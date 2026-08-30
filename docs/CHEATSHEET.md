@@ -251,10 +251,11 @@ some(inner) / none         // Option
 TypeName(args...)          // constructor
 TypeName{ field1, field2 } // record pattern
 literal                    // int, float, string, bool
+a | b | c                  // or-pattern: any alternative matches (binder-free)
 ```
 **`_` can appear in match patterns, `let _ = x` (discard), `for _ in xs`, and lambda params `(_ ) => expr`.**
 
-**NOT supported in patterns:** no `...` spread, no range patterns (`1..5`), no nested `|` (or-pattern), no `as` binding.
+**NOT supported in patterns:** no `...` spread, no range patterns (`1..5`), no `as` binding. Or-pattern alternatives (`"a" | "an" | "the" => …`) ARE supported at the top of an arm, but cannot bind variables — write separate arms when the body needs the payload.
 
 ### Lambda
 ```

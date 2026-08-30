@@ -39,7 +39,20 @@ pub fn rewrite_never_err_effect_match(
                 Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 => a[0].clone(),
                 _ => return,
             };
-            let raw_call = IrExpr { ty: ok_ty.clone(), ..(**subject).clone() };
+            // The bind value is the SOURCE `!` spelling (`let v = f()!` — an
+            // Unwrap over the still-Result-typed call), NOT a raw-retyped
+            // call: the never-err strip family then processes it exactly like
+            // user-written `!`, keeping the call-site protocol agreed with
+            // the def's own never-err lowering. The first cut retyped the
+            // call to the raw ok type here; the call site then read a carrier
+            // the (wasm-leg) def never produced, and a match-on-effect-call
+            // inside a while body ran its arms ZERO times, silently (#1571).
+            let raw_call = IrExpr {
+                kind: IrExprKind::Unwrap { expr: Box::new((**subject).clone()) },
+                ty: ok_ty.clone(),
+                span: subject.span.clone(),
+                def_id: None,
+            };
             // Only the `ok(x)` BIND pattern is rewritten — the bound `var` gives the raw call result a
             // named owner with a sound scope-end drop. An `ok(_)` WILDCARD is LEFT as a `match` (it then
             // WALLs cleanly via the un-rewritten path): binding the result to a fresh throwaway var would
@@ -59,6 +72,9 @@ pub fn rewrite_never_err_effect_match(
             };
             let body_expr = ok_arm.body.clone();
             let result_ty = expr.ty.clone();
+            if std::env::var_os("ALMIDE_DBG_NEMATCH").is_some() {
+                eprintln!("NEMATCH-REWRITE fired: subject={:?} ty={:?}", subject.kind, result_ty);
+            }
             expr.kind = IrExprKind::Block { stmts: vec![bind_stmt], expr: Some(Box::new(body_expr)) };
             expr.ty = result_ty;
         }
@@ -202,6 +218,18 @@ pub fn populate_abi_registries(fns: &[IrFunction], _record_layouts: &RecordLayou
             .map(|f| f.name.as_str().to_string())
             .collect();
     });
+    DECLARED_OPTION_EFFECT_FNS.with(|s| {
+        *s.borrow_mut() = fns
+            .iter()
+            .filter(|f| {
+                f.is_effect
+                    && matches!(&f.ret_ty,
+                        Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, _))
+                    && !can_err.contains(f.name.as_str())
+            })
+            .map(|f| f.name.as_str().to_string())
+            .collect();
+    });
 }
 
 pub fn inline_mutual_tail_recursion(
@@ -249,6 +277,9 @@ pub fn inline_mutual_tail_recursion(
             rewrite_fan_map_pure(&mut nf.body);
             crate::lower::desugar_option_str_literal_match(&mut nf.body);
             rewrite_never_err_effect_match(&mut nf.body, &can_err, &lifted_effect_fns);
+            // …and strip the `!` nodes that rewrite just synthesized (it runs
+            // after the first strip pass by design — see the rewrite's doc).
+            strip_never_err_unwraps(&mut nf.body, &can_err, &lifted_effect_fns, f.name.as_str());
             unwrap_never_err_call_types(&mut nf.body, &can_err, &lifted_effect_fns);
             rewrap_never_err_into_result_targets(
                 &mut nf.body,

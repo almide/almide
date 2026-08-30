@@ -416,6 +416,29 @@ impl Checker {
                 self.reject_ctor_pattern_mismatch(CtorPat::None, &resolved);
             }
             ast::Pattern::Literal { .. } => {}
+            // #1461: or-pattern — alternatives are BINDER-FREE (the arm
+            // body cannot depend on which alternative matched), so
+            // binding is a no-op after the rule holds; each alternative
+            // still shape-checks against the subject type.
+            ast::Pattern::Or { alts } => {
+                for alt in alts {
+                    if let Some(binder) = first_or_alt_binder(alt) {
+                        self.emit(
+                            super::err(
+                                format!(
+                                    "or-pattern alternative binds `{}` — alternatives must be binder-free",
+                                    binder
+                                ),
+                                "The arm body cannot depend on which alternative matched, so a                                  binder inside `a | b` has no single value. Write separate arms                                  when the body needs the payload, or use `_` inside the alternative."
+                                    .to_string(),
+                                "match pattern".to_string(),
+                            )
+                            .with_code("E080"),
+                        );
+                    }
+                    self.bind_pattern(alt, ty);
+                }
+            }
         }
     }
 
@@ -931,6 +954,26 @@ fn foreign_ctor_case_list(bare_name: Sym, resolved: &Ty) -> Option<Vec<String>> 
 /// The E048 diagnostic for a cross-family constructor pattern. `fix` is the
 /// same arm position spelled in the subject's family, and is both the `try:`
 /// snippet and the noun the hint tells the author to write.
+/// The first variable binder inside an or-pattern alternative, if any
+/// (#1461's binder-free rule). Wildcards bind nothing and are fine.
+fn first_or_alt_binder(pat: &ast::Pattern) -> Option<almide_base::intern::Sym> {
+    match pat {
+        ast::Pattern::Ident { name } => Some(*name),
+        ast::Pattern::Constructor { args, .. } => args.iter().find_map(first_or_alt_binder),
+        ast::Pattern::RecordPattern { fields, .. } => fields.iter().find_map(|f| {
+            f.pattern.as_ref().map_or(Some(f.name), first_or_alt_binder)
+        }),
+        ast::Pattern::Tuple { elements } | ast::Pattern::List { elements } => {
+            elements.iter().find_map(first_or_alt_binder)
+        }
+        ast::Pattern::Some { inner } | ast::Pattern::Ok { inner } | ast::Pattern::Err { inner } => {
+            first_or_alt_binder(inner)
+        }
+        ast::Pattern::Or { alts } => alts.iter().find_map(first_or_alt_binder),
+        ast::Pattern::Wildcard | ast::Pattern::None | ast::Pattern::Literal { .. } => None,
+    }
+}
+
 fn cross_family_pattern_diag(
     ctor: CtorPat,
     fix: CtorPat,

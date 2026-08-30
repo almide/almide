@@ -187,6 +187,30 @@ impl LowerCtx {
                 }
                 Ty::String => Some(("String".to_string(), false)),
                 Ty::Bytes => Some(("Bytes".to_string(), false)),
+                // LIST slots (#1580 — `(state, List[event])`, the multi-event
+                // pair): a SCALAR-element list is one-level-exact (one rc_dec
+                // frees the block — no owned inner heap); a `List[String]`
+                // slot frees per-element via the vp-private
+                // `__drop_vp_list_str` (the shared `__drop_list_str` is gated
+                // on record/variant FIELD usage and would dangle here).
+                // Deeper element classes (records, variants, nested lists)
+                // keep the honest decline. Reserved lowercase names, as with
+                // `scalar` below.
+                Ty::Applied(TypeConstructorId::List, la) if la.len() == 1 => {
+                    if !is_heap_ty(&la[0]) {
+                        Some(("list_scalar".to_string(), false))
+                    } else if matches!(la[0], Ty::String) {
+                        Some(("list_str".to_string(), true))
+                    } else {
+                        None
+                    }
+                }
+                // A SCALAR slot (`(Int, Note("a", n))` — #1579's mixed pair):
+                // stored raw, freed by nothing — the generated drop SKIPS the
+                // slot (an rc_dec there would dec a non-handle). The lowercase
+                // name is structurally collision-free: type names are
+                // Uppercase-initial, so no user type can spell it.
+                _ if !is_heap_ty(t) => Some(("scalar".to_string(), false)),
                 _ => None,
             }
         };
@@ -228,15 +252,27 @@ impl LowerCtx {
                 }
                 let ops_mark = self.ops.len();
                 let lhh_mark = self.live_heap_handles.len();
-                let a = match self.lower_owned_heap_field(&elements[0]) {
-                    Some(v) => v,
-                    None => return self.rollback_ops(ops_mark, lhh_mark),
-                };
-                let b = match self.lower_owned_heap_field(&elements[1]) {
-                    Some(v) => v,
-                    None => return self.rollback_ops(ops_mark, lhh_mark),
-                };
-                // The 2-slot pair block OWNING both variant blocks (moved in).
+                // Lower both slot values FIRST (before the alloc) so a slot
+                // expr that itself allocates does not interleave with the
+                // store sequence. A HEAP slot is a fresh owned value moved in;
+                // a SCALAR slot (#1579's mixed pair) is a raw value stored
+                // directly — no handle, no move, and the generated
+                // `$__drop_vp_…` skips its slot.
+                let mut slot_vals: Vec<(ValueId, bool)> = Vec::with_capacity(2);
+                for e in elements.iter() {
+                    if is_heap_ty(&e.ty) {
+                        match self.lower_owned_heap_field(e) {
+                            Some(v) => slot_vals.push((v, true)),
+                            None => return self.rollback_ops(ops_mark, lhh_mark),
+                        }
+                    } else {
+                        match self.lower_scalar_value(e) {
+                            Some(v) => slot_vals.push((v, false)),
+                            None => return self.rollback_ops(ops_mark, lhh_mark),
+                        }
+                    }
+                }
+                // The 2-slot pair block OWNING its heap slots (moved in).
                 let two = self.fresh_value();
                 self.ops.push(Op::ConstInt { dst: two, value: 2 });
                 let tup = self.fresh_value();
@@ -247,21 +283,28 @@ impl LowerCtx {
                 });
                 let th = self.fresh_value();
                 self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(th), args: vec![tup] });
-                let ah = self.fresh_value();
-                self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(ah), args: vec![a] });
-                let s0 = self.load_addr(th, 12);
-                self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![s0, ah] });
-                self.ops.push(Op::Consume { v: a });
-                self.live_heap_handles.retain(|h| *h != a);
-                let bh = self.fresh_value();
-                self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(bh), args: vec![b] });
-                let s1o = self.fresh_value();
-                self.ops.push(Op::ConstInt { dst: s1o, value: 20 });
-                let s1 = self.fresh_value();
-                self.ops.push(Op::IntBinOp { dst: s1, op: IntOp::Add, a: th, b: s1o });
-                self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![s1, bh] });
-                self.ops.push(Op::Consume { v: b });
-                self.live_heap_handles.retain(|h| *h != b);
+                for (idx, (v, is_heap)) in slot_vals.into_iter().enumerate() {
+                    let off = self.fresh_value();
+                    self.ops.push(Op::ConstInt { dst: off, value: 12 + (idx as i64) * 8 });
+                    let slot = self.fresh_value();
+                    self.ops.push(Op::IntBinOp { dst: slot, op: IntOp::Add, a: th, b: off });
+                    let store_val = if is_heap {
+                        let h = self.fresh_value();
+                        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![v] });
+                        h
+                    } else {
+                        v
+                    };
+                    self.ops.push(Op::Prim {
+                        kind: PrimKind::Store { width: 8 },
+                        dst: None,
+                        args: vec![slot, store_val],
+                    });
+                    if is_heap {
+                        self.ops.push(Op::Consume { v });
+                        self.live_heap_handles.retain(|h| *h != v);
+                    }
+                }
                 Some(self.materialize_result_aggregate(tup, repr, false, drop_fn))
             }
             IrExprKind::ResultErr { expr: inner } => {

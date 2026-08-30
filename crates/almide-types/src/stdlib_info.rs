@@ -7,7 +7,7 @@ pub const STDLIB_MODULES: &[&str] = &[
     "string", "list", "int", "float", "bytes", "matrix", "fs", "env", "map",
     "json", "http", "process", "math", "random", "regex", "io", "result",
     "option", "error", "datetime", "testing", "value", "set",
-    "base64", "hex", "hash", "net", "zlib",
+    "base64", "hex", "hash", "net", "url", "zlib",
     // Sized numeric types (Stage 3 of the sized-numeric-types arc).
     // Each hosts UFCS conversion methods (`.to_int64()`,
     // `.to_float32()`, ...). Auto-imported alongside `int` / `float`
@@ -23,7 +23,7 @@ pub const BUNDLED_MODULES: &[&str] = &[
     "error", "math", "datetime", "value", "option", "result",
     "map", "set", "string",
     "env", "io", "random", "regex", "testing",
-    "process", "fs", "http", "html", "json", "matrix", "mem", "net", "zlib",
+    "process", "fs", "http", "html", "json", "matrix", "mem", "net", "url", "zlib",
     "int8", "int16", "int32", "int64",
     "uint8", "uint16", "uint32", "uint64",
     "float32", "float64",
@@ -135,6 +135,7 @@ fn bundled_source_core(name: &str) -> Option<&'static str> {
         "int" => Some(crate::embedded::SRC_INT),
         "base64" => Some(crate::embedded::SRC_BASE64),
         "hex" => Some(crate::embedded::SRC_HEX),
+        "url" => Some(crate::embedded::SRC_URL),
         "hash" => Some(crate::embedded::SRC_HASH),
         "float" => Some(crate::embedded::SRC_FLOAT),
         "bytes" => Some(crate::embedded::SRC_BYTES),

@@ -180,7 +180,11 @@ fn bind_dec_check_exempt(var: VarId, value: &IrExpr, ctx: &VerifyCtx) -> bool {
     // Replacing this name-prefix exclusion with scope-aware Dec
     // accounting is a tracked perceus-belt follow-up.
     let vname = ctx.var_table.get(var).name.as_str();
-    vname.starts_with("__tco_") || vname.starts_with("__br_")
+    // Single-condition decisions (MC/DC ledger, #566): || as early return.
+    if vname.starts_with("__tco_") {
+        return true;
+    }
+    vname.starts_with("__br_")
 }
 
 /// First phase of `verify_block`: each heap `Bind` in `stmts` should have a

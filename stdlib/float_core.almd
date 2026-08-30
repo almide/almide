@@ -10,12 +10,11 @@ fn float_floor(x: Float) -> Float = prim.ffloor(x)
 
 fn float_ceil(x: Float) -> Float = prim.fceil(x)
 
-// float.min/max are NaN-AWARE and resolve ±0 ties to the FIRST operand — NOT the raw
-// wasm f64.min/f64.max instructions (which PROPAGATE NaN and pick ±0 by IEEE magnitude).
-// This is the exact decision tree shared with math.fmin/fmax (math_float.almd): ignore a
-// NaN operand (return the other), and on every non-strict tie (incl. +0.0 == -0.0) keep
-// the first operand. is_nan via fne(x,x); the strict compare via flt/fgt. Matches v0's
-// `float.min`/`float.max` byte-for-byte.
+// float.min/max are NaN-AWARE — NOT the raw wasm f64.min/f64.max instructions (which
+// PROPAGATE NaN). The exact decision tree shared with math.fmin/fmax (math_float.almd):
+// ignore a NaN operand (return the other); a TIE (±0 pair included) follows IEEE-754-2019
+// zero ordering (C-049, ALS-T23): min(±0) = -0.0, max(±0) = +0.0, commutative — computed
+// as the bitwise OR (min) / AND (max) of the payloads, the identity on non-zero ties.
 fn float_min(a: Float, b: Float) -> Float = {
   let anan = prim.fne(a, a)
   if anan then b
@@ -24,7 +23,11 @@ fn float_min(a: Float, b: Float) -> Float = {
     if bnan then a
     else {
       let agtb = prim.fgt(a, b)
-      if agtb then b else a
+      if agtb then b
+      else {
+        let bgta = prim.fgt(b, a)
+        if bgta then a else prim.ffrombits(prim.bor(prim.fbits(a), prim.fbits(b)))
+      }
     }
   }
 }
@@ -37,7 +40,11 @@ fn float_max(a: Float, b: Float) -> Float = {
     if bnan then a
     else {
       let altb = prim.flt(a, b)
-      if altb then b else a
+      if altb then b
+      else {
+        let blta = prim.flt(b, a)
+        if blta then a else prim.ffrombits(prim.band(prim.fbits(a), prim.fbits(b)))
+      }
     }
   }
 }

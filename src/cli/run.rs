@@ -487,10 +487,35 @@ fn cmd_run_wasm(file: &str, program_args: &[String], verified: bool, time_report
     // failed the Perceus RC gate would silently execute leaky/double-freeing code,
     // so a verification failure is always a hard error here. The waiver is
     // build-only (you opt into shipping a known-bad artifact, not into running it).
-    let (bytes, _produced_by_v1) = match super::build::compile_to_wasm_bytes(file, false, verified, false) {
+    let (bytes, structural) = match super::build::compile_to_wasm_bytes(file, false, verified, false) {
         Ok(b) => b,
         Err(()) => return 1,
     };
+
+    // Structural-leg modules import `almide.*` and execute on the EMBEDDED
+    // host — the exact host the 610/610 corpus acceptance measured (fs, env
+    // and stdin included), so `run --target wasm` reproduces the measured
+    // bytes without an external runtime. Program args stay unsupported on
+    // this leg the honest way: a program that READS them walls at emit.
+    if structural {
+        let started = std::time::Instant::now();
+        return match almide_wasm_run::run_wasm_real_stdin(&bytes) {
+            Ok(r) => {
+                print!("{}", r.stdout);
+                eprint!("{}", r.stderr);
+                use std::io::Write as _;
+                let _ = std::io::stdout().flush();
+                if time_report {
+                    eprintln!("[almide] wall {} ms (embedded wasmtime)", started.elapsed().as_millis());
+                }
+                r.exit.clamp(0, 255)
+            }
+            Err(e) => {
+                err(&format!("error: embedded wasm host: {e}"));
+                1
+            }
+        };
+    }
 
     // Stage the module under a per-content temp name so concurrent `almide run`
     // invocations never race on one path (the build scratch dir is shared).

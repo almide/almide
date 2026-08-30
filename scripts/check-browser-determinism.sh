@@ -49,11 +49,32 @@ JS
 
 NATIVE_BIN="$NATIVE_HARNESS/target/release/wasmgen-harness"
 fail=0; n=0
+# Tracked-skip ceiling, shared with check-host-determinism.sh: 16 as of the
+# 2026-08-26 commissioning (the graduated wall corpus — locally re-measured);
+# 17 as of 2026-08-30 — gzip_inflate_members.almd (C-326) is structural-only,
+# the incumbent walls its loop-level tuple write-back (see the host twin and
+# proofs/walled-real-baseline.txt; prunes with #1696 steps 4-5).
+MAX_WALLED=17
+walled=0
 for fix in "$FIXTURE_DIR"/*.almd; do
   [ -e "$fix" ] || continue
   name="$(basename "$fix")"
-  "$NATIVE_BIN" "$fix" "$WORK/native.wasm" 2>/dev/null || { echo "FAIL  $name (native errored)"; fail=1; continue; }
-  if ! node "$WORK/run.js" "$WORK/pkg" "$fix" "$WORK/uu.wasm" 2>"$WORK/err"; then
+  "$NATIVE_BIN" "$fix" "$WORK/native.wasm" 2>/dev/null; nrc=$?
+  node "$WORK/run.js" "$WORK/pkg" "$fix" "$WORK/uu.wasm" 2>"$WORK/err"; brc=$?
+  # The harness exits 3 on a v1 WALL (a tracked skip — the incumbent does
+  # not render the fixture; the commissioned structural leg does). Both
+  # legs walling is the SAME renderer agreeing with itself; one leg
+  # rendering what the other walls is a real ABI divergence and FAILS.
+  if [ "$nrc" -eq 3 ]; then
+    if [ "$brc" -ne 0 ]; then
+      echo "skip  $name (v1 wall on both ABIs — commissioned-leg fixture)"
+      walled=$((walled+1)); continue
+    fi
+    echo "FAIL  $name — browser ABI rendered what the native harness walls"
+    fail=1; continue
+  fi
+  if [ "$nrc" -ne 0 ]; then echo "FAIL  $name (native errored rc=$nrc)"; fail=1; continue; fi
+  if [ "$brc" -ne 0 ]; then
     echo "FAIL  $name — browser compile PANICKED: $(grep -iE 'panic|unreachable|RuntimeError' "$WORK/err" | head -1)"
     fail=1; continue
   fi
@@ -73,9 +94,13 @@ if [ "$fail" -ne 0 ]; then
 fi
 # No vacuous pass (#985): on a green run every corpus file was compared, so an
 # empty/renamed FIXTURE_DIR (n=0) is a broken scan, not a win.
-corpus=$(ls "$FIXTURE_DIR"/*.almd 2>/dev/null | wc -l | tr -d ' ')
-if [ "$corpus" -eq 0 ] || [ "$n" -ne "$corpus" ]; then
-  echo "::error::browser-determinism: compared $n of $corpus fixtures in $FIXTURE_DIR — the scan went blind (#985)"
+if [ "$walled" -gt "$MAX_WALLED" ]; then
+  echo "::error::browser-determinism: $walled fixtures walled (ceiling $MAX_WALLED) — coverage shrank; fix the wall or raise MAX_WALLED consciously in the same change (#985)"
   exit 1
 fi
-echo "browser-ABI determinism: $n/$corpus fixtures compile without panic and byte-identical to native"
+corpus=$(ls "$FIXTURE_DIR"/*.almd 2>/dev/null | wc -l | tr -d ' ')
+if [ "$corpus" -eq 0 ] || [ "$((n + walled))" -ne "$corpus" ]; then
+  echo "::error::browser-determinism: compared $n + skipped $walled of $corpus fixtures in $FIXTURE_DIR — the scan went blind (#985)"
+  exit 1
+fi
+echo "browser-ABI determinism: $n compared + $walled tracked-skips of $corpus fixtures — byte-identical to native"

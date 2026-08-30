@@ -1,0 +1,20 @@
+diff --git a/crates/almide-wasm/src/work.rs b/crates/almide-wasm/src/work.rs
+index 7c49e222f..8792839b7 100644
+--- a/crates/almide-wasm/src/work.rs
++++ b/crates/almide-wasm/src/work.rs
+@@ -73,13 +73,13 @@ impl FnWork {
+     /// The +1-biased funcref-table slot for an entry.
+     pub(crate) fn slot(&self, e: TableEntry) -> u32 {
+         if let Some(&i) = self.entry_ids.borrow().get(&e) {
+-            return i + 1;
++            return i; // [MUTANT: bias dropped]
+         }
+         let mut v = self.entries.borrow_mut();
+         let i = v.len() as u32;
+         v.push(e.clone());
+         self.entry_ids.borrow_mut().insert(e, i);
+-        i + 1
++        i // [MUTANT: bias dropped]
+     }
+ 
+     /// The wasm type index for a call_indirect signature.

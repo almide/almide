@@ -1,0 +1,1633 @@
+// @contract: C-326
+// The 322-line gzip inflate as a cross-target fixture (#1696 step 2): bit
+// reader through tuple returns, fixed AND dynamic Huffman blocks, LZ77
+// back-copy into a mut Bytes, CRC-32 + ISIZE verification, two members.
+// `inflate` selects stored/fixed/dynamic per block through a value-position
+// match whose arms call tuple-form mut fns — the phase-4 hoist moves the
+// write-back out of the branch, so the STRUCTURAL leg lowers the whole
+// program (before the hoist it refused here, and before the #1688 wall it
+// emitted this shape silently wrong). The embedded input is a 1,144-byte
+// two-member gzip stream (member 1: 3,000 bytes of text under -9 dynamic
+// Huffman with an FNAME header; member 2: one -1 fixed-Huffman line).
+// (value, pos, buf, cnt)
+fn bits(pos: Int, buf: Int, cnt: Int, inp: Bytes, need: Int) -> (Int, Int, Int, Int) = {
+  var p = pos
+  var b = buf
+  var c = cnt
+  while c < need {
+    b = int.bor(b, int.bshl(bytes.get_or(inp, p, 0), c))
+    p = p + 1
+    c = c + 8
+  }
+  (int.band(b, int.bshl(1, need) - 1), p, int.bshr(b, need), c - need)
+}
+
+// Huffman table packed in one list: [0..16) = count per length, [16..) = symbols by code.
+fn construct(lengths: List[Int], n: Int) -> List[Int] = {
+  var count = list.repeat(0, 16)
+  var i = 0
+  while i < n {
+    count[lengths[i]] = count[lengths[i]] + 1
+    i = i + 1
+  }
+  var offs = list.repeat(0, 16)
+  var len = 1
+  while len < 15 {
+    offs[len + 1] = offs[len] + count[len]
+    len = len + 1
+  }
+  var symbol = list.repeat(0, n)
+  i = 0
+  while i < n {
+    if lengths[i] != 0 then {
+      symbol[offs[lengths[i]]] = i
+      offs[lengths[i]] = offs[lengths[i]] + 1
+    } else ()
+    i = i + 1
+  }
+  count + symbol
+}
+
+// (symbol or -1, pos, buf, cnt)
+fn decode(pos: Int, buf: Int, cnt: Int, inp: Bytes, h: List[Int]) -> (Int, Int, Int, Int) = {
+  var p = pos
+  var b = buf
+  var c = cnt
+  var code = 0
+  var first = 0
+  var index = 0
+  var len = 1
+  var result = 0 - 1
+  while len <= 15 and result < 0 {
+    let (bit, p2, b2, c2) = bits(p, b, c, inp, 1)
+    p = p2
+    b = b2
+    c = c2
+    code = int.bor(code, bit)
+    let cnt_len = h[len]
+    if code - cnt_len < first then {
+      result = h[16 + index + (code - first)]
+    } else {
+      index = index + cnt_len
+      first = int.bshl(first + cnt_len, 1)
+      code = int.bshl(code, 1)
+      len = len + 1
+    }
+  }
+  (result, p, b, c)
+}
+
+let lbase = [
+  3,
+  4,
+  5,
+  6,
+  7,
+  8,
+  9,
+  10,
+  11,
+  13,
+  15,
+  17,
+  19,
+  23,
+  27,
+  31,
+  35,
+  43,
+  51,
+  59,
+  67,
+  83,
+  99,
+  115,
+  131,
+  163,
+  195,
+  227,
+  258
+]
+
+let lext = [
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  1,
+  1,
+  1,
+  1,
+  2,
+  2,
+  2,
+  2,
+  3,
+  3,
+  3,
+  3,
+  4,
+  4,
+  4,
+  4,
+  5,
+  5,
+  5,
+  5,
+  0
+]
+
+let dbase = [
+  1,
+  2,
+  3,
+  4,
+  5,
+  7,
+  9,
+  13,
+  17,
+  25,
+  33,
+  49,
+  65,
+  97,
+  129,
+  193,
+  257,
+  385,
+  513,
+  769,
+  1025,
+  1537,
+  2049,
+  3073,
+  4097,
+  6145,
+  8193,
+  12289,
+  16385,
+  24577
+]
+
+let dext = [
+  0,
+  0,
+  0,
+  0,
+  1,
+  1,
+  2,
+  2,
+  3,
+  3,
+  4,
+  4,
+  5,
+  5,
+  6,
+  6,
+  7,
+  7,
+  8,
+  8,
+  9,
+  9,
+  10,
+  10,
+  11,
+  11,
+  12,
+  12,
+  13,
+  13
+]
+
+fn sym_kind(sym: Int) -> Int = if sym < 0 then 0
+else if sym < 256 then 1
+else if sym == 256 then 2
+else if sym - 257 >= 29 then 0 else 3
+
+fn len_kind(sym: Int) -> Int = if sym < 0 then 0
+else if sym < 16 then 1
+else if sym == 16 then 2
+else if sym == 17 then 3 else 4
+
+// (status, pos, buf, cnt)
+fn codes(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes, lencode: List[Int], distcode: List[Int]) -> (Int, Int, Int, Int) = {
+  var p = pos
+  var b = buf
+  var c = cnt
+  var status = 0
+  var running = true
+  while running {
+    let (sym, p2, b2, c2) = decode(p, b, c, inp, lencode)
+    p = p2
+    b = b2
+    c = c2
+    let sk = sym_kind(sym)
+    var clen = 0
+    var dist = 1
+    match int.band(sk, 3) {
+      0 => {
+        status = 0 - 1
+        running = false
+      },
+      1 => { bytes.push(out, sym) },
+      2 => {
+        running = false
+      },
+      _ => {
+        let li = sym - 257
+        let (eb, p3, b3, c3) = bits(p, b, c, inp, lext[li])
+        let (ds, p4, b4, c4) = decode(p3, b3, c3, inp, distcode)
+        let dsc = if ds < 0 or ds >= 30 then 0 else ds
+        let (db, p5, b5, c5) = bits(p4, b4, c4, inp, dext[dsc])
+        p = p5
+        b = b5
+        c = c5
+        let bad = if ds < 0 or ds >= 30 then 1 else 0
+        status = 0 - bad
+        running = bad == 0
+        clen = if bad == 1 then 0 else lbase[li] + eb
+        dist = dbase[dsc] + db
+      },
+    }
+    var k = 0
+    while k < clen {
+      bytes.push(out, bytes.get_or(out, bytes.len(out) - dist, 0))
+      k = k + 1
+    }
+  }
+  (status, p, b, c)
+}
+
+fn fixed_lit() -> List[Int] = {
+  var lengths = list.repeat(8, 288)
+  var i = 144
+  while i < 256 {
+    lengths[i] = 9
+    i = i + 1
+  }
+  i = 256
+  while i < 280 {
+    lengths[i] = 7
+    i = i + 1
+  }
+  construct(lengths, 288)
+}
+
+// Read the HLIT+HDIST code lengths (with 16/17/18 repeats). Returns (status, pos, buf, cnt, lengths).
+fn read_lengths(pos: Int, buf: Int, cnt: Int, inp: Bytes, lencode: List[Int], total: Int) -> (Int, Int, Int, Int, List[Int]) = {
+  var p = pos
+  var b = buf
+  var c = cnt
+  var lengths = list.repeat(0, 320)
+  var i = 0
+  var status = 0
+  while i < total and status == 0 {
+    let (sym, p2, b2, c2) = decode(p, b, c, inp, lencode)
+    p = p2
+    b = b2
+    c = c2
+    let lk = len_kind(sym)
+    let need = if lk == 2 then 2
+    else if lk == 3 then 3
+    else if lk == 4 then 7 else 0
+    let (extra, p3, b3, c3) = bits(p, b, c, inp, need)
+    p = p3
+    b = b3
+    c = c3
+    let val = if lk == 1 then sym
+    else if lk == 2 and i > 0 then lengths[i - 1] else 0
+    let rep0 = if lk == 1 then 1
+    else if lk == 2 or lk == 3 then 3 + extra
+    else if lk == 4 then 11 + extra else 0
+    let bad = if lk == 0 or (lk == 2 and i == 0) or i + rep0 > total then 1 else 0
+    status = 0 - bad
+    var rep = if bad == 1 then 0 else rep0
+    while rep > 0 {
+      lengths[i] = val
+      i = i + 1
+      rep = rep - 1
+    }
+  }
+  (status, p, b, c, if status != 0 then list.repeat(0, 320) else lengths)
+}
+
+// (status, pos, buf, cnt)
+fn dynamic(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes) -> (Int, Int, Int, Int) = {
+  let order = [
+    16,
+    17,
+    18,
+    0,
+    8,
+    7,
+    9,
+    6,
+    10,
+    5,
+    11,
+    4,
+    12,
+    3,
+    13,
+    2,
+    14,
+    1,
+    15
+  ]
+  let (nlit, p1, b1, c1) = bits(pos, buf, cnt, inp, 5)
+  let (ndist, p2, b2, c2) = bits(p1, b1, c1, inp, 5)
+  let (ncode, p3, b3, c3) = bits(p2, b2, c2, inp, 4)
+  let nlen = nlit + 257
+  let ndis = ndist + 1
+  var p = p3
+  var b = b3
+  var c = c3
+  var cl = list.repeat(0, 19)
+  var i = 0
+  while i < ncode + 4 {
+    let (v, p4, b4, c4) = bits(p, b, c, inp, 3)
+    p = p4
+    b = b4
+    c = c4
+    cl[order[i]] = v
+    i = i + 1
+  }
+  let lencode = construct(cl, 19)
+  let (status, p5, b5, c5, lengths) = read_lengths(p, b, c, inp, lencode, nlen + ndis)
+  let (s2, p6, b6, c6) = codes(p5, b5, c5, inp, out, construct(lengths, nlen), construct(list.slice(lengths, nlen, nlen + ndis), ndis))
+  (if status != 0 then status else s2, p6, b6, c6)
+}
+
+// (status, pos, 0, 0) — stored blocks are byte-aligned
+fn stored(pos: Int, inp: Bytes, mut out: Bytes) -> (Int, Int, Int, Int) = {
+  let len = int.bor(bytes.get_or(inp, pos, 0), int.bshl(bytes.get_or(inp, pos + 1, 0), 8))
+  let nlen = int.bor(bytes.get_or(inp, pos + 2, 0), int.bshl(bytes.get_or(inp, pos + 3, 0), 8))
+  let start = pos + 4
+  let bad = if int.bxor(len, nlen) != 65535 or start + len > bytes.len(inp) then 1 else 0
+  let n = if bad == 1 then 0 else len
+  var k = 0
+  while k < n {
+    bytes.push(out, bytes.get_or(inp, start + k, 0))
+    k = k + 1
+  }
+  (0 - bad, start + n, 0, 0)
+}
+
+// Inflate one DEFLATE stream starting at byte `pos`; returns (status, pos of the first byte after it).
+fn inflate(pos: Int, inp: Bytes, mut out: Bytes) -> (Int, Int) = {
+  let flit = fixed_lit()
+  let fdist = construct(list.repeat(5, 30), 30)
+  var p = pos
+  var b = 0
+  var c = 0
+  var last = 0
+  var status = 0
+  while last == 0 and status == 0 {
+    let (l, p1, b1, c1) = bits(p, b, c, inp, 1)
+    let (kind, p2, b2, c2) = bits(p1, b1, c1, inp, 2)
+    last = l
+    let (s, p3, b3, c3) = match int.band(kind, 3) {
+      0 => stored(p2, inp, out),
+      1 => codes(p2, b2, c2, inp, out, flit, fdist),
+      2 => dynamic(p2, b2, c2, inp, out),
+      _ => (0 - 1, p2, b2, c2),
+    }
+    status = s
+    p = p3
+    b = b3
+    c = c3
+  }
+  (status, p)
+}
+
+fn crc_table() -> List[Int] = {
+  var t = list.repeat(0, 256)
+  var n = 0
+  while n < 256 {
+    var cc = n
+    var k = 0
+    while k < 8 {
+      cc = if int.band(cc, 1) == 1 then int.bxor(3988292384, int.bshr(cc, 1)) else int.bshr(cc, 1)
+      k = k + 1
+    }
+    t[n] = cc
+    n = n + 1
+  }
+  t
+}
+
+fn crc32(t: List[Int], b: Bytes, start: Int) -> Int = {
+  var cc = 4294967295
+  var i = start
+  let n = bytes.len(b)
+  while i < n {
+    cc = int.bxor(t[int.band(int.bxor(cc, bytes.get_or(b, i, 0)), 255)], int.bshr(cc, 8))
+    i = i + 1
+  }
+  int.bxor(cc, 4294967295)
+}
+
+fn u32_le(b: Bytes, p: Int) -> Int = int.bor(int.bor(bytes.get_or(b, p, 0), int.bshl(bytes.get_or(b, p + 1, 0), 8)), int.bor(int.bshl(bytes.get_or(b, p + 2, 0), 16), int.bshl(bytes.get_or(b, p + 3, 0), 24)))
+
+fn skip_zstr(b: Bytes, p: Int) -> Int = if bytes.get_or(b, p, 0) == 0 then p + 1 else skip_zstr(b, p + 1)
+
+// Position of the deflate stream after the gzip member header at `pos`, or -1 if not a gzip member.
+fn header_end(inp: Bytes, pos: Int) -> Int = {
+  if bytes.get_or(inp, pos, 0) != 31 or bytes.get_or(inp, pos + 1, 0) != 139 or bytes.get_or(inp, pos + 2, 0) != 8 then 0 - 1
+  else {
+    let flg = bytes.get_or(inp, pos + 3, 0)
+    let p0 = pos + 10
+    let p1 = if int.band(flg, 4) != 0 then p0 + 2 + int.bor(bytes.get_or(inp, p0, 0), int.bshl(bytes.get_or(inp, p0 + 1, 0), 8))
+    else p0
+    let p2 = if int.band(flg, 8) != 0 then skip_zstr(inp, p1) else p1
+    let p3 = if int.band(flg, 16) != 0 then skip_zstr(inp, p2) else p2
+    if int.band(flg, 2) != 0 then p3 + 2 else p3
+  }
+}
+
+// gzip members back to back; returns 0 on success, else an error code (see error_text).
+fn gunzip(inp: Bytes, mut out: Bytes) -> Int = {
+  let t = crc_table()
+  var pos = 0
+  var code = 0
+  while pos < bytes.len(inp) and code == 0 {
+    let start = header_end(inp, pos)
+    let member_start = bytes.len(out)
+    let (status, after) = inflate(if start < 0 then pos else start, inp, out)
+    let stored_crc = u32_le(inp, after)
+    let isize = u32_le(inp, after + 4)
+    pos = after + 8
+    code = if start < 0 then 1
+    else if status != 0 then 2
+    else if crc32(t, out, member_start) != stored_crc then 3
+    else if int.band(bytes.len(out) - member_start, 4294967295) != isize then 4 else 0
+  }
+  code
+}
+
+fn error_text(code: Int) -> String = if code == 1 then "not gzip"
+else if code == 2 then "corrupt deflate stream"
+else if code == 3 then "crc mismatch" else "size mismatch"
+
+let gz_bytes = [
+  31,
+  139,
+  8,
+  8,
+  16,
+  237,
+  147,
+  106,
+  2,
+  3,
+  109,
+  49,
+  46,
+  116,
+  120,
+  116,
+  0,
+  93,
+  86,
+  209,
+  118,
+  228,
+  32,
+  8,
+  125,
+  239,
+  95,
+  205,
+  167,
+  152,
+  132,
+  38,
+  116,
+  76,
+  156,
+  99,
+  204,
+  116,
+  179,
+  95,
+  191,
+  112,
+  47,
+  38,
+  237,
+  158,
+  211,
+  114,
+  175,
+  136,
+  136,
+  160,
+  100,
+  30,
+  31,
+  233,
+  35,
+  249,
+  95,
+  246,
+  127,
+  85,
+  147,
+  235,
+  199,
+  35,
+  109,
+  78,
+  234,
+  244,
+  78,
+  245,
+  9,
+  242,
+  93,
+  242,
+  167,
+  169,
+  107,
+  217,
+  40,
+  117,
+  236,
+  104,
+  11,
+  201,
+  154,
+  116,
+  194,
+  201,
+  227,
+  227,
+  49,
+  124,
+  164,
+  33,
+  25,
+  164,
+  97,
+  146,
+  5,
+  120,
+  36,
+  87,
+  141,
+  16,
+  164,
+  201,
+  214,
+  1,
+  79,
+  128,
+  110,
+  93,
+  225,
+  76,
+  109,
+  63,
+  240,
+  125,
+  60,
+  246,
+  96,
+  13,
+  248,
+  132,
+  108,
+  102,
+  148,
+  111,
+  150,
+  207,
+  224,
+  177,
+  172,
+  149,
+  10,
+  60,
+  114,
+  172,
+  54,
+  176,
+  40,
+  38,
+  229,
+  22,
+  159,
+  159,
+  144,
+  112,
+  168,
+  123,
+  218,
+  70,
+  33,
+  147,
+  74,
+  220,
+  101,
+  114,
+  146,
+  85,
+  122,
+  80,
+  164,
+  225,
+  62,
+  151,
+  77,
+  220,
+  221,
+  138,
+  131,
+  172,
+  47,
+  169,
+  176,
+  217,
+  38,
+  78,
+  59,
+  166,
+  33,
+  95,
+  58,
+  58,
+  35,
+  99,
+  160,
+  224,
+  247,
+  124,
+  237,
+  108,
+  149,
+  173,
+  185,
+  99,
+  100,
+  217,
+  160,
+  9,
+  162,
+  127,
+  53,
+  59,
+  188,
+  23,
+  96,
+  72,
+  53,
+  173,
+  67,
+  1,
+  81,
+  76,
+  213,
+  182,
+  212,
+  178,
+  119,
+  174,
+  118,
+  224,
+  84,
+  127,
+  240,
+  30,
+  49,
+  230,
+  119,
+  161,
+  156,
+  2,
+  24,
+  139,
+  145,
+  77,
+  246,
+  48,
+  64,
+  0,
+  96,
+  213,
+  55,
+  217,
+  103,
+  197,
+  104,
+  161,
+  140,
+  149,
+  203,
+  181,
+  116,
+  249,
+  177,
+  118,
+  201,
+  191,
+  88,
+  183,
+  184,
+  60,
+  106,
+  34,
+  224,
+  10,
+  236,
+  79,
+  184,
+  223,
+  149,
+  209,
+  53,
+  187,
+  104,
+  250,
+  23,
+  225,
+  181,
+  158,
+  185,
+  22,
+  178,
+  59,
+  104,
+  76,
+  83,
+  227,
+  89,
+  13,
+  24,
+  77,
+  227,
+  1,
+  163,
+  224,
+  173,
+  21,
+  69,
+  228,
+  141,
+  247,
+  173,
+  29,
+  44,
+  205,
+  27,
+  242,
+  143,
+  242,
+  206,
+  252,
+  81,
+  110,
+  129,
+  29,
+  7,
+  51,
+  31,
+  220,
+  216,
+  110,
+  73,
+  89,
+  145,
+  112,
+  99,
+  39,
+  180,
+  147,
+  78,
+  48,
+  73,
+  212,
+  238,
+  74,
+  48,
+  124,
+  16,
+  99,
+  186,
+  209,
+  177,
+  147,
+  145,
+  140,
+  185,
+  24,
+  228,
+  164,
+  220,
+  155,
+  76,
+  126,
+  101,
+  6,
+  197,
+  130,
+  210,
+  40,
+  199,
+  147,
+  184,
+  29,
+  57,
+  43,
+  110,
+  170,
+  13,
+  246,
+  69,
+  95,
+  206,
+  170,
+  188,
+  149,
+  89,
+  232,
+  20,
+  57,
+  141,
+  1,
+  11,
+  27,
+  3,
+  28,
+  254,
+  226,
+  63,
+  172,
+  252,
+  248,
+  182,
+  171,
+  107,
+  198,
+  114,
+  228,
+  178,
+  250,
+  195,
+  156,
+  16,
+  226,
+  148,
+  252,
+  170,
+  77,
+  82,
+  53,
+  109,
+  65,
+  176,
+  217,
+  36,
+  120,
+  104,
+  147,
+  157,
+  132,
+  149,
+  112,
+  182,
+  117,
+  85,
+  235,
+  154,
+  8,
+  128,
+  244,
+  125,
+  105,
+  139,
+  103,
+  127,
+  82,
+  193,
+  14,
+  122,
+  205,
+  68,
+  84,
+  147,
+  37,
+  120,
+  35,
+  226,
+  253,
+  62,
+  58,
+  67,
+  218,
+  131,
+  123,
+  60,
+  215,
+  32,
+  159,
+  157,
+  23,
+  127,
+  14,
+  85,
+  113,
+  84,
+  42,
+  70,
+  191,
+  53,
+  104,
+  41,
+  49,
+  22,
+  127,
+  48,
+  186,
+  223,
+  10,
+  203,
+  187,
+  222,
+  243,
+  179,
+  88,
+  139,
+  226,
+  217,
+  49,
+  94,
+  188,
+  44,
+  85,
+  172,
+  89,
+  172,
+  231,
+  127,
+  202,
+  242,
+  75,
+  247,
+  42,
+  251,
+  127,
+  91,
+  239,
+  99,
+  121,
+  201,
+  175,
+  209,
+  109,
+  221,
+  150,
+  82,
+  173,
+  93,
+  221,
+  251,
+  30,
+  119,
+  68,
+  239,
+  52,
+  71,
+  227,
+  138,
+  177,
+  197,
+  203,
+  27,
+  51,
+  29,
+  104,
+  66,
+  14,
+  219,
+  222,
+  73,
+  35,
+  233,
+  16,
+  41,
+  63,
+  70,
+  166,
+  217,
+  237,
+  197,
+  154,
+  182,
+  203,
+  74,
+  25,
+  173,
+  76,
+  70,
+  153,
+  82,
+  101,
+  34,
+  131,
+  31,
+  235,
+  197,
+  61,
+  84,
+  60,
+  30,
+  209,
+  217,
+  155,
+  51,
+  138,
+  37,
+  89,
+  64,
+  53,
+  5,
+  108,
+  196,
+  81,
+  66,
+  129,
+  202,
+  19,
+  125,
+  188,
+  218,
+  169,
+  23,
+  156,
+  12,
+  252,
+  9,
+  165,
+  125,
+  3,
+  184,
+  103,
+  110,
+  85,
+  96,
+  103,
+  241,
+  212,
+  154,
+  102,
+  212,
+  87,
+  80,
+  64,
+  207,
+  139,
+  188,
+  180,
+  45,
+  231,
+  202,
+  189,
+  234,
+  36,
+  184,
+  20,
+  78,
+  222,
+  138,
+  206,
+  106,
+  148,
+  174,
+  156,
+  162,
+  113,
+  184,
+  151,
+  56,
+  27,
+  216,
+  217,
+  89,
+  11,
+  210,
+  250,
+  92,
+  100,
+  169,
+  83,
+  36,
+  23,
+  3,
+  148,
+  207,
+  152,
+  221,
+  65,
+  246,
+  18,
+  231,
+  189,
+  144,
+  82,
+  143,
+  109,
+  236,
+  54,
+  240,
+  217,
+  162,
+  241,
+  72,
+  227,
+  157,
+  49,
+  228,
+  236,
+  219,
+  190,
+  38,
+  215,
+  46,
+  136,
+  227,
+  236,
+  161,
+  157,
+  61,
+  178,
+  147,
+  129,
+  125,
+  90,
+  69,
+  60,
+  209,
+  139,
+  108,
+  200,
+  250,
+  98,
+  93,
+  235,
+  233,
+  199,
+  89,
+  112,
+  187,
+  249,
+  190,
+  22,
+  184,
+  53,
+  89,
+  133,
+  110,
+  130,
+  158,
+  23,
+  109,
+  55,
+  203,
+  151,
+  182,
+  47,
+  210,
+  203,
+  75,
+  213,
+  109,
+  182,
+  140,
+  25,
+  219,
+  17,
+  156,
+  242,
+  161,
+  27,
+  208,
+  47,
+  187,
+  149,
+  201,
+  10,
+  80,
+  74,
+  91,
+  19,
+  8,
+  223,
+  96,
+  104,
+  234,
+  15,
+  111,
+  86,
+  46,
+  188,
+  118,
+  42,
+  141,
+  41,
+  54,
+  34,
+  91,
+  16,
+  212,
+  210,
+  113,
+  131,
+  157,
+  161,
+  164,
+  62,
+  181,
+  9,
+  239,
+  61,
+  56,
+  62,
+  103,
+  42,
+  127,
+  241,
+  85,
+  209,
+  57,
+  41,
+  226,
+  250,
+  137,
+  209,
+  244,
+  116,
+  150,
+  212,
+  136,
+  92,
+  157,
+  83,
+  1,
+  104,
+  67,
+  112,
+  57,
+  39,
+  0,
+  148,
+  254,
+  218,
+  123,
+  84,
+  254,
+  184,
+  227,
+  237,
+  95,
+  188,
+  93,
+  131,
+  136,
+  180,
+  115,
+  166,
+  229,
+  30,
+  241,
+  224,
+  232,
+  15,
+  247,
+  162,
+  8,
+  223,
+  41,
+  167,
+  115,
+  153,
+  175,
+  165,
+  193,
+  243,
+  53,
+  67,
+  210,
+  3,
+  232,
+  251,
+  181,
+  90,
+  94,
+  203,
+  79,
+  238,
+  159,
+  21,
+  125,
+  177,
+  58,
+  168,
+  130,
+  21,
+  173,
+  241,
+  174,
+  144,
+  242,
+  52,
+  164,
+  26,
+  118,
+  28,
+  160,
+  147,
+  246,
+  223,
+  1,
+  214,
+  89,
+  7,
+  212,
+  207,
+  26,
+  188,
+  47,
+  254,
+  146,
+  177,
+  195,
+  245,
+  73,
+  246,
+  1,
+  93,
+  128,
+  97,
+  189,
+  51,
+  4,
+  237,
+  164,
+  219,
+  21,
+  69,
+  0,
+  95,
+  199,
+  52,
+  11,
+  177,
+  55,
+  250,
+  160,
+  225,
+  197,
+  94,
+  200,
+  47,
+  74,
+  143,
+  71,
+  189,
+  13,
+  106,
+  255,
+  252,
+  124,
+  241,
+  187,
+  235,
+  16,
+  207,
+  200,
+  169,
+  159,
+  248,
+  153,
+  66,
+  250,
+  55,
+  244,
+  185,
+  164,
+  61,
+  128,
+  141,
+  35,
+  167,
+  113,
+  33,
+  68,
+  42,
+  200,
+  232,
+  223,
+  126,
+  218,
+  80,
+  101,
+  221,
+  120,
+  69,
+  86,
+  157,
+  178,
+  78,
+  185,
+  155,
+  95,
+  182,
+  205,
+  114,
+  116,
+  205,
+  233,
+  27,
+  133,
+  203,
+  61,
+  143,
+  57,
+  158,
+  122,
+  78,
+  71,
+  3,
+  224,
+  167,
+  64,
+  166,
+  144,
+  24,
+  204,
+  225,
+  83,
+  34,
+  81,
+  89,
+  94,
+  75,
+  98,
+  59,
+  34,
+  229,
+  78,
+  164,
+  248,
+  129,
+  73,
+  126,
+  132,
+  241,
+  222,
+  77,
+  251,
+  149,
+  235,
+  20,
+  21,
+  200,
+  72,
+  71,
+  230,
+  215,
+  54,
+  203,
+  247,
+  98,
+  63,
+  109,
+  165,
+  97,
+  169,
+  226,
+  11,
+  144,
+  75,
+  89,
+  1,
+  223,
+  46,
+  15,
+  60,
+  222,
+  124,
+  200,
+  63,
+  18,
+  98,
+  163,
+  217,
+  184,
+  11,
+  0,
+  0,
+  31,
+  139,
+  8,
+  8,
+  2,
+  237,
+  147,
+  106,
+  4,
+  3,
+  109,
+  50,
+  46,
+  116,
+  120,
+  116,
+  0,
+  75,
+  76,
+  132,
+  129,
+  36,
+  56,
+  72,
+  70,
+  0,
+  133,
+  0,
+  71,
+  103,
+  111,
+  133,
+  220,
+  74,
+  133,
+  164,
+  252,
+  10,
+  133,
+  242,
+  204,
+  146,
+  12,
+  133,
+  180,
+  204,
+  178,
+  84,
+  133,
+  148,
+  252,
+  170,
+  212,
+  60,
+  133,
+  156,
+  204,
+  194,
+  210,
+  252,
+  34,
+  133,
+  172,
+  210,
+  244,
+  98,
+  5,
+  3,
+  67,
+  35,
+  99,
+  19,
+  83,
+  51,
+  115,
+  11,
+  75,
+  46,
+  0,
+  211,
+  224,
+  120,
+  82,
+  83,
+  0,
+  0,
+  0
+]
+
+fn main() -> Unit = {
+  let inp = bytes.from_list(gz_bytes)
+  var out = bytes.new(0)
+  let code = gunzip(inp, out)
+  println("${code},${bytes.len(out)}")
+  println(bytes.to_string_lossy(out))
+}

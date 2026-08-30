@@ -42,7 +42,10 @@ impl Checker {
                 let resolved_right = resolve_ty(&right_ty, &self.uf);
                 match (&resolved_left, &resolved_right) {
                     (Ty::Fn { params: a_params, is_effect: a_eff, .. }, Ty::Fn { ret: c_ret, is_effect: c_eff, .. }) => {
-                        Ty::Fn { params: a_params.clone(), ret: c_ret.clone(), is_effect: *a_eff || *c_eff }
+                        // Single-condition decisions (MC/DC ledger, #566):
+                        // the || as if/else, verbatim.
+                        let is_effect = if *a_eff { true } else { *c_eff };
+                        Ty::Fn { params: a_params.clone(), ret: c_ret.clone(), is_effect }
                     }
                     _ => Ty::Unknown,
                 }
@@ -511,9 +514,11 @@ impl Checker {
         // `assert_eq(n, u8v)` passed check and emitted `almide_eq!(i64, u8)` —
         // a native E0308. The arg AST is only in scope here, which is where the
         // literal exemption can be decided.
-        if matches!(&callee.kind, ExprKind::Ident { name, .. } if matches!(name.as_str(), "assert_eq" | "assert_ne"))
-            && args.len() >= 2
-        {
+        let is_assert_pair = matches!(&callee.kind, ExprKind::Ident { name, .. } if matches!(name.as_str(), "assert_eq" | "assert_ne"));
+        // Single-condition decisions (MC/DC ledger): && as its if/else
+        // value form, verbatim short-circuit.
+        let assert_pair_with_two = if is_assert_pair { args.len() >= 2 } else { false };
+        if assert_pair_with_two {
             let peers: Vec<(Ty, Option<ast::Span>, bool)> = args.iter().take(2).map(|a| (
                 self.type_map.get(&a.id).cloned().unwrap_or(Ty::Unknown),
                 a.span,
@@ -602,7 +607,15 @@ impl Checker {
         for arg in args {
             if !matches!(arg.kind, ExprKind::Placeholder) { continue; }
             let ph = arg.span?;
-            if ph.line != call.line || ph.col < call.col || ph.col >= call.end_col {
+            // Single-condition decisions (MC/DC ledger): each || arm is
+            // its own return-None guard.
+            if ph.line != call.line {
+                return None;
+            }
+            if ph.col < call.col {
+                return None;
+            }
+            if ph.col >= call.end_col {
                 return None;
             }
             offsets.push(ph.col - call.col);
@@ -618,7 +631,8 @@ impl Checker {
         let mut out = String::new();
         let mut next = 0usize;
         for (i, c) in text.chars().enumerate() {
-            if next < offsets.len() && i == offsets[next] {
+            let at_placeholder = if next < offsets.len() { i == offsets[next] } else { false };
+            if at_placeholder {
                 if c != '_' { return None; }
                 out.push_str(&names[next]);
                 next += 1;
@@ -712,7 +726,8 @@ impl Checker {
         }).collect();
         let ret_ty = self.infer_expr(body);
         self.env.can_call_effect = saved_can_call_effect;
-        let became_fallible = self.env.lambda_prop_used || slot_effect;
+        // Single-condition decisions (MC/DC ledger): || as if/else.
+        let became_fallible = if self.env.lambda_prop_used { true } else { slot_effect };
         let channel = self.env.lambda_ret.take();
         self.env.lambda_ret = saved_lambda_ret;
         self.env.lambda_prop_used = saved_prop_used;
@@ -963,10 +978,15 @@ impl Checker {
             // key on what the identifier RESOLVES to, never on its spelling —
             // which is the same mistake, inverted, that this check exists to
             // fix (#1055: a bare `eff` laundering its effect bit).
-            if self.env.lookup_var(name).is_some()
-                || self.env.top_lets.contains_key(&sym(name))
-                || matches!(self.env.types.get(&sym(name)), Some(Ty::ConstParam { .. }))
-            {
+            // Single-condition decisions (MC/DC ledger): each || arm is
+            // its own continue guard, same order.
+            if self.env.lookup_var(name).is_some() {
+                continue;
+            }
+            if self.env.top_lets.contains_key(&sym(name)) {
+                continue;
+            }
+            if matches!(self.env.types.get(&sym(name)), Some(Ty::ConstParam { .. })) {
                 continue;
             }
             let Some(sig) = self.env.functions.get(&sym(name)).cloned() else { continue };
@@ -1002,7 +1022,12 @@ impl Checker {
     /// else at type-check time so the failure is a clear diagnostic, not a
     /// codegen ICE (#608).
     fn check_unwrap_propagation_context(&mut self, operand: &Ty) {
-        if self.env.auto_unwrap || self.env.in_test_block {
+        // Single-condition decisions (MC/DC ledger): each || arm is its
+        // own return guard.
+        if self.env.auto_unwrap {
+            return;
+        }
+        if self.env.in_test_block {
             return;
         }
         let accepted = if self.env.lambda_depth == 0 {
@@ -1042,7 +1067,7 @@ impl Checker {
             (
                 Ty::Applied(TypeConstructorId::Result, ra),
                 Ty::Applied(TypeConstructorId::Result, oa),
-            ) if ra.len() == 2 && oa.len() == 2 => {
+            ) if both_result_arity_two(ra, oa) => {
                 self.unify_infer(&ra[1], &oa[1]);
                 true
             }
@@ -1079,7 +1104,7 @@ impl Checker {
             (
                 Ty::Applied(TypeConstructorId::Result, ra),
                 Ty::Applied(TypeConstructorId::Result, oa),
-            ) if ra.len() == 2 && oa.len() == 2 => {
+            ) if both_result_arity_two(ra, oa) => {
                 // E is String by the channel's construction (ADR-0002 D2, L3):
                 // a custom-E operand fails this unification.
                 self.unify_infer(&ra[1], &oa[1]);
@@ -1300,4 +1325,13 @@ fn callee_display_name(callee: &ast::Expr) -> Option<String> {
         },
         _ => None,
     }
+}
+
+/// Both Result applications carry exactly (T, E) — the match guards' &&
+/// split into single-condition decisions (MC/DC ledger, #566).
+fn both_result_arity_two(ra: &[Ty], oa: &[Ty]) -> bool {
+    if ra.len() != 2 {
+        return false;
+    }
+    oa.len() == 2
 }

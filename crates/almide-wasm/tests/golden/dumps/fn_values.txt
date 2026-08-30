@@ -1,0 +1,1872 @@
+type 0: FuncType { params: [I32, I32], results: [] }
+type 1: FuncType { params: [I32], results: [] }
+type 2: FuncType { params: [I32, I32, I32], results: [I32] }
+type 3: FuncType { params: [I32, I64], results: [I32] }
+type 4: FuncType { params: [], results: [] }
+type 5: FuncType { params: [I32, I32], results: [I32] }
+type 6: FuncType { params: [I64], results: [I32] }
+type 7: FuncType { params: [I32], results: [I32] }
+type 8: FuncType { params: [I32, I64], results: [I32] }
+type 9: FuncType { params: [I32], results: [I64] }
+type 10: FuncType { params: [I32, I32, I32, I64], results: [I32] }
+type 11: FuncType { params: [I32, I32, I32, I32], results: [I32] }
+type 12: FuncType { params: [I32], results: [F64] }
+type 13: FuncType { params: [I32, I64], results: [I32] }
+type 14: FuncType { params: [I32, I64, I64], results: [I32] }
+type 15: FuncType { params: [I32, I32, I32, I32, I32], results: [I64] }
+type 16: FuncType { params: [I32], results: [] }
+type 17: FuncType { params: [I32, I32, I32], results: [] }
+type 18: FuncType { params: [I64], results: [I64] }
+type 19: FuncType { params: [I64], results: [I64] }
+type 20: FuncType { params: [I32, I64], results: [I64] }
+import almide.println Func(0)
+import almide.eprintln Func(0)
+import almide.exit Func(1)
+import almide.fs_call Func(15)
+import almide.host_read Func(16)
+func 0 -> type 1
+func 1 -> type 1
+func 2 -> type 2
+func 3 -> type 6
+func 4 -> type 3
+func 5 -> type 5
+func 6 -> type 7
+func 7 -> type 6
+func 8 -> type 5
+func 9 -> type 5
+func 10 -> type 8
+func 11 -> type 8
+func 12 -> type 8
+func 13 -> type 5
+func 14 -> type 5
+func 15 -> type 7
+func 16 -> type 5
+func 17 -> type 9
+func 18 -> type 10
+func 19 -> type 11
+func 20 -> type 11
+func 21 -> type 12
+func 22 -> type 13
+func 23 -> type 14
+func 24 -> type 13
+func 25 -> type 5
+func 26 -> type 11
+func 27 -> type 17
+func 28 -> type 1
+func 29 -> type 1
+func 30 -> type 1
+func 31 -> type 7
+func 32 -> type 5
+func 33 -> type 8
+func 34 -> type 18
+func 35 -> type 19
+func 36 -> type 4
+func 37 -> type 20
+func 38 -> type 20
+table TableType { element_type: funcref, table64: false, initial: 3, maximum: Some(3), shared: false }
+memory MemoryType { memory64: false, shared: false, initial: 2, maximum: None, page_size_log2: None }
+global GlobalType { content_type: I32, mutable: false, shared: false } = I32Const { value: 224 } End
+global GlobalType { content_type: I32, mutable: true, shared: false } = I32Const { value: 65760 } End
+global GlobalType { content_type: I32, mutable: true, shared: false } = I32Const { value: 224 } End
+global GlobalType { content_type: I32, mutable: false, shared: false } = I32Const { value: 65760 } End
+global GlobalType { content_type: I64, mutable: true, shared: false } = I64Const { value: 9223372036854775807 } End
+global GlobalType { content_type: I64, mutable: true, shared: false } = I64Const { value: 0 } End
+global GlobalType { content_type: I64, mutable: true, shared: false } = I64Const { value: 0 } End
+global GlobalType { content_type: I64, mutable: true, shared: false } = I64Const { value: 0 } End
+global GlobalType { content_type: I32, mutable: true, shared: false } = I32Const { value: 0 } End
+global GlobalType { content_type: I64, mutable: true, shared: false } = I64Const { value: 9223372036854775807 } End
+global GlobalType { content_type: I32, mutable: true, shared: false } = I32Const { value: 0 } End
+global GlobalType { content_type: I64, mutable: true, shared: false } = I64Const { value: 0 } End
+export memory Memory 0
+export main Func 41
+export __heap Global 1
+export add1 Func 39
+export add2 Func 40
+element funcs [42,43]
+code locals=[]
+  LocalGet { local_index: 0 }
+  I32Const { value: 12 }
+  I32Add
+  LocalGet { local_index: 0 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 4, memory: 0 } }
+  Call { function_index: 0 }
+  End
+code locals=[]
+  LocalGet { local_index: 0 }
+  I32Const { value: 12 }
+  I32Add
+  LocalGet { local_index: 0 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 4, memory: 0 } }
+  Call { function_index: 1 }
+  End
+code locals=[]
+  LocalGet { local_index: 0 }
+  LocalGet { local_index: 2 }
+  I32Add
+  GlobalGet { global_index: 3 }
+  I32GtU
+  If { blockty: Empty }
+  Unreachable
+  End
+  LocalGet { local_index: 0 }
+  LocalGet { local_index: 1 }
+  LocalGet { local_index: 2 }
+  Call { function_index: 32 }
+  LocalGet { local_index: 0 }
+  LocalGet { local_index: 2 }
+  I32Add
+  End
+code locals=[1xI32,1xI64,1xI32]
+  I32Const { value: 48 }
+  LocalSet { local_index: 1 }
+  LocalGet { local_index: 0 }
+  I64Const { value: 0 }
+  I64LtS
+  LocalSet { local_index: 3 }
+  LocalGet { local_index: 3 }
+  If { blockty: Empty }
+  LocalGet { local_index: 0 }
+  LocalSet { local_index: 2 }
+  Else
+  I64Const { value: 0 }
+  LocalGet { local_index: 0 }
+  I64Sub
+  LocalSet { local_index: 2 }
+  End
+  Loop { blockty: Empty }
+  LocalGet { local_index: 1 }
+  I32Const { value: 1 }
+  I32Sub
+  LocalSet { local_index: 1 }
+  LocalGet { local_index: 1 }
+  I64Const { value: 48 }
+  I64Const { value: 0 }
+  LocalGet { local_index: 2 }
+  I64Const { value: 10 }
+  I64RemS
+  I64Sub
+  I64Add
+  I32WrapI64
+  I32Store8 { memarg: MemArg { align: 0, max_align: 0, offset: 0, memory: 0 } }
+  LocalGet { local_index: 2 }
+  I64Const { value: 10 }
+  I64DivS
+  LocalSet { local_index: 2 }
+  LocalGet { local_index: 2 }
+  I64Const { value: 0 }
+  I64Ne
+  BrIf { relative_depth: 0 }
+  End
+  LocalGet { local_index: 3 }
+  If { blockty: Empty }
+  LocalGet { local_index: 1 }
+  I32Const { value: 1 }
+  I32Sub
+  LocalSet { local_index: 1 }
+  LocalGet { local_index: 1 }
+  I32Const { value: 45 }
+  I32Store8 { memarg: MemArg { align: 0, max_align: 0, offset: 0, memory: 0 } }
+  End
+  I32Const { value: 48 }
+  LocalGet { local_index: 1 }
+  I32Sub
+  End
+code locals=[1xI32]
+  LocalGet { local_index: 1 }
+  Call { function_index: 8 }
+  LocalSet { local_index: 2 }
+  LocalGet { local_index: 0 }
+  I32Const { value: 48 }
+  LocalGet { local_index: 2 }
+  I32Sub
+  LocalGet { local_index: 2 }
+  Call { function_index: 32 }
+  LocalGet { local_index: 0 }
+  LocalGet { local_index: 2 }
+  I32Add
+  End
+code locals=[]
+  LocalGet { local_index: 0 }
+  I32Const { value: 124 }
+  I32Const { value: 140 }
+  LocalGet { local_index: 1 }
+  Select
+  I32Const { value: 4 }
+  I32Const { value: 5 }
+  LocalGet { local_index: 1 }
+  Select
+  Call { function_index: 7 }
+  End
+code locals=[4xI32]
+  LocalGet { local_index: 0 }
+  I32Const { value: 15 }
+  I32Add
+  I32Const { value: -4 }
+  I32And
+  LocalSet { local_index: 3 }
+  LocalGet { local_index: 3 }
+  I32Const { value: 16 }
+  I32LtU
+  If { blockty: Empty }
+  I32Const { value: 16 }
+  LocalSet { local_index: 3 }
+  End
+  I32Const { value: 28 }
+  LocalGet { local_index: 3 }
+  I32Const { value: 1 }
+  I32Sub
+  I32Clz
+  I32Sub
+  LocalSet { local_index: 2 }
+  LocalGet { local_index: 2 }
+  I32Const { value: 16 }
+  I32LtU
+  If { blockty: Empty }
+  LocalGet { local_index: 2 }
+  I32Const { value: 2 }
+  I32Shl
+  I32Const { value: 48 }
+  I32Add
+  LocalSet { local_index: 2 }
+  LocalGet { local_index: 2 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 0, memory: 0 } }
+  LocalTee { local_index: 4 }
+  If { blockty: Empty }
+  LocalGet { local_index: 2 }
+  LocalGet { local_index: 4 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 12, memory: 0 } }
+  I32Store { memarg: MemArg { align: 2, max_align: 2, offset: 0, memory: 0 } }
+  LocalGet { local_index: 4 }
+  I32Const { value: 1 }
+  I32Store { memarg: MemArg { align: 2, max_align: 2, offset: 0, memory: 0 } }
+  LocalGet { local_index: 4 }
+  LocalGet { local_index: 0 }
+  I32Store { memarg: MemArg { align: 2, max_align: 2, offset: 4, memory: 0 } }
+  LocalGet { local_index: 4 }
+  I32Const { value: 16 }
+  LocalGet { local_index: 2 }
+  I32Const { value: 48 }
+  I32Sub
+  I32Const { value: 2 }
+  I32ShrU
+  I32Shl
+  I32Const { value: 12 }
+  I32Sub
+  I32Store { memarg: MemArg { align: 2, max_align: 2, offset: 8, memory: 0 } }
+  LocalGet { local_index: 4 }
+  Return
+  End
+  I32Const { value: 28 }
+  LocalGet { local_index: 3 }
+  I32Const { value: 1 }
+  I32Sub
+  I32Clz
+  I32Sub
+  LocalSet { local_index: 2 }
+  I32Const { value: 16 }
+  LocalGet { local_index: 2 }
+  I32Shl
+  LocalSet { local_index: 3 }
+  End
+  GlobalGet { global_index: 1 }
+  LocalSet { local_index: 1 }
+  LocalGet { local_index: 1 }
+  I32Const { value: 12 }
+  I32Add
+  LocalGet { local_index: 0 }
+  I32Add
+  I32Const { value: 3 }
+  I32Add
+  I32Const { value: -4 }
+  I32And
+  LocalSet { local_index: 2 }
+  LocalGet { local_index: 3 }
+  I32Const { value: 524288 }
+  I32LeU
+  If { blockty: Empty }
+  LocalGet { local_index: 1 }
+  LocalGet { local_index: 3 }
+  I32Add
+  LocalSet { local_index: 2 }
+  End
+  LocalGet { local_index: 2 }
+  MemorySize { mem: 0 }
+  I32Const { value: 16 }
+  I32Shl
+  I32GtU
+  If { blockty: Empty }
+  LocalGet { local_index: 2 }
+  MemorySize { mem: 0 }
+  I32Const { value: 16 }
+  I32Shl
+  I32Sub
+  I32Const { value: 65535 }
+  I32Add
+  I32Const { value: 16 }
+  I32ShrU
+  MemorySize { mem: 0 }
+  LocalGet { local_index: 2 }
+  MemorySize { mem: 0 }
+  I32Const { value: 16 }
+  I32Shl
+  I32Sub
+  I32Const { value: 65535 }
+  I32Add
+  I32Const { value: 16 }
+  I32ShrU
+  MemorySize { mem: 0 }
+  I32GtU
+  Select
+  MemoryGrow { mem: 0 }
+  I32Const { value: 0 }
+  I32LtS
+  If { blockty: Empty }
+  I32Const { value: 177 }
+  Call { function_index: 6 }
+  I32Const { value: 1 }
+  Call { function_index: 2 }
+  Unreachable
+  End
+  End
+  LocalGet { local_index: 1 }
+  I32Const { value: 1 }
+  I32Store { memarg: MemArg { align: 2, max_align: 2, offset: 0, memory: 0 } }
+  LocalGet { local_index: 1 }
+  LocalGet { local_index: 0 }
+  I32Store { memarg: MemArg { align: 2, max_align: 2, offset: 4, memory: 0 } }
+  LocalGet { local_index: 1 }
+  LocalGet { local_index: 3 }
+  I32Const { value: 12 }
+  I32Sub
+  I32Store { memarg: MemArg { align: 2, max_align: 2, offset: 8, memory: 0 } }
+  LocalGet { local_index: 2 }
+  GlobalSet { global_index: 1 }
+  LocalGet { local_index: 1 }
+  End
+code locals=[2xI32]
+  LocalGet { local_index: 0 }
+  Call { function_index: 8 }
+  LocalSet { local_index: 1 }
+  LocalGet { local_index: 1 }
+  Call { function_index: 11 }
+  LocalSet { local_index: 2 }
+  LocalGet { local_index: 2 }
+  I32Const { value: 12 }
+  I32Add
+  I32Const { value: 48 }
+  LocalGet { local_index: 1 }
+  I32Sub
+  LocalGet { local_index: 1 }
+  Call { function_index: 32 }
+  LocalGet { local_index: 2 }
+  End
+code locals=[6xI32]
+  LocalGet { local_index: 0 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 4, memory: 0 } }
+  LocalSet { local_index: 2 }
+  LocalGet { local_index: 1 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 4, memory: 0 } }
+  LocalSet { local_index: 3 }
+  LocalGet { local_index: 2 }
+  LocalGet { local_index: 3 }
+  I32Add
+  Call { function_index: 11 }
+  LocalSet { local_index: 4 }
+  LocalGet { local_index: 4 }
+  I32Const { value: 12 }
+  I32Add
+  LocalSet { local_index: 5 }
+  LocalGet { local_index: 0 }
+  I32Const { value: 12 }
+  I32Add
+  LocalSet { local_index: 6 }
+  LocalGet { local_index: 2 }
+  I32Const { value: 16 }
+  I32LtU
+  If { blockty: Empty }
+  LocalGet { local_index: 6 }
+  LocalGet { local_index: 2 }
+  I32Add
+  LocalSet { local_index: 7 }
+  Block { blockty: Empty }
+  Loop { blockty: Empty }
+  LocalGet { local_index: 6 }
+  LocalGet { local_index: 7 }
+  I32GeU
+  BrIf { relative_depth: 1 }
+  LocalGet { local_index: 5 }
+  LocalGet { local_index: 6 }
+  I32Load8U { memarg: MemArg { align: 0, max_align: 0, offset: 0, memory: 0 } }
+  I32Store8 { memarg: MemArg { align: 0, max_align: 0, offset: 0, memory: 0 } }
+  LocalGet { local_index: 5 }
+  I32Const { value: 1 }
+  I32Add
+  LocalSet { local_index: 5 }
+  LocalGet { local_index: 6 }
+  I32Const { value: 1 }
+  I32Add
+  LocalSet { local_index: 6 }
+  Br { relative_depth: 0 }
+  End
+  End
+  Else
+  LocalGet { local_index: 5 }
+  LocalGet { local_index: 6 }
+  LocalGet { local_index: 2 }
+  MemoryCopy { dst_mem: 0, src_mem: 0 }
+  End
+  LocalGet { local_index: 4 }
+  I32Const { value: 12 }
+  I32Add
+  LocalGet { local_index: 2 }
+  I32Add
+  LocalSet { local_index: 5 }
+  LocalGet { local_index: 1 }
+  I32Const { value: 12 }
+  I32Add
+  LocalSet { local_index: 6 }
+  LocalGet { local_index: 3 }
+  I32Const { value: 16 }
+  I32LtU
+  If { blockty: Empty }
+  LocalGet { local_index: 6 }
+  LocalGet { local_index: 3 }
+  I32Add
+  LocalSet { local_index: 7 }
+  Block { blockty: Empty }
+  Loop { blockty: Empty }
+  LocalGet { local_index: 6 }
+  LocalGet { local_index: 7 }
+  I32GeU
+  BrIf { relative_depth: 1 }
+  LocalGet { local_index: 5 }
+  LocalGet { local_index: 6 }
+  I32Load8U { memarg: MemArg { align: 0, max_align: 0, offset: 0, memory: 0 } }
+  I32Store8 { memarg: MemArg { align: 0, max_align: 0, offset: 0, memory: 0 } }
+  LocalGet { local_index: 5 }
+  I32Const { value: 1 }
+  I32Add
+  LocalSet { local_index: 5 }
+  LocalGet { local_index: 6 }
+  I32Const { value: 1 }
+  I32Add
+  LocalSet { local_index: 6 }
+  Br { relative_depth: 0 }
+  End
+  End
+  Else
+  LocalGet { local_index: 5 }
+  LocalGet { local_index: 6 }
+  LocalGet { local_index: 3 }
+  MemoryCopy { dst_mem: 0, src_mem: 0 }
+  End
+  LocalGet { local_index: 4 }
+  End
+code locals=[2xI32]
+  LocalGet { local_index: 0 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 4, memory: 0 } }
+  LocalSet { local_index: 2 }
+  LocalGet { local_index: 2 }
+  LocalGet { local_index: 1 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 4, memory: 0 } }
+  I32Ne
+  If { blockty: Empty }
+  I32Const { value: 0 }
+  Return
+  End
+  I32Const { value: 0 }
+  LocalSet { local_index: 3 }
+  Loop { blockty: Empty }
+  LocalGet { local_index: 3 }
+  LocalGet { local_index: 2 }
+  I32GeU
+  If { blockty: Empty }
+  I32Const { value: 1 }
+  Return
+  End
+  LocalGet { local_index: 0 }
+  LocalGet { local_index: 3 }
+  I32Add
+  I32Load8U { memarg: MemArg { align: 0, max_align: 0, offset: 12, memory: 0 } }
+  LocalGet { local_index: 1 }
+  LocalGet { local_index: 3 }
+  I32Add
+  I32Load8U { memarg: MemArg { align: 0, max_align: 0, offset: 12, memory: 0 } }
+  I32Ne
+  If { blockty: Empty }
+  I32Const { value: 0 }
+  Return
+  End
+  LocalGet { local_index: 3 }
+  I32Const { value: 1 }
+  I32Add
+  LocalSet { local_index: 3 }
+  Br { relative_depth: 0 }
+  End
+  Unreachable
+  End
+code locals=[1xI32]
+  LocalGet { local_index: 1 }
+  I64Const { value: 0 }
+  I64LtS
+  LocalGet { local_index: 1 }
+  LocalGet { local_index: 0 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 4, memory: 0 } }
+  I32Const { value: 8 }
+  I32DivU
+  I64ExtendI32U
+  I64GeS
+  I32Or
+  If { blockty: Empty }
+  I32Const { value: 0 }
+  Return
+  End
+  I32Const { value: 8 }
+  Call { function_index: 11 }
+  LocalSet { local_index: 2 }
+  LocalGet { local_index: 2 }
+  LocalGet { local_index: 0 }
+  I64ExtendI32U
+  LocalGet { local_index: 1 }
+  I64Const { value: 8 }
+  I64Mul
+  I64Add
+  I32WrapI64
+  I64Load { memarg: MemArg { align: 2, max_align: 3, offset: 12, memory: 0 } }
+  I64Store { memarg: MemArg { align: 2, max_align: 3, offset: 12, memory: 0 } }
+  LocalGet { local_index: 2 }
+  End
+code locals=[1xI32]
+  LocalGet { local_index: 1 }
+  I64Const { value: 0 }
+  I64LtS
+  LocalGet { local_index: 1 }
+  LocalGet { local_index: 0 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 4, memory: 0 } }
+  I32Const { value: 4 }
+  I32DivU
+  I64ExtendI32U
+  I64GeS
+  I32Or
+  If { blockty: Empty }
+  I32Const { value: 0 }
+  Return
+  End
+  I32Const { value: 4 }
+  Call { function_index: 11 }
+  LocalSet { local_index: 2 }
+  LocalGet { local_index: 2 }
+  LocalGet { local_index: 0 }
+  I64ExtendI32U
+  LocalGet { local_index: 1 }
+  I64Const { value: 4 }
+  I64Mul
+  I64Add
+  I32WrapI64
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 12, memory: 0 } }
+  I32Store { memarg: MemArg { align: 2, max_align: 2, offset: 12, memory: 0 } }
+  LocalGet { local_index: 2 }
+  End
+code locals=[3xI32]
+  LocalGet { local_index: 0 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 4, memory: 0 } }
+  LocalSet { local_index: 2 }
+  LocalGet { local_index: 0 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 8, memory: 0 } }
+  LocalSet { local_index: 3 }
+  LocalGet { local_index: 3 }
+  LocalGet { local_index: 2 }
+  I32Sub
+  I32Const { value: 8 }
+  I32GeU
+  If { blockty: Empty }
+  LocalGet { local_index: 0 }
+  LocalGet { local_index: 2 }
+  I32Add
+  LocalGet { local_index: 1 }
+  I64Store { memarg: MemArg { align: 2, max_align: 3, offset: 12, memory: 0 } }
+  LocalGet { local_index: 0 }
+  LocalGet { local_index: 2 }
+  I32Const { value: 8 }
+  I32Add
+  I32Store { memarg: MemArg { align: 2, max_align: 2, offset: 4, memory: 0 } }
+  LocalGet { local_index: 0 }
+  Return
+  End
+  LocalGet { local_index: 3 }
+  I32Const { value: 1 }
+  I32Shl
+  LocalSet { local_index: 3 }
+  LocalGet { local_index: 3 }
+  I32Const { value: 32 }
+  I32LtU
+  If { blockty: Empty }
+  I32Const { value: 32 }
+  LocalSet { local_index: 3 }
+  End
+  LocalGet { local_index: 3 }
+  Call { function_index: 11 }
+  LocalSet { local_index: 4 }
+  LocalGet { local_index: 4 }
+  I32Const { value: 12 }
+  I32Add
+  LocalGet { local_index: 0 }
+  I32Const { value: 12 }
+  I32Add
+  LocalGet { local_index: 2 }
+  Call { function_index: 32 }
+  LocalGet { local_index: 4 }
+  LocalGet { local_index: 2 }
+  I32Add
+  LocalGet { local_index: 1 }
+  I64Store { memarg: MemArg { align: 2, max_align: 3, offset: 12, memory: 0 } }
+  LocalGet { local_index: 4 }
+  LocalGet { local_index: 2 }
+  I32Const { value: 8 }
+  I32Add
+  I32Store { memarg: MemArg { align: 2, max_align: 2, offset: 4, memory: 0 } }
+  LocalGet { local_index: 0 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 0, memory: 0 } }
+  I32Const { value: 1 }
+  I32Eq
+  If { blockty: Empty }
+  LocalGet { local_index: 0 }
+  Call { function_index: 33 }
+  End
+  LocalGet { local_index: 4 }
+  End
+code locals=[3xI32]
+  LocalGet { local_index: 0 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 4, memory: 0 } }
+  LocalSet { local_index: 2 }
+  LocalGet { local_index: 0 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 8, memory: 0 } }
+  LocalSet { local_index: 3 }
+  LocalGet { local_index: 3 }
+  LocalGet { local_index: 2 }
+  I32Sub
+  I32Const { value: 4 }
+  I32GeU
+  If { blockty: Empty }
+  LocalGet { local_index: 0 }
+  LocalGet { local_index: 2 }
+  I32Add
+  LocalGet { local_index: 1 }
+  I32Store { memarg: MemArg { align: 2, max_align: 2, offset: 12, memory: 0 } }
+  LocalGet { local_index: 0 }
+  LocalGet { local_index: 2 }
+  I32Const { value: 4 }
+  I32Add
+  I32Store { memarg: MemArg { align: 2, max_align: 2, offset: 4, memory: 0 } }
+  LocalGet { local_index: 0 }
+  Return
+  End
+  LocalGet { local_index: 3 }
+  I32Const { value: 1 }
+  I32Shl
+  LocalSet { local_index: 3 }
+  LocalGet { local_index: 3 }
+  I32Const { value: 16 }
+  I32LtU
+  If { blockty: Empty }
+  I32Const { value: 16 }
+  LocalSet { local_index: 3 }
+  End
+  LocalGet { local_index: 3 }
+  Call { function_index: 11 }
+  LocalSet { local_index: 4 }
+  LocalGet { local_index: 4 }
+  I32Const { value: 12 }
+  I32Add
+  LocalGet { local_index: 0 }
+  I32Const { value: 12 }
+  I32Add
+  LocalGet { local_index: 2 }
+  Call { function_index: 32 }
+  LocalGet { local_index: 4 }
+  LocalGet { local_index: 2 }
+  I32Add
+  LocalGet { local_index: 1 }
+  I32Store { memarg: MemArg { align: 2, max_align: 2, offset: 12, memory: 0 } }
+  LocalGet { local_index: 4 }
+  LocalGet { local_index: 2 }
+  I32Const { value: 4 }
+  I32Add
+  I32Store { memarg: MemArg { align: 2, max_align: 2, offset: 4, memory: 0 } }
+  LocalGet { local_index: 0 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 0, memory: 0 } }
+  I32Const { value: 1 }
+  I32Eq
+  If { blockty: Empty }
+  LocalGet { local_index: 0 }
+  Call { function_index: 33 }
+  End
+  LocalGet { local_index: 4 }
+  End
+code locals=[3xI32]
+  LocalGet { local_index: 0 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 4, memory: 0 } }
+  I32Const { value: 4 }
+  I32DivU
+  LocalSet { local_index: 2 }
+  I32Const { value: 0 }
+  Call { function_index: 11 }
+  LocalSet { local_index: 4 }
+  I32Const { value: 0 }
+  LocalSet { local_index: 3 }
+  Loop { blockty: Empty }
+  LocalGet { local_index: 3 }
+  LocalGet { local_index: 2 }
+  I32GeU
+  If { blockty: Empty }
+  LocalGet { local_index: 4 }
+  Return
+  End
+  LocalGet { local_index: 3 }
+  I32Const { value: 0 }
+  I32Ne
+  If { blockty: Empty }
+  LocalGet { local_index: 4 }
+  LocalGet { local_index: 1 }
+  Call { function_index: 13 }
+  LocalSet { local_index: 4 }
+  End
+  LocalGet { local_index: 4 }
+  LocalGet { local_index: 0 }
+  LocalGet { local_index: 3 }
+  I32Const { value: 4 }
+  I32Mul
+  I32Add
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 12, memory: 0 } }
+  Call { function_index: 13 }
+  LocalSet { local_index: 4 }
+  LocalGet { local_index: 3 }
+  I32Const { value: 1 }
+  I32Add
+  LocalSet { local_index: 3 }
+  Br { relative_depth: 0 }
+  End
+  Unreachable
+  End
+code locals=[2xI32]
+  LocalGet { local_index: 0 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 4, memory: 0 } }
+  LocalSet { local_index: 1 }
+  LocalGet { local_index: 1 }
+  Call { function_index: 11 }
+  LocalSet { local_index: 2 }
+  LocalGet { local_index: 2 }
+  I32Const { value: 12 }
+  I32Add
+  LocalGet { local_index: 0 }
+  I32Const { value: 12 }
+  I32Add
+  LocalGet { local_index: 1 }
+  Call { function_index: 32 }
+  LocalGet { local_index: 2 }
+  End
+code locals=[2xI32]
+  LocalGet { local_index: 1 }
+  LocalGet { local_index: 0 }
+  I32Sub
+  LocalSet { local_index: 2 }
+  LocalGet { local_index: 2 }
+  Call { function_index: 11 }
+  LocalSet { local_index: 3 }
+  LocalGet { local_index: 3 }
+  I32Const { value: 12 }
+  I32Add
+  LocalGet { local_index: 0 }
+  LocalGet { local_index: 2 }
+  Call { function_index: 32 }
+  LocalGet { local_index: 3 }
+  End
+code locals=[2xI32,1xI64]
+  LocalGet { local_index: 0 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 4, memory: 0 } }
+  LocalSet { local_index: 2 }
+  I32Const { value: 0 }
+  LocalSet { local_index: 1 }
+  I64Const { value: 0 }
+  LocalSet { local_index: 3 }
+  Block { blockty: Empty }
+  Loop { blockty: Empty }
+  LocalGet { local_index: 1 }
+  LocalGet { local_index: 2 }
+  I32GeU
+  BrIf { relative_depth: 1 }
+  LocalGet { local_index: 0 }
+  LocalGet { local_index: 1 }
+  I32Add
+  I32Load8U { memarg: MemArg { align: 0, max_align: 0, offset: 12, memory: 0 } }
+  I32Const { value: 192 }
+  I32And
+  I32Const { value: 128 }
+  I32Ne
+  If { blockty: Empty }
+  LocalGet { local_index: 3 }
+  I64Const { value: 1 }
+  I64Add
+  LocalSet { local_index: 3 }
+  End
+  LocalGet { local_index: 1 }
+  I32Const { value: 1 }
+  I32Add
+  LocalSet { local_index: 1 }
+  Br { relative_depth: 0 }
+  End
+  End
+  LocalGet { local_index: 3 }
+  End
+code locals=[2xI32]
+  LocalGet { local_index: 0 }
+  I32Const { value: 12 }
+  I32Add
+  LocalTee { local_index: 4 }
+  LocalGet { local_index: 0 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 4, memory: 0 } }
+  I32Add
+  LocalSet { local_index: 5 }
+  Block { blockty: Empty }
+  Loop { blockty: Empty }
+  LocalGet { local_index: 4 }
+  LocalGet { local_index: 5 }
+  I32GeU
+  BrIf { relative_depth: 1 }
+  LocalGet { local_index: 4 }
+  LocalGet { local_index: 2 }
+  I32Add
+  I64Load { memarg: MemArg { align: 2, max_align: 3, offset: 0, memory: 0 } }
+  LocalGet { local_index: 3 }
+  I64Eq
+  If { blockty: Empty }
+  LocalGet { local_index: 4 }
+  Return
+  End
+  LocalGet { local_index: 4 }
+  LocalGet { local_index: 1 }
+  I32Add
+  LocalSet { local_index: 4 }
+  Br { relative_depth: 0 }
+  End
+  End
+  I32Const { value: 0 }
+  End
+code locals=[2xI32]
+  LocalGet { local_index: 0 }
+  I32Const { value: 12 }
+  I32Add
+  LocalTee { local_index: 4 }
+  LocalGet { local_index: 0 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 4, memory: 0 } }
+  I32Add
+  LocalSet { local_index: 5 }
+  Block { blockty: Empty }
+  Loop { blockty: Empty }
+  LocalGet { local_index: 4 }
+  LocalGet { local_index: 5 }
+  I32GeU
+  BrIf { relative_depth: 1 }
+  LocalGet { local_index: 4 }
+  LocalGet { local_index: 2 }
+  I32Add
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 0, memory: 0 } }
+  LocalGet { local_index: 3 }
+  I32Eq
+  If { blockty: Empty }
+  LocalGet { local_index: 4 }
+  Return
+  End
+  LocalGet { local_index: 4 }
+  LocalGet { local_index: 1 }
+  I32Add
+  LocalSet { local_index: 4 }
+  Br { relative_depth: 0 }
+  End
+  End
+  I32Const { value: 0 }
+  End
+code locals=[2xI32]
+  LocalGet { local_index: 0 }
+  I32Const { value: 12 }
+  I32Add
+  LocalTee { local_index: 4 }
+  LocalGet { local_index: 0 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 4, memory: 0 } }
+  I32Add
+  LocalSet { local_index: 5 }
+  Block { blockty: Empty }
+  Loop { blockty: Empty }
+  LocalGet { local_index: 4 }
+  LocalGet { local_index: 5 }
+  I32GeU
+  BrIf { relative_depth: 1 }
+  LocalGet { local_index: 4 }
+  LocalGet { local_index: 2 }
+  I32Add
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 0, memory: 0 } }
+  LocalGet { local_index: 3 }
+  Call { function_index: 14 }
+  If { blockty: Empty }
+  LocalGet { local_index: 4 }
+  Return
+  End
+  LocalGet { local_index: 4 }
+  LocalGet { local_index: 1 }
+  I32Add
+  LocalSet { local_index: 4 }
+  Br { relative_depth: 0 }
+  End
+  End
+  I32Const { value: 0 }
+  End
+code locals=[3xI64]
+  LocalGet { local_index: 0 }
+  I64ExtendI32U
+  I64Const { value: 15 }
+  I64ShrU
+  I64Const { value: 1 }
+  I64And
+  LocalSet { local_index: 1 }
+  LocalGet { local_index: 0 }
+  I64ExtendI32U
+  I64Const { value: 10 }
+  I64ShrU
+  I64Const { value: 31 }
+  I64And
+  LocalSet { local_index: 2 }
+  LocalGet { local_index: 0 }
+  I64ExtendI32U
+  I64Const { value: 1023 }
+  I64And
+  LocalSet { local_index: 3 }
+  LocalGet { local_index: 2 }
+  I64Eqz
+  If { blockty: Empty }
+  LocalGet { local_index: 3 }
+  F64ConvertI64U
+  F64Const { value: Ieee64(4499096027743125504) }
+  F64Mul
+  F64Const { value: Ieee64(4607182418800017408) }
+  F64Const { value: Ieee64(13830554455654793216) }
+  LocalGet { local_index: 1 }
+  I64Eqz
+  Select
+  F64Mul
+  Return
+  End
+  LocalGet { local_index: 2 }
+  I64Const { value: 31 }
+  I64Eq
+  If { blockty: Empty }
+  LocalGet { local_index: 1 }
+  I64Const { value: 63 }
+  I64Shl
+  I64Const { value: 2047 }
+  I64Const { value: 52 }
+  I64Shl
+  I64Or
+  LocalGet { local_index: 3 }
+  I64Const { value: 42 }
+  I64Shl
+  I64Or
+  F64ReinterpretI64
+  Return
+  End
+  LocalGet { local_index: 1 }
+  I64Const { value: 63 }
+  I64Shl
+  LocalGet { local_index: 2 }
+  I64Const { value: 1008 }
+  I64Add
+  I64Const { value: 52 }
+  I64Shl
+  I64Or
+  LocalGet { local_index: 3 }
+  I64Const { value: 42 }
+  I64Shl
+  I64Or
+  F64ReinterpretI64
+  End
+code locals=[2xI32,1xI64]
+  LocalGet { local_index: 0 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 4, memory: 0 } }
+  LocalSet { local_index: 3 }
+  I32Const { value: 0 }
+  LocalSet { local_index: 2 }
+  I64Const { value: 0 }
+  LocalSet { local_index: 4 }
+  Block { blockty: Empty }
+  Loop { blockty: Empty }
+  LocalGet { local_index: 2 }
+  LocalGet { local_index: 3 }
+  I32GeU
+  BrIf { relative_depth: 1 }
+  LocalGet { local_index: 4 }
+  LocalGet { local_index: 1 }
+  I64GeS
+  BrIf { relative_depth: 1 }
+  LocalGet { local_index: 2 }
+  I32Const { value: 1 }
+  I32Add
+  LocalSet { local_index: 2 }
+  Block { blockty: Empty }
+  Loop { blockty: Empty }
+  LocalGet { local_index: 2 }
+  LocalGet { local_index: 3 }
+  I32GeU
+  BrIf { relative_depth: 1 }
+  LocalGet { local_index: 0 }
+  LocalGet { local_index: 2 }
+  I32Add
+  I32Load8U { memarg: MemArg { align: 0, max_align: 0, offset: 12, memory: 0 } }
+  I32Const { value: 192 }
+  I32And
+  I32Const { value: 128 }
+  I32Ne
+  BrIf { relative_depth: 1 }
+  LocalGet { local_index: 2 }
+  I32Const { value: 1 }
+  I32Add
+  LocalSet { local_index: 2 }
+  Br { relative_depth: 0 }
+  End
+  End
+  LocalGet { local_index: 4 }
+  I64Const { value: 1 }
+  I64Add
+  LocalSet { local_index: 4 }
+  Br { relative_depth: 0 }
+  End
+  End
+  LocalGet { local_index: 2 }
+  End
+code locals=[3xI32]
+  LocalGet { local_index: 0 }
+  LocalGet { local_index: 1 }
+  I64Const { value: 0 }
+  I64LtS
+  If { blockty: Type(I64) }
+  I64Const { value: 0 }
+  Else
+  LocalGet { local_index: 1 }
+  End
+  Call { function_index: 27 }
+  LocalSet { local_index: 3 }
+  LocalGet { local_index: 0 }
+  LocalGet { local_index: 2 }
+  I64Const { value: 0 }
+  I64LtS
+  If { blockty: Type(I64) }
+  I64Const { value: 0 }
+  Else
+  LocalGet { local_index: 2 }
+  End
+  Call { function_index: 27 }
+  LocalSet { local_index: 4 }
+  LocalGet { local_index: 3 }
+  LocalGet { local_index: 4 }
+  I32GeU
+  If { blockty: Empty }
+  I32Const { value: 0 }
+  Call { function_index: 11 }
+  Return
+  End
+  LocalGet { local_index: 4 }
+  LocalGet { local_index: 3 }
+  I32Sub
+  Call { function_index: 11 }
+  LocalSet { local_index: 5 }
+  LocalGet { local_index: 5 }
+  I32Const { value: 12 }
+  I32Add
+  LocalGet { local_index: 0 }
+  I32Const { value: 12 }
+  I32Add
+  LocalGet { local_index: 3 }
+  I32Add
+  LocalGet { local_index: 4 }
+  LocalGet { local_index: 3 }
+  I32Sub
+  Call { function_index: 32 }
+  LocalGet { local_index: 5 }
+  End
+code locals=[1xI32,1xI64,1xI32,1xI64]
+  LocalGet { local_index: 1 }
+  I64Const { value: 0 }
+  I64LeS
+  If { blockty: Empty }
+  I32Const { value: 0 }
+  Call { function_index: 11 }
+  Return
+  End
+  LocalGet { local_index: 0 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 4, memory: 0 } }
+  LocalSet { local_index: 2 }
+  LocalGet { local_index: 2 }
+  I64ExtendI32U
+  LocalGet { local_index: 1 }
+  I64Mul
+  LocalSet { local_index: 3 }
+  LocalGet { local_index: 3 }
+  I64Const { value: 2147483648 }
+  I64GtS
+  If { blockty: Empty }
+  Unreachable
+  End
+  LocalGet { local_index: 3 }
+  I32WrapI64
+  Call { function_index: 11 }
+  LocalSet { local_index: 4 }
+  I64Const { value: 0 }
+  LocalSet { local_index: 5 }
+  Block { blockty: Empty }
+  Loop { blockty: Empty }
+  LocalGet { local_index: 5 }
+  LocalGet { local_index: 1 }
+  I64GeS
+  BrIf { relative_depth: 1 }
+  LocalGet { local_index: 4 }
+  I32Const { value: 12 }
+  I32Add
+  LocalGet { local_index: 5 }
+  I32WrapI64
+  LocalGet { local_index: 2 }
+  I32Mul
+  I32Add
+  LocalGet { local_index: 0 }
+  I32Const { value: 12 }
+  I32Add
+  LocalGet { local_index: 2 }
+  Call { function_index: 32 }
+  LocalGet { local_index: 5 }
+  I64Const { value: 1 }
+  I64Add
+  LocalSet { local_index: 5 }
+  Br { relative_depth: 0 }
+  End
+  End
+  LocalGet { local_index: 4 }
+  End
+code locals=[6xI32]
+  LocalGet { local_index: 0 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 4, memory: 0 } }
+  LocalSet { local_index: 4 }
+  LocalGet { local_index: 1 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 4, memory: 0 } }
+  LocalSet { local_index: 5 }
+  LocalGet { local_index: 4 }
+  LocalGet { local_index: 5 }
+  LocalGet { local_index: 4 }
+  LocalGet { local_index: 5 }
+  I32LtU
+  Select
+  LocalSet { local_index: 3 }
+  I32Const { value: 0 }
+  LocalSet { local_index: 2 }
+  Block { blockty: Empty }
+  Loop { blockty: Empty }
+  LocalGet { local_index: 2 }
+  LocalGet { local_index: 3 }
+  I32GeU
+  BrIf { relative_depth: 1 }
+  LocalGet { local_index: 0 }
+  I32Const { value: 12 }
+  I32Add
+  LocalGet { local_index: 2 }
+  I32Add
+  I32Load8U { memarg: MemArg { align: 0, max_align: 0, offset: 0, memory: 0 } }
+  LocalSet { local_index: 6 }
+  LocalGet { local_index: 1 }
+  I32Const { value: 12 }
+  I32Add
+  LocalGet { local_index: 2 }
+  I32Add
+  I32Load8U { memarg: MemArg { align: 0, max_align: 0, offset: 0, memory: 0 } }
+  LocalSet { local_index: 7 }
+  LocalGet { local_index: 6 }
+  LocalGet { local_index: 7 }
+  I32Ne
+  If { blockty: Empty }
+  I32Const { value: -1 }
+  I32Const { value: 1 }
+  LocalGet { local_index: 6 }
+  LocalGet { local_index: 7 }
+  I32LtU
+  Select
+  Return
+  End
+  LocalGet { local_index: 2 }
+  I32Const { value: 1 }
+  I32Add
+  LocalSet { local_index: 2 }
+  Br { relative_depth: 0 }
+  End
+  End
+  LocalGet { local_index: 4 }
+  LocalGet { local_index: 5 }
+  I32Eq
+  If { blockty: Empty }
+  I32Const { value: 0 }
+  Return
+  End
+  I32Const { value: -1 }
+  I32Const { value: 1 }
+  LocalGet { local_index: 4 }
+  LocalGet { local_index: 5 }
+  I32LtU
+  Select
+  End
+code locals=[9xI32]
+  LocalGet { local_index: 0 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 4, memory: 0 } }
+  LocalSet { local_index: 4 }
+  LocalGet { local_index: 1 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 4, memory: 0 } }
+  LocalSet { local_index: 5 }
+  LocalGet { local_index: 2 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 4, memory: 0 } }
+  LocalSet { local_index: 6 }
+  LocalGet { local_index: 5 }
+  I32Eqz
+  If { blockty: Empty }
+  LocalGet { local_index: 3 }
+  If { blockty: Empty }
+  LocalGet { local_index: 2 }
+  LocalGet { local_index: 0 }
+  Call { function_index: 13 }
+  Return
+  End
+  I32Const { value: 0 }
+  LocalSet { local_index: 7 }
+  I32Const { value: 0 }
+  LocalSet { local_index: 8 }
+  Block { blockty: Empty }
+  Loop { blockty: Empty }
+  LocalGet { local_index: 8 }
+  LocalGet { local_index: 4 }
+  I32GeU
+  BrIf { relative_depth: 1 }
+  LocalGet { local_index: 0 }
+  I32Const { value: 12 }
+  I32Add
+  LocalGet { local_index: 8 }
+  I32Add
+  I32Load8U { memarg: MemArg { align: 0, max_align: 0, offset: 0, memory: 0 } }
+  I32Const { value: 192 }
+  I32And
+  I32Const { value: 128 }
+  I32Ne
+  If { blockty: Empty }
+  LocalGet { local_index: 7 }
+  I32Const { value: 1 }
+  I32Add
+  LocalSet { local_index: 7 }
+  End
+  LocalGet { local_index: 8 }
+  I32Const { value: 1 }
+  I32Add
+  LocalSet { local_index: 8 }
+  Br { relative_depth: 0 }
+  End
+  End
+  LocalGet { local_index: 4 }
+  LocalGet { local_index: 7 }
+  I32Const { value: 1 }
+  I32Add
+  LocalGet { local_index: 6 }
+  I32Mul
+  I32Add
+  Call { function_index: 11 }
+  LocalSet { local_index: 10 }
+  LocalGet { local_index: 10 }
+  I32Const { value: 12 }
+  I32Add
+  LocalSet { local_index: 9 }
+  LocalGet { local_index: 9 }
+  LocalGet { local_index: 2 }
+  I32Const { value: 12 }
+  I32Add
+  LocalGet { local_index: 6 }
+  MemoryCopy { dst_mem: 0, src_mem: 0 }
+  LocalGet { local_index: 9 }
+  LocalGet { local_index: 6 }
+  I32Add
+  LocalSet { local_index: 9 }
+  I32Const { value: 0 }
+  LocalSet { local_index: 8 }
+  Block { blockty: Empty }
+  Loop { blockty: Empty }
+  LocalGet { local_index: 8 }
+  LocalGet { local_index: 4 }
+  I32GeU
+  BrIf { relative_depth: 1 }
+  LocalGet { local_index: 9 }
+  LocalGet { local_index: 0 }
+  I32Const { value: 12 }
+  I32Add
+  LocalGet { local_index: 8 }
+  I32Add
+  I32Load8U { memarg: MemArg { align: 0, max_align: 0, offset: 0, memory: 0 } }
+  I32Store8 { memarg: MemArg { align: 0, max_align: 0, offset: 0, memory: 0 } }
+  LocalGet { local_index: 9 }
+  I32Const { value: 1 }
+  I32Add
+  LocalSet { local_index: 9 }
+  LocalGet { local_index: 8 }
+  I32Const { value: 1 }
+  I32Add
+  LocalSet { local_index: 8 }
+  LocalGet { local_index: 8 }
+  LocalGet { local_index: 4 }
+  I32GeU
+  If { blockty: Type(I32) }
+  I32Const { value: 1 }
+  Else
+  LocalGet { local_index: 0 }
+  I32Const { value: 12 }
+  I32Add
+  LocalGet { local_index: 8 }
+  I32Add
+  I32Load8U { memarg: MemArg { align: 0, max_align: 0, offset: 0, memory: 0 } }
+  I32Const { value: 192 }
+  I32And
+  I32Const { value: 128 }
+  I32Ne
+  End
+  If { blockty: Empty }
+  LocalGet { local_index: 9 }
+  LocalGet { local_index: 2 }
+  I32Const { value: 12 }
+  I32Add
+  LocalGet { local_index: 6 }
+  MemoryCopy { dst_mem: 0, src_mem: 0 }
+  LocalGet { local_index: 9 }
+  LocalGet { local_index: 6 }
+  I32Add
+  LocalSet { local_index: 9 }
+  End
+  Br { relative_depth: 0 }
+  End
+  End
+  LocalGet { local_index: 10 }
+  Return
+  End
+  I32Const { value: 0 }
+  LocalSet { local_index: 7 }
+  I32Const { value: 0 }
+  LocalSet { local_index: 8 }
+  Block { blockty: Empty }
+  Loop { blockty: Empty }
+  LocalGet { local_index: 8 }
+  LocalGet { local_index: 5 }
+  I32Add
+  LocalGet { local_index: 4 }
+  I32GtU
+  BrIf { relative_depth: 1 }
+  I32Const { value: 1 }
+  LocalSet { local_index: 12 }
+  I32Const { value: 0 }
+  LocalSet { local_index: 11 }
+  Block { blockty: Empty }
+  Loop { blockty: Empty }
+  LocalGet { local_index: 11 }
+  LocalGet { local_index: 5 }
+  I32GeU
+  BrIf { relative_depth: 1 }
+  LocalGet { local_index: 0 }
+  I32Const { value: 12 }
+  I32Add
+  LocalGet { local_index: 8 }
+  I32Add
+  LocalGet { local_index: 11 }
+  I32Add
+  I32Load8U { memarg: MemArg { align: 0, max_align: 0, offset: 0, memory: 0 } }
+  LocalGet { local_index: 1 }
+  I32Const { value: 12 }
+  I32Add
+  LocalGet { local_index: 11 }
+  I32Add
+  I32Load8U { memarg: MemArg { align: 0, max_align: 0, offset: 0, memory: 0 } }
+  I32Ne
+  If { blockty: Empty }
+  I32Const { value: 0 }
+  LocalSet { local_index: 12 }
+  Br { relative_depth: 2 }
+  End
+  LocalGet { local_index: 11 }
+  I32Const { value: 1 }
+  I32Add
+  LocalSet { local_index: 11 }
+  Br { relative_depth: 0 }
+  End
+  End
+  LocalGet { local_index: 12 }
+  If { blockty: Empty }
+  LocalGet { local_index: 7 }
+  I32Const { value: 1 }
+  I32Add
+  LocalSet { local_index: 7 }
+  LocalGet { local_index: 8 }
+  LocalGet { local_index: 5 }
+  I32Add
+  LocalSet { local_index: 8 }
+  LocalGet { local_index: 3 }
+  BrIf { relative_depth: 2 }
+  Else
+  LocalGet { local_index: 8 }
+  I32Const { value: 1 }
+  I32Add
+  LocalSet { local_index: 8 }
+  End
+  Br { relative_depth: 0 }
+  End
+  End
+  LocalGet { local_index: 4 }
+  LocalGet { local_index: 7 }
+  LocalGet { local_index: 6 }
+  LocalGet { local_index: 5 }
+  I32Sub
+  I32Mul
+  I32Add
+  Call { function_index: 11 }
+  LocalSet { local_index: 10 }
+  LocalGet { local_index: 10 }
+  I32Const { value: 12 }
+  I32Add
+  LocalSet { local_index: 9 }
+  I32Const { value: 0 }
+  LocalSet { local_index: 8 }
+  Block { blockty: Empty }
+  Loop { blockty: Empty }
+  LocalGet { local_index: 8 }
+  LocalGet { local_index: 4 }
+  I32GeU
+  BrIf { relative_depth: 1 }
+  I32Const { value: 0 }
+  LocalSet { local_index: 12 }
+  LocalGet { local_index: 7 }
+  I32Const { value: 0 }
+  I32GtS
+  LocalGet { local_index: 8 }
+  LocalGet { local_index: 5 }
+  I32Add
+  LocalGet { local_index: 4 }
+  I32LeU
+  I32And
+  If { blockty: Empty }
+  I32Const { value: 1 }
+  LocalSet { local_index: 12 }
+  I32Const { value: 0 }
+  LocalSet { local_index: 11 }
+  Block { blockty: Empty }
+  Loop { blockty: Empty }
+  LocalGet { local_index: 11 }
+  LocalGet { local_index: 5 }
+  I32GeU
+  BrIf { relative_depth: 1 }
+  LocalGet { local_index: 0 }
+  I32Const { value: 12 }
+  I32Add
+  LocalGet { local_index: 8 }
+  I32Add
+  LocalGet { local_index: 11 }
+  I32Add
+  I32Load8U { memarg: MemArg { align: 0, max_align: 0, offset: 0, memory: 0 } }
+  LocalGet { local_index: 1 }
+  I32Const { value: 12 }
+  I32Add
+  LocalGet { local_index: 11 }
+  I32Add
+  I32Load8U { memarg: MemArg { align: 0, max_align: 0, offset: 0, memory: 0 } }
+  I32Ne
+  If { blockty: Empty }
+  I32Const { value: 0 }
+  LocalSet { local_index: 12 }
+  Br { relative_depth: 2 }
+  End
+  LocalGet { local_index: 11 }
+  I32Const { value: 1 }
+  I32Add
+  LocalSet { local_index: 11 }
+  Br { relative_depth: 0 }
+  End
+  End
+  End
+  LocalGet { local_index: 12 }
+  If { blockty: Empty }
+  LocalGet { local_index: 9 }
+  LocalGet { local_index: 2 }
+  I32Const { value: 12 }
+  I32Add
+  LocalGet { local_index: 6 }
+  MemoryCopy { dst_mem: 0, src_mem: 0 }
+  LocalGet { local_index: 9 }
+  LocalGet { local_index: 6 }
+  I32Add
+  LocalSet { local_index: 9 }
+  LocalGet { local_index: 8 }
+  LocalGet { local_index: 5 }
+  I32Add
+  LocalSet { local_index: 8 }
+  LocalGet { local_index: 7 }
+  I32Const { value: 1 }
+  I32Sub
+  LocalSet { local_index: 7 }
+  Else
+  LocalGet { local_index: 9 }
+  LocalGet { local_index: 0 }
+  I32Const { value: 12 }
+  I32Add
+  LocalGet { local_index: 8 }
+  I32Add
+  I32Load8U { memarg: MemArg { align: 0, max_align: 0, offset: 0, memory: 0 } }
+  I32Store8 { memarg: MemArg { align: 0, max_align: 0, offset: 0, memory: 0 } }
+  LocalGet { local_index: 9 }
+  I32Const { value: 1 }
+  I32Add
+  LocalSet { local_index: 9 }
+  LocalGet { local_index: 8 }
+  I32Const { value: 1 }
+  I32Add
+  LocalSet { local_index: 8 }
+  End
+  Br { relative_depth: 0 }
+  End
+  End
+  LocalGet { local_index: 10 }
+  End
+code locals=[1xI32]
+  LocalGet { local_index: 2 }
+  I32Const { value: 16 }
+  I32LtU
+  If { blockty: Empty }
+  LocalGet { local_index: 1 }
+  LocalGet { local_index: 2 }
+  I32Add
+  LocalSet { local_index: 3 }
+  Block { blockty: Empty }
+  Loop { blockty: Empty }
+  LocalGet { local_index: 1 }
+  LocalGet { local_index: 3 }
+  I32GeU
+  BrIf { relative_depth: 1 }
+  LocalGet { local_index: 0 }
+  LocalGet { local_index: 1 }
+  I32Load8U { memarg: MemArg { align: 0, max_align: 0, offset: 0, memory: 0 } }
+  I32Store8 { memarg: MemArg { align: 0, max_align: 0, offset: 0, memory: 0 } }
+  LocalGet { local_index: 0 }
+  I32Const { value: 1 }
+  I32Add
+  LocalSet { local_index: 0 }
+  LocalGet { local_index: 1 }
+  I32Const { value: 1 }
+  I32Add
+  LocalSet { local_index: 1 }
+  Br { relative_depth: 0 }
+  End
+  End
+  Else
+  LocalGet { local_index: 0 }
+  LocalGet { local_index: 1 }
+  LocalGet { local_index: 2 }
+  MemoryCopy { dst_mem: 0, src_mem: 0 }
+  End
+  End
+code locals=[2xI32]
+  LocalGet { local_index: 0 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 8, memory: 0 } }
+  I32Const { value: 15 }
+  I32Add
+  I32Const { value: -4 }
+  I32And
+  LocalSet { local_index: 1 }
+  LocalGet { local_index: 1 }
+  I32Const { value: 16 }
+  I32LtU
+  If { blockty: Empty }
+  Return
+  End
+  I32Const { value: 28 }
+  LocalGet { local_index: 1 }
+  I32Const { value: 1 }
+  I32Sub
+  I32Clz
+  I32Sub
+  LocalSet { local_index: 2 }
+  LocalGet { local_index: 2 }
+  I32Const { value: 16 }
+  I32GeU
+  If { blockty: Empty }
+  Return
+  End
+  LocalGet { local_index: 2 }
+  I32Const { value: 2 }
+  I32Shl
+  I32Const { value: 48 }
+  I32Add
+  LocalSet { local_index: 2 }
+  LocalGet { local_index: 0 }
+  LocalGet { local_index: 2 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 0, memory: 0 } }
+  I32Store { memarg: MemArg { align: 2, max_align: 2, offset: 12, memory: 0 } }
+  LocalGet { local_index: 2 }
+  LocalGet { local_index: 0 }
+  I32Store { memarg: MemArg { align: 2, max_align: 2, offset: 0, memory: 0 } }
+  End
+code locals=[]
+  LocalGet { local_index: 0 }
+  GlobalGet { global_index: 3 }
+  I32LtU
+  If { blockty: Empty }
+  Return
+  End
+  LocalGet { local_index: 0 }
+  LocalGet { local_index: 0 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 0, memory: 0 } }
+  I32Const { value: 1 }
+  I32Add
+  I32Store { memarg: MemArg { align: 2, max_align: 2, offset: 0, memory: 0 } }
+  End
+code locals=[1xI32]
+  LocalGet { local_index: 0 }
+  GlobalGet { global_index: 3 }
+  I32LtU
+  If { blockty: Empty }
+  Return
+  End
+  LocalGet { local_index: 0 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 0, memory: 0 } }
+  I32Const { value: 1 }
+  I32Sub
+  LocalSet { local_index: 1 }
+  LocalGet { local_index: 0 }
+  LocalGet { local_index: 1 }
+  I32Store { memarg: MemArg { align: 2, max_align: 2, offset: 0, memory: 0 } }
+  LocalGet { local_index: 1 }
+  I32Eqz
+  If { blockty: Empty }
+  LocalGet { local_index: 0 }
+  Call { function_index: 33 }
+  End
+  End
+code locals=[1xI32]
+  LocalGet { local_index: 0 }
+  GlobalGet { global_index: 3 }
+  I32LtU
+  If { blockty: Empty }
+  LocalGet { local_index: 0 }
+  Return
+  End
+  LocalGet { local_index: 0 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 0, memory: 0 } }
+  I32Const { value: 1 }
+  I32LeU
+  If { blockty: Empty }
+  LocalGet { local_index: 0 }
+  Return
+  End
+  LocalGet { local_index: 0 }
+  Call { function_index: 20 }
+  LocalSet { local_index: 1 }
+  LocalGet { local_index: 0 }
+  LocalGet { local_index: 0 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 0, memory: 0 } }
+  I32Const { value: 1 }
+  I32Sub
+  I32Store { memarg: MemArg { align: 2, max_align: 2, offset: 0, memory: 0 } }
+  LocalGet { local_index: 1 }
+  End
+code locals=[6xI32]
+  LocalGet { local_index: 0 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 4, memory: 0 } }
+  LocalSet { local_index: 2 }
+  LocalGet { local_index: 1 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 4, memory: 0 } }
+  LocalSet { local_index: 3 }
+  LocalGet { local_index: 0 }
+  GlobalGet { global_index: 3 }
+  I32GeU
+  LocalGet { local_index: 0 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 0, memory: 0 } }
+  I32Const { value: 1 }
+  I32Eq
+  I32And
+  LocalGet { local_index: 2 }
+  LocalGet { local_index: 3 }
+  I32Add
+  LocalGet { local_index: 0 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 8, memory: 0 } }
+  I32LeU
+  I32And
+  If { blockty: Empty }
+  LocalGet { local_index: 0 }
+  I32Const { value: 12 }
+  I32Add
+  LocalGet { local_index: 2 }
+  I32Add
+  LocalSet { local_index: 5 }
+  LocalGet { local_index: 1 }
+  I32Const { value: 12 }
+  I32Add
+  LocalSet { local_index: 6 }
+  LocalGet { local_index: 3 }
+  I32Const { value: 16 }
+  I32LtU
+  If { blockty: Empty }
+  LocalGet { local_index: 6 }
+  LocalGet { local_index: 3 }
+  I32Add
+  LocalSet { local_index: 7 }
+  Block { blockty: Empty }
+  Loop { blockty: Empty }
+  LocalGet { local_index: 6 }
+  LocalGet { local_index: 7 }
+  I32GeU
+  BrIf { relative_depth: 1 }
+  LocalGet { local_index: 5 }
+  LocalGet { local_index: 6 }
+  I32Load8U { memarg: MemArg { align: 0, max_align: 0, offset: 0, memory: 0 } }
+  I32Store8 { memarg: MemArg { align: 0, max_align: 0, offset: 0, memory: 0 } }
+  LocalGet { local_index: 5 }
+  I32Const { value: 1 }
+  I32Add
+  LocalSet { local_index: 5 }
+  LocalGet { local_index: 6 }
+  I32Const { value: 1 }
+  I32Add
+  LocalSet { local_index: 6 }
+  Br { relative_depth: 0 }
+  End
+  End
+  Else
+  LocalGet { local_index: 5 }
+  LocalGet { local_index: 6 }
+  LocalGet { local_index: 3 }
+  MemoryCopy { dst_mem: 0, src_mem: 0 }
+  End
+  LocalGet { local_index: 0 }
+  LocalGet { local_index: 2 }
+  LocalGet { local_index: 3 }
+  I32Add
+  I32Store { memarg: MemArg { align: 2, max_align: 2, offset: 4, memory: 0 } }
+  LocalGet { local_index: 0 }
+  Return
+  End
+  LocalGet { local_index: 0 }
+  LocalGet { local_index: 1 }
+  Call { function_index: 13 }
+  LocalSet { local_index: 4 }
+  LocalGet { local_index: 0 }
+  Call { function_index: 35 }
+  LocalGet { local_index: 4 }
+  End
+code locals=[3xI32]
+  LocalGet { local_index: 0 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 4, memory: 0 } }
+  LocalSet { local_index: 2 }
+  LocalGet { local_index: 0 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 8, memory: 0 } }
+  LocalSet { local_index: 3 }
+  LocalGet { local_index: 3 }
+  LocalGet { local_index: 2 }
+  I32Sub
+  I32Const { value: 1 }
+  I32GeU
+  If { blockty: Empty }
+  LocalGet { local_index: 0 }
+  LocalGet { local_index: 2 }
+  I32Add
+  LocalGet { local_index: 1 }
+  I64Store8 { memarg: MemArg { align: 0, max_align: 0, offset: 12, memory: 0 } }
+  LocalGet { local_index: 0 }
+  LocalGet { local_index: 2 }
+  I32Const { value: 1 }
+  I32Add
+  I32Store { memarg: MemArg { align: 2, max_align: 2, offset: 4, memory: 0 } }
+  LocalGet { local_index: 0 }
+  Return
+  End
+  LocalGet { local_index: 3 }
+  I32Const { value: 1 }
+  I32Shl
+  LocalSet { local_index: 3 }
+  LocalGet { local_index: 3 }
+  I32Const { value: 16 }
+  I32LtU
+  If { blockty: Empty }
+  I32Const { value: 16 }
+  LocalSet { local_index: 3 }
+  End
+  LocalGet { local_index: 3 }
+  Call { function_index: 11 }
+  LocalSet { local_index: 4 }
+  LocalGet { local_index: 4 }
+  I32Const { value: 12 }
+  I32Add
+  LocalGet { local_index: 0 }
+  I32Const { value: 12 }
+  I32Add
+  LocalGet { local_index: 2 }
+  Call { function_index: 32 }
+  LocalGet { local_index: 4 }
+  LocalGet { local_index: 2 }
+  I32Add
+  LocalGet { local_index: 1 }
+  I64Store8 { memarg: MemArg { align: 0, max_align: 0, offset: 12, memory: 0 } }
+  LocalGet { local_index: 4 }
+  LocalGet { local_index: 2 }
+  I32Const { value: 1 }
+  I32Add
+  I32Store { memarg: MemArg { align: 2, max_align: 2, offset: 4, memory: 0 } }
+  LocalGet { local_index: 0 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 0, memory: 0 } }
+  I32Const { value: 1 }
+  I32Eq
+  If { blockty: Empty }
+  LocalGet { local_index: 0 }
+  Call { function_index: 33 }
+  End
+  LocalGet { local_index: 4 }
+  End
+code locals=[3xI32,1xI64,1xF64,24xI32,16xI64,8xF64]
+  LocalGet { local_index: 0 }
+  I64Const { value: 1 }
+  I64Add
+  End
+code locals=[3xI32,1xI64,1xF64,24xI32,16xI64,8xF64]
+  LocalGet { local_index: 0 }
+  I64Const { value: 2 }
+  I64Add
+  End
+code locals=[1xI64,1xI32,1xI64,1xI64,3xI32,1xI64,1xF64,24xI32,16xI64,8xF64]
+  I64Const { value: 1 }
+  LocalSet { local_index: 0 }
+  LocalGet { local_index: 0 }
+  I64Const { value: 1 }
+  I64Eq
+  If { blockty: Type(I32) }
+  I32Const { value: 145 }
+  Else
+  I32Const { value: 161 }
+  End
+  LocalSet { local_index: 1 }
+  LocalGet { local_index: 1 }
+  LocalSet { local_index: 9 }
+  LocalGet { local_index: 9 }
+  I64Const { value: 41 }
+  LocalGet { local_index: 9 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 12, memory: 0 } }
+  CallIndirect { type_index: 20, table_index: 0 }
+  Call { function_index: 12 }
+  Call { function_index: 5 }
+  End
+code locals=[3xI32,1xI64,1xF64,24xI32,16xI64,8xF64]
+  LocalGet { local_index: 1 }
+  ReturnCall { function_index: 39 }
+  End
+code locals=[3xI32,1xI64,1xF64,24xI32,16xI64,8xF64]
+  LocalGet { local_index: 1 }
+  ReturnCall { function_index: 40 }
+  End
+data len=209 head=000000000000000000000000000000000000000000000000

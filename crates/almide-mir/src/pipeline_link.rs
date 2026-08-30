@@ -29,6 +29,7 @@ fn lower_and_link_one_runtime_fn(
     functions: &mut Vec<crate::MirFunction>,
 ) {
     let lowered = crate::lower::lower_function(f, &layouts.globals);
+
     if let Err(e) = &lowered {
         if verbose
             && (entries.iter().any(|(impl_fn, _)| f.name.as_str() == *impl_fn)
@@ -98,7 +99,7 @@ fn synthesize_mutable_global_init(
             blank_lines_before: 0,
             def_id: None,
             module_origin: None,
-            mutated_params: vec![],
+            mutated_params: vec![], // fresh-fn: synthesized zero-param runner
         };
         match crate::lower::lower_function_all_with_globals(
             &init_fn,

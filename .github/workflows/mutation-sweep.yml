@@ -1,0 +1,53 @@
+name: Mutation sweep (full net)
+
+# #1619: the FULL 40-mutant sweep of ci/mutations/ — the standing evidence
+# that the release-shape net keeps its teeth. It used to run inside ci.yml
+# on every push and PR, where (a) it cost ~45 min per PR for mutants the PR
+# never touched, and (b) ci.yml's `cancel-in-progress: true` concurrency
+# group let the NEXT develop merge cancel the sweep mid-run, so the develop
+# evidence routinely never completed. Here it runs where it cannot be
+# canceled and off the PR critical path:
+#   - develop pushes, in a queued (NOT cancel-in-progress) group — a burst
+#     of merges collapses to "one running + one queued", and the running
+#     sweep always finishes;
+#   - nightly, beside conformance-mutations;
+#   - manual dispatch.
+# PRs run the INCREMENTAL scope inside ci.yml (only mutants intersecting
+# the change set) — see scripts/check-mutation-gate.sh for the scope rule.
+#
+# 4-way positional shard (mutant index mod 4): every mutant costs one
+# release rebuild + one net run, so modulo is the balanced split. ~10 shard
+# mutants x ~45 s warm ≈ 8-12 min wall per shard.
+
+on:
+  push:
+    branches: [develop]
+  schedule:
+    # 05:15 UTC — clear of the 03:00 fuzz night and 04:30 conformance run.
+    - cron: "15 5 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: mutation-sweep-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  sweep:
+    name: Mutation sweep (shard ${{ matrix.shard }}/4)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+      - name: this shard's mutants must all be caught
+        run: |
+          ALMIDE_MUTATION_SHARDS=4 \
+          ALMIDE_MUTATION_SHARD=${{ matrix.shard }} \
+            bash scripts/check-mutation-gate.sh

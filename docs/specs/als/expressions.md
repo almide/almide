@@ -300,7 +300,13 @@ ALS-S1)。
 
 **受理形**: `match subject { pattern [if guard] => expr, … }` — パターンは
 リテラル(文字列・整数)、ワイルドカード `_`、束縛子 `x`、ガード付き束縛子
-`x if cond`、Option の `some(x)` / `none`、Result の `ok(x)` / `err(e)`。
+`x if cond`、Option の `some(x)` / `none`、Result の `ok(x)` / `err(e)`、
+そして **or-パターン** `a | b | c`(#1461)— いずれかの選択肢が一致すれば
+アームが取られる。選択肢は**束縛子を持てない**(E080 — 本体はどの選択肢が
+一致したかに依存できないため; ペイロードが要るときはアームを分けるか `_`)。
+網羅性はアームが選択肢の**和集合**を被覆するとして判定される。lowering は
+アームを選択肢ごとの IR アームに脱糖するので、両バックエンドと interp は
+単一パターンのアームしか見ない(クロスターゲット一致は構成的)。
 アーム本体は式(補間を含む)。
 
 **選択の裁定**: アームは**先頭から順に最初に一致したもの**が取られる
@@ -496,7 +502,21 @@ E004。
 (fixture: `Rgb(r, _, b) => r + b` → 4、`Green` → 20、両ターゲット同一)。
 match の網羅性は ALS-E18(E010)。
 
-テスト: `spec/wasm_cross/call_lambda_ctor.almd`(契約 C-259)。
+**コンストラクタは関数値**(#1111、2026-08-05 ○×批准): ペイロード付き
+ケース名の裸参照は関数値 — 1 引数ケースは `(A) -> T`、多引数ケースは
+`(A, B, …) -> T`(部分適用は無い; カリー化が要る場面はラムダで書く)。
+無引数ケースの裸参照は値そのもの(関数値ではない)。組み込みコンストラクタ
+`some` / `ok` / `err` も同格: 裸の `some` は `(x) => some(x)` と同値の
+関数値(パーサが eta 展開を合成する — 全レッグがラムダ経路で処理するため
+両ターゲット同一は構成的)。`[1, 2] |> list.map(some)` ==
+`[some(1), some(2)]`、`list.map(xs, Circle)` == `list.map(xs, (x) =>
+Circle(x))`。
+
+テスト: `spec/wasm_cross/call_lambda_ctor.almd`(契約 C-259)、
+`spec/wasm_cross/ctor_fn_value.almd`(契約 C-322)、
+`spec/lang/ctor_fn_value_test.almd`。or-パターン:
+`spec/wasm_cross/or_pattern.almd`(契約 C-323)、
+`spec/lang/or_pattern_test.almd`、`tests/diagnostics/e080-or-pattern-binder/`。
 
 ## ALS-D1 宣言(`Decl::Module` / `Decl::Import` / `Decl::Type` / `Decl::Fn` / `Decl::TopLet` / `Decl::Protocol` / `Decl::Test` / `Decl::TestWhereDef`)
 

@@ -1,0 +1,46 @@
+// @contract: C-069
+// #1571: a statement-position `match` over an effect-fn call inside a `while`
+// body must RUN its arms. The never-err rewrite turns the match into a block
+// whose ok-arm body lands as a nested BLOCK TAIL, and lower_block_stmt_tail
+// had no Block arm — the tail fell to the caps-elision default and the arms
+// executed ZERO times (native: the arms run; wasm: acc stayed 0, exit 0 — the
+// silent accept-and-wrong class). The dispatcher now executes Block tails and
+// WALLS any other call-bearing tail it cannot execute (no third state, #810).
+import io
+
+effect fn step(k: Int) -> Int = k * 2
+
+effect fn fallible(k: Int) -> Int = {
+  if k > 9 then err("too big") else ok(k * 3)
+}
+
+effect fn main() -> Unit = {
+  var i = 0
+  var acc = 0
+  while i < 3 {
+    match step(i) {
+      ok(v) => {
+        io.print("ok " + int.to_string(v))
+        acc = acc + v
+      },
+      err(e) => { io.print("err " + e) },
+    }
+    i = i + 1
+  }
+  io.print("acc=" + int.to_string(acc))
+  // the can-err twin keeps voting through the ordinary carrier path
+  var j = 8
+  var acc2 = 0
+  while j < 11 {
+    match fallible(j) {
+      ok(v) => {
+        acc2 = acc2 + v
+      },
+      err(e) => {
+        acc2 = acc2 - 1
+      },
+    }
+    j = j + 1
+  }
+  io.print(" acc2=" + int.to_string(acc2))
+}

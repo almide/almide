@@ -151,7 +151,10 @@ fn return_only_generic_runtime_fns() -> BTreeSet<String> {
                         None => (e.as_str(), BTreeSet::new()),
                     };
                     let n = name_part.trim().trim_start_matches("const ").trim();
-                    (!n.is_empty()).then(|| (n.to_string(), bound))
+                    // A lifetime parameter (`<'a>`) is not a type the call
+                    // site could pin — a turbofish cannot name it and rustc
+                    // never E0282s on one — so it is outside the family.
+                    (!n.is_empty() && !n.starts_with('\'')).then(|| (n.to_string(), bound))
                 })
                 .collect();
             let mut pinned = ident_tokens(params);

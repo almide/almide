@@ -1,0 +1,5 @@
+// ALS-B9: the computation itself, unscheduled.
+@bounded
+fn pick() -> Int = 40 + 2
+
+fn main() -> Unit = println("${pick()}")

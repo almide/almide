@@ -316,9 +316,19 @@ done <<< "$(grep -rhoE '(crates|runtime|stdlib|spec|tests|scripts|proofs)/[A-Za-
 # C-302 -> C-319 to match the canonical id. The reserved range is NOT mintable
 # here — it is a documented hole that DIES at the Stage B cutover (als
 # BOUNDARY.md: mount als, delete the copies). New ids in the copy must land in
-# als FIRST (two-PR order, als CONTRIBUTING; next free per #1544: C-320).
-RESERVED_CANONICAL_LO=302
-RESERVED_CANONICAL_HI=318
+# als FIRST (two-PR order, als CONTRIBUTING; next free per #1544: C-321 —
+# C-320 landed als-first 2026-08-25, ported here for the #1572 cut fix).
+# 2026-08-26: C-302..C-309 (ALS-T19..T24 numeric determinism, ALS-B1..B2
+# bounded head) ported from the canonical ledger together with their
+# fixtures and spec chapters — the hole narrowed to C-310..C-318 (ALS-B3..B11,
+# whose E070-E079 checker evidence was not implemented here yet).
+# 2026-08-27: the hole CLOSED — the @bounded checker (E070-E078) landed with
+# 0.59.2 and its 27 e07x fixture families, so C-310..C-318 ported verbatim
+# from the canonical ledger. The range is EMPTY (LO>HI skips the branch);
+# the machinery stays for any future canonical reservation. Contiguity now
+# binds across the whole ledger again.
+RESERVED_CANONICAL_LO=1
+RESERVED_CANONICAL_HI=0
 sorted_ids="$(printf '%s\n' "$ALL_IDS" | sort -u)"
 n_contracts="$(printf '%s\n' "$sorted_ids" | grep -c . || true)"
 maxnum="$(printf '%s\n' "$sorted_ids" | sed -E 's/^C-//' | sort -n | tail -1)"

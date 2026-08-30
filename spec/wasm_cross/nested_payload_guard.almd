@@ -1,0 +1,19 @@
+// @contract: C-070
+// Graduated from proofs/wall-corpus/nested_payload_guard.almd at the commissioning
+// switchover: the structural emitter lowers the shape the incumbent
+// refused (match arm guard cannot be faithfully lowered), byte-verified on both targets.
+// koka parc4's shape: a GUARD on an arm whose pattern destructures a NESTED
+// payload (`OCons(some(x), _) if x == y`). Flat-arm guards lower and vote
+// (koka_parc3_guard_chain fixture); adding the nested payload puts the arm
+// outside the linearizable subset — running every arm would lose the
+// guard's conditional selection, so the renderer refuses.
+type OList = | ONil | OCons(Int?, OList)
+
+fn pick_opt(xs: OList, y: Int) -> Int = match xs {
+  OCons(some(x), _) if x == y => x,
+  OCons(none, _) => 2,
+  OCons(_, _) => y,
+  ONil => y,
+}
+
+fn main() -> Unit = println(int.to_string(pick_opt(OCons(some(6), ONil), 6)))

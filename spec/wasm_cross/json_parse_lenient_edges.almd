@@ -1,0 +1,58 @@
+// @contract: C-087
+// The lenient edges of json.parse, pinned against the native oracle (ALS-T3).
+// The native parser moved from a Vec<char> to byte offsets (#1678); nothing
+// here may move with it. Two things are only observable through these shapes:
+//
+//   - An error names the CHAR index of the offending position, not the byte
+//     offset. A 3-byte 日 and a 4-byte emoji before the bad token each count
+//     once. (The self-hosted leg counts at error time; the native leg now does
+//     the same — both from a byte position.)
+//   - Whitespace is Unicode White_Space (`char::is_whitespace`): ideographic
+//     space, NBSP, em space, NEL and the ASCII VT/FF are all skipped between
+//     tokens; a non-space multi-byte char in value position is an error.
+//
+// Everything else is the oracle's documented leniency: trailing content after
+// the top-level value is ignored, a missing `,` ends the container early, an
+// object key is hunted through the string reader whatever char starts it, and
+// the four Rust number-parse messages pass through verbatim.
+import json
+
+fn s(text: String) -> String = match json.parse(text) {
+  ok(v) => json.stringify(v),
+  err(e) => "ERR " + e,
+}
+
+fn main() -> Unit = {
+  // Error position is a char index: 8 here, where the byte offset is 14.
+  println(s('["日本語", x]'))
+  // 5 here, where the byte offset is 8 (the emoji is 4 bytes).
+  println(s('["😀",é]'))
+  // The bad char itself may be multi-byte.
+  println(s('[¿]'))
+  println(s('[1,]'))
+  // Unicode whitespace between every token.
+  println(s('{\u{3000}"k"\u{00A0}:\u{2028}1\u{85}}'))
+  println(s('[\u{2003}1\u{3000},\u{00A0}2\u{0B}]'))
+  println(s('\u{0C}\u{3000}true'))
+  // Leniency: trailing content is ignored; a missing separator closes the container.
+  println(s('true false'))
+  println(s('[1 2]'))
+  println(s('{"a":1 "b":2}'))
+  // A key is hunted through the string reader: the unquoted key swallows the
+  // rest of the input, and the value is then missing.
+  println(s('{x: 1}'))
+  println(s('{日: 1}'))
+  println(s('{"a":1,}'))
+  // Bare literals that are not quite literals.
+  println(s('tru'))
+  println(s('nul'))
+  println(s('fals'))
+  // Number-parse messages pass through from the host parser.
+  println(s('-'))
+  println(s('--1'))
+  println(s('1e'))
+  // Empty and whitespace-only input.
+  println(s(''))
+  println(s('   '))
+  println(s('\u{3000}'))
+}

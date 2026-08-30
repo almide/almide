@@ -10,23 +10,38 @@
 # two ~180s targets the file called 5s. Guessing which targets matter is the
 # thing that failed; this is the whole profile.
 #
-# Captured 2026-08-08 from one `cargo test --workspace` on an M-series laptop
 # (Running/finished-in pairs). CI runners are slower, but packing needs only the
 # RATIOS. Targets under 5s are omitted — they are within the default's noise.
 # Refresh by rerunning that command when the shard job's balance report drifts.
-wasm_runtime_test                276
-native_v1_differential_test      138
-examples_parity_test             35
-crossmod_matrix_test             29
-semantic_laws_test               27
-charge_probe_test                26
-almide_mir                       25
-wasm_dispatch_coverage_test      24
-bridge_test                      19
-almide_egg_lab                   19
-fmt_test                         17
-fuzz_test                        15
-io_read_all_test                 13
-eval_test                        9
-mcp_test                         9
-diagnostic_harness_test          7
+# Refreshed 2026-08-27 by scripts/refresh-ci-test-weights.sh from a CI run's own
+# shard logs (Running/finished-in pairs, summed per target across shards).
+wasm_runtime_test                516
+run_parity                       284
+backend_parity                   223
+surface_matrix                   213
+diagnostic_harness_test          193
+fuzz_differential                142
+wasm_dispatch_coverage_test      100
+check_parity                     97
+libm_trig_cross_target_test      55
+kernel_conformance_test          51
+charge_probe_test                45
+bridge_test                      45
+almide_mir                       37
+fmt_test                         33
+fuzz_test                        32
+libm_atan_tanh_cross_target_test 28
+http_timeout_native_test         27
+almide_egg_lab                   24
+native_v1_differential_test      21
+rc_placement_snapshot_test       15
+examples_parity_test             12
+crossmod_matrix_test             12
+regex_fuzz_test                  10
+stdlib_examples_test             9
+semantic_laws_test               8
+gauntlet                         7
+bytes_unwrap_callarg_test        6
+fmt_corpus_test                  6
+heap_cap_test                    6
+bytes_coalesce_call_arg_test     6

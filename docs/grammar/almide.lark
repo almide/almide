@@ -96,7 +96,7 @@ _o_deriving: COLON TYPENAME (COMMA TYPENAME)*
 
 // ── protocol ─────────────────────────────────────────────────────
 protocol_decl: PROTOCOL TYPENAME _o_generics "{" _nl (protocol_method _nl)* "}"
-protocol_method: _o_effect FN fn_name _o_generics "(" param_list ")" ARROW type_expr
+protocol_method: _o_effect FN fn_name _o_generics "(" param_list ")" ARROW type_expr _o_bang
 
 // ── top-level let / var ──────────────────────────────────────────
 top_let: _o_top_vis _let_or_var name_tok _o_ty_ann EQ _nl expr
@@ -328,6 +328,12 @@ ctor_expr: SOME "(" expr ")"
          | ERR "(" expr ")"
          | ERR_UC "(" expr ")"
          | TODO "(" plain_string ")"
+         // #1111: a bare builtin ctor is a FUNCTION VALUE (the parser
+         // synthesizes its eta-expansion) — accepted wherever an
+         // expression atom is.
+         | SOME | SOME_UC
+         | OK | OK_UC
+         | ERR | ERR_UC
 
 // ── control flow ─────────────────────────────────────────────────
 
@@ -341,7 +347,7 @@ match_expr: MATCH _nl expr _nl "{" match_body "}"
 match_body: _nl (match_arm _seps)* _o_match_arm
 _o_match_arm: match_arm
             |
-match_arm: pattern _o_guard FATARROW _nl expr
+match_arm: pattern (PIPE _nl pattern)* _o_guard FATARROW _nl expr
 _o_guard: IF expr
         |
 

@@ -1,0 +1,12 @@
+import self.app
+import io
+
+type Cell: HasValue = { n: Int }
+
+fn Cell.value(self) -> Int = self.n
+
+fn via_generic[T: HasValue](x: T) -> Int = app.doubled(x)
+
+effect fn main() -> Unit = {
+  io.print(int.to_string(via_generic(Cell { n: 21 })))
+}

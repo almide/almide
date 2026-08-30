@@ -1,0 +1,82 @@
+// @contract: C-158
+// #1581: a `!` propagation written INLINE in a record-literal field lowers
+// exactly like the hoisted `let` spelling it is equivalent to — the
+// fallible-DTO shape (`Out { a: label(r)! }`, a use case assembling its
+// result from fallible calls). The desugar hoists every non-trivial field
+// up to the last `!` field into `__rec_fld` binds (evaluation order kept;
+// the `!`'s early return fires before the record materializes, exactly as
+// inline), so the literal's heap field materializes from the propagated
+// value through the ordinary bind machinery. Cells: single heap field,
+// two fields with the `!` first, the effect-fn twin, the scalar-field
+// control, and the guarded spelling (the place_order wall class — its
+// wall read `heap-result if` where the plain tail read `ResultOk`; one
+// brick, two spellings), ok and err paths.
+type Row: Eq, Repr = { id: String }
+
+type Out: Eq, Repr = { a: String }
+
+type Out2: Eq, Repr = { a: String, b: String }
+
+type OutI: Eq, Repr = { n: Int }
+
+fn label(r: Row) -> String! = r.id
+
+fn num(r: Row) -> Int! = string.len(r.id)
+
+fn f1(r: Row) -> Out! = Out { a: label(r)! }
+
+fn f2(r: Row) -> Out2! = Out2 { a: label(r)!, b: "k" }
+
+effect fn f3(r: Row) -> Out! = Out { a: label(r)! }
+
+fn f4(r: Row) -> OutI! = OutI { n: num(r)! }
+
+fn f5(r: Row) -> Out! = {
+  guard string.len(r.id) > 0 else err("empty")
+  Out { a: label(r)! }
+}
+
+fn f5x(r: Row) -> Int! = {
+  let o = f5(r)!
+  string.len(o.a)
+}
+
+fn f6(r: Row) -> (Row, Out)! = (r, Out { a: label(r)! })
+
+fn f6_len(r: Row) -> Int! = {
+  let p = f6(r)!
+  string.len(p.0.id) + string.len(p.1.a)
+}
+
+effect fn main() -> Unit = {
+  let r = Row { id: "x" }
+  let o1 = f1(r)!
+  println(o1.a)
+  // x
+  let o2 = f2(r)!
+  println(o2.a)
+  // x
+  println(o2.b)
+  // k
+  let o3 = f3(r)!
+  println(o3.a)
+  // x
+  let o4 = f4(r)!
+  println("${o4.n}")
+  // 1
+  let ok5 = f5x(r) ?? -1
+  println("${ok5}")
+  // 1
+  let er5 = f5x(Row { id: "" }) ?? -1
+  // -1 — the guard's err path takes the fallback
+  println("${er5}")
+  let p6 = f6(r)!
+  println(p6.0.id)
+  // x
+  println(p6.1.a)
+  // x
+  let n6 = f6_len(r) ?? -1
+  // 2 — the literal in a TUPLE SLOT of the carrier (the #1581 reopen
+  // cell: the functional-port (state, dto) pair)
+  println("${n6}")
+}

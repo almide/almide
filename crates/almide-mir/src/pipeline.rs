@@ -146,11 +146,28 @@ fn dependency_package_of(name: &str, is_self: bool) -> Option<&str> {
 }
 
 fn resolve_user_module_calls(ir: &mut almide_ir::IrProgram) {
+    resolve_user_module_calls_impl(ir, false)
+}
+
+/// The post-link ROUND 2 (#1557 leg 2): mono (inside link_ir) mints bare
+/// Named calls to sibling convention impls that round 1 could not see —
+/// mangle them so the link set carries them. Scoped to STRICTLY-USER modules:
+/// after link_ir the bundled stdlib self-hosts sit in `ir.modules` too, and
+/// an unrestricted second pass rewrote `list.*`-style Module calls into
+/// mangled Named ones, bypassing the name-table routing (`tracked_calls`) —
+/// the rc-placement snapshot caught the changed link set
+/// (`list.drop_hshare` newly pulled in on a single-file fixture).
+fn resolve_user_module_calls_round2(ir: &mut almide_ir::IrProgram) {
+    resolve_user_module_calls_impl(ir, true)
+}
+
+fn resolve_user_module_calls_impl(ir: &mut almide_ir::IrProgram, user_only: bool) {
     use almide_ir::{walk_expr_mut, CallTarget, IrExprKind, IrMutVisitor};
     use almide_lang::intern::sym;
     let user_mods: std::collections::HashMap<String, std::collections::HashSet<String>> = ir
         .modules
         .iter()
+        .filter(|m| !user_only || !almide_lang::stdlib_info::is_any_stdlib(m.name.as_str()))
         .map(|m| (m.name.as_str().to_string(), linkable_module_fns(m)))
         .filter(|(_, fns)| !fns.is_empty())
         .collect();
@@ -259,10 +276,17 @@ fn unresolved_import_wall(
         };
         let Some(root) = path.first() else { continue };
         let wanted = if root.as_str() == "self" {
-            match path.get(1) {
-                Some(sibling) => sibling.as_str(),
-                None => continue,
+            if path.len() < 2 {
+                // `import self as pkg` — the file's own package, no module.
+                continue;
             }
+            // The BINDING segment — the LAST path element. A flat sibling
+            // (`import self.money`) and a nested one
+            // (`import self.application.place_order`) both register in
+            // `modules` under that final name (#1557 leg 3: the first-segment
+            // match walled every nested package path while the resolver had
+            // already delivered the module as `place_order`).
+            path.last().map(|s| s.as_str()).unwrap_or_default()
         } else {
             // Hardcoded AND bundled stdlib both type from stdlib info /
             // bundled sigs — `import prim` (bundled-only) must not wall.
@@ -287,11 +311,14 @@ fn unresolved_import_wall(
             } else {
                 "dependency module"
             };
+            let have: Vec<&str> = modules.iter().map(|(n, _, _)| n.as_str()).collect();
             return Some(LowerError::at(
                 *span,
                 format!(
                     "import {spelled} — {kind} not resolved by this render's front-end \
-                     (feature wall, not a type error; cf. #943 for the linking-stage wall)"
+                     (feature wall, not a type error; cf. #943 for the linking-stage wall; \
+                     resolved modules: [{}])",
+                    have.join(", ")
                 ),
             ));
         }
@@ -444,6 +471,10 @@ fn source_to_ir_with(
     resolve_user_module_calls(&mut ir);
 
     almide_driver::link_ir(&mut ir);
+    // #1557 leg 2, round 2: mono (inside link_ir) mints bare Named calls to
+    // sibling convention impls the round-1 pass could not see; mangle them so
+    // the link set carries them (user modules only — see the impl doc).
+    resolve_user_module_calls_round2(&mut ir);
     // Transparent-newtype erasure LAST (post-link, pre-lowering): `mod type X = String`
     // ctor calls/patterns/Ty tags become the inner type (see newtype_erase.rs).
     crate::lower::erase_transparent_newtypes(&mut ir);
@@ -686,7 +717,7 @@ fn synthesize_library_main(ir: &mut almide_ir::IrProgram) {
         blank_lines_before: 0,
         def_id: None,
         module_origin: None,
-        mutated_params: vec![],
+        mutated_params: vec![], // fresh-fn: synthesized empty library main, zero params
     });
 }
 

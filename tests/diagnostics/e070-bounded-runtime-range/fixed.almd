@@ -1,0 +1,9 @@
+// ALS-B3: literal bounds give the loop its static trip count.
+@bounded
+fn sum_to_4() -> Int = {
+  var acc = 0
+  for i in 0..<4 { acc = acc + i }
+  acc
+}
+
+fn main() -> Unit = println("${sum_to_4()}")

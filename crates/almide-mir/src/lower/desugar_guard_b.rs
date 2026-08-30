@@ -500,6 +500,121 @@ mod hoist_impl {
         }
     }
 
+    /// #1581: a `!` PROPAGATION inline in a record-literal FIELD
+    /// (`Out { a: label(r)! }` — the fallible-DTO shape) walled whenever the
+    /// field is heap-typed and the literal is a Result carrier's Ok payload;
+    /// the hoisted `let` spelling always lowered. Mechanize that spelling:
+    /// hoist every field up to and including the LAST `!` field that is not a
+    /// trivially pure read (Var / literal) to its own `__rec_fld` bind —
+    /// evaluation order is preserved among the hoisted fields, later fields
+    /// stay inline and still evaluate after them, and the `!`'s early return
+    /// fires before the record materializes exactly as it did inline.
+    /// Descends through the ADR-0002 lifted tail's ctor (`ok(Out { … })`) to
+    /// the literal. The Unwrap/Try node carries the PAYLOAD type (the call
+    /// under it carries the carrier), so the hoisted bind is the proven C-222
+    /// bind-position unwrap verbatim.
+    fn trivially_pure(e: &IrExpr) -> bool {
+        matches!(
+            e.kind,
+            IrExprKind::Var { .. }
+                | IrExprKind::LitInt { .. }
+                | IrExprKind::LitFloat { .. }
+                | IrExprKind::LitStr { .. }
+                | IrExprKind::LitBool { .. }
+                | IrExprKind::Unit
+        )
+    }
+
+    /// The Record-arm rule shared by the direct and tuple-slot positions:
+    /// hoist every non-trivially-pure field up to `upto` (inclusive).
+    fn hoist_record_fields_upto(
+        fields: &mut [(almide_lang::intern::Sym, IrExpr)],
+        upto: usize,
+        vt: &mut VarTable,
+        hoists: &mut Vec<IrStmt>,
+    ) {
+        for (idx, (_, fe)) in fields.iter_mut().enumerate() {
+            if idx > upto {
+                break;
+            }
+            if !trivially_pure(fe) {
+                hoists.push(hoist_to_bind(fe, vt, "__rec_fld"));
+            }
+        }
+    }
+
+    fn record_last_bang(e: &IrExpr) -> Option<usize> {
+        let IrExprKind::Record { fields, .. } = &e.kind else { return None };
+        fields
+            .iter()
+            .rposition(|(_, fe)| matches!(fe.kind, IrExprKind::Unwrap { .. } | IrExprKind::Try { .. }))
+    }
+
+    fn hoist_bang_record_fields(
+        value: &mut IrExpr,
+        vt: &mut VarTable,
+        hoists: &mut Vec<IrStmt>,
+    ) {
+        let rec = match &mut value.kind {
+            IrExprKind::ResultOk { expr }
+            | IrExprKind::ResultErr { expr }
+            | IrExprKind::OptionSome { expr } => &mut **expr,
+            _ => value,
+        };
+        match &mut rec.kind {
+            IrExprKind::Record { fields, .. } => {
+                let Some(last_bang) = fields.iter().rposition(|(_, fe)| {
+                    matches!(fe.kind, IrExprKind::Unwrap { .. } | IrExprKind::Try { .. })
+                }) else {
+                    return;
+                };
+                hoist_record_fields_upto(fields, last_bang, vt, hoists);
+            }
+            // #1581 residual: the record literal sits in a TUPLE SLOT of the
+            // carrier's Ok payload (`fn f(r) -> (Row, Out)! = (r, Out { a:
+            // label(r)! })` — the functional-port `(state, dto)` pair). Hoist
+            // through the tuple layer: every non-trivially-pure slot (or, for
+            // a record slot, its non-trivially-pure fields) up to and
+            // including the LAST bang-bearing record slot, in evaluation
+            // order — earlier effectful slots hoist too, so nothing reorders
+            // across the `!`'s early return.
+            IrExprKind::Tuple { elements } => {
+                let Some(last_slot) =
+                    elements.iter().rposition(|e| record_last_bang(e).is_some())
+                else {
+                    return;
+                };
+                for (idx, slot) in elements.iter_mut().enumerate() {
+                    if idx > last_slot {
+                        break;
+                    }
+                    if let IrExprKind::Record { fields, .. } = &mut slot.kind {
+                        let upto = if idx == last_slot {
+                            match record_last_bang_fields(fields) {
+                                Some(b) => b,
+                                None => fields.len().saturating_sub(1),
+                            }
+                        } else {
+                            fields.len().saturating_sub(1)
+                        };
+                        hoist_record_fields_upto(fields, upto, vt, hoists);
+                    } else if !trivially_pure(slot) {
+                        hoists.push(hoist_to_bind(slot, vt, "__tup_slot"));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn record_last_bang_fields(
+        fields: &[(almide_lang::intern::Sym, IrExpr)],
+    ) -> Option<usize> {
+        fields
+            .iter()
+            .rposition(|(_, fe)| matches!(fe.kind, IrExprKind::Unwrap { .. } | IrExprKind::Try { .. }))
+    }
+
     fn rewrite_block(stmts: &mut Vec<IrStmt>, vt: &mut VarTable) {
         let mut i = 0;
         while i < stmts.len() {
@@ -514,6 +629,7 @@ mod hoist_impl {
                     // No behavior change — see docs/roadmap/active/code-health-codopsy.md.
                     hoist_record_literal_call_args(value, vt, &mut hoists);
                     hoist_scalar_call_record_fields(value, vt, &mut hoists);
+                    hoist_bang_record_fields(value, vt, &mut hoists);
                 }
                 IrStmtKind::Expr { expr } => rewrite_expr(expr, vt),
                 _ => {}
@@ -539,6 +655,13 @@ mod hoist_impl {
                 rewrite_block(stmts, vt);
                 if let Some(t) = expr.as_deref_mut() {
                     rewrite_expr(t, vt);
+                    // A TAIL-position record literal with a `!` field
+                    // (`fn f(r) = { …; Out { a: label(r)! } }` and the lifted
+                    // `ok(Out { … })` spelling — #1581): hoist the fields into
+                    // this block's own statements, right before the tail.
+                    let mut hoists: Vec<IrStmt> = Vec::new();
+                    hoist_bang_record_fields(t, vt, &mut hoists);
+                    stmts.extend(hoists);
                 }
             }
             IrExprKind::If { cond, then, else_ } => {
@@ -555,7 +678,25 @@ mod hoist_impl {
     }
 
     pub(crate) fn rewrite_expr_entry(e: &mut IrExpr, vt: &mut VarTable) {
-        rewrite_expr(e, vt)
+        rewrite_expr(e, vt);
+        // A NON-Block fn body (`fn f(r) = Out { a: label(r)! }` — the 5-line
+        // #1581 repro): there is no statement list to hoist into, so wrap the
+        // body in a Block carrying the hoisted binds ahead of the literal.
+        let mut hoists: Vec<IrStmt> = Vec::new();
+        hoist_bang_record_fields(e, vt, &mut hoists);
+        if !hoists.is_empty() {
+            let ty = e.ty.clone();
+            let tail = std::mem::replace(
+                e,
+                IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None },
+            );
+            *e = IrExpr {
+                kind: IrExprKind::Block { stmts: hoists, expr: Some(Box::new(tail)) },
+                ty,
+                span: None,
+                def_id: None,
+            };
+        }
     }
 }
 

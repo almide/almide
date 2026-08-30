@@ -29,6 +29,12 @@ thread_local! {
     /// block (read with Result polarity/offsets — r5's `hit=999` silent wrong value +
     /// rc_dec trap). A SPELLED `!` is different (unwrap-the-Option, die on none) and is
     /// NOT stripped.
+    /// The EFFECT members of [`DECLARED_OPTION_FNS`] (#1573): the callees
+    /// whose `??` the checker types as the EFFECT err-fallback (identity —
+    /// `T? ?? T?`; a PURE declared-Option fn's `??` types as the
+    /// Option-unwrap `T? ?? T`, so a `?? none` there is a type error).
+    pub(crate) static DECLARED_OPTION_EFFECT_FNS: std::cell::RefCell<std::collections::HashSet<String>> =
+        std::cell::RefCell::new(std::collections::HashSet::new());
     pub(crate) static DECLARED_OPTION_FNS: std::cell::RefCell<std::collections::HashSet<String>> =
         std::cell::RefCell::new(std::collections::HashSet::new());
 
@@ -267,15 +273,33 @@ pub fn compute_can_err(fns: &[IrFunction]) -> std::collections::HashSet<String> 
 /// the #1125 silent-wrong class. The type gate (`expr.ty` is the Option) keeps a
 /// genuine Option-payload unwrap (ty = the payload) out of the strip.
 pub fn strip_declared_option_trys(body: &mut IrExpr) {
+    strip_declared_option_trys_impl(body, false)
+}
+
+/// The program-wide fixpoint's variant (#1557 leg 2): strip ONLY calls to
+/// MANGLED (cross-module) declared-Option callees. The pre-pass already ran
+/// the unrestricted strip over main with its own-module registry; re-running
+/// it unrestricted inside the fixpoint let the evolving can_err sets strip
+/// main-region nodes the pre-pass deliberately left (the
+/// option_to_result_generic wasm-leg regression). The mangled names are
+/// exactly the set the pre-pass could not see by construction.
+pub fn strip_declared_option_trys_mangled(body: &mut IrExpr) {
+    strip_declared_option_trys_impl(body, true)
+}
+
+fn strip_declared_option_trys_impl(body: &mut IrExpr, mangled_only: bool) {
     use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
     use almide_lang::types::constructor::TypeConstructorId;
-    struct S;
+    struct S {
+        mangled_only: bool,
+    }
     impl IrMutVisitor for S {
         fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
             walk_expr_mut(self, expr);
             let declared_option_call = |inner: &IrExpr| {
                 matches!(&inner.kind, IrExprKind::Call { target: CallTarget::Named { name }, .. }
-                    if DECLARED_OPTION_FNS.with(|s| s.borrow().contains(name.as_str())))
+                    if (!self.mangled_only || name.as_str().starts_with("almide_rt_"))
+                        && DECLARED_OPTION_FNS.with(|s| s.borrow().contains(name.as_str())))
             };
             let strip = match &expr.kind {
                 IrExprKind::Try { expr: inner } => declared_option_call(inner),
@@ -283,19 +307,44 @@ pub fn strip_declared_option_trys(body: &mut IrExpr) {
                     declared_option_call(inner)
                         && matches!(&expr.ty, Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1)
                 }
+                // #1573: the effect-`??` over a NEVER-ERR declared-Option
+                // effect callee. The call site carries the LIFTED carrier
+                // (`Result[Option[T], String]`) while the node's own type is
+                // the Ok payload `Option[T]` — the err-fallback edge is
+                // unreachable for a never-err callee, so the node strips to
+                // the call RETYPED to the raw Option (the same
+                // Result-to-raw retype the never-err `!` strip performs; the
+                // def's never-err lowering returns exactly that raw Option).
+                // Keyed on EFFECT callees only; a pure fn's `??` is
+                // load-bearing Option-unwrap logic and types differently.
+                IrExprKind::UnwrapOr { expr: inner, .. } => {
+                    matches!(&inner.kind,
+                        IrExprKind::Call { target: CallTarget::Named { name }, .. }
+                            if DECLARED_OPTION_EFFECT_FNS.with(|s| s.borrow().contains(name.as_str())))
+                        && matches!(&expr.ty, Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1)
+                        && matches!(&inner.ty, Ty::Applied(TypeConstructorId::Result, ra)
+                            if ra.len() == 2 && ra[0] == expr.ty && matches!(ra[1], Ty::String))
+                }
                 _ => false,
             };
             if strip {
-                if let IrExprKind::Try { expr: inner } | IrExprKind::Unwrap { expr: inner } =
-                    &expr.kind
+                if let IrExprKind::Try { expr: inner }
+                | IrExprKind::Unwrap { expr: inner }
+                | IrExprKind::UnwrapOr { expr: inner, .. } = &expr.kind
                 {
                     let mut inner = (**inner).clone();
+                    // The effect-`??` case: the call carries the lifted
+                    // carrier type; the never-err def returns the RAW Option,
+                    // so the stripped call takes the node's own (payload)
+                    // type. Try/Unwrap inners are already raw-typed and the
+                    // assignment is the identity there.
+                    inner.ty = expr.ty.clone();
                     std::mem::swap(expr, &mut inner);
                 }
             }
         }
     }
-    S.visit_expr_mut(body);
+    S { mangled_only }.visit_expr_mut(body);
 }
 
 pub fn strip_never_err_unwraps(

@@ -86,6 +86,11 @@ fn while_heap_accumulator_wall_renders_headline_hint_caret_and_note() {
             "-o",
             dir.join("wall.wasm").to_str().unwrap(),
         ])
+        // This test's SUBJECT is the incumbent leg's wall-rendering machinery
+        // (#931 headline/hint/caret/note; the marker line): pin that leg
+        // explicitly — the commissioned structural leg lowers some of these
+        // shapes outright (routing would otherwise change what is tested).
+        .env("ALMIDE_WASM_INCUMBENT", "1")
         .output()
         .expect("failed to spawn almide");
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -181,6 +186,11 @@ fn capturing_closure_hof_wall_emits_the_marker_line() {
             "-o",
             dir.join("wall.wasm").to_str().unwrap(),
         ])
+        // This test's SUBJECT is the incumbent leg's wall-rendering machinery
+        // (#931 headline/hint/caret/note; the marker line): pin that leg
+        // explicitly — the commissioned structural leg lowers some of these
+        // shapes outright (routing would otherwise change what is tested).
+        .env("ALMIDE_WASM_INCUMBENT", "1")
         .output()
         .expect("failed to spawn almide");
     let stderr = String::from_utf8_lossy(&output.stderr);

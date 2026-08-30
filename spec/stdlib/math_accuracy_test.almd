@@ -1,0 +1,49 @@
+// ALS-T22 — transcendental accuracy bounds (C-305). Reference bits are the
+// correctly rounded binary64 of values computed to 70 decimal digits
+// (Decimal exp/ln/sqrt, Taylor sin/cos; pow = exp(y ln x)). ulp distance =
+// |to_bits(x) - to_bits(ref)| for same-signed doubles.
+fn ulp_from(x: Float, reference_bits: Int) -> Int = math.abs(float.to_bits(x) - reference_bits)
+
+test "sqrt is correctly rounded" {
+  assert_eq(ulp_from(math.sqrt(2.0), 4609047870845172685), 0)
+  assert_eq(ulp_from(math.sqrt(0.5), 4604544271217802189), 0)
+  assert_eq(ulp_from(math.sqrt(1.0e300), 6850974717710472879), 0)
+}
+
+test "exp within 1 ulp" {
+  assert(ulp_from(math.exp(1.0), 4613303445314885481) <= 1)
+  assert(ulp_from(math.exp(-1.5), 4597207131539332125) <= 1)
+  assert(ulp_from(math.exp(10.0), 4671783802770883936) <= 1)
+  assert(ulp_from(math.exp(0.1), 4607656066507473108) <= 1)
+}
+
+test "log, log2, log10 within 1 ulp" {
+  assert(ulp_from(math.log(2.0), 4604418534313441775) <= 1)
+  assert(ulp_from(math.log(0.5), -4618953502541334033) <= 1)
+  assert(ulp_from(math.log(1.0e10), 4627174418536376923) <= 1)
+  assert(ulp_from(math.log2(3.0), 4609816855700290920) <= 1)
+  assert(ulp_from(math.log2(1000.0), 4621799855853615765) <= 1)
+  assert(ulp_from(math.log10(3.0), 4602266672337769981) <= 1)
+  assert(ulp_from(math.log10(1000.0), 4613937818241073152) <= 1)
+}
+
+test "sin, cos, tan within 1 ulp" {
+  assert(ulp_from(math.sin(0.5), 4602308182625945072) <= 1)
+  assert(ulp_from(math.sin(1.0), 4605754516372524270) <= 1)
+  assert(ulp_from(math.sin(2.0), 4606365442650518598) <= 1)
+  assert(ulp_from(math.sin(10.0), -4620296710764933294) <= 1)
+  assert(ulp_from(math.cos(0.5), 4606079780542709072) <= 1)
+  assert(ulp_from(math.cos(1.0), 4603041830072026764) <= 1)
+  assert(ulp_from(math.cos(2.0), -4622203781984849403) <= 1)
+  assert(ulp_from(math.cos(10.0), -4617639132858127585) <= 1)
+  assert(ulp_from(math.tan(0.5), 4603095874924660554) <= 1)
+  assert(ulp_from(math.tan(1.0), 4609692760021066662) <= 1)
+  assert(ulp_from(math.tan(2.0), -4611269345697771272) <= 1)
+  assert(ulp_from(math.tan(10.0), 4604015134707169154) <= 1)
+}
+
+test "fpow within 1 ulp" {
+  assert(ulp_from(math.fpow(2.0, 0.5), 4609047870845172685) <= 1)
+  assert(ulp_from(math.fpow(3.0, 2.5), 4624965139347756608) <= 1)
+  assert(ulp_from(math.fpow(10.0, -3.0), 4562254508917369340) <= 1)
+}

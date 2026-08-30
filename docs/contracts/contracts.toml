@@ -174,6 +174,7 @@ doc       = "C-008-009-010-repr.md"
 evidence  = [
   { path = "spec/wasm_cross/compound_repr_interp.almd", class = "fixture" },
   { path = "spec/wasm_cross/repr_parity_pin.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fuzz_found_nested_interp_capture.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -242,6 +243,8 @@ evidence  = [
   { path = "spec/wasm_cross/map_fold.almd", class = "fixture" },
   { path = "spec/wasm_cross/map_index_order.almd", class = "fixture" },
   { path = "spec/wasm_cross/map_core_trio.almd", class = "fixture" },
+  { path = "spec/wasm_cross/map_fold_heap_accumulator.almd", class = "fixture" },
+  { path = "spec/wasm_cross/map_of_maps_value.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -268,6 +271,10 @@ evidence  = [
   { path = "spec/wasm_cross/compound_eq.almd", class = "fixture" },
   { path = "spec/wasm_cross/deep_eq_heap.almd", class = "fixture" },
   { path = "spec/wasm_cross/map_set_eq.almd", class = "fixture" },
+  { path = "spec/wasm_cross/variant_record_literal_equality.almd", class = "fixture" },
+  { path = "spec/wasm_cross/unique_non_flat_element.almd", class = "fixture" },
+  { path = "spec/wasm_cross/list_of_tuples_equality.almd", class = "fixture" },
+  { path = "spec/wasm_cross/map_rich_variant_key.almd", class = "fixture" },
 ]
 
 # ── UNICODE STRING SURFACE ───────────────────────────────────────────
@@ -723,7 +730,7 @@ evidence  = [
 id        = "C-049"
 spec      = "ALS-T15"
 title     = "float.sign is f64::signum; float/math min/max ignore NaN"
-statement = "`float.sign` == Rust `f64::signum` — `copysign(1.0, x)` for every non-NaN x (so `sign(0.0)=1`, `sign(-0.0)=-1`, `sign(±inf)=±1`) and NaN for NaN — NOT the old three-way sign (0 for ±0.0/NaN). `float.max`/`float.min`/`math.fmax`/`math.fmin` IGNORE a NaN operand and return the other, and on ±0 ties ALL FOUR return the FIRST operand (`max(0,-0)=0`, `max(-0,0)=-0`). Both targets implement the same explicit NaN/tie decision tree — never the NaN-propagating raw `f64.max`/`f64.min` wasm instructions, and never the llvm.minnum/maxnum intrinsics, whose unspecified ±0-tie order let x86 `maxsd` return the SECOND operand when inlined. All byte-identical native == wasm == interp."
+statement = "`float.sign` == Rust `f64::signum` — `copysign(1.0, x)` for every non-NaN x (so `sign(0.0)=1`, `sign(-0.0)=-1`, `sign(±inf)=±1`) and NaN for NaN — NOT the old three-way sign (0 for ±0.0/NaN). `float.max`/`float.min`/`math.fmax`/`math.fmin` IGNORE a NaN operand and return the other, and a ±0 tie follows IEEE-754-2019 zero ordering (ALS-T23, adjudicated als #28), COMMUTATIVE: `min(-0.0, 0.0) = min(0.0, -0.0) = -0.0` and `max(-0.0, 0.0) = max(0.0, -0.0) = +0.0` — computed as the bitwise OR (min) / AND (max) of the tied payloads, the identity on non-zero ties. This RETIRES the first-operand tie rule this contract used to state. Both targets implement the same explicit NaN/tie decision tree — never the NaN-propagating raw `f64.max`/`f64.min` wasm instructions, and never the llvm.minnum/maxnum intrinsics, whose unspecified ±0-tie order let x86 `maxsd` return the SECOND operand when inlined. All byte-identical native == wasm == interp."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
@@ -967,6 +974,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/effect_tco.almd", class = "fixture" },
   { path = "spec/wasm_cross/effect_tco_err_rewrap.almd", class = "fixture" },
+  { path = "spec/wasm_cross/loop_effect_match_stmt.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -979,6 +987,8 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/nested_ctor_pattern.almd", class = "fixture" },
   { path = "spec/wasm_cross/nested_variant_tag_box.almd", class = "fixture" },
+  { path = "spec/wasm_cross/nested_payload_guard.almd", class = "fixture" },
+  { path = "spec/wasm_cross/nested_tuple_pattern.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -1167,6 +1177,8 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/json_number_unicode.almd", class = "fixture" },
   { path = "spec/wasm_cross/json_string_span.almd", class = "fixture" },
+  { path = "spec/wasm_cross/json_parse_lenient_edges.almd", class = "fixture" },
+  { path = "spec/wasm_cross/json_many_keys.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -1309,6 +1321,7 @@ evidence  = [
   { path = "spec/wasm_cross/option_heap_eq.almd", class = "fixture" },
   { path = "spec/wasm_cross/result_eq.almd", class = "fixture" },
   { path = "spec/wasm_cross/heap_result_if_eq_cond.almd", class = "fixture" },
+  { path = "spec/wasm_cross/bytes_equality_call_operands.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -1344,6 +1357,11 @@ evidence  = [
   { path = "spec/wasm_cross/reduce_str.almd", class = "fixture" },
   { path = "spec/wasm_cross/closure_accumulator.almd", class = "fixture" },
   { path = "spec/wasm_cross/value_object_leak_loop.almd", class = "fixture" },
+  { path = "spec/wasm_cross/pop_heap_element.almd", class = "fixture" },
+  { path = "spec/wasm_cross/enumerate_unnameable_element.almd", class = "fixture" },
+  { path = "spec/wasm_cross/list_of_maps_loop_build.almd", class = "fixture" },
+  { path = "spec/wasm_cross/nested_three_level_literal.almd", class = "fixture" },
+  { path = "spec/wasm_cross/nested_three_level_loop_build.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -1428,6 +1446,7 @@ evidence  = [
   { path = "spec/wasm_cross/result_match_rewrap_modcall.almd", class = "fixture" },
   { path = "spec/wasm_cross/variant_pair_result_return.almd", class = "fixture" },
   { path = "spec/wasm_cross/record_pair_result_return.almd", class = "fixture" },
+  { path = "spec/wasm_cross/result_option_call_payload_return.almd", class = "fixture" },
   { path = "spec/wasm_cross/closure_rich_list_capture.almd", class = "fixture" },
 ]
 
@@ -1536,6 +1555,7 @@ since     = "0.27.6"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/pipe_lambda_block_value.almd", class = "fixture" },
+  { path = "spec/wasm_cross/pipe_chain_scalar_bind.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -1671,6 +1691,7 @@ since     = "0.27.6"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/generic_chain_unwrap_or.almd", class = "fixture" },
+  { path = "spec/wasm_cross/qq_record_fallback.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -1732,6 +1753,8 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/mut_heap_param.almd", class = "fixture" },
   { path = "spec/wasm_cross/bytes_param_writeback.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mut_param_effect_never_err.almd", class = "fixture" },
+  { path = "spec/wasm_cross/effect_mut_generic_port.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -2027,11 +2050,15 @@ evidence  = [
 id        = "C-158"
 spec      = "ALS-I3"
 title     = "A some/ok ctor over a scalar call or tuple payload materializes the real value, never a zeroed ctor"
-statement = "A `some(...)`/`ok(...)`/`err(...)` constructor whose payload is a SCALAR-typed call (`ok(<Float combinator chain>)`, `some(list.len(...))`) or a TUPLE literal (`ok((0.3, 1000000))` — the mixed-scalar (Float, Int) shape) either materializes the REAL computed payload — byte-identical to native — or WALLS honestly. Previously the ctor safety net required a HEAP CALL payload, so these fell to the deferred Opaque: an EMPTY block the Result/Option formatter read as `ok(0)` while native printed the real value (differential-fuzz seed 1784512190387680000 index 74, a silent wrong value), and `result.unwrap_or` over the deferred tuple-payload wrapper aborted \"index out of bounds\" on the wasm leg while native succeeded (RunFailureDivergence). These — and IF-merged payloads (`ok(if c then some(\"a\") else some(\"b\"))`, whose deferral made the downstream unwrap take the FALLBACK on a Some) — now take the same ANF route: materialize into a synth temp via the ordinary bind path, rebuild the ctor over the temp, retry the materializer, and wall if the bind itself deferred or is outside the subset."
+statement = "A `some(...)`/`ok(...)`/`err(...)` constructor whose payload is a SCALAR-typed call (`ok(<Float combinator chain>)`, `some(list.len(...))`) or a TUPLE literal (`ok((0.3, 1000000))` — the mixed-scalar (Float, Int) shape) either materializes the REAL computed payload — byte-identical to native — or WALLS honestly. Previously the ctor safety net required a HEAP CALL payload, so these fell to the deferred Opaque: an EMPTY block the Result/Option formatter read as `ok(0)` while native printed the real value (differential-fuzz seed 1784512190387680000 index 74, a silent wrong value), and `result.unwrap_or` over the deferred tuple-payload wrapper aborted \"index out of bounds\" on the wasm leg while native succeeded (RunFailureDivergence). These — and IF-merged payloads (`ok(if c then some(\"a\") else some(\"b\"))`, whose deferral made the downstream unwrap take the FALLBACK on a Some) — now take the same ANF route: materialize into a synth temp via the ordinary bind path, rebuild the ctor over the temp, retry the materializer, and wall if the bind itself deferred or is outside the subset. The FN-TAIL position carries the same law (#1578): a `-> (A, B)!` plain value tail's lifted `ok((..))` that the tail's pointwise ctor list declines is routed through the heap-result ARM router (`lower_heap_result_arm` — the tail is a degenerate single arm), so scalar pairs, record pairs and record-String pairs return the real pair in tail position exactly as they already did inside any branch arm; a payload outside the arm family (a variant element) keeps the honest wall in both positions."
 since     = "0.32.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/ctor_scalar_call_payload.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fallible_tuple_value_tail.almd", class = "fixture" },
+  { path = "spec/wasm_cross/result_tuple_variant_payload.almd", class = "fixture" },
+  { path = "spec/wasm_cross/result_tuple_list_slots.almd", class = "fixture" },
+  { path = "spec/wasm_cross/bang_in_record_literal_field.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -3829,6 +3856,8 @@ evidence  = [
   { path = "spec/wasm_cross/codec_string_escapes.almd", class = "fixture" },
   { path = "spec/wasm_cross/codec_variant_roundtrip.almd", class = "fixture" },
   { path = "spec/wasm_cross/codec_whitespace_tolerance.almd", class = "fixture" },
+  { path = "spec/wasm_cross/codec_list_default.almd", class = "fixture" },
+  { path = "spec/wasm_cross/codec_triple_list.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -3877,4 +3906,286 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/closure_captured_list_mutation.almd", class = "fixture" },
   { path = "spec/wasm_cross/closure_captured_map_records.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-320"
+spec      = "ALS-D2"
+title     = "A budget cut performs exit bookkeeping: exhausted is always Err, regions are independent, cut placement is unobservable"
+statement = "A `fan.bounded` cut runs the same meter bookkeeping as a normal region exit, so (1) an exhausted region's verdict is Err — never a stale Ok carrying a partial or zero value; (2) a region's verdict and value do not depend on any other region in the program (meter state cannot leak across regions); (3) whether the cut fires in a loop directly in the arm or inside a callee is unobservable, and the arm's value is the block's value regardless of loop form; (4) the meter charges the budgeted body only — runtime services that materialize observables (formatting, the `??` fallback path) are neither charged nor cut. Adjudicated 2026-08-25 from greenfield's stage-64 finding; through 0.59.1 the violation was IDENTICAL on both targets (a direct-arm cut returned from the region fn past BudgetExit: stale ok(0) instead of Err, and the leaked meter state poisoned every later region — the pre-existing fuel fixtures only exercise callee-loop cuts, which reach the exit and were correct), so cross-target agreement cannot see it: the reference-leg pin asserts the normative values (almide/almide#1572; canonical row: als ledger C-320, spec ALS-DT2). Mechanism: BudgetEnter stashes the saved outer fuel in a global and keeps the entry-units global armed (>= 0) while the region is open; BudgetExit disarms it; the BudgetExhausted read — the one point every region converges, the wrapper's verdict bind — performs the identical exit bookkeeping first when it finds the region still armed."
+since     = "0.59.2"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/fuel_cut_in_arm_loop.almd", class = "fixture" },
+  { path = "tests/charge_probe_test.rs", name = "cut_bookkeeping_pins_normative_values", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-302"
+spec      = "ALS-T19"
+title     = "Numeric determinism family head: a Float result is a function of the program alone"
+statement = "The observable result of any Float computation (stdout, stderr, exit code, `float.to_bits`) is a function of the program and its inputs — not of the target, host CPU, OS, build flags or the process's floating-point mode. ALS-T19 names every member section (T2/T9/T10/T13/T15/T20–T24, C9, E3, M10, R4, C-210) and the NaN observation boundaries; every fixture of the family carries this id alongside its own. Written requirements-first (ADR-0016): the family landed here before any implementation pinned it."
+since     = "0.58.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/float_no_contraction.almd", class = "fixture" },
+  { path = "spec/wasm_cross/float_subnormal_preserved.almd", class = "fixture" },
+  { path = "spec/wasm_cross/math_transcendental_bits.almd", class = "fixture" },
+  { path = "spec/wasm_cross/float_signed_zero_minmax.almd", class = "fixture" },
+  { path = "spec/wasm_cross/float_to_int_edges.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-303"
+spec      = "ALS-T20"
+title     = "Float operations round to nearest-even once each — no contraction, no FMA"
+statement = "Every Float operation rounds to nearest, ties to even, once; `a * b + c` is two roundings on every target. With `a = 1 + 2^-52` and `b = 1 - 2^-53` (parsed at run time), `a * b` rounds to exactly 1.0, so `a * b - 1.0` and `a * b + (-1.0)` are 0.0 on both targets; a fused multiply-add would leave `2^-53 - 2^-105`. No other rounding mode is observable, and no backend may contract."
+since     = "0.58.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/float_no_contraction.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-304"
+spec      = "ALS-T21"
+title     = "Subnormal floats are preserved — no flush-to-zero on any target"
+statement = "binary64 subnormals survive parse, arithmetic, display and `float.to_bits` on every target: `2.2250738585072014e-308 / 2.0` is `2^-1023` with bits `2251799813685248`, `float.parse(\"5e-324\")` has bits `1`, and neither is zero. Flush-to-zero and denormals-are-zero, inherited from a process or set by a backend, are non-conforming."
+since     = "0.58.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/float_subnormal_preserved.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-305"
+spec      = "ALS-T22"
+title     = "Transcendental accuracy bounds: sqrt correctly rounded, exp/log/log2/log10/sin/cos/tan/fpow within 1 ulp"
+statement = "Beyond byte-identity across targets (C-026), the family declares distance from the true value: `math.sqrt`/`float.sqrt` are correctly rounded; `math.exp/log/log2/log10/sin/cos/tan` and `math.fpow` / Float `**` are within 1 ulp of the correctly rounded result; `math.log_gamma` carries no accuracy claim. Checked at sample points against references computed to 70 decimal digits and rounded to binary64 (the bit patterns in the tests); the cross-target fixture pins the bits on both legs."
+since     = "0.58.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/math_transcendental_bits.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-306"
+spec      = "ALS-T23"
+title     = "Signed zero: IEEE propagation, equality ignores the sign, min/max order -0 below +0 (IEEE 754-2019)"
+statement = "`-0.0 * 1.0 = -0.0`, `-0.0 + 0.0 = 0.0` (also with a literal `0.0` operand — `x + 0.0 -> x` is not a valid identity for `x = -0.0`), `1.0 / -inf = -0.0`; `0.0 == -0.0` is true; `-0.0` displays with its sign. `float.min/max` and `math.fmin/fmax` follow IEEE 754-2019 minimum/maximum zero ordering: `min(-0.0, 0.0) = min(0.0, -0.0) = -0.0` and `max(-0.0, 0.0) = max(0.0, -0.0) = +0.0` — commutative, consistent with totalOrder (C9); NaN is ignored as in C-049. This RETIRES the first-operand tie rule C-049 used to state (adjudicated 2026-08-21, #28). Until the reference leg lands (ADR-0015), the cross fixtures assert agreement; `float_determinism_test.almd` asserts propagation and equality, and `float_minmax_zero_order_test.almd` asserts the zero ORDER — red against 0.58.0 by design (the release predates the rule)."
+since     = "0.60.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/float_signed_zero_minmax.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-307"
+spec      = "ALS-T24"
+title     = "float.to_int truncates toward zero and saturates, NaN to 0; the checked family is exact-or-none"
+statement = "`float.to_int` truncates toward zero, saturates at the i64 bounds for out-of-range and ±inf, and maps NaN to 0 (`to_int(2.7)=2`, `to_int(-2.7)=-2`, `to_int(9.3e18)=9223372036854775807`, `to_int(-inf)=-9223372036854775808`, `to_int(NaN)=0`, `to_int(-0.0)=0`). `float.to_{int8..int64,uint8..uint64}_checked` and `float.to_float32_checked` return `some` only when the value is exactly representable in the target type: fractional values, out-of-range, NaN and ±inf are `none` (`to_int64_checked(2.7)=none`, `to_int64_checked(-0.0)=some(0)`, `to_float32_checked(0.1)=none`). Identical on both targets."
+since     = "0.58.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/float_to_int_edges.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-308"
+spec      = "ALS-B1"
+title     = "@bounded is a function attribute that changes nothing about types or values — a bounded function is an ordinary function"
+statement = "`@bounded` on `fn` / `effect fn` declares membership in the bounded profile; it is accepted only on function declarations (no module-level spelling), leaves the function callable as any other, and affects no type, value or output. Violations are type-check rejections with codes E070–E079 and the message form `<construct> is not admissible in a @bounded function`; a function without the attribute is never affected."
+since     = "0.60.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/bounded_kernel.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-309"
+spec      = "ALS-B2"
+title     = "Subset, not dialect: a program's observable behaviour is identical with and without @bounded"
+statement = "Removing every `@bounded` attribute from a program yields the same program: stdout, stderr and exit code are identical. `bounded_kernel.almd` and `bounded_kernel_plain.almd` differ only in the attributes and print the same bytes on both targets. Requirements-first (ADR-0017): specified here before any checker enforces it; the 0.58.0 release warns E053 (unknown attribute) and has no such rejection, so this evidence is red against it by design."
+since     = "0.60.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/bounded_kernel.almd", class = "fixture" },
+  { path = "spec/wasm_cross/bounded_kernel_plain.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-310"
+spec      = "ALS-B3"
+title     = "Only counted loops with compile-time-constant range bounds are admissible in a @bounded function (E070)"
+statement = "Loops in a `@bounded` function are `for i in a..<b` / `a...b` with both bounds compile-time constants; nesting is admissible (bound = product). `while`, `for x in <container>` and a range with a run-time bound are rejected with E070 (hint `counted range`). Requirements-first (ADR-0017): specified here before any checker enforces it; the 0.58.0 release warns E053 (unknown attribute) and has no such rejection, so this evidence is red against it by design."
+since     = "0.60.0"
+status    = "active"
+evidence  = [
+  { path = "tests/diagnostics/e070-bounded-unbounded-loop/broken.almd", class = "fixture" },
+  { path = "tests/diagnostics/e070-bounded-for-over-container/broken.almd", class = "fixture" },
+  { path = "spec/stdlib/bounded_profile_test.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-311"
+spec      = "ALS-B4"
+title     = "No allocation inside a counted loop in a @bounded function (E071)"
+statement = "Inside a counted loop body of a `@bounded` function, constructing, concatenating or pushing to a list/string/map/set or creating a closure is rejected with E071 (hint `allocate outside the loop`); reading, borrowing and passing existing heap values is admissible; allocation outside loops is admissible. Requirements-first (ADR-0017): specified here before any checker enforces it; the 0.58.0 release warns E053 (unknown attribute) and has no such rejection, so this evidence is red against it by design."
+since     = "0.60.0"
+status    = "active"
+evidence  = [
+  { path = "tests/diagnostics/e071-bounded-alloc-in-loop/broken.almd", class = "fixture" },
+  { path = "spec/stdlib/bounded_profile_test.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-312"
+spec      = "ALS-B5"
+title     = "break and continue are rejected inside a @bounded function's loops (E072)"
+statement = "`break` / `continue` in a counted loop of a `@bounded` function are rejected with E072 (hint `single exit`): the trip count is exactly the range length, never at-most. Requirements-first (ADR-0017): specified here before any checker enforces it; the 0.58.0 release warns E053 (unknown attribute) and has no such rejection, so this evidence is red against it by design."
+since     = "0.60.0"
+status    = "active"
+evidence  = [
+  { path = "tests/diagnostics/e072-bounded-break/broken.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-313"
+spec      = "ALS-B6"
+title     = "Recursion is rejected in the bounded profile — the reachable call graph is a DAG (E073)"
+statement = "Self or mutual recursion reachable from a `@bounded` function is rejected with E073 (hint `call graph`); an unresolvable callee is rejected conservatively. Recursive types are admissible; recursive traversal is not. Requirements-first (ADR-0017): specified here before any checker enforces it; the 0.58.0 release warns E053 (unknown attribute) and has no such rejection, so this evidence is red against it by design."
+since     = "0.60.0"
+status    = "active"
+evidence  = [
+  { path = "tests/diagnostics/e073-bounded-recursion/broken.almd", class = "fixture" },
+  { path = "spec/stdlib/bounded_profile_test.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-314"
+spec      = "ALS-B7"
+title     = "A @bounded function calls only @bounded functions and first-order pure stdlib members (E074)"
+statement = "Calls from a `@bounded` function to a non-`@bounded` user function, creation or call of a closure/lambda, a higher-order stdlib call (a function value passed), a function reference, or `any P` dispatch are rejected with E074 (hint `@bounded callee`). Calls to `@bounded` functions and to first-order members of pure stdlib modules are admissible. Requirements-first (ADR-0017): specified here before any checker enforces it; the 0.58.0 release warns E053 (unknown attribute) and has no such rejection, so this evidence is red against it by design."
+since     = "0.60.0"
+status    = "active"
+evidence  = [
+  { path = "tests/diagnostics/e074-bounded-unbounded-callee/broken.almd", class = "fixture" },
+  { path = "tests/diagnostics/e074-bounded-higher-order/broken.almd", class = "fixture" },
+  { path = "spec/stdlib/bounded_profile_test.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-315"
+spec      = "ALS-B8"
+title     = "Run-time-length heap construction is rejected in a @bounded function (E075)"
+statement = "`string.repeat`, `list.with_capacity`, `list.range` and any list/string construction whose size is a run-time value are rejected with E075 (hint `compile-time size`) in a `@bounded` function; literals and constant-size construction are admissible, and `push` outside loops is admissible. Requirements-first (ADR-0017): specified here before any checker enforces it; the 0.58.0 release warns E053 (unknown attribute) and has no such rejection, so this evidence is red against it by design."
+since     = "0.60.0"
+status    = "active"
+evidence  = [
+  { path = "tests/diagnostics/e075-bounded-runtime-length-heap/broken.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-316"
+spec      = "ALS-B9"
+title     = "A @bounded effect fn may only use standard output; other effect modules, host-reaching modules and fan are rejected (E076)"
+statement = "In a `@bounded` function, calls into `env`, `fs`, `http`, `io` (other than print), `net`, `process`, `random`, `zlib`, the host-reaching `datetime`/`args`/`mem`/`testing`, and `fan.*` are rejected with E076 (hint `declared capability`); `println` and its family are admissible in a `@bounded effect fn`. Requirements-first (ADR-0017): specified here before any checker enforces it; the 0.58.0 release warns E053 (unknown attribute) and has no such rejection, so this evidence is red against it by design."
+since     = "0.60.0"
+status    = "active"
+evidence  = [
+  { path = "tests/diagnostics/e076-bounded-effect-outside-capability/broken.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-317"
+spec      = "ALS-B10"
+title     = "Float operations are provisionally rejected in a @bounded function (E077)"
+statement = "Operators on Float (arithmetic, comparison) and calls to Float-taking stdlib functions inside a `@bounded` function are rejected with E077 (hint `Int arithmetic`); holding and passing Float values is admissible. Provisional: revised — never silently relaxed — once the ALS-T19 numeric family is normative AND the certification seat has a Float operation set. Requirements-first (ADR-0017): specified here before any checker enforces it; the 0.58.0 release warns E053 (unknown attribute) and has no such rejection, so this evidence is red against it by design."
+since     = "0.60.0"
+status    = "active"
+evidence  = [
+  { path = "tests/diagnostics/e077-bounded-float-arithmetic/broken.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-318"
+spec      = "ALS-B11"
+title     = "Early exit inside a counted loop body is rejected in a @bounded function (E078)"
+statement = "`!` propagation (effect fn) and `guard … else` inside a counted loop body of a `@bounded` function are rejected with E078 (hint `outside the loop`); propagation and guards outside loops are admissible. Requirements-first (ADR-0017): specified here before any checker enforces it; the 0.58.0 release warns E053 (unknown attribute) and has no such rejection, so this evidence is red against it by design."
+since     = "0.60.0"
+status    = "active"
+evidence  = [
+  { path = "tests/diagnostics/e078-bounded-early-exit-in-loop/broken.almd", class = "fixture" },
+  { path = "spec/stdlib/bounded_profile_test.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-321"
+spec      = "ALS-R3"
+title     = "The fan prefetch split (start-all, await-in-arm-order, abandon-losers) is unobservable"
+statement = "A fan.map whose whole arm body is one fs.read_text on the element lowers to two phases (#1628 increment 2b): every read STARTS in list order, then every arm AWAITS in arm order — and the split is unobservable against the sequential contract (C-004): results in list order, the FIRST err in ARM order decides (certified by stacking two different failures — a directory at arm 2, a missing file at arm 3 — where a completion-order drain could surface either message and arm order admits only arm 2's), and after the deciding err the remaining started reads drain and are discarded, so no read outlives the fan. fan.any over the same shape (#1628 increment 2c) rides the identical split with FIRST-OK-wins in arm order: after the winner every remaining started read is ABANDONED (op 42 — on the p3 component the subtask.cancel cooperative handshake, reaping a raced completion's descriptor; sequential hosts answer ok(0)), so no losing subtask outlives the fan and the run exits clean; element errs skip and all-fail answers the C-004 ledger Err, byte-identical to the sequential form. The determinism split this stages (#1628 stage 3): GUEST-side order is fixed by construction — the p3 component drains its waitable set in arm order regardless of the order the host completes the async-lowered open-at subtasks — while hosts that cannot overlap treat the start as a no-op (the embedded host answers op 40 with ok(0) and re-dispatches the read at the await), making sequential equality hold by construction there. The p3 component leg of the same shapes is pinned by tests/component_p3_test.rs::p3_component_fan_prefetch_reads_concurrently, which also asserts the emitter's own ALMIDE_DBG_FAN route line (prefetch lowering engaged) at build time — the import-section assertion alone proved vacuous (to_p3 declares the async imports unconditionally), and the route line is what caught the first pattern regression: the frontend spells the callback's fallible instantiation ok(unwrap(expr)), not Try, so the original matcher never fired and every leg ran sequentially while the vacuous assertion stayed green. Scope note: the err probe runs BOTH through a Result-returning wrapper fn and as the un-banged fallible form directly in the caller — the shape that aborted on the structural leg until the callback-wrapper strip (#1663, closed: the incumbent never had the bug — the early incumbent-leg attribution was a routing mislabel, `almide run` sends fs programs down the structural leg — and all four legs plus the interp now agree; tests/fan_callback_try_structural_test.rs pins the forced-structural leg)."
+since     = "0.60.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/fan_prefetch_fs.almd", class = "fixture" },
+  { path = "tests/component_p3_test.rs", class = "fixture", name = "p3_component_fan_prefetch_reads_concurrently" },
+]
+
+[[contract]]
+id        = "C-322"
+spec      = "ALS-E27"
+title     = "Constructors are function values, the builtin trio included"
+statement = "A payload-carrying constructor's bare reference is a function value: user ctors as (A) -> T for 1-ary and (A, B, …) -> T for multi-arg (NO partial application — currying is spelled with a lambda), the 0-ary case a plain value; and the builtin trio some / ok / err is first-class the same way — a bare `some` parses as its synthesized eta-expansion `(x) => some(x)`, so every leg (checker, native, wasm, interp) processes the lambda form it already carries, making cross-target identity constructive rather than re-proved per backend (#1111, ratified 2026-08-05: the asymmetry where `list.map(xs, Circle)` worked but `list.map(xs, some)` was a parse error is closed). The pre-change parse error carried the eta-expansion hint; A/B: v0.59.2 errors, this build maps `[1, 2] |> list.map(some)` to `[some(1), some(2)]` on both targets."
+since     = "0.60.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/ctor_fn_value.almd", class = "fixture" },
+  { path = "spec/lang/ctor_fn_value_test.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-323"
+spec      = "ALS-E18"
+title     = "Or-patterns: an arm's alternatives match as a union, binder-free"
+statement = "A match arm may carry or-pattern alternatives `a | b | c => body` (#1461): the arm is taken when ANY alternative matches, first-arm-wins ordering is unchanged, the arm covers the alternatives' UNION for exhaustiveness (an or-covered match needs no wildcard), and alternatives are BINDER-FREE — a variable binder inside an alternative is E080 with the write-separate-arms hint, because the body cannot depend on which alternative matched. Lowering desugars the arm into one IR arm per alternative, so both backends and the interp process plain single-pattern arms — cross-target identity is constructive, not re-proved per backend."
+since     = "0.60.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/or_pattern.almd", class = "fixture" },
+  { path = "spec/lang/or_pattern_test.almd", class = "fixture" },
+  { path = "tests/diagnostics/e080-or-pattern-binder/broken.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-324"
+spec      = "ALS-M13"
+title     = "Mut-param forwarding from a branch arm: folded to value flow or refused, never silently wrong"
+statement = "A `mut` parameter forwarded to a user callee from inside an if/match arm (#1688) is rewritten by the C-132 move-mode fold into value flow — a write-back leaf becomes the direct tail call, any other Unit leaf (a stdlib mut call, a `()` arm) becomes `{ leaf; param }` — so both targets run the same explicit-return convention and stdout stays byte-identical. A shape the fold cannot prove (a non-terminal branch, a write-back the leaf vocabulary does not cover) is REFUSED by the structural emitter (assign:mut-param-in-branch-arm) and by the incumbent's MIR wall; it is never emitted. Before the fold covered these leaves the structural leg shipped wrong bytes silently — native `A&B`, wasm `\\0\\0\\0` — which is the divergence this contract forbids."
+since     = "0.60.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/mut_param_branch_forward.almd", class = "fixture" },
+  { path = "spec/wasm_cross/sql_highlight_tokens.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-325"
+spec      = "ALS-M13"
+title     = "bytes.push growth is amortized: linear retention, byte-identical at scale"
+statement = "Growing a `Bytes` by repeated `bytes.push` retains O(n) memory on the structural wasm leg and completes byte-identically with native at any size linear memory can hold. The `$bytes_push` helper carries the `$list_push` discipline — in-place append while capacity remains, geometric growth (max(cap*2, 16)) on overflow, the outgrown block freed when uniquely owned — replacing the per-push copy-grow protocol that reallocated len+1 every push and never freed the outgrown block, so n pushes retained n²/2 bytes and `bytes.new(0)` + 69,000 pushes died `out of memory` where native and the incumbent complete (#1689). Value semantics hold across the in-place fast path: a bind takes its snapshot, a later push into the source is invisible through the alias."
+since     = "0.60.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/bytes_push_growth.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-326"
+spec      = "ALS-M13"
+title     = "Branch-selected mut-fn calls hoist their write-back out of the arm: the gzip-inflate shape lowers structurally"
+statement = "A tuple-form or was-Unit mut-param call selected by an if/match arm (`let (s, p) = match kind { 0 => stored(pos, inp, out), 1 => codes(..., out, ...), _ => (fail, pos) }` — the gzip inflate's block dispatch) is rewritten by the phase-4 hoist: every arm yields the buffer (the callee's raw return, or the param read back for a call-free arm), and ONE write-back Assign applies outside the branch in straight-line position — the exact discipline the proven straight-line C-132 form uses, so the structural wasm leg lowers the whole program and native/wasm stay byte-identical. Before the hoist this shape was refused by the #1688 wall (and by the incumbent's brick), and before the wall it was emitted silently wrong. An arm that writes the param any other way (a second mut param, an unrecognized write-back) still declines the hoist and stays refused, never emitted."
+since     = "0.60.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/gzip_inflate_members.almd", class = "fixture" },
 ]

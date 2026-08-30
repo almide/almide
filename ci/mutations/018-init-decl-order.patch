@@ -1,0 +1,16 @@
+diff --git a/crates/almide-wasm/src/lib.rs b/crates/almide-wasm/src/lib.rs
+index cde211f7a..08cfed973 100644
+--- a/crates/almide-wasm/src/lib.rs
++++ b/crates/almide-wasm/src/lib.rs
+@@ -578,7 +578,10 @@ fn build_globals(
+             global_map.insert(use_g, slot);
+         }
+     }
+-    let init_order = dependency_init_order_spaced(ir, &alias);
++    let mut init_order: Vec<GVar> = ir.top_lets.iter().map(|t| (0, t.var)).collect(); // [MUTANT: decl order]
++    for (i, m) in ir.modules.iter().enumerate() {
++        init_order.extend(m.top_lets.iter().map(|t| (i as u32 + 1, t.var)));
++    }
+     let mut init_by_var: HashMap<GVar, InitLet> = HashMap::new();
+     for tl in &ir.top_lets {
+         init_by_var.insert((0, tl.var), InitLet { space: 0, module: None, tl: tl.clone() });

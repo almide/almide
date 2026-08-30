@@ -289,6 +289,173 @@ pub fn dependency_init_order(
     topo_sort_emit(&decl_order, &deps)
 }
 
+/// Space-aware [`dependency_init_order`]: the same six steps with every
+/// variable identity a `GVar` and every scanned body tagged with the space
+/// its `VarId`s index. Returns the init order as `GVar`s (the consumer
+/// emits each initializer in its own space).
+pub fn dependency_init_order_spaced(
+    program: &IrProgram,
+    alias: &HashMap<GVar, GVar>,
+) -> Vec<GVar> {
+    // Step 1: legacy emission order — (decl, owning module, initializer).
+    let mut decl_order: Vec<(GVar, Option<&str>, &IrExpr)> = Vec::new();
+    for tl in &program.top_lets {
+        decl_order.push(((0, tl.var), None, &tl.value));
+    }
+    for (i, m) in program.modules.iter().enumerate() {
+        for tl in &m.top_lets {
+            decl_order.push(((i as SpaceId + 1, tl.var), Some(m.name.as_str()), &tl.value));
+        }
+    }
+    let decls: HashSet<GVar> = decl_order.iter().map(|(g, _, _)| *g).collect();
+
+    // Scan one body whose `VarId`s live in `space`.
+    let scan = |space: SpaceId, expr: &IrExpr| -> (Vec<GVar>, Vec<FnKey>) {
+        use crate::visit::{walk_expr, IrVisitor};
+        struct Collector<'a> {
+            space: SpaceId,
+            alias: &'a HashMap<GVar, GVar>,
+            decls: &'a HashSet<GVar>,
+            reads: Vec<GVar>,
+            calls: Vec<FnKey>,
+        }
+        impl IrVisitor for Collector<'_> {
+            fn visit_expr(&mut self, e: &IrExpr) {
+                match &e.kind {
+                    IrExprKind::Var { id } => {
+                        let g = (self.space, *id);
+                        let decl = self.alias.get(&g).copied().unwrap_or(g);
+                        if self.decls.contains(&decl) && !self.reads.contains(&decl) {
+                            self.reads.push(decl);
+                        }
+                    }
+                    IrExprKind::Call { target, .. } => {
+                        if let Some(k) = fn_key_of_target(target) {
+                            if !self.calls.contains(&k) {
+                                self.calls.push(k);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                walk_expr(self, e);
+            }
+        }
+        let mut c = Collector { space, alias, decls: &decls, reads: Vec::new(), calls: Vec::new() };
+        c.visit_expr(expr);
+        (c.reads, c.calls)
+    };
+
+    // Step 2: index every user function (with its space) by identity.
+    let mut fn_reads: HashMap<FnKey, Vec<GVar>> = HashMap::new();
+    let mut fn_calls: HashMap<FnKey, Vec<FnKey>> = HashMap::new();
+    let mut index_fn = |space: SpaceId, f: &IrFunction| {
+        let (reads, calls) = scan(space, &f.body);
+        let key = fn_key_of_function(f);
+        fn_reads.entry(key.clone()).or_default().extend(reads);
+        fn_calls.entry(key).or_default().extend(calls);
+    };
+    for f in &program.functions {
+        index_fn(0, f);
+    }
+    for (i, m) in program.modules.iter().enumerate() {
+        for f in &m.functions {
+            index_fn(i as SpaceId + 1, f);
+        }
+    }
+
+    // Step 3: transitive global read-set per function.
+    fn reads_of(
+        key: &FnKey,
+        fn_reads: &HashMap<FnKey, Vec<GVar>>,
+        fn_calls: &HashMap<FnKey, Vec<FnKey>>,
+        seen: &mut HashSet<FnKey>,
+        out: &mut Vec<GVar>,
+    ) {
+        if !seen.insert(key.clone()) {
+            return;
+        }
+        if let Some(rs) = fn_reads.get(key) {
+            for &r in rs {
+                if !out.contains(&r) {
+                    out.push(r);
+                }
+            }
+        }
+        if let Some(cs) = fn_calls.get(key) {
+            for c in cs {
+                reads_of(c, fn_reads, fn_calls, seen, out);
+            }
+        }
+    }
+
+    // Step 4: module → its top-let global decls (coarse safety net).
+    let mut module_globals: HashMap<&str, Vec<GVar>> = HashMap::new();
+    for &(g, m, _) in &decl_order {
+        if let Some(mn) = m {
+            module_globals.entry(mn).or_default().push(g);
+        }
+    }
+
+    // Step 5: per-top-let dependency set.
+    let mut deps: HashMap<GVar, Vec<GVar>> = HashMap::new();
+    for &(g, owner, expr) in &decl_order {
+        let (direct, calls) = scan(g.0, expr);
+        let mut dep: Vec<GVar> = direct;
+        for c in &calls {
+            let mut seen = HashSet::new();
+            let mut reads = Vec::new();
+            reads_of(c, &fn_reads, &fn_calls, &mut seen, &mut reads);
+            for r in reads {
+                if !dep.contains(&r) {
+                    dep.push(r);
+                }
+            }
+        }
+        if owner.is_none() {
+            for gs in module_globals.values() {
+                for &mg in gs {
+                    if !dep.contains(&mg) {
+                        dep.push(mg);
+                    }
+                }
+            }
+        }
+        dep.retain(|d| *d != g);
+        deps.insert(g, dep);
+    }
+
+    // Step 6: stable topological emit.
+    fn visit(
+        g: GVar,
+        deps: &HashMap<GVar, Vec<GVar>>,
+        done: &mut HashSet<GVar>,
+        on_stack: &mut HashSet<GVar>,
+        emitted: &mut Vec<GVar>,
+    ) {
+        if done.contains(&g) || on_stack.contains(&g) {
+            return;
+        }
+        on_stack.insert(g);
+        if let Some(ds) = deps.get(&g) {
+            for &d in ds {
+                visit(d, deps, done, on_stack, emitted);
+            }
+        }
+        on_stack.remove(&g);
+        if done.insert(g) {
+            emitted.push(g);
+        }
+    }
+    let mut emitted: Vec<GVar> = Vec::with_capacity(decl_order.len());
+    let mut done: HashSet<GVar> = HashSet::new();
+    let mut on_stack: HashSet<GVar> = HashSet::new();
+    for &(g, _, _) in &decl_order {
+        visit(g, &deps, &mut done, &mut on_stack, &mut emitted);
+    }
+    emitted
+}
+
 /// Step 1: the legacy emission order — (decl VarId, owning module, &initializer).
 /// `None` module = root.
 fn build_decl_order(program: &IrProgram) -> Vec<(VarId, Option<&str>, &IrExpr)> {
@@ -460,6 +627,91 @@ fn alias_key(vi: &VarInfo) -> (String, String) {
     )
 }
 
+// ── Space-aware form (#1596) ────────────────────────────────────────────
+//
+// Separately-lowered modules carry their OWN `VarTable` (each starting at
+// VarId 0), so a bare-VarId key collides across module tables and with the
+// program's — the panic/wrong-slot class the structural wasm leg hit on
+// `import self` packages. `SpaceId` names the table a VarId belongs to;
+// every global-machinery identity below is the (space, var) pair. The flat
+// forms above stay for the single-space callers (the Rust-target pass,
+// where module vars share the program counter by construction).
+
+/// Which `VarTable` a `VarId` indexes: 0 = the program root,
+/// i+1 = `program.modules[i]`.
+pub type SpaceId = u32;
+/// A globally-unambiguous variable identity.
+pub type GVar = (SpaceId, VarId);
+
+/// The `VarInfo` a `GVar` names. Panics on an out-of-range id — by the time
+/// the global machinery runs, every top-let var is in its own table by
+/// construction.
+pub fn spaced_var<'a>(program: &'a IrProgram, g: GVar) -> &'a VarInfo {
+    let (space, var) = g;
+    if space == 0 {
+        program.var_table.get(var)
+    } else {
+        program.modules[(space - 1) as usize].var_table.get(var)
+    }
+}
+
+/// Space-aware [`GlobalInfo`]: the decl is a `GVar`.
+#[derive(Debug, Clone)]
+pub struct SpacedGlobalInfo {
+    pub storage: TopLetStorage,
+    pub static_name: String,
+    pub decl: GVar,
+}
+
+/// Space-aware [`build_global_tables`]: derives the spaces from the program
+/// itself. The alias map resolves EVERY table's module-origin use-site vars
+/// to their declaration `GVar` (cross-space reads: the entry reading
+/// `m.SYSTEM`, one module reading another's global).
+pub fn build_global_tables_spaced(
+    program: &IrProgram,
+) -> (HashMap<GVar, SpacedGlobalInfo>, HashMap<GVar, GVar>, Vec<String>) {
+    let mut globals: HashMap<GVar, SpacedGlobalInfo> = HashMap::new();
+    let mut by_key: HashMap<(String, String), GVar> = HashMap::new();
+    let mut each_top_let = |space: SpaceId, tls: &[IrTopLet], table: &VarTable| {
+        for tl in tls {
+            let (mutable, kind, var, init_aborts) = top_let_inputs(tl);
+            let g = (space, var);
+            let vi = table.get(var);
+            let storage = classify_storage(mutable, kind, &vi.ty, init_aborts);
+            globals.insert(g, SpacedGlobalInfo { storage, static_name: static_name(vi), decl: g });
+            by_key.insert(alias_key(vi), g);
+        }
+    };
+    each_top_let(0, &program.top_lets, &program.var_table);
+    for (i, m) in program.modules.iter().enumerate() {
+        each_top_let(i as SpaceId + 1, &m.top_lets, &m.var_table);
+    }
+    let mut alias: HashMap<GVar, GVar> = HashMap::new();
+    let mut offenders: Vec<String> = Vec::new();
+    let mut each_table = |space: SpaceId, table: &VarTable| {
+        for (i, vi) in table.entries.iter().enumerate() {
+            let g = (space, VarId(i as u32));
+            if vi.module_origin.is_none() || globals.contains_key(&g) {
+                continue;
+            }
+            match by_key.get(&alias_key(vi)) {
+                Some(&decl) => {
+                    alias.insert(g, decl);
+                }
+                None => offenders.push(format!(
+                    "space {} var #{} `{}` (origin {:?})",
+                    space, i, vi.name.as_str(), vi.module_origin
+                )),
+            }
+        }
+    };
+    each_table(0, &program.var_table);
+    for (i, m) in program.modules.iter().enumerate() {
+        each_table(i as SpaceId + 1, &m.var_table);
+    }
+    (globals, alias, offenders)
+}
+
 /// Build the decl table + resolve every module-origin use-site VarId to its
 /// declaration. Returns (globals, alias map, unresolved offenders).
 pub fn build_global_tables(
@@ -530,7 +782,7 @@ mod tests {
             is_effect: false, is_test: false,
             generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![],
             visibility: IrVisibility::Public, doc: None, blank_lines_before: 0, def_id: None,
-            mutated_params: vec![], module_origin: Some(module.to_string()),
+            mutated_params: vec![], module_origin: Some(module.to_string()), // fresh-fn: test fixture
         }
     }
     fn empty_module(name: &str) -> IrModule {

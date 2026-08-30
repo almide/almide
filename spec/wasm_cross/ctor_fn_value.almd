@@ -1,0 +1,27 @@
+// @contract: C-322
+// ALS-E27 (docs/specs/als/expressions.md): constructors as FUNCTION
+// VALUES (#1111). The builtin trio's bare reference synthesizes its
+// eta-expansion in the parser ((x) => some(x)), so every leg processes
+// the lambda form it already carries — cross-target identity by
+// construction, pinned here executably: bare some/ok/err through
+// list.map, a let-bound builtin ctor applied, a user 1-ary ctor mapped,
+// a user multi-arg ctor bound and applied ((A, B) -> T, no partial
+// application), and the 0-ary case as a plain value.
+type Shape = | Circle(Int) | Rect(Int, Int) | Dot
+
+effect fn main() -> Unit = {
+  let opts = [1, 2] |> list.map(some)
+  println(if opts == [some(1), some(2)] then "some-maps" else "BAD")
+  let oks: List[Result[Int, String]] = [3] |> list.map(ok)
+  println(if oks == [ok(3)] then "ok-maps" else "BAD")
+  let errs: List[Result[Int, String]] = ["e"] |> list.map(err)
+  println(if errs == [err("e")] then "err-maps" else "BAD")
+  let f = some
+  println(if f(7) == some(7) then "bound-applies" else "BAD")
+  let shapes = [1, 2] |> list.map(Circle)
+  println(if shapes == [Circle(1), Circle(2)] then "user-maps" else "BAD")
+  let mk = Rect
+  println(if mk(3, 4) == Rect(3, 4) then "multi-applies" else "BAD")
+  let d = Dot
+  println(if d == Dot then "zero-value" else "BAD")
+}

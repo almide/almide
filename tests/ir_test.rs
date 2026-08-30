@@ -1,3 +1,5 @@
+// The 3.14-style literals are arbitrary float fixtures, not math consts.
+#![allow(clippy::approx_constant)]
 use almide::ir::*;
 use almide::types::Ty;
 use almide::ast::Span;

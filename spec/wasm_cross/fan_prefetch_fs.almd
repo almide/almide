@@ -1,0 +1,59 @@
+// @contract: C-321
+// ALS-R3 (docs/specs/als/runtime.md): the fan PREFETCH lowering — a
+// fan.map whose whole arm body is one fs.read_text on the element is
+// lowered start-all-then-await-in-arm-order (#1628 increment 2b), and
+// that split must be UNOBSERVABLE: list-order results, the FIRST err in
+// ARM order decides, identical to native's sequential evaluation. On
+// hosts that overlap I/O (the p3 component's async-lowered open-at
+// subtasks, drained by a waitable set in ARM order) the same bytes must
+// come out; hosts that cannot overlap treat the start as a no-op (the
+// embedded harness host answers op 40 with ok(0) and re-dispatches the
+// read at the await). The p3 component leg of these same shapes is
+// pinned by tests/component_p3_test.rs::
+// p3_component_fan_prefetch_reads_concurrently, which additionally
+// asserts the artifact imports the async machinery so a silent
+// sequential fallback cannot pass.
+//
+// The err probe stacks TWO DIFFERENT failures (arm 2 a directory, arm 3
+// missing): a completion-order drain could surface either message, arm
+// order admits only arm 2's — so the err text itself certifies the
+// order. Probed BOTH ways: through a Result-returning wrapper fn, and
+// as the UN-banged fallible form directly in the caller — the shape
+// whose callback `!` used to abort on the structural leg (#1663, fixed:
+// the callback's ok-unwrap wrapper strips to the raw Result and the fan
+// accumulator provides the first-err semantics).
+//
+// SELF-CONTAINED: creates its own relative directory (C-137 relative-path
+// resolution) and removes it at the end.
+import fs
+
+effect fn read_all(paths: List[String]) -> Result[List[String], String] = fan.map(paths, (p) => fs.read_text(p)!)
+
+effect fn main() -> Unit = {
+  let dir = "almide_xt_fanpf_tmp"
+  let _ = fs.mkdir_p(dir)!
+  let _ = fs.write("almide_xt_fanpf_tmp/a.txt", "alpha")!
+  let _ = fs.write("almide_xt_fanpf_tmp/b.txt", "bravo")!
+  let _ = fs.write("almide_xt_fanpf_tmp/c.txt", "charlie")!
+  // Happy path: three prefetched reads, list-order results.
+  match read_all(["almide_xt_fanpf_tmp/a.txt", "almide_xt_fanpf_tmp/b.txt", "almide_xt_fanpf_tmp/c.txt"]) {
+    ok(texts) => println(texts |> list.join("|")),
+    err(m) => println("BAD happy err=${m}"),
+  }
+  // Err-order probe: arm 2 (a directory) and arm 3 (missing) fail with
+  // DIFFERENT messages; the result must carry arm 2's. The started
+  // arm-3 read drains without deciding.
+  match read_all(["almide_xt_fanpf_tmp/a.txt", "almide_xt_fanpf_tmp", "almide_xt_fanpf_tmp/gone.txt"]) {
+    ok(_) => println("BAD: err arm did not decide"),
+    err(m) => println("err=${m}"),
+  }
+  // The same probe as the UN-banged fallible form in the caller (#1663):
+  // the callback's `!` instantiates the fallible form and the first err
+  // in ARM order is the block's Result VALUE — never an abort.
+  let direct = fan.map(["almide_xt_fanpf_tmp/a.txt", "almide_xt_fanpf_tmp", "almide_xt_fanpf_tmp/gone.txt"], (p) => fs.read_text(p)!)
+  match direct {
+    ok(_) => println("BAD: direct err arm did not decide"),
+    err(m) => println("direct-err=${m}"),
+  }
+  let _ = fs.remove_all(dir)!
+}

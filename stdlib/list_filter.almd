@@ -5,7 +5,7 @@
 // capacity is harmless — the free-list reclaims by `cap`). The predicate is called EXACTLY
 // ONCE per element (single pass), so a (pure) predicate byte-matches v0. List[Int] only;
 // elements are i64 VALUES copied (no new heap), so nothing leaks. Result owned rc=1.
-fn __filter_fill(dh: Int, sh: Int, f: fn(Int) -> Bool, n: Int, i: Int, di: Int) -> Int = if i >= n then di
+fn __filter_fill(dh: Int, sh: Int, f: (Int) -> Bool, n: Int, i: Int, di: Int) -> Int = if i >= n then di
 else {
   let x = prim.load64(sh + 12 + i * 8)
   let keep = f(x)
@@ -17,7 +17,7 @@ else {
   }
 }
 
-fn list_filter(xs: List[Int], f: fn(Int) -> Bool) -> List[Int] = {
+fn list_filter(xs: List[Int], f: (Int) -> Bool) -> List[Int] = {
   let n = list.len(xs)
   let buf = prim.alloc_list(n)
   let count = __filter_fill(prim.handle(buf), prim.handle(xs), f, n, 0, 0)

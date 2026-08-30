@@ -1,0 +1,50 @@
+# The WASI/Component-Model version-pin policy (#1628 stage 4).
+#
+# WASI 0.3.x cuts a minor every two months and minors ADD WIT-language
+# requirements (0.3.1 already requires `map<K,V>` / `implements`), so
+# "which WASI minor the p3 leg targets" is a LEDGER ROW, not an
+# assumption — and every place that row's facts appear in the tree is
+# re-derived against this file by scripts/check-wasi-pins.sh (CI
+# `checks` job): a drifted pin fails the gate naming the file that
+# moved.
+#
+# Change protocol: bump a field here IN THE SAME PR as the thing that
+# moved (a vendored-WIT upgrade, a wasmtime major, a flag change), with
+# the upstream release named in `sources`. The wasm-tools family
+# (wasmparser / wasm-encoder / wit-component / wit-parser) moves in
+# LOCKSTEP (session doctrine — split-family versions have broken parses
+# before); the gate checks the workspace pins agree with each other.
+
+[wasi]
+# The WASI minor the p3 component leg targets. The vendored WIT under
+# crates/almide-wasm-run/wit/p3/ carries interfaces at EXACTLY this
+# version, copied from the RUNTIME's vendored tree (the runtime's copy
+# is the ground truth, not wasi-cli's draft tags — the rc-2025-09-16
+# draft had `async func` stdio while the ratified 0.3.0 ships
+# write-via-stream sync+future, and only the runtime tree showed it).
+minor = "0.3.0"
+
+[runtime]
+# wasmtime floor for the p3 leg: 46 is the first release running p3 BY
+# DEFAULT; LTS 36 has NO default p3 (documented refusal, not a target).
+# `crate_major` is the embedded host's Cargo pin; `ci` is the release CI
+# installs for the execution legs.
+floor = 46
+crate_major = 47
+ci = "v47.0.3"
+# The flag surface the p3 execution legs pass (47.x): -S p3=y alone
+# refuses sync stream builtins — the 🚝 more-async-builtins gate is
+# load-bearing.
+flags = "-W component-model-async=y,component-model-more-async-builtins=y -S p3=y"
+
+[wasm-tools]
+# The lockstep family version (workspace Cargo pins).
+family = "0.257"
+
+[sources]
+# Dated upstream evidence for the rows above.
+evidence = [
+  "WASI v0.3.0 release 2026-06-11; v0.3.1 2026-08-11 (github.com/WebAssembly/WASI/releases)",
+  "wasmtime 46 release notes: wasi:cli@0.3.0 default-on (p3)",
+  "wasmtime v47.0.2 vendored crates/wasi/src/p3/wit — the WIT shapes the almide p3 leg transcribed (2026-08-27/28 survey, ../almide-references/RESEARCH-component-model.md)",
+]

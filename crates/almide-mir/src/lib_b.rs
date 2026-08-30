@@ -4,16 +4,21 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PrimKind {
     /// Stage 2 budget region entry: arg = budget in ns; converts to charge
-    /// units (CM-1 v0: 1000ns per charge), saves the outer remaining fuel
-    /// (the result), sets fuel = min(budget_units, outer) — EIP-150 min-cap.
+    /// units (CM-1 v0: 1000ns per charge; clamped >= 0), saves the outer
+    /// remaining fuel (the result, also stashed in the `__b_saved` global for
+    /// the C-320 reap), sets fuel = min(budget_units, outer) — EIP-150
+    /// min-cap. While a region is open `__fuel_entry` >= 0; exit disarms it.
     BudgetEnter,
     /// 1 iff the current region overspent (fuel went negative) — the
     /// exhaustion verdict read AFTER the body ran (lazy check; the model's
-    /// verified overrun form).
+    /// verified overrun form). C-320: if `__fuel_entry` is still armed, a
+    /// strict cut returned from the region fn past BudgetExit — this read
+    /// performs the identical exit bookkeeping first (verdict/spend/fuel
+    /// restore from `__b_saved`): "a cut books like a normal exit".
     BudgetExhausted,
-    /// Restore the outer counter: arg = saved; fuel = saved - consumed.
-    /// Streaming semantics: the inner spend (even past the budget) drains
-    /// the outer region too.
+    /// Restore the outer counter: arg = saved; fuel = saved - consumed;
+    /// disarms `__fuel_entry` (-1). Streaming semantics: the inner spend
+    /// (even past the budget) drains the outer region too.
     BudgetExit,
     /// Read the PERSISTED consumed amount of the most recently exited region
     /// (set by BudgetExit) — the per-arm spend the race winner fold compares.

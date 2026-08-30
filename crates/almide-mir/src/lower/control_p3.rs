@@ -149,6 +149,29 @@ impl LowerCtx {
                 return None;
             }
         }
+        // The RESULT twin (#1582): a `Result[record, _] ?? <record fallback>`
+        // taken here rode the value-position variant match, which ACCEPTS the
+        // shape and misreads it — the ok arm bound an empty field, the err
+        // arm garbage bytes, with no wall (the silent-wrong class). DECLINE
+        // outright: the bind-position caller then rewrites to the explicit
+        // `match e { ok(p) => p, err(_) => d }` through the PROVEN
+        // bind-position heap-match machinery (measured byte-identical to the
+        // user-written match on both targets), and a value-position `??`
+        // walls honestly instead of fabricating a record. Gated on a
+        // record-typed Ok payload (any registered record — an all-scalar
+        // record's field read misreads the same way).
+        if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, a) = &expr.ty
+        {
+            if a.len() == 2 {
+                if let Ty::Named(n, _) = &a[0] {
+                    if crate::lower::canonical_record_key(&self.record_layouts, n.as_str())
+                        .is_some()
+                    {
+                        return None;
+                    }
+                }
+            }
+        }
         // #1418 SPECULATIVE ORDER INVERSION (scalar slice): try the MATCH form
         // FIRST — `e ?? d` as `match e { ok(p) => p, err(_) => d }` (Roc's
         // canonical desugar, character-identical) through the generic scalar

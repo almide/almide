@@ -174,10 +174,14 @@ impl Checker {
 
     // ── Declaration checking ──
 
-    /// Push generic type vars, structural bounds, and protocol bounds into the environment.
-    fn enter_generics(&mut self, generics: &Option<Vec<ast::GenericParam>>) {
+    /// Push generic type vars, structural bounds, and protocol bounds into the
+    /// environment. Returns the SHADOWED `env.types` bindings so
+    /// `exit_generics` can restore them — a generic letter shadows a
+    /// same-named type for one declaration, it must not destroy it (#1574).
+    fn enter_generics(&mut self, generics: &Option<Vec<ast::GenericParam>>) -> Vec<(Sym, Option<Ty>)> {
         use crate::canonicalize::registration::SCALAR_TYPE_NAMES;
-        let gs = match generics { Some(gs) => gs, None => return };
+        let mut shadowed: Vec<(Sym, Option<Ty>)> = Vec::new();
+        let gs = match generics { Some(gs) => gs, None => return shadowed };
         for g in gs.iter() {
             // A const param is a generic with a single scalar type bound. The
             // bound is carried out of the same expression that tests for it —
@@ -190,9 +194,11 @@ impl Checker {
             let is_const = const_bound.is_some();
             if let Some(bound) = const_bound {
                 let ty = self.resolve_type_expr(&ast::TypeExpr::Simple { name: sym(&bound) });
-                self.env.types.insert(sym(&g.name), Ty::ConstParam { name: sym(&g.name), ty: Box::new(ty) });
+                let prev = self.env.types.insert(sym(&g.name), Ty::ConstParam { name: sym(&g.name), ty: Box::new(ty) });
+                shadowed.push((sym(&g.name), prev));
             } else {
-                self.env.types.insert(sym(&g.name), Ty::TypeVar(sym(&g.name)));
+                let prev = self.env.types.insert(sym(&g.name), Ty::TypeVar(sym(&g.name)));
+                shadowed.push((sym(&g.name), prev));
             }
             if let Some(bte) = &g.structural_bound {
                 let bt = self.resolve_type_expr(bte);
@@ -204,15 +210,24 @@ impl Checker {
                 }
             }
         }
+        shadowed
     }
 
-    /// Remove generic type vars, structural bounds, and protocol bounds from the environment.
-    fn exit_generics(&mut self, generics: &Option<Vec<ast::GenericParam>>) {
-        let gs = match generics { Some(gs) => gs, None => return };
-        for g in gs.iter() {
-            self.env.types.remove(&sym(&g.name));
-            self.env.structural_bounds.remove(&sym(&g.name));
-            self.env.generic_protocol_bounds.remove(&sym(&g.name));
+    /// Remove generic structural/protocol bounds and RESTORE the `env.types`
+    /// bindings the generic letters shadowed (#1574).
+    fn exit_generics(&mut self, generics: &Option<Vec<ast::GenericParam>>, shadowed: Vec<(Sym, Option<Ty>)>) {
+        if let Some(gs) = generics {
+            for g in gs.iter() {
+                self.env.types.remove(&sym(&g.name));
+                self.env.structural_bounds.remove(&sym(&g.name));
+                self.env.generic_protocol_bounds.remove(&sym(&g.name));
+            }
+        }
+        for (gn, prev) in shadowed.into_iter().rev() {
+            match prev {
+                Some(t) => { self.env.types.insert(gn, t); }
+                None => { self.env.types.remove(&gn); }
+            }
         }
     }
 
@@ -302,7 +317,7 @@ impl Checker {
     fn check_fn_decl(&mut self, name: &str, decl: FnToCheck<'_>) {
         let FnToCheck { params, return_type, body, effect, generics } = decl;
         self.env.push_scope();
-        self.enter_generics(generics);
+        let shadowed_generics = self.enter_generics(generics);
         // A bare `self` first param is sugar for `self: Self` (see
         // registration.rs's matching fix). `Self` only stays an unresolved
         // placeholder inside a `protocol { ... }` declaration; on an actual
@@ -352,7 +367,7 @@ impl Checker {
             self.constrain_with_hint(ret_ty, body_ity, format!("fn '{}'", name), hint);
         }
         self.env.current_ret = prev.0; self.env.can_call_effect = prev.1; self.env.auto_unwrap = prev.2; self.env.lambda_depth = prev.3;
-        self.exit_generics(generics);
+        self.exit_generics(generics, shadowed_generics);
         self.env.pop_scope();
     }
 

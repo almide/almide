@@ -1,0 +1,15 @@
+// @contract: C-070
+// Graduated from proofs/wall-corpus/nested_tuple_pattern.almd at the commissioning
+// switchover: the structural emitter lowers the shape the incumbent
+// refused (scalar binding outside the value subset), byte-verified on both targets.
+// grain pattern_matching.re tuple_match_deep: a NESTED tuple pattern
+// (`(a, (d, e), c)`) — the inner tuple destructure inside a match binding
+// is outside the wasm value subset (the permissive path would defer the
+// binding to Const 0 and pick a silently wrong sum). FLAT tuple patterns
+// of any width vote (grain_pattern_destructure.almd).
+fn main() -> Unit = {
+  let t3 = match (1, (4, 5), 3) {
+    (a, (d, e), c) => a + c + d + e
+  }
+  println(int.to_string(t3))
+}

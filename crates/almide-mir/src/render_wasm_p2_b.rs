@@ -330,8 +330,17 @@ fn render_op_prim(
         let d = local(dst.expect("BudgetEnter has a result"));
         let a = local(args[0]);
         let cm1 = crate::charge_probe::CM1_NS_PER_CHARGE;
+        // The units clamp keeps $__fuel_entry >= 0 while a region is open, so
+        // entry < 0 unambiguously means "no region awaiting exit bookkeeping"
+        // (the C-320 reap sentinel consulted by BudgetExhausted). $__b_saved
+        // duplicates the result because a strict cut returns from the region
+        // fn without reaching BudgetExit, whose saved operand dies with that
+        // frame — the reap needs it from a global.
         return format!(
             "    (global.set $__fuel_entry (i64.div_s (local.get {a}) (i64.const {cm1})))\n\
+                 (if (i64.lt_s (global.get $__fuel_entry) (i64.const 0))\n\
+                   (then (global.set $__fuel_entry (i64.const 0))))\n\
+                 (global.set $__b_saved (global.get $__fuel))\n\
                  (local.set {d} (global.get $__fuel))\n\
                  (if (i64.lt_s (global.get $__fuel_entry) (global.get $__fuel))\n\
                    (then (global.set $__fuel (global.get $__fuel_entry))))\n"
@@ -373,8 +382,22 @@ fn render_op_prim(
         // Reads the PERSISTED verdict of the most recently exited region (set
         // by BudgetExit), so the caller can consult it after the counter was
         // restored — the scalar path that keeps Result off the native rung.
+        // C-320 reap: a strict cut returned from the region fn WITHOUT running
+        // BudgetExit, leaving $__fuel_entry armed (>= 0). This read sits at
+        // the one place every region converges — the wrapper's verdict bind
+        // right after the region call — so it performs the missed exit
+        // bookkeeping first (same arithmetic, saved from $__b_saved), keeping
+        // "a cut books like a normal exit" true on every path.
         let d = local(dst.expect("BudgetExhausted has a result"));
-        return format!("    (local.set {d} (global.get $__b_verdict))\n");
+        return format!(
+            "    (if (i64.ge_s (global.get $__fuel_entry) (i64.const 0))\n\
+                   (then\n\
+                     (global.set $__b_verdict (i64.extend_i32_u (i64.lt_s (global.get $__fuel) (i64.const 0))))\n\
+                     (global.set $__b_spend (i64.sub (global.get $__fuel_entry) (global.get $__fuel)))\n\
+                     (global.set $__fuel (i64.sub (global.get $__b_saved) (global.get $__b_spend)))\n\
+                     (global.set $__fuel_entry (i64.const -1))))\n\
+                 (local.set {d} (global.get $__b_verdict))\n"
+        );
     }
     if let PrimKind::BudgetExit = kind {
         let d = local(dst.expect("BudgetExit has a result"));
@@ -383,6 +406,7 @@ fn render_op_prim(
             "    (global.set $__b_verdict (i64.extend_i32_u (i64.lt_s (global.get $__fuel) (i64.const 0))))\n\
                  (global.set $__b_spend (i64.sub (global.get $__fuel_entry) (global.get $__fuel)))\n\
                  (global.set $__fuel (i64.sub (local.get {a}) (global.get $__b_spend)))\n\
+                 (global.set $__fuel_entry (i64.const -1))\n\
                  (local.set {d} (i64.const 0))\n"
         );
     }

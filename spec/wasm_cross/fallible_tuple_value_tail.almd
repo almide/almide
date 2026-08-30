@@ -1,0 +1,54 @@
+// @contract: C-158
+// #1578: a `-> (A, B)!` fn whose body is a PLAIN VALUE TAIL lifts to
+// ok((..)) and returns the real pair — the fn-tail position admits the same
+// payload family as the heap-result arm position (the tail is a degenerate
+// single arm, routed through the same `lower_heap_result_arm`). Before the
+// fix the tail-position router was a pointwise ctor list with no entry for
+// a scalar pair, a record pair, or a record-String pair: the identical
+// payload passed the moment the body had any branch (an err arm, a two-ok
+// `if`) and walled without one. Never-err and can-err spellings both pin,
+// plus the err path itself.
+type A = { x: Int }
+
+type B = { y: Int }
+
+fn scalar_pair(n: Int) -> (Int, Int)! = {
+  let d = n + 1
+  (d, 2)
+}
+
+fn record_pair(n: Int) -> (A, B)! = {
+  let d = n + 1
+  (A { x: n }, B { y: d })
+}
+
+fn record_str(n: Int) -> (A, String)! = {
+  let d = n + 1
+  (A { x: d }, "ok")
+}
+
+fn guarded(n: Int) -> (Int, Int)! = {
+  guard n > 0 else err("neg")
+  let d = n + 1
+  (d, 2)
+}
+
+effect fn main() -> Unit = {
+  let p = scalar_pair(41)!
+  println("${p.0 + p.1}")
+  // 44
+  let q = record_pair(41)!
+  println("${q.0.x + q.1.y}")
+  // 83
+  let r = record_str(41)!
+  println("${r.0.x}")
+  // 42
+  println(r.1)
+  // ok
+  let s = guarded(41)!
+  println("${s.0 + s.1}")
+  // 44
+  let t = guarded(-1) ?? (0, 0)
+  // 0 — the err path takes the fallback
+  println("${t.0 + t.1}")
+}

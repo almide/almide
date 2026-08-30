@@ -1,0 +1,11 @@
+// ALS-B5: branch inside the body instead of exiting it early.
+@bounded
+fn sum_odds() -> Int = {
+  var acc = 0
+  for i in 0..<10 {
+    acc = acc + (if i % 2 == 0 then 0 else i)
+  }
+  acc
+}
+
+fn main() -> Unit = println("${sum_odds()}")

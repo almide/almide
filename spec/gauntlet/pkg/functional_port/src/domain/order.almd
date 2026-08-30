@@ -1,0 +1,28 @@
+import self.domain.money
+
+type OrderStatus: Eq, Repr, Codec = | Draft | Placed | Cancelled
+
+type OrderLine: Eq, Repr = { sku: String, qty: Int, unit_price: money.Money }
+
+type Order: Eq, Repr = { id: String, customer: String, lines: List[OrderLine], status: OrderStatus }
+
+fn new_order(id: String, customer: String) -> Order = Order { id: id, customer: customer, lines: [], status: Draft }
+
+fn Order.total(self) -> money.Money! = self.lines |> list.map((l) => money.times(l.unit_price, l.qty)!)! |> list.fold(money.zero(), (acc, m) => money.add(acc, m))
+
+fn Order.add_line(self, line: OrderLine) -> Order! = {
+  guard self.status == Draft else err("cannot modify an order in status ${self.status}")
+  guard line.qty > 0 else err("line quantity must be positive: ${line.qty}")
+  { ...self, lines: self.lines + [line] }
+}
+
+fn Order.place(self) -> Order! = {
+  guard self.status == Draft else err("order ${self.id} is already ${self.status}")
+  guard list.len(self.lines) > 0 else err("cannot place an empty order")
+  { ...self, status: Placed }
+}
+
+fn Order.cancel(self) -> Order! = {
+  guard self.status != Cancelled else err("order ${self.id} is already cancelled")
+  { ...self, status: Cancelled }
+}

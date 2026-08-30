@@ -198,5 +198,9 @@ pub fn plus_one_events_backed(func: &MirFunction) -> bool {
         .count();
     let dups = func.ops.iter().filter(|o| matches!(o, crate::Op::Dup { .. })).count();
     let merge_credits = merge_dst_i_credits(func);
-    i == allocs + heap_results + merge_credits && a == dups
+    // Single-condition decisions (MC/DC ledger, #566): && as early return.
+    if i != allocs + heap_results + merge_credits {
+        return false;
+    }
+    a == dups
 }

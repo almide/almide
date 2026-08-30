@@ -1,0 +1,62 @@
+# MC/DC DECISION LEDGER (#566 rung 2) — every boolean-operator site in the
+# safety set, each resolved or pending. Regenerate rows: proofs/mcdc-ledger.sh
+# --write (hand-written resolution/tests/note fields survive by id). A
+# `vectors` row names unit tests demonstrating each operand's INDEPENDENT
+# effect on the outcome (the MC/DC pair); `refactored` rows disappear when the
+# site stops scanning; `pending` is a shrink-only debt.
+#
+# pending_ceiling = "0"
+
+[[site]]
+id = "d144f08238"
+file = "crates/almide-codegen/src/perceus_verified.rs"
+line = "87"
+op = "&&"
+excerpt = "if !matches!(info.mutability, almide_ir::Mutability::Var) && decs > incs + 1 {"
+resolution = "vectors"
+tests = "crates/almide-codegen/tests/mcdc_perceus_vectors_test.rs::site87_baseline_immutable_overdec_reports_double_free, crates/almide-codegen/tests/mcdc_perceus_vectors_test.rs::site87_c1_mutability_alone_suppresses_double_free, crates/almide-codegen/tests/mcdc_perceus_vectors_test.rs::site87_c2_balance_alone_suppresses_double_free"
+
+[[site]]
+id = "c6daa3639c"
+file = "crates/almide-codegen/src/perceus_verified.rs"
+line = "211"
+op = "&&"
+excerpt = "if decs == 0 && !is_mutable && !ctx.moved_out_vars.contains(var) {"
+resolution = "vectors"
+tests = "crates/almide-codegen/tests/mcdc_perceus_vectors_test.rs::site207_baseline_undecced_immutable_unmoved_reports_leak, crates/almide-codegen/tests/mcdc_perceus_vectors_test.rs::site207_c1_a_dec_alone_suppresses_the_leak, crates/almide-codegen/tests/mcdc_perceus_vectors_test.rs::site207_c2_mutability_alone_suppresses_the_leak, crates/almide-codegen/tests/mcdc_perceus_vectors_test.rs::site207_c3_moved_out_alone_suppresses_the_leak"
+
+[[site]]
+id = "793e81bbe8"
+file = "crates/almide-codegen/src/perceus_verified.rs"
+line = "211"
+op = "&&"
+excerpt = "if decs == 0 && !is_mutable && !ctx.moved_out_vars.contains(var) {"
+resolution = "vectors"
+tests = "crates/almide-codegen/tests/mcdc_perceus_vectors_test.rs::site207_baseline_undecced_immutable_unmoved_reports_leak, crates/almide-codegen/tests/mcdc_perceus_vectors_test.rs::site207_c1_a_dec_alone_suppresses_the_leak, crates/almide-codegen/tests/mcdc_perceus_vectors_test.rs::site207_c2_mutability_alone_suppresses_the_leak, crates/almide-codegen/tests/mcdc_perceus_vectors_test.rs::site207_c3_moved_out_alone_suppresses_the_leak"
+
+[[site]]
+id = "f77e06ee65"
+file = "crates/almide-codegen/src/perceus_verified.rs"
+line = "217"
+op = "&&"
+excerpt = "if !is_mutable && decs > incs + 1 {"
+resolution = "vectors"
+tests = "crates/almide-codegen/tests/mcdc_perceus_vectors_test.rs::site213_baseline_immutable_overdec_reports_double_free, crates/almide-codegen/tests/mcdc_perceus_vectors_test.rs::site213_c1_mutability_alone_suppresses_double_free, crates/almide-codegen/tests/mcdc_perceus_vectors_test.rs::site213_c2_balance_alone_suppresses_double_free"
+
+[[site]]
+id = "11cfddc353"
+file = "crates/almide-frontend/src/check/calls.rs"
+line = "411"
+op = "&&"
+excerpt = "if sig.is_effect && !self.env.can_call_effect {"
+resolution = "vectors"
+tests = "tests/mcdc_effect_vectors_test.rs::site402_baseline_effect_callee_from_pure_fn_is_e006, tests/mcdc_effect_vectors_test.rs::site402_c1_pure_callee_alone_is_clean, tests/mcdc_effect_vectors_test.rs::site402_c2_effect_caller_alone_is_clean"
+
+[[site]]
+id = "2bc2167940"
+file = "crates/almide-frontend/src/check/calls.rs"
+line = "458"
+op = "||"
+excerpt = "if arg_tys.len() < min_params || arg_tys.len() > sig.params.len() {"
+resolution = "vectors"
+tests = "tests/mcdc_effect_vectors_test.rs::site449_baseline_exact_arity_is_clean, tests/mcdc_effect_vectors_test.rs::site449_c1_too_few_arguments_alone_is_e004, tests/mcdc_effect_vectors_test.rs::site449_c2_too_many_arguments_alone_is_e004"

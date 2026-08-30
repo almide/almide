@@ -113,10 +113,12 @@ almide test                      # Find all .almd with test blocks (recursive)
 almide test spec/lang/           # Run tests in a directory
 almide test spec/lang/expr_test.almd  # Run a single test file
 almide test --run "pattern"      # Filter tests by name
+almide bench app.almd            # Verify-then-time (median; --target wasm for the embedded host)
 almide compile                    # Module interface (project)
 almide compile parser             # Module interface (by name)
 almide compile app.almd --json    # Module interface (JSON)
 almide check app.almd             # Type check only
+almide check app.almd --profile critical --allow IO  # Critical profile (#567): bounded rules on every fn, capabilities deny-all
 almide fmt app.almd               # Format source
 almide fmt --check spec/          # Formatting gate (non-zero on drift)
 almide fmt --no-import-edit stdlib/  # Format WITHOUT touching imports (splice-context sources)
@@ -288,7 +290,7 @@ parse_int(s)!                          // unwrap, propagate err (effect fn only)
 
 ### Imports
 - Stdlib modules (`string`, `int`, `float`, `list`, `value`, `map`, `set`, `math`, `datetime`, `error`, `bytes`, sized ints, etc.) are auto-imported — do NOT write `import string`. Authoritative lists: `import_table.rs` seed + `AUTO_IMPORT_BUNDLED` in `stdlib_info.rs`
-- `json`, `fs`, `http`, `env`, `io`, `random`, `regex`, `process`, `testing` require explicit `import`
+- `json`, `fs`, `http`, `env`, `io`, `random`, `regex`, `process`, `testing`, `url` require explicit `import`
 - External packages require `import pkg_name`
 - Package self-reference: `import self as pkg_name`
 

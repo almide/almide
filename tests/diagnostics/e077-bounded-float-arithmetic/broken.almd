@@ -1,0 +1,5 @@
+// ALS-B10: Float arithmetic is provisionally outside the profile — not admissible.
+@bounded
+fn scale(x: Float) -> Float = x * 2.0
+
+fn main() -> Unit = println(float.to_string(scale(1.5)))

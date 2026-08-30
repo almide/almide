@@ -22,7 +22,10 @@ export LC_ALL=C
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-EXEMPT="E054 E033 E420"
+# E081 fires in the BUILD path (--target wasm availability, #1423) — the
+# check-harness fixture format cannot reach it; its pin is
+# tests/wasm_availability_e081_test.rs (the E054 precedent).
+EXEMPT="E054 E033 E420 E081"
 
 fail=0
 backlog=""

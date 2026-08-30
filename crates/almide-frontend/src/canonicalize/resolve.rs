@@ -32,6 +32,16 @@ pub fn resolve_type_expr(te: &ast::TypeExpr, known_types: Option<&HashMap<Sym, T
 ///   also falls through to bare).
 /// - Stdlib / local / unknown names → None (stay bare).
 pub fn canonical_user_type_sym(name: &str, types: &HashMap<Sym, Ty>, cur_mod: Option<&str>) -> Option<Sym> {
+    // A name the CURRENT resolution scope binds as a type variable (a
+    // generic letter shadowed in by an overlay or registration scope) is a
+    // bound variable, never a reference to a module's nominal type —
+    // `fn go[Q](c: Q)` must not resolve `Q` to an imported `infra.Q`
+    // (#1577). Without this the qualified canonicalization outranked the
+    // TypeVar binding, mono saw a nominal param with no type var anywhere,
+    // and the call site dangled unspecialized on both targets.
+    if matches!(types.get(&sym(name)), Some(Ty::TypeVar(_) | Ty::ConstParam { .. })) {
+        return None;
+    }
     canonical_user_type_sym_own_module(name, types, cur_mod)
         .or_else(|| canonical_user_type_sym_qualified(name, types))
         .or_else(|| canonical_user_type_sym_sibling(name, types, cur_mod))

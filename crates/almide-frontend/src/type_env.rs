@@ -16,6 +16,7 @@ pub struct EnvKeySnapshot {
     top_lets: std::collections::HashSet<Sym>,
 }
 
+#[derive(Clone)]
 pub struct TypeEnv {
     /// User-defined type declarations: name -> Ty
     pub types: std::collections::HashMap<Sym, Ty>,
@@ -51,8 +52,6 @@ pub struct TypeEnv {
     /// diagnostic can say "move the effect out of the region" instead of
     /// the misleading "mark the caller as effect fn" (the caller already is).
     pub metered_region: Option<&'static str>,
-    /// Set of effect function names
-    pub effect_fns: std::collections::HashSet<Sym>,
     /// Variant constructor name -> candidate (variant type name, case info) list.
     /// Usually one entry; MORE than one when the same constructor name is declared
     /// in multiple variant types (e.g. a local type and a dependency's) — an
@@ -189,7 +188,6 @@ impl TypeEnv {
             auto_unwrap: false,
             can_call_effect: false,
             metered_region: None,
-            effect_fns: std::collections::HashSet::new(),
             constructors: std::collections::HashMap::new(),
             user_modules: std::collections::HashSet::new(),
             dep_root_modules: std::collections::HashSet::new(),

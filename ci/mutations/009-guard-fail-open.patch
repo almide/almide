@@ -1,0 +1,13 @@
+diff --git a/crates/almide-wasm/src/patterns.rs b/crates/almide-wasm/src/patterns.rs
+index bc381bb31..e68b0ef1a 100644
+--- a/crates/almide-wasm/src/patterns.rs
++++ b/crates/almide-wasm/src/patterns.rs
+@@ -71,7 +71,7 @@ impl Emitter<'_> {
+                 self.f.instructions().if_(BlockType::Result(ValType::I32));
+                 self.emit_pattern_binds(&arm.pattern, subj_ty, scr)?;
+                 self.lower(g, Some(BOOL))?;
+-                self.f.instructions().else_().i32_const(0).end();
++                self.f.instructions().else_().i32_const(1).end();
+             }
+         }
+         let bt = match result {

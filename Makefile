@@ -74,11 +74,14 @@ receipt:
 
 # Real verdicts, real trees: the old recipe discarded both exit codes with
 # `|| true` and pointed the Almide formatter at src/ — which contains only
-# .rs files (#984). The .almd trees CI gates are spec/ and examples/ (#919);
-# stdlib/ stays out until the formatter-style question settles.
+# .rs files (#984). The .almd trees CI gates are spec/, examples/ and
+# stdlib/ (#919, #1462) — stdlib under --no-import-edit: its sources are
+# splice-context, and import auto-insertion is the one transform that
+# corrupts them.
 fmt:
 	cargo fmt
 	$(BIN) fmt spec/ examples/
+	$(BIN) fmt --no-import-edit stdlib/
 
 ## Clean
 

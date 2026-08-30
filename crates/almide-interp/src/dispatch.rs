@@ -588,21 +588,38 @@ impl<'a> Interpreter<'a> {
         };
         match symbol {
             "almide_rt_prim_budget_enter" => {
-                let units = int0() / almide_lang::time_units::CM1_NS_PER_CHARGE;
+                let units = (int0() / almide_lang::time_units::CM1_NS_PER_CHARGE).max(0);
                 self.det_entry.set(units);
                 let saved = self.det_fuel.get();
+                self.det_saved.set(saved);
                 if units < saved {
                     self.det_fuel.set(units);
                 }
                 self.det_region_depth.set(self.det_region_depth.get() + 1);
                 Flow::val(Value::Int(saved))
             }
-            "almide_rt_prim_budget_exhausted" => Flow::val(Value::Int(self.det_verdict.get())),
+            "almide_rt_prim_budget_exhausted" => {
+                // C-320 reap: a det_cut returned from the region fn without
+                // reaching the exit prim, leaving det_entry armed (>= 0 while
+                // a region is open — the enter clamp's invariant). Perform
+                // the missed exit bookkeeping first — same arithmetic, saved
+                // taken from det_saved — exactly as the backend renders do.
+                if self.det_entry.get() >= 0 {
+                    self.det_verdict.set(i64::from(self.det_fuel.get() < 0));
+                    let consumed = self.det_entry.get() - self.det_fuel.get();
+                    self.det_spend.set(consumed);
+                    self.det_fuel.set(self.det_saved.get() - consumed);
+                    self.det_entry.set(-1);
+                    self.det_region_depth.set(self.det_region_depth.get().saturating_sub(1));
+                }
+                Flow::val(Value::Int(self.det_verdict.get()))
+            }
             "almide_rt_prim_budget_exit" => {
                 self.det_verdict.set(i64::from(self.det_fuel.get() < 0));
                 let consumed = self.det_entry.get() - self.det_fuel.get();
                 self.det_spend.set(consumed);
                 self.det_fuel.set(int0() - consumed);
+                self.det_entry.set(-1);
                 self.det_region_depth.set(self.det_region_depth.get().saturating_sub(1));
                 Flow::val(Value::Int(0))
             }
@@ -1805,9 +1822,11 @@ impl<'a> Interpreter<'a> {
             let clo = Closure {
                 params,
                 body: Rc::new(func.body.clone()),
-                // Top-level fn closes only over top-level lets, modeled by the
-                // root scope.
-                captured: self.root_scope(),
+                // A named fn closes only over top-level lets — the frame of
+                // the SPACE its body's VarIds index (#1602: a module `__`
+                // helper in the flat table captures its module's frame, not
+                // the root's).
+                captured: self.space_scope(self.fn_space_of(func)).clone(),
                 // The fn's DECLARED return type rides along so the closure
                 // boundary can run the same #1226 read-back a direct call
                 // gets (value.as_array as an FnRef leaked raw addresses).

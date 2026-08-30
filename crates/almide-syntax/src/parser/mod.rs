@@ -21,6 +21,7 @@ mod recovery;
 mod statements;
 mod test_attributes;
 mod test_expr_precedence;
+mod test_multiline_tuple;
 mod types;
 
 use crate::lexer::{Token, TokenType};

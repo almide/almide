@@ -92,6 +92,8 @@ pub struct RenderContext<'a> {
     pub minimal_generic_bounds: bool,
     /// Emit `#[repr(C)]` on structs/enums for stable C ABI layout.
     pub repr_c: bool,
+    /// #572: emit `// almd:` anchor comments on every rendered fn.
+    pub trace: bool,
     /// VarIds of current fn params emitted as Rust references (`&T`,
     /// `&[T]`, `&str`). Used by the Borrow walker to avoid
     /// double-borrowing an already-reference binding.
@@ -123,7 +125,7 @@ pub struct RenderContext<'a> {
 
 impl<'a> RenderContext<'a> {
     pub fn new(templates: &'a TemplateSet, var_table: &'a VarTable) -> Self {
-        Self { templates, var_table, indent: 0, target: Target::Rust, auto_unwrap: false, is_test: false, ann: std::rc::Rc::new(CodegenAnnotations::default()), type_aliases: std::rc::Rc::new(std::collections::HashMap::new()), generic_types: std::rc::Rc::new(std::collections::HashSet::new()), minimal_generic_bounds: false, repr_c: false, ref_params: std::collections::HashSet::new(), ref_mut_params: std::collections::HashSet::new(), param_vars: std::collections::HashSet::new(), repr_named_types: std::rc::Rc::new(std::collections::HashSet::new()), fn_err_ty: None }
+        Self { templates, var_table, indent: 0, target: Target::Rust, auto_unwrap: false, is_test: false, trace: false, ann: std::rc::Rc::new(CodegenAnnotations::default()), type_aliases: std::rc::Rc::new(std::collections::HashMap::new()), generic_types: std::rc::Rc::new(std::collections::HashSet::new()), minimal_generic_bounds: false, repr_c: false, ref_params: std::collections::HashSet::new(), ref_mut_params: std::collections::HashSet::new(), param_vars: std::collections::HashSet::new(), repr_named_types: std::rc::Rc::new(std::collections::HashSet::new()), fn_err_ty: None }
     }
 
     pub fn with_target(mut self, target: Target) -> Self {
@@ -416,6 +418,19 @@ fn wrap_main_fn_code(fn_code: String, ctx: &RenderContext, is_rust_effect_main: 
 }
 
 pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
+    let body = render_function_inner(ctx, func);
+    // #572: the source-to-generated anchor — one comment per rendered fn,
+    // keyed to the BODY's source line (IrFunction carries no decl span;
+    // the body span is the correspondence unit the sidecar map scans).
+    if ctx.trace && !body.is_empty() {
+        if let Some(sp) = &func.body.span {
+            return format!("// almd: fn {} @ line {}\n{}", func.name, sp.line, body);
+        }
+    }
+    body
+}
+
+fn render_function_inner(ctx: &RenderContext, func: &IrFunction) -> String {
     // Collect VarIds of fn params that will be emitted as references
     // (`&T` / `&[T]` / `&str`). The Borrow walker uses this to skip
     // outer `&` wrap on already-borrowed bindings.
@@ -484,6 +499,7 @@ fn fn_render_context<'a>(
         generic_types: ctx.generic_types.clone(),
         minimal_generic_bounds: ctx.minimal_generic_bounds,
         repr_c: ctx.repr_c,
+        trace: ctx.trace,
         ref_params,
         ref_mut_params,
         param_vars: func.params.iter().map(|p| p.var).collect(),

@@ -1,0 +1,53 @@
+// #1569: the fallibility marker parses in a PROTOCOL method's return
+// position — `-> R!E` (typed error) and `-> R!` (String default) — exactly
+// as on a free fn. The checker already accepted a declaration/impl spelling
+// mismatch (protocol Result[R, E] vs impl R!E); only the parse was missing.
+type E: Eq, Repr = | Bad(String)
+
+type R: Eq, Repr = { id: String }
+
+protocol P {
+  fn get(self, id: String) -> R!E
+  fn head(self) -> R!
+}
+
+type Store: P = { rows: List[R] }
+
+fn Store.get(self, id: String) -> R!E = match self.rows |> list.find((r) => r.id == id) {
+  some(r) => ok(r),
+  none => err(Bad("missing " + id)),
+}
+
+fn Store.head(self) -> R! = match list.get(self.rows, 0) {
+  some(r) => ok(r),
+  none => err("empty"),
+}
+
+fn use_p[S: P](s: S) -> String = match s.get("a") {
+  ok(r) => r.id,
+  err(Bad(m)) => "E " + m,
+}
+
+test "protocol method with typed fallible return dispatches through a bound" {
+  let s = Store { rows: [
+    R { id: "a" }
+  ] }
+  assert_eq(use_p(s), "a")
+  let empty = Store { rows: [] }
+  assert_eq(use_p(empty), "E missing a")
+}
+
+test "bare-bang protocol return keeps the String default" {
+  let s = Store { rows: [
+    R { id: "x" }
+  ] }
+  match s.head() {
+    ok(r) => assert_eq(r.id, "x"),
+    err(e) => assert(false),
+  }
+  let empty = Store { rows: [] }
+  match empty.head() {
+    ok(r) => assert(false),
+    err(e) => assert_eq(e, "empty"),
+  }
+}

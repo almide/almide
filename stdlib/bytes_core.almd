@@ -919,14 +919,14 @@ fn bytes_to_string(b: Bytes) -> Result[String, String] = {
 
 // ── bytes.map_each ── every byte through `f` (once, in order), the result truncated
 // to u8 (native: `f(*x as i64) as u8`).
-fn __bme_fill(dh: Int, sh: Int, f: fn(Int) -> Int, n: Int, i: Int) -> Int = if i >= n then 0
+fn __bme_fill(dh: Int, sh: Int, f: (Int) -> Int, n: Int, i: Int) -> Int = if i >= n then 0
 else {
   let v = f(prim.load8(sh + i))
   prim.store8(dh + i, prim.band(v, 255))
   __bme_fill(dh, sh, f, n, i + 1)
 }
 
-fn bytes_map_each(b: Bytes, f: fn(Int) -> Int) -> Bytes = {
+fn bytes_map_each(b: Bytes, f: (Int) -> Int) -> Bytes = {
   let h = prim.handle(b)
   let n = prim.load32(h + 4)
   let out = prim.alloc_bytes(n)

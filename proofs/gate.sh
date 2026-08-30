@@ -146,6 +146,18 @@ run branch-mismatch ownership 1
 run borrow-live ownership 0
 run borrow-uaf  ownership 1
 
+echo "-- property: ownership, format v5 (law 6: the arm-terminal Return exit) --"
+# The R2 `!` exit shape: the arm drops everything it owns BEFORE the
+# frame-targeted Return, the surviving arm releases normally → `i{dx|}d`
+# ACCEPT (CBranchRet: the flagged arm runs entry→0, the join continues from
+# the surviving arm alone). A returning arm that MISSES the pre-return drop
+# is a leak on the exit path → `i{x|}d`, the flagged arm sits at count 1 and
+# the proven checker REJECTs. First round-trip of an `x` witness through the
+# extracted binary + the coqc oracle (check_xc) — previously exercised only
+# by in-file Coq Examples.
+run branch-ret      ownership 0
+run branch-ret-leak ownership 1
+
 echo "-- property: call-modes over CLOSURE dispatch (brick 5c: possible-callee set) --"
 # main calls through a funcref. AGREE: the dispatch shape matches the one table
 # target, the site's modes equal its signature → ACCEPT. UNKNOWABLE: the site's

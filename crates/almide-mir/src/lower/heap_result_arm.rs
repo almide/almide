@@ -12,7 +12,7 @@ impl LowerCtx {
     /// against a value whose defining alloc sits in the untaken block — `s == TAG` with
     /// `TAG` mentioned in both arms answered `else-miss` for the very string TAG holds
     /// (#945's heap twin; the scalar `CAP` edition was the reported glTF-loader bug).
-    fn lower_heap_result_arm(&mut self, arm: &IrExpr, result_ty: &Ty) -> Option<ValueId> {
+    pub(crate) fn lower_heap_result_arm(&mut self, arm: &IrExpr, result_ty: &Ty) -> Option<ValueId> {
         self.in_frame += 1;
         self.unit_arm_depth += 1;
         let r = self.lower_heap_result_arm_unmarked(arm, result_ty);

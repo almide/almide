@@ -1,0 +1,9 @@
+// ALS-B11: default inside the loop; no early exit.
+@bounded
+fn sum_first(xs: List[Int]) -> Int = {
+  var acc = 0
+  for i in 0..<3 { acc = acc + (list.get(xs, i) ?? 0) }
+  acc
+}
+
+fn main() -> Unit = println("${sum_first([1, 2, 3])}")

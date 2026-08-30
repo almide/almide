@@ -38,6 +38,62 @@ thread_local! {
     /// matching module prefix (#411-B). In-module calls are already prefixed by the
     /// caller's module before this pass, so they are not keyed here.
     static MODULE_METHOD_FNS: RefCell<HashMap<String, String>> = RefCell::new(HashMap::new());
+    /// `T.decode` fns whose `Value` param is passed BY REFERENCE after borrow
+    /// inference (#1679) — keyed like `MODULE_METHOD_FNS`. Every derived
+    /// decode borrows; a user-written `T.decode` does whatever its body
+    /// needs. The list/option codec reroutes below pick the runtime driver
+    /// whose `Fn` bound matches the per-element FnRef they hand it.
+    static DECODE_BY_REF: RefCell<std::collections::HashSet<String>> = RefCell::new(std::collections::HashSet::new());
+}
+
+/// Collect the `T.decode` fns that borrow their `Value` input, under every
+/// spelling a reroute can look up: the IR name, the module-bare name, and the
+/// trailing `Type.method` (the same three keys `collect_module_method_fns` uses).
+fn collect_decode_by_ref(program: &IrProgram) -> std::collections::HashSet<String> {
+    let mut set = std::collections::HashSet::new();
+    let mut add = |f: &IrFunction, origin: Option<&str>| {
+        let by_ref = f.name.ends_with(".decode")
+            && f.params.first().is_some_and(|p| matches!(p.borrow, ParamBorrow::Ref)
+                && matches!(&p.ty, Ty::Named(n, _) if n.as_str() == "Value"));
+        if !by_ref { return; }
+        let name = f.name.as_str();
+        set.insert(name.to_string());
+        if let Some(bare) = origin.and_then(|o| name.strip_prefix(&format!("{}.", o))) {
+            set.insert(bare.to_string());
+        }
+        let segs: Vec<&str> = name.split('.').collect();
+        if segs.len() > 2 {
+            set.insert(format!("{}.{}", segs[segs.len() - 2], segs[segs.len() - 1]));
+        }
+    };
+    for f in &program.functions {
+        add(f, f.module_origin.as_deref());
+    }
+    for m in &program.modules {
+        let ident = m.versioned_name
+            .map(|v| v.to_string().replace('.', "_"))
+            .unwrap_or_else(|| m.name.to_string().replace('.', "_"));
+        for f in &m.functions {
+            add(f, Some(&ident));
+        }
+    }
+    set
+}
+
+/// The `Value` argument of a rerouted codec driver, normalized to what the
+/// chosen runtime fn takes. `BorrowInsertion` already wrapped it in a `Borrow`
+/// for the derived worker's `&Value` param; the by-value driver wants it bare.
+fn codec_value_arg(arg: IrExpr, by_ref: bool) -> IrExpr {
+    let bare = match arg.kind {
+        IrExprKind::Borrow { expr, as_str: false, mutable: false } => *expr,
+        kind => IrExpr { kind, ..arg },
+    };
+    if by_ref {
+        let ty = bare.ty.clone();
+        IrExpr { kind: IrExprKind::Borrow { expr: Box::new(bare), as_str: false, mutable: false }, ty, span: None, def_id: None }
+    } else {
+        bare
+    }
 }
 
 /// Collect every module-defined dotted function (`Color.encode`) → its module
@@ -102,6 +158,8 @@ impl NanoPass for BuiltinLoweringPass {
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         let method_fns = collect_module_method_fns(&program);
         MODULE_METHOD_FNS.with(|c| *c.borrow_mut() = method_fns);
+        let by_ref = collect_decode_by_ref(&program);
+        DECODE_BY_REF.with(|c| *c.borrow_mut() = by_ref);
         for func in &mut program.functions {
             func.body = rewrite_expr(std::mem::take(&mut func.body));
         }
@@ -137,6 +195,17 @@ fn rewrite_call_list_codec(name: Sym, args: Vec<IrExpr>, type_args: Vec<Ty>, ty:
     };
     let primitives = ["string", "int", "float", "bool"];
     if primitives.contains(&type_name) {
+        // The primitive list DECODERS borrow their input (#1679) — the
+        // runtime `almide_rt___decode_list_<prim>(v: &Value)`; the encoders
+        // still consume their Vec. The call reaches this pass under its
+        // stdlib name, which BorrowInsertion has no signature for, so the
+        // borrow is placed here, where the runtime target is chosen.
+        let mut args = args;
+        if name.starts_with("__decode_list_")
+            && let Some(v) = args.pop()
+        {
+            args.push(codec_value_arg(v, true));
+        }
         IrExpr { kind: IrExprKind::Call {
             target: CallTarget::Named { name: format!("almide_rt_{}", name).into() },
             args, type_args,
@@ -174,14 +243,22 @@ fn rewrite_call_list_codec(name: Sym, args: Vec<IrExpr>, type_args: Vec<Ty>, ty:
                 )),
             }
         };
+        let by_ref = !is_encode && DECODE_BY_REF.with(|c| c.borrow().contains(&codec_method));
         let mut new_args = args;
+        if !is_encode
+            && let Some(v) = new_args.pop()
+        {
+            new_args.push(codec_value_arg(v, by_ref));
+        }
         new_args.push(IrExpr {
             kind: IrExprKind::FnRef { name: func_ref.into() },
             ty: fn_ref_ty,
             span: None, def_id: None,
         });
-        let rt_func = if name.starts_with("__encode") {
+        let rt_func = if is_encode {
             "almide_rt_value_encode_list"
+        } else if by_ref {
+            "almide_rt_value_decode_list_ref"
         } else {
             "almide_rt_value_decode_list"
         };
@@ -217,13 +294,20 @@ fn rewrite_call_option_codec(name: Sym, type_name: String, args: Vec<IrExpr>, ty
             ret: Box::new(Ty::Applied(TypeConstructorId::Result, vec![elem_ty, Ty::String])),
         }
     };
+    let by_ref = !is_encode && DECODE_BY_REF.with(|c| c.borrow().contains(&codec_method));
     let mut new_args = args;
+    if !is_encode && !new_args.is_empty() {
+        let v = new_args.remove(0);
+        new_args.insert(0, codec_value_arg(v, by_ref));
+    }
     new_args.push(IrExpr {
         kind: IrExprKind::FnRef { name: func_ref.into() },
         ty: fn_ref_ty, span: None, def_id: None,
     });
     let rt_func = if is_encode {
         "almide_rt_value_option_encode"
+    } else if by_ref {
+        "almide_rt_value_decode_option_custom_ref"
     } else {
         "almide_rt_value_decode_option_custom"
     };

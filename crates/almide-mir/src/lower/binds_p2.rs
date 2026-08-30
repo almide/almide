@@ -65,6 +65,18 @@ impl LowerCtx {
                     .into(),
             ));
         }
+        // A `Try` bind (the auto-`?` node the codec DERIVE decoders synthesize
+        // per `?`-bound field — user auto-? was removed by ADR-0008/E041) has
+        // the SAME propagation semantics as `!`. Under the probe the position
+        // desugars that used to restructure it are off, so route it through
+        // the one rule; a decline falls through to the existing chain (the
+        // nested-arm reach wall stays the honest fallback). Probe-off is
+        // untouched — the desugar ladder still owns the node.
+        if crate::lower::bang_return_probe() && matches!(&value.kind, IrExprKind::Try { .. }) {
+            if self.try_lower_bind_unwrap_return(var, ty, value)? {
+                return Ok(());
+            }
+        }
         // A BLOCK-valued bind (`let a = { let n = 5; n * n }` — an inlined pipe-lambda, or any block
         // in value position): lower the block's statements as effects in the current scope, then bind
         // `var` to the block's TAIL by recursing. Without this the Block falls through to the scalar
@@ -134,7 +146,9 @@ impl LowerCtx {
                 return Ok(false);
             }};
         }
-        let IrExprKind::Unwrap { expr } = &value.kind else { return Ok(false) };
+        let (IrExprKind::Unwrap { expr } | IrExprKind::Try { expr }) = &value.kind else {
+            return Ok(false);
+        };
         // A DECLARED-Result fn admits by its declared family; a LIFTED effect
         // fn by its synthetic `Result[T, String]` carrier's family — BOTH are
         // now computed at ctx build (`decl_ret_family` covers the lift; the
@@ -164,14 +178,46 @@ impl LowerCtx {
         // either, but its `!` is NOT an abort — inside a fallible lambda it
         // is the lambda's own propagation (fallible_lambda L1: aborting there
         // killed the process mid-test instead of yielding the `??` fallback).
+        // #1437 L1 lifted the heap-callee narrowing: under the probe every
+        // lifted heap carrier is wrapped and @16-readable, and a declared
+        // Result callee always was — so a void fn's `!` admits ANY Result
+        // family (the abort message is the err String @12, family-uniform)
+        // and an OPTION callee (none aborts with the manufactured "none",
+        // matching the desugar's v0 line byte for byte).
         let void_fn = fn_fam.is_none()
             && !self.ret_is_result_abi
-            && matches!(self.decl_ret_ty_is_unit, true)
-            && crate::lower::result_family(&expr.ty) == crate::lower::ResultFamily::Scalar;
-        if fn_fam.is_none() && !void_fn {
+            && matches!(self.decl_ret_ty_is_unit, true);
+        // An OPTION callee (`let x = find(k)!` over `-> T?`): the carrier has
+        // no err channel — the none path CONSTRUCTS the fn's err("none") (the
+        // desugar's build_option_unwrap_match contract) — so it requires a
+        // String-err Result channel on the FN side (declared Result[_, String]
+        // or the lifted synthetic carrier; a custom-err fn would type-pun the
+        // manufactured message, an Option-returning fn propagates none itself
+        // and a void fn aborts — all three keep their position desugar).
+        let callee_is_option =
+            matches!(&expr.ty, Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1);
+        // An OPTION-RETURNING fn (declared `-> T?`): its `!` on an Option
+        // callee PROPAGATES THE NONE ITSELF (#1067 — the pass-through is
+        // repr-identical: every Option none is a len@4 = 0 block), so the
+        // exit arm is the SAME drops + Return(carrier) the same-family
+        // Result case uses — no rebox, no manufactured message. Identified
+        // by the declared-variant flag with NO err channel (decl_fn_err is
+        // None exactly for a declared Option / an Option-typed lambda body).
+        let opt_fn = self.decl_ret_is_result && self.decl_fn_err.is_none();
+        if fn_fam.is_none() && !void_fn && !opt_fn {
             decline!("fn-family");
         }
-        if !matches!(&expr.ty, Ty::Applied(TypeConstructorId::Result, _)) {
+        // A RESULT callee inside an Option-returning fn has an err payload
+        // with nowhere to go (returning the carrier would type-pun err as
+        // some) — keep its honest wall.
+        if opt_fn && !callee_is_option && !void_fn {
+            decline!("result-in-option-fn");
+        }
+        if callee_is_option {
+            if !void_fn && !opt_fn && !matches!(self.decl_fn_err, Some(Ty::String)) {
+                decline!("option-fn-channel");
+            }
+        } else if !matches!(&expr.ty, Ty::Applied(TypeConstructorId::Result, _)) {
             decline!("callee-family");
         }
         let callee_fam = crate::lower::result_family(&expr.ty);
@@ -184,7 +230,7 @@ impl LowerCtx {
         // `materialize_result_err_str` — whose Err block is the FAMILY
         // SUPERSET (len@4=1 for len-as-tag readers AND tag@16=1 for
         // cap-as-tag readers), so ONE constructor serves both directions.
-        let rebox = !void_fn && callee_fam != fn_fam;
+        let rebox = !void_fn && !opt_fn && (callee_is_option || callee_fam != fn_fam);
         let rebox_repr = if rebox {
             match crate::lower::repr_of(&expr.ty) {
                 Ok(r) => Some(r),
@@ -195,10 +241,13 @@ impl LowerCtx {
         };
         // The ok-payload bind classes this slice owns: scalar/Unit (value
         // copy), and for a HeapOk callee a String / flat heap-elem list /
-        // tracked-variant payload (Dup'd — see below). Anything else (records,
-        // Value, maps) declines to the wall for the next slice.
+        // Option/Result payload (Dup'd — see below) plus the ADT classes
+        // (variant / record / tuple) the ordinary Named-call bind seeds.
+        // Anything else (Value, maps, generic records) declines to the wall
+        // for the next slice.
+        let mut adt_payload = false;
         let heap_payload_class = if is_heap_ty(ty) {
-            if callee_fam != crate::lower::ResultFamily::HeapOk {
+            if !callee_is_option && callee_fam != crate::lower::ResultFamily::HeapOk {
                 decline!("heap-payload-scalar-carrier");
             }
             if matches!(ty, Ty::String)
@@ -209,7 +258,42 @@ impl LowerCtx {
                 )
             {
                 true
+            } else if matches!(ty, Ty::Named(n, a)
+                    if a.is_empty() && self.variant_layouts.by_type.contains_key(n.as_str()))
+                || self.aggregate_field_tys(ty).is_some_and(|(_, tys)| {
+                    self.record_or_anon_drop_type_name(ty).is_some()
+                        || tys.iter().all(|f| !is_heap_ty(f))
+                })
+                // …plus the residue classes the ordinary bind's seeding also
+                // owns: a VALUE payload (runtime-tag-dispatched DropValue via
+                // value_handles), a SCALAR-element list/set (flat block
+                // free), a tuple whose heap slots are all Strings (the masked
+                // one-level sweep frees exactly those slots), and a
+                // Map[String, scalar] (the split layout whose DropListStr
+                // sweep rc_decs exactly the n key Strings — the route
+                // seed_call_named_heap_drop_route_b already carries).
+                || crate::lower::is_value_ty(ty)
+                || matches!(ty, Ty::Applied(TypeConstructorId::Map, a)
+                    if a.len() == 2 && matches!(a[0], Ty::String) && !is_heap_ty(&a[1]))
+                || matches!(ty, Ty::Applied(TypeConstructorId::List | TypeConstructorId::Set, a)
+                    if a.len() == 1 && !is_heap_ty(&a[0]))
+                || matches!(ty, Ty::Tuple(ts)
+                    if ts.iter().all(|f| !is_heap_ty(f) || matches!(f, Ty::String)))
+            {
+                // A user ADT payload — variant (rich or flat) or record/tuple
+                // (recursive-drop, anonrec, or all-scalar): the SAME classes a
+                // plain `let r = f()` Named-call bind admits, seeded by the
+                // same routine (`seed_call_named_heap_read_shape` below), so
+                // the admission envelope and the drop/read soundness story are
+                // exactly the ordinary bind's. A record outside that envelope
+                // (a generic decl whose one-level mask would leak a nested
+                // heap field) still declines.
+                adt_payload = true;
+                true
             } else {
+                if dbg {
+                    eprintln!("BANG-PAYLOAD-TY {:?} :: {}", ty, self.fn_name);
+                }
                 decline!("heap-payload-class");
             }
         } else {
@@ -217,7 +301,7 @@ impl LowerCtx {
         };
         // The err components must agree — the pass-through would type-pun a
         // mismatched err payload (the collect_map! class; v0 map_err-coerces).
-        if self.unwrap_tail_err_mismatch(expr) {
+        if !callee_is_option && self.unwrap_tail_err_mismatch(expr) {
             decline!("err-mismatch");
         }
         // Lower the callee through the FULL existing bind machinery onto a
@@ -235,16 +319,74 @@ impl LowerCtx {
             Some(v)
         });
         let Some(v) = attempt else { decline!("callee-lowering") };
+        if dbg {
+            eprintln!(
+                "BANG-FIRE {} :: callee_ty={:?} fam={:?} opt={} rebox={} void={}",
+                self.fn_name, expr.ty, callee_fam, callee_is_option, rebox, void_fn
+            );
+        }
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![v] });
         // The err tag: Scalar family reads len-as-tag @4; HeapOk reads the
         // dedicated tag slot @16 (len is pinned to 1 there).
-        let tag_off = match callee_fam {
-            crate::lower::ResultFamily::Scalar => 4,
-            crate::lower::ResultFamily::HeapOk => 16,
+        // The void abort's message pieces are allocated BEFORE the branch (the
+        // overflow-abort precedent: pre-branch alloc, in-arm die, continue
+        // path frees at scope end — no ownership event inside an arm). An
+        // OPTION none has no payload, so its line is fully static; a Result
+        // err's line is `"Error: " + <msg @12> + "\n"` (build_main_die_line's
+        // exact spelling), concatenated IN the arm with unreachable balancing
+        // drops after the die (the arm machinery's own shape).
+        let void_msg_pieces = if void_fn {
+            if callee_is_option {
+                let msg = self.fresh_value();
+                self.ops.push(Op::Alloc {
+                    dst: msg,
+                    repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+                    init: crate::Init::Str("Error: none\n".into()),
+                });
+                self.live_heap_handles.push(msg);
+                Some((msg, None))
+            } else {
+                let pre = self.fresh_value();
+                self.ops.push(Op::Alloc {
+                    dst: pre,
+                    repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+                    init: crate::Init::Str("Error: ".into()),
+                });
+                self.live_heap_handles.push(pre);
+                let nl = self.fresh_value();
+                self.ops.push(Op::Alloc {
+                    dst: nl,
+                    repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+                    init: crate::Init::Str("\n".into()),
+                });
+                self.live_heap_handles.push(nl);
+                Some((pre, Some(nl)))
+            }
+        } else {
+            None
+        };
+        let tag_off = if callee_is_option {
+            4
+        } else {
+            match callee_fam {
+                crate::lower::ResultFamily::Scalar => 4,
+                crate::lower::ResultFamily::HeapOk => 16,
+            }
         };
         let tag = self.load_at_offset(h, tag_off, PrimKind::Load { width: 4 });
-        self.ops.push(Op::IfThen { cond: tag, dst: None });
+        // Result: nonzero tag = err (the exit). Option: len@4 == 0 = none —
+        // invert to an eq-0 scalar so the SAME IfThen(exit) frame serves both.
+        let exit_cond = if callee_is_option {
+            let zero = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: zero, value: 0 });
+            let is_none = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: is_none, op: crate::IntOp::Eq, a: tag, b: zero });
+            is_none
+        } else {
+            tag
+        };
+        self.ops.push(Op::IfThen { cond: exit_cond, dst: None });
         // The exit path never mutates `live_heap_handles` — the surviving ok
         // continuation still owns everything; the arm only EMITS the drops.
         if void_fn {
@@ -255,17 +397,59 @@ impl LowerCtx {
             // and `prim.die` never returns, so no ownership event is needed
             // (the process ends — the same accounting the overflow-abort
             // shape uses).
-            let eb = self.load_at_offset(h, 12, PrimKind::LoadHandle);
+            let (line, balance) = match void_msg_pieces {
+                Some((msg, None)) => (msg, Vec::new()),
+                Some((pre, Some(nl))) => {
+                    let eb = self.load_at_offset(h, 12, PrimKind::LoadHandle);
+                    let t1 = self.fresh_value();
+                    self.ops.push(Op::CallFn {
+                        dst: Some(t1),
+                        name: "__str_concat".to_string(),
+                        args: vec![crate::CallArg::Handle(pre), crate::CallArg::Handle(eb)],
+                        result: Some(crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT }),
+                    });
+                    let t2 = self.fresh_value();
+                    self.ops.push(Op::CallFn {
+                        dst: Some(t2),
+                        name: "__str_concat".to_string(),
+                        args: vec![crate::CallArg::Handle(t1), crate::CallArg::Handle(nl)],
+                        result: Some(crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT }),
+                    });
+                    (t2, vec![t1, t2])
+                }
+                None => unreachable!("void_fn set but no message pieces"),
+            };
             // `prim.die` takes the message's ADDRESS (i64), not the i32
             // handle — the same `Handle`-then-`Die` pair the overflow abort
-            // emits (calls_p4_b.rs:589-591).
+            // emits (calls_p4_b.rs:589-591). The concat temporaries are
+            // released AFTER the die — unreachable, but they keep the arm's
+            // ownership net at zero (the arm machinery's drop_arm_locals
+            // shape; the process never executes them).
             let mh = self.fresh_value();
-            self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(mh), args: vec![eb] });
+            self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(mh), args: vec![line] });
             self.ops.push(Op::Prim { kind: PrimKind::Die, dst: None, args: vec![mh] });
+            for t in balance {
+                self.ops.push(Op::Drop { v: t });
+            }
         } else if let Some(repr) = rebox_repr {
-            let eb = self.load_at_offset(h, 12, PrimKind::LoadHandle);
-            let e_dup = self.fresh_value();
-            self.ops.push(Op::Dup { dst: e_dup, src: eb });
+            // The err piece moved into the reboxed block: an OPTION carrier has
+            // none — manufacture the desugar-identical "none" message; a
+            // Result carrier's err String is extracted @12 and Dup'd (inc
+            // strictly before any release — the Lean oproj law).
+            let e_dup = if callee_is_option {
+                let msg = self.fresh_value();
+                self.ops.push(Op::Alloc {
+                    dst: msg,
+                    repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+                    init: crate::Init::Str("none".into()),
+                });
+                msg
+            } else {
+                let eb = self.load_at_offset(h, 12, PrimKind::LoadHandle);
+                let e_dup = self.fresh_value();
+                self.ops.push(Op::Dup { dst: e_dup, src: eb });
+                e_dup
+            };
             let live: Vec<ValueId> = self.live_heap_handles.clone();
             for other in live {
                 if other != v {
@@ -305,10 +489,34 @@ impl LowerCtx {
             let payload = self.fresh_value();
             self.ops.push(Op::Dup { dst: payload, src: borrowed });
             self.live_heap_handles.push(payload);
-            if crate::lower::is_heap_elem_list_ty(ty) {
-                self.value_drops.entry(payload).or_default().flat_elems = true;
-            }
+            // EVERY payload class rides the ordinary Named-call bind's
+            // seeding — the SAME route+read pair, in the same order: the
+            // drop-route chain (map key-sweeps, list_<R>, lenlist, the
+            // List[Value]/value sets), then the read shapes (record field
+            // reads, variant read-shape via seed_variant_param, materialized
+            // lists). One seeding story, not a per-class fork: the classic
+            // branch's hand-rolled flat_elems missed value_elem_lists on a
+            // List[Value] payload, and the codec decoder's element reads came
+            // back wrong ("expected Str" on an OK decode — the t3 probe).
+            self.seed_call_named_heap_drop_route(payload, ty);
+            self.seed_call_named_heap_read_shape(payload, ty);
             self.seed_variant_value_shape(payload, ty);
+            if adt_payload {
+                // A USER VARIANT payload additionally routes its scope-end
+                // drop: RICH recurses via the generated `$__drop_<V>`
+                // (named_route -> DropVariant), FLAT frees one level under
+                // the default Drop.
+                if let Ty::Named(n, args) = ty {
+                    if args.is_empty()
+                        && self.variant_layouts.needs_recursive_drop(n.as_str(), &|rn| {
+                            crate::lower::canonical_record_key(&self.record_layouts, rn).is_some()
+                        })
+                    {
+                        self.value_drops.entry(payload).or_default().named_route =
+                            Some(n.as_str().to_string());
+                    }
+                }
+            }
             self.value_of.insert(var, payload);
         } else {
             let payload = self.load_at_offset(h, 12, PrimKind::Load { width: 8 });

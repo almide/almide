@@ -24,6 +24,7 @@ use std::process::Command;
 const PARITY: &[&str] = &[
     "balanced-parens.almd",
     "binary-search.almd",
+    "pid-kernel.almd",
     "fan_demo.almd",
     "lisp.almd",
     "llama_block.almd",

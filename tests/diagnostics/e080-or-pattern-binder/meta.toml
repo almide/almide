@@ -1,0 +1,3 @@
+expects_code = "E080"
+expects_error = "or-pattern alternative binds"
+hint_substring = "Write separate arms"

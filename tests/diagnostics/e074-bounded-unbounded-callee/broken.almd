@@ -1,0 +1,7 @@
+// ALS-B7: calling a function outside the profile opens the call graph — not admissible.
+fn helper(x: Int) -> Int = x + 1
+
+@bounded
+fn uses_plain(x: Int) -> Int = helper(x)
+
+fn main() -> Unit = println("${uses_plain(1)}")

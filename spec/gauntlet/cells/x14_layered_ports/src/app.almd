@@ -1,0 +1,11 @@
+import self.ports
+
+effect fn report[S: RowStore](s: S) -> String = {
+  let n = s.count()!
+  let hit = s.get("a")!
+  let label = match hit {
+    some(r) => r.id,
+    none => "-",
+  }
+  "n=${n} hit=${label}"
+}

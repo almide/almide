@@ -1,0 +1,15 @@
+import io
+
+type Mem: Eq, Repr = { ks: List[String] }
+
+type Out: Eq, Repr = { s: String }
+
+fn f(s: Mem) -> (Mem, Out)! = {
+  let d = Mem { ks: s.ks + ["a"] }
+  (d, Out { s: "x" })
+}
+
+effect fn main() -> Unit = {
+  let (a, o) = f(Mem { ks: [] })!
+  io.print("${list.len(a.ks)}${o.s}")
+}

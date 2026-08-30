@@ -1,0 +1,37 @@
+// @contract: C-323
+// ALS-E18 (docs/specs/als/expressions.md): or-patterns (#1461) — an arm
+// `a | b | c => body` matches when ANY alternative matches, alternatives
+// are binder-free (E080), the arm covers the union for exhaustiveness,
+// and lowering desugars it into one IR arm per alternative — so both
+// backends and the interp process plain single-pattern arms and
+// cross-target identity is constructive. Probes: variant alternatives,
+// string-literal alternatives, int-literal alternatives, and an
+// or-covered exhaustive match with no wildcard.
+type Color = | Red | Green | Blue | Rgb(Int)
+
+fn color_class(c: Color) -> String = match c {
+  Red | Green => "warmish",
+  Blue => "cool",
+  Rgb(_) => "custom",
+}
+
+effect fn main() -> Unit = {
+  println(color_class(Red))
+  println(color_class(Green))
+  println(color_class(Blue))
+  println(color_class(Rgb(7)))
+  let word = match "an" {
+    "a" | "an" | "the" => "article",
+    _ => "word",
+  }
+  println(word)
+  let sz = match 1 {
+    0 | 1 => "small",
+    _ => "big",
+  }
+  println(sz)
+  let cov = match some(3) {
+    some(_) | none => "covered"
+  }
+  println(cov)
+}

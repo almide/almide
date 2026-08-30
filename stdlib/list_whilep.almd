@@ -4,7 +4,7 @@
 // f via CallIndirect through its slot, called once per inspected element (byte-matches v0).
 // List[Int]; elements are i64 VALUES copied (no new heap), result `len` patched to the kept
 // count (the over-allocated capacity is reclaimed by the free-list). Source borrowed.
-fn __takew_fill(dh: Int, sh: Int, f: fn(Int) -> Bool, n: Int, i: Int) -> Int = if i >= n then i
+fn __takew_fill(dh: Int, sh: Int, f: (Int) -> Bool, n: Int, i: Int) -> Int = if i >= n then i
 else {
   let x = prim.load64(sh + 12 + i * 8)
   let h = f(x)
@@ -14,7 +14,7 @@ else {
   } else { i }
 }
 
-fn list_take_while(xs: List[Int], f: fn(Int) -> Bool) -> List[Int] = {
+fn list_take_while(xs: List[Int], f: (Int) -> Bool) -> List[Int] = {
   let n = list.len(xs)
   let buf = prim.alloc_list(n)
   let cnt = __takew_fill(prim.handle(buf), prim.handle(xs), f, n, 0)
@@ -22,7 +22,7 @@ fn list_take_while(xs: List[Int], f: fn(Int) -> Bool) -> List[Int] = {
   buf
 }
 
-fn __dropw_skip(sh: Int, f: fn(Int) -> Bool, n: Int, i: Int) -> Int = if i >= n then n
+fn __dropw_skip(sh: Int, f: (Int) -> Bool, n: Int, i: Int) -> Int = if i >= n then n
 else {
   let x = prim.load64(sh + 12 + i * 8)
   let h = f(x)
@@ -38,7 +38,7 @@ else {
   __copy_tail(dh, sh, si + 1, di + 1, n)
 }
 
-fn list_drop_while(xs: List[Int], f: fn(Int) -> Bool) -> List[Int] = {
+fn list_drop_while(xs: List[Int], f: (Int) -> Bool) -> List[Int] = {
   let n = list.len(xs)
   let skip = __dropw_skip(prim.handle(xs), f, n, 0)
   let keep = n - skip
@@ -51,7 +51,7 @@ fn list_drop_while(xs: List[Int], f: fn(Int) -> Bool) -> List[Int] = {
 // DEEP-COPIED (string.repeat ·1) into the result — single-owned, the source still owns the original
 // (no double-free, the bug the generic i64 impls had). Predicate f: (String) -> Bool via CallIndirect,
 // exactly like list_filter_str. Result `len` is the kept count; result owned, source borrowed. ──
-fn __takew_str_fill(dh: Int, sh: Int, f: fn(String) -> Bool, n: Int, i: Int, di: Int) -> Int = if i >= n then di
+fn __takew_str_fill(dh: Int, sh: Int, f: (String) -> Bool, n: Int, i: Int, di: Int) -> Int = if i >= n then di
 else {
   let x = prim.load_str(sh + 12 + i * 8)
   if f(x) then {
@@ -61,7 +61,7 @@ else {
   } else di
 }
 
-fn list_take_while_str(xs: List[String], f: fn(String) -> Bool) -> List[String] = {
+fn list_take_while_str(xs: List[String], f: (String) -> Bool) -> List[String] = {
   let n = list.len(xs)
   let buf = prim.alloc_list_str(n)
   let cnt = __takew_str_fill(prim.handle(buf), prim.handle(xs), f, n, 0, 0)
@@ -69,7 +69,7 @@ fn list_take_while_str(xs: List[String], f: fn(String) -> Bool) -> List[String] 
   buf
 }
 
-fn __dropw_str_skip(sh: Int, f: fn(String) -> Bool, n: Int, i: Int) -> Int = if i >= n then n
+fn __dropw_str_skip(sh: Int, f: (String) -> Bool, n: Int, i: Int) -> Int = if i >= n then n
 else {
   let x = prim.load_str(sh + 12 + i * 8)
   if f(x) then __dropw_str_skip(sh, f, n, i + 1)
@@ -84,7 +84,7 @@ else {
   __copy_tail_str(dh, sh, si + 1, di + 1, n)
 }
 
-fn list_drop_while_str(xs: List[String], f: fn(String) -> Bool) -> List[String] = {
+fn list_drop_while_str(xs: List[String], f: (String) -> Bool) -> List[String] = {
   let n = list.len(xs)
   let skip = __dropw_str_skip(prim.handle(xs), f, n, 0)
   let keep = n - skip

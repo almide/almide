@@ -82,12 +82,25 @@ pub fn almide_rt_math_pow(base: i64, exp: i64) -> i64 {
 // intrinsics whose ±0-tie order is UNSPECIFIED — under `#[inline(always)]`
 // x86 selects `maxsd` (returns the SECOND operand on ties), silently
 // contradicting both the non-inlined library call and the wasm emit.
-// Ties return the FIRST operand: max(0,-0)=0, max(-0,0)=-0 (C-049).
+// Ties follow IEEE-754-2019 zero ordering (C-049, ALS-T23):
+// min(±0)= -0.0, max(±0)= +0.0, commutative.
 #[inline(always)] pub fn almide_rt_math_fmin(a: f64, b: f64) -> f64 {
-    if a.is_nan() { b } else if b.is_nan() { a } else if a > b { b } else { a }
+    if a.is_nan() { b }
+    else if b.is_nan() { a }
+    else if a < b { a }
+    else if b < a { b }
+    // Tie (a == b, the ±0 pair included): IEEE-754-2019 minimum — a
+    // negative-signed operand wins, commutatively (min(0,-0) = -0).
+    else if a.is_sign_negative() { a } else { b }
 }
 #[inline(always)] pub fn almide_rt_math_fmax(a: f64, b: f64) -> f64 {
-    if a.is_nan() { b } else if b.is_nan() { a } else if a < b { b } else { a }
+    if a.is_nan() { b }
+    else if b.is_nan() { a }
+    else if a > b { a }
+    else if b > a { b }
+    // Tie: IEEE-754-2019 maximum — a positive-signed operand wins,
+    // commutatively (max(-0,0) = +0).
+    else if a.is_sign_positive() { a } else { b }
 }
 // Float pow delegates to the vendored musl-libm `pow` (deterministic +
 // bit-identical to the WASM port). This also makes all the special cases

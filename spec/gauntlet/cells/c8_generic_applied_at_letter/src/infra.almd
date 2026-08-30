@@ -1,0 +1,5 @@
+import self.ports
+
+type Q: Proto = { n: Int }
+
+fn Q.read(self) -> Int = self.n

@@ -1,0 +1,7 @@
+// ALS-B9: env reaches the host outside the profile's capability — not admissible.
+import env
+
+@bounded
+effect fn which_os() -> String = env.os()
+
+effect fn main() -> Unit = println(which_os() ?? "unknown")

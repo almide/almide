@@ -1,0 +1,11 @@
+// UNFILED: `self` is accepted everywhere EXCEPT as a match subject
+type Kind: Eq, Repr = | Hot | Cold
+
+fn Kind.me(self) -> Kind = self
+
+fn Kind.same(self, o: Kind) -> Bool = self == o
+
+fn Kind.score(self) -> Int = match self {
+  Hot => 1,
+  Cold => 0,
+}

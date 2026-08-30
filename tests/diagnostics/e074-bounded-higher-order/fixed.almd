@@ -1,0 +1,9 @@
+// ALS-B7: first-order stdlib calls inside a counted loop, no function values.
+@bounded
+fn doubled_sum(xs: List[Int]) -> Int = {
+  var acc = 0
+  for i in 0..<3 { acc = acc + (list.get(xs, i) ?? 0) * 2 }
+  acc
+}
+
+fn main() -> Unit = println("${doubled_sum([1, 2, 3])}")

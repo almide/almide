@@ -79,9 +79,17 @@ fi
 # reached the byte-compare, so a renderer regression that walled everything
 # printed "0/0 byte-identical" and exited 0. On a green run every corpus file
 # is either compared or walled — enforce that identity, and ratchet `walled`
-# at its real value (0 as of 2026-07-30, CI-measured over 324 fixtures): a
-# NEW wall is a conscious ceiling bump, never silent shrinkage of coverage.
-MAX_WALLED=0
+# at its real value: 0 as of 2026-07-30 (324 fixtures); 16 as of 2026-08-26 —
+# the commissioning switchover GRADUATED the entire legacy wall corpus into
+# spec/wasm_cross (the structural leg renders them; the incumbent still
+# walls them, so they are tracked skips of the INCUMBENT'S determinism
+# domain, locally re-measured at exactly 16 over 634 fixtures). A NEW wall
+# is a conscious ceiling bump, never silent shrinkage of coverage.
+# 17 as of 2026-08-30: gzip_inflate_members.almd (C-326) is STRUCTURAL-ONLY
+# — the incumbent's brick walls its loop-level tuple write-back
+# (WhileHeapAccumulator), which is the intended division of labor until
+# #1696 steps 4-5 move the certificate and retire the incumbent.
+MAX_WALLED=17
 corpus=$(ls "$FIXTURE_DIR"/*.almd 2>/dev/null | wc -l | tr -d ' ')
 if [ "$corpus" -eq 0 ] || [ $((n + walled)) -ne "$corpus" ]; then
   echo "::error::host-determinism: compared $n + walled $walled != corpus $corpus in $FIXTURE_DIR — the scan went blind (#985)"

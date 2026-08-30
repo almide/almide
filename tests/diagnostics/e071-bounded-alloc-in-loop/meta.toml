@@ -1,0 +1,3 @@
+expects_code = "E071"
+expects_error = "not admissible in a @bounded function"
+hint_substring = "allocate outside the loop"

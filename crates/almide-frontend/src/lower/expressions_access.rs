@@ -299,13 +299,23 @@ fn lower_expr_match_arm(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Opti
             let s = if subject_ty != s.ty {
                 IrExpr { ty: subject_ty.clone(), ..s }
             } else { s };
-            let ir_arms = arms.iter().map(|arm| {
-                ctx.push_scope();
-                let pat = lower_pattern(ctx, &arm.pattern, &subject_ty);
-                let guard = arm.guard.as_ref().map(|g| lower_expr(ctx, g));
-                let body = lower_expr(ctx, &arm.body);
-                ctx.pop_scope();
-                IrMatchArm { pattern: pat, guard, body }
+            // #1461: an or-pattern arm desugars to one IR arm per
+            // alternative — the body re-lowers per alternative under its
+            // own scope (alternatives are binder-free, checker E080, so
+            // every copy is closed over the same outer bindings).
+            let ir_arms = arms.iter().flat_map(|arm| {
+                let alts: Vec<&ast::Pattern> = match &arm.pattern {
+                    ast::Pattern::Or { alts } => alts.iter().collect(),
+                    p => vec![p],
+                };
+                alts.into_iter().map(|alt| {
+                    ctx.push_scope();
+                    let pat = lower_pattern(ctx, alt, &subject_ty);
+                    let guard = arm.guard.as_ref().map(|g| lower_expr(ctx, g));
+                    let body = lower_expr(ctx, &arm.body);
+                    ctx.pop_scope();
+                    IrMatchArm { pattern: pat, guard, body }
+                }).collect::<Vec<_>>()
             }).collect();
             ctx.mk(IrExprKind::Match { subject: Box::new(s), arms: ir_arms }, ty, span)
 }

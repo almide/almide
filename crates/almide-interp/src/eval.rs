@@ -511,9 +511,15 @@ impl<'a> Interpreter<'a> {
     /// final value (`run_callable`'s pending list) instead of re-implementing
     /// it: one instrument, two call sites.
     pub(crate) fn try_unwrap_value(&mut self, v: Value, node_ty: &Ty) -> Flow {
-        if matches!(node_ty,
-            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a) if a.len() == 1)
-        {
+        self.try_unwrap_value_flag(v, marker_is_option_identity(node_ty))
+    }
+
+    /// The flag form: the only fact `!` normalization reads off the marker
+    /// node's type is "is it the C-216 Option identity" — one bit, so the
+    /// trampoline carries the bit instead of cloning a `Ty` per hop
+    /// (#1232, the last quick-win row).
+    pub(crate) fn try_unwrap_value_flag(&mut self, v: Value, opt_identity: bool) -> Flow {
+        if opt_identity {
             if let Value::Option(_) = v {
                 return Flow::val(v);
             }
@@ -649,9 +655,12 @@ impl<'a> Interpreter<'a> {
         let Some(decl) = self.record_decls.get(&key).copied() else {
             return Ok(out);
         };
-        if decl.iter().all(|f| f.default.is_none()) {
-            return Ok(out);
-        }
+        // ALWAYS rebuild in DECLARATION order, defaults or not: a permuted
+        // literal (`ERec { y: 2, x: 1 }`) must equal the declared-order value
+        // — both backends normalize at lowering, and the payload Vec's
+        // PartialEq is positional, so the old defaults-only early return made
+        // the interp dissent `ne` against a native==wasm `eq` (caught by the
+        // 3-way oracle while graduating variant_record_literal_equality).
         let mut filled = Vec::with_capacity(decl.len());
         for f in decl {
             if let Some(pos) = out.iter().position(|(k, _)| *k == f.name) {
@@ -865,7 +874,7 @@ impl<'a> Interpreter<'a> {
                             SpineOutcome::Transfer {
                                 next,
                                 next_args,
-                                try_marker: Some(cur.ty.clone()),
+                                try_marker: Some(marker_is_option_identity(&cur.ty)),
                             }
                         }
                         Some(out) => out,
@@ -1041,4 +1050,12 @@ fn lift_to_declared_carrier(ty: &Ty, flow: Flow) -> Flow {
         Flow::Value(v) => Flow::Value(Value::Result(Ok(Box::new(v)))),
         other => other,
     }
+}
+
+/// The C-216 marker fact (see `try_unwrap_value_flag`): a `Try`/`Unwrap`
+/// node TYPED `Option[_]` is the effect-RESULT-layer strip on a
+/// declared-Option effect call — identity on Option values.
+pub(crate) fn marker_is_option_identity(node_ty: &Ty) -> bool {
+    matches!(node_ty,
+        Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a) if a.len() == 1)
 }

@@ -1,0 +1,8 @@
+// ALS-B6: mutual recursion is a back edge in the reachable call graph.
+@bounded
+fn even(n: Int) -> Int = if n == 0 then 1 else odd(n - 1)
+
+@bounded
+fn odd(n: Int) -> Int = if n == 0 then 0 else even(n - 1)
+
+fn main() -> Unit = println("${even(4)}")

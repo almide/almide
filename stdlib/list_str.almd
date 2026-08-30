@@ -51,7 +51,7 @@ fn list_index_of_str(xs: List[String], x: String) -> Int? = {
 // ── Higher-order list.all/any/count over a List[String] (the predicate takes a String element by
 // handle, heap-arg closure ABI; reads only, no allocation). Sum the predicate's 0/1 into a hit
 // count: any = count>0, all = count==len, count = the hit count itself. Pure predicate = v0-match.
-fn __list_str_count_hits(h: Int, f: fn(String) -> Bool, n: Int, i: Int, acc: Int) -> Int = if i >= n then acc
+fn __list_str_count_hits(h: Int, f: (String) -> Bool, n: Int, i: Int, acc: Int) -> Int = if i >= n then acc
 else {
   let x = prim.load_str(h + 12 + i * 8)
   let hit = f(x)
@@ -59,21 +59,21 @@ else {
   else __list_str_count_hits(h, f, n, i + 1, acc)
 }
 
-fn list_any_str(xs: List[String], f: fn(String) -> Bool) -> Bool = {
+fn list_any_str(xs: List[String], f: (String) -> Bool) -> Bool = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
   let hits = __list_str_count_hits(h, f, n, 0, 0)
   hits > 0
 }
 
-fn list_all_str(xs: List[String], f: fn(String) -> Bool) -> Bool = {
+fn list_all_str(xs: List[String], f: (String) -> Bool) -> Bool = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
   let hits = __list_str_count_hits(h, f, n, 0, 0)
   hits >= n
 }
 
-fn list_count_str(xs: List[String], f: fn(String) -> Bool) -> Int = {
+fn list_count_str(xs: List[String], f: (String) -> Bool) -> Int = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
   __list_str_count_hits(h, f, n, 0, 0)
@@ -81,14 +81,14 @@ fn list_count_str(xs: List[String], f: fn(String) -> Bool) -> Int = {
 
 // list.fold over a List[String] — f : (Acc, String) -> Acc (Int accumulator), a 2-arity closure
 // with a String element second arg (heap-widened). Left fold in element order. Read-only.
-fn __list_str_fold_loop(h: Int, f: fn(Int, String) -> Int, n: Int, i: Int, acc: Int) -> Int = if i >= n then acc
+fn __list_str_fold_loop(h: Int, f: (Int, String) -> Int, n: Int, i: Int, acc: Int) -> Int = if i >= n then acc
 else {
   let x = prim.load_str(h + 12 + i * 8)
   let nacc = f(acc, x)
   __list_str_fold_loop(h, f, n, i + 1, nacc)
 }
 
-fn list_fold_str(xs: List[String], init: Int, f: fn(Int, String) -> Int) -> Int = {
+fn list_fold_str(xs: List[String], init: Int, f: (Int, String) -> Int) -> Int = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
   __list_str_fold_loop(h, f, n, 0, init)
@@ -106,17 +106,17 @@ fn __lfs_some(x: String) -> String? = {
 
 // Split so the lets live in a function BODY and the heap-result `if` is its TAIL (a block with lets
 // as a heap-result-if's else arm does not lower — mirror list_get_str's flat helper-tail shape).
-fn __list_find_str_at(h: Int, f: fn(String) -> Bool, n: Int, i: Int) -> String? = {
+fn __list_find_str_at(h: Int, f: (String) -> Bool, n: Int, i: Int) -> String? = {
   let x = prim.load_str(h + 12 + i * 8)
   let hit = f(x)
   if hit then __lfs_some(x)
   else __list_find_str_loop(h, f, n, i + 1)
 }
 
-fn __list_find_str_loop(h: Int, f: fn(String) -> Bool, n: Int, i: Int) -> String? = if i >= n then __lfs_none()
+fn __list_find_str_loop(h: Int, f: (String) -> Bool, n: Int, i: Int) -> String? = if i >= n then __lfs_none()
 else __list_find_str_at(h, f, n, i)
 
-fn list_find_str(xs: List[String], f: fn(String) -> Bool) -> String? = {
+fn list_find_str(xs: List[String], f: (String) -> Bool) -> String? = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
   __list_find_str_loop(h, f, n, 0)

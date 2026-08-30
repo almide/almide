@@ -1,0 +1,16 @@
+import io
+
+type Row: Eq, Repr = { id: String }
+
+type Out: Eq, Repr = { a: String, b: String, c: String }
+
+fn label(r: Row) -> String! = r.id
+
+fn wrap(s: String) -> String = "[" + s + "]"
+
+fn f(r: Row) -> (Row, Out)! = (r, Out { a: wrap(label(r)!), b: "p" + label(r)! + "q", c: "x${label(r)!}y" })
+
+effect fn main() -> Unit = {
+  let (x, o) = f(Row { id: "z" })!
+  io.print("${x.id}${o.a}${o.b}${o.c}")
+}

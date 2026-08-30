@@ -1,0 +1,7 @@
+spec/gauntlet/cells/s3_module_qualified_protocol/src/main.almd	error: Expected type name at line 4:11 (got Ident 'ports')
+spec/gauntlet/cells/s4_bare_mut_self.almd	error: Expected Colon at line 4:21 (got Comma ',')
+spec/gauntlet/cells/s5_match_self.almd	error: 'self' is not valid in Almide at line 8:36
+spec/gauntlet/cells/s6_generic_protocol.almd	error: Expected Eq at line 8:26 (got LBracket '[')
+spec/integration/modules/dmod_b/src/mod.almd	module 'dmod_d' not found
+spec/integration/modules/dmod_c/src/mod.almd	module 'dmod_d' not found
+spec/integration/modules/mylib/src/utils.almd	module 'extlib' not found

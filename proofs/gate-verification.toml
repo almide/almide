@@ -17,12 +17,32 @@
 #                     Honest debt: the gate may be decorative and we would
 #                     not know. Burn-down tracked by the ceiling.
 #
-# unverified_ceiling = "2"
+# unverified_ceiling = "0"
+
+[[gate]]
+path = "scripts/check-doc-fences.sh"
+class = "NEGATIVE_TESTED"
+evidence = "#1490 landing (2026-08-28): the output-drift direction demonstrated before first green — the list.md run-fence's pinned output hand-flipped 3->4 went red with the diff shown, restored green. The probe also caught the gate's own first bug: unescaped backticks in two FAIL messages parsed as command substitution and swallowed the run/cmp block entirely, so the corrupted doc passed — fixed before landing (the reason the negative probe is mandatory). Blind-scan floor: zero marked fences under docs/stdlib/ is a hard FAIL (#976 class)."
+
+[[gate]]
+path = "proofs/check-structural-bytes.sh"
+class = "NEGATIVE_TESTED"
+evidence = "#576 slice-3 landing (2026-08-28): a hand-corrupted byte in StructuralDecode.v's inc_bytes list (65;1 -> 65;2) failed the gate naming the exact emitter-vs-proven diff, restored green (23/37/70/259 bytes matched; slice 4 added the $alloc row with LEB-aware wrapper stripping). The gate re-derives BOTH sides per run — the emitter's bytes through its own dump helper, the proven lists parsed out of the .v source — so neither can drift silently against the decode theorems."
+
+[[gate]]
+path = "scripts/check-wasi-pins.sh"
+class = "NEGATIVE_TESTED"
+evidence = "#1628 stage-4 landing (2026-08-28): policy crate_major hand-flipped 47->48 went red naming the exact drifted pin (wasmtime Cargo pin is 47, policy says 48), restored green. The gate re-derives every fact the policy states from the tree per run — vendored WIT versions, the p3 shim's import versions, the wasmtime Cargo/CI pins, the p3 harness flag surface, the wasm-tools lockstep family — so the WASI-minor compat target is a checked ledger row, not an assumption."
+
+[[gate]]
+path = "scripts/check-target-availability.sh"
+class = "NEGATIVE_TESTED"
+evidence = "#1423 stage-2+3 landing (2026-08-28): a declared row hand-renamed (int.bnot -> int.bnot_GONE) went red in BOTH directions at once — the measured wall named as UNDECLARED, restored green. Stage 3 doubled the sweep: the DEFAULT-routing measurement diffs against the [[wasm-unavailable]] table the E081 check-time diagnostic consumes (four directions total: 323 lower / 66 native-only / 31 ratchet / 34 both-legs). The gate re-measures the whole surface per run with the renderer's own verdict (tools/target_availability_probe.py, ALMIDE_WASM_STRUCTURAL=1 hard-wall probe per public stdlib fn), so neither a silent new wall nor a stale row survives; name-diff false positives are structurally impossible (the ~199-row over-report experiment is the design's reason)."
 
 [[gate]]
 path = "scripts/check-contracts.sh"
 class = "MUTATION_TESTED"
-evidence = "flight-evidence-gaps.md F1 progress-2 (2026-07-04): spec-resolution mutation test (nonexistent ALS section reference => FAIL) SIGPIPE FLAKE FIXED (2026-08-16): seven membership tests were `printf '%s\\n' \"$SET\" | grep -q \"$x\"`, which is a RACE under this script's `set -o pipefail` — `grep -q` exits the instant it matches and closes the pipe, so a `printf` still writing dies of SIGPIPE and the PIPELINE reports failure even though the element WAS found. The gate then declared a contract \"not in the ledger\", naming whichever id lost the race, so it accused a DIFFERENT contract every time (observed: C-084, C-059, C-087). Measured on the 286-id ledger: an EARLY match false-failed 1 run in 400 and a LATE match never did — exactly the shape the race predicts, since a late match leaves nothing left to write. Locally the gate was red about 1 run in 6. All seven now read from a here-string via a single `has()` helper, so there is no pipe to break: 25 consecutive runs green, 0 red. This is not cosmetic — a verdict-bearing gate that is randomly red teaches everyone to re-run until green, which is also what you do to a real failure, and CI's green history on this gate was therefore luck rather than evidence."
+evidence = "flight-evidence-gaps.md F1 progress-2 (2026-07-04): spec-resolution mutation test (nonexistent ALS section reference => FAIL) SIGPIPE FLAKE FIXED (2026-08-16): seven membership tests were `printf '%s\\n' \"$SET\" | grep -q \"$x\"`, which is a RACE under this script's `set -o pipefail` — `grep -q` exits the instant it matches and closes the pipe, so a `printf` still writing dies of SIGPIPE and the PIPELINE reports failure even though the element WAS found. The gate then declared a contract \"not in the ledger\", naming whichever id lost the race, so it accused a DIFFERENT contract every time (observed: C-084, C-059, C-087). Measured on the 286-id ledger: an EARLY match false-failed 1 run in 400 and a LATE match never did — exactly the shape the race predicts, since a late match leaves nothing left to write. Locally the gate was red about 1 run in 6. All seven now read from a here-string via a single `has()` helper, so there is no pipe to break: 25 consecutive runs green, 0 red. This is not cosmetic — a verdict-bearing gate that is randomly red teaches everyone to re-run until green, which is also what you do to a real failure, and CI's green history on this gate was therefore luck rather than evidence. 2026-08-27: the #1544 canonical reservation range emptied (C-310..C-318 ported verbatim with the 0.59.2 checker landing); negative directions re-demonstrated at the closure — a gap inside the formerly-reserved range now fails the CONTIGUITY branch (C-315 removed locally: red, restored: green), and the retired collision branch is unreachable by construction (LO>HI)."
 
 [[gate]]
 path = "scripts/check-scalar-read-audit.sh"
@@ -80,9 +100,19 @@ class = "NEGATIVE_TESTED"
 evidence = "#1244 round 5 (coqc/ocamlopt present locally, so the gate RAN): the forge went into the TRUSTED GLUE the proof does not cover — driver.ml's ownership arm rubber-stamped to `true` gave 'FAIL double_free.cert: got exit 0 want 1 (ACCEPT)', and to `false` gave 'FAIL balanced.cert: got exit 1 want 0 (REJECT)'; both the accept and the reject assertions therefore bind. Restored green (26/26)"
 
 [[gate]]
+path = "proofs/mcdc-mutation.sh"
+class = "NEGATIVE_TESTED"
+evidence = "Landing run (2026-08-27): all 6 vectors-resolved sites' operator-swap mutants killed (green unmutated, red mutated, 79 s wall, sources hash-verified restored). Fail directions each demonstrated and restored: a site's tests pointed at an unrelated always-green test -> 'MUTANT SURVIVED' naming site, mutation and tests, exit 1; a named vector assertion inverted -> 'vectors FAIL UNMUTATED — fix the tests first' (a red baseline cannot fake kills); the source pre-mutated by hand -> the site's id no longer scans and the row goes red. The smoke run caught the gate's own first bug: the scanner emits CHARACTER offsets but the mutator read bytes, so multi-byte comments shifted the site — fixed to text-mode before landing."
+
+[[gate]]
+path = "proofs/mcdc-ledger.sh"
+class = "NEGATIVE_TESTED"
+evidence = "Landing run (2026-08-26), each restored to green: a dropped row -> 'boolean site … has NO ledger row' naming file:line and excerpt; a vectors row naming a nonexistent test fn -> red with the fn and file named; pending ceiling raised by one -> 'BELOW ceiling — ratchet it down'; a pending row hand-flipped to refactored while the site still scans -> red at the site. Zero-sites-scanned is a hard error (broken instrument). Scanner honesty was tuned by its own first runs: closure heads (.or_else(|| …)) are excluded by the preceding-token rule, and sites past a file's first #[cfg(test)] are the tests themselves and are not ledgered."
+
+[[gate]]
 path = "proofs/coverage.sh"
 class = "NEGATIVE_TESTED"
-evidence = "#1244 round 5: the FIRST probe exposed a real hole — `find -perm /111` is GNU-only, so on any BSD/macOS host the gate died at step 2/4 with 'illegal mode string' and never reached the ratchet; fixed portably (same PR) plus a hard error when discovery finds no test binaries (a 0-binary run would still have reported a number). Then the ratchet itself: proofs/coverage-baseline.txt forged 5819 -> 9900 gave 'COVERAGE RATCHET FAIL: TOTAL 70.09% < baseline 99.00%' on a full real measurement, and `coverage.sh --bogus` gave the #990 usage error exit 2. Measured 70.09% is above the real 58.19% floor, so the same measurement is the pass direction"
+evidence = "#1244 round 5: the FIRST probe exposed a real hole — `find -perm /111` is GNU-only, so on any BSD/macOS host the gate died at step 2/4 with 'illegal mode string' and never reached the ratchet; fixed portably (same PR) plus a hard error when discovery finds no test binaries (a 0-binary run would still have reported a number). Then the ratchet itself: proofs/coverage-baseline.txt forged 5819 -> 9900 gave 'COVERAGE RATCHET FAIL: TOTAL 70.09% < baseline 99.00%' on a full real measurement, and `coverage.sh --bogus` gave the #990 usage error exit 2. Measured 70.09% is above the real 58.19% floor, so the same measurement is the pass direction. 2026-08-26 (#566 rung 2, safety floors): a canary row with floor 99.99 -> 'SAFETY COVERAGE FAIL: … 55.16% < floor 99.99%' and a row naming a nonexistent file -> 'not found in the report', both on one full run, exit 1; clean run -> 'safety floors OK (10 file(s))', exit 0. The FIRST canary run caught the gate's own bug: the floor block died of SIGPIPE (printf | early-exit awk under pipefail) and produced no output at all — fixed to a herestring in its own commit"
 
 [[gate]]
 path = "proofs/diff-fuzz.sh"
@@ -126,7 +156,8 @@ evidence = "#1234 landing PR: forged a workflow with a duplicate `if:` key (the 
 
 [[gate]]
 path = "scripts/check-browser-determinism.sh"
-class = "UNVERIFIED"
+class = "EXERCISED"
+evidence = "PR #1599 rounds 4-5 (2026-08-26): both verdict directions in real operation — the gate FAILED correctly when the graduated wall corpus entered spec/wasm_cross (16 fixtures the incumbent renderer walls reported 'native errored', run 32946512713), and passed after gaining the wall-vs-error discipline (tracked skips, ceiling 16, asymmetric render-vs-wall still FAILS). The completeness check counts n + walled against the corpus, so a blind scan cannot pass."
 
 [[gate]]
 path = "scripts/check-embedded-size.sh"
@@ -145,7 +176,8 @@ evidence = "#1244 round 3: corpus-floor direction (1 fixture => FAIL, the #976 v
 
 [[gate]]
 path = "scripts/check-host-determinism.sh"
-class = "UNVERIFIED"
+class = "EXERCISED"
+evidence = "PR #1599 rounds 4-5 (2026-08-26): both verdict directions in real operation — MAX_WALLED=0 FAILED correctly when the graduated wall corpus added 16 incumbent walls (run 32946512713), and passed after the conscious ceiling bump to the locally re-measured 16. The n + walled == corpus completeness check and the one-host-walls asymmetry FAIL were already in the script; the ceiling firing proved the counting path live."
 
 [[gate]]
 path = "scripts/check-libm-determinism.sh"
@@ -200,7 +232,12 @@ evidence = "landing PR: an unresolvable section (ALS-Z999) and a dropped row (UN
 [[gate]]
 path = "scripts/check-lark-grammar.sh"
 class = "MUTATION_TESTED"
-evidence = "#1310 landing PR: 5 fail directions demonstrated before first green — keyword respelled (fan->fann: parity BOTH ways + 4 corpus under-accepts), EXCLUDED '..=' re-declared in OPERATORS (leak), param type annotation made optional (negative fixture 'param-without-type' ACCEPTED), '++' fixture shown to still PARSE with the compiler (stale-fixture direction, fixture retired), and an .almd-free corpus dir (blind-gate guard)"
+evidence = "#1310 landing PR: 5 fail directions demonstrated before first green — keyword respelled (fan->fann: parity BOTH ways + 4 corpus under-accepts), EXCLUDED '..=' re-declared in OPERATORS (leak), param type annotation made optional (negative fixture 'param-without-type' ACCEPTED), '++' fixture shown to still PARSE with the compiler (stale-fixture direction, fixture retired), and an .almd-free corpus dir (blind-gate guard). CORPUS MEMO (2026-08-27): the Earley pass over the 1,556-file corpus was ~5 min of the always-on checks job, so ACCEPTED verdicts are memoized under sha256(grammar text, lark version, gate script) and only acceptance is memoized — rejected files are re-parsed every run because their verdict is what the compiler oracle is consulted on. Negative-tested locally with the no-memo run as the baseline (1553/1556 accepted, 3 rejected by both, 0 disagreements, 104.6s on 8 workers): a cold memo parses all 1,556 and reproduces the baseline verdict; a warm memo re-parses exactly the 3 rejected files (0.4s) with the same verdict; one corpus file with a comment appended is re-parsed on top of those 3 (4 parsed); a memo whose key is moved and a memo holding non-JSON each fall back to parsing all 1,556 with the baseline verdict. The memo is a memo of a pure function, never a relaxation; CI caches are branch-scoped, so a PR reads develop's memo and develop never reads a PR's."
+
+[[gate]]
+path = "scripts/check-clippy-warnings.sh"
+class = "NEGATIVE_TESTED"
+evidence = "#1462 landing (2026-08-28): three fail directions demonstrated before first green — a compile-failing tree (clippy deny-level overly_complex_bool_expr in the parser: the gate refused to count, and the finding itself was a real vestigial `|| true`), a wrong baseline (ratchet-down demand), and the shared count-compare with its 40-unit blindness floor inherited verbatim from the rustc sibling. The FIRST CI RUN fired the ratchet-down branch for real (1,480 under the pinned 1.94.0 vs a 1,494 baseline measured on a local 1.96) — which exposed that the count is TOOLCHAIN-COUPLED; the gate now runs the pinned toolchain for its verdict and demotes non-pinned local runs to informative"
 
 [[gate]]
 path = "scripts/check-rustc-warnings.sh"
@@ -309,3 +346,33 @@ evidence = "alloc-ceiling landing (2026-08-16): four forged trees, each demonstr
 path = "scripts/check-stability-closure.sh"
 class = "NEGATIVE_TESTED"
 evidence = "#1485 landing drill (2026-08-20): the gate is INFORMATIONAL by design (always exit 0 — its verdict is the per-criterion standing, its failure mode is MISREPORT). Report-follows-input demonstrated: a COMPILER_FRONTIER row forged out of proofs/wasm-fallback-baseline.txt moved the wasm-frontier standing 5→4 in the printed report; restored, it read 5 again. The blockers criterion was cross-checked against the live tracker (0 open I-severity issues, matching the printed PASS)."
+
+[[gate]]
+path = "scripts/check-file-discipline.sh"
+class = "NEGATIVE_TESTED"
+evidence = "Commissioning PR (2026-08-26): an 801-line probe file under crates/almide-wasm/src => exit 1 naming the file; removed => exit 0. Adopted from the greenfield burn, where the 800-line cap was the measured primary driver of codopsy slippage (stages 39 and 51)."
+
+[[gate]]
+path = "scripts/check-ferrocene-lane.sh"
+class = "NEGATIVE_TESTED"
+evidence = "Lane landing (2026-08-28, #573): both fail directions demonstrated with wrapper shims and the committed tree as the positive control — (1) an emitter shim prepending a nightly feature gate => exit 1 naming the fixture (line-start-anchored grep, no string-literal false positives); (2) a build shim emitting a rustc-style error[E0308] => exit 1 with the compiler text verbatim. The WALL SPLIT (first dispatched run, 2026-08-27): an almide-side subset refusal (fan budgets are trust-spine-only — fan_race_mapper) is toolchain-independent and counts as a design-wall SKIP, never a lane failure; a silent non-rustc build failure likewise (probed: rc 0 with the skip counted). Full local sweep: 633 fixtures, 0 failures, 1 design-wall skip. The pin (Ferrocene 26.05.0 == upstream 1.95.0, als ADR-0015 clause 4) lives in the weekly workflow."
+
+[[gate]]
+path = "scripts/check-mutation-gate.sh"
+class = "EXERCISED"
+evidence = "Greenfield CI mutation-gate job (2026-08-20..26, PORTLOG stages 74+): both verdict directions observed in real operation — 40-42 pre-authored mutants caught green on every push, and the no-longer-applies direction fired at the stage-39 split refresh (a drifted patch went red until refreshed, never retired). All 40 patches re-verified apply-clean against this tree at commissioning. Split evidence model since #1619: PR runs are INCREMENTAL (a mutant is in scope when the PR's change set touches its patched files, the patch itself, or the shared killer infrastructure — crates/almide-wasm/tests/ or the runner script, which put EVERY mutant in scope), and the FULL 40-mutant sweep's standing evidence is .github/workflows/mutation-sweep.yml: develop pushes in an uncancelable concurrency group plus the 05:15 UTC nightly, 4-way positional shard. Under ci.yml's cancel-in-progress group the develop sweep was routinely canceled mid-run (run 33045982751: 18/40 then canceled), which is why push-side evidence moved to the sweep workflow. Killer-first (2026-08-28, #1619 item 3): the net suites run sequentially with a stop at the first red — the verdict is unchanged (caught == net red) and the killer is named in the log; both directions revalidated at the change (mutant 003 caught by backend_parity in the first two suites; a comment-only survivor probe reported SURVIVED and the gate red)."
+
+[[gate]]
+path = "scripts/check-fmt-gate.sh"
+class = "NEGATIVE_TESTED"
+evidence = "Commissioning PR (2026-08-26): a drift probe appended to spec/wasm_cross/while_loops.almd => exit 1; restored => exit 0. The wrapper exists because the gauntlet's deliberately-invalid REJECT cells cannot parse, and the bare `fmt --check spec/` exits 1 on parse-skips even at zero drift; the gauntlet manifest's reject rows are the single exclusion source (the fmt-corpus test applies the same ruling)."
+
+[[gate]]
+path = "scripts/check-readme-numbers.sh"
+class = "NEGATIVE_TESTED"
+evidence = "README resync landing (2026-08-27, PR #1605): the rule is that every count the README quotes is either derived inside a generated block or carries its measurement date on the same line — the '164-contract' ledger (real count 311), '310 test files' (421), and the 703 B Hello, world measured four releases earlier were each a bare number no gate read. Negative-tested with the committed tree as the positive control (pass): (1) an appended undated '999 test files and 12 contracts' => FAIL; (2) the same line with '(measured 2026-08-27)' => pass, so the date is the escape hatch and nothing else; (3) 'the sole wasm path' => FAIL and (4) '164-contract' => FAIL, the two retired phrases the fossil list refuses; (5) '41 Theorems' with a capital => FAIL (the match is case-folded, so a heading cannot hide a count); (6) '96 audited theorems' => pass, the one exemption, because proofs/check.sh asserts that count where it is computed and now lists README.md in its COUNT_DOCS. The companion generator scripts/gen-readme-stats.sh --check was forged twice the same day: a stats row hand-edited from 421 to 420 => FAIL (stale block), and the stamped baseline docs/benchmarks/wasm-size.txt with incumbent_bytes 1096 rewritten to 1000 => FAIL naming both legs' bytes ('structural 4361 vs 4361, incumbent 1096 vs 1000'), with the restored tree passing again as the control."
+
+[[gate]]
+path = "scripts/check-docs-only.sh"
+class = "NEGATIVE_TESTED"
+evidence = "docs-only short-circuit landing (2026-08-27): the classifier decides whether a change set can be observed by the compiler's test matrix — a wrong `true` skips twenty minutes of tests, so the allow-list is short and the bias is toward CODE. Negative-tested on 17 change sets with the committed tree's own README-only PR shape as the positive control: README.md alone => true; README + ARCHITECTURE + a banner image + LICENSE-MIT => true; docs/wasm/README.md + a figure => true; an issue template => true; README + src/cli/build.rs => false (the first code path is named in the reason); docs/diagnostics/E041.md alone => false (tests/explain_docs_test.rs reads it); docs/project/CLAUDE_TEMPLATE.md alone => false (include_str! into the binary); docs/benchmarks/build-speed.txt, docs/contracts/contracts.toml, scripts/check-readme-numbers.sh, .github/workflows/ci.yml, llms.txt, spec/lang/expr_test.almd, stdlib/string.almd, Cargo.lock => each false; the EMPTY change set => false (nothing to classify is a full run, never a skip); an unknown git ref => non-zero exit, never a verdict. The fail-safe direction is structural as well as tested: the CI step is continue-on-error, so a crashed classifier leaves the job output EMPTY and every heavy job's `docs_only != 'true'` guard holds — breakage costs a full run, not a skipped suite."

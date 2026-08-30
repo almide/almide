@@ -14,7 +14,8 @@
 fn __app_read(path: String) -> String = {
   let r: Result[String, String] = prim.read_text_file(path)
   let rh = prim.handle(r)
-  if prim.load32(rh + 16) != 0 then "" else {
+  if prim.load32(rh + 16) != 0 then ""
+  else {
     let t: String = prim.load_handle(rh + 12)
     t + ""
   }

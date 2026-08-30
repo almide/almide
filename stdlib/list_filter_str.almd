@@ -4,7 +4,7 @@
 // the result's len header to the match count (spare capacity reclaimed by cap). Each KEPT element is
 // DEEP-COPIED (string.repeat ·1) into the result so it is single-owned (the source still owns the
 // original — no double-free). Source borrowed; result owned.
-fn __filterstr_fill(dh: Int, sh: Int, f: fn(String) -> Bool, n: Int, i: Int, di: Int) -> Int = if i >= n then di
+fn __filterstr_fill(dh: Int, sh: Int, f: (String) -> Bool, n: Int, i: Int, di: Int) -> Int = if i >= n then di
 else {
   let x = prim.load_str(sh + 12 + i * 8)
   let keep = f(x)
@@ -15,7 +15,7 @@ else {
   } else __filterstr_fill(dh, sh, f, n, i + 1, di)
 }
 
-fn list_filter_str(xs: List[String], f: fn(String) -> Bool) -> List[String] = {
+fn list_filter_str(xs: List[String], f: (String) -> Bool) -> List[String] = {
   let n = list.len(xs)
   let buf = prim.alloc_list_str(n)
   let count = __filterstr_fill(prim.handle(buf), prim.handle(xs), f, n, 0, 0)

@@ -25,3 +25,8 @@ spec/**/*.wasm
 # Lean lake build dirs (local builds only; CI builds from scratch)
 .lake/
 crates/almide-mir/m.wasm
+
+# gen-dossier.sh output: the redirect creates this in the repo root BEFORE
+# the receipt inside fingerprints the tree — an untracked hit would break
+# the fingerprint fast-path and force a full gate re-derivation
+almide-dossier-*.md

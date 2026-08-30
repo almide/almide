@@ -100,6 +100,17 @@ MISRA C / Ada Ravenscar / SPARK subset の analog。`almide check --profile crit
 - **Critical は subset であって方言ではない** — 全 Critical コードは通常モードでも
   そのまま有効 (SPARK ⊂ Ada と同じ関係)
 
+**状態 (#567 着地)**: `almide check --profile critical` 稼働 — bounded
+プロファイル (ALS §B, E070–E078) を全関数に適用し、capability は deny-all
+出発で `--allow IO|Net|Env|Time|Rand|Process` が grant。スコープはエントリ
+プログラム (stdlib はプロファイルの下の trusted runtime)。subset 性は
+`tests/critical_profile_test.rs` が全負例で通常モード PASS を突き合わせて
+CI 強制。静的メモリ規律 (#568) も着地: 参照アプリが critical-clean +
+カーネル emit 無割当 + `--heap-cap` 固定予算で完走(予算超過は決定的
+OOM abort)、分割ホスト要件は docs/project/PARTITIONED-RUNTIME.md。
+残: `fan.*` の admissibility (#1628 stage 2 のコスト境界待ち)、
+RC drop カスケード上限。
+
 ### CG-4: Translation validation (L)
 
 belt の思想をビルド単位の証明に拡張: 「この .wasm はこの検証済み IR の正しい翻訳」

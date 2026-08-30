@@ -116,7 +116,7 @@ fn list_swap_str(xs: List[String], i: Int, j: Int) -> List[String] = {
 // rc_inc-shared (co-own), the target slot stores f(old) directly (the closure's return is already
 // owned — no inc, and the copy never acquires the replaced old element). v0 calls f only in bounds;
 // OOB shares every slot (the unchanged copy). Result drops via the recursive DropListStr.
-fn __lsu_val_str(hit: Bool, addr: Int, old: String, f: fn(String) -> String) -> Int = if hit then {
+fn __lsu_val_str(hit: Bool, addr: Int, old: String, f: (String) -> String) -> Int = if hit then {
   let nv = f(old)
   // nv is an OWNED return the lowering auto-releases at scope end (a raw store64 is
   // invisible to the ownership cert) — acquire the slot's own ref explicitly and let
@@ -132,7 +132,7 @@ fn __lsu_val_str(hit: Bool, addr: Int, old: String, f: fn(String) -> String) -> 
   0
 }
 
-fn __lsu_fill_str(sh: Int, bh: Int, n: Int, i: Int, f: fn(String) -> String, j: Int) -> Int = if j >= n then 0
+fn __lsu_fill_str(sh: Int, bh: Int, n: Int, i: Int, f: (String) -> String, j: Int) -> Int = if j >= n then 0
 else {
   let old = prim.load_str(sh + 12 + j * 8)
   let hit = j == i
@@ -140,7 +140,7 @@ else {
   __lsu_fill_str(sh, bh, n, i, f, j + 1)
 }
 
-fn list_update_str(xs: List[String], i: Int, f: fn(String) -> String) -> List[String] = {
+fn list_update_str(xs: List[String], i: Int, f: (String) -> String) -> List[String] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
   let buf = prim.alloc_list_str(n)
@@ -153,7 +153,7 @@ fn list_update_str(xs: List[String], i: Int, f: fn(String) -> String) -> List[St
 // (not in value_core with the other _value modifiers) because the single-pass fill never
 // acquires the replaced element, so it has no same-file __drop_value dependency. Result drops
 // via the recursive DropListValue.
-fn __lsuv_val(hit: Bool, addr: Int, old: Value, f: fn(Value) -> Value) -> Int = if hit then {
+fn __lsuv_val(hit: Bool, addr: Int, old: Value, f: (Value) -> Value) -> Int = if hit then {
   let nv = f(old)
   // nv is an OWNED return the lowering auto-releases at scope end (a raw store64 is
   // invisible to the ownership cert) — acquire the slot's own ref explicitly and let
@@ -169,7 +169,7 @@ fn __lsuv_val(hit: Bool, addr: Int, old: Value, f: fn(Value) -> Value) -> Int = 
   0
 }
 
-fn __lsuv_fill(sh: Int, bh: Int, n: Int, i: Int, f: fn(Value) -> Value, j: Int) -> Int = if j >= n then 0
+fn __lsuv_fill(sh: Int, bh: Int, n: Int, i: Int, f: (Value) -> Value, j: Int) -> Int = if j >= n then 0
 else {
   let old: Value = prim.load_handle(sh + 12 + j * 8)
   let hit = j == i
@@ -177,7 +177,7 @@ else {
   __lsuv_fill(sh, bh, n, i, f, j + 1)
 }
 
-fn list_update_value(xs: List[Value], i: Int, f: fn(Value) -> Value) -> List[Value] = {
+fn list_update_value(xs: List[Value], i: Int, f: (Value) -> Value) -> List[Value] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
   let buf = prim.alloc_list_str(n)
@@ -374,7 +374,7 @@ fn list_tail_str(xs: List[String]) -> List[String] = {
 // invoked via CallIndirect (the list.map machinery), here CONDITIONALLY — v0's update only calls
 // `f(s.clone())` when the index is in bounds. Returns 0 (a scalar helper, so list_update keeps a
 // plain heap tail `buf`, no heap-result if).
-fn __upd_slot(bh: Int, n: Int, i: Int, f: fn(Int) -> Int) -> Int = if i < 0 then 0
+fn __upd_slot(bh: Int, n: Int, i: Int, f: (Int) -> Int) -> Int = if i < 0 then 0
 else if i >= n then 0
 else {
   let old = prim.load64(bh + 12 + i * 8)
@@ -386,7 +386,7 @@ else {
 // list.update(xs, i, f): a fresh same-length List[Int] copy with slot i replaced by f(xs[i])
 // (the in-bounds case); an out-of-range index returns the copy unchanged. Same single-owned-Alloc
 // cert as list.set — the only addition is the conditional closure call inside the scalar helper.
-fn list_update(xs: List[Int], i: Int, f: fn(Int) -> Int) -> List[Int] = {
+fn list_update(xs: List[Int], i: Int, f: (Int) -> Int) -> List[Int] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
   let buf = prim.alloc_list(n)

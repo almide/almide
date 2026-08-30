@@ -237,7 +237,11 @@ pub fn validate_translation_perceus(wat: &str, mir: &crate::MirFunction) -> bool
         .count();
     let total_rc_decs = wat.matches("call $rc_dec").count();
     let body_rc_decs = total_rc_decs.saturating_sub(preamble_rc_decs);
-    positives && body_rc_decs >= drop_count(mir)
+    // Single-condition decisions (MC/DC ledger, #566): && as early return.
+    if !positives {
+        return false;
+    }
+    body_rc_decs >= drop_count(mir)
 }
 
 #[cfg(test)]

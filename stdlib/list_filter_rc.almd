@@ -6,7 +6,7 @@
 // the predicate is called exactly once per element. Source borrowed; result owned
 // (DynListStr — its recursive DropListStr rc_dec's each co-owned slot, the CoownLoop.v
 // producer/consumer pattern).
-fn __filterrc_fill(dh: Int, sh: Int, f: fn(Int) -> Bool, n: Int, i: Int, di: Int) -> Int = if i >= n then di
+fn __filterrc_fill(dh: Int, sh: Int, f: (Int) -> Bool, n: Int, i: Int, di: Int) -> Int = if i >= n then di
 else {
   let x = prim.load64(sh + 12 + i * 8)
   let keep = f(x)
@@ -17,7 +17,7 @@ else {
   } else __filterrc_fill(dh, sh, f, n, i + 1, di)
 }
 
-fn list_filter_rc(xs: List[Int], f: fn(Int) -> Bool) -> List[Int] = {
+fn list_filter_rc(xs: List[Int], f: (Int) -> Bool) -> List[Int] = {
   let n = list.len(xs)
   let buf = prim.alloc_list_str(n)
   let count = __filterrc_fill(prim.handle(buf), prim.handle(xs), f, n, 0, 0)

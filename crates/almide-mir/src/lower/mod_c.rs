@@ -538,15 +538,28 @@ fn new_lower_ctx(
             // fs_fold_lines_range: the @16 read took the err branch on an OK
             // carrier). `None` here keeps those fns walling until the split
             // is closed in its own slice.
-            t if !crate::lower::is_heap_ty(t)
-                && !matches!(
+            t if !matches!(
                     t,
                     Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, _)
                 )
                 && crate::lower::AUTO_WRAP_ABI_FNS
                     .with(|s| s.borrow().contains(func.name.as_str())) =>
             {
-                Some(crate::lower::ResultFamily::Scalar)
+                if !crate::lower::is_heap_ty(t) {
+                    Some(crate::lower::ResultFamily::Scalar)
+                } else if crate::lower::bang_return_probe() {
+                    // #1437 L1: UNDER THE PROBE the lift wraps every return
+                    // position (auto_wrap_abi_body's probe arm below), so a
+                    // heap T's carrier blocks are all @16-readable by
+                    // construction — err via the ResErrStr superset, ok via
+                    // the cap-as-tag materialize_result_str — and the family
+                    // may finally be read off the synthetic type. PROBE-OFF
+                    // the #841 hybrid (raw ok tails) still exists and the
+                    // containment stays None.
+                    Some(crate::lower::result_family(&Ty::result((*t).clone(), Ty::String)))
+                } else {
+                    None
+                }
             }
             _ => None,
         },
@@ -596,7 +609,16 @@ pub fn auto_wrap_abi_body(func: &IrFunction) -> Option<IrExpr> {
         // is the #1410 path, already proven.
         let opt_ret = matches!(&func.ret_ty,
             Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, _));
-        if opt_ret || !has_propagation_site(&body) {
+        // #1437 L1: under the RETURN-OP PROBE the propagation rewrite (the
+        // machinery the skip defers to) never runs, so a `!`-bearing HEAP-ret
+        // body would keep its raw ok tails — the #841 hybrid the R2 rule can
+        // neither read nor return. Wrap those unconditionally there; SCALAR
+        // members keep their proven downstream path (their raw tails lower
+        // through the scalar tail machinery probe-on today), and probe-off is
+        // byte-identical.
+        let wrap_under_probe =
+            crate::lower::bang_return_probe() && crate::lower::is_heap_ty(&func.ret_ty);
+        if opt_ret || !has_propagation_site(&body) || wrap_under_probe {
             wrap_return_positions_in_ok(&mut body, &func.ret_ty, &result_ty);
         }
         // A SINGLE-EXPRESSION body `X!` (or auto-`?` `X?`) whose callee already
@@ -789,10 +811,21 @@ fn lower_function_all_impl(
     // default while v0 pushed — the #790 mut_list_param row, main-reachable).
     // WALL the fn — v0 emits the correct convention on both targets.
     if !func.mutated_params.is_empty() {
+        // The C-132 move-mode pass rewrites every eligible shape upstream
+        // (mutated_params cleared), so a surviving entry names the honest
+        // boundary: a value-returning effect fn that CAN err carries #1576's
+        // unratified question (what the caller's `mut` argument holds after
+        // an err), not a missing brick (#1622).
+        let why = if func.is_effect && !matches!(func.ret_ty, almide_lang::types::Ty::Unit) {
+            "a value-returning effect fn with a `mut` param that CAN err — what \
+             the caller's argument holds after an err is #1576's unratified \
+             design question (never-err forms rewrite via C-132)"
+        } else {
+            "the move-mode write-back convention (C-132) not in this brick"
+        };
         return Err(LowerError::Unsupported(format!(
-            "fn `{}` mutates its `mut` param(s) — the move-mode write-back \
-             convention (C-132) not in this brick",
-            func.name
+            "fn `{}` mutates its `mut` param(s) — {}",
+            func.name, why
         )));
     }
     let mut ctx = new_lower_ctx(func, globals, global_inits, record_layouts, variant_layouts);
@@ -972,6 +1005,7 @@ include!("desugar_call_arg_anf.rs");
 include!("desugar_unwrap.rs");
 include!("desugar_unwrap_b.rs");
 include!("desugar_nested_unwrap.rs");
+include!("desugar_ctor_payload.rs");
 include!("desugar_loop.rs");
 include!("desugar_loop_b.rs");
 include!("desugar_branch.rs");

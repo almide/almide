@@ -8,8 +8,10 @@ pub fn takes_raw_fn_last_arg(name: &str) -> bool {
         "almide_rt_fs_fold_lines_range" |
         "almide_rt_list_flat_map_arr" |
         "almide_rt_value_decode_list" |
+        "almide_rt_value_decode_list_ref" |
         "almide_rt_value_decode_option" |
         "almide_rt_value_decode_option_custom" |
+        "almide_rt_value_decode_option_custom_ref" |
         "almide_rt_value_decode_with_default" |
         "almide_rt_value_encode_list" |
         "almide_rt_value_option_encode"
@@ -731,12 +733,15 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_value_as_string" => &[false],
         "almide_rt_value_bool" => &[false],
         "almide_rt_value_decode_list" => &[false, false],
+        "almide_rt_value_decode_list_ref" => &[false, false],
         "almide_rt_value_decode_option" => &[false, false, false],
         "almide_rt_value_decode_option_custom" => &[false, false, false],
+        "almide_rt_value_decode_option_custom_ref" => &[false, false, false],
         "almide_rt_value_decode_with_default" => &[false, false, false, false],
         "almide_rt_value_encode_list" => &[false, false],
         "almide_rt_value_eq" => &[false, false],
         "almide_rt_value_field" => &[false, false],
+        "almide_rt_value_field_ref" => &[false, false],
         "almide_rt_value_float" => &[false],
         "almide_rt_value_int" => &[false],
         "almide_rt_value_keys" => &[false],

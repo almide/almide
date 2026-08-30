@@ -1,0 +1,13 @@
+diff --git a/crates/almide-wasm/src/calls.rs b/crates/almide-wasm/src/calls.rs
+index 24f0dc228..6223423ba 100644
+--- a/crates/almide-wasm/src/calls.rs
++++ b/crates/almide-wasm/src/calls.rs
+@@ -129,7 +129,7 @@ impl Emitter<'_> {
+                         self.f.instructions().i32_const(1);
+                     }
+                 }
+-                self.f.instructions().call(F_EXIT_IMPORT).unreachable();
++                self.f.instructions().drop();
+                 Ok(None)
+             }
+             CallTarget::Module { module, func, .. }

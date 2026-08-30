@@ -35,7 +35,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  RUST_TOOLCHAIN: "1.89.0"
+  RUST_TOOLCHAIN: "1.94.0"  # runner-class MSRV: the almide binary embeds wasmtime 47 (commissioned host); compiler crates keep the 1.89 claim per-crate
   # Cold runners gain nothing from the workspace's release-incremental
   # profile (#1006) — it only bloats the caches. Opt out.
   CARGO_INCREMENTAL: "0"
@@ -47,6 +47,72 @@ env:
   GCM_INTERACTIVE: "never"
 
 jobs:
+  # ═══════════════════════════════════════════════
+  # Change class — a docs-only change skips the test matrix
+  # ═══════════════════════════════════════════════
+
+  changes:
+    # A README-only PR used to buy the whole matrix: four Test Rust shards
+    # (14–20 min), two determinism sweeps, the gates job, the perf ratchet —
+    # none of which read what changed. scripts/check-docs-only.sh classifies
+    # the change set (allow-list: *.md, images, LICENSE; everything else is
+    # code, and the markdown a test or the binary consumes is code too), and
+    # the heavy jobs carry `if: needs.changes.outputs.docs_only != 'true'`.
+    #
+    # Job-level `if`, NOT a workflow `paths` filter: a job skipped by its own
+    # `if` reports SUCCESS to branch protection ("Jobs that are skipped will
+    # report their status as Success. They will not prevent a pull request
+    # from merging, even if it is a required check" — GitHub docs, "Handling
+    # skipped but required checks"), while a workflow filtered out by `paths`
+    # leaves its required checks Expected forever and the PR blocked.
+    #
+    # MATRIX jobs are the exception: a job-level `if` skips the job BEFORE the
+    # matrix expands, so the one skipped check-run is named with the literal
+    # `${{ matrix.shard }}` and the required contexts `Test Rust (shard 0/4)`…
+    # `(shard 3/4)` never receive a run — the first docs-only PR (#1609) sat
+    # BLOCKED on exactly that. test-rust therefore keeps its job-level guard
+    # OFF and guards every STEP instead (`if: env.DOCS_ONLY != 'true'`): the
+    # four shards expand, each finishes in seconds, each reports success under
+    # its real name.
+    #
+    # Fail-safe direction: the classify step is `continue-on-error`, so a
+    # broken classifier yields an EMPTY output, `'' != 'true'` holds, and
+    # everything runs. Breakage costs twenty minutes, never a skipped suite.
+    #
+    # What still runs on a docs-only change: build (the checks need the
+    # binary), Emit & Format (LLM-surface fences, stdlib doc indexes, README
+    # stats, the build-speed block, `almide docs-gen --check`), Lean proofs.
+    name: Change class (docs-only skips the test matrix)
+    runs-on: ubuntu-latest
+    outputs:
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - id: classify
+        name: Classify the change set (scripts/check-docs-only.sh)
+        continue-on-error: true
+        run: |
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            # HEAD is the PR's merge commit; its merge-base with the base branch
+            # is the base tip, so the range is exactly the PR's own change set.
+            git fetch -q origin "${{ github.base_ref }}"
+            bash scripts/check-docs-only.sh "$(git merge-base "origin/${{ github.base_ref }}" HEAD)" HEAD
+          else
+            before="${{ github.event.before }}"
+            if [ -n "$before" ] && [ "$before" != "0000000000000000000000000000000000000000" ] && git cat-file -e "$before^{commit}" 2>/dev/null; then
+              bash scripts/check-docs-only.sh "$before" HEAD
+            else
+              echo "docs_only=false" >> "$GITHUB_OUTPUT"
+              echo "check-docs-only: no comparable base for this push — full run"
+            fi
+          fi
+
+      - name: Verdict
+        run: echo "docs_only=${{ steps.classify.outputs.docs_only }} (empty means the classifier failed — full run)"
+
   # ═══════════════════════════════════════════════
   # Build — shared by all jobs
   # ═══════════════════════════════════════════════
@@ -61,6 +127,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
+          # clippy rides this job's compile cache for its ratchet (#1462).
+          components: clippy
 
       - uses: actions/cache@v6
         with:
@@ -80,6 +148,13 @@ jobs:
       - name: Rustc warning ratchet (a noisy build hides the one warning that matters)
         run: bash scripts/check-rustc-warnings.sh
 
+      # The clippy tier of the same discipline (#1462): a shrink-only
+      # baseline over `cargo clippy --workspace --all-targets`. Lives in
+      # `build` for the same reason the rustc ratchet does — it compiles,
+      # and the release build above primes the dependency cache.
+      - name: Clippy warning ratchet (#1462 — the lint tier rustc does not see)
+        run: bash scripts/check-clippy-warnings.sh
+
       - uses: actions/upload-artifact@v7
         with:
           name: almide-linux
@@ -98,7 +173,8 @@ jobs:
     # twice. Cheap (no tests run, just enumeration) and it gates the same commit
     # the shards run on.
     name: Test shards cover every target
-    needs: build
+    needs: [changes, build]
+    if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -145,24 +221,35 @@ jobs:
     # total) and `wasm_runtime_test` alone is ~270s, so past 4 shards the
     # longest target IS the floor and extra jobs buy nothing.
     name: Test Rust (shard ${{ matrix.shard }}/4)
-    needs: build
+    needs: [changes, build]
+    # No job-level docs-only guard here — see the `changes` job: a skipped
+    # MATRIX job never expands, so the required `Test Rust (shard N/4)`
+    # contexts would stay Expected. Every step is guarded instead; on a
+    # docs-only change the four shards expand, run nothing, and report
+    # success under their real names in seconds.
     runs-on: ubuntu-latest
+    env:
+      DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
     strategy:
       fail-fast: false
       matrix:
         shard: [0, 1, 2, 3]
     steps:
       - uses: actions/checkout@v7
+        if: env.DOCS_ONLY != 'true'
 
       - uses: actions/download-artifact@v8
+        if: env.DOCS_ONLY != 'true'
         with:
           name: almide-linux
           path: /tmp/almide-bin
 
       - name: Setup
+        if: env.DOCS_ONLY != 'true'
         run: chmod +x /tmp/almide-bin/almide
 
       - uses: dtolnay/rust-toolchain@stable
+        if: env.DOCS_ONLY != 'true'
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
@@ -172,6 +259,7 @@ jobs:
       # shape as fuzz-nightly's cache — registry + git + target, keyed on
       # Cargo.lock, prefix restore so a lockfile bump still warm-starts.
       - uses: actions/cache@v6
+        if: env.DOCS_ONLY != 'true'
         with:
           path: |
             ~/.cargo/registry
@@ -181,11 +269,13 @@ jobs:
           restore-keys: test-rust-cargo-${{ env.RUST_TOOLCHAIN }}-
 
       - name: Cache wasmtime tarball
+        if: env.DOCS_ONLY != 'true'
         uses: actions/cache@v6
         with:
           path: wasmtime-v47.0.3-x86_64-linux.tar.xz
           key: wasmtime-v47.0.3-x86_64-linux
       - name: Install wasmtime
+        if: env.DOCS_ONLY != 'true'
         # Required by the cross-target gate (wasm_cross_target_spec) and the
         # wasm_runtime_test capture tests — without it they skip, so the
         # cross-target ratchet would not actually enforce here.
@@ -208,12 +298,14 @@ jobs:
           wasmtime --version
 
       - name: Install wasm-opt (binaryen)
+        if: env.DOCS_ONLY != 'true'
         # Required by the wasm-opt parity gate (wasm_runtime_test::wasm_opt_parity_spec) — without
         # it the test silently early-returns as a pass, so `--wasm-opt`'s
         # differential-equivalence claim would never actually be checked here.
         run: sudo apt-get update && sudo apt-get install -y binaryen && wasm-opt --version
 
       - name: Cargo tests
+        if: env.DOCS_ONLY != 'true'
         # Parallel-safe: the shared build scratch dir (/tmp/almide-run,
         # /tmp/almide-build) is serialized across processes by an advisory
         # flock (see src/cli/run.rs BuildDirLock). Unix only — this runner
@@ -256,7 +348,8 @@ jobs:
     # downloaded binary, which is why this job installs wasmtime/wasm-opt but
     # skips the heavy cargo cache the shards restore.
     name: Almide gates (compiler-driven, shard-independent)
-    needs: build
+    needs: [changes, build]
+    if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -376,6 +469,8 @@ jobs:
 
   test-arm:
     name: Test ARM (NEON, Apple Silicon)
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     # almide-kernel's NEON kernels (silu/softmax/gelu/q1_0) cross-built on the x86
     # runners but were never *executed* — build-cross only proves they compile.
     # macos-14 is Apple Silicon, where NEON is the ARMv8 baseline, so the public
@@ -412,7 +507,8 @@ jobs:
 
   test-wasm:
     name: Test WASM
-    needs: build
+    needs: [changes, build]
+    if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -465,6 +561,8 @@ jobs:
 
   test-wasm-windows:
     name: Test WASM (Windows host)
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     # Self-sufficient build: the `almide-windows` artifact exists only on
     # release PRs (build-cross is PR-to-main-gated), and this gate must run on
     # every develop push — a Windows-host regression found at release time is
@@ -557,7 +655,8 @@ jobs:
   # `walled` tally before it can land).
   wasm-host-determinism:
     name: WASM host-arch determinism
-    if: github.server_url == 'https://github.com'
+    needs: changes
+    if: github.server_url == 'https://github.com' && needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -641,7 +740,8 @@ jobs:
     # repos/almide/almide/branches/develop/protection/required_status_checks
     # in the same change.
     name: WASM browser-ABI determinism
-    if: github.server_url == 'https://github.com'
+    needs: changes
+    if: github.server_url == 'https://github.com' && needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -836,6 +936,67 @@ jobs:
   # Checks
   # ═══════════════════════════════════════════════
 
+  coverage-ratchet:
+    # #566 gap B: the nightly ratchet surfaced a regression up to 24h late,
+    # inviting baseline conflicts. This runs the SAME gate at push/PR time —
+    # ~14 min measured — but only when something it measures changed.
+    name: Coverage ratchet at push time (#566)
+    needs: changes
+    if: github.server_url == 'https://github.com' && needs.changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Relevance — skip when nothing measured changed
+        id: rel
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE="${{ github.event.before }}"
+          fi
+          case "$BASE" in ""|0000000000000000000000000000000000000000) BASE="$(git rev-parse HEAD~1 2>/dev/null || true)";; esac
+          if [ -n "$BASE" ] && git cat-file -e "$BASE" 2>/dev/null; then
+            CHANGED="$(git diff --name-only "$BASE"..HEAD)"
+          else
+            CHANGED="unknown-base"
+          fi
+          if [ -n "$CHANGED" ] && ! printf '%s\n' "$CHANGED" | grep -qE '^(crates/|src/|runtime/|spec/|stdlib/|proofs/coverage|proofs/mcdc|Cargo)'; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "nothing coverage-relevant changed ($(printf '%s\n' "$CHANGED" | wc -l) file(s))"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+      # RUST_TOOLCHAIN (1.94), not the historical 1.89 per-crate floor: the
+      # commissioned workspace lock carries deps (thiserror 2.0.20) whose MSRV
+      # is above 1.89, so a 1.89 build of the WORKSPACE no longer resolves.
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.rel.outputs.skip != 'true'
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: actions/cache@v6
+        if: steps.rel.outputs.skip != 'true'
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: coverage-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+      - name: Install llvm-tools
+        if: steps.rel.outputs.skip != 'true'
+        run: rustup component add llvm-tools-preview
+      - name: Build almide (stamp expects an installed binary)
+        if: steps.rel.outputs.skip != 'true'
+        run: |
+          cargo build --release
+          mkdir -p ~/.local/bin && cp target/release/almide ~/.local/bin/
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Measure coverage and enforce the ratchet + safety floors
+        if: steps.rel.outputs.skip != 'true'
+        run: bash proofs/coverage.sh --check
+
   checks:
     name: Emit & Format
     needs: build
@@ -866,8 +1027,11 @@ jobs:
           $ALMIDE "$f" --emit-ast > /dev/null
           echo "AST emit OK"
 
-      - name: fmt gate (spec/ + examples/ stay formatted, #919)
-        run: /tmp/almide-bin/almide fmt --check spec/ examples/
+      - name: fmt gate (spec/ + examples/ + stdlib/ stay formatted, #919/#1462; gauntlet reject cells excluded by the manifest; stdlib under --no-import-edit)
+        run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-fmt-gate.sh
+
+      - name: Doc fences execute (#1490 — marked stdlib examples check/run byte-exactly)
+        run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-doc-fences.sh
 
       - name: Forbidden impurities (no raw clocks/threads in the compile path)
         run: scripts/check-forbidden-impurities.sh
@@ -889,6 +1053,9 @@ jobs:
 
       - name: Contract ledger traceability (every contract evidenced, every fixture contracted)
         run: scripts/check-contracts.sh
+
+      - name: WASI/Component-Model pin policy (#1628 stage 4)
+        run: bash scripts/check-wasi-pins.sh
 
       - name: Allocation ceilings (one 2 GiB limit, every spelling agrees)
         run: bash scripts/check-alloc-ceilings.sh
@@ -946,6 +1113,22 @@ jobs:
       - name: Stdlib doc signature indexes up to date (regenerate and diff)
         run: ALMIDE_BIN=/tmp/almide-bin/almide python3 tools/gen-stdlib-doc-index.py --check
 
+      - name: README counts derived, Hello, world bytes match the stamped baseline, no undated hand-written count
+        run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/gen-readme-stats.sh --check && bash scripts/check-readme-numbers.sh
+
+      # The two README-reading checks that otherwise live only in jobs a
+      # docs-only change skips (tests/docs_gen_test.rs in Test Rust, the
+      # build-speed render in Almide gates). This job always runs, so a README
+      # edit cannot dodge them by being docs-only.
+      - name: docs-gen --check (stdlib-count claim in README/SPEC/WASM-OUTPUT, llms.txt version and codes)
+        run: /tmp/almide-bin/almide docs-gen --check
+
+      - name: README build-speed block is fresh (#999 — render check, no measurement)
+        # `almide run` builds the gates tool natively, so this step needs cargo.
+        run: |
+          rustup toolchain install stable --profile minimal >/dev/null 2>&1 || true
+          /tmp/almide-bin/almide run tools/almide-gates/src/main.almd -- bench docs/benchmarks --check-readme
+
       - name: LLM-surface fences compile (#1483 — every \`\`\`almide check fence passes almide check)
         run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-llm-surface.sh
 
@@ -972,9 +1155,25 @@ jobs:
       # gate reads. It resolves `ALMIDE`, not the `ALMIDE_BIN` the rest of the
       # job passes, and `checks` never builds — it downloads the artifact — so
       # the default `target/release/almide` probe finds nothing.
+      # The grammar gate's Earley pass over the ~1,500-file corpus was this
+      # job's longest step (~5 min of ~6.5). Accepted verdicts are memoized
+      # under a key of (grammar, lark version, gate script); the memo is
+      # restored by prefix so a run inherits the newest memo for the same
+      # grammar and re-parses only files whose bytes moved. Any change to the
+      # key parses everything again — the memo is a memo of a pure function,
+      # never a relaxation. Caches are branch-scoped: a PR reads develop's
+      # memo, develop never reads a PR's.
+      - name: Grammar-gate corpus memo
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/lark-gate-memo.json
+          key: lark-gate-memo-${{ hashFiles('docs/grammar/almide.lark', 'scripts/lib/lark-gate.py') }}-${{ github.run_id }}
+          restore-keys: lark-gate-memo-${{ hashFiles('docs/grammar/almide.lark', 'scripts/lib/lark-gate.py') }}-
+
       - name: Grammar stays in sync with the parser (#1365)
         env:
           ALMIDE: /tmp/almide-bin/almide
+          LARK_GATE_CACHE: ${{ runner.temp }}/lark-gate-memo.json
         run: |
           python3 -m pip install --quiet lark
           bash scripts/check-lark-grammar.sh
@@ -984,16 +1183,23 @@ jobs:
 
   perf-ratchet:
     name: Perf ratchet (native/Rust ratio, #917)
-    needs: build
+    needs: [changes, build]
+    if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
 
       # rustc/cargo: the ratchet compiles the handwritten references and the
-      # generated Rust of each benchmark with the same toolchain.
+      # generated Rust of each benchmark with the same toolchain — STABLE,
+      # not the MSRV pin: the ratios describe what users run, and the
+      # baselines were historically recorded under the then-stable. (An
+      # earlier version of this comment blamed rustc 1.94's optimizer for
+      # idiom-ceiling reds; a probe on the runner class showed those reds
+      # were runner bimodality under-sampled at 3 runs — see the RUNS
+      # comment in scripts/check-perf-ratio.sh. Toolchain choice was never
+      # the cause.) Build and test jobs keep the 1.94 MSRV pin; this job's
+      # claim is about the GENERATED CODE, not the compiler's build floor.
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
 
       - uses: actions/download-artifact@v8
         with:
@@ -1002,6 +1208,12 @@ jobs:
 
       - name: Setup
         run: chmod +x /tmp/almide-bin/almide
+
+      # The idiom relation gates on callgrind instruction counts (wall time
+      # is machine-state bimodal on this runner class — see the IDIOM_CEILING
+      # comment in scripts/check-perf-ratio.sh).
+      - name: valgrind (for the Ir idiom gate)
+        run: sudo apt-get update -q && sudo apt-get install -y -q valgrind
 
       - name: Native runtime ratio vs handwritten Rust
         run: ALMIDE_BIN=/tmp/almide-bin/almide scripts/check-perf-ratio.sh
@@ -1190,3 +1402,79 @@ jobs:
             -H "Authorization: token ${{ secrets.PLAYGROUND_DISPATCH_TOKEN }}" \
             https://api.github.com/repos/almide/playground/dispatches \
             -d '{"event_type":"compiler-updated"}'
+
+  # ── Commissioned wasm leg (Stage 2, 2026-08-26) ─────────────────────────
+  # The structural emitter and its greenfield gate fleet, in release shape
+  # (V-1: assertions live in the shipped-shape build). Debug shards skip
+  # these suites (cfg_attr debug ignore), so this job is their ONLY runner.
+  commissioned-wasm-gates:
+    name: Commissioned wasm gates (structural leg, release)
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install wasmtime (stock CLI — the WASI gate's third-party runtime)
+        run: |
+          curl https://wasmtime.dev/install.sh -sSf | bash
+          echo "$HOME/.wasmtime/bin" >> "$GITHUB_PATH"
+      - name: Carried gates in release shape
+        run: cargo test --release --locked -p almide-wasm -p almide-wasm-run -p almide-spine -p almide-syntax -p almide-corpus -p almide-layout
+      - name: Target-availability matrix (#1423 — declared == measured, both directions)
+        run: cargo build --release --locked --bin almide && bash scripts/check-target-availability.sh
+
+  # Aviation discipline as CI (adopted from the greenfield burn, where
+  # codopsy slipped to B twice and only a human check-in caught it):
+  # the commissioned crates hold A (>= 90) forever, and the 800-line file
+  # discipline is the cheap proxy for the measured primary slippage driver.
+  commissioned-aviation-quality:
+    name: Commissioned aviation quality (codopsy A + file discipline)
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+      - name: build codopsy
+        run: git clone --depth 1 https://github.com/O6lvl4/codopsy /tmp/codopsy && cargo build --release --manifest-path /tmp/codopsy/Cargo.toml
+      - name: score must be A (>= 90)
+        run: |
+          cp .codopsyrc.json crates/almide-wasm/ 2>/dev/null || true
+          /tmp/codopsy/target/release/codopsy analyze crates/almide-wasm 2>&1 | tee /tmp/codopsy.out
+          sed 's/\x1b\[[0-9;]*m//g' /tmp/codopsy.out | grep -E "Quality Score:" | grep -qE "\((9[0-9]|100)/100\)" || { echo "::error::codopsy below A"; exit 1; }
+      - name: file discipline (800-line cap over the commissioned backend)
+        run: bash scripts/check-file-discipline.sh
+
+  # V-6: verification of the verifier as a STANDING gate. Every pre-authored
+  # mutant in ci/mutations/ must be CAUGHT by the release-shape net; a
+  # surviving mutant or a no-longer-applying patch is red (refresh, never
+  # retire).
+  #
+  # #1619: PR runs are INCREMENTAL — only mutants whose patched files (or
+  # patch file, or the shared killer infrastructure) intersect the PR's
+  # change set run, so most PRs finish in seconds instead of ~45 min. The
+  # FULL 40-mutant sweep lives in mutation-sweep.yml (develop pushes in an
+  # uncancelable concurrency group + nightly), where it actually completes —
+  # under ci.yml's cancel-in-progress group the develop sweep was routinely
+  # canceled mid-run, which is standing evidence that never lands. Push
+  # events therefore skip this job entirely (skipped = success for the
+  # required-check, and the sweep workflow owns the push-side evidence).
+  commissioned-mutation-gate:
+    name: Commissioned mutation gate (the net keeps its teeth)
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The incremental scope diffs against the PR base ref.
+          fetch-depth: 0
+      - uses: Swatinem/rust-cache@v2
+      - name: in-scope mutants must be caught (full sweep lives in mutation-sweep.yml)
+        run: |
+          git fetch -q origin "${{ github.base_ref }}"
+          ALMIDE_MUTATION_SCOPE=incremental \
+          ALMIDE_MUTATION_BASE="origin/${{ github.base_ref }}" \
+            bash scripts/check-mutation-gate.sh

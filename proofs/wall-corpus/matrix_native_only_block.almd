@@ -1,0 +1,14 @@
+// @wall: matrix.qwen3_block_q1_0_kv is native-only
+// The packed-GGUF transformer block has no primitive decomposition on any
+// wasm leg — the build-time guard names the op and the rewrite (compose
+// from primitive matrix ops) instead of letting an emitter ICE deep in
+// codegen. Pinned for BOTH legs: this is a target-availability refusal,
+// not a lowering gap.
+effect fn main() -> Unit = {
+  let h = matrix.zeros(1, 8)
+  let kc = matrix.zeros(1, 8)
+  let vc = matrix.zeros(1, 8)
+  let w = bytes.new(64)
+  let (o, _k, _v) = matrix.qwen3_block_q1_0_kv(h, kc, vc, w, [0], [0], 0, 1, 1, 8, 8, 10000.0, 0.00001)
+  println(int.to_string(matrix.rows(o)))
+}

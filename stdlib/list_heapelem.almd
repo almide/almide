@@ -63,7 +63,7 @@ fn list_set_heapelem(xs: List[Value], i: Int, x: Value) -> List[Value] = {
 // each slot acquires its own reference, and the hit slot acquires one for the
 // closure's OWNED return so the lowering's scope-end auto-release consumes the +1.
 // Nothing is dropped here, so there is no recursive-drop dependency.
-fn __lshu_val(hit: Bool, addr: Int, old: Value, f: fn(Value) -> Value) -> Int = if hit then {
+fn __lshu_val(hit: Bool, addr: Int, old: Value, f: (Value) -> Value) -> Int = if hit then {
   let nv = f(old)
   let nh = prim.handle(nv)
   prim.rc_inc(nh)
@@ -76,7 +76,7 @@ fn __lshu_val(hit: Bool, addr: Int, old: Value, f: fn(Value) -> Value) -> Int = 
   0
 }
 
-fn __lshu_fill(sh: Int, bh: Int, n: Int, i: Int, f: fn(Value) -> Value, j: Int) -> Int = if j >= n then 0
+fn __lshu_fill(sh: Int, bh: Int, n: Int, i: Int, f: (Value) -> Value, j: Int) -> Int = if j >= n then 0
 else {
   let old: Value = prim.load_handle(sh + 12 + j * 8)
   let hit = j == i
@@ -84,7 +84,7 @@ else {
   __lshu_fill(sh, bh, n, i, f, j + 1)
 }
 
-fn list_update_heapelem(xs: List[Value], i: Int, f: fn(Value) -> Value) -> List[Value] = {
+fn list_update_heapelem(xs: List[Value], i: Int, f: (Value) -> Value) -> List[Value] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
   let buf: List[Value] = prim.alloc_list_str(n)

@@ -434,6 +434,16 @@ fn inline_and_classify_cross_module_fns(
                 .collect();
         for f in inlined_fns.iter_mut().chain(module_fn_sibs.iter_mut()) {
             let self_name = f.name.as_str().to_string();
+            // #1557 leg 2: the declared-Option strip belongs to this
+            // program-wide re-run too — the pre-pass ran it with MAIN-ONLY
+            // registries, so a cross-module declared-Option effect method's
+            // mangled name was not yet in DECLARED_OPTION_FNS and the
+            // caller's `!` survived un-stripped: it then lowered against the
+            // callee's raw-Option ABI as if there were a carrier, and the
+            // program ran to exit 0 with ZERO output (silent-empty — the
+            // accept-and-wrong class, on the DEFAULT path, no generics
+            // needed). Same pre-pass order: the Option strip first.
+            crate::lower::strip_declared_option_trys_mangled(&mut f.body);
             crate::lower::strip_never_err_unwraps(
                 &mut f.body,
                 &wide_can_err,
@@ -441,6 +451,12 @@ fn inline_and_classify_cross_module_fns(
                 &self_name,
             );
             crate::lower::rewrite_never_err_effect_match(&mut f.body, &wide_can_err, &wide_lifted);
+            crate::lower::strip_never_err_unwraps(
+                &mut f.body,
+                &wide_can_err,
+                &wide_lifted,
+                &self_name,
+            );
             crate::lower::unwrap_never_err_call_types(&mut f.body, &wide_can_err, &wide_lifted);
             crate::lower::rewrap_never_err_into_result_targets(
                 &mut f.body,

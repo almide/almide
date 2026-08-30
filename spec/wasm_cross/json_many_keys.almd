@@ -1,0 +1,35 @@
+// @contract: C-087
+// Objects with thousands of DISTINCT keys round-trip through json.parse and
+// stringify with every key intact and in order. The native leg interns object
+// keys in a bounded, direct-mapped table (#1679): a document with more keys
+// than slots forces the collision path, and one with more distinct keys than
+// the leak cap forces the past-the-cap path — both must be observably
+// identical to the plain owned-key behavior, and to the wasm leg, which
+// interns nothing. Keys are also read back by name after the table is full.
+import json
+
+fn obj_text(p: String, n: Int) -> String = "{" + (0..<n |> list.map((i) => "\"${p}${i}\":${i}") |> list.join(",")) + "}"
+
+fn check(p: String, n: Int) -> Unit = {
+  let v = json.parse(obj_text(p, n)) ?? value.null()
+  let keys = value.keys(v)
+  let rt = if json.stringify(v) == obj_text(p, n) then "same" else "DRIFT"
+  println("${p}${n}: keys=${list.len(keys)} first=${keys[0]} last=${keys[n - 1]} rt=${rt}")
+  println("  first=${json.get_int(v, "${p}0") ?? -1} last=${json.get_int(v, "${p}${n - 1}") ?? -1} missing=${json.get_int(v, "nope") ?? -1}")
+}
+
+fn main() -> Unit = {
+  check("k", 8)
+  // More keys than the native table has slots: the collision path.
+  check("k", 1500)
+  // More distinct keys, over several objects, than the native leak cap: the
+  // past-the-cap path, with earlier objects' keys still resolving.
+  for p in ["a", "b", "c", "d", "e"] {
+    check(p, 1000)
+  }
+  // The same keys parsed again resolve to the same values (a table hit must
+  // compare bytes, not just the slot).
+  let a = json.parse('{"alpha":1,"beta":2}') ?? value.null()
+  let b = json.parse('{"beta":20,"alpha":10,"gamma":30}') ?? value.null()
+  println("${json.get_int(a, "alpha") ?? -1} ${json.get_int(b, "alpha") ?? -1} ${json.get_int(b, "gamma") ?? -1} ${list.join(value.keys(b), ",")}")
+}

@@ -1,0 +1,5 @@
+// ALS-B7: a direct first-order computation.
+@bounded
+fn plus_one(x: Int) -> Int = x + 1
+
+fn main() -> Unit = println("${plus_one(4)}")

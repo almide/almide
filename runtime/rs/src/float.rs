@@ -16,12 +16,25 @@ pub fn almide_rt_float_round(n: f64) -> f64 { n.round() }
 pub fn almide_rt_float_sqrt(n: f64) -> f64 { n.sqrt() }
 // Explicit NaN/tie decision tree — see almide_rt_math_fmin/fmax (math.rs) for
 // why `f64::min`/`f64::max` (llvm.minnum/maxnum, unspecified ±0-tie order)
-// must not be used. Ties return the FIRST operand (C-049).
+// must not be used. Ties follow IEEE-754-2019 zero ordering (C-049,
+// ALS-T23): min(±0 tie) = -0.0, max(±0 tie) = +0.0, commutative.
 pub fn almide_rt_float_min(a: f64, b: f64) -> f64 {
-    if a.is_nan() { b } else if b.is_nan() { a } else if a > b { b } else { a }
+    if a.is_nan() { b }
+    else if b.is_nan() { a }
+    else if a < b { a }
+    else if b < a { b }
+    // Tie (a == b, the ±0 pair included): IEEE-754-2019 minimum — a
+    // negative-signed operand wins, commutatively (min(0,-0) = -0).
+    else if a.is_sign_negative() { a } else { b }
 }
 pub fn almide_rt_float_max(a: f64, b: f64) -> f64 {
-    if a.is_nan() { b } else if b.is_nan() { a } else if a < b { b } else { a }
+    if a.is_nan() { b }
+    else if b.is_nan() { a }
+    else if a > b { a }
+    else if b > a { b }
+    // Tie: IEEE-754-2019 maximum — a positive-signed operand wins,
+    // commutatively (max(-0,0) = +0).
+    else if a.is_sign_positive() { a } else { b }
 }
 // ALS-T6: lo > hi OR a NaN bound aborts in the T6 form — `!(lo <= hi)` covers
 // both (f64::clamp panics raw on either).

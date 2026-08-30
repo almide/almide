@@ -1,6 +1,6 @@
 # v1: The Trust Spine — Proof-Carrying Compilation
 
-> **Shipped.** v1 is the default and — since the v0 wasm emitter was retired (#782, 2026-07-20) — the *only* wasm compilation path. This was a ground-up redesign of the compiler's *trust model*, not a feature on top of v0.
+> **Shipped — as the certificate spine.** v1 replaced the v0 wasm emitter (#782, 2026-07-20) and was the only wasm compilation path until the commissioned **structural leg** became the default `--target wasm` route (#1599, v0.60.0). What ships by default today is the structural leg — **trusted, not proven**: its evidence is differential (byte-identity against this spine on the `wasm_cross` corpus, mutation nets, a refusal ratchet), not a certificate. v1 remains the *certified* leg: the per-build ownership certificate below is emitted and kernel-re-verified on the incumbent path (`ALMIDE_WASM_INCUMBENT=1`, and every shape the structural leg refuses reroutes here — a verified-to-verified handover). Putting the certificate on the structural leg, then retiring this emitter, is #1696. This page describes the v1 spine; the `Built …` line names the leg that produced your bytes.
 
 The [Perceus proof](../crates/almide-perceus-belt/) proves one compiler pass, once. v1 generalizes that principle to the **whole pipeline** — but instead of proving every pass, it proves a tiny *checker* and makes the compiler re-verify itself on every build.
 
@@ -50,7 +50,7 @@ The **trusted base is the Rocq kernel plus the extracted checker** (~1,400 lines
 
 <!-- tcb:generated:start — derived by scripts/gen-claims.sh; DO NOT EDIT between the markers -->
 > **Measured, regenerated:** extracted checker `proofs/checker.ml` = **1348 lines** (+ 331
-> `.mli`); Rocq spine = **149 theorems+lemmas** (axiom-clean, asserted by `proofs/check.sh`);
+> `.mli`); Rocq spine = **188 theorems+lemmas** (axiom-clean, asserted by `proofs/check.sh`);
 > Lean Perceus belt = **41 theorems**, 0 sorry (CI-gated).
 <!-- tcb:generated:end -->
 

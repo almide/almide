@@ -54,6 +54,13 @@ fn corpus_survives_verify_and_is_idempotent() {
     for path in &files {
         let src = std::fs::read_to_string(path).expect("read corpus file");
         let rel = path.strip_prefix(&root).unwrap_or(path).display().to_string();
+        // The DDD gauntlet's REJECT cells are deliberately-invalid programs
+        // (the manifest pins their front rejection — spec/gauntlet/README.md);
+        // the fmt contract applies to programs the front accepts. Skip only
+        // the cells the gauntlet manifest itself classes as reject rows.
+        if rel.starts_with("spec/gauntlet/") && gauntlet_reject_paths(&root).iter().any(|p| rel.starts_with(p)) {
+            continue;
+        }
         let program = match parse(&src) {
             Ok(p) => p,
             Err(e) => {
@@ -205,4 +212,19 @@ fn option_sugar_canonicalization_verifies_as_conserving() {
         .expect("the Option->? spelling rename is the same type, not an AST change");
     let second = parse(&formatted).expect("formatted parses");
     assert_eq!(format_program(&second), formatted, "fmt must stay idempotent");
+}
+
+/// The gauntlet manifest's reject rows, as corpus-relative path prefixes
+/// (a dir cell's row names the cell dir; its files all skip).
+fn gauntlet_reject_paths(root: &std::path::Path) -> Vec<String> {
+    let manifest = root.join("crates/almide-wasm/tests/golden/gauntlet-manifest.txt");
+    let Ok(text) = std::fs::read_to_string(manifest) else { return Vec::new() };
+    text.lines()
+        .filter(|l| l.starts_with("reject\t"))
+        .filter_map(|l| l.rsplit('\t').next())
+        .map(|cell| {
+            let cell = cell.strip_suffix(".almd").map(|c| format!("{c}.almd")).unwrap_or_else(|| cell.to_string());
+            format!("spec/gauntlet/{}", cell.trim_end_matches("/src/main.almd").trim_end_matches(".almd"))
+        })
+        .collect()
 }

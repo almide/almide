@@ -1,0 +1,51 @@
+// @contract: C-324
+// Mut-param forwarding from inside a branch arm (#1688).
+//
+// A `mut` parameter forwarded to a user callee from inside an if/match arm
+// is the shape the C-132 move-mode fold must rewrite into value flow: the
+// write-back leaf becomes a direct tail call, a bare Unit leaf (a stdlib
+// mut call, a `()` arm) becomes `{ leaf; param }`. Before the fold learned
+// these leaves the structural wasm leg emitted the un-folded write-back
+// Assign inside the arm and produced wrong bytes silently (native `A&B`,
+// wasm `\0\0\0`) — the exact I-divergence this fixture pins. The residual
+// un-foldable shapes are WALLED by the emitter (assign:mut-param-in-
+// branch-arm), never emitted.
+//
+// Shapes: terminal if with a user-callee arm + stdlib-push arm; the same
+// as a match; a match with a `()` arm; two forwarding hops (main → esc →
+// one); growth across the calls so the buffer reallocates under the fold.
+import io
+
+fn one(mut out: Bytes, v: Int) -> Unit = bytes.push(out, v)
+
+fn esc_if(mut out: Bytes, b: Int) -> Unit = if b == 38 then one(out, 38) else bytes.push(out, b)
+
+fn esc_match(mut out: Bytes, b: Int) -> Unit = match b {
+  38 => one(out, 38),
+  _ => bytes.push(out, b),
+}
+
+fn maybe(mut out: Bytes, b: Int) -> Unit = match b {
+  0 => (),
+  _ => one(out, b),
+}
+
+fn main() -> Unit = {
+  var a = bytes.new(0)
+  esc_if(a, 65)
+  esc_if(a, 38)
+  esc_if(a, 66)
+  var m = bytes.new(0)
+  esc_match(m, 67)
+  esc_match(m, 38)
+  esc_match(m, 68)
+  var s = bytes.new(0)
+  maybe(s, 69)
+  maybe(s, 0)
+  maybe(s, 70)
+  io.write(a)
+  io.write(m)
+  io.write(s)
+  println("")
+  println("${bytes.len(a)},${bytes.len(m)},${bytes.len(s)}")
+}

@@ -95,7 +95,7 @@ impl Parser {
     /// `Result[T, E]`, the 2-arg pseudo-generic. Bare `!` stays 1-arg (the
     /// `!String` default), so `T!` keeps meaning `T!String` and every existing
     /// program is unaffected. Same-line only, one token of lookahead.
-    fn parse_fn_return_type(&mut self) -> Result<TypeExpr, String> {
+    pub(crate) fn parse_fn_return_type(&mut self) -> Result<TypeExpr, String> {
         self.expect(TokenType::Arrow)?;
         let return_type = self.parse_type_expr()?;
         if !self.check(TokenType::Bang) || self.newline_before_current() {

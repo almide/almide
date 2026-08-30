@@ -1,0 +1,11 @@
+fn go(n: Int, acc: Int) -> Int = if n <= 0 then acc else go(n - 1, (acc + n) % 999983)
+
+fn main() -> Unit = {
+  var r = 0
+  var acc = 0
+  while r < 30 {
+    acc = (acc + go(1000000, 0)) % 999983
+    r = r + 1
+  }
+  println(int.to_string(acc))
+}

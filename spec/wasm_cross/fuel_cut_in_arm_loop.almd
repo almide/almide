@@ -1,0 +1,84 @@
+// @contract: C-320
+// ALS-DT2, cut bookkeeping (adjudicated 2026-08-25, greenfield stage-64 f18d):
+// a budget cut performs the same meter bookkeeping as a normal region exit.
+// Normative values (the comments below): exhausted => -1 (Err), roomy => the
+// arm's computed value, independent of loop form (for/while), cut placement
+// (direct-in-arm vs callee) and of any earlier region's verdict.
+// The 0.58.0 release violates this identically on BOTH targets (a direct-arm
+// cut => stale ok(0) instead of Err, and the leaked meter state poisons every
+// later region: it prints 6 6 -1 -1 6 6 0 0 0 instead of 6 6 -1 -1 6 6 -1 6 -1)
+// — invisible to agreement, which is why the reference leg pins the values
+// (almide/almide#1572). Clean callee controls run FIRST so the poisoning is
+// visible in the tail rather than corrupting the controls.
+fn hfor(n: Int) -> Int = {
+  var s = 0
+  for _i in 0..<n {
+    s = s + 1
+  }
+  s
+}
+
+fn hwhile(n: Int) -> Int = {
+  var s = 0
+  var i = 0
+  while i < n {
+    s = s + 1
+    i = i + 1
+  }
+  s
+}
+
+effect fn main() -> Unit = {
+  // controls: callee loops, roomy and exhausted — correct on 0.58.0 too
+  let a = fan.bounded(compute.ms(100)) { hfor(6) } ?? -1
+  let b = fan.bounded(compute.ms(100)) { hwhile(6) } ?? -1
+  let c = fan.bounded(compute.ns(10)) { hfor(100000) } ?? -1
+  let d = fan.bounded(compute.ns(10)) { hwhile(100000) } ?? -1
+  // direct-in-arm loops: value and verdict must match the callee forms
+  let e = fan.bounded(compute.ms(100)) {
+    var s = 0
+    var i = 0
+    while i < 6 {
+      s = s + 1
+      i = i + 1
+    }
+    s
+  } ?? -1
+  let f = fan.bounded(compute.ms(100)) {
+    var s = 0
+    for _i in 0..<6 {
+      s = s + 1
+    }
+    s
+  } ?? -1
+  let g = fan.bounded(compute.ns(10)) {
+    var s = 0
+    var i = 0
+    while i < 100000 {
+      s = s + 1
+      i = i + 1
+    }
+    s
+  } ?? -1
+  // region independence: after the direct-arm cut above, clean regions still judge
+  let h = fan.bounded(compute.ms(100)) { hfor(6) } ?? -1
+  let i2 = fan.bounded(compute.ns(10)) { hwhile(100000) } ?? -1
+  println("${a}")
+  // 6
+  println("${b}")
+  // 6
+  println("${c}")
+  // -1
+  println("${d}")
+  // -1
+  println("${e}")
+  // 6
+  println("${f}")
+  // 6
+  println("${g}")
+  // -1
+  println("${h}")
+  // 6 (a cut in an earlier region leaks nothing into this one)
+  // -1
+  println("${i2}")
+}

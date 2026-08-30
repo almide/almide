@@ -392,7 +392,20 @@ pub fn lower_function_all_with_globals(
     record_layouts: &RecordLayouts,
     variant_layouts: &VariantLayouts,
 ) -> Result<Vec<MirFunction>, LowerError> {
-    lower_function_all_impl(func, globals, global_inits, record_layouts, variant_layouts)
+    let out = lower_function_all_impl(func, globals, global_inits, record_layouts, variant_layouts);
+    // Debug aid (wasm-leg parity with the native rungs' ALMIDE_DUMP_MIR):
+    // `ALMIDE_DUMP_WMIR=<substr>` prints the lowered op stream of matching fns.
+    if let (Ok(pat), Ok(ms)) = (std::env::var("ALMIDE_DUMP_WMIR"), &out) {
+        if func.name.as_str().contains(&pat) {
+            for m in ms {
+                eprintln!("== WMIR {} ==", m.name);
+                for op in &m.ops {
+                    eprintln!("  {op:?}");
+                }
+            }
+        }
+    }
+    out
 }
 
 /// [`lower_function_all_with_types`] WITH the program's VARIANT-layout registry threaded in

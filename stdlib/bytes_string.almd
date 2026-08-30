@@ -37,8 +37,7 @@ fn bytes_read_string_at(b: Bytes, pos: Int, len: Int) -> String = {
   let blen = prim.load32(h + 4)
   let n = if pos < 0 then 0
   else if len < 0 then 0
-  else if pos > blen - len then 0
-  else len
+  else if pos > blen - len then 0 else len
   let out = prim.alloc_str(n)
   let _x = __bs_copy(prim.handle(out) + 12, h + 12 + pos, n, 0)
   out

@@ -1,0 +1,9 @@
+// ALS-B4: pushing inside a counted loop allocates per iteration — not admissible.
+@bounded
+fn squares() -> List[Int] = {
+  var xs: List[Int] = []
+  for i in 0..<8 { xs = xs + [i * i] }
+  xs
+}
+
+fn main() -> Unit = println("${list.len(squares())}")

@@ -1,0 +1,12 @@
+// ALS-B11: a guard inside a counted loop is an early exit past the bound.
+@bounded
+fn all_positive(xs: List[Int]) -> Int = {
+  var acc = 0
+  for i in 0..<3 {
+    guard (list.get(xs, i) ?? 0) > 0 else 0
+    acc = acc + 1
+  }
+  acc
+}
+
+fn main() -> Unit = println("${all_positive([1, 2, 3])}")

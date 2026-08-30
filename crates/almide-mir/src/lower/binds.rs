@@ -422,6 +422,27 @@ impl LowerCtx {
                     _
                 )
             ),
+            // A FALLIBLE lambda (ADR-0009: fallibility-inferred mini fallible
+            // fn) reaches the lift with its carrier ALREADY in `body.ty`
+            // (`Result[B, String]` — L3/L5 ran upstream), so the sub-context
+            // classifies it exactly like a declared-Result fn: the one `!`
+            // rule then owns its propagation instead of declining fn-family.
+            // A bare-typed body (an L9 test-block lambda — deliberately
+            // channel-less) stays None and keeps its honest wall.
+            decl_ret_family: match &body.ty {
+                t @ Ty::Applied(
+                    almide_lang::types::constructor::TypeConstructorId::Result,
+                    _,
+                ) => Some(crate::lower::result_family(t)),
+                _ => None,
+            },
+            decl_fn_err: match &body.ty {
+                Ty::Applied(
+                    almide_lang::types::constructor::TypeConstructorId::Result,
+                    a,
+                ) if a.len() == 2 => Some(a[1].clone()),
+                _ => None,
+            },
             ..Default::default()
         };
         // The leading ENV param: the closure block itself, BORROWED (the caller owns it

@@ -200,9 +200,10 @@ fn __almd_wall_hit() -> bool {
 /// arithmetic as the wasm leg (wrapping i64, trace*1000003+site).
 pub(crate) const COUNTER_SHIM: &str = "thread_local! {
     static __ALMD_FUEL: std::cell::Cell<i64> = const { std::cell::Cell::new(i64::MAX) };
-    static __ALMD_FUEL_ENTRY: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
+    static __ALMD_FUEL_ENTRY: std::cell::Cell<i64> = const { std::cell::Cell::new(-1) };
     static __ALMD_B_VERDICT: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
     static __ALMD_B_SPEND: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
+    static __ALMD_B_SAVED: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
     static __ALMD_TRACE: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
 }";
 
@@ -235,15 +236,23 @@ pub(crate) static BUDGET_SHIM: std::sync::LazyLock<String> = std::sync::LazyLock
 });
 
 pub(crate) const BUDGET_SHIM_TEMPLATE: &str = "fn __almd_budget_enter(budget_ns: i64) -> i64 {
-    let units = budget_ns / __ALMD_CM1_NS__;
+    let units = (budget_ns / __ALMD_CM1_NS__).max(0);
     __ALMD_FUEL_ENTRY.with(|e| e.set(units));
     let saved = __ALMD_FUEL.with(|f| f.get());
+    __ALMD_B_SAVED.with(|s| s.set(saved));
     if units < saved {
         __ALMD_FUEL.with(|f| f.set(units));
     }
     saved
 }
 fn __almd_budget_exhausted() -> i64 {
+    if __ALMD_FUEL_ENTRY.with(|e| e.get()) >= 0 {
+        __ALMD_B_VERDICT.with(|v| v.set(i64::from(__ALMD_FUEL.with(|f| f.get()) < 0)));
+        let consumed = __ALMD_FUEL_ENTRY.with(|e| e.get()) - __ALMD_FUEL.with(|f| f.get());
+        __ALMD_B_SPEND.with(|s| s.set(consumed));
+        __ALMD_FUEL.with(|f| f.set(__ALMD_B_SAVED.with(|s| s.get()) - consumed));
+        __ALMD_FUEL_ENTRY.with(|e| e.set(-1));
+    }
     __ALMD_B_VERDICT.with(|v| v.get())
 }
 fn __almd_budget_exit(saved: i64) -> i64 {
@@ -251,6 +260,7 @@ fn __almd_budget_exit(saved: i64) -> i64 {
     let consumed = __ALMD_FUEL_ENTRY.with(|e| e.get()) - __ALMD_FUEL.with(|f| f.get());
     __ALMD_B_SPEND.with(|s| s.set(consumed));
     __ALMD_FUEL.with(|f| f.set(saved - consumed));
+    __ALMD_FUEL_ENTRY.with(|e| e.set(-1));
     0
 }
 fn __almd_budget_spend() -> i64 {

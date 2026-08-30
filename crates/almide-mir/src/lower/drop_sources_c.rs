@@ -914,6 +914,23 @@ pub fn generate_variant_pair_result_sources(
                 }
             }
             Ty::String | Ty::Bytes => Some(false),
+            // LIST slots (#1580): a scalar-element list frees flat (one
+            // rc_dec); a `List[String]` frees per-element via the vp-private
+            // `__drop_vp_list_str` (rich). Deeper element classes decline —
+            // the ctor gate mirrors this exactly.
+            Ty::Applied(TypeConstructorId::List, la) if la.len() == 1 => {
+                if !crate::lower::is_heap_ty(&la[0]) {
+                    Some(false)
+                } else if matches!(la[0], Ty::String) {
+                    Some(true)
+                } else {
+                    None
+                }
+            }
+            // A SCALAR slot (#1579's mixed pair, `(Int, Note("a", n))`): the
+            // slot holds a raw value, not a handle — the emitted drop SKIPS
+            // it entirely (see `slot_free`; an rc_dec would dec a non-handle).
+            _ if !crate::lower::is_heap_ty(t) => Some(false),
             _ => None,
         }
     };
@@ -944,11 +961,26 @@ pub fn generate_variant_pair_result_sources(
         }
     }
     fn ty_slot_name(t: &Ty) -> String {
+        use almide_lang::types::constructor::TypeConstructorId;
         match t {
             Ty::Named(n, _) => n.as_str().to_string(),
             Ty::String => "String".to_string(),
             Ty::Bytes => "Bytes".to_string(),
-            _ => unreachable!("slot_class admitted only Named/String/Bytes"),
+            // The lowercase spellings are the ctor gate's reserved slot names
+            // (`variant_pair_result_drop_fn`): type names are
+            // Uppercase-initial, so no user type can collide with them.
+            Ty::Applied(TypeConstructorId::List, la)
+                if la.len() == 1 && !crate::lower::is_heap_ty(&la[0]) =>
+            {
+                "list_scalar".to_string()
+            }
+            Ty::Applied(TypeConstructorId::List, la)
+                if la.len() == 1 && matches!(la[0], Ty::String) =>
+            {
+                "list_str".to_string()
+            }
+            _ if !crate::lower::is_heap_ty(t) => "scalar".to_string(),
+            _ => unreachable!("slot_class admitted only Named/String/Bytes/list/scalar"),
         }
     }
     impl almide_ir::visit::IrVisitor for Finder<'_> {
@@ -968,10 +1000,41 @@ pub fn generate_variant_pair_result_sources(
     }
 
     let mut out = String::new();
+    let mut need_vp_list_str = false;
+    for (a, b) in &finder.pairs {
+        need_vp_list_str = need_vp_list_str || a == "list_str" || b == "list_str";
+    }
+    if need_vp_list_str {
+        // The vp-PRIVATE `List[String]` element sweep. The shared
+        // `__drop_list_str` is gated on record/variant FIELD usage
+        // (`program_uses_list_str_drop_field`) and would dangle for a program
+        // whose only `List[String]` owner is a vp slot — a private namespaced
+        // copy needs no cross-generator gate and can never double-define.
+        out.push_str(
+            "fn __drop_vp_list_str(xs: List[String]) -> Unit = {\n  \
+               let h = prim.handle(xs)\n  \
+               if prim.load32(h + 0) == 1 then __drop_vp_list_str_loop(h, prim.load32(h + 4), 0) else ()\n  \
+               prim.rc_dec(h)\n}\n\
+             fn __drop_vp_list_str_loop(h: Int, n: Int, i: Int) -> Unit =\n  \
+               if i >= n then ()\n  \
+               else { prim.rc_dec(prim.load64(h + 12 + i * 8))\n         \
+                      __drop_vp_list_str_loop(h, n, i + 1) }\n",
+        );
+    }
     for (a, b) in &finder.pairs {
         let fa = drop_fn_ident(a);
         let fb = drop_fn_ident(b);
         let slot_free = |name: &str, off: u32, ident: &str| -> String {
+            if name == "scalar" {
+                // A raw scalar slot owns nothing — freeing it would rc_dec a
+                // non-handle. Emit no free for the slot.
+                return String::new();
+            }
+            if name == "list_str" {
+                return format!(
+                    "    let s{off}: List[String] = prim.load_handle(h + {off})\n    __drop_vp_list_str(s{off})\n"
+                );
+            }
             if rich.contains(name) || rich_recs.contains(name) {
                 format!(
                     "    let s{off}: {name} = prim.load_handle(h + {off})\n    __drop_{ident}(s{off})\n"

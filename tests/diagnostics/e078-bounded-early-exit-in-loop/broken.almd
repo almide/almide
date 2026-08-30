@@ -1,0 +1,9 @@
+// ALS-B11: `!` inside the loop body exits mid-iteration — not admissible.
+@bounded
+effect fn sum_first(xs: List[Int]) -> Int! = {
+  var acc = 0
+  for i in 0..<3 { acc = acc + list.get(xs, i)! }
+  ok(acc)
+}
+
+effect fn main() -> Unit = println("${sum_first([1, 2, 3]) ?? -1}")

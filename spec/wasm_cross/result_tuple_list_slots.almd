@@ -1,0 +1,72 @@
+// @contract: C-158
+// #1580: a Result tuple with a List slot returns the real pair for every
+// partner slot — the variant-pair family's classifier gains the List
+// classes (a scalar-element list is one-level-exact under a flat rc_dec; a
+// List[String] frees per-element via the vp-private `__drop_vp_list_str`,
+// since the shared `__drop_list_str` is gated on record/variant FIELD usage
+// and would dangle for a vp-only program). Deeper element classes (records,
+// variants, nested lists) keep the honest decline. The (Int, List[String])
+// churn is leak-free under a 256 KB heap cap (2000 iterations, measured
+// while landing; the carrier spelling cannot loop — `!` in a loop body is
+// its own subset).
+type A = { x: Int }
+
+fn c1(n: Int) -> (Int, List[String])! = {
+  (n, ["a", "b"])
+}
+
+fn c2(n: Int) -> (String, List[String])! = {
+  ("s" + int.to_string(n), ["c"])
+}
+
+fn c3(n: Int) -> (A, List[String])! = {
+  (A { x: n }, ["d", "e", "f"])
+}
+
+fn c4(n: Int) -> (List[String], List[String])! = {
+  (["g"], ["h", "i"])
+}
+
+fn c5(n: Int) -> (Int, List[Int])! = {
+  (n, [1, 2, 3])
+}
+
+fn c6(n: Int) -> (Int, List[String])! = {
+  guard n > 0 else err("neg")
+  (n, ["z"])
+}
+
+fn c6_len(n: Int) -> Int! = {
+  let p = c6(n)!
+  p.0 + list.len(p.1)
+}
+
+effect fn main() -> Unit = {
+  let p1 = c1(41)!
+  println("${p1.0}")
+  // 41
+  println("${list.len(p1.1)}")
+  // 2
+  let p2 = c2(7)!
+  println(p2.0)
+  // s7
+  println("${list.len(p2.1)}")
+  // 1
+  let p3 = c3(9)!
+  println("${p3.0.x}")
+  // 9
+  println("${list.len(p3.1)}")
+  // 3
+  let p4 = c4(0)!
+  println("${list.len(p4.0) + list.len(p4.1)}")
+  // 3
+  let p5 = c5(5)!
+  println("${p5.0 + list.len(p5.1)}")
+  // 8
+  let ok6 = c6_len(4) ?? -1
+  println("${ok6}")
+  // 5
+  let err6 = c6_len(-4) ?? -1
+  // -1 — the err path takes the fallback
+  println("${err6}")
+}

@@ -20,6 +20,7 @@ pub struct BuildArgs<'a> {
     pub verified: bool,
     pub native_verified: bool,
     pub wasm_opt: bool,
+    pub component: bool,
     pub heap_cap: Option<u32>,
 }
 
@@ -147,7 +148,7 @@ pub fn cmd_build(args: BuildArgs) {
     // (verbatim) — this is purely a call-site params bundling.
     let BuildArgs {
         file, output, target, release, fast, unchecked_index: _unchecked_index,
-        no_check, repr_c, cdylib, emit_unverified, verified, native_verified, wasm_opt, heap_cap,
+        no_check, repr_c, cdylib, emit_unverified, verified, native_verified, wasm_opt, component, heap_cap,
     } = args;
     reject_removed_target(target);
     let is_wasm = matches!(target, Some("wasm" | "wasm32" | "wasi"));
@@ -160,13 +161,13 @@ pub fn cmd_build(args: BuildArgs) {
         // the whole CLI runs on the one `almide-main` worker thread, so the
         // thread-local is exactly as scoped as this call.
         let _cap = heap_cap.map(almide_mir::heap_cap::HeapCapGuard::set);
-        cmd_build_wasm_direct(file, output, no_check, emit_unverified, verified, wasm_opt);
+        cmd_build_wasm_direct(file, output, no_check, emit_unverified, verified, wasm_opt, component);
         return;
     }
 
     let output = compute_output_path(file, output, is_wasm);
 
-    let opts = crate::codegen::CodegenOptions { repr_c, allow_unverified: false };
+    let opts = crate::codegen::CodegenOptions { repr_c, allow_unverified: false, trace: false };
     let (rs_code, _ir) = crate::try_compile_with_ir(file, no_check, &opts)
         .unwrap_or_else(|_| std::process::exit(1));
 
@@ -328,7 +329,7 @@ fn cmd_build_wasi_rustc(rs_code: &str, output: &str) {
 }
 
 /// Direct WASM emit: parse → check → lower → optimize → monomorphize → emit WASM binary.
-fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allow_unverified: bool, verified: bool, wasm_opt: bool) {
+fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allow_unverified: bool, verified: bool, wasm_opt: bool, component: bool) {
     let default_output = format!("{}.wasm", file.strip_suffix(".almd").unwrap_or("a.out"));
     let output = output.unwrap_or(&default_output);
 
@@ -337,9 +338,73 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
     // command writes — the cross-target equivalence guarantee depends on both
     // entry points sharing one code path. Any compile diagnostic was already
     // printed there; we just propagate the exit.
-    let (bytes, _produced_by_v1) = match compile_to_wasm_bytes(file, allow_unverified, verified, true) {
+    let (bytes, structural) = match compile_to_wasm_bytes(file, allow_unverified, verified, true) {
         Ok(b) => b,
         Err(()) => std::process::exit(1),
+    };
+    // The structural leg's module imports `almide.*` (the embedded host's
+    // surface). A BUILD artifact must run on stock runtimes, so it ships in
+    // the WASI form — same index space, shimmed imports, proc_exit on trap
+    // (the #1588 transform; the 578-fixture stock-wasmtime gate is its
+    // reproduction witness).
+    // `--component` on the STRUCTURAL leg (#1628 stage 1): the DIRECT p2
+    // path — canonical-ABI imports straight off the almide.* module, no
+    // preview1 adapter (~25 KB lighter, and the only shape the stage-2
+    // fan/async lowering can build on). `ALMIDE_COMPONENT_ADAPTER=1` is
+    // the reversible switch back to the stage-0 adapter wrap; the
+    // incumbent leg stays on the adapter path (its module is already
+    // p1-shaped).
+    let direct_p2 = component
+        && structural
+        && std::env::var_os("ALMIDE_COMPONENT_ADAPTER").is_none();
+    // `ALMIDE_COMPONENT_P3=1` (#1628 stage 2, experimental): the WASI 0.3
+    // component — stdio over component-model streams on the async
+    // canonical ABI. Needs a p3-capable runtime (wasmtime 46+); stays an
+    // env opt-in until the fan lowering lands on the same plumbing and
+    // the corpus gates cover it.
+    let direct_p3 = direct_p2 && std::env::var_os("ALMIDE_COMPONENT_P3").is_some();
+    let bytes = if direct_p3 {
+        match almide_wasm_run::wasi_p3::to_p3(&bytes) {
+            Ok(c) => c,
+            Err(e) => {
+                err(&format!("error: p3 component transform failed — this is an Almide bug: {e}"));
+                std::process::exit(1);
+            }
+        }
+    } else if direct_p2 {
+        match almide_wasm_run::wasi_p2::to_p2(&bytes) {
+            Ok(c) => c,
+            Err(e) => {
+                err(&format!("error: p2 component transform failed — this is an Almide bug: {e}"));
+                std::process::exit(1);
+            }
+        }
+    } else {
+        let bytes = if structural {
+            match almide_wasm_run::wasi::to_wasi(&bytes) {
+                Ok(w) => w,
+                Err(e) => {
+                    err(&format!("error: WASI transform failed — this is an Almide bug: {e}"));
+                    std::process::exit(1);
+                }
+            }
+        } else {
+            bytes
+        };
+        // Stage-0 adapter wrap (the incumbent leg's component form, and
+        // the structural leg's reversible fallback): the WASI core module
+        // + the Cargo-pinned preview1 adapter. Packaging, not a rewrite.
+        if component {
+            match wrap_component(&bytes) {
+                Ok(c) => c,
+                Err(e) => {
+                    err(&format!("error: component encoding failed — this is an Almide bug: {e}"));
+                    std::process::exit(1);
+                }
+            }
+        } else {
+            bytes
+        }
     };
 
     let pre_size = bytes.len();
@@ -357,10 +422,23 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
     // an explicit, default-off opt-in (`--wasm-opt`) rather than automatic —
     // see the wasm-opt parity leg (`tests/wasm_runtime_test.rs::wasm_opt_parity_spec`) for the
     // differential-testing evidence backing this tier's own guarantee.
+    // Name the LEG in the one line every build prints: "which renderer
+    // produced these bytes" was invisible by default (the line said
+    // v1-verified even for structural output), and that opacity cost real
+    // diagnosis time — a "wasm doesn't work" report cannot be split
+    // between legs without it.
+    let leg = match (structural, component) {
+        (true, false) => "structural leg",
+        (false, false) => "incumbent v1 leg",
+        (true, true) if direct_p3 => "structural leg, WASI 0.3 component (direct, async ABI)",
+        (true, true) if direct_p2 => "structural leg, WASI 0.2 component (direct)",
+        (true, true) => "structural leg, WASI 0.2 component (adapter)",
+        (false, true) => "incumbent v1 leg, WASI 0.2 component (adapter)",
+    };
     if !wasm_opt {
         err(&format!(
-            "Built {} ({} bytes, v1-verified — wasm-opt skipped; pass --wasm-opt for a smaller, non-verified build)",
-            output, pre_size
+            "Built {} ({} bytes, {}, verified — wasm-opt skipped; pass --wasm-opt for a smaller, non-verified build)",
+            output, pre_size, leg
         ));
         return;
     }
@@ -373,10 +451,10 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
                 output, pre_size, post_size, pct
             ));
         }
-        Err(_) => {
+        Err(why) => {
             err(&format!(
-                "Built {} ({} bytes) — --wasm-opt requested but wasm-opt is not installed; shipped the verified module unoptimized",
-                output, pre_size
+                "Built {} ({} bytes) — --wasm-opt requested but not applied: {}; shipped the verified module unoptimized",
+                output, pre_size, why
             ));
         }
     }
@@ -437,7 +515,8 @@ pub(super) fn lower_one_wasm_module(
 /// `compile_to_wasm_bytes`'s parse + dependency-fetch + import-resolution
 /// phase. Extracted verbatim — prints diagnostics and returns `Err(())` on
 /// any parse/fetch/resolve failure, mirroring the original early returns.
-fn parse_and_resolve_wasm(file: &str) -> Result<(almide::ast::Program, String, resolve::ResolvedModules), ()> {
+#[allow(clippy::type_complexity)]
+fn parse_and_resolve_wasm(file: &str) -> Result<(almide::ast::Program, String, resolve::ResolvedModules, Vec<(project::PkgId, std::path::PathBuf)>), ()> {
     let (program, source_text, parse_errors) = parse_file(file);
 
     if !parse_errors.is_empty() {
@@ -466,7 +545,7 @@ fn parse_and_resolve_wasm(file: &str) -> Result<(almide::ast::Program, String, r
         Err(e) => { err(&format!("{}", e)); return Err(()); }
     };
 
-    Ok((program, source_text, resolved))
+    Ok((program, source_text, resolved, dep_paths))
 }
 
 /// `compile_to_wasm_bytes`'s type-check phase: canonicalize, build the
@@ -556,6 +635,81 @@ fn verify_wasm_ir(ir_program: &almide::ir::IrProgram) -> Result<(), ()> {
 /// decomposition) have no WASM lowering. Reject at build time with a clear
 /// message rather than letting the emitter ICE deep in codegen. Extracted
 /// verbatim.
+/// #1423 stage 3 — the check-time availability diagnostic. The declared
+/// BOTH-LEGS wall set (proofs/target-availability.toml, measured with
+/// default routing and gated four-directionally by
+/// scripts/check-target-availability.sh) turns the late render wall into
+/// an E081 at check time, naming the reason and — where one exists — the
+/// portable alternative. The render wall stays as the backstop.
+fn check_wasm_availability(ir_program: &almide::ir::IrProgram) -> Result<(), ()> {
+    // The measurement escape: the availability PROBE builds through this
+    // binary to measure the ground truth the table declares — with the
+    // check armed it would measure its own declaration (circular).
+    if std::env::var_os("ALMIDE_NO_AVAIL_CHECK").is_some() {
+        return Ok(());
+    }
+    use std::collections::BTreeMap;
+    use std::sync::OnceLock;
+    static UNAVAILABLE: OnceLock<BTreeMap<String, (String, Option<String>)>> = OnceLock::new();
+    let table = UNAVAILABLE.get_or_init(|| {
+        let toml = include_str!("../../proofs/target-availability.toml");
+        let mut out = BTreeMap::new();
+        // Line-anchored: the header COMMENT names the section literally,
+        // and a bare substring split ate the first native-only row
+        // through it (datetime.parse_iso E081-fired while being merely
+        // structural-pending — the reachability ratchet caught it).
+        for block in toml.split("\n[[wasm-unavailable]]\n").skip(1) {
+            let field = |k: &str| {
+                block.lines().find_map(|l| {
+                    l.strip_prefix(&format!("{k} = \"")).and_then(|r| r.strip_suffix('"')).map(str::to_string)
+                })
+            };
+            if let (Some(fn_name), Some(reason)) = (field("fn"), field("reason")) {
+                out.insert(fn_name, (reason, field("alt")));
+            }
+        }
+        out
+    });
+    let mut hits: BTreeMap<String, &(String, Option<String>)> = BTreeMap::new();
+    use almide::ir::visit::IrVisitor;
+    struct Scan<'a> {
+        table: &'a BTreeMap<String, (String, Option<String>)>,
+        hits: BTreeMap<String, &'a (String, Option<String>)>,
+    }
+    impl<'a> IrVisitor for Scan<'a> {
+        fn visit_expr(&mut self, e: &almide::ir::IrExpr) {
+            if let almide::ir::IrExprKind::Call {
+                target: almide::ir::CallTarget::Module { module, func, .. }, ..
+            } = &e.kind
+            {
+                let key = format!("{}.{}", module.as_str(), func.as_str());
+                if let Some(row) = self.table.get(&key) {
+                    self.hits.entry(key).or_insert(row);
+                }
+            }
+            almide::ir::visit::walk_expr(self, e);
+        }
+    }
+    let mut scan = Scan { table, hits: BTreeMap::new() };
+    for f in ir_program.functions.iter().chain(ir_program.modules.iter().flat_map(|m| m.functions.iter())) {
+        scan.visit_expr(&f.body);
+    }
+    hits.extend(scan.hits);
+    if hits.is_empty() {
+        return Ok(());
+    }
+    for (key, (reason, alt)) in &hits {
+        let alt_line = alt.as_ref().map(|a| format!("\n  try: {a}")).unwrap_or_default();
+        err(&format!(
+            "error[E081]: `{key}` is not available on --target wasm\n  \
+             reason: {reason}{alt_line}\n  \
+             note: the availability matrix is proofs/target-availability.toml (#1423); \
+             the same program builds with --target rust"
+        ));
+    }
+    Err(())
+}
+
 fn check_no_native_only_matrix(ir_program: &almide::ir::IrProgram) -> Result<(), ()> {
     if let Some(op) = almide::codegen::program_uses_native_only_matrix_on_wasm(ir_program) {
         err(&format!(
@@ -568,12 +722,110 @@ fn check_no_native_only_matrix(ir_program: &almide::ir::IrProgram) -> Result<(),
     Ok(())
 }
 
-/// `compile_to_wasm_bytes`'s v1 PCC-verified trust-spine render — the ONLY
-/// wasm path (#782: the v0 wasm emitter is retired). A v1 wall is an
-/// honest, diagnosed hard error, never a silent fallback into unverified
-/// codegen: a program that compiles is verified, a program the renderer
-/// cannot verify is refused with the wall reason (refusal over risk — the
-/// medical-grade bar). Extracted verbatim.
+/// The commissioned wasm leg (Stage 2 switchover): route between the
+/// structural emitter (`almide::wasm_leg` + `almide_wasm::emit_program`,
+/// the greenfield engine — measured 610/610 byte-identical to native on
+/// the full wasm_cross corpus) and the incumbent WAT trust-spine.
+///
+/// Routing has TWO tiers. Tier 1 is by PROJECT SHAPE (the enumerated
+/// conditions below). Tier 2: a program the shape routing gives to the
+/// structural leg whose lowering then WALLS is re-rendered by the incumbent
+/// — a verified-to-verified handover, NOT the retired v0 fallback (#782's
+/// sin was falling into UNVERIFIED codegen). A program NEITHER leg lowers
+/// still fails hard with the incumbent's wall diagnostics. The handover is
+/// named on stderr under `ALMIDE_VERIFIED_DEBUG=1`, and the leg that
+/// produced the bytes is named in the `Built …` line / `--time-report`:
+///   - `ALMIDE_WASM_INCUMBENT=1`     → incumbent (the reversible switch,
+///                                      kept for one release)
+///   - main-less library module      → incumbent (#881 export mode — the
+///                                      structural emitter has no library
+///                                      form yet)
+///   - host-variant program on the BUILD path → incumbent (its artifact
+///                                      speaks real WASI fs/env; the WASI
+///                                      transform's shims cover less)
+///   - everything else               → structural emitter
+///
+/// The second tuple field is true when the STRUCTURAL leg produced the
+/// bytes (they import `almide.*` and run on the embedded host; the build
+/// path converts them with `to_wasi` for stock runtimes).
+fn render_wasm_module_routed(
+    file: &str,
+    source_text: &str,
+    v1_self_modules: &[(String, almide_lang::ast::Program, bool)],
+    library_ok: bool,
+    has_main: bool,
+    dep_paths: &[(project::PkgId, std::path::PathBuf)],
+    uses_incumbent_features: bool,
+    host_variant: bool,
+) -> Result<(Vec<u8>, bool), ()> {
+    //   - `ALMIDE_FUEL_PROBE` set         → incumbent (the charge-trace
+    //     probe line is that leg's Σ-probe instrumentation — contract
+    //     evidence keeps its measured meaning; the structural leg's C-320
+    //     conformance has its own gates in crates/almide-wasm)
+    // `ALMIDE_WASM_STRUCTURAL=1` — the frontier-development probe switch:
+    // force the STRUCTURAL leg on shapes the routing would send to the
+    // incumbent, and turn every wall/decline into a hard error instead of
+    // the reroute (a probe that silently rerouted would measure nothing).
+    // This is how a routed-away shape (#1596 self-import, #1598 matrix/io)
+    // is exercised while its structural support is built, and the lever the
+    // eventual route flip is verified with.
+    let force_structural = std::env::var_os("ALMIDE_WASM_STRUCTURAL").is_some();
+    let incumbent = !force_structural
+        && (std::env::var_os("ALMIDE_WASM_INCUMBENT").is_some()
+            || std::env::var_os("ALMIDE_FUEL_PROBE").is_some()
+            || !has_main
+            || uses_incumbent_features
+            || (library_ok && host_variant));
+    if incumbent {
+        return render_wasm_module(source_text, v1_self_modules, library_ok).map(|(b, _)| (b, false));
+    }
+    // A structural WALL routes to the incumbent renderer. This is NOT the
+    // retired v0 fallback (#782's sin was falling into UNVERIFIED codegen):
+    // both legs here are verified renderers, so the product never regresses
+    // on a shape only the incumbent lowers — and a program NEITHER leg can
+    // lower still fails hard with the incumbent's rich wall diagnostics.
+    // ALMIDE_VERIFIED_DEBUG=1 names the wall that rerouted.
+    let reroute = |why: &str| {
+        if force_structural {
+            err(&format!("error: structural leg walled under ALMIDE_WASM_STRUCTURAL ({why})"));
+            return Err(());
+        }
+        if std::env::var_os("ALMIDE_VERIFIED_DEBUG").is_some() {
+            err(&format!("[almide] structural leg declined ({why}) — incumbent renderer"));
+        }
+        render_wasm_module(source_text, v1_self_modules, library_ok).map(|(b, _)| (b, false))
+    };
+    let ir = match almide::wasm_leg::lower_to_ir_with_deps(file, source_text, dep_paths) {
+        Ok(ir) => ir,
+        Err(e) => return reroute(&format!("front: {e}")),
+    };
+    match almide_wasm::emit_program(&ir) {
+        Ok(bytes) => {
+            // Same emit-time validation discipline as the incumbent leg:
+            // never ship bytes wasmtime would refuse at load.
+            if let Err(e) = wasmparser::validate(&bytes) {
+                return reroute(&format!("validation: {}", e.message()));
+            }
+            // With the debug env, ALWAYS name the winning leg — the
+            // incumbent path and the reroute already speak, so a silent
+            // structural success made the env an incomplete oracle.
+            if std::env::var_os("ALMIDE_VERIFIED_DEBUG").is_some() {
+                err(&format!(
+                    "[almide] structural leg emitted the module ({} bytes)",
+                    bytes.len()
+                ));
+            }
+            Ok((bytes, true))
+        }
+        Err(almide_wasm::EmitError::Unsupported(reason)) => reroute(&reason),
+    }
+}
+
+/// The incumbent v1 PCC-verified trust-spine render (#782: the v0 wasm
+/// emitter is retired). A v1 wall is an honest, diagnosed hard error, never
+/// a silent fallback into unverified codegen: a program that compiles is
+/// verified, a program the renderer cannot verify is refused with the wall
+/// reason (refusal over risk — the medical-grade bar). Extracted verbatim.
 fn render_wasm_module(source_text: &str, v1_self_modules: &[(String, almide_lang::ast::Program, bool)], library_ok: bool) -> Result<(Vec<u8>, bool), ()> {
     // `almide build` may produce a main-less LIBRARY module (pub-fn exports,
     // synthesized empty `_start` — #881); `almide run` must keep the no-main
@@ -701,7 +953,7 @@ fn render_wasm_module(source_text: &str, v1_self_modules: &[(String, almide_lang
 }
 
 pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified: bool, library_ok: bool) -> Result<(Vec<u8>, bool), ()> {
-    let (mut program, source_text, mut resolved) = parse_and_resolve_wasm(file)?;
+    let (mut program, source_text, mut resolved, dep_paths) = parse_and_resolve_wasm(file)?;
 
     // v1 `--verified`: capture the FRESH (un-inferred) cross-module siblings now, before the loop
     // below mutates them in place — the v1 pipeline re-runs its own canonicalize/infer/lower from
@@ -714,14 +966,60 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
     let mut ir_program = lower_and_link_wasm_ir(&program, &mut checker, &mut resolved)?;
     verify_wasm_ir(&ir_program)?;
     check_no_native_only_matrix(&ir_program)?;
+    check_wasm_availability(&ir_program)?;
 
-    // v1 OPT-IN verified codegen: after every v0 gate above (type-check, IR-verify, native-matrix
-    // guard) has passed, TRY the PCC-verified trust-spine renderer. It is byte-
-    // identical to v0 where it lowers and WALLS (`Err`) otherwise — on a wall we fall through to
-    // v0 codegen below. Honest-wall: a v1 module is never wrong; a walled program builds via v0
-    // exactly as without `--verified`.
+    // Routing inputs (see render_wasm_module_routed): project shape, decided
+    // from what the v0 gates already computed — never from a failure.
+    let has_main = ir_program.functions.iter().any(|f| f.name.as_str() == "main");
+    // `@export`-attributed fns must survive as wasm exports (the DCE-root
+    // contract, wasm_export_dce_root_test) — the structural leg has no
+    // export mode yet (#1598's sibling surface), so those modules stay on
+    // the incumbent leg.
+    let has_exports = ir_program.functions.iter().any(|f| !f.export_attrs.is_empty());
+    let imports_module = |names: &[&str]| {
+        std::iter::once(&program)
+            .chain(resolved.modules.iter().map(|(_, p, _, _)| p))
+            .flat_map(|p| p.imports.iter())
+            .any(|d| {
+                matches!(d, almide::ast::Decl::Import { path, .. }
+                    if path.first().is_some_and(|r| names.contains(&r.as_str())))
+            })
+    };
+    // Build-time host routing: env/process ride the incumbent (no
+    // structural surface); fs rides the incumbent because the p1
+    // `to_wasi` transform carries no fs ops — EXCEPT when the build is
+    // headed for the direct p3 component (#1628 increment 2d), whose
+    // shim now carries the full fs read+write surface, so fs programs
+    // flip to the structural leg there by default (#1584's first
+    // default-route slice).
+    let p3_requested = std::env::var_os("ALMIDE_COMPONENT_P3").is_some();
+    let host_variant = imports_module(&["env", "process"])
+        || (imports_module(&["fs"]) && !p3_requested);
+    // #1598 CLOSED as per-fn auto-flip: the matrix/io module pre-scan is
+    // GONE. The linked surfaces (io.read_all via the host's op-31 drain
+    // joined io.print/write/write_bytes/read_n_bytes; the measured matrix
+    // arms) lower structurally; anything still unlinked (the qwen/llama
+    // matrix long tail, io.read_line/read_byte) WALLS at lowering and the
+    // tier-2 verified-to-verified reroute hands it to the incumbent — so
+    // every future linked fn flips its own route with no hand-mirrored
+    // list to drift.
+    // #1596 CLOSED: `import self as m` projects run the structural leg.
+    // The spaced globals machinery ((space, VarId) keys — separately-
+    // lowered modules each restart VarIds at 0) fixed the top-let storage
+    // misalignment; the full crossmod matrix passes on the forced
+    // structural leg, and a shape it still cannot lower (a module
+    // initializer with inner binds) walls honestly and reroutes.
     let _ = (&mut ir_program, allow_unverified, verified);
-    render_wasm_module(&source_text, &v1_self_modules, library_ok)
+    render_wasm_module_routed(
+        file,
+        &source_text,
+        &v1_self_modules,
+        library_ok,
+        has_main,
+        &dep_paths,
+        has_exports,
+        host_variant,
+    )
 }
 
 /// Best-effort map of a validation-error byte offset to the function that
@@ -729,7 +1027,7 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
 /// the name section (still present — validation runs before
 /// [`strip_wasm_name_section`]). `None` only if the module is too broken
 /// to walk section-by-section; the caller still reports the offset.
-fn wasm_function_at(bytes: &[u8], offset: usize) -> Option<String> {
+fn wasm_function_at(bytes: &[u8], offset: u64) -> Option<String> {
     use wasmparser::{KnownCustom, Name, Parser, Payload, TypeRef};
     let mut imported_funcs: u32 = 0;
     let mut code_index: u32 = 0;
@@ -897,6 +1195,23 @@ fn write_leb128_u32(mut v: u32) -> Vec<u8> {
 
 /// Run `wasm-opt -Oz` on the output file, in-place.
 /// Returns the new file size on success.
+/// Wrap a WASI-preview1 core module into a WASI 0.2 component: the
+/// wit-component encoder + the adapter the provider crate pins. The
+/// spike evidence (issue #1628): hello-world and the stdin family run
+/// byte-identically core vs component on wasmtime 47.
+fn wrap_component(core: &[u8]) -> Result<Vec<u8>, String> {
+    wit_component::ComponentEncoder::default()
+        .module(core)
+        .map_err(|e| format!("module: {e}"))?
+        .adapter(
+            "wasi_snapshot_preview1",
+            wasi_preview1_component_adapter_provider::WASI_SNAPSHOT_PREVIEW1_COMMAND_ADAPTER,
+        )
+        .map_err(|e| format!("adapter: {e}"))?
+        .encode()
+        .map_err(|e| format!("encode: {e}"))
+}
+
 fn run_wasm_opt(path: &str) -> Result<usize, String> {
     // `-Oz`, matching the flag's documented contract: `--wasm-opt` exists to
     // shrink the module (the published size tables are -Oz numbers), and the
@@ -907,19 +1222,35 @@ fn run_wasm_opt(path: &str) -> Result<usize, String> {
     // --enable-nontrapping-float-to-int: float→int renders as
     // `i64.trunc_sat_f64_s` (the saturating truncate, lib_b.rs).
     // --enable-tail-call: mutual/self tail recursion renders `return_call`.
-    let status = std::process::Command::new("wasm-opt")
+    // --enable-bulk-memory: the STRUCTURAL leg renders `memory.copy`
+    // (#1616 — without the flag wasm-opt refuses the module, and the old
+    // message blamed a missing install).
+    // --enable-mutable-globals: the structural leg EXPORTS mutable
+    // globals; newer binaryen accepts that by default but older releases
+    // (CI's) validate the MVP restriction unless told otherwise — the
+    // first CI run of the honest-refusal path caught exactly this.
+    let out = std::process::Command::new("wasm-opt")
         .args([
             "-Oz",
             "--enable-nontrapping-float-to-int",
             "--enable-tail-call",
+            "--enable-bulk-memory",
+            "--enable-mutable-globals",
             path,
             "-o",
             path,
         ])
-        .status()
-        .map_err(|e| format!("wasm-opt not available ({})", e))?;
-    if !status.success() {
-        return Err(format!("wasm-opt failed (exit {:?})", status.code()));
+        .output()
+        .map_err(|e| format!("wasm-opt is not installed ({})", e))?;
+    if !out.status.success() {
+        // The tool RAN and refused — a different failure class than a
+        // missing install, and its stderr names the real cause (#1616:
+        // "not installed" sent users to reinstall a tool they had).
+        return Err(format!(
+            "wasm-opt ran and refused (exit {:?}): {}",
+            out.status.code(),
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
     }
     let meta = std::fs::metadata(path).map_err(|e| format!("stat {}: {}", path, e))?;
     Ok(meta.len() as usize)

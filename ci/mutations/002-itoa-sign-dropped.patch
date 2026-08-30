@@ -1,0 +1,16 @@
+diff --git a/crates/almide-wasm/src/runtime.rs b/crates/almide-wasm/src/runtime.rs
+index c6d5a987f..f0082ecfd 100644
+--- a/crates/almide-wasm/src/runtime.rs
++++ b/crates/almide-wasm/src/runtime.rs
+@@ -67,10 +67,8 @@ pub(crate) fn emit_itoa() -> Function {
+     i.local_get(u).i64_const(10).i64_div_s().local_set(u);
+     i.local_get(u).i64_const(0).i64_ne().br_if(0);
+     i.end();
+-    // sign
++    // sign  [MUTANT: dropped]
+     i.local_get(neg).if_(BlockType::Empty);
+-    i.local_get(p).i32_const(1).i32_sub().local_set(p);
+-    i.local_get(p).i32_const(i32::from(b'-')).i32_store8(byte);
+     i.end();
+     // return ITOA_END - p
+     i.i32_const(ITOA_END as i32).local_get(p).i32_sub();

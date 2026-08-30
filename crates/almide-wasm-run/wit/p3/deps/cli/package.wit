@@ -1,0 +1,32 @@
+package wasi:cli@0.3.0;
+
+interface types {
+  enum error-code {
+    io,
+    illegal-byte-sequence,
+    pipe,
+  }
+}
+
+interface stdin {
+  use types.{error-code};
+  read-via-stream: func() -> tuple<stream<u8>, future<result<_, error-code>>>;
+}
+
+interface stdout {
+  use types.{error-code};
+  write-via-stream: func(data: stream<u8>) -> future<result<_, error-code>>;
+}
+
+interface stderr {
+  use types.{error-code};
+  write-via-stream: func(data: stream<u8>) -> future<result<_, error-code>>;
+}
+
+interface exit {
+  exit: func(status: result);
+}
+
+interface run {
+  run: async func() -> result;
+}

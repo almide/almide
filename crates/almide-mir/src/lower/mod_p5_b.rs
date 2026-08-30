@@ -229,6 +229,15 @@ pub(crate) fn try_tco_rewrite(
     // result is exactly the cert-clean scalar-loop form (`tco_empty_for` has scalar
     // empties since brick 1), so admit it; the collect/carried gates below still decline
     // anything outside the loop subset, falling back to the real recursion as before.
+    let dbg_tco = std::env::var_os("ALMIDE_DBG_TCO").is_some();
+    macro_rules! tco_trace {
+        ($msg:expr) => {
+            if dbg_tco {
+                eprintln!("TCO {} :: {}", fn_name, $msg);
+            }
+        };
+    }
+    tco_trace!("candidate");
     let n = params.len();
     // Band-allocated (formerly a body+params max scan — the missed multi-line
     // shape of the 32-site sweep; rk and the iterator index draw consecutive
@@ -248,7 +257,10 @@ pub(crate) fn try_tco_rewrite(
     let idx_var = lit.as_ref().map(|(_, iv, _)| *iv);
 
     // FIRST collection — detect the self-calls + carried params (on the pre-substitution body).
-    let (calls0, bases0) = collect_tco_shape(work_body, fn_name, n)?;
+    let Some((calls0, bases0)) = collect_tco_shape(work_body, fn_name, n) else {
+        tco_trace!("bail: collect0");
+        return None;
+    };
     // An `err($x)`-of-a-VAR base is the desugared `e!` early-return — a Result-unwrap INSIDE the
     // recursion (read_basic's `let (ch,np)=read_escape(..)!`). The TCO loop cannot carry that mid-body
     // early-exit: desugar_let_unwrap (run before this) turned the `!` into a `match e { ok($p)=>{..;
@@ -265,7 +277,10 @@ pub(crate) fn try_tco_rewrite(
     if let Some((_, _, ci)) = &lit {
         carried0[*ci] = false;
     }
-    let append_accs = detect_append_accs(&calls0, params, &carried0)?;
+    let Some(append_accs) = detect_append_accs(&calls0, params, &carried0) else {
+        tco_trace!("bail: append-accs");
+        return None;
+    };
     drop(calls0);
     drop(bases0);
 
@@ -277,7 +292,10 @@ pub(crate) fn try_tco_rewrite(
     let params2: &[almide_ir::IrParam] = &params_v;
 
     // SECOND collection — on the substituted body, with the slot params.
-    let (calls, bases) = collect_tco_shape(work_ref, fn_name, n)?;
+    let Some((calls, bases)) = collect_tco_shape(work_ref, fn_name, n) else {
+        tco_trace!("bail: collect1");
+        return None;
+    };
     // A param is loop-CARRIED iff some self-call passes a value other than the param itself.
     let mut carried = carried_flags(&calls, params2);
     // The list-iterator param is now INVARIANT — its `list.drop(cs,1)` self-call arg is replaced by

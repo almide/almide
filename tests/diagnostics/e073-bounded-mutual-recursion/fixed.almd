@@ -1,0 +1,5 @@
+// ALS-B6: parity by arithmetic — no recursion.
+@bounded
+fn even(n: Int) -> Int = if n % 2 == 0 then 1 else 0
+
+fn main() -> Unit = println("${even(4)}")

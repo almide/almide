@@ -42,7 +42,7 @@ fn report_check_errors_or_exit(
 /// call `parse_file` itself so each caller keeps its own parse + any
 /// pre-resolve early-exit check (`cmd_check_effects`'s parse-error gate)
 /// at exactly its original point in the control flow.
-fn resolve_and_typecheck_for_check(file: &str, program: &mut almide::ast::Program, source_text: &str) -> (Vec<diagnostic::Diagnostic>, check_mod::Checker) {
+fn resolve_and_typecheck_for_check(file: &str, program: &mut almide::ast::Program, source_text: &str, critical: Option<&[String]>) -> (Vec<diagnostic::Diagnostic>, check_mod::Checker) {
     let dep_paths = super::dep_paths_from_cwd_toml();
 
     let mut resolved = resolve::resolve_imports_with_deps(file, program, &dep_paths)
@@ -59,7 +59,16 @@ fn resolve_and_typecheck_for_check(file: &str, program: &mut almide::ast::Progra
     // program reads them (drivers infer the entry FIRST; without this the
     // readers see the registration seed — Unknown for non-literal inits).
     almide::resolve::refresh_module_toplets(&mut checker, &resolved.modules);
+    // #567: the critical profile scopes to the ENTRY program only — armed for
+    // exactly this inference call and cleared before the module loop below,
+    // so imported modules (stdlib above all — the trusted runtime BELOW the
+    // profile, full of while loops by design) are never profiled.
+    if let Some(grants) = critical {
+        checker.profile_critical = true;
+        checker.critical_allow = grants.to_vec();
+    }
     let diagnostics = checker.infer_program(program);
+    checker.profile_critical = false;
 
     // #862: an imported module's OWN body was never inferred on the check
     // path, so an E006 (or any other body-level error) inside it stayed
@@ -128,7 +137,7 @@ fn report_timings(r: &almide_base::profile::PhaseReport, total_secs: f64) {
     ));
 }
 
-pub fn cmd_check(file: &str, deny_warnings: bool, timings: bool, stamp: bool) {
+pub fn cmd_check(file: &str, deny_warnings: bool, timings: bool, stamp: bool, critical: Option<&[String]>) {
     // Arm the accounting BEFORE the first source is read; a phase counter that
     // starts mid-pipeline reports a front end with no lexer.
     if timings {
@@ -137,7 +146,7 @@ pub fn cmd_check(file: &str, deny_warnings: bool, timings: bool, stamp: bool) {
     let total_timer = almide_base::profile::ProfileTimer::start(timings);
 
     let (mut program, source_text, parse_errors) = parse_file(file);
-    let (diagnostics, checker) = resolve_and_typecheck_for_check(file, &mut program, &source_text);
+    let (diagnostics, checker) = resolve_and_typecheck_for_check(file, &mut program, &source_text, critical);
 
     // Lower to IR for unused variable analysis (only if no parse or type errors)
     let has_type_errors = diagnostics.iter().any(|d| d.level == diagnostic::Level::Error);
@@ -241,7 +250,7 @@ fn parse_for_json(file: &str) -> (Option<almide::ast::Program>, String, Vec<diag
     (program, input, errors)
 }
 
-pub fn cmd_check_json(file: &str) {
+pub fn cmd_check_json(file: &str, critical: Option<&[String]>) {
     let (parsed, source_text, parse_errors) = parse_for_json(file);
     let Some(mut program) = parsed else {
         for d in &parse_errors {
@@ -252,7 +261,7 @@ pub fn cmd_check_json(file: &str) {
         // success just because the diagnostics got a better shape.
         std::process::exit(1);
     };
-    let (diagnostics, checker) = resolve_and_typecheck_for_check(file, &mut program, &source_text);
+    let (diagnostics, checker) = resolve_and_typecheck_for_check(file, &mut program, &source_text, critical);
 
     // Output each diagnostic as JSON (one per line)
     for d in &parse_errors {
@@ -331,7 +340,7 @@ pub fn cmd_check_effects(file: &str) {
         std::process::exit(1);
     }
 
-    let (diagnostics, checker) = resolve_and_typecheck_for_check(file, &mut program, &source_text);
+    let (diagnostics, checker) = resolve_and_typecheck_for_check(file, &mut program, &source_text, None);
 
     let errors: Vec<_> = diagnostics.iter()
         .filter(|d| d.level == diagnostic::Level::Error)

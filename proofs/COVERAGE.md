@@ -70,3 +70,47 @@ norms+bytes, defunc find, load_weights record return) cover the new surface
 almost completely. render_wasm/registry.rs grew 648 → 679 covered lines (the
 matrix_core self-host). Next targets unchanged: control_p5 defunc engine
 (largest untested surface), tail.rs, binds_p2/p4.
+
+## Rung 2 instruments — 2026-08-26 (#566)
+
+Measured constraints first: rustc's MC/DC instrumentation no longer exists
+(added 2024, removed Aug 2025 — rust-lang/rust#144999; 1.96.1 accepts
+`block | branch | condition`, probed), so MC/DC-grade evidence is a
+per-decision argument, not a compiler flag:
+
+- **proofs/mcdc-ledger.sh / .toml** — every boolean-operator site in the ten
+  safety files (perceus_verified, certificate family, translation_validation,
+  the effect/capability checks) carries a row: `vectors` naming the
+  independence-pair unit tests (each test flips ONE condition and the verdict
+  flips with it), or `pending` under a shrink-only ceiling. Landing state:
+  51 sites, 6 resolved with 16 tests (perceus_verified 87/207/213, calls.rs
+  402/449), 45 pending.
+- **Safety-set per-file line floors** — proofs/coverage-safety-baseline.txt,
+  enforced by coverage.sh after the TOTAL ratchet: the safety files may not
+  rot while the TOTAL holds. Seeded from a full local run (1.96.1/macOS)
+  minus a 5-point cross-platform margin (CI 1.89.0/linux measures a few
+  points off: translation_validation 70.09 local vs 68.18 CI same night;
+  TOTAL 65.50 local vs 67.59 CI).
+- **Condition-level backstop** — `ALMIDE_COVERAGE_CONDITION=1` +
+  the nightly `coverage-condition` job on a dated-nightly pin
+  (nightly-2026-08-01) with a first-step flag probe: per-condition branch
+  records including the RHS of lazy operators, same floors, same ratchet.
+- **Push-time ratchet** — ci.yml `coverage-ratchet` job runs the same gate at
+  push/PR time behind a relevance check (measured 11–14 min in CI; the
+  nightly-only cadence surfaced regressions up to 24 h late).
+
+The scanner's own honesty was tuned by its first runs: closure heads
+(`.or_else(|| …)`) are excluded by the preceding-token rule, and sites past a
+file's first `#[cfg(test)]` are the tests themselves, not ledgered.
+
+## Vector truth check — 2026-08-27 (#566, mutation)
+
+A `vectors` ledger row used to be verified only for EXISTENCE of the named
+tests — a vacuous test would have kept the gate green. `proofs/mcdc-mutation.sh`
+closes that: for every resolved site it applies the operator-swap mutant
+(&& <-> ||) at the site's exact character offset (sources restored and
+hash-verified on every exit path) and requires the named vectors to be green
+unmutated and red under the mutant. v1 mutant class is the operator swap;
+condition-level stuck-at mutants need operand extents (an AST) and are the
+next ratchet. Runs nightly (job "mcdc-mutation"); never run cargo
+concurrently with it.

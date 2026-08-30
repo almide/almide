@@ -105,8 +105,7 @@ fn map_from_list_hobj(pairs: List[(String, String)]) -> Map[String, String] = {
 // `__drop_map_rec_<R>`), routed by the bind's `map_named_value_drop`.
 fn map_new_hobj() -> Map[String, String] = prim.alloc_map_kv(0)
 
-fn map_set_hobj(m: Map[String, String], k: String, v: String) -> Map[String, String] =
-  __hobj_set(m, k, prim.handle(v))
+fn map_set_hobj(m: Map[String, String], k: String, v: String) -> Map[String, String] = __hobj_set(m, k, prim.handle(v))
 
 fn __hobj_none() -> String? = none
 

@@ -20,7 +20,7 @@ fn main() -> Unit = {
   // NaN fails both comparisons and lands on the upper bound — the same result
   // the `fmin`/`fmax` form produced, so this is unchanged.
   println("${float.clamp(0.0 / 0.0, 0.0, 3.0)}")
-  // The neighbouring min/max keep their own (wasm-spec) zero behaviour: this
-  // contract is about `clamp` alone.
+  // The neighbouring min/max follow IEEE-754-2019 zero ordering (C-049:
+  // max tie -> +0, min tie -> -0): this contract is about `clamp` alone.
   println("${float.max(-0.0, 0.0)}:${float.min(-0.0, 0.0)}")
 }

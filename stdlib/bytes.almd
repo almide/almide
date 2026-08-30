@@ -130,7 +130,7 @@ fn len(b: Bytes) -> Int = _
 fn lines(b: Bytes) -> List[Bytes] = _
 
 @intrinsic("almide_rt_bytes_map_each")
-fn map_each(b: Bytes, f: fn(Int) -> Int) -> Bytes = _
+fn map_each(b: Bytes, f: (Int) -> Int) -> Bytes = _
 
 @intrinsic("almide_rt_bytes_new")
 fn new(len: Int) -> Bytes = _

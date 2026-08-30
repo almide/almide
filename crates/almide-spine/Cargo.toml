@@ -1,0 +1,22 @@
+[package]
+name = "almide-spine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "SPIKE S1: salsa query spine over the ported parser (ARCHITECTURE.md §6.5)"
+
+[dependencies]
+almide = { path = "../.." }
+almide-driver = { path = "../almide-driver" }
+almide-types = { path = "../almide-types" }
+almide-syntax = { path = "../almide-syntax" }
+salsa = "0.23"
+serde_json = "1"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+almide-corpus = { path = "../almide-corpus" }
+sha2 = "0.10"

@@ -1,0 +1,44 @@
+// @contract: C-127
+// #1582: `<Result[record, String]> ?? <record-literal fallback>` answers the
+// REAL record on both arms — the value-position `??` route used to ACCEPT
+// this shape and misread it (ok arm: empty field; err arm: garbage bytes;
+// no wall — the silent-wrong class), while the user-written
+// `match e { ok(p) => p, err(_) => d }` was always correct. The route now
+// DECLINES a record-typed Ok payload, so a bind-position `??` rewrites to
+// that exact match through the proven bind-position heap-match machinery,
+// and a value-position `??` walls honestly instead of fabricating a
+// record. Producer spelling is irrelevant (measured with the inline-`!`
+// literal and the hoisted let body alike); both consumers pin here, plus
+// the scalar-`??` control.
+type Out: Eq, Repr = { a: String }
+
+fn mk(flag: Bool) -> Out! = {
+  guard flag else err("no")
+  Out { a: "x" }
+}
+
+fn mk_len(flag: Bool) -> Int! = {
+  let o = mk(flag)!
+  string.len(o.a)
+}
+
+effect fn main() -> Unit = {
+  let o = mk(true) ?? Out { a: "fb" }
+  println(o.a)
+  // x
+  let p = mk(false) ?? Out { a: "fb" }
+  println(p.a)
+  // fb
+  let q = match mk(false) {
+    ok(v) => v,
+    err(_) => Out { a: "m-fb" },
+  }
+  println(q.a)
+  // m-fb
+  let n1 = mk_len(true) ?? -1
+  println("${n1}")
+  // 1
+  let n2 = mk_len(false) ?? -1
+  // -1
+  println("${n2}")
+}
