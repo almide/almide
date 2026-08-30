@@ -5,8 +5,8 @@
 #             never edited by hand in README.md. The bytes are machine-independent:
 #             the emitters are pure Rust and the structural leg's build artifact is
 #             the #1588 WASI form.
-version          = almide 0.59.2
-date             = 2026-08-27
+version          = almide 0.60.0
+date             = 2026-08-30
 program          = fn main() -> Unit = { println("Hello, world!") }
-structural_bytes = 4459
+structural_bytes = 4590
 incumbent_bytes  = 1096
