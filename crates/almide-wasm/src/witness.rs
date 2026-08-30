@@ -45,6 +45,12 @@ pub struct WitnessRecorder {
     poisoned: bool,
 }
 
+impl Default for WitnessRecorder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WitnessRecorder {
     pub fn new() -> Self {
         Self { next_obj: 0, obj_of_local: HashMap::new(), streams: BTreeMap::new(), poisoned: false }
@@ -202,9 +208,11 @@ fn subset_rhs(value: &IrExpr) -> Option<String> {
 /// (function name, certificate) pairs collected while a sweep runs.
 /// `start_collecting` arms it; `take` disarms and returns the batch. The
 /// emitter pushes only while armed, so product builds never pay.
-fn sink() -> &'static Mutex<Option<Vec<(String, String)>>> {
+type Sink = Mutex<Option<Vec<(String, String)>>>;
+
+fn sink() -> &'static Sink {
     use std::sync::OnceLock;
-    static SINK: OnceLock<Mutex<Option<Vec<(String, String)>>>> = OnceLock::new();
+    static SINK: OnceLock<Sink> = OnceLock::new();
     SINK.get_or_init(|| Mutex::new(None))
 }
 
