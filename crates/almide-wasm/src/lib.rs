@@ -75,6 +75,7 @@ mod collections_set;
 mod emit;
 pub use emit::emit_program;
 mod emitter;
+mod emitter_values;
 mod emitter_vars;
 mod patterns;
 mod prim;
