@@ -654,7 +654,11 @@ fn check_wasm_availability(ir_program: &almide::ir::IrProgram) -> Result<(), ()>
     let table = UNAVAILABLE.get_or_init(|| {
         let toml = include_str!("../../proofs/target-availability.toml");
         let mut out = BTreeMap::new();
-        for block in toml.split("[[wasm-unavailable]]").skip(1) {
+        // Line-anchored: the header COMMENT names the section literally,
+        // and a bare substring split ate the first native-only row
+        // through it (datetime.parse_iso E081-fired while being merely
+        // structural-pending — the reachability ratchet caught it).
+        for block in toml.split("\n[[wasm-unavailable]]\n").skip(1) {
             let field = |k: &str| {
                 block.lines().find_map(|l| {
                     l.strip_prefix(&format!("{k} = \"")).and_then(|r| r.strip_suffix('"')).map(str::to_string)
