@@ -1,0 +1,11 @@
+// wasm:skip — the test harness's wasm leg renders through the incumbent
+// pipeline, which has no env.sleep_ms capability seat (the structural leg
+// serves it: embedded-host op 36 / p1 clock busy-wait, cross-target parity
+// pinned by spec/wasm_cross/env_sleep_pause.almd, C-327). The skip prunes
+// with #1696 steps 4-5 alongside its determinism-ledger siblings.
+import env
+
+test "sleep_ms pauses and returns" {
+  env.sleep_ms(1)!
+  assert_eq(1, 1)
+}
