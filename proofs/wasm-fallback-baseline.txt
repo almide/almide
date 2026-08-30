@@ -30,3 +30,4 @@ spec/stdlib/zlib_test.almd :: HOST_CAPABILITY :: zlib is a native library bindin
 spec/stdlib/coverage_assert_throws_test.almd :: HARNESS_LIMITATION :: assert_throws needs panic catching; a wasm trap is uncatchable in-process
 spec/stdlib/testing_polarity_test.almd :: HARNESS_LIMITATION :: assert_throws needs panic catching; a wasm trap is uncatchable in-process
 spec/stdlib/http_status_test.almd :: HOST_CAPABILITY :: http client is an OS socket API
+spec/stdlib/env_sleep_test.almd :: HARNESS_LIMITATION :: env.sleep_ms has no seat in the incumbent test renderer; the structural leg serves it (C-327) and the row prunes with #1696 steps 4-5
