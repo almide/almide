@@ -4155,3 +4155,25 @@ evidence  = [
   { path = "spec/lang/or_pattern_test.almd", class = "fixture" },
   { path = "tests/diagnostics/e080-or-pattern-binder/broken.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-324"
+spec      = "ALS-M13"
+title     = "Mut-param forwarding from a branch arm: folded to value flow or refused, never silently wrong"
+statement = "A `mut` parameter forwarded to a user callee from inside an if/match arm (#1688) is rewritten by the C-132 move-mode fold into value flow — a write-back leaf becomes the direct tail call, any other Unit leaf (a stdlib mut call, a `()` arm) becomes `{ leaf; param }` — so both targets run the same explicit-return convention and stdout stays byte-identical. A shape the fold cannot prove (a non-terminal branch, a write-back the leaf vocabulary does not cover) is REFUSED by the structural emitter (assign:mut-param-in-branch-arm) and by the incumbent's MIR wall; it is never emitted. Before the fold covered these leaves the structural leg shipped wrong bytes silently — native `A&B`, wasm `\\0\\0\\0` — which is the divergence this contract forbids."
+since     = "0.60.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/mut_param_branch_forward.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-325"
+spec      = "ALS-M13"
+title     = "bytes.push growth is amortized: linear retention, byte-identical at scale"
+statement = "Growing a `Bytes` by repeated `bytes.push` retains O(n) memory on the structural wasm leg and completes byte-identically with native at any size linear memory can hold. The `$bytes_push` helper carries the `$list_push` discipline — in-place append while capacity remains, geometric growth (max(cap*2, 16)) on overflow, the outgrown block freed when uniquely owned — replacing the per-push copy-grow protocol that reallocated len+1 every push and never freed the outgrown block, so n pushes retained n²/2 bytes and `bytes.new(0)` + 69,000 pushes died `out of memory` where native and the incumbent complete (#1689). Value semantics hold across the in-place fast path: a bind takes its snapshot, a later push into the source is invisible through the alias."
+since     = "0.60.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/bytes_push_growth.almd", class = "fixture" },
+]

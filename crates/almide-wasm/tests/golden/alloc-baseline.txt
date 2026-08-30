@@ -34,11 +34,12 @@
 66528	spec/wasm_cross/bytes_negative_offset_family.almd
 65872	spec/wasm_cross/bytes_new_exhaustion.almd
 78576	spec/wasm_cross/bytes_param_writeback.almd
-65872	spec/wasm_cross/bytes_push_inplace.almd
+328160	spec/wasm_cross/bytes_push_growth.almd
+65824	spec/wasm_cross/bytes_push_inplace.almd
 66960	spec/wasm_cross/bytes_rawptr.almd
 67616	spec/wasm_cross/bytes_set_value_semantics.almd
 67664	spec/wasm_cross/bytes_string_window_domain.almd
-76736	spec/wasm_cross/bytes_writer_family.almd
+76720	spec/wasm_cross/bytes_writer_family.almd
 66112	spec/wasm_cross/call_closure_lambda_param.almd
 65968	spec/wasm_cross/call_lambda_ctor.almd
 66336	spec/wasm_cross/callee_shadowing_family.almd
@@ -363,8 +364,9 @@
 75072	spec/wasm_cross/mg_rebuild_two_phase.almd
 65936	spec/wasm_cross/module_global_const.almd
 74528	spec/wasm_cross/module_var_alias_cow.almd
-69744	spec/wasm_cross/mut_heap_param.almd
+69200	spec/wasm_cross/mut_heap_param.almd
 66992	spec/wasm_cross/mut_map_param.almd
+65904	spec/wasm_cross/mut_param_branch_forward.almd
 391536	spec/wasm_cross/mut_param_call_chain.almd
 66032	spec/wasm_cross/mut_param_effect_never_err.almd
 95072	spec/wasm_cross/mutable_global_bytes_arena.almd
