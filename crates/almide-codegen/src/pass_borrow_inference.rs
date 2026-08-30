@@ -377,8 +377,9 @@ fn infer_program_fn_borrows(program: &mut IrProgram, sigs: &mut HashMap<String, 
             seed_monomorphized_mut_params(func, sigs, key);
             continue;
         }
-        if func.is_test || is_derive_fn(func) || is_monomorphized(&func.name) || func.generics.as_ref().map_or(false, |g| !g.is_empty()) { continue; }
-        let borrows = tco_owned_params(func, infer_function_borrows(func));
+        let derived = is_derive_fn(func);
+        if func.is_test || (!derived && (is_monomorphized(&func.name) || func.generics.as_ref().map_or(false, |g| !g.is_empty()))) { continue; }
+        let borrows = tco_owned_params(func, if derived { derived_value_borrows(func) } else { infer_function_borrows(func) });
         // Always record the signature (including all-Own) so that the
         // fixed-point iteration can distinguish "known to be Own" from
         // "not yet analysed". Without this, self-recursive functions
@@ -403,8 +404,9 @@ fn infer_program_module_borrows(program: &mut IrProgram, sigs: &mut HashMap<Stri
                 seed_monomorphized_mut_params(func, sigs, key);
                 continue;
             }
-            if func.is_test || is_derive_fn(func) || is_monomorphized(&func.name) || func.generics.as_ref().map_or(false, |g| !g.is_empty()) { continue; }
-            let borrows = tco_owned_params(func, infer_function_borrows(func));
+            let derived = is_derive_fn(func);
+            if func.is_test || (!derived && (is_monomorphized(&func.name) || func.generics.as_ref().map_or(false, |g| !g.is_empty()))) { continue; }
+            let borrows = tco_owned_params(func, if derived { derived_value_borrows(func) } else { infer_function_borrows(func) });
             sigs.insert(format!("{}::{}", mod_name, func.name), borrows.clone());
             // `ResolveCallsPass` rewrites bundled-Almide calls to
             // `CallTarget::Named { almide_rt_<m>_<f> }`. BorrowInsertion
@@ -440,6 +442,24 @@ fn infer_program_module_borrows(program: &mut IrProgram, sigs: &mut HashMap<Stri
                 // last-resort rule MODULE_METHOD_FNS applies to its tail key.
                 if func.name.as_str().contains('.') {
                     sigs.entry(func.name.to_string()).or_insert_with(|| borrows.clone());
+                }
+                // …and, for a NAMESPACED derive (`varlib.Pigment.decode` — the
+                // fn is named `mod.Type.method` once its type is `mod.Type`,
+                // #433 × #411-B), under the trailing `Type.method` that a
+                // `varlib.Pigment.decode(..)` call site actually carries, and
+                // under the symbol the definition emits with the leading
+                // `{origin}_` stripped — the two spellings BuiltinLowering
+                // resolves (`collect_module_method_fns`), which the mirrors
+                // above miss because they prefix the origin a second time.
+                let segs: Vec<&str> = func.name.as_str().split('.').collect();
+                if segs.len() > 2 {
+                    let tail = format!("{}.{}", segs[segs.len() - 2], segs[segs.len() - 1]);
+                    sigs.entry(format!("{}::{}", mod_name, tail)).or_insert_with(|| borrows.clone());
+                    sigs.entry(tail).or_insert_with(|| borrows.clone());
+                    let origin = mod_name.replace('.', "_");
+                    let flat = func.name.as_str().replace('.', "_");
+                    let base = flat.strip_prefix(&format!("{}_", origin)).unwrap_or(&flat).to_string();
+                    sigs.entry(format!("almide_rt_{}_{}", origin, base)).or_insert_with(|| borrows.clone());
                 }
             }
             for (param, borrow) in func.params.iter_mut().zip(borrows) {
@@ -572,12 +592,13 @@ fn infer_function_borrows(func: &IrFunction) -> Vec<ParamBorrow> {
 }
 
 fn is_derive_fn(func: &IrFunction) -> bool {
-    // Auto-derived convention methods are excluded from borrow inference — they
-    // are a generated API surface whose call sites (often cross-module, where the
-    // borrow signature can't be looked up) pass owned values, so a Ref param would
-    // mismatch (E0308). Once record borrow inference is enabled (#647), a
-    // record-typed derived `encode(p: Pigment)` would otherwise become `&Pigment`
-    // and break those owned-arg call sites.
+    // Auto-derived convention methods get the restricted inference of
+    // `derived_value_borrows` — they are a generated API surface whose call
+    // sites (often cross-module, where the borrow signature can't be looked
+    // up) pass owned values, so a Ref param would mismatch (E0308). With record
+    // borrow inference enabled (#647), a record-typed derived `encode(p:
+    // Pigment)` would otherwise become `&Pigment` and break those owned-arg
+    // call sites; only `Value` params are inferred (#1679).
     //
     // Identification is structural, NOT name-based: `lower/mod.rs` stamps every
     // generated convention fn with a synthetic `@derived` attribute at the single
@@ -723,6 +744,29 @@ fn is_borrow_eligible(ty: &Ty) -> bool {
         | Ty::Record { .. }
         | Ty::OpenRecord { .. }
     ) || matches!(ty, Ty::Named(n, _) if is_record_type_name(n.as_str()))
+    // `Value`, the codec universal model, reads like a record: every
+    // `value.*` intrinsic already takes `&Value` (`intrinsic_borrow_mode`),
+    // so a user or derived fn that only feeds its `Value` param to those
+    // never needs to own it (#1679 — decode was cloning an 8-field object
+    // per call to read it once).
+    || is_value_ty(ty)
+}
+
+fn is_value_ty(ty: &Ty) -> bool {
+    matches!(ty, Ty::Named(n, _) if n.as_str() == "Value")
+}
+
+/// Borrow modes for a `@derived` convention fn (and the codec workers the
+/// derive emits). Derives are a generated API surface whose call sites pass
+/// owned values and cannot always see an inferred signature (cross-module
+/// bare keys, #1549), so only their `Value` params are inferred — a derived
+/// `decode` reads its input through `value.*` intrinsics and never needs to
+/// own it (#1679). Every other param keeps `Own`, exactly as before.
+fn derived_value_borrows(func: &IrFunction) -> Vec<ParamBorrow> {
+    let inferred = infer_function_borrows(func);
+    func.params.iter().zip(inferred)
+        .map(|(p, b)| if is_value_ty(&p.ty) { b } else { ParamBorrow::Own })
+        .collect()
 }
 
 include!("pass_borrow_inference_ownership.rs");
