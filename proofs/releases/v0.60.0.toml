@@ -1,0 +1,27 @@
+# Release evidence seal — v0.60.0. IMMUTABLE: every [derived] field is
+# re-measured from the tag's tree by `scripts/release-seal.sh check`;
+# an edit that disagrees with the tag fails CI. [recorded] fields are
+# facts the tag cannot re-derive (fill them in before committing).
+
+[release]
+version = "0.60.0"
+tag = "v0.60.0"
+tag_commit = "6e958f1740ab4081c62074edd795aa79b7d7703a"
+date = "2026-08-30"
+url = "https://github.com/almide/almide/releases/tag/v0.60.0"
+
+[derived]
+cargo_version = "0.60.0"
+contracts_sha256 = "761a3475cda75f2d2d03e611c42fcede23972fe9fb5efb043568c13827db3a2e"
+contracts_total = "326"
+contracts_flagged = "0"
+abstain_ledger_sha256 = "32dc2fbff95234ae685cf1df7c41e452678c63af0df425d82bf7d0241d2184a9"
+abstain_ledger_entries = "25"
+wasm_cross_fixtures = "644"
+rust_toolchain = "1.94.0"
+wasmtime = "v47.0.3"
+
+[recorded]
+release_gate = "Three-RC channel on one day (owner's call, #1484): rc1 froze the surface, rc2 proved the dossier pipeline (first attached+attested dossier), rc3 shipped the two soak-found blockers fixed (#1688 I-divergence, #1689 OOM — both closed via #1693 with A/B evidence against the released rc binaries, fixtures C-324/C-325/C-326). Blocker gate at the tag: 0 (#1482). Interface diff v0.59.2 -> v0.60.0: additive (+6 url, -0; #1488). Tag-tree CI: full battery green on the content-identical develop head (mutation sweep full net, Trust Spine, Cross-Target, Acceptance Ring); the tag's own Trust Spine run assembled and Sigstore-attested the qualification dossier (#571/#1534 first FINAL firing). Fuzz: no dedicated tag dispatch — the nightly differential fuzz ran through the rc window (latest run 33301893855, 2026-08-30, red-as-findings per doctrine; findings triaged to issues, none release-blocking at the tag)."
+assets = "7: almide-linux-x86_64.tar.gz, almide-linux-aarch64.tar.gz, almide-macos-x86_64.tar.gz, almide-macos-aarch64.tar.gz, almide-windows-x86_64.zip, almide-checksums.sha256, almide-dossier-v0.60.0.md (Sigstore-attested)"
+known_problems = "None release-blocking. Standing, all visible-by-design: (1) 23 both-legs stdlib walls (E081 at check time, triaged on #1423 — 2 fixable, 9 wasi:http port work, 12 justified-forever candidates pending rulings); (2) the structural-only division — gzip_inflate_members walls on the INCUMBENT leg by design (walled-real baseline rows, determinism MAX_WALLED=17 twins; prunes with #1696 steps 4-5); (3) main lineage was reconnected before this release (6b98c3044, ours-merge, content-neutral) after two squash releases orphaned it — release PRs merge with a MERGE COMMIT from here on; (4) #1690 router surfaces only the incumbent's wall text when both legs refuse."

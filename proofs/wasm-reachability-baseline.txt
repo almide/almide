@@ -47,6 +47,7 @@ http.delete :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effec
 http.get :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.get needs a declared capability not in this brick
 http.get_bytes :: UNPROBEABLE :: no candidate shape builds natively
 http.get_header :: UNPROBEABLE :: parameter type outside the synthesizer
+http.get_status :: HOST_CAPABILITY :: http client is an OS socket API — checks and builds natively, the wasm leg walls (sweep verdict GAP: wasm build failed)
 http.openai_streaming_call :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.openai_streaming_call needs a declared capability not in this brick
 http.patch :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.patch needs a declared capability not in this brick
 http.post :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.post needs a declared capability not in this brick
@@ -58,6 +59,7 @@ http.req_method :: UNPROBEABLE :: parameter type outside the synthesizer
 http.req_path :: UNPROBEABLE :: parameter type outside the synthesizer
 http.request :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.request needs a declared capability not in this brick
 http.request_bytes :: UNPROBEABLE :: no candidate shape builds natively
+http.request_status :: HOST_CAPABILITY :: http client is an OS socket API — checks and builds natively, the wasm leg walls (sweep verdict GAP: wasm build failed)
 http.request_stream :: UNPROBEABLE :: no candidate shape builds natively
 http.serve :: UNPROBEABLE :: parameter type outside the synthesizer
 http.set_header :: UNPROBEABLE :: parameter type outside the synthesizer

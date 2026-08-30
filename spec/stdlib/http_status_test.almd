@@ -1,0 +1,33 @@
+// wasm:skip — native-only http client, not available in WASM
+//
+// http.get_status / http.request_status return (status_code, body) for any
+// complete response; Err is transport-only. Probes follow the net_test.almd
+// discipline: the effectful call is BOUND first and the pure local is matched,
+// so branch-lift synthesizes no real fn (the walled-real ratchet stays empty).
+// The closed-local-port probe exercises the transport-Err path with no
+// external network; the status-code unit is declared out-of-band in
+// docs/stdlib/semantics-manifest.toml.
+import http
+
+fn verdict(code: Int) -> String = if code == 404 then "available" else "taken"
+
+test "status verdict is a pure branch on the code" {
+  assert_eq(verdict(404), "available")
+  assert_eq(verdict(200), "taken")
+}
+
+test "request_status to a closed local port is a transport err" {
+  let result = http.request_status("GET", "http://127.0.0.1:1", "", ["User-Agent": "almide-test"])
+  match result {
+    ok(_) => assert(false),
+    err(_) => assert(true),
+  }
+}
+
+test "get_status to a closed local port is a transport err" {
+  let result = http.get_status("http://127.0.0.1:1")
+  match result {
+    ok(_) => assert(false),
+    err(_) => assert(true),
+  }
+}
