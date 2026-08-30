@@ -38,7 +38,6 @@
 bytes.copy_to_ptr :: UNPROBEABLE :: parameter type outside the synthesizer
 bytes.from_raw_ptr :: UNPROBEABLE :: parameter type outside the synthesizer
 env.set :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call env.set needs a declared capability not in this brick
-env.sleep_ms :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call env.sleep_ms needs a declared capability not in this brick
 fs.fold_lines_chunked :: UNPROBEABLE :: no candidate shape builds natively
 fs.fold_lines_range :: UNPROBEABLE :: no candidate shape builds natively
 http.anthropic_streaming_call :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.anthropic_streaming_call needs a declared capability not in this brick
@@ -114,7 +113,6 @@ process.exec_in :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: e
 process.exec_status :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.exec_status needs a declared capability not in this brick
 process.exec_status_timeout :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.exec_status_timeout needs a declared capability not in this brick
 process.exec_with_stdin :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.exec_with_stdin needs a declared capability not in this brick
-process.exit :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: scalar binding outside the value subset cannot be faithfully computed in this brick (the permissive caps-counting path 
 process.is_alive :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: scalar binding outside the value subset cannot be faithfully computed in this brick (the permissive caps-counting path 
 process.kill :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.kill needs a declared capability not in this brick
 process.pid :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: scalar binding outside the value subset cannot be faithfully computed in this brick (the permissive caps-counting path 
