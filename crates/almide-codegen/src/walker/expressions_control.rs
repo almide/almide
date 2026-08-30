@@ -675,6 +675,25 @@ fn try_render_borrow_already_ref_param(ctx: &RenderContext, inner: &IrExpr, as_s
     None
 }
 
+/// `&(almide_rt_value_field(v, k))?` → `almide_rt_value_field_ref(v, k)?`
+/// (#1679). A derived decode reads every field through this exact shape —
+/// look the field up (a clone of it), propagate the miss, borrow the copy for
+/// the `as_*` / nested decode that only reads it — so the copy was the whole
+/// cost of the read. The `_ref` twin returns a borrow into the object, the
+/// same two error strings on a miss, and lives exactly as long as the
+/// borrowed argument would have: the operand of a `Borrow` is consumed by
+/// the call it sits in. Only the shared, non-`as_str` borrow qualifies.
+fn try_render_borrowed_field_lookup(ctx: &RenderContext, inner: &IrExpr) -> Option<String> {
+    let IrExprKind::Try { expr: tried } = &inner.kind else { return None; };
+    let args = match &tried.kind {
+        IrExprKind::RuntimeCall { symbol, args } if symbol.as_str() == "almide_rt_value_field" => args,
+        IrExprKind::Call { target: CallTarget::Named { name }, args, .. } if name.as_str() == "almide_rt_value_field" => args,
+        _ => return None,
+    };
+    let rendered: Vec<String> = args.iter().map(|a| render_expr(ctx, a)).collect();
+    Some(format!("almide_rt_value_field_ref({})?", rendered.join(", ")))
+}
+
 fn render_expr_borrow(ctx: &RenderContext, expr: &IrExpr) -> String {
     let IrExprKind::Borrow { expr: inner, as_str, mutable } = &expr.kind else { unreachable!() };
     if let Some(rendered) = try_render_borrow_shared_mut(ctx, inner, *mutable) {
@@ -701,6 +720,9 @@ fn render_expr_borrow(ctx: &RenderContext, expr: &IrExpr) -> String {
         }
         format!("&*{}", render_expr(ctx, inner))
     } else {
+        if let Some(rendered) = try_render_borrowed_field_lookup(ctx, inner) {
+            return rendered;
+        }
         let rendered = render_expr(ctx, inner);
         // #1210: a Bytes/Matrix-typed RVALUE that renders as a type-propagating
         // expression (the `??` lowering's `match`, an `if`/`else`, a block)
