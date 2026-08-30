@@ -119,6 +119,23 @@ pub fn almide_rt_json_parse(text: &str) -> Result<Value, String> {
             }
         }
     }
+    /// An object key: the escape-free run is interned straight from the input
+    /// slice (no `String` in between); anything with an escape takes the
+    /// general string path and is interned from its result.
+    fn parse_key(t: &str, pos: &mut usize) -> Result<Key, String> {
+        let b = t.as_bytes();
+        let save = *pos;
+        step_char(t, pos);
+        let start = *pos;
+        let mut i = start;
+        while i < b.len() && b[i] != b'"' && b[i] != b'\\' { i += 1; }
+        if i < b.len() && b[i] == b'"' {
+            *pos = i + 1;
+            return Ok(intern_key(&t[start..i]));
+        }
+        *pos = save;
+        parse_string(t, pos).map(|s| intern_key(&s))
+    }
     fn parse_number(t: &str, pos: &mut usize) -> Result<Value, String> {
         let b = t.as_bytes();
         let start = *pos;
@@ -173,7 +190,7 @@ pub fn almide_rt_json_parse(text: &str) -> Result<Value, String> {
         if *pos < b.len() && b[*pos] == b'}' { *pos += 1; return Ok(Value::Object(pairs)); }
         loop {
             skip_ws(t, pos);
-            let key = parse_string(t, pos)?;
+            let key = parse_key(t, pos)?;
             skip_ws(t, pos);
             if *pos < b.len() && b[*pos] == b':' { *pos += 1; }
             let val = parse_value(t, pos)?;
@@ -192,7 +209,7 @@ pub fn almide_rt_json_parse(text: &str) -> Result<Value, String> {
 
 pub fn almide_json_get(j: &Value, key: &str) -> Option<Value> {
     match j {
-        Value::Object(entries) => entries.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone()),
+        Value::Object(entries) => entries.iter().find(|(k, _)| k.as_ref() == key).map(|(_, v)| v.clone()),
         _ => None,
     }
 }
@@ -242,7 +259,7 @@ pub fn almide_json_as_array(j: &Value) -> Option<Vec<Value>> {
 // ── Object operations ──
 
 pub fn almide_json_keys(j: &Value) -> Vec<String> {
-    match j { Value::Object(entries) => entries.iter().map(|(k, _)| k.clone()).collect(), _ => vec![] }
+    match j { Value::Object(entries) => entries.iter().map(|(k, _)| k.to_string()).collect(), _ => vec![] }
 }
 
 pub fn almide_json_to_map(j: &Value) -> Option<AlmideMap<String, String>> {
@@ -253,7 +270,7 @@ pub fn almide_json_to_map(j: &Value) -> Option<AlmideMap<String, String>> {
                     Value::Str(s) => s.clone(),
                     _ => almide_rt_value_stringify(v),
                 };
-                (k.clone(), s)
+                (k.to_string(), s)
             }).collect();
             Some(map)
         }
@@ -262,7 +279,7 @@ pub fn almide_json_to_map(j: &Value) -> Option<AlmideMap<String, String>> {
 }
 
 pub fn almide_json_object(entries: &[(String, Value)]) -> Value {
-    Value::Object(entries.to_vec())
+    Value::Object(entries.iter().map(|(k, v)| (intern_key(k), v.clone())).collect())
 }
 
 pub fn almide_json_from_float(n: f64) -> Value { Value::Float(n) }
@@ -406,15 +423,15 @@ fn set_at_steps(j: &Value, steps: &[PathStep], value: &Value) -> Value {
         PathStep::Field(key) => match j {
             Value::Object(entries) => {
                 let rest = &steps[1..];
-                let mut new_entries: Vec<(String, Value)> = entries.iter()
-                    .map(|(k, v)| if k == key { (k.clone(), set_at_steps(v, rest, value)) } else { (k.clone(), v.clone()) })
+                let mut new_entries: Vec<(Key, Value)> = entries.iter()
+                    .map(|(k, v)| if k.as_ref() == key.as_str() { (k.clone(), set_at_steps(v, rest, value)) } else { (k.clone(), v.clone()) })
                     .collect();
-                if !entries.iter().any(|(k, _)| k == key) {
-                    new_entries.push((key.clone(), set_at_steps(&Value::Object(vec![]), rest, value)));
+                if !entries.iter().any(|(k, _)| k.as_ref() == key.as_str()) {
+                    new_entries.push((intern_key(key), set_at_steps(&Value::Object(vec![]), rest, value)));
                 }
                 Value::Object(new_entries)
             }
-            _ => Value::Object(vec![(key.clone(), set_at_steps(&Value::Object(vec![]), &steps[1..], value))]),
+            _ => Value::Object(vec![(intern_key(key), set_at_steps(&Value::Object(vec![]), &steps[1..], value))]),
         },
         PathStep::Index(i) => match j {
             Value::Array(items) => {
@@ -436,10 +453,10 @@ fn remove_at_steps(j: &Value, steps: &[PathStep]) -> Value {
         PathStep::Field(key) => match j {
             Value::Object(entries) => {
                 if steps.len() == 1 {
-                    Value::Object(entries.iter().filter(|(k, _)| k != key).cloned().collect())
+                    Value::Object(entries.iter().filter(|(k, _)| k.as_ref() != key.as_str()).cloned().collect())
                 } else {
                     Value::Object(entries.iter().map(|(k, v)| {
-                        if k == key { (k.clone(), remove_at_steps(v, &steps[1..])) } else { (k.clone(), v.clone()) }
+                        if k.as_ref() == key.as_str() { (k.clone(), remove_at_steps(v, &steps[1..])) } else { (k.clone(), v.clone()) }
                     }).collect())
                 }
             }

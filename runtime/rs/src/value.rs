@@ -1,6 +1,14 @@
 // Value — universal data model for Codec protocol
 // All public functions use `almide_rt_` prefix for consistent codegen dispatch.
 
+/// An object key (#1679). The keys of every document a program parses come
+/// from a small fixed vocabulary — the field names of its types — so they are
+/// interned: the first sighting leaks one `&'static str`, every later one is
+/// a pointer copy. `Cow` keeps the fallback honest: past the intern cap, or on
+/// a slot collision, a key is an ordinary owned `String`. Clone of an
+/// interned key is free, no refcount, and the type stays `Send`.
+pub type Key = std::borrow::Cow<'static, str>;
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
     Null,
@@ -9,7 +17,44 @@ pub enum Value {
     Float(f64),
     Str(String),
     Array(Vec<Value>),
-    Object(Vec<(String, Value)>),
+    Object(Vec<(Key, Value)>),
+}
+
+const KEY_SLOTS: usize = 1024;
+const KEY_LEAK_CAP: usize = 4096;
+thread_local! {
+    /// Direct-mapped key table: one probe, one byte compare, no hashing
+    /// machinery. A collision does not evict — the newcomer stays owned.
+    static KEY_TABLE: std::cell::RefCell<(Vec<Option<&'static str>>, usize)> =
+        std::cell::RefCell::new((vec![None; KEY_SLOTS], 0));
+}
+
+#[inline]
+fn key_slot(k: &str) -> usize {
+    let mut h: u64 = k.len() as u64;
+    for &b in k.as_bytes().iter().take(16) { h = (h.rotate_left(5) ^ b as u64).wrapping_mul(0x517c_c1b7_2722_0a95); }
+    (h >> 32) as usize % KEY_SLOTS
+}
+
+/// Intern `k` as an object key: a pointer copy when it has been seen, one
+/// leaked allocation the first time (bounded by `KEY_LEAK_CAP`), an owned
+/// `String` otherwise.
+pub(crate) fn intern_key(k: &str) -> Key {
+    KEY_TABLE.with(|t| {
+        let mut t = t.borrow_mut();
+        let slot = key_slot(k);
+        match t.0[slot] {
+            Some(hit) if hit == k => Key::Borrowed(hit),
+            Some(_) => Key::Owned(k.to_string()),
+            None if t.1 < KEY_LEAK_CAP => {
+                let leaked: &'static str = Box::leak(k.to_string().into_boxed_str());
+                t.0[slot] = Some(leaked);
+                t.1 += 1;
+                Key::Borrowed(leaked)
+            }
+            None => Key::Owned(k.to_string()),
+        }
+    })
 }
 
 // ── Construction ──
@@ -19,7 +64,7 @@ pub fn almide_rt_value_int(n: i64) -> Value { Value::Int(n) }
 pub fn almide_rt_value_float(f: f64) -> Value { Value::Float(f) }
 pub fn almide_rt_value_bool(b: bool) -> Value { Value::Bool(b) }
 pub fn almide_rt_value_array(items: &Vec<Value>) -> Value { Value::Array(items.clone()) }
-pub fn almide_rt_value_object(pairs: &Vec<(String, Value)>) -> Value { Value::Object(pairs.clone()) }
+pub fn almide_rt_value_object(pairs: &Vec<(String, Value)>) -> Value { Value::Object(pairs.iter().map(|(k, v)| (intern_key(k), v.clone())).collect()) }
 pub fn almide_rt_value_null() -> Value { Value::Null }
 // Structural equality (`value.eq`). The wasm leg had this in its self-host
 // registry all along; native only ever reached Value equality through user
@@ -32,7 +77,7 @@ pub fn almide_rt_value_eq(a: Value, b: Value) -> bool { a == b }
 pub fn almide_rt_value_field(v: &Value, key: &str) -> Result<Value, String> {
     if let Value::Object(pairs) = v {
         for (k, val) in pairs {
-            if k == key { return Ok(val.clone()); }
+            if k.as_ref() == key { return Ok(val.clone()); }
         }
         Err(format!("missing field '{}'", key))
     } else {
@@ -116,7 +161,7 @@ pub fn almide_rt_value_decode_option_custom_ref<T, F: Fn(&Value) -> Result<T, St
 pub fn almide_rt_value_field_ref<'a>(v: &'a Value, key: &str) -> Result<&'a Value, String> {
     if let Value::Object(pairs) = v {
         for (k, val) in pairs {
-            if k == key { return Ok(val); }
+            if k.as_ref() == key { return Ok(val); }
         }
         Err(format!("missing field '{}'", key))
     } else {
@@ -176,7 +221,7 @@ pub fn almide_rt___decode_default_list_bool(v: Value, key: String, default: Vec<
 /// would be undefined on a value-only program (#416 native-link fix).
 pub fn almide_rt_value_keys(v: &Value) -> Vec<String> {
     match v {
-        Value::Object(entries) => entries.iter().map(|(k, _)| k.clone()).collect(),
+        Value::Object(entries) => entries.iter().map(|(k, _)| k.to_string()).collect(),
         _ => vec![],
     }
 }
@@ -185,7 +230,7 @@ pub fn almide_rt_value_keys(v: &Value) -> Vec<String> {
 pub fn almide_rt_value_pick(v: &Value, keys: &[String]) -> Value {
     match v {
         Value::Object(pairs) => {
-            Value::Object(pairs.iter().filter(|(k, _)| keys.contains(k)).cloned().collect())
+            Value::Object(pairs.iter().filter(|(k, _)| keys.iter().any(|x| x.as_str() == k.as_ref())).cloned().collect())
         }
         other => other.clone(),
     }
@@ -195,7 +240,7 @@ pub fn almide_rt_value_pick(v: &Value, keys: &[String]) -> Value {
 pub fn almide_rt_value_rename_keys(v: &Value, f: impl Fn(String) -> String) -> Value {
     match v {
         Value::Object(pairs) => {
-            Value::Object(pairs.iter().map(|(k, v)| (f(k.clone()), v.clone())).collect())
+            Value::Object(pairs.iter().map(|(k, v)| (intern_key(&f(k.to_string())), v.clone())).collect())
         }
         other => other.clone(),
     }
@@ -223,7 +268,7 @@ pub fn almide_rt_value_merge(a: &Value, b: &Value) -> Value {
 pub fn almide_rt_value_omit(v: &Value, keys: &[String]) -> Value {
     match v {
         Value::Object(pairs) => {
-            Value::Object(pairs.iter().filter(|(k, _)| !keys.contains(k)).cloned().collect())
+            Value::Object(pairs.iter().filter(|(k, _)| !keys.iter().any(|x| x.as_str() == k.as_ref())).cloned().collect())
         }
         other => other.clone(),
     }
@@ -263,7 +308,7 @@ pub fn almide_rt_value_tagged_variant(v: Value) -> Result<(String, Value), Strin
         Value::Object(pairs) => {
             if pairs.len() == 1 {
                 let (tag, payload) = pairs.into_iter().next().unwrap();
-                Ok((tag, payload))
+                Ok((tag.into_owned(), payload))
             } else {
                 Err(format!("expected object with exactly 1 key for variant, got {} keys", pairs.len()))
             }
