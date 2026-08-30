@@ -136,3 +136,7 @@ spec/wasm_cross/nested_three_level_literal.almd :: main
 # retirement) — or earlier if the incumbent learns the shape.
 spec/wasm_cross/gzip_inflate_members.almd :: gunzip
 spec/wasm_cross/gzip_inflate_members.almd :: inflate
+# (2026-08-31, C-327) env.sleep_ms has no capability seat in the incumbent
+# brick; the structural leg serves it (embedded-host op 36 / p1 clock spin).
+# Prunes with #1696 steps 4-5, same as the inflate pair above.
+spec/wasm_cross/env_sleep_pause.almd :: main
