@@ -33,6 +33,11 @@ pub(crate) const OP_WALL_NOW: i32 = 34;
 /// buffer), handled by the host BEFORE its buffer reads. No observable
 /// value: the guest builds the always-ok unit carrier itself.
 pub(crate) const OP_SLEEP_MS: i32 = 36;
+/// env.set (#1423 bucket C ruling): key in a, value in b — the embedded
+/// host records it in the process-wide overlay op 26 consults first, so a
+/// later env.get observes the set exactly as native's process-level
+/// setenv does. Stock-p1 artifacts keep the defined refusal.
+pub(crate) const OP_ENV_SET: i32 = 37;
 const OP_READ_BYTES: i32 = 14;
 
 impl Emitter<'_> {

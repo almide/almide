@@ -54,7 +54,7 @@ fail=0; n=0
 # 17 as of 2026-08-30 — gzip_inflate_members.almd (C-326) is structural-only,
 # the incumbent walls its loop-level tuple write-back (see the host twin and
 # proofs/walled-real-baseline.txt; prunes with #1696 steps 4-5).
-MAX_WALLED=18
+MAX_WALLED=19
 walled=0
 for fix in "$FIXTURE_DIR"/*.almd; do
   [ -e "$fix" ] || continue

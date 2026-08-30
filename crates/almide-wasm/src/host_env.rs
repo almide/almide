@@ -56,6 +56,12 @@ impl Emitter<'_> {
                 self.release_i64();
                 Some(SliceTy::Option(self.types.intern(STR)))
             }
+            // Result[Unit, String]: the overlay set — key in a, value in
+            // b, the fs.write two-string convention (#1423 bucket C).
+            ("env", "set", [k, v]) => {
+                self.fs_call_str2(k, v, crate::fs_meta::OP_ENV_SET)?;
+                Some(self.fs_result_unit()?)
+            }
             ("env", "os", []) => {
                 self.fs_call_0(OP_ENV_OS)?;
                 self.fs_take_text()?;

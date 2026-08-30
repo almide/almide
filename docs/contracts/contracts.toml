@@ -4200,3 +4200,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/env_sleep_pause.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-328"
+spec      = "ALS-R5"
+title     = "env.set takes effect for every later in-process env.get"
+statement = "env.set(k, v) makes every subsequent in-process env.get(k) observe v, byte-identically native <-> wasm, including overwrite and non-ASCII values (#1423 bucket C ruling). Native realizes it as process-level setenv (almide_rt_env_set); the embedded almide.* host as a process-wide OVERLAY the env.get op consults before the real environ (fs_call op 37 writes it, op 26 reads through it — std::env::set_var is unsafe under the wasmtime host's threads, and the overlay reproduces the setenv observable without it). Stock-p1 artifacts keep the defined refusal until the component leg's wasi:cli environment world; a key never set falls through to the real environ unchanged."
+since     = "0.61.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/env_set_overlay.almd", class = "fixture" },
+]

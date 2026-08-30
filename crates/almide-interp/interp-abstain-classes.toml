@@ -51,6 +51,9 @@ patterns = [
   # observable value, so a sleep-that-does-nothing interp arm is a
   # faithful vote — bounded glue, no architectural change.
   "capability: env.sleep_ms",
+  # env.set (#1423 bucket C): the overlay is state glue at the argv/env
+  # tier, same class as random_get/read_n_bytes — bounded, not architectural.
+  "capability: env.set",
   "capability: HOF map.fold",
   # SURFACED BY the #1416 ctor glue (map.new/set.new/with_capacity), not
   # introduced by it: map_filter / map_set_typechange used to abstain at

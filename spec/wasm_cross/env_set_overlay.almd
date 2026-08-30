@@ -1,0 +1,15 @@
+// @contract: C-328
+// env.set takes effect for every later in-process env.get (#1423 bucket C
+// ruling): native realizes it as process-level setenv; the embedded host
+// as an overlay consulted before the real environ (op 37/26) — the same
+// observable, including overwrite and non-ASCII values. The probe key is
+// namespaced and never pre-set, so the first read pins the unset arm too.
+import env
+
+effect fn main() -> Unit = {
+  println(env.get("ALMIDE_C328_PROBE") ?? "unset")
+  env.set("ALMIDE_C328_PROBE", "первый")!
+  println(env.get("ALMIDE_C328_PROBE") ?? "unset")
+  env.set("ALMIDE_C328_PROBE", "second")!
+  println(env.get("ALMIDE_C328_PROBE") ?? "unset")
+}

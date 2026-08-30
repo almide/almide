@@ -38,11 +38,6 @@ reason = "host-surface"
 issue = "#1423"
 
 [[native-only]]
-fn = "env.set"
-reason = "host-surface"
-issue = "#1423"
-
-[[native-only]]
 fn = "env.unix_timestamp"
 reason = "host-surface"
 issue = "#1423"
@@ -280,11 +275,6 @@ issue = "#1423"
 # ── The BOTH-LEGS wall set (#1423 stage 3): a call to one of these on
 # `--target wasm` is a CHECK-TIME error (E081) naming the reason and,
 # where one exists, the portable alternative.
-
-[[wasm-unavailable]]
-fn = "env.set"
-reason = "mutating/timing env surface has no wasm binding (reads work)"
-issue = "#1423"
 
 [[wasm-unavailable]]
 fn = "http.delete"
