@@ -404,3 +404,107 @@ effect fn fs_fallible_for_each_line(path: String, f: (String) -> Result[Unit, St
     __ffl_walk_eff_u(th, prim.load32(th + 4), 0, f)
   }
 }
+
+// `fs.fold_lines_range` Int-accumulator twin (`_i` — the count-in-range
+// shape, and the availability probe's `A = Int` instantiation): the SAME
+// range walker over an Int acc. Completes the range column of the C-220
+// family matrix (#1423 bucket A).
+fn __ffl_range_walk_i(sh: Int, slen: Int, pos: Int, endp: Int, acc: Int, f: (Int, String) -> Int) -> Int = if pos >= endp or pos >= slen then acc
+else {
+  let e = __ffl_nl(sh, slen, pos)
+  let line = __ffl_line(sh, pos, e)
+  let nacc = f(acc, line)
+  __ffl_range_walk_i(sh, slen, e + 1, endp, nacc, f)
+}
+
+effect fn fs_fold_lines_range_i(path: String, start: Int, endp: Int, init: Int, f: (Int, String) -> Int) -> Result[Int, String] = {
+  let r: Result[String, String] = prim.read_text_file(path)
+  let rh = prim.handle(r)
+  if prim.load32(rh + 16) != 0 then {
+    let m: String = prim.load_handle(rh + 12)
+    err(m)
+  } else {
+    let text: String = prim.load_handle(rh + 12)
+    let th = prim.handle(text)
+    let slen = prim.load32(th + 4)
+    let p0 = __ffl_range_start(th, slen, start)
+    ok(__ffl_range_walk_i(th, slen, p0, endp, init, f))
+  }
+}
+
+// `fs.fold_lines_range` String-accumulator twin (`_s` — the concat-in-range
+// shape): the SAME range walker over a String acc.
+fn __ffl_range_walk_s(sh: Int, slen: Int, pos: Int, endp: Int, acc: String, f: (String, String) -> String) -> String = if pos >= endp or pos >= slen then acc
+else {
+  let e = __ffl_nl(sh, slen, pos)
+  let line = __ffl_line(sh, pos, e)
+  let nacc = f(acc, line)
+  __ffl_range_walk_s(sh, slen, e + 1, endp, nacc, f)
+}
+
+effect fn fs_fold_lines_range_s(path: String, start: Int, endp: Int, init: String, f: (String, String) -> String) -> Result[String, String] = {
+  let r: Result[String, String] = prim.read_text_file(path)
+  let rh = prim.handle(r)
+  if prim.load32(rh + 16) != 0 then {
+    let m: String = prim.load_handle(rh + 12)
+    err(m)
+  } else {
+    let text: String = prim.load_handle(rh + 12)
+    let th = prim.handle(text)
+    let slen = prim.load32(th + 4)
+    let p0 = __ffl_range_start(th, slen, start)
+    ok(__ffl_range_walk_s(th, slen, p0, endp, init, f))
+  }
+}
+
+// `fs.fold_lines_range` Map[String, Int]-accumulator twin (`_msi`): the
+// surface over the range walker the chunked msi twin already owns.
+effect fn fs_fold_lines_range_msi(path: String, start: Int, endp: Int, init: Map[String, Int], f: (Map[String, Int], String) -> Map[String, Int]) -> Result[Map[String, Int], String] = {
+  let r: Result[String, String] = prim.read_text_file(path)
+  let rh = prim.handle(r)
+  if prim.load32(rh + 16) != 0 then {
+    let m: String = prim.load_handle(rh + 12)
+    err(m)
+  } else {
+    let text: String = prim.load_handle(rh + 12)
+    let th = prim.handle(text)
+    let slen = prim.load32(th + 4)
+    let p0 = __ffl_range_start(th, slen, start)
+    ok(__ffl_range_walk_msi(th, slen, p0, endp, init, f))
+  }
+}
+
+// `fs.fold_lines_chunked` String-accumulator twin (`_s` — concat partials
+// per chunk): the SAME byte partition as the msi/ls/i twins, each String
+// partial stored as a heap handle into the partials block. Completes the
+// walker x accumulator twin matrix (#1423 bucket A): every accumulating
+// walker now carries {_msi, _i, _ls, _s}.
+fn __ffl_chunks_s(sh: Int, slen: Int, lh: Int, n: Int, chunk: Int, i: Int, init: String, f: (String, String) -> String) -> Int = if i >= n then 0
+else {
+  let s = i * chunk
+  let e = if s + chunk < slen then s + chunk else slen
+  let p0 = __ffl_range_start(sh, slen, s)
+  let part = __ffl_range_walk_s(sh, slen, p0, e, init, f)
+  prim.store_str(lh + 12 + i * 8, part)
+  __ffl_chunks_s(sh, slen, lh, n, chunk, i + 1, init, f)
+}
+
+effect fn fs_fold_lines_chunked_s(path: String, workers: Int, init: String, f: (String, String) -> String) -> Result[List[String], String] = {
+  let r: Result[String, String] = prim.read_text_file(path)
+  let rh = prim.handle(r)
+  if prim.load32(rh + 16) != 0 then {
+    let m: String = prim.load_handle(rh + 12)
+    err(m)
+  } else {
+    let text: String = prim.load_handle(rh + 12)
+    let th = prim.handle(text)
+    let slen = prim.load32(th + 4)
+    let w = if workers < 1 then 1 else workers
+    let chunk = slen / w + 1
+    let full = (slen + chunk - 1) / chunk
+    let n = if w < full then w else full
+    let parts: List[String] = prim.alloc_list_str(n)
+    let _c = __ffl_chunks_s(th, slen, prim.handle(parts), n, chunk, 0, init, f)
+    ok(parts)
+  }
+}

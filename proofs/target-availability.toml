@@ -25,7 +25,7 @@
 # generator gaps). Claimed neither way; shrinking it is probe work.
 
 # Measured (this generation): structural 340 ok / 49 native-only; default-routing 23 wasm-unavailable; 39 unsynthesizable.
-pending_self_host_ceiling = 16
+pending_self_host_ceiling = 15
 
 [[native-only]]
 fn = "datetime.parse_iso"
@@ -59,7 +59,7 @@ issue = "#1423"
 
 [[native-only]]
 fn = "fs.fold_lines_range"
-reason = "pending-self-host"
+reason = "structural-leg-gap: the incumbent links the four self-host twins (#1423 bucket A) and the default route BUILDS; the structural leg has no fold_lines_range arm yet and declines under ALMIDE_WASM_STRUCTURAL=1"
 issue = "#1423"
 
 [[native-only]]
@@ -294,11 +294,6 @@ issue = "#1423"
 [[wasm-unavailable]]
 fn = "env.sleep_ms"
 reason = "mutating/timing env surface has no wasm binding (reads work)"
-issue = "#1423"
-
-[[wasm-unavailable]]
-fn = "fs.fold_lines_range"
-reason = "the streaming-callback reader has no wasm lowering yet (read_text / read_lines work)"
 issue = "#1423"
 
 [[wasm-unavailable]]
