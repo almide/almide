@@ -4165,6 +4165,7 @@ since     = "0.60.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/mut_param_branch_forward.almd", class = "fixture" },
+  { path = "spec/wasm_cross/sql_highlight_tokens.almd", class = "fixture" },
 ]
 
 [[contract]]

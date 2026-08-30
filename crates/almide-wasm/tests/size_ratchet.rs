@@ -45,7 +45,13 @@ fn corpus_sizes_hold_the_baseline() {
         let rel = line.splitn(3, '\t').nth(2).expect("manifest row");
         let text = std::fs::read_to_string(almide_corpus::resolve(&root, rel)).expect("fixture readable");
         let ir = almide_spine::s5::lower_to_ir(rel, &text).expect("front (manifest fixtures all lower)");
-        let bytes = almide_wasm::emit_program(&ir).expect("emit (manifest fixtures all emit)");
+        // `!` row: the structural leg REFUSES this fixture (CLI reroutes
+        // to the incumbent — #1688's unfoldable shapes). No size to pin;
+        // the alloc ledger asserts the refusal stays a refusal.
+        let Ok(bytes) = almide_wasm::emit_program(&ir) else {
+            rows.push_str(&format!("!\t{rel}\n"));
+            continue;
+        };
         let n = bytes.len() as u64;
         assert!(n >= 100, "{rel}: {n} bytes — too small to be a real module, measurement broken");
         rows.push_str(&format!("{n}\t{rel}\n"));
@@ -61,6 +67,9 @@ fn corpus_sizes_hold_the_baseline() {
     let mut base: std::collections::BTreeMap<&str, u64> = std::collections::BTreeMap::new();
     for l in baseline.lines() {
         let (n, rel) = l.split_once('\t').expect("baseline row");
+        if n == "!" {
+            continue; // structural-refused row — nothing to compare
+        }
         base.insert(rel, n.parse().expect("baseline size"));
     }
 
