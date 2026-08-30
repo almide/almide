@@ -47,6 +47,10 @@ patterns = [
 [[class]]
 name = "BRIDGEABLE"
 patterns = [
+  # env.sleep_ms (#1423 bucket A): the pause is wall-clock with no
+  # observable value, so a sleep-that-does-nothing interp arm is a
+  # faithful vote — bounded glue, no architectural change.
+  "capability: env.sleep_ms",
   "capability: HOF map.fold",
   # SURFACED BY the #1416 ctor glue (map.new/set.new/with_capacity), not
   # introduced by it: map_filter / map_set_typechange used to abstain at

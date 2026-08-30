@@ -85,11 +85,14 @@ fi
 # walls them, so they are tracked skips of the INCUMBENT'S determinism
 # domain, locally re-measured at exactly 16 over 634 fixtures). A NEW wall
 # is a conscious ceiling bump, never silent shrinkage of coverage.
+# 18 as of 2026-08-30 (second bump): env_sleep_pause.almd (C-327) walls on
+# the incumbent brick (env.sleep_ms has no capability seat there) — same
+# structural-only division, prunes with #1696 steps 4-5.
 # 17 as of 2026-08-30: gzip_inflate_members.almd (C-326) is STRUCTURAL-ONLY
 # — the incumbent's brick walls its loop-level tuple write-back
 # (WhileHeapAccumulator), which is the intended division of labor until
 # #1696 steps 4-5 move the certificate and retire the incumbent.
-MAX_WALLED=17
+MAX_WALLED=18
 corpus=$(ls "$FIXTURE_DIR"/*.almd 2>/dev/null | wc -l | tr -d ' ')
 if [ "$corpus" -eq 0 ] || [ $((n + walled)) -ne "$corpus" ]; then
   echo "::error::host-determinism: compared $n + walled $walled != corpus $corpus in $FIXTURE_DIR — the scan went blind (#985)"

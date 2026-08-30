@@ -407,16 +407,8 @@ effect fn fs_fallible_for_each_line(path: String, f: (String) -> Result[Unit, St
 
 // `fs.fold_lines_range` Int-accumulator twin (`_i` — the count-in-range
 // shape, and the availability probe's `A = Int` instantiation): the SAME
-// range walker over an Int acc. Completes the range column of the C-220
-// family matrix (#1423 bucket A).
-fn __ffl_range_walk_i(sh: Int, slen: Int, pos: Int, endp: Int, acc: Int, f: (Int, String) -> Int) -> Int = if pos >= endp or pos >= slen then acc
-else {
-  let e = __ffl_nl(sh, slen, pos)
-  let line = __ffl_line(sh, pos, e)
-  let nacc = f(acc, line)
-  __ffl_range_walk_i(sh, slen, e + 1, endp, nacc, f)
-}
-
+// range walker the chunked `_i` twin already owns. Completes the range
+// column of the C-220 family matrix (#1423 bucket A).
 effect fn fs_fold_lines_range_i(path: String, start: Int, endp: Int, init: Int, f: (Int, String) -> Int) -> Result[Int, String] = {
   let r: Result[String, String] = prim.read_text_file(path)
   let rh = prim.handle(r)
