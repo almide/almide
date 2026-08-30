@@ -4178,3 +4178,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/bytes_push_growth.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-326"
+spec      = "ALS-M13"
+title     = "Branch-selected mut-fn calls hoist their write-back out of the arm: the gzip-inflate shape lowers structurally"
+statement = "A tuple-form or was-Unit mut-param call selected by an if/match arm (`let (s, p) = match kind { 0 => stored(pos, inp, out), 1 => codes(..., out, ...), _ => (fail, pos) }` — the gzip inflate's block dispatch) is rewritten by the phase-4 hoist: every arm yields the buffer (the callee's raw return, or the param read back for a call-free arm), and ONE write-back Assign applies outside the branch in straight-line position — the exact discipline the proven straight-line C-132 form uses, so the structural wasm leg lowers the whole program and native/wasm stay byte-identical. Before the hoist this shape was refused by the #1688 wall (and by the incumbent's brick), and before the wall it was emitted silently wrong. An arm that writes the param any other way (a second mut param, an unrecognized write-back) still declines the hoist and stays refused, never emitted."
+since     = "0.60.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/gzip_inflate_members.almd", class = "fixture" },
+]

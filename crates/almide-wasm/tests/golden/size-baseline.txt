@@ -203,6 +203,7 @@
 9263	spec/wasm_cross/grouping_unary.almd
 6361	spec/wasm_cross/guard_let_statement.almd
 4093	spec/wasm_cross/guard_statement.almd
+26474	spec/wasm_cross/gzip_inflate_members.almd
 7756	spec/wasm_cross/hash_digests.almd
 4602	spec/wasm_cross/heap_arena.almd
 4193	spec/wasm_cross/heap_result_err_interp.almd
