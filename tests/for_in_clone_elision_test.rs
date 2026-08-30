@@ -52,8 +52,11 @@ fn emitted_main(source: &str, tag: &str) -> String {
     rest[..end].to_string()
 }
 
+// `hit` only READS its Value (borrow inference makes it `&Value`, #1679);
+// `keep` stores it in a list, so the callee must own it — the consuming case.
 const PRELUDE: &str = "type U = { a: Int }\n\
     fn hit(v: Value) -> Int = match value.as_int(v) { ok(n) => n, err(_) => 0 }\n\
+    fn keep(v: Value) -> Int = list.len([v])\n\
     fn hitu(u: U) -> Int = u.a\n";
 
 #[test]
@@ -63,13 +66,13 @@ fn list_loop_borrows_the_list_and_moves_the_element() {
         fn main() -> Unit = {{\n\
           let data: List[Value] = [value.int(1), value.int(2)]\n\
           var t = 0\n\
-          for v in data {{ t = t + hit(v) }}\n\
-          for v in data {{ t = t + hit(v) }}\n\
+          for v in data {{ t = t + keep(v) }}\n\
+          for v in data {{ t = t + keep(v) }}\n\
           println(\"${{t}}\")\n\
         }}\n"), "borrow-move");
     assert!(body.contains("for v in data.iter().cloned()"), "the list is borrowed by `.iter()`, a clone under it is a throwaway copy:\n{body}");
     assert!(!body.contains("data.clone()"), "whole-list clone is back on the loop head:\n{body}");
-    assert!(body.contains("hit(v)"), "the loop variable is rebound every iteration; its last use is a move:\n{body}");
+    assert!(body.contains("keep(v)"), "the loop variable is rebound every iteration; its last use is a move:\n{body}");
     assert!(!body.contains("v.clone()"), "loop-variable clone is back:\n{body}");
 }
 
@@ -82,12 +85,12 @@ fn body_bound_let_moves_at_its_last_use() {
           var t = 0\n\
           for v in data {{\n\
             let w = v\n\
-            t = t + hit(w)\n\
+            t = t + keep(w)\n\
           }}\n\
           println(\"${{t}}\")\n\
         }}\n"), "let-move");
     assert!(body.contains("let w: Value = v;"), "`let w = v` is the loop variable's last use — a move:\n{body}");
-    assert!(body.contains("hit(w)") && !body.contains("w.clone()"), "a body-level `let` is rebound every iteration too:\n{body}");
+    assert!(body.contains("keep(w)") && !body.contains("w.clone()"), "a body-level `let` is rebound every iteration too:\n{body}");
 }
 
 #[test]
@@ -111,11 +114,11 @@ fn outer_loop_variable_used_in_an_inner_loop_still_clones() {
           let data: List[Value] = [value.int(1), value.int(2)]\n\
           var t = 0\n\
           for v in data {{\n\
-            for i in 0..<2 {{ t = t + hit(v) + i }}\n\
+            for i in 0..<2 {{ t = t + keep(v) + i }}\n\
           }}\n\
           println(\"${{t}}\")\n\
         }}\n"), "nested");
-    assert!(body.contains("hit(v.clone())"), "an outer loop variable is NOT fresh inside the inner loop — it must clone:\n{body}");
+    assert!(body.contains("keep(v.clone())"), "an outer loop variable is NOT fresh inside the inner loop — it must clone:\n{body}");
 }
 
 #[test]
@@ -126,7 +129,7 @@ fn loop_variable_captured_by_a_closure_still_clones() {
           let data: List[Value] = [value.int(1), value.int(2)]\n\
           var t = 0\n\
           for v in data {{\n\
-            let f = () => hit(v)\n\
+            let f = () => keep(v)\n\
             t = t + f() + f()\n\
           }}\n\
           println(\"${{t}}\")\n\
@@ -138,7 +141,7 @@ fn loop_variable_captured_by_a_closure_still_clones() {
     // in-loop always-clone rule.
     assert!(body.contains("= v.clone();"), "the capture bind copies the loop variable exactly once:\n{body}");
     assert!(!body.contains("v.clone().clone()"), "the double clone on the capture bind is back:\n{body}");
-    assert!(body.contains("hit(__cap_"), "the closure body must read its own capture, never the loop variable:\n{body}");
+    assert!(body.contains("keep(__cap_"), "the closure body must read its own capture, never the loop variable:\n{body}");
 }
 
 #[test]
@@ -161,15 +164,18 @@ fn binder_the_body_only_borrows_iterates_by_reference() {
         fn main() -> Unit = {{\
           let us: List[U] = [U {{ a: 1 }}, U {{ a: 2 }}]\
           let names: List[String] = [\"ab\", \"c\"]\
+          let data: List[Value] = [value.int(1)]\
           var t = 0\
           for u in us {{ t = t + hitu(u) }}\
           for u in us {{ t = t + u.a }}\
           for s in names {{ t = t + string.len(s) }}\
+          for v in data {{ t = t + hit(v) }}\
           println(\"${{t}}\")\
         }}\n"), "borrowed-binder");
     assert!(body.contains("for u in us.iter() {"), "a binder only ever passed by `&` never needs an owned element:\n{body}");
     assert!(body.contains("hitu(&u)"), "the borrowed call site is unchanged (`&&T` coerces):\n{body}");
     assert!(body.contains("for s in names.iter() {"), "a String binder read through `&*s` iterates by reference too:\n{body}");
+    assert!(body.contains("for v in data.iter() {") && body.contains("hit(&v)"), "a Value read by a borrowing callee (#1679) iterates by reference:\n{body}");
     assert!(!body.contains("iter().cloned()"), "no loop in this program consumes its element — every `.cloned()` here is a copy nobody reads:\n{body}");
 }
 
@@ -181,10 +187,10 @@ fn binder_that_is_consumed_or_matched_keeps_the_element_copy() {
           let us: List[U] = [U {{ a: 1 }}]\
           let data: List[Value] = [value.int(1)]\
           var t = 0\
-          for v in data {{ t = t + hit(v) }}\
+          for v in data {{ t = t + keep(v) }}\
           for u in us {{ t = t + (match u {{ U {{ a }} => a }}) }}\
           println(\"${{t}}\")\
         }}\n"), "consumed-binder");
-    assert!(body.contains("for v in data.iter().cloned() {") && body.contains("hit(v)"), "an owned-arg call consumes the element — it must be copied out of the list, then moved:\n{body}");
+    assert!(body.contains("for v in data.iter().cloned() {") && body.contains("keep(v)"), "an owned-arg call consumes the element — it must be copied out of the list, then moved:\n{body}");
     assert!(body.contains("for u in us.iter().cloned() {"), "a match subject binds payloads by value — the element stays owned:\n{body}");
 }
