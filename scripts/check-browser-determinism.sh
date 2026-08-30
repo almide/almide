@@ -50,8 +50,11 @@ JS
 NATIVE_BIN="$NATIVE_HARNESS/target/release/wasmgen-harness"
 fail=0; n=0
 # Tracked-skip ceiling, shared with check-host-determinism.sh: 16 as of the
-# 2026-08-26 commissioning (the graduated wall corpus — locally re-measured).
-MAX_WALLED=16
+# 2026-08-26 commissioning (the graduated wall corpus — locally re-measured);
+# 17 as of 2026-08-30 — gzip_inflate_members.almd (C-326) is structural-only,
+# the incumbent walls its loop-level tuple write-back (see the host twin and
+# proofs/walled-real-baseline.txt; prunes with #1696 steps 4-5).
+MAX_WALLED=17
 walled=0
 for fix in "$FIXTURE_DIR"/*.almd; do
   [ -e "$fix" ] || continue
