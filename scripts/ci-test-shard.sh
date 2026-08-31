@@ -98,7 +98,7 @@ for pkg, kind, name in bins[shard]:
 # partitioner, the weights file and the shard-coverage gate keep their
 # exact contract.
 enumerate_archive() {
-  cargo nextest list --archive-file "$ARCHIVE" --message-format json 2>/dev/null | python3 -c '
+  cargo nextest list --archive-file "$ARCHIVE" --message-format json | python3 -c '
 import json, sys
 d = json.load(sys.stdin)
 rows = []
@@ -135,6 +135,7 @@ case "${1:-}" in
       IFS=$'\t' read -r pkg kind name <<<"$row"
       case "$kind" in
         lib) bid="$pkg" ;;
+        bin) bid="$pkg::bin/$name" ;;
         *)   bid="$pkg::$name" ;;
       esac
       if [ -z "$expr" ]; then expr="binary_id(=$bid)"; else expr="$expr | binary_id(=$bid)"; fi

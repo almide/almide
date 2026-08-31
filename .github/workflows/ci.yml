@@ -217,6 +217,17 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # #1732: enumerate from the build job's nextest archive — this
+      # job's old enumerate compiled the workspace.
+      - name: Install cargo-nextest
+        run: |
+          curl -LsSf https://get.nexte.st/latest/linux -o /tmp/nextest.tar.gz
+          sudo tar xzf /tmp/nextest.tar.gz -C /usr/local/bin
+          cargo nextest --version
+      - uses: actions/download-artifact@v8
+        with:
+          name: almide-tests-archive
+          path: /tmp/almide-archive
       - name: Union of shards == full target set
         run: |
           set -euo pipefail
