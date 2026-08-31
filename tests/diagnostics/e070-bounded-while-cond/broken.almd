@@ -1,0 +1,13 @@
+// ALS-B5: a while over a runtime condition has no static trip count.
+@bounded
+fn drain(n: Int) -> Int = {
+  var left = n
+  var steps = 0
+  while left > 0 {
+    left = left - 1
+    steps = steps + 1
+  }
+  steps
+}
+
+fn main() -> Unit = println("${drain(5)}")

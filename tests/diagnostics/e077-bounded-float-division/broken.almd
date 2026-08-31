@@ -1,0 +1,8 @@
+// ALS-B7 (provisional): Float division inside the bounded profile.
+@bounded
+fn ratio(a: Int, b: Int) -> Int = {
+  let r = float.from_int(a) / float.from_int(b)
+  float.to_int(r)
+}
+
+fn main() -> Unit = println("${ratio(6, 3)}")

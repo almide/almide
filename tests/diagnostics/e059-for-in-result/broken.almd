@@ -1,0 +1,6 @@
+fn main() -> Unit = {
+  let r = int.parse("3")
+  for x in r {
+    println(int.to_string(x))
+  }
+}

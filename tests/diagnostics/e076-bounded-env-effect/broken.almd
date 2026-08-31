@@ -1,0 +1,10 @@
+import env
+
+// ALS-B5: an env read is an effect the bounded capability set must name.
+@bounded
+effect fn who() -> Int = {
+  let h = env.get("HOME") ?? ""
+  string.len(h)
+}
+
+fn main() -> Unit = println("ok")

@@ -1,0 +1,8 @@
+// ALS-B5: a literal count is a static footprint.
+@bounded
+fn pad() -> Int = {
+  let s = string.repeat("x", 4)
+  string.len(s)
+}
+
+fn main() -> Unit = println("${pad()}")
