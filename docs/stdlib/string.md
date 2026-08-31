@@ -364,7 +364,7 @@ string.split(s: String, sep: String) -> List[String]
 string.split_once(s: String, sep: String) -> Option[()]
 string.join(list: List[String], sep: String) -> String
 string.len(s: String) -> Int
-string.length(s: String) -> Int
+string.length(s: String) -> Int   (deprecated — use string.len)
 string.contains(s: String, sub: String) -> Bool
 string.starts_with(s: String, prefix: String) -> Bool
 string.ends_with(s: String, suffix: String) -> Bool
