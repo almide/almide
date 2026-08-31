@@ -621,6 +621,59 @@ impl Emitter<'_> {
         self.rc_owned.insert(idx);
         Ok(true)
     }
+
+    /// The list twin of [`Self::try_str_append_assign`] (#1729):
+    /// `data = data + [e]` — the canonical accumulator loop — routes
+    /// through `$cow` + `$list_push_{8,4}` (amortized in-place growth,
+    /// the outgrown block freed at rc==1) instead of `$concat`'s full
+    /// copy per append. The COW judge keeps value semantics for a
+    /// shared accumulator; the element is lowered AFTER the judge but
+    /// read against the pre-assign block either way, so a
+    /// self-referencing element (`data + [list.len(data)]`) observes
+    /// the value before the mutation, exactly like the concat form.
+    fn try_list_append_assign(
+        &mut self,
+        var: &almide_ir::VarId,
+        value: &IrExpr,
+    ) -> Result<bool, EmitError> {
+        if self.metered || self.cells.contains(var) {
+            return Ok(false);
+        }
+        let Some(&(idx, SliceTy::List(h))) = self.locals.get(var) else {
+            return Ok(false);
+        };
+        let IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList, left, right } = &value.kind
+        else {
+            return Ok(false);
+        };
+        if !matches!(&left.kind, IrExprKind::Var { id } if id == var) {
+            return Ok(false);
+        }
+        let IrExprKind::List { elements } = &right.kind else {
+            return Ok(false);
+        };
+        let [elem] = &elements[..] else {
+            return Ok(false);
+        };
+        let el = self.types.el(h);
+        // SCALAR 8-byte elements only: a 4-byte HANDLE slot (record/str/
+        // list element) needs the literal builder's Dup discipline — the
+        // container owns the element, the load is a borrow, and pushing
+        // the borrowed handle un-Dup'd double-owns it (the C-186 fixture
+        // caught exactly that). Heap-element appends keep the concat
+        // path, whose outgrown generations the assign dec now frees.
+        if el != INT && el != FLOAT {
+            return Ok(false);
+        }
+        self.f.instructions().local_get(idx).call(F_COW);
+        self.lower(elem, Some(el))?;
+        if el.val_type() == ValType::F64 {
+            self.f.instructions().i64_reinterpret_f64();
+        }
+        self.f.instructions().call(F_LIST_PUSH_8).local_set(idx);
+        self.rc_owned.insert(idx);
+        Ok(true)
+    }
 }
 
 impl Emitter<'_> {
@@ -629,6 +682,9 @@ impl Emitter<'_> {
     /// complexity budget.
     fn lower_assign(&mut self, var: &almide_ir::VarId, value: &IrExpr) -> Result<(), EmitError> {
                 if self.try_str_append_assign(var, value)? {
+                    return Ok(());
+                }
+                if self.try_list_append_assign(var, value)? {
                     return Ok(());
                 }
                 let (local, declared) = match self.locals.get(var) {
@@ -676,10 +732,29 @@ impl Emitter<'_> {
                 // through the call — the callee already released what it
                 // outgrew, and a dec here double-frees (mut_heap_param
                 // exit-1'd on exactly this).
+                // The self-mention skip is CALL-shaped only: `xs = f(xs)` /
+                // `xs = $push(xs, v)` transfer ownership through the callee
+                // (a dec here double-freed — mut_heap_param). A NON-call
+                // self-mentioning rhs (`data = data + [x]` — the append
+                // loop's ConcatList) merely READS the old block and builds a
+                // FRESH one; skipping the dec leaked every outgrown
+                // generation, and a 65k-append loop exhausted the 4 GiB
+                // address space in a quarter second (#1729). Aliasing rhs
+                // shapes (`xs = if c then xs else ys`) stay safe by order:
+                // the RC-5 inc above runs before this dec, so a same-block
+                // result nets to zero.
+                let call_core = match &value.kind {
+                    IrExprKind::Unwrap { expr } | IrExprKind::Try { expr } => &expr.kind,
+                    k => k,
+                };
+                let call_shaped_self = matches!(
+                    call_core,
+                    IrExprKind::Call { .. } | IrExprKind::RuntimeCall { .. }
+                ) && crate::rc_ownership::rc_mentions_var(value, *var);
                 if let Some(idx) = local
                     && !self.cells.contains(var)
                     && self.rc_droppable(declared)
-                    && !crate::rc_ownership::rc_mentions_var(value, *var)
+                    && !call_shaped_self
                 {
                     self.f.instructions().local_get(idx).call(F_DEC_FLAT);
                     self.rc_owned.insert(idx);

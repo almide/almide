@@ -161,6 +161,9 @@ pub fn cmd_build(args: BuildArgs) {
         // the whole CLI runs on the one `almide-main` worker thread, so the
         // thread-local is exactly as scoped as this call.
         let _cap = heap_cap.map(almide_mir::heap_cap::HeapCapGuard::set);
+        // #1729: the structural leg's twin — the cap becomes the emitted
+        // memory's declared maximum (it silently ignored the knob before).
+        let _cap_structural = heap_cap.map(almide_wasm::heap_cap::HeapCapGuard::set);
         cmd_build_wasm_direct(file, output, no_check, emit_unverified, verified, wasm_opt, component);
         return;
     }

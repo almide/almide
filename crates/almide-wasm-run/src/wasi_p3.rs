@@ -276,6 +276,7 @@ pub fn to_p3(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
         func_types,
         tables,
         old_mem_min,
+        old_mem_max,
         parsed_globals,
         global_count,
         heap_global,
@@ -450,7 +451,8 @@ pub fn to_p3(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     let mut memories = MemorySection::new();
     memories.memory(MemoryType {
         minimum: old_mem_min + PARK_SPAN / 65536,
-        maximum: None,
+        // #1729: carry the heap-cap maximum through, span-shifted.
+        maximum: old_mem_max.map(|m| m.max(old_mem_min) + PARK_SPAN / 65536),
         memory64: false,
         shared: false,
         page_size_log2: None,
