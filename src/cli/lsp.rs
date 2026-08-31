@@ -481,6 +481,10 @@ fn derive_workspace_root(init: &InitializeParams) -> Option<std::path::PathBuf> 
 /// every keystroke and serves the dep list cached at open time; a project
 /// never opened in this session analyzes against no deps rather than
 /// touching the network (#927).
+// `Uri` keys trip clippy::mutable_key_type across this server — a false
+// positive (Uri hashes by its string form; no key is mutated in place), and
+// the same shape the pre-existing documents/analyzed maps already carry.
+#[allow(clippy::mutable_key_type)]
 fn handle_notification(notif: Notification, connection: &Connection, documents: &mut HashMap<Uri, String>, analyzed: &mut HashMap<Uri, AnalyzedDoc>, dep_cache: &mut DepCache, dirty: &mut std::collections::HashSet<Uri>) {
     match notif.method.as_str() {
         "textDocument/didOpen" => {
@@ -607,6 +611,7 @@ pub fn run_lsp() {
 
 /// Re-analyze every dirty document and publish its diagnostics — the single
 /// analysis point behind both the idle debounce and compile-before-answering.
+#[allow(clippy::mutable_key_type)] // same Uri-key false positive as handle_notification
 fn flush_dirty(connection: &Connection, documents: &HashMap<Uri, String>, analyzed: &mut HashMap<Uri, AnalyzedDoc>, dep_cache: &mut DepCache, dirty: &mut std::collections::HashSet<Uri>) {
     for uri in dirty.drain() {
         let Some(source) = documents.get(&uri) else { continue };

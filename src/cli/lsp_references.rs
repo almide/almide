@@ -119,7 +119,7 @@ impl<'a> OccWalker<'a> {
     /// text is `name`. Returns 1-based char (col, end_col), or None when the
     /// line is missing or the candidate is not unique.
     fn recover_name_token(&self, name: crate::intern::Sym, span: crate::ast::Span) -> Option<(usize, usize)> {
-        let line_text = self.source_lines.get(span.line.saturating_sub(1) as usize)?;
+        let line_text = self.source_lines.get(span.line.saturating_sub(1))?;
         let tokens = crate::lexer::Lexer::tokenize(line_text);
         let mut hit: Option<(usize, usize)> = None;
         for t in &tokens {
@@ -127,7 +127,7 @@ impl<'a> OccWalker<'a> {
                 if hit.is_some() {
                     return Option::None; // ambiguous — refuse precision
                 }
-                hit = Some((t.col as usize, t.end_col as usize));
+                hit = Some((t.col, t.end_col));
             }
         }
         hit
@@ -376,7 +376,7 @@ fn def_at_position(idx: &OccIndex, doc: &AnalyzedDoc, pos: Position) -> Option<u
 
 fn occ_to_location(o: &RefOcc, doc: &AnalyzedDoc, uri: &Uri) -> Option<Location> {
     let lines: Vec<&str> = doc.source.lines().collect();
-    let line_text = lines.get(o.line.saturating_sub(1) as usize)?;
+    let line_text = lines.get(o.line.saturating_sub(1))?;
     Some(Location {
         uri: uri.clone(),
         range: Range {
@@ -447,7 +447,7 @@ fn compute_rename(doc: &AnalyzedDoc, pos: Position, new_name: &str, uri: &Uri) -
     let mut edits: Vec<TextEdit> = idx.occs.iter()
         .filter(|o| o.def == def)
         .filter_map(|o| {
-            let line_text = lines.get(o.line.saturating_sub(1) as usize)?;
+            let line_text = lines.get(o.line.saturating_sub(1))?;
             Some(TextEdit {
                 range: Range {
                     start: Position { line: (o.line - 1) as u32, character: char_col_to_utf16(line_text, o.col) },
@@ -459,6 +459,11 @@ fn compute_rename(doc: &AnalyzedDoc, pos: Position, new_name: &str, uri: &Uri) -
         .collect();
     edits.sort_by_key(|e| (e.range.start.line, e.range.start.character));
     edits.dedup_by_key(|e| (e.range.start.line, e.range.start.character));
+    // clippy::mutable_key_type fires on `Uri` keys throughout this server —
+    // a false positive here: lsp_types::Uri hashes by its string form and
+    // nothing mutates a key in place (the pre-existing documents/analyzed
+    // maps carry the same shape).
+    #[allow(clippy::mutable_key_type)]
     let mut changes = std::collections::HashMap::new();
     changes.insert(uri.clone(), edits);
     Ok(WorkspaceEdit { changes: Some(changes), ..Default::default() })
