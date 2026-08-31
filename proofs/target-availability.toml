@@ -88,33 +88,8 @@ reason = "pending-self-host"
 issue = "#1423"
 
 [[native-only]]
-fn = "http.delete"
-reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --target wasm` answers identically to native (C-328); the stock artifact refuses at build via the op audit until the p2/p3 component port"
-issue = "#1423"
-
-[[native-only]]
-fn = "http.get"
-reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --target wasm` answers identically to native (C-328); the stock artifact refuses at build via the op audit until the p2/p3 component port"
-issue = "#1423"
-
-[[native-only]]
 fn = "http.get_bytes"
 reason = "host-surface"
-issue = "#1423"
-
-[[native-only]]
-fn = "http.patch"
-reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --target wasm` answers identically to native (C-328); the stock artifact refuses at build via the op audit until the p2/p3 component port"
-issue = "#1423"
-
-[[native-only]]
-fn = "http.post"
-reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --target wasm` answers identically to native (C-328); the stock artifact refuses at build via the op audit until the p2/p3 component port"
-issue = "#1423"
-
-[[native-only]]
-fn = "http.put"
-reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --target wasm` answers identically to native (C-328); the stock artifact refuses at build via the op audit until the p2/p3 component port"
 issue = "#1423"
 
 [[native-only]]

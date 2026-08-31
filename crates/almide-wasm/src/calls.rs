@@ -655,12 +655,25 @@ impl Emitter<'_> {
                 unsup(&format!("call:fs.{func}"))
             }
             CallTarget::Module { module, func, .. }
-                if matches!(module.as_str(), "env" | "io" | "process" | "http") =>
+                if matches!(module.as_str(), "env" | "io" | "process") =>
             {
                 if let Some(out) = self.lower_host_call(module.as_str(), func.as_str(), args)? {
                     return Ok(out);
                 }
                 unsup(&format!("call:{module}.{func}"))
+            }
+            // http (#1710): the ported client fns take the host route; the
+            // REST of the family keeps its pre-port path (self-host /
+            // honest wall) — walling here regressed the pure constructors
+            // (http.response measured lower before the port).
+            CallTarget::Module { module, func, .. } if module.as_str() == "http" => {
+                if let Some(out) = self.lower_host_call("http", func.as_str(), args)? {
+                    return Ok(out);
+                }
+                // The family's pre-port route verbatim (`_ =>` below): the
+                // self-host registry serves the pure fns (url_decode, the
+                // response constructors) exactly as before the port.
+                self.lower_module_call_c(target, args, tail, ret_hint)
             }
             // #1423 stage 4: the error trio — semantics verbatim from
             // runtime/rs/src/error.rs.
