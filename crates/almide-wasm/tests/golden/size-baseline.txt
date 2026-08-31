@@ -636,6 +636,7 @@
 1551	spec/wasm_cross/while_loops.almd
 2240	spec/wasm_cross/whilep_str.almd
 9050	spec/wasm_cross/wide_function_body.almd
+1668	spec/wasm_cross/witness_straightline.almd
 8814	spec/wasm_cross/zip_view_shape.almd
 4055	spec/wasm_fail/effect_err_aborts_both_legs.almd
 4099	spec/wasm_fail/int_parse_err_propagates.almd
