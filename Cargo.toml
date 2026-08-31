@@ -58,6 +58,9 @@ semver = "1"
 toml = "1.1"
 lasso = { version = "0.7", features = ["multi-threaded"] }
 lsp-server = "0.10"
+# The LSP main loop's idle debounce needs recv_timeout on lsp-server's
+# channel type (#1470) — same crate lsp-server itself uses.
+crossbeam-channel = "0.5"
 lsp-types = "0.97"
 wit-component = "0.257"
 wasi-preview1-component-adapter-provider = "47.0.2"
