@@ -266,15 +266,24 @@ fn bare_type_name(type_name: &str) -> &str {
 pub fn convention_emit_key(env: &TypeEnv, type_name: &str, method: &str) -> Option<Sym> {
     convention_fn_key(env, type_name, method).map(|_| {
         // A receiver whose canonical type is module-qualified (`moda.Box`)
-        // emits the QUALIFIED method name when that spelling is registered:
-        // with TWO modules owning the bare type name, the bare `Box.tag` is
-        // one ambiguous key at symbol re-attachment and dispatched to
-        // whichever module registered last (#1728). Single-owner and derived
-        // (bare-registered) methods keep the bare form (#1087).
-        if type_name.contains('.')
-            && env.functions.contains_key(&sym(&format!("{}.{}", type_name, method)))
-        {
-            return sym(&format!("{}.{}", type_name, method));
+        // emits the QUALIFIED method name ONLY when the bare spelling is
+        // AMBIGUOUS — two modules each registered `<mod>.Box.tag`, so the
+        // bare `Box.tag` is one key at symbol re-attachment and dispatched
+        // to whichever module registered last (#1728). A single owner keeps
+        // the bare form: that is the spelling BOTH backends' re-attachment
+        // machinery links (#1087), and qualifying it walled the wasm leg
+        // (the #1087 fixture fell off the fallback ratchet).
+        if let Some((_, bare)) = type_name.rsplit_once('.') {
+            let qualified = format!("{}.{}", type_name, method);
+            let suffix = format!(".{}.{}", bare, method);
+            if env.functions.contains_key(&sym(&qualified))
+                && env
+                    .functions
+                    .keys()
+                    .any(|k| k.as_str().ends_with(&suffix) && k.as_str() != qualified)
+            {
+                return sym(&qualified);
+            }
         }
         sym(&format!("{}.{}", bare_type_name(type_name), method))
     })
