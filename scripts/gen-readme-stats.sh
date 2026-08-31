@@ -38,10 +38,13 @@ STATS_START="<!-- stats:generated:start — derived from docs/stdlib/*.md, spec/
 STATS_END="<!-- stats:generated:end -->"
 SIZE_START="<!-- wasm-size:generated:start — rendered from docs/benchmarks/wasm-size.txt by scripts/gen-readme-stats.sh; DO NOT EDIT between the markers -->"
 SIZE_END="<!-- wasm-size:generated:end -->"
+RT_START="<!-- wasm-runtime:generated:start — rendered from docs/benchmarks/wasm-runtime.txt by scripts/gen-readme-stats.sh; DO NOT EDIT between the markers -->"
+RT_END="<!-- wasm-runtime:generated:end -->"
+RT_LEDGER="docs/benchmarks/wasm-runtime.txt"
 
 [ -f "$README" ] || { echo "::error::$README not found (run from repo root)"; exit 2; }
 [ -f "$LEDGER" ] || { echo "::error::$LEDGER not found"; exit 2; }
-for m in "$STATS_START" "$STATS_END" "$SIZE_START" "$SIZE_END"; do
+for m in "$STATS_START" "$STATS_END" "$SIZE_START" "$SIZE_END" "$RT_START" "$RT_END"; do
   grep -qxF "$m" "$README" || { echo "::error::marker missing from $README: $m"; exit 2; }
 done
 
@@ -113,8 +116,8 @@ contracts="$(awk '/'"'"''"'"''"'"'/ { s = !s; next } !s && /^\[\[contract\]\]/ {
 size_version="$(kv version)"; size_date="$(kv date)"
 size_struct="$(thousands "$(kv structural_bytes)")"; size_incumb="$(thousands "$(kv incumbent_bytes)")"
 
-stats_body="$(mktemp)"; size_body="$(mktemp)"; rendered="$(mktemp)"
-trap 'rm -f "$stats_body" "$size_body" "$rendered"' EXIT
+stats_body="$(mktemp)"; size_body="$(mktemp)"; rt_body="$(mktemp)"; rendered="$(mktemp)"
+trap 'rm -f "$stats_body" "$size_body" "$rt_body" "$rendered"' EXIT
 
 cat > "$stats_body" <<EOF
 | Derived count | Value |
@@ -131,13 +134,34 @@ cat > "$size_body" <<EOF
 Measured on ${size_version}, ${size_date}, from \`docs/benchmarks/wasm-size.txt\`; no post-hoc optimizer touches the shipped bytes (\`--wasm-opt\` is opt-in and its output is not the verified module).
 EOF
 
+# The wasm-runtime block (#1701), rendered from the committed ledger — the
+# gate (scripts/check-wasm-runtime-ratio.sh) re-measures the ratios; this
+# renderer only formats what is committed, same rule as the size block.
+rt_version="$(grep -E '^version' "$RT_LEDGER" | head -1 | sed -E 's/^[^=]*=[[:space:]]*//')"
+rt_date="$(grep -E '^date' "$RT_LEDGER" | head -1 | sed -E 's/^[^=]*=[[:space:]]*//')"
+{
+  echo '| Benchmark (`almide bench`, verify-then-time, median of 5) | wasm/native ratio |'
+  echo "|---|---:|"
+  grep -E '^[a-z].*\| measured' "$RT_LEDGER" | while IFS='|' read -r n _ _ _ r; do
+    printf '| %s | **%s×** |\n' "$(echo "$n" | xargs)" "$(echo "$r" | xargs)"
+  done
+  routed=$(grep -cE '^[a-z].*\| routed-incumbent' "$RT_LEDGER" || true)
+  walled=$(grep -cE '^[a-z].*\| walled' "$RT_LEDGER" || true)
+  oom=$(grep -cE '^[a-z].*\| oom-embedded' "$RT_LEDGER" || true)
+  echo
+  printf '%s%s%s\n' \
+    'Embedded wasm host (Perceus RC in linear memory) against the native binary, same machine, same run — the ratio is the CI-gated quantity (`scripts/check-wasm-runtime-ratio.sh`). binarytrees runs its fan arms on the embedded host'"'"'s thread pool, which is why wasm WINS there. The unmeasured corpus cells stay honest instead of estimated: ' \
+    "${routed} route to the incumbent artifact, ${walled} wall on the wasm build path, ${oom} exhaust the embedded heap (#1729)" \
+    ' — each re-measured every gate run, so a cell that starts benching fails the gate until its row is promoted. Ledger: `docs/benchmarks/wasm-runtime.txt` ('"${rt_version}, ${rt_date}"').' 
+} > "$rt_body"
+
 splice() { # $1 start marker, $2 end marker, $3 body file; stdin → stdout
   awk -v S="$1" -v E="$2" -v B="$3" '
     $0 == S { print; while ((getline l < B) > 0) print l; close(B); skip = 1; next }
     $0 == E { skip = 0 }
     !skip { print }'
 }
-splice "$STATS_START" "$STATS_END" "$stats_body" < "$README" | splice "$SIZE_START" "$SIZE_END" "$size_body" > "$rendered"
+splice "$STATS_START" "$STATS_END" "$stats_body" < "$README" | splice "$SIZE_START" "$SIZE_END" "$size_body" | splice "$RT_START" "$RT_END" "$rt_body" > "$rendered"
 
 if [ "$MODE" = "--check" ]; then
   if ! cmp -s "$rendered" "$README"; then

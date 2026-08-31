@@ -1424,6 +1424,13 @@ jobs:
         run: cargo test --release --locked -p almide-wasm -p almide-wasm-run -p almide-spine -p almide-syntax -p almide-corpus -p almide-layout
       - name: Target-availability matrix (#1423 — declared == measured, both directions)
         run: cargo build --release --locked --bin almide && bash scripts/check-target-availability.sh
+      # #1701: the wasm runtime RATIO ratchet. The ratio wasm/native cancels
+      # the machine (same discipline as the native perf-ratio gate), so CI's
+      # own hardware gates it; the non-measured ledger rows are re-measured
+      # too — a cell that starts benching fails with the good news until its
+      # row is promoted to `measured`.
+      - name: Wasm runtime ratio ratchet (#1701)
+        run: bash scripts/check-wasm-runtime-ratio.sh
 
   # Aviation discipline as CI (adopted from the greenfield burn, where
   # codopsy slipped to B twice and only a human check-in caught it):
