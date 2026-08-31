@@ -36,7 +36,6 @@ struct RefDef {
     name: crate::intern::Sym,
     line: usize,
     col: usize,
-    end_col: usize,
     precise: bool,
     /// Kind label for refusal messages ("parameter", "function", …).
     kind: &'static str,
@@ -107,7 +106,7 @@ impl<'a> OccWalker<'a> {
             },
             _ => (0, 0, 0, false),
         };
-        self.idx.defs.push(RefDef { name, line, col, end_col, precise, kind });
+        self.idx.defs.push(RefDef { name, line, col, precise, kind });
         if precise {
             self.idx.occs.push(RefOcc { def: def_id, line, col, end_col });
         } else if self.in_hole_depth > 0 {
