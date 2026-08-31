@@ -55,6 +55,15 @@ fn wrap_call_args_for_target(args: Vec<IrExpr>, target: &CallTarget, sigs: &Hash
         _ => (None, false),
     };
     let Some(name) = callee_name else { return args; };
+    // ALMIDE_DBG_BORROW=<substr>: name the two keys this call site consults
+    // and what each resolved to (companion of the per-iteration sig dump).
+    if let Ok(filter) = std::env::var("ALMIDE_DBG_BORROW")
+        && name.contains(&filter)
+    {
+        let direct = sigs.get(&name).cloned();
+        let scoped = mod_scope.and_then(|m| sigs.get(&format!("{}::{}", m, name))).cloned();
+        eprintln!("[borrow callsite] name={name} scope={mod_scope:?} scoped={scoped:?} direct={direct:?}");
+    }
     // For module-scoped calls, look up with "module::func" key first
     let borrows = mod_scope
         .and_then(|m| sigs.get(&format!("{}::{}", m, name)))
