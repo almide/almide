@@ -1,524 +1,366 @@
-# The target-availability matrix (#1423 stages 2+3): the DECLARED
-# single-leg stdlib surface, diffed bidirectionally against the measured
-# reality by scripts/check-target-availability.sh (CI). Measurement = the
-# renderer's own verdict: tools/target_availability_probe.py synthesizes
-# a minimal REAL-SHAPED call per public stdlib fn (mid-body, statement
-# position for Unit returns — a one-call main measures program-shape
-# support, not the fn: the process.exit lesson) and attempts the wasm
-# build; the STRUCTURAL sweep forces that leg, the DEFAULT-routing sweep
-# includes the incumbent reroute. Both sweeps run with
-# ALMIDE_NO_AVAIL_CHECK=1 — the ground truth, never our own declaration.
+# The target-availability matrix, PER LEG (#1423 stages 2+3; #1710
+# increment 2's vocabulary): the DECLARED unavailable surface of each
+# SERVICE LEG, diffed bidirectionally against the measured reality by
+# scripts/check-target-availability.sh (CI). Measurement = the renderer's
+# (or the run path's) own verdict via tools/target_availability_probe.py
+# --leg <leg>; each leg keeps its own two-direction agreement and its own
+# shrink-only story.
 #
-# Row discipline (the rustc tier-check rule): every measured wall MUST
-# have a row (a new wall without a declaration fails CI), every row MUST
-# still measure as a wall (a fn that starts building makes its row STALE
-# — delete it, the shrink direction), a reasonless row fails, and the
+# Legs:
+#   structural    ALMIDE_WASM_STRUCTURAL=1 build — the emitter frontier
+#                 (the incumbent may still serve the fn; informational
+#                 for #1584).
+#   stock-p1      default `build --target wasm` (reroute included) — a
+#                 wall here means NO build path serves the fn: the E081
+#                 check-time-diagnostic set (src/cli/build.rs reads the
+#                 stock-p1 rows).
+#   embedded      `run --target wasm` through the embedded host —
+#                 service measured by execution (an answered runtime err
+#                 counts as service; an unknown-op host reply does not).
+#   p3-component  ALMIDE_COMPONENT_P3 — the sweep joins with the
+#                 wasi:http@0.3 port (#1710); no rows declare it yet.
+#
+# Row discipline (per leg, the rustc tier-check rule): every measured
+# wall MUST have its leg in a row, every declared leg MUST still measure
+# as a wall (a leg that starts serving makes the entry STALE — remove
+# the leg, the shrink direction), a reasonless leg fails, and the
 # pending-self-host count is a both-way ratchet.
-#
-#   [[native-only]]       walls on the STRUCTURAL leg (the incumbent may
-#                         still serve it — informational for #1584).
-#   [[wasm-unavailable]]
+schema = 2
+
+pending_self_host_ceiling = 15
+
+
+[[unavailable]]
+fn = "datetime.parse_iso"
+legs = ["structural"]
+reason = "pending-self-host"
+issue = "#1423"
+
+[[unavailable]]
+fn = "env.millis"
+legs = ["structural"]
+reason = "host-surface"
+issue = "#1423"
+
+[[unavailable]]
 fn = "env.set"
+legs = ["stock-p1"]
 reason = "stock artifact pending the p1-shim environ story; the embedded host serves the overlay (op 37/26)"
 issue = "#1423"
 
-[[wasm-unavailable]]  walls under DEFAULT routing: NO leg builds it —
-#                         the E081 check-time-diagnostic set.
-#
-# The probe-unsynthesizable table is the honesty bucket: fns whose
-# minimal call the probe cannot yet type (nominal runtime types, residual
-# generator gaps). Claimed neither way; shrinking it is probe work.
-
-# Measured (this generation): structural 340 ok / 49 native-only; default-routing 23 wasm-unavailable; 39 unsynthesizable.
-pending_self_host_ceiling = 15
-
-[[native-only]]
-fn = "datetime.parse_iso"
-reason = "pending-self-host"
-issue = "#1423"
-
-[[native-only]]
-fn = "env.millis"
-reason = "host-surface"
-issue = "#1423"
-
-[[native-only]]
+[[unavailable]]
 fn = "env.unix_timestamp"
+legs = ["structural"]
 reason = "host-surface"
 issue = "#1423"
 
-[[native-only]]
+[[unavailable]]
 fn = "fs.fold_lines_chunked"
+legs = ["structural"]
 reason = "pending-self-host"
 issue = "#1423"
 
-[[native-only]]
+[[unavailable]]
 fn = "fs.fold_lines_range"
+legs = ["structural"]
 reason = "structural-leg-gap: the incumbent links the four self-host twins (#1423 bucket A) and the default route BUILDS; the structural leg has no fold_lines_range arm yet and declines under ALMIDE_WASM_STRUCTURAL=1"
 issue = "#1423"
 
-[[native-only]]
+[[unavailable]]
 fn = "fs.glob"
+legs = ["embedded", "structural"]
 reason = "pending-self-host"
 issue = "#1423"
 
-[[native-only]]
+[[unavailable]]
 fn = "fs.stat"
+legs = ["structural"]
 reason = "pending-self-host"
 issue = "#1423"
 
-[[native-only]]
+[[unavailable]]
 fn = "hex.decode"
+legs = ["structural"]
 reason = "pending-self-host"
 issue = "#1423"
 
-[[native-only]]
+[[unavailable]]
 fn = "html.empty"
+legs = ["structural"]
 reason = "pending-self-host"
 issue = "#1423"
 
-[[native-only]]
+[[unavailable]]
 fn = "html.escape"
+legs = ["structural"]
 reason = "pending-self-host"
 issue = "#1423"
 
-[[native-only]]
+[[unavailable]]
 fn = "html.raw"
+legs = ["structural"]
 reason = "pending-self-host"
 issue = "#1423"
 
-[[native-only]]
-fn = "http.get_bytes"
-reason = "host-surface"
-issue = "#1423"
-
-[[native-only]]
-fn = "http.request"
-reason = "host-surface"
-issue = "#1423"
-
-[[native-only]]
-fn = "http.get_status"
-reason = "host-surface"
-issue = "#1423"
-
-[[native-only]]
-fn = "http.request_status"
-reason = "host-surface"
-issue = "#1423"
-
-[[native-only]]
-fn = "http.request_bytes"
-reason = "host-surface"
-issue = "#1423"
-
-[[native-only]]
-fn = "http.url_decode"
-reason = "host-surface"
-issue = "#1423"
-
-[[native-only]]
-fn = "list.shuffle"
-reason = "pending-self-host"
-issue = "#1423"
-
-[[native-only]]
-fn = "map.clear"
-reason = "pending-self-host"
-issue = "#1423"
-
-[[native-only]]
-fn = "map.delete"
-reason = "pending-self-host"
-issue = "#1423"
-
-[[native-only]]
-fn = "path.from_string"
-reason = "pending-self-host"
-issue = "#1423"
-
-[[native-only]]
-fn = "path.trusted"
-reason = "pending-self-host"
-issue = "#1423"
-
-[[native-only]]
-fn = "process.env"
-reason = "host-surface"
-issue = "#1423"
-
-[[native-only]]
-fn = "process.exec"
-reason = "host-surface"
-issue = "#1423"
-
-[[native-only]]
-fn = "process.exec_in"
-reason = "host-surface"
-issue = "#1423"
-
-[[native-only]]
-fn = "process.exec_status"
-reason = "host-surface"
-issue = "#1423"
-
-[[native-only]]
-fn = "process.exec_status_timeout"
-reason = "host-surface"
-issue = "#1423"
-
-[[native-only]]
-fn = "process.exec_with_stdin"
-reason = "host-surface"
-issue = "#1423"
-
-[[native-only]]
-fn = "process.is_alive"
-reason = "host-surface"
-issue = "#1423"
-
-[[native-only]]
-fn = "process.kill"
-reason = "host-surface"
-issue = "#1423"
-
-[[native-only]]
-fn = "process.pid"
-reason = "host-surface"
-issue = "#1423"
-
-[[native-only]]
-fn = "process.spawn"
-reason = "host-surface"
-issue = "#1423"
-
-[[native-only]]
-fn = "process.stdin_lines"
-reason = "host-surface"
-issue = "#1423"
-
-[[native-only]]
-fn = "random.choice"
-reason = "host-surface"
-issue = "#1423"
-
-[[native-only]]
-fn = "random.float"
-reason = "host-surface"
-issue = "#1423"
-
-[[native-only]]
-fn = "random.shuffle"
-reason = "host-surface"
-issue = "#1423"
-
-[[native-only]]
-fn = "testing.assert_approx"
-reason = "host-surface"
-issue = "#1423"
-
-[[native-only]]
-fn = "testing.assert_contains"
-reason = "host-surface"
-issue = "#1423"
-
-[[native-only]]
-fn = "testing.assert_gt"
-reason = "host-surface"
-issue = "#1423"
-
-[[native-only]]
-fn = "testing.assert_lt"
-reason = "host-surface"
-issue = "#1423"
-
-[[native-only]]
-fn = "testing.assert_some"
-reason = "host-surface"
-issue = "#1423"
-
-[[native-only]]
-fn = "testing.assert_throws"
-reason = "host-surface"
-issue = "#1423"
-
-[[native-only]]
-fn = "value.to_camel_case"
-reason = "pending-self-host"
-issue = "#1423"
-
-[[native-only]]
-fn = "value.to_snake_case"
-reason = "pending-self-host"
-issue = "#1423"
-
-# ── The BOTH-LEGS wall set (#1423 stage 3): a call to one of these on
-# `--target wasm` is a CHECK-TIME error (E081) naming the reason and,
-# where one exists, the portable alternative.
-
-[[wasm-unavailable]]
+[[unavailable]]
 fn = "http.delete"
+legs = ["stock-p1"]
 reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --target wasm` answers identically to native (C-328); the stock artifact refuses at build via the op audit until the p2/p3 component port"
 issue = "#1423"
 
-[[wasm-unavailable]]
+[[unavailable]]
 fn = "http.get"
+legs = ["stock-p1"]
 reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --target wasm` answers identically to native (C-328); the stock artifact refuses at build via the op audit until the p2/p3 component port"
 issue = "#1423"
 
-[[wasm-unavailable]]
+[[unavailable]]
 fn = "http.get_bytes"
-reason = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+legs = ["embedded", "stock-p1", "structural"]
+reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+reason-structural = "host-surface"
 issue = "#1423"
 
-[[wasm-unavailable]]
-fn = "http.patch"
-reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --target wasm` answers identically to native (C-328); the stock artifact refuses at build via the op audit until the p2/p3 component port"
-issue = "#1423"
-
-[[wasm-unavailable]]
-fn = "http.post"
-reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --target wasm` answers identically to native (C-328); the stock artifact refuses at build via the op audit until the p2/p3 component port"
-issue = "#1423"
-
-[[wasm-unavailable]]
-fn = "http.put"
-reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --target wasm` answers identically to native (C-328); the stock artifact refuses at build via the op audit until the p2/p3 component port"
-issue = "#1423"
-
-[[wasm-unavailable]]
-fn = "http.request"
-reason = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
-issue = "#1423"
-
-[[wasm-unavailable]]
+[[unavailable]]
 fn = "http.get_status"
-reason = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+legs = ["embedded", "stock-p1", "structural"]
+reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+reason-structural = "host-surface"
 issue = "#1423"
 
-[[wasm-unavailable]]
-fn = "http.request_status"
-reason = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+[[unavailable]]
+fn = "http.patch"
+legs = ["stock-p1"]
+reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --target wasm` answers identically to native (C-328); the stock artifact refuses at build via the op audit until the p2/p3 component port"
 issue = "#1423"
 
-[[wasm-unavailable]]
+[[unavailable]]
+fn = "http.post"
+legs = ["stock-p1"]
+reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --target wasm` answers identically to native (C-328); the stock artifact refuses at build via the op audit until the p2/p3 component port"
+issue = "#1423"
+
+[[unavailable]]
+fn = "http.put"
+legs = ["stock-p1"]
+reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --target wasm` answers identically to native (C-328); the stock artifact refuses at build via the op audit until the p2/p3 component port"
+issue = "#1423"
+
+[[unavailable]]
+fn = "http.request"
+legs = ["embedded", "stock-p1", "structural"]
+reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+reason-structural = "host-surface"
+issue = "#1423"
+
+[[unavailable]]
 fn = "http.request_bytes"
-reason = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+legs = ["embedded", "stock-p1", "structural"]
+reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+reason-structural = "host-surface"
 issue = "#1423"
 
-[[wasm-unavailable]]
+[[unavailable]]
+fn = "http.request_status"
+legs = ["embedded", "stock-p1", "structural"]
+reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+reason-structural = "host-surface"
+issue = "#1423"
+
+[[unavailable]]
+fn = "http.url_decode"
+legs = ["structural"]
+reason = "host-surface"
+issue = "#1423"
+
+[[unavailable]]
+fn = "list.shuffle"
+legs = ["structural"]
+reason = "pending-self-host"
+issue = "#1423"
+
+[[unavailable]]
+fn = "map.clear"
+legs = ["structural"]
+reason = "pending-self-host"
+issue = "#1423"
+
+[[unavailable]]
+fn = "map.delete"
+legs = ["structural"]
+reason = "pending-self-host"
+issue = "#1423"
+
+[[unavailable]]
+fn = "path.from_string"
+legs = ["structural"]
+reason = "pending-self-host"
+issue = "#1423"
+
+[[unavailable]]
+fn = "path.trusted"
+legs = ["structural"]
+reason = "pending-self-host"
+issue = "#1423"
+
+[[unavailable]]
 fn = "process.env"
-reason = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+legs = ["embedded", "stock-p1", "structural"]
+reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+reason-structural = "host-surface"
 issue = "#1423"
 
-[[wasm-unavailable]]
+[[unavailable]]
 fn = "process.exec"
-reason = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+legs = ["embedded", "stock-p1", "structural"]
+reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+reason-structural = "host-surface"
 issue = "#1423"
 
-[[wasm-unavailable]]
+[[unavailable]]
 fn = "process.exec_in"
-reason = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+legs = ["embedded", "stock-p1", "structural"]
+reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+reason-structural = "host-surface"
 issue = "#1423"
 
-[[wasm-unavailable]]
+[[unavailable]]
 fn = "process.exec_status"
-reason = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+legs = ["embedded", "stock-p1", "structural"]
+reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+reason-structural = "host-surface"
 issue = "#1423"
 
-[[wasm-unavailable]]
+[[unavailable]]
 fn = "process.exec_status_timeout"
-reason = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+legs = ["embedded", "stock-p1", "structural"]
+reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+reason-structural = "host-surface"
 issue = "#1423"
 
-[[wasm-unavailable]]
+[[unavailable]]
 fn = "process.exec_with_stdin"
-reason = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+legs = ["embedded", "stock-p1", "structural"]
+reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+reason-structural = "host-surface"
 issue = "#1423"
 
-[[wasm-unavailable]]
+[[unavailable]]
 fn = "process.is_alive"
-reason = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+legs = ["embedded", "stock-p1", "structural"]
+reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+reason-structural = "host-surface"
 issue = "#1423"
 
-[[wasm-unavailable]]
+[[unavailable]]
 fn = "process.kill"
-reason = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+legs = ["embedded", "stock-p1", "structural"]
+reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+reason-structural = "host-surface"
 issue = "#1423"
 
-[[wasm-unavailable]]
+[[unavailable]]
 fn = "process.pid"
-reason = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+legs = ["embedded", "stock-p1", "structural"]
+reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+reason-structural = "host-surface"
 issue = "#1423"
 
-[[wasm-unavailable]]
+[[unavailable]]
 fn = "process.spawn"
-reason = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+legs = ["embedded", "stock-p1", "structural"]
+reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+reason-structural = "host-surface"
 issue = "#1423"
 
-[[wasm-unavailable]]
+[[unavailable]]
 fn = "process.stdin_lines"
-reason = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+legs = ["embedded", "stock-p1", "structural"]
+reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+reason-structural = "host-surface"
 issue = "#1423"
 
-[[wasm-unavailable]]
+[[unavailable]]
+fn = "random.choice"
+legs = ["structural"]
+reason = "host-surface"
+issue = "#1423"
+
+[[unavailable]]
+fn = "random.float"
+legs = ["structural"]
+reason = "host-surface"
+issue = "#1423"
+
+[[unavailable]]
+fn = "random.shuffle"
+legs = ["structural"]
+reason = "host-surface"
+issue = "#1423"
+
+[[unavailable]]
+fn = "testing.assert_approx"
+legs = ["structural"]
+reason = "host-surface"
+issue = "#1423"
+
+[[unavailable]]
+fn = "testing.assert_contains"
+legs = ["structural"]
+reason = "host-surface"
+issue = "#1423"
+
+[[unavailable]]
+fn = "testing.assert_gt"
+legs = ["structural"]
+reason = "host-surface"
+issue = "#1423"
+
+[[unavailable]]
+fn = "testing.assert_lt"
+legs = ["structural"]
+reason = "host-surface"
+issue = "#1423"
+
+[[unavailable]]
+fn = "testing.assert_some"
+legs = ["structural"]
+reason = "host-surface"
+issue = "#1423"
+
+[[unavailable]]
 fn = "testing.assert_throws"
-reason = "the assertion helper has no wasm lowering yet — the plain assert forms work"
+legs = ["embedded", "stock-p1", "structural"]
+reason-embedded = "the assertion helper has no wasm lowering yet — the plain assert forms work"
+reason-stock-p1 = "the assertion helper has no wasm lowering yet — the plain assert forms work"
+reason-structural = "host-surface"
 alt = "match on the err arm and assert"
 issue = "#1423"
 
-[[unsynthesizable]]
-fn = "compute.ns"
-note = "Int) -> Compute` … `compute.h(n: Int"
+[[unavailable]]
+fn = "value.to_camel_case"
+legs = ["structural"]
+reason = "pending-self-host"
+issue = "#1423"
 
-[[unsynthesizable]]
-fn = "duration.ns"
-note = "Int) -> Duration` … `duration.h(n: Int"
-
-[[unsynthesizable]]
-fn = "html.concat"
-note = "SafeHtml"
-
-[[unsynthesizable]]
-fn = "html.to_string"
-note = "SafeHtml"
-
-[[unsynthesizable]]
-fn = "http.body"
-note = "HttpResponse"
-
-[[unsynthesizable]]
-fn = "http.get_header"
-note = "HttpResponse"
-
-[[unsynthesizable]]
-fn = "http.query_params"
-note = "HttpRequest"
-
-[[unsynthesizable]]
-fn = "http.req_body"
-note = "HttpRequest"
-
-[[unsynthesizable]]
-fn = "http.req_header"
-note = "HttpRequest"
-
-[[unsynthesizable]]
-fn = "http.req_method"
-note = "HttpRequest"
-
-[[unsynthesizable]]
-fn = "http.req_path"
-note = "HttpRequest"
-
-[[unsynthesizable]]
-fn = "http.serve"
-note = "(HttpRequest) -> HttpResponse"
-
-[[unsynthesizable]]
-fn = "http.set_header"
-note = "HttpResponse"
-
-[[unsynthesizable]]
-fn = "http.status"
-note = "HttpResponse"
-
-[[unsynthesizable]]
-fn = "json.field"
-note = "JsonPath"
-
-[[unsynthesizable]]
-fn = "json.get_path"
-note = "JsonPath"
-
-[[unsynthesizable]]
-fn = "json.index"
-note = "JsonPath"
-
-[[unsynthesizable]]
-fn = "json.remove_path"
-note = "JsonPath"
-
-[[unsynthesizable]]
-fn = "json.set_path"
-note = "JsonPath"
-
-[[unsynthesizable]]
-fn = "list.partition"
-note = "Fn[A] -> Bool) -> (List[A]"
-
-[[unsynthesizable]]
-fn = "mem.restore"
-note = "probe-ill-typed: error[E003]: undefined variable 'mem'"
-
-[[unsynthesizable]]
-fn = "mem.save"
-note = "probe-ill-typed: error[E003]: undefined variable 'mem'"
-
-[[unsynthesizable]]
-fn = "net.tcp_is_open"
-note = "probe-ill-typed: error[E003]: undefined variable 'net'"
-
-[[unsynthesizable]]
-fn = "option.or_else"
-note = "probe-ill-typed: error[E005]: argument 'f' expects fn() -> Option[Int] but got fn(?1) -> Option[I"
-
-[[unsynthesizable]]
-fn = "option.unwrap_or_else"
-note = "probe-ill-typed: error[E005]: argument 'f' expects fn() -> Int but got fn(?1) -> Int"
-
-[[unsynthesizable]]
-fn = "path.to_string"
-note = "SafePath"
-
-[[unsynthesizable]]
-fn = "result.flat_map"
-note = "probe-ill-typed: error[E005]: argument 'r' expects Result[A, E] but got Int"
-
-[[unsynthesizable]]
-fn = "result.is_err"
-note = "probe-ill-typed: error[E005]: argument 'r' expects Result[A, E] but got Int"
-
-[[unsynthesizable]]
-fn = "result.is_ok"
-note = "probe-ill-typed: error[E005]: argument 'r' expects Result[A, E] but got Int"
-
-[[unsynthesizable]]
-fn = "result.map"
-note = "probe-ill-typed: error[E005]: argument 'r' expects Result[A, E] but got Int"
-
-[[unsynthesizable]]
-fn = "result.map_err"
-note = "probe-ill-typed: error[E005]: argument 'r' expects Result[A, E] but got Int"
-
-[[unsynthesizable]]
-fn = "result.partition"
-note = "List[Result[T, E]]) -> (List[T]"
-
-[[unsynthesizable]]
-fn = "result.to_err_option"
-note = "probe-ill-typed: error[E005]: argument 'r' expects Result[A, E] but got Int"
-
-[[unsynthesizable]]
-fn = "result.to_option"
-note = "probe-ill-typed: error[E005]: argument 'r' expects Result[A, E] but got Int"
-
-[[unsynthesizable]]
-fn = "result.unwrap_or"
-note = "probe-ill-typed: error[E005]: argument 'r' expects Result[A, E] but got Int"
-
-[[unsynthesizable]]
-fn = "result.unwrap_or_else"
-note = "probe-ill-typed: error[E005]: argument 'r' expects Result[A, E] but got Int"
-
-[[unsynthesizable]]
-fn = "set.new"
-note = "probe-ill-typed: error[E018]: cannot infer the element type of `set.new()`"
-
-[[unsynthesizable]]
-fn = "testing.assert_ok"
-note = "probe-ill-typed: error[E005]: argument 'result' expects Result[A, B] but got String"
-
-[[unsynthesizable]]
-fn = "url.to_string"
-note = "Url"
+[[unavailable]]
+fn = "value.to_snake_case"
+legs = ["structural"]
+reason = "pending-self-host"
+issue = "#1423"
