@@ -312,15 +312,34 @@ impl Emitter<'_> {
 
     /// `[value block]` -> `[Result block]`: tag match yields ok(payload),
     /// anything else the exact incumbent err line.
+    /// The seven `<prefix>, received <Kind>` messages, indexed by the
+    /// Value tag — the byte-for-byte twins of value_core's `__vkind`
+    /// leaves (#1675).
+    fn intern_kind_msgs(&mut self, prefix: &str) -> [u32; 7] {
+        ["Null", "Bool", "Int", "Float", "Str", "Array", "Object"]
+            .map(|k| self.pool.intern(&format!("{prefix}, received {k}")) as u32)
+    }
+
+    /// Leaves the tag-selected message from `msgs` on the stack: a
+    /// select chain over `ht` (the value's tag, already in a local).
+    fn emit_kind_msg_select(&mut self, msgs: [u32; 7], ht: u32) {
+        let mut i = self.f.instructions();
+        i.i32_const(msgs[6] as i32);
+        for (t, m) in msgs.iter().enumerate().take(6) {
+            i.i32_const(*m as i32).local_get(ht).i32_const(t as i32).i32_ne().select();
+        }
+    }
+
     fn emit_value_unbox(
         &mut self,
         want_tag: i32,
         payload: SliceTy,
         err_msg: &str,
     ) -> Result<(), EmitError> {
-        let msg = self.pool.intern(err_msg);
+        let msgs = self.intern_kind_msgs(err_msg);
         let hv = self.hold_i32()?;
         let hr = self.hold_i32()?;
+        let ht = self.hold_i32()?;
         self.f.instructions().local_set(hv);
         self.f
             .instructions()
@@ -330,6 +349,7 @@ impl Emitter<'_> {
         let mut i = self.f.instructions();
         i.local_get(hv)
             .i32_load(slot_memarg(almide_layout::SUM_TAG))
+            .local_tee(ht)
             .i32_const(want_tag)
             .i32_eq()
             .if_(BlockType::Empty);
@@ -341,11 +361,14 @@ impl Emitter<'_> {
         let mut i = self.f.instructions();
         i.else_();
         i.local_get(hr).i32_const(1).i32_store(slot_memarg(almide_layout::SUM_TAG));
-        i.local_get(hr)
-            .i32_const(msg as i32)
-            .i32_store(slot_memarg(almide_layout::SUM_FIELD));
+        i.local_get(hr);
+        let _ = i;
+        self.emit_kind_msg_select(msgs, ht);
+        self.f.instructions().i32_store(slot_memarg(almide_layout::SUM_FIELD));
+        let mut i = self.f.instructions();
         i.end();
         i.local_get(hr);
+        self.release_i32();
         self.release_i32();
         self.release_i32();
         Ok(())
@@ -354,29 +377,35 @@ impl Emitter<'_> {
     /// `as_float` with the #658 widening: Float passes through, Int
     /// converts, anything else errs "expected Float".
     fn emit_value_as_float(&mut self) -> Result<(), EmitError> {
-        let msg = self.pool.intern("expected Float");
+        let msgs = self.intern_kind_msgs("expected Float");
         let hv = self.hold_i32()?;
         let hr = self.hold_i32()?;
+        let ht = self.hold_i32()?;
         self.f.instructions().local_set(hv);
         self.f.instructions().i32_const(16).call(F_ALLOC).local_set(hr);
         let m_tag = slot_memarg(almide_layout::SUM_TAG);
         let m_pay = slot_memarg(almide_layout::SUM_FIELD);
         let mut i = self.f.instructions();
-        i.local_get(hv).i32_load(m_tag).i32_const(VT_FLOAT).i32_eq();
+        i.local_get(hv).i32_load(m_tag).local_tee(ht).i32_const(VT_FLOAT).i32_eq();
         i.if_(BlockType::Empty);
         i.local_get(hr).i32_const(0).i32_store(m_tag);
         i.local_get(hr).local_get(hv).f64_load(m_pay).f64_store(m_pay);
         i.else_();
-        i.local_get(hv).i32_load(m_tag).i32_const(VT_INT).i32_eq();
+        i.local_get(ht).i32_const(VT_INT).i32_eq();
         i.if_(BlockType::Empty);
         i.local_get(hr).i32_const(0).i32_store(m_tag);
         i.local_get(hr).local_get(hv).i64_load(m_pay).f64_convert_i64_s().f64_store(m_pay);
         i.else_();
         i.local_get(hr).i32_const(1).i32_store(m_tag);
-        i.local_get(hr).i32_const(msg as i32).i32_store(m_pay);
+        i.local_get(hr);
+        let _ = i;
+        self.emit_kind_msg_select(msgs, ht);
+        let mut i = self.f.instructions();
+        i.i32_store(m_pay);
         i.end();
         i.end();
         i.local_get(hr);
+        self.release_i32();
         self.release_i32();
         self.release_i32();
         Ok(())
@@ -434,14 +463,20 @@ impl Emitter<'_> {
                 self.f.instructions().i32_const(16).call(F_ALLOC).local_set(hr);
                 let m_tag = slot_memarg(almide_layout::SUM_TAG);
                 let m_pay = slot_memarg(almide_layout::SUM_FIELD);
-                let not_obj = self.pool.intern("expected Object");
+                let not_obj = self.intern_kind_msgs("expected Object");
                 let miss_pre = self.pool.intern("missing field '");
                 let miss_post = self.pool.intern("'");
+                let ht = self.hold_i32()?;
                 let mut i = self.f.instructions();
+                i.local_get(hv).i32_load(m_tag).local_set(ht);
                 i.local_get(hv).local_get(hk).call(vf).local_set(hv);
                 i.local_get(hv).i32_eqz().if_(BlockType::Empty);
                 i.local_get(hr).i32_const(1).i32_store(m_tag);
-                i.local_get(hr).i32_const(not_obj as i32).i32_store(m_pay);
+                i.local_get(hr);
+                let _ = i;
+                self.emit_kind_msg_select(not_obj, ht);
+                let mut i = self.f.instructions();
+                i.i32_store(m_pay);
                 i.else_();
                 i.local_get(hv).i32_const(1).i32_eq().if_(BlockType::Empty);
                 i.local_get(hr).i32_const(1).i32_store(m_tag);
@@ -455,6 +490,7 @@ impl Emitter<'_> {
                 i.end();
                 i.end();
                 i.local_get(hr);
+                self.release_i32();
                 self.release_i32();
                 self.release_i32();
                 self.release_i32();

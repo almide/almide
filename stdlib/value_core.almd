@@ -16,6 +16,24 @@ fn value_null() -> Value = {
   v
 }
 
+// #1675: the wire-kind name for a tag, for decode diagnostics — matches the
+// native Value variant names byte-for-byte (parity is contract surface).
+fn __vkind(tag: Int) -> String = match tag {
+  0 => "Null",
+  1 => "Bool",
+  2 => "Int",
+  3 => "Float",
+  4 => "Str",
+  5 => "Array",
+  6 => "Object",
+  _ => "Unknown",
+}
+
+fn __vkind_of(v: Value) -> String = {
+  let h = prim.handle(v)
+  __vkind(prim.load32(h + 4))
+}
+
 fn value_int(n: Int) -> Value = {
   let v = prim.alloc_value(1)
   let h = prim.handle(v)
@@ -54,7 +72,7 @@ fn value_as_int(v: Value) -> Result[Int, String] = {
   let h = prim.handle(v)
   let tag = prim.load32(h + 4)
   let n = prim.load64(h + 12)
-  if tag == 2 then ok(n) else err("expected Int")
+  if tag == 2 then ok(n) else err("expected Int, received " + __vkind(tag))
 }
 
 // A JSON number has no int/float split, so an integer Value is a valid Float — widen it
@@ -64,7 +82,7 @@ fn value_as_bool(v: Value) -> Result[Bool, String] = {
   let tag = prim.load32(h + 4)
   let raw = prim.load64(h + 12)
   let b = raw != 0
-  if tag == 1 then ok(b) else err("expected Bool")
+  if tag == 1 then ok(b) else err("expected Bool, received " + __vkind(tag))
 }
 
 fn __vf_frombits(raw: Int) -> Result[Float, String] = {
@@ -86,7 +104,7 @@ fn value_as_float(v: Value) -> Result[Float, String] = {
   let tag = prim.load32(h + 4)
   let raw = prim.load64(h + 12)
   if tag == 3 then __vf_frombits(raw)
-  else if tag == 2 then __vf_fromint(raw) else err("expected Float")
+  else if tag == 2 then __vf_fromint(raw) else err("expected Float, received " + __vkind(tag))
 }
 
 // value.as_string — Ok(a fresh deep COPY of the payload String) when the Value is a Str (tag 4),
@@ -131,7 +149,7 @@ fn __vstr_ok(h: Int) -> Result[String, String] = {
 fn value_as_string(v: Value) -> Result[String, String] = {
   let h = prim.handle(v)
   let tag = prim.load32(h + 4)
-  if tag == 4 then __vstr_ok(h) else err("expected Str")
+  if tag == 4 then __vstr_ok(h) else err("expected Str, received " + __vkind(tag))
 }
 
 fn __varr_copy(src: Int, dst: Int, i: Int, n: Int) -> Unit = if i >= n then ()
@@ -695,7 +713,7 @@ else {
 fn value_field(v: Value, key: String) -> Result[Value, String] = {
   let h = prim.handle(v)
   let tag = prim.load32(h + 4)
-  if tag != 6 then err("expected Object")
+  if tag != 6 then err("expected Object, received " + __vkind(tag))
   else {
     let n = prim.load32(h + 8) / 2
     let idx = __vobj_find(v, key, 0, n)
@@ -1140,7 +1158,7 @@ fn __varr_to_list(v: Value) -> List[Value] = {
 fn value_as_array(v: Value) -> Result[List[Value], String] = {
   let h = prim.handle(v)
   let tag = prim.load32(h + 4)
-  if tag == 5 then ok(__varr_to_list(v)) else err("expected Array")
+  if tag == 5 then ok(__varr_to_list(v)) else err("expected Array, received " + __vkind(tag))
 }
 
 // The RECURSIVE free of a `Result[Value, String]` (the render of `Op::DropResultValue` calls this) —

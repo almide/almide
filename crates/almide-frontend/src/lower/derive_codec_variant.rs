@@ -201,7 +201,7 @@ pub(super) fn auto_derive_variant_decode(wk: &mut CodecWk, type_ty: &Ty, cases: 
                         },
                         ty: value_ty.clone(), span: None, def_id: None,
                     };
-                    let decoded = dec_field_expr(wk, elem, field_ty, &value_ty);
+                    let decoded = dec_field_expr(wk, elem, field_ty, &value_ty, &format!("[{i}]"));
                     let ev = wk.vt.alloc(sym(&format!("_e{}", i)), field_ty.clone(), Mutability::Let, None);
                     stmts.push(IrStmt {
                         kind: IrStmtKind::Bind { var: ev, mutability: Mutability::Let, ty: field_ty.clone(), value: decoded },
@@ -272,7 +272,7 @@ pub(super) fn auto_derive_variant_decode(wk: &mut CodecWk, type_ty: &Ty, cases: 
                             })},
                             ty: value_ty.clone(), span: None, def_id: None,
                         };
-                        dec_field_expr(wk, get_field, &f.ty, &value_ty)
+                        dec_field_expr(wk, get_field, &f.ty, &value_ty, f.name.as_ref())
                     };
                     let fv = wk.vt.alloc(sym(&format!("_f_{}", f.name)), f.ty.clone(), Mutability::Let, None);
                     stmts.push(IrStmt {

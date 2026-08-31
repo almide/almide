@@ -4,9 +4,18 @@
 // found") while the native oracle (runtime/rs/src/value.rs) uses the Value
 // variant names and an interpolated field name ("expected Float", "missing
 // field 'y'"). #657.
+//
+// #1675: the messages carry the RECEIVED kind and a trailing path —
+// `expected Str, received Int, at address.city` — composed by the shared
+// pure-Almide `__err_at` (parent segments prepend dot-style, list indexes
+// join bracket-style). A missing field names itself in-message and its
+// CONTAINER in the path. Both legs must print identical bytes.
 import json
 
 type Point: Codec = { x: Int, y: Float }
+
+type Addr: Codec = { city: String }
+type User: Codec = { name: String, addr: Addr, tags: List[String] }
 
 fn main() -> Unit = {
   // Missing required field 'y' → "missing field 'y'" (field name interpolated).
@@ -39,6 +48,23 @@ fn main() -> Unit = {
   })
   let n = json.parse("5") ?? value.null()
   println(match value.as_string(n) {
+    ok(_) => "ok",
+    err(e) => e,
+  })
+  // #1675 composition: nested record path, container path for a missing
+  // field, and the bracket-joined list index.
+  let deep = json.parse('{"name":"a","addr":{"city":7},"tags":["x"]}') ?? value.null()
+  println(match User.decode(deep) {
+    ok(_) => "ok",
+    err(e) => e,
+  })
+  let hole = json.parse('{"name":"a","addr":{},"tags":[]}') ?? value.null()
+  println(match User.decode(hole) {
+    ok(_) => "ok",
+    err(e) => e,
+  })
+  let idx = json.parse('{"name":"a","addr":{"city":"c"},"tags":["x",5,"y"]}') ?? value.null()
+  println(match User.decode(idx) {
     ok(_) => "ok",
     err(e) => e,
   })

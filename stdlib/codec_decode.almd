@@ -8,7 +8,7 @@ fn __is_null(v: Value) -> Bool = prim.load32(prim.handle(v) + 4) == 0
 fn __dl_int(items: List[Value], n: Int, i: Int, acc: List[Int]) -> Result[List[Int], String] = if i >= n then ok(acc)
 else match value.as_int(list.get(items, i) ?? value.null()) {
   ok(x) => __dl_int(items, n, i + 1, acc + [x]),
-  err(e) => err(e),
+  err(e) => err(__err_at_index(e, i)),
 }
 
 fn __decode_list_int(v: Value) -> Result[List[Int], String] = match value.as_array(v) {
@@ -19,7 +19,7 @@ fn __decode_list_int(v: Value) -> Result[List[Int], String] = match value.as_arr
 fn __dl_float(items: List[Value], n: Int, i: Int, acc: List[Float]) -> Result[List[Float], String] = if i >= n then ok(acc)
 else match value.as_float(list.get(items, i) ?? value.null()) {
   ok(x) => __dl_float(items, n, i + 1, acc + [x]),
-  err(e) => err(e),
+  err(e) => err(__err_at_index(e, i)),
 }
 
 fn __decode_list_float(v: Value) -> Result[List[Float], String] = match value.as_array(v) {
@@ -30,7 +30,7 @@ fn __decode_list_float(v: Value) -> Result[List[Float], String] = match value.as
 fn __dl_bool(items: List[Value], n: Int, i: Int, acc: List[Bool]) -> Result[List[Bool], String] = if i >= n then ok(acc)
 else match value.as_bool(list.get(items, i) ?? value.null()) {
   ok(x) => __dl_bool(items, n, i + 1, acc + [x]),
-  err(e) => err(e),
+  err(e) => err(__err_at_index(e, i)),
 }
 
 fn __decode_list_bool(v: Value) -> Result[List[Bool], String] = match value.as_array(v) {
@@ -38,10 +38,37 @@ fn __decode_list_bool(v: Value) -> Result[List[Bool], String] = match value.as_a
   err(e) => err(e),
 }
 
+// #1675: splice a path segment into a decode error. The canonical shape is
+// `<leaf>, at <path>` — appending keeps composition a pure suffix edit: a
+// parent frame prepends its segment (`city` -> `address.city`), and an index
+// segment (`[1]`) joins without a dot (`tags[1]`). One implementation for
+// BOTH targets: this is pure Almide, so native and wasm compile the same fn.
+// (No string.split_once here: that fn has no wasm lowering yet — the scan
+// uses len/slice/starts_with, which both legs link.)
+fn __err_scan(e: String, n: Int, i: Int) -> Int =
+  if i + 5 > n then 0 - 1
+  else if string.slice(e, i, i + 5) == ", at " then i
+  else __err_scan(e, n, i + 1)
+
+fn __err_at(e: String, seg: String) -> String = {
+  let n = string.len(e)
+  let i = __err_scan(e, n, 0)
+  if i < 0 then e + ", at " + seg
+  else {
+    let head = string.slice(e, 0, i)
+    let path = string.slice(e, i + 5, n)
+    if string.starts_with(path, "[") then head + ", at " + seg + path
+    else head + ", at " + seg + "." + path
+  }
+}
+
+// #1675: the list-element frame — `[i]` joins the path bracket-style.
+fn __err_at_index(e: String, i: Int) -> String = __err_at(e, "[" + int.to_string(i) + "]")
+
 fn __dl_string(items: List[Value], n: Int, i: Int, acc: List[String]) -> Result[List[String], String] = if i >= n then ok(acc)
 else match value.as_string(list.get(items, i) ?? value.null()) {
   ok(x) => __dl_string(items, n, i + 1, acc + [x]),
-  err(e) => err(e),
+  err(e) => err(__err_at_index(e, i)),
 }
 
 fn __decode_list_string(v: Value) -> Result[List[String], String] = match value.as_array(v) {

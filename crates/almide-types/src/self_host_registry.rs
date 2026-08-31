@@ -161,6 +161,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
             ("__encode_option_int", "__encode_option_int"), ("__encode_option_float", "__encode_option_float"),
             ("__encode_option_bool", "__encode_option_bool"), ("__encode_option_string", "__encode_option_string")]),
         (crate::embedded::SRC_CODEC_DECODE, &[
+            ("__err_at", "__err_at"), ("__err_at_index", "__err_at_index"),
             ("__decode_list_int", "__decode_list_int"), ("__decode_list_float", "__decode_list_float"),
             ("__decode_list_bool", "__decode_list_bool"), ("__decode_list_string", "__decode_list_string"),
             ("__decode_option_int", "__decode_option_int"), ("__decode_option_float", "__decode_option_float"),

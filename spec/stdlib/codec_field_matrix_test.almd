@@ -60,7 +60,7 @@ test "scalars: integral Float encodes without decimal point and widens back" {
 test "scalars: decode strictness — Int rejects a fractional number, missing field errs" {
   match Scalars.decode(parse('{"s":"x","i":1.5,"f":1.0,"b":true}')) {
     ok(_) => assert(false),
-    err(e) => assert_eq(e, "expected Int"),
+    err(e) => assert_eq(e, "expected Int, received Float, at i"),
   }
   match Scalars.decode(parse('{"i":1,"f":1.0,"b":true}')) {
     ok(_) => assert(false),
@@ -172,7 +172,7 @@ test "nested containers: List[Option], List[List], deep Option[List[Option]]" {
   assert_eq(Deep.decode(Deep.encode(y)), ok(y))
   match Deep.decode(parse('{"lo":["bad"],"ll":[],"lc":[]}')) {
     ok(_) => assert(false),
-    err(e) => assert_eq(e, "expected Int"),
+    err(e) => assert_eq(e, "expected Int, received Str, at lo[0]"),
   }
 }
 

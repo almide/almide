@@ -29,6 +29,6 @@ test "decode: present key decodes through Pt.decode" {
 test "decode: malformed present value is an error, not the default" {
   match W.decode(json.parse("{\"label\":\"d\",\"p\":{\"y\":1}}")!) {
     ok(_) => assert_eq("decoded", "should have failed"),
-    err(e) => assert_eq(e, "missing field 'x'"),
+    err(e) => assert_eq(e, "missing field 'x', at p"),
   }
 }
