@@ -38,7 +38,6 @@ effect fn main() -> Unit = {
     data[2 * i + 1] = float.round(im * 100.0) / 100.0
   }
 
-  let start = env.millis()
 
   // Bit-reversal permutation
   var j = 0
@@ -100,7 +99,5 @@ effect fn main() -> Unit = {
     data[i] = data[i] * factor
   }
 
-  let elapsed = env.millis() - start
   println("size: 2^${int.to_string(size)} = ${int.to_string(n)}")
-  println("execution time: ${int.to_string(elapsed)} ms")
 }

@@ -165,7 +165,17 @@ build. Regenerate with `almide run tools/almide-gates/src/main.almd -- bench`; t
 | build, cold, `--target wasm` | **61.7 ms** | 3 |
 <!-- build-speed:generated:end -->
 
-`almide check` scales linearly: over a 2k → 30k-line ladder of this repo's own stdlib the log-log slope of check time against project lines is **1.13** (1.0 is linear, 2.0 quadratic) and the 10k-line rung costs **4.4×** the empty-project floor — measured 2026-08-13, held by `scripts/check-edit-loop-scale.sh`, table in [BENCHMARKS.md](./docs/project/BENCHMARKS.md#edit-loop-scale-1334). Native runtime against handwritten Rust: **1.00×** on n-body and spectral-norm, 1.16–1.18× on fasta and FFT, ~1.6× where the workload is list materialization (#1004), CI-gated ratio ratchet ([scoreboard](./docs/project/BENCHMARKS.md)). Wasm runtime numbers are deliberately absent rather than estimated.
+`almide check` scales linearly: over a 2k → 30k-line ladder of this repo's own stdlib the log-log slope of check time against project lines is **1.13** (1.0 is linear, 2.0 quadratic) and the 10k-line rung costs **4.4×** the empty-project floor — measured 2026-08-13, held by `scripts/check-edit-loop-scale.sh`, table in [BENCHMARKS.md](./docs/project/BENCHMARKS.md#edit-loop-scale-1334). Native runtime against handwritten Rust: **1.00×** on n-body and spectral-norm, 1.16–1.18× on fasta and FFT, ~1.6× where the workload is list materialization (#1004), CI-gated ratio ratchet ([scoreboard](./docs/project/BENCHMARKS.md)). Wasm runtime, measured and gated (#1701):
+
+<!-- wasm-runtime:generated:start — rendered from docs/benchmarks/wasm-runtime.txt by scripts/gen-readme-stats.sh; DO NOT EDIT between the markers -->
+| Benchmark (`almide bench`, verify-then-time, median of 5) | wasm/native ratio |
+|---|---:|
+| nbody | **2.09×** |
+| spectralnorm | **2.26×** |
+| binarytrees | **0.85×** |
+
+Embedded wasm host (Perceus RC in linear memory) against the native binary, same machine, same run — the ratio is the CI-gated quantity (`scripts/check-wasm-runtime-ratio.sh`). binarytrees runs its fan arms on the embedded host's thread pool, which is why wasm WINS there. The unmeasured corpus cells stay honest instead of estimated: 3 route to the incumbent artifact, 1 wall on the wasm build path, 5 exhaust the embedded heap (#1729) — each re-measured every gate run, so a cell that starts benching fails the gate until its row is promoted. Ledger: `docs/benchmarks/wasm-runtime.txt` (almide 0.61.0, 2026-08-31).
+<!-- wasm-runtime:generated:end -->
 
 ## How It Works
 

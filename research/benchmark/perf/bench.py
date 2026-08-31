@@ -32,7 +32,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 # (name, almd source, rust refs, timing arg, verify arg, verify mode, legs)
 # verify mode: "bytes" = full stdout must match across every variant;
-# "line1" = only the first line is deterministic (fft self-times on line 2).
+# "line1" = only the first line is deterministic (the rust-ref fft still
+# self-times on line 2; the almide fft dropped its self-timing for #1701 —
+# `almide bench` verifies full output, so a nondeterministic line refuses).
 # legs: None = every requested leg; otherwise restrict this row.
 # fft is split into two rows: the wasm leg currently degrades so hard on the
 # hot `data[i] = x` list writes (~3,000x at 2^18) that the canonical 2^22
