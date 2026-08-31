@@ -67,6 +67,7 @@ mod bytes;
 mod bytes_rw;
 pub mod witness;
 mod calls;
+mod calls_modules;
 mod cells;
 mod unroll;
 mod collect;
