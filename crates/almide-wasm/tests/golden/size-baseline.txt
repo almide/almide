@@ -6,7 +6,7 @@
 1824	spec/wasm_cross/anon_records_and_fusion.almd
 1844	spec/wasm_cross/append_accumulator.almd
 1919	spec/wasm_cross/append_accumulator_heap.almd
-3563	spec/wasm_cross/args_surface.almd
+3612	spec/wasm_cross/args_surface.almd
 1644	spec/wasm_cross/assert_abort_eq.almd
 1706	spec/wasm_cross/assert_abort_msg.almd
 1712	spec/wasm_cross/assert_abort_multiline.almd
@@ -24,7 +24,7 @@
 2013	spec/wasm_cross/bounded_kernel.almd
 2013	spec/wasm_cross/bounded_kernel_plain.almd
 1907	spec/wasm_cross/branch_lift_in_loop.almd
-5301	spec/wasm_cross/bundled_pure_modules.almd
+5350	spec/wasm_cross/bundled_pure_modules.almd
 2949	spec/wasm_cross/bytes_alloc_ceiling_domain.almd
 2144	spec/wasm_cross/bytes_array_count_domain.almd
 1529	spec/wasm_cross/bytes_equality_call_operands.almd
@@ -99,6 +99,8 @@
 56478	spec/wasm_cross/edge_string_unicode.almd
 2474	spec/wasm_cross/effect_assign_unwrap.almd
 5477	spec/wasm_cross/effect_fn_value.almd
+1689	spec/wasm_cross/effect_main_guard_err.almd
+4296	spec/wasm_cross/effect_main_guard_ok.almd
 2647	spec/wasm_cross/effect_mut_generic_port.almd
 5303	spec/wasm_cross/effect_option_explicit_bang.almd
 4401	spec/wasm_cross/effect_slot_carrier.almd

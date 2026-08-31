@@ -530,6 +530,8 @@ evidence  = [
   { path = "spec/wasm_cross/match_result.almd", class = "fixture" },
   { path = "spec/wasm_cross/option_result.almd", class = "fixture" },
   { path = "spec/wasm_cross/early_return_control_flow.almd", class = "fixture" },
+  { path = "spec/wasm_cross/effect_main_guard_err.almd", class = "fixture" },
+  { path = "spec/wasm_cross/effect_main_guard_ok.almd", class = "fixture" },
 ]
 
 # ── RECORDS / VARIANTS / SIZED INTEGERS ──────────────────────────────

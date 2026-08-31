@@ -12,6 +12,14 @@ use crate::*;
 impl Emitter<'_> {
     /// Statement position: Unit-typed shapes only (blocks, calls, control).
     pub(crate) fn lower_stmt_expr(&mut self, e: &IrExpr) -> Result<(), EmitError> {
+        // main's Result-typed statement/tail is the effect carrier —
+        // err aborts with the native contract instead of discarding
+        // (#1734; see try_lower_main_err_carrier).
+        if !matches!(&e.kind, IrExprKind::Block { .. } | IrExprKind::If { .. } | IrExprKind::Match { .. })
+            && self.try_lower_main_err_carrier(e)?
+        {
+            return Ok(());
+        }
         match &e.kind {
             IrExprKind::Block { stmts, expr } => {
                 for s in stmts {
@@ -163,12 +171,16 @@ impl Emitter<'_> {
                 self.f.instructions().return_();
             }
             // main / Unit fn: the else IS the return — evaluate it in
-            // statement position (a `process.exit` else never returns;
-            // a value else discards into the early Unit return). The
+            // statement position (a `process.exit` else never returns).
+            // A RESULT else in main is the err channel, not a discard:
+            // `guard c else err(…)` must print `Error: {msg}` and exit 1
+            // (#1734 — the discard silently swallowed the err). The
             // early return skips the RC epilogue: a leak, never a
             // dangle.
             None => {
-                self.lower_stmt_expr(else_)?;
+                if !self.try_lower_main_err_carrier(else_)? {
+                    self.lower_stmt_expr(else_)?;
+                }
                 self.f.instructions().return_();
             }
         }
