@@ -6,7 +6,10 @@
 > on the [almide-dojo](https://github.com/almide/almide-dojo) MSR benchmark.
 
 If you are an LLM writing Almide code, read this file first. It is
-concise on purpose. Follow the link map for depth.
+concise on purpose. Follow the link map for depth. This file and
+docs/CHEATSHEET.md are the STABLE surface (#1483): every example fence
+labeled `almide check` is compiled by CI on every change, so what you
+read here is what the current compiler accepts.
 
 ## Fast facts
 
