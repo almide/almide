@@ -470,6 +470,21 @@ impl LowerCtx {
             let z = self.fresh_value();
             self.ops.push(Op::ConstInt { dst: z, value: 0 });
             z
+        } else if expr.ty == Ty::Unit {
+            // A Unit payload with EFFECTS — `ok(println(x))`, the shape the
+            // guard restructure leaves for `guard c else err(…)` in an
+            // `effect fn -> Unit` (#1734). The payload IS the statement: run
+            // its effects in this arm, then the 0 placeholder exactly as the
+            // literal-Unit arm above (the payload slot is never extracted).
+            let ops_mark = self.ops.len();
+            if self.lower_stmt_expr(expr).is_err() {
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(arm_mark);
+                return None;
+            }
+            let z = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: z, value: 0 });
+            z
         } else {
             self.lower_scalar_value(expr)?
         };

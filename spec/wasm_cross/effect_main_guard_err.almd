@@ -1,0 +1,12 @@
+// @contract: C-035
+// #1734: `guard c else err(…)` at the top of an effect `fn main() -> Unit` —
+// the idiomatic CLI argument check. The FAILING guard is main's err channel:
+// `Error: <msg>` on stderr + exit 1, byte-identical across targets. The
+// structural leg silently swallowed this err (no message, exit 0) through
+// 0.61.0; the incumbent leg walled the shape outright — both legs now honour
+// the C-035 termination.
+effect fn main() -> Unit = {
+  let n = string.len("")
+  guard n >= 1 else err("guard tripped")
+  println("unreachable continuation")
+}

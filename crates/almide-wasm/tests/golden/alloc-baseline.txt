@@ -24,7 +24,7 @@
 66128	spec/wasm_cross/bounded_kernel.almd
 66128	spec/wasm_cross/bounded_kernel_plain.almd
 66400	spec/wasm_cross/branch_lift_in_loop.almd
-67184	spec/wasm_cross/bundled_pure_modules.almd
+67200	spec/wasm_cross/bundled_pure_modules.almd
 66688	spec/wasm_cross/bytes_alloc_ceiling_domain.almd
 132176	spec/wasm_cross/bytes_array_count_domain.almd
 65808	spec/wasm_cross/bytes_equality_call_operands.almd
@@ -99,6 +99,8 @@
 113792	spec/wasm_cross/edge_string_unicode.almd
 66656	spec/wasm_cross/effect_assign_unwrap.almd
 67232	spec/wasm_cross/effect_fn_value.almd
+65872	spec/wasm_cross/effect_main_guard_err.almd
+66336	spec/wasm_cross/effect_main_guard_ok.almd
 66352	spec/wasm_cross/effect_mut_generic_port.almd
 67296	spec/wasm_cross/effect_option_explicit_bang.almd
 66496	spec/wasm_cross/effect_slot_carrier.almd

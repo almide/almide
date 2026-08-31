@@ -204,6 +204,12 @@ impl LowerCtx {
                         | IrExprKind::Tuple { .. }
                         | IrExprKind::If { .. }
                         | IrExprKind::Match { .. }
+                        // BLOCK payloads (#1734: `ok({ …; println(html) })` — the
+                        // guard restructure's continuation as the Unit-Ok payload):
+                        // the ANF bind's Block arm runs the statements in the
+                        // current scope and recurses on the tail — the same proven
+                        // route; a statement it cannot lower declines cleanly.
+                        | IrExprKind::Block { .. }
                 )
             {
                 let payload_ty = expr.ty.clone();

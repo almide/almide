@@ -1,0 +1,15 @@
+// @contract: C-035
+// #1734: the PASSING guard chain's continuation runs at the fn-body tail with
+// its own `!` binds intact (the guard restructure materializes only the
+// verdict — `let $r = if c then ok(()) else err(e); let $g = $r!` — and the
+// continuation stays a top-block statement list, where the `!` position
+// desugars still see it). Two stacked guards pin the chain flattening.
+effect fn main() -> Unit = {
+  let items = ["a", "b", "c"]
+  guard list.len(items) >= 1 else err("empty")
+  guard list.len(items) >= 2 else err("short")
+  let v = int.parse("42")!
+  let joined = items |> list.join(",")
+  println(joined)
+  println(int.to_string(v + list.len(items)))
+}
