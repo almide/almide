@@ -29,10 +29,17 @@ pub fn check(ctx: &HintContext) -> Option<HintResult> {
             message: None,
             hint: "Use '->' for return type, not '='. Write: fn name() -> Type = body".into(),
         }),
-        // Generics: `<>` instead of `[]`
-        (TokenType::RParen, TokenType::LAngle, _) => Some(HintResult {
+        // Generics: `<>` instead of `[]` — three positions, one mistake
+        // (#1736). The DECLARATION head (`fn id<T>(x: T)` — the parser wants
+        // LParen) is the highest-frequency spelling in anything trained on
+        // Rust/TS/Java; the TYPE ANNOTATION (`let xs: List<Int> = []` — the
+        // parser wants Eq) is its sibling; the expression position
+        // (`f()<T>` — RParen) was the only one wired.
+        (TokenType::RParen, TokenType::LAngle, _)
+        | (TokenType::LParen, TokenType::LAngle, _)
+        | (TokenType::Eq, TokenType::LAngle, _) => Some(HintResult {
             message: None,
-            hint: "Use [] for generics, not <>. Example: List[String], Result[T, E]".into(),
+            hint: "Use [] for generics, not <>. Example: fn id[T](x: T) -> T, List[String], Result[T, E]".into(),
         }),
         _ => None,
     }
