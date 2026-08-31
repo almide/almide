@@ -255,6 +255,53 @@ impl LspClient {
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
 
+    /// Incremental didChange (#1470): a RANGE edit, not a full-text resend.
+    fn did_change_range(&mut self, uri: &str, start: (u32, u32), end: (u32, u32), text: &str) {
+        self.send(&json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didChange",
+            "params": {
+                "textDocument": { "uri": uri, "version": 3 },
+                "contentChanges": [{
+                    "range": {
+                        "start": { "line": start.0, "character": start.1 },
+                        "end": { "line": end.0, "character": end.1 }
+                    },
+                    "text": text
+                }]
+            }
+        }));
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+
+    fn references(&mut self, id: i64, uri: &str, line: u32, character: u32) -> Value {
+        self.send(&json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "textDocument/references",
+            "params": {
+                "textDocument": { "uri": uri },
+                "position": { "line": line, "character": character },
+                "context": { "includeDeclaration": true }
+            }
+        }));
+        self.recv_response(id)
+    }
+
+    fn rename(&mut self, id: i64, uri: &str, line: u32, character: u32, new_name: &str) -> Value {
+        self.send(&json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "textDocument/rename",
+            "params": {
+                "textDocument": { "uri": uri },
+                "position": { "line": line, "character": character },
+                "newName": new_name
+            }
+        }));
+        self.recv_response(id)
+    }
+
     fn signature_help(&mut self, id: i64, uri: &str, line: u32, character: u32) -> Value {
         self.send(&json!({
             "jsonrpc": "2.0",
@@ -483,7 +530,7 @@ fn utf16_col(line: &str, target: &str) -> u32 {
 }
 
 #[test]
-fn lsp_capabilities_declare_utf16_and_no_rename() {
+fn lsp_capabilities_declare_utf16_rename_and_incremental_sync() {
     let mut c = LspClient::start();
     assert_eq!(
         c.capabilities["positionEncoding"].as_str(),
@@ -491,9 +538,25 @@ fn lsp_capabilities_declare_utf16_and_no_rename() {
         "server must declare the encoding it honors: {}",
         c.capabilities
     );
-    assert!(
-        c.capabilities.get("renameProvider").is_none(),
-        "unscoped textual rename must not be advertised: {}",
+    // #1470: rename is BACK — binding-aware with a total-accounting refusal
+    // net, replacing the withdrawn textual find/replace. And sync is
+    // INCREMENTAL (kind 2), not full-document-per-keystroke.
+    assert_eq!(
+        c.capabilities["renameProvider"].as_bool(),
+        Some(true),
+        "binding-aware rename must be advertised: {}",
+        c.capabilities
+    );
+    assert_eq!(
+        c.capabilities["referencesProvider"].as_bool(),
+        Some(true),
+        "references must be advertised: {}",
+        c.capabilities
+    );
+    assert_eq!(
+        c.capabilities["textDocumentSync"].as_i64(),
+        Some(2),
+        "sync must be INCREMENTAL: {}",
         c.capabilities
     );
     c.shutdown();
@@ -632,5 +695,86 @@ fn lsp_diagnostics_type_error() {
     assert!(!arr.is_empty(), "should have at least one diagnostic");
     let codes: Vec<&str> = arr.iter().filter_map(|d| d["code"].as_str()).collect();
     assert!(codes.contains(&"E001"), "should contain E001: {:?}", codes);
+    c.shutdown();
+}
+
+// ── #1470: incremental sync, references, rename ──────────────────
+
+#[test]
+fn lsp_incremental_range_edit_applies() {
+    let mut c = LspClient::start();
+    c.open_file(TEST_URI, TEST_SOURCE);
+    // line 6: `fn double(x: Int) -> Int = x * 2` — replace the NAME via a
+    // range edit (chars 3..9). documentSymbol must then list `triple`.
+    c.did_change_range(TEST_URI, (6, 3), (6, 9), "triple");
+    let resp = c.document_symbols(1, TEST_URI);
+    let syms = serde_json::to_string(&resp["result"]).unwrap_or_default();
+    assert!(syms.contains("triple"), "range edit did not apply: {syms}");
+    assert!(!syms.contains("double"), "old name survived the splice: {syms}");
+    c.shutdown();
+}
+
+#[test]
+fn lsp_references_top_level_binding() {
+    let mut c = LspClient::start();
+    c.open_file(TEST_URI, TEST_SOURCE);
+    // `greeting` declared on line 8, used on line 11 inside greet(greeting).
+    let resp = c.references(1, TEST_URI, 8, 4);
+    let locs = resp["result"].as_array().cloned().unwrap_or_default();
+    assert_eq!(locs.len(), 2, "declaration + one use, got: {locs:?}");
+    let lines: Vec<u64> = locs.iter().map(|l| l["range"]["start"]["line"].as_u64().unwrap()).collect();
+    assert!(lines.contains(&8) && lines.contains(&11), "wrong lines: {lines:?}");
+    c.shutdown();
+}
+
+const SHADOW_SOURCE: &str = r#"fn f(x: Int) -> Int = {
+  let y = x + 1
+  let g = (x: Int) => x * 2
+  y + g(x)
+}
+"#;
+
+#[test]
+fn lsp_rename_respects_shadowing() {
+    let mut c = LspClient::start();
+    c.open_file(TEST_URI, SHADOW_SOURCE);
+    // Rename the OUTER param x (decl at line 0) to n: the lambda's own x
+    // (a different binding) must be untouched.
+    let resp = c.rename(1, TEST_URI, 0, 5, "n");
+    let edits = resp["result"]["changes"][TEST_URI].as_array().cloned().unwrap_or_default();
+    assert_eq!(edits.len(), 3, "param decl + 2 uses, got: {resp}");
+    let lines: Vec<u64> = edits.iter().map(|e| e["range"]["start"]["line"].as_u64().unwrap()).collect();
+    assert!(lines.contains(&0) && lines.contains(&1) && lines.contains(&3), "wrong lines: {lines:?}");
+    assert!(!lines.contains(&2), "lambda's shadowing x must not be renamed: {lines:?}");
+    c.shutdown();
+}
+
+#[test]
+fn lsp_rename_refuses_with_visible_reason() {
+    let mut c = LspClient::start();
+    c.open_file(TEST_URI, SHADOW_SOURCE);
+    // `q` is not an identifier at this position — and an invalid NEW name
+    // must also refuse. Both refusals are ERROR responses (visible in the
+    // editor), never silent nulls.
+    let resp = c.rename(1, TEST_URI, 0, 5, "not a name");
+    assert!(resp.get("error").is_some(), "invalid new name must refuse visibly: {resp}");
+    // Renaming ONTO a name that already appears refuses (capture guard).
+    let resp = c.rename(2, TEST_URI, 0, 5, "y");
+    assert!(resp.get("error").is_some(), "capture-risk rename must refuse: {resp}");
+    c.shutdown();
+}
+
+const INTERP_SOURCE: &str = r#"fn shout(name: String) -> String = "hey ${name}!"
+"#;
+
+#[test]
+fn lsp_rename_refuses_interpolated_occurrence() {
+    let mut c = LspClient::start();
+    c.open_file(TEST_URI, INTERP_SOURCE);
+    // `name` occurs inside `${...}` — span-precision there is not
+    // guaranteed, so the rename must refuse rather than risk splicing the
+    // string wrong.
+    let resp = c.rename(1, TEST_URI, 0, 9, "who");
+    assert!(resp.get("error").is_some(), "in-hole occurrence must refuse: {resp}");
     c.shutdown();
 }
