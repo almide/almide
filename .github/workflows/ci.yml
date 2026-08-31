@@ -159,6 +159,25 @@ jobs:
 
       - run: cargo build --release
 
+      # #1732: the workspace's dev-profile TEST build happens ONCE, here,
+      # and ships to the shards as a cargo-nextest archive — the four
+      # shard jobs stop compiling entirely (each used to repeat this
+      # ~10-minute build). The archive carries every test binary plus
+      # build-script outputs; shards replay it with `nextest run
+      # --archive-file` under the same target map and coverage gate.
+      - name: Install cargo-nextest
+        run: |
+          curl -LsSf https://get.nexte.st/latest/linux -o /tmp/nextest.tar.gz
+          tar xzf /tmp/nextest.tar.gz -C /usr/local/bin
+          cargo nextest --version
+      - name: Archive the workspace test binaries
+        run: cargo nextest archive --workspace --archive-file /tmp/almide-tests.tar.zst
+      - uses: actions/upload-artifact@v7
+        with:
+          name: almide-tests-archive
+          path: /tmp/almide-tests.tar.zst
+          retention-days: 1
+
       # Wired to `build`, not `checks`: the ratchet compiles the workspace, and
       # `checks` downloads a prebuilt binary with no cargo toolchain. Runs after
       # the release build so the warning set is measured against the same
@@ -201,10 +220,10 @@ jobs:
       - name: Union of shards == full target set
         run: |
           set -euo pipefail
-          bash scripts/ci-test-shard.sh --list-all | sort > /tmp/all.txt
+          bash scripts/ci-test-shard.sh --list-all-archive /tmp/almide-archive/almide-tests.tar.zst | sort > /tmp/all.txt
           : > /tmp/union.txt
           for i in 0 1 2 3; do
-            bash scripts/ci-test-shard.sh --list "$i" 4 >> /tmp/union.txt
+            bash scripts/ci-test-shard.sh --list-archive "$i" 4 /tmp/almide-archive/almide-tests.tar.zst >> /tmp/union.txt
           done
           sort /tmp/union.txt > /tmp/union_sorted.txt
           dupes=$(sort /tmp/union.txt | uniq -d | wc -l | tr -d ' ')
@@ -223,7 +242,7 @@ jobs:
       - name: Balance report (informational — imbalance costs time, not coverage)
         run: |
           for i in 0 1 2 3; do
-            printf '  shard %s: %s target(s)\n' "$i" "$(bash scripts/ci-test-shard.sh --list "$i" 4 | wc -l | tr -d ' ')"
+            printf '  shard %s: %s target(s)\n' "$i" "$(bash scripts/ci-test-shard.sh --list-archive "$i" 4 /tmp/almide-archive/almide-tests.tar.zst | wc -l | tr -d ' ')"
           done
 
   test-rust:
@@ -271,20 +290,21 @@ jobs:
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
-      # This job was the ONE heavy job with no cargo cache: every PR run
-      # downloaded the registry and cold-built the whole workspace's dev-profile
-      # test targets (~15 of its ~22 minutes) before a single test ran. Same
-      # shape as fuzz-nightly's cache — registry + git + target, keyed on
-      # Cargo.lock, prefix restore so a lockfile bump still warm-starts.
-      - uses: actions/cache@v6
+      # #1732: no compile here anymore — the build job ships the
+      # dev-profile test binaries as a nextest archive, and this job
+      # replays it. The big registry/target cache went with the compile;
+      # only the tool tarball caches below remain.
+      - name: Install cargo-nextest
+        if: env.DOCS_ONLY != 'true'
+        run: |
+          curl -LsSf https://get.nexte.st/latest/linux -o /tmp/nextest.tar.gz
+          tar xzf /tmp/nextest.tar.gz -C /usr/local/bin
+          cargo nextest --version
+      - uses: actions/download-artifact@v8
         if: env.DOCS_ONLY != 'true'
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: test-rust-cargo-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: test-rust-cargo-${{ env.RUST_TOOLCHAIN }}-
+          name: almide-tests-archive
+          path: /tmp/almide-archive
 
       - name: Cache wasmtime tarball
         if: env.DOCS_ONLY != 'true'
@@ -343,7 +363,7 @@ jobs:
         # and runs this shard's share. `shard-coverage` below proves the four
         # shards' union is the whole set, so a partition bug reads as a RED
         # build rather than a fast green one.
-        run: bash scripts/ci-test-shard.sh --run ${{ matrix.shard }} 4
+        run: bash scripts/ci-test-shard.sh --run-archive ${{ matrix.shard }} 4 /tmp/almide-archive/almide-tests.tar.zst
 
   almide-gates:
     # BRANCH PROTECTION: this job's name is a REQUIRED CHECK on develop. Renaming

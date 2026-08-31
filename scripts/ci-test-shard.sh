@@ -59,7 +59,7 @@ for line in sorted(set(out)):
 
 partition() { # shard total  (empty shard = print every target)
   local shard="${1:-}" total="${2:-}"
-  enumerate | python3 -c '
+  { if [ "${ENUM:-}" = archive ]; then enumerate_archive; else enumerate; fi; } | python3 -c '
 import sys, os
 shard = os.environ.get("SHARD", "")
 total = os.environ.get("TOTAL", "")
@@ -92,8 +92,55 @@ for pkg, kind, name in bins[shard]:
 '
 }
 
+# Archive-sourced enumerate (#1732): the same pkg/kind/name rows, read
+# from a cargo-nextest archive instead of a fresh workspace compile. The
+# row format is IDENTICAL (diffed 213 == 213 at the refit), so the
+# partitioner, the weights file and the shard-coverage gate keep their
+# exact contract.
+enumerate_archive() {
+  cargo nextest list --archive-file "$ARCHIVE" --message-format json 2>/dev/null | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+rows = []
+for v in d["rust-suites"].values():
+    rows.append("%s\t%s\t%s" % (v["package-name"], v["kind"], v["binary-name"]))
+for line in sorted(set(rows)):
+    print(line)
+'
+}
+
 case "${1:-}" in
   --list-all) SHARD="" TOTAL="" DEFAULT_WEIGHT=$DEFAULT_WEIGHT WEIGHTS=$WEIGHTS partition ;;
+  --list-all-archive)
+    ARCHIVE="$2"
+    SHARD="" TOTAL="" DEFAULT_WEIGHT=$DEFAULT_WEIGHT WEIGHTS=$WEIGHTS ENUM=archive partition ;;
+  --list-archive)
+    ARCHIVE="$4"
+    SHARD="$2" TOTAL="$3" DEFAULT_WEIGHT=$DEFAULT_WEIGHT WEIGHTS=$WEIGHTS ENUM=archive partition ;;
+  --run-archive)
+    # The no-compile shard run (#1732): partition from the archive, then
+    # ONE nextest invocation over the union filterset of this shard's
+    # binary ids (lib = the bare package id, test = pkg::name). Keeps
+    # per-test process isolation and --no-fail-fast parity with the
+    # per-package cargo loop below.
+    shard="$2"; total="$3"; ARCHIVE="$4"
+    mapfile -t rows < <(SHARD="$shard" TOTAL="$total" DEFAULT_WEIGHT=$DEFAULT_WEIGHT WEIGHTS=$WEIGHTS ENUM=archive partition)
+    if [ "${#rows[@]}" -eq 0 ]; then
+      echo "shard $shard/$total: no targets — a partition that runs nothing is a bug, not a fast build" >&2
+      exit 1
+    fi
+    echo "== shard $shard/$total: ${#rows[@]} target(s) (archive) =="
+    expr=""
+    for row in "${rows[@]}"; do
+      IFS=$'\t' read -r pkg kind name <<<"$row"
+      case "$kind" in
+        lib) bid="$pkg" ;;
+        *)   bid="$pkg::$name" ;;
+      esac
+      if [ -z "$expr" ]; then expr="binary_id(=$bid)"; else expr="$expr | binary_id(=$bid)"; fi
+    done
+    exec cargo nextest run --archive-file "$ARCHIVE" --workspace-remap . --no-fail-fast -E "$expr"
+    ;;
   --list)     SHARD="$2" TOTAL="$3" DEFAULT_WEIGHT=$DEFAULT_WEIGHT WEIGHTS=$WEIGHTS partition ;;
   --run)
     shard="$2"; total="$3"
