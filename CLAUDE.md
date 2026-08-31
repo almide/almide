@@ -333,6 +333,24 @@ differential fuzz, an emit-time Σ-probe, or a Lean theorem. The index is
   vocabulary is shared with the rt-oracle-registry via
   `scripts/lib/contract-classes.txt`.
 
+## The LLM-Facing Surface Is the Stable Surface (#1483)
+
+`docs/CHEATSHEET.md` and `llms.txt` are what models read as training and
+context data — **anything that appears there is a promise**, and anything not
+intended as a promise must not appear there. Our primary reader cannot notice
+a doc/reality gap, so the gap is gated:
+
+- A fence labeled ```` ```almide check ```` asserts "this is a complete,
+  checkable program" and `scripts/check-llm-surface.sh` (CI) runs
+  `almide check` on every one — a rotted example is a CI failure, not a
+  training-corpus bug. Plain ```` ```almide ```` stays a highlighting label
+  for fragments and deliberate ✗-examples.
+- Growing coverage means COMPLETING an example and promoting its marker,
+  one fence at a time. The gate's allowlist is shrink-only.
+- New language surface documented in the cheatsheet lands with its spec
+  coverage in the same change — the contract-ledger rule above, applied to
+  prose.
+
 ## Documentation
 
 - 言語仕様: `docs/specs/` — ルールは [docs/specs/CLAUDE.md](./docs/specs/CLAUDE.md)
