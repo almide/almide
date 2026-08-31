@@ -143,6 +143,32 @@ D.func()       // ✗ undefined variable 'D'
 
 D を使いたければ `import D` を明示する。npm の phantom dependency 問題を防ぐ設計。
 
+### 4.1 Convention method の越境定義(#1591 批准)
+
+**呼び出し側モジュールが、import した型に対して convention method を追加定義できる**
+(open extension — Go / Kotlin / Swift の拡張メソッドと同型)。convention method は
+UFCS の糖衣にすぎず、インスタンス解決の一貫性問題を持たないため、これは意図された
+表面である。
+
+```almide
+import self.boxlib
+
+// boxlib.Box への後付け拡張 — 合法
+fn Box.double(self) -> Int = self.n * 2
+```
+
+**ただし同一型・同名メソッドの重複定義はエラー(E012)。** 定義側と呼び出し側の
+双方が同じ `Type.method` を宣言した場合、勝者は定義されない(実測でバックエンド間の
+乖離を生んだ — #1726)。重複は check 時に両定義位置を挙げて拒否される。
+
+```almide
+// boxlib が fn Box.tag を持つとき、呼び出し側で
+fn Box.tag(self) -> String = "caller"   // ✗ E012: defined in more than one module
+```
+
+同名の**別型**(`moda.Box` と `modb.Box`)はそれぞれ独立にメソッドを持てる。
+派生メソッド(derived `repr` 等)への明示的 override は従来どおり合法(#1087)。
+
 ---
 
 ## 5. ダイヤモンド依存
