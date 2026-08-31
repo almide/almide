@@ -26,6 +26,12 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
+  # The develop merge queue (#1732 follow-on): the queue's temporary
+  # gh-readonly-queue/* branch must receive every REQUIRED check, or the
+  # first queued PR stalls forever. Only this workflow and
+  # acceptance-ring.yml produce required contexts; the rest deliberately
+  # skip merge_group to keep the queue validation lean.
+  merge_group:
 
 # Cancel superseded runs on the same ref so a burst of pushes doesn't fire N
 # concurrent runs that all re-download tools and trip the per-IP rate limit.
@@ -100,6 +106,18 @@ jobs:
             # is the base tip, so the range is exactly the PR's own change set.
             git fetch -q origin "${{ github.base_ref }}"
             bash scripts/check-docs-only.sh "$(git merge-base "origin/${{ github.base_ref }}" HEAD)" HEAD
+          elif [ "${{ github.event_name }}" = merge_group ]; then
+            # The queue's group branch: base_sha is the develop tip the group
+            # was built on, so the range is the WHOLE group's change set —
+            # docs_only only when every queued PR is docs-only, which is the
+            # correct conservative reading.
+            base="${{ github.event.merge_group.base_sha }}"
+            if [ -n "$base" ] && git cat-file -e "$base^{commit}" 2>/dev/null; then
+              bash scripts/check-docs-only.sh "$base" HEAD
+            else
+              echo "docs_only=false" >> "$GITHUB_OUTPUT"
+              echo "check-docs-only: merge_group base unavailable — full run"
+            fi
           else
             before="${{ github.event.before }}"
             if [ -n "$before" ] && [ "$before" != "0000000000000000000000000000000000000000" ] && git cat-file -e "$before^{commit}" 2>/dev/null; then
@@ -955,6 +973,8 @@ jobs:
           set -euo pipefail
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             BASE="${{ github.event.pull_request.base.sha }}"
+          elif [ "${{ github.event_name }}" = "merge_group" ]; then
+            BASE="${{ github.event.merge_group.base_sha }}"
           else
             BASE="${{ github.event.before }}"
           fi
