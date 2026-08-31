@@ -116,11 +116,9 @@ fn chunked_body_terminated(body: &[u8]) -> bool {
 fn decode_chunked(body: &str) -> String {
     let mut result = String::new();
     let mut remaining = body;
-    loop {
-        let line_end = match remaining.find("\r\n") {
-            Some(i) => i,
-            None => break,
-        };
+    // `while let` spelling of the template's `loop`+`match` (clippy holds
+    // this copy to the workspace ledger; behavior identical).
+    while let Some(line_end) = remaining.find("\r\n") {
         let size = usize::from_str_radix(remaining[..line_end].trim(), 16).unwrap_or(0);
         if size == 0 {
             break;
