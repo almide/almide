@@ -1,0 +1,11 @@
+// #1590: a protocol in type position used to report "unknown type 'Repo'"
+// AFTER a derived E002 ("undefined method 'save' on Repo") — the writer,
+// reading top-down, fixed the wrong thing. Now: ONE error, root cause first,
+// and the message names the boundary (protocol-as-type, #1589), not a typo.
+protocol Repo {
+  fn save(self, v: Int) -> Unit
+}
+
+fn use_repo(r: Repo) -> Unit = r.save(1)
+
+fn main() -> Unit = println("x")

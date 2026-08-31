@@ -390,11 +390,16 @@ fn syntax_guide_not_triggered_wrong_scope() {
 // Phase 4: new syntax_guide hints
 // ============================================================
 
+/// #1590: `self` is a LEGAL identifier (the bare receiver parameter and
+/// every convention-method-body use), so the hint system must NOT reject
+/// it — the old entry fired on `match self { … }` and called a valid
+/// spelling "not valid in Almide". Misuse outside a method is the
+/// checker's E003, not a parser rejection.
 #[test]
-fn syntax_guide_self() {
+fn syntax_guide_self_is_not_rejected() {
     let got = tok(TokenType::Ident, "self");
     let ctx = HintContext { expected: None, got: &got, prev: None, next: None, scope: HintScope::Expression };
-    assert_hint_match(&ctx, "first parameter");
+    assert!(check_hint(&ctx).is_none(), "'self' must parse as an ordinary identifier");
 }
 
 #[test]
