@@ -68,7 +68,7 @@ issue = "#1423"
 
 [[unavailable]]
 fn = "fs.glob"
-legs = ["embedded", "structural"]
+legs = ["structural"]
 reason = "pending-self-host"
 issue = "#1423"
 
