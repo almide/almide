@@ -85,7 +85,7 @@ pub fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
 /// Named/Record split and `TyChecker::check_ty`'s Named/Variant split).
 fn render_type_decl_record(ctx: &RenderContext, td: &IrTypeDecl, generics_str: &str, decl_attrs: &[&str]) -> String {
     let IrTypeDeclKind::Record { fields } = &td.kind else { unreachable!() };
-    let has_fn_fields = fields.iter().any(|f| matches!(&f.ty, Ty::Fn { .. }));
+    let has_fn_fields = fields.iter().any(|f| ty_has_fn_with(&f.ty, &ctx.ann.fn_blocked_types));
     // Matrix / Fn / transitively-blocking types prevent PartialEq derive.
     // Uses the precomputed `eq_blocked_types` set so Named references
     // to other blocked user types propagate correctly.
@@ -188,8 +188,8 @@ fn render_type_decl_variant(ctx: &RenderContext, td: &IrTypeDecl, generics_str: 
     // `Rc<dyn Fn>`, which is neither Debug nor PartialEq → derive Clone only.
     let has_fn_fields = cases.iter().any(|v| match &v.kind {
         IrVariantKind::Unit => false,
-        IrVariantKind::Tuple { fields } => fields.iter().any(ty_has_fn),
-        IrVariantKind::Record { fields } => fields.iter().any(|f| ty_has_fn(&f.ty)),
+        IrVariantKind::Tuple { fields } => fields.iter().any(|t| ty_has_fn_with(t, &ctx.ann.fn_blocked_types)),
+        IrVariantKind::Record { fields } => fields.iter().any(|f| ty_has_fn_with(&f.ty, &ctx.ann.fn_blocked_types)),
     });
     let has_ord = td.deriving.as_ref().map_or(false, |d| d.iter().any(|s| s.as_str() == "Ord"));
     let mut enum_attrs = decl_attrs.to_vec();
@@ -221,13 +221,13 @@ fn render_type_decl_variant(ctx: &RenderContext, td: &IrTypeDecl, generics_str: 
 /// whose fields/payloads are all `AlmideRepr` (no closure field). The interp
 /// router (`ty_needs_repr`) and the impl emitter share this predicate so the
 /// "this Named type is repr-backed" decision is made in exactly one place.
-pub fn type_has_repr_impl(td: &IrTypeDecl) -> bool {
+pub fn type_has_repr_impl(td: &IrTypeDecl, fn_blocked: &HashSet<String>) -> bool {
     match &td.kind {
-        IrTypeDeclKind::Record { fields } => !fields.iter().any(|f| ty_has_fn(&f.ty)),
+        IrTypeDeclKind::Record { fields } => !fields.iter().any(|f| ty_has_fn_with(&f.ty, fn_blocked)),
         IrTypeDeclKind::Variant { cases, .. } => !cases.iter().any(|v| match &v.kind {
             IrVariantKind::Unit => false,
-            IrVariantKind::Tuple { fields } => fields.iter().any(ty_has_fn),
-            IrVariantKind::Record { fields } => fields.iter().any(|f| ty_has_fn(&f.ty)),
+            IrVariantKind::Tuple { fields } => fields.iter().any(|t| ty_has_fn_with(t, fn_blocked)),
+            IrVariantKind::Record { fields } => fields.iter().any(|f| ty_has_fn_with(&f.ty, fn_blocked)),
         }),
         _ => false,
     }
@@ -235,7 +235,7 @@ pub fn type_has_repr_impl(td: &IrTypeDecl) -> bool {
 
 fn render_repr_impl(ctx: &RenderContext, td: &IrTypeDecl) -> Option<String> {
     // Records/variants without a closure field back a repr; skip everything else.
-    if !type_has_repr_impl(td) { return None; }
+    if !type_has_repr_impl(td, &ctx.ann.fn_blocked_types) { return None; }
 
     // Generic header + target. The impl GENERICS carry every param's bounds; the
     // impl TARGET uses BARE params. For a generic type these MUST differ:
@@ -375,6 +375,13 @@ pub fn take_anon_fn_keys() -> HashSet<Vec<String>> {
 
 pub fn collect_anon_records(program: &IrProgram, named: &HashMap<Vec<String>, String>) -> HashMap<Vec<String>, String> {
     ANON_FN_KEYS.with(|s| s.borrow_mut().clear());
+    // The same transitive fn-blocked set the derive gate uses (#1674): an anon
+    // record whose field is a fn-BLOCKED named type must also derive Clone only.
+    let all_decls: Vec<IrTypeDecl> = program.type_decls.iter()
+        .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()))
+        .cloned()
+        .collect();
+    ANON_FN_BLOCKED.with(|s| *s.borrow_mut() = compute_fn_blocked_types(&all_decls));
     let named_set: HashSet<Vec<String>> = named.keys().cloned().collect();
     let mut seen: HashSet<Vec<String>> = HashSet::new();
 
@@ -577,11 +584,66 @@ fn collect_anon_from_stmt(stmt: &IrStmt, named: &HashSet<Vec<String>>, seen: &mu
     }
 }
 
-/// True if `ty` mentions a function type anywhere (directly or nested in a
-/// container/tuple/record). Such a type lowers to `Rc<dyn Fn>` (or a container
-/// thereof), which is neither `Debug` nor `PartialEq`.
-fn ty_has_fn(ty: &Ty) -> bool {
-    matches!(ty, Ty::Fn { .. }) || ty.children().iter().any(|c| ty_has_fn(c))
+/// True if `ty` mentions a function type anywhere — directly, nested in a
+/// container/tuple/record, or through a fn-blocked NAMED type from the
+/// precomputed transitive set. Such a type lowers to `Rc<dyn Fn>` (or a
+/// container thereof), which is neither `Debug` nor `PartialEq`.
+///
+/// This is `ty_has_fn` widened by a precomputed transitive set: a `Named` reference to
+/// a fn-blocked user type counts as holding a function value (#1674 — the
+/// analysis was one level deep, so `type Schema = | Str(Check)` over a
+/// closure-carrying `Check` still derived Debug/PartialEq and the generated
+/// Rust did not compile). Mirror of `ty_blocks_eq_with`.
+pub(super) fn ty_has_fn_with(ty: &Ty, fn_blocked: &HashSet<String>) -> bool {
+    match ty {
+        Ty::Fn { .. } => true,
+        Ty::Named(name, args) => {
+            fn_blocked.contains(name.as_str())
+                || args.iter().any(|t| ty_has_fn_with(t, fn_blocked))
+        }
+        Ty::Tuple(elems) => elems.iter().any(|t| ty_has_fn_with(t, fn_blocked)),
+        Ty::Applied(_, args) => args.iter().any(|t| ty_has_fn_with(t, fn_blocked)),
+        Ty::Record { fields } | Ty::OpenRecord { fields } => {
+            fields.iter().any(|(_, t)| ty_has_fn_with(t, fn_blocked))
+        }
+        _ => false,
+    }
+}
+
+/// Precompute the user-defined type names that transitively contain a function
+/// value — fixed point over the whole decl set, exactly like
+/// `compute_eq_blocked_types`.
+pub(super) fn compute_fn_blocked_types(type_decls: &[IrTypeDecl]) -> HashSet<String> {
+    let mut blocked: HashSet<String> = HashSet::new();
+    loop {
+        let mut changed = false;
+        for td in type_decls {
+            if blocked.contains(td.name.as_str()) { continue }
+            let blocks = match &td.kind {
+                IrTypeDeclKind::Record { fields } => {
+                    fields.iter().any(|f| ty_has_fn_with(&f.ty, &blocked))
+                }
+                IrTypeDeclKind::Variant { cases, .. } => {
+                    cases.iter().any(|c| match &c.kind {
+                        IrVariantKind::Unit => false,
+                        IrVariantKind::Tuple { fields } => {
+                            fields.iter().any(|t| ty_has_fn_with(t, &blocked))
+                        }
+                        IrVariantKind::Record { fields } => {
+                            fields.iter().any(|f| ty_has_fn_with(&f.ty, &blocked))
+                        }
+                    })
+                }
+                _ => false,
+            };
+            if blocks {
+                blocked.insert(td.name.to_string());
+                changed = true;
+            }
+        }
+        if !changed { break }
+    }
+    blocked
 }
 
 /// Does this type transitively hold a value that doesn't implement `PartialEq`
@@ -693,6 +755,11 @@ thread_local! {
     /// does not affect host-deterministic emit. (Closure codegen cross-target gaps.)
     static ANON_FN_KEYS: std::cell::RefCell<HashSet<Vec<String>>> =
         std::cell::RefCell::new(HashSet::new());
+    /// Fn-blocked named types for the CURRENT `collect_anon_records` run
+    /// (#1674) — consulted by `collect_anon_from_ty` so an anon record whose
+    /// field is a fn-blocked NAMED type also lands in `ANON_FN_KEYS`.
+    static ANON_FN_BLOCKED: std::cell::RefCell<HashSet<String>> =
+        std::cell::RefCell::new(HashSet::new());
 }
 
 fn collect_anon_from_ty(ty: &Ty, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
@@ -705,7 +772,7 @@ fn collect_anon_from_ty(ty: &Ty, named: &HashSet<Vec<String>>, seen: &mut HashSe
             // `Map[_, Fn]`, `(Fn, _)`, …) lowers to a type that is neither `Debug`
             // nor `PartialEq`, so the generated struct must derive `Clone` only.
             // Matching `Ty::Fn` alone missed boxed-closure containers.
-            if fields.iter().any(|(_, t)| ty_has_fn(t)) {
+            if fields.iter().any(|(_, t)| ANON_FN_BLOCKED.with(|b| ty_has_fn_with(t, &b.borrow()))) {
                 ANON_FN_KEYS.with(|s| { s.borrow_mut().insert(names.clone()); });
             }
             seen.insert(names);
