@@ -657,17 +657,28 @@ fn check_wasm_availability(ir_program: &almide::ir::IrProgram) -> Result<(), ()>
     let table = UNAVAILABLE.get_or_init(|| {
         let toml = include_str!("../../proofs/target-availability.toml");
         let mut out = BTreeMap::new();
-        // Line-anchored: the header COMMENT names the section literally,
-        // and a bare substring split ate the first native-only row
-        // through it (datetime.parse_iso E081-fired while being merely
-        // structural-pending — the reachability ratchet caught it).
-        for block in toml.split("\n[[wasm-unavailable]]\n").skip(1) {
+        // Schema 2 (#1710 increment 2): one `[[unavailable]]` row per fn
+        // with a per-leg `legs = [..]` list. E081 is the STOCK-P1 story —
+        // "no build path serves this on `--target wasm`" — so only rows
+        // declaring that leg feed the diagnostic. The reason is the
+        // per-leg `reason-stock-p1` when present, else the shared
+        // `reason`. Line-anchored block split, as before (a substring
+        // split once ate the first row through the header comment).
+        for block in toml.split("\n[[unavailable]]\n").skip(1) {
             let field = |k: &str| {
                 block.lines().find_map(|l| {
                     l.strip_prefix(&format!("{k} = \"")).and_then(|r| r.strip_suffix('"')).map(str::to_string)
                 })
             };
-            if let (Some(fn_name), Some(reason)) = (field("fn"), field("reason")) {
+            let legs = block
+                .lines()
+                .find_map(|l| l.strip_prefix("legs = ["))
+                .unwrap_or("");
+            if !legs.contains("\"stock-p1\"") {
+                continue;
+            }
+            let reason = field("reason-stock-p1").or_else(|| field("reason"));
+            if let (Some(fn_name), Some(reason)) = (field("fn"), reason) {
                 out.insert(fn_name, (reason, field("alt")));
             }
         }
