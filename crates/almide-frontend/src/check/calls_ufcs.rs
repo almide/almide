@@ -80,10 +80,10 @@ impl Checker {
         // post-solve E029 names the root cause at the annotation with the
         // protocol-specific message. One root-cause error beats a derived
         // E002 the writer reads first and fixes wrongly.
-        if let Ty::Named(n, _) = &obj_concrete {
-            if self.env.protocols.contains_key(n) {
-                return Ty::Unknown;
-            }
+        if let Ty::Named(n, _) = &obj_concrete
+            && self.env.protocols.contains_key(n)
+        {
+            return Ty::Unknown;
         }
         // #1521: an unknown method on a CONCRETE user type used to fall into
         // the callable-object constrain below and E001'd "expected P but got
