@@ -70,7 +70,10 @@ def render_ty(t: dict) -> str:
 def signature(module: str, f: dict) -> str:
     params = ", ".join(f"{p['name']}: {render_ty(p['type'])}" for p in f.get("params", []))
     eff = "effect " if f.get("effect") else ""
-    return f"{eff}{module}.{f['name']}({params}) -> {render_ty(f['return'])}"
+    # #1735: a deprecated fn carries its steer inline, so the generated
+    # index and the E052 warning tell one story.
+    dep = f"   (deprecated — {f['deprecated']})" if f.get("deprecated") else ""
+    return f"{eff}{module}.{f['name']}({params}) -> {render_ty(f['return'])}{dep}"
 
 
 def module_block(module: str) -> str:
