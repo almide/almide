@@ -392,9 +392,41 @@ fn infer_program_fn_borrows(program: &mut IrProgram, sigs: &mut HashMap<String, 
     }
 }
 
+/// Upsert one MIRROR key (`owner` is the claimant's `mod::name` identity —
+/// unique across modules, so same-named fns in two modules stay two
+/// claimants). Mirrors are shared namespace, so the first claimant
+/// keeps the key (`or_insert`'s arbitration against same-named fns and against
+/// canonical entries) — but the claimant itself must keep its mirror CURRENT
+/// across fixed-point iterations. Frozen `or_insert` mirrors were #1713: a
+/// derived decode whose record has an Option-of-heap field infers `Ref` only
+/// in round 1 (round 0 runs before the generated option workers' signatures
+/// exist), so the bare `Type.decode` key a cross-module call site carries kept
+/// round 0's `Own` while the definition emitted `&Value` — E0308 on a program
+/// `check` had passed.
+fn upsert_mirror(
+    sigs: &mut HashMap<String, Vec<ParamBorrow>>,
+    owners: &mut HashMap<String, String>,
+    key: String,
+    owner: &str,
+    borrows: &[ParamBorrow],
+) {
+    use std::collections::hash_map::Entry;
+    match sigs.entry(key) {
+        Entry::Occupied(mut e) => {
+            if owners.get(e.key()).is_some_and(|o| o == owner) {
+                *e.get_mut() = borrows.to_vec();
+            }
+        }
+        Entry::Vacant(e) => {
+            owners.insert(e.key().clone(), owner.to_string());
+            e.insert(borrows.to_vec());
+        }
+    }
+}
+
 /// One fixed-point iteration's pass over module functions. Same shape and
 /// same safety rationale as `infer_program_fn_borrows`.
-fn infer_program_module_borrows(program: &mut IrProgram, sigs: &mut HashMap<String, Vec<ParamBorrow>>) {
+fn infer_program_module_borrows(program: &mut IrProgram, sigs: &mut HashMap<String, Vec<ParamBorrow>>, mirror_owners: &mut HashMap<String, String>) {
     for module in &mut program.modules {
         let mod_name = module.name.to_string();
         MOD_SCOPE.with(|m| *m.borrow_mut() = Some(mod_name.clone()));
@@ -441,7 +473,8 @@ fn infer_program_module_borrows(program: &mut IrProgram, sigs: &mut HashMap<Stri
                 // or another module keeps its own signature — the same
                 // last-resort rule MODULE_METHOD_FNS applies to its tail key.
                 if func.name.as_str().contains('.') {
-                    sigs.entry(func.name.to_string()).or_insert_with(|| borrows.clone());
+                    let owner = format!("{}::{}", mod_name, func.name);
+                    upsert_mirror(sigs, mirror_owners, func.name.to_string(), &owner, &borrows);
                 }
                 // …and, for a NAMESPACED derive (`varlib.Pigment.decode` — the
                 // fn is named `mod.Type.method` once its type is `mod.Type`,
@@ -453,13 +486,14 @@ fn infer_program_module_borrows(program: &mut IrProgram, sigs: &mut HashMap<Stri
                 // above miss because they prefix the origin a second time.
                 let segs: Vec<&str> = func.name.as_str().split('.').collect();
                 if segs.len() > 2 {
+                    let owner = format!("{}::{}", mod_name, func.name);
                     let tail = format!("{}.{}", segs[segs.len() - 2], segs[segs.len() - 1]);
-                    sigs.entry(format!("{}::{}", mod_name, tail)).or_insert_with(|| borrows.clone());
-                    sigs.entry(tail).or_insert_with(|| borrows.clone());
+                    upsert_mirror(sigs, mirror_owners, format!("{}::{}", mod_name, tail), &owner, &borrows);
+                    upsert_mirror(sigs, mirror_owners, tail, &owner, &borrows);
                     let origin = mod_name.replace('.', "_");
                     let flat = func.name.as_str().replace('.', "_");
                     let base = flat.strip_prefix(&format!("{}_", origin)).unwrap_or(&flat).to_string();
-                    sigs.entry(format!("almide_rt_{}_{}", origin, base)).or_insert_with(|| borrows.clone());
+                    upsert_mirror(sigs, mirror_owners, format!("almide_rt_{}_{}", origin, base), &owner, &borrows);
                 }
             }
             for (param, borrow) in func.params.iter_mut().zip(borrows) {
@@ -471,6 +505,8 @@ fn infer_program_module_borrows(program: &mut IrProgram, sigs: &mut HashMap<Stri
 
 pub fn infer_borrow_signatures(program: &mut IrProgram) -> HashMap<String, Vec<ParamBorrow>> {
     let mut sigs: HashMap<String, Vec<ParamBorrow>> = HashMap::new();
+    // Which fn (`mod::name`) first claimed each MIRROR key — see `upsert_mirror`.
+    let mut mirror_owners: HashMap<String, String> = HashMap::new();
 
     seed_record_names(program);
     seed_intrinsic_sigs(&mut sigs);
@@ -483,8 +519,15 @@ pub fn infer_borrow_signatures(program: &mut IrProgram) -> HashMap<String, Vec<P
 
         MOD_SCOPE.with(|m| *m.borrow_mut() = None);
         infer_program_fn_borrows(program, &mut sigs);
-        infer_program_module_borrows(program, &mut sigs);
+        infer_program_module_borrows(program, &mut sigs, &mut mirror_owners);
 
+        // ALMIDE_DBG_BORROW=<substr>: dump every matching sig key per
+        // fixed-point iteration (the probe that caught #1713's frozen mirrors).
+        if let Ok(filter) = std::env::var("ALMIDE_DBG_BORROW") {
+            for (k, v) in &sigs {
+                if k.contains(&filter) { eprintln!("[borrow iter {_iter}] {k} -> {v:?}"); }
+            }
+        }
         if sigs == prev_sigs {
             break;
         }
