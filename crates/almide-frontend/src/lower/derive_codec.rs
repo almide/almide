@@ -420,15 +420,18 @@ fn err_at_index_worker(wk: &mut CodecWk, ok_ty: &Ty) -> String {
     let res_ty = Ty::result(ok_ty.clone(), Ty::String);
     let r = wk.vt.alloc(sym("_r"), res_ty.clone(), Mutability::Let, None);
     let iv = wk.vt.alloc(sym("_i"), Ty::Int, Mutability::Let, None);
-    let x = wk.vt.alloc(sym("_wx"), ok_ty.clone(), Mutability::Let, None);
     let ev = wk.vt.alloc(sym("_we"), Ty::String, Mutability::Let, None);
+    // The ok arm passes the PARAM through (`ok(_) => r`) instead of
+    // re-materializing `ok(x)`: an Option-payload result ctor sits outside
+    // the v1 spine's ctor zoo and would wall the worker; the passthrough
+    // shape lowers on every leg.
     let body = e_(IrExprKind::Match {
         subject: Box::new(e_(IrExprKind::Var { id: r }, res_ty.clone())),
         arms: vec![
             IrMatchArm {
-                pattern: IrPattern::Ok { inner: Box::new(IrPattern::Bind { var: x, ty: ok_ty.clone() }) },
+                pattern: IrPattern::Ok { inner: Box::new(IrPattern::Wildcard) },
                 guard: None,
-                body: e_(IrExprKind::ResultOk { expr: Box::new(e_(IrExprKind::Var { id: x }, ok_ty.clone())) }, res_ty.clone()),
+                body: e_(IrExprKind::Var { id: r }, res_ty.clone()),
             },
             IrMatchArm {
                 pattern: IrPattern::Err { inner: Box::new(IrPattern::Bind { var: ev, ty: Ty::String }) },
@@ -455,15 +458,15 @@ fn err_at_worker(wk: &mut CodecWk, ok_ty: &Ty) -> String {
     let res_ty = Ty::result(ok_ty.clone(), Ty::String);
     let r = wk.vt.alloc(sym("_r"), res_ty.clone(), Mutability::Let, None);
     let seg = wk.vt.alloc(sym("_seg"), Ty::String, Mutability::Let, None);
-    let x = wk.vt.alloc(sym("_wx"), ok_ty.clone(), Mutability::Let, None);
     let ev = wk.vt.alloc(sym("_we"), Ty::String, Mutability::Let, None);
+    // ok(_) => r passthrough — see err_at_index_worker for why.
     let body = e_(IrExprKind::Match {
         subject: Box::new(e_(IrExprKind::Var { id: r }, res_ty.clone())),
         arms: vec![
             IrMatchArm {
-                pattern: IrPattern::Ok { inner: Box::new(IrPattern::Bind { var: x, ty: ok_ty.clone() }) },
+                pattern: IrPattern::Ok { inner: Box::new(IrPattern::Wildcard) },
                 guard: None,
-                body: e_(IrExprKind::ResultOk { expr: Box::new(e_(IrExprKind::Var { id: x }, ok_ty.clone())) }, res_ty.clone()),
+                body: e_(IrExprKind::Var { id: r }, res_ty.clone()),
             },
             IrMatchArm {
                 pattern: IrPattern::Err { inner: Box::new(IrPattern::Bind { var: ev, ty: Ty::String }) },
