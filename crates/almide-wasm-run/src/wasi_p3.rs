@@ -1352,7 +1352,7 @@ fn shim_callback() -> Function {
 
 #[cfg(test)]
 mod wit_tests {
-    /// #1710 increment 2 foundation: the vendored wasi:http@0.3 package
+    /// #1710 increment 2 foundation: the vendored wasi:http@0.3.0 package
     /// resolves, and BOTH worlds (the fs-only `p3-command` and the
     /// http-importing `p3-command-http`) select cleanly. A WIT drift —
     /// a trimmed interface the world still names, a dep the trim lost —
