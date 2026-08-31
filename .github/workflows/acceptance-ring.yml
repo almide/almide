@@ -26,6 +26,9 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
+  # Required contexts (Build the compiler under test, Ring (dfa/parsegen/svg))
+  # must also report on the develop merge queue's group branches.
+  merge_group:
   workflow_dispatch:
 
 concurrency:
