@@ -394,11 +394,25 @@ impl Checker {
                     self.diagnostics.push(diag);
                     continue;
                 }
-                let mut diag = err(
-                    format!("unknown type '{}'", s),
-                    format!("no `type {}` is declared (or imported) in this program — declare it, or check the spelling", s),
-                    ctx.clone(),
-                ).with_code("E029");
+                // #1590: the name IS declared — as a PROTOCOL. "unknown
+                // type" reads as a typo to the writer who declared it two
+                // lines up; name the actual boundary instead.
+                let mut diag = if self.env.protocols.contains_key(&s) {
+                    err(
+                        format!("'{}' is a protocol, not a type", s),
+                        format!(
+                            "A protocol cannot be used as a value type yet (#1589 — no dyn dispatch): a parameter or field cannot hold `any {}`. Take the concrete adopting type instead.",
+                            s
+                        ),
+                        ctx.clone(),
+                    ).with_code("E029")
+                } else {
+                    err(
+                        format!("unknown type '{}'", s),
+                        format!("no `type {}` is declared (or imported) in this program — declare it, or check the spelling", s),
+                        ctx.clone(),
+                    ).with_code("E029")
+                };
                 if let Some(sp) = span {
                     diag.line = Some(sp.line);
                     diag.col = Some(sp.col);

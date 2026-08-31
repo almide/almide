@@ -271,6 +271,31 @@ pub fn validate_protocol_impls(env: &TypeEnv, diagnostics: &mut Vec<Diagnostic>)
                 None => continue,
             };
 
+            // #1590/#1589: a GENERIC protocol adopted here is a dead end in
+            // every direction — the adoption cannot bind the parameter
+            // (`: Repository[User]` does not parse), so the per-method
+            // checks below produce hints containing a FREE `T` the writer
+            // cannot implement, and a concrete implementation is then
+            // rejected with "change the return type to 'Option[T]'". Name
+            // the root cause ONCE at the adoption and skip the method
+            // checks entirely.
+            if !proto_def.generics.is_empty() {
+                diagnostics.push(err(
+                    format!(
+                        "type '{}' adopts generic protocol '{}[{}]', which cannot be implemented yet",
+                        type_name, proto_name,
+                        proto_def.generics.iter().map(|g| g.to_string()).collect::<Vec<_>>().join(", ")
+                    ),
+                    format!(
+                        "Generic-protocol adoption is not supported (#1589): the adoption cannot bind '{}', so no method signature can satisfy it. Drop the protocol from the declaration and implement the methods as plain convention fns on '{}' for now.",
+                        proto_def.generics.iter().map(|g| g.to_string()).collect::<Vec<_>>().join(", "),
+                        type_name
+                    ),
+                    format!("type {} : {}", type_name, proto_name),
+                ));
+                continue;
+            }
+
             for method_sig in &proto_def.methods {
                 let target = ImplTarget { name: *type_name, is_generic, ty: &type_ty };
                 validate_protocol_method_impl(env, diagnostics, &target, *proto_name, method_sig);
