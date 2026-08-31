@@ -333,11 +333,12 @@ fn render_fn_generics_str(ctx: &RenderContext, fn_ctx: &RenderContext, func: &Ir
 /// the mapping is injective per distinct original. ASCII-only names keep
 /// their exact historical spelling (zero churn for the existing corpus).
 pub fn rust_safe_fn_name(raw: &str) -> String {
-    let s = raw.replace(' ', "_").replace('-', "_").replace('.', "_")
+    let s = raw
+        .replace([' ', '-', '.', ',', ':', '[', ']'], "_")
+        .replace(['(', ')'], "")
         .replace('+', "_plus_").replace('/', "_div_").replace('*', "_mul_")
-        .replace('(', "").replace(')', "").replace(',', "_").replace(':', "_")
         .replace('=', "_eq_").replace('!', "_bang_").replace('?', "_q_")
-        .replace('<', "_lt_").replace('>', "_gt_").replace('[', "_").replace(']', "_")
+        .replace('<', "_lt_").replace('>', "_gt_")
         .replace('|', "_pipe_").replace('&', "_amp_").replace('%', "_mod_");
     let mut safe: String = s.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).collect();
     if raw.chars().any(|c| !c.is_ascii()) {
