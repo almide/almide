@@ -20,7 +20,7 @@ wasmparser = "0.257"
 wasm-encoder = "0.257"
 wasmtime = "47"
 wit-component = "0.257"
-wit-parser = "0.257"
+wit-parser = "0.258"
 
 [lints]
 workspace = true
