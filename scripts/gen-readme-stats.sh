@@ -150,7 +150,7 @@ rt_date="$(grep -E '^date' "$RT_LEDGER" | head -1 | sed -E 's/^[^=]*=[[:space:]]
   oom=$(grep -cE '^[a-z].*\| oom-embedded' "$RT_LEDGER" || true)
   echo
   printf '%s%s%s\n' \
-    'Embedded wasm host (Perceus RC in linear memory) against the native binary, same machine, same run — the ratio is the CI-gated quantity (`scripts/check-wasm-runtime-ratio.sh`). binarytrees runs its fan arms on the embedded host'"'"'s thread pool, which is why wasm WINS there. The unmeasured corpus cells stay honest instead of estimated: ' \
+    'Embedded wasm host (Perceus RC in linear memory) against the native binary, same machine, same run. Cross-engine ratios do NOT cancel hardware (a 2-core CI runner measures nbody ~10x worse), so the ratio verdict runs on the stamping machine class and CI gates the STATUS taxonomy below (`scripts/check-wasm-runtime-ratio.sh`). binarytrees runs its fan arms on the embedded host'"'"'s thread pool, which is why wasm WINS there. The unmeasured corpus cells stay honest instead of estimated: ' \
     "${routed} route to the incumbent artifact, ${walled} wall on the wasm build path, ${oom} exhaust the embedded heap (#1729)" \
     ' — each re-measured every gate run, so a cell that starts benching fails the gate until its row is promoted. Ledger: `docs/benchmarks/wasm-runtime.txt` ('"${rt_version}, ${rt_date}"').' 
 } > "$rt_body"
