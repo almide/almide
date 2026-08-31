@@ -74,6 +74,37 @@ pub fn almide_rt_value_eq(a: Value, b: Value) -> bool { a == b }
 
 // ── Access ──
 
+/// #1675: the wire-kind name for decode diagnostics — matches the wasm
+/// self-host's `__vkind` byte-for-byte (parity is contract surface).
+fn value_kind(v: &Value) -> &'static str {
+    match v {
+        Value::Null => "Null",
+        Value::Bool(_) => "Bool",
+        Value::Int(_) => "Int",
+        Value::Float(_) => "Float",
+        Value::Str(_) => "Str",
+        Value::Array(_) => "Array",
+        Value::Object(_) => "Object",
+    }
+}
+
+/// #1675: splice a path segment into a decode error — `<leaf>, at <path>`,
+/// parent segments prepend (`city` -> `address.city`), index segments join
+/// bracket-style (`tags[1]`). The wasm leg's `__err_at` twin composes the
+/// same bytes.
+pub fn almide_rt___err_at(e: String, seg: String) -> String {
+    match e.split_once(", at ") {
+        Some((head, path)) if path.starts_with('[') => format!("{head}, at {seg}{path}"),
+        Some((head, path)) => format!("{head}, at {seg}.{path}"),
+        None => format!("{e}, at {seg}"),
+    }
+}
+
+/// #1675: the list-element frame — `[i]` joins the path bracket-style.
+pub fn almide_rt___err_at_index(e: String, i: i64) -> String {
+    almide_rt___err_at(e, format!("[{i}]"))
+}
+
 pub fn almide_rt_value_field(v: &Value, key: &str) -> Result<Value, String> {
     if let Value::Object(pairs) = v {
         for (k, val) in pairs {
@@ -81,28 +112,28 @@ pub fn almide_rt_value_field(v: &Value, key: &str) -> Result<Value, String> {
         }
         Err(format!("missing field '{}'", key))
     } else {
-        Err("expected Object".to_string())
+        Err(format!("expected Object, received {}", value_kind(v)))
     }
 }
 
 pub fn almide_rt_value_as_string(v: &Value) -> Result<String, String> {
-    match v { Value::Str(s) => Ok(s.clone()), _ => Err("expected Str".to_string()) }
+    match v { Value::Str(s) => Ok(s.clone()), _ => Err(format!("expected Str, received {}", value_kind(v))) }
 }
 pub fn almide_rt_value_as_int(v: &Value) -> Result<i64, String> {
-    match v { Value::Int(n) => Ok(*n), _ => Err("expected Int".to_string()) }
+    match v { Value::Int(n) => Ok(*n), _ => Err(format!("expected Int, received {}", value_kind(v))) }
 }
 pub fn almide_rt_value_as_float(v: &Value) -> Result<f64, String> {
     // A JSON number has no int/float distinction, so an integer literal is a
     // valid Float — widen it (mirrors json.as_float/get_float, value.rs siblings,
     // and serde's f64 deserializer). Keeps Codec roundtrips total for Float
     // fields whose value happens to be integral (#658).
-    match v { Value::Float(f) => Ok(*f), Value::Int(n) => Ok(*n as f64), _ => Err("expected Float".to_string()) }
+    match v { Value::Float(f) => Ok(*f), Value::Int(n) => Ok(*n as f64), _ => Err(format!("expected Float, received {}", value_kind(v))) }
 }
 pub fn almide_rt_value_as_bool(v: &Value) -> Result<bool, String> {
-    match v { Value::Bool(b) => Ok(*b), _ => Err("expected Bool".to_string()) }
+    match v { Value::Bool(b) => Ok(*b), _ => Err(format!("expected Bool, received {}", value_kind(v))) }
 }
 pub fn almide_rt_value_as_array(v: &Value) -> Result<Vec<Value>, String> {
-    match v { Value::Array(a) => Ok(a.clone()), _ => Err("expected Array".to_string()) }
+    match v { Value::Array(a) => Ok(a.clone()), _ => Err(format!("expected Array, received {}", value_kind(v))) }
 }
 
 // ── List encode/decode ──
@@ -112,8 +143,10 @@ pub fn almide_rt_value_encode_list<T, F: Fn(T) -> Value>(items: Vec<T>, f: F) ->
 }
 pub fn almide_rt_value_decode_list<T, F: Fn(Value) -> Result<T, String>>(v: Value, f: F) -> Result<Vec<T>, String> {
     match v {
-        Value::Array(items) => items.into_iter().map(f).collect(),
-        _ => Err("expected Array".to_string()),
+        Value::Array(items) => items.into_iter().enumerate()
+            .map(|(i, e)| f(e).map_err(|er| almide_rt___err_at_index(er, i as i64)))
+            .collect(),
+        other => Err(format!("expected Array, received {}", value_kind(&other))),
     }
 }
 
@@ -122,8 +155,10 @@ pub fn almide_rt_value_decode_list<T, F: Fn(Value) -> Result<T, String>>(v: Valu
 /// so the elements are read in place instead of moved out of a copy.
 pub fn almide_rt_value_decode_list_ref<T, F: Fn(&Value) -> Result<T, String>>(v: &Value, f: F) -> Result<Vec<T>, String> {
     match v {
-        Value::Array(items) => items.iter().map(f).collect(),
-        _ => Err("expected Array".to_string()),
+        Value::Array(items) => items.iter().enumerate()
+            .map(|(i, e)| f(e).map_err(|er| almide_rt___err_at_index(er, i as i64)))
+            .collect(),
+        _ => Err(format!("expected Array, received {}", value_kind(v))),
     }
 }
 
@@ -165,7 +200,7 @@ pub fn almide_rt_value_field_ref<'a>(v: &'a Value, key: &str) -> Result<&'a Valu
         }
         Err(format!("missing field '{}'", key))
     } else {
-        Err("expected Object".to_string())
+        Err(format!("expected Object, received {}", value_kind(v)))
     }
 }
 pub fn almide_rt_value_decode_with_default<T: Clone, F: Fn(Value) -> Result<T, String>>(v: &Value, key: &str, default: T, f: F) -> Result<T, String> {

@@ -132,7 +132,7 @@
         // SELF-HOSTED value.as_int/as_bool/as_float → Result[T, String] (read the tag, Ok(payload)
         // on a match else Err("expected T"); materialized Result, match-executable). as_int(int 42)=
         // Ok(42); as_int(null)=Err("expected Int"); as_bool(bool true)=Ok(true)→"yes"; as_float(int 7)
-        // widens to Ok(7.0)="float-ok"; as_float(null)=Err("expected Float"). Byte-matches v0.
+        // widens to Ok(7.0)="float-ok"; as_float(null)=Err("expected Float, received Null"). Byte-matches v0.
         let src = "fn main() -> Unit = {\n  \
             let oi = value.as_int(value.int(42))\n  \
             match oi { Ok(n) => println(int.to_string(n)), Err(e) => println(e), }\n  \
@@ -147,7 +147,7 @@
         let prog = lower_source(src);
         assert!(prog.functions.iter().any(|f| f.name == "value.as_int"));
         if let Some(out) = build_and_run("self_hosted_value_scalar_extractors", &render_wasm_program(&prog)) {
-            assert_eq!(out, "42\nexpected Int\nyes\nfloat-ok\nexpected Float");
+            assert_eq!(out, "42\nexpected Int, received Null\nyes\nfloat-ok\nexpected Float, received Null");
         }
     }
 

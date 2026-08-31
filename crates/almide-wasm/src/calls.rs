@@ -287,6 +287,15 @@ impl Emitter<'_> {
                 // (Int) -> String: UTF-8 byte encoding into its own fresh
                 // string buffer — layout-shared writes only.
                 "string_from_codepoint",
+                // (String, String) -> String / (String, Int) -> String:
+                // the #1675 decode-path composers — language-level
+                // len/slice/starts_with/concat only, no raw header
+                // access. Parity evidence: spec/wasm_cross/
+                // codec_decode_errors.almd prints byte-identical across
+                // legs including the composed `at address.city` /
+                // `tags[1]` paths.
+                "__err_at",
+                "__err_at_index",
             ];
             // Second tier: signatures that TRIP the coupled-type proxy
             // below but whose bodies are AUDITED raw-write-free — every

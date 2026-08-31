@@ -49,6 +49,8 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt___encode_option_float" => &[false],
         "almide_rt___encode_option_int" => &[false],
         "almide_rt___encode_option_string" => &[false],
+        "almide_rt___err_at" => &[false, false],
+        "almide_rt___err_at_index" => &[false, false],
         "almide_rt_base64_decode" => &[false],
         "almide_rt_base64_decode_url" => &[false],
         "almide_rt_base64_encode" => &[false],

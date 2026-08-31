@@ -446,7 +446,7 @@ fn rewrite_call_rename(name: Sym, args: Vec<IrExpr>, type_args: Vec<Ty>, ty: Ty,
     // families are rewritten: a USER fn merely named with a `__` prefix must
     // link like any other user fn — the old blanket `__` rewrite renamed its
     // call sites but never its definition, so it failed with E0425 (#868).
-    if name.starts_with("__encode_") || name.starts_with("__decode_") {
+    if name.starts_with("__encode_") || name.starts_with("__decode_") || name.starts_with("__err_at") {
         return IrExpr { kind: IrExprKind::Call {
             target: CallTarget::Named { name: format!("almide_rt_{}", name).into() },
             args, type_args,
