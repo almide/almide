@@ -38,6 +38,15 @@ pub(crate) const OP_SLEEP_MS: i32 = 36;
 /// later env.get observes the set exactly as native's process-level
 /// setenv does. Stock-p1 artifacts keep the defined refusal.
 pub(crate) const OP_ENV_SET: i32 = 37;
+/// The http string client (#1710 increment 1): url in a, body in b, the
+/// method IS the op. Served on the embedded host by the transcribed
+/// native client; ops 40-42 are the fan prefetch protocol, so this
+/// family starts at 43. Stock artifacts refuse at build (the op audit).
+pub(crate) const OP_HTTP_GET: i32 = 43;
+pub(crate) const OP_HTTP_POST: i32 = 44;
+pub(crate) const OP_HTTP_PUT: i32 = 45;
+pub(crate) const OP_HTTP_PATCH: i32 = 46;
+pub(crate) const OP_HTTP_DELETE: i32 = 47;
 const OP_READ_BYTES: i32 = 14;
 
 impl Emitter<'_> {
