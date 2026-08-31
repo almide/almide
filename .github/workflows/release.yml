@@ -135,7 +135,7 @@ jobs:
       #   gh attestation verify <asset> -R almide/almide
       # (documented in SECURITY.md). The checksums file is attested too.
       - name: Attest release assets (Sigstore)
-        uses: actions/attest-build-provenance@v3
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: release/*
 
