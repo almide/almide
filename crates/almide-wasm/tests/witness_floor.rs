@@ -58,10 +58,10 @@ fn structural_witnesses_balance_and_hold_the_floor() {
                 }
                 // emit_program lowers every fn once per emission pass
                 // (the reachability two-pass) — the passes must agree.
-                if let Some(prev) = certs.insert(key.clone(), cert.clone()) {
-                    if prev != cert {
-                        nondet.push(key);
-                    }
+                if let Some(prev) = certs.insert(key.clone(), cert.clone())
+                    && prev != cert
+                {
+                    nondet.push(key);
                 }
             }
         }
