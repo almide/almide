@@ -60,6 +60,8 @@ fn collect_decode_by_ref(program: &IrProgram) -> std::collections::HashSet<Strin
         set.insert(name.to_string());
         if let Some(bare) = origin.and_then(|o| name.strip_prefix(&format!("{}.", o))) {
             set.insert(bare.to_string());
+        } else if let Some(o) = origin {
+            set.insert(format!("{}.{}", o, name)); // qualified twin-dispatch key (#1728)
         }
         let segs: Vec<&str> = name.split('.').collect();
         if segs.len() > 2 {
@@ -122,6 +124,13 @@ fn collect_module_method_fns(program: &IrProgram) -> HashMap<String, String> {
         map.insert(name.to_string(), symbol.clone());
         if let Some(bare) = name.strip_prefix(&format!("{}.", origin)) {
             map.insert(bare.to_string(), symbol.clone());
+        } else {
+            // The qualified spelling (`moda.Box.tag`) a call site emits when
+            // TWO modules own the bare type name — the bare `Box.tag` key is
+            // one slot and dispatches to whichever module registered last
+            // (#1728). The module-side fn is named bare, so this key must be
+            // built here.
+            map.insert(format!("{}.{}", origin, name), symbol.clone());
         }
         // The trailing `Type.method` is what a caller inside the owning module
         // emits, and it is the only spelling that survives when the module

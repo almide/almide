@@ -109,11 +109,45 @@ fn same_bare_name_in_two_modules_stays_two_method_sets() {
             ("src/modb.almd", "type Box = { s: String }\n\nfn Box.tag(self) -> String = \"B\"\n"),
         ],
     );
-    // (A pre-existing E005 receiver-typing wart exists on this shape — what
-    // this test pins is only that the CONFLICT detector stays quiet on two
-    // DIFFERENT types that share a bare name.)
     assert!(
         !text.contains("more than one module"),
         "distinct same-named types must not be flagged as duplicates:\n{text}"
     );
+    // #1728: the E005 receiver-typing wart on this shape is fixed — the
+    // method's registered self type is the canonical `moda.Box`, so the
+    // twins CHECK clean outright.
+    assert!(
+        !text.contains("E005"),
+        "twin methods must type against their own module's receiver:\n{text}"
+    );
+}
+
+/// #1728 end-to-end: each twin dispatches to ITS OWN module's method — the
+/// qualified emit key + the origin-qualified symbol map keep `moda.Box.tag`
+/// and `modb.Box.tag` distinct all the way to the generated symbols.
+#[test]
+fn twins_dispatch_to_their_own_module() {
+    let dir = std::env::temp_dir().join(format!("almd_conv_ruling_twinrun_{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    std::fs::write(
+        dir.join("almide.toml"),
+        "[package]\nname = \"ruling\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("src/main.almd"),
+        "import self.moda\nimport self.modb\n\neffect fn main() -> Unit = {\n  println(moda.Box { n: 1 }.tag())\n  println(modb.Box { s: \"x\" }.tag())\n}\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("src/moda.almd"), "type Box = { n: Int }\n\nfn Box.tag(self) -> String = \"A\"\n").unwrap();
+    std::fs::write(dir.join("src/modb.almd"), "type Box = { s: String }\n\nfn Box.tag(self) -> String = \"B\"\n").unwrap();
+    let out = Command::new(almide_bin())
+        .args(["run", dir.join("src/main.almd").to_str().unwrap()])
+        .output()
+        .expect("failed to spawn almide");
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+    std::fs::remove_dir_all(&dir).ok();
+    assert!(out.status.success(), "twins project must run:\n{stdout}{stderr}");
+    assert_eq!(stdout, "A\nB\n", "each twin must dispatch to its own module's method:\n{stderr}");
 }
