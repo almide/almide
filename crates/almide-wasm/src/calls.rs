@@ -655,7 +655,7 @@ impl Emitter<'_> {
                 unsup(&format!("call:fs.{func}"))
             }
             CallTarget::Module { module, func, .. }
-                if matches!(module.as_str(), "env" | "io" | "process") =>
+                if matches!(module.as_str(), "env" | "io" | "process" | "http") =>
             {
                 if let Some(out) = self.lower_host_call(module.as_str(), func.as_str(), args)? {
                     return Ok(out);

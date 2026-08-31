@@ -1,0 +1,32 @@
+// @contract: C-328
+// The http string family on the EMBEDDED wasm lane (#1710 increment 1):
+// `almide run --target wasm` serves get/post/put/patch/delete through the
+// transcribed native client (ops 43..=47), so transport-error texts —
+// the closed-port refusal, the DNS failure — match native byte-for-byte.
+// This directory is the native⇄embedded net (tests/embedded_cross_test.rs):
+// stock artifacts refuse these ops at build time (the op audit), so the
+// fixtures deliberately live OUTSIDE spec/wasm_cross's stock sweeps.
+import http
+
+effect fn main() -> Unit = {
+  match http.get("http://127.0.0.1:9/") {
+    ok(_) => println("get: unexpected ok"),
+    err(e) => println("get: ${e}"),
+  }
+  match http.post("http://127.0.0.1:9/x", "{}") {
+    ok(_) => println("post: unexpected ok"),
+    err(e) => println("post: ${e}"),
+  }
+  match http.put("http://127.0.0.1:9/x", "y") {
+    ok(_) => println("put: unexpected ok"),
+    err(e) => println("put: ${e}"),
+  }
+  match http.patch("http://127.0.0.1:9/x", "z") {
+    ok(_) => println("patch: unexpected ok"),
+    err(e) => println("patch: ${e}"),
+  }
+  match http.delete("http://127.0.0.1:9/x") {
+    ok(_) => println("delete: unexpected ok"),
+    err(e) => println("delete: ${e}"),
+  }
+}

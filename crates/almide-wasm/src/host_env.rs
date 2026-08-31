@@ -62,6 +62,28 @@ impl Emitter<'_> {
                 self.fs_call_str2(k, v, crate::fs_meta::OP_ENV_SET)?;
                 Some(self.fs_result_unit()?)
             }
+            // The http string family (#1710 increment 1): every fn is
+            // Result[String, String] — exactly the fs.read_text decode.
+            ("http", "get", [u]) => {
+                self.fs_call_1(u, crate::fs_meta::OP_HTTP_GET)?;
+                Some(self.fs_result_string()?)
+            }
+            ("http", "delete", [u]) => {
+                self.fs_call_1(u, crate::fs_meta::OP_HTTP_DELETE)?;
+                Some(self.fs_result_string()?)
+            }
+            ("http", "post", [u, b]) => {
+                self.fs_call_str2(u, b, crate::fs_meta::OP_HTTP_POST)?;
+                Some(self.fs_result_string()?)
+            }
+            ("http", "put", [u, b]) => {
+                self.fs_call_str2(u, b, crate::fs_meta::OP_HTTP_PUT)?;
+                Some(self.fs_result_string()?)
+            }
+            ("http", "patch", [u, b]) => {
+                self.fs_call_str2(u, b, crate::fs_meta::OP_HTTP_PATCH)?;
+                Some(self.fs_result_string()?)
+            }
             ("env", "os", []) => {
                 self.fs_call_0(OP_ENV_OS)?;
                 self.fs_take_text()?;

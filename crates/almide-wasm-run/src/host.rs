@@ -352,6 +352,25 @@ fn fs_dispatch_host(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
                 Err(_) => (pack(2, 0), Vec::new()),
             },
         },
+        // http string client (#1710 increment 1, ops 43..=47): url in a,
+        // body (POST/PUT/PATCH) in b — THE native client transcribed
+        // (http_client.rs), so error texts and framing match native
+        // byte-for-byte. Stock artifacts never reach here (the build-path
+        // op audit refuses unserved ops); the embedded lane serves them.
+        43..=47 => {
+            let method = match op {
+                43 => "GET",
+                44 => "POST",
+                45 => "PUT",
+                46 => "PATCH",
+                _ => "DELETE",
+            };
+            let body = String::from_utf8_lossy(b).to_string();
+            match crate::http_client::request(method, a, &body, &[]) {
+                Ok(text) => ok_text(text),
+                Err(m) => err_s(m),
+            }
+        }
         // env.set (#1423 bucket C ruling): key in a, value in b.
         37 => {
             let v = String::from_utf8_lossy(b).to_string();

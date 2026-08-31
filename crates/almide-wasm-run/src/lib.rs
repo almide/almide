@@ -3,6 +3,7 @@
 //! import set; `RunResult` carries the cross-target observables.
 
 mod host;
+pub mod http_client;
 pub mod wasi;
 pub mod wasi_p2;
 pub mod wasi_p3;

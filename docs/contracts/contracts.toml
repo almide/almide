@@ -4202,3 +4202,14 @@ evidence  = [
   { path = "spec/wasm_cross/env_sleep_pause.almd", class = "fixture" },
 ]
 
+[[contract]]
+id        = "C-328"
+spec      = "ALS-R5"
+title     = "The http string family answers identically on the native and embedded-wasm lanes"
+statement = "http.get/post/put/patch/delete answer byte-identically on the native leg and the EMBEDDED wasm lane (`almide run --target wasm`, #1710 increment 1): the embedded host serves fs_call ops 43..=47 with a verbatim transcription of the native rustls client (crates/almide-wasm-run/src/http_client.rs), so transport-error texts — connection refusal, DNS failure, the timeout wording and its env-var hint, the close-without-close_notify tolerance, chunked framing — match by shared code, and a copy drift fails the spec/embedded_cross net (tests/embedded_cross_test.rs). STOCK artifacts refuse these ops at BUILD time through the emitted-op audit against the p1 shim's served set — never a runtime refusal on a runtime the developer never ran; the stock/component story is the rest of #1710."
+since     = "0.61.1"
+status    = "active"
+evidence  = [
+  { path = "spec/embedded_cross/http_client_errs.almd", class = "fixture" },
+]
+

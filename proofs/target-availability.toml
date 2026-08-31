@@ -89,12 +89,12 @@ issue = "#1423"
 
 [[native-only]]
 fn = "http.delete"
-reason = "host-surface"
+reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --target wasm` answers identically to native (C-328); the stock artifact refuses at build via the op audit until the p2/p3 component port"
 issue = "#1423"
 
 [[native-only]]
 fn = "http.get"
-reason = "host-surface"
+reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --target wasm` answers identically to native (C-328); the stock artifact refuses at build via the op audit until the p2/p3 component port"
 issue = "#1423"
 
 [[native-only]]
@@ -104,17 +104,17 @@ issue = "#1423"
 
 [[native-only]]
 fn = "http.patch"
-reason = "host-surface"
+reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --target wasm` answers identically to native (C-328); the stock artifact refuses at build via the op audit until the p2/p3 component port"
 issue = "#1423"
 
 [[native-only]]
 fn = "http.post"
-reason = "host-surface"
+reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --target wasm` answers identically to native (C-328); the stock artifact refuses at build via the op audit until the p2/p3 component port"
 issue = "#1423"
 
 [[native-only]]
 fn = "http.put"
-reason = "host-surface"
+reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --target wasm` answers identically to native (C-328); the stock artifact refuses at build via the op audit until the p2/p3 component port"
 issue = "#1423"
 
 [[native-only]]
@@ -283,12 +283,12 @@ issue = "#1423"
 
 [[wasm-unavailable]]
 fn = "http.delete"
-reason = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --target wasm` answers identically to native (C-328); the stock artifact refuses at build via the op audit until the p2/p3 component port"
 issue = "#1423"
 
 [[wasm-unavailable]]
 fn = "http.get"
-reason = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --target wasm` answers identically to native (C-328); the stock artifact refuses at build via the op audit until the p2/p3 component port"
 issue = "#1423"
 
 [[wasm-unavailable]]
@@ -298,17 +298,17 @@ issue = "#1423"
 
 [[wasm-unavailable]]
 fn = "http.patch"
-reason = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --target wasm` answers identically to native (C-328); the stock artifact refuses at build via the op audit until the p2/p3 component port"
 issue = "#1423"
 
 [[wasm-unavailable]]
 fn = "http.post"
-reason = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --target wasm` answers identically to native (C-328); the stock artifact refuses at build via the op audit until the p2/p3 component port"
 issue = "#1423"
 
 [[wasm-unavailable]]
 fn = "http.put"
-reason = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
+reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --target wasm` answers identically to native (C-328); the stock artifact refuses at build via the op audit until the p2/p3 component port"
 issue = "#1423"
 
 [[wasm-unavailable]]
