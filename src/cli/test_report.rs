@@ -391,28 +391,22 @@ fn test_name_map(source: &str) -> Vec<(String, String)> {
         let Some(rest) = rest.trim_start().strip_prefix('"') else { continue };
         let Some(end) = rest.find('"') else { continue };
         let name = &rest[..end];
-        out.push((format!("__test_almd_{}", mangle(name)), name.to_string()));
+        // Mangle the PREFIXED spelling, exactly as the walker does — the
+        // #1721 hash suffix is computed over the whole raw fn name, prefix
+        // included, so mangling only the bare name would derive a different
+        // hash for every non-ASCII test. ASCII names are unaffected (the
+        // prefix sanitizes to itself).
+        out.push((mangle(&format!("__test_almd_{name}")), name.to_string()));
     }
     out
 }
 
-/// The Rust walker's fn-name sanitizer, forward-applied (walker/mod.rs).
+/// The Rust walker's fn-name sanitizer, forward-applied — THE walker's own
+/// implementation, not a copy (#1721: the private copy here had already
+/// drifted from walker/mod.rs, and the injective non-ASCII hash suffix must
+/// agree byte-for-byte or every non-ASCII test name stops resolving).
 fn mangle(name: &str) -> String {
-    let s = name
-        .replace('+', "_plus_")
-        .replace('/', "_div_")
-        .replace('*', "_mul_")
-        .replace('(', "")
-        .replace(')', "")
-        .replace('=', "_eq_")
-        .replace('!', "_bang_")
-        .replace('?', "_q_")
-        .replace('<', "_lt_")
-        .replace('>', "_gt_")
-        .replace('|', "_pipe_")
-        .replace('&', "_amp_")
-        .replace('%', "_mod_");
-    s.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).collect()
+    almide_codegen::walker::rust_safe_fn_name(name)
 }
 
 /// `tests::__test_almd_string_mismatch` → `string mismatch` when the source
@@ -753,5 +747,11 @@ mod tests {
         let names = test_name_map(src);
         assert_eq!(names[0].0, "__test_almd_a__plus__b_fast");
         assert_eq!(display_name(&names, "tests::__test_almd_a__plus__b_fast"), "a + b (fast)");
+        // #1721: a non-ASCII name round-trips through the injective mangle
+        // (hash computed over the PREFIXED spelling, matching the walker).
+        let jp = "test \"b: 失敗表示は日本語名で出る\" {\n}\n";
+        let names_jp = test_name_map(jp);
+        let mangled = names_jp[0].0.clone();
+        assert_eq!(display_name(&names_jp, &format!("tests::{mangled}")), "b: 失敗表示は日本語名で出る");
     }
 }
