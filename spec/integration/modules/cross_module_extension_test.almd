@@ -1,0 +1,11 @@
+// #1591 (ratified): a convention method defined in the CALLING module against
+// a foreign type — open extension at a distance. The duplicate case (both
+// modules defining the same Type.method) is E012 (#1726), pinned in
+// tests/convention_extension_ruling_test.rs.
+import varlib
+
+fn Pigment.luma(self) -> Int = (self.r + self.g + self.b) / 3
+
+test "extension at a distance: caller-module method on a foreign type (#1591)" {
+  assert_eq(varlib.Pigment { r: 3, g: 6, b: 9 }.luma(), 6)
+}
