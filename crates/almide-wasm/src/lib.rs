@@ -104,6 +104,7 @@ mod list_order;
 mod list_sort;
 mod string_scan;
 mod stmts;
+mod stmts_append;
 mod string_ext;
 pub(crate) mod work;
 pub(crate) use work::*;
