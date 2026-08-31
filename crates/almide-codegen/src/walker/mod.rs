@@ -322,6 +322,65 @@ fn render_fn_generics_str(ctx: &RenderContext, fn_ctx: &RenderContext, func: &Ir
 
 /// Sanitize the function name: spaces/dots/hyphens → underscores, mangle
 /// Rust-illegal characters, escape Rust keywords, add the module-origin
+/// A Rust-identifier-safe spelling of `raw`, shared by the walker and the
+/// test-report name recovery (src/cli/test_report.rs mangles FORWARD with
+/// this same fn — a private copy there drifted once already).
+///
+/// #1721: the final non-ASCII sweep replaces every non-ASCII char with `_`,
+/// which is LOSSY — two Japanese test names with the same ASCII skeleton and
+/// length collapsed into one Rust fn (E0428). When `raw` contains any
+/// non-ASCII character, an 8-hex FNV-1a of its UTF-8 bytes is appended so
+/// the mapping is injective per distinct original. ASCII-only names keep
+/// their exact historical spelling (zero churn for the existing corpus).
+pub fn rust_safe_fn_name(raw: &str) -> String {
+    let s = raw.replace(' ', "_").replace('-', "_").replace('.', "_")
+        .replace('+', "_plus_").replace('/', "_div_").replace('*', "_mul_")
+        .replace('(', "").replace(')', "").replace(',', "_").replace(':', "_")
+        .replace('=', "_eq_").replace('!', "_bang_").replace('?', "_q_")
+        .replace('<', "_lt_").replace('>', "_gt_").replace('[', "_").replace(']', "_")
+        .replace('|', "_pipe_").replace('&', "_amp_").replace('%', "_mod_");
+    let mut safe: String = s.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).collect();
+    if raw.chars().any(|c| !c.is_ascii()) {
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for b in raw.as_bytes() {
+            h ^= *b as u64;
+            h = h.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        safe.push_str(&format!("_{:08x}", (h >> 32) as u32 ^ h as u32));
+    }
+    safe
+}
+
+#[cfg(test)]
+mod rust_safe_fn_name_tests {
+    use super::rust_safe_fn_name;
+
+    /// #1721: same ASCII skeleton + same non-ASCII count must NOT collide.
+    #[test]
+    fn same_skeleton_nonascii_names_stay_distinct() {
+        let a = rust_safe_fn_name("__test_almd_a: 値を取る旗に値が無ければ断る");
+        let b = rust_safe_fn_name("__test_almd_a: 旗の値は位置引数に混ざらない");
+        assert_ne!(a, b, "lossy mangle collided: {a}");
+    }
+
+    /// ASCII names keep their exact historical spelling — zero churn for the
+    /// existing corpus, and the test-report recovery keeps matching.
+    #[test]
+    fn ascii_names_are_untouched_by_the_hash_rule() {
+        assert_eq!(rust_safe_fn_name("__test_almd_a + b (fast)"), "__test_almd_a__plus__b_fast");
+        assert_eq!(rust_safe_fn_name("string mismatch"), "string_mismatch");
+    }
+
+    /// The suffix is a pure function of the original spelling (stable across
+    /// runs and platforms), so a reordered file keeps its names.
+    #[test]
+    fn hash_suffix_is_stable() {
+        let once = rust_safe_fn_name("日本語");
+        assert_eq!(once, rust_safe_fn_name("日本語"));
+        assert!(once.ends_with(|c: char| c.is_ascii_hexdigit()));
+    }
+}
+
 /// runtime prefix, and append the generics suffix.
 fn render_fn_safe_name(
     ctx: &RenderContext,
@@ -338,14 +397,7 @@ fn render_fn_safe_name(
     } else {
         func.name.to_string()
     };
-    let mut safe_name = raw_name.replace(' ', "_").replace('-', "_").replace('.', "_")
-        .replace('+', "_plus_").replace('/', "_div_").replace('*', "_mul_")
-        .replace('(', "").replace(')', "").replace(',', "_").replace(':', "_")
-        .replace('=', "_eq_").replace('!', "_bang_").replace('?', "_q_")
-        .replace('<', "_lt_").replace('>', "_gt_").replace('[', "_").replace(']', "_")
-        .replace('|', "_pipe_").replace('&', "_amp_").replace('%', "_mod_");
-    // Strip any remaining non-ASCII characters (e.g., →, ★, etc.)
-    safe_name = safe_name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).collect();
+    let mut safe_name = rust_safe_fn_name(&raw_name);
     // Emit-time prefix: module_origin → "almide_rt_{origin}_{name}"
     // IR name stays clean; prefix is a rendering concern.
     if let Some(ref origin) = func.module_origin {
