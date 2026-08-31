@@ -1,0 +1,8 @@
+// #1677: a nested `fn` declaration — reflexive for writers from Rust/TS/Swift.
+// The old diagnostic named the token ("Expected expression ... got Fn") and the
+// orphaned body flooded E003 on the parameters; the rule is what broke.
+effect fn main() -> Unit = {
+  let total = 1000
+  fn row(label: String, ns: Int) -> Unit = println("${label}: ${ns / total}")
+  row("a", 5)
+}

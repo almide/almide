@@ -11,6 +11,34 @@ use crate::lexer::TokenType;
 use super::Parser;
 
 impl Parser {
+    /// #1677: a `fn` (or `effect fn`) declaration at STATEMENT position inside
+    /// a braced block. Emits the boundary-naming diagnostic, consumes the
+    /// whole declaration through its body (recovery that leaves the body
+    /// behind re-parses it as statements and floods E003 on the parameters),
+    /// and records the name in `failed_fn_names` so call sites below do not
+    /// cascade "undefined function".
+    pub(crate) fn nested_fn_decl_error(&mut self) {
+        let tok = self.current().clone();
+        let diag = self.diag_error(
+            "`fn` cannot be declared inside a function body",
+            "Move it to the top level (thread any captured locals as parameters), or bind a lambda: `let row = (label, ns) => ...`",
+            "nested fn",
+        ).with_try("fn row(label: String, ns: Int, total: Int) -> Unit =\n    println(\"${label}: ${ns / total}\")");
+        self.errors.push(diag);
+        let _ = tok;
+        match self.parse_fn_decl() {
+            Ok(Decl::Fn { name, .. }) => {
+                self.failed_fn_names.insert(name.to_string());
+            }
+            Ok(_) => {}
+            Err(_) => {
+                // parse_fn_decl already recorded the name and its own error;
+                // skip to a statement boundary so the loop can continue.
+                self.recover_to_sync_point(true);
+            }
+        }
+    }
+
     pub(crate) fn parse_fn_decl(&mut self) -> Result<Decl, String> {
         let span = self.current_span();
         if self.check(TokenType::Pub) { self.advance(); }

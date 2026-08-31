@@ -81,6 +81,23 @@ impl Parser {
         let mut stmts = initial_comments;
         let mut final_expr: Option<Box<Expr>> = None;
         while !self.check(TokenType::RBrace) && !self.check(TokenType::EOF) {
+            // #1677: a nested `fn` declaration — reflexive for writers from
+            // Rust/TS/Swift, unsupported here. The old path fell into
+            // "Expected expression … got Fn" plus E003s from the orphaned
+            // body. Name the rule, consume the WHOLE declaration (so its body
+            // does not re-parse as statements), and suppress the undefined-
+            // function cascade at its call sites. Braced blocks only: at
+            // top level a stray `fn` is the next declaration, not a nesting.
+            if self.check(TokenType::Fn)
+                || (self.check(TokenType::Effect)
+                    && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Fn))
+            {
+                let err_span = Some(self.current_span());
+                self.nested_fn_decl_error();
+                stmts.push(Stmt::Error { span: err_span });
+                self.skip_newlines();
+                continue;
+            }
             let pre_err_len = self.errors.len();
             match self.parse_stmt() {
                 Ok(stmt) => {
