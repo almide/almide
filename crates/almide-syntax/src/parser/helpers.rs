@@ -458,6 +458,31 @@ impl Parser {
         }
     }
 
+    /// Bind `comments` as LEADING on `id` (the #1714 list/map-element path —
+    /// same table the #1404 inline machinery writes to, so fmt reads one map).
+    pub(crate) fn attach_leading_comments(&mut self, id: crate::ast::ExprId, comments: Vec<String>) {
+        if comments.is_empty() { return; }
+        self.expr_comments.entry(id).or_default().leading.extend(comments);
+    }
+
+    /// Like `skip_newlines`, but COLLECT the comment tokens skipped over: the
+    /// own-line comments inside a bracketed literal that introduce the element
+    /// that follows (#1714 — the `// ---- group ----` catalog idiom). The
+    /// caller attaches the result as LEADING on the next node it parses
+    /// (attach-to-following, #1326's ruling); a caller that finds no next node
+    /// leaves them uncollected-in-output and the conservation verifier keeps
+    /// refusing that shape honestly.
+    pub(crate) fn skip_newlines_collecting(&mut self) -> Vec<String> {
+        let mut collected = Vec::new();
+        while self.check(TokenType::Newline) || self.check(TokenType::Comment) {
+            if self.check(TokenType::Comment) {
+                collected.push(self.current().value.clone());
+            }
+            self.advance();
+        }
+        collected
+    }
+
     /// Skip newlines only if the next non-newline token matches `tt`.
     /// This allows multiline continuation for operators like `|>`.
     pub(crate) fn skip_newlines_if_followed_by(&mut self, tt: TokenType) {

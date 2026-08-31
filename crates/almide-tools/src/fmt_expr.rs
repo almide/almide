@@ -536,14 +536,50 @@ fn fmt_block(out: &mut String, stmts: &[Stmt], expr: &Option<Box<Expr>>, depth: 
     w!(out, "{}}}", ind(depth));
 }
 
+/// Does `id` carry LEADING comments (the #1714 own-line element-introducer
+/// shape)? Decides multi-line forcing for list/map literals: an own-line `//`
+/// comment has nowhere to go on one line — the record-type precedent
+/// (`fmt_record_type`).
+fn has_leading_comments(id: ExprId) -> bool {
+    comments_for(id).is_some_and(|a| !a.leading.is_empty())
+}
+
+/// Emit `id`'s leading comments on their own lines at `depth` — the element
+/// position their author wrote them in. The caller then renders the node via
+/// [`fmt_expr_sans_leading`] so the generic inline-leading printer in
+/// [`fmt_expr`] does not print them a second time.
+fn emit_leading_comment_lines(out: &mut String, id: ExprId, depth: usize) {
+    if let Some(a) = comments_for(id) {
+        for c in &a.leading {
+            out.push_str(&ind(depth));
+            out.push_str(c);
+            out.push('\n');
+        }
+    }
+}
+
+/// Render `expr` with its LEADING comments already emitted own-line by the
+/// caller; trailing stays inline exactly as [`fmt_expr`] prints it.
+fn fmt_expr_sans_leading(out: &mut String, expr: &Expr, depth: usize) {
+    fmt_expr_inner(out, expr, depth);
+    if let Some(a) = comments_for(expr.id) {
+        for c in &a.trailing {
+            out.push(' ');
+            out.push_str(c);
+        }
+    }
+}
+
 fn fmt_list(out: &mut String, elements: &[Expr], depth: usize) {
     if elements.is_empty() { out.push_str("[]"); return; }
-    if elements.len() <= 5 && elements.iter().all(is_short) {
+    let any_leading = elements.iter().any(|e| has_leading_comments(e.id));
+    if !any_leading && elements.len() <= 5 && elements.iter().all(is_short) {
         out.push('['); comma_sep(out, elements, |out, e| fmt_expr(out, e, depth)); out.push(']');
     } else {
         out.push_str("[\n");
         for (i, e) in elements.iter().enumerate() {
-            out.push_str(&ind(depth + 1)); fmt_expr(out, e, depth + 1);
+            emit_leading_comment_lines(out, e.id, depth + 1);
+            out.push_str(&ind(depth + 1)); fmt_expr_sans_leading(out, e, depth + 1);
             if i < elements.len() - 1 { out.push(','); } out.push('\n');
         }
         w!(out, "{}]", ind(depth));
@@ -551,13 +587,18 @@ fn fmt_list(out: &mut String, elements: &[Expr], depth: usize) {
 }
 
 fn fmt_map(out: &mut String, entries: &[(Expr, Expr)], depth: usize) {
-    let short = entries.len() <= 3 && entries.iter().all(|(k, v)| is_short(k) && is_short(v));
+    let any_leading = entries.iter().any(|(k, _)| has_leading_comments(k.id));
+    let short = !any_leading && entries.len() <= 3 && entries.iter().all(|(k, v)| is_short(k) && is_short(v));
     let (open, close, d) = if short { ("[", "]", depth) } else { ("[\n", "]", depth + 1) };
     out.push_str(open);
     for (i, (k, v)) in entries.iter().enumerate() {
         if short { if i > 0 { out.push_str(", "); } }
-        else { out.push_str(&ind(d)); }
-        fmt_expr(out, k, d); out.push_str(": "); fmt_expr(out, v, d);
+        else {
+            emit_leading_comment_lines(out, k.id, d);
+            out.push_str(&ind(d));
+        }
+        if short { fmt_expr(out, k, d); } else { fmt_expr_sans_leading(out, k, d); }
+        out.push_str(": "); fmt_expr(out, v, d);
         if !short { if i < entries.len() - 1 { out.push(','); } out.push('\n'); }
     }
     if !short { out.push_str(&ind(depth)); }

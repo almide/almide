@@ -223,6 +223,52 @@ mod attr_tests {
         assert_eq!(once, twice, "formatting is not idempotent for attached comments");
     }
 
+    /// #1714: own-line comments inside a LIST literal introduce the element
+    /// that follows (the `// ---- group ----` catalog idiom). They bind
+    /// LEADING on that element and reprint on their own lines above it; a
+    /// list that carries one is forced multi-line (an own-line `//` has
+    /// nowhere to go on one line — the record-type precedent). Before this,
+    /// such files could never be formatted: the conservation verifier
+    /// refused them (E054) forever.
+    #[test]
+    fn own_line_comments_in_a_list_literal_stay_above_their_elements() {
+        let src = "type Fix = { id: String, who: String }\n\nlet FIXES: List[Fix] = [\n  // ---- group 1 ----\n  Fix { id: \"A-01\", who: \"dev\" },\n  // ---- group 2 ----\n  Fix { id: \"B-01\", who: \"ops\" },\n]\n";
+        let out = roundtrip(src);
+        let g1 = out.find("// ---- group 1 ----").expect("group 1 comment lost");
+        let a01 = out.find("A-01").expect("element 1 lost");
+        let g2 = out.find("// ---- group 2 ----").expect("group 2 comment lost");
+        let b01 = out.find("B-01").expect("element 2 lost");
+        assert!(g1 < a01 && a01 < g2 && g2 < b01, "comments drifted off their groups:\n{out}");
+        // Own line, not joined onto the element's line.
+        assert!(out.contains("// ---- group 1 ----\n"), "comment not on its own line:\n{out}");
+        let twice = roundtrip(&out);
+        assert_eq!(out, twice, "list-comment formatting is not idempotent");
+    }
+
+    /// #1714, the forcing rule: a list short enough for one line goes
+    /// multi-line the moment an element carries a leading comment.
+    #[test]
+    fn a_leading_comment_forces_a_short_list_multiline() {
+        let src = "let XS: List[Int] = [\n  // the answer\n  42,\n]\n";
+        let out = roundtrip(src);
+        assert!(out.contains("[\n"), "short list with a comment must not collapse to one line:\n{out}");
+        assert!(out.contains("// the answer"), "comment lost:\n{out}");
+        assert_eq!(out, roundtrip(&out), "not idempotent");
+    }
+
+    /// #1714, the map arm: entry-introducing comments bind to the entry's KEY
+    /// and survive in place.
+    #[test]
+    fn own_line_comments_in_a_map_literal_stay_above_their_entries() {
+        let src = "let M: Map[String, Int] = [\n  // first\n  \"a\": 1,\n  // second\n  \"b\": 2,\n]\n";
+        let out = roundtrip(src);
+        let c1 = out.find("// first").expect("first comment lost");
+        let a = out.find("\"a\"").expect("entry a lost");
+        let c2 = out.find("// second").expect("second comment lost");
+        assert!(c1 < a && a < c2, "map comments drifted:\n{out}");
+        assert_eq!(out, roundtrip(&out), "map-comment formatting is not idempotent");
+    }
+
     /// Parse → format → parse round-trip: the second parse must
     /// produce the same attribute structure as the first. This is
     /// the formatter's idempotency contract, stricter than matching
