@@ -31,6 +31,7 @@ fn join(list: List[String], sep: String) -> String = _
 @intrinsic("almide_rt_string_len")
 fn len(s: String) -> Int = _
 
+@deprecated(since=3, use="string.len")
 @intrinsic("almide_rt_string_len")
 fn length(s: String) -> Int = _
 
