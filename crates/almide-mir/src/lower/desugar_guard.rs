@@ -258,7 +258,7 @@ pub fn normalize_tail_err_raise_ifs(program: &mut almide_ir::IrProgram) {
                                     }),
                                 },
                                 ty: result_ty.clone(),
-                                span: else_.span.clone(),
+                                span: else_.span,
                                 def_id: None,
                             };
                             let err_leaf = IrExpr { ty: result_ty.clone(), ..inner };
@@ -269,7 +269,7 @@ pub fn normalize_tail_err_raise_ifs(program: &mut almide_ir::IrProgram) {
                                     else_: Box::new(err_leaf),
                                 },
                                 ty: result_ty.clone(),
-                                span: e.span.clone(),
+                                span: e.span,
                                 def_id: None,
                             };
                             let r = vt.alloc(
@@ -307,7 +307,7 @@ pub fn normalize_tail_err_raise_ifs(program: &mut almide_ir::IrProgram) {
                                             }),
                                         },
                                         ty: Ty::Unit,
-                                        span: e.span.clone(),
+                                        span: e.span,
                                         def_id: None,
                                     },
                                     mutability: Mutability::Let,
@@ -321,7 +321,7 @@ pub fn normalize_tail_err_raise_ifs(program: &mut almide_ir::IrProgram) {
                                     expr: Some(Box::new(continuation)),
                                 },
                                 ty: Ty::Unit,
-                                span: e.span.clone(),
+                                span: e.span,
                                 def_id: e.def_id,
                             };
                             // The continuation's own tail may be the next guard
@@ -337,7 +337,7 @@ pub fn normalize_tail_err_raise_ifs(program: &mut almide_ir::IrProgram) {
                                     &mut t.kind
                                 {
                                     if !inner.is_empty() {
-                                        stmts.extend(inner.drain(..));
+                                        stmts.append(inner);
                                         let v = (**iv).clone();
                                         **t = v;
                                     }
