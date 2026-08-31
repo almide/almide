@@ -11,7 +11,7 @@ almide-ir = { path = "../almide-ir" }
 almide-base = { path = "../almide-base" }
 almide-types = { path = "../almide-types" }
 almide-layout = { path = "../almide-layout" }
-wasm-encoder = { version = "0.257", features = ["wasmparser"] }
+wasm-encoder = { version = "0.258", features = ["wasmparser"] }
 wasmparser = "0.257"
 
 [dev-dependencies]

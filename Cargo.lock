@@ -253,7 +253,7 @@ dependencies = [
  "almide-wasm-run",
  "anyhow",
  "sha2",
- "wasm-encoder 0.257.1",
+ "wasm-encoder 0.258.0",
  "wasmparser 0.257.1",
  "wasmtime",
 ]
@@ -265,7 +265,7 @@ dependencies = [
  "almide-wasm",
  "anyhow",
  "rustls",
- "wasm-encoder 0.257.1",
+ "wasm-encoder 0.258.0",
  "wasmparser 0.257.1",
  "wasmtime",
  "webpki-roots",

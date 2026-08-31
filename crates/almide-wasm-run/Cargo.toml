@@ -17,7 +17,7 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "logg
 webpki-roots = "1.0"
 anyhow = "1"
 wasmparser = "0.257"
-wasm-encoder = "0.257"
+wasm-encoder = "0.258"
 wasmtime = "47"
 wit-component = "0.257"
 wit-parser = "0.257"
