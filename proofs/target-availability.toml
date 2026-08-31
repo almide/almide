@@ -58,11 +58,6 @@ reason = "structural-leg-gap: the incumbent links the four self-host twins (#142
 issue = "#1423"
 
 [[native-only]]
-fn = "env.set"
-reason = "embedded-lane-only: the overlay (op 37) serves `almide run --target wasm`; the stock p1 shim has no environ service yet, and the to_wasi op-audit refuses the artifact at BUILD time rather than shipping a runtime refusal (#1423 bucket C follow-up: shim overlay + environ_get remap)"
-issue = "#1423"
-
-[[native-only]]
 fn = "fs.glob"
 reason = "pending-self-host"
 issue = "#1423"

@@ -850,7 +850,12 @@ fn render_wasm_module_routed(
             // refusal there (the env.set lesson) — refuse at build time,
             // through the same reroute (the incumbent may serve the fn
             // with real WASI imports; if not, its wall names the reason).
+            // Not under ALMIDE_WASM_STRUCTURAL: the force switch probes
+            // the EMITTER frontier (its contract is walls-as-hard-errors
+            // on lowering, not stock service); the audit gates what the
+            // DEFAULT path ships.
             if library_ok
+                && !force_structural
                 && let Some(op) = host_ops
                     .iter()
                     .find(|op| !almide_wasm_run::wasi::P1_SERVED_OPS.contains(op))
