@@ -140,7 +140,11 @@ case "${1:-}" in
       esac
       if [ -z "$expr" ]; then expr="binary_id(=$bid)"; else expr="$expr | binary_id(=$bid)"; fi
     done
-    exec cargo nextest run --archive-file "$ARCHIVE" --workspace-remap . --no-fail-fast -E "$expr"
+    # --extract-to .: the archive recreates ./target/debug/* in the
+    # workspace, so the CARGO_BIN_EXE_* paths the test helpers baked at
+    # compile time resolve on a checkout that never ran cargo (the
+    # binding_diag "No such file or directory" class, soak round 2).
+    exec cargo nextest run --archive-file "$ARCHIVE" --extract-to . --workspace-remap . --no-fail-fast -E "$expr"
     ;;
   --list)     SHARD="$2" TOTAL="$3" DEFAULT_WEIGHT=$DEFAULT_WEIGHT WEIGHTS=$WEIGHTS partition ;;
   --run)
