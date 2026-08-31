@@ -853,9 +853,14 @@ fn render_wasm_module_routed(
             // Not under ALMIDE_WASM_STRUCTURAL: the force switch probes
             // the EMITTER frontier (its contract is walls-as-hard-errors
             // on lowering, not stock service); the audit gates what the
-            // DEFAULT path ships.
+            // DEFAULT path ships. Not under ALMIDE_COMPONENT_P3 either:
+            // the p3-requested build ships through `to_p3`, whose shim
+            // carries the fs surface the p1 set does not (the same env
+            // predicate that flipped fs routing structural above) — an
+            // op the p3 transform cannot map still fails loudly there.
             if library_ok
                 && !force_structural
+                && std::env::var_os("ALMIDE_COMPONENT_P3").is_none()
                 && let Some(op) = host_ops
                     .iter()
                     .find(|op| !almide_wasm_run::wasi::P1_SERVED_OPS.contains(op))
