@@ -1,8 +1,10 @@
 # Wasm runtime ledger (#1701) — the SOURCE for the README's wasm-runtime block.
 # Regenerate: bash scripts/check-wasm-runtime-ratio.sh --measure
-# Gate:       bash scripts/check-wasm-runtime-ratio.sh   (re-measures the
-#             RATIO wasm/native per measured row; the ratio cancels the
-#             machine — absolute times are the stamping machine's context).
+# Gate:       bash scripts/check-wasm-runtime-ratio.sh — the STATUS taxonomy
+#             is enforced everywhere (a hole that starts benching, a measured
+#             row that stops, a changed refusal class all fail); the RATIO
+#             verdict runs only on the stamping machine class (cross-engine
+#             ratios do not cancel hardware — see the script header).
 #
 # Rows: name | status | native_ms | wasm_ms | ratio (wasm/native)
 #   measured          — `almide bench --target wasm` (embedded host, verify-
@@ -19,15 +21,15 @@ version = almide 0.61.0
 date    = 2026-08-31
 machine = arm64 Darwin (local stamp; ratios are the gated quantity)
 
-nbody                 | measured         | 1.26  | 2.63 | 2.09
-spectralnorm          | measured         | 1.44  | 3.25 | 2.26
-binarytrees           | measured         | 3.26  | 2.78 | 0.85
-fasta                 | routed-incumbent | 1.44  | -    | -
-fannkuchredux         | routed-incumbent | 1.39  | -    | -
-mandelbrot            | routed-incumbent | 2.56  | -    | -
-onebrc                | walled           | 1.80  | -    | -
-fft                   | oom-embedded     | 38.73 | -    | -
-strchurn              | oom-embedded     | 51.18 | -    | -
-listbuild_append      | oom-embedded     | 19.89 | -    | -
-listbuild_combinator  | oom-embedded     | 20.66 | -    | -
-listbuild_prealloc    | oom-embedded     | 20.11 | -    | -
+nbody                 | measured         | 1.19  | 2.61 | 2.19
+spectralnorm          | measured         | 1.44  | 3.16 | 2.19
+binarytrees           | measured         | 3.18  | 2.68 | 0.84
+fasta                 | routed-incumbent | 1.39  | -    | -
+fannkuchredux         | routed-incumbent | 1.42  | -    | -
+mandelbrot            | routed-incumbent | 2.55  | -    | -
+onebrc                | walled           | 1.79  | -    | -
+fft                   | oom-embedded     | 38.69 | -    | -
+strchurn              | oom-embedded     | 51.43 | -    | -
+listbuild_append      | oom-embedded     | 20.86 | -    | -
+listbuild_combinator  | oom-embedded     | 21.00 | -    | -
+listbuild_prealloc    | oom-embedded     | 19.79 | -    | -

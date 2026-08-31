@@ -7,16 +7,22 @@
 # number, and the watch on it.
 #
 # What it checks, per row of docs/benchmarks/wasm-runtime.txt:
-#   measured          re-bench BOTH legs and compare the RATIO wasm/native
-#                     against the committed one. Ratios cancel the machine
-#                     (same discipline as check-perf-ratio.sh); absolute
-#                     times in the ledger are the stamping machine's context.
-#                     Budget: WASM_RUNTIME_BUDGET_PCT (default 50) percent
-#                     above the committed ratio — wide on purpose, a real
-#                     regression (a lost in-place write, an rc leak in a hot
-#                     loop) shows as 2-10x. And BOTH directions: a ratio
-#                     under 40% of baseline means the bench or a leg broke —
-#                     a durable win re-stamps the ledger in the same change.
+#   measured          re-bench BOTH legs. The row must still BENCH — that
+#                     is enforced everywhere. The RATIO comparison is a
+#                     VERDICT only on the machine class that stamped the
+#                     ledger (local runs, or WASM_RUNTIME_RATIO_VERDICT=1):
+#                     unlike the native/Rust gate, a CROSS-ENGINE ratio does
+#                     NOT cancel the machine — measured 2026-08-31, nbody
+#                     wasm/native was 2.09 on the stamping M-series and
+#                     19.95 on a 2-core ubuntu runner (the embedded engine's
+#                     fixed costs and the fan thread-pool advantage both
+#                     scale with hardware) — so on CI the ratio prints for
+#                     information and the STATUS taxonomy is the gate.
+#                     Budget when the verdict is armed:
+#                     WASM_RUNTIME_BUDGET_PCT (default 50) percent above
+#                     the committed ratio, and BOTH directions (under 40%
+#                     of baseline = the bench broke or a durable win —
+#                     re-stamp in the same change).
 #   routed-incumbent  the embedded-host bench must STILL refuse (the program
 #                     routes to the incumbent artifact). If it starts
 #                     benching, the routing improved: FAIL with the good
@@ -56,9 +62,11 @@ if [ "${1:-}" = "--measure" ]; then
     cat <<'HDR'
 # Wasm runtime ledger (#1701) — the SOURCE for the README's wasm-runtime block.
 # Regenerate: bash scripts/check-wasm-runtime-ratio.sh --measure
-# Gate:       bash scripts/check-wasm-runtime-ratio.sh   (re-measures the
-#             RATIO wasm/native per measured row; the ratio cancels the
-#             machine — absolute times are the stamping machine's context).
+# Gate:       bash scripts/check-wasm-runtime-ratio.sh — the STATUS taxonomy
+#             is enforced everywhere (a hole that starts benching, a measured
+#             row that stops, a changed refusal class all fail); the RATIO
+#             verdict runs only on the stamping machine class (cross-engine
+#             ratios do not cancel hardware — see the script header).
 #
 # Rows: name | status | native_ms | wasm_ms | ratio (wasm/native)
 #   measured          — `almide bench --target wasm` (embedded host, verify-
@@ -98,6 +106,12 @@ HDR
   exit 0
 fi
 
+# Ratio verdict: on by default locally (the stamping machine class), off on
+# CI unless explicitly armed — see the header for the measured reason.
+if [ -n "${WASM_RUNTIME_RATIO_VERDICT:-}" ]; then RATIO_VERDICT=1
+elif [ -n "${GITHUB_ACTIONS:-}" ]; then RATIO_VERDICT=0
+else RATIO_VERDICT=1; fi
+
 fail=0
 while IFS= read -r raw; do
   case "$raw" in ''|\#*|version*|date*|machine*) continue ;; esac
@@ -128,6 +142,10 @@ now = $w/$n; base = $ratio
 hi = base * (1 + $budget/100); lo = base * 0.4
 print('HIGH' if now > hi else 'LOW' if now < lo else 'OK', f'{now:.2f}')")
       v=${verdict%% *}; now=${verdict##* }
+      if [ "$RATIO_VERDICT" != "1" ]; then
+        echo "wasm-runtime[$name]: benches (ratio $now here, $ratio stamped — informational on this machine class)"
+        continue
+      fi
       case "$v" in
         OK)  echo "wasm-runtime[$name]: ratio $now (baseline $ratio) OK" ;;
         HIGH) echo "::error::wasm-runtime[$name]: ratio $now regressed past baseline $ratio +${budget}%"; fail=1 ;;
