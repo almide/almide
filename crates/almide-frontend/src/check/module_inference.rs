@@ -322,7 +322,9 @@ impl Checker {
         // registration.rs's matching fix). `Self` only stays an unresolved
         // placeholder inside a `protocol { ... }` declaration; on an actual
         // convention method it must resolve to the enclosing type.
-        let receiver_ty = name.split_once('.').map(|(ty_name, _)| Ty::Named(sym(ty_name), Vec::new()));
+        let receiver_ty = name
+            .split_once('.')
+            .map(|(ty_name, _)| self.resolve_type_expr(&ast::TypeExpr::Simple { name: sym(ty_name) }));
         for (i, p) in params.iter_mut().enumerate() {
             let ty = if i == 0 && p.name.as_str() == "self"
                 && matches!(&p.ty, ast::TypeExpr::Simple { name: tn } if tn.as_str() == "Self")

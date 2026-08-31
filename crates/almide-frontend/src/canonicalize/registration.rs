@@ -264,8 +264,20 @@ fn bare_type_name(type_name: &str) -> &str {
 /// Emitting the prefixed spelling produced calls to `lib_Color_repr` against a
 /// definition called `almide_rt_lib_Color_repr` (#1087).
 pub fn convention_emit_key(env: &TypeEnv, type_name: &str, method: &str) -> Option<Sym> {
-    convention_fn_key(env, type_name, method)
-        .map(|_| sym(&format!("{}.{}", bare_type_name(type_name), method)))
+    convention_fn_key(env, type_name, method).map(|_| {
+        // A receiver whose canonical type is module-qualified (`moda.Box`)
+        // emits the QUALIFIED method name when that spelling is registered:
+        // with TWO modules owning the bare type name, the bare `Box.tag` is
+        // one ambiguous key at symbol re-attachment and dispatched to
+        // whichever module registered last (#1728). Single-owner and derived
+        // (bare-registered) methods keep the bare form (#1087).
+        if type_name.contains('.')
+            && env.functions.contains_key(&sym(&format!("{}.{}", type_name, method)))
+        {
+            return sym(&format!("{}.{}", type_name, method));
+        }
+        sym(&format!("{}.{}", bare_type_name(type_name), method))
+    })
 }
 /// Substitute `Self` → concrete type in a protocol method type.
 fn substitute_self(ty: &Ty, replacement: &Ty) -> Ty {
@@ -403,8 +415,14 @@ pub fn register_fn_sig(env: &mut TypeEnv, decl: &FnSigToRegister<'_>) {
         (*gn, prev)
     }).collect();
     // A bare `self` first parameter is sugar for `self: Self` (the parser always types it `TypeExpr::Simple { name: "Self" }`). Inside a `protocol { ... }` declaration `Self` is a legitimate unresolved placeholder, but on a real convention method (`fn Type.method(self, ...)`) it must resolve to the enclosing type, the same way `Self` in a protocol's own signature gets substituted when checked against one.
-    let receiver_ty = name.split_once('.').map(|(ty_name, _)| Ty::Named(sym(ty_name), Vec::new()));
+    // The synthesized receiver resolves through the SAME canonicalizer as a
+    // written type reference: with TWO modules owning the bare name, a bare
+    // `Ty::Named` here typed the method's self as the ambiguous bare name
+    // while the checked receiver carried the canonical `mod.Type` (#1728).
     let tcm = type_cur_mod(env, prefix);
+    let receiver_ty = name
+        .split_once('.')
+        .map(|(ty_name, _)| resolve_in(env, &ast::TypeExpr::Simple { name: sym(ty_name) }, tcm));
     let ptys: Vec<(Sym, Ty)> = params.iter().enumerate().map(|(i, p)| {
         if i == 0 && p.name.as_str() == "self" {
             if let (ast::TypeExpr::Simple { name: tn }, Some(rt)) = (&p.ty, &receiver_ty) {
