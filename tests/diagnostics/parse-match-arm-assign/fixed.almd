@@ -1,0 +1,13 @@
+// The fix the hint teaches: an arm body that assigns is a block.
+fn main() -> Unit = {
+  var c = 0
+  match int.parse("3") {
+    ok(_) => {
+      c = c + 1
+    },
+    err(_) => {
+      c = c
+    },
+  }
+  println("${c}")
+}

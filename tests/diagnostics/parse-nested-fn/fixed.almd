@@ -1,0 +1,7 @@
+// The fix the hint teaches: top-level fn, captured local threaded as a parameter.
+fn row(label: String, ns: Int, total: Int) -> Unit = println("${label}: ${ns / total}")
+
+effect fn main() -> Unit = {
+  let total = 1000
+  row("a", 5, total)
+}
