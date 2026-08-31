@@ -15,6 +15,7 @@ import json
 type Point: Codec = { x: Int, y: Float }
 
 type Addr: Codec = { city: String }
+
 type User: Codec = { name: String, addr: Addr, tags: List[String] }
 
 fn main() -> Unit = {

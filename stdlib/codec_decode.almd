@@ -45,10 +45,9 @@ fn __decode_list_bool(v: Value) -> Result[List[Bool], String] = match value.as_a
 // BOTH targets: this is pure Almide, so native and wasm compile the same fn.
 // (No string.split_once here: that fn has no wasm lowering yet — the scan
 // uses len/slice/starts_with, which both legs link.)
-fn __err_scan(e: String, n: Int, i: Int) -> Int =
-  if i + 5 > n then 0 - 1
-  else if string.slice(e, i, i + 5) == ", at " then i
-  else __err_scan(e, n, i + 1)
+fn __err_scan(e: String, n: Int, i: Int) -> Int = if i + 5 > n then 0 - 1
+else if string.slice(e, i, i + 5) == ", at " then i
+else __err_scan(e, n, i + 1)
 
 fn __err_at(e: String, seg: String) -> String = {
   let n = string.len(e)
@@ -57,8 +56,7 @@ fn __err_at(e: String, seg: String) -> String = {
   else {
     let head = string.slice(e, 0, i)
     let path = string.slice(e, i + 5, n)
-    if string.starts_with(path, "[") then head + ", at " + seg + path
-    else head + ", at " + seg + "." + path
+    if string.starts_with(path, "[") then head + ", at " + seg + path else head + ", at " + seg + "." + path
   }
 }
 
