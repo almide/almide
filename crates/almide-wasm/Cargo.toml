@@ -22,7 +22,7 @@ almide-wasm-run = { path = "../almide-wasm-run" }
 almide = { path = "../.." }
 wasmparser = "0.257"
 wasmtime = "47"
-sha2 = "0.10"
+sha2 = "0.11"
 
 [lints]
 workspace = true
