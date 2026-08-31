@@ -86,6 +86,10 @@ pub(crate) struct Parsed<'a> {
     pub(crate) func_types: Vec<u32>,
     pub(crate) tables: TableSection,
     pub(crate) old_mem_min: u64,
+    /// The source module's declared memory MAXIMUM (the #1729 heap-cap,
+    /// baked by the structural emitter) — carried through the transform,
+    /// widened by the PARK_SPAN pages this shim appends.
+    pub(crate) old_mem_max: Option<u64>,
     pub(crate) parsed_globals: Vec<(GlobalType, Option<i32>, Option<i64>, Option<u64>)>,
     pub(crate) global_count: u32,
     pub(crate) heap_global: Option<u32>,
@@ -151,6 +155,7 @@ pub(crate) fn parse_module(bytes: &[u8]) -> anyhow::Result<Parsed<'_>> {
         func_types: Vec::new(),
         tables: TableSection::new(),
         old_mem_min: 0,
+        old_mem_max: None,
         parsed_globals: Vec::new(),
         global_count: 0,
         heap_global: None,
@@ -186,7 +191,9 @@ pub(crate) fn parse_module(bytes: &[u8]) -> anyhow::Result<Parsed<'_>> {
             }
             Payload::MemorySection(r) => {
                 for m in r {
-                    p.old_mem_min = m?.initial;
+                    let m = m?;
+                    p.old_mem_min = m.initial;
+                    p.old_mem_max = m.maximum;
                 }
             }
             Payload::GlobalSection(r) => {
@@ -226,6 +233,7 @@ pub fn to_wasi(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
         func_types,
         tables,
         old_mem_min,
+        old_mem_max,
         parsed_globals,
         global_count,
         heap_global,
@@ -301,7 +309,10 @@ pub fn to_wasi(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     let mut memories = MemorySection::new();
     memories.memory(MemoryType {
         minimum: old_mem_min + PARK_SPAN / 65536,
-        maximum: None,
+        // Preserve the heap-cap maximum (#1729), shifted by the same span
+        // the minimum gained — dropping it silently un-capped every
+        // `--heap-cap` structural artifact.
+        maximum: old_mem_max.map(|m| m.max(old_mem_min) + PARK_SPAN / 65536),
         memory64: false,
         shared: false,
         page_size_log2: None,

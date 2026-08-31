@@ -123,12 +123,16 @@ fn fixed_heap_budget_suffices_and_is_enforced() {
     let stdout = String::from_utf8_lossy(&run.stdout);
     assert_eq!(stdout.lines().count(), 16, "the 16-step trace lost lines:\n{stdout}");
 
-    // The same budget is ENFORCED: unbounded growth meets the defined
-    // OOM abort at a deterministic point, not silent expansion.
+    // The same budget is ENFORCED: growth past the budget meets the
+    // defined OOM abort at a deterministic point, not silent expansion.
+    // 1M ints ≈ 8 MiB of live payload — over the 1 MiB cap by any
+    // allocator. (100k ints ≈ 800 KiB FITS the cap now that the append
+    // window reuses the outgrown generations, #1729 — the old count only
+    // tripped the cap through the quadratic leak this arc removed.)
     let glutton = dir.join("glutton.almd");
     std::fs::write(
         &glutton,
-        "effect fn main() -> Unit = {\n  var xs: List[Int] = []\n  for i in 0..<100000 {\n    xs = xs + [i]\n  }\n  println(int.to_string(list.len(xs)))\n}\n",
+        "effect fn main() -> Unit = {\n  var xs: List[Int] = []\n  for i in 0..<1000000 {\n    xs = xs + [i]\n  }\n  println(int.to_string(list.len(xs)))\n}\n",
     )
     .expect("write");
     let glutton_wasm = dir.join("glutton-cap.wasm");

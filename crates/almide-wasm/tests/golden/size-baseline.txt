@@ -169,7 +169,7 @@
 2833	spec/wasm_cross/fuel_block_body.almd
 2141	spec/wasm_cross/fuel_bounded_boundary.almd
 1808	spec/wasm_cross/fuel_divergence_cut.almd
-2530	spec/wasm_cross/fuel_dyn_charge.almd
+2534	spec/wasm_cross/fuel_dyn_charge.almd
 2433	spec/wasm_cross/fuel_race_boundary.almd
 4095	spec/wasm_cross/fuel_race_err_skip.almd
 2142	spec/wasm_cross/fuel_timeout_ends.almd
@@ -219,7 +219,7 @@
 2789	spec/wasm_cross/heap_result_tuple_return.almd
 2881	spec/wasm_cross/hex_two_module_link.almd
 2477	spec/wasm_cross/hof_closure_string_tail.almd
-3756	spec/wasm_cross/host_floor_string_alloc.almd
+3760	spec/wasm_cross/host_floor_string_alloc.almd
 7912	spec/wasm_cross/http_response_headers.almd
 1455	spec/wasm_cross/i64_min_literal.almd
 1672	spec/wasm_cross/if_block_forms.almd
@@ -229,7 +229,7 @@
 2089	spec/wasm_cross/index_bounds_i64.almd
 2036	spec/wasm_cross/index_bounds_write_heap.almd
 1848	spec/wasm_cross/index_bounds_write_only_var.almd
-2658	spec/wasm_cross/inplace_mutator_statement.almd
+2636	spec/wasm_cross/inplace_mutator_statement.almd
 1613	spec/wasm_cross/int8_div_overflow.almd
 1718	spec/wasm_cross/int_clamp_inverted.almd
 1583	spec/wasm_cross/int_div_by_zero.almd
@@ -362,7 +362,7 @@
 10308	spec/wasm_cross/matrix_select_rows.almd
 17009	spec/wasm_cross/matrix_select_rows_oob.almd
 9987	spec/wasm_cross/matrix_softmax_fastexp.almd
-9518	spec/wasm_cross/memory_stress.almd
+9507	spec/wasm_cross/memory_stress.almd
 7712	spec/wasm_cross/mg_rebuild_two_phase.almd
 2009	spec/wasm_cross/module_global_const.almd
 7785	spec/wasm_cross/module_var_alias_cow.almd
@@ -397,7 +397,7 @@
 1508	spec/wasm_cross/nested_tuple_pattern.almd
 2817	spec/wasm_cross/nested_tuples.almd
 9715	spec/wasm_cross/nested_unwrap_or_share.almd
-5069	spec/wasm_cross/nested_unwrap_propagation.almd
+4996	spec/wasm_cross/nested_unwrap_propagation.almd
 3368	spec/wasm_cross/nested_variant_match_bind.almd
 2745	spec/wasm_cross/nested_variant_tag_box.almd
 2111	spec/wasm_cross/nested_variant_tree.almd
@@ -438,7 +438,7 @@
 2734	spec/wasm_cross/range_bind_no_materialize.almd
 1657	spec/wasm_cross/range_first_class.almd
 2000	spec/wasm_cross/range_materialize_oom.almd
-4444	spec/wasm_cross/rc_alloc_stress.almd
+4448	spec/wasm_cross/rc_alloc_stress.almd
 2461	spec/wasm_cross/rc_reclaim_churn.almd
 1511	spec/wasm_cross/record_forms.almd
 6456	spec/wasm_cross/record_pair_result_return.almd
@@ -483,7 +483,7 @@
 24547	spec/wasm_cross/rope_geometry_family.almd
 1907	spec/wasm_cross/scalar_if_arm_effects.almd
 2996	spec/wasm_cross/scan_heap_acc.almd
-6199	spec/wasm_cross/set_index_order.almd
+6188	spec/wasm_cross/set_index_order.almd
 9879	spec/wasm_cross/set_insertion_order.almd
 3004	spec/wasm_cross/sized_int_overflow_wrap.almd
 3261	spec/wasm_cross/sized_int_record_fields.almd

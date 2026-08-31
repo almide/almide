@@ -146,9 +146,16 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     }
 
     let mut memories = MemorySection::new();
+    // #1729: an armed heap-cap becomes the memory's declared MAXIMUM
+    // (never below the static minimum) — growth past it fails and the
+    // allocator answers with the defined C-197 OOM abort.
+    let maximum = match crate::heap_cap::heap_cap() {
+        0 => None,
+        cap => Some(u64::from(cap).div_ceil(65536).max(pages)),
+    };
     memories.memory(MemoryType {
         minimum: pages,
-        maximum: None,
+        maximum,
         memory64: false,
         shared: false,
         page_size_log2: None,
