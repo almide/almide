@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let m: Map[(Int, Float), Int] = [:]
+  println(int.to_string(map.len(m)))
+}

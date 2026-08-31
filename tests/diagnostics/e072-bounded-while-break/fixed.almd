@@ -1,0 +1,13 @@
+// ALS-B5: run both counted ranges to completion.
+@bounded
+fn seek(t: Int) -> Int = {
+  var hit = 0
+  for i in 0..<50 {
+    for j in 0..<50 {
+      if i * j != t then hit = j
+    }
+  }
+  hit
+}
+
+fn main() -> Unit = println("${seek(9)}")

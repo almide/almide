@@ -1,0 +1,11 @@
+// ALS-B5: per-iteration list growth allocates inside the counted loop.
+@bounded
+fn build() -> Int = {
+  var xs: List[Int] = []
+  for i in 0..<8 {
+    xs = xs + [i]
+  }
+  list.len(xs)
+}
+
+fn main() -> Unit = println("${build()}")

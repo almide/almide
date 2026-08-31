@@ -1,0 +1,11 @@
+// ALS-B5: a three-fn call cycle is recursion the counted profile refuses.
+@bounded
+fn a(n: Int) -> Int = if n <= 0 then 0 else b(n - 1)
+
+@bounded
+fn b(n: Int) -> Int = if n <= 0 then 0 else c(n - 1)
+
+@bounded
+fn c(n: Int) -> Int = if n <= 0 then 0 else a(n - 1)
+
+fn main() -> Unit = println("${a(3)}")

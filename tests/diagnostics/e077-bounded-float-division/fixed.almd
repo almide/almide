@@ -1,0 +1,5 @@
+// ALS-B7: integer division stays in the profile.
+@bounded
+fn ratio(a: Int, b: Int) -> Int = a / b
+
+fn main() -> Unit = println("${ratio(6, 3)}")

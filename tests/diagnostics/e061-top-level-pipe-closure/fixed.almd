@@ -1,0 +1,3 @@
+fn shout(s: String) -> String = s + "!"
+
+fn main() -> Unit = println(shout("hey"))

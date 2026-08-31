@@ -1,0 +1,11 @@
+// ALS-B5: carry the answer in a scalar accumulator.
+@bounded
+fn build() -> Int = {
+  var count = 0
+  for i in 0..<8 {
+    count = count + 1
+  }
+  count
+}
+
+fn main() -> Unit = println("${build()}")
