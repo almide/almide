@@ -1,8 +1,8 @@
-diff --git a/crates/almide-wasm/src/calls.rs b/crates/almide-wasm/src/calls.rs
-index 24f0dc228..6223423ba 100644
---- a/crates/almide-wasm/src/calls.rs
-+++ b/crates/almide-wasm/src/calls.rs
-@@ -129,7 +129,7 @@ impl Emitter<'_> {
+diff --git a/crates/almide-wasm/src/calls_modules.rs b/crates/almide-wasm/src/calls_modules.rs
+index ccf06d9ba..90f1a5cf3 100644
+--- a/crates/almide-wasm/src/calls_modules.rs
++++ b/crates/almide-wasm/src/calls_modules.rs
+@@ -44,7 +44,7 @@ impl Emitter<'_> {
                          self.f.instructions().i32_const(1);
                      }
                  }
