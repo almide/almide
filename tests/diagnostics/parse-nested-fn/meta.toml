@@ -1,0 +1,2 @@
+expects_error = "`fn` cannot be declared inside a function body"
+hint_substring = "bind a lambda"

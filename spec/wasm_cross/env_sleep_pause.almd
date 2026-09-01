@@ -1,0 +1,14 @@
+// @contract: C-327
+// env.sleep_ms pauses and returns on every leg (#1423 bucket A). The pause
+// itself is wall-clock, never an observable value: the fixture pins the
+// return path and the ordering around it. The embedded host sleeps the
+// thread (op 36); the stock-WASI p1 build spins on the monotonic clock it
+// already imports (the import-count identity keeps the funcref table
+// verbatim); native sleeps in the runtime.
+import env
+
+effect fn main() -> Unit = {
+  println("before")
+  env.sleep_ms(1)!
+  println("after")
+}

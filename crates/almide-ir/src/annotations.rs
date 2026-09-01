@@ -63,6 +63,14 @@ pub struct CodegenAnnotations {
     /// derive `PartialEq` (a field transitively blocks equality — e.g.
     /// contains a Matrix or a function pointer).
     pub eq_blocked_types: HashSet<String>,
+    /// User-defined record/enum names that transitively CONTAIN a function
+    /// value (directly, in a container, or through another fn-blocked named
+    /// type). Such a type lowers to `Rc<dyn Fn>` somewhere inside, so its
+    /// struct/enum derives `Clone` only — no `Debug`, no `PartialEq`, no
+    /// generated `AlmideRepr` impl. One level deep was #1674: a type
+    /// containing a fn-carrying type still derived Debug and rustc refused
+    /// the generated Rust.
+    pub fn_blocked_types: HashSet<String>,
     /// Record types ALL of whose generic params are phantom (declared but used
     /// by no field). Rust rejects an unused type param (`error[E0392]`), so the
     /// Rust struct is emitted WITHOUT generics and every `Ty::Named` reference to

@@ -1,0 +1,12 @@
+// The fix the hint teaches: take the concrete adopting type.
+protocol Repo {
+  fn save(self, v: Int) -> Unit
+}
+
+type MemRepo = { n: Int }
+
+fn MemRepo.save(self, v: Int) -> Unit = println(int.to_string(v))
+
+fn use_repo(r: MemRepo) -> Unit = r.save(1)
+
+fn main() -> Unit = use_repo(MemRepo { n: 0 })

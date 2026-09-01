@@ -215,9 +215,9 @@ pub fn all_hints() -> Vec<HintEntry> {
         },
         HintEntry {
             module: "syntax_guide",
-            trigger: "'self'/'this' in expression",
-            message: "'self'/'this' is not valid in Almide",
-            hint: "Pass the value as the first parameter. Example: fn greet(user: User) -> String",
+            trigger: "'this' in expression",
+            message: "'this' is not valid in Almide",
+            hint: "Use `self` as the explicit first parameter of a convention method.",
         },
         HintEntry {
             module: "syntax_guide",

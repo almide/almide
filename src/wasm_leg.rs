@@ -235,6 +235,13 @@ fn link_self_host(
         // must not depend on hash-seed iteration order.
         let mut needed: Vec<String> = needed.into_iter().collect();
         needed.sort();
+        // ALMIDE_DBG_LINK=1: dump the demand set and what each key resolves
+        // to — the probe that caught #1675's missed __err_at demand.
+        if std::env::var_os("ALMIDE_DBG_LINK").is_some() {
+            for n in &needed {
+                eprintln!("[link] demand {} -> {}", n, registry.get(n).map(|_| "registered").unwrap_or("UNREGISTERED"));
+            }
+        }
         let mut grew = false;
         for surface in needed {
             let Some(&src) = registry.get(&surface) else { continue };

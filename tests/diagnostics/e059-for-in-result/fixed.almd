@@ -1,0 +1,7 @@
+fn main() -> Unit = {
+  let r = int.parse("3")
+  match r {
+    ok(x) => println(int.to_string(x)),
+    err(_) => println("bad"),
+  }
+}

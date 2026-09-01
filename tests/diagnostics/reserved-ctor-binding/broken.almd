@@ -1,0 +1,8 @@
+// `err` is the Result constructor keyword — binding it used to die with a raw
+// "Expected identifier (got Err 'err')" whose hint pointed at the token BEFORE.
+fn main() -> Unit = {
+  let err = compute()
+  println("${err}")
+}
+
+fn compute() -> Int = 2

@@ -1,0 +1,2 @@
+expects_error = "Expected pattern"
+hint_substring = "assignment is a statement, not an expression"

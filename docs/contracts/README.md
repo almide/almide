@@ -24,7 +24,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-326 contracts
+328 contracts
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
@@ -60,9 +60,9 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-030 | hex.encode / hex.decode are byte-identical incl. positional error detail | 0.24.0 | active | fixture | 2 |
 | C-031 | json get/set/remove_path edge cases match the infallible native oracle | 0.24.0 | active | fixture | 2 |
 | C-032 | Regex engine is byte-identical to the native engine over a fuzzed grammar | 0.24.0 | active | fuzz(220) | 2 |
-| C-033 | [Value semantics for aliased mutables (copy-on-write)](C-033-cow-truth-table.md) | 0.24.0 | active | fixture | 2 |
+| C-033 | [Value semantics for aliased mutables (copy-on-write)](C-033-cow-truth-table.md) | 0.24.0 | active | fixture | 3 |
 | C-034 | Out-of-range list ops clamp / no-op gracefully (no OOB heap access) | 0.24.0 | active | fixture | 8 |
-| C-035 | Effect-main errors terminate uniformly: Error: <msg> + exit 1 | 0.24.0 | active | fixture | 4 |
+| C-035 | Effect-main errors terminate uniformly: Error: <msg> + exit 1 | 0.24.0 | active | fixture | 6 |
 | C-036 | Records, variants, and pattern matching are byte-identical | 0.24.0 | active | fixture | 7 |
 | C-037 | bytes.read_f16_le decodes IEEE-754 half floats identically | 0.24.0 | active | fixture | 1 |
 | C-038 | Sized-integer literals narrow to the declared field width | 0.24.0 | active | fixture | 2 |
@@ -354,4 +354,6 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-324 | Mut-param forwarding from a branch arm: folded to value flow or refused, never silently wrong | 0.60.0 | active | fixture | 2 |
 | C-325 | bytes.push growth is amortized: linear retention, byte-identical at scale | 0.60.0 | active | fixture | 1 |
 | C-326 | Branch-selected mut-fn calls hoist their write-back out of the arm: the gzip-inflate shape lowers structurally | 0.60.0 | active | fixture | 1 |
+| C-327 | env.sleep_ms pauses and returns on every leg | 0.60.1 | active | fixture | 1 |
+| C-328 | The http string family answers identically on the native and embedded-wasm lanes | 0.61.1 | active | fixture | 0 |
 

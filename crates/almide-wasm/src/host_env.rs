@@ -56,6 +56,34 @@ impl Emitter<'_> {
                 self.release_i64();
                 Some(SliceTy::Option(self.types.intern(STR)))
             }
+            // Result[Unit, String]: the overlay set — key in a, value in
+            // b, the fs.write two-string convention (#1423 bucket C).
+            ("env", "set", [k, v]) => {
+                self.fs_call_str2(k, v, crate::fs_meta::OP_ENV_SET)?;
+                Some(self.fs_result_unit()?)
+            }
+            // The http string family (#1710 increment 1): every fn is
+            // Result[String, String] — exactly the fs.read_text decode.
+            ("http", "get", [u]) => {
+                self.fs_call_1(u, crate::fs_meta::OP_HTTP_GET)?;
+                Some(self.fs_result_string()?)
+            }
+            ("http", "delete", [u]) => {
+                self.fs_call_1(u, crate::fs_meta::OP_HTTP_DELETE)?;
+                Some(self.fs_result_string()?)
+            }
+            ("http", "post", [u, b]) => {
+                self.fs_call_str2(u, b, crate::fs_meta::OP_HTTP_POST)?;
+                Some(self.fs_result_string()?)
+            }
+            ("http", "put", [u, b]) => {
+                self.fs_call_str2(u, b, crate::fs_meta::OP_HTTP_PUT)?;
+                Some(self.fs_result_string()?)
+            }
+            ("http", "patch", [u, b]) => {
+                self.fs_call_str2(u, b, crate::fs_meta::OP_HTTP_PATCH)?;
+                Some(self.fs_result_string()?)
+            }
             ("env", "os", []) => {
                 self.fs_call_0(OP_ENV_OS)?;
                 self.fs_take_text()?;
@@ -213,6 +241,53 @@ impl Emitter<'_> {
                 let sh = self.types.intern(STR);
                 Some(SliceTy::Result(uh, sh))
             }
+            // Unit effect with no failure channel and no observable value:
+            // sleep on the host (the ms count rides the a_len slot with a
+            // null a_ptr — the op-35 scalar discipline; clamped to
+            // [0, i32::MAX]), the i64 status dropped, then the always-ok
+            // unit carrier io.print builds (#1423 bucket A).
+            ("env", "sleep_ms", [ms]) => {
+                self.lower(ms, Some(INT))?;
+                let hm = self.hold_i64()?;
+                self.note_host_op(crate::fs_meta::OP_SLEEP_MS);
+                {
+                    let mut i = self.f.instructions();
+                    i.local_set(hm);
+                    i.i32_const(crate::fs_meta::OP_SLEEP_MS);
+                    i.i32_const(0);
+                    i.local_get(hm).i64_const(0).i64_lt_s();
+                    i.if_(BlockType::Result(wasm_encoder::ValType::I64));
+                    i.i64_const(0);
+                    i.else_();
+                    i.local_get(hm).i64_const(0x7FFF_FFFF).i64_lt_s();
+                    i.if_(BlockType::Result(wasm_encoder::ValType::I64));
+                    i.local_get(hm);
+                    i.else_();
+                    i.i64_const(0x7FFF_FFFF);
+                    i.end();
+                    i.end();
+                    i.i32_wrap_i64();
+                    i.i32_const(0).i32_const(0);
+                    i.call(F_FS_CALL);
+                    i.drop();
+                }
+                self.release_i64();
+                let hb = self.hold_i32()?;
+                {
+                    let mut i = self.f.instructions();
+                    i.i32_const(16)
+                        .call(F_ALLOC)
+                        .local_tee(hb)
+                        .i32_const(0)
+                        .i32_store(slot_memarg(almide_layout::SUM_TAG));
+                    i.local_get(hb).i32_const(0).i32_store(slot_memarg(almide_layout::SUM_FIELD));
+                    i.local_get(hb);
+                }
+                self.release_i32();
+                let uh = self.types.intern(SliceTy::Unit);
+                let sh = self.types.intern(STR);
+                Some(SliceTy::Result(uh, sh))
+            }
             // List[Int] → low bytes, then the same raw sink.
             ("io", "write_bytes", [xs]) => {
                 match self.lower(xs, None)? {
@@ -261,6 +336,8 @@ impl Emitter<'_> {
                 // The host serves UP TO n bytes off the stdin CURSOR, so
                 // sequential reads compose with read_byte/read_line
                 // exactly as native's shared stdin handle does.
+                self.note_host_op(OP_STDIN_TAKE);
+                let mut i = self.f.instructions();
                 i.i32_const(OP_STDIN_TAKE);
                 i.i32_const(0);
                 i.local_get(hn).i64_const(0x7FFF_FFFF).i64_lt_s();
@@ -317,6 +394,8 @@ impl Emitter<'_> {
         let hb = self.hold_i32()?;
         let mut i = self.f.instructions();
         i.local_set(hb);
+        self.note_host_op(OP_STDOUT_RAW);
+        let mut i = self.f.instructions();
         i.i32_const(OP_STDOUT_RAW);
         i.i32_const(0).i32_const(0);
         i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32).i32_add();

@@ -1,0 +1,14 @@
+// The fix the hint teaches: plain convention fns, no protocol clause.
+type User = { id: Int }
+type MemStore = { users: List[User] }
+
+fn MemStore.find(self, id: Int) -> Option[User] =
+  self.users |> list.find((u) => u.id == id)
+
+fn main() -> Unit = {
+  let s = MemStore { users: [User { id: 1 }] }
+  match s.find(1) {
+    some(u) => println(int.to_string(u.id)),
+    none => println("none"),
+  }
+}

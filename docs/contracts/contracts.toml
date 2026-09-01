@@ -496,6 +496,7 @@ evidence  = [
   { path = "spec/wasm_cross/alias_cow.almd", class = "fixture" },
   { path = "spec/lang/alias_cow_test.almd", class = "fixture" },
   { path = "spec/wasm_cross/module_var_alias_cow.almd", class = "fixture" },
+  { path = "spec/wasm_cross/witness_straightline.almd", class = "fixture" },
 ]
 
 # ── LIST BOUNDS GRACEFULNESS ─────────────────────────────────────────
@@ -529,6 +530,8 @@ evidence  = [
   { path = "spec/wasm_cross/match_result.almd", class = "fixture" },
   { path = "spec/wasm_cross/option_result.almd", class = "fixture" },
   { path = "spec/wasm_cross/early_return_control_flow.almd", class = "fixture" },
+  { path = "spec/wasm_cross/effect_main_guard_err.almd", class = "fixture" },
+  { path = "spec/wasm_cross/effect_main_guard_ok.almd", class = "fixture" },
 ]
 
 # ── RECORDS / VARIANTS / SIZED INTEGERS ──────────────────────────────
@@ -1138,7 +1141,7 @@ evidence  = [
 id        = "C-084"
 spec      = "ALS-D6"
 title     = "Codec/value decode error messages are byte-identical across targets"
-statement = "value.as_* type mismatches and Codec decode failures produce the SAME error string on both backends. The WASM emitter mirrors the native oracle (runtime/rs/src/value.rs): type errors name the Value variant (`expected Float`, `expected Int`, `expected Str`, `expected Bool`, `expected Object`, `expected Array`) and a missing required field interpolates its name (`missing field '<key>'`, built at runtime via __concat_str), replacing the prior lowercase / `key not found` placeholders."
+statement = "value.as_* type mismatches and Codec decode failures produce the SAME error string on both backends. Type errors name the expected and RECEIVED Value variants and derived decode frames append a trailing path (`expected Str, received Int, at address.city` — #1675): parent segments join dot-style, list indexes bracket-style, and a missing field names itself in-message with its CONTAINER in the path (`missing field 'city', at addr`). The composer (`__err_at`) is ONE pure-Almide implementation (stdlib/codec_decode.almd) compiled by both legs, so the path bytes cannot drift. The LEAF messages have three surfaces that CAN drift and are held identical by these fixtures: value_core's `__vkind` leaves, the native runtime's `value_kind`, and the wasm emitter's inline unbox (a tag-selected message table in crates/almide-wasm/src/value.rs)."
 since     = "0.27.6"
 status    = "active"
 evidence  = [
@@ -4189,3 +4192,26 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/gzip_inflate_members.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-327"
+spec      = "ALS-R5"
+title     = "env.sleep_ms pauses and returns on every leg"
+statement = "env.sleep_ms(ms) suspends for at least ms milliseconds and returns ok(()) on every leg (#1423 bucket A): native sleeps in the runtime intrinsic; the embedded almide.* host sleeps the thread (fs_call op 36 — the count rides the a_len slot with a null a_ptr, the op-35 scalar discipline); the stock-WASI p1 artifact spins on the monotonic clock it already imports (clock_time_get busy-wait — WASI p1 has no sleep short of poll_oneoff, and importing a sixth WASI function would shift every defined function index while the element section is copied verbatim, a funcref corruption of the #1688 silent class; the spin is confined to stock p1 artifacts and retires with the component leg's wasi:clocks wait-for, the async-ABI form the vendored 0.3 WIT already carries). The build path reaches the structural leg through the REVERSE verified-to-verified handover: a shape-routed host-variant program the incumbent walls gets one structural attempt before the build fails. The pause is wall-clock, never an observable value — the fixture pins the return path and program order around it."
+since     = "0.60.1"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/env_sleep_pause.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-328"
+spec      = "ALS-R5"
+title     = "The http string family answers identically on the native and embedded-wasm lanes"
+statement = "http.get/post/put/patch/delete answer byte-identically on the native leg and the EMBEDDED wasm lane (`almide run --target wasm`, #1710 increment 1): the embedded host serves fs_call ops 43..=47 with a verbatim transcription of the native rustls client (crates/almide-wasm-run/src/http_client.rs), so transport-error texts — connection refusal, DNS failure, the timeout wording and its env-var hint, the close-without-close_notify tolerance, chunked framing — match by shared code, and a copy drift fails the spec/embedded_cross net (tests/embedded_cross_test.rs). STOCK artifacts refuse these ops at BUILD time through the emitted-op audit against the p1 shim's served set — never a runtime refusal on a runtime the developer never ran; the stock/component story is the rest of #1710."
+since     = "0.61.1"
+status    = "active"
+evidence  = [
+  { path = "spec/embedded_cross/http_client_errs.almd", class = "fixture" },
+]
+

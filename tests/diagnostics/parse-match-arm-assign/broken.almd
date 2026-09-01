@@ -1,0 +1,8 @@
+// #1677: assignment in a match arm — the parser commits to reading the next
+// arm and the old hint enumerated pattern syntax (the one thing that was
+// right). The statement/expression boundary is the rule; name it.
+fn main() -> Unit = {
+  var c = 0
+  match int.parse("3") { ok(_) => c = c + 1, err(_) => c = c }
+  println("${c}")
+}

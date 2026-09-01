@@ -74,6 +74,17 @@ impl Checker {
         if let Some(ty) = self.check_call_target_e002_hint(builtin_module, &field, object) {
             return ty;
         }
+        // #1590: a PROTOCOL name used as a value type — the lookup fails
+        // because the ANNOTATION is invalid, not because the method is
+        // missing. Stay quiet here (the Unknown-recovery doctrine); the
+        // post-solve E029 names the root cause at the annotation with the
+        // protocol-specific message. One root-cause error beats a derived
+        // E002 the writer reads first and fixes wrongly.
+        if let Ty::Named(n, _) = &obj_concrete
+            && self.env.protocols.contains_key(n)
+        {
+            return Ty::Unknown;
+        }
         // #1521: an unknown method on a CONCRETE user type used to fall into
         // the callable-object constrain below and E001'd "expected P but got
         // fn() -> …" — but the object was never a function; the METHOD is

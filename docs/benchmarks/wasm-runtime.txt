@@ -1,0 +1,35 @@
+# Wasm runtime ledger (#1701) — the SOURCE for the README's wasm-runtime block.
+# Regenerate: bash scripts/check-wasm-runtime-ratio.sh --measure
+# Gate:       bash scripts/check-wasm-runtime-ratio.sh — the STATUS taxonomy
+#             is enforced everywhere (a hole that starts benching, a measured
+#             row that stops, a changed refusal class all fail); the RATIO
+#             verdict runs only on the stamping machine class (cross-engine
+#             ratios do not cancel hardware — see the script header).
+#
+# Rows: name | status | native_ms | wasm_ms | ratio (wasm/native)
+#   measured          — `almide bench --target wasm` (embedded host, verify-
+#                       then-time, median of 5 + warmup) and the native twin
+#   routed-incumbent  — the program routes to the incumbent artifact; the
+#                       embedded-host bench honestly refuses
+#   walled            — the wasm build path walls the program (neither leg)
+#   oom-embedded      — the workload exceeds the embedded host's memory
+#                       service today (#1729)
+# Every non-measured row is RE-MEASURED by the gate: a row that starts
+# benching fails the run with the good news (flip it to measured in the
+# same change); a measured row that stops benching fails as a regression.
+version = almide 0.61.0
+date    = 2026-09-01
+machine = arm64 Darwin (local stamp; ratios are the gated quantity)
+
+nbody                 | measured         | 1.22  | 2.64 | 2.16
+spectralnorm          | measured         | 1.34  | 3.01 | 2.25
+binarytrees           | measured         | 3.22  | 2.61 | 0.81
+fasta                 | routed-incumbent | 1.33  | -    | -
+fannkuchredux         | routed-incumbent | 1.39  | -    | -
+mandelbrot            | routed-incumbent | 2.50  | -    | -
+onebrc                | walled           | 1.85  | -    | -
+fft                   | oom-embedded     | 39.80 | -    | -
+strchurn              | oom-embedded     | 54.81 | -    | -
+listbuild_append      | measured         | 21.04 | 86.77 | 4.12
+listbuild_combinator  | oom-embedded     | 21.52 | -    | -
+listbuild_prealloc    | oom-embedded     | 20.22 | -    | -

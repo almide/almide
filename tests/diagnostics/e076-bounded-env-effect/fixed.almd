@@ -1,0 +1,5 @@
+// ALS-B5: keep the bounded body pure and pass the value in.
+@bounded
+fn who(h: String) -> Int = string.len(h)
+
+fn main() -> Unit = println("${who("x")}")

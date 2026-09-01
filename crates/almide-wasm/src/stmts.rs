@@ -12,6 +12,14 @@ use crate::*;
 impl Emitter<'_> {
     /// Statement position: Unit-typed shapes only (blocks, calls, control).
     pub(crate) fn lower_stmt_expr(&mut self, e: &IrExpr) -> Result<(), EmitError> {
+        // main's Result-typed statement/tail is the effect carrier —
+        // err aborts with the native contract instead of discarding
+        // (#1734; see try_lower_main_err_carrier).
+        if !matches!(&e.kind, IrExprKind::Block { .. } | IrExprKind::If { .. } | IrExprKind::Match { .. })
+            && self.try_lower_main_err_carrier(e)?
+        {
+            return Ok(());
+        }
         match &e.kind {
             IrExprKind::Block { stmts, expr } => {
                 for s in stmts {
@@ -163,12 +171,16 @@ impl Emitter<'_> {
                 self.f.instructions().return_();
             }
             // main / Unit fn: the else IS the return — evaluate it in
-            // statement position (a `process.exit` else never returns;
-            // a value else discards into the early Unit return). The
+            // statement position (a `process.exit` else never returns).
+            // A RESULT else in main is the err channel, not a discard:
+            // `guard c else err(…)` must print `Error: {msg}` and exit 1
+            // (#1734 — the discard silently swallowed the err). The
             // early return skips the RC epilogue: a leak, never a
             // dangle.
             None => {
-                self.lower_stmt_expr(else_)?;
+                if !self.try_lower_main_err_carrier(else_)? {
+                    self.lower_stmt_expr(else_)?;
+                }
                 self.f.instructions().return_();
             }
         }
@@ -231,6 +243,9 @@ impl Emitter<'_> {
             if self.rc_droppable(declared) {
                 self.f.instructions().local_get(idx).call(F_DEC_FLAT);
                 self.rc_owned.insert(idx);
+                if self.witness.is_some() {
+                    self.witness_bind(idx, declared, value);
+                }
             }
             self.f.instructions().local_set(idx);
         }
@@ -573,40 +588,6 @@ impl Emitter<'_> {
     }
 }
 
-impl Emitter<'_> {
-    /// The growing-accumulator window (`acc = acc + s`, Str): route
-    /// through $str_append — in place under rc == 1 with class slack,
-    /// else concat + release of the outgrown block. Without this the
-    /// Assign dec-skip (rhs mentions the var) plus F_CONCAT's borrow
-    /// semantics leaked every outgrown accumulator
-    /// (spec/churn/string_accumulator_churn OOM'd at the commissioning).
-    /// UNMETERED only — the metered ConcatStr path carries the T3-5
-    /// dynamic charge and region programs keep that exact cost model.
-    fn try_str_append_assign(
-        &mut self,
-        var: &almide_ir::VarId,
-        value: &IrExpr,
-    ) -> Result<bool, EmitError> {
-        if self.metered || self.cells.contains(var) {
-            return Ok(false);
-        }
-        let Some(&(idx, SliceTy::Scalar(Scalar::Str))) = self.locals.get(var) else {
-            return Ok(false);
-        };
-        let IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, left, right } = &value.kind
-        else {
-            return Ok(false);
-        };
-        if !matches!(&left.kind, IrExprKind::Var { id } if id == var) {
-            return Ok(false);
-        }
-        self.f.instructions().local_get(idx);
-        self.lower(right, Some(STR))?;
-        self.f.instructions().call(F_STR_APPEND).local_set(idx);
-        self.rc_owned.insert(idx);
-        Ok(true)
-    }
-}
 
 impl Emitter<'_> {
     /// `Assign` lowering — the share/dec discipline (RC-3/RC-5) plus the
@@ -614,6 +595,9 @@ impl Emitter<'_> {
     /// complexity budget.
     fn lower_assign(&mut self, var: &almide_ir::VarId, value: &IrExpr) -> Result<(), EmitError> {
                 if self.try_str_append_assign(var, value)? {
+                    return Ok(());
+                }
+                if self.try_list_append_assign(var, value)? {
                     return Ok(());
                 }
                 let (local, declared) = match self.locals.get(var) {
@@ -661,10 +645,29 @@ impl Emitter<'_> {
                 // through the call — the callee already released what it
                 // outgrew, and a dec here double-frees (mut_heap_param
                 // exit-1'd on exactly this).
+                // The self-mention skip is CALL-shaped only: `xs = f(xs)` /
+                // `xs = $push(xs, v)` transfer ownership through the callee
+                // (a dec here double-freed — mut_heap_param). A NON-call
+                // self-mentioning rhs (`data = data + [x]` — the append
+                // loop's ConcatList) merely READS the old block and builds a
+                // FRESH one; skipping the dec leaked every outgrown
+                // generation, and a 65k-append loop exhausted the 4 GiB
+                // address space in a quarter second (#1729). Aliasing rhs
+                // shapes (`xs = if c then xs else ys`) stay safe by order:
+                // the RC-5 inc above runs before this dec, so a same-block
+                // result nets to zero.
+                let call_core = match &value.kind {
+                    IrExprKind::Unwrap { expr } | IrExprKind::Try { expr } => &expr.kind,
+                    k => k,
+                };
+                let call_shaped_self = matches!(
+                    call_core,
+                    IrExprKind::Call { .. } | IrExprKind::RuntimeCall { .. }
+                ) && crate::rc_ownership::rc_mentions_var(value, *var);
                 if let Some(idx) = local
                     && !self.cells.contains(var)
                     && self.rc_droppable(declared)
-                    && !crate::rc_ownership::rc_mentions_var(value, *var)
+                    && !call_shaped_self
                 {
                     self.f.instructions().local_get(idx).call(F_DEC_FLAT);
                     self.rc_owned.insert(idx);

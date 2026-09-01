@@ -1,0 +1,8 @@
+// ALS-B5: a run-time repeat count is a run-time-length heap value.
+@bounded
+fn pad(n: Int) -> Int = {
+  let s = string.repeat("x", n)
+  string.len(s)
+}
+
+fn main() -> Unit = println("${pad(4)}")

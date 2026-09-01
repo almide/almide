@@ -266,6 +266,15 @@ impl Parser {
         let hint = match (&tok.token_type, tok.value.as_str()) {
             (TokenType::Underscore, _) => "\n  Hint: '_' can only be used in match patterns, not as a variable name.",
             (TokenType::Test, _) => "\n  Hint: `test \"...\"` is a top-level form. Got here mid-declaration — either the previous fn/type/impl is missing a closing `}`, or the test block shouldn't be in this file at all (harness-submitted code).",
+            // The Result/Option constructors are keywords in BOTH spellings ("ok"
+            // and "Ok" lex to the same token), and they are exactly what a model
+            // trained on Go or Rust reaches for as a binding name (#1694). Without
+            // these arms the error says "Expected identifier (got Err 'err')" and
+            // the generic check-the-token-before hint points AWAY from the fix.
+            (TokenType::Ok, _) => "\n  Hint: 'ok' is the built-in Result constructor ok(v) — a reserved word, not a binding name. Rename the binding (e.g. res), or write it in backticks (`ok`) to use the keyword as a name. Also reserved: err, some, none and their capitalized forms.",
+            (TokenType::Err, _) => "\n  Hint: 'err' is the built-in Result constructor err(e) — a reserved word, not a binding name. Rename the binding (e.g. e, msg), or write it in backticks (`err`) to use the keyword as a name. Also reserved: ok, some, none and their capitalized forms.",
+            (TokenType::Some, _) => "\n  Hint: 'some' is the built-in Option constructor some(v) — a reserved word, not a binding name. Rename the binding, or write it in backticks (`some`) to use the keyword as a name. Also reserved: ok, err, none and their capitalized forms.",
+            (TokenType::None, _) => "\n  Hint: 'none' is the built-in Option constructor — a reserved word, not a binding name. Rename the binding, or write it in backticks (`none`) to use the keyword as a name. Also reserved: ok, err, some and their capitalized forms.",
             // A backtick lands here only as a MALFORMED escape — the lexer
             // declines one enclosing no identifier character (#1457). Binding
             // position never reaches `unknown_char_error`, so the hint that
@@ -447,6 +456,31 @@ impl Parser {
         while self.check(TokenType::Newline) || self.check(TokenType::Comment) {
             self.advance();
         }
+    }
+
+    /// Bind `comments` as LEADING on `id` (the #1714 list/map-element path —
+    /// same table the #1404 inline machinery writes to, so fmt reads one map).
+    pub(crate) fn attach_leading_comments(&mut self, id: crate::ast::ExprId, comments: Vec<String>) {
+        if comments.is_empty() { return; }
+        self.expr_comments.entry(id).or_default().leading.extend(comments);
+    }
+
+    /// Like `skip_newlines`, but COLLECT the comment tokens skipped over: the
+    /// own-line comments inside a bracketed literal that introduce the element
+    /// that follows (#1714 — the `// ---- group ----` catalog idiom). The
+    /// caller attaches the result as LEADING on the next node it parses
+    /// (attach-to-following, #1326's ruling); a caller that finds no next node
+    /// leaves them uncollected-in-output and the conservation verifier keeps
+    /// refusing that shape honestly.
+    pub(crate) fn skip_newlines_collecting(&mut self) -> Vec<String> {
+        let mut collected = Vec::new();
+        while self.check(TokenType::Newline) || self.check(TokenType::Comment) {
+            if self.check(TokenType::Comment) {
+                collected.push(self.current().value.clone());
+            }
+            self.advance();
+        }
+        collected
     }
 
     /// Skip newlines only if the next non-newline token matches `tt`.

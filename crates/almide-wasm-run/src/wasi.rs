@@ -28,6 +28,12 @@ use wasm_encoder::{
 };
 use wasmparser::{Parser, Payload};
 
+/// The host ops `shim_fs_call` SERVES on a stock WASI runtime. The build
+/// path audits an artifact's emitted op set against this before shipping
+/// (an unserved op = a runtime refusal on a runtime the developer never
+/// ran — the env.set lesson): extend the shim and this list TOGETHER.
+pub const P1_SERVED_OPS: &[i32] = &[30, 31, 32, 34, 35, 36];
+
 pub(crate) const UNSUPPORTED_MSG: &[u8] = b"Error: host op unsupported in the WASI build\n";
 // Park-page layout (offsets from park base).
 pub(crate) const IOV: u64 = 0; // two iovec entries (16 bytes)
@@ -80,6 +86,10 @@ pub(crate) struct Parsed<'a> {
     pub(crate) func_types: Vec<u32>,
     pub(crate) tables: TableSection,
     pub(crate) old_mem_min: u64,
+    /// The source module's declared memory MAXIMUM (the #1729 heap-cap,
+    /// baked by the structural emitter) — carried through the transform,
+    /// widened by the PARK_SPAN pages this shim appends.
+    pub(crate) old_mem_max: Option<u64>,
     pub(crate) parsed_globals: Vec<(GlobalType, Option<i32>, Option<i64>, Option<u64>)>,
     pub(crate) global_count: u32,
     pub(crate) heap_global: Option<u32>,
@@ -145,6 +155,7 @@ pub(crate) fn parse_module(bytes: &[u8]) -> anyhow::Result<Parsed<'_>> {
         func_types: Vec::new(),
         tables: TableSection::new(),
         old_mem_min: 0,
+        old_mem_max: None,
         parsed_globals: Vec::new(),
         global_count: 0,
         heap_global: None,
@@ -180,7 +191,9 @@ pub(crate) fn parse_module(bytes: &[u8]) -> anyhow::Result<Parsed<'_>> {
             }
             Payload::MemorySection(r) => {
                 for m in r {
-                    p.old_mem_min = m?.initial;
+                    let m = m?;
+                    p.old_mem_min = m.initial;
+                    p.old_mem_max = m.maximum;
                 }
             }
             Payload::GlobalSection(r) => {
@@ -220,6 +233,7 @@ pub fn to_wasi(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
         func_types,
         tables,
         old_mem_min,
+        old_mem_max,
         parsed_globals,
         global_count,
         heap_global,
@@ -295,7 +309,10 @@ pub fn to_wasi(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     let mut memories = MemorySection::new();
     memories.memory(MemoryType {
         minimum: old_mem_min + PARK_SPAN / 65536,
-        maximum: None,
+        // Preserve the heap-cap maximum (#1729), shifted by the same span
+        // the minimum gained — dropping it silently un-capped every
+        // `--heap-cap` structural artifact.
+        maximum: old_mem_max.map(|m| m.max(old_mem_min) + PARK_SPAN / 65536),
         memory64: false,
         shared: false,
         page_size_log2: None,
@@ -408,12 +425,14 @@ fn shim_exit() -> Function {
     f
 }
 
-/// The almide `fs_call` contract over WASI: ops 30/31/32/34/35 supported,
-/// everything else takes the defined refusal (stderr + exit 1).
+/// The almide `fs_call` contract over WASI: ops 30/31/32/34/35/36
+/// supported, everything else takes the defined refusal (stderr + exit 1).
 fn shim_fs_call(park: u64, g_plen: u32, g_pcap: u32) -> Function {
     // params: 0=op 1=a_ptr 2=a_len 3=b_ptr 4=b_len; locals: 5=total 6=nread
+    // 7=deadline (i64, op 36)
     let (op, a_len, b_ptr, b_len, total, nread) = (0u32, 2u32, 3u32, 4u32, 5u32, 6u32);
-    let mut f = Function::new([(2, ValType::I32)]);
+    let deadline = 7u32;
+    let mut f = Function::new([(2, ValType::I32), (1, ValType::I64)]);
     let mut i = f.instructions();
 
     // op 30: raw stdout append.
@@ -511,6 +530,32 @@ fn shim_fs_call(park: u64, g_plen: u32, g_pcap: u32) -> Function {
     i.local_get(op).i32_const(34).i32_eq().if_(BlockType::Empty);
     i.i32_const(0).i64_const(1).i32_const(park as i32).call(3).drop();
     i.i32_const(park as i32).i64_load(mem(0)).return_();
+    i.end();
+
+    // op 36: env.sleep_ms — a MONOTONIC busy-wait over clock_time_get
+    // (the ms count rides a_len, the op-35 scalar convention). WASI p1
+    // has no sleep primitive short of poll_oneoff, and importing a sixth
+    // WASI function would shift every defined function index while the
+    // element section is copied verbatim (a funcref-table corruption of
+    // exactly the #1688 silent class) — so the p1 build spins on the
+    // clock it already imports. The embedded host and native sleep
+    // properly; the CPU burn is confined to stock-runtime artifacts and
+    // ends with the incumbent's poll story or the p2 component's
+    // monotonic-clock world, whichever lands first.
+    i.local_get(op).i32_const(36).i32_eq().if_(BlockType::Empty);
+    i.local_get(a_len).i32_const(0).i32_lt_s().if_(BlockType::Empty);
+    i.i32_const(0).local_set(a_len);
+    i.end();
+    i.i32_const(1).i64_const(1).i32_const(park as i32).call(3).drop();
+    i.i32_const(park as i32).i64_load(mem(0));
+    i.local_get(a_len).i64_extend_i32_u().i64_const(1_000_000).i64_mul();
+    i.i64_add().local_set(deadline);
+    i.loop_(BlockType::Empty);
+    i.i32_const(1).i64_const(1).i32_const(park as i32).call(3).drop();
+    i.i32_const(park as i32).i64_load(mem(0));
+    i.local_get(deadline).i64_lt_u().br_if(0);
+    i.end();
+    i.i64_const(0).return_();
     i.end();
 
     // Everything else: the defined refusal.

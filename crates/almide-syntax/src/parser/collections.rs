@@ -81,6 +81,23 @@ impl Parser {
         let mut stmts = initial_comments;
         let mut final_expr: Option<Box<Expr>> = None;
         while !self.check(TokenType::RBrace) && !self.check(TokenType::EOF) {
+            // #1677: a nested `fn` declaration — reflexive for writers from
+            // Rust/TS/Swift, unsupported here. The old path fell into
+            // "Expected expression … got Fn" plus E003s from the orphaned
+            // body. Name the rule, consume the WHOLE declaration (so its body
+            // does not re-parse as statements), and suppress the undefined-
+            // function cascade at its call sites. Braced blocks only: at
+            // top level a stray `fn` is the next declaration, not a nesting.
+            if self.check(TokenType::Fn)
+                || (self.check(TokenType::Effect)
+                    && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Fn))
+            {
+                let err_span = Some(self.current_span());
+                self.nested_fn_decl_error();
+                stmts.push(Stmt::Error { span: err_span });
+                self.skip_newlines();
+                continue;
+            }
             let pre_err_len = self.errors.len();
             match self.parse_stmt() {
                 Ok(stmt) => {
@@ -177,7 +194,11 @@ impl Parser {
         let span = Some(self.current_span());
         let open = self.current().clone();
         self.expect(TokenType::LBracket)?;
-        self.skip_newlines();
+        // #1714: own-line comments before an element introduce it — collect
+        // and bind them LEADING on the element's id so fmt can reprint them.
+        // Comments with no following element (before `]`) stay uncollected and
+        // the conservation verifier keeps refusing that shape.
+        let pending = self.skip_newlines_collecting();
 
         if self.check(TokenType::RBracket) {
             self.advance();
@@ -190,6 +211,7 @@ impl Parser {
         }
 
         let first = self.parse_expr()?;
+        self.attach_leading_comments(first.id, pending);
         self.skip_newlines();
 
         if self.check(TokenType::Colon) {
@@ -200,9 +222,11 @@ impl Parser {
         let mut elements = vec![first];
         while self.check(TokenType::Comma) {
             self.advance();
-            self.skip_newlines();
+            let pending = self.skip_newlines_collecting();
             if self.check(TokenType::RBracket) { break; }
-            elements.push(self.parse_expr()?);
+            let e = self.parse_expr()?;
+            self.attach_leading_comments(e.id, pending);
+            elements.push(e);
             self.skip_newlines();
         }
         if !self.check(TokenType::RBracket) && !self.check(TokenType::EOF) {
@@ -224,9 +248,12 @@ impl Parser {
         let mut entries = vec![(first_key, first_value)];
         while self.check(TokenType::Comma) {
             self.advance();
-            self.skip_newlines();
+            // #1714: same leading-comment collection as the list arm — a map
+            // entry's comments bind to its KEY expression.
+            let pending = self.skip_newlines_collecting();
             if self.check(TokenType::RBracket) { break; }
             let key = self.parse_expr()?;
+            self.attach_leading_comments(key.id, pending);
             self.skip_newlines();
             self.expect(TokenType::Colon)?;
             self.skip_newlines();

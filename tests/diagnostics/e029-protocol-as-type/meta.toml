@@ -1,0 +1,3 @@
+expects_code = "E029"
+expects_error = "is a protocol, not a type"
+hint_substring = "cannot be used as a value type"

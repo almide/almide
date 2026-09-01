@@ -1,0 +1,15 @@
+// ALS-B5: break inside a counted for weakens the trip count — a nested
+// early exit is the same violation one level down.
+@bounded
+fn seek(t: Int) -> Int = {
+  var hit = 0
+  for i in 0..<50 {
+    for j in 0..<50 {
+      if i * j == t then break
+      hit = j
+    }
+  }
+  hit
+}
+
+fn main() -> Unit = println("${seek(9)}")

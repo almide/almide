@@ -1,0 +1,12 @@
+// #1590: adopting a GENERIC protocol was a dead end in every direction — the
+// missing-method hint demanded an unimplementable `-> Option[T]` (free T),
+// and a concrete implementation was then rejected with "change the return
+// type to 'Option[T]'". Now the adoption itself names the root cause once.
+protocol Repository[T] {
+  fn find(self, id: Int) -> Option[T]
+}
+
+type User = { id: Int }
+type MemStore: Repository = { users: List[User] }
+
+fn main() -> Unit = println("x")

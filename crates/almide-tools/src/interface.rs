@@ -705,7 +705,35 @@ fn collect_preceding_doc(lines: &[&str], i: usize) -> DocInfo {
                     doc_lines.push(c.to_string());
                 }
             }
-            None => break,
+            None => {
+                // Attribute lines sit BETWEEN the doc comments and the
+                // declaration (`@intrinsic(..)`, `@deprecated(..)`) —
+                // skip through them so the comments above still attach,
+                // and read the `@deprecated` attribute itself (#1735):
+                // the interface JSON's `deprecated` field is what the
+                // doc-index generator annotates from.
+                if prev.starts_with('@') {
+                    if let Some(args) = prev
+                        .strip_prefix("@deprecated(")
+                        .and_then(|r| r.strip_suffix(')'))
+                    {
+                        let field = |k: &str| {
+                            args.split(',').find_map(|p| {
+                                p.trim()
+                                    .strip_prefix(k)
+                                    .map(|r| r.trim_start_matches([' ', '=']).trim_matches('"').to_string())
+                            })
+                        };
+                        deprecated = Some(match (field("use"), field("note")) {
+                            (Some(u), _) => format!("use {u}"),
+                            (None, Some(n)) => n,
+                            (None, None) => String::new(),
+                        });
+                    }
+                    continue;
+                }
+                break;
+            }
         }
     }
     doc_lines.reverse();
@@ -720,4 +748,39 @@ fn extract_decl_name(rest: &str) -> Option<std::string::String> {
         .take_while(|c| c.is_alphanumeric() || *c == '_')
         .collect();
     if name.is_empty() { None } else { Some(name) }
+}
+
+#[cfg(test)]
+mod attr_doc_tests {
+    use super::extract_docs;
+
+    /// #1735 follow-up: attribute lines (`@intrinsic(..)`, `@deprecated(..)`)
+    /// sit between a declaration and its doc comment. The doc walk skips
+    /// THROUGH them (previously every attributed fn silently lost its doc
+    /// comment in the interface JSON), and the `@deprecated` attribute
+    /// itself feeds the `deprecated` field the doc-index annotates from.
+    #[test]
+    fn docs_attach_through_attributes_and_deprecated_reads_the_attr() {
+        let src = "\
+// The old spelling.
+@deprecated(since = 3, use = \"m.shout\")
+fn yell(s: String) -> String = shout(s)
+
+// Doc above an intrinsic.
+@intrinsic(\"almide_rt_x\")
+fn direct(s: String) -> String = _
+
+@deprecated(since = 2, note = \"removed with the v2 surface\")
+fn gone() -> Unit = ()
+";
+        let docs = extract_docs(src);
+        let yell = &docs["yell"];
+        assert_eq!(yell.doc.as_deref(), Some("The old spelling."));
+        assert_eq!(yell.deprecated.as_deref(), Some("use m.shout"));
+        let direct = &docs["direct"];
+        assert_eq!(direct.doc.as_deref(), Some("Doc above an intrinsic."));
+        assert_eq!(direct.deprecated, None);
+        let gone = &docs["gone"];
+        assert_eq!(gone.deprecated.as_deref(), Some("removed with the v2 surface"));
+    }
 }

@@ -33,10 +33,15 @@ fn collect_type_aliases_and_generics(program: &IrProgram) -> (
 /// Gate mirrors `render_repr_impl` (closure-bearing types are excluded).
 fn collect_repr_named_types(program: &IrProgram) -> std::collections::HashSet<almide_base::intern::Sym> {
     let mut repr_named_types = std::collections::HashSet::new();
-    for td in program.type_decls.iter()
+    let all: Vec<_> = program.type_decls.iter()
         .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()))
-    {
-        if declarations::type_has_repr_impl(td) {
+        .cloned()
+        .collect();
+    // Same transitive fn-blocked set the derive gate uses (#1674): a type
+    // whose field CONTAINS a closure through another named type has no repr.
+    let fn_blocked = declarations::compute_fn_blocked_types(&all);
+    for td in &all {
+        if declarations::type_has_repr_impl(td, &fn_blocked) {
             repr_named_types.insert(td.name);
         }
     }
@@ -58,6 +63,7 @@ fn build_program_ann(ctx: &RenderContext, program: &IrProgram) -> CodegenAnnotat
         .cloned()
         .collect();
     ann.eq_blocked_types = super::walker::declarations::compute_eq_blocked_types(&all_type_decls);
+    ann.fn_blocked_types = super::walker::declarations::compute_fn_blocked_types(&all_type_decls);
     ann.phantom_param_structs = super::walker::declarations::compute_phantom_param_structs(&all_type_decls);
     // §4 endgame: the legacy pre-index (lazy_top_let_names /
     // eager_force_top_lets / const_top_let_vars) and the mutable-storage

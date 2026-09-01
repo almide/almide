@@ -26,6 +26,12 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
+  # The develop merge queue (#1732 follow-on): the queue's temporary
+  # gh-readonly-queue/* branch must receive every REQUIRED check, or the
+  # first queued PR stalls forever. Only this workflow and
+  # acceptance-ring.yml produce required contexts; the rest deliberately
+  # skip merge_group to keep the queue validation lean.
+  merge_group:
 
 # Cancel superseded runs on the same ref so a burst of pushes doesn't fire N
 # concurrent runs that all re-download tools and trip the per-IP rate limit.
@@ -100,6 +106,18 @@ jobs:
             # is the base tip, so the range is exactly the PR's own change set.
             git fetch -q origin "${{ github.base_ref }}"
             bash scripts/check-docs-only.sh "$(git merge-base "origin/${{ github.base_ref }}" HEAD)" HEAD
+          elif [ "${{ github.event_name }}" = merge_group ]; then
+            # The queue's group branch: base_sha is the develop tip the group
+            # was built on, so the range is the WHOLE group's change set —
+            # docs_only only when every queued PR is docs-only, which is the
+            # correct conservative reading.
+            base="${{ github.event.merge_group.base_sha }}"
+            if [ -n "$base" ] && git cat-file -e "$base^{commit}" 2>/dev/null; then
+              bash scripts/check-docs-only.sh "$base" HEAD
+            else
+              echo "docs_only=false" >> "$GITHUB_OUTPUT"
+              echo "check-docs-only: merge_group base unavailable — full run"
+            fi
           else
             before="${{ github.event.before }}"
             if [ -n "$before" ] && [ "$before" != "0000000000000000000000000000000000000000" ] && git cat-file -e "$before^{commit}" 2>/dev/null; then
@@ -141,6 +159,25 @@ jobs:
 
       - run: cargo build --release
 
+      # #1732: the workspace's dev-profile TEST build happens ONCE, here,
+      # and ships to the shards as a cargo-nextest archive — the four
+      # shard jobs stop compiling entirely (each used to repeat this
+      # ~10-minute build). The archive carries every test binary plus
+      # build-script outputs; shards replay it with `nextest run
+      # --archive-file` under the same target map and coverage gate.
+      - name: Install cargo-nextest
+        run: |
+          curl -LsSf https://get.nexte.st/latest/linux -o /tmp/nextest.tar.gz
+          tar xzf /tmp/nextest.tar.gz -C /usr/local/bin
+          cargo nextest --version
+      - name: Archive the workspace test binaries
+        run: cargo nextest archive --workspace --archive-file /tmp/almide-tests.tar.zst
+      - uses: actions/upload-artifact@v7
+        with:
+          name: almide-tests-archive
+          path: /tmp/almide-tests.tar.zst
+          retention-days: 1
+
       # Wired to `build`, not `checks`: the ratchet compiles the workspace, and
       # `checks` downloads a prebuilt binary with no cargo toolchain. Runs after
       # the release build so the warning set is measured against the same
@@ -180,13 +217,24 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # #1732: enumerate from the build job's nextest archive — this
+      # job's old enumerate compiled the workspace.
+      - name: Install cargo-nextest
+        run: |
+          curl -LsSf https://get.nexte.st/latest/linux -o /tmp/nextest.tar.gz
+          sudo tar xzf /tmp/nextest.tar.gz -C /usr/local/bin
+          cargo nextest --version
+      - uses: actions/download-artifact@v8
+        with:
+          name: almide-tests-archive
+          path: /tmp/almide-archive
       - name: Union of shards == full target set
         run: |
           set -euo pipefail
-          bash scripts/ci-test-shard.sh --list-all | sort > /tmp/all.txt
+          bash scripts/ci-test-shard.sh --list-all-archive /tmp/almide-archive/almide-tests.tar.zst | sort > /tmp/all.txt
           : > /tmp/union.txt
           for i in 0 1 2 3; do
-            bash scripts/ci-test-shard.sh --list "$i" 4 >> /tmp/union.txt
+            bash scripts/ci-test-shard.sh --list-archive "$i" 4 /tmp/almide-archive/almide-tests.tar.zst >> /tmp/union.txt
           done
           sort /tmp/union.txt > /tmp/union_sorted.txt
           dupes=$(sort /tmp/union.txt | uniq -d | wc -l | tr -d ' ')
@@ -205,7 +253,7 @@ jobs:
       - name: Balance report (informational — imbalance costs time, not coverage)
         run: |
           for i in 0 1 2 3; do
-            printf '  shard %s: %s target(s)\n' "$i" "$(bash scripts/ci-test-shard.sh --list "$i" 4 | wc -l | tr -d ' ')"
+            printf '  shard %s: %s target(s)\n' "$i" "$(bash scripts/ci-test-shard.sh --list-archive "$i" 4 /tmp/almide-archive/almide-tests.tar.zst | wc -l | tr -d ' ')"
           done
 
   test-rust:
@@ -253,20 +301,21 @@ jobs:
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
-      # This job was the ONE heavy job with no cargo cache: every PR run
-      # downloaded the registry and cold-built the whole workspace's dev-profile
-      # test targets (~15 of its ~22 minutes) before a single test ran. Same
-      # shape as fuzz-nightly's cache — registry + git + target, keyed on
-      # Cargo.lock, prefix restore so a lockfile bump still warm-starts.
-      - uses: actions/cache@v6
+      # #1732: no compile here anymore — the build job ships the
+      # dev-profile test binaries as a nextest archive, and this job
+      # replays it. The big registry/target cache went with the compile;
+      # only the tool tarball caches below remain.
+      - name: Install cargo-nextest
+        if: env.DOCS_ONLY != 'true'
+        run: |
+          curl -LsSf https://get.nexte.st/latest/linux -o /tmp/nextest.tar.gz
+          tar xzf /tmp/nextest.tar.gz -C /usr/local/bin
+          cargo nextest --version
+      - uses: actions/download-artifact@v8
         if: env.DOCS_ONLY != 'true'
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: test-rust-cargo-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: test-rust-cargo-${{ env.RUST_TOOLCHAIN }}-
+          name: almide-tests-archive
+          path: /tmp/almide-archive
 
       - name: Cache wasmtime tarball
         if: env.DOCS_ONLY != 'true'
@@ -325,7 +374,7 @@ jobs:
         # and runs this shard's share. `shard-coverage` below proves the four
         # shards' union is the whole set, so a partition bug reads as a RED
         # build rather than a fast green one.
-        run: bash scripts/ci-test-shard.sh --run ${{ matrix.shard }} 4
+        run: bash scripts/ci-test-shard.sh --run-archive ${{ matrix.shard }} 4 /tmp/almide-archive/almide-tests.tar.zst
 
   almide-gates:
     # BRANCH PROTECTION: this job's name is a REQUIRED CHECK on develop. Renaming
@@ -955,6 +1004,8 @@ jobs:
           set -euo pipefail
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             BASE="${{ github.event.pull_request.base.sha }}"
+          elif [ "${{ github.event_name }}" = "merge_group" ]; then
+            BASE="${{ github.event.merge_group.base_sha }}"
           else
             BASE="${{ github.event.before }}"
           fi
@@ -1424,6 +1475,13 @@ jobs:
         run: cargo test --release --locked -p almide-wasm -p almide-wasm-run -p almide-spine -p almide-syntax -p almide-corpus -p almide-layout
       - name: Target-availability matrix (#1423 — declared == measured, both directions)
         run: cargo build --release --locked --bin almide && bash scripts/check-target-availability.sh
+      # #1701: the wasm runtime RATIO ratchet. The ratio wasm/native cancels
+      # the machine (same discipline as the native perf-ratio gate), so CI's
+      # own hardware gates it; the non-measured ledger rows are re-measured
+      # too — a cell that starts benching fails with the good news until its
+      # row is promoted to `measured`.
+      - name: Wasm runtime ratio ratchet (#1701)
+        run: bash scripts/check-wasm-runtime-ratio.sh
 
   # Aviation discipline as CI (adopted from the greenfield burn, where
   # codopsy slipped to B twice and only a human check-in caught it):

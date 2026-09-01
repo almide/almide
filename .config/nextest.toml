@@ -1,0 +1,15 @@
+# nextest execution policy (#1732). cargo test runs a binary's #[test]s as
+# THREADS in one process, so suites that serialize shared on-disk fixtures
+# with in-process statics (a Mutex/OnceLock over the fs fixture files and
+# the shared build scratch) were safe. nextest runs each test in its OWN
+# process — those statics no longer serialize anything, and the fixture
+# suites raced (fs_preopen_resolve reading a sibling test's round marker,
+# wasm-opt parity seeing a vanished file — soak round 3). The test-group
+# pins them back to one-at-a-time; every other binary keeps full
+# process-parallelism.
+[test-groups]
+shared-fixture-serial = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'binary_id(=almide::wasm_runtime_test)'
+test-group = "shared-fixture-serial"

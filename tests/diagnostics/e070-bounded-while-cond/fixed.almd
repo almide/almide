@@ -1,0 +1,11 @@
+// ALS-B5: the counted range is the admissible spelling.
+@bounded
+fn drain(n: Int) -> Int = {
+  var steps = 0
+  for i in 0..<100 {
+    if i < n then steps = steps + 1
+  }
+  steps
+}
+
+fn main() -> Unit = println("${drain(5)}")

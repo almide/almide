@@ -1,0 +1,2 @@
+expects_error = "adopts generic protocol"
+hint_substring = "cannot bind 'T'"

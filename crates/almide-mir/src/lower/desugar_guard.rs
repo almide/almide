@@ -136,7 +136,12 @@ pub fn normalize_tail_err_raise_ifs(program: &mut almide_ir::IrProgram) {
     fn is_scalar_value_ty(ty: &Ty) -> bool {
         // Scalar payloads AND String: both have a proven bind-position `!` unwrap
         // (`let $g: String = $r!` is the fs.read_text class), so both normalize.
-        matches!(ty, Ty::Int | Ty::Float | Ty::Bool | Ty::String)
+        // Unit joins (#1734): `guard c else err(…)` in an `effect fn -> Unit` —
+        // the idiomatic CLI argument check — leaves a Unit-tail if whose only
+        // other lowering path is the #1537 statement-branch wall; the
+        // bind-position `!` over Result[Unit, String] is the same effect-call
+        // class (`fs.write_text(p, s)!`).
+        matches!(ty, Ty::Int | Ty::Float | Ty::Bool | Ty::String | Ty::Unit)
     }
     /// The raising arm's inner Result expr, if this arm IS an err-raise. Two
     /// spellings, ONE meaning at a fn tail — "this function returns Err(e)":
@@ -218,6 +223,130 @@ pub fn normalize_tail_err_raise_ifs(program: &mut almide_ir::IrProgram) {
             match &e.kind {
                 IrExprKind::Block { stmts, expr: Some(t) } if stmts.is_empty() => peel(t),
                 _ => e,
+            }
+        }
+        // #1734 — the UNIT-tail guard chain (`guard c else err(…)` in an
+        // `effect fn -> Unit`, the idiomatic CLI argument check): the generic
+        // fold below would nest the WHOLE continuation into `ok(<block>)`,
+        // stranding its `!` binds outside the top-block position desugars.
+        // Instead, materialize only the guard VERDICT and leave the
+        // continuation at the tail, where every later desugar still sees it:
+        //
+        //   if c then <continuation> else err(e)      (Unit tail)
+        //     ≡  { let $r = if c then ok(()) else err(e); let $g = $r!;
+        //          <continuation> }
+        //
+        // The verdict-if has trivial arms (both proven ctor shapes) and the
+        // bind-position `!` over Result[Unit, E] is the effect-call class.
+        // Chained guards recurse: the continuation's own tail-if takes the
+        // same rewrite.
+        if e.ty == Ty::Unit {
+            if let IrExprKind::If { cond, then, else_ } = &e.kind {
+                let then_is_raise = err_raise_inner(peel(then)).is_some();
+                let raise = err_raise_inner(peel(else_)).cloned();
+                if let (false, Some(inner)) = (then_is_raise, raise) {
+                    if let Ty::Applied(TypeConstructorId::Result, a) = &inner.ty {
+                        if a.len() == 2 {
+                            let result_ty = Ty::result(Ty::Unit, a[1].clone());
+                            let unit_ok = IrExpr {
+                                kind: IrExprKind::ResultOk {
+                                    expr: Box::new(IrExpr {
+                                        kind: IrExprKind::Unit,
+                                        ty: Ty::Unit,
+                                        span: None,
+                                        def_id: None,
+                                    }),
+                                },
+                                ty: result_ty.clone(),
+                                span: else_.span,
+                                def_id: None,
+                            };
+                            let err_leaf = IrExpr { ty: result_ty.clone(), ..inner };
+                            let verdict = IrExpr {
+                                kind: IrExprKind::If {
+                                    cond: cond.clone(),
+                                    then: Box::new(unit_ok),
+                                    else_: Box::new(err_leaf),
+                                },
+                                ty: result_ty.clone(),
+                                span: e.span,
+                                def_id: None,
+                            };
+                            let r = vt.alloc(
+                                almide_lang::intern::sym("__guard_res"),
+                                result_ty.clone(),
+                                Mutability::Let,
+                                None,
+                            );
+                            let g = vt.alloc(
+                                almide_lang::intern::sym("__guard_ok"),
+                                Ty::Unit,
+                                Mutability::Let,
+                                None,
+                            );
+                            let bind_r = IrStmt {
+                                kind: IrStmtKind::Bind {
+                                    var: r,
+                                    ty: result_ty.clone(),
+                                    value: verdict,
+                                    mutability: Mutability::Let,
+                                },
+                                span: None,
+                            };
+                            let bind_g = IrStmt {
+                                kind: IrStmtKind::Bind {
+                                    var: g,
+                                    ty: Ty::Unit,
+                                    value: IrExpr {
+                                        kind: IrExprKind::Unwrap {
+                                            expr: Box::new(IrExpr {
+                                                kind: IrExprKind::Var { id: r },
+                                                ty: result_ty,
+                                                span: None,
+                                                def_id: None,
+                                            }),
+                                        },
+                                        ty: Ty::Unit,
+                                        span: e.span,
+                                        def_id: None,
+                                    },
+                                    mutability: Mutability::Let,
+                                },
+                                span: None,
+                            };
+                            let continuation = (**then).clone();
+                            *e = IrExpr {
+                                kind: IrExprKind::Block {
+                                    stmts: vec![bind_r, bind_g],
+                                    expr: Some(Box::new(continuation)),
+                                },
+                                ty: Ty::Unit,
+                                span: e.span,
+                                def_id: e.def_id,
+                            };
+                            // The continuation's own tail may be the next guard
+                            // in the chain — normalize it in place, then FLATTEN
+                            // a Block continuation into this block so every
+                            // minted `let $r/$g` pair reaches the fn-body TOP
+                            // statement list (the only list the `!` position
+                            // desugars scan). The caller's Block-arm flatten
+                            // hoists this whole block one more level.
+                            if let IrExprKind::Block { stmts, expr: Some(t) } = &mut e.kind {
+                                rewrite_tail(t, vt, false);
+                                if let IrExprKind::Block { stmts: inner, expr: Some(iv) } =
+                                    &mut t.kind
+                                {
+                                    if !inner.is_empty() {
+                                        stmts.append(inner);
+                                        let v = (**iv).clone();
+                                        **t = v;
+                                    }
+                                }
+                            }
+                            return;
+                        }
+                    }
+                }
             }
         }
         fn classify_chain(e: &IrExpr) -> Option<(Ty, Option<Ty>)> {

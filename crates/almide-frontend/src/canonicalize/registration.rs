@@ -142,6 +142,106 @@ pub fn prefixed_key(prefix: Option<&str>, name: &str) -> String {
 /// the bare one is the fallback. Consumers must use the key this RETURNS —
 /// guessing one shape is exactly how `p.encode()`, `json.encode(p)` and
 /// `[T: Codec]` came to fail across an import (#1087, #1089).
+/// #1726 (the #1591 ruling): a convention method defined on the SAME type in
+/// MORE than one module is a check-time error. Open extension is ratified —
+/// a caller module extending a foreign type with a FRESH method name is
+/// deliberate surface — but a duplicate had no defined winner: native answered
+/// the defining module's body and wasm the caller's (an I-divergence). No
+/// precedence rule is worth that class of drift; the duplicate is refused
+/// with both sites named.
+///
+/// Identity is the SELF parameter's canonical type (#433 gives user-module
+/// types their qualified spelling), so two DIFFERENT types that share a bare
+/// name (`modA.Box` vs `modB.Box`) each keep their own method set, and only a
+/// true same-type duplicate collides. Derived methods are not in
+/// `explicit_convention_fns`, so a custom override of a derived `repr`/`eq`
+/// stays legal (#1087).
+fn validate_convention_method_conflicts(env: &TypeEnv, diagnostics: &mut Vec<Diagnostic>) {
+    // The TYPE a convention key targets, as a collision identity:
+    //   - "P.Type.method" where P declares Type       -> "P.Type" (its own)
+    //   - "Type.method" where the root declares Type  -> "Type"
+    //   - a FOREIGN extension (the #1591 surface)     -> the sole declaring
+    //     module's "M.Type" when exactly one module declares that bare name;
+    //     with several same-named candidates the identity falls back to the
+    //     key itself — self-unique, so ambiguity NEVER produces a false
+    //     conflict (modA.Box and modB.Box each keep their own method set).
+    let conv_target_id = |key: &str| -> Option<(String, String)> {
+        let (head, method) = key.rsplit_once('.')?;
+        let (prefix, type_seg) = match head.rsplit_once('.') {
+            Some((p, t)) => (Some(p), t),
+            _ => (Option::None, head),
+        };
+        // A convention key's middle segment is a TYPE name (uppercase); a
+        // dotted PLAIN fn ("mod.helper") is not a convention target.
+        if !type_seg.starts_with(|c: char| c.is_ascii_uppercase()) {
+            return Option::None;
+        }
+        let id = match prefix {
+            Some(p) => {
+                let qualified = format!("{}.{}", p, type_seg);
+                if env.types.contains_key(&sym(&qualified)) {
+                    qualified // the module's own type
+                } else {
+                    foreign_owner_id(env, type_seg).unwrap_or_else(|| key.to_string())
+                }
+            }
+            _ => {
+                if env.types.contains_key(&sym(type_seg))
+                    && !env.prefixed_bare_aliases.contains(&sym(type_seg))
+                {
+                    type_seg.to_string() // the root program's own type
+                } else {
+                    foreign_owner_id(env, type_seg).unwrap_or_else(|| key.to_string())
+                }
+            }
+        };
+        Some((id, method.to_string()))
+    };
+    let mut by_target: HashMap<(String, String), Vec<String>> = HashMap::new();
+    for key in &env.explicit_convention_fns {
+        let Some(target) = conv_target_id(key.as_str()) else { continue };
+        by_target.entry(target).or_default().push(key.to_string());
+    }
+    let mut conflicts: Vec<((String, String), Vec<String>)> =
+        by_target.into_iter().filter(|(_, keys)| keys.len() > 1).collect();
+    conflicts.sort();
+    for ((ty, method), mut keys) in conflicts {
+        keys.sort();
+        keys.dedup();
+        if keys.len() < 2 { continue; }
+        let msg = format!("convention method '{}.{}' is defined in more than one module", ty, method);
+        // Registration validation can run more than once over one env — an
+        // identical conflict must not stack.
+        if diagnostics.iter().any(|d| d.message == msg) { continue; }
+        diagnostics.push(err(
+            msg,
+            format!(
+                "The definitions ({}) would shadow each other with no defined winner. \
+                 Keep ONE definition — extension at a distance is fine for a NEW method \
+                 name, but a duplicate on the same type is refused (#1591 ruling).",
+                keys.join(", ")
+            ),
+            format!("fn {}.{}", ty, method),
+        ).with_code("E012"));
+    }
+}
+
+/// The single module that declares bare type `type_seg`, as "M.Type" — or
+/// None when zero or several modules do (ambiguity never flags; see caller).
+fn foreign_owner_id(env: &TypeEnv, type_seg: &str) -> Option<String> {
+    let suffix = format!(".{}", type_seg);
+    let mut owner: Option<String> = Option::None;
+    for k in env.types.keys() {
+        if k.as_str().ends_with(&suffix) {
+            if owner.is_some() {
+                return Option::None;
+            }
+            owner = Some(k.to_string());
+        }
+    }
+    owner
+}
+
 pub fn convention_fn_key(env: &TypeEnv, type_name: &str, method: &str) -> Option<Sym> {
     let qualified = sym(&format!("{}.{}", type_name, method));
     if env.functions.contains_key(&qualified) {
@@ -164,8 +264,29 @@ fn bare_type_name(type_name: &str) -> &str {
 /// Emitting the prefixed spelling produced calls to `lib_Color_repr` against a
 /// definition called `almide_rt_lib_Color_repr` (#1087).
 pub fn convention_emit_key(env: &TypeEnv, type_name: &str, method: &str) -> Option<Sym> {
-    convention_fn_key(env, type_name, method)
-        .map(|_| sym(&format!("{}.{}", bare_type_name(type_name), method)))
+    convention_fn_key(env, type_name, method).map(|_| {
+        // A receiver whose canonical type is module-qualified (`moda.Box`)
+        // emits the QUALIFIED method name ONLY when the bare spelling is
+        // AMBIGUOUS — two modules each registered `<mod>.Box.tag`, so the
+        // bare `Box.tag` is one key at symbol re-attachment and dispatched
+        // to whichever module registered last (#1728). A single owner keeps
+        // the bare form: that is the spelling BOTH backends' re-attachment
+        // machinery links (#1087), and qualifying it walled the wasm leg
+        // (the #1087 fixture fell off the fallback ratchet).
+        if let Some((_, bare)) = type_name.rsplit_once('.') {
+            let qualified = format!("{}.{}", type_name, method);
+            let suffix = format!(".{}.{}", bare, method);
+            if env.functions.contains_key(&sym(&qualified))
+                && env
+                    .functions
+                    .keys()
+                    .any(|k| k.as_str().ends_with(&suffix) && k.as_str() != qualified)
+            {
+                return sym(&qualified);
+            }
+        }
+        sym(&format!("{}.{}", bare_type_name(type_name), method))
+    })
 }
 /// Substitute `Self` → concrete type in a protocol method type.
 fn substitute_self(ty: &Ty, replacement: &Ty) -> Ty {
@@ -303,8 +424,14 @@ pub fn register_fn_sig(env: &mut TypeEnv, decl: &FnSigToRegister<'_>) {
         (*gn, prev)
     }).collect();
     // A bare `self` first parameter is sugar for `self: Self` (the parser always types it `TypeExpr::Simple { name: "Self" }`). Inside a `protocol { ... }` declaration `Self` is a legitimate unresolved placeholder, but on a real convention method (`fn Type.method(self, ...)`) it must resolve to the enclosing type, the same way `Self` in a protocol's own signature gets substituted when checked against one.
-    let receiver_ty = name.split_once('.').map(|(ty_name, _)| Ty::Named(sym(ty_name), Vec::new()));
+    // The synthesized receiver resolves through the SAME canonicalizer as a
+    // written type reference: with TWO modules owning the bare name, a bare
+    // `Ty::Named` here typed the method's self as the ambiguous bare name
+    // while the checked receiver carried the canonical `mod.Type` (#1728).
     let tcm = type_cur_mod(env, prefix);
+    let receiver_ty = name
+        .split_once('.')
+        .map(|(ty_name, _)| resolve_in(env, &ast::TypeExpr::Simple { name: sym(ty_name) }, tcm));
     let ptys: Vec<(Sym, Ty)> = params.iter().enumerate().map(|(i, p)| {
         if i == 0 && p.name.as_str() == "self" {
             if let (ast::TypeExpr::Simple { name: tn }, Some(rt)) = (&p.ty, &receiver_ty) {
@@ -640,6 +767,7 @@ pub fn register_decls(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl
     if env.alias_owner_module.is_none() {
         validate_protocol_impls(env, diagnostics);
         validate_derive_field_support(env, diagnostics);
+        validate_convention_method_conflicts(env, diagnostics);
     }
 }
 /// `ast::Decl::Fn` arm of [`register_decls`] — E012 duplicate-function diagnostic (skipped for `@extern` re-exports), signature registration, and DefTable registration. Verbatim text move; `continue` in the original loop becomes an early `return` here (both simply skip the rest of this decl's registration and move on to the next `decl`).

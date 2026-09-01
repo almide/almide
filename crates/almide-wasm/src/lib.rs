@@ -65,7 +65,10 @@ fn unsup<T>(what: &str) -> Result<T, EmitError> {
 
 mod bytes;
 mod bytes_rw;
+pub mod heap_cap;
+pub mod witness;
 mod calls;
+mod calls_modules;
 mod cells;
 mod unroll;
 mod collect;
@@ -73,7 +76,7 @@ mod collections;
 mod collections_hof;
 mod collections_set;
 mod emit;
-pub use emit::emit_program;
+pub use emit::{emit_program, emit_program_with_ops};
 mod emitter;
 mod emitter_values;
 mod emitter_vars;
@@ -101,6 +104,7 @@ mod list_order;
 mod list_sort;
 mod string_scan;
 mod stmts;
+mod stmts_append;
 mod string_ext;
 pub(crate) mod work;
 pub(crate) use work::*;
@@ -143,6 +147,13 @@ const ITOA_END: u32 = 48;
 /// `[16<<c, 32<<c)` — filed by floor, taken by ceil, so a taken block
 /// always fits the request without rounding the bump path.
 const FREELIST_BASE: u32 = ITOA_END;
+// 16 classes cover blocks up to 512 KiB; a freed block above the ceiling is
+// ABANDONED. This bound is part of the PROVEN runtime core (StructuralAlloc.v
+// `CLASSES`, the StructuralDecode.v byte transcription and the tree pin) —
+// widening it means re-transcribing and re-proving. The #1729 churn OOM was
+// not this ceiling: it was the assign-site leak (every outgrown generation
+// retained), fixed in stmts.rs; the append window's geometric growth bounds
+// the over-ceiling leak to ~2x the final size.
 const FREELIST_CLASSES: u32 = 16;
 /// The pool starts right after the scratch + free-list table: null
 /// guard `[0,PAYLOAD)`, padding to 16, scratch `[16,48)`, free-list

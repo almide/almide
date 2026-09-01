@@ -11,6 +11,10 @@ description = "The greenfield wasm HOST: the almide.* import surface (print/exit
 
 [dependencies]
 almide-wasm = { path = "../almide-wasm" }
+# The embedded host's http client (#1710 increment 1): a verbatim copy of
+# the native runtime template's rustls client (see src/http_client.rs).
+rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
+webpki-roots = "1.0"
 anyhow = "1"
 wasmparser = "0.257"
 wasm-encoder = "0.257"

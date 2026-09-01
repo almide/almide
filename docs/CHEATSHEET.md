@@ -56,7 +56,7 @@ type Handler = (String) -> String                    // function type alias
 ```
 
 ### Conventions
-```
+```almide check
 type Color: Eq, Repr = Red | Green | Blue   // convention after type name with :
 ```
 
@@ -67,7 +67,7 @@ instead of hand-writing `match` ladders. The derived Codec is
 externally tagged — the ctor name is the single key; a record payload
 keeps its field names, a tuple payload is a positional array, a unit
 case is `null`:
-```
+```almide check
 type Event: Codec = | Click(Int, Int) | Scroll{dy: Int} | Quit
 // Event.encode(Click(10, 20))    → {"Click": [10, 20]}
 // Event.encode(Scroll { dy: 5 }) → {"Scroll": {"dy": 5}}
@@ -397,7 +397,7 @@ m["key"] = value           // index write (var only)
 A malformed numeric escape (e.g. `\xzz`, `\u{}`) is left literal.
 
 ### Heredoc (multi-line strings)
-```
+```almide check
 let sql = """
   SELECT *
   FROM users
@@ -410,7 +410,7 @@ let sql = """
 ## Statements
 
 ### Top-level let (module-scope constant)
-```
+```almide check
 let PI = 3.14159265358979323846
 let MAX_RETRIES = 3
 let GREETING = "Hello"
@@ -632,7 +632,7 @@ assert(cond)               // assert true
 `eprintln` is for debug/internal errors only — user-facing messages MUST use `println`.
 
 ### Stdin & parsing
-```
+```almide check
 import io                                     // io is NOT auto-imported
 effect fn main() -> Unit = {
   let line = io.read_line()                   // plain String — NOT a Result. Do not add ! or ?
@@ -831,6 +831,7 @@ fn types, Result) — wrap those in a named Codec type or convert at the boundar
 - `1 :: 2 :: []` → **WRONG**. Write `[1, 2]`. There is no cons operator `::`
 - `fn foo<T>(x: T)` → **WRONG**. Write `fn foo[T](x: T)`. Use `[]` for generics, not `<>`
 - `let mut x = 1` → **WRONG**. Write `var x = 1`. `mut` is only a parameter modifier (`fn f(mut x: Int)`), not a binding modifier
+- `let err = f()` → **WRONG**. `ok`/`err`/`some`/`none` (and capitalized forms) are the built-in Result/Option constructors — reserved words. Rename the binding (`let msg = f()`), or backtick-escape to keep the name (`let `err` = f()`)
 - Nested `fn` inside a function → **WRONG**. All `fn` must be top-level. Use `let helper = (x) => ...` for local functions
 - `match x { ... pattern => expr }` with `...` → **WRONG**. No spread in patterns
 - `async fn` / `await` → **WRONG**. Almide has no async/await. Use `fan.any` / `fan.settle` / `fan.race` / `fan.bounded` block forms

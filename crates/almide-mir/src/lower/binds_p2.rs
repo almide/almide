@@ -541,6 +541,28 @@ impl LowerCtx {
             self.value_of.insert(var, dst);
             return Ok(());
         }
+        // A UNIT-typed call bind (`let $h = println(x)` — the ANF temp the
+        // ctor-net mints for `ok(println(x))`, the guard-restructure shape of
+        // `guard c else err(…)` in an `effect fn -> Unit`, #1734): the bind IS
+        // the statement. Run the call's effects for real, then bind the 0
+        // placeholder — a Unit value is never read, exactly the Unit-Ok
+        // payload discipline.
+        if *ty == Ty::Unit
+            && matches!(value.kind, IrExprKind::Call { .. } | IrExprKind::RuntimeCall { .. })
+        {
+            let ops_mark = self.ops.len();
+            match self.lower_stmt_expr(value) {
+                Ok(()) => {
+                    let dst = self.fresh_value();
+                    self.ops.push(Op::ConstInt { dst, value: 0 });
+                    self.value_of.insert(var, dst);
+                    return Ok(());
+                }
+                Err(_) => {
+                    self.ops.truncate(ops_mark);
+                }
+            }
+        }
         if self.try_lower_bind_scalar_literal(var, value) {
             return Ok(());
         }

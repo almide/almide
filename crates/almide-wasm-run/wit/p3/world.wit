@@ -22,3 +22,23 @@ world p3-command {
 
   export wasi:cli/run@0.3.0;
 }
+
+// The http-importing twin (#1710 increment 2): selected ONLY when the
+// program's host ops include the http client family, so an http-free
+// component keeps instantiating without `-S http`. The outgoing client
+// rides `wasi:http/client@0.3.0.send` (the async canonical ABI — the
+// same subtask machinery the fan prefetch lowers onto).
+world p3-command-http {
+  import wasi:cli/stdin@0.3.0;
+  import wasi:cli/stdout@0.3.0;
+  import wasi:cli/stderr@0.3.0;
+  import wasi:cli/exit@0.3.0;
+  import wasi:clocks/system-clock@0.3.0;
+  import wasi:random/random@0.3.0;
+  import wasi:filesystem/types@0.3.0;
+  import wasi:filesystem/preopens@0.3.0;
+  import wasi:http/types@0.3.0;
+  import wasi:http/client@0.3.0;
+
+  export wasi:cli/run@0.3.0;
+}

@@ -28,6 +28,25 @@ pub(crate) const OP_STDIN_TAKE: i32 = 35;
 pub(crate) const OP_RANDOM_GET: i32 = 32;
 pub(crate) const OP_CWD: i32 = 33;
 pub(crate) const OP_WALL_NOW: i32 = 34;
+/// env.sleep_ms (#1423 bucket A): the millisecond count rides the a_len
+/// slot with a null a_ptr (the op-35 scalar discipline — never a guest
+/// buffer), handled by the host BEFORE its buffer reads. No observable
+/// value: the guest builds the always-ok unit carrier itself.
+pub(crate) const OP_SLEEP_MS: i32 = 36;
+/// env.set (#1423 bucket C ruling): key in a, value in b — the embedded
+/// host records it in the process-wide overlay op 26 consults first, so a
+/// later env.get observes the set exactly as native's process-level
+/// setenv does. Stock-p1 artifacts keep the defined refusal.
+pub(crate) const OP_ENV_SET: i32 = 37;
+/// The http string client (#1710 increment 1): url in a, body in b, the
+/// method IS the op. Served on the embedded host by the transcribed
+/// native client; ops 40-42 are the fan prefetch protocol, so this
+/// family starts at 43. Stock artifacts refuse at build (the op audit).
+pub(crate) const OP_HTTP_GET: i32 = 43;
+pub(crate) const OP_HTTP_POST: i32 = 44;
+pub(crate) const OP_HTTP_PUT: i32 = 45;
+pub(crate) const OP_HTTP_PATCH: i32 = 46;
+pub(crate) const OP_HTTP_DELETE: i32 = 47;
 const OP_READ_BYTES: i32 = 14;
 
 impl Emitter<'_> {
@@ -109,7 +128,12 @@ impl Emitter<'_> {
     }
 
     /// no-arg host op: fs_call(op, 0,0,0,0) — ret on the stack.
+    pub(crate) fn note_host_op(&self, op: i32) {
+        self.work.host_ops.borrow_mut().insert(op);
+    }
+
     pub(crate) fn fs_call_0(&mut self, op: i32) -> Result<(), EmitError> {
+        self.note_host_op(op);
         let mut i = self.f.instructions();
         i.i32_const(op);
         i.i32_const(0).i32_const(0).i32_const(0).i32_const(0);
@@ -122,6 +146,7 @@ impl Emitter<'_> {
     /// scalar, never a guest buffer (the op-31 comment's 4 GiB trap) —
     /// and the host special-cases the op before its buffer reads.
     pub(crate) fn fs_call_stdin_take(&mut self, count: i32) -> Result<(), EmitError> {
+        self.note_host_op(OP_STDIN_TAKE);
         let mut i = self.f.instructions();
         i.i32_const(OP_STDIN_TAKE);
         i.i32_const(0).i32_const(count).i32_const(0).i32_const(0);

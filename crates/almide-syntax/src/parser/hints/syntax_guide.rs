@@ -74,9 +74,16 @@ fn check_rejected_ident(name: &str) -> Option<HintResult> {
             message: Some(format!("'{}' is not valid in Almide", name)),
             hint: "Almide has no try/catch. Use 'match' on Result values instead.".into(),
         }),
-        "self" | "this" => Some(HintResult {
-            message: Some(format!("'{}' is not valid in Almide", name)),
-            hint: "Pass the value as an explicit first parameter. Example: fn Dog.repr(d: Dog) -> String".into(),
+        // `self` is NOT here (#1590): it is a legal identifier — the bare
+        // receiver parameter and every use in a convention-method body —
+        // and the old entry fired on `match self { … }` (the `{` after the
+        // subject fails the used-as-identifier lookahead), reporting
+        // "'self' is not valid in Almide" about a spelling three sibling
+        // positions accept. Outside a method, `self` now gets the checker's
+        // honest E003 instead of a categorically false parser rejection.
+        "this" => Some(HintResult {
+            message: Some("'this' is not valid in Almide".into()),
+            hint: "Use `self` as the explicit first parameter of a convention method: fn Dog.repr(self) -> String".into(),
         }),
         "new" => Some(HintResult {
             message: Some("'new' is not needed in Almide".into()),

@@ -82,6 +82,10 @@ pub(crate) struct Emitter<'a> {
     /// call in tail position with a matching return type emits
     /// `return_call` — constant stack for deep (incl. mutual) recursion.
     pub(crate) in_tail: bool,
+    /// #1696 phase A: armed by lower_fn when the straightline gate
+    /// admits the body — the Bind route and the epilogue record their
+    /// RC events here; the certificate is pushed to the witness sink.
+    pub(crate) witness: Option<crate::witness::WitnessRecorder>,
     /// Positive while lowering an if/match arm. A droppable PARAM reassigned
     /// under a branch has no sound ownership story (one path frees the
     /// caller's block, the other keeps it — #1688 shipped wrong bytes
@@ -193,6 +197,47 @@ impl Emitter<'_> {
         self.release_i32();
         Ok(elem)
     }
+    /// main's err channel (#1734, the pre-existing structural hole): a
+    /// Result-typed expression in MAIN's statement/tail position is the
+    /// effect carrier, not a discardable value — the native/interp
+    /// contract is `Error: {msg}` on stderr + exit 1 on err, plain
+    /// fallthrough on ok. Discarding it swallowed the err (silent exit
+    /// 0 — `effect fn main() -> Unit = err("boom")` on the released
+    /// 0.61.0). Returns Ok(true) when this handled the expression.
+    /// A non-String err payload walls honestly (no message to print).
+    pub(crate) fn try_lower_main_err_carrier(&mut self, e: &IrExpr) -> Result<bool, EmitError> {
+        use almide_types::types::{Ty, TypeConstructorId};
+        if !self.in_main {
+            return Ok(false);
+        }
+        let Ty::Applied(TypeConstructorId::Result, a) = &e.ty else {
+            return Ok(false);
+        };
+        if a.len() != 2 {
+            return Ok(false);
+        }
+        let got = self.lower(e, None)?;
+        let SliceTy::Result(_, eh) = got else {
+            // Effect-ABI transparency already unwrapped it — nothing to route.
+            self.f.instructions().drop();
+            return Ok(true);
+        };
+        if self.types.el(eh) != STR {
+            return Err(EmitError::Unsupported("main-err-carrier:non-string-err".into()));
+        }
+        let hb = self.scr_i32_local;
+        let mut i = self.f.instructions();
+        i.local_set(hb);
+        i.local_get(hb)
+            .i32_load(slot_memarg(almide_layout::SUM_TAG))
+            .if_(BlockType::Empty);
+        i.local_get(hb).i32_load(slot_memarg(almide_layout::SUM_FIELD));
+        let _ = i;
+        self.emit_error_frame_abort();
+        self.f.instructions().end();
+        Ok(true)
+    }
+
     /// The main-level / pure-fn abort frame for a failed `!`: the exact
     /// native contract — `Error: {msg}` on stderr, exit 1. The message
     /// block address is on the stack.

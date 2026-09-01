@@ -251,6 +251,39 @@ if [ "$krc" -eq 0 ]; then
 fi
 echo "ok   tamper(ii): a simulated divergent verdict is CAUGHT by the kernel oracle"
 
+# ── #1696 phase A2: the STRUCTURAL leg's witnesses through the SAME proven
+# checker. The recorder (crates/almide-wasm/src/witness.rs) logs each RC
+# event as its instruction is emitted, so an accept here certifies the
+# emitted instruction stream's ownership discipline — one contract level
+# closer to the bytes than the incumbent's MIR-side projection. Three
+# standing samples (two fixture fns + one organic corpus fn) plus the
+# same corruption drill the incumbent rows get.
+echo
+echo "== structural leg  ⊳  proven checker (#1696 phase A2) =="
+emit_structural() { # fixture-rel fn-name
+  (cd "$ROOT" && cargo run -q -p almide-wasm --example emit_structural_witness -- "$1" "$2")
+}
+run_structural() { # fixture-rel fn-name expected_exit
+  emit_structural "$1" "$2" > /tmp/structural.witness
+  set +e
+  "$ROOT/proofs/checker" ownership /tmp/structural.witness >/tmp/gate.out 2>&1; local rc=$?
+  set -e
+  if [ "$rc" -ne "$3" ]; then
+    echo "FAIL [structural] $1::$2: got exit $rc want $3 ($(cat /tmp/gate.out))"; exit 1
+  fi
+  kernel_verify ownership /tmp/structural.witness "$3"     || { echo "FAIL [structural] $1::$2: KERNEL oracle disagrees"; exit 1; }
+  echo "ok   [structural] $1::$2: witness '$(cat /tmp/structural.witness | tr '\n' '|')' accepted (kernel agrees)"
+}
+run_structural spec/wasm_cross/witness_straightline.almd shed 0
+run_structural spec/wasm_cross/witness_straightline.almd tag 0
+run_structural spec/wasm_cross/r5_lowmisc_param_try_err.almd id_list 0
+# Corruption drill: strip one release — the checker must see the leak.
+emit_structural spec/wasm_cross/witness_straightline.almd shed | sed 's/dd$/d/' > /tmp/structural.tamper
+set +e; "$ROOT/proofs/checker" ownership /tmp/structural.tamper >/dev/null 2>&1; src_rc=$?; set -e
+if [ "$src_rc" -ne 1 ]; then echo "FAIL structural-tamper: a leaked structural witness was accepted"; exit 1; fi
+kernel_verify ownership /tmp/structural.tamper 1   || { echo "FAIL structural-tamper: the kernel accepted the leak"; exit 1; }
+echo "ok   structural-tamper: a leaked structural witness is rejected by the binary AND the kernel"
+
 echo
 echo "GATE OK: the kernel-proven checker re-verified per-build witnesses on THREE"
 echo "properties (ownership + name totality + capability bound), AND a REAL .almd"

@@ -96,6 +96,33 @@ fn every_streaming_cell_decides_its_fallible_form() {
     }
 }
 
+/// THIRD AXIS (#1423 bucket A): the typed-twin matrix on the wasm/self-host
+/// route. Every ACCUMULATING walker carries all four accumulator twins
+/// {_msi, _i, _ls, _s} in the self-host registry, so no accumulator type
+/// falls to the `_x` wall point-wise; `for_each_line` accumulates nothing
+/// and has no twins by construction. Dropping a cell — or adding a walker
+/// without its four twins — fails here.
+#[test]
+fn every_accumulating_walker_carries_all_four_acc_twins() {
+    let src = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("crates/almide-types/src/self_host_registry.rs"),
+    )
+    .expect("read self_host_registry.rs");
+    for walker in ["fold_lines", "fold_lines_chunked", "fold_lines_range"] {
+        for suf in ["msi", "i", "ls", "s"] {
+            let surface = format!("\"fs.{walker}_{suf}\"");
+            assert!(
+                src.contains(&surface),
+                "twin matrix cell missing: {surface} — every accumulating \
+                 streaming walker carries all four accumulator twins (add the \
+                 self-host twin in stdlib/fs_fold_lines.almd, register it, and \
+                 route it in mod_p4_h.rs, in the same PR)"
+            );
+        }
+    }
+}
+
 /// The frontend's dispatch table and this matrix must name the SAME cells —
 /// a carrier nothing rewrites to is dead code, and a rewrite with no carrier
 /// is a wall at a distance.

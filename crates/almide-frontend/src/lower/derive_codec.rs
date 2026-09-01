@@ -392,15 +392,119 @@ fn dec_result_expr(wk: &mut CodecWk, expr: IrExpr, ty: &Ty, value_ty: &Ty) -> Ir
 
 /// Decode a REQUIRED field from its fetched Value: existing shapes delegate
 /// to [`decode_field_value`] (byte-pinned helper routes); a list with a
-/// container element Try's the generated worker in bind position.
-fn dec_field_expr(wk: &mut CodecWk, get_expr: IrExpr, ty: &Ty, value_ty: &Ty) -> IrExpr {
-    if let Ty::Applied(TypeConstructorId::List, a) = ty {
-        if a.len() == 1 && is_container_ty(&a[0]) {
-            let call = dec_result_expr(wk, get_expr, ty, value_ty);
-            return e_(IrExprKind::Try { expr: Box::new(call) }, ty.clone());
-        }
+/// #1675: rebuild `res` (a `Result[T, String]` expr) so an Err carries this
+/// field's path segment: `match res { ok(x) => ok(x), err(e) =>
+/// err(__err_at(e, seg)) }`. All types concrete per field — both legs lower
+/// the match with their existing machinery, and `__err_at` is ONE pure-Almide
+/// implementation (stdlib/codec_decode.almd) shared by native and wasm.
+fn wrap_err_at(wk: &mut CodecWk, res: IrExpr, ok_ty: &Ty, seg: &str) -> IrExpr {
+    // A per-type WORKER, not an inline match: `Try { match <call> { … } }`
+    // in bind position is outside the structural leg's lowering subset
+    // (codec_triple_list walled on it), while a top-level fn matching on
+    // its own PARAM is the `T.__list_dec_go` shape both legs already lower.
+    let worker = err_at_worker(wk, ok_ty);
+    let res_ty = Ty::result(ok_ty.clone(), Ty::String);
+    call_named_(&worker, vec![
+        res,
+        e_(IrExprKind::LitStr { value: seg.to_string() }, Ty::String),
+    ], res_ty)
+}
+
+/// Mint (once per ok-type) `T.__erratidx_<mangle>(r, i)` — the index twin of
+/// [`err_at_worker`], delegating to `__err_at_index`.
+fn err_at_index_worker(wk: &mut CodecWk, ok_ty: &Ty) -> String {
+    let name = format!("{}.__erratidx_{}", wk.type_name, ty_mangle(ok_ty));
+    if !wk.seen.insert(name.clone()) {
+        return name;
     }
-    decode_field_value(get_expr, ty, value_ty)
+    let res_ty = Ty::result(ok_ty.clone(), Ty::String);
+    let r = wk.vt.alloc(sym("_r"), res_ty.clone(), Mutability::Let, None);
+    let iv = wk.vt.alloc(sym("_i"), Ty::Int, Mutability::Let, None);
+    let ev = wk.vt.alloc(sym("_we"), Ty::String, Mutability::Let, None);
+    // The ok arm passes the PARAM through (`ok(_) => r`) instead of
+    // re-materializing `ok(x)`: an Option-payload result ctor sits outside
+    // the v1 spine's ctor zoo and would wall the worker; the passthrough
+    // shape lowers on every leg.
+    let body = e_(IrExprKind::Match {
+        subject: Box::new(e_(IrExprKind::Var { id: r }, res_ty.clone())),
+        arms: vec![
+            IrMatchArm {
+                pattern: IrPattern::Ok { inner: Box::new(IrPattern::Wildcard) },
+                guard: None,
+                body: e_(IrExprKind::Var { id: r }, res_ty.clone()),
+            },
+            IrMatchArm {
+                pattern: IrPattern::Err { inner: Box::new(IrPattern::Bind { var: ev, ty: Ty::String }) },
+                guard: None,
+                body: e_(IrExprKind::ResultErr { expr: Box::new(call_named_("__err_at_index", vec![
+                    e_(IrExprKind::Var { id: ev }, Ty::String),
+                    e_(IrExprKind::Var { id: iv }, Ty::Int),
+                ], Ty::String)) }, res_ty.clone()),
+            },
+        ],
+    }, res_ty.clone());
+    let f = mk_worker_fn(&name, vec![(r, "_r", res_ty.clone()), (iv, "_i", Ty::Int)], res_ty, body);
+    wk.out.push(f);
+    name
+}
+
+/// Mint (once per ok-type) `T.__erratw_<mangle>(r, seg)` — rebuilds an Err
+/// with `__err_at(e, seg)`, passes an Ok through.
+fn err_at_worker(wk: &mut CodecWk, ok_ty: &Ty) -> String {
+    let name = format!("{}.__erratw_{}", wk.type_name, ty_mangle(ok_ty));
+    if !wk.seen.insert(name.clone()) {
+        return name;
+    }
+    let res_ty = Ty::result(ok_ty.clone(), Ty::String);
+    let r = wk.vt.alloc(sym("_r"), res_ty.clone(), Mutability::Let, None);
+    let seg = wk.vt.alloc(sym("_seg"), Ty::String, Mutability::Let, None);
+    let ev = wk.vt.alloc(sym("_we"), Ty::String, Mutability::Let, None);
+    // ok(_) => r passthrough — see err_at_index_worker for why.
+    let body = e_(IrExprKind::Match {
+        subject: Box::new(e_(IrExprKind::Var { id: r }, res_ty.clone())),
+        arms: vec![
+            IrMatchArm {
+                pattern: IrPattern::Ok { inner: Box::new(IrPattern::Wildcard) },
+                guard: None,
+                body: e_(IrExprKind::Var { id: r }, res_ty.clone()),
+            },
+            IrMatchArm {
+                pattern: IrPattern::Err { inner: Box::new(IrPattern::Bind { var: ev, ty: Ty::String }) },
+                guard: None,
+                body: e_(IrExprKind::ResultErr { expr: Box::new(call_named_("__err_at", vec![
+                    e_(IrExprKind::Var { id: ev }, Ty::String),
+                    e_(IrExprKind::Var { id: seg }, Ty::String),
+                ], Ty::String)) }, res_ty.clone()),
+            },
+        ],
+    }, res_ty.clone());
+    let f = mk_worker_fn(&name, vec![(r, "_r", res_ty.clone()), (seg, "_seg", Ty::String)], res_ty, body);
+    wk.out.push(f);
+    name
+}
+
+/// Apply [`wrap_err_at`] to the operand of a top-level `Try` (the shape every
+/// field-decode branch produces); anything else passes through unchanged.
+fn wrap_try_err_at(wk: &mut CodecWk, expr: IrExpr, ok_ty: &Ty, seg: &str) -> IrExpr {
+    if let IrExprKind::Try { expr: inner } = expr.kind {
+        let wrapped = wrap_err_at(wk, *inner, ok_ty, seg);
+        return e_(IrExprKind::Try { expr: Box::new(wrapped) }, ok_ty.clone());
+    }
+    IrExpr { kind: expr.kind, ..expr }
+}
+
+/// container element Try's the generated worker in bind position.
+fn dec_field_expr(wk: &mut CodecWk, get_expr: IrExpr, ty: &Ty, value_ty: &Ty, seg: &str) -> IrExpr {
+    if let Ty::Applied(TypeConstructorId::List, a) = ty
+        && a.len() == 1
+        && is_container_ty(&a[0])
+    {
+        let call = dec_result_expr(wk, get_expr, ty, value_ty);
+        let wrapped = wrap_err_at(wk, call, ty, seg);
+        return e_(IrExprKind::Try { expr: Box::new(wrapped) }, ty.clone());
+    }
+    let plain = decode_field_value(get_expr, ty, value_ty);
+    wrap_try_err_at(wk, plain, ty, seg)
 }
 
 /// `T.__dec_<mangle>(v) -> Result[List[elem], String]` + `_go` worker for a
@@ -450,6 +554,13 @@ fn dec_list_worker(wk: &mut CodecWk, list_ty: &Ty, elem: &Ty, value_ty: &Ty) -> 
         index: Box::new(e_(IrExprKind::Var { id: i }, Ty::Int)),
     }, value_ty.clone());
     let dec_elem = dec_result_expr(wk, elem_expr, elem, value_ty);
+    // #1675: the element's error carries its index — the same call-shaped
+    // wrap the field frames use (a worker call, not an inline match).
+    let idx_worker = err_at_index_worker(wk, elem);
+    let dec_elem = call_named_(&idx_worker, vec![
+        dec_elem,
+        e_(IrExprKind::Var { id: i }, Ty::Int),
+    ], Ty::result(elem.clone(), Ty::String));
     let bind_x = IrStmt {
         kind: IrStmtKind::Bind {
             var: x, mutability: Mutability::Let, ty: elem.clone(),
@@ -742,7 +853,7 @@ pub(super) fn auto_derive_decode(wk: &mut CodecWk, type_ty: &Ty, fields: &[IrFie
                     fv_expr.clone(),
                     call_mod_("value", "null", vec![], value_ty.clone()),
                 ], Ty::Bool);
-                let decoded = dec_field_expr(wk, fv_expr, &f.ty, &value_ty);
+                let decoded = dec_field_expr(wk, fv_expr, &f.ty, &value_ty, &key_name(f));
                 IrExpr {
                     kind: IrExprKind::Match {
                         subject: Box::new(get_field_call),
@@ -789,7 +900,7 @@ pub(super) fn auto_derive_decode(wk: &mut CodecWk, type_ty: &Ty, fields: &[IrFie
                 kind: IrExprKind::Try { expr: Box::new(get_field_call) },
                 ty: value_ty.clone(), span: None, def_id: None,
             };
-            dec_field_expr(wk, get_and_try, &f.ty, &value_ty)
+            dec_field_expr(wk, get_and_try, &f.ty, &value_ty, &key_name(f))
         };
 
         stmts.push(IrStmt {

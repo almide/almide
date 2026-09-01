@@ -79,7 +79,7 @@ effect fn main() -> Unit = {
     let y_start = chunk_idx * rows_per_chunk
     let y_end = if chunk_idx == n_chunks - 1 then n else y_start + rows_per_chunk
     ok(compute_chunk(y_start, y_end, n, inv_n))
-  })
+  })!
 
   for chunk in chunks {
     io.write(chunk)

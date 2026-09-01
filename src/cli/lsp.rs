@@ -427,14 +427,20 @@ fn find_ident_in_stmt(stmt: &crate::ast::Stmt, name: &str, type_map: &crate::typ
 /// `position_encoding` declares UTF-16 explicitly — that is what an LSP
 /// client sends by default, and every position this server reads or emits is
 /// converted through the utf16/char-column helpers rather than sliced as raw
-/// bytes (#927). Rename is deliberately NOT advertised: the old
-/// implementation was an unscoped textual find/replace (renamed matches
-/// inside strings, comments, and shadowed scopes), which silently corrupts
-/// user code. It comes back when it can be binding-aware via the Checker.
+/// bytes (#927).
+///
+/// Sync is INCREMENTAL (#1470): the client sends range edits, not the whole
+/// document per keystroke — `apply_content_change` splices them in UTF-16
+/// coordinates.
+///
+/// Rename is BACK (#1470): the old textual find/replace was withdrawn for
+/// silently corrupting code (matches inside strings, comments, shadowed
+/// scopes); the new one is binding-aware (`lsp_references.rs`) and refuses —
+/// with the reason — any rename its total-accounting net cannot prove safe.
 fn lsp_server_capabilities() -> ServerCapabilities {
     ServerCapabilities {
         position_encoding: Some(PositionEncodingKind::UTF16),
-        text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
+        text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::INCREMENTAL)),
         hover_provider: Some(HoverProviderCapability::Simple(true)),
         completion_provider: Some(CompletionOptions {
             trigger_characters: Some(vec![".".to_string()]),
@@ -450,6 +456,8 @@ fn lsp_server_capabilities() -> ServerCapabilities {
         }),
         workspace_symbol_provider: Some(OneOf::Left(true)),
         code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
+        references_provider: Some(OneOf::Left(true)),
+        rename_provider: Some(OneOf::Left(true)),
         ..Default::default()
     }
 }
@@ -473,7 +481,11 @@ fn derive_workspace_root(init: &InitializeParams) -> Option<std::path::PathBuf> 
 /// every keystroke and serves the dep list cached at open time; a project
 /// never opened in this session analyzes against no deps rather than
 /// touching the network (#927).
-fn handle_notification(notif: Notification, connection: &Connection, documents: &mut HashMap<Uri, String>, analyzed: &mut HashMap<Uri, AnalyzedDoc>, dep_cache: &mut DepCache) {
+// `Uri` keys trip clippy::mutable_key_type across this server — a false
+// positive (Uri hashes by its string form; no key is mutated in place), and
+// the same shape the pre-existing documents/analyzed maps already carry.
+#[allow(clippy::mutable_key_type)]
+fn handle_notification(notif: Notification, connection: &Connection, documents: &mut HashMap<Uri, String>, analyzed: &mut HashMap<Uri, AnalyzedDoc>, dep_cache: &mut DepCache, dirty: &mut std::collections::HashSet<Uri>) {
     match notif.method.as_str() {
         "textDocument/didOpen" => {
             if let Ok(params) = serde_json::from_value::<DidOpenTextDocumentParams>(notif.params) {
@@ -492,26 +504,19 @@ fn handle_notification(notif: Notification, connection: &Connection, documents: 
             match serde_json::from_value::<DidChangeTextDocumentParams>(notif.params) {
                 Ok(params) => {
                     let uri = params.text_document.uri.clone();
-                    if let Some(change) = params.content_changes.into_iter().last() {
-                        let source = change.text;
-                        let file_path = uri_to_path(&uri);
-                        if trace {
-                            eprintln!("[lsp-trace] didChange uri={} path={:?}", uri.as_str(), file_path);
-                        }
-                        let t = std::time::Instant::now();
-                        let deps = project_deps_for(file_path.as_deref(), dep_cache, false);
-                        if trace {
-                            eprintln!("[lsp-trace] didChange deps resolved: {} in {:?}", deps.len(), t.elapsed());
-                        }
-                        let t = std::time::Instant::now();
-                        let doc = AnalyzedDoc::analyze(&source, file_path.as_deref(), &deps);
-                        if trace {
-                            eprintln!("[lsp-trace] didChange analyzed in {:?}", t.elapsed());
-                        }
-                        publish_diagnostics(connection, &uri, &doc.lsp_diagnostics);
-                        documents.insert(uri.clone(), source);
-                        analyzed.insert(uri, doc);
+                    // INCREMENTAL sync (#1470): splice each range edit into
+                    // the stored text, in arrival order. Analysis does NOT
+                    // run here — the doc is marked dirty and the main loop's
+                    // 100 ms idle debounce (gleam's strategy) analyzes it,
+                    // or the next request flushes it first.
+                    let text = documents.entry(uri.clone()).or_default();
+                    for change in params.content_changes {
+                        apply_content_change(text, change);
                     }
+                    if trace {
+                        eprintln!("[lsp-trace] didChange applied, {} bytes now — analysis deferred to idle", text.len());
+                    }
+                    dirty.insert(uri);
                 }
                 // A notification with unparseable params is dropped by design
                 // (no reply channel exists for notifications) — but never
@@ -525,6 +530,7 @@ fn handle_notification(notif: Notification, connection: &Connection, documents: 
             if let Ok(params) = serde_json::from_value::<DidCloseTextDocumentParams>(notif.params) {
                 documents.remove(&params.text_document.uri);
                 analyzed.remove(&params.text_document.uri);
+                dirty.remove(&params.text_document.uri);
             }
         }
         _ => {}
@@ -546,14 +552,34 @@ pub fn run_lsp() {
     let mut documents: HashMap<Uri, String> = HashMap::new();
     let mut analyzed: HashMap<Uri, AnalyzedDoc> = HashMap::new();
     let mut dep_cache: DepCache = HashMap::new();
+    // Docs edited since their last analysis (#1470). The gleam strategy:
+    // a 100 ms idle debounce batches keystrokes, and any REQUEST flushes
+    // first (compile-before-answering), so answers are never stale.
+    let mut dirty: std::collections::HashSet<Uri> = std::collections::HashSet::new();
 
-    for msg in &connection.receiver {
+    loop {
+        let msg = if dirty.is_empty() {
+            match connection.receiver.recv() {
+                Ok(m) => m,
+                Err(_) => break,
+            }
+        } else {
+            match connection.receiver.recv_timeout(std::time::Duration::from_millis(100)) {
+                Ok(m) => m,
+                Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
+                    flush_dirty(&connection, &documents, &mut analyzed, &mut dep_cache, &mut dirty);
+                    continue;
+                }
+                Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
+            }
+        };
         match msg {
             Message::Request(req) => {
                 if connection.handle_shutdown(&req).unwrap_or(false) { return; }
                 if std::env::var("ALMIDE_LSP_TRACE").is_ok() {
                     eprintln!("[lsp-trace] request  {} id={:?}", req.method, req.id);
                 }
+                flush_dirty(&connection, &documents, &mut analyzed, &mut dep_cache, &mut dirty);
                 let resp = handle_request(&req, &documents, &analyzed, &workspace_root);
                 // A REQUEST must always get a response (JSON-RPC). A `None`
                 // here used to be a SILENT DROP — a client blocking on the
@@ -575,12 +601,67 @@ pub fn run_lsp() {
                 if std::env::var("ALMIDE_LSP_TRACE").is_ok() {
                     eprintln!("[lsp-trace] notification {}", notif.method);
                 }
-                handle_notification(notif, &connection, &mut documents, &mut analyzed, &mut dep_cache)
+                handle_notification(notif, &connection, &mut documents, &mut analyzed, &mut dep_cache, &mut dirty)
             }
             Message::Response(_) => {}
         }
     }
     io_threads.join().ok();
+}
+
+/// Re-analyze every dirty document and publish its diagnostics — the single
+/// analysis point behind both the idle debounce and compile-before-answering.
+#[allow(clippy::mutable_key_type)] // same Uri-key false positive as handle_notification
+fn flush_dirty(connection: &Connection, documents: &HashMap<Uri, String>, analyzed: &mut HashMap<Uri, AnalyzedDoc>, dep_cache: &mut DepCache, dirty: &mut std::collections::HashSet<Uri>) {
+    for uri in dirty.drain() {
+        let Some(source) = documents.get(&uri) else { continue };
+        let file_path = uri_to_path(&uri);
+        let deps = project_deps_for(file_path.as_deref(), dep_cache, false);
+        let doc = AnalyzedDoc::analyze(source, file_path.as_deref(), &deps);
+        publish_diagnostics(connection, &uri, &doc.lsp_diagnostics);
+        analyzed.insert(uri, doc);
+    }
+}
+
+/// Splice one LSP content change into `text`. `range` is UTF-16 (the
+/// encoding this server declares); a change with no range replaces the
+/// whole document (the FULL-sync form clients may still send).
+fn apply_content_change(text: &mut String, change: TextDocumentContentChangeEvent) {
+    let Some(range) = change.range else {
+        *text = change.text;
+        return;
+    };
+    let start = lsp_pos_to_byte_offset(text, range.start);
+    let end = lsp_pos_to_byte_offset(text, range.end);
+    if start <= end && end <= text.len() {
+        text.replace_range(start..end, &change.text);
+    } else {
+        // A malformed range must never corrupt the buffer. Loudly keep the
+        // old text; the next full analysis will surface any drift.
+        eprintln!("[lsp] didChange range {:?} out of bounds ({} bytes) — edit dropped", range, text.len());
+    }
+}
+
+/// UTF-16 LSP `Position` → byte offset into `text`. Past-the-end positions
+/// clamp (LSP expresses newline inclusion as `(line+1, 0)`, which lands on
+/// the next iteration's line start).
+fn lsp_pos_to_byte_offset(text: &str, pos: Position) -> usize {
+    let mut off = 0usize;
+    for (i, seg) in text.split_inclusive('\n').enumerate() {
+        if i as u32 == pos.line {
+            let content = seg.strip_suffix('\n').map(|l| l.strip_suffix('\r').unwrap_or(l)).unwrap_or(seg);
+            let mut units = 0u32;
+            for (bidx, ch) in content.char_indices() {
+                if units >= pos.character {
+                    return off + bidx;
+                }
+                units += ch.len_utf16() as u32;
+            }
+            return off + content.len();
+        }
+        off += seg.len();
+    }
+    text.len()
 }
 
 fn handle_request(req: &Request, documents: &HashMap<Uri, String>, analyzed: &HashMap<Uri, AnalyzedDoc>, workspace_root: &Option<std::path::PathBuf>) -> Option<Response> {
@@ -643,6 +724,34 @@ fn handle_request(req: &Request, documents: &HashMap<Uri, String>, analyzed: &Ha
             let result = serde_json::to_value(symbols).ok()?;
             Some(Response::new_ok(req.id.clone(), result))
         }
+        "textDocument/references" => {
+            let params: ReferenceParams = serde_json::from_value(req.params.clone()).ok()?;
+            let uri = params.text_document_position.text_document.uri.clone();
+            let pos = params.text_document_position.position;
+            let doc = analyzed.get(&uri)?;
+            let locs = compute_references(doc, pos, &uri, params.context.include_declaration);
+            let result = serde_json::to_value(locs).ok()?;
+            Some(Response::new_ok(req.id.clone(), result))
+        }
+        "textDocument/rename" => {
+            let params: RenameParams = serde_json::from_value(req.params.clone()).ok()?;
+            let uri = params.text_document_position.text_document.uri.clone();
+            let pos = params.text_document_position.position;
+            let doc = analyzed.get(&uri)?;
+            match compute_rename(doc, pos, &params.new_name, &uri) {
+                Ok(edit) => {
+                    let result = serde_json::to_value(edit).ok()?;
+                    Some(Response::new_ok(req.id.clone(), result))
+                }
+                // A refusal is a VISIBLE error (editors surface the message),
+                // never a silent null — the guardrail must read as one.
+                Err(why) => Some(Response::new_err(
+                    req.id.clone(),
+                    lsp_server::ErrorCode::RequestFailed as i32,
+                    why,
+                )),
+            }
+        }
         "textDocument/codeAction" => {
             let params: CodeActionParams = serde_json::from_value(req.params.clone()).ok()?;
             let uri = &params.text_document.uri;
@@ -656,4 +765,5 @@ fn handle_request(req: &Request, documents: &HashMap<Uri, String>, analyzed: &Ha
 }
 
 include!("lsp_hover_definition.rs");
+include!("lsp_references.rs");
 include!("lsp_code_actions.rs");

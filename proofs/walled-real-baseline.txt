@@ -136,3 +136,14 @@ spec/wasm_cross/nested_three_level_literal.almd :: main
 # retirement) — or earlier if the incumbent learns the shape.
 spec/wasm_cross/gzip_inflate_members.almd :: gunzip
 spec/wasm_cross/gzip_inflate_members.almd :: inflate
+# (2026-08-31, C-327) env.sleep_ms has no capability seat in the incumbent
+# brick; the structural leg serves it (embedded-host op 36 / p1 clock spin).
+# Prunes with #1696 steps 4-5, same as the inflate pair above.
+spec/wasm_cross/env_sleep_pause.almd :: main
+# 2026-08-31 (#1710 increment 1): the embedded_cross http fixture's `main` walls
+# on the BUILD path by DESIGN — ops 43-47 are served by the embedded host
+# (`almide run --target wasm`, spec/embedded_cross gate) and declared
+# wasm-unavailable with an embedded-lane-served reason in the availability
+# matrix. Retires when the p3 client leg ships the ops on stock artifacts
+# (#1710 increment 2 / #1716).
+spec/embedded_cross/http_client_errs.almd :: main

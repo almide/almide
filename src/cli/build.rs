@@ -161,6 +161,9 @@ pub fn cmd_build(args: BuildArgs) {
         // the whole CLI runs on the one `almide-main` worker thread, so the
         // thread-local is exactly as scoped as this call.
         let _cap = heap_cap.map(almide_mir::heap_cap::HeapCapGuard::set);
+        // #1729: the structural leg's twin — the cap becomes the emitted
+        // memory's declared maximum (it silently ignored the knob before).
+        let _cap_structural = heap_cap.map(almide_wasm::heap_cap::HeapCapGuard::set);
         cmd_build_wasm_direct(file, output, no_check, emit_unverified, verified, wasm_opt, component);
         return;
     }
@@ -654,17 +657,28 @@ fn check_wasm_availability(ir_program: &almide::ir::IrProgram) -> Result<(), ()>
     let table = UNAVAILABLE.get_or_init(|| {
         let toml = include_str!("../../proofs/target-availability.toml");
         let mut out = BTreeMap::new();
-        // Line-anchored: the header COMMENT names the section literally,
-        // and a bare substring split ate the first native-only row
-        // through it (datetime.parse_iso E081-fired while being merely
-        // structural-pending — the reachability ratchet caught it).
-        for block in toml.split("\n[[wasm-unavailable]]\n").skip(1) {
+        // Schema 2 (#1710 increment 2): one `[[unavailable]]` row per fn
+        // with a per-leg `legs = [..]` list. E081 is the STOCK-P1 story —
+        // "no build path serves this on `--target wasm`" — so only rows
+        // declaring that leg feed the diagnostic. The reason is the
+        // per-leg `reason-stock-p1` when present, else the shared
+        // `reason`. Line-anchored block split, as before (a substring
+        // split once ate the first row through the header comment).
+        for block in toml.split("\n[[unavailable]]\n").skip(1) {
             let field = |k: &str| {
                 block.lines().find_map(|l| {
                     l.strip_prefix(&format!("{k} = \"")).and_then(|r| r.strip_suffix('"')).map(str::to_string)
                 })
             };
-            if let (Some(fn_name), Some(reason)) = (field("fn"), field("reason")) {
+            let legs = block
+                .lines()
+                .find_map(|l| l.strip_prefix("legs = ["))
+                .unwrap_or("");
+            if !legs.contains("\"stock-p1\"") {
+                continue;
+            }
+            let reason = field("reason-stock-p1").or_else(|| field("reason"));
+            if let (Some(fn_name), Some(reason)) = (field("fn"), reason) {
                 out.insert(fn_name, (reason, field("alt")));
             }
         }
@@ -777,7 +791,37 @@ fn render_wasm_module_routed(
             || uses_incumbent_features
             || (library_ok && host_variant));
     if incumbent {
-        return render_wasm_module(source_text, v1_self_modules, library_ok).map(|(b, _)| (b, false));
+        let r = render_wasm_module(source_text, v1_self_modules, library_ok).map(|(b, _)| (b, false));
+        // REVERSE handover (#1423 bucket A, the env.sleep_ms build shape):
+        // a SHAPE-routed host-variant program the incumbent walls gets one
+        // structural attempt — the same verified-to-verified doctrine as
+        // the forward reroute below, in the other direction. The forced
+        // routes (ALMIDE_WASM_INCUMBENT / FUEL_PROBE) and the main-less
+        // library form stay final: an explicit choice is not rerouted, and
+        // the structural leg has no library form to hand over to.
+        let shape_routed = std::env::var_os("ALMIDE_WASM_INCUMBENT").is_none()
+            && std::env::var_os("ALMIDE_FUEL_PROBE").is_none()
+            && has_main
+            && !uses_incumbent_features;
+        if r.is_err()
+            && shape_routed
+            && let Ok(ir) = almide::wasm_leg::lower_to_ir_with_deps(file, source_text, dep_paths)
+            && let Ok((bytes, host_ops)) = almide_wasm::emit_program_with_ops(&ir)
+            && wasmparser::validate(&bytes).is_ok()
+            && (!library_ok
+                || host_ops
+                    .iter()
+                    .all(|op| almide_wasm_run::wasi::P1_SERVED_OPS.contains(op)))
+        {
+            if std::env::var_os("ALMIDE_VERIFIED_DEBUG").is_some() {
+                err(&format!(
+                    "[almide] incumbent walled — structural leg took the build ({} bytes)",
+                    bytes.len()
+                ));
+            }
+            return Ok((bytes, true));
+        }
+        return r;
     }
     // A structural WALL routes to the incumbent renderer. This is NOT the
     // retired v0 fallback (#782's sin was falling into UNVERIFIED codegen):
@@ -793,18 +837,51 @@ fn render_wasm_module_routed(
         if std::env::var_os("ALMIDE_VERIFIED_DEBUG").is_some() {
             err(&format!("[almide] structural leg declined ({why}) — incumbent renderer"));
         }
-        render_wasm_module(source_text, v1_self_modules, library_ok).map(|(b, _)| (b, false))
+        let res = render_wasm_module(source_text, v1_self_modules, library_ok).map(|(b, _)| (b, false));
+        if res.is_err() {
+            // #1690: BOTH legs refused. The incumbent just printed its own wall
+            // above — without these lines the DEFAULT leg's reason is invisible,
+            // and the reader bisects a function the structural leg lowers fine
+            // for a reason that belongs to the other engine.
+            err(&format!("wall (structural leg, the default): {why}"));
+            err("note: both wasm legs refused this program — the failure above these lines is the incumbent fallback's; the structural leg's own reason is the `wall (structural leg…)` line.");
+        }
+        res
     };
     let ir = match almide::wasm_leg::lower_to_ir_with_deps(file, source_text, dep_paths) {
         Ok(ir) => ir,
         Err(e) => return reroute(&format!("front: {e}")),
     };
-    match almide_wasm::emit_program(&ir) {
-        Ok(bytes) => {
+    match almide_wasm::emit_program_with_ops(&ir) {
+        Ok((bytes, host_ops)) => {
             // Same emit-time validation discipline as the incumbent leg:
             // never ship bytes wasmtime would refuse at load.
             if let Err(e) = wasmparser::validate(&bytes) {
                 return reroute(&format!("validation: {}", e.message()));
+            }
+            // BUILD artifacts run on stock runtimes through to_wasi: an
+            // emitted host op the p1 shim cannot serve would be a RUNTIME
+            // refusal there (the env.set lesson) — refuse at build time,
+            // through the same reroute (the incumbent may serve the fn
+            // with real WASI imports; if not, its wall names the reason).
+            // Not under ALMIDE_WASM_STRUCTURAL: the force switch probes
+            // the EMITTER frontier (its contract is walls-as-hard-errors
+            // on lowering, not stock service); the audit gates what the
+            // DEFAULT path ships. Not under ALMIDE_COMPONENT_P3 either:
+            // the p3-requested build ships through `to_p3`, whose shim
+            // carries the fs surface the p1 set does not (the same env
+            // predicate that flipped fs routing structural above) — an
+            // op the p3 transform cannot map still fails loudly there.
+            if library_ok
+                && !force_structural
+                && std::env::var_os("ALMIDE_COMPONENT_P3").is_none()
+                && let Some(op) = host_ops
+                    .iter()
+                    .find(|op| !almide_wasm_run::wasi::P1_SERVED_OPS.contains(op))
+            {
+                return reroute(&format!(
+                    "host op {op} has no stock-WASI service (the embedded host                      — `almide run --target wasm` — serves it)"
+                ));
             }
             // With the debug env, ALWAYS name the winning leg — the
             // incumbent path and the reroute already speak, so a silent

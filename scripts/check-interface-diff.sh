@@ -47,8 +47,14 @@ surface() { # ref -> sorted signature lines on stdout
       done \
     | grep -E '^[a-z_0-9]+\.[a-z_0-9]+\(' \
     | grep -vE '^[a-z_0-9]+\.__' \
+    | sed -E 's/[[:space:]]+\(deprecated[^)]*\)[[:space:]]*$//' \
     | sort -u
 }
+# The `(deprecated — …)` annotation the index renders (#1735/#1758) is
+# METADATA, stripped before the diff: gaining or losing the annotation is
+# not a signature change — the deprecation window is exactly the
+# mechanism that keeps a later REMOVAL classifiable here, and marking a
+# fn deprecated must never itself read as the break it exists to prevent.
 # The `__`-prefixed names are INTERNAL carriers (the ADR-0006 fallible family,
 # self-host helpers) — checker-inserted, not writable surface — so their
 # appearance and disappearance is not an interface event.

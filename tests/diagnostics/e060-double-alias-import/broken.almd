@@ -1,0 +1,4 @@
+import regex as a
+import regex as b
+
+fn main() -> Unit = println(if a.is_match("x", "x") and b.is_match("y", "y") then "y" else "n")

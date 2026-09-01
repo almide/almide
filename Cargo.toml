@@ -17,7 +17,7 @@ unsafe_code = "forbid"
 
 [package]
 name = "almide"
-version = "0.61.0"
+version = "0.61.1"
 edition = "2024"
 # Runner-class MSRV: the binary embeds the wasmtime 47 host (the commissioned
 # wasm leg). Compiler crates keep their own 1.89 claim via workspace.package.
@@ -58,9 +58,12 @@ semver = "1"
 toml = "1.1"
 lasso = { version = "0.7", features = ["multi-threaded"] }
 lsp-server = "0.10"
+# The LSP main loop's idle debounce needs recv_timeout on lsp-server's
+# channel type (#1470) — same crate lsp-server itself uses.
+crossbeam-channel = "0.5"
 lsp-types = "0.97"
 wit-component = "0.257"
-wasi-preview1-component-adapter-provider = "47.0.2"
+wasi-preview1-component-adapter-provider = "48.0.1"
 
 # Cross-platform advisory file lock (flock / LockFileEx) for the shared build
 # scratch dir (see BuildDirLock) — lets CI run the suite in parallel on every

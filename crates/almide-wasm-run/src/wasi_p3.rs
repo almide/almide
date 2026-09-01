@@ -255,6 +255,7 @@ pub fn to_p3(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
         ("random.wit", include_str!("../wit/p3/deps/random/package.wit")),
         ("cli.wit", include_str!("../wit/p3/deps/cli/package.wit")),
         ("filesystem.wit", include_str!("../wit/p3/deps/filesystem/package.wit")),
+        ("http.wit", include_str!("../wit/p3/deps/http/package.wit")),
     ] {
         resolve
             .push_str(name, text)
@@ -276,6 +277,7 @@ pub fn to_p3(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
         func_types,
         tables,
         old_mem_min,
+        old_mem_max,
         parsed_globals,
         global_count,
         heap_global,
@@ -450,7 +452,8 @@ pub fn to_p3(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     let mut memories = MemorySection::new();
     memories.memory(MemoryType {
         minimum: old_mem_min + PARK_SPAN / 65536,
-        maximum: None,
+        // #1729: carry the heap-cap maximum through, span-shifted.
+        maximum: old_mem_max.map(|m| m.max(old_mem_min) + PARK_SPAN / 65536),
         memory64: false,
         shared: false,
         page_size_log2: None,
@@ -1345,4 +1348,46 @@ fn shim_callback() -> Function {
     i.unreachable();
     i.end();
     f
+}
+
+#[cfg(test)]
+mod wit_tests {
+    /// #1710 increment 2 foundation: the vendored wasi:http@0.3.0 package
+    /// resolves, and BOTH worlds (the fs-only `p3-command` and the
+    /// http-importing `p3-command-http`) select cleanly. A WIT drift —
+    /// a trimmed interface the world still names, a dep the trim lost —
+    /// fails here instead of at the first http emit.
+    #[test]
+    fn both_p3_worlds_resolve_with_the_vendored_http_package() {
+        let mut resolve = wit_parser::Resolve::default();
+        for (name, text) in [
+            ("clocks.wit", include_str!("../wit/p3/deps/clocks/package.wit")),
+            ("random.wit", include_str!("../wit/p3/deps/random/package.wit")),
+            ("cli.wit", include_str!("../wit/p3/deps/cli/package.wit")),
+            ("filesystem.wit", include_str!("../wit/p3/deps/filesystem/package.wit")),
+            ("http.wit", include_str!("../wit/p3/deps/http/package.wit")),
+        ] {
+            resolve.push_str(name, text).unwrap_or_else(|e| panic!("wit {name}: {e}"));
+        }
+        let pkg = resolve
+            .push_str("world.wit", include_str!("../wit/p3/world.wit"))
+            .expect("world.wit");
+        resolve.select_world(&[pkg], Some("p3-command")).expect("p3-command");
+        let mut resolve2 = wit_parser::Resolve::default();
+        for (name, text) in [
+            ("clocks.wit", include_str!("../wit/p3/deps/clocks/package.wit")),
+            ("random.wit", include_str!("../wit/p3/deps/random/package.wit")),
+            ("cli.wit", include_str!("../wit/p3/deps/cli/package.wit")),
+            ("filesystem.wit", include_str!("../wit/p3/deps/filesystem/package.wit")),
+            ("http.wit", include_str!("../wit/p3/deps/http/package.wit")),
+        ] {
+            resolve2.push_str(name, text).unwrap_or_else(|e| panic!("wit {name}: {e}"));
+        }
+        let pkg2 = resolve2
+            .push_str("world.wit", include_str!("../wit/p3/world.wit"))
+            .expect("world.wit");
+        resolve2
+            .select_world(&[pkg2], Some("p3-command-http"))
+            .expect("p3-command-http");
+    }
 }

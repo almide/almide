@@ -176,6 +176,12 @@ impl Parser {
         let tok = self.current();
         let hint: String = match (&tok.token_type, tok.value.as_str()) {
             (_, "=>") => "\n  Hint: Missing pattern before '=>'. Use '_' for wildcard, or a variable name".into(),
+            // #1677: `ok(_) => c = c + 1` — the arm body parsed as `c`, the
+            // parser moved on to the next arm, and `=` is where it noticed.
+            // The broken rule is the statement/expression boundary, not
+            // pattern syntax — name it, or the hint sends the reader to
+            // enumerate patterns (the one thing that was right).
+            (TokenType::Eq, _) => "\n  Hint: assignment is a statement, not an expression — a match arm that assigns needs a block body:\n    ok(_) => { c = c + 1 }".into(),
             (TokenType::DotDotDot, _) | (TokenType::DotDot, _) => {
                 "\n  Hint: rest/spread patterns `[h, ...t]` / `[h, ..t]` are not supported in Almide list patterns.\n\
                   Use recursion with list.first / list.drop:\n\

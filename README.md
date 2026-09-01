@@ -122,7 +122,7 @@ The guarantee is **continuous, with an explicit, ledger-managed scope**: "byte-i
 This claim is not prose. Every observable promise is a named contract in the [behavior-contract ledger](docs/contracts/), each traceable to executable evidence, and the numbers below are regenerated from the ledger (`scripts/gen-claims.sh`, enforced by `scripts/check-contracts.sh` in CI):
 
 <!-- claims:generated:start — derived from docs/contracts/contracts.toml by scripts/gen-claims.sh; DO NOT EDIT between the markers -->
-> **Ledger: 326 contracts — 326 active, 0 flagged-for-revision.**
+> **Ledger: 328 contracts — 328 active, 0 flagged-for-revision.**
 >
 > **Divergences awaiting a fix: none.** Every contract in the ledger is
 > `active`, carrying executable evidence of class >= `fixture`. The one
@@ -143,9 +143,9 @@ No runtime, no GC, no interpreter — native compiles through Rust to machine co
 <!-- wasm-size:generated:start — rendered from docs/benchmarks/wasm-size.txt by scripts/gen-readme-stats.sh; DO NOT EDIT between the markers -->
 | Program (`almide build --target wasm`, verified, as shipped) | incumbent v1 leg | structural leg |
 |---|---:|---:|
-| Hello, world | **1,096 B** | **4,590 B** |
+| Hello, world | **1,096 B** | **2,225 B** |
 
-Measured on almide 0.60.0, 2026-08-30, from `docs/benchmarks/wasm-size.txt`; no post-hoc optimizer touches the shipped bytes (`--wasm-opt` is opt-in and its output is not the verified module).
+Measured on almide 0.61.0, 2026-08-31, from `docs/benchmarks/wasm-size.txt`; no post-hoc optimizer touches the shipped bytes (`--wasm-opt` is opt-in and its output is not the verified module).
 <!-- wasm-size:generated:end -->
 
 Rust on the same wasm target is 40 KB+ for Hello, world even fully size-tuned; the native minigit CLI binary is 418 KB stripped with 0 dependencies. The byte-by-byte dissection, measured 2026-07-23 on the incumbent leg: **[docs/wasm/WASM-OUTPUT.md](./docs/wasm/WASM-OUTPUT.md)**.
@@ -165,7 +165,18 @@ build. Regenerate with `almide run tools/almide-gates/src/main.almd -- bench`; t
 | build, cold, `--target wasm` | **61.7 ms** | 3 |
 <!-- build-speed:generated:end -->
 
-`almide check` scales linearly: over a 2k → 30k-line ladder of this repo's own stdlib the log-log slope of check time against project lines is **1.13** (1.0 is linear, 2.0 quadratic) and the 10k-line rung costs **4.4×** the empty-project floor — measured 2026-08-13, held by `scripts/check-edit-loop-scale.sh`, table in [BENCHMARKS.md](./docs/project/BENCHMARKS.md#edit-loop-scale-1334). Native runtime against handwritten Rust: **1.00×** on n-body and spectral-norm, 1.16–1.18× on fasta and FFT, ~1.6× where the workload is list materialization (#1004), CI-gated ratio ratchet ([scoreboard](./docs/project/BENCHMARKS.md)). Wasm runtime numbers are deliberately absent rather than estimated.
+`almide check` scales linearly: over a 2k → 30k-line ladder of this repo's own stdlib the log-log slope of check time against project lines is **1.13** (1.0 is linear, 2.0 quadratic) and the 10k-line rung costs **4.4×** the empty-project floor — measured 2026-08-13, held by `scripts/check-edit-loop-scale.sh`, table in [BENCHMARKS.md](./docs/project/BENCHMARKS.md#edit-loop-scale-1334). Native runtime against handwritten Rust: **1.00×** on n-body and spectral-norm, 1.16–1.18× on fasta and FFT, ~1.6× where the workload is list materialization (#1004), CI-gated ratio ratchet ([scoreboard](./docs/project/BENCHMARKS.md)). Wasm runtime, measured and gated (#1701):
+
+<!-- wasm-runtime:generated:start — rendered from docs/benchmarks/wasm-runtime.txt by scripts/gen-readme-stats.sh; DO NOT EDIT between the markers -->
+| Benchmark (`almide bench`, verify-then-time, median of 5) | wasm/native ratio |
+|---|---:|
+| nbody | **2.16×** |
+| spectralnorm | **2.25×** |
+| binarytrees | **0.81×** |
+| listbuild_append | **4.12×** |
+
+Embedded wasm host (Perceus RC in linear memory) against the native binary, same machine, same run. Cross-engine ratios do NOT cancel hardware (a 2-core CI runner measures nbody ~10x worse), so the ratio verdict runs on the stamping machine class and CI gates the STATUS taxonomy below (`scripts/check-wasm-runtime-ratio.sh`). binarytrees runs its fan arms on the embedded host's thread pool, which is why wasm WINS there. The unmeasured corpus cells stay honest instead of estimated: 3 route to the incumbent artifact, 1 wall on the wasm build path, 4 exhaust the embedded heap (#1729) — each re-measured every gate run, so a cell that starts benching fails the gate until its row is promoted. Ledger: `docs/benchmarks/wasm-runtime.txt` (almide 0.61.0, 2026-09-01).
+<!-- wasm-runtime:generated:end -->
 
 ## How It Works
 
@@ -215,7 +226,7 @@ The Perceus proof above proves one compiler pass, once. v1 generalizes that prin
 | Derived count | Value |
 |---|---|
 | Stdlib | 971 functions across 43 modules — self-hosted `.almd`, signature indexes regenerated from the compiler by `tools/gen-stdlib-doc-index.py` |
-| Tests | 426 `.almd` test files under `spec/` (`almide test spec/`) + the 326-contract cross-target ledger |
+| Tests | 427 `.almd` test files under `spec/` (`almide test spec/`) + the 328-contract cross-target ledger |
 <!-- stats:generated:end -->
 
 ## Ecosystem and documentation

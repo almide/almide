@@ -101,9 +101,9 @@ mode of a router should be a wall, never a misread.
 | `s2_multiline_tuple` | fixed (a tuple literal could not span lines; list/record/map could) |
 | `s3_module_qualified_protocol` | **open, unfiled** — `ports.Store` is a parse error in a bound and in a conformance list; the bare name resolves globally, while *types* must be qualified. The rule is exactly inverted between the two |
 | `s4_bare_mut_self` | **open, unfiled** — `mut self` is a parse error; `mut self: Self` is required |
-| `s5_match_self` | **open, unfiled** — `self`, `self.f`, `self == x` all work; `match self { … }` reports *"'self' is not valid in Almide"*, which is categorically false and sends the writer to abandon `self` entirely |
-| `s6_generic_protocol` | **open, unfiled** — `protocol Repository[T]` parses and cannot be used: neither `type X: Repository[User]` nor `[R: Repository[User]]` parses, and the unparameterized form demands an unimplementable `-> Option[T]`. The canonical Repository abstraction is unavailable |
-| `s7_protocol_as_type` | **open, unfiled** — a protocol is not a type: `List[Policy]` is `E029`, no existential dispatch. Diagnostics also print two derived `E002`s and an `E001` blaming the wrong element *before* the real `E029`, so reading top-down leads to the wrong fix |
+| `s5_match_self` | **closed (#1590)** — `self` was on the parser's rejected-ident table and the used-as-identifier lookahead had no `{` case; `self` now parses as the ordinary identifier it is, and the cell checks green |
+| `s6_generic_protocol` | **diagnosed honestly (#1590), expressiveness open (#1589)** — the adoption now refuses at the declaration with the root cause (generic-protocol adoption cannot bind `T`) instead of demanding an unimplementable `-> Option[T]`; the Repository abstraction itself still needs #1589 |
+| `s7_protocol_as_type` | **diagnosed honestly (#1590), expressiveness open (#1589)** — E029 now says "'Policy' is a protocol, not a type" and the derived `E002`s are suppressed; the `List[Policy]` shape still emits one element-mismatch `E001` first (noted on #1590), and existential dispatch remains #1589 |
 
 **Invariant for greenfield**: these are design decisions, not bugs — decide them
 deliberately. Whatever `self` means, it means it in every position. Whatever a

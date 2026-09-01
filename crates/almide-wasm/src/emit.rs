@@ -16,19 +16,30 @@ use crate::*;
 /// dead-code elimination (the type/decl/stub bookkeeping of a dead
 /// registry graph once quadrupled a small module).
 pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
-    let (bytes, visited, total) = emit_program_pass(ir, None)?;
+    emit_program_with_ops(ir).map(|(b, _)| b)
+}
+
+/// [`emit_program`] plus the set of `almide.fs_call` HOST OP numbers the
+/// emitted module spells (#1423/#1710): the build path audits it against
+/// the stock p1 shim's served set BEFORE shipping — an op the shim cannot
+/// serve refuses at build time with its name, never as a runtime refusal
+/// on a runtime the developer never ran (the env.set lesson, 2026-08-31).
+pub fn emit_program_with_ops(
+    ir: &IrProgram,
+) -> Result<(Vec<u8>, std::collections::BTreeSet<i32>), EmitError> {
+    let (bytes, visited, total, ops) = emit_program_pass(ir, None)?;
     if visited.len() >= total {
-        return Ok(bytes);
+        return Ok((bytes, ops));
     }
-    let (bytes, _, _) = emit_program_pass(ir, Some(&visited))?;
-    Ok(bytes)
+    let (bytes, _, _, ops) = emit_program_pass(ir, Some(&visited))?;
+    Ok((bytes, ops))
 }
 
 #[allow(clippy::type_complexity)]
 fn emit_program_pass(
     ir: &IrProgram,
     keep: Option<&HashSet<usize>>,
-) -> Result<(Vec<u8>, HashSet<usize>, usize), EmitError> {
+) -> Result<(Vec<u8>, HashSet<usize>, usize, std::collections::BTreeSet<i32>), EmitError> {
     let Some(main) = ir.functions.iter().find(|f| f.name.as_str() == "main") else {
         return unsup("no main function");
     };
@@ -123,6 +134,9 @@ fn emit_program_pass(
             charge_entry: meter.user.contains(f.name.as_str())
                 && !meter.exempt.contains(f.name.as_str()),
             var_space: *space,
+            witness_name: Some(
+                qual.clone().unwrap_or_else(|| f.name.as_str().to_string()),
+            ),
         };
         match lower_fn(&params, plan, &f.body, &[], &ctx, &mut pool) {
             Ok(ok) => {
@@ -160,6 +174,7 @@ fn emit_program_pass(
         ret: None,
         cur_module: None,
         var_space: 0,
+        witness_name: Some("main".to_string()),
         effect_raw: None,
         in_main: true,
         env_captures: None,
@@ -188,6 +203,7 @@ fn emit_program_pass(
                 ret: ll.ret,
                 cur_module: ll.cur_module.clone(),
                 var_space: ll.var_space,
+                witness_name: None,
                 effect_raw: ll.effect_raw,
                 in_main: false,
                 env_captures: Some(ll.captures.clone()),
@@ -307,5 +323,6 @@ fn emit_program_pass(
         true_base,
         false_base,
     })?;
-    Ok((bytes, visited, total))
+    let host_ops = work.host_ops.borrow().clone();
+    Ok((bytes, visited, total, host_ops))
 }

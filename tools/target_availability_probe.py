@@ -9,9 +9,16 @@ Name-diffs over self_host_registry.rs over-report (~199 false rows — linkage
 is multi-mechanism); this probe cannot: it asks the one authority, the
 renderer itself.
 
-With --default-routing the sweep drops the structural force: walls then
-mean NO leg serves the fn on `--target wasm` (the reroute included) — the
-check-time-diagnostic set (#1423 stage 3).
+The sweep is per-LEG (--leg, #1710 increment 2's vocabulary):
+  structural   ALMIDE_WASM_STRUCTURAL=1 build — the emitter frontier.
+  stock-p1     default `build --target wasm` (reroute included) — walls
+               mean no build path serves the fn (the E081 set).
+               (--default-routing is the legacy alias.)
+  embedded     `run --target wasm` through the embedded host — service
+               measured by EXECUTION: a run that reaches the host and is
+               answered (even with a runtime err like a missing file) is
+               service; a build wall or an `unknown ... op` host reply is
+               not.
 
 Output (stdout): one line per fn — `status<TAB>module.fn<TAB>detail`.
   ok        lowered and emitted
@@ -209,11 +216,17 @@ def synth(mod, fn, params, ret, variant):
 def main():
     sigs = parse_sigs()
     tmp = tempfile.mkdtemp(prefix="almide-avail-")
+    leg = "structural"
     if "--default-routing" in sys.argv[1:]:
+        leg = "stock-p1"
+    for i, a in enumerate(sys.argv[1:]):
+        if a == "--leg":
+            leg = sys.argv[1:][i + 1]
+    if leg == "structural":
+        env = dict(os.environ, ALMIDE_WASM_STRUCTURAL="1")
+    else:
         env = dict(os.environ)
         env.pop("ALMIDE_WASM_STRUCTURAL", None)
-    else:
-        env = dict(os.environ, ALMIDE_WASM_STRUCTURAL="1")
     # Measure the ground truth, not our own declaration (see
     # check_wasm_availability's escape).
     env["ALMIDE_NO_AVAIL_CHECK"] = "1"
@@ -229,11 +242,43 @@ def main():
             src = os.path.join(tmp, "probe.almd")
             with open(src, "w") as f:
                 f.write(prog)
-            r = subprocess.run(
-                [ALMIDE, "build", src, "--target", "wasm", "-o", os.devnull],
-                capture_output=True, text=True, env=env, cwd=tmp,
-            )
-            if r.returncode == 0:
+            if leg == "embedded":
+                try:
+                    r = subprocess.run(
+                        [ALMIDE, "run", src, "--target", "wasm"],
+                        capture_output=True, text=True, env=env, cwd=tmp,
+                        stdin=subprocess.DEVNULL, timeout=120,
+                    )
+                except subprocess.TimeoutExpired:
+                    # A hang is not a service verdict either way — record
+                    # it honestly; the row needs human eyes, not a guess.
+                    if verdict is None or verdict[0] != "wall":
+                        verdict = ("wall", "probe-timeout (120s)")
+                    continue
+            else:
+                r = subprocess.run(
+                    [ALMIDE, "build", src, "--target", "wasm", "-o", os.devnull],
+                    capture_output=True, text=True, env=env, cwd=tmp,
+                )
+            combined = r.stderr + r.stdout
+            if leg == "embedded" and "unknown" in combined and " op " in combined:
+                # The host answered "unknown ... op N": the run REACHED the
+                # host and the service is absent — an embedded wall.
+                first = next(
+                    (l for l in combined.splitlines() if "unknown" in l), "?"
+                )
+                if verdict is None or verdict[0] != "wall":
+                    verdict = ("wall", first[:120])
+                continue
+            if r.returncode == 0 or (
+                leg == "embedded"
+                and r.returncode != 0
+                and "wall" not in combined
+                and "error[E0" not in combined
+                and "Expected" not in combined
+            ):
+                # Embedded service includes an answered runtime err (a
+                # probe arg like a missing file) — the host served the op.
                 verdict = ("ok", "")
                 break
             first = next(
