@@ -163,6 +163,57 @@ fn fixed_heap_budget_suffices_and_is_enforced() {
 }
 
 #[test]
+fn flat_map_chunks_recycle_under_fixed_budget() {
+    if Command::new(almide_bin()).arg("--version").output().is_err() {
+        return;
+    }
+    if !wasmtime_available() {
+        return;
+    }
+    let dir = std::env::temp_dir().join("almide-static-memory");
+    std::fs::create_dir_all(&dir).expect("mkdir");
+
+    // The flat_map merge window (#1729, increment 2): 50k fresh scalar
+    // chunks push into the accumulator and each chunk is freed per
+    // iteration, and 50k pushes of an ALIASED chunk (the callback
+    // returning its captured list) take inc-before-dec, so the shared
+    // list survives its own consumption. Live payload ≈ 2 MiB; the old
+    // per-element $concat retained the outgrown accumulator every
+    // iteration (O(n²) bytes), which no fixed budget survives.
+    let fm = dir.join("flatmap-recycle.almd");
+    std::fs::write(
+        &fm,
+        "import int\n\neffect fn main() -> Unit = {\n  let shared = [7, 8, 9]\n  let big = list.range(0, 50000) |> list.flat_map((i) => [i, i + 1])\n  let echo = list.range(0, 50000) |> list.flat_map((i) => shared)\n  println(int.to_string(list.len(big)))\n  println(int.to_string(list.len(echo)))\n  println(int.to_string(list.sum(shared)))\n}\n",
+    )
+    .expect("write");
+    let fm_wasm = dir.join("flatmap-recycle.wasm");
+    let out = Command::new(almide_bin())
+        .args([
+            "build",
+            fm.to_str().unwrap(),
+            "--target",
+            "wasm",
+            "--heap-cap",
+            "8388608",
+            "-o",
+            fm_wasm.to_str().unwrap(),
+        ])
+        .output()
+        .expect("spawn almide build");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let run = Command::new("wasmtime")
+        .args(["run", fm_wasm.to_str().unwrap()])
+        .output()
+        .expect("spawn wasmtime");
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout),
+        "100000\n150000\n24\n",
+        "flat_map under the budget must answer the native trace"
+    );
+}
+
+#[test]
 fn artifact_is_partition_shaped() {
     if Command::new(almide_bin()).arg("--version").output().is_err() {
         return;
