@@ -24,7 +24,9 @@
 # The class is a human judgment recorded here; the GATE enforces the SET.
 #
 # Counts at last regen: 369 parity, 65 gap (39 host, 26 frontier),
-# 113 unprobeable.
+# 113 unprobeable. 2026-09-01 (#1700): the eight zlib rows pruned — the
+# self-hosted decoder/encoder builds on wasm, so they join parity at the
+# next regen (377/57: 31 host, 26 frontier).
 #
 # COMPILER_FRONTIER — the burn-down:
 #
@@ -152,11 +154,3 @@ value.pick :: UNPROBEABLE :: no candidate shape builds natively
 value.stringify :: UNPROBEABLE :: no candidate shape builds natively
 value.to_camel_case :: UNPROBEABLE :: no candidate shape builds natively
 value.to_snake_case :: UNPROBEABLE :: no candidate shape builds natively
-zlib.compress :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call zlib.compress needs a declared capability not in this brick
-zlib.compress_level :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call zlib.compress_level needs a declared capability not in this brick
-zlib.decompress :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call zlib.decompress needs a declared capability not in this brick
-zlib.deflate :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call zlib.deflate needs a declared capability not in this brick
-zlib.deflate_level :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call zlib.deflate_level needs a declared capability not in this brick
-zlib.gunzip :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call zlib.gunzip needs a declared capability not in this brick
-zlib.gzip :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call zlib.gzip needs a declared capability not in this brick
-zlib.inflate :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call zlib.inflate needs a declared capability not in this brick
