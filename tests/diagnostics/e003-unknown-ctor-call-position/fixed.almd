@@ -1,0 +1,10 @@
+// An uppercase name called like a constructor, but no type, variant case,
+// or opaque alias with that name is declared anywhere.
+type Paint = | Color(Int, Int, Int)
+
+fn main() -> Unit = {
+  let c = Color(255, 0, 0)
+  match c {
+    Color(r, _, _) => println("${r}"),
+  }
+}

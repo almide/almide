@@ -1,0 +1,8 @@
+// The fix: rename one constructor so the name is unique.
+type Cmd = | Stop | Send(Int)
+type Event = | Tick | Emit(Int)
+
+fn main() -> Unit = {
+  let x: Cmd = Send(5)
+  println("${x}")
+}

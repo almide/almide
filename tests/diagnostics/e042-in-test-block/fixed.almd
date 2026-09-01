@@ -1,0 +1,9 @@
+// E042 in a TEST block — a discarded Result hides a failing assertion path.
+fn validate(n: Int) -> Int! = if n > 0 then ok(n) else err("bad")
+
+test "validate accepts positives" {
+  validate(5)!
+  assert_eq(1, 1)
+}
+
+fn main() -> Unit = println("ok")

@@ -1,0 +1,8 @@
+// The fix: the block's result string interpolates the original error.
+effect fn main() -> Unit = {
+  let n = int.parse("9") |> result.map_err((e) => {
+    let stage = "parsing"
+    "failed while ${stage}: ${e}"
+  })!
+  println(int.to_string(n))
+}

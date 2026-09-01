@@ -1,0 +1,4 @@
+// The fix: keep the original error at the end of the context message.
+let parsed = int.parse("42") |> result.map_err((e) => "bad input: ${e}")
+
+fn main() -> Unit = println(int.to_string(parsed ?? -1))

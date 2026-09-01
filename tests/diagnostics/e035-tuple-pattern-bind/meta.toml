@@ -1,0 +1,3 @@
+expects_code = "E035"
+expects_error = "branching on the text"
+hint_substring = "match on it"

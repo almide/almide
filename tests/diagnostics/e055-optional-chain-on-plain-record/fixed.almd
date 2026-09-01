@@ -1,0 +1,6 @@
+// Fixed: `?.` belongs on an Option — take P? and the chain is the right tool.
+type P = { v: Int }
+
+fn f(p: P?) -> Int? = p?.v
+
+fn main() -> Unit = println(int.to_string(f(some(P { v: 3 })) ?? 0))

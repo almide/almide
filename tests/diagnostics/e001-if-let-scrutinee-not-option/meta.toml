@@ -1,0 +1,3 @@
+expects_code = "E001"
+expects_error = "`if let` requires an Option or Result"
+hint_substring = "if let v = some_option"

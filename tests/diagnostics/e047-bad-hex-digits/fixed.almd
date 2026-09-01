@@ -1,0 +1,6 @@
+// `\xNN` needs exactly two HEX digits — `Z` is not one, so `\xZZ` is an
+// unknown escape rather than a codepoint.
+fn main() -> Unit = {
+  let byte = "\x5A"
+  println(byte)
+}

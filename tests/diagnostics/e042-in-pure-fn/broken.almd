@@ -1,0 +1,8 @@
+// E042 fires in a PURE fn too — must-use applies in every fn kind, not just
+// effect fns.
+fn width_of(s: String) -> Int = {
+  int.parse(s)
+  string.len(s)
+}
+
+fn main() -> Unit = println(int.to_string(width_of("42")))

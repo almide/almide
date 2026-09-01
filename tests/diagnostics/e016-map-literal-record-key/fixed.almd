@@ -1,0 +1,8 @@
+// The fix: key the literal on comparable data; the record with the closure
+// is fine as the VALUE.
+type K = { hit: (Int) -> Int }
+
+fn main() -> Unit = {
+  let m = ["first": K { hit: (n) => n }]
+  println(int.to_string(map.len(m)))
+}

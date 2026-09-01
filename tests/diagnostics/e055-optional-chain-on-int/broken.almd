@@ -1,0 +1,5 @@
+// E055 variant: `?.` on a plain Int — nothing in the chain is optional,
+// so the plain "Option-only" hint fires instead of the Result ladder.
+fn f(n: Int) -> Int? = n?.abs
+
+fn main() -> Unit = println(int.to_string(f(0 - 4) ?? 0))

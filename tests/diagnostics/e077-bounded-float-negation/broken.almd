@@ -1,0 +1,5 @@
+// ALS-B10: unary negation computes on a Float — rejected in the profile.
+@bounded
+fn flip(x: Float) -> Float = -x
+
+fn main() -> Unit = println(float.to_string(flip(1.5)))

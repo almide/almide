@@ -1,0 +1,9 @@
+// `err(e)` aimed at `list.find`'s Option: an Option's failure arm is `none`
+// and carries NO error value, so the binder must go away — the hint's
+// asymmetric-pair note is the variant pinned here.
+fn first_even(xs: List[Int]) -> Int = match list.find(xs, (n) => n % 2 == 0) {
+  some(v) => v,
+  none => -1,
+}
+
+fn main() -> Unit = println(int.to_string(first_even([1, 4])))

@@ -1,0 +1,3 @@
+expects_code = "E004"
+expects_error = "function value `f` takes 1 argument(s), 2 given"
+hint_substring = "match its arity exactly"

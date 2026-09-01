@@ -1,0 +1,4 @@
+// Fixed: the fn no longer claims the bounded profile, so the clock read is admissible.
+effect fn stamp() -> Int = datetime.now()
+
+effect fn main() -> Unit = println(int.to_string(stamp() ?? 0))

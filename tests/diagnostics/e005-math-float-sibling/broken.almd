@@ -1,0 +1,3 @@
+// An Int-only math builtin given a Float: the hint must point at the
+// Float-preserving sibling (float.abs), not the truncating float.to_int (#740).
+fn main() -> Unit = println(int.to_string(math.abs(-2.5)))

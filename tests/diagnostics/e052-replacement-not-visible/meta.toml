@@ -1,0 +1,3 @@
+expects_code = "E052"
+expects_error = "is deprecated since dialect"
+hint_substring = "not visible from here"

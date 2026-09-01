@@ -1,0 +1,10 @@
+// E043: `fs.__fallible_for_each_line` is the desugar TARGET the checker
+// instantiates when a for_each_line callback propagates — an internal carrier
+// source may not name (#1144, ADR-0006), never a second spelling.
+import fs
+
+effect fn store(l: String) -> Unit = println(l)
+
+effect fn main() -> Unit = {
+  fs.__fallible_for_each_line("data.txt", (l) => store(l))
+}

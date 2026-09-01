@@ -1,0 +1,6 @@
+// E042 on a statement-position PIPE chain — the whole chain's Result is
+// discarded, not just a bare call.
+effect fn main() -> Unit = {
+  int.parse("41") |> result.map((m) => m + 1)
+  println("done")
+}

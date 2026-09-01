@@ -1,0 +1,4 @@
+// E049 variant: the OCaml `let _ = e in body` discard idiom.
+effect fn main() -> Unit = {
+  let _ = println("side effect") println("done")
+}

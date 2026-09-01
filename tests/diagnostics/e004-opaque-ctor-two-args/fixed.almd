@@ -1,0 +1,8 @@
+// An opaque type (mod type) constructor wraps exactly one value;
+// passing two arguments is an arity error with its own hint.
+mod type UserId = Int
+
+fn main() -> Unit = {
+  let u = UserId(7)
+  println(match u { UserId(n) => int.to_string(n) })
+}

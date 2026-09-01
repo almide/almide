@@ -1,0 +1,9 @@
+// ALS-B7: a parenthesized callee is not a direct name — an indirect call the
+// profile rejects even when the value inside is a plain parameter.
+@bounded
+fn step(x: Int) -> Int = x + 1
+
+@bounded
+fn twice(x: Int) -> Int = step(step(x))
+
+fn main() -> Unit = println("${twice(2)}")

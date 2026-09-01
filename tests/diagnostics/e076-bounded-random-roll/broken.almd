@@ -1,0 +1,8 @@
+// ALS-B9: random reaches the host RNG — an effect outside the profile's
+// declared capability.
+import random
+
+@bounded
+effect fn roll() -> Int = random.int(1, 6)
+
+effect fn main() -> Unit = println(int.to_string(roll() ?? 1))

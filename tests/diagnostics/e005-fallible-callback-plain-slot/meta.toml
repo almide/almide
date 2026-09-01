@@ -1,0 +1,3 @@
+expects_code = "E005"
+expects_error = "argument 'f' expects"
+hint_substring = "declare the slot fallible"

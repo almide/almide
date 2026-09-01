@@ -1,0 +1,5 @@
+// The fix: bind the chain's value and propagate with `!`.
+effect fn main() -> Unit = {
+  let n = int.parse("41") |> result.map((m) => m + 1)!
+  println(int.to_string(n))
+}

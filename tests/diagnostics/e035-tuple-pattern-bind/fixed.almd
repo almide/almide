@@ -1,0 +1,10 @@
+// The fix: report the error with context instead of branching on its text.
+effect fn fetch(n: Int) -> Result[Int, String] = if n > 0 then ok(n) else err("neg")
+
+effect fn main() -> Unit = {
+  match (fetch(1), fetch(-1)) {
+    (ok(a), ok(b)) => println(int.to_string(a + b)),
+    (err(e), _) => println("left failed: ${e}"),
+    _ => println("other"),
+  }
+}

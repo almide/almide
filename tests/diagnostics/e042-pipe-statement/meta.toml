@@ -1,0 +1,3 @@
+expects_code = "E042"
+expects_error = "discards a Result"
+hint_substring = "Matching on ok/err"

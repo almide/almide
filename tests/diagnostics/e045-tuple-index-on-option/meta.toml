@@ -1,0 +1,3 @@
+expects_code = "E045"
+expects_error = "tuple index .0 on non-tuple type Option[Int]"
+hint_substring = "positional .k access"

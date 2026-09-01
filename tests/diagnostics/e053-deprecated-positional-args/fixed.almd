@@ -1,0 +1,8 @@
+// #1518: @deprecated with POSITIONAL arguments — every argument must be
+// named (since/use/note), so the bare values are unreadable.
+@deprecated(since = 2, use = "shout")
+fn yell(s: String) -> String = s
+
+fn shout(s: String) -> String = s
+
+fn main() -> Unit = println(shout("hi"))

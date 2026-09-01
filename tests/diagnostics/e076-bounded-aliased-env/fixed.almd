@@ -1,0 +1,6 @@
+// Fixed: the fn no longer claims the bounded profile, so the aliased env read is admissible.
+import env as e
+
+effect fn home() -> String = e.get("HOME") ?? ""
+
+effect fn main() -> Unit = println(home() ?? "")

@@ -1,0 +1,3 @@
+expects_code = "E043"
+expects_error = "fs.try_fold_lines was removed"
+hint_substring = "fs.fold_lines(path, z, (a, l) => f(a, l)!)!"

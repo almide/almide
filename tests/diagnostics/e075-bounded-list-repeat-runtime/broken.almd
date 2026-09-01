@@ -1,0 +1,5 @@
+// ALS-B8: list.repeat with a run-time count builds a run-time-length list.
+@bounded
+fn zeros(n: Int) -> Int = list.len(list.repeat(0, n))
+
+fn main() -> Unit = println("${zeros(4)}")

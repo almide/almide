@@ -1,0 +1,3 @@
+expects_code = "E051"
+expects_error = "stamped for dialect 4294967295"
+hint_substring = "Upgrade the compiler"

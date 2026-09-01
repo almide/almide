@@ -1,0 +1,3 @@
+expects_code = "E005"
+expects_error = "expects Int but got Option[Int]"
+hint_substring = "it is not error propagation"

@@ -1,0 +1,3 @@
+expects_code = "E045"
+expects_error = ".7 is out of range"
+hint_substring = "the tuple has 2 element(s)"

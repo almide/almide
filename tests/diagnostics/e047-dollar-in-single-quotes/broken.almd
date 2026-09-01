@@ -1,0 +1,6 @@
+// `\$` suppresses interpolation only in double-quoted strings — a
+// single-quoted literal has no `${}` layer, so `\$` names no escape there.
+fn main() -> Unit = {
+  let tag = '\$'
+  println(tag)
+}

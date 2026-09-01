@@ -1,0 +1,4 @@
+// The fix: unwrap the Option and use the Int directly — there is no field.
+fn first_len(o: Option[Int]) -> Int = o ?? 0
+
+fn main() -> Unit = println(int.to_string(first_len(some(3))))

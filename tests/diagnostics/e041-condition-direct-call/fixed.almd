@@ -1,0 +1,7 @@
+// E041, condition variant: a fallible call sitting DIRECTLY in an `if`
+// condition no longer auto-unwraps — the Result must be propagated with `!`.
+effect fn ready() -> Bool = true
+
+effect fn main() -> Unit = {
+  if ready()! then println("go") else println("wait")
+}

@@ -1,0 +1,11 @@
+// Convention methods share the fn namespace under their prefixed key,
+// so two `fn Point.show` definitions collide like any duplicate fn.
+type Point = { x: Int, y: Int }
+
+fn Point.show(p: Point) -> String = "(${p.x}, ${p.y})"
+fn Point.show(p: Point) -> String = "<${p.x};${p.y}>"
+
+fn main() -> Unit = {
+  let p = Point { x: 1, y: 2 }
+  println(p.show())
+}

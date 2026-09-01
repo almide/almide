@@ -1,0 +1,3 @@
+expects_code = "E030"
+expects_error = "operator '<=' is not defined for Option[Int]"
+hint_substring = "Compare scalar fields explicitly"

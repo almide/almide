@@ -1,0 +1,6 @@
+// ALS-B9: datetime looks pure but reads the host clock — an effect outside
+// the profile's declared capability.
+@bounded
+effect fn stamp() -> Int = datetime.now()
+
+effect fn main() -> Unit = println(int.to_string(stamp() ?? 0))

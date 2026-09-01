@@ -1,0 +1,8 @@
+// An unknown escape (`\q`) inside a triple-quoted heredoc: the escape layer
+// applies to heredocs too, and the validator reports it on the offending line.
+fn main() -> Unit = {
+  let doc = """
+    usage: tool \q [options]
+    """
+  println(doc)
+}

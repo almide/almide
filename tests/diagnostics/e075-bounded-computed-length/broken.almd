@@ -1,0 +1,9 @@
+// ALS-B8: a capacity computed from a parameter is a run-time value even
+// when the arithmetic is simple.
+@bounded
+fn room(n: Int) -> Int = {
+  let xs: List[Int] = list.with_capacity(n * 2)
+  list.len(xs)
+}
+
+fn main() -> Unit = println("${room(2)}")

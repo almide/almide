@@ -1,0 +1,8 @@
+// A Set head: sets are collections but not `for`-iterable — convert with
+// set.to_list so the loop walks a List.
+fn main() -> Unit = {
+  let s = set.from_list([1, 2, 3])
+  for x in s {
+    println(int.to_string(x))
+  }
+}

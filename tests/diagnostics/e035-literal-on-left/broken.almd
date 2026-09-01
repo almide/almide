@@ -1,0 +1,10 @@
+// E035 with the string literal on the LEFT of the comparison — the reversed
+// spelling is the same text-branching.
+effect fn fetch() -> Result[Int, String] = err("timeout")
+
+effect fn main() -> Unit = {
+  match fetch() {
+    ok(n) => println(int.to_string(n)),
+    err(e) => println(if "timeout" == e then "soft" else "hard"),
+  }
+}

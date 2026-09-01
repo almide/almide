@@ -1,0 +1,6 @@
+// The fix: `?? fallback` unwraps to the plain Int the slot expects.
+fn parse_num(s: String) -> Result[Int, String] = ok(string.len(s))
+
+fn double(n: Int) -> Int = n * 2
+
+fn main() -> Unit = println(int.to_string(double(parse_num("abc") ?? 0)))

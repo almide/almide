@@ -1,0 +1,3 @@
+expects_code = "E002"
+expects_error = "is not a function — it has type Int"
+hint_substring = "only functions and closures can be called"

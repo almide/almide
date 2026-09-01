@@ -1,0 +1,6 @@
+// A List key is fine only when its element is hashable — List[Float] is
+// blocked by the Float inside.
+fn main() -> Unit = {
+  let m: Map[Int, List[Float]] = [:]
+  println(int.to_string(map.len(m)))
+}

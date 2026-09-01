@@ -1,0 +1,5 @@
+// The fix: unwrap_or applies to an Option, not to the already-plain value.
+fn main() -> Unit = {
+  let n = option.unwrap_or(some(5), 0)
+  println(int.to_string(n))
+}

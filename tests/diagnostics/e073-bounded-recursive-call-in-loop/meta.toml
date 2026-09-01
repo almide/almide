@@ -1,0 +1,3 @@
+expects_code = "E073"
+expects_error = "recursion is not admissible"
+hint_substring = "replace the recursion with a counted loop"

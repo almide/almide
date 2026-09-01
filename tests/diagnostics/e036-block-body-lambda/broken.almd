@@ -1,0 +1,9 @@
+// E036 with a BLOCK-bodied mapper — the block's own locals don't count as
+// using the error param, which is still silently dropped.
+effect fn main() -> Unit = {
+  let n = int.parse("9") |> result.map_err((e) => {
+    let stage = "parsing"
+    "failed while ${stage}"
+  })!
+  println(int.to_string(n))
+}

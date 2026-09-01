@@ -1,0 +1,7 @@
+// Ordering two OPTION operands in an if condition: Option has no `<=` —
+// unwrap to the scalar payload first.
+fn main() -> Unit = {
+  let lo: Int? = some(1)
+  let hi: Int? = some(9)
+  if lo <= hi then println("ordered") else println("swapped")
+}

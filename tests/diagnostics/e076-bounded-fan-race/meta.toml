@@ -1,0 +1,3 @@
+expects_code = "E076"
+expects_error = "`fan.*` scheduling is not admissible"
+hint_substring = "standard output only"

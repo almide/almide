@@ -1,0 +1,8 @@
+// A list literal mixing a sized UInt8 element with a canonical Int VALUE
+// (not a literal) needs an explicit width conversion on one side.
+fn main() -> Unit = {
+  let a = int.to_uint8(3)
+  let b = 100
+  let xs = [a, b]
+  println("${list.len(xs)}")
+}

@@ -1,0 +1,6 @@
+// The builder API is checked too: a Float key type inferred through
+// map.from_list is rejected the same as an annotated literal.
+fn main() -> Unit = {
+  let m = map.from_list([("low", 1.5), ("high", 2.5)])
+  println(int.to_string(map.len(m)))
+}

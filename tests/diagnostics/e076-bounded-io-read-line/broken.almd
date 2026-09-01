@@ -1,0 +1,8 @@
+// ALS-B9: io.read_line reaches past the print family — the profile's only
+// io capability is standard output, so a stdin read is rejected.
+import io
+
+@bounded
+effect fn ask() -> String = io.read_line()
+
+effect fn main() -> Unit = println(ask() ?? "")

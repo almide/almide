@@ -1,0 +1,9 @@
+// ALS-B3: spell the same iteration as a counted range.
+@bounded
+fn sum_range() -> Int = {
+  var acc = 0
+  for x in 0..<4 { acc = acc + x }
+  acc
+}
+
+fn main() -> Unit = println("${sum_range()}")

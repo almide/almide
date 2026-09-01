@@ -1,0 +1,5 @@
+// ALS-B8: a literal pad width is a compile-time size.
+@bounded
+fn align() -> Int = string.len(string.pad_start("7", 5, "0"))
+
+fn main() -> Unit = println("${align()}")

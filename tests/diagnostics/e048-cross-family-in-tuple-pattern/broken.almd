@@ -1,0 +1,8 @@
+// The cross-family slip at a NESTED position: the second tuple element is an
+// Option, but the inner pattern spells the Result family's `ok(..)`.
+fn snd(p: (Int, Int?)) -> Int = match p {
+  (_, ok(b)) => b,
+  _ => 0,
+}
+
+fn main() -> Unit = println(int.to_string(snd((1, some(2)))))

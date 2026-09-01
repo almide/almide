@@ -1,0 +1,3 @@
+expects_code = "E030"
+expects_error = "operator '<' is not defined for Set[Int]"
+hint_substring = "ordered collections"

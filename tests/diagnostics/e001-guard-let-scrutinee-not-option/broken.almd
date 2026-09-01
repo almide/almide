@@ -1,0 +1,8 @@
+// `guard let` unwraps an Option/Result and exits through the else branch on
+// the empty side; a plain Int scrutinee has no inner value to bind.
+fn label(n: Int) -> String = {
+  guard let v = n else { "no" }
+  "got ${v}"
+}
+
+fn main() -> Unit = println(label(3))

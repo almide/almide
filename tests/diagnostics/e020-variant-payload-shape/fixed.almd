@@ -1,0 +1,5 @@
+// Distinct type names (and case names, so constructors stay unambiguous).
+type Shape = | Circle { r: Float } | Dot
+type Outline = | Ring(Float) | Point
+
+fn main() -> Unit = println("ok")

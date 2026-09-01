@@ -1,0 +1,17 @@
+// ALS-B11: a guard nested inside an if-branch of a counted loop body is still
+// an early exit past the iteration bound.
+@bounded
+fn capped_count(xs: List[Int]) -> Int = {
+  var acc = 0
+  for i in 0..<4 {
+    if (list.get(xs, i) ?? 0) > 0 then {
+      guard acc < 3 else acc
+      acc = acc + 1
+    } else {
+      acc = acc + 0
+    }
+  }
+  acc
+}
+
+fn main() -> Unit = println("${capped_count([1, 2, 3, 4])}")

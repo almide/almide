@@ -1,0 +1,9 @@
+// ALS-B4: accumulate the scalar answer instead of building maps.
+@bounded
+fn tally() -> Int = {
+  var acc = 0
+  for i in 0..<3 { acc = acc + 1 }
+  acc
+}
+
+fn main() -> Unit = println("${tally()}")

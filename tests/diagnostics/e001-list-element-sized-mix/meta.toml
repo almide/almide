@@ -1,0 +1,3 @@
+expects_code = "E001"
+expects_error = "list element mixes sized numeric type UInt8 with a canonical Int value"
+hint_substring = "so every peer has the same width"

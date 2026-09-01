@@ -1,0 +1,5 @@
+// E044 variant: fn main declared with a tuple return type.
+fn main() -> Unit = {
+  let (a, b) = (1, 2)
+  println("${a} ${b}")
+}

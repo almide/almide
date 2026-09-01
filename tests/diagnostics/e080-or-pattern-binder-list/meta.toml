@@ -1,0 +1,3 @@
+expects_code = "E080"
+expects_error = "or-pattern alternative binds `x`"
+hint_substring = "no single value"

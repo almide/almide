@@ -1,0 +1,9 @@
+// E041, condition variant through a `while` head: the loop condition takes
+// the same explicit `!` as an `if` condition — no auto-unwrap.
+effect fn more() -> Bool = false
+
+effect fn main() -> Unit = {
+  while more()! {
+    println("tick")
+  }
+}

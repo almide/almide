@@ -1,0 +1,6 @@
+// E052 variant: `use` names a function this compiler cannot see — the hint
+// says so instead of guessing at the edit.
+@deprecated(since = 4, use = "textkit.emphasize")
+fn yell(s: String) -> String = s + "!"
+
+effect fn main() -> Unit = println(yell("hi"))

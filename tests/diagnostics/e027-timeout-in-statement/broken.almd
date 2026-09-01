@@ -1,0 +1,7 @@
+// E027: the legacy fan.timeout CALL spelling, in bare STATEMENT position.
+effect fn work() -> Result[Int, String] = ok(1)
+
+effect fn main() -> Unit = {
+  fan.timeout(1000, () => work())
+  println("done")
+}

@@ -1,0 +1,9 @@
+// The fix: interpolate the original error so the chain keeps its cause.
+fn half(n: Int) -> Int! = if n % 2 == 0 then ok(n / 2) else err("odd")
+
+test "map_err keeps context" {
+  let r = half(3) |> result.map_err((e) => "bad half: ${e}")
+  assert_eq(r, err("bad half: odd"))
+}
+
+fn main() -> Unit = println("ok")

@@ -1,0 +1,6 @@
+// A bare `err(...)` let initializer: the OK slot is reachable only
+// through an un-exercised branch, so the NAMED-binding hint fires.
+fn main() -> Unit = {
+  let e = err("boom")
+  println("done")
+}

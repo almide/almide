@@ -1,0 +1,3 @@
+expects_code = "E023"
+expects_error = "derives 'Ord' but field 'a' has type 'Point', which does not derive 'Ord'"
+hint_substring = "add `: Ord` to the declaration"

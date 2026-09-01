@@ -1,0 +1,10 @@
+// E050 variant: two selective imports from DIFFERENT modules, each shadowed
+// by a local fn — each collision is reported against its own module.
+import json.{parse}
+import regex.{find}
+
+fn parse(s: String) -> Int = string.len(s)
+
+fn find(s: String) -> Int = string.len(s) * 2
+
+effect fn main() -> Unit = println(int.to_string(parse("a") + find("b")))

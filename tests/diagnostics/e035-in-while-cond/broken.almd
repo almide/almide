@@ -1,0 +1,13 @@
+// E035 in a WHILE condition — a retry loop keyed off the error's text.
+effect fn risky() -> Result[Int, String] = err("retry")
+
+effect fn main() -> Unit = {
+  match risky() {
+    ok(n) => println(int.to_string(n)),
+    err(e) => {
+      var tries = 0
+      while e == "retry" and tries < 3 { tries = tries + 1 }
+      println("gave up after ${tries}")
+    },
+  }
+}

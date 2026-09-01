@@ -1,0 +1,9 @@
+// E049 variant: the let-in inside a guard's else block.
+fn describe(n: Int) -> Unit = {
+  guard n > 0 else {
+    let msg = "not positive" in println(msg)
+  }
+  println(int.to_string(n))
+}
+
+fn main() -> Unit = describe(4)

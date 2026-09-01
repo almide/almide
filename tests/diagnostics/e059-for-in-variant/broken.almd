@@ -1,0 +1,10 @@
+// A variant value is one case of a sum type — inspect it with match, not
+// with a for loop.
+type Shape = | Circle(Int) | Square(Int)
+
+fn main() -> Unit = {
+  let s = Circle(3)
+  for x in s {
+    println("${x}")
+  }
+}

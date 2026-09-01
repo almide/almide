@@ -1,0 +1,10 @@
+// Immutable `let` bindings are safe to read from fan branches.
+effect fn main() -> Unit = {
+  var scale0 = 2
+  let scale = scale0
+  let (a, b) = fan {
+    [1, 2, 3] |> list.map((n) => n * scale) |> list.len
+    10
+  }
+  println(int.to_string(a + b))
+}

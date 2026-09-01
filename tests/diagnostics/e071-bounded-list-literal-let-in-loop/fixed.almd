@@ -1,0 +1,9 @@
+// ALS-B4: the pair length is a constant — no list needed in the loop.
+@bounded
+fn diag() -> Int = {
+  var acc = 0
+  for i in 0..<5 { acc = acc + 2 }
+  acc
+}
+
+fn main() -> Unit = println("${diag()}")

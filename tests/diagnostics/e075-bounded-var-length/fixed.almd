@@ -1,0 +1,9 @@
+// ALS-B8: a `let` bound to an integer literal is a compile-time size.
+@bounded
+fn wall() -> Int = {
+  let w = 3
+  let s = string.repeat("=", w)
+  string.len(s)
+}
+
+fn main() -> Unit = println("${wall()}")

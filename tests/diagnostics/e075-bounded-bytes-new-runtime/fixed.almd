@@ -1,0 +1,5 @@
+// ALS-B8: a literal byte length is a compile-time size.
+@bounded
+fn buf() -> Int = bytes.len(bytes.new(3))
+
+fn main() -> Unit = println("${buf()}")

@@ -1,0 +1,4 @@
+// Fixed: a plain value is accessed directly — no chain needed.
+fn f(n: Int) -> Int = int.abs(n)
+
+fn main() -> Unit = println(int.to_string(f(0 - 4)))

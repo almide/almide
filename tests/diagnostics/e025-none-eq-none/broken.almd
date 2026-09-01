@@ -1,0 +1,6 @@
+// #1116 shape: `none == none` unifies two Option slots with each other
+// and nothing else — both sides stay unpinned.
+fn main() -> Unit = {
+  let same = none == none
+  println(if same then "eq" else "ne")
+}
