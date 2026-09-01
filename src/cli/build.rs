@@ -692,12 +692,12 @@ fn check_wasm_availability(ir_program: &almide::ir::IrProgram, embedded_leg: boo
         out
     });
     let leg_lit = if embedded_leg { "\"embedded\"" } else { "\"stock-p1\"" };
-    let mut hits: BTreeMap<String, &(String, Option<String>, Option<String>, Option<String>, Option<String>)> = BTreeMap::new();
+    let mut hits: BTreeMap<String, &Row> = BTreeMap::new();
     use almide::ir::visit::IrVisitor;
     struct Scan<'a> {
-        table: &'a BTreeMap<String, (String, Option<String>, Option<String>, Option<String>, Option<String>)>,
+        table: &'a BTreeMap<String, Row>,
         leg_lit: &'static str,
-        hits: BTreeMap<String, &'a (String, Option<String>, Option<String>, Option<String>, Option<String>)>,
+        hits: BTreeMap<String, &'a Row>,
     }
     impl<'a> IrVisitor for Scan<'a> {
         fn visit_expr(&mut self, e: &almide::ir::IrExpr) {
@@ -706,10 +706,10 @@ fn check_wasm_availability(ir_program: &almide::ir::IrProgram, embedded_leg: boo
             } = &e.kind
             {
                 let key = format!("{}.{}", module.as_str(), func.as_str());
-                if let Some(row) = self.table.get(&key) {
-                    if row.0.contains(self.leg_lit) {
-                        self.hits.entry(key).or_insert(row);
-                    }
+                if let Some(row) = self.table.get(&key)
+                    && row.0.contains(self.leg_lit)
+                {
+                    self.hits.entry(key).or_insert(row);
                 }
             }
             almide::ir::visit::walk_expr(self, e);
