@@ -1,0 +1,35 @@
+// @contract: C-333
+// ALS-E18 (docs/specs/als/expressions.md): as-patterns (#1461) —
+// `name @ pattern` binds the whole value at the position while the
+// inner pattern destructures the same value. Probes: variant arms with
+// the whole passed onward, as-over-list composed with the rest form,
+// as-over-option, and the untaken-arm ordering.
+type Shape = | Circle(Int) | Rect(Int, Int)
+
+fn describe(s: Shape) -> String = match s {
+  Circle(_) => "round",
+  Rect(_, _) => "angular",
+}
+
+fn area_note(s: Shape) -> String = match s {
+  c @ Circle(r) => "circle:${r}:${describe(c)}",
+  r @ Rect(_, _) => "rect:${describe(r)}",
+}
+
+fn pick(xs: List[Int]) -> String = match xs {
+  all @ [x] => "one:${x}:${list.len(all)}",
+  all @ [a, ..t] => "many:${a}:${list.len(all)}:${list.len(t)}",
+  _ => "none",
+}
+
+fn main() -> Unit = {
+  println(area_note(Circle(3)))
+  println(area_note(Rect(2, 5)))
+  println(pick([9]))
+  println(pick([1, 2, 3]))
+  println(pick([]))
+  match some(7) {
+    w @ some(v) => println("opt:${v}:${w ?? 0}"),
+    none => println("opt:none"),
+  }
+}

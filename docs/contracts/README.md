@@ -24,7 +24,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-332 contracts
+333 contracts
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
@@ -360,4 +360,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-330 | The http string family answers on the stock runtime through the p3 component's async-lowered exchange | 0.62.0 | active | fixture | 0 |
 | C-331 | zlib is self-hosted on wasm: decoding is byte-identical, encoding is round-trip-exact with leg-dependent bytes | 0.61.2 | active | fixture | 1 |
 | C-332 | List-rest patterns: the tail past the prefix binds as a list, identically on every leg | 0.62.0 | active | fixture | 1 |
+| C-333 | As-patterns: the whole value binds beside its own destructuring, identically on every leg | 0.62.0 | active | fixture | 1 |
 

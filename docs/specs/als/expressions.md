@@ -306,6 +306,9 @@ ALS-S1)。
 接頭要素の後ろ全体が `..name` で **subject と同じリスト型**に束縛される
 (`..` は無束縛)。rest はリストパターンの**最終要素のみ**(後置は parse
 エラー「Rest pattern must be last」)。
+**as-パターン** `name @ pattern`(#1461)— その位置の**値全体**を束縛しつつ
+内側パターンが同じ値を分解・照合する(`c @ Circle(r)`)。`@` は arm レベルの
+`|` より強く結合し、or 選択肢内の as は他の束縛子と同じく E080。
 そして **or-パターン** `a | b | c`(#1461)— いずれかの選択肢が一致すれば
 アームが取られる。選択肢は**束縛子を持てない**(E080 — 本体はどの選択肢が
 一致したかに依存できないため; ペイロードが要るときはアームを分けるか `_`)。
@@ -326,7 +329,9 @@ ALS-S1)。
 テスト: `spec/wasm_cross/match_forms.almd`(契約 C-247)、
 `spec/wasm_cross/list_rest_pattern.almd`(契約 C-332 — rest 形の全レッグ
 一致: 再帰 sum、被覆梯子で終端化される自然形、ガード付き rest、文字列
-tail)、`tests/match_diag_test.rs`(負例)。
+tail)、`spec/wasm_cross/as_pattern.almd`(契約 C-333 — as 形: variant の
+whole 転送、as×rest 合成、option carrier)、`tests/match_diag_test.rs`
+(負例)。
 
 ## ALS-E19 for-in 文(`ExprKind::ForIn`)
 
