@@ -59,7 +59,7 @@ Inverse of `gzip`.
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (8 functions)
+## Signature index (10 functions)
 
 ```
 effect zlib.compress(data: Bytes) -> Bytes
@@ -70,6 +70,8 @@ effect zlib.deflate_level(data: Bytes, level: Int) -> Bytes
 effect zlib.inflate(data: Bytes) -> Bytes
 effect zlib.gzip(data: Bytes) -> Bytes
 effect zlib.gunzip(data: Bytes) -> Bytes
+zlib.crc32(data: Bytes) -> Int
+zlib.adler32(data: Bytes) -> Int
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

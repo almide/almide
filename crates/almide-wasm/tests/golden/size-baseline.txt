@@ -641,6 +641,7 @@
 9050	spec/wasm_cross/wide_function_body.almd
 1668	spec/wasm_cross/witness_straightline.almd
 8814	spec/wasm_cross/zip_view_shape.almd
+23515	spec/wasm_cross/zlib_selfhost.almd
 4055	spec/wasm_fail/effect_err_aborts_both_legs.almd
 4099	spec/wasm_fail/int_parse_err_propagates.almd
 7281	spec/wasm_fail/matrix_index_oob_aborts.almd

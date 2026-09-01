@@ -778,6 +778,24 @@ impl<'a> Interpreter<'a> {
                 let _ = s;
                 Flow::Unsupported("string index access".into())
             }
+            // Address-model list (#1700): inside the pool tier the binding
+            // holds a slot-block ADDRESS (see exec_stmt_index_assign's twin
+            // arm). Element count in the len header, 8-byte Int slots.
+            Value::Int(addr) => {
+                let Ok(base) = u32::try_from(addr) else {
+                    return Flow::Abort("index out of bounds".into());
+                };
+                let Some(count) = self.heap.load(base + almide_layout::LEN.offset, 4) else {
+                    return Flow::Abort(format!("internal: index access on Int (v-addr {addr})"));
+                };
+                if i < 0 || i >= count {
+                    return Flow::Abort("index out of bounds".into());
+                }
+                match self.heap.load(base + almide_layout::PAYLOAD + (i as u32) * 8, 8) {
+                    Some(v) => Flow::val(Value::Int(v)),
+                    None => Flow::Abort("index out of bounds".into()),
+                }
+            }
             other => Flow::Abort(format!(
                 "internal: index access on {}",
                 other.type_name()

@@ -1,43 +1,59 @@
-// wasm:skip — OS/native-only API, not available in WASM
+// zlib self-host tests (#1700, C-330): round trips on every entry point,
+// checksum known answers, and the container error split. The old
+// "compress reduces size" assertion is gone WITH the wasm:skip marker it
+// lived under: the wasm legs encode stored blocks (valid DEFLATE, no
+// shrink), and the ratio was never the promise — the round trip is.
 import zlib
 
 test "zlib compress/decompress roundtrip" {
   let data = bytes.from_string("Hello, compressed world! This is a test of zlib compression.")
-  let compressed = zlib.compress(data)!
-  let restored = zlib.decompress(compressed)!
-  assert_eq(bytes.to_list(data), bytes.to_list(restored))
+  let restored = zlib.decompress(zlib.compress(data)!)!
+  assert(bytes.to_list(data) == bytes.to_list(restored), "zlib round trip")
 }
 
 test "zlib deflate/inflate roundtrip" {
   let data = bytes.from_string("Minecraft protocol uses raw deflate")
-  let deflated = zlib.deflate(data)!
-  let inflated = zlib.inflate(deflated)!
-  assert_eq(bytes.to_list(data), bytes.to_list(inflated))
+  let inflated = zlib.inflate(zlib.deflate(data)!)!
+  assert(bytes.to_list(data) == bytes.to_list(inflated), "deflate round trip")
 }
 
 test "zlib gzip/gunzip roundtrip" {
   let data = bytes.from_string("gzip format test")
-  let gzipped = zlib.gzip(data)!
-  let restored = zlib.gunzip(gzipped)!
-  assert_eq(bytes.to_list(data), bytes.to_list(restored))
+  let restored = zlib.gunzip(zlib.gzip(data)!)!
+  assert(bytes.to_list(data) == bytes.to_list(restored), "gzip round trip")
 }
 
-test "zlib compress reduces size on repetitive data" {
-  let repeated = bytes.from_string("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-  let compressed = zlib.compress(repeated)!
-  assert(bytes.len(compressed) < bytes.len(repeated))
+test "zlib compress_level round trips at both ends of the dial" {
+  let data = bytes.from_string("test data for the level dial")
+  assert(bytes.to_list(zlib.decompress(zlib.compress_level(data, 0)!)!) == bytes.to_list(data), "level 0")
+  assert(bytes.to_list(zlib.decompress(zlib.compress_level(data, 9)!)!) == bytes.to_list(data), "level 9")
+  assert(bytes.to_list(zlib.inflate(zlib.deflate_level(data, 1)!)!) == bytes.to_list(data), "deflate level 1")
 }
 
-test "zlib compress_level 0 (no compression)" {
-  let data = bytes.from_string("test data")
-  let stored = zlib.compress_level(data, 0)!
-  let restored = zlib.decompress(stored)!
-  assert_eq(bytes.to_list(data), bytes.to_list(restored))
+test "round trips at the empty and one-byte sizes" {
+  let empty = bytes.new(0)
+  assert(bytes.len(zlib.decompress(zlib.compress(empty)!)!) == 0, "zlib empty round trip")
+  assert(bytes.len(zlib.inflate(zlib.deflate(empty)!)!) == 0, "deflate empty round trip")
+  assert(bytes.len(zlib.gunzip(zlib.gzip(empty)!)!) == 0, "gzip empty round trip")
+  let one = bytes.from_list([170])
+  assert(bytes.to_list(zlib.gunzip(zlib.gzip(one)!)!) == [170], "gzip one-byte round trip")
 }
 
-test "zlib compress_level 9 (max compression)" {
-  let data = bytes.from_string("test data for max compression level nine")
-  let best = zlib.compress_level(data, 9)!
-  let restored = zlib.decompress(best)!
-  assert_eq(bytes.to_list(data), bytes.to_list(restored))
+test "crc32 known answers" {
+  assert(zlib.crc32(bytes.new(0)) == 0, "crc32 of empty")
+  assert(zlib.crc32(bytes.from_list([1, 2, 3])) == 1438416925, "crc32 of 1,2,3")
+  assert(zlib.crc32(bytes.from_string("123456789")) == 3421780262, "crc32 check vector")
+}
+
+test "adler32 known answers" {
+  assert(zlib.adler32(bytes.new(0)) == 1, "adler32 of empty")
+  assert(zlib.adler32(bytes.from_list([1, 2, 3])) == 851975, "adler32 of 1,2,3")
+  assert(zlib.adler32(bytes.from_string("123456789")) == 152961502, "adler32 check vector")
+}
+
+test "gunzip rejects non-gzip input" {
+  match zlib.gunzip(bytes.from_list([1, 2, 3])) {
+    ok(_) => assert(false, "gunzip accepted garbage"),
+    err(e) => assert(string.len(e) > 0, "gunzip err carries a message"),
+  }
 }

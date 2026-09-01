@@ -511,6 +511,14 @@ call:value.omit
 call:value.pick
 call:value.str
 call:value.stringify
+call:zlib.compress
+call:zlib.compress_level
+call:zlib.decompress
+call:zlib.deflate
+call:zlib.deflate_level
+call:zlib.gunzip
+call:zlib.gzip
+call:zlib.inflate
 expr:BinOp
 expr:Block
 expr:Break
