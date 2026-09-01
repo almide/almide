@@ -4205,6 +4205,17 @@ evidence  = [
 ]
 
 [[contract]]
+id        = "C-330"
+spec      = "ALS-R5"
+title     = "The http string family answers on the stock runtime through the p3 component's async-lowered exchange"
+statement = "http.get/post/put/patch/delete (fs_call ops 43..=47) are served by the ALMIDE_COMPONENT_P3 artifact over wasi:http@0.3 on a stock wasmtime (`-S p3=y -S http=y`, the pin-policy flag surface): ok answers carry the decoded response body and transport failures answer err with the static E_HTTP text (host-specific wording is NOT promised across lanes — C-328's shared-client wording guarantee is embedded/native only). The exchange shape is load-bearing, not stylistic: the trailers future-write, the body stream-writes and client.send are all [async-lower] builtins joined on one waitable set and drained by a guest scheduler loop, because each sync lower parks the fiber on a rendezvous whose reader only appears inside send — the bring-up bisect hung exactly at the sync trailers write, and a body past the host's 1MiB http-outgoing-body-buffer-chunks rendezvous buffer deadlocks any shape that cannot keep feeding the stream while send is in flight. The pinning fixture drives all five family members through a live local server in one component run, with a 2MiB PUT crossing that buffer on purpose, under a deadlock watchdog."
+since     = "0.62.0"
+status    = "active"
+evidence  = [
+  { path = "tests/component_p3_test.rs", class = "fixture", name = "p3_component_speaks_http" },
+]
+
+[[contract]]
 id        = "C-328"
 spec      = "ALS-R5"
 title     = "The http string family answers identically on the native and embedded-wasm lanes"

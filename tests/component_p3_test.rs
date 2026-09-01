@@ -624,3 +624,194 @@ fn p3_component_abort_answers_exit_one() {
     assert!(err.contains("Error: none"), "abort message missing:\n{err}");
     assert_eq!(code, 1, "the abort must answer exit 1 on the p3 leg");
 }
+
+// ── #1710 PR B: the wasi:http@0.3 client leg ──────────────────────────
+//
+// The five-fn http string family (ops 43..=47) rides the p3 component
+// through an async-lowered exchange: the trailers future-write, the body
+// stream-writes and `send` itself are all `[async-lower]` builtins joined
+// on one waitable set, drained by a guest scheduler loop — the sync
+// lowers deadlock on the host's rendezvous (the write's reader only
+// appears inside `send`), which the bring-up bisect proved empirically.
+// The big-body PUT below crosses the host's 1MiB
+// `http-outgoing-body-buffer-chunks` rendezvous buffer on purpose: it is
+// the regression fixture for that deadlock class.
+
+/// One-connection-per-request HTTP/1.1 echo server: GET answers a fixed
+/// body, DELETE a marker, POST/PUT/PATCH echo the decoded body length
+/// (chunked and content-length both). Serves until the process exits.
+fn spawn_http_echo() -> std::net::SocketAddr {
+    use std::io::{BufRead, BufReader, Read, Write};
+    let l = std::net::TcpListener::bind("127.0.0.1:0").expect("bind echo server");
+    let addr = l.local_addr().expect("local addr");
+    std::thread::spawn(move || {
+        for conn in l.incoming() {
+            let Ok(c) = conn else { break };
+            let mut r = BufReader::new(c);
+            let mut line = String::new();
+            if r.read_line(&mut line).is_err() || line.is_empty() {
+                continue;
+            }
+            let method = line.split_whitespace().next().unwrap_or("").to_string();
+            let mut clen = 0usize;
+            let mut chunked = false;
+            loop {
+                let mut h = String::new();
+                if r.read_line(&mut h).is_err() || h.trim().is_empty() {
+                    break;
+                }
+                let hl = h.to_ascii_lowercase();
+                if let Some(v) = hl.strip_prefix("content-length:") {
+                    clen = v.trim().parse().unwrap_or(0);
+                }
+                if hl.starts_with("transfer-encoding:") && hl.contains("chunked") {
+                    chunked = true;
+                }
+            }
+            let mut body = Vec::new();
+            if chunked {
+                loop {
+                    let mut sz = String::new();
+                    if r.read_line(&mut sz).is_err() {
+                        break;
+                    }
+                    let n = usize::from_str_radix(
+                        sz.trim().split(';').next().unwrap_or("0"),
+                        16,
+                    )
+                    .unwrap_or(0);
+                    if n == 0 {
+                        let mut crlf = String::new();
+                        let _ = r.read_line(&mut crlf);
+                        break;
+                    }
+                    let mut chunk = vec![0u8; n + 2];
+                    if r.read_exact(&mut chunk).is_err() {
+                        break;
+                    }
+                    chunk.truncate(n);
+                    body.extend_from_slice(&chunk);
+                }
+            } else if clen > 0 {
+                body = vec![0u8; clen];
+                let _ = r.read_exact(&mut body);
+            }
+            let resp = match method.as_str() {
+                "GET" => "hello from p3".to_string(),
+                "DELETE" => "gone".to_string(),
+                _ => format!("len:{}", body.len()),
+            };
+            let mut c = r.into_inner();
+            let _ = write!(
+                c,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                resp.len(),
+                resp
+            );
+        }
+    });
+    addr
+}
+
+/// Run a p3 component with the http feature mounted, under a watchdog:
+/// a scheduler regression is a deadlock, and it must fail the test in
+/// two minutes, not hang the suite.
+fn run_p3_http(module: &Path) -> Option<(String, String, i32)> {
+    let mut child = Command::new("wasmtime")
+        .args([
+            "run",
+            "-W",
+            "component-model-async=y,component-model-more-async-builtins=y",
+            "-S",
+            "p3=y",
+            "-S",
+            "http=y",
+            module.to_str().unwrap(),
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn wasmtime");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    loop {
+        match child.try_wait().expect("try_wait") {
+            Some(_) => break,
+            None if std::time::Instant::now() > deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("p3 http component deadlocked (120s watchdog) — the async-lowered exchange regressed into a sync rendezvous");
+            }
+            None => std::thread::sleep(std::time::Duration::from_millis(50)),
+        }
+    }
+    let out = child.wait_with_output().expect("wait wasmtime");
+    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+    if !out.status.success()
+        && (stderr.contains("unexpected argument")
+            || stderr.contains("unknown")
+            || stderr.contains("requires the component model"))
+    {
+        eprintln!("skipping p3 http execution: this wasmtime lacks the p3 http feature set");
+        return None;
+    }
+    Some((
+        String::from_utf8_lossy(&out.stdout).to_string(),
+        stderr,
+        out.status.code().unwrap_or(-1),
+    ))
+}
+
+#[test]
+fn p3_component_speaks_http() {
+    let addr = spawn_http_echo();
+    // All five family members in program order; the PUT body is 2MiB —
+    // past the host's rendezvous buffer, the deadlock-class fixture.
+    let probe = format!(
+        r#"import http
+
+effect fn main() -> Unit = {{
+  match http.get("http://{addr}/hello") {{
+    ok(b) => println("get:${{b}}"),
+    err(e) => println("get-err:${{e}}"),
+  }}
+  match http.post("http://{addr}/echo", "tiny body") {{
+    ok(b) => println("post:${{b}}"),
+    err(e) => println("post-err:${{e}}"),
+  }}
+  let chunk = string.repeat("abcdefgh", 32768)
+  let body = chunk + chunk + chunk + chunk + chunk + chunk + chunk + chunk
+  match http.put("http://{addr}/echo", body) {{
+    ok(b) => println("put:${{b}}"),
+    err(e) => println("put-err:${{e}}"),
+  }}
+  match http.patch("http://{addr}/echo", "patch") {{
+    ok(b) => println("patch:${{b}}"),
+    err(e) => println("patch-err:${{e}}"),
+  }}
+  match http.delete("http://{addr}/gone") {{
+    ok(b) => println("del:${{b}}"),
+    err(e) => println("del-err:${{e}}"),
+  }}
+}}
+"#
+    );
+    let d = dir();
+    let src = d.join("http_probe.almd");
+    std::fs::write(&src, probe).expect("write probe");
+    let out = d.join("http_probe.p3.wasm");
+    build_p3(&src, &out);
+    if !wasmtime_available() {
+        eprintln!("skipping p3 http execution: wasmtime not installed");
+        return;
+    }
+    let Some((stdout, stderr, code)) = run_p3_http(&out) else {
+        return;
+    };
+    assert_eq!(code, 0, "p3 http probe exit code; stderr:\n{stderr}");
+    assert_eq!(
+        stdout,
+        "get:hello from p3\npost:len:9\nput:len:2097152\npatch:len:5\ndel:gone\n",
+        "p3 http probe stdout; stderr:\n{stderr}"
+    );
+}

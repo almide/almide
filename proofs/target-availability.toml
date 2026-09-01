@@ -99,13 +99,13 @@ issue = "#1423"
 [[unavailable]]
 fn = "http.delete"
 legs = ["stock-p1"]
-reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --target wasm` answers identically to native (C-328); the stock artifact refuses at build via the op audit until the p2/p3 component port"
+reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --target wasm` answers identically to native (C-328), and the ALMIDE_COMPONENT_P3 component serves the family over wasi:http@0.3 (#1710 PR B, `-S http=y`); the DEFAULT stock artifact still refuses at build via the op audit"
 issue = "#1423"
 
 [[unavailable]]
 fn = "http.get"
 legs = ["stock-p1"]
-reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --target wasm` answers identically to native (C-328); the stock artifact refuses at build via the op audit until the p2/p3 component port"
+reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --target wasm` answers identically to native (C-328), and the ALMIDE_COMPONENT_P3 component serves the family over wasi:http@0.3 (#1710 PR B, `-S http=y`); the DEFAULT stock artifact still refuses at build via the op audit"
 issue = "#1423"
 
 [[unavailable]]
@@ -127,19 +127,19 @@ issue = "#1423"
 [[unavailable]]
 fn = "http.patch"
 legs = ["stock-p1"]
-reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --target wasm` answers identically to native (C-328); the stock artifact refuses at build via the op audit until the p2/p3 component port"
+reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --target wasm` answers identically to native (C-328), and the ALMIDE_COMPONENT_P3 component serves the family over wasi:http@0.3 (#1710 PR B, `-S http=y`); the DEFAULT stock artifact still refuses at build via the op audit"
 issue = "#1423"
 
 [[unavailable]]
 fn = "http.post"
 legs = ["stock-p1"]
-reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --target wasm` answers identically to native (C-328); the stock artifact refuses at build via the op audit until the p2/p3 component port"
+reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --target wasm` answers identically to native (C-328), and the ALMIDE_COMPONENT_P3 component serves the family over wasi:http@0.3 (#1710 PR B, `-S http=y`); the DEFAULT stock artifact still refuses at build via the op audit"
 issue = "#1423"
 
 [[unavailable]]
 fn = "http.put"
 legs = ["stock-p1"]
-reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --target wasm` answers identically to native (C-328); the stock artifact refuses at build via the op audit until the p2/p3 component port"
+reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --target wasm` answers identically to native (C-328), and the ALMIDE_COMPONENT_P3 component serves the family over wasi:http@0.3 (#1710 PR B, `-S http=y`); the DEFAULT stock artifact still refuses at build via the op audit"
 issue = "#1423"
 
 [[unavailable]]

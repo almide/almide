@@ -34,8 +34,9 @@ crate_major = 47
 ci = "v47.0.3"
 # The flag surface the p3 execution legs pass (47.x): -S p3=y alone
 # refuses sync stream builtins — the 🚝 more-async-builtins gate is
-# load-bearing.
-flags = "-W component-model-async=y,component-model-more-async-builtins=y -S p3=y"
+# load-bearing. -S http=y mounts wasi:http@0.3 for the client leg
+# (#1710 PR B); components that import it refuse to link without it.
+flags = "-W component-model-async=y,component-model-more-async-builtins=y -S p3=y -S http=y"
 
 [wasm-tools]
 # The lockstep family version (workspace Cargo pins). 0.258 is the
