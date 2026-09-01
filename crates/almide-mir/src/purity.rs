@@ -363,6 +363,25 @@ fn is_pure_fn_in_impure_module(module: &str, func: &str) -> bool {
         // host's `$TMPDIR` claim (the Go/Python WASI convention) — an env
         // read is a capability, admitted the same way env.get is.
         "env" => matches!(func, "os"),
+        // The whole zlib surface is a DETERMINISTIC data transform of its
+        // input bytes (#1700): the self-host bodies (stdlib/zlib_inflate.almd
+        // / zlib_deflate.almd) reach no host capability, and the `effect fn`
+        // spelling is the Result carrier, not an effect. Same admission class
+        // as http's pure codecs below — enumerated, so a future zlib fn with
+        // a real capability does not ride in silently.
+        "zlib" => matches!(
+            func,
+            "compress"
+                | "compress_level"
+                | "decompress"
+                | "deflate"
+                | "deflate_level"
+                | "inflate"
+                | "gzip"
+                | "gunzip"
+                | "crc32"
+                | "adler32"
+        ),
         // Pure data codecs on the blanket-impure http module (the network fns stay
         // walled): url_decode is a percent-decoder (stdlib/http_url_decode.almd).
         "http" => matches!(

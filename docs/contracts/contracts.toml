@@ -4237,3 +4237,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/env_set_overlay.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-330"
+spec      = "ALS-R5"
+title     = "zlib is self-hosted on wasm: decoding is byte-identical, encoding is round-trip-exact with leg-dependent bytes"
+statement = "`import zlib` builds and runs on the wasm legs (#1700): the C-326 gzip decoder, promoted to stdlib, serves `zlib.gunzip` / `zlib.inflate` / `zlib.decompress` (gzip members + crc32/ISIZE, raw DEFLATE, zlib header + adler32), and a stored-block encoder serves `zlib.gzip` / `zlib.deflate[_level]` / `zlib.compress[_level]`. DECODING is byte-identical across legs by construction — DEFLATE decoding is exact, so a native-flate2-encoded stream (dynamic Huffman included) decodes to the same bytes everywhere; the fixture pins three flate2-produced known-answer vectors. COMPRESSED BYTES ARE LEG-DEPENDENT BY DESIGN: native keeps the flate2 intrinsics (real LZ77 ratios), the wasm legs emit stored blocks (valid DEFLATE, no shrink; ~5 bytes framing per 65535-byte chunk) — a bounded divergence in the C-189 class, declared here and pinned by ROUND TRIP (`decompress(compress(x)) == x` on every leg), never by encoded bytes. The `_level` twins accept and ignore the level on wasm (stored blocks have no dial). `zlib.crc32` / `zlib.adler32` are pure Almide on every target — known answers, no intrinsic."
+since     = "0.61.2"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/zlib_selfhost.almd", class = "fixture" },
+]

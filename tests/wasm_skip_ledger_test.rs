@@ -51,10 +51,9 @@ const GENUINE_SKIPS: &[(&str, SkipReason)] = &[
     ("spec/stdlib/process_exec_status_test.almd", SkipReason::NativeOnlyApi),
     // `http.serve` binds a TCP listener.
     ("spec/lang/effect_intrinsic_tail_test.almd", SkipReason::NativeOnlyApi),
-    // zlib is `@intrinsic`-only — the bodies live in `runtime/rs/src/zlib.rs`.
-    // Lifting this skip means implementing DEFLATE in Almide, not widening the
-    // lowering subset.
-    ("spec/stdlib/zlib_test.almd", SkipReason::NativeOnlyApi),
+    // (zlib row RETIRED 2026-09-01: #1700 implemented DEFLATE in Almide —
+    // the C-326 decoder promoted to stdlib plus a stored-block encoder —
+    // so the file runs the wasm leg for real.)
     // These assert a compile error and carry no test blocks.
     ("spec/integration/modules/vis_mod_error_test.almd", SkipReason::CompileErrorFixture),
     ("spec/integration/modules/vis_local_error_test.almd", SkipReason::CompileErrorFixture),

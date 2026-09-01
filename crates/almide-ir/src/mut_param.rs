@@ -87,15 +87,19 @@ pub fn lower_mut_params_move_mode(program: &mut IrProgram) -> bool {
 /// correctly); an arm that writes `p` some OTHER way (a nested branch
 /// write-back, a second mut param) declines the hoist and stays walled.
 fn hoist_branch_writebacks(program: &mut IrProgram) {
-    let vt = &mut program.var_table;
-    let mut h = WritebackHoister { vt };
-    for func in program.functions.iter_mut() {
-        h.visit_expr_mut(&mut func.body);
+    {
+        let mut h = WritebackHoister { vt: &mut program.var_table };
+        for func in program.functions.iter_mut() {
+            h.visit_expr_mut(&mut func.body);
+        }
+        for tl in &mut program.top_lets {
+            h.visit_expr_mut(&mut tl.value);
+        }
     }
-    for tl in &mut program.top_lets {
-        h.visit_expr_mut(&mut tl.value);
-    }
+    // Module bodies hoist against the MODULE's table — the program table's
+    // ids are a different namespace (the spliced-mut-param ICE, #1700).
     for m in &mut program.modules {
+        let mut h = WritebackHoister { vt: &mut m.var_table };
         for func in m.functions.iter_mut() {
             h.visit_expr_mut(&mut func.body);
         }
@@ -821,10 +825,15 @@ fn rewrite_signatures(program: &mut IrProgram, mut_fns: &MutFns) {
     for func in program.functions.iter_mut() {
         rewrite_one_signature(func, "", vt, mut_fns);
     }
+    // Module fns index their MODULE's table — allocating their writeback
+    // locals in the program table hands them VarIds past their own table's
+    // len (the spliced-mut-param ICE, #1700: zlib was the first registry
+    // module with `mut` params).
     for m in program.modules.iter_mut() {
         let scope = m.name.to_string();
+        let mvt = &mut m.var_table;
         for func in m.functions.iter_mut() {
-            rewrite_one_signature(func, &scope, vt, mut_fns);
+            rewrite_one_signature(func, &scope, mvt, mut_fns);
         }
     }
 }
@@ -926,16 +935,21 @@ fn unit_placeholder() -> IrExpr {
 /// a `b.items` field FieldAssigns it, and a temp (no named place) skips
 /// the writeback — native mutates an invisible temp there too.
 fn rewrite_call_sites(program: &mut IrProgram, mut_fns: &MutFns) {
-    let vt = &mut program.var_table;
-    let mut rw = CallSiteRewriter { mut_fns, vt, scope: String::new() };
-    for func in program.functions.iter_mut() {
-        rw.visit_expr_mut(&mut func.body);
+    {
+        let vt = &mut program.var_table;
+        let mut rw = CallSiteRewriter { mut_fns, vt, scope: String::new() };
+        for func in program.functions.iter_mut() {
+            rw.visit_expr_mut(&mut func.body);
+        }
+        for tl in &mut program.top_lets {
+            rw.visit_expr_mut(&mut tl.value);
+        }
     }
-    for tl in &mut program.top_lets {
-        rw.visit_expr_mut(&mut tl.value);
-    }
+    // Same table discipline as rewrite_signatures: module bodies allocate
+    // their call-site temporaries in the MODULE's table.
     for m in &mut program.modules {
-        rw.scope = m.name.to_string();
+        let mut rw =
+            CallSiteRewriter { mut_fns, vt: &mut m.var_table, scope: m.name.to_string() };
         for func in m.functions.iter_mut() {
             rw.visit_expr_mut(&mut func.body);
         }

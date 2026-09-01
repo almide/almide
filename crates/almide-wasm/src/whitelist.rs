@@ -189,6 +189,17 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     "http_get_header",
     // regex_engine.almd Option returners (same audit).
     "regex_find", "regex_captures",
+    // zlib_inflate.almd / zlib_deflate.almd (#1700, audited 2026-09-01):
+    // the C-326 gzip decoder promoted to stdlib plus the stored-block
+    // encoder. Every Result is built via language-level ok()/err(); the
+    // buffers are bytes.new/bytes.push/bytes.get_or (public surface — the
+    // exact construction the C-326 fixture already runs byte-identical on
+    // the structural leg); no prim access at all. Parity evidence:
+    // spec/wasm_cross/zlib_selfhost.almd (known-answer decode + round
+    // trips, C-330).
+    "zlib_gunzip", "zlib_inflate", "zlib_decompress",
+    "zlib_deflate", "zlib_deflate_level", "zlib_compress", "zlib_compress_level",
+    "zlib_gzip",
 ];
 
 /// The vendored-libm family (C-305): every body is a FAITHFUL

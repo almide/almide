@@ -1,0 +1,523 @@
+// zlib_inflate — SELF-HOSTED decompression half of `zlib` (#1700): raw DEFLATE
+// (`zlib.inflate`), the zlib container (`zlib.decompress`, header + adler32),
+// and gzip members (`zlib.gunzip`, header + crc32 + ISIZE) — the C-326 decoder
+// (spec/wasm_cross/gzip_inflate_members.almd) promoted to stdlib. Native keeps
+// the flate2 intrinsics as the oracle; DEFLATE decoding is exact, so success
+// outputs are byte-identical across legs by construction. Error TEXTS name the
+// entry point and the failure the way the decoder saw it (flate2's io wording
+// is not reproduced — the cross-target promise is bounded to success bytes and
+// the err/ok SPLIT, C-330).
+// (value, pos, buf, cnt)
+fn zli_bits(pos: Int, buf: Int, cnt: Int, inp: Bytes, need: Int) -> (Int, Int, Int, Int) = {
+  var p = pos
+  var b = buf
+  var c = cnt
+  while c < need {
+    b = int.bor(b, int.bshl(bytes.get_or(inp, p, 0), c))
+    p = p + 1
+    c = c + 8
+  }
+  (int.band(b, int.bshl(1, need) - 1), p, int.bshr(b, need), c - need)
+}
+
+// Huffman table packed in one list: [0..16) = count per length, [16..) = symbols by code.
+fn zli_construct(lengths: List[Int], n: Int) -> List[Int] = {
+  var count = list.repeat(0, 16)
+  var i = 0
+  while i < n {
+    count[lengths[i]] = count[lengths[i]] + 1
+    i = i + 1
+  }
+  var offs = list.repeat(0, 16)
+  var len = 1
+  while len < 15 {
+    offs[len + 1] = offs[len] + count[len]
+    len = len + 1
+  }
+  var symbol = list.repeat(0, n)
+  i = 0
+  while i < n {
+    if lengths[i] != 0 then {
+      symbol[offs[lengths[i]]] = i
+      offs[lengths[i]] = offs[lengths[i]] + 1
+    } else ()
+    i = i + 1
+  }
+  count + symbol
+}
+
+// (symbol or -1, pos, buf, cnt)
+fn zli_decode(pos: Int, buf: Int, cnt: Int, inp: Bytes, h: List[Int]) -> (Int, Int, Int, Int) = {
+  var p = pos
+  var b = buf
+  var c = cnt
+  var code = 0
+  var first = 0
+  var index = 0
+  var len = 1
+  var result = 0 - 1
+  while len <= 15 and result < 0 {
+    let (bit, p2, b2, c2) = zli_bits(p, b, c, inp, 1)
+    p = p2
+    b = b2
+    c = c2
+    code = int.bor(code, bit)
+    let cnt_len = h[len]
+    if code - cnt_len < first then {
+      result = h[16 + index + (code - first)]
+    } else {
+      index = index + cnt_len
+      first = int.bshl(first + cnt_len, 1)
+      code = int.bshl(code, 1)
+      len = len + 1
+    }
+  }
+  (result, p, b, c)
+}
+
+fn zli_lbase() -> List[Int] = [
+  3,
+  4,
+  5,
+  6,
+  7,
+  8,
+  9,
+  10,
+  11,
+  13,
+  15,
+  17,
+  19,
+  23,
+  27,
+  31,
+  35,
+  43,
+  51,
+  59,
+  67,
+  83,
+  99,
+  115,
+  131,
+  163,
+  195,
+  227,
+  258
+]
+
+fn zli_lext() -> List[Int] = [
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  1,
+  1,
+  1,
+  1,
+  2,
+  2,
+  2,
+  2,
+  3,
+  3,
+  3,
+  3,
+  4,
+  4,
+  4,
+  4,
+  5,
+  5,
+  5,
+  5,
+  0
+]
+
+fn zli_dbase() -> List[Int] = [
+  1,
+  2,
+  3,
+  4,
+  5,
+  7,
+  9,
+  13,
+  17,
+  25,
+  33,
+  49,
+  65,
+  97,
+  129,
+  193,
+  257,
+  385,
+  513,
+  769,
+  1025,
+  1537,
+  2049,
+  3073,
+  4097,
+  6145,
+  8193,
+  12289,
+  16385,
+  24577
+]
+
+fn zli_dext() -> List[Int] = [
+  0,
+  0,
+  0,
+  0,
+  1,
+  1,
+  2,
+  2,
+  3,
+  3,
+  4,
+  4,
+  5,
+  5,
+  6,
+  6,
+  7,
+  7,
+  8,
+  8,
+  9,
+  9,
+  10,
+  10,
+  11,
+  11,
+  12,
+  12,
+  13,
+  13
+]
+
+fn zli_sym_kind(sym: Int) -> Int = if sym < 0 then 0
+else if sym < 256 then 1
+else if sym == 256 then 2
+else if sym - 257 >= 29 then 0 else 3
+
+fn zli_len_kind(sym: Int) -> Int = if sym < 0 then 0
+else if sym < 16 then 1
+else if sym == 16 then 2
+else if sym == 17 then 3 else 4
+
+// (status, pos, buf, cnt)
+fn zli_codes(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes, lencode: List[Int], distcode: List[Int]) -> (Int, Int, Int, Int) = {
+  let lbase = zli_lbase()
+  let lext = zli_lext()
+  let dbase = zli_dbase()
+  let dext = zli_dext()
+  var p = pos
+  var b = buf
+  var c = cnt
+  var status = 0
+  var running = true
+  while running {
+    let (sym, p2, b2, c2) = zli_decode(p, b, c, inp, lencode)
+    p = p2
+    b = b2
+    c = c2
+    let sk = zli_sym_kind(sym)
+    var clen = 0
+    var dist = 1
+    match int.band(sk, 3) {
+      0 => {
+        status = 0 - 1
+        running = false
+      },
+      1 => { bytes.push(out, sym) },
+      2 => {
+        running = false
+      },
+      _ => {
+        let li = sym - 257
+        let (eb, p3, b3, c3) = zli_bits(p, b, c, inp, lext[li])
+        let (ds, p4, b4, c4) = zli_decode(p3, b3, c3, inp, distcode)
+        let dsc = if ds < 0 or ds >= 30 then 0 else ds
+        let (db, p5, b5, c5) = zli_bits(p4, b4, c4, inp, dext[dsc])
+        p = p5
+        b = b5
+        c = c5
+        let bad = if ds < 0 or ds >= 30 then 1 else 0
+        status = 0 - bad
+        running = bad == 0
+        clen = if bad == 1 then 0 else lbase[li] + eb
+        dist = dbase[dsc] + db
+      },
+    }
+    var k = 0
+    while k < clen {
+      bytes.push(out, bytes.get_or(out, bytes.len(out) - dist, 0))
+      k = k + 1
+    }
+  }
+  (status, p, b, c)
+}
+
+fn zli_fixed_lit() -> List[Int] = {
+  var lengths = list.repeat(8, 288)
+  var i = 144
+  while i < 256 {
+    lengths[i] = 9
+    i = i + 1
+  }
+  i = 256
+  while i < 280 {
+    lengths[i] = 7
+    i = i + 1
+  }
+  zli_construct(lengths, 288)
+}
+
+// Read the HLIT+HDIST code lengths (with 16/17/18 repeats). Returns (status, pos, buf, cnt, lengths).
+fn zli_read_lengths(pos: Int, buf: Int, cnt: Int, inp: Bytes, lencode: List[Int], total: Int) -> (Int, Int, Int, Int, List[Int]) = {
+  var p = pos
+  var b = buf
+  var c = cnt
+  var lengths = list.repeat(0, 320)
+  var i = 0
+  var status = 0
+  while i < total and status == 0 {
+    let (sym, p2, b2, c2) = zli_decode(p, b, c, inp, lencode)
+    p = p2
+    b = b2
+    c = c2
+    let lk = zli_len_kind(sym)
+    let need = if lk == 2 then 2
+    else if lk == 3 then 3
+    else if lk == 4 then 7 else 0
+    let (extra, p3, b3, c3) = zli_bits(p, b, c, inp, need)
+    p = p3
+    b = b3
+    c = c3
+    let val = if lk == 1 then sym
+    else if lk == 2 and i > 0 then lengths[i - 1] else 0
+    let rep0 = if lk == 1 then 1
+    else if lk == 2 or lk == 3 then 3 + extra
+    else if lk == 4 then 11 + extra else 0
+    let bad = if lk == 0 or (lk == 2 and i == 0) or i + rep0 > total then 1 else 0
+    status = 0 - bad
+    var rep = if bad == 1 then 0 else rep0
+    while rep > 0 {
+      lengths[i] = val
+      i = i + 1
+      rep = rep - 1
+    }
+  }
+  (status, p, b, c, if status != 0 then list.repeat(0, 320) else lengths)
+}
+
+// (status, pos, buf, cnt)
+fn zli_dynamic(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes) -> (Int, Int, Int, Int) = {
+  let order = [
+    16,
+    17,
+    18,
+    0,
+    8,
+    7,
+    9,
+    6,
+    10,
+    5,
+    11,
+    4,
+    12,
+    3,
+    13,
+    2,
+    14,
+    1,
+    15
+  ]
+  let (nlit, p1, b1, c1) = zli_bits(pos, buf, cnt, inp, 5)
+  let (ndist, p2, b2, c2) = zli_bits(p1, b1, c1, inp, 5)
+  let (ncode, p3, b3, c3) = zli_bits(p2, b2, c2, inp, 4)
+  let nlen = nlit + 257
+  let ndis = ndist + 1
+  var p = p3
+  var b = b3
+  var c = c3
+  var cl = list.repeat(0, 19)
+  var i = 0
+  while i < ncode + 4 {
+    let (v, p4, b4, c4) = zli_bits(p, b, c, inp, 3)
+    p = p4
+    b = b4
+    c = c4
+    cl[order[i]] = v
+    i = i + 1
+  }
+  let lencode = zli_construct(cl, 19)
+  let (status, p5, b5, c5, lengths) = zli_read_lengths(p, b, c, inp, lencode, nlen + ndis)
+  let (s2, p6, b6, c6) = zli_codes(p5, b5, c5, inp, out, zli_construct(lengths, nlen), zli_construct(list.slice(lengths, nlen, nlen + ndis), ndis))
+  (if status != 0 then status else s2, p6, b6, c6)
+}
+
+// (status, pos, 0, 0) — stored blocks are byte-aligned
+fn zli_stored(pos: Int, inp: Bytes, mut out: Bytes) -> (Int, Int, Int, Int) = {
+  let len = int.bor(bytes.get_or(inp, pos, 0), int.bshl(bytes.get_or(inp, pos + 1, 0), 8))
+  let nlen = int.bor(bytes.get_or(inp, pos + 2, 0), int.bshl(bytes.get_or(inp, pos + 3, 0), 8))
+  let start = pos + 4
+  let bad = if int.bxor(len, nlen) != 65535 or start + len > bytes.len(inp) then 1 else 0
+  let n = if bad == 1 then 0 else len
+  var k = 0
+  while k < n {
+    bytes.push(out, bytes.get_or(inp, start + k, 0))
+    k = k + 1
+  }
+  (0 - bad, start + n, 0, 0)
+}
+
+// Inflate one DEFLATE stream starting at byte `pos`; returns (status, pos of the first byte after it).
+fn zli_inflate_stream(pos: Int, inp: Bytes, mut out: Bytes) -> (Int, Int) = {
+  let flit = zli_fixed_lit()
+  let fdist = zli_construct(list.repeat(5, 30), 30)
+  var p = pos
+  var b = 0
+  var c = 0
+  var last = 0
+  var status = 0
+  while last == 0 and status == 0 {
+    let (l, p1, b1, c1) = zli_bits(p, b, c, inp, 1)
+    let (kind, p2, b2, c2) = zli_bits(p1, b1, c1, inp, 2)
+    last = l
+    let (s, p3, b3, c3) = match int.band(kind, 3) {
+      0 => zli_stored(p2, inp, out),
+      1 => zli_codes(p2, b2, c2, inp, out, flit, fdist),
+      2 => zli_dynamic(p2, b2, c2, inp, out),
+      _ => (0 - 1, p2, b2, c2),
+    }
+    status = s
+    p = p3
+    b = b3
+    c = c3
+  }
+  (status, p)
+}
+
+fn zli_crc_table() -> List[Int] = {
+  var t = list.repeat(0, 256)
+  var n = 0
+  while n < 256 {
+    var cc = n
+    var k = 0
+    while k < 8 {
+      cc = if int.band(cc, 1) == 1 then int.bxor(3988292384, int.bshr(cc, 1)) else int.bshr(cc, 1)
+      k = k + 1
+    }
+    t[n] = cc
+    n = n + 1
+  }
+  t
+}
+
+fn zli_crc32_from(t: List[Int], b: Bytes, start: Int) -> Int = {
+  var cc = 4294967295
+  var i = start
+  let n = bytes.len(b)
+  while i < n {
+    cc = int.bxor(t[int.band(int.bxor(cc, bytes.get_or(b, i, 0)), 255)], int.bshr(cc, 8))
+    i = i + 1
+  }
+  int.bxor(cc, 4294967295)
+}
+
+// Adler-32 over b[start..) — s1/s2 mod 65521, (s2 << 16) | s1.
+fn zli_adler32_from(b: Bytes, start: Int) -> Int = {
+  var s1 = 1
+  var s2 = 0
+  var i = start
+  let n = bytes.len(b)
+  while i < n {
+    s1 = (s1 + bytes.get_or(b, i, 0)) % 65521
+    s2 = (s2 + s1) % 65521
+    i = i + 1
+  }
+  int.bor(int.bshl(s2, 16), s1)
+}
+
+fn zli_u32_le(b: Bytes, p: Int) -> Int = int.bor(int.bor(bytes.get_or(b, p, 0), int.bshl(bytes.get_or(b, p + 1, 0), 8)), int.bor(int.bshl(bytes.get_or(b, p + 2, 0), 16), int.bshl(bytes.get_or(b, p + 3, 0), 24)))
+
+fn zli_skip_zstr(b: Bytes, p: Int) -> Int = if bytes.get_or(b, p, 0) == 0 then p + 1 else zli_skip_zstr(b, p + 1)
+
+// Position of the deflate stream after the gzip member header at `pos`, or -1 if not a gzip member.
+fn zli_header_end(inp: Bytes, pos: Int) -> Int = {
+  if bytes.get_or(inp, pos, 0) != 31 or bytes.get_or(inp, pos + 1, 0) != 139 or bytes.get_or(inp, pos + 2, 0) != 8 then 0 - 1
+  else {
+    let flg = bytes.get_or(inp, pos + 3, 0)
+    let p0 = pos + 10
+    let p1 = if int.band(flg, 4) != 0 then p0 + 2 + int.bor(bytes.get_or(inp, p0, 0), int.bshl(bytes.get_or(inp, p0 + 1, 0), 8))
+    else p0
+    let p2 = if int.band(flg, 8) != 0 then zli_skip_zstr(inp, p1) else p1
+    let p3 = if int.band(flg, 16) != 0 then zli_skip_zstr(inp, p2) else p2
+    if int.band(flg, 2) != 0 then p3 + 2 else p3
+  }
+}
+
+// gzip members back to back; returns 0 on success, else 1=not gzip,
+// 2=corrupt deflate, 3=crc mismatch, 4=size mismatch.
+fn zli_gunzip_members(inp: Bytes, mut out: Bytes) -> Int = {
+  let t = zli_crc_table()
+  var pos = 0
+  var code = 0
+  while pos < bytes.len(inp) and code == 0 {
+    let start = zli_header_end(inp, pos)
+    let member_start = bytes.len(out)
+    let (status, after) = zli_inflate_stream(if start < 0 then pos else start, inp, out)
+    let stored_crc = zli_u32_le(inp, after)
+    let isize = zli_u32_le(inp, after + 4)
+    pos = after + 8
+    code = if start < 0 then 1
+    else if status != 0 then 2
+    else if zli_crc32_from(t, out, member_start) != stored_crc then 3
+    else if int.band(bytes.len(out) - member_start, 4294967295) != isize then 4 else 0
+  }
+  code
+}
+
+fn zli_gunzip_error(code: Int) -> String = if code == 1 then "not gzip"
+else if code == 2 then "corrupt deflate stream"
+else if code == 3 then "crc mismatch" else "size mismatch"
+
+// ── The stdlib entry points ──
+effect fn zlib_gunzip(data: Bytes) -> Result[Bytes, String] = {
+  var out = bytes.new(0)
+  let code = zli_gunzip_members(data, out)
+  if code == 0 then ok(out)
+  else err("zlib.gunzip: ${zli_gunzip_error(code)}")
+}
+
+effect fn zlib_inflate(data: Bytes) -> Result[Bytes, String] = {
+  var out = bytes.new(0)
+  let (status, _after) = zli_inflate_stream(0, data, out)
+  if status == 0 then ok(out) else err("zlib.inflate: corrupt deflate stream")
+}
+
+effect fn zlib_decompress(data: Bytes) -> Result[Bytes, String] = {
+  let cmf = bytes.get_or(data, 0, 0)
+  let flg = bytes.get_or(data, 1, 0)
+  if bytes.len(data) < 6 or int.band(cmf, 15) != 8 or (cmf * 256 + flg) % 31 != 0 then err("zlib.decompress: not a zlib stream")
+  else if int.band(flg, 32) != 0 then err("zlib.decompress: preset dictionary unsupported")
+  else {
+    var out = bytes.new(0)
+    let (status, after) = zli_inflate_stream(2, data, out)
+    let stored = int.bor(int.bshl(bytes.get_or(data, after, 0), 24), int.bor(int.bshl(bytes.get_or(data, after + 1, 0), 16), int.bor(int.bshl(bytes.get_or(data, after + 2, 0), 8), bytes.get_or(data, after + 3, 0))))
+    if status != 0 then err("zlib.decompress: corrupt deflate stream")
+    else if zli_adler32_from(out, 0) != stored then err("zlib.decompress: adler32 mismatch") else ok(out)
+  }
+}

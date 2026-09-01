@@ -1,0 +1,131 @@
+// zlib_deflate — SELF-HOSTED compression half of `zlib` (#1700): STORED-block
+// DEFLATE (`zlib.deflate`), the zlib container (`zlib.compress`, header +
+// adler32), and gzip (`zlib.gzip`, header + crc32 + ISIZE). Stored blocks are
+// valid DEFLATE that any inflater reads back exactly; they do not shrink data
+// (5 bytes of framing per <=65535-byte chunk), which is the honest floor the
+// wasm legs ship until a level-aware LZ77 lands. Native keeps the flate2
+// intrinsics, so COMPRESSED BYTES ARE LEG-DEPENDENT BY DESIGN — the bounded
+// divergence C-330 declares; the cross-target promise is the round trip
+// (decompress(compress(x)) == x on every leg) and the container framing.
+// The `level` twins clamp and IGNORE the level (stored blocks have no dial).
+// Raw DEFLATE from stored blocks: <=65535-byte chunks, BFINAL on the last.
+fn zld_stored_stream(data: Bytes, mut out: Bytes) -> Unit = {
+  let n = bytes.len(data)
+  var pos = 0
+  var done = false
+  while done == false {
+    let remain = n - pos
+    let take = if remain > 65535 then 65535 else remain
+    let final = if pos + take >= n then 1 else 0
+    bytes.push(out, final)
+    let nlen = int.bxor(take, 65535)
+    bytes.push(out, int.band(take, 255))
+    bytes.push(out, int.band(int.bshr(take, 8), 255))
+    bytes.push(out, int.band(nlen, 255))
+    bytes.push(out, int.band(int.bshr(nlen, 8), 255))
+    var k = 0
+    while k < take {
+      bytes.push(out, bytes.get_or(data, pos + k, 0))
+      k = k + 1
+    }
+    pos = pos + take
+    done = final == 1
+  }
+}
+
+fn zld_crc_table() -> List[Int] = {
+  var t = list.repeat(0, 256)
+  var n = 0
+  while n < 256 {
+    var cc = n
+    var k = 0
+    while k < 8 {
+      cc = if int.band(cc, 1) == 1 then int.bxor(3988292384, int.bshr(cc, 1)) else int.bshr(cc, 1)
+      k = k + 1
+    }
+    t[n] = cc
+    n = n + 1
+  }
+  t
+}
+
+fn zld_crc32(b: Bytes) -> Int = {
+  let t = zld_crc_table()
+  var cc = 4294967295
+  var i = 0
+  let n = bytes.len(b)
+  while i < n {
+    cc = int.bxor(t[int.band(int.bxor(cc, bytes.get_or(b, i, 0)), 255)], int.bshr(cc, 8))
+    i = i + 1
+  }
+  int.bxor(cc, 4294967295)
+}
+
+fn zld_adler32(b: Bytes) -> Int = {
+  var s1 = 1
+  var s2 = 0
+  var i = 0
+  let n = bytes.len(b)
+  while i < n {
+    s1 = (s1 + bytes.get_or(b, i, 0)) % 65521
+    s2 = (s2 + s1) % 65521
+    i = i + 1
+  }
+  int.bor(int.bshl(s2, 16), s1)
+}
+
+// ── The stdlib entry points ──
+effect fn zlib_deflate(data: Bytes) -> Result[Bytes, String] = {
+  var out = bytes.new(0)
+  zld_stored_stream(data, out)
+  ok(out)
+}
+
+effect fn zlib_deflate_level(data: Bytes, level: Int) -> Result[Bytes, String] = {
+  let _ = level
+  zlib_deflate(data)!
+}
+
+effect fn zlib_compress(data: Bytes) -> Result[Bytes, String] = {
+  var out = bytes.new(0)
+  bytes.push(out, 120)
+  bytes.push(out, 1)
+  zld_stored_stream(data, out)
+  let a = zld_adler32(data)
+  bytes.push(out, int.band(int.bshr(a, 24), 255))
+  bytes.push(out, int.band(int.bshr(a, 16), 255))
+  bytes.push(out, int.band(int.bshr(a, 8), 255))
+  bytes.push(out, int.band(a, 255))
+  ok(out)
+}
+
+effect fn zlib_compress_level(data: Bytes, level: Int) -> Result[Bytes, String] = {
+  let _ = level
+  zlib_compress(data)!
+}
+
+effect fn zlib_gzip(data: Bytes) -> Result[Bytes, String] = {
+  var out = bytes.new(0)
+  bytes.push(out, 31)
+  bytes.push(out, 139)
+  bytes.push(out, 8)
+  bytes.push(out, 0)
+  bytes.push(out, 0)
+  bytes.push(out, 0)
+  bytes.push(out, 0)
+  bytes.push(out, 0)
+  bytes.push(out, 0)
+  bytes.push(out, 255)
+  zld_stored_stream(data, out)
+  let crc = zld_crc32(data)
+  bytes.push(out, int.band(crc, 255))
+  bytes.push(out, int.band(int.bshr(crc, 8), 255))
+  bytes.push(out, int.band(int.bshr(crc, 16), 255))
+  bytes.push(out, int.band(int.bshr(crc, 24), 255))
+  let isize = int.band(bytes.len(data), 4294967295)
+  bytes.push(out, int.band(isize, 255))
+  bytes.push(out, int.band(int.bshr(isize, 8), 255))
+  bytes.push(out, int.band(int.bshr(isize, 16), 255))
+  bytes.push(out, int.band(int.bshr(isize, 24), 255))
+  ok(out)
+}
