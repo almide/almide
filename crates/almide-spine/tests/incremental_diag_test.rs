@@ -23,7 +23,7 @@ use std::sync::atomic::Ordering;
 fn fresh(text: &str) -> CheckOutput {
     let db = SpineDb::default();
     let f = SourceFile::new(&db, "scenario.almd".to_string(), text.to_string());
-    check_file_json_v3(&db, f)
+    check_file_json_v3(&db, f).clone()
 }
 
 /// Run one edit script: apply each step to a persistent db (with an
@@ -44,7 +44,7 @@ fn run_scenario(name: &str, steps: &[&str]) {
             file.set_text(&mut db).to(text.to_string());
         }
         FILE_CHECK_EXECUTIONS.store(0, Ordering::Relaxed);
-        let inc = check_file_json_v3(&db, file);
+        let inc = check_file_json_v3(&db, file).clone();
         let ran = FILE_CHECK_EXECUTIONS.load(Ordering::Relaxed);
         // Memoization witness: the edited file re-checks (k>0), the neighbor
         // never does.
