@@ -120,8 +120,10 @@ fn frames(names: &[String]) -> Vec<u8> {
 /// CHAR-count lengths (string.len semantics — the guest counts chars,
 /// so this parser walks chars, not bytes), `<len>\n<payload>` cells:
 /// method, body, then key/value pairs until the frame ends.
-fn parse_http_frame(frame: &str) -> Result<(String, String, Vec<(String, String)>), String> {
-    fn cell<'a>(rest: &'a str) -> Result<(String, &'a str), String> {
+type HttpFrame = (String, String, Vec<(String, String)>);
+
+fn parse_http_frame(frame: &str) -> Result<HttpFrame, String> {
+    fn cell(rest: &str) -> Result<(String, &str), String> {
         let nl = rest.find('\n').ok_or_else(|| "malformed http frame (missing length)".to_string())?;
         let n: usize = rest[..nl].parse().map_err(|_| "malformed http frame (bad length)".to_string())?;
         let tail = &rest[nl + 1..];
