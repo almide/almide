@@ -68,7 +68,10 @@ fn spec_corpus_ast_matches_oracle_hashes() {
             .unwrap_or_else(|e| panic!("{rel}: oracle parsed this but greenfield failed: {e}"));
         assert!(parser.errors.is_empty(), "{rel}: oracle emitted AST but greenfield has parse errors: {:?}", parser.errors[0]);
         let json = serde_json::to_string_pretty(&prog).unwrap();
-        let got = format!("{:x}", Sha256::digest(format!("{json}\n").as_bytes()));
+        let got = Sha256::digest(format!("{json}\n").as_bytes())
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>();
         if got != *want {
             mismatches.push(rel.clone());
         }
