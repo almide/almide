@@ -147,3 +147,9 @@ spec/wasm_cross/env_sleep_pause.almd :: main
 # matrix. Retires when the p3 client leg ships the ops on stock artifacts
 # (#1710 increment 2 / #1716).
 spec/embedded_cross/http_client_errs.almd :: main
+# (2026-09-01, C-329/#1716) env.set has no seat in the incumbent brick; the
+# STRUCTURAL leg serves the overlay (embedded op 37/26, p1 shim overlay log +
+# real-environ fallthrough), so the env-overlay fixture lowers there and on
+# every execution sweep. Same division as the C-326/C-327 rows; prunes with
+# #1696 steps 4-5.
+spec/wasm_cross/env_set_overlay.almd :: main

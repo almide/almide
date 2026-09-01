@@ -35,6 +35,9 @@ struct Host {
     /// The stdin stream (op 31 drains it — the guest caps counts on its
     /// side); tests run with a fixed buffer, the runner reads lazily.
     stdin: Arc<Mutex<StdinSource>>,
+    /// Program args for op 29 (#1716): framed as [argv0, args...] — the
+    /// guest's args arm skips the first frame, matching native argv[1..].
+    args: Vec<String>,
     /// Linear-memory budget (heap-budget gates); unlimited by default.
     limits: wasmtime::StoreLimits,
 }
@@ -379,8 +382,9 @@ fn fs_dispatch_host(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
         }
         27 => ok_text(std::env::consts::OS.to_string()),
         28 => ok_text(std::env::temp_dir().to_string_lossy().replace('\\', "/")),
-        // args: [argv0] — a non-empty program path on both legs; the
-        // fixtures only observe len + non-emptiness.
+        // args without a run context (#1716): [argv0] only — the fs_call
+        // closure answers op 29 with the run's real args before dispatch
+        // reaches here, so this arm is the no-Host fallback.
         29 => {
             let buf = frames(&["wasm-harness".to_string()]);
             (pack(0, buf.len()), buf)
@@ -479,7 +483,7 @@ pub fn run_wasm(bytes: &[u8]) -> anyhow::Result<RunResult> {
 
 /// Run with a fixed stdin buffer (tests; piped byte streams).
 pub fn run_wasm_with(bytes: &[u8], stdin: &[u8]) -> anyhow::Result<RunResult> {
-    run_wasm_src(bytes, StdinSource::Buf(stdin.to_vec()), None)
+    run_wasm_src(bytes, StdinSource::Buf(stdin.to_vec()), None, &[])
 }
 
 /// Run under a hard linear-memory budget (bytes). Growth past the cap
@@ -487,19 +491,26 @@ pub fn run_wasm_with(bytes: &[u8], stdin: &[u8]) -> anyhow::Result<RunResult> {
 /// "Error: out of memory" + exit 1 (C-197) — the heap-budget
 /// acceptance-gate observable (W-8; the RC arc's floor).
 pub fn run_wasm_capped(bytes: &[u8], max_memory_bytes: usize) -> anyhow::Result<RunResult> {
-    run_wasm_src(bytes, StdinSource::Buf(Vec::new()), Some(max_memory_bytes))
+    run_wasm_src(bytes, StdinSource::Buf(Vec::new()), Some(max_memory_bytes), &[])
 }
 
 /// Run with the process's real stdin, read lazily on first guest read
 /// (the product runner — never blocks for programs that skip stdin).
 pub fn run_wasm_real_stdin(bytes: &[u8]) -> anyhow::Result<RunResult> {
-    run_wasm_src(bytes, StdinSource::RealOnce, None)
+    run_wasm_src(bytes, StdinSource::RealOnce, None, &[])
+}
+
+/// The product runner with program args (#1716): op 29 answers
+/// [argv0, args...] and the guest's frame walk skips argv0.
+pub fn run_wasm_real_stdin_args(bytes: &[u8], args: &[String]) -> anyhow::Result<RunResult> {
+    run_wasm_src(bytes, StdinSource::RealOnce, None, args)
 }
 
 fn run_wasm_src(
     bytes: &[u8],
     stdin: StdinSource,
     max_memory_bytes: Option<usize>,
+    args: &[String],
 ) -> anyhow::Result<RunResult> {
     wasmparser::validate(bytes)?; // the wall: never instantiate an invalid module
     // Epoch deadline: a fixture (or a MUTANT under the gate) that
@@ -526,6 +537,7 @@ fn run_wasm_src(
             exit: exit.clone(),
             fs_buf: fs_buf.clone(),
             stdin: stdin_buf.clone(),
+            args: args.to_vec(),
             limits,
         },
     );
@@ -583,6 +595,16 @@ fn run_wasm_src(
                 let ms = i64::from(a_len).max(0) as u64;
                 std::thread::sleep(std::time::Duration::from_millis(ms));
                 return Ok(0);
+            }
+            // op 29 = args (#1716): argv0 + the run's program args; the
+            // guest skips frame 0 (native argv[1..] semantics).
+            if op == 29 {
+                let mut names = vec!["wasm-harness".to_string()];
+                names.extend(caller.data().args.iter().cloned());
+                let buf = frames(&names);
+                let len = buf.len();
+                *caller.data().fs_buf.lock().expect("fs buf") = buf;
+                return Ok((len as i64) & 0xFFFF_FFFF);
             }
             let mem = caller
                 .get_export("memory")

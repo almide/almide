@@ -101,23 +101,36 @@ impl Emitter<'_> {
                 Some(STR)
             }
             ("env" | "process", "args", []) => {
+                // Frames arrive [argv0, args...] on every host (#1716):
+                // the embedded host names itself, a stock p1 runtime
+                // passes the module path. env.args is native argv[1..]
+                // (the FIRST frame drops — its fresh block frees);
+                // process.args is the FULL argv (C-096, argv0 kept).
+                let skip0 = module == "env";
                 self.fs_call_0(OP_ARGS)?;
                 let (hraw, hlen, _herr) = self.fs_frames_or_err()?;
                 let hlist = self.hold_i32()?;
+                let hfirst = self.hold_i32()?;
                 self.f.instructions().i32_const(0).call(F_ALLOC).local_set(hlist);
+                self.f.instructions().i32_const(i32::from(skip0)).local_set(hfirst);
                 self.fs_frames_foreach(hraw, hlen, |em| {
                     let hline = em.tmp_i32_local;
                     em.f.instructions().local_set(hline);
+                    em.f.instructions().local_get(hfirst).if_(BlockType::Empty);
+                    em.f.instructions().i32_const(0).local_set(hfirst);
+                    em.f.instructions().local_get(hline).call(F_DEC_FLAT);
+                    em.f.instructions().else_();
                     em.f
                         .instructions()
                         .local_get(hlist)
                         .local_get(hline)
                         .call(F_LIST_PUSH_4)
                         .local_set(hlist);
+                    em.f.instructions().end();
                     Ok(())
                 })?;
                 self.f.instructions().local_get(hlist);
-                for _ in 0..4 {
+                for _ in 0..5 {
                     self.release_i32();
                 }
                 Some(SliceTy::List(self.types.intern(STR)))

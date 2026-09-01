@@ -4215,3 +4215,14 @@ evidence  = [
   { path = "spec/embedded_cross/http_client_errs.almd", class = "fixture" },
 ]
 
+
+[[contract]]
+id        = "C-329"
+spec      = "ALS-R5"
+title     = "env.set is observed by env.get identically on every leg, and the p1 shim serves the environ/args ops"
+statement = "`env.set(k, v)` makes a later `env.get(k)` in the same process answer some(v) — last write wins, the empty-string value round-trips, and an unset name stays none — identically on native (process-level setenv semantics via the overlay), the embedded wasm lane (the op 37/26 overlay), and STOCK p1 artifacts (#1716): the to_wasi shim appends an overlay log page and serves op 37 (append) and op 26 (last-match scan, then a real-environ fallthrough via environ_sizes_get/environ_get), so a stock runtime's own environment is visible through the same env.get. The same change taught the shim op 29 (args frames from args_sizes_get/args_get, argv0 first) and the guest arm skips argv0 — `env.args()` answers argv[1..] on native, embedded (the run host forwards `--` args), and stock alike. The import count grew 5 -> 9, so the element section re-encodes through the remapping Reencoder — funcref tables shift with the imports (the #1688 class; the p2/p3 transforms carried this latent and are fixed by the same machinery)."
+since     = "0.61.2"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/env_set_overlay.almd", class = "fixture" },
+]

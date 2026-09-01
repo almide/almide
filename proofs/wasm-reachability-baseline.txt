@@ -37,7 +37,6 @@
 
 bytes.copy_to_ptr :: UNPROBEABLE :: parameter type outside the synthesizer
 bytes.from_raw_ptr :: UNPROBEABLE :: parameter type outside the synthesizer
-env.set :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call env.set needs a declared capability not in this brick
 fs.fold_lines_chunked :: UNPROBEABLE :: no candidate shape builds natively
 fs.fold_lines_range :: UNPROBEABLE :: no candidate shape builds natively
 http.anthropic_streaming_call :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.anthropic_streaming_call needs a declared capability not in this brick

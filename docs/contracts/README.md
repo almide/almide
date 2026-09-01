@@ -24,7 +24,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-328 contracts
+329 contracts
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
@@ -356,4 +356,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-326 | Branch-selected mut-fn calls hoist their write-back out of the arm: the gzip-inflate shape lowers structurally | 0.60.0 | active | fixture | 1 |
 | C-327 | env.sleep_ms pauses and returns on every leg | 0.60.1 | active | fixture | 1 |
 | C-328 | The http string family answers identically on the native and embedded-wasm lanes | 0.61.1 | active | fixture | 0 |
+| C-329 | env.set is observed by env.get identically on every leg, and the p1 shim serves the environ/args ops | 0.61.2 | active | fixture | 1 |
 

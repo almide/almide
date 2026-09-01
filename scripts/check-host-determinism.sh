@@ -92,7 +92,11 @@ fi
 # — the incumbent's brick walls its loop-level tuple write-back
 # (WhileHeapAccumulator), which is the intended division of labor until
 # #1696 steps 4-5 move the certificate and retire the incumbent.
-MAX_WALLED=18
+# 19 as of 2026-09-01: env_set_overlay.almd (C-329) — the determinism
+# harnesses build the almide.* module without the env host surface, so the
+# env.set/get fixture walls here; it executes on the embedded + stock-p1
+# sweeps (#1716), which is where its promise lives.
+MAX_WALLED=19
 corpus=$(ls "$FIXTURE_DIR"/*.almd 2>/dev/null | wc -l | tr -d ' ')
 if [ "$corpus" -eq 0 ] || [ $((n + walled)) -ne "$corpus" ]; then
   echo "::error::host-determinism: compared $n + walled $walled != corpus $corpus in $FIXTURE_DIR — the scan went blind (#985)"

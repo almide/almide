@@ -499,7 +499,7 @@ fn cmd_run_wasm(file: &str, program_args: &[String], verified: bool, time_report
     // this leg the honest way: a program that READS them walls at emit.
     if structural {
         let started = std::time::Instant::now();
-        return match almide_wasm_run::run_wasm_real_stdin(&bytes) {
+        return match almide_wasm_run::run_wasm_real_stdin_args(&bytes, program_args) {
             Ok(r) => {
                 print!("{}", r.stdout);
                 eprint!("{}", r.stderr);
