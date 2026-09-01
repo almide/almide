@@ -19,4 +19,4 @@ workspace = true
 
 [dev-dependencies]
 almide-corpus = { path = "../almide-corpus" }
-sha2 = "0.10"
+sha2 = "0.11"
