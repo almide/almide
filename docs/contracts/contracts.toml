@@ -4219,11 +4219,12 @@ evidence  = [
 id        = "C-328"
 spec      = "ALS-R5"
 title     = "The http string family answers identically on the native and embedded-wasm lanes"
-statement = "http.get/post/put/patch/delete answer byte-identically on the native leg and the EMBEDDED wasm lane (`almide run --target wasm`, #1710 increment 1): the embedded host serves fs_call ops 43..=47 with a verbatim transcription of the native rustls client (crates/almide-wasm-run/src/http_client.rs), so transport-error texts — connection refusal, DNS failure, the timeout wording and its env-var hint, the close-without-close_notify tolerance, chunked framing — match by shared code, and a copy drift fails the spec/embedded_cross net (tests/embedded_cross_test.rs). STOCK artifacts refuse these ops at BUILD time through the emitted-op audit against the p1 shim's served set — never a runtime refusal on a runtime the developer never ran; the stock/component story is the rest of #1710."
+statement = "http.get/post/put/patch/delete answer byte-identically on the native leg and the EMBEDDED wasm lane (`almide run --target wasm`, #1710 increment 1): the embedded host serves fs_call ops 43..=47 with the shared rt-core client (crates/almide-rt-core), so transport-error texts — connection refusal, DNS failure, the timeout wording and its env-var hint, the close-without-close_notify tolerance, chunked framing — match by shared code, and a drift fails the spec/embedded_cross net (tests/embedded_cross_test.rs). Increment 3 extends the same promise to the FRAMED family — http.request / request_status / get_status / request_bytes / get_bytes ride ops 48..=50 with (method, body, headers) serialized into one decimal char-length frame by the http_framed splice and parsed by the host with the same char arithmetic; a frame-protocol drift between splice and host diverges the net (spec/embedded_cross/http_framed_errs.almd). E081 is a PER-LEG verdict from the same increment: the run/bench route walls only on rows declaring the embedded leg, so the served family runs without the ALMIDE_NO_AVAIL_CHECK escape (retired from the net harness), while STOCK artifacts keep refusing these ops at BUILD time through the emitted-op audit — never a runtime refusal on a runtime the developer never ran; the stock/component story is the rest of #1710."
 since     = "0.61.1"
 status    = "active"
 evidence  = [
   { path = "spec/embedded_cross/http_client_errs.almd", class = "fixture" },
+  { path = "spec/embedded_cross/http_framed_errs.almd", class = "fixture" },
 ]
 
 

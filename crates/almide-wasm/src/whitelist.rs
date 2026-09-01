@@ -208,6 +208,18 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
 /// through prim-MEDIATED alloc_list_f64 with 8-byte Float slot stores
 /// (the one list class both layouts share). One vendored libm on every
 /// target is the bit-parity mechanism itself.
+/// The framed http client family (#1710 increment 3, audited 2026-09-02):
+/// stdlib/http_framed.almd — PURE language surface end to end (string
+/// interpolation, list.map/fold, map.entries, string.take/drop,
+/// int.parse, ok()/tuple ctors); the only leaves are the op-48/49/50
+/// host calls the emitter lowers itself (host_env arms). Result returns
+/// and the Map[String, String] headers param trip the coupled proxy;
+/// the bodies never touch a raw layout.
+pub(crate) const HTTP_CLIENT_SUM: &[&str] = &[
+    "__request_impl", "__request_status_impl", "__get_status_impl",
+    "__request_bytes_impl", "__get_bytes_impl",
+];
+
 pub(crate) const MATH_VERIFIED: &[&str] = &[
     "math_abs", "math_atan", "math_choose", "math_cos", "math_e", "math_exp",
     "math_factorial", "math_fmax", "math_fmin", "math_fpow", "math_log", "math_log10",

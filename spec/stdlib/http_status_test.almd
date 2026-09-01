@@ -1,4 +1,7 @@
-// wasm:skip — native-only http client, not available in WASM
+// wasm:skip — the TEST harness's wasm lane renders through the incumbent
+// brick, which has no http op capability; the run/embedded lane DOES serve
+// this family (#1710 increment 3) and spec/embedded_cross/http_framed_errs
+// pins it. This skip retires with the render_wasm switchover (#1584).
 //
 // http.get_status / http.request_status return (status_code, body) for any
 // complete response; Err is transport-only. Probes follow the net_test.almd

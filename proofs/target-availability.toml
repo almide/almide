@@ -110,18 +110,14 @@ issue = "#1423"
 
 [[unavailable]]
 fn = "http.get_bytes"
-legs = ["embedded", "stock-p1", "structural"]
-reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
-reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
-reason-structural = "host-surface"
+legs = ["stock-p1"]
+reason = "embedded-lane-served (#1710 increment 3, the framed ops 48..=50): `almide run --target wasm` serves the 4-arg request family through the http_framed splice and the transcribed native client (C-328); the DEFAULT stock artifact still refuses at build via the op audit"
 issue = "#1423"
 
 [[unavailable]]
 fn = "http.get_status"
-legs = ["embedded", "stock-p1", "structural"]
-reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
-reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
-reason-structural = "host-surface"
+legs = ["stock-p1"]
+reason = "embedded-lane-served (#1710 increment 3, the framed ops 48..=50): `almide run --target wasm` serves the 4-arg request family through the http_framed splice and the transcribed native client (C-328); the DEFAULT stock artifact still refuses at build via the op audit"
 issue = "#1423"
 
 [[unavailable]]
@@ -144,26 +140,20 @@ issue = "#1423"
 
 [[unavailable]]
 fn = "http.request"
-legs = ["embedded", "stock-p1", "structural"]
-reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
-reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
-reason-structural = "host-surface"
+legs = ["stock-p1"]
+reason = "embedded-lane-served (#1710 increment 3, the framed ops 48..=50): `almide run --target wasm` serves the 4-arg request family through the http_framed splice and the transcribed native client (C-328); the DEFAULT stock artifact still refuses at build via the op audit"
 issue = "#1423"
 
 [[unavailable]]
 fn = "http.request_bytes"
-legs = ["embedded", "stock-p1", "structural"]
-reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
-reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
-reason-structural = "host-surface"
+legs = ["stock-p1"]
+reason = "embedded-lane-served (#1710 increment 3, the framed ops 48..=50): `almide run --target wasm` serves the 4-arg request family through the http_framed splice and the transcribed native client (C-328); the DEFAULT stock artifact still refuses at build via the op audit"
 issue = "#1423"
 
 [[unavailable]]
 fn = "http.request_status"
-legs = ["embedded", "stock-p1", "structural"]
-reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
-reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
-reason-structural = "host-surface"
+legs = ["stock-p1"]
+reason = "embedded-lane-served (#1710 increment 3, the framed ops 48..=50): `almide run --target wasm` serves the 4-arg request family through the http_framed splice and the transcribed native client (C-328); the DEFAULT stock artifact still refuses at build via the op audit"
 issue = "#1423"
 
 [[unavailable]]

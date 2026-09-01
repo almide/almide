@@ -45,10 +45,13 @@ const GENUINE_SKIPS: &[(&str, SkipReason)] = &[
     ("spec/integration/extern_c/extern_c_test.almd", SkipReason::NativeOnlyApi),
     // OS sockets and subprocesses: outside the WASI surface the runtime targets.
     ("spec/stdlib/net_test.almd", SkipReason::NativeOnlyApi),
-    // The http client opens an OS socket; the status twins have no wasm leg.
-    ("spec/stdlib/http_status_test.almd", SkipReason::NativeOnlyApi),
     ("spec/stdlib/process_ext_test.almd", SkipReason::NativeOnlyApi),
     ("spec/stdlib/process_exec_status_test.almd", SkipReason::NativeOnlyApi),
+    // The status twins run on the embedded lane (#1710 increment 3,
+    // spec/embedded_cross pins them) but the TEST harness's wasm lane is
+    // the incumbent brick, which has no http capability — retires with
+    // the render_wasm switchover (#1584).
+    ("spec/stdlib/http_status_test.almd", SkipReason::NativeOnlyApi),
     // `http.serve` binds a TCP listener.
     ("spec/lang/effect_intrinsic_tail_test.almd", SkipReason::NativeOnlyApi),
     // (zlib row RETIRED 2026-09-01: #1700 implemented DEFLATE in Almide —

@@ -84,6 +84,22 @@ impl Emitter<'_> {
                 self.fs_call_str2(u, b, crate::fs_meta::OP_HTTP_PATCH)?;
                 Some(self.fs_result_string()?)
             }
+            // The framed request family (#1710 increment 3): the spliced
+            // http_framed leaves — url in a, the (method, body, headers)
+            // frame in b. 49's status answer is a `<code>\n<body>` string
+            // the guest splits; 50 is the raw-bytes carrier.
+            ("http", "__http_framed_text", [u, f]) => {
+                self.fs_call_str2(u, f, crate::fs_meta::OP_HTTP_FRAMED_TEXT)?;
+                Some(self.fs_result_string()?)
+            }
+            ("http", "__http_framed_status", [u, f]) => {
+                self.fs_call_str2(u, f, crate::fs_meta::OP_HTTP_FRAMED_STATUS)?;
+                Some(self.fs_result_string()?)
+            }
+            ("http", "__http_framed_bytes", [u, f]) => {
+                self.fs_call_str2(u, f, crate::fs_meta::OP_HTTP_FRAMED_BYTES)?;
+                Some(self.fs_result_bytes()?)
+            }
             ("env", "os", []) => {
                 self.fs_call_0(OP_ENV_OS)?;
                 self.fs_take_text()?;
