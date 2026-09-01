@@ -24,7 +24,7 @@ fn normalized_hash(stdout: &[u8]) -> String {
     let no_nul: String = text.chars().filter(|c| *c != '\0').collect();
     let trimmed = no_nul.trim_end_matches('\n');
     let text = if trimmed.is_empty() { String::new() } else { format!("{trimmed}\n") };
-    format!("{:x}", Sha256::digest(text.as_bytes()))
+    Sha256::digest(text.as_bytes()).iter().map(|b| format!("{b:02x}")).collect::<String>()
 }
 
 fn wasmtime_bin() -> String {
