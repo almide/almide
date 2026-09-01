@@ -30,3 +30,4 @@ crates/almide-mir/m.wasm
 # the receipt inside fingerprints the tree — an untracked hit would break
 # the fingerprint fast-path and force a full gate re-derivation
 almide-dossier-*.md
+*.regen
