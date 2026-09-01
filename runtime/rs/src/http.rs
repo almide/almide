@@ -4,13 +4,10 @@
 // SSE streaming: almide_rt_sse_openai_chat, almide_rt_sse_anthropic_messages (in sse.rs)
 
 // HashMap already imported by prelude
-use std::io::{Read, Write, BufRead, BufReader};
-use std::net::{TcpStream, TcpListener};
-
-#[cfg(not(target_arch = "wasm32"))]
-use std::sync::Arc;
-#[cfg(not(target_arch = "wasm32"))]
-use rustls::{ClientConfig, ClientConnection, StreamOwned, RootCertStore};
+// Read/Write/TcpStream come from the inlined client core (#1715); this
+// file imports only its own remainder (server + SSE parsing).
+use std::io::{BufRead, BufReader};
+use std::net::TcpListener;
 
 // ── HTTP response/request type aliases ──
 // Named `HttpResponse`/`HttpRequest` (not `Response`/`Request`) so the emitted
@@ -157,113 +154,6 @@ pub fn almide_http_url_decode(s: &str) -> String {
     percent_decode(s)
 }
 
-// ── HTTP Client ──
-
-/// The client read timeout: `default_secs` unless `ALMIDE_HTTP_TIMEOUT_SECS`
-/// overrides it; `0` means NO timeout (block until the server answers). A
-/// local-LLM endpoint (Ollama et al.) routinely needs 30-120 s of prompt
-/// evaluation before the first response byte, so the old hardcoded 30 s
-/// surfaced as `read failed: Resource temporarily unavailable (os error 35)`
-/// on any long call (#1561). One env var governs all three clients
-/// (request / request_bytes at 30 s default, the SSE stream at 120 s).
-/// Read a full `Connection: close` HTTP response, tolerating a peer that
-/// closes without TLS close_notify (#1592: Google front-ends — api.osv.dev —
-/// close this way on EVERY request, and rustls surfaces it as
-/// `UnexpectedEof`). The data is read incrementally; a read error after a
-/// SYNTACTICALLY COMPLETE response keeps the data (curl's and every
-/// browser's behavior — the error only concerns bytes after the body), and
-/// a read error before completeness still propagates: a truncated body is
-/// never silently returned.
-fn read_response_tolerant(stream: &mut impl Read) -> Result<Vec<u8>, String> {
-    let mut response = Vec::new();
-    let mut buf = [0u8; 8192];
-    loop {
-        match stream.read(&mut buf) {
-            Ok(0) => break,
-            Ok(n) => response.extend_from_slice(&buf[..n]),
-            Err(e) => {
-                if response_is_complete(&response) {
-                    break;
-                }
-                return Err(read_error_msg(&e));
-            }
-        }
-    }
-    Ok(response)
-}
-
-/// Is this response whole by ITS OWN framing? Headers must have ended, and
-/// then: a `Content-Length` body is complete when that many bytes arrived;
-/// a chunked body when its terminal 0-chunk (and closing CRLF) arrived —
-/// judged by the same size-walk the decoder performs, never a substring
-/// probe (a body CONTAINING "0\r\n" must not read as terminated); a body
-/// with neither is EOF-delimited, so the close IS its end.
-fn response_is_complete(resp: &[u8]) -> bool {
-    let Some(idx) = resp.windows(4).position(|w| w == b"\r\n\r\n") else {
-        return false;
-    };
-    let headers = String::from_utf8_lossy(&resp[..idx]).to_lowercase();
-    let body = &resp[idx + 4..];
-    if headers.contains("transfer-encoding: chunked") {
-        return chunked_body_terminated(body);
-    }
-    if let Some(cl) = headers
-        .lines()
-        .find_map(|l| l.strip_prefix("content-length:"))
-        .and_then(|v| v.trim().parse::<usize>().ok())
-    {
-        return body.len() >= cl;
-    }
-    true
-}
-
-/// Walk the chunk sizes exactly as `decode_chunked_bytes` does and report
-/// whether the terminal 0-chunk was reached.
-fn chunked_body_terminated(body: &[u8]) -> bool {
-    let mut pos = 0usize;
-    loop {
-        let Some(line_end) = body[pos..].windows(2).position(|w| w == b"\r\n") else {
-            return false;
-        };
-        let size_str = String::from_utf8_lossy(&body[pos..pos + line_end]);
-        let Ok(size) = usize::from_str_radix(size_str.trim(), 16) else {
-            return false;
-        };
-        if size == 0 {
-            return true;
-        }
-        pos += line_end + 2 + size;
-        if pos > body.len() {
-            return false;
-        }
-        if body[pos..].starts_with(b"\r\n") {
-            pos += 2;
-        }
-    }
-}
-
-/// A read error message the caller can ACT on: the timeout case names the
-/// env var (the raw `Resource temporarily unavailable (os error 35)` gave no
-/// path to the fix — #1561); everything else keeps the original detail.
-fn read_error_msg(e: &std::io::Error) -> String {
-    if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) {
-        "read timed out waiting for the server (raise ALMIDE_HTTP_TIMEOUT_SECS; 0 = no timeout)"
-            .to_string()
-    } else {
-        format!("read failed: {}", e)
-    }
-}
-
-fn client_read_timeout(default_secs: u64) -> Option<std::time::Duration> {
-    match std::env::var("ALMIDE_HTTP_TIMEOUT_SECS")
-        .ok()
-        .and_then(|v| v.trim().parse::<u64>().ok())
-    {
-        Some(0) => None,
-        Some(s) => Some(std::time::Duration::from_secs(s)),
-        None => Some(std::time::Duration::from_secs(default_secs)),
-    }
-}
 
 pub fn almide_http_get(url: &str) -> Result<String, String> {
     almide_http_request("GET", url, "", &AlmideMap::new())
@@ -289,27 +179,22 @@ pub fn almide_http_get_with_headers(url: &str, headers: &AlmideMap<String, Strin
     almide_http_request("GET", url, "", headers)
 }
 
+// ── HTTP Client ──
+//
+// The client core (parse/timeout/framing/TLS/exchange, all three result
+// shapes) lives in crates/almide-rt-core/src/http_client_core.rs and is
+// inlined here at embed time (#1715) — the SAME text the embedded host
+// links, so the C-328 equality holds by shared code. The wrappers below
+// only adapt the AlmideMap header surface to the core's pair slice.
+include!("../../../crates/almide-rt-core/src/http_client_core.rs");
+
+/// Headers cross into the shared core as a plain pair slice.
+fn header_pairs(headers: &AlmideMap<String, String>) -> Vec<(String, String)> {
+    headers.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+}
+
 pub fn almide_http_request(method: &str, url: &str, body: &str, headers: &AlmideMap<String, String>) -> Result<String, String> {
-    let (is_https, host, port, path) = parse_url(url)?;
-
-    let stream = TcpStream::connect(format!("{}:{}", host, port))
-        .map_err(|e| format!("connection failed: {}", e))?;
-    stream.set_read_timeout(client_read_timeout(30)).ok();
-
-    if is_https {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let mut tls_stream = make_tls_stream(&host, stream)?;
-            http_exchange(&mut tls_stream, method, &host, &path, body, headers)
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            Err("HTTPS is not supported on WASM target".to_string())
-        }
-    } else {
-        let mut stream = stream;
-        http_exchange(&mut stream, method, &host, &path, body, headers)
-    }
+    request(method, url, body, &header_pairs(headers))
 }
 
 // ── Status-preserving client ──
@@ -326,26 +211,7 @@ pub fn almide_http_get_status(url: &str) -> Result<(i64, String), String> {
 }
 
 pub fn almide_http_request_status(method: &str, url: &str, body: &str, headers: &AlmideMap<String, String>) -> Result<(i64, String), String> {
-    let (is_https, host, port, path) = parse_url(url)?;
-
-    let stream = TcpStream::connect(format!("{}:{}", host, port))
-        .map_err(|e| format!("connection failed: {}", e))?;
-    stream.set_read_timeout(client_read_timeout(30)).ok();
-
-    if is_https {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let mut tls_stream = make_tls_stream(&host, stream)?;
-            http_exchange_status(&mut tls_stream, method, &host, &path, body, headers)
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            Err("HTTPS is not supported on WASM target".to_string())
-        }
-    } else {
-        let mut stream = stream;
-        http_exchange_status(&mut stream, method, &host, &path, body, headers)
-    }
+    request_status(method, url, body, &header_pairs(headers))
 }
 
 // ── Binary client ──
@@ -359,99 +225,10 @@ pub fn almide_http_get_bytes(url: &str) -> Result<Vec<u8>, String> {
 }
 
 pub fn almide_http_request_bytes(method: &str, url: &str, body: &str, headers: &AlmideMap<String, String>) -> Result<Vec<u8>, String> {
-    let (is_https, host, port, path) = parse_url(url)?;
-
-    let stream = TcpStream::connect(format!("{}:{}", host, port))
-        .map_err(|e| format!("connection failed: {}", e))?;
-    stream.set_read_timeout(client_read_timeout(30)).ok();
-
-    if is_https {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let mut tls_stream = make_tls_stream(&host, stream)?;
-            http_exchange_bytes(&mut tls_stream, method, &host, &path, body, headers)
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            Err("HTTPS is not supported on WASM target".to_string())
-        }
-    } else {
-        let mut stream = stream;
-        http_exchange_bytes(&mut stream, method, &host, &path, body, headers)
-    }
+    request_bytes(method, url, body, &header_pairs(headers))
 }
 
-/// Perform HTTP request/response exchange over any Read+Write stream.
-fn http_exchange(stream: &mut (impl Read + Write), method: &str, host: &str, path: &str, body: &str, headers: &AlmideMap<String, String>) -> Result<String, String> {
-    let mut req = format!("{} {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n", method, path, host);
-    if !body.is_empty() {
-        req.push_str(&format!("Content-Length: {}\r\n", body.len()));
-        if !headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("content-type")) {
-            req.push_str("Content-Type: application/json\r\n");
-        }
-    }
-    for (k, v) in headers.iter() { req.push_str(&format!("{}: {}\r\n", k, v)); }
-    req.push_str("\r\n");
-    req.push_str(body);
 
-    stream.write_all(req.as_bytes()).map_err(|e| format!("write failed: {}", e))?;
-
-    let response = read_response_tolerant(stream)?;
-    let text = String::from_utf8_lossy(&response).to_string();
-
-    // Split headers and body
-    if let Some(idx) = text.find("\r\n\r\n") {
-        let resp_body = &text[idx + 4..];
-        // Handle chunked transfer encoding
-        let header_section = &text[..idx];
-        if header_section.to_lowercase().contains("transfer-encoding: chunked") {
-            Ok(decode_chunked(resp_body))
-        } else {
-            Ok(resp_body.to_string())
-        }
-    } else {
-        Ok(text)
-    }
-}
-
-// Like http_exchange, but also parses the status line and returns
-// `(status_code, body)`. A missing/unparseable status line yields code 0.
-fn http_exchange_status(stream: &mut (impl Read + Write), method: &str, host: &str, path: &str, body: &str, headers: &AlmideMap<String, String>) -> Result<(i64, String), String> {
-    let mut req = format!("{} {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n", method, path, host);
-    if !body.is_empty() {
-        req.push_str(&format!("Content-Length: {}\r\n", body.len()));
-        if !headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("content-type")) {
-            req.push_str("Content-Type: application/json\r\n");
-        }
-    }
-    for (k, v) in headers.iter() { req.push_str(&format!("{}: {}\r\n", k, v)); }
-    req.push_str("\r\n");
-    req.push_str(body);
-
-    stream.write_all(req.as_bytes()).map_err(|e| format!("write failed: {}", e))?;
-
-    let response = read_response_tolerant(stream)?;
-    let text = String::from_utf8_lossy(&response).to_string();
-
-    if let Some(idx) = text.find("\r\n\r\n") {
-        let header_section = &text[..idx];
-        let resp_body = &text[idx + 4..];
-        let status_line = header_section.lines().next().unwrap_or("");
-        let code: i64 = status_line
-            .split_whitespace()
-            .nth(1)
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(0);
-        let body_out = if header_section.to_lowercase().contains("transfer-encoding: chunked") {
-            decode_chunked(resp_body)
-        } else {
-            resp_body.to_string()
-        };
-        Ok((code, body_out))
-    } else {
-        Ok((0, text))
-    }
-}
 
 // ── Streaming request ──
 //
@@ -633,22 +410,6 @@ fn http_exchange_stream<S: Read + Write, F: FnMut(&str)>(
     Ok(())
 }
 
-// ── TLS ──
-
-#[cfg(not(target_arch = "wasm32"))]
-fn make_tls_stream(host: &str, stream: TcpStream) -> Result<StreamOwned<ClientConnection, TcpStream>, String> {
-    let mut root_store = RootCertStore::empty();
-    root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-    let config = Arc::new(
-        ClientConfig::builder()
-            .with_root_certificates(root_store)
-            .with_no_client_auth()
-    );
-    let server_name = rustls::pki_types::ServerName::try_from(host.to_string())
-        .map_err(|e| format!("invalid DNS name: {}", e))?;
-    let conn = ClientConnection::new(config, server_name).map_err(|e| format!("TLS error: {}", e))?;
-    Ok(StreamOwned::new(conn, stream))
-}
 
 // ── HTTP Server ──
 
@@ -683,97 +444,9 @@ pub fn almide_rt_http_serve(
 
 // ── Helpers ──
 
-fn parse_url(url: &str) -> Result<(bool, String, u16, String), String> {
-    let (is_https, url) = if let Some(rest) = url.strip_prefix("https://") {
-        (true, rest)
-    } else if let Some(rest) = url.strip_prefix("http://") {
-        (false, rest)
-    } else {
-        (false, url)
-    };
-    let default_port: u16 = if is_https { 443 } else { 80 };
-    let (host_port, path) = match url.find('/') {
-        Some(i) => (&url[..i], &url[i..]),
-        None => (url, "/"),
-    };
-    let (host, port) = match host_port.find(':') {
-        Some(i) => (&host_port[..i], host_port[i+1..].parse::<u16>().unwrap_or(default_port)),
-        None => (host_port, default_port),
-    };
-    Ok((is_https, host.to_string(), port, path.to_string()))
-}
 
-fn decode_chunked(body: &str) -> String {
-    let mut result = String::new();
-    let mut remaining = body;
-    loop {
-        let line_end = match remaining.find("\r\n") { Some(i) => i, None => break };
-        let size = usize::from_str_radix(remaining[..line_end].trim(), 16).unwrap_or(0);
-        if size == 0 { break; }
-        let data_start = line_end + 2;
-        if data_start + size <= remaining.len() {
-            result.push_str(&remaining[data_start..data_start + size]);
-            remaining = &remaining[data_start + size..];
-            if remaining.starts_with("\r\n") { remaining = &remaining[2..]; }
-        } else { break; }
-    }
-    result
-}
 
-/// Like `http_exchange` but returns the raw response body bytes. The
-/// header/body split and chunked decode operate at the byte level so binary
-/// payloads are never run through `from_utf8_lossy`.
-fn http_exchange_bytes(stream: &mut (impl Read + Write), method: &str, host: &str, path: &str, body: &str, headers: &AlmideMap<String, String>) -> Result<Vec<u8>, String> {
-    let mut req = format!("{} {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n", method, path, host);
-    if !body.is_empty() {
-        req.push_str(&format!("Content-Length: {}\r\n", body.len()));
-        if !headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("content-type")) {
-            req.push_str("Content-Type: application/json\r\n");
-        }
-    }
-    for (k, v) in headers.iter() { req.push_str(&format!("{}: {}\r\n", k, v)); }
-    req.push_str("\r\n");
-    req.push_str(body);
 
-    stream.write_all(req.as_bytes()).map_err(|e| format!("write failed: {}", e))?;
-
-    let response = read_response_tolerant(stream)?;
-
-    // Split header/body on the raw bytes — never decode the body as UTF-8.
-    if let Some(idx) = response.windows(4).position(|w| w == b"\r\n\r\n") {
-        let header_section = String::from_utf8_lossy(&response[..idx]).to_lowercase();
-        let resp_body = &response[idx + 4..];
-        if header_section.contains("transfer-encoding: chunked") {
-            Ok(decode_chunked_bytes(resp_body))
-        } else {
-            Ok(resp_body.to_vec())
-        }
-    } else {
-        Ok(response)
-    }
-}
-
-/// Byte-level chunked transfer-decoding (mirrors `decode_chunked` for `Vec<u8>`).
-fn decode_chunked_bytes(body: &[u8]) -> Vec<u8> {
-    let mut result = Vec::new();
-    let mut pos = 0usize;
-    while pos < body.len() {
-        let line_end = match body[pos..].windows(2).position(|w| w == b"\r\n") {
-            Some(i) => pos + i,
-            None => break,
-        };
-        let size_str = String::from_utf8_lossy(&body[pos..line_end]);
-        let size = usize::from_str_radix(size_str.trim(), 16).unwrap_or(0);
-        if size == 0 { break; }
-        let data_start = line_end + 2;
-        if data_start + size <= body.len() {
-            result.extend_from_slice(&body[data_start..data_start + size]);
-            pos = data_start + size;
-            if pos + 2 <= body.len() && &body[pos..pos + 2] == b"\r\n" { pos += 2; }
-        } else { break; }
-    }
-    result
-}
 
 /// Percent-decode an `application/x-www-form-urlencoded` component: `+` → space,
 /// `%XX` → the raw byte 0xXX. Bytes are gathered first then interpreted as UTF-8

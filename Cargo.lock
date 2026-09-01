@@ -195,6 +195,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "almide-rt-core"
+version = "0.12.2"
+dependencies = [
+ "rustls",
+ "webpki-roots",
+]
+
+[[package]]
 name = "almide-spine"
 version = "0.12.2"
 dependencies = [
@@ -262,13 +270,12 @@ dependencies = [
 name = "almide-wasm-run"
 version = "0.12.2"
 dependencies = [
+ "almide-rt-core",
  "almide-wasm",
  "anyhow",
- "rustls",
  "wasm-encoder 0.258.0",
  "wasmparser 0.258.0",
  "wasmtime",
- "webpki-roots",
  "wit-component 0.258.0",
  "wit-parser 0.258.0",
 ]
