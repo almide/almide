@@ -284,7 +284,7 @@
 66176	spec/wasm_cross/list_call_element.almd
 66688	spec/wasm_cross/list_chunk_windows.almd
 65920	spec/wasm_cross/list_chunk_zero.almd
-70720	spec/wasm_cross/list_comprehensive.almd
+70512	spec/wasm_cross/list_comprehensive.almd
 81504	spec/wasm_cross/list_count_index_truncation.almd
 70224	spec/wasm_cross/list_cross_module_variant.almd
 66096	spec/wasm_cross/list_element_hof_chain.almd
