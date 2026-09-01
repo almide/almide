@@ -557,9 +557,16 @@ impl Emitter<'_> {
                 }
                 self.emit_error_frame_abort();
                 self.f.instructions().end();
-                // COW: the binding gets a fresh block, then the store.
+                // RC-5: the COW judge, not an unconditional copy — a
+                // uniquely-held list takes the store IN PLACE, a shared one
+                // copies and releases one source ref. The old
+                // $block_copy-per-write materialized a fresh generation on
+                // EVERY index write and never freed the outgrown one, so n
+                // writes into a preallocated list retained O(n²) bytes
+                // (#1729: the prealloc/fft rows OOM'd at 2^16 writes where
+                // the live payload is 512 KiB).
                 get_target(self.f, self.locals, self.globals);
-                self.f.instructions().call(F_BLOCK_COPY).local_set(hb);
+                self.f.instructions().call(F_COW).local_set(hb);
                 if is_local {
                     let idx = self.locals[target].0;
                     self.f.instructions().local_get(hb).local_set(idx);

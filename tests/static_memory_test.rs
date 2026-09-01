@@ -214,6 +214,56 @@ fn flat_map_chunks_recycle_under_fixed_budget() {
 }
 
 #[test]
+fn index_writes_stay_in_place_under_fixed_budget() {
+    if Command::new(almide_bin()).arg("--version").output().is_err() {
+        return;
+    }
+    if !wasmtime_available() {
+        return;
+    }
+    let dir = std::env::temp_dir().join("almide-static-memory");
+    std::fs::create_dir_all(&dir).expect("mkdir");
+
+    // The index-write COW judge (#1729): 100k writes into a preallocated
+    // 100k-element list run IN PLACE when the list is uniquely held —
+    // the old $block_copy-per-write materialized a fresh generation on
+    // every write (O(n²) retained), which no fixed budget survives. The
+    // snapshot taken before the loop pins the value-semantics half: the
+    // shared holder forces ONE copy and keeps its zeros.
+    let iw = dir.join("index-writes.almd");
+    std::fs::write(
+        &iw,
+        "import int\n\neffect fn main() -> Unit = {\n  var data: List[Int] = list.repeat(0, 100000)\n  let snap = data\n  for i in 0..<100000 {\n    data[i] = 1\n  }\n  println(int.to_string(list.sum(snap)))\n  println(int.to_string(list.sum(data)))\n}\n",
+    )
+    .expect("write");
+    let iw_wasm = dir.join("index-writes.wasm");
+    let out = Command::new(almide_bin())
+        .args([
+            "build",
+            iw.to_str().unwrap(),
+            "--target",
+            "wasm",
+            "--heap-cap",
+            "8388608",
+            "-o",
+            iw_wasm.to_str().unwrap(),
+        ])
+        .output()
+        .expect("spawn almide build");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let run = Command::new("wasmtime")
+        .args(["run", iw_wasm.to_str().unwrap()])
+        .output()
+        .expect("spawn wasmtime");
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout),
+        "0\n100000\n",
+        "the snapshot must keep its zeros and the writes must land"
+    );
+}
+
+#[test]
 fn artifact_is_partition_shaped() {
     if Command::new(almide_bin()).arg("--version").output().is_err() {
         return;
