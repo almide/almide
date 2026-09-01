@@ -23,10 +23,16 @@ impl Checker {
                 // position is the must-use error E042 — in EVERY fn kind, not
                 // only the old auto-? contexts. Queue unconditionally;
                 // post-solve keeps only Result-typed sites. The `!` insertion
-                // hint stays mechanical for a plain call.
+                // hint stays mechanical for a plain call, but only where `!`
+                // is legal (effect fn body / test block, the E022 predicate)
+                // — in a pure fn the applied fix could never compile, and a
+                // span fix that cannot compile is worse than no span fix
+                // (#1528: the e042-in-pure-fn fixture pins this).
                 self.deferred_implicit_prop_checks.push((
                     t.clone(), expr.span, "of this statement's result",
-                    matches!(expr.kind, ast::ExprKind::Call { .. }), true,
+                    matches!(expr.kind, ast::ExprKind::Call { .. })
+                        && (self.env.auto_unwrap || self.env.in_test_block),
+                    true,
                 ));
                 // #662: a discarded expression statement whose type carries an
                 // unconstrained phantom slot (e.g. a bare `result.or_else(r0,
