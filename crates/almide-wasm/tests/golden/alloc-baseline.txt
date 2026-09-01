@@ -24,7 +24,7 @@
 66128	spec/wasm_cross/bounded_kernel.almd
 66128	spec/wasm_cross/bounded_kernel_plain.almd
 66400	spec/wasm_cross/branch_lift_in_loop.almd
-67200	spec/wasm_cross/bundled_pure_modules.almd
+67104	spec/wasm_cross/bundled_pure_modules.almd
 66688	spec/wasm_cross/bytes_alloc_ceiling_domain.almd
 132176	spec/wasm_cross/bytes_array_count_domain.almd
 65808	spec/wasm_cross/bytes_equality_call_operands.almd
