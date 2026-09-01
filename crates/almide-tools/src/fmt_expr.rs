@@ -830,6 +830,11 @@ fn fmt_pattern(out: &mut String, pat: &Pattern) {
             }
         }
         Pattern::Tuple { elements } => { out.push('('); comma_sep(out, elements, |out, e| fmt_pattern(out, e)); out.push(')'); }
+        Pattern::As { name, inner } => {
+            out.push_str(name.as_str());
+            out.push_str(" @ ");
+            fmt_pattern(out, inner);
+        }
         Pattern::List { elements, rest } => {
             out.push('[');
             comma_sep(out, elements, |out, e| fmt_pattern(out, e));

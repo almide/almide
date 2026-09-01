@@ -70,7 +70,8 @@ fn pattern_contains_list(pat: &IrPattern) -> bool {
     match pat {
         IrPattern::List { .. } => true,
         IrPattern::Tuple { elements } => elements.iter().any(pattern_contains_list),
-        IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => pattern_contains_list(inner),
+        IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner }
+        | IrPattern::As { inner, .. } => pattern_contains_list(inner),
         IrPattern::Constructor { args, .. } => args.iter().any(pattern_contains_list),
         _ => false,
     }
@@ -282,6 +283,21 @@ fn build_list_if_chain_list_pattern(
                     ty: elem_ty.clone(),
                     span: None, def_id: None,
                 };
+                let (elem_pat, as_bind) = match elem_pat {
+                    IrPattern::As { var, inner, .. } => (inner.as_ref(), Some(*var)),
+                    p => (p, None),
+                };
+                if let Some(var) = as_bind {
+                    stmts.push(IrStmt {
+                        kind: IrStmtKind::Bind {
+                            var,
+                            mutability: Mutability::Let,
+                            ty: elem_ty.clone(),
+                            value: index_expr.clone(),
+                        },
+                        span: None,
+                    });
+                }
                 match elem_pat {
                     IrPattern::Bind { var, .. } => {
                         stmts.push(IrStmt {
@@ -661,6 +677,32 @@ fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt
 
     match &arm.pattern {
         IrPattern::List { .. } => build_list_if_chain_list_pattern(subject, arm, rest, result_ty, vt, covered_below, rest_from),
+        // As over a list pattern (#1461): bind the WHOLE subject, then
+        // desugar the inner list arm exactly as if it stood alone.
+        IrPattern::As { var, ty, inner } if matches!(inner.as_ref(), IrPattern::List { .. }) => {
+            let inner_arm = IrMatchArm {
+                pattern: (**inner).clone(),
+                guard: arm.guard.clone(),
+                body: arm.body.clone(),
+            };
+            let desugared = build_list_if_chain_list_pattern(subject, &inner_arm, rest, result_ty, vt, covered_below, rest_from);
+            IrExpr {
+                kind: IrExprKind::Block {
+                    stmts: vec![IrStmt {
+                        kind: IrStmtKind::Bind {
+                            var: *var,
+                            mutability: Mutability::Let,
+                            ty: ty.clone(),
+                            value: subject.clone(),
+                        },
+                        span: None,
+                    }],
+                    expr: Some(Box::new(desugared)),
+                },
+                ty: result_ty.clone(),
+                span: None, def_id: None,
+            }
+        }
         // Tuple containing list patterns: extract list checks from tuple elements
         IrPattern::Tuple { elements } if elements.iter().any(pattern_contains_list) =>
             build_list_if_chain_tuple_pattern(subject, elements, arm, rest, result_ty, vt, (covered_below, rest_from)),

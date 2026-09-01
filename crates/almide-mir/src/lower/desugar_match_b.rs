@@ -183,6 +183,7 @@ fn introduces_binder(e: &IrExpr) -> bool {
                 elements.iter().any(pattern_binds)
                     || rest.as_ref().is_some_and(|r| pattern_binds(r))
             }
+            P::As { .. } => true,
             P::RecordPattern { fields, .. } => {
                 fields.iter().any(|f| f.pattern.as_ref().map(pattern_binds).unwrap_or(true))
             }

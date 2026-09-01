@@ -430,6 +430,14 @@ pub(super) fn lower_pattern(ctx: &mut LowerCtx, pat: &ast::Pattern, ty: &Ty) -> 
             let var = ctx.define_var(name, ty.clone(), Mutability::Let, None);
             IrPattern::Bind { var, ty: ty.clone() }
         }
+        ast::Pattern::As { name, inner } => {
+            let var = ctx.define_var(name, ty.clone(), Mutability::Let, None);
+            IrPattern::As {
+                var,
+                ty: ty.clone(),
+                inner: Box::new(lower_pattern(ctx, inner, ty)),
+            }
+        }
         ast::Pattern::Literal { value } => lower_pattern_literal(ctx, value),
         ast::Pattern::Constructor { name, args } => {
             let bare_name = bare_ctor_name(name);

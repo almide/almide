@@ -126,6 +126,9 @@ pub enum Pattern {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         rest: Option<Option<Sym>>,
     },
+    /// As-pattern (#1461): `name @ pattern` — binds the WHOLE value at
+    /// this position while the inner pattern destructures/tests it.
+    As { name: Sym, inner: Box<Pattern> },
     /// Or-pattern (#1461): `a | b | c => body` — the arm matches when ANY
     /// alternative matches. Alternatives are binder-free (checker rule);
     /// lowering desugars the arm into one IR arm per alternative.
@@ -606,6 +609,7 @@ fn visit_pattern_exprs_mut(pat: &mut Pattern, f: &mut impl FnMut(&mut Expr)) {
             for fp in fields.iter_mut() { if let Some(ref mut p) = fp.pattern { visit_pattern_exprs_mut(p, f); } }
         }
         Pattern::Tuple { elements } | Pattern::List { elements, .. } => { for e in elements.iter_mut() { visit_pattern_exprs_mut(e, f); } }
+        Pattern::As { inner, .. } => visit_pattern_exprs_mut(inner, f),
         Pattern::Some { inner } | Pattern::Ok { inner } | Pattern::Err { inner } => visit_pattern_exprs_mut(inner, f),
         Pattern::Or { alts } => { for a in alts.iter_mut() { visit_pattern_exprs_mut(a, f); } }
         Pattern::Wildcard | Pattern::Ident { .. } | Pattern::None => {}
@@ -803,6 +807,7 @@ fn visit_pattern_exprs(pat: &Pattern, f: &mut impl FnMut(&Expr)) {
             for fp in fields.iter() { if let Some(ref p) = fp.pattern { visit_pattern_exprs(p, f); } }
         }
         Pattern::Tuple { elements } | Pattern::List { elements, .. } => { for e in elements.iter() { visit_pattern_exprs(e, f); } }
+        Pattern::As { inner, .. } => visit_pattern_exprs(inner, f),
         Pattern::Some { inner } | Pattern::Ok { inner } | Pattern::Err { inner } => visit_pattern_exprs(inner, f),
         Pattern::Or { alts } => { for a in alts.iter() { visit_pattern_exprs(a, f); } }
         Pattern::Wildcard | Pattern::Ident { .. } | Pattern::None => {}

@@ -7,6 +7,7 @@
 66240	spec/wasm_cross/append_accumulator.almd
 66176	spec/wasm_cross/append_accumulator_heap.almd
 ~	spec/wasm_cross/args_surface.almd
+66304	spec/wasm_cross/as_pattern.almd
 65840	spec/wasm_cross/assert_abort_eq.almd
 65936	spec/wasm_cross/assert_abort_msg.almd
 65920	spec/wasm_cross/assert_abort_multiline.almd

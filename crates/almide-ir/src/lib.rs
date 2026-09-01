@@ -248,6 +248,9 @@ pub enum IrPattern {
     None,
     Ok { inner: Box<IrPattern> },
     Err { inner: Box<IrPattern> },
+    /// As-pattern (#1461): binds the WHOLE value at this position while
+    /// the inner pattern destructures/tests the same value.
+    As { var: VarId, ty: Ty, inner: Box<IrPattern> },
     /// `rest` (#1461 list-rest): Some = the pattern matches any list of
     /// length >= elements.len(); the tail past the prefix binds through
     /// the boxed sub-pattern (`Bind` for `[a, ..t]` — its ty is the

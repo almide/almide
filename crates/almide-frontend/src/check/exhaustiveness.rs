@@ -83,6 +83,9 @@ fn lower(pat: &ast::Pattern) -> Pat {
         ast::Pattern::Tuple { elements, .. } => {
             Pat::Ctor(CtorId::Tuple, elements.iter().map(lower).collect())
         }
+        // As-pattern: coverage is the INNER pattern's (the binder is
+        // irrefutable decoration).
+        ast::Pattern::As { inner, .. } => lower(inner),
         ast::Pattern::List { elements, .. } => {
             Pat::Ctor(CtorId::Tuple, elements.iter().map(lower).collect())
         }

@@ -558,6 +558,7 @@ expr:Unwrap
 expr:UnwrapOr
 expr:Var
 expr:While
+pattern:As
 pattern:Bind
 pattern:Constructor
 pattern:Err

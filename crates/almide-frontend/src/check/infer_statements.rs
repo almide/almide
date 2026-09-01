@@ -410,6 +410,12 @@ impl Checker {
         match pattern {
             ast::Pattern::Wildcard => {}
             ast::Pattern::Ident { name } => { self.env.define_var(name, ty.clone()); }
+            // As-pattern (#1461): the name binds the WHOLE value at this
+            // position; the inner pattern destructures the same value.
+            ast::Pattern::As { name, inner } => {
+                self.env.define_var(name, ty.clone());
+                self.bind_pattern(inner, ty);
+            }
             ast::Pattern::Constructor { name, args } => self.bind_pattern_constructor(name, args, ty),
             ast::Pattern::RecordPattern { name, fields, .. } => self.bind_pattern_record(name, fields, ty),
             ast::Pattern::Tuple { elements } => self.bind_pattern_tuple(elements, ty),
@@ -972,6 +978,7 @@ fn foreign_ctor_case_list(bare_name: Sym, resolved: &Ty) -> Option<Vec<String>> 
 fn first_or_alt_binder(pat: &ast::Pattern) -> Option<almide_base::intern::Sym> {
     match pat {
         ast::Pattern::Ident { name } => Some(*name),
+        ast::Pattern::As { name, .. } => Some(*name),
         ast::Pattern::Constructor { args, .. } => args.iter().find_map(first_or_alt_binder),
         ast::Pattern::RecordPattern { fields, .. } => fields.iter().find_map(|f| {
             f.pattern.as_ref().map_or(Some(f.name), first_or_alt_binder)
