@@ -17,7 +17,7 @@ fn workspace_root() -> PathBuf {
 }
 
 fn sha(s: &str) -> String {
-    format!("{:x}", Sha256::digest(s.as_bytes()))
+    Sha256::digest(s.as_bytes()).iter().map(|b| format!("{b:02x}")).collect::<String>()
 }
 
 #[test]
