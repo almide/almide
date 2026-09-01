@@ -202,6 +202,18 @@ pub fn to_p2(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     code.function(&shim_cabi_realloc(heap_global));
     code.function(&shim_run(main_index + SHIFT));
 
+    // Elements re-encode through the Remap (#1716): the +3 import shift
+    // must move funcref table entries too, or every closure retargets
+    // three functions early — the #1688 silent class, live here until
+    // this line.
+    let mut element_sec = wasm_encoder::ElementSection::new();
+    for e in elements {
+        use wasm_encoder::reencode::Reencode as _;
+        remap
+            .parse_element(&mut element_sec, e)
+            .map_err(|e| anyhow::anyhow!("element reencode: {e:?}"))?;
+    }
+
     data.active(0, &ConstExpr::i32_const((park + MSG) as i32), UNSUPPORTED_MSG.iter().copied());
 
     let mut m = Module::new();
@@ -212,7 +224,7 @@ pub fn to_p2(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
         .section(&memories)
         .section(&globals)
         .section(&exports)
-        .section(&elements)
+        .section(&element_sec)
         .section(&code)
         .section(&data);
     let mut core = m.finish();

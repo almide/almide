@@ -43,12 +43,6 @@ reason = "host-surface"
 issue = "#1423"
 
 [[unavailable]]
-fn = "env.set"
-legs = ["stock-p1"]
-reason = "stock artifact pending the p1-shim environ story; the embedded host serves the overlay (op 37/26)"
-issue = "#1423"
-
-[[unavailable]]
 fn = "env.unix_timestamp"
 legs = ["structural"]
 reason = "host-surface"
