@@ -374,6 +374,7 @@
 65904	spec/wasm_cross/mut_param_branch_forward.almd
 391536	spec/wasm_cross/mut_param_call_chain.almd
 66032	spec/wasm_cross/mut_param_effect_never_err.almd
+66368	spec/wasm_cross/mut_param_writeback_growth.almd
 95072	spec/wasm_cross/mutable_global_bytes_arena.almd
 66272	spec/wasm_cross/mutable_global_bytes_copy_from.almd
 65984	spec/wasm_cross/mutable_global_repeat_writes.almd
@@ -641,7 +642,7 @@
 71536	spec/wasm_cross/wide_function_body.almd
 65808	spec/wasm_cross/witness_straightline.almd
 71328	spec/wasm_cross/zip_view_shape.almd
-454096	spec/wasm_cross/zlib_selfhost.almd
+454224	spec/wasm_cross/zlib_selfhost.almd
 66144	spec/wasm_fail/effect_err_aborts_both_legs.almd
 66144	spec/wasm_fail/int_parse_err_propagates.almd
 66160	spec/wasm_fail/matrix_index_oob_aborts.almd

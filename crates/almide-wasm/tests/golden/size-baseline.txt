@@ -207,7 +207,7 @@
 6904	spec/wasm_cross/grouping_unary.almd
 4147	spec/wasm_cross/guard_let_statement.almd
 1879	spec/wasm_cross/guard_statement.almd
-24404	spec/wasm_cross/gzip_inflate_members.almd
+24392	spec/wasm_cross/gzip_inflate_members.almd
 5458	spec/wasm_cross/hash_digests.almd
 2514	spec/wasm_cross/heap_arena.almd
 2030	spec/wasm_cross/heap_result_err_interp.almd
@@ -374,6 +374,7 @@
 2784	spec/wasm_cross/mut_param_branch_forward.almd
 4290	spec/wasm_cross/mut_param_call_chain.almd
 2186	spec/wasm_cross/mut_param_effect_never_err.almd
+2532	spec/wasm_cross/mut_param_writeback_growth.almd
 7877	spec/wasm_cross/mutable_global_bytes_arena.almd
 2989	spec/wasm_cross/mutable_global_bytes_copy_from.almd
 2146	spec/wasm_cross/mutable_global_repeat_writes.almd
@@ -641,7 +642,7 @@
 9050	spec/wasm_cross/wide_function_body.almd
 1668	spec/wasm_cross/witness_straightline.almd
 8814	spec/wasm_cross/zip_view_shape.almd
-23515	spec/wasm_cross/zlib_selfhost.almd
+23612	spec/wasm_cross/zlib_selfhost.almd
 4055	spec/wasm_fail/effect_err_aborts_both_legs.almd
 4099	spec/wasm_fail/int_parse_err_propagates.almd
 7281	spec/wasm_fail/matrix_index_oob_aborts.almd

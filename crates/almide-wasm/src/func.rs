@@ -420,12 +420,16 @@ pub(crate) fn lower_fn(
         // inc borrowed args; fresh temporaries are consumed here).
         // Early returns and tail calls skip this — a leak, never a
         // dangle. BTreeSet order keeps the release deterministic.
-        for idx in std::mem::take(&mut em.rc_owned) {
+        let owned = std::mem::take(&mut em.rc_owned);
+        for &idx in &owned {
             em.f.instructions().local_get(idx).call(F_DEC_FLAT);
             em.witness_dec(idx);
         }
         for (k, &(_, pty)) in params.iter().enumerate() {
-            if em.rc_droppable(pty) {
+            // A param the Assign routes made an rc_owned member (the
+            // mut-param writeback) was released by the pass above —
+            // a second dec here is the #1770 double free.
+            if em.rc_droppable(pty) && !owned.contains(&(env_shift + k as u32)) {
                 // env_shift: a lifted lambda's raw param 0 is the closure
                 // ENV block — dec'ing it freed the closure after its
                 // first invoke (call_indirect then read a freelist

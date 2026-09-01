@@ -38,7 +38,7 @@ impl Emitter<'_> {
         self.f.instructions().local_get(idx);
         self.lower(right, Some(STR))?;
         self.f.instructions().call(F_STR_APPEND).local_set(idx);
-        self.rc_owned.insert(idx);
+        self.rc_own(idx);
         Ok(true)
     }
 
@@ -91,7 +91,7 @@ impl Emitter<'_> {
             self.f.instructions().i64_reinterpret_f64();
         }
         self.f.instructions().call(F_LIST_PUSH_8).local_set(idx);
-        self.rc_owned.insert(idx);
+        self.rc_own(idx);
         Ok(true)
     }
 }

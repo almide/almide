@@ -242,7 +242,7 @@ impl Emitter<'_> {
             // the local joins the epilogue's owner set.
             if self.rc_droppable(declared) {
                 self.f.instructions().local_get(idx).call(F_DEC_FLAT);
-                self.rc_owned.insert(idx);
+                self.rc_own(idx);
                 if self.witness.is_some() {
                     self.witness_bind(idx, declared, value);
                 }
@@ -250,6 +250,16 @@ impl Emitter<'_> {
             self.f.instructions().local_set(idx);
         }
         Ok(())
+    }
+
+    /// Register a local as an epilogue-released owner. A droppable PARAM
+    /// can land here too (a mut-param writeback's Assign) — the epilogue's
+    /// param pass skips locals in this set, so each local is released
+    /// exactly once (#1770: both passes firing on one local double-freed
+    /// the returned buffer, and its freelist link zeroed the first
+    /// payload word).
+    pub(crate) fn rc_own(&mut self, idx: u32) {
+        self.rc_owned.insert(idx);
     }
 
     pub(crate) fn lower_stmt(&mut self, s: &IrStmt) -> Result<(), EmitError> {
@@ -677,7 +687,7 @@ impl Emitter<'_> {
                     && !call_shaped_self
                 {
                     self.f.instructions().local_get(idx).call(F_DEC_FLAT);
-                    self.rc_owned.insert(idx);
+                    self.rc_own(idx);
                 }
                 match local {
                     Some(idx) => self.emit_store_var(*var, idx, declared)?,

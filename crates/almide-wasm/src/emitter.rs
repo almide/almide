@@ -30,6 +30,12 @@ pub(crate) struct Emitter<'a> {
     /// and loop binds never enter — they borrow their subject's
     /// interior. BTreeSet: the dec order must be deterministic.
     pub(crate) rc_owned: std::collections::BTreeSet<u32>,
+    // NOTE: rc_owned and rc_droppable_params are BOTH dec'd by the
+    // epilogue — a local in the two sets at once is a double free. Use
+    // rc_own(), never a raw insert (#1770: a mut-param writeback's
+    // Assign made the PARAM an "owner", the epilogue dec'd it twice,
+    // and the freed-but-returned buffer's freelist link zeroed its
+    // first payload word).
     pub(crate) table: &'a FnTable,
     pub(crate) types: &'a TypeTable,
     pub(crate) calls: &'a mut HashSet<usize>,
