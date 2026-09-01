@@ -38,8 +38,11 @@ ci = "v47.0.3"
 flags = "-W component-model-async=y,component-model-more-async-builtins=y -S p3=y"
 
 [wasm-tools]
-# The lockstep family version (workspace Cargo pins).
-family = "0.257"
+# The lockstep family version (workspace Cargo pins). 0.258 is the
+# 0.3.1-era toolchain (WIT `map<K,V>` / `implements` support) — the
+# coordinated bump #1759 landed the family as ONE change after the
+# per-crate dependabot PRs each failed on split-family version skew.
+family = "0.258"
 
 [sources]
 # Dated upstream evidence for the rows above.
@@ -47,4 +50,5 @@ evidence = [
   "WASI v0.3.0 release 2026-06-11; v0.3.1 2026-08-11 (github.com/WebAssembly/WASI/releases)",
   "wasmtime 46 release notes: wasi:cli@0.3.0 default-on (p3)",
   "wasmtime v47.0.2 vendored crates/wasi/src/p3/wit — the WIT shapes the almide p3 leg transcribed (2026-08-27/28 survey, ../almide-references/RESEARCH-component-model.md)",
+  "wasm-tools 0.258.0 release (wasmparser/wasm-encoder/wit-parser/wit-component lockstep, 2026-08; the 0.3.1 WIT-language train)",
 ]
