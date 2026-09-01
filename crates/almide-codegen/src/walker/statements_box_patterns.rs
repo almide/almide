@@ -444,7 +444,7 @@ pub fn render_pattern_hinted(ctx: &RenderContext, pat: &IrPattern, enum_hint: Op
             ctx.templates.render_with("tuple_literal", None, &[], &[("elements", elems.as_str())])
                 .unwrap_or_else(|| "tuple(...)".into())
         }
-        IrPattern::List { elements } => {
+        IrPattern::List { elements, .. } => {
             if elements.is_empty() {
                 "[]".to_string()
             } else {

@@ -211,17 +211,23 @@ impl Emitter<'_> {
                 self.f.instructions().else_().i32_const(0).end();
                 Ok(())
             }
-            (IrPattern::List { elements }, SliceTy::List(h)) => {
+            (IrPattern::List { elements, rest }, SliceTy::List(h)) => {
                 // Fixed-arity list pattern (#1584's last lowering wall):
                 // the block's byte LEN equals arity × stride, then each
                 // REFUTABLE element tests at its payload slot. `[]` is the
-                // pure length test.
+                // pure length test. A rest form (#1461) relaxes the
+                // length test to >= — the tail past the prefix is what
+                // the rest sub-pattern binds or ignores.
                 let et = self.types.el(h);
                 let stride = et.slot_size();
                 self.f.instructions().local_get(scr);
                 self.f.instructions().i32_load(len_memarg());
                 self.f.instructions().i32_const((elements.len() as u32 * stride) as i32);
-                self.f.instructions().i32_eq();
+                if rest.is_some() {
+                    self.f.instructions().i32_ge_u();
+                } else {
+                    self.f.instructions().i32_eq();
+                }
                 for (i, ep) in elements.iter().enumerate() {
                     if pattern_irrefutable(ep) {
                         continue;
@@ -320,13 +326,42 @@ impl Emitter<'_> {
                 };
                 self.bind_inner(inner, e, almide_layout::SUM_FIELD, scr)
             }
-            IrPattern::List { elements } => {
+            IrPattern::List { elements, rest } => {
                 let SliceTy::List(h) = subj_ty else {
                     return unsup("pattern:list-on-nonlist");
                 };
                 let stride = self.types.el(h).slot_size();
                 for (i, ep) in elements.iter().enumerate() {
                     self.bind_inner(ep, h, i as u32 * stride, scr)?;
+                }
+                // #1461 list-rest: a NAMED tail materializes as a fresh
+                // list block — alloc(len - prefix) + payload copy, the
+                // list.drop lowering's shape with the clamp elided (the
+                // test arm already guaranteed len >= prefix). Like every
+                // pattern bind it is NOT epilogue-owned: registering it
+                // freed a returned tail under the reader (the freelist
+                // link zeroed element 0) — the block leaks instead, the
+                // list.drop result's own leak-not-dangle discipline.
+                if let Some(r) = rest
+                    && let IrPattern::Bind { var, .. } = r.as_ref()
+                {
+                        let Some(&(idx, _)) = self.locals.get(var) else {
+                            return unsup("bind:unmapped");
+                        };
+                        let dropped = (elements.len() as u32 * stride) as i32;
+                        let hc = self.hold_i32()?;
+                        let mut i = self.f.instructions();
+                        i.local_get(scr).i32_load(len_memarg());
+                        i.i32_const(dropped).i32_sub().local_set(hc);
+                        i.local_get(hc).call(F_ALLOC).local_set(idx);
+                        i.local_get(idx).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+                        i.local_get(scr)
+                            .i32_const(almide_layout::PAYLOAD as i32 + dropped)
+                            .i32_add();
+                        i.local_get(hc);
+                        i.call(F_COPY);
+                        let _ = i;
+                        self.release_i32();
                 }
                 Ok(())
             }

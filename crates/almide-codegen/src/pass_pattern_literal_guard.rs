@@ -147,7 +147,7 @@ fn descend_children(pat: &mut IrPattern, f: &mut dyn FnMut(&mut IrPattern)) {
     match pat {
         IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => f(inner),
         IrPattern::Constructor { args, .. } => args.iter_mut().for_each(|a| f(a)),
-        IrPattern::Tuple { elements } | IrPattern::List { elements } => {
+        IrPattern::Tuple { elements } | IrPattern::List { elements, .. } => {
             elements.iter_mut().for_each(|e| f(e))
         }
         IrPattern::RecordPattern { fields, .. } => {

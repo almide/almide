@@ -151,7 +151,7 @@ impl<'a> OccWalker<'a> {
                     _ => self.define(f.name, span, kind),
                 }
             },
-            P::Tuple { elements } | P::List { elements } => for e in elements { self.bind_pattern(e, span, kind); },
+            P::Tuple { elements } | P::List { elements, .. } => for e in elements { self.bind_pattern(e, span, kind); },
             P::Some { inner } | P::Ok { inner } | P::Err { inner } => self.bind_pattern(inner, span, kind),
             P::Or { alts } => for a in alts { self.bind_pattern(a, span, kind); },
             P::Wildcard | P::None | P::Literal { .. } => {}

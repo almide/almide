@@ -248,7 +248,13 @@ pub enum IrPattern {
     None,
     Ok { inner: Box<IrPattern> },
     Err { inner: Box<IrPattern> },
-    List { elements: Vec<IrPattern> },
+    /// `rest` (#1461 list-rest): Some = the pattern matches any list of
+    /// length >= elements.len(); the tail past the prefix binds through
+    /// the boxed sub-pattern (`Bind` for `[a, ..t]` — its ty is the
+    /// SUBJECT's list type — `Wildcard` for `[a, ..]`). None = the
+    /// exact-length form. A full IrPattern so every visitor, remap and
+    /// bind collector recurses without a special case.
+    List { elements: Vec<IrPattern>, rest: Option<Box<IrPattern>> },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

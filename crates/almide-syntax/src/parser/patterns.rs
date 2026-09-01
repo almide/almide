@@ -134,16 +134,40 @@ impl Parser {
     fn parse_list_pattern(&mut self) -> Result<Pattern, String> {
         self.advance();
         let mut elements = Vec::new();
+        let mut rest: Option<Option<Sym>> = None;
         if !self.check(TokenType::RBracket) {
-            elements.push(self.parse_pattern()?);
-            while self.check(TokenType::Comma) {
-                self.advance();
-                if self.check(TokenType::RBracket) { break; }
+            loop {
+                // `..`/`..name` (#1461): the rest form, LAST position only
+                // — a suffix after it has no lowering and refuses here.
+                if self.check(TokenType::DotDot) {
+                    self.advance();
+                    let name = if self.check(TokenType::Ident) {
+                        Some(self.advance_and_get_sym())
+                    } else {
+                        None
+                    };
+                    rest = Some(name);
+                    if self.check(TokenType::Comma) {
+                        let tok = self.current();
+                        return Err(format!(
+                            "Rest pattern must be last at line {}:{}: `[a, ..t]` binds the whole tail — nothing can follow it",
+                            tok.line, tok.col
+                        ));
+                    }
+                    break;
+                }
                 elements.push(self.parse_pattern()?);
+                if !self.check(TokenType::Comma) {
+                    break;
+                }
+                self.advance();
+                if self.check(TokenType::RBracket) {
+                    break;
+                }
             }
         }
         self.expect(TokenType::RBracket)?;
-        Ok(Pattern::List { elements })
+        Ok(Pattern::List { elements, rest })
     }
 
     fn parse_negative_literal_pattern(&mut self) -> Result<Pattern, String> {
@@ -183,12 +207,8 @@ impl Parser {
             // enumerate patterns (the one thing that was right).
             (TokenType::Eq, _) => "\n  Hint: assignment is a statement, not an expression — a match arm that assigns needs a block body:\n    ok(_) => { c = c + 1 }".into(),
             (TokenType::DotDotDot, _) | (TokenType::DotDot, _) => {
-                "\n  Hint: rest/spread patterns `[h, ...t]` / `[h, ..t]` are not supported in Almide list patterns.\n\
-                  Use recursion with list.first / list.drop:\n\
-                    match xs {\n\
-                      [] => base,\n\
-                      _  => { let h = list.first(xs)!; let t = list.drop(xs, 1); /* ... */ },\n\
-                    }\n\
+                "\n  Hint: the rest form is spelled with TWO dots and lives inside a list pattern: `[h, ..t]` binds the tail, `[h, ..]` ignores it.\n\
+                  Here the dots sit where a whole pattern was expected — put them as the LAST element of `[...]`.\n\
                   Note: `{ x, .. }` IS valid inside record patterns.".into()
             }
             _ => "\n  Hint: Valid patterns: _, variable, Type(args), (a, b), [], [a, b], some(x), ok(x), err(x), none, true, false, 42, \"text\"".into(),

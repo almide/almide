@@ -220,7 +220,11 @@ fn collect_varids_in_pattern(pattern: &IrPattern, out: &mut Vec<VarId>) {
     match pattern {
         IrPattern::Bind { var, .. } => collect_var_id(*var, out),
         IrPattern::Constructor { args, .. } => { for a in args { collect_varids_in_pattern(a, out); } }
-        IrPattern::Tuple { elements } | IrPattern::List { elements } => { for e in elements { collect_varids_in_pattern(e, out); } }
+        IrPattern::Tuple { elements } => { for e in elements { collect_varids_in_pattern(e, out); } }
+        IrPattern::List { elements, rest } => {
+            for e in elements { collect_varids_in_pattern(e, out); }
+            if let Some(r) = rest { collect_varids_in_pattern(r, out); }
+        }
         IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => collect_varids_in_pattern(inner, out),
         IrPattern::RecordPattern { fields, .. } => { for f in fields { if let Some(p) = &f.pattern { collect_varids_in_pattern(p, out); } } }
         IrPattern::Literal { expr } => collect_varids_in_expr(expr, out),
@@ -427,7 +431,11 @@ fn remap_pattern_varids(pattern: &mut IrPattern, remap: &HashMap<VarId, VarId>) 
     match pattern {
         IrPattern::Bind { var, .. } => *var = remap_id(*var, remap),
         IrPattern::Constructor { args, .. } => { for a in args { remap_pattern_varids(a, remap); } }
-        IrPattern::Tuple { elements } | IrPattern::List { elements } => { for e in elements { remap_pattern_varids(e, remap); } }
+        IrPattern::Tuple { elements } => { for e in elements { remap_pattern_varids(e, remap); } }
+        IrPattern::List { elements, rest } => {
+            for e in elements { remap_pattern_varids(e, remap); }
+            if let Some(r) = rest { remap_pattern_varids(r, remap); }
+        }
         IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => remap_pattern_varids(inner, remap),
         IrPattern::RecordPattern { fields, .. } => { for f in fields { if let Some(p) = &mut f.pattern { remap_pattern_varids(p, remap); } } }
         _ => {} // Wildcard, None, Literal (literals don't bind VarIds)

@@ -273,7 +273,14 @@ impl LowerCtx {
             }
             IrPattern::Constructor { args: elements, .. }
             | IrPattern::Tuple { elements }
-            | IrPattern::List { elements } => self.bind_each(elements, subject),
+            | IrPattern::List { elements, rest: None } => self.bind_each(elements, subject),
+            // #1461 list-rest: the incumbent brick has no tail-slice
+            // machinery — an honest wall; the structural leg (the
+            // default) lowers this form.
+            IrPattern::List { rest: Some(_), .. } => Err(LowerError::at(
+                None,
+                "list-rest pattern binds are outside this brick — the structural leg lowers them",
+            )),
             IrPattern::RecordPattern { fields, .. } => self.bind_record_fields(fields, subject),
         }
     }

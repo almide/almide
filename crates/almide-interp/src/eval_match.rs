@@ -108,8 +108,24 @@ impl<'a> Interpreter<'a> {
                     .all(|(p, v)| self.try_match(p, v, binds)),
                 _ => false,
             },
-            IrPattern::List { elements } => match value.as_iter_items() {
-                Some(items) if items.len() == elements.len() => elements
+            IrPattern::List { elements, rest } => match value.as_iter_items() {
+                // #1461 list-rest: rest relaxes the length test to >= and
+                // binds the tail past the prefix as a fresh list value.
+                Some(items) if rest.is_some() && items.len() >= elements.len() => {
+                    let prefix_ok = elements
+                        .iter()
+                        .zip(items.iter())
+                        .all(|(p, v)| self.try_match(p, v, binds));
+                    if prefix_ok
+                        && let Some(r) = rest
+                        && let IrPattern::Bind { var, .. } = r.as_ref()
+                    {
+                        let tail: Vec<Value> = items[elements.len()..].to_vec();
+                        binds.push((*var, Value::List(std::rc::Rc::new(tail))));
+                    }
+                    prefix_ok
+                }
+                Some(items) if rest.is_none() && items.len() == elements.len() => elements
                     .iter()
                     .zip(items.iter())
                     .all(|(p, v)| self.try_match(p, v, binds)),

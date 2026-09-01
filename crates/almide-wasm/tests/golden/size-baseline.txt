@@ -308,6 +308,7 @@
 2242	spec/wasm_cross/list_product_overflow.almd
 1843	spec/wasm_cross/list_remove_at_oob.almd
 2265	spec/wasm_cross/list_repeat_size_ceiling.almd
+2839	spec/wasm_cross/list_rest_pattern.almd
 8996	spec/wasm_cross/list_set_value.almd
 4346	spec/wasm_cross/list_slice_oob.almd
 2525	spec/wasm_cross/list_sort_short.almd
