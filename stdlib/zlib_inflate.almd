@@ -6,7 +6,7 @@
 // outputs are byte-identical across legs by construction. Error TEXTS name the
 // entry point and the failure the way the decoder saw it (flate2's io wording
 // is not reproduced — the cross-target promise is bounded to success bytes and
-// the err/ok SPLIT, C-330).
+// the err/ok SPLIT, C-331).
 // (value, pos, buf, cnt)
 fn zli_bits(pos: Int, buf: Int, cnt: Int, inp: Bytes, need: Int) -> (Int, Int, Int, Int) = {
   var p = pos
