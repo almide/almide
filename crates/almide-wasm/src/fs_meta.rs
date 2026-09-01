@@ -47,6 +47,14 @@ pub(crate) const OP_HTTP_POST: i32 = 44;
 pub(crate) const OP_HTTP_PUT: i32 = 45;
 pub(crate) const OP_HTTP_PATCH: i32 = 46;
 pub(crate) const OP_HTTP_DELETE: i32 = 47;
+/// The framed request family (#1710 increment 3): url in a, the
+/// decimal-length (method, body, headers) frame in b — CHAR-count cells,
+/// `<len>\n<payload>`, built by stdlib/http_framed.almd and parsed by the
+/// embedded host with the same char arithmetic. 48 answers the body text,
+/// 49 answers `<status>\n<body>` (split guest-side), 50 answers raw bytes.
+pub(crate) const OP_HTTP_FRAMED_TEXT: i32 = 48;
+pub(crate) const OP_HTTP_FRAMED_STATUS: i32 = 49;
+pub(crate) const OP_HTTP_FRAMED_BYTES: i32 = 50;
 const OP_READ_BYTES: i32 = 14;
 
 impl Emitter<'_> {

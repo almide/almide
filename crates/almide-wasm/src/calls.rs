@@ -105,6 +105,26 @@ impl Emitter<'_> {
                 if let Some((ti, ci)) = ctor {
                     return self.lower_variant_ctor(name, ti, ci, args);
                 }
+                // The http_framed op leaves (#1710 increment 3): the
+                // splice's bodyless `= _` leaves, lowered as host ops —
+                // the intra-module twins of the host_env http arms (url
+                // in a, the method/body/headers frame in b). They carry
+                // no table body, so they intercept BEFORE resolution.
+                match name {
+                    "__http_framed_text" => {
+                        self.fs_call_str2(&args[0], &args[1], crate::fs_meta::OP_HTTP_FRAMED_TEXT)?;
+                        return Ok(Some(self.fs_result_string()?));
+                    }
+                    "__http_framed_status" => {
+                        self.fs_call_str2(&args[0], &args[1], crate::fs_meta::OP_HTTP_FRAMED_STATUS)?;
+                        return Ok(Some(self.fs_result_string()?));
+                    }
+                    "__http_framed_bytes" => {
+                        self.fs_call_str2(&args[0], &args[1], crate::fs_meta::OP_HTTP_FRAMED_BYTES)?;
+                        return Ok(Some(self.fs_result_bytes()?));
+                    }
+                    _ => {}
+                }
                 // Entry fns resolve by name; a miss falls back to the
                 // module-fn simple-name index (intra-module calls arrive
                 // as Named after lower_module).
@@ -324,6 +344,7 @@ impl Emitter<'_> {
                 && !crate::whitelist::CODEC_ENCODE_VERIFIED.contains(&impl_fn)
                 && !crate::whitelist::BYTES_FAMILY_VERIFIED.contains(&impl_fn)
                 && !crate::whitelist::BYTES_FAMILY_SUM.contains(&impl_fn)
+                && !crate::whitelist::HTTP_CLIENT_SUM.contains(&impl_fn)
             {
                 return None;
             }
@@ -358,6 +379,7 @@ impl Emitter<'_> {
                 && !crate::whitelist::SCALAR_TEXT_SUM_BUILDERS.contains(&impl_fn)
                 && !crate::whitelist::CODEC_ENCODE_VERIFIED.contains(&impl_fn)
                 && !crate::whitelist::BYTES_FAMILY_SUM.contains(&impl_fn)
+                && !crate::whitelist::HTTP_CLIENT_SUM.contains(&impl_fn)
                 && (info.params.iter().any(coupled) || info.ret.as_ref().is_some_and(coupled))
             {
                 return None;

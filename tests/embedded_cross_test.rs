@@ -44,9 +44,6 @@ fn embedded_lane_fixtures_match_native_byte_for_byte() {
         let run = |extra: &[&str]| {
             let mut c = Command::new(almide_bin());
             c.arg("run").arg(&path).args(extra);
-            // The availability matrix declares these fns by their BUILD
-            // verdict; the embedded lane is the one being measured here.
-            c.env("ALMIDE_NO_AVAIL_CHECK", "1");
             c.output().expect("almide runs")
         };
         let native = run(&[]);

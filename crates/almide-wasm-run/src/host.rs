@@ -116,6 +116,33 @@ fn frames(names: &[String]) -> Vec<u8> {
 
 /// status<<32 | len: 0 = ok, 1 = err (buffer holds the message), 2 =
 /// ok-none (the *_if_exists shapes). `flag` rides len for bool ops.
+/// Parse the http_framed cell frame (#1710 increment 3): decimal
+/// CHAR-count lengths (string.len semantics — the guest counts chars,
+/// so this parser walks chars, not bytes), `<len>\n<payload>` cells:
+/// method, body, then key/value pairs until the frame ends.
+fn parse_http_frame(frame: &str) -> Result<(String, String, Vec<(String, String)>), String> {
+    fn cell<'a>(rest: &'a str) -> Result<(String, &'a str), String> {
+        let nl = rest.find('\n').ok_or_else(|| "malformed http frame (missing length)".to_string())?;
+        let n: usize = rest[..nl].parse().map_err(|_| "malformed http frame (bad length)".to_string())?;
+        let tail = &rest[nl + 1..];
+        if tail.chars().count() < n {
+            return Err("malformed http frame (short cell)".to_string());
+        }
+        let byte_end = tail.char_indices().nth(n).map(|(i, _)| i).unwrap_or(tail.len());
+        Ok((tail[..byte_end].to_string(), &tail[byte_end..]))
+    }
+    let (method, rest) = cell(frame)?;
+    let (body, mut rest) = cell(rest)?;
+    let mut headers = Vec::new();
+    while !rest.is_empty() {
+        let (k, r1) = cell(rest)?;
+        let (v, r2) = cell(r1)?;
+        headers.push((k, v));
+        rest = r2;
+    }
+    Ok((method, body, headers))
+}
+
 fn pack(status: i64, len: usize) -> i64 {
     (status << 32) | (len as i64 & 0xFFFF_FFFF)
 }
@@ -360,6 +387,31 @@ fn fs_dispatch_host(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
         // (http_client.rs), so error texts and framing match native
         // byte-for-byte. Stock artifacts never reach here (the build-path
         // op audit refuses unserved ops); the embedded lane serves them.
+        // The framed request family (#1710 increment 3, ops 48..=50):
+        // url in a, the decimal CHAR-length frame in b — method cell,
+        // body cell, then header key/value cells, `<len>\n<payload>`
+        // each, exactly as stdlib/http_framed.almd builds it. 48 answers
+        // the body text, 49 answers `<status>\n<body>`, 50 raw bytes.
+        48..=50 => {
+            let frame = String::from_utf8_lossy(b).to_string();
+            match parse_http_frame(&frame) {
+                Err(m) => err_s(m),
+                Ok((method, body, headers)) => match op {
+                    48 => match almide_rt_core::http_client_core::request(&method, a, &body, &headers) {
+                        Ok(text) => ok_text(text),
+                        Err(m) => err_s(m),
+                    },
+                    49 => match almide_rt_core::http_client_core::request_status(&method, a, &body, &headers) {
+                        Ok((code, text)) => ok_text(format!("{code}\n{text}")),
+                        Err(m) => err_s(m),
+                    },
+                    _ => match almide_rt_core::http_client_core::request_bytes(&method, a, &body, &headers) {
+                        Ok(bytes) => (pack(0, bytes.len()), bytes),
+                        Err(m) => err_s(m),
+                    },
+                },
+            }
+        }
         43..=47 => {
             let method = match op {
                 43 => "GET",

@@ -341,7 +341,7 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
     // command writes — the cross-target equivalence guarantee depends on both
     // entry points sharing one code path. Any compile diagnostic was already
     // printed there; we just propagate the exit.
-    let (bytes, structural, host_ops) = match compile_to_wasm_bytes(file, allow_unverified, verified, true) {
+    let (bytes, structural, host_ops) = match compile_to_wasm_bytes(file, allow_unverified, verified, true, false) {
         Ok(b) => b,
         Err(()) => std::process::exit(1),
     };
@@ -648,7 +648,7 @@ fn verify_wasm_ir(ir_program: &almide::ir::IrProgram) -> Result<(), ()> {
 /// scripts/check-target-availability.sh) turns the late render wall into
 /// an E081 at check time, naming the reason and — where one exists — the
 /// portable alternative. The render wall stays as the backstop.
-fn check_wasm_availability(ir_program: &almide::ir::IrProgram) -> Result<(), ()> {
+fn check_wasm_availability(ir_program: &almide::ir::IrProgram, embedded_leg: bool) -> Result<(), ()> {
     // The measurement escape: the availability PROBE builds through this
     // binary to measure the ground truth the table declares — with the
     // check armed it would measure its own declaration (circular).
@@ -657,17 +657,20 @@ fn check_wasm_availability(ir_program: &almide::ir::IrProgram) -> Result<(), ()>
     }
     use std::collections::BTreeMap;
     use std::sync::OnceLock;
-    static UNAVAILABLE: OnceLock<BTreeMap<String, (String, Option<String>)>> = OnceLock::new();
+    type Row = (String, Option<String>, Option<String>, Option<String>, Option<String>);
+    static UNAVAILABLE: OnceLock<BTreeMap<String, Row>> = OnceLock::new();
     let table = UNAVAILABLE.get_or_init(|| {
         let toml = include_str!("../../proofs/target-availability.toml");
         let mut out = BTreeMap::new();
         // Schema 2 (#1710 increment 2): one `[[unavailable]]` row per fn
-        // with a per-leg `legs = [..]` list. E081 is the STOCK-P1 story —
-        // "no build path serves this on `--target wasm`" — so only rows
-        // declaring that leg feed the diagnostic. The reason is the
-        // per-leg `reason-stock-p1` when present, else the shared
-        // `reason`. Line-anchored block split, as before (a substring
-        // split once ate the first row through the header comment).
+        // with a per-leg `legs = [..]` list. E081 is a PER-LEG verdict
+        // (#1710 increment 3): the build path walls on the stock-p1 leg,
+        // the run/bench path (the embedded host) walls on the embedded
+        // leg — a stock wall alone no longer refuses the run route the
+        // row's own reason says is served. Rows keep their raw legs list
+        // and both per-leg reasons; the caller filters. Line-anchored
+        // block split, as before (a substring split once ate the first
+        // row through the header comment).
         for block in toml.split("\n[[unavailable]]\n").skip(1) {
             let field = |k: &str| {
                 block.lines().find_map(|l| {
@@ -677,22 +680,24 @@ fn check_wasm_availability(ir_program: &almide::ir::IrProgram) -> Result<(), ()>
             let legs = block
                 .lines()
                 .find_map(|l| l.strip_prefix("legs = ["))
-                .unwrap_or("");
-            if !legs.contains("\"stock-p1\"") {
-                continue;
-            }
-            let reason = field("reason-stock-p1").or_else(|| field("reason"));
-            if let (Some(fn_name), Some(reason)) = (field("fn"), reason) {
-                out.insert(fn_name, (reason, field("alt")));
+                .unwrap_or("")
+                .to_string();
+            if let Some(fn_name) = field("fn") {
+                out.insert(
+                    fn_name,
+                    (legs, field("reason-stock-p1"), field("reason-embedded"), field("reason"), field("alt")),
+                );
             }
         }
         out
     });
-    let mut hits: BTreeMap<String, &(String, Option<String>)> = BTreeMap::new();
+    let leg_lit = if embedded_leg { "\"embedded\"" } else { "\"stock-p1\"" };
+    let mut hits: BTreeMap<String, &(String, Option<String>, Option<String>, Option<String>, Option<String>)> = BTreeMap::new();
     use almide::ir::visit::IrVisitor;
     struct Scan<'a> {
-        table: &'a BTreeMap<String, (String, Option<String>)>,
-        hits: BTreeMap<String, &'a (String, Option<String>)>,
+        table: &'a BTreeMap<String, (String, Option<String>, Option<String>, Option<String>, Option<String>)>,
+        leg_lit: &'static str,
+        hits: BTreeMap<String, &'a (String, Option<String>, Option<String>, Option<String>, Option<String>)>,
     }
     impl<'a> IrVisitor for Scan<'a> {
         fn visit_expr(&mut self, e: &almide::ir::IrExpr) {
@@ -702,13 +707,15 @@ fn check_wasm_availability(ir_program: &almide::ir::IrProgram) -> Result<(), ()>
             {
                 let key = format!("{}.{}", module.as_str(), func.as_str());
                 if let Some(row) = self.table.get(&key) {
-                    self.hits.entry(key).or_insert(row);
+                    if row.0.contains(self.leg_lit) {
+                        self.hits.entry(key).or_insert(row);
+                    }
                 }
             }
             almide::ir::visit::walk_expr(self, e);
         }
     }
-    let mut scan = Scan { table, hits: BTreeMap::new() };
+    let mut scan = Scan { table, leg_lit, hits: BTreeMap::new() };
     for f in ir_program.functions.iter().chain(ir_program.modules.iter().flat_map(|m| m.functions.iter())) {
         scan.visit_expr(&f.body);
     }
@@ -725,7 +732,11 @@ fn check_wasm_availability(ir_program: &almide::ir::IrProgram) -> Result<(), ()>
     if hits.is_empty() {
         return Ok(());
     }
-    for (key, (reason, alt)) in &hits {
+    for (key, (_, r_stock, r_emb, r_shared, alt)) in &hits {
+        let reason = if embedded_leg { r_emb.as_ref() } else { r_stock.as_ref() }
+            .or(r_shared.as_ref())
+            .cloned()
+            .unwrap_or_else(|| "declared unavailable on this leg".to_string());
         let alt_line = alt.as_ref().map(|a| format!("\n  try: {a}")).unwrap_or_default();
         err(&format!(
             "error[E081]: `{key}` is not available on --target wasm\n  \
@@ -1042,7 +1053,7 @@ fn render_wasm_module(source_text: &str, v1_self_modules: &[(String, almide_lang
     }
 }
 
-pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified: bool, library_ok: bool) -> Result<(Vec<u8>, bool, Vec<i32>), ()> {
+pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified: bool, library_ok: bool, embedded_leg: bool) -> Result<(Vec<u8>, bool, Vec<i32>), ()> {
     let (mut program, source_text, mut resolved, dep_paths) = parse_and_resolve_wasm(file)?;
 
     // v1 `--verified`: capture the FRESH (un-inferred) cross-module siblings now, before the loop
@@ -1056,7 +1067,7 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
     let mut ir_program = lower_and_link_wasm_ir(&program, &mut checker, &mut resolved)?;
     verify_wasm_ir(&ir_program)?;
     check_no_native_only_matrix(&ir_program)?;
-    check_wasm_availability(&ir_program)?;
+    check_wasm_availability(&ir_program, embedded_leg)?;
 
     // Routing inputs (see render_wasm_module_routed): project shape, decided
     // from what the v0 gates already computed — never from a failure.
