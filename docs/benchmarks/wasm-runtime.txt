@@ -17,19 +17,19 @@
 # Every non-measured row is RE-MEASURED by the gate: a row that starts
 # benching fails the run with the good news (flip it to measured in the
 # same change); a measured row that stops benching fails as a regression.
-version = almide 0.61.0
+version = almide 0.61.1
 date    = 2026-09-01
 machine = arm64 Darwin (local stamp; ratios are the gated quantity)
 
-nbody                 | measured         | 1.29  | 2.82 | 2.19
-spectralnorm          | measured         | 1.54  | 3.17 | 2.06
-binarytrees           | measured         | 3.14  | 2.70 | 0.86
-fasta                 | routed-incumbent | 1.46  | -    | -
-fannkuchredux         | routed-incumbent | 1.41  | -    | -
-mandelbrot            | routed-incumbent | 2.64  | -    | -
-onebrc                | walled           | 1.69  | -    | -
-fft                   | measured         | 39.65 | 205.05 | 5.17
-strchurn              | oom-embedded     | 53.94 | -    | -
-listbuild_append      | measured         | 20.54 | 86.20 | 4.20
-listbuild_combinator  | measured         | 21.37 | 96.23 | 4.50
-listbuild_prealloc    | measured         | 21.09 | 82.62 | 3.92
+nbody                 | measured         | 1.46  | 2.76 | 1.89
+spectralnorm          | measured         | 1.39  | 3.00 | 2.16
+binarytrees           | measured         | 3.05  | 3.02 | 0.99
+fasta                 | routed-incumbent | 1.43  | -    | -
+fannkuchredux         | routed-incumbent | 1.40  | -    | -
+mandelbrot            | routed-incumbent | 2.57  | -    | -
+onebrc                | walled           | 1.86  | -    | -
+fft                   | measured         | 39.35 | 204.27 | 5.19
+strchurn              | measured         | 55.01 | 51.80 | 0.94
+listbuild_append      | measured         | 20.72 | 86.54 | 4.18
+listbuild_combinator  | measured         | 21.31 | 96.99 | 4.55
+listbuild_prealloc    | measured         | 21.27 | 82.95 | 3.90
