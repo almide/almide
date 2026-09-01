@@ -686,29 +686,52 @@ pub(crate) fn emit_block_copy() -> Function {
 }
 
 /// `$list_join(list: i32, sep: i32) -> i32`: join a List[String]'s blocks
-/// with `sep` — repeated `$concat` (quadratic, fine for fixture scale).
+/// with `sep` in TWO PASSES — pass 1 sums the piece lengths plus n-1
+/// separators, ONE `$alloc`, pass 2 cursor-copies pieces and separators.
+/// The old repeated-`$concat` body re-copied the whole accumulator per
+/// element and never freed the outgrown generation, so n pieces churned
+/// and retained O(n²) bytes (#1729's strchurn row) — and generations past
+/// the 512 KiB freelist ceiling never recycle, so the fix is reuse-shaped:
+/// one result block, zero intermediates. Pieces are borrowed, the result
+/// is fresh — the ownership contract is unchanged.
 pub(crate) fn emit_list_join() -> Function {
-    // params: 0=list i32, 1=sep i32; locals: 2=n i32, 3=i i32, 4=acc i32
-    let (list, sep, n, idx, acc) = (0u32, 1u32, 2u32, 3u32, 4u32);
-    let mut f = Function::new([(3, ValType::I32)]);
+    // params: 0=list i32, 1=sep i32; locals: 2=n, 3=i, 4=total, 5=base,
+    // 6=cur, 7=ph, 8=pl, 9=sl (all i32)
+    let (list, sep, n, idx, total) = (0u32, 1u32, 2u32, 3u32, 4u32);
+    let (base, cur, ph, pl, sl) = (5u32, 6u32, 7u32, 8u32, 9u32);
+    let payload = almide_layout::PAYLOAD as i32;
+    let mut f = Function::new([(8, ValType::I32)]);
     let mut i = f.instructions();
     i.local_get(list).i32_load(len_memarg()).i32_const(4).i32_div_u().local_set(n);
-    i.i32_const(0).call(F_ALLOC).local_set(acc); // ""
+    i.local_get(sep).i32_load(len_memarg()).local_set(sl);
+    i.i32_const(0).local_set(total);
     i.i32_const(0).local_set(idx);
-    i.loop_(BlockType::Empty);
-    i.local_get(idx).local_get(n).i32_ge_u().if_(BlockType::Empty);
-    i.local_get(acc).return_();
-    i.end();
-    i.local_get(idx).i32_const(0).i32_ne().if_(BlockType::Empty);
-    i.local_get(acc).local_get(sep).call(F_CONCAT).local_set(acc);
-    i.end();
-    i.local_get(acc);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(idx).local_get(n).i32_ge_u().br_if(1);
+    i.local_get(total);
     i.local_get(list).local_get(idx).i32_const(4).i32_mul().i32_add().i32_load(slot_memarg(0));
-    i.call(F_CONCAT).local_set(acc);
+    i.i32_load(len_memarg()).i32_add().local_set(total);
     i.local_get(idx).i32_const(1).i32_add().local_set(idx);
-    i.br(0);
+    i.br(0).end().end();
+    i.local_get(n).i32_const(0).i32_ne().if_(BlockType::Empty);
+    i.local_get(total).local_get(n).i32_const(1).i32_sub().local_get(sl).i32_mul().i32_add().local_set(total);
     i.end();
-    i.unreachable();
+    i.local_get(total).call(F_ALLOC).local_set(base);
+    i.local_get(base).i32_const(payload).i32_add().local_set(cur);
+    i.i32_const(0).local_set(idx);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(idx).local_get(n).i32_ge_u().br_if(1);
+    i.local_get(idx).i32_const(0).i32_ne().if_(BlockType::Empty);
+    i.local_get(cur).local_get(sep).i32_const(payload).i32_add().local_get(sl).call(F_COPY);
+    i.local_get(cur).local_get(sl).i32_add().local_set(cur);
+    i.end();
+    i.local_get(list).local_get(idx).i32_const(4).i32_mul().i32_add().i32_load(slot_memarg(0)).local_set(ph);
+    i.local_get(ph).i32_load(len_memarg()).local_set(pl);
+    i.local_get(cur).local_get(ph).i32_const(payload).i32_add().local_get(pl).call(F_COPY);
+    i.local_get(cur).local_get(pl).i32_add().local_set(cur);
+    i.local_get(idx).i32_const(1).i32_add().local_set(idx);
+    i.br(0).end().end();
+    i.local_get(base);
     i.end();
     f
 }

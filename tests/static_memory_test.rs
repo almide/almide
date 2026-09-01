@@ -264,6 +264,56 @@ fn index_writes_stay_in_place_under_fixed_budget() {
 }
 
 #[test]
+fn join_allocates_one_result_under_fixed_budget() {
+    if Command::new(almide_bin()).arg("--version").output().is_err() {
+        return;
+    }
+    if !wasmtime_available() {
+        return;
+    }
+    let dir = std::env::temp_dir().join("almide-static-memory");
+    std::fs::create_dir_all(&dir).expect("mkdir");
+
+    // The two-pass $list_join (#1729's strchurn shape): joining 50k
+    // rendered ints allocates ONE result block. The old repeated-$concat
+    // body re-copied the growing accumulator per piece and never freed
+    // the outgrown generation — O(n²) retained bytes past the 512 KiB
+    // freelist ceiling, which no fixed budget survives. The split-back
+    // round trip pins the byte contract on the same run.
+    let jn = dir.join("join-budget.almd");
+    std::fs::write(
+        &jn,
+        "import int\n\neffect fn main() -> Unit = {\n  let n = 50000\n  let parts = list.range(0, n) |> list.map((i) => int.to_string(i))\n  let joined = string.join(parts, \",\")\n  let back = string.split(joined, \",\")\n  println(int.to_string(string.len(joined)))\n  println(int.to_string(list.len(back)))\n}\n",
+    )
+    .expect("write");
+    let jn_wasm = dir.join("join-budget.wasm");
+    let out = Command::new(almide_bin())
+        .args([
+            "build",
+            jn.to_str().unwrap(),
+            "--target",
+            "wasm",
+            "--heap-cap",
+            "8388608",
+            "-o",
+            jn_wasm.to_str().unwrap(),
+        ])
+        .output()
+        .expect("spawn almide build");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let run = Command::new("wasmtime")
+        .args(["run", jn_wasm.to_str().unwrap()])
+        .output()
+        .expect("spawn wasmtime");
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout),
+        "288889\n50000\n",
+        "join then split must round-trip under the budget"
+    );
+}
+
+#[test]
 fn artifact_is_partition_shaped() {
     if Command::new(almide_bin()).arg("--version").output().is_err() {
         return;
