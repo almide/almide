@@ -97,7 +97,7 @@
 68592	spec/wasm_cross/edge_int_boundaries.almd
 67504	spec/wasm_cross/edge_map_order.almd
 113792	spec/wasm_cross/edge_string_unicode.almd
-66656	spec/wasm_cross/effect_assign_unwrap.almd
+66624	spec/wasm_cross/effect_assign_unwrap.almd
 67232	spec/wasm_cross/effect_fn_value.almd
 65872	spec/wasm_cross/effect_main_guard_err.almd
 66336	spec/wasm_cross/effect_main_guard_ok.almd
@@ -206,7 +206,7 @@
 70000	spec/wasm_cross/grouping_unary.almd
 66288	spec/wasm_cross/guard_let_statement.almd
 65840	spec/wasm_cross/guard_statement.almd
-7097840	spec/wasm_cross/gzip_inflate_members.almd
+782832	spec/wasm_cross/gzip_inflate_members.almd
 92752	spec/wasm_cross/hash_digests.almd
 68768	spec/wasm_cross/heap_arena.almd
 65936	spec/wasm_cross/heap_result_err_interp.almd
@@ -227,10 +227,10 @@
 65872	spec/wasm_cross/if_block_forms.almd
 65808	spec/wasm_cross/if_let_forms.almd
 66400	spec/wasm_cross/if_let_guard_let.almd
-66192	spec/wasm_cross/index_bounds.almd
-66144	spec/wasm_cross/index_bounds_i64.almd
-66128	spec/wasm_cross/index_bounds_write_heap.almd
-66048	spec/wasm_cross/index_bounds_write_only_var.almd
+66128	spec/wasm_cross/index_bounds.almd
+66080	spec/wasm_cross/index_bounds_i64.almd
+66096	spec/wasm_cross/index_bounds_write_heap.almd
+66016	spec/wasm_cross/index_bounds_write_only_var.almd
 66240	spec/wasm_cross/inplace_mutator_statement.almd
 65808	spec/wasm_cross/int8_div_overflow.almd
 65904	spec/wasm_cross/int_clamp_inverted.almd
@@ -284,7 +284,7 @@
 66176	spec/wasm_cross/list_call_element.almd
 66688	spec/wasm_cross/list_chunk_windows.almd
 65920	spec/wasm_cross/list_chunk_zero.almd
-70512	spec/wasm_cross/list_comprehensive.almd
+70448	spec/wasm_cross/list_comprehensive.almd
 81504	spec/wasm_cross/list_count_index_truncation.almd
 70224	spec/wasm_cross/list_cross_module_variant.almd
 66096	spec/wasm_cross/list_element_hof_chain.almd
@@ -364,10 +364,10 @@
 106304	spec/wasm_cross/matrix_select_rows.almd
 148080	spec/wasm_cross/matrix_select_rows_oob.almd
 172016	spec/wasm_cross/matrix_softmax_fastexp.almd
-147440	spec/wasm_cross/memory_stress.almd
+122352	spec/wasm_cross/memory_stress.almd
 75072	spec/wasm_cross/mg_rebuild_two_phase.almd
 65936	spec/wasm_cross/module_global_const.almd
-74528	spec/wasm_cross/module_var_alias_cow.almd
+74464	spec/wasm_cross/module_var_alias_cow.almd
 69200	spec/wasm_cross/mut_heap_param.almd
 66992	spec/wasm_cross/mut_map_param.almd
 65904	spec/wasm_cross/mut_param_branch_forward.almd
@@ -420,8 +420,8 @@
 65760	spec/wasm_cross/pipe_chain_scalar_bind.almd
 65968	spec/wasm_cross/pipe_compose_forms.almd
 65792	spec/wasm_cross/pipe_lambda_block_value.almd
-66576	spec/wasm_cross/place_assign_ascription.almd
-66672	spec/wasm_cross/place_mutation.almd
+66512	spec/wasm_cross/place_assign_ascription.almd
+66576	spec/wasm_cross/place_mutation.almd
 76576	spec/wasm_cross/playground_default.almd
 65856	spec/wasm_cross/pop_heap_element.almd
 ~	spec/wasm_cross/process_args.almd
