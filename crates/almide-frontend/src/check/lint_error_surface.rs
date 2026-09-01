@@ -347,6 +347,7 @@ fn collect_err_pattern_binds(pat: &ast::Pattern, out: &mut Vec<Sym>) {
             for e in elements { collect_err_pattern_binds(e, out); }
         }
         P::Some { inner } | P::Ok { inner } => collect_err_pattern_binds(inner, out),
+        P::As { inner, .. } => collect_err_pattern_binds(inner, out),
         _ => {}
     }
 }

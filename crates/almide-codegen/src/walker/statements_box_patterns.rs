@@ -77,6 +77,7 @@ fn box_shape_guard(ctx: &RenderContext, pat: &IrPattern, access: &str, counter: 
 fn guard_shape(ctx: &RenderContext, pat: &IrPattern, counter: &mut usize, subs: &mut Vec<String>) -> String {
     match pat {
         IrPattern::Wildcard | IrPattern::Bind { .. } => "_".to_string(),
+        IrPattern::As { inner, .. } => guard_shape(ctx, inner, counter, subs),
         IrPattern::Literal { .. } => render_pattern_hinted(ctx, pat, None),
         IrPattern::Some { inner } => format!("Some({})", guard_shape(ctx, inner, counter, subs)),
         IrPattern::None => "None".to_string(),
@@ -419,6 +420,10 @@ pub fn render_pattern_hinted(ctx: &RenderContext, pat: &IrPattern, enum_hint: Op
     match pat {
         IrPattern::Wildcard => template_or(ctx, "pattern_wildcard", &[], "_"),
         IrPattern::Bind { var, .. } => ctx.var_name(*var).to_string(),
+        // As-pattern (#1461): Rust's own `name @ pat` carries it 1:1.
+        IrPattern::As { var, inner, .. } => {
+            format!("{} @ {}", ctx.var_name(*var), render_pattern(ctx, inner))
+        }
         IrPattern::Literal { expr } => render_pattern_literal(ctx, expr),
         IrPattern::Some { inner } => {
             let binding_s = render_pattern(ctx, inner);

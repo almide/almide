@@ -537,6 +537,8 @@ fn registry_impl_names() -> &'static std::collections::HashSet<&'static str> {
 fn pattern_irrefutable(p: &IrPattern) -> bool {
     match p {
         IrPattern::Wildcard | IrPattern::Bind { .. } => true,
+        // An as-pattern is exactly as refutable as its inner pattern.
+        IrPattern::As { inner, .. } => pattern_irrefutable(inner),
         // A tuple of irrefutable positions always matches.
         IrPattern::Tuple { elements } => elements.iter().all(pattern_irrefutable),
         _ => false,

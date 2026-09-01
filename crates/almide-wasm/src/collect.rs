@@ -155,6 +155,15 @@ pub(crate) fn collect_pattern_binds(
         IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => {
             collect_pattern_binds(inner, out, seen, types)
         }
+        IrPattern::As { var, ty, inner } => {
+            let Some(sty) = slice_ty_of(ty, types) else {
+                return unsup(&format!("bind-ty:{}", ty_name(ty)));
+            };
+            if seen.insert(*var) {
+                out.push((*var, sty));
+            }
+            collect_pattern_binds(inner, out, seen, types)
+        }
         IrPattern::RecordPattern { fields, .. } => {
             for fp in fields {
                 if let Some(p) = &fp.pattern {

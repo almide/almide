@@ -108,6 +108,10 @@ impl<'a> Interpreter<'a> {
                     .all(|(p, v)| self.try_match(p, v, binds)),
                 _ => false,
             },
+            IrPattern::As { var, inner, .. } => {
+                binds.push((*var, value.clone()));
+                self.try_match(inner, value, binds)
+            }
             IrPattern::List { elements, rest } => match value.as_iter_items() {
                 // #1461 list-rest: rest relaxes the length test to >= and
                 // binds the tail past the prefix as a fresh list value.

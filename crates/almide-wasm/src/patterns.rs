@@ -122,6 +122,9 @@ impl Emitter<'_> {
         scr: u32,
     ) -> Result<(), EmitError> {
         match (p, subj_ty) {
+            // As-pattern (#1461): the test is the INNER pattern's — the
+            // binder is irrefutable decoration handled by the bind pass.
+            (IrPattern::As { inner, .. }, _) => self.emit_pattern_test(inner, subj_ty, scr),
             (IrPattern::Literal { expr }, SliceTy::Scalar(s)) => {
                 self.f.instructions().local_get(scr);
                 self.lower(expr, Some(SliceTy::Scalar(s)))?;
@@ -301,6 +304,15 @@ impl Emitter<'_> {
     ) -> Result<(), EmitError> {
         match p {
             IrPattern::Wildcard | IrPattern::Literal { .. } | IrPattern::None => Ok(()),
+            // As-pattern (#1461): bind the WHOLE value at this position,
+            // then the inner pattern's binds against the same scrutinee.
+            IrPattern::As { var, inner, .. } => {
+                let Some(&(idx, _)) = self.locals.get(var) else {
+                    return unsup("bind:unmapped");
+                };
+                self.f.instructions().local_get(scr).local_set(idx);
+                self.emit_pattern_binds(inner, subj_ty, scr)
+            }
             IrPattern::Bind { var, .. } => {
                 let Some(&(idx, _)) = self.locals.get(var) else {
                     return unsup("bind:unmapped");

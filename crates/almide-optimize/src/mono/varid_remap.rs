@@ -225,6 +225,10 @@ fn collect_varids_in_pattern(pattern: &IrPattern, out: &mut Vec<VarId>) {
             for e in elements { collect_varids_in_pattern(e, out); }
             if let Some(r) = rest { collect_varids_in_pattern(r, out); }
         }
+        IrPattern::As { var, inner, .. } => {
+            collect_var_id(*var, out);
+            collect_varids_in_pattern(inner, out);
+        }
         IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => collect_varids_in_pattern(inner, out),
         IrPattern::RecordPattern { fields, .. } => { for f in fields { if let Some(p) = &f.pattern { collect_varids_in_pattern(p, out); } } }
         IrPattern::Literal { expr } => collect_varids_in_expr(expr, out),
@@ -435,6 +439,10 @@ fn remap_pattern_varids(pattern: &mut IrPattern, remap: &HashMap<VarId, VarId>) 
         IrPattern::List { elements, rest } => {
             for e in elements { remap_pattern_varids(e, remap); }
             if let Some(r) = rest { remap_pattern_varids(r, remap); }
+        }
+        IrPattern::As { var, inner, .. } => {
+            *var = remap_id(*var, remap);
+            remap_pattern_varids(inner, remap);
         }
         IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => remap_pattern_varids(inner, remap),
         IrPattern::RecordPattern { fields, .. } => { for f in fields { if let Some(p) = &mut f.pattern { remap_pattern_varids(p, remap); } } }

@@ -86,6 +86,17 @@ impl Parser {
         if self.check(TokenType::Ident) {
             let name = sym(&self.current().value);
             self.advance();
+            // As-pattern (#1461): `name @ pattern` binds the whole value
+            // while the inner pattern destructures it. `@` binds tighter
+            // than the arm-level `|` — parenthesize an or-alternative.
+            if self.check(TokenType::At) {
+                self.advance();
+                let inner = match self.parse_pattern() {
+                    Ok(p) => p,
+                    Err(e) => return Some(Err(e)),
+                };
+                return Some(Ok(Pattern::As { name, inner: Box::new(inner) }));
+            }
             return Some(Ok(Pattern::Ident { name }));
         }
         None

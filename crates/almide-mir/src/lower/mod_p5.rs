@@ -530,6 +530,7 @@ pub(crate) fn max_var_id(body: &IrExpr) -> u32 {
                     pat_max(r, acc);
                 }
             }
+            IrPattern::As { inner, .. } => pat_max(inner, acc),
             IrPattern::RecordPattern { fields, .. } => {
                 for f in fields {
                     if let Some(fp) = &f.pattern {

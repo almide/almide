@@ -281,6 +281,10 @@ impl LowerCtx {
                 None,
                 "list-rest pattern binds are outside this brick — the structural leg lowers them",
             )),
+            IrPattern::As { .. } => Err(LowerError::at(
+                None,
+                "as-pattern binds are outside this brick — the structural leg lowers them",
+            )),
             IrPattern::RecordPattern { fields, .. } => self.bind_record_fields(fields, subject),
         }
     }
