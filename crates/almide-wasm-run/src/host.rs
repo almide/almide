@@ -369,7 +369,7 @@ fn fs_dispatch_host(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
                 _ => "DELETE",
             };
             let body = String::from_utf8_lossy(b).to_string();
-            match crate::http_client::request(method, a, &body, &[]) {
+            match almide_rt_core::http_client_core::request(method, a, &body, &[]) {
                 Ok(text) => ok_text(text),
                 Err(m) => err_s(m),
             }

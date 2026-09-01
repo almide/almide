@@ -11,10 +11,11 @@ description = "The greenfield wasm HOST: the almide.* import surface (print/exit
 
 [dependencies]
 almide-wasm = { path = "../almide-wasm" }
+# The shared native-runtime client core (#1715): the http client the
+# embedded host serves through fs_call ops 43..=47 — the SAME source the
+# splice template inlines, so C-328 equality holds by construction.
+almide-rt-core = { path = "../almide-rt-core" }
 # The embedded host's http client (#1710 increment 1): a verbatim copy of
-# the native runtime template's rustls client (see src/http_client.rs).
-rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
-webpki-roots = "1.0"
 anyhow = "1"
 wasmparser = "0.258"
 wasm-encoder = "0.258"
