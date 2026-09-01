@@ -254,10 +254,11 @@ literal                    // int, float, string, bool
 a | b | c                  // or-pattern: any alternative matches (binder-free)
 [h, ..t]                   // list-rest: len >= 1, t binds the tail (a list)
 [a, b, ..]                 // rest ignored: len >= 2, rest slot is LAST-only
+c @ Circle(r)              // as-pattern: c binds the whole, r the payload
 ```
 **`_` can appear in match patterns, `let _ = x` (discard), `for _ in xs`, and lambda params `(_ ) => expr`.**
 
-**NOT supported in patterns:** no range patterns (`1..5`), no `as` binding, no rest anywhere but the LAST list slot (`[..t, x]` refuses). Or-pattern alternatives (`"a" | "an" | "the" => …`) ARE supported at the top of an arm, but cannot bind variables — write separate arms when the body needs the payload. List-rest (`[h, ..t]`) IS supported and is the idiomatic head/tail split:
+**NOT supported in patterns:** no range patterns (`1..5`), no rest anywhere but the LAST list slot (`[..t, x]` refuses). Or-pattern alternatives (`"a" | "an" | "the" => …`) ARE supported at the top of an arm, but cannot bind variables — write separate arms when the body needs the payload. List-rest (`[h, ..t]`) IS supported and is the idiomatic head/tail split:
 
 ```almide check
 fn sum(xs: List[Int]) -> Int = match xs {

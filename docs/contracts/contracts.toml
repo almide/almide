@@ -4264,3 +4264,16 @@ evidence  = [
   { path = "tests/diagnostics/list-rest-not-last/broken.almd", class = "fixture" },
 ]
 
+[[contract]]
+id        = "C-333"
+spec      = "ALS-E18"
+title     = "As-patterns: the whole value binds beside its own destructuring, identically on every leg"
+statement = "A pattern position may be `name @ pattern` (#1461): the name binds the WHOLE value at that position — with the position's own type — while the inner pattern destructures and tests the same value; `@` binds tighter than the arm-level `|`, and an as-binder inside an or-alternative is E080 like any other binder. Cross-leg identity is constructive per leg: the Rust walker renders Rust's own `name @ pat` 1:1 (list-carrying arms pre-desugar through the same ladder as C-332, the as-bind hoisted as a whole-subject bind); the structural wasm leg tests the inner pattern and binds the scrutinee local beside the inner binds; the interp clones the value into the bind and recurses. The incumbent brick walls the form honestly. Composition with the rest form (`all @ [a, ..t]`) is part of the pinned surface."
+since     = "0.62.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/as_pattern.almd", class = "fixture" },
+  { path = "spec/lang/as_pattern_test.almd", class = "fixture" },
+]
+
+
