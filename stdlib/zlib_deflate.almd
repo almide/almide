@@ -9,6 +9,8 @@
 // (decompress(compress(x)) == x on every leg) and the container framing.
 // The `level` twins clamp and IGNORE the level (stored blocks have no dial).
 // Raw DEFLATE from stored blocks: <=65535-byte chunks, BFINAL on the last.
+fn zld_push_byte(mut out: Bytes, v: Int) -> Unit = bytes.push(out, int.band(v, 255))
+
 fn zld_stored_stream(data: Bytes, mut out: Bytes) -> Unit = {
   let n = bytes.len(data)
   var pos = 0
@@ -19,10 +21,8 @@ fn zld_stored_stream(data: Bytes, mut out: Bytes) -> Unit = {
     let final = if pos + take >= n then 1 else 0
     bytes.push(out, final)
     let nlen = int.bxor(take, 65535)
-    bytes.push(out, int.band(take, 255))
-    bytes.push(out, int.band(int.bshr(take, 8), 255))
-    bytes.push(out, int.band(nlen, 255))
-    bytes.push(out, int.band(int.bshr(nlen, 8), 255))
+    zld_push_u16_le(out, take)
+    zld_push_u16_le(out, nlen)
     var k = 0
     while k < take {
       bytes.push(out, bytes.get_or(data, pos + k, 0))
@@ -31,6 +31,11 @@ fn zld_stored_stream(data: Bytes, mut out: Bytes) -> Unit = {
     pos = pos + take
     done = final == 1
   }
+}
+
+fn zld_push_u16_le(mut out: Bytes, v: Int) -> Unit = {
+  bytes.push(out, int.band(v, 255))
+  bytes.push(out, int.band(int.bshr(v, 8), 255))
 }
 
 fn zld_crc_table() -> List[Int] = {

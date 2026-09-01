@@ -1,0 +1,31 @@
+// @contract: C-226
+// The #1770 shape: a fn keeps WRITING its own mut param after forwarding
+// it to a user mut helper, and the buffer REALLOCATES during those later
+// writes. The helper's write-back made the param an epilogue "owner" on
+// top of the param pass's own release — the double dec freed the buffer
+// the fn returned, and the freelist link write zeroed its first payload
+// word (native [1,16,...] vs wasm [0,0,0,0,...]). Every leg must print
+// the same header and the same round-trip bytes.
+
+fn push_u16_le(mut out: Bytes, v: Int) -> Unit = {
+  bytes.push(out, int.band(v, 255))
+  bytes.push(out, int.band(int.bshr(v, 8), 255))
+}
+
+fn stream(mut out: Bytes, n: Int) -> Unit = {
+  bytes.push(out, 1)
+  push_u16_le(out, n)
+  push_u16_le(out, int.bxor(n, 65535))
+  var k = 0
+  while k < n {
+    bytes.push(out, 97)
+    k = k + 1
+  }
+}
+
+fn main() -> Unit = {
+  var out = bytes.new(0)
+  stream(out, 16)
+  println("head=${out |> bytes.to_list |> list.take(5) |> list.map((x) => int.to_string(x)) |> list.join(",")}")
+  println("len=${bytes.len(out)}")
+}
