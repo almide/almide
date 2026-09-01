@@ -1,0 +1,10 @@
+// The #1773 class on the Ord walk: an Ord-declared variant whose case payload
+// carries a Float has no total order (f64 is not Ord) — the false-cycle bug
+// let it through to a rustc refusal on the derive's monomorph.
+type Level: Ord = | Exact(Float) | Unknown
+
+fn main() -> Unit = {
+  let xs: List[Level] = [Unknown]
+  let s = list.sort(xs)
+  println(int.to_string(list.len(s)))
+}

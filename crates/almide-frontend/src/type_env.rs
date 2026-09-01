@@ -276,10 +276,18 @@ impl TypeEnv {
                 if !seen.insert(*name) {
                     return true;
                 }
-                if let Some(resolved) = self.types.get(name) {
-                    self.is_eq_inner(resolved, seen)
-                } else {
-                    true
+                match self.types.get(name) {
+                    // A Named that resolves to its variant DEFINITION is one
+                    // logical node: re-entering the Variant arm would read the
+                    // name already in `seen` as a cycle and skip the payloads
+                    // (#1773's class — a Float payload passed as hashable).
+                    // Claim the variant's name and walk the payloads directly.
+                    Some(resolved @ Ty::Variant { name: vn, .. }) => {
+                        seen.insert(*vn);
+                        resolved.children().iter().all(|child| self.is_eq_inner(child, seen))
+                    }
+                    Some(resolved) => self.is_eq_inner(resolved, seen),
+                    None => true,
                 }
             }
             // All other types: Eq if all children are Eq
@@ -310,10 +318,17 @@ impl TypeEnv {
                 if !seen.insert(*name) {
                     return true;
                 }
-                if let Some(resolved) = self.types.get(name) {
-                    self.is_hash_inner(resolved, seen)
-                } else {
-                    true
+                match self.types.get(name) {
+                    // One logical node with its variant definition — see
+                    // is_eq_inner. Without the bypass the payload walk was
+                    // skipped as a false cycle and `| Temp(Float)` keyed a
+                    // Map (#1773: check passed, rustc refused Hash on f64).
+                    Some(resolved @ Ty::Variant { name: vn, .. }) => {
+                        seen.insert(*vn);
+                        resolved.children().iter().all(|child| self.is_hash_inner(child, seen))
+                    }
+                    Some(resolved) => self.is_hash_inner(resolved, seen),
+                    None => true,
                 }
             }
             // All other types: hashable if all children are hashable
@@ -347,7 +362,16 @@ impl TypeEnv {
                 if !seen.insert(*name) {
                     return None;
                 }
-                self.types.get(name).and_then(|resolved| self.hash_blocker_inner(resolved, seen))
+                match self.types.get(name) {
+                    // Mirror of is_hash_inner's variant-definition bypass —
+                    // the two traversals must never disagree on reachability.
+                    Some(resolved @ Ty::Variant { name: vn, .. }) => {
+                        seen.insert(*vn);
+                        resolved.children().iter().find_map(|child| self.hash_blocker_inner(child, seen))
+                    }
+                    Some(resolved) => self.hash_blocker_inner(resolved, seen),
+                    None => None,
+                }
             }
             _ => ty.children().iter().find_map(|child| self.hash_blocker_inner(child, seen)),
         }
@@ -388,6 +412,13 @@ impl TypeEnv {
                         && !self.declares_ord(*name)
                     {
                         return false;
+                    }
+                    // Variant-definition bypass (see is_eq_inner): the
+                    // declares_ord gate above already admitted the derive;
+                    // the payloads must still order structurally.
+                    if let Ty::Variant { name: vn, .. } = &resolved {
+                        seen.insert(*vn);
+                        return resolved.children().iter().all(|child| self.is_ord_inner(child, seen));
                     }
                     self.is_ord_inner(&resolved, seen)
                 } else {
