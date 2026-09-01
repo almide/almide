@@ -37,12 +37,6 @@ impl Emitter<'_> {
                 self.release_f64();
                 Some(FLOAT)
             }
-            // This host passes NO program arguments (the harness defines
-            // the boundary): the empty List[String].
-            ("env", "args", []) => {
-                self.f.instructions().i32_const(0).call(F_ALLOC);
-                Some(SliceTy::List(self.types.intern(STR)))
-            }
             // C-210: NaN OBSERVATION IS CANONICAL — to_bits collapses every
             // NaN to 0x7FF8000000000000; non-NaN bits stay raw.
             ("float", "to_bits", [x]) => {

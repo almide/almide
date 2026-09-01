@@ -500,6 +500,16 @@ pub fn to_p3(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     ));
     code.function(&shim_callback());
 
+    // Elements re-encode through the Remap (#1716): the import shift must
+    // move funcref table entries too (#1688's silent class).
+    let mut element_sec = wasm_encoder::ElementSection::new();
+    for e in elements {
+        use wasm_encoder::reencode::Reencode as _;
+        remap
+            .parse_element(&mut element_sec, e)
+            .map_err(|e| anyhow::anyhow!("element reencode: {e:?}"))?;
+    }
+
     data.active(0, &ConstExpr::i32_const((park + MSG) as i32), UNSUPPORTED_MSG.iter().copied());
     for (off, msg) in [
         (MSG_NOENT, E_NOENT),
@@ -519,7 +529,7 @@ pub fn to_p3(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
         .section(&memories)
         .section(&globals)
         .section(&exports)
-        .section(&elements)
+        .section(&element_sec)
         .section(&code)
         .section(&data);
     let mut core = m.finish();
