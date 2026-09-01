@@ -341,10 +341,14 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
     // command writes — the cross-target equivalence guarantee depends on both
     // entry points sharing one code path. Any compile diagnostic was already
     // printed there; we just propagate the exit.
-    let (bytes, structural) = match compile_to_wasm_bytes(file, allow_unverified, verified, true) {
+    let (bytes, structural, host_ops) = match compile_to_wasm_bytes(file, allow_unverified, verified, true) {
         Ok(b) => b,
         Err(()) => std::process::exit(1),
     };
+    // The p3 component earns its http import block only when the emitted
+    // op set reaches the http family (#1710 PR B) — a non-http component
+    // must not demand `-S http=y` from its runtime.
+    let wants_http = host_ops.iter().any(|op| (43..=47).contains(op));
     // The structural leg's module imports `almide.*` (the embedded host's
     // surface). A BUILD artifact must run on stock runtimes, so it ships in
     // the WASI form — same index space, shimmed imports, proc_exit on trap
@@ -367,7 +371,7 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
     // the corpus gates cover it.
     let direct_p3 = direct_p2 && std::env::var_os("ALMIDE_COMPONENT_P3").is_some();
     let bytes = if direct_p3 {
-        match almide_wasm_run::wasi_p3::to_p3(&bytes) {
+        match almide_wasm_run::wasi_p3::to_p3(&bytes, wants_http) {
             Ok(c) => c,
             Err(e) => {
                 err(&format!("error: p3 component transform failed — this is an Almide bug: {e}"));
@@ -709,6 +713,15 @@ fn check_wasm_availability(ir_program: &almide::ir::IrProgram) -> Result<(), ()>
         scan.visit_expr(&f.body);
     }
     hits.extend(scan.hits);
+    // The p3 component serves the http string family (#1710 PR B): under
+    // ALMIDE_COMPONENT_P3 the ops-43..=47 fns ship through the to_p3 http
+    // shim, so their stock-p1 rows do not bar THIS build path — the same
+    // predicate that flips fs routing structural for p3.
+    if std::env::var_os("ALMIDE_COMPONENT_P3").is_some() {
+        for k in ["http.get", "http.post", "http.put", "http.patch", "http.delete"] {
+            hits.remove(k);
+        }
+    }
     if hits.is_empty() {
         return Ok(());
     }
@@ -771,7 +784,7 @@ fn render_wasm_module_routed(
     dep_paths: &[(project::PkgId, std::path::PathBuf)],
     uses_incumbent_features: bool,
     host_variant: bool,
-) -> Result<(Vec<u8>, bool), ()> {
+) -> Result<(Vec<u8>, bool, Vec<i32>), ()> {
     //   - `ALMIDE_FUEL_PROBE` set         → incumbent (the charge-trace
     //     probe line is that leg's Σ-probe instrumentation — contract
     //     evidence keeps its measured meaning; the structural leg's C-320
@@ -791,7 +804,7 @@ fn render_wasm_module_routed(
             || uses_incumbent_features
             || (library_ok && host_variant));
     if incumbent {
-        let r = render_wasm_module(source_text, v1_self_modules, library_ok).map(|(b, _)| (b, false));
+        let r = render_wasm_module(source_text, v1_self_modules, library_ok).map(|(b, _)| (b, false, Vec::new()));
         // REVERSE handover (#1423 bucket A, the env.sleep_ms build shape):
         // a SHAPE-routed host-variant program the incumbent walls gets one
         // structural attempt — the same verified-to-verified doctrine as
@@ -819,7 +832,7 @@ fn render_wasm_module_routed(
                     bytes.len()
                 ));
             }
-            return Ok((bytes, true));
+            return Ok((bytes, true, host_ops.iter().copied().collect()));
         }
         return r;
     }
@@ -837,7 +850,7 @@ fn render_wasm_module_routed(
         if std::env::var_os("ALMIDE_VERIFIED_DEBUG").is_some() {
             err(&format!("[almide] structural leg declined ({why}) — incumbent renderer"));
         }
-        let res = render_wasm_module(source_text, v1_self_modules, library_ok).map(|(b, _)| (b, false));
+        let res = render_wasm_module(source_text, v1_self_modules, library_ok).map(|(b, _)| (b, false, Vec::new()));
         if res.is_err() {
             // #1690: BOTH legs refused. The incumbent just printed its own wall
             // above — without these lines the DEFAULT leg's reason is invisible,
@@ -892,7 +905,7 @@ fn render_wasm_module_routed(
                     bytes.len()
                 ));
             }
-            Ok((bytes, true))
+            Ok((bytes, true, host_ops.iter().copied().collect()))
         }
         Err(almide_wasm::EmitError::Unsupported(reason)) => reroute(&reason),
     }
@@ -1029,7 +1042,7 @@ fn render_wasm_module(source_text: &str, v1_self_modules: &[(String, almide_lang
     }
 }
 
-pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified: bool, library_ok: bool) -> Result<(Vec<u8>, bool), ()> {
+pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified: bool, library_ok: bool) -> Result<(Vec<u8>, bool, Vec<i32>), ()> {
     let (mut program, source_text, mut resolved, dep_paths) = parse_and_resolve_wasm(file)?;
 
     // v1 `--verified`: capture the FRESH (un-inferred) cross-module siblings now, before the loop

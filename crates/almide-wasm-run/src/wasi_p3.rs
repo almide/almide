@@ -116,7 +116,39 @@ const I_FS_MKDIR: u32 = 39; // [method]descriptor.create-directory-at
 const I_FS_UNLINK: u32 = 40; // [method]descriptor.unlink-file-at
 const I_FS_RMDIR: u32 = 41; // [method]descriptor.remove-directory-at
 const IMPORTS: u32 = 42;
-const SHIFT: u32 = IMPORTS - 5;
+
+// ── The p3 http client import block (#1710 PR B) ────────────────────────
+// Appended AFTER the fs table and included only when the module's op set
+// reaches the http family (43..=47) — a non-http component must not demand
+// `-S http=y` from its runtime. Builtin names follow wit-parser's mangling
+// (`[stream-new-0][static]request.new`): the component encode validates
+// them against the world, so a drifted name fails loudly at emit.
+const I_HTTP_FIELDS_NEW: u32 = 42; // [constructor]fields () -> own<fields>
+const I_HTTP_REQ_NEW: u32 = 43; // [static]request.new (retptr: request + sent-future)
+const I_HTTP_REQ_SNEW: u32 = 44; // [stream-new-0] of request.new (contents)
+const I_HTTP_REQ_SWRITE: u32 = 45; // [stream-write-0] of request.new
+const I_HTTP_REQ_SDROPW: u32 = 46; // [stream-drop-writable-0] of request.new
+const I_HTTP_REQ_FNEW: u32 = 47; // [future-new-1] of request.new (trailers)
+const I_HTTP_REQ_FWRITE: u32 = 48; // [future-write-1] of request.new
+const I_HTTP_REQ_FDROPW: u32 = 49; // [future-drop-writable-1] of request.new
+const I_HTTP_REQ_SENTDROP: u32 = 50; // [future-drop-readable-2] of request.new
+const I_HTTP_SET_METHOD: u32 = 51; // [method]request.set-method
+const I_HTTP_SET_SCHEME: u32 = 52; // [method]request.set-scheme
+const I_HTTP_SET_AUTH: u32 = 53; // [method]request.set-authority
+const I_HTTP_SET_PATH: u32 = 54; // [method]request.set-path-with-query
+const I_HTTP_SEND: u32 = 55; // client.send (sync lower, retptr)
+const I_HTTP_STATUS: u32 = 56; // [method]response.get-status-code
+const I_HTTP_CONSUME: u32 = 57; // [static]response.consume-body (retptr)
+const I_HTTP_CB_FNEW: u32 = 58; // [future-new-0] of consume-body (handling result)
+const I_HTTP_CB_FWRITE: u32 = 59; // [future-write-0] of consume-body
+const I_HTTP_CB_FDROPW: u32 = 60; // [future-drop-writable-0] of consume-body
+const I_HTTP_BODY_READ: u32 = 61; // [stream-read-1] of consume-body (the body)
+const I_HTTP_BODY_DROPR: u32 = 62; // [stream-drop-readable-1] of consume-body
+const I_HTTP_TRL_DROPR: u32 = 63; // [future-drop-readable-2] of consume-body
+const I_HTTP_REQ_DROP: u32 = 64; // [resource-drop]request
+const I_HTTP_RESP_DROP: u32 = 65; // [resource-drop]response
+const I_HTTP_FIELDS_DROP: u32 = 66; // [resource-drop]fields
+const IMPORTS_HTTP: u32 = 67;
 
 // Park offsets past the shared ones: retptr / future-payload scratch.
 const RET: u64 = 32;
@@ -136,6 +168,11 @@ const E_ACCES: &[u8] = b"Permission denied (os error 13)";
 const E_ISDIR: &[u8] = b"Is a directory (os error 21)";
 const E_GEN: &[u8] = b"filesystem operation failed";
 const E_NOPRE: &[u8] = b"no filesystem preopen (run with --dir)";
+// The p3 http transport-error static (#1710 PR B): transport-error TEXT is
+// host-specific by contract — the cross-lane fixtures assert err-ness, not
+// the wording (the native legs' per-OS errno suffixes already force that).
+const MSG_HTTP: u64 = 576;
+const E_HTTP: &[u8] = b"http request failed (p3 transport)";
 
 // Park layout, checked at COMPILE time: retptr spans and the message
 // statics must not collide with each other or the stdin/entropy DATA
@@ -148,7 +185,8 @@ const _: () = {
     assert!(MSG_ACCES + E_ACCES.len() as u64 <= MSG_ISDIR);
     assert!(MSG_ISDIR + E_ISDIR.len() as u64 <= MSG_GEN);
     assert!(MSG_GEN + E_GEN.len() as u64 <= MSG_NOPRE);
-    assert!(MSG_NOPRE + E_NOPRE.len() as u64 <= DATA);
+    assert!(MSG_NOPRE + E_NOPRE.len() as u64 <= MSG_HTTP);
+    assert!(MSG_HTTP + E_HTTP.len() as u64 <= DATA);
 };
 
 // The fan prefetch slot table: SLOT_CAP slots of SLOT_STRIDE bytes on
@@ -241,12 +279,423 @@ fn fs_abi(resolve: &wit_parser::Resolve) -> anyhow::Result<FsAbi> {
     })
 }
 
+/// Feed the request body (#1710 PR B): issue async stream-writes until the
+/// write blocks (join the writable end to the exchange's waitable set and
+/// mark pending) or the body is fully accepted, at which point the writable
+/// end drops — the EOF the server needs before it will answer. Slot numbers
+/// are shim_http's fixed local map.
+fn http_body_pump(i: &mut wasm_encoder::InstructionSink<'_>) {
+    let (b_ptr, b_len, str_tx) = (3u32, 4u32, 15u32);
+    let (n, k, hws, str_pend) = (26u32, 27u32, 29u32, 31u32);
+    i.i32_const(0).local_set(str_pend);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(b_len).i32_eqz().br_if(1);
+    i.local_get(str_tx).local_get(b_ptr).local_get(b_len).call(I_HTTP_REQ_SWRITE).local_set(n);
+    i.local_get(n).i32_const(-1).i32_eq().if_(BlockType::Empty);
+    i.local_get(hws).i32_const(0).i32_lt_s().if_(BlockType::Empty);
+    i.call(I_WS_NEW).local_set(hws);
+    i.end();
+    i.local_get(str_tx).local_get(hws).call(I_WS_JOIN);
+    i.i32_const(1).local_set(str_pend);
+    i.end();
+    i.local_get(str_pend).br_if(1);
+    i.local_get(n).i32_const(4).i32_shr_u().local_set(k);
+    i.local_get(b_ptr).local_get(k).i32_add().local_set(b_ptr);
+    i.local_get(b_len).local_get(k).i32_sub().local_set(b_len);
+    i.local_get(n).i32_const(15).i32_and().i32_const(1).i32_eq().if_(BlockType::Empty);
+    i.i32_const(0).local_set(b_len); // DROPPED: the reader closed the body
+    i.end();
+    i.br(0).end().end();
+    i.local_get(str_pend).i32_eqz().if_(BlockType::Empty);
+    i.local_get(str_tx).call(I_HTTP_REQ_SDROPW);
+    i.end();
+}
+
+/// The p3 http string client (#1710 PR B): serve fs_call ops 43..=47 over
+/// `wasi:http/client@0.3.0`'s sync-lowered `send`. Sequence (the recorded
+/// blueprint): url parse in-shim (scheme prefix, authority to '/', path
+/// rest); empty `fields`; the trailers future written `ok(none)` up front;
+/// an optional contents stream fed and its writable end dropped BEFORE the
+/// sync send (the rendezvous-ordering probe the blueprint demands — a body
+/// past the host's buffer (`-S http-outgoing-body-buffer-chunks`) is the
+/// empirical fixture); the sent-future's readable dropped; on `ok`, the
+/// response body drains through the same realloc'd sync-read loop the fs
+/// shim uses, into the parked-result convention. Transport errors answer
+/// `pack(1, len)` with the static E_HTTP text (host-specific wording is
+/// bounded by contract — fixtures assert err-ness). The p3 stream delivers
+/// the DECODED body, so no chunked handling exists here by design.
+fn shim_http(park: u64, g_plen: u32, g_ppos: u32, f_realloc: u32, h: &HttpAbi) -> Function {
+    // Emit-time bisect knob (#1710 PR B bring-up): ALMIDE_P3_HTTP_STOP=N
+    // makes the shim answer the static err right after stage N, so a hang
+    // localizes to the first stage whose stop-build still hangs. Stages:
+    // 1 = fields+trailers written, 2 = request.new, 3 = setters,
+    // 4 = body fed + writable dropped, 5 = sent-future dropped.
+    let stop = std::env::var("ALMIDE_P3_HTTP_STOP")
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(0);
+    let (op, a_ptr, a_len, b_ptr, b_len) = (0u32, 1u32, 2u32, 3u32, 4u32);
+    let (sch, rest) = (5u32, 6u32);
+    let (auth_ptr, auth_len, path_ptr, path_len) = (7u32, 8u32, 9u32, 10u32);
+    let (headers, trl_rx, trl_tx, str_rx, str_tx) = (11u32, 12u32, 13u32, 14u32, 15u32);
+    let (request, sentfut, response, cb_rx, cb_tx) = (16u32, 17u32, 18u32, 19u32, 20u32);
+    let (body_rx, trlfut, buf, cap, total) = (21u32, 22u32, 23u32, 24u32, 25u32);
+    let (n, k) = (26u32, 27u32);
+    let s64 = 28u32;
+    let (hws, trl_pend, str_pend, snd_done) = (29u32, 30u32, 31u32, 32u32);
+    let mut f = Function::new([(23, ValType::I32), (1, ValType::I64), (4, ValType::I32)]);
+    let mut i = f.instructions();
+
+    // ── URL parse: scheme by prefix, authority to '/', path = rest ──
+    i.i32_const(h.sch_http).local_set(sch);
+    i.i32_const(0).local_set(rest);
+    i.local_get(a_len).i32_const(8).i32_ge_u().if_(BlockType::Empty);
+    for (kb, ch) in b"https://".iter().enumerate() {
+        i.local_get(a_ptr).i32_load8_u(mem8(kb as u64)).i32_const(*ch as i32).i32_eq();
+        if kb > 0 {
+            i.i32_and();
+        }
+    }
+    i.if_(BlockType::Empty);
+    i.i32_const(h.sch_https).local_set(sch);
+    i.i32_const(8).local_set(rest);
+    i.end();
+    i.end();
+    i.local_get(rest).i32_eqz();
+    i.local_get(a_len).i32_const(7).i32_ge_u();
+    i.i32_and().if_(BlockType::Empty);
+    for (kb, ch) in b"http://".iter().enumerate() {
+        i.local_get(a_ptr).i32_load8_u(mem8(kb as u64)).i32_const(*ch as i32).i32_eq();
+        if kb > 0 {
+            i.i32_and();
+        }
+    }
+    i.if_(BlockType::Empty);
+    i.i32_const(7).local_set(rest);
+    i.end();
+    i.end();
+    i.local_get(a_ptr).local_get(rest).i32_add().local_set(auth_ptr);
+    i.local_get(rest).local_set(k);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(k).local_get(a_len).i32_ge_u().br_if(1);
+    i.local_get(a_ptr)
+        .local_get(k)
+        .i32_add()
+        .i32_load8_u(mem8(0))
+        .i32_const('/' as i32)
+        .i32_eq()
+        .br_if(1);
+    i.local_get(k).i32_const(1).i32_add().local_set(k);
+    i.br(0).end().end();
+    i.local_get(k).local_get(rest).i32_sub().local_set(auth_len);
+    i.local_get(k).local_get(a_len).i32_lt_u().if_(BlockType::Empty);
+    i.local_get(a_ptr).local_get(k).i32_add().local_set(path_ptr);
+    i.local_get(a_len).local_get(k).i32_sub().local_set(path_len);
+    i.else_();
+    i.i32_const((park + RET + 24) as i32).i32_const('/' as i32).i32_store8(mem8(0));
+    i.i32_const((park + RET + 24) as i32).local_set(path_ptr);
+    i.i32_const(1).local_set(path_len);
+    i.end();
+
+    // ── empty fields; trailers future written ok(none) up front ──
+    i.call(I_HTTP_FIELDS_NEW).local_set(headers);
+    if stop == 11 {
+        fs_err(&mut i, g_ppos, g_plen, park, MSG_HTTP, E_HTTP.len());
+    }
+    i.call(I_HTTP_REQ_FNEW).local_set(s64);
+    if stop == 12 {
+        fs_err(&mut i, g_ppos, g_plen, park, MSG_HTTP, E_HTTP.len());
+    }
+    // tx = high half, rx = low half (the sync-streams.wast packing).
+    i.local_get(s64).i64_const(32).i64_shr_u().i32_wrap_i64().local_set(trl_tx);
+    i.local_get(s64).i32_wrap_i64().local_set(trl_rx);
+    // ok(none): result disc 0 @0, option disc 0 @payload — 8 zeroed bytes.
+    i.i32_const((park + RET) as i32).i64_const(0).i64_store(mem64(16));
+    if stop == 14 {
+        fs_err(&mut i, g_ppos, g_plen, park, MSG_HTTP, E_HTTP.len());
+    }
+    // The write is the ASYNC lower: the sync form parks this fiber on a
+    // rendezvous whose reader (the host's request machinery) only appears
+    // inside `send` — the stop=13 bring-up probe hung exactly there. On
+    // BLOCKED the write-end joins a fresh waitable set and is retired at
+    // the end of the exchange, when send has forced the host to read it.
+    // The ok(none) buffer at park+RET+16 must stay intact until then.
+    i.i32_const(-1).local_set(hws);
+    i.i32_const(0).local_set(trl_pend);
+    i.local_get(trl_tx).i32_const((park + RET + 16) as i32).call(I_HTTP_REQ_FWRITE).local_set(n);
+    i.local_get(n).i32_const(-1).i32_eq().if_(BlockType::Empty);
+    i.call(I_WS_NEW).local_set(hws);
+    i.local_get(trl_tx).local_get(hws).call(I_WS_JOIN);
+    i.i32_const(1).local_set(trl_pend);
+    i.else_();
+    i.local_get(trl_tx).call(I_HTTP_REQ_FDROPW);
+    i.end();
+    if stop == 13 {
+        fs_err(&mut i, g_ppos, g_plen, park, MSG_HTTP, E_HTTP.len());
+    }
+    if stop == 1 {
+        fs_err(&mut i, g_ppos, g_plen, park, MSG_HTTP, E_HTTP.len());
+    }
+
+    // ── optional contents stream ──
+    i.i32_const(-1).local_set(str_tx);
+    i.i32_const(0).local_set(str_rx);
+    i.local_get(b_len).i32_const(0).i32_gt_s().if_(BlockType::Empty);
+    i.call(I_HTTP_REQ_SNEW).local_set(s64);
+    i.local_get(s64).i64_const(32).i64_shr_u().i32_wrap_i64().local_set(str_tx);
+    i.local_get(s64).i32_wrap_i64().local_set(str_rx);
+    i.end();
+
+    // ── request.new(headers, contents?, trailers_rx, options none, retptr) ──
+    i.local_get(headers);
+    i.local_get(str_tx).i32_const(0).i32_ge_s().if_(BlockType::Result(ValType::I32));
+    i.i32_const(1);
+    i.else_();
+    i.i32_const(0);
+    i.end();
+    i.local_get(str_rx);
+    i.local_get(trl_rx);
+    i.i32_const(0);
+    i.i32_const(0);
+    i.i32_const((park + RET) as i32);
+    i.call(I_HTTP_REQ_NEW);
+    i.i32_const((park + RET) as i32).i32_load(mem(0)).local_set(request);
+    i.i32_const((park + RET) as i32).i32_load(mem(4)).local_set(sentfut);
+    if stop == 2 {
+        fs_err(&mut i, g_ppos, g_plen, park, MSG_HTTP, E_HTTP.len());
+    }
+
+    // ── setters (a syntactically bad component answers the static err) ──
+    // method by op code (43 get / 44 post / 45 put / 46 patch / 47 delete).
+    i.local_get(op).i32_const(43).i32_eq().if_(BlockType::Result(ValType::I32));
+    i.i32_const(h.m_get);
+    i.else_();
+    i.local_get(op).i32_const(44).i32_eq().if_(BlockType::Result(ValType::I32));
+    i.i32_const(h.m_post);
+    i.else_();
+    i.local_get(op).i32_const(45).i32_eq().if_(BlockType::Result(ValType::I32));
+    i.i32_const(h.m_put);
+    i.else_();
+    i.local_get(op).i32_const(46).i32_eq().if_(BlockType::Result(ValType::I32));
+    i.i32_const(h.m_patch);
+    i.else_();
+    i.i32_const(h.m_delete);
+    i.end();
+    i.end();
+    i.end();
+    i.end();
+    i.local_set(n);
+    i.local_get(request).local_get(n).i32_const(0).i32_const(0).call(I_HTTP_SET_METHOD).local_set(k);
+    i.local_get(request)
+        .i32_const(1)
+        .local_get(sch)
+        .i32_const(0)
+        .i32_const(0)
+        .call(I_HTTP_SET_SCHEME);
+    i.local_get(k).i32_or().local_set(k);
+    i.local_get(request)
+        .i32_const(1)
+        .local_get(auth_ptr)
+        .local_get(auth_len)
+        .call(I_HTTP_SET_AUTH);
+    i.local_get(k).i32_or().local_set(k);
+    i.local_get(request)
+        .i32_const(1)
+        .local_get(path_ptr)
+        .local_get(path_len)
+        .call(I_HTTP_SET_PATH);
+    i.local_get(k).i32_or();
+    i.if_(BlockType::Empty);
+    i.local_get(request).call(I_HTTP_REQ_DROP);
+    i.local_get(sentfut).call(I_HTTP_REQ_SENTDROP);
+    fs_err(&mut i, g_ppos, g_plen, park, MSG_HTTP, E_HTTP.len());
+    i.end();
+    if stop == 3 {
+        fs_err(&mut i, g_ppos, g_plen, park, MSG_HTTP, E_HTTP.len());
+    }
+
+    // ── body: async writes, EOF (drop-writable) only once fully accepted.
+    // A sync write pre-send deadlocks exactly like the trailers future,
+    // and EOF cannot wait for a post-send retire either — the server may
+    // hold the response until it sees the request complete. The pump +
+    // scheduler below is therefore the required shape (#1710 risk #1).
+    i.local_get(str_tx).i32_const(0).i32_ge_s().if_(BlockType::Empty);
+    http_body_pump(&mut i);
+    i.end();
+    if stop == 4 {
+        fs_err(&mut i, g_ppos, g_plen, park, MSG_HTTP, E_HTTP.len());
+    }
+    i.local_get(sentfut).call(I_HTTP_REQ_SENTDROP);
+    if stop == 5 {
+        fs_err(&mut i, g_ppos, g_plen, park, MSG_HTTP, E_HTTP.len());
+    }
+
+
+    // ── the async send + the guest scheduler ──
+    // send is the async lower: `(subtask<<4)|state`, state 2 = returned
+    // inline (the aopen convention). While it runs, the host reads the
+    // trailers future and the body stream; their completion events drive
+    // the loop until the response has landed and both writes retired.
+    i.local_get(request).i32_const((park + RET + 8) as i32).call(I_HTTP_SEND).local_set(n);
+    i.local_get(n).i32_const(15).i32_and().i32_const(2).i32_eq().if_(BlockType::Empty);
+    i.i32_const(1).local_set(snd_done);
+    i.else_();
+    i.local_get(hws).i32_const(0).i32_lt_s().if_(BlockType::Empty);
+    i.call(I_WS_NEW).local_set(hws);
+    i.end();
+    i.local_get(n).i32_const(4).i32_shr_u().local_get(hws).call(I_WS_JOIN);
+    i.end();
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(snd_done);
+    i.local_get(trl_pend).i32_eqz().i32_and();
+    i.local_get(str_pend).i32_eqz().i32_and();
+    i.br_if(1);
+    i.local_get(hws).i32_const((park + RET) as i32).call(I_WS_WAIT).local_set(n);
+    i.local_get(n).i32_const(5).i32_eq().if_(BlockType::Empty); // FUTURE_WRITE
+    i.local_get(trl_tx).call(I_HTTP_REQ_FDROPW);
+    i.i32_const(0).local_set(trl_pend);
+    i.end();
+    i.local_get(n).i32_const(3).i32_eq().if_(BlockType::Empty); // STREAM_WRITE
+    i.i32_const((park + RET) as i32).i32_load(mem(4)).local_set(k); // count<<4|status
+    i.local_get(b_ptr).local_get(k).i32_const(4).i32_shr_u().i32_add().local_set(b_ptr);
+    i.local_get(b_len).local_get(k).i32_const(4).i32_shr_u().i32_sub().local_set(b_len);
+    i.local_get(k).i32_const(15).i32_and().i32_const(1).i32_eq().if_(BlockType::Empty);
+    i.i32_const(0).local_set(b_len); // reader dropped: nothing more to feed
+    i.end();
+    http_body_pump(&mut i);
+    i.end();
+    i.local_get(n).i32_const(1).i32_eq().if_(BlockType::Empty); // SUBTASK
+    i.i32_const((park + RET) as i32).i32_load(mem(4)).i32_const(2).i32_eq().if_(BlockType::Empty);
+    i.i32_const((park + RET) as i32).i32_load(mem(0)).call(I_SUBTASK_DROP);
+    i.i32_const(1).local_set(snd_done);
+    i.end();
+    i.end();
+    i.br(0).end().end();
+    i.i32_const((park + RET) as i32).i32_load8_u(mem8(8));
+    i.if_(BlockType::Empty);
+    fs_err(&mut i, g_ppos, g_plen, park, MSG_HTTP, E_HTTP.len());
+    i.end();
+    i.i32_const((park + RET) as i32).i32_load(mem(8 + h.send_payload)).local_set(response);
+
+    // ── consume-body + the realloc'd drain (the fs read loop's shape) ──
+    i.call(I_HTTP_CB_FNEW).local_set(s64);
+    i.local_get(s64).i64_const(32).i64_shr_u().i32_wrap_i64().local_set(cb_tx);
+    i.local_get(s64).i32_wrap_i64().local_set(cb_rx);
+    i.local_get(response).local_get(cb_rx).i32_const((park + RET) as i32).call(I_HTTP_CONSUME);
+    i.i32_const((park + RET) as i32).i32_load(mem(0)).local_set(body_rx);
+    i.i32_const((park + RET) as i32).i32_load(mem(4)).local_set(trlfut);
+    i.i32_const(0).i32_const(0).i32_const(8).i32_const(65536).call(f_realloc).local_set(buf);
+    i.i32_const(65536).local_set(cap);
+    i.i32_const(0).local_set(total);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(total).local_get(cap).i32_ge_u();
+    i.if_(BlockType::Empty);
+    i.local_get(buf).local_get(cap).i32_const(8);
+    i.local_get(cap).i32_const(1).i32_shl();
+    i.call(f_realloc).local_set(buf);
+    i.local_get(cap).i32_const(1).i32_shl().local_set(cap);
+    i.end();
+    i.local_get(body_rx);
+    i.local_get(buf).local_get(total).i32_add();
+    i.local_get(cap).local_get(total).i32_sub();
+    i.call(I_HTTP_BODY_READ);
+    i.i32_const(4).i32_shr_u().local_set(n);
+    i.local_get(n).i32_eqz().br_if(1);
+    i.local_get(total).local_get(n).i32_add().local_set(total);
+    i.br(0).end().end();
+    i.local_get(body_rx).call(I_HTTP_BODY_DROPR);
+    i.local_get(trlfut).call(I_HTTP_TRL_DROPR);
+    // handling result: ok written into the kept writable, then dropped.
+    i.i32_const((park + RET) as i32).i64_const(0).i64_store(mem64(16));
+    i.local_get(cb_tx).i32_const((park + RET + 16) as i32).call(I_HTTP_CB_FWRITE).drop();
+    i.local_get(cb_tx).call(I_HTTP_CB_FDROPW);
+
+    // Error paths above leak the set + pending write-ends by design —
+    // they are terminal transport failures.
+    i.local_get(hws).i32_const(0).i32_ge_s().if_(BlockType::Empty);
+    i.local_get(hws).call(I_WS_DROP);
+    i.end();
+
+    i.local_get(buf).global_set(g_ppos);
+    i.local_get(total).global_set(g_plen);
+    i.local_get(total).i64_extend_i32_u().return_();
+    i.unreachable();
+    i.end();
+    f
+}
+
+/// Canonical-ABI facts the http shim stores through (#1710 PR B) — DERIVED
+/// from the vendored WIT at emit time, never hand-counted (the fs_abi
+/// doctrine: a case index or payload offset written as a literal drifts
+/// silently when the WIT moves; a lookup by name fails loudly).
+struct HttpAbi {
+    m_get: i32, // method variant case indices
+    m_post: i32,
+    m_put: i32,
+    m_patch: i32,
+    m_delete: i32,
+    sch_http: i32, // scheme variant case indices
+    sch_https: i32,
+    /// result<response, error-code> payload offset (send's retptr layout).
+    send_payload: u64,
+}
+
+fn http_abi(resolve: &wit_parser::Resolve) -> anyhow::Result<HttpAbi> {
+    use wit_parser::{Type, TypeDefKind};
+    let (_, http_pkg) = resolve
+        .packages
+        .iter()
+        .find(|(_, p)| p.name.namespace == "wasi" && p.name.name == "http")
+        .ok_or_else(|| anyhow::anyhow!("wasi:http package not in the resolve"))?;
+    let iface_id = *http_pkg
+        .interfaces
+        .get("types")
+        .ok_or_else(|| anyhow::anyhow!("wasi:http/types interface not found"))?;
+    let iface = &resolve.interfaces[iface_id];
+    let find = |name: &str| -> anyhow::Result<wit_parser::TypeId> {
+        iface
+            .types
+            .get(name)
+            .copied()
+            .ok_or_else(|| anyhow::anyhow!("wit type {name} not found in wasi:http/types"))
+    };
+    let case = |id: wit_parser::TypeId, name: &str| -> anyhow::Result<i32> {
+        match &resolve.types[id].kind {
+            TypeDefKind::Variant(v) => v
+                .cases
+                .iter()
+                .position(|c| c.name == name)
+                .map(|p| p as i32)
+                .ok_or_else(|| anyhow::anyhow!("variant case {name} not found")),
+            k => Err(anyhow::anyhow!("expected variant, got {k:?}")),
+        }
+    };
+    let method = find("method")?;
+    let scheme = find("scheme")?;
+    let ec = find("error-code")?;
+    let mut sa = wit_parser::SizeAlign::default();
+    sa.fill(resolve);
+    let ec_align = sa.align(&Type::Id(ec)).align_wasm32() as u64;
+    Ok(HttpAbi {
+        m_get: case(method, "get")?,
+        m_post: case(method, "post")?,
+        m_put: case(method, "put")?,
+        m_patch: case(method, "patch")?,
+        m_delete: case(method, "delete")?,
+        sch_http: case(scheme, "HTTP")?,
+        sch_https: case(scheme, "HTTPS")?,
+        // own<response> aligns 4; the discriminant byte rounds up to the
+        // larger of that and error-code's alignment.
+        send_payload: 4u64.max(ec_align),
+    })
+}
+
 /// 8-byte MemArg.
 fn mem64(offset: u64) -> MemArg {
     MemArg { offset, align: 3, memory_index: 0 }
 }
 
-pub fn to_p3(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
+pub fn to_p3(bytes: &[u8], wants_http: bool) -> anyhow::Result<Vec<u8>> {
     // The vendored WIT first: the fs shim's layout facts derive from it,
     // so a WIT/shim drift refuses to emit instead of corrupting stores.
     let mut resolve = wit_parser::Resolve::default();
@@ -264,10 +713,14 @@ pub fn to_p3(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     let pkg = resolve
         .push_str("world.wit", include_str!("../wit/p3/world.wit"))
         .map_err(|e| anyhow::anyhow!("wit world: {e}"))?;
+    // The http-importing world only when the module's op set reaches the
+    // http family — a non-http component must not demand `-S http=y`.
+    let world_name = if wants_http { "p3-command-http" } else { "p3-command" };
     let world = resolve
-        .select_world(&[pkg], Some("p3-command"))
+        .select_world(&[pkg], Some(world_name))
         .map_err(|e| anyhow::anyhow!("world: {e}"))?;
     let abi = fs_abi(&resolve)?;
+    let habi = if wants_http { Some(http_abi(&resolve)?) } else { None };
     // The stat result's WIT-derived footprint must fit its park slot.
     assert!(STATRET + abi.stat_size <= MSG_NOENT, "STATRET reaches the messages");
 
@@ -290,7 +743,9 @@ pub fn to_p3(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     let main_index = main_index.ok_or_else(|| anyhow::anyhow!("no main export"))?;
     let heap_global = heap_global.ok_or_else(|| anyhow::anyhow!("no __heap export"))?;
     let n_funcs = func_types.len() as u32;
-    let shim_base = IMPORTS + n_funcs;
+    let n_imports = if wants_http { IMPORTS_HTTP } else { IMPORTS };
+    let shift = n_imports - 5;
+    let shim_base = n_imports + n_funcs;
     // Shim order mirrors the almide.* import order (println, eprintln,
     // exit, fs_call, host_read), then cabi_realloc, run, callback.
     let f_realloc = shim_base + 5;
@@ -376,6 +831,10 @@ pub fn to_p3(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     let t_ws_new = type_index(&mut types, &[], &[ValType::I32]);
     let t_ws_join = type_index(&mut types, &[ValType::I32; 2], &[]);
     let t_ws_wait = type_index(&mut types, &[ValType::I32; 2], &[ValType::I32]);
+    // http client core shapes (#1710 PR B).
+    let t_set4 = type_index(&mut types, &[ValType::I32; 4], &[ValType::I32]);
+    let t_set5 = type_index(&mut types, &[ValType::I32; 5], &[ValType::I32]);
+    let t_consume = type_index(&mut types, &[ValType::I32; 3], &[]);
 
     let mut type_sec = TypeSection::new();
     for (p, r) in &types {
@@ -435,10 +894,60 @@ pub fn to_p3(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
         (I_FS_RMDIR, fs_types, "[method]descriptor.remove-directory-at", t_pathop),
     ];
     assert_eq!(import_list.len() as u32, IMPORTS, "IMPORTS count drift");
+    let http_types = "wasi:http/types@0.3.0";
+    let http_client = "wasi:http/client@0.3.0";
+    let http_import_list: &[(u32, &str, &str, u32)] = &[
+        (I_HTTP_FIELDS_NEW, http_types, "[constructor]fields", t_ws_new),
+        (I_HTTP_REQ_NEW, http_types, "[static]request.new", t_open),
+        (I_HTTP_REQ_SNEW, http_types, "[stream-new-0][static]request.new", t_new),
+        (
+            I_HTTP_REQ_SWRITE,
+            http_types,
+            "[async-lower][stream-write-0][static]request.new",
+            t_rw,
+        ),
+        (I_HTTP_REQ_SDROPW, http_types, "[stream-drop-writable-0][static]request.new", t_drop),
+        (I_HTTP_REQ_FNEW, http_types, "[future-new-1][static]request.new", t_new),
+        (
+            I_HTTP_REQ_FWRITE,
+            http_types,
+            "[async-lower][future-write-1][static]request.new",
+            t_fut_read,
+        ),
+        (I_HTTP_REQ_FDROPW, http_types, "[future-drop-writable-1][static]request.new", t_drop),
+        (I_HTTP_REQ_SENTDROP, http_types, "[future-drop-readable-2][static]request.new", t_drop),
+        (I_HTTP_SET_METHOD, http_types, "[method]request.set-method", t_set4),
+        (I_HTTP_SET_SCHEME, http_types, "[method]request.set-scheme", t_set5),
+        (I_HTTP_SET_AUTH, http_types, "[method]request.set-authority", t_set4),
+        (I_HTTP_SET_PATH, http_types, "[method]request.set-path-with-query", t_set4),
+        (I_HTTP_SEND, http_client, "[async-lower]send", t_fut_read),
+        (I_HTTP_STATUS, http_types, "[method]response.get-status-code", t_call),
+        (I_HTTP_CONSUME, http_types, "[static]response.consume-body", t_consume),
+        (I_HTTP_CB_FNEW, http_types, "[future-new-0][static]response.consume-body", t_new),
+        (I_HTTP_CB_FWRITE, http_types, "[future-write-0][static]response.consume-body", t_fut_read),
+        (I_HTTP_CB_FDROPW, http_types, "[future-drop-writable-0][static]response.consume-body", t_drop),
+        (I_HTTP_BODY_READ, http_types, "[stream-read-1][static]response.consume-body", t_rw),
+        (I_HTTP_BODY_DROPR, http_types, "[stream-drop-readable-1][static]response.consume-body", t_drop),
+        (I_HTTP_TRL_DROPR, http_types, "[future-drop-readable-2][static]response.consume-body", t_drop),
+        (I_HTTP_REQ_DROP, http_types, "[resource-drop]request", t_drop),
+        (I_HTTP_RESP_DROP, http_types, "[resource-drop]response", t_drop),
+        (I_HTTP_FIELDS_DROP, http_types, "[resource-drop]fields", t_drop),
+    ];
+    assert_eq!(
+        IMPORTS + http_import_list.len() as u32,
+        IMPORTS_HTTP,
+        "IMPORTS_HTTP count drift"
+    );
     let mut imports = ImportSection::new();
     for (k, (want, m, n, t)) in import_list.iter().enumerate() {
         assert_eq!(k as u32, *want, "import order drift at {m}#{n}");
         imports.import(m, n, EntityType::Function(*t));
+    }
+    if wants_http {
+        for (k, (want, m, n, t)) in http_import_list.iter().enumerate() {
+            assert_eq!(IMPORTS + k as u32, *want, "http import order drift at {m}#{n}");
+            imports.import(m, n, EntityType::Function(*t));
+        }
     }
 
     let mut functions = FunctionSection::new();
@@ -447,6 +956,9 @@ pub fn to_p3(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     }
     for ti in [t_print, t_print, t_exit, t_fs, t_hread, t_realloc, t_status, t_callback] {
         functions.function(ti);
+    }
+    if wants_http {
+        functions.function(t_fs); // shim_http (the almide fs_call ABI)
     }
 
     let mut memories = MemorySection::new();
@@ -473,7 +985,7 @@ pub fn to_p3(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     };
 
     let mut code = CodeSection::new();
-    let mut remap = Remap { shim_base, shift: SHIFT };
+    let mut remap = Remap { shim_base, shift };
     for b in bodies {
         code.function(&reencode_body(&b, &mut remap, I_EXIT)?);
     }
@@ -481,14 +993,15 @@ pub fn to_p3(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     code.function(&shim_print(g_err_tx, g_err_fut, I_ERR_CALL, I_ERR_NEW, I_ERR_WRITE, park, true));
     code.function(&shim_exit());
     let f_fs_self = shim_base + 3;
+    let f_http = wants_http.then_some(shim_base + 8);
     code.function(&shim_fs_call(
         park, g_plen, g_ppos, g_in_rx, g_in_fut, g_out_tx, g_out_fut, g_err_tx, g_err_fut,
-        g_pre, f_realloc, &abi, f_fs_self, g_wset, g_slots, g_slotn,
+        g_pre, f_realloc, &abi, f_fs_self, g_wset, g_slots, g_slotn, f_http,
     ));
     code.function(&shim_host_read(g_plen, g_ppos));
     code.function(&shim_cabi_realloc(heap_global));
     code.function(&shim_run(
-        main_index + SHIFT,
+        main_index + shift,
         park,
         g_out_tx,
         g_out_fut,
@@ -499,6 +1012,9 @@ pub fn to_p3(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
         g_wset,
     ));
     code.function(&shim_callback());
+    if let Some(h) = habi.as_ref() {
+        code.function(&shim_http(park, g_plen, g_ppos, f_realloc, h));
+    }
 
     // Elements re-encode through the Remap (#1716): the import shift must
     // move funcref table entries too (#1688's silent class).
@@ -519,6 +1035,9 @@ pub fn to_p3(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
         (MSG_NOPRE, E_NOPRE),
     ] {
         data.active(0, &ConstExpr::i32_const((park + off) as i32), msg.iter().copied());
+    }
+    if wants_http {
+        data.active(0, &ConstExpr::i32_const((park + MSG_HTTP) as i32), E_HTTP.iter().copied());
     }
 
     let mut m = Module::new();
@@ -771,6 +1290,7 @@ fn shim_fs_call(
     g_wset: u32,
     g_slots: u32,
     g_slotn: u32,
+    f_http: Option<u32>,
 ) -> Function {
     let (op, a_ptr, a_len, b_ptr, b_len) = (0u32, 1u32, 2u32, 3u32, 4u32);
     let total = 5u32;
@@ -780,6 +1300,19 @@ fn shim_fs_call(
     let (sl, j) = (13u32, 14u32);
     let mut f = Function::new([(2, ValType::I32), (1, ValType::I64), (7, ValType::I32)]);
     let mut i = f.instructions();
+
+    // ops 43..=47: the http string client (#1710 PR B) — forwarded whole
+    // to the dedicated shim when the module's op set earned the imports.
+    if let Some(h) = f_http {
+        i.local_get(op).i32_const(43).i32_ge_s();
+        i.local_get(op).i32_const(47).i32_le_s();
+        i.i32_and().if_(BlockType::Empty);
+        for pidx in 0..5u32 {
+            i.local_get(pidx);
+        }
+        i.call(h).return_();
+        i.end();
+    }
 
     // op 30: raw stdout append (no newline) — b carries the bytes.
     i.local_get(op).i32_const(30).i32_eq().if_(BlockType::Empty);

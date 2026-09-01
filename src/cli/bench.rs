@@ -66,7 +66,7 @@ fn bench_native(file: &str, runs: u32) {
 }
 
 fn bench_wasm(file: &str, runs: u32) {
-    let (bytes, structural) = match super::build::compile_to_wasm_bytes(file, false, true, false) {
+    let (bytes, structural, _host_ops) = match super::build::compile_to_wasm_bytes(file, false, true, false) {
         Ok(b) => b,
         Err(()) => std::process::exit(1),
     };
