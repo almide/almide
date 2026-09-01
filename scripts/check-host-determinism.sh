@@ -96,7 +96,10 @@ fi
 # harnesses build the almide.* module without the env host surface, so the
 # env.set/get fixture walls here; it executes on the embedded + stock-p1
 # sweeps (#1716), which is where its promise lives.
-MAX_WALLED=19
+# 20 as of 2026-09-01: zlib_selfhost.almd (C-330/#1700) — the incumbent
+# walls the promoted C-326 decoder's tuple write-back loops, the same
+# division the gzip_inflate_members rows record; prunes with #1696 4-5.
+MAX_WALLED=20
 corpus=$(ls "$FIXTURE_DIR"/*.almd 2>/dev/null | wc -l | tr -d ' ')
 if [ "$corpus" -eq 0 ] || [ $((n + walled)) -ne "$corpus" ]; then
   echo "::error::host-determinism: compared $n + walled $walled != corpus $corpus in $FIXTURE_DIR — the scan went blind (#985)"
