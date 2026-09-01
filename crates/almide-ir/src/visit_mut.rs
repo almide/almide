@@ -237,8 +237,12 @@ pub fn walk_pattern_mut<V: IrMutVisitor>(v: &mut V, pat: &mut IrPattern) {
                 if let Some(p) = &mut f.pattern { v.visit_pattern_mut(p); }
             }
         }
-        IrPattern::Tuple { elements } | IrPattern::List { elements } => {
+        IrPattern::Tuple { elements } => {
             for e in elements { v.visit_pattern_mut(e); }
+        }
+        IrPattern::List { elements, rest } => {
+            for e in elements { v.visit_pattern_mut(e); }
+            if let Some(r) = rest { v.visit_pattern_mut(r); }
         }
         IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => {
             v.visit_pattern_mut(inner);

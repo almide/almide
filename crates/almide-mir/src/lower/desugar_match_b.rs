@@ -178,7 +178,11 @@ fn introduces_binder(e: &IrExpr) -> bool {
             P::Wildcard | P::None | P::Literal { .. } => false,
             P::Some { inner } | P::Ok { inner } | P::Err { inner } => pattern_binds(inner),
             P::Constructor { args, .. } => args.iter().any(pattern_binds),
-            P::Tuple { elements } | P::List { elements } => elements.iter().any(pattern_binds),
+            P::Tuple { elements } => elements.iter().any(pattern_binds),
+            P::List { elements, rest } => {
+                elements.iter().any(pattern_binds)
+                    || rest.as_ref().is_some_and(|r| pattern_binds(r))
+            }
             P::RecordPattern { fields, .. } => {
                 fields.iter().any(|f| f.pattern.as_ref().map(pattern_binds).unwrap_or(true))
             }
@@ -279,7 +283,7 @@ pub fn desugar_tuple_variant_match(body: &IrExpr) -> Option<IrExpr> {
                 | IrPattern::Ok { .. }
                 | IrPattern::Err { .. }
                 | IrPattern::Constructor { .. }
-        ) || matches!(p, IrPattern::List { elements } if elements.is_empty())
+        ) || matches!(p, IrPattern::List { elements, rest: None } if elements.is_empty())
     }
 
     /// The nesting context of [`nest_conditional_columns`] — the match being

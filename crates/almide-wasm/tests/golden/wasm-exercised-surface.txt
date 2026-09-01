@@ -561,6 +561,7 @@ expr:While
 pattern:Bind
 pattern:Constructor
 pattern:Err
+pattern:List
 pattern:Literal
 pattern:None
 pattern:Ok

@@ -164,10 +164,18 @@ pub(crate) fn collect_pattern_binds(
             Ok(())
         }
         IrPattern::Constructor { args, .. }
-        | IrPattern::Tuple { elements: args }
-        | IrPattern::List { elements: args } => {
+        | IrPattern::Tuple { elements: args } => {
             for a in args {
                 collect_pattern_binds(a, out, seen, types)?;
+            }
+            Ok(())
+        }
+        IrPattern::List { elements: args, rest } => {
+            for a in args {
+                collect_pattern_binds(a, out, seen, types)?;
+            }
+            if let Some(r) = rest {
+                collect_pattern_binds(r, out, seen, types)?;
             }
             Ok(())
         }

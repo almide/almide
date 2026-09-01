@@ -413,7 +413,14 @@ impl Checker {
             ast::Pattern::Constructor { name, args } => self.bind_pattern_constructor(name, args, ty),
             ast::Pattern::RecordPattern { name, fields, .. } => self.bind_pattern_record(name, fields, ty),
             ast::Pattern::Tuple { elements } => self.bind_pattern_tuple(elements, ty),
-            ast::Pattern::List { elements } => self.bind_pattern_list(elements, ty),
+            ast::Pattern::List { elements, rest } => {
+                self.bind_pattern_list(elements, ty);
+                // #1461 list-rest: the tail binding carries the SAME list
+                // type as the subject (List[T] -> List[T]).
+                if let Some(Some(name)) = rest {
+                    self.env.define_var(name, resolve_ty(ty, &self.uf));
+                }
+            }
             ast::Pattern::Some { inner } => self.bind_pattern_some(inner, ty),
             ast::Pattern::Ok { inner } => self.bind_pattern_ok(inner, ty),
             ast::Pattern::Err { inner } => self.bind_pattern_err(inner, ty),
@@ -969,9 +976,12 @@ fn first_or_alt_binder(pat: &ast::Pattern) -> Option<almide_base::intern::Sym> {
         ast::Pattern::RecordPattern { fields, .. } => fields.iter().find_map(|f| {
             f.pattern.as_ref().map_or(Some(f.name), first_or_alt_binder)
         }),
-        ast::Pattern::Tuple { elements } | ast::Pattern::List { elements } => {
-            elements.iter().find_map(first_or_alt_binder)
-        }
+        ast::Pattern::Tuple { elements } => elements.iter().find_map(first_or_alt_binder),
+        // A NAMED rest is a binder for the or-alternative rule too.
+        ast::Pattern::List { elements, rest } => elements
+            .iter()
+            .find_map(first_or_alt_binder)
+            .or_else(|| rest.as_ref().and_then(|r| *r)),
         ast::Pattern::Some { inner } | ast::Pattern::Ok { inner } | ast::Pattern::Err { inner } => {
             first_or_alt_binder(inner)
         }

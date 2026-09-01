@@ -465,10 +465,22 @@ pub(super) fn lower_pattern(ctx: &mut LowerCtx, pat: &ast::Pattern, ty: &Ty) -> 
             let inner_ty = applied_arg(ty, TypeConstructorId::Result, 1);
             IrPattern::Err { inner: Box::new(lower_pattern(ctx, inner, &inner_ty)) }
         }
-        ast::Pattern::List { elements } => {
+        ast::Pattern::List { elements, rest } => {
             let elem_ty = applied_arg(ty, TypeConstructorId::List, 0);
             let ir_elems = elements.iter().map(|e| lower_pattern(ctx, e, &elem_ty)).collect();
-            IrPattern::List { elements: ir_elems }
+            // #1461 list-rest: a NAMED tail binds with the subject's own
+            // list type; `[a, ..]` keeps the >=-length semantics with a
+            // Wildcard rest.
+            let ir_rest = rest.as_ref().map(|r| {
+                Box::new(match r {
+                    Some(name) => {
+                        let var = ctx.define_var(name, ty.clone(), Mutability::Let, None);
+                        IrPattern::Bind { var, ty: ty.clone() }
+                    }
+                    None => IrPattern::Wildcard,
+                })
+            });
+            IrPattern::List { elements: ir_elems, rest: ir_rest }
         }
     }
 }
