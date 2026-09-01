@@ -6,7 +6,6 @@
 // the fn returned, and the freelist link write zeroed its first payload
 // word (native [1,16,...] vs wasm [0,0,0,0,...]). Every leg must print
 // the same header and the same round-trip bytes.
-
 fn push_u16_le(mut out: Bytes, v: Int) -> Unit = {
   bytes.push(out, int.band(v, 255))
   bytes.push(out, int.band(int.bshr(v, 8), 255))
