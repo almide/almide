@@ -5,7 +5,7 @@
 // (5 bytes of framing per <=65535-byte chunk), which is the honest floor the
 // wasm legs ship until a level-aware LZ77 lands. Native keeps the flate2
 // intrinsics, so COMPRESSED BYTES ARE LEG-DEPENDENT BY DESIGN — the bounded
-// divergence C-330 declares; the cross-target promise is the round trip
+// divergence C-331 declares; the cross-target promise is the round trip
 // (decompress(compress(x)) == x on every leg) and the container framing.
 // The `level` twins clamp and IGNORE the level (stored blocks have no dial).
 // Raw DEFLATE from stored blocks: <=65535-byte chunks, BFINAL on the last.

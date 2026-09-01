@@ -1,4 +1,4 @@
-// zlib self-host tests (#1700, C-330): round trips on every entry point,
+// zlib self-host tests (#1700, C-331): round trips on every entry point,
 // checksum known answers, and the container error split. The old
 // "compress reduces size" assertion is gone WITH the wasm:skip marker it
 // lived under: the wasm legs encode stored blocks (valid DEFLATE, no

@@ -1,10 +1,10 @@
-// @contract: C-330
+// @contract: C-331
 // The self-hosted zlib surface (#1700): DECODING is byte-identical across
 // legs by construction (DEFLATE decoding is exact) — the three vectors below
 // were produced by the NATIVE flate2 encoder (dynamic-Huffman zlib/deflate
 // and the gzip container) and must decode to the same text on every leg.
 // COMPRESSED bytes are leg-dependent by design (native flate2, wasm stored
-// blocks) — the bounded divergence C-330 declares — so the encode half is
+// blocks) — the bounded divergence C-331 declares — so the encode half is
 // pinned by ROUND TRIP on whichever leg runs, never by encoded bytes.
 // crc32/adler32 live in spec/stdlib/zlib_test.almd — the interp leg has no
 // arm for them yet, and a mid-fixture abstention would cost the decode half

@@ -196,7 +196,7 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     // exact construction the C-326 fixture already runs byte-identical on
     // the structural leg); no prim access at all. Parity evidence:
     // spec/wasm_cross/zlib_selfhost.almd (known-answer decode + round
-    // trips, C-330).
+    // trips, C-331).
     "zlib_gunzip", "zlib_inflate", "zlib_decompress",
     "zlib_deflate", "zlib_deflate_level", "zlib_compress", "zlib_compress_level",
     "zlib_gzip",
