@@ -4250,3 +4250,17 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/zlib_selfhost.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-332"
+spec      = "ALS-E18"
+title     = "List-rest patterns: the tail past the prefix binds as a list, identically on every leg"
+statement = "A list pattern may end with a rest slot (#1461): `[h, ..t]` matches any list of length >= the prefix and binds the tail past the prefix as a list of the subject's own type; `[h, ..]` ignores the tail; the rest slot is LAST-only (a suffix after it is a parse error naming the rule). Both legs and the interp agree by construction on distinct lowerings that share one semantics: the Rust leg's ListPatternLowering emits len >= N plus a list.drop(subject, N) bind — with a length-coverage ladder that terminates a fully-covered chain (exact lengths 0..k-1 plus a rest at <= k) without demanding a wildcard, closing the else-Unit fall-off the exact-length chain hit at rustc; the structural wasm leg relaxes the block-length test to >= and materializes the tail as a fresh block (alloc + payload copy, the list.drop shape — NOT epilogue-owned: an owned tail was freed under a reader returning it, so it follows the drop result's leak-not-dangle discipline); the interp slices its value vector. The incumbent brick walls the form honestly (the structural leg is the default route); or-patterns treat a NAMED rest as a binder for the E080 rule."
+since     = "0.62.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/list_rest_pattern.almd", class = "fixture" },
+  { path = "spec/lang/list_rest_pattern_test.almd", class = "fixture" },
+  { path = "tests/diagnostics/list-rest-not-last/broken.almd", class = "fixture" },
+]
+
