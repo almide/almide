@@ -99,7 +99,10 @@ fi
 # 20 as of 2026-09-01: zlib_selfhost.almd (C-331/#1700) — the incumbent
 # walls the promoted C-326 decoder's tuple write-back loops, the same
 # division the gzip_inflate_members rows record; prunes with #1696 4-5.
-MAX_WALLED=20
+# 21 as of 2026-09-02: list_rest_pattern.almd (C-332/#1461) — the
+# incumbent brick walls the rest form honestly (the structural leg is
+# the default route and lowers it); prunes with #1696 4-5.
+MAX_WALLED=21
 corpus=$(ls "$FIXTURE_DIR"/*.almd 2>/dev/null | wc -l | tr -d ' ')
 if [ "$corpus" -eq 0 ] || [ $((n + walled)) -ne "$corpus" ]; then
   echo "::error::host-determinism: compared $n + walled $walled != corpus $corpus in $FIXTURE_DIR — the scan went blind (#985)"

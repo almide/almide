@@ -61,7 +61,10 @@ fail=0; n=0
 # 20 as of 2026-09-01: zlib_selfhost.almd (C-331/#1700) — the incumbent
 # walls the promoted C-326 decoder's tuple write-back loops, the same
 # division the gzip_inflate_members rows record; prunes with #1696 4-5.
-MAX_WALLED=20
+# 21 as of 2026-09-02: list_rest_pattern.almd (C-332/#1461) — the
+# incumbent brick walls the rest form honestly (the structural leg is
+# the default route and lowers it); prunes with #1696 4-5.
+MAX_WALLED=21
 walled=0
 for fix in "$FIXTURE_DIR"/*.almd; do
   [ -e "$fix" ] || continue
