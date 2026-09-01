@@ -1,0 +1,7 @@
+// E052 fires in condition position too, called from a PURE fn.
+@deprecated(since = 3, use = "shout")
+fn yell(s: String) -> String = shout(s)
+
+fn shout(s: String) -> String = s + "!"
+
+fn main() -> Unit = println(if yell("a") == "a!" then "y" else "n")

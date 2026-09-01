@@ -1,0 +1,6 @@
+// An OPEN record and a closed record under one name: the field lists match,
+// but openness makes them structurally distinct types.
+type Cfg = { name: String, .. }
+type Cfg = { name: String }
+
+fn main() -> Unit = println("ok")

@@ -1,0 +1,8 @@
+// E037: `!=` with a Result on one side and its plain payload on the other,
+// in LET-BINDING position — the carrier never equals the payload.
+fn helper() -> Result[Int, String] = ok(0)
+
+fn main() -> Unit = {
+  let differs = (helper() ?? -1) != 0
+  println("${differs}")
+}

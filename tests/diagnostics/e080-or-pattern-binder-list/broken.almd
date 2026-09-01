@@ -1,0 +1,8 @@
+// A binder inside a LIST-pattern alternative: `x` has no value when the
+// empty-list alternative matches.
+fn head_label(xs: List[Int]) -> String = match xs {
+  [x] | [] => "small",
+  _ => "big",
+}
+
+fn main() -> Unit = println(head_label([1]))

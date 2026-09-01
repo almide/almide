@@ -1,0 +1,3 @@
+expects_code = "E057"
+expects_error = "fn 'tick' has no body"
+hint_substring = "Write the body after '='"

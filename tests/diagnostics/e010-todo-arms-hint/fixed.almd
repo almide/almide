@@ -1,0 +1,14 @@
+// The missing-arms hint carries paste-ready arm templates plus the
+// `_ => todo()` incremental fallback; a payload case must render its binder.
+type Shape =
+  | Dot
+  | Circle(Float)
+  | Rect(Float, Float)
+
+fn area(s: Shape) -> Float = match s {
+  Dot => 0.0,
+  Circle(r) => 3.14 * r * r,
+  Rect(w, h) => w * h,
+}
+
+fn main() -> Unit = println(float.to_string(area(Circle(2.0))))

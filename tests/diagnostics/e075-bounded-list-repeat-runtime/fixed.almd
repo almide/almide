@@ -1,0 +1,5 @@
+// ALS-B8: a literal repeat count is a compile-time size.
+@bounded
+fn zeros() -> Int = list.len(list.repeat(0, 4))
+
+fn main() -> Unit = println("${zeros()}")

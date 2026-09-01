@@ -1,0 +1,3 @@
+expects_code = "E046"
+expects_error = "call argument (argument 1)"
+hint_substring = "does NOT partially apply"

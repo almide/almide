@@ -1,0 +1,10 @@
+// ALS-B6: a self-call from inside a counted loop is still a cycle in the
+// reachable call graph.
+@bounded
+fn churn(n: Int) -> Int = {
+  var acc = n
+  for i in 0..<2 { acc = churn(acc - 1) }
+  acc
+}
+
+fn main() -> Unit = println("${churn(4)}")

@@ -1,0 +1,3 @@
+expects_code = "E037"
+expects_error = "operator '!=' compares Result[Int, String] with Int"
+hint_substring = "Unwrap the Result operand"

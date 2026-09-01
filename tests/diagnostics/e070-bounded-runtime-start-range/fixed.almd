@@ -1,0 +1,9 @@
+// ALS-B3: literal bounds on both ends make the range counted.
+@bounded
+fn tail_sum() -> Int = {
+  var acc = 0
+  for i in 5..<8 { acc = acc + i }
+  acc
+}
+
+fn main() -> Unit = println("${tail_sum()}")

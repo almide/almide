@@ -1,0 +1,3 @@
+expects_code = "E037"
+expects_error = "operator '==' compares List[Int] with List[String]"
+hint_substring = "same type"

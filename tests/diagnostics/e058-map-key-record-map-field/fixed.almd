@@ -1,0 +1,8 @@
+// The blocker is a Map one level down: a record carrying a Map field cannot
+// be a key even though the record itself looks plain.
+type Cfg = { flags: Map[String, Bool] }
+
+fn main() -> Unit = {
+  let m: Map[String, Cfg] = [:]
+  println(int.to_string(map.len(m)))
+}

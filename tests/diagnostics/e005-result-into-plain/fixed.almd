@@ -1,0 +1,6 @@
+// The fix: unwrap the Result with a fallback before the plain-Int slot.
+fn parse_score(s: String) -> Result[Int, String] = ok(string.len(s))
+
+fn double(n: Int) -> Int = n * 2
+
+fn main() -> Unit = println(int.to_string(double(parse_score("ab") ?? 0)))

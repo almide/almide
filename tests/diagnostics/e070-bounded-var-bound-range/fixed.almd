@@ -1,0 +1,10 @@
+// ALS-B3: a `let` bound to an integer literal is a compile-time constant.
+@bounded
+fn ramp() -> Int = {
+  let limit = 4
+  var acc = 0
+  for i in 0..<limit { acc = acc + i }
+  acc
+}
+
+fn main() -> Unit = println("${ramp()}")

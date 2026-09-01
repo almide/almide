@@ -1,0 +1,5 @@
+// ALS-B8: bytes.new with a run-time length is a run-time-sized allocation.
+@bounded
+fn buf(n: Int) -> Int = bytes.len(bytes.new(n))
+
+fn main() -> Unit = println("${buf(3)}")

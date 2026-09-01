@@ -1,0 +1,3 @@
+expects_code = "E019"
+expects_error = "declared in Cmd and Event"
+hint_substring = "not yet supported"

@@ -1,0 +1,6 @@
+// A let-bound function VALUE has a fixed parameter list — calling it
+// under-arity is E004 with the function-value wording (#1521).
+fn main() -> Unit = {
+  let add = (a: Int, b: Int) => a + b
+  println(int.to_string(add(1)))
+}

@@ -1,0 +1,6 @@
+// E049 variant: the let-in inside a counted for-loop body.
+fn main() -> Unit = {
+  for i in 0..<3 {
+    let m = i * 2 in println(int.to_string(m))
+  }
+}

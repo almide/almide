@@ -1,0 +1,10 @@
+// ALS-B3: a range whose START is a run-time value has no static trip count
+// (the end being a literal does not save it).
+@bounded
+fn tail_sum(start: Int) -> Int = {
+  var acc = 0
+  for i in start..<8 { acc = acc + i }
+  acc
+}
+
+fn main() -> Unit = println("${tail_sum(5)}")

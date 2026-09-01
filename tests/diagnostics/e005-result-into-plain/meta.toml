@@ -1,0 +1,3 @@
+expects_code = "E005"
+expects_error = "expects Int but got Result[Int, String]"
+hint_substring = "unwrap it first"

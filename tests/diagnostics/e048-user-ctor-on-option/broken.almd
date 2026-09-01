@@ -1,0 +1,11 @@
+// A USER constructor pattern aimed at an Option subject: `list.get` returns
+// `Int?`, whose only cases are the builtin `some(..)` / `none` — `Red` can
+// never be one of them.
+type Color = Red(Int) | Blue(Int)
+
+fn shade(xs: List[Int]) -> Int = match list.get(xs, 0) {
+  Red(r) => r,
+  _ => 0,
+}
+
+fn main() -> Unit = println(int.to_string(shade([1])))

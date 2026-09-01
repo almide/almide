@@ -1,0 +1,5 @@
+// A Fn-typed PARAMETER called with too many arguments inside the fn
+// body: the declared (Int) -> Int fixes the arity at one.
+fn apply(f: (Int) -> Int, x: Int) -> Int = f(x, x)
+
+fn main() -> Unit = println(int.to_string(apply((n: Int) => n + 1, 3)))

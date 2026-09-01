@@ -1,0 +1,7 @@
+// A TUPLE ELEMENT of an immutable binding passed to a `mut` parameter — the
+// root binding must be `var` for `pair.0` to be a mutable place.
+fn main() -> Unit = {
+  let pair = ([1], "tag")
+  list.push(pair.0, 9)
+  println(int.to_string(list.len(pair.0)))
+}

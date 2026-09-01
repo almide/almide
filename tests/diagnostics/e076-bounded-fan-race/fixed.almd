@@ -1,0 +1,5 @@
+// Fixed: the winning computation itself, unscheduled.
+@bounded
+fn pick() -> Int = 2 * 2
+
+fn main() -> Unit = println(int.to_string(pick()))

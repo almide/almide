@@ -1,0 +1,8 @@
+// E046: `_` as the argument of a FALLIBLE call unwrapped with `!` — the
+// placeholder is rejected before effect propagation is even considered.
+effect fn fetch(n: Int) -> Result[Int, String] = ok(n)
+
+effect fn main() -> Unit = {
+  let v = fetch(7)!
+  println(int.to_string(v))
+}

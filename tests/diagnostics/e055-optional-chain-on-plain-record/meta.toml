@@ -1,0 +1,3 @@
+expects_code = "E055"
+expects_error = "requires Option type but got P"
+hint_substring = "only on Option[T] values"

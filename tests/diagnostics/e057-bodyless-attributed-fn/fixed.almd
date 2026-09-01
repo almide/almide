@@ -1,0 +1,6 @@
+// E057 variant: an attribute that is not @extern/@intrinsic (here @bounded)
+// does not license a missing body.
+@bounded
+fn tick(n: Int) -> Int = n + 1
+
+fn main() -> Unit = println("${tick(1)}")

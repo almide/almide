@@ -1,0 +1,13 @@
+// ALS-B4: a list literal inside a counted loop allocates per iteration,
+// even bound to a fresh local rather than growing a binding.
+@bounded
+fn diag() -> Int = {
+  var acc = 0
+  for i in 0..<5 {
+    let pair = [i, i * 2]
+    acc = acc + list.len(pair)
+  }
+  acc
+}
+
+fn main() -> Unit = println("${diag()}")

@@ -1,0 +1,5 @@
+// A module-scope `let` and a `var` sharing one name: both are top-level
+// bindings, so the second declaration is a duplicate — not a shadow.
+let limit = 5
+
+fn main() -> Unit = println(int.to_string(limit))

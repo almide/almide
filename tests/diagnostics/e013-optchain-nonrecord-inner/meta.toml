@@ -1,0 +1,3 @@
+expects_code = "E013"
+expects_error = "cannot access field 'length' on type Int"
+hint_substring = "requires a record type inside Option"

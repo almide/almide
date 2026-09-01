@@ -1,0 +1,13 @@
+// ALS-B4: string interpolation inside a counted loop builds a fresh string
+// per iteration.
+@bounded
+fn trace() -> Int = {
+  var acc = 0
+  for i in 0..<3 {
+    let label = "step ${i}"
+    acc = acc + string.len(label)
+  }
+  acc
+}
+
+fn main() -> Unit = println("${trace()}")

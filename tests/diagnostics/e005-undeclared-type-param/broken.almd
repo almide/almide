@@ -1,0 +1,9 @@
+// A capitalized bare name in the writer's own signature that names no known
+// type: the mismatch hint must suggest declaring it as a type parameter.
+// (The unknown-type E029 on the signature itself co-occurs by construction.)
+fn wrap(x: Item) -> Item = x
+
+fn main() -> Unit = {
+  let _ = wrap(1)
+  println("ok")
+}

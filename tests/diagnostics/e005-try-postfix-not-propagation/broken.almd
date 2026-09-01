@@ -1,0 +1,8 @@
+// A `?` postfix used as if it were error propagation: `?` converts the Result
+// to an Option, so the Int slot receives Option[Int] (#1071). The hint must
+// name the rule and point at `!` (the propagating unwrap).
+fn parse_num(s: String) -> Result[Int, String] = ok(string.len(s))
+
+fn double(n: Int) -> Int = n * 2
+
+fn main() -> Unit = println(int.to_string(double(parse_num("abc")?)))

@@ -1,0 +1,14 @@
+// ALS-B5: break in a match arm still exits the counted loop early.
+@bounded
+fn probe() -> Int = {
+  var acc = 0
+  for i in 0..<6 {
+    match i {
+      3 => break,
+      _ => { acc = acc + i },
+    }
+  }
+  acc
+}
+
+fn main() -> Unit = println("${probe()}")

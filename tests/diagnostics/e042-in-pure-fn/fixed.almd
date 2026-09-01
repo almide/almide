@@ -1,0 +1,8 @@
+// The fix: `let _ =` is the explicit-discard spelling (a pure fn cannot
+// propagate with `!`).
+fn width_of(s: String) -> Int = {
+  let _ = int.parse(s)
+  string.len(s)
+}
+
+fn main() -> Unit = println(int.to_string(width_of("42")))

@@ -1,0 +1,3 @@
+expects_code = "E009"
+expects_error = "cannot mutate immutable binding 'registry'"
+hint_substring = "Use 'var registry = ...' to declare a mutable variable"

@@ -1,0 +1,5 @@
+// ALS-B8: a literal repeat count is a compile-time size.
+@bounded
+fn pattern() -> Int = bytes.len(bytes.repeat(bytes.new(2), 2))
+
+fn main() -> Unit = println("${pattern()}")

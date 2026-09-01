@@ -1,0 +1,8 @@
+// #1518: @deprecated with an argument name it does not take (`reason`) —
+// the whole attribute is unreadable, so it errors instead of dropping.
+@deprecated(since = 2, reason = "superseded")
+fn yell(s: String) -> String = s
+
+fn shout(s: String) -> String = s
+
+fn main() -> Unit = println(shout("hi"))

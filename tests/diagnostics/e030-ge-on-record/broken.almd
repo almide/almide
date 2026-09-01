@@ -1,0 +1,7 @@
+// Ordering two RECORD values with `>=` — a record has no operator ordering;
+// compare the scalar field that defines it.
+type Score = { points: Int }
+
+fn beats(a: Score, b: Score) -> Bool = a >= b
+
+fn main() -> Unit = println(if beats(Score { points: 3 }, Score { points: 1 }) then "win" else "lose")

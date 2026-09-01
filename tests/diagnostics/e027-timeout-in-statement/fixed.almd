@@ -1,0 +1,9 @@
+// The block-head form: a Duration deadline checked cooperatively at charge
+// sites.
+fn work() -> Int = 1
+
+effect fn main() -> Unit = {
+  let r = fan.timeout(duration.ms(1000)) { work() } ?? -1
+  println(int.to_string(r))
+  println("done")
+}

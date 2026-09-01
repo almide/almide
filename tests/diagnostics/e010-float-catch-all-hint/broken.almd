@@ -1,0 +1,8 @@
+// Matching a Float against literals alone can never be exhaustive — the hint
+// must name the Float subject and ask for a catch-all '_' arm.
+fn bucket(x: Float) -> String = match x {
+  0.0 => "zero",
+  1.0 => "one",
+}
+
+fn main() -> Unit = println(bucket(2.5))

@@ -1,0 +1,10 @@
+// E009, index-assign on a MODULE-LEVEL `let` from a fn body: the global
+// immutable binding may not be element-mutated either (this shape used to
+// slip past check and die as an opaque generated-Rust error).
+let registry = ["a", "b"]
+
+fn rename() -> Unit = {
+  registry[0] = "z"
+}
+
+fn main() -> Unit = rename()

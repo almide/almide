@@ -1,0 +1,3 @@
+expects_code = "E048"
+expects_error = "is not a case of `Result[Int, String]`"
+hint_substring = "ok(..) / err(..)"

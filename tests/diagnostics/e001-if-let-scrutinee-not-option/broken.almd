@@ -1,0 +1,6 @@
+// `if let` binds the inner value of an Option/Result scrutinee, so a plain
+// Int scrutinee has nothing to unwrap.
+fn main() -> Unit = {
+  let n = 5
+  if let v = n { println("${v}") } else { println("none") }
+}

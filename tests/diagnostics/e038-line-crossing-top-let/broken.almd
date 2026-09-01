@@ -1,0 +1,6 @@
+// E038 at module scope: a top-level let whose ?? fallback starts on the
+// next line would swallow the following declaration text.
+let base = int.parse("7")??
+0
+
+fn main() -> Unit = println(int.to_string(base))

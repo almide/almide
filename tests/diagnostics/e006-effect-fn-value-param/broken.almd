@@ -1,0 +1,7 @@
+// Calling an `effect (A) -> B` VALUE (here a parameter) needs the effect
+// capability just like a named effect fn — a pure fn cannot invoke it (#1055).
+effect fn parse_pos(s: String) -> Int = string.len(s)
+
+fn use_parser(h: effect (String) -> Int, s: String) -> Int = h(s) ?? 0
+
+effect fn main() -> Unit = println(int.to_string(use_parser(parse_pos, "abc")))

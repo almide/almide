@@ -1,0 +1,3 @@
+expects_code = "E004"
+expects_error = "function value `add` takes 2 argument(s), 1 given"
+hint_substring = "fixed parameter list"

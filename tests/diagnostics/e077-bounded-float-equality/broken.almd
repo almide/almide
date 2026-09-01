@@ -1,0 +1,6 @@
+// ALS-B10: Float equality is a comparison computing on Floats — rejected in
+// the profile like the ordering operators.
+@bounded
+fn same(a: Float, b: Float) -> Bool = a == b
+
+fn main() -> Unit = println(if same(1.5, 1.5) then "eq" else "ne")

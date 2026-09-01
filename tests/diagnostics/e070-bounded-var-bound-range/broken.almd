@@ -1,0 +1,11 @@
+// ALS-B3: a `var` bound is not a compile-time constant even when it is
+// initialized from a literal — mutability forfeits the static trip count.
+@bounded
+fn ramp() -> Int = {
+  var limit = 4
+  var acc = 0
+  for i in 0..<limit { acc = acc + i }
+  acc
+}
+
+fn main() -> Unit = println("${ramp()}")

@@ -1,0 +1,13 @@
+// Fixed: both locals renamed — every bare name has exactly one meaning again.
+import json.{parse}
+import regex.{find}
+
+fn parse_len(s: String) -> Int = string.len(s)
+
+fn find_len(s: String) -> Int = string.len(s) * 2
+
+effect fn main() -> Unit = {
+  let v = parse("[1]") ?? value.null()
+  let hit = find("a", "abc") ?? ""
+  println(int.to_string(parse_len(json.stringify(v)) + find_len(hit)))
+}

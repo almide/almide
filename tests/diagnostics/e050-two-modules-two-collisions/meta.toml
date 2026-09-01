@@ -1,0 +1,3 @@
+expects_code = "E050"
+expects_error = "collides with selective import"
+hint_substring = "exactly one meaning"

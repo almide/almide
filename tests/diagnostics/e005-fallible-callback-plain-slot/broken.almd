@@ -1,0 +1,8 @@
+// A FALLIBLE callback ((Int) -> Result[..]) handed to a total fn-typed slot:
+// the hint must name the two working spellings, not "fix the argument type"
+// (#1108 Phase 2b-iii).
+fn apply(f: (Int) -> Int, n: Int) -> Int = f(n)
+
+fn checked(n: Int) -> Result[Int, String] = ok(n)
+
+fn main() -> Unit = println(int.to_string(apply(checked, 3)))

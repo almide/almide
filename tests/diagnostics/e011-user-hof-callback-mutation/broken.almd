@@ -1,0 +1,14 @@
+// E011: the closure passed to a USER-DEFINED higher-order fn mutates an outer
+// var — the escape analysis is about the closure, not about stdlib callees.
+fn twice(f: (Int) -> Int) -> Int = f(1) + f(2)
+
+fn total() -> Int = {
+  var sum = 0
+  let r = twice((n) => {
+    sum = sum + n
+    n
+  })
+  sum + r
+}
+
+fn main() -> Unit = println(int.to_string(total()))

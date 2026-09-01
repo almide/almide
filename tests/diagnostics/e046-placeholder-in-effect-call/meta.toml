@@ -1,0 +1,3 @@
+expects_code = "E046"
+expects_error = "argument 1 of fetch()"
+hint_substring = "lambda"

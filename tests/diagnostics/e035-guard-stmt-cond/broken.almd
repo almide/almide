@@ -1,0 +1,14 @@
+// E035 in a `guard` statement condition — guarding on the error's text.
+effect fn risky() -> Result[Int, String] = err("boom")
+
+effect fn describe() -> Result[String, String] = {
+  match risky() {
+    ok(n) => ok(int.to_string(n)),
+    err(e) => {
+      guard e != "boom" else err("known failure")
+      ok("recovered: ${e}")
+    },
+  }
+}
+
+effect fn main() -> Unit = println(describe() ?? "none")

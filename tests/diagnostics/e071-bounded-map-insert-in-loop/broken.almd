@@ -1,0 +1,9 @@
+// ALS-B4: map.insert inside a counted loop allocates per iteration.
+@bounded
+fn fill() -> Int = {
+  var m: Map[String, Int] = [:]
+  for i in 0..<3 { map.insert(m, "k", i) }
+  map.len(m)
+}
+
+fn main() -> Unit = println("${fill()}")

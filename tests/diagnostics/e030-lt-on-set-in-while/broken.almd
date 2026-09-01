@@ -1,0 +1,7 @@
+// Ordering two SET operands in a while condition: Set has no `<` — compare
+// an explicit scalar such as the sizes.
+fn main() -> Unit = {
+  let small = set.from_list([1])
+  let big = set.from_list([1, 2])
+  while small < big { println("growing") }
+}

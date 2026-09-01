@@ -1,0 +1,3 @@
+expects_code = "E061"
+expects_error = "top-level 'let scale' cannot be bound to a function value"
+hint_substring = "works inside a fn or test body"

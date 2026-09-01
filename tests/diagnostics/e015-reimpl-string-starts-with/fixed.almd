@@ -1,0 +1,2 @@
+// A two-argument String predicate mirroring stdlib string.starts_with.
+fn main() -> Unit = println(if string.starts_with("ab", "a") then "y" else "n")

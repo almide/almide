@@ -1,0 +1,6 @@
+// One unused import in a block where the OTHER import is genuinely used —
+// the warning must single out the dead line only.
+import json
+
+
+effect fn main() -> Unit = println(json.stringify(json.parse("1")!))

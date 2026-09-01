@@ -1,0 +1,3 @@
+expects_code = "E001"
+expects_error = "if branches mixes sized numeric type UInt8 with a canonical Int value"
+hint_substring = "A literal adopts the sized width automatically"

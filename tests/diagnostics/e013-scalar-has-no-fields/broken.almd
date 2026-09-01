@@ -1,0 +1,6 @@
+// Field access on a concrete NON-record scalar (an Int): outside records
+// Almide values have no fields at all — the checker must say so instead of
+// dying at codegen (#1521).
+fn tag(n: Int) -> Int = n.value
+
+fn main() -> Unit = println(int.to_string(tag(7)))

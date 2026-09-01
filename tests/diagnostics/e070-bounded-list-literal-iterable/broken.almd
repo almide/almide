@@ -1,0 +1,10 @@
+// ALS-B3: iterating a list literal is still a container walk, not a counted
+// range — the profile has no trip count for it.
+@bounded
+fn sum3() -> Int = {
+  var acc = 0
+  for x in [1, 2, 3] { acc = acc + x }
+  acc
+}
+
+fn main() -> Unit = println("${sum3()}")

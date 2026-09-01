@@ -1,0 +1,12 @@
+// A FIELD of a temporary (a call result) passed to a `mut` parameter: the
+// member chain bottoms out at no binding at all, so there is no place whose
+// mutation could survive the call.
+type Bag = { items: List[Int] }
+
+fn make() -> Bag = Bag { items: [1] }
+
+fn main() -> Unit = {
+  var bag = make()
+  list.push(bag.items, 2)
+  println("done")
+}

@@ -1,0 +1,3 @@
+expects_code = "E071"
+expects_error = "building a string inside a counted loop"
+hint_substring = "allocate outside the loop"

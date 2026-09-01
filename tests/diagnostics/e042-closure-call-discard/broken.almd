@@ -1,0 +1,6 @@
+// E042 where the discarded Result comes from calling a LOCAL closure.
+effect fn main() -> Unit = {
+  let f = (s: String) => int.parse(s)
+  f("7")
+  println("done")
+}

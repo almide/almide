@@ -1,0 +1,5 @@
+// ALS-B8: padding to a run-time width constructs a run-time-length string.
+@bounded
+fn align(n: Int) -> Int = string.len(string.pad_start("7", n, "0"))
+
+fn main() -> Unit = println("${align(5)}")

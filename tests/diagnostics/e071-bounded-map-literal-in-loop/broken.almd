@@ -1,0 +1,12 @@
+// ALS-B4: a map literal inside a counted loop allocates per iteration.
+@bounded
+fn tally() -> Int = {
+  var acc = 0
+  for i in 0..<3 {
+    let row = ["idx": i]
+    acc = acc + map.len(row)
+  }
+  acc
+}
+
+fn main() -> Unit = println("${tally()}")

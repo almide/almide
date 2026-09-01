@@ -1,0 +1,3 @@
+expects_code = "E060"
+expects_error = "already imported as 'rx'"
+hint_substring = "Remove the duplicate import"

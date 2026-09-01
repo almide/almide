@@ -1,0 +1,3 @@
+expects_code = "E016"
+expects_error = "type 'K' is not hashable"
+hint_substring = "function-typed field anywhere in the key type"

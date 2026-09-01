@@ -1,0 +1,8 @@
+// The binder hides two constructor levels deep — the rule covers binders at
+// any depth inside an alternative.
+fn label(x: Option[Option[Int]]) -> String = match x {
+  some(some(n)) | none => "?",
+  some(none) => "empty",
+}
+
+fn main() -> Unit = println(label(none))

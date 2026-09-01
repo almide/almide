@@ -1,0 +1,5 @@
+// A module-level let bound to a zero-parameter lambda still has no home in
+// the compiled output — the arity does not matter.
+let answer = () => 42
+
+fn main() -> Unit = println("ready")

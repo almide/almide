@@ -1,0 +1,10 @@
+// The fix: keep the mutation local — copy into a `var` and mutate that.
+let registry = ["a", "b"]
+
+fn renamed() -> List[String] = {
+  var out = registry
+  out[0] = "z"
+  out
+}
+
+fn main() -> Unit = println(int.to_string(list.len(renamed())))

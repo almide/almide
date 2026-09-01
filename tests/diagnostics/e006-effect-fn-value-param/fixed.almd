@@ -1,0 +1,6 @@
+// The fix: the caller of an effect fn value must itself be an effect fn.
+effect fn parse_pos(s: String) -> Int = string.len(s)
+
+effect fn use_parser(h: effect (String) -> Int, s: String) -> Int = h(s)!
+
+effect fn main() -> Unit = println(int.to_string(use_parser(parse_pos, "abc") ?? 0))

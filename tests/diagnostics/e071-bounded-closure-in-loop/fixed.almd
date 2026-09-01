@@ -1,0 +1,9 @@
+// ALS-B4: inline the computation — the loop body stays allocation-free.
+@bounded
+fn warm() -> Int = {
+  var acc = 0
+  for i in 0..<4 { acc = acc + (i + 1) }
+  acc
+}
+
+fn main() -> Unit = println("${warm()}")

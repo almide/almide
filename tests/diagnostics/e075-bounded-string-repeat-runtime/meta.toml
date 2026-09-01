@@ -1,3 +1,3 @@
 expects_code = "E075"
-expects_error = ""
-hint_substring = ""
+expects_error = "run-time-length heap construction is not admissible"
+hint_substring = "compile-time size"

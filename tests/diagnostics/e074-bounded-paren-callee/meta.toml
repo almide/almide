@@ -1,0 +1,3 @@
+expects_code = "E074"
+expects_error = "an indirect call"
+hint_substring = "first-order pure stdlib members directly"

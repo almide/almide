@@ -1,0 +1,7 @@
+// #899 shape: a bare `none` in ARGUMENT position opens an Option slot
+// nothing pins — the call's own result (Bool) is concrete, so only the
+// ctor-in-arg sweep catches it.
+fn main() -> Unit = {
+  let flag = option.is_none(none)
+  println(if flag then "empty" else "has value")
+}

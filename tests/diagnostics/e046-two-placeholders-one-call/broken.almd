@@ -1,0 +1,5 @@
+// E046: TWO `_` in one call — each placeholder reports its own argument
+// position, and the shared steer names both lambda parameters.
+fn mk(a: Int, b: Int) -> Int = a * 10 + b
+
+fn main() -> Unit = println(int.to_string(mk(_, _)))

@@ -1,0 +1,4 @@
+// Fixed: a plain list is measured directly — no chain needed.
+fn head_len(xs: List[String]) -> Int = list.len(xs)
+
+fn main() -> Unit = println(int.to_string(head_len(["a"])))

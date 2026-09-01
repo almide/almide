@@ -1,0 +1,8 @@
+// Method-call syntax on a list receiver where the name has no close match
+// in the list module: the hint has no rewrite to offer, so it points at
+// `almide explain E002` instead.
+fn main() -> Unit = {
+  let xs = [3, 1, 2]
+  let ys = xs.bibble()
+  println("${list.len(ys)}")
+}

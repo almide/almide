@@ -1,0 +1,12 @@
+// ALS-B7: a method call through a computed receiver (a field access) is an
+// indirect callee the profile's static call graph cannot follow.
+type Inner = { v: Int }
+type Outer = { inner: Inner }
+
+@bounded
+fn scaled(i: Inner) -> Int = i.v * 2
+
+@bounded
+fn go(o: Outer) -> Int = scaled(o.inner)
+
+fn main() -> Unit = println("${go(Outer { inner: Inner { v: 3 } })}")

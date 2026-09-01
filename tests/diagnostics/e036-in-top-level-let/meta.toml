@@ -1,0 +1,3 @@
+expects_code = "E036"
+expects_error = "never uses the error value"
+hint_substring = "keep the original error"

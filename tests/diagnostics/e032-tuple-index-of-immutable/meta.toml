@@ -1,0 +1,3 @@
+expects_code = "E032"
+expects_error = "cannot mutate a field of immutable binding 'pair'"
+hint_substring = "Declare 'pair' with `var`"
