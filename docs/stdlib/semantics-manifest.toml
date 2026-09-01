@@ -2453,6 +2453,22 @@ to 9's 7 bytes, and inflate roundtrips the level-10 output byte-identically.
 #                not 2 characters and not a block count)
 #   second     — the Int is a Unix-epoch timestamp in SECONDS (modified_at —
 #                the same scale as env.unix_timestamp, NOT millis)
+[[zlib.fn]]
+name = "crc32"
+index_unit = "value"
+setup = ["let crc = zlib.crc32(bytes.from_list([1, 2, 3]))"]
+probe = "crc"
+expect = "1438416925"
+note = "The Int is the CRC-32 (IEEE, reflected) checksum value, unsigned 32-bit — pure Almide on every leg (#1700), probed for real now that zlib lowers on wasm."
+
+[[zlib.fn]]
+name = "adler32"
+index_unit = "value"
+setup = ["let adl = zlib.adler32(bytes.from_list([1, 2, 3]))"]
+probe = "adl"
+expect = "851975"
+note = "The Int is the Adler-32 checksum value ((s2 << 16) | s1, mod 65521) — pure Almide on every leg (#1700)."
+
 [fs]
 default_index_unit = "byte-value"
 
