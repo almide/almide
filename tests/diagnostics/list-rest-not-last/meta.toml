@@ -1,0 +1,2 @@
+expects_error = "Rest pattern must be last"
+hint_substring = "parser expected a different token"

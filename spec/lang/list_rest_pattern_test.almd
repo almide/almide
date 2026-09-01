@@ -1,0 +1,44 @@
+// #1461 — list-rest patterns (ALS-E18): `[h, ..t]` matches any list of
+// length >= the prefix and binds the tail as a list; `[h, ..]` ignores
+// it. The rest slot is last-only (parse error otherwise). The Rust leg's
+// coverage ladder terminates a fully-covered chain without a wildcard.
+fn total(xs: List[Int]) -> Int = match xs {
+  [] => 0,
+  [h, ..t] => h + total(t),
+}
+
+fn shape(xs: List[Int]) -> String = match xs {
+  [] => "empty",
+  [x] => "one:${x}",
+  [a, b, ..] => "many:${a},${b}",
+}
+
+fn heads(xs: List[String]) -> String = match xs {
+  [h, ..t] if list.len(t) > 0 => "${h}+${list.len(t)}",
+  [h, ..] => "solo:${h}",
+  [] => "none",
+}
+
+test "recursive sum through the rest tail" {
+  assert_eq(total([1, 2, 3, 4, 5]), 15)
+  assert_eq(total([]), 0)
+}
+
+test "coverage ladder terminates the natural chain" {
+  assert_eq(shape([]), "empty")
+  assert_eq(shape([7]), "one:7")
+  assert_eq(shape([9, 8, 7]), "many:9,8")
+}
+
+test "guards on rest arms and the ignored-rest form" {
+  assert_eq(heads(["a", "b", "c"]), "a+2")
+  assert_eq(heads(["z"]), "solo:z")
+  assert_eq(heads([]), "none")
+}
+
+test "whole-list rest binds the subject list" {
+  let t = match ["x", "y"] {
+    [..all] => all
+  }
+  assert_eq(list.join(t, "+"), "x+y")
+}

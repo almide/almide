@@ -301,6 +301,11 @@ ALS-S1)。
 **受理形**: `match subject { pattern [if guard] => expr, … }` — パターンは
 リテラル(文字列・整数)、ワイルドカード `_`、束縛子 `x`、ガード付き束縛子
 `x if cond`、Option の `some(x)` / `none`、Result の `ok(x)` / `err(e)`、
+リストパターン `[]` / `[a, b]`(要素数一致 + 要素ごとの束縛・リテラル照合)、
+その **rest 形** `[h, ..t]` / `[h, ..]`(#1461)— 長さ判定が `>=` に緩み、
+接頭要素の後ろ全体が `..name` で **subject と同じリスト型**に束縛される
+(`..` は無束縛)。rest はリストパターンの**最終要素のみ**(後置は parse
+エラー「Rest pattern must be last」)。
 そして **or-パターン** `a | b | c`(#1461)— いずれかの選択肢が一致すれば
 アームが取られる。選択肢は**束縛子を持てない**(E080 — 本体はどの選択肢が
 一致したかに依存できないため; ペイロードが要るときはアームを分けるか `_`)。
@@ -319,7 +324,9 @@ ALS-S1)。
 は型検査を通った match には存在しない。
 
 テスト: `spec/wasm_cross/match_forms.almd`(契約 C-247)、
-`tests/match_diag_test.rs`(負例)。
+`spec/wasm_cross/list_rest_pattern.almd`(契約 C-332 — rest 形の全レッグ
+一致: 再帰 sum、被覆梯子で終端化される自然形、ガード付き rest、文字列
+tail)、`tests/match_diag_test.rs`(負例)。
 
 ## ALS-E19 for-in 文(`ExprKind::ForIn`)
 
