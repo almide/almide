@@ -103,7 +103,11 @@ fi
 # as_pattern.almd (C-333) — the incumbent brick walls both #1461 forms
 # honestly (the structural leg is the default route and lowers them);
 # prunes with #1696 4-5.
-MAX_WALLED=22
+# 23 as of 2026-09-02: generic_record_fn_field.almd (C-092/#1676) — the
+# incumbent brick refuses the return-position computed call on the
+# instantiated closure field (the structural leg, the default route,
+# lowers it); prunes with #1696 4-5.
+MAX_WALLED=23
 corpus=$(ls "$FIXTURE_DIR"/*.almd 2>/dev/null | wc -l | tr -d ' ')
 if [ "$corpus" -eq 0 ] || [ $((n + walled)) -ne "$corpus" ]; then
   echo "::error::host-determinism: compared $n + walled $walled != corpus $corpus in $FIXTURE_DIR — the scan went blind (#985)"

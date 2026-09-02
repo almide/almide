@@ -187,6 +187,7 @@
 2054	spec/wasm_cross/generic_concat.almd
 2220	spec/wasm_cross/generic_fn_in_inferred_lambda.almd
 2162	spec/wasm_cross/generic_record_field_size.almd
+3055	spec/wasm_cross/generic_record_fn_field.almd
 2341	spec/wasm_cross/generics_mono.almd
 1737	spec/wasm_cross/gleam_bool_shortcircuit.almd
 2756	spec/wasm_cross/gleam_equality_matrix.almd

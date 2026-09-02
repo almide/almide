@@ -173,3 +173,12 @@ spec/lang/as_pattern_test.almd :: pick
 spec/wasm_cross/as_pattern.almd :: area_note
 spec/wasm_cross/as_pattern.almd :: main
 spec/wasm_cross/as_pattern.almd :: pick
+
+# (2026-09-02, C-092/#1676) the generic record's instantiated closure field is
+# called from return position; the incumbent brick refuses the heap-result
+# computed call (`heap-result method/computed call`), the STRUCTURAL leg
+# (the default) lowers it. Same division as the list_rest_pattern rows;
+# prunes with #1696 4-5.
+spec/wasm_cross/generic_record_fn_field.almd :: call_any__String
+spec/wasm_cross/generic_record_fn_field.almd :: call_it
+spec/wasm_cross/generic_record_fn_field.almd :: call_q

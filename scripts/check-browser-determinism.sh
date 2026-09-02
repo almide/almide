@@ -65,7 +65,11 @@ fail=0; n=0
 # as_pattern.almd (C-333) — the incumbent brick walls both #1461 forms
 # honestly (the structural leg is the default route and lowers them);
 # prunes with #1696 4-5.
-MAX_WALLED=22
+# 23 as of 2026-09-02: generic_record_fn_field.almd (C-092/#1676) — the
+# incumbent brick refuses the return-position computed call on the
+# instantiated closure field (the structural leg, the default route,
+# lowers it); prunes with #1696 4-5.
+MAX_WALLED=23
 walled=0
 for fix in "$FIXTURE_DIR"/*.almd; do
   [ -e "$fix" ] || continue
