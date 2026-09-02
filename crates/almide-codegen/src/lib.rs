@@ -457,20 +457,21 @@ fn resolve_runtime_deps(needed: &mut std::collections::HashSet<&str>) {
     }
 }
 
-/// Collect the runtime module bodies for the `needed` set: hoist top-level `use`
-/// to the front, deduplicate, and skip struct definitions the walker already
-/// emitted (present in `user_code`) to avoid E0428. Returns the assembled block.
 /// Process one runtime module's (already-test-block-stripped) source lines,
 /// appending top-level `use` lines into `use_set`/`use_lines` (deduped) and
-/// everything else into `body_lines` — skipping a `#[derive(...)] pub
-/// struct Name { ... }` block whose struct the walker already emitted into
-/// `user_code`. Extracted from `rust_runtime_modules` (cog>30
-/// decomposition, second round): a write-only accumulator over
+/// everything else into `body_lines`. Extracted from `rust_runtime_modules`
+/// (cog>30 decomposition, second round): a write-only accumulator over
 /// `use_set`/`use_lines`/`body_lines`, never read back to change its own
 /// branching within this call.
+///
+/// No runtime item is ever skipped in favour of a walker-emitted one: every
+/// runtime type carries a reserved `Almide*` spelling the walker never
+/// emits a decl for (walker/runtime_owned.rs, #1821). The former name-keyed
+/// `#[derive] pub struct` skip — which deduped the bundled `FileStat` /
+/// `ProcessStatus` twins — silently substituted a USER struct of that name
+/// for the runtime's, breaking the runtime's own constructors (E0560).
 fn append_runtime_module_lines(
     source: &str,
-    user_code: &str,
     use_set: &mut std::collections::HashSet<String>,
     use_lines: &mut Vec<String>,
     body_lines: &mut Vec<String>,
@@ -480,10 +481,6 @@ fn append_runtime_module_lines(
     let mut i = 0;
     while i < lines.len() {
         if let Some(next) = try_consume_use_line(&lines, i, use_set, use_lines) {
-            i = next;
-            continue;
-        }
-        if let Some(next) = try_skip_emitted_struct_block(&lines, i, user_code) {
             i = next;
             continue;
         }
@@ -514,33 +511,6 @@ fn try_consume_use_line(
     } else {
         None
     }
-}
-
-/// Try to consume a `#[derive(...)] pub struct Name { ... }` block starting
-/// at `lines[i]` whose struct `user_code` already contains (the walker
-/// already emitted it). Returns the index right after the closing brace when
-/// the block is skipped. Extracted from `append_runtime_module_lines`.
-fn try_skip_emitted_struct_block(lines: &[&str], i: usize, user_code: &str) -> Option<usize> {
-    let trimmed = lines[i].trim();
-    if !trimmed.starts_with("#[derive(") { return None; }
-    let next = lines.get(i + 1)?;
-    let struct_name = next.trim().strip_prefix("pub struct ")
-        .and_then(|s| s.split_whitespace().next())
-        .map(|s| s.trim_end_matches('{').trim())?;
-    let needle = format!("struct {}", struct_name);
-    if !user_code.contains(&needle) { return None; }
-    // Skip derive + struct + fields + closing brace
-    let mut j = i + 1; // skip #[derive]
-    let mut depth = 0u32;
-    while j < lines.len() {
-        if lines[j].contains('{') { depth += 1; }
-        if lines[j].contains('}') {
-            depth = depth.saturating_sub(1);
-            if depth == 0 { j += 1; break; }
-        }
-        j += 1;
-    }
-    Some(j)
 }
 
 /// Remove single-item `use a::b::X;` lines when a group `use
@@ -575,13 +545,13 @@ fn dedup_use_lines(use_lines: Vec<String>, use_set: &std::collections::HashSet<S
     }).collect()
 }
 
-fn rust_runtime_modules(needed: &std::collections::HashSet<&str>, user_code: &str) -> String {
+fn rust_runtime_modules(needed: &std::collections::HashSet<&str>) -> String {
     let mut use_set = std::collections::HashSet::new();
     let mut use_lines = Vec::new();
     let mut body_lines = Vec::new();
     for (name, source) in crate::generated::rust_runtime::RUST_RUNTIME_MODULES {
         if needed.contains(name) {
-            append_runtime_module_lines(source, user_code, &mut use_set, &mut use_lines, &mut body_lines);
+            append_runtime_module_lines(source, &mut use_set, &mut use_lines, &mut body_lines);
         }
     }
     let use_lines = dedup_use_lines(use_lines, &use_set);
@@ -615,7 +585,7 @@ pub fn emit_runtime_crate() -> String {
             needed.insert(*name);
         }
     }
-    out.push_str(&rust_runtime_modules(&needed, ""));
+    out.push_str(&rust_runtime_modules(&needed));
     // matrix.rs calls `almide_kernel::…`; embed the kernel as a crate-local module so
     // the single-crate runtime rlib resolves it (no extern). Always present here — the
     // shared rlib includes every std module, matrix among them.
@@ -665,7 +635,7 @@ fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetC
                 }
             }
             resolve_runtime_deps(&mut needed);
-            output.push_str(&rust_runtime_modules(&needed, &user_code));
+            output.push_str(&rust_runtime_modules(&needed));
             // matrix.rs calls `almide_kernel::…`; when matrix is included, drop the
             // embedded kernel in beside it — above the boundary, so it stays in the
             // runtime preamble (the rlib split and the inline build both keep it).
