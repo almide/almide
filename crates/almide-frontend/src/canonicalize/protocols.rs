@@ -13,6 +13,7 @@ pub fn register_builtin_protocols(env: &mut TypeEnv) {
 
     // Eq: fn eq(a: Self, b: Self) -> Bool
     env.protocols.insert("Eq".into(), ProtocolDef {
+        origin: None,
         name: "Eq".into(),
         generics: vec![],
         methods: vec![ProtocolMethodSig {
@@ -25,6 +26,7 @@ pub fn register_builtin_protocols(env: &mut TypeEnv) {
 
     // Repr: fn repr(v: Self) -> String
     env.protocols.insert("Repr".into(), ProtocolDef {
+        origin: None,
         name: "Repr".into(),
         generics: vec![],
         methods: vec![ProtocolMethodSig {
@@ -37,6 +39,7 @@ pub fn register_builtin_protocols(env: &mut TypeEnv) {
 
     // Ord: fn cmp(a: Self, b: Self) -> Int
     env.protocols.insert("Ord".into(), ProtocolDef {
+        origin: None,
         name: "Ord".into(),
         generics: vec![],
         methods: vec![ProtocolMethodSig {
@@ -49,6 +52,7 @@ pub fn register_builtin_protocols(env: &mut TypeEnv) {
 
     // Hash: fn hash(v: Self) -> Int
     env.protocols.insert("Hash".into(), ProtocolDef {
+        origin: None,
         name: "Hash".into(),
         generics: vec![],
         methods: vec![ProtocolMethodSig {
@@ -61,6 +65,7 @@ pub fn register_builtin_protocols(env: &mut TypeEnv) {
 
     // Codec: fn encode(v: Self) -> Value, fn decode(v: Value) -> Result[Self, String]
     env.protocols.insert("Codec".into(), ProtocolDef {
+        origin: None,
         name: "Codec".into(),
         generics: vec![],
         methods: vec![
@@ -81,6 +86,7 @@ pub fn register_builtin_protocols(env: &mut TypeEnv) {
 
     // Encode: fn encode(v: Self) -> Value
     env.protocols.insert("Encode".into(), ProtocolDef {
+        origin: None,
         name: "Encode".into(),
         generics: vec![],
         methods: vec![ProtocolMethodSig {
@@ -93,6 +99,7 @@ pub fn register_builtin_protocols(env: &mut TypeEnv) {
 
     // Decode: fn decode(v: Value) -> Result[Self, String]
     env.protocols.insert("Decode".into(), ProtocolDef {
+        origin: None,
         name: "Decode".into(),
         generics: vec![],
         methods: vec![ProtocolMethodSig {
@@ -108,6 +115,7 @@ pub fn register_builtin_protocols(env: &mut TypeEnv) {
     // = x + y` flows through without a separate hand-impl. Monomorph
     // repairs the `BinOp` kind once `T` resolves to a concrete width.
     env.protocols.insert("Numeric".into(), ProtocolDef {
+        origin: None,
         name: "Numeric".into(),
         generics: vec![],
         methods: vec![
