@@ -16,7 +16,11 @@
 #                       (assert_throws requires catching a panic; wasm traps
 #                       are uncatchable in-process).
 #
-# COMPILER_FRONTIER (0) — the debt is EMPTY: every spec file the wasm leg can host, it runs.
+# COMPILER_FRONTIER (1) — the test harness's wasm lane renders through the
+# INCUMBENT brick, which has no list-rest bind (#1461); the structural leg —
+# the default build/run route — lowers the form (C-332 pins it on every
+# execution sweep). Retires with the #1584 render_wasm switchover.
+spec/lang/list_rest_pattern_test.almd :: COMPILER_FRONTIER :: incumbent brick has no list-rest pattern bind (structural leg lowers it; retires with #1584)
 #
 # HOST_CAPABILITY (6):
 spec/lang/effect_intrinsic_tail_test.almd :: HOST_CAPABILITY :: http.serve is a TCP listener
