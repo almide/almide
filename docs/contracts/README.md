@@ -354,7 +354,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-324 | Mut-param forwarding from a branch arm: folded to value flow or refused, never silently wrong | 0.60.0 | active | fixture | 2 |
 | C-325 | bytes.push growth is amortized: linear retention, byte-identical at scale | 0.60.0 | active | fixture | 1 |
 | C-326 | Branch-selected mut-fn calls hoist their write-back out of the arm: the gzip-inflate shape lowers structurally | 0.60.0 | active | fixture | 1 |
-| C-327 | env.sleep_ms pauses and returns on every leg | 0.60.1 | active | fixture | 1 |
+| C-327 | env.sleep_ms pauses and returns on every leg | 0.60.1 | active | fixture | 2 |
 | C-328 | The http string family answers identically on the native and embedded-wasm lanes | 0.61.1 | active | fixture | 0 |
 | C-329 | env.set is observed by env.get identically on every leg, and the p1 shim serves the environ/args ops | 0.61.2 | active | fixture | 1 |
 | C-330 | The http string family answers on the stock runtime through the p3 component's async-lowered exchange | 0.62.0 | active | fixture | 0 |

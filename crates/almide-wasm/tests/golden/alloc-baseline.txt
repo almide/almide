@@ -15,6 +15,7 @@
 65872	spec/wasm_cross/assign_alias_rc.almd
 66064	spec/wasm_cross/autotry_construction.almd
 65904	spec/wasm_cross/autotry_result_first_arg.almd
+84224	spec/wasm_cross/availability_pure_batch.almd
 66880	spec/wasm_cross/bang_in_record_literal_field.almd
 70656	spec/wasm_cross/base64_encode.almd
 70352	spec/wasm_cross/binary_operators.almd
