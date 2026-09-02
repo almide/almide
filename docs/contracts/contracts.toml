@@ -488,7 +488,7 @@ evidence  = [
 id        = "C-033"
 spec      = "ALS-C5"
 title     = "Value semantics for aliased mutables (copy-on-write)"
-statement = "`var b = a; a[i] = v` leaves `b` unchanged on both targets: heap-typed vars that are copy-aliased AND mutated in place get a copy-on-write at every mutation site (AliasCowPass may-alias analysis -> needs_cow; wasm clones via __cow_check before IndexAssign/FieldAssign/ListSwap/Reverse/Rotate/CopySlice and in-place stdlib mutators; native counts mutation targets as uses so aliased binds clone-at-bind). The full alias-shape truth table (A-M: chains, branch arms, record fields, destructures, map/string in-place) behaves identically on both targets."
+statement = "`var b = a; a[i] = v` leaves `b` unchanged on both targets: heap-typed vars that are copy-aliased AND mutated in place get a copy-on-write at every mutation site (AliasCowPass may-alias analysis -> needs_cow; wasm clones via __cow_check before IndexAssign/FieldAssign/ListSwap/Reverse/Rotate/CopySlice and in-place stdlib mutators; native counts mutation targets as uses so aliased binds clone-at-bind). The full alias-shape truth table (A-M: chains, branch arms, record fields, destructures, map/string in-place) behaves identically on both targets. EXTENDED (#1219 stage 1, 0.61.2): on the structural wasm leg `m[k] = v`, `map.insert(m, k, v)` and the rebind `m = map.set(m, k, v)` write INTO the var's block when the block is the var's alone and take the functional copy otherwise — the judge is rc == 1 under a MONOTONE Map share witness (Maps stay off the droppable set, so the count only ever says 'a second holder existed': every holder other than a plain var — a record/tuple/variant/option/list slot, a map VALUE slot, a for-in cursor — takes +1, binds and assigns copy, borrowed params and C-319 cells never enter the window). An alias or holder bound before a write keeps the pre-write value, an overwrite keeps the entry's position, an append keeps insertion order, a for-in over the map being written walks the pre-loop entries, and the old copy-per-write's O(n^2) retained bytes (a 20k-entry build loop exhausted the heap where native ran in milliseconds) become O(n). Same change: the map entry store CO-OWNS a droppable (String/Bytes/List) key or value handle — before, a `let`-bound key (`let k = \"k\" + int.to_string(i)`) was released at the next loop rebind and the 0.61.1 default leg read back the strings the loop built next (`2,3,0,1,…` for native's `k0,k1,k2,k3`), a silent cross-target divergence now pinned."
 since     = "0.24.0"
 status    = "active"
 doc       = "C-033-cow-truth-table.md"
@@ -497,6 +497,7 @@ evidence  = [
   { path = "spec/lang/alias_cow_test.almd", class = "fixture" },
   { path = "spec/wasm_cross/module_var_alias_cow.almd", class = "fixture" },
   { path = "spec/wasm_cross/witness_straightline.almd", class = "fixture" },
+  { path = "spec/wasm_cross/map_set_in_place.almd", class = "fixture" },
 ]
 
 # ── LIST BOUNDS GRACEFULNESS ─────────────────────────────────────────

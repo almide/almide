@@ -1,0 +1,118 @@
+// @contract: C-033
+// The in-place `map.set` window (#1219 stage 1): a mutable build loop writes
+// INTO the var's block when the block is the var's alone — an existing key
+// takes the value in its position, a new key appends (insertion order kept,
+// growth amortized) — and every alias or holder bound BEFORE a write keeps the
+// pre-write value (copy-on-write at the mutation site, the C-033 discipline).
+// Also pins the map entry store co-owning a `let`-bound String key/value (the
+// 0.61.1 default leg kept a dangling handle and read back the strings the loop
+// built next). Native, the structural wasm leg and the incumbent print the
+// same bytes: lengths, checksums, insertion order, every alias observation.
+type Holder = { snap: Map[Int, Int], tag: Int }
+
+fn checksum(m: Map[Int, Int]) -> Int = map.fold(m, 0, (acc, k, v) => (acc * 31 + k * 7 + v) % 1000000007)
+
+fn render(m: Map[Int, Int]) -> String = {
+  var out = ""
+  for (k, v) in m {
+    out = out + int.to_string(k) + ":" + int.to_string(v) + ","
+  }
+  out
+}
+
+fn put(mut m: Map[Int, Int], k: Int, v: Int) -> Unit = map.insert(m, k, v)
+
+fn bump(mut m: Map[String, Int], k: String) -> Unit = map.insert(m, k, map.get_or(m, k, 0) + 1)
+
+fn main() -> Unit = {
+  // A. the build loop: 3000 writes over 2000 keys — the last 1000 overwrite
+  var m: Map[Int, Int] = map.new()
+  for i in 0..<3000 {
+    map.insert(m, i % 2000, i)
+  }
+  println("A.len=" + int.to_string(map.len(m)) + " sum=" + int.to_string(checksum(m)))
+  println("A.k0=" + int.to_string(map.get_or(m, 0, 0 - 1)) + " k999=" + int.to_string(map.get_or(m, 999, 0 - 1)) + " k1999=" + int.to_string(map.get_or(m, 1999, 0 - 1)))
+  println("A.first=" + int.to_string(list.get_or(map.keys(m), 0, 0 - 1)) + " last=" + int.to_string(list.get_or(map.keys(m), 1999, 0 - 1)))
+  // B. the index-assign spelling with the counter idiom (the value reads the
+  // map being written), and the explicit rebind spelling
+  var c: Map[Int, Int] = map.new()
+  for i in 0..<500 {
+    c[i % 7] = map.get_or(c, i % 7, 0) + 1
+  }
+  println("B.c=" + render(c))
+  var r: Map[Int, Int] = map.new()
+  for i in 0..<64 {
+    r = map.set(r, 63 - i, i)
+  }
+  println("B.r.len=" + int.to_string(map.len(r)) + " first=" + int.to_string(list.get_or(map.keys(r), 0, 0 - 1)) + " sum=" + int.to_string(checksum(r)))
+  // C. aliases bound before a write keep the pre-write value; a set through
+  // the alias leaves the alias untouched too
+  let a = m
+  var b = map.set(a, 5000, 1)
+  map.insert(m, 5001, 2)
+  println("C.a=" + int.to_string(map.len(a)) + " b=" + int.to_string(map.len(b)) + " m=" + int.to_string(map.len(m)))
+  println("C.a.has5000=" + (if map.contains(a, 5000) then "yes" else "no") + " a.has5001=" + (if map.contains(a, 5001) then "yes" else "no") + " b.has5001=" + (if map.contains(b, 5001) then "yes" else "no"))
+  // D. holders other than a var — a record field, an option payload, a tuple
+  // slot — keep the pre-write entries across an overwrite AND an append
+  var d: Map[Int, Int] = map.from_list([(1, 10), (2, 20)])
+  let held = Holder { snap: d, tag: 1 }
+  let opt = some(d)
+  let pair = (d, 7)
+  map.insert(d, 3, 30)
+  d[1] = 11
+  let ol = match opt {
+    some(x) => render(x),
+    none => "none",
+  }
+  let (pd, _pt) = pair
+  println("D.d=" + render(d))
+  println("D.held=" + render(held.snap) + " opt=" + ol + " pair=" + render(pd))
+  // E. a for-in cursor over the map being written walks the pre-loop entries
+  // (a snapshot); the writes land after it
+  var e: Map[Int, Int] = map.from_list([(1, 1), (2, 2), (3, 3)])
+  for (k, v) in e {
+    map.insert(e, k + 10, v * 100)
+  }
+  println("E=" + render(e))
+  // F. the `mut` parameter shape: the write persists to the caller
+  var counts: Map[Int, Int] = [:]
+  put(counts, 1, 100)
+  put(counts, 2, 200)
+  put(counts, 1, 111)
+  var freq: Map[String, Int] = [:]
+  bump(freq, "a")
+  bump(freq, "a")
+  bump(freq, "b")
+  println("F=" + render(counts) + " a=" + int.to_string(map.get_or(freq, "a", 0)) + " b=" + int.to_string(map.get_or(freq, "b", 0)))
+  // G. `let`-bound String keys and values: the entry co-owns the handle, so the
+  // binding's release at the next loop round does not free what the map holds
+  var s: Map[String, Int] = map.new()
+  for i in 0..<30 {
+    let k = "k" + int.to_string(i % 4)
+    s[k] = map.get_or(s, k, 0) + i
+  }
+  println("G.keys=" + list.join(map.keys(s), ",") + " k2=" + int.to_string(map.get_or(s, "k2", 0 - 1)))
+  var w: Map[Int, String] = map.new()
+  for i in 0..<12 {
+    let v = "w" + int.to_string(i % 5)
+    w[i % 5] = v
+  }
+  let w2 = match map.get(w, 2) {
+    some(x) => x,
+    none => "?",
+  }
+  println("G.w.len=" + int.to_string(map.len(w)) + " w2=" + w2)
+  // H. a map shared by an earlier walk keeps growing correctly afterwards
+  var h: Map[Int, Int] = map.new()
+  for i in 0..<20 {
+    map.insert(h, i, i * i)
+  }
+  var walked = 0
+  for (k, v) in h {
+    walked = walked + k + v
+  }
+  for i in 20..<40 {
+    map.insert(h, i, i * i)
+  }
+  println("H.walked=" + int.to_string(walked) + " len=" + int.to_string(map.len(h)) + " sum=" + int.to_string(checksum(h)))
+}
