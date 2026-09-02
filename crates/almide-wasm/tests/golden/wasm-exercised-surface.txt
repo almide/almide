@@ -189,8 +189,14 @@ call:hash.fnv1a32
 call:hash.fnv1a32_bytes
 call:hash.sha256
 call:hash.sha256_hex
+call:hex.decode
 call:hex.encode
 call:hex.encode_upper
+call:html.concat
+call:html.empty
+call:html.escape
+call:html.raw
+call:html.to_string
 call:http.body
 call:http.get_header
 call:http.json
@@ -393,8 +399,11 @@ call:option.unwrap_or_else
 call:path.basename
 call:path.dirname
 call:path.extension
+call:path.from_string
 call:path.is_absolute
 call:path.join
+call:path.to_string
+call:path.trusted
 call:println
 call:process.args
 call:process.exit
@@ -511,6 +520,8 @@ call:value.omit
 call:value.pick
 call:value.str
 call:value.stringify
+call:value.to_camel_case
+call:value.to_snake_case
 call:zlib.compress
 call:zlib.compress_level
 call:zlib.decompress

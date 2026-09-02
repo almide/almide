@@ -27,6 +27,10 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
 pub fn emit_program_with_ops(
     ir: &IrProgram,
 ) -> Result<(Vec<u8>, std::collections::BTreeSet<i32>), EmitError> {
+    // Transparent newtypes erase FIRST, so both passes read one tree
+    // (#1423 stage 4: the html/path SafeHtml/SafePath rows).
+    let erased = crate::newtype::erase_transparent_aliases(ir);
+    let ir = erased.as_ref().unwrap_or(ir);
     let (bytes, visited, total, ops) = emit_program_pass(ir, None)?;
     if visited.len() >= total {
         return Ok((bytes, ops));

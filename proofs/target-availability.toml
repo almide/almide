@@ -27,7 +27,7 @@
 # pending-self-host count is a both-way ratchet.
 schema = 2
 
-pending_self_host_ceiling = 15
+pending_self_host_ceiling = 7
 
 
 [[unavailable]]
@@ -68,30 +68,6 @@ issue = "#1423"
 
 [[unavailable]]
 fn = "fs.stat"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1423"
-
-[[unavailable]]
-fn = "hex.decode"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1423"
-
-[[unavailable]]
-fn = "html.empty"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1423"
-
-[[unavailable]]
-fn = "html.escape"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1423"
-
-[[unavailable]]
-fn = "html.raw"
 legs = ["structural"]
 reason = "pending-self-host"
 issue = "#1423"
@@ -176,18 +152,6 @@ issue = "#1423"
 
 [[unavailable]]
 fn = "map.delete"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1423"
-
-[[unavailable]]
-fn = "path.from_string"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1423"
-
-[[unavailable]]
-fn = "path.trusted"
 legs = ["structural"]
 reason = "pending-self-host"
 issue = "#1423"
@@ -335,16 +299,4 @@ reason-embedded = "the assertion helper has no wasm lowering yet — the plain a
 reason-stock-p1 = "the assertion helper has no wasm lowering yet — the plain assert forms work"
 reason-structural = "host-surface"
 alt = "match on the err arm and assert"
-issue = "#1423"
-
-[[unavailable]]
-fn = "value.to_camel_case"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1423"
-
-[[unavailable]]
-fn = "value.to_snake_case"
-legs = ["structural"]
-reason = "pending-self-host"
 issue = "#1423"
