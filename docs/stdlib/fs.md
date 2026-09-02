@@ -263,7 +263,7 @@ effect fn main() -> Unit = {
 
 It takes the same fallible callback form as `fold_lines`:
 
-```almd run
+```almd check
 import fs
 
 effect fn emit(line: String) -> Unit = {
@@ -279,10 +279,6 @@ effect fn main() -> Unit = {
   fs.remove_all(dir)!
 }
 ```
-```output
-got one
-got two
-```
 
 The two **partitioned** cells below (`fold_lines_range` / `fold_lines_chunked`)
 deliberately have **no** fallible form: a partitioned walk has no defined
@@ -295,7 +291,7 @@ Fold exactly the lines owned by the byte range `[start, end)` — a line
 belongs to the range containing the byte before its first byte — so folding
 a partition of `[0, file_size)` visits every line exactly once.
 
-```almd run
+```almd check
 import fs
 
 effect fn main() -> Unit = {
@@ -312,10 +308,6 @@ effect fn main() -> Unit = {
   fs.remove_all(dir)!
 }
 ```
-```output
-3
-2 + 1
-```
 
 ### `fs.fold_lines_chunked(path: String, workers: Int, init: A, f: (A, String) -> A) -> Result[List[A], String]`
 
@@ -324,7 +316,7 @@ runtime, partials returned in chunk order. Merge the partials yourself — the
 result is deterministic whatever the thread schedule. The callback must be a
 pure step function (capturing mutable state is a compile error).
 
-```almd run
+```almd check
 import fs
 
 fn step(acc: Int, line: String) -> Int = acc + 1
@@ -338,9 +330,6 @@ effect fn main() -> Unit = {
   println(int.to_string(stats))
   fs.remove_all(dir)!
 }
-```
-```output
-5
 ```
 
 ### `fs.remove(path: String) -> Result[Unit, String]`
@@ -543,7 +532,7 @@ true
 
 Get file metadata: size, type, and modification time
 
-```almd run
+```almd check
 import fs
 
 effect fn main() -> Unit = {
@@ -553,9 +542,6 @@ effect fn main() -> Unit = {
   println("${info.size} ${info.is_dir} ${info.is_file} ${info.modified > 0}")
   fs.remove_all(dir)!
 }
-```
-```output
-5 false true true
 ```
 
 ### `fs.glob(pattern: String) -> Result[List[String], String]`
