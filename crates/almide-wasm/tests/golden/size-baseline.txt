@@ -163,6 +163,7 @@
 1814	spec/wasm_cross/for_in_forms.almd
 12533	spec/wasm_cross/fs_composition_family.almd
 7351	spec/wasm_cross/fs_fallible_stream_callback.almd
+!	spec/wasm_cross/fs_glob_segments.almd
 4849	spec/wasm_cross/fs_list_dir_multipass.almd
 5813	spec/wasm_cross/fs_metadata_family.almd
 2893	spec/wasm_cross/fs_preopen_resolve.almd
