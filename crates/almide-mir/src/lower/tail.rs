@@ -803,3 +803,4 @@ impl LowerCtx {
 }
 
 include!("tail_b.rs");
+include!("tail_c.rs");
