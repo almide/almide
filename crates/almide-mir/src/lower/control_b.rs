@@ -419,6 +419,7 @@ impl LowerCtx {
 
 include!("option_match.rs");
 include!("control_p2.rs");
+include!("control_p2_e.rs");
 include!("control_p2_b.rs");
 include!("control_p2_c.rs");
 include!("control_p2_d.rs");
