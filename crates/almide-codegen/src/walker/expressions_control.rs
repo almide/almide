@@ -88,7 +88,7 @@ fn render_expr_var(ctx: &RenderContext, expr: &IrExpr) -> String {
         // shared static is not Sync, and fan threads read globals). A BARE
         // read stays raw — borrow positions coerce against the raw runtime
         // signatures directly; OWNING positions go through `Clone{Var}` nodes
-        // (CloneInsertion), whose render re-wraps into the RcCow shape.
+        // (CloneInsertion), whose render re-wraps into the AlmideRcCow shape.
         return read;
     }
     raw_name
@@ -190,7 +190,7 @@ fn render_expr_for_in(ctx: &RenderContext, expr: &IrExpr) -> String {
         }
         _ => {
             let base = render_expr(ctx, iterable);
-            // List types: .iter().cloned() works for both RcCow<Vec<T>>
+            // List types: .iter().cloned() works for both AlmideRcCow<Vec<T>>
             // (via Deref) and plain Vec<T>, giving owned T values. A binder
             // the body only borrows (`borrowed_loop_vars`, #1673) skips the
             // per-element copy: `.iter()` binds `&T`.
@@ -322,9 +322,9 @@ fn render_expr_call(ctx: &RenderContext, expr: &IrExpr) -> String {
                 .unwrap_or_else(|| {
                     format!("almide_rt_{}_{}({})", mod_ident, func_ident, args_str)
                 });
-            // #617: same raw-runtime-result → RcCow boundary as RuntimeCall —
+            // #617: same raw-runtime-result → AlmideRcCow boundary as RuntimeCall —
             // but ONLY for STDLIB modules (native runtime signatures). A USER
-            // module fn's generated signature already carries the mapped RcCow
+            // module fn's generated signature already carries the mapped AlmideRcCow
             // types, so gluing it would double-wrap (E0283 in the nn repo).
             if almide_lang::stdlib_info::is_stdlib_module(module.as_str()) {
                 rc_cow_result_glue(call, &expr.ty)
@@ -376,7 +376,7 @@ fn render_expr_record(ctx: &RenderContext, expr: &IrExpr) -> String {
     let ctor_name_str = name.as_ref().map(|s| s.as_str()).unwrap_or("");
     let explicit_names: std::collections::HashSet<&str> = fields.iter().map(|(k, _)| &**k).collect();
     let mut field_strs: Vec<String> = Vec::new();
-    // Render explicit fields (owned: RcCow vars unwrapped to T)
+    // Render explicit fields (owned: AlmideRcCow vars unwrapped to T)
     for (k, v) in fields.iter() {
         let mut val_str = render_expr_owned(ctx, v);
         // Box recursive fields (annotation is target-aware — empty for non-Rust)
@@ -538,10 +538,10 @@ fn render_expr_unwrap(ctx: &RenderContext, expr: &IrExpr) -> String {
     }
     // #1296: a NATIVE-runtime call returning `Result[Bytes/Matrix, String]`
     // unwrapped in place (`bytes.len(zlib.compress_level(d, 9)!)`): the #617
-    // glue wraps the Ok side BEFORE `?` (`(call.map(|__e| RcCow::from(__e)))?`),
+    // glue wraps the Ok side BEFORE `?` (`(call.map(|__e| AlmideRcCow::from(__e)))?`),
     // so in call-ARGUMENT position rustc back-infers `?`'s source from the
-    // consuming `&Vec<u8>` parameter and E0308s on the RcCow. Emit the RAW
-    // call, unwrap FIRST, then glue the Ok value — `RcCow::from((raw)?)` is
+    // consuming `&Vec<u8>` parameter and E0308s on the AlmideRcCow. Emit the RAW
+    // call, unwrap FIRST, then glue the Ok value — `AlmideRcCow::from((raw)?)` is
     // concretely typed end to end, and the arg-position `&` deref-coerces.
     // Narrow by construction: String-err only (the template's map_err
     // variants keep their path), non-test (tests use .unwrap()).
@@ -587,15 +587,15 @@ fn render_expr_unwrap(ctx: &RenderContext, expr: &IrExpr) -> String {
 
 fn render_expr_clone(ctx: &RenderContext, expr: &IrExpr) -> String {
     let IrExprKind::Clone { expr: inner } = &expr.kind else { unreachable!() };
-    // Val-wrapped var: deref then clone to get T. Bind handler re-wraps in RcCow::new().
+    // Val-wrapped var: deref then clone to get T. Bind handler re-wraps in AlmideRcCow::new().
     if let IrExprKind::Var { id } = &inner.kind {
         if ctx.ann.is_rc_cow(id) {
             let var_name = ctx.var_name(*id).to_string();
             return format!("(*{}).clone()", var_name);
         }
         // #617: cloning a GLOBAL out of its raw static (Bytes/Matrix shapes)
-        // produces the raw value — re-wrap into the RcCow value shape the
-        // surrounding code stores. Locals are already RcCow (their clone is
+        // produces the raw value — re-wrap into the AlmideRcCow value shape the
+        // surrounding code stores. Locals are already AlmideRcCow (their clone is
         // the O(1) Rc bump) — no glue.
         if ctx.ann.global(*id).is_some() && rc_cow_needs_glue(&inner.ty) {
             let read = render_expr(ctx, inner);
@@ -621,7 +621,7 @@ fn render_expr_clone(ctx: &RenderContext, expr: &IrExpr) -> String {
         .unwrap_or_else(|| format!("{}.clone()", expr_s))
 }
 
-/// Shared-mut non-Copy var (`SharedMut`, Closure v2 P6): borrow through the
+/// Shared-mut non-Copy var (`AlmideSharedMut`, Closure v2 P6): borrow through the
 /// `RefCell` rather than the `.get()` clone a bare Var read would emit, so a
 /// mutating call (`list.push(acc, …)` → `&mut *acc.borrow_mut()`) writes the
 /// ONE shared cell the closure also holds. A shared read uses `&*acc.borrow()`
@@ -632,7 +632,7 @@ fn try_render_borrow_shared_mut(ctx: &RenderContext, inner: &IrExpr, mutable: bo
     // #1143 marker: `Borrow(Deref(Var cell))` — SharedCellBorrowPass proved
     // this read can borrow the cell in place (every use in its statement is
     // a shared call-arg read), so skip the `.get()` whole-value clone. The
-    // shape cannot occur otherwise on a SharedMut var (the cell has no
+    // shape cannot occur otherwise on a AlmideSharedMut var (the cell has no
     // Deref impl, so the generic `&*v` render would not compile).
     if let IrExprKind::Deref { expr: dinner } = &inner.kind {
         if let IrExprKind::Var { id } = &dinner.kind {
@@ -732,11 +732,11 @@ fn render_expr_borrow(ctx: &RenderContext, expr: &IrExpr) -> String {
         // #1210: a Bytes/Matrix-typed RVALUE that renders as a type-propagating
         // expression (the `??` lowering's `match`, an `if`/`else`, a block)
         // defeats the deref coercion `&var` relies on — rustc propagates the
-        // callee's expected `&Vec<u8>` INTO the arms, so the RcCow-typed arms
-        // fail E0308 ("expected Vec<u8>, found RcCow<Vec<u8>>"). `&*(…)` derefs
-        // through the RcCow explicitly — the same layer coercion strips from a
+        // callee's expected `&Vec<u8>` INTO the arms, so the AlmideRcCow-typed arms
+        // fail E0308 ("expected Vec<u8>, found AlmideRcCow<Vec<u8>>"). `&*(…)` derefs
+        // through the AlmideRcCow explicitly — the same layer coercion strips from a
         // plain var. Bytes/Matrix only: they are the two types whose value
-        // convention (RcCow) differs from the raw runtime signature (#617).
+        // convention (AlmideRcCow) differs from the raw runtime signature (#617).
         {
             use almide_lang::types::constructor::TypeConstructorId as TC;
             let rc_cow_valued = matches!(

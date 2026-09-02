@@ -72,8 +72,8 @@ fn build_program_ann(ctx: &RenderContext, program: &IrProgram) -> CodegenAnnotat
     // that soaked the flip (v0.27.2) retired with the predicates it
     // compared. One rule, one place.
     // Classify function-local `var` bindings:
-    //   LocalMut (let mut T)  — not captured by closures, no RcCow overhead
-    //   RcCow                 — captured by a lambda, needs COW semantics
+    //   LocalMut (let mut T)  — not captured by closures, no AlmideRcCow overhead
+    //   AlmideRcCow                 — captured by a lambda, needs COW semantics
     //
     // Scan IR Bind statements for `var` of non-Copy types, then check if
     // any lambda in the same function captures that var.
@@ -156,7 +156,7 @@ fn render_program_top_lets(ctx: &RenderContext, program: &IrProgram, parts: &mut
     for tl in &program.top_lets {
         // #617: a shared static stores the RAW Bytes/Matrix shape (Rc is not Sync;
         // fan threads read globals) — type and initializer un-wrap here, every
-        // READ site re-wraps into the RcCow value shape.
+        // READ site re-wraps into the AlmideRcCow value shape.
         let ty_str = expressions::rc_cow_raw_type(&render_type_fn(ctx, &tl.ty));
         let val_str = expressions::rc_cow_unglue(render_expr_fn(ctx, &tl.value), &tl.ty);
         let info = ctx.ann.globals.get(&tl.var).unwrap_or_else(|| panic!(
@@ -290,12 +290,12 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
 // No behavior change.
 
 /// Classify function-local `var` bindings:
-///   LocalMut (let mut T)  — not captured by closures, no RcCow overhead
-///   RcCow                 — captured by a lambda, needs COW semantics
+///   LocalMut (let mut T)  — not captured by closures, no AlmideRcCow overhead
+///   AlmideRcCow                 — captured by a lambda, needs COW semantics
 ///
 /// Scan IR Bind statements for `var` of non-Copy types, then check if
 /// any lambda in the same function captures that var.
-/// Var/params that must NEVER get RcCow storage: mutable top-lets (module
+/// Var/params that must NEVER get AlmideRcCow storage: mutable top-lets (module
 /// globals, handled by the `ModuleRc`/`ModuleCell` path) and every fn
 /// param (borrow inference owns those). Extracted from
 /// `classify_local_var_storage` (cog>30 decomposition, pattern 2:
@@ -400,12 +400,12 @@ fn classify_local_var_storage(program: &IrProgram, ann: &mut CodegenAnnotations)
     let non_copy_var_binds = collect_non_copy_var_binds(program);
     let captured = collect_lambda_captured_vars(program);
 
-    // Phase 3: Only vars captured by lambdas get RcCow; rest are LocalMut (let mut)
+    // Phase 3: Only vars captured by lambdas get AlmideRcCow; rest are LocalMut (let mut)
     for var_id in non_copy_var_binds {
         if exclude.contains(&var_id) { continue; }
         // Captured mutable vars that became shared cells (`Rc<Cell>` for Copy via
-        // P3, `SharedMut` for non-Copy via P6) are driven by the shared-mut path,
-        // NOT RcCow — RcCow's copy-on-write would lose a mutation made through the
+        // P3, `AlmideSharedMut` for non-Copy via P6) are driven by the shared-mut path,
+        // NOT AlmideRcCow — AlmideRcCow's copy-on-write would lose a mutation made through the
         // closure. (Closure v2 P6.)
         if ann.is_shared_mut(&VarId(var_id)) { continue; }
         if captured.contains(&var_id) {
