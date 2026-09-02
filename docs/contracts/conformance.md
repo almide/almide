@@ -11,7 +11,7 @@
 > (spec-coverage + evidence-class >= fixture for every active contract), so this
 > page cannot legitimately contain an empty Fixtures cell.
 
-114 normative sections; 711 distinct executable fixtures.
+114 normative sections; 712 distinct executable fixtures.
 
 | Section | Contracts | Fixtures (how CI runs each) |
 |---------|-----------|------------------------------|
@@ -58,7 +58,7 @@
 | ALS-E13 | C-242 | `spec/wasm_cross/if_block_forms.almd` (byte-compare) |
 | ALS-E14 | C-243 | `spec/wasm_cross/if_block_forms.almd` (byte-compare) |
 | ALS-E15 | C-244 | `spec/wasm_cross/while_loops.almd` (byte-compare) |
-| ALS-E16 | C-245 | `spec/wasm_cross/string_interpolation.almd` (byte-compare) |
+| ALS-E16 | C-245 | `spec/wasm_cross/string_interpolation.almd` (byte-compare)<br>`spec/wasm_cross/string_interp_large_hole.almd` (byte-compare) |
 | ALS-E17 | C-246 | `spec/wasm_cross/string_interpolation.almd` (byte-compare) |
 | ALS-E18 | C-247, C-281, C-323, C-332, C-333 | `spec/wasm_cross/match_forms.almd` (byte-compare)<br>`spec/wasm_cross/result_default_and_passthrough.almd` (byte-compare)<br>`spec/wasm_cross/effect_tail_carrier_family.almd` (byte-compare)<br>`spec/wasm_cross/or_pattern.almd` (byte-compare)<br>`spec/lang/or_pattern_test.almd` (both-target test)<br>`tests/diagnostics/e080-or-pattern-binder/broken.almd` (checker)<br>`spec/wasm_cross/list_rest_pattern.almd` (byte-compare)<br>`spec/lang/list_rest_pattern_test.almd` (both-target test)<br>`tests/diagnostics/list-rest-not-last/broken.almd` (checker)<br>`spec/wasm_cross/as_pattern.almd` (byte-compare)<br>`spec/lang/as_pattern_test.almd` (both-target test) |
 | ALS-E19 | C-248, C-279 | `spec/wasm_cross/for_in_forms.almd` (byte-compare)<br>`spec/wasm_cross/licm_zero_trip_hoist.almd` (byte-compare) |

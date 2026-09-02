@@ -517,6 +517,7 @@
 67008	spec/wasm_cross/string_empty_pattern.almd
 78224	spec/wasm_cross/string_float_stable.almd
 67952	spec/wasm_cross/string_from_bytes.almd
+3474800	spec/wasm_cross/string_interp_large_hole.almd
 70128	spec/wasm_cross/string_interpolation.almd
 77072	spec/wasm_cross/string_is_alphanumeric.almd
 66832	spec/wasm_cross/string_lines.almd
