@@ -1346,12 +1346,11 @@ fn qualified_import_heads(program: &mut ast::Program) -> std::collections::HashS
             ast::Pattern::Or { alts } => for a in alts { walk_pat(a, heads); },
             ast::Pattern::Wildcard | ast::Pattern::Ident { .. } | ast::Pattern::None
             | ast::Pattern::Literal { .. } => {}
-            // A pattern form this walker does not know (the #1461 as-pattern
-            // lands separately) contributes no heads — an unmarked alias
-            // there surfaces as a false E060, which the multi-file corpus
-            // would catch; extend the walk when the form lands.
-            #[allow(unreachable_patterns)]
-            _ => {}
+            // `x @ c.Red` (#1461): the binder names nothing qualified; the
+            // inner pattern may. Exhaustive on purpose — a new pattern form
+            // must be walked here, or an alias used only inside it is a
+            // false E060 the multi-file corpus would catch.
+            ast::Pattern::As { inner, .. } => walk_pat(inner, heads),
         }
     }
     fn walk_generics(gs: &Option<Vec<ast::GenericParam>>, heads: &mut HashSet<Sym>) {

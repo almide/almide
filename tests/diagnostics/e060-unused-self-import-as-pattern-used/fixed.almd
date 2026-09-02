@@ -1,0 +1,13 @@
+// A self import referenced ONLY inside an as-pattern's inner pattern
+// (`x @ c.Red`) is USED — the syntactic usage walk must descend through the
+// binder (#1783 walker, extended for #1461's as-patterns). This broken file
+// adds a second, genuinely unused import beside it.
+import self.color as c
+
+
+fn name(v: c.Color) -> String = match v {
+  x @ c.Red => "red",
+  _ => "other",
+}
+
+fn main() -> Unit = println(name(c.Red))
