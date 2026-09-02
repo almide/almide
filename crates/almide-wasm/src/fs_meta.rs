@@ -130,6 +130,11 @@ impl Emitter<'_> {
             (f, [p, init, cb]) if f.starts_with("__fallible_fold_lines") => {
                 self.lower_fs_fallible_fold(p, init, cb)?
             }
+            // The walk twin (#1806, family completeness): the callback
+            // answers Result[Unit, String]; the first err ends the walk.
+            (f, [p, cb]) if f.starts_with("__fallible_for_each_line") => {
+                self.lower_fs_fallible_for_each(p, cb)?
+            }
             _ => return Ok(None),
         };
         Ok(Some(Some(out)))
@@ -342,10 +347,20 @@ impl Emitter<'_> {
         init: &IrExpr,
         cb: &IrExpr,
     ) -> Result<SliceTy, EmitError> {
-        let (params, body) = self.hof_lambda(cb, 2)?;
         let Some(acc_ty) = slice_ty_of(&init.ty, self.types) else {
             return unsup(&format!("fs-fallible-fold-acc:{}", ty_name(&init.ty)));
         };
+        // #1806: the canonical callback (`(a, l) => step(a, l)!`) arrives
+        // with its marker stripped — the body IS the Result call, so it
+        // inlines into this frame. A COMPOUND body (`{ …; step(a, l)! }`)
+        // keeps its `!`s: it is a real fallible closure with its own
+        // channel, and inlining it would route those `!`s into the
+        // ENCLOSING fn's carrier — the err escaped `main` where native
+        // bound it. Such a body is called as the closure it is.
+        if body_propagates(cb) {
+            return self.lower_fs_fallible_fold_closure(p, init, cb, acc_ty);
+        }
+        let (params, body) = self.hof_lambda(cb, 2)?;
         self.lower(init, Some(acc_ty))?;
         self.f.instructions().local_set(params[0]);
         self.fs_call_1(p, 12)?; // OP_READ_LINES
@@ -398,4 +413,210 @@ impl Emitter<'_> {
         }
         Ok(SliceTy::Result(self.types.intern(acc_ty), self.types.intern(STR)))
     }
+
+    /// The compound-callback fold (#1806): the lambda is lowered ONCE as a
+    /// closure value and called per line through the funcref table, so a
+    /// `!` inside its body propagates through the closure's own Result
+    /// channel — `err(e)` is the callback's answer, which ends the walk and
+    /// becomes the fold's result, exactly as the inline canonical form and
+    /// both other legs answer.
+    fn lower_fs_fallible_fold_closure(
+        &mut self,
+        p: &IrExpr,
+        init: &IrExpr,
+        cb: &IrExpr,
+        acc_ty: SliceTy,
+    ) -> Result<SliceTy, EmitError> {
+        let got = self.lower(cb, None)?;
+        let SliceTy::Fn(sig) = got else {
+            return unsup(&format!("fs-fallible-fold-callee-{got:?}"));
+        };
+        let def = self.types.fn_sig_def(sig);
+        if def.params.len() != 2 {
+            return unsup("fs-fallible-fold-arity");
+        }
+        let (p_acc, p_line) = (def.params[0], def.params[1]);
+        let mut ps: Vec<ValType> = vec![ValType::I32];
+        ps.extend(def.params.iter().map(|t| t.val_type()));
+        let ti = self.work.itype(ps, def.ret.map(SliceTy::val_type));
+        let hcl = self.hold_i32()?;
+        self.f.instructions().local_set(hcl);
+        let hacc = self.hold_for(acc_ty)?;
+        self.lower(init, Some(acc_ty))?;
+        self.f.instructions().local_set(hacc);
+        self.fs_call_1(p, 12)?; // OP_READ_LINES
+        let (hraw, hlen, herr) = self.fs_frames_or_err()?;
+        let hr = self.hold_i32()?;
+        self.f.instructions().i32_const(0).local_set(hr);
+        let acc_droppable = self.rc_droppable(p_acc);
+        let line_droppable = self.rc_droppable(p_line);
+        self.fs_frames_foreach(hraw, hlen, |em| {
+            let hline = em.tmp_i32_local;
+            em.f.instructions().local_set(hline);
+            em.f.instructions().local_get(hr).i32_eqz().if_(BlockType::Empty);
+            // Closure convention (calls.rs): env first, then the args —
+            // each a borrowed view, so the RC-3 callee-owned guard +1s
+            // it (the closure's epilogue decs its params).
+            em.f.instructions().local_get(hcl);
+            em.f.instructions().local_get(hacc);
+            if acc_droppable {
+                em.rc_inc_top();
+            }
+            em.f.instructions().local_get(hline);
+            if line_droppable {
+                em.rc_inc_top();
+            }
+            em.f.instructions().local_get(hcl).i32_load(slot_memarg(0));
+            em.f.instructions().call_indirect(0, ti);
+            let hres = em.tmp_i32_local;
+            let mut i = em.f.instructions();
+            i.local_set(hres);
+            i.local_get(hres).i32_load(slot_memarg(almide_layout::SUM_TAG)).i32_eqz();
+            i.if_(BlockType::Empty);
+            i.local_get(hres);
+            let _ = i;
+            em.load_ty_slot(acc_ty, almide_layout::SUM_FIELD);
+            let mut i = em.f.instructions();
+            i.local_set(hacc);
+            i.else_();
+            i.local_get(hres).local_set(hr);
+            i.end();
+            i.end();
+            Ok(())
+        })?;
+        let hs = self.hold_i32()?;
+        {
+            let mut i = self.f.instructions();
+            i.local_get(herr).if_(BlockType::Result(ValType::I32));
+            i.local_get(herr);
+            i.else_();
+            i.local_get(hr).if_(BlockType::Result(ValType::I32));
+            i.local_get(hr);
+            i.else_();
+            i.i32_const(16)
+                .call(F_ALLOC)
+                .local_tee(hs)
+                .i32_const(0)
+                .i32_store(slot_memarg(almide_layout::SUM_TAG));
+            i.local_get(hs).local_get(hacc);
+        }
+        self.store_ty_slot(acc_ty, almide_layout::SUM_FIELD);
+        self.f.instructions().local_get(hs).end().end();
+        // hs, hr, herr, hlen, hraw are i32 holds; hacc is typed; hcl is i32.
+        for _ in 0..5 {
+            self.release_i32();
+        }
+        self.release_for(acc_ty);
+        self.release_i32();
+        Ok(SliceTy::Result(self.types.intern(acc_ty), self.types.intern(STR)))
+    }
+}
+
+impl Emitter<'_> {
+    /// `fs.__fallible_for_each_line(p, cb)`: the callback yields
+    /// Result[Unit, String] per line; the first err is the whole result and
+    /// later lines never see the callback. A canonical body inlines; a
+    /// compound body (its own `!`s) is called as the closure it is (#1806).
+    fn lower_fs_fallible_for_each(&mut self, p: &IrExpr, cb: &IrExpr) -> Result<SliceTy, EmitError> {
+        let compound = body_propagates(cb);
+        let (params, body, hcl, ti) = if compound {
+            let got = self.lower(cb, None)?;
+            let SliceTy::Fn(sig) = got else {
+                return unsup(&format!("fs-fallible-each-callee-{got:?}"));
+            };
+            let def = self.types.fn_sig_def(sig);
+            if def.params.len() != 1 {
+                return unsup("fs-fallible-each-arity");
+            }
+            let mut ps: Vec<ValType> = vec![ValType::I32];
+            ps.extend(def.params.iter().map(|t| t.val_type()));
+            let ti = self.work.itype(ps, def.ret.map(SliceTy::val_type));
+            let hcl = self.hold_i32()?;
+            self.f.instructions().local_set(hcl);
+            (Vec::new(), None, Some(hcl), Some(ti))
+        } else {
+            let (params, body) = self.hof_lambda(cb, 1)?;
+            (params, Some(body), None, None)
+        };
+        self.fs_call_1(p, 12)?; // OP_READ_LINES
+        let (hraw, hlen, herr) = self.fs_frames_or_err()?;
+        let hr = self.hold_i32()?;
+        self.f.instructions().i32_const(0).local_set(hr);
+        self.fs_frames_foreach(hraw, hlen, |em| {
+            let hline = em.tmp_i32_local;
+            em.f.instructions().local_set(hline);
+            em.f.instructions().local_get(hr).i32_eqz().if_(BlockType::Empty);
+            match (hcl, ti, body) {
+                (Some(hcl), Some(ti), _) => {
+                    em.f.instructions().local_get(hcl);
+                    em.f.instructions().local_get(hline);
+                    em.rc_inc_top();
+                    em.f.instructions().local_get(hcl).i32_load(slot_memarg(0));
+                    em.f.instructions().call_indirect(0, ti);
+                }
+                (_, _, Some(body)) => {
+                    em.f.instructions().local_get(hline).local_set(params[0]);
+                    em.lower(body, None)?;
+                }
+                _ => return unsup("fs-fallible-each-shape"),
+            }
+            let hres = em.tmp_i32_local;
+            let mut i = em.f.instructions();
+            i.local_set(hres);
+            i.local_get(hres).i32_load(slot_memarg(almide_layout::SUM_TAG)).if_(BlockType::Empty);
+            i.local_get(hres).local_set(hr);
+            i.end();
+            i.end();
+            Ok(())
+        })?;
+        let hs = self.hold_i32()?;
+        {
+            let mut i = self.f.instructions();
+            i.local_get(herr).if_(BlockType::Result(ValType::I32));
+            i.local_get(herr);
+            i.else_();
+            i.local_get(hr).if_(BlockType::Result(ValType::I32));
+            i.local_get(hr);
+            i.else_();
+            i.i32_const(16)
+                .call(F_ALLOC)
+                .local_tee(hs)
+                .i32_const(0)
+                .i32_store(slot_memarg(almide_layout::SUM_TAG));
+            i.local_get(hs).i32_const(0).i32_store(slot_memarg(almide_layout::SUM_FIELD));
+            i.local_get(hs);
+            i.end().end();
+        }
+        for _ in 0..5 {
+            self.release_i32();
+        }
+        if compound {
+            self.release_i32();
+        }
+        Ok(SliceTy::Result(self.types.intern(SliceTy::Unit), self.types.intern(STR)))
+    }
+}
+
+/// Does the callback body still carry a propagation marker? The frontend
+/// strips the canonical tail `!`; anything left (`{ …; f(x)! }`, `g(f(x)!)`)
+/// means the lambda is a real fallible closure whose `!`s belong to ITS
+/// channel (#1806).
+fn body_propagates(cb: &IrExpr) -> bool {
+    struct Scan(bool);
+    impl almide_ir::visit::IrVisitor for Scan {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if self.0 {
+                return;
+            }
+            if matches!(e.kind, IrExprKind::Try { .. } | IrExprKind::Unwrap { .. }) {
+                self.0 = true;
+                return;
+            }
+            almide_ir::visit::walk_expr(self, e);
+        }
+    }
+    let IrExprKind::Lambda { body, .. } = &cb.kind else { return false };
+    let mut s = Scan(false);
+    almide_ir::visit::IrVisitor::visit_expr(&mut s, body);
+    s.0
 }

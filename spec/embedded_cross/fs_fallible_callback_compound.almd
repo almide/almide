@@ -1,0 +1,79 @@
+// @contract: C-274
+// A COMPOUND fallible callback on the fs streaming walkers (#1806): the
+// frontend strips only the canonical tail `!` (`(a, l) => step(a, l)!`);
+// a block body (`{ println(..); step(a, l)! }`, `{ let l = ..; step(a, l)! }`,
+// two `!`s) stays a real fallible closure with its own Result channel. The
+// structural leg inlined that body into the ENCLOSING frame, so its `!`
+// propagated out of `main` — `Error: bad row: b`, exit 1 — where native
+// and the incumbent bound `err(e)` and kept going. The compound body is now
+// called as the closure it is, per line, and the first err ends the walk.
+// Both walkers, both callback shapes, an Int and a String accumulator, and
+// the ok path — printed AFTER the walk so the bound Result is the witness.
+// An fs program routes to the incumbent on the BUILD path, so this lives in
+// the embedded lane (`run --target wasm`), where the structural leg serves it.
+import fs
+
+fn add_row(acc: Int, line: String) -> Int! = if line == "b" then err("bad row: " + line) else ok(acc + 1)
+
+fn join_row(acc: String, line: String) -> String! = if line == "b" then err("bad join: " + line) else ok(acc + line + ";")
+
+fn bump(n: Int) -> Int! = if n > 100 then err("big") else ok(n)
+
+fn note(l: String) -> Unit! = if l == "b" then err("bad line: " + l) else ok(())
+
+fn show_int(r: Result[Int, String]) -> String = match r {
+  ok(n) => "ok " + int.to_string(n),
+  err(e) => "error: " + e,
+}
+
+fn show_str(r: Result[String, String]) -> String = match r {
+  ok(s) => "ok " + s,
+  err(e) => "error: " + e,
+}
+
+fn show_unit(r: Result[Unit, String]) -> String = match r {
+  ok(_) => "ok",
+  err(e) => "error: " + e,
+}
+
+effect fn main() -> Unit = {
+  let dir = fs.create_temp_dir("xt_fallible_compound")!
+  let bad = dir + "/bad.txt"
+  let good = dir + "/good.txt"
+  let _w1 = fs.write(bad, "a\nb\nc\n")!
+  let _w2 = fs.write(good, "a\nc\n")!
+  // canonical (the stripped form) — the reference
+  println("fold canonical: " + show_int(fs.fold_lines(bad, 0, (acc, line) => add_row(acc, line)!)))
+  // block body with a statement before the `!`
+  println("fold block: " + show_int(fs.fold_lines(bad, 0, (acc, line) => {
+    println("visiting " + line)
+    add_row(acc, line)!
+  })))
+  // block body, String accumulator
+  println("fold string: " + show_str(fs.fold_lines(bad, "", (acc, line) => {
+    let l = string.trim(line)
+    join_row(acc, l)!
+  })))
+  // two propagation points in one body
+  println("fold two bangs: " + show_int(fs.fold_lines(good, 0, (acc, line) => {
+    let b = bump(acc)!
+    add_row(b, line)!
+  })))
+  // the ok path through the compound body
+  println("fold ok: " + show_int(fs.fold_lines(good, 0, (acc, line) => {
+    let l = string.trim(line)
+    add_row(acc, l)!
+  })))
+  // for_each_line: canonical and compound
+  println("each canonical: " + show_unit(fs.for_each_line(bad, (l) => note(l)!)))
+  println("each block: " + show_unit(fs.for_each_line(bad, (l) => {
+    println("see " + l)
+    note(l)!
+  })))
+  println("each ok: " + show_unit(fs.for_each_line(good, (l) => {
+    let t = string.trim(l)
+    note(t)!
+  })))
+  let _rm = fs.remove_all(dir)!
+  println("after")
+}
