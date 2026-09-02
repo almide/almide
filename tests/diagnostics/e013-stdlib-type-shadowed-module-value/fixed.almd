@@ -1,0 +1,12 @@
+// The module variant of the #1828 gap: `shadow.Value` used to dual-register
+// under the bare `Value`, so `json.parse`'s result read as the module's
+// record and `.n` type-checked. The stdlib's `Value` keeps the bare identity;
+// the module's is `shadow.Value`, which the hint names.
+import json
+import self.shadow
+
+effect fn main() -> Unit = {
+  let v = json.parse("{\"n\": 1}")!
+  let mine = shadow.mk(value.as_int(value.field(v, "n")!)!)
+  println(int.to_string(mine.n))
+}

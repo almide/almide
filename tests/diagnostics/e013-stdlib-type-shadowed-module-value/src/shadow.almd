@@ -1,0 +1,5 @@
+// A user MODULE's `type Value` is `shadow.Value` — its own identity (#433),
+// and never the bare `Value` every `json.*` signature carries (#1828).
+type Value = { n: Int }
+
+fn mk(n: Int) -> Value = Value { n: n }

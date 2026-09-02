@@ -1,6 +1,6 @@
 # Module System Specification
 
-> Last updated: 2026-03-31. Verified by `spec/integration/modules/` (25 tests + 4 error tests).
+> Last updated: 2026-09-02. Verified by `spec/integration/modules/` (25 tests + 4 error tests) and `spec/wasm_cross/stdlib_type_shadow.almd`.
 
 ---
 
@@ -168,6 +168,37 @@ fn Box.tag(self) -> String = "caller"   // ✗ E012: defined in more than one mo
 
 同名の**別型**(`moda.Box` と `modb.Box`)はそれぞれ独立にメソッドを持てる。
 派生メソッド(derived `repr` 等)への明示的 override は従来どおり合法(#1087)。
+
+### 4.2 stdlib 所有型と同名のユーザ型 (#1828)
+
+`Value` / `HttpRequest` / `HttpResponse` / `JsonPath` / `Endian` / `FileStat` /
+`ProcessStatus` / `Url` / `TcpStream` / `TcpListener` / `SafeHtml` / `SafePath` は
+stdlib モジュールが所有する型で、その**裸名が正準の同一性**である(`json.parse` の
+返り値は常に stdlib の `Value`)。台帳は `stdlib_info::STDLIB_OWNED_TYPES`
+(`tests/runtime_backed_types_matrix.rs` が bundled 宣言との一致を機械検査する)。
+
+ユーザがこの名前で型を宣言すると、その型は #433 のモジュール修飾同一性を取る —
+エントリファイルなら `self.Value`、モジュール `m` なら `m.Value` — ので、stdlib の
+シグネチャが指す型は決して置き換わらない。両者が同じファイルに共存でき、
+native と wasm で byte-identical に動く。
+
+```almide
+import json
+type Value = { n: Int }           // これは self.Value
+
+effect fn main() -> Unit = {
+  let mine = Value { n: 7 }       // ユーザの型
+  let doc = json.parse("{}")!     // stdlib の Value
+  println("${mine.n} ${json.stringify(doc)}")
+}
+```
+
+`json.parse("{}")!.n` は E013(stdlib の `Value` にフィールドはない)で、hint がどちらの
+型かを名指しする。`let v: Value = json.parse("{}")!` は E001(`self.Value` と `Value` は
+別の型)。`${mine}` の repr はソースの綴り `Value { n: 7 }` で表示される。
+
+テスト: `spec/wasm_cross/stdlib_type_shadow.almd`,
+`tests/diagnostics/e013-stdlib-type-shadowed-*/`
 
 ---
 

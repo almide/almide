@@ -1055,11 +1055,12 @@ evidence  = [
 id        = "C-076"
 spec      = "ALS-M3"
 title     = "Producer-side in-module variant construction is target-stable"
-statement = "A producer function declared inside the submodule that owns a variant type, constructing the variant via the bare constructor (tuple `Circle(r)` or record-variant `Circle { radius: r }`) and returning it, compiles and runs byte-identically on native Rust and wasm32 (stdout, stderr, exit). The construction expression's type is pinned to the owner-qualified `mod.Type`, so the #433 name-pinning verifier never fires on a valid in-module construction."
+statement = "A producer function declared inside the submodule that owns a variant type, constructing the variant via the bare constructor (tuple `Circle(r)` or record-variant `Circle { radius: r }`) and returning it, compiles and runs byte-identically on native Rust and wasm32 (stdout, stderr, exit). The construction expression's type is pinned to the owner-qualified `mod.Type`, so the #433 name-pinning verifier never fires on a valid in-module construction. EXTENDED (#1828, 0.61.2): the same module-qualified identity is what a USER declaration of a STDLIB-OWNED type name receives — `type Value = { n: Int }` in the entry program is `self.Value`, in module `m` it is `m.Value` — and the stdlib's bare identity (`Ty::Named(\"Value\")`, the type every `json.*` / `value.*` signature carries; likewise `HttpRequest` / `HttpResponse` / `JsonPath` / `Endian` / `FileStat` / `ProcessStatus` / `Url` / `TcpStream` / `TcpListener` / `SafeHtml` / `SafePath`, the closed `STDLIB_OWNED_TYPES` registry) is never rebound by it. Observables: `json.parse(..)!.n` against a user `Value` is check-time E013 whose hint names both types (before: accepted, a wrong number on wasm, rustc E0308 on native); `let v: Value = json.parse(..)!` is E001; and a program that declares such a type AND receives the stdlib's under the same spelling runs byte-identically on both legs — the user's record literal, field read, record pattern, convention method, equality and repr (shown under the source spelling `Value { .. }`), a user variant beside the runtime's `HttpResponse`, a user `Endian` record beside the twin's own `LittleEndian` / `BigEndian` under the auto-import, a user `JsonPath` beside `json.field(json.root(), ..)`, a user `Url` beside `url.parse`. A struct PATTERN carries the same qualified name as the struct literal into the IR, so a module's `Cfg { a, .. }` no longer names the pre-mangle struct on native (was rustc E0308 while wasm ran)."
 since     = "0.27.6"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/r5_mod_producer_variant.almd", class = "fixture" },
+  { path = "spec/wasm_cross/stdlib_type_shadow.almd", class = "fixture" },
 ]
 
 [[contract]]

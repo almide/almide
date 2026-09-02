@@ -1,0 +1,11 @@
+// A user `type FileStat` beside `fs.stat`, which hands back the STDLIB's
+// `FileStat` (the bundled twin declared in fs.almd, with its own fields).
+// The user's type is `self.FileStat`; the roster in the diagnostic is the
+// stdlib record's, and the hint names both types (#1828).
+import fs
+type FileStat = { n: Int }
+
+effect fn main() -> Unit = {
+  let m = fs.stat("/tmp")!
+  println(int.to_string(m.n))
+}
