@@ -162,8 +162,10 @@ fn derive_codec(
 fn auto_derive_repr(vt: &mut VarTable, type_name: &str, type_ty: &Ty, fields: &[IrFieldDecl]) -> IrFunction {
     let var = vt.alloc(sym("_v"), type_ty.clone(), Mutability::Let, None);
 
-    // Build string interp: "TypeName { field1: ..., field2: ... }"
-    let mut parts = vec![IrStringPart::Lit { value: format!("{} {{ ", type_name) }];
+    // Build string interp: "TypeName { field1: ..., field2: ... }" — the
+    // DECLARED spelling (`Cfg`, not a module's `m.Cfg`), the bytes `"${v}"`
+    // prints on every leg (#1836, C-009). The fn NAME below stays qualified.
+    let mut parts = vec![IrStringPart::Lit { value: format!("{} {{ ", declared_type_name(type_name)) }];
     for (i, f) in fields.iter().enumerate() {
         if i > 0 { parts.push(IrStringPart::Lit { value: ", ".to_string() }); }
         parts.push(IrStringPart::Lit { value: format!("{}: ", f.name) });

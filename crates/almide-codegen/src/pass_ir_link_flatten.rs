@@ -94,6 +94,11 @@ fn mangle_qualified_type_names(program: &mut IrProgram) {
 
     for td in &mut program.type_decls {
         if let Some(nn) = map.get(td.name.as_str()) {
+            // The mangle is not invertible, so carry the DECLARED spelling
+            // alongside: the repr impl prints `Cfg`, never `almide_rt_m_Cfg`
+            // (#1836, C-009).
+            program.codegen_annotations.repr_names
+                .insert(nn.as_str().to_string(), td.declared_name().to_string());
             td.name = *nn;
         }
         rename_type_decl_kind(&mut td.kind, &map);
@@ -147,7 +152,7 @@ fn build_type_rename_map(type_decls: &[IrTypeDecl]) -> HashMap<String, Sym> {
     let mut groups: HashMap<(String, String), Vec<String>> = HashMap::new();
     for td in type_decls {
         let n = td.name.as_str();
-        let base = n.rsplit('.').next().unwrap_or(n).to_string();
+        let base = almide_ir::declared_type_name(n).to_string();
         groups.entry((base, td.structural_fingerprint())).or_default().push(n.to_string());
     }
 

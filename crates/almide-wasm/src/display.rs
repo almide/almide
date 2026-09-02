@@ -297,11 +297,10 @@ impl Emitter<'_> {
                     self.append_lit("{ ");
                     fields.sort_by(|a, b| a.name.cmp(&b.name));
                 } else {
-                    // The entry program's shadow of a stdlib-owned name is
-                    // `self.X` (#1828); it displays as the `X` the source
-                    // declares, as native does.
-                    let shown = almide_types::stdlib_info::strip_root_type_scope(&name);
-                    self.append_lit(&format!("{shown} {{ "));
+                    // Both the entry program's shadow of a stdlib-owned name
+                    // (`self.X`, #1828) and a module record (`m.Cfg`, #1836) show
+                    // the last segment the source declares.
+                    self.append_lit(&format!("{} {{ ", almide_ir::declared_type_name(&name)));
                 }
                 for (k, fi) in fields.iter().enumerate() {
                     if k > 0 {

@@ -107,7 +107,25 @@ pub struct IrTypeDecl {
     pub blank_lines_before: u32,
 }
 
+/// The name a type was DECLARED with: the last segment of a module-qualified
+/// IR type name (`m.Cfg` -> `Cfg`, `a.b.Cfg` -> `Cfg`); a bare name is
+/// returned unchanged. Before the native flatten rename every module type is
+/// spelled `<module path>.<Base>` and a dot occurs nowhere else in a type
+/// name, so the last segment is exactly the source spelling. This is the ONE
+/// spelling a value's repr prints on every leg (#1836, C-009): the entry
+/// program's `type Cfg` prints `Cfg { … }`, and so does a module's — the
+/// module a value came from is no more part of its repr than the file the
+/// entry type was declared in.
+pub fn declared_type_name(name: &str) -> &str {
+    name.rsplit('.').next().unwrap_or(name)
+}
+
 impl IrTypeDecl {
+    /// The source spelling of this decl's name (`declared_type_name`).
+    pub fn declared_name(&self) -> &str {
+        declared_type_name(self.name.as_str())
+    }
+
     /// Base-name-normalized shape fingerprint. Two decls with the same BASE
     /// name and the same fingerprint are STRUCTURAL TWINS: the checker unifies
     /// them freely (same-shape records flow into each other across modules),
@@ -118,12 +136,12 @@ impl IrTypeDecl {
         fn norm_ty(ty: &Ty) -> String {
             match ty {
                 Ty::Named(n, args) => {
-                    let base = n.as_str().rsplit('.').next().unwrap_or(n.as_str());
+                    let base = declared_type_name(n.as_str());
                     let args_s: Vec<String> = args.iter().map(norm_ty).collect();
                     format!("N:{}<{}>", base, args_s.join(","))
                 }
                 Ty::Variant { name, .. } => {
-                    let base = name.as_str().rsplit('.').next().unwrap_or(name.as_str());
+                    let base = declared_type_name(name.as_str());
                     format!("V:{}", base)
                 }
                 Ty::Applied(c, args) => {

@@ -160,11 +160,19 @@ impl<'a> Interpreter<'a> {
         //    MISS (program fns stay authoritative) and only when exactly ONE
         //    loaded module defines the name — an ambiguous name abstains
         //    honestly rather than resolving from the wrong source (#1087).
+        //    A convention method on a MODULE type (`Pt.repr`, #1836) is
+        //    registered under the module-qualified spelling (`m.Pt.repr`)
+        //    while the call site carries only `Type.method` (the subject
+        //    type has no module) — the same unique-suffix resolution the
+        //    wasm dispatcher applies to a cross-module Codec method.
         {
+            let qualified_suffix = |f: &str| {
+                n.contains('.') && f.strip_suffix(n).is_some_and(|p| p.ends_with('.'))
+            };
             let mut hits = self
                 .module_fns
                 .iter()
-                .filter(|((_, f), _)| *f == name)
+                .filter(|((_, f), _)| *f == name || qualified_suffix(f.as_str()))
                 .map(|(_, func)| *func);
             if let (Some(func), None) = (hits.next(), hits.next()) {
                 return self.eval_lowered_fn_call(func, args, scope);
