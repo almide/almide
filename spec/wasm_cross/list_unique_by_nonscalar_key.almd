@@ -1,0 +1,72 @@
+// @contract: C-053
+// list.unique_by with a NON-SCALAR key (#1797). The structural leg walled
+// `list-unique-by-key-nonscalar`: its seen set was scanned by the scalar scan
+// family, so the documented `(s) => string.get(s, 0)` — an Option[String] key —
+// refused to lower while native printed `["aa", "ba"]`. Every key the
+// type-directed `==` compares (Option, tuple, list, result, record, variant)
+// now rides a seen list of key handles scanned with the generic equality;
+// elements keep first-occurrence order. The String and Int keys are the
+// unchanged scalar path (controls). Record and variant keys are pinned too
+// (#1812): native's `almide_rt_list_unique_by` scans a `PartialEq` seen list
+// (PR #1818), the same first-seen rule the structural leg runs, so user types
+// need no `Eq + Hash`.
+type K = { a: String, n: Int }
+
+type Parity = | Even | Odd
+
+type Tag = | Lo(Int) | Hi
+
+fn main() -> Unit = {
+  // Option[String] — the issue's shape; both "" keys are none
+  println("opt=${list.unique_by([
+    "aa",
+    "ab",
+    "ba",
+    "",
+    "bb",
+    ""
+  ], (s) => string.get(s, 0))}")
+  // (String, Int) tuple — first char + length
+  println("tup=${list.unique_by(["ab", "ac", "abc", "bc", "b"], (s) => (string.take(s, 1), string.len(s)))}")
+  // List[Int] — element-wise key equality
+  println("lst=${list.unique_by([
+    [1, 2],
+    [3],
+    [1, 2],
+    []
+  ], (xs) => list.map(xs, (x) => x * 2))}")
+  // Option[Int] — a none key among some keys
+  println("opt_int=${list.unique_by([10, 7, 20, 3, 30], (x) => if x >= 10 then some(x / 10) else none)}")
+  // Result[Int, String] — tag agreement, then the active payload
+  println("res=${list.unique_by([1, 2, 3, 4], (x) => if x % 2 == 0 then ok(x / 2) else err("odd"))}")
+  // record key (#1812) — first char + length parity; "ad" and "bd" repeat a key
+  println("rec=${list.unique_by([
+    "ab",
+    "abc",
+    "ad",
+    "bc",
+    "b",
+    "bd"
+  ], (s) => K { a: string.take(s, 1), n: string.len(s) % 2 })}")
+  // nullary-variant key
+  println("var=${list.unique_by([1, 2, 3, 4, 5], (x) => if x % 2 == 0 then Even else Odd)}")
+  // payload-variant key — tag agreement, then the payload
+  println("var_payload=${list.unique_by([
+    1,
+    4,
+    7,
+    10,
+    12,
+    2
+  ], (x) => if x < 10 then Lo(x % 3) else Hi)}")
+  // controls: the scalar path
+  println("str=${list.unique_by(["ab", "ac", "abc", "bc", "b"], (s) => string.take(s, 1))}")
+  println("int=${list.unique_by([
+    1,
+    2,
+    3,
+    4,
+    5,
+    6
+  ], (x) => x % 3)}")
+}

@@ -69,7 +69,12 @@ fail=0; n=0
 # incumbent brick refuses the return-position computed call on the
 # instantiated closure field (the structural leg, the default route,
 # lowers it); prunes with #1696 4-5.
-MAX_WALLED=23
+# 24 as of 2026-09-02: list_unique_by_nonscalar_key.almd (C-053/#1797) —
+# the incumbent routes a non-scalar unique_by key to its unlinked `_x`
+# render wall (C-147; a render-phase refusal the walled-real ratchet
+# already classes "(b) acceptable", so no baseline row); the structural
+# leg lowers every equatable key. Prunes with #1696 4-5.
+MAX_WALLED=24
 walled=0
 for fix in "$FIXTURE_DIR"/*.almd; do
   [ -e "$fix" ] || continue

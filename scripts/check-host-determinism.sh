@@ -107,7 +107,12 @@ fi
 # incumbent brick refuses the return-position computed call on the
 # instantiated closure field (the structural leg, the default route,
 # lowers it); prunes with #1696 4-5.
-MAX_WALLED=23
+# 24 as of 2026-09-02: list_unique_by_nonscalar_key.almd (C-053/#1797) —
+# the incumbent routes a non-scalar unique_by key to its unlinked `_x`
+# render wall (C-147; a render-phase refusal the walled-real ratchet
+# already classes "(b) acceptable", so no baseline row); the structural
+# leg lowers every equatable key. Prunes with #1696 4-5.
+MAX_WALLED=24
 corpus=$(ls "$FIXTURE_DIR"/*.almd 2>/dev/null | wc -l | tr -d ' ')
 if [ "$corpus" -eq 0 ] || [ $((n + walled)) -ne "$corpus" ]; then
   echo "::error::host-determinism: compared $n + walled $walled != corpus $corpus in $FIXTURE_DIR — the scan went blind (#985)"
