@@ -756,7 +756,7 @@ fn main() -> Unit = {
 
 ### `list.pop(xs: List[A]) -> Option[A]`
 
-Remove and discard the last element in place. Requires var binding.
+Remove the last element in place and return it (`some(x)`, or `none` when the list is empty). Requires var binding.
 
 ```almd run
 fn main() -> Unit = {

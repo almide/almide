@@ -9,7 +9,7 @@ File system. import fs, effect.
 `ok(none)` when the path (or a parent) does not exist, `ok(some(content))`
 when readable, `err(msg)` for real failures (permission, a directory at the
 path, IO). Race-free — the classification happens inside the one read
-(unlike an `fs.exists` pre-check). Contract C-215; native-only today
+(unlike an `fs.exists` pre-check). Contract C-215; serves on native and both wasm legs
 (the wasm render walls honestly).
 
 ```almd run
@@ -454,7 +454,7 @@ false true
 
 ### `fs.walk(dir: String) -> Result[List[String], String]`
 
-Recursively list all files in a directory tree
+Recursively list every entry — files AND directories — in a directory tree
 
 ```almd run
 import fs

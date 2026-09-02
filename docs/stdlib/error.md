@@ -38,10 +38,14 @@ oops
 
 ### `error.chain(outer: String, cause: String) -> String`
 
-Chain two error messages with a cause separator.
+Chain two error messages: the outer message on one line, the cause on the next, prefixed `caused by:`.
 
-```almd
-error.chain("load failed", "file not found") // => "load failed: file not found"
+```almd run
+fn main() -> Unit = println(error.chain("load failed", "file not found"))
+```
+```output
+load failed
+caused by: file not found
 ```
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->

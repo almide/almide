@@ -53,8 +53,19 @@ err(invalid digit found in string)
 
 Parse a hexadecimal string into an integer. Returns err if the string is not valid hex.
 
-```almd
-int.parse_hex(\"ff\") // => ok(255)
+```almd run
+fn show(r: Result[Int, String]) -> String = match r { ok(n) => "ok " + int.to_string(n), err(e) => "err " + e }
+
+fn main() -> Unit = {
+  println(show(int.from_hex("ff")))
+  println(show(int.from_hex("FF")))
+  println(show(int.from_hex("zz")))
+}
+```
+```output
+ok 255
+ok 255
+err invalid digit found in string
 ```
 
 ### `int.abs(n: Int) -> Int`

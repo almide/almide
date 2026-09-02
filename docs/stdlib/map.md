@@ -201,8 +201,17 @@ fn main() -> Unit = {
 
 Transform all values in the map using a function, keeping keys unchanged.
 
-```almd
-map.map_values(m, fn(v) => v * 2)
+```almd run
+fn main() -> Unit = {
+  let m = map.from_list([("a", 1), ("b", 2), ("c", 3)])
+  let doubled = map.map(m, (v) => v * 2)
+  println("${map.get(doubled, "a") ?? 0} ${map.get(doubled, "b") ?? 0} ${map.get(doubled, "c") ?? 0}")
+  println(int.to_string(map.len(doubled)))
+}
+```
+```output
+2 4 6
+3
 ```
 
 ### `map.filter(m: Map[K, V], f: Fn[K, V] -> Bool) -> Map[K, V]`
