@@ -1,0 +1,42 @@
+// @contract: C-092
+// A generic record whose field is FUNCTION-typed instantiates through the
+// signature (#1676): `run: (Value, String) -> P[T]` with T = String is a
+// concrete closure slot, so a fn taking `S[String]` and calling the field
+// from return position lowers on the default leg and prints what native
+// prints. Before the fix the instance builder's substitution had no arm
+// for function types: `T` stayed bare, the field resolved nothing, the
+// reserved instance stayed Excluded, and the record LITERAL in `str_s`
+// walled as `record-of-variant-ty` — while the monomorphic spelling of the
+// same program lowered. Three shapes: the issue's (a Value-taking closure
+// returning a generic variant), a String-returning field called in tail
+// position, and a generic fn over `S[T]` (the monomorphized instance).
+// The incumbent brick refuses the return-position computed call
+// (`heap-result method/computed call`), so these rows are structural-only.
+type P[T] = | Good(T) | Bad(Int)
+
+type S[T] = { name: String, run: (Value, String) -> P[T] }
+
+type Q[T] = { name: String, run: (String) -> T }
+
+fn str_s() -> S[String] = S { name: "s", run: (v, p) => Good("${p}=${value.as_string(v) ?? "?"}") }
+
+fn call_it(v: Value, k: String, s: S[String]) -> P[String] = (s.run)(v, k)
+
+fn bang_q() -> Q[String] = Q { name: "q", run: (p) => p + "!" }
+
+fn call_q(k: String, q: Q[String]) -> String = (q.run)(k)
+
+fn call_any[T](v: Value, k: String, s: S[T]) -> P[T] = (s.run)(v, k)
+
+fn show(p: P[String]) -> String = match p {
+  Good(s) => s,
+  Bad(n) => "bad ${n}",
+}
+
+fn main() -> Unit = {
+  println(show(call_it(value.str("hi"), "a", str_s())))
+  println(call_q("b", bang_q()))
+  println(show(call_any(value.str("yo"), "c", str_s())))
+  let bad: S[String] = S { name: "n", run: (v, p) => Bad(7) }
+  println(show(call_it(value.int(1), "d", bad)))
+}
