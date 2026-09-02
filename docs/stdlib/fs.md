@@ -546,10 +546,26 @@ effect fn main() -> Unit = {
 
 ### `fs.glob(pattern: String) -> Result[List[String], String]`
 
-Find files matching a glob pattern
+Find the paths matching a glob pattern. The pattern is matched segment by
+segment against the paths below its literal prefix (the current directory
+when the pattern is relative): `*` matches any run of characters within one
+segment, `**` matches zero or more whole segments, everything else is
+literal. Files and directories both qualify. The answer is sorted and spelled
+with the pattern's own prefix — cwd-relative, no leading `./`, for a relative
+pattern — and a prefix directory that does not exist answers `[]`.
 
-```almd
-let files = fs.glob("src/**/*.almd")
+```almd check
+import fs
+
+effect fn main() -> Unit = {
+  // From the repo root: ["src/deep/util.almd", "src/main.almd"] — every
+  // .almd at any depth under src/, sorted; "src/*.almd" would stop at depth 1
+  // and "*.almd" lists only the current directory.
+  let files = fs.glob("src/**/*.almd")!
+  for f in files {
+    println(f)
+  }
+}
 ```
 
 ### `fs.create_temp_file(prefix: String) -> Result[String, String]`

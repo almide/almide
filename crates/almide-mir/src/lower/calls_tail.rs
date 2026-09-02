@@ -75,7 +75,8 @@ fn is_admitted_effectful_fs_families(module: &str, func: &str) -> bool {
             // `fs.write_bytes` / `fs.write_bytes_raw` WRITE the materialized byte buffer
             // through the write floor (fs_write_bytes.almd / fs_write_bytes_raw.almd) — FsWrite.
             // `fs.walk` / `fs.glob` recursively READ directories (read_dir + path_filestat,
-            // fs_walk.almd — glob shares the walk machinery and reads PWD, adding CliArgs).
+            // fs_walk.almd — glob shares the walk machinery, walking the C-137 cwd as ".",
+            // plus path_exists for its literal-path case; #1805 made it segment-wise).
             || matches!(func, "remove" | "write_bytes" | "write_bytes_raw" | "walk" | "glob")
             // `fs.rename` WRITES the filesystem (the path_rename floor, fs_rename.almd) —
             // FsWrite. `fs.is_symlink` READS it (the no-follow stat, fs_is_symlink.almd) — FsRead.
