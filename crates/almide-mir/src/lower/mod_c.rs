@@ -1015,6 +1015,7 @@ include!("desugar_branch.rs");
 include!("desugar_branch_b.rs");
 include!("desugar_fan.rs");
 include!("desugar_match.rs");
+include!("desugar_match_grouped.rs");
 include!("desugar_match_b.rs");
 include!("desugar_match_c.rs");
 include!("desugar_match_subject.rs");
