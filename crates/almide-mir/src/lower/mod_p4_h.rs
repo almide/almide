@@ -251,53 +251,10 @@ fn list_heap_call_name_special_cases(
     // fallible walker (fs_fold_lines.almd), every other accumulator to an
     // unregistered `_x` name that walls at render rather than mislinking.
     if module == "fs" && func == "__fallible_fold_lines" {
-        use almide_lang::types::constructor::TypeConstructorId as TC;
-        let msi_acc = matches!(arg_tys.get(1),
-            Some(Ty::Applied(TC::Map, a)) if a.len() == 2
-                && matches!(a[0], Ty::String) && matches!(a[1], Ty::Int));
-        return Some(if msi_acc {
-            "fs.__fallible_fold_lines_msi".to_string()
-        } else if matches!(arg_tys.get(1), Some(Ty::Int)) {
-            // The Int accumulator (fs_streaming's traced_step cell): the `_i`
-            // fallible walker — same first-err trace contract as `_msi`.
-            "fs.__fallible_fold_lines_i".to_string()
-        } else {
-            "fs.__fallible_fold_lines_x".to_string()
-        });
+        return Some(fallible_fold_lines_call_name(arg_tys));
     }
     if module == "fs" && matches!(func, "fold_lines" | "fold_lines_chunked" | "fold_lines_range") {
-        use almide_lang::types::constructor::TypeConstructorId as TC;
-        let init_idx = match func { "fold_lines" => 1, "fold_lines_chunked" => 2, _ => 3 };
-        let msi_acc = matches!(arg_tys.get(init_idx),
-            Some(Ty::Applied(TC::Map, a)) if a.len() == 2
-                && matches!(a[0], Ty::String) && matches!(a[1], Ty::Int));
-        let ls_acc = matches!(arg_tys.get(init_idx),
-            Some(Ty::Applied(TC::List, a)) if a.len() == 1 && matches!(a[0], Ty::String));
-        // The Int accumulator (#1233 — the chunked error-path shape
-        // `fold_lines_chunked(p, w, 0, (acc, line) => acc)`) routes to the
-        // `_i` twin; its `Result[List[Int], String]` payload class rides the
-        // fan.map precedent (cap-as-tag @16, flat DropListStr — a List[scalar]
-        // block frees flat). The remaining family cells (fold_lines int acc,
-        // range int acc, non-String-element lists, …) stay `_x`-walled until
-        // their twins land — never a wrong-typed link.
-        let int_acc = matches!(arg_tys.get(init_idx), Some(Ty::Int));
-        let s_acc = matches!(arg_tys.get(init_idx), Some(Ty::String));
-        // The walker x accumulator twin matrix is COMPLETE (#1423 bucket A):
-        // every accumulating walker carries {_msi, _i, _ls, _s} — asserted
-        // by tests/fs_streaming_family_gate_test.rs. Any other accumulator
-        // type routes to an unregistered `_x` name and walls cleanly at
-        // render — never a wrong-typed link.
-        return Some(if msi_acc {
-            format!("fs.{func}_msi")
-        } else if ls_acc {
-            format!("fs.{func}_ls")
-        } else if int_acc {
-            format!("fs.{func}_i")
-        } else if s_acc {
-            format!("fs.{func}_s")
-        } else {
-            format!("fs.{func}_x")
-        });
+        return Some(fold_lines_call_name(func, arg_tys));
     }
     None
 }
@@ -454,5 +411,62 @@ fn option_call_name_closure_result_repr(func: &str, arg_tys: &[Ty], result_ty: &
             Some("option.unwrap_or_else_h".to_string())
         }
         _ => None,
+    }
+}
+
+
+/// Verbatim from [`list_heap_call_name_special_cases`]: the `__fallible_fold_lines`
+/// walker twin, keyed on the accumulator type.
+fn fallible_fold_lines_call_name(arg_tys: &[Ty]) -> String {
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    let msi_acc = matches!(arg_tys.get(1),
+        Some(Ty::Applied(TC::Map, a)) if a.len() == 2
+            && matches!(a[0], Ty::String) && matches!(a[1], Ty::Int));
+    if msi_acc {
+        "fs.__fallible_fold_lines_msi".to_string()
+    } else if matches!(arg_tys.get(1), Some(Ty::Int)) {
+        // The Int accumulator (fs_streaming's traced_step cell): the `_i`
+        // fallible walker — same first-err trace contract as `_msi`.
+        "fs.__fallible_fold_lines_i".to_string()
+    } else {
+        "fs.__fallible_fold_lines_x".to_string()
+    }
+}
+
+/// Verbatim from [`list_heap_call_name_special_cases`]: the total fold_lines
+/// family twin (`_msi`/`_ls`/`_i`/`_s`, else the `_x` wall), keyed on the
+/// accumulator type at the family cell's init position.
+fn fold_lines_call_name(func: &str, arg_tys: &[Ty]) -> String {
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    let init_idx = match func { "fold_lines" => 1, "fold_lines_chunked" => 2, _ => 3 };
+    let msi_acc = matches!(arg_tys.get(init_idx),
+        Some(Ty::Applied(TC::Map, a)) if a.len() == 2
+            && matches!(a[0], Ty::String) && matches!(a[1], Ty::Int));
+    let ls_acc = matches!(arg_tys.get(init_idx),
+        Some(Ty::Applied(TC::List, a)) if a.len() == 1 && matches!(a[0], Ty::String));
+    // The Int accumulator (#1233 — the chunked error-path shape
+    // `fold_lines_chunked(p, w, 0, (acc, line) => acc)`) routes to the
+    // `_i` twin; its `Result[List[Int], String]` payload class rides the
+    // fan.map precedent (cap-as-tag @16, flat DropListStr — a List[scalar]
+    // block frees flat). The remaining family cells (fold_lines int acc,
+    // range int acc, non-String-element lists, …) stay `_x`-walled until
+    // their twins land — never a wrong-typed link.
+    let int_acc = matches!(arg_tys.get(init_idx), Some(Ty::Int));
+    let s_acc = matches!(arg_tys.get(init_idx), Some(Ty::String));
+    // The walker x accumulator twin matrix is COMPLETE (#1423 bucket A):
+    // every accumulating walker carries {_msi, _i, _ls, _s} — asserted
+    // by tests/fs_streaming_family_gate_test.rs. Any other accumulator
+    // type routes to an unregistered `_x` name and walls cleanly at
+    // render — never a wrong-typed link.
+    if msi_acc {
+        format!("fs.{func}_msi")
+    } else if ls_acc {
+        format!("fs.{func}_ls")
+    } else if int_acc {
+        format!("fs.{func}_i")
+    } else if s_acc {
+        format!("fs.{func}_s")
+    } else {
+        format!("fs.{func}_x")
     }
 }
