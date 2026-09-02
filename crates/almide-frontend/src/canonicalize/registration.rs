@@ -638,9 +638,18 @@ fn register_type_decl_opaque_alias(env: &mut TypeEnv, name: &str, resolved: Ty, 
     // Register as nominal type (not transparent alias)
     let generic_args: Vec<Ty> = gnames.iter().map(|g| Ty::TypeVar(*g)).collect();
     let resolved = Ty::Named(sym(name), generic_args);
-    // Register constructor with visibility restriction
+    // Register constructor with visibility restriction. The OWNER is a
+    // definition-time identity captured once: the prefixed registration
+    // names it outright, and the per-module re-registration (which runs
+    // with prefix = None under `alias_owner_module`) must not overwrite it
+    // with "no module" — that read the defining module's own constructor
+    // call as foreign, so a `mod type` alias could never be built anywhere
+    // (the reference compilers key this privilege to the definition's
+    // module identity and never re-derive it: Rust's DefId parent, Gleam's
+    // opaque-type module, Roc's opaque wrap/unwrap scope).
     env.opaque_alias_visibility.insert(sym(name), visibility);
-    env.opaque_alias_module.insert(sym(name), prefix.map(|p| sym(p)));
+    let owner = prefix.map(|p| sym(p)).or(env.alias_owner_module);
+    env.opaque_alias_module.insert(sym(name), owner);
     resolved
 }
 /// Fix up a `Variant`'s registered name to the DECLARED name, and register each of its constructors. Verbatim text move out of [`register_type_decl`].
