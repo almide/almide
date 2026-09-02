@@ -134,10 +134,19 @@ fn main() -> Unit = {
 
 ### `math.exp(x: Float) -> Float`
 
-Return e raised to the given power.
+Return e raised to the given power. The vendored libm guarantees the result within 1 ulp of the true value and byte-identical across targets (C-305) — not correct rounding: `math.exp(1.0)` is one ulp above `math.e()`, which is the correctly rounded constant.
 
-```almd
-math.exp(1.0) // => 2.718281828459045
+```almd run
+fn main() -> Unit = {
+  println(float.to_string(math.exp(0.0)))
+  println(float.to_string(math.exp(1.0)))
+  println(float.to_string(math.e()))
+}
+```
+```output
+1.0
+2.7182818284590455
+2.718281828459045
 ```
 
 ### `math.sqrt(x: Float) -> Float`

@@ -108,7 +108,7 @@ fn main() -> Unit = {
 
 ### `map.keys(m: Map[K, V]) -> List[K]`
 
-Get all keys as a sorted list.
+Get all keys as a list, in insertion order (the order the entries were first inserted; overwriting a key keeps its position).
 
 ```almd
 map.keys(m)
@@ -144,7 +144,7 @@ fn main() -> Unit = {
 
 ### `map.entries(m: Map[K, V]) -> List[(K, V)]`
 
-Get all key-value pairs as a list of tuples, sorted by key.
+Get all key-value pairs as a list of tuples, in insertion order.
 
 ```almd
 map.entries(m)
