@@ -634,6 +634,12 @@ fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetC
                     needed.insert(name);
                 }
             }
+            // A TYPE reference is a use of the module that defines the type
+            // (#1829): `let e: Endian = BigEndian` names bytes.rs's enum
+            // without calling a `bytes.*` fn, and the call-driven set above
+            // left the module out. The reserved spelling in the user code is
+            // the reference — see `walker::runtime_owned::modules_spelled_in`.
+            needed.extend(walker::runtime_owned::modules_spelled_in(&user_code));
             resolve_runtime_deps(&mut needed);
             output.push_str(&rust_runtime_modules(&needed));
             // matrix.rs calls `almide_kernel::…`; when matrix is included, drop the
