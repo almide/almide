@@ -6,80 +6,130 @@ Mathematical functions. import math.
 
 Return the smaller of two integers.
 
-```almd
-math.min(3, 7) // => 3
+```almd run
+fn main() -> Unit = {
+  println("${math.min(3, 7)}")
+}
+```
+```output
+3
 ```
 
 ### `math.max(a: Int, b: Int) -> Int`
 
 Return the larger of two integers.
 
-```almd
-math.max(3, 7) // => 7
+```almd run
+fn main() -> Unit = {
+  println("${math.max(3, 7)}")
+}
+```
+```output
+7
 ```
 
 ### `math.abs(n: Int) -> Int`
 
 Return the absolute value of an integer.
 
-```almd
-math.abs(-5) // => 5
+```almd run
+fn main() -> Unit = {
+  println("${math.abs(-5)}")
+}
+```
+```output
+5
 ```
 
 ### `math.pow(base: Int, exp: Int) -> Int`
 
 Raise an integer base to an integer exponent.
 
-```almd
-math.pow(2, 10) // => 1024
+```almd run
+fn main() -> Unit = {
+  println("${math.pow(2, 10)}")
+}
+```
+```output
+1024
 ```
 
 ### `math.pi() -> Float`
 
 Return the mathematical constant pi (3.14159...).
 
-```almd
-math.pi() // => 3.141592653589793
+```almd run
+fn main() -> Unit = {
+  println(float.to_string(math.pi()))
+}
+```
+```output
+3.141592653589793
 ```
 
 ### `math.e() -> Float`
 
 Return Euler's number e (2.71828...).
 
-```almd
-math.e() // => 2.718281828459045
+```almd run
+fn main() -> Unit = {
+  println(float.to_string(math.e()))
+}
+```
+```output
+2.718281828459045
 ```
 
 ### `math.sin(x: Float) -> Float`
 
 Return the sine of an angle in radians.
 
-```almd
-math.sin(0.0) // => 0.0
+```almd run
+fn main() -> Unit = {
+  println(float.to_string(math.sin(0.0)))
+}
+```
+```output
+0.0
 ```
 
 ### `math.cos(x: Float) -> Float`
 
 Return the cosine of an angle in radians.
 
-```almd
-math.cos(0.0) // => 1.0
+```almd run
+fn main() -> Unit = {
+  println(float.to_string(math.cos(0.0)))
+}
+```
+```output
+1.0
 ```
 
 ### `math.tan(x: Float) -> Float`
 
 Return the tangent of an angle in radians.
 
-```almd
-math.tan(0.0) // => 0.0
+```almd run
+fn main() -> Unit = {
+  println(float.to_string(math.tan(0.0)))
+}
+```
+```output
+0.0
 ```
 
 ### `math.log(x: Float) -> Float`
 
 Return the natural logarithm (base e) of a float.
 
-```almd
-math.log(1.0) // => 0.0
+```almd run
+fn main() -> Unit = {
+  println(float.to_string(math.log(1.0)))
+}
+```
+```output
+0.0
 ```
 
 ### `math.exp(x: Float) -> Float`
@@ -94,80 +144,130 @@ math.exp(1.0) // => 2.718281828459045
 
 Return the square root of a float.
 
-```almd
-math.sqrt(16.0) // => 4.0
+```almd run
+fn main() -> Unit = {
+  println(float.to_string(math.sqrt(16.0)))
+}
+```
+```output
+4.0
 ```
 
 ### `math.log10(x: Float) -> Float`
 
 Return the base-10 logarithm of a float.
 
-```almd
-math.log10(100.0) // => 2.0
+```almd run
+fn main() -> Unit = {
+  println(float.to_string(math.log10(100.0)))
+}
+```
+```output
+2.0
 ```
 
 ### `math.log2(x: Float) -> Float`
 
 Return the base-2 logarithm of a float.
 
-```almd
-math.log2(8.0) // => 3.0
+```almd run
+fn main() -> Unit = {
+  println(float.to_string(math.log2(8.0)))
+}
+```
+```output
+3.0
 ```
 
 ### `math.sign(n: Int) -> Int`
 
 Return the sign of an integer: -1, 0, or 1.
 
-```almd
-math.sign(-42) // => -1
+```almd run
+fn main() -> Unit = {
+  println("${math.sign(-42)}")
+}
+```
+```output
+-1
 ```
 
 ### `math.fmin(a: Float, b: Float) -> Float`
 
 Return the smaller of two floats.
 
-```almd
-math.fmin(1.5, 2.5) // => 1.5
+```almd run
+fn main() -> Unit = {
+  println(float.to_string(math.fmin(1.5, 2.5)))
+}
+```
+```output
+1.5
 ```
 
 ### `math.fmax(a: Float, b: Float) -> Float`
 
 Return the larger of two floats.
 
-```almd
-math.fmax(1.5, 2.5) // => 2.5
+```almd run
+fn main() -> Unit = {
+  println(float.to_string(math.fmax(1.5, 2.5)))
+}
+```
+```output
+2.5
 ```
 
 ### `math.fpow(base: Float, exp: Float) -> Float`
 
 Raise a float base to a float exponent.
 
-```almd
-math.fpow(2.0, 0.5) // => 1.4142135623730951
+```almd run
+fn main() -> Unit = {
+  println(float.to_string(math.fpow(2.0, 0.5)))
+}
+```
+```output
+1.4142135623730951
 ```
 
 ### `math.factorial(n: Int) -> Int`
 
 Return the factorial of a non-negative integer.
 
-```almd
-math.factorial(5) // => 120
+```almd run
+fn main() -> Unit = {
+  println("${math.factorial(5)}")
+}
+```
+```output
+120
 ```
 
 ### `math.choose(n: Int, k: Int) -> Int`
 
 Return the binomial coefficient C(n, k) = n! / (k! * (n-k)!).
 
-```almd
-math.choose(5, 2) // => 10
+```almd run
+fn main() -> Unit = {
+  println("${math.choose(5, 2)}")
+}
+```
+```output
+10
 ```
 
 ### `math.log_gamma(x: Float) -> Float`
 
 Return the natural logarithm of the gamma function at x.
 
-```almd
-math.log_gamma(5.0) // => 3.178...
+```almd run
+fn main() -> Unit = {
+  println(float.to_fixed(math.log_gamma(5.0), 3))
+}
+```
+```output
+3.178
 ```
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
