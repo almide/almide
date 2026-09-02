@@ -436,17 +436,14 @@ fn render_anon_record_decls(ctx: &RenderContext, parts: &mut Vec<String>) {
         // `Debug + PartialEq` generic bounds — derive(Clone) re-adds `T: Clone`
         // itself. Mirrors the `type`-declared record path. (Cross-target gaps.)
         let has_fn = ctx.ann.anon_records_with_fn.contains(field_names);
-        let generics: Vec<String> = (0..field_names.len())
-            .map(|i| {
-                let name_s = format!("T{}", i);
-                if has_fn {
-                    name_s
-                } else {
-                    ctx.templates.render_with("generic_bound_full", None, &[], &[("name", name_s.as_str())])
-                        .unwrap_or_else(|| format!("T{}", i))
-                }
-            })
-            .collect();
+        // The struct DEFINITION carries no bounds (#1798): a bound written on
+        // the definition must be satisfied at every mention of the type, and
+        // a generic record's field `inner: AlmdRec_…<String, T>` mentions it
+        // under the enclosing decl's own `T: Clone + PartialEq` — no Debug —
+        // so rustc refused the field (E0277). The derives add their own
+        // per-impl bounds, and the AlmideRepr impl below declares the full
+        // set it needs; nothing else depended on the definition's bounds.
+        let generics: Vec<String> = (0..field_names.len()).map(|i| format!("T{}", i)).collect();
         let fields: Vec<String> = field_names.iter().enumerate()
             .map(|(i, name)| {
                 let type_s = format!("T{}", i);
@@ -473,13 +470,16 @@ fn render_anon_record_decls(ctx: &RenderContext, parts: &mut Vec<String>) {
         if !has_fn {
             let bare_generics: Vec<String> = (0..field_names.len())
                 .map(|i| format!("T{}", i)).collect();
-            // The anon struct declares each param via `generic_bound_full`
-            // (`T: Clone + Debug + PartialEq`); the impl must satisfy those
-            // same bounds, plus `AlmideRepr` so the field reprs compose.
-            // Reuse the template so the bounds stay in lock-step with the decl.
+            // The repr impl needs exactly what a NAMED record's repr impl
+            // needs — `generic_bound` (`T: Clone + PartialEq`) plus
+            // `AlmideRepr` so the field reprs compose. Not `_full`: the
+            // repr never formats with Debug, and a generic record's own repr
+            // impl (bounded `T: AlmideRepr + Clone + PartialEq`) calls this
+            // one on its anonymous field — a Debug requirement here made
+            // that call unsatisfiable (#1798, E0599 behind the E0277).
             let impl_bounds = bare_generics.iter()
                 .map(|t| {
-                    let own = ctx.templates.render_with("generic_bound_full", None, &[], &[("name", t.as_str())])
+                    let own = ctx.templates.render_with("generic_bound", None, &[], &[("name", t.as_str())])
                         .unwrap_or_else(|| format!("{}: Clone + std::fmt::Debug + PartialEq", t));
                     match own.split_once(':') {
                         Some((name, rest)) => format!("{}: AlmideRepr +{}", name.trim_end(), rest),
