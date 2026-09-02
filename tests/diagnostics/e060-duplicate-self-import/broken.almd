@@ -1,0 +1,6 @@
+// Importing the same self module twice under two aliases is the duplicate
+// import E060 — one name is enough.
+import self.helper as h
+import self.helper as helper2
+
+fn main() -> Unit = println(int.to_string(h.open() + helper2.open()))

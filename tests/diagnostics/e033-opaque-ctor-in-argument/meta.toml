@@ -1,0 +1,3 @@
+expects_code = "E033"
+expects_error = "cannot construct opaque type 'UserId'"
+hint_substring = "Use the module's public API"

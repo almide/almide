@@ -1,0 +1,5 @@
+// The foreign constructor call is refused wherever it sits — here inline
+// as a call argument, with an Int payload.
+import self.ident as id
+
+fn main() -> Unit = println(id.show(UserId(7)))

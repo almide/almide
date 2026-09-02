@@ -1,0 +1,3 @@
+expects_code = "E029"
+expects_error = "unknown type 'Piont'"
+hint_substring = ""

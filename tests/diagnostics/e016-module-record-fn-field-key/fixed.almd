@@ -1,0 +1,8 @@
+// The hash-blocker walk resolves the sibling's record and finds its fn
+// field: keying a Map by it is E016 with the closure wording (#1518).
+import self.handler as hd
+
+fn main() -> Unit = {
+  let m: Map[String, hd.Handler] = map.new()
+  println(int.to_string(map.len(m)))
+}

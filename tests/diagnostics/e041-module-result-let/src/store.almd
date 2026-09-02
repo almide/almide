@@ -1,0 +1,1 @@
+pub effect fn fetch() -> Result[Int, String] = ok(7)

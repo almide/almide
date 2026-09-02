@@ -1,0 +1,3 @@
+expects_code = "E002"
+expects_error = "undefined function 'helper.opne'"
+hint_substring = ""

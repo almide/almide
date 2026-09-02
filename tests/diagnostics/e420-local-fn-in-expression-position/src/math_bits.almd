@@ -1,0 +1,2 @@
+local fn twice(n: Int) -> Int = n * 2
+pub fn double(n: Int) -> Int = twice(n)

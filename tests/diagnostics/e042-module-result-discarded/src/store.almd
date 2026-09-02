@@ -1,0 +1,1 @@
+pub effect fn save() -> Result[Unit, String] = ok(())

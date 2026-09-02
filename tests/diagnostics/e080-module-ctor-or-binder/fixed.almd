@@ -1,0 +1,12 @@
+// Or-alternatives are binder-free even when the constructors come from a
+// sibling module: binding the payload inside `c.Circle(r) | c.Square(r)`
+// is E080.
+import self.shape as c
+
+fn size(s: c.Shape) -> Int = match s {
+  c.Circle(r) => r,
+  c.Square(r) => r,
+  c.Dot => 0,
+}
+
+fn main() -> Unit = println(int.to_string(size(c.dot())))

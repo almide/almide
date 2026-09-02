@@ -1,0 +1,5 @@
+// A `local fn` is same-FILE only (#870): the entry file reaching a sibling's
+// local fn through `import self.helper` is E420 — the hint names the tier.
+import self.helper as h
+
+fn main() -> Unit = println(int.to_string(h.open()))

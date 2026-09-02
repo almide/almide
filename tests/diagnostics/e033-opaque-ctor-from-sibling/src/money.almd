@@ -1,0 +1,4 @@
+mod type Cents = Int
+
+pub fn from_int(n: Int) -> Cents = Cents(n)
+pub fn value(c: Cents) -> Int = 0
