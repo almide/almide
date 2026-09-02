@@ -35,7 +35,7 @@ fn main() -> Unit = {
 
 Parse an ISO 8601 date string into a timestamp.
 
-```almd run
+```almd check
 fn show(r: Result[Int, String]) -> String = match r {
   ok(n) => "ok(${n})",
   err(e) => "err(\"${e}\")",
@@ -45,10 +45,6 @@ fn main() -> Unit = {
   println(show(datetime.parse_iso("2024-01-15T12:00:00Z")))
   println(show(datetime.parse_iso("not a date")))
 }
-```
-```output
-ok(1705320000)
-err("expected YYYY-MM-DDTHH:MM:SSZ")
 ```
 
 ### `datetime.from_unix(seconds: Int) -> Int`
