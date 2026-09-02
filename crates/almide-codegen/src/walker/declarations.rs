@@ -209,7 +209,9 @@ fn render_type_decl_variant(ctx: &RenderContext, td: &IrTypeDecl, generics_str: 
 
 /// Build `impl AlmideRepr for <Type>` for a record or variant type, mirroring
 /// the `auto_derive_repr` literal format:
-///   record       → `P { x: 1, y: 2 }`     (field declaration order)
+///   record       → `P { x: 1, y: 2 }`     (field declaration order; the
+///                  DECLARED name — a module's `m.Cfg` prints `Cfg`, not the
+///                  post-flatten `almide_rt_m_Cfg` (#1836, `ann.repr_names`))
 ///   tuple variant→ `Click(10, 20)`
 ///   record variant→`Scroll { dy: 5 }`
 ///   nullary       → `Quit`
@@ -281,11 +283,12 @@ fn render_repr_impl(ctx: &RenderContext, td: &IrTypeDecl) -> Option<String> {
             let args = fields.iter()
                 .map(|f| format!("self.{}.almide_repr()", f.name))
                 .collect::<Vec<_>>().join(", ");
-            // The entry program's shadow of a stdlib-owned name is the flat
-            // `almide_rt_self_X` here (#1828); its repr shows the `X` the
-            // source declares, as the wasm leg's does.
-            let root_scope = format!("almide_rt_{}_", almide_lang::stdlib_info::ROOT_TYPE_SCOPE);
-            let shown = td.name.as_str().strip_prefix(root_scope.as_str()).unwrap_or(td.name.as_str());
+            // The flatten pass records the declared name of every qualified type
+            // it mangles (#1836) — the entry program's stdlib-owned shadow
+            // `self.X` -> `almide_rt_self_X` (#1828) included — so the repr
+            // shows the `X` the source declares, as the wasm legs do.
+            let shown = ctx.ann.repr_names.get(td.name.as_str())
+                .map(String::as_str).unwrap_or(td.name.as_str());
             format!("format!(\"{} {{{{ {} }}}}\", {})", shown, fmt, args)
         }
         IrTypeDeclKind::Variant { cases, .. } => {

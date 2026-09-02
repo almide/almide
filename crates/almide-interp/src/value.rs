@@ -558,10 +558,10 @@ fn repr_seq(open: &str, close: &str, xs: &[Value]) -> String {
 fn repr_record(name: Option<Sym>, fields: &[(Sym, Value)]) -> String {
     let mut o = String::new();
     if let Some(n) = name {
-        // The entry program's shadow of a stdlib-owned name is `self.X`
-        // (#1828); it displays as the `X` the source declares, as both
-        // backends do.
-        o.push_str(almide_lang::stdlib_info::strip_root_type_scope(n.as_str()));
+        // The DECLARED spelling: a module record's type is `m.Cfg`, its repr
+        // is `Cfg { … }` on every leg (#1836, C-009); the entry program's
+        // stdlib-owned shadow `self.X` (#1828) displays as `X` the same way.
+        o.push_str(almide_ir::declared_type_name(n.as_str()));
         o.push(' ');
     }
     o.push('{');

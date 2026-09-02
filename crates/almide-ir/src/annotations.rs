@@ -59,6 +59,16 @@ pub struct CodegenAnnotations {
     /// `walker/runtime_owned.rs`; read by every type / record-literal /
     /// pattern spelling site (#1821).
     pub runtime_owned_types: HashMap<String, String>,
+    /// Post-flatten Rust type name -> the name the type was DECLARED with
+    /// (`almide_rt_m_Cfg` -> `Cfg`), for every module type the link flatten
+    /// renamed. The generated `AlmideRepr` impl prints THIS spelling, so a
+    /// module record reprs as `Cfg { a: 1, b: 2 }` — the same bytes the
+    /// entry program's `type Cfg` prints, and the same bytes wasm and the
+    /// interp print (#1836, C-009). Keyed by the renamed name because the
+    /// mangle is not invertible: `almide_rt_<mod>_<Type>` cannot be split
+    /// back when either part carries an underscore. A root decl keeps its
+    /// bare name and needs no entry. Populated by `mangle_qualified_type_names`.
+    pub repr_names: HashMap<String, String>,
     /// Field count of each nominal record type (name → number of fields).
     /// Used to decide whether a record destructure pattern needs a trailing
     /// `..` to cover fields the user didn't name.
