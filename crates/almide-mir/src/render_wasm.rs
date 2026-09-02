@@ -730,6 +730,7 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
 
 include!("render_wasm_module_parts.rs");
 include!("render_wasm_b.rs");
+include!("render_wasm_b_tail.rs");
 include!("render_wasm_bce.rs");
 include!("render_wasm_c.rs");
 include!("render_wasm_dce.rs");
