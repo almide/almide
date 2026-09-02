@@ -1,0 +1,40 @@
+// @contract: C-245
+// #1826: an interpolation hole past the structural leg's 64 KiB fixed
+// line room. Every interpolation builds in the line buffer; a hole of
+// 65 540+ chars ran off the end of the room and trapped — exit 1 with
+// EMPTY stdout and stderr where native printed the line (nightly fuzz,
+// seed 537649456916 index 250, a 1 000 000-char pad_end hole). The room
+// now RELOCATES to a heap arena when a build outgrows it, so a build of
+// any length completes. Rows pin the room's edge (65 535 / 65 537), a
+// hole ~4.6× the room (300 000), a nested value-position build inside a
+// large one, an Int rendered exactly at the edge (the $append_i64 path,
+// which had no room check at all), the statement-position println shape
+// of the original repro, the JSON quoting writer (a direct-store path),
+// and small builds AFTER the relocation. Lengths + head/tail + a
+// checksum, not the whole text, keep the manifest readable.
+import json
+
+fn hole(n: Int) -> String = string.pad_end("x", n, "y")
+
+fn checksum(s: String) -> Int = string.count(s, "y") * 7 + string.len(s)
+
+fn report(label: String, s: String) -> Unit = println("${label}: len=${string.len(s)} head=${string.take(s, 8)} tail=${string.take_end(s, 8)} sum=${checksum(s)}")
+
+fn main() -> Unit = {
+  // value-position builds at the fixed room's edge and far past it
+  report("65535", "p=${hole(65535)}")
+  report("65537", "p=${hole(65537)}")
+  report("300000", "p=${hole(300000)}")
+  // an inner value-position build nested inside an outer large one,
+  // then another large part appended after it
+  report("nested", "outer[${"inner<${hole(70000)}>"}]${hole(70000)}")
+  // an Int rendered exactly at the room's edge
+  report("int-edge", "${hole(65530)}${1234567890}")
+  // the statement-position println of the original repro
+  println("stmt=${hole(65537)}|")
+  // the JSON quoting writer over a large string
+  let v = value.object([("k", value.str(hole(70000)))])
+  report("json", json.stringify(v))
+  // small builds after the relocation
+  println("after: ${1 + 2} ${true} ${"ok"}")
+}

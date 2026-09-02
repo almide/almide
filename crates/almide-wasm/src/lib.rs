@@ -85,6 +85,7 @@ mod patterns;
 mod prim;
 mod runtime;
 mod runtime_alloc;
+mod runtime_line;
 mod runtime_str;
 mod scalar_ext;
 mod data;
@@ -161,7 +162,11 @@ const FREELIST_CLASSES: u32 = 16;
 /// guard `[0,PAYLOAD)`, padding to 16, scratch `[16,48)`, free-list
 /// heads `[48,112)`.
 const POOL_START: u32 = FREELIST_BASE + FREELIST_CLASSES * 4;
-/// Minimum room the line buffer must have beyond the pool.
+/// The line buffer's FIXED room beyond the pool — a floor, not a
+/// ceiling: a build that outgrows it relocates to a heap arena
+/// (`$line_grow`, runtime_line.rs, #1826) and continues, so an
+/// interpolation of any length renders. The room sits between the pool
+/// and the heap, which is why it cannot simply `memory.grow`.
 const LINE_BUF_MIN: u64 = 65536;
 
 // ── function / type / global indices ────────────────────────────────────
@@ -234,8 +239,17 @@ const F_STR_APPEND: u32 = 37;
 /// pushes retained Σn ≈ n²/2 bytes — `bytes.new(0)` + 69k pushes OOM'd
 /// where native and the incumbent complete (#1689).
 const F_BYTES_PUSH: u32 = 38;
+/// `$line_grow(cur, len)`: relocate the line-buffer region to a heap
+/// arena with room for `len` more bytes at logical cursor `cur`
+/// (#1826) — the append helpers call it instead of trapping.
+const F_LINE_GROW: u32 = 39;
+/// `$line_println(start, cur)` / `$line_eprintln(start, cur)`: flush a
+/// finished statement-position build to the stream import from its
+/// PHYSICAL address (`start + G_LINE_DELTA`).
+const F_LINE_PRINTLN: u32 = 40;
+const F_LINE_EPRINTLN: u32 = 41;
 /// First program-function index; `main` sits after every program function.
-const F_FN_BASE: u32 = 39;
+const F_FN_BASE: u32 = 42;
 /// Fixed type indices: 0 print(ptr,len)→(), 1 block-print(i32)→(),
 /// 2 append_copy, 3 append_i64, 4 main ()→(), 5 (i32,i32)→i32
 /// (append_bool/concat/str_eq), 6 (i64)→i32 (itoa/int_to_string),
@@ -246,17 +260,20 @@ const T_MAIN: u32 = 4;
 /// 12: (i32)→f64 f16_to_f64; 13: (i32,i64)→i32 cp_off/str_repeat;
 /// 14: (i32,i64,i64)→i32 str_slice.
 const T_FN_BASE: u32 = 18;
-// Global 0 is the immutable line-buffer start (= align16(pool end)); it
-// is emitted for inspectability but no instruction references it since
-// the build cursor (global 2) took over.
+/// Immutable i32 global: the line-buffer start (= align16(pool end)) —
+/// the LOGICAL origin every build cursor is measured from (#1826:
+/// `$line_grow` copies `[line_start, cur)` and re-bases the delta on it).
+const G_LINE_START: u32 = 0;
 /// Mutable i32 global: the bump-allocator head.
 const G_HEAP: u32 = 1;
 /// Mutable i32 global: the line-buffer BUILD CURSOR — stack-disciplined so
 /// interpolation builds NEST (a value-position `"${...}"` inside another
 /// build starts after the outer's partial content and restores on exit).
 const G_LINE_CURSOR: u32 = 2;
-/// Immutable i32 global: one past the line buffer (= heap start); the
-/// append helpers trap LOUDLY on overflow instead of corrupting the heap.
+/// Immutable i32 global: one past the FIXED line room (= heap start) —
+/// the heap FLOOR the `$inc`/`$dec_flat`/`$cow` guards and the
+/// `$str_append` window test against. The append helpers no longer trap
+/// against it: the room's live end is `G_LINE_ROOM` (#1826).
 const G_LINE_END: u32 = 3;
 /// Deterministic meter (ALS-DT2, mirrors the interp's det_* cells):
 /// remaining fuel units (i64, starts at i64::MAX — outside a region the
@@ -275,8 +292,17 @@ const G_DET_VERDICT: u32 = 6;
 const G_DET_SPEND: u32 = 7;
 /// Region nesting depth (i32) — the cut condition needs depth > 0.
 const G_DET_DEPTH: u32 = 8;
+/// Mutable i32 global: physical − logical for the line buffer (#1826).
+/// 0 while the region lives in the fixed room; after `$line_grow`
+/// relocates it to a heap arena, `arena_payload − line_start`. Every
+/// write to a cursor adds it; cursors themselves stay logical, so the
+/// `start` locals of nested builds never go stale.
+const G_LINE_DELTA: u32 = 12;
+/// Mutable i32 global: one past the LOGICAL room (`line_start +
+/// capacity`) — starts at the heap floor, moves up with each grow.
+const G_LINE_ROOM: u32 = 13;
 /// Fixed runtime globals above; top-let globals start here.
-const G_FIXED_COUNT: u32 = 12;
+const G_FIXED_COUNT: u32 = 14;
 
 // ── slice value model ───────────────────────────────────────────────────
 

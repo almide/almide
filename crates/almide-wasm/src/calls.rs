@@ -407,14 +407,15 @@ impl Emitter<'_> {
     pub(crate) fn lower_print(&mut self, arg: &IrExpr, import: u32, block_print: u32) -> Result<(), EmitError> {
         if let IrExprKind::StringInterp { parts } = &arg.kind {
             let start = self.lower_interp_build(parts)?;
-            // print(start, cursor - start), then release the buffer region.
+            // Flush [start, cursor) from its PHYSICAL home (the region may
+            // have relocated to a heap arena mid-build, #1826), then
+            // release the buffer region.
+            let flush = if import == F_PRINTLN_IMPORT { F_LINE_PRINTLN } else { F_LINE_EPRINTLN };
             self.f
                 .instructions()
                 .local_get(start)
                 .local_get(self.cursor_local)
-                .local_get(start)
-                .i32_sub()
-                .call(import)
+                .call(flush)
                 .local_get(start)
                 .global_set(G_LINE_CURSOR);
             self.release_i32();

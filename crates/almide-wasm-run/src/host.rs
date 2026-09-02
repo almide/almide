@@ -12,8 +12,10 @@ use std::sync::{Arc, Mutex};
 
 /// One wasm run's cross-target observables: stdout, stderr, exit code.
 /// A trap WITHOUT a recorded `almide.exit` code is a runtime abort
-/// (unreachable / div-by-zero / OOB) — exit 1, the native abort contract.
-/// Not every gate reads every field (the run manifest hashes stdout only).
+/// (unreachable / div-by-zero / OOB) — exit 1, the native abort contract,
+/// and (#1826) ONE stderr line naming it, `Error: wasm trap: <reason>`,
+/// never a silent exit 1. Not every gate reads every field (the run
+/// manifest hashes stdout only).
 #[allow(dead_code)]
 pub struct RunResult {
     pub stdout: String,
@@ -728,7 +730,14 @@ fn run_wasm_src(
             if std::env::var("ALMIDE_DBG_TRAP").is_ok() {
                 eprintln!("TRAP: {e:?}");
             }
-            1 // genuine trap = runtime abort
+            // A genuine trap is a runtime abort: exit 1, and (#1826) the
+            // abort NAMES itself on stderr in the `Error: ` form native's
+            // aborts use. Native never has this case (its aborts are all
+            // `Error: <msg>` from a defined guard), so the `wasm trap:`
+            // prefix is this leg's own spelling — a fuzz finding or a
+            // user is never left with an empty stderr and a bare 1.
+            err.lock().expect("test harness invariant").push_str(&trap_line(e));
+            1
         }
         (Ok(()), Some(_)) => {
             anyhow::bail!("almide.exit recorded a code but the run returned normally")
@@ -746,4 +755,87 @@ fn run_wasm_src(
         exit: exit_code,
         heap_end,
     })
+}
+
+/// The one stderr line a trapped run reports (#1826), in the `Error: `
+/// abort form: wasmtime's own `Trap` Display — already spelled
+/// `wasm trap: <reason>` ("out of bounds memory access", "wasm
+/// `unreachable` instruction executed", "call stack exhausted", …) —
+/// when the error is a trap, else the chain's root cause under the same
+/// prefix. Never the multi-line backtrace.
+fn trap_line(e: &wasmtime::Error) -> String {
+    match e.downcast_ref::<wasmtime::Trap>() {
+        Some(t) => format!("Error: {t}\n"),
+        None => format!("Error: wasm trap: {}\n", e.root_cause()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::run_wasm;
+    use wasm_encoder::{
+        CodeSection, ExportKind, ExportSection, Function, FunctionSection, Instruction,
+        MemArg, MemorySection, MemoryType, Module, TypeSection,
+    };
+
+    /// A one-function module whose exported `main` runs `body` — the
+    /// smallest thing the host will instantiate (no `almide.*` imports).
+    fn module(body: &[Instruction<'_>]) -> Vec<u8> {
+        let mut types = TypeSection::new();
+        types.ty().function([], []);
+        let mut funcs = FunctionSection::new();
+        funcs.function(0);
+        let mut mems = MemorySection::new();
+        mems.memory(MemoryType {
+            minimum: 1,
+            maximum: None,
+            memory64: false,
+            shared: false,
+            page_size_log2: None,
+        });
+        let mut exports = ExportSection::new();
+        exports.export("memory", ExportKind::Memory, 0);
+        exports.export("main", ExportKind::Func, 0);
+        let mut code = CodeSection::new();
+        let mut f = Function::new([]);
+        for op in body {
+            f.instruction(op);
+        }
+        f.instruction(&Instruction::End);
+        code.function(&f);
+        let mut m = Module::new();
+        m.section(&types).section(&funcs).section(&mems).section(&exports).section(&code);
+        m.finish()
+    }
+
+    /// #1826 defect 2: a trap that reaches the host with no recorded
+    /// `almide.exit` is exit 1 AND one stderr line naming the reason —
+    /// never a silent 1.
+    #[test]
+    fn a_trap_names_itself_on_stderr_and_exits_1() {
+        let r = run_wasm(&module(&[Instruction::Unreachable])).expect("engine runs the module");
+        assert_eq!(r.exit, 1);
+        assert_eq!(r.stdout, "");
+        assert_eq!(r.stderr, "Error: wasm trap: wasm `unreachable` instruction executed\n");
+    }
+
+    #[test]
+    fn an_out_of_bounds_access_names_the_memory_trap() {
+        let oob = [
+            Instruction::I32Const(-1),
+            Instruction::I32Load(MemArg { offset: 0, align: 2, memory_index: 0 }),
+            Instruction::Drop,
+        ];
+        let r = run_wasm(&module(&oob)).expect("engine runs the module");
+        assert_eq!(r.exit, 1);
+        assert_eq!(r.stderr, "Error: wasm trap: out of bounds memory access\n");
+    }
+
+    /// The happy path is untouched: a clean return is exit 0, empty stderr.
+    #[test]
+    fn a_clean_return_stays_silent() {
+        let r = run_wasm(&module(&[Instruction::Nop])).expect("engine runs the module");
+        assert_eq!(r.exit, 0);
+        assert_eq!(r.stderr, "");
+    }
 }
