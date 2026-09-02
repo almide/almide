@@ -223,8 +223,9 @@ impl Emitter<'_> {
     }
 
     /// `list.unique_by(xs, f)` — first-seen dedup keyed by the callback's
-    /// result (Int / Bool / String / Float key classes via the scan
-    /// family); elements keep first-occurrence order.
+    /// result; elements keep first-occurrence order. A SCALAR key (Int /
+    /// Bool / String / Float) scans the seen set through the scan family;
+    /// any other equatable key takes the deep lane (#1797).
     pub(crate) fn lower_list_unique_by(
         &mut self,
         xs: &IrExpr,
@@ -233,7 +234,9 @@ impl Emitter<'_> {
         let (params, body) = self.hof_lambda(cb, 1)?;
         let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
         let kt = self.infer(body)?;
-        let SliceTy::Scalar(_) = kt else { return unsup("list-unique-by-key-nonscalar") };
+        let SliceTy::Scalar(_) = kt else {
+            return self.lower_list_unique_by_deep(kt, elem, (bh, ch, ih), params[0], body);
+        };
         let scan = self.scan_helper(kt)?;
         let kstride = kt.slot_size() as i32;
         let stride = elem.slot_size() as i32;
@@ -284,5 +287,122 @@ impl Emitter<'_> {
             self.release_i32();
         }
         Ok(Some(SliceTy::List(self.types.intern(elem))))
+    }
+}
+
+/// The key types the deep lane admits: every shape `emit_val_eq` compares
+/// structurally. `Fn`/`Matrix` have no equality; `Unit` never FLOWS out of
+/// a lambda body as a value (the void convention) — each walls by name.
+fn unique_by_key_equatable(kt: SliceTy) -> bool {
+    matches!(
+        kt,
+        SliceTy::Option(_)
+            | SliceTy::Result(..)
+            | SliceTy::List(_)
+            | SliceTy::Map(..)
+            | SliceTy::Set(_)
+            | SliceTy::Tuple(_)
+            | SliceTy::Named(_)
+            | SliceTy::Value
+    )
+}
+
+impl Emitter<'_> {
+    /// The NON-SCALAR key lane of `list.unique_by` (#1797): the seen set is
+    /// a list of key HANDLES (every non-scalar key is an i32 block) scanned
+    /// with the type-directed `==` (`emit_val_eq`) instead of the scalar
+    /// scan family — the documented `(s) => string.get(s, 0)` (an
+    /// `Option[String]` key) walled `list-unique-by-key-nonscalar` here.
+    /// `loop_` is `hof_loop_open`'s (base, count, idx) triple; the caller
+    /// already lowered `xs` and holds those three.
+    fn lower_list_unique_by_deep(
+        &mut self,
+        kt: SliceTy,
+        elem: SliceTy,
+        loop_: (u32, u32, u32),
+        param: u32,
+        body: &IrExpr,
+    ) -> Result<Option<SliceTy>, EmitError> {
+        if !unique_by_key_equatable(kt) {
+            return unsup(&format!("list-unique-by-key:{kt:?}"));
+        }
+        let (bh, ch, ih) = loop_;
+        let stride = elem.slot_size() as i32;
+        let hseen = self.hold_i32()?;
+        let hout = self.hold_i32()?;
+        let hkept = self.hold_i32()?;
+        let hkey = self.hold_i32()?;
+        {
+            let mut i = self.f.instructions();
+            i.i32_const(0).call(F_ALLOC).local_set(hseen);
+            i.local_get(ch).i32_const(stride).i32_mul().call(F_ALLOC).local_set(hout);
+            i.i32_const(0).local_set(hkept);
+            i.block(BlockType::Empty).loop_(BlockType::Empty);
+        }
+        self.hof_elem_into(elem, bh, ch, ih, param);
+        self.lower(body, Some(kt))?;
+        self.f.instructions().local_set(hkey);
+        self.emit_seen_key_scan(kt, hseen, hkey)?;
+        {
+            let mut i = self.f.instructions();
+            i.i32_eqz().if_(BlockType::Empty);
+            i.local_get(hseen).local_get(hkey);
+        }
+        // The seen list becomes a co-owner of a key read from a droppable
+        // local (RC-3 share rule); fresh keys transfer as-is.
+        self.rc_share_guard(body, kt);
+        {
+            let mut i = self.f.instructions();
+            i.call(F_LIST_PUSH_4).local_set(hseen);
+            i.local_get(hout).local_get(hkept).i32_const(stride).i32_mul().i32_add();
+            i.local_get(param);
+        }
+        self.store_ty_slot(elem, 0);
+        {
+            let mut i = self.f.instructions();
+            i.local_get(hkept).i32_const(1).i32_add().local_set(hkept);
+            i.end();
+        }
+        self.hof_step(ih);
+        {
+            let mut i = self.f.instructions();
+            i.local_get(hout).local_get(hkept).i32_const(stride).i32_mul().i32_store(len_memarg());
+            i.local_get(hout);
+        }
+        for _ in 0..7 {
+            self.release_i32();
+        }
+        Ok(Some(SliceTy::List(self.types.intern(elem))))
+    }
+
+    /// `[] -> i32`: 1 when the key in `hkey` structurally equals any handle
+    /// in the 4-byte-slot list `hseen`, else 0. The verdict local is set on
+    /// the first hit and the scan breaks out of its own block.
+    fn emit_seen_key_scan(&mut self, kt: SliceTy, hseen: u32, hkey: u32) -> Result<(), EmitError> {
+        let hj = self.hold_i32()?;
+        let hf = self.hold_i32()?;
+        {
+            let mut i = self.f.instructions();
+            i.i32_const(0).local_set(hf);
+            i.i32_const(0).local_set(hj);
+            i.block(BlockType::Empty).loop_(BlockType::Empty);
+            i.local_get(hj).local_get(hseen).i32_load(len_memarg()).i32_ge_u().br_if(1);
+            i.local_get(hseen).local_get(hj).i32_add().i32_load(slot_memarg(0));
+            i.local_get(hkey);
+        }
+        self.emit_val_eq(kt)?;
+        {
+            let mut i = self.f.instructions();
+            i.if_(BlockType::Empty);
+            i.i32_const(1).local_set(hf);
+            i.br(2);
+            i.end();
+            i.local_get(hj).i32_const(4).i32_add().local_set(hj);
+            i.br(0).end().end();
+            i.local_get(hf);
+        }
+        self.release_i32();
+        self.release_i32();
+        Ok(())
     }
 }
