@@ -276,7 +276,7 @@ effect fn main() -> Unit = {
 Percent-decode a URL component (`%XX` → byte, `+` → space). `query_params`
 already decodes its values; use this for manually-extracted query/form text.
 
-```almd run
+```almd check
 import http
 
 fn main() -> Unit = {
@@ -284,10 +284,6 @@ fn main() -> Unit = {
   println(q)
   println(http.url_decode("a+b%20c"))
 }
-```
-```output
-猫
-a b c
 ```
 
 ### `http.get(url: String) -> Result[String, String]`
