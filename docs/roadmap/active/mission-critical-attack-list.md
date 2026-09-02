@@ -49,12 +49,15 @@ Sizes: S (≤1 day) / M (≤1 week) / L (≤1 month) / XL (a quarter+).
   Exit: walls < 100 per 30-min fuzz run AND every graduation lands its
   specimen as a voting fixture under contract in the same PR (the shrink-only
   rule already in place).
-- [ ] **A1-3 (L, #1528) Negative-test 10× (test-surface-25x tier 1).** 99 diagnostic
+- [x] **A1-3 (L, #1528) Negative-test 10× (test-surface-25x tier 1).** 99 diagnostic
   pairs vs rust's ~15k is the widest maturity gap. Exit: every E-code has a
   fixture family covering each hint variant and each fix-it verdict; ≥1,000
   pairs; the coverage gate enumerates E-codes with < 3 fixtures.
   PROGRESS 2026-08-18: **749 pairs** (wave-2's 730 + the #1518/#1521/#1486/
   #1515 families); three new E-codes (E058/E059/E060) landed with families.
+  CLOSED 2026-09-02 (#1784): **1,000 pairs exactly**; multi-file fixtures
+  (`almide.toml` + `src/*.almd` siblings) retired the E033/E420 exemptions,
+  so every code is on the ≥3-family bar the coverage gate enforces.
 - [x] **A1-4 (M, #1529) RC-placement snapshots (koka parc model).** Commit the
   post-RC-insertion drop/dup placement as expected output beside the runtime
   result for an RC-critical corpus (the koka_parc* family is the seed), so a
