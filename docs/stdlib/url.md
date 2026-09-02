@@ -21,11 +21,23 @@ not followed by `/`; `query`/`fragment` are `""` when their separators are
 absent. Rejects inputs without a `scheme://` authority and ports outside
 `0..=65535`, with the reason in the `err`.
 
-```almd
-match url.parse("https://example.com:8080/a/b?x=1#top") {
-  ok(u) => u.host,   // "example.com"
-  err(reason) => reason,
+```almd run
+import url
+
+fn host_of(s: String) -> String =
+  match url.parse(s) {
+    ok(u) => u.host,
+    err(reason) => reason,
+  }
+
+fn main() -> Unit = {
+  println(host_of("https://example.com:8080/a/b?x=1#top"))
+  println(host_of("example.com/a/b"))
 }
+```
+```output
+example.com
+url.parse: missing '://' scheme separator
 ```
 
 ### `url.to_string(u: Url) -> String`
@@ -38,8 +50,15 @@ and `#fragment` only when present.
 Percent-encodes every byte outside RFC 3986's unreserved set (ALPHA / DIGIT
 / `-` `.` `_` `~`), UTF-8 first, uppercase hex digits.
 
-```almd
-url.encode_component("a b")   // "a%20b"
+```almd run
+import url
+
+fn main() -> Unit = {
+  println(url.encode_component("a b"))
+}
+```
+```output
+a%20b
 ```
 
 ### `url.decode_component(s: String) -> Result[String, String]`
@@ -58,8 +77,15 @@ percent-decoded (compose with `decode_component` when needed).
 The inverse of `query_pairs`, percent-encoding each key and value with
 `encode_component`.
 
-```almd
-url.build_query([("q", "a b"), ("lang", "ja")])   // "q=a%20b&lang=ja"
+```almd run
+import url
+
+fn main() -> Unit = {
+  println(url.build_query([("q", "a b"), ("lang", "ja")]))
+}
+```
+```output
+q=a%20b&lang=ja
 ```
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
