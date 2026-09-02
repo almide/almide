@@ -1,0 +1,44 @@
+// counts — the STAMPED aggregate totals (proofs/ledger-counts.toml) and the dated block the
+// generators wrap them in. The bash side is scripts/lib/ledger-counts.sh; this is its port for
+// the `contracts-readme` and `conformance` subcommands, byte for byte. The totals are RENDERED
+// from the record, never re-measured here: re-measuring them per PR is what made every fixture
+// or contract PR rewrite the same "N contracts / N fixtures" lines and conflict at the merge
+// queue. Refresh is `bash scripts/gen-ledger-counts.sh`, a release step.
+import fs
+import toml
+
+// The record's lines. A missing file reads as no lines, so every `get` is "" — the caller
+// renders an empty total rather than inventing one (the bash `counts_get` exits 2 there).
+effect fn load(path: String) -> List[String] = fs.read_lines(path) ?? []
+
+// `key = value` → value, quotes stripped; "" when absent. Comment lines never match: a `#`
+// line has no bare-identifier key.
+fn get(lines: List[String], key: String) -> String = {
+  let line = (lines |> list.filter((l) => not string.starts_with(string.trim(l), "#")) |> list.find((l) => toml.scalar_key(l) == key)) ?? ""
+  if line == "" then "" else toml.scalar_value(line)
+}
+
+// The note every start marker carries — the same bytes as COUNTS_NOTE in the bash library.
+fn note() -> String = "stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers"
+
+fn start_marker(date: String) -> String = "<!-- counts:generated:start (as of " + date + ") — " + note() + " -->"
+
+fn end_marker() -> String = "<!-- counts:generated:end -->"
+
+// The block: start marker (dated), the body, end marker — each line newline-terminated.
+fn block(date: String, body: String) -> String = start_marker(date) + "\n" + body + "\n" + end_marker() + "\n"
+
+test "a record value is read back with its quotes stripped, and an absent key as empty" {
+  let lines = [
+    "# LEDGER COUNTS — stamped",
+    "date                       = \"2026-09-02\"",
+    "contracts                  = 334"
+  ]
+  assert_eq(get(lines, "date"), "2026-09-02")
+  assert_eq(get(lines, "contracts"), "334")
+  assert_eq(get(lines, "absent"), "")
+}
+
+test "the block is the bash renderer's shape: dated start marker, body, end marker" {
+  assert_eq(block("2026-09-02", "334 contracts"), "<!-- counts:generated:start (as of 2026-09-02) — " + note() + " -->\n334 contracts\n<!-- counts:generated:end -->\n")
+}

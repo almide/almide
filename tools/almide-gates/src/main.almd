@@ -13,6 +13,7 @@ import mdmeta
 import toml
 import contracts
 import conformance
+import counts
 import stamp
 import parity_sweep
 import track_record
@@ -88,13 +89,17 @@ effect fn gen_contracts_readme(root: String) -> String = {
   // one doc directory.
   let classes = contracts.parse_classes(fs.read_text("scripts/lib/contract-classes.txt") ?? "")
   let rs = contracts.rows(classes, tables)
-  header + int.to_string(list.len(rs)) + " contracts\n\n" + "| ID | Contract | Since | Status | Strongest Evidence | # Fixtures |\n" + "|----|----------|-------|--------|--------------------|-----------:|\n" + list.join(rs, "\n") + "\n\n"
+  // The total is the stamped record rendered, not `list.len(rs)`: the rows are derived every
+  // run, the count only at `gen-ledger-counts.sh` time (see counts.almd).
+  let record = counts.load("proofs/ledger-counts.toml")!
+  header + counts.block(counts.get(record, "date"), counts.get(record, "contracts") + " contracts") + "\n" + "| ID | Contract | Since | Status | Strongest Evidence | # Fixtures |\n" + "|----|----------|-------|--------|--------------------|-----------:|\n" + list.join(rs, "\n") + "\n\n"
 }
 
 effect fn gen_conformance(root: String) -> String = {
   let header = fs.read_text(root + "/.conformance-header.md") ?? ""
   let tables = toml.parse_tables(fs.read_text(root + "/contracts.toml")!)
-  header + conformance.report_body(tables)
+  let record = counts.load("proofs/ledger-counts.toml")!
+  header + conformance.report_body(tables, record)
 }
 
 effect fn main() -> Unit = {

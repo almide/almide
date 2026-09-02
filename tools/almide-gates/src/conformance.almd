@@ -4,6 +4,7 @@
 // exercising each, with how CI runs them. Unlike the README table, evidence here is filtered
 // to `fixture` / `exhaustive` only.
 import toml
+import counts
 
 // Zero-pad the section number so a STRING sort orders `ALS-T10` after `ALS-T9`.
 // The Python original sorts on the tuple `(letters, int(digits))`; `list.sort_by` takes one
@@ -54,8 +55,15 @@ fn row(tables: List[toml.Table], spec: String) -> String = {
 
 fn distinct_fixture_count(tables: List[toml.Table]) -> Int = tables |> list.flat_map((t) => executable_paths(t)) |> list.unique |> list.len
 
-fn report_body(tables: List[toml.Table]) -> String = {
+// The two totals, measured — the port of `generate-conformance.sh --measure`, which is what
+// `gen-ledger-counts.sh` stamps into the record. The report itself never calls this.
+fn measure(tables: List[toml.Table]) -> String = int.to_string(list.len(sections_of(tables))) + " " + int.to_string(distinct_fixture_count(tables))
+
+// `record` is the stamped record (proofs/ledger-counts.toml, as lines): the totals line renders
+// from it inside the dated counts block, the rows are derived from the ledger every run.
+fn report_body(tables: List[toml.Table], record: List[String]) -> String = {
   let secs = sections_of(tables)
   let rows = secs |> list.map((s) => row(tables, s)) |> list.join("\n")
-  int.to_string(list.len(secs)) + " normative sections; " + int.to_string(distinct_fixture_count(tables)) + " distinct executable fixtures.\n\n" + "| Section | Contracts | Fixtures (how CI runs each) |\n" + "|---------|-----------|------------------------------|\n" + rows + "\n"
+  let totals = counts.get(record, "conformance_sections") + " normative sections; " + counts.get(record, "conformance_fixtures") + " distinct executable fixtures."
+  counts.block(counts.get(record, "date"), totals) + "\n" + "| Section | Contracts | Fixtures (how CI runs each) |\n" + "|---------|-----------|------------------------------|\n" + rows + "\n"
 }
