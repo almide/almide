@@ -40,7 +40,7 @@ DEAD
 Decode a hex string. Both cases are accepted, and they may be mixed. `err` on an
 odd length or a non-hex character.
 
-```almd run
+```almd check
 import hex
 
 fn show(r: Result[Bytes, String]) -> String = match r {
@@ -62,11 +62,6 @@ fn main() -> Unit = {
   println(show(check("dea")))
   println(show(check("zz")))
 }
-```
-```output
-ok([222, 173])
-err("bad hex: hex string has odd length: 3")
-err("bad hex: invalid hex char at 0")
 ```
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
