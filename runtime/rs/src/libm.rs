@@ -122,12 +122,12 @@ fn vscalbn(mut x: f64, mut n: i32) -> f64 {
 // ====================================================
 
 // initial value for jk
-const INIT_JK: [usize; 4] = [3, 4, 4, 6];
+const ALMIDE_INIT_JK: [usize; 4] = [3, 4, 4, 6];
 
 // Table of constants for 2/pi, 396 Hex digits (476 decimal) of 2/pi:
 //   the (24*i)-th .. (24*i+23)-th bit of 2/pi after the binary point;
-//   IPIO2[i] * 2^(-24(i+1)).
-const IPIO2: [i32; 690] = [
+//   ALMIDE_IPIO2[i] * 2^(-24(i+1)).
+const ALMIDE_IPIO2: [i32; 690] = [
     0xA2F983, 0x6E4E44, 0x1529FC, 0x2757D1, 0xF534DD, 0xC0DB62, 0x95993C, 0x439041, 0xFE5163,
     0xABDEBB, 0xC561B7, 0x246E3A, 0x424DD2, 0xE00649, 0x2EEA09, 0xD1921C, 0xFE1DEB, 0x1CB129,
     0xA73EE8, 0x8235F5, 0x2EBB44, 0x84E99C, 0x7026B4, 0x5F7E41, 0x3991D6, 0x398353, 0x39F49C,
@@ -207,7 +207,7 @@ const IPIO2: [i32; 690] = [
     0x5B2746, 0xED3400, 0x7700D2, 0x55F4FC, 0x4D5901, 0x8071E0,
 ];
 
-const PIO2: [f64; 8] = [
+const ALMIDE_PIO2: [f64; 8] = [
     1.57079625129699707031e+00, /* 0x3FF921FB, 0x40000000 */
     7.54978941586159635335e-08, /* 0x3E74442D, 0x00000000 */
     5.39030252995776476554e-15, /* 0x3CF84698, 0x80000000 */
@@ -237,7 +237,7 @@ fn rem_pio2_large(x: &[f64], y: &mut [f64], e0: i32, prec: usize) -> i32 {
     let mut iq: [i32; 20] = [0; 20];
 
     /* initialize jk */
-    let jk = INIT_JK[prec];
+    let jk = ALMIDE_INIT_JK[prec];
     let jp = jk;
 
     /* determine jx,jv,q0, note that 3>q0 */
@@ -253,7 +253,7 @@ fn rem_pio2_large(x: &[f64], y: &mut [f64], e0: i32, prec: usize) -> i32 {
     let mut j = (jv as i32) - (jx as i32);
     let m = jx + jk;
     for i in 0..=m {
-        f[i] = if j < 0 { 0. } else { IPIO2[j as usize] as f64 };
+        f[i] = if j < 0 { 0. } else { ALMIDE_IPIO2[j as usize] as f64 };
         j += 1;
     }
 
@@ -348,7 +348,7 @@ fn rem_pio2_large(x: &[f64], y: &mut [f64], e0: i32, prec: usize) -> i32 {
 
                 for i in (jz + 1)..=(jz + k) {
                     /* add q[jz+1] to q[jz+k] */
-                    f[jx + i] = IPIO2[jv + i] as f64;
+                    f[jx + i] = ALMIDE_IPIO2[jv + i] as f64;
                     fw = 0f64;
                     for j in 0..=jx {
                         fw += x[j] * f[jx + i - j];
@@ -397,7 +397,7 @@ fn rem_pio2_large(x: &[f64], y: &mut [f64], e0: i32, prec: usize) -> i32 {
         fw = 0f64;
         let mut k = 0;
         while (k <= jp) && (k <= jz - i) {
-            fw += PIO2[k] * q[i + k];
+            fw += ALMIDE_PIO2[k] * q[i + k];
             k += 1;
         }
         fq[jz - i] = fw;
@@ -461,22 +461,22 @@ fn rem_pio2_large(x: &[f64], y: &mut [f64], e0: i32, prec: usize) -> i32 {
 // Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
 // ====================================================
 
-const EPS: f64 = 2.2204460492503131e-16;
-const TO_INT: f64 = 1.5 / EPS;
+const ALMIDE_EPS: f64 = 2.2204460492503131e-16;
+const ALMIDE_TO_INT: f64 = 1.5 / ALMIDE_EPS;
 /// 53 bits of 2/pi
-const INV_PIO2: f64 = 6.36619772367581382433e-01; /* 0x3FE45F30, 0x6DC9C883 */
+const ALMIDE_INV_PIO2: f64 = 6.36619772367581382433e-01; /* 0x3FE45F30, 0x6DC9C883 */
 /// first 33 bits of pi/2
-const PIO2_1: f64 = 1.57079632673412561417e+00; /* 0x3FF921FB, 0x54400000 */
-/// pi/2 - PIO2_1
-const PIO2_1T: f64 = 6.07710050650619224932e-11; /* 0x3DD0B461, 0x1A626331 */
+const ALMIDE_PIO2_1: f64 = 1.57079632673412561417e+00; /* 0x3FF921FB, 0x54400000 */
+/// pi/2 - ALMIDE_PIO2_1
+const ALMIDE_PIO2_1T: f64 = 6.07710050650619224932e-11; /* 0x3DD0B461, 0x1A626331 */
 /// second 33 bits of pi/2
-const PIO2_2: f64 = 6.07710050630396597660e-11; /* 0x3DD0B461, 0x1A600000 */
-/// pi/2 - (PIO2_1+PIO2_2)
-const PIO2_2T: f64 = 2.02226624879595063154e-21; /* 0x3BA3198A, 0x2E037073 */
+const ALMIDE_PIO2_2: f64 = 6.07710050630396597660e-11; /* 0x3DD0B461, 0x1A600000 */
+/// pi/2 - (ALMIDE_PIO2_1+ALMIDE_PIO2_2)
+const ALMIDE_PIO2_2T: f64 = 2.02226624879595063154e-21; /* 0x3BA3198A, 0x2E037073 */
 /// third 33 bits of pi/2
-const PIO2_3: f64 = 2.02226624871116645580e-21; /* 0x3BA3198A, 0x2E000000 */
-/// pi/2 - (PIO2_1+PIO2_2+PIO2_3)
-const PIO2_3T: f64 = 8.47842766036889956997e-32; /* 0x397B839A, 0x252049C1 */
+const ALMIDE_PIO2_3: f64 = 2.02226624871116645580e-21; /* 0x3BA3198A, 0x2E000000 */
+/// pi/2 - (ALMIDE_PIO2_1+ALMIDE_PIO2_2+ALMIDE_PIO2_3)
+const ALMIDE_PIO2_3T: f64 = 8.47842766036889956997e-32; /* 0x397B839A, 0x252049C1 */
 
 /// Remainder of x rem pi/2 in (n, y0, y1). Caller handles |x| ~<= pi/4.
 fn rem_pio2(x: f64) -> (i32, f64, f64) {
@@ -487,11 +487,11 @@ fn rem_pio2(x: f64) -> (i32, f64, f64) {
 
     fn medium(x: f64, ix: u32) -> (i32, f64, f64) {
         /* rint(x/(pi/2)), assume round-to-nearest. */
-        let tmp = x * INV_PIO2 + TO_INT;
-        let f_n = tmp - TO_INT;
+        let tmp = x * ALMIDE_INV_PIO2 + ALMIDE_TO_INT;
+        let f_n = tmp - ALMIDE_TO_INT;
         let n = f_n as i32;
-        let mut r = x - f_n * PIO2_1;
-        let mut w = f_n * PIO2_1T; /* 1st round, good to 85 bits */
+        let mut r = x - f_n * ALMIDE_PIO2_1;
+        let mut w = f_n * ALMIDE_PIO2_1T; /* 1st round, good to 85 bits */
         let mut y0 = r - w;
         let ui = f64::to_bits(y0);
         let ey = (ui >> 52) as i32 & 0x7ff;
@@ -499,17 +499,17 @@ fn rem_pio2(x: f64) -> (i32, f64, f64) {
         if ex - ey > 16 {
             /* 2nd round, good to 118 bits */
             let t = r;
-            w = f_n * PIO2_2;
+            w = f_n * ALMIDE_PIO2_2;
             r = t - w;
-            w = f_n * PIO2_2T - ((t - r) - w);
+            w = f_n * ALMIDE_PIO2_2T - ((t - r) - w);
             y0 = r - w;
             let ey = (f64::to_bits(y0) >> 52) as i32 & 0x7ff;
             if ex - ey > 49 {
                 /* 3rd round, good to 151 bits, covers all cases */
                 let t = r;
-                w = f_n * PIO2_3;
+                w = f_n * ALMIDE_PIO2_3;
                 r = t - w;
-                w = f_n * PIO2_3T - ((t - r) - w);
+                w = f_n * ALMIDE_PIO2_3T - ((t - r) - w);
                 y0 = r - w;
             }
         }
@@ -526,25 +526,25 @@ fn rem_pio2(x: f64) -> (i32, f64, f64) {
         if ix <= 0x4002d97c {
             /* |x| ~<= 3pi/4 */
             if sign == 0 {
-                let z = x - PIO2_1; /* one round good to 85 bits */
-                let y0 = z - PIO2_1T;
-                let y1 = (z - y0) - PIO2_1T;
+                let z = x - ALMIDE_PIO2_1; /* one round good to 85 bits */
+                let y0 = z - ALMIDE_PIO2_1T;
+                let y1 = (z - y0) - ALMIDE_PIO2_1T;
                 return (1, y0, y1);
             } else {
-                let z = x + PIO2_1;
-                let y0 = z + PIO2_1T;
-                let y1 = (z - y0) + PIO2_1T;
+                let z = x + ALMIDE_PIO2_1;
+                let y0 = z + ALMIDE_PIO2_1T;
+                let y1 = (z - y0) + ALMIDE_PIO2_1T;
                 return (-1, y0, y1);
             }
         } else if sign == 0 {
-            let z = x - 2.0 * PIO2_1;
-            let y0 = z - 2.0 * PIO2_1T;
-            let y1 = (z - y0) - 2.0 * PIO2_1T;
+            let z = x - 2.0 * ALMIDE_PIO2_1;
+            let y0 = z - 2.0 * ALMIDE_PIO2_1T;
+            let y1 = (z - y0) - 2.0 * ALMIDE_PIO2_1T;
             return (2, y0, y1);
         } else {
-            let z = x + 2.0 * PIO2_1;
-            let y0 = z + 2.0 * PIO2_1T;
-            let y1 = (z - y0) + 2.0 * PIO2_1T;
+            let z = x + 2.0 * ALMIDE_PIO2_1;
+            let y0 = z + 2.0 * ALMIDE_PIO2_1T;
+            let y1 = (z - y0) + 2.0 * ALMIDE_PIO2_1T;
             return (-2, y0, y1);
         }
     }
@@ -557,14 +557,14 @@ fn rem_pio2(x: f64) -> (i32, f64, f64) {
                 return medium(x, ix);
             }
             if sign == 0 {
-                let z = x - 3.0 * PIO2_1;
-                let y0 = z - 3.0 * PIO2_1T;
-                let y1 = (z - y0) - 3.0 * PIO2_1T;
+                let z = x - 3.0 * ALMIDE_PIO2_1;
+                let y0 = z - 3.0 * ALMIDE_PIO2_1T;
+                let y1 = (z - y0) - 3.0 * ALMIDE_PIO2_1T;
                 return (3, y0, y1);
             } else {
-                let z = x + 3.0 * PIO2_1;
-                let y0 = z + 3.0 * PIO2_1T;
-                let y1 = (z - y0) + 3.0 * PIO2_1T;
+                let z = x + 3.0 * ALMIDE_PIO2_1;
+                let y0 = z + 3.0 * ALMIDE_PIO2_1T;
+                let y1 = (z - y0) + 3.0 * ALMIDE_PIO2_1T;
                 return (-3, y0, y1);
             }
         } else {
@@ -573,14 +573,14 @@ fn rem_pio2(x: f64) -> (i32, f64, f64) {
                 return medium(x, ix);
             }
             if sign == 0 {
-                let z = x - 4.0 * PIO2_1;
-                let y0 = z - 4.0 * PIO2_1T;
-                let y1 = (z - y0) - 4.0 * PIO2_1T;
+                let z = x - 4.0 * ALMIDE_PIO2_1;
+                let y0 = z - 4.0 * ALMIDE_PIO2_1T;
+                let y1 = (z - y0) - 4.0 * ALMIDE_PIO2_1T;
                 return (4, y0, y1);
             } else {
-                let z = x + 4.0 * PIO2_1;
-                let y0 = z + 4.0 * PIO2_1T;
-                let y1 = (z - y0) + 4.0 * PIO2_1T;
+                let z = x + 4.0 * ALMIDE_PIO2_1;
+                let y0 = z + 4.0 * ALMIDE_PIO2_1T;
+                let y1 = (z - y0) + 4.0 * ALMIDE_PIO2_1T;
                 return (-4, y0, y1);
             }
         }

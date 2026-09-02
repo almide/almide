@@ -11,14 +11,14 @@
 // way, byte-identical to the self-host twin (spec/wasm_cross/hash_digests.almd
 // pins the NIST vectors on both legs).
 
-const FNV_OFFSET32: u64 = 2166136261;
-const FNV_PRIME32: u64 = 16777619;
+const ALMIDE_FNV_OFFSET32: u64 = 2166136261;
+const ALMIDE_FNV_PRIME32: u64 = 16777619;
 
 fn fnv1a32(data: &[u8]) -> i64 {
-    let mut h = FNV_OFFSET32;
+    let mut h = ALMIDE_FNV_OFFSET32;
     for &b in data {
         h ^= b as u64;
-        h = h.wrapping_mul(FNV_PRIME32) & 0xFFFF_FFFF;
+        h = h.wrapping_mul(ALMIDE_FNV_PRIME32) & 0xFFFF_FFFF;
     }
     h as i64
 }
@@ -26,7 +26,7 @@ fn fnv1a32(data: &[u8]) -> i64 {
 pub fn almide_rt_hash_fnv1a32(s: &str) -> i64 { fnv1a32(s.as_bytes()) }
 pub fn almide_rt_hash_fnv1a32_bytes(b: &Vec<u8>) -> i64 { fnv1a32(b) }
 
-const SHA_K: [u32; 64] = [
+const ALMIDE_SHA_K: [u32; 64] = [
     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
     0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
     0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
@@ -65,7 +65,7 @@ fn sha256(data: &[u8]) -> Vec<u8> {
         for t in 0..64 {
             let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
             let ch = (e & f) ^ (!e & g);
-            let t1 = hh.wrapping_add(s1).wrapping_add(ch).wrapping_add(SHA_K[t]).wrapping_add(w[t]);
+            let t1 = hh.wrapping_add(s1).wrapping_add(ch).wrapping_add(ALMIDE_SHA_K[t]).wrapping_add(w[t]);
             let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
             let maj = (a & b) ^ (a & c) ^ (b & c);
             let t2 = s0.wrapping_add(maj);

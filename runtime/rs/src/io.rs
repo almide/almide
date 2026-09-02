@@ -4,13 +4,13 @@ use std::io::Write;
 use std::cell::RefCell;
 
 thread_local! {
-    static STDOUT_BUF: RefCell<std::io::BufWriter<std::io::Stdout>> =
+    static ALMIDE_STDOUT_BUF: RefCell<std::io::BufWriter<std::io::Stdout>> =
         RefCell::new(std::io::BufWriter::with_capacity(65536, std::io::stdout()));
 }
 
 /// Flush the buffered stdout writer. Called at program exit.
 pub fn almide_rt_io_flush() {
-    STDOUT_BUF.with(|buf| { let _ = buf.borrow_mut().flush(); });
+    ALMIDE_STDOUT_BUF.with(|buf| { let _ = buf.borrow_mut().flush(); });
 }
 
 // print is for interactive output (prompts, streaming tokens) — flush so
@@ -79,7 +79,7 @@ pub fn almide_rt_io_read_n_bytes(n: i64) -> Vec<i64> {
 }
 
 // `println!`/`print!` write through Rust's own `Stdout` handle, NOT through
-// STDOUT_BUF — two independent buffers over one fd. Without a flush here, a
+// ALMIDE_STDOUT_BUF — two independent buffers over one fd. Without a flush here, a
 // program interleaving `println` and `io.write` emitted them in BUFFER order
 // (every io.write deferred to the exit flush) instead of PROGRAM order, while
 // the wasm leg's direct `fd_write` kept program order: a cross-target stdout
@@ -88,7 +88,7 @@ pub fn almide_rt_io_read_n_bytes(n: i64) -> Vec<i64> {
 // still batches WITHIN one call, which is where the byte-streaming benches
 // spend their time.
 pub fn almide_rt_io_write_bytes(data: &Vec<i64>) {
-    STDOUT_BUF.with(|buf| {
+    ALMIDE_STDOUT_BUF.with(|buf| {
         let mut w = buf.borrow_mut();
         let bytes: Vec<u8> = data.iter().map(|&b| b as u8).collect();
         w.write_all(&bytes).unwrap();
@@ -97,7 +97,7 @@ pub fn almide_rt_io_write_bytes(data: &Vec<i64>) {
 }
 
 pub fn almide_rt_io_write(data: &Vec<u8>) {
-    STDOUT_BUF.with(|buf| {
+    ALMIDE_STDOUT_BUF.with(|buf| {
         let mut w = buf.borrow_mut();
         w.write_all(data).unwrap();
         let _ = w.flush();

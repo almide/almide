@@ -1,7 +1,7 @@
 // hex — lowercase / uppercase hex encoding/decoding.
 
-const LOWER: &[u8; 16] = b"0123456789abcdef";
-const UPPER: &[u8; 16] = b"0123456789ABCDEF";
+const ALMIDE_LOWER: &[u8; 16] = b"0123456789abcdef";
+const ALMIDE_UPPER: &[u8; 16] = b"0123456789ABCDEF";
 
 fn hex_encode_with(b: &[u8], alphabet: &[u8; 16]) -> String {
     let mut out = String::with_capacity(b.len() * 2);
@@ -22,11 +22,11 @@ fn hex_from_nibble(c: u8) -> Option<u8> {
 }
 
 pub fn almide_rt_hex_encode(b: &Vec<u8>) -> String {
-    hex_encode_with(b, LOWER)
+    hex_encode_with(b, ALMIDE_LOWER)
 }
 
 pub fn almide_rt_hex_encode_upper(b: &Vec<u8>) -> String {
-    hex_encode_with(b, UPPER)
+    hex_encode_with(b, ALMIDE_UPPER)
 }
 
 pub fn almide_rt_hex_decode(s: &str) -> Result<Vec<u8>, String> {

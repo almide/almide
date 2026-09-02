@@ -8,21 +8,21 @@
 // replaced by plain indexing / dropped (force_eval only raises the FP
 // underflow flag, which the runtime does not observe).
 
-const ATANHI: [f64; 4] = [
+const ALMIDE_ATANHI: [f64; 4] = [
     4.63647609000806093515e-01, /* atan(0.5)hi 0x3FDDAC67, 0x0561BB4F */
     7.85398163397448278999e-01, /* atan(1.0)hi 0x3FE921FB, 0x54442D18 */
     9.82793723247329054082e-01, /* atan(1.5)hi 0x3FEF730B, 0xD281F69B */
     1.57079632679489655800e+00, /* atan(inf)hi 0x3FF921FB, 0x54442D18 */
 ];
 
-const ATANLO: [f64; 4] = [
+const ALMIDE_ATANLO: [f64; 4] = [
     2.26987774529616870924e-17, /* atan(0.5)lo 0x3C7A2B7F, 0x222F65E2 */
     3.06161699786838301793e-17, /* atan(1.0)lo 0x3C81A626, 0x33145C07 */
     1.39033110312309984516e-17, /* atan(1.5)lo 0x3C700788, 0x7AF0CBBD */
     6.12323399573676603587e-17, /* atan(inf)lo 0x3C91A626, 0x33145C07 */
 ];
 
-const AT: [f64; 11] = [
+const ALMIDE_AT: [f64; 11] = [
     3.33333333333329318027e-01,  /* 0x3FD55555, 0x5555550D */
     -1.99999999998764832476e-01, /* 0xBFC99999, 0x9998EBC4 */
     1.42857142725034663711e-01,  /* 0x3FC24924, 0x920083FF */
@@ -46,7 +46,7 @@ fn atan(x: f64) -> f64 {
         if x.is_nan() {
             return x;
         }
-        let z = ATANHI[3] + f64::from_bits(0x0380_0000); // 0x1p-120f
+        let z = ALMIDE_ATANHI[3] + f64::from_bits(0x0380_0000); // 0x1p-120f
         return if sign != 0 { -z } else { z };
     }
 
@@ -83,29 +83,29 @@ fn atan(x: f64) -> f64 {
 
     let z = x * x;
     let w = z * z;
-    /* break sum from i=0 to 10 AT[i]z**(i+1) into odd and even poly */
-    let s1 = z * (AT[0] + w * (AT[2] + w * (AT[4] + w * (AT[6] + w * (AT[8] + w * AT[10])))));
-    let s2 = w * (AT[1] + w * (AT[3] + w * (AT[5] + w * (AT[7] + w * AT[9]))));
+    /* break sum from i=0 to 10 ALMIDE_AT[i]z**(i+1) into odd and even poly */
+    let s1 = z * (ALMIDE_AT[0] + w * (ALMIDE_AT[2] + w * (ALMIDE_AT[4] + w * (ALMIDE_AT[6] + w * (ALMIDE_AT[8] + w * ALMIDE_AT[10])))));
+    let s2 = w * (ALMIDE_AT[1] + w * (ALMIDE_AT[3] + w * (ALMIDE_AT[5] + w * (ALMIDE_AT[7] + w * ALMIDE_AT[9]))));
 
     if id < 0 {
         return x - x * (s1 + s2);
     }
 
-    let z = ATANHI[id as usize] - (x * (s1 + s2) - ATANLO[id as usize] - x);
+    let z = ALMIDE_ATANHI[id as usize] - (x * (s1 + s2) - ALMIDE_ATANLO[id as usize] - x);
 
     if sign != 0 { -z } else { z }
 }
 
-const EXPM1_O_THRESHOLD: f64 = 7.09782712893383973096e+02; /* 0x40862E42, 0xFEFA39EF */
-const EXPM1_LN2_HI: f64 = 6.93147180369123816490e-01; /* 0x3fe62e42, 0xfee00000 */
-const EXPM1_LN2_LO: f64 = 1.90821492927058770002e-10; /* 0x3dea39ef, 0x35793c76 */
-const EXPM1_INVLN2: f64 = 1.44269504088896338700e+00; /* 0x3ff71547, 0x652b82fe */
+const ALMIDE_EXPM1_O_THRESHOLD: f64 = 7.09782712893383973096e+02; /* 0x40862E42, 0xFEFA39EF */
+const ALMIDE_EXPM1_LN2_HI: f64 = 6.93147180369123816490e-01; /* 0x3fe62e42, 0xfee00000 */
+const ALMIDE_EXPM1_LN2_LO: f64 = 1.90821492927058770002e-10; /* 0x3dea39ef, 0x35793c76 */
+const ALMIDE_EXPM1_INVLN2: f64 = 1.44269504088896338700e+00; /* 0x3ff71547, 0x652b82fe */
 /* Scaled Q's: Qn_here = 2**n * Qn_above, for R(2*z) where z = hxs = x*x/2: */
-const EXPM1_Q1: f64 = -3.33333333333331316428e-02; /* BFA11111 111110F4 */
-const EXPM1_Q2: f64 = 1.58730158725481460165e-03; /* 3F5A01A0 19FE5585 */
-const EXPM1_Q3: f64 = -7.93650757867487942473e-05; /* BF14CE19 9EAADBB7 */
-const EXPM1_Q4: f64 = 4.00821782732936239552e-06; /* 3ED0CFCA 86E65239 */
-const EXPM1_Q5: f64 = -2.01099218183624371326e-07; /* BE8AFDB7 6E09C32D */
+const ALMIDE_EXPM1_Q1: f64 = -3.33333333333331316428e-02; /* BFA11111 111110F4 */
+const ALMIDE_EXPM1_Q2: f64 = 1.58730158725481460165e-03; /* 3F5A01A0 19FE5585 */
+const ALMIDE_EXPM1_Q3: f64 = -7.93650757867487942473e-05; /* BF14CE19 9EAADBB7 */
+const ALMIDE_EXPM1_Q4: f64 = 4.00821782732936239552e-06; /* 3ED0CFCA 86E65239 */
+const ALMIDE_EXPM1_Q5: f64 = -2.01099218183624371326e-07; /* BE8AFDB7 6E09C32D */
 
 /// `expm1(x)` — bit-identical reference (vendored libm 0.2.16).
 fn expm1(mut x: f64) -> f64 {
@@ -129,7 +129,7 @@ fn expm1(mut x: f64) -> f64 {
         if sign != 0 {
             return -1.0;
         }
-        if x > EXPM1_O_THRESHOLD {
+        if x > ALMIDE_EXPM1_O_THRESHOLD {
             x *= f64::from_bits(0x7fe0000000000000);
             return x;
         }
@@ -141,19 +141,19 @@ fn expm1(mut x: f64) -> f64 {
         if hx < 0x3FF0A2B2 {
             /* and |x| < 1.5 ln2 */
             if sign == 0 {
-                hi = x - EXPM1_LN2_HI;
-                lo = EXPM1_LN2_LO;
+                hi = x - ALMIDE_EXPM1_LN2_HI;
+                lo = ALMIDE_EXPM1_LN2_LO;
                 k = 1;
             } else {
-                hi = x + EXPM1_LN2_HI;
-                lo = -EXPM1_LN2_LO;
+                hi = x + ALMIDE_EXPM1_LN2_HI;
+                lo = -ALMIDE_EXPM1_LN2_LO;
                 k = -1;
             }
         } else {
-            k = (EXPM1_INVLN2 * x + if sign != 0 { -0.5 } else { 0.5 }) as i32;
+            k = (ALMIDE_EXPM1_INVLN2 * x + if sign != 0 { -0.5 } else { 0.5 }) as i32;
             t = k as f64;
-            hi = x - t * EXPM1_LN2_HI; /* t*ln2_hi is exact here */
-            lo = t * EXPM1_LN2_LO;
+            hi = x - t * ALMIDE_EXPM1_LN2_HI; /* t*ln2_hi is exact here */
+            lo = t * ALMIDE_EXPM1_LN2_LO;
         }
         x = hi - lo;
         c = (hi - x) - lo;
@@ -169,7 +169,7 @@ fn expm1(mut x: f64) -> f64 {
     let hfx = 0.5 * x;
     let hxs = x * hfx;
     let r1 = 1.0
-        + hxs * (EXPM1_Q1 + hxs * (EXPM1_Q2 + hxs * (EXPM1_Q3 + hxs * (EXPM1_Q4 + hxs * EXPM1_Q5))));
+        + hxs * (ALMIDE_EXPM1_Q1 + hxs * (ALMIDE_EXPM1_Q2 + hxs * (ALMIDE_EXPM1_Q3 + hxs * (ALMIDE_EXPM1_Q4 + hxs * ALMIDE_EXPM1_Q5))));
     t = 3.0 - r1 * hfx;
     let mut e = hxs * ((r1 - t) / (6.0 - x * t));
     if k == 0 {
