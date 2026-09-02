@@ -456,7 +456,11 @@ fn display_aggregate(obj: &IrExpr, ty: &Ty, registry: &RecordLayouts) -> Option<
         parts.push(lit_str("("));
     } else {
         let name = type_name?;
-        parts.push(lit_str(&format!("{name} {{ ")));
+        // The entry program's shadow of a stdlib-owned name is `self.X`
+        // (#1828); `${record}` shows the `X` the source declares, as native
+        // and the structural leg do.
+        let shown = almide_lang::stdlib_info::strip_root_type_scope(&name);
+        parts.push(lit_str(&format!("{shown} {{ ")));
     }
     for (idx, (fname, fty)) in fields.iter().enumerate() {
         if idx > 0 {

@@ -502,6 +502,7 @@ call:uint64.to_string
 call:uint8.to_int64
 call:uint8.to_int8_checked
 call:uint8.to_string
+call:url.parse
 call:user-fn
 call:value.array
 call:value.as_array
