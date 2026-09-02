@@ -44,18 +44,20 @@ struct RuntimeOwned {
     almd: &'static str,
     /// The runtime's reserved Rust spelling.
     rust: &'static str,
+    /// The runtime module (runtime/rs/src/<module>.rs) that defines the item.
+    module: &'static str,
     /// The bundled decl's shape for the twins; `None` for undeclared names.
     twin: Option<TwinShape>,
 }
 
 const TABLE: &[RuntimeOwned] = &[
-    RuntimeOwned { almd: "Value", rust: "AlmideValue", twin: None },
-    RuntimeOwned { almd: "HttpRequest", rust: "AlmideHttpRequest", twin: None },
-    RuntimeOwned { almd: "HttpResponse", rust: "AlmideHttpResponse", twin: None },
-    RuntimeOwned { almd: "JsonPath", rust: "AlmideJsonPath", twin: None },
-    RuntimeOwned { almd: "Endian", rust: "AlmideEndian", twin: Some(TwinShape::Variant(&["LittleEndian", "BigEndian"])) },
-    RuntimeOwned { almd: "FileStat", rust: "AlmideFileStat", twin: Some(TwinShape::Record(&["size", "is_dir", "is_file", "modified"])) },
-    RuntimeOwned { almd: "ProcessStatus", rust: "AlmideProcessStatus", twin: Some(TwinShape::Record(&["code", "stdout", "stderr"])) },
+    RuntimeOwned { almd: "Value", rust: "AlmideValue", module: "value", twin: None },
+    RuntimeOwned { almd: "HttpRequest", rust: "AlmideHttpRequest", module: "http", twin: None },
+    RuntimeOwned { almd: "HttpResponse", rust: "AlmideHttpResponse", module: "http", twin: None },
+    RuntimeOwned { almd: "JsonPath", rust: "AlmideJsonPath", module: "json", twin: None },
+    RuntimeOwned { almd: "Endian", rust: "AlmideEndian", module: "bytes", twin: Some(TwinShape::Variant(&["LittleEndian", "BigEndian"])) },
+    RuntimeOwned { almd: "FileStat", rust: "AlmideFileStat", module: "fs", twin: Some(TwinShape::Record(&["size", "is_dir", "is_file", "modified"])) },
+    RuntimeOwned { almd: "ProcessStatus", rust: "AlmideProcessStatus", module: "process", twin: Some(TwinShape::Record(&["code", "stdout", "stderr"])) },
 ];
 
 /// The reserved spelling of a bundled-twin decl — `None` for every other
@@ -119,4 +121,21 @@ pub(crate) fn variant_ctors() -> impl Iterator<Item = (&'static str, &'static st
             _ => None,
         })
         .flatten()
+}
+
+/// The runtime modules whose owned type the rendered user code spells — the
+/// module a TYPE reference pulls in (#1829). `IrProgram::used_stdlib_modules`
+/// is call-driven, so a program that only NAMES a runtime-owned type (an
+/// `Endian` annotation, a `BigEndian` ctor or pattern, a `FileStat` param)
+/// without calling into its module never spliced the module that defines it:
+/// E0425 / E0433 at rustc after a green `almide check`. The reserved spelling
+/// is emitter-only — the bare name is the user's and a user type never
+/// renders as `Almide*` — so its presence in the rendered user code IS the
+/// reference, the same text-level union `emit_source` already performs for
+/// the `almide_rt_<module>_` symbols an operator lowers to.
+pub(crate) fn modules_spelled_in(user_code: &str) -> Vec<&'static str> {
+    TABLE.iter()
+        .filter(|e| user_code.contains(e.rust))
+        .map(|e| e.module)
+        .collect()
 }
