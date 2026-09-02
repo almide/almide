@@ -29,11 +29,10 @@ const SOFT_GATE: bool = false;
 /// fixture harness can't express (E420 is cross-module visibility,
 /// which requires an `import` graph). Keep this list short — each
 /// entry is a gap the harness can't cover today.
+// E420 and E033 left this list in #1528's multi-file sweep: a fixture dir
+// may carry almide.toml + src/*.almd siblings, and the harness's
+// `almide check broken.almd` resolves `import self.x` against them.
 const FIXTURE_ALLOWLIST: &[&str] = &[
-    "E420",
-    // E033 (opaque-type construction outside its defining module) needs a
-    // two-module import graph the single-file harness can't express.
-    "E033",
     // E054 (fmt verification failed) fires on an INTERNAL formatter defect —
     // no committed source file can (or should) trigger it deliberately, and
     // the harness runs `almide check`, which never formats. The verifier

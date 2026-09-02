@@ -1,0 +1,5 @@
+// A qualified call into a self module names a fn the module does not
+// declare — E002 with the module-scoped spelling.
+import self.helper as h
+
+fn main() -> Unit = println(int.to_string(helper.open()))

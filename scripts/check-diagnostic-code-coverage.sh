@@ -11,9 +11,10 @@
 # Known no-fixture codes, each with a reason the docs carry:
 #   E054 — fires only on an internal formatter defect (no committed source can
 #          trigger it deliberately; pinned by fmt_corpus_test instead).
-#   E033 — needs a multi-module project (opaque-type external construction);
-#          pinned by module-project tests, not single-file fixtures.
-#   E420 — needs a cross-module call (mod/local visibility); same.
+# E033 / E420 left this list in #1528's multi-file sweep: a fixture dir may
+# carry almide.toml + src/*.almd siblings, and `almide check broken.almd`
+# resolves `import self.x` against them — so the two cross-module codes
+# have real families now.
 #
 # Codes with fewer than 3 fixtures FAIL the gate: the tier-1 bar (>=3
 # families per code) was promoted from soft backlog to enforced when the
@@ -27,7 +28,7 @@ cd "$ROOT"
 # E081 fires in the BUILD path (--target wasm availability, #1423) — the
 # check-harness fixture format cannot reach it; its pin is
 # tests/wasm_availability_e081_test.rs (the E054 precedent).
-EXEMPT="E054 E033 E420 E081"
+EXEMPT="E054 E081"
 
 fail=0
 total=0

@@ -1,0 +1,3 @@
+expects_code = "E420"
+expects_error = "function 'math_bits.twice' is not accessible"
+hint_substring = "same file"

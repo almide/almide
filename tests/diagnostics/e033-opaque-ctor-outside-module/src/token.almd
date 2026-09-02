@@ -1,0 +1,4 @@
+mod type Token = String
+
+pub fn make(raw: String) -> Token = Token(raw)
+pub fn text(t: Token) -> String = "token"

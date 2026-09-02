@@ -1,0 +1,8 @@
+// A sibling's fallible result bound by a plain `let` is E041: the Result
+// stays a value until `!` propagates it.
+import self.store as s
+
+effect fn main() -> Unit = {
+  let v = s.fetch()
+  println(int.to_string(v))
+}

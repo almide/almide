@@ -1,0 +1,5 @@
+// Field access on a sibling's record checks against ITS definition: a
+// field the module never declared is E013 with the field list.
+import self.geo as g
+
+fn main() -> Unit = println(int.to_string(g.origin().z))

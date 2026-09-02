@@ -1,0 +1,3 @@
+expects_code = "E033"
+expects_error = "cannot construct opaque type 'Token' outside its defining module"
+hint_substring = "public API"

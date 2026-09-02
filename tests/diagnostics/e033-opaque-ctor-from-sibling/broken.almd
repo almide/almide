@@ -1,0 +1,5 @@
+// The boundary is the DEFINING MODULE, not the entry file: a sibling module
+// constructing another sibling's opaque type is E033 just the same.
+import self.ledger as l
+
+fn main() -> Unit = println(int.to_string(l.open_balance()))
