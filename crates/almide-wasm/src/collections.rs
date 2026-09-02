@@ -197,74 +197,33 @@ impl Emitter<'_> {
                 self.release_i32();
                 Ok(Some(v))
             }
+            // The functional set: a copy with the entry overwritten or
+            // appended (map_inplace.rs holds the core; the in-place
+            // window shares it as its shared-block fallback).
             ("set", [m, key, value]) => {
                 let (mh, kh_local, eh, k, v, lay) = self.map_scan(m, key)?;
                 let vh = self.hold_for(v)?;
                 self.lower(value, Some(v))?;
+                self.rc_map_value_share(value, v);
                 self.f.instructions().local_set(vh);
-                self.f
-                    .instructions()
-                    .local_get(eh)
-                    .i32_const(0)
-                    .i32_ne()
-                    .if_(BlockType::Result(wasm_encoder::ValType::I32));
-                // overwrite in a copy: dest = r + (e - m) + voff
-                let (len_h, rh) = self.emit_copy_grow(mh, 0)?;
-                self.f
-                    .instructions()
-                    .local_get(rh)
-                    .local_get(eh)
-                    .i32_add()
-                    .local_get(mh)
-                    .i32_sub()
-                    .i32_const(lay.1 as i32)
-                    .i32_add()
-                    .local_get(vh);
-                self.store_ty_slot_raw(v);
-                self.f.instructions().local_get(rh);
-                let _ = len_h;
-                self.release_i32();
-                self.release_i32();
-                self.f.instructions().else_();
-                // append a fresh entry at the old end
-                let (len_h2, rh2) = self.emit_copy_grow(mh, lay.2)?;
-                self.f
-                    .instructions()
-                    .local_get(rh2)
-                    .i32_const(almide_layout::PAYLOAD as i32)
-                    .i32_add()
-                    .local_get(len_h2)
-                    .i32_add()
-                    .i32_const(lay.0 as i32)
-                    .i32_add()
-                    .local_get(kh_local);
-                self.store_ty_slot_raw(k);
-                self.f
-                    .instructions()
-                    .local_get(rh2)
-                    .i32_const(almide_layout::PAYLOAD as i32)
-                    .i32_add()
-                    .local_get(len_h2)
-                    .i32_add()
-                    .i32_const(lay.1 as i32)
-                    .i32_add()
-                    .local_get(vh);
-                self.store_ty_slot_raw(v);
-                self.f.instructions().local_get(rh2);
-                self.release_i32();
-                self.release_i32();
-                self.f.instructions().end();
+                let holds = crate::map_inplace::MapSetHolds { mh, kh: kh_local, eh, vh };
+                self.emit_map_set_copy(holds, k, v, lay)?;
                 self.release_for(v);
                 self.release_i32(); // eh
                 self.release_for(k);
                 self.release_i32(); // mh
                 Ok(Some(SliceTy::Map(self.types.intern(k), self.types.intern(v))))
             }
-            ("insert", [m, _key, _value]) => {
-                // mut form: var write-back of the functional build.
+            ("insert", [m, key, value]) => {
+                // mut form: the in-place window when the var owns its
+                // block (#1219), else a var write-back of the functional
+                // build.
                 let IrExprKind::Var { id } = &m.kind else {
                     return unsup("map-insert-nonvar");
                 };
+                if self.try_map_set_in_place(id, key, value)? {
+                    return Ok(None);
+                }
                 let Some((var_idx, var_ty, vglob)) = self.mut_var(id) else {
                     return unsup("var:unmapped");
                 };

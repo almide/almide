@@ -136,6 +136,7 @@ impl Emitter<'_> {
         let hn = self.hold_i64()?;
         self.f.instructions().local_set(hn);
         self.lower(v, Some(et))?;
+        self.rc_map_value_share(v, et);
         enum Hv {
             I64(u32),
             F64(u32),

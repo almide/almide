@@ -78,6 +78,18 @@ impl Emitter<'_> {
         if ty.val_type() != ValType::I32 {
             return;
         }
+        // #1219 stage 1: a Map handle stored into a block witnesses a
+        // second holder. Maps stay OFF the droppable set (never dec'd),
+        // so the count is MONOTONE — "shared at some point" — which is
+        // exactly what the in-place set window asks (rc == 1 ⇒ the
+        // var's block is its alone). Binds/assigns copy, so a plain var
+        // never shares; a fresh value has no other holder to witness.
+        if matches!(ty, SliceTy::Map(..)) {
+            if !rc_certainly_fresh(&e.kind) {
+                self.rc_inc_top();
+            }
+            return;
+        }
         match &e.kind {
             almide_ir::IrExprKind::Var { id } => {
                 if self.cells.contains(id) {

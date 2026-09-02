@@ -94,4 +94,35 @@ impl Emitter<'_> {
         self.rc_own(idx);
         Ok(true)
     }
+
+    /// The map twin (#1219 stage 1): the rebind `m = map.set(m, k, v)`
+    /// — what `m[k] = v` and `map.insert(m, k, v)` are on the incumbent
+    /// leg and what a persistent-style program writes by hand — routes
+    /// through the in-place window when `m` owns its block. Any other
+    /// receiver (`b = map.set(a, k, v)`) keeps the functional copy, so
+    /// `a` is untouched.
+    pub(crate) fn try_map_set_assign(
+        &mut self,
+        var: &almide_ir::VarId,
+        value: &IrExpr,
+    ) -> Result<bool, EmitError> {
+        let IrExprKind::Call {
+            target: almide_ir::CallTarget::Module { module, func, .. },
+            args,
+            ..
+        } = &value.kind
+        else {
+            return Ok(false);
+        };
+        if module.as_str() != "map" || func.as_str() != "set" {
+            return Ok(false);
+        }
+        let [recv, key, val] = &args[..] else {
+            return Ok(false);
+        };
+        if !matches!(&recv.kind, IrExprKind::Var { id } if id == var) {
+            return Ok(false);
+        }
+        self.try_map_set_in_place(var, key, val)
+    }
 }

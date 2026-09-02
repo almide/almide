@@ -273,9 +273,13 @@ impl Emitter<'_> {
             IrStmtKind::FieldAssign { target, field, value } => {
                 self.lower_field_assign(target, field, value)
             }
-            // `m[k] = v` on a map var — the same write-back the
+            // `m[k] = v` on a map var — the in-place window when the var
+            // owns its block (#1219), else the same write-back the
             // `map.insert` mut form runs (functional `set`, rebind).
             IrStmtKind::MapInsert { target, key, value } => {
+                if self.try_map_set_in_place(target, key, value)? {
+                    return Ok(());
+                }
                 if self.cells.contains(target) {
                     return unsup("cell-write:map-insert");
                 }
@@ -408,6 +412,14 @@ impl Emitter<'_> {
                             return unsup("bind:unmapped");
                         };
                         let (koff, voff, esz) = crate::collections::entry_layout(k, v);
+                        // #1219: the cursor below holds the block across
+                        // the body — a `map.insert(m, …)` there must not
+                        // grow it in place under us, so the subject
+                        // witnesses a second holder (the monotone Map rc;
+                        // the window then takes the functional copy).
+                        if !crate::rc_ownership::rc_certainly_fresh(&iterable.kind) {
+                            self.rc_inc_top();
+                        }
                         let bh = self.hold_i32()?;
                         let cur = self.hold_i32()?;
                         let end = self.hold_i32()?;
@@ -540,6 +552,7 @@ impl Emitter<'_> {
                 let hi = self.hold_i64()?;
                 self.f.instructions().local_set(hi);
                 self.lower(value, Some(el))?;
+                self.rc_map_value_share(value, el);
                 let hv = self.hold_val(el)?;
                 let hb = self.hold_i32()?;
                 self.f.instructions().local_set(hv);
@@ -615,6 +628,9 @@ impl Emitter<'_> {
                     return Ok(());
                 }
                 if self.try_list_append_assign(var, value)? {
+                    return Ok(());
+                }
+                if self.try_map_set_assign(var, value)? {
                     return Ok(());
                 }
                 let (local, declared) = match self.locals.get(var) {
