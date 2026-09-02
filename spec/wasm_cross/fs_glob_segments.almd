@@ -1,0 +1,47 @@
+// @contract: C-228
+// fs.glob matches SEGMENT-WISE against the path relative to the pattern's
+// literal base (#1805): `*` spans any run of characters within ONE segment
+// (a leading dot included), `**` spans zero or more whole segments, a literal
+// path answers itself, a non-matching pattern (or a missing base) answers [],
+// results are byte-order sorted and directories are eligible like files.
+// Neither target can change the cwd, so the temp dir stands in for it: every
+// pattern carries the absolute prefix and every result is printed with the
+// prefix stripped — the entropy suffix never reaches stdout. The base is
+// re-spelled from its segments (a doubled slash collapses), so the strip
+// length comes from the normalized prefix, not the raw temp path. The tree:
+// rows.txt and notes.md (depth 0), sub/x.txt and sub/.hidden.txt (depth 1),
+// sub/deep (a directory), sub/deep/y.txt (depth 2).
+import fs
+
+fn norm(d: String) -> String = "/" + (string.split(d, "/") |> list.filter((s) => string.len(s) > 0) |> list.join("/"))
+
+fn strip(d: String, ps: List[String]) -> String = {
+  let cut = string.len(norm(d)) + 1
+  ps |> list.map((p) => string.slice(p, cut, string.len(p))) |> list.join(",")
+}
+
+effect fn show(label: String, d: String, pattern: String) -> Unit = println("${label}=[${strip(d, fs.glob(d + pattern)!)}]")
+
+effect fn main() -> Unit = {
+  let d = fs.create_temp_dir("glob1805")!
+  fs.mkdir_p(d + "/sub/deep")!
+  fs.write(d + "/rows.txt", "r")!
+  fs.write(d + "/notes.md", "n")!
+  fs.write(d + "/sub/x.txt", "x")!
+  fs.write(d + "/sub/.hidden.txt", "h")!
+  fs.write(d + "/sub/deep/y.txt", "y")!
+  show("star_in_dir", d, "/sub/*.txt")!
+  show("dstar_under_dir", d, "/sub/**/*.txt")!
+  show("star_top", d, "/*.txt")!
+  show("dstar_top", d, "/**/*.txt")!
+  show("dstar_tail", d, "/sub/**")!
+  show("dstar_zero", d, "/sub/**/deep/*.txt")!
+  show("dir_match", d, "/**/deep")!
+  show("star_segment", d, "/*/x.txt")!
+  show("mid_star", d, "/s*b/d*p/*.txt")!
+  show("literal", d, "/sub/deep/y.txt")!
+  show("trailing_slash", d, "/sub/")!
+  show("no_match", d, "/sub/*.md")!
+  show("missing_base", d, "/nope/*.txt")!
+  fs.remove_all(d)!
+}

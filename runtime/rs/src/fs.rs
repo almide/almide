@@ -388,40 +388,84 @@ fn walk_recursive(dir: &Path, results: &mut Vec<String>) -> Result<(), String> {
     Ok(())
 }
 
-// Glob (simple pattern matching)
+// Glob (segment-wise, #1805). The pattern is split on '/' — empty segments (a
+// trailing or doubled slash) are dropped, a leading '/' makes it absolute — and
+// the leading run of wildcard-free segments is the BASE: the directory the walk
+// starts from, re-spelled from its segments in front of every result (empty =
+// the cwd, walked as "."). The remaining segments match one-to-one against the
+// base-relative path of every entry the recursive walk visits (files AND
+// directories, fs.walk's visit set): `*` matches any run of characters within
+// ONE segment (empty included, a leading dot included), a segment that is
+// exactly `**` matches zero or more whole segments, everything else is literal.
+// A base that is not a directory answers [] (never an error); a pattern without
+// wildcards is a literal path and answers [path] iff it exists; a `**`-only
+// remainder also admits the base itself. Results are cwd-relative (no `./`)
+// when the base is empty, and byte-order sorted. The walk is depth-bounded to
+// the pattern's segment count when it holds no `**`. The wasm twin
+// (stdlib/fs_walk.almd `fs_glob`) transcribes this algorithm step for step.
 pub fn almide_rt_fs_glob(pattern: &str) -> Result<Vec<String>, String> {
-    // Simple glob: split by * and match files in current dir
-    let dir = Path::new(".").canonicalize().map_err(io_err)?;
+    let absolute = pattern.starts_with('/');
+    let segs: Vec<&str> = pattern.split('/').filter(|s| !s.is_empty()).collect();
+    let k = segs.iter().take_while(|s| !s.contains('*')).count();
+    let pats = &segs[k..];
+    let base = format!("{}{}", if absolute { "/" } else { "" }, segs[..k].join("/"));
+    if pats.is_empty() {
+        let hit = !base.is_empty() && Path::new(&base).exists();
+        return Ok(if hit { vec![base] } else { Vec::new() });
+    }
+    if !base.is_empty() && !Path::new(&base).is_dir() { return Ok(Vec::new()); }
+    let root = if base.is_empty() { "." } else { base.as_str() };
+    let prefix = if base.is_empty() || base == "/" { base.clone() } else { format!("{}/", base) };
+    let depth = if pats.iter().any(|p| *p == "**") { None } else { Some(pats.len()) };
     let mut results = Vec::new();
-    glob_recursive(&dir, pattern, &mut results)?;
+    if !base.is_empty() && glob_segs_match(pats, &[]) { results.push(base.clone()); }
+    let mut rels = Vec::new();
+    glob_walk(Path::new(root), "", depth, &mut rels)?;
+    for rel in rels {
+        let rsegs: Vec<&str> = rel.split('/').collect();
+        if glob_segs_match(pats, &rsegs) { results.push(format!("{}{}", prefix, rel)); }
+    }
     results.sort();
     Ok(results)
 }
 
-fn glob_recursive(dir: &Path, pattern: &str, results: &mut Vec<String>) -> Result<(), String> {
+// Collects every entry below `dir` as a `/`-joined path relative to the walk
+// root; `depth` is the count of levels still to visit (`Some(1)` = list `dir`
+// only), `None` unbounded.
+fn glob_walk(dir: &Path, rel_prefix: &str, depth: Option<usize>, out: &mut Vec<String>) -> Result<(), String> {
     for entry in std::fs::read_dir(dir).map_err(io_err)? {
         let entry = entry.map_err(io_err)?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let rel = if rel_prefix.is_empty() { name } else { format!("{}/{}", rel_prefix, name) };
         let path = entry.path();
-        let name = path.to_string_lossy().replace('\\', "/");
-        if glob_match(pattern, &name) {
-            results.push(name.clone());
-        }
-        if path.is_dir() { glob_recursive(&path, pattern, results)?; }
+        let descend = depth != Some(1) && path.is_dir();
+        out.push(rel.clone());
+        if descend { glob_walk(&path, &rel, depth.map(|d| d - 1), out)?; }
     }
     Ok(())
 }
 
-fn glob_match(pattern: &str, name: &str) -> bool {
-    let parts: Vec<&str> = pattern.split('*').collect();
-    if parts.len() == 1 { return name == pattern; }
+// `pats` against `segs`, segment by segment; `**` spans zero or more whole segments.
+fn glob_segs_match(pats: &[&str], segs: &[&str]) -> bool {
+    match pats.first() {
+        None => segs.is_empty(),
+        Some(&"**") => (0..=segs.len()).any(|i| glob_segs_match(&pats[1..], &segs[i..])),
+        Some(pat) => !segs.is_empty() && glob_star_match(pat, segs[0]) && glob_segs_match(&pats[1..], &segs[1..]),
+    }
+}
+
+// One segment: `*` matches any run of characters (empty included); the rest is literal.
+fn glob_star_match(pat: &str, seg: &str) -> bool {
+    let parts: Vec<&str> = pat.split('*').collect();
+    if parts.len() == 1 { return pat == seg; }
+    let (first, last) = (parts[0], parts[parts.len() - 1]);
+    if seg.len() < first.len() + last.len() || !seg.starts_with(first) || !seg.ends_with(last) { return false; }
+    let region = &seg[first.len()..seg.len() - last.len()];
     let mut pos = 0;
-    for (i, part) in parts.iter().enumerate() {
+    for part in &parts[1..parts.len() - 1] {
         if part.is_empty() { continue; }
-        match name[pos..].find(part) {
-            Some(idx) => {
-                if i == 0 && idx != 0 { return false; }
-                pos += idx + part.len();
-            }
+        match region[pos..].find(part) {
+            Some(i) => pos += i + part.len(),
             None => return false,
         }
     }
