@@ -153,3 +153,15 @@ spec/embedded_cross/http_client_errs.almd :: main
 # every execution sweep. Same division as the C-326/C-327 rows; prunes with
 # #1696 steps 4-5.
 spec/wasm_cross/env_set_overlay.almd :: main
+# (2026-09-02, C-332/#1461) list-rest patterns have no seat in the incumbent
+# brick (binds_p4 walls the form honestly); the STRUCTURAL leg — the default
+# route — lowers them on every execution sweep. Same division as the
+# C-326/C-327/C-329 rows; prunes with #1696 steps 4-5.
+spec/lang/list_rest_pattern_test.almd :: __test_almd_whole-list rest binds the subject list
+spec/lang/list_rest_pattern_test.almd :: heads
+spec/lang/list_rest_pattern_test.almd :: shape
+spec/lang/list_rest_pattern_test.almd :: total
+spec/wasm_cross/list_rest_pattern.almd :: main
+spec/wasm_cross/list_rest_pattern.almd :: shape
+spec/wasm_cross/list_rest_pattern.almd :: tail_of
+spec/wasm_cross/list_rest_pattern.almd :: total
