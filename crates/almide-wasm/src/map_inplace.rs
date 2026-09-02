@@ -55,6 +55,24 @@ impl Emitter<'_> {
         }
     }
 
+    /// A DROPPABLE key or value (Str / Bytes / List-of-scalar) written
+    /// into a map entry is co-owned by the map: +1 on the stored handle.
+    /// Before this the entry held a BORROWED handle — a `let`-bound key
+    /// (`let k = "k" + int.to_string(i)`) was released at the next loop
+    /// rebind and the map kept a dangling pointer that the next
+    /// allocation of the same size class overwrote, so `map.keys` read
+    /// back the digit strings the loop built next (native: `k0,k1,…`;
+    /// the 0.61.1 default leg: `2,3,0,1,…`). Runs on the ALLOCATED
+    /// branch only for keys (an overwrite stores no key) and on both for
+    /// values; `$inc` no-ops below the heap floor, so literal keys pay
+    /// nothing. The overwritten value keeps today's leak (it may still be
+    /// co-owned by the tuple `map.from_list` copied it from).
+    fn rc_entry_coown(&mut self, hold: u32, ty: SliceTy) {
+        if self.rc_droppable(ty) {
+            self.f.instructions().local_get(hold).call(F_INC);
+        }
+    }
+
     /// The functional `map.set` core: the result block (a copy of the
     /// receiver with the found entry overwritten, or grown by one entry
     /// appended) is left on the stack.
@@ -85,6 +103,7 @@ impl Emitter<'_> {
             .i32_add()
             .local_get(vh);
         self.store_ty_slot_raw(v);
+        self.rc_entry_coown(vh, v);
         self.f.instructions().local_get(rh);
         let _ = len_h;
         self.release_i32();
@@ -103,6 +122,7 @@ impl Emitter<'_> {
             .i32_add()
             .local_get(kh);
         self.store_ty_slot_raw(k);
+        self.rc_entry_coown(kh, k);
         self.f
             .instructions()
             .local_get(rh2)
@@ -114,6 +134,7 @@ impl Emitter<'_> {
             .i32_add()
             .local_get(vh);
         self.store_ty_slot_raw(v);
+        self.rc_entry_coown(vh, v);
         self.f.instructions().local_get(rh2);
         self.release_i32();
         self.release_i32();
@@ -177,6 +198,7 @@ impl Emitter<'_> {
             i.local_get(eh).i32_const(voff).i32_add().local_get(vh);
         }
         self.store_ty_slot_raw(v);
+        self.rc_entry_coown(vh, v);
         {
             let mut i = self.f.instructions();
             i.else_();
@@ -193,8 +215,10 @@ impl Emitter<'_> {
             i.local_get(eh).i32_const(koff).i32_add().local_get(kh);
         }
         self.store_ty_slot_raw(k);
+        self.rc_entry_coown(kh, k);
         self.f.instructions().local_get(eh).i32_const(voff).i32_add().local_get(vh);
         self.store_ty_slot_raw(v);
+        self.rc_entry_coown(vh, v);
         {
             let mut i = self.f.instructions();
             i.local_get(mh)
