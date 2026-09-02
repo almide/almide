@@ -187,6 +187,7 @@
 1937	spec/wasm_cross/generic_chain_unwrap_or.almd
 2054	spec/wasm_cross/generic_concat.almd
 2220	spec/wasm_cross/generic_fn_in_inferred_lambda.almd
+2790	spec/wasm_cross/generic_record_anon_field.almd
 2162	spec/wasm_cross/generic_record_field_size.almd
 3079	spec/wasm_cross/generic_record_fn_field.almd
 2341	spec/wasm_cross/generics_mono.almd
