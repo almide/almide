@@ -1,0 +1,5 @@
+// A self-module import nothing references is E060 exactly like an unused
+// stdlib import (#1783) — the alias never enters the file's usage set.
+import self.helper as h
+
+fn main() -> Unit = println("hi")

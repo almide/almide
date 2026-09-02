@@ -1,0 +1,6 @@
+// The unaliased form: `import self.helper` binds the leaf name `helper`,
+// and a file that never spells `helper.` is E060 like any unused import
+// (#1783). The removal fix is the same machine-applicable delete.
+import self.helper
+
+fn main() -> Unit = println("hi")

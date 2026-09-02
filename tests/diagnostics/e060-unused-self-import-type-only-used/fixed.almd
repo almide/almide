@@ -1,0 +1,9 @@
+// A self import referenced ONLY in a type position (`g.Point`) is USED —
+// the usage set must count type spellings, not just calls (#1783). This
+// broken file adds a second, genuinely unused import beside it.
+import self.geo as g
+
+
+fn origin() -> g.Point = g.Point { x: 0, y: 0 }
+
+fn main() -> Unit = println(int.to_string(origin().x))
