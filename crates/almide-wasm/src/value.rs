@@ -75,6 +75,11 @@ impl Emitter<'_> {
             // the source (native filter+clone of the pair vec — the pair
             // blocks themselves are never copied). Non-object passes through.
             ("pick" | "omit", [v, keys]) => Some(self.lower_value_pick_omit(func, v, keys)?),
+            // to_camel_case / to_snake_case (#1423 stage 4): a SHALLOW key
+            // rename — every pair is rebuilt with a FRESH key from the
+            // linked self-host transform and its value SHARED (pick/omit's
+            // graveyard discipline). Non-object passes through.
+            ("to_camel_case" | "to_snake_case", [v]) => Some(self.lower_value_rename(func, v)?),
             // Object: tag 6, payload = the (String, Value) pairs list —
             // insertion order IS the block, exactly the interp's ordered
             // object model.
@@ -161,6 +166,83 @@ impl Emitter<'_> {
         i.local_get(hw).i32_const(4).i32_add().local_set(hw);
         i.end();
         i.local_get(hv).i32_const(4).i32_add().local_set(hv);
+        i.br(0).end().end();
+        i.local_get(ho).local_get(hw).i32_store(len_memarg());
+        // box a fresh Object value
+        i.i32_const(16).call(F_ALLOC).local_set(hp);
+        i.local_get(hp).i32_const(VT_OBJECT).i32_store(slot_memarg(almide_layout::SUM_TAG));
+        i.local_get(hp).local_get(ho).i32_store(slot_memarg(almide_layout::SUM_FIELD));
+        i.local_get(hp);
+        i.end();
+        let _ = i;
+        for _ in 0..5 {
+            self.release_i32();
+        }
+        Ok(SliceTy::Value)
+    }
+
+    /// A self-host module's PRIVATE helper by unique `.name` suffix —
+    /// registry modules carry ordinal names (`__selfhost_N`), so the
+    /// qualified key is not spellable up front. Ambiguity walls.
+    fn selfhost_helper(&self, helper: &str) -> Option<usize> {
+        let suffix = format!(".{helper}");
+        let mut hits = self.table.by_name.iter().filter(|(k, _)| k.ends_with(&suffix));
+        let first = hits.next()?;
+        if hits.next().is_some() {
+            return None;
+        }
+        Some(*first.1)
+    }
+
+    /// The rename walk: the key transform is the self-host helper
+    /// (`__vu_camel` / `__vu_snake` — own-buffer string builders on the
+    /// digest-shared string layout, the string_to_lower class), the
+    /// object walk is native: the incumbent's walk reads its tag/len
+    /// slots raw and cannot link against this layout.
+    fn lower_value_rename(&mut self, func: &str, v: &IrExpr) -> Result<SliceTy, EmitError> {
+        let helper = if func == "to_camel_case" { "__vu_camel" } else { "__vu_snake" };
+        let Some(hi) = self.selfhost_helper(helper) else {
+            return Err(EmitError::Unsupported(format!("value.{func}:unlinked:{helper}")));
+        };
+        if let Some(r) = &self.table.infos[hi].refuse {
+            return Err(EmitError::Unsupported(format!("call-fn:{helper}:{r}")));
+        }
+        let transform = self.table.infos[hi].wasm_index;
+        self.calls.insert(hi);
+        self.lower(v, Some(SliceTy::Value))?;
+        let hv = self.hold_i32()?;
+        self.f.instructions().local_set(hv);
+        let ti = self.types.tuple(vec![STR, SliceTy::Value]);
+        let def = self.types.tuple_def(ti);
+        let (key_off, val_off, pair_size) = (def.fields[0].1, def.fields[1].1, def.size);
+        let hp = self.hold_i32()?;
+        let ho = self.hold_i32()?;
+        let hw = self.hold_i32()?;
+        let hq = self.hold_i32()?;
+        let mut i = self.f.instructions();
+        i.local_get(hv)
+            .i32_load(slot_memarg(almide_layout::SUM_TAG))
+            .i32_const(VT_OBJECT)
+            .i32_ne()
+            .if_(BlockType::Result(wasm_encoder::ValType::I32));
+        i.local_get(hv);
+        i.else_();
+        i.local_get(hv).i32_load(slot_memarg(almide_layout::SUM_FIELD)).local_set(hp);
+        i.local_get(hp).i32_load(len_memarg()).call(F_ALLOC).local_set(ho);
+        i.i32_const(0).local_set(hw); // one cursor: every pair is kept
+        i.block(BlockType::Empty).loop_(BlockType::Empty);
+        i.local_get(hw).local_get(hp).i32_load(len_memarg()).i32_ge_u().br_if(1);
+        i.local_get(hp).local_get(hw).i32_add().i32_load(slot_memarg(0)).local_set(hv);
+        i.i32_const(pair_size as i32).call(F_ALLOC).local_set(hq);
+        // key: +1 the borrowed source key (the callee's epilogue releases
+        // its param), the transform's fresh result is the pair's own.
+        i.local_get(hv).i32_load(slot_memarg(key_off)).call(F_INC);
+        i.local_get(hq);
+        i.local_get(hv).i32_load(slot_memarg(key_off)).call(transform);
+        i.i32_store(slot_memarg(key_off));
+        i.local_get(hq).local_get(hv).i32_load(slot_memarg(val_off)).i32_store(slot_memarg(val_off));
+        i.local_get(ho).local_get(hw).i32_add().local_get(hq).i32_store(slot_memarg(0));
+        i.local_get(hw).i32_const(4).i32_add().local_set(hw);
         i.br(0).end().end();
         i.local_get(ho).local_get(hw).i32_store(len_memarg());
         // box a fresh Object value

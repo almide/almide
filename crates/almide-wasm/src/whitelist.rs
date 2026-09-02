@@ -76,7 +76,7 @@ pub(crate) const SCALAR_TEXT_VERIFIED: &[&str] = &[
     "float_abs", "float_floor", "float_round", "float_is_nan", "float_from_float64",
     "float_from_float32", "float_to_float32",
     "int_to_hex", "int_rotate_left", "int_rotate_right", "hash_fnv1a32",
-    "hash_sha256", "hash_sha256_hex", "hex_encode", "hex_encode_upper", "hex_decode",
+    "hash_sha256", "hash_sha256_hex", "hex_encode", "hex_encode_upper",
     "string_contains", "string_count", "string_trim_start", "string_trim_end",
     "string_is_alpha", "string_is_digit", "string_is_alphanumeric_uni", "string_is_upper",
     "string_is_lower",
@@ -85,9 +85,14 @@ pub(crate) const SCALAR_TEXT_VERIFIED: &[&str] = &[
     "string_is_whitespace", "string_to_bytes",
 ];
 
-/// Same audit, Option-returning (constructor-built sums).
-pub(crate) const SCALAR_TEXT_SUM_BUILDERS: &[&str] =
-    &["string_index_of", "string_last_index_of", "base64_decode", "base64_decode_url"];
+/// Same audit, Option/Result-returning (constructor-built sums).
+/// hex_decode (#1423 stage 4): its `Result[Bytes, String]` is built via
+/// ok()/err() — read-only loads on the digest-shared string layout and
+/// stores into its own prim.alloc_bytes buffer, the base64_decode class
+/// (it sat in the plain tier, where the coupled-type proxy walled it).
+pub(crate) const SCALAR_TEXT_SUM_BUILDERS: &[&str] = &[
+    "string_index_of", "string_last_index_of", "base64_decode", "base64_decode_url", "hex_decode",
+];
 
 /// The Codec-derive encode splices: their bodies carry ZERO prims —
 /// every Value is built through the public value.* surface, which THIS
