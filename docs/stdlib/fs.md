@@ -12,64 +12,154 @@ path, IO). Race-free — the classification happens inside the one read
 (unlike an `fs.exists` pre-check). Contract C-215; native-only today
 (the wasm render walls honestly).
 
-```almide
-let cfg = fs.read_text_if_exists(path)! ?? "default"
+```almd run
+import fs
+
+effect fn main() -> Unit = {
+  let dir = fs.create_temp_dir("fs-doc-")!
+  let path = "${dir}/config.toml"
+  let cfg = fs.read_text_if_exists(path)! ?? "default"
+  println(cfg)
+  fs.write(path, "port = 8080")!
+  println(fs.read_text_if_exists(path)! ?? "default")
+  fs.remove_all(dir)!
+}
+```
+```output
+default
+port = 8080
 ```
 
 ### `fs.read_text(path: String) -> Result[String, String]`
 
 Read file contents as a UTF-8 string
 
-```almd
-let text = fs.read_text("config.toml")
+```almd run
+import fs
+
+effect fn main() -> Unit = {
+  let dir = fs.create_temp_dir("fs-doc-")!
+  fs.write("${dir}/config.toml", "port = 8080")!
+  let text = fs.read_text("${dir}/config.toml")!
+  println(text)
+  fs.remove_all(dir)!
+}
+```
+```output
+port = 8080
 ```
 
 ### `fs.read_bytes(path: String) -> Result[List[Int], String]`
 
 Read file contents as a list of bytes
 
-```almd
-let bytes = fs.read_bytes("image.png")
+```almd run
+import fs
+
+effect fn main() -> Unit = {
+  let dir = fs.create_temp_dir("fs-doc-")!
+  fs.write_bytes("${dir}/image.png", [137, 80, 78, 71])!
+  let bytes = fs.read_bytes("${dir}/image.png")!
+  println("${bytes}")
+  fs.remove_all(dir)!
+}
+```
+```output
+[137, 80, 78, 71]
 ```
 
 ### `fs.write(path: String, content: String) -> Result[Unit, String]`
 
 Write a string to a file, creating or overwriting it
 
-```almd
-fs.write("output.txt", "hello")
+```almd run
+import fs
+
+effect fn main() -> Unit = {
+  let dir = fs.create_temp_dir("fs-doc-")!
+  fs.write("${dir}/output.txt", "hello")!
+  println(fs.read_text("${dir}/output.txt")!)
+  fs.remove_all(dir)!
+}
+```
+```output
+hello
 ```
 
 ### `fs.write_bytes(path: String, bytes: List[Int]) -> Result[Unit, String]`
 
 Write a list of bytes to a file
 
-```almd
-fs.write_bytes("out.bin", [0, 1, 2])
+```almd run
+import fs
+
+effect fn main() -> Unit = {
+  let dir = fs.create_temp_dir("fs-doc-")!
+  fs.write_bytes("${dir}/out.bin", [0, 1, 2])!
+  println("${fs.read_bytes("${dir}/out.bin")!}")
+  fs.remove_all(dir)!
+}
+```
+```output
+[0, 1, 2]
 ```
 
 ### `fs.append(path: String, content: String) -> Result[Unit, String]`
 
 Append a string to a file, creating it if it doesn't exist
 
-```almd
-fs.append("log.txt", "new line\n")
+```almd run
+import fs
+
+effect fn main() -> Unit = {
+  let dir = fs.create_temp_dir("fs-doc-")!
+  let log = "${dir}/log.txt"
+  fs.append(log, "first line\n")!
+  fs.append(log, "new line\n")!
+  println("${fs.read_lines(log)!}")
+  fs.remove_all(dir)!
+}
+```
+```output
+["first line", "new line"]
 ```
 
 ### `fs.mkdir_p(path: String) -> Result[Unit, String]`
 
 Create a directory and all parent directories
 
-```almd
-fs.mkdir_p("data/cache/images")
+```almd run
+import fs
+
+effect fn main() -> Unit = {
+  let dir = fs.create_temp_dir("fs-doc-")!
+  fs.mkdir_p("${dir}/data/cache/images")!
+  println("${fs.is_dir("${dir}/data/cache/images")}")
+  fs.remove_all(dir)!
+}
+```
+```output
+true
 ```
 
 ### `fs.exists(path: String) -> Bool`
 
 Check if a file or directory exists
 
-```almd
-if fs.exists("config.toml") then ...
+```almd run
+import fs
+
+effect fn main() -> Unit = {
+  let dir = fs.create_temp_dir("fs-doc-")!
+  fs.write("${dir}/config.toml", "")!
+  println(if fs.exists("${dir}/config.toml") then "found" else "missing")
+  println(if fs.exists("${dir}/other.toml") then "found" else "missing")
+  fs.remove_all(dir)!
+}
+```
+```output
+found
+missing
 ```
 
 ### `fs.read_lines(path: String) -> Result[List[String], String]`
@@ -78,8 +168,19 @@ Read a file as a list of lines. Materializes the whole file — for large
 inputs use `fs.fold_lines` / `fs.for_each_line` instead (O(longest line)
 memory, not O(file)).
 
-```almd
-let lines = fs.read_lines("data.csv")
+```almd run
+import fs
+
+effect fn main() -> Unit = {
+  let dir = fs.create_temp_dir("fs-doc-")!
+  fs.write("${dir}/data.csv", "a,1\nb,2\n")!
+  let lines = fs.read_lines("${dir}/data.csv")!
+  println("${lines}")
+  fs.remove_all(dir)!
+}
+```
+```output
+["a,1", "b,2"]
 ```
 
 ### `fs.fold_lines(path: String, init: A, f: (A, String) -> A) -> Result[A, String]`
@@ -88,8 +189,21 @@ Fold over a file's lines without materializing them — line semantics
 byte-match `read_lines` (contract C-220). The default shape for aggregating
 a large file.
 
-```almd
-let total = fs.fold_lines("data.csv", 0, (acc, line) => acc + parse_row(line))!
+```almd run
+import fs
+
+fn parse_row(line: String) -> Int = int.parse(line) ?? 0
+
+effect fn main() -> Unit = {
+  let dir = fs.create_temp_dir("fs-doc-")!
+  fs.write("${dir}/data.csv", "1\n2\n3\n")!
+  let total = fs.fold_lines("${dir}/data.csv", 0, (acc, line) => acc + parse_row(line))!
+  println(int.to_string(total))
+  fs.remove_all(dir)!
+}
+```
+```output
+6
 ```
 
 A **fallible callback** makes the whole walk fallible (ADR-0006, contract
@@ -97,9 +211,33 @@ C-274): a callback body that propagates with `!` selects the first-err
 short-circuit form — the callback is never invoked for a line after the one
 that failed, and the native reader stops there too. Same name, one extra `!`.
 
-```almd
-// first err wins; later lines are never visited
-let stats = fs.fold_lines(path, map.new(), (acc, line) => add_row(acc, line)!)!
+```almd run
+import fs
+
+fn add_row(acc: Int, line: String) -> Int! = {
+  guard line != "oops" else err("bad row: ${line}")
+  acc + (int.parse(line) ?? 0)
+}
+
+effect fn main() -> Unit = {
+  let dir = fs.create_temp_dir("fs-doc-")!
+  let path = "${dir}/data.csv"
+  fs.write(path, "1\n2\n3\n")!
+  let stats = fs.fold_lines(path, 0, (acc, line) => add_row(acc, line)!)!
+  println(int.to_string(stats))
+  // first err wins; later lines are never visited
+  fs.write(path, "1\noops\n3\n")!
+  let failed = fs.fold_lines(path, 0, (acc, line) => add_row(acc, line)!)
+  match failed {
+    ok(n) => println(int.to_string(n)),
+    err(e) => println("error: ${e}"),
+  }
+  fs.remove_all(dir)!
+}
+```
+```output
+6
+error: bad row: oops
 ```
 
 ### `fs.for_each_line(path: String, f: (String) -> Unit) -> Result[Unit, String]`
@@ -107,15 +245,43 @@ let stats = fs.fold_lines(path, map.new(), (acc, line) => add_row(acc, line)!)!
 Visit each line of a file in order without materializing the list. The
 callback may mutate captured `var`s.
 
-```almd
-var count = 0
-fs.for_each_line("data.csv", (line) => { count = count + 1 })!
+```almd run
+import fs
+
+effect fn main() -> Unit = {
+  let dir = fs.create_temp_dir("fs-doc-")!
+  fs.write("${dir}/data.csv", "a,1\nb,2\nc,3\n")!
+  var count = 0
+  fs.for_each_line("${dir}/data.csv", (line) => { count = count + 1 })!
+  println(int.to_string(count))
+  fs.remove_all(dir)!
+}
+```
+```output
+3
 ```
 
 It takes the same fallible callback form as `fold_lines`:
 
-```almd
-fs.for_each_line(path, (line) => emit(line)!)!
+```almd run
+import fs
+
+effect fn emit(line: String) -> Unit = {
+  guard line != "" else err("empty line")
+  println("got ${line}")
+}
+
+effect fn main() -> Unit = {
+  let dir = fs.create_temp_dir("fs-doc-")!
+  let path = "${dir}/data.csv"
+  fs.write(path, "one\ntwo\n")!
+  fs.for_each_line(path, (line) => emit(line)!)!
+  fs.remove_all(dir)!
+}
+```
+```output
+got one
+got two
 ```
 
 The two **partitioned** cells below (`fold_lines_range` / `fold_lines_chunked`)
@@ -129,8 +295,26 @@ Fold exactly the lines owned by the byte range `[start, end)` — a line
 belongs to the range containing the byte before its first byte — so folding
 a partition of `[0, file_size)` visits every line exactly once.
 
-```almd
-let part = fs.fold_lines_range("data.csv", 0, 4096, 0, (acc, line) => acc + 1)!
+```almd run
+import fs
+
+effect fn main() -> Unit = {
+  let dir = fs.create_temp_dir("fs-doc-")!
+  let path = "${dir}/data.csv"
+  fs.write(path, "a\nbb\nccc\n")!
+  let part = fs.fold_lines_range(path, 0, 4096, 0, (acc, line) => acc + 1)!
+  println(int.to_string(part))
+  // a partition of [0, file_size) visits every line exactly once
+  let size = fs.file_size(path)!
+  let first = fs.fold_lines_range(path, 0, 4, 0, (acc, line) => acc + 1)!
+  let second = fs.fold_lines_range(path, 4, size, 0, (acc, line) => acc + 1)!
+  println("${first} + ${second}")
+  fs.remove_all(dir)!
+}
+```
+```output
+3
+2 + 1
 ```
 
 ### `fs.fold_lines_chunked(path: String, workers: Int, init: A, f: (A, String) -> A) -> Result[List[A], String]`
@@ -140,97 +324,238 @@ runtime, partials returned in chunk order. Merge the partials yourself — the
 result is deterministic whatever the thread schedule. The callback must be a
 pure step function (capturing mutable state is a compile error).
 
-```almd
-let partials = fs.fold_lines_chunked("data.csv", 8, map.new(), step)!
-let stats = partials |> list.fold(map.new(), (acc, m) => combine(acc, m))
+```almd run
+import fs
+
+fn step(acc: Int, line: String) -> Int = acc + 1
+fn combine(a: Int, b: Int) -> Int = a + b
+
+effect fn main() -> Unit = {
+  let dir = fs.create_temp_dir("fs-doc-")!
+  fs.write("${dir}/data.csv", "a\nb\nc\nd\ne\n")!
+  let partials = fs.fold_lines_chunked("${dir}/data.csv", 8, 0, step)!
+  let stats = partials |> list.fold(0, (acc, m) => combine(acc, m))
+  println(int.to_string(stats))
+  fs.remove_all(dir)!
+}
+```
+```output
+5
 ```
 
 ### `fs.remove(path: String) -> Result[Unit, String]`
 
 Delete a file
 
-```almd
-fs.remove("temp.txt")
+```almd run
+import fs
+
+effect fn main() -> Unit = {
+  let dir = fs.create_temp_dir("fs-doc-")!
+  fs.write("${dir}/temp.txt", "scratch")!
+  fs.remove("${dir}/temp.txt")!
+  println("${fs.exists("${dir}/temp.txt")}")
+  fs.remove_all(dir)!
+}
+```
+```output
+false
 ```
 
 ### `fs.list_dir(path: String) -> Result[List[String], String]`
 
 List entries in a directory
 
-```almd
-let entries = fs.list_dir("src/")
+```almd run
+import fs
+
+effect fn main() -> Unit = {
+  let dir = fs.create_temp_dir("fs-doc-")!
+  fs.mkdir_p("${dir}/src")!
+  fs.write("${dir}/src/main.almd", "")!
+  fs.write("${dir}/src/util.almd", "")!
+  let entries = fs.list_dir("${dir}/src/")!
+  println("${entries |> list.sort}")
+  fs.remove_all(dir)!
+}
+```
+```output
+["main.almd", "util.almd"]
 ```
 
 ### `fs.is_dir(path: String) -> Bool`
 
 Check if a path is a directory
 
-```almd
-if fs.is_dir("src") then ...
+```almd run
+import fs
+
+effect fn main() -> Unit = {
+  let dir = fs.create_temp_dir("fs-doc-")!
+  fs.mkdir_p("${dir}/src")!
+  fs.write("${dir}/readme.md", "")!
+  println(if fs.is_dir("${dir}/src") then "directory" else "not a directory")
+  println(if fs.is_dir("${dir}/readme.md") then "directory" else "not a directory")
+  fs.remove_all(dir)!
+}
+```
+```output
+directory
+not a directory
 ```
 
 ### `fs.is_file(path: String) -> Bool`
 
 Check if a path is a regular file
 
-```almd
-if fs.is_file("readme.md") then ...
+```almd run
+import fs
+
+effect fn main() -> Unit = {
+  let dir = fs.create_temp_dir("fs-doc-")!
+  fs.mkdir_p("${dir}/src")!
+  fs.write("${dir}/readme.md", "")!
+  println(if fs.is_file("${dir}/readme.md") then "file" else "not a file")
+  println(if fs.is_file("${dir}/src") then "file" else "not a file")
+  fs.remove_all(dir)!
+}
+```
+```output
+file
+not a file
 ```
 
 ### `fs.copy(src: String, dst: String) -> Result[Unit, String]`
 
 Copy a file from src to dst
 
-```almd
-fs.copy("a.txt", "b.txt")
+```almd run
+import fs
+
+effect fn main() -> Unit = {
+  let dir = fs.create_temp_dir("fs-doc-")!
+  fs.write("${dir}/a.txt", "hello")!
+  fs.copy("${dir}/a.txt", "${dir}/b.txt")!
+  println(fs.read_text("${dir}/b.txt")!)
+  fs.remove_all(dir)!
+}
+```
+```output
+hello
 ```
 
 ### `fs.rename(src: String, dst: String) -> Result[Unit, String]`
 
 Rename or move a file
 
-```almd
-fs.rename("old.txt", "new.txt")
+```almd run
+import fs
+
+effect fn main() -> Unit = {
+  let dir = fs.create_temp_dir("fs-doc-")!
+  fs.write("${dir}/old.txt", "hello")!
+  fs.rename("${dir}/old.txt", "${dir}/new.txt")!
+  println("${fs.exists("${dir}/old.txt")} ${fs.exists("${dir}/new.txt")}")
+  fs.remove_all(dir)!
+}
+```
+```output
+false true
 ```
 
 ### `fs.walk(dir: String) -> Result[List[String], String]`
 
 Recursively list all files in a directory tree
 
-```almd
-let all_files = fs.walk("src/")
+```almd run
+import fs
+
+effect fn main() -> Unit = {
+  let dir = fs.create_temp_dir("fs-doc-")!
+  fs.mkdir_p("${dir}/src/util")!
+  fs.write("${dir}/src/main.almd", "")!
+  fs.write("${dir}/src/util/io.almd", "")!
+  let all_files = fs.walk("${dir}/src")!
+  println("${all_files |> list.map((f) => string.replace(f, dir, "")) |> list.sort}")
+  fs.remove_all(dir)!
+}
+```
+```output
+["/src/main.almd", "/src/util", "/src/util/io.almd"]
 ```
 
 ### `fs.remove_all(path: String) -> Result[Unit, String]`
 
 Recursively delete a directory and all its contents
 
-```almd
-fs.remove_all("build/")
+```almd run
+import fs
+
+effect fn main() -> Unit = {
+  let dir = fs.create_temp_dir("fs-doc-")!
+  fs.mkdir_p("${dir}/build/obj")!
+  fs.write("${dir}/build/obj/main.o", "")!
+  fs.remove_all("${dir}/build/")!
+  println("${fs.exists("${dir}/build")}")
+  fs.remove_all(dir)!
+}
+```
+```output
+false
 ```
 
 ### `fs.file_size(path: String) -> Result[Int, String]`
 
 Get file size in bytes
 
-```almd
-let size = fs.file_size("data.bin")
+```almd run
+import fs
+
+effect fn main() -> Unit = {
+  let dir = fs.create_temp_dir("fs-doc-")!
+  fs.write_bytes("${dir}/data.bin", [0, 1, 2, 3, 4])!
+  let size = fs.file_size("${dir}/data.bin")!
+  println(int.to_string(size))
+  fs.remove_all(dir)!
+}
+```
+```output
+5
 ```
 
 ### `fs.temp_dir() -> String`
 
 Get the system temporary directory path
 
-```almd
-let tmp = fs.temp_dir()
+```almd run
+import fs
+
+effect fn main() -> Unit = {
+  let tmp = fs.temp_dir()
+  println("${fs.is_dir(tmp)}")
+}
+```
+```output
+true
 ```
 
 ### `fs.stat(path: String) -> Result[{size: Int, is_dir: Bool, is_file: Bool, modified: Int}, String]`
 
 Get file metadata: size, type, and modification time
 
-```almd
-let info = fs.stat("file.txt") // {size, is_dir, is_file, modified}
+```almd run
+import fs
+
+effect fn main() -> Unit = {
+  let dir = fs.create_temp_dir("fs-doc-")!
+  fs.write("${dir}/file.txt", "hello")!
+  let info = fs.stat("${dir}/file.txt")! // {size, is_dir, is_file, modified}
+  println("${info.size} ${info.is_dir} ${info.is_file} ${info.modified > 0}")
+  fs.remove_all(dir)!
+}
+```
+```output
+5 false true true
 ```
 
 ### `fs.glob(pattern: String) -> Result[List[String], String]`
@@ -245,32 +570,71 @@ let files = fs.glob("src/**/*.almd")
 
 Create a temporary file with a given prefix, return its path
 
-```almd
-let path = fs.create_temp_file("almide-")
+```almd run
+import fs
+
+effect fn main() -> Unit = {
+  let path = fs.create_temp_file("almide-")!
+  println("${fs.is_file(path)} ${string.contains(path, "almide-")}")
+  fs.remove(path)!
+}
+```
+```output
+true true
 ```
 
 ### `fs.create_temp_dir(prefix: String) -> Result[String, String]`
 
 Create a temporary directory with a given prefix, return its path
 
-```almd
-let dir = fs.create_temp_dir("build-")
+```almd run
+import fs
+
+effect fn main() -> Unit = {
+  let dir = fs.create_temp_dir("build-")!
+  println("${fs.is_dir(dir)} ${string.contains(dir, "build-")}")
+  fs.remove_all(dir)!
+}
+```
+```output
+true true
 ```
 
 ### `fs.is_symlink(path: String) -> Bool`
 
 Check if a path is a symbolic link
 
-```almd
-if fs.is_symlink("link") then ...
+```almd run
+import fs
+
+effect fn main() -> Unit = {
+  let dir = fs.create_temp_dir("fs-doc-")!
+  fs.write("${dir}/link", "a regular file, not a symlink")!
+  println(if fs.is_symlink("${dir}/link") then "symlink" else "not a symlink")
+  fs.remove_all(dir)!
+}
+```
+```output
+not a symlink
 ```
 
 ### `fs.modified_at(path: String) -> Result[Int, String]`
 
 Get file modification time as Unix timestamp (seconds)
 
-```almd
-let ts = fs.modified_at("file.txt")
+```almd run
+import fs
+
+effect fn main() -> Unit = {
+  let dir = fs.create_temp_dir("fs-doc-")!
+  fs.write("${dir}/file.txt", "hello")!
+  let ts = fs.modified_at("${dir}/file.txt")!
+  println("${ts > 0}")
+  fs.remove_all(dir)!
+}
+```
+```output
+true
 ```
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
