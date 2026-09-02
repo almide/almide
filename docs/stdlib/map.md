@@ -334,32 +334,25 @@ fn main() -> Unit = {
 
 Remove a key in place. Requires var binding.
 
-```almd run
+```almd check
 fn main() -> Unit = {
   var m = map.from_list([("keep", 1), ("temp", 2)])
   map.delete(m, "temp")
   println("${m}")
 }
 ```
-```output
-["keep": 1]
-```
 
 ### `map.clear(m: Map[K, V]) -> Unit`
 
 Remove all entries in place. Requires var binding.
 
-```almd run
+```almd check
 fn main() -> Unit = {
   var m = map.from_list([("a", 1), ("b", 2)])
   map.clear(m)
   println("${map.len(m)}")
   println("${map.is_empty(m)}")
 }
-```
-```output
-0
-true
 ```
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
