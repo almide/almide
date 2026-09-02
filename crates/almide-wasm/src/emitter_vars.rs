@@ -52,8 +52,8 @@ impl Emitter<'_> {
     /// The COW form of the mut-var read (RC-5): every in-place mutation
     /// route reads through here — a shared block copies first and the
     /// var (or cell) is repointed at the unique copy before the route
-    /// touches it. Lists and Bytes only; strings and maps mutate
-    /// functionally.
+    /// touches it. Lists and Bytes only; strings mutate functionally and
+    /// maps have their own judge (map_inplace.rs, #1219).
     pub(crate) fn emit_read_mut_var_cow(
         &mut self,
         id: &VarId,

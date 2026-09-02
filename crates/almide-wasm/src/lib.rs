@@ -75,6 +75,7 @@ mod collect;
 mod collections;
 mod collections_hof;
 mod collections_set;
+mod map_inplace;
 mod emit;
 pub use emit::{emit_program, emit_program_with_ops};
 mod emitter;

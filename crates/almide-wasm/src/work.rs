@@ -63,6 +63,13 @@ pub(crate) enum Helper {
     /// ok(shared block) or err(the Utf8Error Display line, "invalid
     /// UTF-8: " prefixed — the native wrapper's format).
     BytesToString { inv_pre: u32, inv_mid: u32, inc_pre: u32 },
+    /// `$map_reserve(block, esz) -> block` — the map twin of
+    /// `$list_push`'s growth discipline (#1219 stage 1): room for one
+    /// more `esz`-byte entry in place when the size class has slack,
+    /// else the doubled block with the entries copied and the outgrown
+    /// block freed iff rc == 1. `len` is left for the caller to bump
+    /// after it stores the pair at the old end.
+    MapReserve,
     /// `$scan_f64(block, stride, off, needle) -> i32` — the float lane of
     /// the scan family (native PartialEq: -0.0 == 0.0, NaN never matches;
     /// a Helper, not a fixed function, because its f64 param breaks the

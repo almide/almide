@@ -134,6 +134,9 @@ impl Emitter<'_> {
                 let elem = self.infer(x)?;
                 let stride = elem.slot_size();
                 self.lower(x, Some(elem))?;
+                // A repeated Map handle is n holders (#1219: the in-place
+                // window must see the share).
+                self.rc_map_value_share(x, elem);
                 enum Hx {
                     I64(u32),
                     F64(u32),

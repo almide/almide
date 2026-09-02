@@ -119,6 +119,7 @@ impl Emitter<'_> {
                 let hn = self.hold_i64()?;
                 self.f.instructions().local_set(hn);
                 self.lower(v, Some(elem))?;
+                self.rc_map_value_share(v, elem);
                 let hv = self.hold_val(elem)?;
                 let hoff = self.hold_i32()?;
                 let ho = self.hold_i32()?;
