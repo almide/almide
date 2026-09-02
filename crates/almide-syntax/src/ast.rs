@@ -508,6 +508,14 @@ pub struct Program {
     /// suppress cascading "undefined function" diagnostics from call sites.
     #[serde(skip)]
     pub failed_fn_names: std::collections::HashSet<String>,
+    /// True when the parser reported any error: recovery dropped source text
+    /// (a declaration, a fn body, a statement), so usage-based verdicts over
+    /// this file — the E060 unused-import pass — are judged on an incomplete
+    /// picture and stay silent; the parse error is already the diagnosis
+    /// (#1783's gauntlet `s3` cell, where the refused `ports.Store` bound
+    /// takes the only uses of `ports` with it).
+    #[serde(skip)]
+    pub parse_recovered: bool,
     /// #1404: comments bound to an EXPRESSION, keyed by `ExprId`.
     ///
     /// A SIDE TABLE rather than a field on `Expr`, deliberately: `Expr` is
