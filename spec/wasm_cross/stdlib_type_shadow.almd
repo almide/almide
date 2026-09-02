@@ -26,15 +26,28 @@ import http
 import url
 
 type Value = { n: Int }
+
 type HttpRequest = | Small(Int) | Big
+
 type Endian = { n: Int }
+
 type JsonPath = { n: Int }
+
 type Url = { n: Int }
 
 fn twice(v: Value) -> Int = v.n * 2
-fn kind(v: Value) -> String = match v { Value { n } => if n > 1 then "big" else "small" }
+
+fn kind(v: Value) -> String = match v {
+  Value { n } => if n > 1 then "big" else "small"
+}
+
 fn Value.triple(self) -> Int = self.n * 3
-fn show(r: HttpRequest) -> String = match r { Small(n) => "small ${n}", Big => "big" }
+
+fn show(r: HttpRequest) -> String = match r {
+  Small(n) => "small ${n}",
+  Big => "big",
+}
+
 fn pick(big: Bool) -> Endian = if big then Endian { n: 1 } else Endian { n: 0 }
 
 effect fn main() -> Unit = {
