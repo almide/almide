@@ -508,6 +508,7 @@
 66480	spec/wasm_cross/split_empty_sep.almd
 67728	spec/wasm_cross/spread_record_share.almd
 !	spec/wasm_cross/sql_highlight_tokens.almd
+69856	spec/wasm_cross/stdlib_type_shadow.almd
 66816	spec/wasm_cross/str_result_heap_bind.almd
 66016	spec/wasm_cross/string_bool_ordering.almd
 116512	spec/wasm_cross/string_case_unicode.almd

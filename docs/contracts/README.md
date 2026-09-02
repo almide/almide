@@ -103,7 +103,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-073 | Tuple pattern testing a variant constructor | 0.27.6 | active | fixture | 1 |
 | C-074 | Iterative split/replace on large inputs | 0.27.6 | active | fixture | 1 |
 | C-075 | lowmisc round-5 cluster: borrowed-param owning binding, effect-Option auto-try strip, matching-error ! passthrough | 0.27.6 | active | fixture | 1 |
-| C-076 | Producer-side in-module variant construction is target-stable | 0.27.6 | active | fixture | 1 |
+| C-076 | Producer-side in-module variant construction is target-stable | 0.27.6 | active | fixture | 2 |
 | C-077 | Cross-module heap-global init order is dependency-respecting | 0.27.6 | active | fixture | 1 |
 | C-078 | Phantom record generic param is stripped on the Rust target | 0.27.6 | active | fixture | 1 |
 | C-079 | Variant cases with distinct anonymous-record payloads are target-stable | 0.27.6 | active | fixture | 1 |
