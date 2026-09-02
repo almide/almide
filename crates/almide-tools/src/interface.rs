@@ -464,6 +464,9 @@ fn resolve_ty_applied(ty: &Ty, records: &RecordLookup, variants: &VariantLookup)
             TypeRef::Map { key: one(&args[0]), value: one(&args[1]) }
         }
         TypeConstructorId::Tuple => TypeRef::Tuple { elements: each(args) },
+        // #1832: `Matrix[Float32]` is the applied matrix constructor; spell it as a
+        // named type with its element argument instead of `Unknown`.
+        TypeConstructorId::Matrix => TypeRef::Named { name: "Matrix".into(), args: each(args) },
         TypeConstructorId::UserDefined(name) => {
             TypeRef::Named { name: name.clone(), args: each(args) }
         }

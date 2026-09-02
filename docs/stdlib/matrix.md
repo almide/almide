@@ -181,12 +181,12 @@ matrix.conv1d(input: Matrix, weight: Matrix, bias: List[Float], kernel: Int, str
 matrix.gather_rows(m: Matrix, indices: List[Int]) -> Matrix
 matrix.dot_row(m: Matrix, r: Int, vec: List[Float]) -> Float
 matrix.row_dot(m: Matrix, r: Int, vec: List[Float]) -> Float
-matrix.zeros_f32(rows: Int, cols: Int) -> ?
-matrix.ones_f32(rows: Int, cols: Int) -> ?
-matrix.mul_f32(a: ?, b: ?) -> ?
-matrix.mul_f32_scaled(a: ?, alpha: Float, b: ?) -> ?
-matrix.mul_f32_t(a: ?, b: ?) -> ?
-matrix.mul_f32_t_scaled(a: ?, alpha: Float, b: ?) -> ?
+matrix.zeros_f32(rows: Int, cols: Int) -> Matrix[Float32]
+matrix.ones_f32(rows: Int, cols: Int) -> Matrix[Float32]
+matrix.mul_f32(a: Matrix[Float32], b: Matrix[Float32]) -> Matrix[Float32]
+matrix.mul_f32_scaled(a: Matrix[Float32], alpha: Float, b: Matrix[Float32]) -> Matrix[Float32]
+matrix.mul_f32_t(a: Matrix[Float32], b: Matrix[Float32]) -> Matrix[Float32]
+matrix.mul_f32_t_scaled(a: Matrix[Float32], alpha: Float, b: Matrix[Float32]) -> Matrix[Float32]
 matrix.mul_scaled(a: Matrix, alpha: Float, b: Matrix) -> Matrix
 ```
 
