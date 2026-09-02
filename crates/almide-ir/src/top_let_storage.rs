@@ -389,13 +389,7 @@ pub fn dependency_init_order_spaced(
         }
     }
 
-    // Step 4: module → its top-let global decls (coarse safety net).
-    let mut module_globals: HashMap<&str, Vec<GVar>> = HashMap::new();
-    for &(g, m, _) in &decl_order {
-        if let Some(mn) = m {
-            module_globals.entry(mn).or_default().push(g);
-        }
-    }
+    // Step 4 (the module → globals map) folds into Step 5's declaration-order walk (#1808).
 
     // Step 5: per-top-let dependency set.
     let mut deps: HashMap<GVar, Vec<GVar>> = HashMap::new();
@@ -413,11 +407,13 @@ pub fn dependency_init_order_spaced(
             }
         }
         if owner.is_none() {
-            for gs in module_globals.values() {
-                for &mg in gs {
-                    if !dep.contains(&mg) {
-                        dep.push(mg);
-                    }
+            // Declaration order, never `HashMap::values()` (#1808): the
+            // order these coarse edges enter `dep` is the order the DFS
+            // visits them, and a hash-seeded order moved a whole module's
+            // initializer block between two builds of one binary.
+            for &(mg, owner, _) in &decl_order {
+                if owner.is_some() && !dep.contains(&mg) {
+                    dep.push(mg);
                 }
             }
         }
@@ -523,15 +519,13 @@ fn fn_global_reads(
     }
 }
 
-/// Step 4: module → its top-let global decls (for the coarse safety net).
-fn build_module_globals<'a>(
-    decl_order: &[(VarId, Option<&'a str>, &IrExpr)],
-) -> HashMap<&'a str, Vec<VarId>> {
-    let mut module_globals: HashMap<&str, Vec<VarId>> = HashMap::new();
-    for &(v, m, _) in decl_order {
-        if let Some(mn) = m { module_globals.entry(mn).or_default().push(v); }
-    }
-    module_globals
+/// Step 4: every module top-let global, in DECLARATION order (for the
+/// coarse safety net). A per-module `HashMap` here iterated in hash-seed
+/// order, and that order became the DFS visit order below — a whole
+/// module's initializer block moved between two builds of one binary
+/// (#1808, `spec/wasm_cross_pkg`).
+fn build_module_globals(decl_order: &[(VarId, Option<&str>, &IrExpr)]) -> Vec<VarId> {
+    decl_order.iter().filter(|(_, m, _)| m.is_some()).map(|&(v, _, _)| v).collect()
 }
 
 /// Interprocedural half of step 5: fold globals read (transitively) through
@@ -554,9 +548,9 @@ fn add_transitive_callee_reads(
 /// this is sound because submodules are always dependencies of the root (the
 /// root imports them, never vice versa). Catches reads reachable only
 /// through method/computed/stdlib-HOF callees that step 2 can't name.
-fn add_module_globals_safety_net(module_globals: &HashMap<&str, Vec<VarId>>, dep: &mut Vec<VarId>) {
-    for (_, gs) in module_globals {
-        for &g in gs { if !dep.contains(&g) { dep.push(g); } }
+fn add_module_globals_safety_net(module_globals: &[VarId], dep: &mut Vec<VarId>) {
+    for &g in module_globals {
+        if !dep.contains(&g) { dep.push(g); }
     }
 }
 
@@ -567,7 +561,7 @@ fn compute_dependency_sets(
     decls: &HashSet<VarId>,
     fn_reads: &HashMap<FnKey, Vec<VarId>>,
     fn_calls: &HashMap<FnKey, Vec<FnKey>>,
-    module_globals: &HashMap<&str, Vec<VarId>>,
+    module_globals: &[VarId],
 ) -> HashMap<VarId, Vec<VarId>> {
     let mut deps: HashMap<VarId, Vec<VarId>> = HashMap::new();
     for &(v, owner, expr) in decl_order {
