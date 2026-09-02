@@ -181,13 +181,17 @@ evidence  = [
 id        = "C-009"
 spec      = "ALS-R2"
 title     = "Record / variant / anonymous-record interpolation repr (field sorting)"
-statement = "`\"${value}\"` renders records (`P { x: 1 }`), variants (tuple/record/nullary payloads), and anonymous records to their Almide construction-literal form — the same format `deriving Repr` produces — byte-identically on both targets. Anonymous records have NO type name and render their fields in SORTED name order on BOTH targets (native synthesized `AlmdRec_*` stores fields sorted; the wasm walk sorts to match)."
+statement = "`\"${value}\"` renders records (`P { x: 1 }`), variants (tuple/record/nullary payloads), and anonymous records to their Almide construction-literal form — the same format `deriving Repr` produces — byte-identically on both targets. Anonymous records have NO type name and render their fields in SORTED name order on BOTH targets (native synthesized `AlmdRec_*` stores fields sorted; the wasm walk sorts to match). EXTENDED (#1836, 0.61.2): the type name a repr prints is the name the type was DECLARED with, on every leg — a record declared `type Cfg` in module `m` reprs as `Cfg { a: 1, b: 2 }`, exactly as the entry program's `type Cfg` does; the module a value came from is not part of its repr (two modules' same-named types print the same bare name, like two files' would). Native printed the post-flatten Rust struct (`almide_rt_m_Cfg { … }`), wasm (both emitters) and the interp the pre-flatten qualified decl (`m.Cfg { … }`), and a module type's `deriving Repr` baked the qualified spelling into the IR — three spellings, none the source's. One helper (`almide_ir::declared_type_name`, the last segment of the pre-flatten dotted name) now spells every leg; native carries it past the flatten rename as `repr_names` (the mangle is not invertible). Pinned by spec/integration/modules/cross_module_repr_test.almd on the native and wasm `almide test` lanes and by tests/module_type_repr_test.rs on the interp and incumbent legs; the derived-Repr / record-list shapes live in cross_module_repr_derive_test.almd (the wasm TEST lane's v1 renderer walls on them and skips honestly)."
 since     = "0.24.0"
 status    = "active"
 doc       = "C-008-009-010-repr.md"
 evidence  = [
   { path = "spec/wasm_cross/compound_repr_records_interp.almd", class = "fixture" },
   { path = "spec/wasm_cross/compound_repr_recursive_interp.almd", class = "fixture" },
+  { path = "spec/integration/modules/cross_module_repr_test.almd", class = "fixture" },
+  { path = "spec/integration/modules/cross_module_repr_derive_test.almd", class = "fixture" },
+  { path = "tests/module_type_repr_test.rs", name = "every_compiled_leg_prints_the_declared_name", class = "fixture" },
+  { path = "tests/module_type_repr_test.rs", name = "interp_prints_the_declared_name", class = "fixture" },
 ]
 
 [[contract]]
