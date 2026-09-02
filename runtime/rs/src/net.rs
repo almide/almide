@@ -10,12 +10,12 @@ use std::io::{Read as _, Write as _};
 use std::time::Duration;
 
 thread_local! {
-    static STREAMS: RefCell<Vec<Option<std::net::TcpStream>>> = RefCell::new(Vec::new());
-    static LISTENERS: RefCell<Vec<Option<std::net::TcpListener>>> = RefCell::new(Vec::new());
+    static ALMIDE_STREAMS: RefCell<Vec<Option<std::net::TcpStream>>> = RefCell::new(Vec::new());
+    static ALMIDE_LISTENERS: RefCell<Vec<Option<std::net::TcpListener>>> = RefCell::new(Vec::new());
 }
 
 fn alloc_stream(s: std::net::TcpStream) -> i64 {
-    STREAMS.with(|cell| {
+    ALMIDE_STREAMS.with(|cell| {
         let mut v = cell.borrow_mut();
         // Reuse freed slots
         for (i, slot) in v.iter_mut().enumerate() {
@@ -31,7 +31,7 @@ fn alloc_stream(s: std::net::TcpStream) -> i64 {
 }
 
 fn alloc_listener(l: std::net::TcpListener) -> i64 {
-    LISTENERS.with(|cell| {
+    ALMIDE_LISTENERS.with(|cell| {
         let mut v = cell.borrow_mut();
         for (i, slot) in v.iter_mut().enumerate() {
             if slot.is_none() {
@@ -48,7 +48,7 @@ fn alloc_listener(l: std::net::TcpListener) -> i64 {
 fn with_stream<F, R>(handle: i64, f: F) -> Result<R, String>
 where F: FnOnce(&mut std::net::TcpStream) -> Result<R, String>
 {
-    STREAMS.with(|cell| {
+    ALMIDE_STREAMS.with(|cell| {
         let mut v = cell.borrow_mut();
         let idx = handle as usize;
         if idx >= v.len() {
@@ -104,7 +104,7 @@ pub fn almide_rt_net_tcp_read_exact(handle: i64, len: i64) -> Result<Vec<u8>, St
 // ── Close ──
 
 pub fn almide_rt_net_tcp_close(handle: i64) -> Result<(), String> {
-    STREAMS.with(|cell| {
+    ALMIDE_STREAMS.with(|cell| {
         let mut v = cell.borrow_mut();
         let idx = handle as usize;
         if idx >= v.len() {
@@ -120,7 +120,7 @@ pub fn almide_rt_net_tcp_close(handle: i64) -> Result<(), String> {
 // ── Status ──
 
 pub fn almide_rt_net_tcp_is_open(handle: i64) -> bool {
-    STREAMS.with(|cell| {
+    ALMIDE_STREAMS.with(|cell| {
         let v = cell.borrow();
         let idx = handle as usize;
         idx < v.len() && v[idx].is_some()
@@ -171,7 +171,7 @@ pub fn almide_rt_net_tcp_listen(host: &str, port: i64) -> Result<i64, String> {
 }
 
 pub fn almide_rt_net_tcp_accept(handle: i64) -> Result<i64, String> {
-    LISTENERS.with(|cell| {
+    ALMIDE_LISTENERS.with(|cell| {
         let v = cell.borrow();
         let idx = handle as usize;
         if idx >= v.len() {
@@ -189,7 +189,7 @@ pub fn almide_rt_net_tcp_accept(handle: i64) -> Result<i64, String> {
 }
 
 pub fn almide_rt_net_tcp_close_listener(handle: i64) -> Result<(), String> {
-    LISTENERS.with(|cell| {
+    ALMIDE_LISTENERS.with(|cell| {
         let mut v = cell.borrow_mut();
         let idx = handle as usize;
         if idx >= v.len() {

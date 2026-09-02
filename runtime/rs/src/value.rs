@@ -20,33 +20,33 @@ pub enum AlmideValue {
     Object(Vec<(AlmideKey, AlmideValue)>),
 }
 
-const KEY_SLOTS: usize = 1024;
-const KEY_LEAK_CAP: usize = 4096;
+const ALMIDE_KEY_SLOTS: usize = 1024;
+const ALMIDE_KEY_LEAK_CAP: usize = 4096;
 thread_local! {
     /// Direct-mapped key table: one probe, one byte compare, no hashing
     /// machinery. A collision does not evict — the newcomer stays owned.
-    static KEY_TABLE: std::cell::RefCell<(Vec<Option<&'static str>>, usize)> =
-        std::cell::RefCell::new((vec![None; KEY_SLOTS], 0));
+    static ALMIDE_KEY_TABLE: std::cell::RefCell<(Vec<Option<&'static str>>, usize)> =
+        std::cell::RefCell::new((vec![None; ALMIDE_KEY_SLOTS], 0));
 }
 
 #[inline]
 fn key_slot(k: &str) -> usize {
     let mut h: u64 = k.len() as u64;
     for &b in k.as_bytes().iter().take(16) { h = (h.rotate_left(5) ^ b as u64).wrapping_mul(0x517c_c1b7_2722_0a95); }
-    (h >> 32) as usize % KEY_SLOTS
+    (h >> 32) as usize % ALMIDE_KEY_SLOTS
 }
 
 /// Intern `k` as an object key: a pointer copy when it has been seen, one
-/// leaked allocation the first time (bounded by `KEY_LEAK_CAP`), an owned
+/// leaked allocation the first time (bounded by `ALMIDE_KEY_LEAK_CAP`), an owned
 /// `String` otherwise.
 pub(crate) fn intern_key(k: &str) -> AlmideKey {
-    KEY_TABLE.with(|t| {
+    ALMIDE_KEY_TABLE.with(|t| {
         let mut t = t.borrow_mut();
         let slot = key_slot(k);
         match t.0[slot] {
             Some(hit) if hit == k => AlmideKey::Borrowed(hit),
             Some(_) => AlmideKey::Owned(k.to_string()),
-            None if t.1 < KEY_LEAK_CAP => {
+            None if t.1 < ALMIDE_KEY_LEAK_CAP => {
                 let leaked: &'static str = Box::leak(k.to_string().into_boxed_str());
                 t.0[slot] = Some(leaked);
                 t.1 += 1;

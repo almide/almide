@@ -225,15 +225,15 @@ pub fn almide_rt_list_window<T: Clone>(xs: Vec<T>, n: i64) -> Vec<Vec<T>> {
 
 // ── Parallel variants (auto-parallelization for pure lambdas) ──
 // Uses std::thread::scope for work-stealing parallelism.
-// Falls back to sequential below PARALLEL_THRESHOLD elements.
+// Falls back to sequential below ALMIDE_PARALLEL_THRESHOLD elements.
 
 // Parallel when there are at least 2 elements.
 // Each element may represent arbitrarily heavy work (e.g., fan { list.map(chunks, heavy_fn) }).
 // Using a high threshold would skip parallelism for small lists with expensive per-element work.
-const PARALLEL_THRESHOLD: usize = 2;
+const ALMIDE_PARALLEL_THRESHOLD: usize = 2;
 
 pub fn almide_rt_list_par_map<A: Send + Sync + Clone, B: Send + Sync>(xs: Vec<A>, f: impl Fn(A) -> B + Send + Sync) -> Vec<B> {
-    if xs.len() < PARALLEL_THRESHOLD {
+    if xs.len() < ALMIDE_PARALLEL_THRESHOLD {
         return xs.into_iter().map(&f).collect();
     }
     let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
@@ -256,7 +256,7 @@ pub fn almide_rt_list_par_map<A: Send + Sync + Clone, B: Send + Sync>(xs: Vec<A>
 }
 
 pub fn almide_rt_list_par_filter<A: Send + Sync + Clone>(xs: Vec<A>, f: impl Fn(A) -> bool + Send + Sync) -> Vec<A> {
-    if xs.len() < PARALLEL_THRESHOLD {
+    if xs.len() < ALMIDE_PARALLEL_THRESHOLD {
         return xs.into_iter().filter(|x| f(x.clone())).collect();
     }
     let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
@@ -279,7 +279,7 @@ pub fn almide_rt_list_par_filter<A: Send + Sync + Clone>(xs: Vec<A>, f: impl Fn(
 }
 
 pub fn almide_rt_list_par_any<A: Send + Sync + Clone>(xs: &[A], f: impl Fn(A) -> bool + Send + Sync) -> bool {
-    if xs.len() < PARALLEL_THRESHOLD {
+    if xs.len() < ALMIDE_PARALLEL_THRESHOLD {
         return xs.iter().any(|x| f(x.clone()));
     }
     let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
@@ -305,7 +305,7 @@ pub fn almide_rt_list_par_any<A: Send + Sync + Clone>(xs: &[A], f: impl Fn(A) ->
 }
 
 pub fn almide_rt_list_par_all<A: Send + Sync + Clone>(xs: &[A], f: impl Fn(A) -> bool + Send + Sync) -> bool {
-    if xs.len() < PARALLEL_THRESHOLD {
+    if xs.len() < ALMIDE_PARALLEL_THRESHOLD {
         return xs.iter().all(|x| f(x.clone()));
     }
     let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
@@ -349,10 +349,10 @@ pub fn almide_rt_list_par_all<A: Send + Sync + Clone>(xs: &[A], f: impl Fn(A) ->
 // mirror, and the two legs still agree because the reservation is
 // unobservable (C-034). v0's wasm leg clamped at the same 64 MiB in
 // emit_wasm/calls_list.rs, retired in c71eff7b.
-pub const MAX_WITH_CAPACITY_PREALLOC_BYTES: usize = 64 * 1024 * 1024; // 64 MiB
+pub const ALMIDE_MAX_WITH_CAPACITY_PREALLOC_BYTES: usize = 64 * 1024 * 1024; // 64 MiB
 #[inline(always)] pub fn almide_rt_list_with_capacity<A>(cap: i64) -> Vec<A> {
     let elem_size = std::mem::size_of::<A>().max(1);
-    let max_cap = MAX_WITH_CAPACITY_PREALLOC_BYTES / elem_size;
+    let max_cap = ALMIDE_MAX_WITH_CAPACITY_PREALLOC_BYTES / elem_size;
     Vec::with_capacity((cap.max(0) as usize).min(max_cap))
 }
 pub fn almide_rt_list_pop<A>(xs: &mut Vec<A>) -> Option<A> { xs.pop() }

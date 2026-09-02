@@ -31,21 +31,21 @@ pub fn almide_rt_int_parse_hex(s: &str) -> Result<i64, String> { i64::from_str_r
 #[inline(always)] pub fn almide_rt_int_bshr(n: i64, bits: i64) -> i64 { n >> bits }
 /// Width at and above which the `bits`-wide mask saturates to all-ones — see
 /// the wasm `FULL_WIDTH_BITS` (calls_numeric.rs); the guard is shared.
-const ROTATE_FULL_WIDTH_BITS: i64 = 64;
+const ALMIDE_ROTATE_FULL_WIDTH_BITS: i64 = 64;
 /// `Error: <msg>` text for a non-positive rotate width. A width `<= 0` has no
 /// register to rotate (and `n % bits` would divide by zero), so `rotate_*` is
 /// TOTAL like int `/`/`%` (C-001): it aborts with this message + exit 1,
 /// byte-identical on both targets, instead of a native rem-by-zero panic (101)
 /// / wasm `i64.rem_s` trap (134). Wording shared verbatim with the wasm emit.
-pub const ROTATE_NONPOSITIVE_WIDTH_MSG: &str = "rotate width must be positive";
+pub const ALMIDE_ROTATE_NONPOSITIVE_WIDTH_MSG: &str = "rotate width must be positive";
 #[inline]
 fn rotate_mask(bits: i64) -> u64 {
-    if bits >= ROTATE_FULL_WIDTH_BITS { u64::MAX } else { (1u64 << bits) - 1 }
+    if bits >= ALMIDE_ROTATE_FULL_WIDTH_BITS { u64::MAX } else { (1u64 << bits) - 1 }
 }
 #[inline]
 fn check_rotate_width(bits: i64) {
     if bits <= 0 {
-        eprintln!("Error: {}", ROTATE_NONPOSITIVE_WIDTH_MSG);
+        eprintln!("Error: {}", ALMIDE_ROTATE_NONPOSITIVE_WIDTH_MSG);
         std::process::exit(1);
     }
 }
