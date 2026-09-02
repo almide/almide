@@ -74,7 +74,13 @@ impl TyChecker<'_> {
     /// the arm body uses `self.*` fields).
     fn check_ty_named(&mut self, n: &Sym, args: &[Ty]) {
         let s = n.as_str();
-        if !s.contains('.') && !self.decls.bare.contains(n) {
+        // A bare stdlib-owned name (`Value`, `FileStat`) IS canonical — the
+        // stdlib's identity, with no declaration of its own — however many
+        // user scopes declare that name (#1828).
+        if !s.contains('.')
+            && !self.decls.bare.contains(n)
+            && almide_lang::stdlib_info::stdlib_owned_type_owner(s).is_none()
+        {
             if let Some(cands) = self.decls.qualified.get(s) {
                 // Cap per-site duplicates: one report per (name, where) is enough.
                 if !self.offenders.iter().any(|o| o.bare == s && o.where_ == self.where_) {
@@ -308,7 +314,11 @@ pub fn collect_unresolvable_names(program: &IrProgram) -> Vec<UnresolvableName> 
 fn build_repair_map(decls: &DeclIndex) -> std::collections::HashMap<Sym, Sym> {
     let mut map = std::collections::HashMap::new();
     for (base, owners) in &decls.qualified {
-        if decls.bare.contains(&almide_base::intern::sym(base)) {
+        // A bare stdlib-owned name is the stdlib's type, never a leaked
+        // reference to the user's `self.X` / `m.X` shadow of it (#1828).
+        if decls.bare.contains(&almide_base::intern::sym(base))
+            || almide_lang::stdlib_info::stdlib_owned_type_owner(base).is_some()
+        {
             continue;
         }
         if owners.len() == 1 {

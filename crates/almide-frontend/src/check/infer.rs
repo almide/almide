@@ -260,7 +260,13 @@ impl Checker {
     // early-return to the caller, `None` to continue.
     fn check_record_enum_misuse(&mut self, n: &Sym, ctor_sym: Sym) -> Option<Ty> {
         if !self.env.constructors.contains_key(&ctor_sym) {
-            if let Some(Ty::Variant { cases, .. }) = self.env.types.get(&sym(n)) {
+            // The literal's TYPE resolves canonically: the entry program's
+            // `type Endian = { n: Int }` is `self.Endian`, not the bundled
+            // `Endian` enum the bare key holds (#1828).
+            let key = crate::canonicalize::resolve::canonical_user_type_sym(
+                n.as_str(), &self.env.types, self.current_module_prefix.as_deref(),
+            ).unwrap_or(*n);
+            if let Some(Ty::Variant { cases, .. }) = self.env.types.get(&key) {
                 let record_cases: Vec<&str> = cases.iter()
                     .filter(|c| matches!(c.payload, VariantPayload::Record(_)))
                     .map(|c| c.name.as_str())
@@ -555,6 +561,7 @@ impl Checker {
             Some(close) => format!("Did you mean `{}`? Available fields: {}", close, available),
             None => format!("Available fields: {}", available),
         };
+        let hint = format!("{}{}", hint, self.stdlib_shadow_note(concrete).unwrap_or_default());
         let mut diag = super::err(
             format!("no field '{}' on {}", field, concrete.display()),
             hint,
@@ -586,10 +593,35 @@ impl Checker {
     if !handled_elsewhere && !opaque {
         self.emit(super::err(
             format!("no field '{}' on {} — the type has no fields", field, concrete.display()),
-            "Almide values outside records have no fields. Use the type's stdlib module functions instead.".to_string(),
+            format!(
+                "Almide values outside records have no fields. Use the type's stdlib module functions instead.{}",
+                self.stdlib_shadow_note(concrete).unwrap_or_default()
+            ),
             format!("field access .{}", field),
         ).with_code("E013"));
     }
+    }
+
+    /// #1828: the value is the STDLIB's `Value` / `FileStat` / … while this
+    /// program also declares a type of that name. The two spell alike, so
+    /// say which one this is and where the user's own type lives — a
+    /// same-name declaration never rebinds a stdlib type.
+    fn stdlib_shadow_note(&self, concrete: &Ty) -> Option<String> {
+        let Ty::Named(n, _) = concrete else { return None };
+        let owner = almide_lang::stdlib_info::stdlib_owned_type_owner(n.as_str())?;
+        let mut shadows: Vec<&str> = self.env.types.keys()
+            .map(|k| k.as_str())
+            .filter(|k| k.rsplit_once('.').is_some_and(|(p, base)| {
+                base == n.as_str() && !almide_lang::stdlib_info::is_bundled_module(p)
+            }))
+            .collect();
+        shadows.sort_unstable();
+        let shadow = shadows.first()?;
+        Some(format!(
+            " Here `{n}` is the `{owner}` module's type, not your `type {n}` (which is `{shadow}`): \
+             a same-name declaration never rebinds a stdlib type, so read this value through \
+             `{owner}.*` — or rename your type to keep the two apart."
+        ))
     }
 
     /// Rewrite a Haskell/Python/Ruby-style field access into the Almide stdlib

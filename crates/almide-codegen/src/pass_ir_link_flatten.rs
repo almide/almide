@@ -259,8 +259,10 @@ fn rename_ty(ty: &Ty, map: &HashMap<String, Sym>) -> Ty {
 /// (cross-module record bound in a loop).
 fn rename_bind_tys_in_stmts(stmts: &mut [IrStmt], map: &HashMap<String, Sym>) {
     for s in stmts.iter_mut() {
-        if let IrStmtKind::Bind { ty, .. } = &mut s.kind {
-            *ty = rename_ty(ty, map);
+        match &mut s.kind {
+            IrStmtKind::Bind { ty, .. } => *ty = rename_ty(ty, map),
+            IrStmtKind::BindDestructure { pattern, .. } => rename_pattern(pattern, map),
+            _ => {}
         }
     }
 }
@@ -334,7 +336,49 @@ fn rename_expr(e: IrExpr, map: &HashMap<String, Sym>) -> IrExpr {
             **ty = rename_ty(ty, map);
         }
         IrExprKind::InlineRust { template, .. } => rename_inline_rust_template(template, map),
+        // A struct PATTERN carries the same qualified name as the literal
+        // (`m.Cfg`, `self.Value` — pinned by lowering) and needs the same
+        // mangle: a bare spelling matched against the flat struct was rustc
+        // E0308 (#1828's family).
+        IrExprKind::Match { arms, .. } => {
+            for arm in arms.iter_mut() {
+                rename_pattern(&mut arm.pattern, map);
+            }
+        }
         _ => {}
     }
     e
+}
+
+/// Rename the struct name of every record pattern under `p` (nested
+/// positions included) through the flatten map.
+fn rename_pattern(p: &mut IrPattern, map: &HashMap<String, Sym>) {
+    match p {
+        IrPattern::RecordPattern { name, fields, .. } => {
+            if let Some(nn) = map.get(name.as_str()) {
+                *name = nn.as_str().to_string();
+            }
+            for f in fields.iter_mut() {
+                if let Some(inner) = &mut f.pattern {
+                    rename_pattern(inner, map);
+                }
+            }
+        }
+        IrPattern::Constructor { args: elements, .. } | IrPattern::Tuple { elements } => {
+            for e in elements.iter_mut() {
+                rename_pattern(e, map);
+            }
+        }
+        IrPattern::List { elements, rest } => {
+            for e in elements.iter_mut() {
+                rename_pattern(e, map);
+            }
+            if let Some(r) = rest {
+                rename_pattern(r, map);
+            }
+        }
+        IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner }
+        | IrPattern::As { inner, .. } => rename_pattern(inner, map),
+        IrPattern::Wildcard | IrPattern::Bind { .. } | IrPattern::Literal { .. } | IrPattern::None => {}
+    }
 }

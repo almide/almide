@@ -84,6 +84,75 @@ pub fn runtime_backed_type_owner(name: &str) -> Option<&'static str> {
     })
 }
 
+/// Nominal type names a stdlib module OWNS, `(module, type name)`: the
+/// builtin dynamic `Value`, every `RUNTIME_BACKED_TYPES` row, and every
+/// `type` declared in a bundled module (`fs.FileStat`, `bytes.Endian`, …).
+///
+/// The checker gives a stdlib type its BARE name as its canonical identity
+/// (`Ty::Named("Value")` is what every `json.*` / `value.*` signature
+/// carries, and what the runtimes key on). A user declaration of one of
+/// these names therefore cannot share that key: it takes the #433
+/// module-qualified identity instead (`self.Value` in the entry program,
+/// `m.Value` in module `m`), so `json.parse(..)` keeps returning the
+/// builtin whatever the program declares (#1828 — before, the user's record
+/// rebound the bare key and `json.parse("{}")!.n` type-checked, printing a
+/// wrong value on wasm). Completeness is machine-checked:
+/// `stdlib_owned_types_matrix` (tests/runtime_backed_types_matrix.rs)
+/// asserts this list is exactly `Value` + the runtime-backed rows + the
+/// bundled `type` declarations.
+pub const STDLIB_OWNED_TYPES: &[(&str, &str)] = &[
+    ("value", "Value"),
+    ("http", "HttpRequest"),
+    ("http", "HttpResponse"),
+    ("json", "JsonPath"),
+    ("bytes", "Endian"),
+    ("fs", "FileStat"),
+    ("html", "SafeHtml"),
+    ("net", "TcpListener"),
+    ("net", "TcpStream"),
+    ("path", "SafePath"),
+    ("process", "ProcessStatus"),
+    ("url", "Url"),
+];
+
+/// The owning module of a stdlib-owned nominal type, by BARE name — `None`
+/// for a qualified spelling and for every name a stdlib module does not own
+/// (the common case).
+pub fn stdlib_owned_type_owner(name: &str) -> Option<&'static str> {
+    STDLIB_OWNED_TYPES.iter().find_map(|(module, ty)| (*ty == name).then_some(*module))
+}
+
+/// Are `a` and `b` a stdlib-owned type's own BARE name and a USER scope's
+/// declaration of that name (`Value` vs `self.Value` / `m.Value`, either
+/// order)? Two different types that spell alike — never the same type, so
+/// no bare-name leniency applies between them (#1828).
+pub fn stdlib_type_vs_user_shadow(a: &str, b: &str) -> bool {
+    let shadow_of = |bare: &str, qualified: &str| {
+        !bare.contains('.')
+            && stdlib_owned_type_owner(bare).is_some()
+            && qualified.rsplit_once('.').is_some_and(|(p, base)| base == bare && !is_bundled_module(p))
+    };
+    shadow_of(a, b) || shadow_of(b, a)
+}
+
+/// The identity scope of an ENTRY-program declaration that shadows a
+/// stdlib-owned type name (#1828): `type Value = { n: Int }` in the main
+/// file is `self.Value`, the way a module `m`'s is `m.Value`. `self` is the
+/// package self-reference keyword of `import`, so no user module is ever
+/// registered under it and the key cannot collide with a real `mod.Type`;
+/// it is not a bundled module, so every #433 consumer (link mangling,
+/// codegen, wasm) treats the key as a user-module type.
+pub const ROOT_TYPE_SCOPE: &str = "self";
+
+/// A type's SOURCE spelling for display (`repr`): the entry program's
+/// `self.Value` shows as the `Value` the file declares. Every other name is
+/// returned as is.
+pub fn strip_root_type_scope(name: &str) -> &str {
+    name.strip_prefix(ROOT_TYPE_SCOPE)
+        .and_then(|rest| rest.strip_prefix('.'))
+        .unwrap_or(name)
+}
+
 /// #1075 → #1078: the dynamic surface used to have two module names for one
 /// concept (`json.null` / `value.null`, `value.get` / `value.field`, …). After
 /// one release of E040 warnings with a mechanical `almide fix` rewrite, the

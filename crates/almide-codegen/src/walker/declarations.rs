@@ -281,7 +281,12 @@ fn render_repr_impl(ctx: &RenderContext, td: &IrTypeDecl) -> Option<String> {
             let args = fields.iter()
                 .map(|f| format!("self.{}.almide_repr()", f.name))
                 .collect::<Vec<_>>().join(", ");
-            format!("format!(\"{} {{{{ {} }}}}\", {})", td.name, fmt, args)
+            // The entry program's shadow of a stdlib-owned name is the flat
+            // `almide_rt_self_X` here (#1828); its repr shows the `X` the
+            // source declares, as the wasm leg's does.
+            let root_scope = format!("almide_rt_{}_", almide_lang::stdlib_info::ROOT_TYPE_SCOPE);
+            let shown = td.name.as_str().strip_prefix(root_scope.as_str()).unwrap_or(td.name.as_str());
+            format!("format!(\"{} {{{{ {} }}}}\", {})", shown, fmt, args)
         }
         IrTypeDeclKind::Variant { cases, .. } => {
             let arms = cases.iter().map(|v| render_repr_variant_arm(&td.name, v))

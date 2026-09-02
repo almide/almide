@@ -518,7 +518,16 @@ fn lower_const_param_ir_params(ctx: &mut LowerCtx, generics: &Option<Vec<ast::Ge
 /// `env.types` for a non-generic fn, or [`generic_typevar_overlay`]'s copy
 /// with the fn's own generic letters mapped to `TypeVar` (#1577).
 fn lower_fn_value_params(ctx: &mut LowerCtx, name: &str, params: &[ast::Param], module_prefix: Option<&str>, span: &Option<ast::Span>, sig_types: &HashMap<Sym, Ty>) -> Vec<IrParam> {
-    let receiver_ty = name.split_once('.').map(|(ty_name, _)| Ty::Named(sym(ty_name), Vec::new()));
+    // The receiver resolves through the same canonicalizer as a written
+    // annotation (the checker's `check_fn_body` does the same): a bare
+    // `Ty::Named(ty_name)` typed `fn Value.triple(self)` on the entry
+    // program's `type Value` as the STDLIB's `Value` (#1828), and a module's
+    // `fn Cfg.get(self)` as a bare `Cfg` the name repair had to complete.
+    let receiver_ty = name.split_once('.').map(|(ty_name, _)| {
+        crate::canonicalize::resolve::resolve_type_expr_in(
+            &ast::TypeExpr::Simple { name: sym(ty_name) }, Some(sig_types), module_prefix,
+        )
+    });
     let mut ir_params = Vec::new();
     for (i, p) in params.iter().enumerate() {
         let ty = if i == 0 && p.name.as_str() == "self"

@@ -21,6 +21,19 @@ pub(super) fn generate_auto_derives(ctx: &mut LowerCtx, type_decls: &[IrTypeDecl
             None => continue,
         };
         let type_ty = Ty::Named(td.name, vec![]);
+        // The entry program's shadow of a stdlib-owned name is declared
+        // `self.X` (#1828), but its convention fns are keyed BARE (`X.eq`)
+        // like every other root declaration's — that is the key
+        // `register_derive_sigs` registered and the name the call site
+        // emits (`X_eq`). The VALUE type stays the qualified one.
+        let bare = almide_lang::stdlib_info::strip_root_type_scope(td.name.as_str());
+        let root_shadow;
+        let td = if bare == td.name.as_str() {
+            td
+        } else {
+            root_shadow = IrTypeDecl { name: sym(bare), ..td.clone() };
+            &root_shadow
+        };
         let fields = match &td.kind {
             IrTypeDeclKind::Record { fields } => Some(fields.clone()),
             _ => None,

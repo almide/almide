@@ -297,7 +297,11 @@ impl Emitter<'_> {
                     self.append_lit("{ ");
                     fields.sort_by(|a, b| a.name.cmp(&b.name));
                 } else {
-                    self.append_lit(&format!("{name} {{ "));
+                    // The entry program's shadow of a stdlib-owned name is
+                    // `self.X` (#1828); it displays as the `X` the source
+                    // declares, as native does.
+                    let shown = almide_types::stdlib_info::strip_root_type_scope(&name);
+                    self.append_lit(&format!("{shown} {{ "));
                 }
                 for (k, fi) in fields.iter().enumerate() {
                     if k > 0 {
