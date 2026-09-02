@@ -425,6 +425,7 @@ _o_field_init: field_init
         | INTERP_STRING | HEREDOC_INTERP
         | TRUE | FALSE
         | ctor_pattern
+        | IDENT "@" pattern                     -> as_pat
         | IDENT                                 -> bind_pat
 
 _ok_kw: OK | OK_UC
