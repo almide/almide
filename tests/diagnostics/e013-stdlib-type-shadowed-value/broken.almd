@@ -1,0 +1,12 @@
+// A user `type Value` beside `json.parse`, whose result is the STDLIB's
+// `Value`. The two spell alike but are different types: the user's is
+// `self.Value`, and a same-name declaration never rebinds the stdlib's
+// identity (#1828 — before, `.n` type-checked against the json value and
+// printed a wrong number on wasm).
+import json
+type Value = { n: Int }
+
+effect fn main() -> Unit = {
+  let v = json.parse("{\"n\": 1}")!
+  println(int.to_string(v.n))
+}

@@ -1,0 +1,57 @@
+// @contract: C-076
+// A user type named after a STDLIB-OWNED type — the builtin `Value`, a
+// runtime-backed nominal (`HttpRequest`, `JsonPath`), a bundled twin
+// (`Endian`, here under the auto-import with no `import bytes`), a bundled
+// record (`Url`) — keeps its own identity while the stdlib's stays exactly
+// what every stdlib signature carries (#1828). The checker keys the user's
+// declaration under the #433 module-qualified name (`self.Value` in the entry
+// program), never under the bare key the stdlib's `Ty::Named("Value")` is;
+// link mangling then names the user's struct apart from the runtime's
+// reserved `AlmideValue` (#1821) on native, and the wasm type table keys it
+// apart from the builtin dynamic value. Before this landing `json.parse("{}")!.n`
+// type-checked against the user's record and printed a wrong number on wasm
+// while native failed at rustc (E0308).
+//
+// Cells, each byte-identical native == wasm: the user's record literal, field
+// read, record PATTERN, convention method, equality and repr (shown under the
+// SOURCE spelling `Value { … }`, not the identity key) beside the stdlib value
+// flowing through `json.parse` / `json.stringify` / `value.int`; a user
+// VARIANT under a runtime-backed name beside the runtime's `HttpResponse`;
+// a user record under the twin's name beside the twin's own constructors
+// (`LittleEndian` / `BigEndian`) reaching `bytes.write_uint16`; a user record
+// under `JsonPath` beside `json.field(json.root(), ..)`; a user record under
+// `Url` beside `url.parse`'s own record.
+import json
+import http
+import url
+
+type Value = { n: Int }
+type HttpRequest = | Small(Int) | Big
+type Endian = { n: Int }
+type JsonPath = { n: Int }
+type Url = { n: Int }
+
+fn twice(v: Value) -> Int = v.n * 2
+fn kind(v: Value) -> String = match v { Value { n } => if n > 1 then "big" else "small" }
+fn Value.triple(self) -> Int = self.n * 3
+fn show(r: HttpRequest) -> String = match r { Small(n) => "small ${n}", Big => "big" }
+fn pick(big: Bool) -> Endian = if big then Endian { n: 1 } else Endian { n: 0 }
+
+effect fn main() -> Unit = {
+  let mine = Value { n: 7 }
+  let doc = json.parse("{\"a\":1}")!
+  println("${twice(mine)} ${kind(mine)} ${mine.triple()} ${mine == Value { n: 7 }} ${mine}")
+  println("${json.stringify(doc)} ${json.stringify(value.int(3))}")
+  let r = http.response(200, "body")
+  println("${show(Small(3))} ${show(Big)} ${http.body(r)}")
+  var t = bytes.new(0)
+  bytes.write_uint16(t, 258, LittleEndian)
+  let e: Endian = pick(true)
+  println("${int.from_uint16(bytes.read_uint16(t, 0, LittleEndian))} ${int.from_uint16(bytes.read_uint16(t, 0, BigEndian))} ${e.n}")
+  let path = json.field(json.root(), "a")
+  let jp = JsonPath { n: 5 }
+  println("${jp.n} ${json.stringify(json.get_path(doc, path) ?? value.null())}")
+  let u = url.parse("http://example.com/p")!
+  let mu = Url { n: 9 }
+  println("${mu.n} ${u.host}")
+}

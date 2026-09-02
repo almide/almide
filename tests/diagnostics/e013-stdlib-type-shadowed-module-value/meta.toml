@@ -1,0 +1,3 @@
+expects_code = "E013"
+expects_error = "no field 'n' on Value"
+hint_substring = "which is `shadow.Value`"
