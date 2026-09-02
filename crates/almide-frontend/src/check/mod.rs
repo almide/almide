@@ -1040,18 +1040,45 @@ impl Checker {
         self.validate_implicit_propagation();
         self.lint_error_surface(program);
         self.check_bounded_profile(program);
-        // Unused import warnings
-        for imp in &program.imports {
+        // Unused import warnings. Usage is judged SYNTACTICALLY first
+        // (#1783): every `alias.x` spelling in the file — call targets,
+        // record/variant constructors, type annotations, patterns — marks
+        // its alias, so a self-module import used only through a type
+        // or a `m.Box { .. }` literal is used; the call-site marks the
+        // checker recorded along the way are the second source.
+        for head in qualified_import_heads(program) {
+            if self.env.import_table.aliases.contains_key(&head) {
+                self.env.import_table.used.insert(head);
+            }
+        }
+        // Third source: a BARE protocol name in a generic bound or a
+        // conformance list (`[S: Store]`, `type Mem: Store`). Protocols
+        // resolve unqualified from any module, so the spelling names no
+        // alias — the declaring module's canonical name (the protocol's
+        // origin) is matched against each import's canonical instead.
+        let bound_origins: std::collections::HashSet<Sym> = bare_protocol_refs(program).iter()
+            .filter_map(|p| self.env.protocols.get(p).and_then(|d| d.origin))
+            .collect();
+        // The verdict needs a fully parsed file: recovery drops the text that
+        // may have been the use, and the parse error is already the diagnosis.
+        let judge_unused = !program.parse_recovered;
+        for imp in program.imports.iter().filter(|_| judge_unused) {
             let (path, alias, span) = match imp {
                 ast::Decl::Import { path, alias, span, .. } => (path, alias, span),
                 _ => continue,
             };
             let import_name = alias.as_ref().cloned()
                 .unwrap_or_else(|| path.last().cloned().unwrap_or_default());
+            // A self-module import is judged like any other (#1783): its
+            // alias enters `used` on qualified calls AND type positions, so
+            // an unreferenced `import self.x as h` warns with the same
+            // removal fix.
+            let used_via_bound = self.env.import_table.aliases.get(&sym(&import_name))
+                .is_some_and(|canon| bound_origins.contains(canon));
             if import_name.is_empty()
                 || self.env.import_table.used.contains(&sym(&import_name))
                 || import_name.starts_with('_')
-                || path.first().map(|s| s.as_str()) == Some("self")
+                || used_via_bound
             { continue; }
             let line = span.as_ref().map(|s| s.line).unwrap_or(0);
             let mut diag = Diagnostic::warning(
@@ -1258,3 +1285,166 @@ include!("post_solve_validation.rs");
 include!("lint_error_surface.rs");
 include!("bounded.rs");
 include!("module_inference.rs");
+
+/// Every import-alias head spelled in the program (#1783): the `h` of
+/// `h.open()`, `m.Box { .. }`, `g.Point` in any type position, `c.Red` in a
+/// pattern. Purely syntactic, so it is deterministic under the spine's
+/// checker clones and complete over every usage form the resolver knows.
+fn qualified_import_heads(program: &mut ast::Program) -> std::collections::HashSet<Sym> {
+    use std::collections::HashSet;
+    let mut heads: HashSet<Sym> = HashSet::new();
+    fn head_of(name: Sym, heads: &mut HashSet<Sym>) {
+        if let Some((h, _)) = name.as_str().split_once('.') {
+            heads.insert(sym(h));
+        }
+    }
+    fn walk_ty(te: &ast::TypeExpr, heads: &mut HashSet<Sym>) {
+        match te {
+            ast::TypeExpr::Simple { name } => head_of(*name, heads),
+            ast::TypeExpr::Generic { name, args } => {
+                head_of(*name, heads);
+                for a in args { walk_ty(a, heads); }
+            }
+            ast::TypeExpr::Record { fields } | ast::TypeExpr::OpenRecord { fields } => {
+                for f in fields { walk_ty(&f.ty, heads); }
+            }
+            ast::TypeExpr::Fn { params, ret, .. } => {
+                for p in params { walk_ty(p, heads); }
+                walk_ty(ret, heads);
+            }
+            ast::TypeExpr::Tuple { elements } | ast::TypeExpr::Union { members: elements } => {
+                for e in elements { walk_ty(e, heads); }
+            }
+            ast::TypeExpr::Variant { cases } => {
+                for c in cases {
+                    match c {
+                        ast::VariantCase::Tuple { fields, .. } => for t in fields { walk_ty(t, heads); },
+                        ast::VariantCase::Record { fields, .. } => for f in fields { walk_ty(&f.ty, heads); },
+                        ast::VariantCase::Unit { .. } => {}
+                    }
+                }
+            }
+            ast::TypeExpr::ConstLit { .. } => {}
+        }
+    }
+    fn walk_pat(p: &ast::Pattern, heads: &mut HashSet<Sym>) {
+        match p {
+            ast::Pattern::Constructor { name, args } => {
+                head_of(*name, heads);
+                for a in args { walk_pat(a, heads); }
+            }
+            ast::Pattern::RecordPattern { name, fields, .. } => {
+                head_of(*name, heads);
+                for f in fields { if let Some(fp) = &f.pattern { walk_pat(fp, heads); } }
+            }
+            ast::Pattern::Tuple { elements } | ast::Pattern::List { elements, .. } => {
+                for e in elements { walk_pat(e, heads); }
+            }
+            ast::Pattern::Some { inner } | ast::Pattern::Ok { inner } | ast::Pattern::Err { inner } => {
+                walk_pat(inner, heads)
+            }
+            ast::Pattern::Or { alts } => for a in alts { walk_pat(a, heads); },
+            ast::Pattern::Wildcard | ast::Pattern::Ident { .. } | ast::Pattern::None
+            | ast::Pattern::Literal { .. } => {}
+            // A pattern form this walker does not know (the #1461 as-pattern
+            // lands separately) contributes no heads — an unmarked alias
+            // there surfaces as a false E060, which the multi-file corpus
+            // would catch; extend the walk when the form lands.
+            #[allow(unreachable_patterns)]
+            _ => {}
+        }
+    }
+    fn walk_generics(gs: &Option<Vec<ast::GenericParam>>, heads: &mut HashSet<Sym>) {
+        for g in gs.iter().flatten() {
+            if let Some(b) = &g.structural_bound { walk_ty(b, heads); }
+        }
+    }
+    fn walk_where(wc: &ast::TestWhere, heads: &mut HashSet<Sym>) {
+        match wc {
+            ast::TestWhere::Override { path, .. } | ast::TestWhere::CallResponse { target: path, .. } => {
+                if path.len() > 1 { heads.insert(path[0]); }
+                if let ast::TestWhere::CallResponse { params, .. } = wc {
+                    for p in params { walk_pat(p, heads); }
+                }
+            }
+            ast::TestWhere::Case { bindings, .. } => for b in bindings { walk_where(b, heads); },
+            ast::TestWhere::Bind { .. } => {}
+        }
+    }
+    for decl in &program.decls {
+        match decl {
+            ast::Decl::Fn { params, return_type, generics, .. } => {
+                walk_generics(generics, &mut heads);
+                for p in params { walk_ty(&p.ty, &mut heads); }
+                walk_ty(return_type, &mut heads);
+            }
+            ast::Decl::TopLet { ty: Some(t), .. } => walk_ty(t, &mut heads),
+            ast::Decl::Type { ty, generics, .. } => {
+                walk_generics(generics, &mut heads);
+                walk_ty(ty, &mut heads);
+            }
+            ast::Decl::Protocol { generics, methods, .. } => {
+                walk_generics(generics, &mut heads);
+                for m in methods {
+                    for p in &m.params { walk_ty(&p.ty, &mut heads); }
+                    walk_ty(&m.return_type, &mut heads);
+                }
+            }
+            ast::Decl::Test { where_clauses: wcs, .. } | ast::Decl::TestWhereDef { clauses: wcs, .. } => {
+                for wc in wcs { walk_where(wc, &mut heads); }
+            }
+            ast::Decl::TopLet { ty: None, .. } | ast::Decl::Module { .. } | ast::Decl::Import { .. } => {}
+        }
+    }
+    ast::visit_exprs_mut(program, &mut |e: &mut ast::Expr| {
+        match &e.kind {
+            ast::ExprKind::Ident { name } | ast::ExprKind::TypeName { name } => head_of(*name, &mut heads),
+            ast::ExprKind::Record { name: Some(n), .. } => head_of(*n, &mut heads),
+            ast::ExprKind::Call { type_args: Some(tas), .. } => {
+                for t in tas { walk_ty(t, &mut heads); }
+            }
+            ast::ExprKind::TypeAscription { ty, .. } => walk_ty(ty, &mut heads),
+            ast::ExprKind::Lambda { params, .. } => {
+                for p in params { if let Some(t) = &p.ty { walk_ty(t, &mut heads); } }
+            }
+            ast::ExprKind::Block { stmts, .. } => {
+                for st in stmts {
+                    match st {
+                        ast::Stmt::Let { ty: Some(t), .. } | ast::Stmt::Var { ty: Some(t), .. } => walk_ty(t, &mut heads),
+                        ast::Stmt::LetDestructure { pattern, .. } => walk_pat(pattern, &mut heads),
+                        _ => {}
+                    }
+                }
+            }
+            ast::ExprKind::Match { arms, .. } => {
+                for arm in arms { walk_pat(&arm.pattern, &mut heads); }
+            }
+            _ => {}
+        }
+    });
+    heads
+}
+
+/// Every protocol name spelled BARE in a bound or a conformance list
+/// (#1783): `[S: Store]` on a fn, type or protocol, and `type Mem: Store`.
+/// These resolve without a module alias, so `qualified_import_heads` cannot
+/// see them; the E060 pass maps each through the protocol's origin instead.
+fn bare_protocol_refs(program: &ast::Program) -> std::collections::HashSet<Sym> {
+    fn take(gs: &Option<Vec<ast::GenericParam>>, refs: &mut std::collections::HashSet<Sym>) {
+        for g in gs.iter().flatten() {
+            for b in g.bounds.iter().flatten() { refs.insert(*b); }
+        }
+    }
+    let mut refs = std::collections::HashSet::new();
+    for decl in &program.decls {
+        match decl {
+            ast::Decl::Fn { generics, .. } | ast::Decl::Protocol { generics, .. } => take(generics, &mut refs),
+            ast::Decl::Type { generics, deriving, .. } => {
+                take(generics, &mut refs);
+                for d in deriving.iter().flatten() { refs.insert(*d); }
+            }
+            _ => {}
+        }
+    }
+    refs
+}

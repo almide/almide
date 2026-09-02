@@ -2,4 +2,4 @@
 // declare — E002 with the module-scoped spelling.
 import self.helper as h
 
-fn main() -> Unit = println(int.to_string(helper.open()))
+fn main() -> Unit = println(int.to_string(h.open()))
