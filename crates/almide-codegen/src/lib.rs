@@ -34,6 +34,7 @@ pub mod pass_capture_clone;
 pub mod pass_shared_cell_borrow;
 pub mod pass_clone;
 pub mod pass_clone_loops;
+pub mod pass_clone_interp;
 pub mod pass_top_let_storage;
 pub mod pass_fan_lowering;
 pub mod pass_list_pattern;

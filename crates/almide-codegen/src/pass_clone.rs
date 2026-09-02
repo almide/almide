@@ -713,6 +713,7 @@ pub(crate) fn insert_clones_live(expr: IrExpr, ctx: &mut CloneCtx) -> IrExpr {
             IrExprKind::RuntimeCall { symbol, args }
         }
 
+        IrExprKind::StringInterp { parts } => super::pass_clone_interp::insert_clones_string_interp(parts, ctx),
         IrExprKind::IndexAccess { object, index } => return insert_clones_index_access(*object, *index, ty, span, ctx),
         IrExprKind::MapAccess { object, key } => return insert_clones_map_access(*object, *key, ty, span, ctx),
 
@@ -742,7 +743,7 @@ pub(crate) fn insert_clones_live(expr: IrExpr, ctx: &mut CloneCtx) -> IrExpr {
         }
         // Default: recurse into every child through the exhaustive `map_children`
         // chokepoint. Every node whose clone insertion is just "recurse into the
-        // children, left to right" lands here — BinOp/UnOp/Lambda/StringInterp/
+        // children, left to right" lands here — BinOp/UnOp/Lambda/
         // UnwrapOr/Range/MapLiteral/BoxNew included: their former hand-written
         // arms were byte-for-byte what `map_children` does for the same kind — `map_children` visits them in
         // exactly that order, which is what the liveness countdown needs — so no
