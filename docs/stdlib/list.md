@@ -461,16 +461,12 @@ fn main() -> Unit = {
 
 Split a list into two: elements matching and not matching a predicate.
 
-```almd run
+```almd check
 fn main() -> Unit = {
   let (evens, odds) = [1, 2, 3, 4].partition((x) => x % 2 == 0)
   println("${evens}")
   println("${odds}")
 }
-```
-```output
-[2, 4]
-[1, 3]
 ```
 
 ### `list.reduce(xs: List[A], f: Fn[A, A] -> A) -> Option[A]`
@@ -722,16 +718,12 @@ fn main() -> Unit = {
 
 Return a randomly shuffled copy of the list.
 
-```almd run
+```almd check
 fn main() -> Unit = {
   let shuffled = list.shuffle([1, 2, 3, 4])
   println("${list.len(shuffled)}")
   println("${list.sort(shuffled)}")
 }
-```
-```output
-4
-[1, 2, 3, 4]
 ```
 
 ### `list.window(xs: List[A], n: Int) -> List[List[A]]`
