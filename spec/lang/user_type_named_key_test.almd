@@ -1,0 +1,20 @@
+// wasm:skip — native-only pin: the wasm leg has no runtime prelude to collide with
+// A user type named `Key` (#1813). The native runtime's object-key alias in
+// the `value` module was spelled `Key`, so a program that declared its own
+// `type Key` and spliced that module (json/value) hit rustc E0428 on the
+// inline build path — check green, build red. The alias is the reserved
+// `AlmideKey` now, in the runtime's `Almide*` convention, so the user
+// spelling is free. Pinned natively with the inline path forced in
+// tests/native_runtime_key_alias_pin_test.rs; this block runs both lanes.
+import json
+
+type Key = { id: Int }
+
+fn key_of(n: Int) -> Key = Key { id: n }
+
+test "a user type named Key coexists with the runtime's object-key alias" {
+  let k = key_of(1)
+  assert_eq(k.id, 1)
+  assert_eq(k, Key { id: 1 })
+  assert_eq(json.stringify(json.parse("{\"a\":1}")!), "{\"a\":1}")
+}
