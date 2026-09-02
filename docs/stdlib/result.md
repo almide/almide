@@ -190,10 +190,10 @@ result.is_ok(r: Result[A, E]) -> Bool
 result.is_err(r: Result[A, E]) -> Bool
 result.to_option(r: Result[A, E]) -> Option[A]
 result.to_err_option(r: Result[A, E]) -> Option[E]
-result.partition(rs: List[Result[T, E]]) -> ()
+result.partition(rs: List[Result[T, E]]) -> (List[T], List[E])
 result.flatten(r: Result[Result[A, E], E]) -> Result[A, E]
 result.to_list(r: Result[A, E]) -> List[A]
-result.zip(a: Result[A, E], b: Result[B, E]) -> Result[(), E]
+result.zip(a: Result[A, E], b: Result[B, E]) -> Result[(A, B), E]
 result.or_else(r: Result[A, E], f: (E) -> Result[A, F]) -> Result[A, F]
 result.filter(r: Result[A, E], pred: (A) -> Bool, err_val: E) -> Result[A, E]
 ```

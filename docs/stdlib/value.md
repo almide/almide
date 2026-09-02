@@ -106,7 +106,7 @@ value.float(f: Float) -> Value
 value.int(n: Int) -> Value
 value.merge(a: Value, b: Value) -> Value
 value.null() -> Value
-value.object(pairs: List[()]) -> Value
+value.object(pairs: List[(String, Value)]) -> Value
 value.omit(v: Value, keys: List[String]) -> Value
 value.pick(v: Value, keys: List[String]) -> Value
 value.str(s: String) -> Value

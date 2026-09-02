@@ -833,8 +833,8 @@ list.swap(xs: List[A], i: Int, j: Int) -> List[A]
 list.sort(xs: List[A]) -> List[A]
 list.reverse(xs: List[A]) -> List[A]
 list.contains(xs: List[A], x: A) -> Bool
-list.enumerate(xs: List[A]) -> List[()]
-list.zip(xs: List[A], ys: List[B]) -> List[()]
+list.enumerate(xs: List[A]) -> List[(Int, A)]
+list.zip(xs: List[A], ys: List[B]) -> List[(A, B)]
 list.flatten(xss: List[List[T]]) -> List[T]
 list.take(xs: List[A], n: Int) -> List[A]
 list.drop(xs: List[A], n: Int) -> List[A]
@@ -862,7 +862,7 @@ list.fold(xs: List[A], init: B, f: (B, A) -> B) -> B
 list.sort_by(xs: List[A], f: (A) -> B) -> List[A]
 list.take_while(xs: List[A], f: (A) -> Bool) -> List[A]
 list.drop_while(xs: List[A], f: (A) -> Bool) -> List[A]
-list.partition(xs: List[A], f: (A) -> Bool) -> ()
+list.partition(xs: List[A], f: (A) -> Bool) -> (List[A], List[A])
 list.reduce(xs: List[A], f: (A, A) -> A) -> Option[A]
 list.group_by(xs: List[A], f: (A) -> B) -> Map[B, List[A]]
 list.find_index(xs: List[A], f: (A) -> Bool) -> Option[Int]
@@ -888,7 +888,7 @@ list.with_capacity(cap: Int) -> List[A]
 list.pop(xs: List[A]) -> Option[A]
 list.clear(xs: List[A]) -> Unit
 list.bundled_probe(n: Int) -> Int
-list.split_at(xs: List[T], n: Int) -> ()
+list.split_at(xs: List[T], n: Int) -> (List[T], List[T])
 list.iterate(seed: T, f: (T) -> T, n: Int) -> List[T]
 ```
 

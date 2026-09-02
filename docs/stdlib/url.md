@@ -97,8 +97,8 @@ url.encode_component(s: String) -> String
 url.decode_component(s: String) -> Result[String, String]
 url.parse(s: String) -> Result[Url, String]
 url.to_string(u: Url) -> String
-url.query_pairs(query: String) -> List[()]
-url.build_query(pairs: List[()]) -> String
+url.query_pairs(query: String) -> List[(String, String)]
+url.build_query(pairs: List[(String, String)]) -> String
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->
