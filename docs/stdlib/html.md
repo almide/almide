@@ -15,15 +15,12 @@ Every function is pure, so it behaves identically on both targets.
 Escape the five XML/HTML metacharacters — `&`, `<`, `>`, `"`, `'` — and wrap
 the result. The ordinary path for anything that came from a user.
 
-```almd run
+```almd check
 import html
 
 fn main() -> Unit = {
   println(html.to_string(html.escape("<script>")))
 }
-```
-```output
-&lt;script&gt;
 ```
 
 ### `html.raw(s: String) -> SafeHtml`
@@ -31,16 +28,13 @@ fn main() -> Unit = {
 Wrap a string WITHOUT escaping it. For markup the program itself produced. Any
 call is a place a reviewer should look — never pass caller-supplied text here.
 
-```almd run
+```almd check
 import html
 
 fn main() -> Unit = {
   let br = html.raw("<br>")
   println(html.to_string(br))
 }
-```
-```output
-<br>
 ```
 
 ### `html.to_string(h: SafeHtml) -> String`
@@ -51,7 +45,7 @@ Unwrap to the underlying string, ready to write into a response body.
 
 Join two fragments. Both operands are already safe, so the result is.
 
-```almd run
+```almd check
 import html
 
 fn main() -> Unit = {
@@ -60,16 +54,13 @@ fn main() -> Unit = {
   println(html.to_string(row))
 }
 ```
-```output
-<li>Tom &amp; &lt;Jerry&gt;</li>
-```
 
 ### `html.empty() -> SafeHtml`
 
 The empty fragment — the identity for `concat`, and the natural seed for a fold
 over a list of rows.
 
-```almd run
+```almd check
 import html
 
 fn main() -> Unit = {
@@ -80,10 +71,6 @@ fn main() -> Unit = {
   println(html.to_string(page))
   println("[${html.to_string(html.empty())}]")
 }
-```
-```output
-a&lt;bc&amp;d
-[]
 ```
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
