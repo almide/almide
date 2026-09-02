@@ -15,7 +15,7 @@ The guarantee is **continuous, with an explicit scope** — held by gates that r
 
 ## The contract ledger
 
-This claim is not prose. Every observable promise is a named contract in the [behavior-contract ledger](../contracts), each traceable to executable evidence of class ≥ `fixture`. The live contract counts and the exceptions clause are auto-generated from the ledger into the [README claims block](../../README.md) by `scripts/gen-claims.sh`, and `scripts/check-contracts.sh` fails CI if the block drifts — the public claim literally cannot desynchronize from what the gates verify.
+This claim is not prose. Every observable promise is a named contract in the [behavior-contract ledger](../contracts), each traceable to executable evidence of class ≥ `fixture`. The exceptions clause is auto-generated from the ledger into the [README claims block](../../README.md) by `scripts/gen-claims.sh`; the contract counts beside it are stamped from the ledger with their measurement date (`proofs/ledger-counts.toml`, `scripts/gen-ledger-counts.sh`, re-measured nightly by `scripts/check-ledger-counts.sh`); and `scripts/check-contracts.sh` fails CI if the block drifts from either — the public claim literally cannot desynchronize from what the gates verify.
 
 Ledger mechanics:
 
