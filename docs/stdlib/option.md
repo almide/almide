@@ -223,7 +223,7 @@ option.is_some(o: Option[A]) -> Bool
 option.is_none(o: Option[A]) -> Bool
 option.to_result(o: Option[A], e: E) -> Result[A, E]
 option.filter(o: Option[A], f: (A) -> Bool) -> Option[A]
-option.zip(a: Option[A], b: Option[B]) -> Option[()]
+option.zip(a: Option[A], b: Option[B]) -> Option[(A, B)]
 option.or_else(o: Option[A], f: () -> Option[A]) -> Option[A]
 option.to_list(o: Option[A]) -> List[A]
 option.collect(xs: List[Option[T]]) -> Option[List[T]]

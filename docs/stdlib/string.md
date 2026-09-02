@@ -637,7 +637,7 @@ hel
 ```
 string.trim(s: String) -> String
 string.split(s: String, sep: String) -> List[String]
-string.split_once(s: String, sep: String) -> Option[()]
+string.split_once(s: String, sep: String) -> Option[(String, String)]
 string.join(list: List[String], sep: String) -> String
 string.len(s: String) -> Int
 string.length(s: String) -> Int   (deprecated — use string.len)
@@ -681,7 +681,7 @@ string.take(s: String, n: Int) -> String
 string.take_end(s: String, n: Int) -> String
 string.drop(s: String, n: Int) -> String
 string.drop_end(s: String, n: Int) -> String
-string.run_length_encode(s: String) -> List[()]
+string.run_length_encode(s: String) -> List[(String, Int)]
 string.push(s: String, suffix: String) -> Unit
 string.clear(s: String) -> Unit
 ```

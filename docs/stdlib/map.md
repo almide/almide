@@ -378,17 +378,17 @@ map.remove(m: Map[K, V], key: K) -> Map[K, V]
 map.keys(m: Map[K, V]) -> List[K]
 map.values(m: Map[K, V]) -> List[V]
 map.len(m: Map[K, V]) -> Int
-map.entries(m: Map[K, V]) -> List[()]
+map.entries(m: Map[K, V]) -> List[(K, V)]
 map.merge(a: Map[K, V], b: Map[K, V]) -> Map[K, V]
 map.is_empty(m: Map[K, V]) -> Bool
-map.from_list(pairs: List[()]) -> Map[K, V]
+map.from_list(pairs: List[(K, V)]) -> Map[K, V]
 map.map(m: Map[K, V], f: (V) -> B) -> Map[K, B]
 map.filter(m: Map[K, V], f: (K, V) -> Bool) -> Map[K, V]
 map.fold(m: Map[K, V], init: A, f: (A, K, V) -> A) -> A
 map.any(m: Map[K, V], f: (K, V) -> Bool) -> Bool
 map.all(m: Map[K, V], f: (K, V) -> Bool) -> Bool
 map.count(m: Map[K, V], f: (K, V) -> Bool) -> Int
-map.find(m: Map[K, V], f: (K, V) -> Bool) -> Option[()]
+map.find(m: Map[K, V], f: (K, V) -> Bool) -> Option[(K, V)]
 map.update(m: Map[K, V], key: K, f: (V) -> V) -> Map[K, V]
 map.upsert(m: Map[K, V], key: K, init: V, f: (V) -> V) -> Map[K, V]
 map.insert(m: Map[K, V], key: K, value: V) -> Unit

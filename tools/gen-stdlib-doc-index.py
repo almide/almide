@@ -48,7 +48,9 @@ def render_ty(t: dict) -> str:
         params = ", ".join(render_ty(p) for p in t.get("params", []))
         return f"({params}) -> {render_ty(t['return'])}"
     if k == "tuple":
-        return "(" + ", ".join(render_ty(p) for p in t.get("items", t.get("elems", []))) + ")"
+        # The interface JSON spells tuple members `elements` (#1832); the
+        # old `items`/`elems` lookups rendered every tuple as `()`.
+        return "(" + ", ".join(render_ty(p) for p in t.get("elements", t.get("items", t.get("elems", [])))) + ")"
     if k in ("named", "type_var"):
         name = t.get("name", "?")
         args = t.get("args", [])

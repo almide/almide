@@ -487,8 +487,8 @@ effect http.put(url: String, body: String) -> String
 effect http.patch(url: String, body: String) -> String
 effect http.delete(url: String) -> String
 effect http.request(method: String, url: String, body: String, headers: Map[String, String]) -> String
-effect http.get_status(url: String) -> ()
-effect http.request_status(method: String, url: String, body: String, headers: Map[String, String]) -> ()
+effect http.get_status(url: String) -> (Int, String)
+effect http.request_status(method: String, url: String, body: String, headers: Map[String, String]) -> (Int, String)
 effect http.get_bytes(url: String) -> Bytes
 effect http.request_bytes(method: String, url: String, body: String, headers: Map[String, String]) -> Bytes
 effect http.request_stream(method: String, url: String, body: String, headers: Map[String, String], on_chunk: (String) -> Unit) -> Unit
