@@ -6,96 +6,207 @@ Option type operations. auto-imported.
 
 Transform the inner value using a function. If none, returns none.
 
-```almd
-option.map(some(2), (x) => x * 10) // => some(20)
+```almd run
+fn show(o: Option[Int]) -> String = match o {
+  some(n) => "some(${n})",
+  none => "none",
+}
+
+fn main() -> Unit = {
+  println(show(option.map(some(2), (x) => x * 10)))
+}
+```
+```output
+some(20)
 ```
 
 ### `option.flat_map(o: Option[A], f: Fn[A] -> Option[B]) -> Option[B]`
 
 Chain an Option-returning function on the inner value. Flattens nested Options.
 
-```almd
-option.flat_map(some(5), (x) => if x > 0 then some(x) else none)
+```almd run
+fn show(o: Option[Int]) -> String = match o {
+  some(n) => "some(${n})",
+  none => "none",
+}
+
+fn main() -> Unit = {
+  println(show(option.flat_map(some(5), (x) => if x > 0 then some(x) else none)))
+  println(show(option.flat_map(some(-5), (x) => if x > 0 then some(x) else none)))
+}
+```
+```output
+some(5)
+none
 ```
 
 ### `option.flatten(o: Option[Option[A]]) -> Option[A]`
 
 Flatten a nested Option. some(some(x)) becomes some(x), some(none) becomes none.
 
-```almd
-option.flatten(some(some(42))) // => some(42)
+```almd run
+fn show(o: Option[Int]) -> String = match o {
+  some(n) => "some(${n})",
+  none => "none",
+}
+
+fn main() -> Unit = {
+  println(show(option.flatten(some(some(42)))))
+  println(show(option.flatten(some(none))))
+}
+```
+```output
+some(42)
+none
 ```
 
 ### `option.unwrap_or(o: Option[A], default: A) -> A`
 
 Get the inner value, or return a default if none.
 
-```almd
-option.unwrap_or(none, 0) // => 0
+```almd run
+fn main() -> Unit = {
+  println("${option.unwrap_or(none, 0)}")
+  println("${option.unwrap_or(some(7), 0)}")
+}
+```
+```output
+0
+7
 ```
 
 ### `option.unwrap_or_else(o: Option[A], f: Fn[Unit] -> A) -> A`
 
 Get the inner value, or compute a default using a function.
 
-```almd
-option.unwrap_or_else(none, () => 42) // => 42
+```almd run
+fn main() -> Unit = {
+  println("${option.unwrap_or_else(none, () => 42)}")
+}
+```
+```output
+42
 ```
 
 ### `option.is_some(o: Option[A]) -> Bool`
 
 Check if the Option contains a value.
 
-```almd
-option.is_some(some(42)) // => true
+```almd run
+fn main() -> Unit = {
+  println("${option.is_some(some(42))}")
+}
+```
+```output
+true
 ```
 
 ### `option.is_none(o: Option[A]) -> Bool`
 
 Check if the Option is none.
 
-```almd
-option.is_none(none) // => true
+```almd run
+fn main() -> Unit = {
+  println("${option.is_none(none: Option[Int])}")
+}
+```
+```output
+true
 ```
 
 ### `option.to_result(o: Option[A], err: String) -> Result[A, String]`
 
 Convert some to ok, none to err with the given error message.
 
-```almd
-option.to_result(some(42), "missing") // => ok(42)
+```almd run
+fn show(r: Result[Int, String]) -> String = match r {
+  ok(n) => "ok(${n})",
+  err(e) => "err(\"${e}\")",
+}
+
+fn main() -> Unit = {
+  println(show(option.to_result(some(42), "missing")))
+  println(show(option.to_result(none, "missing")))
+}
+```
+```output
+ok(42)
+err("missing")
 ```
 
 ### `option.filter(o: Option[A], f: Fn[A] -> Bool) -> Option[A]`
 
 Keep the value if it satisfies the predicate, otherwise return none.
 
-```almd
-option.filter(some(5), (x) => x > 3) // => some(5)
+```almd run
+fn show(o: Option[Int]) -> String = match o {
+  some(n) => "some(${n})",
+  none => "none",
+}
+
+fn main() -> Unit = {
+  println(show(option.filter(some(5), (x) => x > 3)))
+  println(show(option.filter(some(2), (x) => x > 3)))
+}
+```
+```output
+some(5)
+none
 ```
 
 ### `option.zip(a: Option[A], b: Option[B]) -> Option[(A, B)]`
 
 Combine two Options into an Option of a tuple. None if either is none.
 
-```almd
-option.zip(some(1), some(2)) // => some((1, 2))
+```almd run
+fn show(o: Option[(Int, Int)]) -> String = match o {
+  some((a, b)) => "some((${a}, ${b}))",
+  none => "none",
+}
+
+fn main() -> Unit = {
+  println(show(option.zip(some(1), some(2))))
+  println(show(option.zip(some(1), none)))
+}
+```
+```output
+some((1, 2))
+none
 ```
 
 ### `option.or_else(o: Option[A], f: Fn[Unit] -> Option[A]) -> Option[A]`
 
 Return the Option if some, otherwise call the function to produce an alternative.
 
-```almd
-option.or_else(none, () => some(42)) // => some(42)
+```almd run
+fn show(o: Option[Int]) -> String = match o {
+  some(n) => "some(${n})",
+  none => "none",
+}
+
+fn main() -> Unit = {
+  println(show(option.or_else(none, () => some(42))))
+  println(show(option.or_else(some(1), () => some(42))))
+}
+```
+```output
+some(42)
+some(1)
 ```
 
 ### `option.to_list(o: Option[A]) -> List[A]`
 
 Convert some(x) to [x], none to [].
 
-```almd
-option.to_list(some(42)) // => [42]
+```almd run
+fn main() -> Unit = {
+  println("${option.to_list(some(42))}")
+  println("${option.to_list(none: Option[Int])}")
+}
+```
+```output
+[42]
+[]
 ```
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
