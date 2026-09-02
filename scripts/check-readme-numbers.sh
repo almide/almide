@@ -12,6 +12,9 @@
 # Rule: outside generated blocks, a line that pairs a number with one of the
 # COUNTED nouns must also carry a YYYY-MM-DD date, or match an exemption
 # below — each exemption names the gate that owns the number instead.
+# Generated blocks NEST: the stamped `counts:generated` block (dated in its
+# start marker) sits inside the claims and stats blocks, so the skip is a
+# depth, not a flag — a flag would resume scanning at the inner end marker.
 #
 # It also refuses the phrases that stopped being true at commissioning
 # (#1599): the wasm path is two verified legs behind a router, not one.
@@ -28,9 +31,9 @@ while IFS= read -r hit; do
   echo "::error::README.md:$hit"
   fail=1
 done < <(awk -v nouns="$NOUNS" -v exempt="$EXEMPT" '
-  /<!-- [a-z-]+:generated:start/ { skip = 1 }
-  /<!-- [a-z-]+:generated:end -->/ { skip = 0; next }
-  skip { next }
+  /<!-- [a-z-]+:generated:start/ { depth++ }
+  /<!-- [a-z-]+:generated:end -->/ { depth--; next }
+  depth > 0 { next }
   {
     line = tolower($0)
     if (match(line, "[0-9][0-9,]*[[:space:]]*-?[[:space:]]*" nouns "([^a-z]|$)")) {
