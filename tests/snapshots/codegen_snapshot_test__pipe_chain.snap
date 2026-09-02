@@ -177,11 +177,20 @@ pub fn almide_rt_list_drop_end<T: Clone>(xs: Vec<T>, n: i64) -> Vec<T> {
     let end = if n as usize >= xs.len() { 0 } else { xs.len() - n as usize };
     xs[..end].to_vec()
 }
-pub fn almide_rt_list_unique_by<T: Clone, K: Eq + std::hash::Hash>(xs: Vec<T>, f: std::rc::Rc<dyn Fn(T) -> K>) -> Vec<T> {
+// Keep the FIRST element of each distinct key, in first-occurrence order.
+// The key bound is `PartialEq` (not `Eq + Hash`) so a record, variant, tuple,
+// Option or Float key dedups exactly as the wasm leg's generic-equality scan
+// does (#1812): user types derive `Clone, Debug, PartialEq` only, so the old
+// `HashSet` seen set was a check-passes/build-fails gap (rustc E0277), and a
+// Float key follows `PartialEq` — `-0.0 == 0.0` collapses, NaN never matches.
+pub fn almide_rt_list_unique_by<T: Clone, K: PartialEq>(xs: Vec<T>, f: std::rc::Rc<dyn Fn(T) -> K>) -> Vec<T> {
     let f = move |a| f(a);
-    let mut seen = std::collections::HashSet::new();
+    let mut seen: Vec<K> = Vec::new();
     let mut result = Vec::new();
-    for x in xs { if seen.insert(f(x.clone())) { result.push(x); } }
+    for x in xs {
+        let k = f(x.clone());
+        if !seen.iter().any(|s| *s == k) { seen.push(k); result.push(x); }
+    }
     result
 }
 pub fn almide_rt_list_shuffle<T>(mut xs: Vec<T>) -> Vec<T> {
