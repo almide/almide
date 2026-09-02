@@ -1,0 +1,81 @@
+// @contract: C-333
+// A closure call takes +1 on a BORROWED heap argument (#1786): RC-3's
+// convention is callee-owned — every fn epilogue, a lifted lambda's
+// included, decs its droppable params — so the call_indirect site must
+// guard a match-bound payload, a field or element read, or a param of the
+// enclosing fn exactly as a named-fn site does. Before the guard, `pred(v)`
+// inside `ok(v) => …` handed the lambda the caller's only reference; the
+// epilogue freed it and the next 16-byte allocation landed on the string
+// (nightly fuzz 2026-08-29/30/09-01: zeroed and garbage payloads). Every
+// shape prints the value AFTER the closure call — the freed block shows
+// as zeros on wasm, so the print is the witness. Payloads come from a
+// spliced stdlib call (`string.pad_end` with width 0 copies its input), a
+// heap block whose size class the re-wrap allocation reuses at once.
+type Box = { s: String }
+
+// Spell a Result explicitly (a `${r}` of a Result is a debug-form warning).
+fn show(r: Result[String, String]) -> String = match r {
+  ok(x) => "ok(" + x + ")",
+  err(e) => "err(" + e + ")",
+}
+
+fn my_filter(r: Result[String, String], pred: (String) -> Bool, e: String) -> Result[String, String] = match r {
+  ok(v) => if pred(v) then ok(v) else err(e),
+  err(x) => err(x),
+}
+
+fn opt_pred(o: String?, pred: (String) -> Bool) -> Bool = match o {
+  some(v) => pred(v),
+  none => false,
+}
+
+// A for-in element is a borrowed view of the list slot — the closure runs
+// inside the loop (the list-rest form `[v] => pred(v)` walls on the incumbent
+// brick, so the loop carries the element shape on every leg).
+fn any_pred(xs: List[String], pred: (String) -> Bool) -> Bool = {
+  var hit = false
+  for v in xs {
+    hit = pred(v)
+  }
+  hit
+}
+
+fn field_pred(b: Box, pred: (String) -> Bool) -> Bool = pred(b.s)
+
+fn apply(s: String, pred: (String) -> Bool) -> Bool = pred(s)
+
+fn main() -> Unit = {
+  // match-bound payload, re-wrapped after the closure ran
+  let v: Result[String, String] = ok(string.pad_end("abc", 0, "xy"))
+  let r = my_filter(v, ((n) => true), "e")
+  println("filter: ${show(r)} v=${show(v)}")
+  // the err branch returns the caller's err payload; the ok payload must survive too
+  let w: Result[String, String] = ok(string.pad_end("-0", 0, "q"))
+  let k = my_filter(w, ((n) => false), "fallback")
+  println("reject: ${show(k)} w=${show(w)}")
+  // option payload
+  let o: String? = some(string.pad_end("opt", 0, "z"))
+  let ob = opt_pred(o, ((n) => string.len(n) == 3))
+  println("option: ${ob} o=${o ?? "none"}")
+  // list element
+  let xs = [
+    string.pad_end("elem", 0, "z")
+  ]
+  let lb = any_pred(xs, ((n) => true))
+  println("list: ${lb} xs=${xs}")
+  // record field
+  let b = Box { s: string.pad_end("field", 0, "z") }
+  let fb = field_pred(b, ((n) => true))
+  println("field: ${fb} b=${b.s}")
+  // a param of the enclosing fn forwarded to the closure
+  let p: Result[String, String] = ok(string.pad_end("param", 0, "z"))
+  let pb = match p {
+    ok(x) => apply(x, ((n) => true)),
+    err(e) => false,
+  }
+  println("param: ${pb} p=${show(p)}")
+  // non-ASCII payload through the same path (the fuzzer's 日本語 / café rows)
+  let j: Result[String, String] = ok(string.pad_end("日本語", 0, "café"))
+  let jr = my_filter(j, ((n) => true), " nbsp ")
+  println("utf8: ${show(jr)}")
+}

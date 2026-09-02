@@ -42,6 +42,15 @@ impl Emitter<'_> {
                 self.f.instructions().local_get(h);
                 for (a, p) in args.iter().zip(def.params.iter()) {
                     self.lower(a, Some(*p))?;
+                    // RC-3 callee-owned args hold for a lifted lambda
+                    // exactly as for a named fn: its epilogue decs every
+                    // droppable param, so a borrowed argument — a
+                    // match-bound payload, a field or element read, a
+                    // param of the enclosing fn — takes +1 here. Without
+                    // it `pred(v)` inside `ok(v) => …` freed the payload
+                    // the caller still held (the nightly fuzz's
+                    // zeroed-string findings).
+                    self.rc_arg_guard(a, *p);
                 }
                 self.f.instructions().local_get(h).i32_load(slot_memarg(0));
                 let mut ps: Vec<ValType> = vec![ValType::I32];
