@@ -27,6 +27,12 @@ pub(crate) fn desugar_stmt_value_nested_unwrap(
     body: &IrExpr,
     next_var: &mut u32,
 ) -> Option<IrExpr> {
+    // Search first, clone only on a candidate (the `desugar_let_unwrap`
+    // shape, #1232): a body `has_candidate_unwrap` rejects can never be
+    // rewritten below, so it is declined without the whole-body clone.
+    if !has_candidate_unwrap(body) {
+        return None;
+    }
     let mut out = body.clone();
     if nested_unwrap_rewrite_expr(&mut out, next_var) {
         return Some(out);
@@ -171,6 +177,56 @@ fn nested_unwrap_rewrite_stmts(
     false
 }
 
+/// A scalar-typed `Unwrap` whose operand is a Result/Option — the node class
+/// every nested hoist below targets.
+fn is_hoistable_unwrap(e: &IrExpr) -> bool {
+    use almide_ir::IrExprKind;
+    matches!(
+        &e.kind,
+        IrExprKind::Unwrap { expr: inner }
+            if !crate::lower::is_heap_ty(&e.ty)
+                && matches!(
+                    &inner.ty,
+                    almide_lang::types::Ty::Applied(
+                        almide_lang::types::constructor::TypeConstructorId::Result
+                            | almide_lang::types::constructor::TypeConstructorId::Option,
+                        _
+                    )
+                )
+    )
+}
+
+/// Read-only SUPERSET of what the mutable search can hoist: an
+/// `is_hoistable_unwrap` node anywhere, or an `Unwrap` at an Assign's value
+/// root (the root-Assign case hoists regardless of type). Position rules are
+/// ignored here, so a `true` may still decline later — never the reverse.
+fn has_candidate_unwrap(body: &IrExpr) -> bool {
+    use almide_ir::visit::{walk_expr, walk_stmt, IrVisitor};
+    use almide_ir::{IrExprKind, IrStmt, IrStmtKind};
+    struct V(bool);
+    impl IrVisitor for V {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if self.0 || is_hoistable_unwrap(e) {
+                self.0 = true;
+                return;
+            }
+            walk_expr(self, e);
+        }
+        fn visit_stmt(&mut self, s: &IrStmt) {
+            if let IrStmtKind::Assign { value, .. } = &s.kind {
+                if matches!(value.kind, IrExprKind::Unwrap { .. }) {
+                    self.0 = true;
+                    return;
+                }
+            }
+            walk_stmt(self, s);
+        }
+    }
+    let mut v = V(false);
+    v.visit_expr(body);
+    v.0
+}
+
 /// Find a hoistable nested scalar Result/Option `Unwrap` strictly BELOW the
 /// given expression's root; replace it with a fresh Var and return the Bind
 /// stmt kind that hoists it.
@@ -193,22 +249,6 @@ fn take_innermost_scalar_unwrap(
     next_var: &mut u32,
 ) -> Option<(almide_ir::IrStmtKind, Option<almide_ir::Span>)> {
     use almide_ir::{IrExpr, IrExprKind, IrStmtKind, Mutability, VarId};
-
-    fn is_hoistable_unwrap(e: &IrExpr) -> bool {
-        matches!(
-            &e.kind,
-            IrExprKind::Unwrap { expr: inner }
-                if !crate::lower::is_heap_ty(&e.ty)
-                    && matches!(
-                        &inner.ty,
-                        almide_lang::types::Ty::Applied(
-                            almide_lang::types::constructor::TypeConstructorId::Result
-                                | almide_lang::types::constructor::TypeConstructorId::Option,
-                            _
-                        )
-                    )
-        )
-    }
 
     fn hoist_here(e: &mut IrExpr, next_var: &mut u32) -> (IrStmtKind, Option<almide_ir::Span>) {
         let ty = e.ty.clone();
