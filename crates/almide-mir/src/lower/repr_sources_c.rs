@@ -185,7 +185,10 @@ fn generate_named_record_reprs(
 "));
         out.push_str("  let h = prim.handle(e)
 ");
-        let mut concat = format!("\"{tname} {{ \"");
+        // The entry program's shadow of a stdlib-owned name is `self.X`
+        // (#1828); its repr shows the `X` the source declares, as native does.
+        let shown = almide_lang::stdlib_info::strip_root_type_scope(tname);
+        let mut concat = format!("\"{shown} {{ \"");
         for (i, (fld, ty)) in fields.iter().enumerate() {
             if i > 0 {
                 concat.push_str(" + \", \"");

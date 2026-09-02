@@ -17,6 +17,39 @@ pub fn resolve_type_expr(te: &ast::TypeExpr, known_types: Option<&HashMap<Sym, T
     resolve_type_expr_in(te, known_types, None)
 }
 
+/// The identity scope of an ENTRY-program declaration that shadows a
+/// stdlib-owned type name (#1828): `type Value = { n: Int }` in the main
+/// file is `self.Value`, the way a module `m`'s is `m.Value`. Defined
+/// beside the owned-type registry so the display side (`repr` on both
+/// backends) strips the same scope.
+pub use almide_lang::stdlib_info::ROOT_TYPE_SCOPE;
+
+/// The canonical `env.types` key a user declaration of a STDLIB-OWNED type
+/// name takes in `cur_mod` (#1828): `self.Value` for the entry program,
+/// `m.Value` inside user module `m`. The stdlib keeps the bare key — that
+/// bare spelling is the identity every stdlib signature and both runtimes
+/// carry — so the user's declaration never rebinds it. `None` for every
+/// other name, for a qualified spelling, and inside a bundled module (a
+/// stdlib body's bare `Value` IS the stdlib's).
+pub fn stdlib_shadow_key(name: &str, cur_mod: Option<&str>) -> Option<String> {
+    if name.contains('.') || almide_lang::stdlib_info::stdlib_owned_type_owner(name).is_none() {
+        return None;
+    }
+    let scope = match cur_mod {
+        Some(m) if almide_lang::stdlib_info::is_bundled_module(m) => return None,
+        Some(m) => m,
+        None => ROOT_TYPE_SCOPE,
+    };
+    Some(format!("{}.{}", scope, name))
+}
+
+/// The `stdlib_shadow_key` entry when the program declares one, whatever its
+/// shape (record, variant, alias) — the user's declaration under that name.
+fn stdlib_shadow_entry<'t>(name: &str, types: &'t HashMap<Sym, Ty>, cur_mod: Option<&str>) -> Option<(Sym, &'t Ty)> {
+    let key = sym(&stdlib_shadow_key(name, cur_mod)?);
+    types.get(&key).map(|t| (key, t))
+}
+
 /// Resolve a nominal type NAME to its canonical (possibly module-qualified)
 /// Sym, per the #433 rules. THE single place this qualification predicate
 /// lives — annotations (via `resolve_type_expr_in`) and the checker's record
@@ -41,6 +74,11 @@ pub fn canonical_user_type_sym(name: &str, types: &HashMap<Sym, Ty>, cur_mod: Op
     // and the call site dangled unspecialized on both targets.
     if matches!(types.get(&sym(name)), Some(Ty::TypeVar(_) | Ty::ConstParam { .. })) {
         return None;
+    }
+    // A user declaration of a stdlib-owned name lives under its shadow key
+    // (#1828); the bare key is the stdlib's and is never consulted for it.
+    if let Some((key, Ty::Record { .. } | Ty::Variant { .. })) = stdlib_shadow_entry(name, types, cur_mod) {
+        return Some(key);
     }
     canonical_user_type_sym_own_module(name, types, cur_mod)
         .or_else(|| canonical_user_type_sym_qualified(name, types))
@@ -109,24 +147,33 @@ fn canonical_user_type_sym_bare(name: &str, types: &HashMap<Sym, Ty>, cur_mod: O
     // dependency's bare alias (which mirrors its qualified entry exactly).
     // Only for the main program (`cur_mod` is None); a user module's own types
     // are already qualified and handled by `canonical_user_type_sym_own_module`.
+    // A `<mod>.name` key is a USER module's type when `<mod>` is neither a
+    // bundled module nor the entry program's own shadow scope (#1828): the
+    // entry program's declarations are not importable, so they are never a
+    // bare reference's owner from anywhere else.
+    let user_module_owner = |k: &Sym| {
+        k.as_str().rsplit_once('.').map_or(false, |(p, base)| {
+            base == name && p != ROOT_TYPE_SCOPE && !almide_lang::stdlib_info::is_bundled_module(p)
+        })
+    };
     if cur_mod.is_none() {
         if let Some(bare) = types.get(&sym(name)) {
             if matches!(bare, Ty::Record { .. } | Ty::Variant { .. }) {
-                let is_alias_of_a_qualified = types.iter().any(|(k, v)| {
-                    k.as_str().rsplit_once('.').map_or(false, |(p, base)| {
-                        base == name && !almide_lang::stdlib_info::is_bundled_module(p)
-                    }) && v == bare
-                });
+                let is_alias_of_a_qualified = types.iter().any(|(k, v)| user_module_owner(k) && v == bare);
                 if !is_alias_of_a_qualified {
                     return Some(sym(name));
                 }
             }
         }
     }
+    // A bundled module's body never references a user type: its bare names
+    // are its own or the stdlib's, so the unique-owner fallback must not
+    // hand it a user module's same-named type.
+    if cur_mod.is_some_and(almide_lang::stdlib_info::is_bundled_module) {
+        return None;
+    }
     let mut owners = types.iter().filter(|(k, v)| {
-        k.as_str().rsplit_once('.').map_or(false, |(p, base)| {
-            base == name && !almide_lang::stdlib_info::is_bundled_module(p)
-        }) && matches!(v, Ty::Record { .. } | Ty::Variant { .. })
+        user_module_owner(k) && matches!(v, Ty::Record { .. } | Ty::Variant { .. })
     });
     if let Some((k, _)) = owners.next() {
         if owners.next().is_none() {
@@ -254,6 +301,11 @@ fn resolve_simple_type_other(other: &str, known_types: Option<&HashMap<Sym, Ty>>
     // to the existing bare resolution for stdlib / local types.
     if let Some(qualified) = known_types.and_then(|types| canonical_user_type_sym(other, types, cur_mod)).map(|s| Ty::Named(s, vec![])) {
         return qualified;
+    }
+    // A user ALIAS of a stdlib-owned name (`type Value = Int`) lives under
+    // the shadow key too (#1828); the nominal shapes were answered above.
+    if let Some((_, alias)) = known_types.and_then(|types| stdlib_shadow_entry(other, types, cur_mod)) {
+        return alias.clone();
     }
     // - Generic type parameters (T, U, Self, ...) resolve via
     //   known_types as `Ty::TypeVar`.

@@ -130,6 +130,30 @@ pub fn prefixed_key(prefix: Option<&str>, name: &str) -> String {
     prefix.map(|p| format!("{}.{}", p, name)).unwrap_or_else(|| name.to_string())
 }
 
+/// The identity prefix of a `type` declaration: its module when it has one;
+/// otherwise, for a declaration of a STDLIB-OWNED name, the scope that keeps
+/// it off the stdlib's bare key (#1828) — the module whose unprefixed pass
+/// `infer_module` is running (`alias_owner_module`), else the entry
+/// program's `ROOT_TYPE_SCOPE`. Every other unprefixed declaration keeps the
+/// bare key it always had.
+pub fn type_decl_prefix(env: &TypeEnv, prefix: Option<&str>, name: &str) -> Option<String> {
+    if let Some(p) = prefix {
+        return Some(p.to_string());
+    }
+    almide_lang::stdlib_info::stdlib_owned_type_owner(name)?;
+    Some(env.alias_owner_module.map(|m| m.to_string())
+        .unwrap_or_else(|| super::resolve::ROOT_TYPE_SCOPE.to_string()))
+}
+
+/// Is this a USER declaration shadowing a stdlib-owned type name — one whose
+/// canonical key is `prefix.name` while the bare `name` stays the stdlib's?
+/// False for the stdlib's own bundled registration of the same name (that
+/// registration is what WRITES the bare key).
+fn shadows_stdlib_type(prefix: Option<&str>, name: &str) -> bool {
+    prefix.is_some_and(|p| !almide_lang::stdlib_info::is_bundled_module(p))
+        && almide_lang::stdlib_info::stdlib_owned_type_owner(name).is_some()
+}
+
 /// The `env.functions` key for a convention method (`encode`, `repr`, …) on
 /// `type_name`, or `None` when the type has no such method.
 ///
@@ -622,10 +646,23 @@ pub fn register_type_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, 
         }
     }
 
+    // A record / variant / transparent alias declared under a stdlib-owned
+    // name registers under its shadow scope (#1828); everything below keys
+    // on `prefix`, so rebinding it here gives the declaration its qualified
+    // identity end to end. An OPAQUE alias (`mod type X = String`) keeps the
+    // bare key: its newtype constructor and pattern are spelled by the bare
+    // name on the native leg and the wasm legs wall the form for any module
+    // scope, so a scoped identity has nowhere to go yet (a module's own
+    // `mod type Token` fails the same way today).
+    let is_opaque_alias = opaque_alias_shape(&resolved, visibility);
+    let owner = if is_opaque_alias { prefix.map(str::to_string) } else { type_decl_prefix(env, prefix, name) };
+    let prefix = owner.as_deref();
+    let user_shadow = !is_opaque_alias && shadows_stdlib_type(prefix, name);
+
     resolved = register_type_decl_opaque_alias(env, name, resolved, &gnames, prefix, visibility);
     register_type_decl_variant_ctors(env, diagnostics, name, prefix, &mut resolved);
     register_type_decl_check_duplicate(env, diagnostics, name, prefix, &resolved);
-    register_type_decl_finalize(env, name, ty, prefix, resolved);
+    register_type_decl_finalize(env, name, ty, prefix, resolved, user_shadow);
 
     if let Some(derives) = deriving {
         register_derive_sigs(env, derives, name, prefix);
@@ -633,10 +670,7 @@ pub fn register_type_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, 
 }
 /// `mod`/local type alias → nominal newtype (opaque constructor), when the declared visibility isn't Public and the resolved shape isn't already a Record/Variant. Registers the opaque-alias bookkeeping and returns the (possibly rewritten) resolved type. Verbatim text move out of [`register_type_decl`].
 fn register_type_decl_opaque_alias(env: &mut TypeEnv, name: &str, resolved: Ty, gnames: &[Sym], prefix: Option<&str>, visibility: ast::Visibility) -> Ty {
-    let is_opaque_alias = !matches!(visibility, ast::Visibility::Public)
-        && !matches!(resolved, Ty::Variant { .. })
-        && !matches!(resolved, Ty::Record { .. });
-    if !is_opaque_alias {
+    if !opaque_alias_shape(&resolved, visibility) {
         return resolved;
     }
     // Store the inner target type for codegen
@@ -657,6 +691,13 @@ fn register_type_decl_opaque_alias(env: &mut TypeEnv, name: &str, resolved: Ty, 
     let owner = prefix.map(|p| sym(p)).or(env.alias_owner_module);
     env.opaque_alias_module.insert(sym(name), owner);
     resolved
+}
+
+/// The `mod` / `local` alias-to-nominal-newtype rule: a non-public
+/// declaration whose resolved shape is not already a record or variant.
+fn opaque_alias_shape(resolved: &Ty, visibility: ast::Visibility) -> bool {
+    !matches!(visibility, ast::Visibility::Public)
+        && !matches!(resolved, Ty::Variant { .. } | Ty::Record { .. })
 }
 /// Fix up a `Variant`'s registered name to the DECLARED name, and register each of its constructors. Verbatim text move out of [`register_type_decl`].
 fn register_type_decl_variant_ctors(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, name: &str, prefix: Option<&str>, resolved: &mut Ty) {
@@ -722,14 +763,20 @@ fn register_type_decl_check_duplicate(env: &TypeEnv, diagnostics: &mut Vec<Diagn
     }
 }
 /// Register field defaults (both plain and record-payload variant cases), insert the resolved type under its canonical key, and — for a prefixed (imported/sub-module) type — dual-register the bare name for unqualified access. Verbatim text move out of [`register_type_decl`].
-fn register_type_decl_finalize(env: &mut TypeEnv, name: &str, ty: &ast::TypeExpr, prefix: Option<&str>, resolved: Ty) {
+fn register_type_decl_finalize(env: &mut TypeEnv, name: &str, ty: &ast::TypeExpr, prefix: Option<&str>, resolved: Ty, user_shadow: bool) {
     let key = prefixed_key(prefix, name);
+    // A user declaration shadowing a stdlib-owned name never writes the
+    // BARE key (#1828): that key is the stdlib type's identity — the twin's
+    // own bundled registration writes it, an undeclared builtin (`Value`)
+    // has none — and every stdlib signature resolves through it. The user's
+    // type is reachable through its qualified key alone.
+    let dual_register_bare = prefix.is_some() && !user_shadow;
     // Field defaults, keyed like `types` (both keys when prefixed), so record-construction validation knows which fields may be omitted (#488).
     if let ast::TypeExpr::Record { fields } | ast::TypeExpr::OpenRecord { fields } = ty {
         let defaults: std::collections::HashSet<Sym> =
             fields.iter().filter(|f| f.default.is_some()).map(|f| f.name).collect();
         env.record_field_defaults.insert(sym(&key), defaults.clone());
-        if prefix.is_some() {
+        if dual_register_bare {
             env.record_field_defaults.insert(sym(name), defaults);
         }
     }
@@ -745,11 +792,11 @@ fn register_type_decl_finalize(env: &mut TypeEnv, name: &str, ty: &ast::TypeExpr
         }
     }
     env.types.insert(sym(&key), resolved.clone());
-    if prefix.is_some() {
+    if dual_register_bare {
         // Bare-name dual-registration of a prefixed type, for unqualified access. Record it so a local same-name type may shadow it (#433).
         env.types.insert(sym(name), resolved);
         env.prefixed_bare_aliases.insert(sym(name));
-    } else {
+    } else if prefix.is_none() {
         // A local type owns the bare name now — it is no longer a dependency alias, so a later genuine local duplicate is still caught by E020.
         env.prefixed_bare_aliases.remove(&sym(name));
     }
@@ -864,8 +911,13 @@ fn register_decl_type(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl
     register_type_decl(env, diagnostics, &TypeDeclToRegister {
         name, ty, deriving, generics, prefix, visibility: *visibility,
     });
-    // Register in DefTable
-    let type_key = prefixed_key(prefix, name);
+    // Register in DefTable, under the same identity key the type env holds:
+    // the shadow scope when `register_type_decl` gave the declaration one
+    // (a stdlib-owned name, #1828 — an opaque alias keeps the bare key and
+    // registers no scoped entry), else the prefixed key.
+    let owner = type_decl_prefix(env, prefix, name);
+    let scoped_key = prefixed_key(owner.as_deref(), name);
+    let type_key = if env.types.contains_key(&sym(&scoped_key)) { scoped_key } else { prefixed_key(prefix, name) };
     let pkg = prefix.and_then(|p| p.split('.').next()).unwrap_or("");
     let mod_path = prefix.unwrap_or("");
     let resolved_ty = env.types.get(&sym(&type_key)).cloned().unwrap_or(Ty::Unknown);
@@ -876,9 +928,15 @@ fn register_decl_type(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl
         // `[T: Codec]` bound resolves its argument to `Ty::Named("lib.P")` and
         // looked that up here, where only bare `P` had ever been written — so
         // a conforming type from another module was reported as not
-        // implementing the protocol (#1087).
+        // implementing the protocol (#1087). A stdlib-owned name's bare slot
+        // is the stdlib's (#1828): the user's derives never land on it.
+        let protocol_keys: Vec<Sym> = if type_key != prefixed_key(prefix, name) {
+            vec![sym(&type_key)]
+        } else {
+            vec![sym(name), sym(&type_key)]
+        };
         for d in derives {
-            for key in [sym(name), sym(&type_key)] {
+            for key in protocol_keys.iter().copied() {
                 env.type_protocols
                     .entry(key)
                     .or_insert_with(std::collections::HashSet::new)

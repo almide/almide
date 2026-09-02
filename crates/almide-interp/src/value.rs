@@ -558,7 +558,10 @@ fn repr_seq(open: &str, close: &str, xs: &[Value]) -> String {
 fn repr_record(name: Option<Sym>, fields: &[(Sym, Value)]) -> String {
     let mut o = String::new();
     if let Some(n) = name {
-        o.push_str(n.as_str());
+        // The entry program's shadow of a stdlib-owned name is `self.X`
+        // (#1828); it displays as the `X` the source declares, as both
+        // backends do.
+        o.push_str(almide_lang::stdlib_info::strip_root_type_scope(n.as_str()));
         o.push(' ');
     }
     o.push('{');

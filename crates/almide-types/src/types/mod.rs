@@ -17,9 +17,18 @@ fn bare_type_name(name: &str) -> &str {
     name.rsplit_once('.').map(|(_, bare)| bare).unwrap_or(name)
 }
 
-/// Compare two type name Syms ignoring module qualification.
+/// Compare two type name Syms ignoring module qualification — except that a
+/// BARE stdlib-owned name (`Value`, `FileStat`, …) is the stdlib's type
+/// itself, and a user declaration of that name is `self.X` / `m.X`, a
+/// different type that never matches it by spelling (#1828: with the
+/// leniency, `let v: Value = json.parse(..)!` unified the user's record with
+/// the json value).
 pub(crate) fn names_match(a: Sym, b: Sym) -> bool {
-    a == b || bare_type_name(a.as_str()) == bare_type_name(b.as_str())
+    if a == b {
+        return true;
+    }
+    let (sa, sb) = (a.as_str(), b.as_str());
+    bare_type_name(sa) == bare_type_name(sb) && !crate::stdlib_info::stdlib_type_vs_user_shadow(sa, sb)
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]

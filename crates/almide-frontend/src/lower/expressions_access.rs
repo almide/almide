@@ -510,6 +510,13 @@ fn lower_expr_record(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<
                         return sym(&qual);
                     }
                 }
+                // The entry program's struct shadowing a stdlib-owned name is
+                // `self.Type` (#1828), pinned like a module's own struct.
+                if let Some(qual) = crate::canonicalize::resolve::stdlib_shadow_key(s, ctx.current_module.map(|m| m.as_str())) {
+                    if is_struct(&qual) {
+                        return sym(&qual);
+                    }
+                }
                 n
             });
             let mut rec = ctx.mk(IrExprKind::Record { name: ctor_name, fields: fs }, ty, span);

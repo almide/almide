@@ -57,7 +57,15 @@ fn bare_named_of(name: &str, types: &TypeTable) -> Option<SliceTy> {
             }
             _ => None,
         })
-        .or_else(|| named_suffix_unique(types, name))
+        // A stdlib-owned bare name IS the stdlib's identity (#1828): a user
+        // declaration of that name lives under `self.X` / `m.X` and must
+        // never be reached from the bare spelling by suffix.
+        .or_else(|| {
+            if almide_types::stdlib_info::stdlib_owned_type_owner(name).is_some() {
+                return None;
+            }
+            named_suffix_unique(types, name)
+        })
 }
 
 pub(crate) fn slice_ty_of(ty: &Ty, types: &TypeTable) -> Option<SliceTy> {

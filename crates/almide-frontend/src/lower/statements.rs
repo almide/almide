@@ -544,9 +544,9 @@ fn lower_pattern_record(
     fields: &[ast::FieldPattern],
     rest: bool,
 ) -> IrPattern {
-    let bare_name = bare_ctor_name(name);
+    let pat_name = struct_pattern_name(ctx, name);
     let mut ir_fields: Vec<IrFieldPattern> = fields.iter().map(|f| {
-        let field_ty = resolve_record_field_ty(ctx, &bare_name, &f.name);
+        let field_ty = resolve_record_field_ty(ctx, &pat_name, &f.name);
         IrFieldPattern {
             name: f.name.to_string(),
             pattern: f.pattern.as_ref().map(|p| lower_pattern(ctx, p, &field_ty)),
@@ -554,12 +554,29 @@ fn lower_pattern_record(
     }).collect();
     for (i, f) in fields.iter().enumerate() {
         if f.pattern.is_none() {
-            let field_ty = resolve_record_field_ty(ctx, &bare_name, &f.name);
+            let field_ty = resolve_record_field_ty(ctx, &pat_name, &f.name);
             let var = ctx.define_var(&f.name, field_ty.clone(), Mutability::Let, None);
             ir_fields[i].pattern = Some(IrPattern::Bind { var, ty: field_ty });
         }
     }
-    IrPattern::RecordPattern { name: bare_name.to_string(), fields: ir_fields, rest }
+    IrPattern::RecordPattern { name: pat_name.to_string(), fields: ir_fields, rest }
+}
+
+/// The name a record pattern carries into the IR. A STRUCT pattern is pinned
+/// to its qualified canonical name — `m.Cfg` inside module `m`, `self.Value`
+/// for the entry program's shadow of a stdlib-owned name (#1828) — exactly
+/// as the struct LITERAL is (`lower/expressions_access.rs`, #433), so the
+/// native walker names the mangled struct instead of a bare spelling the
+/// flat program no longer has (`Cfg { a, .. }` against `almide_rt_m_Cfg` was
+/// rustc E0308 while the wasm leg ran — a divergence of this landing's
+/// family). A record-VARIANT case keeps the bare case name: the ctor table is
+/// keyed by it and the subject's enum qualifies it (#412).
+fn struct_pattern_name(ctx: &LowerCtx, written: &almide_base::intern::Sym) -> almide_base::intern::Sym {
+    let cur_mod = ctx.current_module.map(|m| m.as_str());
+    match crate::canonicalize::resolve::canonical_user_type_sym(written.as_str(), &ctx.env.types, cur_mod) {
+        Some(key) if matches!(ctx.env.types.get(&key), Some(Ty::Record { .. })) => key,
+        _ => bare_ctor_name(written),
+    }
 }
 
 /// Extract constructor payload types from the subject type first (instantiated types),
