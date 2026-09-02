@@ -188,7 +188,7 @@ effect fn main() -> Unit = {
 
 ```
 effect process.exec(cmd: String, args: List[String]) -> String
-effect process.exit(code: Int) -> ?
+effect process.exit(code: Int) -> Never
 process.args() -> List[String]
 effect process.stdin_lines() -> List[String]
 effect process.exec_in(dir: String, cmd: String, args: List[String]) -> String

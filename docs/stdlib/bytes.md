@@ -163,21 +163,21 @@ bytes.append_u16_le(b: Bytes, val: Int) -> Unit
 bytes.append_u32_be(b: Bytes, val: Int) -> Unit
 bytes.append_u32_le(b: Bytes, val: Int) -> Unit
 bytes.append_u8(b: Bytes, val: Int) -> Unit
-bytes.as_mut_ptr(b: Bytes) -> ?
-bytes.as_ptr(b: Bytes) -> ?
+bytes.as_mut_ptr(b: Bytes) -> RawPtr
+bytes.as_ptr(b: Bytes) -> RawPtr
 bytes.chunks(b: Bytes, size: Int) -> List[Bytes]
 bytes.clear(b: Bytes) -> Unit
 bytes.cmp(a: Bytes, b: Bytes) -> Int
 bytes.concat(a: Bytes, b: Bytes) -> Bytes
 bytes.contains(b: Bytes, pattern: Bytes) -> Bool
 bytes.copy_from(dst: Bytes, src: Bytes, dst_off: Int, src_off: Int, len: Int) -> Unit
-bytes.copy_to_ptr(b: Bytes, ptr: ?, cap: Int) -> Int
+bytes.copy_to_ptr(b: Bytes, ptr: RawPtr, cap: Int) -> Int
 bytes.data_ptr(b: Bytes) -> Int
 bytes.ends_with(b: Bytes, suffix: Bytes) -> Bool
 bytes.eof(b: Bytes, pos: Int) -> Bool
 bytes.fill(b: Bytes, val: Int) -> Unit
 bytes.from_list(xs: List[Int]) -> Bytes
-bytes.from_raw_ptr(ptr: ?, len: Int) -> Bytes
+bytes.from_raw_ptr(ptr: RawPtr, len: Int) -> Bytes
 bytes.from_string(s: String) -> Bytes
 bytes.get(b: Bytes, i: Int) -> Option[Int]
 bytes.get_or(b: Bytes, i: Int, default: Int) -> Int

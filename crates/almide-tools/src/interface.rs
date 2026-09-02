@@ -437,6 +437,10 @@ fn resolve_ty_scalar(ty: &Ty) -> Option<TypeRef> {
         Ty::UInt64 => named("UInt64"),
         Ty::Float32 => named("Float32"),
         Ty::Float64 => named("Float64"),
+        // #1832: the raw pointer and the bottom type used to fall through to
+        // `Unknown`, which the signature index rendered as `?`.
+        Ty::RawPtr => named("RawPtr"),
+        Ty::Never => named("Never"),
         _ => return None,
     })
 }
