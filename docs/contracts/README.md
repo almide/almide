@@ -272,7 +272,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-242 | Conditional expressions evaluate the taken arm only, identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-243 | Block expressions yield their tail value identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-244 | While loops iterate their condition-tested body identically on both targets | 0.57.1 | active | fixture | 1 |
-| C-245 | String interpolation embeds each segment's canonical display identically on both targets | 0.57.1 | active | fixture | 1 |
+| C-245 | String interpolation embeds each segment's canonical display identically on both targets | 0.57.1 | active | fixture | 2 |
 | C-246 | Identifiers resolve to their nearest binding; unresolved names are check-time E003 naming the identifier | 0.57.1 | active | fixture | 1 |
 | C-247 | Match expressions select the first matching arm identically on both targets; non-exhaustive is check-time E010 | 0.57.1 | active | fixture | 1 |
 | C-248 | for-in iterates list-family heads with optional tuple destructuring identically on both targets | 0.57.1 | active | fixture | 1 |
