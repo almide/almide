@@ -282,7 +282,25 @@ none
 
 ### `json.set_path(j: Value, path: JsonPath, value: Value) -> Result[Value, String]`
 
-Set a value at a JSON path. Returns error if path is invalid.
+Set a value at a JSON path. Infallible: a missing object key is created, an index past the end of an array leaves the document unchanged, and a field step through a non-object value replaces that value with an object holding the field.
+
+```almd run
+import json
+
+fn show(r: Result[Value, String]) -> String = match r { ok(v) => json.stringify(v), err(e) => "err " + e }
+
+effect fn main() -> Unit = {
+  let doc = json.parse("{\"a\": {\"b\": 1}, \"xs\": [1, 2]}")!
+  println(show(json.set_path(doc, json.root() |> json.field("a") |> json.field("c"), value.int(5))))
+  println(show(json.set_path(doc, json.root() |> json.field("xs") |> json.index(7), value.int(5))))
+  println(show(json.set_path(doc, json.root() |> json.field("a") |> json.field("b") |> json.field("z"), value.int(5))))
+}
+```
+```output
+{"a":{"b":1,"c":5},"xs":[1,2]}
+{"a":{"b":1},"xs":[1,2]}
+{"a":{"b":{"z":5}},"xs":[1,2]}
+```
 
 ```almd run
 import json
