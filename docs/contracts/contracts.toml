@@ -3106,11 +3106,12 @@ evidence  = [
 id        = "C-245"
 spec      = "ALS-E16"
 title     = "String interpolation embeds each segment's canonical display identically on both targets"
-statement = "ALS-E16: `${expr}` segments (variable, arithmetic, multiple per literal), the `\\${` literal escape, and per-type display — String verbatim, Int decimal, Bool lowercase, Float canonical (1.5 pinned; the exhaustive float display norm waits on the ALS-E3/#1261 ruling) — byte-identical native <-> wasm (fixture pins hello world / sum=3 / n*7=42 / mix / escaped ${not_interp} / float=1.5 bool=false)."
+statement = "ALS-E16: `${expr}` segments (variable, arithmetic, multiple per literal), the `\\${` literal escape, and per-type display — String verbatim, Int decimal, Bool lowercase, Float canonical (1.5 pinned; the exhaustive float display norm waits on the ALS-E3/#1261 ruling) — byte-identical native <-> wasm (fixture pins hello world / sum=3 / n*7=42 / mix / escaped ${not_interp} / float=1.5 bool=false). EXTENDED (#1826, 0.61.2): the build has NO length ceiling — an interpolation whose segments total any length renders what native renders, on the structural leg included. That leg builds every interpolation in a line buffer whose fixed room is 64 KiB; a build that outgrows it now RELOCATES to a heap arena (cursors are logical offsets, so nested builds stay sound and the arena is kept for the program's lifetime) where it used to run off the room and trap into a SILENT exit 1 (nightly fuzz seed 537649456916 index 250: a 1 000 000-char `string.pad_end` hole printed natively, exited 1 with empty stdout on wasm). Pinned at the room's edge (65 535 / 65 537 chars), at 300 000, nested, with an Int rendered at the edge (the `$append_i64` path had no room check at all), in statement and value position, and through the JSON quoting writer. In the same change the embedded wasm host stopped exiting 1 in silence on a trap: a trap that reaches it without an `almide.exit` code prints ONE stderr line, `Error: wasm trap: <wasmtime's reason>` (out of bounds memory access / wasm `unreachable` instruction executed / call stack exhausted …), and exits 1 — a shape native never produces (native aborts are `Error: <msg>` from a defined guard), so the `wasm trap:` prefix is the leg's own spelling and NOT a byte-identity promise; a contracted fixture never traps. The p1 shim's injected `proc_exit(1)` on a stock WASI runtime stays silent (that runtime has nowhere to print from)."
 since     = "0.57.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/string_interpolation.almd", class = "fixture" },
+  { path = "spec/wasm_cross/string_interp_large_hole.almd", class = "fixture" },
 ]
 
 [[contract]]

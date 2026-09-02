@@ -137,6 +137,9 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     functions.function(7); // F_COW ((i32) -> i32)
     functions.function(5); // F_STR_APPEND ((i32, i32) -> i32)
     functions.function(8); // F_BYTES_PUSH ((i32, i64) -> i32)
+    functions.function(0); // F_LINE_GROW ((i32, i32) -> ())
+    functions.function(0); // F_LINE_PRINTLN ((i32, i32) -> ())
+    functions.function(0); // F_LINE_EPRINTLN ((i32, i32) -> ())
     for i in 0..table.infos.len() {
         functions.function(T_FN_BASE + i as u32);
     }
@@ -201,6 +204,16 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     globals.global(
         GlobalType { val_type: ValType::I64, mutable: true, shared: false },
         &ConstExpr::i64_const(0),
+    );
+    // #1826: the line buffer's relocation delta (0 = the fixed room) and
+    // its logical room end (starts at the heap floor) — globals 12/13.
+    globals.global(
+        GlobalType { val_type: ValType::I32, mutable: true, shared: false },
+        &ConstExpr::i32_const(0),
+    );
+    globals.global(
+        GlobalType { val_type: ValType::I32, mutable: true, shared: false },
+        &ConstExpr::i32_const(heap_start as i32),
     );
 
     // The funcref table always exists (a call_indirect in ANY body needs
@@ -293,6 +306,9 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
         (F_COW, emit_cow()),
         (F_STR_APPEND, emit_str_append()),
         (F_BYTES_PUSH, emit_bytes_push()),
+        (F_LINE_GROW, emit_line_grow()),
+        (F_LINE_PRINTLN, emit_line_print(F_PRINTLN_IMPORT)),
+        (F_LINE_EPRINTLN, emit_line_print(F_EPRINTLN_IMPORT)),
     ];
     debug_assert!(
         static_helpers.iter().enumerate().all(|(i, (idx, _))| *idx == F_PRINTLN_BLOCK + i as u32),

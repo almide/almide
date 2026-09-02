@@ -6,6 +6,9 @@ use wasm_encoder::{BlockType, Function, MemArg, ValType};
 use crate::*;
 
 pub(crate) use crate::runtime_alloc::{emit_alloc, emit_cow, emit_dec_flat, emit_free, emit_inc};
+pub(crate) use crate::runtime_line::{
+    emit_append_copy, emit_append_i64, emit_buf_to_block, emit_line_grow, emit_line_print,
+};
 
 // ── emitted runtime helpers ─────────────────────────────────────────────
 
@@ -62,45 +65,6 @@ pub(crate) fn emit_block_print(import: u32) -> Function {
         .i32_load(len_memarg()) // len from the header
         .call(import)
         .end();
-    f
-}
-
-/// `$append_copy(cur: i32, src: i32, len: i32) -> i32`: memory.copy bytes
-/// to the cursor, return the advanced cursor. Traps LOUDLY when the write
-/// would leave the line buffer (never corrupts the heap behind it).
-pub(crate) fn emit_append_copy() -> Function {
-    let mut f = Function::new([]);
-    let mut i = f.instructions();
-    i.local_get(0).local_get(2).i32_add().global_get(G_LINE_END).i32_gt_u().if_(BlockType::Empty);
-    i.unreachable();
-    i.end();
-    i.local_get(0)
-        .local_get(1)
-        .local_get(2)
-        .call(F_COPY)
-        .local_get(0)
-        .local_get(2)
-        .i32_add()
-        .end();
-    f
-}
-
-/// `$buf_to_block(start: i32, cur: i32) -> i32`: capture a finished
-/// line-buffer build as a REAL layout block (value-position `"${...}"`).
-pub(crate) fn emit_buf_to_block() -> Function {
-    // params: 0=start i32, 1=cur i32; locals: 2=len i32, 3=base i32
-    let (start, cur, len, bbase) = (0u32, 1u32, 2u32, 3u32);
-    let payload = almide_layout::PAYLOAD as i32;
-    let mut f = Function::new([(2, ValType::I32)]);
-    let mut i = f.instructions();
-    i.local_get(cur).local_get(start).i32_sub().local_set(len);
-    i.local_get(len).call(F_ALLOC).local_set(bbase);
-    i.local_get(bbase).i32_const(payload).i32_add();
-    i.local_get(start);
-    i.local_get(len);
-    i.call(F_COPY);
-    i.local_get(bbase);
-    i.end();
     f
 }
 
@@ -395,23 +359,6 @@ pub(crate) fn emit_itoa() -> Function {
     i.end();
     // return ITOA_END - p
     i.i32_const(ITOA_END as i32).local_get(p).i32_sub();
-    i.end();
-    f
-}
-
-/// `$append_i64(cur: i32, v: i64) -> i32`: itoa then copy to the cursor;
-/// returns the advanced cursor.
-pub(crate) fn emit_append_i64() -> Function {
-    // params: 0=cur i32, 1=v i64; locals: 2=len i32
-    let (cur, v, len) = (0u32, 1u32, 2u32);
-    let mut f = Function::new([(1, ValType::I32)]);
-    let mut i = f.instructions();
-    i.local_get(v).call(F_ITOA).local_set(len);
-    i.local_get(cur);
-    i.i32_const(ITOA_END as i32).local_get(len).i32_sub(); // src
-    i.local_get(len);
-    i.call(F_COPY);
-    i.local_get(cur).local_get(len).i32_add();
     i.end();
     f
 }
