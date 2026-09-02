@@ -9,6 +9,16 @@
 /// of 3): FsRead (`read_text`/`read_bytes*`/`list_dir`/`exists`/`stat`) and FsWrite
 /// (`write`/`mkdir_p`/`remove_all`) admitted calls. Verbatim.
 fn is_admitted_effectful_fs(module: &str, func: &str) -> bool {
+    // Three thirds of one OR-chain (codopsy A: cc 34 as a single predicate):
+    // the one-name read/write and path admissions, then the `matches!` families.
+    is_admitted_effectful_fs_reads_writes(module, func)
+        || is_admitted_effectful_fs_paths(module, func)
+        || is_admitted_effectful_fs_families(module, func)
+}
+
+/// Verbatim first third of [`is_admitted_effectful_fs`]: the one-name read /
+/// write clauses (`read_text` … `write`).
+fn is_admitted_effectful_fs_reads_writes(module: &str, func: &str) -> bool {
     (module == "fs" && func == "read_text")
         // `fs.read_lines` READS the filesystem — REUSES Capability::FsRead. Self-hosted
         // as prim.read_text_file + string.lines (fs_read_lines.almd), the exact
@@ -18,7 +28,12 @@ fn is_admitted_effectful_fs(module: &str, func: &str) -> bool {
         || (module == "fs" && func == "list_dir")
         || (module == "fs" && func == "read_bytes")
         || (module == "fs" && func == "write")
-        || (module == "fs" && func == "mkdir_p")
+}
+
+/// Verbatim second third of [`is_admitted_effectful_fs`]: the one-name path
+/// clauses (`mkdir_p` … `stat`).
+fn is_admitted_effectful_fs_paths(module: &str, func: &str) -> bool {
+    (module == "fs" && func == "mkdir_p")
         // `fs.create_temp_dir` WRITES the filesystem (a mkdir under the temp
         // root) — REUSES Capability::FsWrite, plus Entropy for the unique
         // suffix. Self-hosted over prim.make_dir + prim.random_get
@@ -36,11 +51,16 @@ fn is_admitted_effectful_fs(module: &str, func: &str) -> bool {
         // prim floor is in the program map and the transitive cap_witness counts FsRead.
         // Returns Result[FileStat, String] (a record Ok payload).
         || (module == "fs" && func == "stat")
+}
+
+/// Verbatim second half of [`is_admitted_effectful_fs`]: the family clauses
+/// (`file_size`/… through the fold_lines walkers).
+fn is_admitted_effectful_fs_families(module: &str, func: &str) -> bool {
         // `fs.file_size` / `fs.modified_at` / `fs.is_dir` / `fs.is_file` READ the
         // filesystem (each a path_filestat query) — REUSE Capability::FsRead, the
         // fs.stat accounting. Self-hosted over prim.path_filestat (fs_file_size.almd /
         // fs_modified_at.almd / fs_is_dir.almd — is_dir and is_file share one file).
-        || (module == "fs" && matches!(func, "file_size" | "modified_at" | "is_dir" | "is_file"))
+    (module == "fs" && matches!(func, "file_size" | "modified_at" | "is_dir" | "is_file"))
         // `fs.copy` READS src and WRITES dst (prim.read_text_file + prim.write_text_file,
         // fs_copy.almd) — FsRead + FsWrite. `fs.append` is the same composition over one
         // path (read-concat-write, fs_append.almd). `fs.create_temp_file` WRITES the
