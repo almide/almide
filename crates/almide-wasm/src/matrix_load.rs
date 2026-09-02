@@ -329,8 +329,13 @@ impl Emitter<'_> {
         let hrow = self.hold_i64()?; // rid (selector) / row index as i64
         let hj = self.hold_i32()?;
         let hrb = self.hold_i64()?; // row_bytes
+        // #1787: a selected ROW is `cols / 128` whole blocks (native's row
+        // schedule); the trailing `cols mod 128` elements are 0.0. The
+        // global-k schedule below is right only for the full loader.
+        let hcr = self.hold_i64()?; // cols rounded down to the block
         let mut i = self.f.instructions();
         i.local_get(hc).i64_const(128).i64_div_s().i64_const(18).i64_mul().local_set(hrb);
+        i.local_get(hc).i64_const(128).i64_div_s().i64_const(128).i64_mul().local_set(hcr);
         i.i32_const(0).local_set(hi);
         i.block(BlockType::Empty).loop_(BlockType::Empty);
         i.local_get(hi).local_get(hr).i32_wrap_i64().i32_ge_u().br_if(1);
@@ -366,10 +371,22 @@ impl Emitter<'_> {
             .i32_const(8)
             .i32_mul();
         i.i32_add();
-        // k = rid*cols + j (global schedule)
-        i.local_get(hd).local_get(hoff);
-        i.local_get(hrow).local_get(hc).i64_mul().local_get(hj).i64_extend_i32_u().i64_add();
-        i.call(qv);
+        if select {
+            // j < cr: k = rid*cr + j on the ROW schedule; else the zero tail.
+            i.local_get(hj).i64_extend_i32_u().local_get(hcr).i64_lt_u();
+            i.if_(BlockType::Result(ValType::F64));
+            i.local_get(hd).local_get(hoff);
+            i.local_get(hrow).local_get(hcr).i64_mul().local_get(hj).i64_extend_i32_u().i64_add();
+            i.call(qv);
+            i.else_();
+            i.i64_const(0).f64_reinterpret_i64();
+            i.end();
+        } else {
+            // k = rid*cols + j (global schedule)
+            i.local_get(hd).local_get(hoff);
+            i.local_get(hrow).local_get(hc).i64_mul().local_get(hj).i64_extend_i32_u().i64_add();
+            i.call(qv);
+        }
         i.f64_store(mat_elem());
         i.local_get(hj).i32_const(1).i32_add().local_set(hj);
         i.br(0).end().end();
@@ -378,6 +395,7 @@ impl Emitter<'_> {
         i.br(0).end().end();
         i.local_get(ho);
         let _ = i;
+        self.release_i64();
         self.release_i64();
         self.release_i32();
         self.release_i64();

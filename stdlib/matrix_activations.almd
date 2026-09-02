@@ -549,9 +549,12 @@ fn matrix_from_q1_0_bytes(data: Bytes, offset: Int, rows: Int, cols: Int) -> Lis
 
 // select_rows_q1_0(data, offset, cols, row_ids) — the ROW-SUBSET twin of
 // from_q1_0_bytes: each selected row rid (clamped to 0 like native's
-// `rid.max(0)`) decodes its cols weights through the SAME `__q10_row`
-// (row_k0 = rid·cols — the global-k schedule works because cols is a
-// 128-multiple, so a row starts on a block boundary).
+// `rid.max(0)`) decodes its whole blocks through the SAME `__q10_row` on the
+// ROW schedule (row_k0 = rid·cr with cr = cols/128*128 — native's
+// `n_blocks = cols / 128`), and the trailing `cols mod 128` elements are 0.0
+// (#1787: the global-k `rid·cols` schedule only agreed with native when cols
+// was a 128-multiple; a partial block decoded bytes the row bound never
+// admitted).
 // A row whose 18-byte/128-weight blocks would read past the buffer is the
 // all-zero row (`__q8_zfill`, the shared zero-filler) — the family's defined
 // OOB→zeros edge, per ROW; `limit` is the absolute end of the data block.
@@ -561,9 +564,13 @@ else {
   let rid0 = list.get(ids, i) ?? 0
   let rid = if rid0 < 0 then 0 else rid0
   let row_bytes = cols / 128 * 18
+  let cr = cols / 128 * 128
   let row = prim.alloc_list_f64(cols)
   let _c = if base + rid * row_bytes + row_bytes > limit then __q8_zfill(prim.handle(row), cols, 0)
-  else __q10_row(prim.handle(row), base, limit, rid * cols, cols, 0)
+  else {
+    let _d = __q10_row(prim.handle(row), base, limit, rid * cr, cr, 0)
+    __q8_zfill(prim.handle(row), cols, cr)
+  }
   prim.store_str(ho + 12 + i * 8, row)
   __q10_sel_rows(ho, base, limit, ids, cols, i + 1)
 }
