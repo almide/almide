@@ -4294,3 +4294,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/closure_borrowed_arg_guard.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-335"
+spec      = "ALS-R7"
+title     = "path.extension treats a leading dot as a hidden-file marker, not an extension, on both targets"
+statement = "`path.extension` answers the documented rule on every target: the extension is the text after the LAST dot of the basename, and a name whose only dot is a leading one (`.gitignore`) has no extension — `none`, the same rule `path.stem` already kept (`.gitignore` stems to itself) and the POSIX / Rust `Path::extension` convention. `.bashrc.bak` is `bak`, `a.tar.gz` is `gz`, `Makefile` is `none`, and a bare trailing dot (`foo.`) is the empty extension. Before this contract both legs split the basename on every dot and answered `some(\"gitignore\")` while the docs promised `none` (#1795, found by the doctest promotion); the body is self-hosted and shared, so the fix and the fixture bind both legs at once."
+since     = "0.61.2"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/path_extension_hidden.almd", class = "fixture" },
+]
