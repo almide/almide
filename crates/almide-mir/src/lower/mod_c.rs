@@ -1003,6 +1003,7 @@ include!("mod_p5_b.rs");
 // The desugar family (formerly one 4.8k-line mod_p6.rs), split by concern:
 include!("desugar.rs");
 include!("desugar_b.rs");
+include!("desugar_c.rs");
 include!("desugar_call_arg_anf.rs");
 include!("desugar_unwrap.rs");
 include!("desugar_unwrap_b.rs");
