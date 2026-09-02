@@ -3,6 +3,14 @@
 # Clone of docs/roadmap/generate-readme.sh in spirit: pure shell/awk, no deps.
 #
 #   bash docs/contracts/generate-readme.sh > docs/contracts/README.md
+#   bash docs/contracts/generate-readme.sh --counts > docs/contracts/README.md
+#                          # also restamp proofs/ledger-counts.toml first
+#
+# The "N contracts" total above the table is NOT re-derived on a default run:
+# it is rendered from the stamped record in proofs/ledger-counts.toml inside a
+# dated `counts:generated` block, so a contract PR regenerates its row and
+# leaves the total alone (two contract PRs conflicted on that one line at every
+# merge). The table rows are derived every run.
 #
 # Values are unquoted by stripping the LEADING `key = "` and the TRAILING quote only —
 # NOT at the first `"` found, because a title may contain an escaped one (C-050's
@@ -23,6 +31,12 @@ cd "$(dirname "$0")/../.." || exit 2
 
 LEDGER="docs/contracts/contracts.toml"
 CLASS_FILE="scripts/lib/contract-classes.txt"
+. scripts/lib/ledger-counts.sh
+case "${1:-}" in
+  --counts) counts_stamp ;;
+  "") ;;
+  *) echo "::error::unknown flag $1 (expected --counts)" >&2; exit 2 ;;
+esac
 # Comma-joined so it survives an awk -v assignment (newlines are illegal there).
 CLASSES_CSV="$(grep -vE '^[[:space:]]*(#|$)' "$CLASS_FILE" | paste -sd, -)"
 
@@ -48,6 +62,12 @@ cat << 'HEADER'
 - The gate (`scripts/check-contracts.sh`, CI + lefthook) enforces that every
   contract has real evidence, every fixture names its contract(s), and the link is
   bidirectional.
+- **Aggregate counts are stamped, not regenerated per PR.** The "N contracts"
+  total below (and every other total the generated docs quote) renders from
+  `proofs/ledger-counts.toml`, dated in its `counts:generated` block. A fixture
+  or contract PR regenerates the rows and leaves the block alone; refresh with
+  `bash scripts/gen-ledger-counts.sh` before a release seal, or when the nightly
+  `scripts/check-ledger-counts.sh` reports drift.
 
 Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
@@ -96,7 +116,7 @@ awk -v classes="$CLASSES_CSV" '
   END { flush() }
 ' "$LEDGER" | sort > /tmp/contracts_rows.$$
 
-echo "$(grep -c . /tmp/contracts_rows.$$) contracts"
+counts_render_index
 echo ""
 echo "| ID | Contract | Since | Status | Strongest Evidence | # Fixtures |"
 echo "|----|----------|-------|--------|--------------------|-----------:|"
