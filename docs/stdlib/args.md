@@ -16,8 +16,13 @@ almide run app.almd -- --verbose --output=out.txt input.csv
 
 The argument list as given, argv[0] included.
 
-```almd
-let all = args.raw()
+```almd check
+import args
+
+fn main() -> Unit = {
+  let all = args.raw()
+  println("${all}")
+}
 ```
 
 ### `args.flag(name: String) -> Bool`
@@ -25,8 +30,12 @@ let all = args.raw()
 True when either the long form `--name` or the short form `-n` (the first
 character of `name`) is present.
 
-```almd
-if args.flag("verbose") then println("loud") else ()
+```almd check
+import args
+
+fn main() -> Unit = {
+  if args.flag("verbose") then println("loud") else ()
+}
 ```
 
 ### `args.option(name: String) -> Option[String]`
@@ -34,10 +43,16 @@ if args.flag("verbose") then println("loud") else ()
 The value of `--name`, accepting both spellings — `--name=value` and
 `--name value`. `none` when the flag is absent or has no value after it.
 
-```almd
-match args.option("output") {
-  some(path) => fs.write(path, body),
-  none => println(body),
+```almd check
+import args
+import fs
+
+effect fn main() -> Unit = {
+  let body = "report body"
+  match args.option("output") {
+    some(path) => fs.write(path, body),
+    none => println(body),
+  }
 }
 ```
 
@@ -45,8 +60,13 @@ match args.option("output") {
 
 `args.option` with a default.
 
-```almd
-let out = args.option_or("output", "out.txt")
+```almd check
+import args
+
+fn main() -> Unit = {
+  let out = args.option_or("output", "out.txt")
+  println(out)
+}
 ```
 
 ### `args.positional() -> List[String]`
@@ -54,16 +74,27 @@ let out = args.option_or("output", "out.txt")
 Arguments that are not flags, with argv[0] dropped. Note that this filters on a
 leading `-`, so a value supplied as `--name value` stays in the list.
 
-```almd
-for file in args.positional() { process(file) }
+```almd check
+import args
+
+fn process(file: String) -> Unit = println("processing ${file}")
+
+fn main() -> Unit = {
+  for file in args.positional() { process(file) }
+}
 ```
 
 ### `args.positional_at(i: Int) -> Option[String]`
 
 The i-th positional argument, or `none` when there are fewer.
 
-```almd
-let input = args.positional_at(0) ?? "-"
+```almd check
+import args
+
+fn main() -> Unit = {
+  let input = args.positional_at(0) ?? "-"
+  println(input)
+}
 ```
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
