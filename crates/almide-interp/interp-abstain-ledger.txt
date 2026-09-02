@@ -11,6 +11,7 @@
 # (bridge.rs / hofs.rs / dispatch.rs — see crates/almide-interp/CLAUDE.md).
 
 alias_combinator_rc  out-of-interp-scope capability: prim.handle of a Option (outside the slice-2 heap family)
+availability_pure_batch  out-of-interp-scope capability: html.escape
 bytes_rawptr  out-of-interp-scope capability: prim.int_to_ptr
 count_domain_nonbytes  out-of-interp-scope capability: prim.read_n_bytes
 effect_tco_err_rewrap  interp fuel/recursion budget exhausted
