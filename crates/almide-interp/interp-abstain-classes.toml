@@ -104,4 +104,9 @@ patterns = [
   # was reached with an argument shape the block heap never handed out) —
   # dispatch-tier strictness, one level in from the heap boundary.
   "capability: prim.store64 with a non-address",
+  # html.* (#1817 / #1844): stdlib/html.almd is not a self_host_registry
+  # source, so the interp pool has no body for it while the structural leg
+  # serves it by newtype erasure. Registering the source (or a pool-side
+  # single-variant unwrap of `mod type SafeHtml`) is dispatch glue.
+  "capability: html.escape",
 ]
