@@ -369,6 +369,7 @@
 245904	spec/wasm_cross/matrix_q_fp16_scale_domain.almd
 106304	spec/wasm_cross/matrix_select_rows.almd
 148080	spec/wasm_cross/matrix_select_rows_oob.almd
+142400	spec/wasm_cross/matrix_select_rows_q1_partial_block.almd
 172016	spec/wasm_cross/matrix_softmax_fastexp.almd
 122016	spec/wasm_cross/memory_stress.almd
 75072	spec/wasm_cross/mg_rebuild_two_phase.almd
