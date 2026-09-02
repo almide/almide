@@ -5,7 +5,7 @@
 // only has to hand off a `(text_delta) -> Unit` callback for live
 // rendering and consume the final LLMResponse-shaped JSON.
 //
-// `Value` and `almide_http_request_stream` resolve via flat inlining
+// `AlmideValue` and `almide_http_request_stream` resolve via flat inlining
 // into the user program (the runtime crate isn't a workspace member —
 // every module's source is concatenated into a single file at compile
 // time). No `use crate::...` imports here.
@@ -41,7 +41,7 @@ pub fn almide_rt_sse_openai_chat(
 
     let mut sse_buffer = String::new();
     let mut content = String::new();
-    let mut tool_calls: Vec<ToolCallAcc> = Vec::new();
+    let mut tool_calls: Vec<AlmideToolCallAcc> = Vec::new();
     let mut prompt_tokens: i64 = 0;
     let mut completion_tokens: i64 = 0;
     let mut total_tokens: i64 = 0;
@@ -116,7 +116,7 @@ pub fn almide_rt_sse_openai_chat(
 // ── SSE event handler ──
 
 #[derive(Default, Clone)]
-struct ToolCallAcc {
+struct AlmideToolCallAcc {
     id: String,
     name: String,
     arguments: String,
@@ -125,7 +125,7 @@ struct ToolCallAcc {
 fn handle_sse_data(
     payload: &str,
     content: &mut String,
-    tool_calls: &mut Vec<ToolCallAcc>,
+    tool_calls: &mut Vec<AlmideToolCallAcc>,
     prompt_tokens: &mut i64,
     completion_tokens: &mut i64,
     total_tokens: &mut i64,
@@ -154,7 +154,7 @@ fn handle_sse_data(
         }
     }
     let choices = match get_field(&parsed, "choices") {
-        Some(Value::Array(a)) => a,
+        Some(AlmideValue::Array(a)) => a,
         _ => return,
     };
     let first = match choices.first() {
@@ -176,11 +176,11 @@ fn handle_sse_data(
             content.push_str(&text);
         }
     }
-    if let Some(Value::Array(tcs)) = get_field(&delta, "tool_calls") {
+    if let Some(AlmideValue::Array(tcs)) = get_field(&delta, "tool_calls") {
         for tc in tcs {
             let idx = get_int(&tc, "index").unwrap_or(0) as usize;
             while tool_calls.len() <= idx {
-                tool_calls.push(ToolCallAcc::default());
+                tool_calls.push(AlmideToolCallAcc::default());
             }
             let acc = &mut tool_calls[idx];
             if let Some(id) = get_string(&tc, "id") {
@@ -202,10 +202,10 @@ fn handle_sse_data(
     }
 }
 
-// ── Tiny Value helpers (mirrors json.rs's getters) ──
+// ── Tiny AlmideValue helpers (mirrors json.rs's getters) ──
 
-fn get_field(v: &Value, key: &str) -> Option<Value> {
-    if let Value::Object(pairs) = v {
+fn get_field(v: &AlmideValue, key: &str) -> Option<AlmideValue> {
+    if let AlmideValue::Object(pairs) = v {
         for (k, val) in pairs {
             if k.as_ref() == key {
                 return Some(val.clone());
@@ -215,18 +215,18 @@ fn get_field(v: &Value, key: &str) -> Option<Value> {
     None
 }
 
-fn get_string(v: &Value, key: &str) -> Option<String> {
-    if let Some(Value::Str(s)) = get_field(v, key) {
+fn get_string(v: &AlmideValue, key: &str) -> Option<String> {
+    if let Some(AlmideValue::Str(s)) = get_field(v, key) {
         Some(s)
     } else {
         None
     }
 }
 
-fn get_int(v: &Value, key: &str) -> Option<i64> {
+fn get_int(v: &AlmideValue, key: &str) -> Option<i64> {
     match get_field(v, key) {
-        Some(Value::Int(i)) => Some(i),
-        Some(Value::Float(f)) => Some(f as i64),
+        Some(AlmideValue::Int(i)) => Some(i),
+        Some(AlmideValue::Float(f)) => Some(f as i64),
         _ => None,
     }
 }
@@ -275,7 +275,7 @@ pub fn almide_rt_sse_anthropic_messages(
     let mut sse_buffer = String::new();
     let mut content = String::new();
     // Tool blocks accumulate by `index` across content_block_start / delta.
-    let mut tool_calls: Vec<ToolCallAcc> = Vec::new();
+    let mut tool_calls: Vec<AlmideToolCallAcc> = Vec::new();
     let mut prompt_tokens: i64 = 0;
     let mut completion_tokens: i64 = 0;
     let mut finish_reason = String::new();
@@ -344,9 +344,9 @@ pub fn almide_rt_sse_anthropic_messages(
 
 fn handle_anthropic_event(
     event_name: &str,
-    parsed: &Value,
+    parsed: &AlmideValue,
     content: &mut String,
-    tool_calls: &mut Vec<ToolCallAcc>,
+    tool_calls: &mut Vec<AlmideToolCallAcc>,
     prompt_tokens: &mut i64,
     completion_tokens: &mut i64,
     finish_reason: &mut String,
@@ -373,7 +373,7 @@ fn handle_anthropic_event(
                 let btype = get_string(&block, "type").unwrap_or_default();
                 if btype == "tool_use" {
                     while tool_calls.len() <= index {
-                        tool_calls.push(ToolCallAcc::default());
+                        tool_calls.push(AlmideToolCallAcc::default());
                     }
                     let acc = &mut tool_calls[index];
                     if let Some(id) = get_string(&block, "id") {
@@ -404,7 +404,7 @@ fn handle_anthropic_event(
                 } else if dtype == "input_json_delta" {
                     if let Some(partial) = get_string(&delta, "partial_json") {
                         while tool_calls.len() <= index {
-                            tool_calls.push(ToolCallAcc::default());
+                            tool_calls.push(AlmideToolCallAcc::default());
                         }
                         tool_calls[index].arguments.push_str(&partial);
                     }

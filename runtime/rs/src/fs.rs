@@ -4,12 +4,26 @@ use std::path::Path;
 
 fn io_err(e: impl std::fmt::Display) -> String { format!("{}", e) }
 
+// The runtime-side twin of stdlib/fs.almd's `type FileStat = { size, is_dir,
+// is_file, modified }`: the bundled decl types the surface at check time, this
+// struct is the value at run time. The emitter spells the type under this
+// reserved name and skips the bundled decl (walker/runtime_owned.rs, #1821), so
+// a user's own `type FileStat` keeps the bare spelling. The repr the emitted
+// decl used to carry lives here and prints the Almide-level literal form.
 #[derive(Clone, Debug, PartialEq)]
-pub struct FileStat {
+pub struct AlmideFileStat {
     pub size: i64,
     pub is_dir: bool,
     pub is_file: bool,
     pub modified: i64,
+}
+impl AlmideRepr for AlmideFileStat {
+    fn almide_repr(&self) -> String {
+        format!(
+            "FileStat {{ size: {}, is_dir: {}, is_file: {}, modified: {} }}",
+            self.size.almide_repr(), self.is_dir.almide_repr(), self.is_file.almide_repr(), self.modified.almide_repr()
+        )
+    }
 }
 
 // Read
@@ -326,7 +340,7 @@ pub fn almide_rt_fs_modified_at(path: &str) -> Result<i64, String> {
     let modified = meta.modified().map_err(io_err)?;
     Ok(modified.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64)
 }
-pub fn almide_rt_fs_stat(path: &str) -> Result<FileStat, String> {
+pub fn almide_rt_fs_stat(path: &str) -> Result<AlmideFileStat, String> {
     let meta = std::fs::metadata(path).map_err(io_err)?;
     let size = meta.len() as i64;
     let is_dir = meta.is_dir();
@@ -334,7 +348,7 @@ pub fn almide_rt_fs_stat(path: &str) -> Result<FileStat, String> {
     let modified = meta.modified().ok()
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
         .map(|d| d.as_secs() as i64).unwrap_or(0);
-    Ok(FileStat { size, is_dir, is_file, modified })
+    Ok(AlmideFileStat { size, is_dir, is_file, modified })
 }
 
 // Temp

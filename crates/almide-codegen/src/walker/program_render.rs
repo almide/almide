@@ -81,9 +81,17 @@ fn build_program_ann(ctx: &RenderContext, program: &IrProgram) -> CodegenAnnotat
     ann
 }
 
-/// Register every variant constructor → enum name (top-level type decls,
-/// then imported-module type decls).
+/// Register every variant constructor → enum name: the runtime-owned ctors
+/// first (`LittleEndian` → `AlmideEndian`, #1821 — present whether or not the
+/// bundled decl reached the program), then top-level type decls, then
+/// imported-module type decls, so a user decl overrides a runtime ctor name.
 fn register_ctor_to_enum(ctx: &mut RenderContext, program: &IrProgram) {
+    {
+        let ann = std::rc::Rc::make_mut(&mut ctx.ann);
+        for (ctor, enum_name) in runtime_owned::variant_ctors() {
+            ann.ctor_to_enum.insert(ctor.to_string(), enum_name.to_string());
+        }
+    }
     for td in &program.type_decls {
         register_type_decl_ctors(ctx, td);
     }
@@ -101,9 +109,11 @@ fn register_ctor_to_enum(ctx: &mut RenderContext, program: &IrProgram) {
 /// `program.modules`).
 fn register_type_decl_ctors(ctx: &mut RenderContext, td: &IrTypeDecl) {
     if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
+        // A bundled twin's ctors belong to the runtime's reserved enum.
+        let enum_name = runtime_owned::decl_rust_name(td);
         let ann = std::rc::Rc::make_mut(&mut ctx.ann);
         for c in cases {
-            ann.ctor_to_enum.insert(c.name.to_string(), td.name.to_string());
+            ann.ctor_to_enum.insert(c.name.to_string(), enum_name.clone());
         }
     }
 }
@@ -113,14 +123,15 @@ fn render_program_type_decls(ctx: &RenderContext, program: &IrProgram, parts: &m
     // Track emitted names to deduplicate across modules
     let mut emitted_types: std::collections::HashSet<String> = std::collections::HashSet::new();
     for td in &program.type_decls {
-        // `bytes.Endian` is RUNTIME-OWNED (#1098): the native runtime defines
-        // the enum (plus its ctor shims for the auto-import case, where this
-        // decl never reaches the program), so emitting the bundled decl here
-        // duplicated it (E0428) whenever `import bytes` was explicit. The
-        // ctor REGISTRATION stays (register_ctor_to_enum) so construction
-        // still emits `Endian::LittleEndian`. A user type named Endian cannot
-        // exist — the checker rejects it as ambiguous against the stdlib decl.
-        if td.name.as_str() == "Endian" {
+        // A bundled twin (`Endian` / `FileStat` / `ProcessStatus`) is
+        // RUNTIME-OWNED (#1098, #1821): the native runtime defines the type
+        // under its reserved spelling, repr impl included, so emitting the
+        // bundled decl — it reaches the program whenever the import is
+        // explicit — would duplicate it. The ctor REGISTRATION stays
+        // (register_ctor_to_enum), routed to the reserved enum. A USER type of
+        // the same name (the checker accepts one; it shadows the stdlib decl)
+        // has a different shape, is not a twin, and renders here as usual.
+        if runtime_owned::twin_spelling(td).is_some() {
             continue;
         }
         emitted_types.insert(td.name.as_str().to_string());
@@ -247,6 +258,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
     // make_mut mutates in place without a clone.
     {
         let ann = std::rc::Rc::make_mut(&mut ctx.ann);
+        ann.runtime_owned_types = runtime_owned::spellings_for(program);
         ann.named_records = collect_named_records(program);
         ann.anon_records = collect_anon_records(program, &ann.named_records);
         ann.anon_records_with_fn = declarations::take_anon_fn_keys();

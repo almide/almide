@@ -89,7 +89,7 @@ fn body_bound_let_moves_at_its_last_use() {
           }}\n\
           println(\"${{t}}\")\n\
         }}\n"), "let-move");
-    assert!(body.contains("let w: Value = v;"), "`let w = v` is the loop variable's last use — a move:\n{body}");
+    assert!(body.contains("let w: AlmideValue = v;"), "`let w = v` is the loop variable's last use — a move:\n{body}");
     assert!(body.contains("keep(w)") && !body.contains("w.clone()"), "a body-level `let` is rebound every iteration too:\n{body}");
 }
 

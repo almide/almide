@@ -389,11 +389,13 @@ fn render_pattern_constructor(ctx: &RenderContext, name: &str, args: &[IrPattern
 
 /// `render_pattern_hinted`'s `RecordPattern` arm, extracted verbatim.
 fn render_pattern_record(ctx: &RenderContext, name: &str, fields: &[almide_ir::IrFieldPattern], rest: bool, enum_hint: Option<&str>) -> String {
-    // Qualify enum variant record patterns: Circle → Shape::Circle.
+    // Qualify enum variant record patterns: Circle → Shape::Circle. A plain
+    // record pattern on a runtime-owned struct (`FileStat`, #1821) spells the
+    // runtime's reserved name.
     let qualified_name = if let Some(enum_name) = resolve_pattern_enum_name(ctx, enum_hint, name) {
         format!("{}::{}", enum_name, name)
     } else {
-        name.to_string()
+        ctx.ann.runtime_owned_types.get(name).cloned().unwrap_or_else(|| name.to_string())
     };
     let fields_str = fields.iter()
         .map(|f| match &f.pattern {

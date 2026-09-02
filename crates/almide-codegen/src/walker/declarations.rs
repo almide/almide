@@ -326,23 +326,18 @@ fn render_repr_variant_arm(type_name: &str, v: &IrVariantDecl) -> String {
 // ── Anonymous record collection ──
 // Simplified version of emit_rust::lower_types logic, directly in codegen.
 
+/// Sorted field names → the Rust struct a record literal of that shape
+/// constructs. A bundled twin (`FileStat`, #1821) keys to the runtime's
+/// reserved struct, since its decl is never emitted.
 pub fn collect_named_records(program: &IrProgram) -> HashMap<Vec<String>, String> {
     let mut map = HashMap::new();
-    for td in &program.type_decls {
+    let all = program.type_decls.iter()
+        .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()));
+    for td in all {
         if let IrTypeDeclKind::Record { fields } = &td.kind {
             let mut names: Vec<String> = fields.iter().map(|f| f.name.to_string()).collect();
             names.sort();
-            map.insert(names, td.name.to_string());
-        }
-    }
-    // Also collect from module type declarations
-    for module in &program.modules {
-        for td in &module.type_decls {
-            if let IrTypeDeclKind::Record { fields } = &td.kind {
-                let mut names: Vec<String> = fields.iter().map(|f| f.name.to_string()).collect();
-                names.sort();
-                map.insert(names, td.name.to_string());
-            }
+            map.insert(names, super::runtime_owned::decl_rust_name(td));
         }
     }
     map

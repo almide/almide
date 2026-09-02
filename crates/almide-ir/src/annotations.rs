@@ -52,6 +52,13 @@ pub struct CodegenAnnotations {
     /// `Debug`/`PartialEq`), like a `type`-declared record's `has_fn_fields` path.
     pub anon_records_with_fn: std::collections::HashSet<Vec<String>>,
     pub named_records: HashMap<Vec<String>, String>,
+    /// Almide name → the runtime's reserved Rust spelling for every
+    /// runtime-owned nominal type this program references (`Value` →
+    /// `AlmideValue`, `HttpRequest` → `AlmideHttpRequest`, …), minus the names
+    /// a user declaration claims. Computed by the walker's program setup from
+    /// `walker/runtime_owned.rs`; read by every type / record-literal /
+    /// pattern spelling site (#1821).
+    pub runtime_owned_types: HashMap<String, String>,
     /// Field count of each nominal record type (name → number of fields).
     /// Used to decide whether a record destructure pattern needs a trailing
     /// `..` to cover fields the user didn't name.

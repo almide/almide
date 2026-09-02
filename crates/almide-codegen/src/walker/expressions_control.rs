@@ -444,6 +444,11 @@ fn render_expr_record(ctx: &RenderContext, expr: &IrExpr) -> String {
             _ => render_type(ctx, &expr.ty),
         }
     });
+    // A runtime-owned struct (`FileStat`, #1821) constructs under the
+    // runtime's reserved spelling.
+    if let Some(reserved) = ctx.ann.runtime_owned_types.get(&type_name) {
+        type_name = reserved.clone();
+    }
     // Qualify enum variant constructors via template
     if let Some(enum_name) = ctx.ann.ctor_to_enum.get(&type_name) {
         // Try ctor_record template first (TS: function call), fallback to record_literal
