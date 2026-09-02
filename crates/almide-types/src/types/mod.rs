@@ -134,6 +134,13 @@ pub struct ProtocolDef {
     pub name: Sym,
     pub generics: Vec<Sym>,
     pub methods: Vec<ProtocolMethodSig>,
+    /// The canonical module that declared this protocol (the registration
+    /// prefix), `None` for built-in conventions and the main file's own
+    /// protocols. Protocols resolve by bare name from any module (the
+    /// gauntlet's open `s3` question), so this is how an `import self.ports`
+    /// referenced only through a `[S: Store]` bound or a `type T: Store`
+    /// conformance is judged USED for E060 (#1783).
+    pub origin: Option<Sym>,
 }
 
 /// A single method signature within a protocol definition.

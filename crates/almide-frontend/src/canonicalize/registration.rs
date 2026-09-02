@@ -546,7 +546,7 @@ pub fn register_derive_sigs(env: &mut TypeEnv, derives: &[Sym], type_name: &str,
     }
 }
 /// Register a user-defined protocol declaration into env.protocols.
-pub fn register_protocol_decl(env: &mut TypeEnv, name: &str, generics: &Option<Vec<ast::GenericParam>>, methods: &[ast::ProtocolMethod]) {
+pub fn register_protocol_decl(env: &mut TypeEnv, name: &str, generics: &Option<Vec<ast::GenericParam>>, methods: &[ast::ProtocolMethod], prefix: Option<&str>) {
     let gnames: Vec<Sym> = generics.as_ref()
         .map(|gs| gs.iter().map(|g| sym(&g.name)).collect())
         .unwrap_or_default();
@@ -581,10 +581,16 @@ pub fn register_protocol_decl(env: &mut TypeEnv, name: &str, generics: &Option<V
         }
     }
 
+    // The origin is a definition-time identity: the prefixed registration
+    // sets it, and `infer_module`'s unprefixed re-registration of the same
+    // declarations must not erase it (the same rule as opaque-alias owners).
+    let origin = prefix.map(sym)
+        .or_else(|| env.protocols.get(&sym(name)).and_then(|p| p.origin));
     env.protocols.insert(sym(name), ProtocolDef {
         name: sym(name),
         generics: gnames,
         methods: method_sigs,
+        origin,
     });
 }
 /// Protocols whose auto-derive RECURSES INTO EACH FIELD'S TYPE: deriving them on a struct/variant emits per-field work that requires the field type to ALSO satisfy the protocol. `Codec` calls `Field.encode` / `Field.decode`; `Ord`/`Hash` lower to a Rust `#[derive(Ord/Hash)]` that needs the field's Rust type to impl it. `Eq`/`Repr` are excluded — every generated struct gets `PartialEq` + a repr path unconditionally, so a field need not declare them (gating those would be a false positive).
@@ -760,7 +766,7 @@ pub fn register_decls(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl
             ast::Decl::Test { .. } => register_decl_test(diagnostics, &mut seen_test, decl),
             ast::Decl::Type { .. } => register_decl_type(env, diagnostics, decl, prefix),
             ast::Decl::Protocol { name, generics, methods, .. } => {
-                register_protocol_decl(env, name, generics, methods);
+                register_protocol_decl(env, name, generics, methods, prefix);
             }
             ast::Decl::TopLet { .. } => register_decl_top_let(env, decl, prefix),
             _ => {}
