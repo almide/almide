@@ -7,7 +7,7 @@
 /// a pointer copy. `Cow` keeps the fallback honest: past the intern cap, or on
 /// a slot collision, a key is an ordinary owned `String`. Clone of an
 /// interned key is free, no refcount, and the type stays `Send`.
-pub type Key = std::borrow::Cow<'static, str>;
+pub type AlmideKey = std::borrow::Cow<'static, str>;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
@@ -17,7 +17,7 @@ pub enum Value {
     Float(f64),
     Str(String),
     Array(Vec<Value>),
-    Object(Vec<(Key, Value)>),
+    Object(Vec<(AlmideKey, Value)>),
 }
 
 const KEY_SLOTS: usize = 1024;
@@ -39,20 +39,20 @@ fn key_slot(k: &str) -> usize {
 /// Intern `k` as an object key: a pointer copy when it has been seen, one
 /// leaked allocation the first time (bounded by `KEY_LEAK_CAP`), an owned
 /// `String` otherwise.
-pub(crate) fn intern_key(k: &str) -> Key {
+pub(crate) fn intern_key(k: &str) -> AlmideKey {
     KEY_TABLE.with(|t| {
         let mut t = t.borrow_mut();
         let slot = key_slot(k);
         match t.0[slot] {
-            Some(hit) if hit == k => Key::Borrowed(hit),
-            Some(_) => Key::Owned(k.to_string()),
+            Some(hit) if hit == k => AlmideKey::Borrowed(hit),
+            Some(_) => AlmideKey::Owned(k.to_string()),
             None if t.1 < KEY_LEAK_CAP => {
                 let leaked: &'static str = Box::leak(k.to_string().into_boxed_str());
                 t.0[slot] = Some(leaked);
                 t.1 += 1;
-                Key::Borrowed(leaked)
+                AlmideKey::Borrowed(leaked)
             }
-            None => Key::Owned(k.to_string()),
+            None => AlmideKey::Owned(k.to_string()),
         }
     })
 }

@@ -122,7 +122,7 @@ pub fn almide_rt_json_parse(text: &str) -> Result<Value, String> {
     /// An object key: the escape-free run is interned straight from the input
     /// slice (no `String` in between); anything with an escape takes the
     /// general string path and is interned from its result.
-    fn parse_key(t: &str, pos: &mut usize) -> Result<Key, String> {
+    fn parse_key(t: &str, pos: &mut usize) -> Result<AlmideKey, String> {
         let b = t.as_bytes();
         let save = *pos;
         step_char(t, pos);
@@ -423,7 +423,7 @@ fn set_at_steps(j: &Value, steps: &[PathStep], value: &Value) -> Value {
         PathStep::Field(key) => match j {
             Value::Object(entries) => {
                 let rest = &steps[1..];
-                let mut new_entries: Vec<(Key, Value)> = entries.iter()
+                let mut new_entries: Vec<(AlmideKey, Value)> = entries.iter()
                     .map(|(k, v)| if k.as_ref() == key.as_str() { (k.clone(), set_at_steps(v, rest, value)) } else { (k.clone(), v.clone()) })
                     .collect();
                 if !entries.iter().any(|(k, _)| k.as_ref() == key.as_str()) {
