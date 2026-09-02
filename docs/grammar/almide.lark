@@ -431,8 +431,11 @@ _ok_kw: OK | OK_UC
 _err_kw: ERR | ERR_UC
 _some_kw: SOME | SOME_UC
 
-_o_pattern_list: pattern (COMMA pattern)* _comma
+_o_pattern_list: pattern (COMMA pattern)* (COMMA list_rest)? _comma
+               | list_rest _comma
                |
+// #1461 list-rest: `..` / `..name` as the LAST list slot.
+list_rest: DOTDOT IDENT?                           -> rest_pat
 
 ctor_pattern: qualified_ctor "(" _o_pattern_args ")"   -> ctor_args_pat
             | qualified_ctor record_pattern            -> ctor_record_pat
