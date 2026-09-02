@@ -9,13 +9,13 @@
 use std::io::{BufRead, BufReader};
 use std::net::TcpListener;
 
-// ── HTTP response/request type aliases ──
-// Named `HttpResponse`/`HttpRequest` (not `Response`/`Request`) so the emitted
-// alias never collides with a user/dependency `enum Response` in the same Rust
-// module (E0428). The `HttpRequest` alias also gives the user-facing `HttpRequest`
-// type a Rust name so `http.serve` handlers compile.
-pub type HttpResponse = AlmideHttpResponse;
-pub type HttpRequest = AlmideHttpRequest;
+// ── HTTP response/request types ──
+// The user-facing `HttpRequest` / `HttpResponse` nominals are RUNTIME-BACKED
+// (stdlib_info::RUNTIME_BACKED_TYPES): the emitter spells them under the
+// reserved `Almide*` names below (#1821), so a user's own `type HttpRequest`
+// never meets a runtime item of the same spelling in the flat-spliced module.
+// No bare alias may exist here — it collided (E0428) with exactly that user
+// type whenever http.rs was inlined.
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct AlmideHttpResponse {

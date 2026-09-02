@@ -944,103 +944,99 @@ pub fn almide_rt_bytes_append_i64_le(b: &mut Vec<u8>, val: i64) {
 
 // ── Typed byte IO: the Endian-parameterized surface (#1098) ──
 //
-// `Endian` is the runtime-side twin of stdlib/bytes.almd's
+// `AlmideEndian` is the runtime-side twin of stdlib/bytes.almd's
 // `type Endian = | LittleEndian | BigEndian` — the same pattern as fs.rs's
-// `FileStat`: the bundled decl types the surface at check time, this enum is
-// the value at run time. The non-snake-case ctor fns exist because codegen
-// emits a BUNDLED nullary variant ctor as a plain call (`LittleEndian()`) —
-// bundled type decls are not in the emitted program's ctor registry, so the
-// spelling must resolve as a function. A user-declared ctor of the same name
-// cannot collide: the checker rejects it as an ambiguous constructor against
-// the stdlib decl.
+// `AlmideFileStat`: the bundled decl types the surface at check time, this
+// enum is the value at run time. The emitter spells the type under this
+// reserved name and qualifies both ctors against it (`AlmideEndian::
+// LittleEndian`, construction and pattern alike, whether or not the bundled
+// decl reached the program — walker/runtime_owned.rs, #1821), so a user's own
+// `type Endian` keeps the bare spelling and never collides with this enum.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Endian { LittleEndian, BigEndian }
+pub enum AlmideEndian { LittleEndian, BigEndian }
 // The repr the codegen-emitted decl used to carry — the decl emission is
-// skipped now (the runtime owns the type), so the impl lives here.
-impl AlmideRepr for Endian {
+// skipped (the runtime owns the type), so the impl lives here and prints the
+// Almide-level ctor names.
+impl AlmideRepr for AlmideEndian {
     fn almide_repr(&self) -> String {
         match self {
-            Endian::LittleEndian => "LittleEndian".to_string(),
-            Endian::BigEndian => "BigEndian".to_string(),
+            AlmideEndian::LittleEndian => "LittleEndian".to_string(),
+            AlmideEndian::BigEndian => "BigEndian".to_string(),
         }
     }
 }
-#[allow(non_snake_case)]
-pub fn LittleEndian() -> Endian { Endian::LittleEndian }
-#[allow(non_snake_case)]
-pub fn BigEndian() -> Endian { Endian::BigEndian }
 
-pub fn almide_rt_bytes_read_uint16(b: &Vec<u8>, offset: i64, e: Endian) -> u16 {
+pub fn almide_rt_bytes_read_uint16(b: &Vec<u8>, offset: i64, e: AlmideEndian) -> u16 {
     (match e {
-        Endian::LittleEndian => almide_rt_bytes_read_u16_le(b, offset),
-        Endian::BigEndian => almide_rt_bytes_read_u16_be(b, offset),
+        AlmideEndian::LittleEndian => almide_rt_bytes_read_u16_le(b, offset),
+        AlmideEndian::BigEndian => almide_rt_bytes_read_u16_be(b, offset),
     }) as u16
 }
-pub fn almide_rt_bytes_read_uint32(b: &Vec<u8>, offset: i64, e: Endian) -> u32 {
+pub fn almide_rt_bytes_read_uint32(b: &Vec<u8>, offset: i64, e: AlmideEndian) -> u32 {
     (match e {
-        Endian::LittleEndian => almide_rt_bytes_read_u32_le(b, offset),
-        Endian::BigEndian => almide_rt_bytes_read_u32_be(b, offset),
+        AlmideEndian::LittleEndian => almide_rt_bytes_read_u32_le(b, offset),
+        AlmideEndian::BigEndian => almide_rt_bytes_read_u32_be(b, offset),
     }) as u32
 }
-pub fn almide_rt_bytes_read_int32(b: &Vec<u8>, offset: i64, e: Endian) -> i32 {
+pub fn almide_rt_bytes_read_int32(b: &Vec<u8>, offset: i64, e: AlmideEndian) -> i32 {
     (match e {
-        Endian::LittleEndian => almide_rt_bytes_read_i32_le(b, offset),
-        Endian::BigEndian => almide_rt_bytes_read_i32_be(b, offset),
+        AlmideEndian::LittleEndian => almide_rt_bytes_read_i32_le(b, offset),
+        AlmideEndian::BigEndian => almide_rt_bytes_read_i32_be(b, offset),
     }) as i32
 }
-pub fn almide_rt_bytes_read_float32(b: &Vec<u8>, offset: i64, e: Endian) -> f32 {
+pub fn almide_rt_bytes_read_float32(b: &Vec<u8>, offset: i64, e: AlmideEndian) -> f32 {
     (match e {
-        Endian::LittleEndian => almide_rt_bytes_read_f32_le(b, offset),
-        Endian::BigEndian => almide_rt_bytes_read_f32_be(b, offset),
+        AlmideEndian::LittleEndian => almide_rt_bytes_read_f32_le(b, offset),
+        AlmideEndian::BigEndian => almide_rt_bytes_read_f32_be(b, offset),
     }) as f32
 }
 
-pub fn almide_rt_bytes_write_uint16(b: &mut Vec<u8>, value: u16, e: Endian) {
+pub fn almide_rt_bytes_write_uint16(b: &mut Vec<u8>, value: u16, e: AlmideEndian) {
     match e {
-        Endian::LittleEndian => almide_rt_bytes_append_u16_le(b, value as i64),
-        Endian::BigEndian => almide_rt_bytes_append_u16_be(b, value as i64),
+        AlmideEndian::LittleEndian => almide_rt_bytes_append_u16_le(b, value as i64),
+        AlmideEndian::BigEndian => almide_rt_bytes_append_u16_be(b, value as i64),
     }
 }
-pub fn almide_rt_bytes_write_uint32(b: &mut Vec<u8>, value: u32, e: Endian) {
+pub fn almide_rt_bytes_write_uint32(b: &mut Vec<u8>, value: u32, e: AlmideEndian) {
     match e {
-        Endian::LittleEndian => almide_rt_bytes_append_u32_le(b, value as i64),
-        Endian::BigEndian => almide_rt_bytes_append_u32_be(b, value as i64),
+        AlmideEndian::LittleEndian => almide_rt_bytes_append_u32_le(b, value as i64),
+        AlmideEndian::BigEndian => almide_rt_bytes_append_u32_be(b, value as i64),
     }
 }
-pub fn almide_rt_bytes_write_int32(b: &mut Vec<u8>, value: i32, e: Endian) {
+pub fn almide_rt_bytes_write_int32(b: &mut Vec<u8>, value: i32, e: AlmideEndian) {
     match e {
-        Endian::LittleEndian => almide_rt_bytes_append_i32_le(b, value as i64),
-        Endian::BigEndian => almide_rt_bytes_append_i32_be(b, value as i64),
+        AlmideEndian::LittleEndian => almide_rt_bytes_append_i32_le(b, value as i64),
+        AlmideEndian::BigEndian => almide_rt_bytes_append_i32_be(b, value as i64),
     }
 }
-pub fn almide_rt_bytes_write_float32(b: &mut Vec<u8>, value: f32, e: Endian) {
+pub fn almide_rt_bytes_write_float32(b: &mut Vec<u8>, value: f32, e: AlmideEndian) {
     match e {
-        Endian::LittleEndian => almide_rt_bytes_append_f32_le(b, value as f64),
-        Endian::BigEndian => almide_rt_bytes_append_f32_be(b, value as f64),
+        AlmideEndian::LittleEndian => almide_rt_bytes_append_f32_le(b, value as f64),
+        AlmideEndian::BigEndian => almide_rt_bytes_append_f32_be(b, value as f64),
     }
 }
 
-pub fn almide_rt_bytes_set_uint16(b: &mut Vec<u8>, offset: i64, value: u16, e: Endian) {
+pub fn almide_rt_bytes_set_uint16(b: &mut Vec<u8>, offset: i64, value: u16, e: AlmideEndian) {
     match e {
-        Endian::LittleEndian => almide_rt_bytes_set_u16_le(b, offset, value as i64),
-        Endian::BigEndian => almide_rt_bytes_set_u16_be(b, offset, value as i64),
+        AlmideEndian::LittleEndian => almide_rt_bytes_set_u16_le(b, offset, value as i64),
+        AlmideEndian::BigEndian => almide_rt_bytes_set_u16_be(b, offset, value as i64),
     }
 }
-pub fn almide_rt_bytes_set_uint32(b: &mut Vec<u8>, offset: i64, value: u32, e: Endian) {
+pub fn almide_rt_bytes_set_uint32(b: &mut Vec<u8>, offset: i64, value: u32, e: AlmideEndian) {
     match e {
-        Endian::LittleEndian => almide_rt_bytes_set_u32_le(b, offset, value as i64),
-        Endian::BigEndian => almide_rt_bytes_set_u32_be(b, offset, value as i64),
+        AlmideEndian::LittleEndian => almide_rt_bytes_set_u32_le(b, offset, value as i64),
+        AlmideEndian::BigEndian => almide_rt_bytes_set_u32_be(b, offset, value as i64),
     }
 }
-pub fn almide_rt_bytes_set_int32(b: &mut Vec<u8>, offset: i64, value: i32, e: Endian) {
+pub fn almide_rt_bytes_set_int32(b: &mut Vec<u8>, offset: i64, value: i32, e: AlmideEndian) {
     match e {
-        Endian::LittleEndian => almide_rt_bytes_set_i32_le(b, offset, value as i64),
-        Endian::BigEndian => almide_rt_bytes_set_i32_be(b, offset, value as i64),
+        AlmideEndian::LittleEndian => almide_rt_bytes_set_i32_le(b, offset, value as i64),
+        AlmideEndian::BigEndian => almide_rt_bytes_set_i32_be(b, offset, value as i64),
     }
 }
-pub fn almide_rt_bytes_set_float32(b: &mut Vec<u8>, offset: i64, value: f32, e: Endian) {
+pub fn almide_rt_bytes_set_float32(b: &mut Vec<u8>, offset: i64, value: f32, e: AlmideEndian) {
     match e {
-        Endian::LittleEndian => almide_rt_bytes_set_f32_le(b, offset, value as f64),
-        Endian::BigEndian => almide_rt_bytes_set_f32_be(b, offset, value as f64),
+        AlmideEndian::LittleEndian => almide_rt_bytes_set_f32_le(b, offset, value as f64),
+        AlmideEndian::BigEndian => almide_rt_bytes_set_f32_be(b, offset, value as f64),
     }
 }

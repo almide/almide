@@ -28,6 +28,12 @@ fn render_type_named(ctx: &RenderContext, name: &almide_base::intern::Sym, args:
         // Strip module qualifier: module.Type → Type
         // (all modules flatten into one file in generated Rust)
         let bare = name.rsplit('.').next().unwrap_or(name);
+        // A runtime-owned nominal renders under the runtime's reserved
+        // spelling (`Value` → `AlmideValue`, #1821); the bare spelling is a
+        // user type's.
+        if let Some(reserved) = ctx.ann.runtime_owned_types.get(bare) {
+            return reserved.clone();
+        }
         bare.to_string()
     } else {
         let bare = name.rsplit('.').next().unwrap_or(name);
@@ -205,7 +211,9 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
         Ty::TypeVar(n) if n.starts_with('?') => template_or(ctx, "typevar_infer", &[], "_"),
         Ty::TypeVar(n) => n.to_string(),
         Ty::Unknown | Ty::Union(_) => template_or(ctx, "unknown_type", &[], "_"),
-        Ty::Variant { name, .. } => name.to_string(),
+        Ty::Variant { name, .. } => ctx.ann.runtime_owned_types.get(name.as_str())
+            .cloned()
+            .unwrap_or_else(|| name.to_string()),
         // Fallback
         #[allow(unreachable_patterns)]
         _ => format!("{}", ty.display()),

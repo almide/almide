@@ -1,41 +1,41 @@
 // ---- Regex Runtime ----
 
 #[derive(Clone)]
-enum RxNode {
+enum AlmideRxNode {
     Lit(char),
     Dot,
     Class(Vec<(char, char)>, bool), // ranges, negated
     AnchorStart,
     AnchorEnd,
-    Group(Vec<Vec<RxPiece>>, usize), // alternations, capture index (1-based; 0 = no capture)
+    Group(Vec<Vec<AlmideRxPiece>>, usize), // alternations, capture index (1-based; 0 = no capture)
 }
 
 #[derive(Clone)]
-struct RxPiece {
-    node: RxNode,
+struct AlmideRxPiece {
+    node: AlmideRxNode,
     min: usize,
     max: Option<usize>,
 }
 
-struct RxPat {
-    alts: Vec<Vec<RxPiece>>,
+struct AlmideRxPat {
+    alts: Vec<Vec<AlmideRxPiece>>,
     ncap: usize,
 }
 
-type RxCaps = Vec<Option<(usize, usize)>>;
+type AlmideRxCaps = Vec<Option<(usize, usize)>>;
 
 // ---- Parsing ----
 
-fn rx_compile(pat: &str) -> RxPat {
+fn rx_compile(pat: &str) -> AlmideRxPat {
     let chars: Vec<char> = pat.chars().collect();
     let mut pos = 0usize;
     let mut ncap = 0usize;
     let alts = rx_parse_alts(&chars, &mut pos, &mut ncap, false);
-    RxPat { alts, ncap }
+    AlmideRxPat { alts, ncap }
 }
 
-fn rx_parse_alts(chars: &[char], pos: &mut usize, ncap: &mut usize, in_group: bool) -> Vec<Vec<RxPiece>> {
-    let mut alts: Vec<Vec<RxPiece>> = vec![vec![]];
+fn rx_parse_alts(chars: &[char], pos: &mut usize, ncap: &mut usize, in_group: bool) -> Vec<Vec<AlmideRxPiece>> {
+    let mut alts: Vec<Vec<AlmideRxPiece>> = vec![vec![]];
     while *pos < chars.len() {
         if chars[*pos] == ')' && in_group { break; }
         if chars[*pos] == '|' {
@@ -49,7 +49,7 @@ fn rx_parse_alts(chars: &[char], pos: &mut usize, ncap: &mut usize, in_group: bo
     alts
 }
 
-fn rx_parse_piece(chars: &[char], pos: &mut usize, ncap: &mut usize) -> RxPiece {
+fn rx_parse_piece(chars: &[char], pos: &mut usize, ncap: &mut usize) -> AlmideRxPiece {
     let node = rx_parse_atom(chars, pos, ncap);
     let (min, max) = if *pos < chars.len() {
         match chars[*pos] {
@@ -72,7 +72,7 @@ fn rx_parse_piece(chars: &[char], pos: &mut usize, ncap: &mut usize) -> RxPiece 
     } else {
         (1, Some(1))
     };
-    RxPiece { node, min, max }
+    AlmideRxPiece { node, min, max }
 }
 
 /// Parse a `{n}` / `{n,}` / `{n,m}` quantifier starting at the `{` at `start`.
@@ -105,13 +105,13 @@ fn rx_parse_brace(chars: &[char], start: usize) -> Option<(usize, Option<usize>,
     }
 }
 
-fn rx_parse_atom(chars: &[char], pos: &mut usize, ncap: &mut usize) -> RxNode {
+fn rx_parse_atom(chars: &[char], pos: &mut usize, ncap: &mut usize) -> AlmideRxNode {
     let c = chars[*pos];
     *pos += 1;
     match c {
-        '.' => RxNode::Dot,
-        '^' => RxNode::AnchorStart,
-        '$' => RxNode::AnchorEnd,
+        '.' => AlmideRxNode::Dot,
+        '^' => AlmideRxNode::AnchorStart,
+        '$' => AlmideRxNode::AnchorEnd,
         '\\' => rx_parse_escape(chars, pos),
         '[' => rx_parse_class(chars, pos),
         '(' => {
@@ -119,31 +119,31 @@ fn rx_parse_atom(chars: &[char], pos: &mut usize, ncap: &mut usize) -> RxNode {
             let ci = *ncap;
             let alts = rx_parse_alts(chars, pos, ncap, true);
             if *pos < chars.len() && chars[*pos] == ')' { *pos += 1; }
-            RxNode::Group(alts, ci)
+            AlmideRxNode::Group(alts, ci)
         }
-        _ => RxNode::Lit(c),
+        _ => AlmideRxNode::Lit(c),
     }
 }
 
-fn rx_parse_escape(chars: &[char], pos: &mut usize) -> RxNode {
-    if *pos >= chars.len() { return RxNode::Lit('\\'); }
+fn rx_parse_escape(chars: &[char], pos: &mut usize) -> AlmideRxNode {
+    if *pos >= chars.len() { return AlmideRxNode::Lit('\\'); }
     let c = chars[*pos];
     *pos += 1;
     match c {
-        'd' => RxNode::Class(vec![('0', '9')], false),
-        'D' => RxNode::Class(vec![('0', '9')], true),
-        'w' => RxNode::Class(vec![('a', 'z'), ('A', 'Z'), ('0', '9'), ('_', '_')], false),
-        'W' => RxNode::Class(vec![('a', 'z'), ('A', 'Z'), ('0', '9'), ('_', '_')], true),
-        's' => RxNode::Class(vec![(' ', ' '), ('\t', '\t'), ('\n', '\n'), ('\r', '\r')], false),
-        'S' => RxNode::Class(vec![(' ', ' '), ('\t', '\t'), ('\n', '\n'), ('\r', '\r')], true),
-        'n' => RxNode::Lit('\n'),
-        't' => RxNode::Lit('\t'),
-        'r' => RxNode::Lit('\r'),
-        _ => RxNode::Lit(c),
+        'd' => AlmideRxNode::Class(vec![('0', '9')], false),
+        'D' => AlmideRxNode::Class(vec![('0', '9')], true),
+        'w' => AlmideRxNode::Class(vec![('a', 'z'), ('A', 'Z'), ('0', '9'), ('_', '_')], false),
+        'W' => AlmideRxNode::Class(vec![('a', 'z'), ('A', 'Z'), ('0', '9'), ('_', '_')], true),
+        's' => AlmideRxNode::Class(vec![(' ', ' '), ('\t', '\t'), ('\n', '\n'), ('\r', '\r')], false),
+        'S' => AlmideRxNode::Class(vec![(' ', ' '), ('\t', '\t'), ('\n', '\n'), ('\r', '\r')], true),
+        'n' => AlmideRxNode::Lit('\n'),
+        't' => AlmideRxNode::Lit('\t'),
+        'r' => AlmideRxNode::Lit('\r'),
+        _ => AlmideRxNode::Lit(c),
     }
 }
 
-fn rx_parse_class(chars: &[char], pos: &mut usize) -> RxNode {
+fn rx_parse_class(chars: &[char], pos: &mut usize) -> AlmideRxNode {
     let neg = *pos < chars.len() && chars[*pos] == '^';
     if neg { *pos += 1; }
     let mut ranges: Vec<(char, char)> = vec![];
@@ -174,16 +174,16 @@ fn rx_parse_class(chars: &[char], pos: &mut usize) -> RxNode {
         }
     }
     if *pos < chars.len() { *pos += 1; } // skip ]
-    RxNode::Class(ranges, neg)
+    AlmideRxNode::Class(ranges, neg)
 }
 
 // ---- Matching ----
 
-fn rx_node_matches(node: &RxNode, c: char) -> bool {
+fn rx_node_matches(node: &AlmideRxNode, c: char) -> bool {
     match node {
-        RxNode::Lit(ch) => c == *ch,
-        RxNode::Dot => c != '\n',
-        RxNode::Class(ranges, neg) => {
+        AlmideRxNode::Lit(ch) => c == *ch,
+        AlmideRxNode::Dot => c != '\n',
+        AlmideRxNode::Class(ranges, neg) => {
             let hit = ranges.iter().any(|&(lo, hi)| c >= lo && c <= hi);
             hit != *neg
         }
@@ -191,7 +191,7 @@ fn rx_node_matches(node: &RxNode, c: char) -> bool {
     }
 }
 
-fn rx_match_alts(alts: &[Vec<RxPiece>], s: &[char], p: usize, caps: &mut RxCaps) -> Option<usize> {
+fn rx_match_alts(alts: &[Vec<AlmideRxPiece>], s: &[char], p: usize, caps: &mut AlmideRxCaps) -> Option<usize> {
     for alt in alts {
         let save = caps.clone();
         if let Some(e) = rx_match_seq(alt, 0, s, p, caps) {
@@ -202,21 +202,21 @@ fn rx_match_alts(alts: &[Vec<RxPiece>], s: &[char], p: usize, caps: &mut RxCaps)
     None
 }
 
-fn rx_match_seq(seq: &[RxPiece], si: usize, s: &[char], p: usize, caps: &mut RxCaps) -> Option<usize> {
+fn rx_match_seq(seq: &[AlmideRxPiece], si: usize, s: &[char], p: usize, caps: &mut AlmideRxCaps) -> Option<usize> {
     if si >= seq.len() { return Some(p); }
     let piece = &seq[si];
     match &piece.node {
-        RxNode::AnchorStart => {
+        AlmideRxNode::AnchorStart => {
             if p == 0 { rx_match_seq(seq, si + 1, s, p, caps) } else { None }
         }
-        RxNode::AnchorEnd => {
+        AlmideRxNode::AnchorEnd => {
             if p == s.len() { rx_match_seq(seq, si + 1, s, p, caps) } else { None }
         }
         _ => rx_match_rep(seq, si, s, p, caps, 0),
     }
 }
 
-fn rx_match_rep(seq: &[RxPiece], si: usize, s: &[char], p: usize, caps: &mut RxCaps, count: usize) -> Option<usize> {
+fn rx_match_rep(seq: &[AlmideRxPiece], si: usize, s: &[char], p: usize, caps: &mut AlmideRxCaps, count: usize) -> Option<usize> {
     let piece = &seq[si];
     let at_max = piece.max.map_or(false, |m| count >= m);
     // Greedy: try to match one more first
@@ -238,12 +238,12 @@ fn rx_match_rep(seq: &[RxPiece], si: usize, s: &[char], p: usize, caps: &mut RxC
     None
 }
 
-fn rx_match_one(node: &RxNode, s: &[char], p: usize, caps: &mut RxCaps) -> Option<usize> {
+fn rx_match_one(node: &AlmideRxNode, s: &[char], p: usize, caps: &mut AlmideRxCaps) -> Option<usize> {
     match node {
-        RxNode::Lit(_) | RxNode::Dot | RxNode::Class(_, _) => {
+        AlmideRxNode::Lit(_) | AlmideRxNode::Dot | AlmideRxNode::Class(_, _) => {
             if p < s.len() && rx_node_matches(node, s[p]) { Some(1) } else { None }
         }
-        RxNode::Group(alts, ci) => {
+        AlmideRxNode::Group(alts, ci) => {
             let start = p;
             if let Some(end) = rx_match_alts(alts, s, p, caps) {
                 if *ci > 0 {
@@ -261,9 +261,9 @@ fn rx_match_one(node: &RxNode, s: &[char], p: usize, caps: &mut RxCaps) -> Optio
 
 // ---- Search ----
 
-fn rx_find_at(rx: &RxPat, s: &[char], start: usize) -> Option<(usize, usize, RxCaps)> {
+fn rx_find_at(rx: &AlmideRxPat, s: &[char], start: usize) -> Option<(usize, usize, AlmideRxCaps)> {
     for i in start..=s.len() {
-        let mut caps: RxCaps = vec![None; rx.ncap];
+        let mut caps: AlmideRxCaps = vec![None; rx.ncap];
         if let Some(end) = rx_match_alts(&rx.alts, s, i, &mut caps) {
             return Some((i, end, caps));
         }
@@ -282,7 +282,7 @@ pub fn almide_regex_is_match(pat: &str, s: &str) -> bool {
 pub fn almide_regex_full_match(pat: &str, s: &str) -> bool {
     let rx = rx_compile(pat);
     let chars: Vec<char> = s.chars().collect();
-    let mut caps: RxCaps = vec![None; rx.ncap];
+    let mut caps: AlmideRxCaps = vec![None; rx.ncap];
     if let Some(end) = rx_match_alts(&rx.alts, &chars, 0, &mut caps) {
         end == chars.len()
     } else {

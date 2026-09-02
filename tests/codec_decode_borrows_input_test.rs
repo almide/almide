@@ -56,8 +56,8 @@ const SRC: &str = "type Address: Codec = { city: String }\n\
 fn derived_decode_takes_its_input_by_reference() {
     if !tool_available() { eprintln!("skipping: almide binary not available"); return; }
     let rust = emitted(SRC, "sig");
-    assert!(rust.contains("pub fn User_decode(_v: &Value)"), "derived decode must borrow its Value input:\n{}", grep(&rust, "_decode("));
-    assert!(rust.contains("pub fn Address_decode(_v: &Value)"), "nested record decode must borrow too:\n{}", grep(&rust, "_decode("));
+    assert!(rust.contains("pub fn User_decode(_v: &AlmideValue)"), "derived decode must borrow its AlmideValue input:\n{}", grep(&rust, "_decode("));
+    assert!(rust.contains("pub fn Address_decode(_v: &AlmideValue)"), "nested record decode must borrow too:\n{}", grep(&rust, "_decode("));
     assert!(rust.contains("User_decode(&v)"), "the call site hands over a borrow, not a copy:\n{}", grep(&rust, "User_decode("));
     assert!(rust.contains("Address_decode(almide_rt_value_field_ref(_v, \"address\")?)"), "a nested field decodes a BORROW into the object — no copy of the field:\n{}", grep(&rust, "Address_decode("));
 }
@@ -77,9 +77,9 @@ fn list_and_option_drivers_take_the_by_reference_twin() {
     if !tool_available() { eprintln!("skipping: almide binary not available"); return; }
     let rust = emitted(SRC, "drivers");
     assert!(rust.contains("almide_rt_value_decode_list_ref(almide_rt_value_field_ref(_v, \"homes\")?, Address_decode)"),
-        "a List[Record] field must route to the `&Value` list driver with the by-ref element decoder:\n{}", grep(&rust, "decode_list"));
+        "a List[Record] field must route to the `&AlmideValue` list driver with the by-ref element decoder:\n{}", grep(&rust, "decode_list"));
     assert!(!rust.contains("almide_rt_value_decode_list(&"), "the by-value list driver must never receive a borrow:\n{}", grep(&rust, "decode_list"));
-    assert!(rust.contains("__decode_option_Address(_v: &Value, _key: String)"), "the derived option worker borrows its Value too:\n{}", grep(&rust, "__decode_option_Address"));
+    assert!(rust.contains("__decode_option_Address(_v: &AlmideValue, _key: String)"), "the derived option worker borrows its AlmideValue too:\n{}", grep(&rust, "__decode_option_Address"));
 }
 
 /// The lines of `rust` mentioning `needle` — a failure names the shapes that
