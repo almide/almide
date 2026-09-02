@@ -1,0 +1,30 @@
+// @contract: C-092
+// A generic record whose field is an ANONYMOUS record carrying the parameter
+// (#1798): `inner: { x: T, tag: String }` with T = Int. The native emitter
+// wrote the anonymous struct's definition with bounds on its type
+// parameters (`T0: Clone + Debug + PartialEq`), and a generic record's field
+// `inner: AlmdRec_…<String, T>` mentioned it under the enclosing decl's own
+// `T: Clone + PartialEq` — no Debug — so rustc refused the field (E0277)
+// while `almide check` had accepted the program and wasm printed 42: the
+// check-passes/build-fails class. The definition carries no bounds now; the
+// derives and the repr impl declare their own. Three readers: the field
+// through a closure field, the field alone, and the nested record printed.
+type S[T] = { name: String, inner: { x: T, tag: String }, run: (T) -> T }
+
+type W[T] = { inner: { x: T, tag: String } }
+
+fn mk() -> S[Int] = S { name: "s", inner: { x: 41, tag: "t" }, run: (n) => n + 1 }
+
+fn call_it(s: S[Int]) -> Int = (s.run)(s.inner.x)
+
+fn wrap(v: String) -> W[String] = W { inner: { x: v, tag: "w" } }
+
+fn unwrap_w(w: W[String]) -> String = w.inner.x + "/" + w.inner.tag
+
+fn main() -> Unit = {
+  println(int.to_string(call_it(mk())))
+  println(unwrap_w(wrap("hi")))
+  let s = mk()
+  println("${s.inner.x} ${s.inner.tag} ${s.name}")
+  println("${s.inner}")
+}
