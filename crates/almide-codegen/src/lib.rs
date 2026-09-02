@@ -279,7 +279,7 @@ pub fn codegen_with(program: &mut IrProgram, target: Target, options: &CodegenOp
 
 
 /// The fixed runtime prelude: AlmideConcat trait + impls, the almide_eq!/almide_ne!
-/// macros, and the RcCow<T> COW value type with its impls.
+/// macros, and the AlmideRcCow<T> COW value type with its impls.
 ///
 /// `for_crate` toggles between two emission modes:
 /// - `false` (inline): private items, plain `macro_rules!` — one self-contained main.rs.
@@ -335,33 +335,33 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     // checked against len as usize; negative or >= len aborts.
     s.push_str(&format!("{macro_attr}macro_rules! almide_index {{ ($xs:expr, $i:expr) => {{{{ let (__xs, __i) = (&$xs, $i as i64); if __i < 0 || (__i as u64) >= __xs.len() as u64 {{ eprintln!(\"Error: index out of bounds\"); std::process::exit(1); }} __xs[__i as usize].clone() }}}}; }}\n"));
     s.push_str(&format!("{macro_attr}macro_rules! almide_index_set {{ ($xs:expr, $i:expr, $v:expr) => {{{{ let __i = $i as i64; if __i < 0 || (__i as u64) >= $xs.len() as u64 {{ eprintln!(\"Error: index out of bounds\"); std::process::exit(1); }} $xs[__i as usize] = $v; }}}}; }}\n"));
-    // RcCow<T>: COW value type. Clone = Rc::clone (O(1)), mutation = Rc::make_mut (COW).
+    // AlmideRcCow<T>: COW value type. Clone = Rc::clone (O(1)), mutation = Rc::make_mut (COW).
     // Inspired by Swift's value type semantics.
-    s.push_str(&format!("{vis}struct RcCow<T>({vis}std::rc::Rc<T>);\n"));
-    s.push_str("impl<T: std::fmt::Debug> std::fmt::Debug for RcCow<T> { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { self.0.fmt(f) } }\n");
-    s.push_str("impl<T: Clone> Clone for RcCow<T> { fn clone(&self) -> Self { RcCow(std::rc::Rc::clone(&self.0)) } }\n");
-    s.push_str("impl<T: PartialEq> PartialEq for RcCow<T> { fn eq(&self, other: &Self) -> bool { *self.0 == *other.0 } }\n");
-    s.push_str("impl<T: PartialEq> PartialEq<T> for RcCow<T> { fn eq(&self, other: &T) -> bool { *self.0 == *other } }\n");
-    s.push_str("impl PartialEq<&str> for RcCow<String> { fn eq(&self, other: &&str) -> bool { self.0.as_str() == *other } }\n");
-    s.push_str("impl<T> std::ops::Deref for RcCow<T> { type Target = T; fn deref(&self) -> &T { &self.0 } }\n");
-    s.push_str("impl<T: Clone> std::ops::DerefMut for RcCow<T> { fn deref_mut(&mut self) -> &mut T { std::rc::Rc::make_mut(&mut self.0) } }\n");
-    s.push_str(&format!("impl<T> RcCow<T> {{ {vis}fn new(v: T) -> Self {{ RcCow(std::rc::Rc::new(v)) }} {vis}fn make_mut(&mut self) -> &mut T where T: Clone {{ std::rc::Rc::make_mut(&mut self.0) }} {vis}fn into_inner(self) -> T where T: Clone {{ std::rc::Rc::try_unwrap(self.0).unwrap_or_else(|rc| (*rc).clone()) }} }}\n"));
-    s.push_str("impl<T> From<T> for RcCow<T> { fn from(v: T) -> Self { RcCow::new(v) } }\n");
-    s.push_str("impl<T: std::fmt::Display> std::fmt::Display for RcCow<T> { fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { self.0.fmt(f) } }\n");
-    s.push_str("impl<T: std::hash::Hash> std::hash::Hash for RcCow<T> { fn hash<H: std::hash::Hasher>(&self, state: &mut H) { self.0.hash(state) } }\n");
-    // Blanket AlmideConcat: RcCow<T> + Rhs and RcCow<T> + Val<U> — 2 impls cover all combos.
-    s.push_str("impl<T: Clone, Rhs> AlmideConcat<Rhs> for RcCow<T> where T: AlmideConcat<Rhs> { type Output = RcCow<<T as AlmideConcat<Rhs>>::Output>; #[inline(always)] fn concat(self, rhs: Rhs) -> Self::Output { RcCow::new((*self).clone().concat(rhs)) } }\n");
-    // SharedMut<T>: shared interior-mutable cell for a non-Copy `var` captured and
+    s.push_str(&format!("{vis}struct AlmideRcCow<T>({vis}std::rc::Rc<T>);\n"));
+    s.push_str("impl<T: std::fmt::Debug> std::fmt::Debug for AlmideRcCow<T> { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { self.0.fmt(f) } }\n");
+    s.push_str("impl<T: Clone> Clone for AlmideRcCow<T> { fn clone(&self) -> Self { AlmideRcCow(std::rc::Rc::clone(&self.0)) } }\n");
+    s.push_str("impl<T: PartialEq> PartialEq for AlmideRcCow<T> { fn eq(&self, other: &Self) -> bool { *self.0 == *other.0 } }\n");
+    s.push_str("impl<T: PartialEq> PartialEq<T> for AlmideRcCow<T> { fn eq(&self, other: &T) -> bool { *self.0 == *other } }\n");
+    s.push_str("impl PartialEq<&str> for AlmideRcCow<String> { fn eq(&self, other: &&str) -> bool { self.0.as_str() == *other } }\n");
+    s.push_str("impl<T> std::ops::Deref for AlmideRcCow<T> { type Target = T; fn deref(&self) -> &T { &self.0 } }\n");
+    s.push_str("impl<T: Clone> std::ops::DerefMut for AlmideRcCow<T> { fn deref_mut(&mut self) -> &mut T { std::rc::Rc::make_mut(&mut self.0) } }\n");
+    s.push_str(&format!("impl<T> AlmideRcCow<T> {{ {vis}fn new(v: T) -> Self {{ AlmideRcCow(std::rc::Rc::new(v)) }} {vis}fn make_mut(&mut self) -> &mut T where T: Clone {{ std::rc::Rc::make_mut(&mut self.0) }} {vis}fn into_inner(self) -> T where T: Clone {{ std::rc::Rc::try_unwrap(self.0).unwrap_or_else(|rc| (*rc).clone()) }} }}\n"));
+    s.push_str("impl<T> From<T> for AlmideRcCow<T> { fn from(v: T) -> Self { AlmideRcCow::new(v) } }\n");
+    s.push_str("impl<T: std::fmt::Display> std::fmt::Display for AlmideRcCow<T> { fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { self.0.fmt(f) } }\n");
+    s.push_str("impl<T: std::hash::Hash> std::hash::Hash for AlmideRcCow<T> { fn hash<H: std::hash::Hasher>(&self, state: &mut H) { self.0.hash(state) } }\n");
+    // Blanket AlmideConcat: AlmideRcCow<T> + Rhs and AlmideRcCow<T> + Val<U> — 2 impls cover all combos.
+    s.push_str("impl<T: Clone, Rhs> AlmideConcat<Rhs> for AlmideRcCow<T> where T: AlmideConcat<Rhs> { type Output = AlmideRcCow<<T as AlmideConcat<Rhs>>::Output>; #[inline(always)] fn concat(self, rhs: Rhs) -> Self::Output { AlmideRcCow::new((*self).clone().concat(rhs)) } }\n");
+    // AlmideSharedMut<T>: shared interior-mutable cell for a non-Copy `var` captured and
     // mutated through a closure (Closure v2, P6). The non-Copy analogue of the
     // `Rc<Cell<T>>` used for Copy captures: `Clone` is `Rc::clone` (O(1), shares the
     // SAME cell) so a `move` closure's mutation is visible to the enclosing scope —
-    // unlike `RcCow`, whose `make_mut` clones on a shared write and loses it. The
+    // unlike `AlmideRcCow`, whose `make_mut` clones on a shared write and loses it. The
     // `get`/`set` API mirrors `Cell` so reads/assigns lower identically for both.
-    s.push_str(&format!("{vis}struct SharedMut<T>({vis}std::rc::Rc<std::cell::RefCell<T>>);\n"));
-    s.push_str("impl<T> Clone for SharedMut<T> { fn clone(&self) -> Self { SharedMut(std::rc::Rc::clone(&self.0)) } }\n");
-    s.push_str("impl<T: std::fmt::Debug> std::fmt::Debug for SharedMut<T> { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { self.0.borrow().fmt(f) } }\n");
-    s.push_str("impl<T: PartialEq> PartialEq for SharedMut<T> { fn eq(&self, other: &Self) -> bool { *self.0.borrow() == *other.0.borrow() } }\n");
-    s.push_str(&format!("impl<T> SharedMut<T> {{ {vis}fn new(v: T) -> Self {{ SharedMut(std::rc::Rc::new(std::cell::RefCell::new(v))) }} {vis}fn get(&self) -> T where T: Clone {{ self.0.borrow().clone() }} {vis}fn set(&self, v: T) {{ *self.0.borrow_mut() = v; }} {vis}fn borrow(&self) -> std::cell::Ref<'_, T> {{ self.0.borrow() }} {vis}fn borrow_mut(&self) -> std::cell::RefMut<'_, T> {{ self.0.borrow_mut() }} }}\n"));
+    s.push_str(&format!("{vis}struct AlmideSharedMut<T>({vis}std::rc::Rc<std::cell::RefCell<T>>);\n"));
+    s.push_str("impl<T> Clone for AlmideSharedMut<T> { fn clone(&self) -> Self { AlmideSharedMut(std::rc::Rc::clone(&self.0)) } }\n");
+    s.push_str("impl<T: std::fmt::Debug> std::fmt::Debug for AlmideSharedMut<T> { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { self.0.borrow().fmt(f) } }\n");
+    s.push_str("impl<T: PartialEq> PartialEq for AlmideSharedMut<T> { fn eq(&self, other: &Self) -> bool { *self.0.borrow() == *other.0.borrow() } }\n");
+    s.push_str(&format!("impl<T> AlmideSharedMut<T> {{ {vis}fn new(v: T) -> Self {{ AlmideSharedMut(std::rc::Rc::new(std::cell::RefCell::new(v))) }} {vis}fn get(&self) -> T where T: Clone {{ self.0.borrow().clone() }} {vis}fn set(&self, v: T) {{ *self.0.borrow_mut() = v; }} {vis}fn borrow(&self) -> std::cell::Ref<'_, T> {{ self.0.borrow() }} {vis}fn borrow_mut(&self) -> std::cell::RefMut<'_, T> {{ self.0.borrow_mut() }} }}\n"));
     s.push_str(&almide_repr_prelude(vis));
     s
 }
@@ -417,9 +417,9 @@ fn almide_repr_prelude(vis: &str) -> String {
     s.push_str("impl<T: AlmideRepr> AlmideRepr for std::option::Option<T> { fn almide_repr(&self) -> String { match self { Some(v) => format!(\"some({})\", v.almide_repr()), None => \"none\".to_string() } } }\n");
     // Result: `ok(v)` / `err(e)`.
     s.push_str("impl<T: AlmideRepr, E: AlmideRepr> AlmideRepr for std::result::Result<T, E> { fn almide_repr(&self) -> String { match self { Ok(v) => format!(\"ok({})\", v.almide_repr()), Err(e) => format!(\"err({})\", e.almide_repr()) } } }\n");
-    // RcCow / SharedMut transparently forward to the wrapped value.
-    s.push_str("impl<T: AlmideRepr> AlmideRepr for RcCow<T> { fn almide_repr(&self) -> String { (**self).almide_repr() } }\n");
-    s.push_str("impl<T: AlmideRepr + Clone> AlmideRepr for SharedMut<T> { fn almide_repr(&self) -> String { self.0.borrow().almide_repr() } }\n");
+    // AlmideRcCow / AlmideSharedMut transparently forward to the wrapped value.
+    s.push_str("impl<T: AlmideRepr> AlmideRepr for AlmideRcCow<T> { fn almide_repr(&self) -> String { (**self).almide_repr() } }\n");
+    s.push_str("impl<T: AlmideRepr + Clone> AlmideRepr for AlmideSharedMut<T> { fn almide_repr(&self) -> String { self.0.borrow().almide_repr() } }\n");
     // Reference forwarders so `almide_repr(&&x)` and slice elements compose.
     s.push_str("impl<T: AlmideRepr + ?Sized> AlmideRepr for &T { fn almide_repr(&self) -> String { (**self).almide_repr() } }\n");
     s.push_str("impl<T: AlmideRepr + ?Sized> AlmideRepr for std::boxed::Box<T> { fn almide_repr(&self) -> String { (**self).almide_repr() } }\n");

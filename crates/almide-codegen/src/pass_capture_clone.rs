@@ -103,7 +103,7 @@ fn detect_shared_mut(program: &IrProgram) -> HashSet<VarId> {
     // `thread_local!` storage (a mutated one becomes `ModuleRc`/`ModuleCell`) and
     // are already globally reachable, so a closure references them directly by their
     // storage class — it does not capture a heap cell. Marking a global `shared_mut`
-    // double-classifies it (ModuleRc AND SharedMut) and the two emit conflicting
+    // double-classifies it (ModuleRc AND AlmideSharedMut) and the two emit conflicting
     // references: the closure body uses `G.with(…)` while the enclosing read uses a
     // lowercase `g.get()` that doesn't exist → `error[E0425]: cannot find value g`.
     // So exclude globals here; their mutability is handled by the ModuleRc path.
@@ -119,7 +119,7 @@ fn detect_shared_mut(program: &IrProgram) -> HashSet<VarId> {
     // captured param needs a shared cell only if the closure ITSELF mutates it;
     // its bare `Var` flag (TCO artifact) must not trigger shared-mut. (Without this
     // exclusion the param read emits `.get()` on a value that was never cell-wrapped
-    // — params have no `SharedMut::new` declaration site — yielding E0061/E0277.)
+    // — params have no `AlmideSharedMut::new` declaration site — yielding E0061/E0277.)
     let params: HashSet<VarId> = program.functions.iter().flat_map(|f| f.params.iter().map(|p| p.var))
         .chain(program.modules.iter().flat_map(|m| m.functions.iter().flat_map(|f| f.params.iter().map(|p| p.var))))
         .collect();
@@ -139,9 +139,9 @@ fn detect_shared_mut(program: &IrProgram) -> HashSet<VarId> {
                     let info = self.vt.get(v);
                     // A captured var that is mutated through the closure must become a
                     // shared cell so the mutation is visible to the enclosing scope.
-                    // Copy types lower to `Rc<Cell<T>>`, non-Copy to `SharedMut`
+                    // Copy types lower to `Rc<Cell<T>>`, non-Copy to `AlmideSharedMut`
                     // (`Rc<RefCell<T>>`) — the walker picks by type. Without this a
-                    // non-Copy capture went through `RcCow`, whose copy-on-write loses
+                    // non-Copy capture went through `AlmideRcCow`, whose copy-on-write loses
                     // the mutation. (Closure v2: P3 = Copy, P6 = non-Copy.)
                     // For a function param, the `Var` flag is a TCO artifact, so only a
                     // genuine closure-body mutation counts (see `params` note above).

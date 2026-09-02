@@ -2,7 +2,7 @@
 //! reads a statement proves safe, instead of `.get()`-cloning it per read.
 //!
 //! A closure-captured mutable heap local (`var stats: Map[...]` used from a
-//! lambda) lowers to a `SharedMut` cell (`Rc<RefCell<T>>`). A READ of it in
+//! lambda) lowers to a `AlmideSharedMut` cell (`Rc<RefCell<T>>`). A READ of it in
 //! borrow position emitted `&cap.get()` — a deep clone of the whole value
 //! per read, which made every `map.get` through a closure clone the Map
 //! (~5x on the onebrc aggregation loop). A mutating access already writes
@@ -11,7 +11,7 @@
 //!
 //! MARKER, not a schema change: a qualifying read `Borrow { Var v }` is
 //! rewritten to `Borrow { Deref { Var v } }` — a shape that cannot
-//! otherwise occur on a `SharedMut` var (the cell type has no `Deref`
+//! otherwise occur on a `AlmideSharedMut` var (the cell type has no `Deref`
 //! impl, so the generic `&*v` render would not compile) — and the walker's
 //! borrow renderer turns exactly that shape into `&*v.borrow()`. Unmarked
 //! reads keep the owned `.get()` snapshot.
@@ -28,7 +28,7 @@
 //!   aliasing the same cell could run (and take a mut borrow) while a
 //!   guard is live, or whose temporary-lifetime extension keeps a guard
 //!   alive into arm/body code. Named user fns cannot hold the cell:
-//!   `SharedMut` exists only as a closure-capture representation, and a
+//!   `AlmideSharedMut` exists only as a closure-capture representation, and a
 //!   nested statement (its own semicolon scope) is still visited and
 //!   marked independently.
 //! - a `match f(read) { .. }` whose SUBJECT holds the reads is first

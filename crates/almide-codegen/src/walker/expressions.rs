@@ -62,8 +62,8 @@ fn mangle_applied_for_mono(base: &str, args: &[Ty]) -> String {
     format!("{}_{}", base, inner)
 }
 
-/// Render an expression ensuring an owned value (not RcCow wrapper).
-/// For RcCow vars, produces `(*var).clone()` to yield the unwrapped T.
+/// Render an expression ensuring an owned value (not AlmideRcCow wrapper).
+/// For AlmideRcCow vars, produces `(*var).clone()` to yield the unwrapped T.
 /// Used at sites that need owned T: function args, record fields, concat operands.
 pub(crate) fn render_expr_owned(ctx: &RenderContext, expr: &IrExpr) -> String {
     if let IrExprKind::Var { id } = &expr.kind {
@@ -633,7 +633,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
 
         // ── Pre-resolved runtime call (from @intrinsic / NormalizeRuntimeCalls) ──
         // #617: a raw NATIVE-runtime result whose type reaches Bytes/Matrix
-        // converts to the RcCow value shape at this boundary. A user-module fn
+        // converts to the AlmideRcCow value shape at this boundary. A user-module fn
         // normalized into the same RuntimeCall spelling already returns the
         // mapped types — no glue (double-wrap otherwise).
         IrExprKind::RuntimeCall { symbol, args } => {
@@ -777,7 +777,7 @@ fn render_expr_wrappers(ctx: &RenderContext, expr: &IrExpr) -> String {
 
 /// `RuntimeCall` rendering. A container-constructing runtime fn needs its
 /// turbofish pinned; #617: a raw NATIVE-runtime result whose type reaches
-/// Bytes/Matrix converts to the RcCow value shape at this boundary. A
+/// Bytes/Matrix converts to the AlmideRcCow value shape at this boundary. A
 /// user-module fn normalized into the same RuntimeCall spelling already returns
 /// the mapped types — no glue (double-wrap otherwise).
 fn render_expr_runtime_call(

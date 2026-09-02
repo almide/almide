@@ -103,7 +103,7 @@ fn primitive_type_name(ty: &Ty) -> Option<&'static str> {
 
 /// The leaf types rendered through a template key, as `(key, fallback)`.
 ///
-/// #617: Bytes/Matrix are RcCow VALUE types on the Rust target — copies are O(1)
+/// #617: Bytes/Matrix are AlmideRcCow VALUE types on the Rust target — copies are O(1)
 /// Rc bumps, mutation is make_mut copy-on-write (rust.toml templates + the
 /// `rc_cow_result_glue` boundary in the expression walker).
 ///
@@ -120,8 +120,8 @@ fn templated_scalar_type(ty: &Ty) -> Option<(&'static str, &'static str)> {
         Ty::String => ("type_string", "String"),
         Ty::Bool => ("type_bool", "bool"),
         Ty::Unit | Ty::Never => ("type_unit", "()"),
-        Ty::Bytes => ("type_bytes", "RcCow<Vec<u8>>"),
-        Ty::Matrix => ("type_matrix", "RcCow<AlmideMatrix>"),
+        Ty::Bytes => ("type_bytes", "AlmideRcCow<Vec<u8>>"),
+        Ty::Matrix => ("type_matrix", "AlmideRcCow<AlmideMatrix>"),
         _ => return None,
     })
 }
@@ -137,7 +137,7 @@ fn render_type_applied(ctx: &RenderContext, id: &TypeConstructorId, args: &[Ty])
         // `Matrix[Float32]` / `Matrix[Float64]` annotations without a separate
         // Rust type surface yet. Type-specialised layouts will fold into this
         // arm in a follow-up codegen arc.
-        (TypeConstructorId::Matrix, _) => template_or(ctx, "type_matrix", &[], "RcCow<AlmideMatrix>"),
+        (TypeConstructorId::Matrix, _) => template_or(ctx, "type_matrix", &[], "AlmideRcCow<AlmideMatrix>"),
         (TypeConstructorId::Option, [inner]) => {
             let inner_s = render_type(ctx, inner);
             ctx.templates.render_with("type_option", None, &[], &[("inner", inner_s.as_str())])

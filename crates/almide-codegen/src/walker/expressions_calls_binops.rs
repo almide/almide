@@ -28,7 +28,7 @@ fn render_iter_chain(ctx: &RenderContext, source: &IrExpr, consume: bool, steps:
 // ── Binary operator rendering ──
 
 /// #617: the matrix operators return a RAW AlmideMatrix from the runtime —
-/// wrap into the RcCow value shape like every runtime-call result.
+/// wrap into the AlmideRcCow value shape like every runtime-call result.
 /// Extracted from `render_binop`'s BinOp::{Mul,Add,Sub,Scale}Matrix arms
 /// (cog>30 decomposition, pattern 2, uniform-shaped arms grouped by a
 /// shared theme). Only ever called for those four ops.
@@ -118,7 +118,7 @@ fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _
     // minutes at 100% CPU on exactly that shape; found 2026-08-03).
     if matches!(op, BinOp::ConcatStr | BinOp::ConcatList) {
         let ty_tag = if op == BinOp::ConcatStr { "String" } else { "List" };
-        // Unwrap RcCow operands to owned T for concat
+        // Unwrap AlmideRcCow operands to owned T for concat
         let lo = render_expr_owned(ctx, left);
         let ro = render_expr_owned(ctx, right);
         return ctx
@@ -464,7 +464,7 @@ fn render_enum_constructor(ctx: &RenderContext, ctor_name: &str, enum_name: &str
         let needs_box = ctx.ann.recursive_enums.contains(enum_name)
             && (ty_contains_name(&a.ty, enum_name)
                 || ctx.ann.boxed_fields.contains(&(ctor_name.to_string(), format!("{}", i))));
-        // Unwrap RcCow for var bindings used as variant constructor args.
+        // Unwrap AlmideRcCow for var bindings used as variant constructor args.
         let is_rc_cow_var = matches!(&a.kind, IrExprKind::Var { id } if ctx.ann.is_rc_cow(id));
         let rendered = if is_rc_cow_var {
             format!("{}.into_inner()", rendered)
@@ -532,7 +532,7 @@ fn coerce_to_owned_string(rendered: &str, expr: &IrExpr) -> String {
 
 /// #617: does this type reach a `Bytes`/`Matrix` anywhere a runtime boundary
 /// would hand back RAW values (`Vec<u8>` / `AlmideMatrix`) where the generated
-/// code stores the RcCow value type?
+/// code stores the AlmideRcCow value type?
 pub(super) fn rc_cow_needs_glue(ty: &Ty) -> bool {
     use almide_lang::types::constructor::TypeConstructorId as TC;
     match ty {
@@ -545,10 +545,10 @@ pub(super) fn rc_cow_needs_glue(ty: &Ty) -> bool {
     }
 }
 
-/// #617: conversion glue from a RAW runtime result to the RcCow-typed value the
-/// generated code stores — `Bytes`/`Matrix` map to `RcCow<…>` (rust.toml
+/// #617: conversion glue from a RAW runtime result to the AlmideRcCow-typed value the
+/// generated code stores — `Bytes`/`Matrix` map to `AlmideRcCow<…>` (rust.toml
 /// `type_bytes`/`type_matrix`), while the runtime keeps its raw signatures.
-/// Immutable/mutable ARG borrows need no glue (`&RcCow<T>` / `&mut RcCow<T>`
+/// Immutable/mutable ARG borrows need no glue (`&AlmideRcCow<T>` / `&mut AlmideRcCow<T>`
 /// deref-coerce; the `&mut` path IS the `make_mut` copy-on-write that preserves
 /// value semantics). Identity when no Bytes/Matrix is reachable in `ty`.
 pub(super) fn rc_cow_result_glue(expr_str: String, ty: &Ty) -> String {
@@ -558,7 +558,7 @@ pub(super) fn rc_cow_result_glue(expr_str: String, ty: &Ty) -> String {
     }
     match ty {
         Ty::Bytes | Ty::Matrix | Ty::Applied(TC::Matrix, _) => {
-            format!("RcCow::from({expr_str})")
+            format!("AlmideRcCow::from({expr_str})")
         }
         Ty::Applied(TC::List, args) => {
             let inner = rc_cow_result_glue("__e".to_string(), &args[0]);
@@ -599,13 +599,13 @@ pub(super) fn rc_cow_result_glue(expr_str: String, ty: &Ty) -> String {
 
 /// #617: the reverse boundary — a runtime fn whose signature takes a CONCRETE
 /// container of raw elements (`&[AlmideMatrix]`), where deref coercion cannot
-/// see through the RcCow ELEMENTS. Element-cloned at the call site; the only
+/// see through the AlmideRcCow ELEMENTS. Element-cloned at the call site; the only
 /// such runtime family today is `matrix.concat_cols_many`.
 fn rc_cow_arg_needs_raw_elems(symbol: &str) -> bool {
     symbol == "almide_rt_matrix_concat_cols_many"
 }
 
-/// #617: the inverse of [`rc_cow_result_glue`] — convert an RcCow-shaped value
+/// #617: the inverse of [`rc_cow_result_glue`] — convert an AlmideRcCow-shaped value
 /// expression back to the RAW shape a shared STATIC stores (an `Rc` inside a
 /// static is not `Sync`, and fan threads read globals, so top-lets keep the raw
 /// `Vec<u8>` / `AlmideMatrix` layout; locals re-wrap at the read boundary).
@@ -616,7 +616,7 @@ pub(super) fn rc_cow_unglue(expr_str: String, ty: &Ty) -> String {
     }
     match ty {
         Ty::Bytes | Ty::Matrix | Ty::Applied(TC::Matrix, _) => {
-            format!("RcCow::into_inner({expr_str})")
+            format!("AlmideRcCow::into_inner({expr_str})")
         }
         Ty::Applied(TC::List, args) => {
             let inner = rc_cow_unglue("__e".to_string(), &args[0]);
@@ -655,19 +655,19 @@ pub(super) fn rc_cow_unglue(expr_str: String, ty: &Ty) -> String {
     }
 }
 
-/// #617: render a type for a shared STATIC — the RcCow value shape textually
-/// reverted to the raw storage shape (RcCow only ever wraps these two types,
+/// #617: render a type for a shared STATIC — the AlmideRcCow value shape textually
+/// reverted to the raw storage shape (AlmideRcCow only ever wraps these two types,
 /// so the rewrite is total and unambiguous).
 pub(super) fn rc_cow_raw_type(ty_str: &str) -> String {
     ty_str
-        .replace("RcCow<Vec<u8>>", "Vec<u8>")
-        .replace("RcCow<AlmideMatrix>", "AlmideMatrix")
+        .replace("AlmideRcCow<Vec<u8>>", "Vec<u8>")
+        .replace("AlmideRcCow<AlmideMatrix>", "AlmideMatrix")
 }
 
 /// #617: TRUE iff `symbol` names a NATIVE runtime fn (raw `Vec<u8>` /
 /// `AlmideMatrix` signatures) rather than a USER-module fn that received the
 /// same `almide_rt_<m>_` prefixing (whose generated signature already carries
-/// the mapped RcCow types — gluing it would double-wrap, the nn E0283).
+/// the mapped AlmideRcCow types — gluing it would double-wrap, the nn E0283).
 /// Decided against the runtime-module registry, the one source of truth for
 /// what ships raw native signatures.
 fn rc_cow_symbol_is_native_runtime(symbol: &str) -> bool {
@@ -694,7 +694,7 @@ fn try_render_numeric_cast(ctx: &RenderContext, symbol: &almide_base::intern::Sy
     }
 }
 
-/// Mutating stdlib calls on a module-level (`ModuleRc`) or `RcCow` var:
+/// Mutating stdlib calls on a module-level (`ModuleRc`) or `AlmideRcCow` var:
 /// route through `Rc::make_mut`/`.make_mut()` so the mutation hits the
 /// shared backing store, not a clone. The mutator set is the one source of
 /// truth in `pass_closure_conversion` (list/map/string/bytes &mut-on-args[0]
@@ -745,7 +745,7 @@ fn render_runtime_call_args_owned(ctx: &RenderContext, symbol: &almide_base::int
         .map(|a| {
             let r = render_expr_owned(ctx, a);
             // #617: a concrete container-of-raw runtime param cannot deref-coerce
-            // through RcCow ELEMENTS — clone them out at this (rare) boundary. The
+            // through AlmideRcCow ELEMENTS — clone them out at this (rare) boundary. The
             // closure param is EXPLICITLY typed: the producer side may itself be
             // result glue ending in `collect::<Vec<_>>()`, whose `_` only resolves
             // from this consumer.
