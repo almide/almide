@@ -139,3 +139,17 @@ pub(crate) fn modules_spelled_in(user_code: &str) -> Vec<&'static str> {
         .map(|e| e.module)
         .collect()
 }
+
+/// Whether the runtime's definition of a runtime-owned type carries an
+/// `AlmideRepr` impl — the bundled twins do (`impl AlmideRepr for
+/// AlmideEndian` in bytes.rs, `AlmideFileStat` in fs.rs,
+/// `AlmideProcessStatus` in process.rs: the impls the walker used to emit
+/// beside the twin decl, moved into the runtime by #1821). `${e}` on such a
+/// value routes through `almide_repr` whether or not the bundled decl
+/// reached the program: under the auto-import it never does, so the
+/// decl-driven `repr_named_types` set left the walker on the `Display` path
+/// and the runtime enum has none (E0277, #1829). The undeclared names
+/// (`Value`, the http/json handles) keep their `Display` route untouched.
+pub(crate) fn has_runtime_repr(almd: &str) -> bool {
+    TABLE.iter().any(|e| e.almd == almd && e.twin.is_some())
+}

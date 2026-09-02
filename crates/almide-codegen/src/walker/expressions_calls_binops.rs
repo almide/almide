@@ -806,8 +806,14 @@ fn ty_needs_repr(ctx: &RenderContext, ty: &Ty) -> bool {
         Ty::Tuple(..) => true,
         // Anonymous records get an inline literal repr.
         Ty::Record { .. } | Ty::OpenRecord { .. } => true,
-        // Named records/variants → repr only when a generated impl exists.
-        Ty::Named(name, _) => ctx.repr_named_types.contains(name),
+        // Named records/variants → repr only when a generated impl exists —
+        // or the runtime's own, for a runtime-owned twin (`Endian`,
+        // `FileStat`, `ProcessStatus`) the program references under the
+        // reserved spelling: its impl lives in the runtime, so the route
+        // holds with or without the bundled decl (#1829).
+        Ty::Named(name, _) => ctx.repr_named_types.contains(name)
+            || (ctx.ann.runtime_owned_types.contains_key(name.as_str())
+                && super::runtime_owned::has_runtime_repr(name.as_str())),
         // Everything else (scalars, String, Bool, Unit, Fn, Unknown, …) stays on
         // the Display path.
         _ => false,
