@@ -1234,11 +1234,12 @@ evidence  = [
 id        = "C-092"
 spec      = "ALS-M2"
 title     = "A generic record field is sized by its instantiated type at construction"
-statement = "A generic record field is allocated and laid out by its instantiated type, byte-identical native == wasm. The WASM record emit sized the block from the DECLARED field list, so a generic field (value: T) used the unresolved param's default size (4 bytes); a trailing concrete heap field then wrote past the under-allocated block and read back empty, corrupting both the record and any spread of it. Construction now derives size and field order from the concrete (generic-substituted) layout of the result type."
+statement = "A generic record field is allocated and laid out by its instantiated type, byte-identical native == wasm. The WASM record emit sized the block from the DECLARED field list, so a generic field (value: T) used the unresolved param's default size (4 bytes); a trailing concrete heap field then wrote past the under-allocated block and read back empty, corrupting both the record and any spread of it. Construction now derives size and field order from the concrete (generic-substituted) layout of the result type. EXTENDED (#1676, 0.61.2): a FUNCTION-typed field instantiates through its signature on the structural leg — `run: (Value, String) -> P[T]` with T = String is a concrete closure slot. The instance builder's substitution had no arm for function (or anonymous-record) types, so `T` stayed bare inside the signature, the field resolved nothing, the reserved instance index stayed Excluded, and a record LITERAL of the instance walled as `record-of-variant-ty` on the default leg whenever some fn took `S[String]` as a parameter — the monomorphic spelling of the same program lowered. A fn calling the field from return position now prints what native prints (structural-only rows: the incumbent brick refuses the heap-result computed call)."
 since     = "0.27.6"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/generic_record_field_size.almd", class = "fixture" },
+  { path = "spec/wasm_cross/generic_record_fn_field.almd", class = "fixture" },
 ]
 
 [[contract]]
