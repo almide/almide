@@ -26,7 +26,7 @@
 2013	spec/wasm_cross/bounded_kernel.almd
 2013	spec/wasm_cross/bounded_kernel_plain.almd
 1907	spec/wasm_cross/branch_lift_in_loop.almd
-5957	spec/wasm_cross/bundled_pure_modules.almd
+6081	spec/wasm_cross/bundled_pure_modules.almd
 2949	spec/wasm_cross/bytes_alloc_ceiling_domain.almd
 2144	spec/wasm_cross/bytes_array_count_domain.almd
 1529	spec/wasm_cross/bytes_equality_call_operands.almd
@@ -428,6 +428,7 @@
 4157	spec/wasm_cross/option_unwrap_or_else_heap.almd
 1623	spec/wasm_cross/optional_chain_scalar.almd
 2031	spec/wasm_cross/or_pattern.almd
+3685	spec/wasm_cross/path_extension_hidden.almd
 1636	spec/wasm_cross/phantom_type_param.almd
 1539	spec/wasm_cross/pipe_chain_scalar_bind.almd
 1798	spec/wasm_cross/pipe_compose_forms.almd
