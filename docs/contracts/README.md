@@ -195,7 +195,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-165 | fold over a String-keyed map, a String list or a String set threads a heap accumulator on both targets | 0.36.0 | active | fixture | 1 |
 | C-166 | Map interpolation renders every self-hosted key/value pairing on both targets | 0.36.0 | active | fixture | 1 |
 | C-167 | float.clamp returns its input unchanged when in range, sign bit included | 0.36.0 | active | fixture | 1 |
-| C-168 | list.flatten borrows its argument, so it composes with another borrow of the same binding | 0.36.0 | active | fixture | 1 |
+| C-168 | list.flatten borrows its argument, so it composes with another borrow of the same binding | 0.36.0 | active | fixture | 2 |
 | C-169 | list.repeat over the size ceiling aborts in the T6 form on both targets | 0.36.0 | active | fixture | 1 |
 | C-170 | Integer arithmetic wraps in every position, including a module-level let | 0.36.0 | active | fixture | 1 |
 | C-171 | Byte-offset bound checks do not overflow at the i64 boundary | 0.36.0 | active | fixture | 1 |
