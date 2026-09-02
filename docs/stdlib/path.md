@@ -126,11 +126,15 @@ fn show(o: Option[String]) -> String = match o {
 fn main() -> Unit = {
   println(show(path.extension("file.txt")))
   println(show(path.extension("Makefile")))
+  println(show(path.extension(".gitignore")))
+  println(show(path.extension(".bashrc.bak")))
 }
 ```
 ```output
 some("txt")
 none
+none
+some("bak")
 ```
 
 ### `path.is_absolute(p: String) -> Bool`

@@ -1,0 +1,23 @@
+// @contract: C-335
+// path.extension on hidden files (#1795): a leading dot is a hidden-file
+// marker, not an extension — `.gitignore` is `none`, `.bashrc.bak` is `bak`,
+// the rule `path.stem` already kept and the docs state. Both legs share the
+// self-hosted body, so one fixture binds them; every row is printed.
+import path
+
+fn show(o: String?) -> String = match o {
+  some(s) => "some(" + s + ")",
+  none => "none",
+}
+
+fn main() -> Unit = {
+  println(show(path.extension("file.txt")))
+  println(show(path.extension("Makefile")))
+  println(show(path.extension(".gitignore")))
+  println(show(path.extension(".bashrc.bak")))
+  println(show(path.extension("a.tar.gz")))
+  println(show(path.extension("dir.d/README")))
+  println(show(path.extension("/tmp/.hidden/x.log")))
+  println(show(path.extension("foo.")))
+  println(path.stem(".gitignore") + " " + path.stem("a.tar.gz") + " " + path.stem(".bashrc.bak"))
+}
