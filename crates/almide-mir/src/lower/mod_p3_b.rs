@@ -447,12 +447,10 @@ impl LowerCtx {
         // SAME one bind rule with a synthetic discard binding (`let _ = f()!`
         // semantics — the ok payload is a scalar copy nobody reads). Probe-off
         // keeps the pre-rule dispatch byte-identical.
-        if crate::lower::bang_return_probe() {
-            if matches!(&expr.kind, IrExprKind::Unwrap { .. }) {
-                let discard = VarId(crate::lower::desugar_var_seed());
-                if self.try_lower_bind_unwrap_return(discard, &expr.ty, expr)? {
-                    return Ok(());
-                }
+        if crate::lower::bang_return_probe() && matches!(&expr.kind, IrExprKind::Unwrap { .. }) {
+            let discard = VarId(crate::lower::desugar_var_seed());
+            if self.try_lower_bind_unwrap_return(discard, &expr.ty, expr)? {
+                return Ok(());
             }
         }
         match &expr.kind {

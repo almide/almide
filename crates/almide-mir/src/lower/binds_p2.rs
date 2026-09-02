@@ -72,10 +72,11 @@ impl LowerCtx {
         // the one rule; a decline falls through to the existing chain (the
         // nested-arm reach wall stays the honest fallback). Probe-off is
         // untouched — the desugar ladder still owns the node.
-        if crate::lower::bang_return_probe() && matches!(&value.kind, IrExprKind::Try { .. }) {
-            if self.try_lower_bind_unwrap_return(var, ty, value)? {
-                return Ok(());
-            }
+        if crate::lower::bang_return_probe()
+            && matches!(&value.kind, IrExprKind::Try { .. })
+            && self.try_lower_bind_unwrap_return(var, ty, value)?
+        {
+            return Ok(());
         }
         // A BLOCK-valued bind (`let a = { let n = 5; n * n }` — an inlined pipe-lambda, or any block
         // in value position): lower the block's statements as effects in the current scope, then bind
