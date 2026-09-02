@@ -402,6 +402,7 @@ call:path.extension
 call:path.from_string
 call:path.is_absolute
 call:path.join
+call:path.stem
 call:path.to_string
 call:path.trusted
 call:println
