@@ -423,6 +423,7 @@ include!("control_p2_b.rs");
 include!("control_p2_c.rs");
 include!("control_p2_d.rs");
 include!("control_p3.rs");
+include!("control_p3_qq.rs");
 include!("control_p3_b.rs");
 include!("control_p3_c.rs");
 include!("heap_result_arm.rs");
