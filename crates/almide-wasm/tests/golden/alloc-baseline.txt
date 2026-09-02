@@ -47,6 +47,7 @@
 ~	spec/wasm_cross/checked_conversion_value_match.almd
 67872	spec/wasm_cross/chunk_str.almd
 66160	spec/wasm_cross/closure_accumulator.almd
+67456	spec/wasm_cross/closure_borrowed_arg_guard.almd
 546368	spec/wasm_cross/closure_captured_map_records.almd
 482736	spec/wasm_cross/closure_rich_list_capture.almd
 82656	spec/wasm_cross/closure_scalar_captures.almd

@@ -1,4 +1,4 @@
-// @contract: C-333
+// @contract: C-334
 // A closure call takes +1 on a BORROWED heap argument (#1786): RC-3's
 // convention is callee-owned — every fn epilogue, a lifted lambda's
 // included, decs its droppable params — so the call_indirect site must

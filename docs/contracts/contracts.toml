@@ -4277,4 +4277,13 @@ evidence  = [
   { path = "spec/lang/as_pattern_test.almd", class = "fixture" },
 ]
 
-
+[[contract]]
+id        = "C-334"
+spec      = "ALS-I1"
+title     = "A closure call takes +1 on a borrowed heap argument: the RC-3 callee-owned convention holds through call_indirect"
+statement = "On the structural wasm leg, a call through a function VALUE (call_indirect through the funcref table — a lambda parameter `pred(v)`, a stored closure, a direct `((n) => …)(x)`) applies the same RC-3 argument guard a named-fn call does: a droppable argument that is not certainly fresh — a match-bound payload (`ok(v) => pred(v)`, `some(v)`, `[v]`), a record field or list element read, a param of the enclosing fn forwarded on — takes +1 at the call site, because every callee epilogue, a lifted lambda's included, decs its droppable params. The value the caller still holds is byte-identical native == wasm AFTER the closure ran. Before this contract the computed-callee path lowered its arguments without the guard, so the lambda's epilogue freed the caller's only reference and the next same-size allocation (the `ok(v)` re-wrap) landed on the string: the nightly differential fuzzer's zeroed and garbage payloads of 2026-08-29, 08-30 and 09-01 (#924; `r3 = \"aaaa\"` → `\"\\0\\0\\0\\0\"`, `ok(\"café\")`, `ok(\"日本語\")`, `ok(\"-0\")` → `ok(\"\")`). A literal or user-fn payload only LOOKED fine: the block was freed all the same and the garbage surfaced once the allocator reused the size class. Fixed in #1786; the incumbent leg never had the gap."
+since     = "0.61.2"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/closure_borrowed_arg_guard.almd", class = "fixture" },
+]
