@@ -350,8 +350,14 @@ impl Checker {
             // Check if we're in the defining module
             let defining_module = self.env.opaque_alias_module.get(&sym(name))
                 .cloned().flatten();
-            let current_module = self.env.self_module_name
-                .or(self.current_module_prefix.as_ref().map(|p| sym(p)));
+            // The module whose body is being checked is the current one;
+            // `self_module_name` is the package's own identity and applies
+            // only to the entry file (no prefix). The reversed order made
+            // the DEFINING module's own constructor call read as foreign,
+            // so a `mod type` alias could never be built anywhere (#1528's
+            // multi-file E033 sweep found it).
+            let current_module = self.current_module_prefix.as_ref().map(|p| sym(p))
+                .or(self.env.self_module_name);
             let allowed = match (&defining_module, &current_module) {
                 (None, None) => true,       // defined in main, used in main
                 (Some(def), Some(cur)) => def == cur, // same module
