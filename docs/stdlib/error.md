@@ -6,16 +6,34 @@ Error construction and inspection. import error.
 
 Add context message to an error result.
 
-```almd
-error.context(result, "failed to load config")
+```almd run
+fn show(r: Result[Int, String]) -> String = match r {
+  ok(n) => "ok(${n})",
+  err(e) => "err(\"${e}\")",
+}
+
+fn main() -> Unit = {
+  let result: Result[Int, String] = err("file not found")
+  println(show(error.context(result, "failed to load config")))
+  println(show(error.context(ok(1), "failed to load config")))
+}
+```
+```output
+err("failed to load config: file not found")
+ok(1)
 ```
 
 ### `error.message(r: Result[T, String]) -> String`
 
 Extract the error message from a Result, or empty string if ok.
 
-```almd
-error.message(err("oops")) // => "oops"
+```almd run
+fn main() -> Unit = {
+  println(error.message(err("oops"): Result[Int, String]))
+}
+```
+```output
+oops
 ```
 
 ### `error.chain(outer: String, cause: String) -> String`
