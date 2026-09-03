@@ -347,6 +347,7 @@
 3112	spec/wasm_cross/map_fold_heap_acc_skv.almd
 3444	spec/wasm_cross/map_fold_heap_accumulator.almd
 6827	spec/wasm_cross/map_index_order.almd
+6187	spec/wasm_cross/map_index_string_key_shapes.almd
 12304	spec/wasm_cross/map_insertion_order.almd
 16092	spec/wasm_cross/map_interp_string_value.almd
 2939	spec/wasm_cross/map_of_maps_value.almd
