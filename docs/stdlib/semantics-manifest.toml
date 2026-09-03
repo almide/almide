@@ -2642,6 +2642,17 @@ reason text.
 """
 
 [[http.fn]]
+name = "status_code"
+index_unit = "status-code"
+probe = 'http.status_code(http.status(http.response(200, "sb"), 418))'
+expect = "418"
+note = """
+The status GETTER (#1791) — the read twin of status(resp, code), so the code
+written by status is read back by status_code: the same 3-digit unit, in the
+same slot of the record the *_response client family fills from the wire.
+"""
+
+[[http.fn]]
 name = "get_status"
 index_unit = "status-code"
 probe = "1"

@@ -186,6 +186,9 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     // (Option ret) sits in the SUM tier below.
     "http_response", "http_json", "http_redirect", "http_with_headers",
     "http_status", "http_body", "http_set_header",
+    // The #1791 read side (audited 2026-09-03): the same list/string
+    // surface plus int.parse / map.new / map.contains / map.set.
+    "http_status_code", "http_headers", "http_header_values",
     // random_int.almd (audited 2026-08-25): prim.alloc_bytes scratch +
     // prim.random_get (the op-32 entropy boundary) + pure span math —
     // the VALUE is nondeterministic by contract (C-112 pins the range).

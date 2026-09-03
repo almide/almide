@@ -25,6 +25,10 @@ test "http.status unit=status-code" {
   assert_eq("${http.body(r) + " " + (http.get_header(r, "Content-Type") ?? "none")}", "sb text/plain")
 }
 
+test "http.status_code unit=status-code" {
+  assert_eq("${http.status_code(http.status(http.response(200, "sb"), 418))}", "418")
+}
+
 test "http.get_status unit=status-code" {
   assert_eq("${1}", "1")
 }

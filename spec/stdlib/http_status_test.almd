@@ -4,13 +4,19 @@
 // pins it. This skip retires with the render_wasm switchover (#1584).
 //
 // http.get_status / http.request_status return (status_code, body) for any
-// complete response; Err is transport-only. Probes follow the net_test.almd
+// complete response; Err is transport-only. The `*_response` twins (#1791)
+// answer the whole record — status, every header line (repeats kept), body —
+// pinned below by a loopback round-trip against a canned raw response
+// served over `net`: the listener is bound BEFORE the `fan` so the client's
+// dial is queued in the backlog until the server arm accepts. Probes follow the net_test.almd
 // discipline: the effectful call is BOUND first and the pure local is matched,
 // so branch-lift synthesizes no real fn (the walled-real ratchet stays empty).
 // The closed-local-port probe exercises the transport-Err path with no
 // external network; the status-code unit is declared out-of-band in
 // docs/stdlib/semantics-manifest.toml.
+import env
 import http
+import net
 
 fn verdict(code: Int) -> String = if code == 404 then "available" else "taken"
 
@@ -33,4 +39,71 @@ test "get_status to a closed local port is a transport err" {
     ok(_) => assert(false),
     err(_) => assert(true),
   }
+}
+
+test "request_response to a closed local port is a transport err" {
+  let result = http.request_response("GET", "http://127.0.0.1:1", "", map.new())
+  match result {
+    ok(_) => assert(false),
+    err(_) => assert(true),
+  }
+}
+
+// The server arm owns listen + accept + answer: the `net` handle tables are
+// thread-local, and each `fan` arm is its own thread. The client arm dials
+// until the listener is up (bounded retries, 20 ms apart).
+effect fn answer_once(port: Int, reply: String) -> Result[Unit, String] = {
+  let server = net.tcp_listen("127.0.0.1", port)!
+  let peer = net.tcp_accept(server)!
+  let _ = net.tcp_read(peer, 4096)!
+  net.tcp_write(peer, bytes.from_string(reply))!
+  net.tcp_close(peer)!
+  net.tcp_close_listener(server)!
+  ok(())
+}
+
+effect fn fetch_retry(method: String, url: String, headers: Map[String, String], left: Int) -> Result[HttpResponse, String] = match http.request_response(method, url, "", headers) {
+  ok(resp) => ok(resp),
+  err(e) => if left == 0 then err(e)
+  else {
+    env.sleep_ms(20)
+    fetch_retry(method, url, headers, left - 1)
+  },
+}
+
+effect fn get_retry(url: String, left: Int) -> Result[HttpResponse, String] = match http.get_response(url) {
+  ok(resp) => ok(resp),
+  err(e) => if left == 0 then err(e)
+  else {
+    env.sleep_ms(20)
+    get_retry(url, left - 1)
+  },
+}
+
+test "request_response keeps status, every header and the body of a 3xx" {
+  let reply = "HTTP/1.1 302 Found\r\nLocation: /next\r\nSet-Cookie: a=1; HttpOnly\r\nSet-Cookie: b=2; Secure\r\nX-Frame-Options: DENY\r\nContent-Length: 5\r\n\r\nmoved"
+  let (_, resp) = fan {
+    answer_once(39190, reply)
+    fetch_retry("GET", "http://127.0.0.1:39190/old", ["User-Agent": "almide-test"], 100)
+  }
+  assert_eq(http.status_code(resp), 302)
+  assert_eq(http.body(resp), "moved")
+  assert_eq(http.get_header(resp, "location") ?? "none", "/next")
+  assert_eq(http.get_header(resp, "Set-Cookie") ?? "none", "a=1; HttpOnly")
+  assert_eq(http.header_values(resp, "set-cookie"), ["a=1; HttpOnly", "b=2; Secure"])
+  let hs = http.headers(resp)
+  assert_eq(map.get(hs, "x-frame-options") ?? "none", "DENY")
+  assert_eq(map.get(hs, "set-cookie") ?? "none", "a=1; HttpOnly")
+  assert_eq(map.get(hs, "X-Frame-Options") ?? "none", "none")
+}
+
+test "get_response is the GET cell of the family and a 404 is Ok" {
+  let reply = "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: 4\r\n\r\ngone"
+  let (_, resp) = fan {
+    answer_once(39191, reply)
+    get_retry("http://127.0.0.1:39191/missing", 100)
+  }
+  assert_eq(http.status_code(resp), 404)
+  assert_eq(http.body(resp), "gone")
+  assert_eq(http.headers(resp), ["content-type": "text/plain", "content-length": "4"])
 }

@@ -181,6 +181,66 @@ text/plain
 none
 ```
 
+### `http.status_code(resp: HttpResponse) -> Int`
+
+Read the status code of a response — the getter twin of `http.status`.
+
+```almd run
+import http
+
+fn main() -> Unit = {
+  let resp = http.status(http.response(200, "teapot"), 418)
+  println("${http.status_code(resp)}")
+}
+```
+```output
+418
+```
+
+### `http.header_values(resp: HttpResponse, key: String) -> List[String]`
+
+EVERY value of one field, in order — the accessor for a field that repeats
+(`Set-Cookie`), where `get_header` answers only the first occurrence. The
+lookup is case-insensitive; an absent field is `[]`.
+
+```almd run
+import http
+
+fn main() -> Unit = {
+  let resp = http.with_headers(200, "", ["Set-Cookie": "a=1; HttpOnly"])
+  println("${http.header_values(resp, "set-cookie")}")
+  println("${http.header_values(resp, "X-Nope")}")
+}
+```
+```output
+["a=1; HttpOnly"]
+[]
+```
+
+### `http.headers(resp: HttpResponse) -> Map[String, String]`
+
+All headers as a map keyed by the **lowercased** field name (RFC 9110 §5.1:
+field names are case-insensitive ASCII tokens). A repeated field keeps its
+**first** value — the rule `get_header` and `req_header` already apply — so a
+`Set-Cookie` list is read through `header_values`, never through this map.
+
+```almd run
+import http
+
+fn main() -> Unit = {
+  let resp = http.with_headers(200, "", ["X-Frame-Options": "DENY", "Content-Type": "text/html"])
+  let hs = http.headers(resp)
+  println(map.get(hs, "x-frame-options") ?? "none")
+  println(map.get(hs, "X-Frame-Options") ?? "none")
+  println("${map.keys(hs)}")
+}
+```
+```output
+DENY
+none
+["x-frame-options", "content-type"]
+```
+
 ### `http.req_method(req: HttpRequest) -> String`
 
 Get the HTTP method of a request (GET, POST, etc.)
@@ -429,6 +489,125 @@ effect fn main() -> Unit = {
 }
 ```
 
+### The `*_response` family — status, headers and body together
+
+Every verb-shaped String client has a `*_response` twin with the **same
+parameters** that answers the whole `HttpResponse` record instead of the body:
+
+| body only | full response |
+|---|---|
+| `http.get(url)` | `http.get_response(url)` |
+| `http.post(url, body)` | `http.post_response(url, body)` |
+| `http.put(url, body)` | `http.put_response(url, body)` |
+| `http.patch(url, body)` | `http.patch_response(url, body)` |
+| `http.delete(url)` | `http.delete_response(url)` |
+| `http.request(method, url, body, headers)` | `http.request_response(method, url, body, headers)` |
+
+**Family rule** (machine-checked by `tests/http_response_family_gate_test.rs`):
+each of `get` / `post` / `put` / `patch` / `delete` / `request` has exactly one
+`<verb>_response` twin, and nothing else grows one. The body-only fn is the
+`body` projection of its twin and `request_status` the `(status, body)`
+projection — all three shapes come from one exchange in the runtime, so they
+cannot drift. Intentional omissions: `get_status` / `get_bytes` /
+`request_bytes` are result-*shape* variants, not verbs (they get no twin), and
+`request_stream` carries no response record (its body goes chunk-wise to the
+callback).
+
+What the record holds:
+
+- `http.status_code(resp)` — **any** complete response is `Ok`: a 404 and a
+  3xx included. `Err` is a transport failure only (connection / TLS /
+  timeout).
+- **Redirects are never followed.** A 3xx arrives as-is with its `Location`
+  header, so the response is always to the URL you passed — there is no
+  separate "final URL".
+- Headers keep their wire spelling and a repeated field keeps **every**
+  occurrence: `http.get_header(resp, k)` answers the first, `http.header_values(resp, k)`
+  all of them, `http.headers(resp)` the lowercased-name map (first wins).
+- `http.body(resp)` — the transfer-decoded body text.
+
+The twins are **native-only** today: the embedded wasm lane serves the
+body / status / bytes shapes through the framed ops (#1710 increment 3) and
+grows the response shape when the wasi:http port lands (#1710);
+`proofs/target-availability.toml` declares the legs.
+
+### `http.get_response(url: String) -> Result[HttpResponse, String]`
+
+```almd check
+import http
+
+effect fn main() -> Unit = {
+  let resp = http.get_response("https://example.com/")!
+  println("status ${http.status_code(resp)}")
+  println(http.get_header(resp, "strict-transport-security") ?? "no HSTS")
+  println(http.get_header(resp, "x-frame-options") ?? "no X-Frame-Options")
+}
+```
+
+### `http.post_response(url: String, body: String) -> Result[HttpResponse, String]`
+
+```almd check
+import http
+
+effect fn main() -> Unit = {
+  let resp = http.post_response("https://api.example.com/login", '{"user": "alice"}')!
+  for cookie in http.header_values(resp, "set-cookie") {
+    println(cookie)
+  }
+}
+```
+
+### `http.put_response(url: String, body: String) -> Result[HttpResponse, String]`
+
+```almd check
+import http
+
+effect fn main() -> Unit = {
+  let resp = http.put_response("https://api.example.com/items/1", '{"name": "alice"}')!
+  println("${http.status_code(resp) == 204}")
+}
+```
+
+### `http.patch_response(url: String, body: String) -> Result[HttpResponse, String]`
+
+```almd check
+import http
+
+effect fn main() -> Unit = {
+  let resp = http.patch_response("https://api.example.com/items/1", '{"name": "bob"}')!
+  println(http.body(resp))
+}
+```
+
+### `http.delete_response(url: String) -> Result[HttpResponse, String]`
+
+```almd check
+import http
+
+effect fn main() -> Unit = {
+  let resp = http.delete_response("https://api.example.com/items/1")!
+  println("${http.status_code(resp)}")
+}
+```
+
+### `http.request_response(method: String, url: String, body: String, headers: Map[String, String]) -> Result[HttpResponse, String]`
+
+The general form. A redirect check reads the 3xx and its `Location` straight
+off the record:
+
+```almd check
+import http
+
+effect fn main() -> Unit = {
+  let resp = http.request_response("GET", "http://example.com/old", "", ["User-Agent": "checker"])!
+  let code = http.status_code(resp)
+  if code >= 300 and code < 400 then
+    println("redirects to ${http.get_header(resp, "location") ?? "?"}")
+  else
+    println("answers ${code} directly")
+}
+```
+
 ### `http.get_bytes(url: String) -> Result[Bytes, String]`
 
 Send an HTTP GET and return the raw response body as `Bytes` (no UTF-8
@@ -463,7 +642,7 @@ effect fn main() -> Unit = {
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (28 functions)
+## Signature index (37 functions)
 
 ```
 effect http.serve(port: Int, f: (HttpRequest) -> Result[HttpResponse, String]) -> Unit
@@ -475,6 +654,9 @@ http.status(resp: HttpResponse, code: Int) -> HttpResponse
 http.body(resp: HttpResponse) -> String
 http.set_header(resp: HttpResponse, key: String, value: String) -> HttpResponse
 http.get_header(resp: HttpResponse, key: String) -> Option[String]
+http.status_code(resp: HttpResponse) -> Int
+http.headers(resp: HttpResponse) -> Map[String, String]
+http.header_values(resp: HttpResponse, key: String) -> List[String]
 http.req_method(req: HttpRequest) -> String
 http.req_path(req: HttpRequest) -> String
 http.req_body(req: HttpRequest) -> String
@@ -489,6 +671,12 @@ effect http.delete(url: String) -> String
 effect http.request(method: String, url: String, body: String, headers: Map[String, String]) -> String
 effect http.get_status(url: String) -> (Int, String)
 effect http.request_status(method: String, url: String, body: String, headers: Map[String, String]) -> (Int, String)
+effect http.get_response(url: String) -> HttpResponse
+effect http.post_response(url: String, body: String) -> HttpResponse
+effect http.put_response(url: String, body: String) -> HttpResponse
+effect http.patch_response(url: String, body: String) -> HttpResponse
+effect http.delete_response(url: String) -> HttpResponse
+effect http.request_response(method: String, url: String, body: String, headers: Map[String, String]) -> HttpResponse
 effect http.get_bytes(url: String) -> Bytes
 effect http.request_bytes(method: String, url: String, body: String, headers: Map[String, String]) -> Bytes
 effect http.request_stream(method: String, url: String, body: String, headers: Map[String, String], on_chunk: (String) -> Unit) -> Unit

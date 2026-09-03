@@ -62,6 +62,24 @@ fn set_header(resp: HttpResponse, key: String, value: String) -> HttpResponse = 
 @borrow_ref(resp)
 fn get_header(resp: HttpResponse, key: String) -> String? = _
 
+// Read side of the response record (#1791). `status_code` is the GETTER
+// twin of `status(resp, code)`; `header_values` keeps a repeated field
+// (`Set-Cookie`) whole where `get_header` answers the first occurrence;
+// `headers` is the lowercased-name map, first value wins — the one rule
+// `get_header` / `req_header` already apply — so a repeated field is read
+// through `header_values`, never through the map.
+@intrinsic("almide_http_status_code")
+@borrow_ref(resp)
+fn status_code(resp: HttpResponse) -> Int = _
+
+@intrinsic("almide_http_headers")
+@borrow_ref(resp)
+fn headers(resp: HttpResponse) -> Map[String, String] = _
+
+@intrinsic("almide_http_header_values")
+@borrow_ref(resp)
+fn header_values(resp: HttpResponse, key: String) -> List[String] = _
+
 // ── Request accessors (pure) ──
 @intrinsic("almide_http_req_method")
 @borrow_ref(req)
@@ -118,6 +136,42 @@ effect fn get_status(url: String) -> Result[(Int, String), String] = _
 @intrinsic("almide_http_request_status")
 @borrow_ref(headers)
 effect fn request_status(method: String, url: String, body: String, headers: Map[String, String]) -> Result[(Int, String), String] = _
+
+// Full-response client (#1791): the `*_response` twin of EVERY verb-shaped
+// String client above — same parameters, `Result[HttpResponse, String]` back.
+// FAMILY RULE (machine-checked by tests/http_response_family_gate_test.rs):
+// each of get / post / put / patch / delete / request has exactly one
+// `<verb>_response` twin with the same parameter list; the body-only fn is
+// the `body` projection of its twin and `request_status` the (status, body)
+// projection, so the three shapes answer from ONE exchange. Intentional
+// omissions: `get_status` / `get_bytes` / `request_bytes` are result-SHAPE
+// variants, not verbs (they get no twin), and `request_stream` carries no
+// response record (its body is delivered chunk-wise to the callback).
+//
+// ANY complete response is `Ok` — a 404 or a 3xx included; `Err` is a
+// transport failure only. Redirects are NEVER followed: the 3xx and its
+// `Location` header are the answer, and the response is always to the URL
+// the caller passed. Header names keep their wire spelling and a repeated
+// field keeps every occurrence — read them with `get_header` (first),
+// `header_values` (all) or `headers` (lowercased map, first wins).
+@intrinsic("almide_http_get_response")
+effect fn get_response(url: String) -> Result[HttpResponse, String] = _
+
+@intrinsic("almide_http_post_response")
+effect fn post_response(url: String, body: String) -> Result[HttpResponse, String] = _
+
+@intrinsic("almide_http_put_response")
+effect fn put_response(url: String, body: String) -> Result[HttpResponse, String] = _
+
+@intrinsic("almide_http_patch_response")
+effect fn patch_response(url: String, body: String) -> Result[HttpResponse, String] = _
+
+@intrinsic("almide_http_delete_response")
+effect fn delete_response(url: String) -> Result[HttpResponse, String] = _
+
+@intrinsic("almide_http_request_response")
+@borrow_ref(headers)
+effect fn request_response(method: String, url: String, body: String, headers: Map[String, String]) -> Result[HttpResponse, String] = _
 
 // Binary client: returns the raw response body as `Bytes` with no UTF-8
 // conversion, so binary payloads (images, audio — e.g. TTS mp3/wav) survive
