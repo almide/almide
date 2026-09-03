@@ -125,7 +125,11 @@ if units < unit_floor:
 
 count = len(warnings)
 if os.environ.get("CLIPPY_RATCHET_COUNT_OVERRIDE"):
+    # The negative-control hook: the verdict branches are exercised with a
+    # forged count, on any toolchain (the pinned-toolchain guard below is
+    # about the MEASUREMENT, which the override replaces).
     count = int(os.environ["CLIPPY_RATCHET_COUNT_OVERRIDE"])
+    verdict = True
     print(f"clippy-warnings: NEGATIVE-CONTROL count override {count}")
 baseline = int(open(baseline_path, encoding="utf-8").read().strip())
 print(f"clippy-warnings: {count} warning(s) over {units} workspace units (baseline {baseline})")
