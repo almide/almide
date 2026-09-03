@@ -20,6 +20,7 @@ env_sleep_pause  out-of-interp-scope capability: env.sleep_ms
 fan_effect_mapper_capability  out-of-interp-scope capability: prim.handle of a Result (outside the slice-2 heap family)
 fs_composition_family  out-of-interp-scope capability: prim.handle of a Result (outside the slice-2 heap family)
 fs_fallible_stream_callback  out-of-interp-scope capability: prim.handle of a Result (outside the slice-2 heap family)
+fs_glob_segments  out-of-interp-scope capability: prim.handle of a Result (outside the slice-2 heap family)
 fs_list_dir_multipass  out-of-interp-scope capability: prim.handle of a Result (outside the slice-2 heap family)
 fs_metadata_family  out-of-interp-scope capability: prim.handle of a Result (outside the slice-2 heap family)
 fs_read_directory_errno  out-of-interp-scope capability: prim.handle of a Result (outside the slice-2 heap family)
