@@ -1,0 +1,14 @@
+// A module's own `mod type` newtype is constructed and destructured inside
+// the module and carried opaquely by the importer (#1835). The E033 boundary
+// (constructing it from here) is pinned by tests/diagnostics/e033-opaque-*.
+import opaquelib
+
+test "module builds and opens its own newtype" {
+  let t = opaquelib.make("raw")
+  assert(opaquelib.text(t) == "raw")
+}
+
+test "module newtype equality" {
+  assert(opaquelib.same(opaquelib.make("a"), opaquelib.make("a")))
+  assert(opaquelib.same(opaquelib.make("a"), opaquelib.make("b")) == false)
+}

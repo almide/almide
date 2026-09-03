@@ -1,0 +1,42 @@
+// @contract: C-076
+// The OPAQUE shape of the stdlib-owned type shadow (#1835): `mod type Value =
+// String` is a newtype the entry program owns — `self.Value`, the one identity
+// its constructor call, its pattern and its type decl carry — while the json
+// value flowing through `json.parse` / `json.stringify` keeps the stdlib's bare
+// `Value`. Before this landing the newtype kept the bare key: `check` accepted
+// a program that mixed the two, native failed at rustc (E0308) and the
+// structural wasm leg read a json value's payload as a String. Both alias
+// visibilities (`mod`, `local`) and a second stdlib-owned name (`JsonPath`,
+// whose incumbent-leg self-host rep must stay the stdlib's) are pinned.
+//
+// Cells, each byte-identical native == wasm: construction, destructure,
+// equality, a list of the newtype, a pipe through it, beside `json.parse`,
+// `json.stringify`, `value.int` and `json.field(json.root(), ..)`.
+import json
+
+mod type Value = String
+
+local type JsonPath = Int
+
+fn mk(s: String) -> Value = Value(s)
+
+fn un(v: Value) -> String = match v {
+  Value(s) => s
+}
+
+fn same(a: Value, b: Value) -> Bool = a == b
+
+fn depth(p: JsonPath) -> Int = match p {
+  JsonPath(n) => n
+}
+
+effect fn main() -> Unit = {
+  let doc = json.parse("{\"a\":[1,2]}")!
+  let mine = mk("x")
+  println("${un(mine)} ${json.stringify(doc)} ${json.stringify(value.int(3))}")
+  println("${same(mine, Value("x"))} ${same(mine, Value("y"))}")
+  let items: List[Value] = [Value("a"), Value("b")]
+  println("${list.len(items)} ${un(items[1])} ${"z" |> mk |> un}")
+  let path = json.field(json.root(), "a")
+  println("${depth(JsonPath(2))} ${json.stringify(json.get_path(doc, path) ?? value.null())}")
+}

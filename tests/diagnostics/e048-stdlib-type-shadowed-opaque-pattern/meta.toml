@@ -1,0 +1,3 @@
+expects_code = "E048"
+expects_error = "pattern `Value(..)` is not a case of `Value`"
+hint_substring = "never rebinds a stdlib type"
