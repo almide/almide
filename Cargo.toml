@@ -85,3 +85,16 @@ tempfile = "3"
 [profile.release]
 incremental = true
 
+
+# The CI test archive (ci.yml `build` → the four `Test Rust` shards). It is the
+# dev profile with the debuginfo left out: the shards replay these binaries from
+# a nextest archive, and debuginfo was most of the 3.1 GB that every shard
+# downloaded. Semantics are UNCHANGED — `inherits = "dev"` keeps
+# debug_assertions and overflow checks, so the `cfg_attr(debug_assertions,
+# ignore = "…release-only…")` sweeps stay ignored here exactly as they were.
+# Symbols are kept (`strip = "debuginfo"`, not "symbols") so a panic in a shard
+# still names its frames.
+[profile.ci-test]
+inherits = "dev"
+debug = 0
+strip = "debuginfo"

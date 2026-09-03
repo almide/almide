@@ -164,19 +164,27 @@ jobs:
 
       - run: cargo build --release
 
-      # #1732: the workspace's dev-profile TEST build happens ONCE, here,
-      # and ships to the shards as a cargo-nextest archive — the four
-      # shard jobs stop compiling entirely (each used to repeat this
-      # ~10-minute build). The archive carries every test binary plus
-      # build-script outputs; shards replay it with `nextest run
-      # --archive-file` under the same target map and coverage gate.
+      # #1732: the workspace's TEST build happens ONCE, here, and ships to
+      # the shards as a cargo-nextest archive — the four shard jobs stop
+      # compiling entirely (each used to repeat this ~10-minute build). The
+      # archive carries every test binary plus build-script outputs; shards
+      # replay it with `nextest run --archive-file` under the same target map
+      # and coverage gate.
+      #
+      # `--cargo-profile ci-test` (Cargo.toml): the dev profile minus
+      # debuginfo. The dev-profile archive was 3.1 GB, took 164 s to pack and
+      # 86 s to upload, and every shard downloaded it (the `digest-mismatch`
+      # flake lived on that download). Test semantics are the dev profile's
+      # (debug_assertions on, so the release-only sweeps stay ignored here).
+      # The shards need no profile flag: the archive records its own layout
+      # and `--extract-to` recreates target/ci-test/*.
       - name: Install cargo-nextest
         run: |
           curl -LsSf https://get.nexte.st/latest/linux -o /tmp/nextest.tar.gz
           tar xzf /tmp/nextest.tar.gz -C /usr/local/bin
           cargo nextest --version
       - name: Archive the workspace test binaries
-        run: cargo nextest archive --workspace --archive-file /tmp/almide-tests.tar.zst
+        run: cargo nextest archive --workspace --cargo-profile ci-test --archive-file /tmp/almide-tests.tar.zst
       - uses: actions/upload-artifact@v7
         with:
           name: almide-tests-archive
@@ -310,8 +318,8 @@ jobs:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
       # #1732: no compile here anymore — the build job ships the
-      # dev-profile test binaries as a nextest archive, and this job
-      # replays it. The big registry/target cache went with the compile;
+      # ci-test-profile test binaries (dev minus debuginfo) as a nextest
+      # archive, and this job replays it. The big registry/target cache went with the compile;
       # only the tool tarball caches below remain.
       - name: Install cargo-nextest
         if: env.DOCS_ONLY != 'true'
