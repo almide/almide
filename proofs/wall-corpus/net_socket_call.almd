@@ -1,8 +1,10 @@
-// @wall: Module call net.tcp_connect
+// @wall: `net.tcp_connect` is not available on --target wasm
 // TCP sockets are a host capability with no WASI preview-1 surface in the
-// structural leg's import set: the call refuses by its unlinked name rather
-// than pretending a socket exists. Graduates with a sockets story (wasi p2
-// or a host op), never silently.
+// structural leg's import set. Since the availability ledger covers the whole
+// public surface (#1827), the refusal is the E081 availability diagnostic at
+// check time — one per net.* call, naming the module's missing host binding —
+// rather than the emitter's unlinked-name wall. Graduates with a sockets story
+// (wasi p2 or a host op), never silently.
 import net
 
 effect fn main() -> Unit = {
