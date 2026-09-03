@@ -203,8 +203,15 @@ impl Emitter<'_> {
             i.local_get(rh).local_get(ih).i32_const(u.slot_size() as i32).i32_mul().i32_add();
             i.local_get(henv);
             i.local_get(hx);
-            i.local_get(henv).i32_load(slot_memarg(0));
         }
+        // Closure convention (calls.rs): the callee OWNS its args and its
+        // epilogue decs every droppable param, so the element — a borrowed
+        // read the list still holds — takes the RC-3 +1 here, exactly as
+        // the fs walkers' per-line call does.
+        if self.rc_droppable(elem) {
+            self.rc_inc_top();
+        }
+        self.f.instructions().local_get(henv).i32_load(slot_memarg(0));
         let ti = self.work.itype(
             vec![ValType::I32, elem.val_type()],
             Some(u.val_type()),
