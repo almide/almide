@@ -70,7 +70,7 @@ counts_measure() {
     contracts                "$total" \
     contracts_active         "$active" \
     contracts_flagged        "$flagged" \
-    contracts_spec_keyed     "$(grep -c '^spec ' docs/contracts/contracts.toml)" \
+    contracts_spec_keyed     "$(awk '/^\[\[contract\]\]/{if(k)n++; k=0} /^spec /{k=1} END{if(k)n++; print n+0}' docs/contracts/contracts.toml)" \
     wasm_cross_fixtures      "$(ls spec/wasm_cross/*.almd | wc -l | tr -d ' ')" \
     interp_abstains          "$(grep -vc '^#\|^$' crates/almide-interp/interp-abstain-ledger.txt)" \
     conformance_sections     "$sections" \
