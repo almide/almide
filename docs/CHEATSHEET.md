@@ -450,7 +450,13 @@ expr!              // unwrap Result/Option, propagate the failure (effect fn, or
 expr ?? fallback   // unwrap or use fallback value
 expr?              // Result → Option (err → none)
 expr?.field        // optional chaining (Option[Record] → Option[FieldType])
+o?.x ?? default    // the idiom: read a field if present, else default (ADR-0005; `?.` is Option-only — on a Result write `(r?)?.x`)
 ```
+
+Each value-level operator is the desugaring of a named stdlib function (ADR-0005):
+`x ?? d` ≡ `option.unwrap_or_else(x, () => d)` / `result.unwrap_or_else(r, (_) => d)`
+(the fallback is lazy), `r?` ≡ `result.to_option(r)`, `o?.x` ≡ `option.map(o, (v) => v.x)`.
+`o?` on a value that is already an Option is a no-op and warns (E056).
 
 `!` on an effect CALL always compiles: if the fn never fails (`random.int`,
 `fs.exists`, …) the `!` is a silent no-op. You never need to know whether a
