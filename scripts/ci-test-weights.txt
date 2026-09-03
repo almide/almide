@@ -69,6 +69,12 @@ reimpl_lint_best_match_test      7
 io_read_all_test                 7
 deterministic_profile_test       6
 float_to_fixed_cross_target_test 5
+# The six wasm_runtime_* binaries (the former wasm_runtime_test, 1552 s on CI
+# run 33695667642): measured locally on 2026-09-03 with nextest, release,
+# sequential (41.1 / 350.3 / 345.1 / 351.9 / 7.5 / 3.9 s) and scaled to the
+# parent's 1552 so the ratios hold; the next refresh-ci-test-weights.sh run
+# replaces them with CI numbers (the ledger binary runs ~190 s under the dev
+# profile, so its scaled 11 is low until then).
 wasm_runtime_interp_oracle       497
 wasm_runtime_cross_target        494
 wasm_runtime_opt_parity          487
