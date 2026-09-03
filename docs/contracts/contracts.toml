@@ -3176,11 +3176,12 @@ evidence  = [
 id        = "C-250"
 spec      = "ALS-E20"
 title     = "Pipe and composition evaluate as plain application in order, identically on both targets"
-statement = "ALS-E20: `x |> f` is observationally `f(x)` — single (10), chained (11), and through a HOF with a lambda (3); `f >> g` builds a callable applying left-to-right ((double >> inc)(4) = 9) — byte-identical native <-> wasm."
+statement = "ALS-E20: `x |> f` is observationally `f(x)` — single (10), chained (11), and through a HOF with a lambda (3); `f >> g` builds a callable applying left-to-right ((double >> inc)(4) = 9) — byte-identical native <-> wasm. EXTENDED (#1873, 0.61.2): a TUPLE-PATTERN lambda as a pipe stage, `x |> ((a, b)) => body`, binds every name through the pattern — observationally `(((a, b)) => body)(x)`, the same destructure the direct spelling `list.map(xs, ((a, b)) => body)` gets. The frontend inlines a single-param pipe lambda to `{ let p = x; body }` (C-115); that arm bound `p.name` — the FIRST pattern name — to the whole tuple and left the rest unbound, so `(1, 2) |> ((a, b)) => a + b` was check-green and build-red on BOTH legs (rustc E0599/E0425 natively; a wasm type mismatch). It now emits `{ let (a, b) = x; body }`. Pinned across the family the grammar admits (flat names only — nested and record patterns are not lambda-parameter syntax): two and three names, a `_` hole, a String element, a tuple-valued element destructured again in the body, a call-produced tuple, and a plain pipe stage chained after the pattern stage — byte-identical native <-> wasm."
 since     = "0.57.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/pipe_compose_forms.almd", class = "fixture" },
+  { path = "spec/wasm_cross/pipe_tuple_pattern_lambda.almd", class = "fixture" },
 ]
 
 [[contract]]

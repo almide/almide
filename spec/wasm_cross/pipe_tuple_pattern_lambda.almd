@@ -1,0 +1,33 @@
+// @contract: C-250
+// A tuple-pattern lambda as a PIPE stage (#1873): `x |> ((a, b)) => body`
+// binds every name through the pattern, exactly as the direct spelling
+// `list.map(xs, ((a, b)) => body)` does. The pipe-inlined lambda used to
+// bind only the first name to the WHOLE tuple — check green, invalid Rust
+// natively (E0599 / E0425), invalid wasm (type mismatch). The family the
+// grammar admits: flat names, `_` holes, String and tuple-valued elements,
+// a call-produced tuple, and chaining into a plain pipe stage.
+fn pair() -> (Int, Int) = (7, 3)
+
+fn main() -> Unit = {
+  // The issue's shape.
+  let t1 = (1, 2) |> ((a, b)) => a + b
+  println("${t1}")
+  // A String element read in an interpolation and a call.
+  let t2 = ("ab", 3) |> ((s, n)) => "${s}:${n}:${string.repeat(s, n)}"
+  println(t2)
+  // Three names with a `_` hole.
+  let t3 = (2, 99, 5) |> ((a, _, c)) => a * c
+  println("${t3}")
+  // A tuple-valued element, destructured again in the body.
+  let t4 = ((4, 6), 10) |> ((p, c)) => {
+    let (a, b) = p
+    a + b + c
+  }
+  println("${t4}")
+  // A call-produced tuple, then a plain pipe stage after the pattern stage.
+  let t5 = (pair() |> ((a, b)) => a - b) |> (d) => d * 100
+  println("${t5}")
+  // The direct spelling on the same values agrees.
+  let direct = [(1, 2), (7, 3)] |> list.map(((a, b)) => a - b)
+  println("${direct}")
+}
