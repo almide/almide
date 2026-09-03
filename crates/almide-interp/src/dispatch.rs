@@ -13,7 +13,7 @@
 use std::rc::Rc;
 
 use almide_base::intern::Sym;
-use almide_ir::{CallTarget, IrExpr};
+use almide_ir::{CallTarget, IrExpr, IrExprKind};
 use almide_lang::types::Ty;
 
 use crate::env::Scope;
@@ -568,10 +568,7 @@ impl<'a> Interpreter<'a> {
             ));
         }
         let Some(recv) = args.first().and_then(crate::inplace::receiver_var) else {
-            return Flow::Unsupported(format!(
-                "in-place container mutation `{m}.{f}` through a non-variable receiver \
-                 (a record field / index / temporary has no single binding to write back to)"
-            ));
+            return self.eval_inplace_on_temporary(m, f, args, scope);
         };
         // A `mut`-PARAMETER receiver is fine now: the write lands on the
         // callee frame's binding, and `eval_named_call`'s mut-param copy-out
@@ -589,6 +586,52 @@ impl<'a> Interpreter<'a> {
             Some(Some(out)) => Flow::val(out),
             Some(None) => Flow::Abort(format!("internal: malformed `{m}.{f}` receiver or args")),
             None => Flow::Abort(format!("internal: `{m}.{f}` on an unbound receiver")),
+        }
+    }
+
+    /// [`Self::eval_inplace_mutation`] for a receiver that is not a variable.
+    /// A TEMPORARY — a call result (`bytes.append_u8(bytes.new(2), 7)`,
+    /// #1849) — has no binding to write back to, and none is needed: both
+    /// backends evaluate the arguments in order, mutate the temporary and
+    /// drop it, so the statement observes nothing but its own argument
+    /// evaluation. The mutation runs on the evaluated value here (through
+    /// the same `inplace::apply`, so a temporary that ALIASES a live
+    /// binding's `Rc` takes the COW copy and the binding is untouched —
+    /// the fixture's `same(x)` probe) and the value is dropped with the
+    /// call. A record field or an index is a different shape: the backends
+    /// write THROUGH it, and this frame has no single slot for it — that
+    /// shape still abstains under its own name.
+    fn eval_inplace_on_temporary(
+        &mut self,
+        m: &str,
+        f: &str,
+        args: &[IrExpr],
+        scope: &Scope,
+    ) -> Flow {
+        let Some(recv) = args.first() else {
+            return Flow::Abort(format!("internal: `{m}.{f}` with no receiver"));
+        };
+        let shape = match &recv.kind {
+            IrExprKind::Call { .. } => None,
+            IrExprKind::Member { .. } => Some("a record field"),
+            IrExprKind::IndexAccess { .. } | IrExprKind::TupleIndex { .. } => Some("an index"),
+            _ => Some("a non-call expression"),
+        };
+        if let Some(shape) = shape {
+            return Flow::Unsupported(format!(
+                "in-place container mutation `{m}.{f}` through {shape} receiver \
+                 (the backends write through it; this frame has no single binding \
+                 to write back to)"
+            ));
+        }
+        let mut temp = val!(self.eval_expr(recv, scope));
+        let mut rest = Vec::with_capacity(args.len().saturating_sub(1));
+        for a in &args[1..] {
+            rest.push(val!(self.eval_expr(a, scope)));
+        }
+        match crate::inplace::apply(m, f, &mut temp, rest) {
+            Some(out) => Flow::val(out),
+            None => Flow::Abort(format!("internal: malformed `{m}.{f}` receiver or args")),
         }
     }
 
