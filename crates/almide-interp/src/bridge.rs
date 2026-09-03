@@ -69,7 +69,10 @@ fn uint64_fn(func: &str, args: &[Value]) -> Option<Flow> {
     let n = as_int(args.first())? as u64;
     let f = match func {
         "to_string" => Flow::val(Value::str(n.to_string())),
-        "to_float32" | "to_float64" => Flow::val(Value::Float(n as f64)),
+        // `to_float32` rounds through f32 exactly as the backends do (the
+        // int_bit_family fixture's u64 column: 2147483647 prints 2147483648.0).
+        "to_float32" => Flow::val(Value::Float(n as f32 as f64)),
+        "to_float64" => Flow::val(Value::Float(n as f64)),
         _ => return None,
     };
     Some(f)
