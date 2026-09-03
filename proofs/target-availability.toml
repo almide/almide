@@ -49,7 +49,16 @@ schema = 2
 # has no arm yet. Burn down from here.
 # 2026-09-02 (#1423 stage 4): 82 -> 74. hex.decode, the html and path
 # newtype ctors and the value case walks serve on the structural leg.
-pending_self_host_ceiling = 74
+# 2026-09-03 (#1423 stage 4): 74 -> 36. The bytes search/edit/predicate
+# family (17: cmp, contains, index_of, starts_with, ends_with, is_empty,
+# is_valid_utf8, eof, skip, insert, remove_at, reverse, xor, map_each,
+# split, lines, data_ptr) and the int bit family with every `to_float32`
+# twin (21) serve on the structural leg: the audited bytes_core /
+# int_bitcount / int_bits / float_bits / int_to_float bodies join the
+# linked-impl whitelist, split and lines get native arms (their self-host
+# twins write the incumbent's 8-byte List slot stride raw), and the
+# i2f32 prim converts i64 -> f32 directly (single rounding).
+pending_self_host_ceiling = 36
 
 # The unprobed class (#1827), per leg. Today: the five HttpRequest
 # accessors (http.query_params / req_body / req_header / req_method /
@@ -63,108 +72,6 @@ unprobed_ceiling_embedded = 5
 
 [[unavailable]]
 fn = "bytes.clear"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "bytes.cmp"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "bytes.contains"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "bytes.data_ptr"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "bytes.ends_with"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "bytes.eof"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "bytes.index_of"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "bytes.insert"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "bytes.is_empty"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "bytes.is_valid_utf8"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "bytes.lines"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "bytes.map_each"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "bytes.remove_at"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "bytes.reverse"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "bytes.skip"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "bytes.split"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "bytes.starts_with"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "bytes.xor"
 legs = ["structural"]
 reason = "pending-self-host"
 issue = "#1827"
@@ -398,108 +305,6 @@ fn = "http.url_decode"
 legs = ["structural"]
 reason = "host-surface"
 issue = "#1423"
-
-[[unavailable]]
-fn = "int.bit_reverse"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "int.bit_width"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "int.bits_to_f32"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "int.byte_swap"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "int.count_leading_zeros"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "int.count_trailing_zeros"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "int.log2_ceil"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "int.log2_floor"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "int.next_power_of_two"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "int.pop_count"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "int.prev_power_of_two"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "int.to_float32"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "int.to_float32_checked"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "int16.to_float32"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "int32.to_float32"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "int64.to_float32"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "int8.to_float32"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
 
 [[unavailable]]
 fn = "list.partition"
@@ -1085,27 +890,3 @@ reason-stock-p1 = "the assertion helper has no wasm lowering yet — the plain a
 reason-structural = "host-surface"
 alt = "match on the err arm and assert"
 issue = "#1423"
-
-[[unavailable]]
-fn = "uint16.to_float32"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "uint32.to_float32"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "uint64.to_float32"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "uint8.to_float32"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"

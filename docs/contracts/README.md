@@ -372,4 +372,6 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-334 | A closure call takes +1 on a borrowed heap argument: the RC-3 callee-owned convention holds through call_indirect | 0.61.2 | active | fixture | 1 |
 | C-335 | path.extension treats a leading dot as a hidden-file marker, not an extension, on both targets | 0.61.2 | active | fixture | 1 |
 | C-336 | Each test starts from re-initialized mutable module globals, on both targets | 0.57.1 | active | fixture | 0 |
+| C-337 | The bytes search, edit and predicate family answers identically on every leg | 0.61.2 | active | fixture | 1 |
+| C-338 | The int bit family, bits_to_f32 and the Int -> Float32 convert agree on every leg | 0.61.2 | active | fixture | 1 |
 
