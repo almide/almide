@@ -109,4 +109,8 @@ patterns = [
   # serves it by newtype erasure. Registering the source (or a pool-side
   # single-variant unwrap of `mod type SafeHtml`) is dispatch glue.
   "capability: html.escape",
+  # url.* (#1837 / #1844): same shape as html — stdlib/url.almd is not a
+  # self_host_registry source, so the pool has no body; registering it is
+  # dispatch glue.
+  "capability: url.parse",
 ]
