@@ -1149,6 +1149,9 @@ jobs:
       - name: TOR references (every operational requirement keeps its enforcing instrument)
         run: bash scripts/check-tor-refs.sh
 
+      - name: Optimization pass roster (#929 — every pass file and NanoPass name rowed per target in ARCHITECTURE.md)
+        run: bash scripts/check-pass-roster.sh
+
       - name: ALS element coverage (every syntax element rowed; UNWRITTEN shrink-only — the freeze precondition)
         run: bash scripts/check-als-element-coverage.sh
 
