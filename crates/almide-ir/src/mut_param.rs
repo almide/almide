@@ -24,19 +24,22 @@
 //!   fn push9(v, x) -> (Int, List[Int]) = { let __mp_ret = <body>; (__mp_ret, v) }
 //!   let __mp_tmp = push9(data, 7); data = __mp_tmp.1; let i = __mp_tmp.0
 //!
-//! Effect fns with a non-Unit return that CAN ERR are SKIPPED (their return
-//! is later Result-wrapped, and the err arm carries no buffer channel — what
-//! the caller's `mut` argument holds after an err is #1576's unratified
-//! design question). A NEVER-ERR effect fn has no err arm to answer for, so
-//! it takes the same tuple rewrite as a plain value fn (#1575: the effect
-//! marker changes the return channel, not the parameter convention).
-//! Never-err is judged by a conservative syntactic scan over a FIXPOINT
-//! allow-list (#1622): err construction, `!` over a non-admitted callee,
-//! `fan`, and runtime calls keep the exclusion; a bare (un-`!`ed) call
-//! cannot feed the effect channel because propagation is EXPLICIT
-//! (ADR-0008); lambda bodies are scanned like any expression; and an effect
-//! fn whose own body passes joins the allow-list, so a never-err protocol
-//! method admits the monomorphized generic caller that reaches it with `!`.
+//! An EFFECT fn with a non-Unit return takes the same tuple rewrite (#1575:
+//! the effect marker changes the return channel, not the parameter
+//! convention), whether or not it can err (#1576, ratified): `(T, Buf)`
+//! rides the OK payload only — the lifted carrier is `Result[(T, Buf), E]`,
+//! the err arm carries no buffer, and at a `!` site the err propagates
+//! BEFORE any write-back, so the caller's slot keeps its pre-call binding —
+//! exactly the order the was-Unit form has always realized. A declared-
+//! Result effect fn (`-> T!`, the single-layer effect ABI: the body's
+//! `ok`/`err` ARE the effect channel) is first stripped to its raw payload
+//! (`ok(x)` tail -> `x`, an `err(e)` tail stays as the raise leaf, any other
+//! Result-typed tail is `!`-unwrapped) so the tuple pairs `T` — not the
+//! Result — with the buffer; the previous `(Result, Buf)` pairing double-
+//! layered the carrier (structural `ok(22)` where native printed `22`, an
+//! invalid module on the incumbent). A declared-Result fn whose err type is
+//! not the default `String` carrier stays excluded (honest wall): the lifted
+//! carrier the wasm ABI builds for a raw tuple is `Result[_, String]`.
 //! A rewritten fn's `mutated_params` is CLEARED:
 //! the convention is now explicit in the tree (the v1 C-132 wall keys on it,
 //! and LICM's conservatism is subsumed by the call-site Assign).
@@ -44,7 +47,7 @@
 //! Callers: the v0 wasm nanopass (`MutParamLoweringPass`) and the v1 MIR
 //! pipeline's pre-lowering (both `source_to_ir` twins — desugar-before-both).
 
-use crate::visit::{walk_expr, IrVisitor};
+use crate::visit::IrVisitor;
 use crate::visit_mut::{walk_expr_mut, IrMutVisitor};
 use crate::*;
 use almide_base::intern::sym;
@@ -511,8 +514,8 @@ fn fold_if_arms(e: &mut IrExpr, p: VarId, mut_ty: &Ty, scope: &str, mut_fns: &Mu
                             _ => value,
                         };
                         matches!(&inner.kind,
-                            IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
-                                if (mut_fns.contains_key(name.as_str()) || mut_fns.contains_key(&scope_key(scope, name.as_str())))
+                            IrExprKind::Call { target, args, .. }
+                                if call_spelling(target).is_some_and(|name| mut_fns.contains_key(&name) || mut_fns.contains_key(&scope_key(scope, &name)))
                                     && args.iter().any(|a| matches!(&a.kind, IrExprKind::Var { id } if *id == p)))
                     }
                     _ => false,
@@ -574,10 +577,36 @@ fn scope_key(scope: &str, name: &str) -> String {
     format!("{scope}\u{1}{name}")
 }
 
+/// The spelling a call site uses for a collected fn: a bare/dotted/mangled
+/// `Named` name as written, or the `module.func` key of a RESOLVED
+/// `CallTarget::Module` call — the shape a cross-module call to a user fn
+/// (`place_order.place_order(repo, ..)` from main, its mono instance
+/// included) arrives in. Before the Module arm the DDD tree's can-err
+/// entry points were collected (the dotted key existed) but their call
+/// sites never rewrote, and the callee's tuple met the caller's record
+/// (structural `ty-mismatch:Tuple-vs-Named`).
+fn call_spelling(target: &CallTarget) -> Option<String> {
+    match target {
+        CallTarget::Named { name } => Some(name.to_string()),
+        // A STDLIB module call (`list.clear(xs)`, `string.push(s, c)`) is
+        // lowered in place by the emitters' own mutator paths and must not
+        // be rewritten (rewriting it walled eleven fixtures with
+        // `call-unit-in-value`); only a USER module's resolved call takes
+        // the move-mode form.
+        CallTarget::Module { module, .. }
+            if almide_lang::stdlib_info::is_any_stdlib(module.as_str()) =>
+        {
+            None
+        }
+        CallTarget::Module { module, func, .. } => Some(format!("{module}.{func}")),
+        CallTarget::Method { .. } | CallTarget::Computed { .. } => None,
+    }
+}
+
 /// Functions eligible for the move-mode rewrite: name → (mut param index, its
 /// type, whether the callee returned Unit before the rewrite).
 ///
-/// Non-Unit EFFECT fns are excluded (Result-wrap interplay). Call sites are
+/// Non-Unit effect fns take the tuple form too (#1576). Call sites are
 /// keyed by BARE name, so a name that resolves to more than one function
 /// (same-name fns across modules, the #692 class) must be excluded wholesale:
 /// rewriting the callee but not a caller — or a caller of the OTHER same-name
@@ -590,26 +619,41 @@ fn collect_mut_fns(program: &IrProgram) -> MutFns {
     // module, so a user fn merely SHARING a verb with string.replace et al.
     // was silently excluded and its wasm leg walled (#1558).
     let mut name_count: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    // A `Type.method` spelling is resolved by TYPE, not by scope: a
+    // monomorphized generic caller calls the bound's method as
+    // `Named{MemoryOrderRepo.save}` from ITS module (the DDD use case in
+    // `place_order`), while the method lives in `memory_repo`. Such a
+    // name gets a GLOBAL key when exactly one definition in the whole
+    // program spells it; before that the cross-module method call was
+    // never rewritten, the callee's returned buffer was dropped, and the
+    // repository silently lost every save (native `rev=$37.50`, wasm
+    // `rev=$0.00` then `no such order`).
+    let mut method_count: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     for func in program.functions.iter() {
         *name_count.entry(scope_key("", func.name.as_str())).or_insert(0) += 1;
+        if func.name.as_str().contains('.') {
+            *method_count.entry(func.name.to_string()).or_insert(0) += 1;
+        }
     }
     for m in &program.modules {
         for func in &m.functions {
             *name_count.entry(scope_key(m.name.as_str(), func.name.as_str())).or_insert(0) += 1;
+            if func.name.as_str().contains('.') {
+                *method_count.entry(func.name.to_string()).or_insert(0) += 1;
+            }
         }
     }
-    let pure_names = collect_provably_pure_names(program);
     let mut mut_fns: MutFns = std::collections::HashMap::new();
     // Program-level functions first, then module ones — the original
     // collection order, which a duplicate name would otherwise decide.
     for func in program.functions.iter() {
-        if let Some(entry) = mut_fn_entry(func, name_count.get(&scope_key("", func.name.as_str())).copied().unwrap_or(0), &pure_names) {
+        if let Some(entry) = mut_fn_entry(func, name_count.get(&scope_key("", func.name.as_str())).copied().unwrap_or(0)) {
             mut_fns.insert(scope_key("", func.name.as_str()), entry);
         }
     }
     for m in &program.modules {
         for func in &m.functions {
-            if let Some(entry) = mut_fn_entry(func, name_count.get(&scope_key(m.name.as_str(), func.name.as_str())).copied().unwrap_or(0), &pure_names) {
+            if let Some(entry) = mut_fn_entry(func, name_count.get(&scope_key(m.name.as_str(), func.name.as_str())).copied().unwrap_or(0)) {
                 // A MODULE fn's call sites spell THREE names: bare from inside
                 // the module, MODULE-QUALIFIED (`convmut.Box.bump`) pre-resolution,
                 // and the MANGLED runtime symbol (`almide_rt_convmut_Box_bump`)
@@ -629,6 +673,9 @@ fn collect_mut_fns(program: &IrProgram) -> MutFns {
                     entry.clone(),
                 );
                 mut_fns.insert(format!("{}.{}", m.name.as_str(), func.name.as_str()), entry.clone());
+                if method_count.get(func.name.as_str()) == Some(&1) {
+                    mut_fns.insert(func.name.to_string(), entry.clone());
+                }
                 mut_fns.insert(scope_key(m.name.as_str(), func.name.as_str()), entry);
             }
         }
@@ -642,11 +689,7 @@ fn collect_mut_fns(program: &IrProgram) -> MutFns {
 }
 
 /// One function's [`MutFns`] entry, or `None` when it is not eligible.
-fn mut_fn_entry(
-    func: &IrFunction,
-    same_scope_count: usize,
-    pure_names: &std::collections::HashSet<String>,
-) -> Option<(usize, Ty, bool, Ty)> {
+fn mut_fn_entry(func: &IrFunction, same_scope_count: usize) -> Option<(usize, Ty, bool, Ty)> {
     let probe = std::env::var("ALMIDE_MP_PROBE").is_ok();
     if func.mutated_params.len() != 1 {
         if probe && !func.mutated_params.is_empty() {
@@ -663,156 +706,35 @@ fn mut_fn_entry(
     let idx = func.mutated_params[0];
     let p = func.params.get(idx)?;
     let was_unit = matches!(func.ret_ty, Ty::Unit);
-    if !was_unit && func.is_effect && !fn_cannot_err(func, pure_names) {
+    let Some(payload) = value_payload_ty(func) else {
         if probe {
-            eprintln!("[mp-reject] {} can-err (#1576 exclusion)", func.name);
+            eprintln!("[mp-reject] {} declared-Result effect fn with a non-String err carrier", func.name);
         }
-        // The err arm carries no buffer channel — #1576's unratified design
-        // question. A NEVER-ERR effect fn has no err arm, so it rides the
-        // value-fn tuple rewrite (#1575).
+        return None;
+    };
+    Some((idx, p.ty.clone(), was_unit, payload))
+}
+
+/// The type the tuple rewrite pairs with the buffer — the callee's ORIGINAL
+/// return, except for a declared-Result EFFECT fn (`-> T!`), whose Result is
+/// the single-layer effect channel rather than a value: there the payload is
+/// the ok type `T`, and the body is stripped to it by [`strip_ok_layer`].
+/// `None` for a declared-Result effect fn whose err type is not the default
+/// `String` carrier — the lifted `Result[(T, Buf), String]` the wasm ABI
+/// builds for a raw tuple could not carry it, so the fn stays excluded.
+fn value_payload_ty(func: &IrFunction) -> Option<Ty> {
+    match single_layer_ok_ty(func) {
+        Some((ok_ty, err_ty)) => matches!(err_ty, Ty::String).then_some(ok_ty),
+        None => Some(func.ret_ty.clone()),
+    }
+}
+
+/// `Some((T, E))` when `func` is an effect fn declared `-> Result[T, E]`.
+fn single_layer_ok_ty(func: &IrFunction) -> Option<(Ty, Ty)> {
+    if !func.is_effect {
         return None;
     }
-    Some((idx, p.ty.clone(), was_unit, func.ret_ty.clone()))
-}
-
-/// Every callee name (bare, dotted, mangled) whose EVERY program definition
-/// provably cannot err — the allow-list [`fn_cannot_err`] resolves Named
-/// calls against: all non-effect fns (they cannot err by type), plus the
-/// FIXPOINT of effect fns whose own bodies pass the scan (#1622 — a
-/// protocol method `effect fn put` with no err arm admits the generic
-/// caller that reaches it with `!`). A name that resolves to nothing in the
-/// program (a stdlib/runtime spelling), or that any scope defines as a
-/// possibly-erring fn, is NOT in the set: the never-err scan must
-/// under-approximate, never over-approximate.
-fn collect_provably_pure_names(program: &IrProgram) -> std::collections::HashSet<String> {
-    // Group every program definition under each spelling a call site can use.
-    let mut defs: std::collections::HashMap<String, Vec<&IrFunction>> =
-        std::collections::HashMap::new();
-    for func in &program.functions {
-        defs.entry(func.name.to_string()).or_default().push(func);
-    }
-    for m in &program.modules {
-        for func in &m.functions {
-            defs.entry(func.name.to_string()).or_default().push(func);
-            defs.entry(format!("{}.{}", m.name, func.name)).or_default().push(func);
-            defs.entry(format!(
-                "almide_rt_{}_{}",
-                m.name.as_str().replace('.', "_"),
-                func.name.as_str().replace('.', "_")
-            ))
-            .or_default()
-            .push(func);
-        }
-    }
-    // Fixpoint (#1622): non-effect fns cannot err by type and seed the set;
-    // an EFFECT fn whose body passes [`fn_cannot_err`] against the current
-    // set joins it, so `effect fn put` with no err arm admits the
-    // `effect fn uc` that calls it with `!` — the effect marker changes the
-    // return channel, not the err-ability. A spelling joins only when EVERY
-    // definition under it qualifies (the same collision discipline the flat
-    // set had), and growth is monotone, so the loop terminates.
-    let mut allow: std::collections::HashSet<String> = std::collections::HashSet::new();
-    loop {
-        let mut grew = false;
-        for (name, fs) in &defs {
-            if allow.contains(name) {
-                continue;
-            }
-            if fs.iter().all(|f| !f.is_effect || fn_cannot_err(f, &allow)) {
-                allow.insert(name.clone());
-                grew = true;
-            }
-        }
-        if !grew {
-            break;
-        }
-    }
-    allow
-}
-
-/// Conservative syntactic never-err verdict for an effect fn's body: no err
-/// construction, no lambda (its deferred body is opaque to this scan), no
-/// bare propagation node (`Unwrap`/`UnwrapOr`), and every call lands on a
-/// name [`collect_provably_pure_names`] admits — module/method/computed/
-/// runtime calls all fail the scan. `Try` (`!`) over an ADMITTED call is a
-/// pass-through, not an err source (#1622): the callee cannot err, so the
-/// propagation arm is dead; `Try` over anything else keeps the exclusion.
-/// Anything unrecognized keeps the #1576 exclusion, so a wrong answer here
-/// can only DECLINE a rewrite, never admit an err path.
-fn fn_cannot_err(func: &IrFunction, pure_names: &std::collections::HashSet<String>) -> bool {
-    struct Scan<'a> {
-        pure_names: &'a std::collections::HashSet<String>,
-        err_source: bool,
-    }
-    impl Scan<'_> {
-        fn admitted_call(&self, expr: &IrExpr) -> bool {
-            let target = match &expr.kind {
-                IrExprKind::Call { target, .. } | IrExprKind::TailCall { target, .. } => target,
-                _ => return false,
-            };
-            match target {
-                CallTarget::Named { name } => self.pure_names.contains(name.as_str()),
-                // The dotted spelling — the defs map lists every fully-bodied
-                // module fn there, so a stdlib/user module fn qualifies
-                // exactly when its definition does. A spelling with no
-                // definition (an @intrinsic bridge surface, a HOF's fallible
-                // instantiation) is not admitted.
-                CallTarget::Module { module, func, .. } => {
-                    self.pure_names.contains(&format!("{}.{}", module, func))
-                }
-                _ => false,
-            }
-        }
-    }
-    impl IrVisitor for Scan<'_> {
-        fn visit_expr(&mut self, expr: &IrExpr) {
-            if self.err_source {
-                return;
-            }
-            match &expr.kind {
-                IrExprKind::Try { expr: inner } | IrExprKind::Unwrap { expr: inner }
-                    if self.admitted_call(inner) =>
-                {
-                    // On a callee that cannot err, `!` is the identity in
-                    // both its spellings — Try's propagation arm and
-                    // Unwrap's abort arm are equally dead. walk_expr
-                    // descends into the admitted call, whose own Call arm
-                    // passes and scans the arguments.
-                }
-                IrExprKind::Try { .. }
-                | IrExprKind::Unwrap { .. }
-                | IrExprKind::ResultErr { .. }
-                | IrExprKind::Fan { .. }
-                | IrExprKind::RuntimeCall { .. } => {
-                    self.err_source = true;
-                    return;
-                }
-                // `??` HANDLES its operand's err — nothing propagates. Its
-                // children are scanned like any expression (the fallback may
-                // itself contain a propagation node).
-                IrExprKind::UnwrapOr { .. } => {}
-                // A lambda's body is scanned like any other expression (#1622):
-                // a closure whose body cannot err cannot err ANYWHERE it
-                // escapes to — even a HOF's fallible instantiation degenerates
-                // to never-err when the callback is clean. A `!` inside the
-                // body over a non-admitted callee still poisons via the arms
-                // above.
-                IrExprKind::Lambda { .. } => {}
-                // A BARE call — one the Try/Unwrap arms above did not consume
-                // — cannot feed the enclosing effect channel: propagation is
-                // EXPLICIT (ADR-0008), so an effect callee without `!` is
-                // E041/E042 upstream or a `let _ =` discard, and a discarded
-                // err never propagates. Its arguments are scanned by the
-                // walk (a lambda argument's `!` is judged where it appears).
-                IrExprKind::Call { .. } | IrExprKind::TailCall { .. } => {}
-                _ => {}
-            }
-            walk_expr(self, expr);
-        }
-    }
-    let mut scan = Scan { pure_names, err_source: false };
-    scan.visit_expr(&func.body);
-    !scan.err_source
+    Some((func.ret_ty.result_ok_ty()?, func.ret_ty.result_err_ty()?))
 }
 
 /// Phase 1: rewrite function bodies. Unit-returning fns return the
@@ -880,11 +802,15 @@ fn rewrite_unit_body(func: &mut IrFunction, mut_var: VarId, mut_ty: Ty) {
 /// — the body runs first (its mutations land in the param local), then the
 /// tuple pairs the original result with the final buffer.
 fn rewrite_value_body(func: &mut IrFunction, vt: &mut VarTable, mut_var: VarId, mut_ty: Ty) {
-    let orig_ty = func.ret_ty.clone();
+    let single_layer = single_layer_ok_ty(func).map(|(ok_ty, _)| ok_ty);
+    let orig_ty = single_layer.clone().unwrap_or_else(|| func.ret_ty.clone());
     let tuple_ty = Ty::Tuple(vec![orig_ty.clone(), mut_ty.clone()]);
     func.ret_ty = tuple_ty.clone();
     let ret_var = vt.alloc(sym("__mp_ret"), orig_ty.clone(), Mutability::Let, None);
-    let old_body = std::mem::replace(&mut func.body, unit_placeholder());
+    let mut old_body = std::mem::replace(&mut func.body, unit_placeholder());
+    if let Some(ok_ty) = &single_layer {
+        strip_ok_layer(&mut old_body, ok_ty);
+    }
     let tuple = IrExpr {
         kind: IrExprKind::Tuple {
             elements: vec![var_read(ret_var, orig_ty.clone()), var_read(mut_var, mut_ty)],
@@ -910,6 +836,52 @@ fn rewrite_value_body(func: &mut IrFunction, vt: &mut VarTable, mut_var: VarId, 
         span: None,
         def_id: None,
     };
+}
+
+/// Strip the single-layer effect Result off a declared-Result effect fn's
+/// body so it yields the raw ok payload: every TAIL position (block tail,
+/// if/match arm) that constructs `ok(x)` becomes `x`; an `err(e)` tail keeps
+/// its node and takes the raw type (the emitters' raise leaf — the fn's
+/// lifted carrier is what it returns through); any other Result-typed tail
+/// (a call returning the Result, a variable) is `!`-unwrapped, which raises
+/// the same way. Statement-position `err`s (a guard's else arm) are already
+/// raise leaves and are not touched.
+fn strip_ok_layer(e: &mut IrExpr, ok_ty: &Ty) {
+    match &mut e.kind {
+        IrExprKind::ResultOk { expr } => {
+            let inner = std::mem::replace(&mut **expr, unit_placeholder());
+            *e = inner;
+            e.ty = ok_ty.clone();
+        }
+        IrExprKind::ResultErr { .. } => e.ty = ok_ty.clone(),
+        IrExprKind::Block { expr: Some(tail), .. } => {
+            strip_ok_layer(tail, ok_ty);
+            e.ty = ok_ty.clone();
+        }
+        IrExprKind::If { then, else_, .. } => {
+            strip_ok_layer(then, ok_ty);
+            strip_ok_layer(else_, ok_ty);
+            e.ty = ok_ty.clone();
+        }
+        IrExprKind::Match { arms, .. } => {
+            for arm in arms.iter_mut() {
+                strip_ok_layer(&mut arm.body, ok_ty);
+            }
+            e.ty = ok_ty.clone();
+        }
+        _ if e.ty.result_ok_ty().is_some() => {
+            let span = e.span;
+            let inner = std::mem::replace(e, unit_placeholder());
+            *e = IrExpr {
+                kind: IrExprKind::Unwrap { expr: Box::new(inner) },
+                ty: ok_ty.clone(),
+                span,
+                def_id: None,
+            };
+        }
+        // Already raw (a `!`-unwrapped tail the checker lifted): nothing to strip.
+        _ => {}
+    }
 }
 
 /// A typed read of `id`. Span-less: these nodes are synthesized, not parsed.
@@ -1018,15 +990,16 @@ impl IrMutVisitor for CallSiteRewriter<'_> {
             return;
         }
 
-        let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &expr.kind else {
+        if std::env::var("ALMIDE_MP_PROBE").is_ok()
+            && let IrExprKind::Call { target, .. } = &expr.kind
+        {
+            eprintln!("[mp-call] scope={:?} target={:?}", self.scope, target);
+        }
+        let IrExprKind::Call { target, args, .. } = &expr.kind else {
             return;
         };
-        let Some((idx, mut_ty, was_unit, callee_ret)) = self
-            .mut_fns
-            .get(name.as_str())
-            .or_else(|| self.mut_fns.get(&scope_key(&self.scope, name.as_str())))
-            .cloned()
-        else {
+        let Some(name) = call_spelling(target) else { return };
+        let Some((idx, mut_ty, was_unit, callee_ret)) = self.lookup_mut_fn(&name).cloned() else {
             return;
         };
         let Some(arg) = args.get(idx) else { return };
@@ -1136,19 +1109,15 @@ impl CallSiteRewriter<'_> {
         let IrExprKind::Block { stmts, expr: tail } = &inner.kind else { return false };
         match stmts.first() {
             Some(IrStmt { kind: IrStmtKind::Bind { value, .. }, .. }) => {
-                let IrExprKind::Call { target: CallTarget::Named { name }, .. } = &value.kind
-                else {
-                    return false;
-                };
-                matches!(self.lookup_mut_fn(name.as_str()), Some(&(_, _, true, _)))
+                let IrExprKind::Call { target, .. } = &value.kind else { return false };
+                let Some(name) = call_spelling(target) else { return false };
+                matches!(self.lookup_mut_fn(&name), Some(&(_, _, true, _)))
                     && matches!(tail.as_deref().map(|t| &t.kind), Some(IrExprKind::Unit))
             }
             Some(IrStmt { kind: IrStmtKind::BindDestructure { value, .. }, .. }) => {
-                let IrExprKind::Call { target: CallTarget::Named { name }, .. } = &value.kind
-                else {
-                    return false;
-                };
-                matches!(self.lookup_mut_fn(name.as_str()), Some(&(_, _, false, _)))
+                let IrExprKind::Call { target, .. } = &value.kind else { return false };
+                let Some(name) = call_spelling(target) else { return false };
+                matches!(self.lookup_mut_fn(&name), Some(&(_, _, false, _)))
                     && matches!(tail.as_deref().map(|t| &t.kind), Some(IrExprKind::Var { .. }))
             }
             _ => false,
@@ -1162,12 +1131,10 @@ impl CallSiteRewriter<'_> {
     /// Perform the rotation [`Self::wrapper_rotation_applies`] admitted. The
     /// wrapper's err-propagation moves INTO the bind (`let __mp_buf = call!` /
     /// `let (__mp_res, __mp_buf) = call!`), so on the err path the writeback
-    /// never runs — matching the native by-reference semantics (a failed
-    /// callee's caller-visible buffer is whatever the callee left in it; here
-    /// the callee never returns a buffer on err, and the caller's binding
-    /// keeps its pre-call value). The value shape only ever arrives for a
-    /// NEVER-ERR callee (the mut_fn_entry admission), so its err path is
-    /// unreachable to begin with.
+    /// never runs: the callee returns no buffer on err, the caller's binding
+    /// keeps its pre-call value, and the err leaves the caller through its
+    /// own `!` — the ratified #1576 order, for the was-Unit and the value
+    /// shape alike.
     fn rotate_wrapper_into_block(expr: &mut IrExpr) {
         let span = expr.span;
         let block_ty = {

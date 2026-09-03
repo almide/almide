@@ -132,6 +132,24 @@ pub(crate) fn collect_binds_stmt(
             collect_binds(value, out, seen, types)
         }
         IrStmtKind::Expr { expr } => collect_binds(expr, out, seen, types),
+        // Place mutations LOWER (C-136), so a lambda beneath their value
+        // needs its param locals: `self.rows = self.rows |> list.filter((r)
+        // => ..)` inside a `mut self` repository method walled as
+        // `bind:unmapped` (the #1576 DDD tree's save port) because the
+        // FieldAssign value was never walked.
+        IrStmtKind::FieldAssign { value, .. } => collect_binds(value, out, seen, types),
+        IrStmtKind::IndexAssign { index, value, .. } => {
+            collect_binds(index, out, seen, types)?;
+            collect_binds(value, out, seen, types)
+        }
+        IrStmtKind::MapInsert { key, value, .. } => {
+            collect_binds(key, out, seen, types)?;
+            collect_binds(value, out, seen, types)
+        }
+        IrStmtKind::Guard { cond, else_ } => {
+            collect_binds(cond, out, seen, types)?;
+            collect_binds(else_, out, seen, types)
+        }
         _ => Ok(()), // lowering unsups these before any local is needed
     }
 }
@@ -293,9 +311,16 @@ fn collect_binds_data_b(
             collect_binds(right, out, seen, types)
         }
         IrExprKind::UnOp { operand, .. } => collect_binds(operand, out, seen, types),
+        // `Try` is the frontend's propagation spelling of `!`; the C-132
+        // rotation moves it INTO the move-mode bind (`let (r, b) = call!`),
+        // so a mut-fn call under an interpolation part / call argument
+        // carries its `__mp_res`/`__mp_buf` binds beneath a Try (#1576's
+        // DDD tree: `" ${cancel_order(mem, id)!} …"`) — missing it here
+        // surfaced as `bind:unmapped`.
         IrExprKind::OptionSome { expr }
         | IrExprKind::ResultOk { expr }
         | IrExprKind::ResultErr { expr }
+        | IrExprKind::Try { expr }
         | IrExprKind::Unwrap { expr } => collect_binds(expr, out, seen, types),
         IrExprKind::UnwrapOr { expr, fallback } => {
             collect_binds(expr, out, seen, types)?;
