@@ -44,5 +44,5 @@ fn assert_err[A, B](result: Result[A, B]) -> Unit = _
 // `expected:` / `found:`, exit 1), the same shape on every lane, which is what
 // the accept step reads back. This body is reached only through a first-class
 // use of the fn value (never desugared) and keeps the verdict, minus the site.
-fn assert_snapshot(actual: String, expected: String) -> Unit =
-  if actual == expected then () else panic("snapshot mismatch\n  expected: ${expected}\n  found: ${actual}")
+fn assert_snapshot(actual: String, expected: String) -> Unit = if actual == expected then ()
+else panic("snapshot mismatch\n  expected: ${expected}\n  found: ${actual}")
