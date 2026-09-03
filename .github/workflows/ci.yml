@@ -1137,6 +1137,12 @@ jobs:
       - name: Dialect epoch gate fires on forged ledgers and constants (negative controls)
         run: bash scripts/check-dialect-epochs-negative.sh
 
+      - name: Interface differ fires on a removed effect fn (negative controls, #1860)
+        # The release gate itself runs at tag time against real refs; this proves
+        # it can still refuse — a forged index with one effect fn and one pure fn
+        # deleted must classify `breaking`, an added effect fn must count.
+        run: bash scripts/check-interface-diff-negative.sh
+
       - name: Gate verification ledger (every gate classified by how it can fail — no decorative gates)
         run: bash scripts/check-gate-verification.sh
 
