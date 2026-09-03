@@ -56,56 +56,61 @@ impl<'a> Interpreter<'a> {
                 }
                 Ok(any.then(|| Value::Map(Rc::new(rebuilt))))
             }
-            (Value::Int(i), _) => {
-                let Some(addr) = u32::try_from(*i).ok().filter(|a| self.heap.kind(*a).is_some())
-                else {
-                    // An ordinary integer (or a non-base address): not ours.
-                    return Ok(None);
-                };
-                if heap_modeled_ty(ty) {
-                    return match self.rebuild_addr(addr, ty) {
-                        Some(rebuilt) => Ok(Some(rebuilt)),
-                        None => Err(format!(
-                            "return sync: a block has no faithful read-back \
-                             under the declared return type ({})",
-                            ty_short(ty)
-                        )),
-                    };
-                }
-                use almide_lang::types::constructor::TypeConstructorId as C;
-                if matches!(ty, Ty::Applied(C::List | C::Set | C::Map | C::Option | C::Result, _))
-                {
-                    // A container-typed return we cannot spell (a generic
-                    // element erased to a type variable, an unmodeled Option
-                    // block): the fixture expects a container, so the raw
-                    // address must not leak into native ops — abstain.
-                    return Err(format!(
-                        "return sync: a block under an unspellable container \
-                         return type ({})",
-                        ty_short(ty)
-                    ));
-                }
-                if matches!(ty, Ty::Named(n, args) if args.is_empty() && n.as_str() == "Value") {
-                    // The dynamic `Value` leaves the pool tier as a CARRIER:
-                    // the block address (so `prim.handle` re-enters the SAME
-                    // block) plus the structural snapshot display and `==`
-                    // read. A bare Int here used to leak to native ops as an
-                    // integer (value_repr printed the address, value_eq
-                    // pointer-compared to false).
-                    return match self.dyn_value_of(addr) {
-                        Some(d) => Ok(Some(d)),
-                        None => Err(format!(
-                            "return sync: a Value-typed block at {addr} cannot \
-                             be walked (unknown tag or unreadable child)"
-                        )),
-                    };
-                }
-                // An opaque return type (a bare type variable, Int): the
-                // address IS the value in the i64-uniform tier.
-                Ok(None)
-            }
+            (Value::Int(i), _) => self.sync_addr(*i, ty),
             _ => Ok(None),
         }
+    }
+
+    /// The `Int` arm of [`Self::sync_value`]: an integer that is a live block
+    /// address is read back under the declared type; an ordinary integer, or
+    /// an opaque return type where the address IS the value, passes through.
+    fn sync_addr(&self, i: i64, ty: &Ty) -> Result<Option<Value>, String> {
+        let Some(addr) = u32::try_from(i).ok().filter(|a| self.heap.kind(*a).is_some())
+        else {
+            // An ordinary integer (or a non-base address): not ours.
+            return Ok(None);
+        };
+        if heap_modeled_ty(ty) {
+            return match self.rebuild_addr(addr, ty) {
+                Some(rebuilt) => Ok(Some(rebuilt)),
+                None => Err(format!(
+                    "return sync: a block has no faithful read-back \
+                     under the declared return type ({})",
+                    ty_short(ty)
+                )),
+            };
+        }
+        use almide_lang::types::constructor::TypeConstructorId as C;
+        if matches!(ty, Ty::Applied(C::List | C::Set | C::Map | C::Option | C::Result, _))
+        {
+            // A container-typed return we cannot spell (a generic
+            // element erased to a type variable, an unmodeled Option
+            // block): the fixture expects a container, so the raw
+            // address must not leak into native ops — abstain.
+            return Err(format!(
+                "return sync: a block under an unspellable container \
+                 return type ({})",
+                ty_short(ty)
+            ));
+        }
+        if matches!(ty, Ty::Named(n, args) if args.is_empty() && n.as_str() == "Value") {
+            // The dynamic `Value` leaves the pool tier as a CARRIER:
+            // the block address (so `prim.handle` re-enters the SAME
+            // block) plus the structural snapshot display and `==`
+            // read. A bare Int here used to leak to native ops as an
+            // integer (value_repr printed the address, value_eq
+            // pointer-compared to false).
+            return match self.dyn_value_of(addr) {
+                Some(d) => Ok(Some(d)),
+                None => Err(format!(
+                    "return sync: a Value-typed block at {addr} cannot \
+                     be walked (unknown tag or unreadable child)"
+                )),
+            };
+        }
+        // An opaque return type (a bare type variable, Int): the
+        // address IS the value in the i64-uniform tier.
+        Ok(None)
     }
 
     /// Per-element sync for a native list/set — `Ok(None)` when nothing
