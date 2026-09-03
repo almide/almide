@@ -366,6 +366,7 @@ impl Emitter<'_> {
             "len" => self.lower_bytes_len(x),
             "from_string" => self.lower_bytes_from_string(x),
             "from_list" => self.lower_bytes_from_list(x),
+            "lines" => self.lower_bytes_lines(x),
             _ => self.lower_bytes_new(x),
         }
     }
@@ -376,6 +377,7 @@ impl Emitter<'_> {
             "concat" => self.lower_bytes_concat(a, b),
             "chunks" => self.lower_bytes_chunks(a, b),
             "repeat" => self.lower_bytes_repeat(a, b),
+            "split" => self.lower_bytes_split(a, b),
             _ => self.lower_bytes_get(a, b),
         }
     }
@@ -401,8 +403,8 @@ impl Emitter<'_> {
             // Shape-grouped dispatch (pattern-count complexity; the
             // name split lives in the per-shape sub-dispatchers).
             ("to_string" | "to_list" | "to_string_lossy" | "len" | "from_string"
-            | "from_list" | "new", [x]) => self.lower_bytes_unary(func, x),
-            ("concat" | "chunks" | "repeat" | "get", [a, b]) => {
+            | "from_list" | "new" | "lines", [x]) => self.lower_bytes_unary(func, x),
+            ("concat" | "chunks" | "repeat" | "get" | "split", [a, b]) => {
                 self.lower_bytes_pair(func, a, b)
             }
             ("set" | "slice" | "get_or", [a, b, c]) => self.lower_bytes_triple(func, a, b, c),
