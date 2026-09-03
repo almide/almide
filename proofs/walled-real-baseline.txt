@@ -192,3 +192,11 @@ spec/wasm_cross/generic_record_fn_field.almd :: call_q
 # The STRUCTURAL leg (the default) releases the mutated block after the
 # call and runs byte-identical to native. Prunes with #1696 4-5.
 spec/wasm_cross/bytes_temp_receiver.almd :: main
+# 2026-09-03 (#1791, the http response family): the loopback round-trip test's
+# three fns (a retrying dial through `net` + `fan`, and the transport-err test
+# block) are network-effect shapes the incumbent MIR lowering walls; the native
+# lane pins them and the structural leg is capability-walled on wasip1 by
+# design (C-328). Retire with #1696.
+spec/stdlib/http_status_test.almd :: __test_almd_request_response to a closed local port is a transport err
+spec/stdlib/http_status_test.almd :: fetch_retry
+spec/stdlib/http_status_test.almd :: get_retry
