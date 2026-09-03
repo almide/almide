@@ -1,0 +1,10 @@
+// A stdlib import used ONLY through the type it owns — `Endian` in a
+// signature, the bare `LittleEndian` constructor, no `bytes.*` call — is
+// USED: the type alone pulls the module's declaration into the IR (#1853).
+// This broken file adds a genuinely unused import beside it.
+import bytes
+
+
+fn f(e: Endian) -> Endian = e
+
+fn main() -> Unit = println("${f(LittleEndian)}")

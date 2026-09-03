@@ -1,0 +1,10 @@
+// A user `type Endian` shadows the stdlib's (#1837): every bare `Endian`
+// and `Little` below is the program's own declaration, so they use no
+// import — `import bytes` stays unused (#1853).
+
+
+type Endian = | Little | Big
+
+fn f(e: Endian) -> Endian = e
+
+fn main() -> Unit = println(match f(Little) { Little => "little", Big => "big" })
