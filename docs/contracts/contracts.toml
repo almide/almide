@@ -3454,6 +3454,7 @@ evidence  = [
   { path = "spec/wasm_cross/fs_fallible_stream_callback.almd", class = "fixture" },
   { path = "spec/stdlib/fs_streaming_test.almd", class = "fixture" },
   { path = "tests/fs_streaming_family_gate_test.rs", name = "every_streaming_cell_decides_its_fallible_form", class = "fixture" },
+]
 
 # ── http RESPONSE HEADERS ──────────────────────────────────────────────
 [[contract]]
@@ -3465,15 +3466,6 @@ since     = "0.57.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/http_response_headers.almd", class = "fixture" },
-
-spec      = "ALS-I3"
-title     = "Each test starts from re-initialized mutable module globals, on both targets"
-statement = "ALS-I3: a `test` block observes every MUTABLE module-level `var` at its declared initializer, whatever a preceding test wrote — native gets this from cargo's per-test thread isolation, and the wasm test runner replays each initializer through the ordinary slot-routed Assign (take + drop-old + store) before each test body, so the two legs agree test-for-test. The re-init covers MODULE top-lets as well as main-region ones: `disambiguate_module_global_regions` runs BEFORE the runner synthesis, so every module id is program-unique and a main-region Assign naming one cannot collide (#1233 — before this, any file with a mutable module `var` walled the whole wasm leg and only native ever ran it)."
-since     = "0.57.1"
-status    = "active"
-evidence  = [
-  { path = "spec/integration/modules/cross_module_global_state_loop_test.almd", class = "fixture" },
-  { path = "spec/integration/modules/cross_module_cell_update_test.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -4314,4 +4306,21 @@ since     = "0.61.2"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/path_extension_hidden.almd", class = "fixture" },
+]
+
+# ── PER-TEST RE-INIT OF MUTABLE MODULE GLOBALS ────────────────────────
+# Landed in 6dc32f3be (0.57.1) INSIDE C-275's evidence array, with no [[contract]]
+# header and no id: the awk generators folded it into C-275 (whose index row then
+# carried THIS title) and the almide-gates reader folded both into C-274. Given its
+# own block in #1843; `since` keeps the release the behaviour actually shipped in.
+[[contract]]
+id        = "C-336"
+spec      = "ALS-I3"
+title     = "Each test starts from re-initialized mutable module globals, on both targets"
+statement = "ALS-I3: a `test` block observes every MUTABLE module-level `var` at its declared initializer, whatever a preceding test wrote — native gets this from cargo's per-test thread isolation, and the wasm test runner replays each initializer through the ordinary slot-routed Assign (take + drop-old + store) before each test body, so the two legs agree test-for-test. The re-init covers MODULE top-lets as well as main-region ones: `disambiguate_module_global_regions` runs BEFORE the runner synthesis, so every module id is program-unique and a main-region Assign naming one cannot collide (#1233 — before this, any file with a mutable module `var` walled the whole wasm leg and only native ever ran it)."
+since     = "0.57.1"
+status    = "active"
+evidence  = [
+  { path = "spec/integration/modules/cross_module_global_state_loop_test.almd", class = "fixture" },
+  { path = "spec/integration/modules/cross_module_cell_update_test.almd", class = "fixture" },
 ]
