@@ -6,7 +6,7 @@
 #             the emitters are pure Rust and the structural leg's build artifact is
 #             the #1588 WASI form.
 version          = almide 0.61.1
-date             = 2026-09-03
+date             = 2026-09-04
 program          = fn main() -> Unit = { println("Hello, world!") }
-structural_bytes = 2264
+structural_bytes = 2269
 incumbent_bytes  = 1096
