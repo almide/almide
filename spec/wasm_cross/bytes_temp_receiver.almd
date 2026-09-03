@@ -1,0 +1,117 @@
+// @contract: C-213
+// Cross-target differential fixture: a TEMPORARY receiver of a Unit-returning
+// `bytes` mutator (#1849).
+//
+// The in-place writers take a NON-`mut` receiver (`fn append_i16_be(b: Bytes,
+// val: Int) -> Unit`), so the checker admits a temporary — a call result —
+// where `push`'s `mut b` is E032. Native mutates the temporary and drops it:
+// the statement is legal and observes nothing but its own argument
+// evaluation. The structural wasm leg walled the shape, and the reroute to
+// the incumbent emitted INVALID wasm (the functional twin's result left on
+// the operand stack). Now the default leg lowers it and releases the mutated
+// block after the call.
+//
+// Three receiver shapes per representative writer, so the fixture pins the
+// whole write-back rule and not one cell of it:
+//   - a temporary (`bytes.new(n)`, `bytes.from_list([..])`) — runs, and its
+//     arguments still evaluate in order; nothing else survives
+//   - a `let`-bound receiver — native writes THROUGH the binding (the
+//     intrinsic's &mut protocol), and so does wasm
+//   - a `var` receiver — the write-back the family always had
+// plus the aliasing probe: a temporary that BORROWS a live var's block (a fn
+// returning its parameter) is mutated as a copy, and the var is untouched.
+fn show(label: String, b: Bytes) -> Unit = println(label + " " + "${bytes.to_list(b)}")
+
+fn same(b: Bytes) -> Bytes = b
+
+fn traced(v: Int) -> Int = {
+  println("arg ${v}")
+  v
+}
+
+fn main() -> Unit = {
+  // ── temporaries: the statement runs and leaves nothing behind ──
+  let _ = bytes.append_i16_be(bytes.from_list([1, 2, 3, 4, 5]), 0)
+  bytes.append_i16_be(bytes.new(2), 258)
+  bytes.append_i16_le(bytes.new(2), 258)
+  bytes.append_u8(bytes.new(2), 511)
+  bytes.append_u16_be(bytes.new(0), 258)
+  bytes.append_u32_le(bytes.new(0), 258)
+  bytes.append_i32_be(bytes.new(0), -2)
+  bytes.append_i64_le(bytes.new(0), -1)
+  bytes.append_f32_le(bytes.new(0), 1.5)
+  bytes.append_f64_be(bytes.new(0), 1.5)
+  bytes.write_u8(bytes.new(0), 7)
+  bytes.write_u32_be(bytes.new(0), 258)
+  bytes.write_i64_be(bytes.new(0), -1)
+  bytes.write_f64_be(bytes.new(0), 1.5)
+  bytes.write_bool(bytes.new(0), true)
+  bytes.write_string_be(bytes.new(0), "hi")
+  bytes.write_uint16(bytes.new(0), 258, LittleEndian)
+  bytes.write_float32(bytes.new(0), 1.5, BigEndian)
+  bytes.set_uint16(bytes.new(2), 0, 258, BigEndian)
+  bytes.set_u16_be(bytes.new(2), 0, 258)
+  bytes.set_u8(bytes.new(2), 0, 511)
+  bytes.fill(bytes.new(2), 7)
+  bytes.copy_from(bytes.new(3), bytes.from_list([7, 8, 9]), 0, 0, 3)
+  println("temporaries ok")
+  // ── the temporary's arguments evaluate, in order, exactly once ──
+  bytes.append_i16_be(bytes.from_list([traced(1)]), traced(2))
+  bytes.append_u8(bytes.new(traced(3)), traced(4))
+  bytes.set_uint16(bytes.new(traced(5)), traced(6), 258, LittleEndian)
+  // ── let-bound receivers: the write lands through the binding ──
+  let a = bytes.new(2)
+  bytes.append_i16_be(a, 258)
+  show("let_append_i16_be", a)
+  let b = bytes.new(2)
+  bytes.append_i16_le(b, 258)
+  show("let_append_i16_le", b)
+  let c = bytes.new(2)
+  bytes.append_u8(c, 511)
+  show("let_append_u8", c)
+  let d = bytes.new(4)
+  bytes.set_uint16(d, 1, 258, BigEndian)
+  show("let_set_uint16", d)
+  let e = bytes.new(0)
+  bytes.write_u8(e, 7)
+  bytes.write_bool(e, true)
+  bytes.write_string_be(e, "hi")
+  show("let_cursor", e)
+  // ── var receivers: the write-back the family always had ──
+  var v = bytes.new(0)
+  bytes.append_i16_be(v, 258)
+  bytes.append_i16_le(v, 258)
+  bytes.append_u8(v, 511)
+  show("var_append", v)
+  var w = bytes.new(4)
+  bytes.set_uint16(w, 0, 258, LittleEndian)
+  bytes.set_uint16(w, 2, 258, BigEndian)
+  show("var_set_uint16", w)
+  var g = bytes.new(3)
+  bytes.fill(g, 9)
+  bytes.copy_from(g, bytes.from_list([7, 8]), 1, 0, 2)
+  show("var_fill_copy_from", g)
+  // ── aliasing: a temporary that borrows a var's block is mutated as a copy ──
+  let x = bytes.from_list([1, 2])
+  bytes.append_u8(same(x), 7)
+  bytes.append_i16_be(same(x), 7)
+  bytes.write_u8(same(x), 7)
+  bytes.fill(same(x), 9)
+  bytes.copy_from(same(x), bytes.from_list([7, 8]), 0, 0, 2)
+  show("alias_untouched", x)
+  var y = bytes.from_list([1, 2])
+  let snap = y
+  bytes.append_u8(y, 7)
+  show("var_after", y)
+  show("snapshot_before", snap)
+  // ── a temporary receiver in a loop: the mutated block is released after
+  // every statement (only the temporary itself stays behind — the RC-3
+  // arg-guard leak every call-result argument takes), so 60k statements
+  // run to completion where a leaked result would have doubled the heap ──
+  for _i in 0..<20000 {
+    bytes.append_i16_be(bytes.new(64), 1)
+    bytes.append_u8(bytes.new(64), 1)
+    bytes.write_u8(bytes.new(64), 1)
+  }
+  println("loop ok")
+}
