@@ -10,8 +10,13 @@
 > A section with no executable fixture would fail `scripts/check-contracts.sh`
 > (spec-coverage + evidence-class >= fixture for every active contract), so this
 > page cannot legitimately contain an empty Fixtures cell.
+> The totals line below is STAMPED (`proofs/ledger-counts.toml`, dated in its
+> block) and refreshed only by `bash scripts/gen-ledger-counts.sh` — a fixture
+> PR regenerates the rows and leaves it alone.
 
+<!-- counts:generated:start (as of 2026-09-03) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
 114 normative sections; 717 distinct executable fixtures.
+<!-- counts:generated:end -->
 
 | Section | Contracts | Fixtures (how CI runs each) |
 |---------|-----------|------------------------------|
