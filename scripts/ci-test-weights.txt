@@ -16,7 +16,6 @@
 # shard logs (Running/finished-in pairs, summed per target across shards).
 # Refreshed 2026-09-03 by scripts/refresh-ci-test-weights.sh from a CI run's own
 # shard logs (nextest per-test lines, or Running/finished-in pairs, summed per target across shards).
-wasm_runtime_test                1552
 diagnostic_harness_test          1441
 eval_test                        518
 backend_parity                   381
@@ -70,3 +69,9 @@ reimpl_lint_best_match_test      7
 io_read_all_test                 7
 deterministic_profile_test       6
 float_to_fixed_cross_target_test 5
+wasm_runtime_interp_oracle       497
+wasm_runtime_cross_target        494
+wasm_runtime_opt_parity          487
+wasm_runtime_inline              58
+wasm_runtime_interp_ledger       11
+wasm_runtime_fail_corpus         5
