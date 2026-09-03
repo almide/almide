@@ -375,7 +375,7 @@ evidence = "Greenfield CI mutation-gate job (2026-08-20..26, PORTLOG stages 74+)
 [[gate]]
 path = "scripts/check-fmt-gate.sh"
 class = "NEGATIVE_TESTED"
-evidence = "Commissioning PR (2026-08-26): a drift probe appended to spec/wasm_cross/while_loops.almd => exit 1; restored => exit 0. The wrapper exists because the gauntlet's deliberately-invalid REJECT cells cannot parse, and the bare `fmt --check spec/` exits 1 on parse-skips even at zero drift; the gauntlet manifest's reject rows are the single exclusion source (the fmt-corpus test applies the same ruling)."
+evidence = "Commissioning PR (2026-08-26): a drift probe appended to spec/wasm_cross/while_loops.almd => exit 1; restored => exit 0. The wrapper exists because the gauntlet's deliberately-invalid REJECT cells cannot parse, and the bare `fmt --check spec/` exits 1 on parse-skips even at zero drift; the gauntlet manifest's reject rows are the single exclusion source (the fmt-corpus test applies the same ruling). tools/almide-gates/ joined the roots (2026-09-03, #1855) after drifting to 10 of 16 files with no step formatting it: with the freshly formatted tree as the positive control (exit 0, 1310 files), an unused `import toml` re-added to tools/almide-gates/src/ledger_speckey.almd => exit 1 ('1 of 1310 file(s) need formatting'); the same file with a one-line body broken across two lines => exit 1; restored => exit 0."
 
 [[gate]]
 path = "scripts/check-ledger-counts.sh"

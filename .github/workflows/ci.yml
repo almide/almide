@@ -1096,7 +1096,7 @@ jobs:
           $ALMIDE "$f" --emit-ast > /dev/null
           echo "AST emit OK"
 
-      - name: fmt gate (spec/ + examples/ + stdlib/ stay formatted, #919/#1462; gauntlet reject cells excluded by the manifest; stdlib under --no-import-edit)
+      - name: fmt gate (spec/ + examples/ + tools/almide-gates/ + stdlib/ stay formatted, #919/#1462/#1855; gauntlet reject cells excluded by the manifest; stdlib under --no-import-edit)
         run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-fmt-gate.sh
 
       - name: Doc fences execute (#1490 — marked stdlib examples check/run byte-exactly)
