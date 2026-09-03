@@ -25,8 +25,7 @@ fn rank_of(classes: List[String], c: String) -> Int = {
 }
 
 fn is_three_digit_id(id: String) -> Bool = {
-  string.starts_with(id, "C-") and string.len(id) == 5
-    and (string.slice(id, 2) |> string.chars |> list.all((c) => string.contains("0123456789", c)))
+  string.starts_with(id, "C-") and string.len(id) == 5 and (string.slice(id, 2) |> string.chars |> list.all((c) => string.contains("0123456789", c)))
 }
 
 // MAJOR.MINOR.PATCH, every part non-empty and numeric. `since` was documented REQUIRED and
@@ -35,8 +34,7 @@ fn is_three_digit_id(id: String) -> Bool = {
 // reads is a field that silently goes missing.
 fn is_semver(v: String) -> Bool = {
   let parts = string.split(v, ".")
-  list.len(parts) == 3
-    and (parts |> list.all((p) => p != "" and (p |> string.chars |> list.all((c) => string.contains("0123456789", c)))))
+  list.len(parts) == 3 and (parts |> list.all((p) => p != "" and (p |> string.chars |> list.all((c) => string.contains("0123456789", c)))))
 }
 
 fn schema_errors(t: toml.Table, doc_exists: Bool) -> List[String] = {
@@ -44,17 +42,23 @@ fn schema_errors(t: toml.Table, doc_exists: Bool) -> List[String] = {
   let status = toml.table_get(t, "status")
   let doc = toml.table_get(t, "doc")
   let since = toml.table_get(t, "since")
-  let bad_id = if is_three_digit_id(id) then [] else ["bad contract id '" + id + "' (must match ^C-[0-9]{3}$)"]
+  let bad_id = if is_three_digit_id(id) then []
+  else ["bad contract id '" + id + "' (must match ^C-[0-9]{3}$)"]
   let bad_status = if status == "active" or status == "flagged-for-revision" then []
-    else [id + ": status '" + status + "' is not one of {active, flagged-for-revision}"]
-  let no_title = if toml.table_get(t, "title") != "" then [] else [id + ": REQUIRED key 'title' is missing"]
-  let no_stmt = if toml.table_get(t, "statement") != "" then [] else [id + ": REQUIRED key 'statement' is missing"]
-  let bad_since = if since == "" then
-      [id + ": REQUIRED key 'since' is missing (the version the contract became normative)"]
-    else if is_semver(since) then []
-    else [id + ": since='" + since + "' is not a MAJOR.MINOR.PATCH version"]
-  let bad_doc = if doc != "" and not doc_exists then
-      [id + ": doc='" + doc + "' does not exist under docs/contracts/"] else []
+  else [
+    id + ": status '" + status + "' is not one of {active, flagged-for-revision}"
+  ]
+  let no_title = if toml.table_get(t, "title") != "" then []
+  else [id + ": REQUIRED key 'title' is missing"]
+  let no_stmt = if toml.table_get(t, "statement") != "" then []
+  else [id + ": REQUIRED key 'statement' is missing"]
+  let bad_since = if since == "" then [
+    id + ": REQUIRED key 'since' is missing (the version the contract became normative)"
+  ]
+  else if is_semver(since) then []
+  else [id + ": since='" + since + "' is not a MAJOR.MINOR.PATCH version"]
+  let bad_doc = if doc != "" and not doc_exists then [id + ": doc='" + doc + "' does not exist under docs/contracts/"]
+  else []
   bad_id + bad_status + no_title + no_stmt + bad_since + bad_doc
 }
 
@@ -63,38 +67,36 @@ fn schema_errors(t: toml.Table, doc_exists: Bool) -> List[String] = {
 // between evidence and an assertion.
 fn evidence_shape_errors(classes: List[String], id: String, path: String, cls: String, n: String) -> List[String] = {
   let bad_class = if rank_of(classes, cls) >= 0 then []
-    else [id + ": class '" + cls + "' not one of {" + list.join(classes, ",") + "}"]
+  else [id + ": class '" + cls + "' not one of {" + list.join(classes, ",") + "}"]
   let bad_n = if cls != "fuzz" then []
-    else {
-      let parsed = int.parse(n) ?? 0
-      if n != "" and n != "-" and parsed >= 1 then []
-      else [id + ": class='fuzz' evidence (" + path + ") requires n=<int >= 1> (got '" + n + "')"]
-    }
+  else {
+    let parsed = int.parse(n) ?? 0
+    if n != "" and n != "-" and parsed >= 1 then []
+    else [id + ": class='fuzz' evidence (" + path + ") requires n=<int >= 1> (got '" + n + "')"]
+  }
   bad_class + bad_n
 }
 
 // A NAME is required when the evidence is a source unit rather than a whole fixture file: the
 // gate has to be able to grep for the thing being cited. A `*.rs` file certifies nothing on its
 // own — the claim is about one function in it.
-fn needs_name(path: String, cls: String) -> Bool =
-  string.ends_with(path, ".rs") or string.ends_with(path, ".lean") or string.ends_with(path, ".toml")
-    or cls == "fuzz" or cls == "lean" or cls == "exhaustive"
+fn needs_name(path: String, cls: String) -> Bool = string.ends_with(path, ".rs") or string.ends_with(path, ".lean") or string.ends_with(path, ".toml") or cls == "fuzz" or cls == "lean" or cls == "exhaustive"
 
 // The grep the named unit must satisfy, per file kind. Returned as a pattern description rather
 // than run here so the rule stays pure and testable.
 fn unit_kind(path: String) -> String = if string.ends_with(path, ".rs") then "fn"
 else if string.ends_with(path, ".lean") then "theorem/def"
 else if string.ends_with(path, ".toml") then "routine"
-else if string.ends_with(path, ".almd") then "test"
-else ""
+else if string.ends_with(path, ".almd") then "test" else ""
 
 // (b) — an ACTIVE contract must reach the `fixture` rank. A flagged one is EXEMPT: being
 // flagged is the honest way to say a claim currently rests on prose, and the flagged count is
 // itself a down-only ratchet, so the exemption cannot be used to hide.
-fn active_floor_error(id: String, status: String, max_rank: Int, fixture_rank: Int) -> List[String] =
-  if status == "flagged-for-revision" then []
-  else if max_rank >= fixture_rank then []
-  else [id + " is active but has no evidence of class >= fixture (by-construction/doc-only alone cannot certify observable behaviour; add a fixture or set status=flagged-for-revision)"]
+fn active_floor_error(id: String, status: String, max_rank: Int, fixture_rank: Int) -> List[String] = if status == "flagged-for-revision" then []
+else if max_rank >= fixture_rank then []
+else [
+  id + " is active but has no evidence of class >= fixture (by-construction/doc-only alone cannot certify observable behaviour; add a fixture or set status=flagged-for-revision)"
+]
 
 test "an id is C- plus exactly three digits" {
   // `C-1` and `C-1000` are MALFORMED, not leniently accepted: the ledger's own tooling
@@ -119,7 +121,14 @@ test "since must be MAJOR.MINOR.PATCH, all numeric" {
 test "the class rank comes from the shared file's line order, not a hard-coded list" {
   // Two gates read one file so their enums cannot drift. A rank hard-coded here would
   // reintroduce exactly the divergence the shared file exists to prevent.
-  let classes = ["doc-only", "by-construction", "fixture", "fuzz", "exhaustive", "lean"]
+  let classes = [
+    "doc-only",
+    "by-construction",
+    "fixture",
+    "fuzz",
+    "exhaustive",
+    "lean"
+  ]
   assert_eq(rank_of(classes, "doc-only"), 0)
   assert_eq(rank_of(classes, "fixture"), 2)
   assert_eq(rank_of(classes, "lean"), 5)
@@ -127,7 +136,14 @@ test "the class rank comes from the shared file's line order, not a hard-coded l
 }
 
 test "fuzz evidence without a positive n is a schema error" {
-  let classes = ["doc-only", "by-construction", "fixture", "fuzz", "exhaustive", "lean"]
+  let classes = [
+    "doc-only",
+    "by-construction",
+    "fixture",
+    "fuzz",
+    "exhaustive",
+    "lean"
+  ]
   assert_eq(list.len(evidence_shape_errors(classes, "C-001", "p", "fuzz", "12")), 0)
   assert_eq(list.len(evidence_shape_errors(classes, "C-001", "p", "fuzz", "-")), 1)
   assert_eq(list.len(evidence_shape_errors(classes, "C-001", "p", "fuzz", "0")), 1)
@@ -160,14 +176,10 @@ test "the active floor exempts flagged contracts and nothing else" {
 test "the schema errors come out in the bash's emission order" {
   // The gate's OUTPUT is its error list, so a port that finds the same problems in a
   // different sequence is not byte-identical to the original.
-  let t = toml.Table {
-    scalars: [
-      toml.Pair { key: "id", value: "C-1" },
-      toml.Pair { key: "status", value: "maybe" },
-    ],
-    array_key: "",
-    array_items: [],
-  }
+  let t = toml.Table { scalars: [
+    toml.Pair { key: "id", value: "C-1" },
+    toml.Pair { key: "status", value: "maybe" }
+  ], array_key: "", array_items: [] }
   let errs = schema_errors(t, true)
   assert_eq(list.len(errs), 5)
   assert_eq(string.starts_with(list.get_or(errs, 0, ""), "bad contract id"), true)

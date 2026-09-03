@@ -38,18 +38,11 @@ else if oracle_out != wasm_out then "mismatch" else "match"
 // Both stderr streams arrive RAW and are normalised here, `wat_path` included — so the whole
 // trap decision is one testable function rather than a rule split across a caller that masks a
 // path and a callee that filters lines.
-fn verdict_full(
-  oracle_ok: Bool, render_ok: Bool, wasm_ok: Bool,
-  oracle_out: String, wasm_out: String,
-  oracle_code: Int, wasm_code: Int,
-  oracle_err: String, wasm_err: String, wat_path: String,
-) -> String = {
+fn verdict_full(oracle_ok: Bool, render_ok: Bool, wasm_ok: Bool, oracle_out: String, wasm_out: String, oracle_code: Int, wasm_code: Int, oracle_err: String, wasm_err: String, wat_path: String) -> String = {
   let base = verdict_of(oracle_ok, render_ok, wasm_ok, oracle_out, wasm_out)
   if base != "match" then base
   else if oracle_ok then "match"
-  else if oracle_code == wasm_code
-    and normalize_oracle_err(oracle_err) == normalize_wasm_err(wasm_err, wat_path) then "match"
-  else "xfail"
+  else if oracle_code == wasm_code and normalize_oracle_err(oracle_err) == normalize_wasm_err(wasm_err, wat_path) then "match" else "xfail"
 }
 
 // COMPILER noise is not a program observable, and both legs emit their own kind.
@@ -58,11 +51,7 @@ fn verdict_full(
 // native-fallback notice went always-on in #931 — so every trap fixture that walls the
 // native-verified rung "regressed" the moment that notice appeared. It is infrastructure
 // chatter about HOW the program was built, in the same class as wasmtime's module preamble.
-fn normalize_oracle_err(s: String) -> String =
-  lines_of(s)
-    |> list.filter((l) => not string.starts_with(l, "note: verified native render walled"))
-    |> list.filter((l) => not string.starts_with(l, "  reason: "))
-    |> list.join("\n")
+fn normalize_oracle_err(s: String) -> String = lines_of(s) |> list.filter((l) => not string.starts_with(l, "note: verified native render walled")) |> list.filter((l) => not string.starts_with(l, "  reason: ")) |> list.join("\n")
 
 // v1: wasmtime wraps a trap in its own frame — a preamble naming the module PATH (which is a
 // temp file, so it differs every run and can never match), a `Caused by:` header, and an
@@ -70,13 +59,9 @@ fn normalize_oracle_err(s: String) -> String =
 // `wat_path` is blanked out rather than left in, because the path is the one part guaranteed
 // to differ between the two legs for reasons that have nothing to do with the program.
 fn normalize_wasm_err(s: String, wat_path: String) -> String = {
-  let masked = if wat_path == "" then s else string.replace(s, wat_path, "<module>")
-  lines_of(masked)
-    |> list.filter((l) => not string.starts_with(l, "Error: failed to run main module"))
-    |> list.filter((l) => not string.starts_with(l, "Caused by:"))
-    |> list.map(strip_backtrace_index)
-    |> list.filter((l) => l != "")
-    |> list.join("\n")
+  let masked = if wat_path == "" then s
+  else string.replace(s, wat_path, "<module>")
+  lines_of(masked) |> list.filter((l) => not string.starts_with(l, "Error: failed to run main module")) |> list.filter((l) => not string.starts_with(l, "Caused by:")) |> list.map(strip_backtrace_index) |> list.filter((l) => l != "") |> list.join("\n")
 }
 
 // A stream's FINAL newline is a line TERMINATOR, not an empty line — which is how `sed` reads
@@ -102,9 +87,8 @@ fn strip_backtrace_index(line: String) -> String = {
   else string.slice(line, scan_class(line, after_digits + 1, " "))
 }
 
-fn scan_class(s: String, p: Int, cls: String) -> Int =
-  if p < string.len(s) and string.contains(cls, string.slice(s, p, p + 1)) then scan_class(s, p + 1, cls)
-  else p
+fn scan_class(s: String, p: Int, cls: String) -> Int = if p < string.len(s) and string.contains(cls, string.slice(s, p, p + 1)) then scan_class(s, p + 1, cls)
+else p
 
 effect fn exit_ok(cmd: String, args: List[String]) -> Bool = {
   let st = process.exec_status(cmd, args)
