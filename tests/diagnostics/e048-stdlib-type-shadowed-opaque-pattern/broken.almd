@@ -1,0 +1,16 @@
+// The issue's second shape (#1835): a `match` that aims the user newtype's
+// pattern `Value(s)` at the json value. The pattern is `self.Value`'s and the
+// subject is the stdlib's `Value` — E048 refuses the mix where before the
+// pattern bound `s` untyped and the structural wasm leg printed the json
+// value's payload as a String.
+import json
+
+mod type Value = String
+
+effect fn main() -> Unit = {
+  let doc = json.parse("[1]")!
+  let s = match doc {
+    Value(s) => s
+  }
+  println(s)
+}
