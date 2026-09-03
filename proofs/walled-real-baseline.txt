@@ -182,3 +182,13 @@ spec/wasm_cross/as_pattern.almd :: pick
 spec/wasm_cross/generic_record_fn_field.almd :: call_any__String
 spec/wasm_cross/generic_record_fn_field.almd :: call_it
 spec/wasm_cross/generic_record_fn_field.almd :: call_q
+
+# (2026-09-03, C-213/#1849) a TEMPORARY receiver of a Unit-returning bytes
+# mutator (`bytes.append_i16_be(bytes.new(2), 258)`, `let _ = …` on the
+# same): the incumbent brick walls it honestly — the receiver discipline
+# refuses a call-result receiver (`in-place mutator … over a Call receiver`)
+# instead of linking the functional twin and leaving its result on the
+# operand stack, and the `let _ =` Unit binding is outside its value subset.
+# The STRUCTURAL leg (the default) releases the mutated block after the
+# call and runs byte-identical to native. Prunes with #1696 4-5.
+spec/wasm_cross/bytes_temp_receiver.almd :: main

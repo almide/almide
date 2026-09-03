@@ -112,7 +112,12 @@ fi
 # render wall (C-147; a render-phase refusal the walled-real ratchet
 # already classes "(b) acceptable", so no baseline row); the structural
 # leg lowers every equatable key. Prunes with #1696 4-5.
-MAX_WALLED=24
+# 25 as of 2026-09-03: bytes_temp_receiver.almd (C-213/#1849) — a TEMPORARY
+# receiver of a Unit-returning bytes mutator; the incumbent brick walls it
+# honestly (the receiver discipline names the call-result receiver, and the
+# `let _ =` Unit binding is outside its value subset) where the structural
+# leg, the default route, releases the mutated block. Prunes with #1696 4-5.
+MAX_WALLED=25
 corpus=$(ls "$FIXTURE_DIR"/*.almd 2>/dev/null | wc -l | tr -d ' ')
 if [ "$corpus" -eq 0 ] || [ $((n + walled)) -ne "$corpus" ]; then
   echo "::error::host-determinism: compared $n + walled $walled != corpus $corpus in $FIXTURE_DIR — the scan went blind (#985)"

@@ -13,6 +13,7 @@
 alias_combinator_rc  out-of-interp-scope capability: prim.handle of a Option (outside the slice-2 heap family)
 availability_pure_batch  out-of-interp-scope capability: html.escape
 bytes_rawptr  out-of-interp-scope capability: prim.int_to_ptr
+bytes_temp_receiver  out-of-interp-scope capability: in-place container mutation `bytes.append_i16_be` through a non-variable receiver (a record field / index / temporary has no single binding to write back to)
 count_domain_nonbytes  out-of-interp-scope capability: prim.read_n_bytes
 effect_tco_err_rewrap  interp fuel/recursion budget exhausted
 env_set_overlay  out-of-interp-scope capability: env.set

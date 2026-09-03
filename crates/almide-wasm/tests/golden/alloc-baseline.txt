@@ -41,6 +41,7 @@
 66960	spec/wasm_cross/bytes_rawptr.almd
 67168	spec/wasm_cross/bytes_set_value_semantics.almd
 67616	spec/wasm_cross/bytes_string_window_domain.almd
+10311120	spec/wasm_cross/bytes_temp_receiver.almd
 76720	spec/wasm_cross/bytes_writer_family.almd
 66112	spec/wasm_cross/call_closure_lambda_param.almd
 65968	spec/wasm_cross/call_lambda_ctor.almd
