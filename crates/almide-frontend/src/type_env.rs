@@ -268,10 +268,10 @@ impl TypeEnv {
                 return Some(sym(&own));
             }
         }
-        if let Some(shadow) = crate::canonicalize::resolve::stdlib_shadow_key(name, cur_mod) {
-            if has(&shadow) {
-                return Some(sym(&shadow));
-            }
+        if let Some(shadow) = crate::canonicalize::resolve::stdlib_shadow_key(name, cur_mod)
+            && has(&shadow)
+        {
+            return Some(sym(&shadow));
         }
         if has(name) {
             return Some(sym(name));
