@@ -440,6 +440,7 @@
 65760	spec/wasm_cross/pipe_chain_scalar_bind.almd
 65968	spec/wasm_cross/pipe_compose_forms.almd
 65792	spec/wasm_cross/pipe_lambda_block_value.almd
+71536	spec/wasm_cross/pipe_unwrap_or_family.almd
 66480	spec/wasm_cross/place_assign_ascription.almd
 66656	spec/wasm_cross/place_mutation.almd
 72192	spec/wasm_cross/playground_default.almd
