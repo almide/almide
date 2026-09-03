@@ -290,147 +290,9 @@ impl<'a> Interpreter<'a> {
         // `args_get_list` answers argv[1..]; `args_get_list_full` prepends an
         // argv[0] whose only cross-target observable is NONEMPTINESS (the
         // fixtures assert it, never print it — C-181's argv0 normalization).
-        if module.as_str() == "prim" {
-            // The BLOCK HEAP floor (#1226, heap.rs). Same tier as argv /
-            // env / fs and for the same reason: these read and MUTATE per-run
-            // interpreter state, which the stateless `bridge::prim_fn` cannot
-            // hold. Slice 1 served the flat String/Bytes family; slice 2 adds
-            // the slot-block container family (`alloc_list*` / `alloc_set*` /
-            // `alloc_map*` / `alloc_value`, `store_str` / `load_str` /
-            // `load_handle`, `rc_inc` / `rc_dec`). What a block cannot
-            // faithfully spell still falls through to the honest abstain, so
-            // this stays a CLOSED family the voting gate can arbitrate.
-            if let Some(flow) = self.heap_prim(func.as_str(), &args) {
-                return flow;
-            }
-            match func.as_str() {
-                // `prim.die(prim.handle(msg))` — the guarded-abort floor
-                // (Stage 2 BRIDGEABLE burn-down: int_pow_negative_exponent,
-                // list_chunk_zero, …). The argument is by construction a
-                // handle to the full "Error: <reason>\n" line both backends
-                // eprint VERBATIM before exit(1); the interp's Abort contract
-                // prints `Error: {msg}\n`, so the bridged message is that line
-                // with the frame stripped. A message outside the frame
-                // abstains — this floor must never invent a stderr the
-                // backends would not produce.
-                "die" => {
-                    let Some(addr) = heap_addr(args.first()) else {
-                        return Flow::Unsupported("prim.die with a non-address".into());
-                    };
-                    let Some((bytes, _)) = self.heap.block_bytes(addr) else {
-                        return Flow::Unsupported(
-                            "prim.die outside this heap's arena".into(),
-                        );
-                    };
-                    let msg = String::from_utf8_lossy(&bytes).into_owned();
-                    let Some(reason) = msg
-                        .strip_prefix("Error: ")
-                        .and_then(|m| m.strip_suffix('\n'))
-                    else {
-                        return Flow::Unsupported(
-                            "prim.die with a message outside the Error:-line contract"
-                                .into(),
-                        );
-                    };
-                    return Flow::Abort(reason.to_string());
-                }
-                "args_get_list" => {
-                    let items: Vec<Value> =
-                        self.args.iter().map(|s| Value::str(s.clone())).collect();
-                    return Flow::val(Value::list(items));
-                }
-                "args_get_list_full" => {
-                    let mut items = vec![Value::str("interp")];
-                    items.extend(self.args.iter().map(|s| Value::str(s.clone())));
-                    return Flow::val(Value::list(items));
-                }
-                // The env floor (same tier as argv, C-133): `prim.env_get`
-                // reads the LIVE process environment — exactly what the other
-                // two legs observe (native getenv; wasm WASI environ with
-                // inherit-env), so all three answer the same bytes. Without
-                // this arm the resolve below finds the lowered `env_get`
-                // stdlib fn BY BARE NAME — the very fn whose body is this
-                // prim — and the interp spun in that cycle until fuel ran
-                // out (the module-identity bug class, #1087–#1094, one tier
-                // down: a prim resolved from the wrong source).
-                "env_get" => {
-                    let Some(Value::Str(name)) = args.first() else {
-                        return Flow::Abort("internal: prim.env_get expects a String".into());
-                    };
-                    return Flow::val(match std::env::var(name.as_str()) {
-                        Ok(v) => Value::Option(Some(Box::new(Value::str(v)))),
-                        Err(_) => Value::Option(None),
-                    });
-                }
-                // The sandboxed fs floor (#1218, vfs.rs): writes land in the
-                // per-interpreter overlay, reads fall back to the real fs
-                // read-only. Same tier as the argv/env floors — these prims
-                // read INTERPRETER state, which the stateless bridge cannot.
-                "read_text_file" => {
-                    let Some(Value::Str(path)) = args.first() else {
-                        return Flow::Abort("internal: prim.read_text_file expects a String".into());
-                    };
-                    return Flow::val(match crate::vfs::read_text(&self.vfs, path) {
-                        Ok(s) => Value::Result(Ok(Box::new(Value::str(s)))),
-                        Err(e) => Value::Result(Err(Box::new(Value::str(e)))),
-                    });
-                }
-                "write_text_file" => {
-                    let (Some(Value::Str(path)), Some(Value::Str(content))) =
-                        (args.first(), args.get(1))
-                    else {
-                        return Flow::Abort(
-                            "internal: prim.write_text_file expects (String, String)".into(),
-                        );
-                    };
-                    let (path, content) = (path.to_string(), content.to_string());
-                    return Flow::val(match crate::vfs::write_text(&mut self.vfs, &path, &content) {
-                        Ok(()) => Value::Result(Ok(Box::new(Value::Unit))),
-                        Err(e) => Value::Result(Err(Box::new(Value::str(e)))),
-                    });
-                }
-                "make_dir" => {
-                    let Some(Value::Str(path)) = args.first() else {
-                        return Flow::Abort("internal: prim.make_dir expects a String".into());
-                    };
-                    let path = path.to_string();
-                    return Flow::val(match crate::vfs::make_dir(&mut self.vfs, &path) {
-                        Ok(()) => Value::Result(Ok(Box::new(Value::Unit))),
-                        Err(e) => Value::Result(Err(Box::new(Value::str(e)))),
-                    });
-                }
-                "path_exists" => {
-                    let Some(Value::Str(path)) = args.first() else {
-                        return Flow::Abort("internal: prim.path_exists expects a String".into());
-                    };
-                    return Flow::val(Value::Bool(crate::vfs::exists(&self.vfs, path)));
-                }
-                "remove_all" => {
-                    let Some(Value::Str(path)) = args.first() else {
-                        return Flow::Abort("internal: prim.remove_all expects a String".into());
-                    };
-                    let path = path.to_string();
-                    return match crate::vfs::remove_all(&mut self.vfs, &path) {
-                        crate::vfs::RemoveOutcome::Removed => {
-                            Flow::val(Value::Result(Ok(Box::new(Value::Unit))))
-                        }
-                        // A host path the overlay never wrote: refusing to
-                        // delete real files is the sandbox's point, and
-                        // pretending to would be a wrong vote — abstain.
-                        crate::vfs::RemoveOutcome::HostOnly => Flow::Unsupported(
-                            "prim.remove_all on a host path (the overlay is read-only toward the real fs)".into(),
-                        ),
-                        crate::vfs::RemoveOutcome::Missing => {
-                            Flow::val(Value::Result(Err(Box::new(Value::str(
-                                "No such file or directory (os error 2)".to_string(),
-                            )))))
-                        }
-                    };
-                }
-                _ => {}
-            }
+        if let Some(flow) = self.prim_floor(module.as_str(), func.as_str(), &args) {
+            return flow;
         }
-
         // Scalar / string / math native bridge (intrinsic-symbol surface).
         if let Some(result) = crate::bridge::dispatch(module.as_str(), func.as_str(), &args) {
             return result;
@@ -468,6 +330,161 @@ impl<'a> Interpreter<'a> {
         // address, and an eager rebuild there snapshots blocks the caller is
         // still writing through (see `pool_fns`).
         self.sync_at_pool_boundary(func_def, flow)
+    }
+
+    /// The `prim` floors that read or MUTATE per-run interpreter state, which
+    /// the stateless `bridge::prim_fn` cannot hold: the block heap, the guarded
+    /// abort, argv, the live env, and the sandboxed fs. `None` = not one of
+    /// these (or not `prim` at all); the caller falls through to the bridge.
+    fn prim_floor(&mut self, module: &str, func: &str, args: &[Value]) -> Option<Flow> {
+        if module != "prim" {
+            return None;
+        }
+        // The BLOCK HEAP floor (#1226, heap.rs). Same tier as argv /
+        // env / fs and for the same reason: these read and MUTATE per-run
+        // interpreter state, which the stateless `bridge::prim_fn` cannot
+        // hold. Slice 1 served the flat String/Bytes family; slice 2 adds
+        // the slot-block container family (`alloc_list*` / `alloc_set*` /
+        // `alloc_map*` / `alloc_value`, `store_str` / `load_str` /
+        // `load_handle`, `rc_inc` / `rc_dec`). What a block cannot
+        // faithfully spell still falls through to the honest abstain, so
+        // this stays a CLOSED family the voting gate can arbitrate.
+        if let Some(flow) = self.heap_prim(func, args) {
+            return Some(flow);
+        }
+        match func {
+            // `prim.die(prim.handle(msg))` — the guarded-abort floor
+            // (Stage 2 BRIDGEABLE burn-down: int_pow_negative_exponent,
+            // list_chunk_zero, …). The argument is by construction a
+            // handle to the full "Error: <reason>\n" line both backends
+            // eprint VERBATIM before exit(1); the interp's Abort contract
+            // prints `Error: {msg}\n`, so the bridged message is that line
+            // with the frame stripped. A message outside the frame
+            // abstains — this floor must never invent a stderr the
+            // backends would not produce.
+            "die" => Some(self.prim_die(args)),
+            "args_get_list" => {
+                let items: Vec<Value> =
+                    self.args.iter().map(|s| Value::str(s.clone())).collect();
+                Some(Flow::val(Value::list(items)))
+            }
+            "args_get_list_full" => {
+                let mut items = vec![Value::str("interp")];
+                items.extend(self.args.iter().map(|s| Value::str(s.clone())));
+                Some(Flow::val(Value::list(items)))
+            }
+            // The env floor (same tier as argv, C-133): `prim.env_get`
+            // reads the LIVE process environment — exactly what the other
+            // two legs observe (native getenv; wasm WASI environ with
+            // inherit-env), so all three answer the same bytes. Without
+            // this arm the resolve below finds the lowered `env_get`
+            // stdlib fn BY BARE NAME — the very fn whose body is this
+            // prim — and the interp spun in that cycle until fuel ran
+            // out (the module-identity bug class, #1087–#1094, one tier
+            // down: a prim resolved from the wrong source).
+            "env_get" => {
+                let Some(Value::Str(name)) = args.first() else {
+                    return Some(Flow::Abort("internal: prim.env_get expects a String".into()));
+                };
+                Some(Flow::val(match std::env::var(name.as_str()) {
+                    Ok(v) => Value::Option(Some(Box::new(Value::str(v)))),
+                    Err(_) => Value::Option(None),
+                }))
+            }
+            _ => self.vfs_prim(func, args),
+        }
+    }
+
+    /// The guarded-abort floor behind `prim.die` — see the arm in
+    /// [`Self::prim_floor`] for the contract.
+    fn prim_die(&self, args: &[Value]) -> Flow {
+        let Some(addr) = heap_addr(args.first()) else {
+            return Flow::Unsupported("prim.die with a non-address".into());
+        };
+        let Some((bytes, _)) = self.heap.block_bytes(addr) else {
+            return Flow::Unsupported("prim.die outside this heap's arena".into());
+        };
+        let msg = String::from_utf8_lossy(&bytes).into_owned();
+        let Some(reason) = msg
+            .strip_prefix("Error: ")
+            .and_then(|m| m.strip_suffix('\n'))
+        else {
+            return Flow::Unsupported(
+                "prim.die with a message outside the Error:-line contract".into(),
+            );
+        };
+        Flow::Abort(reason.to_string())
+    }
+
+    /// The sandboxed fs floor (#1218, vfs.rs): writes land in the
+    /// per-interpreter overlay, reads fall back to the real fs
+    /// read-only. Same tier as the argv/env floors — these prims
+    /// read INTERPRETER state, which the stateless bridge cannot.
+    fn vfs_prim(&mut self, func: &str, args: &[Value]) -> Option<Flow> {
+        match func {
+            "read_text_file" => {
+                let Some(Value::Str(path)) = args.first() else {
+                    return Some(Flow::Abort("internal: prim.read_text_file expects a String".into()));
+                };
+                Some(Flow::val(match crate::vfs::read_text(&self.vfs, path) {
+                    Ok(s) => Value::Result(Ok(Box::new(Value::str(s)))),
+                    Err(e) => Value::Result(Err(Box::new(Value::str(e)))),
+                }))
+            }
+            "write_text_file" => {
+                let (Some(Value::Str(path)), Some(Value::Str(content))) =
+                    (args.first(), args.get(1))
+                else {
+                    return Some(Flow::Abort(
+                        "internal: prim.write_text_file expects (String, String)".into(),
+                    ));
+                };
+                let (path, content) = (path.to_string(), content.to_string());
+                Some(Flow::val(match crate::vfs::write_text(&mut self.vfs, &path, &content) {
+                    Ok(()) => Value::Result(Ok(Box::new(Value::Unit))),
+                    Err(e) => Value::Result(Err(Box::new(Value::str(e)))),
+                }))
+            }
+            "make_dir" => {
+                let Some(Value::Str(path)) = args.first() else {
+                    return Some(Flow::Abort("internal: prim.make_dir expects a String".into()));
+                };
+                let path = path.to_string();
+                Some(Flow::val(match crate::vfs::make_dir(&mut self.vfs, &path) {
+                    Ok(()) => Value::Result(Ok(Box::new(Value::Unit))),
+                    Err(e) => Value::Result(Err(Box::new(Value::str(e)))),
+                }))
+            }
+            "path_exists" => {
+                let Some(Value::Str(path)) = args.first() else {
+                    return Some(Flow::Abort("internal: prim.path_exists expects a String".into()));
+                };
+                Some(Flow::val(Value::Bool(crate::vfs::exists(&self.vfs, path))))
+            }
+            "remove_all" => {
+                let Some(Value::Str(path)) = args.first() else {
+                    return Some(Flow::Abort("internal: prim.remove_all expects a String".into()));
+                };
+                let path = path.to_string();
+                Some(match crate::vfs::remove_all(&mut self.vfs, &path) {
+                    crate::vfs::RemoveOutcome::Removed => {
+                        Flow::val(Value::Result(Ok(Box::new(Value::Unit))))
+                    }
+                // A host path the overlay never wrote: refusing to
+                // delete real files is the sandbox's point, and
+                // pretending to would be a wrong vote — abstain.
+                    crate::vfs::RemoveOutcome::HostOnly => Flow::Unsupported(
+                        "prim.remove_all on a host path (the overlay is read-only toward the real fs)".into(),
+                    ),
+                    crate::vfs::RemoveOutcome::Missing => {
+                        Flow::val(Value::Result(Err(Box::new(Value::str(
+                            "No such file or directory (os error 2)".to_string(),
+                        )))))
+                    }
+                })
+            }
+            _ => None,
+        }
     }
 
     /// Run a resolved body, tracking the pool-tier boundary: while a POOL
