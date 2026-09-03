@@ -1,6 +1,6 @@
 # CLI Specification
 
-> Last updated: 2026-08-14
+> Last updated: 2026-09-03
 
 ## Overview
 
@@ -85,6 +85,14 @@ almide test --json                      # 結果を JSONL (1行1ファイル) �
 | `--no-check` | 型チェックをスキップ |
 | `--json` | JSON 形式で結果出力 |
 | `--target wasm` | wasmtime で実行 |
+
+スクラッチ成果物（wasm レグが wasmtime に渡す `.wasm` モジュール）は実行ごとに固有の
+`$TMPDIR/almide-test-<pid>-<nonce>/` 配下に、ファイルの**絶対パス**のハッシュで命名して
+置かれ、終了時に削除される（`ALMIDE_KEEP_SCRATCH=1` で残し、場所を stderr に出す）。
+同名ファイルの並列実行や別ディレクトリの同名ファイルがパスを共有することはない（#1877）。
+ネイティブ fallback のビルドキャッシュは `$TMPDIR/almide-test/native/` に永続（同じく絶対パス鍵）。
+
+テスト: `tests/test_scratch_race_test.rs`
 
 失敗の報告は**構造化ブロック**（`FAILED: <file>` に続けて `test:` / `at:` /
 `hint:` / `diff:` または `expected:` `found:`）。複数行文字列・リスト・レコードは
