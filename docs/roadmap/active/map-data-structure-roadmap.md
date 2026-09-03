@@ -93,7 +93,7 @@ Almide itself). Track as the long-term persistent-collections direction.
 ## Cross-cutting
 
 Whatever the representation, the **hard invariant is observable cross-target equivalence**
-(native iteration == wasm iteration, enforced by `tests/wasm_runtime_test.rs::wasm_cross_target_spec`).
+(native iteration == wasm iteration, enforced by `tests/wasm_runtime_cross_target.rs::wasm_cross_target_spec`).
 Any move ①→②→③ must keep every `spec/wasm_cross/map_*` case byte-identical and add no
 `@xt-allow`. Set may stay a dense list (Set[Float] needs only `PartialEq`); the index
 question is Map-specific.

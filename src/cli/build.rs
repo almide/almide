@@ -427,7 +427,7 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
     // finished output, so running it replaces bytes the trust-spine produced
     // with bytes a separate, un-certified tool rewrote. That is why it stays
     // an explicit, default-off opt-in (`--wasm-opt`) rather than automatic —
-    // see the wasm-opt parity leg (`tests/wasm_runtime_test.rs::wasm_opt_parity_spec`) for the
+    // see the wasm-opt parity leg (`tests/wasm_runtime_opt_parity.rs::wasm_opt_parity_spec`) for the
     // differential-testing evidence backing this tier's own guarantee.
     // Name the LEG in the one line every build prints: "which renderer
     // produced these bytes" was invisible by default (the line said

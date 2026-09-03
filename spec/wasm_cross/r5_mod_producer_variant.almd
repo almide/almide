@@ -5,7 +5,7 @@
 // name. In a SUBMODULE that owns the variant, that name is `mod.Shape`, and a
 // bare-typed construction tripped the #433 name-pinning guard at codegen on both
 // targets (the real #631 trigger, gated by the project-based cross-target test
-// `wasm_cross_module_producer_side_variant_ctor` in tests/wasm_runtime_test.rs).
+// `wasm_cross_module_producer_side_variant_ctor` in tests/wasm_runtime_test_parts/p2.rs).
 // The single-file wasm_cross gate cannot host module projects, so this fixture
 // locks the producer-side construction + match repr in single-file form.
 type Shape = | Circle(Int) | Square(Int)

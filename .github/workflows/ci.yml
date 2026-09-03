@@ -266,8 +266,11 @@ jobs:
     # therefore their own lock — that is where the parallelism comes from.
     #
     # 4, not more: the load is extremely skewed (the top 4 targets are half the
-    # total) and `wasm_runtime_test` alone is ~270s, so past 4 shards the
-    # longest target IS the floor and extra jobs buy nothing.
+    # total), so past 4 shards the longest single target IS the floor and extra
+    # jobs buy nothing. The former giant, `wasm_runtime_test` (1552 s on run
+    # 33695667642), is split into per-gate `wasm_runtime_*` binaries (largest
+    # ~520 s) so the packer can spread it; the floor is `diagnostic_harness_test`
+    # now.
     name: Test Rust (shard ${{ matrix.shard }}/4)
     needs: [changes, build]
     # No job-level docs-only guard here — see the `changes` job: a skipped
@@ -326,7 +329,7 @@ jobs:
       - name: Install wasmtime
         if: env.DOCS_ONLY != 'true'
         # Required by the cross-target gate (wasm_cross_target_spec) and the
-        # wasm_runtime_test capture tests — without it they skip, so the
+        # wasm_runtime_* capture tests — without it they skip, so the
         # cross-target ratchet would not actually enforce here.
         run: |
           # Pinned + cached + retried. On a cache hit the tarball is already here,
@@ -348,7 +351,7 @@ jobs:
 
       - name: Install wasm-opt (binaryen)
         if: env.DOCS_ONLY != 'true'
-        # Required by the wasm-opt parity gate (wasm_runtime_test::wasm_opt_parity_spec) — without
+        # Required by the wasm-opt parity gate (wasm_runtime_opt_parity::wasm_opt_parity_spec) — without
         # it the test silently early-returns as a pass, so `--wasm-opt`'s
         # differential-equivalence claim would never actually be checked here.
         run: sudo apt-get update && sudo apt-get install -y binaryen && wasm-opt --version
@@ -1369,9 +1372,12 @@ jobs:
       #   - tool_arming_tripwire_test: the leg stays honest about its own
       #     tools — a broken wasmtime/binaryen install FAILS here instead of
       #     letting the wasm suites skip-as-pass (#983's lesson, kept).
-      #   - wasm_runtime_test (macOS, armed): the byte-compare harness on the
-      #     other tool-bearing platform — cross-target equivalence is checked
-      #     on a second OS, not just Linux.
+      #   - the wasm_runtime_* binaries (macOS, armed): the byte-compare
+      #     harness on the other tool-bearing platform — cross-target
+      #     equivalence is checked on a second OS, not just Linux. Under
+      #     `cargo test` each corpus-gate binary builds its own fixture table
+      #     (see tests/wasm_runtime_test_parts/corpus.rs), the same cost the
+      #     Linux shards already pay per test process under nextest.
       #   - lsp_test + fix_test + diagnostic_harness_test: the path- and
       #     process-sensitive root suites (tmp dirs, binary spawning, path
       #     separators) — the classes behind #1008 and the os-error-3 catch.
@@ -1385,7 +1391,7 @@ jobs:
         run: |
           cargo test --test tool_arming_tripwire_test --test lsp_test --test fix_test --test diagnostic_harness_test
           if [ "${{ runner.os }}" != "Windows" ]; then
-            cargo test --test wasm_runtime_test
+            cargo test --test wasm_runtime_inline --test wasm_runtime_cross_target --test wasm_runtime_opt_parity --test wasm_runtime_interp_oracle --test wasm_runtime_interp_ledger --test wasm_runtime_fail_corpus
           fi
 
       - uses: actions/upload-artifact@v7

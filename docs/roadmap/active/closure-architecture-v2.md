@@ -330,7 +330,7 @@ worked for the same reason (their emit reads `Bind.ty`, which `auto_try` fixes).
 Verified: `?` and `!` repros → `15` on wasm + native; the fixed `main` IR matches the
 `!` form (tail-lifted `__perceus_ret`, `rc_dec` after the use); edge cases (two closures,
 multiple calls in one expr, closure passed to a HOF) cross-target identical; spec 240/240;
-full `cargo test`; 2 new regressions in `tests/wasm_runtime_test.rs`
+full `cargo test`; 2 new regressions in `tests/wasm_runtime_test_parts/p2.rs`
 (`wasm_effect_fn_returns_closure_auto_try_binding`, `_used_twice`).
 
 ### DONE — P4: one free-var analysis for both targets

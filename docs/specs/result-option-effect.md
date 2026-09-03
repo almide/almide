@@ -234,7 +234,7 @@ fn retry(op: (Int) -> Int!) -> Int! = op(1)!   // fn 型 slot の `!`(L7/L8)
   両ターゲット一致(旧記述の「wasm が exit 0 で黙殺する残存乖離」は解消済み — 実測で
   両ターゲット exit 1 + `Error:` を確認)
 
-テスト: `tests/wasm_runtime_test.rs::unhandled_main_error_terminates_consistently`,
+テスト: `tests/wasm_runtime_test_parts/p3.rs::unhandled_main_error_terminates_consistently`,
 `spec/lang/result_option_matrix_test.almd`
 
 ## 5. test ブロック
