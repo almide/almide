@@ -372,19 +372,7 @@ impl<'a> Interpreter<'a> {
                 break 'tramp cut;
             }
 
-            // #1602: a lowered fn's body indexes ITS space's VarTable, so its
-            // frame parents off that space's globals frame — never the
-            // caller's chain, whose same-numbered VarIds may belong to a
-            // different table. Closures keep their captured chain (which was
-            // built under this rule at creation).
-            let fn_base = match &callee {
-                TailCallee::Fn(f) => {
-                    let space = self.fn_space_of(f);
-                    self.cur_space.set(space);
-                    self.space_scope(space).clone()
-                }
-                TailCallee::Clo(_) => base.clone(),
-            };
+            let fn_base = self.hop_base_scope(&callee, base);
             let (frame, fn_body, clo_body) = bind_hop_frame(&callee, &mut args, &fn_base);
             if first_frame.is_none() {
                 first_frame = Some(frame.clone());
@@ -423,11 +411,37 @@ impl<'a> Interpreter<'a> {
             }
         };
 
-        // #1226 read-back for the FINAL callee when the spine ended inside a
-        // pool fn at the tier boundary (tail transfers bypass the dispatch
-        // tails where the sync normally lives). Idempotent with the outer
-        // dispatch sync: a rebuilt value is no longer a block address.
-        let result = match &callee {
+        let result = self.sync_final_hop(&callee, result);
+        let result = normalize_option_fn_return(&callee, result);
+        let result = self.fold_pending_try(result, &pending);
+        self.det_in_user.set(det_was_user);
+        self.cur_space.set(space_was);
+        self.depth.set(self.depth.get() - 1);
+        (result, first_frame.unwrap_or_else(|| base.child()))
+    }
+
+    /// #1602: a lowered fn's body indexes ITS space's VarTable, so its
+    /// frame parents off that space's globals frame — never the
+    /// caller's chain, whose same-numbered VarIds may belong to a
+    /// different table. Closures keep their captured chain (which was
+    /// built under this rule at creation).
+    fn hop_base_scope(&self, callee: &TailCallee<'a>, base: &env::Scope) -> env::Scope {
+        match callee {
+            TailCallee::Fn(f) => {
+                let space = self.fn_space_of(f);
+                self.cur_space.set(space);
+                self.space_scope(space).clone()
+            }
+            TailCallee::Clo(_) => base.clone(),
+        }
+    }
+
+    /// #1226 read-back for the FINAL callee when the spine ended inside a
+    /// pool fn at the tier boundary (tail transfers bypass the dispatch
+    /// tails where the sync normally lives). Idempotent with the outer
+    /// dispatch sync: a rebuilt value is no longer a block address.
+    fn sync_final_hop(&self, callee: &TailCallee<'a>, result: Flow) -> Flow {
+        match callee {
             TailCallee::Fn(f)
                 if self.pool_depth == 0 && self.pool_fns.contains(&f.name) =>
             {
@@ -444,13 +458,7 @@ impl<'a> Interpreter<'a> {
                 }
             }
             _ => result,
-        };
-        let result = normalize_option_fn_return(&callee, result);
-        let result = self.fold_pending_try(result, &pending);
-        self.det_in_user.set(det_was_user);
-        self.cur_space.set(space_was);
-        self.depth.set(self.depth.get() - 1);
-        (result, first_frame.unwrap_or_else(|| base.child()))
+        }
     }
 
     /// The per-hop entry charge — the backends charge INSIDE the loop, so each
