@@ -91,7 +91,7 @@ stdin plumbing that landed with the C-320 arc.
 
 ### Where the stdlib went
 
-Almide's stdlib is 973 functions across 43 modules — but they are **self-hosted
+Almide's stdlib is 982 functions across 43 modules — but they are **self-hosted
 in Almide** and linked *on demand*. The compiler scans the lowered program for
 called dispatch names (`string.len`, `map.set`, `list.sort_by`, …) and links
 only the matching self-host sources, iterating to a fixpoint so a linked
