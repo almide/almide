@@ -31,7 +31,9 @@ fn by_field(m: Map[String, Int], r: Rec) -> Int? = m[r.name]
 
 fn by_loop(m: Map[String, Int], ks: List[String]) -> Int = {
   var t = 0
-  for k in ks { t = t + (m[k] ?? -1) }
+  for k in ks {
+    t = t + (m[k] ?? -1)
+  }
   t
 }
 
