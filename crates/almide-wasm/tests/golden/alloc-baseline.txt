@@ -346,13 +346,14 @@
 68432	spec/wasm_cross/map_fold_heap_acc.almd
 67184	spec/wasm_cross/map_fold_heap_acc_skv.almd
 65888	spec/wasm_cross/map_fold_heap_accumulator.almd
-159296	spec/wasm_cross/map_index_order.almd
-80064	spec/wasm_cross/map_insertion_order.almd
+171584	spec/wasm_cross/map_index_order.almd
+82112	spec/wasm_cross/map_insertion_order.almd
 105408	spec/wasm_cross/map_interp_string_value.almd
 65936	spec/wasm_cross/map_of_maps_value.almd
 65824	spec/wasm_cross/map_rich_variant_key.almd
 67392	spec/wasm_cross/map_set_eq.almd
-257824	spec/wasm_cross/map_set_in_place.almd
+341792	spec/wasm_cross/map_set_in_place.almd
+351504	spec/wasm_cross/map_set_index_threshold.almd
 68624	spec/wasm_cross/map_set_ops.almd
 84480	spec/wasm_cross/map_set_typechange.almd
 66192	spec/wasm_cross/map_wide_int_key.almd
@@ -459,7 +460,7 @@
 66848	spec/wasm_cross/range_bind_no_materialize.almd
 65792	spec/wasm_cross/range_first_class.almd
 65920	spec/wasm_cross/range_materialize_oom.almd
-957824	spec/wasm_cross/rc_alloc_stress.almd
+1068416	spec/wasm_cross/rc_alloc_stress.almd
 3265872	spec/wasm_cross/rc_reclaim_churn.almd
 65840	spec/wasm_cross/record_forms.almd
 579776	spec/wasm_cross/record_pair_result_return.almd
@@ -504,7 +505,7 @@
 176608	spec/wasm_cross/rope_geometry_family.almd
 65984	spec/wasm_cross/scalar_if_arm_effects.almd
 66352	spec/wasm_cross/scan_heap_acc.almd
-194736	spec/wasm_cross/set_index_order.almd
+204464	spec/wasm_cross/set_index_order.almd
 80880	spec/wasm_cross/set_insertion_order.almd
 66416	spec/wasm_cross/sized_int_overflow_wrap.almd
 66704	spec/wasm_cross/sized_int_record_fields.almd

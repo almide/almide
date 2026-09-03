@@ -165,7 +165,10 @@ impl Emitter<'_> {
         let (k, v) = (self.types.el(kt), self.types.el(vt));
         let lay = crate::collections::entry_layout(k, v);
         let (koff, voff, esz) = (lay.0 as i32, lay.1 as i32, lay.2 as i32);
-        let scan = self.scan_helper(k)?;
+        // the var's block is stable across the loop: the index lane, and
+        // its append hook after the store (#1219 stage 2)
+        let scan = self.keyed_find(k)?;
+        let append = self.keyed_append(k);
         let reserve = self.work.helper(Helper::MapReserve);
         let kh = self.hold_for(k)?;
         self.lower(key, Some(k))?;
@@ -177,6 +180,7 @@ impl Emitter<'_> {
         let mh = self.hold_i32()?;
         self.emit_read_mut_var(id, idx, ty, global);
         self.f.instructions().local_set(mh);
+        let oh = self.hold_i32()?;
         let eh = self.hold_i32()?;
         self.f
             .instructions()
@@ -204,6 +208,7 @@ impl Emitter<'_> {
             i.else_();
             // absent: room for one entry (in place under class slack,
             // else the doubled block), then the pair at the old end.
+            i.local_get(mh).local_set(oh);
             i.local_get(mh).i32_const(esz).call(reserve).local_set(mh);
             i.local_get(mh)
                 .i32_const(almide_layout::PAYLOAD as i32)
@@ -227,6 +232,10 @@ impl Emitter<'_> {
                 .i32_const(esz)
                 .i32_add()
                 .i32_store(len_memarg());
+            // the index follows the entry (and the block, if it moved)
+            if let Some(append) = append {
+                i.local_get(oh).local_get(mh).i32_const(esz).i32_const(koff).call(append).drop();
+            }
             i.end();
             i.else_();
         }
@@ -237,6 +246,7 @@ impl Emitter<'_> {
         self.f.instructions().local_get(mh);
         self.emit_store_mut_var(*id, idx, ty, global)?;
         self.release_i32(); // eh
+        self.release_i32(); // oh
         self.release_i32(); // mh
         self.release_for(v);
         self.release_for(k);
