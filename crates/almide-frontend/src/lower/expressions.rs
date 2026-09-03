@@ -912,21 +912,12 @@ fn lower_pipe(ctx: &mut LowerCtx, left: &ast::Expr, right: &ast::Expr, ty: Ty, s
             let param_ty = p
                 .ty
                 .as_ref()
-                .map(|te| resolve_type_expr(te))
+                .map(resolve_type_expr)
                 .unwrap_or_else(|| ctx.expr_ty(left));
             ctx.push_scope();
-            let var = ctx.define_var(&p.name, param_ty.clone(), Mutability::Let, span.clone());
+            let bind = lower_pipe_lambda_bind(ctx, p, param_ty, ir_left, span);
             let ir_body = lower_expr(ctx, body);
             ctx.pop_scope();
-            let bind = IrStmt {
-                kind: IrStmtKind::Bind {
-                    var,
-                    mutability: Mutability::Let,
-                    ty: param_ty,
-                    value: ir_left,
-                },
-                span: span.clone(),
-            };
             ctx.mk(IrExprKind::Block { stmts: vec![bind], expr: Some(Box::new(ir_body)) }, ty, span)
         }
         _ => {
@@ -936,6 +927,59 @@ fn lower_pipe(ctx: &mut LowerCtx, left: &ast::Expr, right: &ast::Expr, ty: Ty, s
                 target: CallTarget::Computed { callee: Box::new(ir_right) },
                 args: vec![ir_left], type_args: vec![],
             }, ty, span)
+        }
+    }
+}
+
+/// The bind a pipe-inlined single-param lambda opens its block with: a
+/// tuple-pattern parameter (`x |> ((a, b)) => body`) destructures the
+/// piped value through the pattern — `let (a, b) = x` — exactly as the
+/// direct-call lowering (`lower_expr_lambda`) does; a plain name binds it
+/// whole. Binding `p.name` alone aliased the WHOLE tuple under the first
+/// name and left the rest unbound (#1873: check green, invalid Rust and
+/// invalid wasm). Runs inside the lambda's scope (the caller pushes it).
+fn lower_pipe_lambda_bind(ctx: &mut LowerCtx, p: &ast::LambdaParam, param_ty: Ty, ir_left: IrExpr, span: Option<ast::Span>) -> IrStmt {
+    match &p.tuple_names {
+        // A tuple-pattern parameter (`x |> ((a, b)) => body`) binds
+        // EVERY name through the pattern — `{ let (a, b) = x; body }`,
+        // the same destructure the direct-call lowering emits
+        // (`lower_expr_lambda`). Binding `p.name` alone aliased the
+        // whole tuple under the first name and left the rest unbound
+        // (#1873: check green, invalid Rust and invalid wasm).
+        Some(names) if names.len() > 1 => {
+            let elem_tys: Vec<Ty> = match &param_ty {
+                Ty::Tuple(es) if es.len() == names.len() => es.clone(),
+                _ => vec![Ty::Unknown; names.len()],
+            };
+            let elements: Vec<IrPattern> = names.iter().zip(elem_tys.iter())
+                .map(|(n, et)| {
+                    if n.as_str() == "_" {
+                        IrPattern::Wildcard
+                    } else {
+                        let v = ctx.define_var(n, et.clone(), Mutability::Let, span);
+                        IrPattern::Bind { var: v, ty: et.clone() }
+                    }
+                })
+                .collect();
+            IrStmt {
+                kind: IrStmtKind::BindDestructure {
+                    pattern: IrPattern::Tuple { elements },
+                    value: ir_left,
+                },
+                span,
+            }
+        }
+        _ => {
+            let var = ctx.define_var(&p.name, param_ty.clone(), Mutability::Let, span);
+            IrStmt {
+                kind: IrStmtKind::Bind {
+                    var,
+                    mutability: Mutability::Let,
+                    ty: param_ty,
+                    value: ir_left,
+                },
+                span,
+            }
         }
     }
 }
