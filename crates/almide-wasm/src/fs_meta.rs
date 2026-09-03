@@ -600,8 +600,18 @@ impl Emitter<'_> {
 /// Does the callback body still carry a propagation marker? The frontend
 /// strips the canonical tail `!`; anything left (`{ …; f(x)! }`, `g(f(x)!)`)
 /// means the lambda is a real fallible closure whose `!`s belong to ITS
-/// channel (#1806).
-fn body_propagates(cb: &IrExpr) -> bool {
+/// channel (#1806). Shared with the list/fan mapper heads (#1406): the
+/// frontend's strip covers only the `list.*` callees, so `fan.settle`'s
+/// canonical `(p) => f(p)!` reaches the emitter as `list.map` over
+/// `ok(unwrap(f(p)))` — a propagating body by this test.
+pub(crate) fn body_propagates(cb: &IrExpr) -> bool {
+    let IrExprKind::Lambda { body, .. } = &cb.kind else { return false };
+    expr_propagates(body)
+}
+
+/// `body_propagates` over an already-unwrapped body (the fan heads strip
+/// their own canonical wrapper first, then ask whether anything is left).
+pub(crate) fn expr_propagates(body: &IrExpr) -> bool {
     struct Scan(bool);
     impl almide_ir::visit::IrVisitor for Scan {
         fn visit_expr(&mut self, e: &IrExpr) {
@@ -615,7 +625,6 @@ fn body_propagates(cb: &IrExpr) -> bool {
             almide_ir::visit::walk_expr(self, e);
         }
     }
-    let IrExprKind::Lambda { body, .. } = &cb.kind else { return false };
     let mut s = Scan(false);
     almide_ir::visit::IrVisitor::visit_expr(&mut s, body);
     s.0

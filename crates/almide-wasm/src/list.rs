@@ -586,8 +586,15 @@ impl Emitter<'_> {
         cb: &IrExpr,
     ) -> Result<Option<SliceTy>, EmitError> {
         // A FN-VALUE callback (a HOF param forwarded to list.map, #653)
-        // has no body to inline — it call_indirects per element.
-        if !matches!(&cb.kind, IrExprKind::Lambda { .. }) {
+        // has no body to inline — it call_indirects per element. A lambda
+        // whose body still PROPAGATES takes the same route (#1406): its
+        // `!`s belong to the closure's own Result channel (`fan.settle`'s
+        // canonical `(p) => f(p)!` arrives here as `ok(unwrap(f(p)))`, and
+        // a compound body keeps its markers outright), and inlining it
+        // routed them into the ENCLOSING frame — the err escaped `main`
+        // where native captured it into the element's Result (the #1806
+        // class, on the mapper heads).
+        if !matches!(&cb.kind, IrExprKind::Lambda { .. }) || crate::fs_meta::body_propagates(cb) {
             return self.lower_list_map_fnvalue(xs, cb);
         }
         let (params, body) = self.hof_lambda(cb, 1)?;
