@@ -1,0 +1,42 @@
+// mapbuild — the everyday keyed-aggregation shape (#1219): build a map in a
+// mutable loop, then read every key back. Int keys and String keys, 20 000
+// entries each — past every index threshold, and the size step where the
+// structural wasm leg's linear scan measured ×3.9 per doubling before the
+// stage-2 index (388 ms here on 0.61.1+stage 1; native ~4 ms).
+//
+// The row exists to RATCHET the complexity class, not the constant: the
+// wasm/native ratio must stay flat when this size doubles. Both legs print
+// the same checksum, so `almide bench` verifies before it times.
+import env
+import int
+
+effect fn main() -> Unit = {
+  let args = env.args()
+  let n = if list.len(args) > 0 then {
+    match list.get(args, 0) {
+      some(s) => match int.parse(s) {
+        ok(v) => v,
+        err(_) => 20000,
+      },
+      none => 20000,
+    }
+  } else 20000
+  var by_int: Map[Int, Int] = map.new()
+  for i in 0..<n {
+    by_int[i * 7] = i
+  }
+  var acc = 0
+  for i in 0..<n {
+    acc = acc + map.get_or(by_int, i * 7, -1)
+  }
+  var by_str: Map[String, Int] = map.new()
+  for i in 0..<n {
+    let k = "k" + int.to_string(i)
+    by_str[k] = map.get_or(by_str, k, 0) + i
+  }
+  var acc2 = 0
+  for i in 0..<n {
+    acc2 = acc2 + map.get_or(by_str, "k" + int.to_string(i), -1)
+  }
+  println("int: ${int.to_string(map.len(by_int))} ${int.to_string(acc)} str: ${int.to_string(map.len(by_str))} ${int.to_string(acc2)}")
+}

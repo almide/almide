@@ -18,18 +18,19 @@
 # benching fails the run with the good news (flip it to measured in the
 # same change); a measured row that stops benching fails as a regression.
 version = almide 0.61.1
-date    = 2026-09-01
+date    = 2026-09-04
 machine = arm64 Darwin (local stamp; ratios are the gated quantity)
 
-nbody                 | measured         | 1.46  | 2.76 | 1.89
-spectralnorm          | measured         | 1.39  | 3.00 | 2.16
-binarytrees           | measured         | 3.05  | 3.02 | 0.99
-fasta                 | routed-incumbent | 1.43  | -    | -
-fannkuchredux         | routed-incumbent | 1.40  | -    | -
-mandelbrot            | routed-incumbent | 2.57  | -    | -
-onebrc                | walled           | 1.86  | -    | -
-fft                   | measured         | 39.35 | 204.27 | 5.19
-strchurn              | measured         | 55.01 | 51.80 | 0.94
-listbuild_append      | measured         | 20.72 | 86.54 | 4.18
-listbuild_combinator  | measured         | 21.31 | 96.99 | 4.55
-listbuild_prealloc    | measured         | 21.27 | 82.95 | 3.90
+nbody                 | measured         | 2.81  | 7.25 | 2.58
+spectralnorm          | measured         | 3.51  | 9.17 | 2.61
+binarytrees           | measured         | 7.05  | 6.65 | 0.94
+fasta                 | routed-incumbent | 3.07  | -    | -
+fannkuchredux         | routed-incumbent | 3.13  | -    | -
+mandelbrot            | routed-incumbent | 6.38  | -    | -
+onebrc                | walled           | 4.19  | -    | -
+fft                   | measured         | 51.00 | 228.52 | 4.48
+strchurn              | measured         | 62.35 | 64.90 | 1.04
+listbuild_append      | measured         | 29.67 | 100.93 | 3.40
+listbuild_combinator  | measured         | 30.82 | 106.37 | 3.45
+listbuild_prealloc    | measured         | 29.32 | 98.66 | 3.36
+mapbuild              | measured         | 13.31 | 12.96 | 0.97
