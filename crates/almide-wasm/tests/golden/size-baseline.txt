@@ -385,6 +385,7 @@
 2683	spec/wasm_cross/mut_map_param.almd
 2910	spec/wasm_cross/mut_param_branch_forward.almd
 4410	spec/wasm_cross/mut_param_call_chain.almd
+8511	spec/wasm_cross/mut_param_effect_can_err.almd
 2327	spec/wasm_cross/mut_param_effect_never_err.almd
 2655	spec/wasm_cross/mut_param_writeback_growth.almd
 7904	spec/wasm_cross/mutable_global_bytes_arena.almd
