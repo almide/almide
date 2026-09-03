@@ -8,6 +8,7 @@ mod emit;
 mod check;
 mod dialect_stamp;
 mod commands;
+mod test_scratch;
 pub mod test_report;
 mod install;
 mod selfupdate;
