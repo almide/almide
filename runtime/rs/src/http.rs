@@ -112,6 +112,33 @@ pub fn almide_http_get_header(resp: &AlmideHttpResponse, key: &str) -> Option<St
     resp.headers.iter().find(|(k, _)| k.eq_ignore_ascii_case(key)).map(|(_, v)| v.clone())
 }
 
+/// The status code of a response — the read twin of `almide_http_set_status`
+/// (#1791; the Almide surface had no status GETTER before the response family).
+pub fn almide_http_status_code(resp: &AlmideHttpResponse) -> i64 {
+    resp.status
+}
+
+/// EVERY value of one field, in wire order — the accessor that keeps a
+/// repeated field (`Set-Cookie`) whole where `get_header` answers the first.
+pub fn almide_http_header_values(resp: &AlmideHttpResponse, key: &str) -> Vec<String> {
+    resp.headers.iter().filter(|(k, _)| k.eq_ignore_ascii_case(key)).map(|(_, v)| v.clone()).collect()
+}
+
+/// All headers as a map keyed by the LOWERCASED field name (RFC 9110 §5.1 —
+/// field names are case-insensitive ASCII tokens). A repeated field keeps its
+/// FIRST value — the same rule `get_header` / `req_header` apply — so a
+/// `Set-Cookie` list is read through `header_values`, never through this map.
+pub fn almide_http_headers(resp: &AlmideHttpResponse) -> AlmideMap<String, String> {
+    let mut out = AlmideMap::new();
+    for (k, v) in resp.headers.iter() {
+        let name = k.to_ascii_lowercase();
+        if !out.contains_key(&name) {
+            out.insert(name, v.clone());
+        }
+    }
+    out
+}
+
 pub fn almide_http_set_cookie(mut resp: AlmideHttpResponse, name: &str, value: &str) -> AlmideHttpResponse {
     resp.headers.push(("Set-Cookie".into(), format!("{}={}", name, value)));
     resp
@@ -212,6 +239,40 @@ pub fn almide_http_get_status(url: &str) -> Result<(i64, String), String> {
 
 pub fn almide_http_request_status(method: &str, url: &str, body: &str, headers: &AlmideMap<String, String>) -> Result<(i64, String), String> {
     request_status(method, url, body, &header_pairs(headers))
+}
+
+// ── Full-response client (#1791) ──
+//
+// The twin of every verb-shaped String client, answering the WHOLE response
+// as an `AlmideHttpResponse` — status, every header line in wire order
+// (repeats kept), body — for ANY complete response; `Err` is transport-only.
+// Redirects are never followed, so a 3xx arrives with its `Location`. The
+// String and status clients above are projections of `request_response` in
+// the shared core, so the three shapes cannot drift apart.
+
+pub fn almide_http_get_response(url: &str) -> Result<AlmideHttpResponse, String> {
+    almide_http_request_response("GET", url, "", &AlmideMap::new())
+}
+
+pub fn almide_http_post_response(url: &str, body: &str) -> Result<AlmideHttpResponse, String> {
+    almide_http_request_response("POST", url, body, &AlmideMap::new())
+}
+
+pub fn almide_http_put_response(url: &str, body: &str) -> Result<AlmideHttpResponse, String> {
+    almide_http_request_response("PUT", url, body, &AlmideMap::new())
+}
+
+pub fn almide_http_patch_response(url: &str, body: &str) -> Result<AlmideHttpResponse, String> {
+    almide_http_request_response("PATCH", url, body, &AlmideMap::new())
+}
+
+pub fn almide_http_delete_response(url: &str) -> Result<AlmideHttpResponse, String> {
+    almide_http_request_response("DELETE", url, "", &AlmideMap::new())
+}
+
+pub fn almide_http_request_response(method: &str, url: &str, body: &str, headers: &AlmideMap<String, String>) -> Result<AlmideHttpResponse, String> {
+    request_response(method, url, body, &header_pairs(headers))
+        .map(|(status, headers, body)| AlmideHttpResponse { status, body, headers })
 }
 
 // ── Binary client ──
