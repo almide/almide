@@ -1469,7 +1469,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install wasmtime (stock CLI — the WASI gate's third-party runtime)
         run: |
-          curl https://wasmtime.dev/install.sh -sSf | bash
+          curl https://wasmtime.dev/install.sh -sSf | bash -s -- --version v27.0.0
           echo "$HOME/.wasmtime/bin" >> "$GITHUB_PATH"
       - name: Carried gates in release shape
         run: cargo test --release --locked -p almide-wasm -p almide-wasm-run -p almide-spine -p almide-syntax -p almide-corpus -p almide-layout
