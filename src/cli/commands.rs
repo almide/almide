@@ -841,7 +841,10 @@ fn run_test_file_once(
     no_check: bool,
     wasm_only: bool,
 ) -> Result<(i32, String), String> {
-    match compile_and_run_wasm_test(file, tmp_dir) {
+    // The scratch layout (#1877) hands the wasm module path to the runner;
+    // the accept loop keeps its own per-invocation dir and mirrors the name.
+    let wasm_path = tmp_dir.join(file.replace(['/', '.'], "_") + ".wasm");
+    match compile_and_run_wasm_test(file, wasm_path) {
         WasmTestOutcome::Pass { .. } => return Ok((0, String::new())),
         WasmTestOutcome::Fail { raw, .. } => return Ok((1, raw)),
         WasmTestOutcome::CompileError { detail, .. } => {
@@ -855,7 +858,7 @@ fn run_test_file_once(
     }
     let worker_dir = std::env::temp_dir()
         .join("almide-test")
-        .join(file.replace('/', "_").replace('.', "_"));
+        .join(file.replace(['/', '.'], "_"));
     match super::run::compile_to_binary(file, no_check, true, false, Some(&worker_dir)) {
         Ok(bin) => Ok(super::run::run_binary_captured(&bin, program_args)),
         Err(e) => Err(format!("Compile error for {file}:\n{e}")),
