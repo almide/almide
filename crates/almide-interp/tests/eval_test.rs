@@ -1245,3 +1245,30 @@ fn opaque_newtype_ctor_is_identity_on_its_payload() {
     );
     assert_eq!((exit, out.as_str()), (0, "x true false 2 b\n3\n"), "stderr: {err}");
 }
+
+/// A Unit-returning in-place writer over a TEMPORARY receiver (#1849): the
+/// arguments evaluate in order, the temporary is mutated and dropped, and a
+/// temporary that aliases a live binding's `Rc` is mutated as a COW copy —
+/// the binding is untouched. A variable receiver keeps its write-back.
+#[test]
+fn inplace_writer_on_a_temporary_receiver_mutates_and_drops_it() {
+    let (exit, out, err) = run(
+        "fn same(b: Bytes) -> Bytes = b\n\
+         fn traced(v: Int) -> Int = {\n\
+         \x20 println(\"arg ${v}\")\n\
+         \x20 v\n\
+         }\n\
+         fn main() -> Unit = {\n\
+         \x20 bytes.append_u8(bytes.new(2), 511)\n\
+         \x20 bytes.append_i16_be(bytes.from_list([traced(1)]), traced(2))\n\
+         \x20 let x = bytes.from_list([1, 2])\n\
+         \x20 bytes.append_u8(same(x), 7)\n\
+         \x20 bytes.fill(same(x), 9)\n\
+         \x20 println(\"${bytes.to_list(x)}\")\n\
+         \x20 var v = bytes.new(0)\n\
+         \x20 bytes.append_u8(v, 511)\n\
+         \x20 println(\"${bytes.to_list(v)}\")\n\
+         }\n",
+    );
+    assert_eq!((exit, out.as_str()), (0, "arg 1\narg 2\n[1, 2]\n[255]\n"), "stderr: {err}");
+}
