@@ -206,3 +206,40 @@ effect fn main() -> Unit = {
   // body is emitted with its own trailing blank line trimmed by exactly one.
   println(string.slice(body, 0, string.len(body) - 1))
 }
+
+// The first line on which two renderings differ, or "" when they are byte-identical. A
+// failing byte-compare must name the line, not dump two 60 KB documents side by side.
+fn first_divergence(expected: String, actual: String) -> String = {
+  let e = string.split(expected, "\n")
+  let a = string.split(actual, "\n")
+  let hit = list.range(0, int.max(list.len(e), list.len(a))) |> list.find((i) => list.get_or(e, i, "<missing>") != list.get_or(a, i, "<missing>"))
+  match hit {
+    some(i) => "line " + int.to_string(i + 1) + "\n  committed: " + list.get_or(e, i, "<missing>") + "\n  rendered:  " + list.get_or(a, i, "<missing>"),
+    none => "",
+  }
+}
+
+// The port's acceptance check, EXECUTABLE (#1843). The header of this file says a
+// reimplementation is correct exactly when its bytes match the bash original's — and for
+// three weeks nothing checked: the freshness gates compare the bash against the committed
+// docs, never the port against either, so a reader that folded two contracts into one
+// rendered a different index while every gate stayed green. These run from the repository
+// root, as CI's "Almide dogfood tests" step does, and read the committed docs the bash
+// generators produced.
+test "the conformance rendering is byte-identical to the committed docs/contracts/conformance.md" {
+  assert_eq(first_divergence(fs.read_text("docs/contracts/conformance.md")!, gen_conformance("docs/contracts")!), "")
+}
+
+test "the index rendering is byte-identical to the committed docs/contracts/README.md" {
+  assert_eq(first_divergence(fs.read_text("docs/contracts/README.md")!, gen_contracts_readme("docs/contracts")!), "")
+}
+
+test "the ledger is well-formed under the subset reader — no block shape had to be recovered" {
+  assert_eq(toml.parse_doc(fs.read_text("docs/contracts/contracts.toml")!).problems, [])
+}
+
+test "first_divergence names the first differing line, and only that" {
+  assert_eq(first_divergence("a\nb\nc\n", "a\nb\nc\n"), "")
+  assert_eq(first_divergence("a\nb\nc\n", "a\nB\nc\n"), "line 2\n  committed: b\n  rendered:  B")
+  assert_eq(first_divergence("a\n", "a\nb\n"), "line 2\n  committed: \n  rendered:  b")
+}

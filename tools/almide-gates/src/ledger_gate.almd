@@ -200,7 +200,13 @@ effect fn freshness_pass() -> List[String] = {
 effect fn run(root: String) -> Gate = {
   let classes = contracts.parse_classes(fs.read_text("scripts/lib/contract-classes.txt") ?? "")
   let fixture_rank = ledger_schema.rank_of(classes, "fixture")
-  let tables = toml.parse_tables(fs.read_text(root + "/contracts.toml") ?? "")
+  let doc = toml.parse_doc(fs.read_text(root + "/contracts.toml") ?? "")
+  let tables = doc.tables
+  // The document's own shape first (#1843): a block the reader had to RECOVER — an array
+  // missing its `]`, a header-less contract pasted into another — is an error here, not a
+  // fold. The bash has no counterpart (its awk recovers silently), so on a well-formed ledger
+  // the output stays byte-identical; on a damaged one this is the only voice.
+  let d_errs = doc.problems |> list.map((p) => root + "/contracts.toml " + p)
   let real = tables |> list.filter((t) => toml.table_get(t, "id") != "")
   let ids = real |> list.map((t) => toml.table_get(t, "id"))
   let fixture_dir = "spec/wasm_cross"
@@ -227,14 +233,14 @@ effect fn run(root: String) -> Gate = {
   let spec = speckey_pass(real)!
   let fresh = freshness_pass()!
   let n_flagged = ledger_coverage.count_flagged(real)
-  let n_err = list.len(e_errs) + list.len(a_errs) + list.len(b_errs) + list.len(sym.0)
+  let n_err = list.len(d_errs) + list.len(e_errs) + list.len(a_errs) + list.len(b_errs) + list.len(sym.0)
     + list.len(cited) + list.len(f_errs) + list.len(spec.0) + list.len(fresh)
   let tail = if n_err > 0 then errs(["contract-ledger gate FAILED — see messages above."])
     else summary(list.len(ids), list.len(ids) - n_flagged, n_flagged, 0, sym.1, list.len(fixtures))
   // The bash's order exactly: each check echoes where it runs, so the informational lines sit
   // BETWEEN the error groups rather than after all of them.
   Gate {
-    lines: errs(e_errs) + errs(a_errs) + errs(b_errs) + errs(sym.0)
+    lines: errs(d_errs) + errs(e_errs) + errs(a_errs) + errs(b_errs) + errs(sym.0)
       + errs(cited) + cited_ok
       + errs(f_errs)
       + ["----", "evidence by class:"] + histogram(classes, real)
