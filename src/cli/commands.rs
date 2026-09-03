@@ -1,5 +1,6 @@
 use crate::{parse_file, fmt, project, project_fetch, resolve, canonicalize, check, diagnostic, out, out_no_nl, err, err_no_nl};
 use super::{collect_test_files, incremental_cache_dir};
+use super::test_scratch::TestScratch;
 
 pub fn cmd_init() {
     if std::path::Path::new("almide.toml").exists() {
@@ -96,7 +97,7 @@ fn discover_test_files(file: &str, fallback_dirs: &[&str]) -> Vec<String> {
 /// CPU count), each in its own scratch dir so cold rustc builds parallelize
 /// instead of serializing on the shared dir's BUILD_LOCK. Extracted
 /// verbatim.
-fn compile_test_files_parallel(test_files: &[String], no_check: bool) -> Vec<(String, Result<std::path::PathBuf, String>)> {
+fn compile_test_files_parallel(test_files: &[String], no_check: bool, scratch: &std::sync::Arc<TestScratch>) -> Vec<(String, Result<std::path::PathBuf, String>)> {
     let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
     let (tx, rx) = std::sync::mpsc::channel();
     let (sem_tx, sem_rx) = std::sync::mpsc::sync_channel::<()>(cpus);
@@ -108,13 +109,13 @@ fn compile_test_files_parallel(test_files: &[String], no_check: bool) -> Vec<(St
         let tx = tx.clone();
         let sem_rx = sem_rx.clone();
         let sem_tx = sem_tx.clone();
+        let scratch = scratch.clone();
         handles.push(std::thread::spawn(move || {
             let _ = sem_rx.lock().unwrap().recv();
             // Per-file scratch dir so cold rustc builds parallelize instead
-            // of serializing on the shared dir's BUILD_LOCK.
-            let worker_dir = std::env::temp_dir()
-                .join("almide-test")
-                .join(test_file.replace('/', "_").replace('.', "_"));
+            // of serializing on the shared dir's BUILD_LOCK; keyed on the
+            // absolute path (#1877).
+            let worker_dir = scratch.native_worker_dir(&test_file);
             let result = super::run::compile_to_binary(&test_file, no_check, true, false, Some(&worker_dir));
             let _ = sem_tx.send(());
             let _ = tx.send((test_file, result));
@@ -167,9 +168,10 @@ pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>) {
     let test_files: Vec<String> = discover_test_files(file, &["spec", "exercises"]);
 
     let program_args = test_harness_args(run_filter);
+    let scratch = std::sync::Arc::new(TestScratch::new());
 
     // Phase 1: Compile all test files in parallel (bounded by CPU count)
-    let compiled = compile_test_files_parallel(&test_files, no_check);
+    let compiled = compile_test_files_parallel(&test_files, no_check, &scratch);
 
     // Phase 2: Execute test binaries in parallel (bounded by CPU count)
     let results = run_test_binaries_parallel(compiled, &program_args);
@@ -183,9 +185,11 @@ pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>) {
     }
     if failed > 0 {
         err(&format!("\n{}/{} test file(s) failed", failed, test_files.len()));
+        scratch.finish();
         std::process::exit(1);
     }
     err(&format!("\nAll {} test file(s) passed", test_files.len()));
+    scratch.finish();
 }
 
 enum WasmTestOutcome {
@@ -345,14 +349,11 @@ fn lower_wasm_test_modules(program: &almide_lang::ast::Program, checker: &mut ch
     Ok(ir_program)
 }
 
-fn compile_and_run_wasm_test(test_file: &str, tmp_dir: &std::path::Path) -> WasmTestOutcome {
+fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::PathBuf) -> WasmTestOutcome {
     let skip = |reason: String| WasmTestOutcome::Skip { file: test_file.to_string(), reason };
     let compile_error = |detail: String| WasmTestOutcome::CompileError { file: test_file.to_string(), detail };
     let prof = std::env::var_os("ALMIDE_PROFILE").is_some();
     let mut marks: Vec<(&'static str, std::time::Instant)> = vec![("start", std::time::Instant::now())];
-
-    let wasm_name = test_file.replace('/', "_").replace('.', "_") + ".wasm";
-    let wasm_path = tmp_dir.join(&wasm_name);
 
     let (mut program, source_text, parse_errors) = parse_file(test_file);
     mark(prof, &mut marks, "parse");
@@ -504,13 +505,11 @@ fn compile_and_run_wasm_test(test_file: &str, tmp_dir: &std::path::Path) -> Wasm
 pub fn cmd_test_wasm(file: &str, _run_filter: Option<&str>) {
     let test_files: Vec<String> = discover_test_files(file, &[]);
 
-    let tmp_dir = std::env::temp_dir().join("almide-wasm-test");
-    std::fs::create_dir_all(&tmp_dir).ok();
+    let scratch = std::sync::Arc::new(TestScratch::new());
 
     // Parallel: each file's compile+run is independent and rustc/cargo-free,
     // so there's no global build lock to serialize on (unlike the native path).
     let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
-    let tmp_dir = std::sync::Arc::new(tmp_dir);
     let (tx, rx) = std::sync::mpsc::channel();
     let (sem_tx, sem_rx) = std::sync::mpsc::sync_channel::<()>(cpus);
     for _ in 0..cpus { let _ = sem_tx.send(()); }
@@ -519,12 +518,12 @@ pub fn cmd_test_wasm(file: &str, _run_filter: Option<&str>) {
     let mut handles = Vec::new();
     for test_file in test_files.clone() {
         let tx = tx.clone();
-        let tmp_dir = tmp_dir.clone();
+        let scratch = scratch.clone();
         let sem_rx = sem_rx.clone();
         let sem_tx = sem_tx.clone();
         handles.push(std::thread::spawn(move || {
             let _ = sem_rx.lock().unwrap().recv();
-            let outcome = compile_and_run_wasm_test(&test_file, &tmp_dir);
+            let outcome = compile_and_run_wasm_test(&test_file, scratch.wasm_module_path(&test_file));
             let _ = sem_tx.send(());
             let _ = tx.send(outcome);
         }));
@@ -576,6 +575,7 @@ pub fn cmd_test_wasm(file: &str, _run_filter: Option<&str>) {
         err(&format!("{} passed, {} failed (of {} files)",
             passed, failed, test_files.len()));
     }
+    scratch.finish();
     if failed > 0 {
         std::process::exit(1);
     }
@@ -583,7 +583,7 @@ pub fn cmd_test_wasm(file: &str, _run_filter: Option<&str>) {
 
 /// `cmd_test_fast`'s Phase 1: run every file on the fast rustc-free WASM
 /// path, in parallel (bounded by `cpus`). Extracted verbatim.
-fn run_wasm_test_phase(test_files: &[String], tmp_dir: &std::sync::Arc<std::path::PathBuf>, cpus: usize) -> Vec<WasmTestOutcome> {
+fn run_wasm_test_phase(test_files: &[String], scratch: &std::sync::Arc<TestScratch>, cpus: usize) -> Vec<WasmTestOutcome> {
     let (tx, rx) = std::sync::mpsc::channel();
     let (sem_tx, sem_rx) = std::sync::mpsc::sync_channel::<()>(cpus);
     for _ in 0..cpus { let _ = sem_tx.send(()); }
@@ -592,12 +592,12 @@ fn run_wasm_test_phase(test_files: &[String], tmp_dir: &std::sync::Arc<std::path
     let mut handles = Vec::new();
     for tf in test_files.to_vec() {
         let tx = tx.clone();
-        let td = tmp_dir.clone();
+        let scratch = scratch.clone();
         let sr = sem_rx.clone();
         let st = sem_tx.clone();
         handles.push(std::thread::spawn(move || {
             let _ = sr.lock().unwrap().recv();
-            let o = compile_and_run_wasm_test(&tf, &td);
+            let o = compile_and_run_wasm_test(&tf, scratch.wasm_module_path(&tf));
             let _ = st.send(());
             let _ = tx.send(o);
         }));
@@ -611,7 +611,7 @@ fn run_wasm_test_phase(test_files: &[String], tmp_dir: &std::sync::Arc<std::path
 /// `cmd_test_fast`'s Phase 2: native rustc fallback (authoritative) for
 /// everything the WASM path didn't pass, parallel with per-file scratch
 /// dirs. Output is captured — see [`run_test_binaries_parallel`].
-fn run_native_fallback_phase(fallback: &[String], program_args: &std::sync::Arc<Vec<String>>, no_check: bool, cpus: usize) -> Vec<TestRun> {
+fn run_native_fallback_phase(fallback: &[String], program_args: &std::sync::Arc<Vec<String>>, no_check: bool, cpus: usize, scratch: &std::sync::Arc<TestScratch>) -> Vec<TestRun> {
     let (tx, rx) = std::sync::mpsc::channel();
     let (sem_tx, sem_rx) = std::sync::mpsc::sync_channel::<()>(cpus);
     for _ in 0..cpus { let _ = sem_tx.send(()); }
@@ -623,11 +623,10 @@ fn run_native_fallback_phase(fallback: &[String], program_args: &std::sync::Arc<
         let args = program_args.clone();
         let sr = sem_rx.clone();
         let st = sem_tx.clone();
+        let scratch = scratch.clone();
         handles.push(std::thread::spawn(move || {
             let _ = sr.lock().unwrap().recv();
-            let worker_dir = std::env::temp_dir()
-                .join("almide-test")
-                .join(tf.replace('/', "_").replace('.', "_"));
+            let worker_dir = scratch.native_worker_dir(&tf);
             let (code, out) = match super::run::compile_to_binary(&tf, no_check, true, false, Some(&worker_dir)) {
                 Ok(bin) => super::run::run_binary_captured(&bin, &args),
                 Err(e) => (1, format!("Compile error for {}:\n{}", tf, e)),
@@ -651,11 +650,10 @@ pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>) {
     let test_files: Vec<String> = discover_test_files(file, &["spec", "exercises"]);
 
     let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
-    let tmp_dir = std::sync::Arc::new(std::env::temp_dir().join("almide-wasm-test"));
-    std::fs::create_dir_all(&*tmp_dir).ok();
+    let scratch = std::sync::Arc::new(TestScratch::new());
 
     // Phase 1: WASM (fast, rustc-free), parallel.
-    let wasm_outcomes = run_wasm_test_phase(&test_files, &tmp_dir, cpus);
+    let wasm_outcomes = run_wasm_test_phase(&test_files, &scratch, cpus);
 
     let mut wasm_pass = 0usize;
     let mut fallback: Vec<String> = Vec::new();
@@ -689,7 +687,7 @@ pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>) {
     // path didn't pass, parallel with per-file scratch dirs.
     let program_args = test_harness_args(run_filter);
 
-    let native_results = run_native_fallback_phase(&fallback, &program_args, no_check, cpus);
+    let native_results = run_native_fallback_phase(&fallback, &program_args, no_check, cpus, &scratch);
 
     let mut failed = 0;
     for (file, code, output) in &native_results {
@@ -729,6 +727,7 @@ pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>) {
     };
     err(&format!("\n{} via WASM, {} via native fallback{}, {} failed (of {} files)",
         wasm_pass, fallback.len().saturating_sub(failed), trap_note, failed, test_files.len()));
+    scratch.finish();
     if failed > 0 {
         std::process::exit(1);
     }
