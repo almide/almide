@@ -39,7 +39,7 @@
 //! v0/Rust-target only: the v1 MIR path has its own ownership model, and
 //! the interpreter consumes the pre-codegen IR — neither sees this marker.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use almide_ir::*;
 use almide_ir::visit::{walk_expr, IrVisitor};
 use almide_ir::visit_mut::{walk_expr_mut, walk_stmt_mut, IrMutVisitor};
@@ -80,7 +80,7 @@ impl NanoPass for SharedCellBorrowPass {
             // Fn-local truth: `optimize/branch_lift.rs` helpers KEEP the
             // captured free vars' ids as their params, where the binding is
             // a plain snapshot, not a cell — never mark those.
-            let fn_cells: HashSet<VarId> = cells
+            let fn_cells: Vec<VarId> = cells
                 .iter()
                 .filter(|v| !f.params.iter().any(|p| p.var == **v))
                 .copied()
@@ -90,8 +90,9 @@ impl NanoPass for SharedCellBorrowPass {
             }
             let body = std::mem::take(&mut f.body);
             f.body = hoist_match_subjects(body, &fn_cells, &mut program.var_table, &mut changed);
-            let mut scopes = ScopeWalker { cells: &fn_cells, changed: &mut changed };
-            scopes.visit_expr_mut(&mut f.body);
+            let qualifying = StmtSummaries::of(&f.body, &fn_cells);
+            let mut marks = MarkActive { cells: &fn_cells, qualifying: &qualifying, active: vec![0; fn_cells.len()], changed: &mut changed };
+            marks.visit_expr_mut(&mut f.body);
         }
         program.functions = fns;
         PassResult { program, changed }
@@ -107,7 +108,7 @@ impl NanoPass for SharedCellBorrowPass {
 /// for the borrow marking on its own.
 fn hoist_match_subjects(
     expr: IrExpr,
-    cells: &HashSet<VarId>,
+    cells: &[VarId],
     vt: &mut VarTable,
     changed: &mut bool,
 ) -> IrExpr {
@@ -147,9 +148,9 @@ fn hoist_match_subjects(
 }
 
 /// Does the subtree contain a `Var` naming any of the cell vars?
-fn touches_any(expr: &IrExpr, cells: &HashSet<VarId>) -> bool {
+fn touches_any(expr: &IrExpr, cells: &[VarId]) -> bool {
     struct Touch<'a> {
-        cells: &'a HashSet<VarId>,
+        cells: &'a [VarId],
         found: bool,
     }
     impl IrVisitor for Touch<'_> {
@@ -171,172 +172,206 @@ fn touches_any(expr: &IrExpr, cells: &HashSet<VarId>) -> bool {
     t.found
 }
 
-// ── Step 2: per-statement analysis + marking ─────────────────────────────
+// ── Step 2: per-statement summaries, then marking ────────────────────────
+//
+// The per-statement decision (reject on any hard-to-reason shape in the
+// subtree, then, per cell var, require every use to be a shared borrow in
+// direct call-arg position) used to be three subtree scans per statement
+// per cell — and a statement nested k levels deep was rescanned by each of
+// its k enclosing statements. Every quantity the decision reads is a SUM
+// over the subtree's nodes (disqualifying nodes, `Var v` nodes, good
+// call-arg reads of `v`), so one walk keeping running totals gives each
+// statement its summary as "counters after minus counters before" (#1232).
+// The marking is then a second single walk: a read is rewritten iff some
+// enclosing statement qualified for its var — which is what visiting every
+// statement with a fresh rescan computed, since the marker is idempotent
+// and invisible to the counts (`shared_cell_read_of` accepts both forms).
 
-/// Visits every statement in the body (any nesting level — lambda bodies,
-/// loop bodies, match arms) and tries to mark its cell reads.
-struct ScopeWalker<'a> {
-    cells: &'a HashSet<VarId>,
-    changed: &'a mut bool,
+/// Which cells each statement qualifies for, keyed by the statement's heap
+/// address — the same keying as `pass_clone.rs`'s `BranchCounts` (#1230):
+/// the marking walk mutates borrow nodes in place and never moves a
+/// statement, so every key still names its original statement.
+struct StmtSummaries {
+    qualifying: HashMap<*const IrStmt, Vec<VarId>>,
 }
 
-impl IrMutVisitor for ScopeWalker<'_> {
-    fn visit_stmt_mut(&mut self, stmt: &mut IrStmt) {
-        try_mark_stmt(stmt, self.cells, self.changed);
-        walk_stmt_mut(self, stmt);
+impl StmtSummaries {
+    fn of(body: &IrExpr, cells: &[VarId]) -> StmtSummaries {
+        let mut s = Summarize {
+            cells,
+            disq: 0,
+            total: vec![0; cells.len()],
+            good: vec![0; cells.len()],
+            stack: Vec::new(),
+            qualifying: HashMap::new(),
+        };
+        s.visit_expr(body);
+        StmtSummaries { qualifying: s.qualifying }
     }
 }
 
-/// The per-statement decision: reject on any hard-to-reason shape in the
-/// subtree, then, per cell var, require every use to be a shared borrow in
-/// direct call-arg position before rewriting those reads to the marker.
-fn try_mark_stmt(stmt: &mut IrStmt, cells: &HashSet<VarId>, changed: &mut bool) {
-    if stmt_has_disqualifying_shape(stmt) {
-        return;
+/// The running-total walk behind [`StmtSummaries`].
+struct Summarize<'a> {
+    cells: &'a [VarId],
+    /// Disqualifying nodes seen so far (see [`is_disqualifying_shape`]).
+    disq: u32,
+    /// Per cell slot: `Var v` nodes seen so far.
+    total: Vec<u32>,
+    /// Per cell slot: good call-arg reads seen so far (see `count_good`).
+    good: Vec<u32>,
+    /// Snapshots of the three counters at each open statement, flat:
+    /// `disq`, then `total`, then `good` — no allocation per statement.
+    stack: Vec<u32>,
+    qualifying: HashMap<*const IrStmt, Vec<VarId>>,
+}
+
+impl Summarize<'_> {
+    fn slot(&self, id: VarId) -> Option<usize> {
+        self.cells.iter().position(|c| *c == id)
     }
-    for v in cells {
-        if stmt_writes_var(stmt, *v) {
-            continue;
+
+    /// The `good` contribution of one call node: each argument sitting in
+    /// the exact safe shape (a shared `Borrow` directly on a cell var, or
+    /// the already-marked `&*v` form) counts once for that var. Each such
+    /// argument contains exactly one `Var v` node, so `good == total` over a
+    /// statement means no use of `v` escapes the safe shape.
+    fn count_good(&mut self, args: &[IrExpr]) {
+        for a in args {
+            if let Some(k) = shared_cell_read_of(a).and_then(|id| self.slot(id)) {
+                self.good[k] += 1;
+            }
         }
-        let uses = count_uses(stmt, *v);
-        if uses.total > 0 && uses.good == uses.total {
-            let mut m = MarkReads { v: *v, changed };
-            m.visit_stmt_mut(stmt);
+    }
+
+    /// The cells `stmt` qualifies for, given the counters snapshotted at
+    /// `base` when the statement was entered.
+    fn qualifying_cells(&self, stmt: &IrStmt, base: usize) -> Vec<VarId> {
+        let n = self.cells.len();
+        if self.disq != self.stack[base] {
+            return Vec::new();
         }
+        let (total0, good0) = (&self.stack[base + 1..base + 1 + n], &self.stack[base + 1 + n..base + 1 + 2 * n]);
+        (0..n)
+            .filter(|&k| {
+                let total = self.total[k] - total0[k];
+                let good = self.good[k] - good0[k];
+                total > 0 && good == total && !stmt_writes_var(stmt, self.cells[k])
+            })
+            .map(|k| self.cells[k])
+            .collect()
+    }
+}
+
+impl IrVisitor for Summarize<'_> {
+    fn visit_expr(&mut self, e: &IrExpr) {
+        self.disq += u32::from(is_disqualifying_shape(e));
+        if let IrExprKind::Var { id } = &e.kind {
+            if let Some(k) = self.slot(*id) {
+                self.total[k] += 1;
+            }
+        }
+        if let IrExprKind::Call { args, .. } | IrExprKind::RuntimeCall { args, .. } | IrExprKind::TailCall { args, .. } = &e.kind {
+            self.count_good(args);
+        }
+        walk_expr(self, e);
+    }
+
+    fn visit_stmt(&mut self, stmt: &IrStmt) {
+        let base = self.stack.len();
+        self.stack.push(self.disq);
+        self.stack.extend_from_slice(&self.total);
+        self.stack.extend_from_slice(&self.good);
+        walk_stmt(self, stmt);
+        let cells = self.qualifying_cells(stmt, base);
+        if !cells.is_empty() {
+            self.qualifying.insert(std::ptr::from_ref(stmt), cells);
+        }
+        self.stack.truncate(base);
     }
 }
 
 /// Shapes this pass refuses to reason about within one statement scope.
-fn stmt_has_disqualifying_shape(stmt: &IrStmt) -> bool {
-    struct Scan {
-        disq: bool,
+fn is_disqualifying_shape(e: &IrExpr) -> bool {
+    match &e.kind {
+        IrExprKind::Lambda { .. }
+        | IrExprKind::ForIn { .. }
+        | IrExprKind::While { .. }
+        | IrExprKind::RenderedCall { .. } => true,
+        IrExprKind::Call { target: CallTarget::Computed { .. }, .. } => true,
+        IrExprKind::Match { subject, .. } => !matches!(subject.kind, IrExprKind::Var { .. }),
+        _ => false,
     }
-    impl IrVisitor for Scan {
-        fn visit_expr(&mut self, e: &IrExpr) {
-            if self.disq {
-                return;
-            }
-            if matches!(
-                &e.kind,
-                IrExprKind::Lambda { .. }
-                    | IrExprKind::ForIn { .. }
-                    | IrExprKind::While { .. }
-                    | IrExprKind::RenderedCall { .. }
-            ) {
-                self.disq = true;
-                return;
-            }
-            if let IrExprKind::Call { target: CallTarget::Computed { .. }, .. } = &e.kind {
-                self.disq = true;
-                return;
-            }
-            if let IrExprKind::Match { subject, .. } = &e.kind {
-                if !matches!(subject.kind, IrExprKind::Var { .. }) {
-                    self.disq = true;
-                    return;
-                }
-            }
-            walk_expr(self, e);
-        }
-    }
-    let mut s = Scan { disq: false };
-    s.visit_stmt(stmt);
-    s.disq
 }
 
 /// Statement-kind write targets are VarIds, invisible to the expr walk.
 fn stmt_writes_var(stmt: &IrStmt, v: VarId) -> bool {
-    if let IrStmtKind::Assign { var, .. } = &stmt.kind {
-        return *var == v;
+    match &stmt.kind {
+        IrStmtKind::Assign { var, .. } | IrStmtKind::Bind { var, .. } => *var == v,
+        IrStmtKind::IndexAssign { target, .. }
+        | IrStmtKind::MapInsert { target, .. }
+        | IrStmtKind::FieldAssign { target, .. } => *target == v,
+        _ => false,
     }
-    if let IrStmtKind::Bind { var, .. } = &stmt.kind {
-        return *var == v;
-    }
-    if let IrStmtKind::IndexAssign { target, .. } = &stmt.kind {
-        return *target == v;
-    }
-    if let IrStmtKind::MapInsert { target, .. } = &stmt.kind {
-        return *target == v;
-    }
-    if let IrStmtKind::FieldAssign { target, .. } = &stmt.kind {
-        return *target == v;
-    }
-    false
 }
 
-struct Uses {
-    total: usize,
-    good: usize,
-}
-
-/// `total` counts every `Var v` node; `good` counts the ones sitting in the
-/// exact safe shape (a shared `Borrow` that is a direct call argument).
-/// Each good argument contains exactly one `Var v` node, so
-/// `good == total` means no use escapes the safe shape.
-fn count_uses(stmt: &IrStmt, v: VarId) -> Uses {
-    struct Count {
-        v: VarId,
-        total: usize,
-        good: usize,
-    }
-    impl Count {
-        fn scan_args(&mut self, args: &[IrExpr]) {
-            for a in args {
-                if is_shared_cell_read(a, self.v) {
-                    self.good += 1;
-                }
-            }
-        }
-    }
-    impl IrVisitor for Count {
-        fn visit_expr(&mut self, e: &IrExpr) {
-            if let IrExprKind::Var { id } = &e.kind {
-                if *id == self.v {
-                    self.total += 1;
-                }
-            }
-            if let IrExprKind::Call { args, .. } = &e.kind {
-                self.scan_args(args);
-            } else if let IrExprKind::RuntimeCall { args, .. } = &e.kind {
-                self.scan_args(args);
-            } else if let IrExprKind::TailCall { args, .. } = &e.kind {
-                self.scan_args(args);
-            }
-            walk_expr(self, e);
-        }
-    }
-    let mut c = Count { v, total: 0, good: 0 };
-    c.visit_stmt(stmt);
-    Uses { total: c.total, good: c.good }
-}
-
-/// `&v` (shared, not `&mut`) directly on the cell var — or the already
-/// marked `&*v` form from an enclosing scope's earlier visit.
-fn is_shared_cell_read(arg: &IrExpr, v: VarId) -> bool {
+/// `&v` (shared, not `&mut`) directly on a var — or the already marked `&*v`
+/// form from an earlier marking — returns that var.
+fn shared_cell_read_of(arg: &IrExpr) -> Option<VarId> {
     let IrExprKind::Borrow { expr: inner, mutable: false, .. } = &arg.kind else {
-        return false;
+        return None;
     };
-    if matches!(&inner.kind, IrExprKind::Var { id } if *id == v) {
-        return true;
+    match &inner.kind {
+        IrExprKind::Var { id } => Some(*id),
+        IrExprKind::Deref { expr: dinner } => match &dinner.kind {
+            IrExprKind::Var { id } => Some(*id),
+            _ => None,
+        },
+        _ => None,
     }
-    if let IrExprKind::Deref { expr: dinner } = &inner.kind {
-        return matches!(&dinner.kind, IrExprKind::Var { id } if *id == v);
-    }
-    false
 }
 
-/// Rewrite every shared `Borrow { Var v }` in the statement into the
-/// `Borrow { Deref { Var v } }` marker. Only run when the statement
-/// qualified, so every such site is a shared call-arg read.
-struct MarkReads<'a> {
-    v: VarId,
+/// The marking walk: a shared `Borrow { Var v }` becomes the
+/// `Borrow { Deref { Var v } }` marker iff `v` is ACTIVE — some enclosing
+/// statement qualified for it. `active[k]` counts the open statements that
+/// qualified for cell slot `k`, so nesting composes by increment/decrement.
+struct MarkActive<'a> {
+    cells: &'a [VarId],
+    qualifying: &'a StmtSummaries,
+    active: Vec<u32>,
     changed: &'a mut bool,
 }
 
-impl IrMutVisitor for MarkReads<'_> {
+impl MarkActive<'_> {
+    fn slot(&self, id: VarId) -> Option<usize> {
+        self.cells.iter().position(|c| *c == id)
+    }
+
+    fn is_active(&self, id: VarId) -> bool {
+        self.slot(id).is_some_and(|k| self.active[k] > 0)
+    }
+}
+
+impl IrMutVisitor for MarkActive<'_> {
+    fn visit_stmt_mut(&mut self, stmt: &mut IrStmt) {
+        let key = std::ptr::from_ref(&*stmt);
+        let opened: Vec<usize> = self
+            .qualifying
+            .qualifying
+            .get(&key)
+            .map(|cells| cells.iter().filter_map(|v| self.slot(*v)).collect())
+            .unwrap_or_default();
+        for &k in &opened {
+            self.active[k] += 1;
+        }
+        walk_stmt_mut(self, stmt);
+        for &k in &opened {
+            self.active[k] -= 1;
+        }
+    }
+
     fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
         if let IrExprKind::Borrow { expr: inner, mutable: false, .. } = &mut expr.kind {
-            if matches!(&inner.kind, IrExprKind::Var { id } if *id == self.v) {
+            if matches!(&inner.kind, IrExprKind::Var { id } if self.is_active(*id)) {
                 let var_expr = std::mem::take(inner.as_mut());
                 **inner = IrExpr {
                     ty: var_expr.ty.clone(),
