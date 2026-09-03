@@ -30,12 +30,16 @@ jobs:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
       - uses: actions/cache@v6
+        # The gate builds under its OWN target dir (target/mutations, #1845)
+        # so a mutant binary can never outlive it; that dir is what is worth
+        # caching here, and the key carries the dir name so the cache saved
+        # under the old shared-target layout is not restored in its place.
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-          key: mutation-gate-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+            target/mutations
+          key: mutation-gate-target-mutations-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
 
       - name: Cache wasmtime tarball
         uses: actions/cache@v6
@@ -45,8 +49,9 @@ jobs:
 
       - name: Install wasmtime
         # Pinned + cached + retried, same pattern as fuzz-nightly.yml. The
-        # gate REFUSES to run without a wasm runtime (the wasm-leg mutant m5
-        # would survive for the wrong reason).
+        # gate REFUSES to run without a wasm runtime (the wasm-leg mutant m5,
+        # seeded into the structural emitter, would survive for the wrong
+        # reason).
         run: |
           VERSION=v47.0.3
           TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
