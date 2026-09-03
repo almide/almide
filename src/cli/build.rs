@@ -716,8 +716,24 @@ fn check_wasm_availability(ir_program: &almide::ir::IrProgram, embedded_leg: boo
         }
     }
     let mut scan = Scan { table, leg_lit, hits: BTreeMap::new() };
-    for f in ir_program.functions.iter().chain(ir_program.modules.iter().flat_map(|m| m.functions.iter())) {
+    // Only REACHABLE bodies are scanned — the same reachability the wasm
+    // emitter prunes by (`reachability::reachable_fn_names`), so the
+    // check-time diagnostic and the emit agree: a call the emitter never
+    // lowers cannot fail the build (#644's pin, kept when the ledger grew
+    // to the whole public surface in #1827/#1831). The render wall stays
+    // the backstop for anything reachability lets through.
+    let reachable = almide::codegen::reachability::reachable_fn_names(ir_program);
+    let is_reachable = |module: Option<&str>, name: &str| {
+        almide::codegen::reachability::registered_keys(module, name).iter().any(|k| reachable.contains(k))
+    };
+    for f in ir_program.functions.iter().filter(|f| is_reachable(None, f.name.as_str())) {
         scan.visit_expr(&f.body);
+    }
+    for m in &ir_program.modules {
+        let mname = m.name.to_string();
+        for f in m.functions.iter().filter(|f| is_reachable(Some(&mname), f.name.as_str())) {
+            scan.visit_expr(&f.body);
+        }
     }
     hits.extend(scan.hits);
     // The p3 component serves the http string family (#1710 PR B): under
