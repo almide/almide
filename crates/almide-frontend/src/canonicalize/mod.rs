@@ -46,7 +46,25 @@ pub fn canonicalize_program<'a>(
     program: &ast::Program,
     modules: impl Iterator<Item = (&'a str, &'a ast::Program, bool)>,
 ) -> CanonicalizationResult {
+    canonicalize_program_in(program, modules, None)
+}
+
+/// [`canonicalize_program`] with the entry program's IDENTITY: when the
+/// entry is a bundled stdlib module checked on its own (`almide compile
+/// bytes --json` stages the bundled source as the entry),
+/// `entry_bundled_module` names it, so the module's own `type` declarations
+/// of the names it owns keep the stdlib's bare key instead of a user
+/// program's shadow scope (#1828, `TypeEnv::entry_bundled_module`). `None`
+/// is every other entry program, unchanged.
+pub fn canonicalize_program_in<'a>(
+    program: &ast::Program,
+    modules: impl Iterator<Item = (&'a str, &'a ast::Program, bool)>,
+    entry_bundled_module: Option<&str>,
+) -> CanonicalizationResult {
     let mut env = TypeEnv::new();
+    env.entry_bundled_module = entry_bundled_module
+        .filter(|m| almide_lang::stdlib_info::is_bundled_module(m))
+        .map(sym);
     let mut diagnostics = Vec::new();
 
     // 1. Built-in protocols

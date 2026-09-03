@@ -135,14 +135,20 @@ pub fn prefixed_key(prefix: Option<&str>, name: &str) -> String {
 /// it off the stdlib's bare key (#1828) — the module whose unprefixed pass
 /// `infer_module` is running (`alias_owner_module`), else the entry
 /// program's `ROOT_TYPE_SCOPE`. Every other unprefixed declaration keeps the
-/// bare key it always had.
+/// bare key it always had — including the owning stdlib module's own
+/// declaration when THAT module is the entry program (`almide compile bytes`
+/// checks the bundled source on its own, `entry_bundled_module`): that
+/// registration is the one that WRITES the bare key, not a user shadow of it.
 pub fn type_decl_prefix(env: &TypeEnv, prefix: Option<&str>, name: &str) -> Option<String> {
     if let Some(p) = prefix {
         return Some(p.to_string());
     }
     almide_lang::stdlib_info::stdlib_owned_type_owner(name)?;
-    Some(env.alias_owner_module.map(|m| m.to_string())
-        .unwrap_or_else(|| super::resolve::ROOT_TYPE_SCOPE.to_string()))
+    match env.alias_owner_module {
+        Some(m) => Some(m.to_string()),
+        None if env.entry_owns_stdlib_type(name) => None,
+        None => Some(super::resolve::ROOT_TYPE_SCOPE.to_string()),
+    }
 }
 
 /// Is this a USER declaration shadowing a stdlib-owned type name — one whose
