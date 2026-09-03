@@ -1,0 +1,79 @@
+// @contract: C-004
+// #1406 (stage 2 of the #1350 ruling, on the STRUCTURAL leg): the three fan
+// MAPPER heads run an EFFECT callback identically on native and the default
+// wasm leg, in every spelling the ruling admits:
+//   - the canonical `!` tail (`(p) => fs.read_text(p)!`, `(p) => helper(p)!`)
+//   - a COMPOUND body — a statement before the `!` (`{ let t = ..; f(t)! }`)
+//   - a bare effect-fn VALUE (`fan.any(paths, helper)`)
+// consumed via `!`, `??`, and a match over settle's list.
+//
+// The frontend strips the canonical `!` only for `list.*` callees, and
+// `fan.settle(xs, f)` desugars to `list.map` AFTER that pass — so settle's
+// callback reached the emitter as `ok(unwrap(f(p)))`, and the structural
+// leg's inlined `Unwrap` propagated out of `main` (`Error: No such file or
+// directory (os error 2)`, exit 1) where native captured the err into the
+// element's Result. A compound body did the same on all three heads. Such a
+// callback is now lowered once as a closure value and called per element
+// (the #1806 route the fs walkers take), so its `!` rides the closure's own
+// Result channel.
+//
+// SELF-CONTAINED: its own temp dir (never printed — the suffix differs per
+// run), removed at the end. An fs program routes to the incumbent on the
+// BUILD path, so this lives in the embedded lane (`run --target wasm`),
+// where the structural leg serves it.
+import fs
+
+effect fn helper(p: String) -> Result[String, String] = fs.read_text(p)
+
+fn show(r: Result[String, String]) -> String = match r {
+  ok(v) => "ok " + v,
+  err(e) => "err " + e,
+}
+
+effect fn main() -> Unit = {
+  let d = fs.create_temp_dir("fanForms")!
+  fs.write(d + "/a.txt", "alpha")!
+  fs.write(d + "/b.txt", "beta")!
+  let mixed = [d + "/missing.txt", d + "/b.txt", d + "/a.txt"]
+  let good = [d + "/a.txt", d + "/b.txt"]
+  let bad_last = [d + "/a.txt", d + "/gone.txt"]
+  // ── fan.any: first Ok wins, an element's err skips ──
+  println("any bang fs: " + fan.any(mixed, (p) => fs.read_text(p)!)!)
+  println("any bang helper: " + fan.any(mixed, (p) => helper(p)!)!)
+  println("any compound: " + fan.any(mixed, (p) => {
+    let t = string.trim(p)
+    fs.read_text(t)!
+  })!)
+  println("any value: " + fan.any(mixed, helper)!)
+  println("any all-fail: " + (fan.any([d + "/x.txt"], (p) => fs.read_text(p)!) ?? "fb"))
+  // ── fan.settle: EVERY element's Result, errs captured ──
+  let s1 = fan.settle(mixed, (p) => fs.read_text(p)!)
+  println("settle bang fs: " + list.join(s1 |> list.map((r) => show(r)), " | "))
+  let s2 = fan.settle(mixed, (p) => helper(p)!)
+  println("settle bang helper: " + list.join(s2 |> list.map((r) => show(r)), " | "))
+  let s3 = fan.settle(mixed, (p) => {
+    let t = string.trim(p)
+    fs.read_text(t)!
+  })
+  println("settle compound: " + list.join(s3 |> list.map((r) => show(r)), " | "))
+  let s4 = fan.settle(mixed, helper)
+  println("settle value: " + list.join(s4 |> list.map((r) => show(r)), " | "))
+  // ── fan.map: collect in order, the FIRST err is the result ──
+  println("map bang fs: " + list.join(fan.map(good, (p) => fs.read_text(p)!)!, ","))
+  println("map bang helper: " + list.join(fan.map(good, (p) => helper(p)!)!, ","))
+  println("map compound: " + list.join(fan.map(good, (p) => {
+    let t = string.trim(p)
+    fs.read_text(t)!
+  })!, ","))
+  println("map value: " + list.join(fan.map(good, helper)!, ","))
+  println("map first err: " + list.join(fan.map(bad_last, (p) => {
+    let t = string.trim(p)
+    fs.read_text(t)!
+  }) ?? ["fb"], ","))
+  println("map value err: " + show(match fan.map(bad_last, helper) {
+    ok(vs) => ok(list.join(vs, ",")),
+    err(e) => err(e),
+  }))
+  fs.remove_all(d)!
+  println("after")
+}

@@ -7,6 +7,19 @@
 // path a missing pairing turns into a wasm wall. fan.settle is exempt from
 // the table by design (it desugars to list.map and is generic for free);
 // Bool payloads intentionally ride Int 0/1 until a dogfood need appears.
+// EFFECT-CALLBACK column (#1350 stage 2 / #1406): every mapper head —
+// fan.map, fan.any, AND fan.settle — has one row whose callback reaches a
+// real capability (fs, wasm-available), as an inline lambda and as an
+// effect-fn VALUE. fan.race is the reasoned omission: its mapper meters a
+// PURE body by the checker (E006 names the effect fn), so it has no effect
+// cell on either target. These rows use the plain spelling (`f(p)`, no `!`)
+// because a test block's `!` is a plain unwrap (L9); the `!` / compound /
+// value spellings are pinned cross-target by
+// spec/embedded_cross/fan_mapper_effect_callback_forms.almd.
+import fs
+
+effect fn read_one(p: String) -> Result[String, String] = fs.read_text(p)
+
 fn m_ii(x: Int) -> Result[Int, String] = ok(x + 1)
 
 fn m_is(x: Int) -> Result[String, String] = ok(int.to_string(x))
@@ -134,4 +147,50 @@ test "map first Err short-circuits in list order" {
 test "any Err disqualifies the element only" {
   let r = fan.any([-1.0, 2.0], (x) => if x < 0.0 then err("neg") else ok(x))
   assert_eq(r, ok(2.0))
+}
+
+// ── effect-callback column: one row per mapper head, fs-backed ──
+test "map effect callback reaches fs" {
+  let d = fs.create_temp_dir("fanMx")!
+  fs.write(d + "/a.txt", "alpha")!
+  fs.write(d + "/b.txt", "beta")!
+  assert_eq(fan.map([d + "/a.txt", d + "/b.txt"], (p) => fs.read_text(p)), ok(["alpha", "beta"]))
+  assert_eq(fan.map([d + "/a.txt", d + "/b.txt"], read_one), ok(["alpha", "beta"]))
+  // the FIRST err (list order) is the whole result
+  let r = fan.map([d + "/a.txt", d + "/gone.txt"], read_one)
+  assert_eq(r, err("No such file or directory (os error 2)"))
+  fs.remove_all(d)!
+}
+
+test "any effect callback reaches fs" {
+  let d = fs.create_temp_dir("fanMx")!
+  fs.write(d + "/a.txt", "alpha")!
+  // the missing candidate's err skips; the first readable file wins
+  assert_eq(fan.any([d + "/gone.txt", d + "/a.txt"], (p) => fs.read_text(p)), ok("alpha"))
+  assert_eq(fan.any([d + "/gone.txt", d + "/a.txt"], read_one), ok("alpha"))
+  assert_eq(fan.any([d + "/gone.txt"], read_one), err("fan.any: all candidates failed"))
+  fs.remove_all(d)!
+}
+
+// settle's rows compare through `show`: the test harness's wasm lane is the
+// incumbent brick, which walls a heap-Result equality in a returned position
+// ("heap-result `match` outside the executable subset") and would route the
+// whole file to the native fallback — the row must RUN on the wasm lane.
+fn show(r: Result[String, String]) -> String = match r {
+  ok(v) => "ok " + v,
+  err(e) => "err " + e,
+}
+
+test "settle effect callback reaches fs" {
+  let d = fs.create_temp_dir("fanMx")!
+  fs.write(d + "/a.txt", "alpha")!
+  // EVERY element's Result, errs captured in list order
+  let rs = fan.settle([d + "/gone.txt", d + "/a.txt"], (p) => fs.read_text(p)) |> list.map((r) => show(r))
+  assert_eq(rs, [
+    "err No such file or directory (os error 2)",
+    "ok alpha"
+  ])
+  let vs = fan.settle([d + "/gone.txt", d + "/a.txt"], read_one) |> list.map((r) => show(r))
+  assert_eq(vs, rs)
+  fs.remove_all(d)!
 }
