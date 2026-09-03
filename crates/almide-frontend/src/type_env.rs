@@ -250,6 +250,38 @@ impl TypeEnv {
         })
     }
 
+    /// The `opaque_alias_targets` key a constructor call or pattern spelled
+    /// `name` names from `cur_mod` (#1835) — the newtype's identity
+    /// (`registration::opaque_alias_identity`): the module's own `m.name`;
+    /// the entry program's shadow of a stdlib-owned name (`self.name`); the
+    /// bare name (a bundled module's newtype, or the entry program's plain
+    /// one); else the unique OTHER module's `x.name` — a foreign constructor,
+    /// which the checker reports as E033 rather than as an unknown name.
+    pub fn opaque_alias_key(&self, name: &str, cur_mod: Option<&str>) -> Option<Sym> {
+        let has = |k: &str| self.opaque_alias_targets.contains_key(&sym(k));
+        if name.contains('.') {
+            return has(name).then(|| sym(name));
+        }
+        if let Some(m) = cur_mod {
+            let own = format!("{}.{}", m, name);
+            if has(&own) {
+                return Some(sym(&own));
+            }
+        }
+        if let Some(shadow) = crate::canonicalize::resolve::stdlib_shadow_key(name, cur_mod) {
+            if has(&shadow) {
+                return Some(sym(&shadow));
+            }
+        }
+        if has(name) {
+            return Some(sym(name));
+        }
+        let mut foreign = self.opaque_alias_targets.keys()
+            .filter(|k| k.as_str().rsplit_once('.').is_some_and(|(_, base)| base == name));
+        let first = *foreign.next()?;
+        foreign.next().is_none().then_some(first)
+    }
+
     /// Snapshot the current keys in functions/types/constructors/top_lets.
     /// Used by module body checking to temporarily register unprefixed declarations
     /// and clean them up afterwards.

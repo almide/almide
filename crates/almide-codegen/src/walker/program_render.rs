@@ -8,9 +8,11 @@
 fn collect_type_aliases_and_generics(program: &IrProgram) -> (
     std::collections::HashMap<almide_base::intern::Sym, Ty>,
     std::collections::HashSet<almide_base::intern::Sym>,
+    std::collections::HashSet<almide_base::intern::Sym>,
 ) {
     let mut type_aliases = std::collections::HashMap::new();
     let mut generic_types = std::collections::HashSet::new();
+    let mut newtype_ctors = std::collections::HashSet::new();
     let all_type_decls = program.type_decls.iter()
         .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()));
     for td in all_type_decls {
@@ -18,6 +20,10 @@ fn collect_type_aliases_and_generics(program: &IrProgram) -> (
             // Opaque (mod/local) aliases are newtypes — don't expand transparently
             if matches!(td.visibility, IrVisibility::Public) {
                 type_aliases.insert(td.name, target.clone());
+            } else if !matches!(target, Ty::Fn { .. }) {
+                // The struct `render_type_decl_alias` emits; its ctor call is
+                // spelled by this (post-flatten) name (#1835).
+                newtype_ctors.insert(td.name);
             }
         }
         // Track types with generic parameters
@@ -25,7 +31,7 @@ fn collect_type_aliases_and_generics(program: &IrProgram) -> (
             generic_types.insert(td.name);
         }
     }
-    (type_aliases, generic_types)
+    (type_aliases, generic_types, newtype_ctors)
 }
 
 /// Record/variant types that get a generated `AlmideRepr` impl — a value
@@ -229,7 +235,7 @@ fn render_program_test_fns(ctx: &RenderContext, program: &IrProgram, parts: &mut
 pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
     // Build constructor → enum name map
     // Build type alias map for transparent expansion
-    let (type_aliases, generic_types) = collect_type_aliases_and_generics(program);
+    let (type_aliases, generic_types, newtype_ctors) = collect_type_aliases_and_generics(program);
     let repr_named_types = collect_repr_named_types(program);
     let ann = build_program_ann(ctx, program);
     let mut ctx = RenderContext {
@@ -249,6 +255,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         param_vars: std::collections::HashSet::new(),
         ref_mut_params: std::collections::HashSet::new(),
         repr_named_types: std::rc::Rc::new(repr_named_types),
+        newtype_ctors: std::rc::Rc::new(newtype_ctors),
         fn_err_ty: None,
     };
     register_ctor_to_enum(&mut ctx, program);

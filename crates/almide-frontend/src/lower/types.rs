@@ -25,15 +25,14 @@ pub(super) fn lower_type_decl(ctx: &mut LowerCtx, decl: &TypeToLower<'_>) -> IrT
     let qualified_name = match module_prefix {
         Some(m) if !almide_lang::stdlib_info::is_bundled_module(m) => format!("{}.{}", m, name),
         // The entry program's declaration of a stdlib-owned name is `self.Type`
-        // (#1828) — the checker's key for it — so the bare spelling stays the
-        // stdlib's on every backend. Not an opaque alias: that newtype keeps
-        // the bare key (see `register_type_decl`). And not the owning stdlib
-        // module's OWN declaration when that module is the entry program
+        // (#1828) — the checker's key for it, whatever the shape: the opaque
+        // alias's newtype identity is the same scope (#1835), the name its
+        // ctor call and pattern were lowered under — so the bare spelling
+        // stays the stdlib's on every backend. Not the owning stdlib module's
+        // OWN declaration when that module is the entry program
         // (`entry_bundled_module`): the checker keyed it bare, as the stdlib's.
         None if almide_lang::stdlib_info::stdlib_owned_type_owner(name).is_some()
-            && !ctx.env.entry_owns_stdlib_type(name)
-            && (matches!(visibility, ast::Visibility::Public)
-                || matches!(ty, ast::TypeExpr::Record { .. } | ast::TypeExpr::OpenRecord { .. } | ast::TypeExpr::Variant { .. })) =>
+            && !ctx.env.entry_owns_stdlib_type(name) =>
         {
             format!("{}.{}", crate::canonicalize::resolve::ROOT_TYPE_SCOPE, name)
         }

@@ -652,20 +652,23 @@ pub fn register_type_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, 
         }
     }
 
-    // A record / variant / transparent alias declared under a stdlib-owned
-    // name registers under its shadow scope (#1828); everything below keys
-    // on `prefix`, so rebinding it here gives the declaration its qualified
-    // identity end to end. An OPAQUE alias (`mod type X = String`) keeps the
-    // bare key: its newtype constructor and pattern are spelled by the bare
-    // name on the native leg and the wasm legs wall the form for any module
-    // scope, so a scoped identity has nowhere to go yet (a module's own
-    // `mod type Token` fails the same way today).
-    let is_opaque_alias = opaque_alias_shape(&resolved, visibility);
-    let owner = if is_opaque_alias { prefix.map(str::to_string) } else { type_decl_prefix(env, prefix, name) };
+    // Every shape declared under a stdlib-owned name registers under its
+    // shadow scope (#1828); everything below keys on `prefix`, so rebinding
+    // it here gives the declaration its qualified identity end to end. The
+    // OPAQUE alias (`mod type X = String`) included (#1835): its newtype
+    // identity — the `Ty::Named` its constructor call and pattern carry,
+    // `opaque_alias_identity` — takes the same scope, so `mod type Value =
+    // String` beside `json.parse` is two types on every leg. The DEFINING
+    // module of the newtype (the E033 boundary) is read off the original
+    // prefix before the rebind: the entry program's shadow scope is `self`,
+    // not a module its own constructor call would be foreign to.
+    let defining_module = prefix.map(sym).or(env.alias_owner_module);
+    let identity = opaque_alias_identity(env, prefix, name);
+    let owner = type_decl_prefix(env, prefix, name);
     let prefix = owner.as_deref();
-    let user_shadow = !is_opaque_alias && shadows_stdlib_type(prefix, name);
+    let user_shadow = shadows_stdlib_type(prefix, name);
 
-    resolved = register_type_decl_opaque_alias(env, name, resolved, &gnames, prefix, visibility);
+    resolved = register_type_decl_opaque_alias(env, identity, defining_module, resolved, &gnames, visibility);
     register_type_decl_variant_ctors(env, diagnostics, name, prefix, &mut resolved);
     register_type_decl_check_duplicate(env, diagnostics, name, prefix, &resolved);
     register_type_decl_finalize(env, name, ty, prefix, resolved, user_shadow);
@@ -674,16 +677,16 @@ pub fn register_type_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, 
         register_derive_sigs(env, derives, name, prefix);
     }
 }
-/// `mod`/local type alias → nominal newtype (opaque constructor), when the declared visibility isn't Public and the resolved shape isn't already a Record/Variant. Registers the opaque-alias bookkeeping and returns the (possibly rewritten) resolved type. Verbatim text move out of [`register_type_decl`].
-fn register_type_decl_opaque_alias(env: &mut TypeEnv, name: &str, resolved: Ty, gnames: &[Sym], prefix: Option<&str>, visibility: ast::Visibility) -> Ty {
+/// `mod`/local type alias → nominal newtype (opaque constructor), when the declared visibility isn't Public and the resolved shape isn't already a Record/Variant. Registers the opaque-alias bookkeeping under the newtype's `identity` and returns the (possibly rewritten) resolved type. Verbatim text move out of [`register_type_decl`].
+fn register_type_decl_opaque_alias(env: &mut TypeEnv, identity: Sym, defining_module: Option<Sym>, resolved: Ty, gnames: &[Sym], visibility: ast::Visibility) -> Ty {
     if !opaque_alias_shape(&resolved, visibility) {
         return resolved;
     }
     // Store the inner target type for codegen
-    env.opaque_alias_targets.insert(sym(name), resolved.clone());
+    env.opaque_alias_targets.insert(identity, resolved.clone());
     // Register as nominal type (not transparent alias)
     let generic_args: Vec<Ty> = gnames.iter().map(|g| Ty::TypeVar(*g)).collect();
-    let resolved = Ty::Named(sym(name), generic_args);
+    let resolved = Ty::Named(identity, generic_args);
     // Register constructor with visibility restriction. The OWNER is a
     // definition-time identity captured once: the prefixed registration
     // names it outright, and the per-module re-registration (which runs
@@ -693,10 +696,33 @@ fn register_type_decl_opaque_alias(env: &mut TypeEnv, name: &str, resolved: Ty, 
     // (the reference compilers key this privilege to the definition's
     // module identity and never re-derive it: Rust's DefId parent, Gleam's
     // opaque-type module, Roc's opaque wrap/unwrap scope).
-    env.opaque_alias_visibility.insert(sym(name), visibility);
-    let owner = prefix.map(|p| sym(p)).or(env.alias_owner_module);
-    env.opaque_alias_module.insert(sym(name), owner);
+    env.opaque_alias_visibility.insert(identity, visibility);
+    env.opaque_alias_module.insert(identity, defining_module);
     resolved
+}
+
+/// The nominal identity of an OPAQUE alias (`mod type X = T`, #1835): the
+/// `Ty::Named` its constructor call and pattern carry, and the key of the
+/// `opaque_alias_*` tables. A user module's is `m.X` whichever pass
+/// registers it (the prefixed one names the module; `infer_module`'s
+/// unprefixed one runs under `alias_owner_module`), and the entry program's
+/// declaration of a stdlib-owned name is `self.X` (`type_decl_prefix`). A
+/// BUNDLED module's own newtype (`html`'s `SafeHtml`) keeps the bare name —
+/// the spelling every stdlib signature carries and `lower_type_decl`
+/// declares it under — and so does the entry program's plain `mod type
+/// UserId = Int`. The lowered ctor call, the ctor pattern and the type decl
+/// all spell this one name, so the native flatten mangle and the wasm
+/// newtype erasure see a single identity where the bare spelling used to
+/// leave a module's `Token(s)` unresolved (rustc E0531) and unerased.
+fn opaque_alias_identity(env: &TypeEnv, prefix: Option<&str>, name: &str) -> Sym {
+    let scope = match prefix {
+        Some(p) => Some(p.to_string()),
+        None => env.alias_owner_module.map(|m| m.to_string()).or_else(|| type_decl_prefix(env, None, name)),
+    };
+    match scope {
+        Some(p) if !almide_lang::stdlib_info::is_bundled_module(&p) => sym(&format!("{}.{}", p, name)),
+        _ => sym(name),
+    }
 }
 
 /// The `mod` / `local` alias-to-nominal-newtype rule: a non-public
@@ -919,8 +945,8 @@ fn register_decl_type(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl
     });
     // Register in DefTable, under the same identity key the type env holds:
     // the shadow scope when `register_type_decl` gave the declaration one
-    // (a stdlib-owned name, #1828 — an opaque alias keeps the bare key and
-    // registers no scoped entry), else the prefixed key.
+    // (a stdlib-owned name, #1828 — the opaque alias included, #1835), else
+    // the prefixed key.
     let owner = type_decl_prefix(env, prefix, name);
     let scoped_key = prefixed_key(owner.as_deref(), name);
     let type_key = if env.types.contains_key(&sym(&scoped_key)) { scoped_key } else { prefixed_key(prefix, name) };
