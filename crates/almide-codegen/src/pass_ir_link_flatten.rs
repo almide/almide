@@ -336,6 +336,21 @@ fn rename_expr(e: IrExpr, map: &HashMap<String, Sym>) -> IrExpr {
         }
         IrExprKind::Lambda { params, .. } => rename_lambda_param_tys(params, map),
         IrExprKind::ClosureCreate { captures, .. } => rename_closure_capture_tys(captures, map),
+        // An opaque newtype's ctor call names its struct (`self.Value`,
+        // `m.Token` — pinned by lowering, #1835): mangle it with the decl,
+        // as the struct literal's ctor name is above. In tail position the
+        // call is a `TailCall` (TailCallMarkPass) — the same target.
+        IrExprKind::Call { target: CallTarget::Named { name }, type_args, .. } => {
+            if let Some(nn) = map.get(name.as_str()) {
+                *name = *nn;
+            }
+            rename_call_type_args(type_args, map)
+        }
+        IrExprKind::TailCall { target: CallTarget::Named { name }, .. } => {
+            if let Some(nn) = map.get(name.as_str()) {
+                *name = *nn;
+            }
+        }
         IrExprKind::Call { type_args, .. } => rename_call_type_args(type_args, map),
         IrExprKind::RcWrap { cast_ty: Some(ty), .. } => {
             **ty = rename_ty(ty, map);
@@ -355,8 +370,8 @@ fn rename_expr(e: IrExpr, map: &HashMap<String, Sym>) -> IrExpr {
     e
 }
 
-/// Rename the struct name of every record pattern under `p` (nested
-/// positions included) through the flatten map.
+/// Rename the struct name of every record pattern and opaque-newtype ctor
+/// pattern under `p` (nested positions included) through the flatten map.
 fn rename_pattern(p: &mut IrPattern, map: &HashMap<String, Sym>) {
     match p {
         IrPattern::RecordPattern { name, fields, .. } => {
@@ -369,7 +384,18 @@ fn rename_pattern(p: &mut IrPattern, map: &HashMap<String, Sym>) {
                 }
             }
         }
-        IrPattern::Constructor { args: elements, .. } | IrPattern::Tuple { elements } => {
+        // An opaque newtype's ctor pattern names its struct the way its ctor
+        // call does (`self.Value(s)`, #1835); a variant case's bare name is
+        // never a map key.
+        IrPattern::Constructor { name, args } => {
+            if let Some(nn) = map.get(name.as_str()) {
+                *name = nn.as_str().to_string();
+            }
+            for e in args.iter_mut() {
+                rename_pattern(e, map);
+            }
+        }
+        IrPattern::Tuple { elements } => {
             for e in elements.iter_mut() {
                 rename_pattern(e, map);
             }

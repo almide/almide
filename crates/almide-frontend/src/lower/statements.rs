@@ -446,7 +446,7 @@ pub(super) fn lower_pattern(ctx: &mut LowerCtx, pat: &ast::Pattern, ty: &Ty) -> 
                 let arg_ty = payload_tys.get(i).cloned().unwrap_or(Ty::Unknown);
                 lower_pattern(ctx, a, &arg_ty)
             }).collect();
-            IrPattern::Constructor { name: bare_name.to_string(), args: ir_args }
+            IrPattern::Constructor { name: ctor_pattern_name(ctx, &bare_name, ty), args: ir_args }
         }
         ast::Pattern::RecordPattern { name, fields, rest } =>
             lower_pattern_record(ctx, name, fields, *rest),
@@ -576,6 +576,25 @@ fn struct_pattern_name(ctx: &LowerCtx, written: &almide_base::intern::Sym) -> al
     match crate::canonicalize::resolve::canonical_user_type_sym(written.as_str(), &ctx.env.types, cur_mod) {
         Some(key) if matches!(ctx.env.types.get(&key), Some(Ty::Record { .. })) => key,
         _ => bare_ctor_name(written),
+    }
+}
+
+/// The name a constructor pattern carries into the IR. An opaque newtype's
+/// pattern (`Value(s)` against a subject of that newtype) is pinned to the
+/// newtype's IDENTITY — `self.Value`, `m.Token` — the one spelling its ctor
+/// call and its type decl carry (#1835), so the native flatten mangle and
+/// the wasm newtype erasure treat the three as one name. A variant case
+/// keeps its bare case name: the ctor table is keyed by it and the
+/// subject's enum qualifies it (#412).
+fn ctor_pattern_name(ctx: &LowerCtx, bare_name: &almide_base::intern::Sym, subject_ty: &Ty) -> String {
+    match ctx.env.resolve_named(subject_ty) {
+        Ty::Named(t, _)
+            if ctx.env.opaque_alias_targets.contains_key(&t)
+                && almide_ir::declared_type_name(t.as_str()) == bare_name.as_str() =>
+        {
+            t.to_string()
+        }
+        _ => bare_name.to_string(),
     }
 }
 

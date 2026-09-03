@@ -45,6 +45,23 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
             if let Some(module) = ctx.env.import_table.direct.get(name).copied() {
                 return CallTarget::Module { module, func: *name, def_id: ctx.def_map.get(&sym(&format!("{}.{}", module, name))).copied() };
             }
+            // An opaque newtype's constructor call is spelled by the bare
+            // name and carries the newtype's IDENTITY into the IR (#1835):
+            // `m.Token` for a module's own, `self.Value` for the entry
+            // program's shadow of a stdlib-owned name — the name the type
+            // decl is lowered under, so the native flatten mangle and the
+            // wasm newtype erasure find one spelling for the call, the
+            // pattern and the struct. A bundled module's newtype and the
+            // entry program's plain one are already bare. Variant cases
+            // resolve first: a name is never both.
+            if matches!(callee.kind, ast::ExprKind::TypeName { .. }) {
+                let cur_mod = ctx.current_module.map(|m| m.as_str());
+                if ctx.env.lookup_ctor_in(name, cur_mod).is_none() {
+                    if let Some(key) = ctx.env.opaque_alias_key(name.as_str(), cur_mod) {
+                        return CallTarget::Named { name: key };
+                    }
+                }
+            }
             CallTarget::Named { name: *name }
         }
         ast::ExprKind::Member { object, field, .. } => lower_call_target_member(ctx, callee, object, field),
