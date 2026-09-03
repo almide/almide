@@ -28,13 +28,26 @@
 # Negative control (must exit 1): run any additive pair REVERSED —
 #   check-interface-diff.sh HEAD v0.57.0
 # turns every addition into a removal, which must classify `breaking`.
+# The forged-input controls live in check-interface-diff-negative.sh (#1860):
+# it points INTERFACE_DIFF_ROOT at a scratch repo whose index copy has one
+# effect fn and one pure fn deleted, and expects `breaking` for each.
 set -euo pipefail
 export LC_ALL=C
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="${INTERFACE_DIFF_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 PREV="${1:?usage: check-interface-diff.sh <prev-ref> <ref> [--allow-breaking]}"
 CUR="${2:?usage: check-interface-diff.sh <prev-ref> <ref> [--allow-breaking]}"
 ALLOW="${3:-}"
+
+# The index writer (tools/gen-stdlib-doc-index.py `signature()`) emits exactly
+# one shape: `[effect ]module.fn(params) -> ret[   (deprecated — …)]`. The
+# `effect ` prefix is the only modifier that can precede the qualified name,
+# and it MUST be admitted here — anchoring at the module head skipped every
+# effect fn, so an added effect twin was uncounted and a REMOVED effect fn
+# classified `identical` (#1860). Any new modifier the writer grows belongs in
+# this one pattern; the negative control (check-interface-diff-negative.sh)
+# deletes an effect line and a pure line and expects `breaking` for both.
+SIG_HEAD='^(effect )?[a-z_0-9]+\.'
 
 # All signature lines inside the generated blocks of docs/stdlib/*.md at REF.
 surface() { # ref -> sorted signature lines on stdout
@@ -45,8 +58,8 @@ surface() { # ref -> sorted signature lines on stdout
         git -C "$ROOT" show "$ref:$f" 2>/dev/null \
           | awk '/BEGIN GENERATED SIGNATURE INDEX/{on=1} /END GENERATED SIGNATURE INDEX/{on=0} on'
       done \
-    | grep -E '^[a-z_0-9]+\.[a-z_0-9]+\(' \
-    | grep -vE '^[a-z_0-9]+\.__' \
+    | grep -E "${SIG_HEAD}[a-z_0-9]+\(" \
+    | grep -vE "${SIG_HEAD}__" \
     | sed -E 's/[[:space:]]+\(deprecated[^)]*\)[[:space:]]*$//' \
     | sort -u
 }
@@ -59,8 +72,12 @@ surface() { # ref -> sorted signature lines on stdout
 # self-host helpers) — checker-inserted, not writable surface — so their
 # appearance and disappearance is not an interface event.
 
-prev_s=$(surface "$PREV")
-cur_s=$(surface "$CUR")
+# An empty surface makes the trailing grep exit 1, which under pipefail would
+# let `set -e` kill the script silently with exit 1 — before the loud exit-2
+# guard below ever ran (the negative control's blank-index case). Swallow the
+# pipeline status so emptiness is judged by the guard, not by set -e.
+prev_s=$(surface "$PREV" || true)
+cur_s=$(surface "$CUR" || true)
 
 [ -n "$prev_s" ] || { echo "check-interface-diff: no generated signature index at $PREV" >&2; exit 2; }
 [ -n "$cur_s" ]  || { echo "check-interface-diff: no generated signature index at $CUR" >&2; exit 2; }
