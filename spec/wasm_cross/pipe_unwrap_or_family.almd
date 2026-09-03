@@ -1,0 +1,78 @@
+// @contract: C-218
+// ADR-0005 D6 (#1107): `??` applied to a PIPE stage. The parser binds `??`
+// tighter than `|>`, so `xs |> f(a) ?? d` is `Pipe(xs, UnwrapOr(f(a), d))`;
+// the checker re-associates it to `UnwrapOr(f(xs, a), d)` and annotates the
+// piped operand with its RESOLVED type (#1127) BEFORE the lowering runs its
+// pipe transform, so the lowering picks the ok/err or some/none match from
+// that annotation instead of guessing Option. Through 0.53.6 the guess was
+// wrong for a Result operand: native emitted an Option-shaped match over a
+// Result (rustc E0308, build red) and the wasm leg read the Result block as
+// an Option — `["1", "x"] |> list.try_map(parse) ?? [0]` printed a list of
+// heap garbage with exit 0 (the BUG-ledger cells the ADR cites). The tail
+// position then walled until #1134. Both halves are pinned here in the
+// modern spelling (`list.map((s) => f(s)!)`, ADR-0006), byte-identical
+// native == wasm, together with the scalar-Option shapes that always worked
+// so the family cannot drift piecewise.
+// positive-only, so the err arm has a second trigger besides a non-number
+fn parse_pos(s: String) -> Result[Int, String] = match int.parse(s) {
+  ok(n) => if n > 0 then ok(n) else err("not positive"),
+  err(e) => err(e),
+}
+
+fn my_res(xs: List[Int]) -> Result[Int, String] = match list.first(xs) {
+  some(v) => ok(v),
+  none => err("empty"),
+}
+
+// the ledger cell, fn-tail position (#1134's wall)
+fn heads(xs: List[String]) -> List[Int] = xs |> list.map((s) => parse_pos(s)!) ?? [0]
+
+// piped on after the fallback: `(xs |> stage ?? d) |> next`
+fn head_count(xs: List[String]) -> Int = (xs |> list.map((s) => parse_pos(s)!) ?? [0]) |> list.len
+
+// scalar Option stages: ident target, call target, a chain
+fn first_or(xs: List[Int]) -> Int = xs |> list.first ?? -1
+
+fn second_or(xs: List[Int]) -> Int = xs |> list.get(1) ?? -3
+
+fn big_first(xs: List[Int]) -> Int = xs |> list.filter((x) => x > 1) |> list.first ?? -4
+
+// user Result fn as the stage
+fn user_res(xs: List[Int]) -> Int = xs |> my_res ?? -5
+
+// `??` mid-chain: the fallback feeds the next stages
+fn mid_chain(xs: List[Int]) -> String = xs |> list.first ?? 0 |> (n) => n + 1 |> int.to_string
+
+// heap Option payload
+fn long_name(xs: List[String]) -> String = xs |> list.find((s) => string.len(s) > 1) ?? "none"
+
+// `??` inside a lambda that is itself a pipe stage
+fn sum_heads(xss: List[List[Int]]) -> Int = xss |> list.map((l) => l |> list.first ?? 0) |> list.sum
+
+// the fallback stays lazy in pipe position
+fn lazy(xs: List[Int]) -> Int = xs |> list.first ?? {
+  println("fallback evaluated")
+  -8
+}
+
+fn main() -> Unit = {
+  // bind position — the ledger cell: ok payload, first-err short-circuit
+  let a = ["1", "2"] |> list.map((s) => parse_pos(s)!) ?? [0]
+  let b = ["1", "x"] |> list.map((s) => parse_pos(s)!) ?? [0]
+  println("bind ${a} ${b}")
+  println("heads ${heads(["3", "4"])} ${heads(["3", "zz"])} ${heads(["3", "-4"])} ${heads([])}")
+  println("head_count ${head_count(["3", "4", "5"])} ${head_count(["zz"])}")
+  println("first_or ${first_or([7, 8])} ${first_or([])}")
+  println("second_or ${second_or([7, 8])} ${second_or([7])}")
+  println("big_first ${big_first([1, 2, 3])} ${big_first([0])}")
+  println("user_res ${user_res([9])} ${user_res([])}")
+  println("mid_chain ${mid_chain([4])} ${mid_chain([])}")
+  println("long_name ${long_name(["a", "bb"])} ${long_name(["a"])}")
+  println("sum_heads ${sum_heads([
+    [1],
+    [],
+    [2]
+  ])}")
+  println("lazy ${lazy([1])}")
+  println("lazy ${lazy([])}")
+}
