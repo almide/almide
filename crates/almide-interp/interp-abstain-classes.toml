@@ -113,4 +113,10 @@ patterns = [
   # self_host_registry source, so the pool has no body; registering it is
   # dispatch glue.
   "capability: url.parse",
+  # A Unit-returning bytes writer over a TEMPORARY receiver (#1849,
+  # bytes_temp_receiver): inplace.rs models the family from the name for a
+  # VARIABLE receiver (the write-back has a binding); a call-result receiver
+  # has none, and native's semantics are evaluate-the-arguments-and-discard —
+  # dispatch glue (mutate the temporary value, drop it), no new model.
+  "capability: in-place container mutation",
 ]

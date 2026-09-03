@@ -74,7 +74,12 @@ fail=0; n=0
 # render wall (C-147; a render-phase refusal the walled-real ratchet
 # already classes "(b) acceptable", so no baseline row); the structural
 # leg lowers every equatable key. Prunes with #1696 4-5.
-MAX_WALLED=24
+# 25 as of 2026-09-03: bytes_temp_receiver.almd (C-213/#1849) — a TEMPORARY
+# receiver of a Unit-returning bytes mutator; the incumbent brick walls it
+# honestly (the receiver discipline names the call-result receiver, and the
+# `let _ =` Unit binding is outside its value subset) where the structural
+# leg, the default route, releases the mutated block. Prunes with #1696 4-5.
+MAX_WALLED=25
 walled=0
 for fix in "$FIXTURE_DIR"/*.almd; do
   [ -e "$fix" ] || continue
