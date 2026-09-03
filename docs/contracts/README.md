@@ -275,7 +275,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-237 | Option/Result constructor literals build and eliminate identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-238 | First-class range values iterate their true bounds on both targets | 0.57.1 | active | fixture | 5 |
 | C-239 | Collection literals, indexing, and the empty spellings behave identically on both targets | 0.57.1 | active | fixture | 1 |
-| C-240 | Map literals and empty-map reads behave identically on both targets | 0.57.1 | active | fixture | 1 |
+| C-240 | Map literals and empty-map reads behave identically on both targets | 0.57.1 | active | fixture | 2 |
 | C-241 | Binding statements: let shadowing, var reassignment, and their check-time guards are identical on both targets | 0.57.1 | active | fixture | 1 |
 | C-242 | Conditional expressions evaluate the taken arm only, identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-243 | Block expressions yield their tail value identically on both targets | 0.57.1 | active | fixture | 1 |

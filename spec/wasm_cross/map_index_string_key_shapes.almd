@@ -1,0 +1,51 @@
+// @contract: C-240
+// `m[k]` on a String-keyed map, across every shape the KEY can take (#1874):
+// a literal, a `let`-bound String, a String PARAMETER (in tail, `let`, and
+// interpolation position, and used twice so both the first and the last use
+// render), a String record field, a for-in binder, a lambda parameter, and
+// an Int parameter on an Int-keyed map — with the `map.get` spelling on the
+// same values for agreement. The native leg renders a borrow-inferred String
+// parameter as `&str`, and the index read borrowed it AGAIN (`&&str`, rustc
+// E0308): check green, native build red, wasm correct. Byte-identical now.
+type Rec = { name: String }
+
+fn by_lit(m: Map[String, Int]) -> Int? = m["a"]
+
+fn by_let(m: Map[String, Int]) -> Int? = {
+  let k = "b"
+  m[k]
+}
+
+fn by_param(m: Map[String, Int], k: String) -> Int? = m[k]
+
+fn by_param_let(m: Map[String, Int], k: String) -> Int = {
+  let v = m[k]
+  v ?? -1
+}
+
+fn by_param_interp(m: Map[String, Int], k: String) -> String = "${k}=${m[k] ?? -1}"
+
+fn by_param_twice(m: Map[String, Int], k: String) -> Int = (m[k] ?? -1) + (m[k] ?? -1)
+
+fn by_field(m: Map[String, Int], r: Rec) -> Int? = m[r.name]
+
+fn by_loop(m: Map[String, Int], ks: List[String]) -> Int = {
+  var t = 0
+  for k in ks { t = t + (m[k] ?? -1) }
+  t
+}
+
+fn by_lambda(m: Map[String, Int], ks: List[String]) -> List[Int] = ks |> list.map((k) => m[k] ?? -1)
+
+fn by_int_param(m: Map[Int, String], k: Int) -> String? = m[k]
+
+fn by_get(m: Map[String, Int], k: String) -> Int? = map.get(m, k)
+
+fn main() -> Unit = {
+  let m = ["a": 1, "b": 2, "c": 3]
+  println("lit=${by_lit(m) ?? -1} let=${by_let(m) ?? -1}")
+  println("param=${by_param(m, "c") ?? -1} miss=${by_param(m, "zz") ?? -1}")
+  println("param_let=${by_param_let(m, "a")} interp=${by_param_interp(m, "b")} twice=${by_param_twice(m, "c")}")
+  println("field=${by_field(m, Rec { name: "b" }) ?? -1} loop=${by_loop(m, ["a", "b", "zz"])} lambda=${by_lambda(m, ["c", "zz", "a"])}")
+  println("int=${by_int_param([1: "x", 2: "y"], 2) ?? "-"} get=${by_get(m, "c") ?? -1}")
+}
