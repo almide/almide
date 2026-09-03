@@ -39,6 +39,7 @@
 328160	spec/wasm_cross/bytes_push_growth.almd
 65824	spec/wasm_cross/bytes_push_inplace.almd
 66960	spec/wasm_cross/bytes_rawptr.almd
+89568	spec/wasm_cross/bytes_search_edit_family.almd
 67168	spec/wasm_cross/bytes_set_value_semantics.almd
 67616	spec/wasm_cross/bytes_string_window_domain.almd
 10311232	spec/wasm_cross/bytes_temp_receiver.almd
@@ -242,6 +243,7 @@
 66016	spec/wasm_cross/index_bounds_write_only_var.almd
 66160	spec/wasm_cross/inplace_mutator_statement.almd
 65808	spec/wasm_cross/int8_div_overflow.almd
+707424	spec/wasm_cross/int_bit_family.almd
 65904	spec/wasm_cross/int_clamp_inverted.almd
 65808	spec/wasm_cross/int_div_by_zero.almd
 65808	spec/wasm_cross/int_div_by_zero_literal.almd
