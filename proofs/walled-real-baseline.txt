@@ -136,3 +136,6 @@ spec/wasm_cross/nested_three_level_literal.almd :: main
 # retirement) — or earlier if the incumbent learns the shape.
 spec/wasm_cross/gzip_inflate_members.almd :: gunzip
 spec/wasm_cross/gzip_inflate_members.almd :: inflate
+# #1576 also: the DDD gauntlet's mut_port `main` (the can-err mut-param port call
+# consumed by `!`) walls on the incumbent for the same reason as the fixture's fns.
+spec/gauntlet/pkg/mut_port/src/main.almd :: main
