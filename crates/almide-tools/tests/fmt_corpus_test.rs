@@ -181,14 +181,33 @@ fn inline_block_comment_is_attached_and_conserved() {
     assert_eq!(format_program(&second), formatted, "fmt must stay idempotent");
 }
 
-/// The half #1404 does NOT close, pinned so the boundary is explicit: a `//`
-/// comment before a continuation line still refuses. Reprinting it inline
-/// would comment out the rest of the line — an early attempt did exactly that
-/// and the verifier caught `binary -> int`, i.e. the `+ 2` had vanished. It
-/// needs line-aware placement, which the inline bracket is not.
+/// #1326: a `//` comment before a continuation line binds to the operand
+/// whose line it ends and VERIFIES — the break is reprinted after that
+/// operand with the operator leading the next line, so the comment can never
+/// swallow the `+ 2` (an early inline attempt did exactly that: the verifier
+/// caught `binary -> int`). Idempotent: the reparse finds the comment in the
+/// same gap.
 #[test]
-fn a_line_comment_before_a_continuation_still_refuses() {
+fn a_line_comment_before_a_continuation_is_attached_and_conserved() {
     let src = "fn main() -> Unit = {\n  let y = 1 + // why\n    2\n  println(\"ok\")\n}\n";
+    let program = parse(src).expect("parses");
+    let formatted = format_program(&program);
+    verify_format(src, &program, &formatted).expect("line comment before a continuation verifies");
+    assert!(
+        formatted.contains("let y = 1 // why\n    + 2\n"),
+        "comment must end the operand's line and the operator lead the continuation:\n{formatted}"
+    );
+    let second = parse(&formatted).expect("formatted parses");
+    assert_eq!(format_program(&second), formatted, "fmt must stay idempotent");
+}
+
+/// The boundary #1326 leaves, pinned so it stays explicit: a `//` that ends a
+/// line on a KEYWORD or DELIMITER rather than an operand (`then // why`, a
+/// trailing `.`, `match { // c`) has no operand to bind to and still refuses.
+/// The refusal is the contract — never a silent drop.
+#[test]
+fn a_line_comment_after_a_keyword_still_refuses() {
+    let src = "fn f(x: Int) -> Int = {\n  let y = if x > 0 then // why\n    1 else 2\n  y\n}\n";
     let program = parse(src).expect("parses");
     let formatted = format_program(&program);
     let why = verify_format(src, &program, &formatted)
