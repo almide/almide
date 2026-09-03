@@ -255,7 +255,8 @@ The Wgsl arm is the four rows marked W. Class:
 | 26 | `NormalizeRuntimeCalls` | `pass_normalize_runtime_calls.rs` | Rust | Rust by design | legacy `Named { almide_rt_* }` → `RuntimeCall` | n/a |
 | 27 | `IrLinkFlatten` | `pass_ir_link_flatten.rs` | Rust | Rust by design | flatten modules into the root for the walker | keeps modules, qualified names |
 | 28 | `SharedCellBorrow` | `pass_shared_cell_borrow.rs` | Rust | Rust by design | borrow a captured cell in place for statement-proven-safe reads (#1143) | n/a |
-| 29 | `TopLetStorage` | `pass_top_let_storage.rs` | all | analysis | the unified top-let storage attribute for the walker (§4 Stage 1) | own globals plan (`build_globals`) |
+| 29 | `RangeCountingVars` | `pass_range_counting.rs` | Rust | optimizer | a `let`-bound range read ONLY as `for-in` heads stays a bare `Range<i64>` instead of a materialized `Vec<i64>` (#1857); mirrors MIR's #1400 `range_counting_vars` admission rule and runs last so the set names the final IR | `ranges.rs` counting loop (#1400) — already has it |
+| 30 | `TopLetStorage` | `pass_top_let_storage.rs` | all | analysis | the unified top-let storage attribute for the walker (§4 Stage 1) | own globals plan (`build_globals`) |
 
 ### C. Structural wasm leg — `crates/almide-wasm` (default `--target wasm`)
 
