@@ -197,7 +197,87 @@ pub fn make_tls_stream(
     Ok(rustls::StreamOwned::new(conn, stream))
 }
 
-/// Perform an HTTP request/response exchange over any Read+Write stream.
+/// Write the request head + body: `Connection: close`, a `Content-Length`
+/// whenever a body rides along (plus a default JSON `Content-Type` unless the
+/// caller named one), then the caller's headers in map order. ONE writer for
+/// every client shape, so the wire request cannot drift between the twins.
+pub fn http_write_request(
+    stream: &mut impl Write,
+    method: &str,
+    host: &str,
+    path: &str,
+    body: &str,
+    headers: &[(String, String)],
+) -> Result<(), String> {
+    let mut req = format!("{} {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n", method, path, host);
+    if !body.is_empty() {
+        req.push_str(&format!("Content-Length: {}\r\n", body.len()));
+        if !headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("content-type")) {
+            req.push_str("Content-Type: application/json\r\n");
+        }
+    }
+    for (k, v) in headers.iter() {
+        req.push_str(&format!("{}: {}\r\n", k, v));
+    }
+    req.push_str("\r\n");
+    req.push_str(body);
+    stream.write_all(req.as_bytes()).map_err(|e| format!("write failed: {}", e))
+}
+
+/// A parsed text response: `(status_code, headers, body)`. The header list
+/// is EVERY field line in wire order — names keep their wire spelling, and a
+/// repeated field (`Set-Cookie`) keeps every occurrence (#1791); the
+/// accessors do the case-insensitive matching. A missing / unparseable
+/// status line yields code 0 and an empty header list (the whole text is
+/// then the body — the same tolerance the body-only client always had).
+pub type HttpTextResponse = (i64, Vec<(String, String)>, String);
+
+/// The full-response exchange (#1791): status line, header block and the
+/// transfer-decoded body of ANY complete response. The body-only and
+/// status-only exchanges below are thin projections of this one, so the
+/// three shapes cannot disagree on framing or error texts.
+pub fn http_exchange_response(
+    stream: &mut (impl Read + Write),
+    method: &str,
+    host: &str,
+    path: &str,
+    body: &str,
+    headers: &[(String, String)],
+) -> Result<HttpTextResponse, String> {
+    http_write_request(stream, method, host, path, body, headers)?;
+
+    let response = read_response_tolerant(stream)?;
+    let text = String::from_utf8_lossy(&response).to_string();
+
+    if let Some(idx) = text.find("\r\n\r\n") {
+        let header_section = &text[..idx];
+        let resp_body = &text[idx + 4..];
+        let mut lines = header_section.lines();
+        let status_line = lines.next().unwrap_or("");
+        let code: i64 = status_line
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        let resp_headers: Vec<(String, String)> = lines
+            .filter_map(|line| {
+                let (k, v) = line.split_once(':')?;
+                Some((k.trim().to_string(), v.trim().to_string()))
+            })
+            .collect();
+        let body_out = if header_section.to_lowercase().contains("transfer-encoding: chunked") {
+            decode_chunked(resp_body)
+        } else {
+            resp_body.to_string()
+        };
+        Ok((code, resp_headers, body_out))
+    } else {
+        Ok((0, Vec::new(), text))
+    }
+}
+
+/// Perform an HTTP request/response exchange over any Read+Write stream and
+/// return the body — the body projection of `http_exchange_response`.
 pub fn http_exchange(
     stream: &mut (impl Read + Write),
     method: &str,
@@ -206,39 +286,12 @@ pub fn http_exchange(
     body: &str,
     headers: &[(String, String)],
 ) -> Result<String, String> {
-    let mut req = format!("{} {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n", method, path, host);
-    if !body.is_empty() {
-        req.push_str(&format!("Content-Length: {}\r\n", body.len()));
-        if !headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("content-type")) {
-            req.push_str("Content-Type: application/json\r\n");
-        }
-    }
-    for (k, v) in headers.iter() {
-        req.push_str(&format!("{}: {}\r\n", k, v));
-    }
-    req.push_str("\r\n");
-    req.push_str(body);
-
-    stream.write_all(req.as_bytes()).map_err(|e| format!("write failed: {}", e))?;
-
-    let response = read_response_tolerant(stream)?;
-    let text = String::from_utf8_lossy(&response).to_string();
-
-    if let Some(idx) = text.find("\r\n\r\n") {
-        let resp_body = &text[idx + 4..];
-        let header_section = &text[..idx];
-        if header_section.to_lowercase().contains("transfer-encoding: chunked") {
-            Ok(decode_chunked(resp_body))
-        } else {
-            Ok(resp_body.to_string())
-        }
-    } else {
-        Ok(text)
-    }
+    http_exchange_response(stream, method, host, path, body, headers).map(|(_, _, b)| b)
 }
 
 /// Like `http_exchange`, but also parses the status line and returns
-/// `(status_code, body)`. A missing/unparseable status line yields code 0.
+/// `(status_code, body)` — the status projection of `http_exchange_response`.
+/// A missing/unparseable status line yields code 0.
 pub fn http_exchange_status(
     stream: &mut (impl Read + Write),
     method: &str,
@@ -247,42 +300,7 @@ pub fn http_exchange_status(
     body: &str,
     headers: &[(String, String)],
 ) -> Result<(i64, String), String> {
-    let mut req = format!("{} {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n", method, path, host);
-    if !body.is_empty() {
-        req.push_str(&format!("Content-Length: {}\r\n", body.len()));
-        if !headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("content-type")) {
-            req.push_str("Content-Type: application/json\r\n");
-        }
-    }
-    for (k, v) in headers.iter() {
-        req.push_str(&format!("{}: {}\r\n", k, v));
-    }
-    req.push_str("\r\n");
-    req.push_str(body);
-
-    stream.write_all(req.as_bytes()).map_err(|e| format!("write failed: {}", e))?;
-
-    let response = read_response_tolerant(stream)?;
-    let text = String::from_utf8_lossy(&response).to_string();
-
-    if let Some(idx) = text.find("\r\n\r\n") {
-        let header_section = &text[..idx];
-        let resp_body = &text[idx + 4..];
-        let status_line = header_section.lines().next().unwrap_or("");
-        let code: i64 = status_line
-            .split_whitespace()
-            .nth(1)
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(0);
-        let body_out = if header_section.to_lowercase().contains("transfer-encoding: chunked") {
-            decode_chunked(resp_body)
-        } else {
-            resp_body.to_string()
-        };
-        Ok((code, body_out))
-    } else {
-        Ok((0, text))
-    }
+    http_exchange_response(stream, method, host, path, body, headers).map(|(c, _, b)| (c, b))
 }
 
 /// Like `http_exchange` but returns the raw response body bytes — binary
@@ -295,20 +313,7 @@ pub fn http_exchange_bytes(
     body: &str,
     headers: &[(String, String)],
 ) -> Result<Vec<u8>, String> {
-    let mut req = format!("{} {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n", method, path, host);
-    if !body.is_empty() {
-        req.push_str(&format!("Content-Length: {}\r\n", body.len()));
-        if !headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("content-type")) {
-            req.push_str("Content-Type: application/json\r\n");
-        }
-    }
-    for (k, v) in headers.iter() {
-        req.push_str(&format!("{}: {}\r\n", k, v));
-    }
-    req.push_str("\r\n");
-    req.push_str(body);
-
-    stream.write_all(req.as_bytes()).map_err(|e| format!("write failed: {}", e))?;
+    http_write_request(stream, method, host, path, body, headers)?;
 
     let response = read_response_tolerant(stream)?;
 
@@ -325,64 +330,67 @@ pub fn http_exchange_bytes(
     }
 }
 
+/// Connect (with the 30 s default read timeout) — the one dial every
+/// client shape shares.
+fn http_client_connect(host: &str, port: u16) -> Result<TcpStream, String> {
+    let stream = TcpStream::connect(format!("{}:{}", host, port))
+        .map_err(|e| format!("connection failed: {}", e))?;
+    stream.set_read_timeout(client_read_timeout(30)).ok();
+    Ok(stream)
+}
+
+/// The full-response client (#1791): `(status_code, headers, body)` for ANY
+/// complete response — a 404 or a 3xx is `Ok`, with its `Location` in the
+/// header list. Redirects are NEVER followed: the 3xx and its `Location` are
+/// the answer, so the final URL is always the URL the caller passed. `Err`
+/// is a transport failure (connection / TLS / timeout).
+pub fn request_response(
+    method: &str,
+    url: &str,
+    body: &str,
+    headers: &[(String, String)],
+) -> Result<HttpTextResponse, String> {
+    let (is_https, host, port, path) = parse_url(url)?;
+    let stream = http_client_connect(&host, port)?;
+
+    if is_https {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let mut tls_stream = make_tls_stream(&host, stream)?;
+            http_exchange_response(&mut tls_stream, method, &host, &path, body, headers)
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            Err("HTTPS is not supported on WASM target".to_string())
+        }
+    } else {
+        let mut stream = stream;
+        http_exchange_response(&mut stream, method, &host, &path, body, headers)
+    }
+}
+
 /// The String client: `Ok(body)` for any complete response, `Err` for
-/// transport failures (connection / TLS / timeout).
+/// transport failures (connection / TLS / timeout) — the body projection of
+/// `request_response`.
 pub fn request(
     method: &str,
     url: &str,
     body: &str,
     headers: &[(String, String)],
 ) -> Result<String, String> {
-    let (is_https, host, port, path) = parse_url(url)?;
-
-    let stream = TcpStream::connect(format!("{}:{}", host, port))
-        .map_err(|e| format!("connection failed: {}", e))?;
-    stream.set_read_timeout(client_read_timeout(30)).ok();
-
-    if is_https {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let mut tls_stream = make_tls_stream(&host, stream)?;
-            http_exchange(&mut tls_stream, method, &host, &path, body, headers)
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            Err("HTTPS is not supported on WASM target".to_string())
-        }
-    } else {
-        let mut stream = stream;
-        http_exchange(&mut stream, method, &host, &path, body, headers)
-    }
+    request_response(method, url, body, headers).map(|(_, _, b)| b)
 }
 
 /// The status-preserving client: `(status_code, body)` for ANY complete
-/// response — a 404 is `Ok((404, body))`, not an `Err`.
+/// response — a 404 is `Ok((404, body))`, not an `Err` — the status
+/// projection of `request_response`.
 pub fn request_status(
     method: &str,
     url: &str,
     body: &str,
     headers: &[(String, String)],
 ) -> Result<(i64, String), String> {
-    let (is_https, host, port, path) = parse_url(url)?;
-
-    let stream = TcpStream::connect(format!("{}:{}", host, port))
-        .map_err(|e| format!("connection failed: {}", e))?;
-    stream.set_read_timeout(client_read_timeout(30)).ok();
-
-    if is_https {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let mut tls_stream = make_tls_stream(&host, stream)?;
-            http_exchange_status(&mut tls_stream, method, &host, &path, body, headers)
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            Err("HTTPS is not supported on WASM target".to_string())
-        }
-    } else {
-        let mut stream = stream;
-        http_exchange_status(&mut stream, method, &host, &path, body, headers)
-    }
+    request_response(method, url, body, headers).map(|(c, _, b)| (c, b))
 }
 
 /// The binary client: the raw response body as `Vec<u8>`.
@@ -393,10 +401,7 @@ pub fn request_bytes(
     headers: &[(String, String)],
 ) -> Result<Vec<u8>, String> {
     let (is_https, host, port, path) = parse_url(url)?;
-
-    let stream = TcpStream::connect(format!("{}:{}", host, port))
-        .map_err(|e| format!("connection failed: {}", e))?;
-    stream.set_read_timeout(client_read_timeout(30)).ok();
+    let stream = http_client_connect(&host, port)?;
 
     if is_https {
         #[cfg(not(target_arch = "wasm32"))]
