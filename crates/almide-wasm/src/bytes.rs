@@ -149,12 +149,7 @@ impl Emitter<'_> {
     }
 
     fn lower_bytes_fill(&mut self, b: &IrExpr, v: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
-        let IrExprKind::Var { id } = &b.kind else {
-            return unsup("bytes-fill-nonvar");
-        };
-        let Some((var_idx, var_ty, vglob)) = self.mut_var(id) else {
-            return unsup("var:unmapped");
-        };
+        let recv = self.bytes_recv("fill", b)?;
         self.lower(b, Some(BYTES))?;
         let hb = self.hold_i32()?;
         self.f.instructions().local_set(hb);
@@ -170,7 +165,7 @@ impl Emitter<'_> {
         i.memory_fill(0);
         i.local_get(ho);
         let _ = i;
-        self.emit_store_mut_var(*id, var_idx, var_ty, vglob)?;
+        self.emit_bytes_writeback(&recv)?;
         self.release_i32();
         self.release_i64();
         self.release_i32();
@@ -480,13 +475,8 @@ impl Emitter<'_> {
             // MUT window copy (native copy_from): either offset past its
             // buffer is a no-op; len clamps to both remainders.
             ("copy_from", [dst, src, doff, soff, n]) => {
-                let IrExprKind::Var { id } = &dst.kind else {
-                    return unsup("bytes-copy-from-nonvar");
-                };
-                let Some((var_idx, var_ty, vglob)) = self.mut_var(id) else {
-                    return unsup("var:unmapped");
-                };
-                self.emit_read_mut_var_cow(id, var_idx, var_ty, vglob)?;
+                let recv = self.bytes_recv("copy-from", dst)?;
+                self.emit_read_bytes_recv(&recv, dst)?;
                 self.f.instructions().call(F_BLOCK_COPY);
                 let dh = self.hold_i32()?;
                 self.f.instructions().local_set(dh);
@@ -562,7 +552,7 @@ impl Emitter<'_> {
                 i.end();
                 i.local_get(dh);
                 let _ = i;
-                self.emit_store_mut_var(*id, var_idx, var_ty, vglob)?;
+                self.emit_bytes_writeback(&recv)?;
                 self.release_i32();
                 self.release_i64();
                 self.release_i64();
@@ -580,12 +570,7 @@ impl Emitter<'_> {
                 "write_u8" | "write_u16_be" | "write_u32_be" | "write_i64_be" | "write_f64_be",
                 [b, v],
             ) => {
-                let IrExprKind::Var { id } = &b.kind else {
-                    return unsup("bytes-write-nonvar");
-                };
-                let Some((var_idx, var_ty, vglob)) = self.mut_var(id) else {
-                    return unsup("var:unmapped");
-                };
+                let recv = self.bytes_recv("write", b)?;
                 let (k, float) = match func {
                     "write_u8" => (1, false),
                     "write_u16_be" => (2, false),
@@ -594,7 +579,7 @@ impl Emitter<'_> {
                     _ => (8, true),
                 };
                 self.lower_bytes_write_be(b, v, k, float)?;
-                self.emit_store_mut_var(*id, var_idx, var_ty, vglob)?;
+                self.emit_bytes_writeback(&recv)?;
                 Ok(None)
             }
             // copy_within: memmove inside the buffer, NO-OP when the
@@ -684,19 +669,15 @@ impl Emitter<'_> {
             // The linked append/write family is FUNCTIONAL in the
             // self-host but MUT on the native surface — a statement call
             // on a var writes the fresh result back (the list.push
-            // convention).
+            // convention); on a temporary the fresh result is released
+            // (#1849, bytes_recv.rs).
             (f, [b, ..]) if f.starts_with("append_") || f.starts_with("write_") => {
-                let IrExprKind::Var { id } = &b.kind else {
-                    return unsup("bytes-append-nonvar");
-                };
-                let Some((var_idx, var_ty, vglob)) = self.mut_var(id) else {
-                    return unsup("var:unmapped");
-                };
+                let recv = self.bytes_recv("append", b)?;
                 match self.lower_linked_call("bytes", func, args, false)? {
                     Some(SliceTy::Scalar(Scalar::Bytes)) => {}
                     other => return unsup(&format!("bytes-append-ret:{other:?}")),
                 }
-                self.emit_store_mut_var(*id, var_idx, var_ty, vglob)?;
+                self.emit_bytes_writeback(&recv)?;
                 Ok(None)
             }
             // Not a native arm: the audited linked path before the wall.
@@ -710,16 +691,11 @@ impl Emitter<'_> {
     /// path, geometric growth, outgrown block freed at rc==1 (#1689) —
     /// then write back, exactly the `list.push` convention.
     fn lower_bytes_push(&mut self, b: &IrExpr, v: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
-                let IrExprKind::Var { id } = &b.kind else {
-                    return unsup("bytes-push-nonvar");
-                };
-                let Some((var_idx, var_ty, vglob)) = self.mut_var(id) else {
-                    return unsup("var:unmapped");
-                };
-                self.emit_read_mut_var_cow(id, var_idx, var_ty, vglob)?;
-                self.lower(v, Some(INT))?;
-                self.f.instructions().call(F_BYTES_PUSH);
-                self.emit_store_mut_var(*id, var_idx, var_ty, vglob)?;
-                Ok(None)
+        let recv = self.bytes_recv("push", b)?;
+        self.emit_read_bytes_recv(&recv, b)?;
+        self.lower(v, Some(INT))?;
+        self.f.instructions().call(F_BYTES_PUSH);
+        self.emit_bytes_writeback(&recv)?;
+        Ok(None)
     }
 }

@@ -65,6 +65,7 @@ fn unsup<T>(what: &str) -> Result<T, EmitError> {
 
 mod bytes;
 mod bytes_rw;
+mod bytes_recv;
 pub mod heap_cap;
 pub mod witness;
 mod calls;
