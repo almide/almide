@@ -213,3 +213,10 @@ spec/wasm_cross/mut_param_effect_can_err.almd :: uc__Mem
 # #1576 also: the DDD gauntlet's mut_port `main` (the can-err mut-param port call
 # consumed by `!`) walls on the incumbent for the same reason as the fixture's fns.
 spec/gauntlet/pkg/mut_port/src/main.almd :: main
+# 2026-09-03 (#1219 stage 2, the keyed-index threshold fixture): three branch-lifted
+# synthetic fns wall on the incumbent MIR lowering (`heap-result if` outside its
+# executable subset); the structural leg serves the fixture byte-identically to
+# native, and the incumbent is retiring under #1696.
+spec/wasm_cross/map_set_index_threshold.almd :: branch_lift_synth_3
+spec/wasm_cross/map_set_index_threshold.almd :: branch_lift_synth_4
+spec/wasm_cross/map_set_index_threshold.almd :: branch_lift_synth_7
