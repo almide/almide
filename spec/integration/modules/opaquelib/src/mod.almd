@@ -1,0 +1,13 @@
+// A module's own opaque newtype (#1835): `mod type Token = String` is
+// `opaquelib.Token`, the one identity its constructor call, its pattern and
+// its type decl carry, so the module builds and opens its own newtype on
+// every leg (before: rustc E0531 on native, both wasm legs refused).
+mod type Token = String
+
+fn make(s: String) -> Token = Token(s)
+
+fn text(t: Token) -> String = match t {
+  Token(s) => s
+}
+
+fn same(a: Token, b: Token) -> Bool = a == b

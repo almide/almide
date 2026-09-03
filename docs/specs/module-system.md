@@ -182,6 +182,14 @@ stdlib モジュールが所有する型で、その**裸名が正準の同一�
 シグネチャが指す型は決して置き換わらない。両者が同じファイルに共存でき、
 native と wasm で byte-identical に動く。
 
+宣言の形は問わない (#1835): opaque alias `mod type Value = String` の newtype も
+同じ `self.Value` / `m.Value` を同一性とし、コンストラクタ呼び出し `Value(s)` と
+パターン `Value(s)` はその名前を IR まで運ぶ(native の flatten mangle、wasm の
+newtype 消去、interp が一つの綴りを見る)。同じ配管で、モジュール自身の
+`mod type Token = String` も `m.Token` として構築・分解できる(以前は native が
+rustc E0531、wasm は両レグ拒否)。bundled stdlib 自身の newtype(`html` の
+`SafeHtml` 等)は裸名のままである。
+
 ```almide
 import json
 type Value = { n: Int }           // これは self.Value
