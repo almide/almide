@@ -1,0 +1,91 @@
+// @contract: C-338
+// #1423 stage 4: the int bit-introspection family (count_leading_zeros,
+// count_trailing_zeros, pop_count, bit_reverse, byte_swap, bit_width,
+// log2_floor, log2_ceil, next_power_of_two, prev_power_of_two), the f32
+// reinterpret `int.bits_to_f32`, and the `Int -> Float32` convert
+// (`int.to_float32`, its checked twin and the eight sized-int twins)
+// close on the STRUCTURAL leg. Native (runtime/rs/src/int.rs) is the
+// oracle: every fn prints over the domain-edge values (zero, one, -1,
+// the i32 rails, u32::MAX, 2^32, the i64 rails and their neighbours) and
+// the double-rounding sentinel 2^60 + 2^36 + 1, which an i64 -> f64 -> f32
+// conversion lands on the f32 tie (rounds to 2^60) where the direct
+// i64 -> f32 convert reads the true value above it (2^60 + 2^37).
+fn opt32(o: Float32?) -> String = match o {
+  some(f) => "some(${float32.to_string(f)})",
+  none => "none",
+}
+
+fn edges() -> List[Int] = [
+  0,
+  1,
+  -1,
+  2,
+  3,
+  255,
+  256,
+  1023,
+  1024,
+  1025,
+  2147483647,
+  -2147483648,
+  4294967295,
+  4294967296,
+  9223372036854775806,
+  9223372036854775807,
+  -9223372036854775807,
+  -9223372036854775808,
+  4611686018427387904,
+  4611686018427387905,
+  1152921573326323713,
+  16777217,
+  -16777217
+]
+
+fn main() -> Unit = {
+  for n in edges() {
+    println("bits ${n} clz=${int.count_leading_zeros(n)} ctz=${int.count_trailing_zeros(n)} pop=${int.pop_count(n)} width=${int.bit_width(n)}")
+    println("log ${n} floor=${int.log2_floor(n)} ceil=${int.log2_ceil(n)} next=${int.next_power_of_two(n)} prev=${int.prev_power_of_two(n)}")
+    println("swap ${n} rev=${int.bit_reverse(n)} bswap=${int.byte_swap(n)}")
+    println("f32 ${n} ${float32.to_string(int.to_float32(n))} ${opt32(int.to_float32_checked(n))} ${int.bits_to_f32(n)}")
+  }
+  // bits_to_f32 reads the LOW 32 bits: sign, ±0, ±inf, NaN, subnormal, 1.0, the high half ignored
+  for bits in [
+    0,
+    2147483648,
+    1065353216,
+    3212836864,
+    2139095040,
+    4286578688,
+    2143289344,
+    1,
+    8388607,
+    4294967295,
+    4294967296,
+    5368709120,
+    -4294967296,
+    -1
+  ] {
+    println("bits_to_f32 ${bits} ${int.bits_to_f32(bits)}")
+  }
+  // the sized twins ride int.to_float32 through their widening
+  for n in [
+    0,
+    1,
+    -1,
+    127,
+    -128,
+    255,
+    32767,
+    -32768,
+    65535,
+    2147483647,
+    -2147483648,
+    4294967295,
+    16777217,
+    9223372036854775807,
+    -9223372036854775808
+  ] {
+    println("sized ${n} i8=${float32.to_string(int8.to_float32(int.to_int8(n)))} u8=${float32.to_string(uint8.to_float32(int.to_uint8(n)))} i16=${float32.to_string(int16.to_float32(int.to_int16(n)))} u16=${float32.to_string(uint16.to_float32(int.to_uint16(n)))}")
+    println("sized ${n} i32=${float32.to_string(int32.to_float32(int.to_int32(n)))} u32=${float32.to_string(uint32.to_float32(int.to_uint32(n)))} i64=${float32.to_string(int64.to_float32(int.to_int64(n)))} u64=${float32.to_string(uint64.to_float32(int.to_uint64(n)))}")
+  }
+}
