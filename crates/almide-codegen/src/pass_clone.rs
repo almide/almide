@@ -30,73 +30,22 @@ impl NanoPass for CloneInsertionPass {
         let top_let_vars: HashSet<VarId> = program.top_lets.iter().map(|tl| tl.var).collect();
 
         // Compute syntactic counts (no loop/lambda bumps) for remaining tracking
-        let syntactic = compute_syntactic_counts_program(&program);
+        let syntactic = SyntacticCounts::of(&program.functions, &program.top_lets);
 
-        let always_marks = program.codegen_annotations.always_clone_vars.clone();
-        let tco_owned = program.codegen_annotations.tco_owned_params.clone();
-        let tco_fns = program.codegen_annotations.tco_rewritten_fns.clone();
-        let (always, eligible) = split_clone_ids(&program.var_table, &top_let_vars, &syntactic, &always_marks, &tco_owned);
-        // #1130: the TCO exemption holds ONLY inside the body TailCallOpt
-        // rewrote. A VarId can live in another function too — `branch_lift`
-        // lifts an in-loop branch into a helper whose params ARE the
-        // enclosing fn's vars — and there the compensating clone plan does
-        // not exist, so its bare moves were a rustc E0382. Everything else
-        // gets the ordinary last-use analysis.
-        let no_exempt: HashSet<VarId> = HashSet::new();
-        let (always_plain, eligible_plain) = split_clone_ids(&program.var_table, &top_let_vars, &syntactic, &always_marks, &no_exempt);
-        let mut remaining = build_remaining(&eligible, &syntactic);
-        let mut remaining_plain = build_remaining(&eligible_plain, &syntactic);
-        // #1230: any id the branch walk can deduct lives in `remaining` or
-        // `remaining_plain`, whose key sets are exactly the two eligible sets —
-        // so the branch-count memo only needs to track their union. Counts for
-        // ids outside every `remaining` are deduct no-ops either way.
-        let tracked: HashSet<VarId> = eligible.union(&eligible_plain).copied().collect();
-        // Nothing is fresh at function top level — see `CloneCtx::fresh`.
-        let no_fresh: HashSet<VarId> = HashSet::new();
-
-        for func in &mut program.functions {
-            // Reset remaining for each function (vars are function-scoped)
-            let tco_here = tco_fns.contains(&func.name);
-            let (a, e, r) = if tco_here {
-                (&always, &eligible, &mut remaining)
-            } else {
-                (&always_plain, &eligible_plain, &mut remaining_plain)
-            };
-            reset_remaining(r, e, &syntactic);
-            let memo = BranchCounts::compute(&func.body, &tracked);
-            func.body = insert_clones_live(std::mem::take(&mut func.body), &mut CloneCtx { always: a, eligible: e, remaining: r, in_loop: false, memo: &memo, fresh: &no_fresh });
-        }
-        for tl in &mut program.top_lets {
-            reset_remaining(&mut remaining, &eligible, &syntactic);
-            let memo = BranchCounts::compute(&tl.value, &tracked);
-            tl.value = insert_clones_live(std::mem::take(&mut tl.value), &mut CloneCtx { always: &always, eligible: &eligible, remaining: &mut remaining, in_loop: false, memo: &memo, fresh: &no_fresh });
-        }
+        let marks = CloneMarks {
+            always: program.codegen_annotations.always_clone_vars.clone(),
+            tco_owned: program.codegen_annotations.tco_owned_params.clone(),
+            tco_fns: program.codegen_annotations.tco_rewritten_fns.clone(),
+        };
+        let sets = ClassSets::split(&program.var_table, &top_let_vars, &syntactic.total, &marks);
+        rewrite_bodies(&mut program.functions, &mut program.top_lets, &syntactic, &sets, &marks.tco_fns);
 
         let IrProgram { modules, var_table, .. } = &mut program;
         for module in modules.iter_mut() {
             let module_top_lets: HashSet<VarId> = module.top_lets.iter().map(|tl| tl.var).collect();
-            let module_syntactic = compute_syntactic_counts_module(module);
-            let (m_always, m_eligible) = split_clone_ids(var_table, &module_top_lets, &module_syntactic, &always_marks, &tco_owned);
-            let (m_always_plain, m_eligible_plain) = split_clone_ids(var_table, &module_top_lets, &module_syntactic, &always_marks, &no_exempt);
-            let mut m_remaining = build_remaining(&m_eligible, &module_syntactic);
-            let mut m_remaining_plain = build_remaining(&m_eligible_plain, &module_syntactic);
-            let m_tracked: HashSet<VarId> = m_eligible.union(&m_eligible_plain).copied().collect();
-
-            for func in module.functions.iter_mut() {
-                let (a, e, r) = if tco_fns.contains(&func.name) {
-                    (&m_always, &m_eligible, &mut m_remaining)
-                } else {
-                    (&m_always_plain, &m_eligible_plain, &mut m_remaining_plain)
-                };
-                reset_remaining(r, e, &module_syntactic);
-                let memo = BranchCounts::compute(&func.body, &m_tracked);
-                func.body = insert_clones_live(std::mem::take(&mut func.body), &mut CloneCtx { always: a, eligible: e, remaining: r, in_loop: false, memo: &memo, fresh: &no_fresh });
-            }
-            for tl in module.top_lets.iter_mut() {
-                reset_remaining(&mut m_remaining, &m_eligible, &module_syntactic);
-                let memo = BranchCounts::compute(&tl.value, &m_tracked);
-                tl.value = insert_clones_live(std::mem::take(&mut tl.value), &mut CloneCtx { always: &m_always, eligible: &m_eligible, remaining: &mut m_remaining, in_loop: false, memo: &memo, fresh: &no_fresh });
-            }
+            let module_syntactic = SyntacticCounts::of(&module.functions, &module.top_lets);
+            let m_sets = ClassSets::split(var_table, &module_top_lets, &module_syntactic.total, &marks);
+            rewrite_bodies(&mut module.functions, &mut module.top_lets, &module_syntactic, &m_sets, &marks.tco_fns);
         }
         // Loop binders the bodies only borrowed (#1673): the walker binds them
         // `&T` off `xs.iter()`.
@@ -107,26 +56,138 @@ impl NanoPass for CloneInsertionPass {
 
 // ── Syntactic use-count (no loop/lambda bumps) ─────────────────────
 
-fn compute_syntactic_counts_program(program: &IrProgram) -> HashMap<VarId, u32> {
-    let mut counts = HashMap::new();
-    for func in &program.functions {
-        count_syntactic(&func.body, &mut counts);
-    }
-    for tl in &program.top_lets {
-        count_syntactic(&tl.value, &mut counts);
-    }
-    counts
+/// The syntactic counts of one function group (the program's own fns +
+/// top-lets, or one module's), kept BOTH as the group-wide total and per
+/// body (#1232).
+///
+/// `total` is what classifies a var (`split_clone_ids`) and seeds its
+/// `remaining` count — deliberately group-wide, not per body: a VarId can
+/// live in two bodies (`branch_lift` helpers keep the enclosing fn's ids as
+/// their params), and such a var's last-use count must span both so neither
+/// body moves it. The per-body maps only say WHICH ids a body mentions, so
+/// the rewrite walk can narrow its tracking to those — see [`BodyScope`].
+struct SyntacticCounts {
+    total: HashMap<VarId, u32>,
+    /// One map per `functions[i]`, in order.
+    fn_bodies: Vec<HashMap<VarId, u32>>,
+    /// One map per `top_lets[i]`, in order.
+    top_let_bodies: Vec<HashMap<VarId, u32>>,
 }
 
-fn compute_syntactic_counts_module(module: &IrModule) -> HashMap<VarId, u32> {
-    let mut counts = HashMap::new();
-    for func in &module.functions {
-        count_syntactic(&func.body, &mut counts);
+impl SyntacticCounts {
+    fn of(functions: &[IrFunction], top_lets: &[IrTopLet]) -> SyntacticCounts {
+        let mut total = HashMap::new();
+        let count = |body: &IrExpr, total: &mut HashMap<VarId, u32>| {
+            let mut counts = HashMap::new();
+            count_syntactic(body, &mut counts);
+            for (id, n) in &counts {
+                *total.entry(*id).or_insert(0) += n;
+            }
+            counts
+        };
+        let fn_bodies = functions.iter().map(|f| count(&f.body, &mut total)).collect();
+        let top_let_bodies = top_lets.iter().map(|tl| count(&tl.value, &mut total)).collect();
+        SyntacticCounts { total, fn_bodies, top_let_bodies }
     }
-    for tl in &module.top_lets {
-        count_syntactic(&tl.value, &mut counts);
+}
+
+/// The annotation sets earlier passes left for this one.
+struct CloneMarks {
+    always: HashSet<VarId>,
+    tco_owned: HashSet<VarId>,
+    tco_fns: HashSet<Sym>,
+}
+
+/// The `always` / `eligible` classification of one function group, in both
+/// flavours: with the TCO-owned exemption (for the bodies TailCallOpt
+/// rewrote, and every top-let) and without it.
+struct ClassSets {
+    always: HashSet<VarId>,
+    eligible: HashSet<VarId>,
+    always_plain: HashSet<VarId>,
+    eligible_plain: HashSet<VarId>,
+}
+
+impl ClassSets {
+    fn split(vt: &VarTable, top_let_vars: &HashSet<VarId>, syntactic: &HashMap<VarId, u32>, marks: &CloneMarks) -> ClassSets {
+        let (always, eligible) = split_clone_ids(vt, top_let_vars, syntactic, &marks.always, &marks.tco_owned);
+        // #1130: the TCO exemption holds ONLY inside the body TailCallOpt
+        // rewrote. A VarId can live in another function too — `branch_lift`
+        // lifts an in-loop branch into a helper whose params ARE the
+        // enclosing fn's vars — and there the compensating clone plan does
+        // not exist, so its bare moves were a rustc E0382. Everything else
+        // gets the ordinary last-use analysis.
+        let no_exempt: HashSet<VarId> = HashSet::new();
+        let (always_plain, eligible_plain) = split_clone_ids(vt, top_let_vars, syntactic, &marks.always, &no_exempt);
+        ClassSets { always, eligible, always_plain, eligible_plain }
     }
-    counts
+
+    /// The pair a function body walks under: the exempting flavour inside a
+    /// TCO-rewritten body, the plain one everywhere else.
+    fn for_fn(&self, tco_here: bool) -> (&HashSet<VarId>, &HashSet<VarId>) {
+        if tco_here { (&self.always, &self.eligible) } else { (&self.always_plain, &self.eligible_plain) }
+    }
+}
+
+/// The classification narrowed to ONE body (#1232): the walk over a body
+/// only ever tests, decrements, deducts or min-merges ids that body mentions
+/// (a `Var` node or an in-place-mutation target — exactly what
+/// `SyntacticCounter` records), so dropping every other id from the three
+/// maps changes nothing it emits. It changes what the maps cost: `remaining`
+/// used to hold every eligible id of the whole program, and every If/Match
+/// node cloned it once per branch and min-merged it over the full eligible
+/// set — proportional to the program, not to the function.
+struct BodyScope {
+    always: HashSet<VarId>,
+    eligible: HashSet<VarId>,
+    /// Seeded from the GROUP-wide count (see [`SyntacticCounts`]), so an id
+    /// shared with another body still counts that body's uses.
+    remaining: HashMap<VarId, u32>,
+}
+
+impl BodyScope {
+    fn narrow(mentioned: &HashMap<VarId, u32>, always: &HashSet<VarId>, eligible: &HashSet<VarId>, total: &HashMap<VarId, u32>) -> BodyScope {
+        let mut scope = BodyScope { always: HashSet::new(), eligible: HashSet::new(), remaining: HashMap::new() };
+        for &id in mentioned.keys() {
+            if always.contains(&id) {
+                scope.always.insert(id);
+            }
+            if eligible.contains(&id) {
+                scope.eligible.insert(id);
+                scope.remaining.insert(id, total.get(&id).copied().unwrap_or(0));
+            }
+        }
+        scope
+    }
+}
+
+/// Rewrite every body of one function group under its own [`BodyScope`].
+fn rewrite_bodies(functions: &mut [IrFunction], top_lets: &mut [IrTopLet], syntactic: &SyntacticCounts, sets: &ClassSets, tco_fns: &HashSet<Sym>) {
+    for (func, mentioned) in functions.iter_mut().zip(&syntactic.fn_bodies) {
+        let (always, eligible) = sets.for_fn(tco_fns.contains(&func.name));
+        func.body = rewrite_body(std::mem::take(&mut func.body), mentioned, always, eligible, &syntactic.total);
+    }
+    for (tl, mentioned) in top_lets.iter_mut().zip(&syntactic.top_let_bodies) {
+        tl.value = rewrite_body(std::mem::take(&mut tl.value), mentioned, &sets.always, &sets.eligible, &syntactic.total);
+    }
+}
+
+fn rewrite_body(body: IrExpr, mentioned: &HashMap<VarId, u32>, always: &HashSet<VarId>, eligible: &HashSet<VarId>, total: &HashMap<VarId, u32>) -> IrExpr {
+    let mut scope = BodyScope::narrow(mentioned, always, eligible, total);
+    // #1230: any id the branch walk can deduct lives in `remaining`, whose
+    // key set is exactly `scope.eligible` — so the branch-count memo only
+    // needs to track that set. Counts for other ids are deduct no-ops.
+    let memo = BranchCounts::compute(&body, &scope.eligible);
+    // Nothing is fresh at function top level — see `CloneCtx::fresh`.
+    let no_fresh: HashSet<VarId> = HashSet::new();
+    insert_clones_live(body, &mut CloneCtx {
+        always: &scope.always,
+        eligible: &scope.eligible,
+        remaining: &mut scope.remaining,
+        in_loop: false,
+        memo: &memo,
+        fresh: &no_fresh,
+    })
 }
 
 /// Counts every syntactic `Var` use by riding the exhaustive `IrVisitor` walk —
@@ -367,16 +428,6 @@ fn split_clone_ids(
     (always, eligible)
 }
 
-fn build_remaining(eligible: &HashSet<VarId>, syntactic: &HashMap<VarId, u32>) -> HashMap<VarId, u32> {
-    eligible.iter().map(|&id| (id, syntactic.get(&id).copied().unwrap_or(0))).collect()
-}
-
-fn reset_remaining(remaining: &mut HashMap<VarId, u32>, eligible: &HashSet<VarId>, syntactic: &HashMap<VarId, u32>) {
-    for &id in eligible {
-        remaining.insert(id, syntactic.get(&id).copied().unwrap_or(0));
-    }
-}
-
 // ── Clone insertion with last-use tracking ─────────────────────────
 
 /// Bundles the four values threaded unchanged through every recursive call
@@ -505,14 +556,14 @@ fn insert_clones_match(subject: IrExpr, arms: Vec<IrMatchArm>, ctx: &mut CloneCt
     for (i, arm) in arms.into_iter().enumerate() {
         *ctx.remaining = saved.clone();
         // siblings = total - own, computed elementwise BEFORE the saturating
-        // deduction so saturation can't distort the difference.
-        let mut siblings = total_counts.clone();
-        for (id, n) in arm_counts[i].iter() {
-            if let Some(t) = siblings.get_mut(id) {
-                *t -= n;
+        // deduction so saturation can't distort the difference. Read straight
+        // off the two maps — no per-arm copy of `total_counts` (#1232).
+        for (id, total) in &total_counts {
+            let own = arm_counts[i].get(id).copied().unwrap_or(0);
+            if let Some(r) = ctx.remaining.get_mut(id) {
+                *r = r.saturating_sub(total - own);
             }
         }
-        deduct_sibling_uses(ctx.remaining, &siblings);
         let new_guard = arm.guard.map(|g| insert_clones_live(g, ctx));
         let new_body = insert_clones_live(arm.body, ctx);
         new_arms.push(IrMatchArm { pattern: arm.pattern, guard: new_guard, body: new_body });
