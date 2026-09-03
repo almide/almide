@@ -250,6 +250,7 @@ evidence  = [
   { path = "spec/wasm_cross/map_core_trio.almd", class = "fixture" },
   { path = "spec/wasm_cross/map_fold_heap_accumulator.almd", class = "fixture" },
   { path = "spec/wasm_cross/map_of_maps_value.almd", class = "fixture" },
+  { path = "spec/wasm_cross/map_set_index_threshold.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -262,6 +263,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/set_insertion_order.almd", class = "fixture" },
   { path = "spec/wasm_cross/set_index_order.almd", class = "fixture" },
+  { path = "spec/wasm_cross/map_set_index_threshold.almd", class = "fixture" },
 ]
 
 # ── DEEP STRUCTURAL EQUALITY ─────────────────────────────────────────
