@@ -34,6 +34,15 @@ pub struct CodegenAnnotations {
     /// placed the body's clones and moves. A bare (moving) use, a `&mut`, a
     /// closure capture, a match on `x`, or a tuple binder keeps `.cloned()`.
     pub borrowed_loop_vars: HashSet<VarId>,
+    /// `let r = <lit>..<e` binders whose EVERY read is a single-variable
+    /// `for-in` head (#1857, the native twin of the wasm leg's #1400
+    /// `range_counting_vars`). The walker binds them as a bare
+    /// `std::ops::Range<i64>` and each head iterates `r.clone()` — two
+    /// scalars, never a materialized `Vec<i64>`. Decided at pipeline end by
+    /// `RangeCountingVarsPass`, so the set names exactly the shapes the
+    /// walker renders. A read anywhere else (indexed, measured, passed, a
+    /// tuple head) keeps the var on the materializing `range_expr` path.
+    pub range_counting_vars: HashSet<VarId>,
     /// §4 Stage 1 — the unified top-let storage attribute, computed once by
     /// `TopLetStoragePass` and asserted equal to every legacy predicate by
     /// the walker-side agreement verifier. Stage 2 makes consumers read THIS

@@ -48,6 +48,7 @@ pub mod pass_effect_inference;
 pub mod pass_tco;
 pub mod pass_licm;
 pub mod pass_peephole;
+pub mod pass_range_counting;
 pub mod perceus_verified;
 pub mod pass_egg_saturation;
 pub mod pass_matrix_shape_spec;
