@@ -4352,6 +4352,8 @@ since     = "0.61.2"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/int_bit_family.almd", class = "fixture" },
+]
+
 [[contract]]
 id        = "C-339"
 spec      = "ALS-T18"
