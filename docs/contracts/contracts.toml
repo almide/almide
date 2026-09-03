@@ -4325,3 +4325,27 @@ evidence  = [
   { path = "spec/integration/modules/cross_module_global_state_loop_test.almd", class = "fixture" },
   { path = "spec/integration/modules/cross_module_cell_update_test.almd", class = "fixture" },
 ]
+
+# ── BYTES SEARCH / EDIT / PREDICATE FAMILY ────────────────────────────
+[[contract]]
+id        = "C-337"
+spec      = "ALS-C5"
+title     = "The bytes search, edit and predicate family answers identically on every leg"
+statement = "Every `bytes` search / edit / predicate fn prints the same answer native == wasm over the integer-domain edge values (zero, one, -1, the i32 rails, u32::MAX, 2^32, the i64 rails and their neighbours, len-1 / len / len+1): `cmp` is lexicographic with a proper prefix the smaller (-1 / 0 / 1); `contains` and `index_of` treat the empty pattern as a hit at 0 and a pattern longer than the haystack as a miss; `starts_with` / `ends_with` hold for the empty affix and never for one longer than the buffer; `is_valid_utf8` is `std::str::from_utf8(b).is_ok()` — overlong encodings, UTF-16 surrogates, codepoints past U+10FFFF and a truncated tail all reject; `eof` reads `pos as usize >= len` so a NEGATIVE pos is past the end; `skip` adds and clamps to the length (the sum wraps in i64, both legs); `insert` clamps the position to `[0, len]` and stores the value's LOW BYTE; `remove_at` returns a copy when the position is out of range (negative included); `reverse` / `xor` (the shorter length) / `map_each` (the callback result truncated to u8, every byte once in order) are fresh buffers; `split` on an EMPTY separator is the one-element list holding a copy of the input and otherwise a non-overlapping left-to-right scan whose tail piece (possibly empty) is always pushed; `lines` splits on the newline byte with no carriage-return handling and pushes the final tail only when non-empty; `data_ptr` is an address (never printed cross-leg — two calls on one buffer agree). `runtime/rs/src/bytes.rs` is the oracle. On the STRUCTURAL leg (#1423 stage 4, 0.61.2) the audited `bytes_core.almd` bodies link through the whitelist (read-only load8 walks over the digest-shared Bytes payload, stores into their own alloc_bytes buffers, index_of's `Int?` built via some()/none), while `split` and `lines` are native arms in the `chunks` shape — their self-host twins write the incumbent's 8-byte List slot stride raw (`prim.store_str(lh + 12 + idx * 8, ..)`), which this layout's 4-byte handles cannot share."
+since     = "0.61.2"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/bytes_search_edit_family.almd", class = "fixture" },
+]
+
+# ── INT BIT-INTROSPECTION FAMILY AND THE Int -> Float32 CONVERT ───────
+[[contract]]
+id        = "C-338"
+spec      = "ALS-T24"
+title     = "The int bit family, bits_to_f32 and the Int -> Float32 convert agree on every leg"
+statement = "`int.count_leading_zeros` / `count_trailing_zeros` / `pop_count` / `bit_reverse` / `byte_swap` read the i64 as its u64 bit pattern (`clz(-1) = 0`, `ctz(0) = 64`, `pop_count(-1) = 64`); `bit_width(0) = 0` else `64 - clz`; `log2_floor(n <= 0) = -1`, `log2_ceil(n <= 1) = 0` (else `64 - clz(n - 1)`), `next_power_of_two(n <= 1) = 1` with `2^63` wrapping to i64::MIN, `prev_power_of_two(n <= 0) = 0`; `int.bits_to_f32` reads the LOW 32 bits as an IEEE binary32 and widens (sign, ±0, ±inf, NaN, subnormals; the high half ignored); `int.to_float32` is the DIRECT `n as f32` — a SINGLE rounding — and `to_float32_checked` is `some` exactly when the round trip through `Float32 -> Int` is the identity; the eight sized twins (`int8` / `int16` / `int32` / `int64` / `uint8` / `uint16` / `uint32` / `uint64 .to_float32`) ride the same convert through their widening. `runtime/rs/src/int.rs` is the oracle; native prints the f32 through `float32.to_string` and every wasm leg matches byte for byte over the integer-domain edge values, the powers of two around 2^62, and the double-rounding sentinel 2^60 + 2^36 + 1, which an i64 -> f64 -> f32 conversion lands exactly on the f32 tie (rounding to even, 2^60) where the direct convert reads the true value above the tie (2^60 + 2^37). On the STRUCTURAL leg (#1423 stage 4, 0.61.2) the pure-scalar `int_bitcount` / `int_bits` / `float_bits` / `int_to_float` bodies link through the whitelist and the `i2f32` prim lowers to `f32.convert_i64_s` (it was `f64.convert_i64_s` + demote, the double rounding the sentinel pins)."
+since     = "0.61.2"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/int_bit_family.almd", class = "fixture" },
+]

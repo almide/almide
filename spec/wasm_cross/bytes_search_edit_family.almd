@@ -1,0 +1,103 @@
+// @contract: C-337
+// #1423 stage 4: the bytes search / edit / predicate family closes on the
+// STRUCTURAL leg — cmp, contains, index_of, starts_with, ends_with,
+// is_empty, is_valid_utf8, eof, skip, insert, remove_at, reverse, xor,
+// map_each, split, lines, data_ptr. Native (runtime/rs/src/bytes.rs) is
+// the oracle; every fn prints over the domain-edge values the integer
+// matrix feeds (zero, one, -1, the i32 rails, u32::MAX, 2^32, the i64
+// rails and their neighbours, len-1 / len / len+1) and every wasm leg
+// must match byte for byte.
+fn show(label: String, b: Bytes) -> Unit = println(label + " " + "${bytes.to_list(b)}")
+
+fn show_list(label: String, xs: List[Bytes]) -> Unit = {
+  let parts = xs |> list.map((p) => "${bytes.to_list(p)}")
+  println(label + " " + int.to_string(list.len(xs)) + " " + (parts |> list.join(";")))
+}
+
+fn opt(o: Int?) -> String = match o {
+  some(i) => "some(${i})",
+  none => "none",
+}
+
+fn b(s: String) -> Bytes = bytes.from_string(s)
+
+fn edges() -> List[Int] = [
+  0,
+  1,
+  -1,
+  2147483647,
+  -2147483648,
+  4294967295,
+  4294967296,
+  9223372036854775806,
+  9223372036854775807,
+  -9223372036854775807,
+  -9223372036854775808,
+  4,
+  5,
+  6
+]
+
+fn main() -> Unit = {
+  let abcde = b("abcde")
+  // cmp: lexicographic, a prefix is the smaller, -1/0/1
+  println("cmp ${bytes.cmp(abcde, abcde)} ${bytes.cmp(b("abc"), abcde)} ${bytes.cmp(abcde, b("abc"))}")
+  println("cmp ${bytes.cmp(b("abd"), abcde)} ${bytes.cmp(b(""), b(""))} ${bytes.cmp(b(""), b("a"))}")
+  println("cmp ${bytes.cmp(bytes.from_list([255]), bytes.from_list([1]))} ${bytes.cmp(bytes.from_list([0]), bytes.from_list([]))}")
+  // contains / index_of: empty pattern hits at 0, longer-than-haystack misses
+  println("contains ${bytes.contains(abcde, b("bcd"))} ${bytes.contains(abcde, b(""))} ${bytes.contains(abcde, b("abcdef"))} ${bytes.contains(abcde, b("ce"))} ${bytes.contains(b(""), b(""))}")
+  println("index_of ${opt(bytes.index_of(abcde, b("cd")))} ${opt(bytes.index_of(abcde, b("")))} ${opt(bytes.index_of(abcde, b("abcdef")))} ${opt(bytes.index_of(abcde, b("x")))} ${opt(bytes.index_of(b("aaa"), b("aa")))}")
+  // starts_with / ends_with: the empty affix always holds
+  println("starts ${bytes.starts_with(abcde, b("ab"))} ${bytes.starts_with(abcde, b(""))} ${bytes.starts_with(abcde, b("abcdef"))} ${bytes.starts_with(abcde, b("b"))} ${bytes.starts_with(b(""), b(""))}")
+  println("ends ${bytes.ends_with(abcde, b("de"))} ${bytes.ends_with(abcde, b(""))} ${bytes.ends_with(abcde, b("abcdef"))} ${bytes.ends_with(abcde, b("d"))} ${bytes.ends_with(b(""), b("a"))}")
+  // is_empty / is_valid_utf8: overlong, surrogate, truncated, > U+10FFFF
+  println("is_empty ${bytes.is_empty(b(""))} ${bytes.is_empty(abcde)} ${bytes.is_empty(bytes.new(0))} ${bytes.is_empty(bytes.new(1))}")
+  println("utf8 ${bytes.is_valid_utf8(b(""))} ${bytes.is_valid_utf8(b("héllo"))} ${bytes.is_valid_utf8(bytes.from_list([255]))} ${bytes.is_valid_utf8(bytes.from_list([192, 128]))} ${bytes.is_valid_utf8(bytes.from_list([237, 160, 128]))}")
+  println("utf8 ${bytes.is_valid_utf8(bytes.from_list([226, 130]))} ${bytes.is_valid_utf8(bytes.from_list([244, 144, 128, 128]))} ${bytes.is_valid_utf8(bytes.from_list([240, 144, 128, 128]))} ${bytes.is_valid_utf8(bytes.from_list([224, 160, 128]))} ${bytes.is_valid_utf8(bytes.from_list([224, 128, 128]))}")
+  // eof / skip / insert / remove_at over every edge position
+  for e in edges() {
+    println("pos ${e} eof=${bytes.eof(abcde, e)} skip=${bytes.skip(abcde, 2, e)} skip0=${bytes.skip(abcde, e, 1)}")
+    show("insert ${e}", bytes.insert(abcde, e, 120))
+    show("remove_at ${e}", bytes.remove_at(abcde, e))
+  }
+  // insert's value truncates to the low byte
+  for v in edges() {
+    show("insert_val ${v}", bytes.insert(b("ab"), 1, v))
+  }
+  println("eof_empty ${bytes.eof(b(""), 0)} ${bytes.eof(b(""), -1)} skip_empty ${bytes.skip(b(""), 0, 3)}")
+  // reverse / xor (min length) / map_each (low byte of the callback)
+  show("reverse", bytes.reverse(abcde))
+  show("reverse", bytes.reverse(b("")))
+  show("reverse", bytes.reverse(bytes.from_list([7])))
+  show("xor", bytes.xor(bytes.from_list([255, 15, 1]), bytes.from_list([15, 255])))
+  show("xor", bytes.xor(b(""), abcde))
+  show("xor", bytes.xor(abcde, abcde))
+  show("map_each", bytes.map_each(bytes.from_list([1, 2, 3]), (x) => x * 100))
+  show("map_each", bytes.map_each(bytes.from_list([1, 2, 3]), (x) => 0 - x))
+  show("map_each", bytes.map_each(b(""), (x) => x + 1))
+  show("map_each", bytes.map_each(bytes.from_list([200]), (x) => 9223372036854775807))
+  show("map_each", bytes.map_each(bytes.from_list([200]), (x) => -9223372036854775808))
+  // split: empty sep = [copy]; the tail piece is always pushed
+  show_list("split", bytes.split(b("a,b,,c,"), b(",")))
+  show_list("split", bytes.split(b(",a"), b(",")))
+  show_list("split", bytes.split(abcde, b("")))
+  show_list("split", bytes.split(b(""), b(",")))
+  show_list("split", bytes.split(b(""), b("")))
+  show_list("split", bytes.split(b("aaaa"), b("aa")))
+  show_list("split", bytes.split(b("aaa"), b("aa")))
+  show_list("split", bytes.split(b("abc"), b("abcd")))
+  show_list("split", bytes.split(b("x--y--"), b("--")))
+  // lines: the final tail only when non-empty, no \r handling
+  show_list("lines", bytes.lines(b("a\nb\n")))
+  show_list("lines", bytes.lines(b("a\nb")))
+  show_list("lines", bytes.lines(b("\n\n")))
+  show_list("lines", bytes.lines(b("")))
+  show_list("lines", bytes.lines(b("\n")))
+  show_list("lines", bytes.lines(b("a\r\nb")))
+  show_list("lines", bytes.lines(b("abc")))
+  // data_ptr: an address, never printed — two calls on one buffer agree,
+  // the empty buffer's address is never negative
+  let p1 = bytes.data_ptr(abcde)
+  let p2 = bytes.data_ptr(abcde)
+  println("data_ptr ${p1 == p2} ${bytes.data_ptr(b("")) >= 0}")
+}

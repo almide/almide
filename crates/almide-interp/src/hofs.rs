@@ -51,14 +51,40 @@ impl<'a> Interpreter<'a> {
         // `(m, f)` literal pair, so splitting on `m` first changes nothing
         // observable, and keeps each group under the per-function
         // complexity threshold instead of one 30-armed match.
-        match m {
-            "list" => self.eval_hof_list(f, &evaled),
-            "map" => self.eval_hof_map_mod(f, &evaled),
-            "option" => self.eval_hof_option(f, &evaled),
-            "result" => self.eval_hof_result(f, &evaled),
-            "set" => self.eval_hof_set(f, &evaled),
+        match (m, f) {
+            ("list", _) => self.eval_hof_list(f, &evaled),
+            ("map", _) => self.eval_hof_map_mod(f, &evaled),
+            ("option", _) => self.eval_hof_option(f, &evaled),
+            ("result", _) => self.eval_hof_result(f, &evaled),
+            ("set", _) => self.eval_hof_set(f, &evaled),
+            ("bytes", "map_each") => self.hof_bytes_map_each(&evaled),
             _ => Flow::Unsupported(format!("HOF {}.{}", m, f)),
         }
+    }
+
+    /// `bytes.map_each(b, f)` — every octet through `f` once, in order, the
+    /// result TRUNCATED to u8 (native `f(*x as i64) as u8`, the wasm twins'
+    /// `band(v, 255)`). The Bytes model is a list of octets, so this is
+    /// `hof_map` plus the truncation the #1505 lesson demands of every
+    /// byte store (an untruncated `-1` would vote `-1` where both targets
+    /// print `255`).
+    fn hof_bytes_map_each(&mut self, args: &[Value]) -> Flow {
+        let items = match Self::recv_items(args) {
+            Ok(i) => i,
+            Err(f) => return f,
+        };
+        let clo = match Self::recv_closure(args, 1) {
+            Ok(c) => c,
+            Err(f) => return f,
+        };
+        let mut out = Vec::with_capacity(items.len());
+        for item in items {
+            out.push(match val!(self.apply_closure(&clo, vec![item])) {
+                Value::Int(n) => Value::Int((n as u8) as i64),
+                other => other,
+            });
+        }
+        Flow::val(Value::list(out))
     }
 
     fn eval_hof_list(&mut self, f: &str, evaled: &[Value]) -> Flow {
