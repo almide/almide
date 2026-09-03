@@ -148,14 +148,19 @@ jobs:
           # clippy rides this job's compile cache for its ratchet (#1462).
           components: clippy
 
-      - uses: actions/cache@v6
+      # Dependencies only. The old actions/cache entry (registry + git + the
+      # whole `target/`) had grown to 4.1 GB and took 143 s to restore — most
+      # of it the workspace's own artifacts, which every run recompiles anyway
+      # because the sources changed. rust-cache prunes workspace crates from
+      # `target/` on save and keeps the dependency artifacts (release,
+      # ci-test, and the check/clippy metadata the two ratchets below ride).
+      # `save-if`: develop writes, PRs and queue branches read — one warm
+      # entry per toolchain + lockfile instead of one per branch.
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: linux-cargo-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: linux-cargo-${{ env.RUST_TOOLCHAIN }}-
+          shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
+          save-if: ${{ github.ref == 'refs/heads/develop' }}
+          cache-on-failure: true
 
       - run: cargo build --release
 
@@ -628,14 +633,13 @@ jobs:
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
-      - uses: actions/cache@v6
+      # Dependencies only (see the `build` job): rust-cache prunes the
+      # workspace's own artifacts on save; develop writes, PRs read.
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-${{ env.RUST_TOOLCHAIN }}-
+          shared-key: ci-wasm-windows-${{ env.RUST_TOOLCHAIN }}
+          save-if: ${{ github.ref == 'refs/heads/develop' }}
+          cache-on-failure: true
 
       - run: cargo build --release
 
@@ -1314,14 +1318,13 @@ jobs:
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
-      - uses: actions/cache@v6
+      # Dependencies only (see the `build` job): rust-cache prunes the
+      # workspace's own artifacts on save; develop writes, PRs read.
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-${{ env.RUST_TOOLCHAIN }}-
+          shared-key: ci-cross-platform-${{ matrix.os }}-${{ env.RUST_TOOLCHAIN }}
+          save-if: ${{ github.ref == 'refs/heads/develop' }}
+          cache-on-failure: true
 
       - run: cargo build --release
 
