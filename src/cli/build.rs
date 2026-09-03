@@ -388,7 +388,7 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
         }
     } else {
         let bytes = if structural {
-            match almide_wasm_run::wasi::to_wasi(&bytes) {
+            match almide_wasm_run::wasi::to_wasi(&bytes, &host_ops) {
                 Ok(w) => w,
                 Err(e) => {
                     err(&format!("error: WASI transform failed — this is an Almide bug: {e}"));
