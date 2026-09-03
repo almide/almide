@@ -94,43 +94,10 @@ impl<'a> Interpreter<'a> {
             return flow;
         }
 
-        // 2. Variant constructor (Unit / Tuple). Record-variant ctors arrive
-        //    as `Record` nodes, handled in eval. Look up in the registry.
-        if let Some((ty_name, kind)) = self.variant_ctor(name) {
-            return self.eval_variant_ctor_call(ty_name, name, kind, args, scope);
-        }
-
-        // 2b. The stdlib's only BUNDLED variant type (bytes.Endian): its decl
-        //     lives in the bundled module, never in the program, so the ctor
-        //     registry above misses it. The checker already typed the ctor —
-        //     build the variant value directly (the same value the inplace
-        //     tier's `endian_is_big` and the bytes read bridge dispatch on).
-        if args.is_empty() && matches!(n, "LittleEndian" | "BigEndian") {
-            return Flow::val(Value::Variant {
-                ty: None,
-                ctor: name,
-                payload: VariantPayload::Unit,
-            });
-        }
-
-        // 2c. An opaque NEWTYPE's constructor (`SafeHtml(s)`, `Value(s)` under
-        //     its `self.Value` identity, #1835): both backends erase the
-        //     wrapper — the value IS its payload — so the call is an identity
-        //     on its one argument. Registered by name from the program's
-        //     Alias decls; an arity other than one is not a newtype call.
-        if args.len() == 1 && self.newtype_ctors.contains(&name) {
-            return self.eval_expr(&args[0], scope);
-        }
-
-        // 2d. Inside a LOWERED MODULE body, a bare sibling call resolves
-        //     against the executing module FIRST (#1844) — the scope the
-        //     checker bound it in — before the flat table and before the
-        //     unique-definer rule of step 4: `to_string(a)` inside
-        //     `html.concat` is html's own, however many loaded modules (or
-        //     the program) spell a `to_string`. The program root (space 0)
-        //     has no owner and keeps the flat-table order below.
-        if let Some(func) = self.own_module_sibling(name) {
-            return self.eval_lowered_fn_call(func, args, scope);
+        // 2. Constructors and the executing module's own sibling — the pure
+        //    lookups between the builtins and the flat fn table.
+        if let Some(flow) = self.eval_named_ctor_or_sibling(name, args, scope) {
+            return flow;
         }
 
         // 3. A user / stdlib free function lowered into the program. A stdlib
@@ -202,17 +169,57 @@ impl<'a> Interpreter<'a> {
         Flow::Unsupported(format!("named call `{}`", n))
     }
 
-    /// Step 2d of [`Self::eval_named_call`]: the executing module's own
-    /// definition of `name`, when a module body is executing (`cur_space`)
-    /// and its module defines the name.
+    /// Step 2 of [`Self::eval_named_call`]: the pure lookups between the
+    /// builtins and the flat fn table. `None` = none of them claims `name`.
+    fn eval_named_ctor_or_sibling(&mut self, name: Sym, args: &[IrExpr], scope: &Scope) -> Option<Flow> {
+        let n = name.as_str();
+        // 2a. Variant constructor (Unit / Tuple). Record-variant ctors arrive
+        //     as `Record` nodes, handled in eval. Look up in the registry.
+        if let Some((ty_name, kind)) = self.variant_ctor(name) {
+            return Some(self.eval_variant_ctor_call(ty_name, name, kind, args, scope));
+        }
+        // 2b. The stdlib's only BUNDLED variant type (bytes.Endian): its decl
+        //     lives in the bundled module, never in the program, so the ctor
+        //     registry above misses it. The checker already typed the ctor —
+        //     build the variant value directly (the same value the inplace
+        //     tier's `endian_is_big` and the bytes read bridge dispatch on).
+        if args.is_empty() && matches!(n, "LittleEndian" | "BigEndian") {
+            return Some(Flow::val(Value::Variant {
+                ty: None,
+                ctor: name,
+                payload: VariantPayload::Unit,
+            }));
+        }
+        // 2c. An opaque NEWTYPE's constructor (`SafeHtml(s)`, `Value(s)` under
+        //     its `self.Value` identity, #1835): both backends erase the
+        //     wrapper — the value IS its payload — so the call is an identity
+        //     on its one argument. Registered by name from the program's
+        //     Alias decls; an arity other than one is not a newtype call.
+        if args.len() == 1 && self.newtype_ctors.contains(&name) {
+            return Some(self.eval_expr(&args[0], scope));
+        }
+        // 2d. Inside a LOWERED MODULE body, a bare sibling call resolves
+        //     against the executing module FIRST (#1844) — the scope the
+        //     checker bound it in — before the flat table and before the
+        //     unique-definer rule of step 4: `to_string(a)` inside
+        //     `html.concat` is html's own, however many loaded modules (or
+        //     the program) spell a `to_string`. The program root (space 0)
+        //     has no owner and keeps the flat-table order below.
+        let func = self.own_module_sibling(name)?;
+        Some(self.eval_lowered_fn_call(func, args, scope))
+    }
+
+    /// Step 2d of [`Self::eval_named_ctor_or_sibling`]: the executing
+    /// module's own definition of `name`, when a module body is executing
+    /// (`cur_space`) and its module defines the name.
     fn own_module_sibling(&self, name: Sym) -> Option<&'a almide_ir::IrFunction> {
         let space = self.cur_space.get();
         let owner = self.program.modules.get(space.checked_sub(1)? as usize)?.name;
         self.module_fns.get(&(owner, name)).copied()
     }
 
-    /// Step 2 of [`Self::eval_named_call`]: build the variant value a Unit- or
-    /// Tuple-payload constructor names.
+    /// Step 2a of [`Self::eval_named_ctor_or_sibling`]: build the variant
+    /// value a Unit- or Tuple-payload constructor names.
     fn eval_variant_ctor_call(
         &mut self,
         ty_name: Sym,
