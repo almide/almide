@@ -441,27 +441,49 @@ pub enum TestWhere {
 
 /// Comments attached to one EXPRESSION (#1404 / #1326).
 ///
-/// The attachment rule, ruled 2026-08-14: **a comment binds to the node it is
-/// adjacent to, on the side it was written**.
+/// The attachment rule, ruled 2026-08-14 and completed 2026-08-31 (the mixed
+/// rule): **an inline `/* */` binds to the node it is adjacent to, on the
+/// side it was written; a comment that ends a line binds to the line it
+/// ends** — that is, to the operand the line ends with.
 ///
 /// ```text
 /// foo(/* why */ a, b)      // LEADING on `a`  — travels with `a` if it moves
 /// f(1 /* x */, 2)          // TRAILING on `1` — does NOT cross the comma
+/// 1 /* x */ + 2            // TRAILING on `1` — an operator follows, not a node
 /// let y = 1 + // why
-///   2                      // TRAILING on `1` — the operand it follows
+///   2                      // LINE_TRAILING on `1` — the operand whose line
+///                          // the comment ends; fmt keeps the break after it
+/// xs
+///   // drop the empties
+///   |> list.filter(f)      // LINE_BETWEEN on `xs` — own-line comments between
+///                          // the operand and its continuation
 /// ```
 ///
 /// The leading half is the ruling as asked; the trailing half is its mirror,
 /// because taking "attach to the FOLLOWING node" literally would move
 /// `/* x */` across the comma and onto `2`, annotating a value its author
 /// never wrote it against. rustfmt and prettier bind the same way.
+///
+/// The two LINE slots are what a `//` needs that an inline `/* */` does not:
+/// a `//` comment consumes the rest of its physical line, so reprinting it
+/// inline (`1 // why + 2`) would comment out the continuation. fmt therefore
+/// prints a line slot exactly where the author's line break was — after the
+/// operand — and lets the operator (or `.` chain link) lead the next line.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ExprComments {
     /// Written before the node, on the same line.
     pub leading: Vec<String>,
-    /// Written after the node — an inline `/* */` or an end-of-line `//` whose
-    /// expression continues on the next line.
+    /// Written after the node, inline (`1 /* x */`), the line continuing
+    /// after it.
     pub trailing: Vec<String>,
+    /// Written after the node, ending its line, with the enclosing expression
+    /// continuing on a later line (`1 + // why` / `xs // note` before `|>`).
+    /// Reprinted after the node; the line breaks there.
+    pub line_trailing: Vec<String>,
+    /// Own-line comments between the node's line and the continuation line
+    /// that follows it. Reprinted each on its own line at the continuation
+    /// indent, above the operator / chain link.
+    pub line_between: Vec<String>,
 }
 
 /// A file's DIALECT STAMP — `@dialect(N)`, written above everything else.
