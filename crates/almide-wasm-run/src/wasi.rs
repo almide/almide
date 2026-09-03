@@ -5,20 +5,34 @@
 //!
 //! The transform is a POST-PASS, so the emitter and its verified
 //! envelope stay untouched:
-//!   - the 5 `almide.*` imports are replaced by 5 WASI imports (SAME
-//!     count, so every other function index is preserved verbatim);
+//!   - the 5 `almide.*` imports are replaced by 5 WASI imports
+//!     (fd_write / proc_exit / random_get / clock_time_get / fd_read),
+//!     plus the environ/args quartet ONLY when the module's emitted op
+//!     set reaches it (below); every non-import index shifts by the
+//!     import delta, and the element section re-encodes through the
+//!     same Remap (#1716);
 //!   - every call to an old import retargets to one of 5 appended SHIM
-//!     functions implementing the almide host contract over WASI
-//!     (fd_write / proc_exit / random_get / clock_time_get / fd_read);
-//!   - one PARK page is appended to linear memory for iovecs, the
-//!     stdin/entropy buffer (grown on demand), and the unsupported-op
-//!     message; two globals carry the park length and capacity.
+//!     functions implementing the almide host contract over WASI;
+//!   - one PARK span is appended to linear memory for iovecs, the
+//!     stdin/entropy buffer (grown on demand), the unsupported-op
+//!     message and the env overlay log; globals carry the park length
+//!     and capacity (and the overlay length, when an env service ships).
 //!
 //! Supported host surface (the non-host-variant corpus): console
 //! output (println/eprintln/io.print/io.write), exit codes, stdin
-//! read-to-end, entropy, the wall clock. fs/env/process ops take the
+//! read-to-end, entropy, the wall clock. fs/process ops take the
 //! DEFINED refusal: a named message on stderr + exit 1 — never a
 //! silent wrong answer (the target-availability doctrine, #1423).
+//!
+//! The env/args SERVICES are reachability-gated (#1841, the #1712
+//! discipline applied to the transform): `env.get` (op 26) ships the
+//! environ pair of imports + its scan shim, `env.set` (op 37) its
+//! overlay-append shim, `env.args`/`process.args` (op 29) the args
+//! pair of imports + its frames shim — each only when the emitted op
+//! set names the op. A hello-world artifact carries none of them
+//! (five imports, five shims), and an op that never reached the module
+//! cannot be called, so the gate is a selection over the op table the
+//! build path already audits against `P1_SERVED_OPS`, not an analysis.
 
 use wasm_encoder::reencode::{Reencode, RoundtripReencoder};
 use wasm_encoder::{
@@ -237,7 +251,41 @@ pub(crate) fn parse_module(bytes: &[u8]) -> anyhow::Result<Parsed<'_>> {
     Ok(p)
 }
 
-pub fn to_wasi(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
+/// The optional p1 services (#1841), selected from the module's emitted
+/// op set — one flag per service, each with its own imports and shim.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct P1Services {
+    /// op 26 (`env.get`): environ_sizes_get + environ_get, the scan shim.
+    pub env_get: bool,
+    /// op 37 (`env.set`): the overlay-append shim (no import).
+    pub env_set: bool,
+    /// op 29 (`env.args` / `process.args`): args_sizes_get + args_get,
+    /// the frames shim.
+    pub args: bool,
+}
+
+impl P1Services {
+    /// Which services `host_ops` (the emitter's op set) reaches.
+    pub fn from_ops(host_ops: &[i32]) -> Self {
+        Self {
+            env_get: host_ops.contains(&26),
+            env_set: host_ops.contains(&37),
+            args: host_ops.contains(&29),
+        }
+    }
+
+    /// The WASI imports this selection adds past the base five.
+    pub fn extra_imports(self) -> u32 {
+        2 * u32::from(self.env_get) + 2 * u32::from(self.args)
+    }
+}
+
+/// Rewrite an emitted almide module into a stock-runtime p1 command.
+/// `host_ops` is the emitter's op set for the module (the second half of
+/// `almide_wasm::emit_program_with_ops`): the env/args services ship only
+/// for the ops it names (#1841).
+pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
+    let services = P1Services::from_ops(host_ops);
     let parsed = parse_module(bytes)?;
     let Parsed {
         mut types,
@@ -256,11 +304,13 @@ pub fn to_wasi(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     } = parsed;
     let main_index = main_index.ok_or_else(|| anyhow::anyhow!("no main export"))?;
     let heap_global = heap_global.ok_or_else(|| anyhow::anyhow!("no __heap export"))?;
-    // 9 WASI imports replace the 5 almide.* ones (#1716 added the
-    // environ/args quartet), so every non-import index shifts by 4.
-    const IMPORTS: u32 = 9;
-    const SHIFT: u32 = IMPORTS - 5;
-    let shim_base = IMPORTS + func_types.len() as u32;
+    // The base five WASI imports replace the five almide.* ones; the
+    // environ/args pairs (#1716) are appended only for the services the
+    // op set reaches (#1841), so every non-import index shifts by the
+    // number of pairs shipped (0, 2 or 4).
+    let imports_count: u32 = 5 + services.extra_imports();
+    let shift: u32 = imports_count - 5;
+    let shim_base = imports_count + func_types.len() as u32;
     // The park CANNOT live past the current memory end — the bump heap
     // grows there. It takes over the ORIGINAL heap base instead, and
     // the heap's initial pointer moves up by the span: nothing else
@@ -270,7 +320,10 @@ pub fn to_wasi(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
         .1
         .ok_or_else(|| anyhow::anyhow!("__heap init not i32"))? as u32 as u64;
     let park: u64 = heap_init;
-    let (g_plen, g_pcap, g_ovl) = (global_count, global_count + 1, global_count + 2);
+    let (g_plen, g_pcap) = (global_count, global_count + 1);
+    // g_ovl (the overlay log length) exists only when an env service
+    // ships — nothing else reads or writes the log.
+    let g_ovl = (services.env_get || services.env_set).then_some(global_count + 2);
     let mut globals = GlobalSection::new();
     for (idx, (gt, i32v, i64v, f64v)) in parsed_globals.iter().enumerate() {
         let init = if idx as u32 == heap_global {
@@ -312,21 +365,45 @@ pub fn to_wasi(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     imports.import(W, "random_get", EntityType::Function(t_random)); // 2
     imports.import(W, "clock_time_get", EntityType::Function(t_clock)); // 3
     imports.import(W, "fd_read", EntityType::Function(t_fd_rw)); // 4
-    // The environ/args quartet (#1716) — all share the (ptr, ptr) -> errno
-    // shape. Appended AFTER the original five so the shim bodies' literal
-    // import indices 0..4 stay put.
-    imports.import(W, "environ_sizes_get", EntityType::Function(t_random)); // 5
-    imports.import(W, "environ_get", EntityType::Function(t_random)); // 6
-    imports.import(W, "args_sizes_get", EntityType::Function(t_random)); // 7
-    imports.import(W, "args_get", EntityType::Function(t_random)); // 8
+    // The environ/args pairs (#1716) — all share the (ptr, ptr) -> errno
+    // shape. Appended AFTER the base five so the shim bodies' literal
+    // import indices 0..4 stay put; each pair is present only when its
+    // service ships (#1841), and its shim takes the indices it landed on.
+    let mut next_import = 5u32;
+    let environ_imports = services.env_get.then(|| {
+        imports.import(W, "environ_sizes_get", EntityType::Function(t_random));
+        imports.import(W, "environ_get", EntityType::Function(t_random));
+        next_import += 2;
+        (next_import - 2, next_import - 1)
+    });
+    let args_imports = services.args.then(|| {
+        imports.import(W, "args_sizes_get", EntityType::Function(t_random));
+        imports.import(W, "args_get", EntityType::Function(t_random));
+        next_import += 2;
+        (next_import - 2, next_import - 1)
+    });
+    debug_assert_eq!(next_import, imports_count);
 
     let mut functions = FunctionSection::new();
     for ti in &func_types {
         functions.function(*ti);
     }
-    for ti in [t_print, t_print, t_exit, t_fs, t_read, t_fs, t_fs, t_fs] {
+    for ti in [t_print, t_print, t_exit, t_fs, t_read] {
         functions.function(ti);
     }
+    // The optional service shims, in order behind the base five: their
+    // function indices are handed to shim_fs_call's forwarding arms.
+    let mut next_shim = shim_base + 5;
+    let mut service_slot = |present: bool| {
+        present.then(|| {
+            functions.function(t_fs);
+            next_shim += 1;
+            next_shim - 1
+        })
+    };
+    let f_env_get = service_slot(services.env_get);
+    let f_env_set = service_slot(services.env_set);
+    let f_args = service_slot(services.args);
 
     let mut memories = MemorySection::new();
     memories.memory(MemoryType {
@@ -351,34 +428,44 @@ pub fn to_wasi(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
         &ConstExpr::i32_const((park + OVL) as i32),
     );
     // g_ovl: bytes appended to the env overlay log so far.
-    globals.global(
-        GlobalType { val_type: ValType::I32, mutable: true, shared: false },
-        &ConstExpr::i32_const(0),
-    );
+    if g_ovl.is_some() {
+        globals.global(
+            GlobalType { val_type: ValType::I32, mutable: true, shared: false },
+            &ConstExpr::i32_const(0),
+        );
+    }
 
     let mut exports = ExportSection::new();
     for (name, kind, idx) in &export_rows {
-        let idx = if *kind == ExportKind::Func { *idx + SHIFT } else { *idx };
+        let idx = if *kind == ExportKind::Func { *idx + shift } else { *idx };
         exports.export(name, *kind, idx);
     }
-    exports.export("_start", ExportKind::Func, main_index + SHIFT);
+    exports.export("_start", ExportKind::Func, main_index + shift);
 
     let mut code = CodeSection::new();
-    let mut remap = Remap { shim_base, shift: SHIFT };
+    let mut remap = Remap { shim_base, shift };
     for b in bodies {
         code.function(&reencode_body(&b, &mut remap, 1)?);
     }
     // Shims (their own calls target the NEW imports — no remap). Order:
-    // println, eprintln, exit, fs_call, host_read, env_get, env_set, args.
-    let (f_env_get, f_env_set, f_args) = (shim_base + 5, shim_base + 6, shim_base + 7);
+    // println, eprintln, exit, fs_call, host_read, then whichever of
+    // env_get, env_set, args the op set reached.
     code.function(&shim_print(1, park));
     code.function(&shim_print(2, park));
     code.function(&shim_exit());
     code.function(&shim_fs_call(park, g_plen, g_pcap, f_env_get, f_env_set, f_args));
     code.function(&shim_host_read(park, g_plen));
-    code.function(&shim_env_get(park, g_plen, g_ovl));
-    code.function(&shim_env_set(park, g_ovl));
-    code.function(&shim_args(park, g_plen));
+    if f_env_get.is_some() {
+        let (i_sizes, i_get) = environ_imports.expect("env_get service imports its pair");
+        code.function(&shim_env_get(park, g_plen, g_ovl.expect("env service global"), i_sizes, i_get));
+    }
+    if f_env_set.is_some() {
+        code.function(&shim_env_set(park, g_ovl.expect("env service global")));
+    }
+    if f_args.is_some() {
+        let (i_sizes, i_get) = args_imports.expect("args service imports its pair");
+        code.function(&shim_args(park, g_plen, i_sizes, i_get));
+    }
 
     let mut element_sec = ElementSection::new();
     for e in elements {
@@ -472,15 +559,16 @@ fn shim_exit() -> Function {
 }
 
 /// The almide `fs_call` contract over WASI: ops 26/29/30/31/32/34/35/36/37
-/// supported (the environ/args trio routes to its own shims, #1716),
-/// everything else takes the defined refusal (stderr + exit 1).
+/// supported (the environ/args trio routes to its own shims when they
+/// ship, #1716/#1841), everything else takes the defined refusal
+/// (stderr + exit 1).
 fn shim_fs_call(
     park: u64,
     g_plen: u32,
     g_pcap: u32,
-    f_env_get: u32,
-    f_env_set: u32,
-    f_args: u32,
+    f_env_get: Option<u32>,
+    f_env_set: Option<u32>,
+    f_args: Option<u32>,
 ) -> Function {
     // params: 0=op 1=a_ptr 2=a_len 3=b_ptr 4=b_len; locals: 5=total 6=nread
     // 7=deadline (i64, op 36)
@@ -489,8 +577,11 @@ fn shim_fs_call(
     let mut f = Function::new([(2, ValType::I32), (1, ValType::I64)]);
     let mut i = f.instructions();
 
-    // ops 26/37/29: env.get / env.set / args — forwarded whole.
-    for (code, target) in [(26, f_env_get), (37, f_env_set), (29, f_args)] {
+    // ops 26/37/29: env.get / env.set / args — forwarded whole to the
+    // service shim, when the op set shipped one (an absent service falls
+    // through to the refusal, which the build-time op audit forecloses).
+    let forwarded = [(26, f_env_get), (37, f_env_set), (29, f_args)];
+    for (code, target) in forwarded.into_iter().filter_map(|(c, t)| t.map(|t| (c, t))) {
         i.local_get(op).i32_const(code).i32_eq().if_(BlockType::Empty);
         for p in 0..5u32 {
             i.local_get(p);
@@ -687,7 +778,8 @@ fn shim_env_set(park: u64, g_ovl: u32) -> Function {
 /// environ via `environ_sizes_get`/`environ_get` ("KEY=VALUE\0" strings).
 /// Found: value bytes stage at park+DATA (host_read's landing zone),
 /// answer `pack(0, len)`. Absent: `pack(2, 0)` — the ok-none tag.
-fn shim_env_get(park: u64, g_plen: u32, g_ovl: u32) -> Function {
+/// `i_sizes` / `i_get` are the import indices the environ pair landed on.
+fn shim_env_get(park: u64, g_plen: u32, g_ovl: u32, i_sizes: u32, i_get: u32) -> Function {
     // params: 0=op 1=a_ptr 2=a_len 3=b_ptr 4=b_len
     // locals: 5=p 6=end 7=klen 8=vlen 9=best 10=j 11=s 12=count
     let (a_ptr, a_len) = (1u32, 2u32);
@@ -730,7 +822,7 @@ fn shim_env_get(park: u64, g_plen: u32, g_ovl: u32) -> Function {
     i.end();
 
     // ── real environ fallthrough ──
-    i.i32_const((park + NREAD) as i32).i32_const((park + NREAD + 4) as i32).call(5); // environ_sizes_get
+    i.i32_const((park + NREAD) as i32).i32_const((park + NREAD + 4) as i32).call(i_sizes); // environ_sizes_get
     i.if_(BlockType::Empty); // errno → none
     i.i64_const(2).i64_const(32).i64_shl().return_();
     i.end();
@@ -744,7 +836,7 @@ fn shim_env_get(park: u64, g_plen: u32, g_ovl: u32) -> Function {
     i.end();
     i.i32_const((park + DATA) as i32);
     i.i32_const((park + DATA) as i32).local_get(count).i32_const(4).i32_mul().i32_add();
-    i.call(6); // environ_get(ptrs, buf)
+    i.call(i_get); // environ_get(ptrs, buf)
     i.if_(BlockType::Empty);
     i.i64_const(2).i64_const(32).i64_shl().return_();
     i.end();
@@ -786,13 +878,14 @@ fn shim_env_get(park: u64, g_plen: u32, g_ovl: u32) -> Function {
 /// (argv0 included, matching the embedded host's non-empty-argv0
 /// contract), re-framed as `[len u32][bytes]` per entry — the almide
 /// frames encoding — staged at park+DATA. Answer `pack(0, total)`.
-fn shim_args(park: u64, g_plen: u32) -> Function {
+/// `i_sizes` / `i_get` are the import indices the args pair landed on.
+fn shim_args(park: u64, g_plen: u32, i_sizes: u32, i_get: u32) -> Function {
     // params 0..4 unused beyond the ABI; locals: 5=argc 6=i 7=s 8=n 9=out
     // 10=frames_base
     let (argc, idx, s, n, out, frames_base) = (5u32, 6u32, 7u32, 8u32, 9u32, 10u32);
     let mut f = Function::new([(6, ValType::I32)]);
     let mut i = f.instructions();
-    i.i32_const((park + NREAD) as i32).i32_const((park + NREAD + 4) as i32).call(7); // args_sizes_get
+    i.i32_const((park + NREAD) as i32).i32_const((park + NREAD + 4) as i32).call(i_sizes); // args_sizes_get
     i.if_(BlockType::Empty);
     i.i32_const(0).global_set(g_plen);
     i.i64_const(0).return_();
@@ -809,7 +902,7 @@ fn shim_args(park: u64, g_plen: u32) -> Function {
     i.end();
     i.i32_const((park + DATA) as i32);
     i.i32_const((park + DATA) as i32).local_get(argc).i32_const(4).i32_mul().i32_add();
-    i.call(8); // args_get(ptrs, buf)
+    i.call(i_get); // args_get(ptrs, buf)
     i.if_(BlockType::Empty);
     i.i32_const(0).global_set(g_plen);
     i.i64_const(0).return_();
