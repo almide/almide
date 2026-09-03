@@ -548,10 +548,12 @@ fn format_program_inner(program: &Program) -> String {
 /// `program` is the exact value `format_program` rendered — after any
 /// `auto_imports` mutation — so intentional import edits verify clean.
 ///
-/// Comments sitting INLINE mid-expression (`f(1 /* x */, 2)`, a `// why`
-/// trailing an operator before a continuation line) are legal to parse but
-/// not yet attachable by fmt — this check makes fmt REFUSE such files
-/// loudly instead of deleting the comment (#1326 tracks attachment).
+/// A comment the parser has no slot for (an inline `/* */` between two
+/// comments, a `//` after a trailing `.` or after `then`) is legal to parse
+/// but not attachable by fmt — this check makes fmt REFUSE such files loudly
+/// instead of deleting the comment. The attachable positions are the
+/// `ExprComments` slots (#1404 inline, #1714 own-line element introducers,
+/// #1326 line-end and between-line continuation comments).
 pub fn verify_format(original_src: &str, program: &Program, formatted: &str) -> Result<(), String> {
     use almide_lang::lexer::{Lexer, TokenType};
     use almide_lang::parser::Parser;

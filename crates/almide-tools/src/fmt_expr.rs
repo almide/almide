@@ -26,6 +26,36 @@ fn comments_for(id: ExprId) -> Option<ExprComments> {
     EXPR_COMMENTS.with(|c| c.borrow().get(&id).cloned())
 }
 
+/// #1326: does the source break its line right after `id`, with a comment
+/// that made the break load-bearing — an end-of-line `//` on the operand's
+/// line, or own-line comments between it and its continuation?
+fn has_continuation_comments(id: ExprId) -> bool {
+    comments_for(id).is_some_and(|a| !a.line_trailing.is_empty() || !a.line_between.is_empty())
+}
+
+/// Print the continuation break after a node carrying #1326 comments: the
+/// end-of-line ones on the node's line, a newline, each own-line one on its
+/// own line, then the continuation indent (one level in from `depth`) —
+/// the parent prints the operator or `.` link right after. The break is what
+/// keeps a `//` from commenting out the rest of the expression; re-reading
+/// the output finds the same comments in the same gap, so the attachment is
+/// stable across passes.
+fn fmt_continuation_break(out: &mut String, id: ExprId, depth: usize) {
+    let Some(a) = comments_for(id) else { return };
+    for c in &a.line_trailing {
+        out.push(' ');
+        out.push_str(c);
+    }
+    out.push('\n');
+    let i = ind(depth + 1);
+    for c in &a.line_between {
+        out.push_str(&i);
+        out.push_str(c);
+        out.push('\n');
+    }
+    out.push_str(&i);
+}
+
 fn fmt_expr(out: &mut String, expr: &Expr, depth: usize) {
     // #1404: a bound comment brackets its node's rendering, on the side it was
     // written. Both go inline — a leading one before the node, a trailing one
@@ -146,6 +176,10 @@ fn fmt_expr_wrapper(out: &mut String, expr: &Expr, depth: usize) -> bool {
         }
         ExprKind::Member { object, field, .. } => {
             fmt_expr(out, object, depth);
+            // `obj // note` then `.method()` on the next line (#1326).
+            if has_continuation_comments(object.id) {
+                fmt_continuation_break(out, object.id, depth);
+            }
             w!(out, ".{field}");
         }
         ExprKind::TupleIndex { object, index, .. } => {
@@ -169,24 +203,35 @@ fn fmt_expr_wrapper(out: &mut String, expr: &Expr, depth: usize) -> bool {
 }
 
 /// Two children joined by an operator or separator.
+///
+/// One line, unless the left child carries #1326 continuation comments: then
+/// the line breaks after it and the operator LEADS the continuation line —
+/// the `|>` / leading-`.` idiom, and the one spelling every infix operator
+/// re-parses as a continuation. The inclusive range is the exception: a line
+/// cannot open with `...` (that is a spread — see `INFIX_TOKENS`), so its
+/// operator stays at the end of the line and the break follows it.
 fn fmt_expr_infix(out: &mut String, expr: &Expr, depth: usize) -> bool {
-    let mut joined = |l: &Expr, sep: &str, r: &Expr| {
+    let mut joined = |l: &Expr, sep: &str, r: &Expr, op_leads: bool| {
         fmt_expr(out, l, depth);
-        out.push_str(sep);
+        if !has_continuation_comments(l.id) {
+            out.push_str(sep);
+        } else if op_leads {
+            fmt_continuation_break(out, l.id, depth);
+            out.push_str(sep.trim_start());
+        } else {
+            out.push_str(sep.trim_end());
+            fmt_continuation_break(out, l.id, depth);
+        }
         fmt_expr(out, r, depth);
     };
     match &expr.kind {
-        ExprKind::Pipe { left, right, .. } => joined(left, " |> ", right),
-        ExprKind::Compose { left, right, .. } => joined(left, " >> ", right),
-        ExprKind::UnwrapOr { expr: e, fallback, .. } => joined(e, " ?? ", fallback),
+        ExprKind::Pipe { left, right, .. } => joined(left, " |> ", right, true),
+        ExprKind::Compose { left, right, .. } => joined(left, " >> ", right, true),
+        ExprKind::UnwrapOr { expr: e, fallback, .. } => joined(e, " ?? ", fallback, true),
         ExprKind::Range { start, end, inclusive, .. } => {
-            joined(start, if *inclusive { "..." } else { "..<" }, end)
+            joined(start, if *inclusive { "..." } else { "..<" }, end, !*inclusive)
         }
-        ExprKind::Binary { op, left, right, .. } => {
-            fmt_expr(out, left, depth);
-            w!(out, " {op} ");
-            fmt_expr(out, right, depth);
-        }
+        ExprKind::Binary { op, left, right, .. } => joined(left, &format!(" {op} "), right, true),
         _ => return false,
     }
     true
