@@ -390,6 +390,61 @@ fn index_newtype_ctors(program: &IrProgram) -> HashSet<Sym> {
         .collect()
 }
 
+/// A module's `__`-prefixed PRIVATE helpers also join the flat table:
+/// the module's own bodies call them as bare Named targets (`flag` →
+/// `__flag_at`), and #868 rejects the prefix in user code, so a program
+/// fn can never collide. Only a name defined in EXACTLY ONE module is
+/// indexed — a shared helper name across two modules stays module-keyed
+/// and abstains honestly rather than resolving from the wrong source
+/// (the #1087 class).
+fn index_private_module_helpers<'a>(
+    program: &'a IrProgram,
+    fns: &mut HashMap<Sym, &'a IrFunction>,
+) {
+    let mut count: HashMap<Sym, u32> = HashMap::new();
+    for m in &program.modules {
+        for f in &m.functions {
+            if f.name.as_str().starts_with("__") {
+                *count.entry(f.name).or_insert(0) += 1;
+            }
+        }
+    }
+    for m in &program.modules {
+        for f in &m.functions {
+            if f.name.as_str().starts_with("__") && count.get(&f.name) == Some(&1) {
+                fns.entry(f.name).or_insert(f);
+            }
+        }
+    }
+}
+
+/// The record-shaped type decls (records and record-payload variant cases)
+/// by name, program-level first, then module-level — `or_insert` keeps the
+/// first definition authoritative.
+fn index_record_decls(program: &IrProgram) -> HashMap<Sym, &[almide_ir::IrFieldDecl]> {
+    let mut record_decls: HashMap<Sym, &[almide_ir::IrFieldDecl]> = HashMap::new();
+    for td in program
+        .type_decls
+        .iter()
+        .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()))
+    {
+        match &td.kind {
+            almide_ir::IrTypeDeclKind::Record { fields } => {
+                record_decls.entry(td.name).or_insert(fields);
+            }
+            almide_ir::IrTypeDeclKind::Variant { cases, .. } => {
+                for c in cases {
+                    if let almide_ir::IrVariantKind::Record { fields } = &c.kind {
+                        record_decls.entry(c.name).or_insert(fields);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    record_decls
+}
+
 impl<'a> Interpreter<'a> {
     pub fn new(program: &'a IrProgram) -> Self {
         let mut fns = HashMap::new();
@@ -429,53 +484,11 @@ impl<'a> Interpreter<'a> {
                 fn_space.insert(f as *const IrFunction as usize, i as u32 + 1);
             }
         }
-        // A module's `__`-prefixed PRIVATE helpers also join the flat table:
-        // the module's own bodies call them as bare Named targets (`flag` →
-        // `__flag_at`), and #868 rejects the prefix in user code, so a program
-        // fn can never collide. Only a name defined in EXACTLY ONE module is
-        // indexed — a shared helper name across two modules stays module-keyed
-        // and abstains honestly rather than resolving from the wrong source
-        // (the #1087 class).
-        {
-            let mut count: HashMap<Sym, u32> = HashMap::new();
-            for m in &program.modules {
-                for f in &m.functions {
-                    if f.name.as_str().starts_with("__") {
-                        *count.entry(f.name).or_insert(0) += 1;
-                    }
-                }
-            }
-            for m in &program.modules {
-                for f in &m.functions {
-                    if f.name.as_str().starts_with("__") && count.get(&f.name) == Some(&1) {
-                        fns.entry(f.name).or_insert(f);
-                    }
-                }
-            }
-        }
+        index_private_module_helpers(program, &mut fns);
         let named_records = index_named_records(program);
         let variant_ctors = index_variant_ctors(program);
         let newtype_ctors = index_newtype_ctors(program);
-        let mut record_decls: HashMap<Sym, &'a [almide_ir::IrFieldDecl]> = HashMap::new();
-        for td in program
-            .type_decls
-            .iter()
-            .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()))
-        {
-            match &td.kind {
-                almide_ir::IrTypeDeclKind::Record { fields } => {
-                    record_decls.entry(td.name).or_insert(fields);
-                }
-                almide_ir::IrTypeDeclKind::Variant { cases, .. } => {
-                    for c in cases {
-                        if let almide_ir::IrVariantKind::Record { fields } = &c.kind {
-                            record_decls.entry(c.name).or_insert(fields);
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
+        let record_decls = index_record_decls(program);
 
         Interpreter {
             program,
