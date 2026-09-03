@@ -269,6 +269,72 @@ mod attr_tests {
         assert_eq!(out, roundtrip(&out), "map-comment formatting is not idempotent");
     }
 
+    /// #1404, the inline `/* */` slots the verifier used to refuse, one per
+    /// bracket kind: a call's argument list, a list literal, a record
+    /// literal — and an operator position, where the comment has nothing to
+    /// LEAD and so trails the operand before it (`1 /* x */ + 2` used to
+    /// park at the `+`, which no node claims).
+    #[test]
+    fn inline_block_comments_stay_in_place_in_every_bracket_kind() {
+        let src = "type P = { a: Int, b: Int }\nfn g(a: Int, b: Int) -> Int = a + b\nfn main() -> Unit = {\n  let c = g(1 /* arg */, 2)\n  let l = [1 /* one */, 2]\n  let r = P { a: 1 /* one */, b: 2 }\n  let o = 1 /* lhs */ + /* rhs */ 2\n}\n";
+        let out = roundtrip(src);
+        for want in ["g(1 /* arg */, 2)", "[1 /* one */, 2]", "a: 1 /* one */, b: 2", "1 /* lhs */ + /* rhs */ 2"] {
+            assert!(out.contains(want), "expected `{want}` in:\n{out}");
+        }
+        assert_eq!(out, roundtrip(&out), "not idempotent");
+    }
+
+    /// #1326, the line-end rule: a `//` before a continuation line binds to
+    /// the operand whose line it ends, whichever side of the operator it was
+    /// written on, and fmt keeps the break there with the operator LEADING
+    /// the continuation — so the comment can never swallow the operand that
+    /// follows. Covered: an infix operand, a `|>` pipe, a `.` method chain.
+    #[test]
+    fn a_trailing_line_comment_before_a_continuation_ends_its_operands_line() {
+        let src = "fn f(xs: List[Int]) -> Int = {\n  let a = 1 + // after op\n    2\n  let b = 1 // before op\n    + 2\n  let c = xs // pipe\n    |> list.len\n  let d = \"abc\" // chain\n    .len()\n  a + b + c + d\n}\n";
+        let out = roundtrip(src);
+        for want in [
+            "let a = 1 // after op\n    + 2\n",
+            "let b = 1 // before op\n    + 2\n",
+            "let c = xs // pipe\n    |> list.len\n",
+            "let d = \"abc\" // chain\n    .len()\n",
+        ] {
+            assert!(out.contains(want), "expected {want:?} in:\n{out}");
+        }
+        assert_eq!(out, roundtrip(&out), "not idempotent");
+    }
+
+    /// #1326, the between-line slot: own-line comments inside a continuation
+    /// (the `// step` idiom between pipe segments) stay on their own lines
+    /// above the segment they introduce, whether the operator ended the
+    /// previous line or opens the next.
+    #[test]
+    fn own_line_comments_between_continuation_lines_stay_on_their_own_lines() {
+        let src = "fn f(xs: List[Int]) -> Int = {\n  let p = xs\n    // drop the small\n    |> list.filter((x) => x > 1)\n    // count\n    |> list.len\n  let k = 1 +\n    // own line after the operator\n    2\n  p + k\n}\n";
+        let out = roundtrip(src);
+        for want in [
+            "let p = xs\n    // drop the small\n    |> list.filter((x) => x > 1)\n    // count\n    |> list.len\n",
+            "let k = 1\n    // own line after the operator\n    + 2\n",
+        ] {
+            assert!(out.contains(want), "expected {want:?} in:\n{out}");
+        }
+        assert_eq!(out, roundtrip(&out), "not idempotent");
+    }
+
+    /// #1326 binds to the operand the LINE ends with, not the innermost one:
+    /// in `1 + 2 * 3 // c` the Pratt loop that skips the gap is the `*`
+    /// level, which then yields the `+` to its caller — the comment must
+    /// follow the operator to the node that really ends the line, or the
+    /// printer of `+ 4` never sees it. Chained gaps each keep their own.
+    #[test]
+    fn a_continuation_comment_binds_to_the_operand_the_line_ends_with() {
+        let src = "fn f(a: Int, b: Int, c: Int) -> Int = {\n  let q = 1 + 2 * 3 // precedence\n    + 4\n  let w = a // c1\n    + b // c2\n    + c\n  q + w\n}\n";
+        let out = roundtrip(src);
+        assert!(out.contains("let q = 1 + 2 * 3 // precedence\n    + 4\n"), "wrong operand:\n{out}");
+        assert!(out.contains("let w = a // c1\n    + b // c2\n    + c\n"), "chained gaps drifted:\n{out}");
+        assert_eq!(out, roundtrip(&out), "not idempotent");
+    }
+
     /// Parse → format → parse round-trip: the second parse must
     /// produce the same attribute structure as the first. This is
     /// the formatter's idempotency contract, stricter than matching
