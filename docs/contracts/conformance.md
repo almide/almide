@@ -57,7 +57,7 @@
 | ALS-E7 | C-235 | `spec/wasm_cross/grouping_unary.almd` (byte-compare) |
 | ALS-E8 | C-236 | `spec/wasm_cross/tuple_ops.almd` (byte-compare) |
 | ALS-E9 | C-237, C-286 | `spec/wasm_cross/option_result_ctors.almd` (byte-compare)<br>`spec/wasm_cross/unwrap_or_source_survives.almd` (byte-compare) |
-| ALS-E10 | C-238 | `spec/wasm_cross/range_first_class.almd` (byte-compare)<br>`spec/wasm_cross/range_bind_no_materialize.almd` (byte-compare)<br>`spec/wasm_cross/range_bind_huge.almd` (byte-compare)<br>`spec/wasm_cross/range_materialize_oom.almd` (byte-compare) |
+| ALS-E10 | C-238 | `spec/wasm_cross/range_first_class.almd` (byte-compare)<br>`spec/wasm_cross/range_bind_no_materialize.almd` (byte-compare)<br>`spec/wasm_cross/range_bind_huge.almd` (byte-compare)<br>`spec/wasm_cross/range_bind_walled_no_materialize.almd` (byte-compare)<br>`spec/wasm_cross/range_materialize_oom.almd` (byte-compare) |
 | ALS-E11 | C-239 | `spec/wasm_cross/collection_literals.almd` (byte-compare) |
 | ALS-E12 | C-240 | `spec/wasm_cross/collection_literals.almd` (byte-compare) |
 | ALS-E13 | C-242 | `spec/wasm_cross/if_block_forms.almd` (byte-compare) |

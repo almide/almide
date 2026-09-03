@@ -1,0 +1,30 @@
+// @contract: C-238
+// #1857: the head-only bound-range deferral must hold on the native v3 codegen
+// FALLBACK, not only on the v1 trust-spine. range_bind_huge.almd proves the
+// default native path counts; but v1 walls on any function it cannot lower
+// and the WHOLE program then renders through the v3 codegen — where every
+// `let`-bound range still materialized. The 2026-09-03 fuzz-nightly (run
+// 33727913791, seed 539646620663 index 1415, a range_bind_no_materialize.almd
+// mutation) put `let empty = -2147483648..<0` next to a range that IS indexed
+// and measured: 16 GiB of `Vec<i64>` natively (33.6 s) against two locals on
+// wasm (0.7 s), byte-identical output.
+//
+// Like range_bind_huge.almd this is a cell the reference interpreter cannot
+// vote on (4294967294 iterations exhaust its fuel by construction); the
+// abstention is ledgered for THIS file.
+effect fn main() -> Unit = {
+  // Indexed AND measured: this range must materialize via `list.range`, and
+  // the native v1 trust-spine walls on that call ("not in the native runtime
+  // floor"), so `main` renders through the v3 codegen.
+  let idx = 0..<5
+  println("len=" + int.to_string(list.len(idx)) + " at2=" + int.to_string(idx[2]))
+  // Head-only, and too long to materialize on any machine this suite runs
+  // on (~32 GB): a materializing leg dies "Error: out of memory", a counting
+  // leg needs two locals. Same span and sum as range_bind_huge.almd.
+  let huge = 0..<4294967295
+  var hs = 0
+  for i in huge {
+    hs = hs + i
+  }
+  println("huge=" + int.to_string(hs))
+}

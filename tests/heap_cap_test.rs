@@ -217,6 +217,71 @@ fn map_literal_intermediates_do_not_leak_under_the_cap() {
     assert_eq!(out, MAP_LITERAL_CHURN_EXPECTED, "map-literal churn output");
 }
 
+/// #1857: a `let`-bound range read ONLY as a `for-in` head allocates nothing
+/// on native even when the program falls off the v1 trust-spine onto the v3
+/// codegen. The `list.len` / index reads of `idx` force a `list.range`
+/// materialization v1 cannot link, so `main` renders through v3 — where,
+/// before the fix, `big` was materialized as a 1 GiB `Vec<i64>` (the nightly
+/// fuzzer's seed 539646620663 index 1415 carried 16 GiB: 33.6 s native vs
+/// 0.7 s wasm, byte-identical). Under a 4 MiB ceiling that materialization is
+/// the deterministic OOM; the head-only deferral (`RangeCountingVarsPass`)
+/// is what makes this a green run.
+const WALLED_RANGE_PROBE: &str = r#"effect fn main() -> Unit = {
+  let idx = 0..<5
+  println("len=" + int.to_string(list.len(idx)) + " at2=" + int.to_string(idx[2]))
+  let big = 0..<134217728
+  var e = 0
+  for _i in big {
+    e = e + 1
+  }
+  println("e=" + int.to_string(e))
+}
+"#;
+const WALLED_RANGE_EXPECTED: &str = "len=5 at2=2\ne=134217728";
+const WALLED_RANGE_CAP: u32 = 4 * 1024 * 1024;
+
+#[test]
+fn walled_head_only_range_allocates_nothing_natively() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let src = dir.path().join("walled-range.almd");
+    std::fs::write(&src, WALLED_RANGE_PROBE).expect("write probe");
+    let bin = dir.path().join("walled-range-capped");
+
+    // ALMIDE_VERIFIED_DEBUG names the wall that rerouted (the note below).
+    let build = Command::new(almide_bin())
+        .env("ALMIDE_VERIFIED_DEBUG", "1")
+        .args(["build", "--heap-cap", &WALLED_RANGE_CAP.to_string()])
+        .arg(&src)
+        .arg("-o")
+        .arg(&bin)
+        .output()
+        .expect("spawn almide build");
+    assert!(
+        build.status.success(),
+        "cap build failed: {}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+    let build_note = String::from_utf8_lossy(&build.stderr);
+    // The probe is only a witness while it actually walls v1: if the native
+    // floor ever grows `list.range`, this program stops exercising the v3
+    // fallback and the gate must move to a shape that still does.
+    assert!(
+        build_note.contains("verified native render walled"),
+        "the walled-range probe no longer walls the v1 native render — pick a shape that does: {build_note}"
+    );
+
+    let run = Command::new(&bin).output().expect("spawn capped probe");
+    let stdout = String::from_utf8_lossy(&run.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert_eq!(
+        run.status.code(),
+        Some(0),
+        "a head-only bound range must not materialize on the v3 fallback \
+         (a red here is #1857 back: the 1 GiB Vec<i64> under a {WALLED_RANGE_CAP}-byte ceiling): {stderr}"
+    );
+    assert_eq!(stdout, WALLED_RANGE_EXPECTED, "walled-range probe output");
+}
+
 #[test]
 fn native_cap_enforcement_is_live() {
     let dir = tempfile::tempdir().expect("tempdir");
