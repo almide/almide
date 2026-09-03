@@ -190,6 +190,9 @@ jobs:
           name: almide-tests-archive
           path: /tmp/almide-tests.tar.zst
           retention-days: 1
+          # nextest already zstd-compressed the archive; a second gzip pass
+          # over incompressible bytes only costs upload-artifact time.
+          compression-level: 0
 
       # Wired to `build`, not `checks`: the ratchet compiles the workspace, and
       # `checks` downloads a prebuilt binary with no cargo toolchain. Runs after
