@@ -512,6 +512,7 @@
 66416	spec/wasm_cross/sized_int_overflow_wrap.almd
 66704	spec/wasm_cross/sized_int_record_fields.almd
 66192	spec/wasm_cross/sized_numeric_literals.almd
+66064	spec/wasm_cross/snapshot_mismatch_abort.almd
 67104	spec/wasm_cross/sort_by_call_count.almd
 3267584	spec/wasm_cross/sort_by_str_key_heap.almd
 66480	spec/wasm_cross/split_empty_sep.almd
