@@ -349,6 +349,10 @@ fn lower_function_all_impl(
             func.name, why
         )));
     }
+    // #1865: a `!`-consumed `fan.map` whose inline callback propagates is refused
+    // BEFORE any desugar touches the body — the unwrap ladder would otherwise
+    // wall the same fn first, spanless, under a reason naming the wrong construct.
+    wall_fan_map_propagating_callbacks(&func.body)?;
     let mut ctx = new_lower_ctx(func, globals, global_inits, record_layouts, variant_layouts);
     let params = ctx.bind_params(&func.params)?;
     // TCO: a tail-self-recursive heap-result function is rewritten to a scalar loop + post-loop
