@@ -1,42 +1,35 @@
 // bytes_typed — SELF-HOSTED typed Endian wrappers (`bytes.read_uint16/uint32/int32/
 // float32` + the `write_*` / `set_*` twins), byte-matching stdlib/bytes.almd's v0
-// wrappers over the width primitives. The `Endian` ARGUMENT is represented as a
-// 1-byte block (0 = LittleEndian, 1 = BigEndian — stdlib/bytes.almd's decl order):
-// the using program's variant_layouts has no stdlib-module types, so a test-side
-// `LittleEndian` lowers as a bare named call — REGISTERING the ctor names to these
-// 1-byte builders links it, and only THIS module ever reads the block (the caller
-// passes the handle through and flat-drops it — exact for a nested-heap-free block).
-// Declaring a local `type Endian` twin instead would collide with the checker's
-// stdlib decl ("ambiguous constructor"), and the functional append twins cannot be
-// cross-called (the stdlib sig types them as v0's in-place `-> Unit`), so the write
-// path re-implements the grow-append locally (the __bam shape). Reads and sets
-// cross-call the PROVEN registered primitives (type-identical sigs). v0's write
-// forms are IN-PLACE appends; v1 rewrites the statement call to a functional rebind
-// (mod_p3's bytes.push arm), and the write twins RETURN the fresh grown Bytes.
-fn bytes_endian_le() -> Bytes = {
-  let e = prim.alloc_bytes(1)
-  prim.store8(prim.handle(e) + 12, 0)
-  e
+// wrappers over the width primitives. The `Endian` ARGUMENT is stdlib/bytes.almd's
+// DECLARED variant (`type Endian = | LittleEndian | BigEndian`), the one value every
+// leg agrees on: the frontend hands that declaration to any program that spells the
+// type (#1839, `ir_link`'s type-owner pull), so a `LittleEndian` at a call site, a
+// `let e: Endian` bind and a `fn (e: Endian)` param all lower as the SAME variant
+// this module matches on. (Before #1839 the argument was a private 1-byte block and
+// the ctor NAMES were registered to builders of it — sound only while the decl never
+// reached the program; with `import bytes` the decl arrived, the call site passed
+// the variant, and the structural leg walled on the representation split.) Reads
+// and sets cross-call the PROVEN registered primitives (type-identical sigs). The
+// functional append twins cannot be cross-called (the stdlib sig types them as v0's
+// in-place `-> Unit`), so the write path re-implements the grow-append locally (the
+// __bam shape). v0's write forms are IN-PLACE appends; v1 rewrites the statement
+// call to a functional rebind (mod_p3's bytes.push arm), and the write twins RETURN
+// the fresh grown Bytes.
+fn __endian_is_le(e: Endian) -> Bool = match e {
+  LittleEndian => true,
+  BigEndian => false,
 }
 
-fn bytes_endian_be() -> Bytes = {
-  let e = prim.alloc_bytes(1)
-  prim.store8(prim.handle(e) + 12, 1)
-  e
-}
+fn bytes_read_uint16(b: Bytes, offset: Int, e: Endian) -> Int = if __endian_is_le(e) then bytes.read_u16_le(b, offset) else bytes.read_u16_be(b, offset)
 
-fn __endian_is_le(e: Bytes) -> Bool = prim.load8(prim.handle(e) + 12) == 0
+fn bytes_read_uint32(b: Bytes, offset: Int, e: Endian) -> Int = if __endian_is_le(e) then bytes.read_u32_le(b, offset) else bytes.read_u32_be(b, offset)
 
-fn bytes_read_uint16(b: Bytes, offset: Int, e: Bytes) -> Int = if __endian_is_le(e) then bytes.read_u16_le(b, offset) else bytes.read_u16_be(b, offset)
-
-fn bytes_read_uint32(b: Bytes, offset: Int, e: Bytes) -> Int = if __endian_is_le(e) then bytes.read_u32_le(b, offset) else bytes.read_u32_be(b, offset)
-
-fn bytes_read_int32(b: Bytes, offset: Int, e: Bytes) -> Int = if __endian_is_le(e) then bytes.read_i32_le(b, offset) else bytes.read_i32_be(b, offset)
+fn bytes_read_int32(b: Bytes, offset: Int, e: Endian) -> Int = if __endian_is_le(e) then bytes.read_i32_le(b, offset) else bytes.read_i32_be(b, offset)
 
 // A v1 `Float32` VALUE holds the f32 BIT PATTERN in its i64 slot (lib.rs's
 // identity-cast contract), so the Float-returning width reads narrow via
 // float.to_float32 and the Float32 params widen via float.from_float32.
-fn bytes_read_float32(b: Bytes, offset: Int, e: Bytes) -> Float32 = {
+fn bytes_read_float32(b: Bytes, offset: Int, e: Endian) -> Float32 = {
   let f = if __endian_is_le(e) then bytes.read_f32_le(b, offset) else bytes.read_f32_be(b, offset)
   float.to_float32(f)
 }
@@ -72,27 +65,27 @@ fn __bt_append(b: Bytes, bits: Int, k: Int, le: Bool) -> Bytes = {
   out
 }
 
-fn bytes_write_uint16(b: Bytes, v: Int, e: Bytes) -> Bytes = __bt_append(b, v, 2, __endian_is_le(e))
+fn bytes_write_uint16(b: Bytes, v: Int, e: Endian) -> Bytes = __bt_append(b, v, 2, __endian_is_le(e))
 
-fn bytes_write_uint32(b: Bytes, v: Int, e: Bytes) -> Bytes = __bt_append(b, v, 4, __endian_is_le(e))
+fn bytes_write_uint32(b: Bytes, v: Int, e: Endian) -> Bytes = __bt_append(b, v, 4, __endian_is_le(e))
 
-fn bytes_write_int32(b: Bytes, v: Int, e: Bytes) -> Bytes = __bt_append(b, v, 4, __endian_is_le(e))
+fn bytes_write_int32(b: Bytes, v: Int, e: Endian) -> Bytes = __bt_append(b, v, 4, __endian_is_le(e))
 
-fn bytes_write_float32(b: Bytes, v: Float32, e: Bytes) -> Bytes = {
+fn bytes_write_float32(b: Bytes, v: Float32, e: Endian) -> Bytes = {
   let f = float.from_float32(v)
   __bt_append(b, prim.f32bits(prim.f2f32(f)), 4, __endian_is_le(e))
 }
 
-fn bytes_set_uint16(b: Bytes, offset: Int, v: Int, e: Bytes) -> Unit = if __endian_is_le(e) then bytes.set_u16_le(b, offset, v)
+fn bytes_set_uint16(b: Bytes, offset: Int, v: Int, e: Endian) -> Unit = if __endian_is_le(e) then bytes.set_u16_le(b, offset, v)
 else bytes.set_u16_be(b, offset, v)
 
-fn bytes_set_uint32(b: Bytes, offset: Int, v: Int, e: Bytes) -> Unit = if __endian_is_le(e) then bytes.set_u32_le(b, offset, v)
+fn bytes_set_uint32(b: Bytes, offset: Int, v: Int, e: Endian) -> Unit = if __endian_is_le(e) then bytes.set_u32_le(b, offset, v)
 else bytes.set_u32_be(b, offset, v)
 
-fn bytes_set_int32(b: Bytes, offset: Int, v: Int, e: Bytes) -> Unit = if __endian_is_le(e) then bytes.set_i32_le(b, offset, v)
+fn bytes_set_int32(b: Bytes, offset: Int, v: Int, e: Endian) -> Unit = if __endian_is_le(e) then bytes.set_i32_le(b, offset, v)
 else bytes.set_i32_be(b, offset, v)
 
-fn bytes_set_float32(b: Bytes, offset: Int, v: Float32, e: Bytes) -> Unit = {
+fn bytes_set_float32(b: Bytes, offset: Int, v: Float32, e: Endian) -> Unit = {
   let f = float.from_float32(v)
   if __endian_is_le(e) then bytes.set_f32_le(b, offset, f)
   else bytes.set_f32_be(b, offset, f)
