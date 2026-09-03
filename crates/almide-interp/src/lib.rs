@@ -160,6 +160,19 @@ pub struct Interpreter<'a> {
     /// before the fn-table lookup. First declaration wins on a shared case
     /// name, exactly like the scan it replaces.
     pub(crate) variant_ctors: HashMap<Sym, (Sym, dispatch::CtorKind)>,
+    /// The opaque NEWTYPE decls (`mod type SafeHtml = String`, `local type
+    /// JsonPath = Int`) under the identity their ctor call and ctor pattern
+    /// carry into the IR — bare for a bundled module's own or the entry
+    /// program's plain one, `self.Value` for the entry program's shadow of a
+    /// stdlib-owned name, `m.Token` for a module's (#1835). Both backends
+    /// ERASE the newtype: native renders the ctor call as the tuple-struct
+    /// construction and the pattern as its destructure, the wasm leg lowers
+    /// the value to its payload outright — so the interp's ctor arm is an
+    /// identity on the argument and its pattern arm a pass-through to the
+    /// payload sub-pattern. The same filter as codegen's
+    /// `collect_newtype_ctors` (pass_builtin_lowering.rs), minus the dotted
+    /// restriction it needs only because bare names never reach its flatten.
+    pub(crate) newtype_ctors: HashSet<Sym>,
     /// The global scope holding evaluated top-level lets. Every top-level fn
     /// call and `FnRef` closure parents off this so globals are visible from
     /// nested calls (not just from `main`'s body). Seeded once, lazily.
@@ -355,6 +368,22 @@ fn index_variant_ctors(program: &IrProgram) -> HashMap<Sym, (Sym, dispatch::Ctor
     out
 }
 
+/// The opaque-newtype decl names (program + modules) — a non-public `Alias`
+/// whose target is not a fn type, the decls native renders as `pub struct
+/// N(T)`. A PUBLIC alias is transparent (no ctor exists), and a fn-typed
+/// alias names a signature, not a wrapper.
+fn index_newtype_ctors(program: &IrProgram) -> HashSet<Sym> {
+    use almide_ir::{IrTypeDeclKind, IrVisibility};
+    program
+        .type_decls
+        .iter()
+        .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()))
+        .filter(|td| matches!(td.visibility, IrVisibility::Mod | IrVisibility::Private))
+        .filter(|td| matches!(&td.kind, IrTypeDeclKind::Alias { target } if !matches!(target, Ty::Fn { .. })))
+        .map(|td| td.name)
+        .collect()
+}
+
 impl<'a> Interpreter<'a> {
     pub fn new(program: &'a IrProgram) -> Self {
         let mut fns = HashMap::new();
@@ -420,6 +449,7 @@ impl<'a> Interpreter<'a> {
         }
         let named_records = index_named_records(program);
         let variant_ctors = index_variant_ctors(program);
+        let newtype_ctors = index_newtype_ctors(program);
         let mut record_decls: HashMap<Sym, &'a [almide_ir::IrFieldDecl]> = HashMap::new();
         for td in program
             .type_decls
@@ -454,6 +484,7 @@ impl<'a> Interpreter<'a> {
             record_decls,
             named_records,
             variant_ctors,
+            newtype_ctors,
             globals: env::Scope::root(),
             module_globals: program.modules.iter().map(|_| env::Scope::root()).collect(),
             fn_space,

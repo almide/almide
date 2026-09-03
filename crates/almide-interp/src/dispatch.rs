@@ -113,6 +113,15 @@ impl<'a> Interpreter<'a> {
             });
         }
 
+        // 2c. An opaque NEWTYPE's constructor (`SafeHtml(s)`, `Value(s)` under
+        //     its `self.Value` identity, #1835): both backends erase the
+        //     wrapper — the value IS its payload — so the call is an identity
+        //     on its one argument. Registered by name from the program's
+        //     Alias decls; an arity other than one is not a newtype call.
+        if args.len() == 1 && self.newtype_ctors.contains(&name) {
+            return self.eval_expr(&args[0], scope);
+        }
+
         // 3. A user / stdlib free function lowered into the program. A stdlib
         //    IMPL name (`string_slice` — how a lowered MODULE body spells
         //    `string.slice`) first tries the SAME native bridge a
