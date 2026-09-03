@@ -6,9 +6,20 @@
 # of a std method, an eta-expanded closure), and until this gate existed it
 # ran in ZERO workflows — the survey's finding. Same discipline as every
 # ratchet in this repo: the count is a shrink-only ledger
-# (scripts/clippy-warnings-baseline.txt), it fails in BOTH directions, and a
-# toolchain upgrade that lights a new lint tree-wide is answered by raising
-# the baseline ON PURPOSE in the same change, then burning it back down.
+# (scripts/clippy-warnings-baseline.txt) and growth fails; a toolchain
+# upgrade that lights a new lint tree-wide is answered by raising the
+# baseline ON PURPOSE in the same change, then burning it back down.
+#
+# A count BELOW the baseline is a notice on a PR, not a failure: the count is
+# measured on the PR merged with develop, so a warning that another PR
+# removed drops EVERY open PR below the file at once — the 2026-09-03 chain
+# saw four PRs go red in turn on a moving target. The file still only
+# shrinks: the nightly clippy-baseline workflow runs this gate with
+# CLIPPY_RATCHET_STRICT=1, where a stale baseline is red and the fix is
+# CLIPPY_RATCHET_WRITE=1 (rewrite the file to the measured count) in a PR.
+# CLIPPY_RATCHET_COUNT_OVERRIDE=<n> is the negative-control hook: it replaces
+# the measured count so both verdict branches can be demonstrated without a
+# forged tree (used only by the gate's own negative test).
 #
 # Dependency warnings are not counted (not ours to fix); the per-crate
 # epilogue lines are dropped (no spans); a defect is counted ONCE even when
@@ -113,6 +124,9 @@ if units < unit_floor:
     sys.exit(1)
 
 count = len(warnings)
+if os.environ.get("CLIPPY_RATCHET_COUNT_OVERRIDE"):
+    count = int(os.environ["CLIPPY_RATCHET_COUNT_OVERRIDE"])
+    print(f"clippy-warnings: NEGATIVE-CONTROL count override {count}")
 baseline = int(open(baseline_path, encoding="utf-8").read().strip())
 print(f"clippy-warnings: {count} warning(s) over {units} workspace units (baseline {baseline})")
 
@@ -135,8 +149,18 @@ if count > baseline:
     sys.exit(1)
 
 if count < baseline:
-    print(f"::error::clippy-warnings: {count} warnings is BELOW the baseline {baseline} —"
-          f" ratchet {baseline_path} down to {count} in the SAME change. The ledger only"
-          " shrinks, and it has to say so.", file=sys.stderr)
-    sys.exit(1)
+    if os.environ.get("CLIPPY_RATCHET_WRITE") == "1":
+        open(baseline_path, "w", encoding="utf-8").write(f"{count}\n")
+        print(f"clippy-warnings: baseline ratcheted {baseline} -> {count} in {baseline_path}")
+        sys.exit(0)
+    if os.environ.get("CLIPPY_RATCHET_STRICT") == "1":
+        print(f"::error::clippy-warnings: {count} warnings is BELOW the baseline {baseline} —"
+              f" the ledger only shrinks, and it has to say so: run"
+              " CLIPPY_RATCHET_WRITE=1 bash scripts/check-clippy-warnings.sh and commit"
+              f" {baseline_path}.", file=sys.stderr)
+        sys.exit(1)
+    print(f"::warning::clippy-warnings: {count} warnings is BELOW the baseline {baseline}"
+          " (a PR measures itself merged with develop, so this is expected while sibling"
+          " PRs land); the nightly clippy-baseline workflow ratchets the file down.")
+    sys.exit(0)
 PY
