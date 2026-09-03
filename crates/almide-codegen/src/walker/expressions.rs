@@ -371,7 +371,16 @@ fn render_expr_index_access(ctx: &RenderContext, object: &IrExpr, index: &IrExpr
 /// `MapAccess { object, key }` case of `render_expr`.
 fn render_expr_map_access(ctx: &RenderContext, object: &IrExpr, key: &IrExpr) -> String {
     let obj_str = render_expr(ctx, object);
-    let key_str = render_expr(ctx, key);
+    let mut key_str = render_expr(ctx, key);
+    // The `map_get` template borrows the key itself (`.get(&{key})`), so the
+    // key must render as an OWNED `K`. A borrow-inferred String param is
+    // already `&str`, and `&&str` is not `&String` (rustc E0308, #1874) —
+    // materialize the owned key, the same `.to_string()` pass_clone gives a
+    // non-last use of that param. Every other key shape (a literal, a `let`
+    // String, a record field, a loop or lambda binder) renders owned already.
+    if is_borrowed_string_param(ctx, key) {
+        key_str = format!("{}.to_string()", key_str);
+    }
     ctx.templates.render_with("map_get", None, &[], &[("object", obj_str.as_str()), ("key", key_str.as_str())])
         .unwrap_or_else(|| "map_get(...)".into())
 }

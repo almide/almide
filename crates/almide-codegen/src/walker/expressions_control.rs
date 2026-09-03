@@ -592,6 +592,19 @@ fn render_expr_unwrap(ctx: &RenderContext, expr: &IrExpr) -> String {
     }
 }
 
+/// A String-typed Var that is a fn param rendered by BorrowInference as
+/// `&str` (Rust target). Its owned form is `.to_string()`, not `.clone()`
+/// (which on `&str` yields `&str`), and a template that borrows it again
+/// (`&{key}`) would produce `&&str` — a shape no `&String` slot accepts.
+fn is_borrowed_string_param(ctx: &RenderContext, expr: &IrExpr) -> bool {
+    matches!(ctx.target, super::super::pass::Target::Rust)
+        && matches!(expr.ty, Ty::String)
+        && match &expr.kind {
+            IrExprKind::Var { id } => ctx.ref_params.contains(id),
+            _ => false,
+        }
+}
+
 fn render_expr_clone(ctx: &RenderContext, expr: &IrExpr) -> String {
     let IrExprKind::Clone { expr: inner } = &expr.kind else { unreachable!() };
     // Val-wrapped var: deref then clone to get T. Bind handler re-wraps in AlmideRcCow::new().
@@ -615,13 +628,7 @@ fn render_expr_clone(ctx: &RenderContext, expr: &IrExpr) -> String {
     // `&str` returns `&str`, not `String`. Use `.to_string()` so
     // the surrounding context (which expects an owned `String`)
     // type-checks.
-    let is_borrowed_string_param = matches!(ctx.target, super::super::pass::Target::Rust)
-        && matches!(inner.ty, Ty::String)
-        && match &inner.kind {
-            IrExprKind::Var { id } => ctx.ref_params.contains(id),
-            _ => false,
-        };
-    if is_borrowed_string_param {
+    if is_borrowed_string_param(ctx, inner) {
         return format!("{}.to_string()", expr_s);
     }
     ctx.templates.render_with("clone_expr", None, &[], &[("expr", expr_s.as_str())])
