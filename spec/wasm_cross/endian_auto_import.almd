@@ -1,0 +1,52 @@
+// @contract: C-213
+// Cross-target differential fixture: the `Endian` type under the AUTO-IMPORT.
+//
+// No `import bytes` anywhere in this file — `bytes` is auto-imported, and the
+// program still SPELLS the stdlib-declared `type Endian` in every position a
+// program can: a `let` annotation, a ctor bound to a name, a fn parameter, a fn
+// result, a `match` subject, an `==`, an interpolation, a list element, and an
+// `Endian` VALUE (not just a bare ctor) handed to the typed read / write / set
+// wrappers. Before #1839 every one of these walled on the wasm leg unless the
+// import was written explicitly, and the bound-value read walled on the
+// structural leg even WITH it (two representations of one type).
+fn name(e: Endian) -> String = match e {
+  LittleEndian => "le",
+  BigEndian => "be",
+}
+
+fn pick(big: Bool) -> Endian = if big then BigEndian else LittleEndian
+
+fn flip(e: Endian) -> Endian = match e {
+  LittleEndian => BigEndian,
+  BigEndian => LittleEndian,
+}
+
+fn main() -> Unit = {
+  // ── the type as a value: bind, param, result, match, ==, repr ──
+  let e: Endian = BigEndian
+  let f = pick(false)
+  println(name(e) + " " + name(f) + " " + name(flip(e)))
+  println("${e} ${f} ${flip(f)}")
+  println("${e == BigEndian} ${e == f} ${flip(e) == f}")
+  let names = [LittleEndian, BigEndian, pick(true)] |> list.map((x) => name(x))
+  println("${names}")
+  // ── an Endian VALUE handed to the typed reads (the bound form) ──
+  let b = bytes.from_list([1, 2, 3, 4])
+  println("${int.from_uint16(bytes.read_uint16(b, 0, e))} ${int.from_uint16(bytes.read_uint16(b, 0, f))}")
+  println("${int.from_uint32(bytes.read_uint32(b, 0, pick(true)))} ${int.from_int32(bytes.read_int32(b, 0, flip(e)))}")
+  println(float.to_string(float.from_float32(bytes.read_float32(bytes.from_list([63, 192, 0, 0]), 0, e))))
+  // ── and the bare ctor form beside it (one representation) ──
+  println("${int.from_uint16(bytes.read_uint16(b, 2, LittleEndian))} ${int.from_uint16(bytes.read_uint16(b, 2, BigEndian))}")
+  // ── writes and sets with the bound value ──
+  var w = bytes.new(0)
+  bytes.write_uint16(w, 258, e)
+  bytes.write_uint32(w, 258, f)
+  bytes.write_int32(w, -2, flip(f))
+  bytes.write_float32(w, 1.5, e)
+  println("${bytes.to_list(w)}")
+  var s = bytes.new(8)
+  bytes.set_uint16(s, 0, 258, e)
+  bytes.set_uint32(s, 2, 258, f)
+  bytes.set_int32(s, 4, -2, pick(false))
+  println("${bytes.to_list(s)}")
+}
