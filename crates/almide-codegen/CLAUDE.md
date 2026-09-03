@@ -19,7 +19,7 @@ MatrixShapeSpec → ConstFold → IntrinsicLowering → BorrowInsertion →
 TailCallOpt → CaptureClone → CloneInsertion → MatchSubject → EffectInference →
 StdlibLowering → AutoParallel → ResultPropagation → BuiltinLowering →
 Peephole → RustLowering → FanLowering → NormalizeRuntimeCalls →
-IrLinkFlatten → TopLetStorage
+IrLinkFlatten → RangeCountingVars → TopLetStorage
 
 - Each pass: `impl NanoPass { fn run(&self, program, target) -> PassResult }`
 

@@ -373,6 +373,9 @@ fn render_stmt_bind(ctx: &RenderContext, stmt: &IrStmt) -> String {
     if let Some(rendered) = try_render_bind_shared_mut(ctx, var, ty, value) {
         return rendered;
     }
+    if let Some(rendered) = try_render_bind_counting_range(ctx, var, value) {
+        return rendered;
+    }
     let name_s = ctx.var_name(*var).to_string();
     // Bindings whose runtime representation is a borrow the `Ty` system
     // cannot spell (TCO borrow-preserved `Bytes` temps): render the
@@ -413,6 +416,23 @@ fn render_stmt_bind(ctx: &RenderContext, stmt: &IrStmt) -> String {
     };
     ctx.templates.render_with(construct, None, &[], &[("name", name_s.as_str()), ("type", type_s.as_str()), ("value", value_s.as_str())])
         .unwrap_or_else(|| format!("let _ = _;"))
+}
+
+/// #1857: a `let`-bound range `RangeCountingVarsPass` admitted — every read
+/// is a `for-in` head — binds the bare `std::ops::Range<i64>` (two scalars)
+/// instead of the `range_expr` template's materialized `Vec<i64>`. The heads
+/// iterate `r.clone()` (`render_expr_for_in`). The bounds are evaluated ONCE
+/// here, exactly as the materializing bind evaluated them.
+fn try_render_bind_counting_range(ctx: &RenderContext, var: &VarId, value: &IrExpr) -> Option<String> {
+    if !ctx.ann.range_counting_vars.contains(var) {
+        return None;
+    }
+    let IrExprKind::Range { start, end, inclusive } = &value.kind else { return None };
+    let (ty, op) = if *inclusive { ("std::ops::RangeInclusive<i64>", "..=") } else { ("std::ops::Range<i64>", "..") };
+    Some(format!(
+        "let {}: {} = {}{}{};",
+        ctx.var_name(*var), ty, render_expr(ctx, start), op, render_expr(ctx, end)
+    ))
 }
 
 fn render_stmt_assign(ctx: &RenderContext, stmt: &IrStmt) -> String {

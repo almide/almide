@@ -188,6 +188,13 @@ fn render_expr_for_in(ctx: &RenderContext, expr: &IrExpr) -> String {
             let op = if *inclusive { "..=" } else { ".." };
             format!("{}{}{}", s, op, e)
         }
+        // #1857: a `let`-bound range whose every read is a head was bound as
+        // a bare `Range<i64>` (`try_render_bind_counting_range`); iterate a
+        // clone of the two scalars so a second, nested, or captured head
+        // reads the same bounds — the counting loop, never a Vec.
+        IrExprKind::Var { id } if ctx.ann.range_counting_vars.contains(id) => {
+            format!("{}.clone()", ctx.var_name(*id))
+        }
         _ => {
             let base = render_expr(ctx, iterable);
             // List types: .iter().cloned() works for both AlmideRcCow<Vec<T>>
