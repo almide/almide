@@ -395,6 +395,9 @@ fn is_pure_fn_in_impure_module(module: &str, func: &str) -> bool {
                 | "body"
                 | "set_header"
                 | "get_header"
+                | "status_code"
+                | "headers"
+                | "header_values"
         ),
         _ => false,
     }
