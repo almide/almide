@@ -9,9 +9,10 @@
 // and measured: 16 GiB of `Vec<i64>` natively (33.6 s) against two locals on
 // wasm (0.7 s), byte-identical output.
 //
-// Like range_bind_huge.almd this is a cell the reference interpreter cannot
-// vote on (4294967294 iterations exhaust its fuel by construction); the
-// abstention is ledgered for THIS file.
+// Unlike range_bind_huge.almd the loop takes only the first four elements and
+// breaks: the SPAN is the property (a materializing leg reserves the whole
+// block at the bind, before the first iteration), and stopping early keeps the
+// cell inside the reference interpreter's fuel so all three oracles vote.
 effect fn main() -> Unit = {
   // Indexed AND measured: this range must materialize via `list.range`, and
   // the native v1 trust-spine walls on that call ("not in the native runtime
@@ -19,11 +20,14 @@ effect fn main() -> Unit = {
   let idx = 0..<5
   println("len=" + int.to_string(list.len(idx)) + " at2=" + int.to_string(idx[2]))
   // Head-only, and too long to materialize on any machine this suite runs
-  // on (~32 GB): a materializing leg dies "Error: out of memory", a counting
-  // leg needs two locals. Same span and sum as range_bind_huge.almd.
+  // on (~32 GB): a materializing leg dies "Error: out of memory" at the bind,
+  // a counting leg needs two locals. Same span as range_bind_huge.almd; the
+  // head reads 0..3 and breaks.
   let huge = 0..<4294967295
   var hs = 0
   for i in huge {
+    if i > 3 then break
+    else ()
     hs = hs + i
   }
   println("huge=" + int.to_string(hs))

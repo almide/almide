@@ -458,7 +458,7 @@
 67408	spec/wasm_cross/random_int_entropy.almd
 65840	spec/wasm_cross/range_bind_huge.almd
 66848	spec/wasm_cross/range_bind_no_materialize.almd
-66160	spec/wasm_cross/range_bind_walled_no_materialize.almd
+66112	spec/wasm_cross/range_bind_walled_no_materialize.almd
 65792	spec/wasm_cross/range_first_class.almd
 65920	spec/wasm_cross/range_materialize_oom.almd
 1068416	spec/wasm_cross/rc_alloc_stress.almd
