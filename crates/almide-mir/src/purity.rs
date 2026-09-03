@@ -344,6 +344,7 @@ fn is_pure_fn_in_impure_module(module: &str, func: &str) -> bool {
         "testing" => matches!(
             func,
             "assert_gt"
+                | "assert_snapshot"
                 | "assert_lt"
                 | "assert_approx"
                 | "assert_contains"
