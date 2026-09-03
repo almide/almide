@@ -47,22 +47,16 @@ effect fn bench(key: String, n: Int, pre: List[String], cmd: String, cmd_args: L
 
 fn fmt_ms(x10: Int) -> String = int.to_string(x10 / 10) + "." + int.to_string(x10 % 10)
 
-fn row_line(r: Row) -> String =
-  string.pad_end(r.key, 9, " ") + " = " + fmt_ms(r.ms) + "   n=" + int.to_string(r.n)
+fn row_line(r: Row) -> String = string.pad_end(r.key, 9, " ") + " = " + fmt_ms(r.ms) + "   n=" + int.to_string(r.n)
 
 // The RATCHET. Build timing on a shared machine is noisy at the tens-of-percent level, so a
 // gate that fires at 5% gets switched off within a week — which is worse than no gate. 1.5x
 // catches a real regression (an added pass, a lost cache) and ignores load.
 fn regressed(got_x10: Int, base_x10: Int, tol_pct: Int) -> Bool = got_x10 * 100 > base_x10 * tol_pct
 
-fn regression_line(key: String, got_x10: Int, base_x10: Int, tol_pct: Int) -> String =
-  "::error::build-speed REGRESSION: " + key + " is " + fmt_ms(got_x10) + "ms against a "
-    + fmt_ms(base_x10) + "ms baseline (> " + int.to_string(tol_pct / 100) + "."
-    + int.to_string((tol_pct / 10) % 10) + "x)"
+fn regression_line(key: String, got_x10: Int, base_x10: Int, tol_pct: Int) -> String = "::error::build-speed REGRESSION: " + key + " is " + fmt_ms(got_x10) + "ms against a " + fmt_ms(base_x10) + "ms baseline (> " + int.to_string(tol_pct / 100) + "." + int.to_string((tol_pct / 10) % 10) + "x)"
 
-fn ok_line(key: String, got_x10: Int, base_x10: Int) -> String =
-  "  " + string.pad_end(key, 9, " ") + " " + string.pad_start(fmt_ms(got_x10), 8, " ")
-    + "ms  (baseline " + fmt_ms(base_x10) + "ms)"
+fn ok_line(key: String, got_x10: Int, base_x10: Int) -> String = "  " + string.pad_end(key, 9, " ") + " " + string.pad_start(fmt_ms(got_x10), 8, " ") + "ms  (baseline " + fmt_ms(base_x10) + "ms)"
 
 // `key = VALUE   n=N` — the baseline file's one line shape, read back for the ratchet.
 fn baseline_of(lines: List[String], key: String) -> Int = {
@@ -72,8 +66,7 @@ fn baseline_of(lines: List[String], key: String) -> Int = {
       let after = list.get_or(string.split(l, "="), 1, "")
       let num = string.trim(list.get_or(string.split(string.trim(after), " "), 0, "0"))
       let parts = string.split(num, ".")
-      (int.parse(list.get_or(parts, 0, "0")) ?? 0) * 10
-        + (int.parse(list.get_or(parts, 1, "0")) ?? 0)
+      (int.parse(list.get_or(parts, 0, "0")) ?? 0) * 10 + (int.parse(list.get_or(parts, 1, "0")) ?? 0)
     },
     none => -1,
   }
@@ -114,7 +107,14 @@ effect fn measure(alm: String, target: String) -> List[Row] = {
     bench("check_ms", 20, [], alm, ["check", target])!,
     bench("cold_ms", 3, clear, alm, ["build", target, "-o", "/tmp/almide-bs-native"])!,
     bench("warm_ms", 5, [], alm, ["build", target, "-o", "/tmp/almide-bs-native"])!,
-    bench("wasm_ms", 3, clear, alm, ["build", target, "--target", "wasm", "-o", "/tmp/almide-bs.wasm"])!,
+    bench("wasm_ms", 3, clear, alm, [
+      "build",
+      target,
+      "--target",
+      "wasm",
+      "-o",
+      "/tmp/almide-bs.wasm"
+    ])!
   ]
 }
 
@@ -136,15 +136,7 @@ effect fn baseline_text(alm: String, target: String, rows: List[Row], tol_pct: I
     # dependency cache before every repetition — clearing only the latter produces a warm
     # build wearing a cold label.
     """
-  header + "\n"
-    + "version   = " + ver + "\n"
-    + "binary    = sha256:" + sha + "\n"
-    + "machine   = " + sh("uname", ["-m"])! + " " + sh("uname", ["-s"])! + "\n"
-    + "date      = " + sh("date", ["+%Y-%m-%d"])! + "\n"
-    + "target    = " + target + "\n"
-    + "lines     = " + int.to_string(list.len(string.split(src, "\n")) - 1) + "\n"
-    + "tolerance = " + int.to_string(tol_pct) + "\n"
-    + (rows |> list.map(row_line) |> list.join("\n")) + "\n"
+  header + "\n" + "version   = " + ver + "\n" + "binary    = sha256:" + sha + "\n" + "machine   = " + sh("uname", ["-m"])! + " " + sh("uname", ["-s"])! + "\n" + "date      = " + sh("date", ["+%Y-%m-%d"])! + "\n" + "target    = " + target + "\n" + "lines     = " + int.to_string(list.len(string.split(src, "\n")) - 1) + "\n" + "tolerance = " + int.to_string(tol_pct) + "\n" + (rows |> list.map(row_line) |> list.join("\n")) + "\n"
 }
 
 effect fn check_against(path: String, rows: List[Row], tol_pct: Int) -> (List[String], Bool) = {
@@ -155,12 +147,20 @@ effect fn check_against(path: String, rows: List[Row], tol_pct: Int) -> (List[St
   for r in rows {
     let base = baseline_of(lines, r.key)
     if base < 0 then {
-      out = out + ["::error::build-speed: no baseline row for " + r.key]
+      out = out + [
+        "::error::build-speed: no baseline row for " + r.key
+      ]
       passed = false
     } else if regressed(r.ms, base, tol_pct) then {
-      out = out + [regression_line(r.key, r.ms, base, tol_pct)]
+      out = out + [
+        regression_line(r.key, r.ms, base, tol_pct)
+      ]
       passed = false
-    } else out = out + [ok_line(r.key, r.ms, base)]
+    } else {
+      out = out + [
+        ok_line(r.key, r.ms, base)
+      ]
+    }
   }
   (out, passed)
 }
@@ -179,8 +179,7 @@ fn readme_block(lines: List[String]) -> List[String] = {
   }
   let ms = (k: String) => list.get_or(string.split(field(k), " "), 0, "?")
   [
-    "Measured on " + field("version") + ", " + field("machine") + ", `" + field("target")
-      + "` (" + field("lines") + " lines), " + field("date") + ". Every row is an N-run MEAN —",
+    "Measured on " + field("version") + ", " + field("machine") + ", `" + field("target") + "` (" + field("lines") + " lines), " + field("date") + ". Every row is an N-run MEAN —",
     "a single run of a 30ms process is scheduler noise. Cold clears BOTH `$TMPDIR/almide-run`",
     "and the dependency cache before each repetition; clearing only the latter measures a warm",
     "build. Regenerate with `almide run tools/almide-gates/src/main.almd -- bench`; the ratchet",
@@ -191,16 +190,21 @@ fn readme_block(lines: List[String]) -> List[String] = {
     "| `almide check` | **" + ms("check_ms") + " ms** | 20 |",
     "| build, warm (content-cache hit) | **" + ms("warm_ms") + " ms** | 5 |",
     "| build, cold | **" + ms("cold_ms") + " ms** | 3 |",
-    "| build, cold, `--target wasm` | **" + ms("wasm_ms") + " ms** | 3 |",
+    "| build, cold, `--target wasm` | **" + ms("wasm_ms") + " ms** | 3 |"
   ]
 }
 
 test "the README block is rendered from the baseline, values and provenance both" {
   let base = [
-    "version   = almide 0.46.0", "machine   = arm64 Darwin", "date      = 2026-08-01",
-    "target    = examples/lisp.almd", "lines     = 268",
-    "check_ms  = 22.7   n=20", "cold_ms   = 643.9   n=3",
-    "warm_ms   = 266.1   n=5", "wasm_ms   = 299.1   n=3",
+    "version   = almide 0.46.0",
+    "machine   = arm64 Darwin",
+    "date      = 2026-08-01",
+    "target    = examples/lisp.almd",
+    "lines     = 268",
+    "check_ms  = 22.7   n=20",
+    "cold_ms   = 643.9   n=3",
+    "warm_ms   = 266.1   n=5",
+    "wasm_ms   = 299.1   n=3"
   ]
   let b = readme_block(base)
   assert_eq(list.get_or(b, 8, ""), "| `almide check` | **22.7 ms** | 20 |")
@@ -227,7 +231,9 @@ fn splice_block(doc: String, block: List[String]) -> String = {
     } else if l == stop then {
       out = out + [stop]
       inside = false
-    } else if not inside then out = out + [l] else ()
+    } else if not inside then {
+      out = out + [l]
+    } else ()
   }
   list.join(out, "\n")
 }
