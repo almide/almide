@@ -19,12 +19,20 @@
 - The gate (`scripts/check-contracts.sh`, CI + lefthook) enforces that every
   contract has real evidence, every fixture names its contract(s), and the link is
   bidirectional.
+- **Aggregate counts are stamped, not regenerated per PR.** The "N contracts"
+  total below (and every other total the generated docs quote) renders from
+  `proofs/ledger-counts.toml`, dated in its `counts:generated` block. A fixture
+  or contract PR regenerates the rows and leaves the block alone; refresh with
+  `bash scripts/gen-ledger-counts.sh` before a release seal, or when the nightly
+  `scripts/check-ledger-counts.sh` reports drift.
 
 Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
+<!-- counts:generated:start (as of 2026-09-03) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
 335 contracts
+<!-- counts:generated:end -->
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
