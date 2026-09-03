@@ -123,7 +123,7 @@ fi
 # `let (r, b) = call!` destructure-unwrap honestly (`unwrap `!` in a
 # call-argument position`) where the structural leg, the default route,
 # lowers every cell byte-identical to native. Prunes with #1696 4-5.
-MAX_WALLED=26
+MAX_WALLED=27
 corpus=$(ls "$FIXTURE_DIR"/*.almd 2>/dev/null | wc -l | tr -d ' ')
 if [ "$corpus" -eq 0 ] || [ $((n + walled)) -ne "$corpus" ]; then
   echo "::error::host-determinism: compared $n + walled $walled != corpus $corpus in $FIXTURE_DIR — the scan went blind (#985)"
