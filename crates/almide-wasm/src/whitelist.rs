@@ -76,6 +76,17 @@ pub(crate) const SCALAR_TEXT_VERIFIED: &[&str] = &[
     "float_abs", "float_floor", "float_round", "float_is_nan", "float_from_float64",
     "float_from_float32", "float_to_float32",
     "int_to_hex", "int_rotate_left", "int_rotate_right", "hash_fnv1a32",
+    // int_bitcount / int_bits / float_bits / int_to_float (#1423 stage 4,
+    // audited 2026-09-03): the bit-introspection family is the prim
+    // bitwise floor only (bshr/band/bshl/bor over the i64 word — the
+    // int_rotate class), int_bits_to_f32 is the f32 reinterpret prim
+    // and int_to_float32 the direct i64 → f32 convert (single rounding,
+    // native's `n as f32`; the Float32 rides the widened f64 carrier).
+    // No loads, no stores, no handles. Parity evidence:
+    // spec/wasm_cross/int_bit_family.almd.
+    "int_pop_count", "int_count_trailing_zeros", "int_count_leading_zeros", "int_bit_width",
+    "int_log2_floor", "int_log2_ceil", "int_next_power_of_two", "int_prev_power_of_two",
+    "int_byte_swap", "int_bit_reverse", "int_bits_to_f32", "int_to_float32",
     "hash_sha256", "hash_sha256_hex", "hex_encode", "hex_encode_upper",
     "string_contains", "string_count", "string_trim_start", "string_trim_end",
     "string_is_alpha", "string_is_digit", "string_is_alphanumeric_uni", "string_is_upper",
@@ -139,6 +150,18 @@ pub(crate) const BYTES_FAMILY_VERIFIED: &[&str] = &[
     // shape — prim.load32(handle+4) is the Bytes LEN header (len = bytes
     // on both legs); same audit as the append_* family above.
     "bytes_write_bool", "bytes_write_string_be",
+    // bytes_core.almd search/edit/predicate family (#1423 stage 4, audited
+    // 2026-09-03): read-only load8 walks over the digest-shared Bytes
+    // payload (handle+12 = OUR PAYLOAD, load32(h+4) = the byte length on
+    // both legs), the editors (insert / remove_at / reverse / xor /
+    // map_each) store into their own prim.alloc_bytes buffer only, the
+    // predicates and cmp/skip/eof are scalar results, data_ptr is the
+    // payload address (never printed cross-leg). map_each's callback is
+    // a language-level closure call this emitter lowers itself. Parity
+    // evidence: spec/wasm_cross/bytes_search_edit_family.almd.
+    "bytes_cmp", "bytes_contains", "bytes_data_ptr", "bytes_ends_with", "bytes_eof",
+    "bytes_insert", "bytes_is_empty", "bytes_is_valid_utf8", "bytes_map_each",
+    "bytes_remove_at", "bytes_reverse", "bytes_skip", "bytes_starts_with", "bytes_xor",
 ];
 
 /// The exempt-tier members of the same audit (tuple/Option returners
@@ -165,6 +188,9 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     "bytes_read_u16_le_at", "bytes_read_u32_be_at", "bytes_read_u32_le_at", "bytes_read_u8_at",
     "bytes_take_at", "json_get_array", "json_get_bool", "json_get_float", "json_get_int",
     "json_get_string",
+    // bytes_core.almd index_of (#1423 stage 4): the same read-only walk as
+    // contains, its `Int?` built via some()/none in tail position.
+    "bytes_index_of",
     // regex_engine.almd (audited 2026-08-25): the backtracking engine —
     // byte walks on the digest-shared String layout (load32(h+4) = len
     // in BYTES both legs, handle+12 = OUR payload), prim-MEDIATED

@@ -264,9 +264,16 @@ impl Emitter<'_> {
                 self.lower(a, Some(FLOAT))?;
                 Ok(Some(FLOAT))
             }
+            // i64 → f32 DIRECTLY (single rounding — native's `n as f32`
+            // and the incumbent's f32.convert_i64_s), then widened onto
+            // the f64 carrier. The i2f-then-demote spelling double-rounds:
+            // 2^60 + 2^36 + 1 loses its +1 to the f64 step and then sits
+            // exactly on the f32 tie, rounding to even (2^60) where the
+            // single rounding reads the true value above the tie (2^60 +
+            // 2^37).
             ("i2f32", [a]) => {
                 self.lower(a, Some(INT))?;
-                self.f.instructions().f64_convert_i64_s().f32_demote_f64().f64_promote_f32();
+                self.f.instructions().f32_convert_i64_s().f64_promote_f32();
                 Ok(Some(FLOAT))
             }
             ("f32bits", [a]) => {
