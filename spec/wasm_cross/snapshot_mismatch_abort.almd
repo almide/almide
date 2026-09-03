@@ -1,4 +1,4 @@
-// @contract: C-336
+// @contract: C-339
 // testing.assert_snapshot (#1314): a mismatch aborts with the T18-shaped block
 // `Error: snapshot mismatch` / `at: line N` / `expected:` / `found:` on stderr
 // and exit 1, byte-identical on both targets — INSIDE and outside test blocks
