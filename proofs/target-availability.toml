@@ -330,6 +330,54 @@ reason = "embedded-lane-served (#1710 increment 3, the framed ops 48..=50): `alm
 issue = "#1423"
 
 [[unavailable]]
+fn = "http.get_response"
+legs = ["structural", "stock-p1", "embedded"]
+reason-embedded = "no wasm host binding for the full-response client (the framed ops 43..=50 serve the body / status / bytes shapes only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
+reason-stock-p1 = "no wasm host binding for the full-response client (the framed ops 43..=50 serve the body / status / bytes shapes only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
+reason-structural = "host-surface"
+issue = "#1710"
+
+[[unavailable]]
+fn = "http.post_response"
+legs = ["structural", "stock-p1", "embedded"]
+reason-embedded = "no wasm host binding for the full-response client (the framed ops 43..=50 serve the body / status / bytes shapes only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
+reason-stock-p1 = "no wasm host binding for the full-response client (the framed ops 43..=50 serve the body / status / bytes shapes only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
+reason-structural = "host-surface"
+issue = "#1710"
+
+[[unavailable]]
+fn = "http.put_response"
+legs = ["structural", "stock-p1", "embedded"]
+reason-embedded = "no wasm host binding for the full-response client (the framed ops 43..=50 serve the body / status / bytes shapes only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
+reason-stock-p1 = "no wasm host binding for the full-response client (the framed ops 43..=50 serve the body / status / bytes shapes only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
+reason-structural = "host-surface"
+issue = "#1710"
+
+[[unavailable]]
+fn = "http.patch_response"
+legs = ["structural", "stock-p1", "embedded"]
+reason-embedded = "no wasm host binding for the full-response client (the framed ops 43..=50 serve the body / status / bytes shapes only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
+reason-stock-p1 = "no wasm host binding for the full-response client (the framed ops 43..=50 serve the body / status / bytes shapes only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
+reason-structural = "host-surface"
+issue = "#1710"
+
+[[unavailable]]
+fn = "http.delete_response"
+legs = ["structural", "stock-p1", "embedded"]
+reason-embedded = "no wasm host binding for the full-response client (the framed ops 43..=50 serve the body / status / bytes shapes only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
+reason-stock-p1 = "no wasm host binding for the full-response client (the framed ops 43..=50 serve the body / status / bytes shapes only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
+reason-structural = "host-surface"
+issue = "#1710"
+
+[[unavailable]]
+fn = "http.request_response"
+legs = ["structural", "stock-p1", "embedded"]
+reason-embedded = "no wasm host binding for the full-response client (the framed ops 43..=50 serve the body / status / bytes shapes only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
+reason-stock-p1 = "no wasm host binding for the full-response client (the framed ops 43..=50 serve the body / status / bytes shapes only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
+reason-structural = "host-surface"
+issue = "#1710"
+
+[[unavailable]]
 fn = "http.request_stream"
 legs = ["structural", "stock-p1", "embedded"]
 reason-embedded = "no wasm host binding for the streaming client (the framed ops 43..=50 serve the non-streaming family only) — run natively, or wait for the wasi:http@0.3 port (#1710)"

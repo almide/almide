@@ -36,7 +36,6 @@
 # verdict: the argument synthesizer has no literal for these parameter types
 # (Matrix, Value, Json, RawPtr, closures). Shrinking this list widens what
 # the ratchet can see, so it is listed and ratcheted too.
-
 bytes.copy_to_ptr :: UNPROBEABLE :: parameter type outside the synthesizer
 bytes.from_raw_ptr :: UNPROBEABLE :: parameter type outside the synthesizer
 fs.fold_lines_chunked :: UNPROBEABLE :: no candidate shape builds natively
@@ -44,14 +43,21 @@ fs.fold_lines_range :: UNPROBEABLE :: no candidate shape builds natively
 http.anthropic_streaming_call :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.anthropic_streaming_call needs a declared capability not in this brick
 http.body :: UNPROBEABLE :: parameter type outside the synthesizer
 http.delete :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.delete needs a declared capability not in this brick
+http.delete_response :: HOST_CAPABILITY :: http client is an OS socket API — checks and builds natively, the wasm leg walls (sweep verdict GAP: wasm build failed)
 http.get :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.get needs a declared capability not in this brick
 http.get_bytes :: UNPROBEABLE :: no candidate shape builds natively
 http.get_header :: UNPROBEABLE :: parameter type outside the synthesizer
+http.get_response :: HOST_CAPABILITY :: http client is an OS socket API — checks and builds natively, the wasm leg walls (sweep verdict GAP: wasm build failed)
 http.get_status :: HOST_CAPABILITY :: http client is an OS socket API — checks and builds natively, the wasm leg walls (sweep verdict GAP: wasm build failed)
+http.header_values :: UNPROBEABLE :: parameter type outside the synthesizer
+http.headers :: UNPROBEABLE :: parameter type outside the synthesizer
 http.openai_streaming_call :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.openai_streaming_call needs a declared capability not in this brick
 http.patch :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.patch needs a declared capability not in this brick
+http.patch_response :: HOST_CAPABILITY :: http client is an OS socket API — checks and builds natively, the wasm leg walls (sweep verdict GAP: wasm build failed)
 http.post :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.post needs a declared capability not in this brick
+http.post_response :: HOST_CAPABILITY :: http client is an OS socket API — checks and builds natively, the wasm leg walls (sweep verdict GAP: wasm build failed)
 http.put :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.put needs a declared capability not in this brick
+http.put_response :: HOST_CAPABILITY :: http client is an OS socket API — checks and builds natively, the wasm leg walls (sweep verdict GAP: wasm build failed)
 http.query_params :: UNPROBEABLE :: parameter type outside the synthesizer
 http.req_body :: UNPROBEABLE :: parameter type outside the synthesizer
 http.req_header :: UNPROBEABLE :: parameter type outside the synthesizer
@@ -59,11 +65,13 @@ http.req_method :: UNPROBEABLE :: parameter type outside the synthesizer
 http.req_path :: UNPROBEABLE :: parameter type outside the synthesizer
 http.request :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.request needs a declared capability not in this brick
 http.request_bytes :: UNPROBEABLE :: no candidate shape builds natively
+http.request_response :: HOST_CAPABILITY :: http client is an OS socket API — checks and builds natively, the wasm leg walls (sweep verdict GAP: wasm build failed)
 http.request_status :: HOST_CAPABILITY :: http client is an OS socket API — checks and builds natively, the wasm leg walls (sweep verdict GAP: wasm build failed)
 http.request_stream :: UNPROBEABLE :: no candidate shape builds natively
 http.serve :: UNPROBEABLE :: parameter type outside the synthesizer
 http.set_header :: UNPROBEABLE :: parameter type outside the synthesizer
 http.status :: UNPROBEABLE :: parameter type outside the synthesizer
+http.status_code :: UNPROBEABLE :: parameter type outside the synthesizer
 json.field :: UNPROBEABLE :: parameter type outside the synthesizer
 json.get_array :: UNPROBEABLE :: no candidate shape builds natively
 json.get_bool :: UNPROBEABLE :: no candidate shape builds natively
