@@ -41,8 +41,8 @@
 66960	spec/wasm_cross/bytes_rawptr.almd
 67168	spec/wasm_cross/bytes_set_value_semantics.almd
 67616	spec/wasm_cross/bytes_string_window_domain.almd
-10311120	spec/wasm_cross/bytes_temp_receiver.almd
-76720	spec/wasm_cross/bytes_writer_family.almd
+10311232	spec/wasm_cross/bytes_temp_receiver.almd
+76912	spec/wasm_cross/bytes_writer_family.almd
 66112	spec/wasm_cross/call_closure_lambda_param.almd
 65968	spec/wasm_cross/call_lambda_ctor.almd
 66336	spec/wasm_cross/callee_shadowing_family.almd
@@ -117,6 +117,7 @@
 70336	spec/wasm_cross/empty_collection_fold.almd
 66160	spec/wasm_cross/empty_from_list_mono.almd
 68448	spec/wasm_cross/encoding_base64.almd
+71808	spec/wasm_cross/endian_auto_import.almd
 65936	spec/wasm_cross/enumerate_unnameable_element.almd
 ~	spec/wasm_cross/env_args.almd
 ~	spec/wasm_cross/env_get.almd
@@ -510,7 +511,7 @@
 66480	spec/wasm_cross/split_empty_sep.almd
 67728	spec/wasm_cross/spread_record_share.almd
 !	spec/wasm_cross/sql_highlight_tokens.almd
-69856	spec/wasm_cross/stdlib_type_shadow.almd
+69904	spec/wasm_cross/stdlib_type_shadow.almd
 66816	spec/wasm_cross/str_result_heap_bind.almd
 66016	spec/wasm_cross/string_bool_ordering.almd
 116512	spec/wasm_cross/string_case_unicode.almd
