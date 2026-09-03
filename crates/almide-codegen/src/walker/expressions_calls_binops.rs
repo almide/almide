@@ -215,6 +215,15 @@ fn render_call_expr(ctx: &RenderContext, callee: &str, args: &[IrExpr]) -> Strin
 /// (cog>30 decomposition, pattern 2: uniform match arms on `CallTarget`,
 /// mirrors the `lower_expr`/`infer_expr_inner` extraction shape).
 fn render_generic_call_named(ctx: &RenderContext, name: almide_base::intern::Sym, args: &[IrExpr], result_ty: &almide_lang::types::Ty) -> String {
+    // An opaque newtype's ctor call is the tuple-struct construction, spelled
+    // by the struct's name — post-flatten `almide_rt_self_Value(s)` for the
+    // entry program's shadow of a stdlib-owned name, `almide_rt_m_Token(s)`
+    // for a module's own (#1835). The reserved prefix is the STRUCT's (the
+    // #433 mangle), not a runtime helper's, so it is decided before the
+    // invariant below.
+    if ctx.newtype_ctors.contains(&name) {
+        return render_call_expr(ctx, name.as_str(), args);
+    }
     // Invariant: NormalizeRuntimeCallsPass collapses every
     // `Named { "almide_rt_*" }` into `RuntimeCall { symbol }`.
     // A `Named` target reaching the walker therefore must

@@ -491,6 +491,7 @@ impl Checker {
                 if let Some(target) = self.env.opaque_alias_targets.get(tname).cloned() {
                     vec![target]
                 } else {
+                    self.reject_stdlib_shadow_pattern(&format!("{}(..)", name), &resolved);
                     vec![]
                 }
             }
@@ -528,6 +529,30 @@ impl Checker {
         );
     }
 
+    /// A constructor or record pattern aimed at the STDLIB's `Value` /
+    /// `FileStat` / … while the program declares a same-named type of its
+    /// own (#1828, #1835): the pattern is the user's, the subject is the
+    /// stdlib's, and the two only spell alike. Before this refusal the
+    /// pattern bound its payload `Ty::Unknown` and reached codegen — rustc
+    /// E0308 on native while the structural wasm leg read a json value's
+    /// payload as the user's String (ALS-T6). E048's foreign-case cell,
+    /// carrying the E013 shadow note that names both types. Silent for
+    /// every other subject: a program that declares no shadow is not
+    /// this cell's, and error recovery stays as it was.
+    fn reject_stdlib_shadow_pattern(&mut self, pattern: &str, resolved: &Ty) {
+        let Ty::Named(n, _) = resolved else { return };
+        let Some(note) = self.stdlib_shadow_note(resolved) else { return };
+        let owner = almide_lang::stdlib_info::stdlib_owned_type_owner(n.as_str()).unwrap_or("stdlib");
+        self.emit(
+            super::err(
+                format!("pattern `{}` is not a case of `{}`", pattern, resolved.display()),
+                format!("`{}` is the `{}` module's type and has no constructor to destructure.{}", n, owner, note),
+                "match pattern".to_string(),
+            )
+            .with_code("E048"),
+        );
+    }
+
     /// `ast::Pattern::RecordPattern` arm of [`Self::bind_pattern`]. Verbatim text move.
     fn bind_pattern_record(&mut self, name: &Sym, fields: &[ast::FieldPattern], ty: &Ty) {
         let resolved = self.env.resolve_named(ty);
@@ -551,7 +576,10 @@ impl Checker {
                     })
                     .unwrap_or_default()
             }
-            _ => vec![],
+            _ => {
+                self.reject_stdlib_shadow_pattern(&format!("{} {{ .. }}", name), &resolved);
+                vec![]
+            }
         };
         for f in fields {
             let ft = field_tys.iter().find(|(n, _)| *n == f.name).map(|(_, t)| t.clone()).unwrap_or(Ty::Unknown);
