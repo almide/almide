@@ -4353,7 +4353,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/int_bit_family.almd", class = "fixture" },
 [[contract]]
-id        = "C-336"
+id        = "C-339"
 spec      = "ALS-T18"
 title     = "testing.assert_snapshot mismatches abort in the T18 form on both targets, inside test blocks too"
 statement = "A failing `testing.assert_snapshot(actual, expected)` aborts with a STRUCTURED stderr block + exit code 1, byte-identical across targets and the SAME whether the call sits in a plain fn, `main`, or a `test` block: `Error: snapshot mismatch` followed by `  at: line <N>`, `  expected: <expected>`, `  found: <actual>`. Operand display per ALS-R2 (a String prints verbatim), operands evaluated exactly once. FIELD ORDER IS PART OF THE PROMISE and stricter than C-153's: `found` is LAST and runs to the END of the output, blank lines and a trailing newline included — that is the value `almide test --update-snapshots` writes back into the source literal (#1314), so anything the reporter's line-oriented block-end rule would drop must survive here. Implemented as the C-153 frontend-lowering desugar (if + eprintln + process.exit(1)) applied to the `testing.assert_snapshot` call target without the test-block exemption the assert family keeps — libtest's assert payload and the wasm test runner's `prim.die` carry no shape the accept step could read, so one abort form on every lane is what makes the accept step lane-independent."
