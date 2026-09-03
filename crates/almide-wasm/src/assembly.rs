@@ -215,6 +215,11 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
         GlobalType { val_type: ValType::I32, mutable: true, shared: false },
         &ConstExpr::i32_const(heap_start as i32),
     );
+    // #1219 stage 2: the keyed-lookup side table (global 14, 0 = none yet).
+    globals.global(
+        GlobalType { val_type: ValType::I32, mutable: true, shared: false },
+        &ConstExpr::i32_const(0),
+    );
 
     // The funcref table always exists (a call_indirect in ANY body needs
     // it, entries or not); slot 0 stays uninitialized — null funcref =
@@ -412,7 +417,10 @@ fn helper_body(h: &Helper, work: &FnWork, helper_snapshot: &[Helper], hpos: usiz
     Helper::BytesToString { inv_pre, inv_mid, inc_pre } => {
         utf8_helpers::emit_bytes_to_string_helper(*inv_pre, *inv_mid, *inc_pre)
     }
-    _ => helper_body_b(h, work, helper_snapshot),
+    _ => match map_index::helper_body(h) {
+        Some(f) => f,
+        None => helper_body_b(h, work, helper_snapshot),
+    },
     }
 }
 
@@ -429,7 +437,9 @@ pub(crate) fn resolve_extras(
     // lowering; the table-entry extras follow.
     let helper_snapshot: Vec<Helper> = work.helpers.borrow().clone();
     for (hpos, h) in helper_snapshot.iter().enumerate() {
-        let params = match h {
+        let params = match map_index::helper_params(h) {
+            Some(p) => p,
+            None => match h {
             Helper::ValueKeys | Helper::Utf8Lossy | Helper::BytesToString { .. } => {
                 vec![ValType::I32]
             }
@@ -446,6 +456,7 @@ pub(crate) fn resolve_extras(
             Helper::FastExp | Helper::GeluScalar { .. } => vec![ValType::F64],
             Helper::Q10Val => vec![ValType::I32, ValType::I64, ValType::I64],
             _ => vec![ValType::I32, ValType::I32],
+            },
         };
         let ret = match h {
             Helper::FastExp | Helper::GeluScalar { .. } | Helper::Q10Val => ValType::F64,

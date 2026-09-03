@@ -72,7 +72,8 @@ impl Emitter<'_> {
         let kh = self.hold_for(k)?;
         self.lower(key, Some(k))?;
         self.f.instructions().local_set(kh);
-        let scan = self.scan_helper(k)?;
+        // the receiver outlives this probe: the index lane (#1219 stage 2)
+        let scan = self.keyed_find(k)?;
         let eh = self.hold_i32()?;
         self.f
             .instructions()

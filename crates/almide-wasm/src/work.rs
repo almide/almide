@@ -85,6 +85,17 @@ pub(crate) enum Helper {
     /// type shape and cycles are cut here; the body is Emitter-built in
     /// the display-helper phase and stored in `display_bodies`).
     DisplayNamed { ti: u32 },
+    /// The keyed-lookup index family (#1219 stage 2, map_index.rs): the
+    /// address-keyed side table (`get` / `raw` / `set`), the per-class
+    /// key hash, the index builder, the `$scan_*`-shaped `find` and the
+    /// in-place window's `append` maintenance hook.
+    MapIdxSideGet,
+    MapIdxSideRaw,
+    MapIdxSideSet { raw: u32 },
+    MapIdxHash { key: crate::map_index::IdxKey },
+    MapIdxBuild { key: crate::map_index::IdxKey, hash: u32 },
+    MapIdxFind { key: crate::map_index::IdxKey, fns: crate::map_index::IdxFns, build: u32 },
+    MapIdxAppend { key: crate::map_index::IdxKey, fns: crate::map_index::IdxFns },
 }
 
 /// The pretty printer's extra pooled fragments.

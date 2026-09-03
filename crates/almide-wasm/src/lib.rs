@@ -78,6 +78,7 @@ mod collections;
 mod collections_hof;
 mod collections_set;
 mod map_inplace;
+mod map_index;
 mod emit;
 pub use emit::{emit_program, emit_program_with_ops};
 mod emitter;
@@ -303,8 +304,12 @@ const G_LINE_DELTA: u32 = 12;
 /// Mutable i32 global: one past the LOGICAL room (`line_start +
 /// capacity`) — starts at the heap floor, moves up with each grow.
 const G_LINE_ROOM: u32 = 13;
+/// Mutable i32 global: the keyed-lookup index family's side table
+/// (#1219 stage 2, map_index.rs) — 0 until the first indexed lookup
+/// allocates it; a heap block address after.
+const G_MAPIDX: u32 = 14;
 /// Fixed runtime globals above; top-let globals start here.
-const G_FIXED_COUNT: u32 = 14;
+const G_FIXED_COUNT: u32 = 15;
 
 // ── slice value model ───────────────────────────────────────────────────
 

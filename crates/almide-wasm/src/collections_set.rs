@@ -64,7 +64,8 @@ impl Emitter<'_> {
         }
         let bh = self.hold_i32()?;
         self.f.instructions().local_set(bh);
-        let scan = self.scan_helper(e)?;
+        // both operands are stable across the walks: the index lane
+        let scan = self.keyed_find(e)?;
         let stride = e.slot_size() as i32;
         let union = func == "union";
         let keep_found = func == "intersection";
@@ -180,7 +181,7 @@ impl Emitter<'_> {
         }
         let bh = self.hold_i32()?;
         self.f.instructions().local_set(bh);
-        let scan = self.scan_helper(e)?;
+        let scan = self.keyed_find(e)?;
         let stride = e.slot_size() as i32;
         let hcur = self.hold_i32()?;
         let hend = self.hold_i32()?;
@@ -278,7 +279,7 @@ impl Emitter<'_> {
         }
         let bh = self.hold_i32()?;
         self.f.instructions().local_set(bh);
-        let scan = self.scan_helper(e)?;
+        let scan = self.keyed_find(e)?;
         let stride = e.slot_size() as i32;
         let ho = self.hold_i32()?;
         let hw = self.hold_i32()?;
@@ -409,7 +410,7 @@ impl Emitter<'_> {
         let xh = self.hold_for(e)?;
         self.lower(x, Some(e))?;
         self.f.instructions().local_set(xh);
-        let scan = self.scan_helper(e)?;
+        let scan = self.keyed_find(e)?;
         let eh = self.hold_i32()?;
         self.f
             .instructions()

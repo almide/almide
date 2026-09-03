@@ -157,7 +157,7 @@ impl Emitter<'_> {
             // an equal value (recursive through emit_val_eq).
             SliceTy::Map(kh, vh) => {
                 let (kt, vt) = (self.types.el(kh), self.types.el(vh));
-                let scan = self.scan_helper(kt)?;
+                let scan = self.keyed_find(kt)?;
                 let (koff, voff, esz) = crate::collections::entry_layout(kt, vt);
                 let hb = self.hold_i32()?;
                 let ha = self.hold_i32()?;
@@ -216,7 +216,7 @@ impl Emitter<'_> {
             // count the cardinality), then every a-member scans in b.
             SliceTy::Set(h) => {
                 let et = self.types.el(h);
-                let scan = self.scan_helper(et)?;
+                let scan = self.keyed_find(et)?;
                 let stride = et.slot_size() as i32;
                 let hb = self.hold_i32()?;
                 let ha = self.hold_i32()?;

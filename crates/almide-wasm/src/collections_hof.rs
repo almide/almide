@@ -543,7 +543,9 @@ impl Emitter<'_> {
         let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
         let kt = self.infer(body)?;
         let SliceTy::Scalar(_) = kt else { return unsup("list-group-by-key-nonscalar") };
-        let scan = self.map_scan_fn(kt)?;
+        // the accumulator copy-grows per new key (a fresh address each
+        // time): the plain scan, never the index lane
+        let scan = self.scan_helper(kt)?;
         let inner = SliceTy::List(self.types.intern(elem));
         let (koff, voff, esz) = entry_layout(kt, inner);
         let push = match elem.slot_size() {
@@ -620,13 +622,10 @@ impl Emitter<'_> {
         Ok(Some(SliceTy::Map(self.types.intern(kt), self.types.intern(inner))))
     }
 
-    /// The scan helper for this key class (shared with the map ops).
+    /// The keyed lookup for a STABLE receiver (merge / update / upsert
+    /// probe the input map, which outlives the op): the index lane for
+    /// Int/String keys, the scan family otherwise (#1219 stage 2).
     fn map_scan_fn(&mut self, k: SliceTy) -> Result<u32, EmitError> {
-        match k {
-            INT => Ok(F_SCAN_W64),
-            BOOL => Ok(F_SCAN_W32),
-            STR => Ok(F_SCAN_STR),
-            _ => self.scan_helper(k),
-        }
+        self.keyed_find(k)
     }
 }
