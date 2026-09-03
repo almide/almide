@@ -210,3 +210,6 @@ spec/stdlib/http_status_test.almd :: get_retry
 spec/wasm_cross/mut_param_effect_can_err.almd :: go
 spec/wasm_cross/mut_param_effect_can_err.almd :: main
 spec/wasm_cross/mut_param_effect_can_err.almd :: uc__Mem
+# #1576 also: the DDD gauntlet's mut_port `main` (the can-err mut-param port call
+# consumed by `!`) walls on the incumbent for the same reason as the fixture's fns.
+spec/gauntlet/pkg/mut_port/src/main.almd :: main
