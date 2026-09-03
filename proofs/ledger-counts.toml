@@ -12,17 +12,17 @@
 # A fixture or contract PR must NOT refresh it. Measurement recipes:
 # scripts/lib/ledger-counts.sh.
 date                       = "2026-09-03"
-contracts                  = 336
-contracts_active           = 336
+contracts                  = 339
+contracts_active           = 339
 contracts_flagged          = 0
-contracts_spec_keyed       = 336
-wasm_cross_fixtures        = 668
-interp_abstains            = 32
+contracts_spec_keyed       = 339
+wasm_cross_fixtures        = 675
+interp_abstains            = 28
 conformance_sections       = 114
-conformance_fixtures       = 720
-stdlib_functions           = 982
+conformance_fixtures       = 728
+stdlib_functions           = 983
 stdlib_modules             = 43
-spec_test_files            = 432
+spec_test_files            = 433
 scalar_read_arms           = 63
 scalar_read_unguarded      = 0
 wat_prelude_fns            = 63
@@ -30,7 +30,7 @@ libm_sites                 = 5
 als_elements               = 72
 als_elements_unwritten     = 0
 release_seals              = 10
-verification_gates         = 73
+verification_gates         = 75
 verification_unverified    = 0
 tor_rows                   = 9
 fuzz_green_streak_days     = 0
