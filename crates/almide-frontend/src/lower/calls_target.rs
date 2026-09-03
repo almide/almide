@@ -56,10 +56,10 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
             // resolve first: a name is never both.
             if matches!(callee.kind, ast::ExprKind::TypeName { .. }) {
                 let cur_mod = ctx.current_module.map(|m| m.as_str());
-                if ctx.env.lookup_ctor_in(name, cur_mod).is_none() {
-                    if let Some(key) = ctx.env.opaque_alias_key(name.as_str(), cur_mod) {
-                        return CallTarget::Named { name: key };
-                    }
+                if ctx.env.lookup_ctor_in(name, cur_mod).is_none()
+                    && let Some(key) = ctx.env.opaque_alias_key(name.as_str(), cur_mod)
+                {
+                    return CallTarget::Named { name: key };
                 }
             }
             CallTarget::Named { name: *name }
