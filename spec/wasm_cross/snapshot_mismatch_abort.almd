@@ -1,0 +1,16 @@
+// @contract: C-336
+// testing.assert_snapshot (#1314): a mismatch aborts with the T18-shaped block
+// `Error: snapshot mismatch` / `at: line N` / `expected:` / `found:` on stderr
+// and exit 1, byte-identical on both targets — INSIDE and outside test blocks
+// alike (the frontend desugars the call before any lane sees it). `found` is
+// the last field and runs to the end of the output, blank lines included: it is
+// what `almide test --update-snapshots` writes back into the source.
+import testing
+
+fn render(xs: List[Int]) -> String = xs |> list.map((x) => "item ${x}") |> list.join("\n")
+
+fn main() -> Unit = {
+  println("before")
+  testing.assert_snapshot(render([1, 2]) + "\n", "item 1")
+  println("unreachable")
+}
