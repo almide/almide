@@ -1046,18 +1046,45 @@ impl Checker {
         // its alias, so a self-module import used only through a type
         // or a `m.Box { .. }` literal is used; the call-site marks the
         // checker recorded along the way are the second source.
-        for head in qualified_import_heads(program) {
-            if self.env.import_table.aliases.contains_key(&head) {
-                self.env.import_table.used.insert(head);
+        let spelled = import_spellings(program);
+        for head in &spelled.heads {
+            if self.env.import_table.aliases.contains_key(head) {
+                self.env.import_table.used.insert(*head);
             }
         }
-        // Third source: a BARE protocol name in a generic bound or a
-        // conformance list (`[S: Store]`, `type Mem: Store`). Protocols
-        // resolve unqualified from any module, so the spelling names no
-        // alias — the declaring module's canonical name (the protocol's
-        // origin) is matched against each import's canonical instead.
+        // Third source: a spelling that resolves WITHOUT an alias, so it
+        // names no import head — matched through the declaring module's
+        // canonical name against each import's canonical instead:
+        //   - a BARE protocol name in a generic bound or a conformance list
+        //     (`[S: Store]`, `type Mem: Store`), through the protocol's origin;
+        //   - a BARE stdlib-owned type name in a type position or at a record
+        //     head (`e: Endian`, `List[FileStat]`, `FileStat { .. }`), through
+        //     `STDLIB_OWNED_TYPES` (#1853) — the type alone pulls the module's
+        //     declaration into the IR, so the import is not unused;
+        //   - a BARE constructor of a stdlib-owned variant (`LittleEndian`),
+        //     through the constructor table to its type, then as above.
+        // A name THIS file declares is the user's own (`type Endian` is
+        // `self.Endian`, #1837), so its bare spelling marks nothing.
+        let owned_origin = |ty: &Sym| -> Option<Sym> {
+            if spelled.declared.contains(ty) { return None; }
+            almide_lang::stdlib_info::stdlib_owned_type_owner(ty.as_str()).map(sym)
+        };
+        let ctor_origin = |ctor: &Sym| -> Option<Sym> {
+            if spelled.declared.contains(ctor) { return None; }
+            self.env.constructors.get(ctor)?.iter().find_map(|(ty, owner, _)| {
+                let origin = almide_lang::stdlib_info::stdlib_owned_type_owner(ty.as_str())?;
+                // Only the OWNING stdlib module's own case maps: a user
+                // `type Endian` (#1837) registers its cases under the user
+                // scope, and the stdlib's `LittleEndian` spelled beside that
+                // shadow is still the stdlib's — judged by the case's owner,
+                // not by the type name the shadow reuses.
+                owner.is_some_and(|m| m.as_str() == origin).then(|| sym(origin))
+            })
+        };
         let bound_origins: std::collections::HashSet<Sym> = bare_protocol_refs(program).iter()
             .filter_map(|p| self.env.protocols.get(p).and_then(|d| d.origin))
+            .chain(spelled.bare_types.iter().filter_map(owned_origin))
+            .chain(spelled.bare_ctors.iter().filter_map(ctor_origin))
             .collect();
         // The verdict needs a fully parsed file: recovery drops the text that
         // may have been the use, and the parse error is already the diagnosis.
@@ -1286,40 +1313,75 @@ include!("lint_error_surface.rs");
 include!("bounded.rs");
 include!("module_inference.rs");
 
-/// Every import-alias head spelled in the program (#1783): the `h` of
-/// `h.open()`, `m.Box { .. }`, `g.Point` in any type position, `c.Red` in a
-/// pattern. Purely syntactic, so it is deterministic under the spine's
-/// checker clones and complete over every usage form the resolver knows.
-fn qualified_import_heads(program: &mut ast::Program) -> std::collections::HashSet<Sym> {
-    use std::collections::HashSet;
-    let mut heads: HashSet<Sym> = HashSet::new();
-    fn head_of(name: Sym, heads: &mut HashSet<Sym>) {
-        if let Some((h, _)) = name.as_str().split_once('.') {
-            heads.insert(sym(h));
+/// What the file SPELLS that can mark an import used (#1783, #1853).
+/// Purely syntactic, so it is deterministic under the spine's checker
+/// clones and complete over every usage form the resolver knows.
+#[derive(Default)]
+struct ImportSpellings {
+    /// Every import-alias head of a qualified spelling: the `h` of
+    /// `h.open()`, `m.Box { .. }`, `g.Point` in any type position, `c.Red`
+    /// in a pattern.
+    heads: std::collections::HashSet<Sym>,
+    /// Every BARE name in a type position or at a record head (`e: Endian`,
+    /// `List[FileStat]`, `FileStat { .. }`). A stdlib module OWNS some of
+    /// these (`STDLIB_OWNED_TYPES`), and spelling one uses that module's
+    /// import (#1853).
+    bare_types: std::collections::HashSet<Sym>,
+    /// Every BARE capitalised value or pattern spelling — a variant
+    /// constructor's (`LittleEndian`, `LittleEndian => ..`). The E060 pass
+    /// maps each to its declaring type through the constructor table.
+    bare_ctors: std::collections::HashSet<Sym>,
+    /// Every type name and variant case THIS file declares. A bare spelling
+    /// of one is the file's own declaration — a user `type Endian` shadows
+    /// the stdlib's, it never uses `import bytes` (#1837).
+    declared: std::collections::HashSet<Sym>,
+}
+
+impl ImportSpellings {
+    /// `h.x` marks the alias `h`; a bare `X` is a type-position spelling.
+    fn ty_name(&mut self, name: Sym) {
+        match name.as_str().split_once('.') {
+            Some((h, _)) => { self.heads.insert(sym(h)); }
+            None => { self.bare_types.insert(name); }
         }
     }
-    fn walk_ty(te: &ast::TypeExpr, heads: &mut HashSet<Sym>) {
+    /// `c.Red` marks the alias `c`; a bare `Red` is a constructor spelling.
+    /// Lower-case bare names are variables, which no constructor table
+    /// holds — skipped so the set stays the constructor candidates.
+    fn value_name(&mut self, name: Sym) {
+        match name.as_str().split_once('.') {
+            Some((h, _)) => { self.heads.insert(sym(h)); }
+            None if name.as_str().starts_with(|c: char| c.is_ascii_uppercase()) => {
+                self.bare_ctors.insert(name);
+            }
+            None => {}
+        }
+    }
+}
+
+fn import_spellings(program: &mut ast::Program) -> ImportSpellings {
+    fn walk_ty(te: &ast::TypeExpr, s: &mut ImportSpellings) {
         match te {
-            ast::TypeExpr::Simple { name } => head_of(*name, heads),
+            ast::TypeExpr::Simple { name } => s.ty_name(*name),
             ast::TypeExpr::Generic { name, args } => {
-                head_of(*name, heads);
-                for a in args { walk_ty(a, heads); }
+                s.ty_name(*name);
+                for a in args { walk_ty(a, s); }
             }
             ast::TypeExpr::Record { fields } | ast::TypeExpr::OpenRecord { fields } => {
-                for f in fields { walk_ty(&f.ty, heads); }
+                for f in fields { walk_ty(&f.ty, s); }
             }
             ast::TypeExpr::Fn { params, ret, .. } => {
-                for p in params { walk_ty(p, heads); }
-                walk_ty(ret, heads);
+                for p in params { walk_ty(p, s); }
+                walk_ty(ret, s);
             }
             ast::TypeExpr::Tuple { elements } | ast::TypeExpr::Union { members: elements } => {
-                for e in elements { walk_ty(e, heads); }
+                for e in elements { walk_ty(e, s); }
             }
             ast::TypeExpr::Variant { cases } => {
                 for c in cases {
                     match c {
-                        ast::VariantCase::Tuple { fields, .. } => for t in fields { walk_ty(t, heads); },
-                        ast::VariantCase::Record { fields, .. } => for f in fields { walk_ty(&f.ty, heads); },
+                        ast::VariantCase::Tuple { fields, .. } => for t in fields { walk_ty(t, s); },
+                        ast::VariantCase::Record { fields, .. } => for f in fields { walk_ty(&f.ty, s); },
                         ast::VariantCase::Unit { .. } => {}
                     }
                 }
@@ -1327,106 +1389,115 @@ fn qualified_import_heads(program: &mut ast::Program) -> std::collections::HashS
             ast::TypeExpr::ConstLit { .. } => {}
         }
     }
-    fn walk_pat(p: &ast::Pattern, heads: &mut HashSet<Sym>) {
+    fn walk_pat(p: &ast::Pattern, s: &mut ImportSpellings) {
         match p {
             ast::Pattern::Constructor { name, args } => {
-                head_of(*name, heads);
-                for a in args { walk_pat(a, heads); }
+                s.value_name(*name);
+                for a in args { walk_pat(a, s); }
             }
             ast::Pattern::RecordPattern { name, fields, .. } => {
-                head_of(*name, heads);
-                for f in fields { if let Some(fp) = &f.pattern { walk_pat(fp, heads); } }
+                s.ty_name(*name);
+                for f in fields { if let Some(fp) = &f.pattern { walk_pat(fp, s); } }
             }
             ast::Pattern::Tuple { elements } | ast::Pattern::List { elements, .. } => {
-                for e in elements { walk_pat(e, heads); }
+                for e in elements { walk_pat(e, s); }
             }
             ast::Pattern::Some { inner } | ast::Pattern::Ok { inner } | ast::Pattern::Err { inner } => {
-                walk_pat(inner, heads)
+                walk_pat(inner, s)
             }
-            ast::Pattern::Or { alts } => for a in alts { walk_pat(a, heads); },
+            ast::Pattern::Or { alts } => for a in alts { walk_pat(a, s); },
             ast::Pattern::Wildcard | ast::Pattern::Ident { .. } | ast::Pattern::None
             | ast::Pattern::Literal { .. } => {}
             // `x @ c.Red` (#1461): the binder names nothing qualified; the
             // inner pattern may. Exhaustive on purpose — a new pattern form
             // must be walked here, or an alias used only inside it is a
             // false E060 the multi-file corpus would catch.
-            ast::Pattern::As { inner, .. } => walk_pat(inner, heads),
+            ast::Pattern::As { inner, .. } => walk_pat(inner, s),
         }
     }
-    fn walk_generics(gs: &Option<Vec<ast::GenericParam>>, heads: &mut HashSet<Sym>) {
+    fn walk_generics(gs: &Option<Vec<ast::GenericParam>>, s: &mut ImportSpellings) {
         for g in gs.iter().flatten() {
-            if let Some(b) = &g.structural_bound { walk_ty(b, heads); }
+            if let Some(b) = &g.structural_bound { walk_ty(b, s); }
         }
     }
-    fn walk_where(wc: &ast::TestWhere, heads: &mut HashSet<Sym>) {
+    fn walk_where(wc: &ast::TestWhere, s: &mut ImportSpellings) {
         match wc {
             ast::TestWhere::Override { path, .. } | ast::TestWhere::CallResponse { target: path, .. } => {
-                if path.len() > 1 { heads.insert(path[0]); }
+                if path.len() > 1 { s.heads.insert(path[0]); }
                 if let ast::TestWhere::CallResponse { params, .. } = wc {
-                    for p in params { walk_pat(p, heads); }
+                    for p in params { walk_pat(p, s); }
                 }
             }
-            ast::TestWhere::Case { bindings, .. } => for b in bindings { walk_where(b, heads); },
+            ast::TestWhere::Case { bindings, .. } => for b in bindings { walk_where(b, s); },
             ast::TestWhere::Bind { .. } => {}
         }
     }
+    let mut s = ImportSpellings::default();
     for decl in &program.decls {
         match decl {
             ast::Decl::Fn { params, return_type, generics, .. } => {
-                walk_generics(generics, &mut heads);
-                for p in params { walk_ty(&p.ty, &mut heads); }
-                walk_ty(return_type, &mut heads);
+                walk_generics(generics, &mut s);
+                for p in params { walk_ty(&p.ty, &mut s); }
+                walk_ty(return_type, &mut s);
             }
-            ast::Decl::TopLet { ty: Some(t), .. } => walk_ty(t, &mut heads),
-            ast::Decl::Type { ty, generics, .. } => {
-                walk_generics(generics, &mut heads);
-                walk_ty(ty, &mut heads);
+            ast::Decl::TopLet { ty: Some(t), .. } => walk_ty(t, &mut s),
+            ast::Decl::Type { name, ty, generics, .. } => {
+                s.declared.insert(*name);
+                if let ast::TypeExpr::Variant { cases } = ty {
+                    for c in cases {
+                        let (ast::VariantCase::Unit { name } | ast::VariantCase::Tuple { name, .. }
+                            | ast::VariantCase::Record { name, .. }) = c;
+                        s.declared.insert(*name);
+                    }
+                }
+                walk_generics(generics, &mut s);
+                walk_ty(ty, &mut s);
             }
             ast::Decl::Protocol { generics, methods, .. } => {
-                walk_generics(generics, &mut heads);
+                walk_generics(generics, &mut s);
                 for m in methods {
-                    for p in &m.params { walk_ty(&p.ty, &mut heads); }
-                    walk_ty(&m.return_type, &mut heads);
+                    for p in &m.params { walk_ty(&p.ty, &mut s); }
+                    walk_ty(&m.return_type, &mut s);
                 }
             }
             ast::Decl::Test { where_clauses: wcs, .. } | ast::Decl::TestWhereDef { clauses: wcs, .. } => {
-                for wc in wcs { walk_where(wc, &mut heads); }
+                for wc in wcs { walk_where(wc, &mut s); }
             }
             ast::Decl::TopLet { ty: None, .. } | ast::Decl::Module { .. } | ast::Decl::Import { .. } => {}
         }
     }
     ast::visit_exprs_mut(program, &mut |e: &mut ast::Expr| {
         match &e.kind {
-            ast::ExprKind::Ident { name } | ast::ExprKind::TypeName { name } => head_of(*name, &mut heads),
-            ast::ExprKind::Record { name: Some(n), .. } => head_of(*n, &mut heads),
+            ast::ExprKind::Ident { name } | ast::ExprKind::TypeName { name } => s.value_name(*name),
+            ast::ExprKind::Record { name: Some(n), .. } => s.ty_name(*n),
             ast::ExprKind::Call { type_args: Some(tas), .. } => {
-                for t in tas { walk_ty(t, &mut heads); }
+                for t in tas { walk_ty(t, &mut s); }
             }
-            ast::ExprKind::TypeAscription { ty, .. } => walk_ty(ty, &mut heads),
+            ast::ExprKind::TypeAscription { ty, .. } => walk_ty(ty, &mut s),
             ast::ExprKind::Lambda { params, .. } => {
-                for p in params { if let Some(t) = &p.ty { walk_ty(t, &mut heads); } }
+                for p in params { if let Some(t) = &p.ty { walk_ty(t, &mut s); } }
             }
             ast::ExprKind::Block { stmts, .. } => {
                 for st in stmts {
                     match st {
-                        ast::Stmt::Let { ty: Some(t), .. } | ast::Stmt::Var { ty: Some(t), .. } => walk_ty(t, &mut heads),
-                        ast::Stmt::LetDestructure { pattern, .. } => walk_pat(pattern, &mut heads),
+                        ast::Stmt::Let { ty: Some(t), .. } | ast::Stmt::Var { ty: Some(t), .. } => walk_ty(t, &mut s),
+                        ast::Stmt::LetDestructure { pattern, .. } => walk_pat(pattern, &mut s),
                         _ => {}
                     }
                 }
             }
             ast::ExprKind::Match { arms, .. } => {
-                for arm in arms { walk_pat(&arm.pattern, &mut heads); }
+                for arm in arms { walk_pat(&arm.pattern, &mut s); }
             }
             _ => {}
         }
     });
-    heads
+    s
 }
 
 /// Every protocol name spelled BARE in a bound or a conformance list
 /// (#1783): `[S: Store]` on a fn, type or protocol, and `type Mem: Store`.
-/// These resolve without a module alias, so `qualified_import_heads` cannot
+/// These resolve without a module alias, so `import_spellings`' heads cannot
 /// see them; the E060 pass maps each through the protocol's origin instead.
 fn bare_protocol_refs(program: &ast::Program) -> std::collections::HashSet<Sym> {
     fn take(gs: &Option<Vec<ast::GenericParam>>, refs: &mut std::collections::HashSet<Sym>) {
