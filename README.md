@@ -172,16 +172,17 @@ build. Regenerate with `almide run tools/almide-gates/src/main.almd -- bench`; t
 <!-- wasm-runtime:generated:start — rendered from docs/benchmarks/wasm-runtime.txt by scripts/gen-readme-stats.sh; DO NOT EDIT between the markers -->
 | Benchmark (`almide bench`, verify-then-time, median of 5) | wasm/native ratio |
 |---|---:|
-| nbody | **1.89×** |
-| spectralnorm | **2.16×** |
-| binarytrees | **0.99×** |
-| fft | **5.19×** |
-| strchurn | **0.94×** |
-| listbuild_append | **4.18×** |
-| listbuild_combinator | **4.55×** |
-| listbuild_prealloc | **3.90×** |
+| nbody | **2.58×** |
+| spectralnorm | **2.61×** |
+| binarytrees | **0.94×** |
+| fft | **4.48×** |
+| strchurn | **1.04×** |
+| listbuild_append | **3.40×** |
+| listbuild_combinator | **3.45×** |
+| listbuild_prealloc | **3.36×** |
+| mapbuild | **0.97×** |
 
-Embedded wasm host (Perceus RC in linear memory) against the native binary, same machine, same run. Cross-engine ratios do NOT cancel hardware (a 2-core CI runner measures nbody ~10x worse), so the ratio verdict runs on the stamping machine class and CI gates the STATUS taxonomy below (`scripts/check-wasm-runtime-ratio.sh`). binarytrees runs its fan arms on the embedded host's thread pool, which is why wasm WINS there. The unmeasured corpus cells stay honest instead of estimated: 3 route to the incumbent artifact, 1 wall on the wasm build path, 0 exhaust the embedded heap (#1729) — each re-measured every gate run, so a cell that starts benching fails the gate until its row is promoted. Ledger: `docs/benchmarks/wasm-runtime.txt` (almide 0.61.1, 2026-09-01).
+Embedded wasm host (Perceus RC in linear memory) against the native binary, same machine, same run. Cross-engine ratios do NOT cancel hardware (a 2-core CI runner measures nbody ~10x worse), so the ratio verdict runs on the stamping machine class and CI gates the STATUS taxonomy below (`scripts/check-wasm-runtime-ratio.sh`). binarytrees runs its fan arms on the embedded host's thread pool, which is why wasm WINS there. The unmeasured corpus cells stay honest instead of estimated: 3 route to the incumbent artifact, 1 wall on the wasm build path, 0 exhaust the embedded heap (#1729) — each re-measured every gate run, so a cell that starts benching fails the gate until its row is promoted. Ledger: `docs/benchmarks/wasm-runtime.txt` (almide 0.61.1, 2026-09-04).
 <!-- wasm-runtime:generated:end -->
 
 ## How It Works
