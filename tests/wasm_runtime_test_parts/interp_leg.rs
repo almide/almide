@@ -54,7 +54,15 @@ fn lower_for_interp(source: &str) -> Result<almide_ir::IrProgram, String> {
         // MEASUREMENT (the abstain ledger names what each addition closes):
         // a module whose fns reach unfloored effect prims would lower fine
         // here and then abstain per call anyway, so listing it buys nothing.
-        const INTERP_BUNDLED_MODULES: &[&str] = &["args"];
+        //   args — #1217 (the argv floor).
+        //   html — #1844: closes availability_pure_batch (`html.escape`); its
+        //          `mod type SafeHtml = String` newtype is the interp's
+        //          identity ctor + pass-through pattern (#1835).
+        //   path — #1844: the next stop of availability_pure_batch after html
+        //          (`path.from_string`); a `mod type SafePath = String` twin.
+        //   url  — #1844: closes stdlib_type_shadow (`url.parse`); pure
+        //          string arithmetic over the bridge, no prim reached.
+        const INTERP_BUNDLED_MODULES: &[&str] = &["args", "html", "path", "url"];
         let mut bundled: Vec<(String, almide_lang::ast::Program)> = Vec::new();
         for imp in &prog.imports {
             let almide_lang::ast::Decl::Import { path, .. } = imp else { continue };

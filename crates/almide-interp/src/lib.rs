@@ -191,6 +191,12 @@ pub struct Interpreter<'a> {
     /// (0 = root, i+1 = `modules[i]`). Pool fns are absent (their bodies are
     /// self-contained — the pool has no top-lets) and default to space 0.
     pub(crate) fn_space: HashMap<usize, u32>,
+    /// The space of the lowered fn currently EXECUTING (set per trampoline
+    /// hop, restored on return; 0 = the program root, i+1 = `modules[i]`).
+    /// A module body's bare sibling call (`to_string(a)` inside `html.concat`)
+    /// resolves against this module first — the scope the checker bound it
+    /// in — so two loaded modules sharing a fn name are not ambiguous (#1844).
+    pub(crate) cur_space: Cell<u32>,
     pub(crate) globals_ready: Cell<bool>,
     pub(crate) stdout: String,
     pub(crate) stderr: String,
@@ -488,6 +494,7 @@ impl<'a> Interpreter<'a> {
             globals: env::Scope::root(),
             module_globals: program.modules.iter().map(|_| env::Scope::root()).collect(),
             fn_space,
+            cur_space: Cell::new(0),
             globals_ready: Cell::new(false),
             stdout: String::new(),
             stderr: String::new(),
@@ -1000,6 +1007,7 @@ impl<'a> Interpreter<'a> {
         }
         self.depth.set(d + 1);
         let det_was_user = self.det_in_user.get();
+        let space_was = self.cur_space.get();
         // C-320: the meter's region depth at call entry — if the callee
         // leaves it HIGHER, a det cut skipped a region's budget_exit and
         // the exit bookkeeping runs here (exhausted ⇒ Err, never stale).
@@ -1023,7 +1031,11 @@ impl<'a> Interpreter<'a> {
             // different table. Closures keep their captured chain (which was
             // built under this rule at creation).
             let fn_base = match &callee {
-                TailCallee::Fn(f) => self.space_scope(self.fn_space_of(f)).clone(),
+                TailCallee::Fn(f) => {
+                    let space = self.fn_space_of(f);
+                    self.cur_space.set(space);
+                    self.space_scope(space).clone()
+                }
                 TailCallee::Clo(_) => base.clone(),
             };
             let (frame, fn_body, clo_body) = bind_hop_frame(&callee, &mut args, &fn_base);
@@ -1089,6 +1101,7 @@ impl<'a> Interpreter<'a> {
         let result = normalize_option_fn_return(&callee, result);
         let result = self.fold_pending_try(result, &pending);
         self.det_in_user.set(det_was_user);
+        self.cur_space.set(space_was);
         self.depth.set(self.depth.get() - 1);
         (result, first_frame.unwrap_or_else(|| base.child()))
     }

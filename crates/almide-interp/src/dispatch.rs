@@ -122,6 +122,17 @@ impl<'a> Interpreter<'a> {
             return self.eval_expr(&args[0], scope);
         }
 
+        // 2d. Inside a LOWERED MODULE body, a bare sibling call resolves
+        //     against the executing module FIRST (#1844) — the scope the
+        //     checker bound it in — before the flat table and before the
+        //     unique-definer rule of step 4: `to_string(a)` inside
+        //     `html.concat` is html's own, however many loaded modules (or
+        //     the program) spell a `to_string`. The program root (space 0)
+        //     has no owner and keeps the flat-table order below.
+        if let Some(func) = self.own_module_sibling(name) {
+            return self.eval_lowered_fn_call(func, args, scope);
+        }
+
         // 3. A user / stdlib free function lowered into the program. A stdlib
         //    IMPL name (`string_slice` — how a lowered MODULE body spells
         //    `string.slice`) first tries the SAME native bridge a
@@ -189,6 +200,15 @@ impl<'a> Interpreter<'a> {
         }
 
         Flow::Unsupported(format!("named call `{}`", n))
+    }
+
+    /// Step 2d of [`Self::eval_named_call`]: the executing module's own
+    /// definition of `name`, when a module body is executing (`cur_space`)
+    /// and its module defines the name.
+    fn own_module_sibling(&self, name: Sym) -> Option<&'a almide_ir::IrFunction> {
+        let space = self.cur_space.get();
+        let owner = self.program.modules.get(space.checked_sub(1)? as usize)?.name;
+        self.module_fns.get(&(owner, name)).copied()
     }
 
     /// Step 2 of [`Self::eval_named_call`]: build the variant value a Unit- or
