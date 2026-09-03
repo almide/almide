@@ -349,60 +349,6 @@ fn wasm_closure_map_set_then_coalesce() {
 // `__main_runner`'s tag check → fd_write(stderr) + proc_exit(1)).
 // Spec: docs/specs/result-option-effect.md §4.
 
-/// Compile+run on the native target; return (exit_code, stdout, stderr).
-/// Builds to a binary (compiler diagnostics discarded) THEN runs it, so the
-/// captured stderr is the PROGRAM's runtime stderr — not the compiler's warnings
-/// — matching the wasm path (build then wasmtime). Using `almide run` would mix
-/// compile-time warnings into stderr and spuriously diverge from wasm.
-fn run_native_capture(source: &str) -> (i32, String, String) {
-    let dir = tempfile::tempdir().unwrap();
-    let src_path = dir.path().join("test.almd");
-    let bin_path = dir.path().join("test_native_bin");
-    std::fs::write(&src_path, source).unwrap();
-    let build = Command::new(almide_bin())
-        .args(["build", src_path.to_str().unwrap(), "-o", bin_path.to_str().unwrap()])
-        .output()
-        .expect("failed to build native");
-    if !build.status.success() {
-        return (
-            build.status.code().unwrap_or(-1),
-            String::new(),
-            String::from_utf8_lossy(&build.stderr).trim().to_string(),
-        );
-    }
-    let out = Command::new(&bin_path).output().expect("failed to run native binary");
-    (
-        out.status.code().unwrap_or(-1),
-        String::from_utf8_lossy(&out.stdout).trim().to_string(),
-        String::from_utf8_lossy(&out.stderr).trim().to_string(),
-    )
-}
-
-/// Compile to wasm + run via wasmtime; return (exit_code, stdout, stderr).
-/// `None` ONLY when wasmtime itself cannot be spawned. A guest exit of 127 is
-/// an ordinary comparable observable (#991): the old `!= Some(127)` guard
-/// conflated it with wasmtime-absence, and the corpus gate `return`ed green
-/// mid-run on the first such fixture — discarding every remaining fixture AND
-/// every failure already accumulated.
-fn run_wasm_capture(source: &str) -> Option<(i32, String, String)> {
-    let dir = tempfile::tempdir().unwrap();
-    let src_path = dir.path().join("test.almd");
-    let wasm_path = dir.path().join("test.wasm");
-    std::fs::write(&src_path, source).unwrap();
-    let build = Command::new(almide_bin())
-        .args(["build", src_path.to_str().unwrap(), "--target", "wasm", "-o", wasm_path.to_str().unwrap()])
-        .output()
-        .expect("failed to build wasm");
-    assert!(build.status.success(), "wasm build failed:\n{}", String::from_utf8_lossy(&build.stderr));
-    match Command::new("wasmtime").arg("--dir=/").arg("-S").arg("inherit-env=y").arg(wasm_path.to_str().unwrap()).output() {
-        Ok(o) => Some((
-            o.status.code().unwrap_or(-1),
-            String::from_utf8_lossy(&o.stdout).trim().to_string(),
-            String::from_utf8_lossy(&o.stderr).trim().to_string(),
-        )),
-        Err(_) => None,
-    }
-}
 
 #[test]
 fn unhandled_main_error_terminates_consistently() {

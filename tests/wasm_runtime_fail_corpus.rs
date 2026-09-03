@@ -1,3 +1,21 @@
+//! The failure-side corpus GATE (#1411 stage 1): every `spec/wasm_fail/*.almd`
+//! fixture must TERMINATE UNSUCCESSFULLY on both targets, the declared way
+//! (`// @expect-fail:`), and break the SAME way on both — the section comment
+//! below carries the format.
+//!
+//! Split out of the former `wasm_runtime_test` binary with the other corpus
+//! gates so the CI shard packer (scripts/ci-test-shard.sh) can spread them
+//! (wasm_runtime_test_parts/corpus.rs says why).
+//!
+//! Requires: the `almide` binary and wasmtime; the gate self-skips without
+//! them (CI sets `ALMIDE_EXPECT_TOOLS` so a missing tool fails the tripwire).
+
+// common.rs serves every wasm_runtime_* binary; this gate uses only the
+// capture legs.
+#![allow(dead_code)]
+
+include!("wasm_runtime_test_parts/common.rs");
+
 // ── The failure-side corpus (#1411 stage 1) ──
 //
 // `spec/wasm_cross/` asks "do the two legs return the same VALUE"; this gate
