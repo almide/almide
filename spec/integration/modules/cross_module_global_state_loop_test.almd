@@ -1,3 +1,4 @@
+// @contract: C-336
 // #846 regression: LICM hoisted cross-module calls to module fns that mutate
 // module globals (non-effect, no mut params), collapsing N stateful calls in
 // a loop into one. ceangal's scroll physics (tick loops) surfaced it.
