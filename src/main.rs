@@ -181,6 +181,13 @@ enum Commands {
         /// Target: wasm (wasmtime)
         #[arg(long)]
         target: Option<String>,
+        /// Accept snapshot drift: rewrite each failing `testing.assert_snapshot`
+        /// expectation in place, then re-run (also ALMIDE_UPDATE_SNAPSHOTS=1)
+        #[arg(long)]
+        update_snapshots: bool,
+        /// CI mode: snapshots are never written, drift and new snapshots fail (also CI=true)
+        #[arg(long)]
+        ci: bool,
     },
     /// Type check only
     Check {
@@ -606,9 +613,32 @@ fn dispatch_run(file: Option<String>, no_check: bool, release: bool, target: Opt
     });
 }
 
+/// `Commands::Test`'s fields, carried as one value into [`dispatch_test`].
+struct TestArgs {
+    file: Option<String>,
+    run: Option<String>,
+    no_check: bool,
+    json: bool,
+    target: Option<String>,
+    update_snapshots: bool,
+    ci: bool,
+}
+
 /// `dispatch`'s `Commands::Test` arm. Extracted verbatim.
-fn dispatch_test(file: Option<String>, run: Option<String>, no_check: bool, json: bool, target: Option<String>) {
+fn dispatch_test(args: TestArgs) {
+    let TestArgs { file, run, no_check, json, target, update_snapshots, ci } = args;
     let file_str = file.as_deref().unwrap_or("");
+    // The accept step (#1314). CI mode never writes: snapshots are committed
+    // and reviewed like code, so a new or drifted snapshot fails the run
+    // there, with the ordinary report's accept hint pointing at a local run.
+    let update = update_snapshots || env_flag("ALMIDE_UPDATE_SNAPSHOTS");
+    let ci = ci || env_flag("CI");
+    if update && ci {
+        eprintln!("CI mode (--ci / CI=true): --update-snapshots writes nothing — accept snapshots locally with `almide test --update-snapshots <file>` and commit the change");
+    } else if update {
+        cli::cmd_test_update_snapshots(file_str, no_check, run.as_deref(), target.as_deref() == Some("wasm"));
+        return;
+    }
     if target.as_deref() == Some("wasm") {
         cli::cmd_test_wasm(file_str, run.as_deref());
     } else if json {
@@ -620,6 +650,13 @@ fn dispatch_test(file: Option<String>, run: Option<String>, no_check: bool, json
         // Default: fast rustc-free WASM path, native fallback for gaps.
         cli::cmd_test_fast(file_str, no_check, run.as_deref());
     }
+}
+
+/// A boolean environment switch: set and not `0` / `false`.
+fn env_flag(name: &str) -> bool {
+    std::env::var(name)
+        .map(|v| !v.is_empty() && !matches!(v.to_ascii_lowercase().as_str(), "0" | "false"))
+        .unwrap_or(false)
 }
 
 /// `dispatch`'s `Commands::Check` arm. Extracted verbatim — `explain` still
@@ -930,7 +967,9 @@ fn dispatch(cli: Cli) {
                 heap_cap,
             });
         }
-        Commands::Test { file, run, no_check, json, target } => dispatch_test(file, run, no_check, json, target),
+        Commands::Test { file, run, no_check, json, target, update_snapshots, ci } => {
+            dispatch_test(TestArgs { file, run, no_check, json, target, update_snapshots, ci })
+        }
         Commands::Check { file, deny_warnings, json, explain, effects, timings, stamp, profile, allow } => dispatch_check(file, deny_warnings, json, explain, effects, timings, stamp, profile, allow),
         Commands::Fix { file, dry_run, json } => {
             let file = resolve_file(file);
