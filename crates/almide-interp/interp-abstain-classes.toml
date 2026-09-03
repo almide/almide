@@ -119,11 +119,6 @@ patterns = [
   # has none, and native's semantics are evaluate-the-arguments-and-discard —
   # dispatch glue (mutate the temporary value, drop it), no new model.
   "capability: in-place container mutation",
-  # Stdlib module calls with no interp bridge arm yet (dispatch glue at the
-  # bridge.rs tier): the html and url self-hosts reached by the #1828 shadow
-  # fixtures and the pure availability batch.
-  "capability: html.escape",
-  "capability: url.parse",
   # An opaque newtype's constructor call (#1835): `mod type Value = String`
   # lowers `Value(s)` as a Named call on the newtype's identity
   # (`self.Value`, `m.Token`). The value IS its payload — both backends erase
