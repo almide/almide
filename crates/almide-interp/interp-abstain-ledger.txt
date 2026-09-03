@@ -3,10 +3,10 @@
 # current boundary of the executable spec. CG-1 gap audit; shrink to zero.
 #
 # Format: <fixture-stem>  <reason as last observed>  (first token is the key)
-# Gate:   wasm_runtime_test.rs::interp_abstain_ledger — fails on a
+# Gate:   wasm_runtime_interp_ledger.rs::interp_abstain_ledger — fails on a
 #         new abstain missing here AND on a stale entry that now evaluates.
 # Regenerate (then review the diff!):
-#   ALMIDE_UPDATE_INTERP_LEDGER=1 cargo test --test wasm_runtime_test interp_abstain_ledger
+#   ALMIDE_UPDATE_INTERP_LEDGER=1 cargo test --test wasm_runtime_interp_ledger interp_abstain_ledger
 # Preferred alternative to adding an entry: widen the interp glue
 # (bridge.rs / hofs.rs / dispatch.rs — see crates/almide-interp/CLAUDE.md).
 

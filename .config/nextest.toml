@@ -10,6 +10,10 @@
 [test-groups]
 shared-fixture-serial = { max-threads = 1 }
 
+# The former single `wasm_runtime_test` binary is now the `wasm_runtime_*`
+# family (one binary per corpus gate so the shard packer can spread them);
+# they all walk the same on-disk spec/wasm_cross and spec/wasm_fail fixtures,
+# so the whole family stays one-at-a-time when several land on one shard.
 [[profile.default.overrides]]
-filter = 'binary_id(=almide::wasm_runtime_test)'
+filter = 'binary_id(almide::wasm_runtime_*)'
 test-group = "shared-fixture-serial"

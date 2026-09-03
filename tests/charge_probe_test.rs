@@ -251,7 +251,7 @@ fn interp_third_vote_on_metered_fixtures() {
     }
 }
 
-/// The 3-way harness's IR recipe (tests/wasm_runtime_test_parts/p4_corpus.rs):
+/// The 3-way harness's IR recipe (tests/wasm_runtime_test_parts/interp_leg.rs):
 /// parse → check → lower → link, at the pre-codegen cut point.
 fn lower_for_interp(source: &str) -> almide_ir::IrProgram {
     let tokens = almide::lexer::Lexer::tokenize(source);

@@ -44,7 +44,7 @@ fn kernel_conformance_native_stdout_matches_kernel_trace() {
 }
 
 /// Compile one corpus program to wasm and run it — wasmtime preferred,
-/// Node.js WASI fallback, mirroring tests/wasm_runtime_test.rs. Returns
+/// Node.js WASI fallback, mirroring tests/wasm_runtime_test_parts/common.rs. Returns
 /// `None` when no wasm runtime exists on this machine.
 fn run_wasm_stdout(src: &Path) -> Option<String> {
     let dir = tempfile::tempdir().expect("tempdir");
