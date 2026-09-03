@@ -11,7 +11,7 @@
 #
 # WHY THIS EXISTS
 # ---------------
-# The cross-target equivalence GATE (tests/wasm_runtime_test.rs::wasm_cross_target_spec)
+# The cross-target equivalence GATE (tests/wasm_runtime_cross_target.rs::wasm_cross_target_spec)
 # and the wasm-runtime ORACLE-PAIRING registry (crates/almide-codegen/rt-oracle-registry.toml)
 # already enforce equivalence at the test + routine level. This ledger adds the
 # missing layer: a stable, named CONTRACT each fixture certifies, so that

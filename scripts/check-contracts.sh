@@ -2,7 +2,7 @@
 # CONTRACT-LEDGER TRACEABILITY GATE
 # =================================
 #
-# The cross-target equivalence gate (tests/wasm_runtime_test.rs::wasm_cross_target_spec)
+# The cross-target equivalence gate (tests/wasm_runtime_cross_target.rs::wasm_cross_target_spec)
 # and the wasm-runtime oracle-pairing registry (rt-oracle-registry.toml) enforce
 # equivalence at the TEST and ROUTINE level. This gate adds the CONTRACT level:
 # every observable cross-target promise is a named [[contract]] in

@@ -234,7 +234,7 @@ Quick wins first (small effort, high leverage):
      を検査し、`Err` なら `Error: <msg>\n` を fd 2 + `proc_exit(1)`（`emit_wasm/mod.rs`）。
      非 effect `fn main`（`Unit`）は tag を持たないので **effect 限定**（`is_effect`）— でないと ok を
      err と誤判定して全 wasm main が壊れる。
-  - 検証: `tests/wasm_runtime_test.rs::{unhandled_main_error_terminates_consistently,
+  - 検証: `tests/wasm_runtime_test_parts/p3.rs::{unhandled_main_error_terminates_consistently,
     successful_main_exits_zero_both_targets}`。実測 8 ケース中 7 が native==wasm（exit/stderr 一致）。
 
   **残存乖離（別バグ）**: `!` で **Option の `None`** を unwrap（`list.first([])!`、ケース 6）は
@@ -244,12 +244,12 @@ Quick wins first (small effort, high leverage):
 
   これは §12（fan の race/timeout/map-err）と同じ「build は通るが観測非等価」クラス。残りの面的な
   検出には「観測出力（stdout/stderr/exit）を両 target で byte 比較する差分ゲート」（cross-target
-  equivalence の rank 1 force-multiplier）が本筋。`tests/wasm_runtime_test.rs` の spec/wasm_cross
+  equivalence の rank 1 force-multiplier）が本筋。`tests/wasm_runtime_cross_target.rs` の spec/wasm_cross
   stdout 比較ハーネスがその部分実装（stdout のみ。stderr/exit 比較は本節の 2 テストで先行）。
 
   # 14. Cross-target divergence burndown map (2026-06-04) — 面的ハントの結果
 
-  **ゲートは既に存在する**（#352）。`tests/wasm_runtime_test.rs::wasm_cross_target_spec` が
+  **ゲートは既に存在する**（#352）。`tests/wasm_runtime_cross_target.rs::wasm_cross_target_spec` が
   `spec/wasm_cross/*.almd` を native+wasm 両方で走らせ **(exit, stdout, stderr) を byte 比較**、
   `// @xt-allow: <理由>` で tracked 乖離を管理（現状 1 件 = float 最短往復）。native がオラクル。
   よって本丸は「ゲートを建てる」ではなく **`@xt-allow` 債務の burn down**（traversal-totality の

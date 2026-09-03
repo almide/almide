@@ -13,7 +13,7 @@
 # check-contracts.sh keeps it from drifting, the same discipline as README.md.
 #
 # The "How CI runs it" column is derived from the fixture's PATH:
-#   spec/wasm_cross/*.almd    cross-target byte-compare (wasm_runtime_test:
+#   spec/wasm_cross/*.almd    cross-target byte-compare (wasm_runtime_cross_target:
 #                             native stdout/exit == wasm stdout/exit)
 #   spec/**_test.almd, spec/* `almide test` on both targets (Test Rust / Test
 #                             WASM CI jobs)

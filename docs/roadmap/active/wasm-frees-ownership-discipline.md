@@ -53,13 +53,13 @@ Every bug in this drain is one facet of this single gap.
 
 `almide test spec/ --target wasm` (the test-block assertion corpus) is
 **necessary but NOT sufficient**. Test blocks exercise value assertions but skip
-whole shapes. The **`cargo test --release --test wasm_runtime_test`** gate (the
+whole shapes. The **`cargo test --release --test wasm_runtime_cross_target`** gate (the
 ~100 `spec/wasm_cross/*.almd` `@contract` fixtures, byte-identical stdout/stderr/
 exit) exercises shapes the test corpus never does — e.g. **compound set/map keys**
 (`compound_eq.almd`, contract C-015). The real done-bar is:
 
 - `almide test spec/ --target wasm` = clean (assertions), AND
-- `cargo test --release --test wasm_runtime_test` = clean (byte-identical), AND
+- `cargo test --release --test wasm_runtime_cross_target` = clean (byte-identical), AND
 - churn benchmark O(1) (the leak gate — see below), AND
 - native `almide test spec/` unregressed.
 
@@ -91,14 +91,14 @@ Mechanism #2/#3/#5 emit `call rt.rc_inc` **directly** (not an IR `RcInc` node).
 - ✅ native `almide test spec/`: **248/248**.
 - ✅ churn (2M iters of {build Codec record + encode + value.stringify}): peak RSS
   **7.46 MB** = O(1), no leak.
-- ❌ cargo `wasm_runtime_test` gate: **`compound_eq.almd` (C-015) diverges** —
+- ❌ cargo `wasm_runtime_cross_target` gate: **`compound_eq.almd` (C-015) diverges** —
   `set.contains(sr, {record})` returns F (should T) **and** a `rc_dec` sentinel
   trap at `main` exit. (Full diverging list pending the gate run.)
 
 ## Second layer: the COLLECTION RUNTIME (found by the cargo gate, 2026-06-08)
 
 The expression/constructor/closure drain above is verified clean by BOTH the test
-corpus AND a 2M-iter churn. But the `cargo wasm_runtime_test` gate (byte-identical,
+corpus AND a 2M-iter churn. But the `cargo wasm_runtime_cross_target` gate (byte-identical,
 the part `almide test` cannot reach) exposes a **second layer**: the WASM
 collection runtime copies heap element/key/value POINTERS into new structures
 without dup'ing them, so the source's scope-end Dec deep-frees what the new
@@ -171,7 +171,7 @@ Separate, careful fix.
 ## Trap log (environment)
 
 - `almide test spec/ --target wasm` runs every test block on wasmtime; the cargo
-  `wasm_runtime_test` gate is the byte-identical contract gate. **Neither alone is
+  `wasm_runtime_cross_target` gate is the byte-identical contract gate. **Neither alone is
   the bar — both are.**
 - The sentinel guard converts double-free hangs → fast traps, so the corpus run
   terminates instead of spinning.

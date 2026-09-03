@@ -27,7 +27,7 @@ Ledger mechanics:
 | Evidence layer | What it locks |
 |---|---|
 | [Contract ledger](../contracts) | every promise is a named `C-NNN`; an `active` contract must carry evidence of class ≥ `fixture` |
-| [Cross-target fixture gate](../../tests/wasm_runtime_test.rs) | every `spec/wasm_cross/*.almd` fixture runs on both targets; outputs byte-compared (`wasm_cross_target_spec`) |
+| [Cross-target fixture gate](../../tests/wasm_runtime_cross_target.rs) | every `spec/wasm_cross/*.almd` fixture runs on both targets; outputs byte-compared (`wasm_cross_target_spec`) |
 | [Differential fuzz](../../tests/regex_fuzz_test.rs) | randomized programs and inputs, native vs wasm outputs compared |
 | Emit-time Σ-probes | wasm Unicode/case tables exhaustively probed against Rust `std` over the full scalar domain at emit time |
 | [Lean 4 belt](../../crates/almide-perceus-belt) | RC-insertion correctness machine-checked by the Lean kernel |
