@@ -1219,3 +1219,29 @@ fn every_consumption_site_still_sees_the_payload() {
         "stderr: {err}"
     );
 }
+
+/// An opaque newtype (`mod type` / `local type`) is erased by both backends:
+/// its ctor call is the payload and its ctor pattern destructures the
+/// payload. Pinned for the entry program's PLAIN newtype (bare identity,
+/// `Token`) and its shadow of a stdlib-owned name (`self.Value`, #1835), the
+/// two spellings the ctor call and pattern carry into the IR.
+#[test]
+fn opaque_newtype_ctor_is_identity_on_its_payload() {
+    let (exit, out, err) = run(
+        "mod type Value = String\n\
+         local type Token = Int\n\
+         fn un(v: Value) -> String = match v {\n\
+         \x20 Value(s) => s\n\
+         }\n\
+         fn depth(t: Token) -> Int = match t {\n\
+         \x20 Token(n) => n + 1\n\
+         }\n\
+         fn main() -> Unit = {\n\
+         \x20 let mine = Value(\"x\")\n\
+         \x20 let items: List[Value] = [Value(\"a\"), Value(\"b\")]\n\
+         \x20 println(\"${un(mine)} ${mine == Value(\"x\")} ${mine == Value(\"y\")} ${list.len(items)} ${un(items[1])}\")\n\
+         \x20 println(int.to_string(depth(Token(2))))\n\
+         }\n",
+    );
+    assert_eq!((exit, out.as_str()), (0, "x true false 2 b\n3\n"), "stderr: {err}");
+}
