@@ -77,6 +77,7 @@ almide test spec/lang/expr_test.almd    # ファイル指定
 almide test --run "pattern"             # テスト名でフィルタ
 almide test --target wasm               # WASM ターゲットでテスト
 almide test --json                      # 結果を JSONL (1行1ファイル) で出力
+almide test --update-snapshots x_test.almd  # スナップショットの受理(期待値リテラルを書き換え)
 ```
 
 | オプション | 説明 |
@@ -85,6 +86,8 @@ almide test --json                      # 結果を JSONL (1行1ファイル) �
 | `--no-check` | 型チェックをスキップ |
 | `--json` | JSON 形式で結果出力 |
 | `--target wasm` | wasmtime で実行 |
+| `--update-snapshots` | `testing.assert_snapshot` の不一致を受理し、呼び出し側の期待値リテラルをソース内で書き換える(`ALMIDE_UPDATE_SNAPSHOTS=1` でも同じ) |
+| `--ci` | CI モード: スナップショットを一切書かない(`CI=true` でも同じ)。新規・乖離はどちらも失敗 |
 
 スクラッチ成果物（wasm レグが wasmtime に渡す `.wasm` モジュール）は実行ごとに固有の
 `$TMPDIR/almide-test-<pid>-<nonce>/` 配下に、ファイルの**絶対パス**のハッシュで命名して
@@ -123,6 +126,31 @@ test "string concat" {
 - `test` ブロックは任意の `.almd` ファイルに書ける
 - `*_test.almd` サフィックスは慣習（強制ではない）
 - `test` ブロック内は暗黙の effect context（I/O 呼び出し可能）
+
+#### スナップショット (`testing.assert_snapshot`)
+
+期待値は**ソース内のリテラル**(第 2 引数)であり、sidecar ファイルは持たない
+(expect-test 型)。`""` で書き始めて `almide test --update-snapshots <file>` を
+実行すると、実測値がリテラルとして書き戻される(複数行なら heredoc)。
+書き換えは呼び出し行のリテラルだけで、ファイルの他の部分はバイト単位で不変。
+
+```almide
+import testing
+
+test "render" {
+  testing.assert_snapshot(render(x), "")   // → --update-snapshots で実測値に書き換わる
+}
+```
+
+- 不一致は通常の失敗として報告される(`expected:` / `found:` または `diff:` と、
+  `accept:` 行に受理コマンド)。実行時の停止ブロックは両ターゲットで同一
+  (`Error: snapshot mismatch` / `at: line N` / `expected:` / `found:`、exit 1、契約 C-336)
+- `--update-snapshots` は 1 ファイルにつき「実行 → 書き換え → 再実行」を収束まで
+  繰り返す(停止は最初の不一致で起きるため)。第 2 引数がリテラルでない
+  (変数・補間文字列)場合は書き換えず失敗する
+- CI モード(`--ci` / `CI=true`)では `--update-snapshots` は何も書かず、新規
+  (`""`)・乖離とも失敗する。スナップショットはコードと同様にコミットして
+  レビューする
 
 ---
 
@@ -457,3 +485,5 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | 変数 | 説明 |
 |---|---|
 | `ALMIDE_DEBUG_TYPEVARS` | `1` にすると未解決 TypeVar の詳細を出力 |
+| `ALMIDE_UPDATE_SNAPSHOTS` | `1` で `almide test --update-snapshots` と同じ |
+| `CI` | `true` で `almide test --ci` と同じ(スナップショットを書かない) |
