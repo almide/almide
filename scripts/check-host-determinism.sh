@@ -117,7 +117,13 @@ fi
 # honestly (the receiver discipline names the call-result receiver, and the
 # `let _ =` Unit binding is outside its value subset) where the structural
 # leg, the default route, releases the mutated block. Prunes with #1696 4-5.
-MAX_WALLED=25
+# 26 as of 2026-09-03: mut_param_effect_can_err.almd (C-132/#1576) — the
+# can-err effect fn with a `mut` param takes the move-mode tuple rewrite
+# (`(T, Buf)` on the ok payload); the incumbent brick walls the synthesized
+# `let (r, b) = call!` destructure-unwrap honestly (`unwrap `!` in a
+# call-argument position`) where the structural leg, the default route,
+# lowers every cell byte-identical to native. Prunes with #1696 4-5.
+MAX_WALLED=26
 corpus=$(ls "$FIXTURE_DIR"/*.almd 2>/dev/null | wc -l | tr -d ' ')
 if [ "$corpus" -eq 0 ] || [ $((n + walled)) -ne "$corpus" ]; then
   echo "::error::host-determinism: compared $n + walled $walled != corpus $corpus in $FIXTURE_DIR — the scan went blind (#985)"
