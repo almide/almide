@@ -3064,11 +3064,12 @@ evidence  = [
 id        = "C-240"
 spec      = "ALS-E12"
 title     = "Map literals and empty-map reads behave identically on both targets"
-statement = "ALS-E12: the square-bracket-colon map literal, `[:]` empty map, `m[k]` Option reads with `??` fallback, and deterministic insertion-order preservation (the fixture iterates [\"z\": 1, \"a\": 2, \"m\": 3] and pins z=1 a=2 m=3 — insertion order, not key order) — shares the collection fixture with C-239 (the E11/E12 pair landed together, like the E1/E2 template pair)."
+statement = "ALS-E12: the square-bracket-colon map literal, `[:]` empty map, `m[k]` Option reads with `??` fallback, and deterministic insertion-order preservation (the fixture iterates [\"z\": 1, \"a\": 2, \"m\": 3] and pins z=1 a=2 m=3 — insertion order, not key order) — shares the collection fixture with C-239 (the E11/E12 pair landed together, like the E1/E2 template pair). EXTENDED (#1874, 0.61.2): the `m[k]` read is byte-identical for EVERY key shape — a literal, a `let`-bound String, a String PARAMETER (in tail, `let` and interpolation position, and used twice so both the first and the last use render), a String record field, a for-in binder, a lambda parameter, and an Int parameter on an Int-keyed map — and agrees with the `map.get` spelling. The native `map_get` template borrows the key itself (`.get(&{key})`); a borrow-inferred String parameter is already `&str`, so the LAST use of such a parameter (the only one pass_clone leaves bare) rendered `&&str` against the `&String` slot — check green, native build red (rustc E0308), wasm correct. The renderer now materializes the owned key (`.to_string()`) for exactly that shape, the form a non-last use already had."
 since     = "0.57.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/collection_literals.almd", class = "fixture" },
+  { path = "spec/wasm_cross/map_index_string_key_shapes.almd", class = "fixture" },
 ]
 
 [[contract]]
