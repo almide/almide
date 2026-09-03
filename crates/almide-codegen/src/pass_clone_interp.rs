@@ -66,7 +66,14 @@ impl IrVisitor for ByValueUse {
             {
                 match &expr.kind {
                     IrExprKind::IndexAccess { index: rest, .. } | IrExprKind::MapAccess { key: rest, .. } => self.visit_expr(rest),
-                    _ => {}
+                    // Member / TupleIndex / Borrow / Deref: the only child is the
+                    // Var object the guard just judged a place read — nothing
+                    // left to walk.
+                    IrExprKind::Member { .. }
+                    | IrExprKind::TupleIndex { .. }
+                    | IrExprKind::Borrow { .. }
+                    | IrExprKind::Deref { .. } => {}
+                    _ => unreachable!("the guarded arm admits only place accesses"),
                 }
             }
             _ => walk_expr(self, expr),
