@@ -85,7 +85,7 @@ fail=0; n=0
 # `let (r, b) = call!` destructure-unwrap honestly (`unwrap `!` in a
 # call-argument position`) where the structural leg, the default route,
 # lowers every cell byte-identical to native. Prunes with #1696 4-5.
-MAX_WALLED=26
+MAX_WALLED=27
 walled=0
 for fix in "$FIXTURE_DIR"/*.almd; do
   [ -e "$fix" ] || continue
