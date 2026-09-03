@@ -89,6 +89,9 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, call: CallArgs<
     if let Some(desugared) = desugar_assert_outside_test(ctx, &target, &ir_args, span) {
         return desugared;
     }
+    if let Some(desugared) = desugar_snapshot_assert(ctx, &target, &ir_args, span) {
+        return desugared;
+    }
 
     let ty = call_result_ty(&target, ty);
     ctx.mk(IrExprKind::Call { target, args: ir_args, type_args: ta }, ty, span)
@@ -307,6 +310,31 @@ fn desugar_assert_outside_test(
         return None;
     }
     Some(desugar_assert_abort(ctx, n, ir_args.to_vec(), span))
+}
+
+/// `testing.assert_snapshot(actual, expected)` (#1314) desugars to the T18
+/// abort form — INSIDE test blocks too, unlike the assert family above.
+///
+/// The accept step (`almide test --update-snapshots`) is CLI-side: it reads
+/// the abort block back, rewrites the `expected` literal at `at: line <N>`,
+/// and re-runs. That only works when every lane prints the same block with
+/// the found value in it — libtest's `assert_eq!` payload carries the
+/// operands as Rust `Debug` (lossy for the rewrite), and the wasm test
+/// runner's `prim.die` carries no values at all. Desugaring here once, before
+/// any lane, is what makes the accept step lane-independent (the T18 lesson,
+/// C-153). The header is `Error: snapshot mismatch` so the reporter can tell
+/// the two apart and print the accept hint only for this one.
+fn desugar_snapshot_assert(
+    ctx: &mut LowerCtx,
+    target: &CallTarget,
+    ir_args: &[IrExpr],
+    span: Option<ast::Span>,
+) -> Option<IrExpr> {
+    let CallTarget::Module { module, func, .. } = target else { return None };
+    if module.as_str() != "testing" || func.as_str() != "assert_snapshot" || ir_args.len() != 2 {
+        return None;
+    }
+    Some(desugar_assert_abort(ctx, "assert_snapshot", ir_args.to_vec(), span))
 }
 
 /// The type of the call node.
@@ -562,7 +590,7 @@ fn desugar_assert_abort(
         vars.push(ctx.mk(IrExprKind::Var { id: v }, a_ty, span));
     }
     let cond = match name {
-        "assert_eq" => ctx.mk(
+        "assert_eq" | "assert_snapshot" => ctx.mk(
             IrExprKind::BinOp {
                 op: BinOp::Eq,
                 left: Box::new(vars[0].clone()),
@@ -592,6 +620,16 @@ fn desugar_assert_abort(
     let parts: Vec<IrStringPart> = match name {
         "assert_eq" => vec![
             IrStringPart::Lit { value: format!("Error: assertion failed{at}\n  expected: ") },
+            IrStringPart::Expr { expr: vars[1].clone() },
+            IrStringPart::Lit { value: "\n  found: ".into() },
+            IrStringPart::Expr { expr: vars[0].clone() },
+        ],
+        // The snapshot block (#1314): same field order as assert_eq — `found`
+        // LAST so the accept step can take it verbatim to the end of the
+        // output, blank lines and all (the reporter's block-end rule is too
+        // coarse for a value that is about to be written back into source).
+        "assert_snapshot" => vec![
+            IrStringPart::Lit { value: format!("Error: snapshot mismatch{at}\n  expected: ") },
             IrStringPart::Expr { expr: vars[1].clone() },
             IrStringPart::Lit { value: "\n  found: ".into() },
             IrStringPart::Expr { expr: vars[0].clone() },

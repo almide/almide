@@ -87,9 +87,43 @@ test "result is ok" {
 }
 ```
 
+### `testing.assert_snapshot(actual: String, expected: String) -> Unit`
+
+Assert that `actual` equals the snapshot written at the call site. The
+expectation is the literal itself — there is no sidecar file — and the accept
+step rewrites it in place: start with `""`, run
+`almide test --update-snapshots <file>`, and the found value is written back as
+the second argument (a heredoc when it spans lines). A later drift fails the
+plain `almide test` run with a diff and the accept hint; `--update-snapshots`
+rewrites it again. In CI mode (`--ci` or `CI=true`) nothing is ever written —
+a new or drifted snapshot fails there, so snapshots are committed and reviewed
+like code.
+
+```almd check
+import testing
+
+fn render(xs: List[Int]) -> String = xs |> list.map((x) => "item ${x}") |> list.join("\n")
+
+test "single line" {
+  testing.assert_snapshot("hello", "hello")
+}
+
+test "multi line, written back as a heredoc" {
+  testing.assert_snapshot(render([1, 2]), """
+    item 1
+    item 2
+    """)
+}
+```
+
+The second argument must be a plain string literal (no interpolation) for the
+accept step to rewrite it; a mismatch aborts the run with the structured block
+`Error: snapshot mismatch` / `at:` / `expected:` / `found:` and exit code 1 on
+every target (contract C-336).
+
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (9 functions)
+## Signature index (10 functions)
 
 ```
 testing.assert_throws(f: () -> Unit, expected: String) -> Unit
@@ -101,6 +135,7 @@ testing.assert_some(opt: Option[A]) -> Unit
 testing.assert_ok(result: Result[A, B]) -> Unit
 testing.assert_none(opt: Option[A]) -> Unit
 testing.assert_err(result: Result[A, B]) -> Unit
+testing.assert_snapshot(actual: String, expected: String) -> Unit
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

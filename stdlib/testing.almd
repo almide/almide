@@ -36,3 +36,13 @@ fn assert_none[A](opt: A?) -> Unit = _
 @intrinsic("almide_rt_test_assert_err")
 @borrow_ref(result)
 fn assert_err[A, B](result: Result[A, B]) -> Unit = _
+
+// assert_snapshot (#1314): `actual` must equal the `expected` literal written
+// at the call site; `almide test --update-snapshots` rewrites that literal to
+// the found value. The FRONTEND desugars every direct call — inside test
+// blocks too — to the T18 abort block (`Error: snapshot mismatch` / `at:` /
+// `expected:` / `found:`, exit 1), the same shape on every lane, which is what
+// the accept step reads back. This body is reached only through a first-class
+// use of the fn value (never desugared) and keeps the verdict, minus the site.
+fn assert_snapshot(actual: String, expected: String) -> Unit =
+  if actual == expected then () else panic("snapshot mismatch\n  expected: ${expected}\n  found: ${actual}")

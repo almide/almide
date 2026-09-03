@@ -19,6 +19,11 @@ fn testing_assert_approx(a: Float, b: Float, epsilon: Float) -> Unit = if float.
 
 fn testing_assert_contains(haystack: String, needle: String) -> Unit = if string.contains(haystack, needle) then () else prim.die(prim.handle("assert_contains failed\n"))
 
+// The snapshot twin (#1314) is the family's wasm fallback for a FIRST-CLASS use
+// of `testing.assert_snapshot`; a direct call never reaches it — the frontend
+// desugars it to the valued T18 block on every lane (stdlib/testing.almd).
+fn testing_assert_snapshot(actual: String, expected: String) -> Unit = if actual == expected then () else prim.die(prim.handle("assert_snapshot failed\n"))
+
 fn testing_assert_some(o: String?) -> Unit = {
   let h = prim.handle(o)
   if prim.load32(h + 4) != 0 then () else prim.die(prim.handle("assert_some failed: got None\n"))
