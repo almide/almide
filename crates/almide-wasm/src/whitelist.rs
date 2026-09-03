@@ -135,15 +135,6 @@ pub(crate) const BYTES_FAMILY_VERIFIED: &[&str] = &[
     "bytes_read_i32_be_array", "bytes_read_i32_le_array", "bytes_read_i64_be_array",
     "bytes_read_i64_le_array", "bytes_read_string_be", "bytes_read_u16_be_array",
     "bytes_read_u16_le_array", "bytes_read_u32_be_array", "bytes_read_u32_le_array",
-    // bytes_typed.almd (Endian-argument wrappers, #1098): audited 2026-08-25 —
-    // prim.alloc_bytes + load8/store8 on Bytes payloads only (len=bytes on
-    // both legs), payload offset 12 = OUR PAYLOAD; the Endian ctors build a
-    // 1-byte block only this module reads; reads/sets cross-call the C-229
-    // native matrix; write_* return the fresh grown block (v1 rebind form).
-    "bytes_endian_le", "bytes_endian_be", "bytes_read_uint16", "bytes_read_uint32",
-    "bytes_read_int32", "bytes_read_float32", "bytes_write_uint16", "bytes_write_uint32",
-    "bytes_write_int32", "bytes_write_float32", "bytes_set_uint16", "bytes_set_uint32",
-    "bytes_set_int32", "bytes_set_float32",
     // bytes_append_multi.almd cursor tail (#1099): the __bam grow-append
     // shape — prim.load32(handle+4) is the Bytes LEN header (len = bytes
     // on both legs); same audit as the append_* family above.
@@ -153,6 +144,20 @@ pub(crate) const BYTES_FAMILY_VERIFIED: &[&str] = &[
 /// The exempt-tier members of the same audit (tuple/Option returners
 /// with literal-built sums).
 pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
+    // bytes_typed.almd (Endian-argument wrappers, #1098): audited 2026-08-25 —
+    // prim.alloc_bytes + load8/store8 on Bytes payloads only (len=bytes on
+    // both legs), payload offset 12 = OUR PAYLOAD; reads/sets cross-call the
+    // C-229 native matrix; write_* return the fresh grown block (v1 rebind
+    // form). In THIS tier since #1839: the Endian argument is the stdlib's
+    // DECLARED variant (`type Endian = | LittleEndian | BigEndian`), consumed
+    // by a language-level `match` this emitter lowers with its own layout —
+    // the coupled-type proxy fires on the Named param, the body never touches
+    // the block. (The 1-byte-block twin and its registered ctor builders are
+    // gone — they split the representation whenever the decl was present.)
+    "bytes_read_uint16", "bytes_read_uint32",
+    "bytes_read_int32", "bytes_read_float32", "bytes_write_uint16", "bytes_write_uint32",
+    "bytes_write_int32", "bytes_write_float32", "bytes_set_uint16", "bytes_set_uint32",
+    "bytes_set_int32", "bytes_set_float32",
     "bytes_read_bool_at", "bytes_read_f16_le_at", "bytes_read_f32_be_at", "bytes_read_f32_le_at",
     "bytes_read_f64_be_at", "bytes_read_f64_le_at", "bytes_read_i16_be_at", "bytes_read_i16_le_at",
     "bytes_read_i32_be_at", "bytes_read_i32_le_at", "bytes_read_i64_be_at", "bytes_read_i64_le_at",

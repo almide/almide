@@ -28,7 +28,18 @@ fn lower_and_link_one_runtime_fn(
     verbose: bool,
     functions: &mut Vec<crate::MirFunction>,
 ) {
-    let lowered = crate::lower::lower_function(f, &layouts.globals);
+    // The program's record/variant layouts ride along (#1839): a registry
+    // body may take a stdlib-DECLARED variant (`bytes_typed`'s `e: Endian`,
+    // matched by tag), and that declaration reaches the program's type decls
+    // through `ir_link`'s type-owner pull — the same layouts the user fns
+    // lower with. Main fn only, as before (`lower_function`'s contract).
+    let lowered = crate::lower::lower_function_all_with_layouts(
+        f,
+        &layouts.globals,
+        &layouts.record_layouts,
+        &layouts.variant_layouts,
+    )
+    .map(|mut all| all.remove(0));
 
     if let Err(e) = &lowered {
         if verbose

@@ -213,3 +213,32 @@ pub fn register_bundled_types(module: &str, env: &mut crate::types::TypeEnv) {
         }
     }
 }
+
+/// #1839: the bundled module that DECLARES the nominal type `name` (bare
+/// spelling — `Endian` → `bytes`, `FileStat` → `fs`), `None` for every other
+/// name. Enumerated from the bundled sources themselves, so a new `type` in
+/// any bundled module joins `ir_link`'s type-owner pull with no table to
+/// maintain; `bundled_type_decls_are_unique_by_name` (tests/) pins that no
+/// two bundled modules declare one bare name — the pull could not choose.
+pub fn bundled_type_owner(name: &str) -> Option<&'static str> {
+    bundled_type_owners().get(name).copied()
+}
+
+/// Every `bare type name → owning bundled module`, built once per process
+/// from the parse-cached bundled sources.
+pub fn bundled_type_owners() -> &'static HashMap<String, &'static str> {
+    static OWNERS: std::sync::OnceLock<HashMap<String, &'static str>> = std::sync::OnceLock::new();
+    OWNERS.get_or_init(|| {
+        let mut out = HashMap::new();
+        for module in almide_lang::stdlib_info::BUNDLED_MODULES.iter().copied() {
+            let Some(source) = super::stdlib::get_bundled_source(module) else { continue };
+            let Some(program) = almide_lang::parse_cached(source) else { continue };
+            for decl in &program.decls {
+                if let ast::Decl::Type { name, .. } = decl {
+                    out.entry(name.as_str().to_string()).or_insert(module);
+                }
+            }
+        }
+        out
+    })
+}

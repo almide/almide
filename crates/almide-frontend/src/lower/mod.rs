@@ -26,6 +26,7 @@ mod expressions;
 mod calls;
 mod statements;
 mod types;
+pub use types::lower_bundled_type_decl;
 mod derive;
 mod derive_codec;
 mod auto_try;
