@@ -200,3 +200,13 @@ spec/wasm_cross/bytes_temp_receiver.almd :: main
 spec/stdlib/http_status_test.almd :: __test_almd_request_response to a closed local port is a transport err
 spec/stdlib/http_status_test.almd :: fetch_retry
 spec/stdlib/http_status_test.almd :: get_retry
+
+# (2026-09-03, C-132/#1576) a CAN-ERR effect fn with a `mut` param takes the
+# move-mode tuple rewrite (`(T, Buf)` on the ok payload only); the incumbent
+# brick walls the synthesized `let (r, b) = call!` destructure-unwrap in the
+# callers (`unwrap `!` in a call-argument position`) and the generic port's
+# heap-result `if` tail (`uc__Mem`), where the STRUCTURAL leg (the default)
+# lowers every cell byte-identical to native. Prunes with #1696 4-5.
+spec/wasm_cross/mut_param_effect_can_err.almd :: go
+spec/wasm_cross/mut_param_effect_can_err.almd :: main
+spec/wasm_cross/mut_param_effect_can_err.almd :: uc__Mem
