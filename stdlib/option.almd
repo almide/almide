@@ -16,6 +16,9 @@ fn flat_map[A, B](o: A?, f: (A) -> B?) -> B? = _
 fn flatten[A](o: (A?)?) -> A? = _
 
 @intrinsic("almide_rt_option_unwrap_or")
+// ADR-0005 D4: the eager fallback is the third spelling with no definition
+// relation to `??` (≡ unwrap_or_else) — deprecated, removed one window later.
+@deprecated(since = 3, use = "??")
 fn unwrap_or[A](o: A?, default: A) -> A = _
 
 @intrinsic("almide_rt_option_unwrap_or_else")

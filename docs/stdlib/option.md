@@ -64,10 +64,14 @@ none
 
 Get the inner value, or return a default if none.
 
+**Deprecated (E052, ADR-0005 D4)** — the eager fallback is the third spelling with no definition relation to `??` (`≡ unwrap_or_else`, the default is evaluated only on the fallback path). Write `value ?? default`; `almide fix` rewrites both the call and the pipe-stage form. Removed one dialect window later.
+
+
 ```almd run
 fn main() -> Unit = {
-  println("${option.unwrap_or(none, 0)}")
-  println("${option.unwrap_or(some(7), 0)}")
+  let n: Int? = none
+  println("${n ?? 0}")
+  println("${some(7) ?? 0}")
 }
 ```
 ```output
@@ -217,7 +221,7 @@ fn main() -> Unit = {
 option.map(o: Option[A], f: (A) -> B) -> Option[B]
 option.flat_map(o: Option[A], f: (A) -> Option[B]) -> Option[B]
 option.flatten(o: Option[Option[A]]) -> Option[A]
-option.unwrap_or(o: Option[A], default: A) -> A
+option.unwrap_or(o: Option[A], default: A) -> A   (deprecated — use ??)
 option.unwrap_or_else(o: Option[A], f: () -> A) -> A
 option.is_some(o: Option[A]) -> Bool
 option.is_none(o: Option[A]) -> Bool
