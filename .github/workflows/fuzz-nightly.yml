@@ -214,6 +214,20 @@ jobs:
           sudo mv wasmtime-*/wasmtime /usr/local/bin/
           wasmtime --version
 
+      # Evidence for the runner reclaims (exit 143, "the runner has received
+      # a shutdown signal"): 0/0/3/0/2/2/2/4/3 shards per night since
+      # 2026-08-29, both architectures, at independent minutes into the
+      # campaign — the memory-knob step-down (jobs 3→2 / 4→3) did not stop
+      # them. A 20 s memory/load sampler in the job log turns the next kill
+      # into a number: the last sampled line before the shutdown says
+      # whether the VM was out of memory or something else went.
+      - name: Start the memory sampler
+        run: |
+          ( while true; do
+              echo "[mem] $(date -u +%H:%M:%S) $(free -m | awk 'NR==2{printf "used=%sMB avail=%sMB", $3, $7}') load=$(cut -d' ' -f1 /proc/loadavg) procs=$(ls /proc | grep -c '^[0-9]')"
+              sleep 20
+            done ) &
+          echo $! > /tmp/mem-sampler.pid
       - name: Run fuzz campaign
         id: campaign
         run: |
