@@ -655,6 +655,7 @@ fn spawn_http_echo() -> std::net::SocketAddr {
             let method = line.split_whitespace().next().unwrap_or("").to_string();
             let mut clen = 0usize;
             let mut chunked = false;
+            let mut probe = String::new();
             loop {
                 let mut h = String::new();
                 if r.read_line(&mut h).is_err() || h.trim().is_empty() {
@@ -666,6 +667,9 @@ fn spawn_http_echo() -> std::net::SocketAddr {
                 }
                 if hl.starts_with("transfer-encoding:") && hl.contains("chunked") {
                     chunked = true;
+                }
+                if let Some(v) = hl.strip_prefix("x-probe:") {
+                    probe = v.trim().to_string();
                 }
             }
             let mut body = Vec::new();
@@ -699,6 +703,7 @@ fn spawn_http_echo() -> std::net::SocketAddr {
             let resp = match method.as_str() {
                 "GET" => "hello from p3".to_string(),
                 "DELETE" => "gone".to_string(),
+                _ if !probe.is_empty() => format!("len:{};probe:{probe}", body.len()),
                 _ => format!("len:{}", body.len()),
             };
             let mut c = r.into_inner();
@@ -813,5 +818,68 @@ effect fn main() -> Unit = {{
         stdout,
         "get:hello from p3\npost:len:9\nput:len:2097152\npatch:len:5\ndel:gone\n",
         "p3 http probe stdout; stderr:\n{stderr}"
+    );
+}
+
+/// #1710 PR B, the framed family on the p3 component: `request` /
+/// `request_status` / `get_status` / `request_bytes` / `get_bytes` ride
+/// the same async-lowered exchange (ops 48..=50). The frame the guest
+/// builds (stdlib/http_framed.almd: method, body, header cells with CHAR
+/// counts) is parsed in the shim; the method lands as the named variant
+/// case (or `other(string)`), the headers through `fields.append` (the
+/// echo server reflects `x-probe` into the body to prove they crossed),
+/// and `request_status` prefixes the decimal status the host lane prints.
+#[test]
+fn p3_component_speaks_framed_http() {
+    let addr = spawn_http_echo();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let src = dir.path().join("framed.almd");
+    let program = format!(
+        r#"import http
+
+effect fn main() -> Unit = {{
+  match http.request("POST", "http://{addr}/echo", "héllo", ["x-probe": "p3"]) {{
+    ok(t) => println("req:" + t),
+    err(e) => println("req err:" + e),
+  }}
+  match http.request_status("PUT", "http://{addr}/echo", string.repeat("x", 2048), map.new()) {{
+    ok((c, t)) => println("status:${{c}}:" + t),
+    err(e) => println("status err:" + e),
+  }}
+  match http.get_status("http://{addr}/hello") {{
+    ok((c, t)) => println("gets:${{c}}:" + t),
+    err(e) => println("gets err:" + e),
+  }}
+  match http.get_bytes("http://{addr}/hello") {{
+    ok(b) => println("bytes:${{bytes.len(b)}}"),
+    err(e) => println("bytes err:" + e),
+  }}
+  match http.request_bytes("DELETE", "http://{addr}/gone", "", map.new()) {{
+    ok(b) => println("rb:${{bytes.len(b)}}"),
+    err(e) => println("rb err:" + e),
+  }}
+  match http.request("PROPFIND", "http://{addr}/echo", "z", map.new()) {{
+    ok(t) => println("other:" + t),
+    err(e) => println("other err:" + e),
+  }}
+}}
+"#
+    );
+    std::fs::write(&src, program).unwrap();
+    let out = dir.path().join("framed.wasm");
+    let stderr = build_p3(&src, &out);
+    assert!(out.exists(), "p3 framed http build produced no artifact:\n{stderr}");
+    if !wasmtime_available() {
+        eprintln!("skipping p3 framed http execution: wasmtime not installed");
+        return;
+    }
+    let Some((stdout, stderr, code)) = run_p3_http(&out) else {
+        return;
+    };
+    assert_eq!(code, 0, "p3 framed http probe exit code; stderr:\n{stderr}");
+    assert_eq!(
+        stdout,
+        "req:len:6;probe:p3\nstatus:200:len:2048\ngets:200:hello from p3\nbytes:13\nrb:4\nother:len:1\n",
+        "p3 framed http probe stdout; stderr:\n{stderr}"
     );
 }
