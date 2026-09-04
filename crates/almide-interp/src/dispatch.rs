@@ -614,6 +614,7 @@ pub(crate) fn is_hof(module: &str, func: &str) -> bool {
             | ("list", "__fallible_find")
             | ("list", "__fallible_fold")
             | ("list", "__fallible_each")
+            | ("fs", "__fallible_fold_lines")
             | ("map", "map")
             | ("map", "filter")
             | ("map", "fold")
