@@ -55,6 +55,16 @@ patterns = [
   # tier, same class as random_get/read_n_bytes — bounded, not architectural.
   "capability: env.set",
   "capability: HOF map.fold",
+  # SURFACED BY the #1844 Result-handle block (`prim.handle` of a Result is
+  # now the cap-as-tag slot the fs floors hand back), not introduced by it:
+  # the fs fixtures used to abstain at the handle and now get past it to the
+  # next vfs prim the overlay does not serve — a directory listing, a stat,
+  # a bytes read, the fallible fold callback. Sandboxed-fs glue at the
+  # argv/env tier, bounded work each.
+  "capability: prim.read_dir",
+  "capability: prim.path_filestat",
+  "capability: prim.read_bytes_file",
+  "capability: fs.__fallible_fold_lines",
   # SURFACED BY the #1416 ctor glue (map.new/set.new/with_capacity), not
   # introduced by it: map_filter / map_set_typechange used to abstain at
   # `prim.alloc_map` (HEAP_BOUNDARY, first-hit) and now get past the
