@@ -736,7 +736,18 @@ fn run_wasm_src(
             // `Error: <msg>` from a defined guard), so the `wasm trap:`
             // prefix is this leg's own spelling — a fuzz finding or a
             // user is never left with an empty stderr and a bare 1.
-            err.lock().expect("test harness invariant").push_str(&trap_line(e));
+            // EXCEPT the die convention (#1912): a defined guard's
+            // `prim.die` prints its `Error: <msg>` line and then executes
+            // `unreachable` — the trap IS the exit, already named. The stock
+            // wasmtime lane and native show that one line; adding
+            // `Error: wasm trap: unreachable…` after it made the embedded
+            // lane the odd one out.
+            let mut buf = err.lock().expect("test harness invariant");
+            let named_die = is_unreachable_trap(e)
+                && buf.lines().last().is_some_and(|l| l.starts_with("Error: "));
+            if !named_die {
+                buf.push_str(&trap_line(e));
+            }
             1
         }
         (Ok(()), Some(_)) => {
@@ -763,6 +774,11 @@ fn run_wasm_src(
 /// `unreachable` instruction executed", "call stack exhausted", …) —
 /// when the error is a trap, else the chain's root cause under the same
 /// prefix. Never the multi-line backtrace.
+/// The `unreachable` trap — the instruction the die lowering ends on.
+fn is_unreachable_trap(e: &wasmtime::Error) -> bool {
+    matches!(e.downcast_ref::<wasmtime::Trap>(), Some(wasmtime::Trap::UnreachableCodeReached))
+}
+
 fn trap_line(e: &wasmtime::Error) -> String {
     match e.downcast_ref::<wasmtime::Trap>() {
         Some(t) => format!("Error: {t}\n"),
