@@ -127,16 +127,19 @@ impl Emitter<'_> {
         let hn = self.hold_i32()?;
         let width: i64 = if half { 2 } else { 4 };
         let mut i = self.f.instructions();
-        // in-bounds? offset >= 0 && offset + r*c*width <= len
+        // in-bounds? offset >= 0 && offset <= len && r*c*width <= len - offset
+        // — subtraction on the buffer side, never `offset + r*c*width`:
+        // an offset near i64::MAX wrapped that sum negative, passed the
+        // test and read a subnormal out of the wrong bytes (#1909). r and
+        // c are clamped >= 0 and `mat_alloc_out64` has already refused a
+        // product past the element ceiling, so `r*c*width` cannot wrap.
         i.local_get(hoff).i64_const(0).i64_ge_s();
-        i.local_get(hoff)
-            .local_get(hr)
-            .local_get(hc)
-            .i64_mul()
-            .i64_const(width)
-            .i64_mul()
-            .i64_add();
+        i.local_get(hoff);
         i.local_get(hd).i32_load(len_memarg()).i64_extend_i32_u();
+        i.i64_le_s().i32_and();
+        i.local_get(hr).local_get(hc).i64_mul().i64_const(width).i64_mul();
+        i.local_get(hd).i32_load(len_memarg()).i64_extend_i32_u();
+        i.local_get(hoff).i64_sub();
         i.i64_le_s().i32_and().if_(BlockType::Empty);
         i.i32_const(0).local_set(hk);
         i.local_get(hr).local_get(hc).i64_mul().i32_wrap_i64().local_set(hn);
