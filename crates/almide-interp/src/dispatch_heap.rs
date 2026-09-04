@@ -169,49 +169,75 @@ impl<'a> Interpreter<'a> {
                     Ok(v) => (v.as_ref(), 0i64, &ts[0]),
                     Err(e) => (e.as_ref(), 1i64, &ts[1]),
                 };
-                let low = self.heap_result_payload_low(payload, Some(ty))?;
-                Ok(self.heap_result_block(low, tag) as i64)
+                let slot = self.heap_result_payload_slot(payload, Some(ty))?;
+                Ok(self.heap_result_block(slot, tag)? as i64)
             }
             _ => self.heap_materialize(v),
         }
     }
 
-    /// The low 32 bits of a cap-as-tag `Result` slot: a Unit is 0, a Bool
-    /// 0/1, an Int must fit the half (the backends store an i32 there — a
-    /// wider payload has no faithful bits and abstains), a block value is
-    /// its address.
-    fn heap_result_payload_low(&mut self, payload: &Value, ty: Option<&Ty>) -> Result<i64, String> {
-        let low = match payload {
-            Value::Unit => 0,
-            Value::Bool(b) => *b as i64,
-            Value::Int(i) => {
-                if i32::try_from(*i).is_err() {
-                    return Err(format!(
-                        "prim.handle of a Result holding an Int outside the i32 half ({i})"
-                    ));
-                }
-                *i & 0xFFFF_FFFF
-            }
+    /// A `Result` payload as the slot it occupies in the materialized block.
+    /// `Heap(addr)` is a payload that lives in its own block (a Str message,
+    /// a List of lines) — its address; `Scalar(v)` is an inline i64 (an Int
+    /// in full, a Bool 0/1, Unit 0, a Float as its bits — the i64-uniform
+    /// slot both backends store, `Init::ResOkScalar`).
+    fn heap_result_payload_slot(&mut self, payload: &Value, ty: Option<&Ty>) -> Result<ResultSlot, String> {
+        Ok(match payload {
+            Value::Unit => ResultSlot::Scalar(0),
+            Value::Bool(b) => ResultSlot::Scalar(*b as i64),
+            Value::Int(i) => ResultSlot::Scalar(*i),
+            Value::Float(f) => ResultSlot::Scalar(f.to_bits() as i64),
             Value::Str(_) | Value::List(_) | Value::Set(_) | Value::Map(_) | Value::Tuple(_) => {
-                self.heap_materialize_hinted(payload, ty)?
+                ResultSlot::Heap(self.heap_materialize_hinted(payload, ty)?)
             }
             other => {
                 return Err(format!(
-                    "prim.handle of a Result holding a {} (no cap-as-tag slot repr)",
+                    "prim.handle of a Result holding a {} (no slot repr)",
                     other.type_name()
                 ))
             }
-        };
-        Ok(low)
+        })
     }
 
-    fn heap_result_block(&mut self, low: i64, tag: i64) -> u32 {
+    /// The materialized `Result` block — the ONE shape both backends write and
+    /// every stdlib body reads, under its two names:
+    ///
+    /// * `ok(<scalar>)` is the len-as-tag block (`Init::ResOkScalar`):
+    ///   `len@4 = 0` IS the Ok tag, the payload i64 fills the 8-byte slot
+    ///   at `@12` (so `@16`, the slot's high half, is 0 for a small value).
+    ///   `result_to_list` and the scalar family read `len == 0` for Ok.
+    /// * `ok(<heap>)` is the cap-as-tag block (`$rtf_result`): `len@4 = 1`,
+    ///   the payload's ADDRESS in the slot's low half, tag 0 in the high.
+    ///   The fs bodies read `load32(h + 16)` for the tag and
+    ///   `load_handle(h + 12)` for the payload.
+    /// * `err(<e>)` is `len@4 = 1` with the tag 1 in the slot's high half
+    ///   (`Init::ResErrStr`), so BOTH reads agree: `len != 0` and `@16 == 1`.
+    ///   A scalar err payload has to fit the low half; a wider one has no
+    ///   faithful bits and abstains.
+    ///
+    /// The first pass (2026-09-04, 3e8a01fed) wrote every Result in the
+    /// cap-as-tag shape — `len = 1` on an `ok(1)` — and `result.to_list`
+    /// answered `[]` on all 23 of that night's fuzz findings.
+    fn heap_result_block(&mut self, slot: ResultSlot, tag: i64) -> Result<u32, String> {
+        let (len_field, word) = match (tag, slot) {
+            (0, ResultSlot::Scalar(v)) => (0u32, v),
+            (0, ResultSlot::Heap(addr)) => (1u32, addr & 0xFFFF_FFFF),
+            (_, ResultSlot::Heap(addr)) => (1u32, (addr & 0xFFFF_FFFF) | (1 << 32)),
+            (_, ResultSlot::Scalar(v)) => {
+                if i32::try_from(v).is_err() {
+                    return Err(format!(
+                        "prim.handle of an err(<Int>) outside the i32 half ({v}) — no faithful slot"
+                    ));
+                }
+                (1u32, (v & 0xFFFF_FFFF) | (1 << 32))
+            }
+        };
         let base = self.heap.alloc_slots(1);
-        let slot = (low & 0xFFFF_FFFF) | (tag << 32);
+        self.heap.put_len(base, len_field);
         self.heap
-            .store(base + crate::heap::PAYLOAD, 8, slot)
+            .store(base + crate::heap::PAYLOAD, 8, word)
             .expect("a freshly allocated slot is inside the arena");
-        base
+        Ok(base)
     }
 
     /// One container element as its slot i64, driven by the DECLARED element
@@ -370,8 +396,8 @@ impl<'a> Interpreter<'a> {
                     Ok(v) => (v.as_ref(), 0i64),
                     Err(e) => (e.as_ref(), 1i64),
                 };
-                let low = self.heap_result_payload_low(payload, None)?;
-                Ok(self.heap_result_block(low, tag) as i64)
+                let slot = self.heap_result_payload_slot(payload, None)?;
+                Ok(self.heap_result_block(slot, tag)? as i64)
             }
             other => Err(format!(
                 "prim.handle of a {} (outside the slice-2 heap family)",
@@ -646,6 +672,13 @@ impl<'a> Interpreter<'a> {
 
 /// A heap prim's address argument: a non-negative Int, else `None` so the
 /// caller abstains instead of reading somewhere arbitrary.
+/// How a `Result` payload sits in its block: inline, or by address.
+#[derive(Clone, Copy)]
+enum ResultSlot {
+    Scalar(i64),
+    Heap(i64),
+}
+
 fn heap_addr(v: Option<&Value>) -> Option<u32> {
     match v {
         Some(Value::Int(i)) if *i >= 0 => u32::try_from(*i).ok(),
