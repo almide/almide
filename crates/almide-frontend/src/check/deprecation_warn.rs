@@ -46,6 +46,21 @@ impl super::Checker {
         });
 
         let (message, hint, edit) = match &dep.use_instead {
+            // An OPERATOR replacement (`use = "??"`, ADR-0005 D4): the edit is
+            // a call-shape rewrite, not a rename, so no span fix-it — the AST
+            // family of `almide fix` performs it (both the direct call and
+            // the pipe stage). The hint spells the target shape.
+            Some(op) if !op.contains('.') && !op.chars().all(|c| c.is_alphanumeric() || c == '_') => (
+                format!("`{key}` is deprecated since dialect {}", dep.since),
+                format!(
+                    "Use the `{op}` operator — `value {op} default` — the default is evaluated only on the fallback path; `almide fix` rewrites the call.{}",
+                    match &dep.note {
+                        Some(n) => format!(" Note: {n}"),
+                        None => String::new(),
+                    }
+                ),
+                None,
+            ),
             Some(replacement) => {
                 let edit = classify(old_sig.as_ref(), new_sig.as_ref());
                 (
