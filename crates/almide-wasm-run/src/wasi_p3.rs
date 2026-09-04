@@ -148,7 +148,8 @@ const I_HTTP_TRL_DROPR: u32 = 63; // [future-drop-readable-2] of consume-body
 const I_HTTP_REQ_DROP: u32 = 64; // [resource-drop]request
 const I_HTTP_RESP_DROP: u32 = 65; // [resource-drop]response
 const I_HTTP_FIELDS_DROP: u32 = 66; // [resource-drop]fields
-const IMPORTS_HTTP: u32 = 67;
+const I_HTTP_FIELDS_APPEND: u32 = 67; // [method]fields.append (the framed family's headers, #1710)
+const IMPORTS_HTTP: u32 = 68;
 
 // Park offsets past the shared ones: retptr / future-payload scratch.
 const RET: u64 = 32;
@@ -311,6 +312,43 @@ fn http_body_pump(i: &mut wasm_encoder::InstructionSink<'_>) {
     i.end();
 }
 
+/// One http_framed cell at `cur`: `<decimal char count>\n<payload>`. On
+/// exit `tmp` = the payload's first byte, `cur` = one past its last byte
+/// (the next cell), the char walk having counted every byte that is not a
+/// UTF-8 continuation (10xxxxxx). A malformed frame (no '\n', a count past
+/// the end) stops at `frame_end`; this lane's guest builds the frame
+/// itself (stdlib/http_framed.almd), so the shape holds by construction.
+fn http_frame_cell(
+    i: &mut wasm_encoder::InstructionSink<'_>,
+    cur: u32,
+    cell_len: u32,
+    frame_end: u32,
+    tmp: u32,
+    digit: u32,
+) {
+    i.i32_const(0).local_set(cell_len);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(cur).local_get(frame_end).i32_ge_u().br_if(1);
+    i.local_get(cur).i32_load8_u(mem8(0)).local_set(digit);
+    i.local_get(cur).i32_const(1).i32_add().local_set(cur);
+    i.local_get(digit).i32_const(10).i32_eq().br_if(1);
+    i.local_get(cell_len).i32_const(10).i32_mul();
+    i.local_get(digit).i32_const(48).i32_sub().i32_add().local_set(cell_len);
+    i.br(0).end().end();
+    i.local_get(cur).local_set(tmp);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(cell_len).i32_eqz().br_if(1);
+    i.local_get(cur).local_get(frame_end).i32_ge_u().br_if(1);
+    i.local_get(cur).i32_const(1).i32_add().local_set(cur);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(cur).local_get(frame_end).i32_ge_u().br_if(1);
+    i.local_get(cur).i32_load8_u(mem8(0)).i32_const(0xC0).i32_and().i32_const(0x80).i32_ne().br_if(1);
+    i.local_get(cur).i32_const(1).i32_add().local_set(cur);
+    i.br(0).end().end();
+    i.local_get(cell_len).i32_const(1).i32_sub().local_set(cell_len);
+    i.br(0).end().end();
+}
+
 /// The p3 http string client (#1710 PR B): serve fs_call ops 43..=47 over
 /// `wasi:http/client@0.3.0`'s sync-lowered `send`. Sequence (the recorded
 /// blueprint): url parse in-shim (scheme prefix, authority to '/', path
@@ -343,8 +381,35 @@ fn shim_http(park: u64, g_plen: u32, g_ppos: u32, f_realloc: u32, h: &HttpAbi) -
     let (n, k) = (26u32, 27u32);
     let s64 = 28u32;
     let (hws, trl_pend, str_pend, snd_done) = (29u32, 30u32, 31u32, 32u32);
-    let mut f = Function::new([(23, ValType::I32), (1, ValType::I64), (4, ValType::I32)]);
+    // The framed family (ops 48..=50, #1710): the frame's cells.
+    let (m_ptr, m_len, cur, cell_len, frame_end, hdr_ptr, digit, tmp) =
+        (33u32, 34u32, 35u32, 36u32, 37u32, 38u32, 39u32, 40u32);
+    let mut f = Function::new([(23, ValType::I32), (1, ValType::I64), (12, ValType::I32)]);
     let mut i = f.instructions();
+    // ── ops 48..=50: parse the http_framed cell frame in `b` ──
+    // `<len>\n<payload>` cells with CHAR-count lengths (string.len
+    // semantics — a char starts at every byte that is not 10xxxxxx):
+    // method, body, then key/value pairs to the end of the frame. The
+    // method cell lands in (m_ptr, m_len), the body cell REPLACES
+    // (b_ptr, b_len) so the contents pump below feeds it unchanged, and
+    // hdr_ptr..frame_end is the header run the fields loop appends.
+    i.i32_const(0).local_set(m_len);
+    i.local_get(b_ptr).local_set(hdr_ptr);
+    i.local_get(b_ptr).local_get(b_len).i32_add().local_set(frame_end);
+    i.local_get(op).i32_const(48).i32_ge_s().if_(BlockType::Empty);
+    i.local_get(b_ptr).local_set(cur);
+    for which in 0..2u32 {
+        http_frame_cell(&mut i, cur, cell_len, frame_end, tmp, digit);
+        if which == 0 {
+            i.local_get(tmp).local_set(m_ptr);
+            i.local_get(cur).local_get(tmp).i32_sub().local_set(m_len);
+        } else {
+            i.local_get(tmp).local_set(b_ptr);
+            i.local_get(cur).local_get(tmp).i32_sub().local_set(b_len);
+        }
+    }
+    i.local_get(cur).local_set(hdr_ptr);
+    i.end();
 
     // ── URL parse: scheme by prefix, authority to '/', path = rest ──
     i.i32_const(h.sch_http).local_set(sch);
@@ -399,6 +464,27 @@ fn shim_http(park: u64, g_plen: u32, g_ppos: u32, f_realloc: u32, h: &HttpAbi) -
 
     // ── empty fields; trailers future written ok(none) up front ──
     i.call(I_HTTP_FIELDS_NEW).local_set(headers);
+    // The framed family's headers: key/value cells appended in frame order
+    // (the host lane's parse_http_frame order, so the wire carries the
+    // same header sequence on both lanes). A rejected name/value
+    // (header-error) is ignored, as the rt-core client's builder does.
+    i.local_get(op).i32_const(48).i32_ge_s().if_(BlockType::Empty);
+    i.local_get(hdr_ptr).local_set(cur);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(cur).local_get(frame_end).i32_ge_u().br_if(1);
+    http_frame_cell(&mut i, cur, cell_len, frame_end, tmp, digit);
+    i.local_get(tmp).local_set(auth_ptr); // the key span, parked in auth_* until the URL parse below overwrites them
+    i.local_get(cur).local_get(tmp).i32_sub().local_set(auth_len);
+    i.local_get(cur).local_get(frame_end).i32_ge_u().br_if(1);
+    http_frame_cell(&mut i, cur, cell_len, frame_end, tmp, digit);
+    i.local_get(headers);
+    i.local_get(auth_ptr).local_get(auth_len);
+    i.local_get(tmp);
+    i.local_get(cur).local_get(tmp).i32_sub();
+    i.i32_const((park + RET) as i32);
+    i.call(I_HTTP_FIELDS_APPEND);
+    i.br(0).end().end();
+    i.end();
     if stop == 11 {
         fs_err(&mut i, g_ppos, g_plen, park, MSG_HTTP, E_HTTP.len());
     }
@@ -479,13 +565,55 @@ fn shim_http(park: u64, g_plen: u32, g_ppos: u32, f_realloc: u32, h: &HttpAbi) -
     i.local_get(op).i32_const(46).i32_eq().if_(BlockType::Result(ValType::I32));
     i.i32_const(h.m_patch);
     i.else_();
+    i.local_get(op).i32_const(47).i32_eq().if_(BlockType::Result(ValType::I32));
     i.i32_const(h.m_delete);
+    i.else_();
+    // The framed family's method is a STRING: the nine named cases by
+    // byte compare, anything else `other(string)` with the cell as payload.
+    let named: [(&[u8], i32); 9] = [
+        (b"GET", h.m_get),
+        (b"HEAD", h.m_head),
+        (b"POST", h.m_post),
+        (b"PUT", h.m_put),
+        (b"DELETE", h.m_delete),
+        (b"CONNECT", h.m_connect),
+        (b"OPTIONS", h.m_options),
+        (b"TRACE", h.m_trace),
+        (b"PATCH", h.m_patch),
+    ];
+    for (name, case) in named.iter() {
+        i.local_get(m_len).i32_const(name.len() as i32).i32_eq().if_(BlockType::Result(ValType::I32));
+        for (kb, ch) in name.iter().enumerate() {
+            i.local_get(m_ptr).i32_load8_u(mem8(kb as u64)).i32_const(*ch as i32).i32_eq();
+            if kb > 0 {
+                i.i32_and();
+            }
+        }
+        i.else_().i32_const(0).end();
+        i.if_(BlockType::Result(ValType::I32));
+        i.i32_const(*case);
+        i.else_();
+    }
+    i.i32_const(h.m_other);
+    for _ in 0..named.len() {
+        i.end();
+    }
+    i.end();
     i.end();
     i.end();
     i.end();
     i.end();
     i.local_set(n);
-    i.local_get(request).local_get(n).i32_const(0).i32_const(0).call(I_HTTP_SET_METHOD).local_set(k);
+    // `other(string)` carries the method cell as its payload; the named
+    // cases carry none.
+    i.local_get(request).local_get(n);
+    i.local_get(n).i32_const(h.m_other).i32_eq().if_(BlockType::Result(ValType::I32));
+    i.local_get(m_ptr);
+    i.else_().i32_const(0).end();
+    i.local_get(n).i32_const(h.m_other).i32_eq().if_(BlockType::Result(ValType::I32));
+    i.local_get(m_len);
+    i.else_().i32_const(0).end();
+    i.call(I_HTTP_SET_METHOD).local_set(k);
     i.local_get(request)
         .i32_const(1)
         .local_get(sch)
@@ -587,6 +715,30 @@ fn shim_http(park: u64, g_plen: u32, g_ppos: u32, f_realloc: u32, h: &HttpAbi) -
     i.i32_const(0).i32_const(0).i32_const(8).i32_const(65536).call(f_realloc).local_set(buf);
     i.i32_const(65536).local_set(cap);
     i.i32_const(0).local_set(total);
+    // op 49 (`request_status`): `<status>\n` precedes the body — the host
+    // lane's `format!("{code}\n{text}")`. Decimal, no padding: count the
+    // digits, then write them back to front.
+    i.local_get(op).i32_const(49).i32_eq().if_(BlockType::Empty);
+    i.local_get(response).call(I_HTTP_STATUS).i32_const(0xFFFF).i32_and().local_set(tmp);
+    i.i32_const(1).local_set(digit);
+    i.local_get(tmp).local_set(cell_len);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(cell_len).i32_const(10).i32_lt_u().br_if(1);
+    i.local_get(cell_len).i32_const(10).i32_div_u().local_set(cell_len);
+    i.local_get(digit).i32_const(1).i32_add().local_set(digit);
+    i.br(0).end().end();
+    i.local_get(digit).local_set(cur);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(cur).i32_eqz().br_if(1);
+    i.local_get(cur).i32_const(1).i32_sub().local_set(cur);
+    i.local_get(buf).local_get(cur).i32_add();
+    i.local_get(tmp).i32_const(10).i32_rem_u().i32_const(48).i32_add();
+    i.i32_store8(mem8(0));
+    i.local_get(tmp).i32_const(10).i32_div_u().local_set(tmp);
+    i.br(0).end().end();
+    i.local_get(buf).local_get(digit).i32_add().i32_const(10).i32_store8(mem8(0));
+    i.local_get(digit).i32_const(1).i32_add().local_set(total);
+    i.end();
     i.block(BlockType::Empty).loop_(BlockType::Empty);
     i.local_get(total).local_get(cap).i32_ge_u();
     i.if_(BlockType::Empty);
@@ -634,6 +786,12 @@ struct HttpAbi {
     m_put: i32,
     m_patch: i32,
     m_delete: i32,
+    m_head: i32,
+    m_connect: i32,
+    m_options: i32,
+    m_trace: i32,
+    /// `other(string)`: the framed family's method is any string.
+    m_other: i32,
     sch_http: i32, // scheme variant case indices
     sch_https: i32,
     /// result<response, error-code> payload offset (send's retptr layout).
@@ -682,6 +840,11 @@ fn http_abi(resolve: &wit_parser::Resolve) -> anyhow::Result<HttpAbi> {
         m_put: case(method, "put")?,
         m_patch: case(method, "patch")?,
         m_delete: case(method, "delete")?,
+        m_head: case(method, "head")?,
+        m_connect: case(method, "connect")?,
+        m_options: case(method, "options")?,
+        m_trace: case(method, "trace")?,
+        m_other: case(method, "other")?,
         sch_http: case(scheme, "HTTP")?,
         sch_https: case(scheme, "HTTPS")?,
         // own<response> aligns 4; the discriminant byte rounds up to the
@@ -835,6 +998,9 @@ pub fn to_p3(bytes: &[u8], wants_http: bool) -> anyhow::Result<Vec<u8>> {
     let t_set4 = type_index(&mut types, &[ValType::I32; 4], &[ValType::I32]);
     let t_set5 = type_index(&mut types, &[ValType::I32; 5], &[ValType::I32]);
     let t_consume = type_index(&mut types, &[ValType::I32; 3], &[]);
+    // [method]fields.append(self, name ptr/len, value ptr/len, retptr) —
+    // `result<_, header-error>` carries a payload, so it lands via retptr.
+    let t_append = type_index(&mut types, &[ValType::I32; 6], &[]);
 
     let mut type_sec = TypeSection::new();
     for (p, r) in &types {
@@ -932,6 +1098,7 @@ pub fn to_p3(bytes: &[u8], wants_http: bool) -> anyhow::Result<Vec<u8>> {
         (I_HTTP_REQ_DROP, http_types, "[resource-drop]request", t_drop),
         (I_HTTP_RESP_DROP, http_types, "[resource-drop]response", t_drop),
         (I_HTTP_FIELDS_DROP, http_types, "[resource-drop]fields", t_drop),
+        (I_HTTP_FIELDS_APPEND, http_types, "[method]fields.append", t_append),
     ];
     assert_eq!(
         IMPORTS + http_import_list.len() as u32,
@@ -1301,11 +1468,12 @@ fn shim_fs_call(
     let mut f = Function::new([(2, ValType::I32), (1, ValType::I64), (7, ValType::I32)]);
     let mut i = f.instructions();
 
-    // ops 43..=47: the http string client (#1710 PR B) — forwarded whole
-    // to the dedicated shim when the module's op set earned the imports.
+    // ops 43..=47 (the string client) and 48..=50 (the framed family) —
+    // forwarded whole to the http shim when the module's op set earned the
+    // imports (#1710 PR B).
     if let Some(h) = f_http {
         i.local_get(op).i32_const(43).i32_ge_s();
-        i.local_get(op).i32_const(47).i32_le_s();
+        i.local_get(op).i32_const(50).i32_le_s();
         i.i32_and().if_(BlockType::Empty);
         for pidx in 0..5u32 {
             i.local_get(pidx);
