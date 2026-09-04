@@ -58,8 +58,59 @@ impl<'a> Interpreter<'a> {
             ("result", _) => self.eval_hof_result(f, &evaled),
             ("set", _) => self.eval_hof_set(f, &evaled),
             ("bytes", "map_each") => self.hof_bytes_map_each(&evaled),
+            ("fs", "__fallible_fold_lines") => self.hof_fs_try_fold_lines(&evaled),
             _ => Flow::Unsupported(format!("HOF {}.{}", m, f)),
         }
+    }
+
+    /// `fs.__fallible_fold_lines(path, init, (acc, line) => Result[A, E])` —
+    /// the carrier the checker rewrites a `fs.fold_lines` with a propagating
+    /// callback to (#1844). Lines come from the sandboxed overlay (then the
+    /// read-only real fs) with exactly `BufRead::read_line`'s split — the
+    /// native `almide_rt_fs_fold_lines_effect` and the wasm self-host walk:
+    /// `\n` stripped, a preceding `\r` too, a final unterminated line still
+    /// yielded, no trailing empty line. A read error is the native `io_err`
+    /// Display as the whole call's `err`, before any callback runs; the
+    /// first callback `err` short-circuits like every `__fallible_*`.
+    fn hof_fs_try_fold_lines(&mut self, args: &[Value]) -> Flow {
+        let path = match args.first() {
+            Some(v) => match self.coerce_block_str(v.clone()) {
+                Value::Str(s) => s.to_string(),
+                other => {
+                    return Flow::Unsupported(format!(
+                        "fs.__fallible_fold_lines with a {} path",
+                        other.type_name()
+                    ))
+                }
+            },
+            None => return Flow::Abort("internal: __fallible_fold_lines missing path".into()),
+        };
+        let mut acc = match args.get(1) {
+            Some(v) => v.clone(),
+            None => return Flow::Abort("internal: __fallible_fold_lines missing init".into()),
+        };
+        let clo = match Self::recv_closure(args, 2) {
+            Ok(c) => c,
+            Err(f) => return f,
+        };
+        let text = match crate::vfs::read_text(&self.vfs, &path) {
+            Ok(t) => t,
+            Err(e) => return Flow::val(Value::Result(Err(Box::new(Value::str(e))))),
+        };
+        let mut rest = text.as_str();
+        while !rest.is_empty() {
+            let (line, tail) = match rest.find('\n') {
+                Some(i) => (&rest[..i], &rest[i + 1..]),
+                None => (rest, ""),
+            };
+            let line = line.strip_suffix('\r').unwrap_or(line);
+            match self.try_step(&clo, vec![acc.clone(), Value::str(line.to_string())]) {
+                Ok(v) => acc = v,
+                Err(f) => return f,
+            }
+            rest = tail;
+        }
+        Flow::val(Value::Result(Ok(Box::new(acc))))
     }
 
     /// `bytes.map_each(b, f)` — every octet through `f` once, in order, the
