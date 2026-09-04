@@ -584,6 +584,15 @@ fn typecheck_wasm_program(file: &str, source_text: &str, program: &mut almide::a
         }
         return Err(());
     }
+    // Warnings reach this leg too (#1911): the native driver prints every
+    // checker warning before the program runs (compile_driver), and
+    // `run --target wasm` printed none — an E052 deprecation a program
+    // carried was visible on one target and silent on the other.
+    if !crate::warnings_suppressed() {
+        for d in diagnostics.iter().filter(|d| d.level == diagnostic::Level::Warning) {
+            err(&format!("{}", crate::diagnostic_render::display_with_source(d, source_text)));
+        }
+    }
     Ok(checker)
 }
 
