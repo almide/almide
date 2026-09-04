@@ -11,6 +11,16 @@
 //! Two roc-style broken-measurement guards keep the gate honest: a
 //! module under 100 bytes, or a total collapsing under half the
 //! baseline, reads as INSTRUMENTATION FAILURE, never as a win.
+//!
+//! Two ledgers, same rows, same caps (#1859): `size-baseline.txt` pins
+//! `emit_program`'s bytes — the embedded-host module — and
+//! `size-baseline-wasi.txt` pins the SHIPPED form, the same module after
+//! `to_wasi` (the stock-runtime p1 command `almide build --target wasm`
+//! writes). The transform adds the WASI imports and shims, and it is the
+//! layer #1841 regressed by 1,033 B on every env-free module while the
+//! first ledger did not move by a byte: only the shipped bytes see a
+//! transform-level regression, and only a corpus-wide ledger sees it on
+//! every program rather than on Hello, world alone.
 
 use std::path::PathBuf;
 
@@ -26,21 +36,33 @@ fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().expect("test harness invariant")
 }
 
-fn baseline_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/golden/size-baseline.txt")
+fn baseline_path(name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/golden").join(name)
 }
 
-#[cfg_attr(debug_assertions, ignore = "size gate is release-only (bytes are profile-independent; time is not)")]
-#[test]
-fn corpus_sizes_hold_the_baseline() {
+/// One corpus pass measures both forms per fixture: the emitted module
+/// and its `to_wasi` twin. Refusals are `!` rows in both ledgers; a
+/// module that emits but fails the transform is an Almide bug, not a row.
+struct Measured {
+    emitted: Vec<(String, u64)>,
+    shipped: Vec<(String, u64)>,
+    emitted_rows: String,
+    shipped_rows: String,
+}
+
+fn measure_corpus() -> Measured {
     let root = workspace_root();
     let manifest = std::fs::read_to_string(
         root.join("crates/almide-spine/tests/golden/spec-run-manifest.txt"),
     )
     .expect("run manifest");
 
-    let mut rows = String::new();
-    let mut sizes: Vec<(String, u64)> = Vec::new();
+    let mut m = Measured {
+        emitted: Vec::new(),
+        shipped: Vec::new(),
+        emitted_rows: String::new(),
+        shipped_rows: String::new(),
+    };
     for line in manifest.lines() {
         let rel = line.splitn(3, '\t').nth(2).expect("manifest row");
         let text = std::fs::read_to_string(almide_corpus::resolve(&root, rel)).expect("fixture readable");
@@ -48,22 +70,42 @@ fn corpus_sizes_hold_the_baseline() {
         // `!` row: the structural leg REFUSES this fixture (CLI reroutes
         // to the incumbent — #1688's unfoldable shapes). No size to pin;
         // the alloc ledger asserts the refusal stays a refusal.
-        let Ok(bytes) = almide_wasm::emit_program(&ir) else {
-            rows.push_str(&format!("!\t{rel}\n"));
+        let Ok((bytes, host_ops)) = almide_wasm::emit_program_with_ops(&ir) else {
+            m.emitted_rows.push_str(&format!("!\t{rel}\n"));
+            m.shipped_rows.push_str(&format!("!\t{rel}\n"));
             continue;
         };
         let n = bytes.len() as u64;
         assert!(n >= 100, "{rel}: {n} bytes — too small to be a real module, measurement broken");
-        rows.push_str(&format!("{n}\t{rel}\n"));
-        sizes.push((rel.to_string(), n));
-    }
+        m.emitted_rows.push_str(&format!("{n}\t{rel}\n"));
+        m.emitted.push((rel.to_string(), n));
 
-    let bp = baseline_path();
+        let host_ops: Vec<i32> = host_ops.into_iter().collect();
+        let wasi = almide_wasm_run::wasi::to_wasi(&bytes, &host_ops)
+            .unwrap_or_else(|e| panic!("{rel}: to_wasi failed on an emitted module — an Almide bug: {e}"));
+        let w = wasi.len() as u64;
+        assert!(w >= n, "{rel}: shipped {w} B < emitted {n} B — the transform only ADDS sections, measurement broken");
+        m.shipped_rows.push_str(&format!("{w}\t{rel}\n"));
+        m.shipped.push((rel.to_string(), w));
+    }
+    m
+}
+
+#[cfg_attr(debug_assertions, ignore = "size gate is release-only (bytes are profile-independent; time is not)")]
+#[test]
+fn corpus_sizes_hold_the_baseline() {
+    let m = measure_corpus();
+    hold_the_baseline("size-baseline.txt", "emitted", &m.emitted_rows, &m.emitted);
+    hold_the_baseline("size-baseline-wasi.txt", "shipped (to_wasi)", &m.shipped_rows, &m.shipped);
+}
+
+fn hold_the_baseline(name: &str, form: &str, rows: &str, sizes: &[(String, u64)]) {
+    let bp = baseline_path(name);
     if std::env::var("ALMIDE_UPDATE_SIZES").is_ok() {
-        std::fs::write(&bp, &rows).expect("write baseline");
+        std::fs::write(&bp, rows).expect("write baseline");
     }
     let baseline = std::fs::read_to_string(&bp)
-        .expect("golden/size-baseline.txt — generate with ALMIDE_UPDATE_SIZES=1");
+        .unwrap_or_else(|_| panic!("golden/{name} — generate with ALMIDE_UPDATE_SIZES=1"));
     let mut base: std::collections::BTreeMap<&str, u64> = std::collections::BTreeMap::new();
     for l in baseline.lines() {
         let (n, rel) = l.split_once('\t').expect("baseline row");
@@ -76,7 +118,7 @@ fn corpus_sizes_hold_the_baseline() {
     let mut offences = Vec::new();
     let mut total: u64 = 0;
     let mut base_total: u64 = 0;
-    for (rel, n) in &sizes {
+    for (rel, n) in sizes {
         total += n;
         let Some(&b) = base.get(rel.as_str()) else {
             offences.push(format!("{rel}: NEW fixture ({n} B) not in the baseline — regenerate to ratify"));
@@ -97,7 +139,7 @@ fn corpus_sizes_hold_the_baseline() {
     }
     assert!(
         offences.is_empty(),
-        "size ratchet ({} offence(s)) — a regression needs a fix or a deliberate \
+        "size ratchet [{form}] ({} offence(s)) — a regression needs a fix or a deliberate \
          ALMIDE_UPDATE_SIZES=1 re-ratification:\n{}",
         offences.len(),
         offences.join("\n")
@@ -105,12 +147,12 @@ fn corpus_sizes_hold_the_baseline() {
     let total_cap = (base_total as f64 * TOTAL_FACTOR) as u64;
     assert!(
         total <= total_cap,
-        "aggregate {total} B > cap {total_cap} B (baseline {base_total} B) — corpus-wide size regression"
+        "aggregate [{form}] {total} B > cap {total_cap} B (baseline {base_total} B) — corpus-wide size regression"
     );
     assert!(
         total * 2 >= base_total,
-        "aggregate {total} B is under HALF the baseline {base_total} B — a collapse this size is a \
+        "aggregate [{form}] {total} B is under HALF the baseline {base_total} B — a collapse this size is a \
          broken measurement (stub emission?), not a win; re-ratify deliberately if it is real"
     );
-    println!("RATCHET sizes: {} fixtures, {total} B (baseline {base_total} B)", sizes.len());
+    println!("RATCHET sizes [{form}]: {} fixtures, {total} B (baseline {base_total} B)", sizes.len());
 }
