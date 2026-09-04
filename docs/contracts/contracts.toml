@@ -2113,6 +2113,7 @@ evidence  = [
   { path = "spec/wasm_cross/matrix_dims_guard_rows.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_q_dims_guard.almd", class = "fixture" },
   { path = "spec/wasm_cross/count_domain_nonbytes.almd", class = "fixture" },
+  { path = "spec/wasm_cross/matrix_dims_guard_product.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -4365,4 +4366,40 @@ since     = "0.62.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/snapshot_mismatch_abort.almd", class = "fixture" },
+]
+
+# ── THE EAGER FALLBACK IS STRICT ─────────────────────────────────────
+[[contract]]
+id        = "C-340"
+spec      = "ALS-C5"
+title     = "option.unwrap_or and result.unwrap_or evaluate their default before the selection on both targets"
+statement = "`option.unwrap_or(o, d)` / `result.unwrap_or(r, d)` are ordinary strict calls: `d` is evaluated before the select on every leg, so a default that aborts (`int.clamp(3, 3, 1)`) aborts on a `some` / `ok` receiver too, with the same one stderr line and exit 1; the lazy form is `??` (≡ `unwrap_or_else`, ADR-0005), whose default runs only on the fallback path. The structural leg evaluated the default only in the none / err arm (#1906). The eager fns are deprecated (ADR-0005 D4) and keep this strictness through their window."
+since     = "0.62.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/unwrap_or_strict_default.almd", class = "fixture" },
+]
+
+# ── MATRIX BYTE-DECODE OFFSET DOMAIN ──────────────────────────────────
+[[contract]]
+id        = "C-341"
+spec      = "ALS-T24"
+title     = "matrix.from_bytes_f32_le / _f16_le judge their offset on the buffer side, so an offset near i64::MAX is the all-zero matrix"
+statement = "`matrix.from_bytes_f32_le(b, off, r, c)` and `_f16_le` decode only when `0 <= off <= len(b)` and `r * c * width <= len(b) - off`; any other offset — negative, past the end, or near `i64::MAX` — yields the all-zero `r × c` matrix on both targets. The structural leg tested `off + r*c*width <= len`, which wrapped for a huge offset and read a subnormal out of the wrong bytes (#1909)."
+since     = "0.62.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/matrix_from_bytes_offset_domain.almd", class = "fixture" },
+]
+
+# ── BYTES COPY LENGTH DOMAIN ──────────────────────────────────────────
+[[contract]]
+id        = "C-342"
+spec      = "ALS-C5"
+title     = "bytes.copy_from with a negative length or offset copies nothing on both targets"
+statement = "`bytes.copy_from(dst, src, doff, soff, len)` is a no-op when `len <= 0`, `doff < 0` or `soff < 0` on every leg — the family's negative = miss rule; in-range offsets copy `min(len, dst_tail, src_tail)` bytes. Native cast `len as usize`, wrapping a negative length huge and copying the available run (#1910)."
+since     = "0.62.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/bytes_copy_from_negative_len.almd", class = "fixture" },
 ]

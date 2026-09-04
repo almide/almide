@@ -29,6 +29,7 @@
 67216	spec/wasm_cross/bundled_pure_modules.almd
 66688	spec/wasm_cross/bytes_alloc_ceiling_domain.almd
 132176	spec/wasm_cross/bytes_array_count_domain.almd
+66224	spec/wasm_cross/bytes_copy_from_negative_len.almd
 65808	spec/wasm_cross/bytes_equality_call_operands.almd
 92064	spec/wasm_cross/bytes_f16.almd
 72144	spec/wasm_cross/bytes_f16_offset_overflow.almd
@@ -370,8 +371,10 @@
 66496	spec/wasm_cross/math_transcendental_bits.almd
 67264	spec/wasm_cross/matrix_dims_guard.almd
 66416	spec/wasm_cross/matrix_dims_guard_overflow.almd
+66176	spec/wasm_cross/matrix_dims_guard_product.almd
 66288	spec/wasm_cross/matrix_dims_guard_rows.almd
 105152	spec/wasm_cross/matrix_domain_edges.almd
+75520	spec/wasm_cross/matrix_from_bytes_offset_domain.almd
 74272	spec/wasm_cross/matrix_head_count_domain.almd
 91664	spec/wasm_cross/matrix_index_domain_family.almd
 179824	spec/wasm_cross/matrix_pow_libm.almd
@@ -432,7 +435,7 @@
 65824	spec/wasm_cross/option_none_unwrap_term.almd
 66240	spec/wasm_cross/option_result.almd
 66176	spec/wasm_cross/option_result_ctors.almd
-67616	spec/wasm_cross/option_tuple_payload_matrix.almd
+68000	spec/wasm_cross/option_tuple_payload_matrix.almd
 66768	spec/wasm_cross/option_unwrap_or_else_heap.almd
 65840	spec/wasm_cross/optional_chain_scalar.almd
 66176	spec/wasm_cross/or_pattern.almd
@@ -642,10 +645,11 @@
 66144	spec/wasm_cross/unwrap_in_callarg.almd
 66144	spec/wasm_cross/unwrap_in_if_arm.almd
 66048	spec/wasm_cross/unwrap_in_recursion.almd
-66656	spec/wasm_cross/unwrap_or_heap_payload.almd
+66736	spec/wasm_cross/unwrap_or_heap_payload.almd
 66640	spec/wasm_cross/unwrap_or_operand.almd
 202400	spec/wasm_cross/unwrap_or_option_payload.almd
 66944	spec/wasm_cross/unwrap_or_source_survives.almd
+66016	spec/wasm_cross/unwrap_or_strict_default.almd
 67536	spec/wasm_cross/unwrap_or_tail_result.almd
 75968	spec/wasm_cross/unwrap_or_unwrap_fallback.almd
 74688	spec/wasm_cross/uoe_heap_ok_share.almd
