@@ -177,6 +177,12 @@ impl Heap {
         base
     }
 
+    /// Overwrite the `len` field of a block this heap handed out — the
+    /// Result family spells its tag there (`len@4 = 0` is `ok(<scalar>)`).
+    pub(crate) fn put_len(&mut self, base: u32, len: u32) {
+        self.put_u32(base + LEN_OFF, len);
+    }
+
     /// The kind of the block at `addr` — `None` when `addr` is not a base this
     /// heap handed out.
     pub(crate) fn kind(&self, addr: u32) -> Option<BlockKind> {
