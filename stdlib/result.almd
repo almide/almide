@@ -23,9 +23,7 @@ fn flat_map[A, B, E](r: Result[A, E], f: (A) -> Result[B, E]) -> Result[B, E] = 
 
 @intrinsic("almide_rt_result_unwrap_or")
 @consume(r)
-// ADR-0005 D4: the eager fallback is the third spelling with no definition
-// relation to `??` (≡ unwrap_or_else) — deprecated, removed one window later.
-@deprecated(since = 3, use = "??")
+@deprecated(since=3, use="??")
 fn unwrap_or[A, E](r: Result[A, E], default: A) -> A = _
 
 @intrinsic("almide_rt_result_unwrap_or_else")
