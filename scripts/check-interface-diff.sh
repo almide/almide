@@ -85,6 +85,57 @@ cur_s=$(surface "$CUR" || true)
 removed=$(comm -23 <(printf '%s\n' "$prev_s") <(printf '%s\n' "$cur_s"))
 added=$(comm -13 <(printf '%s\n' "$prev_s") <(printf '%s\n' "$cur_s"))
 
+# Legacy placeholder rendering. Indexes written before the interface JSON
+# named RawPtr / Never / Matrix[Float32] and spelled tuple types
+# (394c64294) rendered every tuple as a bare `()` and every unnamed type as
+# `?` — `list.zip(...) -> List[()]`, `bytes.as_ptr(b: Bytes) -> ?`. Read
+# textually against a current index those lines are 51 "removals" that are
+# the SAME functions re-rendered, and a release would have to declare
+# `--allow-breaking` for a diff that breaks nothing. A prev-only line that
+# carries a placeholder is matched against the cur-only lines by turning
+# each placeholder into a wildcard (`()` -> any parenthesised tuple, `?` ->
+# any type); exactly one match reclassifies the pair as a re-rendering and
+# drops it from both sides. A genuine function type `() -> A` is not a
+# placeholder (the `()` is followed by `->`) and never wildcards. A
+# placeholder line with NO current twin is still a removal, and a twin
+# whose parameter list changed still fails to match — the wildcard covers
+# the type slot only, never the name or the arity. Reported on its own line
+# so the count stays auditable.
+rerendered=0
+if [ -n "$removed" ] && [ -n "$added" ]; then
+  norm=$(python3 - "$removed" "$added" <<'PY'
+import re, sys
+removed = [l for l in sys.argv[1].split("\n") if l]
+added = [l for l in sys.argv[2].split("\n") if l]
+PLACEHOLDER = re.compile(r"\(\)(?!\s*->)|\?")
+def wildcard(line):
+    out, pos = "", 0
+    for m in PLACEHOLDER.finditer(line):
+        out += re.escape(line[pos:m.start()])
+        out += r"\((?:[^()]|\([^()]*\))*\)" if m.group() == "()" else r"[A-Za-z0-9_\[\], ]+"
+        pos = m.end()
+    return re.compile("^" + out + re.escape(line[pos:]) + "$")
+keep_removed, matched_added, n = [], set(), 0
+for r in removed:
+    if not PLACEHOLDER.search(r):
+        keep_removed.append(r); continue
+    rx = wildcard(r)
+    hits = [a for a in added if a not in matched_added and rx.match(a)]
+    if len(hits) == 1:
+        matched_added.add(hits[0]); n += 1
+    else:
+        keep_removed.append(r)
+print(n)
+print("\n".join(keep_removed))
+print("--")
+print("\n".join(a for a in added if a not in matched_added))
+PY
+)
+  rerendered=$(printf '%s\n' "$norm" | sed -n 1p)
+  removed=$(printf '%s\n' "$norm" | sed -n '2,/^--$/p' | sed '$d' | grep . || true)
+  added=$(printf '%s\n' "$norm" | sed '1,/^--$/d' | grep . || true)
+fi
+
 if [ -z "$removed" ] && [ -z "$added" ]; then
   verdict="identical"
 elif [ -z "$removed" ]; then
@@ -94,6 +145,9 @@ else
 fi
 
 echo "interface-diff: $PREV -> $CUR = $verdict (added=$(printf '%s' "$added" | grep -c . || true) removed=$(printf '%s' "$removed" | grep -c . || true))"
+if [ "$rerendered" != "0" ]; then
+  echo "re-rendered (legacy placeholder -> named type, same name and arity): $rerendered — not counted"
+fi
 if [ -n "$removed" ]; then
   echo "removed/changed signatures:"
   printf '%s\n' "$removed" | sed 's/^/  - /'

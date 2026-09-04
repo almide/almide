@@ -76,8 +76,19 @@ pure_file=${pure_pick%%	*};     pure_line=${pure_pick#*	}
 forged_effect='effect negative_control.forged(x: Int) -> Result[Int, String]'
 forged_pure='negative_control.forged_pure(x: Int) -> Int'
 
+# The legacy-placeholder control (394c64294): the SAME tuple-returning fn
+# rendered `-> List[()]` in the base index must read as identical against
+# its named-tuple rendering, while a placeholder line with no current twin
+# (or a twin whose parameter list changed) is still a removal.
+tuple_pick=$(pick '^[a-z_0-9]+\.[a-z_0-9]+\(.*-> List\[\(') \
+  || { echo "FAIL: no tuple-returning fn line in the committed index — the placeholder control has no subject" >&2; exit 1; }
+tuple_file=${tuple_pick%%	*}; tuple_line=${tuple_pick#*	}
+legacy_line="${tuple_line%% -> *} -> List[()]"
+legacy_orphan="${tuple_line%%(*}_orphan(${tuple_line#*(}"; legacy_orphan="${legacy_orphan%% -> *} -> List[()]"
 g init -q
 snapshot base
+drop_line "$tuple_file" "$tuple_line"; add_line "$tuple_file" "$legacy_line"; snapshot legacy-tuple
+drop_line "$tuple_file" "$tuple_line"; add_line "$tuple_file" "$legacy_orphan"; snapshot legacy-orphan
 
 drop_line "$effect_file" "$effect_line"; snapshot rm-effect
 drop_line "$pure_file"   "$pure_line";   snapshot rm-pure
@@ -141,8 +152,12 @@ run rm-effect base
 expect "reversed effect removal" 0 "= additive (added=1 removed=0)" "  + $effect_line"
 
 # Blind-gate guard: an index with no signatures is an error, never a verdict.
+run legacy-tuple base
+expect "legacy placeholder re-rendered as a named tuple" 0 "= identical (added=0 removed=0)" "re-rendered (legacy placeholder -> named type, same name and arity): 1"
+run legacy-orphan base
+expect "legacy placeholder with no current twin is a removal" 1 "= breaking (added=1 removed=1)" "  - $legacy_orphan"
 run base blank
 expect "blank index goes loud" 2 "no generated signature index"
 
-echo "interface-diff negative controls: 1 positive + 8 forged inputs all behaved" \
+echo "interface-diff negative controls: 1 positive + 10 forged inputs all behaved" \
   "(effect: $effect_line | pure: $pure_line)"
