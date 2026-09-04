@@ -8,7 +8,7 @@
 fn main() -> Unit = {
   let a: Result[Int, String] = ok(list.len([1, 2, 3]))
   let b: Float? = some(math.sqrt(6.25))
-  let c: Result[Float, String] = ok(option.unwrap_or(some(2.5), 0.1))
+  let c: Result[Float, String] = ok(some(2.5) ?? 0.1)
   let d: Int? = some(int.abs(-7))
   // The heap-payload sibling through the same ANF route: `ok(float.parse(…))`
   // over a closure-fed String (fuzz index 704: native err("invalid float
@@ -20,7 +20,7 @@ fn main() -> Unit = {
   // to an empty block and result.unwrap_or aborted "index out of bounds" on
   // the wasm leg while native succeeded (RunFailureDivergence).
   let y0: Result[(Float, Int), String] = ok((0.3, 1000000))
-  let g: (Float, Int) = result.unwrap_or((if true then y0 else y0), (100.0, 7))
+  let g: (Float, Int) = (if true then y0 else y0) ?? (100.0, 7)
   println("a = ${a}")
   println("b = ${b}")
   println("c = ${c}")

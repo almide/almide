@@ -88,7 +88,7 @@
 8670	spec/wasm_cross/cross_module_spread.almd
 4700	spec/wasm_cross/ctor_fn_value.almd
 6073	spec/wasm_cross/ctor_if_payload.almd
-16493	spec/wasm_cross/ctor_scalar_call_payload.almd
+16501	spec/wasm_cross/ctor_scalar_call_payload.almd
 4506	spec/wasm_cross/ctor_turbofish_family.almd
 5946	spec/wasm_cross/ctor_var_copy_semantics.almd
 4949	spec/wasm_cross/datetime_format.almd
@@ -418,7 +418,7 @@
 3319	spec/wasm_cross/nested_tuple_destructure.almd
 2474	spec/wasm_cross/nested_tuple_pattern.almd
 3790	spec/wasm_cross/nested_tuples.almd
-10775	spec/wasm_cross/nested_unwrap_or_share.almd
+10776	spec/wasm_cross/nested_unwrap_or_share.almd
 6044	spec/wasm_cross/nested_unwrap_propagation.almd
 4452	spec/wasm_cross/nested_variant_match_bind.almd
 3719	spec/wasm_cross/nested_variant_tag_box.almd

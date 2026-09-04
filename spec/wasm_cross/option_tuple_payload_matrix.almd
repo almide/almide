@@ -26,16 +26,16 @@
 // heap element within the tuple does not select a different path.
 fn main() -> Unit = {
   let a: (Int, Int)? = none
-  let r_a: (Int, Int) = option.unwrap_or(some(option.unwrap_or(a, (1, 2))), (3, 4))
+  let r_a: (Int, Int) = some(a ?? (1, 2)) ?? (3, 4)
   println("${r_a}")
   let b: (String, Int)? = none
-  let r_b: (String, Int) = option.unwrap_or(some(option.unwrap_or(b, ("a", 1))), ("b", 2))
+  let r_b: (String, Int) = some(b ?? ("a", 1)) ?? ("b", 2)
   println("${r_b}")
   let c: (Int, String)? = none
-  let r_c: (Int, String) = option.unwrap_or(some(option.unwrap_or(c, (1, "a"))), (2, "b"))
+  let r_c: (Int, String) = some(c ?? (1, "a")) ?? (2, "b")
   println("${r_c}")
   let d: (String, String)? = none
-  let r_d: (String, String) = option.unwrap_or(some(option.unwrap_or(d, ("a", "b"))), ("c", "d"))
+  let r_d: (String, String) = some(d ?? ("a", "b")) ?? ("c", "d")
   println("${r_d}")
   // The SOME side of every cell too: the payload the match KEEPS must be the owned one,
   // not a borrow of the subject that the subject's own drop then frees. An all-scalar
@@ -50,7 +50,7 @@ fn main() -> Unit = {
     // do with the tuple-payload family it exists to pin.
     let name0 = "kept" + int.to_string(i)
     let s: (String, Int)? = some((name0, i))
-    let (name, n) = option.unwrap_or(some(option.unwrap_or(s, ("miss", -1))), ("dflt", -2))
+    let (name, n) = some(s ?? ("miss", -1)) ?? ("dflt", -2)
     acc = acc + n + string.len(name)
     println("${name} ${int.to_string(n)}")
   }
