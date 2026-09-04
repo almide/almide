@@ -114,6 +114,10 @@ patterns = [
   # was reached with an argument shape the block heap never handed out) —
   # dispatch-tier strictness, one level in from the heap boundary.
   "capability: prim.store64 with a non-address",
+  # A load through an address the arena never handed out (a matrix byte
+  # decode over a value the interp holds as a List — C-341's huge-offset
+  # fixture): the same boundary, one instruction earlier.
+  "capability: prim.load8 with a non-address",
   # html.* (#1817 / #1844): stdlib/html.almd is not a self_host_registry
   # source, so the interp pool has no body for it while the structural leg
   # serves it by newtype erasure. Registering the source (or a pool-side

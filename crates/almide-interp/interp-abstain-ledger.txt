@@ -20,6 +20,7 @@ io_write_ordering  out-of-interp-scope capability: prim.fd_write
 list_repeat_size_ceiling  out-of-interp-scope capability: prim.alloc_list(268435456) beyond the interp arena ceiling
 loop_effect_match_stmt  out-of-interp-scope capability: prim.fd_write
 matrix_dims_guard  out-of-interp-scope capability: prim.store64 with a non-address
+matrix_from_bytes_offset_domain  out-of-interp-scope capability: prim.load8 with a non-address
 matrix_q_fp16_scale_domain  out-of-interp-scope capability: prim.handle of a container holding a NaN float (NaN bits are arch-conditional — #1403; a bit-compare vote would be a guess)
 module_var_alias_cow  out-of-interp-scope capability: prim.store64 with a non-address
 mut_param_branch_forward  out-of-interp-scope capability: prim.fd_write
