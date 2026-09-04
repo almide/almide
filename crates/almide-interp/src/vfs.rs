@@ -79,7 +79,10 @@ pub(crate) fn read_text(vfs: &Vfs, path: &str) -> Result<String, String> {
 pub(crate) fn write_bytes(vfs: &mut Vfs, path: &str, content: &[u8]) -> Result<(), String> {
     let path = &normalize(path);
     if matches!(vfs.get(path.as_str()), Some(VfsEntry::Dir)) {
-        return Err("Is a directory (os error 21)".to_string());
+        return Err(EISDIR.to_string());
+    }
+    if ancestor_is_file(vfs, path) {
+        return Err(ENOTDIR.to_string());
     }
     if let Some(parent) = parent_of(path) {
         let in_overlay = matches!(vfs.get(parent), Some(VfsEntry::Dir));
@@ -91,12 +94,32 @@ pub(crate) fn write_bytes(vfs: &mut Vfs, path: &str, content: &[u8]) -> Result<(
     Ok(())
 }
 
+/// A path component ABOVE `path` that is a file — in the overlay or on the
+/// real filesystem: every write-side floor answers the native ENOTDIR for
+/// it (`std::fs::write` / `create_dir_all` through a plain file), before any
+/// "parent missing" verdict.
+fn ancestor_is_file(vfs: &Vfs, path: &str) -> bool {
+    let mut p = path;
+    while let Some(parent) = parent_of(p) {
+        if matches!(vfs.get(parent), Some(VfsEntry::File(_)))
+            || std::path::Path::new(parent).is_file()
+        {
+            return true;
+        }
+        p = parent;
+    }
+    false
+}
+
 /// `prim.make_dir` — `create_dir_all` semantics: every ancestor becomes a dir,
 /// an existing dir is Ok, an existing FILE at the path is the EEXIST error.
 pub(crate) fn make_dir(vfs: &mut Vfs, path: &str) -> Result<(), String> {
     let path = &normalize(path);
     if matches!(vfs.get(path.as_str()), Some(VfsEntry::File(_))) {
         return Err("File exists (os error 17)".to_string());
+    }
+    if ancestor_is_file(vfs, path) {
+        return Err(ENOTDIR.to_string());
     }
     let mut p = path.as_str();
     loop {
@@ -167,6 +190,17 @@ pub(crate) fn read_bytes(vfs: &Vfs, path: &str) -> Result<Vec<u8>, String> {
 /// and stat them in the same run, so "now" is the faithful reading of the
 /// field they see (a fixture can only assert its shape, never its value).
 pub(crate) fn stat(vfs: &Vfs, path: &str) -> Option<(u8, u64, i64)> {
+    stat_with(vfs, path, true)
+}
+
+/// `prim.path_filestat_nofollow` — the same query without following a
+/// symlink at the leaf (filetype 7 = symbolic link on the real fs; the
+/// overlay holds no symlinks, so its answer is `stat`'s).
+pub(crate) fn stat_nofollow(vfs: &Vfs, path: &str) -> Option<(u8, u64, i64)> {
+    stat_with(vfs, path, false)
+}
+
+fn stat_with(vfs: &Vfs, path: &str, follow: bool) -> Option<(u8, u64, i64)> {
     let norm = normalize(path);
     let now_ns = || {
         std::time::SystemTime::now()
@@ -178,8 +212,20 @@ pub(crate) fn stat(vfs: &Vfs, path: &str) -> Option<(u8, u64, i64)> {
         Some(VfsEntry::File(content)) => Some((4, content.len() as u64, now_ns())),
         Some(VfsEntry::Dir) => Some((3, 0, now_ns())),
         None => {
-            let md = std::fs::metadata(path).ok()?;
-            let ftype = if md.is_dir() { 3 } else if md.is_file() { 4 } else { 0 };
+            let md = if follow {
+                std::fs::metadata(path).ok()?
+            } else {
+                std::fs::symlink_metadata(path).ok()?
+            };
+            let ftype = if md.file_type().is_symlink() {
+                7
+            } else if md.is_dir() {
+                3
+            } else if md.is_file() {
+                4
+            } else {
+                0
+            };
             let mtime = md
                 .modified()
                 .ok()
@@ -224,4 +270,53 @@ pub(crate) fn read_dir(vfs: &Vfs, path: &str) -> Result<Vec<String>, String> {
     }
     names.sort();
     Ok(names)
+}
+
+/// `prim.rename` over the overlay. `HostOnly` is the source that exists only
+/// on the real filesystem — the overlay is read-only toward the host, and a
+/// rename that "succeeded" without moving anything would be a wrong vote,
+/// so the caller abstains. A missing source is the native ENOENT; a
+/// destination whose parent exists nowhere is ENOENT too (`std::fs::rename`
+/// does not create directories); an existing destination file is replaced,
+/// as on both legs.
+pub(crate) enum RenameOutcome {
+    Renamed,
+    HostOnly,
+    Failed(String),
+}
+
+pub(crate) fn rename(vfs: &mut Vfs, src: &str, dst: &str) -> RenameOutcome {
+    let src = normalize(src);
+    let dst = normalize(dst);
+    let sub_prefix = format!("{src}/");
+    let keys: Vec<String> = vfs
+        .keys()
+        .filter(|k| **k == src || k.starts_with(&sub_prefix))
+        .cloned()
+        .collect();
+    if keys.is_empty() {
+        return if std::path::Path::new(&src).exists() {
+            RenameOutcome::HostOnly
+        } else {
+            RenameOutcome::Failed(ENOENT.to_string())
+        };
+    }
+    if let Some(parent) = parent_of(&dst) {
+        let in_overlay = matches!(vfs.get(parent), Some(VfsEntry::Dir));
+        if !in_overlay && !std::path::Path::new(parent).is_dir() {
+            return RenameOutcome::Failed(ENOENT.to_string());
+        }
+    }
+    let moved: Vec<(String, VfsEntry)> = keys
+        .into_iter()
+        .filter_map(|k| {
+            let entry = vfs.remove(&k)?;
+            let tail = &k[src.len()..];
+            Some((format!("{dst}{tail}"), entry))
+        })
+        .collect();
+    for (k, e) in moved {
+        vfs.insert(k, e);
+    }
+    RenameOutcome::Renamed
 }

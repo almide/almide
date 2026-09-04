@@ -507,7 +507,7 @@ impl<'a> Interpreter<'a> {
             // fields the stdlib bodies read — and the errno is the return
             // (0 = ok; the bodies only test it against 0, so a missing path
             // answers WASI's ENOENT 44).
-            "path_filestat" => {
+            "path_filestat" | "path_filestat_nofollow" => {
                 let Some(Value::Int(buf)) = args.first() else {
                     return Some(Flow::Unsupported(
                         "prim.path_filestat with a non-address buffer".into(),
@@ -520,7 +520,12 @@ impl<'a> Interpreter<'a> {
                 let Ok(base) = u32::try_from(*buf) else {
                     return Some(Flow::Unsupported("prim.path_filestat with a negative buffer".into()));
                 };
-                let Some((ftype, size, mtime_ns)) = crate::vfs::stat(&self.vfs, &path) else {
+                let statted = if func == "path_filestat" {
+                    crate::vfs::stat(&self.vfs, &path)
+                } else {
+                    crate::vfs::stat_nofollow(&self.vfs, &path)
+                };
+                let Some((ftype, size, mtime_ns)) = statted else {
                     return Some(Flow::val(Value::Int(44)));
                 };
                 let stores = [
@@ -548,6 +553,28 @@ impl<'a> Interpreter<'a> {
                     ))))),
                     Err(e) => Value::Result(Err(Box::new(Value::str(e)))),
                 }))
+            }
+            "rename" => {
+                let src = match self.vfs_path_arg(func, args.first()) {
+                    Ok(p) => p,
+                    Err(f) => return Some(f),
+                };
+                let dst = match self.vfs_path_arg(func, args.get(1)) {
+                    Ok(p) => p,
+                    Err(f) => return Some(f),
+                };
+                Some(match crate::vfs::rename(&mut self.vfs, &src, &dst) {
+                    crate::vfs::RenameOutcome::Renamed => {
+                        Flow::val(Value::Result(Ok(Box::new(Value::Unit))))
+                    }
+                    crate::vfs::RenameOutcome::Failed(e) => {
+                        Flow::val(Value::Result(Err(Box::new(Value::str(e)))))
+                    }
+                    crate::vfs::RenameOutcome::HostOnly => Flow::Unsupported(
+                        "prim.rename of a host-only path (the overlay is read-only toward the host)"
+                            .into(),
+                    ),
+                })
             }
             "make_dir" => {
                 let Some(Value::Str(path)) = args.first() else {
