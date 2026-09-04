@@ -149,6 +149,12 @@ jobs:
       matrix:
         include:
           # `jobs`: worker count handed to the campaign (#1532). The x86_64
+          # 2026-09-04: the reclaim count per night went 0, 0, 3, 0, 2, 2, 2
+          # and 4 (a 09:31Z dispatch) since 2026-08-29 — both architectures
+          # now, aarch64 included — so both knobs step down one (x86_64 3→2,
+          # aarch64 4→3): ~30% fewer programs per shard, but a killed shard
+          # reports NOTHING, which is the larger loss. Re-raise when a week
+          # of nights reads 8/8.
           # ubuntu-latest runners are the ones the OS reclaims under memory
           # pressure — 2 of 4 x86_64 shards died at exit 143 mid-budget in
           # the v0.57.2 release-gate run (445s/170s in, findings=0, ~2,800
@@ -156,14 +162,14 @@ jobs:
           # both that night and on 2026-08-17. Each worker holds a rustc
           # child at peak, so jobs is the memory knob: 3 on the x86_64
           # runners trades ~25% shard throughput for shards that LIVE.
-          - { shard: 1, os: ubuntu-latest, arch: x86_64, jobs: 3 }
-          - { shard: 2, os: ubuntu-latest, arch: x86_64, jobs: 3 }
-          - { shard: 3, os: ubuntu-latest, arch: x86_64, jobs: 3 }
-          - { shard: 4, os: ubuntu-latest, arch: x86_64, jobs: 3 }
-          - { shard: 5, os: ubuntu-24.04-arm, arch: aarch64, jobs: 4 }
-          - { shard: 6, os: ubuntu-24.04-arm, arch: aarch64, jobs: 4 }
-          - { shard: 7, os: ubuntu-24.04-arm, arch: aarch64, jobs: 4 }
-          - { shard: 8, os: ubuntu-24.04-arm, arch: aarch64, jobs: 4 }
+          - { shard: 1, os: ubuntu-latest, arch: x86_64, jobs: 2 }
+          - { shard: 2, os: ubuntu-latest, arch: x86_64, jobs: 2 }
+          - { shard: 3, os: ubuntu-latest, arch: x86_64, jobs: 2 }
+          - { shard: 4, os: ubuntu-latest, arch: x86_64, jobs: 2 }
+          - { shard: 5, os: ubuntu-24.04-arm, arch: aarch64, jobs: 3 }
+          - { shard: 6, os: ubuntu-24.04-arm, arch: aarch64, jobs: 3 }
+          - { shard: 7, os: ubuntu-24.04-arm, arch: aarch64, jobs: 3 }
+          - { shard: 8, os: ubuntu-24.04-arm, arch: aarch64, jobs: 3 }
     # Hard ceiling well above the fuzz budget so a hung child can never
     # wedge the runner indefinitely, with room for a dispatch run that raises
     # `minutes`.
