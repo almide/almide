@@ -66,12 +66,16 @@ err("negative")
 
 ### `result.unwrap_or(r: Result[A, E], default: A) -> A`
 
+**Deprecated (E052, ADR-0005 D4)** — the eager fallback is the third spelling with no definition relation to `??` (`≡ unwrap_or_else`, the default is evaluated only on the fallback path). Write `value ?? default`; `almide fix` rewrites both the call and the pipe-stage form. Removed one dialect window later.
+
+
 Get the ok value, or return a default if err.
 
 ```almd run
 fn main() -> Unit = {
-  println("${result.unwrap_or(err("fail"), 0)}")
-  println("${result.unwrap_or(ok(7): Result[Int, String], 0)}")
+  let r: Result[Int, String] = err("fail")
+  println("${r ?? 0}")
+  println("${(ok(7): Result[Int, String]) ?? 0}")
 }
 ```
 ```output
@@ -184,7 +188,7 @@ fn main() -> Unit = {
 result.map(r: Result[A, E], f: (A) -> B) -> Result[B, E]
 result.map_err(r: Result[A, E], f: (E) -> F) -> Result[A, F]
 result.flat_map(r: Result[A, E], f: (A) -> Result[B, E]) -> Result[B, E]
-result.unwrap_or(r: Result[A, E], default: A) -> A
+result.unwrap_or(r: Result[A, E], default: A) -> A   (deprecated — use ??)
 result.unwrap_or_else(r: Result[A, E], f: (E) -> A) -> A
 result.is_ok(r: Result[A, E]) -> Bool
 result.is_err(r: Result[A, E]) -> Bool
