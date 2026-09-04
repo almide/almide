@@ -279,6 +279,7 @@ impl<'a> Interpreter<'a> {
             "is_none" => Some(self.option_is_none(args)),
             "unwrap_or" => Some(self.option_unwrap_or(args)),
             "to_list" => Some(self.option_to_list(args)),
+            "zip" => Some(self.option_zip(args)),
             "to_result" => Some(self.option_to_result(args)),
             _ => None,
         }
@@ -307,6 +308,17 @@ impl<'a> Interpreter<'a> {
     }
 
     // some(v) → [v], none → [] (runtime/rs option.rs to_list)
+    /// `option.zip(a, b)`: both some → some((va, vb)), else none.
+    fn option_zip(&mut self, args: &[Value]) -> Flow {
+        match (args.first(), args.get(1)) {
+            (Some(Value::Option(Some(a))), Some(Value::Option(Some(b)))) => Flow::val(Value::Option(Some(
+                Box::new(Value::Tuple(Rc::new(vec![a.as_ref().clone(), b.as_ref().clone()]))),
+            ))),
+            (Some(Value::Option(_)), Some(Value::Option(_))) => Flow::val(Value::Option(None)),
+            _ => Flow::Abort("internal: option.zip on non-options".into()),
+        }
+    }
+
     fn option_to_list(&mut self, args: &[Value]) -> Flow {
         match args.first() {
             Some(Value::Option(Some(v))) => Flow::val(Value::list(vec![(**v).clone()])),
@@ -340,10 +352,31 @@ impl<'a> Interpreter<'a> {
             // back `[]` or as its raw slot (12 of the 2026-09-04 nightly's 23
             // findings, once `prim.handle` of a Result stopped abstaining).
             "to_list" => Some(self.result_to_list(args)),
+            // Same class as `to_list`: the registry `result_zip` is the
+            // (Int, Int) twin and reads its payloads as raw slots — a Bool
+            // came back as 0/1, a Float as its bits (8 findings of the
+            // 2026-09-04 60-minute dispatch, seeds 541740772277-9).
+            "zip" => Some(self.result_zip(args)),
             "to_err_option" => Some(self.result_to_err_option(args)),
             "flatten" => Some(self.result_flatten(args)),
             "partition" => Some(self.result_partition(args)),
             _ => None,
+        }
+    }
+
+    /// `result.zip(a, b)`: both ok → ok((va, vb)), else the FIRST err.
+    fn result_zip(&mut self, args: &[Value]) -> Flow {
+        match (args.first(), args.get(1)) {
+            (Some(Value::Result(Ok(a))), Some(Value::Result(Ok(b)))) => Flow::val(Value::Result(Ok(Box::new(
+                Value::Tuple(Rc::new(vec![a.as_ref().clone(), b.as_ref().clone()])),
+            )))),
+            (Some(Value::Result(Err(e))), Some(Value::Result(_))) => {
+                Flow::val(Value::Result(Err(e.clone())))
+            }
+            (Some(Value::Result(Ok(_))), Some(Value::Result(Err(e)))) => {
+                Flow::val(Value::Result(Err(e.clone())))
+            }
+            _ => Flow::Abort("internal: result.zip on non-results".into()),
         }
     }
 
