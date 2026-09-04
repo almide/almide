@@ -285,10 +285,16 @@ static __ALMIDE_CAP_ALLOC: __AlmideCapAlloc = __AlmideCapAlloc;
 "#
     );
     // Inner attributes must precede all items: split after the leading run of
-    // `#![...]` / blank lines, then place the runtime between the two halves.
+    // `#![...]` / blank / `//` comment lines, then place the runtime between
+    // the two halves. The v1 trust-spine render opens with a `// Generated
+    // by …` line BEFORE its `#![allow(..)]`; a leading run that stopped at
+    // the comment put the runtime ahead of the inner attribute — "an inner
+    // attribute is not permitted in this context" — which stayed invisible
+    // while every cap-test program still walled v1 (#1869 widened the floor).
     let mut split = 0;
     for line in rs_code.split_inclusive('\n') {
-        if line.trim().is_empty() || line.trim_start().starts_with("#![") {
+        let l = line.trim_start();
+        if l.trim().is_empty() || l.starts_with("#![") || l.starts_with("//") {
             split += line.len();
         } else {
             break;

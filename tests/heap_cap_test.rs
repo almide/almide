@@ -219,20 +219,24 @@ fn map_literal_intermediates_do_not_leak_under_the_cap() {
 
 /// #1857: a `let`-bound range read ONLY as a `for-in` head allocates nothing
 /// on native even when the program falls off the v1 trust-spine onto the v3
-/// codegen. The `list.len` / index reads of `idx` force a `list.range`
-/// materialization v1 cannot link, so `main` renders through v3 — where,
+/// codegen. The top-level `let` keeps the program off the v1 render (rung 1
+/// has no top-level lets) — it used to be the `list.len` / index reads of
+/// `idx`, until `list.range` and `list.len` joined the native floor (#1869)
+/// — so `main` renders through v3 — where,
 /// before the fix, `big` was materialized as a 1 GiB `Vec<i64>` (the nightly
 /// fuzzer's seed 539646620663 index 1415 carried 16 GiB: 33.6 s native vs
 /// 0.7 s wasm, byte-identical). Under a 4 MiB ceiling that materialization is
 /// the deterministic OOM; the head-only deferral (`RangeCountingVarsPass`)
 /// is what makes this a green run.
-const WALLED_RANGE_PROBE: &str = r#"effect fn main() -> Unit = {
+const WALLED_RANGE_PROBE: &str = r#"let bump = 0
+
+effect fn main() -> Unit = {
   let idx = 0..<5
   println("len=" + int.to_string(list.len(idx)) + " at2=" + int.to_string(idx[2]))
   let big = 0..<134217728
   var e = 0
   for _i in big {
-    e = e + 1
+    e = e + 1 + bump
   }
   println("e=" + int.to_string(e))
 }
@@ -262,9 +266,10 @@ fn walled_head_only_range_allocates_nothing_natively() {
         String::from_utf8_lossy(&build.stderr)
     );
     let build_note = String::from_utf8_lossy(&build.stderr);
-    // The probe is only a witness while it actually walls v1: if the native
-    // floor ever grows `list.range`, this program stops exercising the v3
-    // fallback and the gate must move to a shape that still does.
+    // The probe is only a witness while it actually walls v1: if rung 1 ever
+    // admits top-level lets, this program stops exercising the v3 fallback
+    // and the gate must move to a shape that still does (it moved once
+    // already, when `list.range` / `list.len` joined the floor — #1869).
     assert!(
         build_note.contains("verified native render walled"),
         "the walled-range probe no longer walls the v1 native render — pick a shape that does: {build_note}"
