@@ -61,10 +61,10 @@ patterns = [
   # next vfs prim the overlay does not serve — a directory listing, a stat,
   # a bytes read, the fallible fold callback. Sandboxed-fs glue at the
   # argv/env tier, bounded work each.
-  "capability: prim.read_dir",
-  "capability: prim.path_filestat",
-  "capability: prim.read_bytes_file",
   "capability: fs.__fallible_fold_lines",
+  # One prim deeper again once the overlay served read_dir / path_filestat /
+  # read_bytes_file: the rename floor is the next bounded piece of vfs glue.
+  "capability: prim.rename",
   # SURFACED BY the #1416 ctor glue (map.new/set.new/with_capacity), not
   # introduced by it: map_filter / map_set_typechange used to abstain at
   # `prim.alloc_map` (HEAP_BOUNDARY, first-hit) and now get past the
