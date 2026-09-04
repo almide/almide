@@ -101,8 +101,19 @@ echo "== 1/4 instrumented build (almide-mir + almide-codegen + almide-wasm tests
 # default `--target wasm` leg (and `almide test`'s wasm phase workload) runs
 # the structural emitter, so a spine-crate-only measurement halves the TOTAL
 # while the system's actual hot path goes unmeasured.
+# The test binaries are taken from cargo's own artifact messages, not from a
+# `find` over `<target-dir>/release/deps`: the dated nightly the CONDITION
+# mode pins lays its artifacts out under `build/<crate>/<hash>/out/` and the
+# `deps` directory does not exist there — from 2026-08-27 every nightly
+# per-condition measurement died at step 2/4 with "NO test binaries found"
+# (8 red nights) while the stable-toolchain run kept passing on the old
+# layout. The JSON `executable` field is the one location that does not
+# depend on the layout; the `find` below stays as the fallback.
 LLVM_PROFILE_FILE="$COVDIR/build/host-%m-%p.profraw" \
-  cargo test -p almide-mir -p almide-codegen -p almide-wasm --release --no-run --target-dir "$COVDIR/t" 2>&1 | tail -1
+  cargo test -p almide-mir -p almide-codegen -p almide-wasm --release --no-run --message-format=json --target-dir "$COVDIR/t" \
+  >"$COVDIR/build-tests.json" 2>"$COVDIR/build-tests.log" || { tail -20 "$COVDIR/build-tests.log"; exit 1; }
+tail -1 "$COVDIR/build-tests.log"
+grep -oE '"executable":"[^"]+"' "$COVDIR/build-tests.json" | sed -E 's/^"executable":"//; s/"$//' | LC_ALL=C sort -u >"$COVDIR/testbins.txt" || true
 LLVM_PROFILE_FILE="$COVDIR/build/host-%m-%p.profraw" \
   cargo build --release -p almide-mir --example render_program --target-dir "$COVDIR/t" 2>&1 | tail -1
 LLVM_PROFILE_FILE="$COVDIR/build/host-%m-%p.profraw" \
@@ -113,12 +124,15 @@ echo "== 2/4 run the test suites =="
 # (macOS) rejects it outright — the second call has no `|| true`, so under
 # `set -e` this whole gate died at step 2/4 with "illegal mode string" on every
 # non-GNU host, never reaching the ratchet it exists to enforce (#1244 round 5).
-TESTBINS="$(find "$COVDIR/t/release/deps" -maxdepth 1 -type f -perm -u+x ! -name '*.d' ! -name '*.dylib' | grep -E '/(almide_mir|almide_codegen|almide_wasm|backend_parity|section_dump|fuzz_differential|alias_semantics|tail_calls|integration|lower|render)[^/]*$' || true)"
-[ -n "$TESTBINS" ] || TESTBINS="$(find "$COVDIR/t/release/deps" -maxdepth 1 -type f -perm -u+x ! -name '*.d' ! -name '*.dylib')"
+TESTBIN_NAMES='/(almide_mir|almide_codegen|almide_wasm|backend_parity|section_dump|fuzz_differential|alias_semantics|tail_calls|integration|lower|render)[^/]*$'
+TESTBINS="$(grep -E "$TESTBIN_NAMES" "$COVDIR/testbins.txt" 2>/dev/null || true)"
+[ -n "$TESTBINS" ] || TESTBINS="$(cat "$COVDIR/testbins.txt" 2>/dev/null || true)"
+[ -n "$TESTBINS" ] || TESTBINS="$(find "$COVDIR/t/release/deps" -maxdepth 1 -type f -perm -u+x ! -name '*.d' ! -name '*.dylib' 2>/dev/null | grep -E "$TESTBIN_NAMES" || true)"
+[ -n "$TESTBINS" ] || TESTBINS="$(find "$COVDIR/t/release/deps" -maxdepth 1 -type f -perm -u+x ! -name '*.d' ! -name '*.dylib' 2>/dev/null || true)"
 # No vacuous measurement: zero test binaries would still produce profraw from
 # the step-3 workloads, so the run would report a NUMBER for a suite that never
 # ran. That is the #990 failure mode again — fail instead.
-[ -n "$TESTBINS" ] || { echo "coverage: NO test binaries found under $COVDIR/t/release/deps — the discovery went blind"; exit 1; }
+[ -n "$TESTBINS" ] || { echo "coverage: NO test binaries found (cargo artifact messages empty, $COVDIR/t/release/deps absent) — the discovery went blind"; exit 1; }
 i=0
 for tb in $TESTBINS; do
     i=$((i+1))
