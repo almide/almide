@@ -11,23 +11,23 @@
 fn main() -> Unit = {
   let n1: Result[Float?, String] = ok(some(1.5))
   let e1: Result[Float?, String] = err("boom")
-  let r4 = result.unwrap_or(n1, none)
+  let r4 = n1 ?? none
   match r4 {
     some(v) => println("got ${v}"),
     none => println("none"),
   }
-  let r5 = result.unwrap_or(e1, none)
+  let r5 = e1 ?? none
   match r5 {
     some(v) => println("got ${v}"),
     none => println("none"),
   }
-  let r6 = result.unwrap_or(e1, some(9.5))
+  let r6 = e1 ?? some(9.5)
   match r6 {
     some(v) => println("dflt ${v}"),
     none => println("none"),
   }
   let oo: (Int?)? = some(some(7))
-  let r7 = option.unwrap_or(oo, none)
+  let r7 = oo ?? none
   match r7 {
     some(v) => println("inner ${v}"),
     none => println("none"),
@@ -36,7 +36,7 @@ fn main() -> Unit = {
   var acc = 0
   while i < 2000 {
     let t: Result[Float?, String] = ok(some(2.5))
-    let g = result.unwrap_or(t, none)
+    let g = t ?? none
     match g {
       some(v) => {
         acc = acc + 1

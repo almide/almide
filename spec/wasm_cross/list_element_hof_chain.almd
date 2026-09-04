@@ -19,7 +19,7 @@ fn main() -> Unit = {
   ]
   let x3: Result[Bool, String] = ok(true)
   let r5: List[Bool] = [
-    result.unwrap_or(result.or_else(x3, ((x4) => x3)), true),
+    result.or_else(x3, ((x4) => x3)) ?? true,
     true,
     false,
     true
