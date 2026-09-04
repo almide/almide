@@ -651,3 +651,4 @@ fn main() -> Unit = {
 
 include!("eval_test_parts/sort_and_mut.rs");
 include!("eval_test_parts/fallible_hofs.rs");
+include!("eval_test_parts/result_blocks.rs");

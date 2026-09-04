@@ -333,10 +333,25 @@ impl<'a> Interpreter<'a> {
             "is_err" => Some(self.result_is_err(args)),
             "unwrap_or" => Some(self.result_unwrap_or(args)),
             "to_option" => Some(self.result_to_option(args)),
+            // Value-level, like `option.to_list`: the registry body
+            // (`result_to_list`, stdlib/result_core.almd) is the Int-payload
+            // twin and reads the len-as-tag block — the pool tier would run it
+            // for EVERY payload type, and a String / Bool / Float `ok` came
+            // back `[]` or as its raw slot (12 of the 2026-09-04 nightly's 23
+            // findings, once `prim.handle` of a Result stopped abstaining).
+            "to_list" => Some(self.result_to_list(args)),
             "to_err_option" => Some(self.result_to_err_option(args)),
             "flatten" => Some(self.result_flatten(args)),
             "partition" => Some(self.result_partition(args)),
             _ => None,
+        }
+    }
+
+    fn result_to_list(&mut self, args: &[Value]) -> Flow {
+        match args.first() {
+            Some(Value::Result(Ok(v))) => Flow::val(Value::List(Rc::new(vec![v.as_ref().clone()]))),
+            Some(Value::Result(Err(_))) => Flow::val(Value::List(Rc::new(Vec::new()))),
+            _ => Flow::Abort("internal: result.to_list on non-result".into()),
         }
     }
 
