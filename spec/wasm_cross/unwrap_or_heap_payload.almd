@@ -13,22 +13,22 @@ effect fn main() -> Unit = {
   // Map payload, both arms.
   let m: Map[String, Int] = ["a": 1, "b": 2]
   let o1: Map[String, Int]? = some(m)
-  println(int.to_string(map.len(o1 ?? [:])))
+  println(int.to_string(map.len(option.unwrap_or(o1, [:]))))
   let o1n: Map[String, Int]? = none
-  println(int.to_string(map.len(o1n ?? ["k": 7])))
+  println(int.to_string(map.len(option.unwrap_or(o1n, ["k": 7]))))
   // Mixed-repr tuple payload.
   let o2: (String, Int)? = some(("a", 1))
-  println((o2 ?? ("", 0)).0)
+  println(option.unwrap_or(o2, ("", 0)).0)
   // Nested Option payload.
   let o3: (String?)? = some(some("x"))
-  println((o3 ?? none) ?? "d")
+  println(option.unwrap_or(o3, none) ?? "d")
   // The Result twins, both arms.
   let r1: Result[Map[String, Int], String] = err("boom")
-  println(int.to_string(map.len(r1 ?? ["z": 9])))
+  println(int.to_string(map.len(result.unwrap_or(r1, ["z": 9]))))
   let r2: Result[(String, Int), String] = ok(("a", 1))
-  println((r2 ?? ("", 0)).0)
+  println(result.unwrap_or(r2, ("", 0)).0)
   let r3: Result[String?, String] = ok(some("v"))
-  println((r3 ?? none) ?? "d")
+  println(result.unwrap_or(r3, none) ?? "d")
   // The source stays readable after the unwrap — the payload is borrowed and
   // acquired, not moved out.
   println(int.to_string(map.len(m)))
