@@ -1,0 +1,20 @@
+// @contract: C-340
+// The `*_or` family's default is an ARGUMENT — evaluated before the call
+// on both targets, so a default that aborts aborts on a hit too. The
+// structural leg lowered `list.get_or` and `map.get_or` as a branch that
+// evaluated the default only on the miss path, so
+// `list.get_or(xs, 0, int.clamp(5, 1, 0))` died on native and ran on wasm
+// (fuzz seed 541988714664:692, #1919). `bytes.get_or` already evaluated
+// its default first; it is pinned here with its siblings.
+fn main() -> Unit = {
+  let xs = [10, 20]
+  let m = ["a": 1]
+  var b = bytes.new(2)
+  bytes.set_at(b, 0, 7)
+  println("hits: ${list.get_or(xs, 1, 0)} ${map.get_or(m, "a", 0)} ${bytes.get_or(b, 0, 0)}")
+  println("misses: ${list.get_or(xs, 9, -1)} ${map.get_or(m, "z", -1)} ${bytes.get_or(b, 9, -1)}")
+  println("lazy alternative keeps going: ${list.get(xs, 0) ?? int.clamp(5, 1, 0)}")
+  println("map default aborts on a hit:")
+  println("${map.get_or(m, "a", int.clamp(5, 1, 0))}")
+  println("unreachable")
+}

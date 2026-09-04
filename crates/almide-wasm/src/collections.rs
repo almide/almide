@@ -183,16 +183,23 @@ impl Emitter<'_> {
             }
             ("get_or", [m, key, default]) => {
                 let (_mh, _kh, eh, k, v, lay) = self.map_scan(m, key)?;
+                // The default ALWAYS evaluates (native argument order,
+                // #1919) — see list.get_or; the entry handle is already a
+                // held local.
+                let hd = self.hold_for(v)?;
+                self.lower(default, Some(v))?;
+                self.f.instructions().local_set(hd);
                 self.f
                     .instructions()
                     .local_get(eh)
                     .i32_eqz()
                     .if_(BlockType::Result(v.val_type()));
-                self.lower(default, Some(v))?;
+                self.f.instructions().local_get(hd);
                 self.f.instructions().else_();
                 self.f.instructions().local_get(eh).i32_const(lay.1 as i32).i32_add();
                 self.load_ty_slot_at(v); // eh is ABSOLUTE (inside payload)
                 self.f.instructions().end();
+                self.release_for(v);
                 self.release_i32();
                 self.release_for(k);
                 self.release_i32();

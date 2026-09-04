@@ -735,16 +735,24 @@ impl Emitter<'_> {
             8 => F_LIST_GET_8,
             _ => F_LIST_GET_4,
         };
-        self.f
-            .instructions()
-            .call(helper)
-            .local_tee(self.scr_i32_local)
-            .i32_eqz()
-            .if_(BlockType::Result(elem.val_type()));
+        // The default ALWAYS evaluates, after the lookup and before the
+        // select — native argument order (#1919): an in-branch lowering
+        // skipped its effects (and its aborts) on a hit, so
+        // `list.get_or(xs, 0, int.clamp(5, 1, 0))` died on native and ran
+        // on wasm. The lookup's Option handle waits in a held local; the
+        // default's own lowering may use the scratch local.
+        let hres = self.hold_i32()?;
+        self.f.instructions().call(helper).local_set(hres);
+        let hd = self.hold_for(elem)?;
         self.lower(default, Some(elem))?;
-        self.f.instructions().else_().local_get(self.scr_i32_local);
+        self.f.instructions().local_set(hd);
+        self.f.instructions().local_get(hres).i32_eqz().if_(BlockType::Result(elem.val_type()));
+        self.f.instructions().local_get(hd);
+        self.f.instructions().else_().local_get(hres);
         self.load_ty_slot(elem, almide_layout::OPTION_FIELD);
         self.f.instructions().end();
+        self.release_for(elem);
+        self.release_i32();
         Ok(Some(elem))
     }
 }
