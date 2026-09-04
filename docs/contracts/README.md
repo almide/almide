@@ -375,7 +375,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-337 | The bytes search, edit and predicate family answers identically on every leg | 0.62.0 | active | fixture | 1 |
 | C-338 | The int bit family, bits_to_f32 and the Int -> Float32 convert agree on every leg | 0.62.0 | active | fixture | 1 |
 | C-339 | testing.assert_snapshot mismatches abort in the T18 form on both targets, inside test blocks too | 0.62.0 | active | fixture | 1 |
-| C-340 | option.unwrap_or and result.unwrap_or evaluate their default before the selection on both targets | 0.62.0 | active | fixture | 1 |
+| C-340 | The eager *_or family — option/result.unwrap_or, list/map/bytes.get_or — evaluates its default before the selection on both targets | 0.62.0 | active | fixture | 2 |
 | C-341 | matrix.from_bytes_f32_le / _f16_le judge their offset on the buffer side, so an offset near i64::MAX is the all-zero matrix | 0.62.0 | active | fixture | 1 |
 | C-342 | bytes.copy_from with a negative length or offset copies nothing on both targets | 0.62.0 | active | fixture | 1 |
 
