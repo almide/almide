@@ -258,6 +258,12 @@ pub fn almide_rt_bytes_copy_from(
     src_off: i64,
     len: i64,
 ) {
+    // A negative length is a no-op — the wasm leg's in-range rule (`n >= 0`)
+    // and the family's `negative = miss`; the bare `len as usize` wrapped it
+    // to huge and the `min` below turned it into "copy the whole run" (#1910).
+    if len <= 0 || dst_off < 0 || src_off < 0 {
+        return;
+    }
     let dst_off = dst_off as usize;
     let src_off = src_off as usize;
     let mut len = len as usize;

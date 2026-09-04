@@ -513,6 +513,11 @@ fn bytes_copy_from(xs: &mut [Value], it: &mut std::vec::IntoIter<Value>) -> Opti
     let Value::Int(src_off) = it.next()? else { return None };
     let Value::Int(len) = it.next()? else { return None };
     let src = raw(&src)?;
+    // A negative length or offset is a no-op on both legs (#1910): the
+    // native `as usize` used to wrap it huge and copy the whole run.
+    if len <= 0 || dst_off < 0 || src_off < 0 {
+        return Some(Value::Unit);
+    }
     let (d, s) = (dst_off as usize, src_off as usize);
     if d >= xs.len() || s >= src.len() {
         return Some(Value::Unit);
