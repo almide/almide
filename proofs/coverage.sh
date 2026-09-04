@@ -171,7 +171,17 @@ printf '%s\n' "$REPORT" | tail -40
 # Baseline file holds one number: the floor (integer percent ×100 to avoid
 # float compare, e.g. 6589 = 65.89%). `--check` fails when the measured TOTAL
 # drops below it; `--update` raises it to the measured value (never lowers).
-BASELINE_FILE="$ROOT/proofs/coverage-baseline.txt"
+# CONDITION mode (per-condition branch records, the nightly MC/DC backstop)
+# counts differently from line mode — 56.55% against line mode's 67.32% on
+# the same tree (2026-09-04) — so it ratchets against its OWN floor file.
+# Sharing the line-mode floor made the per-condition job red on every night
+# it ever measured (the first measured night after #1892 fixed its
+# discovery). Seeded on the first run like the line-mode floor.
+if [ "${ALMIDE_COVERAGE_CONDITION:-}" = "1" ]; then
+    BASELINE_FILE="$ROOT/proofs/coverage-baseline-condition.txt"
+else
+    BASELINE_FILE="$ROOT/proofs/coverage-baseline.txt"
+fi
 total_line_pct="$(printf '%s\n' "$REPORT" | awk '/^TOTAL/ { for (i=1;i<=NF;i++) if ($i ~ /%$/) last=$i } END { gsub(/%/,"",last); print last }')"
 total_c="$(printf '%s\n' "$total_line_pct" | awk '{ printf "%d", $1 * 100 }')"
 echo
