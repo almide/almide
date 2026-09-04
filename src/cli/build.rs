@@ -354,7 +354,7 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
     // The p3 component earns its http import block only when the emitted
     // op set reaches the http family (#1710 PR B) — a non-http component
     // must not demand `-S http=y` from its runtime.
-    let wants_http = host_ops.iter().any(|op| (43..=47).contains(op));
+    let wants_http = host_ops.iter().any(|op| (43..=50).contains(op));
     // The structural leg's module imports `almide.*` (the embedded host's
     // surface). A BUILD artifact must run on stock runtimes, so it ships in
     // the WASI form — same index space, shimmed imports, proc_exit on trap
@@ -752,11 +752,23 @@ fn check_wasm_availability(ir_program: &almide::ir::IrProgram, embedded_leg: boo
     }
     hits.extend(scan.hits);
     // The p3 component serves the http string family (#1710 PR B): under
-    // ALMIDE_COMPONENT_P3 the ops-43..=47 fns ship through the to_p3 http
+    // ALMIDE_COMPONENT_P3 the ops-43..=50 fns ship through the to_p3 http
     // shim, so their stock-p1 rows do not bar THIS build path — the same
     // predicate that flips fs routing structural for p3.
     if std::env::var_os("ALMIDE_COMPONENT_P3").is_some() {
-        for k in ["http.get", "http.post", "http.put", "http.patch", "http.delete"] {
+        for k in [
+            "http.get",
+            "http.post",
+            "http.put",
+            "http.patch",
+            "http.delete",
+            // The framed family rides the same shim (ops 48..=50, #1710).
+            "http.request",
+            "http.request_status",
+            "http.get_status",
+            "http.request_bytes",
+            "http.get_bytes",
+        ] {
             hits.remove(k);
         }
     }
