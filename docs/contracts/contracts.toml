@@ -4372,12 +4372,13 @@ evidence  = [
 [[contract]]
 id        = "C-340"
 spec      = "ALS-C5"
-title     = "option.unwrap_or and result.unwrap_or evaluate their default before the selection on both targets"
-statement = "`option.unwrap_or(o, d)` / `result.unwrap_or(r, d)` are ordinary strict calls: `d` is evaluated before the select on every leg, so a default that aborts (`int.clamp(3, 3, 1)`) aborts on a `some` / `ok` receiver too, with the same one stderr line and exit 1; the lazy form is `??` (≡ `unwrap_or_else`, ADR-0005), whose default runs only on the fallback path. The structural leg evaluated the default only in the none / err arm (#1906). The eager fns are deprecated (ADR-0005 D4) and keep this strictness through their window."
+title     = "The eager *_or family — option/result.unwrap_or, list/map/bytes.get_or — evaluates its default before the selection on both targets"
+statement = "`option.unwrap_or(o, d)` / `result.unwrap_or(r, d)` and `list.get_or(xs, i, d)` / `map.get_or(m, k, d)` / `bytes.get_or(b, i, d)` are ordinary strict calls: `d` is evaluated before the select on every leg, so a default that aborts (`int.clamp(3, 3, 1)`) aborts on a `some` / `ok` receiver too, with the same one stderr line and exit 1; the lazy form is `??` (≡ `unwrap_or_else`, ADR-0005), whose default runs only on the fallback path. The structural leg evaluated the default only in the none / err / miss arm (#1906, #1919). The eager fns are deprecated (ADR-0005 D4) and keep this strictness through their window."
 since     = "0.62.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/unwrap_or_strict_default.almd", class = "fixture" },
+  { path = "spec/wasm_cross/get_or_strict_default.almd", class = "fixture" },
 ]
 
 # ── MATRIX BYTE-DECODE OFFSET DOMAIN ──────────────────────────────────

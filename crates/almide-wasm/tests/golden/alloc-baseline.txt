@@ -197,6 +197,7 @@
 66080	spec/wasm_cross/generic_record_field_size.almd
 66688	spec/wasm_cross/generic_record_fn_field.almd
 66272	spec/wasm_cross/generics_mono.almd
+66336	spec/wasm_cross/get_or_strict_default.almd
 65984	spec/wasm_cross/gleam_bool_shortcircuit.almd
 66416	spec/wasm_cross/gleam_equality_matrix.almd
 65824	spec/wasm_cross/gleam_float_sci.almd
@@ -262,7 +263,7 @@
 66080	spec/wasm_cross/int_wrap_rotate_width.almd
 66016	spec/wasm_cross/interp_effect_unwrap_arg.almd
 66048	spec/wasm_cross/io_write_ordering.almd
-229568	spec/wasm_cross/json_gltf_walk.almd
+230400	spec/wasm_cross/json_gltf_walk.almd
 3722304	spec/wasm_cross/json_many_keys.almd
 88976	spec/wasm_cross/json_number_unicode.almd
 74544	spec/wasm_cross/json_parse_lenient_edges.almd
@@ -292,7 +293,7 @@
 65824	spec/wasm_cross/let_wildcard_discard.almd
 65984	spec/wasm_cross/letbound_variant_match.almd
 65936	spec/wasm_cross/licm_zero_trip_hoist.almd
-666000	spec/wasm_cross/list_arg_map_view.almd
+794224	spec/wasm_cross/list_arg_map_view.almd
 66048	spec/wasm_cross/list_call_element.almd
 66688	spec/wasm_cross/list_chunk_windows.almd
 65920	spec/wasm_cross/list_chunk_zero.almd
@@ -301,10 +302,10 @@
 70224	spec/wasm_cross/list_cross_module_variant.almd
 66096	spec/wasm_cross/list_element_hof_chain.almd
 66032	spec/wasm_cross/list_enumerate_find.almd
-66320	spec/wasm_cross/list_enumerate_rich.almd
+66352	spec/wasm_cross/list_enumerate_rich.almd
 66128	spec/wasm_cross/list_eq.almd
 65904	spec/wasm_cross/list_eq_float_bool.almd
-66480	spec/wasm_cross/list_flatten_borrow.almd
+66592	spec/wasm_cross/list_flatten_borrow.almd
 66704	spec/wasm_cross/list_float_equality_family.almd
 125440	spec/wasm_cross/list_float_total_order.almd
 220256	spec/wasm_cross/list_heapelem_rc.almd
@@ -415,7 +416,7 @@
 66336	spec/wasm_cross/nested_map_list_values.almd
 67264	spec/wasm_cross/nested_match_heap_arm.almd
 65840	spec/wasm_cross/nested_payload_guard.almd
-66464	spec/wasm_cross/nested_scalar_record_append.almd
+66512	spec/wasm_cross/nested_scalar_record_append.almd
 65920	spec/wasm_cross/nested_three_level_literal.almd
 65952	spec/wasm_cross/nested_three_level_loop_build.almd
 66144	spec/wasm_cross/nested_tuple_destructure.almd
