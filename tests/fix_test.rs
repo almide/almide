@@ -457,3 +457,55 @@ fn main() -> Unit = {
     assert!(after.contains("${a > b}"), "hole not rewritten:\n{}", after);
     assert!(!after.contains("int.gt"), "int.gt residue inside the hole:\n{}", after);
 }
+
+#[test]
+fn fix_rewrites_eager_unwrap_or_to_the_operator() {
+    // ADR-0005 D4: both call shapes of the deprecated eager fallback become
+    // `a ?? d` — the direct call and the pipe stage, option and result alike.
+    let path = write_tmp("fix_unwrap_or.almd", r#"
+fn f(x: Int) -> Int? = some(x)
+
+fn main() -> Unit = {
+  let a = option.unwrap_or(f(1), 0)
+  let b = f(2) |> option.unwrap_or(9)
+  let c = [1, 2] |> list.get(0) |> option.unwrap_or(7)
+  let r: Result[Int, String] = ok(3)
+  println("${a} ${b} ${c} ${result.unwrap_or(r, 0)}")
+}
+"#);
+    let out = Command::new(almide()).args(["fix", &path]).output().unwrap();
+    assert!(out.status.success(), "stderr:\n{}", String::from_utf8_lossy(&out.stderr));
+    let after = std::fs::read_to_string(&path).unwrap();
+    assert!(!after.contains("unwrap_or("), "eager call left behind:\n{after}");
+    assert!(after.contains("let a = f(1) ?? 0"), "{after}");
+    assert!(after.contains("let b = f(2) ?? 9"), "{after}");
+    assert!(after.contains("[1, 2] |> list.get(0) ?? 7"), "{after}");
+    assert!(after.contains("${r ?? 0}"), "{after}");
+    let run = Command::new(almide()).args(["run", &path]).output().unwrap();
+    assert_eq!(String::from_utf8_lossy(&run.stdout).trim(), "1 2 1 3");
+    let check = Command::new(almide()).args(["check", &path]).output().unwrap();
+    let diag = String::from_utf8_lossy(&check.stderr);
+    assert!(!diag.contains("E052"), "the rewritten file must not warn: {diag}");
+}
+
+#[test]
+fn fix_parenthesizes_the_operator_where_the_call_was_a_primary() {
+    // `??` is infix: as the object of `.0` or the left side of another `??`
+    // the rewritten node needs the grouping the call form never did.
+    let path = write_tmp("fix_unwrap_or_paren.almd", r#"
+fn main() -> Unit = {
+  let o2: (String, Int)? = some(("a", 1))
+  let o3: Option[Option[String]] = some(none)
+  println(option.unwrap_or(o2, ("", 0)).0)
+  println(option.unwrap_or(o3, none) ?? "d")
+}
+"#);
+    let out = Command::new(almide()).args(["fix", &path]).output().unwrap();
+    assert!(out.status.success(), "stderr:\n{}", String::from_utf8_lossy(&out.stderr));
+    let after = std::fs::read_to_string(&path).unwrap();
+    assert!(after.contains("println((o2 ?? (\"\", 0)).0)"), "{after}");
+    assert!(after.contains("println((o3 ?? none) ?? \"d\")"), "{after}");
+    let run = Command::new(almide()).args(["run", &path]).output().unwrap();
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(String::from_utf8_lossy(&run.stdout).trim(), "a\nd");
+}
