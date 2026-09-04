@@ -155,8 +155,63 @@ impl<'a> Interpreter<'a> {
                 self.heap.keep(rc);
                 Ok(a as i64)
             }
+            // The cap-as-tag `Result` block (#1844): the shape the fs / fan
+            // floors hand back and their stdlib bodies read as
+            // `load_handle(h + 12)` (payload, low 32 bits) and `load32(h + 16)`
+            // (tag: 0 = Ok, 1 = Err) — one slot whose high half is the tag,
+            // `len@4 = cap@8 = 1` (render_wasm_fs_wat `$rtf_result`). A Box
+            // has no identity to bind, so each `prim.handle` materializes
+            // afresh — the bodies take the handle once. The payload's own
+            // block (a Str message, a List of lines) is bound the ordinary
+            // way and its address is the low half.
+            (Value::Result(r), Some(Ty::Applied(C::Result, ts))) if ts.len() == 2 => {
+                let (payload, tag, ty) = match r {
+                    Ok(v) => (v.as_ref(), 0i64, &ts[0]),
+                    Err(e) => (e.as_ref(), 1i64, &ts[1]),
+                };
+                let low = self.heap_result_payload_low(payload, Some(ty))?;
+                Ok(self.heap_result_block(low, tag) as i64)
+            }
             _ => self.heap_materialize(v),
         }
+    }
+
+    /// The low 32 bits of a cap-as-tag `Result` slot: a Unit is 0, a Bool
+    /// 0/1, an Int must fit the half (the backends store an i32 there — a
+    /// wider payload has no faithful bits and abstains), a block value is
+    /// its address.
+    fn heap_result_payload_low(&mut self, payload: &Value, ty: Option<&Ty>) -> Result<i64, String> {
+        let low = match payload {
+            Value::Unit => 0,
+            Value::Bool(b) => *b as i64,
+            Value::Int(i) => {
+                if i32::try_from(*i).is_err() {
+                    return Err(format!(
+                        "prim.handle of a Result holding an Int outside the i32 half ({i})"
+                    ));
+                }
+                *i & 0xFFFF_FFFF
+            }
+            Value::Str(_) | Value::List(_) | Value::Set(_) | Value::Map(_) | Value::Tuple(_) => {
+                self.heap_materialize_hinted(payload, ty)?
+            }
+            other => {
+                return Err(format!(
+                    "prim.handle of a Result holding a {} (no cap-as-tag slot repr)",
+                    other.type_name()
+                ))
+            }
+        };
+        Ok(low)
+    }
+
+    fn heap_result_block(&mut self, low: i64, tag: i64) -> u32 {
+        let base = self.heap.alloc_slots(1);
+        let slot = (low & 0xFFFF_FFFF) | (tag << 32);
+        self.heap
+            .store(base + crate::heap::PAYLOAD, 8, slot)
+            .expect("a freshly allocated slot is inside the arena");
+        base
     }
 
     /// One container element as its slot i64, driven by the DECLARED element
@@ -308,6 +363,16 @@ impl<'a> Interpreter<'a> {
                 self.heap.keep(rc);
                 Ok(a as i64)
             }
+            // Un-hinted `Result`: the same cap-as-tag block, the payload read
+            // by its own shape (see `heap_materialize_hinted`).
+            Value::Result(r) => {
+                let (payload, tag) = match r {
+                    Ok(v) => (v.as_ref(), 0i64),
+                    Err(e) => (e.as_ref(), 1i64),
+                };
+                let low = self.heap_result_payload_low(payload, None)?;
+                Ok(self.heap_result_block(low, tag) as i64)
+            }
             other => Err(format!(
                 "prim.handle of a {} (outside the slice-2 heap family)",
                 other.type_name()
@@ -428,7 +493,11 @@ impl<'a> Interpreter<'a> {
                 let Some(a) = heap_addr(args.first()) else {
                     return Some(Flow::Unsupported(format!("prim.{func} with a non-address")));
                 };
-                let Some(h) = self.heap.load(a, 8) else {
+                // A 4-byte read, the backends' `i32.load` (render_wasm_p2_b
+                // `PrimKind::LoadHandle`): a handle is a u32 address, and in
+                // the cap-as-tag Result block the slot's HIGH half is the tag
+                // — an 8-byte read there folded the tag into the address.
+                let Some(h) = self.heap.load(a, 4) else {
                     return Some(Flow::Unsupported(format!(
                         "prim.{func} outside this heap's arena"
                     )));
