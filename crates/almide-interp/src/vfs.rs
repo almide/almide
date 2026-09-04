@@ -145,3 +145,83 @@ pub(crate) fn remove_all(vfs: &mut Vfs, path: &str) -> RemoveOutcome {
     }
     RemoveOutcome::Removed
 }
+
+const ENOTDIR: &str = "Not a directory (os error 20)";
+const EISDIR: &str = "Is a directory (os error 21)";
+
+/// `prim.read_bytes_file` — the bytes floor: the overlay's bytes as they
+/// were written, else a read-only real-fs `std::fs::read`.
+pub(crate) fn read_bytes(vfs: &Vfs, path: &str) -> Result<Vec<u8>, String> {
+    let path = &normalize(path);
+    match vfs.get(path.as_str()) {
+        Some(VfsEntry::File(content)) => Ok(content.clone()),
+        Some(VfsEntry::Dir) => Err(EISDIR.to_string()),
+        None => std::fs::read(path).map_err(|e| format!("{e}")),
+    }
+}
+
+/// `prim.path_filestat` — the three WASI filestat fields the stdlib bodies
+/// read back (`filetype@16`: 3 = directory, 4 = regular file; `size@32`;
+/// `mtim@48` in nanoseconds), or `None` for a path that exists nowhere. An
+/// overlay entry stamps the CURRENT time: the backend legs write real files
+/// and stat them in the same run, so "now" is the faithful reading of the
+/// field they see (a fixture can only assert its shape, never its value).
+pub(crate) fn stat(vfs: &Vfs, path: &str) -> Option<(u8, u64, i64)> {
+    let norm = normalize(path);
+    let now_ns = || {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as i64)
+            .unwrap_or(0)
+    };
+    match vfs.get(norm.as_str()) {
+        Some(VfsEntry::File(content)) => Some((4, content.len() as u64, now_ns())),
+        Some(VfsEntry::Dir) => Some((3, 0, now_ns())),
+        None => {
+            let md = std::fs::metadata(path).ok()?;
+            let ftype = if md.is_dir() { 3 } else if md.is_file() { 4 } else { 0 };
+            let mtime = md
+                .modified()
+                .ok()
+                .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_nanos() as i64)
+                .unwrap_or(0);
+            Some((ftype, md.len(), mtime))
+        }
+    }
+}
+
+/// `prim.read_dir` — the sorted names under `path`: the overlay's direct
+/// children (a file or a dir written under it) merged with the real
+/// directory's entries when one exists there, `names.sort()`ed like native
+/// `almide_rt_fs_list_dir` (the wasm leg sorts the same way). A missing path
+/// is the native ENOENT, a file the native ENOTDIR.
+pub(crate) fn read_dir(vfs: &Vfs, path: &str) -> Result<Vec<String>, String> {
+    let norm = normalize(path);
+    let overlay_dir = matches!(vfs.get(norm.as_str()), Some(VfsEntry::Dir));
+    if matches!(vfs.get(norm.as_str()), Some(VfsEntry::File(_))) {
+        return Err(ENOTDIR.to_string());
+    }
+    let real = std::path::Path::new(path);
+    let mut names: Vec<String> = Vec::new();
+    if real.is_dir() {
+        let entries = std::fs::read_dir(path).map_err(|e| format!("{e}"))?;
+        for entry in entries {
+            let e = entry.map_err(|e| format!("{e}"))?;
+            names.push(e.file_name().to_string_lossy().to_string());
+        }
+    } else if !overlay_dir {
+        return Err(if real.exists() { ENOTDIR.to_string() } else { ENOENT.to_string() });
+    }
+    let prefix = format!("{norm}/");
+    for k in vfs.keys() {
+        if let Some(rest) = k.strip_prefix(&prefix) {
+            let child = rest.split('/').next().unwrap_or(rest).to_string();
+            if !child.is_empty() && !names.contains(&child) {
+                names.push(child);
+            }
+        }
+    }
+    names.sort();
+    Ok(names)
+}

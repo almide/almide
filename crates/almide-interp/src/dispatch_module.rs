@@ -490,6 +490,65 @@ impl<'a> Interpreter<'a> {
                     Err(e) => Value::Result(Err(Box::new(Value::str(e)))),
                 }))
             }
+            "read_bytes_file" => {
+                let path = match self.vfs_path_arg(func, args.first()) {
+                    Ok(p) => p,
+                    Err(f) => return Some(f),
+                };
+                Some(Flow::val(match crate::vfs::read_bytes(&self.vfs, &path) {
+                    Ok(b) => Value::Result(Ok(Box::new(Value::List(std::rc::Rc::new(
+                        b.into_iter().map(|x| Value::Int(x as i64)).collect(),
+                    ))))),
+                    Err(e) => Value::Result(Err(Box::new(Value::str(e)))),
+                }))
+            }
+            // `prim.path_filestat(buf, path)`: the WASI filestat lands in the
+            // caller's 64-byte scratch — filetype@16, size@32, mtim@48 are the
+            // fields the stdlib bodies read — and the errno is the return
+            // (0 = ok; the bodies only test it against 0, so a missing path
+            // answers WASI's ENOENT 44).
+            "path_filestat" => {
+                let Some(Value::Int(buf)) = args.first() else {
+                    return Some(Flow::Unsupported(
+                        "prim.path_filestat with a non-address buffer".into(),
+                    ));
+                };
+                let path = match self.vfs_path_arg(func, args.get(1)) {
+                    Ok(p) => p,
+                    Err(f) => return Some(f),
+                };
+                let Ok(base) = u32::try_from(*buf) else {
+                    return Some(Flow::Unsupported("prim.path_filestat with a negative buffer".into()));
+                };
+                let Some((ftype, size, mtime_ns)) = crate::vfs::stat(&self.vfs, &path) else {
+                    return Some(Flow::val(Value::Int(44)));
+                };
+                let stores = [
+                    (16u32, 1u32, ftype as i64),
+                    (32, 8, size as i64),
+                    (48, 8, mtime_ns),
+                ];
+                for (off, w, val) in stores {
+                    if self.heap.store(base + off, w, val).is_none() {
+                        return Some(Flow::Unsupported(
+                            "prim.path_filestat outside this heap's arena".into(),
+                        ));
+                    }
+                }
+                Some(Flow::val(Value::Int(0)))
+            }
+            "read_dir" => {
+                let path = match self.vfs_path_arg(func, args.first()) {
+                    Ok(p) => p,
+                    Err(f) => return Some(f),
+                };
+                Some(Flow::val(match crate::vfs::read_dir(&self.vfs, &path) {
+                    Ok(names) => Value::Result(Ok(Box::new(Value::List(std::rc::Rc::new(
+                        names.into_iter().map(Value::str).collect(),
+                    ))))),
+                    Err(e) => Value::Result(Err(Box::new(Value::str(e)))),
+                }))
+            }
             "make_dir" => {
                 let Some(Value::Str(path)) = args.first() else {
                     return Some(Flow::Abort("internal: prim.make_dir expects a String".into()));
