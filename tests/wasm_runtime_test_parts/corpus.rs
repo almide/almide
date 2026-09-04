@@ -71,6 +71,18 @@ fn build_corpus() -> Option<Vec<FixtureLegs>> {
         .filter(|e| e.path().extension().map(|x| x == "almd").unwrap_or(false))
         .collect();
     entries.sort_by_key(|e| e.path());
+    // ALMIDE_CORPUS_FILTER=<substring>: a developer's single-fixture loop for
+    // the 3-way harnesses (seconds instead of the ~6 min full corpus). Never
+    // set in CI — the ledger gate over a filtered corpus would read every
+    // filtered-out row as stale.
+    if let Ok(filter) = std::env::var("ALMIDE_CORPUS_FILTER") {
+        entries.retain(|e| {
+            e.path()
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .is_some_and(|s| s.contains(filter.as_str()))
+        });
+    }
     if entries.is_empty() {
         return None;
     }
