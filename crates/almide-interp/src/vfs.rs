@@ -19,7 +19,10 @@
 use std::collections::HashMap;
 
 pub(crate) enum VfsEntry {
-    File(String),
+    /// The file's BYTES — not a String: `fs.write_bytes` lands raw bytes
+    /// (a latin1 line, a truncated sequence) and the text read must then
+    /// answer the backends' InvalidData error, not silently re-encode.
+    File(Vec<u8>),
     Dir,
 }
 
@@ -58,7 +61,10 @@ const ENOENT: &str = "No such file or directory (os error 2)";
 pub(crate) fn read_text(vfs: &Vfs, path: &str) -> Result<String, String> {
     let path = &normalize(path);
     match vfs.get(path.as_str()) {
-        Some(VfsEntry::File(content)) => Ok(content.clone()),
+        // The exact `std::fs::read_to_string` InvalidData Display the native
+        // runtime's `io_err` forwards (and the wasm text floor spells, #1506).
+        Some(VfsEntry::File(content)) => String::from_utf8(content.clone())
+            .map_err(|_| "stream did not contain valid UTF-8".to_string()),
         Some(VfsEntry::Dir) => Err("Is a directory (os error 21)".to_string()),
         None => std::fs::read_to_string(path).map_err(|e| format!("{e}")),
     }
@@ -67,7 +73,10 @@ pub(crate) fn read_text(vfs: &Vfs, path: &str) -> Result<String, String> {
 /// `prim.write_text_file` — into the overlay only. The parent must exist
 /// (overlay dir, or a real directory), the same precondition `std::fs::write`
 /// enforces natively.
-pub(crate) fn write_text(vfs: &mut Vfs, path: &str, content: &str) -> Result<(), String> {
+/// The content is BYTES: what `prim.write_text_file` really carries once a
+/// stdlib body has filled an `alloc_str` block byte by byte
+/// (`fs.write_bytes` / `fs.write_bytes_raw`) — a String arrives as its UTF-8.
+pub(crate) fn write_bytes(vfs: &mut Vfs, path: &str, content: &[u8]) -> Result<(), String> {
     let path = &normalize(path);
     if matches!(vfs.get(path.as_str()), Some(VfsEntry::Dir)) {
         return Err("Is a directory (os error 21)".to_string());
@@ -78,7 +87,7 @@ pub(crate) fn write_text(vfs: &mut Vfs, path: &str, content: &str) -> Result<(),
             return Err(ENOENT.to_string());
         }
     }
-    vfs.insert(path.to_string(), VfsEntry::File(content.to_string()));
+    vfs.insert(path.to_string(), VfsEntry::File(content.to_vec()));
     Ok(())
 }
 

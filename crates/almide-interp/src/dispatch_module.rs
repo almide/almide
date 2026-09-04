@@ -420,27 +420,72 @@ impl<'a> Interpreter<'a> {
     /// per-interpreter overlay, reads fall back to the real fs
     /// read-only. Same tier as the argv/env floors — these prims
     /// read INTERPRETER state, which the stateless bridge cannot.
+    /// A path argument: a `Str`, or a Str-block ADDRESS a body built with
+    /// `alloc_str` (coerced through the arena). Anything else is an honest
+    /// abstain named by shape — a body reaching a vfs prim with a value the
+    /// interp cannot spell must not vote.
+    fn vfs_path_arg(&mut self, func: &str, arg: Option<&Value>) -> Result<String, Flow> {
+        let Some(v) = arg else {
+            return Err(Flow::Unsupported(format!("prim.{func} with no path argument")));
+        };
+        match self.coerce_block_str(v.clone()) {
+            Value::Str(s) => Ok(s.to_string()),
+            other => Err(Flow::Unsupported(format!(
+                "prim.{func} with a {} path (no faithful String)",
+                other.type_name()
+            ))),
+        }
+    }
+
+    /// A content argument as raw bytes: a `Str`'s UTF-8, or the payload of a
+    /// Str / Bytes block at the given ADDRESS (the byte-filled `alloc_str`
+    /// form need not be UTF-8, so it is read as bytes, never as a String).
+    fn vfs_bytes_arg(&mut self, func: &str, arg: Option<&Value>) -> Result<Vec<u8>, Flow> {
+        use crate::heap::BlockKind;
+        match arg {
+            Some(Value::Str(s)) => Ok(s.as_bytes().to_vec()),
+            Some(Value::Int(i)) => {
+                let block = u32::try_from(*i).ok().and_then(|a| self.heap.block_bytes(a));
+                match block {
+                    Some((bytes, BlockKind::Str | BlockKind::Bytes)) => Ok(bytes),
+                    _ => Err(Flow::Unsupported(format!(
+                        "prim.{func} with a non-block Int content (no faithful bytes)"
+                    ))),
+                }
+            }
+            Some(other) => Err(Flow::Unsupported(format!(
+                "prim.{func} with a {} content (no faithful bytes)",
+                other.type_name()
+            ))),
+            None => Err(Flow::Unsupported(format!("prim.{func} with no content argument"))),
+        }
+    }
+
     fn vfs_prim(&mut self, func: &str, args: &[Value]) -> Option<Flow> {
         match func {
             "read_text_file" => {
-                let Some(Value::Str(path)) = args.first() else {
-                    return Some(Flow::Abort("internal: prim.read_text_file expects a String".into()));
+                let path = match self.vfs_path_arg(func, args.first()) {
+                    Ok(p) => p,
+                    Err(f) => return Some(f),
                 };
-                Some(Flow::val(match crate::vfs::read_text(&self.vfs, path) {
+                Some(Flow::val(match crate::vfs::read_text(&self.vfs, &path) {
                     Ok(s) => Value::Result(Ok(Box::new(Value::str(s)))),
                     Err(e) => Value::Result(Err(Box::new(Value::str(e)))),
                 }))
             }
             "write_text_file" => {
-                let (Some(Value::Str(path)), Some(Value::Str(content))) =
-                    (args.first(), args.get(1))
-                else {
-                    return Some(Flow::Abort(
-                        "internal: prim.write_text_file expects (String, String)".into(),
-                    ));
+                let path = match self.vfs_path_arg(func, args.first()) {
+                    Ok(p) => p,
+                    Err(f) => return Some(f),
                 };
-                let (path, content) = (path.to_string(), content.to_string());
-                Some(Flow::val(match crate::vfs::write_text(&mut self.vfs, &path, &content) {
+                // The content is BYTES: a stdlib body that writes bytes fills
+                // an `alloc_str` block byte by byte and hands its ADDRESS here
+                // (`fs.write_bytes`), and those bytes need not be UTF-8.
+                let content = match self.vfs_bytes_arg(func, args.get(1)) {
+                    Ok(b) => b,
+                    Err(f) => return Some(f),
+                };
+                Some(Flow::val(match crate::vfs::write_bytes(&mut self.vfs, &path, &content) {
                     Ok(()) => Value::Result(Ok(Box::new(Value::Unit))),
                     Err(e) => Value::Result(Err(Box::new(Value::str(e)))),
                 }))
