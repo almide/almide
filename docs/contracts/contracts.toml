@@ -4250,7 +4250,7 @@ id        = "C-329"
 spec      = "ALS-R5"
 title     = "env.set is observed by env.get identically on every leg, and the p1 shim serves the environ/args ops"
 statement = "`env.set(k, v)` makes a later `env.get(k)` in the same process answer some(v) — last write wins, the empty-string value round-trips, and an unset name stays none — identically on native (process-level setenv semantics via the overlay), the embedded wasm lane (the op 37/26 overlay), and STOCK p1 artifacts (#1716): the to_wasi shim appends an overlay log page and serves op 37 (append) and op 26 (last-match scan, then a real-environ fallthrough via environ_sizes_get/environ_get), so a stock runtime's own environment is visible through the same env.get. The same change taught the shim op 29 (args frames from args_sizes_get/args_get, argv0 first) and the guest arm skips argv0 — `env.args()` answers argv[1..] on native, embedded (the run host forwards `--` args), and stock alike. The import count grew 5 -> 9, so the element section re-encodes through the remapping Reencoder — funcref tables shift with the imports (the #1688 class; the p2/p3 transforms carried this latent and are fixed by the same machinery). EXTENDED (#1841, 0.61.2): the services are REACHABILITY-GATED, the #1712 fixed-slot discipline applied to the transform — each ships only when the module's emitted op set (the table the build path audits against P1_SERVED_OPS) names its op: op 26 (env.get) brings the environ_sizes_get/environ_get pair and the scan shim, op 29 (env.args / process.args) the args_sizes_get/args_get pair and the frames shim, op 37 (env.set) the overlay-append shim and no import; the overlay-length global rides with either env service. So the p1 import count is 5, 7 or 9 by selection, never 9 unconditionally: a program that never touches env or args imports exactly the base five (fd_write / proc_exit / random_get / clock_time_get / fd_read) and carries the five base shims — Hello, world returned from 3,297 to 2,264 B — while an env/args program pays exactly the services it reaches and answers the same bytes as before on native, embedded and stock alike. The import surface per selection is pinned by crates/almide-wasm/tests/wasi_services.rs (hello: none; args-only: the args pair; env.get-only: the environ pair; env.set-only: no import; the full surface: the quartet)."
-since     = "0.61.2"
+since     = "0.62.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/env_set_overlay.almd", class = "fixture" },
@@ -4262,7 +4262,7 @@ id        = "C-331"
 spec      = "ALS-R5"
 title     = "zlib is self-hosted on wasm: decoding is byte-identical, encoding is round-trip-exact with leg-dependent bytes"
 statement = "`import zlib` builds and runs on the wasm legs (#1700): the C-326 gzip decoder, promoted to stdlib, serves `zlib.gunzip` / `zlib.inflate` / `zlib.decompress` (gzip members + crc32/ISIZE, raw DEFLATE, zlib header + adler32), and a stored-block encoder serves `zlib.gzip` / `zlib.deflate[_level]` / `zlib.compress[_level]`. DECODING is byte-identical across legs by construction — DEFLATE decoding is exact, so a native-flate2-encoded stream (dynamic Huffman included) decodes to the same bytes everywhere; the fixture pins three flate2-produced known-answer vectors. COMPRESSED BYTES ARE LEG-DEPENDENT BY DESIGN: native keeps the flate2 intrinsics (real LZ77 ratios), the wasm legs emit stored blocks (valid DEFLATE, no shrink; ~5 bytes framing per 65535-byte chunk) — a bounded divergence in the C-189 class, declared here and pinned by ROUND TRIP (`decompress(compress(x)) == x` on every leg), never by encoded bytes. The `_level` twins accept and ignore the level on wasm (stored blocks have no dial). `zlib.crc32` / `zlib.adler32` are pure Almide on every target — known answers, no intrinsic."
-since     = "0.61.2"
+since     = "0.62.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/zlib_selfhost.almd", class = "fixture" },
@@ -4298,7 +4298,7 @@ id        = "C-334"
 spec      = "ALS-I1"
 title     = "A closure call takes +1 on a borrowed heap argument: the RC-3 callee-owned convention holds through call_indirect"
 statement = "On the structural wasm leg, a call through a function VALUE (call_indirect through the funcref table — a lambda parameter `pred(v)`, a stored closure, a direct `((n) => …)(x)`) applies the same RC-3 argument guard a named-fn call does: a droppable argument that is not certainly fresh — a match-bound payload (`ok(v) => pred(v)`, `some(v)`, `[v]`), a record field or list element read, a param of the enclosing fn forwarded on — takes +1 at the call site, because every callee epilogue, a lifted lambda's included, decs its droppable params. The value the caller still holds is byte-identical native == wasm AFTER the closure ran. Before this contract the computed-callee path lowered its arguments without the guard, so the lambda's epilogue freed the caller's only reference and the next same-size allocation (the `ok(v)` re-wrap) landed on the string: the nightly differential fuzzer's zeroed and garbage payloads of 2026-08-29, 08-30 and 09-01 (#924; `r3 = \"aaaa\"` → `\"\\0\\0\\0\\0\"`, `ok(\"café\")`, `ok(\"日本語\")`, `ok(\"-0\")` → `ok(\"\")`). A literal or user-fn payload only LOOKED fine: the block was freed all the same and the garbage surfaced once the allocator reused the size class. Fixed in #1786; the incumbent leg never had the gap."
-since     = "0.61.2"
+since     = "0.62.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/closure_borrowed_arg_guard.almd", class = "fixture" },
@@ -4309,7 +4309,7 @@ id        = "C-335"
 spec      = "ALS-R7"
 title     = "path.extension treats a leading dot as a hidden-file marker, not an extension, on both targets"
 statement = "`path.extension` answers the documented rule on every target: the extension is the text after the LAST dot of the basename, and a name whose only dot is a leading one (`.gitignore`) has no extension — `none`, the same rule `path.stem` already kept (`.gitignore` stems to itself) and the POSIX / Rust `Path::extension` convention. `.bashrc.bak` is `bak`, `a.tar.gz` is `gz`, `Makefile` is `none`, and a bare trailing dot (`foo.`) is the empty extension. Before this contract both legs split the basename on every dot and answered `some(\"gitignore\")` while the docs promised `none` (#1795, found by the doctest promotion); the body is self-hosted and shared, so the fix and the fixture bind both legs at once."
-since     = "0.61.2"
+since     = "0.62.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/path_extension_hidden.almd", class = "fixture" },
@@ -4338,7 +4338,7 @@ id        = "C-337"
 spec      = "ALS-C5"
 title     = "The bytes search, edit and predicate family answers identically on every leg"
 statement = "Every `bytes` search / edit / predicate fn prints the same answer native == wasm over the integer-domain edge values (zero, one, -1, the i32 rails, u32::MAX, 2^32, the i64 rails and their neighbours, len-1 / len / len+1): `cmp` is lexicographic with a proper prefix the smaller (-1 / 0 / 1); `contains` and `index_of` treat the empty pattern as a hit at 0 and a pattern longer than the haystack as a miss; `starts_with` / `ends_with` hold for the empty affix and never for one longer than the buffer; `is_valid_utf8` is `std::str::from_utf8(b).is_ok()` — overlong encodings, UTF-16 surrogates, codepoints past U+10FFFF and a truncated tail all reject; `eof` reads `pos as usize >= len` so a NEGATIVE pos is past the end; `skip` adds and clamps to the length (the sum wraps in i64, both legs); `insert` clamps the position to `[0, len]` and stores the value's LOW BYTE; `remove_at` returns a copy when the position is out of range (negative included); `reverse` / `xor` (the shorter length) / `map_each` (the callback result truncated to u8, every byte once in order) are fresh buffers; `split` on an EMPTY separator is the one-element list holding a copy of the input and otherwise a non-overlapping left-to-right scan whose tail piece (possibly empty) is always pushed; `lines` splits on the newline byte with no carriage-return handling and pushes the final tail only when non-empty; `data_ptr` is an address (never printed cross-leg — two calls on one buffer agree). `runtime/rs/src/bytes.rs` is the oracle. On the STRUCTURAL leg (#1423 stage 4, 0.61.2) the audited `bytes_core.almd` bodies link through the whitelist (read-only load8 walks over the digest-shared Bytes payload, stores into their own alloc_bytes buffers, index_of's `Int?` built via some()/none), while `split` and `lines` are native arms in the `chunks` shape — their self-host twins write the incumbent's 8-byte List slot stride raw (`prim.store_str(lh + 12 + idx * 8, ..)`), which this layout's 4-byte handles cannot share."
-since     = "0.61.2"
+since     = "0.62.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/bytes_search_edit_family.almd", class = "fixture" },
@@ -4350,7 +4350,7 @@ id        = "C-338"
 spec      = "ALS-T24"
 title     = "The int bit family, bits_to_f32 and the Int -> Float32 convert agree on every leg"
 statement = "`int.count_leading_zeros` / `count_trailing_zeros` / `pop_count` / `bit_reverse` / `byte_swap` read the i64 as its u64 bit pattern (`clz(-1) = 0`, `ctz(0) = 64`, `pop_count(-1) = 64`); `bit_width(0) = 0` else `64 - clz`; `log2_floor(n <= 0) = -1`, `log2_ceil(n <= 1) = 0` (else `64 - clz(n - 1)`), `next_power_of_two(n <= 1) = 1` with `2^63` wrapping to i64::MIN, `prev_power_of_two(n <= 0) = 0`; `int.bits_to_f32` reads the LOW 32 bits as an IEEE binary32 and widens (sign, ±0, ±inf, NaN, subnormals; the high half ignored); `int.to_float32` is the DIRECT `n as f32` — a SINGLE rounding — and `to_float32_checked` is `some` exactly when the round trip through `Float32 -> Int` is the identity; the eight sized twins (`int8` / `int16` / `int32` / `int64` / `uint8` / `uint16` / `uint32` / `uint64 .to_float32`) ride the same convert through their widening. `runtime/rs/src/int.rs` is the oracle; native prints the f32 through `float32.to_string` and every wasm leg matches byte for byte over the integer-domain edge values, the powers of two around 2^62, and the double-rounding sentinel 2^60 + 2^36 + 1, which an i64 -> f64 -> f32 conversion lands exactly on the f32 tie (rounding to even, 2^60) where the direct convert reads the true value above the tie (2^60 + 2^37). On the STRUCTURAL leg (#1423 stage 4, 0.61.2) the pure-scalar `int_bitcount` / `int_bits` / `float_bits` / `int_to_float` bodies link through the whitelist and the `i2f32` prim lowers to `f32.convert_i64_s` (it was `f64.convert_i64_s` + demote, the double rounding the sentinel pins)."
-since     = "0.61.2"
+since     = "0.62.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/int_bit_family.almd", class = "fixture" },
@@ -4361,7 +4361,7 @@ id        = "C-339"
 spec      = "ALS-T18"
 title     = "testing.assert_snapshot mismatches abort in the T18 form on both targets, inside test blocks too"
 statement = "A failing `testing.assert_snapshot(actual, expected)` aborts with a STRUCTURED stderr block + exit code 1, byte-identical across targets and the SAME whether the call sits in a plain fn, `main`, or a `test` block: `Error: snapshot mismatch` followed by `  at: line <N>`, `  expected: <expected>`, `  found: <actual>`. Operand display per ALS-R2 (a String prints verbatim), operands evaluated exactly once. FIELD ORDER IS PART OF THE PROMISE and stricter than C-153's: `found` is LAST and runs to the END of the output, blank lines and a trailing newline included — that is the value `almide test --update-snapshots` writes back into the source literal (#1314), so anything the reporter's line-oriented block-end rule would drop must survive here. Implemented as the C-153 frontend-lowering desugar (if + eprintln + process.exit(1)) applied to the `testing.assert_snapshot` call target without the test-block exemption the assert family keeps — libtest's assert payload and the wasm test runner's `prim.die` carry no shape the accept step could read, so one abort form on every lane is what makes the accept step lane-independent."
-since     = "0.61.2"
+since     = "0.62.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/snapshot_mismatch_abort.almd", class = "fixture" },

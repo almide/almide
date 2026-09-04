@@ -364,15 +364,15 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-326 | Branch-selected mut-fn calls hoist their write-back out of the arm: the gzip-inflate shape lowers structurally | 0.60.0 | active | fixture | 1 |
 | C-327 | env.sleep_ms pauses and returns on every leg | 0.60.1 | active | fixture | 2 |
 | C-328 | The http string family answers identically on the native and embedded-wasm lanes | 0.61.1 | active | fixture | 0 |
-| C-329 | env.set is observed by env.get identically on every leg, and the p1 shim serves the environ/args ops | 0.61.2 | active | fixture | 1 |
+| C-329 | env.set is observed by env.get identically on every leg, and the p1 shim serves the environ/args ops | 0.62.0 | active | fixture | 1 |
 | C-330 | The http string family answers on the stock runtime through the p3 component's async-lowered exchange | 0.62.0 | active | fixture | 0 |
-| C-331 | zlib is self-hosted on wasm: decoding is byte-identical, encoding is round-trip-exact with leg-dependent bytes | 0.61.2 | active | fixture | 1 |
+| C-331 | zlib is self-hosted on wasm: decoding is byte-identical, encoding is round-trip-exact with leg-dependent bytes | 0.62.0 | active | fixture | 1 |
 | C-332 | List-rest patterns: the tail past the prefix binds as a list, identically on every leg | 0.62.0 | active | fixture | 1 |
 | C-333 | As-patterns: the whole value binds beside its own destructuring, identically on every leg | 0.62.0 | active | fixture | 1 |
-| C-334 | A closure call takes +1 on a borrowed heap argument: the RC-3 callee-owned convention holds through call_indirect | 0.61.2 | active | fixture | 1 |
-| C-335 | path.extension treats a leading dot as a hidden-file marker, not an extension, on both targets | 0.61.2 | active | fixture | 1 |
+| C-334 | A closure call takes +1 on a borrowed heap argument: the RC-3 callee-owned convention holds through call_indirect | 0.62.0 | active | fixture | 1 |
+| C-335 | path.extension treats a leading dot as a hidden-file marker, not an extension, on both targets | 0.62.0 | active | fixture | 1 |
 | C-336 | Each test starts from re-initialized mutable module globals, on both targets | 0.57.1 | active | fixture | 0 |
-| C-337 | The bytes search, edit and predicate family answers identically on every leg | 0.61.2 | active | fixture | 1 |
-| C-338 | The int bit family, bits_to_f32 and the Int -> Float32 convert agree on every leg | 0.61.2 | active | fixture | 1 |
-| C-339 | testing.assert_snapshot mismatches abort in the T18 form on both targets, inside test blocks too | 0.61.2 | active | fixture | 1 |
+| C-337 | The bytes search, edit and predicate family answers identically on every leg | 0.62.0 | active | fixture | 1 |
+| C-338 | The int bit family, bits_to_f32 and the Int -> Float32 convert agree on every leg | 0.62.0 | active | fixture | 1 |
+| C-339 | testing.assert_snapshot mismatches abort in the T18 form on both targets, inside test blocks too | 0.62.0 | active | fixture | 1 |
 
