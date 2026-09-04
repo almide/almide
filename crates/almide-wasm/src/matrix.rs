@@ -58,7 +58,13 @@ impl Emitter<'_> {
             {
                 let mut i = self.f.instructions();
                 i.end();
-                i.local_get(hr).local_get(hc).i64_mul().i64_const(MAX_ELEMS).i64_gt_s();
+                // c > MAX / r (r > 0): the DIVISION form the self-host body
+                // spells (stdlib/matrix_core.almd) — the product `r*c > MAX`
+                // wrapped for `ones(2, i64::MAX)` and passed (#1907).
+                i.local_get(hr).i64_const(0).i64_gt_s();
+                i.local_get(hc);
+                i.i64_const(MAX_ELEMS).local_get(hr).i64_const(1).local_get(hr).i64_const(0).i64_gt_s().select().i64_div_s();
+                i.i64_gt_s().i32_and();
                 i.if_(BlockType::Empty);
                 i.i32_const(msg as i32);
             }
