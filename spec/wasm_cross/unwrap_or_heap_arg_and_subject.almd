@@ -1,0 +1,47 @@
+// @contract: C-346
+// A heap-payload `??` lowers on the incumbent wasm leg in the two positions
+// that still walled after #1943: as a CALL ARGUMENT (`show(o ?? "d")`,
+// `first(t ?? ("z", 9))`, the Option polarity — the Result polarity already
+// took the let-bound route) and as a MATCH SUBJECT with call-bearing arms
+// (`match p ?? ("k", 1) { (s, n) => tag(s) }`). Both ANF through the proven
+// `let t = o ?? d` bind: the argument materializes the temp and borrows it,
+// the subject is hoisted and the match dispatches on the tracked temp. These
+// were the top wall reasons of the composition fuzz family (#1904).
+fn show(s: String) -> Unit = println(s)
+
+fn first(t: (String, Int)) -> String = t.0
+
+fn total(xs: List[Int]) -> Int = list.sum(xs)
+
+fn tag(s: String) -> String = "<${s}>"
+
+fn pair(x: Int) -> Result[(String, Int), String] = if x > 0 then ok(("p", x)) else err("neg")
+
+fn main() -> Unit = {
+  let o: String? = some("a")
+  let n: String? = none
+  show(o ?? "d")
+  show(n ?? "d")
+  let t: (String, Int)? = none
+  show(first(t ?? ("z", 9)))
+  let r: Result[List[Int], String] = ok([1, 2])
+  println(int.to_string(total(r ?? [])))
+  println(first(pair(3) ?? ("z", 0)))
+  println(first(pair(-3) ?? ("z", 0)))
+  let p: (String, Int)? = none
+  let q = match p ?? ("k", 1) {
+    (s, m) => tag(s) + int.to_string(m)
+  }
+  println(q)
+  let s2: (String, Int)? = some(("v", 2))
+  let q2 = match s2 ?? ("k", 1) {
+    (s, m) => tag(s) + int.to_string(m)
+  }
+  println(q2)
+  let i: Int? = some(2)
+  let w = match i ?? 0 {
+    2 => tag("two"),
+    _ => tag("other"),
+  }
+  println(w)
+}

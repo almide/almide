@@ -4446,3 +4446,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/result_param_not_first.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-346"
+spec      = "ALS-C5"
+title     = "A heap-payload ?? lowers on the incumbent leg as a call argument and as a match subject"
+statement = "`o ?? d` with a HEAP payload (String, tuple, list) is served by the incumbent wasm leg in the two positions that stayed walled after #1943: as a CALL ARGUMENT — the Option polarity (`show(o ?? \"d\")`, `first(t ?? (\"z\", 9))`) now takes the same let-bound ANF route the Result polarity (`total(r ?? [])`) already took, materializing a scope-tracked temp and borrowing it — and as a MATCH SUBJECT with call-bearing arms (`match p ?? (\"k\", 1) { (s, m) => tag(s) }`), which is hoisted into `let $m = p ?? d` so the match dispatches on the tracked temp instead of walling as an untracked heap subject. Output is byte-identical to native and to the structural leg for the some/none and ok/err sides alike, and the fn is NOT in `proofs/walled-real-baseline.txt`. These two shapes were the composition fuzz family's top wall reasons (#1904)."
+since     = "0.63.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/unwrap_or_heap_arg_and_subject.almd", class = "fixture" },
+]
