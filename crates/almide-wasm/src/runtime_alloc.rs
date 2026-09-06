@@ -82,6 +82,17 @@ pub(crate) fn emit_alloc(oom_msg: u32) -> Function {
     i.local_get(want).i32_const(16 << (FREELIST_CLASSES - 1)).i32_le_u().if_(BlockType::Empty);
     i.local_get(base).local_get(want).i32_add().local_set(next);
     i.end();
+    // The bump head is an i32: a request whose end lies past 4 GiB WRAPS
+    // `next` below `base`, and the grow guard below (a comparison against
+    // memory.size) then sees a small, in-range frontier — the header
+    // store lands past the end of memory as a raw OOB trap, not the
+    // C-197 abort (#1908: a 2 GiB buffer's append growth). A wrapped
+    // frontier is an allocation the machine cannot satisfy: die in the
+    // defined form before the grow guard can misjudge it.
+    i.local_get(next).local_get(base).i32_lt_u().if_(BlockType::Empty);
+    i.i32_const(oom_msg as i32).call(F_EPRINTLN_BLOCK);
+    i.i32_const(1).call(F_EXIT_IMPORT).unreachable();
+    i.end();
     // if next > memory.size * 64Ki: grow GEOMETRICALLY — max(needed,
     // current) pages, i.e. at least doubling. Grow-just-enough produced
     // thousands of one-page grows on allocation-heavy kernels (~53ms of
@@ -333,7 +344,7 @@ mod tests {
         // the emitted trees moved: update proofs/StructuralRuntime.v to
         // the new trees (re-proving what changed), then this constant.
         assert_eq!(
-            got, 0x71738094f6c49c05,
+            got, 0x2312b47da07c14b0,
             "runtime tree bytes drifted from the proofs/StructuralRuntime.v transcription (got {got:#x})"
         );
     }
