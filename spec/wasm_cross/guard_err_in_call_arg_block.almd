@@ -42,29 +42,16 @@ effect fn bang_then_call(n: Int) -> Int = {
   big(g)
 }
 
+fn render(r: Result[Int, String]) -> String = match r {
+  ok(v) => "ok ${v}",
+  err(e) => "err ${e}",
+}
+
 effect fn main() -> Unit = {
-  match arg_block(5) {
-    ok(v) => println("a5=ok ${v}"),
-    err(e) => println("a5=err ${e}"),
-  }
-  match arg_block(0) {
-    ok(v) => println("a0=ok ${v}"),
-    err(e) => println("a0=err ${e}"),
-  }
-  match arg_block_bang(5) {
-    ok(v) => println("b5=ok ${v}"),
-    err(e) => println("b5=err ${e}"),
-  }
-  match body_block(5) {
-    ok(v) => println("c5=ok ${v}"),
-    err(e) => println("c5=err ${e}"),
-  }
-  match body_block(0) {
-    ok(v) => println("c0=ok ${v}"),
-    err(e) => println("c0=err ${e}"),
-  }
-  match bang_then_call(5) {
-    ok(v) => println("d5=ok ${v}"),
-    err(e) => println("d5=err ${e}"),
-  }
+  println("a5=${render(arg_block(5))}")
+  println("a0=${render(arg_block(0))}")
+  println("b5=${render(arg_block_bang(5))}")
+  println("c5=${render(body_block(5))}")
+  println("c0=${render(body_block(0))}")
+  println("d5=${render(bang_then_call(5))}")
 }
