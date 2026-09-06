@@ -246,6 +246,11 @@ fn matrix_from_bytes_f64_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> L
   // same discipline as the f32/f16 loaders.
   let r = if rows < 0 then 0 else rows
   let c = if cols < 0 then 0 else cols
+  // The shared ceiling (matrix_core's `__mx_dims_guard`, restated here —
+  // the ext part cannot call core's private helpers) BEFORE `r * c * 8`
+  // overflows for a huge count; keep in sync with `__mx_max_elems`.
+  if r > 268435456 then prim.die(prim.handle("Error: matrix dimensions too large\n")) else ()
+  if r > 0 and c > 268435456 / r then prim.die(prim.handle("Error: matrix dimensions too large\n")) else ()
   if offset < 0 or offset + r * c * 8 > len then __mxe_zeros(r, c)
   else {
     let out: List[List[Float]] = prim.alloc_list_str(r)
