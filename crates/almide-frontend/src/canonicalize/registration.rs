@@ -644,7 +644,15 @@ pub fn register_type_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, 
     // destroy same-named type bindings that already exist.
     let shadowed: Vec<(Sym, Option<Ty>)> =
         gnames.iter().map(|gn| (*gn, env.types.insert(*gn, Ty::TypeVar(*gn)))).collect();
-    let mut resolved = resolve(env, ty);
+    // The declaration's BODY resolves in the declaring module's scope, like
+    // every fn signature does: a module record's field `List[Entry]` must pin
+    // to that module's own `Entry`. Resolved bare, it fell to the
+    // unique-owner rule, which is ambiguous the moment a second module also
+    // declares `Entry` — the field stayed a bare `Entry`, the entry program
+    // saw it through `mod.Toc.symbols`, and the flat leg refused the build
+    // (#433 gate) while the wasm leg read the other `Entry`'s layout
+    // (#1957).
+    let mut resolved = resolve_in(env, ty, type_cur_mod(env, prefix));
     for (gn, prev) in shadowed.into_iter().rev() {
         match prev {
             Some(t) => { env.types.insert(gn, t); }
