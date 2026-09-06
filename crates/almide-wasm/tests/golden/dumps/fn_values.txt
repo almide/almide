@@ -364,22 +364,8 @@ code locals=[]
 code locals=[]
   Unreachable
   End
-code locals=[2xI32]
-  LocalGet { local_index: 0 }
-  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 4, memory: 0 } }
-  LocalSet { local_index: 1 }
-  LocalGet { local_index: 1 }
-  Call { function_index: 11 }
-  LocalSet { local_index: 2 }
-  LocalGet { local_index: 2 }
-  I32Const { value: 12 }
-  I32Add
-  LocalGet { local_index: 0 }
-  I32Const { value: 12 }
-  I32Add
-  LocalGet { local_index: 1 }
-  Call { function_index: 32 }
-  LocalGet { local_index: 2 }
+code locals=[]
+  Unreachable
   End
 code locals=[]
   Unreachable
@@ -451,109 +437,17 @@ code locals=[1xI32]
   MemoryCopy { dst_mem: 0, src_mem: 0 }
   End
   End
-code locals=[2xI32]
-  LocalGet { local_index: 0 }
-  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 8, memory: 0 } }
-  I32Const { value: 15 }
-  I32Add
-  I32Const { value: -4 }
-  I32And
-  LocalSet { local_index: 1 }
-  LocalGet { local_index: 1 }
-  I32Const { value: 16 }
-  I32LtU
-  If { blockty: Empty }
-  Return
-  End
-  I32Const { value: 28 }
-  LocalGet { local_index: 1 }
-  I32Const { value: 1 }
-  I32Sub
-  I32Clz
-  I32Sub
-  LocalSet { local_index: 2 }
-  LocalGet { local_index: 2 }
-  I32Const { value: 16 }
-  I32GeU
-  If { blockty: Empty }
-  Return
-  End
-  LocalGet { local_index: 2 }
-  I32Const { value: 2 }
-  I32Shl
-  I32Const { value: 48 }
-  I32Add
-  LocalSet { local_index: 2 }
-  LocalGet { local_index: 0 }
-  LocalGet { local_index: 2 }
-  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 0, memory: 0 } }
-  I32Store { memarg: MemArg { align: 2, max_align: 2, offset: 12, memory: 0 } }
-  LocalGet { local_index: 2 }
-  LocalGet { local_index: 0 }
-  I32Store { memarg: MemArg { align: 2, max_align: 2, offset: 0, memory: 0 } }
+code locals=[]
+  Unreachable
   End
 code locals=[]
-  LocalGet { local_index: 0 }
-  GlobalGet { global_index: 3 }
-  I32LtU
-  If { blockty: Empty }
-  Return
+  Unreachable
   End
-  LocalGet { local_index: 0 }
-  LocalGet { local_index: 0 }
-  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 0, memory: 0 } }
-  I32Const { value: 1 }
-  I32Add
-  I32Store { memarg: MemArg { align: 2, max_align: 2, offset: 0, memory: 0 } }
+code locals=[]
+  Unreachable
   End
-code locals=[1xI32]
-  LocalGet { local_index: 0 }
-  GlobalGet { global_index: 3 }
-  I32LtU
-  If { blockty: Empty }
-  Return
-  End
-  LocalGet { local_index: 0 }
-  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 0, memory: 0 } }
-  I32Const { value: 1 }
-  I32Sub
-  LocalSet { local_index: 1 }
-  LocalGet { local_index: 0 }
-  LocalGet { local_index: 1 }
-  I32Store { memarg: MemArg { align: 2, max_align: 2, offset: 0, memory: 0 } }
-  LocalGet { local_index: 1 }
-  I32Eqz
-  If { blockty: Empty }
-  LocalGet { local_index: 0 }
-  Call { function_index: 33 }
-  End
-  End
-code locals=[1xI32]
-  LocalGet { local_index: 0 }
-  GlobalGet { global_index: 3 }
-  I32LtU
-  If { blockty: Empty }
-  LocalGet { local_index: 0 }
-  Return
-  End
-  LocalGet { local_index: 0 }
-  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 0, memory: 0 } }
-  I32Const { value: 1 }
-  I32LeU
-  If { blockty: Empty }
-  LocalGet { local_index: 0 }
-  Return
-  End
-  LocalGet { local_index: 0 }
-  Call { function_index: 20 }
-  LocalSet { local_index: 1 }
-  LocalGet { local_index: 0 }
-  LocalGet { local_index: 0 }
-  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 0, memory: 0 } }
-  I32Const { value: 1 }
-  I32Sub
-  I32Store { memarg: MemArg { align: 2, max_align: 2, offset: 0, memory: 0 } }
-  LocalGet { local_index: 1 }
+code locals=[]
+  Unreachable
   End
 code locals=[]
   Unreachable
