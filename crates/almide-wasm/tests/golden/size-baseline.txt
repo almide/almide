@@ -487,8 +487,8 @@
 2825	spec/wasm_cross/ref_koka_rescrutinee.almd
 27473	spec/wasm_cross/ref_roc_shared_cow.almd
 2401	spec/wasm_cross/ref_roc_trmc_control.almd
-17112	spec/wasm_cross/regex_engine.almd
-31306	spec/wasm_cross/regex_fuzz_batch.almd
+17945	spec/wasm_cross/regex_engine.almd
+32515	spec/wasm_cross/regex_fuzz_batch.almd
 2478	spec/wasm_cross/repeat_size_ceiling.almd
 2424	spec/wasm_cross/replace_empty_pat.almd
 9729	spec/wasm_cross/repr_parity_pin.almd

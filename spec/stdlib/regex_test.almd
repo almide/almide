@@ -199,3 +199,39 @@ test "regex malformed braces stay literal" {
   assert_eq(regex.full_match("a{,3}", "a{,3}"), true)
   assert_eq(regex.is_match("a{2", "a{2"), true)
 }
+
+// ── backtracking, boundaries, flags, lazy (#1927) ──
+test "regex group backtracking" {
+  assert_eq(regex.is_match("^---- (.+) (stdout|stderr) ----$", "---- tests::a stdout ----"), true)
+  assert_eq(regex.captures("^---- (.+) (stdout|stderr) ----$", "---- tests::a stdout ----"), some(["---- tests::a stdout ----", "tests::a", "stdout"]))
+  assert_eq(regex.is_match("(^| )go\\s+test( |$)", " go test ./... "), true)
+  assert_eq(regex.full_match("(a|ab)(c|bcd)", "abcd"), true)
+  assert_eq(regex.find("(a|ab)c", "abc"), some("abc"))
+}
+
+test "regex word boundary" {
+  assert_eq(regex.is_match("\\bgo\\s+test\\b", " go test ./... "), true)
+  assert_eq(regex.is_match("\\bgo", "ago"), false)
+  assert_eq(regex.is_match("\\Bgo", "ago"), true)
+  assert_eq(regex.find_all("\\b\\w", "ab cd_e f"), ["a", "c", "f"])
+}
+
+test "regex multiline flag" {
+  assert_eq(regex.is_match("(?m)^--- FAIL", "x\n--- FAIL: T"), true)
+  assert_eq(regex.is_match("^--- FAIL", "x\n--- FAIL: T"), false)
+  assert_eq(regex.find_all("(?m)\\w+$", "ab\ncd\nef"), ["ab", "cd", "ef"])
+}
+
+test "regex non-capturing group" {
+  assert_eq(regex.captures("(?:x)(y)", "xy"), some(["xy", "y"]))
+  assert_eq(regex.replace("(?:ab)+", "ababab", "<>"), "<>")
+}
+
+test "regex lazy quantifiers" {
+  assert_eq(regex.find("a.*?b", "aXbYb"), some("aXb"))
+  assert_eq(regex.find("a.*b", "aXbYb"), some("aXbYb"))
+  assert_eq(regex.find("a+?", "aaa"), some("a"))
+  assert_eq(regex.find("a??b", "ab"), some("ab"))
+  assert_eq(regex.full_match("^---- (.+?) stdout ----$", "---- tests::a stdout ----"), true)
+  assert_eq(regex.replace("(?:ab)+?", "ababab", "<>"), "<><><>")
+}
