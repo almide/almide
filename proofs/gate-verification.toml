@@ -30,6 +30,11 @@ class = "NEGATIVE_TESTED"
 evidence = "#576 slice-3 landing (2026-08-28): a hand-corrupted byte in StructuralDecode.v's inc_bytes list (65;1 -> 65;2) failed the gate naming the exact emitter-vs-proven diff, restored green (23/37/70/259 bytes matched; slice 4 added the $alloc row with LEB-aware wrapper stripping). The gate re-derives BOTH sides per run — the emitter's bytes through its own dump helper, the proven lists parsed out of the .v source — so neither can drift silently against the decode theorems."
 
 [[gate]]
+path = "scripts/check-als-pin.sh"
+class = "NEGATIVE_TESTED"
+evidence = "als #60 second-half landing (2026-09-07, almide #1982): a judge ledger with C-347 removed (ALS_LEDGER=<file>) went red naming the id and the remedy (land it in almide/als first, then advance proofs/als-pin.txt; ours 347, judge 346 at 12099f3), the live judge ledger at the pin green (347/347). A fetch failure is exit 2, red in CI — the gate cannot pass by not looking."
+
+[[gate]]
 path = "scripts/check-wasi-pins.sh"
 class = "NEGATIVE_TESTED"
 evidence = "#1628 stage-4 landing (2026-08-28): policy crate_major hand-flipped 47->48 went red naming the exact drifted pin (wasmtime Cargo pin is 47, policy says 48), restored green. The gate re-derives every fact the policy states from the tree per run — vendored WIT versions, the p3 shim's import versions, the wasmtime Cargo/CI pins, the p3 harness flag surface, the wasm-tools lockstep family — so the WASI-minor compat target is a checked ledger row, not an assumption."
