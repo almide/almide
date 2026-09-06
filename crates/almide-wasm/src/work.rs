@@ -157,6 +157,11 @@ pub(crate) struct FnWork {
     pub(crate) display_bodies: std::cell::RefCell<HashMap<u32, DisplayBuild>>,
     pub(crate) eq_bodies: std::cell::RefCell<HashMap<u32, DisplayBuild>>,
     pub(crate) scan_bodies: std::cell::RefCell<HashMap<crate::ETy, DisplayBuild>>,
+    /// Region-pure fns by table index (#1961) — the vocabulary the
+    /// `consume(produce(scalars))` window recogniser consults.
+    pub(crate) region_pure: crate::region::RegionPure,
+    /// Set once any region window was emitted (exports `__heap_high`).
+    pub(crate) region_used: std::cell::Cell<bool>,
 }
 
 pub(crate) enum DisplayBuild {

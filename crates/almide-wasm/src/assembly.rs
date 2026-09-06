@@ -222,6 +222,12 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
         GlobalType { val_type: ValType::I32, mutable: true, shared: false },
         &ConstExpr::i32_const(0),
     );
+    // #1961: the heap high-water mark (global 15), raised at region
+    // window closes.
+    globals.global(
+        GlobalType { val_type: ValType::I32, mutable: true, shared: false },
+        &ConstExpr::i32_const(heap_start as i32),
+    );
 
     // The funcref table always exists (a call_indirect in ANY body needs
     // it, entries or not); slot 0 stays uninitialized — null funcref =
@@ -262,6 +268,12 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     // observable (#1586). Behavior-neutral: nothing in-module reads
     // exports.
     exports.export("__heap", ExportKind::Global, G_HEAP);
+    // A region window (#1961) rewinds `__heap`; the peak the window
+    // reached lives in `__heap_high`, exported only when a window exists
+    // so a window-free module's bytes do not move.
+    if work.region_used.get() {
+        exports.export("__heap_high", ExportKind::Global, G_HEAP_HIGH);
+    }
     // #457: every clean-closure entry pub fn is host-callable.
     for (name, idx) in export_fns {
         exports.export(name, ExportKind::Func, *idx);
