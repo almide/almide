@@ -221,8 +221,8 @@
 66496	spec/wasm_cross/guard_err_in_call_arg_block.almd
 66352	spec/wasm_cross/guard_let_statement.almd
 65888	spec/wasm_cross/guard_statement.almd
-782864	spec/wasm_cross/gzip_inflate_members.almd
-92992	spec/wasm_cross/hash_digests.almd
+778768	spec/wasm_cross/gzip_inflate_members.almd
+83776	spec/wasm_cross/hash_digests.almd
 68816	spec/wasm_cross/heap_arena.almd
 65984	spec/wasm_cross/heap_result_err_interp.almd
 66352	spec/wasm_cross/heap_result_if_append.almd
@@ -684,7 +684,7 @@
 71584	spec/wasm_cross/wide_function_body.almd
 65856	spec/wasm_cross/witness_straightline.almd
 71456	spec/wasm_cross/zip_view_shape.almd
-454272	spec/wasm_cross/zlib_selfhost.almd
+404352	spec/wasm_cross/zlib_selfhost.almd
 66224	spec/wasm_fail/effect_err_aborts_both_legs.almd
 66224	spec/wasm_fail/int_parse_err_propagates.almd
 66272	spec/wasm_fail/matrix_index_oob_aborts.almd
