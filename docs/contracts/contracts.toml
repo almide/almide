@@ -2543,6 +2543,7 @@ evidence  = [
   { path = "spec/wasm_cross/allocation_within_limits.almd", class = "fixture" },
   { path = "spec/wasm_cross/bytes_new_exhaustion.almd", class = "fixture" },
   { path = "spec/wasm_cross/bytes_alloc_ceiling_domain.almd", class = "fixture" },
+  { path = "spec/wasm_cross/bytes_pad_ceiling_oom.almd", class = "fixture" },
   { path = "spec/wasm_cross/prim_alloc_count_domain.almd", class = "fixture" },
   { path = "tests/alloc_bump_wrap_test.rs", class = "fixture", name = "bump_head_wrap_is_the_defined_oom_abort" },
 ]

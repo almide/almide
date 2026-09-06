@@ -27,7 +27,7 @@
 66176	spec/wasm_cross/bounded_kernel_plain.almd
 66448	spec/wasm_cross/branch_lift_in_loop.almd
 67264	spec/wasm_cross/bundled_pure_modules.almd
-66736	spec/wasm_cross/bytes_alloc_ceiling_domain.almd
+66832	spec/wasm_cross/bytes_alloc_ceiling_domain.almd
 132256	spec/wasm_cross/bytes_array_count_domain.almd
 66272	spec/wasm_cross/bytes_copy_from_negative_len.almd
 65856	spec/wasm_cross/bytes_equality_call_operands.almd
@@ -36,6 +36,7 @@
 65888	spec/wasm_cross/bytes_from_list_param.almd
 66624	spec/wasm_cross/bytes_negative_offset_family.almd
 65920	spec/wasm_cross/bytes_new_exhaustion.almd
+66016	spec/wasm_cross/bytes_pad_ceiling_oom.almd
 78688	spec/wasm_cross/bytes_param_writeback.almd
 328208	spec/wasm_cross/bytes_push_growth.almd
 65856	spec/wasm_cross/bytes_push_inplace.almd
