@@ -3,8 +3,11 @@
 ///
 /// Mirrors the experience of `go install`: one command, source-to-binary,
 /// no manual cargo / build / cp dance. Uses the existing dependency
-/// fetcher (`fetch_dep`) for git clones with caching, then delegates the
-/// actual compile to `cli::cmd_build` after chdir'ing into the project.
+/// fetcher for git clones with caching — a tag is an immutable snapshot and
+/// keeps its cache entry, a branch (or the default HEAD) is resolved to the
+/// remote's current commit on every install (`go install pkg@latest`) —
+/// then delegates the actual compile to `cli::cmd_build` after chdir'ing
+/// into the project.
 ///
 /// Resolution order for the install directory:
 ///   1. `--bin-dir <path>`
@@ -151,7 +154,7 @@ fn resolve_source(
 
     // Otherwise resolve as a package spec or git URL.
     let (name, git_url, default_tag) =
-        if spec.starts_with("https://") || spec.starts_with("git@") || spec.starts_with("ssh://") {
+        if spec.starts_with("https://") || spec.starts_with("git@") || spec.starts_with("ssh://") || spec.starts_with("file://") {
             let name = spec
                 .rsplit('/')
                 .next()
@@ -171,6 +174,18 @@ fn resolve_source(
         version: None,
         path: None,
     };
+    // A tag names an immutable snapshot and keeps its cache entry. A branch
+    // (or the remote's default HEAD) MOVES: resolve the remote head now and
+    // build that commit — `go install pkg@latest` semantics — instead of
+    // reusing whatever clone the cache holds from an earlier install, which
+    // silently reinstalled a stale version (#1956). The commit is printed so
+    // what was built is visible.
+    if dep.tag.is_none() {
+        let ref_name = dep.branch.clone().unwrap_or_else(|| "HEAD".to_string());
+        let head = project_fetch::git_remote_head(&dep.git, &ref_name)?;
+        err(&format!("Resolved {} {} -> {}", dep.name, ref_name, &head[..12.min(head.len())]));
+        return project_fetch::fetch_dep_with_lock(&dep, Some(&head));
+    }
     project_fetch::fetch_dep(&dep)
 }
 
