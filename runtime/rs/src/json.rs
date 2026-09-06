@@ -339,8 +339,8 @@ fn stringify_value(v: &AlmideValue, depth: usize) -> String {
 #[derive(Debug, Clone, PartialEq)]
 pub enum AlmideJsonPath {
     JpRoot,
-    JpField(Box<AlmideJsonPath>, String),
-    JpIndex(Box<AlmideJsonPath>, i64),
+    JpField(std::boxed::Box<AlmideJsonPath>, String),
+    JpIndex(std::boxed::Box<AlmideJsonPath>, i64),
 }
 
 impl std::fmt::Display for AlmideJsonPath {
@@ -355,8 +355,8 @@ impl std::fmt::Display for AlmideJsonPath {
 
 // Wrapper functions for stdlib codegen (json.root(), json.field(), json.index())
 pub fn almide_rt_json_root() -> AlmideJsonPath { AlmideJsonPath::JpRoot }
-pub fn almide_rt_json_field(path: AlmideJsonPath, name: &str) -> AlmideJsonPath { AlmideJsonPath::JpField(Box::new(path), name.to_string()) }
-pub fn almide_rt_json_index(path: AlmideJsonPath, i: i64) -> AlmideJsonPath { AlmideJsonPath::JpIndex(Box::new(path), i) }
+pub fn almide_rt_json_field(path: AlmideJsonPath, name: &str) -> AlmideJsonPath { AlmideJsonPath::JpField(std::boxed::Box::new(path), name.to_string()) }
+pub fn almide_rt_json_index(path: AlmideJsonPath, i: i64) -> AlmideJsonPath { AlmideJsonPath::JpIndex(std::boxed::Box::new(path), i) }
 
 /// Resolve a AlmideJsonPath to a list of traversal steps, root-first.
 fn resolve_path(path: &AlmideJsonPath) -> Vec<AlmidePathStep> {

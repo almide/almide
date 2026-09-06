@@ -17,6 +17,37 @@ pub fn resolve_type_expr(te: &ast::TypeExpr, known_types: Option<&HashMap<Sym, T
     resolve_type_expr_in(te, known_types, None)
 }
 
+/// Mirror a dependency module's nominal type keys under every import-ALIAS
+/// spelling the current file can write for it (#1955): `import dep.shape as
+/// sh` (and the implicit last-segment alias `shape`) gets `sh.Box` /
+/// `shape.Box` → `Ty::Named("dep.shape.Box")` indirections, so every
+/// type-expression resolver — registration, checker, lowering — finds the
+/// declaration through `canonical_user_type_sym_qualified` without carrying
+/// the import table. Only the module's OWN types (no submodule segment);
+/// a real key under the alias spelling is never overwritten.
+pub fn register_alias_type_keys(env: &mut crate::types::TypeEnv) {
+    let mut adds: Vec<(Sym, Ty)> = Vec::new();
+    for (alias, canonical) in &env.import_table.aliases {
+        if alias == canonical {
+            continue;
+        }
+        let prefix = format!("{}.", canonical.as_str());
+        for (k, v) in &env.types {
+            if !matches!(v, Ty::Record { .. } | Ty::Variant { .. }) {
+                continue;
+            }
+            let Some(rest) = k.as_str().strip_prefix(&prefix) else { continue };
+            if rest.contains('.') {
+                continue;
+            }
+            adds.push((sym(&format!("{}.{}", alias.as_str(), rest)), Ty::Named(*k, vec![])));
+        }
+    }
+    for (k, v) in adds {
+        env.types.entry(k).or_insert(v);
+    }
+}
+
 /// The identity scope of an ENTRY-program declaration that shadows a
 /// stdlib-owned type name (#1828): `type Value = { n: Int }` in the main
 /// file is `self.Value`, the way a module `m`'s is `m.Value`. Defined
@@ -125,12 +156,31 @@ fn canonical_user_type_sym_own_module(name: &str, types: &HashMap<Sym, Ty>, cur_
 // An already-qualified reference to a USER module's type → kept qualified.
 fn canonical_user_type_sym_qualified(name: &str, types: &HashMap<Sym, Ty>) -> Option<Sym> {
     let (m, _bare) = name.rsplit_once('.')?;
-    if !almide_lang::stdlib_info::is_bundled_module(m) {
-        if let Some(t) = types.get(&sym(name)) {
-            if matches!(t, Ty::Record { .. } | Ty::Variant { .. }) {
-                return Some(sym(name));
-            }
-        }
+    if almide_lang::stdlib_info::is_bundled_module(m) {
+        return None;
+    }
+    match types.get(&sym(name)) {
+        Some(Ty::Record { .. } | Ty::Variant { .. }) => return Some(sym(name)),
+        // An import-alias spelling registered by `register_alias_type_keys`:
+        // follow the indirection to the canonical key.
+        Some(Ty::Named(k, args)) if args.is_empty()
+            && matches!(types.get(k), Some(Ty::Record { .. } | Ty::Variant { .. })) => return Some(*k),
+        _ => {}
+    }
+    // The source writes a DEPENDENCY module by its short spelling
+    // (`shape.Box` for `import dep.shape`) while the table keys the type
+    // under the package-prefixed canonical (`dep.shape.Box`). An explicitly
+    // qualified reference must never fall through to the bare fallback: with
+    // a same-named LOCAL type that fallback answered the local one, so
+    // `fn take(b: shape.Box)` was checked as the entry program's `Box`
+    // (#1955). Resolve by unique dotted suffix instead.
+    let suffix = format!(".{}", name);
+    let mut owners = types.iter().filter(|(k, v)| {
+        k.as_str().ends_with(&suffix) && matches!(v, Ty::Record { .. } | Ty::Variant { .. })
+    });
+    let first = owners.next()?;
+    if owners.next().is_none() {
+        return Some(*first.0);
     }
     None
 }

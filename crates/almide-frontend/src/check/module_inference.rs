@@ -31,6 +31,10 @@ impl Checker {
         // constructor-candidate table treats them as the canonical prefixed
         // entries rather than as a second, competing declaration.
         let snapshot = self.env.snapshot_keys();
+        // This module's alias spellings of dependency types (#1955); dropped
+        // with the snapshot, since another module may bind the same alias
+        // to a different module.
+        crate::canonicalize::resolve::register_alias_type_keys(&mut self.env);
         let saved_alias_owner = self.env.alias_owner_module.replace(sym(module_name));
         crate::canonicalize::registration::register_decls(
             &mut self.env, &mut self.diagnostics, &prog.decls, None,
@@ -110,6 +114,10 @@ impl Checker {
         self.env.import_table = mod_table;
 
         let snapshot = self.env.snapshot_keys();
+        // This module's alias spellings of dependency types (#1955); dropped
+        // with the snapshot, since another module may bind the same alias
+        // to a different module.
+        crate::canonicalize::resolve::register_alias_type_keys(&mut self.env);
         let saved_alias_owner = self.env.alias_owner_module.replace(sym(module_name));
         crate::canonicalize::registration::register_decls(
             &mut self.env, &mut Vec::new(), &prog.decls, None,

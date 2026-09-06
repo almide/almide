@@ -499,8 +499,21 @@ fn lower_expr_record(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<
                 let s = n.as_str();
                 let is_struct = |key: &str| matches!(ctx.env.types.get(&sym(key)), Some(crate::types::Ty::Record { .. }));
                 if let Some((m, base)) = s.rsplit_once('.') {
-                    if !almide_lang::stdlib_info::is_bundled_module(m) && is_struct(s) {
-                        return n; // user-module struct: keep qualified for mangling
+                    // The module part is what the source WROTE: an import alias
+                    // (`import dep.shape as sh` → `sh.Box`) or the short last
+                    // segment (`shape.Box`), while the type table keys the
+                    // struct under its canonical module (`dep.shape.Box`).
+                    // Resolve to the canonical key (alias indirection + dotted
+                    // suffix, `canonical_user_type_sym_qualified`): a miss here
+                    // fell to the bare name and the native emit constructed the
+                    // ENTRY program's same-named struct (#1955).
+                    if !almide_lang::stdlib_info::is_bundled_module(m) {
+                        let cur_mod = ctx.current_module.map(|cm| cm.as_str());
+                        if let Some(key) = crate::canonicalize::resolve::canonical_user_type_sym(s, &ctx.env.types, cur_mod) {
+                            if is_struct(key.as_str()) {
+                                return key; // user-module struct: keep qualified for mangling
+                            }
+                        }
                     }
                     return sym(base); // stdlib / variant: strip (existing #412 behavior)
                 }

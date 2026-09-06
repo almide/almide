@@ -47,7 +47,7 @@ pub(crate) fn intern_key(k: &str) -> AlmideKey {
             Some(hit) if hit == k => AlmideKey::Borrowed(hit),
             Some(_) => AlmideKey::Owned(k.to_string()),
             None if t.1 < ALMIDE_KEY_LEAK_CAP => {
-                let leaked: &'static str = Box::leak(k.to_string().into_boxed_str());
+                let leaked: &'static str = std::boxed::Box::leak(k.to_string().into_boxed_str());
                 t.0[slot] = Some(leaked);
                 t.1 += 1;
                 AlmideKey::Borrowed(leaked)
