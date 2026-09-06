@@ -3,9 +3,9 @@
 - **Status**: Accepted
 - **Date**: 2026-08-01
 - **決定範囲**: `fan.bounded` / `fan.race` の計算量予算の表面表記、および決定的時計の単位定義
-- **関連**: [async-inception.md](../roadmap/active/async-inception.md)（憲章）、
-  [logical-time-async.md](../roadmap/active/logical-time-async.md)（意味論）、
-  [fan-v2.md](../roadmap/active/fan-v2.md)（文法）
+- **関連**: [async-inception.md](https://github.com/almide/almide/blob/develop/docs/roadmap/active/async-inception.md)（憲章）、
+  [logical-time-async.md](https://github.com/almide/almide/blob/develop/docs/roadmap/active/logical-time-async.md)（意味論）、
+  [fan-v2.md](https://github.com/almide/almide/blob/develop/docs/roadmap/active/fan-v2.md)（文法）
 - **批准**: 2026-08-01 の 2 要件討議（「従来の ms で書けること」×「完全性」）で現行形を批准。
   単一 Duration 型案は検討のうえ却下（Alternatives 参照）、壁時計側の完全性機構を S8 に追補
 
@@ -75,12 +75,12 @@ CPU 時間はまだマシン依存である。同じコードでも速い CPU �
 |---|---|---|
 | **壁時計**（wall clock） | ホストの実時間。`Date.now()` / `Instant::now()` が返す量。ホストの速度・負荷・スケジューラに依存し、(プログラム, 入力) の関数では**ない** | 一般用語 |
 | **論理時計**（logical clock） | 物理時間から独立した進行の尺度。**用語の衝突に注意** — 分散システムの Lamport 論理時計は happens-before の半順序を数えるものであり、本 ADR の用法（プログラム自身の実行が進める決定的カウンタ）とは別概念である | [Lamport 1978](https://lamport.azurewebsites.net/pubs/time-clocks.pdf)（同名の別概念） |
-| **決定的時計**（deterministic clock） | 本設計の論理時計。CM-1 のコスト表に従って charge site ごとに進む。値は (プログラム, 入力) の関数で、native / wasm / 全ホストで一致する。壁時計と対をなし、**どちらを読むかは fan の head が名乗る** | [logical-time-async.md](../roadmap/active/logical-time-async.md) |
-| **charge site** | 決定的時計が進む**唯一の点**。共有 MIR の basic block 入口などに置かれる。fuel 系の構文はここでカウンタを読み、oracle 系の構文は同じ点で環境を読む（中断点統一原理） | [logical-time-implementation.md](../roadmap/active/logical-time-implementation.md) |
-| **lockstep 意味論** | race の勝者選択を語る絵 — 全枝が決定的時計を同じ歩幅で進み、最初に完了した枝が勝つ。同着はソース順。実装が使う等価な特徴づけは「(消費, index) の辞書式最小」で、**この 2 つが一致すること**が「物理時間なしの race」の内容である | [logical-time-async.md §決定的事象規則](../roadmap/active/logical-time-async.md)、[Decisive.lean `Ev.prec`](../../crates/almide-race-belt/AlmideRaceBelt/Decisive.lean) |
+| **決定的時計**（deterministic clock） | 本設計の論理時計。CM-1 のコスト表に従って charge site ごとに進む。値は (プログラム, 入力) の関数で、native / wasm / 全ホストで一致する。壁時計と対をなし、**どちらを読むかは fan の head が名乗る** | [logical-time-async.md](https://github.com/almide/almide/blob/develop/docs/roadmap/active/logical-time-async.md) |
+| **charge site** | 決定的時計が進む**唯一の点**。共有 MIR の basic block 入口などに置かれる。fuel 系の構文はここでカウンタを読み、oracle 系の構文は同じ点で環境を読む（中断点統一原理） | [logical-time-implementation.md](https://github.com/almide/almide/blob/develop/docs/roadmap/active/logical-time-implementation.md) |
+| **lockstep 意味論** | race の勝者選択を語る絵 — 全枝が決定的時計を同じ歩幅で進み、最初に完了した枝が勝つ。同着はソース順。実装が使う等価な特徴づけは「(消費, index) の辞書式最小」で、**この 2 つが一致すること**が「物理時間なしの race」の内容である | [logical-time-async.md §決定的事象規則](https://github.com/almide/almide/blob/develop/docs/roadmap/active/logical-time-async.md)、[Decisive.lean `Ev.prec`](https://github.com/almide/almide/blob/develop/crates/almide-race-belt/AlmideRaceBelt/Decisive.lean) |
 | **versioned な抽象コスト表**（CM-1） | 各 MIR op に決定的時計の進み幅を割り当てる表。契約台帳に載る**意味論的オブジェクト**であり、定数の変更は semantic change（版数バンプ）として扱う。EVM の gas schedule が同型の先例 | [Yellow Paper](https://ethereum.github.io/yellowpaper/paper.pdf) Appendix G |
 | **EVM**（Ethereum Virtual Machine） | Ethereum の実行環境。全ノードが同じ状態遷移に同じ gas schedule を適用し、同じ out-of-gas 判定へ到達することで合意を保つ。**決定的な計算量上限の、最大規模の実運用例** | [Yellow Paper](https://ethereum.github.io/yellowpaper/paper.pdf) / [ethereum.org: gas](https://ethereum.org/developers/docs/gas/) |
-| **race belt の 7 定理** | `crates/almide-race-belt/` の Lean 4 定理群（0 sorry、CI `lean-proofs` で kernel-check）。決定的事象の一意性・部分集合安定性・枝刈り cap が決定事象と trap 可視窓を隠せないこと・合流。**すべて単位に依存しない**（事象の時刻は `Nat`）ため、本 ADR の単位変更で 1 文字も変わらない | [Decisive.lean](../../crates/almide-race-belt/AlmideRaceBelt/Decisive.lean) |
+| **race belt の 7 定理** | `crates/almide-race-belt/` の Lean 4 定理群（0 sorry、CI `lean-proofs` で kernel-check）。決定的事象の一意性・部分集合安定性・枝刈り cap が決定事象と trap 可視窓を隠せないこと・合流。**すべて単位に依存しない**（事象の時刻は `Nat`）ため、本 ADR の単位変更で 1 文字も変わらない | [Decisive.lean](https://github.com/almide/almide/blob/develop/crates/almide-race-belt/AlmideRaceBelt/Decisive.lean) |
 | **fuel** | 決定的時計を実装する**機構側**の語（内部カウンタ、`--fuel-probe`、Wasmtime / EVM の系譜）。表面の語彙には出さない | [Wasmtime: fuel vs epoch](https://docs.wasmtime.dev/examples-interrupting-wasm.html) |
 
 ## Context
@@ -389,7 +389,7 @@ LLM は tick の予算を一度も見たことがない。`ticks: 100_000` は 6
 ### 単位の変更が意味論の変更でないことは、機械検査で担保されている
 
 Lean の `Ev { time : Nat }` も全数モデルの `u64` も**単位に一切依存していない**。
-tick を ns と読み替えても [race belt](../../crates/almide-race-belt/) の 7 定理と
+tick を ns と読み替えても [race belt](https://github.com/almide/almide/tree/develop/crates/almide-race-belt) の 7 定理と
 74,898 構成の合流ゲートは 1 文字も変わらない。Wasmtime が名指しした軸
 （fuel = 決定的 / epoch = 壁時計で非決定的）は「**何を数えるか**」の軸であって
 「何と呼ぶか」の軸ではない。全系がこの 2 つを分離してこなかったのは分離する理由が
@@ -418,7 +418,7 @@ tick を ns と読み替えても [race belt](../../crates/almide-race-belt/) �
 
 ### 前回の却下を訂正する
 
-[ticks-interface-audit.md](../roadmap/active/ticks-interface-audit.md) は
+[ticks-interface-audit.md](https://github.com/almide/almide/blob/develop/docs/roadmap/active/ticks-interface-audit.md) は
 「時間風単位の tick 換算（`budget: 100.ms`）」を**誤読の逆再演**として却下していた。
 これは**深刻度の混同**だった。`fan.timeout(1000)` の事故は「壁時計依存 = 決定性が
 壊れる」であり、論理時間を時間単位で書かせる案は**決定性を一切壊さない**（ずれるのは
@@ -516,5 +516,5 @@ supersede する。
 
 **内部**
 
-- [race belt](../../crates/almide-race-belt/) — 単位非依存の 7 定理
-- [logical-time-race spike](../../research/spike/logical-time-race/) — 74,898 構成の合流ゲート
+- [race belt](https://github.com/almide/almide/tree/develop/crates/almide-race-belt) — 単位非依存の 7 定理
+- [logical-time-race spike](https://github.com/almide/almide/tree/develop/research/spike/logical-time-race) — 74,898 構成の合流ゲート

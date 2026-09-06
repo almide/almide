@@ -14,30 +14,50 @@ An Almide source file consists of three sections in order:
 2. **Imports** -- zero or more `import` declarations
 3. **Declarations** -- functions, types, top-level lets, protocols, impls, tests
 
-```
+```almide project
+// file: mylib/src/core.almd
+type Parser = { pos: Int }
+type Lexer = { src: String }
+fn new_parser() -> Parser = Parser { pos: 0 }
+// file: main.almd
 module myapp.utils
 
 import fs
 import json
-import mylib.core.{ Parser, Lexer }
+import mylib.core.{ Parser, new_parser }
 
 type Config = { port: Int, host: String }
 
 fn default_config() -> Config = Config { port: 8080, host: "localhost" }
+fn fresh() -> Parser = new_parser()
 
 test "default config" {
   let c = default_config()
   assert_eq(c.port, 8080)
+  assert_eq(fresh().pos, 0)
 }
 ```
 
 ### Imports
 
-```
+```almide project
+// file: mylib/src/core.almd
+type Lexer = { src: String }
+fn lex(s: String) -> Lexer = Lexer { src: s }
+fn version() -> String = "1"
+// file: main.almd
 import fs                           // simple module import
-import mylib.core                   // dotted path
-import mylib.core.{ Parser, Lexer } // selective import
-import mylib.core as mc             // aliased import
+import mylib.core                   // dotted path → core.lex(...)
+import mylib.core.{ lex, Lexer }    // selective import → lex(...)
+import mylib.core as mc             // aliased import → mc.version()
+
+test "every import form resolves" {
+  assert_eq(core.lex("a").src, "a")
+  let l: Lexer = lex("b")
+  assert_eq(l.src, "b")
+  assert_eq(mc.version(), "1")
+  assert_eq(fs.exists("/nonexistent/almide-doctest"), false)
+}
 ```
 
 Selective imports use the syntax `import path.{ Name1, Name2 }`. Aliases use `as`.
@@ -92,7 +112,7 @@ Selective imports use the syntax `import path.{ Name1, Name2 }`. Aliases use `as
 
 ### 3.1 Simple Types
 
-```
+```almide
 let x: Int = 42
 let name: String = "alice"
 ```
@@ -101,7 +121,7 @@ let name: String = "alice"
 
 Almide uses `[]` for generics, never `<>`.
 
-```
+```almide
 let xs: List[Int] = [1, 2, 3]
 let m: Map[String, Int] = ["a": 1]
 let r: Result[Int, String] = ok(42)
@@ -109,7 +129,7 @@ let r: Result[Int, String] = ok(42)
 
 ### 3.3 Function Types
 
-```
+```almide
 type Handler = (String) -> String
 type Predicate = (Int) -> Bool
 type Reducer = (Int, Int) -> Int
@@ -118,20 +138,20 @@ type Thunk = () -> Int
 
 ### 3.4 Tuple Types
 
-```
+```almide
 type Pair = (Int, String)
 type Triple = (Int, Int, Int)
 ```
 
 ### 3.5 Record Types (anonymous)
 
-```
+```almide
 type User = { name: String, age: Int }
 ```
 
 Record fields support default values and serialization aliases:
 
-```
+```almide
 type Config = {
   host: String = "localhost",
   port: Int = 8080,
@@ -141,7 +161,7 @@ type Config = {
 
 ### 3.6 Open Record Types (structural)
 
-```
+```almide
 fn get_name[T: { name: String, .. }](obj: T) -> String = obj.name
 ```
 
@@ -155,13 +175,13 @@ The `..` indicates the record may have additional fields beyond those listed.
 
 ### 4.1 Functions (`fn`)
 
-```
+```almide
 fn add(x: Int, y: Int) -> Int = x + y
 ```
 
 The body follows `=` and is a single expression. Multi-statement bodies use a block:
 
-```
+```almide
 fn greet(name: String) -> String = {
   let upper = string.to_upper(name)
   "Hello, ${upper}!"
@@ -170,7 +190,7 @@ fn greet(name: String) -> String = {
 
 Braceless blocks are also supported -- when the body starts with `let`, `var`, or `guard`, the parser collects statements until the next top-level declaration:
 
-```
+```almide
 fn process(x: Int) -> Int =
   let doubled = x * 2
   let capped = int.min(doubled, 100)
@@ -179,27 +199,34 @@ fn process(x: Int) -> Int =
 
 #### Generic Functions
 
-```
+```almide
+protocol Show {
+  fn show(a: Self) -> String
+}
 fn identity[T](x: T) -> T = x
 fn first[A, B](pair: (A, B)) -> A = pair.0
-fn apply[T: Repr](x: T) -> String = repr(x)
+fn apply[T: Show](x: T) -> String = x.show()
 ```
 
 Generic parameters use `[]`. Bounds are specified with `:` and combined with `+`:
 
-```
-fn show[T: Repr + Eq](x: T) -> String = repr(x)
+```almide
+protocol Show {
+  fn show(a: Self) -> String
+}
+fn same_or_both[T: Show + Eq](x: T, y: T) -> String =
+  if x == y then x.show() else x.show() + "/" + y.show()
 ```
 
 Structural bounds use an open record type:
 
-```
+```almide
 fn name_of[T: { name: String, .. }](x: T) -> String = x.name
 ```
 
 #### Default Parameters
 
-```
+```almide
 fn connect(host: String, port: Int = 8080) -> String =
   "${host}:${int.to_string(port)}"
 ```
@@ -208,24 +235,36 @@ All parameters after the first default must also have defaults.
 
 #### Named Arguments
 
-```
+```almide
+type User = { name: String, age: Int, active: Bool }
+
 fn create(name: String, age: Int, active: Bool = true) -> User =
-  User { name, age, active }
+  User { name: name, age: age, active: active }
 
 let u = create("alice", 30, active: false)
+
+test "named argument" {
+  assert_eq(u.active, false)
+}
 ```
 
 #### Self Parameter
 
 Functions can take `self` as the first parameter for method-like dispatch:
 
-```
+```almide
+type User = { name: String }
+
 fn User.greet(self) -> String = "Hi, ${self.name}"
+
+test "self parameter dispatches via UFCS" {
+  assert_eq(User { name: "alice" }.greet(), "Hi, alice")
+}
 ```
 
 #### Hole and Todo
 
-```
+```almide
 fn not_yet(x: Int) -> String = _                     // hole: type-checked stub
 fn later(x: Int) -> String = todo("implement later")  // todo with message
 ```
@@ -235,7 +274,7 @@ fn later(x: Int) -> String = todo("implement later")  // todo with message
 Function declarations can be prefixed with one or more `@name` or
 `@name(args)` attributes. The parser accepts a generic shape:
 
-```
+```almide
 @pure
 @inline_rust("almide_rt_int_abs({n})")
 @schedule(device=gpu, tile=32, unroll=true)
@@ -282,7 +321,9 @@ round-trip tests).
 
 Functions with side effects (IO, randomness, etc.) use the `effect fn` modifier. They return `Result[T, E]` and support automatic `?`-propagation via `!`.
 
-```
+```almide
+import fs
+
 effect fn read_config(path: String) -> Result[String, String] = {
   let content = fs.read_text(path)!
   ok(content)
@@ -291,7 +332,7 @@ effect fn read_config(path: String) -> Result[String, String] = {
 
 When an `effect fn` returns `Result[T, E]` and the body is a block that ends without an explicit `ok(...)`, the compiler automatically wraps the trailing expression in `ok(())`:
 
-```
+```almide
 effect fn log(msg: String) -> Result[Unit, String] = {
   println(msg)
   // ok(()) is inserted automatically
@@ -304,13 +345,13 @@ effect fn log(msg: String) -> Result[Unit, String] = {
 
 #### Record Types
 
-```
+```almide
 type User = { name: String, age: Int }
 ```
 
 #### Variant Types (leading `|`)
 
-```
+```almide
 type Color =
   | Red
   | Green
@@ -319,7 +360,7 @@ type Color =
 
 Variant cases can carry data:
 
-```
+```almide
 type Shape =
   | Circle(Float)
   | Rect(Float, Float)
@@ -333,33 +374,33 @@ Three forms of variant cases:
 
 #### Inline Variant (no leading `|`)
 
-```
-type Result[T, E] = Ok(T) | Err(E)
+```almide
+type Outcome[T, E] = Good(T) | Bad(E)
 ```
 
 When all cases are bare uppercase names with no payload, the parser treats `A | B | C` as a union/enum:
 
-```
+```almide
 type Direction = North | South | East | West
 ```
 
 #### Type Alias
 
-```
+```almide
 type Name = String
 type Handler = (String) -> String
 ```
 
 #### Generic Types
 
-```
+```almide
 type Pair[A, B] = { first: A, second: B }
 type Tree[T] = | Leaf(T) | Node(Tree[T], Tree[T])
 ```
 
 #### Conventions (Deriving)
 
-```
+```almide
 type Color: Eq, Repr = Red | Green | Blue
 type Point: Codec = { x: Float, y: Float }
 ```
@@ -370,7 +411,7 @@ Built-in conventions: `Eq`, `Repr`, `Ord`, `Hash`, `Codec`.
 
 ### 4.4 Protocol Declarations
 
-```
+```almide
 protocol Action {
   fn name(a: Self) -> String
   fn execute(a: Self, ctx: Context) -> Result[String, String]
@@ -387,12 +428,20 @@ Protocol methods can be `effect fn`.
 `impl` ブロックは存在しない（削除済み）。プロトコルの充足も型へのメソッド追加も、
 convention method（`fn Type.method`）で行う:
 
-```
+```almide
+type Context = { user: String }
 type GreetAction = { greeting: String }
 
 fn GreetAction.name(a: GreetAction) -> String = "greet"
 fn GreetAction.execute(a: GreetAction, ctx: Context) -> Result[String, String] =
-  ok(a.greeting)
+  ok("${a.greeting}, ${ctx.user}")
+
+test "convention methods: qualified and UFCS" {
+  let a = GreetAction { greeting: "hi" }
+  assert_eq(GreetAction.name(a), "greet")
+  assert_eq(a.name(), "greet")
+  assert_eq(a.execute(Context { user: "bob" }), ok("hi, bob"))
+}
 ```
 
 呼び出しは `GreetAction.name(a)` でも UFCS の `a.name()` でも可。
@@ -403,7 +452,7 @@ fn GreetAction.execute(a: GreetAction, ctx: Context) -> Result[String, String] =
 
 Module-scope constants:
 
-```
+```almide
 let PI = 3.14159265358979323846
 let MAX_RETRIES = 3
 let GREETING = "Hello"
@@ -415,7 +464,7 @@ Evaluated at compile time (const) or via `LazyLock` for non-const expressions.
 
 ### 4.7 Test Declarations
 
-```
+```almide
 test "addition works" {
   assert_eq(1 + 2, 3)
   assert(3 > 0)
@@ -433,25 +482,33 @@ The body is a brace-delimited block expression.
 
 ### 5.1 Literals
 
-```
-42                     // Int
-0xFF                   // Int (hex)
-1_000_000              // Int (underscores for readability)
-3.14                   // Float
-"hello"                // String
-true                   // Bool
-false                  // Bool
-()                     // Unit
+```almide
+let a = 42                     // Int
+let b = 0xFF                   // Int (hex)
+let c = 1_000_000              // Int (underscores for readability)
+let d = 3.14                   // Float
+let e = "hello"                // String
+let f = true                   // Bool
+let g = false                  // Bool
+let h = ()                     // Unit
+
+test "literal values" {
+  assert_eq(b, 255)
+  assert_eq(c, 1000000)
+}
 ```
 
 テスト: `spec/lang/expr_test.almd`
 
 ### 5.2 String Interpolation
 
-```
-"hello ${name}"
-"result = ${1 + 2}"
-"nested ${string.len(name)}"
+```almide
+test "interpolation" {
+  let name = "alice"
+  assert_eq("hello ${name}", "hello alice")
+  assert_eq("result = ${1 + 2}", "result = 3")
+  assert_eq("nested ${string.len(name)}", "nested 5")
+}
 ```
 
 Expressions inside `${}` are parsed as full expressions.
@@ -460,12 +517,17 @@ Expressions inside `${}` are parsed as full expressions.
 
 ### 5.3 Heredoc (Multi-line Strings)
 
-```
+```almide
+let id = 7
 let sql = """
   SELECT *
   FROM users
   WHERE id = ${id}
 """
+
+test "heredoc strips the common indent" {
+  assert_eq(sql, "SELECT *\nFROM users\nWHERE id = 7")
+}
 ```
 
 Leading whitespace is stripped based on minimum indent. Interpolation `${expr}` works inside heredocs.
@@ -476,21 +538,30 @@ Raw heredoc (no escape processing): `r"""..."""`
 
 ### 5.4 List Literals
 
-```
-[]                     // empty list
-[1, 2, 3]             // List[Int]
-["a", "b", "c"]       // List[String]
-[1, 2, 3,]            // trailing comma allowed
+```almide
+let empty: List[Int] = []      // empty list (needs the annotation)
+let ints = [1, 2, 3]           // List[Int]
+let strs = ["a", "b", "c"]     // List[String]
+let trailing = [1, 2, 3,]      // trailing comma allowed
+
+test "list literals" {
+  assert_eq(list.len(empty), 0)
+  assert_eq(ints, trailing)
+}
 ```
 
 テスト: `spec/lang/expr_test.almd`
 
 ### 5.5 Map Literals
 
-```
-[:]                                  // empty map (requires type annotation)
-["a": 1, "b": 2]                    // Map[String, Int]
-let m: Map[String, Int] = [:]       // typed empty map
+```almide
+let m: Map[String, Int] = [:]       // empty map (requires type annotation)
+let ab = ["a": 1, "b": 2]           // Map[String, Int]
+
+test "map literals" {
+  assert_eq(map.len(m), 0)
+  assert_eq(ab["b"], some(2))
+}
 ```
 
 Maps use `[key: value]` syntax -- braces `{}` are for records/blocks, brackets `[]` for lists and maps.
@@ -501,47 +572,59 @@ Maps use `[key: value]` syntax -- braces `{}` are for records/blocks, brackets `
 
 Anonymous records:
 
-```
-{ name: "alice", age: 30 }
+```almide
+let alice = { name: "alice", age: 30 }
 ```
 
 Named records (typed construction):
 
-```
-User { name: "alice", age: 30 }
+```almide
+type User = { name: String, age: Int }
+
+let alice = User { name: "alice", age: 30 }
 ```
 
-Field shorthand -- when the value is a variable with the same name as the field:
+Every field is written `name: value` — there is no field shorthand
+(`{ name, age }` is a syntax error):
 
-```
+```almide check-fail=syntax
 let name = "alice"
 let age = 30
-{ name, age }           // equivalent to { name: name, age: age }
+let r = { name, age }
 ```
 
 #### Spread Records
 
-```
+```almide
+type User = { name: String, age: Int }
+
 let base = { name: "alice", age: 30 }
-{ ...base, name: "bob" }
-User { ...base, name: "bob" }
+let bob = { ...base, name: "bob" }
+let typed = User { ...base, name: "bob" }
+
+test "spread copies the unnamed fields" {
+  assert_eq(bob.age, 30)
+  assert_eq(typed.age, 30)
+}
 ```
 
 テスト: `spec/lang/record_spread_test.almd`, `spec/lang/data_types_test.almd`
 
 ### 5.7 Tuple Expressions
 
-```
-(1, "hello")           // (Int, String)
-(1, 2, 3)             // (Int, Int, Int)
+```almide
+let pair = (1, "hello")        // (Int, String)
+let triple = (1, 2, 3)         // (Int, Int, Int)
 ```
 
 Access tuple elements by index:
 
-```
-let pair = (1, "hello")
-pair.0                 // 1
-pair.1                 // "hello"
+```almide
+test "tuple index access" {
+  let pair = (1, "hello")
+  assert_eq(pair.0, 1)
+  assert_eq(pair.1, "hello")
+}
 ```
 
 テスト: `spec/lang/tuple_test.almd`
@@ -550,12 +633,19 @@ pair.1                 // "hello"
 
 `if` is an expression and requires `then`. `else` is optional -- without `else`, the result is `Unit`.
 
-```
-if x > 0 then "positive" else "non-positive"
-if a then x else if b then y else z
+```almide
+fn sign(x: Int) -> String = if x > 0 then "positive" else "non-positive"
+fn pick(a: Bool, b: Bool, x: Int, y: Int, z: Int) -> Int =
+  if a then x else if b then y else z
+
+test "if is an expression" {
+  assert_eq(sign(-1), "non-positive")
+  assert_eq(pick(false, true, 1, 2, 3), 2)
+}
 ```
 
-```
+```almide
+let count = 1
 let label = if count == 1 then "item" else "items"
 ```
 
@@ -565,30 +655,51 @@ let label = if count == 1 then "item" else "items"
 
 Exhaustive pattern matching:
 
-```
-match shape {
+```almide
+type Shape =
+  | Circle(Float)
+  | Rect(Float, Float)
+  | Named{ name: String, sides: Int }
+
+fn area(shape: Shape) -> Float = match shape {
   Circle(r) => 3.14 * r * r,
   Rect(w, h) => w * h,
   Named{ name, sides } => float.from_int(sides),
+}
+
+test "every case is handled" {
+  assert_eq(area(Rect(2.0, 3.0)), 6.0)
+  assert_eq(area(Named{ name: "tri", sides: 3 }), 3.0)
 }
 ```
 
 Match arms support guards:
 
-```
-match n {
+```almide
+fn classify(n: Int) -> String = match n {
   x if x > 0 => "positive",
   0 => "zero",
   _ => "negative",
+}
+
+test "guards are tried in order" {
+  assert_eq(classify(5), "positive")
+  assert_eq(classify(0), "zero")
+  assert_eq(classify(-2), "negative")
 }
 ```
 
 Pipe-match syntax:
 
-```
-value |> match {
+```almide
+fn or_zero(value: Option[Int]) -> Int = value |> match {
   some(x) => x,
   none => 0,
+}
+
+test "pipe-match" {
+  assert_eq(or_zero(some(4)), 4)
+  assert_eq(or_zero(none), 0)
 }
 ```
 
@@ -596,20 +707,30 @@ value |> match {
 
 ### 5.10 Lambda
 
-```
-(x) => x + 1
-(x, y) => x + y
-(x: Int) => x * 2                    // with type annotation
-(_) => 42                             // wildcard parameter
-((a, b)) => a + b                     // tuple destructuring in parameter
+```almide
+test "lambda forms" {
+  let inc = (x) => x + 1
+  let add = (x, y) => x + y
+  let dbl = (x: Int) => x * 2                    // with type annotation
+  let k = (_) => 42                              // wildcard parameter
+  let sum = ((a, b)) => a + b                    // tuple destructuring in parameter
+  assert_eq(inc(1), 2)
+  assert_eq(add(1, 2), 3)
+  assert_eq(dbl(2), 4)
+  assert_eq(k("anything"), 42)
+  assert_eq(sum((1, 2)), 3)
+}
 ```
 
 Multi-line lambda body uses a block:
 
-```
-let f = (x) => {
-  let y = x * 2
-  y + 1
+```almide
+test "block-bodied lambda" {
+  let f = (x: Int) => {
+    let y = x * 2
+    y + 1
+  }
+  assert_eq(f(3), 7)
 }
 ```
 
@@ -619,7 +740,7 @@ let f = (x) => {
 
 The last expression in a block is the block's value:
 
-```
+```almide
 let result = {
   let x = 1
   let y = 2
@@ -632,25 +753,31 @@ let result = {
 
 ### 5.12 For-In Loop
 
-```
-for x in xs {
-  println(int.to_string(x))
+```almide
+fn print_all(xs: List[Int]) -> Unit = {
+  for x in xs {
+    println(int.to_string(x))
+  }
 }
 ```
 
 Tuple destructuring in for:
 
-```
-for (k, v) in map.entries(m) {
-  println("${k} = ${v}")
+```almide
+fn print_entries(m: Map[String, Int]) -> Unit = {
+  for (k, v) in map.entries(m) {
+    println("${k} = ${v}")
+  }
 }
 ```
 
 Underscore for ignored variable:
 
-```
-for _ in 0..<5 {
-  println("tick")
+```almide
+fn tick_five() -> Unit = {
+  for _ in 0..<5 {
+    println("tick")
+  }
 }
 ```
 
@@ -658,23 +785,27 @@ for _ in 0..<5 {
 
 ### 5.13 While Loop
 
-```
-var i = 0
-while i < 10 {
-  println(int.to_string(i))
-  i = i + 1
+```almide
+fn count_to_ten() -> Unit = {
+  var i = 0
+  while i < 10 {
+    println(int.to_string(i))
+    i = i + 1
+  }
 }
 ```
 
 `break` and `continue` are supported inside loops:
 
-```
-var i = 0
-while true {
-  if i >= 10 then break
-  i = i + 1
-  if i % 2 == 0 then continue
-  println(int.to_string(i))
+```almide
+fn odd_numbers() -> Unit = {
+  var i = 0
+  while true {
+    if i >= 10 then break
+    i = i + 1
+    if i % 2 == 0 then continue
+    println(int.to_string(i))
+  }
 }
 ```
 
@@ -682,16 +813,20 @@ while true {
 
 ### 5.14 Range
 
-```
-0..<5             // [0, 1, 2, 3, 4]     (exclusive end)
-1...5             // [1, 2, 3, 4, 5]     (inclusive end)
+```almide
+test "range forms" {
+  assert_eq(0..<5, [0, 1, 2, 3, 4])     // exclusive end
+  assert_eq(1...5, [1, 2, 3, 4, 5])     // inclusive end
+}
 ```
 
 Ranges can be used in for loops (optimized, no list allocation):
 
-```
-for i in 0..<n {
-  println(int.to_string(i))
+```almide
+fn count_to(n: Int) -> Unit = {
+  for i in 0..<n {
+    println(int.to_string(i))
+  }
 }
 ```
 
@@ -699,20 +834,32 @@ for i in 0..<n {
 
 ### 5.15 Pipe Operator
 
-```
-text |> string.trim |> string.split(",")
-xs |> list.filter(_, (x) => x > 0)      // _ = placeholder for piped value
+```almide
+test "pipe passes the left side as the FIRST argument" {
+  let text = " a,b "
+  assert_eq(text |> string.trim |> string.split(","), ["a", "b"])
+  let xs = [1, -2, 3]
+  assert_eq(xs |> list.filter((x) => x > 0), [1, 3])
+}
 ```
 
-The pipe operator `|>` passes the left side as an argument to the right side. Use `_` as a placeholder for the piped value in function calls.
+The pipe operator `|>` passes the left side as the first argument of the
+right side. There is no placeholder: `_` in a call argument is a hole with no
+value and is rejected (E046).
+
+```almide check-fail=E046
+fn positives(xs: List[Int]) -> List[Int] = xs |> list.filter(_, (x) => x > 0)
+```
 
 テスト: `spec/lang/pipe_test.almd`
 
 ### 5.16 Compose Operator
 
-```
-let transform = string.trim >> string.to_upper
-transform("  hello  ")  // "HELLO"
+```almide
+test "compose" {
+  let transform = string.trim >> string.to_upper
+  assert_eq(transform("  hello  "), "HELLO")
+}
 ```
 
 The `>>` operator composes two functions left-to-right.
@@ -721,11 +868,19 @@ The `>>` operator composes two functions left-to-right.
 
 ### 5.17 Fan Blocks (Concurrent Execution)
 
-```
-let (a, b, c) = fan {
-  fetch_users()
-  fetch_orders()
-  fetch_config()
+```almide
+effect fn fetch_users() -> Result[Int, String] = ok(3)
+effect fn fetch_orders() -> Result[Int, String] = ok(7)
+effect fn fetch_config() -> Result[String, String] = ok("prod")
+
+test "fan returns a tuple of the unwrapped results" {
+  let (a, b, c) = fan {
+    fetch_users()
+    fetch_orders()
+    fetch_config()
+  }
+  assert_eq(a + b, 10)
+  assert_eq(c, "prod")
 }
 ```
 
@@ -735,12 +890,31 @@ Fan blocks only allow expressions -- no `let`, `var`, `for`, or `while` statemen
 
 The `fan.*` block heads share the surface:
 
+```almide
+effect fn a() -> Result[Int, String] = err("a failed")
+effect fn b() -> Result[Int, String] = ok(2)
+fn work(x: Int) -> Int = x * 2
+
+test "fan.* heads" {
+  let first = fan.any {                 // first Ok in source order
+    a()
+    b()
+  }
+  let (ra, rb) = fan.settle {           // a TUPLE of per-arm Results
+    a()
+    b()
+  }
+  let r = fan.bounded(compute.ms(100)) { work(21) } ?? -1  // deterministic budget
+  assert_eq(first, ok(2))
+  assert_eq(ra, err("a failed"))
+  assert_eq(rb, ok(2))
+  assert_eq(r, 42)
+}
 ```
-let first = fan.any { a(); b() }                       // first Ok in source order
-let all   = fan.settle { a(); b() }                    // List[Result[T, String]]
-let win   = fan.race { fast(); slow() } ?? d           // deterministic winner (least compute)
-let r     = fan.bounded(compute.ms(100)) { work(x) } ?? d  // deterministic budget
-```
+
+Arms are separated by newlines (or `,`), never `;`. `fan.race` was removed in
+0.42.0 — under the deterministic model it was `thunks[0]()` by another name —
+and a reference is a tombstone error (E027).
 
 Budgets are built with the `compute.*` time constructors (closed unit set
 `ns / us / ms / s / min / h`); a bare `Int` or a wall-clock `duration.*` value
@@ -751,40 +925,58 @@ time rules: [docs/adr/0001-deterministic-time-units.md](../adr/0001-deterministi
 
 ### 5.18 Option and Result Constructors
 
-```
-some(42)       // Option[Int] = some
-none           // Option[T] = none
+```almide
+let present: Option[Int] = some(42)            // Option[Int] = some
+let absent: Option[Int] = none                 // Option[T] = none
 
-ok(42)         // Result[Int, E] = success
-err("failed")  // Result[T, String] = failure
+let success: Result[Int, String] = ok(42)      // Result[Int, E] = success
+let failure: Result[Int, String] = err("failed")  // Result[T, String] = failure
 ```
 
 テスト: `spec/lang/error_test.almd`, `spec/lang/unwrap_operators_test.almd`
 
 ### 5.19 Function Calls
 
-```
-add(1, 2)                          // positional args
-string.split(text, ",")           // module function call
-list.map(xs, (x) => x + 1)       // higher-order
-f[Int](42)                         // explicit type arguments
+```almide
+fn add(x: Int, y: Int) -> Int = x + y
+fn f[T](x: T) -> T = x
+
+test "call forms" {
+  let text = "a,b"
+  let xs = [1, 2]
+  assert_eq(add(1, 2), 3)                           // positional args
+  assert_eq(string.split(text, ","), ["a", "b"])    // module function call
+  assert_eq(list.map(xs, (x) => x + 1), [2, 3])     // higher-order
+  assert_eq(f[Int](42), 42)                         // explicit type arguments
+}
 ```
 
 Named arguments:
 
-```
-connect("localhost", port: 3000, secure: true)
+```almide
+fn connect(host: String, port: Int = 80, secure: Bool = false) -> String =
+  "${if secure then "https" else "http"}://${host}:${int.to_string(port)}"
+
+test "named arguments" {
+  assert_eq(connect("localhost", port: 3000, secure: true), "https://localhost:3000")
+}
 ```
 
 テスト: `spec/lang/function_test.almd`, `spec/lang/named_args_test.almd`
 
 ### 5.20 Member Access and Index Access
 
-```
-user.name                  // field access
-pair.0                     // tuple index access
-xs[0]                      // list index
-m["key"]                   // map index (returns Option[V])
+```almide
+test "member and index access" {
+  let user = { name: "alice" }
+  let pair = (1, "x")
+  let xs = [10, 20]
+  let m = ["key": 5]
+  assert_eq(user.name, "alice")      // field access
+  assert_eq(pair.0, 1)               // tuple index access
+  assert_eq(xs[0], 10)               // list index
+  assert_eq(m["key"], some(5))       // map index (returns Option[V])
+}
 ```
 
 テスト: `spec/lang/expr_test.almd`, `spec/lang/tuple_test.almd`
@@ -793,9 +985,13 @@ m["key"]                   // map index (returns Option[V])
 
 `f(x, y)` is equivalent to `x.f(y)`. The compiler resolves automatically.
 
-```
-let trimmed = string.trim(text)
-let trimmed = text.trim()          // equivalent via UFCS
+```almide
+test "UFCS" {
+  let text = " x "
+  let trimmed = string.trim(text)
+  let same = text.trim()           // equivalent via UFCS
+  assert_eq(trimmed, same)
+}
 ```
 
 ---
@@ -806,32 +1002,51 @@ Statements appear inside blocks and function bodies. Newlines separate statement
 
 ### 6.1 Let Binding (immutable)
 
-```
-let x = 1
-let x: Int = 1                     // with type annotation
-let _ = some_fn()                  // discard result
+```almide
+fn some_fn() -> Result[Int, String] = ok(1)
+
+test "let forms" {
+  let x = 1
+  let y: Int = 1                   // with type annotation
+  let _ = some_fn()                // discard result
+  assert_eq(x, y)
+}
 ```
 
 ### 6.2 Var Binding (mutable)
 
-```
-var count = 0
-count = count + 1                  // reassignment (var only)
+```almide
+test "var" {
+  var count = 0
+  count = count + 1                // reassignment (var only)
+  assert_eq(count, 1)
+}
 ```
 
 ### 6.3 Destructuring
 
 Record destructuring:
 
-```
-let { name, age } = user
+```almide
+test "record destructuring" {
+  let user = { name: "alice", age: 30 }
+  let { name, age } = user
+  assert_eq(name, "alice")
+  assert_eq(age, 30)
+}
 ```
 
 Tuple destructuring:
 
-```
-let (x, y) = point
-let (first, _, third) = triple     // wildcard for unused
+```almide
+test "tuple destructuring" {
+  let point = (1, 2)
+  let triple = (1, 2, 3)
+  let (x, y) = point
+  let (first, _, third) = triple   // wildcard for unused
+  assert_eq(x + y, 3)
+  assert_eq(first + third, 4)
+}
 ```
 
 テスト: `spec/lang/variable_test.almd`, `spec/lang/data_types_test.almd`
@@ -840,35 +1055,72 @@ let (first, _, third) = triple     // wildcard for unused
 
 Simple reassignment (var only):
 
-```
-x = x + 1
+```almide
+test "reassignment" {
+  var x = 1
+  x = x + 1
+  assert_eq(x, 2)
+}
 ```
 
 Index assignment (var only):
 
-```
-xs[0] = 99
-m["key"] = value
+```almide
+test "index assignment" {
+  var xs = [1, 2]
+  var m: Map[String, Int] = [:]
+  let value = 5
+  xs[0] = 99
+  m["key"] = value
+  assert_eq(xs, [99, 2])
+  assert_eq(m["key"], some(5))
+}
 ```
 
 Field assignment (var only):
 
-```
-user.name = "bob"
+```almide
+test "field assignment" {
+  var user = { name: "alice" }
+  user.name = "bob"
+  assert_eq(user.name, "bob")
+}
 ```
 
 ### 6.5 Guard (early return)
 
-```
-guard x > 0 else err("must be positive")
-guard fs.exists(path) else err(NotFound(path))
+```almide
+import fs
+
+type AppError = NotFound(String) | Invalid(String)
+
+fn positive(x: Int) -> Result[Int, String] = {
+  guard x > 0 else err("must be positive")
+  ok(x)
+}
+
+effect fn require(path: String) -> Result[String, AppError] = {
+  guard fs.exists(path) else err(NotFound(path))
+  ok(path)
+}
+
+test "guard returns the else value early" {
+  assert_eq(positive(-1), err("must be positive"))
+  assert_eq(require("/nonexistent/almide-doctest"), err(NotFound("/nonexistent/almide-doctest")))
+}
 ```
 
 With block body:
 
-```
-guard not fs.exists(path) else {
-  println("already exists")
+```almide
+import fs
+
+effect fn create_once(path: String) -> Result[Unit, String] = {
+  guard not fs.exists(path) else {
+    println("already exists")
+    ok(())
+  }
+  fs.write(path, "")!
   ok(())
 }
 ```
@@ -881,8 +1133,8 @@ guard not fs.exists(path) else {
 
 Any expression can appear as a statement. The last expression in a block is the block's value.
 
-```
-{
+```almide
+fn forty_three() -> Int = {
   println("side effect")           // expression statement (Unit)
   let x = 42
   x + 1                           // final expression = block value
@@ -915,24 +1167,29 @@ Patterns appear in `match` arms, `let` destructuring, and `for` loop variables.
 
 ### 7.2 Examples
 
-```
-match value {
+```almide
+type Shape =
+  | Circle(Float)
+  | Rect(Float, Float)
+  | Named{ name: String, sides: Int }
+
+fn describe(value: Int) -> String = match value {
   0 => "zero",
   n if n > 0 => "positive: ${int.to_string(n)}",
   _ => "negative",
 }
 
-match result {
+fn report(result: Result[String, String]) -> Unit = match result {
   ok(value) => println(value),
   err(msg) => eprintln(msg),
 }
 
-match option {
+fn doubled(option: Option[Int]) -> Int = match option {
   some(x) => x * 2,
   none => 0,
 }
 
-match shape {
+fn area(shape: Shape) -> Float = match shape {
   Circle(r) => 3.14 * r * r,
   Rect(w, h) => w * h,
   Named{ name, .. } => {
@@ -940,17 +1197,29 @@ match shape {
     0.0
   },
 }
+
+test "pattern forms" {
+  assert_eq(describe(3), "positive: 3")
+  assert_eq(doubled(some(2)), 4)
+  assert_eq(area(Circle(1.0)), 3.14)
+}
 ```
 
 ### 7.3 Nested Patterns
 
 Patterns compose:
 
-```
-match pair {
-  (ok(x), ok(y)) => ok(x + y),
-  (err(e), _) => err(e),
-  (_, err(e)) => err(e),
+```almide
+fn add_both(pair: (Result[Int, String], Result[Int, String])) -> Result[Int, String] =
+  match pair {
+    (ok(x), ok(y)) => ok(x + y),
+    (err(e), _) => err(e),
+    (_, err(e)) => err(e),
+  }
+
+test "nested patterns" {
+  assert_eq(add_both((ok(1), ok(2))), ok(3))
+  assert_eq(add_both((ok(1), err("b"))), err("b"))
 }
 ```
 
@@ -1021,11 +1290,19 @@ Almide uses words, not symbols: `&&` and `||` are rejected with hints.
 | `?` | `expr?` | Convert Result to Option (err becomes none) |
 | `?.` | `expr?.field` | Optional chaining (Option[Record] to Option[FieldType]) — **Option 専用**。Result には専用診断で拒否(`(r?)?.x` と合成する) |
 
-```
-let value = map.get(m, "key") ?? "default"
-let content = fs.read_text(path)!
-let name = user?.name
-let opt = risky_fn()?
+```almide
+import fs
+
+type User = { name: String }
+fn risky_fn() -> Result[Int, String] = ok(1)
+
+effect fn demo(m: Map[String, String], path: String, user: Option[User]) -> Result[String, String] = {
+  let value = map.get(m, "key") ?? "default"
+  let content = fs.read_text(path)!
+  let name = user?.name
+  let opt = risky_fn()?
+  ok("${value} ${content} ${name ?? "?"} ${opt ?? 0}")
+}
 ```
 
 テスト: `spec/lang/unwrap_operators_test.almd`, `spec/lang/operator_test.almd`
@@ -1034,20 +1311,24 @@ let opt = risky_fn()?
 
 Bitwise operations are functions, not operators:
 
-```
-int.band(a, b)          // AND
-int.bor(a, b)           // OR
-int.bxor(a, b)          // XOR
-int.bnot(a)             // NOT
-int.bshl(a, n)          // shift left
-int.bshr(a, n)          // shift right
+```almide
+test "bitwise functions" {
+  assert_eq(int.band(6, 3), 2)      // AND
+  assert_eq(int.bor(6, 3), 7)       // OR
+  assert_eq(int.bxor(6, 3), 5)      // XOR
+  assert_eq(int.bnot(0), -1)        // NOT
+  assert_eq(int.bshl(1, 3), 8)      // shift left
+  assert_eq(int.bshr(8, 3), 1)      // shift right
+}
 ```
 
 ### 8.7 String Concatenation
 
-```
-"hello" + " " + "world"        // string concatenation with +
-[1, 2] + [3, 4]                // list concatenation with +
+```almide
+test "+ concatenates" {
+  assert_eq("hello" + " " + "world", "hello world")   // string concatenation with +
+  assert_eq([1, 2] + [3, 4], [1, 2, 3, 4])            // list concatenation with +
+}
 ```
 
 テスト: `spec/lang/string_test.almd`, `spec/lang/operator_test.almd`
@@ -1064,7 +1345,7 @@ Visibility modifiers appear before `fn`, `type`, or `let` at the top level.
 | `mod` | Same project only | `pub(crate)` |
 | `local` | This file only | (private) |
 
-```
+```almide
 fn public_fn() -> Int = 42              // public (default)
 mod fn internal_fn() -> Int = 42        // project-internal
 local fn private_fn() -> Int = 42       // file-private
@@ -1072,14 +1353,14 @@ local fn private_fn() -> Int = 42       // file-private
 
 Modifier order: `[local|mod]? effect? fn`
 
-```
+```almide
 local effect fn helper() -> Result[Unit, String] = ok(())
 mod fn utility(x: Int) -> Int = x * 2
 ```
 
 Visibility also applies to types and top-level lets:
 
-```
+```almide
 local type InternalState = { count: Int }
 mod let CACHE_SIZE = 256
 ```
@@ -1092,7 +1373,7 @@ mod let CACHE_SIZE = 256
 
 ### 10.1 Line Comments
 
-```
+```almide
 // This is a line comment
 let x = 42  // inline comment
 ```
@@ -1101,7 +1382,7 @@ let x = 42  // inline comment
 
 Block comments are nestable:
 
-```
+```almide
 /* This is a block comment */
 
 /*
@@ -1118,14 +1399,20 @@ Block comments are fully skipped by the lexer (not emitted as tokens).
 
 ## 11. Built-in Functions
 
+```almide
+test "built-ins" {
+  let s = "hi"
+  println(s)              // print line to stdout
+  eprintln(s)             // print line to stderr (debug only)
+  assert_eq(1, 1)         // assert equal (test blocks)
+  assert_ne(1, 2)         // assert not equal (test blocks)
+  assert(true)            // assert true (test blocks)
+}
 ```
-println(s)              // print line to stdout
-eprintln(s)             // print line to stderr (debug only)
-assert_eq(a, b)         // assert equal (test blocks)
-assert_ne(a, b)         // assert not equal (test blocks)
-assert(cond)            // assert true (test blocks)
-repr(x)                 // string representation (types with Repr)
-```
+
+String representation is not a built-in function: a type declares the `Repr`
+convention and its value renders through interpolation (`"${x}"`, ALS-R2), or
+it defines `fn T.repr(x: T) -> String` and calls `x.repr()`.
 
 There is no `print` function -- use `println` for all output.
 
@@ -1135,7 +1422,9 @@ There is no `print` function -- use `println` for all output.
 
 ## 12. Entry Point
 
-```
+```almide
+import process
+
 effect fn main() -> Unit = {
   let args = process.args()
   let name = list.get(args, 1) ?? "world"

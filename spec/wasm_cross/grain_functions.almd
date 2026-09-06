@@ -1,4 +1,10 @@
 // @contract: C-292
+// @ref-allow: F1 (docs/ref/PARSER-NOTES.md) — named-argument EVALUATION ORDER
+//   is under adjudication: this file's own labeled_args6 comment and the plain
+//   reading of ALS-E26 say the written order; the implementation evaluates in
+//   parameter order; the reference evaluator follows the text. ALS-E26 must
+//   name the order; then either this fixture's comment or the implementation
+//   is wrong, and this directive comes off.
 // grain functions.re — curried_func (call-of-call), letrec_2 (mutual
 // recursion referencing a later definition, order-independent), named and
 // default arguments (labeled_args1..5, default_args1..5: reorder, omit,

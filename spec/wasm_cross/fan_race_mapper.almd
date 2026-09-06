@@ -1,5 +1,6 @@
 // @contract: C-205
 // @xt-allow: metered mapper needs list.len/list.get — outside the native rung floor (trust-spine lane)
+// @ref-allow: native walls on fan.race (same rung-floor divergence as @xt-allow); ref and wasm agree
 // The MAPPER form `fan.race(budget?, xs, f)` (T7-1): one pure lambda raced
 // over a dynamic list, winner = (spend, index) lexicographic minimum among
 // successes. spend ∝ heavy(x) makes the SMALLEST element the cheapest arm;

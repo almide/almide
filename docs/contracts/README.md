@@ -63,7 +63,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-025 | float.to_fixed is round-half-to-even on the exact binary value | 0.24.0 | active | fuzz(1000) | 1 |
 | C-026 | Vendored-libm trig / exp / log / pow are byte-identical cross-target | 0.24.0 | active | fuzz(4000) | 3 |
 | C-027 | base64 encode/decode (standard + URL-safe) is byte-identical incl. errors | 0.24.0 | active | fixture | 1 |
-| C-028 | int.from_hex mirrors i64::from_str_radix incl. native quirks | 0.24.0 | active | fixture | 1 |
+| C-028 | int.from_hex: trim, strip lowercase 0x repeatedly, sign after the prefix, then radix-16 — incl. native quirks | 0.24.0 | active | fixture | 1 |
 | C-029 | int.parse error modes byte-match native ParseIntError | 0.24.0 | active | fixture | 1 |
 | C-030 | hex.encode / hex.decode are byte-identical incl. positional error detail | 0.24.0 | active | fixture | 2 |
 | C-031 | json get/set/remove_path edge cases match the infallible native oracle | 0.24.0 | active | fixture | 2 |
@@ -341,7 +341,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-303 | Float operations round to nearest-even once each — no contraction, no FMA | 0.58.0 | active | fixture | 1 |
 | C-304 | Subnormal floats are preserved — no flush-to-zero on any target | 0.58.0 | active | fixture | 1 |
 | C-305 | Transcendental accuracy bounds: sqrt correctly rounded, exp/log/log2/log10/sin/cos/tan/fpow within 1 ulp | 0.58.0 | active | fixture | 1 |
-| C-306 | Signed zero: IEEE propagation, equality ignores the sign, min/max order -0 below +0 (IEEE 754-2019) | 0.60.0 | active | fixture | 1 |
+| C-306 | Signed zero: IEEE propagation, equality ignores the sign, min/max order -0 below +0 (IEEE 754-2019) | 0.60.0 | active | fixture | 2 |
 | C-307 | float.to_int truncates toward zero and saturates, NaN to 0; the checked family is exact-or-none | 0.58.0 | active | fixture | 1 |
 | C-308 | @bounded is a function attribute that changes nothing about types or values — a bounded function is an ordinary function | 0.60.0 | active | fixture | 1 |
 | C-309 | Subset, not dialect: a program's observable behaviour is identical with and without @bounded | 0.60.0 | active | fixture | 2 |
@@ -354,8 +354,8 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-316 | A @bounded effect fn may only use standard output; other effect modules, host-reaching modules and fan are rejected (E076) | 0.60.0 | active | fixture | 0 |
 | C-317 | Float operations are provisionally rejected in a @bounded function (E077) | 0.60.0 | active | fixture | 0 |
 | C-318 | Early exit inside a counted loop body is rejected in a @bounded function (E078) | 0.60.0 | active | fixture | 0 |
-| C-319 | A captured-and-mutated var List is shared storage through a closure | 0.59.0 | active | fixture | 2 |
-| C-320 | A budget cut performs exit bookkeeping: exhausted is always Err, regions are independent, cut placement is unobservable | 0.59.2 | active | fixture | 1 |
+| C-319 | A captured-and-mutated var List is shared storage through a closure | 0.60.0 | active | fixture | 2 |
+| C-320 | A budget cut performs exit bookkeeping: exhausted is always Err, regions are independent, cut placement is unobservable | 0.60.0 | active | fixture | 1 |
 | C-321 | The fan prefetch split (start-all, await-in-arm-order, abandon-losers) is unobservable | 0.60.0 | active | fixture | 1 |
 | C-322 | Constructors are function values, the builtin trio included | 0.60.0 | active | fixture | 1 |
 | C-323 | Or-patterns: an arm's alternatives match as a union, binder-free | 0.60.0 | active | fixture | 1 |

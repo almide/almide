@@ -13,7 +13,7 @@
 
 ## 2. Package Identity
 
-```
+```text
 PkgId { name: String, major: u64 }
 ```
 
@@ -25,7 +25,7 @@ PkgId { name: String, major: u64 }
 
 When multiple dependents request the same package (same name, same major):
 
-```
+```text
 B requires D >= 1.2.0
 C requires D >= 1.5.0
 → resolve to D 1.5.0 (maximum of minimums)
@@ -33,7 +33,7 @@ C requires D >= 1.5.0
 
 When majors differ:
 
-```
+```text
 B requires D v1.x (major=1)
 C requires D v2.x (major=2)
 → both coexist as separate modules (D_v1, D_v2)
@@ -44,7 +44,7 @@ C requires D v2.x (major=2)
 
 ### 4.1 Direct vs Transitive
 
-```
+```text
 A imports B, C
 B imports D
 C imports D
@@ -67,10 +67,22 @@ The type checker tracks which modules each file has imported via `import` statem
 
 A module can re-export a dependency's types by wrapping:
 
-```almide
-// B/mod.almd
-import D
-type Logger = D.Logger  // re-export (future: explicit pub use)
+```almide project
+// file: d/mod.almd
+type Logger = { name: String }
+fn make(n: String) -> Logger = Logger { name: n }
+// file: b/mod.almd
+import d
+type Logger = d.Logger  // re-export (future: explicit pub use)
+fn make(n: String) -> Logger = d.make(n)
+fn name_of(l: Logger) -> String = l.name
+// file: main.almd
+import b
+
+test "the consumer sees D's type through B without importing D" {
+  let l: b.Logger = b.make("x")
+  assert_eq(b.name_of(l), "x")
+}
 ```
 
 ## 5. Codegen: Versioned Symbols
@@ -129,7 +141,7 @@ commit = "b8f3a1..."
 
 ## 8. Resolution Algorithm
 
-```
+```text
 1. Parse almide.toml → direct dependencies
 2. For each dep:
    a. If almide.lock has commit → use exact commit (reproducible)
@@ -144,7 +156,7 @@ commit = "b8f3a1..."
 
 ## 9. Error Messages
 
-```
+```text
 error: version conflict for package 'json'
   → myapp requires json >= 2.0.0 (via almide.toml)
   → bindgen requires json >= 1.0.0, < 2.0.0 (via bindgen/almide.toml)

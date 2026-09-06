@@ -1,6 +1,11 @@
 # Almide Grammar (EBNF)
 
-Faithful to the v0.34.x parser (`crates/almide-syntax/`). Terminals: `IDENT`
+A DESCRIPTIVE snapshot: the source of truth for accepted syntax is the
+implementation parser ([crates/almide-syntax](https://github.com/almide/almide/tree/develop/crates/almide-syntax),
+exercised by this repository's corpus and AST-parity gates), and the
+machine-readable grammar lives in [almide/almide-grammar](https://github.com/almide/almide-grammar).
+Written against the v0.34.x parser; amended since alongside syntax changes.
+Terminals: `IDENT`
 (lowercase-initial), `TYPENAME` (uppercase-initial), `INT`, `FLOAT`, `STRING`.
 Keywords can be used as identifiers by backtick-escaping: `` `type` ``.
 
@@ -194,7 +199,7 @@ json, http, fs, process, regex, io, random, testing, env, net, zlib, base64,
 hex, html, mem, args, path
 ```
 
-See [stdlib/](./stdlib/) and [CHEATSHEET.md](./CHEATSHEET.md) for function
+See [stdlib/](https://github.com/almide/almide/tree/develop/docs/stdlib) and [CHEATSHEET.md](https://github.com/almide/almide/blob/develop/docs/CHEATSHEET.md) for function
 references.
 
 ## Removed / rejected forms

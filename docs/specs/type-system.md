@@ -22,7 +22,7 @@ Seven built-in primitive types. Each has kind `*` (concrete, zero type parameter
 
 `Float` is not hashable (cannot be a `Map` key or `Set` element). Function types (`Fn`) are neither Eq nor hashable.
 
-```
+```almide
 let x = 42          // Int
 let y = 3.14        // Float
 let s = "hello"     // String
@@ -40,7 +40,7 @@ Tests: `spec/lang/expr_test.almd`, `spec/lang/bytes_test.almd`, `spec/lang/matri
 
 Homogeneous ordered sequence. Kind: `* -> *`.
 
-```
+```almide
 let xs = [1, 2, 3]              // List[Int]
 let ys: List[String] = []       // empty list requires annotation
 let zs = xs + [4, 5]            // + concatenates lists
@@ -51,7 +51,7 @@ let first = xs[0]               // Int (index access)
 
 Key-value dictionary. Kind: `* -> * -> *`. Keys must be hashable (no `Float`, `Fn`, or `Map` keys).
 
-```
+```almide
 let m = ["a": 1, "b": 2]       // Map[String, Int]
 let empty: Map[String, Int] = [:]
 let v = m["a"]                  // Option[Int]
@@ -61,7 +61,7 @@ let v = m["a"]                  // Option[Int]
 
 Unique element collection. Kind: `* -> *`. Elements must be hashable.
 
-```
+```almide
 let s = set.from_list([1, 2, 3])  // Set[Int]
 ```
 
@@ -69,10 +69,13 @@ let s = set.from_list([1, 2, 3])  // Set[Int]
 
 Fixed-length heterogeneous product type. Variable arity.
 
-```
-let t = (1, "hello", true)     // (Int, String, Bool)
-let x = t.0                    // Int — positional access
-let (a, b) = (1, 2)            // destructuring
+```almide
+test "tuples" {
+  let t = (1, "hello", true)     // (Int, String, Bool)
+  let x = t.0                    // Int — positional access
+  let (a, b) = (1, 2)            // destructuring
+  assert_eq(x + a + b, 4)
+}
 ```
 
 Tests: `spec/lang/data_types_test.almd`, `spec/lang/tuple_test.almd`, `spec/lang/map_literal_test.almd`
@@ -87,12 +90,18 @@ Built-in parameterized types for nullable values and error handling. Both are `A
 
 Kind: `* -> *`. Constructors: `some(v)`, `none`.
 
-```
+```almide
 let x: Option[Int] = some(42)
 let y: Option[Int] = none
-match x {
+
+fn or_zero(o: Option[Int]) -> Int = match o {
   some(v) => v,
   none => 0,
+}
+
+test "both constructors" {
+  assert_eq(or_zero(x), 42)
+  assert_eq(or_zero(y), 0)
 }
 ```
 
@@ -100,14 +109,16 @@ match x {
 
 Kind: `* -> * -> *`. Constructors: `ok(v)`, `err(e)`.
 
-```
+```almide
 let x: Result[Int, String] = ok(42)
 let y: Result[Int, String] = err("fail")
 ```
 
 In `effect fn` bodies, `Result` is auto-unwrapped with `!`:
 
-```
+```almide
+import fs
+
 effect fn read(path: String) -> Result[String, String] = {
   let content = fs.read_text(path)!   // propagates err
   ok(content)
@@ -124,7 +135,7 @@ Tests: `spec/lang/data_types_test.almd`, `spec/lang/error_test.almd`, `spec/lang
 
 Declared with `type`. Fields are accessed by name.
 
-```
+```almide
 type Point = { x: Float, y: Float }
 
 let p: Point = { x: 1.0, y: 2.0 }
@@ -136,7 +147,7 @@ let p2 = { ...p, y: 5.0 }            // spread update
 
 Record literals without a type name are structurally typed.
 
-```
+```almide
 let user = { name: "alice", age: 30 }   // { name: String, age: Int }
 let n = user.name                        // String
 ```
@@ -145,27 +156,29 @@ let n = user.name                        // String
 
 A parameter typed `{ field: Type, .. }` accepts any record that has at least the required fields. Extra fields are allowed and preserved.
 
-```
+```almide
 fn greet(who: { name: String, .. }) -> String = "Hello, ${who.name}!"
 
 type Dog = { name: String, breed: String }
 type Person = { name: String, age: Int, email: String }
 
-greet(Dog { name: "Rex", breed: "Lab" })       // ok
-greet(Person { name: "Alice", age: 30, email: "a@b" })  // ok
-greet({ name: "Bob" })                          // ok — exact match
+test "any record carrying the field is accepted" {
+  assert_eq(greet(Dog { name: "Rex", breed: "Lab" }), "Hello, Rex!")                    // ok
+  assert_eq(greet(Person { name: "Alice", age: 30, email: "a@b" }), "Hello, Alice!")    // ok
+  assert_eq(greet({ name: "Bob" }), "Hello, Bob!")                                      // ok — exact match
+}
 ```
 
 Open records can be used as type aliases (shape aliases):
 
-```
+```almide
 type Named = { name: String, .. }
 fn greet_named(who: Named) -> String = "Hi, ${who.name}!"
 ```
 
 Nested open records are supported:
 
-```
+```almide
 fn get_port(app: { config: { port: Int, .. }, .. }) -> Int = app.config.port
 ```
 
@@ -181,7 +194,7 @@ Algebraic data types (tagged unions). Declared with `|`-separated cases.
 
 ### Unit Payload (Enum-like)
 
-```
+```almide
 type Direction = | North | South | East | West
 
 fn to_str(d: Direction) -> String = match d {
@@ -194,7 +207,7 @@ fn to_str(d: Direction) -> String = match d {
 
 ### Tuple Payload
 
-```
+```almide
 type Shape = | Circle(Float) | Rect(Float, Float)
 
 fn area(s: Shape) -> Float = match s {
@@ -207,7 +220,7 @@ fn area(s: Shape) -> Float = match s {
 
 Variant cases can carry named fields:
 
-```
+```almide
 type Pat =
   | Match { scope: String, regex: String }
   | BeginEnd { scope: String, begin: String, end_pat: String, patterns: List[Pat] }
@@ -217,12 +230,23 @@ type Pat =
 
 Record variant construction and pattern matching:
 
-```
-let p = Match { scope: "keyword", regex: "\\bfn\\b" }
-match p {
+```almide
+type Pat =
+  | Match { scope: String, regex: String }
+  | BeginEnd { scope: String, begin: String, end_pat: String, patterns: List[Pat] }
+  | Include(String)
+  | Empty
+
+fn describe(p: Pat) -> String = match p {
   Match { scope, regex } => scope + " " + regex,
   BeginEnd { scope, .. } => scope,
   _ => "other",
+}
+
+test "record-payload construction and matching" {
+  let p = Match { scope: "keyword", regex: "\\bfn\\b" }
+  assert_eq(describe(p), "keyword \\bfn\\b")
+  assert_eq(describe(Empty), "other")
 }
 ```
 
@@ -230,7 +254,7 @@ match p {
 
 Variant types can reference themselves. The type checker uses cycle detection to prevent infinite loops in Eq/Hash checks.
 
-```
+```almide
 type Tree[T] = | Leaf(T) | Node(T, List[T])
 ```
 
@@ -238,7 +262,7 @@ type Tree[T] = | Leaf(T) | Node(T, List[T])
 
 When omitting the leading `|`, the first case starts immediately:
 
-```
+```almide
 type AppError = NotFound(String) | Io(String)
 ```
 
@@ -250,13 +274,15 @@ Tests: `spec/lang/data_types_test.almd`, `spec/lang/type_system_test.almd`, `spe
 
 Functions are first-class values. The type syntax uses `fn(Params) -> Ret`.
 
-```
+```almide
 fn apply(f: fn(Int) -> Int, x: Int) -> Int = f(x)
 
 fn make_adder(n: Int) -> fn(Int) -> Int = (x) => x + n
 
-let add5 = make_adder(5)
-apply(add5, 10)              // 15
+test "function values" {
+  let add5 = make_adder(5)
+  assert_eq(apply(add5, 10), 15)
+}
 ```
 
 Internally represented as `Ty::Fn { params: Vec<Ty>, ret: Box<Ty> }`.
@@ -267,13 +293,15 @@ Function types are never Eq and never hashable.
 
 `effect fn` marks functions that perform side effects. The type checker enforces that pure functions cannot call effect functions (error E006). The `is_effect` flag on `FnSig` tracks this.
 
-```
+```almide
+import fs
+
 effect fn read_file(path: String) -> Result[String, String] = fs.read_text(path)
 ```
 
 ### Type Aliases for Function Types
 
-```
+```almide
 type Handler = (String) -> String
 ```
 
@@ -287,21 +315,25 @@ Generic type parameters use `[]` syntax (not `<>`).
 
 ### Generic Functions
 
-```
+```almide
 fn id[T](x: T) -> T = x
 fn pair[A, B](a: A, b: B) -> (A, B) = (a, b)
 ```
 
 Type arguments can be inferred or explicit:
 
-```
-id(42)           // T inferred as Int
-id[String]("hi") // T explicitly String
+```almide
+fn id[T](x: T) -> T = x
+
+test "type arguments" {
+  assert_eq(id(42), 42)              // T inferred as Int
+  assert_eq(id[String]("hi"), "hi")  // T explicitly String
+}
 ```
 
 ### Generic Record Types
 
-```
+```almide
 type Box[T] = { value: T, label: String }
 
 fn unbox[T](b: Box[T]) -> T = b.value
@@ -309,7 +341,7 @@ fn unbox[T](b: Box[T]) -> T = b.value
 
 ### Generic Variant Types
 
-```
+```almide
 type Either[A, B] = | Left(A) | Right(B)
 
 fn map_right[A, B, C](e: Either[A, B], f: fn(B) -> C) -> Either[A, C] = match e {
@@ -322,7 +354,7 @@ fn map_right[A, B, C](e: Either[A, B], f: fn(B) -> C) -> Either[A, C] = match e 
 
 Generic parameters can require specific record fields:
 
-```
+```almide
 fn describe[T: { name: String, .. }](x: T) -> String = "name: ${x.name}"
 
 fn set_name[T: { name: String, .. }](x: T, n: String) -> T = { ...x, name: n }
@@ -332,7 +364,14 @@ The bound `T: { name: String, .. }` is an `OpenRecord` constraint. The checker s
 
 ### Protocol Bounds on Generics
 
-```
+```almide
+protocol Showable {
+  fn show(a: Self) -> String
+}
+protocol Nameable {
+  fn get_name(a: Self) -> String
+}
+
 fn display[T: Showable](item: T) -> String = item.show()
 fn show_named[T: Showable + Nameable](item: T) -> String = item.get_name() + ": " + item.show()
 ```
@@ -361,27 +400,36 @@ Fresh type variables are named `?N` (e.g., `?0`, `?1`). They are distinct from u
 
 Types flow both forward (from arguments to return) and backward (from expected type to expression):
 
-```
-let xs: List[Int] = []         // [] gets type List[Int] from annotation
-let f = (x) => x + 1          // x inferred as Int from + operator
+```almide
+test "inference from annotation and from use" {
+  let xs: List[Int] = []         // [] gets type List[Int] from annotation
+  let f = (x) => x + 1           // x inferred as Int from + operator
+  assert_eq(list.len(xs), 0)
+  assert_eq(f(1), 2)
+}
 ```
 
 ### Let-Polymorphism
 
 Generic functions are instantiated with fresh inference variables at each call site:
 
-```
+```almide
 fn id[T](x: T) -> T = x
-id(42)          // T = Int at this call
-id("hello")     // T = String at this call
+
+test "instantiated per call" {
+  assert_eq(id(42), 42)             // T = Int at this call
+  assert_eq(id("hello"), "hello")   // T = String at this call
+}
 ```
 
 ### Lambda Parameter Inference
 
 Lambda parameters are inferred from how they are used:
 
-```
-list.map([1, 2, 3], (x) => x * 2)   // x: Int inferred from List[Int]
+```almide
+test "lambda parameter inferred from the list" {
+  assert_eq(list.map([1, 2, 3], (x) => x * 2), [2, 4, 6])   // x: Int inferred from List[Int]
+}
 ```
 
 ### Constraint Solving
@@ -421,7 +469,7 @@ Open records use order-independent field matching. For `{ a: Int, .. }` vs `{ a:
 
 Open record parameters compose: a function accepting `{ name: String, breed: String, .. }` can pass its argument to a function accepting `{ name: String, .. }`.
 
-```
+```almide
 fn chain_b(x: { name: String, .. }) -> String = x.name
 fn chain_a(x: { name: String, breed: String, .. }) -> String = chain_b(x)
 ```
@@ -436,7 +484,7 @@ Protocols define a set of methods that conforming types must implement. They ser
 
 ### Defining a Protocol
 
-```
+```almide
 protocol Showable {
   fn show(a: Self) -> String
 }
@@ -450,9 +498,17 @@ Two ways to declare that a type implements a protocol:
 
 **Convention methods** (the only mechanism — `impl` blocks were removed):
 
-```
+```almide
+protocol Showable {
+  fn show(a: Self) -> String
+}
+
 type Dog: Showable = { name: String }
 fn Dog.show(d: Dog) -> String = "Dog: " + d.name
+
+test "conformance by convention method" {
+  assert_eq(Dog { name: "Rex" }.show(), "Dog: Rex")
+}
 ```
 
 Convention methods register as `Type.method` in the function environment.
@@ -477,7 +533,7 @@ After all declarations are registered, the checker validates:
 
 ### Using Protocols as Generic Bounds
 
-```
+```almide
 fn display[T: Showable](item: T) -> String = item.show()
 ```
 
@@ -485,16 +541,30 @@ At each call site, the checker verifies that the concrete type for `T` has decla
 
 ### Multiple Protocols
 
-```
+```almide
+protocol Showable {
+  fn show(a: Self) -> String
+}
+protocol Nameable {
+  fn get_name(a: Self) -> String
+}
+
 type Widget: Showable, Nameable = { id: Int, name: String }
+fn Widget.show(w: Widget) -> String = "#${int.to_string(w.id)}"
+fn Widget.get_name(w: Widget) -> String = w.name
+
 fn show_named[T: Showable + Nameable](item: T) -> String = item.get_name() + ": " + item.show()
+
+test "multiple bounds" {
+  assert_eq(show_named(Widget { id: 1, name: "knob" }), "knob: #1")
+}
 ```
 
 ### Marker Protocols
 
 Protocols with no methods serve as markers:
 
-```
+```almide
 protocol Serializable {}
 type Marker: Serializable = { tag: String }
 ```
@@ -507,7 +577,7 @@ Tests: `spec/lang/protocol_test.almd`, `spec/lang/trait_impl_test.almd`, `spec/l
 
 `type Name = ExistingType` creates a transparent alias. The alias is interchangeable with the underlying type.
 
-```
+```almide
 type Score = Int
 type Label = String
 
@@ -525,7 +595,7 @@ Tests: `spec/lang/type_alias_test.almd`
 
 Inline union types represent a value that can be one of several types:
 
-```
+```almide
 type StringOrInt = Int | String
 ```
 
@@ -540,7 +610,7 @@ Unification with unions tries each member with snapshotted bindings, committing 
 
 ## 13. How Types Flow Through the Compiler
 
-```
+```text
 Source (.almd)
     │
     ▼

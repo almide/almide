@@ -1,5 +1,5 @@
 // @contract: C-260, C-263
-// ALS-D1 (docs/specs/als/expressions.md): the declaration family in one
+// ALS-DL1 (docs/specs/als/expressions.md): the declaration family in one
 // program — explicit import (json parse/stringify round-trip), a variant
 // type declaration, top-level lets (Int and String) read from a fn body,
 // fn and effect-fn declarations. Identical observables on both targets.

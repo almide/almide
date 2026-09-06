@@ -8,13 +8,13 @@
 ## 1. 型
 
 ### Result[T, E]
-```
+```text
 ok(v)   : Result[T, E]   // 成功値
 err(e)  : Result[T, E]   // エラー値
 ```
 
 ### Option[T]
-```
+```text
 some(v) : Option[T]       // 値あり
 none    : Option[T]       // 値なし
 ```
@@ -26,12 +26,20 @@ none    : Option[T]       // 値なし
 `->` をまたがない:
 
 ```almide
-fn f(v: Int?) -> Int? = v          // 引数・戻りどちらも可
-f: (Int) -> Int?                    // fn 型 slot: Option[Int] を返す fn
-on_tick: ((Int) -> Unit)?           // fn 値そのものが Option — 括弧必須
-pair: (String, Int)?                // Option[タプル]
-nested: (Int?)?                     // 入れ子(`Int??` は ?? にレクスされ不可)
-fn g(s: String) -> Int?!            // Result[Option[Int], String](? が先、! は戻りマーカー)
+fn f(v: Int?) -> Int? = v                     // 引数・戻りどちらも可
+type Slots = {
+  f: (Int) -> Int?,                           // fn 型 slot: Option[Int] を返す fn
+  on_tick: ((Int) -> Unit)?,                  // fn 値そのものが Option — 括弧必須
+  pair: (String, Int)?,                       // Option[タプル]
+  nested: (Int?)?,                            // 入れ子(`Int??` は ?? にレクスされ不可)
+}
+fn g(s: String) -> Int?! = ok(int.parse(s)?)  // Result[Option[Int], String](? が先、! は戻りマーカー)
+
+test "T? in every type position" {
+  assert_eq(f(some(1)), some(1))
+  assert_eq(g("7"), ok(some(7)))
+  assert_eq(g("x"), ok(none))
+}
 ```
 
 正準形は `T?`: `almide fmt` は `Option[T]` を `T?` へ正規化する(D3)。
@@ -39,7 +47,7 @@ stdlib も `fmt --no-import-edit` で正規化済み(2026-08-07 — 単一化の
 spec/lang/option_marker_test.almd が担う)。
 
 ### Never (bottom type)
-```
+```text
 process.exit(n) : Never   // 戻らない関数の戻り値型
 ```
 Never はどの型にも代入可能。guard else, if then, match arm で使える。
@@ -50,10 +58,17 @@ fn 宣言の戻り位置に限り、`T!` は `Result[T, String]` の糖衣。可
 効果(effect)は直交する 2 軸であり、4 象限すべてが綴れる:
 
 ```almide
-fn        f() -> Int      // pure ・総
-fn        f() -> Int!     // pure ・可謬(= Result[Int, String])
-effect fn f() -> Int      // effect・総(暗黙 lift、§3)
-effect fn f() -> Int!     // effect・可謬
+fn        total()      -> Int  = 1          // pure ・総
+fn        fallible()   -> Int! = ok(1)      // pure ・可謬(= Result[Int, String])
+effect fn e_total()    -> Int  = 1          // effect・総(暗黙 lift、§3)
+effect fn e_fallible() -> Int! = ok(1)      // effect・可謬
+
+test "the four quadrants" {
+  assert_eq(total(), 1)
+  assert_eq(fallible(), ok(1))
+  assert_eq(e_total(), ok(1))       // 呼び出し型は lift 後の Result(§3)
+  assert_eq(e_fallible(), ok(1))
+}
 ```
 
 E は常に String(ADR-0002 D2)。カスタムエラー型は明示の `Result[T, MyError]` で綴る。
@@ -78,15 +93,15 @@ fn checked(s: String) -> Int! = {
 すべての値レベル演算子は名前付き stdlib 関数への脱糖として定義される(ADR-0005)。
 定義表:
 
-```
+```text
 x ?? d      ≡  option.unwrap_or_else(x, () => d)   // Option operand
 r ?? d      ≡  result.unwrap_or_else(r, (_) => d)   // Result operand
 r?          ≡  result.to_option(r)
 o?.x        ≡  option.map(o, (v) => v.x)
 ```
 
-`!` と effect fn の auto-`?` は制御フロー(早期 return)であり、関数実体を持たない
-(ADR-0005 の明示的な境界)。
+`!` は制御フロー(早期 return)であり、関数実体を持たない(ADR-0005 の明示的な
+境界)。
 
 ### `expr!` — unwrap with propagation
 
@@ -143,8 +158,11 @@ Option/Result でない被演算子は `E034`。
 - **行またぎ禁止(E038)**: 文レベルでは fallback は `??` と同じ行に置く。
   複数行は括弧 + `??` 後置:
   ```almide
-  let v = (int.parse(s) ??
-    -5)
+  fn parse_or_minus_five(s: String) -> Int = {
+    let v = (int.parse(s) ??
+      -5)
+    v
+  }
   ```
 - Option/Result でない被演算子は `E034`。
 
@@ -154,7 +172,13 @@ Option/Result でない被演算子は `E034`。
 ### `expr?.field` — optional chaining(Option 専用)
 
 ```almide
+type P = { x: Int }
 fn getx(o: Option[P]) -> Int = o?.x ?? 0    // some(P{x:5}) → 5、none → 0
+
+test "optional chaining" {
+  assert_eq(getx(some(P { x: 5 })), 5)
+  assert_eq(getx(none), 0)
+}
 ```
 
 `Option[レコード]` のフィールドへ安全にアクセスし `Option[フィールド型]` を返す。
@@ -167,6 +191,8 @@ fn getx(o: Option[P]) -> Int = o?.x ?? 0    // some(P{x:5}) → 5、none → 0
 ### 宣言と lift
 
 ```almide
+import fs
+
 effect fn read_file(path: String) -> String = fs.read_text(path)!
 ```
 
@@ -206,10 +232,21 @@ lambda は「ミニ可謬 fn」— 本体の `!` は **lambda 自身の失敗チ
 使用駆動で可謬性が推論される(L1〜L9、2026-08-07 批准):
 
 ```almide
-let g = (x) => int.parse(x)! * 2      // g: (String) -> Result[Int, String] — 第一級
-g("21") ?? -1                          // 呼べば Result 値、普通に消費
-list.map(xs, (s) => halve(parse(s)!)!) // 複合可謬 callback → first-err 形(L6)
-fn retry(op: (Int) -> Int!) -> Int! = op(1)!   // fn 型 slot の `!`(L7/L8)
+fn halve(n: Int) -> Int! = if n % 2 == 0 then ok(n / 2) else err("odd")
+fn retry(op: (Int) -> Int!) -> Int! = op(1)!          // fn 型 slot の `!`(L7/L8)
+
+fn demo(xs: List[String]) -> Int! = {
+  let g = (x) => int.parse(x)! * 2      // g: (String) -> Result[Int, String] — 第一級
+  let doubled = g("21") ?? -1           // 呼べば Result 値、普通に消費
+  let halves = list.map(xs, (s) => halve(int.parse(s)!)!)!   // 複合可謬 callback → first-err 形(L6)
+  ok(doubled + list.sum(halves))
+}
+
+test "fallible lambdas (in fn bodies — test bodies keep unwrap semantics, L9)" {
+  assert_eq(demo(["4", "6"]), ok(47))
+  assert_eq(demo(["4", "7"]), err("odd"))
+  assert_eq(retry((n) => ok(n + 1)), ok(2))
+}
 ```
 
 - E は String 固定(L3)・Option operand の none は err("none")(L4)・値 tail は
@@ -240,8 +277,10 @@ fn retry(op: (Int) -> Int!) -> Int! = op(1)!   // fn 型 slot の `!`(L7/L8)
 ## 5. test ブロック
 
 ```almide
+fn f() -> Int = 42
+
 test "name" {
-  assert_eq(f(), expected)
+  assert_eq(f(), 42)
 }
 ```
 
@@ -263,7 +302,23 @@ almide repr 形(ok/err)への統一は未実施(既知の表示形差)。
 ## 6. guard else
 
 ```almide
-guard condition else { diverge_expr }
+import process
+
+fn positive(n: Int) -> Int! = {
+  guard n > 0 else err("must be positive")    // guard condition else diverge_expr — else は戻りチャネルへ
+  ok(n)
+}
+
+effect fn main() -> Unit = {
+  let n = list.len(process.args())
+  guard n > 0 else process.exit(3)             // else: Never(process.exit)
+  println(int.to_string(n))
+}
+
+test "guard else returns the else value" {
+  assert_eq(positive(0), err("must be positive"))
+  assert_eq(positive(2), ok(2))
+}
 ```
 
 - 条件は Bool に constrain される
