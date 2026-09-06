@@ -522,7 +522,16 @@ fn stmt_guard_has_continue(else_: &IrExpr) -> bool {
 fn render_stmt_guard(ctx: &RenderContext, stmt: &IrStmt) -> String {
     let IrStmtKind::Guard { cond, else_ } = &stmt.kind else { unreachable!() };
     let cond_str = render_expr(ctx, cond);
-    let else_str = render_expr(ctx, else_);
+    // `guard c else err(e)!` (#1926): the `!` on an `err` ctor is a
+    // propagation of that err, and the guard's else IS the early return —
+    // rendering it as `return (Err(..))?` handed `return` the `?`'s
+    // unwrapped `()` (rustc E0308 behind a green check). Return the err
+    // value itself; the `!` has nothing left to do.
+    let else_val: &IrExpr = match &else_.kind {
+        IrExprKind::Unwrap { expr: inner } if matches!(inner.kind, IrExprKind::ResultErr { .. }) => inner,
+        _ => else_,
+    };
+    let else_str = render_expr(ctx, else_val);
     // Determine action: break for loop guards, return for function guards.
     let action = if stmt_guard_is_loop_control(else_) {
         if stmt_guard_has_continue(else_) { "continue" } else { "break" }
