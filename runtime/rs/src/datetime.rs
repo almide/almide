@@ -17,9 +17,9 @@ pub fn almide_rt_datetime_monotonic_ns() -> i64 {
     start.elapsed().as_nanos() as i64
 }
 
-pub fn almide_rt_datetime_year(ts: i64) -> i64 { civil_from_epoch(ts).0 }
-pub fn almide_rt_datetime_month(ts: i64) -> i64 { civil_from_epoch(ts).1 }
-pub fn almide_rt_datetime_day(ts: i64) -> i64 { civil_from_epoch(ts).2 }
+pub fn almide_rt_datetime_year(ts: i64) -> i64 { almide_rt_civil_from_epoch(ts).0 }
+pub fn almide_rt_datetime_month(ts: i64) -> i64 { almide_rt_civil_from_epoch(ts).1 }
+pub fn almide_rt_datetime_day(ts: i64) -> i64 { almide_rt_civil_from_epoch(ts).2 }
 pub fn almide_rt_datetime_hour(ts: i64) -> i64 { ((ts % 86400 + 86400) % 86400) / 3600 }
 pub fn almide_rt_datetime_minute(ts: i64) -> i64 { ((ts % 3600 + 3600) % 3600) / 60 }
 pub fn almide_rt_datetime_second(ts: i64) -> i64 { ((ts % 60) + 60) % 60 }
@@ -31,11 +31,11 @@ pub fn almide_rt_datetime_weekday(ts: i64) -> String {
 }
 
 pub fn almide_rt_datetime_from_parts(y: i64, m: i64, d: i64, h: i64, min: i64, s: i64) -> i64 {
-    epoch_from_civil(y, m, d) + h * 3600 + min * 60 + s
+    almide_rt_epoch_from_civil(y, m, d) + h * 3600 + min * 60 + s
 }
 
 pub fn almide_rt_datetime_to_iso(ts: i64) -> String {
-    let (y, m, d) = civil_from_epoch(ts);
+    let (y, m, d) = almide_rt_civil_from_epoch(ts);
     let h = almide_rt_datetime_hour(ts);
     let mi = almide_rt_datetime_minute(ts);
     let s = almide_rt_datetime_second(ts);
@@ -54,7 +54,7 @@ pub fn almide_rt_datetime_parse_iso(s: &str) -> Result<i64, String> {
 }
 
 pub fn almide_rt_datetime_format(ts: i64, pattern: &str) -> String {
-    let (y, m, d) = civil_from_epoch(ts);
+    let (y, m, d) = almide_rt_civil_from_epoch(ts);
     let h = almide_rt_datetime_hour(ts);
     let mi = almide_rt_datetime_minute(ts);
     let s = almide_rt_datetime_second(ts);
@@ -82,7 +82,7 @@ pub fn almide_rt_datetime_from_unix(seconds: i64) -> i64 { seconds }
 pub fn almide_rt_datetime_to_unix(ts: i64) -> i64 { ts }
 
 // Civil date ↔ epoch conversion (Howard Hinnant's algorithm)
-fn civil_from_epoch(ts: i64) -> (i64, i64, i64) {
+fn almide_rt_civil_from_epoch(ts: i64) -> (i64, i64, i64) {
     let z = ts / 86400 + 719468;
     let era = if z >= 0 { z } else { z - 146096 } / 146097;
     let doe = (z - era * 146097) as u64;
@@ -102,7 +102,7 @@ fn civil_from_epoch(ts: i64) -> (i64, i64, i64) {
 // 18446744073709551615: `153 * (m - 3)` then wrapped, and this leg answered 1540840320
 // where the self-host, which had always been i64, answered 1572566400. Neither number
 // means anything for month -1; the point is that they must be the SAME nothing.
-fn epoch_from_civil(y: i64, m: i64, d: i64) -> i64 {
+fn almide_rt_epoch_from_civil(y: i64, m: i64, d: i64) -> i64 {
     let y = if m <= 2 { y - 1 } else { y };
     let era = if y >= 0 { y } else { y - 399 } / 400;
     let yoe = y - era * 400;

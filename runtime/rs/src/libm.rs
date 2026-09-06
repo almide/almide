@@ -38,6 +38,14 @@
 // ─────────────────────────── helpers ───────────────────────────
 
 /// Faithful port of `libm::floor` (generic path): round toward -inf.
+// SCOPE. The vendored kernels keep their upstream names (`log`, `exp`, `sin`,
+// `pow`, …) so the port stays diffable against libm, but the runtime is
+// concatenated into ONE flat file with the user's program: a user `fn log`
+// collided with the kernel (`E0428: the name log is defined multiple times`,
+// #1957). The kernels live in their own module; only the `almide_rt_libm_*`
+// entries are re-exported.
+mod almide_libm {
+
 #[inline]
 fn vfloor(x: f64) -> f64 {
     let ui = x.to_bits();
@@ -623,3 +631,6 @@ fn rem_pio2(x: f64) -> (i32, f64, f64) {
 include!("libm_p2.rs");
 include!("libm_p3.rs");
 include!("libm_p4.rs");
+
+} // mod almide_libm
+pub use almide_libm::*;
