@@ -837,7 +837,6 @@ fn render_wasm_module_routed(
     has_main: bool,
     dep_paths: &[(project::PkgId, std::path::PathBuf)],
     uses_incumbent_features: bool,
-    host_variant: bool,
 ) -> Result<(Vec<u8>, bool, Vec<i32>), ()> {
     //   - `ALMIDE_FUEL_PROBE` set         → incumbent (the charge-trace
     //     probe line is that leg's Σ-probe instrumentation — contract
@@ -855,8 +854,7 @@ fn render_wasm_module_routed(
         && (std::env::var_os("ALMIDE_WASM_INCUMBENT").is_some()
             || std::env::var_os("ALMIDE_FUEL_PROBE").is_some()
             || !has_main
-            || uses_incumbent_features
-            || (library_ok && host_variant));
+            || uses_incumbent_features);
     if incumbent {
         let r = render_wasm_module(source_text, v1_self_modules, library_ok).map(|(b, _)| (b, false, Vec::new()));
         // REVERSE handover (#1423 bucket A, the env.sleep_ms build shape):
@@ -947,7 +945,7 @@ fn render_wasm_module_routed(
                     .find(|op| !almide_wasm_run::wasi::P1_SERVED_OPS.contains(op))
             {
                 return reroute(&format!(
-                    "host op {op} has no stock-WASI service (the embedded host                      — `almide run --target wasm` — serves it)"
+                    "host op {op} has no stock-WASI service (the embedded host — `almide run --target wasm` — serves it)"
                 ));
             }
             // With the debug env, ALWAYS name the winning leg — the
@@ -1120,29 +1118,20 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
     // export mode yet (#1598's sibling surface), so those modules stay on
     // the incumbent leg.
     let has_exports = ir_program.functions.iter().any(|f| !f.export_attrs.is_empty());
-    let imports_module = |names: &[&str]| {
-        std::iter::once(&program)
-            .chain(resolved.modules.iter().map(|(_, p, _, _)| p))
-            .flat_map(|p| p.imports.iter())
-            .any(|d| {
-                matches!(d, almide::ast::Decl::Import { path, .. }
-                    if path.first().is_some_and(|r| names.contains(&r.as_str())))
-            })
-    };
-    // Build-time host routing: process rides the incumbent (no
-    // structural surface); fs rides the incumbent because the p1
-    // `to_wasi` transform carries no fs ops — EXCEPT when the build is
-    // headed for the direct p3 component (#1628 increment 2d), whose
-    // shim now carries the full fs read+write surface, so fs programs
-    // flip to the structural leg there by default (#1584's first
-    // default-route slice). `env` is NOT in the scan any more (#1921's
-    // first slice): the p1 shim serves get/set/os/cwd/temp_dir/args
-    // structurally, and an env fn it does not link walls at lowering and
-    // takes the verified-to-verified reroute like any other unlinked fn —
-    // the per-fn auto-flip #1598 established, not a module-level denial.
-    let p3_requested = std::env::var_os("ALMIDE_COMPONENT_P3").is_some();
-    let host_variant = imports_module(&["process"])
-        || (imports_module(&["fs"]) && !p3_requested);
+    // #1921 CLOSED: the module-level host-variant import scan is GONE. Host
+    // routing is decided from the EMITTED op set, not from import names:
+    // the structural leg lowers the program, and `render_wasm_module_routed`
+    // audits the host ops it emitted against the p1 shim's served set on the
+    // BUILD path (`library_ok`) — an fs op the `to_wasi` transform cannot
+    // serve reroutes the whole module to the incumbent's WASI rendering,
+    // while `almide run --target wasm` (the embedded host serves every op)
+    // and the direct p3 component (its shim carries the fs surface) keep the
+    // structural module. `process` fns have no structural surface and wall
+    // at lowering, taking the same verified-to-verified reroute. Before
+    // this, `import fs` / `import process` unconditionally denied the
+    // structural leg — including on the run path, where it served the
+    // program end to end — and an fs program whose only fs use was inside a
+    // `!`-consumed `fan.map` built on NEITHER leg.
     // #1598 CLOSED as per-fn auto-flip: the matrix/io module pre-scan is
     // GONE. The linked surfaces (io.read_all via the host's op-31 drain
     // joined io.print/write/write_bytes/read_n_bytes; the measured matrix
@@ -1166,7 +1155,6 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
         has_main,
         &dep_paths,
         has_exports,
-        host_variant,
     )
 }
 
