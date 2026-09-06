@@ -157,6 +157,35 @@ impl LowerCtx {
             return Ok(Some(dst));
         }
         self.ops.truncate(mark);
+        // #1904: a SCALAR field/element read off a fresh HEAP container —
+        // `(o ?? d).n`, `f(x).0` — is the scalar twin of the heap extraction's
+        // materialize-then-extract route (tail.rs): bind the container to a
+        // scope-tracked temp and read the slot off the Var, exactly as
+        // `let t = o ?? d; t.n` lowers. A decline falls to the deferred path.
+        if let Some(container) = crate::lower::extraction_container(tail) {
+            if is_heap_ty(&container.ty)
+                && matches!(&container.kind, IrExprKind::UnwrapOr { .. } | IrExprKind::Call { .. })
+            {
+                let lhh_mark = self.live_heap_handles.len();
+                let lifted_mark = self.lifted.len();
+                let tmp = self.fresh_synth_var();
+                if self.lower_bind(tmp, &container.ty, container).is_ok() {
+                    let synth = IrExpr {
+                        kind: IrExprKind::Var { id: tmp },
+                        ty: container.ty.clone(),
+                        span: container.span.clone(),
+                        def_id: None,
+                    };
+                    let rebuilt = crate::lower::rebuild_extraction(tail, synth);
+                    if let Some(dst) = self.lower_scalar_value(&rebuilt) {
+                        return Ok(Some(dst));
+                    }
+                }
+                self.ops.truncate(mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                self.lifted.truncate(lifted_mark);
+            }
+        }
         self.lower_tail_scalar_deferred_const(tail)
     }
 
@@ -344,7 +373,39 @@ impl LowerCtx {
         // `heap_unwrap_or_tail_position_executes`, which asserts the
         // `option.unwrap_or_str` route survives.
         if !expr.ty.is_result() {
-            return self.lower_tail_heap_fresh(tail);
+            // #1904: the `option.unwrap_or_str` route serves a STRING payload;
+            // a record / tuple / list payload declined it ("cannot be
+            // faithfully returned"). Keep the proven route first, and on a
+            // decline ANF the tail through the let-bound heap `??` (#1943):
+            // `let $t = o ?? d; $t` — the temp is scope-tracked and moved out
+            // exactly like a user-written binding. A second decline keeps the
+            // honest wall.
+            let mark = self.ops.len();
+            let lhh_mark = self.live_heap_handles.len();
+            let lifted_mark = self.lifted.len();
+            let first = self.lower_tail_heap_fresh(tail);
+            if first.is_ok() {
+                return first;
+            }
+            self.ops.truncate(mark);
+            self.live_heap_handles.truncate(lhh_mark);
+            self.lifted.truncate(lifted_mark);
+            let tmp = self.fresh_synth_var();
+            if self.lower_bind(tmp, &tail.ty, tail).is_ok() {
+                let var_tail = IrExpr {
+                    kind: IrExprKind::Var { id: tmp },
+                    ty: tail.ty.clone(),
+                    span: tail.span.clone(),
+                    def_id: None,
+                };
+                if let Ok(v) = self.lower_tail_heap_var(&var_tail) {
+                    return Ok(v);
+                }
+            }
+            self.ops.truncate(mark);
+            self.live_heap_handles.truncate(lhh_mark);
+            self.lifted.truncate(lifted_mark);
+            return first;
         }
         let payload_ty = tail.ty.clone();
         let p = VarId(crate::lower::desugar_var_seed());
