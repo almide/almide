@@ -73,7 +73,10 @@ fn print_usage() {
          \x20 xtarget-fuzz ladder <file.almd> [--timeout S]\n\
          \x20 xtarget-fuzz gen    --seed N --index I [--family F]\n\
          \x20 xtarget-fuzz stats\n\n\
-         --family all|identity|synthesis  (default: all)\n\
+         --family all|identity|synthesis|composition  (default: all)\n\
+         \x20 `composition` runs ONLY the operator-interleaving family: `??` `!` `?`\n\
+         \x20 `|>` match and tuple extraction over Int / String / tuple / record\n\
+         \x20 payloads, judged by construction like `identity`. Part of `all` too.\n\
          \x20 `identity` runs ONLY the self-checking family (#1332): programs built\n\
          \x20 backwards from a known answer, so a leg is judged alone and a bug the\n\
          \x20 two backends SHARE is still convicted. It is part of the `all` mix too.\n\
@@ -136,7 +139,7 @@ fn resolve_family(args: &[String]) -> Family {
     match flag_value(args, "--family") {
         None => Family::All,
         Some(s) => Family::parse(s).unwrap_or_else(|| {
-            eprintln!("unknown --family {s:?} (expected: all, identity, synthesis)");
+            eprintln!("unknown --family {s:?} (expected: all, identity, synthesis, composition)");
             std::process::exit(2);
         }),
     }

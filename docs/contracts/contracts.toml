@@ -4457,3 +4457,15 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/unwrap_or_heap_arg_and_subject.almd", class = "fixture" },
 ]
+
+# ── OPERATOR COMPOSITION (by-construction family) ─────────────────────
+[[contract]]
+id        = "C-347"
+spec      = "ALS-D4"
+title     = "Operator round trips over a known literal print that literal on both targets"
+statement = "A payload carrying the literal K (an Int, a String of length K, a tuple or record holding K) wrapped in any chain of `some(x) ?? d`, `ok(x) ?? d`, `ok(x)!`, `ok(x)? ?? d`, `x |> id`, `match some(x) { some(v) => v, none => d }` and `(x, 7).0` — in tail, `let`-bound, or call-argument position of a plain or effect fn — hands the same payload back, so the program prints K per probe, byte-identical native == wasm. The fallbacks carry K + 1, so a wrong branch, field, or layout changes the number. The nightly `xtarget-fuzz` composition family draws the operator × payload × position product with the answer known by construction (one leg is judged alone); the committed sample is one deterministic draw."
+since     = "0.63.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/composition_fuzz_batch.almd", class = "fixture" },
+]
