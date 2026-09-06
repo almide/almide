@@ -4413,3 +4413,25 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/bytes_copy_from_negative_len.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-343"
+spec      = "ALS-C5"
+title     = "A tail `!` over a declared-Result plain callee yields the payload in a lifted effect fn"
+statement = "In an `effect fn f() -> T` whose tail is `g(..)!` where `g` is a PLAIN fn declared `-> Result[T, E]`, every leg returns g's Ok payload (and propagates its Err) — for a scalar, a String and a tuple `T` alike. The incumbent wasm leg classified `f` never-err (its only `!` is over a callee with no `err(..)`) and lifted it to a raw-payload ABI, but its tail lowering treated the `!` as a same-carrier pass-through and returned g's REAL Result block as the payload: a String read as `(`, a tuple as garbage, an Int as invalid wasm (composition fuzz, seed 7, #1967). The pass-through is sound only under a Result ABI, so a tail `!`/`?` over any callee whose value is a real Result block — a declared-Result fn, lifted or not, can-err or not — now puts `f` on the Result ABI (`AUTO_WRAP_ABI_FNS`), exactly as a can-err callee already did. The structural leg was correct on this shape throughout; the default build reached the incumbent only through the `guard` wall C-344 closes."
+since     = "0.63.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/tail_bang_over_declared_result_callee.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-344"
+spec      = "ALS-C5"
+title     = "guard-else-err inside a call-argument block after a Result bind runs on every leg"
+statement = "`guard c else err(m)!` in an `effect fn -> T` — preceded by a `!`- or `??`-bound Result and followed by a plain-fn call — lowers identically whether the block is the fn body or a CALL ARGUMENT (`big({ let g = r!; guard c else err(m)!; g })`), and whether `c` is constant or not: the fn answers the call's value when the guard passes and `Err(m)` when it fails. Three defects met on this shape (composition fuzz, seed 7, #1968). (1) The structural leg lowered the guard's else `err(m)!` as an UNWRAP — the payload type — against the fn's Result return and walled `ty-mismatch:Scalar(Int)-vs-Result`, so the default build fell back to the incumbent; a `!` over a Result that IS the fn's own Result is propagation and lowers the Result directly (the native walker's #1926 rule, mirrored). (2) The incumbent ran the argument-block hoist (`f({ stmts; e })` ≡ `{ stmts; f(e) }`) AFTER the guard restructure, so a guard inside an argument block never reached the tail-chain rewrite and the raw Guard stmt fell to a lowering that emitted the scalar continuation against the Result ABI (invalid wasm); the hoist now runs first, in both the pipeline and the classify twin. (3) The incumbent's ok-wrap pass declined EVERY named call in return position as \"already yielding the carrier\" — true of an effect sibling on the Result ABI, false of a plain `fn big(x: Int) -> Int` — so `{ let g = r!; big(g) }` returned a raw i64 where an i32 carrier was promised (invalid wasm); only a callee in `AUTO_WRAP_ABI_FNS` is declined now, and every other named call takes the same `ok(..)` wrap a Module call does."
+since     = "0.63.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/guard_err_in_call_arg_block.almd", class = "fixture" },
+]

@@ -468,27 +468,45 @@ fn body_has_stmt_position_propagating_unwrap(body: &IrExpr) -> bool {
 /// through. Without this, `checked` classified can-err (post the Try fixpoint fix)
 /// but its base arm still produced a raw i64 against the i32 Result ABI — the
 /// effect_tco invalid-wasm divergence, second layer.
+///
+/// The same holds for a tail `!`/`?` over a NEVER-ERR callee whose value is
+/// nonetheless a REAL Result block — a fn DECLARED `-> Result[..]` (plain or
+/// effect: not in `lifted`), e.g. `fn w(x) -> Result[String, String] = ok(x)`.
+/// The tail lowering passes such an operand through unchanged, which is the
+/// fn's own return only under a Result ABI; under the raw-`T` lift the block
+/// handle came back AS the payload — `p1=(` for a String, garbage for a tuple,
+/// invalid wasm for an Int (#1967). `can_err` is about the err CHANNEL; the
+/// ABI question is REPRESENTATION, and only a lifted callee answers raw `T`.
 fn body_has_tail_position_canerr_try(
     body: &IrExpr,
     can_err: &std::collections::HashSet<String>,
+    lifted: &std::collections::HashSet<String>,
 ) -> bool {
-    fn scan(e: &IrExpr, can_err: &std::collections::HashSet<String>) -> bool {
+    fn scan(
+        e: &IrExpr,
+        can_err: &std::collections::HashSet<String>,
+        lifted: &std::collections::HashSet<String>,
+    ) -> bool {
         match &e.kind {
             IrExprKind::Unwrap { expr } | IrExprKind::Try { expr } => match &expr.kind {
                 IrExprKind::Call { target: CallTarget::Named { name }, .. } => {
-                    can_err.contains(name.as_str())
+                    can_err.contains(name.as_str()) || !lifted.contains(name.as_str())
                 }
                 IrExprKind::Call { target: CallTarget::Module { .. }, .. }
                 | IrExprKind::RuntimeCall { .. } => true,
                 _ => false,
             },
-            IrExprKind::Block { expr, .. } => expr.as_deref().is_some_and(|t| scan(t, can_err)),
-            IrExprKind::If { then, else_, .. } => scan(then, can_err) || scan(else_, can_err),
-            IrExprKind::Match { arms, .. } => arms.iter().any(|a| scan(&a.body, can_err)),
+            IrExprKind::Block { expr, .. } => {
+                expr.as_deref().is_some_and(|t| scan(t, can_err, lifted))
+            }
+            IrExprKind::If { then, else_, .. } => {
+                scan(then, can_err, lifted) || scan(else_, can_err, lifted)
+            }
+            IrExprKind::Match { arms, .. } => arms.iter().any(|a| scan(&a.body, can_err, lifted)),
             _ => false,
         }
     }
-    scan(body, can_err)
+    scan(body, can_err, lifted)
 }
 
 

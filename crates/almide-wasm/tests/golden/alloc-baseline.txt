@@ -216,6 +216,7 @@
 66512	spec/wasm_cross/grain_records_enums.almd
 66880	spec/wasm_cross/grain_string_escapes.almd
 70112	spec/wasm_cross/grouping_unary.almd
+66480	spec/wasm_cross/guard_err_in_call_arg_block.almd
 66352	spec/wasm_cross/guard_let_statement.almd
 65888	spec/wasm_cross/guard_statement.almd
 782864	spec/wasm_cross/gzip_inflate_members.almd
@@ -551,6 +552,7 @@
 68160	spec/wasm_cross/string_split_rle_codepoint.almd
 86928	spec/wasm_cross/string_to_upper.almd
 77632	spec/wasm_cross/string_whitespace.almd
+66304	spec/wasm_cross/tail_bang_over_declared_result_callee.almd
 66000	spec/wasm_cross/tco_let_bound_if.almd
 67424	spec/wasm_cross/tco_map_acc_seed.almd
 65936	spec/wasm_cross/tco_multi_concat.almd

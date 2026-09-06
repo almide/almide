@@ -161,7 +161,7 @@ pub fn populate_abi_registries(fns: &[IrFunction], _record_layouts: &RecordLayou
                         || (f.is_effect && can_err.contains(f.name.as_str())))
                     && (body_has_stmt_position_propagating_unwrap(&f.body)
                     || body_has_tail_position_option_unwrap(&f.body)
-                    || body_has_tail_position_canerr_try(&f.body, &can_err)
+                    || body_has_tail_position_canerr_try(&f.body, &can_err, &lifted_effect_fns)
                     // #841: EVERY non-Unit CAN-ERR lifted effect fn always-wraps. Its
                     // uncovered shapes (a `!` nested in a branch block, an
                     // argument-position `!`) err via a wrapped block while the ok

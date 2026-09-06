@@ -167,7 +167,24 @@ impl Emitter<'_> {
         self.f.instructions().i32_eqz().if_(BlockType::Empty);
         match self.fn_ret {
             Some(want) => {
-                self.lower(else_, Some(want))?;
+                // `guard c else err(m)!` in an effect fn: the `!` over a
+                // Result whose type IS this fn's Result is propagation —
+                // the else-arm's value is the fn's return, not its unwrapped
+                // payload. Lowering the Unwrap as an unwrap produced the
+                // payload type and walled with `ty-mismatch:Scalar(Int)-vs-
+                // Result` (#1968), routing a correct program to the
+                // incumbent (#1967). The native walker strips the same
+                // wrapper (#1926).
+                let ret_direct = match &else_.kind {
+                    IrExprKind::Unwrap { expr } | IrExprKind::Try { expr }
+                        if matches!(want, SliceTy::Result(..))
+                            && slice_ty_of(&expr.ty, self.types) == Some(want) =>
+                    {
+                        Some(&**expr)
+                    }
+                    _ => None,
+                };
+                self.lower(ret_direct.unwrap_or(else_), Some(want))?;
                 self.f.instructions().return_();
             }
             // main / Unit fn: the else IS the return — evaluate it in

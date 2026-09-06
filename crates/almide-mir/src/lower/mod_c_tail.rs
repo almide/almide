@@ -281,7 +281,20 @@ fn wrap_return_positions_go(expr: &mut IrExpr, decl_ty: &Ty, result_ty: &Ty, in_
         {
             false
         }
-        IrExprKind::Call { target: CallTarget::Named { .. } | CallTarget::Computed { .. } | CallTarget::Method { .. }, .. }
+        // A NAMED callee yields the carrier only when it HAS a Result ABI: a
+        // sibling in `AUTO_WRAP_ABI_FNS` (the self-call included — this fn is
+        // being wrapped exactly because it is in that set). A plain `fn big(x:
+        // Int) -> Int` in the tail is a VALUE producer like any Module call:
+        // declining it left the raw i64 as the fn's return against the promised
+        // i32 carrier — invalid wasm at validate for `{ let g = w_ok(5)!;
+        // big(g) }` (#1968, the incumbent residue). It falls through to the
+        // value wrap below, where `ty == decl_ty` still gates it.
+        IrExprKind::Call { target: CallTarget::Named { name }, .. }
+            if crate::lower::AUTO_WRAP_ABI_FNS.with(|s| s.borrow().contains(name.as_str())) =>
+        {
+            false
+        }
+        IrExprKind::Call { target: CallTarget::Computed { .. } | CallTarget::Method { .. }, .. }
         | IrExprKind::TailCall { .. } => false,
         _ => {
             // A VALUE in return position. Wrap it when it produces the declared
