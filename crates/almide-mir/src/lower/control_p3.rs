@@ -175,6 +175,20 @@ impl LowerCtx {
                 return self.try_lower_opt_fn_unwrap_or(expr, fallback, track_result);
             }
         }
+        // A TUPLE payload with a heap component (`Option[(String, Int)]`,
+        // #1942): the variant-value match below admits it through the
+        // tuple-payload desugar and merges the payload handle as if the whole
+        // tuple were one heap slot — the String half read back as a garbage
+        // handle (`\0` / `\254` bytes, exit 0) on BOTH arms, where the
+        // hand-written `match` (the bind-position route with the branch lift)
+        // is right. Decline here so the bind-position rewrite takes that
+        // proven route; the inline position materializes through it too.
+        if let Ty::Tuple(ts) = &fallback.ty {
+            if ts.iter().any(is_heap_ty) {
+                crate::trace::trace("ALMIDE_DBG_QQ", || format!("[qq] declined {:?} ?? (heap tuple payload — bind route)", expr.ty));
+                return None;
+            }
+        }
         let synth = IrExpr {
             kind: IrExprKind::Unit,
             ty: fallback.ty.clone(),

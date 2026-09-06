@@ -654,6 +654,7 @@
 66992	spec/wasm_cross/unwrap_or_source_survives.almd
 66064	spec/wasm_cross/unwrap_or_strict_default.almd
 67616	spec/wasm_cross/unwrap_or_tail_result.almd
+66128	spec/wasm_cross/unwrap_or_tuple_payload_extract.almd
 76208	spec/wasm_cross/unwrap_or_unwrap_fallback.almd
 74832	spec/wasm_cross/uoe_heap_ok_share.almd
 66400	spec/wasm_cross/user_box_recursive_enum.almd

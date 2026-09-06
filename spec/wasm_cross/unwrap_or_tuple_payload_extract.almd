@@ -1,0 +1,20 @@
+// @contract: C-172
+// `??` over an Option whose payload is a tuple with a heap component, in the
+// let-bound and the inline-extraction positions, some and none arms. The
+// incumbent wasm leg read the let-bound form's String half back as a garbage
+// handle (exit 0, no wall — #1942) and walled the inline `(o ?? d).0`
+// (#1904) while the eager `option.unwrap_or` call lowered; both now take the
+// bind-position match route. The structural leg served both all along.
+fn pick(o: (String, Int)?) -> String = {
+  let t = o ?? ("dflt", 7)
+  "${t.0}/${int.to_string(t.1)}"
+}
+
+fn head(o: (String, Int)?) -> String = (o ?? ("", 0)).0
+
+fn main() -> Unit = {
+  println(pick(some(("a", 1))))
+  println(pick(none))
+  println(head(some(("h", 2))))
+  println("[" + head(none) + "]")
+}
