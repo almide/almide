@@ -83,6 +83,7 @@ global GlobalType { content_type: I64, mutable: true, shared: false } = I64Const
 global GlobalType { content_type: I32, mutable: true, shared: false } = I32Const { value: 0 } End
 global GlobalType { content_type: I32, mutable: true, shared: false } = I32Const { value: 65792 } End
 global GlobalType { content_type: I32, mutable: true, shared: false } = I32Const { value: 0 } End
+global GlobalType { content_type: I32, mutable: true, shared: false } = I32Const { value: 65792 } End
 export memory Memory 0
 export main Func 44
 export __heap Global 1
