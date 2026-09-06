@@ -336,6 +336,10 @@ differential fuzz, an emit-time Σ-probe, or a Lean theorem. The index is
   names its contract(s), and the link is bidirectional. The evidence-class
   vocabulary is shared with the rt-oracle-registry via
   `scripts/lib/contract-classes.txt`.
+- **A new `C-NNN` lands in [almide/als](https://github.com/almide/als) FIRST.** The judge
+  holds the normative ledger; `scripts/check-als-pin.sh` (CI `checks`) refuses any contract
+  id absent from the judge's ledger at the commit pinned in `proofs/als-pin.txt`. Order: als
+  PR (contract + fixture) merges → advance the pin in its own commit → the implementation PR.
 - **Aggregate counts are stamped, not regenerated per PR.** Every "N contracts /
   N fixtures" total the generated docs quote renders from `proofs/ledger-counts.toml`
   inside a dated `counts:generated` block. A fixture/contract PR regenerates the
