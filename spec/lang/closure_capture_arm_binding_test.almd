@@ -31,7 +31,7 @@ test "arm binding captured by a closure and reused" {
 // use-after-capture shape from a real CLI (`peek`). Fixed on develop by the
 // #1925 scoping (this file's first case); pinned here because the report
 // reached 0.62.0 with the second use in interpolation rather than a match.
-effect fn pick(names: List[String], want: Option[String]) -> Result[String, String] = match want {
+effect fn pick(names: List[String], want: String?) -> Result[String, String] = match want {
   some(name) => {
     let near = list.filter(names, (s) => string.contains(string.to_lower(s), string.to_lower(name)))
     err("no `${name}` (near: ${list.join(near, ", ")})")
