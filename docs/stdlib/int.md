@@ -81,6 +81,34 @@ fn main() -> Unit = {
 5
 ```
 
+### `int.is_even(n: Int) -> Bool`
+
+Parity predicate: `true` when `n` is divisible by 2. Negative values and the
+bounds are exact (`%` keeps the dividend's sign, so the test is `% 2 == 0`).
+
+```almd run
+fn main() -> Unit = {
+  println("${int.is_even(4)} ${int.is_even(-3)} ${int.is_even(0)}")
+}
+```
+```output
+true false true
+```
+
+### `int.is_odd(n: Int) -> Bool`
+
+The other half of the parity pair: `true` when `n` is not divisible by 2.
+Scalar `int` only — a sized value reaches it through `int.from_int8(x)`.
+
+```almd run
+fn main() -> Unit = {
+  println("${int.is_odd(7)} ${int.is_odd(-3)} ${int.is_odd(4)}")
+}
+```
+```output
+true true false
+```
+
 ### `int.min(a: Int, b: Int) -> Int`
 
 Return the smaller of two integers.
@@ -319,7 +347,7 @@ numeric-matrix gate in `almide docs-gen --check`.
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (70 functions)
+## Signature index (72 functions)
 
 ```
 int.to_string(n: Int) -> String
@@ -333,6 +361,8 @@ int.abs(n: Int) -> Int
 int.min(a: Int, b: Int) -> Int
 int.max(a: Int, b: Int) -> Int
 int.clamp(n: Int, lo: Int, hi: Int) -> Int
+int.is_even(n: Int) -> Bool
+int.is_odd(n: Int) -> Bool
 int.band(a: Int, b: Int) -> Int
 int.bor(a: Int, b: Int) -> Int
 int.bxor(a: Int, b: Int) -> Int
