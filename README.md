@@ -207,6 +207,7 @@ almide run app.almd                  # Compile + execute (native)
 almide build app.almd --target wasm  # Build WebAssembly (WASI)
 almide test                          # Find and run all test blocks (recursive)
 almide check app.almd                # Type check only
+almide check app.almd --target wasm  # + the wasm build route: E081/E082 at check time (#1922)
 almide fmt app.almd                  # Format source code
 ```
 

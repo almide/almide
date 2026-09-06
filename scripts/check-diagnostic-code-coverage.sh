@@ -28,7 +28,9 @@ cd "$ROOT"
 # E081 fires in the BUILD path (--target wasm availability, #1423) — the
 # check-harness fixture format cannot reach it; its pin is
 # tests/wasm_availability_e081_test.rs (the E054 precedent).
-EXEMPT="E054 E081"
+# E082 (#1922) is the both-legs wasm wall, same path and same precedent —
+# pinned by tests/wasm_both_legs_e082_test.rs.
+EXEMPT="E054 E081 E082"
 
 fail=0
 total=0

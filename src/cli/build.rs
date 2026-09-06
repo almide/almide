@@ -909,7 +909,10 @@ fn render_wasm_module_routed(
             // and the reader bisects a function the structural leg lowers fine
             // for a reason that belongs to the other engine.
             err(&format!("wall (structural leg, the default): {why}"));
-            err("note: both wasm legs refused this program — the failure above these lines is the incumbent fallback's; the structural leg's own reason is the `wall (structural leg…)` line.");
+            // #1922: the both-legs refusal is a named diagnostic. `almide check
+            // --target wasm` runs this same routing and surfaces it at check
+            // time; the build path stays the backstop.
+            err("error[E082]: both wasm legs refused this program on the stock-WASI build path — the failure above these lines is the incumbent fallback's; the structural leg's own reason is the `wall (structural leg…)` line.\n  note: `almide run --target wasm` (the embedded host) may still serve it; `almide check --target wasm` reports this verdict without building");
         }
         res
     };
