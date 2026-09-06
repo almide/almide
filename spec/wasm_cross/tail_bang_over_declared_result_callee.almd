@@ -1,0 +1,42 @@
+// @contract: C-343
+// A tail `!` over a PLAIN fn declared `-> Result[T, E]` inside an effect fn
+// declared `-> T` yields the Ok payload on every leg, for a scalar, a heap and
+// a tuple payload alike. The callee never errs (`ok(x)`), so the effect fn was
+// classified never-err and lifted to a raw-payload ABI on the incumbent wasm
+// leg — but its tail lowering passed the callee's REAL Result block through
+// as if it were the fn's own carrier: `p_str` printed `(` (the block's first
+// byte read as a String), `p_tup` a garbage Int, `p_int` failed wasm
+// validation. The structural leg was right but walled on the `guard` form
+// (C-344), which routed the default build to the incumbent. Composition
+// fuzz family, seed 7 (#1967). The `!` over a can-err callee (`w_err`) still
+// propagates its Err.
+fn w_ok_str(x: String) -> Result[String, String] = ok(x)
+
+fn w_ok_int(x: Int) -> Result[Int, String] = ok(x)
+
+fn w_ok_tup(x: Int) -> Result[(Int, String), String] = ok((x, "z"))
+
+fn w_err(x: Int) -> Result[Int, String] = if x < 0 then err("neg") else ok(x)
+
+effect fn p_str() -> String = w_ok_str(string.repeat("a", 4))!
+
+effect fn p_int() -> Int = w_ok_int(4)!
+
+effect fn p_tup() -> (Int, String) = w_ok_tup(4)!
+
+effect fn p_err(x: Int) -> Int = w_err(x)!
+
+effect fn main() -> Unit = {
+  println("str=${p_str()!} len=${string.len(p_str()!)}")
+  println("int=${p_int()!}")
+  let t = p_tup()!
+  println("tup=${t.0} ${t.1}")
+  match p_err(3) {
+    ok(v) => println("err3=ok ${v}"),
+    err(e) => println("err3=err ${e}"),
+  }
+  match p_err(-3) {
+    ok(v) => println("errneg=ok ${v}"),
+    err(e) => println("errneg=err ${e}"),
+  }
+}
