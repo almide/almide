@@ -56,10 +56,17 @@ jobs:
           fi
           reclaimed=0
           for job in $failed; do
-            # The runner-shutdown message arrives as a job annotation; a
-            # shard that died any other way carries none and is left alone.
-            if gh api --paginate "repos/$REPO/check-runs/$job/annotations" \
-                 --jq '.[].message' | grep -q "runner has received a shutdown signal"; then
+            # A reclaim leaves TWO marks and only the second is in the
+            # annotations: the step's `Process completed with exit code 143`
+            # (SIGTERM) annotation, and the runner's own `The runner has
+            # received a shutdown signal` line in the job LOG (measured on
+            # run 34012629910 shard 4: the first retry judged it "failed on
+            # its own" because it read the annotations alone). Either mark
+            # names the reclaim; a harness crash carries neither.
+            if gh api "repos/$REPO/actions/jobs/$job/logs" 2>/dev/null \
+                 | grep -q "runner has received a shutdown signal" \
+               || gh api --paginate "repos/$REPO/check-runs/$job/annotations" \
+                 --jq '.[].message' | grep -q "exit code 143"; then
               echo "job $job: reclaimed by the runner"
               reclaimed=$((reclaimed + 1))
             else
