@@ -25,3 +25,26 @@ test "arm binding captured by a closure and reused" {
   assert_eq(show(check(some("z"), ["a"])), "ok 0")
   assert_eq(show(check(none, [])), "ok 0")
 }
+
+// #1948: the same arm binding, captured by a closure handed to `list.filter`
+// and then read again by a string interpolation AFTER the closure call — the
+// use-after-capture shape from a real CLI (`peek`). Fixed on develop by the
+// #1925 scoping (this file's first case); pinned here because the report
+// reached 0.62.0 with the second use in interpolation rather than a match.
+effect fn pick(names: List[String], want: Option[String]) -> Result[String, String] = match want {
+  some(name) => {
+    let near = list.filter(names, (s) => string.contains(string.to_lower(s), string.to_lower(name)))
+    err("no `${name}` (near: ${list.join(near, ", ")})")
+  },
+  none => ok("all"),
+}
+
+fn show_pick(r: Result[String, String]) -> String = match r {
+  ok(s) => s,
+  err(e) => e,
+}
+
+test "arm binding captured by a filter closure and interpolated after" {
+  assert_eq(show_pick(pick(["apply", "applied"], some("Appl"))), "no `Appl` (near: apply, applied)")
+  assert_eq(show_pick(pick(["apply"], none)), "all")
+}
