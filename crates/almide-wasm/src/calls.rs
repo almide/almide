@@ -235,6 +235,19 @@ impl Emitter<'_> {
         if args.len() != fields.len() {
             return unsup(&format!("ctor-arity:{name}"));
         }
+        // A nullary case (`Leaf`, `None`-like markers, enum-style
+        // variants) is a static block in the pool, one per (type, case)
+        // (#1961): it carries only its tag, nothing ever writes it, and
+        // the rc ops no-op below the heap floor — so binarytrees' 2^19
+        // leaves cost zero allocations instead of two thirds of them.
+        if fields.is_empty() {
+            let mut payload = vec![0u8; size as usize];
+            let at = almide_layout::SUM_TAG as usize;
+            payload[at..at + 4].copy_from_slice(&tag.to_le_bytes());
+            let block = self.pool.intern_block(&payload);
+            self.f.instructions().i32_const(block as i32);
+            return Ok(Some(SliceTy::Named(ti)));
+        }
         let hold = self.hold_i32()?;
         self.f
             .instructions()
