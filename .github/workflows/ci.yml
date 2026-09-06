@@ -1123,6 +1123,9 @@ jobs:
       - name: Contract ledger traceability (every contract evidenced, every fixture contracted)
         run: scripts/check-contracts.sh
 
+      - name: ALS pin — every contract id is known to the judge at proofs/als-pin.txt (als #60)
+        run: bash scripts/check-als-pin.sh
+
       - name: WASI/Component-Model pin policy (#1628 stage 4)
         run: bash scripts/check-wasi-pins.sh
 
