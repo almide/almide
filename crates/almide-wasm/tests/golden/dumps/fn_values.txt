@@ -262,6 +262,16 @@ code locals=[4xI32]
   LocalSet { local_index: 2 }
   End
   LocalGet { local_index: 2 }
+  LocalGet { local_index: 1 }
+  I32LtU
+  If { blockty: Empty }
+  I32Const { value: 177 }
+  Call { function_index: 6 }
+  I32Const { value: 1 }
+  Call { function_index: 2 }
+  Unreachable
+  End
+  LocalGet { local_index: 2 }
   MemorySize { mem: 0 }
   I32Const { value: 16 }
   I32Shl
