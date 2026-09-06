@@ -14,6 +14,7 @@ use crate::*;
 pub(crate) struct AssembleIn<'a> {
     /// Pooled "Error: out of memory" block for the allocator's C-197 die.
     pub(crate) oom_msg: u32,
+    pub(crate) repeat_msg: u32,
     pub(crate) table: &'a FnTable,
     pub(crate) work: &'a FnWork,
     pub(crate) pool: &'a Pool,
@@ -40,6 +41,7 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
         work,
         pool,
         oom_msg,
+        repeat_msg,
         lowered,
         reachable,
         main_fn,
@@ -301,7 +303,7 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
         (F_F16_TO_F64, emit_f16_to_f64()),
         (F_CP_OFF, emit_cp_off()),
         (F_STR_SLICE, emit_str_slice()),
-        (F_STR_REPEAT, emit_str_repeat()),
+        (F_STR_REPEAT, emit_str_repeat(repeat_msg)),
         (F_STR_CMP, emit_str_cmp()),
         (F_STR_REPLACE, emit_str_replace()),
         (F_COPY, emit_copy()),

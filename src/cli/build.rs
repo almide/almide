@@ -1129,15 +1129,19 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
                     if path.first().is_some_and(|r| names.contains(&r.as_str())))
             })
     };
-    // Build-time host routing: env/process ride the incumbent (no
+    // Build-time host routing: process rides the incumbent (no
     // structural surface); fs rides the incumbent because the p1
     // `to_wasi` transform carries no fs ops — EXCEPT when the build is
     // headed for the direct p3 component (#1628 increment 2d), whose
     // shim now carries the full fs read+write surface, so fs programs
     // flip to the structural leg there by default (#1584's first
-    // default-route slice).
+    // default-route slice). `env` is NOT in the scan any more (#1921's
+    // first slice): the p1 shim serves get/set/os/cwd/temp_dir/args
+    // structurally, and an env fn it does not link walls at lowering and
+    // takes the verified-to-verified reroute like any other unlinked fn —
+    // the per-fn auto-flip #1598 established, not a module-level denial.
     let p3_requested = std::env::var_os("ALMIDE_COMPONENT_P3").is_some();
-    let host_variant = imports_module(&["env", "process"])
+    let host_variant = imports_module(&["process"])
         || (imports_module(&["fs"]) && !p3_requested);
     // #1598 CLOSED as per-fn auto-flip: the matrix/io module pre-scan is
     // GONE. The linked surfaces (io.read_all via the host's op-31 drain

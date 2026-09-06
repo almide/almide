@@ -310,12 +310,14 @@ fn emit_program_pass(
     let (extra_fns, entry_fn_indices) = resolve_extras(&table, &work, &lifted_fns);
 
     let oom_msg = pool.intern("Error: out of memory");
+    let repeat_msg = pool.intern("Error: repeat result too large");
     let total = lowered.len();
     let bytes = assemble_module(AssembleIn {
         table: &table,
         work: &work,
         pool: &pool,
         oom_msg,
+        repeat_msg,
         lowered: &lowered,
         reachable: &visited,
         main_fn: &main_fn,

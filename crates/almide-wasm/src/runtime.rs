@@ -265,7 +265,7 @@ pub(crate) fn emit_str_slice() -> Function {
 /// `$str_repeat(base, n) -> i32`: n clamps at 0; the oracle aborts past
 /// 2 GiB (`ALMIDE_REPEAT_MAX_BYTES`) — here that is a trap in the same
 /// abort-pending class.
-pub(crate) fn emit_str_repeat() -> Function {
+pub(crate) fn emit_str_repeat(repeat_msg: u32) -> Function {
     // params: 0=base, 1=n i64; locals: 2=len i32, 3=total i64, 4=r i32, 5=k i64
     let (bbase, n, len, total, r, k) = (0u32, 1u32, 2u32, 3u32, 4u32, 5u32);
     let payload = almide_layout::PAYLOAD as i32;
@@ -276,10 +276,23 @@ pub(crate) fn emit_str_repeat() -> Function {
     i.i32_const(0).call(F_ALLOC).return_();
     i.end();
     i.local_get(bbase).i32_load(len_memarg()).local_set(len);
-    i.local_get(len).i64_extend_i32_u().local_get(n).i64_mul().local_set(total);
-    i.local_get(total).i64_const(1 << 31).i64_gt_s().if_(BlockType::Empty);
-    i.unreachable();
+    // The C-161 ceiling, tested by DIVISION (`n > 2^31 / len`, the
+    // stdlib/string_repeat.almd guard verbatim): `len * n` is the very
+    // multiplication that overflows for a huge n, and a guard computed
+    // from the wrapped product tests nothing. Past it is the DEFINED
+    // abort — `Error: repeat result too large`, exit 1 — the same line
+    // the native runtime and the self-host print. Before, this helper
+    // trapped a bare `unreachable` with NOTHING on stderr; the fixture
+    // that pins the line (repeat_size_ceiling) imported env and so rode
+    // the incumbent, which is why the structural leg's silence went
+    // unmeasured until env programs routed structurally (#1921).
+    i.local_get(len).i32_const(0).i32_gt_u();
+    i.local_get(n).i64_const(1 << 31).local_get(len).i64_extend_i32_u().i64_div_u().i64_gt_s();
+    i.i32_and().if_(BlockType::Empty);
+    i.i32_const(repeat_msg as i32).call(F_EPRINTLN_BLOCK);
+    i.i32_const(1).call(F_EXIT_IMPORT).unreachable();
     i.end();
+    i.local_get(len).i64_extend_i32_u().local_get(n).i64_mul().local_set(total);
     i.local_get(total).i32_wrap_i64().call(F_ALLOC).local_set(r);
     i.i64_const(0).local_set(k);
     i.block(BlockType::Empty).loop_(BlockType::Empty);
