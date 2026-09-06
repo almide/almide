@@ -1,0 +1,16 @@
+// @contract: C-161
+// `string.repeat` of an EMPTY string, any count: the empty string on both
+// legs, never a trap. The structural leg's `$str_repeat` helper gained the
+// division-form ceiling test (`n > 2^31 / len`) and joined it to `len > 0`
+// with `i32.and` — wasm evaluates both operands eagerly, so the division
+// ran for an empty string and trapped on the zero divisor (three nightly
+// findings, 2026-09-06: `string.repeat("", 3)`, a repeat of an empty slice,
+// `string.is_whitespace(string.repeat("", 3))`). The guard nests now.
+fn main() -> Unit = {
+  println("[" + string.repeat("", 3) + "]")
+  println("[" + string.repeat("", 0) + "]")
+  println("[" + string.repeat(string.slice("abc", 5, 1), 5) + "]")
+  println(if string.is_whitespace(string.repeat("", 3)) then "ws" else "not-ws")
+  println("[" + string.repeat("ab", 3) + "]")
+  println("[" + string.repeat("é", 2) + "]")
+}

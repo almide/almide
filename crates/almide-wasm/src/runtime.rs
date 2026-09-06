@@ -286,11 +286,16 @@ pub(crate) fn emit_str_repeat(repeat_msg: u32) -> Function {
     // that pins the line (repeat_size_ceiling) imported env and so rode
     // the incumbent, which is why the structural leg's silence went
     // unmeasured until env programs routed structurally (#1921).
-    i.local_get(len).i32_const(0).i32_gt_u();
+    // NESTED ifs, not `i32.and`: wasm evaluates both operands of `and`
+    // eagerly, so the division ran for an EMPTY string too and trapped
+    // on the zero divisor (`string.repeat("", 3)` — three nightly
+    // findings, 2026-09-06). The division only exists under `len > 0`.
+    i.local_get(len).i32_const(0).i32_gt_u().if_(BlockType::Empty);
     i.local_get(n).i64_const(1 << 31).local_get(len).i64_extend_i32_u().i64_div_u().i64_gt_s();
-    i.i32_and().if_(BlockType::Empty);
+    i.if_(BlockType::Empty);
     i.i32_const(repeat_msg as i32).call(F_EPRINTLN_BLOCK);
     i.i32_const(1).call(F_EXIT_IMPORT).unreachable();
+    i.end();
     i.end();
     i.local_get(len).i64_extend_i32_u().local_get(n).i64_mul().local_set(total);
     i.local_get(total).i32_wrap_i64().call(F_ALLOC).local_set(r);

@@ -544,6 +544,7 @@
 67968	spec/wasm_cross/string_ops_drain.almd
 87312	spec/wasm_cross/string_passthrough_share.almd
 112240	spec/wasm_cross/string_predicates.almd
+66352	spec/wasm_cross/string_repeat_empty.almd
 67696	spec/wasm_cross/string_rle.almd
 68160	spec/wasm_cross/string_split_rle_codepoint.almd
 86928	spec/wasm_cross/string_to_upper.almd
