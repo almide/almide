@@ -288,9 +288,20 @@ fn wrap_return_positions_go(expr: &mut IrExpr, decl_ty: &Ty, result_ty: &Ty, in_
         // declining it left the raw i64 as the fn's return against the promised
         // i32 carrier — invalid wasm at validate for `{ let g = w_ok(5)!;
         // big(g) }` (#1968, the incumbent residue). It falls through to the
-        // value wrap below, where `ty == decl_ty` still gates it.
+        // value wrap below, where `ty == decl_ty` still gates it. SPINE
+        // positions only, exactly like the Module-call rule: a named call
+        // inside a Match/If ARM stays declined — wrapping it there retyped
+        // the heap-result matches of fs_streaming / fs_if_exists /
+        // fs_fold_lines_range / lambda_effect_symmetry out of the executable
+        // subset (the CI wasm-coverage ratchet on #1971). A UNIT-typed named
+        // call (`assert_eq(..)` ending a test fn) stays declined too, for the
+        // Module-call reason: the unit-tail machinery already turns it into a
+        // statement + `ok(())`, and wrapping the call itself walled every test
+        // fn ending in an assert (lambda_effect_symmetry, the fs_* tests).
         IrExprKind::Call { target: CallTarget::Named { name }, .. }
-            if crate::lower::AUTO_WRAP_ABI_FNS.with(|s| s.borrow().contains(name.as_str())) =>
+            if in_branch
+                || matches!(expr.ty, Ty::Unit)
+                || crate::lower::AUTO_WRAP_ABI_FNS.with(|s| s.borrow().contains(name.as_str())) =>
         {
             false
         }

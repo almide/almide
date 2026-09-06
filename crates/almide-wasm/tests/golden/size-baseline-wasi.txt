@@ -216,7 +216,7 @@
 3519	spec/wasm_cross/grain_records_enums.almd
 4611	spec/wasm_cross/grain_string_escapes.almd
 8142	spec/wasm_cross/grouping_unary.almd
-4293	spec/wasm_cross/guard_err_in_call_arg_block.almd
+3858	spec/wasm_cross/guard_err_in_call_arg_block.almd
 5241	spec/wasm_cross/guard_let_statement.almd
 2913	spec/wasm_cross/guard_statement.almd
 25658	spec/wasm_cross/gzip_inflate_members.almd
