@@ -117,23 +117,27 @@ impl Emitter<'_> {
             }
             ("alloc_bytes", [n]) => {
                 self.lower(n, Some(INT))?;
+                self.emit_alloc_size_guard(1)?;
                 self.f.instructions().i32_wrap_i64().call(F_ALLOC);
                 Ok(Some(SliceTy::Scalar(Scalar::Bytes)))
             }
             ("alloc_str", [n]) => {
                 self.lower(n, Some(INT))?;
+                self.emit_alloc_size_guard(1)?;
                 self.f.instructions().i32_wrap_i64().call(F_ALLOC);
                 Ok(Some(STR))
             }
             ("alloc_list", [n]) => {
                 // List[Int]: n slots of 8 bytes.
                 self.lower(n, Some(INT))?;
+                self.emit_alloc_size_guard(8)?;
                 self.f.instructions().i32_wrap_i64().i32_const(8).i32_mul().call(F_ALLOC);
                 Ok(Some(SliceTy::List(self.types.intern(INT))))
             }
             ("alloc_list_f64", [n]) => {
                 // List[Float]: the same 8-byte slots, Float-typed.
                 self.lower(n, Some(INT))?;
+                self.emit_alloc_size_guard(8)?;
                 self.f.instructions().i32_wrap_i64().i32_const(8).i32_mul().call(F_ALLOC);
                 Ok(Some(SliceTy::List(self.types.intern(FLOAT))))
             }
@@ -350,5 +354,30 @@ impl Emitter<'_> {
             }
             _ => unsup(&format!("call:prim.{func}")),
         }
+    }
+}
+
+impl Emitter<'_> {
+    /// The prim allocators' size judgment, in i64 BEFORE the i32 wrap
+    /// (the `bytes.new` / `bytes.repeat` shape, C-197): an element count
+    /// whose byte total lies past the structural bound is the defined
+    /// `Error: out of memory` abort, never a wrapped small request that
+    /// the allocator satisfies and the element stores then overrun
+    /// (#1908's sibling: `bytes.read_f16_le_array(b, 0, i64::MAX)` wrapped
+    /// `n * 8` to a small size and trapped out of bounds on the first
+    /// store past it, where native died in the C-197 form). The count is
+    /// on the stack (i64) and stays there.
+    pub(crate) fn emit_alloc_size_guard(&mut self, elem_bytes: i64) -> Result<(), EmitError> {
+        let h = self.hold_i64()?;
+        let oom = self.pool.intern("Error: out of memory");
+        let mut i = self.f.instructions();
+        i.local_tee(h);
+        i.local_get(h).i64_const(0x7FFF_0000 / elem_bytes).i64_gt_s().if_(BlockType::Empty);
+        i.i32_const(oom as i32).call(F_EPRINTLN_BLOCK);
+        i.i32_const(1).call(F_EXIT_IMPORT).unreachable();
+        i.end();
+        let _ = i;
+        self.release_i64();
+        Ok(())
     }
 }

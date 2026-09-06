@@ -269,6 +269,12 @@ Definition grow_span (oom_leb : list Z) : list Z :=
    75;27;64;0] ++ [65] ++ oom_leb ++ [72;4;64] ++ [65] ++ oom_leb ++
   [16;6;65;1;16;2;0;11].
 
+(* The wrap guard's body (#1908): the C-197 die — `i32.const oom; call
+   $eprintln_block; i32.const 1; call $exit; unreachable` — the same five
+   instructions that close the grow span. *)
+Definition oom_span (oom_leb : list Z) : list Z :=
+  [65] ++ oom_leb ++ [16;6;65;1;16;2;0].
+
 Fixpoint strip_prefix (pre bs : list Z) : option (list Z) :=
   match pre, bs with
   | [], r => Some r
@@ -301,6 +307,14 @@ Fixpoint adecode_go (fuel : nat) (oom_leb : list Z) (bs : list Z)
           match stk with
           | cnd :: stk' =>
               adecode_go f oom_leb r stk' (AIf cnd [SGrow] :: acc)
+          | [] => None
+          end
+      | None =>
+      match strip_prefix (4 :: 64 :: oom_span oom_leb ++ [11]) bs with
+      | Some r =>
+          match stk with
+          | cnd :: stk' =>
+              adecode_go f oom_leb r stk' (AIf cnd [SOom] :: acc)
           | [] => None
           end
       | None =>
@@ -416,6 +430,7 @@ Fixpoint adecode_go (fuel : nat) (oom_leb : list Z) (bs : list Z)
       | _ => None
       end
       end
+      end
   end.
 
 Definition adecode (oom_leb : list Z) (bs : list Z) : option (list astmt) :=
@@ -444,6 +459,7 @@ Definition alloc_bytes : list Z :=
    35;1;33;1;
    32;1;65;12;106;32;0;106;65;3;106;65;124;113;33;2;
    32;3;65;128;128;32;77;4;64;32;1;32;3;106;33;2;11;
+   32;2;32;1;73;4;64;65;0;16;6;65;1;16;2;0;11;
    32;2;63;0;65;16;116;75;
    4;64;32;2;63;0;65;16;116;107;65;255;255;3;106;65;16;118;63;0;
    32;2;63;0;65;16;116;107;65;255;255;3;106;65;16;118;63;0;

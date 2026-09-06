@@ -1,0 +1,14 @@
+// @contract: C-197
+// The prim allocators (`prim.alloc_list` / `alloc_list_f64` / `alloc_bytes` /
+// `alloc_str`, the self-host's floor) judge their element count in i64 BEFORE
+// the i32 wrap — the `bytes.new` / `bytes.repeat` rule. A count past the
+// structural bound is the defined `Error: out of memory` abort on both legs.
+// Before, `read_f16_le_array(b, 0, i64::MAX)` wrapped `n * 8` to a small size
+// the allocator satisfied, and the first element store past it was a raw
+// out-of-bounds trap (exit 134) against native's C-197 abort (exit 1) —
+// differential fuzz, seed 542118604760 index 417.
+fn main() -> Unit = {
+  println("before")
+  let xs = bytes.read_f16_le_array(bytes.from_list([255, 123, 0, 60]), 0, 9223372036854775807)
+  println("unreachable ${list.len(xs)}")
+}
