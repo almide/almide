@@ -372,20 +372,40 @@ fn env_overlay() -> &'static Mutex<std::collections::HashMap<String, String>> {
 
 /// fs_dispatch_meta for the complexity budget.
 fn fs_dispatch_host(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
+    let err_s = |m: String| (pack(1, m.len()), m.into_bytes());
+    match op {
+        // Decomposed by op family (codopsy cc 38 -> per-family fns): the
+        // http and env arms live in `fs_dispatch_http` / `fs_dispatch_env`.
+        43..=50 => fs_dispatch_http(op, a, b),
+        26 | 27 | 28 | 29 | 33 | 37 => fs_dispatch_env(op, a, b),
+        31 => (pack(0, 0), Vec::new()),
+        // incremental stdin (op 35) — same empty answer in the harness.
+        35 => (pack(0, 0), Vec::new()),
+        32 => {
+            let n = b.len();
+            let mut seed = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos() as u64
+                | 1;
+            let mut out = Vec::with_capacity(n);
+            for _ in 0..n {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                out.push(seed as u8);
+            }
+            (pack(0, out.len()), out)
+        }
+        _ => err_s(format!("unknown fs op {op}")),
+    }
+}
+
+/// The http op family (43..=50) of `fs_dispatch_host`, verbatim.
+fn fs_dispatch_http(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     let ok_text = |t: String| (pack(0, t.len()), t.into_bytes());
     let err_s = |m: String| (pack(1, m.len()), m.into_bytes());
     match op {
-        // env.get consults the env.set overlay FIRST (op 37): native's
-        // process-level setenv makes a later get observe the set, and the
-        // overlay reproduces that observable without std::env::set_var
-        // (unsafe under threads — the wasmtime host runs multi-threaded).
-        26 => match env_overlay().lock().expect("env overlay").get(a).cloned() {
-            Some(v) => ok_text(v),
-            None => match std::env::var(a) {
-                Ok(v) => ok_text(v),
-                Err(_) => (pack(2, 0), Vec::new()),
-            },
-        },
         // http string client (#1710 increment 1, ops 43..=47): url in a,
         // body (POST/PUT/PATCH) in b — THE native client transcribed
         // (http_client.rs), so error texts and framing match native
@@ -431,6 +451,37 @@ fn fs_dispatch_host(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
             }
         }
         // env.set (#1423 bucket C ruling): key in a, value in b.
+        _ => err_s(format!("unknown fs op {op}")),
+    }
+}
+
+/// The env op family (26/27/28/29/33/37) of `fs_dispatch_host`, verbatim.
+fn fs_dispatch_env(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
+    let ok_text = |t: String| (pack(0, t.len()), t.into_bytes());
+    let err_s = |m: String| (pack(1, m.len()), m.into_bytes());
+    match op {
+        // env.get consults the env.set overlay FIRST (op 37): native's
+        // process-level setenv makes a later get observe the set, and the
+        // overlay reproduces that observable without std::env::set_var
+        // (unsafe under threads — the wasmtime host runs multi-threaded).
+        26 => match env_overlay().lock().expect("env overlay").get(a).cloned() {
+            Some(v) => ok_text(v),
+            None => match std::env::var(a) {
+                Ok(v) => ok_text(v),
+                Err(_) => (pack(2, 0), Vec::new()),
+            },
+        },
+        // http string client (#1710 increment 1, ops 43..=47): url in a,
+        // body (POST/PUT/PATCH) in b — THE native client transcribed
+        // (http_client.rs), so error texts and framing match native
+        // byte-for-byte. Stock artifacts never reach here (the build-path
+        // op audit refuses unserved ops); the embedded lane serves them.
+        // The framed request family (#1710 increment 3, ops 48..=50):
+        // url in a, the decimal CHAR-length frame in b — method cell,
+        // body cell, then header key/value cells, `<len>\n<payload>`
+        // each, exactly as stdlib/http_framed.almd builds it. 48 answers
+        // the body text, 49 answers `<status>\n<body>`, 50 raw bytes.
+        // env.set (#1423 bucket C ruling): key in a, value in b.
         37 => {
             let v = String::from_utf8_lossy(b).to_string();
             env_overlay().lock().expect("env overlay").insert(a.to_string(), v);
@@ -441,14 +492,14 @@ fn fs_dispatch_host(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
         // args without a run context (#1716): [argv0] only — the fs_call
         // closure answers op 29 with the run's real args before dispatch
         // reaches here, so this arm is the no-Host fallback.
+        // args without a run context (#1716): [argv0] only — the fs_call
+        // closure answers op 29 with the run's real args before dispatch
+        // reaches here, so this arm is the no-Host fallback.
         29 => {
             let buf = frames(&["wasm-harness".to_string()]);
             (pack(0, buf.len()), buf)
         }
         // stdin read (up to n = a bytes) — the harness has no stdin.
-        31 => (pack(0, 0), Vec::new()),
-        // incremental stdin (op 35) — same empty answer in the harness.
-        35 => (pack(0, 0), Vec::new()),
         // cwd — the same std::env the native runtime reads.
         33 => match std::env::current_dir() {
             Ok(p) => ok_text(p.to_string_lossy().replace('\\', "/")),
@@ -456,22 +507,6 @@ fn fs_dispatch_host(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
         },
         // host entropy: n = b_len bytes from a seeded-by-time xorshift
         // (the range property is the only observable, C-112).
-        32 => {
-            let n = b.len();
-            let mut seed = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos() as u64
-                | 1;
-            let mut out = Vec::with_capacity(n);
-            for _ in 0..n {
-                seed ^= seed << 13;
-                seed ^= seed >> 7;
-                seed ^= seed << 17;
-                out.push(seed as u8);
-            }
-            (pack(0, out.len()), out)
-        }
         _ => err_s(format!("unknown fs op {op}")),
     }
 }
