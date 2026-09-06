@@ -1817,6 +1817,18 @@ probe = 'int.clamp(15, 0, 10)'
 expect = "10"
 
 [[int.fn]]
+name = "is_even"
+index_unit = "value"
+probe = 'int.is_even(0 - 4)'
+expect = "true"
+
+[[int.fn]]
+name = "is_odd"
+index_unit = "value"
+probe = 'int.is_odd(0 - 3)'
+expect = "true"
+
+[[int.fn]]
 name = "band"
 index_unit = "bit-pattern"
 probe = 'int.band(12, 10)'
