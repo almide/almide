@@ -80,8 +80,18 @@ fn discover_test_files(file: &str, fallback_dirs: &[&str]) -> Vec<String> {
                 files.extend(collect_test_files(path));
             }
         }
-        // Fallback: search current directory if no standard dirs found
+        // Fallback: search the current directory if no standard dirs
+        // found — but ONLY inside a project (#1928): without an
+        // `almide.toml` here, `almide test` walked the whole CWD tree
+        // (a workspace of twenty unrelated repos, from a reset shell)
+        // where `almide check` refuses with a hint. Same refusal, same
+        // hint, so the two commands agree on what "no file" means.
         if files.is_empty() {
+            if !std::path::Path::new("almide.toml").exists() {
+                err("No file specified and no almide.toml found.");
+                err("Run 'almide init' to create a project, or specify a file or directory.");
+                std::process::exit(1);
+            }
             files = collect_test_files(std::path::Path::new("."));
         }
         files.sort();
