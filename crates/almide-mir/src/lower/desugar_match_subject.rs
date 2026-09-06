@@ -95,6 +95,13 @@ fn is_hoistable_call_subject(subject: &IrExpr) -> bool {
             if module.as_str() == "list"
                 && func.as_str() == "fold"
                 && matches!(&subject.ty, Ty::Applied(TC::Option, _))
+    ) || matches!(
+        &subject.kind,
+        // #1904: a HEAP `??` as a match subject (`match p ?? ("k", 1) { (s, n) => f(s) }`)
+        // is an UNTRACKED heap value the variant/tuple match path cannot both-arms
+        // linearize over a call-bearing arm; the let-bound heap `??` lowers (#1943),
+        // so hoist it and dispatch on the tracked temp.
+        IrExprKind::UnwrapOr { .. } if is_heap_ty(&subject.ty)
     )
 }
 

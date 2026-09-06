@@ -130,7 +130,17 @@ impl LowerCtx {
                     // `match ok/err` rewrite; the synthetic temp is scope-tracked
                     // like a user-written `let t = out ?? empty` and BORROWED here.
                     // A decline rolls back to the honest wall below.
-                    if is_heap_ty(&a.ty) && expr.ty.is_result() {
+                    // #1904: the OPTION polarity takes the same route — the
+                    // let-bound heap `??` over an Option operand (`let t = o ??
+                    // d`) lowers since #1943, so `show(o ?? "d")` /
+                    // `first(t ?? ("z", 9))` ANF through it exactly like the
+                    // Result twin instead of walling "would borrow an empty
+                    // deferred heap value" (the composition family's top wall).
+                    if is_heap_ty(&a.ty)
+                        && (expr.ty.is_result()
+                            || matches!(&expr.ty,
+                                Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, _)))
+                    {
                         let tmp = self.fresh_synth_var();
                         if self.lower_bind(tmp, &a.ty, a).is_ok() {
                             if let Ok(v) = self.value_for(tmp) {
