@@ -189,7 +189,7 @@ numeric-matrix gate in `almide docs-gen --check`.
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (70 functions)
+## Signature index (72 functions)
 
 ```
 int.to_string(n: Int) -> String
@@ -260,6 +260,8 @@ int.to_uint32_saturating(n: Int) -> UInt32
 int.to_uint64_saturating(n: Int) -> UInt64
 int.from_uint64_checked(n: UInt64) -> Option[Int]
 int.from_uint64_saturating(n: UInt64) -> Int
+int.is_even(n: Int) -> Bool
+int.is_odd(n: Int) -> Bool
 int.min_value() -> Int
 int.max_value() -> Int
 ```

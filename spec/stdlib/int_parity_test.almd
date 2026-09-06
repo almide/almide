@@ -1,0 +1,35 @@
+// int.is_even / int.is_odd — the parity predicate pair (#1923).
+//
+// The natural first spelling of a parity guard is `int.is_even(n)`; today
+// that is E002 and the working spelling is `n % 2 == 0`. The pair exists
+// in the stdlibs a model has already read, so the miss costs an edit turn
+// for no reason. Predicates ship as a pair, per the repo's API-family rule.
+test "is_even agrees with the modulo spelling" {
+  assert_eq(int.is_even(0), true)
+  assert_eq(int.is_even(2), true)
+  assert_eq(int.is_even(1), false)
+  assert_eq(int.is_even(7), false)
+}
+
+test "is_odd is the complement, not a separate opinion" {
+  assert_eq(int.is_odd(1), true)
+  assert_eq(int.is_odd(7), true)
+  assert_eq(int.is_odd(0), false)
+  assert_eq(int.is_odd(2), false)
+}
+
+// Rust's `%` keeps the sign of the dividend, so -3 % 2 == -1, not 1. A
+// parity predicate written as `n % 2 == 1` is wrong for every negative
+// odd number; this pins the answer rather than the spelling.
+test "negatives have parity too" {
+  assert_eq(int.is_even(-2), true)
+  assert_eq(int.is_even(-3), false)
+  assert_eq(int.is_odd(-3), true)
+  assert_eq(int.is_odd(-2), false)
+}
+
+test "the pair partitions every value it is given" {
+  assert_eq(int.is_even(10) and int.is_odd(10), false)
+  assert_eq(int.is_even(10) or int.is_odd(10), true)
+  assert_eq(int.is_even(-11) or int.is_odd(-11), true)
+}

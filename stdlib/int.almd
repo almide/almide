@@ -238,6 +238,13 @@ fn from_uint64_checked(n: UInt64) -> Int? = if int.from_uint64(n) >= 0 then some
 
 fn from_uint64_saturating(n: UInt64) -> Int = if int.from_uint64(n) >= 0 then int.from_uint64(n) else 9223372036854775807
 
+// ── Parity ──
+// Rust `%` keeps the dividend's sign, so test the even form which is
+// sign-independent rather than `n % 2 == 1` (wrong for negative odds).
+fn is_even(n: Int) -> Bool = n % 2 == 0
+
+fn is_odd(n: Int) -> Bool = n % 2 != 0
+
 // ── Bounds ──
 fn min_value() -> Int = -9223372036854775807 - 1
 
