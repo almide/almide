@@ -47,6 +47,14 @@ test "int.clamp unit=value" {
   assert_eq("${int.clamp(15, 0, 10)}", "10")
 }
 
+test "int.is_even unit=value" {
+  assert_eq("${int.is_even(0 - 4)}", "true")
+}
+
+test "int.is_odd unit=value" {
+  assert_eq("${int.is_odd(0 - 3)}", "true")
+}
+
 test "int.band unit=bit-pattern" {
   assert_eq("${int.band(12, 10)}", "8")
 }
