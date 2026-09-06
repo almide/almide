@@ -507,6 +507,7 @@
 2062	spec/wasm_cross/result_list_value_int_tuple.almd
 2619	spec/wasm_cross/result_match_rewrap_modcall.almd
 9644	spec/wasm_cross/result_option_call_payload_return.almd
+3027	spec/wasm_cross/result_param_not_first.almd
 2054	spec/wasm_cross/result_str_int_tuple.almd
 3411	spec/wasm_cross/result_tuple_list_slots.almd
 3518	spec/wasm_cross/result_tuple_variant_payload.almd
