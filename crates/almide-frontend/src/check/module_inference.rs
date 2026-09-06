@@ -486,13 +486,23 @@ impl Checker {
             "refresh: name={} prefix={:?} resolved={:?} existing_prefixed={:?}",
             name, self.current_module_prefix, resolved,
             prefixed_key.as_ref().map(|k| self.env.top_lets.get(k))));
+        // A seeded entry that is PARTIALLY unknown (`List[Unknown]` — the
+        // pre-registration of `let RULES = [Rule {..}]` before `Rule` was
+        // in scope) must be upgraded too, not only a bare `Unknown`: the
+        // old exact-`Unknown` test left `redact.RULES` at `List[Unknown]`,
+        // and the module's own `for r in RULES` lowered `r` as Unknown —
+        // the ConcretizeTypes refusal behind a green check (#1931). A
+        // fully concrete resolution replaces any partial entry; a still-
+        // partial one is left to the post-solve flush.
+        let partial = |t: Option<&Ty>| t.is_none_or(|t| t.contains_unknown() || t.contains_typevar());
+        let concrete = !resolved.contains_unknown() && !resolved.contains_typevar();
         if let Some(k) = prefixed_key {
-            if matches!(self.env.top_lets.get(&k), Some(Ty::Unknown) | None) {
+            if partial(self.env.top_lets.get(&k)) && (concrete || self.env.top_lets.get(&k).is_none_or(|t| matches!(t, Ty::Unknown))) {
                 self.env.top_lets.insert(k, resolved.clone());
             }
             self.pending_toplet_tys.push((k, ity.clone()));
         }
-        if matches!(self.env.top_lets.get(&sym(name)), Some(Ty::Unknown) | None) {
+        if partial(self.env.top_lets.get(&sym(name))) && (concrete || self.env.top_lets.get(&sym(name)).is_none_or(|t| matches!(t, Ty::Unknown))) {
             self.env.top_lets.insert(sym(name), resolved);
         }
         self.pending_toplet_tys.push((sym(name), ity));
