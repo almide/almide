@@ -28,6 +28,8 @@ fn int.from_uint64(n: UInt64) -> Int
 fn int.from_uint64_checked(n: UInt64) -> Option[Int]
 fn int.from_uint64_saturating(n: UInt64) -> Int
 fn int.from_uint8(n: UInt8) -> Int
+fn int.is_even(n: Int) -> Bool
+fn int.is_odd(n: Int) -> Bool
 fn int.log2_ceil(n: Int) -> Int
 fn int.log2_floor(n: Int) -> Int
 fn int.max(a: Int, b: Int) -> Int
