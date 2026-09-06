@@ -156,6 +156,15 @@ const RET: u64 = 32;
 // stat-at's result<descriptor-stat, error-code> needs 112 bytes — parked
 // past MSG (64..109), before the fs message statics at 256.
 const STATRET: u64 = 128;
+// send's result<response, error-code> retptr (#1924): the SAME 112-byte
+// slot as stat-at's (the fs and http shims never nest), NOT the RET
+// scratch. An `err` carries a payload (dns-error-payload's option<string>
+// ptr/len, tls-alert-received's, …) that reaches past RET+8+8 — over the
+// trailers future's parked ok(none) buffer at RET+16, whose write was
+// still pending. The host lifted the scribbled buffer as the trailers
+// value on the NEXT exchange: `failed to read result … unknown handle
+// index <the rcode string's address>`.
+const SENDRET: u64 = STATRET;
 // Static fs error messages (canonical-ABI error-code -> the SAME strings
 // the native runtime's io::Error Display produces, so the common error
 // legs stay byte-identical). Offsets within the park span.
@@ -174,6 +183,16 @@ const E_NOPRE: &[u8] = b"no filesystem preopen (run with --dir)";
 // the wording (the native legs' per-OS errno suffixes already force that).
 const MSG_HTTP: u64 = 576;
 const E_HTTP: &[u8] = b"http request failed (p3 transport)";
+// The `content-length` header name (#1924 B) and the decimal scratch its
+// value is rendered into: a body sent WITHOUT it goes out
+// `transfer-encoding: chunked` (the host's default for a stream of
+// unknown length), which a stock HTTP/1.1 server without chunked
+// support reads as an EMPTY body — the native lane's client always
+// sends a content-length for its String/Bytes body, so the wire shape
+// is the same on both lanes.
+const MSG_CLEN: u64 = 640;
+const E_CLEN: &[u8] = b"content-length";
+const CLEN_BUF: u64 = 704;
 
 // Park layout, checked at COMPILE time: retptr spans and the message
 // statics must not collide with each other or the stdin/entropy DATA
@@ -187,7 +206,9 @@ const _: () = {
     assert!(MSG_ISDIR + E_ISDIR.len() as u64 <= MSG_GEN);
     assert!(MSG_GEN + E_GEN.len() as u64 <= MSG_NOPRE);
     assert!(MSG_NOPRE + E_NOPRE.len() as u64 <= MSG_HTTP);
-    assert!(MSG_HTTP + E_HTTP.len() as u64 <= DATA);
+    assert!(MSG_HTTP + E_HTTP.len() as u64 <= MSG_CLEN);
+    assert!(MSG_CLEN + E_CLEN.len() as u64 <= CLEN_BUF);
+    assert!(CLEN_BUF + 20 <= DATA);
 };
 
 // The fan prefetch slot table: SLOT_CAP slots of SLOT_STRIDE bytes on
@@ -384,7 +405,8 @@ fn shim_http(park: u64, g_plen: u32, g_ppos: u32, f_realloc: u32, h: &HttpAbi) -
     // The framed family (ops 48..=50, #1710): the frame's cells.
     let (m_ptr, m_len, cur, cell_len, frame_end, hdr_ptr, digit, tmp) =
         (33u32, 34u32, 35u32, 36u32, 37u32, 38u32, 39u32, 40u32);
-    let mut f = Function::new([(23, ValType::I32), (1, ValType::I64), (12, ValType::I32)]);
+    let (key_ptr, key_len) = (41u32, 42u32);
+    let mut f = Function::new([(23, ValType::I32), (1, ValType::I64), (14, ValType::I32)]);
     let mut i = f.instructions();
     // ── ops 48..=50: parse the http_framed cell frame in `b` ──
     // `<len>\n<payload>` cells with CHAR-count lengths (string.len
@@ -473,17 +495,48 @@ fn shim_http(park: u64, g_plen: u32, g_ppos: u32, f_realloc: u32, h: &HttpAbi) -
     i.block(BlockType::Empty).loop_(BlockType::Empty);
     i.local_get(cur).local_get(frame_end).i32_ge_u().br_if(1);
     http_frame_cell(&mut i, cur, cell_len, frame_end, tmp, digit);
-    i.local_get(tmp).local_set(auth_ptr); // the key span, parked in auth_* until the URL parse below overwrites them
-    i.local_get(cur).local_get(tmp).i32_sub().local_set(auth_len);
+    // The key span keeps its OWN locals: the URL parse ran ABOVE, so
+    // parking it in auth_* clobbered the authority with the first header
+    // NAME (`set-authority "x-probe"` → a DNS error on every framed
+    // request that carried a header; #1924's "transport error").
+    i.local_get(tmp).local_set(key_ptr);
+    i.local_get(cur).local_get(tmp).i32_sub().local_set(key_len);
     i.local_get(cur).local_get(frame_end).i32_ge_u().br_if(1);
     http_frame_cell(&mut i, cur, cell_len, frame_end, tmp, digit);
     i.local_get(headers);
-    i.local_get(auth_ptr).local_get(auth_len);
+    i.local_get(key_ptr).local_get(key_len);
     i.local_get(tmp);
     i.local_get(cur).local_get(tmp).i32_sub();
     i.i32_const((park + RET) as i32);
     i.call(I_HTTP_FIELDS_APPEND);
     i.br(0).end().end();
+    i.end();
+    // content-length for a non-empty body (decimal, back to front —
+    // the op-49 status rendering's shape). A host that refuses the name
+    // answers header-error, which is ignored like any other rejection.
+    i.local_get(b_len).i32_const(0).i32_gt_s().if_(BlockType::Empty);
+    i.local_get(b_len).local_set(tmp);
+    i.i32_const(1).local_set(digit);
+    i.local_get(tmp).local_set(cell_len);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(cell_len).i32_const(10).i32_lt_u().br_if(1);
+    i.local_get(cell_len).i32_const(10).i32_div_u().local_set(cell_len);
+    i.local_get(digit).i32_const(1).i32_add().local_set(digit);
+    i.br(0).end().end();
+    i.local_get(digit).local_set(cur);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(cur).i32_eqz().br_if(1);
+    i.local_get(cur).i32_const(1).i32_sub().local_set(cur);
+    i.i32_const((park + CLEN_BUF) as i32).local_get(cur).i32_add();
+    i.local_get(tmp).i32_const(10).i32_rem_u().i32_const(48).i32_add();
+    i.i32_store8(mem8(0));
+    i.local_get(tmp).i32_const(10).i32_div_u().local_set(tmp);
+    i.br(0).end().end();
+    i.local_get(headers);
+    i.i32_const((park + MSG_CLEN) as i32).i32_const(E_CLEN.len() as i32);
+    i.i32_const((park + CLEN_BUF) as i32).local_get(digit);
+    i.i32_const((park + RET) as i32);
+    i.call(I_HTTP_FIELDS_APPEND);
     i.end();
     if stop == 11 {
         fs_err(&mut i, g_ppos, g_plen, park, MSG_HTTP, E_HTTP.len());
@@ -664,7 +717,7 @@ fn shim_http(park: u64, g_plen: u32, g_ppos: u32, f_realloc: u32, h: &HttpAbi) -
     // inline (the aopen convention). While it runs, the host reads the
     // trailers future and the body stream; their completion events drive
     // the loop until the response has landed and both writes retired.
-    i.local_get(request).i32_const((park + RET + 8) as i32).call(I_HTTP_SEND).local_set(n);
+    i.local_get(request).i32_const((park + SENDRET) as i32).call(I_HTTP_SEND).local_set(n);
     i.local_get(n).i32_const(15).i32_and().i32_const(2).i32_eq().if_(BlockType::Empty);
     i.i32_const(1).local_set(snd_done);
     i.else_();
@@ -699,11 +752,27 @@ fn shim_http(park: u64, g_plen: u32, g_ppos: u32, f_realloc: u32, h: &HttpAbi) -
     i.end();
     i.end();
     i.br(0).end().end();
-    i.i32_const((park + RET) as i32).i32_load8_u(mem8(8));
+    // Both writes are retired here (the loop above waits for their
+    // events, on the err leg too — the host drops the request's readers),
+    // so the set is dead on every leg: drop it BEFORE the err check. A
+    // set leaked per failed exchange was the other half of #1924.
+    i.local_get(hws).i32_const(0).i32_ge_s().if_(BlockType::Empty);
+    i.local_get(hws).call(I_WS_DROP);
+    i.i32_const(-1).local_set(hws);
+    i.end();
+    i.i32_const((park + SENDRET) as i32).i32_load8_u(mem8(0));
     i.if_(BlockType::Empty);
     fs_err(&mut i, g_ppos, g_plen, park, MSG_HTTP, E_HTTP.len());
     i.end();
-    i.i32_const((park + RET) as i32).i32_load(mem(8 + h.send_payload)).local_set(response);
+    i.i32_const((park + SENDRET) as i32).i32_load(mem(h.send_payload)).local_set(response);
+    // op 49 reads the status HERE: consume-body below takes `this:
+    // response` OWNED, so a status read after it is a use of a moved
+    // handle (`index N is not a resource` — #1924's bare `get_status`
+    // trap; the live-echo test masked it because the index happened to
+    // name another live handle there).
+    i.local_get(op).i32_const(49).i32_eq().if_(BlockType::Empty);
+    i.local_get(response).call(I_HTTP_STATUS).i32_const(0xFFFF).i32_and().local_set(tmp);
+    i.end();
 
     // ── consume-body + the realloc'd drain (the fs read loop's shape) ──
     i.call(I_HTTP_CB_FNEW).local_set(s64);
@@ -719,7 +788,6 @@ fn shim_http(park: u64, g_plen: u32, g_ppos: u32, f_realloc: u32, h: &HttpAbi) -
     // lane's `format!("{code}\n{text}")`. Decimal, no padding: count the
     // digits, then write them back to front.
     i.local_get(op).i32_const(49).i32_eq().if_(BlockType::Empty);
-    i.local_get(response).call(I_HTTP_STATUS).i32_const(0xFFFF).i32_and().local_set(tmp);
     i.i32_const(1).local_set(digit);
     i.local_get(tmp).local_set(cell_len);
     i.block(BlockType::Empty).loop_(BlockType::Empty);
@@ -761,12 +829,6 @@ fn shim_http(park: u64, g_plen: u32, g_ppos: u32, f_realloc: u32, h: &HttpAbi) -
     i.i32_const((park + RET) as i32).i64_const(0).i64_store(mem64(16));
     i.local_get(cb_tx).i32_const((park + RET + 16) as i32).call(I_HTTP_CB_FWRITE).drop();
     i.local_get(cb_tx).call(I_HTTP_CB_FDROPW);
-
-    // Error paths above leak the set + pending write-ends by design —
-    // they are terminal transport failures.
-    i.local_get(hws).i32_const(0).i32_ge_s().if_(BlockType::Empty);
-    i.local_get(hws).call(I_WS_DROP);
-    i.end();
 
     i.local_get(buf).global_set(g_ppos);
     i.local_get(total).global_set(g_plen);
@@ -1205,6 +1267,7 @@ pub fn to_p3(bytes: &[u8], wants_http: bool) -> anyhow::Result<Vec<u8>> {
     }
     if wants_http {
         data.active(0, &ConstExpr::i32_const((park + MSG_HTTP) as i32), E_HTTP.iter().copied());
+        data.active(0, &ConstExpr::i32_const((park + MSG_CLEN) as i32), E_CLEN.iter().copied());
     }
 
     let mut m = Module::new();
