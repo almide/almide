@@ -2237,6 +2237,8 @@ since     = "0.36.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/unwrap_or_heap_payload.almd", class = "fixture" },
+  { path = "spec/wasm_cross/unwrap_or_tuple_payload_extract.almd", class = "fixture" },
+  { path = "spec/lang/unwrap_or_tuple_payload_bind_test.almd", class = "fixture" },
 ]
 
 # ── INTEGER LITERAL DOMAIN: MAGNITUDE, SIGN, AND THE i64 CARRIER ──────

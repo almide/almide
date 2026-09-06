@@ -128,7 +128,12 @@ impl LowerCtx {
             // borrow now resolves exactly as it does for a source `let tmp = f(x); tmp.field`. The
             // borrowed field is alive for the whole expression (the temp outlives it, dropped at
             // scope end), so it is a sound lifetime — identical cert to the proven let-bound form.
-            IrExprKind::Call { .. } if is_heap_ty(&container.ty) => {
+            // `??` (#1904): an `UnwrapOr` container is the same shape — a fresh
+            // owned heap value that is not a let-bound var — and takes the same
+            // materialization. Before, `(o ?? ("", 0)).0` walled here while the
+            // eager `option.unwrap_or(o, ("", 0)).0` (a Call) lowered, which
+            // made ADR-0005 D4's recommended spelling the one that walls.
+            IrExprKind::Call { .. } | IrExprKind::UnwrapOr { .. } if is_heap_ty(&container.ty) => {
                 let tmp = self.fresh_synth_var();
                 self.lower_bind(tmp, &container.ty, container)?;
                 let synth_container = IrExpr {
