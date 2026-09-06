@@ -653,7 +653,7 @@
 66192	spec/wasm_cross/unwrap_in_callarg.almd
 66192	spec/wasm_cross/unwrap_in_if_arm.almd
 66080	spec/wasm_cross/unwrap_in_recursion.almd
-66464	spec/wasm_cross/unwrap_or_heap_arg_and_subject.almd
+66736	spec/wasm_cross/unwrap_or_heap_arg_and_subject.almd
 66784	spec/wasm_cross/unwrap_or_heap_payload.almd
 66704	spec/wasm_cross/unwrap_or_operand.almd
 202528	spec/wasm_cross/unwrap_or_option_payload.almd
