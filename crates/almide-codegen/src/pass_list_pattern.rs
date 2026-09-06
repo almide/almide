@@ -201,9 +201,7 @@ fn build_list_if_chain_list_pattern(
     // arm whose coverage swallows it is TERMINAL — emitted as the chain's
     // else instead of a length test over a fall-off the type system
     // rejects (the else-Unit hole).
-    let irrefutable_elems = elements
-        .iter()
-        .all(|p| matches!(p, IrPattern::Bind { .. } | IrPattern::Wildcard));
+    let irrefutable_elems = elements.iter().all(elem_is_irrefutable);
     let advances = arm.guard.is_none() && irrefutable_elems;
     let covered_next = if advances && rest_pat.is_none() && elements.len() == covered_below {
         covered_below + 1
@@ -299,16 +297,8 @@ fn build_list_if_chain_list_pattern(
                     });
                 }
                 match elem_pat {
-                    IrPattern::Bind { var, .. } => {
-                        stmts.push(IrStmt {
-                            kind: IrStmtKind::Bind {
-                                var: *var,
-                                mutability: Mutability::Let,
-                                ty: elem_ty.clone(),
-                                value: index_expr,
-                            },
-                            span: None,
-                        });
+                    IrPattern::Bind { .. } | IrPattern::Tuple { .. } => {
+                        bind_irrefutable_elem(elem_pat, index_expr, &elem_ty, &mut stmts);
                     }
                     IrPattern::Literal { expr: lit_expr } => {
                         // Add equality check: subject[i] == literal
@@ -615,28 +605,19 @@ fn terminal_rest_binds(
     };
     let mut stmts = Vec::new();
     for (i, elem_pat) in elements.iter().enumerate() {
-        if let IrPattern::Bind { var, .. } = elem_pat {
-            stmts.push(IrStmt {
-                kind: IrStmtKind::Bind {
-                    var: *var,
-                    mutability: Mutability::Let,
-                    ty: elem_ty.clone(),
-                    value: IrExpr {
-                        kind: IrExprKind::IndexAccess {
-                            object: Box::new(subject.clone()),
-                            index: Box::new(IrExpr {
-                                kind: IrExprKind::LitInt { value: i as i64 },
-                                ty: Ty::Int,
-                                span: None, def_id: None,
-                            }),
-                        },
-                        ty: elem_ty.clone(),
-                        span: None, def_id: None,
-                    },
-                },
-                span: None,
-            });
-        }
+        let index_expr = IrExpr {
+            kind: IrExprKind::IndexAccess {
+                object: Box::new(subject.clone()),
+                index: Box::new(IrExpr {
+                    kind: IrExprKind::LitInt { value: i as i64 },
+                    ty: Ty::Int,
+                    span: None, def_id: None,
+                }),
+            },
+            ty: elem_ty.clone(),
+            span: None, def_id: None,
+        };
+        bind_irrefutable_elem(elem_pat, index_expr, &elem_ty, &mut stmts);
     }
     if let Some(IrPattern::Bind { var, .. }) = rest_pat {
         stmts.push(IrStmt {
@@ -746,5 +727,70 @@ fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt
                 }
             }
         }
+    }
+}
+
+/// An element sub-pattern that can never fail: a bind, a wildcard, or a
+/// tuple of those (recursively). Only these advance the length-coverage
+/// ladder and bind without a condition.
+fn elem_is_irrefutable(p: &IrPattern) -> bool {
+    match p {
+        IrPattern::Bind { .. } | IrPattern::Wildcard => true,
+        IrPattern::Tuple { elements } => elements.iter().all(elem_is_irrefutable),
+        IrPattern::As { inner, .. } => elem_is_irrefutable(inner),
+        _ => false,
+    }
+}
+
+/// Bind an IRREFUTABLE element sub-pattern to `value` (#1934): a bind takes
+/// the value, a tuple pattern binds each of its elements through
+/// `TupleIndex` (recursively), a wildcard binds nothing. Before, only a
+/// plain bind was handled here, so `[(name, n), ..rest]` emitted no
+/// binding for `name` / `n` at all — rustc E0425 behind a green check on
+/// the native leg (the structural leg lowered it).
+fn bind_irrefutable_elem(pat: &IrPattern, value: IrExpr, ty: &Ty, stmts: &mut Vec<IrStmt>) {
+    match pat {
+        IrPattern::Bind { var, .. } => {
+            stmts.push(IrStmt {
+                kind: IrStmtKind::Bind {
+                    var: *var,
+                    mutability: Mutability::Let,
+                    ty: ty.clone(),
+                    value,
+                },
+                span: None,
+            });
+        }
+        IrPattern::As { var, inner, .. } => {
+            stmts.push(IrStmt {
+                kind: IrStmtKind::Bind {
+                    var: *var,
+                    mutability: Mutability::Let,
+                    ty: ty.clone(),
+                    value: value.clone(),
+                },
+                span: None,
+            });
+            bind_irrefutable_elem(inner, value, ty, stmts);
+        }
+        IrPattern::Tuple { elements } => {
+            let elem_tys: Vec<Ty> = match ty {
+                Ty::Tuple(ts) => ts.clone(),
+                _ => vec![Ty::Unknown; elements.len()],
+            };
+            for (j, sub) in elements.iter().enumerate() {
+                if matches!(sub, IrPattern::Wildcard) {
+                    continue;
+                }
+                let sub_ty = elem_tys.get(j).cloned().unwrap_or(Ty::Unknown);
+                let access = IrExpr {
+                    kind: IrExprKind::TupleIndex { object: Box::new(value.clone()), index: j },
+                    ty: sub_ty.clone(),
+                    span: None, def_id: None,
+                };
+                bind_irrefutable_elem(sub, access, &sub_ty, stmts);
+            }
+        }
+        _ => {}
     }
 }
