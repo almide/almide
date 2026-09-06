@@ -18,6 +18,7 @@
 //! it needs no second execution to know the right answer.
 
 mod catalogue;
+pub mod composition;
 mod denylist;
 pub mod identity;
 mod mutate;
@@ -38,6 +39,17 @@ const MUTATION_WEIGHT: u32 = 3;
 /// Relative weight of the self-checking identity family (#1332), against
 /// the OTHER two combined — i.e. `3 / (10 + 3)` ≈ 23% of a mixed campaign.
 const IDENTITY_WEIGHT: u32 = 3;
+/// Weight of the composition family among the NON-identity draws: with
+/// synthesis + mutation at 10, roughly one program in four of that share.
+const COMPOSITION_WEIGHT: u32 = 3;
+
+/// Salt for the composition family's own RNG sub-stream, split off exactly
+/// like the identity family's: the family roll must not touch the main
+/// stream (archived synthesis/mutation seeds keep replaying), and it must
+/// not touch the identity stream either (archived identity seeds keep
+/// replaying). The only indices that change meaning are the ones this
+/// family now claims.
+const COMPOSITION_STREAM_SALT: u64 = 0xC0DE_0AC1_E5EE_D502;
 
 /// Salt for the identity family's own RNG sub-stream.
 ///
@@ -63,6 +75,11 @@ pub enum Family {
     Identity,
     /// Type-directed synthesis only.
     Synthesis,
+    /// The self-checking composition family only: operator interleavings
+    /// (`??` `!` `?` `|>` match, tuple extract) over Int / String / tuple /
+    /// record payloads in tail / let / call-argument positions, judged
+    /// by construction like the identity family.
+    Composition,
 }
 
 impl Family {
@@ -71,6 +88,7 @@ impl Family {
             "all" => Some(Family::All),
             "identity" => Some(Family::Identity),
             "synthesis" => Some(Family::Synthesis),
+            "composition" => Some(Family::Composition),
             _ => None,
         }
     }
@@ -80,6 +98,7 @@ impl Family {
             Family::All => "all",
             Family::Identity => "identity",
             Family::Synthesis => "synthesis",
+            Family::Composition => "composition",
         }
     }
 }
@@ -95,10 +114,18 @@ pub struct Generated {
     /// `Some` only for the identity family; every other family is judged
     /// differentially and leaves this `None`.
     pub expected_stdout: Option<String>,
-    /// The structured plan behind an identity program, so a finding can be
-    /// shrunk WITHIN the family (text-level shrinking would break the
-    /// identity invariant and invalidate the oracle).
-    pub plan: Option<identity::Plan>,
+    /// The structured plan behind a self-checking program, so a finding can
+    /// be shrunk WITHIN its family (text-level shrinking would break the
+    /// by-construction invariant and invalidate the oracle).
+    pub plan: Option<FamilyPlan>,
+}
+
+/// The plan of a self-checking program, per family. The minimizer shrinks
+/// through the family's own `shrink`/`render`, never through the text.
+#[derive(Debug, Clone)]
+pub enum FamilyPlan {
+    Identity(identity::Plan),
+    Composition(composition::Plan),
 }
 
 impl Generated {
@@ -116,6 +143,8 @@ pub enum Origin {
     Mutation { corpus_file: String },
     /// Built backwards from a known answer by the identity family.
     Identity { blocks: usize },
+    /// Operator round trips over a known literal by the composition family.
+    Composition { probes: usize },
 }
 
 /// Everything the generator needs that is constant across the campaign.
@@ -161,8 +190,11 @@ impl Engine {
         // IDENTITY_STREAM_SALT for why the main stream must stay untouched.
         let mut alt = SplitMix64::for_program(seed ^ IDENTITY_STREAM_SALT, index);
 
+        let mut comp = SplitMix64::for_program(seed ^ COMPOSITION_STREAM_SALT, index);
+
         match self.family {
             Family::Identity => return self.identity(&mut alt),
+            Family::Composition => return self.composition(&mut comp),
             Family::Synthesis => {
                 let mut rng = SplitMix64::for_program(seed, index);
                 return program::synthesize(&mut rng, &self.catalogue);
@@ -170,6 +202,13 @@ impl Engine {
             Family::All => {
                 if alt.pick_weighted(&[SYNTHESIS_WEIGHT + MUTATION_WEIGHT, IDENTITY_WEIGHT]) == 1 {
                     return self.identity(&mut alt);
+                }
+                // The composition roll comes AFTER the identity roll and
+                // from its own stream, so every identity index keeps its
+                // program; only some former synthesis/mutation indices
+                // now belong to this family.
+                if comp.pick_weighted(&[SYNTHESIS_WEIGHT + MUTATION_WEIGHT, COMPOSITION_WEIGHT]) == 1 {
+                    return self.composition(&mut comp);
                 }
             }
         }
@@ -200,7 +239,19 @@ impl Engine {
             source,
             origin: Origin::Identity { blocks: plan.size() },
             expected_stdout: Some(expected),
-            plan: Some(plan),
+            plan: Some(FamilyPlan::Identity(plan)),
+        }
+    }
+
+    /// One program of the self-checking composition family.
+    fn composition(&self, rng: &mut SplitMix64) -> Generated {
+        let plan = composition::plan(rng);
+        let (source, expected) = composition::render(&plan);
+        Generated {
+            source,
+            origin: Origin::Composition { probes: plan.size() },
+            expected_stdout: Some(expected),
+            plan: Some(FamilyPlan::Composition(plan)),
         }
     }
 }
@@ -267,6 +318,7 @@ mod tests {
         let engine = Engine::with_family(std::path::Path::new("/nonexistent"), Family::All);
         const N: u64 = 600;
         let mut identity = 0usize;
+        let mut composition = 0usize;
         for index in 0..N {
             let g = engine.generate(1332, index);
             if matches!(g.origin, Origin::Identity { .. }) {
@@ -275,13 +327,27 @@ mod tests {
                     g.expected_stdout.is_some() && g.plan.is_some(),
                     "an identity program must carry its oracle AND its plan"
                 );
+            } else if matches!(g.origin, Origin::Composition { .. }) {
+                composition += 1;
+                assert!(
+                    g.expected_stdout.is_some() && g.plan.is_some(),
+                    "a composition program must carry its oracle AND its plan"
+                );
             } else {
                 assert!(
                     g.expected_stdout.is_none(),
-                    "only the identity family may claim a by-construction oracle"
+                    "only the self-checking families may claim a by-construction oracle"
                 );
             }
         }
+        // The composition roll happens on the non-identity share only.
+        let comp_share = composition as f64 / (N as usize - identity) as f64;
+        let comp_declared = COMPOSITION_WEIGHT as f64
+            / (SYNTHESIS_WEIGHT + MUTATION_WEIGHT + COMPOSITION_WEIGHT) as f64;
+        assert!(
+            (comp_share - comp_declared).abs() < 0.06,
+            "composition share {comp_share:.3} strayed from the declared {comp_declared:.3}"
+        );
         let share = identity as f64 / N as f64;
         let declared = IDENTITY_WEIGHT as f64
             / (SYNTHESIS_WEIGHT + MUTATION_WEIGHT + IDENTITY_WEIGHT) as f64;
