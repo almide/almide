@@ -19,6 +19,13 @@ fn mk2(n: Int) -> List[Int] = [n, n, n]
 
 fn via(n: Int) -> List[Int] = mk(n)
 
+fn take(xs: List[Int]) -> Int = 3
+
+fn bind_then_tail(n: Int) -> Int = {{
+  let x = mk(n)
+  take(x)
+}}
+
 fn grow(n: Int) -> String = {{
   let s = "x" + "y"
   s
@@ -79,4 +86,13 @@ fn an_assigned_call_result_is_released() {
 #[test]
 fn a_fresh_string_result_is_released() {
     flat("let s = grow(i)", "    let s = grow(i)\n    total = total + string.len(s)", "2000", "16000");
+}
+
+
+#[test]
+fn a_return_call_releases_the_owned_locals_before_the_jump() {
+    // The tail call replaces the frame, so the epilogue never runs — the
+    // bound local must be released before the jump (a sibling of #1986,
+    // found by the phase-B1 witness: the local's stream ended `iam`).
+    flat("let x = mk(i); take(x)", "    total = total + bind_then_tail(i)", "3000", "24000");
 }
