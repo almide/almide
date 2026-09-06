@@ -144,6 +144,36 @@ pub(crate) fn rc_mentions_var(e: &IrExpr, var: VarId) -> bool {
 }
 
 impl Emitter<'_> {
+    /// A value that arrives OWNED — exactly one credit this frame may
+    /// release: a certainly-fresh construction, or the result of a call
+    /// to a table fn (#1986). A table fn's epilogue hands its caller one
+    /// credit on every path (a certainly-fresh tail is the alloc itself,
+    /// any other droppable tail takes the ret-inc), so the caller's bind,
+    /// assign and return routes must NOT add another — the +1 they took
+    /// for a "borrowed" rhs left every returned List/Str/Bytes at rc 1
+    /// forever (64 B per call, measured N=1000 vs N=8000). Ctors and
+    /// module helpers keep the conservative +1 (a leak is never a
+    /// dangle); helper-by-helper conventions are the follow-up.
+    pub(crate) fn rc_owned_result(&self, e: &almide_ir::IrExpr) -> bool {
+        if rc_certainly_fresh(&e.kind) {
+            return true;
+        }
+        let almide_ir::IrExprKind::Call { target: almide_ir::CallTarget::Named { name }, .. } = &e.kind
+        else {
+            return false;
+        };
+        let name = name.as_str();
+        if self.types.ctors.contains_key(name) {
+            return false;
+        }
+        self.cur_module
+            .and_then(|m| self.table.by_name.get(&format!("{m}.{name}")))
+            .or_else(|| self.table.by_name.get(name))
+            .is_some()
+            || self.resolve_qualified(name).is_some()
+            || self.resolve_method_suffix(name).is_some()
+    }
+
     /// RC-3 callee-owned argument guard: droppable args that are not
     /// certainly fresh get +1 at the call site (the callee's epilogue
     /// releases its params). Fresh temporaries transfer as-is — the
