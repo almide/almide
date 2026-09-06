@@ -68,10 +68,10 @@ func 40 -> type 20
 func 41 -> type 20
 table TableType { element_type: funcref, table64: false, initial: 3, maximum: Some(3), shared: false }
 memory MemoryType { memory64: false, shared: false, initial: 2, maximum: None, page_size_log2: None }
-global GlobalType { content_type: I32, mutable: false, shared: false } = I32Const { value: 224 } End
-global GlobalType { content_type: I32, mutable: true, shared: false } = I32Const { value: 65760 } End
-global GlobalType { content_type: I32, mutable: true, shared: false } = I32Const { value: 224 } End
-global GlobalType { content_type: I32, mutable: false, shared: false } = I32Const { value: 65760 } End
+global GlobalType { content_type: I32, mutable: false, shared: false } = I32Const { value: 256 } End
+global GlobalType { content_type: I32, mutable: true, shared: false } = I32Const { value: 65792 } End
+global GlobalType { content_type: I32, mutable: true, shared: false } = I32Const { value: 256 } End
+global GlobalType { content_type: I32, mutable: false, shared: false } = I32Const { value: 65792 } End
 global GlobalType { content_type: I64, mutable: true, shared: false } = I64Const { value: 9223372036854775807 } End
 global GlobalType { content_type: I64, mutable: true, shared: false } = I64Const { value: 0 } End
 global GlobalType { content_type: I64, mutable: true, shared: false } = I64Const { value: 0 } End
@@ -81,7 +81,7 @@ global GlobalType { content_type: I64, mutable: true, shared: false } = I64Const
 global GlobalType { content_type: I32, mutable: true, shared: false } = I32Const { value: 0 } End
 global GlobalType { content_type: I64, mutable: true, shared: false } = I64Const { value: 0 } End
 global GlobalType { content_type: I32, mutable: true, shared: false } = I32Const { value: 0 } End
-global GlobalType { content_type: I32, mutable: true, shared: false } = I32Const { value: 65760 } End
+global GlobalType { content_type: I32, mutable: true, shared: false } = I32Const { value: 65792 } End
 global GlobalType { content_type: I32, mutable: true, shared: false } = I32Const { value: 0 } End
 export memory Memory 0
 export main Func 44
@@ -609,4 +609,4 @@ code locals=[3xI32,1xI64,1xF64,24xI32,16xI64,8xF64]
   LocalGet { local_index: 1 }
   ReturnCall { function_index: 43 }
   End
-data len=209 head=000000000000000000000000000000000000000000000000
+data len=251 head=000000000000000000000000000000000000000000000000
