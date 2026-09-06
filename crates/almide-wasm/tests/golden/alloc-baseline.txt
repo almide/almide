@@ -17,7 +17,7 @@
 65952	spec/wasm_cross/autotry_result_first_arg.almd
 84464	spec/wasm_cross/availability_pure_batch.almd
 66912	spec/wasm_cross/bang_in_record_literal_field.almd
-70736	spec/wasm_cross/base64_encode.almd
+70048	spec/wasm_cross/base64_encode.almd
 70464	spec/wasm_cross/binary_operators.almd
 66912	spec/wasm_cross/binary_search_duplicate_keys.almd
 65840	spec/wasm_cross/binding_stmts.almd
@@ -221,7 +221,7 @@
 66496	spec/wasm_cross/guard_err_in_call_arg_block.almd
 66352	spec/wasm_cross/guard_let_statement.almd
 65888	spec/wasm_cross/guard_statement.almd
-778768	spec/wasm_cross/gzip_inflate_members.almd
+774672	spec/wasm_cross/gzip_inflate_members.almd
 83776	spec/wasm_cross/hash_digests.almd
 68816	spec/wasm_cross/heap_arena.almd
 65984	spec/wasm_cross/heap_result_err_interp.almd
@@ -270,7 +270,7 @@
 3722528	spec/wasm_cross/json_many_keys.almd
 89216	spec/wasm_cross/json_number_unicode.almd
 74768	spec/wasm_cross/json_parse_lenient_edges.almd
-89664	spec/wasm_cross/json_path_edges.almd
+89632	spec/wasm_cross/json_path_edges.almd
 76784	spec/wasm_cross/json_string_span.almd
 73104	spec/wasm_cross/json_stringify_pretty.almd
 73792	spec/wasm_cross/json_value.almd
@@ -492,8 +492,8 @@
 66272	spec/wasm_cross/ref_koka_rescrutinee.almd
 88560	spec/wasm_cross/ref_roc_shared_cow.almd
 1026768	spec/wasm_cross/ref_roc_trmc_control.almd
-96224	spec/wasm_cross/regex_engine.almd
-319376	spec/wasm_cross/regex_fuzz_batch.almd
+96016	spec/wasm_cross/regex_engine.almd
+317760	spec/wasm_cross/regex_fuzz_batch.almd
 ~	spec/wasm_cross/repeat_size_ceiling.almd
 66160	spec/wasm_cross/replace_empty_pat.almd
 79504	spec/wasm_cross/repr_parity_pin.almd
@@ -532,7 +532,7 @@
 67776	spec/wasm_cross/spread_record_share.almd
 !	spec/wasm_cross/sql_highlight_tokens.almd
 69200	spec/wasm_cross/stdlib_opaque_shadow.almd
-70080	spec/wasm_cross/stdlib_type_shadow.almd
+70048	spec/wasm_cross/stdlib_type_shadow.almd
 66848	spec/wasm_cross/str_result_heap_bind.almd
 66064	spec/wasm_cross/string_bool_ordering.almd
 116656	spec/wasm_cross/string_case_unicode.almd
@@ -559,7 +559,7 @@
 66000	spec/wasm_cross/tco_let_bound_if.almd
 67424	spec/wasm_cross/tco_map_acc_seed.almd
 65936	spec/wasm_cross/tco_multi_concat.almd
-66432	spec/wasm_cross/tco_nested_list_accumulator.almd
+66304	spec/wasm_cross/tco_nested_list_accumulator.almd
 66688	spec/wasm_cross/tco_over_match_result.almd
 65872	spec/wasm_cross/time_negative_scale.almd
 65824	spec/wasm_cross/time_negative_trap.almd
@@ -684,7 +684,7 @@
 71584	spec/wasm_cross/wide_function_body.almd
 65856	spec/wasm_cross/witness_straightline.almd
 71456	spec/wasm_cross/zip_view_shape.almd
-404352	spec/wasm_cross/zlib_selfhost.almd
+375680	spec/wasm_cross/zlib_selfhost.almd
 66224	spec/wasm_fail/effect_err_aborts_both_legs.almd
 66224	spec/wasm_fail/int_parse_err_propagates.almd
 66272	spec/wasm_fail/matrix_index_oob_aborts.almd
