@@ -113,6 +113,9 @@ pub fn canonicalize_program_in<'a>(
     let (table, import_diags) = build_import_table(program, self_name.as_deref(), &env.user_modules);
     env.import_table = table;
     diagnostics.extend(import_diags);
+    // Every alias spelling of a dependency type (`sh.Box`, `shape.Box`)
+    // resolves to its canonical key from here on (#1955).
+    resolve::register_alias_type_keys(&mut env);
 
     // 4. Register main program declarations
     registration::register_decls(&mut env, &mut diagnostics, &program.decls, None);
@@ -191,6 +194,9 @@ pub fn canonicalize_entry_onto(
     let (table, import_diags) = build_import_table(program, self_name.as_deref(), &env.user_modules);
     env.import_table = table;
     diagnostics.extend(import_diags);
+    // Every alias spelling of a dependency type (`sh.Box`, `shape.Box`)
+    // resolves to its canonical key from here on (#1955).
+    resolve::register_alias_type_keys(env);
     registration::register_decls(env, diagnostics, &program.decls, None);
     env.failed_fn_names.extend(program.failed_fn_names.iter().cloned());
     diagnostics.extend(std::mem::take(&mut env.attr_diagnostics));
