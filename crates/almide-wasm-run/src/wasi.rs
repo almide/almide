@@ -453,8 +453,20 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     code.function(&shim_print(1, park));
     code.function(&shim_print(2, park));
     code.function(&shim_exit());
-    code.function(&shim_fs_call(park, g_plen, g_pcap, f_env_get, f_env_set, f_args));
-    code.function(&shim_host_read(park, g_plen));
+    // #1962: a module whose emitted op set is EMPTY never calls `fs_call`
+    // (and `host_read` only copies an op's result out), so both shims ship
+    // as index-stable `unreachable` stubs — the fs_call dispatcher alone is
+    // ~460 B, a quarter of a hello-world artifact. The op set is the same
+    // audited one the build path routes on, so a stub is never reached.
+    if host_ops.is_empty() {
+        let mut stub = Function::new([]);
+        stub.instructions().unreachable().end();
+        code.function(&stub);
+        code.function(&stub);
+    } else {
+        code.function(&shim_fs_call(park, g_plen, g_pcap, f_env_get, f_env_set, f_args));
+        code.function(&shim_host_read(park, g_plen));
+    }
     if f_env_get.is_some() {
         let (i_sizes, i_get) = environ_imports.expect("env_get service imports its pair");
         code.function(&shim_env_get(park, g_plen, g_ovl.expect("env service global"), i_sizes, i_get));
