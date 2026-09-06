@@ -46,7 +46,12 @@ fn emitted_main(source: &str, tag: &str) -> String {
     let rust = String::from_utf8_lossy(&output.stdout).to_string();
     std::fs::remove_dir_all(&dir).ok();
     assert!(output.status.success(), "--target rust emit failed:\n{}", String::from_utf8_lossy(&output.stderr));
-    let start = rust.find("pub fn main(").unwrap_or_else(|| panic!("emitted Rust has no `pub fn main(`:\n{rust}"));
+    // Since #1950 every native main is wrapped: the user's body renders as
+    // `pub fn __almide_main(` and `fn main()` is the process-setup shell.
+    let start = rust
+        .find("pub fn __almide_main(")
+        .or_else(|| rust.find("pub fn main("))
+        .unwrap_or_else(|| panic!("emitted Rust has no `pub fn __almide_main(` / `pub fn main(`:\n{rust}"));
     let rest = &rust[start..];
     let end = rest.find("\n}").map(|i| i + 2).unwrap_or(rest.len());
     rest[..end].to_string()
