@@ -2114,6 +2114,7 @@ evidence  = [
   { path = "spec/wasm_cross/matrix_q_dims_guard.almd", class = "fixture" },
   { path = "spec/wasm_cross/count_domain_nonbytes.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_dims_guard_product.almd", class = "fixture" },
+  { path = "spec/wasm_cross/matrix_from_bytes_count_domain.almd", class = "fixture" },
   { path = "spec/wasm_cross/string_repeat_empty.almd", class = "fixture" },
 ]
 

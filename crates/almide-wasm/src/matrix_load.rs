@@ -122,6 +122,13 @@ impl Emitter<'_> {
         self.f.instructions().local_set(hc);
         self.clamp0(hr);
         self.clamp0(hc);
+        // The shared element ceiling BEFORE any product is formed: with
+        // `cols = i64::MAX - 1` the `r*c*8` in `mat_alloc_out64` WRAPPED
+        // negative, passed its bound, allocated a tiny block and the fill
+        // loop trapped out of bounds where native took the C-161 abort
+        // (`Error: matrix dimensions too large` — differential fuzz, seed
+        // 544202078563 index 874). The division-form guard cannot wrap.
+        self.q_dims_guard(hr, hc);
         let ho = self.mat_alloc_out64(hr, hc)?;
         let hk = self.hold_i32()?;
         let hn = self.hold_i32()?;

@@ -375,12 +375,13 @@
 66208	spec/wasm_cross/matrix_dims_guard_product.almd
 66320	spec/wasm_cross/matrix_dims_guard_rows.almd
 105248	spec/wasm_cross/matrix_domain_edges.almd
-75664	spec/wasm_cross/matrix_from_bytes_offset_domain.almd
+!	spec/wasm_cross/matrix_from_bytes_count_domain.almd
+76048	spec/wasm_cross/matrix_from_bytes_offset_domain.almd
 74640	spec/wasm_cross/matrix_head_count_domain.almd
 91760	spec/wasm_cross/matrix_index_domain_family.almd
 179968	spec/wasm_cross/matrix_pow_libm.almd
 71488	spec/wasm_cross/matrix_q_dims_guard.almd
-246016	spec/wasm_cross/matrix_q_fp16_scale_domain.almd
+246160	spec/wasm_cross/matrix_q_fp16_scale_domain.almd
 106448	spec/wasm_cross/matrix_select_rows.almd
 148224	spec/wasm_cross/matrix_select_rows_oob.almd
 142496	spec/wasm_cross/matrix_select_rows_q1_partial_block.almd

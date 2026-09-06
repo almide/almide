@@ -1,0 +1,17 @@
+// @contract: C-161
+// The byte loaders (`matrix.from_bytes_f32_le` / `_f16_le` / `_f64_le`) take
+// the constructors' shared ceiling on their COUNT before `rows * cols * width`
+// is formed: that product overflows for a huge count, wrapped negative, passed
+// the bounds test, and the wasm leg trapped out of bounds where native took
+// the defined abort (differential fuzz, seed 544202078563 index 874). In-range
+// loads answer identically first; the over-ceiling load dies in the C-161
+// form on both legs: `Error: matrix dimensions too large`, exit 1.
+fn main() -> Unit = {
+  let b = bytes.new(16)
+  println("f32 ok: ${matrix.to_lists(matrix.from_bytes_f32_le(b, 0, 2, 2))}")
+  println("f16 ok: ${matrix.to_lists(matrix.from_bytes_f16_le(b, 0, 2, 4))}")
+  println("f64 ok: ${matrix.to_lists(matrix.from_bytes_f64_le(b, 0, 1, 2))}")
+  println("about to overflow")
+  println("huge: ${matrix.to_lists(matrix.from_bytes_f32_le(b, 0, 1, 9223372036854775806))}")
+  println("unreachable")
+}

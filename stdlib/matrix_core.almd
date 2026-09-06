@@ -551,6 +551,12 @@ fn matrix_from_bytes_f32_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> L
   // undefined forms instead of the family's OOB→zeros edge.
   let r = if rows < 0 then 0 else rows
   let c = if cols < 0 then 0 else cols
+  // The shared ceiling BEFORE `r * c * 4`: that product overflows for a
+  // huge count (`from_bytes_f32_le(b, 0, 1, i64::MAX - 1)`), wrapped
+  // negative, passed the bounds test and the row allocs trapped out of
+  // bounds where native took the C-161 abort (differential fuzz, seed
+  // 544202078563 index 874).
+  let _g = __mx_dims_guard(r, c)
   let need = r * c * 4
   if offset < 0 or offset + need > len then __mx_const(r, c, 0.0)
   else {
@@ -645,6 +651,12 @@ fn matrix_from_bytes_f16_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> L
   // #1503: same clamp discipline as from_bytes_f32_le above.
   let r = if rows < 0 then 0 else rows
   let c = if cols < 0 then 0 else cols
+  // The shared ceiling BEFORE `r * c * 2`: that product overflows for a
+  // huge count (`from_bytes_f16_le(b, 0, 1, i64::MAX - 1)`), wrapped
+  // negative, passed the bounds test and the row allocs trapped out of
+  // bounds where native took the C-161 abort (differential fuzz, seed
+  // 544202078563 index 874).
+  let _g = __mx_dims_guard(r, c)
   let need = r * c * 2
   if offset < 0 or offset + need > len then __mx_const(r, c, 0.0)
   else {
