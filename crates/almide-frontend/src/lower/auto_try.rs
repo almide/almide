@@ -28,9 +28,13 @@ struct TryCtx<'a> {
     /// a `-> Result[..]`-declared effect fn has the same Bind.ty but takes
     /// the auto-`?` (#485).
     annotated_result_vars: &'a HashSet<VarId>,
-    /// #558: qualified fn keys (`module.func`) whose FIRST param is
-    /// Result/Option — that arg keeps its Result (no auto-?).
-    first_arg_unwraps: &'a HashSet<Sym>,
+    /// #558 / #1970: per-parameter flags, keyed by the fn's sig key (bare
+    /// name for a user fn, `module.func` for a stdlib fn): `true` where the
+    /// param is Result/Option-typed — that arg keeps its Result (no auto-?).
+    /// #558 covered only the FIRST param; a Result param at any other index
+    /// still had its effect-call argument unwrapped (`show(tag, f(1))` →
+    /// `show(tag, f(1)?)`: invalid Rust, invalid wasm, a structural wall).
+    result_params: &'a HashMap<Sym, Vec<bool>>,
     /// Usage-based skip set for THIS fn body: vars consumed as a Result
     /// (`match { ok/err }`, `== ok/err`, `??`). Collected once per body and
     /// consulted at EVERY Bind depth — VarIds are unique, so one flat set is
@@ -42,7 +46,7 @@ struct TryCtx<'a> {
 }
 
 /// Insert auto-? (Try nodes) in all effect fn bodies of the program.
-pub fn insert_auto_try(program: &mut IrProgram, annotated_result_vars: &HashSet<VarId>, first_arg_unwraps: &HashSet<Sym>) {
+pub fn insert_auto_try(program: &mut IrProgram, annotated_result_vars: &HashSet<VarId>, result_params: &HashMap<Sym, Vec<bool>>) {
     // Record decls (root + modules) so FieldAssign can resolve a Named
     // target type to its field types. Decl names are canonical (qualified
     // `mod.Type` for user-module types), matching Ty::Named on var types.
@@ -57,7 +61,7 @@ pub fn insert_auto_try(program: &mut IrProgram, annotated_result_vars: &HashSet<
         if func.is_effect && !func.is_test {
             let returns_result = func.ret_ty.is_result();
             let (skip_unwrap, force_skip) = collect_result_match_vars(&func.body);
-            let mut ctx = TryCtx { var_table, record_fields: &record_fields, annotated_result_vars, first_arg_unwraps, skip_unwrap, force_skip };
+            let mut ctx = TryCtx { var_table, record_fields: &record_fields, annotated_result_vars, result_params, skip_unwrap, force_skip };
             let ret_ty = func.ret_ty.clone();
             func.body = insert_try_body(std::mem::take(&mut func.body), returns_result, &ret_ty, &mut ctx);
         }
@@ -68,7 +72,7 @@ pub fn insert_auto_try(program: &mut IrProgram, annotated_result_vars: &HashSet<
             if func.is_effect {
                 let returns_result = func.ret_ty.is_result();
                 let (skip_unwrap, force_skip) = collect_result_match_vars(&func.body);
-                let mut ctx = TryCtx { var_table, record_fields: &record_fields, annotated_result_vars, first_arg_unwraps, skip_unwrap, force_skip };
+                let mut ctx = TryCtx { var_table, record_fields: &record_fields, annotated_result_vars, result_params, skip_unwrap, force_skip };
                 let ret_ty = func.ret_ty.clone();
                 func.body = insert_try_body(std::mem::take(&mut func.body), returns_result, &ret_ty, &mut ctx);
             }
@@ -428,20 +432,27 @@ fn insert_try_control(kind: IrExprKind, ty: &Ty, ctx: &mut TryCtx) -> Result<IrE
             // hardcoded result/option module list — error.context/message,
             // testing.assert_ok and any user fn taking a Result first are now
             // covered. result/option stay as a fallback for intrinsic keys.
-            let skip_first = match &target {
-                CallTarget::Module { module, func, .. } => {
-                    module.as_str() == "result" || module.as_str() == "option"
-                        || ctx.first_arg_unwraps.contains(&sym(&format!("{}.{}", module.as_str(), func.as_str())))
-                }
-                // A USER fn whose first param is Result/Option (e.g.
+            // #1970: the flag is PER PARAMETER — `fn show(tag: String, r:
+            // Result[..])` keeps its second argument's Result exactly as a
+            // first-param Result was kept; the old first-only skip unwrapped
+            // it (`show(tag, f(1)?)`) on every leg.
+            let (flags, first_intrinsic) = match &target {
+                CallTarget::Module { module, func, .. } => (
+                    ctx.result_params.get(&sym(&format!("{}.{}", module.as_str(), func.as_str()))),
+                    module.as_str() == "result" || module.as_str() == "option",
+                ),
+                // A USER fn whose param is Result/Option (e.g.
                 // `fn take(r: Result[..], ..)`) — its sig key is the bare name.
-                CallTarget::Named { name } => ctx.first_arg_unwraps.contains(name),
-                _ => false,
+                CallTarget::Named { name } => (ctx.result_params.get(name), false),
+                _ => (None, false),
+            };
+            let keeps_result = |i: usize| -> bool {
+                (first_intrinsic && i == 0) || flags.is_some_and(|f| f.get(i).copied().unwrap_or(false))
             };
             IrExprKind::Call {
                 target,
                 args: args.into_iter().enumerate()
-                    .map(|(i, a)| insert_try(a, skip_first && i == 0, ctx))
+                    .map(|(i, a)| insert_try(a, keeps_result(i), ctx))
                     .collect(),
                 type_args,
             }

@@ -1,0 +1,30 @@
+// @contract: C-345
+// An effect call passed as a Result/Option-typed parameter keeps its Result
+// at EVERY parameter index, not only the first. The auto-`?` desugar skipped
+// the unwrap for argument 0 of a callee whose first param is Result/Option
+// (#558) and nothing else, so `show("a", f(1))` lowered to `show("a", f(1)?)`
+// — the callee then received the payload where it consumes the Result:
+// invalid Rust natively (E0308 on the `?`), invalid wasm on the incumbent
+// leg, a ty-mismatch wall on the structural leg. Found writing the C-345
+// fixture (#1970).
+effect fn show(tag: String, r: Result[Int, String]) -> Unit = match r {
+  ok(v) => println("${tag}=ok ${v}"),
+  err(e) => println("${tag}=err ${e}"),
+}
+
+effect fn show3(tag: String, n: Int, o: Int?, r: Result[Int, String]) -> Unit = match r {
+  ok(v) => println("${tag}=ok ${v} ${n} ${o ?? -1}"),
+  err(e) => println("${tag}=err ${e} ${n} ${o ?? -1}"),
+}
+
+effect fn f(n: Int) -> Int = if n < 0 then err("neg")!
+else n
+
+fn find(n: Int) -> Int? = if n > 0 then some(n) else none
+
+effect fn main() -> Unit = {
+  show("a", f(1))!
+  show("b", f(-1))!
+  show3("c", 7, find(3), f(2))!
+  show3("d", 8, find(0), f(-2))!
+}
