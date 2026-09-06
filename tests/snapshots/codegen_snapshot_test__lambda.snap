@@ -6,6 +6,20 @@ pub fn apply(f: std::rc::Rc<dyn Fn(i64) -> i64>, x: i64) -> i64 {
     (f.clone())(x)
 }
 
-pub fn main() -> () {
+pub fn __almide_main() -> () {
     println!("{}", format!("{}", apply((std::rc::Rc::new(move |x: i64| (x).wrapping_add(1i64)) as std::rc::Rc<dyn Fn(i64) -> i64>), 41i64)))
+}
+
+fn main() {
+    #[cfg(unix)]
+    {
+        extern "C" {
+            fn signal(sig: i32, handler: usize) -> usize;
+        }
+        // SIGPIPE = 13, SIG_DFL = 0
+        unsafe {
+            signal(13, 0);
+        }
+    }
+    __almide_main();
 }
