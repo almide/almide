@@ -25,11 +25,14 @@
 //! generator defect (`GeneratorReject`), never a finding. The three rungs
 //! "check green ⇒ native compiles ⇒ legs agree" are the existing ladder.
 //!
-//! Stage 1 (this file): operators `??` (Option and Result), `!`, `?`, `|>`,
-//! `match`, tuple wrap/extract; payloads Int / String / tuple-with-heap /
-//! record; positions tail, `let`-bound, call argument. Stage 2 adds
-//! `guard … else err(…)!`, the match subject, string interpolation, closure
-//! bodies, and nested `Option[Result[…]]` payloads.
+//! Stage 1: operators `??` (Option and Result), `!`, `?`, `|>`, `match`,
+//! tuple wrap/extract; payloads Int / String / tuple-with-heap / record;
+//! positions tail, `let`-bound, call argument. Stage 2: `guard … else
+//! err(…)!` held across, the payload as a match SUBJECT taken apart and
+//! rebuilt, string interpolation (String payload), a closure capturing the
+//! payload and handing it back, and the nested `Option[Result[Int, …]]`
+//! payload. An operator is drawn only for the payload classes it is
+//! defined on (`Op::applies`).
 
 use crate::rng::SplitMix64;
 
@@ -47,9 +50,14 @@ pub enum Payload {
     Tuple,
     /// `P { n: K, s: "r" }` — a record with a heap field beside the scalar.
     Record,
+    /// `some(ok(K))` — an Option holding a Result holding K, built and read
+    /// through helpers (`mk_opr` / `un_opr`) so the nested variant carries
+    /// the payload through every operator.
+    OptRes,
 }
 
-const PAYLOADS: [Payload; 4] = [Payload::Int, Payload::Str, Payload::Tuple, Payload::Record];
+const PAYLOADS: [Payload; 5] =
+    [Payload::Int, Payload::Str, Payload::Tuple, Payload::Record, Payload::OptRes];
 
 impl Payload {
     fn suffix(self) -> &'static str {
@@ -58,6 +66,7 @@ impl Payload {
             Payload::Str => "str",
             Payload::Tuple => "tup",
             Payload::Record => "rec",
+            Payload::OptRes => "opr",
         }
     }
 
@@ -67,6 +76,9 @@ impl Payload {
             Payload::Str => "String",
             Payload::Tuple => "(Int, String)",
             Payload::Record => "P",
+            // Named (`type Q = Result[Int, String]?`) so the some-helper's
+            // return spells `Q?` — `Result[Int, String]??` does not parse.
+            Payload::OptRes => "Q",
         }
     }
 
@@ -77,6 +89,7 @@ impl Payload {
             Payload::Str => format!("string.repeat(\"a\", {n})"),
             Payload::Tuple => format!("({n}, \"t\")"),
             Payload::Record => format!("P {{ n: {n}, s: \"r\" }}"),
+            Payload::OptRes => format!("mk_opr({n})"),
         }
     }
 
@@ -87,6 +100,19 @@ impl Payload {
             Payload::Str => format!("string.len({e})"),
             Payload::Tuple => format!("{e}.0"),
             Payload::Record => format!("{e}.n"),
+            Payload::OptRes => format!("un_opr({e})"),
+        }
+    }
+
+    /// The pattern that takes the payload apart and the expression that
+    /// rebuilds it, for the match-subject round trip.
+    fn rebuild_arm(self) -> (&'static str, &'static str) {
+        match self {
+            Payload::Int => ("n", "n"),
+            Payload::Str => ("s", "s"),
+            Payload::Tuple => ("(a, b)", "(a, b)"),
+            Payload::Record => ("P { n, s }", "P { n: n, s: s }"),
+            Payload::OptRes => ("o", "o"),
         }
     }
 }
@@ -109,9 +135,21 @@ pub enum Op {
     MatchSome,
     /// `(x, 7).0` — the payload as a tuple element, extracted again.
     TupleWrap,
+    /// `{ let g = x\n guard K > 0 else err("g")!\n g }` — the payload held
+    /// across a passing guard whose else-arm propagates (#1926). Needs an
+    /// effect fn.
+    GuardPass,
+    /// `match x { <pattern> => <rebuilt> }` — the payload as the SUBJECT of
+    /// a match, taken apart and rebuilt by the arm.
+    MatchSubject,
+    /// `"${x}"` — a String payload through string interpolation.
+    Interp,
+    /// `{ let c = x\n let f = () => c\n f() }` — the payload captured by a
+    /// closure and handed back through the call (#1925).
+    ClosureCapture,
 }
 
-const OPS: [Op; 7] = [
+const OPS: [Op; 11] = [
     Op::OptCoalesce,
     Op::ResCoalesce,
     Op::Bang,
@@ -119,7 +157,30 @@ const OPS: [Op; 7] = [
     Op::Pipe,
     Op::MatchSome,
     Op::TupleWrap,
+    Op::GuardPass,
+    Op::MatchSubject,
+    Op::Interp,
+    Op::ClosureCapture,
 ];
+
+impl Op {
+    /// Whether the round trip is defined for the payload class.
+    fn applies(self, p: Payload) -> bool {
+        match self {
+            Op::Interp => p == Payload::Str,
+            _ => true,
+        }
+    }
+
+    /// Whether the rendering opens a block that indents what it wraps.
+    fn is_block(self) -> bool {
+        matches!(self, Op::GuardPass | Op::ClosureCapture)
+    }
+
+    fn needs_effect(self) -> bool {
+        matches!(self, Op::Bang | Op::GuardPass)
+    }
+}
 
 /// Where the wrapped expression sits in its fn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -164,11 +225,13 @@ pub fn plan(rng: &mut SplitMix64) -> Plan {
     let n = 1 + rng.below(4) as usize;
     let probes = (0..n)
         .map(|_| {
+            let payload = *rng.pick(&PAYLOADS);
             let depth = 1 + rng.below(3) as usize;
-            let ops: Vec<Op> = (0..depth).map(|_| *rng.pick(&OPS)).collect();
-            let needs_effect = ops.contains(&Op::Bang);
+            let usable: Vec<Op> = OPS.iter().copied().filter(|o| o.applies(payload)).collect();
+            let ops: Vec<Op> = (0..depth).map(|_| *rng.pick(&usable)).collect();
+            let needs_effect = ops.iter().any(|o| o.needs_effect());
             Probe {
-                payload: *rng.pick(&PAYLOADS),
+                payload,
                 ops,
                 position: *rng.pick(&POSITIONS),
                 effect: needs_effect || rng.chance(1, 2),
@@ -195,6 +258,18 @@ fn wrap(op: Op, e: &str, p: Payload, k: i64, indent: usize) -> String {
             format!("(match w_some_{s}({e}) {{\n{pad}  some(v) => v,\n{pad}  none => {d},\n{pad}}})")
         }
         Op::TupleWrap => format!("({e}, 7).0"),
+        Op::GuardPass => format!(
+            "{{\n{pad}  let g = {e}\n{pad}  guard {k} > 0 else err(\"g\")!\n{pad}  g\n{pad}}}"
+        ),
+        Op::MatchSubject => {
+            let (pat, rebuilt) = p.rebuild_arm();
+            // A single arm carries no trailing comma under `almide fmt`.
+            format!("(match {e} {{\n{pad}  {pat} => {rebuilt}\n{pad}}})")
+        }
+        Op::Interp => format!("\"${{{e}}}\""),
+        Op::ClosureCapture => {
+            format!("{{\n{pad}  let c = {e}\n{pad}  let f = () => c\n{pad}  f()\n{pad}}}")
+        }
     }
 }
 
@@ -210,9 +285,21 @@ pub fn render(plan: &Plan) -> (String, String) {
             Position::Let => 2,
             Position::Tail | Position::CallArg => 0,
         };
+        // Operators apply inner-first, but a block-opening operator indents
+        // everything it wraps by two columns: walk the chain outer-first to
+        // find the column each operator's own text starts on.
+        let mut columns = Vec::with_capacity(pr.ops.len());
+        let mut cur = indent;
+        for op in pr.ops.iter().rev() {
+            columns.push(cur);
+            if op.is_block() {
+                cur += 2;
+            }
+        }
+        columns.reverse();
         let mut e = pr.payload.literal(k);
-        for op in &pr.ops {
-            e = wrap(*op, &e, pr.payload, k, indent);
+        for (op, col) in pr.ops.iter().zip(columns) {
+            e = wrap(*op, &e, pr.payload, k, col);
         }
         let s = pr.payload.suffix();
         let body = match pr.position {
@@ -245,6 +332,11 @@ pub fn render(plan: &Plan) -> (String, String) {
     used.dedup();
     if used.contains(&Payload::Record) {
         src.push_str("type P = { n: Int, s: String }\n\n");
+    }
+    if used.contains(&Payload::OptRes) {
+        src.push_str("type Q = Result[Int, String]?\n\n");
+        src.push_str("fn mk_opr(n: Int) -> Q = some(ok(n))\n\n");
+        src.push_str("fn un_opr(x: Q) -> Int = match x {\n  some(r) => r ?? 0,\n  none => 0,\n}\n\n");
     }
     // Spelled the way `almide fmt` spells it (`T?`, one blank line between
     // top-level items), so a committed sample passes the fmt gate untouched.
@@ -365,7 +457,8 @@ mod tests {
                 let (src, expected) = render(&c);
                 assert!(parses(&src), "shrink candidate did not parse:\n{src}");
                 assert_eq!(expected.lines().count(), c.size());
-                assert!(c.probes.iter().all(|pr| pr.effect || !pr.ops.contains(&Op::Bang)));
+                assert!(c.probes.iter().all(|pr| pr.effect || !pr.ops.iter().any(|o| o.needs_effect())));
+                assert!(c.probes.iter().all(|pr| pr.ops.iter().all(|o| o.applies(pr.payload))));
             }
         }
     }
