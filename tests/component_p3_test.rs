@@ -703,7 +703,17 @@ fn spawn_http_echo() -> std::net::SocketAddr {
             let resp = match method.as_str() {
                 "GET" => "hello from p3".to_string(),
                 "DELETE" => "gone".to_string(),
-                _ if !probe.is_empty() => format!("len:{};probe:{probe}", body.len()),
+                // The probe cell also reflects the FRAMING: `cl` for a
+                // content-length body, `chunked` for transfer-encoding —
+                // the native lane's client sends content-length for its
+                // String/Bytes body, and #1924 B is the p3 shim sending
+                // chunked, which a server without chunked support reads
+                // as empty.
+                _ if !probe.is_empty() => format!(
+                    "len:{};probe:{probe};framing:{}",
+                    body.len(),
+                    if chunked { "chunked" } else { "cl" }
+                ),
                 _ => format!("len:{}", body.len()),
             };
             let mut c = r.into_inner();
@@ -879,7 +889,73 @@ effect fn main() -> Unit = {{
     assert_eq!(code, 0, "p3 framed http probe exit code; stderr:\n{stderr}");
     assert_eq!(
         stdout,
-        "req:len:6;probe:p3\nstatus:200:len:2048\ngets:200:hello from p3\nbytes:13\nrb:4\nother:len:1\n",
+        "req:len:6;probe:p3;framing:cl\nstatus:200:len:2048\ngets:200:hello from p3\nbytes:13\nrb:4\nother:len:1\n",
         "p3 framed http probe stdout; stderr:\n{stderr}"
+    );
+}
+
+/// #1924 A: a transport-errored exchange must leave the shim's handle
+/// bookkeeping clean. Before, send's `err` payload (an error-code with
+/// string pointers) was written over the RET scratch where the trailers
+/// future's pending ok(none) buffer lived, and the NEXT exchange trapped
+/// (`failed to read result … unknown handle index <an address>`); the
+/// waitable set leaked per failed exchange; and a bare `get_status` as
+/// the FIRST call trapped `index 3 is not a resource` — the status was
+/// read AFTER consume-body had taken the response by value. The program
+/// below is every one of those shapes in sequence against one echo.
+#[test]
+fn p3_http_transport_error_leaves_the_next_exchange_intact() {
+    let addr = spawn_http_echo();
+    // A port nothing listens on: the connection is refused, the exchange
+    // is the static transport err — and nothing else.
+    let dead = {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        l.local_addr().expect("addr")
+    };
+    let dir = tempfile::tempdir().expect("tempdir");
+    let src = dir.path().join("errs.almd");
+    let program = format!(
+        r#"import http
+
+effect fn main() -> Unit = {{
+  match http.get_status("http://{addr}/hello") {{
+    ok((c, t)) => println("first:${{c}}:" + t),
+    err(e) => println("first err:" + e),
+  }}
+  match http.request("POST", "http://{dead}/echo", "héllo", ["x-probe": "p3"]) {{
+    ok(t) => println("dead:" + t),
+    err(e) => println("dead err"),
+  }}
+  match http.request_status("PUT", "http://{addr}/echo", string.repeat("x", 2048), ["x-probe": "again"]) {{
+    ok((c, t)) => println("after:${{c}}:" + t),
+    err(e) => println("after err:" + e),
+  }}
+  match http.get("http://{dead}/hello") {{
+    ok(t) => println("dead2:" + t),
+    err(e) => println("dead2 err"),
+  }}
+  match http.get("http://{addr}/hello") {{
+    ok(t) => println("last:" + t),
+    err(e) => println("last err:" + e),
+  }}
+}}
+"#
+    );
+    std::fs::write(&src, program).unwrap();
+    let out = dir.path().join("errs.wasm");
+    let stderr = build_p3(&src, &out);
+    assert!(out.exists(), "p3 http err-path build produced no artifact:\n{stderr}");
+    if !wasmtime_available() {
+        eprintln!("skipping p3 http err-path execution: wasmtime not installed");
+        return;
+    }
+    let Some((stdout, stderr, code)) = run_p3_http(&out) else {
+        return;
+    };
+    assert_eq!(code, 0, "p3 http err-path probe exit code; stderr:\n{stderr}");
+    assert_eq!(
+        stdout,
+        "first:200:hello from p3\ndead err\nafter:200:len:2048;probe:again;framing:cl\ndead2 err\nlast:hello from p3\n",
+        "p3 http err-path probe stdout; stderr:\n{stderr}"
     );
 }
