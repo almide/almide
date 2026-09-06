@@ -451,6 +451,7 @@
 5285	spec/wasm_cross/place_mutation.almd
 7630	spec/wasm_cross/playground_default.almd
 2576	spec/wasm_cross/pop_heap_element.almd
+3387	spec/wasm_cross/prim_alloc_count_domain.almd
 3290	spec/wasm_cross/process_args.almd
 3073	spec/wasm_cross/protocol_ufcs_inferred_lambda.almd
 6181	spec/wasm_cross/pure_bang_propagation.almd
