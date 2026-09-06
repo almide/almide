@@ -154,6 +154,22 @@ echo "  fixtures rendered (v1 path): $n"
 # runs every test-block file through the full frontend→codegen pipeline.
 LLVM_PROFILE_FILE="$COVDIR/cli-%m-%p.profraw" "$CLI" test spec/ >/dev/null 2>&1 || true
 echo "  v0 CLI: almide test spec/ (frontend + codegen production path)"
+# The COMPONENT emit paths (almide-wasm-run: the p2 shim and the p3 shim with
+# its http / fs / env / io / process op families) are reached only through
+# `almide build --target wasm --component`, which no spec test drives — the
+# 2026-09-04..06 condition-coverage slide was exactly these lines landing
+# unmeasured. Emit-only (no wasmtime): one fixture per host-op family.
+c=0
+printf 'fn main() -> Unit = {\n  println("Hello, world!")\n}\n' > "$COVDIR/hello.almd"
+for f in "$COVDIR/hello.almd" spec/wasm_cross/http_response_headers.almd \
+         spec/wasm_cross/env_platform_reporting.almd spec/wasm_cross/args_surface.almd \
+         spec/wasm_cross/io_write_ordering.almd spec/wasm_cross/process_args.almd; do
+    [ -f "$f" ] || continue
+    LLVM_PROFILE_FILE="$COVDIR/cli-%m-%p.profraw" "$CLI" build "$f" --target wasm --component -o "$COVDIR/p2.wasm" >/dev/null 2>&1 || true
+    ALMIDE_COMPONENT_P3=1 LLVM_PROFILE_FILE="$COVDIR/cli-%m-%p.profraw" "$CLI" build "$f" --target wasm --component -o "$COVDIR/p3.wasm" >/dev/null 2>&1 || true
+    c=$((c+1))
+done
+echo "  component emit (p2 + p3 shims): $c fixture(s)"
 
 echo "== 4/4 merge + report (compiler crate lines) =="
 nprof="$(ls "$COVDIR"/*.profraw 2>/dev/null | wc -l | tr -d ' ')"
@@ -164,7 +180,12 @@ for tb in $TESTBINS; do OBJS="$OBJS -object $tb"; done
 REPORT="$("$LLVM_BIN/llvm-cov" report $OBJS \
     -instr-profile="$COVDIR/all.profdata" \
     -ignore-filename-regex='(\.cargo|rustc|/tests?/|tests_part|examples/|/release/build/)' 2>/dev/null \
-  | awk 'NR<=2 || /almide-(mir|codegen|frontend|wasm)\// || /^TOTAL/' | grep -vE 'tests?_part')"
+  | awk 'NR<=2 || /almide-(mir|codegen|frontend|wasm|wasm-run)\// || /^TOTAL/' | grep -vE 'tests?_part')"
+# The full per-file table goes into a collapsed group so a ratchet slide can be
+# traced to its files from the log alone; the tail stays as the summary.
+echo "::group::per-file coverage (all instrumented compiler crates)"
+printf '%s\n' "$REPORT"
+echo "::endgroup::"
 printf '%s\n' "$REPORT" | tail -40
 
 # ── RATCHET (#566): TOTAL line coverage may only go UP ─────────────────────
