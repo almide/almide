@@ -368,8 +368,7 @@ impl Emitter<'_> {
             // inc-before-dec, so the per-iteration dec balances fresh and
             // aliased alike; the move is by 8-byte bits, so Int and Float
             // share one loop and $dec_flat (shallow) is a full free.
-            if !crate::rc_ownership::rc_certainly_fresh(&crate::rc_ownership::rc_tail(body).kind)
-            {
+            if !self.rc_owned_result(crate::rc_ownership::rc_tail(body)) {
                 self.rc_inc_top();
             }
             self.f.instructions().local_set(hs);

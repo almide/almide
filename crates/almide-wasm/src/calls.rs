@@ -274,7 +274,7 @@ impl Emitter<'_> {
     /// the bare table: accept the module-qualified key ENDING in
     /// `.Type.method` iff it is UNIQUE across modules — ambiguity walls
     /// (order-independent: uniqueness needs no iteration order).
-    fn resolve_method_suffix(&self, name: &str) -> Option<usize> {
+    pub(crate) fn resolve_method_suffix(&self, name: &str) -> Option<usize> {
         if !name.contains('.') {
             return None;
         }

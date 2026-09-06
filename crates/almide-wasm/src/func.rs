@@ -368,9 +368,7 @@ pub(crate) fn lower_fn(
                 em.lower_tail(body, Some(want))?;
                 // RC-3: a droppable result that may BORROW a local
                 // takes +1 before the epilogue releases the owners.
-                if em.rc_droppable(want)
-                    && !crate::rc_ownership::rc_certainly_fresh(&crate::rc_ownership::rc_tail(body).kind)
-                {
+                if em.rc_droppable(want) && !em.rc_owned_result(crate::rc_ownership::rc_tail(body)) {
                     em.rc_inc_top();
                     if em.witness.is_some() {
                         let tail = crate::rc_ownership::rc_tail(body);
@@ -405,9 +403,7 @@ pub(crate) fn lower_fn(
                     // RC-3: the raw payload rides inside the ok carrier
                     // past the epilogue — same borrow rule as the pure
                     // arm, and the +1 must precede the wrap.
-                    if em.rc_droppable(raw)
-                        && !crate::rc_ownership::rc_certainly_fresh(&crate::rc_ownership::rc_tail(body).kind)
-                    {
+                    if em.rc_droppable(raw) && !em.rc_owned_result(crate::rc_ownership::rc_tail(body)) {
                         em.rc_inc_top();
                     }
                 }

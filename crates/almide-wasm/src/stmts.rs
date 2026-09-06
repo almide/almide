@@ -234,7 +234,7 @@ impl Emitter<'_> {
             self.f.instructions().call(F_BLOCK_COPY);
         }
         if matches!(declared, SliceTy::List(_) | SliceTy::Scalar(Scalar::Str | Scalar::Bytes))
-            && !crate::rc_ownership::rc_certainly_fresh(&value.kind)
+            && !self.rc_owned_result(value)
         {
             self.rc_inc_top();
         }
@@ -683,7 +683,7 @@ impl Emitter<'_> {
                 if matches!(
                     declared,
                     SliceTy::List(_) | SliceTy::Scalar(Scalar::Str | Scalar::Bytes)
-                ) && !crate::rc_ownership::rc_certainly_fresh(&value.kind)
+                ) && !self.rc_owned_result(value)
                 {
                     self.rc_inc_top();
                 }
