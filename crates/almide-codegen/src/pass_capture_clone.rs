@@ -280,10 +280,17 @@ fn transform_expr_match(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashS
     let IrExprKind::Match { subject, arms } = &mut expr.kind else { unreachable!() };
     let mut changed = transform_expr(subject, vt, scope_vars);
     for arm in arms {
+        // The arm's pattern bindings are in scope for the guard and the
+        // body (#1925): a `some(key)` binding captured by a `move` closure
+        // and reused in the same arm needs the pre-clone wrap exactly as a
+        // `let` binding does — without it the closure moved `key` and the
+        // later use was rustc E0382 behind a green check.
+        let mut arm_scope = scope_vars.clone();
+        collect_pattern_bindings_into(&arm.pattern, &mut arm_scope);
         if let Some(g) = &mut arm.guard {
-            changed |= transform_expr(g, vt, scope_vars);
+            changed |= transform_expr(g, vt, &arm_scope);
         }
-        changed |= transform_expr(&mut arm.body, vt, scope_vars);
+        changed |= transform_expr(&mut arm.body, vt, &arm_scope);
     }
     changed
 }

@@ -1,0 +1,24 @@
+// #1925: a String bound by a match-arm pattern, captured by a `move`
+// closure handed to a stdlib higher-order fn, then reused in the same arm.
+// The capture pre-clone pass scoped only `let` bindings and params, so the
+// closure moved the binding and the later use was rustc E0382 behind a
+// green check.
+fn check(o: String?, acc: List[List[String]]) -> Result[Int, String] = {
+  match o {
+    none => ok(0),
+    some(key) => match list.find(acc, (p) => p[0] == key) {
+      some(_) => err("dup: ${key}"),
+      none => ok(0),
+    },
+  }
+}
+
+test "arm binding captured by a closure and reused" {
+  assert_eq(check(some("a"), [
+    ["a"]
+  ]), err("dup: a"))
+  assert_eq(check(some("z"), [
+    ["a"]
+  ]), ok(0))
+  assert_eq(check(none, []), ok(0))
+}
