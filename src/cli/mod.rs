@@ -1,7 +1,7 @@
 /// CLI command implementations.
 
 mod run;
-mod build;
+pub(crate) mod build;
 mod bench;
 mod compile;
 mod emit;
