@@ -317,11 +317,18 @@ fn collect_binds_data_b(
         // carries its `__mp_res`/`__mp_buf` binds beneath a Try (#1576's
         // DDD tree: `" ${cancel_order(mem, id)!} …"`) — missing it here
         // surfaced as `bind:unmapped`.
+        // `r?` (ToOption) and `o?.field` (OptionalChain) are wrappers like
+        // `Try`/`Unwrap`: a `match` with a pattern bind beneath them
+        // (`w(match o { some(v) => v, none => d })? ?? d2`, the composition
+        // family's seed-7 draws 11/21/30/57/88/98/103) surfaced as
+        // `bind:unmapped` on BOTH legs because this walk never reached `v`.
         IrExprKind::OptionSome { expr }
         | IrExprKind::ResultOk { expr }
         | IrExprKind::ResultErr { expr }
         | IrExprKind::Try { expr }
-        | IrExprKind::Unwrap { expr } => collect_binds(expr, out, seen, types),
+        | IrExprKind::Unwrap { expr }
+        | IrExprKind::ToOption { expr }
+        | IrExprKind::OptionalChain { expr, .. } => collect_binds(expr, out, seen, types),
         IrExprKind::UnwrapOr { expr, fallback } => {
             collect_binds(expr, out, seen, types)?;
             collect_binds(fallback, out, seen, types)
