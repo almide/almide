@@ -1,0 +1,17 @@
+// @contract: C-197
+// The OVER-BOUND cell of the bytes pad pair: a target no machine can satisfy
+// (`i64::MAX`) takes C-197's single abort form — "Error: out of memory" +
+// exit 1 — on every leg. The structural wasm leg wrapped the i64 target to
+// i32 before its allocator saw it, so `i64::MAX` reached `$alloc` as -1 and
+// died as a raw out-of-bounds trap (exit 134) where native and the incumbent
+// leg abort in the defined form (differential fuzz, seed 20260906 index 431,
+// a mutation of bytes_alloc_ceiling_domain.almd; #1978). The in-range and
+// negative cells stay in that fixture; this one ends at the abort.
+import bytes
+
+fn main() -> Unit = {
+  let b = bytes.from_list([1, 2])
+  println("before=" + int.to_string(bytes.len(bytes.pad_right(b, 5, 9))))
+  println("pad_max=" + int.to_string(bytes.len(bytes.pad_right(b, 9223372036854775807, 9))))
+  println("after")
+}

@@ -433,6 +433,7 @@ impl Emitter<'_> {
                 let hv = self.hold_i64()?;
                 let ho = self.hold_i32()?;
                 let hp = self.hold_i32()?;
+                let oom = self.pool.intern("Error: out of memory");
                 let mut i = self.f.instructions();
                 i.local_set(hv);
                 i.local_get(ht);
@@ -440,6 +441,15 @@ impl Emitter<'_> {
                 i.i64_le_s().if_(BlockType::Result(ValType::I32));
                 i.local_get(bh).call(F_BLOCK_COPY);
                 i.else_();
+                // #1978: a target past the allocator's bound dies in C-197's
+                // single form BEFORE the i32 wrap — `i64::MAX` wrapped to -1
+                // reached `$alloc` and trapped out of bounds where native and
+                // the incumbent abort `Error: out of memory`. The same guard
+                // `bytes.new` carries (differential fuzz, seed 20260906:431).
+                i.local_get(ht).i64_const(0x7FFF_0000).i64_gt_s().if_(BlockType::Empty);
+                i.i32_const(oom as i32).call(F_EPRINTLN_BLOCK);
+                i.i32_const(1).call(F_EXIT_IMPORT).unreachable();
+                i.end();
                 i.local_get(ht).i32_wrap_i64().call(F_ALLOC).local_set(ho);
                 // pad = target - len bytes of val
                 i.local_get(ht)
