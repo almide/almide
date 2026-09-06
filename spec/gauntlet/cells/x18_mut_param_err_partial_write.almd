@@ -1,0 +1,25 @@
+// #1871 — a mut-param effect fn that mutates its buffer and THEN errs, consumed
+// through `??` and `match`. Native passes `mut` as `&mut`, so the write stays
+// visible after the err (r=-9 len=1); the interp (the executable spec) agrees.
+// The wasm carrier (the (T, Buf) tuple with the `!` inside the destructure
+// bind, C-132) would keep the caller's slot at its pre-call value — but the
+// consumer shape is walled on the structural leg today, so the two never meet.
+// This cell pins the WALL: lifting it turns the row red and forces the pinned
+// ruling (the interp's answer: write visible) into the carrier — write the
+// buffer back on the err path too — before the cell may become a `run` row
+// with the native hash.
+effect fn bump_then_fail(mut buf: List[Int], n: Int) -> Int = {
+  list.push(buf, n)
+  if n > 0 then err("fell") else ok(n)
+}
+
+effect fn main() -> Unit = {
+  var xs: List[Int] = []
+  let r = bump_then_fail(xs, 9) ?? -9
+  println("r=${r} len=${list.len(xs)}")
+  let m = match bump_then_fail(xs, 0) {
+    ok(v) => v,
+    err(_) => -1,
+  }
+  println("m=${m} len=${list.len(xs)}")
+}
