@@ -790,11 +790,20 @@ fn run_wasm_src(
         }
     };
     drop(ticker);
-    let heap_end = instance.get_global(&mut store, "__heap").map(|g| match g.get(&mut store) {
-        wasmtime::Val::I32(v) => v as u32 as u64,
-        wasmtime::Val::I64(v) => v as u64,
-        _ => 0,
-    });
+    let read_global = |store: &mut wasmtime::Store<_>, name: &str| {
+        instance.get_global(&mut *store, name).map(|g| match g.get(&mut *store) {
+            wasmtime::Val::I32(v) => v as u32 as u64,
+            wasmtime::Val::I64(v) => v as u64,
+            _ => 0,
+        })
+    };
+    // A region window (#1961) rewinds `__heap`; the allocation total is
+    // the peak, kept in `__heap_high` when the module has windows.
+    let heap_end = read_global(&mut store, "__heap");
+    let heap_end = match (heap_end, read_global(&mut store, "__heap_high")) {
+        (Some(h), Some(hi)) => Some(h.max(hi)),
+        (h, _) => h,
+    };
     Ok(RunResult {
         stdout: out.lock().expect("test harness invariant").clone(),
         stderr: err.lock().expect("test harness invariant").clone(),

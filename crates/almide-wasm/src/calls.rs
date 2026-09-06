@@ -165,6 +165,15 @@ impl Emitter<'_> {
                     return unsup(&format!("call-arity:{name}"));
                 }
                 let (index, ret, params) = (info.wasm_index, info.ret, info.params.clone());
+                // The `consume(produce(scalars))` region window (#1961):
+                // the whole producer/consumer pair runs inside a bump
+                // window that RegionRestore rewinds wholesale. Opened
+                // before the arguments (the producer call IS one), closed
+                // right after the call; a return_call site keeps its C-292
+                // constant stack instead.
+                let window = !(tail && ret.is_some() && ret == self.fn_ret)
+                    && self.region_window_opens(i, ret, args, &params);
+                let save = if window { Some(self.emit_region_save()?) } else { None };
                 for (a, want) in args.iter().zip(params) {
                     self.lower(a, Some(want))?;
                     // RC-3 callee-owned args: a borrowed droppable
@@ -174,6 +183,11 @@ impl Emitter<'_> {
                     self.rc_arg_guard(a, want);
                 }
                 self.calls.insert(i);
+                if let Some(blk) = save {
+                    self.f.instructions().call(index);
+                    self.emit_region_restore(blk);
+                    return Ok(ret);
+                }
                 // Tail position with a matching return type → return_call:
                 // constant stack for arbitrarily deep (incl. mutual)
                 // recursion, the C-292 contract.

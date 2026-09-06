@@ -129,6 +129,7 @@ mod newtype;
 mod fuel;
 mod ranges;
 mod rc_ownership;
+mod region;
 mod sums;
 mod tco;
 mod types_table;
@@ -309,7 +310,13 @@ const G_LINE_ROOM: u32 = 13;
 /// allocates it; a heap block address after.
 const G_MAPIDX: u32 = 14;
 /// Fixed runtime globals above; top-let globals start here.
-const G_FIXED_COUNT: u32 = 15;
+/// #1961: the heap HIGH-WATER mark. `G_HEAP` rewinds at a region
+/// window's close, so the alloc ledger's "final bump = allocation total"
+/// reading needs the peak kept separately; RegionRestore raises it
+/// before rewinding, and `__heap_high` is exported only when a window
+/// was emitted (the host reads max(__heap, __heap_high)).
+const G_HEAP_HIGH: u32 = 15;
+const G_FIXED_COUNT: u32 = 16;
 
 // ── slice value model ───────────────────────────────────────────────────
 
