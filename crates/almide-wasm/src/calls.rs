@@ -543,8 +543,22 @@ impl Emitter<'_> {
     /// pending args on the wasm stack are unaffected ($dec_flat is
     /// stack-neutral), and rc_arg_guard has already +1'd borrowed args.
     pub(crate) fn emit_tail_param_release(&mut self) {
-        for idx in self.rc_droppable_params.clone() {
+        // The frame is replaced, so the fall-through epilogue never runs:
+        // every owner it would have released is released HERE, in its
+        // order — the rc_owned locals first (a `{ let x = mk(n); take(x) }`
+        // tail leaked x on every call: 32 B, measured), then the droppable
+        // params not already among them (#1770: one release per local).
+        // Safe by the epilogue's own argument: the tail call's arguments
+        // are lowered and rc_arg_guard-inc'd already, rc_owned holds only
+        // flat blocks, and a local is never the tail call's result.
+        let owned = self.rc_owned.clone();
+        for &idx in &owned {
             self.f.instructions().local_get(idx).call(F_DEC_FLAT);
+        }
+        for idx in self.rc_droppable_params.clone() {
+            if !owned.contains(&idx) {
+                self.f.instructions().local_get(idx).call(F_DEC_FLAT);
+            }
         }
     }
 }
