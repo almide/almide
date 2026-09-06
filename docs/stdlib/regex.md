@@ -157,6 +157,31 @@ effect fn main() -> Unit = {
 none
 ```
 
+## Supported syntax
+
+The engine is a backtracking matcher: alternatives are tried left to right,
+greedy quantifiers longest-first, lazy quantifiers shortest-first, and a group
+or quantifier that leads the rest of the pattern to fail is retried with its
+next choice. Native and wasm run the same algorithm and agree byte for byte.
+
+| Syntax | Meaning |
+|---|---|
+| `a`, `\.`, `\\` | literal characters (escape a metacharacter with `\`) |
+| `.` | any character except `\n` |
+| `[abc]`, `[a-z]`, `[^0-9]` | character class, range, negated class |
+| `\d` `\w` `\s` and `\D` `\W` `\S` | digit, word (`[A-Za-z0-9_]`), whitespace, and their negations |
+| `\n` `\t` `\r` | control characters |
+| `^`, `$` | start / end of the string |
+| `(?m)` at the start of the pattern | `^` and `$` also match after / before a `\n` |
+| `\b`, `\B` | word boundary / non-boundary (ASCII word characters) |
+| `x|y` | alternation |
+| `(x)`, `(?:x)` | capturing / non-capturing group |
+| `x*` `x+` `x?` `x{n}` `x{n,}` `x{n,m}` | greedy quantifiers (a malformed brace stays literal) |
+| `x*?` `x+?` `x??` `x{n,m}?` | lazy quantifiers |
+
+Not supported: lookaround, backreferences, named groups, Unicode classes, and
+flags other than `(?m)`.
+
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
 ## Signature index (8 functions)
