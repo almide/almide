@@ -2,23 +2,26 @@
 // closure handed to a stdlib higher-order fn, then reused in the same arm.
 // The capture pre-clone pass scoped only `let` bindings and params, so the
 // closure moved the binding and the later use was rustc E0382 behind a
-// green check.
-fn check(o: String?, acc: List[List[String]]) -> Result[Int, String] = {
+// green check. (`List[String]` rather than the report's `List[List[String]]`
+// so the file runs on the wasm leg too — the incumbent brick has no linked
+// `list.find` over a list-of-lists; the capture shape is the same.)
+fn check(o: String?, acc: List[String]) -> Result[Int, String] = {
   match o {
     none => ok(0),
-    some(key) => match list.find(acc, (p) => p[0] == key) {
+    some(key) => match list.find(acc, (p) => p == key) {
       some(_) => err("dup: ${key}"),
       none => ok(0),
     },
   }
 }
 
+fn show(r: Result[Int, String]) -> String = match r {
+  ok(n) => "ok ${n}",
+  err(e) => e,
+}
+
 test "arm binding captured by a closure and reused" {
-  assert_eq(check(some("a"), [
-    ["a"]
-  ]), err("dup: a"))
-  assert_eq(check(some("z"), [
-    ["a"]
-  ]), ok(0))
-  assert_eq(check(none, []), ok(0))
+  assert_eq(show(check(some("a"), ["a"])), "dup: a")
+  assert_eq(show(check(some("z"), ["a"])), "ok 0")
+  assert_eq(show(check(none, [])), "ok 0")
 }
