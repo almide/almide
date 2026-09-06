@@ -369,6 +369,9 @@ jobs:
         with:
           name: fuzz-findings-${{ github.run_id }}
           path: night-findings/
+          # A reclaim retry (fuzz-nightly-retry.yml) re-runs this job on
+          # attempt 2 of the same run; the aggregate is re-uploaded whole.
+          overwrite: true
           retention-days: 30
 
       - name: Open / update tracking issue
