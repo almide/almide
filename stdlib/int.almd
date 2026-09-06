@@ -58,6 +58,19 @@ fn max(a: Int, b: Int) -> Int = _
 @intrinsic("almide_rt_int_clamp")
 fn clamp(n: Int, lo: Int, hi: Int) -> Int = _
 
+// ── Predicates ──
+// The parity PAIR (#1923): reflex vocabulary (Gleam's `int.is_even` /
+// `is_odd`, Ruby's `even?` / `odd?`), pure Almide on both legs. Family
+// rule (tests/int_parity_family_gate_test.rs): the pair lives on scalar
+// `int` ONLY — the sized modules (int8..uint64) are conversion + bounds
+// surfaces and carry no arithmetic predicate; a sized value reaches the
+// pair through `int.from_int8(x)`. `%` is remainder with the dividend's
+// sign, so `-3 % 2 == -1`: parity is `% 2 == 0` and its negation, never
+// `% 2 == 1`.
+fn is_even(n: Int) -> Bool = n % 2 == 0
+
+fn is_odd(n: Int) -> Bool = n % 2 != 0
+
 // ── Bitwise ──
 @intrinsic("almide_rt_int_band")
 fn band(a: Int, b: Int) -> Int = _

@@ -148,3 +148,29 @@ test "int UFCS to_hex" {
 test "int.abs via module negative" {
   assert_eq(int.abs(-7), 7)
 }
+
+// ── Parity pair (#1923) ──
+test "int.is_even / is_odd on small values" {
+  assert_eq(int.is_even(0), true)
+  assert_eq(int.is_even(4), true)
+  assert_eq(int.is_even(7), false)
+  assert_eq(int.is_odd(7), true)
+  assert_eq(int.is_odd(4), false)
+}
+
+test "int.is_even / is_odd on negatives (remainder keeps the dividend's sign)" {
+  assert_eq(int.is_even(-4), true)
+  assert_eq(int.is_odd(-3), true)
+  assert_eq(int.is_even(-3), false)
+  assert_eq(int.is_odd(-4), false)
+}
+
+test "int.is_even / is_odd at the bounds" {
+  assert_eq(int.is_even(int.min_value()), true)
+  assert_eq(int.is_odd(int.max_value()), true)
+}
+
+test "int parity via UFCS" {
+  assert_eq(10.is_even(), true)
+  assert_eq(11.is_odd(), true)
+}
