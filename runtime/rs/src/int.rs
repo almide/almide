@@ -39,26 +39,26 @@ const ALMIDE_ROTATE_FULL_WIDTH_BITS: i64 = 64;
 /// / wasm `i64.rem_s` trap (134). Wording shared verbatim with the wasm emit.
 pub const ALMIDE_ROTATE_NONPOSITIVE_WIDTH_MSG: &str = "rotate width must be positive";
 #[inline]
-fn rotate_mask(bits: i64) -> u64 {
+fn almide_rt_rotate_mask(bits: i64) -> u64 {
     if bits >= ALMIDE_ROTATE_FULL_WIDTH_BITS { u64::MAX } else { (1u64 << bits) - 1 }
 }
 #[inline]
-fn check_rotate_width(bits: i64) {
+fn almide_rt_check_rotate_width(bits: i64) {
     if bits <= 0 {
         eprintln!("Error: {}", ALMIDE_ROTATE_NONPOSITIVE_WIDTH_MSG);
         std::process::exit(1);
     }
 }
 pub fn almide_rt_int_rotate_left(a: i64, n: i64, bits: i64) -> i64 {
-    check_rotate_width(bits);
-    let mask = rotate_mask(bits);
+    almide_rt_check_rotate_width(bits);
+    let mask = almide_rt_rotate_mask(bits);
     let v = (a as u64) & mask;
     let n = (n % bits) as u32;
     ((v << n) | (v >> (bits as u32 - n))) as i64 & mask as i64
 }
 pub fn almide_rt_int_rotate_right(a: i64, n: i64, bits: i64) -> i64 {
-    check_rotate_width(bits);
-    let mask = rotate_mask(bits);
+    almide_rt_check_rotate_width(bits);
+    let mask = almide_rt_rotate_mask(bits);
     let v = (a as u64) & mask;
     let n = (n % bits) as u32;
     ((v >> n) | (v << (bits as u32 - n))) as i64 & mask as i64

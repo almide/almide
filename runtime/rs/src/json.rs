@@ -131,10 +131,10 @@ pub fn almide_rt_json_parse(text: &str) -> Result<AlmideValue, String> {
         while i < b.len() && b[i] != b'"' && b[i] != b'\\' { i += 1; }
         if i < b.len() && b[i] == b'"' {
             *pos = i + 1;
-            return Ok(intern_key(&t[start..i]));
+            return Ok(almide_rt_intern_key(&t[start..i]));
         }
         *pos = save;
-        parse_string(t, pos).map(|s| intern_key(&s))
+        parse_string(t, pos).map(|s| almide_rt_intern_key(&s))
     }
     fn parse_number(t: &str, pos: &mut usize) -> Result<AlmideValue, String> {
         let b = t.as_bytes();
@@ -279,7 +279,7 @@ pub fn almide_json_to_map(j: &AlmideValue) -> Option<AlmideMap<String, String>> 
 }
 
 pub fn almide_json_object(entries: &[(String, AlmideValue)]) -> AlmideValue {
-    AlmideValue::Object(entries.iter().map(|(k, v)| (intern_key(k), v.clone())).collect())
+    AlmideValue::Object(entries.iter().map(|(k, v)| (almide_rt_intern_key(k), v.clone())).collect())
 }
 
 pub fn almide_json_from_float(n: f64) -> AlmideValue { AlmideValue::Float(n) }
@@ -426,11 +426,11 @@ fn set_at_steps(j: &AlmideValue, steps: &[AlmidePathStep], value: &AlmideValue) 
                     .map(|(k, v)| if k.as_ref() == key.as_str() { (k.clone(), set_at_steps(v, rest, value)) } else { (k.clone(), v.clone()) })
                     .collect();
                 if !entries.iter().any(|(k, _)| k.as_ref() == key.as_str()) {
-                    new_entries.push((intern_key(key), set_at_steps(&AlmideValue::Object(vec![]), rest, value)));
+                    new_entries.push((almide_rt_intern_key(key), set_at_steps(&AlmideValue::Object(vec![]), rest, value)));
                 }
                 AlmideValue::Object(new_entries)
             }
-            _ => AlmideValue::Object(vec![(intern_key(key), set_at_steps(&AlmideValue::Object(vec![]), &steps[1..], value))]),
+            _ => AlmideValue::Object(vec![(almide_rt_intern_key(key), set_at_steps(&AlmideValue::Object(vec![]), &steps[1..], value))]),
         },
         AlmidePathStep::Index(i) => match j {
             AlmideValue::Array(items) => {

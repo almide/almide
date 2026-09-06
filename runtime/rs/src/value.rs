@@ -30,7 +30,7 @@ thread_local! {
 }
 
 #[inline]
-fn key_slot(k: &str) -> usize {
+fn almide_rt_key_slot(k: &str) -> usize {
     let mut h: u64 = k.len() as u64;
     for &b in k.as_bytes().iter().take(16) { h = (h.rotate_left(5) ^ b as u64).wrapping_mul(0x517c_c1b7_2722_0a95); }
     (h >> 32) as usize % ALMIDE_KEY_SLOTS
@@ -39,10 +39,10 @@ fn key_slot(k: &str) -> usize {
 /// Intern `k` as an object key: a pointer copy when it has been seen, one
 /// leaked allocation the first time (bounded by `ALMIDE_KEY_LEAK_CAP`), an owned
 /// `String` otherwise.
-pub(crate) fn intern_key(k: &str) -> AlmideKey {
+pub(crate) fn almide_rt_intern_key(k: &str) -> AlmideKey {
     ALMIDE_KEY_TABLE.with(|t| {
         let mut t = t.borrow_mut();
-        let slot = key_slot(k);
+        let slot = almide_rt_key_slot(k);
         match t.0[slot] {
             Some(hit) if hit == k => AlmideKey::Borrowed(hit),
             Some(_) => AlmideKey::Owned(k.to_string()),
@@ -64,7 +64,7 @@ pub fn almide_rt_value_int(n: i64) -> AlmideValue { AlmideValue::Int(n) }
 pub fn almide_rt_value_float(f: f64) -> AlmideValue { AlmideValue::Float(f) }
 pub fn almide_rt_value_bool(b: bool) -> AlmideValue { AlmideValue::Bool(b) }
 pub fn almide_rt_value_array(items: &Vec<AlmideValue>) -> AlmideValue { AlmideValue::Array(items.clone()) }
-pub fn almide_rt_value_object(pairs: &Vec<(String, AlmideValue)>) -> AlmideValue { AlmideValue::Object(pairs.iter().map(|(k, v)| (intern_key(k), v.clone())).collect()) }
+pub fn almide_rt_value_object(pairs: &Vec<(String, AlmideValue)>) -> AlmideValue { AlmideValue::Object(pairs.iter().map(|(k, v)| (almide_rt_intern_key(k), v.clone())).collect()) }
 pub fn almide_rt_value_null() -> AlmideValue { AlmideValue::Null }
 // Structural equality (`value.eq`). The wasm leg had this in its self-host
 // registry all along; native only ever reached AlmideValue equality through user
@@ -76,7 +76,7 @@ pub fn almide_rt_value_eq(a: AlmideValue, b: AlmideValue) -> bool { a == b }
 
 /// #1675: the wire-kind name for decode diagnostics — matches the wasm
 /// self-host's `__vkind` byte-for-byte (parity is contract surface).
-fn value_kind(v: &AlmideValue) -> &'static str {
+fn almide_rt_value_kind(v: &AlmideValue) -> &'static str {
     match v {
         AlmideValue::Null => "Null",
         AlmideValue::Bool(_) => "Bool",
@@ -112,28 +112,28 @@ pub fn almide_rt_value_field(v: &AlmideValue, key: &str) -> Result<AlmideValue, 
         }
         Err(format!("missing field '{}'", key))
     } else {
-        Err(format!("expected Object, received {}", value_kind(v)))
+        Err(format!("expected Object, received {}", almide_rt_value_kind(v)))
     }
 }
 
 pub fn almide_rt_value_as_string(v: &AlmideValue) -> Result<String, String> {
-    match v { AlmideValue::Str(s) => Ok(s.clone()), _ => Err(format!("expected Str, received {}", value_kind(v))) }
+    match v { AlmideValue::Str(s) => Ok(s.clone()), _ => Err(format!("expected Str, received {}", almide_rt_value_kind(v))) }
 }
 pub fn almide_rt_value_as_int(v: &AlmideValue) -> Result<i64, String> {
-    match v { AlmideValue::Int(n) => Ok(*n), _ => Err(format!("expected Int, received {}", value_kind(v))) }
+    match v { AlmideValue::Int(n) => Ok(*n), _ => Err(format!("expected Int, received {}", almide_rt_value_kind(v))) }
 }
 pub fn almide_rt_value_as_float(v: &AlmideValue) -> Result<f64, String> {
     // A JSON number has no int/float distinction, so an integer literal is a
     // valid Float — widen it (mirrors json.as_float/get_float, value.rs siblings,
     // and serde's f64 deserializer). Keeps Codec roundtrips total for Float
     // fields whose value happens to be integral (#658).
-    match v { AlmideValue::Float(f) => Ok(*f), AlmideValue::Int(n) => Ok(*n as f64), _ => Err(format!("expected Float, received {}", value_kind(v))) }
+    match v { AlmideValue::Float(f) => Ok(*f), AlmideValue::Int(n) => Ok(*n as f64), _ => Err(format!("expected Float, received {}", almide_rt_value_kind(v))) }
 }
 pub fn almide_rt_value_as_bool(v: &AlmideValue) -> Result<bool, String> {
-    match v { AlmideValue::Bool(b) => Ok(*b), _ => Err(format!("expected Bool, received {}", value_kind(v))) }
+    match v { AlmideValue::Bool(b) => Ok(*b), _ => Err(format!("expected Bool, received {}", almide_rt_value_kind(v))) }
 }
 pub fn almide_rt_value_as_array(v: &AlmideValue) -> Result<Vec<AlmideValue>, String> {
-    match v { AlmideValue::Array(a) => Ok(a.clone()), _ => Err(format!("expected Array, received {}", value_kind(v))) }
+    match v { AlmideValue::Array(a) => Ok(a.clone()), _ => Err(format!("expected Array, received {}", almide_rt_value_kind(v))) }
 }
 
 // ── List encode/decode ──
@@ -146,7 +146,7 @@ pub fn almide_rt_value_decode_list<T, F: Fn(AlmideValue) -> Result<T, String>>(v
         AlmideValue::Array(items) => items.into_iter().enumerate()
             .map(|(i, e)| f(e).map_err(|er| almide_rt___err_at_index(er, i as i64)))
             .collect(),
-        other => Err(format!("expected Array, received {}", value_kind(&other))),
+        other => Err(format!("expected Array, received {}", almide_rt_value_kind(&other))),
     }
 }
 
@@ -158,7 +158,7 @@ pub fn almide_rt_value_decode_list_ref<T, F: Fn(&AlmideValue) -> Result<T, Strin
         AlmideValue::Array(items) => items.iter().enumerate()
             .map(|(i, e)| f(e).map_err(|er| almide_rt___err_at_index(er, i as i64)))
             .collect(),
-        _ => Err(format!("expected Array, received {}", value_kind(v))),
+        _ => Err(format!("expected Array, received {}", almide_rt_value_kind(v))),
     }
 }
 
@@ -200,7 +200,7 @@ pub fn almide_rt_value_field_ref<'a>(v: &'a AlmideValue, key: &str) -> Result<&'
         }
         Err(format!("missing field '{}'", key))
     } else {
-        Err(format!("expected Object, received {}", value_kind(v)))
+        Err(format!("expected Object, received {}", almide_rt_value_kind(v)))
     }
 }
 pub fn almide_rt_value_decode_with_default<T: Clone, F: Fn(AlmideValue) -> Result<T, String>>(v: &AlmideValue, key: &str, default: T, f: F) -> Result<T, String> {
@@ -275,7 +275,7 @@ pub fn almide_rt_value_pick(v: &AlmideValue, keys: &[String]) -> AlmideValue {
 pub fn almide_rt_value_rename_keys(v: &AlmideValue, f: impl Fn(String) -> String) -> AlmideValue {
     match v {
         AlmideValue::Object(pairs) => {
-            AlmideValue::Object(pairs.iter().map(|(k, v)| (intern_key(&f(k.to_string())), v.clone())).collect())
+            AlmideValue::Object(pairs.iter().map(|(k, v)| (almide_rt_intern_key(&f(k.to_string())), v.clone())).collect())
         }
         other => other.clone(),
     }
