@@ -570,15 +570,27 @@ fn helper_body_b(h: &Helper, work: &FnWork, helper_snapshot: &[Helper]) -> Funct
 /// Roots are every body that ships after the helper block (the reachable
 /// lowered fns, `main`, the program-driven extras); edges INSIDE the helper
 /// set come from scanning each helper's own encoded body, folded to a
-/// fixpoint. The proven runtime core is seeded unconditionally.
+/// fixpoint.
+///
+/// #1962: the proven runtime core (`$alloc` / `$free` / `$inc` / `$dec_flat`
+/// / `$cow`) is NOT seeded any more — it is reached like every other
+/// helper, through a call from a shipped body. A program that never
+/// allocates (hello, world: one data-segment string through `$println`)
+/// ships the five as 2-byte `unreachable` stubs, index-stable, and drops
+/// ~2 KB from every such artifact. The byte-grounding gate
+/// (`proofs/check-structural-bytes.sh`) dumps the core bodies through
+/// `dump_runtime_bytes` at unit level, independent of any module, so the
+/// `StructuralDecode.v` theorems keep their subject either way. Nothing
+/// outside a body reaches the core: the exports are `memory` / `main` /
+/// `__heap` / the `@export` fns, and the WASI transforms park their
+/// buffers on their own page rather than calling `$alloc`.
 fn used_static_helpers<'a>(
     helpers: &[(u32, Function)],
     roots: impl Iterator<Item = &'a Function>,
 ) -> std::collections::HashSet<u32> {
     use std::collections::HashSet;
-    let mut used: HashSet<u32> =
-        [F_ALLOC, F_FREE, F_INC, F_DEC_FLAT, F_COW].into_iter().collect();
-    let mut pending: Vec<u32> = used.iter().copied().collect();
+    let mut used: HashSet<u32> = HashSet::new();
+    let mut pending: Vec<u32> = Vec::new();
     fn note(set: &mut HashSet<u32>, pending: &mut Vec<u32>, idx: u32) {
         if (F_PRINTLN_BLOCK..F_FN_BASE).contains(&idx) && set.insert(idx) {
             pending.push(idx);
