@@ -287,7 +287,7 @@ Proof.
   (* project the memory field out of the aout — injection would numeral-
      normalize the record; a projector keeps `4 * cl` folded *)
   assert (Hmem := f_equal
-    (fun o => match o with AFall c0 => am c0 | ARet _ c0 => am c0 end) Hrun).
+    (fun o => match o with AFall c0 => am c0 | ARet _ c0 => am c0 | AAbort => rmem rs end) Hrun).
   cbn [am agh apages abase anext awant ahead] in Hmem.
   rewrite <- Hmem.
   assert (Hmodel : r_new rs h = Some {| ra := a' ;
@@ -340,7 +340,7 @@ Proof.
              (mkA 0 0 0 0 gh pages (rmem rs)) w cl
              Hw H16 Hcl Hcl16 Hempty Hlen Hfit) in Hrun.
   assert (Hmem := f_equal
-    (fun o => match o with AFall c0 => am c0 | ARet _ c0 => am c0 end) Hrun).
+    (fun o => match o with AFall c0 => am c0 | ARet _ c0 => am c0 | AAbort => rmem rs end) Hrun).
   cbn [am agh apages abase anext awant ahead] in Hmem.
   rewrite <- Hmem.
   assert (Hmodel : r_new rs gh = Some {| ra := a' ;
