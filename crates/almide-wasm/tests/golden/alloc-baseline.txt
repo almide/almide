@@ -77,7 +77,7 @@
 76320	spec/wasm_cross/codec_variant_roundtrip.almd
 70784	spec/wasm_cross/codec_whitespace_tolerance.almd
 67296	spec/wasm_cross/collection_literals.almd
-66432	spec/wasm_cross/composition_fuzz_batch.almd
+66352	spec/wasm_cross/composition_fuzz_batch.almd
 69616	spec/wasm_cross/compound_eq.almd
 95840	spec/wasm_cross/compound_repr_interp.almd
 127216	spec/wasm_cross/compound_repr_records_interp.almd

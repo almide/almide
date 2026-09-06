@@ -382,4 +382,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-344 | guard-else-err inside a call-argument block after a Result bind runs on every leg | 0.63.0 | active | fixture | 1 |
 | C-345 | An effect call passed as a Result/Option parameter keeps its Result at every parameter index | 0.63.0 | active | fixture | 1 |
 | C-346 | A heap-payload ?? lowers on the incumbent leg as a call argument and as a match subject | 0.63.0 | active | fixture | 1 |
+| C-347 | Operator round trips over a known literal print that literal on both targets | 0.63.0 | active | fixture | 1 |
 
