@@ -23,9 +23,15 @@ impl AlmideMatrix {
     pub fn len(&self) -> usize { self.rows } // row count (matches old Vec<Vec<>> semantics)
     #[inline]
     pub fn is_empty(&self) -> bool { self.rows == 0 }
+    /// The rows, in order — exactly `rows` of them. NOT `data.chunks(cols)`:
+    /// an r×0 matrix (`zeros(3, 0)`, a `from_bytes_*` with a clamped
+    /// negative width) has empty data, and `chunks` yielded ZERO rows for
+    /// it while `rows()` still said r — `to_lists` printed `[]` where the
+    /// wasm leg printed `[[], [], []]` (differential fuzz, seed 544254236199
+    /// index 170). Indexing by row keeps the shape the header declares.
     #[inline]
-    pub fn iter(&self) -> std::slice::Chunks<'_, f64> {
-        self.data.chunks(self.cols.max(1))
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &[f64]> + ExactSizeIterator + '_ {
+        (0..self.rows).map(move |r| &self[r])
     }
 }
 
