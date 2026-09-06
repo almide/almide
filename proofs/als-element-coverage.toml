@@ -224,80 +224,80 @@ section = "ALS-E22"
 
 [[element]]
 name = "ExprKind::Error"
-section = "ALS-D2"
+section = "ALS-DL2"
 
 [[element]]
 name = "Stmt::Let"
-section = "ALS-S1"
+section = "ALS-ST1"
 
 [[element]]
 name = "Stmt::LetDestructure"
-section = "ALS-S2"
+section = "ALS-ST2"
 
 [[element]]
 name = "Stmt::Var"
-section = "ALS-S1"
+section = "ALS-ST1"
 
 [[element]]
 name = "Stmt::Assign"
-section = "ALS-S1"
+section = "ALS-ST1"
 
 [[element]]
 name = "Stmt::IndexAssign"
-section = "ALS-S5"
+section = "ALS-ST4"
 
 [[element]]
 name = "Stmt::FieldAssign"
-section = "ALS-S5"
+section = "ALS-ST4"
 
 [[element]]
 name = "Stmt::Guard"
-section = "ALS-S6"
+section = "ALS-ST5"
 
 [[element]]
 name = "Stmt::GuardLet"
-section = "ALS-S7"
+section = "ALS-ST6"
 
 [[element]]
 name = "Stmt::Expr"
-section = "ALS-S3"
+section = "ALS-ST3"
 
 [[element]]
 name = "Stmt::Comment"
-section = "ALS-S4"
+section = "ALS-ST3"
 
 [[element]]
 name = "Stmt::Error"
-section = "ALS-D2"
+section = "ALS-DL2"
 
 [[element]]
 name = "Decl::Module"
-section = "ALS-D1"
+section = "ALS-DL1"
 
 [[element]]
 name = "Decl::Import"
-section = "ALS-D1"
+section = "ALS-DL1"
 
 [[element]]
 name = "Decl::Type"
-section = "ALS-D1"
+section = "ALS-DL1"
 
 [[element]]
 name = "Decl::Fn"
-section = "ALS-D1"
+section = "ALS-DL1"
 
 [[element]]
 name = "Decl::TopLet"
-section = "ALS-D1"
+section = "ALS-DL1"
 
 [[element]]
 name = "Decl::Protocol"
-section = "ALS-D1"
+section = "ALS-DL1"
 
 [[element]]
 name = "Decl::Test"
-section = "ALS-D1"
+section = "ALS-DL1"
 
 [[element]]
 name = "Decl::TestWhereDef"
-section = "ALS-D1"
+section = "ALS-DL1"
