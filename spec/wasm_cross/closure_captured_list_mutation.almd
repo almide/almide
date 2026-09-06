@@ -1,4 +1,8 @@
 // @contract: C-319
+// Ported from the incumbent's ledger copy 2026-08-21 (its cb7c00ee4 minted the
+// id C-302, which the judge had already assigned to the numeric-determinism
+// family head): the behaviour is C-319 HERE, and the ledger here is canonical
+// (als #38). Original text below, verbatim.
 // A `var` List captured AND mutated through a closure is SHARED storage on the
 // wasm leg (the shared-cell machinery, closures Rung 6): the closure's
 // functional rebind (`seen = seen + [s]`, the `list.push` desugar) writes

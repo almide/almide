@@ -11,7 +11,7 @@
 #
 # WHY THIS EXISTS
 # ---------------
-# The cross-target equivalence GATE (tests/wasm_runtime_cross_target.rs::wasm_cross_target_spec)
+# The cross-target equivalence GATE (tests/wasm_runtime_test.rs::wasm_cross_target_spec)
 # and the wasm-runtime ORACLE-PAIRING registry (crates/almide-codegen/rt-oracle-registry.toml)
 # already enforce equivalence at the test + routine level. This ledger adds the
 # missing layer: a stable, named CONTRACT each fixture certifies, so that
@@ -80,7 +80,6 @@ evidence  = [
   { path = "spec/wasm_cross/int_mod_by_zero.almd", class = "fixture" },
   { path = "spec/wasm_cross/int_div_by_zero_literal.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-002"
 spec      = "ALS-T6"
@@ -93,7 +92,6 @@ evidence  = [
   { path = "spec/wasm_cross/int_mod_overflow.almd", class = "fixture" },
   { path = "spec/wasm_cross/int8_div_overflow.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-003"
 spec      = "ALS-T12"
@@ -122,7 +120,6 @@ evidence  = [
   { path = "spec/wasm_cross/fan_effect_mapper_capability.almd", class = "fixture" },
   { path = "spec/embedded_cross/fan_mapper_effect_callback_forms.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-005"
 spec      = "ALS-R3"
@@ -136,12 +133,11 @@ evidence  = [
   { path = "spec/wasm_cross/fan_any_allfail.almd", class = "fixture" },
   { path = "spec/wasm_cross/option_none_unwrap_term.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-006"
 spec      = "ALS-R3"
 title     = "fan.timeout does not exist — wall-clock deadlines live at the host boundary"
-statement = "`fan.timeout` was removed in 0.29.0: a wall-clock timeout has no portable cross-target meaning (wasm has no clock, scheduler, or threads), and it was the sole stdlib surface whose result was not a function of the program + its inputs — the deadline firing depended on machine load, even native-to-native. Referencing it is a check-time tombstone error (E027) with a host-boundary migration hint, identical on both targets since type check precedes the target split. This retired the ledger's LAST flagged-for-revision entry: the ratchet stands at zero, so the equivalence claim carries no clause for divergences awaiting a fix. It is not exception-free in the absolute sense — the platform-reporting fns `env.os` / `env.temp_dir` differ by design and are exempt under C-189, which bounds that carve-out to exactly that surface (env.os and the env/fs temp_dir pair)."
+statement = "`fan.timeout` was removed in 0.29.0: a wall-clock timeout has no portable cross-target meaning (wasm has no clock, scheduler, or threads), and it was the sole stdlib surface whose result was not a function of the program + its inputs — the deadline firing depended on machine load, even native-to-native. Referencing it is a check-time tombstone error (E027) with a host-boundary migration hint, identical on both targets since type check precedes the target split. This retired the ledger's LAST flagged-for-revision entry: the ratchet stands at zero, so the equivalence claim carries no clause for divergences awaiting a fix. It is not exception-free in the absolute sense — the platform-reporting fns `env.os` / `env.temp_dir` differ by design and are exempt under C-189, which bounds that carve-out to exactly that surface (env.os and the env/fs temp_dir pair). SUPERSEDED IN PART (0.47.0): fan.timeout returned as the oracle-tier wall deadline checked cooperatively at charge sites (ALS-DT5, C-208); the tombstone ruling here records the wall-clock-era removal only."
 since     = "0.29.0"
 status    = "active"
 doc       = "C-006-fan-timeout-removed.md"
@@ -177,7 +173,6 @@ evidence  = [
   { path = "spec/wasm_cross/repr_parity_pin.almd", class = "fixture" },
   { path = "spec/wasm_cross/fuzz_found_nested_interp_capture.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-009"
 spec      = "ALS-R2"
@@ -194,7 +189,6 @@ evidence  = [
   { path = "tests/module_type_repr_test.rs", name = "every_compiled_leg_prints_the_declared_name", class = "fixture" },
   { path = "tests/module_type_repr_test.rs", name = "interp_prints_the_declared_name", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-010"
 spec      = "ALS-R2"
@@ -207,7 +201,6 @@ evidence  = [
   { path = "spec/wasm_cross/compound_repr_recursive_interp.almd", class = "fixture" },
   { path = "spec/wasm_cross/recursive_generic_repr_interp.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-011"
 spec      = "ALS-R2"
@@ -222,7 +215,6 @@ evidence  = [
   { path = "spec/wasm_cross/int_float_ops.almd", class = "fixture" },
   { path = "spec/wasm_cross/float_interp_forms.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-012"
 spec      = "ALS-R4"
@@ -252,7 +244,6 @@ evidence  = [
   { path = "spec/wasm_cross/map_of_maps_value.almd", class = "fixture" },
   { path = "spec/wasm_cross/map_set_index_threshold.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-014"
 spec      = "ALS-C2"
@@ -296,7 +287,6 @@ evidence  = [
   { path = "spec/wasm_cross/string_codepoint.almd", class = "fixture" },
   { path = "spec/wasm_cross/string_ops.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-017"
 spec      = "ALS-S2"
@@ -307,7 +297,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/string_empty_pattern.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-018"
 spec      = "ALS-S3"
@@ -318,7 +307,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/string_predicates.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-019"
 spec      = "ALS-S3"
@@ -330,7 +318,6 @@ evidence  = [
   { path = "spec/wasm_cross/string_ops_drain.almd", class = "fixture" },
   { path = "spec/wasm_cross/string_rle.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-020"
 spec      = "ALS-T5"
@@ -341,7 +328,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/string_case_unicode.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-021"
 spec      = "ALS-T1"
@@ -352,12 +338,11 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/string_whitespace.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-022"
 spec      = "ALS-S4"
 title     = "string.from_bytes is UTF-8-lossy decode (inverse of to_bytes)"
-statement = "`string.from_bytes` is a UTF-8 decode (`String::from_utf8_lossy`, U+FFFD per maximal invalid subpart), the exact inverse of `to_bytes`, byte-identical native == wasm — not the old Latin-1 `b as u8 as char` mapping that corrupted every non-ASCII string. `string.len` is BYTE length, so the round-trip is asserted on byte counts and content. The wasm runtime's byte-class derivation is differentially fuzzed (300k randomized byte sequences + boundary cases) against `from_utf8_lossy` at emit time."
+statement = "`string.from_bytes` is a UTF-8 decode (`String::from_utf8_lossy`, U+FFFD per maximal invalid subpart), the exact inverse of `to_bytes`, byte-identical native == wasm — not the old Latin-1 `b as u8 as char` mapping that corrupted every non-ASCII string. `string.len` is BYTE length, so the round-trip is asserted on byte counts and content. The wasm runtime's byte-class derivation is differentially fuzzed (300k randomized byte sequences + boundary cases) against `from_utf8_lossy` at emit time. STALE NOTE (2026-08-27 review): the 'BYTE length' clause no longer describes the release — string.len counts CODEPOINTS on 0.59.1 (len(\"あいう\") = 3), as ALS-S1 rules; the codepoint semantics is the binding one."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
@@ -376,7 +361,6 @@ evidence  = [
   { path = "spec/wasm_cross/float_shortest_roundtrip.almd", class = "fixture" },
   { path = "spec/wasm_cross/num_edge_to_string.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-024"
 spec      = "ALS-T2"
@@ -387,7 +371,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/float_parse.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-025"
 spec      = "ALS-T9"
@@ -428,18 +411,16 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/encoding_base64.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-028"
 spec      = "ALS-T8"
-title     = "int.from_hex mirrors i64::from_str_radix incl. native quirks"
+title     = "int.from_hex: trim, strip lowercase 0x repeatedly, sign after the prefix, then radix-16 — incl. native quirks"
 statement = "`int.from_hex` mirrors native `i64::from_str_radix(s.trim().trim_start_matches(\"0x\"), 16)` exactly, INCLUDING the quirks: `0X10` -> Err (the `0x` strip is lowercase-only), `0x0xff` -> Ok(255) (`trim_start_matches` strips `0x` repeatedly), `f_f` -> Err (no underscore skipping), `0x-ff` -> -255 (sign accepted after strip). The four std ParseIntError strings reproduce exactly, byte-identical native == wasm."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/int_from_hex.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-029"
 spec      = "ALS-T8"
@@ -450,7 +431,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/int_parse_overflow.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-030"
 spec      = "ALS-T11"
@@ -525,7 +505,6 @@ evidence  = [
   { path = "spec/wasm_cross/negative_offset_and_width_totality.almd", class = "fixture" },
   { path = "spec/wasm_cross/repeat_size_ceiling.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-035"
 spec      = "ALS-R1"
@@ -559,7 +538,6 @@ evidence  = [
   { path = "spec/wasm_cross/match_payload_string_literal.almd", class = "fixture" },
   { path = "spec/wasm_cross/record_default_field_omitted.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-037"
 spec      = "ALS-D5"
@@ -570,7 +548,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/bytes_f16.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-038"
 spec      = "ALS-C8"
@@ -582,7 +559,6 @@ evidence  = [
   { path = "spec/wasm_cross/sized_int_record_fields.almd", class = "fixture" },
   { path = "spec/wasm_cross/sized_numeric_literals.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-039"
 spec      = "ALS-C6"
@@ -627,7 +603,6 @@ evidence  = [
   { path = "crates/almide-perceus-belt/AlmidePerceusBelt/Heap.lean", name = "perceus_fixes_heap", class = "lean" },
   { path = "crates/almide-perceus-belt/AlmidePerceusBelt/ClosureRc.lean", name = "closureScope_decs", class = "lean" },
 ]
-
 [[contract]]
 id        = "C-066"
 spec      = "ALS-I1"
@@ -741,7 +716,7 @@ evidence  = [
 id        = "C-049"
 spec      = "ALS-T15"
 title     = "float.sign is f64::signum; float/math min/max ignore NaN"
-statement = "`float.sign` == Rust `f64::signum` — `copysign(1.0, x)` for every non-NaN x (so `sign(0.0)=1`, `sign(-0.0)=-1`, `sign(±inf)=±1`) and NaN for NaN — NOT the old three-way sign (0 for ±0.0/NaN). `float.max`/`float.min`/`math.fmax`/`math.fmin` IGNORE a NaN operand and return the other, and a ±0 tie follows IEEE-754-2019 zero ordering (ALS-T23, adjudicated als #28), COMMUTATIVE: `min(-0.0, 0.0) = min(0.0, -0.0) = -0.0` and `max(-0.0, 0.0) = max(0.0, -0.0) = +0.0` — computed as the bitwise OR (min) / AND (max) of the tied payloads, the identity on non-zero ties. This RETIRES the first-operand tie rule this contract used to state. Both targets implement the same explicit NaN/tie decision tree — never the NaN-propagating raw `f64.max`/`f64.min` wasm instructions, and never the llvm.minnum/maxnum intrinsics, whose unspecified ±0-tie order let x86 `maxsd` return the SECOND operand when inlined. All byte-identical native == wasm == interp."
+statement = "`float.sign` == Rust `f64::signum` — `copysign(1.0, x)` for every non-NaN x (so `sign(0.0)=1`, `sign(-0.0)=-1`, `sign(±inf)=±1`) and NaN for NaN — NOT the old three-way sign (0 for ±0.0/NaN). `float.max`/`float.min`/`math.fmax`/`math.fmin` IGNORE a NaN operand and return the other. On ±0 ties the order is IEEE 754-2019 minimum/maximum (`-0 < +0`, commutative) — normative in ALS-T23 / C-306 since 2026-08-21, which RETIRED the earlier first-operand tie rule. Both targets implement the same explicit NaN/zero decision tree — never the NaN-propagating raw `f64.max`/`f64.min` wasm instructions, and never the llvm.minnum/maxnum intrinsics, whose unspecified ±0-tie order let x86 `maxsd` return the SECOND operand when inlined. All byte-identical native == wasm == interp. SUPERSEDED (ADR-0016, ALS-T23): the first-operand ±0 tie rule is retracted — min answers -0.0 and max answers +0.0, commutative, per IEEE 754-2019 totalOrder; the pin advances with the release that carries the new tie order."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
@@ -820,7 +795,7 @@ evidence  = [
 id        = "C-055"
 spec      = "ALS-C9"
 title     = "list.min/max/sort/sort_by over Float use IEEE-754 totalOrder, valid + identical on both targets"
-statement = "`list.sort`/`list.min`/`list.max` over `List[Float]` and `list.sort_by` with a Float key ORDER by IEEE-754 totalOrder (the ordering twin of `f64::total_cmp`): a +NaN takes the greatest totalOrder position (after +inf), a -NaN the least (before -inf), and `-0.0 < +0.0`. This makes Float ordering legal and byte-identical native == wasm, fixing the divergence where native REJECTED it at compile (`f64: Ord` unsatisfied) while wasm either accepted it with NaN-unaware `f64.le` or emitted an INVALID module (the `sort_by` Float-key path stored an f64 into an i64 local → `local.set` validator error). Native routes `List[Float]` ordering to `total_cmp`-based `_float` runtime variants (IntrinsicLowering swaps the symbol); wasm mirrors with the sign-magnitude bit trick inside `emit_ord_cmp3`'s Float arm (`key = bits ^ ((bits >>_s 63) >>_u 1)`, a monotone i64 key) and pre-transforms `sort_by` Float keys onto the i64 storage path; interp mirrors with `f64::total_cmp`. On the v1 leg the cached-keys desugar (`sort_by` → `sort_by_keys` + a materialized key map) admits ONLY Int keys: it types the synthesized keys list as List[Int], so an ungated String key linked the scalar `list.map` (indirect-call type mismatch trap, differential-fuzz seed 20260718 index 866) and a Float key would sort by raw i64 BIT patterns (wrong order for negatives) — String keys leave the desugar and take the cached-key `sort_by_str_key` twins instead (C-271), Float keys ride the totalOrder route. NaN-SIGN CAVEAT: the totalOrder POSITION of a NaN depends on its sign bit, which for a COMPUTED NaN (`0.0/0.0`) is implementation-defined — native/wasm const-fold it to +NaN (top) while the interp's runtime `divsd` yields -NaN (bottom), so the 3-way fixture stays sign-deterministic (uses ±inf, not a divided NaN); the +NaN-at-top positioning is verified native == wasm directly. ASYMMETRY (named deliberately): this list-extremum/ordering totalOrder is a DIFFERENT contract from the SCALAR `float.min`/`float.max`/`math.fmin`/`math.fmax`, which keep their C-049 NaN-IGNORING semantics — a resolved-but-unsupported sort element type is still a clean emit-time ICE, never an invalid module."
+statement = "`list.sort`/`list.min`/`list.max` over `List[Float]` and `list.sort_by` with a Float key ORDER by IEEE-754 totalOrder (the ordering twin of `f64::total_cmp`): a +NaN takes the greatest totalOrder position (after +inf), a -NaN the least (before -inf), and `-0.0 < +0.0`. This makes Float ordering legal and byte-identical native == wasm, fixing the divergence where native REJECTED it at compile (`f64: Ord` unsatisfied) while wasm either accepted it with NaN-unaware `f64.le` or emitted an INVALID module (the `sort_by` Float-key path stored an f64 into an i64 local → `local.set` validator error). Native routes `List[Float]` ordering to `total_cmp`-based `_float` runtime variants (IntrinsicLowering swaps the symbol); wasm mirrors with the sign-magnitude bit trick inside `emit_ord_cmp3`'s Float arm (`key = bits ^ ((bits >>_s 63) >>_u 1)`, a monotone i64 key) and pre-transforms `sort_by` Float keys onto the i64 storage path; interp mirrors with `f64::total_cmp`. On the v1 leg the cached-keys desugar (`sort_by` → `sort_by_keys` + a materialized key map) admits ONLY Int keys: it types the synthesized keys list as List[Int], so an ungated String key linked the scalar `list.map` (indirect-call type mismatch trap, differential-fuzz seed 20260718 index 866) and a Float key would sort by raw i64 BIT patterns (wrong order for negatives) — String keys leave the desugar and take the cached-key `sort_by_str_key` twins instead (C-276), Float keys ride the totalOrder route. NaN-SIGN CAVEAT: the totalOrder POSITION of a NaN depends on its sign bit, which for a COMPUTED NaN (`0.0/0.0`) is implementation-defined — native/wasm const-fold it to +NaN (top) while the interp's runtime `divsd` yields -NaN (bottom), so the 3-way fixture stays sign-deterministic (uses ±inf, not a divided NaN); the +NaN-at-top positioning is verified native == wasm directly. ASYMMETRY (named deliberately): this list-extremum/ordering totalOrder is a DIFFERENT contract from the SCALAR `float.min`/`float.max`/`math.fmin`/`math.fmax`, which keep their C-049 NaN-IGNORING semantics — a resolved-but-unsupported sort element type is still a clean emit-time ICE, never an invalid module."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
@@ -901,7 +876,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/mut_map_param.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-062"
 spec      = "ALS-D7"
@@ -949,7 +923,6 @@ evidence  = [
   { path = "spec/wasm_cross/string_codepoint_index.almd", class = "fixture" },
   { path = "spec/wasm_cross/string_lines.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-067"
 spec      = "ALS-T6"
@@ -963,7 +936,6 @@ evidence  = [
   { path = "spec/wasm_cross/index_bounds_i64.almd", class = "fixture" },
   { path = "spec/wasm_cross/index_bounds_write_only_var.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-068"
 spec      = "ALS-M4"
@@ -975,7 +947,6 @@ evidence  = [
   { path = "spec/wasm_cross/autotry_construction.almd", class = "fixture" },
   { path = "spec/wasm_cross/autotry_result_first_arg.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-069"
 spec      = "ALS-M4"
@@ -988,7 +959,6 @@ evidence  = [
   { path = "spec/wasm_cross/effect_tco_err_rewrap.almd", class = "fixture" },
   { path = "spec/wasm_cross/loop_effect_match_stmt.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-070"
 spec      = "ALS-M1"
@@ -1002,7 +972,6 @@ evidence  = [
   { path = "spec/wasm_cross/nested_payload_guard.almd", class = "fixture" },
   { path = "spec/wasm_cross/nested_tuple_pattern.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-071"
 spec      = "ALS-I1"
@@ -1013,7 +982,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/r5_wasm_interp_alias_rc.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-072"
 spec      = "ALS-M2"
@@ -1024,7 +992,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/r5_wasm_inferred_record_repr.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-073"
 spec      = "ALS-M1"
@@ -1035,7 +1002,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/r5_wasm_tuple_variant_pattern.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-074"
 spec      = "ALS-S6"
@@ -1046,7 +1012,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/r5_wasm_split_replace_iterative.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-075"
 spec      = "ALS-I3"
@@ -1057,7 +1022,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/r5_lowmisc_param_try_err.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-076"
 spec      = "ALS-M3"
@@ -1070,7 +1034,6 @@ evidence  = [
   { path = "spec/wasm_cross/stdlib_type_shadow.almd", class = "fixture" },
   { path = "spec/wasm_cross/stdlib_opaque_shadow.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-077"
 spec      = "ALS-T7"
@@ -1081,7 +1044,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/r5_mod_global_init_order.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-078"
 spec      = "ALS-M2"
@@ -1092,7 +1054,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/phantom_type_param.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-079"
 spec      = "ALS-M3"
@@ -1103,7 +1064,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/anon_record_variant_payloads.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-080"
 spec      = "ALS-M5"
@@ -1114,7 +1074,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/empty_from_list_mono.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-081"
 spec      = "ALS-M5"
@@ -1125,7 +1084,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/generic_fn_in_inferred_lambda.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-082"
 spec      = "ALS-M5"
@@ -1136,7 +1094,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/call_closure_lambda_param.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-083"
 spec      = "ALS-M8"
@@ -1147,7 +1104,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/i64_min_literal.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-084"
 spec      = "ALS-D6"
@@ -1158,7 +1114,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/codec_decode_errors.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-085"
 spec      = "ALS-D6"
@@ -1169,7 +1124,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/codec_float_int.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-086"
 spec      = "ALS-I1"
@@ -1180,7 +1134,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/alias_combinator_rc.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-087"
 spec      = "ALS-T3"
@@ -1194,7 +1147,6 @@ evidence  = [
   { path = "spec/wasm_cross/json_parse_lenient_edges.almd", class = "fixture" },
   { path = "spec/wasm_cross/json_many_keys.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-088"
 spec      = "ALS-M7"
@@ -1207,7 +1159,6 @@ evidence  = [
   { path = "tests/keyword_submodule_test.rs", name = "keyword_fn_in_submodule_builds_and_runs_native", class = "fixture" },
   { path = "tests/keyword_submodule_test.rs", name = "keyword_fn_in_submodule_matches_on_wasm", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-089"
 spec      = "ALS-M5"
@@ -1218,7 +1169,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/default_param_ref.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-090"
 spec      = "ALS-D7"
@@ -1229,7 +1179,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/bytes_from_list_param.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-091"
 spec      = "ALS-M1"
@@ -1240,7 +1189,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/nested_tuple_destructure.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-092"
 spec      = "ALS-M2"
@@ -1253,7 +1201,6 @@ evidence  = [
   { path = "spec/wasm_cross/generic_record_fn_field.almd", class = "fixture" },
   { path = "spec/wasm_cross/generic_record_anon_field.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-093"
 spec      = "ALS-M3"
@@ -1264,7 +1211,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/mutual_recursive_types.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-094"
 spec      = "ALS-M5"
@@ -1275,7 +1221,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/protocol_ufcs_inferred_lambda.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-095"
 spec      = "ALS-D6"
@@ -1286,7 +1231,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/json_stringify_pretty.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-096"
 spec      = "ALS-R5"
@@ -1297,7 +1241,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/process_args.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-097"
 spec      = "ALS-M5"
@@ -1308,7 +1251,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/generic_concat.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-098"
 spec      = "ALS-D6"
@@ -1319,7 +1261,6 @@ status    = "active"
 evidence  = [
   { path = "tests/crossmod_matrix_test.rs", name = "crossmod_shape_matrix", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-099"
 spec      = "ALS-M8"
@@ -1339,12 +1280,11 @@ evidence  = [
   { path = "spec/wasm_cross/heap_result_if_eq_cond.almd", class = "fixture" },
   { path = "spec/wasm_cross/bytes_equality_call_operands.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-100"
 spec      = "ALS-M12"
 title     = "Self-hosted String classification/transform ops byte-match native on wasm"
-statement = "The self-hosted String classification predicate `string.is_alphanumeric` and the ASCII-fold transform `string.to_upper` MUST produce stdout byte-identical to native on the v1 wasm path. `is_alphanumeric` returns true only when every codepoint is ASCII alphanumeric and false for the empty string, matching native (`abc123`/`Z9` -> true; `ab-c`/`` -> false). `to_upper` maps `a-z` to `A-Z`, leaves all other bytes (digits, symbols, spaces) and the empty string unchanged, matching native `to_uppercase` over ASCII. Both ops were previously unlinked on v1 and are now certified equivalent across native Rust and wasm32."
+statement = "The self-hosted String classification predicate `string.is_alphanumeric` and the ASCII-fold transform `string.to_upper` MUST produce stdout byte-identical to native on the v1 wasm path. `is_alphanumeric` returns true only when every codepoint is Unicode alphanumeric (C-018 / ALS-S3 — this fixture probes the ASCII rows) and false for the empty string, matching native (`abc123`/`Z9` -> true; `ab-c`/`` -> false). `to_upper` maps `a-z` to `A-Z`, leaves all other bytes (digits, symbols, spaces) and the empty string unchanged, matching native `to_uppercase` over ASCII. Both ops were previously unlinked on v1 and are now certified equivalent across native Rust and wasm32."
 since     = "0.27.6"
 status    = "active"
 evidence  = [
@@ -1353,7 +1293,6 @@ evidence  = [
   { path = "spec/wasm_cross/split_empty_sep.almd", class = "fixture" },
   { path = "spec/wasm_cross/replace_empty_pat.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-101"
 spec      = "ALS-M12"
@@ -1379,7 +1318,6 @@ evidence  = [
   { path = "spec/wasm_cross/nested_three_level_literal.almd", class = "fixture" },
   { path = "spec/wasm_cross/nested_three_level_loop_build.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-102"
 spec      = "ALS-M6"
@@ -1392,7 +1330,6 @@ evidence  = [
   { path = "spec/wasm_cross/list_enumerate_find.almd", class = "fixture" },
   { path = "spec/wasm_cross/list_iter_tco.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-103"
 spec      = "ALS-D6"
@@ -1407,7 +1344,6 @@ evidence  = [
   { path = "spec/wasm_cross/value_as_array_roundtrip.almd", class = "fixture" },
   { path = "spec/wasm_cross/value_array_tuple_tco.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-104"
 spec      = "ALS-M6"
@@ -1439,7 +1375,6 @@ evidence  = [
   { path = "spec/wasm_cross/mutual_append.almd", class = "fixture" },
   { path = "spec/wasm_cross/block_line_collect.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-106"
 spec      = "ALS-M10"
@@ -1465,7 +1400,6 @@ evidence  = [
   { path = "spec/wasm_cross/result_option_call_payload_return.almd", class = "fixture" },
   { path = "spec/wasm_cross/closure_rich_list_capture.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-107"
 spec      = "ALS-I3"
@@ -1479,7 +1413,6 @@ evidence  = [
   { path = "spec/wasm_cross/result_list_str_int_tuple.almd", class = "fixture" },
   { path = "spec/wasm_cross/result_list_value_int_tuple.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-108"
 spec      = "ALS-M11"
@@ -1495,7 +1428,6 @@ evidence  = [
   { path = "spec/wasm_cross/let_unwrap_propagation.almd", class = "fixture" },
   { path = "spec/wasm_cross/destructure_let_unwrap.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-109"
 spec      = "ALS-I3"
@@ -1506,7 +1438,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/base64_encode.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-110"
 spec      = "ALS-M13"
@@ -1517,7 +1448,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/bytes_push_inplace.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-111"
 spec      = "ALS-T7"
@@ -1528,7 +1458,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/module_global_const.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-112"
 spec      = "ALS-R5"
@@ -1539,7 +1468,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/random_int_entropy.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-113"
 spec      = "ALS-M1"
@@ -1550,7 +1478,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/letbound_variant_match.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-114"
 spec      = "ALS-M1"
@@ -1561,7 +1488,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/option_match_heap_payload.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-115"
 spec      = "ALS-M10"
@@ -1573,7 +1499,6 @@ evidence  = [
   { path = "spec/wasm_cross/pipe_lambda_block_value.almd", class = "fixture" },
   { path = "spec/wasm_cross/pipe_chain_scalar_bind.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-116"
 spec      = "ALS-I3"
@@ -1585,7 +1510,6 @@ evidence  = [
   { path = "spec/wasm_cross/bool_literal_tail.almd", class = "fixture" },
   { path = "spec/wasm_cross/float_parse_special.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-117"
 spec      = "ALS-M6"
@@ -1596,7 +1520,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/branch_lift_in_loop.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-118"
 spec      = "ALS-R5"
@@ -1607,7 +1530,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/env_args.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-119"
 spec      = "ALS-M4"
@@ -1618,7 +1540,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/effect_unwrap_in_loop.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-120"
 spec      = "ALS-I3"
@@ -1629,7 +1550,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/filter_map_conditional_arm.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-121"
 spec      = "ALS-I1"
@@ -1641,7 +1561,6 @@ evidence  = [
   { path = "spec/wasm_cross/string_passthrough_share.almd", class = "fixture" },
   { path = "spec/wasm_cross/zip_view_shape.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-122"
 spec      = "ALS-I1"
@@ -1652,7 +1571,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/value_object_ops_share.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-123"
 spec      = "ALS-M2"
@@ -1663,7 +1581,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/spread_record_share.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-124"
 spec      = "ALS-C3"
@@ -1674,7 +1591,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/value_deep_eq.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-125"
 spec      = "ALS-C5"
@@ -1685,7 +1601,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/bytes_set_value_semantics.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-126"
 spec      = "ALS-M5"
@@ -1697,7 +1612,6 @@ evidence  = [
   { path = "spec/wasm_cross/nested_hof_lambda_inference.almd", class = "fixture" },
   { path = "spec/wasm_cross/protocol_ufcs_inferred_lambda.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-127"
 spec      = "ALS-M5"
@@ -1709,7 +1623,6 @@ evidence  = [
   { path = "spec/wasm_cross/generic_chain_unwrap_or.almd", class = "fixture" },
   { path = "spec/wasm_cross/qq_record_fallback.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-128"
 spec      = "ALS-T17"
@@ -1720,7 +1633,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/datetime_format.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-129"
 spec      = "ALS-T4"
@@ -1734,7 +1646,6 @@ evidence  = [
   { path = "spec/wasm_cross/list_windows_zero.almd", class = "fixture" },
   { path = "spec/wasm_cross/list_window_zero.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-130"
 spec      = "ALS-I1"
@@ -1746,7 +1657,6 @@ evidence  = [
   { path = "spec/wasm_cross/option_unwrap_or_else_heap.almd", class = "fixture" },
   { path = "spec/wasm_cross/map_fold_heap_acc.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-131"
 spec      = "ALS-C5"
@@ -1758,7 +1668,6 @@ evidence  = [
   { path = "spec/wasm_cross/loop_buffer_churn.almd", class = "fixture" },
   { path = "spec/wasm_cross/loop_push_trailing_increment.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-132"
 spec      = "ALS-M13"
@@ -1773,7 +1682,6 @@ evidence  = [
   { path = "spec/wasm_cross/effect_mut_generic_port.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_effect_can_err.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-133"
 spec      = "ALS-R5"
@@ -1784,7 +1692,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/env_get.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-136"
 spec      = "ALS-M13"
@@ -1795,7 +1702,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/place_mutation.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-135"
 spec      = "ALS-M4"
@@ -1807,7 +1713,6 @@ evidence  = [
   { path = "spec/wasm_cross/unit_effect_abi.almd", class = "fixture" },
   { path = "spec/integration/modules/cross_module_unit_effect_test.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-134"
 spec      = "ALS-T10"
@@ -1819,7 +1724,6 @@ evidence  = [
   { path = "spec/wasm_cross/math_atan_tanh.almd", class = "fixture" },
   { path = "tests/libm_atan_tanh_cross_target_test.rs", name = "atan_tanh_cross_target_random_fuzz", class = "fuzz", n = 3000 },
 ]
-
 [[contract]]
 id        = "C-137"
 spec      = "ALS-R6"
@@ -1831,7 +1735,6 @@ evidence  = [
   { path = "spec/wasm_cross/fs_relative_path.almd", class = "fixture" },
   { path = "spec/stdlib/fs_stat_test.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-138"
 spec      = "ALS-I3"
@@ -1842,7 +1745,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/result_ctor_call_payload.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-154"
 spec      = "ALS-T6"
@@ -1854,7 +1756,6 @@ evidence  = [
   { path = "spec/wasm_cross/int_clamp_inverted.almd", class = "fixture" },
   { path = "spec/wasm_cross/float_clamp_invalid.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-155"
 spec      = "ALS-T6"
@@ -1867,7 +1768,6 @@ evidence  = [
   { path = "spec/wasm_cross/to_fixed_domain_abort_hi.almd", class = "fixture" },
   { path = "spec/wasm_cross/to_fixed_wide_precision.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-153"
 spec      = "ALS-T18"
@@ -1881,7 +1781,6 @@ evidence  = [
   { path = "spec/wasm_cross/assert_abort_msg.almd", class = "fixture" },
   { path = "spec/wasm_cross/assert_abort_multiline.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-147"
 spec      = "ALS-M12"
@@ -1892,7 +1791,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/list_unique_by_str_key.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-148"
 spec      = "ALS-M12"
@@ -1903,7 +1801,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/scan_heap_acc.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-149"
 spec      = "ALS-I1"
@@ -1918,7 +1815,6 @@ evidence  = [
   { path = "spec/wasm_cross/to_result_custom_e.almd", class = "fixture" },
   { path = "spec/wasm_cross/unwrap_or_option_payload.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-150"
 spec      = "ALS-C5"
@@ -1929,7 +1825,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/ctor_var_copy_semantics.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-151"
 spec      = "ALS-M5"
@@ -1940,7 +1835,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/result_wall_escalations.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-152"
 spec      = "ALS-I3"
@@ -1951,7 +1845,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/result_wall_escalations.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-143"
 spec      = "ALS-I3"
@@ -1962,7 +1855,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/ctor_if_payload.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-144"
 spec      = "ALS-I3"
@@ -1973,7 +1865,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/list_element_hof_chain.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-145"
 spec      = "ALS-M5"
@@ -1984,7 +1875,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/list_element_hof_chain.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-146"
 spec      = "ALS-I1"
@@ -1995,7 +1885,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/list_element_hof_chain.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-140"
 spec      = "ALS-T15"
@@ -2006,7 +1895,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/float_round_negzero.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-141"
 spec      = "ALS-M12"
@@ -2017,7 +1905,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/list_zip_with_typed.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-142"
 spec      = "ALS-M5"
@@ -2028,7 +1915,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/result_uoe_float.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-139"
 spec      = "ALS-I3"
@@ -2040,7 +1926,6 @@ evidence  = [
   { path = "spec/wasm_cross/result_combinators_heap_ok.almd", class = "fixture" },
   { path = "spec/wasm_cross/result_filter_heap_ok.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-156"
 spec      = "ALS-I3"
@@ -2051,7 +1936,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/opt_str_str_ctor.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-157"
 spec      = "ALS-I3"
@@ -2062,7 +1946,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/unannotated_toplet_generic_ctor.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-158"
 spec      = "ALS-I3"
@@ -2077,7 +1960,6 @@ evidence  = [
   { path = "spec/wasm_cross/result_tuple_list_slots.almd", class = "fixture" },
   { path = "spec/wasm_cross/bang_in_record_literal_field.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-159"
 spec      = "ALS-I1"
@@ -2088,7 +1970,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/binary_search_duplicate_keys.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-160"
 spec      = "ALS-D4"
@@ -2099,7 +1980,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/bundled_pure_modules.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-161"
 spec      = "ALS-T6"
@@ -2118,7 +1998,6 @@ evidence  = [
   { path = "spec/wasm_cross/matrix_from_bytes_count_domain.almd", class = "fixture" },
   { path = "spec/wasm_cross/string_repeat_empty.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-162"
 spec      = "ALS-T5"
@@ -2129,7 +2008,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/io_write_ordering.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-163"
 spec      = "ALS-M10"
@@ -2140,7 +2018,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/heap_result_if_bind.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-164"
 spec      = "ALS-M12"
@@ -2151,7 +2028,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/list_heapelem_rc.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-165"
 spec      = "ALS-M10"
@@ -2162,7 +2038,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/map_fold_heap_acc_skv.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-166"
 spec      = "ALS-M10"
@@ -2173,7 +2048,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/map_interp_string_value.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-167"
 spec      = "ALS-M8"
@@ -2184,7 +2058,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/float_clamp_negative_zero.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-168"
 spec      = "ALS-M12"
@@ -2196,7 +2069,6 @@ evidence  = [
   { path = "spec/wasm_cross/list_flatten_borrow.almd", class = "fixture" },
   { path = "spec/wasm_cross/native_wall_shapes.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-169"
 spec      = "ALS-T6"
@@ -2207,7 +2079,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/list_repeat_size_ceiling.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-170"
 spec      = "ALS-M8"
@@ -2218,7 +2089,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/toplevel_const_wrapping.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-171"
 spec      = "ALS-T4"
@@ -2229,7 +2099,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/bytes_f16_offset_overflow.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-172"
 spec      = "ALS-M12"
@@ -2320,7 +2189,7 @@ evidence  = [
 # ── THE UNSIGNED 64-BIT LANE ─
 [[contract]]
 id        = "C-179"
-spec      = "ALS-M2"
+spec      = "ALS-M14"
 title     = "UInt64 reaches its full declared domain, with every observer reading the slot unsigned"
 statement = "A `UInt64` value in the UPPER HALF of its declared domain (`i64::MAX+1 ..= u64::MAX`) computes and prints the same on both targets (#872). The IR slot stays ONE i64 and now carries that band as a 64-bit PATTERN: the literal decoder parses it as `u64` and reinterprets, and every observer reads it unsigned — `IntOp::DivU`/`ModU`/`LtU`/`LeU`/`GtU`/`GeU` (new) render `i64.div_u`/`rem_u`/`lt_u`… on wasm and `as u64` casts (plus `rt_chk_div_u`/`rt_chk_mod_u`, same divide-by-zero message bytes) on native; the legacy Rust emitter reinterprets at the declared width so `-1` is written `18446744073709551615u64` rather than the invalid `-1u64`; and `uint64.to_string`/`to_float32`/`to_float64` split ONE step with the unsigned `/`,`%` instead of pivoting through the signed `Int` (their quotients land back in the signed-safe band by construction, so one split suffices). The CONSTANT lane matters too: propagation is what first puts two literals under a `UInt64` `/`, after the fold pass has run, and the native leg's own constant handling then folded it SIGNED (`u64::MAX / 2 = 0`) while wasm kept the runtime unsigned op — a cross-target divergence in exactly the band the lane exists for, settled by an unsigned re-fold scoped to `UInt64`. The interim E024 carrier rejection (C-173's third cause) is RETIRED with the lane that replaced it: the diagnostic's magnitude bound for `UInt64` is again its declared `u64::MAX`, and the docs recommend it once more. Unsigned ordering is unsigned; add/sub/mul keep two's-complement wrapping (identical either reading)."
 since     = "0.37.0"
@@ -2333,7 +2202,7 @@ evidence  = [
 # ── SIZED-INTEGER ARITHMETIC WRAPS AT ITS DECLARED WIDTH ─
 [[contract]]
 id        = "C-180"
-spec      = "ALS-M2"
+spec      = "ALS-M14"
 title     = "Sized-integer +, -, * and ^ wrap at the declared width on both targets"
 statement = "Arithmetic on a narrow sized integer (`Int8`/`Int16`/`Int32`, `UInt8`/`UInt16`/`UInt32`) produces the SAME value on both targets, wrapping at the declared width — the documented semantics (stdlib/int8.almd: narrowing wraps rather than traps). The MIR carries every integer in one i64, so `Int8 127 + 1` computed `128` in the lane; native emits real `i8` arithmetic and wrapped to `-128`, so the wasm leg printed a value OUTSIDE the type's range entirely and the two legs disagreed (#889 — `UInt8 200 + 100` was `44` natively and `300` on wasm; anything that later narrowed, compared or serialized the wasm value was off). Each `+`/`-`/`*` whose operand type is a narrow width now re-wraps its result: signed via shift-left then ARITHMETIC shift-right (sign-extending the truncation), unsigned via a mask. `Int`/`Int64`/`UInt64` are the carrier's own width and are untouched; comparisons cannot leave the range; `/` and `%` cannot either once their operands are in it, and their one exception (`MIN / -1`) already aborts on both legs (C-002). In-range arithmetic is bit-identical to before. The CONSTANT FOLDER obeys the same rule: it computes at i64 width but emits the result as a LITERAL of the declared type, so a folded `let a: Int8 = 127; let b: Int8 = 1; a + b` rendered `128i8` — which rustc rejects outright, meaning the native leg would not BUILD a program the wasm leg ran correctly (#901). Both fold sites (the propagation fold in almide-optimize and the peephole fold in almide-codegen) now narrow to the declared width, so fold-time and runtime agree. `^` obeys the same rule and reached it last: on wasm the operator lowers to a `math.pow` CALL, which never passed through the `IntBinOp` path that re-wraps, so `Int32 999997 ^ 2` printed the un-narrowed `999994000009` against native's `-733379959` — while `a * a` at the very same type agreed on both legs, which is what named the operator rather than the type as the divergence (differential fuzz, seed 1785159097100061000 index 1049, a mutation of the C-184 fixture). The integer operator now wraps its call result to the declared width; wrapping once at the end is wrapping at every step, since two's-complement multiplication is congruent mod 2^bits. `math.fpow` returns a float and has no declared-width notion, so only the integer operator wraps."
 since     = "0.37.0"
@@ -2357,7 +2226,7 @@ evidence  = [
 # ── NEGATED FLOAT LITERAL TAKES ITS CONTEXT TYPE ─
 [[contract]]
 id        = "C-182"
-spec      = "ALS-M2"
+spec      = "ALS-E3"
 title     = "A negated float literal takes its context's float type on both targets"
 statement = "`let f: Float32 = -2.5` (and the same literal in argument position) carries the CONTEXT's float type, exactly as the positive literal already did (#890). Lowered as a `UnOp::NegFloat` over an operand still typed bare `Float` while the enclosing node claimed the annotated `Float32`, native emitted `-(2.5f64)` into an `f32` slot — `error[E0308]`, a hard build failure — and the wasm leg read the mismatched slot as `0.0`, a silent wrong value that a program doing `let scale: Float32 = -1.5` would compute with. The negation is now FOLDED into the literal at the context type, the same rule the Int case has had since #626 (which is why `let a: Int8 = -128` always worked). A negated EXPRESSION (not a literal) still negates at runtime, and the sized-float `NegFloat` selection now recognises `Float32`/`Float64` operands rather than only bare `Float`."
 since     = "0.37.0"
@@ -2454,7 +2323,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/env_platform_reporting.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-190"
 spec      = "ALS-M4"
@@ -2465,7 +2333,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/closure_scalar_captures.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-191"
 spec      = "ALS-M4"
@@ -2476,7 +2343,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/global_in_both_arms.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-192"
 spec      = "ALS-M4"
@@ -2487,7 +2353,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/interp_effect_unwrap_arg.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-193"
 spec      = "ALS-M4"
@@ -2498,7 +2363,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/mutable_global_repeat_writes.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-194"
 spec      = "ALS-M4"
@@ -2509,7 +2373,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/mutable_global_bytes_copy_from.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-195"
 spec      = "ALS-M4"
@@ -2520,7 +2383,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/checked_conversion_value_match.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-196"
 spec      = "ALS-T6"
@@ -2531,7 +2393,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/recursion_depth_within_limits.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-197"
 spec      = "ALS-T6"
@@ -2600,7 +2461,7 @@ evidence  = [
 # ── DETERMINISTIC TIME: CONSTRUCTOR GUARDS ─
 [[contract]]
 id        = "C-202"
-spec      = "ALS-D1"
+spec      = "ALS-DT1"
 title     = "Time constructors guard their domain: negative aborts, overflow saturates"
 statement = "A NEGATIVE argument to any `compute.*` / `duration.*` constructor, and a negative scale factor in `T * Int`, terminate through the §13 convention (`Error: negative time: compute.us(-5)` / `Error: negative time scale: -2` on stderr + exit 1) identically on both targets; an overflowing construction or `T + T` sum SATURATES to the maximum representable time instead of wrapping (a wrapped-negative budget would exhaust instantly — saturation admits the work). Non-negative literal arguments fold at compile time to the same erased value the runtime guard produces."
 since     = "0.47.0"
@@ -2614,7 +2475,7 @@ evidence  = [
 # ── DETERMINISTIC TIME: OPERATOR ALGEBRA ─
 [[contract]]
 id        = "C-203"
-spec      = "ALS-D1"
+spec      = "ALS-DT1"
 title     = "The time-type operator algebra is unit-exact and saturating on both targets"
 statement = "`T + T` (saturating), `T - T` (0-saturating), `T * Int` in either operand order (saturating), and same-clock comparisons agree native == wasm at CHARGE-UNIT precision: the fixture pins every cell by driving a `fan.bounded` verdict across an exact unit boundary, so a one-unit drift in any operator's erasure flips an observable verdict. `T * T`, any Compute⊕Duration mix, bare-Int joins, and `/` are compile-time type errors (checker matrix, not runtime behaviour)."
 since     = "0.47.0"
@@ -2626,7 +2487,7 @@ evidence  = [
 # ── DETERMINISTIC BUDGET VERDICT (fan.bounded) ─
 [[contract]]
 id        = "C-204"
-spec      = "ALS-D2"
+spec      = "ALS-DT2"
 title     = "A fan.bounded verdict is a function of the program and its inputs alone"
 statement = "`fan.bounded(c) { body }` yields Err (the ledger-constant message) exactly when the region's metered spend in charge units exceeds `floor(ns / CM-1)`, and the Ok ⇄ Err flip happens at the SAME declared nanosecond on both targets — the boundary fixtures pin the flip at unit exactness (heavy(1000) = 1002 units flips at 3006ns under CM-1 v0.3). Bind statements inside a block body add zero charge; the bare (no-`??`) form produces the same verdict as a real `Result[T, String]` value; the region body is pure by typing, so no wall-clock input can reach the verdict. The budget expression may reach the head through variables (a let-bound sum, a nested-block binding, an effect-fn boundary) — the nominal time tag erases at MIR, so the variable spelling meters identically to the inline one."
 since     = "0.47.0"
@@ -2643,7 +2504,7 @@ evidence  = [
 # ── DETERMINISTIC RACE WINNER (fan.race) ─
 [[contract]]
 id        = "C-205"
-spec      = "ALS-D3"
+spec      = "ALS-DT3"
 title     = "The fan.race winner is the (spend, index) lexicographic minimum among admitted arms"
 statement = "Every arm is metered on the deterministic clock; an arm is ADMITTED iff it completes within the (optional) budget AND — when it returns a `Result` — it returned Ok (an arm's Err self-disqualifies it, never propagates). The winner is the admitted arm with the least `(spend, index)`: the cheapest arm, ties to source order; no admitted arm yields the ledger-constant Err. The winner-appearance boundary is unit-exact and identical on both targets (heavy(500) = 502 units appears at 1506ns under CM-1 v0.3). The MAPPER form `fan.race(budget?, xs, f)` obeys the SAME law over a dynamic list — arm i is `f(xs[i])` (a pure 1-param lambda returning `Result[T, String]`), index order is list order, the budget is per-element — so an equal-spend tie takes the earlier element and an empty list is the no-admitted-arm Err."
 since     = "0.47.0"
@@ -2660,7 +2521,7 @@ evidence  = [
 # ── SETTLE TUPLE ─
 [[contract]]
 id        = "C-206"
-spec      = "ALS-D4"
+spec      = "ALS-DT4"
 title     = "A settle block settles every arm into its own tuple slot, in arm order"
 statement = "`fan.settle { a; b; … }` evaluates its arms in arm order and yields the TUPLE `(Result[A, String], Result[B, String], …)`: heterogeneous arm types are allowed, a plain arm's value wraps in Ok, and an EFFECTFUL arm's Err is CAPTURED into its slot — never propagated out of the block. Both targets agree byte-for-byte, including the captured-Err case and a tuple-pattern match over the settled slots."
 since     = "0.47.0"
@@ -2672,9 +2533,9 @@ evidence  = [
 # ── CM-1: THE VERSIONED COST MODEL ─
 [[contract]]
 id        = "C-207"
-spec      = "ALS-D2"
+spec      = "ALS-DT2"
 title     = "CM-1 is a versioned constant with a ratio-only wall-clock claim"
-statement = "Deterministic time is `charge units × CM-1` where CM-1 v0.3 = 3ns/unit, defined ONCE (`almide_types::time_units::CM1_NS_PER_CHARGE`) and consumed by both renderers, the interpreter, and `--time-report` from that single definition. The wall-clock claim is RATIO-ONLY: a standing calibration gate measures the declared/measured ratio on a 100M-unit reference workload and asserts it inside the declared 5x band (ADR-0001 D5) — the gate falsified both prior draft constants (21x and 18x out). Changing CM-1 is a versioned cost-model revision (CM-2, …), never a silent retune: every unit-exact fixture in ALS-D2/D3 pins the current value."
+statement = "Deterministic time is `charge units × CM-1` where CM-1 v0.3 = 3ns/unit, defined ONCE (`almide_types::time_units::CM1_NS_PER_CHARGE`) and consumed by both renderers, the interpreter, and `--time-report` from that single definition. The wall-clock claim is RATIO-ONLY: a standing calibration gate measures the declared/measured ratio on a 100M-unit reference workload and asserts it inside the declared 5x band (ADR-0001 D5) — the gate falsified both prior draft constants (21x and 18x out). Changing CM-1 is a versioned cost-model revision (CM-2, …), never a silent retune: every unit-exact fixture in ALS-DT2/DT3 pins the current value."
 since     = "0.47.0"
 status    = "active"
 evidence  = [
@@ -2685,7 +2546,7 @@ evidence  = [
 # ── WALL-CLOCK DEADLINE (fan.timeout) — the R_OMEGA contract ─
 [[contract]]
 id        = "C-208"
-spec      = "ALS-D5"
+spec      = "ALS-DT5"
 title     = "fan.timeout is omega-relative: fixed ends everywhere, fixed omega replays byte-identically"
 statement = "`fan.timeout(duration.ms(n)) { body }` checks its wall deadline COOPERATIVELY at charge sites (never mid-operation) and nests by min-cap on the absolute deadline. The contract is RELATIVE TO omega (which check the deadline fires at — a host input, ADR-0001 S8): a recorded omega REPLAYED (the ordinal baked at compile time, the clock never read) reproduces the observations byte-identically on EVERY target — record on native, replay on wasm included. Only the two ends are absolute: a deadline larger than the work always completes Ok, and a diverging body under any finite deadline is always cut at a charge site (Err, the fallback runs, the program continues). The v1 omega encoding is the single ordinal of the FIRST hit."
 since     = "0.47.0"
@@ -2733,7 +2594,6 @@ evidence  = [
   { path = "spec/wasm_cross/pure_bang_propagation.almd", class = "fixture" },
   { path = "spec/lang/pure_result_bang_test.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-212"
 spec      = "ALS-I3"
@@ -2745,7 +2605,6 @@ evidence  = [
   { path = "spec/wasm_cross/hex_two_module_link.almd", class = "fixture" },
   { path = "crates/almide-mir/src/pipeline_link.rs", name = "dedup_linked_by_name", class = "by-construction" },
 ]
-
 [[contract]]
 id        = "C-213"
 spec      = "ALS-C5"
@@ -2759,7 +2618,6 @@ evidence  = [
   { path = "spec/wasm_cross/endian_auto_import.almd", class = "fixture" },
   { path = "crates/almide-interp/src/inplace.rs", name = "bytes_write_op", class = "by-construction" },
 ]
-
 [[contract]]
 id        = "C-214"
 spec      = "ALS-R5"
@@ -2770,7 +2628,6 @@ status    = "active"
 evidence  = [
   { path = "spec/stdlib/process_timeout_test.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-215"
 spec      = "ALS-R5"
@@ -2782,7 +2639,6 @@ evidence  = [
   { path = "spec/stdlib/fs_if_exists_test.almd", class = "fixture" },
   { path = "spec/wasm_cross/fs_read_directory_errno.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-216"
 spec      = "ALS-D6"
@@ -2793,7 +2649,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/effect_option_explicit_bang.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-217"
 spec      = "ALS-D6"
@@ -2843,7 +2698,6 @@ evidence  = [
   { path = "spec/stdlib/fs_fold_lines_range_test.almd", class = "fixture" },
   { path = "spec/stdlib/fs_fold_lines_chunked_test.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-221"
 spec      = "ALS-M15"
@@ -2856,7 +2710,6 @@ evidence  = [
   { path = "spec/wasm_cross/effect_fn_value.almd", class = "fixture" },
   { path = "spec/lang/fallible_user_hof_test.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-222"
 spec      = "ALS-R2"
@@ -2867,10 +2720,9 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/nested_unwrap_propagation.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-223"
-spec      = "ALS-T6"
+spec      = "ALS-T25"
 title     = "Matrix transcendentals compute through the vendored musl-libm, not the platform one"
 statement = "A `matrix` entry point whose math reaches a transcendental computes it through the VENDORED musl-libm (`runtime/rs/src/libm.rs`, the StrictMath/fdlibm decision) on BOTH legs — never the host platform's libm. Promised observable: `matrix.pow` over varied values (positive, fractional and negative exponents), the rope inverse-frequency table, and the non-kernel sigmoid print byte-identically native <-> wasm. Before this contract native called `f64::powf`/`f64::exp` directly while the wasm self-host used the vendored algorithm, so `matrix.pow(m, 1.7)` printed `1.5620815356808382` on native and `1.5620815356808384` on wasm (#1197) — live on released 0.56.0 and invisible to every gate: the stdlib matrix tests assert through a 1e-5 `approx_eq` tolerance, and the corpus's earlier matrix fixtures fed `matrix.ones`, whose uniform rows cancel the difference. VARIED input values are therefore part of the promise, not incidental. The platform libm is also non-deterministic ACROSS platforms (glibc / macOS / musl differ in the last ULP), so this contract is equally a native-to-native promise: the same program prints the same bytes wherever it was built. The SIMD activations join this promise (#1197 step 2): `matrix.softmax_rows`, `matrix.gelu` and `matrix.swiglu_gate` compute through the CANONICAL fast-exp — one algorithm, spelled identically by the native SIMD kernel (AVX / NEON / wasm-SIMD lanes and the scalar fallback) and by the wasm self-host (`stdlib/matrix_activations.almd`). Four independent spellings had to be unified for that, each worth a byte and each algebraically invisible: (1) FUSION — a fused multiply-add rounds once where mul+add rounds twice, so the algorithm is deliberately UNFUSED throughout, because wasm has no FMA instruction and relaxed-simd's fma is spec'd as fused-or-unfused; (2) REDUCTION ORDER — one left-to-right sum over the stored exps, never a lane-wise accumulator plus a horizontal combine; (3) SCALING — reciprocal-multiply (`inv = 1/sum`; `v * inv`), never `v / sum`; (4) gelu's two spellings — the identity `1 - 2/(exp(2y)+1)` and the cube association `c * ((x*x)*x)`. A lane-equality test (`fast_exp_determinism`) pins each SIMD lane to the scalar reference bitwise over ~60k inputs; its first version used a coarse grid and passed with a re-introduced fmadd, so the dense sweep is part of the promise, not decoration. The byte-match extends to the ASSOCIATION, not just the operands and the reduction order, and only an operand at the edge of the float range can show it: the native kernel spells gelu's scaling `0.5 * x * (1.0 + tanh)`, which Rust parses as `(0.5 * x) * (1.0 + tanh)` — halve FIRST, then double — while the self-host had transcribed v0's `0.5 * ((1 + t) * x)`, which doubles first. For an `x` near f64::MAX the native order stays finite and the self-host's `2.0 * x` overflows, so `matrix.gelu(1.7976931348623157e308)` answered that value natively and `inf` on wasm, both exit 0 (differential fuzz, a matrix_softmax_fastexp mutation). All four native lanes (naive/avx/neon/chunked) already agreed on the native association; the self-host now follows it."
 since     = "0.56.1"
@@ -2880,7 +2732,6 @@ evidence  = [
   { path = "spec/wasm_cross/matrix_softmax_fastexp.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_domain_edges.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-224"
 spec      = "ALS-C7"
@@ -2891,7 +2742,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/if_let_guard_let.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-225"
 spec      = "ALS-R6"
@@ -2902,7 +2752,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fs_read_lines.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-226"
 spec      = "ALS-C7"
@@ -2914,7 +2763,6 @@ evidence  = [
   { path = "spec/wasm_cross/mut_param_call_chain.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_writeback_growth.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-227"
 spec      = "ALS-R6"
@@ -2925,7 +2773,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fs_metadata_family.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-228"
 spec      = "ALS-R6"
@@ -2938,7 +2785,6 @@ evidence  = [
   { path = "spec/wasm_cross/matrix_select_rows.almd", class = "fixture" },
   { path = "spec/wasm_cross/fs_glob_segments.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-229"
 spec      = "ALS-R6"
@@ -2953,7 +2799,6 @@ evidence  = [
   { path = "spec/wasm_cross/bytes_negative_offset_family.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_domain_edges.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-230"
 spec      = "ALS-R6"
@@ -2964,7 +2809,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/flight_pid_control.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-231"
 spec      = "ALS-E1"
@@ -2975,7 +2819,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/literal_int_forms.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-232"
 spec      = "ALS-E2"
@@ -2986,7 +2829,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/literal_int_forms.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-233"
 spec      = "ALS-E4"
@@ -2997,7 +2839,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/literal_unit.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-234"
 spec      = "ALS-E6"
@@ -3009,7 +2850,6 @@ evidence  = [
   { path = "spec/wasm_cross/grouping_unary.almd", class = "fixture" },
   { path = "spec/wasm_cross/tuple_single.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-235"
 spec      = "ALS-E7"
@@ -3020,7 +2860,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/grouping_unary.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-236"
 spec      = "ALS-E8"
@@ -3031,7 +2870,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/tuple_ops.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-237"
 spec      = "ALS-E9"
@@ -3042,7 +2880,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/option_result_ctors.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-238"
 spec      = "ALS-E10"
@@ -3057,7 +2894,6 @@ evidence  = [
   { path = "spec/wasm_cross/range_bind_walled_no_materialize.almd", class = "fixture" },
   { path = "spec/wasm_cross/range_materialize_oom.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-239"
 spec      = "ALS-E11"
@@ -3068,7 +2904,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/collection_literals.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-240"
 spec      = "ALS-E12"
@@ -3080,18 +2915,16 @@ evidence  = [
   { path = "spec/wasm_cross/collection_literals.almd", class = "fixture" },
   { path = "spec/wasm_cross/map_index_string_key_shapes.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-241"
-spec      = "ALS-S1"
+spec      = "ALS-ST1"
 title     = "Binding statements: let shadowing, var reassignment, and their check-time guards are identical on both targets"
-statement = "ALS-S1 (the first statement-direction section): immutable `let` with SHADOWING (the new binding's initializer sees the old one — let x = 1 then let x = x + 10 gives 11), mutable `var` with sequential and in-loop reassignment (10, 6), and a conditional-expression initializer, byte-identical native <-> wasm. The negative half is check-time and pinned by tests/binding_diag_test.rs: assigning a `let` is E009 whose hint steers to `var`; reassigning a `var` at a different type is E001 (the declared type never silently widens)."
+statement = "ALS-ST1 (the first statement-direction section): immutable `let` with SHADOWING (the new binding's initializer sees the old one — let x = 1 then let x = x + 10 gives 11), mutable `var` with sequential and in-loop reassignment (10, 6), and a conditional-expression initializer, byte-identical native <-> wasm. The negative half is check-time and pinned by tests/binding_diag_test.rs: assigning a `let` is E009 whose hint steers to `var`; reassigning a `var` at a different type is E001 (the declared type never silently widens)."
 since     = "0.57.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/binding_stmts.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-242"
 spec      = "ALS-E13"
@@ -3102,7 +2935,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/if_block_forms.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-243"
 spec      = "ALS-E14"
@@ -3113,7 +2945,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/if_block_forms.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-244"
 spec      = "ALS-E15"
@@ -3124,7 +2955,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/while_loops.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-245"
 spec      = "ALS-E16"
@@ -3136,18 +2966,16 @@ evidence  = [
   { path = "spec/wasm_cross/string_interpolation.almd", class = "fixture" },
   { path = "spec/wasm_cross/string_interp_large_hole.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-246"
 spec      = "ALS-E17"
 title     = "Identifiers resolve to their nearest binding; unresolved names are check-time E003 naming the identifier"
-statement = "ALS-E17: an identifier expression resolves to the nearest binding (shadowing per ALS-S1) with identical observables on both targets; an unresolved name is check-time E003 whose diagnostic CONTAINS the failed name (tests/ident_diag_test.rs) — no runtime name-resolution failure exists (a checked name always resolves; NameTotality is the v1 proof obligation for this)."
+statement = "ALS-E17: an identifier expression resolves to the nearest binding (shadowing per ALS-ST1) with identical observables on both targets; an unresolved name is check-time E003 whose diagnostic CONTAINS the failed name (tests/ident_diag_test.rs) — no runtime name-resolution failure exists (a checked name always resolves; NameTotality is the v1 proof obligation for this)."
 since     = "0.57.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/string_interpolation.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-247"
 spec      = "ALS-E18"
@@ -3158,7 +2986,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/match_forms.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-248"
 spec      = "ALS-E19"
@@ -3169,19 +2996,17 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/for_in_forms.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-249"
-spec      = "ALS-S2"
+spec      = "ALS-ST2"
 title     = "Tuple let-destructuring binds each component positionally, identically on both targets"
-statement = "ALS-S2: `let (a, b) = e` binds each component to the corresponding positional value with the tuple's positional types — pinned in the for-in fixture (p + q participating in the 53 sum) and in tuple_ops.almd (C-236). One norm shared by three positions: let-destructure, fn-parameter tuple destructure, and the for-in head (ALS-E19)."
+statement = "ALS-ST2: `let (a, b) = e` binds each component to the corresponding positional value with the tuple's positional types — pinned in the for-in fixture (p + q participating in the 53 sum) and in tuple_ops.almd (C-236). One norm shared by three positions: let-destructure, fn-parameter tuple destructure, and the for-in head (ALS-E19)."
 since     = "0.57.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/for_in_forms.almd", class = "fixture" },
   { path = "spec/wasm_cross/tuple_ops.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-250"
 spec      = "ALS-E20"
@@ -3193,7 +3018,6 @@ evidence  = [
   { path = "spec/wasm_cross/pipe_compose_forms.almd", class = "fixture" },
   { path = "spec/wasm_cross/pipe_tuple_pattern_lambda.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-251"
 spec      = "ALS-E21"
@@ -3204,29 +3028,26 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/if_let_forms.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-252"
-spec      = "ALS-S3"
+spec      = "ALS-ST3"
 title     = "Expression statements and comments: Unit calls execute, discards are explicit, comments are invisible"
-statement = "ALS-S3/S4: a Unit-returning call in statement position executes in order; a pure value is discarded only through `let _ = e`; and every comment form (leading line, trailing, multi-line block, before a declaration) is semantically invisible — the fixture threads all forms between two prints and both targets emit exactly first/second. The negative half is check-time E042 (ADR-0008 must-use): a bare statement-position Result is rejected with BOTH escapes spelled in the hint (`expr!` propagates, `let _ = expr` discards without propagating — C-217's pinned semantics), tested by tests/expr_stmt_diag_test.rs."
+statement = "ALS-ST3: a Unit-returning call in statement position executes in order; a pure value is discarded only through `let _ = e`; and every comment form (leading line, trailing, multi-line block, before a declaration) is semantically invisible — the fixture threads all forms between two prints and both targets emit exactly first/second. The negative half is check-time E042 (ADR-0008 must-use): a bare statement-position Result is rejected with BOTH escapes spelled in the hint (`expr!` propagates, `let _ = expr` discards without propagating — C-217's pinned semantics), tested by tests/expr_stmt_diag_test.rs."
 since     = "0.57.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/expr_stmt_comment.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-253"
-spec      = "ALS-S5"
+spec      = "ALS-ST4"
 title     = "Place assignments and type ascription behave identically on both targets"
-statement = "ALS-S5/E22: list-element `xs[i] = v`, record-field `p.x = v`, and map-key `m[k] = v` (upsert: insert-if-absent, overwrite-if-present — 6 then 100 pinned) all observe the new value on the next read, byte-identical native <-> wasm (fixture pins 21/12/6/100/7); the OOB-write abort stays C-067's ruling. The type-ascription expression `(e: T)` supplies an expected type without changing the value or its runtime representation."
+statement = "ALS-ST4/E22: list-element `xs[i] = v`, record-field `p.x = v`, and map-key `m[k] = v` (upsert: insert-if-absent, overwrite-if-present — 6 then 100 pinned) all observe the new value on the next read, byte-identical native <-> wasm (fixture pins 21/12/6/100/7); the OOB-write abort stays C-067's ruling. The type-ascription expression `(e: T)` supplies an expected type without changing the value or its runtime representation."
 since     = "0.57.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/place_assign_ascription.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-254"
 spec      = "ALS-E22"
@@ -3237,7 +3058,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/place_assign_ascription.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-255"
 spec      = "ALS-E23"
@@ -3248,7 +3068,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/record_forms.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-256"
 spec      = "ALS-E24"
@@ -3259,7 +3078,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/loop_break_continue.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-257"
 spec      = "ALS-E25"
@@ -3270,7 +3088,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/error_operators.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-258"
 spec      = "ALS-E26"
@@ -3281,7 +3098,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/call_lambda_ctor.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-259"
 spec      = "ALS-E27"
@@ -3292,18 +3108,16 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/call_lambda_ctor.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-260"
-spec      = "ALS-D1"
+spec      = "ALS-DL1"
 title     = "The declaration family compiles and runs identically on both targets"
-statement = "ALS-D1: one program threading the declaration family — explicit import (json parse -> stringify round-trip prints [1,2]), a variant type declaration eliminated by match, top-level lets (Int and String) read from a fn body, fn and effect-fn declarations — byte-identical native <-> wasm (fixture pins 300/hi/careful/[1,2]). Protocol resolution stays with C-094/C-126; test blocks are evidenced by the whole spec/lang suite running its wasm leg. The fixture now leads with a `module` header under its comment block — the shape #1323 made un-formattable — so it also pins that a commented module header survives fmt; the multi-module execution evidence stays with the spec/integration/modules suite. `strict` is deliberately OUTSIDE: parsed but consumed by nothing (#1321), its row stays UNWRITTEN."
+statement = "ALS-DL1: one program threading the declaration family — explicit import (json parse -> stringify round-trip prints [1,2]), a variant type declaration eliminated by match, top-level lets (Int and String) read from a fn body, fn and effect-fn declarations — byte-identical native <-> wasm (fixture pins 300/hi/careful/[1,2]). Protocol resolution stays with C-094/C-126; test blocks are evidenced by the whole spec/lang suite running its wasm leg. The fixture now leads with a `module` header under its comment block — the shape #1323 made un-formattable — so it also pins that a commented module header survives fmt; the multi-module execution evidence stays with the spec/integration/modules suite. `strict` is deliberately OUTSIDE: parsed but consumed by nothing (#1321), its row stays UNWRITTEN."
 since     = "0.57.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/declaration_forms.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-261"
 spec      = "ALS-E3"
@@ -3314,7 +3128,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/string_float_stable.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-262"
 spec      = "ALS-E5"
@@ -3325,12 +3138,11 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/string_float_stable.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-263"
-spec      = "ALS-D2"
+spec      = "ALS-DL2"
 title     = "Recovery nodes never appear in accepted programs; a broken file still reports past its first error"
-statement = "ALS-D2: ExprKind::Error / Stmt::Error are recovery vocabulary — placeholders that keep diagnostic collection going past a parse error, never present in an accepted program. Both directions are pinned: the whole spec/wasm_cross corpus (300+ accepted, both-target-executed programs) parses with ZERO recovery nodes, and a deliberately broken file reports diagnostics while parsing CONTINUES past the error (the following declaration is still seen). The fixture leg is any accepted program executing identically with zero recovery artifacts."
+statement = "ALS-DL2: ExprKind::Error / Stmt::Error are recovery vocabulary — placeholders that keep diagnostic collection going past a parse error, never present in an accepted program. Both directions are pinned: the whole spec/wasm_cross corpus (300+ accepted, both-target-executed programs) parses with ZERO recovery nodes, and a deliberately broken file reports diagnostics while parsing CONTINUES past the error (the following declaration is still seen). The fixture leg is any accepted program executing identically with zero recovery artifacts."
 since     = "0.57.1"
 status    = "active"
 evidence  = [
@@ -3338,7 +3150,6 @@ evidence  = [
   { path = "tests/parser_recovery_test.rs", name = "accepted_corpus_contains_zero_recovery_nodes", class = "by-construction" },
   { path = "tests/parser_recovery_test.rs", name = "broken_file_recovers_past_the_error", class = "by-construction" },
 ]
-
 [[contract]]
 id        = "C-264"
 spec      = "ALS-E28"
@@ -3349,29 +3160,26 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/optional_chain_scalar.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-265"
-spec      = "ALS-S6"
+spec      = "ALS-ST5"
 title     = "The guard statement's pass and raise paths behave identically on both targets"
-statement = "ALS-S6: `guard cond else err(e)` is an EARLY EXIT — on the true path the following statements run and the tail value flows out (10 pinned); on the false path the else's err propagates to the caller, where a `!` or match receives it (\"must be positive\" pinned) — byte-identical native <-> wasm. Both raise spellings (`err(e)` and `err(e)!`) normalize identically since #1336, which found the recognizer accepted only the Unwrap-wrapped leaf: the class was wider than guard (a hand-written `{ let m = ..; if m > 0 then m * 2 else err(e) }` walled the same way). `guard let` is a separate class (frontend-desugared to a tail-position variant match, still walled) and is outside this contract."
+statement = "ALS-ST5: `guard cond else err(e)` is an EARLY EXIT — on the true path the following statements run and the tail value flows out (10 pinned); on the false path the else's err propagates to the caller, where a `!` or match receives it (\"must be positive\" pinned) — byte-identical native <-> wasm. Both raise spellings (`err(e)` and `err(e)!`) normalize identically since #1336, which found the recognizer accepted only the Unwrap-wrapped leaf: the class was wider than guard (a hand-written `{ let m = ..; if m > 0 then m * 2 else err(e) }` walled the same way). `guard let` is a separate class (frontend-desugared to a tail-position variant match, still walled) and is outside this contract."
 since     = "0.57.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/guard_statement.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-266"
-spec      = "ALS-S7"
+spec      = "ALS-ST6"
 title     = "guard let binds the success payload and raises on the failing polarity, identically on both targets"
-statement = "ALS-S7: `guard let x = scrut else err(e)` binds the Ok/Some payload for the rest of the block on the success polarity (int.parse(\"21\") -> 42 pinned) and propagates the else's err to the caller on the failing one (\"not a number\" pinned) — byte-identical native <-> wasm; chained guard lets fold into a single carrier bind (#1340). The wall that stood here was POSITIONAL, not polarity- or pattern-shaped: guard let desugars in the frontend to a BLOCK-NESTED variant match, and auto_wrap_abi_body retypes only the body ROOT to the Result carrier, so the nested match kept its scalar type and fell off the carrier-typed tail path. The fix taught the proven bind-shape normalizer about variant matches — the same machinery ALS-S6 uses."
+statement = "ALS-ST6: `guard let x = scrut else err(e)` binds the Ok/Some payload for the rest of the block on the success polarity (int.parse(\"21\") -> 42 pinned) and propagates the else's err to the caller on the failing one (\"not a number\" pinned) — byte-identical native <-> wasm; chained guard lets fold into a single carrier bind (#1340). The wall that stood here was POSITIONAL, not polarity- or pattern-shaped: guard let desugars in the frontend to a BLOCK-NESTED variant match, and auto_wrap_abi_body retypes only the body ROOT to the Result carrier, so the nested match kept its scalar type and fell off the carrier-typed tail path. The fix taught the proven bind-shape normalizer about variant matches — the same machinery ALS-ST5 uses."
 since     = "0.57.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/guard_let_statement.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-267"
 spec      = "ALS-E29"
@@ -3382,7 +3190,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/binary_operators.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-268"
 spec      = "ALS-E30"
@@ -3408,7 +3215,6 @@ evidence  = [
   { path = "spec/wasm_cross/nested_variant_match_bind.almd", class = "fixture" },
   { path = "tests/diagnostic_harness_test.rs", class = "by-construction", name = "broken_files_produce_expected_diagnostics" },
 ]
-
 [[contract]]
 id        = "C-270"
 spec      = "ALS-R6"
@@ -3474,15 +3280,19 @@ evidence  = [
 # ── http RESPONSE HEADERS ──────────────────────────────────────────────
 [[contract]]
 id        = "C-275"
-spec      = "ALS-R7"
+spec      = "ALS-R8"
 title     = "The http response-header surface answers identically on both targets, with case-insensitive field names"
-statement = "ALS-R7: header field names are CASE-INSENSITIVE under an ASCII fold (RFC 9110 §5.1 — a field name is a `token`, so the fold matches `eq_ignore_ascii_case` and must not reach for the Unicode string.to_lower), a response carries AT MOST ONE entry per field name because every write upserts the matching entry's value in place, and `with_headers` yields EXACTLY the caller's map — no seeded Content-Type, which only `response` (text/plain) and `json` (application/json) carry because they give the caller no other way to name one, while `redirect` carries only Location. #1352 measured NINE divergent cells here: native seeded a Content-Type in `with_headers` and matched case-insensitively in `get_header` while the self-host seeded nothing and matched with `==`, so a wasm-target program inspecting a response it had just built silently read `none`. The seeding side lost the ruling on REACHABILITY — with the seed, `with_headers` cannot express a response without a Content-Type (there is no remove_header), without it both shapes are reachable — and `set_header`'s case-SENSITIVE match lost on both legs at once: setting `content-type` on a response holding `Content-Type` appended a second entry the case-insensitive lookup then shadowed, so the write vanished natively too."
+statement = "ALS-R8: header field names are CASE-INSENSITIVE under an ASCII fold (RFC 9110 §5.1 — a field name is a `token`, so the fold matches `eq_ignore_ascii_case` and must not reach for the Unicode string.to_lower), a response carries AT MOST ONE entry per field name because every write upserts the matching entry's value in place, and `with_headers` yields EXACTLY the caller's map — no seeded Content-Type, which only `response` (text/plain) and `json` (application/json) carry because they give the caller no other way to name one, while `redirect` carries only Location. #1352 measured NINE divergent cells here: native seeded a Content-Type in `with_headers` and matched case-insensitively in `get_header` while the self-host seeded nothing and matched with `==`, so a wasm-target program inspecting a response it had just built silently read `none`. The seeding side lost the ruling on REACHABILITY — with the seed, `with_headers` cannot express a response without a Content-Type (there is no remove_header), without it both shapes are reachable — and `set_header`'s case-SENSITIVE match lost on both legs at once: setting `content-type` on a response holding `Content-Type` appended a second entry the case-insensitive lookup then shadowed, so the write vanished natively too."
 since     = "0.57.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/http_response_headers.almd", class = "fixture" },
 ]
 
+# ── TEST-MODE RE-INITIALIZATION OF MUTABLE MODULE GLOBALS ─────────────
+# 2026-08-27 repair: this block lost its [[contract]]/id header lines in the
+# 0.57.1 batch (unclosed evidence arrays above swallowed them); the id is
+# assigned from the ledger's high-water mark at repair time.
 [[contract]]
 id        = "C-276"
 spec      = "ALS-C9"
@@ -3494,7 +3304,6 @@ evidence  = [
   { path = "spec/wasm_cross/sort_by_str_key_heap.almd", class = "fixture" },
   { path = "crates/almide-mir/src/coown_names.rs", name = "coown_names_documented", class = "by-construction" },
 ]
-
 [[contract]]
 id        = "C-277"
 spec      = "ALS-C10"
@@ -3506,7 +3315,6 @@ evidence  = [
   { path = "spec/wasm_cross/ctor_turbofish_family.almd", class = "fixture" },
   { path = "tests/runtime_ctor_turbofish_family_gate_test.rs", name = "every_return_only_generic_ctor_has_a_turbofish_arm", class = "by-construction" },
 ]
-
 [[contract]]
 id        = "C-278"
 spec      = "ALS-R6"
@@ -3519,7 +3327,6 @@ evidence  = [
   { path = "spec/wasm_cross/rope_geometry_family.almd", class = "fixture" },
   { path = "spec/wasm_cross/rope_at_family.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-279"
 spec      = "ALS-E19"
@@ -3530,18 +3337,16 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/licm_zero_trip_hoist.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-280"
-spec      = "ALS-S3"
+spec      = "ALS-ST3"
 title     = "The kernel-conformance family behaves per the machine-checked λ_almd semantics on both targets"
-statement = "ALS-S3 (statement-position effects, execution order) as pinned by the edit-locality kernel: spec/wasm_cross/kernel_conformance.almd is the almide-surface image of the λ_almd program `kAll` (crates/almide-edit-belt/AlmideEditBelt/Conformance.lean), whose observables — nine stdout lines covering print order, pure ok/err through match, `!` on err reified at the call boundary, `!` on ok under the effect-fn tail lift, and callee effects ordered before the caller continues — are KERNEL-CHECKED theorems (k1_obs..kAll_obs, `:= by rfl` kernel reduction; eval_sound + ev_det make them the unique Ev derivations, kAll_ev; axiom sets pinned by #guard_msgs — the third 0-sorry belt). tests/kernel_conformance_test.rs pins the native stdout to the same nine lines; the wasm_cross harness carries the claim to wasm. Beyond the family, the GENERATED corpus (proofs/kernel-conformance/, 48 typed λ_almd-image programs from Corpus.lean's deterministic generator) extends the claim generator-totally over the fragment with a two-tier standing: totality is kernel-checked (theorem corpus_total — every program evaluates to some observables), while the committed .expected traces are EVALUATOR-PINNED (emitted by the compiled Lean evaluator, the trustCompiler-class seam) and held to Corpus.lean byte-for-byte by the CI conformancegen --check step; tests/kernel_conformance_test.rs runs every program on native and wasm against those traces. The erase/render pair is the one reviewed seam; the tier map is docs/contracts/proven-vs-trusted.md (edit-locality Stage 3; the corpus's first run caught almide#1428 and almide#1429)."
+statement = "ALS-ST3 (statement-position effects, execution order) as pinned by the edit-locality kernel: spec/wasm_cross/kernel_conformance.almd is the almide-surface image of the λ_almd program `kAll` (crates/almide-edit-belt/AlmideEditBelt/Conformance.lean), whose observables — nine stdout lines covering print order, pure ok/err through match, `!` on err reified at the call boundary, `!` on ok under the effect-fn tail lift, and callee effects ordered before the caller continues — are KERNEL-CHECKED theorems (k1_obs..kAll_obs, `:= by rfl` kernel reduction; eval_sound + ev_det make them the unique Ev derivations, kAll_ev; axiom sets pinned by #guard_msgs — the third 0-sorry belt). tests/kernel_conformance_test.rs pins the native stdout to the same nine lines; the wasm_cross harness carries the claim to wasm. Beyond the family, the GENERATED corpus (proofs/kernel-conformance/, 48 typed λ_almd-image programs from Corpus.lean's deterministic generator) extends the claim generator-totally over the fragment with a two-tier standing: totality is kernel-checked (theorem corpus_total — every program evaluates to some observables), while the committed .expected traces are EVALUATOR-PINNED (emitted by the compiled Lean evaluator, the trustCompiler-class seam) and held to Corpus.lean byte-for-byte by the CI conformancegen --check step; tests/kernel_conformance_test.rs runs every program on native and wasm against those traces. The erase/render pair is the one reviewed seam; the tier map is docs/contracts/proven-vs-trusted.md (edit-locality Stage 3; the corpus's first run caught almide#1428 and almide#1429)."
 since     = "0.57.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/kernel_conformance.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-281"
 spec      = "ALS-E18"
@@ -3553,7 +3358,6 @@ evidence  = [
   { path = "spec/wasm_cross/result_default_and_passthrough.almd", class = "fixture" },
   { path = "spec/wasm_cross/effect_tail_carrier_family.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-282"
 spec      = "ALS-R6"
@@ -3565,7 +3369,6 @@ evidence  = [
   { path = "spec/wasm_fail/matrix_index_oob_aborts.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_index_domain_family.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-283"
 spec      = "ALS-R6"
@@ -3576,7 +3379,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/callee_shadowing_family.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-284"
 spec      = "ALS-R6"
@@ -3587,7 +3389,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fallible_hof_effect_callback_family.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-285"
 spec      = "ALS-D4"
@@ -3598,7 +3399,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/regex_engine.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-286"
 spec      = "ALS-E9"
@@ -3609,8 +3409,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/unwrap_or_source_survives.almd", class = "fixture" },
 ]
-
-
 [[contract]]
 id        = "C-287"
 spec      = "ALS-M10"
@@ -3621,8 +3419,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/heap_result_if_option_aggregate.almd", class = "fixture" },
 ]
-
-
 [[contract]]
 id        = "C-288"
 spec      = "ALS-M10"
@@ -3633,8 +3429,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/list_enumerate_rich.almd", class = "fixture" },
 ]
-
-
 [[contract]]
 id        = "C-289"
 spec      = "ALS-M10"
@@ -3645,8 +3439,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/list_float_equality_family.almd", class = "fixture" },
 ]
-
-
 [[contract]]
 id        = "C-291"
 spec      = "ALS-M10"
@@ -3657,7 +3449,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/adr0005_operator_equivalence.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-290"
 spec      = "ALS-R5"
@@ -3887,7 +3678,6 @@ evidence  = [
   { path = "spec/wasm_cross/codec_list_default.almd", class = "fixture" },
   { path = "spec/wasm_cross/codec_triple_list.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-299"
 spec      = "ALS-T3"
@@ -3899,7 +3689,6 @@ evidence  = [
   { path = "spec/wasm_cross/hash_digests.almd", class = "fixture" },
   { path = "spec/stdlib/hash_test.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-300"
 spec      = "ALS-T2"
@@ -3912,7 +3701,6 @@ evidence  = [
   { path = "tests/heap_cap_test.rs", name = "map_literal_intermediates_do_not_leak_under_the_cap", class = "fixture" },
   { path = "spec/wasm_cross/list_arg_map_view.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-301"
 spec      = "ALS-T2"
@@ -3923,31 +3711,27 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/map_upsert_str.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-319"
 spec      = "ALS-I1"
 title     = "A captured-and-mutated var List is shared storage through a closure"
-statement = "A `var` List that a closure captures AND mutates behaves as ONE shared storage on both targets: a functional rebind inside the closure (`seen = seen + [s]`, the `list.push` desugar) is visible to the enclosing scope, and an enclosing-scope rebind between closure calls is visible to the next call — both directions, byte-identically native == wasm. The admitted inner classes are exactly the ones whose cell teardown is exact: the len-counted OWNED-slots rule (String elements; Flat-ctor elements like Option[Int]) and the ROUTED map class (`Map[String, <variant>]` / `Map[String, <all-scalar record>]` — the closure_capture_map fold shape, freed via the type-specific generated map sweep at the cell's last ref, both at scope end and through the closure-env capture); a deeper inner (List[List[String]]) keeps the honest lift refusal. The failure mode this pins against is NOT a wall: before the shared-cell admission the capture lowered as an env value-copy and the wasm leg printed a silently wrong value (native 2 / wasm 0). Cell churn is leak-free under the heap cap (flat ceiling across N=2000 vs N=8000)."
-since     = "0.59.0"
+statement = "A `var` List that a closure captures AND mutates behaves as ONE shared storage on both targets: a functional rebind inside the closure (`seen = seen + [s]`, the `list.push` desugar) is visible to the enclosing scope, and an enclosing-scope rebind between closure calls is visible to the next call — both directions, byte-identically native == wasm. The admitted element classes are exactly the ones whose cell teardown is already exact under the len-counted OWNED-slots rule (String elements; Flat-ctor elements like Option[Int]); a deeper element (List[List[String]], a record-valued map) keeps the honest lift refusal. The failure mode this pins against is NOT a wall: before the shared-cell admission the capture lowered as an env value-copy and the wasm leg printed a silently wrong value (native 2 / wasm 0). Cell churn is leak-free under the heap cap (flat ceiling across N=2000 vs N=8000). [Provenance: authored in the incumbent ledger copy as C-302 (cb7c00ee4, 2026-08-21) colliding with the family head this ledger had already minted; renumbered C-319 at the port — the judge ledger is canonical, als #38.]"
+since     = "0.60.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/closure_captured_list_mutation.almd", class = "fixture" },
   { path = "spec/wasm_cross/closure_captured_map_records.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-320"
-spec      = "ALS-D2"
+spec      = "ALS-DT2"
 title     = "A budget cut performs exit bookkeeping: exhausted is always Err, regions are independent, cut placement is unobservable"
-statement = "A `fan.bounded` cut runs the same meter bookkeeping as a normal region exit, so (1) an exhausted region's verdict is Err — never a stale Ok carrying a partial or zero value; (2) a region's verdict and value do not depend on any other region in the program (meter state cannot leak across regions); (3) whether the cut fires in a loop directly in the arm or inside a callee is unobservable, and the arm's value is the block's value regardless of loop form; (4) the meter charges the budgeted body only — runtime services that materialize observables (formatting, the `??` fallback path) are neither charged nor cut. Adjudicated 2026-08-25 from greenfield's stage-64 finding; through 0.59.1 the violation was IDENTICAL on both targets (a direct-arm cut returned from the region fn past BudgetExit: stale ok(0) instead of Err, and the leaked meter state poisoned every later region — the pre-existing fuel fixtures only exercise callee-loop cuts, which reach the exit and were correct), so cross-target agreement cannot see it: the reference-leg pin asserts the normative values (almide/almide#1572; canonical row: als ledger C-320, spec ALS-DT2). Mechanism: BudgetEnter stashes the saved outer fuel in a global and keeps the entry-units global armed (>= 0) while the region is open; BudgetExit disarms it; the BudgetExhausted read — the one point every region converges, the wrapper's verdict bind — performs the identical exit bookkeeping first when it finds the region still armed."
-since     = "0.59.2"
+statement = "A `fan.bounded` cut runs the same meter bookkeeping as a normal region exit, so (1) an exhausted region's verdict is Err — never a stale Ok carrying a partial or zero value; (2) a region's verdict and value do not depend on any other region in the program (meter state cannot leak across regions); (3) whether the cut fires in a loop directly in the arm or inside a callee is unobservable, and the arm's value is the block's value regardless of loop form; (4) the meter charges the budgeted body only — runtime services that materialize observables (formatting, the `??` fallback path) are neither charged nor cut. Adjudicated 2026-08-25 from greenfield's stage-64 finding; the 0.58.0 release violates 1–2 identically on both targets (a direct-arm cut → stale ok(0) instead of Err; the leaked meter state then poisons every later region, roomy or exhausted alike; callee-loop cuts are correct — the pre-existing fuel fixtures only exercise those), so agreement cannot see it — the reference leg pins the values (almide/almide#1572)."
+since     = "0.60.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fuel_cut_in_arm_loop.almd", class = "fixture" },
-  { path = "tests/charge_probe_test.rs", name = "cut_bookkeeping_pins_normative_values", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-302"
 spec      = "ALS-T19"
@@ -3962,7 +3746,6 @@ evidence  = [
   { path = "spec/wasm_cross/float_signed_zero_minmax.almd", class = "fixture" },
   { path = "spec/wasm_cross/float_to_int_edges.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-303"
 spec      = "ALS-T20"
@@ -3972,8 +3755,8 @@ since     = "0.58.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/float_no_contraction.almd", class = "fixture" },
+  { path = "spec/stdlib/float_determinism_test.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-304"
 spec      = "ALS-T21"
@@ -3983,8 +3766,8 @@ since     = "0.58.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/float_subnormal_preserved.almd", class = "fixture" },
+  { path = "spec/stdlib/float_determinism_test.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-305"
 spec      = "ALS-T22"
@@ -3994,8 +3777,8 @@ since     = "0.58.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/math_transcendental_bits.almd", class = "fixture" },
+  { path = "spec/stdlib/math_accuracy_test.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-306"
 spec      = "ALS-T23"
@@ -4005,8 +3788,11 @@ since     = "0.60.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/float_signed_zero_minmax.almd", class = "fixture" },
+  { path = "spec/wasm_cross/float_sign_minmax_ieee.almd", class = "fixture" },
+  { path = "spec/stdlib/float_determinism_test.almd", class = "fixture" },
+  { path = "spec/stdlib/float_minmax_zero_order_test.almd", class = "fixture" },
+  { path = "spec/stdlib/float_signed_zero_sum_test.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-307"
 spec      = "ALS-T24"
@@ -4016,8 +3802,8 @@ since     = "0.58.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/float_to_int_edges.almd", class = "fixture" },
+  { path = "spec/stdlib/float_determinism_test.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-308"
 spec      = "ALS-B1"
@@ -4027,8 +3813,8 @@ since     = "0.60.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/bounded_kernel.almd", class = "fixture" },
+  { path = "spec/stdlib/bounded_profile_test.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-309"
 spec      = "ALS-B2"
@@ -4040,7 +3826,6 @@ evidence  = [
   { path = "spec/wasm_cross/bounded_kernel.almd", class = "fixture" },
   { path = "spec/wasm_cross/bounded_kernel_plain.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-310"
 spec      = "ALS-B3"
@@ -4053,7 +3838,6 @@ evidence  = [
   { path = "tests/diagnostics/e070-bounded-for-over-container/broken.almd", class = "fixture" },
   { path = "spec/stdlib/bounded_profile_test.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-311"
 spec      = "ALS-B4"
@@ -4065,7 +3849,6 @@ evidence  = [
   { path = "tests/diagnostics/e071-bounded-alloc-in-loop/broken.almd", class = "fixture" },
   { path = "spec/stdlib/bounded_profile_test.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-312"
 spec      = "ALS-B5"
@@ -4076,7 +3859,6 @@ status    = "active"
 evidence  = [
   { path = "tests/diagnostics/e072-bounded-break/broken.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-313"
 spec      = "ALS-B6"
@@ -4088,7 +3870,6 @@ evidence  = [
   { path = "tests/diagnostics/e073-bounded-recursion/broken.almd", class = "fixture" },
   { path = "spec/stdlib/bounded_profile_test.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-314"
 spec      = "ALS-B7"
@@ -4101,7 +3882,6 @@ evidence  = [
   { path = "tests/diagnostics/e074-bounded-higher-order/broken.almd", class = "fixture" },
   { path = "spec/stdlib/bounded_profile_test.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-315"
 spec      = "ALS-B8"
@@ -4112,7 +3892,6 @@ status    = "active"
 evidence  = [
   { path = "tests/diagnostics/e075-bounded-runtime-length-heap/broken.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-316"
 spec      = "ALS-B9"
@@ -4123,7 +3902,6 @@ status    = "active"
 evidence  = [
   { path = "tests/diagnostics/e076-bounded-effect-outside-capability/broken.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-317"
 spec      = "ALS-B10"
@@ -4134,7 +3912,6 @@ status    = "active"
 evidence  = [
   { path = "tests/diagnostics/e077-bounded-float-arithmetic/broken.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-318"
 spec      = "ALS-B11"
@@ -4146,7 +3923,6 @@ evidence  = [
   { path = "tests/diagnostics/e078-bounded-early-exit-in-loop/broken.almd", class = "fixture" },
   { path = "spec/stdlib/bounded_profile_test.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-321"
 spec      = "ALS-R3"
@@ -4158,7 +3934,6 @@ evidence  = [
   { path = "spec/wasm_cross/fan_prefetch_fs.almd", class = "fixture" },
   { path = "tests/component_p3_test.rs", class = "fixture", name = "p3_component_fan_prefetch_reads_concurrently" },
 ]
-
 [[contract]]
 id        = "C-322"
 spec      = "ALS-E27"
@@ -4170,7 +3945,6 @@ evidence  = [
   { path = "spec/wasm_cross/ctor_fn_value.almd", class = "fixture" },
   { path = "spec/lang/ctor_fn_value_test.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-323"
 spec      = "ALS-E18"
@@ -4183,7 +3957,6 @@ evidence  = [
   { path = "spec/lang/or_pattern_test.almd", class = "fixture" },
   { path = "tests/diagnostics/e080-or-pattern-binder/broken.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-324"
 spec      = "ALS-M13"
@@ -4195,7 +3968,6 @@ evidence  = [
   { path = "spec/wasm_cross/mut_param_branch_forward.almd", class = "fixture" },
   { path = "spec/wasm_cross/sql_highlight_tokens.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-325"
 spec      = "ALS-M13"
@@ -4206,7 +3978,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/bytes_push_growth.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-326"
 spec      = "ALS-M13"
@@ -4217,7 +3988,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/gzip_inflate_members.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-327"
 spec      = "ALS-R5"
@@ -4229,7 +3999,6 @@ evidence  = [
   { path = "spec/wasm_cross/env_sleep_pause.almd", class = "fixture" },
   { path = "spec/wasm_cross/availability_pure_batch.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-330"
 spec      = "ALS-R5"
@@ -4242,7 +4011,6 @@ evidence  = [
   { path = "tests/component_p3_test.rs", class = "fixture", name = "p3_component_speaks_framed_http" },
   { path = "tests/component_p3_test.rs", class = "fixture", name = "p3_http_transport_error_leaves_the_next_exchange_intact" },
 ]
-
 [[contract]]
 id        = "C-328"
 spec      = "ALS-R5"
@@ -4254,8 +4022,6 @@ evidence  = [
   { path = "spec/embedded_cross/http_client_errs.almd", class = "fixture" },
   { path = "spec/embedded_cross/http_framed_errs.almd", class = "fixture" },
 ]
-
-
 [[contract]]
 id        = "C-329"
 spec      = "ALS-R5"
@@ -4267,7 +4033,6 @@ evidence  = [
   { path = "spec/wasm_cross/env_set_overlay.almd", class = "fixture" },
   { path = "crates/almide-wasm/tests/wasi_services.rs", name = "hello_ships_no_environ_or_args_service", class = "by-construction" },
 ]
-
 [[contract]]
 id        = "C-331"
 spec      = "ALS-R5"
@@ -4278,7 +4043,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/zlib_selfhost.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-332"
 spec      = "ALS-E18"
@@ -4291,7 +4055,6 @@ evidence  = [
   { path = "spec/lang/list_rest_pattern_test.almd", class = "fixture" },
   { path = "tests/diagnostics/list-rest-not-last/broken.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-333"
 spec      = "ALS-E18"
@@ -4303,7 +4066,6 @@ evidence  = [
   { path = "spec/wasm_cross/as_pattern.almd", class = "fixture" },
   { path = "spec/lang/as_pattern_test.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-334"
 spec      = "ALS-I1"
@@ -4314,7 +4076,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/closure_borrowed_arg_guard.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-335"
 spec      = "ALS-R7"
@@ -4366,7 +4127,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/int_bit_family.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-339"
 spec      = "ALS-T18"
@@ -4414,7 +4174,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/bytes_copy_from_negative_len.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-343"
 spec      = "ALS-C5"
@@ -4425,7 +4184,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/tail_bang_over_declared_result_callee.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-344"
 spec      = "ALS-C5"
@@ -4436,7 +4194,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/guard_err_in_call_arg_block.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-345"
 spec      = "ALS-C5"
@@ -4447,7 +4204,6 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/result_param_not_first.almd", class = "fixture" },
 ]
-
 [[contract]]
 id        = "C-346"
 spec      = "ALS-C5"

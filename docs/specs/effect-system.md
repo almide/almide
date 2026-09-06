@@ -8,7 +8,9 @@ Almide's effect system enforces a hard boundary between pure computation and sid
 
 Every function in Almide is either **pure** (`fn`) or **effectful** (`effect fn`). The `effect` modifier is part of the function signature and propagates through the call graph.
 
-```
+```almide
+import fs
+
 fn add(a: Int, b: Int) -> Int = a + b
 
 effect fn read_config(path: String) -> Result[String, String] =
@@ -25,7 +27,9 @@ Test: `spec/lang/effect_fn_test.almd`
 
 A pure function cannot call an effect function. The compiler enforces this at every call site by checking the callee's `is_effect` flag against the caller's `can_call_effect` context.
 
-```
+```almide check-fail=E006
+import http
+
 effect fn fetch() -> Result[String, String] = http.get("https://example.com")
 
 // Compile error E006: cannot call effect function 'fetch' from a pure function
@@ -46,7 +50,7 @@ In the Rust target, `effect fn` return types are lifted to `Result[T, String]` d
 2. The body's tail expression is wrapped in `ok(...)`
 3. Already-Result return types (e.g., `-> Result[Int, String]`) are left unchanged
 
-```
+```almide
 // Source: returns String
 effect fn greet(name: String) -> String = "hello ${name}"
 
@@ -62,11 +66,11 @@ The type checker handles this flexibility through `constrain_effect_body`, which
 
 Test: `spec/lang/effect_fn_test.almd` -- `safe_div`, `require_positive`
 
-## 4. Auto-`?` Propagation and the `!` Operator
+## 4. Explicit Propagation: the `!` Operator
 
 Almide uses the `!` operator for explicit Result/Option unwrapping with error propagation. Inside an `effect fn`, `expr!` unwraps the value and propagates the error to the caller.
 
-```
+```almide
 effect fn add_strings(a: String, b: String) -> Result[Int, String] = {
   let x = int.parse(a)!   // unwrap or propagate err
   let y = int.parse(b)!
@@ -80,11 +84,20 @@ effect fn add_strings(a: String, b: String) -> Result[Int, String] = {
 
 **Codegen (`pass_result_propagation.rs`):** The `ResultPropagationPass` translates `!` into `?` (Rust's try operator). For match subjects, Try is **not** inserted -- you match on `ok`/`err` variants directly.
 
-```
+```almide
+fn require_positive(n: Int) -> Result[Int, String] =
+  if n > 0 then ok(n) else err("must be positive")
+
 effect fn classify(s: String) -> Result[String, String] = {
   let n = int.parse(s)!           // ! propagates parse error
   let valid = require_positive(n)! // ! propagates validation error
   ok(if valid > 100 then "big" else "small")
+}
+
+test "each ! is a propagation point" {
+  assert_eq(classify("500"), ok("big"))
+  assert_eq(classify("-1"), err("must be positive"))
+  assert_eq(classify("x"), err("invalid digit found in string"))
 }
 ```
 
@@ -98,9 +111,12 @@ Test: `spec/lang/effect_fn_test.almd` -- `parse_num`, `add_strings`, `double_par
 
 A `fan` block can only appear inside an `effect fn` or `test` block. Using `fan` in a pure `fn` produces error E007.
 
-```
+```almide check-fail=E007
+effect fn compute_a() -> Result[Int, String] = ok(1)
+effect fn compute_b() -> Result[Int, String] = ok(2)
+
 // Compile error E007: fan block can only be used inside an effect fn
-fn bad() -> (Int, Int) = fan { compute_a(); compute_b() }
+fn bad() -> (Int, Int) = fan { compute_a(), compute_b() }
 ```
 
 The same check applies to `fan.map()` and `fan.any()` calls via `static_dispatch.rs`.
@@ -109,11 +125,13 @@ The same check applies to `fan.map()` and `fan.any()` calls via `static_dispatch
 
 A `fan` block cannot capture `var` bindings from the enclosing scope. This prevents data races. Only `let` bindings may be captured.
 
-```
+```almide check-fail=E008
+effect fn use(n: Int) -> Result[Int, String] = ok(n)
+
 effect fn bad() -> Result[Unit, String] = {
   var count = 0
   // Compile error E008: cannot capture mutable variable 'count' inside fan block
-  let (a, b) = fan { use(count); use(count) }
+  let (a, b) = fan { use(count), use(count) }
   ok(())
 }
 ```
@@ -122,7 +140,10 @@ effect fn bad() -> Result[Unit, String] = {
 
 A `fan` ALL-block / `fan.settle` yields its tuple (no Result wrapper — nothing to unwrap). The Result-yielding forms (`fan.any`, the mappers, `fan.race`) follow ADR-0008: the Result is a VALUE, and a binding spells its propagation explicitly (`let v = fan.any { ... }!`). Test: `spec/wasm_cross/fan_any_early_winner.almd` and the fan fixtures migrated at the 0.55 switch.
 
-```
+```almide
+effect fn add(a: Int, b: Int) -> Result[Int, String] = ok(a + b)
+effect fn mul(a: Int, b: Int) -> Result[Int, String] = ok(a * b)
+
 effect fn example() -> Result[Unit, String] = {
   let (sum, product) = fan {
     add(3, 4)    // Result[Int, String] -> Int
@@ -132,6 +153,10 @@ effect fn example() -> Result[Unit, String] = {
   assert_eq(sum, 7)
   assert_eq(product, 12)
   ok(())
+}
+
+test "the tuple carries the unwrapped values" {
+  assert_eq(example(), ok(()))
 }
 ```
 
@@ -172,10 +197,15 @@ This means test blocks can:
 - Use `fan` blocks
 - Use the `!` operator for unwrapping
 
-```
-test "reads a file" {
-  let content = fs.read_text("test.txt")!
+```almide
+import fs
+
+effect fn load_config() -> Result[String, String] = ok("port=8080")
+
+test "calls effect functions directly" {
+  let content = load_config()!
   assert(string.len(content) > 0)
+  assert_eq(fs.exists("/nonexistent/almide-doctest"), false)
 }
 ```
 
@@ -187,18 +217,22 @@ Test: `spec/lang/effect_fn_test.almd` -- all test blocks call effect functions d
 
 Effect function signatures are preserved across module boundaries. When module A exports an `effect fn`, any module that imports A can call it -- but only from an effect context.
 
-```
-// effectlib module:
+```almide project
+// file: effectlib/mod.almd
 effect fn read_config() -> Result[String, String] = ok("config_value")
 fn pure_() -> String = "pure"
-
-// consumer:
+// file: main.almd
 import effectlib
 
 effect fn main() -> Unit = {
-  let config = effectlib.read_config()  // ok: effect context
+  let config = effectlib.read_config()!  // ok: effect context — the Result is a value, `!` propagates
   assert_eq(config, "config_value")
-  assert_eq(effectlib.pure_(), "pure")  // pure fn also callable
+  assert_eq(effectlib.pure_(), "pure")   // pure fn also callable
+}
+
+test "the imported effect fn keeps its signature" {
+  assert_eq(effectlib.read_config(), ok("config_value"))
+  assert_eq(effectlib.pure_(), "pure")
 }
 ```
 
@@ -237,13 +271,25 @@ The `EffectInferencePass` maps stdlib module usage to seven categories:
 
 After codegen, the compiler runs `EffectInferencePass` to compute per-function transitive effects (direct stdlib calls + effects from called functions, via fixpoint iteration). If any function uses a capability not listed in `allow`, the build fails with a capability violation error.
 
-```
-// almide.toml: allow = ["IO"]
+```almide project build-fail=capability
+// file: almide.toml
+[package]
+name = "permdemo"
+version = "0.1.0"
+
+[permissions]
+allow = ["IO"]
+// file: main.almd
+import http
+
 // This function uses Net (http.get) -> build error
 effect fn fetch() -> Result[String, String] = http.get("https://example.com")
 //   error: capability violation in `fetch`
 //     Net is not in [permissions].allow
 ```
+
+The gate runs after codegen: `almide check` and `almide test` accept the file,
+`almide build` refuses it.
 
 ### Design layers
 

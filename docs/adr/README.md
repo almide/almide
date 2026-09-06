@@ -57,3 +57,8 @@ ADR はその**決定に至る過程**（調査した証拠、比較した代替
 | [0010](./0010-option-type-shorthand.md) | T? is general Option shorthand — every type position, atom-tight binding, fmt-normalized | Accepted | 2026-08-06 |
 | [0011](./0011-execution-substrate-is-a-free-variable.md) | The execution substrate is a free variable — and one arm's output is the last hole in the determinism claim | Proposed | 2026-08-07 |
 | [0012](./0012-typed-error-refinement-in-the-marker.md) | Error-surface end state — refinement stays in the marker (`T!E`), erasure stays the default | Accepted | 2026-08-11 |
+| [0013](./0013-corpus-stays-id-keyed.md) | The conformance corpus stays contract-ID-keyed; semantic reorganization rejected, naming discipline gated | Accepted | 2026-08-20 |
+| [0014](./0014-expectations-are-derived.md) | Pinned expectations are machine-derived or absent — never hand-maintained | Accepted | 2026-08-20 |
+| [0015](./0015-reference-evaluator-is-fresh-source-level-python.md) | The reference evaluator is a fresh, source-level, judge-owned evaluator behind a black-box protocol — seeded by λ_almd, ratcheted by an abstain ledger (amended: Rust) | Accepted | 2026-08-21 |
+| [0016](./0016-numeric-determinism-is-normative.md) | Numeric determinism is one normative family, written once — not a property the targets happen to share | Accepted | 2026-08-21 |
+| [0017](./0017-flight-profile-is-a-normative-subset.md) | The bounded profile (née flight profile) is a normative subset of the language, specified here before any checker enforces it (amended at adjudication: `@bounded`, chapter `bounded.md`, prefix `B`) | Accepted | 2026-08-21 |

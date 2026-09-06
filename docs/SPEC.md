@@ -758,7 +758,7 @@ Runs expressions concurrently. Returns results as a tuple. Only valid inside `ef
 
 `fan` is a SCHEDULING construct, not a semantic one: execution may be parallel, but the
 program's observable behaviour is defined to be exactly that of sequential evaluation in
-list order. See [the concurrency stance](./roadmap/active/concurrency-stance.md).
+list order. See [the concurrency stance](https://github.com/almide/almide/blob/develop/docs/roadmap/active/concurrency-stance.md).
 
 Rules:
 - All siblings are joined — there is no cancellation. If any returns `Err`, the block's

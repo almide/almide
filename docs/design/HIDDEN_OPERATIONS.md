@@ -82,7 +82,7 @@ effect fn load() -> String = {
 外部ランタイムは存在しない。stdlib は self-hosted な純 Almide 実装
 （`stdlib/*.almd` → `crates/almide-types/src/self_host_registry.rs`）が
 ユーザコードと一緒に WAT へコンパイルされ、少数の手書き WAT プリアンブルと
-共にモジュールへ埋め込まれる。詳細: [WASM-OUTPUT.md](../wasm/WASM-OUTPUT.md)。
+共にモジュールへ埋め込まれる。詳細: [WASM-OUTPUT.md](https://github.com/almide/almide/blob/develop/docs/wasm/WASM-OUTPUT.md)。
 
 ---
 

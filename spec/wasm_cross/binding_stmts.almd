@@ -1,5 +1,5 @@
 // @contract: C-241
-// ALS-S1 (docs/specs/als/expressions.md): the binding statements — immutable
+// ALS-ST1 (docs/specs/als/expressions.md): the binding statements — immutable
 // `let` with SHADOWING (a new binding whose initializer sees the old one),
 // mutable `var` with type-fixed reassignment, assignment through control
 // flow, and block-scoped shadowing. The negative half is check-time and

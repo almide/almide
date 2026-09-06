@@ -1,5 +1,5 @@
 // @contract: C-266
-// ALS-S7 (docs/specs/als/expressions.md): the guard-let statement — bind
+// ALS-ST6 (docs/specs/als/expressions.md): the guard-let statement — bind
 // the Ok/Some payload and early-exit on the failing polarity. Both paths
 // pinned for a Result scrutinee: the parse succeeds (payload flows to the
 // tail) and it fails (the else err propagates to the caller, caught here by

@@ -1,4 +1,8 @@
 // @contract: C-167
+//   min/max; release 0.58.0 still implements the retired first-argument rule
+//   (the chapter itself declares its suite files red until the pin advances).
+//   The reference follows the ratified text; this directive tracks the min/max line
+//   and comes off when the implementation catches up.
 // `float.clamp` returns its INPUT — sign bit included — whenever the input is
 // already in range, so `clamp(-0.0, 0.0, hi)` is `-0.0` on both targets.
 //
@@ -20,7 +24,7 @@ fn main() -> Unit = {
   // NaN fails both comparisons and lands on the upper bound — the same result
   // the `fmin`/`fmax` form produced, so this is unchanged.
   println("${float.clamp(0.0 / 0.0, 0.0, 3.0)}")
-  // The neighbouring min/max follow IEEE-754-2019 zero ordering (C-049:
-  // max tie -> +0, min tie -> -0): this contract is about `clamp` alone.
+  // The neighbouring min/max keep their own (wasm-spec) zero behaviour: this
+  // contract is about `clamp` alone.
   println("${float.max(-0.0, 0.0)}:${float.min(-0.0, 0.0)}")
 }

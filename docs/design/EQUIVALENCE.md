@@ -30,8 +30,8 @@ Ledger mechanics:
 | [Cross-target fixture gate](../../tests/wasm_runtime_cross_target.rs) | every `spec/wasm_cross/*.almd` fixture runs on both targets; outputs byte-compared (`wasm_cross_target_spec`) |
 | [Differential fuzz](../../tests/regex_fuzz_test.rs) | randomized programs and inputs, native vs wasm outputs compared |
 | Emit-time Σ-probes | wasm Unicode/case tables exhaustively probed against Rust `std` over the full scalar domain at emit time |
-| [Lean 4 belt](../../crates/almide-perceus-belt) | RC-insertion correctness machine-checked by the Lean kernel |
-| [Org byte-verify sweep](../../scripts/org-byte-verify.sh) | every runnable repo in the almide org executed on both targets, stdout + exit byte-compared |
+| [Lean 4 belt](https://github.com/almide/almide/tree/develop/crates/almide-perceus-belt) | RC-insertion correctness machine-checked by the Lean kernel |
+| [Org byte-verify sweep](https://github.com/almide/almide/blob/develop/scripts/org-byte-verify.sh) | every runnable repo in the almide org executed on both targets, stdout + exit byte-compared |
 
 ## Verify it yourself
 
@@ -41,4 +41,4 @@ bash scripts/check-contracts.sh    # ledger integrity + claims-block freshness
 bash scripts/org-byte-verify.sh    # org-wide two-target byte comparison
 ```
 
-The v1 line strengthens this from "gates verify it" to "a proven checker re-verifies it on every build" — see [TRUST-SPINE.md](../TRUST-SPINE.md).
+The v1 line strengthens this from "gates verify it" to "a proven checker re-verifies it on every build" — see [TRUST-SPINE.md](https://github.com/almide/almide/blob/develop/docs/TRUST-SPINE.md).

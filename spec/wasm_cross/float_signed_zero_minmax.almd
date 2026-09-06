@@ -1,5 +1,4 @@
 // @contract: C-306, C-302
-// @ref-allow: ALS-T23 (ADR-0016, ratified 2026-08-21) orders ±0 as -0 < +0 in
 //   min/max; release 0.58.0 still implements the retired first-argument rule
 //   (the chapter itself declares its suite files red until the pin advances).
 //   The reference follows the ratified text; this directive tracks the ±0 order lines
