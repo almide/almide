@@ -4435,3 +4435,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/guard_err_in_call_arg_block.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-345"
+spec      = "ALS-C5"
+title     = "An effect call passed as a Result/Option parameter keeps its Result at every parameter index"
+statement = "When an effect fn call is the argument for a parameter declared `Result[..]` or `T?`, the callee receives the CARRIER (Ok/Err, some/none) on every leg, whatever the parameter's index: `show(\"a\", f(1))` with `show(tag: String, r: Result[Int, String])` prints `a=ok 1`, and `f(-1)` in the same position prints the Err. The auto-`?` desugar exempted only ARGUMENT 0 of a callee whose FIRST param is Result/Option (#558), so a Result param at index ≥ 1 had its effect-call argument unwrapped to the payload — native emitted `show(tag, f(1)?)` (rustc E0308, a build failure), the incumbent wasm leg failed validation (`expected i32, found i64`) and the structural leg walled `ty-mismatch` — an accepted program no leg could build (#1970). The exemption is a per-parameter flag derived from the signature table now, consulted at every argument index; the `result.*`/`option.*` intrinsic fallback still covers argument 0."
+since     = "0.63.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/result_param_not_first.almd", class = "fixture" },
+]
