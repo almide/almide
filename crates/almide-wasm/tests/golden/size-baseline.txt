@@ -386,6 +386,7 @@
 17405	spec/wasm_cross/matrix_select_rows_oob.almd
 11951	spec/wasm_cross/matrix_select_rows_q1_partial_block.almd
 10345	spec/wasm_cross/matrix_softmax_fastexp.almd
+!	spec/wasm_cross/matrix_zero_cols_rows.almd
 10627	spec/wasm_cross/memory_stress.almd
 7916	spec/wasm_cross/mg_rebuild_two_phase.almd
 2101	spec/wasm_cross/module_global_const.almd
