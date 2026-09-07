@@ -1,11 +1,13 @@
 diff --git a/crates/almide-wasm/src/exit_plan.rs b/crates/almide-wasm/src/exit_plan.rs
+index c60de10cc..28ad8c600 100644
 --- a/crates/almide-wasm/src/exit_plan.rs
 +++ b/crates/almide-wasm/src/exit_plan.rs
-@@ -127,7 +127,7 @@ impl Emitter<'_> {
+@@ -127,8 +127,7 @@ impl Emitter<'_> {
              if omit_first && k == 0 {
                  continue;
              }
--            self.f.instructions().local_get(idx).call(F_DEC_FLAT);
+-            let dec = self.dec_fn_of_local(idx);
+-            self.f.instructions().local_get(idx).call(dec);
 +            let _ = idx; // [MUTANT: exit releases dropped]
          }
          match plan.continuation {
