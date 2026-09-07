@@ -440,6 +440,9 @@ impl Emitter<'_> {
             8 => F_LIST_PUSH_8,
             _ => F_LIST_PUSH_4,
         };
+        // The Option's payload moves into the result as a SHARE: the Option
+        // temporary keeps (and releases) its own credit.
+        self.share_handle_top(b);
         self.f.instructions().call(push).local_set(hacc).end();
         self.hof_step(ih);
         self.f.instructions().local_get(hacc);

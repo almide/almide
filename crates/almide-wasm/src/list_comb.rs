@@ -299,6 +299,9 @@ impl Emitter<'_> {
             8 => F_LIST_PUSH_8,
             _ => F_LIST_PUSH_4,
         };
+        // The pushed element is a COPY of the source's handle: the result
+        // takes its share (#2010).
+        self.share_handle_top(elem);
         self.f.instructions().call(push).local_set(hacc);
         self.f.instructions().end();
         self.hof_step(ih);
@@ -407,6 +410,9 @@ impl Emitter<'_> {
             8 => F_LIST_PUSH_8,
             _ => F_LIST_PUSH_4,
         };
+        // The pushed element is a COPY of the source's handle: the result
+        // takes its share (#2010).
+        self.share_handle_top(elem);
         self.f.instructions().call(push).local_set(hacc);
         self.hof_step(ih);
         self.f.instructions().local_get(hacc);
