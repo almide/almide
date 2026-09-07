@@ -1,7 +1,18 @@
 # Stdlib fns whose bound result still grows the heap (B per call) — #2004 / #2005.
 # Shrink-only: a row may shrink or vanish, never grow or appear. ALMIDE_UPDATE_NATIVE_OWN=1 regenerates.
-list.join 32
+bytes.chunks 32
+bytes.lines 16
+bytes.split 32
+list.chunk 64
+list.enumerate 96
+list.window 64
+list.windows 64
+list.zip 96
+regex.find_all 16
 regex.replace 16
 regex.replace_first 16
-string.join 32
-url.encode_component 112
+regex.split 64
+string.chars 48
+string.lines 16
+string.split 32
+url.encode_component 48

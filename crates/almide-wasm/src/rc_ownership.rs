@@ -57,12 +57,15 @@ impl Emitter<'_> {
     pub(crate) fn rc_droppable(&self, t: SliceTy) -> bool {
         match t {
             SliceTy::Scalar(Scalar::Str | Scalar::Bytes) => true,
-            // A List of blocks is NOT droppable yet, not even its spine: the
-            // shallow-drop experiment (2026-09-08) diverged 40 corpus fixtures
-            // — spines ARE shared undeclared (codec / Value paths, the C-132
-            // buffer tuple, chunk/window/zip results). Stage 2 = that audit
-            // plus typed glue for the elements (#2010).
-            SliceTy::List(h) | SliceTy::Option(h) => self.flat_slot(self.types.el(h)),
+            // A List of ANY element (stage 2a): `$dec_flat` frees the SPINE
+            // only; the elements keep the credits they hold today. The
+            // shallow-drop experiment first diverged 40 corpus fixtures, and
+            // every one was one of two defects: `value.object` borrowed the
+            // spine it keeps (now Retain), and the matrix byte loaders trusted
+            // fresh memory to be zero (now filled). Releasing the elements is
+            // stage 2b: typed glue (#2010).
+            SliceTy::List(_) => true,
+            SliceTy::Option(h) => self.flat_slot(self.types.el(h)),
             SliceTy::Result(a, b) => self.flat_slot(self.types.el(a)) && self.flat_slot(self.types.el(b)),
             SliceTy::Tuple(h) => self.types.tuple_def(h).fields.iter().all(|&(t, _)| self.flat_slot(t)),
             // Records and variants wait for stage 1b: the `mut` param
