@@ -84,7 +84,12 @@ impl Emitter<'_> {
             // insertion order IS the block, exactly the interp's ordered
             // object model.
             ("object", [pairs]) => {
-                let got = self.lower_arg(pairs, None, ArgMode::Borrow)?;
+                // The Value KEEPS the pairs spine (its entries are read
+                // through it forever): retained, like `array`'s elements.
+                // Declared Borrow, a born-here literal was released under
+                // the object the moment list spines became droppable
+                // (`{"":null}` across the codec family, #2010 stage 2).
+                let got = self.lower_arg(pairs, None, ArgMode::Retain)?;
                 let SliceTy::List(h) = got else {
                     return Err(EmitError::Unsupported(format!("value.object-of:{got:?}")));
                 };
