@@ -33,8 +33,13 @@ LOGS_DIR     = File.join(SCRIPT_DIR, '.logs')
 CHEATSHEET   = File.expand_path(File.join(SCRIPT_DIR, '..', '..', '..', 'docs', 'CHEATSHEET.md'))
 NPM_BIN      = File.join(SCRIPT_DIR, '.npm-prefix', 'node_modules', '.bin')
 
-MODEL     = 'claude-sonnet-5'
-MODEL_TAG = 'sonnet5'
+# The model under test. Override per run: `MODEL=claude-fable-5-1 ruby runner_multi.rb …`.
+# The current roster (2026-09): claude-fable-5-1 (the Claude 5 flagship),
+# claude-opus-5, claude-sonnet-5 (the 2026-07-15 snapshot's model), and
+# claude-haiku-4-5-20251001 — a same-model comparison names exactly one of
+# these and the results carry MODEL_TAG in their file names.
+MODEL     = ENV.fetch('MODEL', 'claude-sonnet-5')
+MODEL_TAG = ENV.fetch('MODEL_TAG', MODEL.sub(/^claude-/, '').gsub(/-(\d{8})$/, '').delete('-'))
 
 ALMIDE_V1_PROMPT = <<~PROMPT.strip
   Implement minigit as described in SPEC-v1.txt using Almide.
