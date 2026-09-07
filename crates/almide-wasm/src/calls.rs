@@ -62,7 +62,7 @@ impl Emitter<'_> {
                     // release never runs, so it runs HERE (args are already
                     // +1'd by rc_arg_guard, so a pass-through param
                     // survives its own dec).
-                    self.emit_tail_param_release();
+                    self.emit_tail_param_release(true);
                     self.f.instructions().return_call_indirect(0, ti);
                 } else {
                     self.f.instructions().call_indirect(0, ti);
@@ -192,8 +192,10 @@ impl Emitter<'_> {
                 // constant stack for arbitrarily deep (incl. mutual)
                 // recursion, the C-292 contract.
                 if tail && ret.is_some() && ret == self.fn_ret {
-                    // Same frame-replacement release as the indirect site.
-                    self.emit_tail_param_release();
+                    // Same frame-replacement release as the indirect site —
+                    // unless the callee is THIS fn: tco.rs turns that
+                    // return_call into a loop-back, and the frame lives on.
+                    self.emit_tail_param_release(Some(index) != self.self_index);
                     self.f.instructions().return_call(index);
                 } else {
                     self.f.instructions().call(index);
@@ -542,16 +544,25 @@ impl Emitter<'_> {
     /// tail call replaces the frame and the epilogue never runs. The
     /// pending args on the wasm stack are unaffected ($dec_flat is
     /// stack-neutral), and rc_arg_guard has already +1'd borrowed args.
-    pub(crate) fn emit_tail_param_release(&mut self) {
-        // The frame is replaced, so the fall-through epilogue never runs:
-        // every owner it would have released is released HERE, in its
-        // order — the rc_owned locals first (a `{ let x = mk(n); take(x) }`
-        // tail leaked x on every call: 32 B, measured), then the droppable
-        // params not already among them (#1770: one release per local).
-        // Safe by the epilogue's own argument: the tail call's arguments
-        // are lowered and rc_arg_guard-inc'd already, rc_owned holds only
-        // flat blocks, and a local is never the tail call's result.
-        let owned = self.rc_owned.clone();
+    pub(crate) fn emit_tail_param_release(&mut self, replaces_frame: bool) {
+        // The tail site's releases. The droppable PARAMS always: their
+        // old values are gone after the jump — replaced by the callee's
+        // frame, or by the loop-back's `local.set`s (tco.rs). The
+        // rc_owned LOCALS only when the frame is truly replaced (#1988: a
+        // `{ let x = mk(n); take(x) }` tail leaked x on every call): on a
+        // self tail call the loop form keeps them alive and the next
+        // iteration's rebind (dec-old) or the epilogue releases them —
+        // releasing here too double-freed `t` in examples/lisp.almd's
+        // parse_list. Safe by the epilogue's own argument: the tail
+        // call's arguments are lowered and rc_arg_guard-inc'd already,
+        // rc_owned holds only flat blocks, and a local is never the tail
+        // call's result. Gated on the raw-address rule (#1988): a
+        // module-space or prim-using body keeps every release on the
+        // epilogue — a raw view into a local may still be read.
+        if !self.tail_release_allowed {
+            return;
+        }
+        let owned = if replaces_frame { self.rc_owned.clone() } else { Default::default() };
         for &idx in &owned {
             self.f.instructions().local_get(idx).call(F_DEC_FLAT);
         }

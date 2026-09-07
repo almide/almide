@@ -142,6 +142,7 @@ fn emit_program_pass(
             witness_name: Some(
                 qual.clone().unwrap_or_else(|| f.name.as_str().to_string()),
             ),
+            self_index: Some(table.infos[i].wasm_index),
         };
         match lower_fn(&params, plan, &f.body, &[], &ctx, &mut pool) {
             Ok(ok) => {
@@ -187,6 +188,7 @@ fn emit_program_pass(
         // so no entry charge — the 1002-unit ledger counts the callee's.
         metered: !meter.user.is_empty(),
         charge_entry: false,
+        self_index: None,
     };
     let (main_fn, main_calls) =
         lower_fn(&[], main_plan, &main.body, &init_lets, &ctx, &mut pool)?;
@@ -220,6 +222,7 @@ fn emit_program_pass(
                 // inline lowering they replace.
                 metered: !meter.user.is_empty(),
                 charge_entry: !meter.user.is_empty() && ll.charge_hop,
+                self_index: None,
             };
             let (f, calls) = lower_fn(&ll.params, plan, &ll.body, &[], &ctx, &mut pool)?;
             display_helper_calls

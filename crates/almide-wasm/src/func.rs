@@ -126,6 +126,13 @@ pub(crate) struct FnPlan {
     /// the straightline gate still decides; None = never (display
     /// helpers, lifted lambdas — later phases).
     pub(crate) witness_name: Option<String>,
+    /// This fn's own wasm index (program fns): a `return_call` to it is
+    /// LOOP-CONVERTED (tco.rs) — the frame is not replaced, so the
+    /// tail-site release covers the params only; the owned locals live
+    /// on into the next iteration and its rebind / the epilogue release
+    /// them (#1988: releasing them at the loop-back double-freed a Str
+    /// local in examples/lisp.almd's parse_list).
+    pub(crate) self_index: Option<u32>,
 }
 
 pub(crate) fn lower_fn(
@@ -136,8 +143,18 @@ pub(crate) fn lower_fn(
     ctx: &Ctx,
     pool: &mut Pool,
 ) -> Result<(Function, HashSet<usize>), EmitError> {
-    let FnPlan { ret, effect_raw, in_main, env_captures, cur_module, metered, charge_entry, var_space, witness_name } =
-        plan;
+    let FnPlan {
+        ret,
+        effect_raw,
+        in_main,
+        env_captures,
+        cur_module,
+        metered,
+        charge_entry,
+        var_space,
+        witness_name,
+        self_index,
+    } = plan;
     let cur_module = cur_module.as_deref();
     let env_shift: u32 = u32::from(env_captures.is_some());
     let mut locals: HashMap<VarId, (u32, SliceTy)> = HashMap::new();
@@ -249,6 +266,8 @@ pub(crate) fn lower_fn(
             locals: &locals,
             rc_param_ceiling: env_shift + params.len() as u32,
             rc_droppable_params: Vec::new(),
+            tail_release_allowed: false,
+            self_index,
             rc_owned: std::collections::BTreeSet::new(),
             table: ctx.table,
             types: ctx.types,
@@ -531,6 +550,7 @@ fn populate_tail_release_set(
     if cur_module.is_some() || env_shift != 0 || crate::rc_ownership::body_uses_prim(body) {
         return;
     }
+    em.tail_release_allowed = true;
     for (k, &(_, pty)) in params.iter().enumerate() {
         if em.rc_droppable(pty) {
             em.rc_droppable_params.push(env_shift + k as u32);
