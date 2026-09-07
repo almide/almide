@@ -35,6 +35,11 @@ class = "NEGATIVE_TESTED"
 evidence = "als #60 second-half landing (2026-09-07, almide #1982): a judge ledger with C-347 removed (ALS_LEDGER=<file>) went red naming the id and the remedy (land it in almide/als first, then advance proofs/als-pin.txt; ours 347, judge 346 at 12099f3), the live judge ledger at the pin green (347/347). A fetch failure is exit 2, red in CI — the gate cannot pass by not looking."
 
 [[gate]]
+path = "scripts/check-exit-sites.sh"
+class = "NEGATIVE_TESTED"
+evidence = "#1995 landing (2026-09-07): with the `emit_exit(&plan)` line removed from data.rs's raised-err exit the gate went red naming `data.rs:159 ends the frame without the ExitPlan renderer` with the five lines above it, restored green (9 frame exits). On its first run it found a third `return_call` site (lower_linked_call) that released nothing — pinned by `a_linked_tail_call_releases_the_frame`."
+
+[[gate]]
 path = "scripts/check-wasi-pins.sh"
 class = "NEGATIVE_TESTED"
 evidence = "#1628 stage-4 landing (2026-08-28): policy crate_major hand-flipped 47->48 went red naming the exact drifted pin (wasmtime Cargo pin is 47, policy says 48), restored green. The gate re-derives every fact the policy states from the tree per run — vendored WIT versions, the p3 shim's import versions, the wasmtime Cargo/CI pins, the p3 harness flag surface, the wasm-tools lockstep family — so the WASI-minor compat target is a checked ledger row, not an assumption."
