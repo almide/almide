@@ -193,7 +193,8 @@ impl Emitter<'_> {
                 if self.rc_droppable(want) && !self.rc_owned_result(ret_e, seq0) {
                     self.rc_inc_top();
                 }
-                self.emit_error_exit_release();
+                let plan = self.exit_plan(crate::exit_plan::Continuation::GuardReturn);
+                self.emit_exit(&plan);
                 self.f.instructions().return_();
             }
             // main / Unit fn: the else IS the return — evaluate it in
@@ -206,7 +207,8 @@ impl Emitter<'_> {
                 if !self.try_lower_main_err_carrier(else_)? {
                     self.lower_stmt_expr(else_)?;
                 }
-                self.emit_error_exit_release();
+                let plan = self.exit_plan(crate::exit_plan::Continuation::GuardReturn);
+                self.emit_exit(&plan);
                 self.f.instructions().return_();
             }
         }

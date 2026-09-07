@@ -17,28 +17,24 @@ pub(crate) struct Emitter<'a> {
     /// through a plain Bytes param are the caller-visibility contract
     /// (bytes_param_writeback), exactly the pre-share behavior.
     pub(crate) rc_param_ceiling: u32,
-    /// Local indices of the DROPPABLE params (env_shift applied) — the
-    /// epilogue's release set, ALSO released at return_call sites: a tail
-    /// call REPLACES the frame, so the epilogue never runs there and a
-    /// droppable param (a Str accumulator in TCO) leaked every hop
-    /// (spec/churn/string_accumulator_churn's grow_tco half OOM'd at the
-    /// commissioning). Args are +1'd by rc_arg_guard BEFORE this release,
-    /// so a pass-through param survives its own dec.
-    pub(crate) rc_droppable_params: Vec<u32>,
-    /// Whether a `return_call` site may release ANY owner (params and
-    /// rc_owned locals alike): the same raw-address rule that fills
-    /// `rc_droppable_params` (func.rs `populate_tail_release_set`) — an
-    /// entry fn whose body derives no raw pointer. A module-space or
-    /// prim-using body keeps every release on the (dead) epilogue, i.e.
+    /// Whether a `return_call` site may release ANY frame credit (params
+    /// and rc_owned locals alike): the raw-address rule (func.rs
+    /// `populate_tail_release_set`) — a body that derives no raw pointer.
+    /// A prim-using body keeps every release on the (dead) epilogue, i.e.
     /// leaks rather than frees a block a raw view may still read (#1988:
     /// releasing a display helper's Str local before its tail call
-    /// printed freelist bytes in examples/lisp.almd).
+    /// printed freelist bytes in examples/lisp.almd). Consumed by
+    /// exit_plan.rs only.
     pub(crate) tail_release_allowed: bool,
-    /// Every droppable PARAM local of this frame, raw-address rule or
-    /// not — the ERROR exits (`f()!` propagating, a raised `err(..)`)
-    /// release exactly what the epilogue would have (#1995 exit class:
-    /// the err path leaked the params and the owned locals, 128 B per
-    /// call in the credit probe).
+    /// Local indices of the DROPPABLE params (env_shift applied) — with
+    /// `rc_owned`, the frame's credits: every exit edge (exit_plan.rs)
+    /// partitions them into released ⊎ carried. A tail call REPLACES the
+    /// frame, so the epilogue never runs there and a droppable param (a
+    /// Str accumulator in TCO) leaked every hop before the tail-site
+    /// release (spec/churn/string_accumulator_churn's grow_tco half
+    /// OOM'd at the commissioning); the error and guard exits leaked
+    /// them until #2001. Args are +1'd by rc_arg_guard BEFORE a tail
+    /// release, so a pass-through param survives its own dec.
     pub(crate) rc_frame_params: Vec<u32>,
     /// This fn's own wasm index (see FnPlan::self_index).
     pub(crate) self_index: Option<u32>,
@@ -60,7 +56,7 @@ pub(crate) struct Emitter<'a> {
     pub(crate) module_call_seq: u32,
     pub(crate) module_call_stack: Vec<u32>,
     pub(crate) table_result_seq: Option<u32>,
-    // NOTE: rc_owned and rc_droppable_params are BOTH dec'd by the
+    // NOTE: rc_owned and rc_frame_params are BOTH dec'd by the
     // epilogue — a local in the two sets at once is a double free. Use
     // rc_own(), never a raw insert (#1770: a mut-param writeback's
     // Assign made the PARAM an "owner", the epilogue dec'd it twice,
