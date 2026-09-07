@@ -429,7 +429,7 @@
 66656	spec/wasm_cross/nested_tuples.almd
 75472	spec/wasm_cross/nested_unwrap_or_share.almd
 67152	spec/wasm_cross/nested_unwrap_propagation.almd
-66912	spec/wasm_cross/nested_variant_match_bind.almd
+66864	spec/wasm_cross/nested_variant_match_bind.almd
 66768	spec/wasm_cross/nested_variant_tag_box.almd
 66432	spec/wasm_cross/nested_variant_tree.almd
 65936	spec/wasm_cross/num_edge_to_string.almd
