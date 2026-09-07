@@ -400,7 +400,7 @@ impl Emitter<'_> {
     /// credit moves into the callee; a fresh temporary is born and moves.
     /// Non-droppable arguments have no RC site. Anything else under an
     /// armed recorder is a gate/hook disagreement — poison.
-    pub(crate) fn witness_arg(&mut self, e: &almide_ir::IrExpr, ty: SliceTy) {
+    pub(crate) fn witness_arg(&mut self, e: &almide_ir::IrExpr, ty: SliceTy, seq0: u32) {
         if self.witness.is_none() || !self.rc_droppable(ty) {
             return;
         }
@@ -409,7 +409,10 @@ impl Emitter<'_> {
         } else {
             None
         };
-        let fresh = crate::rc_ownership::rc_certainly_fresh(&e.kind);
+        // Mirrors rc_arg_guard exactly: an OWNED argument (fresh literal
+        // or a call result carrying its one credit) is born and moves
+        // (`im`); a Var shares and moves (`am`).
+        let fresh = self.rc_owned_result(e, seq0);
         let Some(w) = self.witness.as_mut() else { return };
         match src_local {
             Some(l) if w.arg_share_move(l) => {}
