@@ -11,7 +11,7 @@ use crate::*;
 impl Emitter<'_> {
     /// some(last) or none (native `xs.last().cloned()`).
     pub(crate) fn lower_list_last(&mut self, xs: &IrExpr) -> ArmResult {
-        let h = match self.lower(xs, None)? {
+        let h = match self.lower_arg(xs, None, ArgMode::Borrow)? {
             SliceTy::List(h) => h,
             other => return unsup(&format!("list-last-of:{other:?}")),
         };
@@ -40,7 +40,7 @@ impl Emitter<'_> {
     /// Sequential product (native: Int wrapping_mul fold from 1;
     /// Float `iter().product()` — the same left fold from 1.0).
     pub(crate) fn lower_list_product(&mut self, xs: &IrExpr) -> ArmResult {
-        let h = match self.lower(xs, None)? {
+        let h = match self.lower_arg(xs, None, ArgMode::Borrow)? {
             SliceTy::List(h) => h,
             other => return unsup(&format!("list-product-of:{other:?}")),
         };
@@ -89,7 +89,7 @@ impl Emitter<'_> {
 
     /// Concat of the inner lists, in order.
     pub(crate) fn lower_list_flatten(&mut self, xs: &IrExpr) -> ArmResult {
-        let h = match self.lower(xs, None)? {
+        let h = match self.lower_arg(xs, None, ArgMode::Borrow)? {
             SliceTy::List(h) => h,
             other => return unsup(&format!("list-flatten-of:{other:?}")),
         };
@@ -121,7 +121,7 @@ impl Emitter<'_> {
     /// Sequential sum (native: Int wrapping fold from 0; Float
     /// `iter().sum()` — the same left fold from 0.0).
     pub(crate) fn lower_list_sum(&mut self, xs: &IrExpr) -> ArmResult {
-        let h = match self.lower(xs, None)? {
+        let h = match self.lower_arg(xs, None, ArgMode::Borrow)? {
             SliceTy::List(h) => h,
             other => return unsup(&format!("list-sum-of:{other:?}")),
         };
@@ -171,7 +171,7 @@ impl Emitter<'_> {
     /// CONSECUTIVE dedup (native `r.last() != Some(x)` — unlike unique,
     /// only adjacent equals fold).
     pub(crate) fn lower_list_dedup(&mut self, xs: &IrExpr) -> ArmResult {
-        let h = match self.lower(xs, None)? {
+        let h = match self.lower_arg(xs, None, ArgMode::Borrow)? {
             SliceTy::List(h) => h,
             other => return unsup(&format!("list-dedup-of:{other:?}")),
         };
@@ -460,7 +460,7 @@ impl Emitter<'_> {
     ) -> ArmResult {
         let (params, body) = self.hof_lambda(cb, 2)?;
         let b_ty = self.infer(body)?;
-        self.lower(init, Some(b_ty))?;
+        self.lower_arg(init, Some(b_ty), ArgMode::Retain)?;
         self.f.instructions().local_set(params[0]);
         let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
         let hacc = self.hold_i32()?;
@@ -501,13 +501,13 @@ impl Emitter<'_> {
             }
             None => (Vec::new(), None),
         };
-        let ea = match self.lower(a, None)? {
+        let ea = match self.lower_arg(a, None, ArgMode::Borrow)? {
             SliceTy::List(h) => self.types.el(h),
             other => return unsup(&format!("list-zip-of:{other:?}")),
         };
         let ha = self.hold_i32()?;
         self.f.instructions().local_set(ha);
-        let eb = match self.lower(b, None)? {
+        let eb = match self.lower_arg(b, None, ArgMode::Borrow)? {
             SliceTy::List(h) => self.types.el(h),
             other => return unsup(&format!("list-zip-of:{other:?}")),
         };
@@ -592,7 +592,7 @@ impl Emitter<'_> {
 
     /// First-seen order dedup (native nested contains walk).
     pub(crate) fn lower_list_unique(&mut self, xs: &IrExpr) -> ArmResult {
-        let h = match self.lower(xs, None)? {
+        let h = match self.lower_arg(xs, None, ArgMode::Borrow)? {
             SliceTy::List(h) => h,
             other => return unsup(&format!("list-unique-of:{other:?}")),
         };
@@ -696,7 +696,7 @@ impl Emitter<'_> {
         xs: &IrExpr,
         sep: &IrExpr,
     ) -> ArmResult {
-        let h = match self.lower(xs, None)? {
+        let h = match self.lower_arg(xs, None, ArgMode::Borrow)? {
             SliceTy::List(h) => h,
             other => return unsup(&format!("list-intersperse-of:{other:?}")),
         };
@@ -704,7 +704,7 @@ impl Emitter<'_> {
         let stride = elem.slot_size() as i32;
         let hb = self.hold_i32()?;
         self.f.instructions().local_set(hb);
-        self.lower(sep, Some(elem))?;
+        self.lower_arg(sep, Some(elem), ArgMode::Borrow)?;
         let hx = self.hold_val(elem)?;
         self.f.instructions().local_set(hx);
         let hc = self.hold_i32()?;

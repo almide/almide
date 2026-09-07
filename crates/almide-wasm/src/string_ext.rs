@@ -28,7 +28,7 @@ impl Emitter<'_> {
             ("push", [v, x]) => self.lower_string_push(v, x),
             ("from_bytes", [xs]) => self.lower_string_from_bytes(xs),
             ("is_empty", [s]) => {
-                self.lower(s, Some(STR))?;
+                self.lower_arg(s, Some(STR), ArgMode::Borrow)?;
                 self.f.instructions().i32_load(len_memarg()).i32_eqz();
                 Ok(Some(Lowered::scalar(BOOL)))
             }
@@ -54,10 +54,10 @@ impl Emitter<'_> {
     /// reinterprets huge and takes the WHOLE string — deliberately not
     /// the C-054 clamp; cp_off clamps past-end.
     fn lower_string_take(&mut self, s: &IrExpr, n: &IrExpr) -> ArmResult {
-        self.lower(s, Some(STR))?;
+        self.lower_arg(s, Some(STR), ArgMode::Borrow)?;
         let hs = self.hold_i32()?;
         self.f.instructions().local_set(hs);
-        self.lower(n, Some(INT))?;
+        self.lower_arg(n, Some(INT), ArgMode::Borrow)?;
         let hn = self.hold_i64()?;
         let hoff = self.hold_i32()?;
         let hb = self.hold_i32()?;
@@ -88,10 +88,10 @@ impl Emitter<'_> {
     /// reinterprets huge and skips EVERYTHING — the deliberate
     /// mirror-asymmetry of take (whole vs empty).
     fn lower_string_drop(&mut self, s: &IrExpr, n: &IrExpr) -> ArmResult {
-        self.lower(s, Some(STR))?;
+        self.lower_arg(s, Some(STR), ArgMode::Borrow)?;
         let hs = self.hold_i32()?;
         self.f.instructions().local_set(hs);
-        self.lower(n, Some(INT))?;
+        self.lower_arg(n, Some(INT), ArgMode::Borrow)?;
         let hn = self.hold_i64()?;
         let hoff = self.hold_i32()?;
         let hb = self.hold_i32()?;
@@ -126,10 +126,10 @@ impl Emitter<'_> {
     /// Char i as a one-char string (native char_at): negative or
     /// past-end → none; cp_off clamps, so past-end IS off == len.
     fn lower_string_get(&mut self, s: &IrExpr, idx: &IrExpr) -> ArmResult {
-        self.lower(s, Some(STR))?;
+        self.lower_arg(s, Some(STR), ArgMode::Borrow)?;
         let hs = self.hold_i32()?;
         self.f.instructions().local_set(hs);
-        self.lower(idx, Some(INT))?;
+        self.lower_arg(idx, Some(INT), ArgMode::Borrow)?;
         let hn = self.hold_i64()?;
         let hoff = self.hold_i32()?;
         let hw = self.hold_i32()?;
@@ -187,7 +187,7 @@ impl Emitter<'_> {
             return unsup(&format!("string-push-of:{var_ty:?}"));
         }
         self.emit_read_mut_var(id, var_idx, var_ty, vglob);
-        self.lower(x, Some(STR))?;
+        self.lower_arg(x, Some(STR), ArgMode::Borrow)?;
         self.f.instructions().call(F_CONCAT);
         self.emit_store_mut_var(*id, var_idx, var_ty, vglob)?;
         Ok(None)
@@ -201,10 +201,10 @@ impl Emitter<'_> {
         p: &IrExpr,
         prefix: bool,
     ) -> ArmResult {
-        self.lower(s, Some(STR))?;
+        self.lower_arg(s, Some(STR), ArgMode::Borrow)?;
         let hs = self.hold_i32()?;
         self.f.instructions().local_set(hs);
-        self.lower(p, Some(STR))?;
+        self.lower_arg(p, Some(STR), ArgMode::Borrow)?;
         let hp = self.hold_i32()?;
         let hn = self.hold_i32()?;
         let hk = self.hold_i32()?;
@@ -268,10 +268,10 @@ impl Emitter<'_> {
         s: &IrExpr,
         prefix: &IrExpr,
     ) -> ArmResult {
-        self.lower(s, Some(STR))?;
+        self.lower_arg(s, Some(STR), ArgMode::Borrow)?;
         let hs = self.hold_i32()?;
         self.f.instructions().local_set(hs);
-        self.lower(prefix, Some(STR))?;
+        self.lower_arg(prefix, Some(STR), ArgMode::Borrow)?;
         let hp = self.hold_i32()?;
         let hn = self.hold_i32()?;
         let hk = self.hold_i32()?;
@@ -346,20 +346,20 @@ impl Emitter<'_> {
             // empty-pattern char-boundary rule (C-100) lives in the helper.
             ("replace" | "replace_first", [s, from, to]) => {
                 let first = func == "replace_first";
-                self.lower(s, Some(STR))?;
-                self.lower(from, Some(STR))?;
-                self.lower(to, Some(STR))?;
+                self.lower_arg(s, Some(STR), ArgMode::Borrow)?;
+                self.lower_arg(from, Some(STR), ArgMode::Borrow)?;
+                self.lower_arg(to, Some(STR), ArgMode::Borrow)?;
                 self.f.instructions().i32_const(i32::from(first)).call(F_STR_REPLACE);
                 Ok(Some(Lowered::owned(STR)))
             }
             // string.join(xs, sep) is list.join with the module spelled
             // the other way — same F_LIST_JOIN, same List[String] demand.
             ("join", [xs, sep]) => {
-                match self.lower(xs, None)? {
+                match self.lower_arg(xs, None, ArgMode::Borrow)? {
                     SliceTy::List(h) if self.types.el(h) == STR => {}
                     other => return unsup(&format!("string-join-of:{other:?}")),
                 }
-                self.lower(sep, Some(STR))?;
+                self.lower_arg(sep, Some(STR), ArgMode::Borrow)?;
                 self.f.instructions().call(F_LIST_JOIN);
                 Ok(Some(Lowered::owned(STR)))
             }
@@ -384,7 +384,7 @@ impl Emitter<'_> {
     ) -> Result<Option<Option<Lowered>>, EmitError> {
         let out: SliceTy = match (func, args) {
             ("message", [r]) => {
-                let got = self.lower(r, None)?;
+                let got = self.lower_arg(r, None, ArgMode::Borrow)?;
                 let SliceTy::Result(_, er) = got else {
                     return unsup(&format!("error-message-of:{got:?}"));
                 };
@@ -407,7 +407,7 @@ impl Emitter<'_> {
                 STR
             }
             ("context", [r, msg]) => {
-                let got = self.lower(r, None)?;
+                let got = self.lower_arg(r, None, ArgMode::Borrow)?;
                 let SliceTy::Result(ok_h, er) = got else {
                     return unsup(&format!("error-context-of:{got:?}"));
                 };
@@ -416,7 +416,7 @@ impl Emitter<'_> {
                 }
                 let hr = self.hold_i32()?;
                 self.f.instructions().local_set(hr);
-                self.lower(msg, Some(STR))?;
+                self.lower_arg(msg, Some(STR), ArgMode::Borrow)?;
                 let hm = self.hold_i32()?;
                 let sep = self.pool.intern(": ");
                 let hout = self.hold_i32()?;
@@ -448,10 +448,10 @@ impl Emitter<'_> {
                 SliceTy::Result(ok_h, er)
             }
             ("chain", [outer, cause]) => {
-                self.lower(outer, Some(STR))?;
+                self.lower_arg(outer, Some(STR), ArgMode::Borrow)?;
                 let sep = self.pool.intern("\ncaused by: ");
                 self.f.instructions().i32_const(sep as i32).call(F_CONCAT);
-                self.lower(cause, Some(STR))?;
+                self.lower_arg(cause, Some(STR), ArgMode::Borrow)?;
                 self.f.instructions().call(F_CONCAT);
                 STR
             }
@@ -469,10 +469,10 @@ impl Emitter<'_> {
         subject: &IrExpr,
         sep: &IrExpr,
     ) -> ArmResult {
-        self.lower(subject, Some(STR))?;
+        self.lower_arg(subject, Some(STR), ArgMode::Borrow)?;
         let h = self.hold_i32()?;
         self.f.instructions().local_set(h);
-        self.lower(sep, Some(STR))?;
+        self.lower_arg(sep, Some(STR), ArgMode::Borrow)?;
         let hs = self.hold_i32()?;
         self.f.instructions().local_set(hs);
         let sp = self.work.helper(Helper::StringSplit);

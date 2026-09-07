@@ -233,9 +233,13 @@ pub(crate) fn lower_fn(
     local_decls.push((HOLD_I32_POOL, ValType::I32));
     local_decls.push((HOLD_I64_POOL, ValType::I64));
     local_decls.push((HOLD_F64_POOL, ValType::F64));
+    // The borrow pool (arm.rs): borrowed argument temporaries, disjoint
+    // from the scratch pools an arm re-acquires mid-op.
+    let borrow_base = hold_f64_base + HOLD_F64_POOL;
+    local_decls.push((BORROW_POOL, ValType::I32));
     // Deferred-range (start, end) i64 pairs after the pools.
     let mut deferred_ranges: HashMap<VarId, (u32, u32, bool)> = HashMap::new();
-    let mut next_extra = hold_f64_base + HOLD_F64_POOL;
+    let mut next_extra = borrow_base + BORROW_POOL;
     // C-320 repair locals: depth-at-entry (i32).
     let region_depth_entry = if region_saved_var.is_some() {
         local_decls.push((1, ValType::I32));
@@ -270,6 +274,8 @@ pub(crate) fn lower_fn(
             self_index,
             rc_owned: std::collections::BTreeSet::new(),
             owned_call_marks: Default::default(),
+            borrowed_temps: Vec::new(),
+            borrow_base,
             table: ctx.table,
             types: ctx.types,
             calls: &mut calls,

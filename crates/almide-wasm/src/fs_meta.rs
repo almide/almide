@@ -361,7 +361,7 @@ impl Emitter<'_> {
             return self.lower_fs_fallible_fold_closure(p, init, cb, acc_ty);
         }
         let (params, body) = self.hof_lambda(cb, 2)?;
-        self.lower(init, Some(acc_ty))?;
+        self.lower_arg(init, Some(acc_ty), ArgMode::Retain)?;
         self.f.instructions().local_set(params[0]);
         self.fs_call_1(p, 12)?; // OP_READ_LINES
         let (hraw, hlen, herr) = self.fs_frames_or_err()?;
@@ -427,7 +427,7 @@ impl Emitter<'_> {
         cb: &IrExpr,
         acc_ty: SliceTy,
     ) -> Result<SliceTy, EmitError> {
-        let got = self.lower(cb, None)?;
+        let got = self.lower_arg(cb, None, ArgMode::Borrow)?;
         let SliceTy::Fn(sig) = got else {
             return unsup(&format!("fs-fallible-fold-callee-{got:?}"));
         };
@@ -442,7 +442,7 @@ impl Emitter<'_> {
         let hcl = self.hold_i32()?;
         self.f.instructions().local_set(hcl);
         let hacc = self.hold_for(acc_ty)?;
-        self.lower(init, Some(acc_ty))?;
+        self.lower_arg(init, Some(acc_ty), ArgMode::Retain)?;
         self.f.instructions().local_set(hacc);
         self.fs_call_1(p, 12)?; // OP_READ_LINES
         let (hraw, hlen, herr) = self.fs_frames_or_err()?;
@@ -520,7 +520,7 @@ impl Emitter<'_> {
     fn lower_fs_fallible_for_each(&mut self, p: &IrExpr, cb: &IrExpr) -> Result<SliceTy, EmitError> {
         let compound = body_propagates(cb);
         let (params, body, hcl, ti) = if compound {
-            let got = self.lower(cb, None)?;
+            let got = self.lower_arg(cb, None, ArgMode::Borrow)?;
             let SliceTy::Fn(sig) = got else {
                 return unsup(&format!("fs-fallible-each-callee-{got:?}"));
             };

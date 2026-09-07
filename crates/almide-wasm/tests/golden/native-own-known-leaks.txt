@@ -15,7 +15,6 @@ bytes.read_u16_be_array 16
 bytes.read_u16_le_array 16
 bytes.read_u32_be_array 16
 bytes.read_u32_le_array 16
-bytes.set 16
 error.chain 32
 float.to_fixed 8192
 float.to_string 4096

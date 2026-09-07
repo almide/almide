@@ -63,3 +63,72 @@ impl Lowered {
 
 /// The arm chain's return type: `None` is a Unit-position op.
 pub(crate) type ArmResult = Result<Option<Lowered>, crate::EmitError>;
+
+/// What an arm does with an ARGUMENT block — declared at the site that
+/// lowers it (the Koka / Lean borrow summary, per parameter, in code).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ArgMode {
+    /// The arm only reads the block: a temporary handed to it (a call
+    /// result, a born-here literal) is released after the op by the
+    /// wrapper — nobody else will.
+    Borrow,
+    /// The arm keeps the block (stores it into a container, returns it,
+    /// or keeps a raw pointer into it): a temporary's credit moves into
+    /// the arm's result; a Var is shared by the arm itself.
+    Retain,
+}
+
+impl crate::emitter::Emitter<'_> {
+    /// Lower one ARGUMENT of a module op under its declared mode. Under
+    /// `Borrow`, an owned temporary (`rc_owned_result`) is parked in a
+    /// borrow-pool local so the scope can release it once the op is done;
+    /// its value stays on the stack for the arm exactly as `lower` left
+    /// it.
+    pub(crate) fn lower_arg(
+        &mut self,
+        a: &almide_ir::IrExpr,
+        want: Option<SliceTy>,
+        mode: ArgMode,
+    ) -> Result<SliceTy, crate::EmitError> {
+        let got = self.lower(a, want)?;
+        // A string literal is a pool static (below the heap floor: $dec is
+        // a no-op on it) — nothing to release, and no reason to ship the
+        // rc core for a program that never allocates (#1962).
+        let is_static = matches!(a.kind, almide_ir::IrExprKind::LitStr { .. });
+        if mode == ArgMode::Borrow && !is_static && self.rc_droppable(got) && self.rc_owned_result(a) {
+            if self.borrowed_temps.len() as u32 >= crate::emitter::BORROW_POOL {
+                return Err(crate::EmitError::Unsupported("borrow-depth".into()));
+            }
+            let h = self.borrow_base + self.borrowed_temps.len() as u32;
+            self.f.instructions().local_tee(h);
+            self.borrowed_temps.push(h);
+        }
+        Ok(got)
+    }
+
+    /// The scope that pairs with `lower_arg`: run one arm entry (the
+    /// module-call wrapper, or a direct entry such as the slice / map-access
+    /// syntax and the print builtins) and release every temporary its arms
+    /// borrowed once its result is on the stack. Every route that reaches
+    /// an arm goes through here — a borrow with no scope is a hold-balance
+    /// BUG wall at the frame's end (func.rs), never a silent leak.
+    pub(crate) fn arm_scope<T>(
+        &mut self,
+        body: impl FnOnce(&mut Self) -> Result<T, crate::EmitError>,
+    ) -> Result<T, crate::EmitError> {
+        let depth = self.borrowed_temps.len();
+        let out = body(self)?;
+        self.release_borrowed_temps(depth);
+        Ok(out)
+    }
+
+    /// The scope's half: release every temporary the arms borrowed since
+    /// `depth`, in reverse order (the holds are the top of the pool now —
+    /// every hold an arm took inside has been released).
+    fn release_borrowed_temps(&mut self, depth: usize) {
+        while self.borrowed_temps.len() > depth {
+            let h = self.borrowed_temps.pop().unwrap();
+            self.f.instructions().local_get(h).call(crate::F_DEC_FLAT);
+        }
+    }
+}

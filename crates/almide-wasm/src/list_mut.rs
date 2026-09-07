@@ -106,7 +106,7 @@ impl Emitter<'_> {
                 };
                 let elem = self.types.el(h);
                 self.emit_read_mut_var_cow(id, var_idx, var_ty, vglob)?;
-                self.lower(v, Some(elem))?;
+                self.lower_arg(v, Some(elem), ArgMode::Retain)?;
                 self.rc_share_guard(v, elem);
                 // The 8-byte helper's value param is i64; an f64 element
                 // crosses the call boundary as its BIT PATTERN (memory is
@@ -133,7 +133,7 @@ impl Emitter<'_> {
             ("repeat", [x, n]) => {
                 let elem = self.infer(x)?;
                 let stride = elem.slot_size();
-                self.lower(x, Some(elem))?;
+                self.lower_arg(x, Some(elem), ArgMode::Retain)?;
                 // A repeated Map handle is n holders (#1219: the in-place
                 // window must see the share).
                 self.rc_map_value_share(x, elem);
@@ -159,7 +159,7 @@ impl Emitter<'_> {
                         Hx::I32(h)
                     }
                 };
-                self.lower(n, Some(INT))?;
+                self.lower_arg(n, Some(INT), ArgMode::Borrow)?;
                 let hn = self.hold_i64()?;
                 let hb = self.hold_i32()?;
                 let hc = self.hold_i32()?;
@@ -230,12 +230,12 @@ impl Emitter<'_> {
                 let Some(SliceTy::List(h)) = ret_hint else {
                     return unsup("list-with-capacity-no-hint");
                 };
-                self.lower(n, Some(INT))?;
+                self.lower_arg(n, Some(INT), ArgMode::Borrow)?;
                 self.f.instructions().drop().i32_const(0).call(F_ALLOC);
                 Ok(Some(Lowered::owned(SliceTy::List(h))))
             }
             ("is_empty", [xs]) => {
-                match self.lower(xs, None)? {
+                match self.lower_arg(xs, None, ArgMode::Borrow)? {
                     SliceTy::List(_) => {}
                     other => return unsup(&format!("list-is-empty-of:{other:?}")),
                 }

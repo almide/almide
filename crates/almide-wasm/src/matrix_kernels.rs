@@ -18,7 +18,7 @@ pub(crate) fn mat_elem() -> MemArg {
 impl Emitter<'_> {
     /// Lower a Matrix expr; returns (handle, rows i32, cols i32) holds.
     pub(crate) fn mat_open(&mut self, m: &IrExpr) -> Result<(u32, u32, u32), EmitError> {
-        match self.lower(m, None)? {
+        match self.lower_arg(m, None, ArgMode::Borrow)? {
             SliceTy::Matrix => {}
             other => return unsup(&format!("matrix-kernel-of:{other:?}")),
         }
@@ -70,7 +70,7 @@ impl Emitter<'_> {
         let (hm, hr, hc) = self.mat_open(m)?;
         let he = self.hold_f64()?;
         if let Some(e) = e_arg {
-            self.lower(e, Some(FLOAT))?;
+            self.lower_arg(e, Some(FLOAT), ArgMode::Borrow)?;
             self.f.instructions().local_set(he);
         }
         let target = if func == "gelu" {
@@ -201,13 +201,13 @@ impl Emitter<'_> {
         eps: &IrExpr,
     ) -> ArmResult {
         let (hm, hr, hc) = self.mat_open(m)?;
-        match self.lower(gamma, None)? {
+        match self.lower_arg(gamma, None, ArgMode::Borrow)? {
             SliceTy::List(h) if self.types.el(h) == FLOAT => {}
             other => return unsup(&format!("matrix-rms-gamma:{other:?}")),
         }
         let hg = self.hold_i32()?;
         self.f.instructions().local_set(hg);
-        self.lower(eps, Some(FLOAT))?;
+        self.lower_arg(eps, Some(FLOAT), ArgMode::Borrow)?;
         let heps = self.hold_f64()?;
         let hout_c = self.hold_i32()?;
         {

@@ -17,14 +17,14 @@ impl Emitter<'_> {
         xs: &IrExpr,
         idx: &IrExpr,
     ) -> ArmResult {
-        let h = match self.lower(xs, None)? {
+        let h = match self.lower_arg(xs, None, ArgMode::Borrow)? {
             SliceTy::List(h) => h,
             other => return unsup(&format!("list-remove-at-of:{other:?}")),
         };
         let stride = self.types.el(h).slot_size() as i32;
         let hb = self.hold_i32()?;
         self.f.instructions().local_set(hb);
-        self.lower(idx, Some(INT))?;
+        self.lower_arg(idx, Some(INT), ArgMode::Borrow)?;
         let hn = self.hold_i64()?;
         let hl = self.hold_i32()?;
         let hin = self.hold_i32()?;
@@ -73,7 +73,7 @@ impl Emitter<'_> {
     /// Fresh block, elements copied back-to-front (native `iter().rev()`);
     /// slot-width raw moves carry f64 bits and heap handles alike.
     pub(crate) fn lower_list_reverse(&mut self, xs: &IrExpr) -> ArmResult {
-        let h = match self.lower(xs, None)? {
+        let h = match self.lower_arg(xs, None, ArgMode::Borrow)? {
             SliceTy::List(h) => h,
             other => return unsup(&format!("list-reverse-of:{other:?}")),
         };
@@ -123,7 +123,7 @@ impl Emitter<'_> {
         idx: &IrExpr,
         v: &IrExpr,
     ) -> ArmResult {
-        let h = match self.lower(xs, None)? {
+        let h = match self.lower_arg(xs, None, ArgMode::Borrow)? {
             SliceTy::List(h) => h,
             other => return unsup(&format!("list-set-of:{other:?}")),
         };
@@ -132,10 +132,10 @@ impl Emitter<'_> {
         self.f.instructions().call(F_BLOCK_COPY);
         let hb = self.hold_i32()?;
         self.f.instructions().local_set(hb);
-        self.lower(idx, Some(INT))?;
+        self.lower_arg(idx, Some(INT), ArgMode::Borrow)?;
         let hn = self.hold_i64()?;
         self.f.instructions().local_set(hn);
-        self.lower(v, Some(et))?;
+        self.lower_arg(v, Some(et), ArgMode::Borrow)?;
         self.rc_map_value_share(v, et);
         enum Hv {
             I64(u32),
@@ -181,14 +181,14 @@ impl Emitter<'_> {
         xs: &IrExpr,
         n: &IrExpr,
     ) -> ArmResult {
-        let h = match self.lower(xs, None)? {
+        let h = match self.lower_arg(xs, None, ArgMode::Borrow)? {
             SliceTy::List(h) => h,
             other => return unsup(&format!("list-take-end-of:{other:?}")),
         };
         let stride = self.types.el(h).slot_size() as i32;
         let hb = self.hold_i32()?;
         self.f.instructions().local_set(hb);
-        self.lower(n, Some(INT))?;
+        self.lower_arg(n, Some(INT), ArgMode::Borrow)?;
         let hn = self.hold_i64()?;
         let hl = self.hold_i32()?;
         let hst = self.hold_i32()?;
@@ -232,14 +232,14 @@ impl Emitter<'_> {
         xs: &IrExpr,
         n: &IrExpr,
     ) -> ArmResult {
-        let h = match self.lower(xs, None)? {
+        let h = match self.lower_arg(xs, None, ArgMode::Borrow)? {
             SliceTy::List(h) => h,
             other => return unsup(&format!("list-drop-end-of:{other:?}")),
         };
         let stride = self.types.el(h).slot_size() as i32;
         let hb = self.hold_i32()?;
         self.f.instructions().local_set(hb);
-        self.lower(n, Some(INT))?;
+        self.lower_arg(n, Some(INT), ArgMode::Borrow)?;
         let hn = self.hold_i64()?;
         let hl = self.hold_i32()?;
         let hend = self.hold_i32()?;
@@ -279,7 +279,7 @@ impl Emitter<'_> {
         xs: &IrExpr,
         x: &IrExpr,
     ) -> ArmResult {
-        let h = match self.lower(xs, None)? {
+        let h = match self.lower_arg(xs, None, ArgMode::Borrow)? {
             SliceTy::List(h) => h,
             other => return unsup(&format!("list-index-of-of:{other:?}")),
         };
@@ -299,7 +299,7 @@ impl Emitter<'_> {
         let stride = elem.slot_size() as i32;
         let hb = self.hold_i32()?;
         self.f.instructions().local_set(hb);
-        self.lower(x, Some(elem))?;
+        self.lower_arg(x, Some(elem), ArgMode::Borrow)?;
         let hx = self.hold_val(elem)?;
         self.f.instructions().local_set(hx);
         let hc = self.hold_i32()?;
@@ -363,7 +363,7 @@ impl Emitter<'_> {
         cb: &IrExpr,
     ) -> ArmResult {
         let (params, body) = self.hof_lambda(cb, 1)?;
-        let h = match self.lower(xs, None)? {
+        let h = match self.lower_arg(xs, None, ArgMode::Borrow)? {
             SliceTy::List(h) => h,
             other => return unsup(&format!("list-update-of:{other:?}")),
         };
@@ -372,7 +372,7 @@ impl Emitter<'_> {
         self.f.instructions().call(F_BLOCK_COPY);
         let hb = self.hold_i32()?;
         self.f.instructions().local_set(hb);
-        self.lower(idx, Some(INT))?;
+        self.lower_arg(idx, Some(INT), ArgMode::Borrow)?;
         let hn = self.hold_i64()?;
         let ha = self.hold_i32()?;
         let mut i = self.f.instructions();
@@ -413,7 +413,7 @@ impl Emitter<'_> {
         ia: &IrExpr,
         ib: &IrExpr,
     ) -> ArmResult {
-        let h = match self.lower(xs, None)? {
+        let h = match self.lower_arg(xs, None, ArgMode::Borrow)? {
             SliceTy::List(h) => h,
             other => return unsup(&format!("list-swap-of:{other:?}")),
         };
@@ -421,10 +421,10 @@ impl Emitter<'_> {
         self.f.instructions().call(F_BLOCK_COPY);
         let hb = self.hold_i32()?;
         self.f.instructions().local_set(hb);
-        self.lower(ia, Some(INT))?;
+        self.lower_arg(ia, Some(INT), ArgMode::Borrow)?;
         let hi = self.hold_i64()?;
         self.f.instructions().local_set(hi);
-        self.lower(ib, Some(INT))?;
+        self.lower_arg(ib, Some(INT), ArgMode::Borrow)?;
         let hj = self.hold_i64()?;
         let hc = self.hold_i32()?;
         let hp = self.hold_i32()?;

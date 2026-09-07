@@ -59,7 +59,7 @@ impl Emitter<'_> {
     }
 
     fn lower_list_len_arm(&mut self, xs: &IrExpr) -> ArmResult {
-        let elem = match self.lower(xs, None)? {
+        let elem = match self.lower_arg(xs, None, ArgMode::Borrow)? {
             SliceTy::List(h) => self.types.el(h),
             other => return unsup(&format!("list-len-of:{other:?}")),
         };
@@ -73,11 +73,11 @@ impl Emitter<'_> {
     }
 
     fn lower_list_get_arm(&mut self, xs: &IrExpr, idx: &IrExpr) -> ArmResult {
-        let h = match self.lower(xs, None)? {
+        let h = match self.lower_arg(xs, None, ArgMode::Borrow)? {
             SliceTy::List(h) => h,
             other => return unsup(&format!("list-get-of:{other:?}")),
         };
-        self.lower(idx, Some(INT))?;
+        self.lower_arg(idx, Some(INT), ArgMode::Borrow)?;
         let helper = match self.types.el(h).slot_size() {
             8 => F_LIST_GET_8,
             _ => F_LIST_GET_4,
@@ -87,7 +87,7 @@ impl Emitter<'_> {
     }
 
     fn lower_list_first_arm(&mut self, xs: &IrExpr) -> ArmResult {
-        let elem = match self.lower(xs, None)? {
+        let elem = match self.lower_arg(xs, None, ArgMode::Borrow)? {
             SliceTy::List(h) => self.types.el(h),
             other => return unsup(&format!("list-first-of:{other:?}")),
         };
@@ -101,17 +101,17 @@ impl Emitter<'_> {
     }
 
     fn lower_list_join_arm(&mut self, xs: &IrExpr, sep: &IrExpr) -> ArmResult {
-        match self.lower(xs, None)? {
+        match self.lower_arg(xs, None, ArgMode::Borrow)? {
             SliceTy::List(h) if self.types.el(h) == STR => {}
             other => return unsup(&format!("list-join-of:{other:?}")),
         }
-        self.lower(sep, Some(STR))?;
+        self.lower_arg(sep, Some(STR), ArgMode::Borrow)?;
         self.f.instructions().call(F_LIST_JOIN);
         Ok(Some(Lowered::owned(STR)))
     }
 
     fn lower_list_enumerate(&mut self, xs: &IrExpr) -> ArmResult {
-        let elem = match self.lower(xs, None)? {
+        let elem = match self.lower_arg(xs, None, ArgMode::Borrow)? {
             SliceTy::List(h) => self.types.el(h),
             other => return unsup(&format!("list-enumerate-of:{other:?}")),
         };
@@ -191,17 +191,17 @@ impl Emitter<'_> {
     }
 
     fn lower_list_slice(&mut self, xs: &IrExpr, a: &IrExpr, b: &IrExpr) -> ArmResult {
-        let (h, elem) = match self.lower(xs, None)? {
+        let (h, elem) = match self.lower_arg(xs, None, ArgMode::Borrow)? {
             SliceTy::List(h) => (h, self.types.el(h)),
             other => return unsup(&format!("list-slice-of:{other:?}")),
         };
         let stride = elem.slot_size() as i64;
         let bh = self.hold_i32()?;
         self.f.instructions().local_set(bh);
-        self.lower(a, Some(INT))?;
+        self.lower_arg(a, Some(INT), ArgMode::Borrow)?;
         let ah = self.hold_i64()?;
         self.f.instructions().local_set(ah);
-        self.lower(b, Some(INT))?;
+        self.lower_arg(b, Some(INT), ArgMode::Borrow)?;
         let eh = self.hold_i64()?;
         // e = min(b, count); s = a; s < 0 or s >= e → []
         let mut ins = self.f.instructions();
@@ -332,7 +332,7 @@ impl Emitter<'_> {
     }
 
     fn lower_list_length_arm(&mut self, xs: &IrExpr) -> ArmResult {
-        match self.lower(xs, None)? {
+        match self.lower_arg(xs, None, ArgMode::Borrow)? {
             SliceTy::List(h) => {
                 let stride = self.types.el(h).slot_size() as i32;
                 self.f
@@ -540,7 +540,7 @@ impl Emitter<'_> {
         &mut self,
         xs: &IrExpr,
     ) -> Result<(SliceTy, u32, u32, u32), EmitError> {
-        let elem = match self.lower(xs, None)? {
+        let elem = match self.lower_arg(xs, None, ArgMode::Borrow)? {
             // Set is layout-identical; order-preserving HOFs apply as-is.
             SliceTy::List(h) | SliceTy::Set(h) => self.types.el(h),
             other => return unsup(&format!("list-hof-of:{other:?}")),
@@ -702,7 +702,7 @@ impl Emitter<'_> {
         let Some(b) = slice_ty_of(&init.ty, self.types) else {
             return unsup(&format!("list-fold-acc:{}", ty_name(&init.ty)));
         };
-        self.lower(init, Some(b))?;
+        self.lower_arg(init, Some(b), ArgMode::Retain)?;
         self.f.instructions().local_set(acc_p);
         let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
@@ -725,11 +725,11 @@ impl Emitter<'_> {
         idx: &IrExpr,
         default: &IrExpr,
     ) -> ArmResult {
-        let elem = match self.lower(xs, None)? {
+        let elem = match self.lower_arg(xs, None, ArgMode::Borrow)? {
             SliceTy::List(h) => self.types.el(h),
             other => return unsup(&format!("list-get-of:{other:?}")),
         };
-        self.lower(idx, Some(INT))?;
+        self.lower_arg(idx, Some(INT), ArgMode::Borrow)?;
         let helper = match elem.slot_size() {
             8 => F_LIST_GET_8,
             _ => F_LIST_GET_4,
@@ -743,7 +743,7 @@ impl Emitter<'_> {
         let hres = self.hold_i32()?;
         self.f.instructions().call(helper).local_set(hres);
         let hd = self.hold_for(elem)?;
-        self.lower(default, Some(elem))?;
+        self.lower_arg(default, Some(elem), ArgMode::Retain)?;
         self.f.instructions().local_set(hd);
         self.f.instructions().local_get(hres).i32_eqz().if_(BlockType::Result(elem.val_type()));
         self.f.instructions().local_get(hd);

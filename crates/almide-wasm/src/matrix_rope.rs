@@ -31,18 +31,18 @@ impl Emitter<'_> {
         let fsin = self.linked_math("math.sin")?;
         let fcos = self.linked_math("math.cos")?;
         let (hm, hr, hc) = self.mat_open(x)?;
-        self.lower(n_heads, Some(INT))?;
+        self.lower_arg(n_heads, Some(INT), ArgMode::Borrow)?;
         let hnh = self.hold_i64()?;
         self.f.instructions().local_set(hnh);
-        self.lower(head_dim, Some(INT))?;
+        self.lower_arg(head_dim, Some(INT), ArgMode::Borrow)?;
         let hhd = self.hold_i64()?;
         self.f.instructions().local_set(hhd);
-        self.lower(theta, Some(FLOAT))?;
+        self.lower_arg(theta, Some(FLOAT), ArgMode::Borrow)?;
         let hth = self.hold_f64()?;
         self.f.instructions().local_set(hth);
         let hst = self.hold_i64()?;
         if let Some(s) = start {
-            self.lower(s, Some(INT))?;
+            self.lower_arg(s, Some(INT), ArgMode::Borrow)?;
             let mut i = self.f.instructions();
             i.local_set(hst);
             i.i64_const(0).local_get(hst).local_get(hst).i64_const(0).i64_lt_s().select();
@@ -211,7 +211,7 @@ impl Emitter<'_> {
         let (hq, hsq, hdm) = self.mat_open(q)?;
         let (hk, hsk, hkc) = self.mat_open(k)?;
         let (hv, _hvr, hvc) = self.mat_open(v)?;
-        self.lower(n_heads, Some(INT))?;
+        self.lower_arg(n_heads, Some(INT), ArgMode::Borrow)?;
         let hnh = self.hold_i64()?;
         self.f.instructions().local_set(hnh);
         let count_msg = self.pool.intern("head count must be positive");

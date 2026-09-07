@@ -128,7 +128,7 @@ mod json_path_helpers;
 mod newtype;
 mod arg_temps;
 mod arm;
-pub(crate) use arm::{ArmResult, Lowered, Own};
+pub(crate) use arm::{ArgMode, ArmResult, Lowered, Own};
 mod exit_plan;
 mod fuel;
 mod ranges;
@@ -143,7 +143,7 @@ mod value_helpers;
 mod whitelist;
 
 use collect::collect_binds;
-use emitter::{HOLD_F64_POOL, HOLD_I32_POOL, HOLD_I64_POOL};
+use emitter::{BORROW_POOL, HOLD_F64_POOL, HOLD_I32_POOL, HOLD_I64_POOL};
 use runtime::*;
 use runtime_str::*;
 use types_table::TypeTable;

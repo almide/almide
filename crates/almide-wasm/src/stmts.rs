@@ -320,7 +320,7 @@ impl Emitter<'_> {
                     def_id: None,
                 };
                 let args = [var_expr, key.clone(), value.clone()];
-                self.lower_map_call("set", &args, None)?;
+                self.arm_scope(|em| em.lower_map_call("set", &args, None))?;
                 self.f.instructions().local_set(var_idx);
                 Ok(())
             }

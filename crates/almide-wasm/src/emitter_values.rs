@@ -184,7 +184,7 @@ impl Emitter<'_> {
                     span: e.span,
                     def_id: None,
                 };
-                match self.lower_map_call("from_list", &[pairs], Some(ty))? {
+                match self.arm_scope(|em| em.lower_map_call("from_list", &[pairs], Some(ty)))? {
                     Some(t) => Ok(t.ty),
                     None => unsup("map-literal-unit"),
                 }
