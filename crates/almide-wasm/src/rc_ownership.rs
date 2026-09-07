@@ -57,6 +57,11 @@ impl Emitter<'_> {
     pub(crate) fn rc_droppable(&self, t: SliceTy) -> bool {
         match t {
             SliceTy::Scalar(Scalar::Str | Scalar::Bytes) => true,
+            // A List of blocks is NOT droppable yet, not even its spine: the
+            // shallow-drop experiment (2026-09-08) diverged 40 corpus fixtures
+            // — spines ARE shared undeclared (codec / Value paths, the C-132
+            // buffer tuple, chunk/window/zip results). Stage 2 = that audit
+            // plus typed glue for the elements (#2010).
             SliceTy::List(h) | SliceTy::Option(h) => self.flat_slot(self.types.el(h)),
             SliceTy::Result(a, b) => self.flat_slot(self.types.el(a)) && self.flat_slot(self.types.el(b)),
             SliceTy::Tuple(h) => self.types.tuple_def(h).fields.iter().all(|&(t, _)| self.flat_slot(t)),
