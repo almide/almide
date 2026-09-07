@@ -127,6 +127,9 @@ pub(crate) fn emit_bytes_to_string_helper(inv_pre: u32, inv_mid: u32, inc_pre: u
     // valid: ok(b) — the block is immutable, sharing is unobservable
     i.i32_const(16).call(F_ALLOC).local_tee(r);
     i.i32_const(0).i32_store(m_tag);
+    // The Result HOLDS the block: +1 (its typed drop releases it, and the
+    // caller's own release of the bytes is independent — #2010 stage 2c).
+    i.local_get(b).call(F_INC);
     i.local_get(r).local_get(b).i32_store(m_pay);
     i.local_get(r);
     i.end();
