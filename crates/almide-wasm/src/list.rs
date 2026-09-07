@@ -410,6 +410,12 @@ impl Emitter<'_> {
             self.f.instructions().local_set(hacc);
         }
         self.hof_step(ih);
+        // Handle elements were COPIED through the concats: the result takes
+        // one credit per element (the intermediate spines leak, never
+        // dangle — fuzz 20260912: a callback returning a captured list).
+        if !matches!(self.types.el(bi), SliceTy::Scalar(Scalar::Int | Scalar::Float)) {
+            self.emit_inc_elems(hacc, self.types.el(bi));
+        }
         self.f.instructions().local_get(hacc);
         for _ in 0..5 {
             self.release_i32();
