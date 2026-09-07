@@ -1,24 +1,26 @@
-//! #2004 — the argument-temporary class: a droppable value PRODUCED BY A
-//! CALL and consumed directly as an argument of a module op
-//! (`string.len(int.to_string(i))`) had no owner. The table path is
-//! covered by the callee-owned convention (an owned argument moves into
-//! the callee, `rc_arg_guard`); the NATIVE arms — `string.len`,
-//! `list.len`, the contains / index / sum family, the in-place map and
-//! list mutators — read or store the block and never spend its credit,
-//! so every such temporary stayed at rc 1 forever (16 B per call in the
-//! credit probe; 80 B for a two-concat line).
+//! #2004 — the argument-temporary class, LANGUAGE-CONSTRUCT half: a
+//! droppable value produced by a call or born in the expression (a
+//! literal list, an interpolation, an inner concat) and consumed directly
+//! by a binary op, a `for … in`, a `match`, an index, or an interpolation
+//! (`xs + [4]`, `a + b + c`, `for c in string.chars(s)`) had no owner.
+//! The consumer reads the block and never spends its credit, so every
+//! such temporary stayed at rc 1 forever.
 //!
-//! The fix is at the IR, before lowering: every such argument is BOUND
+//! The fix is at the IR, before lowering: every such operand is BOUND
 //! first — `op(f(x))` becomes `{ let t = f(x); op(t) }` — so the Bind
 //! route owns the temporary (its one credit, #1986) and the frame's exit
-//! plan releases it exactly as it releases any other local. The native
-//! arm then sees a plain Var, the argument shape every arm already
-//! handles (a retaining arm shares it; a reading arm borrows it).
+//! plan releases it exactly as it releases any other local.
 //!
-//! Hoisting keeps the arguments' relative order (binds in argument order,
-//! then the call). A hoisted argument is a non-effect call — an effect
+//! The MODULE-OP half is not here: an argument of a native arm is lowered
+//! under the mode the arm DECLARES at the site (`lower_arg`, arm.rs
+//! `ArgMode::Borrow | Retain`), and the wrapper releases what a Borrow
+//! left behind. There is no list of "reader ops" anywhere — the gate
+//! scripts/check-arm-args.sh refuses an undeclared argument.
+//!
+//! Hoisting keeps the operands' relative order (binds in operand order,
+//! then the consumer). A hoisted operand is a non-effect call — an effect
 //! call arrives wrapped in `Try`/`Unwrap` and is left alone — so the
-//! evaluation order change against the non-hoisted arguments (Vars,
+//! evaluation order change against the non-hoisted operands (Vars,
 //! literals, reads) is unobservable.
 
 use almide_base::intern::sym;
@@ -89,36 +91,6 @@ fn is_produced_by_call(e: &IrExpr) -> bool {
     )
 }
 
-/// A module op that only READS its droppable arguments — binding an
-/// argument to a reader is always sound (the frame owns the temporary,
-/// the arm borrows a Var). A RETAINER — a container insert, a push, a
-/// constructor that keeps the block — adopts a fresh temporary as-is
-/// today, and would need a share for a Var it did not get: `set.insert
-/// (h, "s" + …)` with the key bound freed the key under the set
-/// (map_set_index_threshold printed stale keys). Retainers stay on the
-/// old path: their arguments are not bound here. Koka / Lean carry this
-/// as a per-primitive borrow summary; this is that summary, by module
-/// for the copy-semantics modules and by name for `list`.
-fn reader_op(module: &str, func: &str) -> bool {
-    match module {
-        // Strings, bytes and scalars copy what they read; nothing they
-        // return holds an argument block.
-        "string" | "bytes" | "int" | "float" | "math" | "base64" | "url" | "datetime" | "int8"
-        | "int16" | "int32" | "int64" | "uint8" | "uint16" | "uint32" | "uint64" | "float32"
-        | "float64" => true,
-        // List readers over scalar elements (a droppable list argument
-        // is a List of scalars — no element block can be retained).
-        "list" => matches!(
-            func,
-            "len" | "length" | "sum" | "product" | "contains" | "join" | "min" | "max"
-                | "is_empty" | "index_of" | "count" | "all" | "any" | "reverse" | "take"
-                | "drop" | "slice" | "sort" | "map" | "filter" | "first" | "last" | "get"
-                | "get_or" | "head" | "tail" | "zip" | "enumerate" | "fold" | "reduce"
-        ),
-        _ => false,
-    }
-}
-
 /// The value an expression evaluates to, through block wrappers.
 fn tail_of(e: &IrExpr) -> &IrExpr {
     match &e.kind {
@@ -147,12 +119,6 @@ impl IrMutVisitor for Binder<'_> {
     fn visit_expr_mut(&mut self, e: &mut IrExpr) {
         walk_expr_mut(self, e);
         let operands: Vec<&mut IrExpr> = match &mut e.kind {
-            IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } => {
-                if !reader_op(module.as_str(), func.as_str()) {
-                    return;
-                }
-                args.iter_mut().collect()
-            }
             // A binary op over droppable operands — concatenation, or an
             // equality / ordering test on strings and lists — reads both
             // and consumes neither.

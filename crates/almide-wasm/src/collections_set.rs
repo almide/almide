@@ -52,13 +52,13 @@ impl Emitter<'_> {
         a: &IrExpr,
         b: &IrExpr,
     ) -> ArmResult {
-        let e = match self.lower(a, None)? {
+        let e = match self.lower_arg(a, None, ArgMode::Borrow)? {
             SliceTy::Set(h) => self.types.el(h),
             other => return unsup(&format!("set-op-of:{other:?}")),
         };
         let ah = self.hold_i32()?;
         self.f.instructions().local_set(ah);
-        match self.lower(b, None)? {
+        match self.lower_arg(b, None, ArgMode::Borrow)? {
             SliceTy::Set(h) if self.types.el(h) == e => {}
             other => return unsup(&format!("set-algebra-of:{other:?}")),
         }
@@ -169,13 +169,13 @@ impl Emitter<'_> {
     /// is_subset: every member of a found in b; is_disjoint: none.
     fn lower_set_relation(&mut self, func: &str, a: &IrExpr, b: &IrExpr) -> ArmResult {
         let want_found = i32::from(func == "is_subset");
-        let e = match self.lower(a, None)? {
+        let e = match self.lower_arg(a, None, ArgMode::Borrow)? {
             SliceTy::Set(h) => self.types.el(h),
             other => return unsup(&format!("set-op-of:{other:?}")),
         };
         let ah = self.hold_i32()?;
         self.f.instructions().local_set(ah);
-        match self.lower(b, None)? {
+        match self.lower_arg(b, None, ArgMode::Borrow)? {
             SliceTy::Set(h) if self.types.el(h) == e => {}
             other => return unsup(&format!("set-rel-of:{other:?}")),
         }
@@ -220,7 +220,7 @@ impl Emitter<'_> {
 
     /// remove: the set minus one member (a plain copy when absent).
     fn lower_set_remove(&mut self, s: &IrExpr, x: &IrExpr) -> ArmResult {
-        let (sh, _xh, eh, e) = self.set_scan(s, x)?;
+        let (sh, _xh, eh, e) = self.set_scan(s, x, ArgMode::Borrow)?;
         let stride = e.slot_size() as i32;
         let ho = self.hold_i32()?;
         let hp = self.hold_i32()?;
@@ -267,13 +267,13 @@ impl Emitter<'_> {
     /// (a - b) ++ (b - a): the two filters are DISJOINT, so the
     /// concatenation is already deduped.
     fn lower_set_symdiff(&mut self, a: &IrExpr, b: &IrExpr) -> ArmResult {
-        let e = match self.lower(a, None)? {
+        let e = match self.lower_arg(a, None, ArgMode::Borrow)? {
             SliceTy::Set(h) => self.types.el(h),
             other => return unsup(&format!("set-op-of:{other:?}")),
         };
         let ah = self.hold_i32()?;
         self.f.instructions().local_set(ah);
-        match self.lower(b, None)? {
+        match self.lower_arg(b, None, ArgMode::Borrow)? {
             SliceTy::Set(h) if self.types.el(h) == e => {}
             other => return unsup(&format!("set-symdiff-of:{other:?}")),
         }
@@ -341,7 +341,7 @@ impl Emitter<'_> {
     /// Transform + first-seen dedup (a set stays a set).
     fn lower_set_hof_map(&mut self, s: &IrExpr, cb: &IrExpr) -> ArmResult {
         let (params, body) = self.hof_lambda(cb, 1)?;
-        let e = match self.lower(s, None)? {
+        let e = match self.lower_arg(s, None, ArgMode::Borrow)? {
             SliceTy::Set(h) => self.types.el(h),
             other => return unsup(&format!("set-map-of:{other:?}")),
         };
@@ -400,15 +400,18 @@ impl Emitter<'_> {
         Ok(Some(Lowered::owned(SliceTy::Set(self.types.intern(b_ty)))))
     }
 
-    fn set_scan(&mut self, s: &IrExpr, x: &IrExpr) -> Result<(u32, u32, u32, SliceTy), EmitError> {
-        let e = match self.lower(s, None)? {
+    /// The shared probe: `x_mode` is what the CALLER does with the
+    /// element afterwards — `insert` stores it (Retain), `contains` and
+    /// `remove` only compare (Borrow).
+    fn set_scan(&mut self, s: &IrExpr, x: &IrExpr, x_mode: ArgMode) -> Result<(u32, u32, u32, SliceTy), EmitError> {
+        let e = match self.lower_arg(s, None, ArgMode::Borrow)? {
             SliceTy::Set(h) => self.types.el(h),
             other => return unsup(&format!("set-op-of:{other:?}")),
         };
         let sh = self.hold_i32()?;
         self.f.instructions().local_set(sh);
         let xh = self.hold_for(e)?;
-        self.lower(x, Some(e))?;
+        self.lower_arg(x, Some(e), x_mode)?;
         self.f.instructions().local_set(xh);
         let scan = self.keyed_find(e)?;
         let eh = self.hold_i32()?;
@@ -442,7 +445,7 @@ impl Emitter<'_> {
                 Ok(Some(Lowered::owned(ty)))
             }
             ("len", [s]) => {
-                let e = match self.lower(s, None)? {
+                let e = match self.lower_arg(s, None, ArgMode::Borrow)? {
                     SliceTy::Set(h) => self.types.el(h),
                     other => return unsup(&format!("set-op-of:{other:?}")),
                 };
@@ -456,7 +459,7 @@ impl Emitter<'_> {
             }
             // #1423 stage 4: is_empty = the len slot at zero (stride-free).
             ("is_empty", [s]) => {
-                if !matches!(self.lower(s, None)?, SliceTy::Set(..)) {
+                if !matches!(self.lower_arg(s, None, ArgMode::Borrow)?, SliceTy::Set(..)) {
                     return unsup("set-op-of:non-set");
                 }
                 self.f.instructions().i32_load(len_memarg()).i32_eqz();
@@ -465,14 +468,14 @@ impl Emitter<'_> {
             ("to_list", [s]) => {
                 // Layout-identical; sharing the base is unobservable
                 // (no in-place list/set mutation exists, binds deep-copy).
-                let e = match self.lower(s, None)? {
+                let e = match self.lower_arg(s, None, ArgMode::Retain)? {
                     SliceTy::Set(h) => self.types.el(h),
                     other => return unsup(&format!("set-op-of:{other:?}")),
                 };
                 Ok(Some(Lowered::view(SliceTy::List(self.types.intern(e)))))
             }
             ("contains", [s, x]) => {
-                let (_sh, _xh, eh, e) = self.set_scan(s, x)?;
+                let (_sh, _xh, eh, e) = self.set_scan(s, x, ArgMode::Borrow)?;
                 self.f.instructions().local_get(eh).i32_const(0).i32_ne();
                 self.release_i32(); // eh
                 self.release_for(e);
@@ -480,7 +483,7 @@ impl Emitter<'_> {
                 Ok(Some(Lowered::scalar(BOOL)))
             }
             ("insert", [s, x]) => {
-                let (sh, xh, eh, e) = self.set_scan(s, x)?;
+                let (sh, xh, eh, e) = self.set_scan(s, x, ArgMode::Retain)?;
                 self.f
                     .instructions()
                     .local_get(eh)
@@ -517,9 +520,9 @@ impl Emitter<'_> {
                 let Some(b) = slice_ty_of(&init.ty, self.types) else {
                     return unsup(&format!("set-fold-acc:{}", ty_name(&init.ty)));
                 };
-                self.lower(init, Some(b))?;
+                self.lower_arg(init, Some(b), ArgMode::Retain)?;
                 self.f.instructions().local_set(acc_p);
-                let e = match self.lower(s, None)? {
+                let e = match self.lower_arg(s, None, ArgMode::Borrow)? {
                     SliceTy::Set(h) => self.types.el(h),
                     other => return unsup(&format!("set-fold-of:{other:?}")),
                 };
@@ -557,7 +560,7 @@ impl Emitter<'_> {
                 Ok(Some(Lowered::view(b)))
             }
             ("from_list", [xs]) => {
-                let e = match self.lower(xs, None)? {
+                let e = match self.lower_arg(xs, None, ArgMode::Retain)? {
                     SliceTy::List(h) => self.types.el(h),
                     other => return unsup(&format!("set-from-of:{other:?}")),
                 };

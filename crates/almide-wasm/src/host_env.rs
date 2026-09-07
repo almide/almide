@@ -243,7 +243,7 @@ impl Emitter<'_> {
                 Some(Lowered::owned(STR))
             }
             ("io", "write", [b]) => {
-                self.lower(b, Some(SliceTy::Scalar(Scalar::Bytes)))?;
+                self.lower_arg(b, Some(SliceTy::Scalar(Scalar::Bytes)), ArgMode::Borrow)?;
                 self.io_stdout_raw()?;
                 None
             }
@@ -252,7 +252,7 @@ impl Emitter<'_> {
             // the always-ok unit carrier: print has no failure channel,
             // but the effect ABI still hands the caller a Result block.
             ("io", "print", [s]) => {
-                self.lower(s, Some(STR))?;
+                self.lower_arg(s, Some(STR), ArgMode::Borrow)?;
                 self.io_stdout_raw()?;
                 let hb = self.hold_i32()?;
                 {
@@ -276,7 +276,7 @@ impl Emitter<'_> {
             // [0, i32::MAX]), the i64 status dropped, then the always-ok
             // unit carrier io.print builds (#1423 bucket A).
             ("env", "sleep_ms", [ms]) => {
-                self.lower(ms, Some(INT))?;
+                self.lower_arg(ms, Some(INT), ArgMode::Borrow)?;
                 let hm = self.hold_i64()?;
                 self.note_host_op(crate::fs_meta::OP_SLEEP_MS);
                 {
@@ -319,7 +319,7 @@ impl Emitter<'_> {
             }
             // List[Int] → low bytes, then the same raw sink.
             ("io", "write_bytes", [xs]) => {
-                match self.lower(xs, None)? {
+                match self.lower_arg(xs, None, ArgMode::Borrow)? {
                     SliceTy::List(h) if self.types.el(h) == INT => {}
                     other => return unsup(&format!("io-write-bytes-of:{other:?}")),
                 }
@@ -351,7 +351,7 @@ impl Emitter<'_> {
             // n <= 0 → []; else read up to n stdin bytes (harness: none)
             // and decode one i64 slot per byte.
             ("io", "read_n_bytes", [n]) => {
-                self.lower(n, Some(INT))?;
+                self.lower_arg(n, Some(INT), ArgMode::Borrow)?;
                 let hn = self.hold_i64()?;
                 let mut i = self.f.instructions();
                 i.local_set(hn);

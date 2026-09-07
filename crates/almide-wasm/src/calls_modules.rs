@@ -26,7 +26,11 @@ impl Emitter<'_> {
         // node so the bind / assign / return / argument routes take no
         // borrow +1 (`rc_owned_result`). A `View` or a `Scalar` marks
         // nothing. There is no list and no default: the arm said.
-        let lowered = self.lower_module_call_dispatch(target, args, tail, ret_hint)?;
+        // The arguments' half of the declaration (arm.rs `ArgMode`): the
+        // scope releases every temporary an arm only BORROWED once the op
+        // is done and its result sits on the stack ($dec_flat is
+        // stack-neutral).
+        let lowered = self.arm_scope(|em| em.lower_module_call_dispatch(target, args, tail, ret_hint))?;
         Ok(lowered.map(|l| {
             if l.own == Own::Owned && self.rc_droppable(l.ty) {
                 self.mark_owned_call(target);
@@ -59,7 +63,7 @@ impl Emitter<'_> {
                 // `process.exit` executes on any target).
                 match args.first() {
                     Some(a) => {
-                        self.lower(a, Some(INT))?;
+                        self.lower_arg(a, Some(INT), ArgMode::Borrow)?;
                         self.f.instructions().i32_wrap_i64();
                     }
                     None => {
@@ -72,7 +76,7 @@ impl Emitter<'_> {
             CallTarget::Module { module, func, .. }
                 if module.as_str() == "int" && func.as_str() == "to_string" && args.len() == 1 =>
             {
-                self.lower(&args[0], Some(INT))?;
+                self.lower_arg(&args[0], Some(INT), ArgMode::Borrow)?;
                 self.f.instructions().call(F_INT_TO_STRING);
                 // A fresh block at rc 1 — declared owned (#2004: the bind
                 // route's borrow +1 left every `int.to_string` temporary at
@@ -86,10 +90,10 @@ impl Emitter<'_> {
                     && args.len() == 2 =>
             {
                 let is_max = func.as_str() == "max";
-                self.lower(&args[0], Some(INT))?;
+                self.lower_arg(&args[0], Some(INT), ArgMode::Borrow)?;
                 let ha = self.hold_i64()?;
                 self.f.instructions().local_set(ha);
-                self.lower(&args[1], Some(INT))?;
+                self.lower_arg(&args[1], Some(INT), ArgMode::Borrow)?;
                 let hb = self.hold_i64()?;
                 let mut i = self.f.instructions();
                 i.local_set(hb);
@@ -112,7 +116,7 @@ impl Emitter<'_> {
             CallTarget::Module { module, func, .. }
                 if module.as_str() == "int" && func.as_str() == "to_float" && args.len() == 1 =>
             {
-                self.lower(&args[0], Some(INT))?;
+                self.lower_arg(&args[0], Some(INT), ArgMode::Borrow)?;
                 self.f.instructions().f64_convert_i64_s();
                 Ok(Some(Lowered::scalar(FLOAT)))
             }
@@ -121,14 +125,14 @@ impl Emitter<'_> {
                     && matches!(func.as_str(), "len" | "length")
                     && args.len() == 1 =>
             {
-                self.lower(&args[0], Some(STR))?;
+                self.lower_arg(&args[0], Some(STR), ArgMode::Borrow)?;
                 self.f.instructions().call(F_STR_LEN_CHARS);
                 Ok(Some(Lowered::scalar(INT)))
             }
             CallTarget::Module { module, func, .. }
                 if module.as_str() == "json" && func.as_str() == "stringify" && args.len() == 1 =>
             {
-                self.lower(&args[0], Some(SliceTy::Value))?;
+                self.lower_arg(&args[0], Some(SliceTy::Value), ArgMode::Borrow)?;
                 self.emit_value_stringify()?;
                 Ok(Some(Lowered::owned(STR)))
             }
@@ -137,7 +141,7 @@ impl Emitter<'_> {
                     && func.as_str() == "stringify_pretty"
                     && args.len() == 1 =>
             {
-                self.lower(&args[0], Some(SliceTy::Value))?;
+                self.lower_arg(&args[0], Some(SliceTy::Value), ArgMode::Borrow)?;
                 self.emit_value_stringify_pretty()?;
                 Ok(Some(Lowered::owned(STR)))
             }
@@ -147,10 +151,10 @@ impl Emitter<'_> {
                     && args.len() == 3 =>
             {
                 let h = self.work.helper(crate::work::Helper::JsonPathSet);
-                self.lower(&args[0], Some(SliceTy::Value))?;
-                self.lower(&args[1], None)?;
+                self.lower_arg(&args[0], Some(SliceTy::Value), ArgMode::Retain)?;
+                self.lower_arg(&args[1], None, ArgMode::Borrow)?;
                 self.f.instructions().i32_const(0);
-                self.lower(&args[2], Some(SliceTy::Value))?;
+                self.lower_arg(&args[2], Some(SliceTy::Value), ArgMode::Retain)?;
                 self.f.instructions().call(h);
                 // ok(v) — the surface is Result[Value, String], always ok.
                 let hv = self.tmp_i32_local;
@@ -180,8 +184,8 @@ impl Emitter<'_> {
                     && args.len() == 2 =>
             {
                 let h = self.work.helper(crate::work::Helper::JsonPathRemove);
-                self.lower(&args[0], Some(SliceTy::Value))?;
-                self.lower(&args[1], None)?;
+                self.lower_arg(&args[0], Some(SliceTy::Value), ArgMode::Borrow)?;
+                self.lower_arg(&args[1], None, ArgMode::Borrow)?;
                 self.f.instructions().i32_const(0);
                 self.f.instructions().call(h);
                 Ok(Some(Lowered::owned(SliceTy::Value)))
@@ -213,7 +217,7 @@ impl Emitter<'_> {
                 // semantics under the eager name (#1906). The receiver
                 // still lowers first (its side effects come first in source
                 // order); the default lands in a held local of its type.
-                let got = self.lower(&args[0], None)?;
+                let got = self.lower_arg(&args[0], None, ArgMode::Borrow)?;
                 let (et, is_option) = match got {
                     SliceTy::Option(h) => (self.types.el(h), true),
                     SliceTy::Result(o, _) => (self.types.el(o), false),
@@ -222,7 +226,7 @@ impl Emitter<'_> {
                 self.f.instructions().local_set(self.scr_i32_local);
                 let hrecv = self.hold_i32()?;
                 self.f.instructions().local_get(self.scr_i32_local).local_set(hrecv);
-                self.lower(&args[1], Some(et))?;
+                self.lower_arg(&args[1], Some(et), ArgMode::Retain)?;
                 let hdef = match et.val_type() {
                     ValType::I64 => self.hold_i64()?,
                     ValType::F64 => self.hold_f64()?,
@@ -333,10 +337,10 @@ impl Emitter<'_> {
                     && func.as_str() == "slice"
                     && (args.len() == 2 || args.len() == 3) =>
             {
-                self.lower(&args[0], Some(STR))?;
-                self.lower(&args[1], Some(INT))?;
+                self.lower_arg(&args[0], Some(STR), ArgMode::Borrow)?;
+                self.lower_arg(&args[1], Some(INT), ArgMode::Borrow)?;
                 if let Some(e) = args.get(2) {
-                    self.lower(e, Some(INT))?;
+                    self.lower_arg(e, Some(INT), ArgMode::Borrow)?;
                 } else {
                     // the surface's `end` default: i64::MAX ("to the end")
                     self.f.instructions().i64_const(i64::MAX);
@@ -347,8 +351,8 @@ impl Emitter<'_> {
             CallTarget::Module { module, func, .. }
                 if module.as_str() == "string" && func.as_str() == "repeat" && args.len() == 2 =>
             {
-                self.lower(&args[0], Some(STR))?;
-                self.lower(&args[1], Some(INT))?;
+                self.lower_arg(&args[0], Some(STR), ArgMode::Borrow)?;
+                self.lower_arg(&args[1], Some(INT), ArgMode::Borrow)?;
                 self.f.instructions().call(F_STR_REPEAT);
                 Ok(Some(Lowered::owned(STR)))
             }

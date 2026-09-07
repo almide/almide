@@ -51,6 +51,16 @@ pub(crate) struct Emitter<'a> {
     /// through any `{ let t = …; op(t) }` wrapping (arg_temps.rs) and any
     /// nesting, where a completion-order stamp was not.
     pub(crate) owned_call_marks: std::collections::HashSet<usize>,
+    /// Temporaries the arms of the module call being lowered BORROWED
+    /// (`lower_arg`, arm.rs): released by the enclosing `arm_scope`. Each
+    /// entry is a local of the BORROW pool — disjoint from the scratch
+    /// pools, because an arm releases and re-acquires scratch holds
+    /// between the argument's lowering and the op's end (a hold taken
+    /// there would land on the temporary's slot: fs_write_errno's
+    /// `rename` decremented its own Result block, 2026-09-07).
+    pub(crate) borrowed_temps: Vec<u32>,
+    /// First local of the borrow pool (`BORROW_POOL` i32 slots).
+    pub(crate) borrow_base: u32,
     // NOTE: rc_owned and rc_frame_params are BOTH dec'd by the
     // epilogue — a local in the two sets at once is a double free. Use
     // rc_own(), never a raw insert (#1770: a mut-param writeback's
@@ -138,6 +148,9 @@ pub(crate) struct Emitter<'a> {
 pub(crate) const HOLD_I32_POOL: u32 = 24;
 pub(crate) const HOLD_I64_POOL: u32 = 16;
 pub(crate) const HOLD_F64_POOL: u32 = 8;
+/// Borrowed argument temporaries in flight (arm.rs `lower_arg`): one per
+/// droppable call-result argument of the module calls currently nested.
+pub(crate) const BORROW_POOL: u32 = 8;
 
 impl Emitter<'_> {
     pub(crate) fn hold_i32(&mut self) -> Result<u32, EmitError> {
@@ -411,7 +424,7 @@ impl Emitter<'_> {
                 // The slice SYNTAX `xs[a..b]` desugars to this runtime
                 // symbol — one impl with `list.slice` (as in native rt).
                 if symbol.as_str() == "almide_rt_list_slice" && args.len() == 3 {
-                    match self.lower_list_call("slice", args, None)? {
+                    match self.arm_scope(|em| em.lower_list_call("slice", args, None))? {
                         Some(t) => t.ty,
                         None => return unsup("rt:list-slice-unit"),
                     }
@@ -574,7 +587,7 @@ impl Emitter<'_> {
             // (the interp's map_lookup contract).
             IrExprKind::MapAccess { object, key } => {
                 let args = [(**object).clone(), (**key).clone()];
-                match self.lower_map_call("get", &args, want)? {
+                match self.arm_scope(|em| em.lower_map_call("get", &args, want))? {
                     Some(t) => t.ty,
                     None => return unsup("map-access-void"),
                 }

@@ -23,7 +23,7 @@ impl Emitter<'_> {
             // f64::signum: ±1 by SIGN BIT (so sign(-0) = -1, sign(+0) = 1),
             // NaN stays NaN.
             ("float", "sign", [n]) => {
-                self.lower(n, Some(FLOAT))?;
+                self.lower_arg(n, Some(FLOAT), ArgMode::Borrow)?;
                 let h = self.hold_f64()?;
                 let mut i = self.f.instructions();
                 i.local_set(h);
@@ -40,7 +40,7 @@ impl Emitter<'_> {
             // C-210: NaN OBSERVATION IS CANONICAL — to_bits collapses every
             // NaN to 0x7FF8000000000000; non-NaN bits stay raw.
             ("float", "to_bits", [x]) => {
-                self.lower(x, Some(FLOAT))?;
+                self.lower_arg(x, Some(FLOAT), ArgMode::Borrow)?;
                 let h = self.hold_f64()?;
                 let mut i = self.f.instructions();
                 i.local_set(h);
@@ -57,14 +57,14 @@ impl Emitter<'_> {
             // The smuggling door C-210 tolerates: bits go in RAW (payload
             // NaNs live internally; only observation canonicalizes).
             ("int", "bits_to_float", [x]) => {
-                self.lower(x, Some(INT))?;
+                self.lower_arg(x, Some(INT), ArgMode::Borrow)?;
                 self.f.instructions().f64_reinterpret_i64();
                 Some(Lowered::scalar(FLOAT))
             }
             // IEEE-754 requires sqrt correctly rounded: wasm f64.sqrt and
             // Rust's `f64::sqrt` are the SAME function, bit for bit.
             ("math" | "float", "sqrt", [x]) => {
-                self.lower(x, Some(FLOAT))?;
+                self.lower_arg(x, Some(FLOAT), ArgMode::Borrow)?;
                 self.f.instructions().f64_sqrt();
                 Some(Lowered::scalar(FLOAT))
             }
@@ -77,7 +77,7 @@ impl Emitter<'_> {
             // `n as f64` IS f64.convert_i64_s (IEEE round-to-nearest-even)
             // — int.to_float with the module spelled the other way.
             ("float" | "float64", "from_int", [n]) | ("int", "to_float64", [n]) => {
-                self.lower(n, Some(INT))?;
+                self.lower_arg(n, Some(INT), ArgMode::Borrow)?;
                 self.f.instructions().f64_convert_i64_s();
                 Some(Lowered::scalar(FLOAT))
             }
@@ -87,12 +87,12 @@ impl Emitter<'_> {
             }
             // f64.ceil is IEEE-exact on both targets.
             ("float", "ceil", [x]) => {
-                self.lower(x, Some(FLOAT))?;
+                self.lower_arg(x, Some(FLOAT), ArgMode::Borrow)?;
                 self.f.instructions().f64_ceil();
                 Some(Lowered::scalar(FLOAT))
             }
             ("float", "is_infinite", [x]) => {
-                self.lower(x, Some(FLOAT))?;
+                self.lower_arg(x, Some(FLOAT), ArgMode::Borrow)?;
                 let mut i = self.f.instructions();
                 i.f64_abs().f64_const(f64::INFINITY.into()).f64_eq();
                 let _ = i;
@@ -101,7 +101,7 @@ impl Emitter<'_> {
             // Branchless (x ^ (x>>63)) - (x>>63): i64::MIN stays i64::MIN,
             // the release-build native wrap.
             ("int", "abs", [n]) => {
-                self.lower(n, Some(INT))?;
+                self.lower_arg(n, Some(INT), ArgMode::Borrow)?;
                 let h = self.hold_i64()?;
                 let hm = self.hold_i64()?;
                 let mut i = self.f.instructions();
@@ -129,13 +129,13 @@ impl Emitter<'_> {
         hi: &IrExpr,
     ) -> Result<SliceTy, EmitError> {
         let want = if is_int { INT } else { FLOAT };
-        self.lower(n, Some(want))?;
+        self.lower_arg(n, Some(want), ArgMode::Borrow)?;
         let hn = if is_int { self.hold_i64()? } else { self.hold_f64()? };
         self.f.instructions().local_set(hn);
-        self.lower(lo, Some(want))?;
+        self.lower_arg(lo, Some(want), ArgMode::Borrow)?;
         let hlo = if is_int { self.hold_i64()? } else { self.hold_f64()? };
         self.f.instructions().local_set(hlo);
-        self.lower(hi, Some(want))?;
+        self.lower_arg(hi, Some(want), ArgMode::Borrow)?;
         let hhi = if is_int { self.hold_i64()? } else { self.hold_f64()? };
         let msg = self.pool.intern("Error: clamp requires min <= max");
         {
@@ -194,10 +194,10 @@ impl Emitter<'_> {
         a: &IrExpr,
         b: &IrExpr,
     ) -> Result<SliceTy, EmitError> {
-        self.lower(a, Some(FLOAT))?;
+        self.lower_arg(a, Some(FLOAT), ArgMode::Borrow)?;
         let ha = self.hold_f64()?;
         self.f.instructions().local_set(ha);
-        self.lower(b, Some(FLOAT))?;
+        self.lower_arg(b, Some(FLOAT), ArgMode::Borrow)?;
         let hb = self.hold_f64()?;
         let mut i = self.f.instructions();
         i.local_set(hb);
@@ -259,8 +259,8 @@ impl Emitter<'_> {
     ) -> ArmResult {
         match (func, args) {
             ("band" | "bor" | "bxor" | "bshl" | "bshr", [a, b]) => {
-                self.lower(a, Some(INT))?;
-                self.lower(b, Some(INT))?;
+                self.lower_arg(a, Some(INT), ArgMode::Borrow)?;
+                self.lower_arg(b, Some(INT), ArgMode::Borrow)?;
                 let mut i = self.f.instructions();
                 match func {
                     "band" => i.i64_and(),
@@ -276,30 +276,30 @@ impl Emitter<'_> {
             // bxor(n, -1)`, `to_u32(n) = n & 0xFFFFFFFF`, `to_u8(n) =
             // n & 0xFF`, low bits zero-extended).
             ("bnot", [a]) => {
-                self.lower(a, Some(INT))?;
+                self.lower_arg(a, Some(INT), ArgMode::Borrow)?;
                 self.f.instructions().i64_const(-1).i64_xor();
                 Ok(Some(Lowered::scalar(INT)))
             }
             ("to_u32", [a]) => {
-                self.lower(a, Some(INT))?;
+                self.lower_arg(a, Some(INT), ArgMode::Borrow)?;
                 self.f.instructions().i64_const(0xFFFF_FFFF).i64_and();
                 Ok(Some(Lowered::scalar(INT)))
             }
             ("to_u8", [a]) => {
-                self.lower(a, Some(INT))?;
+                self.lower_arg(a, Some(INT), ArgMode::Borrow)?;
                 self.f.instructions().i64_const(0xFF).i64_and();
                 Ok(Some(Lowered::scalar(INT)))
             }
             ("wrap_add" | "wrap_mul", [a, b, bits]) => {
                 let mul = func == "wrap_mul";
-                self.lower(a, Some(INT))?;
-                self.lower(b, Some(INT))?;
+                self.lower_arg(a, Some(INT), ArgMode::Borrow)?;
+                self.lower_arg(b, Some(INT), ArgMode::Borrow)?;
                 if mul {
                     self.f.instructions().i64_mul();
                 } else {
                     self.f.instructions().i64_add();
                 }
-                self.lower(bits, Some(INT))?;
+                self.lower_arg(bits, Some(INT), ArgMode::Borrow)?;
                 let hb = self.hold_i64()?;
                 let mut i = self.f.instructions();
                 i.local_set(hb);

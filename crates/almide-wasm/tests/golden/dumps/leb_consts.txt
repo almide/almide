@@ -196,7 +196,7 @@ code locals=[]
 code locals=[]
   Unreachable
   End
-code locals=[1xI64,1xI64,3xI32,1xI64,1xF64,24xI32,16xI64,8xF64]
+code locals=[1xI64,1xI64,3xI32,1xI64,1xF64,24xI32,16xI64,8xF64,8xI32]
   I64Const { value: 0 }
   LocalSet { local_index: 0 }
   I64Const { value: 0 }

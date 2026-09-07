@@ -17,13 +17,13 @@ impl Emitter<'_> {
         xs: &IrExpr,
         t: &IrExpr,
     ) -> ArmResult {
-        match self.lower(xs, None)? {
+        match self.lower_arg(xs, None, ArgMode::Borrow)? {
             SliceTy::List(h) if self.types.el(h) == INT => {}
             other => return unsup(&format!("list-binary-search-of:{other:?}")),
         }
         let hb = self.hold_i32()?;
         self.f.instructions().local_set(hb);
-        self.lower(t, Some(INT))?;
+        self.lower_arg(t, Some(INT), ArgMode::Borrow)?;
         let ht = self.hold_i64()?;
         let hsize = self.hold_i32()?;
         let hbase = self.hold_i32()?;
@@ -89,14 +89,14 @@ impl Emitter<'_> {
         xs: &IrExpr,
         n: &IrExpr,
     ) -> ArmResult {
-        let e = match self.lower(xs, None)? {
+        let e = match self.lower_arg(xs, None, ArgMode::Borrow)? {
             SliceTy::List(h) => self.types.el(h),
             other => return unsup(&format!("list-window-of:{other:?}")),
         };
         let stride = e.slot_size() as i32;
         let hb = self.hold_i32()?;
         self.f.instructions().local_set(hb);
-        self.lower(n, Some(INT))?;
+        self.lower_arg(n, Some(INT), ArgMode::Borrow)?;
         let hn64 = self.hold_i64()?;
         let hw = self.hold_i32()?;
         let ho = self.hold_i32()?;
@@ -173,7 +173,7 @@ impl Emitter<'_> {
         xs: &IrExpr,
         cb: &IrExpr,
     ) -> ArmResult {
-        let got = self.lower(cb, None)?;
+        let got = self.lower_arg(cb, None, ArgMode::Borrow)?;
         let SliceTy::Fn(sig) = got else {
             return unsup("list-hof-nonlambda");
         };

@@ -22,13 +22,13 @@ impl Emitter<'_> {
         count: &IrExpr,
     ) -> ArmResult {
         let lossy = self.work.helper(crate::work::Helper::Utf8Lossy);
-        self.lower(b, Some(BYTES))?;
+        self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
         let hb = self.hold_i32()?;
         self.f.instructions().local_set(hb);
-        self.lower(pos, Some(INT))?;
+        self.lower_arg(pos, Some(INT), ArgMode::Borrow)?;
         let hp0 = self.hold_i64()?;
         self.f.instructions().local_set(hp0);
-        self.lower(count, Some(INT))?;
+        self.lower_arg(count, Some(INT), ArgMode::Borrow)?;
         let hrem = self.hold_i64()?;
         let hp = self.hold_i64()?;
         let hsl = self.hold_i64()?;
@@ -125,10 +125,10 @@ impl Emitter<'_> {
         k: i32,
         float: bool,
     ) -> ArmResult {
-        self.lower(b, Some(BYTES))?;
+        self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
         let hb = self.hold_i32()?;
         self.f.instructions().local_set(hb);
-        self.lower(v, Some(if float { FLOAT } else { INT }))?;
+        self.lower_arg(v, Some(if float { FLOAT } else { INT }), ArgMode::Borrow)?;
         let hv = self.hold_i64()?;
         let ho = self.hold_i32()?;
         let mut i = self.f.instructions();
@@ -161,10 +161,10 @@ impl Emitter<'_> {
     /// size past the buffer is one whole chunk (the i64 clamp precedes
     /// every i32 narrowing).
     pub(crate) fn lower_bytes_chunks(&mut self, b: &IrExpr, size: &IrExpr) -> ArmResult {
-        self.lower(b, Some(BYTES))?;
+        self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
         let hb = self.hold_i32()?;
         self.f.instructions().local_set(hb);
-        self.lower(size, Some(INT))?;
+        self.lower_arg(size, Some(INT), ArgMode::Borrow)?;
         let hs64 = self.hold_i64()?;
         let hs = self.hold_i32()?;
         let ho = self.hold_i32()?;
@@ -246,10 +246,10 @@ impl Emitter<'_> {
         signed: bool,
         be: bool,
     ) -> Result<(), EmitError> {
-        self.lower(b, Some(BYTES))?;
+        self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
         let bh = self.hold_i32()?;
         self.f.instructions().local_set(bh);
-        self.lower(pos, Some(INT))?;
+        self.lower_arg(pos, Some(INT), ArgMode::Borrow)?;
         let ih = self.hold_i64()?;
         let ha = self.hold_i32()?;
         self.f.instructions().local_set(ih);
@@ -316,15 +316,15 @@ impl Emitter<'_> {
         {
             self.emit_read_mut_var_cow(id, var_idx, var_ty, vglob)?;
         } else {
-            self.lower(b, Some(BYTES))?;
+            self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
         }
         let bh = self.hold_i32()?;
         self.f.instructions().local_set(bh);
-        self.lower(pos, Some(INT))?;
+        self.lower_arg(pos, Some(INT), ArgMode::Borrow)?;
         let ih = self.hold_i64()?;
         self.f.instructions().local_set(ih);
         if float {
-            self.lower(v, Some(FLOAT))?;
+            self.lower_arg(v, Some(FLOAT), ArgMode::Borrow)?;
             let mut i = self.f.instructions();
             if width == 4 {
                 i.f32_demote_f64().i32_reinterpret_f32().i64_extend_i32_u();
@@ -332,7 +332,7 @@ impl Emitter<'_> {
                 i.i64_reinterpret_f64();
             }
         } else {
-            self.lower(v, Some(INT))?;
+            self.lower_arg(v, Some(INT), ArgMode::Borrow)?;
         }
         let hv = self.hold_i64()?;
         let ha = self.hold_i32()?;

@@ -26,7 +26,7 @@ impl Emitter<'_> {
     ) -> Result<Option<Option<Lowered>>, EmitError> {
         let out = match (module, func, args) {
             ("result", "is_ok" | "is_err", [r]) => {
-                let SliceTy::Result(..) = self.lower(r, None)? else {
+                let SliceTy::Result(..) = self.lower_arg(r, None, ArgMode::Borrow)? else {
                     return unsup(&format!("result-{func}-of-nonresult"));
                 };
                 let mut i = self.f.instructions();
@@ -39,7 +39,7 @@ impl Emitter<'_> {
                 Some(Lowered::scalar(BOOL))
             }
             ("option", "is_some" | "is_none", [o]) => {
-                let SliceTy::Option(_) = self.lower(o, None)? else {
+                let SliceTy::Option(_) = self.lower_arg(o, None, ArgMode::Borrow)? else {
                     return unsup(&format!("option-{func}-of-nonoption"));
                 };
                 let mut i = self.f.instructions();
@@ -54,7 +54,7 @@ impl Emitter<'_> {
             // a final len patch (the filter doctrine).
             ("result", "partition", [xs]) => Some(Lowered::owned(self.lower_result_partition(xs)?)),
             ("result", "flat_map", [r, f]) => {
-                let SliceTy::Result(o, _) = self.lower(r, None)? else {
+                let SliceTy::Result(o, _) = self.lower_arg(r, None, ArgMode::Borrow)? else {
                     return unsup("result-flat_map-of-nonresult");
                 };
                 let (params, body) = self.hof_lambda(f, 1)?;
@@ -84,7 +84,7 @@ impl Emitter<'_> {
                 Some(Lowered::owned(rb))
             }
             ("result", "unwrap_or_else", [r, f]) => {
-                let SliceTy::Result(o, er) = self.lower(r, None)? else {
+                let SliceTy::Result(o, er) = self.lower_arg(r, None, ArgMode::Borrow)? else {
                     return unsup("result-uoe-of-nonresult");
                 };
                 let (params, body) = self.hof_lambda(f, 1)?;
@@ -111,7 +111,7 @@ impl Emitter<'_> {
             }
             ("result", "to_option" | "to_err_option", [r]) => {
                 let want_ok = func == "to_option";
-                let SliceTy::Result(o, er) = self.lower(r, None)? else {
+                let SliceTy::Result(o, er) = self.lower_arg(r, None, ArgMode::Borrow)? else {
                     return unsup(&format!("result-{func}-of-nonresult"));
                 };
                 let side_h = if want_ok { o } else { er };
@@ -149,7 +149,7 @@ impl Emitter<'_> {
     /// partition: one pass, oks/errs each an upper-bound alloc with
     /// a final len patch (the filter doctrine).
     fn lower_result_partition(&mut self, xs: &IrExpr) -> Result<SliceTy, EmitError> {
-        let el = match self.lower(xs, None)? {
+        let el = match self.lower_arg(xs, None, ArgMode::Borrow)? {
             SliceTy::List(h) => self.types.el(h),
             other => return unsup(&format!("result-partition-of:{other:?}")),
         };
@@ -243,7 +243,7 @@ impl Emitter<'_> {
         Ok({
 
                 let on_ok = func == "map";
-                let SliceTy::Result(o, er) = self.lower(r, None)? else {
+                let SliceTy::Result(o, er) = self.lower_arg(r, None, ArgMode::Borrow)? else {
                     return unsup(&format!("result-{func}-of-nonresult"));
                 };
                 let (params, body) = self.hof_lambda(f, 1)?;
@@ -301,7 +301,7 @@ impl Emitter<'_> {
         let out = match (module, func, args) {
             ("option", "map" | "flat_map", [o_arg, f]) => {
                 let flat = func == "flat_map";
-                let SliceTy::Option(h) = self.lower(o_arg, None)? else {
+                let SliceTy::Option(h) = self.lower_arg(o_arg, None, ArgMode::Borrow)? else {
                     return unsup(&format!("option-{func}-of-nonoption"));
                 };
                 let a = self.types.el(h);
@@ -345,7 +345,7 @@ impl Emitter<'_> {
                 Some(Lowered::owned(out_ty))
             }
             ("option", "flatten", [o_arg]) => {
-                let SliceTy::Option(h) = self.lower(o_arg, None)? else {
+                let SliceTy::Option(h) = self.lower_arg(o_arg, None, ArgMode::Borrow)? else {
                     return unsup("option-flatten-of-nonoption");
                 };
                 let inner = self.types.el(h);
@@ -368,7 +368,7 @@ impl Emitter<'_> {
                 Some(Lowered::owned(inner))
             }
             ("option", "unwrap_or_else", [o_arg, f]) => {
-                let SliceTy::Option(h) = self.lower(o_arg, None)? else {
+                let SliceTy::Option(h) = self.lower_arg(o_arg, None, ArgMode::Borrow)? else {
                     return unsup("option-uoe-of-nonoption");
                 };
                 let a = self.types.el(h);
@@ -388,7 +388,7 @@ impl Emitter<'_> {
                 Some(Lowered::owned(a))
             }
             ("option", "or_else", [o_arg, f]) => {
-                let got @ SliceTy::Option(_) = self.lower(o_arg, None)? else {
+                let got @ SliceTy::Option(_) = self.lower_arg(o_arg, None, ArgMode::Borrow)? else {
                     return unsup("option-or_else-of-nonoption");
                 };
                 let (_params, body) = self.hof_lambda(f, 0)?;
@@ -405,7 +405,7 @@ impl Emitter<'_> {
                 Some(Lowered::owned(got))
             }
             ("option", "filter", [o_arg, f]) => {
-                let got @ SliceTy::Option(h) = self.lower(o_arg, None)? else {
+                let got @ SliceTy::Option(h) = self.lower_arg(o_arg, None, ArgMode::Borrow)? else {
                     return unsup("option-filter-of-nonoption");
                 };
                 let a = self.types.el(h);
@@ -436,12 +436,12 @@ impl Emitter<'_> {
                 Some(Lowered::owned(got))
             }
             ("option", "zip", [a_arg, b_arg]) => {
-                let SliceTy::Option(ha) = self.lower(a_arg, None)? else {
+                let SliceTy::Option(ha) = self.lower_arg(a_arg, None, ArgMode::Borrow)? else {
                     return unsup("option-zip-of-nonoption");
                 };
                 let hla = self.hold_i32()?;
                 self.f.instructions().local_set(hla);
-                let SliceTy::Option(hb) = self.lower(b_arg, None)? else {
+                let SliceTy::Option(hb) = self.lower_arg(b_arg, None, ArgMode::Borrow)? else {
                     return unsup("option-zip-of-nonoption");
                 };
                 let (a, b) = (self.types.el(ha), self.types.el(hb));
@@ -488,7 +488,7 @@ impl Emitter<'_> {
                 Some(Lowered::owned(SliceTy::Option(self.types.intern(SliceTy::Tuple(ti)))))
             }
             ("option", "to_list", [o_arg]) => {
-                let SliceTy::Option(h) = self.lower(o_arg, None)? else {
+                let SliceTy::Option(h) = self.lower_arg(o_arg, None, ArgMode::Borrow)? else {
                     return unsup("option-to_list-of-nonoption");
                 };
                 let a = self.types.el(h);

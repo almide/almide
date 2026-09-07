@@ -456,9 +456,16 @@ impl Emitter<'_> {
             self.release_i32();
             return Ok(());
         }
-        self.lower(arg, Some(STR))?;
-        self.f.instructions().call(block_print);
-        Ok(())
+        // println / eprintln only READ their argument: a temporary handed
+        // to them (`println(int.to_string(i))`) is borrowed and released
+        // right after the write — this site is its own wrapper (arm.rs
+        // `ArgMode`), there being no module-call wrapper around a Named
+        // builtin.
+        self.arm_scope(|em| {
+            em.lower_arg(arg, Some(STR), ArgMode::Borrow)?;
+            em.f.instructions().call(block_print);
+            Ok(())
+        })
     }
 
     /// Build interpolation parts into the line buffer from the CURRENT

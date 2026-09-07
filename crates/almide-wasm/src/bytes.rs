@@ -30,7 +30,7 @@ pub(crate) fn byte_k(k: u8) -> MemArg {
 impl Emitter<'_> {
 
     fn lower_bytes_new(&mut self, n: &IrExpr) -> ArmResult {
-        self.lower(n, Some(INT))?;
+        self.lower_arg(n, Some(INT), ArgMode::Borrow)?;
         // native `len.max(0)` — a NEGATIVE size is the empty buffer,
         // never a wrapped 4 GiB ask.
         let h = self.hold_i64()?;
@@ -69,10 +69,10 @@ impl Emitter<'_> {
     }
 
     fn lower_bytes_get(&mut self, b: &IrExpr, idx: &IrExpr) -> ArmResult {
-        self.lower(b, Some(BYTES))?;
+        self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
         let bh = self.hold_i32()?;
         self.f.instructions().local_set(bh);
-        self.lower(idx, Some(INT))?;
+        self.lower_arg(idx, Some(INT), ArgMode::Borrow)?;
         let ih = self.hold_i64()?;
         let hr = self.hold_i32()?;
         self.f.instructions().local_set(ih);
@@ -95,14 +95,14 @@ impl Emitter<'_> {
     }
 
     fn lower_bytes_set_arm(&mut self, b: &IrExpr, idx: &IrExpr, v: &IrExpr) -> ArmResult {
-        self.lower(b, Some(BYTES))?;
+        self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
         self.f.instructions().call(F_BLOCK_COPY);
         let bh = self.hold_i32()?;
         self.f.instructions().local_set(bh);
-        self.lower(idx, Some(INT))?;
+        self.lower_arg(idx, Some(INT), ArgMode::Borrow)?;
         let ih = self.hold_i64()?;
         self.f.instructions().local_set(ih);
-        self.lower(v, Some(INT))?;
+        self.lower_arg(v, Some(INT), ArgMode::Borrow)?;
         let hv = self.hold_i64()?;
         self.f.instructions().local_set(hv);
         self.bytes_room(bh, ih, 1);
@@ -116,17 +116,17 @@ impl Emitter<'_> {
         self.release_i64();
         self.release_i64();
         self.release_i32();
-        Ok(Some(Lowered::view(BYTES)))
+        Ok(Some(Lowered::owned(BYTES)))
     }
 
     fn lower_bytes_slice(&mut self, b: &IrExpr, s: &IrExpr, e: &IrExpr) -> ArmResult {
-        self.lower(b, Some(BYTES))?;
+        self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
         let hb = self.hold_i32()?;
         self.f.instructions().local_set(hb);
-        self.lower(s, Some(INT))?;
+        self.lower_arg(s, Some(INT), ArgMode::Borrow)?;
         let hs = self.hold_i64()?;
         self.f.instructions().local_set(hs);
-        self.lower(e, Some(INT))?;
+        self.lower_arg(e, Some(INT), ArgMode::Borrow)?;
         let he = self.hold_i64()?;
         let ho = self.hold_i32()?;
         let mut i = self.f.instructions();
@@ -166,10 +166,10 @@ impl Emitter<'_> {
 
     fn lower_bytes_fill(&mut self, b: &IrExpr, v: &IrExpr) -> ArmResult {
         let recv = self.bytes_recv("fill", b)?;
-        self.lower(b, Some(BYTES))?;
+        self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
         let hb = self.hold_i32()?;
         self.f.instructions().local_set(hb);
-        self.lower(v, Some(INT))?;
+        self.lower_arg(v, Some(INT), ArgMode::Borrow)?;
         let hv = self.hold_i64()?;
         let ho = self.hold_i32()?;
         let mut i = self.f.instructions();
@@ -189,8 +189,8 @@ impl Emitter<'_> {
     }
 
     fn lower_bytes_concat(&mut self, a: &IrExpr, b: &IrExpr) -> ArmResult {
-        self.lower(a, Some(BYTES))?;
-        self.lower(b, Some(BYTES))?;
+        self.lower_arg(a, Some(BYTES), ArgMode::Borrow)?;
+        self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
         self.f.instructions().call(F_CONCAT);
         Ok(Some(Lowered::owned(BYTES)))
     }
@@ -200,13 +200,13 @@ impl Emitter<'_> {
         let inv_mid = self.pool.intern(" bytes from index ");
         let inc_pre = self.pool.intern("invalid UTF-8: incomplete utf-8 byte sequence from index ");
         let h = self.work.helper(Helper::BytesToString { inv_pre, inv_mid, inc_pre });
-        self.lower(b, Some(BYTES))?;
+        self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
         self.f.instructions().call(h);
         Ok(Some(Lowered::owned(SliceTy::Result(self.types.intern(STR), self.types.intern(STR)))))
     }
 
     fn lower_bytes_to_list(&mut self, b: &IrExpr) -> ArmResult {
-        self.lower(b, Some(BYTES))?;
+        self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
         let bh = self.hold_i32()?;
         let hc = self.hold_i32()?;
         let ho = self.hold_i32()?;
@@ -231,10 +231,10 @@ impl Emitter<'_> {
     }
 
     fn lower_bytes_repeat(&mut self, b: &IrExpr, n: &IrExpr) -> ArmResult {
-        self.lower(b, Some(BYTES))?;
+        self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
         let bh = self.hold_i32()?;
         self.f.instructions().local_set(bh);
-        self.lower(n, Some(INT))?;
+        self.lower_arg(n, Some(INT), ArgMode::Borrow)?;
         let hn = self.hold_i64()?;
         let ho = self.hold_i32()?;
         let hw = self.hold_i32()?;
@@ -276,26 +276,26 @@ impl Emitter<'_> {
     }
 
     fn lower_bytes_lossy(&mut self, b: &IrExpr) -> ArmResult {
-        self.lower(b, Some(BYTES))?;
+        self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
         let lossy = self.work.helper(Helper::Utf8Lossy);
         self.f.instructions().call(lossy);
         Ok(Some(Lowered::owned(STR)))
     }
 
     fn lower_bytes_from_string(&mut self, s: &IrExpr) -> ArmResult {
-        self.lower(s, Some(STR))?;
+        self.lower_arg(s, Some(STR), ArgMode::Borrow)?;
         self.f.instructions().call(F_BLOCK_COPY);
         Ok(Some(Lowered::owned(BYTES)))
     }
 
     fn lower_bytes_len(&mut self, b: &IrExpr) -> ArmResult {
-        self.lower(b, Some(BYTES))?;
+        self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
         self.f.instructions().i32_load(len_memarg()).i64_extend_i32_u();
         Ok(Some(Lowered::scalar(INT)))
     }
 
     fn lower_bytes_from_list(&mut self, xs: &IrExpr) -> ArmResult {
-        match self.lower(xs, None)? {
+        match self.lower_arg(xs, None, ArgMode::Borrow)? {
             SliceTy::List(h) if self.types.el(h) == INT => {}
             other => return unsup(&format!("bytes-from-of:{other:?}")),
         }
@@ -345,15 +345,15 @@ impl Emitter<'_> {
     }
 
     fn lower_bytes_get_or(&mut self, b: &IrExpr, i: &IrExpr, d: &IrExpr) -> ArmResult {
-        self.lower(b, Some(BYTES))?;
+        self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
         let bh = self.hold_i32()?;
         self.f.instructions().local_set(bh);
-        self.lower(i, Some(INT))?;
+        self.lower_arg(i, Some(INT), ArgMode::Borrow)?;
         let ih = self.hold_i64()?;
         self.f.instructions().local_set(ih);
         // the default ALWAYS evaluates (native argument order) —
         // in-branch lowering would skip its effects in-bounds
-        self.lower(d, Some(INT))?;
+        self.lower_arg(d, Some(INT), ArgMode::Borrow)?;
         let hd = self.hold_i64()?;
         self.f.instructions().local_set(hd);
         self.bytes_room(bh, ih, 1);
@@ -439,13 +439,13 @@ impl Emitter<'_> {
             // (negative INCLUDED — the signed read, both legs) is a copy.
             ("pad_left" | "pad_right", [b, target, v]) => {
                 let left = func == "pad_left";
-                self.lower(b, Some(BYTES))?;
+                self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
                 let bh = self.hold_i32()?;
                 self.f.instructions().local_set(bh);
-                self.lower(target, Some(INT))?;
+                self.lower_arg(target, Some(INT), ArgMode::Borrow)?;
                 let ht = self.hold_i64()?;
                 self.f.instructions().local_set(ht);
-                self.lower(v, Some(INT))?;
+                self.lower_arg(v, Some(INT), ArgMode::Borrow)?;
                 let hv = self.hold_i64()?;
                 let ho = self.hold_i32()?;
                 let hp = self.hold_i32()?;
@@ -508,16 +508,16 @@ impl Emitter<'_> {
                 self.f.instructions().call(F_BLOCK_COPY);
                 let dh = self.hold_i32()?;
                 self.f.instructions().local_set(dh);
-                self.lower(src, Some(BYTES))?;
+                self.lower_arg(src, Some(BYTES), ArgMode::Borrow)?;
                 let sh = self.hold_i32()?;
                 self.f.instructions().local_set(sh);
-                self.lower(doff, Some(INT))?;
+                self.lower_arg(doff, Some(INT), ArgMode::Borrow)?;
                 let hdo = self.hold_i64()?;
                 self.f.instructions().local_set(hdo);
-                self.lower(soff, Some(INT))?;
+                self.lower_arg(soff, Some(INT), ArgMode::Borrow)?;
                 let hso = self.hold_i64()?;
                 self.f.instructions().local_set(hso);
-                self.lower(n, Some(INT))?;
+                self.lower_arg(n, Some(INT), ArgMode::Borrow)?;
                 let hn = self.hold_i64()?;
                 let hl = self.hold_i32()?;
                 let mut i = self.f.instructions();
@@ -621,16 +621,16 @@ impl Emitter<'_> {
                 let Some((var_idx, var_ty, vglob)) = self.mut_var(id) else {
                     return unsup("var:unmapped");
                 };
-                self.lower(b, Some(BYTES))?;
+                self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
                 let hb = self.hold_i32()?;
                 self.f.instructions().local_set(hb);
-                self.lower(s, Some(INT))?;
+                self.lower_arg(s, Some(INT), ArgMode::Borrow)?;
                 let hs = self.hold_i64()?;
                 self.f.instructions().local_set(hs);
-                self.lower(e, Some(INT))?;
+                self.lower_arg(e, Some(INT), ArgMode::Borrow)?;
                 let he = self.hold_i64()?;
                 self.f.instructions().local_set(he);
-                self.lower(d, Some(INT))?;
+                self.lower_arg(d, Some(INT), ArgMode::Borrow)?;
                 let hd = self.hold_i64()?;
                 let ho = self.hold_i32()?;
                 let mut i = self.f.instructions();
@@ -736,7 +736,7 @@ impl Emitter<'_> {
     fn lower_bytes_push(&mut self, b: &IrExpr, v: &IrExpr) -> ArmResult {
         let recv = self.bytes_recv("push", b)?;
         self.emit_read_bytes_recv(&recv, b)?;
-        self.lower(v, Some(INT))?;
+        self.lower_arg(v, Some(INT), ArgMode::Borrow)?;
         self.f.instructions().call(F_BYTES_PUSH);
         self.emit_bytes_writeback(&recv)?;
         Ok(None)

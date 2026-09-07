@@ -30,7 +30,7 @@ impl Emitter<'_> {
             // native. The result may live in either ping-pong buffer —
             // both are layout-true blocks with the right len header.
             ("sort", [xs]) => {
-                let h = match self.lower(xs, None)? {
+                let h = match self.lower_arg(xs, None, ArgMode::Borrow)? {
                     SliceTy::List(h) => h,
                     other => return unsup(&format!("list-sort-of:{other:?}")),
                 };
@@ -57,14 +57,14 @@ impl Emitter<'_> {
             // skip(n as usize): a NEGATIVE n reinterprets huge — EMPTY
             // (take's mirror keeps the WHOLE list; the asymmetry is v0's).
             ("drop", [xs, n]) => {
-                let h = match self.lower(xs, None)? {
+                let h = match self.lower_arg(xs, None, ArgMode::Borrow)? {
                     SliceTy::List(h) => h,
                     other => return unsup(&format!("list-drop-of:{other:?}")),
                 };
                 let stride = self.types.el(h).slot_size() as i32;
                 let hb = self.hold_i32()?;
                 self.f.instructions().local_set(hb);
-                self.lower(n, Some(INT))?;
+                self.lower_arg(n, Some(INT), ArgMode::Borrow)?;
                 let hn = self.hold_i64()?;
                 let hc = self.hold_i32()?;
                 let ho = self.hold_i32()?;
@@ -107,7 +107,7 @@ impl Emitter<'_> {
             // insert at min(i as usize, len): a NEGATIVE index appends
             // at the END (the huge-usize reinterpretation, v0 verbatim).
             ("insert", [xs, idx, v]) => {
-                let h = match self.lower(xs, None)? {
+                let h = match self.lower_arg(xs, None, ArgMode::Borrow)? {
                     SliceTy::List(h) => h,
                     other => return unsup(&format!("list-insert-of:{other:?}")),
                 };
@@ -115,10 +115,10 @@ impl Emitter<'_> {
                 let stride = elem.slot_size() as i32;
                 let hb = self.hold_i32()?;
                 self.f.instructions().local_set(hb);
-                self.lower(idx, Some(INT))?;
+                self.lower_arg(idx, Some(INT), ArgMode::Borrow)?;
                 let hn = self.hold_i64()?;
                 self.f.instructions().local_set(hn);
-                self.lower(v, Some(elem))?;
+                self.lower_arg(v, Some(elem), ArgMode::Borrow)?;
                 self.rc_map_value_share(v, elem);
                 let hv = self.hold_val(elem)?;
                 let hoff = self.hold_i32()?;
@@ -322,7 +322,7 @@ impl Emitter<'_> {
     ) -> ArmResult {
 
                 let windows = func == "windows";
-                let h = match self.lower(xs, None)? {
+                let h = match self.lower_arg(xs, None, ArgMode::Borrow)? {
                     SliceTy::List(h) => h,
                     other => return unsup(&format!("list-{func}-of:{other:?}")),
                 };
@@ -330,7 +330,7 @@ impl Emitter<'_> {
                 let stride = elem.slot_size() as i32;
                 let hxs = self.hold_i32()?;
                 self.f.instructions().local_set(hxs);
-                self.lower(n_arg, Some(INT))?;
+                self.lower_arg(n_arg, Some(INT), ArgMode::Borrow)?;
                 let hn = self.hold_i64()?;
                 let msg = self.pool.intern(if windows {
                     "window size must be positive"
@@ -449,7 +449,7 @@ impl Emitter<'_> {
         if !matches!(k, INT | FLOAT | STR | BOOL) {
             return unsup(&format!("list-sort-by-key:{k:?}"));
         }
-        let h = match self.lower(xs, None)? {
+        let h = match self.lower_arg(xs, None, ArgMode::Borrow)? {
             SliceTy::List(h) => h,
             other => return unsup(&format!("list-sort-by-of:{other:?}")),
         };
@@ -500,14 +500,14 @@ impl Emitter<'_> {
     /// reinterprets huge and takes the whole list) — split from
     /// `lower_list_order_call` for the complexity budget.
     fn lower_list_take(&mut self, xs: &IrExpr, n: &IrExpr) -> Result<Option<Option<Lowered>>, EmitError> {
-                let h = match self.lower(xs, None)? {
+                let h = match self.lower_arg(xs, None, ArgMode::Borrow)? {
                     SliceTy::List(h) => h,
                     other => return unsup(&format!("list-take-of:{other:?}")),
                 };
                 let stride = self.types.el(h).slot_size() as i32;
                 let hb = self.hold_i32()?;
                 self.f.instructions().local_set(hb);
-                self.lower(n, Some(INT))?;
+                self.lower_arg(n, Some(INT), ArgMode::Borrow)?;
                 let hn = self.hold_i64()?;
                 let hc = self.hold_i32()?;
                 let ho = self.hold_i32()?;

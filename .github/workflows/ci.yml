@@ -1137,6 +1137,9 @@ jobs:
       - name: Exit sites — every frame exit of the structural emitter goes through the ExitPlan renderer (#1995)
         run: bash scripts/check-exit-sites.sh
 
+      - name: Arm arguments — every module-op arm declares Borrow / Retain per argument (#2004)
+        run: bash scripts/check-arm-args.sh
+
       - name: WASI/Component-Model pin policy (#1628 stage 4)
         run: bash scripts/check-wasi-pins.sh
 

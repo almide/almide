@@ -25,10 +25,10 @@ impl Emitter<'_> {
     fn lower_matrix_fill_ctor(&mut self, func: &str, r: &IrExpr, c: &IrExpr) -> ArmResult {
         Ok({
             let ones = func == "ones";
-            self.lower(r, Some(INT))?;
+            self.lower_arg(r, Some(INT), ArgMode::Borrow)?;
             let hr = self.hold_i64()?;
             self.f.instructions().local_set(hr);
-            self.lower(c, Some(INT))?;
+            self.lower_arg(c, Some(INT), ArgMode::Borrow)?;
             let hc = self.hold_i64()?;
             let hb = self.hold_i32()?;
             let msg = self.pool.intern("matrix dimensions too large");
@@ -137,7 +137,7 @@ impl Emitter<'_> {
 
     fn lower_matrix_shape(&mut self, m: &IrExpr) -> ArmResult {
         Ok({
-            self.lower(m, Some(SliceTy::Matrix))?;
+            self.lower_arg(m, Some(SliceTy::Matrix), ArgMode::Borrow)?;
             let hm = self.hold_i32()?;
             let hb = self.hold_i32()?;
             let pair = self.types.tuple(vec![INT, INT]);
@@ -164,7 +164,7 @@ impl Emitter<'_> {
     fn lower_matrix_dims_read(&mut self, func: &str, m: &IrExpr) -> ArmResult {
         Ok({
             let off = if func == "rows" { 0 } else { 4 };
-            self.lower(m, Some(SliceTy::Matrix))?;
+            self.lower_arg(m, Some(SliceTy::Matrix), ArgMode::Borrow)?;
             self.f
                 .instructions()
                 .i32_load(slot_memarg(off))
@@ -175,13 +175,13 @@ impl Emitter<'_> {
 
     fn lower_matrix_get(&mut self, m: &IrExpr, r: &IrExpr, c: &IrExpr) -> ArmResult {
         Ok({
-            self.lower(m, Some(SliceTy::Matrix))?;
+            self.lower_arg(m, Some(SliceTy::Matrix), ArgMode::Borrow)?;
             let hm = self.hold_i32()?;
             self.f.instructions().local_set(hm);
-            self.lower(r, Some(INT))?;
+            self.lower_arg(r, Some(INT), ArgMode::Borrow)?;
             let hr = self.hold_i64()?;
             self.f.instructions().local_set(hr);
-            self.lower(c, Some(INT))?;
+            self.lower_arg(c, Some(INT), ArgMode::Borrow)?;
             let hc = self.hold_i64()?;
             self.f.instructions().local_set(hc);
             // The index-domain rule (C-282): an accessor with no
@@ -223,7 +223,7 @@ impl Emitter<'_> {
         Ok({
             let fh = self.types.intern(FLOAT);
             let inner = self.types.intern(SliceTy::List(fh));
-            self.lower(rows, Some(SliceTy::List(inner)))?;
+            self.lower_arg(rows, Some(SliceTy::List(inner)), ArgMode::Borrow)?;
             let hl = self.hold_i32()?;
             let hr = self.hold_i32()?;
             let hc = self.hold_i32()?;
@@ -317,7 +317,7 @@ impl Emitter<'_> {
 
     fn lower_matrix_to_lists(&mut self, m: &IrExpr) -> ArmResult {
         Ok({
-            self.lower(m, Some(SliceTy::Matrix))?;
+            self.lower_arg(m, Some(SliceTy::Matrix), ArgMode::Borrow)?;
             let hm = self.hold_i32()?;
             let hr = self.hold_i32()?;
             let hc8 = self.hold_i32()?;
@@ -377,7 +377,7 @@ impl Emitter<'_> {
 
     fn lower_matrix_transpose(&mut self, m: &IrExpr) -> ArmResult {
         Ok({
-            self.lower(m, Some(SliceTy::Matrix))?;
+            self.lower_arg(m, Some(SliceTy::Matrix), ArgMode::Borrow)?;
             let hm = self.hold_i32()?;
             let hr = self.hold_i32()?;
             let hc = self.hold_i32()?;
@@ -452,14 +452,14 @@ impl Emitter<'_> {
 
     fn lower_matrix_row_dot(&mut self, m: &IrExpr, r: &IrExpr, v: &IrExpr) -> ArmResult {
         Ok({
-            self.lower(m, Some(SliceTy::Matrix))?;
+            self.lower_arg(m, Some(SliceTy::Matrix), ArgMode::Borrow)?;
             let hm = self.hold_i32()?;
             self.f.instructions().local_set(hm);
-            self.lower(r, Some(INT))?;
+            self.lower_arg(r, Some(INT), ArgMode::Borrow)?;
             let hr = self.hold_i64()?;
             self.f.instructions().local_set(hr);
             let fh = self.types.intern(FLOAT);
-            self.lower(v, Some(SliceTy::List(fh)))?;
+            self.lower_arg(v, Some(SliceTy::List(fh)), ArgMode::Borrow)?;
             let hv = self.hold_i32()?;
             let hs = self.hold_f64()?;
             let hsrc = self.hold_i32()?;

@@ -108,16 +108,16 @@ impl Emitter<'_> {
         rows: &IrExpr,
         cols: &IrExpr,
     ) -> ArmResult {
-        self.lower(data, Some(SliceTy::Scalar(Scalar::Bytes)))?;
+        self.lower_arg(data, Some(SliceTy::Scalar(Scalar::Bytes)), ArgMode::Borrow)?;
         let hd = self.hold_i32()?;
         self.f.instructions().local_set(hd);
-        self.lower(offset, Some(INT))?;
+        self.lower_arg(offset, Some(INT), ArgMode::Borrow)?;
         let hoff = self.hold_i64()?;
         self.f.instructions().local_set(hoff);
-        self.lower(rows, Some(INT))?;
+        self.lower_arg(rows, Some(INT), ArgMode::Borrow)?;
         let hr = self.hold_i64()?;
         self.f.instructions().local_set(hr);
-        self.lower(cols, Some(INT))?;
+        self.lower_arg(cols, Some(INT), ArgMode::Borrow)?;
         let hc = self.hold_i64()?;
         self.f.instructions().local_set(hc);
         self.clamp0(hr);
@@ -191,16 +191,16 @@ impl Emitter<'_> {
         cols: &IrExpr,
         ids: &IrExpr,
     ) -> ArmResult {
-        self.lower(data, Some(SliceTy::Scalar(Scalar::Bytes)))?;
+        self.lower_arg(data, Some(SliceTy::Scalar(Scalar::Bytes)), ArgMode::Borrow)?;
         let hd = self.hold_i32()?;
         self.f.instructions().local_set(hd);
-        self.lower(offset, Some(INT))?;
+        self.lower_arg(offset, Some(INT), ArgMode::Borrow)?;
         let hoff = self.hold_i64()?;
         self.f.instructions().local_set(hoff);
-        self.lower(cols, Some(INT))?;
+        self.lower_arg(cols, Some(INT), ArgMode::Borrow)?;
         let hc = self.hold_i64()?;
         self.f.instructions().local_set(hc);
-        match self.lower(ids, None)? {
+        match self.lower_arg(ids, None, ArgMode::Borrow)? {
             SliceTy::List(h) if self.types.el(h) == INT => {}
             other => return unsup(&format!("matrix-select-ids:{other:?}")),
         }
@@ -298,10 +298,10 @@ impl Emitter<'_> {
         dim_b: &IrExpr,
     ) -> ArmResult {
         let qv = self.work.helper(crate::work::Helper::Q10Val);
-        self.lower(data, Some(SliceTy::Scalar(Scalar::Bytes)))?;
+        self.lower_arg(data, Some(SliceTy::Scalar(Scalar::Bytes)), ArgMode::Borrow)?;
         let hd = self.hold_i32()?;
         self.f.instructions().local_set(hd);
-        self.lower(offset, Some(INT))?;
+        self.lower_arg(offset, Some(INT), ArgMode::Borrow)?;
         let hoff = self.hold_i64()?;
         self.f.instructions().local_set(hoff);
         self.clamp0(hoff);
@@ -310,10 +310,10 @@ impl Emitter<'_> {
         let hc = self.hold_i64()?;
         let hids = self.hold_i32()?;
         if select {
-            self.lower(dim_a, Some(INT))?;
+            self.lower_arg(dim_a, Some(INT), ArgMode::Borrow)?;
             self.f.instructions().local_set(hc);
             self.clamp0(hc);
-            match self.lower(dim_b, None)? {
+            match self.lower_arg(dim_b, None, ArgMode::Borrow)? {
                 SliceTy::List(h) if self.types.el(h) == INT => {}
                 other => return unsup(&format!("matrix-q1-ids:{other:?}")),
             }
@@ -326,9 +326,9 @@ impl Emitter<'_> {
                 .i64_extend_i32_u()
                 .local_set(hr);
         } else {
-            self.lower(dim_a, Some(INT))?;
+            self.lower_arg(dim_a, Some(INT), ArgMode::Borrow)?;
             self.f.instructions().local_set(hr);
-            self.lower(dim_b, Some(INT))?;
+            self.lower_arg(dim_b, Some(INT), ArgMode::Borrow)?;
             self.f.instructions().local_set(hc);
             self.clamp0(hr);
             self.clamp0(hc);
@@ -429,18 +429,18 @@ impl Emitter<'_> {
         cols: &IrExpr,
         ids: &IrExpr,
     ) -> ArmResult {
-        self.lower(data, Some(SliceTy::Scalar(Scalar::Bytes)))?;
+        self.lower_arg(data, Some(SliceTy::Scalar(Scalar::Bytes)), ArgMode::Borrow)?;
         let hd = self.hold_i32()?;
         self.f.instructions().local_set(hd);
-        self.lower(offset, Some(INT))?;
+        self.lower_arg(offset, Some(INT), ArgMode::Borrow)?;
         let hoff = self.hold_i64()?;
         self.f.instructions().local_set(hoff);
         self.clamp0(hoff);
-        self.lower(cols, Some(INT))?;
+        self.lower_arg(cols, Some(INT), ArgMode::Borrow)?;
         let hc = self.hold_i64()?;
         self.f.instructions().local_set(hc);
         self.clamp0(hc);
-        match self.lower(ids, None)? {
+        match self.lower_arg(ids, None, ArgMode::Borrow)? {
             SliceTy::List(h) if self.types.el(h) == INT => {}
             other => return unsup(&format!("matrix-q8-ids:{other:?}")),
         }
@@ -544,7 +544,7 @@ impl Emitter<'_> {
         ids: &IrExpr,
     ) -> ArmResult {
         let (hm, hr, hc) = self.mat_open(m)?;
-        match self.lower(ids, None)? {
+        match self.lower_arg(ids, None, ArgMode::Borrow)? {
             SliceTy::List(h) if self.types.el(h) == INT => {}
             other => return unsup(&format!("matrix-select-ids:{other:?}")),
         }

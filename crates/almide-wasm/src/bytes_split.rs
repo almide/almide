@@ -59,7 +59,7 @@ impl Emitter<'_> {
     /// lines: `b.lines()` — pieces between `\n` bytes, the trailing
     /// piece only when non-empty (native `if start < b.len()`).
     pub(crate) fn lower_bytes_lines(&mut self, b: &IrExpr) -> ArmResult {
-        self.lower(b, Some(BYTES))?;
+        self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
         let hb = self.hold_i32()?;
         let hn = self.hold_i32()?;
         let hc = self.hold_i32()?;
@@ -134,10 +134,10 @@ impl Emitter<'_> {
     /// otherwise the non-overlapping left-to-right scan, the tail piece
     /// always pushed (native `out.push(b[start..].to_vec())`).
     pub(crate) fn lower_bytes_split(&mut self, b: &IrExpr, sep: &IrExpr) -> ArmResult {
-        self.lower(b, Some(BYTES))?;
+        self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
         let hb = self.hold_i32()?;
         self.f.instructions().local_set(hb);
-        self.lower(sep, Some(BYTES))?;
+        self.lower_arg(sep, Some(BYTES), ArgMode::Borrow)?;
         let hsep = self.hold_i32()?;
         let hn = self.hold_i32()?;
         let hm = self.hold_i32()?;

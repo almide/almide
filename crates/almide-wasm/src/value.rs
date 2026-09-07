@@ -39,23 +39,23 @@ impl Emitter<'_> {
                 Some(Lowered::owned(SliceTy::Value))
             }
             ("int", [n]) => {
-                self.lower(n, Some(INT))?;
+                self.lower_arg(n, Some(INT), ArgMode::Borrow)?;
                 self.emit_value_box(VT_INT, Some(INT))?;
                 Some(Lowered::owned(SliceTy::Value))
             }
             ("bool", [b]) => {
-                self.lower(b, Some(BOOL))?;
+                self.lower_arg(b, Some(BOOL), ArgMode::Borrow)?;
                 self.f.instructions().i64_extend_i32_u();
                 self.emit_value_box(VT_BOOL, Some(INT))?;
                 Some(Lowered::owned(SliceTy::Value))
             }
             ("float", [x]) => {
-                self.lower(x, Some(FLOAT))?;
+                self.lower_arg(x, Some(FLOAT), ArgMode::Borrow)?;
                 self.emit_value_box(VT_FLOAT, Some(FLOAT))?;
                 Some(Lowered::owned(SliceTy::Value))
             }
             ("str", [s]) => {
-                self.lower(s, Some(STR))?;
+                self.lower_arg(s, Some(STR), ArgMode::Retain)?;
                 self.emit_value_box(VT_STR, Some(STR))?;
                 Some(Lowered::owned(SliceTy::Value))
             }
@@ -66,8 +66,8 @@ impl Emitter<'_> {
                     key_off: def.fields[0].1,
                     val_off: def.fields[1].1,
                 });
-                self.lower(va, Some(SliceTy::Value))?;
-                self.lower(vb, Some(SliceTy::Value))?;
+                self.lower_arg(va, Some(SliceTy::Value), ArgMode::Retain)?;
+                self.lower_arg(vb, Some(SliceTy::Value), ArgMode::Retain)?;
                 self.f.instructions().call(m);
                 Some(Lowered::owned(SliceTy::Value))
             }
@@ -84,7 +84,7 @@ impl Emitter<'_> {
             // insertion order IS the block, exactly the interp's ordered
             // object model.
             ("object", [pairs]) => {
-                let got = self.lower(pairs, None)?;
+                let got = self.lower_arg(pairs, None, ArgMode::Borrow)?;
                 let SliceTy::List(h) = got else {
                     return Err(EmitError::Unsupported(format!("value.object-of:{got:?}")));
                 };
@@ -104,7 +104,7 @@ impl Emitter<'_> {
                 Some(Lowered::owned(SliceTy::Value))
             }
             ("array", [xs]) => {
-                let got = self.lower(xs, None)?;
+                let got = self.lower_arg(xs, None, ArgMode::Retain)?;
                 let SliceTy::List(h) = got else {
                     return Err(EmitError::Unsupported(format!("value.array-of:{got:?}")));
                 };
@@ -125,10 +125,10 @@ impl Emitter<'_> {
     /// blocks themselves are never copied). Non-object passes through.
     fn lower_value_pick_omit(&mut self, func: &str, v: &IrExpr, keys: &IrExpr) -> Result<SliceTy, EmitError> {
         let keep_found = i32::from(func == "pick");
-        self.lower(v, Some(SliceTy::Value))?;
+        self.lower_arg(v, Some(SliceTy::Value), ArgMode::Retain)?;
         let hv = self.hold_i32()?;
         self.f.instructions().local_set(hv);
-        match self.lower(keys, None)? {
+        match self.lower_arg(keys, None, ArgMode::Borrow)? {
             SliceTy::List(h) if self.types.el(h) == STR => {}
             other => return Err(EmitError::Unsupported(format!("value.{func}-keys:{other:?}"))),
         }
@@ -209,7 +209,7 @@ impl Emitter<'_> {
         }
         let transform = self.table.infos[hi].wasm_index;
         self.calls.insert(hi);
-        self.lower(v, Some(SliceTy::Value))?;
+        self.lower_arg(v, Some(SliceTy::Value), ArgMode::Retain)?;
         let hv = self.hold_i32()?;
         self.f.instructions().local_set(hv);
         let ti = self.types.tuple(vec![STR, SliceTy::Value]);
@@ -504,22 +504,22 @@ impl Emitter<'_> {
     ) -> Result<Option<Option<Lowered>>, EmitError> {
         let out = match (func, args) {
             ("as_int", [v]) => {
-                self.lower(v, Some(SliceTy::Value))?;
+                self.lower_arg(v, Some(SliceTy::Value), ArgMode::Borrow)?;
                 self.emit_value_unbox(VT_INT, INT, "expected Int")?;
                 Some(Lowered::owned(SliceTy::Result(self.types.intern(INT), self.types.intern(STR))))
             }
             ("as_bool", [v]) => {
-                self.lower(v, Some(SliceTy::Value))?;
+                self.lower_arg(v, Some(SliceTy::Value), ArgMode::Borrow)?;
                 self.emit_value_unbox(VT_BOOL, BOOL, "expected Bool")?;
                 Some(Lowered::owned(SliceTy::Result(self.types.intern(BOOL), self.types.intern(STR))))
             }
             ("as_string", [v]) => {
-                self.lower(v, Some(SliceTy::Value))?;
+                self.lower_arg(v, Some(SliceTy::Value), ArgMode::Borrow)?;
                 self.emit_value_unbox(VT_STR, STR, "expected Str")?;
                 Some(Lowered::owned(SliceTy::Result(self.types.intern(STR), self.types.intern(STR))))
             }
             ("as_array", [v]) => {
-                self.lower(v, Some(SliceTy::Value))?;
+                self.lower_arg(v, Some(SliceTy::Value), ArgMode::Borrow)?;
                 let lv = SliceTy::List(self.types.intern(SliceTy::Value));
                 self.emit_value_unbox(VT_ARRAY, lv, "expected Array")?;
                 Some(Lowered::owned(SliceTy::Result(self.types.intern(lv), self.types.intern(STR))))
@@ -527,17 +527,17 @@ impl Emitter<'_> {
             // #658: a JSON number has no int/float split — an Int Value
             // widens to a valid Float.
             ("as_float", [v]) => {
-                self.lower(v, Some(SliceTy::Value))?;
+                self.lower_arg(v, Some(SliceTy::Value), ArgMode::Borrow)?;
                 self.emit_value_as_float()?;
                 Some(Lowered::owned(SliceTy::Result(self.types.intern(FLOAT), self.types.intern(STR))))
             }
             // The Codec-derive field accessor: tag check, first-match
             // scan, the incumbent's exact err lines.
             ("field", [v, key]) => {
-                self.lower(v, Some(SliceTy::Value))?;
+                self.lower_arg(v, Some(SliceTy::Value), ArgMode::Borrow)?;
                 let hv = self.hold_i32()?;
                 self.f.instructions().local_set(hv);
-                self.lower(key, Some(STR))?;
+                self.lower_arg(key, Some(STR), ArgMode::Borrow)?;
                 let hk = self.hold_i32()?;
                 self.f.instructions().local_set(hk);
                 let vf = self.work.helper(Helper::ValueField);
@@ -582,13 +582,13 @@ impl Emitter<'_> {
                 )))
             }
             ("keys", [v]) => {
-                self.lower(v, Some(SliceTy::Value))?;
+                self.lower_arg(v, Some(SliceTy::Value), ArgMode::Borrow)?;
                 let vk = self.work.helper(Helper::ValueKeys);
                 self.f.instructions().call(vk);
                 Some(Lowered::owned(SliceTy::List(self.types.intern(STR))))
             }
             ("stringify", [v]) => {
-                self.lower(v, Some(SliceTy::Value))?;
+                self.lower_arg(v, Some(SliceTy::Value), ArgMode::Borrow)?;
                 self.emit_value_stringify()?;
                 Some(Lowered::owned(STR))
             }
@@ -609,7 +609,7 @@ impl Emitter<'_> {
         &mut self,
         j: &IrExpr,
     ) -> ArmResult {
-        self.lower(j, Some(SliceTy::Value))?;
+        self.lower_arg(j, Some(SliceTy::Value), ArgMode::Borrow)?;
         let ti = self.types.tuple(vec![STR, SliceTy::Value]);
         let def = self.types.tuple_def(ti);
         let (key_off, val_off) = (def.fields[0].1, def.fields[1].1);
