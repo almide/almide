@@ -52,6 +52,25 @@
 #                                           the `fn`/theorem/routine the gate greps.
 #                 n     (int,    OPTIONAL)  REQUIRED iff class="fuzz"; the sample count.
 #
+#   THE THREE SIDES (#1994, contract-relative survival #1998). Evidence says the
+#   promise HOLDS. These three say what a writer can DECLARE, what the compiler
+#   REFUSES, and which edit DISCRIMINATES the promise from its absence — so a change
+#   on any one side is forced through the other two. All OPTIONAL today; every
+#   ownership/scope contract (#1997) MUST carry all three.
+#   declaration (string, OPTIONAL)  "<repo-relative .md path>#<exact heading text
+#                                   after the #'s>". The file and the heading must
+#                                   exist. Renaming the heading breaks the link —
+#                                   that IS the invalidation: re-point it in the
+#                                   same PR.
+#   refusal     (array,  OPTIONAL)  string array of tests/diagnostics/<case> dirs
+#                                   (the negative-fixture harness). Each case's
+#                                   meta.toml must name this contract back with
+#                                   `contract = "C-NNN"` (symmetric, like fixtures).
+#   challenge   (array,  OPTIONAL)  string array of "dojo:<family>" ids. Every id
+#                                   must be a row of scripts/lib/dojo-families.txt,
+#                                   and that row must list this contract back. The
+#                                   file is the pinned copy Dojo's gate reads.
+#
 # THE FLOOR RULE: an `active` contract MUST carry >= 1 evidence of rank >= fixture
 # (see scripts/lib/contract-classes.txt). doc-only / by-construction ALONE fail an
 # active contract. status="flagged-for-revision" is exempt (may rest on doc-only):
@@ -2659,6 +2678,9 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/let_wildcard_discard.almd", class = "fixture" },
 ]
+declaration = "docs/specs/als/expressions.md#ALS-ST1 束縛文(`Stmt::Let` / `Stmt::Var` / `Stmt::Assign`)"
+refusal   = ["tests/diagnostics/e042-unused-result"]
+challenge = ["dojo:fallible-producer"]
 
 # ── THE RETURN-POSITION HEAP `??` (the polymorphic-HOF consumer) ─────
 [[contract]]

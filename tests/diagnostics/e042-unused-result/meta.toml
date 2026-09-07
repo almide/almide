@@ -1,3 +1,6 @@
 expects_code = "E042"
 expects_error = "this statement discards a Result"
 hint_substring = "let _ = expr"
+# Back-link to the contract this case is the REFUSAL side of (#1994). The
+# harness ignores unknown keys; scripts/check-contracts.sh checks symmetry.
+contract = "C-217"

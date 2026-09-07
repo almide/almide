@@ -1,0 +1,24 @@
+# Dojo adversarial edit families — the pinned copy the contract ledger links to.
+#
+# One row per family, TAB-separated:
+#   dojo:<slug><TAB>C-NNN[,C-MMM]
+# The second column lists every contract whose `challenge` array names this
+# family; it may be empty while a family has no contract yet. The link is
+# BIDIRECTIONAL (scripts/check-contracts.sh rule (k), #1994): a contract that
+# names a family must appear in that family's row, and vice versa.
+#
+# The families are specified in almide/almide-dojo#3 (the contract-preserving
+# modification bank). Dojo's own gate reads this file to check that every family
+# it ships is a row here and every row here has a task family there. Add a row
+# when Dojo adds a family; never rename a slug in place (a rename is a new row,
+# and the old row is retired only once no contract names it).
+#
+# Lines beginning with '#' and blank lines are comments — the gate strips them.
+dojo:scope-escape
+dojo:fallible-producer	C-217
+dojo:early-recovery
+dojo:helper-extraction
+dojo:callback-retention
+dojo:nested-scopes
+dojo:representation-change
+dojo:port-evolution
