@@ -126,6 +126,7 @@ mod fs_meta;
 mod host_env;
 mod json_path_helpers;
 mod newtype;
+mod exit_plan;
 mod fuel;
 mod ranges;
 mod rc_ownership;

@@ -265,7 +265,6 @@ pub(crate) fn lower_fn(
             pool,
             locals: &locals,
             rc_param_ceiling: env_shift + params.len() as u32,
-            rc_droppable_params: Vec::new(),
             tail_release_allowed: false,
             rc_frame_params: Vec::new(),
             self_index,
@@ -444,27 +443,11 @@ pub(crate) fn lower_fn(
         // RC-3 epilogue: the fall-through exit releases every local the
         // Bind/Assign routes made an owner, then the droppable PARAMS —
         // the callee-owned half of the argument convention (call sites
-        // inc borrowed args; fresh temporaries are consumed here).
-        // Early returns and tail calls skip this — a leak, never a
-        // dangle. BTreeSet order keeps the release deterministic.
-        let owned = std::mem::take(&mut em.rc_owned);
-        for &idx in &owned {
-            em.f.instructions().local_get(idx).call(F_DEC_FLAT);
-            em.witness_dec(idx);
-        }
-        for (k, &(_, pty)) in params.iter().enumerate() {
-            // A param the Assign routes made an rc_owned member (the
-            // mut-param writeback) was released by the pass above —
-            // a second dec here is the #1770 double free.
-            if em.rc_droppable(pty) && !owned.contains(&(env_shift + k as u32)) {
-                // env_shift: a lifted lambda's raw param 0 is the closure
-                // ENV block — dec'ing it freed the closure after its
-                // first invoke (call_indirect then read a freelist
-                // pointer: "uninitialized element", the C-319 trio).
-                em.f.instructions().local_get(env_shift + k as u32).call(F_DEC_FLAT);
-                em.witness_dec(env_shift + k as u32);
-            }
-        }
+        // inc borrowed args; fresh temporaries are consumed here). The
+        // same ExitPlan the early-return and tail sites consume (#1995).
+        let plan = em.exit_plan(crate::exit_plan::Continuation::ReturnSuccess);
+        em.emit_exit(&plan);
+        em.rc_owned.clear();
         // The armed recorder's certificate goes to the sink — poisoned
         // or not (the floor test fails loudly on the sentinel).
         if let (Some(w), Some(name)) = (em.witness.take(), &witness_name) {
@@ -545,7 +528,7 @@ fn body_region_enter_var(body: &IrExpr) -> Option<VarId> {
     None
 }
 
-/// Fill the tail-site param-release set (calls.rs `emit_tail_param_release`).
+/// Fill the frame's droppable-param set and decide the tail-site release rule (exit_plan.rs).
 /// Sound by construction: ENTRY fns only, never lambdas, and only when the
 /// body derives no raw addresses — a `prim.*` call like `prim.handle(s)`
 /// hands the tail callee a raw pointer into a param's block, and releasing
@@ -587,9 +570,4 @@ fn populate_tail_release_set(
         return;
     }
     em.tail_release_allowed = true;
-    for (k, &(_, pty)) in params.iter().enumerate() {
-        if em.rc_droppable(pty) {
-            em.rc_droppable_params.push(env_shift + k as u32);
-        }
-    }
 }
