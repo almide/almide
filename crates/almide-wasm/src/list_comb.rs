@@ -113,8 +113,12 @@ impl Emitter<'_> {
         i.call(F_CONCAT).local_set(hacc);
         i.local_get(hc).i32_const(4).i32_add().local_set(hc);
         i.br(0).end().end();
-        i.local_get(hacc);
         let _ = i;
+        // The inner lists' handles were COPIED through the concats: the
+        // result takes one credit per element (intermediate spines leak,
+        // never dangle — fuzz 20260913).
+        self.emit_inc_elems(hacc, self.types.el(inner));
+        self.f.instructions().local_get(hacc);
         for _ in 0..3 {
             self.release_i32();
         }
