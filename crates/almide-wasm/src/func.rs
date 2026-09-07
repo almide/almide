@@ -267,6 +267,7 @@ pub(crate) fn lower_fn(
             rc_param_ceiling: env_shift + params.len() as u32,
             rc_droppable_params: Vec::new(),
             tail_release_allowed: false,
+            tail_release_fresh_only: false,
             self_index,
             rc_owned: std::collections::BTreeSet::new(),
             module_call_seq: 0,
@@ -557,10 +558,18 @@ fn populate_tail_release_set(
     params: &[(VarId, SliceTy)],
     body: &IrExpr,
 ) {
-    if cur_module.is_some() || env_shift != 0 || crate::rc_ownership::body_uses_prim(body) {
+    if env_shift != 0 || crate::rc_ownership::body_uses_prim(body) {
         return;
     }
-    em.tail_release_allowed = true;
+    // A module-space body releases at a tail site only when the callee
+    // is returns-fresh (#1990, fresh.rs): a prim-tier callee may hand
+    // back a VIEW of the param (the regex engine's capture buffer),
+    // and releasing under it printed freelist bytes.
+    if cur_module.is_some() {
+        em.tail_release_fresh_only = true;
+    } else {
+        em.tail_release_allowed = true;
+    }
     for (k, &(_, pty)) in params.iter().enumerate() {
         if em.rc_droppable(pty) {
             em.rc_droppable_params.push(env_shift + k as u32);

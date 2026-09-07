@@ -96,3 +96,41 @@ fn a_return_call_releases_the_owned_locals_before_the_jump() {
     // found by the phase-B1 witness: the local's stream ended `iam`).
     flat("let x = mk(i); take(x)", "    total = total + bind_then_tail(i)", "3000", "24000");
 }
+
+/// #1990 — a `bytes.append_*` loop must grow LINEARLY: the linked impl
+/// returns a fresh buffer on every call and the old one has to go.
+/// Before the fix the old buffer stayed at rc 1 on every append (the
+/// module-space wrapper never released its param at the tail site and a
+/// `prim.alloc_*` result carried an extra credit), so N=2000 peaked at
+/// 3.84× N=1000 — quadratic.
+fn append_heap(n: u32) -> (u64, String) {
+    let src = format!(
+        r#"effect fn main() -> Unit = {{
+  var b = bytes.new(0)
+  for i in 0..<{n} {{
+    bytes.append_u16_le(b, i)
+  }}
+  println("${{bytes.len(b)}}")
+}}
+"#
+    );
+    let ir = almide_spine::s5::lower_to_ir("append.almd", &src).expect("front");
+    let bytes = almide_wasm::emit_program(&ir).expect("the structural leg lowers the probe");
+    let out = run_wasm(&bytes).expect("run");
+    assert_eq!(out.exit, 0, "{}", out.stderr);
+    (out.heap_end.expect("__heap"), out.stdout.trim().to_string())
+}
+
+#[test]
+fn a_registry_tail_call_releases_its_owned_param() {
+    let (h1, o1) = append_heap(1000);
+    let (h2, o2) = append_heap(2000);
+    assert_eq!(o1, "2000");
+    assert_eq!(o2, "4000");
+    // Linear: doubling N at most doubles the live buffer (plus the fixed
+    // floor). The quadratic leak measured 3.84×.
+    assert!(
+        (h2 as f64) < 2.5 * (h1 as f64),
+        "bytes.append_* loop is not linear: N=1000 {h1} B, N=2000 {h2} B"
+    );
+}
