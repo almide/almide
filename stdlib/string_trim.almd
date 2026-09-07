@@ -6,13 +6,20 @@
 // decoding UTF-8 at the boundaries only; the middle is byte-copied verbatim.
 // (The first version was ASCII-only and left U+00A0/U+3000 etc. in place —
 // the C-021 divergence on the render_program path.) Self-contained helpers.
-// Decode the UTF-8 codepoint starting at `addr` → (codepoint, byte length).
-fn __trim_cp(addr: Int) -> (Int, Int) = {
+// Decode the UTF-8 codepoint starting at `addr` → codepoint * 4 + (byte length - 1),
+// ONE Int: a tuple here was a heap block per scanned codepoint, and the
+// structural leg has no drop glue for tuples yet (#2005 / #2010) — 64 B
+// leaked per `string.trim` call. `__trim_cp_of` / `__trim_cp_len` unpack.
+fn __trim_cp(addr: Int) -> Int = {
   let b0 = prim.load8(addr)
-  if b0 < 128 then (b0, 1)
-  else if b0 < 224 then ((b0 - 192) * 64 + (prim.load8(addr + 1) - 128), 2)
-  else if b0 < 240 then ((b0 - 224) * 4096 + (prim.load8(addr + 1) - 128) * 64 + (prim.load8(addr + 2) - 128), 3) else ((b0 - 240) * 262144 + (prim.load8(addr + 1) - 128) * 4096 + (prim.load8(addr + 2) - 128) * 64 + (prim.load8(addr + 3) - 128), 4)
+  if b0 < 128 then b0 * 4
+  else if b0 < 224 then ((b0 - 192) * 64 + (prim.load8(addr + 1) - 128)) * 4 + 1
+  else if b0 < 240 then ((b0 - 224) * 4096 + (prim.load8(addr + 1) - 128) * 64 + (prim.load8(addr + 2) - 128)) * 4 + 2 else ((b0 - 240) * 262144 + (prim.load8(addr + 1) - 128) * 4096 + (prim.load8(addr + 2) - 128) * 64 + (prim.load8(addr + 3) - 128)) * 4 + 3
 }
+
+fn __trim_cp_of(packed: Int) -> Int = packed / 4
+
+fn __trim_cp_len(packed: Int) -> Int = packed % 4 + 1
 
 // The byte index where the codepoint containing byte `i` begins: step back
 // over UTF-8 continuation bytes (0b10xxxxxx = 128..191).
@@ -39,16 +46,15 @@ else if c == 12288 then true else false
 // First non-WS byte address scanning forward from `addr` (codepoint steps).
 fn __trim_start(addr: Int, end: Int) -> Int = if addr >= end then addr
 else {
-  let (cp, l) = __trim_cp(addr)
-  if __trim_is_uws(cp) then __trim_start(addr + l, end) else addr
+  let packed = __trim_cp(addr)
+  if __trim_is_uws(__trim_cp_of(packed)) then __trim_start(addr + __trim_cp_len(packed), end) else addr
 }
 
 // Address just past the last non-WS codepoint scanning backward from `end`.
 fn __trim_end(start: Int, end: Int) -> Int = if end <= start then end
 else {
   let cb = __trim_cp_begin(start, end - 1)
-  let (cp, _l) = __trim_cp(cb)
-  if __trim_is_uws(cp) then __trim_end(start, cb) else end
+  if __trim_is_uws(__trim_cp_of(__trim_cp(cb))) then __trim_end(start, cb) else end
 }
 
 fn __trim_copy(src: Int, dst: Int, len: Int) -> Int = if len <= 0 then dst
