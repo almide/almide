@@ -10,7 +10,7 @@ use crate::*;
 
 impl Emitter<'_> {
     /// some(last) or none (native `xs.last().cloned()`).
-    pub(crate) fn lower_list_last(&mut self, xs: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    pub(crate) fn lower_list_last(&mut self, xs: &IrExpr) -> ArmResult {
         let h = match self.lower(xs, None)? {
             SliceTy::List(h) => h,
             other => return unsup(&format!("list-last-of:{other:?}")),
@@ -34,12 +34,12 @@ impl Emitter<'_> {
         self.f.instructions().local_get(hr).end();
         self.release_i32();
         self.release_i32();
-        Ok(Some(SliceTy::Option(self.types.intern(elem))))
+        Ok(Some(Lowered::view(SliceTy::Option(self.types.intern(elem)))))
     }
 
     /// Sequential product (native: Int wrapping_mul fold from 1;
     /// Float `iter().product()` — the same left fold from 1.0).
-    pub(crate) fn lower_list_product(&mut self, xs: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    pub(crate) fn lower_list_product(&mut self, xs: &IrExpr) -> ArmResult {
         let h = match self.lower(xs, None)? {
             SliceTy::List(h) => h,
             other => return unsup(&format!("list-product-of:{other:?}")),
@@ -84,11 +84,11 @@ impl Emitter<'_> {
         }
         self.release_i32();
         self.release_i32();
-        Ok(Some(elem))
+        Ok(Some(Lowered::scalar(elem)))
     }
 
     /// Concat of the inner lists, in order.
-    pub(crate) fn lower_list_flatten(&mut self, xs: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    pub(crate) fn lower_list_flatten(&mut self, xs: &IrExpr) -> ArmResult {
         let h = match self.lower(xs, None)? {
             SliceTy::List(h) => h,
             other => return unsup(&format!("list-flatten-of:{other:?}")),
@@ -115,12 +115,12 @@ impl Emitter<'_> {
         for _ in 0..3 {
             self.release_i32();
         }
-        Ok(Some(SliceTy::List(inner)))
+        Ok(Some(Lowered::owned(SliceTy::List(inner))))
     }
 
     /// Sequential sum (native: Int wrapping fold from 0; Float
     /// `iter().sum()` — the same left fold from 0.0).
-    pub(crate) fn lower_list_sum(&mut self, xs: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    pub(crate) fn lower_list_sum(&mut self, xs: &IrExpr) -> ArmResult {
         let h = match self.lower(xs, None)? {
             SliceTy::List(h) => h,
             other => return unsup(&format!("list-sum-of:{other:?}")),
@@ -165,12 +165,12 @@ impl Emitter<'_> {
         }
         self.release_i32();
         self.release_i32();
-        Ok(Some(elem))
+        Ok(Some(Lowered::scalar(elem)))
     }
 
     /// CONSECUTIVE dedup (native `r.last() != Some(x)` — unlike unique,
     /// only adjacent equals fold).
-    pub(crate) fn lower_list_dedup(&mut self, xs: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    pub(crate) fn lower_list_dedup(&mut self, xs: &IrExpr) -> ArmResult {
         let h = match self.lower(xs, None)? {
             SliceTy::List(h) => h,
             other => return unsup(&format!("list-dedup-of:{other:?}")),
@@ -262,7 +262,7 @@ impl Emitter<'_> {
         for _ in 0..3 {
             self.release_i32();
         }
-        Ok(Some(SliceTy::List(h)))
+        Ok(Some(Lowered::owned(SliceTy::List(h))))
     }
 
     /// Suffix after the first false (native skip_while: the callback
@@ -271,7 +271,7 @@ impl Emitter<'_> {
         &mut self,
         xs: &IrExpr,
         cb: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let (params, body) = self.hof_lambda(cb, 1)?;
         let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
         let hacc = self.hold_i32()?;
@@ -301,7 +301,7 @@ impl Emitter<'_> {
         for _ in 0..5 {
             self.release_i32();
         }
-        Ok(Some(SliceTy::List(self.types.intern(elem))))
+        Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(elem)))))
     }
 
     /// Exists (native `iter().any`): the first true wins, empty = false.
@@ -309,7 +309,7 @@ impl Emitter<'_> {
         &mut self,
         xs: &IrExpr,
         cb: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let (params, body) = self.hof_lambda(cb, 1)?;
         let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
         let hr = self.hold_i32()?;
@@ -326,7 +326,7 @@ impl Emitter<'_> {
         for _ in 0..4 {
             self.release_i32();
         }
-        Ok(Some(BOOL))
+        Ok(Some(Lowered::scalar(BOOL)))
     }
 
     /// Forall (native `iter().all`): the first false wins, empty = true.
@@ -334,7 +334,7 @@ impl Emitter<'_> {
         &mut self,
         xs: &IrExpr,
         cb: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let (params, body) = self.hof_lambda(cb, 1)?;
         let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
         let hr = self.hold_i32()?;
@@ -351,7 +351,7 @@ impl Emitter<'_> {
         for _ in 0..4 {
             self.release_i32();
         }
-        Ok(Some(BOOL))
+        Ok(Some(Lowered::scalar(BOOL)))
     }
 
     /// Matching-element count (native `filter().count()` — every element
@@ -360,7 +360,7 @@ impl Emitter<'_> {
         &mut self,
         xs: &IrExpr,
         cb: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let (params, body) = self.hof_lambda(cb, 1)?;
         let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
         let hn = self.hold_i64()?;
@@ -377,7 +377,7 @@ impl Emitter<'_> {
         for _ in 0..3 {
             self.release_i32();
         }
-        Ok(Some(INT))
+        Ok(Some(Lowered::scalar(INT)))
     }
 
     /// Prefix while true (the callback runs through the FIRST false).
@@ -385,7 +385,7 @@ impl Emitter<'_> {
         &mut self,
         xs: &IrExpr,
         cb: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let (params, body) = self.hof_lambda(cb, 1)?;
         let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
         let hacc = self.hold_i32()?;
@@ -408,7 +408,7 @@ impl Emitter<'_> {
         for _ in 0..4 {
             self.release_i32();
         }
-        Ok(Some(SliceTy::List(self.types.intern(elem))))
+        Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(elem)))))
     }
 
     /// some(fold-from-first) or none (native `into_iter().reduce`).
@@ -416,7 +416,7 @@ impl Emitter<'_> {
         &mut self,
         xs: &IrExpr,
         cb: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let (params, body) = self.hof_lambda(cb, 2)?;
         let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
         let hr = self.hold_i32()?;
@@ -448,7 +448,7 @@ impl Emitter<'_> {
         for _ in 0..4 {
             self.release_i32();
         }
-        Ok(Some(SliceTy::Option(self.types.intern(elem))))
+        Ok(Some(Lowered::view(SliceTy::Option(self.types.intern(elem)))))
     }
 
     /// Running-accumulator list (native scan: push EVERY new acc).
@@ -457,7 +457,7 @@ impl Emitter<'_> {
         xs: &IrExpr,
         init: &IrExpr,
         cb: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let (params, body) = self.hof_lambda(cb, 2)?;
         let b_ty = self.infer(body)?;
         self.lower(init, Some(b_ty))?;
@@ -483,7 +483,7 @@ impl Emitter<'_> {
         for _ in 0..4 {
             self.release_i32();
         }
-        Ok(Some(SliceTy::List(self.types.intern(b_ty))))
+        Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(b_ty)))))
     }
 
     /// Pairs to the SHORTER length (native zip); zip_with maps the pair
@@ -493,7 +493,7 @@ impl Emitter<'_> {
         a: &IrExpr,
         b: &IrExpr,
         cb: Option<&IrExpr>,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let (params, body) = match cb {
             Some(cb) => {
                 let (p, bd) = self.hof_lambda(cb, 2)?;
@@ -587,11 +587,11 @@ impl Emitter<'_> {
         for _ in 0..5 {
             self.release_i32();
         }
-        Ok(Some(SliceTy::List(self.types.intern(out_ty))))
+        Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(out_ty)))))
     }
 
     /// First-seen order dedup (native nested contains walk).
-    pub(crate) fn lower_list_unique(&mut self, xs: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    pub(crate) fn lower_list_unique(&mut self, xs: &IrExpr) -> ArmResult {
         let h = match self.lower(xs, None)? {
             SliceTy::List(h) => h,
             other => return unsup(&format!("list-unique-of:{other:?}")),
@@ -687,7 +687,7 @@ impl Emitter<'_> {
         for _ in 0..5 {
             self.release_i32();
         }
-        Ok(Some(SliceTy::List(h)))
+        Ok(Some(Lowered::owned(SliceTy::List(h))))
     }
 
     /// sep between every pair (native intersperse).
@@ -695,7 +695,7 @@ impl Emitter<'_> {
         &mut self,
         xs: &IrExpr,
         sep: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let h = match self.lower(xs, None)? {
             SliceTy::List(h) => h,
             other => return unsup(&format!("list-intersperse-of:{other:?}")),
@@ -744,6 +744,6 @@ impl Emitter<'_> {
         self.release_i32();
         self.release_val(elem);
         self.release_i32();
-        Ok(Some(SliceTy::List(h)))
+        Ok(Some(Lowered::owned(SliceTy::List(h))))
     }
 }

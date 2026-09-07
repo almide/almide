@@ -64,7 +64,7 @@ impl Emitter<'_> {
         xs: &IrExpr,
         init: &IrExpr,
         cb: &IrExpr,
-    ) -> Result<Option<Option<SliceTy>>, EmitError> {
+    ) -> Result<Option<Option<Lowered>>, EmitError> {
         // Walk the chain source-side: fold(filter(map(src))).
         let mut stages_rev: Vec<Stage> = Vec::new();
         let mut cur = xs;
@@ -170,6 +170,6 @@ impl Emitter<'_> {
         self.release_i32();
         self.release_i32();
         self.release_i32();
-        Ok(Some(Some(acc_ty)))
+        Ok(Some(Some(Lowered::owned(acc_ty))))
     }
 }

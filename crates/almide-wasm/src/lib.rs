@@ -127,6 +127,8 @@ mod host_env;
 mod json_path_helpers;
 mod newtype;
 mod arg_temps;
+mod arm;
+pub(crate) use arm::{ArmResult, Lowered, Own};
 mod exit_plan;
 mod fuel;
 mod ranges;

@@ -11,7 +11,7 @@ use crate::*;
 impl Emitter<'_> {
 
     /// mut pop: some(last) + shrunken-copy write-back.
-    fn lower_list_pop(&mut self, xs: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_list_pop(&mut self, xs: &IrExpr) -> ArmResult {
         {
 
                 let IrExprKind::Var { id } = &xs.kind else {
@@ -63,7 +63,7 @@ impl Emitter<'_> {
                 for _ in 0..4 {
                     self.release_i32();
                 }
-                Ok(Some(SliceTy::Option(self.types.intern(elem))))
+                Ok(Some(Lowered::view(SliceTy::Option(self.types.intern(elem)))))
         }
     }
 
@@ -72,7 +72,7 @@ impl Emitter<'_> {
         func: &str,
         args: &[IrExpr],
         ret_hint: Option<SliceTy>,
-    ) -> Result<Option<Option<SliceTy>>, EmitError> {
+    ) -> Result<Option<Option<Lowered>>, EmitError> {
         let _ = &ret_hint;
         match (func, args) {
             ("pop", [xs]) => self.lower_list_pop(xs),
@@ -222,7 +222,7 @@ impl Emitter<'_> {
                     Hx::F64(_) => self.release_f64(),
                     Hx::I32(_) => self.release_i32(),
                 }
-                Ok(Some(SliceTy::List(self.types.intern(elem))))
+                Ok(Some(Lowered::view(SliceTy::List(self.types.intern(elem)))))
             }
             // Capacity is a HINT (native clamps it and the backing
             // buffer is unobservable) — the value is the empty list.
@@ -232,7 +232,7 @@ impl Emitter<'_> {
                 };
                 self.lower(n, Some(INT))?;
                 self.f.instructions().drop().i32_const(0).call(F_ALLOC);
-                Ok(Some(SliceTy::List(h)))
+                Ok(Some(Lowered::owned(SliceTy::List(h))))
             }
             ("is_empty", [xs]) => {
                 match self.lower(xs, None)? {
@@ -240,7 +240,7 @@ impl Emitter<'_> {
                     other => return unsup(&format!("list-is-empty-of:{other:?}")),
                 }
                 self.f.instructions().i32_load(len_memarg()).i32_eqz();
-                Ok(Some(BOOL))
+                Ok(Some(Lowered::scalar(BOOL)))
             }
             _ => return Ok(None),
         }

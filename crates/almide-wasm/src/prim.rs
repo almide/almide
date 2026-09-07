@@ -20,7 +20,7 @@ impl Emitter<'_> {
         &mut self,
         func: &str,
         args: &[IrExpr],
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         match (func, args) {
             // handle: any BLOCK value's base address as Int.
             ("handle", [x]) => {
@@ -37,22 +37,22 @@ impl Emitter<'_> {
                     other => return unsup(&format!("prim-handle-of:{other:?}")),
                 }
                 self.f.instructions().i64_extend_i32_u();
-                Ok(Some(INT))
+                Ok(Some(Lowered::scalar(INT)))
             }
             ("load8", [a]) => {
                 self.lower(a, Some(INT))?;
                 self.f.instructions().i32_wrap_i64().i32_load8_u(raw(())).i64_extend_i32_u();
-                Ok(Some(INT))
+                Ok(Some(Lowered::scalar(INT)))
             }
             ("load32", [a]) => {
                 self.lower(a, Some(INT))?;
                 self.f.instructions().i32_wrap_i64().i32_load(raw(())).i64_extend_i32_u();
-                Ok(Some(INT))
+                Ok(Some(Lowered::scalar(INT)))
             }
             ("load64", [a]) => {
                 self.lower(a, Some(INT))?;
                 self.f.instructions().i32_wrap_i64().i64_load(raw(()));
-                Ok(Some(INT))
+                Ok(Some(Lowered::scalar(INT)))
             }
             ("store8", [a, v]) => {
                 self.lower(a, Some(INT))?;
@@ -78,7 +78,7 @@ impl Emitter<'_> {
             // RawPtr <-> Int identity casts (both are the i64 address).
             ("int_to_ptr" | "ptr_to_int", [x]) => {
                 self.lower(x, Some(INT))?;
-                Ok(Some(INT))
+                Ok(Some(Lowered::scalar(INT)))
             }
             // Host entropy (C-112): n bytes written at address p via the
             // fs_call boundary (op 32) + host_read; returns 0.
@@ -92,7 +92,7 @@ impl Emitter<'_> {
         &mut self,
         func: &str,
         args: &[IrExpr],
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         match (func, args) {
             ("random_get", [p, n]) => {
                 self.lower(p, Some(INT))?;
@@ -113,33 +113,33 @@ impl Emitter<'_> {
                 let _ = i;
                 self.release_i64();
                 self.release_i64();
-                Ok(Some(INT))
+                Ok(Some(Lowered::scalar(INT)))
             }
             ("alloc_bytes", [n]) => {
                 self.lower(n, Some(INT))?;
                 self.emit_alloc_size_guard(1)?;
                 self.f.instructions().i32_wrap_i64().call(F_ALLOC);
-                Ok(Some(SliceTy::Scalar(Scalar::Bytes)))
+                Ok(Some(Lowered::owned(SliceTy::Scalar(Scalar::Bytes))))
             }
             ("alloc_str", [n]) => {
                 self.lower(n, Some(INT))?;
                 self.emit_alloc_size_guard(1)?;
                 self.f.instructions().i32_wrap_i64().call(F_ALLOC);
-                Ok(Some(STR))
+                Ok(Some(Lowered::owned(STR)))
             }
             ("alloc_list", [n]) => {
                 // List[Int]: n slots of 8 bytes.
                 self.lower(n, Some(INT))?;
                 self.emit_alloc_size_guard(8)?;
                 self.f.instructions().i32_wrap_i64().i32_const(8).i32_mul().call(F_ALLOC);
-                Ok(Some(SliceTy::List(self.types.intern(INT))))
+                Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(INT)))))
             }
             ("alloc_list_f64", [n]) => {
                 // List[Float]: the same 8-byte slots, Float-typed.
                 self.lower(n, Some(INT))?;
                 self.emit_alloc_size_guard(8)?;
                 self.f.instructions().i32_wrap_i64().i32_const(8).i32_mul().call(F_ALLOC);
-                Ok(Some(SliceTy::List(self.types.intern(FLOAT))))
+                Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(FLOAT)))))
             }
             ("band", [a, b]) | ("bor", [a, b]) | ("bxor", [a, b]) | ("bshl", [a, b])
             | ("bshr", [a, b]) | ("bshr_u", [a, b]) => {
@@ -154,7 +154,7 @@ impl Emitter<'_> {
                     "bshr" => i.i64_shr_s(),
                     _ => i.i64_shr_u(),
                 };
-                Ok(Some(INT))
+                Ok(Some(Lowered::scalar(INT)))
             }
             ("f2f32" | "f32_2f" | "i2f32" | "f32bits" | "bits_to_f32", _) => {
                 self.lower_prim_f32(func, args)
@@ -212,28 +212,28 @@ impl Emitter<'_> {
         &mut self,
         func: &str,
         args: &[IrExpr],
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         match (func, args) {
             ("i2f", [a]) => {
                 self.lower(a, Some(INT))?;
                 self.f.instructions().f64_convert_i64_s();
-                Ok(Some(FLOAT))
+                Ok(Some(Lowered::scalar(FLOAT)))
             }
             // Rust `as i64` semantics = saturating truncation.
             ("f2i", [a]) => {
                 self.lower(a, Some(FLOAT))?;
                 self.f.instructions().i64_trunc_sat_f64_s();
-                Ok(Some(INT))
+                Ok(Some(Lowered::scalar(INT)))
             }
             ("fbits", [a]) => {
                 self.lower(a, Some(FLOAT))?;
                 self.f.instructions().i64_reinterpret_f64();
-                Ok(Some(INT))
+                Ok(Some(Lowered::scalar(INT)))
             }
             ("ffrombits", [a]) => {
                 self.lower(a, Some(INT))?;
                 self.f.instructions().f64_reinterpret_i64();
-                Ok(Some(FLOAT))
+                Ok(Some(Lowered::scalar(FLOAT)))
             }
             ("fadd", [a, b]) | ("fsub", [a, b]) | ("fmul", [a, b]) | ("fdiv", [a, b]) => {
                 self.lower(a, Some(FLOAT))?;
@@ -245,7 +245,7 @@ impl Emitter<'_> {
                     "fmul" => i.f64_mul(),
                     _ => i.f64_div(),
                 };
-                Ok(Some(FLOAT))
+                Ok(Some(Lowered::scalar(FLOAT)))
             }
             _ => self.lower_prim_float_b(func, args),
         }
@@ -257,16 +257,16 @@ impl Emitter<'_> {
         &mut self,
         func: &str,
         args: &[IrExpr],
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         match (func, args) {
             ("f2f32", [a]) => {
                 self.lower(a, Some(FLOAT))?;
                 self.f.instructions().f32_demote_f64().f64_promote_f32();
-                Ok(Some(FLOAT))
+                Ok(Some(Lowered::scalar(FLOAT)))
             }
             ("f32_2f", [a]) => {
                 self.lower(a, Some(FLOAT))?;
-                Ok(Some(FLOAT))
+                Ok(Some(Lowered::scalar(FLOAT)))
             }
             // i64 → f32 DIRECTLY (single rounding — native's `n as f32`
             // and the incumbent's f32.convert_i64_s), then widened onto
@@ -278,17 +278,17 @@ impl Emitter<'_> {
             ("i2f32", [a]) => {
                 self.lower(a, Some(INT))?;
                 self.f.instructions().f32_convert_i64_s().f64_promote_f32();
-                Ok(Some(FLOAT))
+                Ok(Some(Lowered::scalar(FLOAT)))
             }
             ("f32bits", [a]) => {
                 self.lower(a, Some(FLOAT))?;
                 self.f.instructions().f32_demote_f64().i32_reinterpret_f32().i64_extend_i32_u();
-                Ok(Some(INT))
+                Ok(Some(Lowered::scalar(INT)))
             }
             ("bits_to_f32", [a]) => {
                 self.lower(a, Some(INT))?;
                 self.f.instructions().i32_wrap_i64().f32_reinterpret_i32().f64_promote_f32();
-                Ok(Some(FLOAT))
+                Ok(Some(Lowered::scalar(FLOAT)))
             }
             _ => unsup(&format!("call:prim.{func}")),
         }
@@ -302,40 +302,40 @@ impl Emitter<'_> {
         &mut self,
         func: &str,
         args: &[IrExpr],
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         match (func, args) {
             ("fceil", [a]) => {
                 self.lower(a, Some(FLOAT))?;
                 self.f.instructions().f64_ceil();
-                Ok(Some(FLOAT))
+                Ok(Some(Lowered::scalar(FLOAT)))
             }
             ("ffloor", [a]) => {
                 self.lower(a, Some(FLOAT))?;
                 self.f.instructions().f64_floor();
-                Ok(Some(FLOAT))
+                Ok(Some(Lowered::scalar(FLOAT)))
             }
             ("fneg", [a]) => {
                 self.lower(a, Some(FLOAT))?;
                 self.f.instructions().f64_neg();
-                Ok(Some(FLOAT))
+                Ok(Some(Lowered::scalar(FLOAT)))
             }
             ("fabs", [a]) => {
                 self.lower(a, Some(FLOAT))?;
                 self.f.instructions().f64_abs();
-                Ok(Some(FLOAT))
+                Ok(Some(Lowered::scalar(FLOAT)))
             }
             // f64.sqrt is IEEE-correctly-rounded on every target — the
             // one transcendental wasm itself guarantees bit-exact.
             ("fsqrt", [a]) => {
                 self.lower(a, Some(FLOAT))?;
                 self.f.instructions().f64_sqrt();
-                Ok(Some(FLOAT))
+                Ok(Some(Lowered::scalar(FLOAT)))
             }
             ("fcopysign", [a, b]) => {
                 self.lower(a, Some(FLOAT))?;
                 self.lower(b, Some(FLOAT))?;
                 self.f.instructions().f64_copysign();
-                Ok(Some(FLOAT))
+                Ok(Some(Lowered::scalar(FLOAT)))
             }
             ("feq", [a, b]) | ("fne", [a, b]) | ("flt", [a, b]) | ("fle", [a, b])
             | ("fgt", [a, b]) | ("fge", [a, b]) => {
@@ -350,7 +350,7 @@ impl Emitter<'_> {
                     "fgt" => i.f64_gt(),
                     _ => i.f64_ge(),
                 };
-                Ok(Some(BOOL))
+                Ok(Some(Lowered::scalar(BOOL)))
             }
             _ => unsup(&format!("call:prim.{func}")),
         }

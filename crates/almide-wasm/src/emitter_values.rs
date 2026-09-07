@@ -185,7 +185,7 @@ impl Emitter<'_> {
                     def_id: None,
                 };
                 match self.lower_map_call("from_list", &[pairs], Some(ty))? {
-                    Some(t) => Ok(t),
+                    Some(t) => Ok(t.ty),
                     None => unsup("map-literal-unit"),
                 }
     }

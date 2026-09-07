@@ -58,7 +58,7 @@ impl Emitter<'_> {
 
     /// lines: `b.lines()` — pieces between `\n` bytes, the trailing
     /// piece only when non-empty (native `if start < b.len()`).
-    pub(crate) fn lower_bytes_lines(&mut self, b: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    pub(crate) fn lower_bytes_lines(&mut self, b: &IrExpr) -> ArmResult {
         self.lower(b, Some(BYTES))?;
         let hb = self.hold_i32()?;
         let hn = self.hold_i32()?;
@@ -107,7 +107,7 @@ impl Emitter<'_> {
         for _ in 0..8 {
             self.release_i32();
         }
-        Ok(Some(SliceTy::List(self.types.intern(BYTES))))
+        Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(BYTES)))))
     }
 
     /// Leaves `1` on the stack when the needle's bytes equal the haystack
@@ -133,7 +133,7 @@ impl Emitter<'_> {
     /// split: `b.split(sep)` — an empty separator yields `[copy of b]`;
     /// otherwise the non-overlapping left-to-right scan, the tail piece
     /// always pushed (native `out.push(b[start..].to_vec())`).
-    pub(crate) fn lower_bytes_split(&mut self, b: &IrExpr, sep: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    pub(crate) fn lower_bytes_split(&mut self, b: &IrExpr, sep: &IrExpr) -> ArmResult {
         self.lower(b, Some(BYTES))?;
         let hb = self.hold_i32()?;
         self.f.instructions().local_set(hb);
@@ -205,6 +205,6 @@ impl Emitter<'_> {
         for _ in 0..12 {
             self.release_i32();
         }
-        Ok(Some(SliceTy::List(self.types.intern(BYTES))))
+        Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(BYTES)))))
     }
 }

@@ -13,7 +13,7 @@ impl Emitter<'_> {
         func: &str,
         args: &[IrExpr],
         ret_hint: Option<SliceTy>,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         match (func, args) {
             ("union" | "intersection" | "difference", [a, b]) => {
                 self.lower_set_algebra(func, a, b)
@@ -21,7 +21,7 @@ impl Emitter<'_> {
             // filter: order-preserving subset — the list machinery applies
             // verbatim (hof_loop_open accepts Set), only the tag differs.
             ("filter", [s, cb]) => match self.lower_list_filter(s, cb)? {
-                Some(SliceTy::List(h)) => Ok(Some(SliceTy::Set(h))),
+                Some(Lowered { ty: SliceTy::List(h), .. }) => Ok(Some(Lowered::owned(SliceTy::Set(h)))),
                 other => Ok(other),
             },
             // is_subset: every member of a found in b; is_disjoint: none.
@@ -51,7 +51,7 @@ impl Emitter<'_> {
         func: &str,
         a: &IrExpr,
         b: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let e = match self.lower(a, None)? {
             SliceTy::Set(h) => self.types.el(h),
             other => return unsup(&format!("set-op-of:{other:?}")),
@@ -163,11 +163,11 @@ impl Emitter<'_> {
         for _ in 0..6 {
             self.release_i32();
         }
-        Ok(Some(SliceTy::Set(self.types.intern(e))))
+        Ok(Some(Lowered::owned(SliceTy::Set(self.types.intern(e)))))
     }
 
     /// is_subset: every member of a found in b; is_disjoint: none.
-    fn lower_set_relation(&mut self, func: &str, a: &IrExpr, b: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_set_relation(&mut self, func: &str, a: &IrExpr, b: &IrExpr) -> ArmResult {
         let want_found = i32::from(func == "is_subset");
         let e = match self.lower(a, None)? {
             SliceTy::Set(h) => self.types.el(h),
@@ -215,11 +215,11 @@ impl Emitter<'_> {
         for _ in 0..5 {
             self.release_i32();
         }
-        Ok(Some(BOOL))
+        Ok(Some(Lowered::scalar(BOOL)))
     }
 
     /// remove: the set minus one member (a plain copy when absent).
-    fn lower_set_remove(&mut self, s: &IrExpr, x: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_set_remove(&mut self, s: &IrExpr, x: &IrExpr) -> ArmResult {
         let (sh, _xh, eh, e) = self.set_scan(s, x)?;
         let stride = e.slot_size() as i32;
         let ho = self.hold_i32()?;
@@ -261,12 +261,12 @@ impl Emitter<'_> {
         self.release_i32(); // eh
         self.release_for(e);
         self.release_i32(); // sh
-        Ok(Some(SliceTy::Set(self.types.intern(e))))
+        Ok(Some(Lowered::owned(SliceTy::Set(self.types.intern(e)))))
     }
 
     /// (a - b) ++ (b - a): the two filters are DISJOINT, so the
     /// concatenation is already deduped.
-    fn lower_set_symdiff(&mut self, a: &IrExpr, b: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_set_symdiff(&mut self, a: &IrExpr, b: &IrExpr) -> ArmResult {
         let e = match self.lower(a, None)? {
             SliceTy::Set(h) => self.types.el(h),
             other => return unsup(&format!("set-op-of:{other:?}")),
@@ -335,11 +335,11 @@ impl Emitter<'_> {
         for _ in 0..6 {
             self.release_i32();
         }
-        Ok(Some(SliceTy::Set(self.types.intern(e))))
+        Ok(Some(Lowered::owned(SliceTy::Set(self.types.intern(e)))))
     }
 
     /// Transform + first-seen dedup (a set stays a set).
-    fn lower_set_hof_map(&mut self, s: &IrExpr, cb: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_set_hof_map(&mut self, s: &IrExpr, cb: &IrExpr) -> ArmResult {
         let (params, body) = self.hof_lambda(cb, 1)?;
         let e = match self.lower(s, None)? {
             SliceTy::Set(h) => self.types.el(h),
@@ -397,7 +397,7 @@ impl Emitter<'_> {
         for _ in 0..4 {
             self.release_i32();
         }
-        Ok(Some(SliceTy::Set(self.types.intern(b_ty))))
+        Ok(Some(Lowered::owned(SliceTy::Set(self.types.intern(b_ty)))))
     }
 
     fn set_scan(&mut self, s: &IrExpr, x: &IrExpr) -> Result<(u32, u32, u32, SliceTy), EmitError> {
@@ -432,14 +432,14 @@ impl Emitter<'_> {
         func: &str,
         args: &[IrExpr],
         ret_hint: Option<SliceTy>,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         match (func, args) {
             ("new", []) => {
                 let Some(ty @ SliceTy::Set(_)) = ret_hint else {
                     return unsup("set-new-needs-context");
                 };
                 self.f.instructions().i32_const(0).call(F_ALLOC);
-                Ok(Some(ty))
+                Ok(Some(Lowered::owned(ty)))
             }
             ("len", [s]) => {
                 let e = match self.lower(s, None)? {
@@ -452,7 +452,7 @@ impl Emitter<'_> {
                     .i32_const(e.slot_size() as i32)
                     .i32_div_u()
                     .i64_extend_i32_u();
-                Ok(Some(INT))
+                Ok(Some(Lowered::scalar(INT)))
             }
             // #1423 stage 4: is_empty = the len slot at zero (stride-free).
             ("is_empty", [s]) => {
@@ -460,7 +460,7 @@ impl Emitter<'_> {
                     return unsup("set-op-of:non-set");
                 }
                 self.f.instructions().i32_load(len_memarg()).i32_eqz();
-                Ok(Some(BOOL))
+                Ok(Some(Lowered::scalar(BOOL)))
             }
             ("to_list", [s]) => {
                 // Layout-identical; sharing the base is unobservable
@@ -469,7 +469,7 @@ impl Emitter<'_> {
                     SliceTy::Set(h) => self.types.el(h),
                     other => return unsup(&format!("set-op-of:{other:?}")),
                 };
-                Ok(Some(SliceTy::List(self.types.intern(e))))
+                Ok(Some(Lowered::view(SliceTy::List(self.types.intern(e)))))
             }
             ("contains", [s, x]) => {
                 let (_sh, _xh, eh, e) = self.set_scan(s, x)?;
@@ -477,7 +477,7 @@ impl Emitter<'_> {
                 self.release_i32(); // eh
                 self.release_for(e);
                 self.release_i32(); // sh
-                Ok(Some(BOOL))
+                Ok(Some(Lowered::scalar(BOOL)))
             }
             ("insert", [s, x]) => {
                 let (sh, xh, eh, e) = self.set_scan(s, x)?;
@@ -507,7 +507,7 @@ impl Emitter<'_> {
                 self.release_i32(); // eh
                 self.release_for(e);
                 self.release_i32(); // sh
-                Ok(Some(SliceTy::Set(self.types.intern(e))))
+                Ok(Some(Lowered::owned(SliceTy::Set(self.types.intern(e)))))
             }
             // The set IS an insertion-ordered flat array (to_list is a
             // cast), so fold walks it exactly like map.fold walks entries.
@@ -554,7 +554,7 @@ impl Emitter<'_> {
                 self.release_i32();
                 self.release_i32();
                 self.release_i32();
-                Ok(Some(b))
+                Ok(Some(Lowered::view(b)))
             }
             ("from_list", [xs]) => {
                 let e = match self.lower(xs, None)? {
@@ -636,7 +636,7 @@ impl Emitter<'_> {
                 self.release_i32();
                 self.release_i32();
                 self.release_i32();
-                Ok(Some(SliceTy::Set(self.types.intern(e))))
+                Ok(Some(Lowered::owned(SliceTy::Set(self.types.intern(e)))))
             }
             _ => self.lower_linked_call("set", func, args, false),
         }

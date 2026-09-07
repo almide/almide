@@ -66,7 +66,7 @@ impl Emitter<'_> {
         func: &str,
         m: &IrExpr,
         e_arg: Option<&IrExpr>,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let (hm, hr, hc) = self.mat_open(m)?;
         let he = self.hold_f64()?;
         if let Some(e) = e_arg {
@@ -105,14 +105,14 @@ impl Emitter<'_> {
         for _ in 0..3 {
             self.release_i32();
         }
-        Ok(Some(SliceTy::Matrix))
+        Ok(Some(Lowered::owned(SliceTy::Matrix)))
     }
 
     /// softmax_rows: per row — max scan (init row[0], `>` keeps NaN out),
     /// fast-exp(x − max) into out, LEFT-TO-RIGHT sum, then RECIPROCAL
     /// MULTIPLY (#1197); a bad sum (≤0 or NaN) yields the uniform 1/n row.
     /// A zero-width matrix loops over nothing per row — no special case.
-    pub(crate) fn lower_matrix_softmax(&mut self, m: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    pub(crate) fn lower_matrix_softmax(&mut self, m: &IrExpr) -> ArmResult {
         let fe = self.work.helper(Helper::FastExp);
         let (hm, hr, hc) = self.mat_open(m)?;
         let ho = self.mat_alloc_out(hr, hc)?;
@@ -188,7 +188,7 @@ impl Emitter<'_> {
         for _ in 0..8 {
             self.release_i32();
         }
-        Ok(Some(SliceTy::Matrix))
+        Ok(Some(Lowered::owned(SliceTy::Matrix)))
     }
 
     /// rms_norm_rows: inv = 1/√(Σx²/c + eps) over the FULL row; the
@@ -199,7 +199,7 @@ impl Emitter<'_> {
         m: &IrExpr,
         gamma: &IrExpr,
         eps: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let (hm, hr, hc) = self.mat_open(m)?;
         match self.lower(gamma, None)? {
             SliceTy::List(h) if self.types.el(h) == FLOAT => {}
@@ -286,6 +286,6 @@ impl Emitter<'_> {
         for _ in 0..3 {
             self.release_i32();
         }
-        Ok(Some(SliceTy::Matrix))
+        Ok(Some(Lowered::owned(SliceTy::Matrix)))
     }
 }

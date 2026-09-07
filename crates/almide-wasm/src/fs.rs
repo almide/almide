@@ -35,7 +35,7 @@ impl Emitter<'_> {
         &mut self,
         func: &str,
         args: &[IrExpr],
-    ) -> Result<Option<Option<SliceTy>>, EmitError> {
+    ) -> Result<Option<Option<Lowered>>, EmitError> {
         let out = match (func, args) {
             ("read_text", [p]) => {
                 self.fs_call_1(p, OP_READ_TEXT)?;
@@ -128,7 +128,7 @@ impl Emitter<'_> {
             }
             _ => return self.lower_fs_call_b(func, args),
         };
-        Ok(Some(Some(out)))
+        Ok(Some(Some(Lowered::owned(out))))
     }
 
 
@@ -397,7 +397,7 @@ impl Emitter<'_> {
         &mut self,
         func: &str,
         args: &[IrExpr],
-    ) -> Result<Option<Option<SliceTy>>, EmitError> {
+    ) -> Result<Option<Option<Lowered>>, EmitError> {
         let out = match (func, args) {
             ("list_dir", [p]) => {
                 self.fs_call_1(p, OP_LIST_DIR)?;
@@ -523,6 +523,6 @@ impl Emitter<'_> {
             }
             _ => return self.lower_fs_meta_call(func, args),
         };
-        Ok(Some(Some(out)))
+        Ok(Some(Some(Lowered::owned(out))))
     }
 }

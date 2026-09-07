@@ -16,7 +16,7 @@ impl Emitter<'_> {
         &mut self,
         xs: &IrExpr,
         t: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         match self.lower(xs, None)? {
             SliceTy::List(h) if self.types.el(h) == INT => {}
             other => return unsup(&format!("list-binary-search-of:{other:?}")),
@@ -78,7 +78,7 @@ impl Emitter<'_> {
         self.release_i32();
         self.release_i64();
         self.release_i32();
-        Ok(Some(SliceTy::Option(self.types.intern(INT))))
+        Ok(Some(Lowered::owned(SliceTy::Option(self.types.intern(INT)))))
     }
 
     /// `list.window(xs, n)` — n == 0 dies loudly (both targets, C-153
@@ -88,7 +88,7 @@ impl Emitter<'_> {
         &mut self,
         xs: &IrExpr,
         n: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let e = match self.lower(xs, None)? {
             SliceTy::List(h) => self.types.el(h),
             other => return unsup(&format!("list-window-of:{other:?}")),
@@ -162,7 +162,7 @@ impl Emitter<'_> {
         self.release_i64();
         self.release_i32();
         let inner = self.types.intern(e);
-        Ok(Some(SliceTy::List(self.types.intern(SliceTy::List(inner)))))
+        Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(SliceTy::List(inner))))))
     }
 
     /// `list.map(xs, f)` with a FN-VALUE callback: the closure
@@ -172,7 +172,7 @@ impl Emitter<'_> {
         &mut self,
         xs: &IrExpr,
         cb: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let got = self.lower(cb, None)?;
         let SliceTy::Fn(sig) = got else {
             return unsup("list-hof-nonlambda");
@@ -226,7 +226,7 @@ impl Emitter<'_> {
             self.release_i32();
         }
         self.release_i32();
-        Ok(Some(SliceTy::List(self.types.intern(u))))
+        Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(u)))))
     }
 
     /// `list.unique_by(xs, f)` — first-seen dedup keyed by the callback's
@@ -237,7 +237,7 @@ impl Emitter<'_> {
         &mut self,
         xs: &IrExpr,
         cb: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let (params, body) = self.hof_lambda(cb, 1)?;
         let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
         let kt = self.infer(body)?;
@@ -293,7 +293,7 @@ impl Emitter<'_> {
         for _ in 0..6 {
             self.release_i32();
         }
-        Ok(Some(SliceTy::List(self.types.intern(elem))))
+        Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(elem)))))
     }
 }
 
@@ -329,7 +329,7 @@ impl Emitter<'_> {
         loop_: (u32, u32, u32),
         param: u32,
         body: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         if !unique_by_key_equatable(kt) {
             return unsup(&format!("list-unique-by-key:{kt:?}"));
         }
@@ -379,7 +379,7 @@ impl Emitter<'_> {
         for _ in 0..7 {
             self.release_i32();
         }
-        Ok(Some(SliceTy::List(self.types.intern(elem))))
+        Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(elem)))))
     }
 
     /// `[] -> i32`: 1 when the key in `hkey` structurally equals any handle
