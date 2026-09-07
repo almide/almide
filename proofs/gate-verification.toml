@@ -40,6 +40,11 @@ class = "NEGATIVE_TESTED"
 evidence = "#1995 landing (2026-09-07): with the `emit_exit(&plan)` line removed from data.rs's raised-err exit the gate went red naming `data.rs:159 ends the frame without the ExitPlan renderer` with the five lines above it, restored green (9 frame exits). On its first run it found a third `return_call` site (lower_linked_call) that released nothing — pinned by `a_linked_tail_call_releases_the_frame`."
 
 [[gate]]
+path = "scripts/check-arm-args.sh"
+class = "NEGATIVE_TESTED"
+evidence = "#2004 landing (2026-09-07): with one declared site (string_ext.rs `starts_with` prefix) hand-reverted to the bare `self.lower(`, the gate went red naming `string_ext.rs:274 lowers an argument without declaring its mode`, restored green (341 declared sites across 23 arm files). The declaration is a type at the site (arm.rs ArgMode); the gate makes the undeclared form a failed build, the ownership matrix (tests/native_result_ownership.rs) judges a wrong Retain, the cross-target fixtures a wrong Borrow (set.insert / map.set found both on the first run)."
+
+[[gate]]
 path = "scripts/check-wasi-pins.sh"
 class = "NEGATIVE_TESTED"
 evidence = "#1628 stage-4 landing (2026-08-28): policy crate_major hand-flipped 47->48 went red naming the exact drifted pin (wasmtime Cargo pin is 47, policy says 48), restored green. The gate re-derives every fact the policy states from the tree per run — vendored WIT versions, the p3 shim's import versions, the wasmtime Cargo/CI pins, the p3 harness flag surface, the wasm-tools lockstep family — so the WASI-minor compat target is a checked ledger row, not an assumption."

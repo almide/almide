@@ -498,6 +498,8 @@ fn build_one_scan_helper(
             self_index: None,
             rc_owned: std::collections::BTreeSet::new(),
             owned_call_marks: Default::default(),
+            borrowed_temps: Vec::new(),
+            borrow_base: 0, // helper bodies lower no arm argument
             table,
             types,
             calls: &mut calls,
@@ -597,6 +599,8 @@ fn build_one_eq_helper(
             self_index: None,
             rc_owned: std::collections::BTreeSet::new(),
             owned_call_marks: Default::default(),
+            borrowed_temps: Vec::new(),
+            borrow_base: 0, // helper bodies lower no arm argument
             table,
             types,
             calls: &mut calls,
@@ -670,6 +674,8 @@ fn build_one_display_helper(
             self_index: None,
             rc_owned: std::collections::BTreeSet::new(),
             owned_call_marks: Default::default(),
+            borrowed_temps: Vec::new(),
+            borrow_base: 0, // helper bodies lower no arm argument
             table,
             types,
             calls: &mut calls,

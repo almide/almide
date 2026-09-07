@@ -13,7 +13,7 @@ use crate::*;
 impl Emitter<'_> {
     /// Shared prologue: lower the map, return (mh, k, v, layout).
     fn map_hof_open(&mut self, m: &IrExpr) -> Result<(u32, SliceTy, SliceTy), EmitError> {
-        let (k, v) = match self.lower(m, None)? {
+        let (k, v) = match self.lower_arg(m, None, ArgMode::Borrow)? {
             SliceTy::Map(kh, vh) => (self.types.el(kh), self.types.el(vh)),
             other => return unsup(&format!("map-hof-of:{other:?}")),
         };
@@ -274,7 +274,7 @@ impl Emitter<'_> {
         b: &IrExpr,
     ) -> ArmResult {
         let (ah, k, v) = self.map_hof_open(a)?;
-        let (bk, bv) = match self.lower(b, None)? {
+        let (bk, bv) = match self.lower_arg(b, None, ArgMode::Borrow)? {
             SliceTy::Map(kh, vh) => (self.types.el(kh), self.types.el(vh)),
             other => return unsup(&format!("map-merge-of:{other:?}")),
         };
@@ -389,7 +389,7 @@ impl Emitter<'_> {
         let (koff, voff, esz) = entry_layout(k, v);
         let _ = koff;
         let hkey = self.hold_for(k)?;
-        self.lower(key, Some(k))?;
+        self.lower_arg(key, Some(k), ArgMode::Borrow)?;
         self.f.instructions().local_set(hkey);
         let ho = self.hold_i32()?;
         let he = self.hold_i32()?;
@@ -453,10 +453,10 @@ impl Emitter<'_> {
         let scan = self.map_scan_fn(k)?;
         let (koff, voff, esz) = entry_layout(k, v);
         let hkey = self.hold_for(k)?;
-        self.lower(key, Some(k))?;
+        self.lower_arg(key, Some(k), ArgMode::Retain)?;
         self.f.instructions().local_set(hkey);
         let hinit = self.hold_for(v)?;
-        self.lower(init, Some(v))?;
+        self.lower_arg(init, Some(v), ArgMode::Retain)?;
         self.f.instructions().local_set(hinit);
         let ho = self.hold_i32()?;
         let he = self.hold_i32()?;

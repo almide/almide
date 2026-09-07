@@ -284,3 +284,17 @@ fn a_registry_tail_call_releases_its_owned_param() {
         "bytes.append_* loop is not linear: N=1000 {h1} B, N=2000 {h2} B"
     );
 }
+
+/// #2004, the builtin half: `println` / `eprintln` are Named builtins with
+/// no module-call wrapper around them, so `lower_print` is its own
+/// wrapper — the fresh string it printed is released right after the
+/// write (was 16 B per call).
+#[test]
+fn a_printed_call_result_is_released() {
+    flat(
+        "eprintln(int.to_string(i))",
+        "    eprintln(int.to_string(i))\n    total = total + 1",
+        "1000",
+        "8000",
+    );
+}

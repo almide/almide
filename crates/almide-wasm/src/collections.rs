@@ -57,12 +57,16 @@ impl Emitter<'_> {
     /// types and the entry layout. Release order at every call site:
     /// entry (i32), key (its own pool), map (i32).
     #[allow(clippy::type_complexity)]
+    /// The shared probe: `key_mode` is what the CALLER does with the key
+    /// afterwards — `set` stores it on append (Retain); `get`, `contains`,
+    /// `get_or` and `remove` only compare (Borrow).
     fn map_scan(
         &mut self,
         m: &IrExpr,
         key: &IrExpr,
+        key_mode: ArgMode,
     ) -> Result<(u32, u32, u32, SliceTy, SliceTy, (u32, u32, u32)), EmitError> {
-        let (k, v) = match self.lower(m, None)? {
+        let (k, v) = match self.lower_arg(m, None, ArgMode::Borrow)? {
             SliceTy::Map(kh, vh) => (self.types.el(kh), self.types.el(vh)),
             other => return unsup(&format!("map-op-of:{other:?}")),
         };
@@ -70,7 +74,7 @@ impl Emitter<'_> {
         let mh = self.hold_i32()?;
         self.f.instructions().local_set(mh);
         let kh = self.hold_for(k)?;
-        self.lower(key, Some(k))?;
+        self.lower_arg(key, Some(k), key_mode)?;
         self.f.instructions().local_set(kh);
         // the receiver outlives this probe: the index lane (#1219 stage 2)
         let scan = self.keyed_find(k)?;
@@ -123,7 +127,7 @@ impl Emitter<'_> {
                 Ok(Some(Lowered::owned(ty)))
             }
             ("len", [m]) => {
-                let (k, v) = match self.lower(m, None)? {
+                let (k, v) = match self.lower_arg(m, None, ArgMode::Borrow)? {
                     SliceTy::Map(kh, vh) => (self.types.el(kh), self.types.el(vh)),
                     other => return unsup(&format!("map-op-of:{other:?}")),
                 };
@@ -140,14 +144,14 @@ impl Emitter<'_> {
             // (0 entries is 0 bytes whatever the entry layout), semantics
             // verbatim from stdlib/map_core.almd's load32(handle+4) == 0.
             ("is_empty", [m]) => {
-                if !matches!(self.lower(m, None)?, SliceTy::Map(..)) {
+                if !matches!(self.lower_arg(m, None, ArgMode::Borrow)?, SliceTy::Map(..)) {
                     return unsup("map-op-of:non-map");
                 }
                 self.f.instructions().i32_load(len_memarg()).i32_eqz();
                 Ok(Some(Lowered::scalar(BOOL)))
             }
             ("contains", [m, key]) => {
-                let (_mh, _kh, eh, k, ..) = self.map_scan(m, key)?;
+                let (_mh, _kh, eh, k, ..) = self.map_scan(m, key, ArgMode::Borrow)?;
                 self.f.instructions().local_get(eh).i32_const(0).i32_ne();
                 self.release_i32(); // eh
                 self.release_for(k);
@@ -155,7 +159,7 @@ impl Emitter<'_> {
                 Ok(Some(Lowered::scalar(BOOL)))
             }
             ("get", [m, key]) => {
-                let (_mh, _kh, eh, k, v, lay) = self.map_scan(m, key)?;
+                let (_mh, _kh, eh, k, v, lay) = self.map_scan(m, key, ArgMode::Borrow)?;
                 // none, or a fresh some-block holding the value slot.
                 self.f
                     .instructions()
@@ -182,12 +186,12 @@ impl Emitter<'_> {
                 Ok(Some(Lowered::view(SliceTy::Option(self.types.intern(v)))))
             }
             ("get_or", [m, key, default]) => {
-                let (_mh, _kh, eh, k, v, lay) = self.map_scan(m, key)?;
+                let (_mh, _kh, eh, k, v, lay) = self.map_scan(m, key, ArgMode::Borrow)?;
                 // The default ALWAYS evaluates (native argument order,
                 // #1919) — see list.get_or; the entry handle is already a
                 // held local.
                 let hd = self.hold_for(v)?;
-                self.lower(default, Some(v))?;
+                self.lower_arg(default, Some(v), ArgMode::Retain)?;
                 self.f.instructions().local_set(hd);
                 self.f
                     .instructions()
@@ -209,9 +213,9 @@ impl Emitter<'_> {
             // appended (map_inplace.rs holds the core; the in-place
             // window shares it as its shared-block fallback).
             ("set", [m, key, value]) => {
-                let (mh, kh_local, eh, k, v, lay) = self.map_scan(m, key)?;
+                let (mh, kh_local, eh, k, v, lay) = self.map_scan(m, key, ArgMode::Retain)?;
                 let vh = self.hold_for(v)?;
-                self.lower(value, Some(v))?;
+                self.lower_arg(value, Some(v), ArgMode::Retain)?;
                 self.rc_map_value_share(value, v);
                 self.f.instructions().local_set(vh);
                 let holds = crate::map_inplace::MapSetHolds { mh, kh: kh_local, eh, vh };
@@ -253,7 +257,7 @@ impl Emitter<'_> {
             // Functional remove: the map minus the entry (a plain copy
             // when the key is absent), insertion order preserved.
             ("remove", [m, key]) => {
-                let (mh, _kh, eh, k, v, lay) = self.map_scan(m, key)?;
+                let (mh, _kh, eh, k, v, lay) = self.map_scan(m, key, ArgMode::Borrow)?;
                 let esz = lay.2 as i32;
                 let ho = self.hold_i32()?;
                 let hp = self.hold_i32()?;
@@ -305,7 +309,7 @@ impl Emitter<'_> {
             // keys/values: ONE side of every entry, insertion order.
             ("keys" | "values", [m]) => {
                 let keys = func == "keys";
-                let (k, v) = match self.lower(m, None)? {
+                let (k, v) = match self.lower_arg(m, None, ArgMode::Borrow)? {
                     SliceTy::Map(kh, vh) => (self.types.el(kh), self.types.el(vh)),
                     other => return unsup(&format!("map-{func}-of:{other:?}")),
                 };
@@ -349,7 +353,7 @@ impl Emitter<'_> {
                 Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(side)))))
             }
             ("entries", [m]) => {
-                let (kh, vh) = match self.lower(m, None)? {
+                let (kh, vh) = match self.lower_arg(m, None, ArgMode::Borrow)? {
                     SliceTy::Map(kh, vh) => (kh, vh),
                     other => return unsup(&format!("map-entries-of:{other:?}")),
                 };
@@ -417,9 +421,9 @@ impl Emitter<'_> {
                 let Some(b) = slice_ty_of(&init.ty, self.types) else {
                     return unsup(&format!("map-fold-acc:{}", ty_name(&init.ty)));
                 };
-                self.lower(init, Some(b))?;
+                self.lower_arg(init, Some(b), ArgMode::Retain)?;
                 self.f.instructions().local_set(acc_p);
-                let (k, v) = match self.lower(m, None)? {
+                let (k, v) = match self.lower_arg(m, None, ArgMode::Borrow)? {
                     SliceTy::Map(kh, vh) => (self.types.el(kh), self.types.el(vh)),
                     other => return unsup(&format!("map-fold-of:{other:?}")),
                 };
@@ -463,7 +467,7 @@ impl Emitter<'_> {
                 // Insertion-ordered upsert over (K, V) pairs. The result
                 // is freshly built and uniquely owned, so the overwrite
                 // case may store IN PLACE; the append case copy-grows.
-                let (k, v, pair_ti) = match self.lower(pairs, None)? {
+                let (k, v, pair_ti) = match self.lower_arg(pairs, None, ArgMode::Borrow)? {
                     SliceTy::List(h) => match self.types.el(h) {
                         SliceTy::Tuple(ti) => {
                             let def = self.types.tuple_def(ti);

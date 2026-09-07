@@ -86,7 +86,7 @@ impl Emitter<'_> {
                 // Such a callback is lowered once as a closure value and
                 // called per element (the #1806 route the fs walkers take).
                 let closure = if crate::fs_meta::expr_propagates(stripped) {
-                    let got = self.lower(cb, None)?;
+                    let got = self.lower_arg(cb, None, ArgMode::Borrow)?;
                     let SliceTy::Fn(sig) = got else {
                         return unsup(&format!("fan-{func}-callee:{got:?}"));
                     };

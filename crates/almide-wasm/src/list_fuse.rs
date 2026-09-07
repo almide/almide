@@ -117,7 +117,7 @@ impl Emitter<'_> {
         let Some(acc_ty) = slice_ty_of(&init.ty, self.types) else {
             return unsup(&format!("list-fold-acc:{}", ty_name(&init.ty)));
         };
-        self.lower(init, Some(acc_ty))?;
+        self.lower_arg(init, Some(acc_ty), ArgMode::Retain)?;
         self.f.instructions().local_set(fold_params[0]);
 
         let (elem0, bh, ch, ih) = self.hof_loop_open(cur)?;

@@ -56,10 +56,10 @@ impl Emitter<'_> {
             ("write_bytes", [p, xs]) => {
                 // b = the List[Int] payload (8-byte i64 LE slots; the
                 // host takes the low byte of each — native `x as u8`).
-                self.lower(p, Some(STR))?;
+                self.lower_arg(p, Some(STR), ArgMode::Borrow)?;
                 let hp = self.hold_i32()?;
                 self.f.instructions().local_set(hp);
-                match self.lower(xs, None)? {
+                match self.lower_arg(xs, None, ArgMode::Borrow)? {
                     SliceTy::List(h) if self.types.el(h) == INT => {}
                     other => return unsup(&format!("fs-write-bytes-of:{other:?}")),
                 }
@@ -80,10 +80,10 @@ impl Emitter<'_> {
                 self.fs_result_unit()?
             }
             ("write_bytes_raw", [p, bs]) => {
-                self.lower(p, Some(STR))?;
+                self.lower_arg(p, Some(STR), ArgMode::Borrow)?;
                 let hp = self.hold_i32()?;
                 self.f.instructions().local_set(hp);
-                match self.lower(bs, None)? {
+                match self.lower_arg(bs, None, ArgMode::Borrow)? {
                     SliceTy::Scalar(Scalar::Bytes) => {}
                     other => return unsup(&format!("fs-write-bytes-raw-of:{other:?}")),
                 }
@@ -194,7 +194,7 @@ impl Emitter<'_> {
     /// path → fs_call(op, path, 0, 0): the i64 ret is on the stack.
     pub(crate) fn fs_call_1(&mut self, p: &IrExpr, op: i32) -> Result<(), EmitError> {
         self.note_host_op(op);
-        self.lower(p, Some(STR))?;
+        self.lower_arg(p, Some(STR), ArgMode::Borrow)?;
         let hp = self.hold_i32()?;
         let mut i = self.f.instructions();
         i.local_set(hp);
@@ -211,10 +211,10 @@ impl Emitter<'_> {
     /// (path, content) both strings → fs_call(op, path, content).
     pub(crate) fn fs_call_str2(&mut self, p: &IrExpr, c: &IrExpr, op: i32) -> Result<(), EmitError> {
         self.note_host_op(op);
-        self.lower(p, Some(STR))?;
+        self.lower_arg(p, Some(STR), ArgMode::Borrow)?;
         let hp = self.hold_i32()?;
         self.f.instructions().local_set(hp);
-        self.lower(c, Some(STR))?;
+        self.lower_arg(c, Some(STR), ArgMode::Borrow)?;
         let hc = self.hold_i32()?;
         let mut i = self.f.instructions();
         i.local_set(hc);
@@ -458,7 +458,7 @@ impl Emitter<'_> {
                 let Some(acc_ty) = slice_ty_of(&init.ty, self.types) else {
                     return unsup(&format!("fs-fold-acc:{}", ty_name(&init.ty)));
                 };
-                self.lower(init, Some(acc_ty))?;
+                self.lower_arg(init, Some(acc_ty), ArgMode::Retain)?;
                 self.f.instructions().local_set(params[0]);
                 self.fs_call_1(p, OP_READ_LINES)?;
                 let (hraw, hlen, herr) = self.fs_frames_or_err()?;

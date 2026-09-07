@@ -40,13 +40,13 @@ impl Emitter<'_> {
         pad: &IrExpr,
         at_start: bool,
     ) -> ArmResult {
-        self.lower(s, Some(STR))?;
+        self.lower_arg(s, Some(STR), ArgMode::Borrow)?;
         let hs = self.hold_i32()?;
         self.f.instructions().local_set(hs);
-        self.lower(w, Some(INT))?;
+        self.lower_arg(w, Some(INT), ArgMode::Borrow)?;
         let hw = self.hold_i64()?;
         self.f.instructions().local_set(hw);
-        self.lower(pad, Some(STR))?;
+        self.lower_arg(pad, Some(STR), ArgMode::Borrow)?;
         let hp = self.hold_i32()?;
         let hl = self.hold_i32()?;
         let hk = self.hold_i32()?;
@@ -142,7 +142,7 @@ impl Emitter<'_> {
     /// "\r\n" pair, no entry for a trailing newline; a lone trailing
     /// '\r' stays in its line.
     pub(crate) fn lower_string_lines(&mut self, s: &IrExpr) -> ArmResult {
-        self.lower(s, Some(STR))?;
+        self.lower_arg(s, Some(STR), ArgMode::Borrow)?;
         let hs = self.hold_i32()?;
         let hl = self.hold_i32()?;
         let hk = self.hold_i32()?;
@@ -211,7 +211,7 @@ impl Emitter<'_> {
 
     /// One-char strings in order (native s.chars()).
     pub(crate) fn lower_string_chars(&mut self, s: &IrExpr) -> ArmResult {
-        self.lower(s, Some(STR))?;
+        self.lower_arg(s, Some(STR), ArgMode::Borrow)?;
         let hs = self.hold_i32()?;
         let hl = self.hold_i32()?;
         let hk = self.hold_i32()?;
@@ -268,7 +268,7 @@ impl Emitter<'_> {
         }
         let upper_idx = info.wasm_index;
         self.calls.insert(fi);
-        self.lower(s, Some(STR))?;
+        self.lower_arg(s, Some(STR), ArgMode::Borrow)?;
         let hs = self.hold_i32()?;
         let hw = self.hold_i32()?;
         let hb = self.hold_i32()?;
@@ -340,7 +340,7 @@ impl Emitter<'_> {
         let def = self.types.tuple_def(ti);
         let (str_off, cnt_off) = (def.fields[0].1, def.fields[1].1);
         let tuple_size = def.size;
-        self.lower(s, Some(STR))?;
+        self.lower_arg(s, Some(STR), ArgMode::Borrow)?;
         let hs = self.hold_i32()?;
         let hl = self.hold_i32()?;
         let hk = self.hold_i32()?;
@@ -424,7 +424,7 @@ impl Emitter<'_> {
         &mut self,
         s: &IrExpr,
     ) -> ArmResult {
-        self.lower(s, Some(STR))?;
+        self.lower_arg(s, Some(STR), ArgMode::Borrow)?;
         let hs = self.hold_i32()?;
         let hw = self.hold_i32()?;
         let hcp = self.hold_i32()?;
@@ -477,7 +477,7 @@ impl Emitter<'_> {
         last: bool,
         s: &IrExpr,
     ) -> ArmResult {
-        self.lower(s, Some(STR))?;
+        self.lower_arg(s, Some(STR), ArgMode::Borrow)?;
         let hs = self.hold_i32()?;
         let hp = self.hold_i32()?;
         let hl = self.hold_i32()?;
@@ -527,7 +527,7 @@ impl Emitter<'_> {
     /// Codepoint-wise reverse (native `chars().rev()`): each UTF-8
     /// sequence keeps its internal byte order, sequences swap ends.
     pub(crate) fn lower_string_reverse(&mut self, s: &IrExpr) -> ArmResult {
-        self.lower(s, Some(STR))?;
+        self.lower_arg(s, Some(STR), ArgMode::Borrow)?;
         let hs = self.hold_i32()?;
         let hn = self.hold_i32()?;
         let hc = self.hold_i32()?;
