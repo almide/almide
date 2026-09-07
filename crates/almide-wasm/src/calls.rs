@@ -394,6 +394,14 @@ impl Emitter<'_> {
                 // value.* surface, which THIS emitter lowers natively —
                 // the whole body is layout-consistent by construction.
                 "json_parse",
+                // (String, String) -> (String, String)?: byte-level find
+                // over the source payload, LEN read on STRING blocks only
+                // (digest-shared), two fresh alloc_str buffers, the pair
+                // and the option built by constructors (#1423 stage 4).
+                "string_split_once",
+                // (String) -> DateTime!: no prim access at all — language-
+                // level slicing and int parsing, Result via ok()/err().
+                "datetime_parse_iso",
             ];
             if !VERIFIED.contains(&impl_fn)
                 && !VERIFIED_SUM_BUILDERS.contains(&impl_fn)
