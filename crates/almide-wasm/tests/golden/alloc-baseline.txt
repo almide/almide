@@ -246,7 +246,7 @@
 66112	spec/wasm_cross/index_bounds_i64.almd
 66128	spec/wasm_cross/index_bounds_write_heap.almd
 66064	spec/wasm_cross/index_bounds_write_only_var.almd
-66272	spec/wasm_cross/inplace_mutator_statement.almd
+66208	spec/wasm_cross/inplace_mutator_statement.almd
 65856	spec/wasm_cross/int8_div_overflow.almd
 74336	spec/wasm_cross/int_bit_family.almd
 65936	spec/wasm_cross/int_clamp_inverted.almd
@@ -353,7 +353,7 @@
 65936	spec/wasm_cross/map_fold_heap_accumulator.almd
 140448	spec/wasm_cross/map_index_order.almd
 67232	spec/wasm_cross/map_index_string_key_shapes.almd
-74848	spec/wasm_cross/map_insertion_order.almd
+74944	spec/wasm_cross/map_insertion_order.almd
 75584	spec/wasm_cross/map_interp_string_value.almd
 65984	spec/wasm_cross/map_of_maps_value.almd
 65856	spec/wasm_cross/map_rich_variant_key.almd
@@ -398,7 +398,7 @@
 66928	spec/wasm_cross/mut_map_param.almd
 65952	spec/wasm_cross/mut_param_branch_forward.almd
 391568	spec/wasm_cross/mut_param_call_chain.almd
-69072	spec/wasm_cross/mut_param_effect_can_err.almd
+69088	spec/wasm_cross/mut_param_effect_can_err.almd
 66064	spec/wasm_cross/mut_param_effect_never_err.almd
 66416	spec/wasm_cross/mut_param_writeback_growth.almd
 70400	spec/wasm_cross/mutable_global_bytes_arena.almd
@@ -520,7 +520,7 @@
 72816	spec/wasm_cross/rope_geometry_family.almd
 65936	spec/wasm_cross/scalar_if_arm_effects.almd
 66384	spec/wasm_cross/scan_heap_acc.almd
-192256	spec/wasm_cross/set_index_order.almd
+192224	spec/wasm_cross/set_index_order.almd
 72016	spec/wasm_cross/set_insertion_order.almd
 66032	spec/wasm_cross/sized_int_overflow_wrap.almd
 66736	spec/wasm_cross/sized_int_record_fields.almd
