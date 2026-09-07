@@ -168,13 +168,18 @@ impl Emitter<'_> {
             // new buffer on every call, quadratic over a loop); the
             // counter the caller captured before lowering the rhs names
             // that call as entry `seq0 + 1`.
-            // NOT `prim.alloc_*`: the allocation is fresh, but the prim-tier
-            // bodies rely on the bind's +1 as the keep-alive for RAW escapes
-            // (`prim.store32(cap + 8, prim.handle(out))` in the regex engine
-            // — treating the alloc as owned freed the capture buffer under a
-            // live raw pointer and the groups printed freelist bytes). That
-            // credit is the tier's convention until the prim bodies carry
-            // their escapes explicitly (#1990 follow-up).
+            // `prim.alloc_*` is a fresh block at rc 1: the bind OWNS it.
+            // (An earlier attempt to treat it as owned freed the regex
+            // engine's capture buffer under a live raw view — but the
+            // culprit was the module-space TAIL release of the same
+            // change, not this rule: with the tail release gated on a
+            // returns-fresh callee, fresh.rs, regex_engine / lisp are
+            // byte-identical and every alloc-ledger watermark went DOWN.)
+            almide_ir::CallTarget::Module { module, func, .. }
+                if module.as_str() == "prim" && func.as_str().starts_with("alloc_") =>
+            {
+                return true;
+            }
             almide_ir::CallTarget::Module { .. } => return self.table_result_seq == Some(seq0 + 1),
             _ => return false,
         };
