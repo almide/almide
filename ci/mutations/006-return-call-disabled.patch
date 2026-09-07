@@ -1,12 +1,13 @@
 diff --git a/crates/almide-wasm/src/calls.rs b/crates/almide-wasm/src/calls.rs
+index 76c44bf0e..a7d3983ef 100644
 --- a/crates/almide-wasm/src/calls.rs
 +++ b/crates/almide-wasm/src/calls.rs
-@@ -207,7 +207,7 @@ impl Emitter<'_> {
-                 // Tail position with a matching return type → return_call:
+@@ -262,7 +262,7 @@ impl Emitter<'_> {
                  // constant stack for arbitrarily deep (incl. mutual)
-                 // recursion, the C-292 contract.
+                 // recursion, the C-292 contract. A parked temporary must
+                 // outlive the callee, so its site stays a plain call.
 -                if tail
 +                if false && tail // [MUTANT: tail calls disabled]
+                     && !parked
+                     && !no_transfer
                      && ret.is_some()
-                     && ret == self.fn_ret
-                     && self.tail_transfer_ok(Some(index) != self.self_index)
