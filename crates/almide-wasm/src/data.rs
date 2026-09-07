@@ -438,8 +438,13 @@ impl Emitter<'_> {
                     }
                 }
                 let hold = self.hold_i32()?;
-                self.f.instructions().call(F_BLOCK_COPY).local_set(hold);
+                let copy = self.copy_fn_of(ty);
+                self.f.instructions().call(copy).local_set(hold);
                 for ((_, fexpr), (fty, off)) in fields.iter().zip(slots) {
+                    // The overwritten field's credit goes with it.
+                    if let Some(dec) = self.elem_is_handle(fty).then(|| self.dec_fn_of(fty)) {
+                        self.f.instructions().local_get(hold).i32_load(slot_memarg(off)).call(dec);
+                    }
                     self.f.instructions().local_get(hold);
                     self.lower(fexpr, Some(fty))?;
                     self.rc_share_guard(fexpr, fty);
@@ -555,6 +560,7 @@ impl Emitter<'_> {
                 for (fty, off, d) in defaults {
                     self.f.instructions().local_get(hold);
                     self.lower(&d, Some(fty))?;
+                    self.rc_share_guard(&d, fty);
                     self.store_ty_slot(fty, off);
                 }
                 self.f.instructions().local_get(hold);

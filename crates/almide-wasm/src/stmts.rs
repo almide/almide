@@ -688,21 +688,14 @@ impl Emitter<'_> {
                         None => return unsup("assign:unmapped"),
                     },
                 };
-                // #1688: a droppable PARAM reassigned under an if/match
-                // arm — one path releases the caller's block, the other
-                // keeps it, and the epilogue's release set can't tell
-                // which ran. The C-132 fold rewrites the provable shapes
-                // away before lowering; whatever still reaches here is
-                // refused, never silently emitted (native `A&B`, wasm
-                // `\0\0\0` was this exact hole).
-                if let Some(idx) = local
-                    && idx < self.rc_param_ceiling
-                    && self.branch_depth > 0
-                    && self.rc_droppable(declared)
-                    && !self.cells.contains(var)
-                {
-                    return unsup("assign:mut-param-in-branch-arm(#1688)");
-                }
+                // #1688 once refused a droppable PARAM reassigned under an
+                // if/match arm ("one path releases the caller's block, the
+                // other keeps it"). Under the credit discipline the local
+                // holds exactly ONE credit on every path — the assign
+                // releases the old occupant and makes the local an owner,
+                // the epilogue releases the local once whichever arm ran —
+                // and the exit validator (E083) checks it; the refusal is
+                // retired (stage 2c-ii: records made the mut_port cell hit it).
                 self.lower(value, Some(declared))?;
                 // RC-5: same share discipline as Bind.
                 if matches!(declared, SliceTy::Map(..) | SliceTy::Set(_)) {
@@ -798,7 +791,12 @@ impl Emitter<'_> {
                     Ok(idx) => self.f.instructions().local_get(idx),
                     Err(gidx) => self.f.instructions().global_get(gidx),
                 };
-                self.f.instructions().call(F_BLOCK_COPY).local_tee(hb);
+                let copy = self.copy_fn_of(SliceTy::Named(ti));
+                self.f.instructions().call(copy).local_tee(hb);
+                // The replaced field's credit goes with it (stage 2c-ii).
+                if let Some(dec) = self.elem_is_handle(fty).then(|| self.dec_fn_of(fty)) {
+                    self.f.instructions().local_get(hb).i32_load(slot_memarg(off)).call(dec);
+                }
                 self.lower(value, Some(fty))?;
                 self.rc_share_guard(value, fty);
                 self.store_ty_slot(fty, off);

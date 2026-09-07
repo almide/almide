@@ -59,31 +59,102 @@ impl Emitter<'_> {
     /// tuple block. Records and variants (2c-ii), Map / Set / Value / Fn
     /// handles carry no credit the holder releases yet.
     pub(crate) fn elem_is_handle(&self, elem: SliceTy) -> bool {
-        matches!(
-            elem,
+        match elem {
             SliceTy::Scalar(Scalar::Str | Scalar::Bytes)
-                | SliceTy::List(_)
-                | SliceTy::Option(_)
-                | SliceTy::Result(..)
-                | SliceTy::Tuple(_)
-        )
+            | SliceTy::List(_)
+            | SliceTy::Option(_)
+            | SliceTy::Result(..)
+            | SliceTy::Tuple(_) => true,
+            // Stage 2c-ii: records and variants with a layout.
+            SliceTy::Named(ti) => self.named_has_layout(ti),
+            _ => false,
+        }
     }
 
-    /// The typed drop of a fixed-slot block (Option / Result / tuple):
-    /// registered once per type, its body built here (the slot table
-    /// needs the type table, which assembly does not have).
-    fn drop_shape(&self, ty: SliceTy, slots: Vec<(u32, u32)>, tagged: Option<(u32, Vec<(u32, Vec<(u32, u32)>)>)>) -> u32 {
-        let idx = self.work.helper(crate::work::Helper::DropShape { ty });
-        if !self.work.drop_bodies.borrow().contains_key(&ty) {
-            let f = crate::runtime_alloc::emit_drop_shape(&slots, tagged);
-            self.work.drop_bodies.borrow_mut().insert(ty, f);
+    /// Does the type table hold a layout for this Named type (a record or
+    /// a variant — `Excluded` names have slots but no layout)?
+    fn named_has_layout(&self, ti: u32) -> bool {
+        matches!(self.types.def(ti), crate::types_table::NamedDef::Record(_) | crate::types_table::NamedDef::Variant(_))
+    }
+
+    /// The handle slots of a fixed-slot block: `(payload offset, dec fn)`
+    /// per slot, and for a tagged block (Result, variant) the per-tag
+    /// tables under the tag word. Registers the nested glue on the way.
+    fn shape_slots(&self, t: SliceTy) -> (Vec<(u32, u32)>, Option<(u32, Vec<(u32, Vec<(u32, u32)>)>)>) {
+        let slot = |ft: SliceTy, off: u32| self.elem_is_handle(ft).then(|| (off, self.dec_fn_of(ft)));
+        match t {
+            SliceTy::Option(h) => (slot(self.types.el(h), almide_layout::OPTION_FIELD).into_iter().collect(), None),
+            SliceTy::Result(a, b) => {
+                let cases = [(0u32, self.types.el(a)), (1u32, self.types.el(b))]
+                    .into_iter()
+                    .filter_map(|(tag, pt)| slot(pt, almide_layout::SUM_FIELD).map(|s| (tag, vec![s])))
+                    .collect();
+                (Vec::new(), Some((almide_layout::SUM_TAG, cases)))
+            }
+            SliceTy::Tuple(h) => {
+                let fields = self.types.tuple_def(h).fields.clone();
+                (fields.iter().filter_map(|&(ft, off)| slot(ft, off)).collect(), None)
+            }
+            SliceTy::Named(ti) => match self.types.def(ti) {
+                crate::types_table::NamedDef::Record(def) => {
+                    (def.fields.iter().filter_map(|fi| slot(fi.ty, fi.offset)).collect(), None)
+                }
+                crate::types_table::NamedDef::Variant(def) => {
+                    let cases = def
+                        .cases
+                        .iter()
+                        .map(|c| (c.tag, c.fields.iter().filter_map(|fi| slot(fi.ty, fi.offset)).collect::<Vec<_>>()))
+                        .filter(|(_, v)| !v.is_empty())
+                        .collect();
+                    (Vec::new(), Some((almide_layout::SUM_TAG, cases)))
+                }
+                crate::types_table::NamedDef::Excluded => (Vec::new(), None),
+            },
+            _ => (Vec::new(), None),
+        }
+    }
+
+    /// Does a fixed-slot block of type `t` hold any handle slot at all?
+    fn shape_has_handles(&self, t: SliceTy) -> bool {
+        let has = |ft: SliceTy| self.elem_is_handle(ft);
+        match t {
+            SliceTy::Option(h) => has(self.types.el(h)),
+            SliceTy::Result(a, b) => has(self.types.el(a)) || has(self.types.el(b)),
+            SliceTy::Tuple(h) => self.types.tuple_def(h).fields.iter().any(|&(ft, _)| has(ft)),
+            SliceTy::Named(ti) => match self.types.def(ti) {
+                crate::types_table::NamedDef::Record(def) => def.fields.iter().any(|fi| has(fi.ty)),
+                crate::types_table::NamedDef::Variant(def) => {
+                    def.cases.iter().any(|c| c.fields.iter().any(|fi| has(fi.ty)))
+                }
+                crate::types_table::NamedDef::Excluded => false,
+            },
+            _ => false,
+        }
+    }
+
+    /// Register a per-shape glue (`DropShape` / `IncShape`) and build its
+    /// body once. A RECURSIVE shape (a tree variant whose case holds the
+    /// tree) reaches its own registration while its slots are computed:
+    /// the placeholder inserted first makes that inner call return the
+    /// promised index instead of recursing.
+    fn shape_helper(&self, h: crate::work::Helper, ty: SliceTy) -> u32 {
+        let idx = self.work.helper(h.clone());
+        if self.work.drop_bodies.borrow().iter().any(|(k, _)| *k == h) {
+            return idx;
+        }
+        self.work.drop_bodies.borrow_mut().push((h.clone(), None));
+        let (slots, tagged) = self.shape_slots(ty);
+        let body = match h {
+            crate::work::Helper::IncShape { .. } => crate::runtime_alloc::emit_inc_shape(&slots, tagged),
+            _ => crate::runtime_alloc::emit_drop_shape(&slots, tagged),
+        };
+        let mut bodies = self.work.drop_bodies.borrow_mut();
+        if let Some(entry) = bodies.iter_mut().find(|(k, _)| *k == h) {
+            entry.1 = Some(body);
         }
         idx
     }
 
-    /// The release fn of a droppable block of type `t`: `$dec_flat` for a
-    /// leaf, the typed drop glue for a List of handles — recursively the
-    /// inner list's glue for a nested one (work.rs `Helper::DropList`).
     pub(crate) fn dec_fn_of(&self, t: SliceTy) -> u32 {
         match t {
             SliceTy::List(h) => {
@@ -95,41 +166,11 @@ impl Emitter<'_> {
                     F_DEC_FLAT
                 }
             }
-            SliceTy::Option(h) => {
-                let el = self.types.el(h);
-                if self.elem_is_handle(el) {
-                    let dec = self.dec_fn_of(el);
-                    self.drop_shape(t, vec![(almide_layout::OPTION_FIELD, dec)], None)
+            SliceTy::Option(_) | SliceTy::Result(..) | SliceTy::Tuple(_) | SliceTy::Named(_) => {
+                if self.shape_has_handles(t) {
+                    self.shape_helper(crate::work::Helper::DropShape { ty: t }, t)
                 } else {
                     F_DEC_FLAT
-                }
-            }
-            SliceTy::Result(a, b) => {
-                let (ta, tb) = (self.types.el(a), self.types.el(b));
-                let mut cases = Vec::new();
-                for (tag, pt) in [(0u32, ta), (1u32, tb)] {
-                    if self.elem_is_handle(pt) {
-                        let dec = self.dec_fn_of(pt);
-                        cases.push((tag, vec![(almide_layout::SUM_FIELD, dec)]));
-                    }
-                }
-                if cases.is_empty() {
-                    F_DEC_FLAT
-                } else {
-                    self.drop_shape(t, Vec::new(), Some((almide_layout::SUM_TAG, cases)))
-                }
-            }
-            SliceTy::Tuple(h) => {
-                let fields = self.types.tuple_def(h).fields.clone();
-                let slots: Vec<(u32, u32)> = fields
-                    .iter()
-                    .filter(|&&(ft, _)| self.elem_is_handle(ft))
-                    .map(|&(ft, off)| (off, self.dec_fn_of(ft)))
-                    .collect();
-                if slots.is_empty() {
-                    F_DEC_FLAT
-                } else {
-                    self.drop_shape(t, slots, None)
                 }
             }
             _ => F_DEC_FLAT,
@@ -164,6 +205,12 @@ impl Emitter<'_> {
                 Some(inc_elems) => self.work.helper(crate::work::Helper::CopyElems { inc_elems }),
                 None => F_BLOCK_COPY,
             },
+            SliceTy::Option(_) | SliceTy::Result(..) | SliceTy::Tuple(_) | SliceTy::Named(_)
+                if self.shape_has_handles(t) =>
+            {
+                let inc_elems = self.shape_helper(crate::work::Helper::IncShape { ty: t }, t);
+                self.work.helper(crate::work::Helper::CopyElems { inc_elems })
+            }
             _ => F_BLOCK_COPY,
         }
     }
@@ -202,7 +249,7 @@ impl Emitter<'_> {
             // (result, buffer) tuple and writes it back through the Assign
             // route, whose ownership is not yet audited for a droppable
             // record (mut_param_effect_never_err double-freed the Tally).
-            SliceTy::Named(_) => false,
+            SliceTy::Named(ti) => self.named_has_layout(ti),
             _ => false,
         }
     }

@@ -320,6 +320,30 @@ pub(crate) fn emit_drop_shape(slots: &[(u32, u32)], tagged: Option<(u32, Vec<(u3
     f
 }
 
+/// `$inc_<shape>(block)`: +1 on every handle slot of a fixed-slot block
+/// (the tagged half per case, as `emit_drop_shape`).
+pub(crate) fn emit_inc_shape(slots: &[(u32, u32)], tagged: Option<(u32, Vec<(u32, Vec<(u32, u32)>)>)>) -> Function {
+    let block = 0u32;
+    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
+    let mut f = Function::new([]);
+    let mut i = f.instructions();
+    for &(off, _) in slots {
+        i.local_get(block).i32_load(word(almide_layout::PAYLOAD + off)).call(F_INC);
+    }
+    if let Some((tag_off, cases)) = tagged {
+        for (tag, cslots) in cases {
+            i.local_get(block).i32_load(word(almide_layout::PAYLOAD + tag_off)).i32_const(tag as i32).i32_eq();
+            i.if_(BlockType::Empty);
+            for (off, _) in cslots {
+                i.local_get(block).i32_load(word(almide_layout::PAYLOAD + off)).call(F_INC);
+            }
+            i.end();
+        }
+    }
+    i.end();
+    f
+}
+
 /// `$inc_elems(block)`: +1 on every element handle of a spine of 4-byte
 /// handle slots (the credits a copied spine must hold, #2010 stage 2b).
 pub(crate) fn emit_inc_elems() -> Function {
@@ -374,6 +398,7 @@ pub(crate) fn helper_params(h: &Helper) -> Option<Vec<ValType>> {
             | Helper::CopyElems { .. }
             | Helper::CowElems { .. }
             | Helper::DropShape { .. }
+            | Helper::IncShape { .. }
     )
     .then(|| vec![ValType::I32])
 }
@@ -383,7 +408,7 @@ pub(crate) fn helper_params(h: &Helper) -> Option<Vec<ValType>> {
 /// unless assembly says f64.
 pub(crate) fn helper_result(h: &Helper) -> Option<ValType> {
     match h {
-        Helper::DropList { .. } | Helper::IncElems | Helper::DropShape { .. } => None,
+        Helper::DropList { .. } | Helper::IncElems | Helper::DropShape { .. } | Helper::IncShape { .. } => None,
         _ => Some(ValType::I32),
     }
 }
@@ -396,11 +421,15 @@ pub(crate) fn helper_body(h: &Helper, work: &crate::work::FnWork) -> Option<Func
         Helper::IncElems => emit_inc_elems(),
         Helper::CopyElems { inc_elems } => emit_copy_elems(*inc_elems),
         Helper::CowElems { inc_elems } => emit_cow_elems(*inc_elems),
-        Helper::DropShape { ty } => work.drop_bodies.borrow_mut().remove(ty).unwrap_or_else(|| {
-            let mut f = Function::new([]);
-            f.instructions().unreachable().end();
-            f
-        }),
+        Helper::DropShape { .. } | Helper::IncShape { .. } => {
+            let mut bodies = work.drop_bodies.borrow_mut();
+            let built = bodies.iter_mut().find(|(k, _)| k == h).and_then(|(_, f)| f.take());
+            built.unwrap_or_else(|| {
+                let mut f = Function::new([]);
+                f.instructions().unreachable().end();
+                f
+            })
+        }
         _ => return None,
     })
 }
