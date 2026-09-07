@@ -25,6 +25,17 @@ pub(crate) struct Emitter<'a> {
     /// commissioning). Args are +1'd by rc_arg_guard BEFORE this release,
     /// so a pass-through param survives its own dec.
     pub(crate) rc_droppable_params: Vec<u32>,
+    /// Whether a `return_call` site may release ANY owner (params and
+    /// rc_owned locals alike): the same raw-address rule that fills
+    /// `rc_droppable_params` (func.rs `populate_tail_release_set`) — an
+    /// entry fn whose body derives no raw pointer. A module-space or
+    /// prim-using body keeps every release on the (dead) epilogue, i.e.
+    /// leaks rather than frees a block a raw view may still read (#1988:
+    /// releasing a display helper's Str local before its tail call
+    /// printed freelist bytes in examples/lisp.almd).
+    pub(crate) tail_release_allowed: bool,
+    /// This fn's own wasm index (see FnPlan::self_index).
+    pub(crate) self_index: Option<u32>,
     /// Locals the Bind/Assign routes made OWNERS of a droppable block
     /// (RC-3): exactly these get the fall-through epilogue dec. Pattern
     /// and loop binds never enter — they borrow their subject's
