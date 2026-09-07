@@ -30,7 +30,11 @@ cd "$ROOT"
 # tests/wasm_availability_e081_test.rs (the E054 precedent).
 # E082 (#1922) is the both-legs wasm wall, same path and same precedent —
 # pinned by tests/wasm_both_legs_e082_test.rs.
-EXEMPT="E054 E081 E082"
+# E083 (#1996) is the wasm emitter's own contract failure (an exit that does
+# not implement its checked ExitPlan) — no source program triggers it; pinned
+# by crates/almide-wasm/tests/exit_validation.rs through the emit-time
+# negative hook `almide_wasm::test_omit_first_release`.
+EXEMPT="E054 E081 E082 E083"
 
 fail=0
 total=0

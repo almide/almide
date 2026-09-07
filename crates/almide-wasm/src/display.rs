@@ -499,6 +499,7 @@ fn build_one_scan_helper(
             rc_owned: std::collections::BTreeSet::new(),
             owned_call_marks: Default::default(),
             borrowed_temps: Vec::new(),
+            exit_ledger: Vec::new(),
             borrow_base: 0, // helper bodies lower no arm argument
             table,
             types,
@@ -600,6 +601,7 @@ fn build_one_eq_helper(
             rc_owned: std::collections::BTreeSet::new(),
             owned_call_marks: Default::default(),
             borrowed_temps: Vec::new(),
+            exit_ledger: Vec::new(),
             borrow_base: 0, // helper bodies lower no arm argument
             table,
             types,
@@ -675,6 +677,7 @@ fn build_one_display_helper(
             rc_owned: std::collections::BTreeSet::new(),
             owned_call_marks: Default::default(),
             borrowed_temps: Vec::new(),
+            exit_ledger: Vec::new(),
             borrow_base: 0, // helper bodies lower no arm argument
             table,
             types,

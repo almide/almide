@@ -61,6 +61,9 @@ pub(crate) struct Emitter<'a> {
     pub(crate) borrowed_temps: Vec<u32>,
     /// First local of the borrow pool (`BORROW_POOL` i32 slots).
     pub(crate) borrow_base: u32,
+    /// Every exit `emit_exit` wrote, with the byte offset it started at —
+    /// the E083 validator (exit_plan.rs) reads the bytes back against it.
+    pub(crate) exit_ledger: Vec<crate::exit_plan::ExitRecord>,
     // NOTE: rc_owned and rc_frame_params are BOTH dec'd by the
     // epilogue — a local in the two sets at once is a double free. Use
     // rc_own(), never a raw insert (#1770: a mut-param writeback's

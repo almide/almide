@@ -86,6 +86,8 @@ fn verdict(entry: &Path) -> String {
             format!("run\texit={} sha256={h}", run.exit)
         }
         Err(almide_wasm::EmitError::Unsupported(r)) => format!("wall\t{r}"),
+        // E083 is a compiler defect, not a wall: it must never enter the ledger.
+        Err(almide_wasm::EmitError::OwnershipLowering(d)) => panic!("{d}"),
     }
 }
 

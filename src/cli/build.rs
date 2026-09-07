@@ -966,6 +966,13 @@ fn render_wasm_module_routed(
             Ok((bytes, true, host_ops.iter().copied().collect()))
         }
         Err(almide_wasm::EmitError::Unsupported(reason)) => reroute(&reason),
+        // E083 (#1996): a compiler ownership defect is NOT rerouted around —
+        // the incumbent would ship a program the checked plan says leaks,
+        // and the message must never tell the writer to change valid code.
+        Err(almide_wasm::EmitError::OwnershipLowering(d)) => {
+            err(&d.to_string());
+            Err(())
+        }
     }
 }
 
