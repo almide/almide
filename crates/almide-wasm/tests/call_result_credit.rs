@@ -97,6 +97,71 @@ fn a_return_call_releases_the_owned_locals_before_the_jump() {
     flat("let x = mk(i); take(x)", "    total = total + bind_then_tail(i)", "3000", "24000");
 }
 
+/// The ERROR exits — `f()!` propagating an err, and a raised `err(..)` —
+/// are function exits like any other: the frame's owned locals and its
+/// droppable params must be released before the `return`. Measured as a
+/// per-call growth that must not exceed the ok path's (both paths leak
+/// the same Result carrier today; the err path leaked the param and the
+/// local on top).
+fn err_exit_heap(n: u32, fail: bool) -> (u64, String) {
+    let cmp = if fail { ">=" } else { "<" };
+    // `guard` PASSES when its condition holds — the failing probe wants
+    // the negation.
+    let ncmp = if fail { "<" } else { ">=" };
+    let src = format!(
+        r#"effect fn boom(n: Int) -> Int = if n {cmp} 0 then err("no") else ok(1)
+
+effect fn work(xs: List[Int], n: Int) -> Int = {{
+  let y = [n, n, n]
+  let v = boom(n)!
+  v + list.len(xs) + list.len(y)
+}}
+
+effect fn raise(xs: List[Int], n: Int) -> Int = {{
+  let y = [n, n]
+  if n {cmp} 0 then err("raised") else ok(list.len(xs) + list.len(y))
+}}
+
+effect fn guarded(xs: List[Int], n: Int) -> Int = {{
+  let y = [n, n]
+  guard n {ncmp} 0 else err("guarded")
+  ok(list.len(xs) + list.len(y))
+}}
+
+effect fn main() -> Unit = {{
+  var total = 0
+  for i in 0..<{n} {{
+    total = total + (match work([i, i], i) {{ ok(v) => v, err(_) => 1 }})
+    total = total + (match raise([i], i) {{ ok(v) => v, err(_) => 1 }})
+    total = total + (match guarded([i], i) {{ ok(v) => v, err(_) => 1 }})
+  }}
+  println("${{total}}")
+}}
+"#
+    );
+    let ir = almide_spine::s5::lower_to_ir("errexit.almd", &src).expect("front");
+    let bytes = almide_wasm::emit_program(&ir).expect("the structural leg lowers the probe");
+    let out = run_wasm(&bytes).expect("run");
+    assert_eq!(out.exit, 0, "{}", out.stderr);
+    (out.heap_end.expect("__heap"), out.stdout.trim().to_string())
+}
+
+#[test]
+fn an_error_exit_releases_the_frame_like_the_ok_exit() {
+    let (ok1, o1) = err_exit_heap(1000, false);
+    let (ok8, o8) = err_exit_heap(8000, false);
+    let (er1, e1) = err_exit_heap(1000, true);
+    let (er8, e8) = err_exit_heap(8000, true);
+    assert_eq!((o1.as_str(), o8.as_str()), ("12000", "96000"));
+    assert_eq!((e1.as_str(), e8.as_str()), ("3000", "24000"));
+    let ok_growth = (ok8 - ok1) / 7000;
+    let err_growth = (er8 - er1) / 7000;
+    assert!(
+        err_growth <= ok_growth,
+        "the err exit leaks what the ok exit releases: {err_growth} B per call on the err path vs {ok_growth} B on the ok path"
+    );
+}
+
 /// #1990 — a `bytes.append_*` loop must grow LINEARLY: the linked impl
 /// returns a fresh buffer on every call and the old one has to go.
 /// Before the fix the old buffer stayed at rc 1 on every append (the
