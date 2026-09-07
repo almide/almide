@@ -4,7 +4,4 @@ list.join 32
 regex.replace 16
 regex.replace_first 16
 string.join 32
-string.trim 64
-string.trim_end 32
-string.trim_start 32
 url.encode_component 208
