@@ -269,6 +269,9 @@ pub(crate) fn lower_fn(
             tail_release_allowed: false,
             self_index,
             rc_owned: std::collections::BTreeSet::new(),
+            module_call_seq: 0,
+            module_call_stack: Vec::new(),
+            table_result_seq: None,
             table: ctx.table,
             types: ctx.types,
             calls: &mut calls,
@@ -384,10 +387,11 @@ pub(crate) fn lower_fn(
         match (ret, effect_raw) {
             (None, _) => em.lower_stmt_expr(body)?,
             (Some(want), None) => {
+                let seq0 = em.module_call_seq;
                 em.lower_tail(body, Some(want))?;
                 // RC-3: a droppable result that may BORROW a local
                 // takes +1 before the epilogue releases the owners.
-                if em.rc_droppable(want) && !em.rc_owned_result(crate::rc_ownership::rc_tail(body)) {
+                if em.rc_droppable(want) && !em.rc_owned_result(crate::rc_ownership::rc_tail(body), seq0) {
                     em.rc_inc_top();
                     if em.witness.is_some() {
                         let tail = crate::rc_ownership::rc_tail(body);
@@ -418,11 +422,12 @@ pub(crate) fn lower_fn(
                     em.lower_stmt_expr(body)?;
                     em.f.instructions().i32_const(0);
                 } else {
+                    let seq0 = em.module_call_seq;
                     em.lower_tail(body, Some(raw))?;
                     // RC-3: the raw payload rides inside the ok carrier
                     // past the epilogue — same borrow rule as the pure
                     // arm, and the +1 must precede the wrap.
-                    if em.rc_droppable(raw) && !em.rc_owned_result(crate::rc_ownership::rc_tail(body)) {
+                    if em.rc_droppable(raw) && !em.rc_owned_result(crate::rc_ownership::rc_tail(body), seq0) {
                         em.rc_inc_top();
                     }
                 }
@@ -539,7 +544,12 @@ fn body_region_enter_var(body: &IrExpr) -> Option<VarId> {
 /// hands the tail callee a raw pointer into a param's block, and releasing
 /// that param at the tail site is a use-after-free (string.is_whitespace
 /// read garbage codepoints exactly this way). Pool/registry bodies keep the
-/// pre-existing accounting.
+/// pre-existing accounting — and MUST (#1990): the direct-prim scan is not
+/// transitive, and a registry body with no `prim` of its own can still tail
+/// into one that returns a raw VIEW into the param (the regex engine's
+/// fuzz batch printed freelist bytes and trapped when module-space bodies
+/// joined the set). The price is the leak the B1 witness names on those
+/// bodies (`iam|im`); lifting it needs a transitive raw-tier analysis.
 fn populate_tail_release_set(
     em: &mut Emitter<'_>,
     cur_module: Option<&str>,

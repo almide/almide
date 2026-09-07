@@ -154,15 +154,30 @@ impl Emitter<'_> {
     /// forever (64 B per call, measured N=1000 vs N=8000). Ctors and
     /// module helpers keep the conservative +1 (a leak is never a
     /// dangle); helper-by-helper conventions are the follow-up.
-    pub(crate) fn rc_owned_result(&self, e: &almide_ir::IrExpr) -> bool {
+    pub(crate) fn rc_owned_result(&self, e: &almide_ir::IrExpr, seq0: u32) -> bool {
         if rc_certainly_fresh(&e.kind) {
             return true;
         }
-        let almide_ir::IrExprKind::Call { target: almide_ir::CallTarget::Named { name }, .. } = &e.kind
-        else {
+        let almide_ir::IrExprKind::Call { target, .. } = &e.kind else {
             return false;
         };
-        let name = name.as_str();
+        let name = match target {
+            almide_ir::CallTarget::Named { name } => name.as_str(),
+            // A module call is owned exactly when IT took the registry
+            // table path (#1990: the `bytes.append_*` rebind leaked the
+            // new buffer on every call, quadratic over a loop); the
+            // counter the caller captured before lowering the rhs names
+            // that call as entry `seq0 + 1`.
+            // NOT `prim.alloc_*`: the allocation is fresh, but the prim-tier
+            // bodies rely on the bind's +1 as the keep-alive for RAW escapes
+            // (`prim.store32(cap + 8, prim.handle(out))` in the regex engine
+            // — treating the alloc as owned freed the capture buffer under a
+            // live raw pointer and the groups printed freelist bytes). That
+            // credit is the tier's convention until the prim bodies carry
+            // their escapes explicitly (#1990 follow-up).
+            almide_ir::CallTarget::Module { .. } => return self.table_result_seq == Some(seq0 + 1),
+            _ => return false,
+        };
         if self.types.ctors.contains_key(name) {
             return false;
         }

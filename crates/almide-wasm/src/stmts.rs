@@ -223,6 +223,7 @@ impl Emitter<'_> {
         let Some(&(idx, declared)) = self.locals.get(var) else {
             return unsup("bind:unmapped");
         };
+        let seq0 = self.module_call_seq;
         self.lower(value, Some(declared))?;
         // RC-5: Lists and Bytes SHARE at bind — the COW judge at every
         // in-place mutation entry moved the value-semantics copy from
@@ -234,7 +235,7 @@ impl Emitter<'_> {
             self.f.instructions().call(F_BLOCK_COPY);
         }
         if matches!(declared, SliceTy::List(_) | SliceTy::Scalar(Scalar::Str | Scalar::Bytes))
-            && !self.rc_owned_result(value)
+            && !self.rc_owned_result(value, seq0)
         {
             self.rc_inc_top();
         }
@@ -675,6 +676,7 @@ impl Emitter<'_> {
                 {
                     return unsup("assign:mut-param-in-branch-arm(#1688)");
                 }
+                let seq0 = self.module_call_seq;
                 self.lower(value, Some(declared))?;
                 // RC-5: same share discipline as Bind.
                 if matches!(declared, SliceTy::Map(..) | SliceTy::Set(_)) {
@@ -683,7 +685,7 @@ impl Emitter<'_> {
                 if matches!(
                     declared,
                     SliceTy::List(_) | SliceTy::Scalar(Scalar::Str | Scalar::Bytes)
-                ) && !self.rc_owned_result(value)
+                ) && !self.rc_owned_result(value, seq0)
                 {
                     self.rc_inc_top();
                 }
