@@ -58,7 +58,7 @@ impl Emitter<'_> {
                 ps.extend(def.params.iter().map(|t| t.val_type()));
                 let ti = self.work.itype(ps, def.ret.map(SliceTy::val_type));
                 // Encoder argument order is (table, type).
-                if tail && def.ret.is_some() && def.ret == self.fn_ret {
+                if tail && def.ret.is_some() && def.ret == self.fn_ret && self.tail_transfer_ok(true) {
                     // A tail call REPLACES the frame — the epilogue's param
                     // release never runs, so it runs HERE (args are already
                     // +1'd by rc_arg_guard, so a pass-through param
@@ -176,8 +176,21 @@ impl Emitter<'_> {
                 let window = !(tail && ret.is_some() && ret == self.fn_ret)
                     && self.region_window_opens(i, ret, args, &params);
                 let save = if window { Some(self.emit_region_save()?) } else { None };
+                // A self tail call in LOOP form under the raw-address rule:
+                // the loop-back rebinds the params and releases nothing
+                // (exit_plan.rs), so a param handed straight through
+                // (`__arr(b, …)` → `__arr(b, …)`) must MOVE, not take the
+                // borrow +1 — that +1 per iteration was the 16 B per call
+                // of every `bytes.read_*_array` (#2005).
+                let loop_form_raw = tail && Some(index) == self.self_index && !self.tail_release_allowed;
+                let mut moved: Vec<u32> = Vec::new();
                 for (a, want) in args.iter().zip(params) {
                     self.lower(a, Some(want))?;
+                    if loop_form_raw && let Some(p) = self.frame_param_var(a) && !moved.contains(&p) {
+                        moved.push(p);
+                        self.witness_arg(a, want);
+                        continue;
+                    }
                     // RC-3 callee-owned args: a borrowed droppable
                     // argument gets +1 here, the callee's epilogue decs
                     // its params — the pair keeps a mut-param callee's
@@ -194,7 +207,11 @@ impl Emitter<'_> {
                 // Tail position with a matching return type → return_call:
                 // constant stack for arbitrarily deep (incl. mutual)
                 // recursion, the C-292 contract.
-                if tail && ret.is_some() && ret == self.fn_ret {
+                if tail
+                    && ret.is_some()
+                    && ret == self.fn_ret
+                    && self.tail_transfer_ok(Some(index) != self.self_index)
+                {
                     // Same frame-replacement release as the indirect site —
                     // unless the callee is THIS fn: tco.rs turns that
                     // return_call into a loop-back, and the frame lives on.
@@ -544,7 +561,7 @@ impl Emitter<'_> {
             self.witness_arg(a, want);
         }
         self.calls.insert(i);
-        if tail && ret.is_some() && ret == self.fn_ret {
+        if tail && ret.is_some() && ret == self.fn_ret && self.tail_transfer_ok(Some(index) != self.self_index) {
             // The third tail site, found by scripts/check-exit-sites.sh
             // the day the gate went in (#1995): a registry-table tail call
             // replaced the frame with no release at all — a user fn whose

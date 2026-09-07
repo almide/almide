@@ -39,6 +39,11 @@ for f in "$SRC"/*.rs; do
   [ "$skip" = 1 ] && continue
   files=$((files + 1))
   checked=$((checked + $(grep -c 'lower_arg(' "$f" || true)))
+  # ArgMode::Raw is the prim floor's declaration alone.
+  if [ "$base" != prim.rs ] && grep -q 'ArgMode::Raw' "$f"; then
+    echo "FAIL: $f declares ArgMode::Raw — only prim.rs may (the raw-address rule is the prim floor's)"
+    fail=1
+  fi
   while IFS=: read -r ln text; do
     if echo "$text" | grep -qE 'self\.lower\((body|fold_body|arm),'; then continue; fi
     echo "FAIL: $f:$ln lowers an argument without declaring its mode (use lower_arg(.., ArgMode::Borrow | ArgMode::Retain))"

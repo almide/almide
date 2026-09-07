@@ -75,6 +75,25 @@ fn synth(ty: &str) -> Option<&'static str> {
     })
 }
 
+/// Every single-letter type parameter becomes `Int`.
+fn instantiate(sig: &str) -> String {
+    let mut out = String::new();
+    let chars: Vec<char> = sig.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        let prev_word = i > 0 && (chars[i - 1].is_alphanumeric() || chars[i - 1] == '_');
+        let next_word = i + 1 < chars.len() && (chars[i + 1].is_alphanumeric() || chars[i + 1] == '_');
+        if c.is_ascii_uppercase() && !prev_word && !next_word {
+            out.push_str("Int");
+        } else {
+            out.push(c);
+        }
+        i += 1;
+    }
+    out
+}
+
 /// Split a parameter list on top-level commas (types carry brackets).
 fn split_params(s: &str) -> Vec<String> {
     let mut out = Vec::new();
@@ -123,8 +142,14 @@ fn rows() -> (Vec<Row>, Vec<String>) {
             if !func.chars().all(|c| c.is_ascii_lowercase() || c == '_' || c.is_ascii_digit()) {
                 continue;
             }
-            let params = &rest[open + 1..arrow];
-            let ret = &rest[arrow + 5..];
+            // A generic signature (`list.repeat(val: A, n: Int) -> List[A]`)
+            // is measured at its Int instance — the structural leg's
+            // droppable List is the scalar-element one, and a generic arm
+            // that mis-declares its result hid behind the skip until the
+            // list.repeat row of #2005.
+            let params = instantiate(&rest[open + 1..arrow]);
+            let ret = instantiate(&rest[arrow + 5..]);
+            let (params, ret) = (params.as_str(), ret.as_str());
             let name = format!("{module}.{func}");
             let Some(reduce) = droppable(ret) else { continue };
             if params.contains("mut ") {
