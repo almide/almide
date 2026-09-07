@@ -227,6 +227,16 @@ pub(crate) fn emit_dec_flat() -> Function {
     i.return_();
     i.end();
     i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_sub().local_set(rc);
+    // Diagnostic knob (`ALMIDE_RC_TRAP_DOUBLE_FREE=1`, emit time): a dec
+    // of a block already at rc 0 — a freed block — traps instead of
+    // wrapping to 0xFFFF_FFFF and silently keeping a dangling block
+    // alive. Off by default: the proof-transcribed runtime tree (the
+    // hash below) is the shipped one.
+    if std::env::var_os("ALMIDE_RC_TRAP_DOUBLE_FREE").is_some() {
+        i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
+        i.unreachable();
+        i.end();
+    }
     i.local_get(block).local_get(rc).i32_store(word(almide_layout::RC.offset));
     i.local_get(rc).i32_eqz().if_(BlockType::Empty);
     i.local_get(block).call(F_FREE);
