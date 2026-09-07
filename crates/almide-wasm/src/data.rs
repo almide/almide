@@ -153,6 +153,9 @@ impl Emitter<'_> {
             && let Some(ret @ SliceTy::Result(..)) = self.fn_ret
         {
             self.lower(e, Some(ret))?;
+            // An exit like any other: the frame's owners are released
+            // before the jump (the err block already shares its payload).
+            self.emit_error_exit_release();
             self.f.instructions().return_();
             return Ok(raw);
         }
@@ -303,12 +306,18 @@ impl Emitter<'_> {
                     match self.lower(expr, None)? {
                         SliceTy::Option(h) => {
                             let et = self.types.el(h);
-                            let mut i = self.f.instructions();
-                            i.local_tee(self.scr_i32_local).i32_eqz().if_(BlockType::Empty);
-                            i.i32_const(almide_layout::NULL_ADDR as i32).return_();
-                            i.end();
-                            i.local_get(self.scr_i32_local);
-                            let _ = i;
+                            self.f
+                                .instructions()
+                                .local_tee(self.scr_i32_local)
+                                .i32_eqz()
+                                .if_(BlockType::Empty);
+                            self.emit_error_exit_release();
+                            self.f
+                                .instructions()
+                                .i32_const(almide_layout::NULL_ADDR as i32)
+                                .return_()
+                                .end()
+                                .local_get(self.scr_i32_local);
                             self.load_ty_slot(et, almide_layout::OPTION_FIELD);
                             return Ok(et);
                         }
@@ -345,9 +354,9 @@ impl Emitter<'_> {
                                 .i32_store(slot_memarg(almide_layout::SUM_TAG))
                                 .local_get(self.tmp_i32_local)
                                 .i32_const(none_msg as i32)
-                                .i32_store(slot_memarg(almide_layout::SUM_FIELD))
-                                .local_get(self.tmp_i32_local)
-                                .return_();
+                                .i32_store(slot_memarg(almide_layout::SUM_FIELD));
+                            self.emit_error_exit_release();
+                            self.f.instructions().local_get(self.tmp_i32_local).return_();
                         } else if self.in_main {
                             let none_msg = self.pool.intern("none");
                             self.f.instructions().i32_const(none_msg as i32);
@@ -373,6 +382,7 @@ impl Emitter<'_> {
                             if fn_err != Some(ert) {
                                 return unsup("unwrap-err-ty-mismatch");
                             }
+                            self.emit_error_exit_release();
                             self.f.instructions().local_get(self.scr_i32_local).return_();
                         } else if self.in_main && ert == STR {
                             self.f.instructions().local_get(self.scr_i32_local);

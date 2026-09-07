@@ -34,6 +34,12 @@ pub(crate) struct Emitter<'a> {
     /// releasing a display helper's Str local before its tail call
     /// printed freelist bytes in examples/lisp.almd).
     pub(crate) tail_release_allowed: bool,
+    /// Every droppable PARAM local of this frame, raw-address rule or
+    /// not — the ERROR exits (`f()!` propagating, a raised `err(..)`)
+    /// release exactly what the epilogue would have (#1995 exit class:
+    /// the err path leaked the params and the owned locals, 128 B per
+    /// call in the credit probe).
+    pub(crate) rc_frame_params: Vec<u32>,
     /// This fn's own wasm index (see FnPlan::self_index).
     pub(crate) self_index: Option<u32>,
     /// Locals the Bind/Assign routes made OWNERS of a droppable block
