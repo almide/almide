@@ -51,6 +51,7 @@ impl Emitter<'_> {
                     // the caller still held (the nightly fuzz's
                     // zeroed-string findings).
                     self.rc_arg_guard(a, *p);
+                    self.witness_arg(a, *p);
                 }
                 self.f.instructions().local_get(h).i32_load(slot_memarg(0));
                 let mut ps: Vec<ValType> = vec![ValType::I32];
@@ -181,6 +182,7 @@ impl Emitter<'_> {
                     // its params — the pair keeps a mut-param callee's
                     // realloc-free honest (rc reflects both holders).
                     self.rc_arg_guard(a, want);
+                    self.witness_arg(a, want);
                 }
                 self.calls.insert(i);
                 if let Some(blk) = save {
@@ -528,6 +530,7 @@ impl Emitter<'_> {
         for (a, want) in args.iter().zip(params) {
             self.lower(a, Some(want))?;
             self.rc_arg_guard(a, want);
+            self.witness_arg(a, want);
         }
         self.calls.insert(i);
         if tail && ret.is_some() && ret == self.fn_ret {
@@ -570,16 +573,32 @@ impl Emitter<'_> {
         // `__gby_add`), and the traps once blamed on releasing them
         // were the loop-form double free above.
         if !self.tail_release_allowed {
+            // No release here — but a real `return_call` still replaces
+            // the frame, and the witness must not credit the dead
+            // epilogue's decs: an unreleased owner shows up as an
+            // unbalanced stream, which is the honest certificate.
+            if replaces_frame && let Some(w) = self.witness.as_mut() {
+                w.frame_replaced();
+            }
             return;
         }
         let owned = if replaces_frame { self.rc_owned.clone() } else { Default::default() };
         for &idx in &owned {
             self.f.instructions().local_get(idx).call(F_DEC_FLAT);
+            self.witness_dec(idx);
         }
         for idx in self.rc_droppable_params.clone() {
             if !owned.contains(&idx) {
                 self.f.instructions().local_get(idx).call(F_DEC_FLAT);
+                self.witness_dec(idx);
             }
+        }
+        // The witness: these were the frame's last releases; the dead
+        // epilogue the emitter still writes after the jump records nothing.
+        // A self tail call is loop-converted (tco.rs) — its frame lives
+        // on and the epilogue's decs are real.
+        if replaces_frame && let Some(w) = self.witness.as_mut() {
+            w.frame_replaced();
         }
     }
 }
