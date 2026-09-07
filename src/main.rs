@@ -1,3 +1,10 @@
+// The CLI is never built without the embedded wasm host: `run`, `bench` and
+// `build --target wasm` are its callers. The feature exists for LIBRARY
+// consumers that compile to wasm32 themselves (almide/playground), where
+// wasmtime cannot be built — see the `almide-wasm-run` note in Cargo.toml.
+#[cfg(not(feature = "embedded-host"))]
+compile_error!("the `almide` binary requires the `embedded-host` feature (default); only the library builds without it");
+
 mod cli;
 mod compile_driver;
 
