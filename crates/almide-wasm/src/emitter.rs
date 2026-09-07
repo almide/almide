@@ -34,12 +34,6 @@ pub(crate) struct Emitter<'a> {
     /// releasing a display helper's Str local before its tail call
     /// printed freelist bytes in examples/lisp.almd).
     pub(crate) tail_release_allowed: bool,
-    /// The module-space relaxation (#1990): the params ARE released at a
-    /// `return_call` site whose callee is returns-fresh (fresh.rs) — its
-    /// result cannot be a view of a param, so the release is exactly the
-    /// epilogue's, moved before the jump. Never set together with
-    /// `tail_release_allowed`; never set for a prim-using body.
-    pub(crate) tail_release_fresh_only: bool,
     /// This fn's own wasm index (see FnPlan::self_index).
     pub(crate) self_index: Option<u32>,
     /// Locals the Bind/Assign routes made OWNERS of a droppable block

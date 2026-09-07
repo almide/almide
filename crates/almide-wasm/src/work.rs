@@ -160,9 +160,6 @@ pub(crate) struct FnWork {
     /// Region-pure fns by table index (#1961) — the vocabulary the
     /// `consume(produce(scalars))` window recogniser consults.
     pub(crate) region_pure: crate::region::RegionPure,
-    /// Returns-fresh fns by table index (#1990) — a module-space tail
-    /// site may release its params before a `return_call` to one.
-    pub(crate) returns_fresh: crate::fresh::ReturnsFresh,
     /// Set once any region window was emitted (exports `__heap_high`).
     pub(crate) region_used: std::cell::Cell<bool>,
 }

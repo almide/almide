@@ -62,7 +62,7 @@ impl Emitter<'_> {
                     // release never runs, so it runs HERE (args are already
                     // +1'd by rc_arg_guard, so a pass-through param
                     // survives its own dec).
-                    self.emit_tail_param_release(true, false);
+                    self.emit_tail_param_release(true);
                     self.f.instructions().return_call_indirect(0, ti);
                 } else {
                     self.f.instructions().call_indirect(0, ti);
@@ -195,8 +195,7 @@ impl Emitter<'_> {
                     // Same frame-replacement release as the indirect site —
                     // unless the callee is THIS fn: tco.rs turns that
                     // return_call into a loop-back, and the frame lives on.
-                    let callee_fresh = self.work.returns_fresh.borrow().contains(&i);
-                    self.emit_tail_param_release(Some(index) != self.self_index, callee_fresh);
+                    self.emit_tail_param_release(Some(index) != self.self_index);
                     self.f.instructions().return_call(index);
                 } else {
                     self.f.instructions().call(index);
@@ -550,7 +549,7 @@ impl Emitter<'_> {
     /// tail call replaces the frame and the epilogue never runs. The
     /// pending args on the wasm stack are unaffected ($dec_flat is
     /// stack-neutral), and rc_arg_guard has already +1'd borrowed args.
-    pub(crate) fn emit_tail_param_release(&mut self, replaces_frame: bool, callee_fresh: bool) {
+    pub(crate) fn emit_tail_param_release(&mut self, replaces_frame: bool) {
         // The tail site's releases. The droppable PARAMS always: their
         // old values are gone after the jump — replaced by the callee's
         // frame, or by the loop-back's `local.set`s (tco.rs). The
@@ -563,20 +562,17 @@ impl Emitter<'_> {
         // call's arguments are lowered and rc_arg_guard-inc'd already,
         // rc_owned holds only flat blocks, and a local is never the tail
         // call's result. Gated on the raw-address rule (#1988): a
-        // module-space or prim-using body keeps every release on the
-        // epilogue — a raw view into a local may still be read.
-        if !self.tail_release_allowed && !(self.tail_release_fresh_only && callee_fresh) {
+        // prim-using body keeps every release on the epilogue — a raw
+        // view into a local may still be read. Module space is NOT a
+        // gate: every module-space `return_call` that skipped this
+        // release leaked its params and locals (the structural witness
+        // counted 63 such wrappers — `fan_map`, `http_set_header`,
+        // `__gby_add`), and the traps once blamed on releasing them
+        // were the loop-form double free above.
+        if !self.tail_release_allowed {
             return;
         }
-        // The module-space relaxation (#1990) moves only the PARAM
-        // releases: the wrapper `bytes_append_u16_le(b, v) = __bam(b, v,
-        // 2, true)` left `b`'s old buffer at rc 1 on every call. Its
-        // owned locals stay on the raw-address rule.
-        let owned = if replaces_frame && self.tail_release_allowed {
-            self.rc_owned.clone()
-        } else {
-            Default::default()
-        };
+        let owned = if replaces_frame { self.rc_owned.clone() } else { Default::default() };
         for &idx in &owned {
             self.f.instructions().local_get(idx).call(F_DEC_FLAT);
         }
