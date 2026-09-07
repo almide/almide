@@ -1,13 +1,15 @@
 diff --git a/crates/almide-wasm/src/stmts.rs b/crates/almide-wasm/src/stmts.rs
-index 865fb01ec..985238e2b 100644
+index abe6f3302..e99d25854 100644
 --- a/crates/almide-wasm/src/stmts.rs
 +++ b/crates/almide-wasm/src/stmts.rs
-@@ -254,7 +254,7 @@ impl Emitter<'_> {
+@@ -682,8 +682,8 @@ impl Emitter<'_> {
                      Ok(idx) => self.f.instructions().local_get(idx),
                      Err(gidx) => self.f.instructions().global_get(gidx),
                  };
--                self.f.instructions().call(F_BLOCK_COPY).local_tee(hb);
+-                let copy = self.copy_fn_of(SliceTy::Named(ti));
+-                self.f.instructions().call(copy).local_tee(hb);
++                let _ = self.copy_fn_of(SliceTy::Named(ti));
 +                self.f.instructions().local_tee(hb); // [MUTANT: copy dropped]
-                 self.lower(value, Some(fty))?;
-                 self.rc_share_guard(value, fty);
-                 self.store_ty_slot(fty, off);
+                 // The replaced field's credit goes with it (stage 2c-ii).
+                 if let Some(dec) = self.elem_is_handle(fty).then(|| self.dec_fn_of(fty)) {
+                     self.f.instructions().local_get(hb).i32_load(slot_memarg(off)).call(dec);
