@@ -78,7 +78,7 @@ fn main() {
     let project = Project::new(&db, inputs.clone());
     PARSE_EXECUTIONS.store(0, Ordering::Relaxed);
     let t = Instant::now();
-    sink = sink.wrapping_add(project_digest(&db, project));
+    sink = sink.wrapping_add(*project_digest(&db, project));
     let cold = t.elapsed().as_secs_f64() * 1e3;
     let cold_execs = PARSE_EXECUTIONS.load(Ordering::Relaxed);
     let overhead = (cold / batch - 1.0) * 100.0;
@@ -93,7 +93,7 @@ fn main() {
         victim.set_text(&mut db).to(new_text);
         PARSE_EXECUTIONS.store(0, Ordering::Relaxed);
         let t = Instant::now();
-        sink = sink.wrapping_add(project_digest(&db, project));
+        sink = sink.wrapping_add(*project_digest(&db, project));
         warm_ms.push(t.elapsed().as_secs_f64() * 1e3);
         per_round_execs.push(PARSE_EXECUTIONS.load(Ordering::Relaxed));
     }
@@ -104,7 +104,7 @@ fn main() {
 
     // ── sanity: a memo hit round (no edit) must run 0 parses ────────────────
     PARSE_EXECUTIONS.store(0, Ordering::Relaxed);
-    sink = sink.wrapping_add(project_digest(&db, project));
+    sink = sink.wrapping_add(*project_digest(&db, project));
     let hit_execs = PARSE_EXECUTIONS.load(Ordering::Relaxed);
 
     let speedup = batch / warm;

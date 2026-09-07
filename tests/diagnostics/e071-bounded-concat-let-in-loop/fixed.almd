@@ -1,0 +1,10 @@
+// ALS-B4: concatenate once before the loop; the body stays allocation-free.
+@bounded
+fn tick(s: String) -> Int = {
+  let t = s + "-"
+  var n = 0
+  for i in 0..<4 { n = n + string.len(t) }
+  n
+}
+
+fn main() -> Unit = println("${tick("go")}")

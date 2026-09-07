@@ -1,0 +1,8 @@
+// E038: terminal `??` as a match arm's result — nothing before the closing
+// brace can be the fallback operand.
+effect fn main() -> Unit = {
+  let _ = match "1" {
+    _ => int.parse("1") ?? 0
+  }
+  println("done")
+}

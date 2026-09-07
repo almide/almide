@@ -12,8 +12,10 @@ use std::sync::{Arc, Mutex};
 
 /// One wasm run's cross-target observables: stdout, stderr, exit code.
 /// A trap WITHOUT a recorded `almide.exit` code is a runtime abort
-/// (unreachable / div-by-zero / OOB) — exit 1, the native abort contract.
-/// Not every gate reads every field (the run manifest hashes stdout only).
+/// (unreachable / div-by-zero / OOB) — exit 1, the native abort contract,
+/// and (#1826) ONE stderr line naming it, `Error: wasm trap: <reason>`,
+/// never a silent exit 1. Not every gate reads every field (the run
+/// manifest hashes stdout only).
 #[allow(dead_code)]
 pub struct RunResult {
     pub stdout: String,
@@ -35,6 +37,9 @@ struct Host {
     /// The stdin stream (op 31 drains it — the guest caps counts on its
     /// side); tests run with a fixed buffer, the runner reads lazily.
     stdin: Arc<Mutex<StdinSource>>,
+    /// Program args for op 29 (#1716): framed as [argv0, args...] — the
+    /// guest's args arm skips the first frame, matching native argv[1..].
+    args: Vec<String>,
     /// Linear-memory budget (heap-budget gates); unlimited by default.
     limits: wasmtime::StoreLimits,
 }
@@ -113,6 +118,35 @@ fn frames(names: &[String]) -> Vec<u8> {
 
 /// status<<32 | len: 0 = ok, 1 = err (buffer holds the message), 2 =
 /// ok-none (the *_if_exists shapes). `flag` rides len for bool ops.
+/// Parse the http_framed cell frame (#1710 increment 3): decimal
+/// CHAR-count lengths (string.len semantics — the guest counts chars,
+/// so this parser walks chars, not bytes), `<len>\n<payload>` cells:
+/// method, body, then key/value pairs until the frame ends.
+type HttpFrame = (String, String, Vec<(String, String)>);
+
+fn parse_http_frame(frame: &str) -> Result<HttpFrame, String> {
+    fn cell(rest: &str) -> Result<(String, &str), String> {
+        let nl = rest.find('\n').ok_or_else(|| "malformed http frame (missing length)".to_string())?;
+        let n: usize = rest[..nl].parse().map_err(|_| "malformed http frame (bad length)".to_string())?;
+        let tail = &rest[nl + 1..];
+        if tail.chars().count() < n {
+            return Err("malformed http frame (short cell)".to_string());
+        }
+        let byte_end = tail.char_indices().nth(n).map(|(i, _)| i).unwrap_or(tail.len());
+        Ok((tail[..byte_end].to_string(), &tail[byte_end..]))
+    }
+    let (method, rest) = cell(frame)?;
+    let (body, mut rest) = cell(rest)?;
+    let mut headers = Vec::new();
+    while !rest.is_empty() {
+        let (k, r1) = cell(rest)?;
+        let (v, r2) = cell(r1)?;
+        headers.push((k, v));
+        rest = r2;
+    }
+    Ok((method, body, headers))
+}
+
 fn pack(status: i64, len: usize) -> i64 {
     (status << 32) | (len as i64 & 0xFFFF_FFFF)
 }
@@ -338,6 +372,91 @@ fn env_overlay() -> &'static Mutex<std::collections::HashMap<String, String>> {
 
 /// fs_dispatch_meta for the complexity budget.
 fn fs_dispatch_host(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
+    let err_s = |m: String| (pack(1, m.len()), m.into_bytes());
+    match op {
+        // Decomposed by op family (codopsy cc 38 -> per-family fns): the
+        // http and env arms live in `fs_dispatch_http` / `fs_dispatch_env`.
+        43..=50 => fs_dispatch_http(op, a, b),
+        26 | 27 | 28 | 29 | 33 | 37 => fs_dispatch_env(op, a, b),
+        31 => (pack(0, 0), Vec::new()),
+        // incremental stdin (op 35) — same empty answer in the harness.
+        35 => (pack(0, 0), Vec::new()),
+        32 => {
+            let n = b.len();
+            let mut seed = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos() as u64
+                | 1;
+            let mut out = Vec::with_capacity(n);
+            for _ in 0..n {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                out.push(seed as u8);
+            }
+            (pack(0, out.len()), out)
+        }
+        _ => err_s(format!("unknown fs op {op}")),
+    }
+}
+
+/// The http op family (43..=50) of `fs_dispatch_host`, verbatim.
+fn fs_dispatch_http(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
+    let ok_text = |t: String| (pack(0, t.len()), t.into_bytes());
+    let err_s = |m: String| (pack(1, m.len()), m.into_bytes());
+    match op {
+        // http string client (#1710 increment 1, ops 43..=47): url in a,
+        // body (POST/PUT/PATCH) in b — THE native client transcribed
+        // (http_client.rs), so error texts and framing match native
+        // byte-for-byte. Stock artifacts never reach here (the build-path
+        // op audit refuses unserved ops); the embedded lane serves them.
+        // The framed request family (#1710 increment 3, ops 48..=50):
+        // url in a, the decimal CHAR-length frame in b — method cell,
+        // body cell, then header key/value cells, `<len>\n<payload>`
+        // each, exactly as stdlib/http_framed.almd builds it. 48 answers
+        // the body text, 49 answers `<status>\n<body>`, 50 raw bytes.
+        48..=50 => {
+            let frame = String::from_utf8_lossy(b).to_string();
+            match parse_http_frame(&frame) {
+                Err(m) => err_s(m),
+                Ok((method, body, headers)) => match op {
+                    48 => match almide_rt_core::http_client_core::request(&method, a, &body, &headers) {
+                        Ok(text) => ok_text(text),
+                        Err(m) => err_s(m),
+                    },
+                    49 => match almide_rt_core::http_client_core::request_status(&method, a, &body, &headers) {
+                        Ok((code, text)) => ok_text(format!("{code}\n{text}")),
+                        Err(m) => err_s(m),
+                    },
+                    _ => match almide_rt_core::http_client_core::request_bytes(&method, a, &body, &headers) {
+                        Ok(bytes) => (pack(0, bytes.len()), bytes),
+                        Err(m) => err_s(m),
+                    },
+                },
+            }
+        }
+        43..=47 => {
+            let method = match op {
+                43 => "GET",
+                44 => "POST",
+                45 => "PUT",
+                46 => "PATCH",
+                _ => "DELETE",
+            };
+            let body = String::from_utf8_lossy(b).to_string();
+            match almide_rt_core::http_client_core::request(method, a, &body, &[]) {
+                Ok(text) => ok_text(text),
+                Err(m) => err_s(m),
+            }
+        }
+        // env.set (#1423 bucket C ruling): key in a, value in b.
+        _ => err_s(format!("unknown fs op {op}")),
+    }
+}
+
+/// The env op family (26/27/28/29/33/37) of `fs_dispatch_host`, verbatim.
+fn fs_dispatch_env(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     let ok_text = |t: String| (pack(0, t.len()), t.into_bytes());
     let err_s = |m: String| (pack(1, m.len()), m.into_bytes());
     match op {
@@ -357,20 +476,11 @@ fn fs_dispatch_host(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
         // (http_client.rs), so error texts and framing match native
         // byte-for-byte. Stock artifacts never reach here (the build-path
         // op audit refuses unserved ops); the embedded lane serves them.
-        43..=47 => {
-            let method = match op {
-                43 => "GET",
-                44 => "POST",
-                45 => "PUT",
-                46 => "PATCH",
-                _ => "DELETE",
-            };
-            let body = String::from_utf8_lossy(b).to_string();
-            match crate::http_client::request(method, a, &body, &[]) {
-                Ok(text) => ok_text(text),
-                Err(m) => err_s(m),
-            }
-        }
+        // The framed request family (#1710 increment 3, ops 48..=50):
+        // url in a, the decimal CHAR-length frame in b — method cell,
+        // body cell, then header key/value cells, `<len>\n<payload>`
+        // each, exactly as stdlib/http_framed.almd builds it. 48 answers
+        // the body text, 49 answers `<status>\n<body>`, 50 raw bytes.
         // env.set (#1423 bucket C ruling): key in a, value in b.
         37 => {
             let v = String::from_utf8_lossy(b).to_string();
@@ -379,16 +489,17 @@ fn fs_dispatch_host(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
         }
         27 => ok_text(std::env::consts::OS.to_string()),
         28 => ok_text(std::env::temp_dir().to_string_lossy().replace('\\', "/")),
-        // args: [argv0] — a non-empty program path on both legs; the
-        // fixtures only observe len + non-emptiness.
+        // args without a run context (#1716): [argv0] only — the fs_call
+        // closure answers op 29 with the run's real args before dispatch
+        // reaches here, so this arm is the no-Host fallback.
+        // args without a run context (#1716): [argv0] only — the fs_call
+        // closure answers op 29 with the run's real args before dispatch
+        // reaches here, so this arm is the no-Host fallback.
         29 => {
             let buf = frames(&["wasm-harness".to_string()]);
             (pack(0, buf.len()), buf)
         }
         // stdin read (up to n = a bytes) — the harness has no stdin.
-        31 => (pack(0, 0), Vec::new()),
-        // incremental stdin (op 35) — same empty answer in the harness.
-        35 => (pack(0, 0), Vec::new()),
         // cwd — the same std::env the native runtime reads.
         33 => match std::env::current_dir() {
             Ok(p) => ok_text(p.to_string_lossy().replace('\\', "/")),
@@ -396,22 +507,6 @@ fn fs_dispatch_host(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
         },
         // host entropy: n = b_len bytes from a seeded-by-time xorshift
         // (the range property is the only observable, C-112).
-        32 => {
-            let n = b.len();
-            let mut seed = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos() as u64
-                | 1;
-            let mut out = Vec::with_capacity(n);
-            for _ in 0..n {
-                seed ^= seed << 13;
-                seed ^= seed >> 7;
-                seed ^= seed << 17;
-                out.push(seed as u8);
-            }
-            (pack(0, out.len()), out)
-        }
         _ => err_s(format!("unknown fs op {op}")),
     }
 }
@@ -479,7 +574,7 @@ pub fn run_wasm(bytes: &[u8]) -> anyhow::Result<RunResult> {
 
 /// Run with a fixed stdin buffer (tests; piped byte streams).
 pub fn run_wasm_with(bytes: &[u8], stdin: &[u8]) -> anyhow::Result<RunResult> {
-    run_wasm_src(bytes, StdinSource::Buf(stdin.to_vec()), None)
+    run_wasm_src(bytes, StdinSource::Buf(stdin.to_vec()), None, &[])
 }
 
 /// Run under a hard linear-memory budget (bytes). Growth past the cap
@@ -487,19 +582,26 @@ pub fn run_wasm_with(bytes: &[u8], stdin: &[u8]) -> anyhow::Result<RunResult> {
 /// "Error: out of memory" + exit 1 (C-197) — the heap-budget
 /// acceptance-gate observable (W-8; the RC arc's floor).
 pub fn run_wasm_capped(bytes: &[u8], max_memory_bytes: usize) -> anyhow::Result<RunResult> {
-    run_wasm_src(bytes, StdinSource::Buf(Vec::new()), Some(max_memory_bytes))
+    run_wasm_src(bytes, StdinSource::Buf(Vec::new()), Some(max_memory_bytes), &[])
 }
 
 /// Run with the process's real stdin, read lazily on first guest read
 /// (the product runner — never blocks for programs that skip stdin).
 pub fn run_wasm_real_stdin(bytes: &[u8]) -> anyhow::Result<RunResult> {
-    run_wasm_src(bytes, StdinSource::RealOnce, None)
+    run_wasm_src(bytes, StdinSource::RealOnce, None, &[])
+}
+
+/// The product runner with program args (#1716): op 29 answers
+/// [argv0, args...] and the guest's frame walk skips argv0.
+pub fn run_wasm_real_stdin_args(bytes: &[u8], args: &[String]) -> anyhow::Result<RunResult> {
+    run_wasm_src(bytes, StdinSource::RealOnce, None, args)
 }
 
 fn run_wasm_src(
     bytes: &[u8],
     stdin: StdinSource,
     max_memory_bytes: Option<usize>,
+    args: &[String],
 ) -> anyhow::Result<RunResult> {
     wasmparser::validate(bytes)?; // the wall: never instantiate an invalid module
     // Epoch deadline: a fixture (or a MUTANT under the gate) that
@@ -526,6 +628,7 @@ fn run_wasm_src(
             exit: exit.clone(),
             fs_buf: fs_buf.clone(),
             stdin: stdin_buf.clone(),
+            args: args.to_vec(),
             limits,
         },
     );
@@ -583,6 +686,16 @@ fn run_wasm_src(
                 let ms = i64::from(a_len).max(0) as u64;
                 std::thread::sleep(std::time::Duration::from_millis(ms));
                 return Ok(0);
+            }
+            // op 29 = args (#1716): argv0 + the run's program args; the
+            // guest skips frame 0 (native argv[1..] semantics).
+            if op == 29 {
+                let mut names = vec!["wasm-harness".to_string()];
+                names.extend(caller.data().args.iter().cloned());
+                let buf = frames(&names);
+                let len = buf.len();
+                *caller.data().fs_buf.lock().expect("fs buf") = buf;
+                return Ok((len as i64) & 0xFFFF_FFFF);
             }
             let mem = caller
                 .get_export("memory")
@@ -652,22 +765,137 @@ fn run_wasm_src(
             if std::env::var("ALMIDE_DBG_TRAP").is_ok() {
                 eprintln!("TRAP: {e:?}");
             }
-            1 // genuine trap = runtime abort
+            // A genuine trap is a runtime abort: exit 1, and (#1826) the
+            // abort NAMES itself on stderr in the `Error: ` form native's
+            // aborts use. Native never has this case (its aborts are all
+            // `Error: <msg>` from a defined guard), so the `wasm trap:`
+            // prefix is this leg's own spelling — a fuzz finding or a
+            // user is never left with an empty stderr and a bare 1.
+            // EXCEPT the die convention (#1912): a defined guard's
+            // `prim.die` prints its `Error: <msg>` line and then executes
+            // `unreachable` — the trap IS the exit, already named. The stock
+            // wasmtime lane and native show that one line; adding
+            // `Error: wasm trap: unreachable…` after it made the embedded
+            // lane the odd one out.
+            let mut buf = err.lock().expect("test harness invariant");
+            let named_die = is_unreachable_trap(e)
+                && buf.lines().last().is_some_and(|l| l.starts_with("Error: "));
+            if !named_die {
+                buf.push_str(&trap_line(e));
+            }
+            1
         }
         (Ok(()), Some(_)) => {
             anyhow::bail!("almide.exit recorded a code but the run returned normally")
         }
     };
     drop(ticker);
-    let heap_end = instance.get_global(&mut store, "__heap").map(|g| match g.get(&mut store) {
-        wasmtime::Val::I32(v) => v as u32 as u64,
-        wasmtime::Val::I64(v) => v as u64,
-        _ => 0,
-    });
+    let read_global = |store: &mut wasmtime::Store<_>, name: &str| {
+        instance.get_global(&mut *store, name).map(|g| match g.get(&mut *store) {
+            wasmtime::Val::I32(v) => v as u32 as u64,
+            wasmtime::Val::I64(v) => v as u64,
+            _ => 0,
+        })
+    };
+    // A region window (#1961) rewinds `__heap`; the allocation total is
+    // the peak, kept in `__heap_high` when the module has windows.
+    let heap_end = read_global(&mut store, "__heap");
+    let heap_end = match (heap_end, read_global(&mut store, "__heap_high")) {
+        (Some(h), Some(hi)) => Some(h.max(hi)),
+        (h, _) => h,
+    };
     Ok(RunResult {
         stdout: out.lock().expect("test harness invariant").clone(),
         stderr: err.lock().expect("test harness invariant").clone(),
         exit: exit_code,
         heap_end,
     })
+}
+
+/// The one stderr line a trapped run reports (#1826), in the `Error: `
+/// abort form: wasmtime's own `Trap` Display — already spelled
+/// `wasm trap: <reason>` ("out of bounds memory access", "wasm
+/// `unreachable` instruction executed", "call stack exhausted", …) —
+/// when the error is a trap, else the chain's root cause under the same
+/// prefix. Never the multi-line backtrace.
+/// The `unreachable` trap — the instruction the die lowering ends on.
+fn is_unreachable_trap(e: &wasmtime::Error) -> bool {
+    matches!(e.downcast_ref::<wasmtime::Trap>(), Some(wasmtime::Trap::UnreachableCodeReached))
+}
+
+fn trap_line(e: &wasmtime::Error) -> String {
+    match e.downcast_ref::<wasmtime::Trap>() {
+        Some(t) => format!("Error: {t}\n"),
+        None => format!("Error: wasm trap: {}\n", e.root_cause()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::run_wasm;
+    use wasm_encoder::{
+        CodeSection, ExportKind, ExportSection, Function, FunctionSection, Instruction,
+        MemArg, MemorySection, MemoryType, Module, TypeSection,
+    };
+
+    /// A one-function module whose exported `main` runs `body` — the
+    /// smallest thing the host will instantiate (no `almide.*` imports).
+    fn module(body: &[Instruction<'_>]) -> Vec<u8> {
+        let mut types = TypeSection::new();
+        types.ty().function([], []);
+        let mut funcs = FunctionSection::new();
+        funcs.function(0);
+        let mut mems = MemorySection::new();
+        mems.memory(MemoryType {
+            minimum: 1,
+            maximum: None,
+            memory64: false,
+            shared: false,
+            page_size_log2: None,
+        });
+        let mut exports = ExportSection::new();
+        exports.export("memory", ExportKind::Memory, 0);
+        exports.export("main", ExportKind::Func, 0);
+        let mut code = CodeSection::new();
+        let mut f = Function::new([]);
+        for op in body {
+            f.instruction(op);
+        }
+        f.instruction(&Instruction::End);
+        code.function(&f);
+        let mut m = Module::new();
+        m.section(&types).section(&funcs).section(&mems).section(&exports).section(&code);
+        m.finish()
+    }
+
+    /// #1826 defect 2: a trap that reaches the host with no recorded
+    /// `almide.exit` is exit 1 AND one stderr line naming the reason —
+    /// never a silent 1.
+    #[test]
+    fn a_trap_names_itself_on_stderr_and_exits_1() {
+        let r = run_wasm(&module(&[Instruction::Unreachable])).expect("engine runs the module");
+        assert_eq!(r.exit, 1);
+        assert_eq!(r.stdout, "");
+        assert_eq!(r.stderr, "Error: wasm trap: wasm `unreachable` instruction executed\n");
+    }
+
+    #[test]
+    fn an_out_of_bounds_access_names_the_memory_trap() {
+        let oob = [
+            Instruction::I32Const(-1),
+            Instruction::I32Load(MemArg { offset: 0, align: 2, memory_index: 0 }),
+            Instruction::Drop,
+        ];
+        let r = run_wasm(&module(&oob)).expect("engine runs the module");
+        assert_eq!(r.exit, 1);
+        assert_eq!(r.stderr, "Error: wasm trap: out of bounds memory access\n");
+    }
+
+    /// The happy path is untouched: a clean return is exit 0, empty stderr.
+    #[test]
+    fn a_clean_return_stays_silent() {
+        let r = run_wasm(&module(&[Instruction::Nop])).expect("engine runs the module");
+        assert_eq!(r.exit, 0);
+        assert_eq!(r.stderr, "");
+    }
 }

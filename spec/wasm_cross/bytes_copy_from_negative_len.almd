@@ -1,0 +1,22 @@
+// @contract: C-342
+// `bytes.copy_from(dst, src, doff, soff, len)` with a NEGATIVE length or
+// offset copies nothing on both targets — the family's `negative = miss`
+// rule. Native cast `len as usize`, which wrapped a negative length huge
+// and then clamped it to the available run, so `-128` copied the byte the
+// wasm leg refused (fuzz seed 541740772279:6731, a mutation of the C-194
+// fixture; #1910).
+fn main() -> Unit = {
+  var a = bytes.new(8)
+  var o = bytes.new(8)
+  bytes.set_at(o, 3, 42)
+  bytes.copy_from(a, o, 0, 3, -128)
+  println("negative len: ${bytes.get_or(a, 0, -1)}")
+  bytes.copy_from(a, o, -1, 3, 1)
+  println("negative dst offset: ${bytes.get_or(a, 0, -1)}")
+  bytes.copy_from(a, o, 0, -1, 1)
+  println("negative src offset: ${bytes.get_or(a, 0, -1)}")
+  bytes.copy_from(a, o, 0, 3, 1)
+  println("positive: ${bytes.get_or(a, 0, -1)}")
+  bytes.copy_from(a, o, 6, 3, 100)
+  println("clamped run: ${bytes.get_or(a, 6, -1)} ${bytes.get_or(a, 7, -1)}")
+}

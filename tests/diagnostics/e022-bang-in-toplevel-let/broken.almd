@@ -1,0 +1,5 @@
+// `!` in a module-scope let initializer: top-level bindings run outside
+// any effect fn or test block, so there is nowhere to propagate the err.
+let port = int.parse("8080")!
+
+fn main() -> Unit = println(int.to_string(port))

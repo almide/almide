@@ -1,0 +1,19 @@
+// @wall: http.get
+// An http-bodied callback in the fan MAPPER heads (#1406): the wall is the
+// CAPABILITY's — `http.get` opens an OS socket, outside every stock wasm
+// artifact's host surface (declared embedded-lane-served in
+// proofs/target-availability.toml: `almide run --target wasm` serves it,
+// the BUILD path refuses via the emitted-op audit) — and its text names
+// http, never the mapper. Pinned so a mapper-lowering change that starts
+// accepting the shape without the capability machinery fails loudly; the
+// fs-bodied twin runs on every leg
+// (spec/embedded_cross/fan_mapper_effect_callback_forms.almd).
+// Graduates with #1710's stock/component client leg.
+import http
+
+effect fn main() -> Unit = {
+  let urls = ["http://127.0.0.1:1/a", "http://127.0.0.1:1/b"]
+  println(fan.any(urls, (u) => http.get(u)) ?? "none")
+  println(int.to_string(list.len(fan.settle(urls, (u) => http.get(u)))))
+  println(int.to_string(list.len(fan.map(urls, (u) => http.get(u)) ?? [])))
+}

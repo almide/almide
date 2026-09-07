@@ -1,0 +1,6 @@
+// ALS-B8: repeating a bytes value a run-time number of times is a
+// run-time-length heap construction (the constant seed does not save it).
+@bounded
+fn pattern(n: Int) -> Int = bytes.len(bytes.repeat(bytes.new(2), n))
+
+fn main() -> Unit = println("${pattern(2)}")

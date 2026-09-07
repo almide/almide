@@ -148,35 +148,51 @@ jobs:
           # clippy rides this job's compile cache for its ratchet (#1462).
           components: clippy
 
-      - uses: actions/cache@v6
+      # Dependencies only. The old actions/cache entry (registry + git + the
+      # whole `target/`) had grown to 4.1 GB and took 143 s to restore — most
+      # of it the workspace's own artifacts, which every run recompiles anyway
+      # because the sources changed. rust-cache prunes workspace crates from
+      # `target/` on save and keeps the dependency artifacts (release,
+      # ci-test, and the check/clippy metadata the two ratchets below ride).
+      # `save-if`: develop writes, PRs and queue branches read — one warm
+      # entry per toolchain + lockfile instead of one per branch.
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: linux-cargo-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: linux-cargo-${{ env.RUST_TOOLCHAIN }}-
+          shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
+          save-if: ${{ github.ref == 'refs/heads/develop' }}
+          cache-on-failure: true
 
       - run: cargo build --release
 
-      # #1732: the workspace's dev-profile TEST build happens ONCE, here,
-      # and ships to the shards as a cargo-nextest archive — the four
-      # shard jobs stop compiling entirely (each used to repeat this
-      # ~10-minute build). The archive carries every test binary plus
-      # build-script outputs; shards replay it with `nextest run
-      # --archive-file` under the same target map and coverage gate.
+      # #1732: the workspace's TEST build happens ONCE, here, and ships to
+      # the shards as a cargo-nextest archive — the four shard jobs stop
+      # compiling entirely (each used to repeat this ~10-minute build). The
+      # archive carries every test binary plus build-script outputs; shards
+      # replay it with `nextest run --archive-file` under the same target map
+      # and coverage gate.
+      #
+      # `--cargo-profile ci-test` (Cargo.toml): the dev profile minus
+      # debuginfo. The dev-profile archive was 3.1 GB, took 164 s to pack and
+      # 86 s to upload, and every shard downloaded it (the `digest-mismatch`
+      # flake lived on that download). Test semantics are the dev profile's
+      # (debug_assertions on, so the release-only sweeps stay ignored here).
+      # The shards need no profile flag: the archive records its own layout
+      # and `--extract-to` recreates target/ci-test/*.
       - name: Install cargo-nextest
         run: |
           curl -LsSf https://get.nexte.st/latest/linux -o /tmp/nextest.tar.gz
           tar xzf /tmp/nextest.tar.gz -C /usr/local/bin
           cargo nextest --version
       - name: Archive the workspace test binaries
-        run: cargo nextest archive --workspace --archive-file /tmp/almide-tests.tar.zst
+        run: cargo nextest archive --workspace --cargo-profile ci-test --archive-file /tmp/almide-tests.tar.zst
       - uses: actions/upload-artifact@v7
         with:
           name: almide-tests-archive
           path: /tmp/almide-tests.tar.zst
           retention-days: 1
+          # nextest already zstd-compressed the archive; a second gzip pass
+          # over incompressible bytes only costs upload-artifact time.
+          compression-level: 0
 
       # Wired to `build`, not `checks`: the ratchet compiles the workspace, and
       # `checks` downloads a prebuilt binary with no cargo toolchain. Runs after
@@ -266,8 +282,11 @@ jobs:
     # therefore their own lock — that is where the parallelism comes from.
     #
     # 4, not more: the load is extremely skewed (the top 4 targets are half the
-    # total) and `wasm_runtime_test` alone is ~270s, so past 4 shards the
-    # longest target IS the floor and extra jobs buy nothing.
+    # total), so past 4 shards the longest single target IS the floor and extra
+    # jobs buy nothing. The former giant, `wasm_runtime_test` (1552 s on run
+    # 33695667642), is split into per-gate `wasm_runtime_*` binaries (largest
+    # ~520 s) so the packer can spread it; the floor is `diagnostic_harness_test`
+    # now.
     name: Test Rust (shard ${{ matrix.shard }}/4)
     needs: [changes, build]
     # No job-level docs-only guard here — see the `changes` job: a skipped
@@ -302,8 +321,8 @@ jobs:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
       # #1732: no compile here anymore — the build job ships the
-      # dev-profile test binaries as a nextest archive, and this job
-      # replays it. The big registry/target cache went with the compile;
+      # ci-test-profile test binaries (dev minus debuginfo) as a nextest
+      # archive, and this job replays it. The big registry/target cache went with the compile;
       # only the tool tarball caches below remain.
       - name: Install cargo-nextest
         if: env.DOCS_ONLY != 'true'
@@ -326,7 +345,7 @@ jobs:
       - name: Install wasmtime
         if: env.DOCS_ONLY != 'true'
         # Required by the cross-target gate (wasm_cross_target_spec) and the
-        # wasm_runtime_test capture tests — without it they skip, so the
+        # wasm_runtime_* capture tests — without it they skip, so the
         # cross-target ratchet would not actually enforce here.
         run: |
           # Pinned + cached + retried. On a cache hit the tarball is already here,
@@ -348,7 +367,7 @@ jobs:
 
       - name: Install wasm-opt (binaryen)
         if: env.DOCS_ONLY != 'true'
-        # Required by the wasm-opt parity gate (wasm_runtime_test::wasm_opt_parity_spec) — without
+        # Required by the wasm-opt parity gate (wasm_runtime_opt_parity::wasm_opt_parity_spec) — without
         # it the test silently early-returns as a pass, so `--wasm-opt`'s
         # differential-equivalence claim would never actually be checked here.
         run: sudo apt-get update && sudo apt-get install -y binaryen && wasm-opt --version
@@ -625,14 +644,13 @@ jobs:
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
-      - uses: actions/cache@v6
+      # Dependencies only (see the `build` job): rust-cache prunes the
+      # workspace's own artifacts on save; develop writes, PRs read.
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-${{ env.RUST_TOOLCHAIN }}-
+          shared-key: ci-wasm-windows-${{ env.RUST_TOOLCHAIN }}
+          save-if: ${{ github.ref == 'refs/heads/develop' }}
+          cache-on-failure: true
 
       - run: cargo build --release
 
@@ -714,6 +732,14 @@ jobs:
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
           targets: wasm32-wasip1, wasm32-unknown-unknown
+
+      # The library must build for the BROWSER without the embedded host: this is
+      # the exact dependency shape almide/playground consumes (`default-features =
+      # false`). The playground's deploy went red (2026-08-30 onwards) when
+      # almide-wasm-run — wasmtime, hence ring/getrandom — became an unconditional
+      # dependency of the root crate; this step is the tripwire.
+      - name: Library builds for wasm32-unknown-unknown without the embedded host
+        run: cargo check --lib --no-default-features --target wasm32-unknown-unknown --locked
 
       - uses: actions/setup-node@v7
         with:
@@ -1078,7 +1104,7 @@ jobs:
           $ALMIDE "$f" --emit-ast > /dev/null
           echo "AST emit OK"
 
-      - name: fmt gate (spec/ + examples/ + stdlib/ stay formatted, #919/#1462; gauntlet reject cells excluded by the manifest; stdlib under --no-import-edit)
+      - name: fmt gate (spec/ + examples/ + tools/almide-gates/ + stdlib/ stay formatted, #919/#1462/#1855; gauntlet reject cells excluded by the manifest; stdlib under --no-import-edit)
         run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-fmt-gate.sh
 
       - name: Doc fences execute (#1490 — marked stdlib examples check/run byte-exactly)
@@ -1104,6 +1130,15 @@ jobs:
 
       - name: Contract ledger traceability (every contract evidenced, every fixture contracted)
         run: scripts/check-contracts.sh
+
+      - name: ALS pin — every contract id is known to the judge at proofs/als-pin.txt (als #60)
+        run: bash scripts/check-als-pin.sh
+
+      - name: Exit sites — every frame exit of the structural emitter goes through the ExitPlan renderer (#1995)
+        run: bash scripts/check-exit-sites.sh
+
+      - name: Arm arguments — every module-op arm declares Borrow / Retain per argument (#2004)
+        run: bash scripts/check-arm-args.sh
 
       - name: WASI/Component-Model pin policy (#1628 stage 4)
         run: bash scripts/check-wasi-pins.sh
@@ -1134,11 +1169,20 @@ jobs:
       - name: Dialect epoch gate fires on forged ledgers and constants (negative controls)
         run: bash scripts/check-dialect-epochs-negative.sh
 
+      - name: Interface differ fires on a removed effect fn (negative controls, #1860)
+        # The release gate itself runs at tag time against real refs; this proves
+        # it can still refuse — a forged index with one effect fn and one pure fn
+        # deleted must classify `breaking`, an added effect fn must count.
+        run: bash scripts/check-interface-diff-negative.sh
+
       - name: Gate verification ledger (every gate classified by how it can fail — no decorative gates)
         run: bash scripts/check-gate-verification.sh
 
       - name: TOR references (every operational requirement keeps its enforcing instrument)
         run: bash scripts/check-tor-refs.sh
+
+      - name: Optimization pass roster (#929 — every pass file and NanoPass name rowed per target in ARCHITECTURE.md)
+        run: bash scripts/check-pass-roster.sh
 
       - name: ALS element coverage (every syntax element rowed; UNWRITTEN shrink-only — the freeze precondition)
         run: bash scripts/check-als-element-coverage.sh
@@ -1302,14 +1346,13 @@ jobs:
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
-      - uses: actions/cache@v6
+      # Dependencies only (see the `build` job): rust-cache prunes the
+      # workspace's own artifacts on save; develop writes, PRs read.
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-${{ env.RUST_TOOLCHAIN }}-
+          shared-key: ci-cross-platform-${{ matrix.os }}-${{ env.RUST_TOOLCHAIN }}
+          save-if: ${{ github.ref == 'refs/heads/develop' }}
+          cache-on-failure: true
 
       - run: cargo build --release
 
@@ -1369,9 +1412,12 @@ jobs:
       #   - tool_arming_tripwire_test: the leg stays honest about its own
       #     tools — a broken wasmtime/binaryen install FAILS here instead of
       #     letting the wasm suites skip-as-pass (#983's lesson, kept).
-      #   - wasm_runtime_test (macOS, armed): the byte-compare harness on the
-      #     other tool-bearing platform — cross-target equivalence is checked
-      #     on a second OS, not just Linux.
+      #   - the wasm_runtime_* binaries (macOS, armed): the byte-compare
+      #     harness on the other tool-bearing platform — cross-target
+      #     equivalence is checked on a second OS, not just Linux. Under
+      #     `cargo test` each corpus-gate binary builds its own fixture table
+      #     (see tests/wasm_runtime_test_parts/corpus.rs), the same cost the
+      #     Linux shards already pay per test process under nextest.
       #   - lsp_test + fix_test + diagnostic_harness_test: the path- and
       #     process-sensitive root suites (tmp dirs, binary spawning, path
       #     separators) — the classes behind #1008 and the os-error-3 catch.
@@ -1385,7 +1431,7 @@ jobs:
         run: |
           cargo test --test tool_arming_tripwire_test --test lsp_test --test fix_test --test diagnostic_harness_test
           if [ "${{ runner.os }}" != "Windows" ]; then
-            cargo test --test wasm_runtime_test
+            cargo test --test wasm_runtime_inline --test wasm_runtime_cross_target --test wasm_runtime_opt_parity --test wasm_runtime_interp_oracle --test wasm_runtime_interp_ledger --test wasm_runtime_fail_corpus
           fi
 
       - uses: actions/upload-artifact@v7
@@ -1469,10 +1515,16 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install wasmtime (stock CLI — the WASI gate's third-party runtime)
         run: |
-          curl https://wasmtime.dev/install.sh -sSf | bash
+          curl https://wasmtime.dev/install.sh -sSf | bash -s -- --version v27.0.0
           echo "$HOME/.wasmtime/bin" >> "$GITHUB_PATH"
       - name: Carried gates in release shape
         run: cargo test --release --locked -p almide-wasm -p almide-wasm-run -p almide-spine -p almide-syntax -p almide-corpus -p almide-layout
+      # #2010 stage 2b: under the double-free trap a second release of a
+      # freed block traps instead of wrapping to 0xFFFF_FFFF — the corpus
+      # and the gauntlet must hold under it (five fixtures only showed
+      # their dangling reads with it armed, 2026-09-08).
+      - name: Double-free trap sweep (corpus burn-up + gauntlet)
+        run: ALMIDE_RC_TRAP_DOUBLE_FREE=1 cargo test --release --locked -p almide-wasm --test backend_parity --test gauntlet
       - name: Target-availability matrix (#1423 — declared == measured, both directions)
         run: cargo build --release --locked --bin almide && bash scripts/check-target-availability.sh
       # #1701: the wasm runtime RATIO ratchet. The ratio wasm/native cancels

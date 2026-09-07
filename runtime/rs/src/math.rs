@@ -36,11 +36,11 @@
 /// `Error: <msg>` + exit-1 abort message for a negative `math.pow` exponent.
 /// Same wording byte-for-byte as the wasm `__pow_trap` so the two targets'
 /// stderr is identical (the C-001 totality discipline).
-pub const POW_NEGATIVE_EXPONENT_MSG: &str = "negative exponent";
+pub const ALMIDE_POW_NEGATIVE_EXPONENT_MSG: &str = "negative exponent";
 #[inline(always)]
 pub fn almide_rt_math_pow(base: i64, exp: i64) -> i64 {
     if exp < 0 {
-        eprintln!("Error: {}", POW_NEGATIVE_EXPONENT_MSG);
+        eprintln!("Error: {}", ALMIDE_POW_NEGATIVE_EXPONENT_MSG);
         std::process::exit(1);
     }
     let mut result: i64 = 1;
@@ -134,10 +134,10 @@ pub fn almide_rt_math_choose(n: i64, k: i64) -> i64 {
 // `0.5·ln(2π)` term to its exact f64 bit-pattern (the platform `ln` of `2π`
 // happens to equal this literal, but hard-coding it removes the platform call),
 // making native == wasm bit-for-bit. See stdlib/math_lgamma.almd.
-const LANCZOS_G_OFFSET: f64 = 7.5; // t = x + g + 0.5  with g = 7
+const ALMIDE_LANCZOS_G_OFFSET: f64 = 7.5; // t = x + g + 0.5  with g = 7
 /// `0.5 · ln(2π)`, pinned to its exact f64 bit-pattern (= `(2π).ln() * 0.5`),
 /// shared verbatim with the wasm emit so the constant term cannot drift.
-const HALF_LN_2PI: f64 = 0.9189385332046727;
+const ALMIDE_HALF_LN_2PI: f64 = 0.9189385332046727;
 pub fn almide_rt_math_log_gamma(x: f64) -> f64 {
     // Lanczos computes Γ(x+1), so shift input by -1 to get Γ(x)
     let x = x - 1.0;
@@ -150,6 +150,6 @@ pub fn almide_rt_math_log_gamma(x: f64) -> f64 {
     for (i, &c) in coeffs[1..].iter().enumerate() {
         ag += c / (x + (i + 1) as f64);
     }
-    let t = x + LANCZOS_G_OFFSET;
-    HALF_LN_2PI + (x + 0.5) * almide_rt_libm_log(t) - t + almide_rt_libm_log(ag)
+    let t = x + ALMIDE_LANCZOS_G_OFFSET;
+    ALMIDE_HALF_LN_2PI + (x + 0.5) * almide_rt_libm_log(t) - t + almide_rt_libm_log(ag)
 }

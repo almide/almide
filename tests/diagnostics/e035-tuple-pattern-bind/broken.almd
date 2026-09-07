@@ -1,0 +1,11 @@
+// E035 where the err binding comes from a TUPLE pattern — matching a pair of
+// Results and branching on the left error's text in the guard.
+effect fn fetch(n: Int) -> Result[Int, String] = if n > 0 then ok(n) else err("neg")
+
+effect fn main() -> Unit = {
+  match (fetch(1), fetch(-1)) {
+    (ok(a), ok(b)) => println(int.to_string(a + b)),
+    (err(e), _) if e == "neg" => println("left negative"),
+    _ => println("other"),
+  }
+}

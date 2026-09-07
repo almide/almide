@@ -18,6 +18,7 @@
 //!   gen     — print a single generated program (no oracle)
 //!   stats   — print catalogue/corpus sizes and exit
 
+mod availability;
 mod findings;
 mod generator;
 mod metamorph;
@@ -72,7 +73,10 @@ fn print_usage() {
          \x20 xtarget-fuzz ladder <file.almd> [--timeout S]\n\
          \x20 xtarget-fuzz gen    --seed N --index I [--family F]\n\
          \x20 xtarget-fuzz stats\n\n\
-         --family all|identity|synthesis  (default: all)\n\
+         --family all|identity|synthesis|composition  (default: all)\n\
+         \x20 `composition` runs ONLY the operator-interleaving family: `??` `!` `?`\n\
+         \x20 `|>` match and tuple extraction over Int / String / tuple / record\n\
+         \x20 payloads, judged by construction like `identity`. Part of `all` too.\n\
          \x20 `identity` runs ONLY the self-checking family (#1332): programs built\n\
          \x20 backwards from a known answer, so a leg is judged alone and a bug the\n\
          \x20 two backends SHARE is still convicted. It is part of the `all` mix too.\n\
@@ -135,7 +139,7 @@ fn resolve_family(args: &[String]) -> Family {
     match flag_value(args, "--family") {
         None => Family::All,
         Some(s) => Family::parse(s).unwrap_or_else(|| {
-            eprintln!("unknown --family {s:?} (expected: all, identity, synthesis)");
+            eprintln!("unknown --family {s:?} (expected: all, identity, synthesis, composition)");
             std::process::exit(2);
         }),
     }
@@ -261,6 +265,7 @@ fn cmd_run(args: &[String]) {
 
     let elapsed = start.elapsed();
     print_summary(&stats, &sink, elapsed, &out_dir);
+    print_declared_available_walls(&stats, &repo, &almide);
     let _ = std::fs::remove_dir_all(scratch_root(&repo));
 
     // Exit code carries the finding CLASS split (#1235): correctness
@@ -785,6 +790,32 @@ fn print_summary(stats: &Stats, sink: &FindingSink, elapsed: Duration, out_dir: 
     }
     if sink.count() > 0 {
         eprintln!("  findings dir     = {}", out_dir.display());
+    }
+}
+
+/// #1423 stage 5, the warning step: walls whose named fn the availability
+/// matrix declares AVAILABLE on the stock-p1 leg (the leg `almide build
+/// --target wasm` serves). A histogram, never a verdict — see
+/// availability.rs for why the promotion waits.
+fn print_declared_available_walls(stats: &Stats, repo: &Path, almide: &Path) {
+    let reasons = stats.wall_reasons.lock().unwrap();
+    if reasons.is_empty() {
+        return;
+    }
+    let walls = availability::declared_available_walls(&reasons, repo, almide, "stock-p1");
+    if walls.is_empty() {
+        return;
+    }
+    let total: u64 = walls.values().sum();
+    eprintln!(
+        "  walled but DECLARED AVAILABLE on stock-p1 = {total} program(s) over {} fn(s) — \
+         #1423 stage-5 candidates (a warning until pending-self-host reaches 0, not a finding):",
+        walls.len()
+    );
+    let mut top: Vec<(&String, &u64)> = walls.iter().collect();
+    top.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+    for (name, n) in top.iter().take(12) {
+        eprintln!("    {n:>4}× {name}");
     }
 }
 

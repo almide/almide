@@ -1,0 +1,6 @@
+// Fixed: the fn no longer claims the bounded profile, so io.read_line is admissible.
+import io
+
+effect fn ask() -> String = io.read_line()
+
+effect fn main() -> Unit = println(ask() ?? "")

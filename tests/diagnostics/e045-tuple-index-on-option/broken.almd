@@ -1,0 +1,6 @@
+// E045 variant: positional .0 on an OPTION — a compound non-tuple type in
+// the message, not a scalar.
+fn main() -> Unit = {
+  let o: Option[Int] = some(1)
+  println(int.to_string(o.0))
+}

@@ -1,0 +1,3 @@
+expects_code = "E058"
+expects_error = "it contains a Map"
+hint_substring = "Map keys must be hashable"

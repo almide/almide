@@ -224,6 +224,13 @@ impl Checker {
         na: almide_base::intern::Sym,
         nb: almide_base::intern::Sym,
     ) -> bool {
+        // A stdlib type and a user's same-named shadow of it (`Value` vs
+        // `self.Value`) are two types that spell alike — decided by NAME,
+        // before either resolves to a shape the other might structurally
+        // accept (#1828: `let v: Value = json.parse(..)!` unified).
+        if almide_lang::stdlib_info::stdlib_type_vs_user_shadow(na.as_str(), nb.as_str()) {
+            return false;
+        }
         let key = if na.as_str() <= nb.as_str() { (na, nb) } else { (nb, na) };
         if !self.unify_named_in_progress.insert(key) {
             return true;

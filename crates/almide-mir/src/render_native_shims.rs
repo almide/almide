@@ -50,6 +50,26 @@ const SHIMS: &[(&str, &[NTy], Option<NTy>, &str)] = &[
     ("string.trim", &[NTy::Str],
             Some(NTy::Str),
             "fn rt_string_trim(s: &str) -> String { s.trim().to_string() }"),
+    // #1869: `list.range` joins the floor as a closed shim. The lowering
+    // materializes a `let`-bound range that is indexed or measured as
+    // `CallFn list.range(s, e)`; without a floor entry the whole program
+    // left the trust-spine for the v3 codegen — silently — on every such
+    // read. The body is the v3 runtime's `almide_rt_list_range` verbatim
+    // (runtime/rs/src/list.rs): empty when e <= s, the span through
+    // `saturating_sub` so `end - start` cannot wrap, and a span the machine
+    // cannot satisfy is the C-197 `Error: out of memory` abort via
+    // `try_reserve_exact` — never `(s..e).collect()`'s raw `capacity
+    // overflow` panic (range_materialize_oom reads exit 1 + that line on
+    // both legs). Rung-4 owned `Vec<i64>`.
+    // #1869: `list.len` over a rung-4 scalar list — the read that, with an
+    // index, forces the `list.range` materialization above; borrowed, like
+    // every heap arg at the MIR call boundary.
+    ("list.len", &[NTy::VecRef],
+            Some(NTy::I64),
+            "fn rt_list_len(xs: &[i64]) -> i64 {\n    xs.len() as i64\n}"),
+    ("list.range", &[NTy::I64, NTy::I64],
+            Some(NTy::Vec),
+            "fn rt_list_range(s: i64, e: i64) -> Vec<i64> {\n    let count = e.saturating_sub(s).max(0) as usize;\n    let mut v: Vec<i64> = Vec::new();\n    if v.try_reserve_exact(count).is_err() {\n        eprintln!(\"Error: out of memory\");\n        std::process::exit(1);\n    }\n    v.extend(s..e);\n    v\n}"),
     ("string.repeat", &[NTy::Str, NTy::I64],
             Some(NTy::Str),
             // The SAME clamp + ceiling as the v0 runtime and the wasm self-host

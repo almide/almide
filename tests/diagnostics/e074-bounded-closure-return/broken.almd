@@ -1,0 +1,6 @@
+// ALS-B7: a closure created as the RETURN VALUE is still a closure — the
+// factory shape is not admissible inside a @bounded function.
+@bounded
+fn make_adder(n: Int) -> (Int) -> Int = (x: Int) => x + n
+
+fn main() -> Unit = println("${make_adder(2)(3)}")

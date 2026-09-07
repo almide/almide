@@ -743,7 +743,24 @@ impl Checker {
                 // Unknown module — suggest across all candidates
                 let candidates = self.env.all_visible_names();
                 if let Some(suggestion) = almide_base::diagnostic::suggest(name, candidates.iter().map(|s| s.as_str())) {
-                    (format!("Did you mean `{}`?", suggestion), Some(suggestion.to_string()), None)
+                    // Spell the suggestion the way THIS file imports the
+                    // module: a `import self.helper as h` author wrote
+                    // `h.opne`, and a fix that rewrites it to
+                    // `helper.open` strands the alias (#1783's sweep saw
+                    // the aligned fixture trip E060 on its own import).
+                    let suggestion = match suggestion.split_once('.') {
+                        Some((m, f)) => {
+                            let alias = self.env.import_table.aliases.iter()
+                                .find(|(a, canon)| canon.as_str() == m && a.as_str() != m)
+                                .map(|(a, _)| a.as_str().to_string());
+                            match alias {
+                                Some(a) => format!("{a}.{f}"),
+                                None => suggestion.to_string(),
+                            }
+                        }
+                        None => suggestion.to_string(),
+                    };
+                    (format!("Did you mean `{}`?", suggestion), Some(suggestion), None)
                 } else {
                     ("Check the function name".to_string(), None, None)
                 }

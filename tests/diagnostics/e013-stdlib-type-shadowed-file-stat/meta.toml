@@ -1,0 +1,3 @@
+expects_code = "E013"
+expects_error = "no field 'n' on FileStat"
+hint_substring = "never rebinds a stdlib type"

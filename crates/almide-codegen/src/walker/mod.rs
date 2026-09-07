@@ -9,6 +9,7 @@
 mod declarations;
 mod expressions;
 pub mod helpers;
+pub(crate) mod runtime_owned;
 mod statements;
 mod types;
 
@@ -115,6 +116,13 @@ pub struct RenderContext<'a> {
     /// set, so a value with the impl renders to its literal form while opaque
     /// `Named` references (e.g. runtime newtypes) stay on the Display path.
     pub repr_named_types: std::rc::Rc<std::collections::HashSet<almide_base::intern::Sym>>,
+    /// Names of the opaque-newtype structs (`mod`/`local` aliases, rendered
+    /// as `pub struct N(T)`), post-flatten. A `Named` call to one is the
+    /// tuple-struct construction, spelled by the struct's name — which after
+    /// the #433 mangle is `almide_rt_self_Value` / `almide_rt_m_Token`
+    /// (#1835), a spelling the reserved-prefix invariant on runtime calls
+    /// must not mistake for a helper.
+    pub newtype_ctors: std::rc::Rc<std::collections::HashSet<almide_base::intern::Sym>>,
     /// Error type `E` of the enclosing fn's declared return `Result[_, E]`,
     /// or `None` if the fn does not return a `Result`. The `!` (Unwrap)
     /// renderer compares a propagated source error against this: when they
@@ -125,7 +133,7 @@ pub struct RenderContext<'a> {
 
 impl<'a> RenderContext<'a> {
     pub fn new(templates: &'a TemplateSet, var_table: &'a VarTable) -> Self {
-        Self { templates, var_table, indent: 0, target: Target::Rust, auto_unwrap: false, is_test: false, trace: false, ann: std::rc::Rc::new(CodegenAnnotations::default()), type_aliases: std::rc::Rc::new(std::collections::HashMap::new()), generic_types: std::rc::Rc::new(std::collections::HashSet::new()), minimal_generic_bounds: false, repr_c: false, ref_params: std::collections::HashSet::new(), ref_mut_params: std::collections::HashSet::new(), param_vars: std::collections::HashSet::new(), repr_named_types: std::rc::Rc::new(std::collections::HashSet::new()), fn_err_ty: None }
+        Self { templates, var_table, indent: 0, target: Target::Rust, auto_unwrap: false, is_test: false, trace: false, ann: std::rc::Rc::new(CodegenAnnotations::default()), type_aliases: std::rc::Rc::new(std::collections::HashMap::new()), generic_types: std::rc::Rc::new(std::collections::HashSet::new()), minimal_generic_bounds: false, repr_c: false, ref_params: std::collections::HashSet::new(), ref_mut_params: std::collections::HashSet::new(), param_vars: std::collections::HashSet::new(), repr_named_types: std::rc::Rc::new(std::collections::HashSet::new()), newtype_ctors: std::rc::Rc::new(std::collections::HashSet::new()), fn_err_ty: None }
     }
 
     pub fn with_target(mut self, target: Target) -> Self {
@@ -455,6 +463,15 @@ fn collect_ref_params(func: &IrFunction) -> (std::collections::HashSet<VarId>, s
 /// declaration order, so an aborting initializer (integer `/`/`%`) fires at
 /// startup — byte-identical to wasm's eager top-let evaluation in
 /// `_start`. Extracted from `render_function` (cog>25 decomposition).
+/// The first statements of every native `main` (#1950): put SIGPIPE back to
+/// its default disposition. Rust's std ignores SIGPIPE at startup, so a
+/// reader closing early (`prog | head`) would turn the next `println` into
+/// "failed printing to stdout: Broken pipe" and exit 101; with the default
+/// disposition the process stops quietly the way `yes | head` does.
+/// Self-contained (no runtime symbol) so it renders the same in the
+/// single-file and module layouts. A no-op off unix.
+const MAIN_SIGPIPE_PRELUDE: &str = "    #[cfg(unix)]\n    {\n        extern \"C\" {\n            fn signal(sig: i32, handler: usize) -> usize;\n        }\n        // SIGPIPE = 13, SIG_DFL = 0\n        unsafe {\n            signal(13, 0);\n        }\n    }\n";
+
 fn wrap_main_fn_code(fn_code: String, ctx: &RenderContext, is_rust_effect_main: bool, is_rust_plain_main_with_forces: bool) -> String {
     let force_lines: String = ctx.ann.global_init_order.iter()
         .filter_map(|v| ctx.ann.globals.get(v))
@@ -462,9 +479,9 @@ fn wrap_main_fn_code(fn_code: String, ctx: &RenderContext, is_rust_effect_main: 
         .map(|i| format!("    std::sync::LazyLock::force(&{});\n", i.static_name))
         .collect();
     if is_rust_effect_main {
-        format!("{}\n\nfn main() {{\n{}    if let Err(__almide_err) = __almide_main() {{\n        eprintln!(\"Error: {{}}\", __almide_err);\n        std::process::exit(1);\n    }}\n}}", fn_code, force_lines)
+        format!("{}\n\nfn main() {{\n{}{}    if let Err(__almide_err) = __almide_main() {{\n        eprintln!(\"Error: {{}}\", __almide_err);\n        std::process::exit(1);\n    }}\n}}", fn_code, MAIN_SIGPIPE_PRELUDE, force_lines)
     } else if is_rust_plain_main_with_forces {
-        format!("{}\n\nfn main() {{\n{}    __almide_main();\n}}", fn_code, force_lines)
+        format!("{}\n\nfn main() {{\n{}{}    __almide_main();\n}}", fn_code, MAIN_SIGPIPE_PRELUDE, force_lines)
     } else {
         fn_code
     }
@@ -557,6 +574,7 @@ fn fn_render_context<'a>(
         ref_mut_params,
         param_vars: func.params.iter().map(|p| p.var).collect(),
         repr_named_types: ctx.repr_named_types.clone(),
+        newtype_ctors: ctx.newtype_ctors.clone(),
         fn_err_ty,
     }
 }
@@ -610,17 +628,12 @@ fn main_wrapper_kinds(ctx: &RenderContext, func: &IrFunction) -> (bool, bool) {
     let is_rust_main = matches!(ctx.target, Target::Rust)
         && func.name.as_str() == "main"
         && !func.is_test;
-    let plain_main_forces = || {
-        ctx.ann.global_init_order.iter().any(|v| {
-            matches!(
-                ctx.ann.globals.get(v).map(|i| i.storage),
-                Some(almide_ir::top_let_storage::TopLetStorage::Lazy { eager_force: true })
-            )
-        })
-    };
+    // A plain `main` is wrapped as well since #1950: the wrapper is where
+    // the process-level setup (SIGPIPE back to its default disposition, the
+    // eager top-let forces) runs before the user's body.
     (
         is_rust_main && func.is_effect,
-        is_rust_main && !func.is_effect && plain_main_forces(),
+        is_rust_main && !func.is_effect,
     )
 }
 

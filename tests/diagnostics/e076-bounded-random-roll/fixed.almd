@@ -1,0 +1,6 @@
+// Fixed: the fn no longer claims the bounded profile, so the RNG call is admissible.
+import random
+
+effect fn roll() -> Int = random.int(1, 6)
+
+effect fn main() -> Unit = println(int.to_string(roll() ?? 1))

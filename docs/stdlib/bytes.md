@@ -163,21 +163,21 @@ bytes.append_u16_le(b: Bytes, val: Int) -> Unit
 bytes.append_u32_be(b: Bytes, val: Int) -> Unit
 bytes.append_u32_le(b: Bytes, val: Int) -> Unit
 bytes.append_u8(b: Bytes, val: Int) -> Unit
-bytes.as_mut_ptr(b: Bytes) -> ?
-bytes.as_ptr(b: Bytes) -> ?
+bytes.as_mut_ptr(b: Bytes) -> RawPtr
+bytes.as_ptr(b: Bytes) -> RawPtr
 bytes.chunks(b: Bytes, size: Int) -> List[Bytes]
 bytes.clear(b: Bytes) -> Unit
 bytes.cmp(a: Bytes, b: Bytes) -> Int
 bytes.concat(a: Bytes, b: Bytes) -> Bytes
 bytes.contains(b: Bytes, pattern: Bytes) -> Bool
 bytes.copy_from(dst: Bytes, src: Bytes, dst_off: Int, src_off: Int, len: Int) -> Unit
-bytes.copy_to_ptr(b: Bytes, ptr: ?, cap: Int) -> Int
+bytes.copy_to_ptr(b: Bytes, ptr: RawPtr, cap: Int) -> Int
 bytes.data_ptr(b: Bytes) -> Int
 bytes.ends_with(b: Bytes, suffix: Bytes) -> Bool
 bytes.eof(b: Bytes, pos: Int) -> Bool
 bytes.fill(b: Bytes, val: Int) -> Unit
 bytes.from_list(xs: List[Int]) -> Bytes
-bytes.from_raw_ptr(ptr: ?, len: Int) -> Bytes
+bytes.from_raw_ptr(ptr: RawPtr, len: Int) -> Bytes
 bytes.from_string(s: String) -> Bytes
 bytes.get(b: Bytes, i: Int) -> Option[Int]
 bytes.get_or(b: Bytes, i: Int, default: Int) -> Int
@@ -195,58 +195,58 @@ bytes.push(b: Bytes, val: Int) -> Unit
 bytes.set_at(b: Bytes, i: Int, val: Int) -> Unit
 bytes.copy_within(b: Bytes, src_start: Int, src_end: Int, dst: Int) -> Unit
 bytes.read_bool(b: Bytes, pos: Int) -> Bool
-bytes.read_bool_at(b: Bytes, pos: Int) -> ()
+bytes.read_bool_at(b: Bytes, pos: Int) -> (Int, Option[Bool])
 bytes.read_f16_le(b: Bytes, pos: Int) -> Float
-bytes.read_f16_le_at(b: Bytes, pos: Int) -> ()
+bytes.read_f16_le_at(b: Bytes, pos: Int) -> (Int, Option[Float])
 bytes.read_f16_le_array(b: Bytes, pos: Int, count: Int) -> List[Float]
 bytes.read_f32_be(b: Bytes, pos: Int) -> Float
 bytes.read_f32_be_array(b: Bytes, pos: Int, count: Int) -> List[Float]
-bytes.read_f32_be_at(b: Bytes, pos: Int) -> ()
+bytes.read_f32_be_at(b: Bytes, pos: Int) -> (Int, Option[Float])
 bytes.read_f32_le(b: Bytes, pos: Int) -> Float
 bytes.read_f32_le_array(b: Bytes, pos: Int, count: Int) -> List[Float]
-bytes.read_f32_le_at(b: Bytes, pos: Int) -> ()
+bytes.read_f32_le_at(b: Bytes, pos: Int) -> (Int, Option[Float])
 bytes.read_f64_be(b: Bytes, pos: Int) -> Float
 bytes.read_f64_be_array(b: Bytes, pos: Int, count: Int) -> List[Float]
-bytes.read_f64_be_at(b: Bytes, pos: Int) -> ()
+bytes.read_f64_be_at(b: Bytes, pos: Int) -> (Int, Option[Float])
 bytes.read_f64_le(b: Bytes, pos: Int) -> Float
 bytes.read_f64_le_array(b: Bytes, pos: Int, count: Int) -> List[Float]
-bytes.read_f64_le_at(b: Bytes, pos: Int) -> ()
+bytes.read_f64_le_at(b: Bytes, pos: Int) -> (Int, Option[Float])
 bytes.read_i16_be(b: Bytes, pos: Int) -> Int
-bytes.read_i16_be_at(b: Bytes, pos: Int) -> ()
+bytes.read_i16_be_at(b: Bytes, pos: Int) -> (Int, Option[Int])
 bytes.read_i16_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]
 bytes.read_i16_le(b: Bytes, pos: Int) -> Int
-bytes.read_i16_le_at(b: Bytes, pos: Int) -> ()
+bytes.read_i16_le_at(b: Bytes, pos: Int) -> (Int, Option[Int])
 bytes.read_i16_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]
 bytes.read_i32_be(b: Bytes, pos: Int) -> Int
 bytes.read_i32_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]
-bytes.read_i32_be_at(b: Bytes, pos: Int) -> ()
+bytes.read_i32_be_at(b: Bytes, pos: Int) -> (Int, Option[Int])
 bytes.read_i32_le(b: Bytes, pos: Int) -> Int
 bytes.read_i32_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]
-bytes.read_i32_le_at(b: Bytes, pos: Int) -> ()
+bytes.read_i32_le_at(b: Bytes, pos: Int) -> (Int, Option[Int])
 bytes.read_i64_be(b: Bytes, pos: Int) -> Int
 bytes.read_i64_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]
-bytes.read_i64_be_at(b: Bytes, pos: Int) -> ()
+bytes.read_i64_be_at(b: Bytes, pos: Int) -> (Int, Option[Int])
 bytes.read_i64_le(b: Bytes, pos: Int) -> Int
 bytes.read_i64_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]
-bytes.read_i64_le_at(b: Bytes, pos: Int) -> ()
+bytes.read_i64_le_at(b: Bytes, pos: Int) -> (Int, Option[Int])
 bytes.read_length_prefixed_strings_le(b: Bytes, pos: Int, count: Int) -> List[String]
 bytes.read_string_at(b: Bytes, pos: Int, len: Int) -> String
 bytes.read_string_be(b: Bytes, pos: Int) -> String
-bytes.read_string_be_at(b: Bytes, pos: Int) -> ()
+bytes.read_string_be_at(b: Bytes, pos: Int) -> (Int, Option[String])
 bytes.read_u16_be(b: Bytes, pos: Int) -> Int
-bytes.read_u16_be_at(b: Bytes, pos: Int) -> ()
+bytes.read_u16_be_at(b: Bytes, pos: Int) -> (Int, Option[Int])
 bytes.read_u16_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]
 bytes.read_u16_le(b: Bytes, pos: Int) -> Int
 bytes.read_u16_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]
-bytes.read_u16_le_at(b: Bytes, pos: Int) -> ()
+bytes.read_u16_le_at(b: Bytes, pos: Int) -> (Int, Option[Int])
 bytes.read_u32_be(b: Bytes, pos: Int) -> Int
 bytes.read_u32_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]
-bytes.read_u32_be_at(b: Bytes, pos: Int) -> ()
+bytes.read_u32_be_at(b: Bytes, pos: Int) -> (Int, Option[Int])
 bytes.read_u32_le(b: Bytes, pos: Int) -> Int
 bytes.read_u32_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]
-bytes.read_u32_le_at(b: Bytes, pos: Int) -> ()
+bytes.read_u32_le_at(b: Bytes, pos: Int) -> (Int, Option[Int])
 bytes.read_u8(b: Bytes, pos: Int) -> Int
-bytes.read_u8_at(b: Bytes, pos: Int) -> ()
+bytes.read_u8_at(b: Bytes, pos: Int) -> (Int, Option[Int])
 bytes.remove_at(b: Bytes, pos: Int) -> Bytes
 bytes.repeat(b: Bytes, n: Int) -> Bytes
 bytes.reverse(b: Bytes) -> Bytes
@@ -271,7 +271,7 @@ bytes.skip_length_prefixed_le(b: Bytes, pos: Int, count: Int) -> Int
 bytes.slice(b: Bytes, start: Int, end: Int) -> Bytes
 bytes.split(b: Bytes, sep: Bytes) -> List[Bytes]
 bytes.starts_with(b: Bytes, prefix: Bytes) -> Bool
-bytes.take_at(b: Bytes, pos: Int, n: Int) -> ()
+bytes.take_at(b: Bytes, pos: Int, n: Int) -> (Int, Option[Bytes])
 bytes.to_list(b: Bytes) -> List[Int]
 bytes.to_string(b: Bytes) -> Result[String, String]
 bytes.to_string_lossy(b: Bytes) -> String

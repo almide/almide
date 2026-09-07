@@ -1,0 +1,8 @@
+// Ordering resolves the sibling's record: a module record without `: Ord`
+// cannot be sorted — E030 names the type by its module spelling.
+import self.geo as g
+
+fn main() -> Unit = {
+  let ps = list.sort_by([g.origin()], (p) => p.x)
+  println(int.to_string(list.len(ps)))
+}

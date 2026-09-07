@@ -1,0 +1,10 @@
+// ALS-B3: a container produced by a stdlib call has a run-time trip count
+// even when its arguments are literals.
+@bounded
+fn sum_range() -> Int = {
+  var acc = 0
+  for x in list.range(0, 4) { acc = acc + x }
+  acc
+}
+
+fn main() -> Unit = println("${sum_range()}")

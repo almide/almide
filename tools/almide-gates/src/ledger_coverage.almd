@@ -20,57 +20,60 @@ import toml
 // `fs.stat("spec/x.almd")`. A single deleted file inside a surviving directory is NOT caught.
 // That is the price of zero false positives, and the evidence-path check covers the paths that
 // actually certify a contract.
-fn dead_path_error(cited: String, parent: String) -> List[String] =
-  [ "cited path '" + cited + "' lives under '" + parent + "', which does not exist (retired subsystem?)" ]
+fn dead_path_error(cited: String, parent: String) -> List[String] = [
+  "cited path '" + cited + "' lives under '" + parent + "', which does not exist (retired subsystem?)"
+]
 
 fn parent_dir(path: String) -> String = {
   let parts = string.split(path, "/")
-  if list.len(parts) <= 1 then "." else list.take(parts, list.len(parts) - 1) |> list.join("/")
+  if list.len(parts) <= 1 then "."
+  else list.take(parts, list.len(parts) - 1) |> list.join("/")
 }
 
 // The prefixes the extraction recognises. A path outside them is not a repository source path
 // and is none of this rule's business.
-fn is_source_prefix(path: String) -> Bool =
-  ["crates/", "runtime/", "stdlib/", "spec/", "tests/", "scripts/", "proofs/"]
-    |> list.any((p) => string.starts_with(path, p))
+fn is_source_prefix(path: String) -> Bool = [
+  "crates/",
+  "runtime/",
+  "stdlib/",
+  "spec/",
+  "tests/",
+  "scripts/",
+  "proofs/"
+] |> list.any((p) => string.starts_with(path, p))
 
-fn has_source_suffix(path: String) -> Bool =
-  [".rs", ".almd", ".lean", ".toml", ".sh"] |> list.any((e) => string.ends_with(path, e))
+fn has_source_suffix(path: String) -> Bool = [".rs", ".almd", ".lean", ".toml", ".sh"] |> list.any((e) => string.ends_with(path, e))
 
 // The extraction the bash does with `grep -rhoE` over the ledger and every fixture. A path is
 // a candidate when it starts at one of the source prefixes and ends at one of the suffixes;
 // the scan walks each line looking for a prefix and then takes the longest run of path
 // characters from there. Written as a scanner rather than a regex because the regex is the
 // part that has silently mis-read its input three times in this Unit already.
-fn is_path_char(c: String) -> Bool =
-  string.contains("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-/", c)
+fn is_path_char(c: String) -> Bool = string.contains("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-/", c)
 
 fn take_path_run(s: String, start: Int) -> String = {
   let e = scan_path(s, start)
   string.slice(s, start, e)
 }
 
-fn scan_path(s: String, p: Int) -> Int =
-  if p < string.len(s) and is_path_char(string.slice(s, p, p + 1)) then scan_path(s, p + 1)
-  else p
+fn scan_path(s: String, p: Int) -> Int = if p < string.len(s) and is_path_char(string.slice(s, p, p + 1)) then scan_path(s, p + 1) else p
 
 // One line's candidates, in the order they appear — the bash sorts and de-dups them globally,
 // so per-line order does not survive, but keeping it makes the function testable.
-fn cited_paths_in(line: String, at: Int, acc: List[String]) -> List[String] =
-  if at >= string.len(line) then acc
-  else {
-    let rest = string.slice(line, at)
-    if is_source_prefix(rest) then {
-      let run = take_path_run(line, at)
-      cited_paths_in(line, at + string.len(run), if has_source_suffix(run) then acc + [run] else acc)
-    } else cited_paths_in(line, at + 1, acc)
-  }
+fn cited_paths_in(line: String, at: Int, acc: List[String]) -> List[String] = if at >= string.len(line) then acc
+else {
+  let rest = string.slice(line, at)
+  if is_source_prefix(rest) then {
+    let run = take_path_run(line, at)
+    cited_paths_in(line, at + string.len(run), if has_source_suffix(run) then acc + [run]
+    else acc)
+  } else cited_paths_in(line, at + 1, acc)
+}
 
 test "a cited path is extracted from prose, and only when it looks like a source file" {
   // Statements legitimately contain prose around the path, and a bare directory or a doc file
   // is not this rule's business.
-  assert_eq(cited_paths_in("see crates/almide-mir/src/x.rs for the pass", 0, []),
-            ["crates/almide-mir/src/x.rs"])
+  assert_eq(cited_paths_in("see crates/almide-mir/src/x.rs for the pass", 0, []), ["crates/almide-mir/src/x.rs"])
   assert_eq(cited_paths_in("the docs/contracts/README.md index", 0, []), [])
   assert_eq(cited_paths_in("spec/wasm_cross/ has fixtures", 0, []), [])
   assert_eq(cited_paths_in("both tests/a.rs and proofs/b.lean", 0, []), ["tests/a.rs", "proofs/b.lean"])
@@ -89,13 +92,10 @@ test "the scan does not run off the end or loop on a non-prefix line" {
 fn pad3(n: Int) -> String = string.pad_start(int.to_string(n), 3, "0")
 
 fn coverage_gaps(ids: List[String], maxnum: Int) -> List[String] = {
-  1...maxnum
-    |> list.filter((i) => not list.contains(ids, "C-" + pad3(i)))
-    |> list.map((i) => "coverage gap: C-" + pad3(i) + " is missing (C-001..C-" + pad3(maxnum) + " must be contiguous)")
+  1...maxnum |> list.filter((i) => not list.contains(ids, "C-" + pad3(i))) |> list.map((i) => "coverage gap: C-" + pad3(i) + " is missing (C-001..C-" + pad3(maxnum) + " must be contiguous)")
 }
 
-fn max_id_num(ids: List[String]) -> Int =
-  ids |> list.map((id) => int.parse(string.slice(id, 2)) ?? 0) |> list.fold(0, (a, b) => if b > a then b else a)
+fn max_id_num(ids: List[String]) -> Int = ids |> list.map((id) => int.parse(string.slice(id, 2)) ?? 0) |> list.fold(0, (a, b) => if b > a then b else a)
 
 // ── (f) RATCHET: the flagged count may only shrink ──────────────────────────
 //
@@ -103,19 +103,16 @@ fn max_id_num(ids: List[String]) -> Int =
 // converged first; C-006 (fan.timeout wall clock) was retired by REMOVING `fan.timeout` in
 // 0.29.0. The number goes DOWN or stays; raising the ceiling to admit a new divergence is the
 // move this check exists to make impossible without saying so out loud.
-fn ratchet_error(n_flagged: Int, ceiling: Int) -> List[String] =
-  if n_flagged <= ceiling then []
-  else [ "flagged-for-revision count " + int.to_string(n_flagged) + " exceeds the ratchet ceiling "
-         + int.to_string(ceiling)
-         + " — a new behaviour must ship an active contract + a fixture (see docs/contracts/README.md)" ]
+fn ratchet_error(n_flagged: Int, ceiling: Int) -> List[String] = if n_flagged <= ceiling then []
+else [
+  "flagged-for-revision count " + int.to_string(n_flagged) + " exceeds the ratchet ceiling " + int.to_string(ceiling) + " — a new behaviour must ship an active contract + a fixture (see docs/contracts/README.md)"
+]
 
-fn count_flagged(tables: List[toml.Table]) -> Int =
-  tables |> list.filter((t) => toml.table_get(t, "status") == "flagged-for-revision") |> list.len
+fn count_flagged(tables: List[toml.Table]) -> Int = tables |> list.filter((t) => toml.table_get(t, "status") == "flagged-for-revision") |> list.len
 
 // The histogram line: `printf '  %-16s %s\n'`. The class column is padded to 16 and the count
 // is not padded at all.
-fn histogram_line(cls: String, count: Int) -> String =
-  "  " + string.pad_end(cls, 16, " ") + " " + int.to_string(count)
+fn histogram_line(cls: String, count: Int) -> String = "  " + string.pad_end(cls, 16, " ") + " " + int.to_string(count)
 
 test "the retired-subsystem rule fires on a dead PARENT, not a dead file" {
   // A statement may legitimately name an illustrative file inside a live directory. Flagging
@@ -138,7 +135,9 @@ test "a coverage gap names the missing id and the full range" {
   assert_eq(coverage_gaps(["C-001", "C-002", "C-003"], 3), [])
   let g = coverage_gaps(["C-001", "C-003"], 3)
   assert_eq(list.len(g), 1)
-  assert_eq(g, ["coverage gap: C-002 is missing (C-001..C-003 must be contiguous)"])
+  assert_eq(g, [
+    "coverage gap: C-002 is missing (C-001..C-003 must be contiguous)"
+  ])
 }
 
 test "the id number is zero-padded to three digits, matching printf '%03d'" {

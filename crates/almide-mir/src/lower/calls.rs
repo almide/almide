@@ -659,6 +659,12 @@ pub(crate) fn is_inplace_mutator(module: &str, func: &str) -> bool {
     (module == "bytes"
         && (func.starts_with("set_")
             || func.starts_with("write_")
+            // The multi-byte appends (#1849): a var receiver is rewritten to
+            // its functional rebind before this predicate is consulted; on a
+            // TEMPORARY the receiver discipline walls honestly instead of
+            // linking the functional twin and leaving its result on the
+            // operand stack (invalid wasm on a program native runs).
+            || func.starts_with("append_")
             || matches!(func, "fill" | "clear" | "copy_within" | "copy_from")))
         || (module == "list" && func == "pop")
 }

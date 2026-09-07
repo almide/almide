@@ -4,9 +4,9 @@
 - **Date**: 2026-08-07
 - **決定範囲**: `fan` の実行基体（何が実際に並行に走るか）、その target ごとの選択、
   基体を自由変数として扱うための前提条件、および C-004 EXCEPTION の分類の訂正
-- **関連**: [async-inception.md](../roadmap/active/async-inception.md)（観測の憲章）、
-  [execution-inception.md](../roadmap/active/execution-inception.md)（本 ADR の憲章）、
-  [concurrency-stance.md](../roadmap/active/concurrency-stance.md)（#1000）、
+- **関連**: [async-inception.md](https://github.com/almide/almide/blob/develop/docs/roadmap/active/async-inception.md)（観測の憲章）、
+  [execution-inception.md](https://github.com/almide/almide/blob/develop/docs/roadmap/active/execution-inception.md)（本 ADR の憲章）、
+  [concurrency-stance.md](https://github.com/almide/almide/blob/develop/docs/roadmap/active/concurrency-stance.md)（#1000）、
   [ADR-0001](./0001-deterministic-time-units.md)（決定的時計）
 - **台帳への影響**: C-004 の EXCEPTION 節の**分類が誤り**（Rationale R1）。C-006 の
   「sole stdlib surface」という記述も、その誤分類の結果として不正確になっている

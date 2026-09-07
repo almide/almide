@@ -36,14 +36,13 @@ jobs:
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
-      - uses: actions/cache@v6
+      # Dependencies only (see ci.yml `build`): rust-cache prunes the
+      # workspace's own artifacts on save; develop writes, PRs read.
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: cross-cargo-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cross-cargo-${{ env.RUST_TOOLCHAIN }}-
+          shared-key: cross-target-${{ env.RUST_TOOLCHAIN }}
+          save-if: ${{ github.ref == 'refs/heads/develop' }}
+          cache-on-failure: true
 
       - name: Build
         run: cargo build --release

@@ -1,0 +1,8 @@
+// #1518: @deprecated with a successor but NO since epoch — the compiler
+// cannot compare it against any caller's @dialect stamp, so it is an error.
+@deprecated(use = "shout")
+fn yell(s: String) -> String = s
+
+fn shout(s: String) -> String = s
+
+fn main() -> Unit = println(shout("hi"))

@@ -1,0 +1,11 @@
+// A USER constructor pattern aimed at a Result subject: `int.parse` returns
+// `Result[Int, String]`, whose cases are `ok(..)` / `err(..)` — a user ctor
+// name can never denote one of those.
+type Color = Red(Int) | Blue(Int)
+
+fn shade(s: String) -> Int = match int.parse(s) {
+  Red(r) => r,
+  _ => 0,
+}
+
+fn main() -> Unit = println(int.to_string(shade("4")))

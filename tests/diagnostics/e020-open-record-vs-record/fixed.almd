@@ -1,0 +1,5 @@
+// Distinct names for the open pattern type and the concrete record.
+type CfgShape = { name: String, .. }
+type Cfg = { name: String }
+
+fn main() -> Unit = println("ok")

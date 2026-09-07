@@ -1,0 +1,6 @@
+// ALS-B7: calling a fn-typed PARAMETER is a call the static call graph cannot
+// follow — only @bounded named functions and first-order pure stdlib qualify.
+@bounded
+fn apply(f: (Int) -> Int, x: Int) -> Int = f(x)
+
+fn main() -> Unit = println("${apply((x: Int) => x * 2, 3)}")

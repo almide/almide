@@ -1,0 +1,5 @@
+// A sized UInt8 VALUE returned into a canonical `-> Int` slot needs an
+// explicit widening call; only literals adopt a width silently.
+fn widen(u: UInt8) -> Int = int.from_uint8(u)
+
+fn main() -> Unit = println("${widen(int.to_uint8(5))}")

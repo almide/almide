@@ -301,8 +301,8 @@ impl Checker {
             self.env.lookup_ctor_in(&sym(name), self.current_module_prefix.as_deref())
         {
             self.check_type_name_variant_ctor(name, arg_tys, type_name, &case)
-        } else if let Some(target_ty) = self.env.opaque_alias_targets.get(&sym(name)).cloned() {
-            self.check_type_name_opaque_alias(name, arg_tys, target_ty)
+        } else if let Some(key) = self.env.opaque_alias_key(name, self.current_module_prefix.as_deref()) {
+            self.check_type_name_opaque_alias(name, key, arg_tys)
         } else {
             // #488: nothing claimed this TypeName call — not a variant ctor, not an opaque alias, and the record paths were intercepted before infer_call. Letting it through here is how unvalidated constructions reached rustc/wasm; make the unknown name a checker error instead.
             self.emit(super::err(
@@ -343,15 +343,26 @@ impl Checker {
     }
 
     // Opaque-alias-ctor path of `check_type_name_call`, e.g. `SafeHtml("hello")`.
-    fn check_type_name_opaque_alias(&mut self, name: &str, arg_tys: &[Ty], target_ty: Ty) -> Ty {
-        let vis = self.env.opaque_alias_visibility.get(&sym(name)).copied()
+    // `name` is the spelling the source wrote (the diagnostics keep it);
+    // `key` is the newtype's identity the call's type carries (#1835 —
+    // `self.Value` for the entry program's shadow of a stdlib-owned name,
+    // `m.Token` for a module's own, bare for a bundled module's).
+    fn check_type_name_opaque_alias(&mut self, name: &str, key: Sym, arg_tys: &[Ty]) -> Ty {
+        let target_ty = self.env.opaque_alias_targets.get(&key).cloned().unwrap_or(Ty::Unknown);
+        let vis = self.env.opaque_alias_visibility.get(&key).copied()
             .unwrap_or(ast::Visibility::Public);
         if !matches!(vis, ast::Visibility::Public) {
             // Check if we're in the defining module
-            let defining_module = self.env.opaque_alias_module.get(&sym(name))
+            let defining_module = self.env.opaque_alias_module.get(&key)
                 .cloned().flatten();
-            let current_module = self.env.self_module_name
-                .or(self.current_module_prefix.as_ref().map(|p| sym(p)));
+            // The module whose body is being checked is the current one;
+            // `self_module_name` is the package's own identity and applies
+            // only to the entry file (no prefix). The reversed order made
+            // the DEFINING module's own constructor call read as foreign,
+            // so a `mod type` alias could never be built anywhere (#1528's
+            // multi-file E033 sweep found it).
+            let current_module = self.current_module_prefix.as_ref().map(|p| sym(p))
+                .or(self.env.self_module_name);
             let allowed = match (&defining_module, &current_module) {
                 (None, None) => true,       // defined in main, used in main
                 (Some(def), Some(cur)) => def == cur, // same module
@@ -374,7 +385,7 @@ impl Checker {
         } else {
             self.constrain(target_ty, arg_tys[0].clone(), format!("constructor {}()", name));
         }
-        Ty::Named(sym(name), vec![])
+        Ty::Named(key, vec![])
     }
     /// Resolve a concrete type to its declared type name.
     fn resolve_type_name(&self, ty: &Ty) -> Option<String> {

@@ -6,6 +6,9 @@ use wasm_encoder::{BlockType, Function, MemArg, ValType};
 use crate::*;
 
 pub(crate) use crate::runtime_alloc::{emit_alloc, emit_cow, emit_dec_flat, emit_free, emit_inc};
+pub(crate) use crate::runtime_line::{
+    emit_append_copy, emit_append_i64, emit_buf_to_block, emit_line_grow, emit_line_print,
+};
 
 // ── emitted runtime helpers ─────────────────────────────────────────────
 
@@ -62,45 +65,6 @@ pub(crate) fn emit_block_print(import: u32) -> Function {
         .i32_load(len_memarg()) // len from the header
         .call(import)
         .end();
-    f
-}
-
-/// `$append_copy(cur: i32, src: i32, len: i32) -> i32`: memory.copy bytes
-/// to the cursor, return the advanced cursor. Traps LOUDLY when the write
-/// would leave the line buffer (never corrupts the heap behind it).
-pub(crate) fn emit_append_copy() -> Function {
-    let mut f = Function::new([]);
-    let mut i = f.instructions();
-    i.local_get(0).local_get(2).i32_add().global_get(G_LINE_END).i32_gt_u().if_(BlockType::Empty);
-    i.unreachable();
-    i.end();
-    i.local_get(0)
-        .local_get(1)
-        .local_get(2)
-        .call(F_COPY)
-        .local_get(0)
-        .local_get(2)
-        .i32_add()
-        .end();
-    f
-}
-
-/// `$buf_to_block(start: i32, cur: i32) -> i32`: capture a finished
-/// line-buffer build as a REAL layout block (value-position `"${...}"`).
-pub(crate) fn emit_buf_to_block() -> Function {
-    // params: 0=start i32, 1=cur i32; locals: 2=len i32, 3=base i32
-    let (start, cur, len, bbase) = (0u32, 1u32, 2u32, 3u32);
-    let payload = almide_layout::PAYLOAD as i32;
-    let mut f = Function::new([(2, ValType::I32)]);
-    let mut i = f.instructions();
-    i.local_get(cur).local_get(start).i32_sub().local_set(len);
-    i.local_get(len).call(F_ALLOC).local_set(bbase);
-    i.local_get(bbase).i32_const(payload).i32_add();
-    i.local_get(start);
-    i.local_get(len);
-    i.call(F_COPY);
-    i.local_get(bbase);
-    i.end();
     f
 }
 
@@ -301,7 +265,7 @@ pub(crate) fn emit_str_slice() -> Function {
 /// `$str_repeat(base, n) -> i32`: n clamps at 0; the oracle aborts past
 /// 2 GiB (`ALMIDE_REPEAT_MAX_BYTES`) — here that is a trap in the same
 /// abort-pending class.
-pub(crate) fn emit_str_repeat() -> Function {
+pub(crate) fn emit_str_repeat(repeat_msg: u32) -> Function {
     // params: 0=base, 1=n i64; locals: 2=len i32, 3=total i64, 4=r i32, 5=k i64
     let (bbase, n, len, total, r, k) = (0u32, 1u32, 2u32, 3u32, 4u32, 5u32);
     let payload = almide_layout::PAYLOAD as i32;
@@ -312,10 +276,28 @@ pub(crate) fn emit_str_repeat() -> Function {
     i.i32_const(0).call(F_ALLOC).return_();
     i.end();
     i.local_get(bbase).i32_load(len_memarg()).local_set(len);
-    i.local_get(len).i64_extend_i32_u().local_get(n).i64_mul().local_set(total);
-    i.local_get(total).i64_const(1 << 31).i64_gt_s().if_(BlockType::Empty);
-    i.unreachable();
+    // The C-161 ceiling, tested by DIVISION (`n > 2^31 / len`, the
+    // stdlib/string_repeat.almd guard verbatim): `len * n` is the very
+    // multiplication that overflows for a huge n, and a guard computed
+    // from the wrapped product tests nothing. Past it is the DEFINED
+    // abort — `Error: repeat result too large`, exit 1 — the same line
+    // the native runtime and the self-host print. Before, this helper
+    // trapped a bare `unreachable` with NOTHING on stderr; the fixture
+    // that pins the line (repeat_size_ceiling) imported env and so rode
+    // the incumbent, which is why the structural leg's silence went
+    // unmeasured until env programs routed structurally (#1921).
+    // NESTED ifs, not `i32.and`: wasm evaluates both operands of `and`
+    // eagerly, so the division ran for an EMPTY string too and trapped
+    // on the zero divisor (`string.repeat("", 3)` — three nightly
+    // findings, 2026-09-06). The division only exists under `len > 0`.
+    i.local_get(len).i32_const(0).i32_gt_u().if_(BlockType::Empty);
+    i.local_get(n).i64_const(1 << 31).local_get(len).i64_extend_i32_u().i64_div_u().i64_gt_s();
+    i.if_(BlockType::Empty);
+    i.i32_const(repeat_msg as i32).call(F_EPRINTLN_BLOCK);
+    i.i32_const(1).call(F_EXIT_IMPORT).unreachable();
     i.end();
+    i.end();
+    i.local_get(len).i64_extend_i32_u().local_get(n).i64_mul().local_set(total);
     i.local_get(total).i32_wrap_i64().call(F_ALLOC).local_set(r);
     i.i64_const(0).local_set(k);
     i.block(BlockType::Empty).loop_(BlockType::Empty);
@@ -395,23 +377,6 @@ pub(crate) fn emit_itoa() -> Function {
     i.end();
     // return ITOA_END - p
     i.i32_const(ITOA_END as i32).local_get(p).i32_sub();
-    i.end();
-    f
-}
-
-/// `$append_i64(cur: i32, v: i64) -> i32`: itoa then copy to the cursor;
-/// returns the advanced cursor.
-pub(crate) fn emit_append_i64() -> Function {
-    // params: 0=cur i32, 1=v i64; locals: 2=len i32
-    let (cur, v, len) = (0u32, 1u32, 2u32);
-    let mut f = Function::new([(1, ValType::I32)]);
-    let mut i = f.instructions();
-    i.local_get(v).call(F_ITOA).local_set(len);
-    i.local_get(cur);
-    i.i32_const(ITOA_END as i32).local_get(len).i32_sub(); // src
-    i.local_get(len);
-    i.call(F_COPY);
-    i.local_get(cur).local_get(len).i32_add();
     i.end();
     f
 }
@@ -686,29 +651,52 @@ pub(crate) fn emit_block_copy() -> Function {
 }
 
 /// `$list_join(list: i32, sep: i32) -> i32`: join a List[String]'s blocks
-/// with `sep` — repeated `$concat` (quadratic, fine for fixture scale).
+/// with `sep` in TWO PASSES — pass 1 sums the piece lengths plus n-1
+/// separators, ONE `$alloc`, pass 2 cursor-copies pieces and separators.
+/// The old repeated-`$concat` body re-copied the whole accumulator per
+/// element and never freed the outgrown generation, so n pieces churned
+/// and retained O(n²) bytes (#1729's strchurn row) — and generations past
+/// the 512 KiB freelist ceiling never recycle, so the fix is reuse-shaped:
+/// one result block, zero intermediates. Pieces are borrowed, the result
+/// is fresh — the ownership contract is unchanged.
 pub(crate) fn emit_list_join() -> Function {
-    // params: 0=list i32, 1=sep i32; locals: 2=n i32, 3=i i32, 4=acc i32
-    let (list, sep, n, idx, acc) = (0u32, 1u32, 2u32, 3u32, 4u32);
-    let mut f = Function::new([(3, ValType::I32)]);
+    // params: 0=list i32, 1=sep i32; locals: 2=n, 3=i, 4=total, 5=base,
+    // 6=cur, 7=ph, 8=pl, 9=sl (all i32)
+    let (list, sep, n, idx, total) = (0u32, 1u32, 2u32, 3u32, 4u32);
+    let (base, cur, ph, pl, sl) = (5u32, 6u32, 7u32, 8u32, 9u32);
+    let payload = almide_layout::PAYLOAD as i32;
+    let mut f = Function::new([(8, ValType::I32)]);
     let mut i = f.instructions();
     i.local_get(list).i32_load(len_memarg()).i32_const(4).i32_div_u().local_set(n);
-    i.i32_const(0).call(F_ALLOC).local_set(acc); // ""
+    i.local_get(sep).i32_load(len_memarg()).local_set(sl);
+    i.i32_const(0).local_set(total);
     i.i32_const(0).local_set(idx);
-    i.loop_(BlockType::Empty);
-    i.local_get(idx).local_get(n).i32_ge_u().if_(BlockType::Empty);
-    i.local_get(acc).return_();
-    i.end();
-    i.local_get(idx).i32_const(0).i32_ne().if_(BlockType::Empty);
-    i.local_get(acc).local_get(sep).call(F_CONCAT).local_set(acc);
-    i.end();
-    i.local_get(acc);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(idx).local_get(n).i32_ge_u().br_if(1);
+    i.local_get(total);
     i.local_get(list).local_get(idx).i32_const(4).i32_mul().i32_add().i32_load(slot_memarg(0));
-    i.call(F_CONCAT).local_set(acc);
+    i.i32_load(len_memarg()).i32_add().local_set(total);
     i.local_get(idx).i32_const(1).i32_add().local_set(idx);
-    i.br(0);
+    i.br(0).end().end();
+    i.local_get(n).i32_const(0).i32_ne().if_(BlockType::Empty);
+    i.local_get(total).local_get(n).i32_const(1).i32_sub().local_get(sl).i32_mul().i32_add().local_set(total);
     i.end();
-    i.unreachable();
+    i.local_get(total).call(F_ALLOC).local_set(base);
+    i.local_get(base).i32_const(payload).i32_add().local_set(cur);
+    i.i32_const(0).local_set(idx);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(idx).local_get(n).i32_ge_u().br_if(1);
+    i.local_get(idx).i32_const(0).i32_ne().if_(BlockType::Empty);
+    i.local_get(cur).local_get(sep).i32_const(payload).i32_add().local_get(sl).call(F_COPY);
+    i.local_get(cur).local_get(sl).i32_add().local_set(cur);
+    i.end();
+    i.local_get(list).local_get(idx).i32_const(4).i32_mul().i32_add().i32_load(slot_memarg(0)).local_set(ph);
+    i.local_get(ph).i32_load(len_memarg()).local_set(pl);
+    i.local_get(cur).local_get(ph).i32_const(payload).i32_add().local_get(pl).call(F_COPY);
+    i.local_get(cur).local_get(pl).i32_add().local_set(cur);
+    i.local_get(idx).i32_const(1).i32_add().local_set(idx);
+    i.br(0).end().end();
+    i.local_get(base);
     i.end();
     f
 }

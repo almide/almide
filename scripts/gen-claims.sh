@@ -8,12 +8,23 @@
 # this script rewrites everything between the claims markers, and
 # scripts/check-contracts.sh runs `--check` in CI so a drifted block is red.
 #
-#   bash scripts/gen-claims.sh          # rewrite README.md in place
-#   bash scripts/gen-claims.sh --check  # exit 1 if the block is stale
+#   bash scripts/gen-claims.sh           # rewrite README.md in place
+#   bash scripts/gen-claims.sh --check   # exit 1 if a block is stale
+#   bash scripts/gen-claims.sh --counts  # also restamp proofs/ledger-counts.toml first
+#
+# The TOTALS (the "Ledger: N contracts — N active, N flagged" line and every
+# number in the STAGE-STATUS block) are not re-derived on a default run: they
+# render from the stamped record in proofs/ledger-counts.toml inside a dated
+# `counts:generated` block (scripts/lib/ledger-counts.sh), so a fixture or
+# contract PR never rewrites them — two such PRs conflicted on those lines at
+# every merge. The flagged-contract LIST stays derived: it names contracts, and
+# the ratchet wants it current the moment a flag is dropped.
 #
 # Pure shell/awk, no deps — same discipline as docs/contracts/generate-readme.sh.
 set -euo pipefail
 cd "$(dirname "$0")/.." || exit 2
+. scripts/lib/ledger-counts.sh
+[ "${1:-}" = "--counts" ] && counts_stamp
 
 LEDGER="docs/contracts/contracts.toml"
 README="README.md"
@@ -32,9 +43,7 @@ trap 'rm -f "$blockfile"' EXIT
 awk '
   function flush() {
     if (id == "") return
-    total++
-    if (status == "active") active++
-    else { nflag++; fid[nflag] = id; ftitle[nflag] = title; fdoc[nflag] = doc }
+    if (status != "active") { nflag++; fid[nflag] = id; ftitle[nflag] = title; fdoc[nflag] = doc }
     id = ""; title = ""; status = ""; doc = ""
   }
   /'"'"''"'"''"'"'/ { in_stmt = !in_stmt; next }
@@ -46,7 +55,6 @@ awk '
   /^doc[ \t]*=/    { v = $0; sub(/^doc[ \t]*=[ \t]*"/, "", v); sub(/".*$/, "", v); doc = v; next }
   END {
     flush()
-    printf "> **Ledger: %d contracts — %d active, %d flagged-for-revision.**\n", total, active, nflag
     print ">"
     if (nflag == 0) {
       # "Divergences awaiting a fix", not "Exceptions" — this block sits directly
@@ -69,6 +77,8 @@ awk '
     }
   }
 ' "$LEDGER" > "$blockfile"
+# The totals line comes first, from the stamped record; the flagged list follows.
+{ counts_render_claims; cat "$blockfile"; } > "$blockfile.full" && mv "$blockfile.full" "$blockfile"
 
 rendered="$(awk -v start="$START" -v end="$END" -v bf="$blockfile" '
   $0 == start { print; while ((getline line < bf) > 0) print line; skip = 1; next }
@@ -130,51 +140,16 @@ else
 fi
 
 # ── Stage-status block in proofs/STAGE-STATUS.md ────────────────────────────
-# The five-stage adoption roadmap's single checkable status artifact: every
-# number measured from committed ledgers (no session prose). Same marker
-# discipline; --check makes drift red.
+# The five-stage adoption roadmap's single checkable status artifact. Every
+# number in it is a total, so the whole block is the stamped record rendered
+# (counts_render_stages — the measurement recipes live next to it in
+# scripts/lib/ledger-counts.sh); --check makes a hand edit red, and the nightly
+# scripts/check-ledger-counts.sh reports when the record has drifted from the
+# ledgers it was measured from.
 STAGES="proofs/STAGE-STATUS.md"
 SSTART="<!-- stages:generated:start — derived from the proofs/ ledgers by scripts/gen-claims.sh; DO NOT EDIT between the markers -->"
 SEND="<!-- stages:generated:end -->"
-stage_block() {
-  local arms unguarded watfns libms corpus abstains voting contracts keyed
-  local seals gates unverified torrows streak
-  arms=$(grep -c '^\[\[arm\]\]' proofs/scalar-read-audit.toml)
-  unguarded=$(grep -c 'class = "UNGUARDED"' proofs/scalar-read-audit.toml || true)
-  watfns=$(grep -c '^\[\[fn\]\]' proofs/wat-prelude-audit.toml)
-  libms=$(grep -c '^\[\[site\]\]' proofs/libm-determinism-audit.toml)
-  corpus=$(ls spec/wasm_cross/*.almd | wc -l | tr -d ' ')
-  abstains=$(grep -vc '^#\|^$' crates/almide-interp/interp-abstain-ledger.txt)
-  voting=$((corpus - abstains))
-  contracts=$(grep -c '^\[\[contract\]\]' docs/contracts/contracts.toml)
-  keyed=$(grep -c '^spec ' docs/contracts/contracts.toml)
-  seals=$(ls proofs/releases/v*.toml 2>/dev/null | wc -l | tr -d ' ')
-  gates=$(grep -c '^\[\[gate\]\]' proofs/gate-verification.toml)
-  unverified=$(grep -c 'class = "UNVERIFIED"' proofs/gate-verification.toml || true)
-  torrows=$(grep -c '^\*\*TOR-' proofs/TOR.md)
-  # The streak is a dated meter maintained by fuzz-green-streak.sh — quote its
-  # last recorded row (a ledger value, not a re-derivation).
-  streak=$(grep -E '^\| [0-9]{4}-' research/benchmark/fuzz-green/README.md | tail -1 | awk -F'|' '{gsub(/ /,"",$3); print $3}')
-  printf '> **Stage 1 (accept-and-wrong extinction): audits COMPLETE and gated** —\n'
-  printf '> scalar-read %s arms / %s UNGUARDED; WAT prelude %s fns classified;\n' "$arms" "$unguarded" "$watfns"
-  printf '> platform-libm %s sites classified. New entries cannot land unclassified.\n' "$libms"
-  printf '>\n'
-  printf '> **Stage 2 (translation validation): %s/%s fixtures cast a real 3-way vote (%s%%)** —\n' "$voting" "$corpus" "$((voting * 100 / corpus))"
-  printf '> the abstain remainder is classified and shrink-only (the interp-heap arc, #1226).\n'
-  printf '>\n'
-  local els unwritten_els
-  els=$(grep -c '^\[\[element\]\]' proofs/als-element-coverage.toml)
-  unwritten_els=$(grep -c 'section = "UNWRITTEN"' proofs/als-element-coverage.toml || true)
-  printf '> **Stage 3 (semantics freeze): %s/%s contracts spec-keyed; syntax-element coverage\n' "$keyed" "$contracts"
-  printf '> %s/%s sectioned (%s UNWRITTEN, shrink-only — the freeze precondition is 0).**\n' "$((els - unwritten_els))" "$els" "$unwritten_els"
-  printf '>\n'
-  printf '> **Stage 4 (durability): fuzz true-green streak = %s day(s)** (dated meter;\n' "$streak"
-  printf '> the correctness-only night verdict shipped 2026-08-12 — 90 days is the milestone).\n'
-  printf '>\n'
-  printf '> **Stage 5 (auditability): %s release seal(s); %s verification gates classified\n' "$seals" "$gates"
-  printf '> (%s UNVERIFIED under a shrink-only ceiling); TOR with %s enforced rows;\n' "$unverified" "$torrows"
-  printf '> gap analysis consolidated in proofs/DO330-GAP.md (reference-gated).**\n'
-}
+stage_block() { counts_render_stages; }
 if grep -qxF "$SSTART" "$STAGES"; then
   sblockfile="$(mktemp)"
   stage_block > "$sblockfile"

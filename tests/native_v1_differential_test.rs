@@ -200,7 +200,9 @@ fn v0_mutual_tail_recursion_survives_opt_level_0() {
 #[test]
 fn out_of_subset_walls_honestly() {
     let walls = [
-        ("list", "fn main() -> Unit = {\n  let xs = [1, 2, 3]\n  println(int.to_string(list.len(xs)))\n}\n"),
+        // `list.len` over a scalar list joined the floor with `list.range`
+        // (#1869); a combinator over the list is still outside it.
+        ("list", "fn main() -> Unit = {\n  let xs = [1, 2, 3]\n  let ys = list.reverse(xs)\n  println(int.to_string(list.len(ys)))\n}\n"),
         ("str_split", "fn main() -> Unit = {\n  let parts = string.split(\"a,b\", \",\")\n  println(parts[0])\n}\n"),
         // list_param moved to the POSITIVE corpus — rung 4 renders scalar-list
         // params/literals/indexing natively (`vec![…]` + the bounds shims).

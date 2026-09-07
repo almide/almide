@@ -430,6 +430,14 @@ pub(super) fn lower_pattern(ctx: &mut LowerCtx, pat: &ast::Pattern, ty: &Ty) -> 
             let var = ctx.define_var(name, ty.clone(), Mutability::Let, None);
             IrPattern::Bind { var, ty: ty.clone() }
         }
+        ast::Pattern::As { name, inner } => {
+            let var = ctx.define_var(name, ty.clone(), Mutability::Let, None);
+            IrPattern::As {
+                var,
+                ty: ty.clone(),
+                inner: Box::new(lower_pattern(ctx, inner, ty)),
+            }
+        }
         ast::Pattern::Literal { value } => lower_pattern_literal(ctx, value),
         ast::Pattern::Constructor { name, args } => {
             let bare_name = bare_ctor_name(name);
@@ -438,7 +446,7 @@ pub(super) fn lower_pattern(ctx: &mut LowerCtx, pat: &ast::Pattern, ty: &Ty) -> 
                 let arg_ty = payload_tys.get(i).cloned().unwrap_or(Ty::Unknown);
                 lower_pattern(ctx, a, &arg_ty)
             }).collect();
-            IrPattern::Constructor { name: bare_name.to_string(), args: ir_args }
+            IrPattern::Constructor { name: ctor_pattern_name(ctx, &bare_name, ty), args: ir_args }
         }
         ast::Pattern::RecordPattern { name, fields, rest } =>
             lower_pattern_record(ctx, name, fields, *rest),
@@ -465,10 +473,22 @@ pub(super) fn lower_pattern(ctx: &mut LowerCtx, pat: &ast::Pattern, ty: &Ty) -> 
             let inner_ty = applied_arg(ty, TypeConstructorId::Result, 1);
             IrPattern::Err { inner: Box::new(lower_pattern(ctx, inner, &inner_ty)) }
         }
-        ast::Pattern::List { elements } => {
+        ast::Pattern::List { elements, rest } => {
             let elem_ty = applied_arg(ty, TypeConstructorId::List, 0);
             let ir_elems = elements.iter().map(|e| lower_pattern(ctx, e, &elem_ty)).collect();
-            IrPattern::List { elements: ir_elems }
+            // #1461 list-rest: a NAMED tail binds with the subject's own
+            // list type; `[a, ..]` keeps the >=-length semantics with a
+            // Wildcard rest.
+            let ir_rest = rest.as_ref().map(|r| {
+                Box::new(match r {
+                    Some(name) => {
+                        let var = ctx.define_var(name, ty.clone(), Mutability::Let, None);
+                        IrPattern::Bind { var, ty: ty.clone() }
+                    }
+                    None => IrPattern::Wildcard,
+                })
+            });
+            IrPattern::List { elements: ir_elems, rest: ir_rest }
         }
     }
 }
@@ -524,9 +544,9 @@ fn lower_pattern_record(
     fields: &[ast::FieldPattern],
     rest: bool,
 ) -> IrPattern {
-    let bare_name = bare_ctor_name(name);
+    let pat_name = struct_pattern_name(ctx, name);
     let mut ir_fields: Vec<IrFieldPattern> = fields.iter().map(|f| {
-        let field_ty = resolve_record_field_ty(ctx, &bare_name, &f.name);
+        let field_ty = resolve_record_field_ty(ctx, &pat_name, &f.name);
         IrFieldPattern {
             name: f.name.to_string(),
             pattern: f.pattern.as_ref().map(|p| lower_pattern(ctx, p, &field_ty)),
@@ -534,12 +554,48 @@ fn lower_pattern_record(
     }).collect();
     for (i, f) in fields.iter().enumerate() {
         if f.pattern.is_none() {
-            let field_ty = resolve_record_field_ty(ctx, &bare_name, &f.name);
+            let field_ty = resolve_record_field_ty(ctx, &pat_name, &f.name);
             let var = ctx.define_var(&f.name, field_ty.clone(), Mutability::Let, None);
             ir_fields[i].pattern = Some(IrPattern::Bind { var, ty: field_ty });
         }
     }
-    IrPattern::RecordPattern { name: bare_name.to_string(), fields: ir_fields, rest }
+    IrPattern::RecordPattern { name: pat_name.to_string(), fields: ir_fields, rest }
+}
+
+/// The name a record pattern carries into the IR. A STRUCT pattern is pinned
+/// to its qualified canonical name — `m.Cfg` inside module `m`, `self.Value`
+/// for the entry program's shadow of a stdlib-owned name (#1828) — exactly
+/// as the struct LITERAL is (`lower/expressions_access.rs`, #433), so the
+/// native walker names the mangled struct instead of a bare spelling the
+/// flat program no longer has (`Cfg { a, .. }` against `almide_rt_m_Cfg` was
+/// rustc E0308 while the wasm leg ran — a divergence of this landing's
+/// family). A record-VARIANT case keeps the bare case name: the ctor table is
+/// keyed by it and the subject's enum qualifies it (#412).
+fn struct_pattern_name(ctx: &LowerCtx, written: &almide_base::intern::Sym) -> almide_base::intern::Sym {
+    let cur_mod = ctx.current_module.map(|m| m.as_str());
+    match crate::canonicalize::resolve::canonical_user_type_sym(written.as_str(), &ctx.env.types, cur_mod) {
+        Some(key) if matches!(ctx.env.types.get(&key), Some(Ty::Record { .. })) => key,
+        _ => bare_ctor_name(written),
+    }
+}
+
+/// The name a constructor pattern carries into the IR. An opaque newtype's
+/// pattern (`Value(s)` against a subject of that newtype) is pinned to the
+/// newtype's IDENTITY — `self.Value`, `m.Token` — the one spelling its ctor
+/// call and its type decl carry (#1835), so the native flatten mangle and
+/// the wasm newtype erasure treat the three as one name. A variant case
+/// keeps its bare case name: the ctor table is keyed by it and the
+/// subject's enum qualifies it (#412).
+fn ctor_pattern_name(ctx: &LowerCtx, bare_name: &almide_base::intern::Sym, subject_ty: &Ty) -> String {
+    match ctx.env.resolve_named(subject_ty) {
+        Ty::Named(t, _)
+            if ctx.env.opaque_alias_targets.contains_key(&t)
+                && almide_ir::declared_type_name(t.as_str()) == bare_name.as_str() =>
+        {
+            t.to_string()
+        }
+        _ => bare_name.to_string(),
+    }
 }
 
 /// Extract constructor payload types from the subject type first (instantiated types),

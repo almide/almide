@@ -88,7 +88,7 @@ fn render_expr_var(ctx: &RenderContext, expr: &IrExpr) -> String {
         // shared static is not Sync, and fan threads read globals). A BARE
         // read stays raw — borrow positions coerce against the raw runtime
         // signatures directly; OWNING positions go through `Clone{Var}` nodes
-        // (CloneInsertion), whose render re-wraps into the RcCow shape.
+        // (CloneInsertion), whose render re-wraps into the AlmideRcCow shape.
         return read;
     }
     raw_name
@@ -188,9 +188,16 @@ fn render_expr_for_in(ctx: &RenderContext, expr: &IrExpr) -> String {
             let op = if *inclusive { "..=" } else { ".." };
             format!("{}{}{}", s, op, e)
         }
+        // #1857: a `let`-bound range whose every read is a head was bound as
+        // a bare `Range<i64>` (`try_render_bind_counting_range`); iterate a
+        // clone of the two scalars so a second, nested, or captured head
+        // reads the same bounds — the counting loop, never a Vec.
+        IrExprKind::Var { id } if ctx.ann.range_counting_vars.contains(id) => {
+            format!("{}.clone()", ctx.var_name(*id))
+        }
         _ => {
             let base = render_expr(ctx, iterable);
-            // List types: .iter().cloned() works for both RcCow<Vec<T>>
+            // List types: .iter().cloned() works for both AlmideRcCow<Vec<T>>
             // (via Deref) and plain Vec<T>, giving owned T values. A binder
             // the body only borrows (`borrowed_loop_vars`, #1673) skips the
             // per-element copy: `.iter()` binds `&T`.
@@ -322,9 +329,9 @@ fn render_expr_call(ctx: &RenderContext, expr: &IrExpr) -> String {
                 .unwrap_or_else(|| {
                     format!("almide_rt_{}_{}({})", mod_ident, func_ident, args_str)
                 });
-            // #617: same raw-runtime-result → RcCow boundary as RuntimeCall —
+            // #617: same raw-runtime-result → AlmideRcCow boundary as RuntimeCall —
             // but ONLY for STDLIB modules (native runtime signatures). A USER
-            // module fn's generated signature already carries the mapped RcCow
+            // module fn's generated signature already carries the mapped AlmideRcCow
             // types, so gluing it would double-wrap (E0283 in the nn repo).
             if almide_lang::stdlib_info::is_stdlib_module(module.as_str()) {
                 rc_cow_result_glue(call, &expr.ty)
@@ -376,7 +383,7 @@ fn render_expr_record(ctx: &RenderContext, expr: &IrExpr) -> String {
     let ctor_name_str = name.as_ref().map(|s| s.as_str()).unwrap_or("");
     let explicit_names: std::collections::HashSet<&str> = fields.iter().map(|(k, _)| &**k).collect();
     let mut field_strs: Vec<String> = Vec::new();
-    // Render explicit fields (owned: RcCow vars unwrapped to T)
+    // Render explicit fields (owned: AlmideRcCow vars unwrapped to T)
     for (k, v) in fields.iter() {
         let mut val_str = render_expr_owned(ctx, v);
         // Box recursive fields (annotation is target-aware — empty for non-Rust)
@@ -444,6 +451,11 @@ fn render_expr_record(ctx: &RenderContext, expr: &IrExpr) -> String {
             _ => render_type(ctx, &expr.ty),
         }
     });
+    // A runtime-owned struct (`FileStat`, #1821) constructs under the
+    // runtime's reserved spelling.
+    if let Some(reserved) = ctx.ann.runtime_owned_types.get(&type_name) {
+        type_name = reserved.clone();
+    }
     // Qualify enum variant constructors via template
     if let Some(enum_name) = ctx.ann.ctor_to_enum.get(&type_name) {
         // Try ctor_record template first (TS: function call), fallback to record_literal
@@ -533,10 +545,10 @@ fn render_expr_unwrap(ctx: &RenderContext, expr: &IrExpr) -> String {
     }
     // #1296: a NATIVE-runtime call returning `Result[Bytes/Matrix, String]`
     // unwrapped in place (`bytes.len(zlib.compress_level(d, 9)!)`): the #617
-    // glue wraps the Ok side BEFORE `?` (`(call.map(|__e| RcCow::from(__e)))?`),
+    // glue wraps the Ok side BEFORE `?` (`(call.map(|__e| AlmideRcCow::from(__e)))?`),
     // so in call-ARGUMENT position rustc back-infers `?`'s source from the
-    // consuming `&Vec<u8>` parameter and E0308s on the RcCow. Emit the RAW
-    // call, unwrap FIRST, then glue the Ok value — `RcCow::from((raw)?)` is
+    // consuming `&Vec<u8>` parameter and E0308s on the AlmideRcCow. Emit the RAW
+    // call, unwrap FIRST, then glue the Ok value — `AlmideRcCow::from((raw)?)` is
     // concretely typed end to end, and the arg-position `&` deref-coerces.
     // Narrow by construction: String-err only (the template's map_err
     // variants keep their path), non-test (tests use .unwrap()).
@@ -580,17 +592,30 @@ fn render_expr_unwrap(ctx: &RenderContext, expr: &IrExpr) -> String {
     }
 }
 
+/// A String-typed Var that is a fn param rendered by BorrowInference as
+/// `&str` (Rust target). Its owned form is `.to_string()`, not `.clone()`
+/// (which on `&str` yields `&str`), and a template that borrows it again
+/// (`&{key}`) would produce `&&str` — a shape no `&String` slot accepts.
+fn is_borrowed_string_param(ctx: &RenderContext, expr: &IrExpr) -> bool {
+    matches!(ctx.target, super::super::pass::Target::Rust)
+        && matches!(expr.ty, Ty::String)
+        && match &expr.kind {
+            IrExprKind::Var { id } => ctx.ref_params.contains(id),
+            _ => false,
+        }
+}
+
 fn render_expr_clone(ctx: &RenderContext, expr: &IrExpr) -> String {
     let IrExprKind::Clone { expr: inner } = &expr.kind else { unreachable!() };
-    // Val-wrapped var: deref then clone to get T. Bind handler re-wraps in RcCow::new().
+    // Val-wrapped var: deref then clone to get T. Bind handler re-wraps in AlmideRcCow::new().
     if let IrExprKind::Var { id } = &inner.kind {
         if ctx.ann.is_rc_cow(id) {
             let var_name = ctx.var_name(*id).to_string();
             return format!("(*{}).clone()", var_name);
         }
         // #617: cloning a GLOBAL out of its raw static (Bytes/Matrix shapes)
-        // produces the raw value — re-wrap into the RcCow value shape the
-        // surrounding code stores. Locals are already RcCow (their clone is
+        // produces the raw value — re-wrap into the AlmideRcCow value shape the
+        // surrounding code stores. Locals are already AlmideRcCow (their clone is
         // the O(1) Rc bump) — no glue.
         if ctx.ann.global(*id).is_some() && rc_cow_needs_glue(&inner.ty) {
             let read = render_expr(ctx, inner);
@@ -603,20 +628,14 @@ fn render_expr_clone(ctx: &RenderContext, expr: &IrExpr) -> String {
     // `&str` returns `&str`, not `String`. Use `.to_string()` so
     // the surrounding context (which expects an owned `String`)
     // type-checks.
-    let is_borrowed_string_param = matches!(ctx.target, super::super::pass::Target::Rust)
-        && matches!(inner.ty, Ty::String)
-        && match &inner.kind {
-            IrExprKind::Var { id } => ctx.ref_params.contains(id),
-            _ => false,
-        };
-    if is_borrowed_string_param {
+    if is_borrowed_string_param(ctx, inner) {
         return format!("{}.to_string()", expr_s);
     }
     ctx.templates.render_with("clone_expr", None, &[], &[("expr", expr_s.as_str())])
         .unwrap_or_else(|| format!("{}.clone()", expr_s))
 }
 
-/// Shared-mut non-Copy var (`SharedMut`, Closure v2 P6): borrow through the
+/// Shared-mut non-Copy var (`AlmideSharedMut`, Closure v2 P6): borrow through the
 /// `RefCell` rather than the `.get()` clone a bare Var read would emit, so a
 /// mutating call (`list.push(acc, …)` → `&mut *acc.borrow_mut()`) writes the
 /// ONE shared cell the closure also holds. A shared read uses `&*acc.borrow()`
@@ -627,7 +646,7 @@ fn try_render_borrow_shared_mut(ctx: &RenderContext, inner: &IrExpr, mutable: bo
     // #1143 marker: `Borrow(Deref(Var cell))` — SharedCellBorrowPass proved
     // this read can borrow the cell in place (every use in its statement is
     // a shared call-arg read), so skip the `.get()` whole-value clone. The
-    // shape cannot occur otherwise on a SharedMut var (the cell has no
+    // shape cannot occur otherwise on a AlmideSharedMut var (the cell has no
     // Deref impl, so the generic `&*v` render would not compile).
     if let IrExprKind::Deref { expr: dinner } = &inner.kind {
         if let IrExprKind::Var { id } = &dinner.kind {
@@ -727,11 +746,11 @@ fn render_expr_borrow(ctx: &RenderContext, expr: &IrExpr) -> String {
         // #1210: a Bytes/Matrix-typed RVALUE that renders as a type-propagating
         // expression (the `??` lowering's `match`, an `if`/`else`, a block)
         // defeats the deref coercion `&var` relies on — rustc propagates the
-        // callee's expected `&Vec<u8>` INTO the arms, so the RcCow-typed arms
-        // fail E0308 ("expected Vec<u8>, found RcCow<Vec<u8>>"). `&*(…)` derefs
-        // through the RcCow explicitly — the same layer coercion strips from a
+        // callee's expected `&Vec<u8>` INTO the arms, so the AlmideRcCow-typed arms
+        // fail E0308 ("expected Vec<u8>, found AlmideRcCow<Vec<u8>>"). `&*(…)` derefs
+        // through the AlmideRcCow explicitly — the same layer coercion strips from a
         // plain var. Bytes/Matrix only: they are the two types whose value
-        // convention (RcCow) differs from the raw runtime signature (#617).
+        // convention (AlmideRcCow) differs from the raw runtime signature (#617).
         {
             use almide_lang::types::constructor::TypeConstructorId as TC;
             let rc_cow_valued = matches!(

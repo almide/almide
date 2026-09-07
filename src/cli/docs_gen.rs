@@ -277,9 +277,9 @@ fn check_stdlib_fn_count() -> Vec<String> {
     modules.retain(|m| almide_lang::time_units::clock_type_of_module(m).is_none());
     let mut total = 0usize;
     for m in &modules {
-        let (file, lenient) = super::compile::resolve_module_to_file(m);
+        let (file, bundled_module) = super::compile::resolve_module_to_file(m);
         let (program, source_text, checker) =
-            super::compile::parse_and_typecheck_for_compile(&file, lenient);
+            super::compile::parse_and_typecheck_for_compile(&file, bundled_module.as_deref());
         let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
         let iface = almide::interface::extract(&ir, m, Some(&source_text));
         // `__`-prefixed fns are INTERNAL carriers (the fallibility-polymorphic
@@ -375,9 +375,9 @@ fn check_numeric_conversion_matrix() -> Vec<String> {
     let mut surface: std::collections::HashMap<&str, std::collections::HashSet<String>> =
         std::collections::HashMap::new();
     for m in CARRIERS.iter().map(|c| c.0).chain(["int"]) {
-        let (file, lenient) = super::compile::resolve_module_to_file(m);
+        let (file, bundled_module) = super::compile::resolve_module_to_file(m);
         let (program, source_text, checker) =
-            super::compile::parse_and_typecheck_for_compile(&file, lenient);
+            super::compile::parse_and_typecheck_for_compile(&file, bundled_module.as_deref());
         let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
         let iface = almide::interface::extract(&ir, m, Some(&source_text));
         surface.insert(m, iface.functions.iter().map(|f| f.name.clone()).collect());

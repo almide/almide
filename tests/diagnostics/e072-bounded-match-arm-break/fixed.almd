@@ -1,0 +1,14 @@
+// ALS-B5: run every iteration and select with the match instead of exiting.
+@bounded
+fn probe() -> Int = {
+  var acc = 0
+  for i in 0..<6 {
+    acc = match i {
+      3 => acc,
+      _ => acc + i,
+    }
+  }
+  acc
+}
+
+fn main() -> Unit = println("${probe()}")

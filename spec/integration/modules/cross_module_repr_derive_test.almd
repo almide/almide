@@ -1,0 +1,22 @@
+// @contract: C-009
+// The sibling of cross_module_repr_test.almd (#1836): a module type's derived
+// `Repr` and a list of module records spell the DECLARED name too — the
+// derived method and `"${v}"` are one C-009 format, so `reprlib.Pt.repr(p)`
+// must equal `"${p}"` byte for byte (before the fix the derive baked
+// `reprlib.Pt { … }` into the IR while native interpolation printed
+// `almide_rt_reprlib_Pt { … }`). Kept apart because the wasm TEST lane's v1
+// renderer walls on `Pt.repr` / `__repr_list_rec_*` and skips the file
+// (honestly; it does not certify these) — the native lane pins both blocks,
+// and tests/module_type_repr_test.rs runs the same shapes on the structural
+// wasm emitter and the interp.
+import reprlib
+
+test "cross-module record list repr" {
+  assert_eq("${[reprlib.mk(), reprlib.mk()]}", "[Cfg { a: 1, b: 2 }, Cfg { a: 1, b: 2 }]")
+}
+
+test "deriving Repr on a module type prints the same bytes as interpolation" {
+  let p = reprlib.mk_pt()
+  assert_eq(reprlib.Pt.repr(p), "Pt { x: 1, y: 2 }")
+  assert_eq(reprlib.Pt.repr(p), "${p}")
+}

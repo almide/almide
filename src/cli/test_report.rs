@@ -122,6 +122,13 @@ impl TestFailure {
                 out.push_str(&format!("  found:    {}\n", indent_continuation(found)));
             }
         }
+        if self.op == "assert_snapshot" {
+            let what = if expected.is_empty() { "new snapshot" } else { "snapshot drift" };
+            out.push_str(&format!(
+                "  accept: {what} — run `almide test --update-snapshots {}` to write the found value into the source\n",
+                self.file
+            ));
+        }
         out
     }
 
@@ -334,12 +341,21 @@ fn parse_t18(file: &str, output: &str) -> Vec<TestFailure> {
     let mut out = Vec::new();
     let lines: Vec<&str> = output.lines().collect();
     for (i, l) in lines.iter().enumerate() {
-        let Some(head) = l.strip_prefix("Error: assertion failed") else { continue };
+        let l = strip_libtest_progress(l);
+        // The snapshot block (#1314) is the same record under its own header,
+        // so the report can carry the accept hint for it alone.
+        let op = if let Some(head) = l.strip_prefix("Error: assertion failed") {
+            if head.starts_with(": ") { "assert" } else { "assert_eq" }
+        } else if l.starts_with("Error: snapshot mismatch") {
+            "assert_snapshot"
+        } else {
+            continue;
+        };
         let mut f = TestFailure {
             file: file.to_string(),
             name: None,
             line: None,
-            op: if head.starts_with(": ") { "assert".into() } else { "assert_eq".into() },
+            op: op.into(),
             expected: None,
             found: None,
             message: l.trim_start_matches("Error: ").to_string(),
@@ -348,6 +364,25 @@ fn parse_t18(file: &str, output: &str) -> Vec<TestFailure> {
         out.push(f);
     }
     out
+}
+
+/// libtest prints `test <name> ... ` WITHOUT a newline before it runs the
+/// test, and the abort's `process.exit(1)` leaves that fragment on stdout.
+/// The captured text is stdout followed by stderr, so whether the T18 header
+/// starts its own line depends on whether libtest's partial line was flushed
+/// before the abort — usually it was not, and the header parsed; when it
+/// was, the line read `test tests::x ... Error: snapshot mismatch`, the
+/// block went unrecognised, and the report fell back to the raw output
+/// without the accept hint (one queue run in three, PR #1892). The fragment
+/// is libtest's, not the program's: strip it and read the header behind it.
+fn strip_libtest_progress(l: &str) -> &str {
+    if !l.starts_with("test ") {
+        return l;
+    }
+    match l.find(" ... Error: ") {
+        Some(pos) => &l[pos + " ... ".len()..],
+        None => l,
+    }
 }
 
 /// The `  key: value` tail of a T18 block. `expected` ends where `  found: `
@@ -635,6 +670,35 @@ mod tests {
         let fs = parse("m.almd", "", out);
         assert_eq!(fs[0].expected.as_deref(), Some("one\nTWO"));
         assert_eq!(fs[0].found.as_deref(), Some("one\ntwo"));
+    }
+
+    #[test]
+    fn a_snapshot_block_carries_the_accept_hint() {
+        let out = "Error: snapshot mismatch\n  at: line 5\n  expected: \n  found: hello\n";
+        let fs = parse("m.almd", "", out);
+        assert_eq!(fs.len(), 1);
+        assert_eq!(fs[0].op, "assert_snapshot");
+        assert_eq!(fs[0].line, Some(5));
+        let r = fs[0].render();
+        assert!(r.contains("new snapshot"), "{r}");
+        assert!(r.contains("almide test --update-snapshots m.almd"), "{r}");
+    }
+
+    #[test]
+    fn t18_header_glued_to_libtest_progress_still_parses() {
+        // stdout ended mid-line (`test x ... ` flushed, no newline) and stderr's
+        // block followed it in the captured text.
+        let out = "running 3 tests\ntest tests::__test_a ... Error: snapshot mismatch\n  at: line 10\n  expected: item 1\nitem 2\n  found: item 1\nitem 2\nitem 3\n";
+        let fs = parse("plain_test.almd", "", out);
+        assert_eq!(fs.len(), 1, "{fs:?}");
+        assert_eq!(fs[0].op, "assert_snapshot");
+        assert_eq!(fs[0].line, Some(10));
+        assert_eq!(fs[0].expected.as_deref(), Some("item 1\nitem 2"));
+        assert_eq!(fs[0].found.as_deref(), Some("item 1\nitem 2\nitem 3"));
+        let r = fs[0].render();
+        assert!(r.contains("accept: snapshot drift — run `almide test --update-snapshots plain_test.almd`"), "{r}");
+        // A program line that merely mentions the words is not a header.
+        assert!(parse("f.almd", "", "note: Error: snapshot mismatch is what it prints\n").is_empty());
     }
 
     #[test]

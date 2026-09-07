@@ -263,10 +263,10 @@ fn find_mut_borrow_var(arg: &IrExpr) -> Option<VarId> {
 /// by-ref calling convention: a `&expr` arg hoists its INNER expr and passes
 /// `&__hoist`. Hoisting the whole `Borrow` bound a reference where the Bind
 /// path expects an owned value — for a mutable global that emitted
-/// `let __hoist: RcCow<Vec<u8>> = &G.with(…)`, invalid Rust on both the
+/// `let __hoist: AlmideRcCow<Vec<u8>> = &G.with(…)`, invalid Rust on both the
 /// binding and the call site (#955, `bytes.copy_from(g, g, …)`). Binding the
 /// inner expr instead lets the Bind renderer apply its owned-value glue
-/// (a global read binds through `RcCow::from(…)`), and `&__hoist`
+/// (a global read binds through `AlmideRcCow::from(…)`), and `&__hoist`
 /// deref-coerces at the call.
 fn hoist_one_arg(arg: IrExpr, hoisted: &mut Vec<IrStmt>, vt: &mut VarTable) -> IrExpr {
     let arg_ty = arg.ty.clone();

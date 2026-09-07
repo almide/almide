@@ -20,6 +20,43 @@ impl Emitter<'_> {
         tail: bool,
         ret_hint: Option<SliceTy>,
     ) -> Result<Option<SliceTy>, EmitError> {
+        // The ONE reader of an arm's ownership declaration (arm.rs): the
+        // result the arm declared `Owned` — a fresh block, or the
+        // registry-table callee's handed-over credit — marks this call
+        // node so the bind / assign / return / argument routes take no
+        // borrow +1 (`rc_owned_result`). A `View` or a `Scalar` marks
+        // nothing. There is no list and no default: the arm said.
+        // The arguments' half of the declaration (arm.rs `ArgMode`): the
+        // scope releases every temporary an arm only BORROWED once the op
+        // is done and its result sits on the stack ($dec_flat is
+        // stack-neutral).
+        let depth = self.borrowed_temps.len();
+        let lowered = self.arm_scope(|em| {
+            let l = em.lower_module_call_dispatch(target, args, tail, ret_hint)?;
+            // A `View` into a temporary this scope releases next would
+            // dangle: it takes its share BEFORE the release (below).
+            Ok(match l {
+                Some(l) if l.own == Own::View && em.borrowed_temps.len() > depth => {
+                    Some(em.promote_escaping_view(l))
+                }
+                other => other,
+            })
+        })?;
+        Ok(lowered.map(|l| {
+            if l.own == Own::Owned && self.rc_droppable(l.ty) {
+                self.mark_owned_call(target);
+            }
+            l.ty
+        }))
+    }
+
+    fn lower_module_call_dispatch(
+        &mut self,
+        target: &CallTarget,
+        args: &[IrExpr],
+        tail: bool,
+        ret_hint: Option<SliceTy>,
+    ) -> ArmResult {
         if let Some(out) = self.lower_string_ext(target, args)? {
             return Ok(out);
         }
@@ -37,7 +74,7 @@ impl Emitter<'_> {
                 // `process.exit` executes on any target).
                 match args.first() {
                     Some(a) => {
-                        self.lower(a, Some(INT))?;
+                        self.lower_arg(a, Some(INT), ArgMode::Borrow)?;
                         self.f.instructions().i32_wrap_i64();
                     }
                     None => {
@@ -50,9 +87,12 @@ impl Emitter<'_> {
             CallTarget::Module { module, func, .. }
                 if module.as_str() == "int" && func.as_str() == "to_string" && args.len() == 1 =>
             {
-                self.lower(&args[0], Some(INT))?;
+                self.lower_arg(&args[0], Some(INT), ArgMode::Borrow)?;
                 self.f.instructions().call(F_INT_TO_STRING);
-                Ok(Some(STR))
+                // A fresh block at rc 1 — declared owned (#2004: the bind
+                // route's borrow +1 left every `int.to_string` temporary at
+                // rc 1 forever).
+                Ok(Some(Lowered::owned(STR)))
             }
             // Two-value i64 min/max — one select each.
             CallTarget::Module { module, func, .. }
@@ -61,10 +101,10 @@ impl Emitter<'_> {
                     && args.len() == 2 =>
             {
                 let is_max = func.as_str() == "max";
-                self.lower(&args[0], Some(INT))?;
+                self.lower_arg(&args[0], Some(INT), ArgMode::Borrow)?;
                 let ha = self.hold_i64()?;
                 self.f.instructions().local_set(ha);
-                self.lower(&args[1], Some(INT))?;
+                self.lower_arg(&args[1], Some(INT), ArgMode::Borrow)?;
                 let hb = self.hold_i64()?;
                 let mut i = self.f.instructions();
                 i.local_set(hb);
@@ -80,41 +120,41 @@ impl Emitter<'_> {
                 let _ = i;
                 self.release_i64();
                 self.release_i64();
-                Ok(Some(INT))
+                Ok(Some(Lowered::scalar(INT)))
             }
             // i64 → f64 is one wasm op; f64.convert_i64_s IS Rust's
             // `as f64` (IEEE round-to-nearest-even), bit-exact.
             CallTarget::Module { module, func, .. }
                 if module.as_str() == "int" && func.as_str() == "to_float" && args.len() == 1 =>
             {
-                self.lower(&args[0], Some(INT))?;
+                self.lower_arg(&args[0], Some(INT), ArgMode::Borrow)?;
                 self.f.instructions().f64_convert_i64_s();
-                Ok(Some(FLOAT))
+                Ok(Some(Lowered::scalar(FLOAT)))
             }
             CallTarget::Module { module, func, .. }
                 if module.as_str() == "string"
                     && matches!(func.as_str(), "len" | "length")
                     && args.len() == 1 =>
             {
-                self.lower(&args[0], Some(STR))?;
+                self.lower_arg(&args[0], Some(STR), ArgMode::Borrow)?;
                 self.f.instructions().call(F_STR_LEN_CHARS);
-                Ok(Some(INT))
+                Ok(Some(Lowered::scalar(INT)))
             }
             CallTarget::Module { module, func, .. }
                 if module.as_str() == "json" && func.as_str() == "stringify" && args.len() == 1 =>
             {
-                self.lower(&args[0], Some(SliceTy::Value))?;
+                self.lower_arg(&args[0], Some(SliceTy::Value), ArgMode::Borrow)?;
                 self.emit_value_stringify()?;
-                Ok(Some(STR))
+                Ok(Some(Lowered::owned(STR)))
             }
             CallTarget::Module { module, func, .. }
                 if module.as_str() == "json"
                     && func.as_str() == "stringify_pretty"
                     && args.len() == 1 =>
             {
-                self.lower(&args[0], Some(SliceTy::Value))?;
+                self.lower_arg(&args[0], Some(SliceTy::Value), ArgMode::Borrow)?;
                 self.emit_value_stringify_pretty()?;
-                Ok(Some(STR))
+                Ok(Some(Lowered::owned(STR)))
             }
             CallTarget::Module { module, func, .. }
                 if module.as_str() == "json"
@@ -122,10 +162,10 @@ impl Emitter<'_> {
                     && args.len() == 3 =>
             {
                 let h = self.work.helper(crate::work::Helper::JsonPathSet);
-                self.lower(&args[0], Some(SliceTy::Value))?;
-                self.lower(&args[1], None)?;
+                self.lower_arg(&args[0], Some(SliceTy::Value), ArgMode::Retain)?;
+                self.lower_arg(&args[1], None, ArgMode::Borrow)?;
                 self.f.instructions().i32_const(0);
-                self.lower(&args[2], Some(SliceTy::Value))?;
+                self.lower_arg(&args[2], Some(SliceTy::Value), ArgMode::Retain)?;
                 self.f.instructions().call(h);
                 // ok(v) — the surface is Result[Value, String], always ok.
                 let hv = self.tmp_i32_local;
@@ -142,7 +182,7 @@ impl Emitter<'_> {
                 i.local_get(self.scr_i32_local);
                 let _ = i;
                 let vh = self.types.intern(SliceTy::Value);
-                Ok(Some(SliceTy::Result(vh, self.types.intern(STR))))
+                Ok(Some(Lowered::owned(SliceTy::Result(vh, self.types.intern(STR)))))
             }
             CallTarget::Module { module, func, .. }
                 if module.as_str() == "json" && func.as_str() == "to_map" && args.len() == 1 =>
@@ -155,11 +195,11 @@ impl Emitter<'_> {
                     && args.len() == 2 =>
             {
                 let h = self.work.helper(crate::work::Helper::JsonPathRemove);
-                self.lower(&args[0], Some(SliceTy::Value))?;
-                self.lower(&args[1], None)?;
+                self.lower_arg(&args[0], Some(SliceTy::Value), ArgMode::Borrow)?;
+                self.lower_arg(&args[1], None, ArgMode::Borrow)?;
                 self.f.instructions().i32_const(0);
                 self.f.instructions().call(h);
-                Ok(Some(SliceTy::Value))
+                Ok(Some(Lowered::owned(SliceTy::Value)))
             }
             _ => self.lower_module_call_b(target, args, tail, ret_hint),
         }
@@ -173,45 +213,65 @@ impl Emitter<'_> {
         args: &[IrExpr],
         tail: bool,
         ret_hint: Option<SliceTy>,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         match target {
             CallTarget::Module { module, func, .. }
                 if (module.as_str() == "option" || module.as_str() == "result")
                     && func.as_str() == "unwrap_or"
                     && args.len() == 2 =>
             {
-                let got = self.lower(&args[0], None)?;
-                match got {
-                    SliceTy::Option(h) => {
-                        let et = self.types.el(h);
-                        self.f
-                            .instructions()
-                            .local_tee(self.scr_i32_local)
-                            .i32_eqz()
-                            .if_(BlockType::Result(et.val_type()));
-                        self.lower(&args[1], Some(et))?;
-                        self.f.instructions().else_().local_get(self.scr_i32_local);
-                        self.load_ty_slot(et, almide_layout::OPTION_FIELD);
-                        self.f.instructions().end();
-                        Ok(Some(et))
+                // `unwrap_or` is an ordinary STRICT call: the default is
+                // evaluated before the selection, as native does — a default
+                // that aborts (`int.clamp(3, 3, 1)`) aborts on an `ok`
+                // receiver too. The branch form that evaluated it only in
+                // the none/err arm was the lazy `??` (≡ unwrap_or_else)
+                // semantics under the eager name (#1906). The receiver
+                // still lowers first (its side effects come first in source
+                // order); the default lands in a held local of its type.
+                let got = self.lower_arg(&args[0], None, ArgMode::Borrow)?;
+                let (et, is_option) = match got {
+                    SliceTy::Option(h) => (self.types.el(h), true),
+                    SliceTy::Result(o, _) => (self.types.el(o), false),
+                    other => return unsup(&format!("unwrap-or-of:{other:?}")),
+                };
+                self.f.instructions().local_set(self.scr_i32_local);
+                let hrecv = self.hold_i32()?;
+                self.f.instructions().local_get(self.scr_i32_local).local_set(hrecv);
+                self.lower_arg(&args[1], Some(et), ArgMode::Retain)?;
+                let hdef = match et.val_type() {
+                    ValType::I64 => self.hold_i64()?,
+                    ValType::F64 => self.hold_f64()?,
+                    _ => self.hold_i32()?,
+                };
+                {
+                    let mut i = self.f.instructions();
+                    i.local_set(hdef);
+                    i.local_get(hrecv);
+                    if is_option {
+                        i.i32_eqz();
+                    } else {
+                        i.i32_load(slot_memarg(almide_layout::SUM_TAG)).i32_const(0).i32_ne();
                     }
-                    SliceTy::Result(o, _) => {
-                        let et = self.types.el(o);
-                        self.f
-                            .instructions()
-                            .local_tee(self.scr_i32_local)
-                            .i32_load(slot_memarg(almide_layout::SUM_TAG))
-                            .i32_const(0)
-                            .i32_ne()
-                            .if_(BlockType::Result(et.val_type()));
-                        self.lower(&args[1], Some(et))?;
-                        self.f.instructions().else_().local_get(self.scr_i32_local);
-                        self.load_ty_slot(et, almide_layout::SUM_FIELD);
-                        self.f.instructions().end();
-                        Ok(Some(et))
-                    }
-                    other => unsup(&format!("unwrap-or-of:{other:?}")),
+                    i.if_(BlockType::Result(et.val_type()));
+                    i.local_get(hdef);
+                    i.else_().local_get(hrecv);
                 }
+                self.load_ty_slot(
+                    et,
+                    if is_option { almide_layout::OPTION_FIELD } else { almide_layout::SUM_FIELD },
+                );
+                // The payload handed out is a SHARE of the receiver's (+1):
+                // with the retained default, both branches hand back an
+                // owned value (#2010 stage 2c).
+                self.share_handle_top(et);
+                self.f.instructions().end();
+                match et.val_type() {
+                    ValType::I64 => self.release_i64(),
+                    ValType::F64 => self.release_f64(),
+                    _ => self.release_i32(),
+                }
+                self.release_i32();
+                Ok(Some(Lowered::owned(et)))
             }
             CallTarget::Module { module, func, .. } if module.as_str() == "matrix" => {
                 if let Some(out) = self.lower_matrix_call(func.as_str(), args)? {
@@ -285,31 +345,31 @@ impl Emitter<'_> {
         args: &[IrExpr],
         tail: bool,
         ret_hint: Option<SliceTy>,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         match target {
             CallTarget::Module { module, func, .. }
                 if module.as_str() == "string"
                     && func.as_str() == "slice"
                     && (args.len() == 2 || args.len() == 3) =>
             {
-                self.lower(&args[0], Some(STR))?;
-                self.lower(&args[1], Some(INT))?;
+                self.lower_arg(&args[0], Some(STR), ArgMode::Borrow)?;
+                self.lower_arg(&args[1], Some(INT), ArgMode::Borrow)?;
                 if let Some(e) = args.get(2) {
-                    self.lower(e, Some(INT))?;
+                    self.lower_arg(e, Some(INT), ArgMode::Borrow)?;
                 } else {
                     // the surface's `end` default: i64::MAX ("to the end")
                     self.f.instructions().i64_const(i64::MAX);
                 }
                 self.f.instructions().call(F_STR_SLICE);
-                Ok(Some(STR))
+                Ok(Some(Lowered::owned(STR)))
             }
             CallTarget::Module { module, func, .. }
                 if module.as_str() == "string" && func.as_str() == "repeat" && args.len() == 2 =>
             {
-                self.lower(&args[0], Some(STR))?;
-                self.lower(&args[1], Some(INT))?;
+                self.lower_arg(&args[0], Some(STR), ArgMode::Borrow)?;
+                self.lower_arg(&args[1], Some(INT), ArgMode::Borrow)?;
                 self.f.instructions().call(F_STR_REPEAT);
-                Ok(Some(STR))
+                Ok(Some(Lowered::owned(STR)))
             }
             CallTarget::Module { module, func, .. } if module.as_str() == "list" => {
                 self.lower_list_call(func.as_str(), args, ret_hint)
@@ -337,5 +397,13 @@ impl Emitter<'_> {
             }
             _ => unreachable!("module dispatch"),
         }
+    }
+}
+
+impl Emitter<'_> {
+    /// Mark this call node's result as OWNED by the caller (#1990 /
+    /// #2004): read by `rc_owned_result` through the node's identity.
+    pub(crate) fn mark_owned_call(&mut self, target: &CallTarget) {
+        self.owned_call_marks.insert(target as *const CallTarget as usize);
     }
 }

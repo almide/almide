@@ -1,0 +1,16 @@
+[package]
+name = "almide-rt-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Prelude-independent native runtime cores shared between the splice template (runtime/rs, via include!) and linking consumers (the embedded host)"
+
+[dependencies]
+# The pure-Rust TLS client the http core rides — same pin the generated
+# projects and the embedded host carry.
+rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
+webpki-roots = "1.0"
+
+[lints]
+workspace = true

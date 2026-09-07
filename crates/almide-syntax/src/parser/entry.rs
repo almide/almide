@@ -56,6 +56,7 @@ impl Parser {
             doc_map: Vec::new(),
             blank_lines_map: Vec::new(),
             failed_fn_names: std::collections::HashSet::new(),
+            parse_recovered: false,
             expr_comments: std::collections::HashMap::new(),
         };
 
@@ -168,6 +169,7 @@ impl Parser {
         }
 
         program.failed_fn_names = std::mem::take(&mut self.failed_fn_names);
+        program.parse_recovered = !self.errors.is_empty();
         // #1404: hand the resolved expression-comment bindings to the Program.
         // Anything still sitting in `inline_comments` was never claimed by a
         // node — fmt's conservation verifier counts LEXER tokens, so an

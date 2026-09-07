@@ -1,0 +1,10 @@
+// Assignment inside a while body to a name never declared with let/var —
+// the accumulator was forgotten, not misspelled.
+fn main() -> Unit = {
+  var i = 0
+  while i < 3 {
+    total = i
+    i = i + 1
+  }
+  println("done")
+}

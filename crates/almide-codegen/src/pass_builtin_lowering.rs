@@ -44,6 +44,27 @@ thread_local! {
     /// needs. The list/option codec reroutes below pick the runtime driver
     /// whose `Fn` bound matches the per-element FnRef they hand it.
     static DECODE_BY_REF: RefCell<std::collections::HashSet<String>> = RefCell::new(std::collections::HashSet::new());
+    /// The dotted names of the program's opaque-newtype decls (`self.Value`,
+    /// `m.Token` — the identity lowering pins on a `mod`/`local` alias
+    /// declared in a module or under a stdlib-owned name, #1835). A `Named`
+    /// call to one is the newtype's CONSTRUCTOR, not a `Type.method`, so
+    /// the dotted-name flattening below leaves it for IrLinkFlatten to
+    /// mangle together with the struct it names.
+    static NEWTYPE_CTORS: RefCell<std::collections::HashSet<String>> = RefCell::new(std::collections::HashSet::new());
+}
+
+/// The dotted opaque-newtype decl names (program + modules): a non-public
+/// `Alias` whose target is not a fn type — the decls the walker renders as
+/// `pub struct N(T)`. Bare-named newtypes need no entry: the flattening
+/// this guards only touches dotted names.
+fn collect_newtype_ctors(program: &IrProgram) -> std::collections::HashSet<String> {
+    program.type_decls.iter()
+        .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()))
+        .filter(|td| matches!(td.visibility, IrVisibility::Mod | IrVisibility::Private))
+        .filter(|td| matches!(&td.kind, IrTypeDeclKind::Alias { target } if !matches!(target, Ty::Fn { .. })))
+        .filter(|td| td.name.as_str().contains('.'))
+        .map(|td| td.name.as_str().to_string())
+        .collect()
 }
 
 /// Collect the `T.decode` fns that borrow their `Value` input, under every
@@ -167,6 +188,8 @@ impl NanoPass for BuiltinLoweringPass {
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         let method_fns = collect_module_method_fns(&program);
         MODULE_METHOD_FNS.with(|c| *c.borrow_mut() = method_fns);
+        let newtype_ctors = collect_newtype_ctors(&program);
+        NEWTYPE_CTORS.with(|c| *c.borrow_mut() = newtype_ctors);
         let by_ref = collect_decode_by_ref(&program);
         DECODE_BY_REF.with(|c| *c.borrow_mut() = by_ref);
         for func in &mut program.functions {
@@ -460,6 +483,12 @@ fn rewrite_call_rename(name: Sym, args: Vec<IrExpr>, type_args: Vec<Ty>, ty: Ty,
             target: CallTarget::Named { name: format!("almide_rt_{}", name).into() },
             args, type_args,
         }, ty, span, def_id: None };
+    }
+    // An opaque newtype's ctor call names its TYPE (`self.Value`, `m.Token`
+    // — the identity lowering pinned, #1835), not a `Type.method`: it keeps
+    // the dotted spelling for IrLinkFlatten to mangle with the struct.
+    if name.contains('.') && NEWTYPE_CTORS.with(|c| c.borrow().contains(name.as_str())) {
+        return IrExpr { kind: IrExprKind::Call { target: CallTarget::Named { name }, args, type_args }, ty, span, def_id: None };
     }
     // Type.method → Type_method. If the method belongs to a
     // module-defined type, carry the module prefix so the call

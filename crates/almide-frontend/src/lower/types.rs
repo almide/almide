@@ -24,6 +24,18 @@ pub(super) fn lower_type_decl(ctx: &mut LowerCtx, decl: &TypeToLower<'_>) -> IrT
     // same-name types stay distinct through link + codegen.
     let qualified_name = match module_prefix {
         Some(m) if !almide_lang::stdlib_info::is_bundled_module(m) => format!("{}.{}", m, name),
+        // The entry program's declaration of a stdlib-owned name is `self.Type`
+        // (#1828) — the checker's key for it, whatever the shape: the opaque
+        // alias's newtype identity is the same scope (#1835), the name its
+        // ctor call and pattern were lowered under — so the bare spelling
+        // stays the stdlib's on every backend. Not the owning stdlib module's
+        // OWN declaration when that module is the entry program
+        // (`entry_bundled_module`): the checker keyed it bare, as the stdlib's.
+        None if almide_lang::stdlib_info::stdlib_owned_type_owner(name).is_some()
+            && !ctx.env.entry_owns_stdlib_type(name) =>
+        {
+            format!("{}.{}", crate::canonicalize::resolve::ROOT_TYPE_SCOPE, name)
+        }
         _ => name.to_string(),
     };
     // Use TypeEnv for field type resolution so aliases (TcpStream → Int)
@@ -82,4 +94,37 @@ fn lower_variant_case(ctx: &mut LowerCtx, case: &ast::VariantCase, _parent: &str
 
 pub(super) fn resolve_type_expr(te: &ast::TypeExpr) -> Ty {
     crate::canonicalize::resolve::resolve_type_expr(te, None)
+}
+
+/// #1839: lower ONE bundled module's `type` declaration exactly as that
+/// module's own lowering does (`lower_module` → [`lower_type_decl`]: the bare
+/// name a bundled decl keeps, the env-resolved field types), for `ir_link`'s
+/// type-owner pull — the declaration handed to a program that spells the
+/// type while the owner module was never loaded. `None` when `module` is not
+/// bundled or declares no such type.
+pub fn lower_bundled_type_decl(module: &str, name: &str) -> Option<IrTypeDecl> {
+    if !almide_lang::stdlib_info::is_bundled_module(module) {
+        return None;
+    }
+    let source = almide_lang::stdlib_info::bundled_source(module)?;
+    let program = almide_lang::parse_cached(source)?;
+    let (ty, deriving, visibility, generics) = program.decls.iter().find_map(|d| match d {
+        ast::Decl::Type { name: n, ty, deriving, visibility, generics, .. } if n.as_str() == name => {
+            Some((ty, deriving, visibility, generics))
+        }
+        _ => None,
+    })?;
+    // The module half of canonicalization with no modules: builtin protocols
+    // plus every bundled type registration — what a bundled decl's field
+    // types resolve against in the real pipeline.
+    let env = crate::canonicalize::canonicalize_modules_env(
+        std::iter::empty::<(&str, &ast::Program, bool)>(),
+    )
+    .env;
+    let type_map = crate::types::TypeMap::new();
+    let mut ctx = LowerCtx::new(&env, &type_map);
+    ctx.current_module = Some(sym(module));
+    Some(lower_type_decl(&mut ctx, &TypeToLower {
+        name, ty, deriving, visibility, generics: generics.as_ref(), module_prefix: Some(module),
+    }))
 }

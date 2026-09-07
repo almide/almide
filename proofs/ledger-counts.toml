@@ -1,0 +1,36 @@
+# LEDGER COUNTS — the aggregate totals the generated docs quote, STAMPED.
+#
+# Rendered verbatim (inside a dated `counts:generated` block) into README.md,
+# proofs/STAGE-STATUS.md, docs/contracts/README.md and
+# docs/contracts/conformance.md by their generators, which never re-measure
+# them: deriving the totals at render time made every fixture or contract PR
+# rewrite the same lines, so any two such PRs conflicted at the merge queue.
+#
+# Refresh:  bash scripts/gen-ledger-counts.sh   (restamps this file and
+#           regenerates the four docs — a release step before the seal, or
+#           whenever the nightly scripts/check-ledger-counts.sh reports drift).
+# A fixture or contract PR must NOT refresh it. Measurement recipes:
+# scripts/lib/ledger-counts.sh.
+date                       = "2026-09-06"
+contracts                  = 342
+contracts_active           = 342
+contracts_flagged          = 0
+contracts_spec_keyed       = 342
+wasm_cross_fixtures        = 682
+interp_abstains            = 19
+conformance_sections       = 114
+conformance_fixtures       = 735
+stdlib_functions           = 985
+stdlib_modules             = 43
+spec_test_files            = 433
+scalar_read_arms           = 63
+scalar_read_unguarded      = 0
+wat_prelude_fns            = 63
+libm_sites                 = 5
+als_elements               = 72
+als_elements_unwritten     = 0
+release_seals              = 10
+verification_gates         = 75
+verification_unverified    = 0
+tor_rows                   = 9
+fuzz_green_streak_days     = 0

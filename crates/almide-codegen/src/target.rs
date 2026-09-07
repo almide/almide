@@ -28,6 +28,7 @@ use super::pass_effect_inference::EffectInferencePass;
 use super::pass_tco::TailCallOptPass;
 use super::pass_licm::LICMPass;
 use super::pass_peephole::PeepholePass;
+use super::pass_range_counting::RangeCountingVarsPass;
 use super::pass_egg_saturation::EggSaturationPass;
 use super::pass_matrix_shape_spec::MatrixShapeSpecPass;
 use super::pass_const_fold::ConstFoldPass;
@@ -156,6 +157,10 @@ fn build_pipeline(target: Target) -> Pipeline {
                 // after every Borrow-shaping pass, so it sees final call
                 // and borrow forms.
                 .add(SharedCellBorrowPass)
+                // #1857: `let`-bound ranges read ONLY as for-in heads stay a
+                // bare `Range<i64>` (the wasm leg's #1400 counting loop, for
+                // the v3 fallback). Last, so the set names the final IR.
+                .add(RangeCountingVarsPass)
                 // §4 Stage 1: compute the unified top-let storage attribute
                 // at pipeline end (VarIds final, modules flattened); the
                 // walker asserts every legacy predicate agrees with it.

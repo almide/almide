@@ -1,0 +1,3 @@
+expects_code = "E053"
+expects_error = "needs `since = N`"
+hint_substring = "dialect-epochs.toml"

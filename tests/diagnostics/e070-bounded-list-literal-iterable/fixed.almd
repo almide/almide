@@ -1,0 +1,9 @@
+// ALS-B3: an inclusive literal range is counted.
+@bounded
+fn sum3() -> Int = {
+  var acc = 0
+  for i in 1...3 { acc = acc + i }
+  acc
+}
+
+fn main() -> Unit = println("${sum3()}")

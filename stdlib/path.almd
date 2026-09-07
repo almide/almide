@@ -55,7 +55,11 @@ fn basename(p: String) -> String = {
 fn extension(p: String) -> String? = {
   let name = basename(p)
   let parts = string.split(name, ".")
-  if list.len(parts) <= 1 then none else list.last(parts)
+  let n = list.len(parts)
+  // A leading dot names a hidden file, not an extension: `.gitignore` has
+  // none, `.bashrc.bak` has `bak` — the rule `stem` keeps and the docs state.
+  if n <= 1 then none
+  else if string.starts_with(name, ".") and n == 2 then none else list.last(parts)
 }
 
 fn is_absolute(p: String) -> Bool = string.starts_with(p, "/")

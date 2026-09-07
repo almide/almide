@@ -297,7 +297,10 @@ impl Emitter<'_> {
                     self.append_lit("{ ");
                     fields.sort_by(|a, b| a.name.cmp(&b.name));
                 } else {
-                    self.append_lit(&format!("{name} {{ "));
+                    // Both the entry program's shadow of a stdlib-owned name
+                    // (`self.X`, #1828) and a module record (`m.Cfg`, #1836) show
+                    // the last segment the source declares.
+                    self.append_lit(&format!("{} {{ ", almide_ir::declared_type_name(&name)));
                 }
                 for (k, fi) in fields.iter().enumerate() {
                     if k > 0 {
@@ -490,8 +493,15 @@ fn build_one_scan_helper(
             pool,
             locals: &empty_locals,
             rc_param_ceiling: 0,
-            rc_droppable_params: Vec::new(),
+            tail_release_allowed: false,
+            rc_frame_params: Vec::new(),
+            self_index: None,
             rc_owned: std::collections::BTreeSet::new(),
+            owned_ty: std::collections::HashMap::new(),
+            owned_call_marks: Default::default(),
+            borrowed_temps: Vec::new(),
+            exit_ledger: Vec::new(),
+            borrow_base: 0, // helper bodies lower no arm argument
             table,
             types,
             calls: &mut calls,
@@ -586,8 +596,15 @@ fn build_one_eq_helper(
             pool,
             locals: &empty_locals,
             rc_param_ceiling: 0,
-            rc_droppable_params: Vec::new(),
+            tail_release_allowed: false,
+            rc_frame_params: Vec::new(),
+            self_index: None,
             rc_owned: std::collections::BTreeSet::new(),
+            owned_ty: std::collections::HashMap::new(),
+            owned_call_marks: Default::default(),
+            borrowed_temps: Vec::new(),
+            exit_ledger: Vec::new(),
+            borrow_base: 0, // helper bodies lower no arm argument
             table,
             types,
             calls: &mut calls,
@@ -656,8 +673,15 @@ fn build_one_display_helper(
             pool,
             locals: &empty_locals,
             rc_param_ceiling: 0,
-            rc_droppable_params: Vec::new(),
+            tail_release_allowed: false,
+            rc_frame_params: Vec::new(),
+            self_index: None,
             rc_owned: std::collections::BTreeSet::new(),
+            owned_ty: std::collections::HashMap::new(),
+            owned_call_marks: Default::default(),
+            borrowed_temps: Vec::new(),
+            exit_ledger: Vec::new(),
+            borrow_base: 0, // helper bodies lower no arm argument
             table,
             types,
             calls: &mut calls,

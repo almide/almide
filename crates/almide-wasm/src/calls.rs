@@ -42,18 +42,29 @@ impl Emitter<'_> {
                 self.f.instructions().local_get(h);
                 for (a, p) in args.iter().zip(def.params.iter()) {
                     self.lower(a, Some(*p))?;
+                    // RC-3 callee-owned args hold for a lifted lambda
+                    // exactly as for a named fn: its epilogue decs every
+                    // droppable param, so a borrowed argument — a
+                    // match-bound payload, a field or element read, a
+                    // param of the enclosing fn — takes +1 here. Without
+                    // it `pred(v)` inside `ok(v) => …` freed the payload
+                    // the caller still held (the nightly fuzz's
+                    // zeroed-string findings).
+                    self.rc_arg_guard(a, *p);
+                    self.witness_arg(a, *p);
                 }
                 self.f.instructions().local_get(h).i32_load(slot_memarg(0));
                 let mut ps: Vec<ValType> = vec![ValType::I32];
                 ps.extend(def.params.iter().map(|t| t.val_type()));
                 let ti = self.work.itype(ps, def.ret.map(SliceTy::val_type));
                 // Encoder argument order is (table, type).
-                if tail && def.ret.is_some() && def.ret == self.fn_ret {
+                if tail && def.ret.is_some() && def.ret == self.fn_ret && self.tail_transfer_ok(true) {
                     // A tail call REPLACES the frame — the epilogue's param
                     // release never runs, so it runs HERE (args are already
                     // +1'd by rc_arg_guard, so a pass-through param
                     // survives its own dec).
-                    self.emit_tail_param_release();
+                    let plan = self.exit_plan(crate::exit_plan::Continuation::TailTransfer { replaces_frame: true });
+                    self.emit_exit(&plan);
                     self.f.instructions().return_call_indirect(0, ti);
                 } else {
                     self.f.instructions().call_indirect(0, ti);
@@ -105,6 +116,26 @@ impl Emitter<'_> {
                 if let Some((ti, ci)) = ctor {
                     return self.lower_variant_ctor(name, ti, ci, args);
                 }
+                // The http_framed op leaves (#1710 increment 3): the
+                // splice's bodyless `= _` leaves, lowered as host ops —
+                // the intra-module twins of the host_env http arms (url
+                // in a, the method/body/headers frame in b). They carry
+                // no table body, so they intercept BEFORE resolution.
+                match name {
+                    "__http_framed_text" => {
+                        self.fs_call_str2(&args[0], &args[1], crate::fs_meta::OP_HTTP_FRAMED_TEXT)?;
+                        return Ok(Some(self.fs_result_string()?));
+                    }
+                    "__http_framed_status" => {
+                        self.fs_call_str2(&args[0], &args[1], crate::fs_meta::OP_HTTP_FRAMED_STATUS)?;
+                        return Ok(Some(self.fs_result_string()?));
+                    }
+                    "__http_framed_bytes" => {
+                        self.fs_call_str2(&args[0], &args[1], crate::fs_meta::OP_HTTP_FRAMED_BYTES)?;
+                        return Ok(Some(self.fs_result_bytes()?));
+                    }
+                    _ => {}
+                }
                 // Entry fns resolve by name; a miss falls back to the
                 // module-fn simple-name index (intra-module calls arrive
                 // as Named after lower_module).
@@ -136,21 +167,58 @@ impl Emitter<'_> {
                     return unsup(&format!("call-arity:{name}"));
                 }
                 let (index, ret, params) = (info.wasm_index, info.ret, info.params.clone());
+                // The `consume(produce(scalars))` region window (#1961):
+                // the whole producer/consumer pair runs inside a bump
+                // window that RegionRestore rewinds wholesale. Opened
+                // before the arguments (the producer call IS one), closed
+                // right after the call; a return_call site keeps its C-292
+                // constant stack instead.
+                let window = !(tail && ret.is_some() && ret == self.fn_ret)
+                    && self.region_window_opens(i, ret, args, &params);
+                let save = if window { Some(self.emit_region_save()?) } else { None };
+                // A self tail call in LOOP form under the raw-address rule:
+                // the loop-back rebinds the params and releases nothing
+                // (exit_plan.rs), so a param handed straight through
+                // (`__arr(b, …)` → `__arr(b, …)`) must MOVE, not take the
+                // borrow +1 — that +1 per iteration was the 16 B per call
+                // of every `bytes.read_*_array` (#2005).
+                let loop_form_raw = tail && Some(index) == self.self_index && !self.tail_release_allowed;
+                let mut moved: Vec<u32> = Vec::new();
                 for (a, want) in args.iter().zip(params) {
                     self.lower(a, Some(want))?;
+                    if loop_form_raw && let Some(p) = self.frame_param_var(a) && !moved.contains(&p) {
+                        moved.push(p);
+                        self.witness_arg(a, want);
+                        continue;
+                    }
                     // RC-3 callee-owned args: a borrowed droppable
                     // argument gets +1 here, the callee's epilogue decs
                     // its params — the pair keeps a mut-param callee's
                     // realloc-free honest (rc reflects both holders).
                     self.rc_arg_guard(a, want);
+                    self.witness_arg(a, want);
                 }
                 self.calls.insert(i);
+                if let Some(blk) = save {
+                    self.f.instructions().call(index);
+                    self.emit_region_restore(blk);
+                    return Ok(ret);
+                }
                 // Tail position with a matching return type → return_call:
                 // constant stack for arbitrarily deep (incl. mutual)
                 // recursion, the C-292 contract.
-                if tail && ret.is_some() && ret == self.fn_ret {
-                    // Same frame-replacement release as the indirect site.
-                    self.emit_tail_param_release();
+                if tail
+                    && ret.is_some()
+                    && ret == self.fn_ret
+                    && self.tail_transfer_ok(Some(index) != self.self_index)
+                {
+                    // Same frame-replacement release as the indirect site —
+                    // unless the callee is THIS fn: tco.rs turns that
+                    // return_call into a loop-back, and the frame lives on.
+                    let plan = self.exit_plan(crate::exit_plan::Continuation::TailTransfer {
+                        replaces_frame: Some(index) != self.self_index,
+                    });
+                    self.emit_exit(&plan);
                     self.f.instructions().return_call(index);
                 } else {
                     self.f.instructions().call(index);
@@ -192,6 +260,19 @@ impl Emitter<'_> {
         if args.len() != fields.len() {
             return unsup(&format!("ctor-arity:{name}"));
         }
+        // A nullary case (`Leaf`, `None`-like markers, enum-style
+        // variants) is a static block in the pool, one per (type, case)
+        // (#1961): it carries only its tag, nothing ever writes it, and
+        // the rc ops no-op below the heap floor — so binarytrees' 2^19
+        // leaves cost zero allocations instead of two thirds of them.
+        if fields.is_empty() {
+            let mut payload = vec![0u8; size as usize];
+            let at = almide_layout::SUM_TAG as usize;
+            payload[at..at + 4].copy_from_slice(&tag.to_le_bytes());
+            let block = self.pool.intern_block(&payload);
+            self.f.instructions().i32_const(block as i32);
+            return Ok(Some(SliceTy::Named(ti)));
+        }
         let hold = self.hold_i32()?;
         self.f
             .instructions()
@@ -218,7 +299,7 @@ impl Emitter<'_> {
     /// the bare table: accept the module-qualified key ENDING in
     /// `.Type.method` iff it is UNIQUE across modules — ambiguity walls
     /// (order-independent: uniqueness needs no iteration order).
-    fn resolve_method_suffix(&self, name: &str) -> Option<usize> {
+    pub(crate) fn resolve_method_suffix(&self, name: &str) -> Option<usize> {
         if !name.contains('.') {
             return None;
         }
@@ -313,6 +394,14 @@ impl Emitter<'_> {
                 // value.* surface, which THIS emitter lowers natively —
                 // the whole body is layout-consistent by construction.
                 "json_parse",
+                // (String, String) -> (String, String)?: byte-level find
+                // over the source payload, LEN read on STRING blocks only
+                // (digest-shared), two fresh alloc_str buffers, the pair
+                // and the option built by constructors (#1423 stage 4).
+                "string_split_once",
+                // (String) -> DateTime!: no prim access at all — language-
+                // level slicing and int parsing, Result via ok()/err().
+                "datetime_parse_iso",
             ];
             if !VERIFIED.contains(&impl_fn)
                 && !VERIFIED_SUM_BUILDERS.contains(&impl_fn)
@@ -324,6 +413,7 @@ impl Emitter<'_> {
                 && !crate::whitelist::CODEC_ENCODE_VERIFIED.contains(&impl_fn)
                 && !crate::whitelist::BYTES_FAMILY_VERIFIED.contains(&impl_fn)
                 && !crate::whitelist::BYTES_FAMILY_SUM.contains(&impl_fn)
+                && !crate::whitelist::HTTP_CLIENT_SUM.contains(&impl_fn)
             {
                 return None;
             }
@@ -358,6 +448,7 @@ impl Emitter<'_> {
                 && !crate::whitelist::SCALAR_TEXT_SUM_BUILDERS.contains(&impl_fn)
                 && !crate::whitelist::CODEC_ENCODE_VERIFIED.contains(&impl_fn)
                 && !crate::whitelist::BYTES_FAMILY_SUM.contains(&impl_fn)
+                && !crate::whitelist::HTTP_CLIENT_SUM.contains(&impl_fn)
                 && (info.params.iter().any(coupled) || info.ret.as_ref().is_some_and(coupled))
             {
                 return None;
@@ -376,22 +467,30 @@ impl Emitter<'_> {
     pub(crate) fn lower_print(&mut self, arg: &IrExpr, import: u32, block_print: u32) -> Result<(), EmitError> {
         if let IrExprKind::StringInterp { parts } = &arg.kind {
             let start = self.lower_interp_build(parts)?;
-            // print(start, cursor - start), then release the buffer region.
+            // Flush [start, cursor) from its PHYSICAL home (the region may
+            // have relocated to a heap arena mid-build, #1826), then
+            // release the buffer region.
+            let flush = if import == F_PRINTLN_IMPORT { F_LINE_PRINTLN } else { F_LINE_EPRINTLN };
             self.f
                 .instructions()
                 .local_get(start)
                 .local_get(self.cursor_local)
-                .local_get(start)
-                .i32_sub()
-                .call(import)
+                .call(flush)
                 .local_get(start)
                 .global_set(G_LINE_CURSOR);
             self.release_i32();
             return Ok(());
         }
-        self.lower(arg, Some(STR))?;
-        self.f.instructions().call(block_print);
-        Ok(())
+        // println / eprintln only READ their argument: a temporary handed
+        // to them (`println(int.to_string(i))`) is borrowed and released
+        // right after the write — this site is its own wrapper (arm.rs
+        // `ArgMode`), there being no module-call wrapper around a Named
+        // builtin.
+        self.arm_scope(|em| {
+            em.lower_arg(arg, Some(STR), ArgMode::Borrow)?;
+            em.f.instructions().call(block_print);
+            Ok(())
+        })
     }
 
     /// Build interpolation parts into the line buffer from the CURRENT
@@ -451,7 +550,7 @@ impl Emitter<'_> {
         func: &str,
         args: &[IrExpr],
         tail: bool,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let key = format!("{module}.{func}");
         let Some(i) = self.resolve_qualified(&key) else {
             return unsup(&format!("call:{key}"));
@@ -467,25 +566,25 @@ impl Emitter<'_> {
         for (a, want) in args.iter().zip(params) {
             self.lower(a, Some(want))?;
             self.rc_arg_guard(a, want);
+            self.witness_arg(a, want);
         }
         self.calls.insert(i);
-        if tail && ret.is_some() && ret == self.fn_ret {
+        if tail && ret.is_some() && ret == self.fn_ret && self.tail_transfer_ok(Some(index) != self.self_index) {
+            // The third tail site, found by scripts/check-exit-sites.sh
+            // the day the gate went in (#1995): a registry-table tail call
+            // replaced the frame with no release at all — a user fn whose
+            // tail is `string.to_upper(s)` leaked `s` on every call.
+            let plan = self.exit_plan(crate::exit_plan::Continuation::TailTransfer {
+                replaces_frame: Some(index) != self.self_index,
+            });
+            self.emit_exit(&plan);
             self.f.instructions().return_call(index);
         } else {
             self.f.instructions().call(index);
         }
-        Ok(ret)
-    }
-}
-
-impl Emitter<'_> {
-    /// Release this fn's droppable params before a `return_call` — the
-    /// tail call replaces the frame and the epilogue never runs. The
-    /// pending args on the wasm stack are unaffected ($dec_flat is
-    /// stack-neutral), and rc_arg_guard has already +1'd borrowed args.
-    pub(crate) fn emit_tail_param_release(&mut self) {
-        for idx in self.rc_droppable_params.clone() {
-            self.f.instructions().local_get(idx).call(F_DEC_FLAT);
-        }
+        // The callee-owned convention IS the declaration: a table callee
+        // hands its droppable result over with exactly one credit (#1986 /
+        // #1990); a scalar result carries nothing.
+        Ok(ret.map(|t| if self.rc_droppable(t) { Lowered::owned(t) } else { Lowered::scalar(t) }))
     }
 }

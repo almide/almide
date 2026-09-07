@@ -1,0 +1,9 @@
+// E049 variant: the let-in sits inside a match arm's block body.
+fn label(n: Int) -> Unit = match n {
+  0 => println("zero"),
+  _ => {
+    let m = n * 2 in println(int.to_string(m))
+  },
+}
+
+fn main() -> Unit = label(3)

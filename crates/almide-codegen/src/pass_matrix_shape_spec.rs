@@ -63,7 +63,7 @@ impl NanoPass for MatrixShapeSpecPass {
     fn targets(&self) -> Option<Vec<Target>> { Some(vec![Target::Rust]) }
     // The small-shape unrolls type-expect the fused matrix forms
     // EggSaturation produces — without it, 4 matrix fusion spec files fail
-    // rustc (E0308, RcCow vs AlmideMatrix). Found by the #912 pass-ordering
+    // rustc (E0308, AlmideRcCow vs AlmideMatrix). Found by the #912 pass-ordering
     // lens round 1: the dep was real but undeclared; declaring it turns the
     // late rustc refusal into an immediate pipeline panic.
     fn depends_on(&self) -> Vec<&'static str> { vec!["EggSaturation"] }
@@ -418,11 +418,11 @@ fn make_unrolled_mul(
         rows.push(format!("vec![{}]", cells.join(", ")));
     }
 
-    // #617: Matrix is the RcCow value type in generated code — the raw
+    // #617: Matrix is the AlmideRcCow value type in generated code — the raw
     // `from_lists` result wraps at this InlineRust boundary (the `&{a}`/`&{b}`
-    // reads deref-coerce through RcCow unchanged).
+    // reads deref-coerce through AlmideRcCow unchanged).
     let template = format!(
-        "{{ let __sa = &{{a}}; let __sb = &{{b}}; RcCow::from(almide_rt_matrix_from_lists(&vec![{rows}])) }}",
+        "{{ let __sa = &{{a}}; let __sb = &{{b}}; AlmideRcCow::from(almide_rt_matrix_from_lists(&vec![{rows}])) }}",
         rows = rows.join(", "),
     );
 

@@ -34,6 +34,15 @@ pub struct CodegenAnnotations {
     /// placed the body's clones and moves. A bare (moving) use, a `&mut`, a
     /// closure capture, a match on `x`, or a tuple binder keeps `.cloned()`.
     pub borrowed_loop_vars: HashSet<VarId>,
+    /// `let r = <lit>..<e` binders whose EVERY read is a single-variable
+    /// `for-in` head (#1857, the native twin of the wasm leg's #1400
+    /// `range_counting_vars`). The walker binds them as a bare
+    /// `std::ops::Range<i64>` and each head iterates `r.clone()` — two
+    /// scalars, never a materialized `Vec<i64>`. Decided at pipeline end by
+    /// `RangeCountingVarsPass`, so the set names exactly the shapes the
+    /// walker renders. A read anywhere else (indexed, measured, passed, a
+    /// tuple head) keeps the var on the materializing `range_expr` path.
+    pub range_counting_vars: HashSet<VarId>,
     /// §4 Stage 1 — the unified top-let storage attribute, computed once by
     /// `TopLetStoragePass` and asserted equal to every legacy predicate by
     /// the walker-side agreement verifier. Stage 2 makes consumers read THIS
@@ -52,6 +61,23 @@ pub struct CodegenAnnotations {
     /// `Debug`/`PartialEq`), like a `type`-declared record's `has_fn_fields` path.
     pub anon_records_with_fn: std::collections::HashSet<Vec<String>>,
     pub named_records: HashMap<Vec<String>, String>,
+    /// Almide name → the runtime's reserved Rust spelling for every
+    /// runtime-owned nominal type this program references (`Value` →
+    /// `AlmideValue`, `HttpRequest` → `AlmideHttpRequest`, …), minus the names
+    /// a user declaration claims. Computed by the walker's program setup from
+    /// `walker/runtime_owned.rs`; read by every type / record-literal /
+    /// pattern spelling site (#1821).
+    pub runtime_owned_types: HashMap<String, String>,
+    /// Post-flatten Rust type name -> the name the type was DECLARED with
+    /// (`almide_rt_m_Cfg` -> `Cfg`), for every module type the link flatten
+    /// renamed. The generated `AlmideRepr` impl prints THIS spelling, so a
+    /// module record reprs as `Cfg { a: 1, b: 2 }` — the same bytes the
+    /// entry program's `type Cfg` prints, and the same bytes wasm and the
+    /// interp print (#1836, C-009). Keyed by the renamed name because the
+    /// mangle is not invertible: `almide_rt_<mod>_<Type>` cannot be split
+    /// back when either part carries an underscore. A root decl keeps its
+    /// bare name and needs no entry. Populated by `mangle_qualified_type_names`.
+    pub repr_names: HashMap<String, String>,
     /// Field count of each nominal record type (name → number of fields).
     /// Used to decide whether a record destructure pattern needs a trailing
     /// `..` to cover fields the user didn't name.

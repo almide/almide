@@ -7,7 +7,7 @@
 // root and failed (`fs.stat("spec/…")` → "stat failed", fs.read_text → NOENT)
 // while native succeeded — the fs_stat_test vein (#790).
 //
-// The gate (tests/wasm_runtime_test.rs::wasm_cross_target_spec) runs this on BOTH
+// The gate (tests/wasm_runtime_cross_target.rs::wasm_cross_target_spec) runs this on BOTH
 // targets from the same cwd, so the relative path below names the same host file
 // on both legs. SELF-CONTAINED: the fixture creates its own relative directory
 // first (any writable cwd works — the host-arch determinism harness runs from a

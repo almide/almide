@@ -440,6 +440,13 @@ pub fn strip_never_err_unwraps(
 /// deferred-Const and printed all-zero results — fan_map_inline_lambda, 2026-07-03).
 /// Call-count-INVARIANT: one Module call becomes one Module call (`ok` is a constructor).
 /// A lambda with a non-`ok` exit (a real Err path) is left untouched and keeps walling.
+///
+/// PRECONDITION, enforced (#1865): "every exit is `ok(…)`" is NOT "can never Err" when
+/// the payload itself PROPAGATES — `(p) => fs.read_text(p)!` reaches here as
+/// `ok(unwrap(fs.read_text(p)))`, and stripping the `ok` hands `list.map` a String-
+/// returning closure whose `!` has no Result channel left to ride (the lifted body
+/// printed garbage bytes per element). Such a body is left as `fan.map`, which
+/// [`wall_fan_map_propagating_callbacks`] refuses honestly under its `!` consumer.
 pub fn rewrite_fan_map_pure(body: &mut IrExpr) {
     use almide_ir::{walk_expr_mut, IrMutVisitor};
     use almide_lang::types::constructor::TypeConstructorId;
@@ -484,6 +491,9 @@ pub fn rewrite_fan_map_pure(body: &mut IrExpr) {
             }
             let IrExprKind::Lambda { params, body, lambda_id } = &args[1].kind else { return };
             let Some(new_body) = strip_ok(body) else { return };
+            if lambda_body_propagates(&new_body) {
+                return;
+            }
             let new_lambda_ty = match &args[1].ty {
                 Ty::Fn { is_effect: _, params: ps, ret } => Ty::Fn { is_effect: false, params: ps.clone(), ret: Box::new(new_tail_ty(ret)) },
                 other => other.clone(),
@@ -516,6 +526,91 @@ pub fn rewrite_fan_map_pure(body: &mut IrExpr) {
         }
     }
     S.visit_expr_mut(body);
+}
+
+/// Does this lambda body PROPAGATE — carry an `Unwrap` (`!`) of its own, outside any
+/// nested lambda (a nested lambda's `!` rides that lambda's own Result channel)? A
+/// never-err `!` has already been stripped by `strip_never_err_unwraps` before any
+/// reader of this asks, so a hit means the body can genuinely exit through `err`.
+pub(crate) fn lambda_body_propagates(body: &IrExpr) -> bool {
+    use almide_ir::visit::{walk_expr, IrVisitor};
+    struct Find {
+        found: bool,
+    }
+    impl IrVisitor for Find {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if self.found || matches!(e.kind, IrExprKind::Lambda { .. }) {
+                return;
+            }
+            if matches!(e.kind, IrExprKind::Unwrap { .. }) {
+                self.found = true;
+                return;
+            }
+            walk_expr(self, e);
+        }
+    }
+    let mut f = Find { found: false };
+    f.visit_expr(body);
+    f.found
+}
+
+/// `e` as `fan.map(xs, <inline lambda whose body propagates>)!` / `?`: the callback.
+fn consumed_propagating_fan_map_callback(e: &IrExpr) -> Option<&IrExpr> {
+    let (IrExprKind::Try { expr: inner } | IrExprKind::Unwrap { expr: inner }) = &e.kind else {
+        return None;
+    };
+    let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &inner.kind
+    else {
+        return None;
+    };
+    if module.as_str() != "fan" || func.as_str() != "map" {
+        return None;
+    }
+    let callback = args.get(1)?;
+    let IrExprKind::Lambda { body, .. } = &callback.kind else { return None };
+    lambda_body_propagates(body).then_some(callback)
+}
+
+/// The #1865 wall: `fan.map(xs, <inline callback whose body propagates>)!` — the
+/// call CONSUMED by `!` (or `?`), in every callback spelling (`(p) =>
+/// fs.read_text(p)!`, the helper call, a compound body) — is refused by this
+/// brick, fn-wide and BEFORE any desugar. Exactly this shape is what
+/// `rewrite_fan_map_pure` used to strip into a String-returning `list.map`
+/// closure (nondeterministic garbage bytes per element); with the strip
+/// declined, the unwrap ladder walls the fn anyway — spanless, under a reason
+/// naming a match it desugared, not the construct the author wrote. The
+/// UN-consumed forms (`?? fb`, a match over the Result, an effect-fn VALUE
+/// callback) ride the self-host `fan.map` route with the callback's own Result
+/// channel intact and stay lowered. The structural leg (the default route) runs
+/// the shape byte-identically to native; the incumbent retires under #1696
+/// rather than growing a lowering. Span: the callback itself.
+pub(crate) fn wall_fan_map_propagating_callbacks(body: &IrExpr) -> Result<(), LowerError> {
+    use almide_ir::visit::{walk_expr, IrVisitor};
+    struct Find {
+        hit: Option<Option<almide_ir::Span>>,
+    }
+    impl IrVisitor for Find {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if self.hit.is_some() {
+                return;
+            }
+            if let Some(callback) = consumed_propagating_fan_map_callback(e) {
+                self.hit = Some(callback.span);
+                return;
+            }
+            walk_expr(self, e);
+        }
+    }
+    let mut f = Find { hit: None };
+    f.visit_expr(body);
+    match f.hit {
+        None => Ok(()),
+        Some(span) => Err(LowerError::at(
+            span,
+            "fan.map consumed by `!` with a propagating (!) callback body is not lowered by \
+             the incumbent leg (the structural leg serves it)",
+        )),
+    }
 }
 
 /// Rewrite a NEVER-ERR user `effect fn` `Named` CALL's result type from the lifted-ABI

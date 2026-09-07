@@ -39,14 +39,14 @@ impl Emitter<'_> {
         w: &IrExpr,
         pad: &IrExpr,
         at_start: bool,
-    ) -> Result<Option<SliceTy>, EmitError> {
-        self.lower(s, Some(STR))?;
+    ) -> ArmResult {
+        self.lower_arg(s, Some(STR), ArgMode::Borrow)?;
         let hs = self.hold_i32()?;
         self.f.instructions().local_set(hs);
-        self.lower(w, Some(INT))?;
+        self.lower_arg(w, Some(INT), ArgMode::Borrow)?;
         let hw = self.hold_i64()?;
         self.f.instructions().local_set(hw);
-        self.lower(pad, Some(STR))?;
+        self.lower_arg(pad, Some(STR), ArgMode::Borrow)?;
         let hp = self.hold_i32()?;
         let hl = self.hold_i32()?;
         let hk = self.hold_i32()?;
@@ -135,14 +135,14 @@ impl Emitter<'_> {
         }
         self.release_i64();
         self.release_i32();
-        Ok(Some(STR))
+        Ok(Some(Lowered::owned(STR)))
     }
 
     /// Rust str::lines verbatim: split at '\n', strip the '\r' of a
     /// "\r\n" pair, no entry for a trailing newline; a lone trailing
     /// '\r' stays in its line.
-    pub(crate) fn lower_string_lines(&mut self, s: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
-        self.lower(s, Some(STR))?;
+    pub(crate) fn lower_string_lines(&mut self, s: &IrExpr) -> ArmResult {
+        self.lower_arg(s, Some(STR), ArgMode::Borrow)?;
         let hs = self.hold_i32()?;
         let hl = self.hold_i32()?;
         let hk = self.hold_i32()?;
@@ -206,12 +206,12 @@ impl Emitter<'_> {
         for _ in 0..7 {
             self.release_i32();
         }
-        Ok(Some(SliceTy::List(self.types.intern(STR))))
+        Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(STR)))))
     }
 
     /// One-char strings in order (native s.chars()).
-    pub(crate) fn lower_string_chars(&mut self, s: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
-        self.lower(s, Some(STR))?;
+    pub(crate) fn lower_string_chars(&mut self, s: &IrExpr) -> ArmResult {
+        self.lower_arg(s, Some(STR), ArgMode::Borrow)?;
         let hs = self.hold_i32()?;
         let hl = self.hold_i32()?;
         let hk = self.hold_i32()?;
@@ -249,7 +249,7 @@ impl Emitter<'_> {
         for _ in 0..6 {
             self.release_i32();
         }
-        Ok(Some(SliceTy::List(self.types.intern(STR))))
+        Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(STR)))))
     }
 
     /// First char to_uppercase + rest verbatim (native capitalize).
@@ -258,7 +258,7 @@ impl Emitter<'_> {
     pub(crate) fn lower_string_capitalize(
         &mut self,
         s: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let Some(fi) = self.resolve_qualified("string.to_upper") else {
             return unsup("capitalize:to-upper-unlinked");
         };
@@ -268,10 +268,11 @@ impl Emitter<'_> {
         }
         let upper_idx = info.wasm_index;
         self.calls.insert(fi);
-        self.lower(s, Some(STR))?;
+        self.lower_arg(s, Some(STR), ArgMode::Borrow)?;
         let hs = self.hold_i32()?;
         let hw = self.hold_i32()?;
         let hb = self.hold_i32()?;
+        let hu = self.hold_i32()?;
         let mut i = self.f.instructions();
         i.local_set(hs);
         i.local_get(hs).i32_load(len_memarg()).i32_eqz();
@@ -290,8 +291,12 @@ impl Emitter<'_> {
         i.local_get(hs).i32_const(almide_layout::PAYLOAD as i32).i32_add();
         i.local_get(hw);
         i.memory_copy(0, 0);
-        i.local_get(hb).call(upper_idx);
-        // rest verbatim
+        // The first char moves into the linked to_upper (callee-owned);
+        // its RESULT is a block of this arm's making — parked in hu,
+        // consumed by the concat below, released after it.
+        i.local_get(hb).call(upper_idx).local_set(hu);
+        i.local_get(hu);
+        // rest verbatim — the same: parked in hb, released after the concat.
         i.local_get(hs).i32_load(len_memarg()).local_get(hw).i32_sub();
         i.call(F_ALLOC).local_set(hb);
         i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32).i32_add();
@@ -303,12 +308,14 @@ impl Emitter<'_> {
         i.local_get(hs).i32_load(len_memarg()).local_get(hw).i32_sub();
         i.memory_copy(0, 0);
         i.local_get(hb).call(F_CONCAT);
+        i.local_get(hu).call(F_DEC_FLAT);
+        i.local_get(hb).call(F_DEC_FLAT);
         i.end();
         let _ = i;
-        for _ in 0..3 {
+        for _ in 0..4 {
             self.release_i32();
         }
-        Ok(Some(STR))
+        Ok(Some(Lowered::owned(STR)))
     }
 
     /// One (char, count) tuple pushed onto the accumulator: the run's
@@ -335,12 +342,12 @@ impl Emitter<'_> {
 
     /// CHAR-level runs (native: equal adjacent chars fold into a
     /// (char, count) pair, in order).
-    pub(crate) fn lower_string_rle(&mut self, s: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    pub(crate) fn lower_string_rle(&mut self, s: &IrExpr) -> ArmResult {
         let ti = self.types.tuple(vec![STR, INT]);
         let def = self.types.tuple_def(ti);
         let (str_off, cnt_off) = (def.fields[0].1, def.fields[1].1);
         let tuple_size = def.size;
-        self.lower(s, Some(STR))?;
+        self.lower_arg(s, Some(STR), ArgMode::Borrow)?;
         let hs = self.hold_i32()?;
         let hl = self.hold_i32()?;
         let hk = self.hold_i32()?;
@@ -415,7 +422,7 @@ impl Emitter<'_> {
         for _ in 0..11 {
             self.release_i32();
         }
-        Ok(Some(SliceTy::List(self.types.intern(SliceTy::Tuple(ti)))))
+        Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(SliceTy::Tuple(ti))))))
     }
 
     /// First char's codepoint (native `chars().next()`): "" → none.
@@ -423,8 +430,8 @@ impl Emitter<'_> {
     pub(crate) fn lower_string_codepoint(
         &mut self,
         s: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
-        self.lower(s, Some(STR))?;
+    ) -> ArmResult {
+        self.lower_arg(s, Some(STR), ArgMode::Borrow)?;
         let hs = self.hold_i32()?;
         let hw = self.hold_i32()?;
         let hcp = self.hold_i32()?;
@@ -466,7 +473,7 @@ impl Emitter<'_> {
         for _ in 0..4 {
             self.release_i32();
         }
-        Ok(Some(SliceTy::Option(self.types.intern(INT))))
+        Ok(Some(Lowered::owned(SliceTy::Option(self.types.intern(INT)))))
     }
 
     /// First/last CHAR as some(String), none on empty (native
@@ -476,8 +483,8 @@ impl Emitter<'_> {
         &mut self,
         last: bool,
         s: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
-        self.lower(s, Some(STR))?;
+    ) -> ArmResult {
+        self.lower_arg(s, Some(STR), ArgMode::Borrow)?;
         let hs = self.hold_i32()?;
         let hp = self.hold_i32()?;
         let hl = self.hold_i32()?;
@@ -521,13 +528,13 @@ impl Emitter<'_> {
         for _ in 0..4 {
             self.release_i32();
         }
-        Ok(Some(SliceTy::Option(self.types.intern(STR))))
+        Ok(Some(Lowered::owned(SliceTy::Option(self.types.intern(STR)))))
     }
 
     /// Codepoint-wise reverse (native `chars().rev()`): each UTF-8
     /// sequence keeps its internal byte order, sequences swap ends.
-    pub(crate) fn lower_string_reverse(&mut self, s: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
-        self.lower(s, Some(STR))?;
+    pub(crate) fn lower_string_reverse(&mut self, s: &IrExpr) -> ArmResult {
+        self.lower_arg(s, Some(STR), ArgMode::Borrow)?;
         let hs = self.hold_i32()?;
         let hn = self.hold_i32()?;
         let hc = self.hold_i32()?;
@@ -567,6 +574,6 @@ impl Emitter<'_> {
         for _ in 0..5 {
             self.release_i32();
         }
-        Ok(Some(STR))
+        Ok(Some(Lowered::owned(STR)))
     }
 }

@@ -1,0 +1,27 @@
+# Release evidence seal — v0.61.1. IMMUTABLE: every [derived] field is
+# re-measured from the tag's tree by `scripts/release-seal.sh check`;
+# an edit that disagrees with the tag fails CI. [recorded] fields are
+# facts the tag cannot re-derive (fill them in before committing).
+
+[release]
+version = "0.61.1"
+tag = "v0.61.1"
+tag_commit = "d32f7b9ec658b1e313143cea6590e381e36e251e"
+date = "2026-09-01"
+url = "https://github.com/almide/almide/releases/tag/v0.61.1"
+
+[derived]
+cargo_version = "0.61.1"
+contracts_sha256 = "4ac0b52578caef1b97fca6fb8984df8cb6731fb21af4f5a075437ad7ec1d98e6"
+contracts_total = "328"
+contracts_flagged = "0"
+abstain_ledger_sha256 = "d26158c7ce5a4dfc2d77cee373e8bb6e2edb5d80308b98ab77d796e3953c06f6"
+abstain_ledger_entries = "26"
+wasm_cross_fixtures = "648"
+rust_toolchain = "1.94.0"
+wasmtime = "v47.0.3"
+
+[recorded]
+release_gate = "Patch train, owner-directed, no RC (#1484: every rider is a fix toward an existing contract or a deprecation window, no new language surface): guard-in-Unit-effect-main lowers on both wasm legs with the C-035 err frame (#1734/#1735), same-named cross-module convention dispatch (#1728), the wasm assign-site churn leak closed + --heap-cap enforced on the structural leg (#1729 increment 1), decode errors name the received kind with the path suffix (#1736), string.length deprecated with the machine rewrite to string.len (E052, #1675), the []-generics steer in declaration heads (#1742's family), nextest-archived CI shards (#1732), adapter 47.0.3 (#1749). Blocker gate at the tag: 0 (#1482). Interface diff v0.61.0 -> v0.61.1: identical per the differ (added=0 removed=0; #1488) - the deprecation annotation is stripped before comparing (a6464d22f, riding this train: marking a fn deprecated is not the break the window exists to prevent). Tag-tree CI: full battery green on the content-identical develop head; queue CI green on every rider. Fuzz: no dedicated tag dispatch - latest nightly differential fuzz 33375232245 (2026-08-31): findings=0 correctness=0 slow=0 across 7,814 generated programs at 311.6 prog/min (4/8 shards delivered their window; the red jobs are shard infrastructure, not findings - the Night verdict is the judge and it answered success)."
+assets = "6: almide-linux-x86_64.tar.gz, almide-linux-aarch64.tar.gz, almide-macos-x86_64.tar.gz, almide-macos-aarch64.tar.gz, almide-windows-x86_64.zip, almide-checksums.sha256 (no dossier asset on this patch tag - the qualification dossier is the minor-release Trust Spine's artifact)"
+known_problems = "None release-blocking. Standing, all visible-by-design: (1) 26 both-legs stdlib walls (E081 at check time, triaged on #1423); (2) the structural-only division and the incumbent retirement plan (#1696); (3) #1690: when both wasm legs wall, only the incumbent's wall text is surfaced; (4) the interface differ's surface excludes effect signatures (recorded on the v0.61.0 seal, unchanged); (5) #1729's remaining embedded-OOM shapes at the tag: listbuild_combinator/listbuild_prealloc/fft/strchurn rows in docs/benchmarks/wasm-runtime.txt (the flat_map and index-write fixes landed on develop AFTER this tag as PR #1761 and ride the next release; strchurn stays open); (6) structural embedded env.args() returns empty (#1716)."

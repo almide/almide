@@ -352,10 +352,11 @@ fn source_to_ir(path: &Path, source: &str) -> FrontendOutcome {
         // C-132 move-mode write-back — the SAME pre-lowering rewrite the pipeline
         // runs (see source_to_ir_with), so mir == ir on both sides.
         almide_ir::mut_param::lower_mut_params_move_mode(&mut ir);
-        // Guard → if restructure — the SAME pre-lowering pass the pipeline runs.
+        // Arg-block hoist, THEN guard → if restructure — the SAME order the
+        // pipeline runs (see source_to_ir_with, #1968).
+        almide_mir::lower::hoist_block_call_args(&mut ir);
         almide_mir::lower::desugar_fn_body_guards(&mut ir);
         almide_mir::lower::normalize_tail_err_raise_ifs(&mut ir);
-        almide_mir::lower::hoist_block_call_args(&mut ir);
         almide_mir::lower::desugar_loop_early_returns(&mut ir);
         almide_mir::lower::hoist_spread_call_bases(&mut ir);
         almide_mir::lower::hoist_record_literal_args(&mut ir);

@@ -30,7 +30,7 @@ impl Emitter<'_> {
         b: &IrExpr,
         c: &IrExpr,
         d: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         match func {
             "from_bytes_f32_le" => self.lower_matrix_from_bytes(false, a, b, c, d),
             "from_bytes_f16_le" => self.lower_matrix_from_bytes(true, a, b, c, d),
@@ -93,6 +93,14 @@ impl Emitter<'_> {
         i.i32_wrap_i64().call(F_ALLOC).local_set(ho);
         i.local_get(ho).local_get(hr).i32_wrap_i64().i32_store(slot_memarg(0));
         i.local_get(ho).local_get(hc).i32_wrap_i64().i32_store(slot_memarg(4));
+        // The cells start ZERO by contract (the OOB→zeros edge of the byte
+        // loaders fills nothing): `$alloc` hands back reused blocks
+        // unzeroed, so the constructor zeroes — the `bytes.new` lesson
+        // (#2004), met again the moment list spines were freed (#2010).
+        i.local_get(ho).i32_const(almide_layout::PAYLOAD as i32 + 8).i32_add();
+        i.i32_const(0);
+        i.local_get(hr).local_get(hc).i64_mul().i64_const(8).i64_mul().i32_wrap_i64();
+        i.memory_fill(0);
         let _ = i;
         Ok(ho)
     }
@@ -107,36 +115,46 @@ impl Emitter<'_> {
         offset: &IrExpr,
         rows: &IrExpr,
         cols: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
-        self.lower(data, Some(SliceTy::Scalar(Scalar::Bytes)))?;
+    ) -> ArmResult {
+        self.lower_arg(data, Some(SliceTy::Scalar(Scalar::Bytes)), ArgMode::Borrow)?;
         let hd = self.hold_i32()?;
         self.f.instructions().local_set(hd);
-        self.lower(offset, Some(INT))?;
+        self.lower_arg(offset, Some(INT), ArgMode::Borrow)?;
         let hoff = self.hold_i64()?;
         self.f.instructions().local_set(hoff);
-        self.lower(rows, Some(INT))?;
+        self.lower_arg(rows, Some(INT), ArgMode::Borrow)?;
         let hr = self.hold_i64()?;
         self.f.instructions().local_set(hr);
-        self.lower(cols, Some(INT))?;
+        self.lower_arg(cols, Some(INT), ArgMode::Borrow)?;
         let hc = self.hold_i64()?;
         self.f.instructions().local_set(hc);
         self.clamp0(hr);
         self.clamp0(hc);
+        // The shared element ceiling BEFORE any product is formed: with
+        // `cols = i64::MAX - 1` the `r*c*8` in `mat_alloc_out64` WRAPPED
+        // negative, passed its bound, allocated a tiny block and the fill
+        // loop trapped out of bounds where native took the C-161 abort
+        // (`Error: matrix dimensions too large` — differential fuzz, seed
+        // 544202078563 index 874). The division-form guard cannot wrap.
+        self.q_dims_guard(hr, hc);
         let ho = self.mat_alloc_out64(hr, hc)?;
         let hk = self.hold_i32()?;
         let hn = self.hold_i32()?;
         let width: i64 = if half { 2 } else { 4 };
         let mut i = self.f.instructions();
-        // in-bounds? offset >= 0 && offset + r*c*width <= len
+        // in-bounds? offset >= 0 && offset <= len && r*c*width <= len - offset
+        // — subtraction on the buffer side, never `offset + r*c*width`:
+        // an offset near i64::MAX wrapped that sum negative, passed the
+        // test and read a subnormal out of the wrong bytes (#1909). r and
+        // c are clamped >= 0 and `mat_alloc_out64` has already refused a
+        // product past the element ceiling, so `r*c*width` cannot wrap.
         i.local_get(hoff).i64_const(0).i64_ge_s();
-        i.local_get(hoff)
-            .local_get(hr)
-            .local_get(hc)
-            .i64_mul()
-            .i64_const(width)
-            .i64_mul()
-            .i64_add();
+        i.local_get(hoff);
         i.local_get(hd).i32_load(len_memarg()).i64_extend_i32_u();
+        i.i64_le_s().i32_and();
+        i.local_get(hr).local_get(hc).i64_mul().i64_const(width).i64_mul();
+        i.local_get(hd).i32_load(len_memarg()).i64_extend_i32_u();
+        i.local_get(hoff).i64_sub();
         i.i64_le_s().i32_and().if_(BlockType::Empty);
         i.i32_const(0).local_set(hk);
         i.local_get(hr).local_get(hc).i64_mul().i32_wrap_i64().local_set(hn);
@@ -169,7 +187,7 @@ impl Emitter<'_> {
             self.release_i64();
         }
         self.release_i32();
-        Ok(Some(SliceTy::Matrix))
+        Ok(Some(Lowered::owned(SliceTy::Matrix)))
     }
 
     /// select_rows_f32: rid clamps to 0; a row whose f32 window leaves
@@ -180,17 +198,17 @@ impl Emitter<'_> {
         offset: &IrExpr,
         cols: &IrExpr,
         ids: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
-        self.lower(data, Some(SliceTy::Scalar(Scalar::Bytes)))?;
+    ) -> ArmResult {
+        self.lower_arg(data, Some(SliceTy::Scalar(Scalar::Bytes)), ArgMode::Borrow)?;
         let hd = self.hold_i32()?;
         self.f.instructions().local_set(hd);
-        self.lower(offset, Some(INT))?;
+        self.lower_arg(offset, Some(INT), ArgMode::Borrow)?;
         let hoff = self.hold_i64()?;
         self.f.instructions().local_set(hoff);
-        self.lower(cols, Some(INT))?;
+        self.lower_arg(cols, Some(INT), ArgMode::Borrow)?;
         let hc = self.hold_i64()?;
         self.f.instructions().local_set(hc);
-        match self.lower(ids, None)? {
+        match self.lower_arg(ids, None, ArgMode::Borrow)? {
             SliceTy::List(h) if self.types.el(h) == INT => {}
             other => return unsup(&format!("matrix-select-ids:{other:?}")),
         }
@@ -272,7 +290,7 @@ impl Emitter<'_> {
         self.release_i64();
         self.release_i64();
         self.release_i32();
-        Ok(Some(SliceTy::Matrix))
+        Ok(Some(Lowered::owned(SliceTy::Matrix)))
     }
 
     /// from_q1_0_bytes / select_rows_q1_0: the Q1_0 decode on the
@@ -286,12 +304,12 @@ impl Emitter<'_> {
         offset: &IrExpr,
         dim_a: &IrExpr,
         dim_b: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let qv = self.work.helper(crate::work::Helper::Q10Val);
-        self.lower(data, Some(SliceTy::Scalar(Scalar::Bytes)))?;
+        self.lower_arg(data, Some(SliceTy::Scalar(Scalar::Bytes)), ArgMode::Borrow)?;
         let hd = self.hold_i32()?;
         self.f.instructions().local_set(hd);
-        self.lower(offset, Some(INT))?;
+        self.lower_arg(offset, Some(INT), ArgMode::Borrow)?;
         let hoff = self.hold_i64()?;
         self.f.instructions().local_set(hoff);
         self.clamp0(hoff);
@@ -300,10 +318,10 @@ impl Emitter<'_> {
         let hc = self.hold_i64()?;
         let hids = self.hold_i32()?;
         if select {
-            self.lower(dim_a, Some(INT))?;
+            self.lower_arg(dim_a, Some(INT), ArgMode::Borrow)?;
             self.f.instructions().local_set(hc);
             self.clamp0(hc);
-            match self.lower(dim_b, None)? {
+            match self.lower_arg(dim_b, None, ArgMode::Borrow)? {
                 SliceTy::List(h) if self.types.el(h) == INT => {}
                 other => return unsup(&format!("matrix-q1-ids:{other:?}")),
             }
@@ -316,9 +334,9 @@ impl Emitter<'_> {
                 .i64_extend_i32_u()
                 .local_set(hr);
         } else {
-            self.lower(dim_a, Some(INT))?;
+            self.lower_arg(dim_a, Some(INT), ArgMode::Borrow)?;
             self.f.instructions().local_set(hr);
-            self.lower(dim_b, Some(INT))?;
+            self.lower_arg(dim_b, Some(INT), ArgMode::Borrow)?;
             self.f.instructions().local_set(hc);
             self.clamp0(hr);
             self.clamp0(hc);
@@ -329,8 +347,13 @@ impl Emitter<'_> {
         let hrow = self.hold_i64()?; // rid (selector) / row index as i64
         let hj = self.hold_i32()?;
         let hrb = self.hold_i64()?; // row_bytes
+        // #1787: a selected ROW is `cols / 128` whole blocks (native's row
+        // schedule); the trailing `cols mod 128` elements are 0.0. The
+        // global-k schedule below is right only for the full loader.
+        let hcr = self.hold_i64()?; // cols rounded down to the block
         let mut i = self.f.instructions();
         i.local_get(hc).i64_const(128).i64_div_s().i64_const(18).i64_mul().local_set(hrb);
+        i.local_get(hc).i64_const(128).i64_div_s().i64_const(128).i64_mul().local_set(hcr);
         i.i32_const(0).local_set(hi);
         i.block(BlockType::Empty).loop_(BlockType::Empty);
         i.local_get(hi).local_get(hr).i32_wrap_i64().i32_ge_u().br_if(1);
@@ -366,10 +389,22 @@ impl Emitter<'_> {
             .i32_const(8)
             .i32_mul();
         i.i32_add();
-        // k = rid*cols + j (global schedule)
-        i.local_get(hd).local_get(hoff);
-        i.local_get(hrow).local_get(hc).i64_mul().local_get(hj).i64_extend_i32_u().i64_add();
-        i.call(qv);
+        if select {
+            // j < cr: k = rid*cr + j on the ROW schedule; else the zero tail.
+            i.local_get(hj).i64_extend_i32_u().local_get(hcr).i64_lt_u();
+            i.if_(BlockType::Result(ValType::F64));
+            i.local_get(hd).local_get(hoff);
+            i.local_get(hrow).local_get(hcr).i64_mul().local_get(hj).i64_extend_i32_u().i64_add();
+            i.call(qv);
+            i.else_();
+            i.i64_const(0).f64_reinterpret_i64();
+            i.end();
+        } else {
+            // k = rid*cols + j (global schedule)
+            i.local_get(hd).local_get(hoff);
+            i.local_get(hrow).local_get(hc).i64_mul().local_get(hj).i64_extend_i32_u().i64_add();
+            i.call(qv);
+        }
         i.f64_store(mat_elem());
         i.local_get(hj).i32_const(1).i32_add().local_set(hj);
         i.br(0).end().end();
@@ -379,6 +414,7 @@ impl Emitter<'_> {
         i.local_get(ho);
         let _ = i;
         self.release_i64();
+        self.release_i64();
         self.release_i32();
         self.release_i64();
         self.release_i32();
@@ -388,7 +424,7 @@ impl Emitter<'_> {
         self.release_i64();
         self.release_i64();
         self.release_i32();
-        Ok(Some(SliceTy::Matrix))
+        Ok(Some(Lowered::owned(SliceTy::Matrix)))
     }
 
     /// select_rows_q8_0_dq: 34-byte blocks of [fp16 scale][32 int8
@@ -400,19 +436,19 @@ impl Emitter<'_> {
         offset: &IrExpr,
         cols: &IrExpr,
         ids: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
-        self.lower(data, Some(SliceTy::Scalar(Scalar::Bytes)))?;
+    ) -> ArmResult {
+        self.lower_arg(data, Some(SliceTy::Scalar(Scalar::Bytes)), ArgMode::Borrow)?;
         let hd = self.hold_i32()?;
         self.f.instructions().local_set(hd);
-        self.lower(offset, Some(INT))?;
+        self.lower_arg(offset, Some(INT), ArgMode::Borrow)?;
         let hoff = self.hold_i64()?;
         self.f.instructions().local_set(hoff);
         self.clamp0(hoff);
-        self.lower(cols, Some(INT))?;
+        self.lower_arg(cols, Some(INT), ArgMode::Borrow)?;
         let hc = self.hold_i64()?;
         self.f.instructions().local_set(hc);
         self.clamp0(hc);
-        match self.lower(ids, None)? {
+        match self.lower_arg(ids, None, ArgMode::Borrow)? {
             SliceTy::List(h) if self.types.el(h) == INT => {}
             other => return unsup(&format!("matrix-q8-ids:{other:?}")),
         }
@@ -505,7 +541,7 @@ impl Emitter<'_> {
         for _ in 0..5 {
             self.release_i32();
         }
-        Ok(Some(SliceTy::Matrix))
+        Ok(Some(Lowered::owned(SliceTy::Matrix)))
     }
 
     /// select_rows (plain): rid clamps to 0; rid < rows copies the row,
@@ -514,9 +550,9 @@ impl Emitter<'_> {
         &mut self,
         m: &IrExpr,
         ids: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let (hm, hr, hc) = self.mat_open(m)?;
-        match self.lower(ids, None)? {
+        match self.lower_arg(ids, None, ArgMode::Borrow)? {
             SliceTy::List(h) if self.types.el(h) == INT => {}
             other => return unsup(&format!("matrix-select-ids:{other:?}")),
         }
@@ -582,6 +618,6 @@ impl Emitter<'_> {
         for _ in 0..3 {
             self.release_i32();
         }
-        Ok(Some(SliceTy::Matrix))
+        Ok(Some(Lowered::owned(SliceTy::Matrix)))
     }
 }

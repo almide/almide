@@ -51,7 +51,7 @@ impl NanoPass for RustLoweringPass {
 /// Vars whose `Assign` must STAY an `Assign` — their lvalue is not a direct
 /// Rust place, so the `xs = xs + [v]` → `xs.push(v)` rewrite would push onto
 /// a DISCARDED CLONE and silently lose the write:
-///   - shared cells (`SharedMut`): `xs.get().push(v)` (Closure v2 P6);
+///   - shared cells (`AlmideSharedMut`): `xs.get().push(v)` (Closure v2 P6);
 ///   - mutable TOP-LETS (`ModuleRc`): the Method renderer falls through
 ///     to the module-var READ accessor `UPPER.with(|c| (**c.borrow())
 ///     .clone()).push(v)` (#501). Left as an Assign, the walker emits

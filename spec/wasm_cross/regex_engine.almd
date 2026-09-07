@@ -8,8 +8,10 @@
 // contents incl. optional-miss, multibyte '.' / class on 日本語, anchors,
 // quantifiers incl. {n}/{n,}/{n,m} braces (#845), replace (verbatim), split
 // edges, full_match, find_all, empty
-// alternation arms (leading/trailing/middle), and replace over empty matches at
-// end-of-string (native end-index guard).
+// alternation arms (leading/trailing/middle), replace over empty matches at
+// end-of-string (native end-index guard), and the backtracking set (#1927):
+// group backtracking, `\b` / `\B`, `(?m)`, `(?:` non-capturing groups, lazy
+// quantifiers, and full_match choosing the arm that reaches the end.
 import regex
 
 fn b2s(b: Bool) -> String = if b then "T" else "F"
@@ -172,4 +174,49 @@ fn main() -> Unit = {
   // {,m} unsupported = literal → T
   // unterminated = literal → T
   println(b2s(regex.is_match("a{2", "a{2")))
+  // ── backtracking set (#1927) ──
+  println(b2s(regex.is_match("^---- (.+) (stdout|stderr) ----$", "---- tests::a stdout ----")))
+  // greedy group backtracks into the alternation → T
+  println(olist(regex.captures("^---- (.+) (stdout|stderr) ----$", "---- tests::a stdout ----")))
+  // → [whole, tests::a, stdout]
+  println(b2s(regex.is_match("(^| )go\\s+test( |$)", " go test ./... ")))
+  // anchors inside group arms → T
+  println(b2s(regex.full_match("(a|ab)(c|bcd)", "abcd")))
+  // full_match retries the first arm → T
+  println(ostr(regex.find("(a|ab)c", "abc")))
+  // leftmost arm fails at c, second arm wins → abc
+  println(b2s(regex.is_match("\\bgo\\s+test\\b", " go test ./... ")))
+  // word boundaries → T
+  println(b2s(regex.is_match("\\bgo", "ago")))
+  // no boundary inside a word → F
+  println(b2s(regex.is_match("\\Bgo", "ago")))
+  // non-boundary → T
+  println(list.join(regex.find_all("\\b\\w", "ab cd_e f"), ","))
+  // word starts → [a, c, f]
+  println(b2s(regex.is_match("\\b本", "a本")))
+  // non-ASCII is not a word char → T
+  println(b2s(regex.is_match("(?m)^--- FAIL", "x\n--- FAIL: T")))
+  // multiline ^ → T
+  println(b2s(regex.is_match("^--- FAIL", "x\n--- FAIL: T")))
+  // no flag: ^ only at start → F
+  println(list.join(regex.find_all("(?m)\\w+$", "ab\ncd\nef"), ","))
+  // multiline $ → [ab, cd, ef]
+  println(olist(regex.captures("(?:x)(y)", "xy")))
+  // non-capturing group has no slot → [xy, y]
+  println(ostr(regex.find("a.*?b", "aXbYb")))
+  // lazy stops at the first b → aXb
+  println(ostr(regex.find("a.*b", "aXbYb")))
+  // greedy takes the last b → aXbYb
+  println(ostr(regex.find("a+?", "aaa")))
+  // lazy plus → a
+  println(ostr(regex.find("a??b", "ab")))
+  // lazy optional still consumes when needed → ab
+  println(b2s(regex.full_match("^---- (.+?) stdout ----$", "---- tests::a stdout ----")))
+  // lazy group with a required tail → T
+  println(regex.replace("(?:ab)+?", "ababab", "<>"))
+  // lazy rep under replace: one instance per match → <><><>
+  println(b2s(regex.full_match("(a*)*b", "aaab")))
+  // nested star terminates (empty instance ends the loop) → T
+  // empty instance is still counted → [, ]
+  println(olist(regex.captures("(a*)*", "")))
 }

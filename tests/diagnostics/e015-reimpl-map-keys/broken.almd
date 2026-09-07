@@ -1,0 +1,5 @@
+// A Map-typed signature (Map[String, Int] -> List[String]) mirroring
+// stdlib map.keys.
+fn keys(m: Map[String, Int]) -> List[String] = []
+
+fn main() -> Unit = println(int.to_string(list.len(keys(["a": 1]))))

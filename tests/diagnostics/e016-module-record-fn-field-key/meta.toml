@@ -1,0 +1,3 @@
+expects_code = "E016"
+expects_error = "Handler"
+hint_substring = ""

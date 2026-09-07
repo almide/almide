@@ -1,5 +1,5 @@
 // @contract: C-253, C-254
-// ALS-S5/E22 (docs/specs/als/expressions.md): place assignments — list
+// ALS-ST4/E22 (docs/specs/als/expressions.md): place assignments — list
 // element `xs[i] = v`, record field `p.x = v`, map key `m[k] = v` (an
 // upsert) — and the type-ascription expression `(e: T)`. Identical
 // observables on both targets. The OOB-write abort ruling is C-067's

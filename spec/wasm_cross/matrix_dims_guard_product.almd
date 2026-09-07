@@ -1,0 +1,14 @@
+// @contract: C-161
+// The over-ceiling guard is the DIVISION form (`cols > MAX / rows`) on both
+// targets, never the product: `ones(2, i64::MAX)` wrapped `r * c` on the
+// structural leg, passed the check and printed a shape where native takes
+// the unified `Error: matrix dimensions too large` abort (fuzz seed
+// 541740772277:11650, #1907). Same one line on stderr, exit 1, byte-identical.
+fn main() -> Unit = {
+  let res = matrix.zeros(2, 3)
+  let (r, c) = matrix.shape(res)
+  println("ok: ${r} x ${c}")
+  let big = matrix.ones(2, 9223372036854775807)
+  let (r2, c2) = matrix.shape(big)
+  println("unreachable: ${r2} x ${c2}")
+}

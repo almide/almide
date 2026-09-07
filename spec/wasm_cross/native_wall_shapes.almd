@@ -1,0 +1,30 @@
+// @contract: C-168
+// A value MOVED inside a string interpolation whose sibling part BORROWS the
+// same binding builds and prints the same bytes on both targets (#1829).
+//
+// `"${m.size} ${m.name} ${kind(m)}"` renders natively as ONE `format!` call,
+// and `format_args!` borrows every argument for the duration of the call —
+// the `m.size` part kept `m` borrowed while `kind(m)` (a by-value parameter,
+// `kind` destructures its argument) moved it: `check` accepted, the wasm leg
+// ran, native rustc rejected with E0505 — the same acceptance gap as the
+// `list.flatten` shape above, one level up in the interpolation. The clone
+// pass now applies the call guard's rule to the interpolation: a place part's
+// root that a value part moves is cloned at the move; parts without the
+// conflict emit exactly what they did.
+type Meta = { size: Int, name: String, is_dir: Bool }
+
+fn kind(m: Meta) -> String = match m {
+  Meta { is_dir, .. } => if is_dir then "dir" else "file"
+}
+
+fn main() -> Unit = {
+  let m = Meta { size: 3, name: "a.txt", is_dir: false }
+  // The shape that failed: a field read and a by-value call in one interpolation.
+  println("${m.size} ${m.name} ${kind(m)}")
+  // The whole value as a part beside the move: the part is the borrow itself.
+  let d = Meta { size: 0, name: "d", is_dir: true }
+  println("${d} ${kind(d)}")
+  // The move first, the borrow after: the order inside the list does not matter.
+  let f = Meta { size: 1, name: "f", is_dir: false }
+  println("${kind(f)} ${f.name}")
+}

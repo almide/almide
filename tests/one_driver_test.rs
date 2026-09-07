@@ -41,7 +41,7 @@ const ALLOWED: &[&str] = &[
 ///
 /// Note the count: #925 said "≥6 independent driver sequences" and the mechanical sweep
 /// found NINE. `classify_corpus_parts/classify_corpus_b.rs`,
-/// `render_wasm/tests_part1.rs`, and `wasm_runtime_test_parts/p4_corpus.rs` were not in
+/// `render_wasm/tests_part1.rs`, and `wasm_runtime_test_parts/interp_leg.rs` were not in
 /// the issue's inventory — which is itself the argument for a gate over a hand count.
 const MIGRATION_BACKLOG: &[&str] = &[];
 

@@ -83,3 +83,30 @@ fn http_set_header(resp: List[String], key: String, value: String) -> List[Strin
 fn __hr_set(resp: List[String], i: Int, key: String, value: String) -> List[String] = if i >= list.len(resp) then resp + [key, value]
 else if __hr_ci_eq(list.get(resp, i) ?? "", key) then list.set(resp, i + 1, value)
 else __hr_set(resp, i + 2, key, value)
+
+// ── Read side (#1791) — the self-hosted twins of the native accessors. ──
+fn http_status_code(resp: List[String]) -> Int = int.parse(list.get(resp, 0) ?? "0") ?? 0
+
+// Every value of one field, in slot order (the native Vec keeps wire order).
+fn http_header_values(resp: List[String], key: String) -> List[String] = __hr_all(resp, 2, key, [])
+
+fn __hr_all(resp: List[String], i: Int, key: String, acc: List[String]) -> List[String] = if i >= list.len(resp) then acc
+else if __hr_ci_eq(list.get(resp, i) ?? "", key) then __hr_all(resp, i + 2, key, acc + [
+  list.get(resp, i + 1) ?? ""
+])
+else __hr_all(resp, i + 2, key, acc)
+
+// ASCII-lowercase a field name through the same per-char fold get_header
+// uses, so the map key spelling agrees with native's to_ascii_lowercase.
+fn __hr_lower(s: String) -> String = string.chars(s) |> list.map((c) => __hr_fold(c)) |> list.join("")
+
+// Lowercased-name map, FIRST value wins (the get_header rule).
+fn http_headers(resp: List[String]) -> Map[String, String] = __hr_map(resp, 2, map.new())
+
+fn __hr_map(resp: List[String], i: Int, acc: Map[String, String]) -> Map[String, String] = if i >= list.len(resp) then acc
+else {
+  let k = __hr_lower(list.get(resp, i) ?? "")
+  let next = if map.contains(acc, k) then acc
+  else map.set(acc, k, list.get(resp, i + 1) ?? "")
+  __hr_map(resp, i + 2, next)
+}

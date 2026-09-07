@@ -1,0 +1,3 @@
+expects_code = "E009"
+expects_error = "cannot mutate immutable binding 'xs'"
+hint_substring = "Use 'var xs = ...' to declare a mutable variable"

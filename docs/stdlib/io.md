@@ -6,56 +6,99 @@ Standard I/O. import io, effect.
 
 Read a single line from standard input
 
-```almd
-let name = io.read_line()
+```almd check
+import io
+
+effect fn main() -> Unit = {
+  let name = io.read_line()
+  println("Hello, ${name}!")
+}
 ```
 
 ### `io.print(s: String) -> Unit`
 
 Print a string to stdout without a trailing newline
 
-```almd
-io.print("Enter name: ")
+```almd run
+import io
+
+effect fn main() -> Unit = {
+  io.print("Enter name: ")
+  println("Alice")
+}
+```
+```output
+Enter name: Alice
 ```
 
 ### `io.read_all() -> String`
 
 Read all of standard input as a single string
 
-```almd
-let input = io.read_all()
+```almd check
+import io
+
+effect fn main() -> Unit = {
+  let input = io.read_all()
+  println(int.to_string(string.len(input)))
+}
 ```
 
 ### `io.write_bytes(data: List[Int]) -> Unit`
 
 Write raw bytes to stdout (no UTF-8 conversion)
 
-```almd
-io.write_bytes([0x50, 0x34, 0x0A])
+```almd run
+import io
+
+effect fn main() -> Unit = {
+  io.write_bytes([0x50, 0x34, 0x0A])
+}
+```
+```output
+P4
 ```
 
 ### `io.write(data: Bytes) -> Unit`
 
 Write a Bytes buffer to stdout (zero-copy, buffered)
 
-```almd
-io.write(buf)
+```almd run
+import io
+
+effect fn main() -> Unit = {
+  let buf = bytes.from_string("Hi\n")
+  io.write(buf)
+}
+```
+```output
+Hi
 ```
 
 ### `io.read_byte() -> Int`
 
 Read a single byte from stdin (returns -1 on EOF).
 
-```almd
-let b = io.read_byte()
+```almd check
+import io
+
+effect fn main() -> Unit = {
+  let b = io.read_byte()
+  println(if b == -1 then "EOF" else int.to_string(b))
+}
 ```
 
 ### `io.read_n_bytes(n: Int) -> List[Int]`
 
 Read N bytes from stdin (may return fewer on EOF).
 
-```almd
-let bytes = io.read_n_bytes(4)
+```almd check
+import io
+
+effect fn main() -> Unit = {
+  let bytes = io.read_n_bytes(4)
+  println("${bytes}")
+}
 ```
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->

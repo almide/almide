@@ -1,0 +1,8 @@
+// ALS-B8: a literal capacity is a compile-time size.
+@bounded
+fn room() -> Int = {
+  let xs: List[Int] = list.with_capacity(4)
+  list.len(xs)
+}
+
+fn main() -> Unit = println("${room()}")

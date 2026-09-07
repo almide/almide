@@ -1,0 +1,84 @@
+// @contract: C-327
+// #1423 stage 4: the pure pending-self-host rows of hex, html, path and
+// value close on the STRUCTURAL leg. Each fn prints over its documented
+// edge cases; native is the oracle and every wasm leg must match byte
+// for byte. hex.decode joins the sum-builder whitelist tier; the html
+// and path newtypes (`mod type SafeHtml = String`) erase to their payload
+// before lowering; the value case transforms are a native shallow key
+// rename around the self-host key builders.
+import hex
+import html
+import json
+import path
+
+fn show_hex(s: String) -> String = match hex.decode(s) {
+  ok(b) => "ok ${hex.encode(b)} len=${bytes.len(b)}",
+  err(e) => "err ${e}",
+}
+
+fn show_path(s: String) -> String = match path.from_string(s) {
+  ok(p) => "ok ${path.to_string(p)}",
+  err(e) => "err ${e}",
+}
+
+fn main() -> Unit = {
+  // hex.decode: both cases, mixed, empty, odd length, first bad char
+  println(show_hex(""))
+  println(show_hex("00ff"))
+  println(show_hex("00FF"))
+  println(show_hex("aBcD01"))
+  println(show_hex("abc"))
+  println(show_hex("zz"))
+  println(show_hex("0g"))
+  println(show_hex("ab cd"))
+  // html.escape: the five metacharacters, & first (no double escape)
+  println(html.to_string(html.escape("<a href=\"x\">Tom & Jerry's</a>")))
+  println(html.to_string(html.escape("&lt;")))
+  println("[${html.to_string(html.escape(""))}]")
+  println(html.to_string(html.raw("<br>")))
+  println("[${html.to_string(html.empty())}]")
+  let frag = ["<b>", "x&y"] |> list.map((i) => html.escape(i)) |> list.fold(html.empty(), (acc, f) => html.concat(acc, f))
+  println(html.to_string(html.concat(frag, html.raw("<hr>"))))
+  // path.from_string: a `..` segment anywhere rejects, `..x` does not
+  println(show_path("a/b"))
+  println(show_path("../x"))
+  println(show_path("a/../b"))
+  println(show_path("a/..b"))
+  println(show_path(".."))
+  println(show_path("[${""}]"))
+  println(show_path("/abs/./x/"))
+  println(path.to_string(path.trusted("../x")))
+  // value.to_camel_case: shallow, ASCII, native's flag walk
+  let snake = value.object([
+    ("user_name", value.str("Alice")),
+    ("created_at", value.int(2024)),
+    ("already", value.bool(true)),
+    ("_lead", value.null()),
+    ("trail_", value.float(1.5)),
+    ("a__b", value.int(1)),
+    ("x_1y", value.int(2)),
+    ("Mixed_Case", value.int(3)),
+    ("outer_key", value.object([("inner_key", value.int(4))]))
+  ])
+  println(json.stringify(value.to_camel_case(snake)))
+  println(json.stringify(value.to_camel_case(value.int(3))))
+  println(json.stringify(value.to_camel_case(value.array([
+    value.object([("a_b", value.int(1))])
+  ]))))
+  println(json.stringify(value.to_camel_case(value.object([]))))
+  // value.to_snake_case: an uppercase past byte 0 gains `_`, lowers
+  let camel = value.object([
+    ("userName", value.str("Alice")),
+    ("createdAt", value.int(2024)),
+    ("already", value.bool(true)),
+    ("HTTPCode", value.int(200)),
+    ("A", value.int(1)),
+    ("aB1C", value.int(2)),
+    ("outerKey", value.object([("innerKey", value.int(4))]))
+  ])
+  println(json.stringify(value.to_snake_case(camel)))
+  println(json.stringify(value.to_snake_case(value.str("Keep"))))
+  // the source objects are untouched by the rename
+  println(json.stringify(snake))
+  println(json.stringify(camel))
+}

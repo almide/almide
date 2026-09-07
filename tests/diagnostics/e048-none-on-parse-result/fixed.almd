@@ -1,0 +1,9 @@
+// `none` aimed at `int.parse`'s Result: the failure arm exists, but in the
+// Result family it is `err(..)` and CARRIES the error value — the hint's
+// asymmetric-pair note is the variant pinned here.
+fn parse_or_zero(s: String) -> Int = match int.parse(s) {
+  err(_) => 0,
+  ok(v) => v,
+}
+
+fn main() -> Unit = println(int.to_string(parse_or_zero("7")))

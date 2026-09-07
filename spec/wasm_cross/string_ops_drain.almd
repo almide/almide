@@ -4,7 +4,7 @@
 //   compile_byte_predicate_range (via is_digit), compile_is_digit,
 //   compile_is_whitespace, compile_cmp (via < on String).
 //
-// The gate (tests/wasm_runtime_test.rs::wasm_cross_target_spec) runs this on BOTH
+// The gate (tests/wasm_runtime_cross_target.rs::wasm_cross_target_spec) runs this on BOTH
 // native and wasm and asserts byte-identical stdout. Native is the oracle.
 //
 // Probe matrix is aimed at the STRUCTURAL differences between the std-backed

@@ -1,0 +1,13 @@
+// @wall: http.get
+// The http string client opens an OS socket — outside every wasm leg's
+// host surface (declared native-only in proofs/target-availability.toml;
+// the embedded lane's op 43..47 service is a RUN-path story, the BUILD
+// path refuses for stock artifacts). Pinned so a lowering change that
+// starts accepting the call without the capability machinery fails loudly.
+// Graduates with #1710's stock/component client leg.
+import http
+
+effect fn main() -> Unit = {
+  let body = http.get("http://127.0.0.1:1/none")!
+  println(body)
+}

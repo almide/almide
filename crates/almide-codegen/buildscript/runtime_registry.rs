@@ -118,6 +118,14 @@ pub fn generate(workspace_root: &Path, out_dir: &Path) {
     write_runtime_fn_modes(&rust_entries, out_dir);
 
     println!("cargo:rerun-if-changed={}", rust_dir.display());
+    // The shared runtime cores (#1715): runtime/rs modules `include!` files
+    // from this crate (http.rs -> http_client_core.rs), and the resolver
+    // above inlines them — so an edit there must re-embed too, or the
+    // committed rust_runtime.rs silently desyncs (the #419 class).
+    println!(
+        "cargo:rerun-if-changed={}",
+        workspace_root.join("crates/almide-rt-core/src").display()
+    );
 }
 
 /// Embed the almide-kernel crate as an inlinable `mod almide_kernel`.

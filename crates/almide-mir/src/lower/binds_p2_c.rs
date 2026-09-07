@@ -535,38 +535,7 @@ impl LowerCtx {
                 dst = self.try_lower_option_match_value(subject, arms, ty);
             }
             if let Some(obj) = dst {
-                self.value_of.insert(var, obj);
-                if !self.live_heap_handles.contains(&obj) {
-                    self.live_heap_handles.push(obj);
-                }
-                if is_variant_ty(ty) {
-                    self.seed_variant_param(obj, ty);
-                } else if crate::lower::is_heap_elem_list_ty(ty)
-                    || matches!(ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
-                        if a.len() == 1 && !is_heap_ty(&a[0]))
-                {
-                    // A List-valued merge binds as a REAL populated block —
-                    // register it so later element reads take the executing path.
-                    self.materialized_lists.insert(obj);
-                } else if let Some((_, tys)) = self.aggregate_field_tys(ty) {
-                    // A RECORD/TUPLE-valued merge is likewise a REAL same-layout
-                    // block: every arm materializes + Consumes its value (a
-                    // some/ok-arm payload is the variant's real payload block, a
-                    // fallback arm a constructed literal). Seed its READ shape +
-                    // heap-slot MASK + recursive drop route exactly like the
-                    // Named-call bind (`seed_call_named_heap_read_shape`): without
-                    // materialized_aggregates a heap FIELD read of the bound var
-                    // fell to the container-grain Dup — the record HEADER printed
-                    // as the String (the #1287 wasm blanks) — and the bare flat
-                    // scope-end Drop leaked the record's heap fields.
-                    let heap_slots: Vec<usize> =
-                        (0..tys.len()).filter(|&i| is_heap_ty(&tys[i])).collect();
-                    self.materialized_aggregates.insert(obj);
-                    self.record_masks.insert(obj, heap_slots);
-                    if let Some(name) = self.record_or_anon_drop_type_name(ty) {
-                        self.value_drops.entry(obj).or_default().named_route = Some(name);
-                    }
-                }
+                self.seed_bound_heap_match_merge(var, ty, obj);
                 return Ok(());
             }
             self.ops.truncate(mark);
@@ -579,6 +548,43 @@ impl LowerCtx {
              computed in this brick (would bind an empty deferred heap value); \
              the merged result has no sound scope-end drop in the flat certificate",
         ))
+    }
+
+    /// Verbatim from [`Self::lower_bind_heap_match`]: bind + scope-track the
+    /// merge object and seed its read shape / drop route by result type.
+    fn seed_bound_heap_match_merge(&mut self, var: VarId, ty: &Ty, obj: ValueId) {
+        self.value_of.insert(var, obj);
+        if !self.live_heap_handles.contains(&obj) {
+            self.live_heap_handles.push(obj);
+        }
+        if is_variant_ty(ty) {
+            self.seed_variant_param(obj, ty);
+        } else if crate::lower::is_heap_elem_list_ty(ty)
+            || matches!(ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
+                if a.len() == 1 && !is_heap_ty(&a[0]))
+        {
+            // A List-valued merge binds as a REAL populated block —
+            // register it so later element reads take the executing path.
+            self.materialized_lists.insert(obj);
+        } else if let Some((_, tys)) = self.aggregate_field_tys(ty) {
+            // A RECORD/TUPLE-valued merge is likewise a REAL same-layout
+            // block: every arm materializes + Consumes its value (a
+            // some/ok-arm payload is the variant's real payload block, a
+            // fallback arm a constructed literal). Seed its READ shape +
+            // heap-slot MASK + recursive drop route exactly like the
+            // Named-call bind (`seed_call_named_heap_read_shape`): without
+            // materialized_aggregates a heap FIELD read of the bound var
+            // fell to the container-grain Dup — the record HEADER printed
+            // as the String (the #1287 wasm blanks) — and the bare flat
+            // scope-end Drop leaked the record's heap fields.
+            let heap_slots: Vec<usize> =
+                (0..tys.len()).filter(|&i| is_heap_ty(&tys[i])).collect();
+            self.materialized_aggregates.insert(obj);
+            self.record_masks.insert(obj, heap_slots);
+            if let Some(name) = self.record_or_anon_drop_type_name(ty) {
+                self.value_drops.entry(obj).or_default().named_route = Some(name);
+            }
+        }
     }
 
     /// Extracted from `Self::lower_bind_heap` (pattern-2 uniform-arm split, cog reduction):

@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
-# The fmt gate (#919): spec/ + examples/ stay formatted. The DDD gauntlet's
-# REJECT cells are deliberately-invalid programs (their front rejection is
-# pinned by the gauntlet manifest), so `almide fmt --check` cannot parse
-# them and would fail the gate on files whose brokenness is the point. The
-# manifest's reject rows are the SINGLE exclusion source — the same ruling
-# the fmt-corpus test applies (crates/almide-tools/tests/fmt_corpus_test.rs).
+# The fmt gate (#919): spec/ + examples/ + tools/almide-gates/ stay formatted.
+# The DDD gauntlet's REJECT cells are deliberately-invalid programs (their
+# front rejection is pinned by the gauntlet manifest), so `almide fmt --check`
+# cannot parse them and would fail the gate on files whose brokenness is the
+# point. The manifest's reject rows are the SINGLE exclusion source — the
+# same ruling the fmt-corpus test applies
+# (crates/almide-tools/tests/fmt_corpus_test.rs).
+#
+# tools/almide-gates/ (#1855): the dogfood project CI runs as a gate had no
+# fmt step of its own and drifted to 10 of 16 files. It is an ordinary
+# project (not splice-context), so it is formatted under the same full
+# ruling as spec/ — import edits included.
 set -euo pipefail
 export LC_ALL=C
 cd "$(dirname "$0")/.."
@@ -22,7 +28,7 @@ rejects=$(grep $'^reject\t' "$MANIFEST" | awk -F'\t' '{print $3}')
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 list="$work/files"
-find spec examples -name '*.almd' > "$work/all"
+find spec examples tools/almide-gates -name '*.almd' > "$work/all"
 sort "$work/all" -o "$work/all"
 : > "$list"
 while IFS= read -r f; do

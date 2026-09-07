@@ -1,0 +1,33 @@
+name: Ledger counts (nightly)
+
+# The aggregate counts the generated docs quote (README claims + stats,
+# proofs/STAGE-STATUS.md, docs/contracts/README.md,
+# docs/contracts/conformance.md) are STAMPED in proofs/ledger-counts.toml and
+# rendered from there: deriving them per PR made every fixture or contract PR
+# rewrite the same "N fixtures / N contracts" lines, so any two conflicted at
+# the merge queue. The PR gates check structure only and require the dated
+# block to match the record; THIS run re-measures the counts and goes red when
+# the record has drifted from the tree. Red means "refresh" —
+# `bash scripts/gen-ledger-counts.sh`, commit the ledger with the four docs —
+# the fuzz-night ethos (a finding to act on), never a reason for a fixture PR
+# to touch the totals. Pure grep/awk/python3 over the checkout: no build.
+
+on:
+  schedule:
+    # 03:40 UTC daily — clear of the fuzz night (03:00), conformance (04:30)
+    # and the mutation sweep (05:15).
+    - cron: "40 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  drift:
+    name: Stamped totals vs the tree
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Re-measure every stamped count (red = refresh needed, not a PR fix)
+        run: bash scripts/check-ledger-counts.sh

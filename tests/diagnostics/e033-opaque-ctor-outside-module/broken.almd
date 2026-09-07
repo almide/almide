@@ -1,0 +1,9 @@
+// A `mod type` alias is a nominal newtype whose constructor belongs to its
+// defining module: building one from the entry file is E033 — go through
+// the module's public API instead.
+import self.token as tk
+
+fn main() -> Unit = {
+  let t = Token("raw")
+  println(tk.text(t))
+}

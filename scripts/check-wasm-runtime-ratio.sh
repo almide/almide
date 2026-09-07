@@ -84,7 +84,7 @@ HDR
     echo "date    = $(date +%F)"
     echo "machine = $(uname -m) $(uname -s) (local stamp; ratios are the gated quantity)"
     echo
-    for name in nbody spectralnorm binarytrees fasta fannkuchredux mandelbrot onebrc fft strchurn listbuild_append listbuild_combinator listbuild_prealloc; do
+    for name in nbody spectralnorm binarytrees fasta fannkuchredux mandelbrot onebrc fft strchurn listbuild_append listbuild_combinator listbuild_prealloc mapbuild; do
       n=$(median_of "$(bench_native "$name")")
       w_out=$(bench_wasm "$name")
       w=$(median_of "$w_out")

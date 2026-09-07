@@ -55,6 +55,16 @@ patterns = [
   # tier, same class as random_get/read_n_bytes — bounded, not architectural.
   "capability: env.set",
   "capability: HOF map.fold",
+  # SURFACED BY the #1844 Result-handle block (`prim.handle` of a Result is
+  # now the cap-as-tag slot the fs floors hand back), not introduced by it:
+  # the fs fixtures used to abstain at the handle and now get past it to the
+  # next vfs prim the overlay does not serve — a directory listing, a stat,
+  # a bytes read, the fallible fold callback. Sandboxed-fs glue at the
+  # argv/env tier, bounded work each.
+  "capability: fs.__fallible_fold_lines",
+  # One prim deeper again once the overlay served read_dir / path_filestat /
+  # read_bytes_file: the rename floor is the next bounded piece of vfs glue.
+  "capability: prim.rename",
   # SURFACED BY the #1416 ctor glue (map.new/set.new/with_capacity), not
   # introduced by it: map_filter / map_set_typechange used to abstain at
   # `prim.alloc_map` (HEAP_BOUNDARY, first-hit) and now get past the
@@ -104,4 +114,30 @@ patterns = [
   # was reached with an argument shape the block heap never handed out) —
   # dispatch-tier strictness, one level in from the heap boundary.
   "capability: prim.store64 with a non-address",
+  # A load through an address the arena never handed out (a matrix byte
+  # decode over a value the interp holds as a List — C-341's huge-offset
+  # fixture): the same boundary, one instruction earlier.
+  "capability: prim.load8 with a non-address",
+  # html.* (#1817 / #1844): stdlib/html.almd is not a self_host_registry
+  # source, so the interp pool has no body for it while the structural leg
+  # serves it by newtype erasure. Registering the source (or a pool-side
+  # single-variant unwrap of `mod type SafeHtml`) is dispatch glue.
+  "capability: html.escape",
+  # url.* (#1837 / #1844): same shape as html — stdlib/url.almd is not a
+  # self_host_registry source, so the pool has no body; registering it is
+  # dispatch glue.
+  "capability: url.parse",
+  # A Unit-returning bytes writer over a TEMPORARY receiver (#1849,
+  # bytes_temp_receiver): inplace.rs models the family from the name for a
+  # VARIABLE receiver (the write-back has a binding); a call-result receiver
+  # has none, and native's semantics are evaluate-the-arguments-and-discard —
+  # dispatch glue (mutate the temporary value, drop it), no new model.
+  "capability: in-place container mutation",
+  # An opaque newtype's constructor call (#1835): `mod type Value = String`
+  # lowers `Value(s)` as a Named call on the newtype's identity
+  # (`self.Value`, `m.Token`). The value IS its payload — both backends erase
+  # the ctor call and the ctor pattern to the inner value — so the interp arm
+  # is an identity on the argument plus a pass-through in `try_match_ctor`:
+  # dispatch glue, not a new evaluation model.
+  "capability: named call `self.Value`",
 ]

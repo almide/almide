@@ -33,7 +33,7 @@ use std::sync::OnceLock;
 // ─────────────────────────── execution substrate ───────────────────────────
 // Self-contained copies of the byte-gate helpers (each file under tests/ is its
 // own crate, so siblings cannot be imported). Mirrors
-// tests/wasm_runtime_test.rs:{17,1399,1425}.
+// tests/wasm_runtime_test_parts/common.rs.
 
 fn almide_bin() -> String {
     if let Ok(bin) = std::env::var("ALMIDE_BIN") {

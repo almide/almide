@@ -1,0 +1,32 @@
+name: Clippy baseline freshness
+
+# The strict half of the clippy warning ratchet (#1462). On a PR the gate
+# treats a count BELOW scripts/clippy-warnings-baseline.txt as a notice — a
+# PR measures itself merged with develop, so a warning removed by a sibling
+# PR drops every open PR under the file at once. Here, nightly on develop,
+# the same gate runs with CLIPPY_RATCHET_STRICT=1: a stale baseline is red,
+# and the fix is `CLIPPY_RATCHET_WRITE=1 bash scripts/check-clippy-warnings.sh`
+# committed in a PR. Red here is a finding, never a broken build.
+
+on:
+  schedule:
+    - cron: "10 3 * * *"
+  workflow_dispatch:
+
+env:
+  RUST_TOOLCHAIN: "1.94.0"
+
+jobs:
+  strict:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: linux-clippy-${{ env.RUST_TOOLCHAIN }}
+      - name: Clippy warning ratchet, strict (a count below the file is red here)
+        run: CLIPPY_RATCHET_STRICT=1 bash scripts/check-clippy-warnings.sh

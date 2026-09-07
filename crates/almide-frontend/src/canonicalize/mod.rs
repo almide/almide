@@ -46,7 +46,25 @@ pub fn canonicalize_program<'a>(
     program: &ast::Program,
     modules: impl Iterator<Item = (&'a str, &'a ast::Program, bool)>,
 ) -> CanonicalizationResult {
+    canonicalize_program_in(program, modules, None)
+}
+
+/// [`canonicalize_program`] with the entry program's IDENTITY: when the
+/// entry is a bundled stdlib module checked on its own (`almide compile
+/// bytes --json` stages the bundled source as the entry),
+/// `entry_bundled_module` names it, so the module's own `type` declarations
+/// of the names it owns keep the stdlib's bare key instead of a user
+/// program's shadow scope (#1828, `TypeEnv::entry_bundled_module`). `None`
+/// is every other entry program, unchanged.
+pub fn canonicalize_program_in<'a>(
+    program: &ast::Program,
+    modules: impl Iterator<Item = (&'a str, &'a ast::Program, bool)>,
+    entry_bundled_module: Option<&str>,
+) -> CanonicalizationResult {
     let mut env = TypeEnv::new();
+    env.entry_bundled_module = entry_bundled_module
+        .filter(|m| almide_lang::stdlib_info::is_bundled_module(m))
+        .map(sym);
     let mut diagnostics = Vec::new();
 
     // 1. Built-in protocols
@@ -95,6 +113,9 @@ pub fn canonicalize_program<'a>(
     let (table, import_diags) = build_import_table(program, self_name.as_deref(), &env.user_modules);
     env.import_table = table;
     diagnostics.extend(import_diags);
+    // Every alias spelling of a dependency type (`sh.Box`, `shape.Box`)
+    // resolves to its canonical key from here on (#1955).
+    resolve::register_alias_type_keys(&mut env);
 
     // 4. Register main program declarations
     registration::register_decls(&mut env, &mut diagnostics, &program.decls, None);
@@ -173,6 +194,9 @@ pub fn canonicalize_entry_onto(
     let (table, import_diags) = build_import_table(program, self_name.as_deref(), &env.user_modules);
     env.import_table = table;
     diagnostics.extend(import_diags);
+    // Every alias spelling of a dependency type (`sh.Box`, `shape.Box`)
+    // resolves to its canonical key from here on (#1955).
+    resolve::register_alias_type_keys(env);
     registration::register_decls(env, diagnostics, &program.decls, None);
     env.failed_fn_names.extend(program.failed_fn_names.iter().cloned());
     diagnostics.extend(std::mem::take(&mut env.attr_diagnostics));

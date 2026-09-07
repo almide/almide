@@ -1,0 +1,3 @@
+expects_code = "E060"
+expects_error = "unused_color"
+hint_substring = ""

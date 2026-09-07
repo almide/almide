@@ -1,0 +1,3 @@
+// A user fn shadowing stdlib float.sqrt with the identical Float -> Float
+// signature — the reimpl lint steers to delegation.
+fn main() -> Unit = println("${float.sqrt(4.0)}")

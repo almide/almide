@@ -89,7 +89,7 @@ fn build() -> StdlibPool {
                 impl_to_call.entry(sym(impl_name)).or_insert((sym(m), sym(f)));
             }
         }
-        if let Some(lowered) = lower_registry_source(source) {
+        if let Some(lowered) = lower_registry_source(source, owning_module(entries)) {
             for f in lowered {
                 // First writer wins: registry sources are name-disjoint (the wasm
                 // leg splices them into one namespace), so a collision would be a
@@ -101,12 +101,29 @@ fn build() -> StdlibPool {
     StdlibPool { fns, call_map, impl_to_call }
 }
 
+/// The bundled module a registry source belongs to: the ONE module every
+/// entry names (`SRC_BYTES_TYPED` → `bytes`). A source serving several
+/// modules (`SRC_CLOCK_NOW` → `datetime` + `env`) has no single owner and
+/// lowers as a plain entry program, as every source did before.
+fn owning_module(entries: &[(&str, &'static str)]) -> Option<&'static str> {
+    let mut modules = entries.iter().filter_map(|(_, call)| call.split_once('.').map(|(m, _)| m));
+    let first = modules.next()?;
+    modules.all(|m| m == first).then_some(first)
+}
+
 /// Parse + check + lower ONE registry source, `None` when any stage declines.
 /// The `catch_unwind` mirrors the harness's fixture lowering: a frontend
 /// `assert` on an out-of-scope construct must degrade to "this source is
 /// uncovered", never poison the whole pool.
-fn lower_registry_source(source: &str) -> Option<Vec<IrFunction>> {
+///
+/// The source is checked AS its owning module (`canonicalize_program_in`,
+/// the driver's bundled-entry recipe, #1837): an unprefixed type it declares
+/// (`type Endian` in the bytes source) keeps the stdlib's bare key instead of
+/// the `self.`-qualified shadow key an entry program's declaration takes —
+/// the same identity leak one level down that #1837 closed for the driver.
+fn lower_registry_source(source: &str, module: Option<&str>) -> Option<Vec<IrFunction>> {
     let src = source.to_string();
+    let module = module.map(str::to_string);
     std::panic::catch_unwind(move || {
         let tokens = Lexer::tokenize(&src);
         let mut parser = Parser::new(tokens);
@@ -114,7 +131,8 @@ fn lower_registry_source(source: &str) -> Option<Vec<IrFunction>> {
         if !parser.errors.is_empty() {
             return None;
         }
-        let canon = canonicalize::canonicalize_program(&prog, std::iter::empty());
+        let canon =
+            canonicalize::canonicalize_program_in(&prog, std::iter::empty(), module.as_deref());
         let mut checker = Checker::from_env(canon.env);
         let diags = checker.infer_program(&mut prog);
         if diags.iter().any(|d| d.level == almide_frontend::diagnostic::Level::Error) {

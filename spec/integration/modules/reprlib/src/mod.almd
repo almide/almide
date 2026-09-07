@@ -1,0 +1,22 @@
+// A module's types repr under their DECLARED names on every leg (#1836,
+// C-009): `Cfg { a: 1, b: 2 }` — never the post-flatten `almide_rt_reprlib_Cfg`
+// (native) nor the qualified `reprlib.Cfg` (wasm, the interp, `deriving Repr`).
+type Cfg = { a: Int, b: Int }
+
+type Shape = | Circle(Int) | Rect { w: Int, h: Int } | Dot
+
+type Outer = { name: String, cfg: Cfg }
+
+type Pt: Repr = { x: Int, y: Int }
+
+fn mk() -> Cfg = Cfg { a: 1, b: 2 }
+
+fn circle(r: Int) -> Shape = Circle(r)
+
+fn rect(w: Int, h: Int) -> Shape = Rect { w: w, h: h }
+
+fn dot() -> Shape = Dot
+
+fn outer() -> Outer = Outer { name: "x", cfg: mk() }
+
+fn mk_pt() -> Pt = Pt { x: 1, y: 2 }

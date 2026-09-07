@@ -1,0 +1,3 @@
+expects_code = "E013"
+expects_error = "the type has no fields"
+hint_substring = "stdlib module functions instead"

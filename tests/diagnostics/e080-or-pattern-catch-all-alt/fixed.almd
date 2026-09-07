@@ -1,0 +1,8 @@
+// A bare identifier as one WHOLE alternative is a binder (a catch-all name
+// mixed with a literal), not a second literal.
+fn label(x: Int) -> String = match x {
+  0 => "zero",
+  _ => "other",
+}
+
+fn main() -> Unit = println(label(0))

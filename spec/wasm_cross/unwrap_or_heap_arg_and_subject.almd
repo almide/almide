@@ -1,0 +1,65 @@
+// @contract: C-346
+// A heap-payload `??` lowers on the incumbent wasm leg in the two positions
+// that still walled after #1943: as a CALL ARGUMENT (`show(o ?? "d")`,
+// `first(t ?? ("z", 9))`, the Option polarity — the Result polarity already
+// took the let-bound route) and as a MATCH SUBJECT with call-bearing arms
+// (`match p ?? ("k", 1) { (s, n) => tag(s) }`). Both ANF through the proven
+// `let t = o ?? d` bind: the argument materializes the temp and borrows it,
+// the subject is hoisted and the match dispatches on the tracked temp. These
+// were the top wall reasons of the composition fuzz family (#1904).
+fn show(s: String) -> Unit = println(s)
+
+fn first(t: (String, Int)) -> String = t.0
+
+fn total(xs: List[Int]) -> Int = list.sum(xs)
+
+fn tag(s: String) -> String = "<${s}>"
+
+fn pair(x: Int) -> Result[(String, Int), String] = if x > 0 then ok(("p", x)) else err("neg")
+
+type P = { n: Int, s: String }
+
+fn w_some_rec(p: P) -> P? = some(p)
+
+fn w_none_rec() -> P? = none
+
+// A tail-position Option `??` with a RECORD payload (the string-only
+// `option.unwrap_or_str` route declined it) and a scalar field read off the
+// `??` container — both take the let-bound route too.
+fn tail_rec(x: Int) -> P = w_some_rec(P { n: x, s: "r" }) ?? P { n: 7, s: "d" }
+
+fn tail_rec_none() -> P = w_none_rec() ?? P { n: 7, s: "d" }
+
+fn field_off(x: Int) -> Int = (w_some_rec(P { n: x, s: "r" }) ?? P { n: 7, s: "d" }).n
+
+fn field_off_none() -> String = (w_none_rec() ?? P { n: 7, s: "d" }).s
+
+fn main() -> Unit = {
+  println("${tail_rec(6).n} ${tail_rec_none().s} ${field_off(5)} ${field_off_none()}")
+  let o: String? = some("a")
+  let n: String? = none
+  show(o ?? "d")
+  show(n ?? "d")
+  let t: (String, Int)? = none
+  show(first(t ?? ("z", 9)))
+  let r: Result[List[Int], String] = ok([1, 2])
+  println(int.to_string(total(r ?? [])))
+  println(first(pair(3) ?? ("z", 0)))
+  println(first(pair(-3) ?? ("z", 0)))
+  let p: (String, Int)? = none
+  let q = match p ?? ("k", 1) {
+    (s, m) => tag(s) + int.to_string(m)
+  }
+  println(q)
+  let s2: (String, Int)? = some(("v", 2))
+  let q2 = match s2 ?? ("k", 1) {
+    (s, m) => tag(s) + int.to_string(m)
+  }
+  println(q2)
+  let i: Int? = some(2)
+  let w = match i ?? 0 {
+    2 => tag("two"),
+    _ => tag("other"),
+  }
+  println(w)
+}

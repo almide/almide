@@ -1,0 +1,3 @@
+expects_code = "E420"
+expects_error = "function 'util.scratch' is not accessible"
+hint_substring = "local fn"

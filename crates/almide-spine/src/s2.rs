@@ -152,7 +152,7 @@ pub fn parse_decls(db: &dyn salsa::Database, file: SourceFile) -> Vec<DeclFp> {
 
 #[salsa::tracked]
 pub fn decl_fp(db: &dyn salsa::Database, key: DeclKey) -> Option<DeclFp> {
-    parse_decls(db, key.file(db)).get(key.index(db)).cloned()
+    parse_decls(db, *key.file(db)).get(*key.index(db)).cloned()
 }
 
 #[salsa::tracked]
@@ -170,7 +170,7 @@ pub fn project_symbols(db: &dyn salsa::Database, project: SProject) -> BTreeMap<
 
 #[salsa::tracked]
 pub fn symbol_fp(db: &dyn salsa::Database, sk: SymbolKey) -> Option<u64> {
-    project_symbols(db, sk.project(db)).get(sk.name(db)).copied()
+    project_symbols(db, *sk.project(db)).get(sk.name(db)).copied()
 }
 
 /// The stand-in sema query: depends on this decl's own fingerprint plus the
@@ -186,7 +186,7 @@ pub fn check_decl(db: &dyn salsa::Database, key: DeclKey) -> u64 {
     for dep in &fp.deps {
         if let Some(sk) = registry.get(dep) {
             if let Some(ifp) = symbol_fp(db, *sk) {
-                acc = acc.wrapping_mul(1_000_003).wrapping_add(ifp);
+                acc = acc.wrapping_mul(1_000_003).wrapping_add(*ifp);
             } else {
                 acc = acc.wrapping_mul(1_000_003).wrapping_add(0xDEAD);
             }

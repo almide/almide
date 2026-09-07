@@ -1,0 +1,169 @@
+// @contract: C-132
+// #1576: a CAN-ERR effect fn with a `mut` param takes the C-132 move-mode
+// tuple rewrite — `(T, Buf)` rides the ok payload only; the err arm carries no
+// buffer and propagates BEFORE any write-back (the ratified err-path order,
+// the same one the was-Unit form realizes). Previously this class was the
+// last honest wall under the DDD package tree (`mut-param:can-err-effect`).
+// Matrix — one row per payload kind the carrier admits, crossed with the
+// buffer kinds and the argument places:
+//   payload : Int | String | record | List | Option (`Int?`) | declared
+//             Result (`Int!`, single-layer) | scalar tuple
+//   buffer  : record field write | List push (reallocating) | String concat
+//   place   : bare var | record FIELD argument
+//   route   : direct `!` | nested forwarding (`go(mut xs) = { add(xs, 1)! …}`)
+//             | generic bound over an `effect fn` protocol method with
+//             `mut self` (the #1622 can-err half, the DDD port spelling)
+//   err     : the last call errs before mutating; `!` propagates to main —
+//             stderr `Error: bad`, exit 1, byte-identical on both targets.
+// Not pinned here (walled on every mut-param callee, never-err included):
+// a `??`/`match` consumer of the call, the only way the caller could READ
+// its buffer after an err — see the C-132 statement for the boundary.
+type Box = { n: Int }
+
+type Pair = { a: Int, b: Int }
+
+type Holder = { items: List[Int], tag: Box }
+
+// --- payload axis (mut record buffer, bare var) ---
+effect fn p_int(mut b: Box, k: Int) -> Int = {
+  guard k >= 0 else err("bad")
+  b.n = b.n + k
+  b.n
+}
+
+effect fn p_str(mut b: Box, k: Int) -> String = {
+  guard k >= 0 else err("bad")
+  b.n = b.n + k
+  "n=${b.n}"
+}
+
+effect fn p_rec(mut b: Box, k: Int) -> Pair = {
+  guard k >= 0 else err("bad")
+  b.n = b.n + k
+  Pair { a: b.n, b: k }
+}
+
+effect fn p_list(mut b: Box, k: Int) -> List[Int] = {
+  guard k >= 0 else err("bad")
+  b.n = b.n + k
+  [
+    b.n,
+    k
+  ]
+}
+
+effect fn p_opt(mut b: Box, k: Int) -> Int? = {
+  guard k >= 0 else err("bad")
+  b.n = b.n + k
+  if k == 0 then none
+  else some(b.n)
+}
+
+effect fn p_res(mut b: Box, k: Int) -> Int! = {
+  guard k >= 0 else err("bad")
+  b.n = b.n + k
+  ok(b.n)
+}
+
+effect fn p_tup(mut b: Box, k: Int) -> (Int, Int) = {
+  guard k >= 0 else err("bad")
+  b.n = b.n + k
+  (b.n, k)
+}
+
+// --- buffer axis ---
+effect fn push_len(mut xs: List[Int], k: Int) -> Int = {
+  guard k >= 0 else err("bad")
+  list.push(xs, k)
+  list.len(xs)
+}
+
+effect fn append_len(mut s: String, k: Int) -> Int = {
+  guard k >= 0 else err("bad")
+  s = s + int.to_string(k)
+  string.len(s)
+}
+
+// --- route axis: nested forwarding ---
+effect fn go(mut xs: List[Int], k: Int) -> Int = {
+  let a = push_len(xs, 1)!
+  let b = push_len(xs, k)!
+  a + b
+}
+
+// --- route axis: generic bound over an effect protocol method ---
+protocol Store {
+  effect fn put(mut self: Self, k: String) -> Unit
+  fn size(self) -> Int
+}
+
+type Mem: Store = { ks: List[String] }
+
+effect fn Mem.put(mut self: Mem, k: String) -> Unit = {
+  guard k != "" else err("empty key")
+  self.ks = self.ks + [k]
+}
+
+fn Mem.size(self) -> Int = list.len(self.ks)
+
+effect fn uc[S: Store](mut s: S, k: String) -> Int = {
+  guard k != "x" else err("bad")
+  s.put(k)!
+  s.size()
+}
+
+effect fn main() -> Unit = {
+  var b = Box { n: 1 }
+  let v1 = p_int(b, 1)!
+  println("${v1} ${b.n}")
+  // 2 2
+  let v2 = p_str(b, 2)!
+  println("${v2} ${b.n}")
+  // n=4 4
+  let r = p_rec(b, 3)!
+  println("${r.a} ${r.b} ${b.n}")
+  // 7 3 7
+  let v4 = p_list(b, 4)!
+  println("${v4} ${b.n}")
+  // [11, 4] 11
+  let v5 = p_opt(b, 0)! ?? -1
+  println("${v5} ${b.n}")
+  // -1 11
+  let v6 = p_opt(b, 5)! ?? -1
+  println("${v6} ${b.n}")
+  // 16 16
+  let v7 = p_res(b, 6)!
+  println("${v7} ${b.n}")
+  // 22 22
+  let t = p_tup(b, 7)!
+  println("${t.0} ${t.1} ${b.n}")
+  // 29 7 29
+  var xs: List[Int] = []
+  let l1 = push_len(xs, 9)!
+  println("${l1} ${xs}")
+  // 1 [9]
+  var s = "s"
+  let l2 = append_len(s, 3)!
+  println("${l2} ${s}")
+  // 2 s3
+  // FIELD argument places
+  var h = Holder { items: [], tag: Box { n: 0 } }
+  let f1 = push_len(h.items, 8)!
+  let f2 = p_int(h.tag, 2)!
+  println("${f1} ${f2} ${h.items} ${h.tag.n}")
+  // 1 2 [8] 2
+  // nested forwarding: go pushes 1 then k through its own mut param
+  let g = go(xs, 5)!
+  println("${g} ${xs}")
+  // 5 [9, 1, 5]
+  // generic bound over an effect protocol method with mut self
+  var m = Mem { ks: [] }
+  let u1 = uc(m, "a")!
+  let u2 = uc(m, "b")!
+  println("${u1} ${u2} ${m.ks}")
+  // 1 2 ["a", "b"]
+  // the err path: the guard fires before any write; `!` propagates to main
+  // (stderr `Error: bad`, exit 1) — the buffer is never written back.
+  let last = p_str(b, -1)!
+  println(last)
+}

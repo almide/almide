@@ -1,0 +1,5 @@
+// `?.` on an Option whose INNER type is not a record: Option[Int] has no
+// field to project, so optional chaining cannot apply.
+fn first_len(o: Option[Int]) -> Int = o?.length ?? 0
+
+fn main() -> Unit = println(int.to_string(first_len(some(3))))

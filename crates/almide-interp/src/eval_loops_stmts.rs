@@ -334,8 +334,42 @@ impl<'a> Interpreter<'a> {
         // `xs[i] = v` copies the whole list — a fill loop turns quadratic.
         // `Rc::make_mut` copies only when an alias exists (C-033 COW).
         let Value::Int(i) = iv else {
-            return Err(Flow::Abort("internal: malformed index-assign".into()));
+            return Err(Flow::Abort(format!(
+                "internal: malformed index-assign (index is {})",
+                iv.type_name()
+            )));
         };
+        // Address-model target (#1700): inside the pool tier a `list.repeat`
+        // resolves to the registry's prim-based impl, so the binding holds a
+        // raw BLOCK ADDRESS, not a Value::List. Write through the slice-2
+        // layout the impl built: len header (bytes) at +4, 8-byte Int slots
+        // from +12 — the exact store the backends compile this statement to.
+        let addr_write = scope.with_slot(target, |slot| match slot {
+            Value::Int(a) => Some(*a),
+            _ => None,
+        });
+        if let Some(Some(addr)) = addr_write {
+            let Value::Int(v) = vv else {
+                return Err(Flow::Unsupported(
+                    "index-assign of a non-scalar into an address-model list".into(),
+                ));
+            };
+            let base = u32::try_from(addr)
+                .map_err(|_| Flow::Abort("index-assign outside this heap's arena".into()))?;
+            // Slot blocks carry their ELEMENT COUNT in the len header
+            // (heap.rs `alloc_slots`), not a byte length.
+            let count = self
+                .heap
+                .load(base + almide_layout::LEN.offset, 4)
+                .ok_or_else(|| Flow::Abort("index-assign outside this heap's arena".into()))?;
+            if i < 0 || i >= count {
+                return Err(Flow::Abort("index out of bounds".into()));
+            }
+            return self
+                .heap
+                .store(base + almide_layout::PAYLOAD + (i as u32) * 8, 8, v)
+                .ok_or_else(|| Flow::Abort("index-assign outside this heap's arena".into()));
+        }
         scope
             .with_slot(target, |slot| match slot {
                 Value::List(xs) => {
@@ -345,7 +379,11 @@ impl<'a> Interpreter<'a> {
                     Rc::make_mut(xs)[i as usize] = vv;
                     Ok(())
                 }
-                _ => Err(Flow::Abort("internal: malformed index-assign".into())),
+                other => Err(Flow::Abort(format!(
+                    "internal: malformed index-assign (target v{} slot is {})",
+                    target.0,
+                    other.type_name()
+                ))),
             })
             .ok_or_else(|| Flow::Abort("internal: index-assign to unbound list".into()))?
     }

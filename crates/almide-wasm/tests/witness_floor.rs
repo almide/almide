@@ -7,10 +7,13 @@
 //!      a gate bug, loudly);
 //!   2. every collected certificate BALANCES under the mirror of the
 //!      proven rule (per object: no release at rc 0, no leak);
-//!   3. the count of witnessed functions never shrinks —
+//!   3. the count of witnessed functions WITH RC EVENTS never shrinks —
 //!      golden/witness-floor.txt, grow-only, ratified with
 //!      ALMIDE_UPDATE_WITNESS_FLOOR=1 (phases B/C admit more shapes and
 //!      raise it; a refactor that silently drops recording fails here).
+//!      A scalar-only body yields an EMPTY certificate (true, and vacuous:
+//!      2,767 of them after B1 admitted scalar tail calls) — counted as
+//!      admitted but not as the floor, so the floor measures RC coverage.
 //!
 //! Phase A2 wires these certificates into proofs/gate.sh so the EXTRACTED
 //! kernel-proven checker re-verifies them — this test is the Rust-side
@@ -66,7 +69,9 @@ fn structural_witnesses_balance_and_hold_the_floor() {
             }
         }
     }
-    let witnessed = certs.len();
+    let admitted = certs.len();
+    let witnessed = certs.values().filter(|c| !c.trim().is_empty()).count();
+    eprintln!("[witness-floor] admitted {admitted} function(s), {witnessed} with RC events");
     assert!(
         nondet.is_empty(),
         "the two emission passes disagree on {} witness(es): {nondet:?}",

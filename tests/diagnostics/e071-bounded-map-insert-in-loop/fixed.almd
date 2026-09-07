@@ -1,0 +1,9 @@
+// ALS-B4: insert outside the loop; the loop is not needed for one key.
+@bounded
+fn fill() -> Int = {
+  var m: Map[String, Int] = [:]
+  map.insert(m, "k", 2)
+  map.len(m)
+}
+
+fn main() -> Unit = println("${fill()}")

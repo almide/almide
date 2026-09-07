@@ -13,8 +13,6 @@
 // adjudicating `chunk/windows(n <= 0)` while BOTH targets disagreed with it — native raising a
 // raw panic, wasm silently returning `len+1` empty windows. Nothing else in the project would
 // have noticed, because every test agreed with the implementation and nothing read the section.
-import toml
-
 // `grep -qE "^## $sec( |$)"` — the section heading, and the trailing boundary matters: without
 // it `ALS-T1` would resolve against a heading for `ALS-T14`.
 fn heading_matches(line: String, sec: String) -> Bool = {
@@ -31,38 +29,28 @@ fn section_of_heading(line: String) -> String = {
   }
 }
 
-fn missing_spec_errors(ids_without_spec: List[String]) -> List[String] =
-  ids_without_spec |> list.map((id) =>
-    "contract " + id + " has NO spec key — every contract must cite its ALS section (#565)")
+fn missing_spec_errors(ids_without_spec: List[String]) -> List[String] = ids_without_spec |> list.map((id) => "contract " + id + " has NO spec key — every contract must cite its ALS section (#565)")
 
-fn unresolved_spec_error(sec: String) -> String =
-  "contract spec key '" + sec + "' has NO normative section (## " + sec + ") under docs/specs/als/"
+fn unresolved_spec_error(sec: String) -> String = "contract spec key '" + sec + "' has NO normative section (## " + sec + ") under docs/specs/als/"
 
 // The reverse direction. The message spells out the repair because the finding is easy to
 // misread as paperwork — it is not; see the header.
-fn orphan_section_error(sec: String) -> String =
-  "ALS section '" + sec + "' is cited by NO contract — every normative section needs >=1 [[contract]] with spec = \"" + sec + "\" (see #565)"
+fn orphan_section_error(sec: String) -> String = "ALS section '" + sec + "' is cited by NO contract — every normative section needs >=1 [[contract]] with spec = \"" + sec + "\" (see #565)"
 
-fn speckey_summary(n: Int) -> String =
-  "spec-keying: " + int.to_string(n) + " distinct ALS section(s) referenced; all resolve."
+fn speckey_summary(n: Int) -> String = "spec-keying: " + int.to_string(n) + " distinct ALS section(s) referenced; all resolve."
 
-fn coverage_summary() -> String =
-  "spec-coverage: every normative ALS section is cited by >=1 contract."
+fn coverage_summary() -> String = "spec-coverage: every normative ALS section is cited by >=1 contract."
 
 // The three FRESHNESS checks. Each compares a generator's output against the committed file,
 // and each names the exact command that repairs it — a stale-derived-file error whose fix the
 // reader has to reconstruct gets worked around instead of run.
-fn stale_error(what: String, cmd: String) -> List[String] =
-  [what + " is stale — run: " + cmd]
+fn stale_error(what: String, cmd: String) -> List[String] = [what + " is stale — run: " + cmd]
 
-fn conformance_stale_error() -> List[String] =
-  stale_error("docs/contracts/conformance.md", "bash docs/contracts/generate-conformance.sh > docs/contracts/conformance.md")
+fn conformance_stale_error() -> List[String] = stale_error("docs/contracts/conformance.md", "bash docs/contracts/generate-conformance.sh > docs/contracts/conformance.md")
 
-fn index_stale_error() -> List[String] =
-  stale_error("docs/contracts/README.md", "bash docs/contracts/generate-readme.sh > docs/contracts/README.md")
+fn index_stale_error() -> List[String] = stale_error("docs/contracts/README.md", "bash docs/contracts/generate-readme.sh > docs/contracts/README.md")
 
-fn distinct_sorted(xs: List[String]) -> List[String] =
-  xs |> list.filter((x) => x != "") |> list.unique |> list.sort
+fn distinct_sorted(xs: List[String]) -> List[String] = xs |> list.filter((x) => x != "") |> list.unique |> list.sort
 
 test "a section heading matches on an exact boundary, not a prefix" {
   // Without the boundary, ALS-T1 resolves against ALS-T14's heading and a bogus key passes.
@@ -96,10 +84,10 @@ test "the summary lines are the bash's exact wording" {
 test "a staleness error names the command that repairs it" {
   // A derived-file error whose fix the reader has to reconstruct gets worked around, not run.
   assert_eq(conformance_stale_error(), [
-    "docs/contracts/conformance.md is stale — run: bash docs/contracts/generate-conformance.sh > docs/contracts/conformance.md",
+    "docs/contracts/conformance.md is stale — run: bash docs/contracts/generate-conformance.sh > docs/contracts/conformance.md"
   ])
   assert_eq(index_stale_error(), [
-    "docs/contracts/README.md is stale — run: bash docs/contracts/generate-readme.sh > docs/contracts/README.md",
+    "docs/contracts/README.md is stale — run: bash docs/contracts/generate-readme.sh > docs/contracts/README.md"
   ])
 }
 

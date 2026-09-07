@@ -419,10 +419,12 @@ impl LowerCtx {
 
 include!("option_match.rs");
 include!("control_p2.rs");
+include!("control_p2_e.rs");
 include!("control_p2_b.rs");
 include!("control_p2_c.rs");
 include!("control_p2_d.rs");
 include!("control_p3.rs");
+include!("control_p3_qq.rs");
 include!("control_p3_b.rs");
 include!("control_p3_c.rs");
 include!("heap_result_arm.rs");
@@ -430,6 +432,7 @@ include!("heap_result_arm_b.rs");
 include!("heap_result_ctrl_arms.rs");
 include!("result_materialize.rs");
 include!("result_ctors.rs");
+include!("result_ctors_b.rs");
 include!("scalar_for.rs");
 // The defunc HOF family (formerly one 3.5k-line control_p5.rs), split by concern:
 include!("defunc_hof.rs");

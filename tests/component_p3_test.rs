@@ -624,3 +624,338 @@ fn p3_component_abort_answers_exit_one() {
     assert!(err.contains("Error: none"), "abort message missing:\n{err}");
     assert_eq!(code, 1, "the abort must answer exit 1 on the p3 leg");
 }
+
+// ── #1710 PR B: the wasi:http@0.3 client leg ──────────────────────────
+//
+// The five-fn http string family (ops 43..=47) rides the p3 component
+// through an async-lowered exchange: the trailers future-write, the body
+// stream-writes and `send` itself are all `[async-lower]` builtins joined
+// on one waitable set, drained by a guest scheduler loop — the sync
+// lowers deadlock on the host's rendezvous (the write's reader only
+// appears inside `send`), which the bring-up bisect proved empirically.
+// The big-body PUT below crosses the host's 1MiB
+// `http-outgoing-body-buffer-chunks` rendezvous buffer on purpose: it is
+// the regression fixture for that deadlock class.
+
+/// One-connection-per-request HTTP/1.1 echo server: GET answers a fixed
+/// body, DELETE a marker, POST/PUT/PATCH echo the decoded body length
+/// (chunked and content-length both). Serves until the process exits.
+fn spawn_http_echo() -> std::net::SocketAddr {
+    use std::io::{BufRead, BufReader, Read, Write};
+    let l = std::net::TcpListener::bind("127.0.0.1:0").expect("bind echo server");
+    let addr = l.local_addr().expect("local addr");
+    std::thread::spawn(move || {
+        for conn in l.incoming() {
+            let Ok(c) = conn else { break };
+            let mut r = BufReader::new(c);
+            let mut line = String::new();
+            if r.read_line(&mut line).is_err() || line.is_empty() {
+                continue;
+            }
+            let method = line.split_whitespace().next().unwrap_or("").to_string();
+            let mut clen = 0usize;
+            let mut chunked = false;
+            let mut probe = String::new();
+            loop {
+                let mut h = String::new();
+                if r.read_line(&mut h).is_err() || h.trim().is_empty() {
+                    break;
+                }
+                let hl = h.to_ascii_lowercase();
+                if let Some(v) = hl.strip_prefix("content-length:") {
+                    clen = v.trim().parse().unwrap_or(0);
+                }
+                if hl.starts_with("transfer-encoding:") && hl.contains("chunked") {
+                    chunked = true;
+                }
+                if let Some(v) = hl.strip_prefix("x-probe:") {
+                    probe = v.trim().to_string();
+                }
+            }
+            let mut body = Vec::new();
+            if chunked {
+                loop {
+                    let mut sz = String::new();
+                    if r.read_line(&mut sz).is_err() {
+                        break;
+                    }
+                    let n = usize::from_str_radix(
+                        sz.trim().split(';').next().unwrap_or("0"),
+                        16,
+                    )
+                    .unwrap_or(0);
+                    if n == 0 {
+                        let mut crlf = String::new();
+                        let _ = r.read_line(&mut crlf);
+                        break;
+                    }
+                    let mut chunk = vec![0u8; n + 2];
+                    if r.read_exact(&mut chunk).is_err() {
+                        break;
+                    }
+                    chunk.truncate(n);
+                    body.extend_from_slice(&chunk);
+                }
+            } else if clen > 0 {
+                body = vec![0u8; clen];
+                let _ = r.read_exact(&mut body);
+            }
+            let resp = match method.as_str() {
+                "GET" => "hello from p3".to_string(),
+                "DELETE" => "gone".to_string(),
+                // The probe cell also reflects the FRAMING: `cl` for a
+                // content-length body, `chunked` for transfer-encoding —
+                // the native lane's client sends content-length for its
+                // String/Bytes body, and #1924 B is the p3 shim sending
+                // chunked, which a server without chunked support reads
+                // as empty.
+                _ if !probe.is_empty() => format!(
+                    "len:{};probe:{probe};framing:{}",
+                    body.len(),
+                    if chunked { "chunked" } else { "cl" }
+                ),
+                _ => format!("len:{}", body.len()),
+            };
+            let mut c = r.into_inner();
+            let _ = write!(
+                c,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                resp.len(),
+                resp
+            );
+        }
+    });
+    addr
+}
+
+/// Run a p3 component with the http feature mounted, under a watchdog:
+/// a scheduler regression is a deadlock, and it must fail the test in
+/// two minutes, not hang the suite.
+fn run_p3_http(module: &Path) -> Option<(String, String, i32)> {
+    let mut child = Command::new("wasmtime")
+        .args([
+            "run",
+            "-W",
+            "component-model-async=y,component-model-more-async-builtins=y",
+            "-S",
+            "p3=y",
+            "-S",
+            "http=y",
+            module.to_str().unwrap(),
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn wasmtime");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    loop {
+        match child.try_wait().expect("try_wait") {
+            Some(_) => break,
+            None if std::time::Instant::now() > deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("p3 http component deadlocked (120s watchdog) — the async-lowered exchange regressed into a sync rendezvous");
+            }
+            None => std::thread::sleep(std::time::Duration::from_millis(50)),
+        }
+    }
+    let out = child.wait_with_output().expect("wait wasmtime");
+    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+    if !out.status.success()
+        && (stderr.contains("unexpected argument")
+            || stderr.contains("unknown")
+            || stderr.contains("requires the component model"))
+    {
+        eprintln!("skipping p3 http execution: this wasmtime lacks the p3 http feature set");
+        return None;
+    }
+    Some((
+        String::from_utf8_lossy(&out.stdout).to_string(),
+        stderr,
+        out.status.code().unwrap_or(-1),
+    ))
+}
+
+#[test]
+fn p3_component_speaks_http() {
+    let addr = spawn_http_echo();
+    // All five family members in program order; the PUT body is 2MiB —
+    // past the host's rendezvous buffer, the deadlock-class fixture.
+    let probe = format!(
+        r#"import http
+
+effect fn main() -> Unit = {{
+  match http.get("http://{addr}/hello") {{
+    ok(b) => println("get:${{b}}"),
+    err(e) => println("get-err:${{e}}"),
+  }}
+  match http.post("http://{addr}/echo", "tiny body") {{
+    ok(b) => println("post:${{b}}"),
+    err(e) => println("post-err:${{e}}"),
+  }}
+  let chunk = string.repeat("abcdefgh", 32768)
+  let body = chunk + chunk + chunk + chunk + chunk + chunk + chunk + chunk
+  match http.put("http://{addr}/echo", body) {{
+    ok(b) => println("put:${{b}}"),
+    err(e) => println("put-err:${{e}}"),
+  }}
+  match http.patch("http://{addr}/echo", "patch") {{
+    ok(b) => println("patch:${{b}}"),
+    err(e) => println("patch-err:${{e}}"),
+  }}
+  match http.delete("http://{addr}/gone") {{
+    ok(b) => println("del:${{b}}"),
+    err(e) => println("del-err:${{e}}"),
+  }}
+}}
+"#
+    );
+    let d = dir();
+    let src = d.join("http_probe.almd");
+    std::fs::write(&src, probe).expect("write probe");
+    let out = d.join("http_probe.p3.wasm");
+    build_p3(&src, &out);
+    if !wasmtime_available() {
+        eprintln!("skipping p3 http execution: wasmtime not installed");
+        return;
+    }
+    let Some((stdout, stderr, code)) = run_p3_http(&out) else {
+        return;
+    };
+    assert_eq!(code, 0, "p3 http probe exit code; stderr:\n{stderr}");
+    assert_eq!(
+        stdout,
+        "get:hello from p3\npost:len:9\nput:len:2097152\npatch:len:5\ndel:gone\n",
+        "p3 http probe stdout; stderr:\n{stderr}"
+    );
+}
+
+/// #1710 PR B, the framed family on the p3 component: `request` /
+/// `request_status` / `get_status` / `request_bytes` / `get_bytes` ride
+/// the same async-lowered exchange (ops 48..=50). The frame the guest
+/// builds (stdlib/http_framed.almd: method, body, header cells with CHAR
+/// counts) is parsed in the shim; the method lands as the named variant
+/// case (or `other(string)`), the headers through `fields.append` (the
+/// echo server reflects `x-probe` into the body to prove they crossed),
+/// and `request_status` prefixes the decimal status the host lane prints.
+#[test]
+fn p3_component_speaks_framed_http() {
+    let addr = spawn_http_echo();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let src = dir.path().join("framed.almd");
+    let program = format!(
+        r#"import http
+
+effect fn main() -> Unit = {{
+  match http.request("POST", "http://{addr}/echo", "héllo", ["x-probe": "p3"]) {{
+    ok(t) => println("req:" + t),
+    err(e) => println("req err:" + e),
+  }}
+  match http.request_status("PUT", "http://{addr}/echo", string.repeat("x", 2048), map.new()) {{
+    ok((c, t)) => println("status:${{c}}:" + t),
+    err(e) => println("status err:" + e),
+  }}
+  match http.get_status("http://{addr}/hello") {{
+    ok((c, t)) => println("gets:${{c}}:" + t),
+    err(e) => println("gets err:" + e),
+  }}
+  match http.get_bytes("http://{addr}/hello") {{
+    ok(b) => println("bytes:${{bytes.len(b)}}"),
+    err(e) => println("bytes err:" + e),
+  }}
+  match http.request_bytes("DELETE", "http://{addr}/gone", "", map.new()) {{
+    ok(b) => println("rb:${{bytes.len(b)}}"),
+    err(e) => println("rb err:" + e),
+  }}
+  match http.request("PROPFIND", "http://{addr}/echo", "z", map.new()) {{
+    ok(t) => println("other:" + t),
+    err(e) => println("other err:" + e),
+  }}
+}}
+"#
+    );
+    std::fs::write(&src, program).unwrap();
+    let out = dir.path().join("framed.wasm");
+    let stderr = build_p3(&src, &out);
+    assert!(out.exists(), "p3 framed http build produced no artifact:\n{stderr}");
+    if !wasmtime_available() {
+        eprintln!("skipping p3 framed http execution: wasmtime not installed");
+        return;
+    }
+    let Some((stdout, stderr, code)) = run_p3_http(&out) else {
+        return;
+    };
+    assert_eq!(code, 0, "p3 framed http probe exit code; stderr:\n{stderr}");
+    assert_eq!(
+        stdout,
+        "req:len:6;probe:p3;framing:cl\nstatus:200:len:2048\ngets:200:hello from p3\nbytes:13\nrb:4\nother:len:1\n",
+        "p3 framed http probe stdout; stderr:\n{stderr}"
+    );
+}
+
+/// #1924 A: a transport-errored exchange must leave the shim's handle
+/// bookkeeping clean. Before, send's `err` payload (an error-code with
+/// string pointers) was written over the RET scratch where the trailers
+/// future's pending ok(none) buffer lived, and the NEXT exchange trapped
+/// (`failed to read result … unknown handle index <an address>`); the
+/// waitable set leaked per failed exchange; and a bare `get_status` as
+/// the FIRST call trapped `index 3 is not a resource` — the status was
+/// read AFTER consume-body had taken the response by value. The program
+/// below is every one of those shapes in sequence against one echo.
+#[test]
+fn p3_http_transport_error_leaves_the_next_exchange_intact() {
+    let addr = spawn_http_echo();
+    // A port nothing listens on: the connection is refused, the exchange
+    // is the static transport err — and nothing else.
+    let dead = {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        l.local_addr().expect("addr")
+    };
+    let dir = tempfile::tempdir().expect("tempdir");
+    let src = dir.path().join("errs.almd");
+    let program = format!(
+        r#"import http
+
+effect fn main() -> Unit = {{
+  match http.get_status("http://{addr}/hello") {{
+    ok((c, t)) => println("first:${{c}}:" + t),
+    err(e) => println("first err:" + e),
+  }}
+  match http.request("POST", "http://{dead}/echo", "héllo", ["x-probe": "p3"]) {{
+    ok(t) => println("dead:" + t),
+    err(e) => println("dead err"),
+  }}
+  match http.request_status("PUT", "http://{addr}/echo", string.repeat("x", 2048), ["x-probe": "again"]) {{
+    ok((c, t)) => println("after:${{c}}:" + t),
+    err(e) => println("after err:" + e),
+  }}
+  match http.get("http://{dead}/hello") {{
+    ok(t) => println("dead2:" + t),
+    err(e) => println("dead2 err"),
+  }}
+  match http.get("http://{addr}/hello") {{
+    ok(t) => println("last:" + t),
+    err(e) => println("last err:" + e),
+  }}
+}}
+"#
+    );
+    std::fs::write(&src, program).unwrap();
+    let out = dir.path().join("errs.wasm");
+    let stderr = build_p3(&src, &out);
+    assert!(out.exists(), "p3 http err-path build produced no artifact:\n{stderr}");
+    if !wasmtime_available() {
+        eprintln!("skipping p3 http err-path execution: wasmtime not installed");
+        return;
+    }
+    let Some((stdout, stderr, code)) = run_p3_http(&out) else {
+        return;
+    };
+    assert_eq!(code, 0, "p3 http err-path probe exit code; stderr:\n{stderr}");
+    assert_eq!(
+        stdout,
+        "first:200:hello from p3\ndead err\nafter:200:len:2048;probe:again;framing:cl\ndead2 err\nlast:hello from p3\n",
+        "p3 http err-path probe stdout; stderr:\n{stderr}"
+    );
+}

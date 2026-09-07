@@ -1,0 +1,7 @@
+// Calling a plain Int binding as if it were a function: the call position
+// makes this an error even though `n` itself is well-typed.
+fn main() -> Unit = {
+  let n = (x: Int) => x + 5
+  let r = n(3)
+  println("${r}")
+}

@@ -103,6 +103,17 @@ pub(crate) fn collect_binds_data(
             }
             Ok(())
         }
+        // A map literal's keys and values are expressions like a list's
+        // elements: a callback lambda inside one (`["k": (if list.all(xs,
+        // (x) => …) then …)]`) needs its params as locals too — the
+        // `bind:unmapped` wall the 2026-09-08 campaign dumped (#1423).
+        IrExprKind::MapLiteral { entries } => {
+            for (k, v) in entries {
+                collect_binds(k, out, seen, types)?;
+                collect_binds(v, out, seen, types)?;
+            }
+            Ok(())
+        }
         IrExprKind::TupleIndex { object, .. } => collect_binds(object, out, seen, types),
         // Lambda params become locals (used when the lambda is inlined as
         // a direct HOF callback; harmless extras otherwise).
@@ -132,6 +143,24 @@ pub(crate) fn collect_binds_stmt(
             collect_binds(value, out, seen, types)
         }
         IrStmtKind::Expr { expr } => collect_binds(expr, out, seen, types),
+        // Place mutations LOWER (C-136), so a lambda beneath their value
+        // needs its param locals: `self.rows = self.rows |> list.filter((r)
+        // => ..)` inside a `mut self` repository method walled as
+        // `bind:unmapped` (the #1576 DDD tree's save port) because the
+        // FieldAssign value was never walked.
+        IrStmtKind::FieldAssign { value, .. } => collect_binds(value, out, seen, types),
+        IrStmtKind::IndexAssign { index, value, .. } => {
+            collect_binds(index, out, seen, types)?;
+            collect_binds(value, out, seen, types)
+        }
+        IrStmtKind::MapInsert { key, value, .. } => {
+            collect_binds(key, out, seen, types)?;
+            collect_binds(value, out, seen, types)
+        }
+        IrStmtKind::Guard { cond, else_ } => {
+            collect_binds(cond, out, seen, types)?;
+            collect_binds(else_, out, seen, types)
+        }
         _ => Ok(()), // lowering unsups these before any local is needed
     }
 }
@@ -155,6 +184,15 @@ pub(crate) fn collect_pattern_binds(
         IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => {
             collect_pattern_binds(inner, out, seen, types)
         }
+        IrPattern::As { var, ty, inner } => {
+            let Some(sty) = slice_ty_of(ty, types) else {
+                return unsup(&format!("bind-ty:{}", ty_name(ty)));
+            };
+            if seen.insert(*var) {
+                out.push((*var, sty));
+            }
+            collect_pattern_binds(inner, out, seen, types)
+        }
         IrPattern::RecordPattern { fields, .. } => {
             for fp in fields {
                 if let Some(p) = &fp.pattern {
@@ -164,10 +202,18 @@ pub(crate) fn collect_pattern_binds(
             Ok(())
         }
         IrPattern::Constructor { args, .. }
-        | IrPattern::Tuple { elements: args }
-        | IrPattern::List { elements: args } => {
+        | IrPattern::Tuple { elements: args } => {
             for a in args {
                 collect_pattern_binds(a, out, seen, types)?;
+            }
+            Ok(())
+        }
+        IrPattern::List { elements: args, rest } => {
+            for a in args {
+                collect_pattern_binds(a, out, seen, types)?;
+            }
+            if let Some(r) = rest {
+                collect_pattern_binds(r, out, seen, types)?;
             }
             Ok(())
         }
@@ -276,10 +322,24 @@ fn collect_binds_data_b(
             collect_binds(right, out, seen, types)
         }
         IrExprKind::UnOp { operand, .. } => collect_binds(operand, out, seen, types),
+        // `Try` is the frontend's propagation spelling of `!`; the C-132
+        // rotation moves it INTO the move-mode bind (`let (r, b) = call!`),
+        // so a mut-fn call under an interpolation part / call argument
+        // carries its `__mp_res`/`__mp_buf` binds beneath a Try (#1576's
+        // DDD tree: `" ${cancel_order(mem, id)!} …"`) — missing it here
+        // surfaced as `bind:unmapped`.
+        // `r?` (ToOption) and `o?.field` (OptionalChain) are wrappers like
+        // `Try`/`Unwrap`: a `match` with a pattern bind beneath them
+        // (`w(match o { some(v) => v, none => d })? ?? d2`, the composition
+        // family's seed-7 draws 11/21/30/57/88/98/103) surfaced as
+        // `bind:unmapped` on BOTH legs because this walk never reached `v`.
         IrExprKind::OptionSome { expr }
         | IrExprKind::ResultOk { expr }
         | IrExprKind::ResultErr { expr }
-        | IrExprKind::Unwrap { expr } => collect_binds(expr, out, seen, types),
+        | IrExprKind::Try { expr }
+        | IrExprKind::Unwrap { expr }
+        | IrExprKind::ToOption { expr }
+        | IrExprKind::OptionalChain { expr, .. } => collect_binds(expr, out, seen, types),
         IrExprKind::UnwrapOr { expr, fallback } => {
             collect_binds(expr, out, seen, types)?;
             collect_binds(fallback, out, seen, types)

@@ -1,0 +1,3 @@
+expects_code = "E003"
+expects_error = "unknown type or constructor 'Color' in call position"
+hint_substring = "No type, variant constructor, or opaque alias"

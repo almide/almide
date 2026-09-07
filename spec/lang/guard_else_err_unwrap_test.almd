@@ -1,0 +1,21 @@
+// #1926: `guard c else err(e)!` in an effect fn. The `!` on the err ctor
+// is a propagation of that err and the guard's else is already the early
+// return, so the native render must return the err value — it rendered
+// `return (Err(..))?`, handing `return` the `?`'s unwrapped `()` (rustc
+// E0308 behind a green check). The wasm leg lowered it correctly.
+effect fn show(path: String) -> String = {
+  guard path != "" else err("usage: show <file>")!
+  "shown:" + path
+}
+
+effect fn show_unit(path: String) -> Unit = {
+  guard path != "" else err("empty")!
+  ()
+}
+
+test "guard else err! propagates the err" {
+  assert_eq(show(""), err("usage: show <file>"))
+  assert_eq(show("x"), ok("shown:x"))
+  assert_eq(show_unit(""), err("empty"))
+  assert_eq(show_unit("y"), ok(()))
+}

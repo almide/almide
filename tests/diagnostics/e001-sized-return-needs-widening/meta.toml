@@ -1,0 +1,3 @@
+expects_code = "E001"
+expects_error = "declares -> Int but its body is a UInt8 value"
+hint_substring = "Widen the value at the return"

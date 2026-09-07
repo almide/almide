@@ -1,0 +1,3 @@
+expects_code = "E015"
+expects_error = "same signature as stdlib `map.keys`"
+hint_substring = "differs from `map.keys`"

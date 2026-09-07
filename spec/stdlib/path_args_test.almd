@@ -11,6 +11,9 @@ test "path basics" {
   assert_eq(path.basename("/usr/bin/node"), "node")
   assert_eq(path.extension("file.txt"), some("txt"))
   assert_eq(path.extension("Makefile"), none)
+  assert_eq(path.extension(".gitignore"), none)
+  assert_eq(path.extension(".bashrc.bak"), some("bak"))
+  assert_eq(path.extension("a.tar.gz"), some("gz"))
 }
 
 test "path.is_absolute" {

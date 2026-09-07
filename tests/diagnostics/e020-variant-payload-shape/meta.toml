@@ -1,0 +1,3 @@
+expects_code = "E020"
+expects_error = "declared more than once with different structures"
+hint_substring = "Rename one so the name is unique"

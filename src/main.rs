@@ -1,3 +1,10 @@
+// The CLI is never built without the embedded wasm host: `run`, `bench` and
+// `build --target wasm` are its callers. The feature exists for LIBRARY
+// consumers that compile to wasm32 themselves (almide/playground), where
+// wasmtime cannot be built — see the `almide-wasm-run` note in Cargo.toml.
+#[cfg(not(feature = "embedded-host"))]
+compile_error!("the `almide` binary requires the `embedded-host` feature (default); only the library builds without it");
+
 mod cli;
 mod compile_driver;
 
@@ -181,6 +188,13 @@ enum Commands {
         /// Target: wasm (wasmtime)
         #[arg(long)]
         target: Option<String>,
+        /// Accept snapshot drift: rewrite each failing `testing.assert_snapshot`
+        /// expectation in place, then re-run (also ALMIDE_UPDATE_SNAPSHOTS=1)
+        #[arg(long)]
+        update_snapshots: bool,
+        /// CI mode: snapshots are never written, drift and new snapshots fail (also CI=true)
+        #[arg(long)]
+        ci: bool,
     },
     /// Type check only
     Check {
@@ -219,6 +233,11 @@ enum Commands {
         /// IO, Net, Env, Time, Rand, Process
         #[arg(long)]
         allow: Vec<String>,
+        /// Also decide the wasm build route (#1922): after a clean check, run
+        /// the same two-leg routing `build --target wasm` uses and report
+        /// E081 / E082 at check time instead of at build time. Only `wasm`.
+        #[arg(long)]
+        target: Option<String>,
     },
     /// Start the Language Server Protocol server (for editor integration)
     Lsp,
@@ -606,9 +625,32 @@ fn dispatch_run(file: Option<String>, no_check: bool, release: bool, target: Opt
     });
 }
 
+/// `Commands::Test`'s fields, carried as one value into [`dispatch_test`].
+struct TestArgs {
+    file: Option<String>,
+    run: Option<String>,
+    no_check: bool,
+    json: bool,
+    target: Option<String>,
+    update_snapshots: bool,
+    ci: bool,
+}
+
 /// `dispatch`'s `Commands::Test` arm. Extracted verbatim.
-fn dispatch_test(file: Option<String>, run: Option<String>, no_check: bool, json: bool, target: Option<String>) {
+fn dispatch_test(args: TestArgs) {
+    let TestArgs { file, run, no_check, json, target, update_snapshots, ci } = args;
     let file_str = file.as_deref().unwrap_or("");
+    // The accept step (#1314). CI mode never writes: snapshots are committed
+    // and reviewed like code, so a new or drifted snapshot fails the run
+    // there, with the ordinary report's accept hint pointing at a local run.
+    let update = update_snapshots || env_flag("ALMIDE_UPDATE_SNAPSHOTS");
+    let ci = ci || env_flag("CI");
+    if update && ci {
+        eprintln!("CI mode (--ci / CI=true): --update-snapshots writes nothing — accept snapshots locally with `almide test --update-snapshots <file>` and commit the change");
+    } else if update {
+        cli::cmd_test_update_snapshots(file_str, no_check, run.as_deref(), target.as_deref() == Some("wasm"));
+        return;
+    }
     if target.as_deref() == Some("wasm") {
         cli::cmd_test_wasm(file_str, run.as_deref());
     } else if json {
@@ -622,10 +664,17 @@ fn dispatch_test(file: Option<String>, run: Option<String>, no_check: bool, json
     }
 }
 
+/// A boolean environment switch: set and not `0` / `false`.
+fn env_flag(name: &str) -> bool {
+    std::env::var(name)
+        .map(|v| !v.is_empty() && !matches!(v.to_ascii_lowercase().as_str(), "0" | "false"))
+        .unwrap_or(false)
+}
+
 /// `dispatch`'s `Commands::Check` arm. Extracted verbatim — `explain` still
 /// returns early into the caller via its own `bool` return (`true` = already
 /// handled, caller should return).
-fn dispatch_check(file: Option<String>, deny_warnings: bool, json: bool, explain: Option<String>, effects: bool, timings: bool, stamp: bool, profile: Option<String>, allow: Vec<String>) {
+fn dispatch_check(file: Option<String>, deny_warnings: bool, json: bool, explain: Option<String>, effects: bool, timings: bool, stamp: bool, profile: Option<String>, allow: Vec<String>, target: Option<String>) {
     if let Some(code) = explain {
         print_error_explanation(&code);
         return;
@@ -647,7 +696,19 @@ fn dispatch_check(file: Option<String>, deny_warnings: bool, json: bool, explain
             std::process::exit(1);
         }
     };
+    let wasm_target = match target.as_deref() {
+        None => false,
+        Some("wasm") => true,
+        Some(other) => {
+            eprintln!("error: `almide check --target` accepts only `wasm` (got `{other}`) — the native target is what `almide check` already judges");
+            std::process::exit(1);
+        }
+    };
     let file = resolve_file(file);
+    if wasm_target && (effects || json) {
+        eprintln!("error: --target wasm is not supported with --effects or --json");
+        std::process::exit(1);
+    }
     if effects {
         if critical.is_some() {
             eprintln!("error: --profile is not supported with --effects");
@@ -657,7 +718,7 @@ fn dispatch_check(file: Option<String>, deny_warnings: bool, json: bool, explain
     } else if json {
         cli::cmd_check_json(&file, critical.as_deref());
     } else {
-        cli::cmd_check(&file, deny_warnings, timings, stamp, critical.as_deref());
+        cli::cmd_check(&file, deny_warnings, timings, stamp, critical.as_deref(), wasm_target);
     }
 }
 
@@ -930,8 +991,10 @@ fn dispatch(cli: Cli) {
                 heap_cap,
             });
         }
-        Commands::Test { file, run, no_check, json, target } => dispatch_test(file, run, no_check, json, target),
-        Commands::Check { file, deny_warnings, json, explain, effects, timings, stamp, profile, allow } => dispatch_check(file, deny_warnings, json, explain, effects, timings, stamp, profile, allow),
+        Commands::Test { file, run, no_check, json, target, update_snapshots, ci } => {
+            dispatch_test(TestArgs { file, run, no_check, json, target, update_snapshots, ci })
+        }
+        Commands::Check { file, deny_warnings, json, explain, effects, timings, stamp, profile, allow, target } => dispatch_check(file, deny_warnings, json, explain, effects, timings, stamp, profile, allow, target),
         Commands::Fix { file, dry_run, json } => {
             let file = resolve_file(file);
             cli::cmd_fix(&file, dry_run, json);

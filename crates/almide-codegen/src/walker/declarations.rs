@@ -209,7 +209,9 @@ fn render_type_decl_variant(ctx: &RenderContext, td: &IrTypeDecl, generics_str: 
 
 /// Build `impl AlmideRepr for <Type>` for a record or variant type, mirroring
 /// the `auto_derive_repr` literal format:
-///   record       → `P { x: 1, y: 2 }`     (field declaration order)
+///   record       → `P { x: 1, y: 2 }`     (field declaration order; the
+///                  DECLARED name — a module's `m.Cfg` prints `Cfg`, not the
+///                  post-flatten `almide_rt_m_Cfg` (#1836, `ann.repr_names`))
 ///   tuple variant→ `Click(10, 20)`
 ///   record variant→`Scroll { dy: 5 }`
 ///   nullary       → `Quit`
@@ -281,7 +283,13 @@ fn render_repr_impl(ctx: &RenderContext, td: &IrTypeDecl) -> Option<String> {
             let args = fields.iter()
                 .map(|f| format!("self.{}.almide_repr()", f.name))
                 .collect::<Vec<_>>().join(", ");
-            format!("format!(\"{} {{{{ {} }}}}\", {})", td.name, fmt, args)
+            // The flatten pass records the declared name of every qualified type
+            // it mangles (#1836) — the entry program's stdlib-owned shadow
+            // `self.X` -> `almide_rt_self_X` (#1828) included — so the repr
+            // shows the `X` the source declares, as the wasm legs do.
+            let shown = ctx.ann.repr_names.get(td.name.as_str())
+                .map(String::as_str).unwrap_or(td.name.as_str());
+            format!("format!(\"{} {{{{ {} }}}}\", {})", shown, fmt, args)
         }
         IrTypeDeclKind::Variant { cases, .. } => {
             let arms = cases.iter().map(|v| render_repr_variant_arm(&td.name, v))
@@ -326,23 +334,18 @@ fn render_repr_variant_arm(type_name: &str, v: &IrVariantDecl) -> String {
 // ── Anonymous record collection ──
 // Simplified version of emit_rust::lower_types logic, directly in codegen.
 
+/// Sorted field names → the Rust struct a record literal of that shape
+/// constructs. A bundled twin (`FileStat`, #1821) keys to the runtime's
+/// reserved struct, since its decl is never emitted.
 pub fn collect_named_records(program: &IrProgram) -> HashMap<Vec<String>, String> {
     let mut map = HashMap::new();
-    for td in &program.type_decls {
+    let all = program.type_decls.iter()
+        .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()));
+    for td in all {
         if let IrTypeDeclKind::Record { fields } = &td.kind {
             let mut names: Vec<String> = fields.iter().map(|f| f.name.to_string()).collect();
             names.sort();
-            map.insert(names, td.name.to_string());
-        }
-    }
-    // Also collect from module type declarations
-    for module in &program.modules {
-        for td in &module.type_decls {
-            if let IrTypeDeclKind::Record { fields } = &td.kind {
-                let mut names: Vec<String> = fields.iter().map(|f| f.name.to_string()).collect();
-                names.sort();
-                map.insert(names, td.name.to_string());
-            }
+            map.insert(names, super::runtime_owned::decl_rust_name(td));
         }
     }
     map

@@ -108,8 +108,28 @@ impl<'a> Interpreter<'a> {
                     .all(|(p, v)| self.try_match(p, v, binds)),
                 _ => false,
             },
-            IrPattern::List { elements } => match value.as_iter_items() {
-                Some(items) if items.len() == elements.len() => elements
+            IrPattern::As { var, inner, .. } => {
+                binds.push((*var, value.clone()));
+                self.try_match(inner, value, binds)
+            }
+            IrPattern::List { elements, rest } => match value.as_iter_items() {
+                // #1461 list-rest: rest relaxes the length test to >= and
+                // binds the tail past the prefix as a fresh list value.
+                Some(items) if rest.is_some() && items.len() >= elements.len() => {
+                    let prefix_ok = elements
+                        .iter()
+                        .zip(items.iter())
+                        .all(|(p, v)| self.try_match(p, v, binds));
+                    if prefix_ok
+                        && let Some(r) = rest
+                        && let IrPattern::Bind { var, .. } = r.as_ref()
+                    {
+                        let tail: Vec<Value> = items[elements.len()..].to_vec();
+                        binds.push((*var, Value::List(std::rc::Rc::new(tail))));
+                    }
+                    prefix_ok
+                }
+                Some(items) if rest.is_none() && items.len() == elements.len() => elements
                     .iter()
                     .zip(items.iter())
                     .all(|(p, v)| self.try_match(p, v, binds)),
@@ -149,7 +169,10 @@ impl<'a> Interpreter<'a> {
     }
 
     /// `try_match`'s `Constructor` arm: the ctor name must agree, and the
-    /// payload arity must match the sub-pattern count.
+    /// payload arity must match the sub-pattern count. An opaque NEWTYPE's
+    /// pattern (`SafeHtml(s)`, `Value(s)` under its `self.Value` identity)
+    /// is a pass-through to the payload sub-pattern: the subject IS the
+    /// payload, the way `eval_named_call` built it (#1835).
     fn try_match_ctor(
         &mut self,
         name: &str,
@@ -157,6 +180,11 @@ impl<'a> Interpreter<'a> {
         value: &Value,
         binds: &mut Vec<(VarId, Value)>,
     ) -> bool {
+        if let [inner] = args
+            && self.newtype_ctors.contains(&almide_base::intern::sym(name))
+        {
+            return self.try_match(inner, value, binds);
+        }
         let Value::Variant { ctor, payload, .. } = value else { return false };
         if ctor.as_str() != name {
             return false;

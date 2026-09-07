@@ -479,7 +479,7 @@ pub fn update_locked_deps(project: &Project, only: Option<&str>) -> Result<Vec<(
 
 /// The remote's current commit for `ref_name` — read WITHOUT cloning
 /// (`git ls-remote`), so `update` costs one network round-trip per dep.
-fn git_remote_head(git_url: &str, ref_name: &str) -> Result<String, String> {
+pub fn git_remote_head(git_url: &str, ref_name: &str) -> Result<String, String> {
     let out = std::process::Command::new("git")
         .args(["ls-remote", git_url, ref_name])
         .output()

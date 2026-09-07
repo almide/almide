@@ -70,7 +70,8 @@ fn pattern_contains_list(pat: &IrPattern) -> bool {
     match pat {
         IrPattern::List { .. } => true,
         IrPattern::Tuple { elements } => elements.iter().any(pattern_contains_list),
-        IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => pattern_contains_list(inner),
+        IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner }
+        | IrPattern::As { inner, .. } => pattern_contains_list(inner),
         IrPattern::Constructor { args, .. } => args.iter().any(pattern_contains_list),
         _ => false,
     }
@@ -174,7 +175,7 @@ fn rewrite_stmts(stmts: Vec<IrStmt>, vt: &mut VarTable, changed: &mut bool) -> V
 /// Uses the subject expression directly (no temp variable) to avoid
 /// type mismatches when borrow passes later change the parameter type.
 fn lower_list_match(subject: IrExpr, arms: Vec<IrMatchArm>, result_ty: &Ty, _vt: &mut VarTable) -> IrExprKind {
-    build_list_if_chain(&subject, &arms, result_ty, _vt).kind
+    build_list_if_chain(&subject, &arms, result_ty, _vt, 0, usize::MAX).kind
 }
 
 /// `IrPattern::List` case of `build_list_if_chain`, extracted verbatim
@@ -182,13 +183,59 @@ fn lower_list_match(subject: IrExpr, arms: Vec<IrMatchArm>, result_ty: &Ty, _vt:
 /// `lower_expr`/`infer_expr_inner` extraction shape).
 fn build_list_if_chain_list_pattern(
     subject: &IrExpr,
-    elements: &[IrPattern],
     arm: &IrMatchArm,
     rest: &[IrMatchArm],
     result_ty: &Ty,
     vt: &mut VarTable,
+    covered_below: usize,
+    rest_from: usize,
 ) -> IrExpr {
-    // Build condition: list.len(subject) == N
+    let IrPattern::List { elements, rest: rest_slot } = &arm.pattern else {
+        unreachable!("dispatched on IrPattern::List");
+    };
+    let elements: &[IrPattern] = elements;
+    let rest_pat: Option<&IrPattern> = rest_slot.as_deref();
+    // Length-coverage ladder (#1461): guard-free arms with irrefutable
+    // elements cover their length (exact) or every length >= their prefix
+    // (rest). The uncovered region is {covered_below .. rest_from-1}; an
+    // arm whose coverage swallows it is TERMINAL — emitted as the chain's
+    // else instead of a length test over a fall-off the type system
+    // rejects (the else-Unit hole).
+    let irrefutable_elems = elements.iter().all(elem_is_irrefutable);
+    let advances = arm.guard.is_none() && irrefutable_elems;
+    let covered_next = if advances && rest_pat.is_none() && elements.len() == covered_below {
+        covered_below + 1
+    } else {
+        covered_below
+    };
+    let rest_from_next = if advances && rest_pat.is_some() {
+        rest_from.min(elements.len())
+    } else {
+        rest_from
+    };
+    // Terminal rest arm: uncovered starts at covered_below >= prefix.
+    // Terminal exact arm: the uncovered region is exactly its length.
+    let terminal = advances
+        && ((rest_pat.is_some() && elements.len() <= covered_below)
+            || (rest_pat.is_none()
+                && elements.len() == covered_below
+                && rest_from == covered_below + 1));
+    if terminal {
+        let mut stmts = terminal_rest_binds(subject, elements, rest_pat, vt);
+        return if stmts.is_empty() {
+            arm.body.clone()
+        } else {
+            let _ = &mut stmts;
+            IrExpr {
+                kind: IrExprKind::Block { stmts, expr: Some(Box::new(arm.body.clone())) },
+                ty: result_ty.clone(),
+                span: None, def_id: None,
+            }
+        };
+    }
+    // Build condition: list.len(subject) == N — or >= N for the rest
+    // form (#1461), whose tail past the prefix is what the rest
+    // sub-pattern binds.
             let len_call = IrExpr {
                 kind: IrExprKind::Call {
                     target: CallTarget::Module { module: sym("list"), func: sym("len"), def_id: None },
@@ -205,7 +252,7 @@ fn build_list_if_chain_list_pattern(
             };
             let cond = IrExpr {
                 kind: IrExprKind::BinOp {
-                    op: BinOp::Eq,
+                    op: if rest_pat.is_some() { BinOp::Gte } else { BinOp::Eq },
                     left: Box::new(len_call),
                     right: Box::new(expected_len),
                 },
@@ -234,17 +281,24 @@ fn build_list_if_chain_list_pattern(
                     ty: elem_ty.clone(),
                     span: None, def_id: None,
                 };
+                let (elem_pat, as_bind) = match elem_pat {
+                    IrPattern::As { var, inner, .. } => (inner.as_ref(), Some(*var)),
+                    p => (p, None),
+                };
+                if let Some(var) = as_bind {
+                    stmts.push(IrStmt {
+                        kind: IrStmtKind::Bind {
+                            var,
+                            mutability: Mutability::Let,
+                            ty: elem_ty.clone(),
+                            value: index_expr.clone(),
+                        },
+                        span: None,
+                    });
+                }
                 match elem_pat {
-                    IrPattern::Bind { var, .. } => {
-                        stmts.push(IrStmt {
-                            kind: IrStmtKind::Bind {
-                                var: *var,
-                                mutability: Mutability::Let,
-                                ty: elem_ty.clone(),
-                                value: index_expr,
-                            },
-                            span: None,
-                        });
+                    IrPattern::Bind { .. } | IrPattern::Tuple { .. } => {
+                        bind_irrefutable_elem(elem_pat, index_expr, &elem_ty, &mut stmts);
                     }
                     IrPattern::Literal { expr: lit_expr } => {
                         // Add equality check: subject[i] == literal
@@ -260,6 +314,36 @@ fn build_list_if_chain_list_pattern(
                     }
                     _ => {} // Wildcard: no binding or check needed
                 }
+            }
+
+            // #1461 list-rest: a NAMED tail binds to list.drop(subject, N)
+            // — the >=-length cond above already admits every longer list.
+            if let Some(IrPattern::Bind { var, .. }) = rest_pat {
+                let drop_call = IrExpr {
+                    kind: IrExprKind::Call {
+                        target: CallTarget::Module { module: sym("list"), func: sym("drop"), def_id: None },
+                        args: vec![
+                            subject.clone(),
+                            IrExpr {
+                                kind: IrExprKind::LitInt { value: elements.len() as i64 },
+                                ty: Ty::Int,
+                                span: None, def_id: None,
+                            },
+                        ],
+                        type_args: vec![],
+                    },
+                    ty: subject.ty.clone(),
+                    span: None, def_id: None,
+                };
+                stmts.push(IrStmt {
+                    kind: IrStmtKind::Bind {
+                        var: *var,
+                        mutability: Mutability::Let,
+                        ty: subject.ty.clone(),
+                        value: drop_call,
+                    },
+                    span: None,
+                });
             }
 
             // Combine length check with element literal checks
@@ -278,7 +362,7 @@ fn build_list_if_chain_list_pattern(
 
             // Apply guard if present — guard must be evaluated AFTER let bindings
             let then_body = if let Some(ref guard) = arm.guard {
-                let else_body = build_list_if_chain(subject, rest, result_ty, vt);
+                let else_body = build_list_if_chain(subject, rest, result_ty, vt, covered_next, rest_from_next);
                 // { let bindings; if guard then body else fallthrough }
                 let guarded = IrExpr {
                     kind: IrExprKind::If {
@@ -314,7 +398,7 @@ fn build_list_if_chain_list_pattern(
                 }
             };
 
-    let else_body = build_list_if_chain(subject, rest, result_ty, vt);
+    let else_body = build_list_if_chain(subject, rest, result_ty, vt, covered_next, rest_from_next);
     IrExpr {
         kind: IrExprKind::If {
             cond: Box::new(combined_cond),
@@ -353,8 +437,8 @@ fn process_tuple_element_pattern(
         span: None, def_id: None,
     };
     match elem_pat {
-        IrPattern::List { elements: list_elems } => {
-            // Length check
+        IrPattern::List { elements: list_elems, rest: rest_pat } => {
+            // Length check (>= for the #1461 rest form)
             let len_call = IrExpr {
                 kind: IrExprKind::Call {
                     target: CallTarget::Module { module: sym("list"), func: sym("len"), def_id: None },
@@ -366,7 +450,7 @@ fn process_tuple_element_pattern(
             };
             conds.push(IrExpr {
                 kind: IrExprKind::BinOp {
-                    op: BinOp::Eq,
+                    op: if rest_pat.is_some() { BinOp::Gte } else { BinOp::Eq },
                     left: Box::new(len_call),
                     right: Box::new(IrExpr {
                         kind: IrExprKind::LitInt { value: list_elems.len() as i64 },
@@ -406,6 +490,36 @@ fn process_tuple_element_pattern(
                     });
                 }
             }
+            // #1461 list-rest inside a tuple position: same drop bind as
+            // the top-level form.
+            if let Some(r) = rest_pat
+                && let IrPattern::Bind { var, .. } = r.as_ref()
+            {
+                    stmts.push(IrStmt {
+                        kind: IrStmtKind::Bind {
+                            var: *var,
+                            mutability: Mutability::Let,
+                            ty: elem_access.ty.clone(),
+                            value: IrExpr {
+                                kind: IrExprKind::Call {
+                                    target: CallTarget::Module { module: sym("list"), func: sym("drop"), def_id: None },
+                                    args: vec![
+                                        elem_access.clone(),
+                                        IrExpr {
+                                            kind: IrExprKind::LitInt { value: list_elems.len() as i64 },
+                                            ty: Ty::Int,
+                                            span: None, def_id: None,
+                                        },
+                                    ],
+                                    type_args: vec![],
+                                },
+                                ty: elem_access.ty.clone(),
+                                span: None, def_id: None,
+                            },
+                        },
+                        span: None,
+                    });
+            }
         }
         IrPattern::Bind { var, .. } => {
             stmts.push(IrStmt {
@@ -429,7 +543,9 @@ fn build_list_if_chain_tuple_pattern(
     rest: &[IrMatchArm],
     result_ty: &Ty,
     vt: &mut VarTable,
+    coverage: (usize, usize),
 ) -> IrExpr {
+    let (covered_next, rest_from_next) = coverage;
             let tuple_tys = match &subject.ty {
                 Ty::Tuple(tys) => tys.clone(),
                 _ => vec![Ty::Unknown; elements.len()],
@@ -462,7 +578,7 @@ fn build_list_if_chain_tuple_pattern(
                 }
             };
 
-    let else_body = build_list_if_chain(subject, rest, result_ty, vt);
+    let else_body = build_list_if_chain(subject, rest, result_ty, vt, covered_next, rest_from_next);
     IrExpr {
         kind: IrExprKind::If {
             cond: Box::new(combined_cond),
@@ -474,7 +590,65 @@ fn build_list_if_chain_tuple_pattern(
     }
 }
 
-fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mut VarTable) -> IrExpr {
+/// The element + rest binds of a TERMINAL rest arm (its length test is
+/// proven by the coverage ladder): index binds for the prefix, list.drop
+/// for a named tail.
+fn terminal_rest_binds(
+    subject: &IrExpr,
+    elements: &[IrPattern],
+    rest_pat: Option<&IrPattern>,
+    _vt: &mut VarTable,
+) -> Vec<IrStmt> {
+    let elem_ty = match &subject.ty {
+        Ty::Applied(TypeConstructorId::List, args) if !args.is_empty() => args[0].clone(),
+        _ => Ty::Unknown,
+    };
+    let mut stmts = Vec::new();
+    for (i, elem_pat) in elements.iter().enumerate() {
+        let index_expr = IrExpr {
+            kind: IrExprKind::IndexAccess {
+                object: Box::new(subject.clone()),
+                index: Box::new(IrExpr {
+                    kind: IrExprKind::LitInt { value: i as i64 },
+                    ty: Ty::Int,
+                    span: None, def_id: None,
+                }),
+            },
+            ty: elem_ty.clone(),
+            span: None, def_id: None,
+        };
+        bind_irrefutable_elem(elem_pat, index_expr, &elem_ty, &mut stmts);
+    }
+    if let Some(IrPattern::Bind { var, .. }) = rest_pat {
+        stmts.push(IrStmt {
+            kind: IrStmtKind::Bind {
+                var: *var,
+                mutability: Mutability::Let,
+                ty: subject.ty.clone(),
+                value: IrExpr {
+                    kind: IrExprKind::Call {
+                        target: CallTarget::Module { module: sym("list"), func: sym("drop"), def_id: None },
+                        args: vec![
+                            subject.clone(),
+                            IrExpr {
+                                kind: IrExprKind::LitInt { value: elements.len() as i64 },
+                                ty: Ty::Int,
+                                span: None, def_id: None,
+                            },
+                        ],
+                        type_args: vec![],
+                    },
+                    ty: subject.ty.clone(),
+                    span: None, def_id: None,
+                },
+            },
+            span: None,
+        });
+    }
+    stmts
+}
+
+fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mut VarTable, covered_below: usize, rest_from: usize) -> IrExpr {
     if arms.is_empty() {
         return IrExpr { kind: IrExprKind::Unit, ty: result_ty.clone(), span: None, def_id: None };
     }
@@ -483,10 +657,36 @@ fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt
     let rest = &arms[1..];
 
     match &arm.pattern {
-        IrPattern::List { elements } => build_list_if_chain_list_pattern(subject, elements, arm, rest, result_ty, vt),
+        IrPattern::List { .. } => build_list_if_chain_list_pattern(subject, arm, rest, result_ty, vt, covered_below, rest_from),
+        // As over a list pattern (#1461): bind the WHOLE subject, then
+        // desugar the inner list arm exactly as if it stood alone.
+        IrPattern::As { var, ty, inner } if matches!(inner.as_ref(), IrPattern::List { .. }) => {
+            let inner_arm = IrMatchArm {
+                pattern: (**inner).clone(),
+                guard: arm.guard.clone(),
+                body: arm.body.clone(),
+            };
+            let desugared = build_list_if_chain_list_pattern(subject, &inner_arm, rest, result_ty, vt, covered_below, rest_from);
+            IrExpr {
+                kind: IrExprKind::Block {
+                    stmts: vec![IrStmt {
+                        kind: IrStmtKind::Bind {
+                            var: *var,
+                            mutability: Mutability::Let,
+                            ty: ty.clone(),
+                            value: subject.clone(),
+                        },
+                        span: None,
+                    }],
+                    expr: Some(Box::new(desugared)),
+                },
+                ty: result_ty.clone(),
+                span: None, def_id: None,
+            }
+        }
         // Tuple containing list patterns: extract list checks from tuple elements
         IrPattern::Tuple { elements } if elements.iter().any(pattern_contains_list) =>
-            build_list_if_chain_tuple_pattern(subject, elements, arm, rest, result_ty, vt),
+            build_list_if_chain_tuple_pattern(subject, elements, arm, rest, result_ty, vt, (covered_below, rest_from)),
         // Non-list patterns: re-wrap into a match with remaining arms
         IrPattern::Wildcard if arm.guard.is_none() => arm.body.clone(),
         IrPattern::Bind { var, .. } if arm.guard.is_none() => {
@@ -527,5 +727,70 @@ fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt
                 }
             }
         }
+    }
+}
+
+/// An element sub-pattern that can never fail: a bind, a wildcard, or a
+/// tuple of those (recursively). Only these advance the length-coverage
+/// ladder and bind without a condition.
+fn elem_is_irrefutable(p: &IrPattern) -> bool {
+    match p {
+        IrPattern::Bind { .. } | IrPattern::Wildcard => true,
+        IrPattern::Tuple { elements } => elements.iter().all(elem_is_irrefutable),
+        IrPattern::As { inner, .. } => elem_is_irrefutable(inner),
+        _ => false,
+    }
+}
+
+/// Bind an IRREFUTABLE element sub-pattern to `value` (#1934): a bind takes
+/// the value, a tuple pattern binds each of its elements through
+/// `TupleIndex` (recursively), a wildcard binds nothing. Before, only a
+/// plain bind was handled here, so `[(name, n), ..rest]` emitted no
+/// binding for `name` / `n` at all — rustc E0425 behind a green check on
+/// the native leg (the structural leg lowered it).
+fn bind_irrefutable_elem(pat: &IrPattern, value: IrExpr, ty: &Ty, stmts: &mut Vec<IrStmt>) {
+    match pat {
+        IrPattern::Bind { var, .. } => {
+            stmts.push(IrStmt {
+                kind: IrStmtKind::Bind {
+                    var: *var,
+                    mutability: Mutability::Let,
+                    ty: ty.clone(),
+                    value,
+                },
+                span: None,
+            });
+        }
+        IrPattern::As { var, inner, .. } => {
+            stmts.push(IrStmt {
+                kind: IrStmtKind::Bind {
+                    var: *var,
+                    mutability: Mutability::Let,
+                    ty: ty.clone(),
+                    value: value.clone(),
+                },
+                span: None,
+            });
+            bind_irrefutable_elem(inner, value, ty, stmts);
+        }
+        IrPattern::Tuple { elements } => {
+            let elem_tys: Vec<Ty> = match ty {
+                Ty::Tuple(ts) => ts.clone(),
+                _ => vec![Ty::Unknown; elements.len()],
+            };
+            for (j, sub) in elements.iter().enumerate() {
+                if matches!(sub, IrPattern::Wildcard) {
+                    continue;
+                }
+                let sub_ty = elem_tys.get(j).cloned().unwrap_or(Ty::Unknown);
+                let access = IrExpr {
+                    kind: IrExprKind::TupleIndex { object: Box::new(value.clone()), index: j },
+                    ty: sub_ty.clone(),
+                    span: None, def_id: None,
+                };
+                bind_irrefutable_elem(sub, access, &sub_ty, stmts);
+            }
+        }
+        _ => {}
     }
 }

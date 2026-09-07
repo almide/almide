@@ -1,0 +1,9 @@
+// A record-pattern field shorthand inside an or-alternative is a binder:
+// `x` would be unbound when the Quit alternative matches.
+type Ev = | Click { x: Int } | Quit
+
+fn describe(e: Ev) -> String = match e {
+  Click { x } | Quit => "input",
+}
+
+fn main() -> Unit = println(describe(Quit))

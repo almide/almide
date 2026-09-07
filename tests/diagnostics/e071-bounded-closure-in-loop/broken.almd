@@ -1,0 +1,13 @@
+// ALS-B4: a closure created inside a counted loop is a per-iteration heap
+// allocation.
+@bounded
+fn warm() -> Int = {
+  var acc = 0
+  for i in 0..<4 {
+    let bump = (x: Int) => x + 1
+    acc = acc + i
+  }
+  acc
+}
+
+fn main() -> Unit = println("${warm()}")

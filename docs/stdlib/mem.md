@@ -31,13 +31,17 @@ mem.restore(mark)
 ```
 
 On the native leg both calls are no-ops: reference counting already reclaims the
-same allocations, so a program using `mem` behaves identically on both targets.
+same allocations, so a program using `mem` is meant to behave identically on both
+targets.
 
-The example above runs on both targets from `main`, but it is not covered by a
-spec test: `mem.save` walls inside a promoted test fn ("scalar binding outside the
-value subset"), and the walled-real ratchet treats a walled function as a
-regression. What IS pinned is that the native symbols exist at all — they used to
-be declared and never defined, so any program calling them emitted invalid Rust.
+Today, however, NO wasm leg builds it — measured by the target-availability
+sweep (#1827) and declared in `proofs/target-availability.toml`: the MIR lowering
+refuses the allocator-mark scalar ("scalar binding outside the value subset",
+even in the example above from `main`), `mem.restore` is not an admitted
+effectful call, and the structural leg has no arm; `almide build --target wasm`
+reports it as E081 at check time. What IS pinned is that the native symbols exist
+at all — they used to be declared and never defined, so any program calling them
+emitted invalid Rust.
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 

@@ -1,0 +1,6 @@
+// The fix: let the callback stay pure and compute the sum from its result.
+fn twice(f: (Int) -> Int) -> Int = f(1) + f(2)
+
+fn total() -> Int = twice((n) => n + n)
+
+fn main() -> Unit = println(int.to_string(total()))

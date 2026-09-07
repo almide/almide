@@ -1,0 +1,5 @@
+// Usage tracking is semantic, not textual: naming the module inside a string
+// literal does not count as using the import.
+import regex
+
+fn main() -> Unit = println("regex is only named in this string")

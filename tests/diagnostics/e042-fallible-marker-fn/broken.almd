@@ -1,0 +1,8 @@
+// E042 on a `-> T!` fallible-marker fn: its Result return is must-use like
+// any other.
+fn parse_port(s: String) -> Int! = int.parse(s)
+
+effect fn main() -> Unit = {
+  parse_port("8080")
+  println("started")
+}

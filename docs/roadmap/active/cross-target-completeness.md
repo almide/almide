@@ -24,7 +24,7 @@ RC) — makes no equivalence claim at all.
 
 | Mechanism | State |
 |---|---|
-| Cross-target gate (`tests/wasm_runtime_test.rs::wasm_cross_target_spec`) | 65+ corpus files, byte-compared, **0 @xt-allow** |
+| Cross-target gate (`tests/wasm_runtime_cross_target.rs::wasm_cross_target_spec`) | 65+ corpus files, byte-compared, **0 @xt-allow** |
 | Documented divergence list | **N = 0** (`fan.timeout`, the last entry, was removed from the language in 0.29.0 — C-006 flipped to active) |
 | Oracle-pairing registry — RETIRED with the v0 emitter (#782); `scripts/check-rt-oracle-registry.sh` is a tombstone | superseded by spec/wasm_cross + the interp 3-way oracle (final v0 tally: 76 verified / 42 grandfathered) |
 | By-construction tables (Σ-probe derived from Rust std at emit time + all-scalar CI locks) | case folding, whitespace, UTF-8 classification, Unicode properties (Alphabetic/Alphanumeric/Uppercase/Lowercase) |

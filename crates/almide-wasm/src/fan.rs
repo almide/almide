@@ -31,7 +31,7 @@ impl Emitter<'_> {
         &mut self,
         func: &str,
         args: &[IrExpr],
-    ) -> Result<Option<Option<SliceTy>>, EmitError> {
+    ) -> Result<Option<Option<Lowered>>, EmitError> {
         // ALMIDE_DBG_FAN=1: name the route each fan call takes (the
         // ALMIDE_DBG_ELEM precedent) — the p3 prefetch test asserts the
         // "prefetch" line so a pattern regression cannot pass silently
@@ -50,7 +50,7 @@ impl Emitter<'_> {
                 if dbg {
                     eprintln!("[fan-dbg] fan.map: prefetch lowering engaged");
                 }
-                Some(self.lower_fan_map_fs_prefetch(xs)?)
+                Some(Lowered::owned(self.lower_fan_map_fs_prefetch(xs)?))
             }
             // fan.any over the same shape (#1628 increment 2c): start every
             // read, await in ARM order, FIRST OK wins — and the remaining
@@ -62,21 +62,60 @@ impl Emitter<'_> {
                 if dbg {
                     eprintln!("[fan-dbg] fan.{func}: prefetch-any lowering engaged");
                 }
-                Some(self.lower_fan_any_fs_prefetch(xs)?)
+                Some(Lowered::owned(self.lower_fan_any_fs_prefetch(xs)?))
             }
             ("map" | "any" | "any_map", [xs, cb]) => {
                 if dbg {
                     eprintln!("[fan-dbg] fan.{func}: sequential accumulator");
                 }
                 let first_ok_wins = func != "map";
-                let (params, body) = self.hof_lambda(cb, 1)?;
+                let IrExprKind::Lambda { body: raw_body, .. } = &cb.kind else {
+                    return unsup("list-hof-nonlambda");
+                };
                 // ADR-0006 (#1663): the callback's top-level `!` IS the
                 // fallible form's instantiation — the accumulator below
                 // performs exactly its first-err semantics, so the Try
                 // layer strips instead of propagating into the caller's
                 // frame (which aborted main where native carries a value).
-                let body = strip_callback_try(body);
+                let stripped = strip_callback_try(raw_body);
+                // #1406: a body that STILL propagates after the wrapper
+                // strip (`(p) => { let t = ..; fs.read_text(t)! }`) is a
+                // real fallible closure with its own Result channel —
+                // inlined, its `!` routed into THIS frame and the err
+                // escaped `main` where native fed it to the accumulator.
+                // Such a callback is lowered once as a closure value and
+                // called per element (the #1806 route the fs walkers take).
+                let closure = if crate::fs_meta::expr_propagates(stripped) {
+                    let got = self.lower_arg(cb, None, ArgMode::Borrow)?;
+                    let SliceTy::Fn(sig) = got else {
+                        return unsup(&format!("fan-{func}-callee:{got:?}"));
+                    };
+                    let def = self.types.fn_sig_def(sig);
+                    let (&[pty], Some(ret)) = (def.params.as_slice(), def.ret) else {
+                        return unsup(&format!("fan-{func}-callee-sig"));
+                    };
+                    let ti = self.work.itype(vec![ValType::I32, pty.val_type()], Some(ret.val_type()));
+                    let hcl = self.hold_i32()?;
+                    self.f.instructions().local_set(hcl);
+                    Some((hcl, ti, pty, ret))
+                } else {
+                    None
+                };
                 let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
+                // The per-element scratch: the lambda's own param local
+                // when its body inlines, a fresh hold when it is called.
+                let (param, body) = match closure {
+                    Some((_, _, pty, _)) => {
+                        if pty != elem {
+                            return unsup(&format!("fan-{func}-callee-param"));
+                        }
+                        (self.hold_for(elem)?, None)
+                    }
+                    None => {
+                        let (params, _) = self.hof_lambda(cb, 1)?;
+                        (params[0], Some(stripped))
+                    }
+                };
                 // The callback body VALUE is a Result block.
                 let hr = self.hold_i32()?;
                 let hacc = self.hold_i32()?;
@@ -86,8 +125,22 @@ impl Emitter<'_> {
                     i.i32_const(0).call(F_ALLOC).local_set(hacc);
                     i.block(BlockType::Empty).loop_(BlockType::Empty);
                 }
-                self.hof_elem_into(elem, bh, ch, ih, params[0]);
-                let got = self.lower(body, None)?;
+                self.hof_elem_into(elem, bh, ch, ih, param);
+                let got = match (closure, body) {
+                    (Some((hcl, ti, _, ret)), _) => {
+                        // Closure convention (calls.rs): env first, then the
+                        // element — a borrowed read the list still holds, so
+                        // the callee-owned guard +1s it (the closure's
+                        // epilogue decs its params).
+                        self.f.instructions().local_get(hcl).local_get(param);
+                        self.share_handle_top(elem);
+                        self.f.instructions().local_get(hcl).i32_load(slot_memarg(0));
+                        self.f.instructions().call_indirect(0, ti);
+                        ret
+                    }
+                    (None, Some(body)) => self.lower(body, None)?,
+                    (None, None) => return unsup(&format!("fan-{func}-shape")),
+                };
                 let SliceTy::Result(o, er) = got else {
                     return unsup(&format!("fan-{func}-body:{got:?}"));
                 };
@@ -149,15 +202,25 @@ impl Emitter<'_> {
                     i.end();
                     i.local_get(hr);
                 }
-                for _ in 0..5 {
+                // hacc, hr; [the closure route's element scratch]; ih, ch,
+                // bh; [the closure hold] — LIFO per pool.
+                self.release_i32();
+                self.release_i32();
+                if closure.is_some() {
+                    self.release_for(elem);
+                }
+                for _ in 0..3 {
                     self.release_i32();
                 }
-                Some(if first_ok_wins {
+                if closure.is_some() {
+                    self.release_i32();
+                }
+                Some(Lowered::owned(if first_ok_wins {
                     SliceTy::Result(o, er)
                 } else {
                     let lb = self.types.intern(SliceTy::List(self.types.intern(b)));
                     SliceTy::Result(lb, er)
-                })
+                }))
             }
             // Block form: ONE literal list of 0-ary thunks, statically
             // unrolled — first Ok short-circuits, a pure arm Ok-adapts
@@ -223,7 +286,7 @@ impl Emitter<'_> {
                 let Some(t) = result_ty else {
                     return unsup("fan-any-armless");
                 };
-                Some(t)
+                Some(Lowered::owned(t))
             }
             _ => return Ok(None),
         };

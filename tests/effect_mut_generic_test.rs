@@ -1,11 +1,13 @@
-//! #1622: the never-err half of `effect fn` protocol methods with `mut self`
-//! reached through a generic bound lowers on BOTH wasm legs (the fixpoint
-//! never-err scan admits an effect callee with no err arm, and `!` over an
-//! admitted callee is a pass-through); the CAN-ERR half keeps its honest
-//! wall, and that wall names #1576's design question instead of C-132's
-//! brick. The cross-target value parity of the green half is pinned by
-//! spec/wasm_cross/effect_mut_generic_port.almd; this gate pins the ROUTING
-//! boundary from both sides.
+//! #1622: `effect fn` protocol methods with `mut self` reached through a
+//! generic bound lower on the structural wasm leg in BOTH halves — the
+//! never-err half (#1622, both legs) and the can-err half (#1576's ruling:
+//! `(T, Buf)` rides the ok payload only, the err propagates before any
+//! write-back). The cross-target value parity is pinned by
+//! spec/wasm_cross/effect_mut_generic_port.almd (never-err) and
+//! spec/wasm_cross/mut_param_effect_can_err.almd (can-err); this gate pins
+//! the ROUTING from both sides: the never-err half on both legs, the can-err
+//! half on the structural leg (the incumbent walls the synthesized
+//! `let (r, b) = call!` destructure honestly — a walled-real baseline row).
 
 use std::path::Path;
 use std::process::Command;
@@ -44,7 +46,7 @@ effect fn main() -> Unit = {
 "#;
 
 /// The same shape with a direct err arm in the GENERIC fn — the can-err
-/// half, whose mut-param semantics await #1576's ruling.
+/// half, admitted by #1576's ruling (the tuple rides the ok payload only).
 const CAN_ERR: &str = r#"protocol Store { effect fn put(mut self: Self, k: String) -> Unit }
 
 type Mem: Store = { ks: List[String] }
@@ -123,32 +125,56 @@ fn never_err_effect_mut_method_via_bound_lowers_structurally() {
 }
 
 #[test]
-fn can_err_half_keeps_an_honest_wall_naming_1576() {
+fn can_err_half_lowers_structurally_under_the_1576_ruling() {
     if !tools_available() {
         return;
     }
     let path = write_fixture("can_err.almd", CAN_ERR);
-    // Native runs it — the wall is a wasm-leg coverage boundary, not a
-    // language error.
     let native = Command::new(almide_bin())
         .args(["run", path.to_str().unwrap()])
         .output()
         .expect("spawn");
-    assert!(native.status.success());
+    assert!(
+        native.status.success(),
+        "native run failed:\n{}",
+        String::from_utf8_lossy(&native.stderr)
+    );
+    let expected = String::from_utf8_lossy(&native.stdout).to_string();
+    assert_eq!(expected, "1 [\"a\"]\n");
 
-    let wasm = Command::new(almide_bin())
+    // Forced-structural: a wall is a hard error, so success proves the
+    // structural leg lowered the can-err shape itself.
+    let forced = Command::new(almide_bin())
         .args(["run", path.to_str().unwrap(), "--target", "wasm"])
+        .env("ALMIDE_WASM_STRUCTURAL", "1")
         .output()
         .expect("spawn");
-    let stderr = String::from_utf8_lossy(&wasm.stderr);
     assert!(
-        !wasm.status.success(),
-        "the can-err half unexpectedly lowered — #1576 is unratified, this \
-         must stay an honest wall until it is"
+        forced.status.success(),
+        "structural leg walled on the can-err shape (#1576 regressed):\n{}",
+        String::from_utf8_lossy(&forced.stderr)
     );
-    assert!(
-        stderr.contains("#1576"),
-        "the can-err wall must name #1576's design question, not a missing \
-         brick:\n{stderr}"
+    assert_eq!(
+        String::from_utf8_lossy(&forced.stdout),
+        expected,
+        "wasm/native divergence on the can-err shape"
     );
+
+    // The incumbent may still wall the synthesized destructure-unwrap, but
+    // it must never emit different bytes: either the same stdout, or an
+    // honest refusal.
+    let incumbent = Command::new(almide_bin())
+        .args(["run", path.to_str().unwrap(), "--target", "wasm"])
+        .env("ALMIDE_WASM_INCUMBENT", "1")
+        .output()
+        .expect("spawn");
+    if incumbent.status.success() {
+        assert_eq!(String::from_utf8_lossy(&incumbent.stdout), expected);
+    } else {
+        assert!(
+            String::from_utf8_lossy(&incumbent.stderr).contains("not yet supported"),
+            "the incumbent neither lowered nor walled honestly:\n{}",
+            String::from_utf8_lossy(&incumbent.stderr)
+        );
+    }
 }

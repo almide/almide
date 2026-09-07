@@ -1,0 +1,5 @@
+// E045: out-of-range tuple index inside a STRING INTERPOLATION segment.
+fn main() -> Unit = {
+  let p = (1, 2)
+  println("pair: ${p.1}")
+}

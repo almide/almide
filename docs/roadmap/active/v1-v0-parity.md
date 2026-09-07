@@ -36,7 +36,7 @@ v1 が v0 相当とは、次を**同時に**満たす状態を指す（すべて
    baseline が全 runnable fixture を網羅（v0 が走る全プログラムで byte 一致）。
 3. **PCC 不変**: `proofs/corpus-wall.sh` が 3プロパティ（ownership ∧ names ∧ caps）で
    ACCEPT を維持（各 phase で回帰させない）。
-4. **3-way オラクル green**: `wasm_runtime_test::interp_cross_target_spec` が全 fixture で
+4. **3-way オラクル green**: `wasm_runtime_interp_oracle::interp_cross_target_spec` が全 fixture で
    native==wasm==interp consensus（abstain ledger は 0 へ収束）。
 5. **org byte-verify 両ターゲット**: `scripts/org-trust-status.sh` の BYTE_VERIFIED が
    全 org リポジトリで native + wasm 両方 pass。

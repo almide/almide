@@ -1,0 +1,4 @@
+mod type UserId = Int
+
+pub fn of(n: Int) -> UserId = UserId(n)
+pub fn show(u: UserId) -> String = "user"

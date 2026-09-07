@@ -546,7 +546,7 @@ fn classify_empty_rest_arms(
     let mut rest_arm: Option<(&IrExpr, Option<VarId>)> = None;
     for arm in arms {
         match &arm.pattern {
-            IrPattern::List { elements } if elements.is_empty() => {
+            IrPattern::List { elements, rest: None } if elements.is_empty() => {
                 if empty_arm.is_some() {
                     return None;
                 }

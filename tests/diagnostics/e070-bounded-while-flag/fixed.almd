@@ -1,0 +1,9 @@
+// ALS-B3: a counted loop with literal bounds is admissible.
+@bounded
+fn settle() -> Int = {
+  var steps = 0
+  for i in 0..<3 { steps = steps + 1 }
+  steps
+}
+
+fn main() -> Unit = println("${settle()}")

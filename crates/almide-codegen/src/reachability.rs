@@ -77,7 +77,7 @@ fn add_target(target: &CallTarget, out: &mut HashSet<String>) {
 /// `module` (None for top-level `program.functions`) may be REGISTERED in
 /// `func_map`, mirroring `register_func` calls in mod.rs. A function is reachable
 /// iff any of these is in the reachable name set.
-pub(crate) fn registered_keys(module: Option<&str>, fname: &str) -> Vec<String> {
+pub fn registered_keys(module: Option<&str>, fname: &str) -> Vec<String> {
     match module {
         None => vec![fname.to_string()],
         Some(m) => {
@@ -169,7 +169,7 @@ fn bfs_reachable(
 /// pre-check (lib.rs), so an unreachable native-only intrinsic the emitter stubs
 /// is equally ignored by the pre-check — the build no longer fails on dead code
 /// the program can never run (#644).
-pub(crate) fn reachable_fn_names(program: &IrProgram) -> HashSet<String> {
+pub fn reachable_fn_names(program: &IrProgram) -> HashSet<String> {
     let has_main = program.functions.iter().any(|f| f.name.as_str() == "main" && !f.is_test);
     let has_tests = program.functions.iter().any(|f| f.is_test);
     let library_mode = !has_main && !has_tests;

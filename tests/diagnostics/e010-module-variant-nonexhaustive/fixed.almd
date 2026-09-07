@@ -1,0 +1,11 @@
+// Exhaustiveness sees a sibling's variant definition: matching two of its
+// three cases is E010 naming the missing one.
+import self.color as c
+
+fn name(x: c.Color) -> String = match x {
+  c.Red => "red",
+  c.Green => "green",
+  c.Blue => "blue",
+}
+
+fn main() -> Unit = println(name(c.red()))

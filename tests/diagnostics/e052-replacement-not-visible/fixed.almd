@@ -1,0 +1,5 @@
+// E052 variant: `use` names a function this compiler cannot see — the hint
+// says so instead of guessing at the edit.
+fn emphasize(s: String) -> String = s + "!"
+
+effect fn main() -> Unit = println(emphasize("hi"))

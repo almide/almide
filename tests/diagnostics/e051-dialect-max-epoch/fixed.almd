@@ -1,0 +1,4 @@
+// Fixed: the stamp lowered to the dialect this compiler actually speaks.
+@dialect(3)
+
+fn main() -> Unit = println("hi")

@@ -1,0 +1,8 @@
+// `!` on the iterable expression of a for-in loop inside a pure fn:
+// the loop head has no error channel to propagate into.
+fn main() -> Unit = {
+  let groups = [[1, 2], [3, 4]]
+  for n in list.first(groups) ?? [] {
+    println(int.to_string(n))
+  }
+}

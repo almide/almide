@@ -1,0 +1,3 @@
+expects_code = "E030"
+expects_error = "operator '>' is not defined for List[Int]"
+hint_substring = "list.sort / list.min / list.max"

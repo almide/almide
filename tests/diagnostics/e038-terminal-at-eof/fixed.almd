@@ -1,0 +1,5 @@
+// E038: `??` as the very last token of the file — nothing follows to be
+// the fallback operand.
+fn main() -> Unit = println("go")
+
+fn tail(s: String) -> Int = int.parse(s) ?? 0

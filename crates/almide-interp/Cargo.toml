@@ -19,8 +19,10 @@ almide-driver = { path = "../almide-driver" }
 # functions the driver uses, then interprets. No fixtures, all inline.
 #
 # The corpus gates that used to live here — the 3-way oracle and the abstain
-# ledger over `spec/wasm_cross/*.almd` — moved to the root binary
-# (`tests/wasm_runtime_test.rs`), where they share ONE build of each fixture
-# with the equivalence and wasm-opt gates instead of compiling it again. That
-# also retired this crate's copies of the native/wasm capture helpers, and with
-# them the `tempfile` scratch dir they needed.
+# ledger over `spec/wasm_cross/*.almd` — moved to the root package's
+# `wasm_runtime_*` test binaries (`tests/wasm_runtime_interp_oracle.rs`,
+# `tests/wasm_runtime_interp_ledger.rs`), which share the corpus and capture
+# helpers with the equivalence and wasm-opt gates by source
+# (`tests/wasm_runtime_test_parts/`). That also retired this crate's copies of
+# the native/wasm capture helpers, and with them the `tempfile` scratch dir
+# they needed.

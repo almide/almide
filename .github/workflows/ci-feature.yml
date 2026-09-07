@@ -40,14 +40,14 @@ jobs:
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
-      - uses: actions/cache@v6
+      # Dependencies only (see ci.yml `build`). Feature branches only READ
+      # the shared entry (develop's ci-feature run never happens — the
+      # trigger is branch-pattern-gated), so every feature push writes its
+      # own key: keep it but let the branch pay for the workspace it built.
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: feature-cargo-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: feature-cargo-${{ env.RUST_TOOLCHAIN }}-
+          shared-key: feature-build-${{ env.RUST_TOOLCHAIN }}
+          cache-on-failure: true
 
       - name: Build
         run: cargo build --release

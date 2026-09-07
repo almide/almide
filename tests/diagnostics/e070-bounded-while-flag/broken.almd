@@ -1,0 +1,14 @@
+// ALS-B3: a flag-controlled while has no static trip count — the profile
+// admits only counted ranges.
+@bounded
+fn settle() -> Int = {
+  var done = false
+  var steps = 0
+  while done == false {
+    steps = steps + 1
+    done = steps > 2
+  }
+  steps
+}
+
+fn main() -> Unit = println("${settle()}")

@@ -354,6 +354,10 @@ fn is_pure_stmt(
 fn collect_pattern_bindings(pattern: &IrPattern, vars: &mut std::collections::HashSet<VarId>) {
     match pattern {
         IrPattern::Bind { var, .. } => { vars.insert(*var); }
+        IrPattern::As { var, inner, .. } => {
+            vars.insert(*var);
+            collect_pattern_bindings(inner, vars);
+        }
         IrPattern::Constructor { args, .. } => {
             for p in args { collect_pattern_bindings(p, vars); }
         }
@@ -362,7 +366,7 @@ fn collect_pattern_bindings(pattern: &IrPattern, vars: &mut std::collections::Ha
                 if let Some(p) = &f.pattern { collect_pattern_bindings(p, vars); }
             }
         }
-        IrPattern::Tuple { elements } | IrPattern::List { elements } => {
+        IrPattern::Tuple { elements } | IrPattern::List { elements, .. } => {
             for p in elements { collect_pattern_bindings(p, vars); }
         }
         IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => {

@@ -28,3 +28,37 @@ effect fn gzip(data: Bytes) -> Result[Bytes, String] = _
 
 @intrinsic("almide_rt_zlib_gunzip")
 effect fn gunzip(data: Bytes) -> Result[Bytes, String] = _
+
+// ── Checksums (#1700) ──
+// Pure Almide on every target (no intrinsic): CRC-32 (IEEE, reflected) and
+// Adler-32 — the checksums the gzip/zlib containers already carry, exposed so
+// programs stop shipping their own tables. Both return the unsigned 32-bit
+// value as an Int.
+fn crc32(data: Bytes) -> Int = {
+  var acc = 4294967295
+  var i = 0
+  let len = bytes.len(data)
+  while i < len {
+    acc = int.bxor(acc, bytes.get_or(data, i, 0))
+    var k = 0
+    while k < 8 {
+      acc = if int.band(acc, 1) == 1 then int.bxor(3988292384, int.bshr(acc, 1)) else int.bshr(acc, 1)
+      k = k + 1
+    }
+    i = i + 1
+  }
+  int.bxor(acc, 4294967295)
+}
+
+fn adler32(data: Bytes) -> Int = {
+  var s1 = 1
+  var s2 = 0
+  var i = 0
+  let len = bytes.len(data)
+  while i < len {
+    s1 = (s1 + bytes.get_or(data, i, 0)) % 65521
+    s2 = (s2 + s1) % 65521
+    i = i + 1
+  }
+  int.bor(int.bshl(s2, 16), s1)
+}

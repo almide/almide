@@ -1,5 +1,7 @@
 # ALS — 実行時規範（Runtime）
 
+> Last updated: 2026-08-20
+
 プログラム実行の観測規範（エラー終了・文字列補間の表示形・並行コンビネータ）。
 参照方法は [strings.md](strings.md) 冒頭と同じ。
 
@@ -27,23 +29,22 @@ Contracts: C-008, C-009, C-010, C-011。
 
 **受理形**(構文要素方向: `ExprKind::Fan` / `FanBounded` / `FanRace` /
 `FanRaceMap` / `FanSettle` / `FanTimeout`): リスト形 `fan.map(xs, (x) =>
-…)`・`fan.bounded(n, xs, f)`、ブロック形 `fan.any { a(); b() }` /
-`fan.settle { … }`。全形が **effect fn 文脈必須**。`fan.map` の mapper は
-**Result を返す契約**(裸の値は検査時拒否、`(x) => ok(…)` へ誘導 —
-any/settle の thunk は auto-wrap、map の mapper はしない)。
-`fan.settle { a; b }` の返りは **Result のタプル**(要素数 = thunk 数)。
-`fan.race`(0.42.0 で削除 — 決定モデル下では `thunks[0]()` と同値で、名前
-だけが壁時計レースを騙っていた)と `fan.timeout`(0.29.0 で削除)は
-**存在しない** — どちらも検査時 E027 tombstone(C-004 の裁定)。AST 上の
-`FanRace` / `FanRaceMap` / `FanTimeout` ノードはこの tombstone 診断の
-担い手としてのみ残る。
+…)`、ブロック形 `fan.any { a(); b() }` / `fan.settle { … }`。全形が
+**effect fn 文脈必須**。`fan.map` の mapper は **Result を返す契約**
+(裸の値は検査時拒否、`(x) => ok(…)` へ誘導 — any/settle の thunk は
+auto-wrap、map の mapper はしない)。`fan.settle { a; b }` の返りは
+**Result のタプル**(要素数 = thunk 数、ALS-DT4)。
 
-`fan.race`・`fan.any`・`fan.map`・`fan.settle` の結果は**リスト順で決定的**
-（最初に完了したものではなく、引数リストの先頭から評価した最初の該当）。
-エラーは ALS-R1 の統一 abort 形で表面化する。`fan.timeout` は言語に**存在
-しない**（0.29.0 で削除）: 壁時計デッドラインは可搬なクロスターゲット意味を
-持たず、参照は両ターゲット共通の check 時 tombstone エラー（E027）になる。
-デッドラインはプログラムを起動するホスト境界で課す。
+`fan.any`・`fan.map`・`fan.settle` の結果は**リスト順で決定的**(最初に
+完了したものではなく、引数リストの先頭から評価した最初の該当)。エラーは
+ALS-R1 の統一 abort 形で表面化する。
+
+`fan.race` と `fan.timeout` は 0.42.0 / 0.29.0 でいったん削除された後、
+**決定的意味論を得て 0.47.0 で復活した**: race は (spend, index) 辞書式
+最小の勝者則(ALS-DT3、C-205 — mapper 形 `fan.race(budget?, xs, f)` を含む)、
+timeout は charge site 協調チェックの壁時計期限(ALS-DT5、C-208)。
+`fan.bounded(c) { … }` は決定的予算(ALS-DT2、C-204)であり、mapper 形は
+持たない。旧 tombstone 裁定(C-004/C-006)はこの復活で SUPERSEDED。
 Contracts: C-004, C-005, C-006。
 
 ## ALS-R4 非有限浮動小数の定数表示
@@ -54,8 +55,9 @@ Contracts: C-012。
 
 ## ALS-R5 プロセス環境
 
-`process.args` / `env.args` は argv[0]（プログラム名）を除いた引数列を
-返し、両ターゲットで一致する。`env.get(name)` はホストプロセスの環境変数を
+`env.args` は argv[0]（プログラム名）を**除いた**引数列を、`process.args`
+は argv[0] を**含む**全列を返し(0.59.1 実測: 引数 2 個で env.args は長さ 2、
+process.args は長さ 3・先頭がバイナリパス)、それぞれ両ターゲットで一致する。`env.get(name)` はホストプロセスの環境変数を
 観測し、存在すれば some(値)、無ければ none を両ターゲットで同一バイトで
 返す（wasm は WASI environ + ランナーの環境継承）。`random.int(a, b)` は
 WASI entropy 下でも常に [a, b] 範囲内。
@@ -66,7 +68,8 @@ wasm レグは WASI サンドボックス（`wasi` / `/tmp`）を返す。両タ
 一致させることこそが欠陥であり、「今どのプラットフォームか」を問う
 プログラムには真を返さねばならない。除外は無制限ではなく、両レグで同一の
 決定的不変量（os は閉じた集合 {macos, linux, windows, wasi} の要素、
-temp_dir は非空かつ posix ホストでは絶対パス）が証明対象となる。第三の関数を
+temp_dir は非空かつ posix ホストでは絶対パス）が証明対象となる。除外は現在
+3 関数(env.os・env.temp_dir・fs.temp_dir — C-189)。第四の関数を
 除外に加えるには C-189 の statement とその fixture の改訂を要する。
 Contracts: C-096, C-112, C-118, C-133, C-189。
 
@@ -116,9 +119,9 @@ native 限定の性質であり、観測可能な約束には含まれない。
 `spec/stdlib/fs_streaming_test.almd`（for_each_line セル — native 限定）,
 `tests/fs_streaming_family_gate_test.rs`（行列ゲート）。
 
-Contracts: C-042。
+Contracts: C-274。
 
-## ALS-R7 HTTP レスポンスヘッダの規範
+## ALS-R8 HTTP レスポンスヘッダの規範
 
 `http` のレスポンス構築族（`response` / `json` / `redirect` / `with_headers` /
 `status` / `body` / `set_header` / `get_header`）は**ネットワークに触れない純

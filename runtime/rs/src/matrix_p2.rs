@@ -311,7 +311,7 @@ pub fn almide_rt_matrix_select_rows(m: &AlmideMatrix, row_ids: &[i64]) -> Almide
 // + 16 B sign bits (LSB-first).
 // sign-byte → 8-lane ±1.0 lookup table. Precomputed so the hot kernel
 // can do a single 64-byte load instead of 8 branches per byte.
-static SIGN_LUT: [[f64; 8]; 256] = {
+static ALMIDE_SIGN_LUT: [[f64; 8]; 256] = {
     let mut t = [[0.0; 8]; 256];
     let mut i = 0;
     while i < 256 {
@@ -339,7 +339,7 @@ unsafe fn q1_0_block_dot_neon(xi: *const f64, sign_bytes: *const u8, scale: f64)
     let mut a3 = vdupq_n_f64(0.0);
     for byte_idx in 0..16 {
         let byte = *sign_bytes.add(byte_idx) as usize;
-        let sig = SIGN_LUT[byte].as_ptr();
+        let sig = ALMIDE_SIGN_LUT[byte].as_ptr();
         let x = xi.add(byte_idx * 8);
         a0 = vfmaq_f64(a0, vld1q_f64(x),        vld1q_f64(sig));
         a1 = vfmaq_f64(a1, vld1q_f64(x.add(2)), vld1q_f64(sig.add(2)));
@@ -355,7 +355,7 @@ fn q1_0_block_dot_scalar(xi: &[f64], sign_bytes: &[u8], scale: f64) -> f64 {
     let mut s = 0.0f64;
     for byte_idx in 0..16 {
         let byte = sign_bytes[byte_idx] as usize;
-        let sig = &SIGN_LUT[byte];
+        let sig = &ALMIDE_SIGN_LUT[byte];
         let off = byte_idx * 8;
         for k in 0..8 {
             s += xi[off + k] * sig[k];
@@ -871,19 +871,19 @@ pub fn almide_rt_matrix_qwen3_block_f32_kv(
 // bandwidth floor (2.4 GB weights/token), so the win here is bandwidth,
 // not FLOPs.
 
-const Q8_BLOCK: usize = 32;
-const Q8_BLOCK_BYTES: usize = 34;
+const ALMIDE_Q8_BLOCK: usize = 32;
+const ALMIDE_Q8_BLOCK_BYTES: usize = 34;
 
 // Quantize an activation row to Q8_0 blocks (llama.cpp's trick): the dot
 // then becomes i8×i8 integer MACs with two per-block scales, which the
 // autovectorizer turns into wide integer SIMD — the i8→f64 scalar convert
 // chain measured SLOWER than the f32 path despite 4x less DRAM traffic.
 fn quantize_row_q8(xi: &[f64]) -> (Vec<f32>, Vec<i8>) {
-    let n_blocks = xi.len() / Q8_BLOCK;
+    let n_blocks = xi.len() / ALMIDE_Q8_BLOCK;
     let mut scales = Vec::with_capacity(n_blocks);
     let mut q = Vec::with_capacity(xi.len());
     for b in 0..n_blocks {
-        let xb = &xi[b * Q8_BLOCK..(b + 1) * Q8_BLOCK];
+        let xb = &xi[b * ALMIDE_Q8_BLOCK..(b + 1) * ALMIDE_Q8_BLOCK];
         let amax = xb.iter().fold(0.0f64, |m, &v| m.max(v.abs()));
         let d = (amax / 127.0) as f32;
         let inv = if d > 0.0 { 1.0 / d as f64 } else { 0.0 };
@@ -898,12 +898,12 @@ fn quantize_row_q8(xi: &[f64]) -> (Vec<f32>, Vec<i8>) {
 #[inline]
 fn q8_0_row_dot_q8_scalar(x_scales: &[f32], x_q: &[i8], row: &[u8]) -> f64 {
     let mut acc = 0.0f64;
-    for (b, blk) in row.chunks_exact(Q8_BLOCK_BYTES).enumerate() {
+    for (b, blk) in row.chunks_exact(ALMIDE_Q8_BLOCK_BYTES).enumerate() {
         let d_w = fp16_bits_to_f32(u16::from_le_bytes([blk[0], blk[1]]));
-        let qs = &blk[2..2 + Q8_BLOCK];
-        let xb = &x_q[b * Q8_BLOCK..(b + 1) * Q8_BLOCK];
+        let qs = &blk[2..2 + ALMIDE_Q8_BLOCK];
+        let xb = &x_q[b * ALMIDE_Q8_BLOCK..(b + 1) * ALMIDE_Q8_BLOCK];
         let mut s = 0i32;
-        for k in 0..Q8_BLOCK {
+        for k in 0..ALMIDE_Q8_BLOCK {
             s += (qs[k] as i8) as i32 * xb[k] as i32;
         }
         acc += (d_w * x_scales[b]) as f64 * s as f64;
@@ -921,13 +921,13 @@ fn q8_0_row_dot_q8_scalar(x_scales: &[f32], x_q: &[i8], row: &[u8]) -> f64 {
 #[target_feature(enable = "avx2")]
 unsafe fn q8_0_row_dot_q8_avx2(x_scales: &[f32], x_q: &[i8], row: &[u8]) -> f64 {
     use std::arch::x86_64::*;
-    let n_blocks = row.len() / Q8_BLOCK_BYTES;
+    let n_blocks = row.len() / ALMIDE_Q8_BLOCK_BYTES;
     let mut acc = 0.0f64;
     for b in 0..n_blocks {
-        let blk = row.as_ptr().add(b * Q8_BLOCK_BYTES);
+        let blk = row.as_ptr().add(b * ALMIDE_Q8_BLOCK_BYTES);
         let d_w = fp16_bits_to_f32(u16::from_le_bytes([*blk, *blk.add(1)]));
         let w = _mm256_loadu_si256(blk.add(2) as *const __m256i);
-        let x = _mm256_loadu_si256(x_q.as_ptr().add(b * Q8_BLOCK) as *const __m256i);
+        let x = _mm256_loadu_si256(x_q.as_ptr().add(b * ALMIDE_Q8_BLOCK) as *const __m256i);
         let ax = _mm256_sign_epi8(x, x); // |x| (unsigned operand)
         let sw = _mm256_sign_epi8(w, x); // w with x's sign folded in
         let p16 = _mm256_maddubs_epi16(ax, sw); // 16 × i16 pairwise products
@@ -972,10 +972,10 @@ pub fn almide_rt_matrix_linear_q8_0_row_no_bias(
     let n_in = w_cols.max(0) as usize;
     let out_cols = w_rows.max(0) as usize;
     let off = w_offset.max(0) as usize;
-    if x_rows == 0 || out_cols == 0 || n_in == 0 || n_in % Q8_BLOCK != 0 {
+    if x_rows == 0 || out_cols == 0 || n_in == 0 || n_in % ALMIDE_Q8_BLOCK != 0 {
         return mk(x_rows, out_cols, vec![0.0f64; x_rows * out_cols]);
     }
-    let row_bytes = n_in / Q8_BLOCK * Q8_BLOCK_BYTES;
+    let row_bytes = n_in / ALMIDE_Q8_BLOCK * ALMIDE_Q8_BLOCK_BYTES;
     let w_all = &w_bytes[off..off + out_cols * row_bytes];
     let mut out = vec![0.0f64; x_rows * out_cols];
     for i in 0..x_rows {
@@ -999,10 +999,10 @@ pub fn almide_rt_matrix_select_rows_q8_0_dq(
     // `cols` died in the raw capacity-overflow form here.
     let (_, c) = almide_rt_matrix_dims(row_ids.len() as i64, cols);
     let off = offset.max(0) as usize;
-    if c % Q8_BLOCK != 0 {
+    if c % ALMIDE_Q8_BLOCK != 0 {
         return mk(row_ids.len(), c, vec![0.0f64; row_ids.len() * c]);
     }
-    let row_bytes = c / Q8_BLOCK * Q8_BLOCK_BYTES;
+    let row_bytes = c / ALMIDE_Q8_BLOCK * ALMIDE_Q8_BLOCK_BYTES;
     let mut out = Vec::<f64>::with_capacity(row_ids.len() * c);
     for &rid in row_ids {
         let base = off + (rid.max(0) as usize) * row_bytes;
@@ -1012,9 +1012,9 @@ pub fn almide_rt_matrix_select_rows_q8_0_dq(
             out.extend(std::iter::repeat(0.0f64).take(c));
             continue;
         }
-        for blk in data[base..base + row_bytes].chunks_exact(Q8_BLOCK_BYTES) {
+        for blk in data[base..base + row_bytes].chunks_exact(ALMIDE_Q8_BLOCK_BYTES) {
             let d = fp16_bits_to_f32(u16::from_le_bytes([blk[0], blk[1]])) as f64;
-            for k in 0..Q8_BLOCK {
+            for k in 0..ALMIDE_Q8_BLOCK {
                 // Q8_0 needs the ruling per ELEMENT, not per block: the product
                 // is zero when EITHER factor is (a zero scale, or a zero quant
                 // under a negative scale), and `a * b` signs by xor.

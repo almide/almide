@@ -1,0 +1,6 @@
+// ALS-B9: fan.* scheduling never enters the profile — the race form is
+// rejected the same as fan.bounded.
+@bounded
+effect fn pick() -> Int = fan.race { 1 + 1, 2 * 2 } ?? 0
+
+effect fn main() -> Unit = println(int.to_string(pick() ?? 0))

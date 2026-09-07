@@ -1,0 +1,5 @@
+// Effect-ness crosses the module boundary: a pure fn calling a sibling's
+// `effect fn` is E006 — mark the caller `effect fn`.
+import self.store as s
+
+effect fn main() -> Unit = println(int.to_string(s.load()!))

@@ -5,9 +5,9 @@
 // read_dir order is already sorted, but native sorts the flattened full-path
 // list, which interleaves levels differently). A read_dir error anywhere
 // (including the root) propagates on the err channel like native's `?`.
-// Reaching read_dir + path_filestat carries Capability::FsRead.
-import env
-
+// Reaching read_dir + path_filestat carries Capability::FsRead. `depth` bounds
+// the recursion: the count of levels still to visit below `dir` (1 = list `dir`
+// only); any negative value is unbounded (fs.walk).
 fn __walk_ftype(path: String) -> Int = {
   let buf = prim.alloc_bytes(64)
   let p = prim.handle(buf) + 12
@@ -15,18 +15,18 @@ fn __walk_ftype(path: String) -> Int = {
   if errno != 0 then 0 else prim.load8(p + 16)
 }
 
-effect fn __walk_entries(dir: String, entries: List[String], i: Int, acc: List[String]) -> Result[List[String], String] = if i >= list.len(entries) then ok(acc)
+effect fn __walk_entries(dir: String, entries: List[String], i: Int, depth: Int, acc: List[String]) -> Result[List[String], String] = if i >= list.len(entries) then ok(acc)
 else {
   let name = list.get(entries, i) ?? ""
   let p = dir + "/" + name
   let acc2 = acc + [p]
-  if __walk_ftype(p) == 3 then {
-    let sub = __walk_into(p, acc2)!
-    __walk_entries(dir, entries, i + 1, sub)
-  } else __walk_entries(dir, entries, i + 1, acc2)
+  if depth != 1 and __walk_ftype(p) == 3 then {
+    let sub = __walk_into(p, depth - 1, acc2)!
+    __walk_entries(dir, entries, i + 1, depth, sub)
+  } else __walk_entries(dir, entries, i + 1, depth, acc2)
 }
 
-effect fn __walk_into(dir: String, acc: List[String]) -> Result[List[String], String] = {
+effect fn __walk_into(dir: String, depth: Int, acc: List[String]) -> Result[List[String], String] = {
   let r: Result[List[String], String] = prim.read_dir(dir)
   let rh = prim.handle(r)
   if prim.load32(rh + 16) != 0 then {
@@ -34,48 +34,128 @@ effect fn __walk_into(dir: String, acc: List[String]) -> Result[List[String], St
     err(m)
   } else {
     let entries: List[String] = prim.load_handle(rh + 12)
-    __walk_entries(dir, entries, 0, acc)
+    __walk_entries(dir, entries, 0, depth, acc)
   }
 }
 
 effect fn fs_walk(dir: String) -> Result[List[String], String] = {
-  let all = __walk_into(dir, [])!
+  let all = __walk_into(dir, -1, [])!
   let sorted = list.sort(all)
   ok(sorted)
 }
 
-// fs.glob(pattern) — the same simple `*`-wildcard matcher native implements
-// (split on '*', require each literal part in order, anchor a non-empty FIRST
-// part at position 0), applied to every full path under the current directory
-// (native canonicalizes "." and recurses the whole tree; here the C-137 cwd —
-// the PWD variable — is the same absolute base the fs floors resolve against),
-// sorted like native. Shares the walk machinery above (one compilation unit —
-// registry sources compile standalone, so a sibling-file impl is unreachable).
-// (`import env` sits at the top of this file — imports precede declarations.)
-fn __glob_parts_match(name: String, parts: List[String], i: Int, pos: Int) -> Bool = if i >= list.len(parts) then true
+// fs.glob(pattern) — SEGMENT-WISE glob (#1805), the step-for-step transcription
+// of native's almide_rt_fs_glob (runtime/rs/src/fs.rs): the pattern is split on
+// '/' (empty segments — a trailing or doubled slash — are dropped; a leading '/'
+// makes it absolute), the leading run of wildcard-free segments is the BASE (the
+// walk root, re-spelled from its segments in front of every result; empty =
+// the C-137 cwd, walked as "."), and the remaining segments match one-to-one against the
+// base-relative path of every entry the recursive walk visits (files AND
+// directories, fs.walk's visit set): `*` matches any run of characters within
+// ONE segment (empty included, a leading dot included), a segment that is
+// exactly `**` matches zero or more whole segments, everything else is literal.
+// A base that is not a directory answers [] (never an err); a pattern without
+// wildcards is a literal path and answers [path] iff it exists; a `**`-only
+// remainder also admits the base itself. Results are cwd-relative (no `./`)
+// when the base is empty, and sorted like native. The walk is depth-bounded to
+// the pattern's segment count when it holds no `**`. Shares the walk machinery
+// above (one compilation unit — registry sources compile standalone, so a
+// sibling-file impl is unreachable). Every pass recurses rather than passing
+// a closure (#892 — a String→Bool lambda into list.take_while trapped with an
+// indirect-call type mismatch on the wasm leg).
+// One segment: `*` matches any run of characters (empty included); the rest is
+// literal. The first and last split parts anchor the ends; the middle parts
+// are found in order inside the region between them.
+fn __glob_mid_match(region: String, parts: List[String], i: Int, end: Int, pos: Int) -> Bool = if i >= end then true
 else {
   let part = list.get(parts, i) ?? ""
-  if string.len(part) == 0 then __glob_parts_match(name, parts, i + 1, pos)
-  else {
-    let rest = string.slice(name, pos, string.len(name))
-    match string.index_of(rest, part) {
-      some(idx) => if i == 0 and idx != 0 then false
-      else __glob_parts_match(name, parts, i + 1, pos + idx + string.len(part)),
-      none => false,
-    }
+  if string.len(part) == 0 then __glob_mid_match(region, parts, i + 1, end, pos)
+  else match string.index_of(string.slice(region, pos, string.len(region)), part) {
+    some(idx) => __glob_mid_match(region, parts, i + 1, end, pos + idx + string.len(part)),
+    none => false,
   }
 }
 
-fn __glob_match(pattern: String, name: String) -> Bool = {
-  let parts = string.split(pattern, "*")
-  if list.len(parts) == 1 then name == pattern
-  else __glob_parts_match(name, parts, 0, 0)
+fn __glob_star_match(pat: String, seg: String) -> Bool = {
+  let parts = string.split(pat, "*")
+  let n = list.len(parts)
+  if n == 1 then pat == seg
+  else {
+    let first = list.get(parts, 0) ?? ""
+    let last = list.get(parts, n - 1) ?? ""
+    let fl = string.len(first)
+    let ll = string.len(last)
+    if string.len(seg) < fl + ll then false
+    else if not string.starts_with(seg, first) then false
+    else if not string.ends_with(seg, last) then false
+    else __glob_mid_match(string.slice(seg, fl, string.len(seg) - ll), parts, 1, n - 1, 0)
+  }
+}
+
+// pats[pi..] against segs[si..], segment by segment; `**` spans zero or more
+// whole segments (tried shortest-first).
+fn __glob_segs_match(pats: List[String], pi: Int, segs: List[String], si: Int) -> Bool = if pi >= list.len(pats) then si >= list.len(segs)
+else {
+  let pat = list.get(pats, pi) ?? ""
+  if pat == "**" then __glob_dstar_match(pats, pi, segs, si)
+  else if si >= list.len(segs) then false
+  else if not __glob_star_match(pat, list.get(segs, si) ?? "") then false
+  else __glob_segs_match(pats, pi + 1, segs, si + 1)
+}
+
+fn __glob_dstar_match(pats: List[String], pi: Int, segs: List[String], si: Int) -> Bool = if __glob_segs_match(pats, pi + 1, segs, si) then true
+else if si < list.len(segs) then __glob_dstar_match(pats, pi, segs, si + 1)
+else false
+
+// Split on '/', dropping empty segments (a trailing or doubled slash).
+fn __glob_segs(parts: List[String], i: Int, acc: List[String]) -> List[String] = if i >= list.len(parts) then acc
+else {
+  let s = list.get(parts, i) ?? ""
+  if string.len(s) == 0 then __glob_segs(parts, i + 1, acc)
+  else __glob_segs(parts, i + 1, acc + [s])
+}
+
+// The count of leading wildcard-free segments (the BASE).
+fn __glob_lit_count(segs: List[String], i: Int) -> Int = if i >= list.len(segs) then i
+else {
+  let s = list.get(segs, i) ?? ""
+  if string.contains(s, "*") then i else __glob_lit_count(segs, i + 1)
+}
+
+fn __glob_has_dstar(pats: List[String], i: Int) -> Bool = if i >= list.len(pats) then false
+else {
+  let s = list.get(pats, i) ?? ""
+  if s == "**" then true else __glob_has_dstar(pats, i + 1)
+}
+
+// Every walked full path is `root/rel` (`cut` = len(root) + 1); keep the
+// matches, spelled `prefix + rel`.
+fn __glob_collect(all: List[String], i: Int, pats: List[String], cut: Int, prefix: String, acc: List[String]) -> List[String] = if i >= list.len(all) then acc
+else {
+  let p = list.get(all, i) ?? ""
+  let rel = string.slice(p, cut, string.len(p))
+  if __glob_segs_match(pats, 0, string.split(rel, "/"), 0) then __glob_collect(all, i + 1, pats, cut, prefix, acc + [prefix + rel])
+  else __glob_collect(all, i + 1, pats, cut, prefix, acc)
 }
 
 effect fn fs_glob(pattern: String) -> Result[List[String], String] = {
-  let base = env.get("PWD") ?? "/"
-  let all = __walk_into(base, [])!
-  let matched = all |> list.filter((n) => __glob_match(pattern, n))
-  let sorted = list.sort(matched)
-  ok(sorted)
+  let empty: List[String] = []
+  let segs = __glob_segs(string.split(pattern, "/"), 0, empty)
+  let k = __glob_lit_count(segs, 0)
+  let pats = list.drop(segs, k)
+  let base = (if string.starts_with(pattern, "/") then "/" else "") + list.join(list.take(segs, k), "/")
+  if list.len(pats) == 0 then {
+    if string.len(base) > 0 and prim.path_exists(base) then ok([base])
+    else ok(empty)
+  } else if string.len(base) > 0 and __walk_ftype(base) != 3 then ok(empty)
+  else {
+    let root = if string.len(base) == 0 then "." else base
+    let prefix = if string.len(base) == 0 or base == "/" then base else base + "/"
+    let depth = if __glob_has_dstar(pats, 0) then -1 else list.len(pats)
+    let all = __walk_into(root, depth, empty)!
+    let self_hit = if string.len(base) > 0 and __glob_segs_match(pats, 0, empty, 0) then [base]
+    else empty
+    let matched = __glob_collect(all, 0, pats, string.len(root) + 1, prefix, self_hit)
+    ok(list.sort(matched))
+  }
 }

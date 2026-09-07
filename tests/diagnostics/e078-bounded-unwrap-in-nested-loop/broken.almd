@@ -1,0 +1,12 @@
+// ALS-B11: `!` propagation two counted loops deep is still an exit
+// mid-iteration — nesting does not launder the early exit.
+@bounded
+effect fn grid_sum(xs: List[Int]) -> Int! = {
+  var acc = 0
+  for i in 0..<2 {
+    for j in 0..<2 { acc = acc + list.get(xs, i * 2 + j)! }
+  }
+  ok(acc)
+}
+
+effect fn main() -> Unit = println("${grid_sum([1, 2, 3, 4]) ?? -1}")

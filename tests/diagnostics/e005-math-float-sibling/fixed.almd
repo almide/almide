@@ -1,0 +1,2 @@
+// The fix: use the Float-preserving sibling.
+fn main() -> Unit = println(float.to_string(float.abs(-2.5)))

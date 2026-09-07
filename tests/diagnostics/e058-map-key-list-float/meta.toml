@@ -1,0 +1,3 @@
+expects_code = "E058"
+expects_error = "type 'List[Float]' is not hashable"
+hint_substring = "Map keys must be hashable"

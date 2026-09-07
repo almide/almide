@@ -169,6 +169,7 @@ from its body on a bare-parameter tail) — the gate bites.
 | `proofs/output-parity.sh` | native and wasm agree, for the baseline set | anything outside that set |
 | `scripts/check-contracts.sh` | every observable cross-target promise has executable evidence | that the promise is the right one |
 | the cross-target fuzz | no divergence found in N programs | no divergence exists |
+| the E083 exit validator (`exit_plan.rs`, #1996) | every function's emitted exit windows implement its checked ExitPlan — each released credit decremented there, nothing carried or foreign decremented, the transfer instruction the plan names, no credit outstanding across a frame-replacing edge — read back from the wasm bytes, or the build stops with a compiler-defect diagnostic (never a wall, never a reroute) | that the plan's CONTENT is right (that is the credit harness and the witness); anything downstream of the bytes (wasmtime, the host) |
 | the kernel-conformance pin (C-280) | the compiled family's observables equal the kernel-checked λ_almd trace, on both targets; the generated corpus matches the compiled evaluator's traces | that every almide program refines the kernel — only the fragment's image is pinned; corpus `.expected` values are evaluator-pinned (compiled Lean), not kernel-checked |
 
 Reproduce all of it: `make verify-trust`.

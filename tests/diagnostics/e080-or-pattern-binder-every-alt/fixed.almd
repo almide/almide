@@ -1,0 +1,10 @@
+// Binding the SAME name in every alternative (Rust allows this) is still
+// rejected: Almide or-pattern alternatives are binder-free, no exceptions.
+type Shape = Circle(Int) | Square(Int)
+
+fn size(s: Shape) -> Int = match s {
+  Circle(n) => n,
+  Square(n) => n,
+}
+
+fn main() -> Unit = println("${size(Circle(2))}")

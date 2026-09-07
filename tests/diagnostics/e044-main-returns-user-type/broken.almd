@@ -1,0 +1,4 @@
+// E044 variant: fn main declared to return a user-declared record type.
+type Summary = { ok: Int }
+
+fn main() -> Summary = Summary { ok: 1 }

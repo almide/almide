@@ -66,6 +66,15 @@ pub struct TypeEnv {
     /// answer `Wrapper` and reported a phantom E019 ("declared in Wrapper and
     /// Wrapper", #862's surfacing of the module-diagnostics path).
     pub alias_owner_module: Option<Sym>,
+    /// Set when the ENTRY program is a bundled stdlib module compiled on its
+    /// own (`almide compile bytes --json` stages the bundled source as the
+    /// entry): that module's name. The entry program's unprefixed `type`
+    /// declaration of a name the module OWNS (`STDLIB_OWNED_TYPES`) is then
+    /// the stdlib's own registration and keeps the bare key — the identity
+    /// every stdlib signature carries — instead of the entry program's
+    /// shadow scope (#1828's `self.X`, which is for a USER program declaring
+    /// the name). `None` for every other entry program.
+    pub entry_bundled_module: Option<Sym>,
     /// User-defined module names (for distinguishing from stdlib in module calls)
     pub user_modules: std::collections::HashSet<Sym>,
     /// PACKAGE roots imported as external dependencies (`import snaidhm`,
@@ -226,7 +235,51 @@ impl TypeEnv {
             opaque_alias_visibility: std::collections::HashMap::new(),
             opaque_alias_module: std::collections::HashMap::new(),
             alias_owner_module: None,
+            entry_bundled_module: None,
         }
+    }
+
+    /// Is an UNPREFIXED declaration of `name` the stdlib's own — the entry
+    /// program being the bundled module that owns the name
+    /// (`entry_bundled_module`)? Such a declaration keeps the bare key; a
+    /// user program's declaration of the same name takes its shadow scope
+    /// (#1828).
+    pub fn entry_owns_stdlib_type(&self, name: &str) -> bool {
+        self.entry_bundled_module.is_some_and(|m| {
+            almide_lang::stdlib_info::stdlib_owned_type_owner(name) == Some(m.as_str())
+        })
+    }
+
+    /// The `opaque_alias_targets` key a constructor call or pattern spelled
+    /// `name` names from `cur_mod` (#1835) — the newtype's identity
+    /// (`registration::opaque_alias_identity`): the module's own `m.name`;
+    /// the entry program's shadow of a stdlib-owned name (`self.name`); the
+    /// bare name (a bundled module's newtype, or the entry program's plain
+    /// one); else the unique OTHER module's `x.name` — a foreign constructor,
+    /// which the checker reports as E033 rather than as an unknown name.
+    pub fn opaque_alias_key(&self, name: &str, cur_mod: Option<&str>) -> Option<Sym> {
+        let has = |k: &str| self.opaque_alias_targets.contains_key(&sym(k));
+        if name.contains('.') {
+            return has(name).then(|| sym(name));
+        }
+        if let Some(m) = cur_mod {
+            let own = format!("{}.{}", m, name);
+            if has(&own) {
+                return Some(sym(&own));
+            }
+        }
+        if let Some(shadow) = crate::canonicalize::resolve::stdlib_shadow_key(name, cur_mod)
+            && has(&shadow)
+        {
+            return Some(sym(&shadow));
+        }
+        if has(name) {
+            return Some(sym(name));
+        }
+        let mut foreign = self.opaque_alias_targets.keys()
+            .filter(|k| k.as_str().rsplit_once('.').is_some_and(|(_, base)| base == name));
+        let first = *foreign.next()?;
+        foreign.next().is_none().then_some(first)
     }
 
     /// Snapshot the current keys in functions/types/constructors/top_lets.
@@ -276,10 +329,18 @@ impl TypeEnv {
                 if !seen.insert(*name) {
                     return true;
                 }
-                if let Some(resolved) = self.types.get(name) {
-                    self.is_eq_inner(resolved, seen)
-                } else {
-                    true
+                match self.types.get(name) {
+                    // A Named that resolves to its variant DEFINITION is one
+                    // logical node: re-entering the Variant arm would read the
+                    // name already in `seen` as a cycle and skip the payloads
+                    // (#1773's class — a Float payload passed as hashable).
+                    // Claim the variant's name and walk the payloads directly.
+                    Some(resolved @ Ty::Variant { name: vn, .. }) => {
+                        seen.insert(*vn);
+                        resolved.children().iter().all(|child| self.is_eq_inner(child, seen))
+                    }
+                    Some(resolved) => self.is_eq_inner(resolved, seen),
+                    None => true,
                 }
             }
             // All other types: Eq if all children are Eq
@@ -310,10 +371,17 @@ impl TypeEnv {
                 if !seen.insert(*name) {
                     return true;
                 }
-                if let Some(resolved) = self.types.get(name) {
-                    self.is_hash_inner(resolved, seen)
-                } else {
-                    true
+                match self.types.get(name) {
+                    // One logical node with its variant definition — see
+                    // is_eq_inner. Without the bypass the payload walk was
+                    // skipped as a false cycle and `| Temp(Float)` keyed a
+                    // Map (#1773: check passed, rustc refused Hash on f64).
+                    Some(resolved @ Ty::Variant { name: vn, .. }) => {
+                        seen.insert(*vn);
+                        resolved.children().iter().all(|child| self.is_hash_inner(child, seen))
+                    }
+                    Some(resolved) => self.is_hash_inner(resolved, seen),
+                    None => true,
                 }
             }
             // All other types: hashable if all children are hashable
@@ -347,7 +415,16 @@ impl TypeEnv {
                 if !seen.insert(*name) {
                     return None;
                 }
-                self.types.get(name).and_then(|resolved| self.hash_blocker_inner(resolved, seen))
+                match self.types.get(name) {
+                    // Mirror of is_hash_inner's variant-definition bypass —
+                    // the two traversals must never disagree on reachability.
+                    Some(resolved @ Ty::Variant { name: vn, .. }) => {
+                        seen.insert(*vn);
+                        resolved.children().iter().find_map(|child| self.hash_blocker_inner(child, seen))
+                    }
+                    Some(resolved) => self.hash_blocker_inner(resolved, seen),
+                    None => None,
+                }
             }
             _ => ty.children().iter().find_map(|child| self.hash_blocker_inner(child, seen)),
         }
@@ -388,6 +465,13 @@ impl TypeEnv {
                         && !self.declares_ord(*name)
                     {
                         return false;
+                    }
+                    // Variant-definition bypass (see is_eq_inner): the
+                    // declares_ord gate above already admitted the derive;
+                    // the payloads must still order structurally.
+                    if let Ty::Variant { name: vn, .. } = &resolved {
+                        seen.insert(*vn);
+                        return resolved.children().iter().all(|child| self.is_ord_inner(child, seen));
                     }
                     self.is_ord_inner(&resolved, seen)
                 } else {

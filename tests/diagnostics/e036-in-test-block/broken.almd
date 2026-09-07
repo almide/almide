@@ -1,0 +1,10 @@
+// E036 inside a TEST block — the assertion pins the replacement text and the
+// original cause is gone.
+fn half(n: Int) -> Int! = if n % 2 == 0 then ok(n / 2) else err("odd")
+
+test "map_err keeps context" {
+  let r = half(3) |> result.map_err((e) => "bad half")
+  assert_eq(r, err("bad half"))
+}
+
+fn main() -> Unit = println("ok")

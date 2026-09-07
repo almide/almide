@@ -337,6 +337,10 @@ fn collect_defined_vars_stmts(stmts: &[IrStmt], defined: &mut HashSet<VarId>, mm
 fn collect_pattern_defined_vars(pat: &IrPattern, defined: &mut HashSet<VarId>) {
     match pat {
         IrPattern::Bind { var, .. } => { defined.insert(*var); }
+        IrPattern::As { var, inner, .. } => {
+            defined.insert(*var);
+            collect_pattern_defined_vars(inner, defined);
+        }
         IrPattern::Constructor { args, .. } => {
             for a in args { collect_pattern_defined_vars(a, defined); }
         }

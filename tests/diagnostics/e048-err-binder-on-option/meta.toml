@@ -1,0 +1,3 @@
+expects_code = "E048"
+expects_error = "pattern `err(..)` destructures a Result"
+hint_substring = "binder goes away"

@@ -1,0 +1,9 @@
+// Enum brace construction as a RECORD FIELD initializer, on an enum whose
+// cases carry no named fields at all.
+type Kind = | Red | Blue
+type Item = { kind: Kind, count: Int }
+
+fn main() -> Unit = {
+  let it = Item { kind: Kind { name: "red" }, count: 1 }
+  println(int.to_string(it.count))
+}

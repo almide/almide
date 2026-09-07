@@ -163,6 +163,157 @@ fn fixed_heap_budget_suffices_and_is_enforced() {
 }
 
 #[test]
+fn flat_map_chunks_recycle_under_fixed_budget() {
+    if Command::new(almide_bin()).arg("--version").output().is_err() {
+        return;
+    }
+    if !wasmtime_available() {
+        return;
+    }
+    let dir = std::env::temp_dir().join("almide-static-memory");
+    std::fs::create_dir_all(&dir).expect("mkdir");
+
+    // The flat_map merge window (#1729, increment 2): 50k fresh scalar
+    // chunks push into the accumulator and each chunk is freed per
+    // iteration, and 50k pushes of an ALIASED chunk (the callback
+    // returning its captured list) take inc-before-dec, so the shared
+    // list survives its own consumption. Live payload ≈ 2 MiB; the old
+    // per-element $concat retained the outgrown accumulator every
+    // iteration (O(n²) bytes), which no fixed budget survives.
+    let fm = dir.join("flatmap-recycle.almd");
+    std::fs::write(
+        &fm,
+        "import int\n\neffect fn main() -> Unit = {\n  let shared = [7, 8, 9]\n  let big = list.range(0, 50000) |> list.flat_map((i) => [i, i + 1])\n  let echo = list.range(0, 50000) |> list.flat_map((i) => shared)\n  println(int.to_string(list.len(big)))\n  println(int.to_string(list.len(echo)))\n  println(int.to_string(list.sum(shared)))\n}\n",
+    )
+    .expect("write");
+    let fm_wasm = dir.join("flatmap-recycle.wasm");
+    let out = Command::new(almide_bin())
+        .args([
+            "build",
+            fm.to_str().unwrap(),
+            "--target",
+            "wasm",
+            "--heap-cap",
+            "8388608",
+            "-o",
+            fm_wasm.to_str().unwrap(),
+        ])
+        .output()
+        .expect("spawn almide build");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let run = Command::new("wasmtime")
+        .args(["run", fm_wasm.to_str().unwrap()])
+        .output()
+        .expect("spawn wasmtime");
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout),
+        "100000\n150000\n24\n",
+        "flat_map under the budget must answer the native trace"
+    );
+}
+
+#[test]
+fn index_writes_stay_in_place_under_fixed_budget() {
+    if Command::new(almide_bin()).arg("--version").output().is_err() {
+        return;
+    }
+    if !wasmtime_available() {
+        return;
+    }
+    let dir = std::env::temp_dir().join("almide-static-memory");
+    std::fs::create_dir_all(&dir).expect("mkdir");
+
+    // The index-write COW judge (#1729): 100k writes into a preallocated
+    // 100k-element list run IN PLACE when the list is uniquely held —
+    // the old $block_copy-per-write materialized a fresh generation on
+    // every write (O(n²) retained), which no fixed budget survives. The
+    // snapshot taken before the loop pins the value-semantics half: the
+    // shared holder forces ONE copy and keeps its zeros.
+    let iw = dir.join("index-writes.almd");
+    std::fs::write(
+        &iw,
+        "import int\n\neffect fn main() -> Unit = {\n  var data: List[Int] = list.repeat(0, 100000)\n  let snap = data\n  for i in 0..<100000 {\n    data[i] = 1\n  }\n  println(int.to_string(list.sum(snap)))\n  println(int.to_string(list.sum(data)))\n}\n",
+    )
+    .expect("write");
+    let iw_wasm = dir.join("index-writes.wasm");
+    let out = Command::new(almide_bin())
+        .args([
+            "build",
+            iw.to_str().unwrap(),
+            "--target",
+            "wasm",
+            "--heap-cap",
+            "8388608",
+            "-o",
+            iw_wasm.to_str().unwrap(),
+        ])
+        .output()
+        .expect("spawn almide build");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let run = Command::new("wasmtime")
+        .args(["run", iw_wasm.to_str().unwrap()])
+        .output()
+        .expect("spawn wasmtime");
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout),
+        "0\n100000\n",
+        "the snapshot must keep its zeros and the writes must land"
+    );
+}
+
+#[test]
+fn join_allocates_one_result_under_fixed_budget() {
+    if Command::new(almide_bin()).arg("--version").output().is_err() {
+        return;
+    }
+    if !wasmtime_available() {
+        return;
+    }
+    let dir = std::env::temp_dir().join("almide-static-memory");
+    std::fs::create_dir_all(&dir).expect("mkdir");
+
+    // The two-pass $list_join (#1729's strchurn shape): joining 50k
+    // rendered ints allocates ONE result block. The old repeated-$concat
+    // body re-copied the growing accumulator per piece and never freed
+    // the outgrown generation — O(n²) retained bytes past the 512 KiB
+    // freelist ceiling, which no fixed budget survives. The split-back
+    // round trip pins the byte contract on the same run.
+    let jn = dir.join("join-budget.almd");
+    std::fs::write(
+        &jn,
+        "import int\n\neffect fn main() -> Unit = {\n  let n = 50000\n  let parts = list.range(0, n) |> list.map((i) => int.to_string(i))\n  let joined = string.join(parts, \",\")\n  let back = string.split(joined, \",\")\n  println(int.to_string(string.len(joined)))\n  println(int.to_string(list.len(back)))\n}\n",
+    )
+    .expect("write");
+    let jn_wasm = dir.join("join-budget.wasm");
+    let out = Command::new(almide_bin())
+        .args([
+            "build",
+            jn.to_str().unwrap(),
+            "--target",
+            "wasm",
+            "--heap-cap",
+            "8388608",
+            "-o",
+            jn_wasm.to_str().unwrap(),
+        ])
+        .output()
+        .expect("spawn almide build");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let run = Command::new("wasmtime")
+        .args(["run", jn_wasm.to_str().unwrap()])
+        .output()
+        .expect("spawn wasmtime");
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout),
+        "288889\n50000\n",
+        "join then split must round-trip under the budget"
+    );
+}
+
+#[test]
 fn artifact_is_partition_shaped() {
     if Command::new(almide_bin()).arg("--version").output().is_err() {
         return;

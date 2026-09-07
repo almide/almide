@@ -1,0 +1,7 @@
+// E037: an Option on one side of == against its bare payload, raised from a
+// match GUARD position.
+fn find() -> Option[Int] = some(1)
+
+fn main() -> Unit = {
+  println(match 0 { _ if (find() ?? 0) == 1 => "hit", _ => "miss" })
+}

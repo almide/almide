@@ -21,6 +21,19 @@ pub(super) fn generate_auto_derives(ctx: &mut LowerCtx, type_decls: &[IrTypeDecl
             None => continue,
         };
         let type_ty = Ty::Named(td.name, vec![]);
+        // The entry program's shadow of a stdlib-owned name is declared
+        // `self.X` (#1828), but its convention fns are keyed BARE (`X.eq`)
+        // like every other root declaration's — that is the key
+        // `register_derive_sigs` registered and the name the call site
+        // emits (`X_eq`). The VALUE type stays the qualified one.
+        let bare = almide_lang::stdlib_info::strip_root_type_scope(td.name.as_str());
+        let root_shadow;
+        let td = if bare == td.name.as_str() {
+            td
+        } else {
+            root_shadow = IrTypeDecl { name: sym(bare), ..td.clone() };
+            &root_shadow
+        };
         let fields = match &td.kind {
             IrTypeDeclKind::Record { fields } => Some(fields.clone()),
             _ => None,
@@ -149,8 +162,10 @@ fn derive_codec(
 fn auto_derive_repr(vt: &mut VarTable, type_name: &str, type_ty: &Ty, fields: &[IrFieldDecl]) -> IrFunction {
     let var = vt.alloc(sym("_v"), type_ty.clone(), Mutability::Let, None);
 
-    // Build string interp: "TypeName { field1: ..., field2: ... }"
-    let mut parts = vec![IrStringPart::Lit { value: format!("{} {{ ", type_name) }];
+    // Build string interp: "TypeName { field1: ..., field2: ... }" — the
+    // DECLARED spelling (`Cfg`, not a module's `m.Cfg`), the bytes `"${v}"`
+    // prints on every leg (#1836, C-009). The fn NAME below stays qualified.
+    let mut parts = vec![IrStringPart::Lit { value: format!("{} {{ ", declared_type_name(type_name)) }];
     for (i, f) in fields.iter().enumerate() {
         if i > 0 { parts.push(IrStringPart::Lit { value: ", ".to_string() }); }
         parts.push(IrStringPart::Lit { value: format!("{}: ", f.name) });

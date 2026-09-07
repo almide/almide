@@ -285,10 +285,16 @@ static __ALMIDE_CAP_ALLOC: __AlmideCapAlloc = __AlmideCapAlloc;
 "#
     );
     // Inner attributes must precede all items: split after the leading run of
-    // `#![...]` / blank lines, then place the runtime between the two halves.
+    // `#![...]` / blank / `//` comment lines, then place the runtime between
+    // the two halves. The v1 trust-spine render opens with a `// Generated
+    // by …` line BEFORE its `#![allow(..)]`; a leading run that stopped at
+    // the comment put the runtime ahead of the inner attribute — "an inner
+    // attribute is not permitted in this context" — which stayed invisible
+    // while every cap-test program still walled v1 (#1869 widened the floor).
     let mut split = 0;
     for line in rs_code.split_inclusive('\n') {
-        if line.trim().is_empty() || line.trim_start().starts_with("#![") {
+        let l = line.trim_start();
+        if l.trim().is_empty() || l.starts_with("#![") || l.starts_with("//") {
             split += line.len();
         } else {
             break;
@@ -341,10 +347,14 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
     // command writes — the cross-target equivalence guarantee depends on both
     // entry points sharing one code path. Any compile diagnostic was already
     // printed there; we just propagate the exit.
-    let (bytes, structural) = match compile_to_wasm_bytes(file, allow_unverified, verified, true) {
+    let (bytes, structural, host_ops) = match compile_to_wasm_bytes(file, allow_unverified, verified, true, false) {
         Ok(b) => b,
         Err(()) => std::process::exit(1),
     };
+    // The p3 component earns its http import block only when the emitted
+    // op set reaches the http family (#1710 PR B) — a non-http component
+    // must not demand `-S http=y` from its runtime.
+    let wants_http = host_ops.iter().any(|op| (43..=50).contains(op));
     // The structural leg's module imports `almide.*` (the embedded host's
     // surface). A BUILD artifact must run on stock runtimes, so it ships in
     // the WASI form — same index space, shimmed imports, proc_exit on trap
@@ -367,7 +377,7 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
     // the corpus gates cover it.
     let direct_p3 = direct_p2 && std::env::var_os("ALMIDE_COMPONENT_P3").is_some();
     let bytes = if direct_p3 {
-        match almide_wasm_run::wasi_p3::to_p3(&bytes) {
+        match almide_wasm_run::wasi_p3::to_p3(&bytes, wants_http) {
             Ok(c) => c,
             Err(e) => {
                 err(&format!("error: p3 component transform failed — this is an Almide bug: {e}"));
@@ -384,7 +394,7 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
         }
     } else {
         let bytes = if structural {
-            match almide_wasm_run::wasi::to_wasi(&bytes) {
+            match almide_wasm_run::wasi::to_wasi(&bytes, &host_ops) {
                 Ok(w) => w,
                 Err(e) => {
                     err(&format!("error: WASI transform failed — this is an Almide bug: {e}"));
@@ -423,7 +433,7 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
     // finished output, so running it replaces bytes the trust-spine produced
     // with bytes a separate, un-certified tool rewrote. That is why it stays
     // an explicit, default-off opt-in (`--wasm-opt`) rather than automatic —
-    // see the wasm-opt parity leg (`tests/wasm_runtime_test.rs::wasm_opt_parity_spec`) for the
+    // see the wasm-opt parity leg (`tests/wasm_runtime_opt_parity.rs::wasm_opt_parity_spec`) for the
     // differential-testing evidence backing this tier's own guarantee.
     // Name the LEG in the one line every build prints: "which renderer
     // produced these bytes" was invisible by default (the line said
@@ -574,6 +584,15 @@ fn typecheck_wasm_program(file: &str, source_text: &str, program: &mut almide::a
         }
         return Err(());
     }
+    // Warnings reach this leg too (#1911): the native driver prints every
+    // checker warning before the program runs (compile_driver), and
+    // `run --target wasm` printed none — an E052 deprecation a program
+    // carried was visible on one target and silent on the other.
+    if !crate::warnings_suppressed() {
+        for d in diagnostics.iter().filter(|d| d.level == diagnostic::Level::Warning) {
+            err(&format!("{}", crate::diagnostic_render::display_with_source(d, source_text)));
+        }
+    }
     Ok(checker)
 }
 
@@ -644,7 +663,7 @@ fn verify_wasm_ir(ir_program: &almide::ir::IrProgram) -> Result<(), ()> {
 /// scripts/check-target-availability.sh) turns the late render wall into
 /// an E081 at check time, naming the reason and — where one exists — the
 /// portable alternative. The render wall stays as the backstop.
-fn check_wasm_availability(ir_program: &almide::ir::IrProgram) -> Result<(), ()> {
+fn check_wasm_availability(ir_program: &almide::ir::IrProgram, embedded_leg: bool) -> Result<(), ()> {
     // The measurement escape: the availability PROBE builds through this
     // binary to measure the ground truth the table declares — with the
     // check armed it would measure its own declaration (circular).
@@ -653,17 +672,20 @@ fn check_wasm_availability(ir_program: &almide::ir::IrProgram) -> Result<(), ()>
     }
     use std::collections::BTreeMap;
     use std::sync::OnceLock;
-    static UNAVAILABLE: OnceLock<BTreeMap<String, (String, Option<String>)>> = OnceLock::new();
+    type Row = (String, Option<String>, Option<String>, Option<String>, Option<String>);
+    static UNAVAILABLE: OnceLock<BTreeMap<String, Row>> = OnceLock::new();
     let table = UNAVAILABLE.get_or_init(|| {
         let toml = include_str!("../../proofs/target-availability.toml");
         let mut out = BTreeMap::new();
         // Schema 2 (#1710 increment 2): one `[[unavailable]]` row per fn
-        // with a per-leg `legs = [..]` list. E081 is the STOCK-P1 story —
-        // "no build path serves this on `--target wasm`" — so only rows
-        // declaring that leg feed the diagnostic. The reason is the
-        // per-leg `reason-stock-p1` when present, else the shared
-        // `reason`. Line-anchored block split, as before (a substring
-        // split once ate the first row through the header comment).
+        // with a per-leg `legs = [..]` list. E081 is a PER-LEG verdict
+        // (#1710 increment 3): the build path walls on the stock-p1 leg,
+        // the run/bench path (the embedded host) walls on the embedded
+        // leg — a stock wall alone no longer refuses the run route the
+        // row's own reason says is served. Rows keep their raw legs list
+        // and both per-leg reasons; the caller filters. Line-anchored
+        // block split, as before (a substring split once ate the first
+        // row through the header comment).
         for block in toml.split("\n[[unavailable]]\n").skip(1) {
             let field = |k: &str| {
                 block.lines().find_map(|l| {
@@ -673,22 +695,24 @@ fn check_wasm_availability(ir_program: &almide::ir::IrProgram) -> Result<(), ()>
             let legs = block
                 .lines()
                 .find_map(|l| l.strip_prefix("legs = ["))
-                .unwrap_or("");
-            if !legs.contains("\"stock-p1\"") {
-                continue;
-            }
-            let reason = field("reason-stock-p1").or_else(|| field("reason"));
-            if let (Some(fn_name), Some(reason)) = (field("fn"), reason) {
-                out.insert(fn_name, (reason, field("alt")));
+                .unwrap_or("")
+                .to_string();
+            if let Some(fn_name) = field("fn") {
+                out.insert(
+                    fn_name,
+                    (legs, field("reason-stock-p1"), field("reason-embedded"), field("reason"), field("alt")),
+                );
             }
         }
         out
     });
-    let mut hits: BTreeMap<String, &(String, Option<String>)> = BTreeMap::new();
+    let leg_lit = if embedded_leg { "\"embedded\"" } else { "\"stock-p1\"" };
+    let mut hits: BTreeMap<String, &Row> = BTreeMap::new();
     use almide::ir::visit::IrVisitor;
     struct Scan<'a> {
-        table: &'a BTreeMap<String, (String, Option<String>)>,
-        hits: BTreeMap<String, &'a (String, Option<String>)>,
+        table: &'a BTreeMap<String, Row>,
+        leg_lit: &'static str,
+        hits: BTreeMap<String, &'a Row>,
     }
     impl<'a> IrVisitor for Scan<'a> {
         fn visit_expr(&mut self, e: &almide::ir::IrExpr) {
@@ -697,22 +721,65 @@ fn check_wasm_availability(ir_program: &almide::ir::IrProgram) -> Result<(), ()>
             } = &e.kind
             {
                 let key = format!("{}.{}", module.as_str(), func.as_str());
-                if let Some(row) = self.table.get(&key) {
+                if let Some(row) = self.table.get(&key)
+                    && row.0.contains(self.leg_lit)
+                {
                     self.hits.entry(key).or_insert(row);
                 }
             }
             almide::ir::visit::walk_expr(self, e);
         }
     }
-    let mut scan = Scan { table, hits: BTreeMap::new() };
-    for f in ir_program.functions.iter().chain(ir_program.modules.iter().flat_map(|m| m.functions.iter())) {
+    let mut scan = Scan { table, leg_lit, hits: BTreeMap::new() };
+    // Only REACHABLE bodies are scanned — the same reachability the wasm
+    // emitter prunes by (`reachability::reachable_fn_names`), so the
+    // check-time diagnostic and the emit agree: a call the emitter never
+    // lowers cannot fail the build (#644's pin, kept when the ledger grew
+    // to the whole public surface in #1827/#1831). The render wall stays
+    // the backstop for anything reachability lets through.
+    let reachable = almide::codegen::reachability::reachable_fn_names(ir_program);
+    let is_reachable = |module: Option<&str>, name: &str| {
+        almide::codegen::reachability::registered_keys(module, name).iter().any(|k| reachable.contains(k))
+    };
+    for f in ir_program.functions.iter().filter(|f| is_reachable(None, f.name.as_str())) {
         scan.visit_expr(&f.body);
     }
+    for m in &ir_program.modules {
+        let mname = m.name.to_string();
+        for f in m.functions.iter().filter(|f| is_reachable(Some(&mname), f.name.as_str())) {
+            scan.visit_expr(&f.body);
+        }
+    }
     hits.extend(scan.hits);
+    // The p3 component serves the http string family (#1710 PR B): under
+    // ALMIDE_COMPONENT_P3 the ops-43..=50 fns ship through the to_p3 http
+    // shim, so their stock-p1 rows do not bar THIS build path — the same
+    // predicate that flips fs routing structural for p3.
+    if std::env::var_os("ALMIDE_COMPONENT_P3").is_some() {
+        for k in [
+            "http.get",
+            "http.post",
+            "http.put",
+            "http.patch",
+            "http.delete",
+            // The framed family rides the same shim (ops 48..=50, #1710).
+            "http.request",
+            "http.request_status",
+            "http.get_status",
+            "http.request_bytes",
+            "http.get_bytes",
+        ] {
+            hits.remove(k);
+        }
+    }
     if hits.is_empty() {
         return Ok(());
     }
-    for (key, (reason, alt)) in &hits {
+    for (key, (_, r_stock, r_emb, r_shared, alt)) in &hits {
+        let reason = if embedded_leg { r_emb.as_ref() } else { r_stock.as_ref() }
+            .or(r_shared.as_ref())
+            .cloned()
+            .unwrap_or_else(|| "declared unavailable on this leg".to_string());
         let alt_line = alt.as_ref().map(|a| format!("\n  try: {a}")).unwrap_or_default();
         err(&format!(
             "error[E081]: `{key}` is not available on --target wasm\n  \
@@ -770,8 +837,7 @@ fn render_wasm_module_routed(
     has_main: bool,
     dep_paths: &[(project::PkgId, std::path::PathBuf)],
     uses_incumbent_features: bool,
-    host_variant: bool,
-) -> Result<(Vec<u8>, bool), ()> {
+) -> Result<(Vec<u8>, bool, Vec<i32>), ()> {
     //   - `ALMIDE_FUEL_PROBE` set         → incumbent (the charge-trace
     //     probe line is that leg's Σ-probe instrumentation — contract
     //     evidence keeps its measured meaning; the structural leg's C-320
@@ -788,10 +854,9 @@ fn render_wasm_module_routed(
         && (std::env::var_os("ALMIDE_WASM_INCUMBENT").is_some()
             || std::env::var_os("ALMIDE_FUEL_PROBE").is_some()
             || !has_main
-            || uses_incumbent_features
-            || (library_ok && host_variant));
+            || uses_incumbent_features);
     if incumbent {
-        let r = render_wasm_module(source_text, v1_self_modules, library_ok).map(|(b, _)| (b, false));
+        let r = render_wasm_module(source_text, v1_self_modules, library_ok).map(|(b, _)| (b, false, Vec::new()));
         // REVERSE handover (#1423 bucket A, the env.sleep_ms build shape):
         // a SHAPE-routed host-variant program the incumbent walls gets one
         // structural attempt — the same verified-to-verified doctrine as
@@ -819,7 +884,7 @@ fn render_wasm_module_routed(
                     bytes.len()
                 ));
             }
-            return Ok((bytes, true));
+            return Ok((bytes, true, host_ops.iter().copied().collect()));
         }
         return r;
     }
@@ -837,14 +902,20 @@ fn render_wasm_module_routed(
         if std::env::var_os("ALMIDE_VERIFIED_DEBUG").is_some() {
             err(&format!("[almide] structural leg declined ({why}) — incumbent renderer"));
         }
-        let res = render_wasm_module(source_text, v1_self_modules, library_ok).map(|(b, _)| (b, false));
+        let res = render_wasm_module(source_text, v1_self_modules, library_ok).map(|(b, _)| (b, false, Vec::new()));
         if res.is_err() {
             // #1690: BOTH legs refused. The incumbent just printed its own wall
             // above — without these lines the DEFAULT leg's reason is invisible,
             // and the reader bisects a function the structural leg lowers fine
             // for a reason that belongs to the other engine.
             err(&format!("wall (structural leg, the default): {why}"));
-            err("note: both wasm legs refused this program — the failure above these lines is the incumbent fallback's; the structural leg's own reason is the `wall (structural leg…)` line.");
+            // #1922: the both-legs refusal is a named diagnostic. `almide check
+            // --target wasm` runs this same routing and surfaces it at check
+            // time; the build path stays the backstop.
+            err("error[E082]: both wasm legs refused this program — the failure above these lines is the incumbent fallback's; the structural leg's own reason is the `wall (structural leg…)` line.");
+            if library_ok {
+                err("  note: this is the stock-WASI BUILD route; `almide run --target wasm` (the embedded host serves every op) may still run it. `almide check --target wasm` reports this verdict without building.");
+            }
         }
         res
     };
@@ -880,7 +951,7 @@ fn render_wasm_module_routed(
                     .find(|op| !almide_wasm_run::wasi::P1_SERVED_OPS.contains(op))
             {
                 return reroute(&format!(
-                    "host op {op} has no stock-WASI service (the embedded host                      — `almide run --target wasm` — serves it)"
+                    "host op {op} has no stock-WASI service (the embedded host — `almide run --target wasm` — serves it)"
                 ));
             }
             // With the debug env, ALWAYS name the winning leg — the
@@ -892,9 +963,16 @@ fn render_wasm_module_routed(
                     bytes.len()
                 ));
             }
-            Ok((bytes, true))
+            Ok((bytes, true, host_ops.iter().copied().collect()))
         }
         Err(almide_wasm::EmitError::Unsupported(reason)) => reroute(&reason),
+        // E083 (#1996): a compiler ownership defect is NOT rerouted around —
+        // the incumbent would ship a program the checked plan says leaks,
+        // and the message must never tell the writer to change valid code.
+        Err(almide_wasm::EmitError::OwnershipLowering(d)) => {
+            err(&d.to_string());
+            Err(())
+        }
     }
 }
 
@@ -1029,7 +1107,7 @@ fn render_wasm_module(source_text: &str, v1_self_modules: &[(String, almide_lang
     }
 }
 
-pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified: bool, library_ok: bool) -> Result<(Vec<u8>, bool), ()> {
+pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified: bool, library_ok: bool, embedded_leg: bool) -> Result<(Vec<u8>, bool, Vec<i32>), ()> {
     let (mut program, source_text, mut resolved, dep_paths) = parse_and_resolve_wasm(file)?;
 
     // v1 `--verified`: capture the FRESH (un-inferred) cross-module siblings now, before the loop
@@ -1043,7 +1121,7 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
     let mut ir_program = lower_and_link_wasm_ir(&program, &mut checker, &mut resolved)?;
     verify_wasm_ir(&ir_program)?;
     check_no_native_only_matrix(&ir_program)?;
-    check_wasm_availability(&ir_program)?;
+    check_wasm_availability(&ir_program, embedded_leg)?;
 
     // Routing inputs (see render_wasm_module_routed): project shape, decided
     // from what the v0 gates already computed — never from a failure.
@@ -1053,25 +1131,20 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
     // export mode yet (#1598's sibling surface), so those modules stay on
     // the incumbent leg.
     let has_exports = ir_program.functions.iter().any(|f| !f.export_attrs.is_empty());
-    let imports_module = |names: &[&str]| {
-        std::iter::once(&program)
-            .chain(resolved.modules.iter().map(|(_, p, _, _)| p))
-            .flat_map(|p| p.imports.iter())
-            .any(|d| {
-                matches!(d, almide::ast::Decl::Import { path, .. }
-                    if path.first().is_some_and(|r| names.contains(&r.as_str())))
-            })
-    };
-    // Build-time host routing: env/process ride the incumbent (no
-    // structural surface); fs rides the incumbent because the p1
-    // `to_wasi` transform carries no fs ops — EXCEPT when the build is
-    // headed for the direct p3 component (#1628 increment 2d), whose
-    // shim now carries the full fs read+write surface, so fs programs
-    // flip to the structural leg there by default (#1584's first
-    // default-route slice).
-    let p3_requested = std::env::var_os("ALMIDE_COMPONENT_P3").is_some();
-    let host_variant = imports_module(&["env", "process"])
-        || (imports_module(&["fs"]) && !p3_requested);
+    // #1921 CLOSED: the module-level host-variant import scan is GONE. Host
+    // routing is decided from the EMITTED op set, not from import names:
+    // the structural leg lowers the program, and `render_wasm_module_routed`
+    // audits the host ops it emitted against the p1 shim's served set on the
+    // BUILD path (`library_ok`) — an fs op the `to_wasi` transform cannot
+    // serve reroutes the whole module to the incumbent's WASI rendering,
+    // while `almide run --target wasm` (the embedded host serves every op)
+    // and the direct p3 component (its shim carries the fs surface) keep the
+    // structural module. `process` fns have no structural surface and wall
+    // at lowering, taking the same verified-to-verified reroute. Before
+    // this, `import fs` / `import process` unconditionally denied the
+    // structural leg — including on the run path, where it served the
+    // program end to end — and an fs program whose only fs use was inside a
+    // `!`-consumed `fan.map` built on NEITHER leg.
     // #1598 CLOSED as per-fn auto-flip: the matrix/io module pre-scan is
     // GONE. The linked surfaces (io.read_all via the host's op-31 drain
     // joined io.print/write/write_bytes/read_n_bytes; the measured matrix
@@ -1095,7 +1168,6 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
         has_main,
         &dep_paths,
         has_exports,
-        host_variant,
     )
 }
 

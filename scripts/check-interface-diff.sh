@@ -28,13 +28,26 @@
 # Negative control (must exit 1): run any additive pair REVERSED —
 #   check-interface-diff.sh HEAD v0.57.0
 # turns every addition into a removal, which must classify `breaking`.
+# The forged-input controls live in check-interface-diff-negative.sh (#1860):
+# it points INTERFACE_DIFF_ROOT at a scratch repo whose index copy has one
+# effect fn and one pure fn deleted, and expects `breaking` for each.
 set -euo pipefail
 export LC_ALL=C
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="${INTERFACE_DIFF_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 PREV="${1:?usage: check-interface-diff.sh <prev-ref> <ref> [--allow-breaking]}"
 CUR="${2:?usage: check-interface-diff.sh <prev-ref> <ref> [--allow-breaking]}"
 ALLOW="${3:-}"
+
+# The index writer (tools/gen-stdlib-doc-index.py `signature()`) emits exactly
+# one shape: `[effect ]module.fn(params) -> ret[   (deprecated — …)]`. The
+# `effect ` prefix is the only modifier that can precede the qualified name,
+# and it MUST be admitted here — anchoring at the module head skipped every
+# effect fn, so an added effect twin was uncounted and a REMOVED effect fn
+# classified `identical` (#1860). Any new modifier the writer grows belongs in
+# this one pattern; the negative control (check-interface-diff-negative.sh)
+# deletes an effect line and a pure line and expects `breaking` for both.
+SIG_HEAD='^(effect )?[a-z_0-9]+\.'
 
 # All signature lines inside the generated blocks of docs/stdlib/*.md at REF.
 surface() { # ref -> sorted signature lines on stdout
@@ -45,8 +58,8 @@ surface() { # ref -> sorted signature lines on stdout
         git -C "$ROOT" show "$ref:$f" 2>/dev/null \
           | awk '/BEGIN GENERATED SIGNATURE INDEX/{on=1} /END GENERATED SIGNATURE INDEX/{on=0} on'
       done \
-    | grep -E '^[a-z_0-9]+\.[a-z_0-9]+\(' \
-    | grep -vE '^[a-z_0-9]+\.__' \
+    | grep -E "${SIG_HEAD}[a-z_0-9]+\(" \
+    | grep -vE "${SIG_HEAD}__" \
     | sed -E 's/[[:space:]]+\(deprecated[^)]*\)[[:space:]]*$//' \
     | sort -u
 }
@@ -59,14 +72,69 @@ surface() { # ref -> sorted signature lines on stdout
 # self-host helpers) — checker-inserted, not writable surface — so their
 # appearance and disappearance is not an interface event.
 
-prev_s=$(surface "$PREV")
-cur_s=$(surface "$CUR")
+# An empty surface makes the trailing grep exit 1, which under pipefail would
+# let `set -e` kill the script silently with exit 1 — before the loud exit-2
+# guard below ever ran (the negative control's blank-index case). Swallow the
+# pipeline status so emptiness is judged by the guard, not by set -e.
+prev_s=$(surface "$PREV" || true)
+cur_s=$(surface "$CUR" || true)
 
 [ -n "$prev_s" ] || { echo "check-interface-diff: no generated signature index at $PREV" >&2; exit 2; }
 [ -n "$cur_s" ]  || { echo "check-interface-diff: no generated signature index at $CUR" >&2; exit 2; }
 
 removed=$(comm -23 <(printf '%s\n' "$prev_s") <(printf '%s\n' "$cur_s"))
 added=$(comm -13 <(printf '%s\n' "$prev_s") <(printf '%s\n' "$cur_s"))
+
+# Legacy placeholder rendering. Indexes written before the interface JSON
+# named RawPtr / Never / Matrix[Float32] and spelled tuple types
+# (394c64294) rendered every tuple as a bare `()` and every unnamed type as
+# `?` — `list.zip(...) -> List[()]`, `bytes.as_ptr(b: Bytes) -> ?`. Read
+# textually against a current index those lines are 51 "removals" that are
+# the SAME functions re-rendered, and a release would have to declare
+# `--allow-breaking` for a diff that breaks nothing. A prev-only line that
+# carries a placeholder is matched against the cur-only lines by turning
+# each placeholder into a wildcard (`()` -> any parenthesised tuple, `?` ->
+# any type); exactly one match reclassifies the pair as a re-rendering and
+# drops it from both sides. A genuine function type `() -> A` is not a
+# placeholder (the `()` is followed by `->`) and never wildcards. A
+# placeholder line with NO current twin is still a removal, and a twin
+# whose parameter list changed still fails to match — the wildcard covers
+# the type slot only, never the name or the arity. Reported on its own line
+# so the count stays auditable.
+rerendered=0
+if [ -n "$removed" ] && [ -n "$added" ]; then
+  norm=$(python3 - "$removed" "$added" <<'PY'
+import re, sys
+removed = [l for l in sys.argv[1].split("\n") if l]
+added = [l for l in sys.argv[2].split("\n") if l]
+PLACEHOLDER = re.compile(r"\(\)(?!\s*->)|\?")
+def wildcard(line):
+    out, pos = "", 0
+    for m in PLACEHOLDER.finditer(line):
+        out += re.escape(line[pos:m.start()])
+        out += r"\((?:[^()]|\([^()]*\))*\)" if m.group() == "()" else r"[A-Za-z0-9_\[\], ]+"
+        pos = m.end()
+    return re.compile("^" + out + re.escape(line[pos:]) + "$")
+keep_removed, matched_added, n = [], set(), 0
+for r in removed:
+    if not PLACEHOLDER.search(r):
+        keep_removed.append(r); continue
+    rx = wildcard(r)
+    hits = [a for a in added if a not in matched_added and rx.match(a)]
+    if len(hits) == 1:
+        matched_added.add(hits[0]); n += 1
+    else:
+        keep_removed.append(r)
+print(n)
+print("\n".join(keep_removed))
+print("--")
+print("\n".join(a for a in added if a not in matched_added))
+PY
+)
+  rerendered=$(printf '%s\n' "$norm" | sed -n 1p)
+  removed=$(printf '%s\n' "$norm" | sed -n '2,/^--$/p' | sed '$d' | grep . || true)
+  added=$(printf '%s\n' "$norm" | sed '1,/^--$/d' | grep . || true)
+fi
 
 if [ -z "$removed" ] && [ -z "$added" ]; then
   verdict="identical"
@@ -77,6 +145,9 @@ else
 fi
 
 echo "interface-diff: $PREV -> $CUR = $verdict (added=$(printf '%s' "$added" | grep -c . || true) removed=$(printf '%s' "$removed" | grep -c . || true))"
+if [ "$rerendered" != "0" ]; then
+  echo "re-rendered (legacy placeholder -> named type, same name and arity): $rerendered — not counted"
+fi
 if [ -n "$removed" ]; then
   echo "removed/changed signatures:"
   printf '%s\n' "$removed" | sed 's/^/  - /'

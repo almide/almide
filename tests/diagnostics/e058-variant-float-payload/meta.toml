@@ -1,0 +1,3 @@
+expects_code = "E058"
+expects_error = "type 'Reading' is not hashable"
+hint_substring = "record/variant with only hashable fields"

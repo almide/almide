@@ -1,0 +1,7 @@
+// E055 variant: `?.` on a BARE record value — not a Result, not an Option,
+// so the plain "Option-only" hint fires instead of the Result ladder.
+type P = { v: Int }
+
+fn f(p: P) -> Int? = p?.v
+
+fn main() -> Unit = println(int.to_string(f(P { v: 3 }) ?? 0))

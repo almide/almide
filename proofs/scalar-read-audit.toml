@@ -297,41 +297,41 @@ verdict = "NOT_SUM_READ"
 why = "aggregate_field/index_offset_any offsets resolve record/tuple layouts only (never variant_layouts); gated on materialized_aggregates/params."
 
 [[arm]]
-file = "control_p2.rs"
+file = "control_p2_e.rs"
 fn = "try_lower_result_match"
 loads = 1
 verdict = "TAG_DISPATCHED"
 why = "tag loaded (off 4 or 16), IfThen(tag); err-payload bind emitted between IfThen and Else, ok-payload bind between Else and EndIf."
 
 [[arm]]
-file = "control_p2.rs"
+file = "control_p2_e.rs"
 fn = "bind_result_err_payload"
 loads = 1
 verdict = "CALLER_DISPATCHED"
-caller = "try_lower_result_match (call between IfThen control_p2.rs:263 and Else :272)"
+caller = "try_lower_result_match (control_p2_e.rs — call between IfThen(tag) and Else; a pure text move under the 800-line cap, PR #1816)"
 why = "Unconditional payload@12 read; sole caller emits it inside the Err (IfThen) region."
 
 [[arm]]
-file = "control_p2.rs"
+file = "control_p2_e.rs"
 fn = "bind_result_ok_payload"
 loads = 2
 verdict = "CALLER_DISPATCHED"
-caller = "try_lower_result_match (call between Else control_p2.rs:272 and EndIf :279)"
+caller = "try_lower_result_match (control_p2_e.rs — call between Else and EndIf; a pure text move under the 800-line cap, PR #1816)"
 why = "Unconditional payload@12 read; sole caller emits it inside the Ok (Else) region."
 
 [[arm]]
-file = "control_p2.rs"
+file = "control_p2_e.rs"
 fn = "try_lower_variant_value_match"
 loads = 1
 verdict = "TAG_DISPATCHED"
 why = "HOISTED-LOAD pattern: both arm payloads loaded before IfThen(tag), consumption strictly branch-confined (then-bind used only in the then arm, else-bind only in the else arm). Sound because LoadHandle is a pure i32.load (render_wasm_p2_b.rs:423 — no rc mutation) and sum blocks are sized so +12 is in-bounds on every arm (Init::OptNone sized like OptSome, binds_p4_b.rs:546) — the untaken arm's load is inert bits in a dead local."
 
 [[arm]]
-file = "control_p2.rs"
+file = "control_p2_e.rs"
 fn = "bind_variant_payload"
 loads = 2
 verdict = "CALLER_DISPATCHED"
-caller = "try_lower_variant_value_match (consumption confined by lower_variant_match_branches control_p2.rs:574-625)"
+caller = "try_lower_variant_value_match (control_p2_e.rs — consumption confined by lower_variant_match_branches; a pure text move under the 800-line cap, PR #1816)"
 why = "Unconditional payload@12 bind with no tag knowledge; the sole caller confines each bound var's CONSUMPTION to its own tag arm (the hoisted-load pattern — see try_lower_variant_value_match for the two soundness facts)."
 
 [[arm]]
@@ -443,16 +443,32 @@ verdict = "NOT_SUM_READ"
 why = "Reads the mutable global's own storage slot (mg_slot_addr) — a fixed-type cell, no sum layout."
 
 [[arm]]
-file = "control_p3.rs"
-fn = "try_lower_option_unwrap_or"
+file = "control_p3_qq.rs"
+fn = "try_lower_opt_fn_unwrap_or"
 loads = 2
 verdict = "TAG_DISPATCHED"
-why = "The closure-coalesce payload case (the retired lower_closure_unwrap_or body, moved inside at the #1418 route deletion): IfThen(tag@4); payload@12 LoadHandle in the Some arm only, over a materialized Option the speculate-guarded bind produced."
+why = "The Option[Fn] class of try_lower_option_unwrap_or, moved to its own helper (PR #1816, a pure text move): the closure-coalesce payload case (the retired lower_closure_unwrap_or body, moved inside at the #1418 route deletion): IfThen(tag@4); payload@12 LoadHandle in the Some arm only, over a materialized Option the speculate-guarded bind produced."
 
 
 [[arm]]
 file = "binds_p2.rs"
 fn = "try_lower_bind_unwrap_return"
-loads = 5
+loads = 1
 verdict = "TAG_DISPATCHED"
-why = "The R2 one-rule `!` bind (return-op-eradication). The FIRST read is always the tag — @4 for the scalar family (len-as-tag), @16 for HeapOk (cap-as-tag) — and the IfThen dispatches on it. Every other load sits strictly INSIDE a dispatched region: the err arm reads the message @12 (rebox path) or @12 for the abort path, both only where the tag said Err; the ok payload (@12, load64 for a scalar or LoadHandle+Dup for a heap payload) sits in the SURVIVING straight-line continuation, reachable only where the tag said Ok. No raw sum read precedes the dispatch."
+why = "The R2 one-rule `!` bind (return-op-eradication). Since PR #1816 this fn holds ONLY the dispatch: the one read is the tag — @4 for the scalar family (len-as-tag), @16 for HeapOk (cap-as-tag) — and the IfThen dispatches on it; the region reads moved verbatim to binds_p2_bang.rs (emit_bang_exit_arm inside the IfThen, bind_bang_ok_payload after the EndIf), each audited as CALLER_DISPATCHED under this caller."
+
+[[arm]]
+file = "binds_p2_bang.rs"
+fn = "emit_bang_exit_arm"
+loads = 2
+verdict = "CALLER_DISPATCHED"
+caller = "try_lower_bind_unwrap_return (binds_p2.rs — the call sits between IfThen(exit_cond) and EndIf, i.e. only where the tag said Err/none)"
+why = "The err arm reads the message @12 (rebox path) or @12 for the abort path — both only where the caller's tag dispatch said Err; the loads are BORROWs (LoadHandle) consumed in the arm."
+
+[[arm]]
+file = "binds_p2_bang.rs"
+fn = "bind_bang_ok_payload"
+loads = 2
+verdict = "CALLER_DISPATCHED"
+caller = "try_lower_bind_unwrap_return (binds_p2.rs — the call follows the EndIf of the exit arm: the SURVIVING straight-line continuation, reachable only where the tag said Ok)"
+why = "The ok payload @12 (load64 for a scalar, LoadHandle+Dup for a heap payload) is read in the surviving continuation the caller's IfThen(exit) already fenced; no raw sum read precedes the dispatch."

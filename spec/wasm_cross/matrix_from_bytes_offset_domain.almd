@@ -1,0 +1,17 @@
+// @contract: C-341
+// `matrix.from_bytes_f32_le` / `_f16_le` judge their offset on the buffer
+// side: an offset beyond the buffer — including one near i64::MAX — is the
+// all-zero matrix on both targets. The structural leg's in-bounds test was
+// `offset + r*c*width <= len`; the sum wrapped negative for a huge offset,
+// passed, and the read returned a subnormal out of the wrong bytes (fuzz
+// seed 541740772278:10760, #1909).
+fn main() -> Unit = {
+  var f = bytes.new(8)
+  bytes.set_f32_le(f, 0, 1.5)
+  bytes.set_f32_le(f, 4, -2.0)
+  println("in bounds: ${matrix.to_lists(matrix.from_bytes_f32_le(f, 0, 1, 2))}")
+  println("past end: ${matrix.to_lists(matrix.from_bytes_f32_le(f, 8, 1, 2))}")
+  println("huge offset: ${matrix.to_lists(matrix.from_bytes_f32_le(f, 9223372036854775807, 1, 2))}")
+  println("negative offset: ${matrix.to_lists(matrix.from_bytes_f32_le(f, -1, 1, 2))}")
+  println("half huge: ${matrix.to_lists(matrix.from_bytes_f16_le(f, 9223372036854775806, 1, 2))}")
+}

@@ -27,6 +27,14 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
 pub fn emit_program_with_ops(
     ir: &IrProgram,
 ) -> Result<(Vec<u8>, std::collections::BTreeSet<i32>), EmitError> {
+    // Transparent newtypes erase FIRST, so both passes read one tree
+    // (#1423 stage 4: the html/path SafeHtml/SafePath rows).
+    let erased = crate::newtype::erase_transparent_aliases(ir);
+    let ir = erased.as_ref().unwrap_or(ir);
+    // #2004: a call result consumed by a module op's argument gets an
+    // owner — bound first, released by the frame's exit plan.
+    let bound = crate::arg_temps::bind_native_temporaries(ir);
+    let ir = bound.as_ref().unwrap_or(ir);
     let (bytes, visited, total, ops) = emit_program_pass(ir, None)?;
     if visited.len() >= total {
         return Ok((bytes, ops));
@@ -82,6 +90,7 @@ fn emit_program_pass(
         table.infos.push(FnInfo { wasm_index: F_FN_BASE + i as u32, params, ret, refuse });
     }
     let main_index = F_FN_BASE + program_fns.len() as u32;
+    let region_pure = region::region_pure_fns(ir, &program_fns, &table);
 
     let mut pool = Pool::new();
     // Interned eagerly so $append_bool can carry their fixed addresses.
@@ -92,7 +101,7 @@ fn emit_program_pass(
 
     // Function-VALUE work shared by every lowering below (funcref table,
     // call_indirect types, lifted lambdas).
-    let work = FnWork::default();
+    let work = FnWork { region_pure: std::cell::RefCell::new(region_pure), ..FnWork::default() };
     // Calls made from display-helper bodies (BFS roots).
     let mut display_helper_calls: std::collections::HashSet<usize> = HashSet::new();
     work.itype_base.set(T_FN_BASE + table.infos.len() as u32);
@@ -101,6 +110,12 @@ fn emit_program_pass(
     // Lower every callable function; a body that doesn't lower yet is
     // recorded (not fatal) — fatal only if `main` can reach it.
     let mut lowered: Vec<Result<(Function, HashSet<usize>), String>> = Vec::new();
+    // Source names for the E083 diagnostic, by (var space, VarId): space 0
+    // is the entry program, space i + 1 is modules[i] (collect_program_fns).
+    let var_name = |space: u32, id: VarId| -> Option<String> {
+        let vt = if space == 0 { &ir.var_table } else { &ir.modules.get(space as usize - 1)?.var_table };
+        vt.entries.get(id.0 as usize).map(|v| v.name.as_str().to_string())
+    };
     for (i, (f, qual, space)) in program_fns.iter().enumerate() {
         if let Some(r) = &table.infos[i].refuse {
             lowered.push(Err(r.clone()));
@@ -108,7 +123,7 @@ fn emit_program_pass(
         }
         let params: Vec<(VarId, SliceTy)> =
             f.params.iter().zip(&table.infos[i].params).map(|(p, &t)| (p.var, t)).collect();
-        let ctx = Ctx { table: &table, types: &types, work: &work, globals: &global_map };
+        let ctx = Ctx { table: &table, types: &types, work: &work, globals: &global_map, var_name: &var_name };
         let cur_module = qual.as_ref().and_then(|q| q.split('.').next());
         let effect_raw = if f.is_effect {
             match slice_ty_of(&f.ret_ty, &types) {
@@ -134,9 +149,11 @@ fn emit_program_pass(
             charge_entry: meter.user.contains(f.name.as_str())
                 && !meter.exempt.contains(f.name.as_str()),
             var_space: *space,
+            name: qual.clone().unwrap_or_else(|| f.name.as_str().to_string()),
             witness_name: Some(
                 qual.clone().unwrap_or_else(|| f.name.as_str().to_string()),
             ),
+            self_index: Some(table.infos[i].wasm_index),
         };
         match lower_fn(&params, plan, &f.body, &[], &ctx, &mut pool) {
             Ok(ok) => {
@@ -161,19 +178,26 @@ fn emit_program_pass(
                         lowered.push(Ok((body, fcalls)));
                     }
                     Err(EmitError::Unsupported(r)) => lowered.push(Err(r)),
+            // E083: a compiler defect is fatal for the whole program — a
+            // reachable-or-not leak is still a defect, never a wall.
+            Err(e @ EmitError::OwnershipLowering(_)) => return Err(e),
                 }
             }
             Err(EmitError::Unsupported(r)) => lowered.push(Err(r)),
+            // E083: a compiler defect is fatal for the whole program — a
+            // reachable-or-not leak is still a defect, never a wall.
+            Err(e @ EmitError::OwnershipLowering(_)) => return Err(e),
         }
     }
 
     // `main`: top-lets as the eager prelude, then the body. Failure here is
     // fatal — main is always reachable.
-    let ctx = Ctx { table: &table, types: &types, work: &work, globals: &global_map };
+    let ctx = Ctx { table: &table, types: &types, work: &work, globals: &global_map, var_name: &var_name };
     let main_plan = FnPlan {
         ret: None,
         cur_module: None,
         var_space: 0,
+        name: "main".to_string(),
         witness_name: Some("main".to_string()),
         effect_raw: None,
         in_main: true,
@@ -182,6 +206,7 @@ fn emit_program_pass(
         // so no entry charge — the 1002-unit ledger counts the callee's.
         metered: !meter.user.is_empty(),
         charge_entry: false,
+        self_index: None,
     };
     let (main_fn, main_calls) =
         lower_fn(&[], main_plan, &main.body, &init_lets, &ctx, &mut pool)?;
@@ -203,6 +228,7 @@ fn emit_program_pass(
                 ret: ll.ret,
                 cur_module: ll.cur_module.clone(),
                 var_space: ll.var_space,
+                name: "<lambda>".to_string(),
                 witness_name: None,
                 effect_raw: ll.effect_raw,
                 in_main: false,
@@ -215,6 +241,7 @@ fn emit_program_pass(
                 // inline lowering they replace.
                 metered: !meter.user.is_empty(),
                 charge_entry: !meter.user.is_empty() && ll.charge_hop,
+                self_index: None,
             };
             let (f, calls) = lower_fn(&ll.params, plan, &ll.body, &[], &ctx, &mut pool)?;
             display_helper_calls
@@ -306,12 +333,14 @@ fn emit_program_pass(
     let (extra_fns, entry_fn_indices) = resolve_extras(&table, &work, &lifted_fns);
 
     let oom_msg = pool.intern("Error: out of memory");
+    let repeat_msg = pool.intern("Error: repeat result too large");
     let total = lowered.len();
     let bytes = assemble_module(AssembleIn {
         table: &table,
         work: &work,
         pool: &pool,
         oom_msg,
+        repeat_msg,
         lowered: &lowered,
         reachable: &visited,
         main_fn: &main_fn,

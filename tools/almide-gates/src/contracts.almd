@@ -61,16 +61,12 @@ fn row(classes: List[String], t: toml.Table) -> String = {
   "| " + id + " | " + name + " | " + toml.table_get(t, "since") + " | " + toml.table_get(t, "status") + " | " + strongest(classes, t.array_items) + " | " + int.to_string(fixture_count(t.array_items)) + " |"
 }
 
-fn rows(classes: List[String], tables: List[toml.Table]) -> List[String] =
-  tables |> list.filter((t) => toml.table_get(t, "id") != "") |> list.map((t) => row(classes, t)) |> list.sort
+fn rows(classes: List[String], tables: List[toml.Table]) -> List[String] = tables |> list.filter((t) => toml.table_get(t, "id") != "") |> list.map((t) => row(classes, t)) |> list.sort
 
 // The one place the file is read. Blank lines and `#` comments are stripped exactly as the
 // bash's `grep -vE '^[[:space:]]*(#|$)'` does, because the LINE ORDER after stripping is the
 // rank — a comment counted as a class would shift every rank below it.
-fn parse_classes(content: String) -> List[String] =
-  string.split(content, "\n")
-    |> list.map((l) => string.trim(l))
-    |> list.filter((l) => l != "" and not string.starts_with(l, "#"))
+fn parse_classes(content: String) -> List[String] = string.split(content, "\n") |> list.map((l) => string.trim(l)) |> list.filter((l) => l != "" and not string.starts_with(l, "#"))
 
 test "the class file is stripped of comments and blanks before the order becomes the rank" {
   // A comment counted as a class would shift every rank below it, silently demoting `fixture`

@@ -1,0 +1,3 @@
+expects_code = "E041"
+expects_error = "implicit propagation of this match subject was removed"
+hint_substring = "Write `expr!` to propagate"

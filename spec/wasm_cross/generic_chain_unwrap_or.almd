@@ -11,7 +11,7 @@ type V = | ValInt(Int) | ValStr(String)
 fn get_alignment(metadata: List[(String, V)]) -> Int = list.find(metadata, (entry) => entry.0 == "general.alignment") |> option.map((entry) => match entry.1 {
   ValInt(n) => n,
   _ => 32,
-}) |> option.unwrap_or(32)
+}) ?? 32
 
 fn main() -> Unit = {
   let md = [("x", ValInt(64)), ("general.alignment", ValInt(16))]

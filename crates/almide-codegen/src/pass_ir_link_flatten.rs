@@ -94,6 +94,11 @@ fn mangle_qualified_type_names(program: &mut IrProgram) {
 
     for td in &mut program.type_decls {
         if let Some(nn) = map.get(td.name.as_str()) {
+            // The mangle is not invertible, so carry the DECLARED spelling
+            // alongside: the repr impl prints `Cfg`, never `almide_rt_m_Cfg`
+            // (#1836, C-009).
+            program.codegen_annotations.repr_names
+                .insert(nn.as_str().to_string(), td.declared_name().to_string());
             td.name = *nn;
         }
         rename_type_decl_kind(&mut td.kind, &map);
@@ -147,7 +152,7 @@ fn build_type_rename_map(type_decls: &[IrTypeDecl]) -> HashMap<String, Sym> {
     let mut groups: HashMap<(String, String), Vec<String>> = HashMap::new();
     for td in type_decls {
         let n = td.name.as_str();
-        let base = n.rsplit('.').next().unwrap_or(n).to_string();
+        let base = almide_ir::declared_type_name(n).to_string();
         groups.entry((base, td.structural_fingerprint())).or_default().push(n.to_string());
     }
 
@@ -259,8 +264,10 @@ fn rename_ty(ty: &Ty, map: &HashMap<String, Sym>) -> Ty {
 /// (cross-module record bound in a loop).
 fn rename_bind_tys_in_stmts(stmts: &mut [IrStmt], map: &HashMap<String, Sym>) {
     for s in stmts.iter_mut() {
-        if let IrStmtKind::Bind { ty, .. } = &mut s.kind {
-            *ty = rename_ty(ty, map);
+        match &mut s.kind {
+            IrStmtKind::Bind { ty, .. } => *ty = rename_ty(ty, map),
+            IrStmtKind::BindDestructure { pattern, .. } => rename_pattern(pattern, map),
+            _ => {}
         }
     }
 }
@@ -329,12 +336,80 @@ fn rename_expr(e: IrExpr, map: &HashMap<String, Sym>) -> IrExpr {
         }
         IrExprKind::Lambda { params, .. } => rename_lambda_param_tys(params, map),
         IrExprKind::ClosureCreate { captures, .. } => rename_closure_capture_tys(captures, map),
+        // An opaque newtype's ctor call names its struct (`self.Value`,
+        // `m.Token` — pinned by lowering, #1835): mangle it with the decl,
+        // as the struct literal's ctor name is above. In tail position the
+        // call is a `TailCall` (TailCallMarkPass) — the same target.
+        IrExprKind::Call { target: CallTarget::Named { name }, type_args, .. } => {
+            if let Some(nn) = map.get(name.as_str()) {
+                *name = *nn;
+            }
+            rename_call_type_args(type_args, map)
+        }
+        IrExprKind::TailCall { target: CallTarget::Named { name }, .. } => {
+            if let Some(nn) = map.get(name.as_str()) {
+                *name = *nn;
+            }
+        }
         IrExprKind::Call { type_args, .. } => rename_call_type_args(type_args, map),
         IrExprKind::RcWrap { cast_ty: Some(ty), .. } => {
             **ty = rename_ty(ty, map);
         }
         IrExprKind::InlineRust { template, .. } => rename_inline_rust_template(template, map),
+        // A struct PATTERN carries the same qualified name as the literal
+        // (`m.Cfg`, `self.Value` — pinned by lowering) and needs the same
+        // mangle: a bare spelling matched against the flat struct was rustc
+        // E0308 (#1828's family).
+        IrExprKind::Match { arms, .. } => {
+            for arm in arms.iter_mut() {
+                rename_pattern(&mut arm.pattern, map);
+            }
+        }
         _ => {}
     }
     e
+}
+
+/// Rename the struct name of every record pattern and opaque-newtype ctor
+/// pattern under `p` (nested positions included) through the flatten map.
+fn rename_pattern(p: &mut IrPattern, map: &HashMap<String, Sym>) {
+    match p {
+        IrPattern::RecordPattern { name, fields, .. } => {
+            if let Some(nn) = map.get(name.as_str()) {
+                *name = nn.as_str().to_string();
+            }
+            for f in fields.iter_mut() {
+                if let Some(inner) = &mut f.pattern {
+                    rename_pattern(inner, map);
+                }
+            }
+        }
+        // An opaque newtype's ctor pattern names its struct the way its ctor
+        // call does (`self.Value(s)`, #1835); a variant case's bare name is
+        // never a map key.
+        IrPattern::Constructor { name, args } => {
+            if let Some(nn) = map.get(name.as_str()) {
+                *name = nn.as_str().to_string();
+            }
+            for e in args.iter_mut() {
+                rename_pattern(e, map);
+            }
+        }
+        IrPattern::Tuple { elements } => {
+            for e in elements.iter_mut() {
+                rename_pattern(e, map);
+            }
+        }
+        IrPattern::List { elements, rest } => {
+            for e in elements.iter_mut() {
+                rename_pattern(e, map);
+            }
+            if let Some(r) = rest {
+                rename_pattern(r, map);
+            }
+        }
+        IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner }
+        | IrPattern::As { inner, .. } => rename_pattern(inner, map),
+        IrPattern::Wildcard | IrPattern::Bind { .. } | IrPattern::Literal { .. } | IrPattern::None => {}
+    }
 }

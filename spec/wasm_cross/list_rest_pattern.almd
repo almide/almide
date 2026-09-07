@@ -1,0 +1,38 @@
+// @contract: C-332
+// ALS-E18 (docs/specs/als/expressions.md): list-rest patterns (#1461) —
+// `[h, ..t]` relaxes the length test to >= and binds the tail past the
+// prefix as a fresh list of the subject's type; `[h, ..]` ignores it.
+// Probes: the recursive-sum idiom, the coverage-ladder chain that needs
+// no wildcard, guarded rest arms, a string tail read AFTER the match
+// (the returned tail must survive the arm — the bind is a fresh block),
+// and a rest inside deeper composition.
+fn total(xs: List[Int]) -> Int = match xs {
+  [] => 0,
+  [h, ..t] => h + total(t),
+}
+
+fn shape(xs: List[Int]) -> String = match xs {
+  [] => "empty",
+  [x] => "one:${x}",
+  [a, b, ..] => "many:${a},${b}",
+}
+
+fn tail_of(xs: List[String]) -> List[String] = match xs {
+  [..t] => t
+}
+
+fn main() -> Unit = {
+  println(int.to_string(total([1, 2, 3, 4, 5])))
+  println(shape([]))
+  println(shape([7]))
+  println(shape([9, 8, 7]))
+  println(list.join(tail_of(["x", "y", "z"]), "+"))
+  match [10, 20, 30] {
+    [first, ..rest] => println("h=${first} r=${list.len(rest)} rsum=${total(rest)}"),
+    _ => println("nope"),
+  }
+  match ["k"] {
+    [h, ..] if h == "k" => println("guard-hit"),
+    _ => println("guard-miss"),
+  }
+}

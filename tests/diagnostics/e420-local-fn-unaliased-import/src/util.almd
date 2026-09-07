@@ -1,0 +1,2 @@
+local fn scratch() -> String = "internal"
+pub fn label() -> String = "public"

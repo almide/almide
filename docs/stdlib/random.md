@@ -6,25 +6,47 @@ Random number generation. import random, effect.
 
 Generate a random integer between min and max (inclusive).
 
-```almd
-random.int(1, 100) // => 42
+```almd check
+import random
+
+effect fn main() -> Unit = {
+  println(int.to_string(random.int(1, 100))) // => 42
+}
 ```
 
 ### `random.float() -> Float`
 
 Generate a random float between 0.0 and 1.0.
 
-```almd
-random.float() // => 0.7321
+```almd check
+import random
+
+effect fn main() -> Unit = {
+  println(float.to_string(random.float())) // => 0.7321
+}
 ```
 
 ### `random.choice(xs: List[T]) -> Option[T]`
 
 Pick a random element from a list, or none if empty.
 
-```almd
-random.choice(["a", "b", "c"]) // => some("b")
-random.choice([("大吉", "Ship it."), ("凶", "Wait.")]) // => some(("凶", "Wait."))
+```almd check
+import random
+
+fn show(o: Option[String]) -> String = match o {
+  some(s) => "some(\"${s}\")",
+  none => "none",
+}
+
+fn show_pair(o: Option[(String, String)]) -> String = match o {
+  some((omen, advice)) => "some((\"${omen}\", \"${advice}\"))",
+  none => "none",
+}
+
+effect fn main() -> Unit = {
+  println(show(random.choice(["a", "b", "c"]))) // => some("b")
+  println(show_pair(random.choice([("大吉", "Ship it."), ("凶", "Wait.")]))) // => some(("凶", "Wait."))
+}
 ```
 
 **wasm element coverage** (#1169): scalar (`Int`/`Float`/`Bool`), `String`, and
@@ -35,8 +57,12 @@ honestly (`random.choice_x` unlinked) and runs via the native leg.
 
 Return a randomly shuffled copy of a list.
 
-```almd
-random.shuffle([1, 2, 3]) // => [3, 1, 2]
+```almd check
+import random
+
+effect fn main() -> Unit = {
+  println("${random.shuffle([1, 2, 3])}") // => [3, 1, 2]
+}
 ```
 
 **wasm element coverage** (#1169): scalar, `String`, and `(String, String)`

@@ -1,0 +1,9 @@
+// #1773: a variant CASE payload carrying a Float must block the Map key the
+// same way a record field does — the Named→Variant resolution used to read
+// its own definition as a recursion cycle and skip the payload walk.
+type Reading = | Temp(Float) | Off
+
+fn main() -> Unit = {
+  let m: Map[Reading, Int] = map.new()
+  println(int.to_string(map.len(m)))
+}

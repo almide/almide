@@ -1,0 +1,14 @@
+// fan.settle forks arms and captures each verdict — an effect like every
+// other fan form, so a pure fn cannot contain it.
+fn check_a() -> Result[Int, String] = ok(1)
+fn check_b() -> Result[Int, String] = ok(2)
+
+fn health() -> (Result[Int, String], Result[Int, String]) = fan.settle {
+  check_a()
+  check_b()
+}
+
+effect fn main() -> Unit = {
+  let (a, b) = health()
+  println("done")
+}

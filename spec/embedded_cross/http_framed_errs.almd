@@ -1,0 +1,34 @@
+// @contract: C-328
+// The framed request family (#1710 increment 3) on the embedded lane:
+// every probe is deterministic — closed local ports and malformed urls,
+// no live network — and the err texts must match native byte-for-byte
+// (the shared rt-core client guarantees it by construction; this net
+// catches a frame-protocol drift between the splice and the host).
+import http
+
+effect fn main() -> Unit = {
+  match http.request("POST", "http://127.0.0.1:1/x", "body", ["K": "v"]) {
+    ok(_) => println("request:unexpected-ok"),
+    err(e) => println("request:${e}"),
+  }
+  match http.request_status("GET", "http://127.0.0.1:1/", "", map.new()) {
+    ok(_) => println("rstatus:unexpected-ok"),
+    err(e) => println("rstatus:${e}"),
+  }
+  match http.get_status("http://127.0.0.1:1/") {
+    ok(_) => println("gstatus:unexpected-ok"),
+    err(e) => println("gstatus:${e}"),
+  }
+  match http.get_bytes("http://127.0.0.1:1/") {
+    ok(_) => println("gbytes:unexpected-ok"),
+    err(e) => println("gbytes:${e}"),
+  }
+  match http.request_bytes("PUT", "http://127.0.0.1:1/", "12345", map.new()) {
+    ok(_) => println("rbytes:unexpected-ok"),
+    err(e) => println("rbytes:${e}"),
+  }
+  match http.get_status("not-a-url") {
+    ok(_) => println("badurl:unexpected-ok"),
+    err(e) => println("badurl:${e}"),
+  }
+}

@@ -169,7 +169,10 @@ call/operator/interpolation inside a record-literal field — **#1583, open**), 
 both layered packages, which are blocked on `x13` (functional port) and on
 `#1576` (mut port — the `mut`-param err-path semantics need a ratified answer:
 what does the caller's argument hold when the callee returns `err` after
-mutating?).
+mutating?). `#1576` was ratified and closed on the structural leg (0.61.2):
+the err propagates before any write-back, so the caller's slot keeps its
+pre-call binding, and `pkg/mut_port` runs byte-identically to native in the
+greenfield gate below.
 
 ## 5. What to do with this here
 

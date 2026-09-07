@@ -2,7 +2,7 @@
 # CONTRACT-LEDGER TRACEABILITY GATE
 # =================================
 #
-# The cross-target equivalence gate (tests/wasm_runtime_test.rs::wasm_cross_target_spec)
+# The cross-target equivalence gate (tests/wasm_runtime_cross_target.rs::wasm_cross_target_spec)
 # and the wasm-runtime oracle-pairing registry (rt-oracle-registry.toml) enforce
 # equivalence at the TEST and ROUTINE level. This gate adds the CONTRACT level:
 # every observable cross-target promise is a named [[contract]] in
@@ -74,10 +74,12 @@ err() { fail=1; echo "::error::$*"; }
 # side can group by id. The `statement` field uses ''' triple-quote when multi-
 # line; a sentinel skips its body. Single-line scalars parse exactly like the
 # registry's awk. Output schema (one per line, TAB-delimited):
-#   META<TAB>id<TAB>status<TAB>doc<TAB>title<TAB>statement<TAB>since
+#   META<TAB>id<TAB>status<TAB>doc<TAB>title<TAB>statement<TAB>since<TAB>declaration<TAB>refusal<TAB>challenge
 #   EV<TAB>id<TAB>path<TAB>class<TAB>name<TAB>n
 # (empty name/n render as the literal "-"; title/statement are presence flags
-# 0|1, since is the literal value or "" when the key is absent)
+# 0|1, since is the literal value or "" when the key is absent; declaration is
+# the literal "path#heading" or "-"; refusal/challenge are the array elements
+# comma-joined, or "-" when absent — #1994)
 # ── SIGPIPE-SAFE MEMBERSHIP ─────────────────────────────────────────────────
 # `printf '%s\n' "$SET" | grep -q "$x"` is a RACE under `set -o pipefail`.
 # `grep -q` exits the instant it matches, closing the pipe; if `printf` has not
@@ -106,9 +108,15 @@ parse_ledger() {
     # Empty optional scalars render as "-": TAB is IFS whitespace, so bash `read`
     # COLLAPSES adjacent tabs and an empty field would shift every later column.
     function emit_meta() {
-      if (id != "") print "META\t" id "\t" status "\t" (doc == "" ? "-" : doc) "\t" title "\t" stmt "\t" (since == "" ? "-" : since)
+      if (id != "") print "META\t" id "\t" status "\t" (doc == "" ? "-" : doc) "\t" title "\t" stmt "\t" (since == "" ? "-" : since) "\t" (decl == "" ? "-" : decl) "\t" (refusal == "" ? "-" : refusal) "\t" (challenge == "" ? "-" : challenge)
     }
-    function reset() { id=""; status=""; doc=""; title=0; stmt=0; since="" }
+    function reset() { id=""; status=""; doc=""; title=0; stmt=0; since=""; decl=""; refusal=""; challenge="" }
+    # A single-line string array `key = ["a", "b"]` -> "a,b". Elements never
+    # contain commas or quotes (paths and dojo:<slug> ids), so this is exact.
+    function arr(line,   v) {
+      v=line; sub(/^[a-z]+[ \t]*=[ \t]*\[/,"",v); sub(/\][ \t]*(#.*)?$/,"",v)
+      gsub(/"/,"",v); gsub(/[ \t]/,"",v); sub(/,$/,"",v); return v
+    }
     BEGIN { reset(); in_stmt=0 }
     # triple-quote sentinel: toggle, and swallow everything between. A
     # `statement = ""..."` opening line is consumed HERE, so the presence flag
@@ -122,6 +130,12 @@ parse_ledger() {
     /^title[ \t]*=/     { title=1; next }
     /^statement[ \t]*=/ { stmt=1; next }
     /^since[ \t]*=/   { v=$0; sub(/^since[ \t]*=[ \t]*"/,"",v); sub(/".*$/,"",v); since=v; next }
+    # The three sides (#1994). `declaration` is one quoted string that may contain
+    # backticks, parens and spaces (it is a verbatim heading), so strip only the
+    # key prefix and the closing quote.
+    /^declaration[ \t]*=/ { v=$0; sub(/^declaration[ \t]*=[ \t]*"/,"",v); sub(/"[ \t]*(#.*)?$/,"",v); decl=v; next }
+    /^refusal[ \t]*=/     { refusal=arr($0); next }
+    /^challenge[ \t]*=/   { challenge=arr($0); next }
     # an evidence inline-table line: { path = "...", class = "...", name = "...", n = N }
     /path[ \t]*=[ \t]*"/ {
       line=$0
@@ -147,7 +161,7 @@ ALL_IDS="$(printf '%s\n' "$META" | cut -f2 | grep . || true)"
 # but unenforced, so 32 contracts (C-067..C-098) shipped without it and the
 # generated README published 32 blank Since cells (#938). A field the schema
 # calls required and the gate never reads is a field that silently goes missing.
-while IFS=$'\t' read -r _tag id status doc title stmt since; do
+while IFS=$'\t' read -r _tag id status doc title stmt since _decl _refusal _challenge; do
   [ -z "$id" ] && continue
   [ "$doc" = "-" ] && doc=""
   [ "$since" = "-" ] && since=""
@@ -279,6 +293,105 @@ if [ -n "$only_rev" ]; then
     err "$base declares $id but $id does not list $base as evidence (link must be symmetric)"
   done <<< "$only_rev"
 fi
+
+# ── (k) THE THREE SIDES (#1994): declaration / refusal / challenge ───────────
+# Evidence proves the promise HOLDS. These three links say what a writer can
+# DECLARE (a spec heading), what the compiler REFUSES (a tests/diagnostics case),
+# and which edit family DISCRIMINATES the promise from its absence (a Dojo task
+# family). Each link is checked for existence, and refusal/challenge are
+# BIDIRECTIONAL like the fixture link: the case's meta.toml names the contract
+# back with `contract = "C-NNN"`, the family row in scripts/lib/dojo-families.txt
+# names it back in its second column. A declaration heading that is renamed
+# breaks the link — that is the intended invalidation (#1998): re-point it in
+# the same PR or the gate stays red.
+DIAG_DIR="tests/diagnostics"
+FAMILIES_FILE="scripts/lib/dojo-families.txt"
+[ -f "$FAMILIES_FILE" ] || err "$FAMILIES_FILE not found (the pinned Dojo family table)"
+FAMILIES="$(grep -vE '^[[:space:]]*(#|$)' "$FAMILIES_FILE" 2>/dev/null || true)"
+
+FWD_RF=""; FWD_CH=""
+while IFS=$'\t' read -r _tag id _status _doc _title _stmt _since decl refusal challenge; do
+  [ -z "$id" ] && continue
+  if [ -n "$decl" ] && [ "$decl" != "-" ]; then
+    dpath="${decl%%#*}"; dhead="${decl#*#}"
+    if [ "$dpath" = "$decl" ] || [ -z "$dhead" ] || [ -z "$dpath" ]; then
+      err "$id: declaration='$decl' must be '<repo-relative .md path>#<heading text>'"
+    elif [ ! -f "$dpath" ]; then
+      err "$id: declaration file '$dpath' does not exist"
+    elif ! grep -qxF -- "## $dhead" "$dpath" && ! grep -qxF -- "### $dhead" "$dpath"; then
+      err "$id: declaration heading '$dhead' not found in $dpath (renamed? re-point the link in the same PR)"
+    fi
+  fi
+  if [ -n "$refusal" ] && [ "$refusal" != "-" ]; then
+    for c in $(printf '%s' "$refusal" | tr ',' ' '); do
+      case "$c" in
+        "$DIAG_DIR"/*) ;;
+        *) err "$id: refusal '$c' must be a $DIAG_DIR/<case> directory"; continue ;;
+      esac
+      if [ ! -d "$c" ]; then err "$id: refusal case '$c' does not exist"; continue; fi
+      [ -f "$c/broken.almd" ] || err "$id: refusal case '$c' has no broken.almd (not a diagnostics case)"
+      FWD_RF="${FWD_RF}${id}	${c}
+"
+    done
+  fi
+  if [ -n "$challenge" ] && [ "$challenge" != "-" ]; then
+    for c in $(printf '%s' "$challenge" | tr ',' ' '); do
+      if ! has '^dojo:[a-z0-9-]+$' "$c" -E; then err "$id: challenge '$c' must match dojo:<slug>"; continue; fi
+      FWD_CH="${FWD_CH}${id}	${c}
+"
+    done
+  fi
+done <<< "$META"
+FWD_RF="$(printf '%s' "$FWD_RF" | sort -u | grep . || true)"
+FWD_CH="$(printf '%s' "$FWD_CH" | sort -u | grep . || true)"
+
+# Reverse refusal edges: tests/diagnostics/<case>/meta.toml --contract=--> C-NNN.
+REV_RF=""
+for m in "$DIAG_DIR"/*/meta.toml; do
+  [ -f "$m" ] || continue
+  d="$(dirname "$m")"
+  ids="$(grep -E '^[[:space:]]*contract[[:space:]]*=' "$m" | sed -E 's/^[^=]*=[[:space:]]*//; s/"//g; s/#.*$//' || true)"
+  [ -z "$ids" ] && continue
+  for cid in $(printf '%s' "$ids" | tr ',' ' '); do
+    if ! has "$cid" "$ALL_IDS"; then err "$m names $cid which is not in the ledger"; continue; fi
+    REV_RF="${REV_RF}${cid}	${d}
+"
+  done
+done
+REV_RF="$(printf '%s' "$REV_RF" | sort -u | grep . || true)"
+
+# Reverse challenge edges: a family row `dojo:<slug><TAB>C-NNN[,C-MMM]` (the
+# second column may be empty while the family has no contract yet).
+REV_CH=""
+while IFS=$'\t' read -r fam ids; do
+  [ -z "$fam" ] && continue
+  has '^dojo:[a-z0-9-]+$' "$fam" -E || err "$FAMILIES_FILE: bad family id '$fam' (must match dojo:<slug>)"
+  for cid in $(printf '%s' "${ids:-}" | tr ',' ' '); do
+    if ! has "$cid" "$ALL_IDS"; then err "$FAMILIES_FILE: $fam names $cid which is not in the ledger"; continue; fi
+    REV_CH="${REV_CH}${cid}	${fam}
+"
+  done
+done <<< "$FAMILIES"
+REV_CH="$(printf '%s' "$REV_CH" | sort -u | grep . || true)"
+fam_dupes="$(printf '%s\n' "$FAMILIES" | cut -f1 | grep . | sort | uniq -d || true)"
+[ -n "$fam_dupes" ] && err "$FAMILIES_FILE: duplicate family row(s): $(printf '%s' "$fam_dupes" | paste -sd, -)"
+
+while IFS=$'\t' read -r id c; do
+  [ -z "$id" ] && continue
+  err "$id lists $c as refusal but $c/meta.toml does not name $id back (add: contract = \"$id\")"
+done <<< "$(comm -23 <(printf '%s\n' "$FWD_RF") <(printf '%s\n' "$REV_RF"))"
+while IFS=$'\t' read -r id c; do
+  [ -z "$id" ] && continue
+  err "$c/meta.toml names $id but $id does not list $c in its refusal array (link must be symmetric)"
+done <<< "$(comm -13 <(printf '%s\n' "$FWD_RF") <(printf '%s\n' "$REV_RF"))"
+while IFS=$'\t' read -r id c; do
+  [ -z "$id" ] && continue
+  err "$id lists $c as challenge but the $c row of $FAMILIES_FILE does not name $id back"
+done <<< "$(comm -23 <(printf '%s\n' "$FWD_CH") <(printf '%s\n' "$REV_CH"))"
+while IFS=$'\t' read -r id c; do
+  [ -z "$id" ] && continue
+  err "$FAMILIES_FILE row $c names $id but $id does not list $c in its challenge array (link must be symmetric)"
+done <<< "$(comm -13 <(printf '%s\n' "$FWD_CH") <(printf '%s\n' "$REV_CH"))"
 
 # ── (j) CITED SOURCE PATHS MUST NOT NAME A RETIRED SUBSYSTEM ────────────────
 # `evidence.path` is already checked to exist. But contract STATEMENTS and
@@ -470,6 +583,13 @@ echo "  fixtures: $n_with_header/$n_fixtures carry a // @contract: header; bidir
 #  (11) point a fixture header back at emit_wasm/rt_*.rs   -> (j) dead-path.
 #  (12) unaligned bogus spec key (`spec = "ALS-BOGUS"`, single space)  -> the
 #       spec-existence loop fires (#989: the aligned-only grep let it pass).
+#  (13) delete `contract = "C-217"` from tests/diagnostics/e042-unused-result/
+#       meta.toml                                             -> (k) refusal not named back.
+#  (14) rename the ALS-ST1 heading in docs/specs/als/expressions.md -> (k)
+#       declaration heading not found (the intended invalidation, #1998).
+#  (15) blank the C-217 column of the dojo:fallible-producer row in
+#       scripts/lib/dojo-families.txt                        -> (k) challenge not named back.
+# (13)-(15) verified 2026-09-07 against C-217: each flips the gate red alone.
 # (10) and (11) were verified by hand against C-067 and spec/wasm_cross/
 # float_parse.almd: each flips the gate red alone and green again on restore.
 # (12) verified 2026-07-30: a single-space bogus key turns the gate red.

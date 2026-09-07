@@ -4,29 +4,33 @@ The five-stage plan (Stage 1 accept-and-wrong の族滅 → Stage 2 translation
 validation 全数化 → Stage 3 意味論凍結 → Stage 4 持続性計測 → Stage 5 DO-330
 ギャップ分析) is the standing adoption roadmap. This page is its SINGLE
 checkable status artifact: every number between the markers is measured from
-the committed ledgers by `scripts/gen-claims.sh` and drift fails CI
-(`check-contracts.sh` runs `--check`) — an auditor reads THIS, not prose
-claims scattered across sessions. Stage semantics and evidence pointers:
+the committed ledgers into `proofs/ledger-counts.toml` — stamped with its date
+by `scripts/gen-ledger-counts.sh` (a release step, or the answer to the nightly
+`scripts/check-ledger-counts.sh` reporting drift), rendered by
+`scripts/gen-claims.sh`, and a hand edit fails CI (`check-contracts.sh` runs
+`--check`) — an auditor reads THIS, not prose claims scattered across sessions. Stage semantics and evidence pointers:
 `docs/roadmap/active/flight-evidence-gaps.md` (the audit findings ledger,
 re-measured 2026-08-12) and `proofs/TOR.md` (the operational contract).
 
 <!-- stages:generated:start — derived from the proofs/ ledgers by scripts/gen-claims.sh; DO NOT EDIT between the markers -->
+<!-- counts:generated:start (as of 2026-09-06) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
 > **Stage 1 (accept-and-wrong extinction): audits COMPLETE and gated** —
-> scalar-read 61 arms / 0 UNGUARDED; WAT prelude 63 fns classified;
+> scalar-read 63 arms / 0 UNGUARDED; WAT prelude 63 fns classified;
 > platform-libm 5 sites classified. New entries cannot land unclassified.
 >
-> **Stage 2 (translation validation): 622/648 fixtures cast a real 3-way vote (95%)** —
+> **Stage 2 (translation validation): 663/682 fixtures cast a real 3-way vote (97%)** —
 > the abstain remainder is classified and shrink-only (the interp-heap arc, #1226).
 >
-> **Stage 3 (semantics freeze): 329/328 contracts spec-keyed; syntax-element coverage
+> **Stage 3 (semantics freeze): 342/342 contracts spec-keyed; syntax-element coverage
 > 72/72 sectioned (0 UNWRITTEN, shrink-only — the freeze precondition is 0).**
 >
 > **Stage 4 (durability): fuzz true-green streak = 0 day(s)** (dated meter;
 > the correctness-only night verdict shipped 2026-08-12 — 90 days is the milestone).
 >
-> **Stage 5 (auditability): 9 release seal(s); 72 verification gates classified
+> **Stage 5 (auditability): 10 release seal(s); 75 verification gates classified
 > (0 UNVERIFIED under a shrink-only ceiling); TOR with 9 enforced rows;
 > gap analysis consolidated in proofs/DO330-GAP.md (reference-gated).**
+<!-- counts:generated:end -->
 <!-- stages:generated:end -->
 
 What the numbers do NOT claim: external adoption (a market fact, not a

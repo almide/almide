@@ -1,0 +1,7 @@
+// E050 variant: the collision through a regex selective import — the rule is
+// not json-specific, any module's selectively-imported name is one bare name.
+import regex.{find}
+
+fn find(s: String) -> Int = string.len(s)
+
+effect fn main() -> Unit = println(int.to_string(find("abc")))

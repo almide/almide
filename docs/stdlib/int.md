@@ -6,176 +6,334 @@ Integer arithmetic and bitwise. auto-imported.
 
 Convert an integer to its decimal string representation.
 
-```almd
-int.to_string(42) // => \"42\
+```almd run
+fn main() -> Unit = {
+  println(int.to_string(42))
+}
+```
+```output
+42
 ```
 
 ### `int.to_hex(n: Int) -> String`
 
 Convert an integer to its hexadecimal string representation (lowercase).
 
-```almd
-int.to_hex(255) // => \"ff\
+```almd run
+fn main() -> Unit = {
+  println(int.to_hex(255))
+}
+```
+```output
+ff
 ```
 
 ### `int.parse(s: String) -> Result[Int, String]`
 
 Parse a decimal string into an integer. Returns err if the string is not a valid integer.
 
-```almd
-int.parse(\"42\") // => ok(42)
+```almd run
+fn main() -> Unit = {
+  match int.parse("42") {
+    ok(n) => println("ok(${n})"),
+    err(e) => println("err(${e})"),
+  }
+  match int.parse("4x2") {
+    ok(n) => println("ok(${n})"),
+    err(e) => println("err(${e})"),
+  }
+}
+```
+```output
+ok(42)
+err(invalid digit found in string)
 ```
 
 ### `int.from_hex(s: String) -> Result[Int, String]`
 
 Parse a hexadecimal string into an integer. Returns err if the string is not valid hex.
 
-```almd
-int.parse_hex(\"ff\") // => ok(255)
+```almd run
+fn show(r: Result[Int, String]) -> String = match r { ok(n) => "ok " + int.to_string(n), err(e) => "err " + e }
+
+fn main() -> Unit = {
+  println(show(int.from_hex("ff")))
+  println(show(int.from_hex("FF")))
+  println(show(int.from_hex("zz")))
+}
+```
+```output
+ok 255
+ok 255
+err invalid digit found in string
 ```
 
 ### `int.abs(n: Int) -> Int`
 
 Return the absolute value of an integer.
 
-```almd
-int.abs(-5) // => 5
+```almd run
+fn main() -> Unit = {
+  println("${int.abs(-5)}")
+}
+```
+```output
+5
+```
+
+### `int.is_even(n: Int) -> Bool`
+
+Parity predicate: `true` when `n` is divisible by 2. Negative values and the
+bounds are exact (`%` keeps the dividend's sign, so the test is `% 2 == 0`).
+
+```almd run
+fn main() -> Unit = {
+  println("${int.is_even(4)} ${int.is_even(-3)} ${int.is_even(0)}")
+}
+```
+```output
+true false true
+```
+
+### `int.is_odd(n: Int) -> Bool`
+
+The other half of the parity pair: `true` when `n` is not divisible by 2.
+Scalar `int` only — a sized value reaches it through `int.from_int8(x)`.
+
+```almd run
+fn main() -> Unit = {
+  println("${int.is_odd(7)} ${int.is_odd(-3)} ${int.is_odd(4)}")
+}
+```
+```output
+true true false
 ```
 
 ### `int.min(a: Int, b: Int) -> Int`
 
 Return the smaller of two integers.
 
-```almd
-int.min(3, 7) // => 3
+```almd run
+fn main() -> Unit = {
+  println("${int.min(3, 7)}")
+}
+```
+```output
+3
 ```
 
 ### `int.max(a: Int, b: Int) -> Int`
 
 Return the larger of two integers.
 
-```almd
-int.max(3, 7) // => 7
+```almd run
+fn main() -> Unit = {
+  println("${int.max(3, 7)}")
+}
+```
+```output
+7
 ```
 
 ### `int.band(a: Int, b: Int) -> Int`
 
 Bitwise AND of two integers.
 
-```almd
-int.band(0b1100, 0b1010) // => 0b1000
+```almd run
+fn main() -> Unit = {
+  println("${int.band(0b1100, 0b1010)}") // 0b1000
+}
+```
+```output
+8
 ```
 
 ### `int.bor(a: Int, b: Int) -> Int`
 
 Bitwise OR of two integers.
 
-```almd
-int.bor(0b1100, 0b1010) // => 0b1110
+```almd run
+fn main() -> Unit = {
+  println("${int.bor(0b1100, 0b1010)}") // 0b1110
+}
+```
+```output
+14
 ```
 
 ### `int.bxor(a: Int, b: Int) -> Int`
 
 Bitwise XOR of two integers.
 
-```almd
-int.bxor(0b1100, 0b1010) // => 0b0110
+```almd run
+fn main() -> Unit = {
+  println("${int.bxor(0b1100, 0b1010)}") // 0b0110
+}
+```
+```output
+6
 ```
 
 ### `int.bshl(a: Int, n: Int) -> Int`
 
 Bitwise shift left.
 
-```almd
-int.bshl(1, 3) // => 8
+```almd run
+fn main() -> Unit = {
+  println("${int.bshl(1, 3)}")
+}
+```
+```output
+8
 ```
 
 ### `int.bshr(a: Int, n: Int) -> Int`
 
 Bitwise shift right (arithmetic).
 
-```almd
-int.bshr(8, 2) // => 2
+```almd run
+fn main() -> Unit = {
+  println("${int.bshr(8, 2)}")
+  println("${int.bshr(-8, 2)}")
+}
+```
+```output
+2
+-2
 ```
 
 ### `int.bnot(a: Int) -> Int`
 
 Bitwise NOT (complement) of an integer.
 
-```almd
-int.bnot(0) // => -1
+```almd run
+fn main() -> Unit = {
+  println("${int.bnot(0)}")
+}
+```
+```output
+-1
 ```
 
 ### `int.wrap_add(a: Int, b: Int, bits: Int) -> Int`
 
 Wrapping addition within a given bit width. Overflow wraps around.
 
-```almd
-int.wrap_add(255, 1, 8) // => 0
+```almd run
+fn main() -> Unit = {
+  println("${int.wrap_add(255, 1, 8)}")
+}
+```
+```output
+0
 ```
 
 ### `int.wrap_mul(a: Int, b: Int, bits: Int) -> Int`
 
 Wrapping multiplication within a given bit width. Overflow wraps around.
 
-```almd
-int.wrap_mul(16, 16, 8) // => 0
+```almd run
+fn main() -> Unit = {
+  println("${int.wrap_mul(16, 16, 8)}")
+}
+```
+```output
+0
 ```
 
 ### `int.rotate_right(a: Int, n: Int, bits: Int) -> Int`
 
 Rotate bits right within a given bit width.
 
-```almd
-int.rotate_right(1, 1, 8) // => 128
+```almd run
+fn main() -> Unit = {
+  println("${int.rotate_right(1, 1, 8)}")
+}
+```
+```output
+128
 ```
 
 ### `int.rotate_left(a: Int, n: Int, bits: Int) -> Int`
 
 Rotate bits left within a given bit width.
 
-```almd
-int.rotate_left(128, 1, 8) // => 1
+```almd run
+fn main() -> Unit = {
+  println("${int.rotate_left(128, 1, 8)}")
+}
+```
+```output
+1
 ```
 
 ### `int.to_u32(a: Int) -> Int`
 
 Truncate an integer to an unsigned 32-bit value (mask to 0...4294967295).
 
-```almd
-int.to_u32(300) // => 300
+```almd run
+fn main() -> Unit = {
+  println("${int.to_u32(300)}")
+  println("${int.to_u32(-1)}")
+}
+```
+```output
+300
+4294967295
 ```
 
 ### `int.to_u8(a: Int) -> Int`
 
 Truncate an integer to an unsigned 8-bit value (mask to 0...255).
 
-```almd
-int.to_u8(300) // => 44
+```almd run
+fn main() -> Unit = {
+  println("${int.to_u8(300)}")
+}
+```
+```output
+44
 ```
 
 ### `int.clamp(n: Int, lo: Int, hi: Int) -> Int`
 
 Clamp an integer to the range [lo, hi].
 
-```almd
-int.clamp(15, 0, 10) // => 10
+```almd run
+fn main() -> Unit = {
+  println("${int.clamp(15, 0, 10)}")
+  println("${int.clamp(-3, 0, 10)}")
+}
+```
+```output
+10
+0
 ```
 
 ### `int.to_float(n: Int) -> Float`
 
 Convert an integer to a floating-point number.
 
-```almd
-int.to_float(42) // => 42.0
+```almd run
+fn main() -> Unit = {
+  println(float.to_string(int.to_float(42)))
+}
+```
+```output
+42.0
 ```
 
 ### `int.bits_to_float(bits: Int) -> Float`
 
 Reinterpret an integer's bits as an IEEE 754 float (f64).
 
-```almd
-int.bits_to_float(4607182418800017408) // => 1.0
+```almd run
+fn main() -> Unit = {
+  println(float.to_string(int.bits_to_float(4607182418800017408)))
+}
+```
+```output
+1.0
 ```
 
 ## Matrix completeness (#956)
@@ -189,7 +347,7 @@ numeric-matrix gate in `almide docs-gen --check`.
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (70 functions)
+## Signature index (72 functions)
 
 ```
 int.to_string(n: Int) -> String
@@ -203,6 +361,8 @@ int.abs(n: Int) -> Int
 int.min(a: Int, b: Int) -> Int
 int.max(a: Int, b: Int) -> Int
 int.clamp(n: Int, lo: Int, hi: Int) -> Int
+int.is_even(n: Int) -> Bool
+int.is_odd(n: Int) -> Bool
 int.band(a: Int, b: Int) -> Int
 int.bor(a: Int, b: Int) -> Int
 int.bxor(a: Int, b: Int) -> Int

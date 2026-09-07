@@ -1,0 +1,3 @@
+expects_code = "E048"
+expects_error = "pattern `none` destructures an Option"
+hint_substring = "carries the error value"

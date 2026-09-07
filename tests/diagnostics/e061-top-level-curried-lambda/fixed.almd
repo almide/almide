@@ -1,0 +1,5 @@
+// A curried binding is still a lambda at module scope — the outer closure
+// cannot live in a module constant.
+fn scale(k: Int, x: Int) -> Int = k * x
+
+fn main() -> Unit = println(int.to_string(scale(2, 3)))

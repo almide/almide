@@ -52,8 +52,8 @@ impl Emitter<'_> {
     /// The COW form of the mut-var read (RC-5): every in-place mutation
     /// route reads through here — a shared block copies first and the
     /// var (or cell) is repointed at the unique copy before the route
-    /// touches it. Lists and Bytes only; strings and maps mutate
-    /// functionally.
+    /// touches it. Lists and Bytes only; strings mutate functionally and
+    /// maps have their own judge (map_inplace.rs, #1219).
     pub(crate) fn emit_read_mut_var_cow(
         &mut self,
         id: &VarId,
@@ -68,7 +68,8 @@ impl Emitter<'_> {
             && (global || idx >= self.rc_param_ceiling)
         {
             let scr = self.scr_i32_local;
-            self.f.instructions().call(F_COW).local_set(scr);
+            let cow = self.cow_fn_of(ty);
+            self.f.instructions().call(cow).local_set(scr);
             self.f.instructions().local_get(scr);
             self.emit_store_mut_var(*id, idx, ty, global)?;
             self.f.instructions().local_get(scr);

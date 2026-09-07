@@ -1,0 +1,8 @@
+// ALS-B9: the capability denial must survive an import alias — `e` resolves
+// back to env before the profile judges the call.
+import env as e
+
+@bounded
+effect fn home() -> String = e.get("HOME") ?? ""
+
+effect fn main() -> Unit = println(home() ?? "")

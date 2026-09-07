@@ -1,0 +1,18 @@
+// The OPAQUE shape of the #1828 shadow (#1835): `mod type Value = String`
+// is a newtype the entry program owns — `self.Value` — and `json.parse`'s
+// result is still the STDLIB's `Value`. Reading a field off the json value
+// is E013 whose hint names both types; before, the newtype shared the
+// stdlib's bare key, so the mix passed `check` (rustc E0308 on native, a
+// json payload read as a String on wasm).
+import json
+
+mod type Value = String
+
+fn text(v: Value) -> String = match v {
+  Value(s) => s
+}
+
+effect fn main() -> Unit = {
+  let doc = json.parse("{\"n\": 1}")!
+  println("${text(Value("x"))} ${int.to_string(doc.n)}")
+}

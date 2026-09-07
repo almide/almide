@@ -1,0 +1,10 @@
+// E016 through the map-LITERAL path: the key expression's type is a record
+// with a function-typed field, so the literal's key is unhashable (#1518's
+// Named-record recursion, at the literal instead of the annotation).
+type K = { hit: (Int) -> Int }
+
+fn main() -> Unit = {
+  let k = K { hit: (n) => n }
+  let m = [k: "first"]
+  println(int.to_string(map.len(m)))
+}

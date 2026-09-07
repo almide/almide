@@ -1,0 +1,10 @@
+// ALS-B8: a `var` length is not a compile-time constant even when it is
+// initialized from a literal — mutability forfeits the static size.
+@bounded
+fn wall() -> Int = {
+  var w = 3
+  let s = string.repeat("=", w)
+  string.len(s)
+}
+
+fn main() -> Unit = println("${wall()}")

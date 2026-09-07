@@ -20,7 +20,7 @@ impl Emitter<'_> {
         module: &str,
         func: &str,
         args: &[IrExpr],
-    ) -> Result<Option<Option<SliceTy>>, EmitError> {
+    ) -> Result<Option<Option<Lowered>>, EmitError> {
         let out = match (module, func, args) {
             // Option[String]: status 2 = unset → none.
             ("env", "get", [name]) => {
@@ -54,73 +54,102 @@ impl Emitter<'_> {
                 let _ = i;
                 self.release_i32();
                 self.release_i64();
-                Some(SliceTy::Option(self.types.intern(STR)))
+                Some(Lowered::owned(SliceTy::Option(self.types.intern(STR))))
             }
             // Result[Unit, String]: the overlay set — key in a, value in
             // b, the fs.write two-string convention (#1423 bucket C).
             ("env", "set", [k, v]) => {
                 self.fs_call_str2(k, v, crate::fs_meta::OP_ENV_SET)?;
-                Some(self.fs_result_unit()?)
+                Some(Lowered::owned(self.fs_result_unit()?))
             }
             // The http string family (#1710 increment 1): every fn is
             // Result[String, String] — exactly the fs.read_text decode.
             ("http", "get", [u]) => {
                 self.fs_call_1(u, crate::fs_meta::OP_HTTP_GET)?;
-                Some(self.fs_result_string()?)
+                Some(Lowered::owned(self.fs_result_string()?))
             }
             ("http", "delete", [u]) => {
                 self.fs_call_1(u, crate::fs_meta::OP_HTTP_DELETE)?;
-                Some(self.fs_result_string()?)
+                Some(Lowered::owned(self.fs_result_string()?))
             }
             ("http", "post", [u, b]) => {
                 self.fs_call_str2(u, b, crate::fs_meta::OP_HTTP_POST)?;
-                Some(self.fs_result_string()?)
+                Some(Lowered::owned(self.fs_result_string()?))
             }
             ("http", "put", [u, b]) => {
                 self.fs_call_str2(u, b, crate::fs_meta::OP_HTTP_PUT)?;
-                Some(self.fs_result_string()?)
+                Some(Lowered::owned(self.fs_result_string()?))
             }
             ("http", "patch", [u, b]) => {
                 self.fs_call_str2(u, b, crate::fs_meta::OP_HTTP_PATCH)?;
-                Some(self.fs_result_string()?)
+                Some(Lowered::owned(self.fs_result_string()?))
+            }
+            // The framed request family (#1710 increment 3): the spliced
+            // http_framed leaves — url in a, the (method, body, headers)
+            // frame in b. 49's status answer is a `<code>\n<body>` string
+            // the guest splits; 50 is the raw-bytes carrier.
+            ("http", "__http_framed_text", [u, f]) => {
+                self.fs_call_str2(u, f, crate::fs_meta::OP_HTTP_FRAMED_TEXT)?;
+                Some(Lowered::owned(self.fs_result_string()?))
+            }
+            ("http", "__http_framed_status", [u, f]) => {
+                self.fs_call_str2(u, f, crate::fs_meta::OP_HTTP_FRAMED_STATUS)?;
+                Some(Lowered::owned(self.fs_result_string()?))
+            }
+            ("http", "__http_framed_bytes", [u, f]) => {
+                self.fs_call_str2(u, f, crate::fs_meta::OP_HTTP_FRAMED_BYTES)?;
+                Some(Lowered::owned(self.fs_result_bytes()?))
             }
             ("env", "os", []) => {
                 self.fs_call_0(OP_ENV_OS)?;
                 self.fs_take_text()?;
-                Some(STR)
+                Some(Lowered::owned(STR))
             }
             // Result[String, String] — the surface is fallible (matched
             // with ok/err), unlike the never-err os/temp_dir texts.
             ("env", "cwd", []) => {
                 self.fs_call_0(OP_CWD)?;
-                Some(self.fs_result_string()?)
+                Some(Lowered::owned(self.fs_result_string()?))
             }
             ("env", "temp_dir", []) => {
                 self.fs_call_0(OP_TEMP_DIR)?;
                 self.fs_take_text()?;
-                Some(STR)
+                Some(Lowered::owned(STR))
             }
             ("env" | "process", "args", []) => {
+                // Frames arrive [argv0, args...] on every host (#1716):
+                // the embedded host names itself, a stock p1 runtime
+                // passes the module path. env.args is native argv[1..]
+                // (the FIRST frame drops — its fresh block frees);
+                // process.args is the FULL argv (C-096, argv0 kept).
+                let skip0 = module == "env";
                 self.fs_call_0(OP_ARGS)?;
                 let (hraw, hlen, _herr) = self.fs_frames_or_err()?;
                 let hlist = self.hold_i32()?;
+                let hfirst = self.hold_i32()?;
                 self.f.instructions().i32_const(0).call(F_ALLOC).local_set(hlist);
+                self.f.instructions().i32_const(i32::from(skip0)).local_set(hfirst);
                 self.fs_frames_foreach(hraw, hlen, |em| {
                     let hline = em.tmp_i32_local;
                     em.f.instructions().local_set(hline);
+                    em.f.instructions().local_get(hfirst).if_(BlockType::Empty);
+                    em.f.instructions().i32_const(0).local_set(hfirst);
+                    em.f.instructions().local_get(hline).call(F_DEC_FLAT);
+                    em.f.instructions().else_();
                     em.f
                         .instructions()
                         .local_get(hlist)
                         .local_get(hline)
                         .call(F_LIST_PUSH_4)
                         .local_set(hlist);
+                    em.f.instructions().end();
                     Ok(())
                 })?;
                 self.f.instructions().local_get(hlist);
-                for _ in 0..4 {
+                for _ in 0..5 {
                     self.release_i32();
                 }
-                Some(SliceTy::List(self.types.intern(STR)))
+                Some(Lowered::owned(SliceTy::List(self.types.intern(STR))))
             }
             // stdin read-to-end (#1598's io half): the host's op-31 drain
             // parks the stream, and the raw-text builder collects it. RAW
@@ -131,7 +160,7 @@ impl Emitter<'_> {
             ("io", "read_all", []) => {
                 self.fs_call_0(OP_STDIN_READ)?;
                 self.fs_take_text()?;
-                Some(STR)
+                Some(Lowered::owned(STR))
             }
             // One byte off the stdin CURSOR (op 35): parked len 0 = EOF
             // -> -1, else the byte zero-extended — the native intrinsic's
@@ -157,7 +186,7 @@ impl Emitter<'_> {
                 let _ = i;
                 self.release_i32();
                 self.release_i64();
-                Some(INT)
+                Some(Lowered::scalar(INT))
             }
             // Byte-at-a-time off the stdin cursor until '\n' (excluded)
             // or EOF, trailing '\r' stripped — native
@@ -211,10 +240,10 @@ impl Emitter<'_> {
                 self.release_i64();
                 self.release_i32();
                 self.release_i32();
-                Some(STR)
+                Some(Lowered::owned(STR))
             }
             ("io", "write", [b]) => {
-                self.lower(b, Some(SliceTy::Scalar(Scalar::Bytes)))?;
+                self.lower_arg(b, Some(SliceTy::Scalar(Scalar::Bytes)), ArgMode::Borrow)?;
                 self.io_stdout_raw()?;
                 None
             }
@@ -223,7 +252,7 @@ impl Emitter<'_> {
             // the always-ok unit carrier: print has no failure channel,
             // but the effect ABI still hands the caller a Result block.
             ("io", "print", [s]) => {
-                self.lower(s, Some(STR))?;
+                self.lower_arg(s, Some(STR), ArgMode::Borrow)?;
                 self.io_stdout_raw()?;
                 let hb = self.hold_i32()?;
                 {
@@ -239,7 +268,7 @@ impl Emitter<'_> {
                 self.release_i32();
                 let uh = self.types.intern(SliceTy::Unit);
                 let sh = self.types.intern(STR);
-                Some(SliceTy::Result(uh, sh))
+                Some(Lowered::owned(SliceTy::Result(uh, sh)))
             }
             // Unit effect with no failure channel and no observable value:
             // sleep on the host (the ms count rides the a_len slot with a
@@ -247,7 +276,7 @@ impl Emitter<'_> {
             // [0, i32::MAX]), the i64 status dropped, then the always-ok
             // unit carrier io.print builds (#1423 bucket A).
             ("env", "sleep_ms", [ms]) => {
-                self.lower(ms, Some(INT))?;
+                self.lower_arg(ms, Some(INT), ArgMode::Borrow)?;
                 let hm = self.hold_i64()?;
                 self.note_host_op(crate::fs_meta::OP_SLEEP_MS);
                 {
@@ -286,11 +315,11 @@ impl Emitter<'_> {
                 self.release_i32();
                 let uh = self.types.intern(SliceTy::Unit);
                 let sh = self.types.intern(STR);
-                Some(SliceTy::Result(uh, sh))
+                Some(Lowered::owned(SliceTy::Result(uh, sh)))
             }
             // List[Int] → low bytes, then the same raw sink.
             ("io", "write_bytes", [xs]) => {
-                match self.lower(xs, None)? {
+                match self.lower_arg(xs, None, ArgMode::Borrow)? {
                     SliceTy::List(h) if self.types.el(h) == INT => {}
                     other => return unsup(&format!("io-write-bytes-of:{other:?}")),
                 }
@@ -322,7 +351,7 @@ impl Emitter<'_> {
             // n <= 0 → []; else read up to n stdin bytes (harness: none)
             // and decode one i64 slot per byte.
             ("io", "read_n_bytes", [n]) => {
-                self.lower(n, Some(INT))?;
+                self.lower_arg(n, Some(INT), ArgMode::Borrow)?;
                 let hn = self.hold_i64()?;
                 let mut i = self.f.instructions();
                 i.local_set(hn);
@@ -382,7 +411,7 @@ impl Emitter<'_> {
                 }
                 self.release_i64();
                 self.release_i64();
-                Some(SliceTy::List(self.types.intern(INT)))
+                Some(Lowered::owned(SliceTy::List(self.types.intern(INT))))
             }
             _ => return Ok(None),
         };

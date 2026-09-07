@@ -1,0 +1,3 @@
+expects_code = "E018"
+expects_error = "cannot infer the element type of empty map"
+hint_substring = "explicit key/value types"

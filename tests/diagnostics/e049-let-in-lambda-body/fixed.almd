@@ -1,0 +1,7 @@
+// E049 variant: the let-in sits inside a lambda's block body.
+fn main() -> Unit = {
+  let show = (n: Int) => {
+    let m = n + 1 println(int.to_string(m))
+  }
+  show(3)
+}

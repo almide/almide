@@ -1,0 +1,5 @@
+// A curried binding is still a lambda at module scope — the outer closure
+// cannot live in a module constant.
+let scale = (k: Int) => (x: Int) => k * x
+
+fn main() -> Unit = println("ready")

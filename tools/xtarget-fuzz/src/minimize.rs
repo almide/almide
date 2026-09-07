@@ -209,21 +209,50 @@ fn reproduces(
 /// own expected output, so the oracle survives minimization.
 pub fn minimize_plan(
     tc: &Toolchain,
-    plan: &crate::generator::identity::Plan,
+    plan: &crate::generator::FamilyPlan,
     target_kind: FindingKind,
     work_dir: &Path,
     reference: Option<&dyn ReferenceOracle>,
 ) -> Minimized {
-    use crate::generator::identity;
+    use crate::generator::{composition, identity, FamilyPlan};
+
+    // Each family shrinks through its own plan; the loop is the same.
+    let (render, shrink): (
+        Box<dyn Fn(&FamilyPlan) -> String>,
+        Box<dyn Fn(&FamilyPlan) -> Vec<FamilyPlan>>,
+    ) = match plan {
+        FamilyPlan::Identity(_) => (
+            Box::new(|p| match p {
+                FamilyPlan::Identity(p) => identity::render(p).0,
+                _ => unreachable!(),
+            }),
+            Box::new(|p| match p {
+                FamilyPlan::Identity(p) => identity::shrink(p).into_iter().map(FamilyPlan::Identity).collect(),
+                _ => unreachable!(),
+            }),
+        ),
+        FamilyPlan::Composition(_) => (
+            Box::new(|p| match p {
+                FamilyPlan::Composition(p) => composition::render(p).0,
+                _ => unreachable!(),
+            }),
+            Box::new(|p| match p {
+                FamilyPlan::Composition(p) => {
+                    composition::shrink(p).into_iter().map(FamilyPlan::Composition).collect()
+                }
+                _ => unreachable!(),
+            }),
+        ),
+    };
 
     let mut current = plan.clone();
-    let mut best = identity::render(&current).0;
+    let mut best = render(&current);
     let mut best_finding = None;
 
     for _ in 0..MAX_ROUNDS {
         let mut shrank = false;
-        for candidate in identity::shrink(&current) {
-            let (src, _) = identity::render(&candidate);
+        for candidate in shrink(&current) {
+            let src = render(&candidate);
             if let Some(f) = reproduces(tc, &src, target_kind, work_dir, reference) {
                 current = candidate;
                 best = src;

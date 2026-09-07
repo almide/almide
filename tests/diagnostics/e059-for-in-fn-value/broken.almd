@@ -1,0 +1,8 @@
+// A function value is not a sequence — apply it inside a loop over a range
+// instead of looping over the function itself.
+fn main() -> Unit = {
+  let f = (n: Int) => n + 1
+  for x in f {
+    println("${x}")
+  }
+}

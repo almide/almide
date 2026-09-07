@@ -1,0 +1,29 @@
+// testing.assert_snapshot (#1314): the expectation is the literal at the call
+// site, accepted in place by `almide test --update-snapshots`. This file pins
+// the GREEN side on both lanes — a matching one-line literal and a matching
+// heredoc (the spelling the accept step writes for a multi-line value). The
+// red side (the abort block, the rewrite, the CI refusal) lives in
+// spec/wasm_cross/snapshot_mismatch_abort.almd and tests/snapshot_update_test.rs.
+import testing
+
+fn render(xs: List[Int]) -> String = xs |> list.map((x) => "item ${x}") |> list.join("\n")
+
+test "a matching one-line snapshot passes" {
+  testing.assert_snapshot("hello", "hello")
+}
+
+test "a matching heredoc snapshot passes" {
+  testing.assert_snapshot(render([1, 2, 3]), """
+    item 1
+    item 2
+    item 3
+    """)
+}
+
+test "a snapshot with escapes matches the literal's decoded value" {
+  testing.assert_snapshot("a \"b\" $c\\d", "a \"b\" \$c\\d")
+}
+
+test "the empty snapshot matches an empty value" {
+  testing.assert_snapshot("", "")
+}

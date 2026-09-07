@@ -5,20 +5,34 @@
 //!
 //! The transform is a POST-PASS, so the emitter and its verified
 //! envelope stay untouched:
-//!   - the 5 `almide.*` imports are replaced by 5 WASI imports (SAME
-//!     count, so every other function index is preserved verbatim);
+//!   - the 5 `almide.*` imports are replaced by 5 WASI imports
+//!     (fd_write / proc_exit / random_get / clock_time_get / fd_read),
+//!     plus the environ/args quartet ONLY when the module's emitted op
+//!     set reaches it (below); every non-import index shifts by the
+//!     import delta, and the element section re-encodes through the
+//!     same Remap (#1716);
 //!   - every call to an old import retargets to one of 5 appended SHIM
-//!     functions implementing the almide host contract over WASI
-//!     (fd_write / proc_exit / random_get / clock_time_get / fd_read);
-//!   - one PARK page is appended to linear memory for iovecs, the
-//!     stdin/entropy buffer (grown on demand), and the unsupported-op
-//!     message; two globals carry the park length and capacity.
+//!     functions implementing the almide host contract over WASI;
+//!   - one PARK span is appended to linear memory for iovecs, the
+//!     stdin/entropy buffer (grown on demand), the unsupported-op
+//!     message and the env overlay log; globals carry the park length
+//!     and capacity (and the overlay length, when an env service ships).
 //!
 //! Supported host surface (the non-host-variant corpus): console
 //! output (println/eprintln/io.print/io.write), exit codes, stdin
-//! read-to-end, entropy, the wall clock. fs/env/process ops take the
+//! read-to-end, entropy, the wall clock. fs/process ops take the
 //! DEFINED refusal: a named message on stderr + exit 1 — never a
 //! silent wrong answer (the target-availability doctrine, #1423).
+//!
+//! The env/args SERVICES are reachability-gated (#1841, the #1712
+//! discipline applied to the transform): `env.get` (op 26) ships the
+//! environ pair of imports + its scan shim, `env.set` (op 37) its
+//! overlay-append shim, `env.args`/`process.args` (op 29) the args
+//! pair of imports + its frames shim — each only when the emitted op
+//! set names the op. A hello-world artifact carries none of them
+//! (five imports, five shims), and an op that never reached the module
+//! cannot be called, so the gate is a selection over the op table the
+//! build path already audits against `P1_SERVED_OPS`, not an analysis.
 
 use wasm_encoder::reencode::{Reencode, RoundtripReencoder};
 use wasm_encoder::{
@@ -32,7 +46,7 @@ use wasmparser::{Parser, Payload};
 /// path audits an artifact's emitted op set against this before shipping
 /// (an unserved op = a runtime refusal on a runtime the developer never
 /// ran — the env.set lesson): extend the shim and this list TOGETHER.
-pub const P1_SERVED_OPS: &[i32] = &[30, 31, 32, 34, 35, 36];
+pub const P1_SERVED_OPS: &[i32] = &[26, 29, 30, 31, 32, 34, 35, 36, 37];
 
 pub(crate) const UNSUPPORTED_MSG: &[u8] = b"Error: host op unsupported in the WASI build\n";
 // Park-page layout (offsets from park base).
@@ -40,9 +54,15 @@ pub(crate) const IOV: u64 = 0; // two iovec entries (16 bytes)
 pub(crate) const NREAD: u64 = 16;
 pub(crate) const NL: u64 = 24;
 pub(crate) const MSG: u64 = 64;
-pub(crate) const DATA: u64 = 1024; // stdin/entropy bytes
-/// The park span: four pages carved out at the original heap base.
-pub(crate) const PARK_SPAN: u64 = 4 * 65536;
+pub(crate) const DATA: u64 = 1024; // stdin/entropy bytes + op result staging
+/// The env.set overlay log (#1716): [klen u32][vlen u32][key][val] entries,
+/// append-only, scanned last-write-wins by op 26. Its page sits ABOVE the
+/// stdin ceiling (g_pcap inits to park+OVL), so read-to-end can never run
+/// into it.
+pub(crate) const OVL: u64 = 4 * 65536;
+/// The park span: five pages carved out at the original heap base — four
+/// for iovecs/messages/stdin, one for the env overlay log.
+pub(crate) const PARK_SPAN: u64 = 5 * 65536;
 
 pub(crate) struct Remap {
     pub(crate) shim_base: u32,
@@ -93,9 +113,15 @@ pub(crate) struct Parsed<'a> {
     pub(crate) parsed_globals: Vec<(GlobalType, Option<i32>, Option<i64>, Option<u64>)>,
     pub(crate) global_count: u32,
     pub(crate) heap_global: Option<u32>,
-    pub(crate) exports: ExportSection,
+    /// Raw export rows — Func indices are ORIGINAL and must be shifted by
+    /// the transform's import delta when rebuilt (#1716).
+    pub(crate) exports: Vec<(String, ExportKind, u32)>,
     pub(crate) main_index: Option<u32>,
-    pub(crate) elements: ElementSection,
+    /// Raw element segments: each transform re-encodes them through its
+    /// own `Remap`, so funcref table entries shift with the import count
+    /// (the #1688 silent-corruption class — a verbatim roundtrip under a
+    /// nonzero shift retargets every closure).
+    pub(crate) elements: Vec<wasmparser::Element<'a>>,
     pub(crate) data: DataSection,
     pub(crate) bodies: Vec<wasmparser::FunctionBody<'a>>,
 }
@@ -145,7 +171,7 @@ fn parse_export(e: wasmparser::Export<'_>, p: &mut Parsed<'_>) -> anyhow::Result
         wasmparser::ExternalKind::Tag => ExportKind::Tag,
         other => anyhow::bail!("unexpected export kind {other:?}"),
     };
-    p.exports.export(e.name, kind, e.index);
+    p.exports.push((e.name.to_string(), kind, e.index));
     Ok(())
 }
 
@@ -159,9 +185,9 @@ pub(crate) fn parse_module(bytes: &[u8]) -> anyhow::Result<Parsed<'_>> {
         parsed_globals: Vec::new(),
         global_count: 0,
         heap_global: None,
-        exports: ExportSection::new(),
+        exports: Vec::new(),
         main_index: None,
-        elements: ElementSection::new(),
+        elements: Vec::new(),
         data: DataSection::new(),
         bodies: Vec::new(),
     };
@@ -208,9 +234,8 @@ pub(crate) fn parse_module(bytes: &[u8]) -> anyhow::Result<Parsed<'_>> {
                 }
             }
             Payload::ElementSection(r) => {
-                let mut re = RoundtripReencoder;
                 for e in r {
-                    re.parse_element(&mut p.elements, e?).expect("element");
+                    p.elements.push(e?);
                 }
             }
             Payload::DataSection(r) => {
@@ -226,7 +251,41 @@ pub(crate) fn parse_module(bytes: &[u8]) -> anyhow::Result<Parsed<'_>> {
     Ok(p)
 }
 
-pub fn to_wasi(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
+/// The optional p1 services (#1841), selected from the module's emitted
+/// op set — one flag per service, each with its own imports and shim.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct P1Services {
+    /// op 26 (`env.get`): environ_sizes_get + environ_get, the scan shim.
+    pub env_get: bool,
+    /// op 37 (`env.set`): the overlay-append shim (no import).
+    pub env_set: bool,
+    /// op 29 (`env.args` / `process.args`): args_sizes_get + args_get,
+    /// the frames shim.
+    pub args: bool,
+}
+
+impl P1Services {
+    /// Which services `host_ops` (the emitter's op set) reaches.
+    pub fn from_ops(host_ops: &[i32]) -> Self {
+        Self {
+            env_get: host_ops.contains(&26),
+            env_set: host_ops.contains(&37),
+            args: host_ops.contains(&29),
+        }
+    }
+
+    /// The WASI imports this selection adds past the base five.
+    pub fn extra_imports(self) -> u32 {
+        2 * u32::from(self.env_get) + 2 * u32::from(self.args)
+    }
+}
+
+/// Rewrite an emitted almide module into a stock-runtime p1 command.
+/// `host_ops` is the emitter's op set for the module (the second half of
+/// `almide_wasm::emit_program_with_ops`): the env/args services ship only
+/// for the ops it names (#1841).
+pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
+    let services = P1Services::from_ops(host_ops);
     let parsed = parse_module(bytes)?;
     let Parsed {
         mut types,
@@ -237,7 +296,7 @@ pub fn to_wasi(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
         parsed_globals,
         global_count,
         heap_global,
-        mut exports,
+        exports: export_rows,
         main_index,
         elements,
         mut data,
@@ -245,7 +304,13 @@ pub fn to_wasi(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     } = parsed;
     let main_index = main_index.ok_or_else(|| anyhow::anyhow!("no main export"))?;
     let heap_global = heap_global.ok_or_else(|| anyhow::anyhow!("no __heap export"))?;
-    let shim_base = 5 + func_types.len() as u32;
+    // The base five WASI imports replace the five almide.* ones; the
+    // environ/args pairs (#1716) are appended only for the services the
+    // op set reaches (#1841), so every non-import index shifts by the
+    // number of pairs shipped (0, 2 or 4).
+    let imports_count: u32 = 5 + services.extra_imports();
+    let shift: u32 = imports_count - 5;
+    let shim_base = imports_count + func_types.len() as u32;
     // The park CANNOT live past the current memory end — the bump heap
     // grows there. It takes over the ORIGINAL heap base instead, and
     // the heap's initial pointer moves up by the span: nothing else
@@ -256,6 +321,9 @@ pub fn to_wasi(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
         .ok_or_else(|| anyhow::anyhow!("__heap init not i32"))? as u32 as u64;
     let park: u64 = heap_init;
     let (g_plen, g_pcap) = (global_count, global_count + 1);
+    // g_ovl (the overlay log length) exists only when an env service
+    // ships — nothing else reads or writes the log.
+    let g_ovl = (services.env_get || services.env_set).then_some(global_count + 2);
     let mut globals = GlobalSection::new();
     for (idx, (gt, i32v, i64v, f64v)) in parsed_globals.iter().enumerate() {
         let init = if idx as u32 == heap_global {
@@ -297,6 +365,24 @@ pub fn to_wasi(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     imports.import(W, "random_get", EntityType::Function(t_random)); // 2
     imports.import(W, "clock_time_get", EntityType::Function(t_clock)); // 3
     imports.import(W, "fd_read", EntityType::Function(t_fd_rw)); // 4
+    // The environ/args pairs (#1716) — all share the (ptr, ptr) -> errno
+    // shape. Appended AFTER the base five so the shim bodies' literal
+    // import indices 0..4 stay put; each pair is present only when its
+    // service ships (#1841), and its shim takes the indices it landed on.
+    let mut next_import = 5u32;
+    let environ_imports = services.env_get.then(|| {
+        imports.import(W, "environ_sizes_get", EntityType::Function(t_random));
+        imports.import(W, "environ_get", EntityType::Function(t_random));
+        next_import += 2;
+        (next_import - 2, next_import - 1)
+    });
+    let args_imports = services.args.then(|| {
+        imports.import(W, "args_sizes_get", EntityType::Function(t_random));
+        imports.import(W, "args_get", EntityType::Function(t_random));
+        next_import += 2;
+        (next_import - 2, next_import - 1)
+    });
+    debug_assert_eq!(next_import, imports_count);
 
     let mut functions = FunctionSection::new();
     for ti in &func_types {
@@ -305,6 +391,19 @@ pub fn to_wasi(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     for ti in [t_print, t_print, t_exit, t_fs, t_read] {
         functions.function(ti);
     }
+    // The optional service shims, in order behind the base five: their
+    // function indices are handed to shim_fs_call's forwarding arms.
+    let mut next_shim = shim_base + 5;
+    let mut service_slot = |present: bool| {
+        present.then(|| {
+            functions.function(t_fs);
+            next_shim += 1;
+            next_shim - 1
+        })
+    };
+    let f_env_get = service_slot(services.env_get);
+    let f_env_set = service_slot(services.env_set);
+    let f_args = service_slot(services.args);
 
     let mut memories = MemorySection::new();
     memories.memory(MemoryType {
@@ -322,24 +421,70 @@ pub fn to_wasi(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
         GlobalType { val_type: ValType::I32, mutable: true, shared: false },
         &ConstExpr::i32_const(0),
     );
+    // g_pcap: the stdin read-to-end ceiling — the overlay page above it
+    // is the env log's, never stdin's.
     globals.global(
         GlobalType { val_type: ValType::I32, mutable: true, shared: false },
-        &ConstExpr::i32_const((park + PARK_SPAN) as i32),
+        &ConstExpr::i32_const((park + OVL) as i32),
     );
+    // g_ovl: bytes appended to the env overlay log so far.
+    if g_ovl.is_some() {
+        globals.global(
+            GlobalType { val_type: ValType::I32, mutable: true, shared: false },
+            &ConstExpr::i32_const(0),
+        );
+    }
 
-    exports.export("_start", ExportKind::Func, main_index);
+    let mut exports = ExportSection::new();
+    for (name, kind, idx) in &export_rows {
+        let idx = if *kind == ExportKind::Func { *idx + shift } else { *idx };
+        exports.export(name, *kind, idx);
+    }
+    exports.export("_start", ExportKind::Func, main_index + shift);
 
     let mut code = CodeSection::new();
-    let mut remap = Remap { shim_base, shift: 0 };
+    let mut remap = Remap { shim_base, shift };
     for b in bodies {
         code.function(&reencode_body(&b, &mut remap, 1)?);
     }
-    // Shims (their own calls target the NEW imports — no remap).
+    // Shims (their own calls target the NEW imports — no remap). Order:
+    // println, eprintln, exit, fs_call, host_read, then whichever of
+    // env_get, env_set, args the op set reached.
     code.function(&shim_print(1, park));
     code.function(&shim_print(2, park));
     code.function(&shim_exit());
-    code.function(&shim_fs_call(park, g_plen, g_pcap));
-    code.function(&shim_host_read(park, g_plen));
+    // #1962: a module whose emitted op set is EMPTY never calls `fs_call`
+    // (and `host_read` only copies an op's result out), so both shims ship
+    // as index-stable `unreachable` stubs — the fs_call dispatcher alone is
+    // ~460 B, a quarter of a hello-world artifact. The op set is the same
+    // audited one the build path routes on, so a stub is never reached.
+    if host_ops.is_empty() {
+        let mut stub = Function::new([]);
+        stub.instructions().unreachable().end();
+        code.function(&stub);
+        code.function(&stub);
+    } else {
+        code.function(&shim_fs_call(park, g_plen, g_pcap, f_env_get, f_env_set, f_args));
+        code.function(&shim_host_read(park, g_plen));
+    }
+    if f_env_get.is_some() {
+        let (i_sizes, i_get) = environ_imports.expect("env_get service imports its pair");
+        code.function(&shim_env_get(park, g_plen, g_ovl.expect("env service global"), i_sizes, i_get));
+    }
+    if f_env_set.is_some() {
+        code.function(&shim_env_set(park, g_ovl.expect("env service global")));
+    }
+    if f_args.is_some() {
+        let (i_sizes, i_get) = args_imports.expect("args service imports its pair");
+        code.function(&shim_args(park, g_plen, i_sizes, i_get));
+    }
+
+    let mut element_sec = ElementSection::new();
+    for e in elements {
+        remap
+            .parse_element(&mut element_sec, e)
+            .map_err(|e| anyhow::anyhow!("element reencode: {e:?}"))?;
+    }
 
     data.active(
         0,
@@ -355,7 +500,7 @@ pub fn to_wasi(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
         .section(&memories)
         .section(&globals)
         .section(&exports)
-        .section(&elements)
+        .section(&element_sec)
         .section(&code)
         .section(&data);
     let out = m.finish();
@@ -392,195 +537,5 @@ pub(crate) fn reencode_body(b: &wasmparser::FunctionBody<'_>, remap: &mut Remap,
     Ok(f)
 }
 
-/// `(ptr, len) -> ()`: fd_write(fd, [(ptr,len),("\n",1)]).
-fn shim_print(fd: i32, park: u64) -> Function {
-    let (ptr, len) = (0u32, 1u32);
-    let mut f = Function::new([]);
-    let mut i = f.instructions();
-    i.i32_const(park as i32).local_get(ptr).i32_store(mem(IOV));
-    i.i32_const(park as i32).local_get(len).i32_store(mem(IOV + 4));
-    i.i32_const(fd);
-    i.i32_const((park + IOV) as i32);
-    i.i32_const(1);
-    i.i32_const((park + NREAD) as i32);
-    i.call(0); // fd_write: the payload
-    i.drop();
-    i.i32_const(park as i32).i32_const(0x0A).i32_store8(mem8(NL));
-    i.i32_const(park as i32).i32_const((park + NL) as i32).i32_store(mem(IOV));
-    i.i32_const(park as i32).i32_const(1).i32_store(mem(IOV + 4));
-    i.i32_const(fd);
-    i.i32_const((park + IOV) as i32);
-    i.i32_const(1);
-    i.i32_const((park + NREAD) as i32);
-    i.call(0); // fd_write: the newline
-    i.drop();
-    i.end();
-    f
-}
-
-/// `(code) -> ()`: proc_exit never returns.
-fn shim_exit() -> Function {
-    let mut f = Function::new([]);
-    f.instructions().local_get(0).call(1).unreachable().end();
-    f
-}
-
-/// The almide `fs_call` contract over WASI: ops 30/31/32/34/35/36
-/// supported, everything else takes the defined refusal (stderr + exit 1).
-fn shim_fs_call(park: u64, g_plen: u32, g_pcap: u32) -> Function {
-    // params: 0=op 1=a_ptr 2=a_len 3=b_ptr 4=b_len; locals: 5=total 6=nread
-    // 7=deadline (i64, op 36)
-    let (op, a_len, b_ptr, b_len, total, nread) = (0u32, 2u32, 3u32, 4u32, 5u32, 6u32);
-    let deadline = 7u32;
-    let mut f = Function::new([(2, ValType::I32), (1, ValType::I64)]);
-    let mut i = f.instructions();
-
-    // op 30: raw stdout append.
-    i.local_get(op).i32_const(30).i32_eq().if_(BlockType::Empty);
-    i.i32_const(park as i32).local_get(b_ptr).i32_store(mem(IOV));
-    i.i32_const(park as i32).local_get(b_len).i32_store(mem(IOV + 4));
-    i.i32_const(1);
-    i.i32_const((park + IOV) as i32);
-    i.i32_const(1);
-    i.i32_const((park + NREAD) as i32);
-    i.call(0).drop();
-    i.i64_const(0).return_();
-    i.end();
-
-    // op 35: incremental stdin — ONE fd_read of up to min(a_len, 4096)
-    // bytes into the park data region (the count rides in a_len, op 32's
-    // b_len convention). Short reads are the contract ("up to n"): the
-    // guest's read_line/read_byte loops ask byte-at-a-time, so one
-    // fd_read per call is exactly the incumbent leg's cadence. An errno
-    // or EOF answers 0 bytes.
-    i.local_get(op).i32_const(35).i32_eq().if_(BlockType::Empty);
-    i.i32_const(park as i32).i32_const((park + DATA) as i32).i32_store(mem(IOV));
-    // len = clamp(a_len, 0..=4096) — unsigned min folds a negative count
-    // into the 4096 arm, and 4096 stays inside the fixed park span.
-    i.local_get(a_len).i32_const(0).i32_lt_s().if_(BlockType::Empty);
-    i.i32_const(0).local_set(a_len);
-    i.end();
-    i.local_get(a_len).i32_const(4096).i32_lt_u().if_(BlockType::Result(ValType::I32));
-    i.local_get(a_len);
-    i.else_();
-    i.i32_const(4096);
-    i.end();
-    i.local_set(nread);
-    i.i32_const(park as i32).local_get(nread).i32_store(mem(IOV + 4));
-    i.i32_const(0);
-    i.i32_const((park + IOV) as i32);
-    i.i32_const(1);
-    i.i32_const((park + NREAD) as i32);
-    i.call(4); // fd_read
-    i.if_(BlockType::Empty); // errno != 0 → 0 bytes
-    i.i32_const(0).global_set(g_plen);
-    i.i64_const(0).return_();
-    i.end();
-    i.i32_const(park as i32).i32_load(mem(NREAD)).local_set(nread);
-    i.local_get(nread).global_set(g_plen);
-    i.local_get(nread).i64_extend_i32_u().return_();
-    i.end();
-
-    // op 31: stdin read-to-end into the park data region (grown on demand).
-    i.local_get(op).i32_const(31).i32_eq().if_(BlockType::Empty);
-    i.i32_const(0).local_set(total);
-    i.block(BlockType::Empty).loop_(BlockType::Empty);
-    // Room: the park span is FIXED (the heap owns everything above) —
-    // a stdin larger than it takes the defined refusal, never a
-    // truncation.
-    i.i32_const((park + DATA + 4096) as i32).local_get(total).i32_add();
-    i.global_get(g_pcap).i32_ge_u().if_(BlockType::Empty);
-    i.i32_const(park as i32).i32_const((park + MSG) as i32).i32_store(mem(IOV));
-    i.i32_const(park as i32).i32_const(UNSUPPORTED_MSG.len() as i32).i32_store(mem(IOV + 4));
-    i.i32_const(2);
-    i.i32_const((park + IOV) as i32);
-    i.i32_const(1);
-    i.i32_const((park + NREAD) as i32);
-    i.call(0).drop();
-    i.i32_const(1).call(1);
-    i.unreachable();
-    i.end();
-    // iovec = (park+DATA+total, 4096)
-    i.i32_const(park as i32);
-    i.i32_const((park + DATA) as i32).local_get(total).i32_add();
-    i.i32_store(mem(IOV));
-    i.i32_const(park as i32).i32_const(4096).i32_store(mem(IOV + 4));
-    i.i32_const(0);
-    i.i32_const((park + IOV) as i32);
-    i.i32_const(1);
-    i.i32_const((park + NREAD) as i32);
-    i.call(4); // fd_read
-    i.br_if(1); // errno != 0 → done with what we have
-    i.i32_const(park as i32).i32_load(mem(NREAD)).local_set(nread);
-    i.local_get(nread).i32_eqz().br_if(1); // EOF
-    i.local_get(total).local_get(nread).i32_add().local_set(total);
-    i.br(0).end().end();
-    i.local_get(total).global_set(g_plen);
-    i.local_get(total).i64_extend_i32_u().return_();
-    i.end();
-
-    // op 32: entropy into the park data region (count rides in b_len).
-    i.local_get(op).i32_const(32).i32_eq().if_(BlockType::Empty);
-    i.i32_const((park + DATA) as i32).local_get(b_len).call(2).drop();
-    i.local_get(b_len).global_set(g_plen);
-    i.i64_const(0).return_();
-    i.end();
-
-    // op 34: the wall clock, raw nanos.
-    i.local_get(op).i32_const(34).i32_eq().if_(BlockType::Empty);
-    i.i32_const(0).i64_const(1).i32_const(park as i32).call(3).drop();
-    i.i32_const(park as i32).i64_load(mem(0)).return_();
-    i.end();
-
-    // op 36: env.sleep_ms — a MONOTONIC busy-wait over clock_time_get
-    // (the ms count rides a_len, the op-35 scalar convention). WASI p1
-    // has no sleep primitive short of poll_oneoff, and importing a sixth
-    // WASI function would shift every defined function index while the
-    // element section is copied verbatim (a funcref-table corruption of
-    // exactly the #1688 silent class) — so the p1 build spins on the
-    // clock it already imports. The embedded host and native sleep
-    // properly; the CPU burn is confined to stock-runtime artifacts and
-    // ends with the incumbent's poll story or the p2 component's
-    // monotonic-clock world, whichever lands first.
-    i.local_get(op).i32_const(36).i32_eq().if_(BlockType::Empty);
-    i.local_get(a_len).i32_const(0).i32_lt_s().if_(BlockType::Empty);
-    i.i32_const(0).local_set(a_len);
-    i.end();
-    i.i32_const(1).i64_const(1).i32_const(park as i32).call(3).drop();
-    i.i32_const(park as i32).i64_load(mem(0));
-    i.local_get(a_len).i64_extend_i32_u().i64_const(1_000_000).i64_mul();
-    i.i64_add().local_set(deadline);
-    i.loop_(BlockType::Empty);
-    i.i32_const(1).i64_const(1).i32_const(park as i32).call(3).drop();
-    i.i32_const(park as i32).i64_load(mem(0));
-    i.local_get(deadline).i64_lt_u().br_if(0);
-    i.end();
-    i.i64_const(0).return_();
-    i.end();
-
-    // Everything else: the defined refusal.
-    i.i32_const(park as i32).i32_const((park + MSG) as i32).i32_store(mem(IOV));
-    i.i32_const(park as i32).i32_const(UNSUPPORTED_MSG.len() as i32).i32_store(mem(IOV + 4));
-    i.i32_const(2);
-    i.i32_const((park + IOV) as i32);
-    i.i32_const(1);
-    i.i32_const((park + NREAD) as i32);
-    i.call(0).drop();
-    i.i32_const(1).call(1); // proc_exit(1)
-    i.unreachable();
-    i.end();
-    f
-}
-
-/// `(dst) -> ()`: copy the parked bytes into guest memory.
-fn shim_host_read(park: u64, g_plen: u32) -> Function {
-    let dst = 0u32;
-    let mut f = Function::new([]);
-    let mut i = f.instructions();
-    i.local_get(dst);
-    i.i32_const((park + DATA) as i32);
-    i.global_get(g_plen);
-    i.memory_copy(0, 0);
-    i.end();
-    f
-}
+// The p1 shims (print / exit / fs_call / host_read / env / args): wasi_shims.rs.
+include!("wasi_shims.rs");

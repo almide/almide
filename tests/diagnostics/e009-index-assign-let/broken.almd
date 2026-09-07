@@ -1,0 +1,7 @@
+// E009, index-assign variant: element-mutating a `let` list — the message is
+// "cannot mutate", not "cannot reassign", and the binding itself must be `var`.
+fn main() -> Unit = {
+  let xs = [1, 2, 3]
+  xs[0] = 9
+  println(int.to_string(list.len(xs)))
+}

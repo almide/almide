@@ -1,12 +1,12 @@
 # Module System Specification
 
-> Last updated: 2026-03-31. Verified by `spec/integration/modules/` (25 tests + 4 error tests).
+> Last updated: 2026-09-02. Verified by `spec/integration/modules/` (25 tests + 4 error tests) and `spec/wasm_cross/stdlib_type_shadow.almd`.
 
 ---
 
 ## 1. Package Structure
 
-```
+```text
 mypackage/
   almide.toml              [package] name = "mypackage", version = "0.1.0"
   src/
@@ -33,12 +33,33 @@ mypackage/
 
 ### 2.1 構文
 
-```almide
-import pkg                    // パッケージ全体
+```almide project
+// file: almide.toml
+[package]
+name = "myapp"
+version = "0.1.0"
+// file: src/mod.almd
+fn hello() -> String = "hello from myapp"
+// file: src/utils.almd
+fn helper() -> String = "helper"
+// file: pkg/src/mod.almd
+fn version() -> String = "1.0"
+// file: pkg/src/sub.almd
+fn func() -> String = "pkg.sub"
+// file: main.almd
+import pkg                    // パッケージ全体 → pkg.version()
 import pkg.sub                // 特定のサブモジュール → sub.func() で呼べる
-import pkg as p               // エイリアス
-import self                   // 自パッケージの mod.almd
-import self.sub               // 自パッケージのサブモジュール
+import pkg as p               // エイリアス → p.version()
+import self                   // 自パッケージの mod.almd → myapp.hello()(almide.toml の name)
+import self.utils             // 自パッケージのサブモジュール → utils.helper()
+
+test "every import form resolves" {
+  assert_eq(pkg.version(), "1.0")
+  assert_eq(sub.func(), "pkg.sub")
+  assert_eq(p.version(), "1.0")
+  assert_eq(myapp.hello(), "hello from myapp")
+  assert_eq(utils.helper(), "helper")
+}
 ```
 
 - `import pkg.sub` は最後のセグメント名で参照可能: `sub.func()`
@@ -65,7 +86,7 @@ stdlib モジュールは2層に分かれる。
 
 未 import のモジュールを使った場合、コンパイラが候補を提示する。
 
-```
+```text
 error[E003]: undefined variable 'json'
   --> app.almd:3:11
   hint: Add `import json` (stdlib: JSON parsing and querying)
@@ -73,7 +94,7 @@ error[E003]: undefined variable 'json'
 ```
 
 外部パッケージ（`almide.toml` に依存あり）の場合:
-```
+```text
 error[E003]: undefined variable 'yaml'
   --> app.almd:5:11
   hint: Add `import yaml` (dependency: almide/yaml)
@@ -111,19 +132,30 @@ Formatted app.almd
 
 ## 3. 呼び出し
 
-```almide
+```almide project
+// file: bindgen/src/mod.almd
+fn version() -> String = "0.1.0"
+// file: bindgen/src/scaffolding.almd
+fn generate(iface: String) -> String = "scaffold:" + iface
+// file: bindgen/src/bindings/python.almd
+fn generate(iface: String) -> String = "py:" + iface
+// file: main.almd
 import bindgen
 import bindgen.scaffolding
 import bindgen.bindings.python
 
-// トップレベル関数
-bindgen.version()
+test "call by the last segment" {
+  let iface = "Api"
 
-// サブモジュール関数（最後のセグメント名で呼ぶ）
-scaffolding.generate(iface)
+  // トップレベル関数
+  assert_eq(bindgen.version(), "0.1.0")
 
-// 深いサブモジュール
-python.generate(iface)
+  // サブモジュール関数（最後のセグメント名で呼ぶ）
+  assert_eq(scaffolding.generate(iface), "scaffold:Api")
+
+  // 深いサブモジュール
+  assert_eq(python.generate(iface), "py:Api")
+}
 ```
 
 import したモジュールの直接の関数のみアクセス可能。サブモジュールにアクセスするには別途 import する（Go, Gleam と同じ方式）。
@@ -134,11 +166,17 @@ import したモジュールの直接の関数のみアクセス可能。サブ�
 
 **直接 import したパッケージのみアクセス可能。推移的依存は不可視。**
 
-```almide
-import B       // B は内部で D を import している
+```almide project check-fail=E003
+// file: d/mod.almd
+fn func() -> String = "d"
+// file: b/mod.almd
+import d
+fn func() -> String = "b via " + d.func()
+// file: main.almd
+import b       // b は内部で d を import している
 
-B.func()       // ✓ 直接 import した
-D.func()       // ✗ undefined variable 'D'
+fn direct() -> String = b.func()       // ✓ 直接 import した
+fn phantom() -> String = d.func()      // ✗ E003 undefined variable 'd'
 ```
 
 D を使いたければ `import D` を明示する。npm の phantom dependency 問題を防ぐ設計。
@@ -169,42 +207,109 @@ fn Box.tag(self) -> String = "caller"   // ✗ E012: defined in more than one mo
 同名の**別型**(`moda.Box` と `modb.Box`)はそれぞれ独立にメソッドを持てる。
 派生メソッド(derived `repr` 等)への明示的 override は従来どおり合法(#1087)。
 
+### 4.2 stdlib 所有型と同名のユーザ型 (#1828)
+
+`Value` / `HttpRequest` / `HttpResponse` / `JsonPath` / `Endian` / `FileStat` /
+`ProcessStatus` / `Url` / `TcpStream` / `TcpListener` / `SafeHtml` / `SafePath` は
+stdlib モジュールが所有する型で、その**裸名が正準の同一性**である(`json.parse` の
+返り値は常に stdlib の `Value`)。台帳は `stdlib_info::STDLIB_OWNED_TYPES`
+(`tests/runtime_backed_types_matrix.rs` が bundled 宣言との一致を機械検査する)。
+
+ユーザがこの名前で型を宣言すると、その型は #433 のモジュール修飾同一性を取る —
+エントリファイルなら `self.Value`、モジュール `m` なら `m.Value` — ので、stdlib の
+シグネチャが指す型は決して置き換わらない。両者が同じファイルに共存でき、
+native と wasm で byte-identical に動く。
+
+宣言の形は問わない (#1835): opaque alias `mod type Value = String` の newtype も
+同じ `self.Value` / `m.Value` を同一性とし、コンストラクタ呼び出し `Value(s)` と
+パターン `Value(s)` はその名前を IR まで運ぶ(native の flatten mangle、wasm の
+newtype 消去、interp が一つの綴りを見る)。同じ配管で、モジュール自身の
+`mod type Token = String` も `m.Token` として構築・分解できる(以前は native が
+rustc E0531、wasm は両レグ拒否)。bundled stdlib 自身の newtype(`html` の
+`SafeHtml` 等)は裸名のままである。
+
+```almide
+import json
+type Value = { n: Int }           // これは self.Value
+
+effect fn main() -> Unit = {
+  let mine = Value { n: 7 }       // ユーザの型
+  let doc = json.parse("{}")!     // stdlib の Value
+  println("${mine.n} ${json.stringify(doc)}")
+}
+```
+
+`json.parse("{}")!.n` は E013(stdlib の `Value` にフィールドはない)で、hint がどちらの
+型かを名指しする。`let v: Value = json.parse("{}")!` は E001(`self.Value` と `Value` は
+別の型)。`${mine}` の repr はソースの綴り `Value { n: 7 }` で表示される。
+
+テスト: `spec/wasm_cross/stdlib_type_shadow.almd`,
+`tests/diagnostics/e013-stdlib-type-shadowed-*/`
+
 ---
 
 ## 5. ダイヤモンド依存
 
-```
+```text
 main → B → D
 main → C → D
 ```
 
 D は1回だけロードされ、1回だけコンパイル出力に含まれる。B と C は同じ D を参照する。
 
-```almide
-import B
-import C
-import D
+```almide project
+// file: d/mod.almd
+fn shared() -> String = "from D"
+// file: b/mod.almd
+import d
+fn from_b() -> String = "B says: " + d.shared()
+// file: c/mod.almd
+import d
+fn from_c() -> String = "C says: " + d.shared()
+// file: main.almd
+import b
+import c
+import d
 
-B.from_b()           // "B says: from D" — B 経由で D を呼ぶ
-C.from_c()           // "C says: from D" — C 経由で D を呼ぶ
-D.shared()           // "from D"         — 直接 D を呼ぶ
+test "one D, reached three ways" {
+  assert_eq(b.from_b(), "B says: from D")   // B 経由で D を呼ぶ
+  assert_eq(c.from_c(), "C says: from D")   // C 経由で D を呼ぶ
+  assert_eq(d.shared(), "from D")           // 直接 D を呼ぶ
+}
 ```
 
 ### 型の同一性
 
 D が定義した型は、B 経由でも C 経由でも同一の型として扱われる。
 
-```almide
-let logger = B.make_logger()     // D.Logger 型を返す
-C.process_logger(logger)         // ✓ B が作った D.Logger を C が受け取れる
-D.log_name(logger)               // ✓ 直接 D に渡すのも同じ型
+```almide project
+// file: d/mod.almd
+type Logger = { name: String }
+fn make_logger(n: String) -> Logger = Logger { name: n }
+fn log_name(l: Logger) -> String = l.name
+// file: b/mod.almd
+import d
+fn make_logger() -> d.Logger = d.make_logger("b")
+// file: c/mod.almd
+import d
+fn process_logger(l: d.Logger) -> String = "C got " + d.log_name(l)
+// file: main.almd
+import b
+import c
+import d
+
+test "D's type is one type through B and C" {
+  let logger = b.make_logger()                       // D.Logger 型を返す
+  assert_eq(c.process_logger(logger), "C got b")     // ✓ B が作った D.Logger を C が受け取れる
+  assert_eq(d.log_name(logger), "b")                 // ✓ 直接 D に渡すのも同じ型
+}
 ```
 
 ### バージョン違いのダイヤモンド
 
 `PkgId(name, major)` で管理。同じ `(name, major)` は1つに統一（MVS: 最大の最小バージョンを選択）。異なる major は別モジュールとして共存し、codegen でシンボル名にバージョンが付く（`pkg_v1_func`, `pkg_v2_func`）。異なる major の同名型は互換性がない。
 
-```
+```text
 B requires D v1.x → almide_rt_D_v1_func()
 C requires D v2.x → almide_rt_D_v2_func()
 D_v1.Logger ≠ D_v2.Logger
@@ -222,7 +327,7 @@ D_v1.Logger ≠ D_v2.Logger
 
 外部から `mod fn` / `local fn` にアクセスするとコンパイルエラー:
 
-```
+```text
 error: function 'internal' is not accessible from module 'extlib'
   hint: 'internal' has restricted visibility
 ```
@@ -233,10 +338,19 @@ error: function 'internal' is not accessible from module 'extlib'
 
 自パッケージの `src/mod.almd` を参照する。`main.almd` からライブラリ関数を呼ぶ場合に使う。
 
-```almide
-// main.almd
+```almide project
+// file: almide.toml
+[package]
+name = "mylib"
+version = "0.1.0"
+// file: src/mod.almd
+fn exported_function() -> String = "exported"
+// file: main.almd
 import self as mylib
-mylib.exported_function()
+
+test "main reaches its own package through self" {
+  assert_eq(mylib.exported_function(), "exported")
+}
 ```
 
 `almide.toml` の `name` がデフォルトのモジュール名。`as` でエイリアス可。`src/mod.almd` が存在しない場合はエラー。
@@ -247,13 +361,24 @@ mylib.exported_function()
 
 サブモジュールは stdlib や他パッケージを自由に import できる。親パッケージのロード時に再帰的に解決される。
 
-```almide
-// mypackage/src/formatter.almd
+```almide project
+// file: extlib/src/mod.almd
+fn info() -> String = "ext"
+// file: mypackage/src/mod.almd
+fn name() -> String = "mypackage"
+// file: mypackage/src/formatter.almd
 fn format_upper(s: String) -> String = string.to_upper(s)   // stdlib
-
-// mypackage/src/utils.almd
+// file: mypackage/src/utils.almd
 import extlib
 fn describe(s: String) -> String = extlib.info() + ": " + s  // 他パッケージ
+// file: main.almd
+import mypackage.formatter
+import mypackage.utils
+
+test "a submodule's own imports resolve when the parent is loaded" {
+  assert_eq(formatter.format_upper("a"), "A")
+  assert_eq(utils.describe("x"), "ext: x")
+}
 ```
 
 サブモジュール内の型チェックでは、そのサブモジュールが import した stdlib / ユーザーモジュールが正しく認識される。

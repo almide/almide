@@ -1,0 +1,9 @@
+// E041, assignment variant: assigning a fallible call's result to an existing
+// var no longer auto-unwraps — the RHS stays a Result without `!`.
+effect fn get() -> Int = 42
+
+effect fn main() -> Unit = {
+  var total = 0
+  total = get()
+  println("${total}")
+}

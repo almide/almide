@@ -1,0 +1,19 @@
+import testing
+
+fn render(xs: List[Int]) -> String = xs |> list.map((x) => "item ${x}") |> list.join("\n")
+
+test "new one-line snapshot" {
+  testing.assert_snapshot("hello \"quoted\" $sigil", "hello \"quoted\" \$sigil")
+}
+
+test "drifted heredoc snapshot" {
+  testing.assert_snapshot(render([1, 2, 3]), """
+    item 1
+    item 2
+    item 3
+    """)
+}
+
+test "already matching" {
+  testing.assert_snapshot("same", "same")
+}

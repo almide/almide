@@ -17,9 +17,18 @@ fn bare_type_name(name: &str) -> &str {
     name.rsplit_once('.').map(|(_, bare)| bare).unwrap_or(name)
 }
 
-/// Compare two type name Syms ignoring module qualification.
+/// Compare two type name Syms ignoring module qualification — except that a
+/// BARE stdlib-owned name (`Value`, `FileStat`, …) is the stdlib's type
+/// itself, and a user declaration of that name is `self.X` / `m.X`, a
+/// different type that never matches it by spelling (#1828: with the
+/// leniency, `let v: Value = json.parse(..)!` unified the user's record with
+/// the json value).
 pub(crate) fn names_match(a: Sym, b: Sym) -> bool {
-    a == b || bare_type_name(a.as_str()) == bare_type_name(b.as_str())
+    if a == b {
+        return true;
+    }
+    let (sa, sb) = (a.as_str(), b.as_str());
+    bare_type_name(sa) == bare_type_name(sb) && !crate::stdlib_info::stdlib_type_vs_user_shadow(sa, sb)
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -134,6 +143,13 @@ pub struct ProtocolDef {
     pub name: Sym,
     pub generics: Vec<Sym>,
     pub methods: Vec<ProtocolMethodSig>,
+    /// The canonical module that declared this protocol (the registration
+    /// prefix), `None` for built-in conventions and the main file's own
+    /// protocols. Protocols resolve by bare name from any module (the
+    /// gauntlet's open `s3` question), so this is how an `import self.ports`
+    /// referenced only through a `[S: Store]` bound or a `type T: Store`
+    /// conformance is judged USED for E060 (#1783).
+    pub origin: Option<Sym>,
 }
 
 /// A single method signature within a protocol definition.

@@ -28,6 +28,12 @@ fn render_type_named(ctx: &RenderContext, name: &almide_base::intern::Sym, args:
         // Strip module qualifier: module.Type → Type
         // (all modules flatten into one file in generated Rust)
         let bare = name.rsplit('.').next().unwrap_or(name);
+        // A runtime-owned nominal renders under the runtime's reserved
+        // spelling (`Value` → `AlmideValue`, #1821); the bare spelling is a
+        // user type's.
+        if let Some(reserved) = ctx.ann.runtime_owned_types.get(bare) {
+            return reserved.clone();
+        }
         bare.to_string()
     } else {
         let bare = name.rsplit('.').next().unwrap_or(name);
@@ -97,7 +103,7 @@ fn primitive_type_name(ty: &Ty) -> Option<&'static str> {
 
 /// The leaf types rendered through a template key, as `(key, fallback)`.
 ///
-/// #617: Bytes/Matrix are RcCow VALUE types on the Rust target — copies are O(1)
+/// #617: Bytes/Matrix are AlmideRcCow VALUE types on the Rust target — copies are O(1)
 /// Rc bumps, mutation is make_mut copy-on-write (rust.toml templates + the
 /// `rc_cow_result_glue` boundary in the expression walker).
 ///
@@ -114,8 +120,8 @@ fn templated_scalar_type(ty: &Ty) -> Option<(&'static str, &'static str)> {
         Ty::String => ("type_string", "String"),
         Ty::Bool => ("type_bool", "bool"),
         Ty::Unit | Ty::Never => ("type_unit", "()"),
-        Ty::Bytes => ("type_bytes", "RcCow<Vec<u8>>"),
-        Ty::Matrix => ("type_matrix", "RcCow<AlmideMatrix>"),
+        Ty::Bytes => ("type_bytes", "AlmideRcCow<Vec<u8>>"),
+        Ty::Matrix => ("type_matrix", "AlmideRcCow<AlmideMatrix>"),
         _ => return None,
     })
 }
@@ -131,7 +137,7 @@ fn render_type_applied(ctx: &RenderContext, id: &TypeConstructorId, args: &[Ty])
         // `Matrix[Float32]` / `Matrix[Float64]` annotations without a separate
         // Rust type surface yet. Type-specialised layouts will fold into this
         // arm in a follow-up codegen arc.
-        (TypeConstructorId::Matrix, _) => template_or(ctx, "type_matrix", &[], "RcCow<AlmideMatrix>"),
+        (TypeConstructorId::Matrix, _) => template_or(ctx, "type_matrix", &[], "AlmideRcCow<AlmideMatrix>"),
         (TypeConstructorId::Option, [inner]) => {
             let inner_s = render_type(ctx, inner);
             ctx.templates.render_with("type_option", None, &[], &[("inner", inner_s.as_str())])
@@ -205,7 +211,9 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
         Ty::TypeVar(n) if n.starts_with('?') => template_or(ctx, "typevar_infer", &[], "_"),
         Ty::TypeVar(n) => n.to_string(),
         Ty::Unknown | Ty::Union(_) => template_or(ctx, "unknown_type", &[], "_"),
-        Ty::Variant { name, .. } => name.to_string(),
+        Ty::Variant { name, .. } => ctx.ann.runtime_owned_types.get(name.as_str())
+            .cloned()
+            .unwrap_or_else(|| name.to_string()),
         // Fallback
         #[allow(unreachable_patterns)]
         _ => format!("{}", ty.display()),

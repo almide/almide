@@ -12,19 +12,47 @@ text rather than binary.
 
 Standard alphabet (RFC 4648 §4), with `=` padding.
 
-```almd
-base64.encode(bytes.from_string("hello"))  // "aGVsbG8="
+```almd run
+import base64
+
+fn main() -> Unit = {
+  println(base64.encode(bytes.from_string("hello")))
+}
+```
+```output
+aGVsbG8=
 ```
 
 ### `base64.decode(s: String) -> Result[Bytes, String]`
 
 Decode the standard alphabet. `err` on an invalid character or a bad length.
 
-```almd
-match base64.decode(payload) {
-  ok(b) => process(b),
-  err(e) => err("bad base64: " + e),
+```almd run
+import base64
+
+fn show(r: Result[String, String]) -> String = match r {
+  ok(s) => "ok(\"${s}\")",
+  err(e) => "err(\"${e}\")",
 }
+
+fn process(b: Bytes) -> Result[String, String] = bytes.to_string(b)
+
+fn decode(payload: String) -> Result[String, String] =
+  match base64.decode(payload) {
+    ok(b) => process(b),
+    err(e) => err("bad base64: " + e),
+  }
+
+fn main() -> Unit = {
+  println(show(decode("aGVsbG8=")))
+  println(show(decode("aGVs*G8=")))
+  println(show(decode("aGVsb")))
+}
+```
+```output
+ok("hello")
+err("bad base64: invalid base64 character")
+err("bad base64: invalid base64 length: 5")
 ```
 
 ### `base64.encode_url(b: Bytes) -> String`
@@ -33,8 +61,17 @@ URL- and filename-safe alphabet (RFC 4648 §5): `-` and `_` replace `+` and `/`.
 Padding is KEPT, so the output still ends in `=` when the input length is not a
 multiple of three.
 
-```almd
-base64.encode_url(bytes.from_string("hi?>"))  // "aGk_Pg=="
+```almd run
+import base64
+
+fn main() -> Unit = {
+  println(base64.encode_url(bytes.from_string("hi?>")))
+  println(base64.encode(bytes.from_string("hi?>")))
+}
+```
+```output
+aGk_Pg==
+aGk/Pg==
 ```
 
 Contexts that want unpadded base64url — JWT segments, for instance — should

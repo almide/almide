@@ -8,9 +8,11 @@
 fn collect_type_aliases_and_generics(program: &IrProgram) -> (
     std::collections::HashMap<almide_base::intern::Sym, Ty>,
     std::collections::HashSet<almide_base::intern::Sym>,
+    std::collections::HashSet<almide_base::intern::Sym>,
 ) {
     let mut type_aliases = std::collections::HashMap::new();
     let mut generic_types = std::collections::HashSet::new();
+    let mut newtype_ctors = std::collections::HashSet::new();
     let all_type_decls = program.type_decls.iter()
         .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()));
     for td in all_type_decls {
@@ -18,6 +20,10 @@ fn collect_type_aliases_and_generics(program: &IrProgram) -> (
             // Opaque (mod/local) aliases are newtypes — don't expand transparently
             if matches!(td.visibility, IrVisibility::Public) {
                 type_aliases.insert(td.name, target.clone());
+            } else if !matches!(target, Ty::Fn { .. }) {
+                // The struct `render_type_decl_alias` emits; its ctor call is
+                // spelled by this (post-flatten) name (#1835).
+                newtype_ctors.insert(td.name);
             }
         }
         // Track types with generic parameters
@@ -25,7 +31,7 @@ fn collect_type_aliases_and_generics(program: &IrProgram) -> (
             generic_types.insert(td.name);
         }
     }
-    (type_aliases, generic_types)
+    (type_aliases, generic_types, newtype_ctors)
 }
 
 /// Record/variant types that get a generated `AlmideRepr` impl — a value
@@ -72,8 +78,8 @@ fn build_program_ann(ctx: &RenderContext, program: &IrProgram) -> CodegenAnnotat
     // that soaked the flip (v0.27.2) retired with the predicates it
     // compared. One rule, one place.
     // Classify function-local `var` bindings:
-    //   LocalMut (let mut T)  — not captured by closures, no RcCow overhead
-    //   RcCow                 — captured by a lambda, needs COW semantics
+    //   LocalMut (let mut T)  — not captured by closures, no AlmideRcCow overhead
+    //   AlmideRcCow                 — captured by a lambda, needs COW semantics
     //
     // Scan IR Bind statements for `var` of non-Copy types, then check if
     // any lambda in the same function captures that var.
@@ -81,9 +87,17 @@ fn build_program_ann(ctx: &RenderContext, program: &IrProgram) -> CodegenAnnotat
     ann
 }
 
-/// Register every variant constructor → enum name (top-level type decls,
-/// then imported-module type decls).
+/// Register every variant constructor → enum name: the runtime-owned ctors
+/// first (`LittleEndian` → `AlmideEndian`, #1821 — present whether or not the
+/// bundled decl reached the program), then top-level type decls, then
+/// imported-module type decls, so a user decl overrides a runtime ctor name.
 fn register_ctor_to_enum(ctx: &mut RenderContext, program: &IrProgram) {
+    {
+        let ann = std::rc::Rc::make_mut(&mut ctx.ann);
+        for (ctor, enum_name) in runtime_owned::variant_ctors() {
+            ann.ctor_to_enum.insert(ctor.to_string(), enum_name.to_string());
+        }
+    }
     for td in &program.type_decls {
         register_type_decl_ctors(ctx, td);
     }
@@ -101,9 +115,11 @@ fn register_ctor_to_enum(ctx: &mut RenderContext, program: &IrProgram) {
 /// `program.modules`).
 fn register_type_decl_ctors(ctx: &mut RenderContext, td: &IrTypeDecl) {
     if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
+        // A bundled twin's ctors belong to the runtime's reserved enum.
+        let enum_name = runtime_owned::decl_rust_name(td);
         let ann = std::rc::Rc::make_mut(&mut ctx.ann);
         for c in cases {
-            ann.ctor_to_enum.insert(c.name.to_string(), td.name.to_string());
+            ann.ctor_to_enum.insert(c.name.to_string(), enum_name.clone());
         }
     }
 }
@@ -113,14 +129,15 @@ fn render_program_type_decls(ctx: &RenderContext, program: &IrProgram, parts: &m
     // Track emitted names to deduplicate across modules
     let mut emitted_types: std::collections::HashSet<String> = std::collections::HashSet::new();
     for td in &program.type_decls {
-        // `bytes.Endian` is RUNTIME-OWNED (#1098): the native runtime defines
-        // the enum (plus its ctor shims for the auto-import case, where this
-        // decl never reaches the program), so emitting the bundled decl here
-        // duplicated it (E0428) whenever `import bytes` was explicit. The
-        // ctor REGISTRATION stays (register_ctor_to_enum) so construction
-        // still emits `Endian::LittleEndian`. A user type named Endian cannot
-        // exist — the checker rejects it as ambiguous against the stdlib decl.
-        if td.name.as_str() == "Endian" {
+        // A bundled twin (`Endian` / `FileStat` / `ProcessStatus`) is
+        // RUNTIME-OWNED (#1098, #1821): the native runtime defines the type
+        // under its reserved spelling, repr impl included, so emitting the
+        // bundled decl — it reaches the program whenever the import is
+        // explicit — would duplicate it. The ctor REGISTRATION stays
+        // (register_ctor_to_enum), routed to the reserved enum. A USER type of
+        // the same name (the checker accepts one; it shadows the stdlib decl)
+        // has a different shape, is not a twin, and renders here as usual.
+        if runtime_owned::twin_spelling(td).is_some() {
             continue;
         }
         emitted_types.insert(td.name.as_str().to_string());
@@ -145,7 +162,7 @@ fn render_program_top_lets(ctx: &RenderContext, program: &IrProgram, parts: &mut
     for tl in &program.top_lets {
         // #617: a shared static stores the RAW Bytes/Matrix shape (Rc is not Sync;
         // fan threads read globals) — type and initializer un-wrap here, every
-        // READ site re-wraps into the RcCow value shape.
+        // READ site re-wraps into the AlmideRcCow value shape.
         let ty_str = expressions::rc_cow_raw_type(&render_type_fn(ctx, &tl.ty));
         let val_str = expressions::rc_cow_unglue(render_expr_fn(ctx, &tl.value), &tl.ty);
         let info = ctx.ann.globals.get(&tl.var).unwrap_or_else(|| panic!(
@@ -218,7 +235,7 @@ fn render_program_test_fns(ctx: &RenderContext, program: &IrProgram, parts: &mut
 pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
     // Build constructor → enum name map
     // Build type alias map for transparent expansion
-    let (type_aliases, generic_types) = collect_type_aliases_and_generics(program);
+    let (type_aliases, generic_types, newtype_ctors) = collect_type_aliases_and_generics(program);
     let repr_named_types = collect_repr_named_types(program);
     let ann = build_program_ann(ctx, program);
     let mut ctx = RenderContext {
@@ -238,6 +255,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         param_vars: std::collections::HashSet::new(),
         ref_mut_params: std::collections::HashSet::new(),
         repr_named_types: std::rc::Rc::new(repr_named_types),
+        newtype_ctors: std::rc::Rc::new(newtype_ctors),
         fn_err_ty: None,
     };
     register_ctor_to_enum(&mut ctx, program);
@@ -247,6 +265,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
     // make_mut mutates in place without a clone.
     {
         let ann = std::rc::Rc::make_mut(&mut ctx.ann);
+        ann.runtime_owned_types = runtime_owned::spellings_for(program);
         ann.named_records = collect_named_records(program);
         ann.anon_records = collect_anon_records(program, &ann.named_records);
         ann.anon_records_with_fn = declarations::take_anon_fn_keys();
@@ -278,12 +297,12 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
 // No behavior change.
 
 /// Classify function-local `var` bindings:
-///   LocalMut (let mut T)  — not captured by closures, no RcCow overhead
-///   RcCow                 — captured by a lambda, needs COW semantics
+///   LocalMut (let mut T)  — not captured by closures, no AlmideRcCow overhead
+///   AlmideRcCow                 — captured by a lambda, needs COW semantics
 ///
 /// Scan IR Bind statements for `var` of non-Copy types, then check if
 /// any lambda in the same function captures that var.
-/// Var/params that must NEVER get RcCow storage: mutable top-lets (module
+/// Var/params that must NEVER get AlmideRcCow storage: mutable top-lets (module
 /// globals, handled by the `ModuleRc`/`ModuleCell` path) and every fn
 /// param (borrow inference owns those). Extracted from
 /// `classify_local_var_storage` (cog>30 decomposition, pattern 2:
@@ -388,12 +407,12 @@ fn classify_local_var_storage(program: &IrProgram, ann: &mut CodegenAnnotations)
     let non_copy_var_binds = collect_non_copy_var_binds(program);
     let captured = collect_lambda_captured_vars(program);
 
-    // Phase 3: Only vars captured by lambdas get RcCow; rest are LocalMut (let mut)
+    // Phase 3: Only vars captured by lambdas get AlmideRcCow; rest are LocalMut (let mut)
     for var_id in non_copy_var_binds {
         if exclude.contains(&var_id) { continue; }
         // Captured mutable vars that became shared cells (`Rc<Cell>` for Copy via
-        // P3, `SharedMut` for non-Copy via P6) are driven by the shared-mut path,
-        // NOT RcCow — RcCow's copy-on-write would lose a mutation made through the
+        // P3, `AlmideSharedMut` for non-Copy via P6) are driven by the shared-mut path,
+        // NOT AlmideRcCow — AlmideRcCow's copy-on-write would lose a mutation made through the
         // closure. (Closure v2 P6.)
         if ann.is_shared_mut(&VarId(var_id)) { continue; }
         if captured.contains(&var_id) {
@@ -424,17 +443,14 @@ fn render_anon_record_decls(ctx: &RenderContext, parts: &mut Vec<String>) {
         // `Debug + PartialEq` generic bounds — derive(Clone) re-adds `T: Clone`
         // itself. Mirrors the `type`-declared record path. (Cross-target gaps.)
         let has_fn = ctx.ann.anon_records_with_fn.contains(field_names);
-        let generics: Vec<String> = (0..field_names.len())
-            .map(|i| {
-                let name_s = format!("T{}", i);
-                if has_fn {
-                    name_s
-                } else {
-                    ctx.templates.render_with("generic_bound_full", None, &[], &[("name", name_s.as_str())])
-                        .unwrap_or_else(|| format!("T{}", i))
-                }
-            })
-            .collect();
+        // The struct DEFINITION carries no bounds (#1798): a bound written on
+        // the definition must be satisfied at every mention of the type, and
+        // a generic record's field `inner: AlmdRec_…<String, T>` mentions it
+        // under the enclosing decl's own `T: Clone + PartialEq` — no Debug —
+        // so rustc refused the field (E0277). The derives add their own
+        // per-impl bounds, and the AlmideRepr impl below declares the full
+        // set it needs; nothing else depended on the definition's bounds.
+        let generics: Vec<String> = (0..field_names.len()).map(|i| format!("T{}", i)).collect();
         let fields: Vec<String> = field_names.iter().enumerate()
             .map(|(i, name)| {
                 let type_s = format!("T{}", i);
@@ -461,13 +477,16 @@ fn render_anon_record_decls(ctx: &RenderContext, parts: &mut Vec<String>) {
         if !has_fn {
             let bare_generics: Vec<String> = (0..field_names.len())
                 .map(|i| format!("T{}", i)).collect();
-            // The anon struct declares each param via `generic_bound_full`
-            // (`T: Clone + Debug + PartialEq`); the impl must satisfy those
-            // same bounds, plus `AlmideRepr` so the field reprs compose.
-            // Reuse the template so the bounds stay in lock-step with the decl.
+            // The repr impl needs exactly what a NAMED record's repr impl
+            // needs — `generic_bound` (`T: Clone + PartialEq`) plus
+            // `AlmideRepr` so the field reprs compose. Not `_full`: the
+            // repr never formats with Debug, and a generic record's own repr
+            // impl (bounded `T: AlmideRepr + Clone + PartialEq`) calls this
+            // one on its anonymous field — a Debug requirement here made
+            // that call unsatisfiable (#1798, E0599 behind the E0277).
             let impl_bounds = bare_generics.iter()
                 .map(|t| {
-                    let own = ctx.templates.render_with("generic_bound_full", None, &[], &[("name", t.as_str())])
+                    let own = ctx.templates.render_with("generic_bound", None, &[], &[("name", t.as_str())])
                         .unwrap_or_else(|| format!("{}: Clone + std::fmt::Debug + PartialEq", t));
                     match own.split_once(':') {
                         Some((name, rest)) => format!("{}: AlmideRepr +{}", name.trim_end(), rest),

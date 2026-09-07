@@ -1,0 +1,3 @@
+expects_code = "E046"
+expects_error = "argument 2 of mk()"
+hint_substring = "Name the missing value with a lambda"

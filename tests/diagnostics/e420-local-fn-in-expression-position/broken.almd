@@ -1,0 +1,5 @@
+// The visibility check fires at the CALL, not the import: a local fn used
+// inside a larger expression (an argument, a pipe stage) is still E420.
+import self.math_bits as mb
+
+fn main() -> Unit = println(int.to_string(mb.twice(3) + 1))

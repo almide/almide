@@ -147,3 +147,76 @@ spec/wasm_cross/env_sleep_pause.almd :: main
 # matrix. Retires when the p3 client leg ships the ops on stock artifacts
 # (#1710 increment 2 / #1716).
 spec/embedded_cross/http_client_errs.almd :: main
+# (2026-09-01, C-329/#1716) env.set has no seat in the incumbent brick; the
+# STRUCTURAL leg serves the overlay (embedded op 37/26, p1 shim overlay log +
+# real-environ fallthrough), so the env-overlay fixture lowers there and on
+# every execution sweep. Same division as the C-326/C-327 rows; prunes with
+# #1696 steps 4-5.
+spec/wasm_cross/env_set_overlay.almd :: main
+# (2026-09-02, C-332/#1461) list-rest patterns have no seat in the incumbent
+# brick (binds_p4 walls the form honestly); the STRUCTURAL leg — the default
+# route — lowers them on every execution sweep. Same division as the
+# C-326/C-327/C-329 rows; prunes with #1696 steps 4-5.
+spec/lang/list_rest_pattern_test.almd :: __test_almd_whole-list rest binds the subject list
+spec/lang/list_rest_pattern_test.almd :: heads
+spec/lang/list_rest_pattern_test.almd :: shape
+spec/lang/list_rest_pattern_test.almd :: total
+spec/wasm_cross/list_rest_pattern.almd :: main
+spec/wasm_cross/list_rest_pattern.almd :: shape
+spec/wasm_cross/list_rest_pattern.almd :: tail_of
+spec/wasm_cross/list_rest_pattern.almd :: total
+# (2026-09-02, C-333/#1461) as-patterns: the same incumbent division as the
+# list-rest rows above.
+spec/lang/as_pattern_test.almd :: __test_almd_as over option carriers
+spec/lang/as_pattern_test.almd :: area_note
+spec/lang/as_pattern_test.almd :: pick
+spec/wasm_cross/as_pattern.almd :: area_note
+spec/wasm_cross/as_pattern.almd :: main
+spec/wasm_cross/as_pattern.almd :: pick
+
+# (2026-09-02, C-092/#1676) the generic record's instantiated closure field is
+# called from return position; the incumbent brick refuses the heap-result
+# computed call (`heap-result method/computed call`), the STRUCTURAL leg
+# (the default) lowers it. Same division as the list_rest_pattern rows;
+# prunes with #1696 4-5.
+spec/wasm_cross/generic_record_fn_field.almd :: call_any__String
+spec/wasm_cross/generic_record_fn_field.almd :: call_it
+spec/wasm_cross/generic_record_fn_field.almd :: call_q
+
+# (2026-09-03, C-213/#1849) a TEMPORARY receiver of a Unit-returning bytes
+# mutator (`bytes.append_i16_be(bytes.new(2), 258)`, `let _ = …` on the
+# same): the incumbent brick walls it honestly — the receiver discipline
+# refuses a call-result receiver (`in-place mutator … over a Call receiver`)
+# instead of linking the functional twin and leaving its result on the
+# operand stack, and the `let _ =` Unit binding is outside its value subset.
+# The STRUCTURAL leg (the default) releases the mutated block after the
+# call and runs byte-identical to native. Prunes with #1696 4-5.
+spec/wasm_cross/bytes_temp_receiver.almd :: main
+# 2026-09-03 (#1791, the http response family): the loopback round-trip test's
+# three fns (a retrying dial through `net` + `fan`, and the transport-err test
+# block) are network-effect shapes the incumbent MIR lowering walls; the native
+# lane pins them and the structural leg is capability-walled on wasip1 by
+# design (C-328). Retire with #1696.
+spec/stdlib/http_status_test.almd :: __test_almd_request_response to a closed local port is a transport err
+spec/stdlib/http_status_test.almd :: fetch_retry
+spec/stdlib/http_status_test.almd :: get_retry
+
+# (2026-09-03, C-132/#1576) a CAN-ERR effect fn with a `mut` param takes the
+# move-mode tuple rewrite (`(T, Buf)` on the ok payload only); the incumbent
+# brick walls the synthesized `let (r, b) = call!` destructure-unwrap in the
+# callers (`unwrap `!` in a call-argument position`) and the generic port's
+# heap-result `if` tail (`uc__Mem`), where the STRUCTURAL leg (the default)
+# lowers every cell byte-identical to native. Prunes with #1696 4-5.
+spec/wasm_cross/mut_param_effect_can_err.almd :: go
+spec/wasm_cross/mut_param_effect_can_err.almd :: main
+spec/wasm_cross/mut_param_effect_can_err.almd :: uc__Mem
+# #1576 also: the DDD gauntlet's mut_port `main` (the can-err mut-param port call
+# consumed by `!`) walls on the incumbent for the same reason as the fixture's fns.
+spec/gauntlet/pkg/mut_port/src/main.almd :: main
+# 2026-09-03 (#1219 stage 2, the keyed-index threshold fixture): three branch-lifted
+# synthetic fns wall on the incumbent MIR lowering (`heap-result if` outside its
+# executable subset); the structural leg serves the fixture byte-identically to
+# native, and the incumbent is retiring under #1696.
+spec/wasm_cross/map_set_index_threshold.almd :: branch_lift_synth_3
+spec/wasm_cross/map_set_index_threshold.almd :: branch_lift_synth_4
+spec/wasm_cross/map_set_index_threshold.almd :: branch_lift_synth_7

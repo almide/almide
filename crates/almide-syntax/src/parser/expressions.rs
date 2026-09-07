@@ -53,7 +53,7 @@ impl Parser {
     /// spread inside a multiline record/list literal, and joining it to the
     /// previous item as an inclusive range would rewrite those programs. An
     /// inclusive range therefore cannot break the line BEFORE its `...`.
-    const INFIX_TOKENS: &'static [TokenType] = &[
+    pub(crate) const INFIX_TOKENS: &'static [TokenType] = &[
         TokenType::Or, TokenType::And,
         TokenType::EqEq, TokenType::BangEq, TokenType::LtEq, TokenType::GtEq,
         TokenType::PipeArrow, TokenType::ComposeArrow,
@@ -69,15 +69,21 @@ impl Parser {
     /// operand (no whitespace, e.g. `-1`, `-x`) is a unary on a new statement,
     /// not a binary continuation. `a\n  - b` (with spaces) still continues as
     /// binary subtraction.
-    fn skip_infix_continuation_newlines(&mut self) {
+    ///
+    /// Returns the comments skipped over when the newlines ARE a continuation
+    /// (#1326); empty when the position is restored, since the comments then
+    /// stay in the stream for the statement-level collectors.
+    fn skip_infix_continuation_newlines(&mut self) -> Vec<super::GapComment> {
         let saved_before_skip = self.pos;
-        self.skip_newlines_if_followed_by_any(Self::INFIX_TOKENS);
+        let gap = self.skip_newlines_if_followed_by_any(Self::INFIX_TOKENS);
         if self.pos != saved_before_skip
             && self.check(TokenType::Minus)
             && self.minus_attached_to_operand()
         {
             self.pos = saved_before_skip;
+            return Vec::new();
         }
+        gap
     }
 
     /// `||` / `&&` are not Almide spellings — reject them with the hint table's
@@ -117,29 +123,43 @@ impl Parser {
         let mut left = self.parse_unary()?;
 
         loop {
-            // Allow operators on next line for multiline expressions
-            self.skip_infix_continuation_newlines();
+            // Allow operators on next line for multiline expressions. The
+            // comments in that gap (#1326) are parked against the operator's
+            // index: this loop may still `break` on binding power and leave
+            // the operator — and the comments — to the enclosing loop, whose
+            // `left` is the operand the line really ends with.
+            let gap = self.skip_infix_continuation_newlines();
+            if !gap.is_empty() {
+                self.pending_gap = Some((self.pos, gap));
+            }
             self.reject_c_style_boolean_operator()?;
 
             let tt = self.current().token_type.clone();
             let Some((l_bp, r_bp)) = Self::infix_bp(&tt) else { break };
             if l_bp < min_bp { break; }
 
+            let mut gap = match self.pending_gap.take() {
+                Some((at, gap)) if at == self.pos => gap,
+                other => {
+                    self.pending_gap = other;
+                    Vec::new()
+                }
+            };
+            let op_on_new_line = self.newline_before_current();
             let span = Some(self.current_span());
             let op_tok = self.current().clone();
             self.advance();
-            // #1326 is NOT handled here, deliberately. `let y = 1 + // why`
-            // then an indented operand: binding that comment TRAILING to `left`
-            // and reprinting it inline produced `1 // why`, which COMMENTS OUT
-            // the rest of the line — the `+ 2` vanished and the expression
-            // reparsed as a bare Int. fmt's conservation verifier caught it
-            // ("AST changed by formatting: binary -> int").
-            //
-            // A `//` comment cannot be reprinted mid-expression at all; it
-            // needs line-aware placement (end of the rendered line), which is a
-            // different mechanism from the inline `/* */` bracket #1404 uses.
-            // Until that exists this stays an honest refusal.
-            self.skip_newlines();
+            // #1326: the operator may also END the line (`1 + // why` then an
+            // indented operand). A comment on the operator's line ends the
+            // line `left` is on unless the operator itself opened a new line,
+            // in which case it sits between the operand and its continuation.
+            // Either way the comment binds to `left` — the line-end rule —
+            // and fmt reprints the break there with the operator leading the
+            // continuation, so `// why` can never comment out `+ 2`.
+            for c in self.walk_newline_run() {
+                gap.push(super::GapComment { own_line: c.own_line || op_on_new_line, ..c });
+            }
+            self.attach_gap_comments(left.id, gap);
 
             // ── Special: |> match { ... } ──
             if tt == TokenType::PipeArrow
@@ -292,8 +312,11 @@ impl Parser {
         let mut expr = self.parse_primary()?;
         loop {
             // `obj\n  .method()` — the leading-dot half of the chain
-            // continuation rule (#1091).
-            self.skip_newlines_if_method_chain();
+            // continuation rule (#1091). The comments in that gap bind to the
+            // receiver whose line they end (#1326); the `.` link is consumed
+            // right below, so there is no outer loop to defer to.
+            let gap = self.skip_newlines_if_method_chain();
+            self.attach_gap_comments(expr.id, gap);
             let (next, consumed) = self.parse_one_postfix(expr)?;
             expr = next;
             if !consumed { break; }

@@ -1,0 +1,8 @@
+// A sibling's Result dropped in statement position is E042 (must-use)
+// — the module boundary does not launder a discarded error.
+import self.store as s
+
+effect fn main() -> Unit = {
+  s.save()!
+  println("saved")
+}

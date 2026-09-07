@@ -495,16 +495,49 @@ impl Parser {
         }
     }
 
-    /// Skip newlines if the next non-newline token matches any of the given types.
-    /// Enables multiline expression continuation when a line starts with a binary operator.
-    pub(crate) fn skip_newlines_if_followed_by_any(&mut self, tts: &[TokenType]) {
-        let saved = self.pos;
+    /// Walk the Newline/Comment run at the cursor, collecting the comments
+    /// with whether each sits on a line of its own within the run or ends the
+    /// line the run started on (#1326). Does NOT decide anything: a caller
+    /// that finds the run was not a continuation restores `self.pos` and
+    /// drops the result, leaving the comment tokens in the stream for the
+    /// statement-level collectors.
+    pub(crate) fn walk_newline_run(&mut self) -> Vec<super::GapComment> {
+        let mut seen_newline = false;
+        let mut comments = Vec::new();
         while self.check(TokenType::Newline) || self.check(TokenType::Comment) {
+            if self.check(TokenType::Comment) {
+                comments.push(super::GapComment { text: self.current().value.clone(), own_line: seen_newline });
+            } else {
+                seen_newline = true;
+            }
             self.advance();
         }
+        comments
+    }
+
+    /// Bind a continuation gap's comments to `id`, the operand whose line
+    /// they end (#1326's line-end rule): end-of-line ones as `line_trailing`,
+    /// own-line ones as `line_between`. fmt reprints the break after `id`.
+    pub(crate) fn attach_gap_comments(&mut self, id: crate::ast::ExprId, gap: Vec<super::GapComment>) {
+        if gap.is_empty() { return; }
+        let slot = self.expr_comments.entry(id).or_default();
+        for c in gap {
+            if c.own_line { slot.line_between.push(c.text) } else { slot.line_trailing.push(c.text) }
+        }
+    }
+
+    /// Skip newlines if the next non-newline token matches any of the given types.
+    /// Enables multiline expression continuation when a line starts with a binary operator.
+    /// Returns the comments skipped over when the skip commits (#1326); empty
+    /// when the position is restored.
+    pub(crate) fn skip_newlines_if_followed_by_any(&mut self, tts: &[TokenType]) -> Vec<super::GapComment> {
+        let saved = self.pos;
+        let gap = self.walk_newline_run();
         if !tts.iter().any(|tt| self.check(tt.clone())) {
             self.pos = saved;
+            return Vec::new();
         }
+        gap
     }
 
     /// Skip newlines only when the next line begins a method chain — a `.`
@@ -517,11 +550,12 @@ impl Parser {
     /// `let x = 1` and a following `.5` into `1.5`-as-tuple-index instead of
     /// reporting the stray token. Nothing else in the grammar starts a line
     /// with a bare `.`, so no other program changes meaning.
-    pub(crate) fn skip_newlines_if_method_chain(&mut self) {
+    ///
+    /// Returns the comments skipped over when the skip commits (#1326); empty
+    /// when the position is restored.
+    pub(crate) fn skip_newlines_if_method_chain(&mut self) -> Vec<super::GapComment> {
         let saved = self.pos;
-        while self.check(TokenType::Newline) || self.check(TokenType::Comment) {
-            self.advance();
-        }
+        let gap = self.walk_newline_run();
         let continues = self.check(TokenType::Dot)
             && self
                 .tokens
@@ -529,7 +563,9 @@ impl Parser {
                 .is_some_and(|t| Self::is_name_token(&t.token_type));
         if !continues {
             self.pos = saved; // restore — the newlines are significant
+            return Vec::new();
         }
+        gap
     }
 
     pub(crate) fn skip_newlines_into_stmts(&mut self, stmts: &mut Vec<Stmt>) {

@@ -1,0 +1,3 @@
+expects_code = "E005"
+expects_error = "expects Int but got Float"
+hint_substring = "preserves the Float"

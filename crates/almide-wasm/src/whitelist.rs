@@ -76,7 +76,18 @@ pub(crate) const SCALAR_TEXT_VERIFIED: &[&str] = &[
     "float_abs", "float_floor", "float_round", "float_is_nan", "float_from_float64",
     "float_from_float32", "float_to_float32",
     "int_to_hex", "int_rotate_left", "int_rotate_right", "hash_fnv1a32",
-    "hash_sha256", "hash_sha256_hex", "hex_encode", "hex_encode_upper", "hex_decode",
+    // int_bitcount / int_bits / float_bits / int_to_float (#1423 stage 4,
+    // audited 2026-09-03): the bit-introspection family is the prim
+    // bitwise floor only (bshr/band/bshl/bor over the i64 word — the
+    // int_rotate class), int_bits_to_f32 is the f32 reinterpret prim
+    // and int_to_float32 the direct i64 → f32 convert (single rounding,
+    // native's `n as f32`; the Float32 rides the widened f64 carrier).
+    // No loads, no stores, no handles. Parity evidence:
+    // spec/wasm_cross/int_bit_family.almd.
+    "int_pop_count", "int_count_trailing_zeros", "int_count_leading_zeros", "int_bit_width",
+    "int_log2_floor", "int_log2_ceil", "int_next_power_of_two", "int_prev_power_of_two",
+    "int_byte_swap", "int_bit_reverse", "int_bits_to_f32", "int_to_float32",
+    "hash_sha256", "hash_sha256_hex", "hex_encode", "hex_encode_upper",
     "string_contains", "string_count", "string_trim_start", "string_trim_end",
     "string_is_alpha", "string_is_digit", "string_is_alphanumeric_uni", "string_is_upper",
     "string_is_lower",
@@ -85,9 +96,14 @@ pub(crate) const SCALAR_TEXT_VERIFIED: &[&str] = &[
     "string_is_whitespace", "string_to_bytes",
 ];
 
-/// Same audit, Option-returning (constructor-built sums).
-pub(crate) const SCALAR_TEXT_SUM_BUILDERS: &[&str] =
-    &["string_index_of", "string_last_index_of", "base64_decode", "base64_decode_url"];
+/// Same audit, Option/Result-returning (constructor-built sums).
+/// hex_decode (#1423 stage 4): its `Result[Bytes, String]` is built via
+/// ok()/err() — read-only loads on the digest-shared string layout and
+/// stores into its own prim.alloc_bytes buffer, the base64_decode class
+/// (it sat in the plain tier, where the coupled-type proxy walled it).
+pub(crate) const SCALAR_TEXT_SUM_BUILDERS: &[&str] = &[
+    "string_index_of", "string_last_index_of", "base64_decode", "base64_decode_url", "hex_decode",
+];
 
 /// The Codec-derive encode splices: their bodies carry ZERO prims —
 /// every Value is built through the public value.* surface, which THIS
@@ -130,24 +146,41 @@ pub(crate) const BYTES_FAMILY_VERIFIED: &[&str] = &[
     "bytes_read_i32_be_array", "bytes_read_i32_le_array", "bytes_read_i64_be_array",
     "bytes_read_i64_le_array", "bytes_read_string_be", "bytes_read_u16_be_array",
     "bytes_read_u16_le_array", "bytes_read_u32_be_array", "bytes_read_u32_le_array",
-    // bytes_typed.almd (Endian-argument wrappers, #1098): audited 2026-08-25 —
-    // prim.alloc_bytes + load8/store8 on Bytes payloads only (len=bytes on
-    // both legs), payload offset 12 = OUR PAYLOAD; the Endian ctors build a
-    // 1-byte block only this module reads; reads/sets cross-call the C-229
-    // native matrix; write_* return the fresh grown block (v1 rebind form).
-    "bytes_endian_le", "bytes_endian_be", "bytes_read_uint16", "bytes_read_uint32",
-    "bytes_read_int32", "bytes_read_float32", "bytes_write_uint16", "bytes_write_uint32",
-    "bytes_write_int32", "bytes_write_float32", "bytes_set_uint16", "bytes_set_uint32",
-    "bytes_set_int32", "bytes_set_float32",
     // bytes_append_multi.almd cursor tail (#1099): the __bam grow-append
     // shape — prim.load32(handle+4) is the Bytes LEN header (len = bytes
     // on both legs); same audit as the append_* family above.
     "bytes_write_bool", "bytes_write_string_be",
+    // bytes_core.almd search/edit/predicate family (#1423 stage 4, audited
+    // 2026-09-03): read-only load8 walks over the digest-shared Bytes
+    // payload (handle+12 = OUR PAYLOAD, load32(h+4) = the byte length on
+    // both legs), the editors (insert / remove_at / reverse / xor /
+    // map_each) store into their own prim.alloc_bytes buffer only, the
+    // predicates and cmp/skip/eof are scalar results, data_ptr is the
+    // payload address (never printed cross-leg). map_each's callback is
+    // a language-level closure call this emitter lowers itself. Parity
+    // evidence: spec/wasm_cross/bytes_search_edit_family.almd.
+    "bytes_cmp", "bytes_contains", "bytes_data_ptr", "bytes_ends_with", "bytes_eof",
+    "bytes_insert", "bytes_is_empty", "bytes_is_valid_utf8", "bytes_map_each",
+    "bytes_remove_at", "bytes_reverse", "bytes_skip", "bytes_starts_with", "bytes_xor",
 ];
 
 /// The exempt-tier members of the same audit (tuple/Option returners
 /// with literal-built sums).
 pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
+    // bytes_typed.almd (Endian-argument wrappers, #1098): audited 2026-08-25 —
+    // prim.alloc_bytes + load8/store8 on Bytes payloads only (len=bytes on
+    // both legs), payload offset 12 = OUR PAYLOAD; reads/sets cross-call the
+    // C-229 native matrix; write_* return the fresh grown block (v1 rebind
+    // form). In THIS tier since #1839: the Endian argument is the stdlib's
+    // DECLARED variant (`type Endian = | LittleEndian | BigEndian`), consumed
+    // by a language-level `match` this emitter lowers with its own layout —
+    // the coupled-type proxy fires on the Named param, the body never touches
+    // the block. (The 1-byte-block twin and its registered ctor builders are
+    // gone — they split the representation whenever the decl was present.)
+    "bytes_read_uint16", "bytes_read_uint32",
+    "bytes_read_int32", "bytes_read_float32", "bytes_write_uint16", "bytes_write_uint32",
+    "bytes_write_int32", "bytes_write_float32", "bytes_set_uint16", "bytes_set_uint32",
+    "bytes_set_int32", "bytes_set_float32",
     "bytes_read_bool_at", "bytes_read_f16_le_at", "bytes_read_f32_be_at", "bytes_read_f32_le_at",
     "bytes_read_f64_be_at", "bytes_read_f64_le_at", "bytes_read_i16_be_at", "bytes_read_i16_le_at",
     "bytes_read_i32_be_at", "bytes_read_i32_le_at", "bytes_read_i64_be_at", "bytes_read_i64_le_at",
@@ -155,6 +188,9 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     "bytes_read_u16_le_at", "bytes_read_u32_be_at", "bytes_read_u32_le_at", "bytes_read_u8_at",
     "bytes_take_at", "json_get_array", "json_get_bool", "json_get_float", "json_get_int",
     "json_get_string",
+    // bytes_core.almd index_of (#1423 stage 4): the same read-only walk as
+    // contains, its `Int?` built via some()/none in tail position.
+    "bytes_index_of",
     // regex_engine.almd (audited 2026-08-25): the backtracking engine —
     // byte walks on the digest-shared String layout (load32(h+4) = len
     // in BYTES both legs, handle+12 = OUR payload), prim-MEDIATED
@@ -176,6 +212,9 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     // (Option ret) sits in the SUM tier below.
     "http_response", "http_json", "http_redirect", "http_with_headers",
     "http_status", "http_body", "http_set_header",
+    // The #1791 read side (audited 2026-09-03): the same list/string
+    // surface plus int.parse / map.new / map.contains / map.set.
+    "http_status_code", "http_headers", "http_header_values",
     // random_int.almd (audited 2026-08-25): prim.alloc_bytes scratch +
     // prim.random_get (the op-32 entropy boundary) + pure span math —
     // the VALUE is nondeterministic by contract (C-112 pins the range).
@@ -189,6 +228,17 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     "http_get_header",
     // regex_engine.almd Option returners (same audit).
     "regex_find", "regex_captures",
+    // zlib_inflate.almd / zlib_deflate.almd (#1700, audited 2026-09-01):
+    // the C-326 gzip decoder promoted to stdlib plus the stored-block
+    // encoder. Every Result is built via language-level ok()/err(); the
+    // buffers are bytes.new/bytes.push/bytes.get_or (public surface — the
+    // exact construction the C-326 fixture already runs byte-identical on
+    // the structural leg); no prim access at all. Parity evidence:
+    // spec/wasm_cross/zlib_selfhost.almd (known-answer decode + round
+    // trips, C-331).
+    "zlib_gunzip", "zlib_inflate", "zlib_decompress",
+    "zlib_deflate", "zlib_deflate_level", "zlib_compress", "zlib_compress_level",
+    "zlib_gzip",
 ];
 
 /// The vendored-libm family (C-305): every body is a FAITHFUL
@@ -197,6 +247,18 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
 /// through prim-MEDIATED alloc_list_f64 with 8-byte Float slot stores
 /// (the one list class both layouts share). One vendored libm on every
 /// target is the bit-parity mechanism itself.
+/// The framed http client family (#1710 increment 3, audited 2026-09-02):
+/// stdlib/http_framed.almd — PURE language surface end to end (string
+/// interpolation, list.map/fold, map.entries, string.take/drop,
+/// int.parse, ok()/tuple ctors); the only leaves are the op-48/49/50
+/// host calls the emitter lowers itself (host_env arms). Result returns
+/// and the Map[String, String] headers param trip the coupled proxy;
+/// the bodies never touch a raw layout.
+pub(crate) const HTTP_CLIENT_SUM: &[&str] = &[
+    "__request_impl", "__request_status_impl", "__get_status_impl",
+    "__request_bytes_impl", "__get_bytes_impl",
+];
+
 pub(crate) const MATH_VERIFIED: &[&str] = &[
     "math_abs", "math_atan", "math_choose", "math_cos", "math_e", "math_exp",
     "math_factorial", "math_fmax", "math_fmin", "math_fpow", "math_log", "math_log10",

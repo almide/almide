@@ -1,0 +1,3 @@
+expects_code = "E043"
+expects_error = "internal carrier, not a spelling"
+hint_substring = "fs.for_each_line(path, (l) => f(l)!)!"

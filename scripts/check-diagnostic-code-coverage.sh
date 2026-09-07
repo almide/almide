@@ -11,12 +11,15 @@
 # Known no-fixture codes, each with a reason the docs carry:
 #   E054 — fires only on an internal formatter defect (no committed source can
 #          trigger it deliberately; pinned by fmt_corpus_test instead).
-#   E033 — needs a multi-module project (opaque-type external construction);
-#          pinned by module-project tests, not single-file fixtures.
-#   E420 — needs a cross-module call (mod/local visibility); same.
+# E033 / E420 left this list in #1528's multi-file sweep: a fixture dir may
+# carry almide.toml + src/*.almd siblings, and `almide check broken.almd`
+# resolves `import self.x` against them — so the two cross-module codes
+# have real families now.
 #
-# Codes with fewer than 3 fixtures are REPORTED as the backlog (soft), not
-# failed — the floor is 1, the tier-1 target is "every hint variant".
+# Codes with fewer than 3 fixtures FAIL the gate: the tier-1 bar (>=3
+# families per code) was promoted from soft backlog to enforced when the
+# corpus cleared it everywhere (#1528) — a shrink below the bar is a
+# regression, not a backlog item.
 set -euo pipefail
 export LC_ALL=C
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -25,10 +28,15 @@ cd "$ROOT"
 # E081 fires in the BUILD path (--target wasm availability, #1423) — the
 # check-harness fixture format cannot reach it; its pin is
 # tests/wasm_availability_e081_test.rs (the E054 precedent).
-EXEMPT="E054 E033 E420 E081"
+# E082 (#1922) is the both-legs wasm wall, same path and same precedent —
+# pinned by tests/wasm_both_legs_e082_test.rs.
+# E083 (#1996) is the wasm emitter's own contract failure (an exit that does
+# not implement its checked ExitPlan) — no source program triggers it; pinned
+# by crates/almide-wasm/tests/exit_validation.rs through the emit-time
+# negative hook `almide_wasm::test_omit_first_release`.
+EXEMPT="E054 E081 E082 E083"
 
 fail=0
-backlog=""
 total=0
 for doc in docs/diagnostics/E*.md; do
   code=$(basename "$doc" .md)
@@ -40,12 +48,10 @@ for doc in docs/diagnostics/E*.md; do
     echo "::error::diagnostic-code-coverage: documented $code has NO fixture family (tests/diagnostics/${lower}-*)"
     fail=1
   elif [ "$n" -lt 3 ]; then
-    backlog="$backlog $code($n)"
+    echo "::error::diagnostic-code-coverage: $code has only $n fixture families — the tier-1 bar is >=3 (#1528, enforced)"
+    fail=1
   fi
 done
 
-echo "diagnostic-code-coverage: $total fixture dir(s) across documented codes; floor >=1 held"
-if [ -n "$backlog" ]; then
-  echo "  below the 3-family tier-1 bar (backlog, not a failure):$backlog"
-fi
+echo "diagnostic-code-coverage: $total fixture dir(s) across documented codes; floor >=1 and the >=3 tier-1 bar held"
 exit $fail

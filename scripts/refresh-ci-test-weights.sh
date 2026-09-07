@@ -5,9 +5,9 @@
 # every line be measured. The original capture was a laptop session; this
 # makes the refresh a command: given a ci.yml run id (default: the latest
 # completed develop run), pull the four `Test Rust (shard N/4)` job logs,
-# pair each `Running tests/<name>.rs` / `Running unittests … (deps/<name>-…)`
-# line with its `test result: … finished in Ns` line (cargo executes targets
-# sequentially, so the two streams pair FIFO), sum per target across shards,
+# sum every nextest per-test line (`PASS [ Ns] (i/n) pkg::target test`) per
+# target across shards — or, for a pre-nextest log, pair each `Running
+# tests/<name>.rs` line with its `test result: … finished in Ns` line —
 # and rewrite the weights file with every target at or above the 5 s default
 # (below it, the default's noise floor covers them — balance, never
 # coverage, exactly as the file header says).
@@ -65,12 +65,30 @@ ansi = re.compile(r"\x1b\[[0-9;]*m")
 running_test = re.compile(r"Running\s+tests/([A-Za-z0-9_]+)\.rs\s+\(")
 running_unit = re.compile(r"Running\s+unittests\s+\S+\s+\(.*/deps/([A-Za-z0-9_]+)-[0-9a-f]{16}\)")
 result = re.compile(r"test result: \w+\. .* finished in ([0-9.]+)s")
+# cargo-nextest (the shard jobs replay a nextest archive since #1615's
+# follow-up): one line per test, `PASS [ 12.345s] ( 3/559) pkg::target name`.
+# The binary id is `pkg::target` for tests/ targets, `pkg` alone for a lib's
+# unit tests and `pkg::bin/name` for a bin's — reduced to the cargo target
+# name the packer keys on.
+nextest = re.compile(r"^\s*(?:PASS|SLOW|FAIL|LEAK|TIMEOUT)\s+\[\s*([0-9.]+)s\]\s+\(\s*\d+/\d+\)\s+(\S+)\s+\S")
+def nextest_target(binary_id):
+    if "::" in binary_id:
+        pkg, name = binary_id.split("::", 1)
+        return name.split("/", 1)[1] if name.startswith("bin/") else name
+    return binary_id.replace("-", "_")
 
 for logf in sorted(os.listdir(tmp)):
     queue, total = [], 0.0
     with open(os.path.join(tmp, logf), errors="replace") as fh:
         for line in fh:
             line = ansi.sub("", line)
+            line = re.sub(r"^\S+Z ", "", line)  # the API log prefixes a timestamp
+            m = nextest.search(line)
+            if m:
+                secs = float(m.group(1))
+                weights[nextest_target(m.group(2))] += secs
+                total += secs
+                continue
             m = running_test.search(line) or running_unit.search(line)
             if m:
                 queue.append(m.group(1))
@@ -122,7 +140,7 @@ import datetime
 stamp = os.environ.get("WEIGHTS_DATE") or datetime.date.today().isoformat()
 head = [l for l in head if not l.startswith("# Captured ") and not l.startswith("# Refreshed ")]
 head.append(f"# Refreshed {stamp} by scripts/refresh-ci-test-weights.sh from a CI run's own\n")
-head.append("# shard logs (Running/finished-in pairs, summed per target across shards).\n")
+head.append("# shard logs (nextest per-test lines, or Running/finished-in pairs, summed per target across shards).\n")
 
 with open(path, "w") as fh:
     fh.writelines(head)

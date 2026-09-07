@@ -52,7 +52,11 @@ Correct flow:
      when it can break written code, a `proofs/dialect-epochs.toml` entry).
 5. **Let the workflow create the release.** It auto-generates notes from commits.
 6. If you want custom notes, edit after the workflow completes: `gh release edit vX.Y.Z --notes "..."`
-7. **Seal the release evidence** (audit freeze): `bash scripts/release-seal.sh gen vX.Y.Z`,
+7. **Refresh the stamped ledger counts** — `bash scripts/gen-ledger-counts.sh`, commit
+   `proofs/ledger-counts.toml` with the four docs it re-renders. Fixture/contract PRs
+   never refresh them; the nightly `scripts/check-ledger-counts.sh` going red is the
+   other time to run it.
+8. **Seal the release evidence** (audit freeze): `bash scripts/release-seal.sh gen vX.Y.Z`,
    fill the `[recorded]` fields (the release-gate fuzz run, the asset inventory), commit
    `proofs/releases/vX.Y.Z.toml` on `develop`. CI re-measures every `[derived]` field
    against the tag forever after — the seal is the release's immutable evidence record.
@@ -118,6 +122,7 @@ almide compile                    # Module interface (project)
 almide compile parser             # Module interface (by name)
 almide compile app.almd --json    # Module interface (JSON)
 almide check app.almd             # Type check only
+almide check app.almd --target wasm# + the wasm build route: E081/E082 at check time (#1922)
 almide check app.almd --profile critical --allow IO  # Critical profile (#567): bounded rules on every fn, capabilities deny-all
 almide fmt app.almd               # Format source
 almide fmt --check spec/          # Formatting gate (non-zero on drift)
@@ -332,6 +337,16 @@ differential fuzz, an emit-time Σ-probe, or a Lean theorem. The index is
   names its contract(s), and the link is bidirectional. The evidence-class
   vocabulary is shared with the rt-oracle-registry via
   `scripts/lib/contract-classes.txt`.
+- **A new `C-NNN` lands in [almide/als](https://github.com/almide/als) FIRST.** The judge
+  holds the normative ledger; `scripts/check-als-pin.sh` (CI `checks`) refuses any contract
+  id absent from the judge's ledger at the commit pinned in `proofs/als-pin.txt`. Order: als
+  PR (contract + fixture) merges → advance the pin in its own commit → the implementation PR.
+- **Aggregate counts are stamped, not regenerated per PR.** Every "N contracts /
+  N fixtures" total the generated docs quote renders from `proofs/ledger-counts.toml`
+  inside a dated `counts:generated` block. A fixture/contract PR regenerates the
+  structural ledgers (rows, manifests, indexes) and leaves the block alone;
+  `bash scripts/gen-ledger-counts.sh` refreshes it at release time or when the
+  nightly `scripts/check-ledger-counts.sh` reports drift.
 
 ## The LLM-Facing Surface Is the Stable Surface (#1483)
 

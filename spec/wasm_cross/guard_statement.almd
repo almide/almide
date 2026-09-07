@@ -1,5 +1,5 @@
 // @contract: C-265
-// ALS-S6 (docs/specs/als/expressions.md): the guard statement — a scalar
+// ALS-ST5 (docs/specs/als/expressions.md): the guard statement — a scalar
 // early return whose else-arm raises. Both paths pinned: the guard passes
 // (value flows to the tail) and the guard fails (the else err propagates
 // out through the caller's `!`, caught here by match). Un-walled on the

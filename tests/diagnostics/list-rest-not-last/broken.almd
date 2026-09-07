@@ -1,0 +1,8 @@
+// The rest slot is LAST-only (#1461): `[..t, x]` would need right-anchored
+// element addressing no lowering carries — the parser names the rule.
+fn last_of(xs: List[Int]) -> Int = match xs {
+  [..t, x] => x,
+  _ => 0,
+}
+
+fn main() -> Unit = println(int.to_string(last_of([1, 2])))

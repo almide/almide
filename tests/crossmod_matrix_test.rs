@@ -51,6 +51,12 @@ let MAYBE = some(Cfg { name: "opt" })
 let N = 7
 
 fn mk() -> Cfg = Cfg { name: "via-fn" }
+// #1931: the module's OWN fn iterating its unannotated record-list top-let.
+fn cfg_name_len() -> Int = {
+  var n = 0
+  for c in CFGS { n = n + string.len(c.name) }
+  n
+}
 
 effect fn estep(n: Int) -> Int = n + 1
 
@@ -277,6 +283,19 @@ effect fn main() -> Unit =
 effect fn main() -> Unit = println(int.to_string(m.N + 1))
 "#,
             expected: "8",
+            status: Status::Works,
+        },
+        Cell {
+            // #1931: `for r in RULES` over the module's own unannotated
+            // `let RULES = [Rule {..}]` lowered `r` as Unknown — the seeded
+            // `List[Unknown]` entry was never upgraded (the refresh replaced
+            // only a bare `Unknown`), a ConcretizeTypes refusal behind a
+            // green check. Single-file and annotated forms were fine.
+            name: "list_record_toplet_for_in_within_module",
+            main: r#"import self as m
+effect fn main() -> Unit = println(int.to_string(m.cfg_name_len()))
+"#,
+            expected: "2",
             status: Status::Works,
         },
         Cell {

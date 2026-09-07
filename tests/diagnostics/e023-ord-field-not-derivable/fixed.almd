@@ -1,0 +1,5 @@
+// The fix: every field of a `: Ord` type must itself be `: Ord`.
+type Point: Ord = { x: Int, y: Int }
+type Edge: Ord = { a: Point, b: Point }
+
+fn main() -> Unit = println("ok")

@@ -1,5 +1,7 @@
 // @pass: none
-// #1487 isolated fixture for the m5-double-wasm-print mutation path
-// (mir/render_wasm_c.rs render_call's PrintStr): exactly one line must come
-// out exactly once — a doubled print is a wasm-vs-native line-count diff.
+// #1487 isolated fixture for the m5-double-wasm-print mutation path (the
+// structural emitter's lower_print in crates/almide-wasm/src/calls.rs —
+// retargeted from mir/render_wasm_c.rs in #1845 when the default wasm leg
+// moved): exactly one line must come out exactly once — a doubled print is
+// a wasm-vs-native line-count diff.
 fn main() -> Unit = println("exactly-once")

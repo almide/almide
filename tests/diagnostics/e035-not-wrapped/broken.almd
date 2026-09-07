@@ -1,0 +1,9 @@
+// E035 behind a `not` — negation does not hide the error-text comparison.
+effect fn fetch() -> Result[Int, String] = err("boom")
+
+effect fn main() -> Unit = {
+  match fetch() {
+    ok(n) => println(int.to_string(n)),
+    err(e) => println(if not (e == "boom") then "unknown" else "known"),
+  }
+}

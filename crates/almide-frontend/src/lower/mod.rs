@@ -26,6 +26,7 @@ mod expressions;
 mod calls;
 mod statements;
 mod types;
+pub use types::lower_bundled_type_decl;
 mod derive;
 mod derive_codec;
 mod auto_try;
@@ -579,14 +580,17 @@ fn finalize_ir_program(program: &mut IrProgram, env: &TypeEnv, annotated_result_
     // arg auto-?'d (it would unwrap the very value the callee consumes —
     // `error.context(inner(), msg)`, `result.unwrap_or(r, d)`, …). Derive the
     // set from the signature table instead of a hardcoded module-name list.
-    let first_arg_unwraps: std::collections::HashSet<almide_base::intern::Sym> = env.functions.iter()
+    // #1970: PER PARAMETER, not first-only — `fn show(tag: String, r: Result[..])`
+    // consumes its SECOND argument as a Result, and the first-only skip unwrapped it.
+    let result_params: std::collections::HashMap<almide_base::intern::Sym, Vec<bool>> = env.functions.iter()
         .filter_map(|(k, sig)| {
-            let first_is_opt_result = sig.params.first()
-                .map_or(false, |(_, t)| t.is_result() || matches!(t, almide_lang::types::Ty::Applied(almide_lang::types::TypeConstructorId::Option, _)));
-            if first_is_opt_result { Some(*k) } else { None }
+            let flags: Vec<bool> = sig.params.iter()
+                .map(|(_, t)| t.is_result() || matches!(t, almide_lang::types::Ty::Applied(almide_lang::types::TypeConstructorId::Option, _)))
+                .collect();
+            if flags.iter().any(|f| *f) { Some((*k, flags)) } else { None }
         })
         .collect();
-    auto_try::insert_auto_try(program, annotated_result_vars, &first_arg_unwraps);
+    auto_try::insert_auto_try(program, annotated_result_vars, &result_params);
 
     // Collect stdlib modules used in root functions/top_lets.
     // ir_link extends this with modules from dependencies.

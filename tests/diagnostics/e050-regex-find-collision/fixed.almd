@@ -1,0 +1,9 @@
+// Fixed: the local fn is renamed — the bare name has exactly one meaning again.
+import regex.{find}
+
+fn find_len(s: String) -> Int = string.len(s)
+
+effect fn main() -> Unit = {
+  let hit = find("a", "abc") ?? ""
+  println(int.to_string(find_len(hit)))
+}

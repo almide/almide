@@ -13,35 +13,75 @@
 # (Running/finished-in pairs). CI runners are slower, but packing needs only the
 # RATIOS. Targets under 5s are omitted — they are within the default's noise.
 # Refresh by rerunning that command when the shard job's balance report drifts.
-# Refreshed 2026-08-27 by scripts/refresh-ci-test-weights.sh from a CI run's own
 # shard logs (Running/finished-in pairs, summed per target across shards).
-wasm_runtime_test                516
-run_parity                       284
-backend_parity                   223
-surface_matrix                   213
-diagnostic_harness_test          193
-fuzz_differential                142
-wasm_dispatch_coverage_test      100
-check_parity                     97
-libm_trig_cross_target_test      55
-kernel_conformance_test          51
-charge_probe_test                45
-bridge_test                      45
-almide_mir                       37
-fmt_test                         33
-fuzz_test                        32
-libm_atan_tanh_cross_target_test 28
-http_timeout_native_test         27
-almide_egg_lab                   24
-native_v1_differential_test      21
-rc_placement_snapshot_test       15
-examples_parity_test             12
-crossmod_matrix_test             12
-regex_fuzz_test                  10
-stdlib_examples_test             9
-semantic_laws_test               8
-gauntlet                         7
-bytes_unwrap_callarg_test        6
-fmt_corpus_test                  6
-heap_cap_test                    6
-bytes_coalesce_call_arg_test     6
+# shard logs (nextest per-test lines, or Running/finished-in pairs, summed per target across shards).
+# shard logs (nextest per-test lines, or Running/finished-in pairs, summed per target across shards).
+# Refreshed 2026-09-04 by scripts/refresh-ci-test-weights.sh from a CI run's own
+# shard logs (nextest per-test lines, or Running/finished-in pairs, summed per target across shards).
+diagnostic_harness_test          1168
+wasm_runtime_opt_parity          685
+wasm_runtime_cross_target        582
+run_parity                       522
+eval_test                        453
+wasm_runtime_interp_oracle       403
+surface_matrix                   332
+wasm_runtime_interp_ledger       299
+backend_parity                   284
+almide_mir                       263
+fuzz_differential                239
+check_parity                     200
+bridge_test                      167
+kernel_conformance_test          151
+wasm_dispatch_coverage_test      144
+libm_explog_pow_cross_target_test 108
+fuzz_test                        99
+libm_trig_cross_target_test      99
+charge_probe_test                98
+fmt_test                         98
+test_scratch_race_test           54
+native_v1_differential_test      49
+wasm_runtime_inline              45
+crossmod_matrix_test             43
+semantic_laws_test               42
+http_close_notify_test           40
+almide_egg_lab                   36
+http_timeout_native_test         32
+libm_atan_tanh_cross_target_test 32
+interp_spaced_globals_test       24
+examples_parity_test             24
+crossmod_convention_key_test     23
+rc_placement_snapshot_test       22
+native_runtime_name_collision_pin_test 21
+nested_effect_unwrap_test        20
+native_codec_option_decode_pin_test 19
+heap_cap_test                    19
+native_runtime_key_alias_pin_test 19
+checker_test                     19
+bytes_unwrap_callarg_test        19
+bytes_coalesce_call_arg_test     17
+native_fn_nested_derive_pin_test 16
+regex_fuzz_test                  15
+gauntlet                         15
+int_literal_domain_test          15
+dep_pkg_submodule_test           15
+stdlib_examples_test             14
+module_type_repr_test            12
+alloc_count_gate_test            11
+native_codegen_walls_pin_test    11
+value_match_unwrap_test          9
+fmt_corpus_test                  9
+convention_extension_ruling_test 9
+mut_param_mono                   8
+fan_callback_try_structural_test 7
+alias_semantics                  7
+tail_calls                       7
+first_light                      7
+lower_test                       7
+io_print                         6
+fix_test                         6
+exercise_corpus_check_test       6
+almide_codegen                   6
+native_mut_param_pins_test       5
+stdlib_owned_type_interface_spelling_test 5
+stdlib_type_owner_pull_test      5
+lsp_test                         5

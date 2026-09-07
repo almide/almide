@@ -1,0 +1,2 @@
+local fn secret() -> Int = 42
+pub fn open() -> Int = 1

@@ -4,14 +4,14 @@
 use std::cell::Cell;
 
 thread_local! {
-    static RNG_STATE: Cell<u64> = Cell::new({
+    static ALMIDE_RNG_STATE: Cell<u64> = Cell::new({
         let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
         t.as_nanos() as u64 ^ 0x517cc1b727220a95
     });
 }
 
 fn next_u64() -> u64 {
-    RNG_STATE.with(|state| {
+    ALMIDE_RNG_STATE.with(|state| {
         let mut s = state.get();
         s ^= s << 13;
         s ^= s >> 7;

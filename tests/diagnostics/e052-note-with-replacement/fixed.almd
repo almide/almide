@@ -1,0 +1,8 @@
+// E052 variant: `use` and `note` together — the hint appends the note
+// after the edit classification.
+@deprecated(since = 5, use = "shout", note = "yell also trimmed its input")
+fn yell(s: String) -> String = shout(s)
+
+fn shout(s: String) -> String = s + "!"
+
+effect fn main() -> Unit = println(shout("hi"))

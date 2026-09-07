@@ -1,0 +1,9 @@
+// A type annotation on the binding does not disambiguate a constructor name
+// declared by two types — resolution is by name, so renaming is the only fix.
+type Cmd = | Stop | Send(Int)
+type Event = | Tick | Send(Int)
+
+fn main() -> Unit = {
+  let x: Cmd = Send(5)
+  println("${x}")
+}

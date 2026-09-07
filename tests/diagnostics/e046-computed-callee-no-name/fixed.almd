@@ -1,0 +1,8 @@
+// E046: `_` as an argument to a COMPUTED callee — the diagnostic has no
+// short callee name to quote, so it names the argument position alone.
+fn pick() -> (Int, Int) -> Int = (a: Int, b: Int) => a + b
+
+fn main() -> Unit = {
+  let f = (x: Int) => (pick())(x, 2)
+  println(int.to_string(f(1)))
+}

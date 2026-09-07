@@ -1,0 +1,10 @@
+// E041, match-subject variant: value patterns over a fallible call's result —
+// the subject stays a Result until it is unwrapped with `!`.
+effect fn code() -> Int = 2
+
+effect fn main() -> Unit = {
+  match code()! {
+    2 => println("two"),
+    _ => println("other"),
+  }
+}

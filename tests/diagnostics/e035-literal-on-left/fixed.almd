@@ -1,0 +1,12 @@
+// The fix: a variant error type carries the kind structurally.
+type NetError = | Timeout | Refused(String)
+
+effect fn fetch() -> Result[Int, NetError] = err(Timeout)
+
+effect fn main() -> Unit = {
+  match fetch() {
+    ok(n) => println(int.to_string(n)),
+    err(Timeout) => println("soft"),
+    err(Refused(_)) => println("hard"),
+  }
+}

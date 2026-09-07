@@ -63,6 +63,13 @@ pub(crate) enum Helper {
     /// ok(shared block) or err(the Utf8Error Display line, "invalid
     /// UTF-8: " prefixed — the native wrapper's format).
     BytesToString { inv_pre: u32, inv_mid: u32, inc_pre: u32 },
+    /// `$map_reserve(block, esz) -> block` — the map twin of
+    /// `$list_push`'s growth discipline (#1219 stage 1): room for one
+    /// more `esz`-byte entry in place when the size class has slack,
+    /// else the doubled block with the entries copied and the outgrown
+    /// block freed iff rc == 1. `len` is left for the caller to bump
+    /// after it stores the pair at the old end.
+    MapReserve,
     /// `$scan_f64(block, stride, off, needle) -> i32` — the float lane of
     /// the scan family (native PartialEq: -0.0 == 0.0, NaN never matches;
     /// a Helper, not a fixed function, because its f64 param breaks the
@@ -78,6 +85,50 @@ pub(crate) enum Helper {
     /// type shape and cycles are cut here; the body is Emitter-built in
     /// the display-helper phase and stored in `display_bodies`).
     DisplayNamed { ti: u32 },
+    /// The keyed-lookup index family (#1219 stage 2, map_index.rs): the
+    /// address-keyed side table (`get` / `raw` / `set`), the per-class
+    /// key hash, the index builder, the `$scan_*`-shaped `find` and the
+    /// in-place window's `append` maintenance hook.
+    MapIdxSideGet,
+    MapIdxSideRaw,
+    MapIdxSideSet { raw: u32 },
+    MapIdxHash { key: crate::map_index::IdxKey },
+    MapIdxBuild { key: crate::map_index::IdxKey, hash: u32 },
+    MapIdxFind { key: crate::map_index::IdxKey, fns: crate::map_index::IdxFns, build: u32 },
+    MapIdxAppend { key: crate::map_index::IdxKey, fns: crate::map_index::IdxFns },
+    /// `$drop_list(block)` — the typed drop of a List whose elements are
+    /// heap HANDLES (#2010 stage 2b): the spine's credit down; at zero
+    /// every element released through `elem_dec` (`$dec_flat` for a
+    /// Str / Bytes element, the inner list's own drop glue for a nested
+    /// one), then the spine freed. One helper per element drop fn.
+    DropList { elem_dec: u32 },
+    /// `$inc_elems(block)`: +1 on every element handle of a spine whose
+    /// slots were COPIED from another spine — the copy holds its own
+    /// credits, so its typed drop releases exactly what it acquired.
+    IncElems,
+    /// `$copy_elems(block) -> block`: `$block_copy` plus the element
+    /// credits of the copy.
+    CopyElems { inc_elems: u32 },
+    /// `$cow_elems(block) -> block`: `$cow` plus the element credits of
+    /// the copy it made (none when the block was uniquely held).
+    CowElems { inc_elems: u32 },
+    /// `$drop_<shape>(block)` — the typed drop of an Option / Result /
+    /// tuple block with handle payloads (#2010 stage 2c): the block's
+    /// credit down; at zero each handle slot released through its own
+    /// dec fn (a Result by its tag), then the block freed. The body is
+    /// built by the emitter at registration (`drop_bodies`) — the slot
+    /// table needs the type table.
+    DropShape { ty: SliceTy },
+    /// `$inc_<shape>(block)`: +1 on every handle slot of an Option /
+    /// Result / tuple / record / variant block — the credits a whole-block
+    /// COPY of it must hold (`CopyElems { inc_elems }` calls it).
+    IncShape { ty: SliceTy },
+    /// `$drop_map(block)` — a Map's SPINE drop (#2010, Map stage a): the
+    /// block's credit down; at zero its index side-table entry is cleared
+    /// (`side_clear` = `$mapidx_side_set`, so a reused address inherits no
+    /// stale index) and the entries array freed. Keys and values keep the
+    /// credits they hold today (stage b: the per-entry walk).
+    DropMapSpine { side_clear: u32 },
 }
 
 /// The pretty printer's extra pooled fragments.
@@ -139,6 +190,14 @@ pub(crate) struct FnWork {
     pub(crate) display_bodies: std::cell::RefCell<HashMap<u32, DisplayBuild>>,
     pub(crate) eq_bodies: std::cell::RefCell<HashMap<u32, DisplayBuild>>,
     pub(crate) scan_bodies: std::cell::RefCell<HashMap<crate::ETy, DisplayBuild>>,
+    /// `Helper::DropShape` bodies, built by `dec_fn_of` when the helper
+    /// is first registered (assembly takes them by type).
+    pub(crate) drop_bodies: std::cell::RefCell<Vec<(Helper, Option<wasm_encoder::Function>)>>,
+    /// Region-pure fns by table index (#1961) — the vocabulary the
+    /// `consume(produce(scalars))` window recogniser consults.
+    pub(crate) region_pure: crate::region::RegionPure,
+    /// Set once any region window was emitted (exports `__heap_high`).
+    pub(crate) region_used: std::cell::Cell<bool>,
 }
 
 pub(crate) enum DisplayBuild {

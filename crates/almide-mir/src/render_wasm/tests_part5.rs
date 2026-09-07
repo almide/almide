@@ -649,3 +649,4 @@ fn range_argument_materializes_via_list_range() {
 
 include!("tests_part5_b.rs");
 include!("tests_part5_c.rs");
+include!("tests_part5_d.rs");

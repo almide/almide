@@ -1,0 +1,5 @@
+// E051 variant: the stamp at the u32 ceiling — an absurdly-future epoch is
+// still just "ahead", reported with the same upgrade-or-lower hint.
+@dialect(4294967295)
+
+fn main() -> Unit = println("hi")

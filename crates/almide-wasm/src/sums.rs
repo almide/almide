@@ -23,10 +23,10 @@ impl Emitter<'_> {
         module: &str,
         func: &str,
         args: &[IrExpr],
-    ) -> Result<Option<Option<SliceTy>>, EmitError> {
+    ) -> Result<Option<Option<Lowered>>, EmitError> {
         let out = match (module, func, args) {
             ("result", "is_ok" | "is_err", [r]) => {
-                let SliceTy::Result(..) = self.lower(r, None)? else {
+                let SliceTy::Result(..) = self.lower_arg(r, None, ArgMode::Borrow)? else {
                     return unsup(&format!("result-{func}-of-nonresult"));
                 };
                 let mut i = self.f.instructions();
@@ -36,10 +36,10 @@ impl Emitter<'_> {
                 } else {
                     i.i32_const(0).i32_ne();
                 }
-                Some(BOOL)
+                Some(Lowered::scalar(BOOL))
             }
             ("option", "is_some" | "is_none", [o]) => {
-                let SliceTy::Option(_) = self.lower(o, None)? else {
+                let SliceTy::Option(_) = self.lower_arg(o, None, ArgMode::Borrow)? else {
                     return unsup(&format!("option-{func}-of-nonoption"));
                 };
                 let mut i = self.f.instructions();
@@ -47,14 +47,14 @@ impl Emitter<'_> {
                 if func == "is_some" {
                     i.i32_eqz();
                 }
-                Some(BOOL)
+                Some(Lowered::scalar(BOOL))
             }
             ("result", "map" | "map_err", [r, f]) => self.lower_result_map(func, r, f)?,
             // partition: one pass, oks/errs each an upper-bound alloc with
             // a final len patch (the filter doctrine).
-            ("result", "partition", [xs]) => Some(self.lower_result_partition(xs)?),
+            ("result", "partition", [xs]) => Some(Lowered::owned(self.lower_result_partition(xs)?)),
             ("result", "flat_map", [r, f]) => {
-                let SliceTy::Result(o, _) = self.lower(r, None)? else {
+                let SliceTy::Result(o, _) = self.lower_arg(r, None, ArgMode::Retain)? else {
                     return unsup("result-flat_map-of-nonresult");
                 };
                 let (params, body) = self.hof_lambda(f, 1)?;
@@ -79,12 +79,15 @@ impl Emitter<'_> {
                 self.load_ty_slot(a, almide_layout::SUM_FIELD);
                 self.f.instructions().local_set(params[0]);
                 self.lower(body, Some(rb))?;
+                // A callback result RETURNED as the arm's value: a view (a captured var,
+                // the input) takes its share so the value is owned on every path.
+                self.rc_share_guard(body, rb);
                 self.f.instructions().end();
                 self.release_i32();
-                Some(rb)
+                Some(Lowered::owned(rb))
             }
             ("result", "unwrap_or_else", [r, f]) => {
-                let SliceTy::Result(o, er) = self.lower(r, None)? else {
+                let SliceTy::Result(o, er) = self.lower_arg(r, None, ArgMode::Borrow)? else {
                     return unsup("result-uoe-of-nonresult");
                 };
                 let (params, body) = self.hof_lambda(f, 1)?;
@@ -103,15 +106,22 @@ impl Emitter<'_> {
                 self.load_ty_slot(e, almide_layout::SUM_FIELD);
                 self.f.instructions().local_set(params[0]);
                 self.lower(body, Some(a))?;
+                // A callback result RETURNED as the arm's value: a view (a captured var,
+                // the input) takes its share so the value is owned on every path.
+                self.rc_share_guard(body, a);
                 self.f.instructions().else_().local_get(hs);
                 self.load_ty_slot(a, almide_layout::SUM_FIELD);
+                // The payload handed out is a SHARE of the Option's (the
+                // borrowed source may be a temporary released next): +1,
+                // so both branches hand back an owned value.
+                self.share_handle_top(a);
                 self.f.instructions().end();
                 self.release_i32();
-                Some(a)
+                Some(Lowered::owned(a))
             }
             ("result", "to_option" | "to_err_option", [r]) => {
                 let want_ok = func == "to_option";
-                let SliceTy::Result(o, er) = self.lower(r, None)? else {
+                let SliceTy::Result(o, er) = self.lower_arg(r, None, ArgMode::Borrow)? else {
                     return unsup(&format!("result-{func}-of-nonresult"));
                 };
                 let side_h = if want_ok { o } else { er };
@@ -135,11 +145,14 @@ impl Emitter<'_> {
                 }
                 self.f.instructions().local_get(hs);
                 self.load_ty_slot(side, almide_layout::SUM_FIELD);
+                // The payload copied out is a SHARE (+1): the new block's
+                // typed drop releases it, the source keeps its own.
+                self.share_handle_top(side);
                 self.store_ty_slot(side, almide_layout::OPTION_FIELD);
                 self.f.instructions().local_get(hb).end();
                 self.release_i32();
                 self.release_i32();
-                Some(SliceTy::Option(side_h))
+                Some(Lowered::owned(SliceTy::Option(side_h)))
             }
             _ => return self.lower_sum_combinator_b(module, func, args),
         };
@@ -149,7 +162,7 @@ impl Emitter<'_> {
     /// partition: one pass, oks/errs each an upper-bound alloc with
     /// a final len patch (the filter doctrine).
     fn lower_result_partition(&mut self, xs: &IrExpr) -> Result<SliceTy, EmitError> {
-        let el = match self.lower(xs, None)? {
+        let el = match self.lower_arg(xs, None, ArgMode::Borrow)? {
             SliceTy::List(h) => self.types.el(h),
             other => return unsup(&format!("result-partition-of:{other:?}")),
         };
@@ -239,11 +252,11 @@ impl Emitter<'_> {
         func: &str,
         r: &IrExpr,
         f: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         Ok({
 
                 let on_ok = func == "map";
-                let SliceTy::Result(o, er) = self.lower(r, None)? else {
+                let SliceTy::Result(o, er) = self.lower_arg(r, None, ArgMode::Retain)? else {
                     return unsup(&format!("result-{func}-of-nonresult"));
                 };
                 let (params, body) = self.hof_lambda(f, 1)?;
@@ -279,12 +292,20 @@ impl Emitter<'_> {
                     .i32_store(slot_memarg(almide_layout::SUM_TAG));
                 self.f.instructions().local_get(hb);
                 self.lower(body, Some(b))?;
+                // A pass-through body hands back a VIEW (a captured var, the
+                // input itself): the block storing it is a holder and takes the share.
+                self.rc_share_guard(body, b);
                 self.store_ty_slot(b, almide_layout::SUM_FIELD);
                 self.f.instructions().local_get(hb).end();
                 self.release_i32();
                 self.release_i32();
                 let bi = self.types.intern(b);
-                Some(if on_ok { SliceTy::Result(bi, er) } else { SliceTy::Result(o, bi) })
+                // The pass-through side hands the INPUT block back, so the
+                // input is RETAINED (a temporary's credit moves into the
+                // result; a Var takes the share) and the result is owned.
+                // On the mapped side the retained Var's share is a leak,
+                // never a dangle (the per-arm identity is #1996).
+                Some(Lowered::owned(if on_ok { SliceTy::Result(bi, er) } else { SliceTy::Result(o, bi) }))
         })
     }
 }
@@ -297,11 +318,11 @@ impl Emitter<'_> {
         module: &str,
         func: &str,
         args: &[IrExpr],
-    ) -> Result<Option<Option<SliceTy>>, EmitError> {
+    ) -> Result<Option<Option<Lowered>>, EmitError> {
         let out = match (module, func, args) {
             ("option", "map" | "flat_map", [o_arg, f]) => {
                 let flat = func == "flat_map";
-                let SliceTy::Option(h) = self.lower(o_arg, None)? else {
+                let SliceTy::Option(h) = self.lower_arg(o_arg, None, ArgMode::Borrow)? else {
                     return unsup(&format!("option-{func}-of-nonoption"));
                 };
                 let a = self.types.el(h);
@@ -327,6 +348,9 @@ impl Emitter<'_> {
                 self.f.instructions().local_set(params[0]);
                 let out_ty = if flat {
                     self.lower(body, Some(b))?;
+                    // A callback result RETURNED as the arm's value: a view (a captured var,
+                    // the input) takes its share so the value is owned on every path.
+                    self.rc_share_guard(body, b);
                     b
                 } else {
                     self.f
@@ -335,6 +359,9 @@ impl Emitter<'_> {
                         .call(F_ALLOC)
                         .local_tee(hb);
                     self.lower(body, Some(b))?;
+                    // A pass-through body hands back a VIEW (a captured var, the
+                    // input itself): the block storing it is a holder and takes the share.
+                    self.rc_share_guard(body, b);
                     self.store_ty_slot(b, almide_layout::OPTION_FIELD);
                     self.f.instructions().local_get(hb);
                     SliceTy::Option(self.types.intern(b))
@@ -342,10 +369,10 @@ impl Emitter<'_> {
                 self.f.instructions().end();
                 self.release_i32();
                 self.release_i32();
-                Some(out_ty)
+                Some(Lowered::owned(out_ty))
             }
             ("option", "flatten", [o_arg]) => {
-                let SliceTy::Option(h) = self.lower(o_arg, None)? else {
+                let SliceTy::Option(h) = self.lower_arg(o_arg, None, ArgMode::Borrow)? else {
                     return unsup("option-flatten-of-nonoption");
                 };
                 let inner = self.types.el(h);
@@ -365,10 +392,12 @@ impl Emitter<'_> {
                 self.load_ty_slot(inner, almide_layout::OPTION_FIELD);
                 self.f.instructions().end();
                 self.release_i32();
-                Some(inner)
+                // The inner option is o's PAYLOAD, not a fresh block: a view
+                // (the bind takes its +1; a temporary source promotes it).
+                Some(Lowered::view(inner))
             }
             ("option", "unwrap_or_else", [o_arg, f]) => {
-                let SliceTy::Option(h) = self.lower(o_arg, None)? else {
+                let SliceTy::Option(h) = self.lower_arg(o_arg, None, ArgMode::Borrow)? else {
                     return unsup("option-uoe-of-nonoption");
                 };
                 let a = self.types.el(h);
@@ -381,14 +410,21 @@ impl Emitter<'_> {
                     i.if_(BlockType::Result(a.val_type()));
                 }
                 self.lower(body, Some(a))?;
+                // A callback result RETURNED as the arm's value: a view (a captured var,
+                // the input) takes its share so the value is owned on every path.
+                self.rc_share_guard(body, a);
                 self.f.instructions().else_().local_get(hs);
                 self.load_ty_slot(a, almide_layout::OPTION_FIELD);
+                // The payload handed out is a SHARE of the Option's (the
+                // borrowed source may be a temporary released next): +1,
+                // so both branches hand back an owned value.
+                self.share_handle_top(a);
                 self.f.instructions().end();
                 self.release_i32();
-                Some(a)
+                Some(Lowered::owned(a))
             }
             ("option", "or_else", [o_arg, f]) => {
-                let got @ SliceTy::Option(_) = self.lower(o_arg, None)? else {
+                let got @ SliceTy::Option(_) = self.lower_arg(o_arg, None, ArgMode::Retain)? else {
                     return unsup("option-or_else-of-nonoption");
                 };
                 let (_params, body) = self.hof_lambda(f, 0)?;
@@ -400,12 +436,16 @@ impl Emitter<'_> {
                     i.if_(BlockType::Result(ValType::I32));
                 }
                 self.lower(body, Some(got))?;
+                // A callback result RETURNED as the arm's value: a view (a captured var,
+                // the input) takes its share so the value is owned on every path.
+                self.rc_share_guard(body, got);
                 self.f.instructions().else_().local_get(hs).end();
                 self.release_i32();
-                Some(got)
+                // `some` hands the INPUT back: retained in, owned out (see result.map).
+                Some(Lowered::owned(got))
             }
             ("option", "filter", [o_arg, f]) => {
-                let got @ SliceTy::Option(h) = self.lower(o_arg, None)? else {
+                let got @ SliceTy::Option(h) = self.lower_arg(o_arg, None, ArgMode::Retain)? else {
                     return unsup("option-filter-of-nonoption");
                 };
                 let a = self.types.el(h);
@@ -433,15 +473,16 @@ impl Emitter<'_> {
                     i.end();
                 }
                 self.release_i32();
-                Some(got)
+                // kept = the INPUT block: retained in, owned out (see result.map).
+                Some(Lowered::owned(got))
             }
             ("option", "zip", [a_arg, b_arg]) => {
-                let SliceTy::Option(ha) = self.lower(a_arg, None)? else {
+                let SliceTy::Option(ha) = self.lower_arg(a_arg, None, ArgMode::Borrow)? else {
                     return unsup("option-zip-of-nonoption");
                 };
                 let hla = self.hold_i32()?;
                 self.f.instructions().local_set(hla);
-                let SliceTy::Option(hb) = self.lower(b_arg, None)? else {
+                let SliceTy::Option(hb) = self.lower_arg(b_arg, None, ArgMode::Borrow)? else {
                     return unsup("option-zip-of-nonoption");
                 };
                 let (a, b) = (self.types.el(ha), self.types.el(hb));
@@ -485,10 +526,10 @@ impl Emitter<'_> {
                 self.release_i32();
                 self.release_i32();
                 self.release_i32();
-                Some(SliceTy::Option(self.types.intern(SliceTy::Tuple(ti))))
+                Some(Lowered::owned(SliceTy::Option(self.types.intern(SliceTy::Tuple(ti)))))
             }
             ("option", "to_list", [o_arg]) => {
-                let SliceTy::Option(h) = self.lower(o_arg, None)? else {
+                let SliceTy::Option(h) = self.lower_arg(o_arg, None, ArgMode::Borrow)? else {
                     return unsup("option-to_list-of-nonoption");
                 };
                 let a = self.types.el(h);
@@ -506,11 +547,14 @@ impl Emitter<'_> {
                 }
                 self.f.instructions().local_get(hs);
                 self.load_ty_slot(a, almide_layout::OPTION_FIELD);
+                // The payload copied out is a SHARE (+1): the new block's
+                // typed drop releases it, the source keeps its own.
+                self.share_handle_top(a);
                 self.store_ty_slot(a, 0);
                 self.f.instructions().local_get(hb).end();
                 self.release_i32();
                 self.release_i32();
-                Some(SliceTy::List(h))
+                Some(Lowered::owned(SliceTy::List(h)))
             }
             _ => return Ok(None),
         };

@@ -1,7 +1,6 @@
 //! Statement-position lowering (binds, assigns, index COW stores, loops,
 //! statement markers) — split from emitter.rs for the complexity budget.
 
-use std::collections::HashMap;
 
 use almide_ir::{IrExpr, IrExprKind, IrStmt, IrStmtKind, VarId};
 use wasm_encoder::BlockType;
@@ -167,7 +166,33 @@ impl Emitter<'_> {
         self.f.instructions().i32_eqz().if_(BlockType::Empty);
         match self.fn_ret {
             Some(want) => {
-                self.lower(else_, Some(want))?;
+                // `guard c else err(m)!` in an effect fn: the `!` over a
+                // Result whose type IS this fn's Result is propagation —
+                // the else-arm's value is the fn's return, not its unwrapped
+                // payload. Lowering the Unwrap as an unwrap produced the
+                // payload type and walled with `ty-mismatch:Scalar(Int)-vs-
+                // Result` (#1968), routing a correct program to the
+                // incumbent (#1967). The native walker strips the same
+                // wrapper (#1926).
+                let ret_direct = match &else_.kind {
+                    IrExprKind::Unwrap { expr } | IrExprKind::Try { expr }
+                        if matches!(want, SliceTy::Result(..))
+                            && slice_ty_of(&expr.ty, self.types) == Some(want) =>
+                    {
+                        Some(&**expr)
+                    }
+                    _ => None,
+                };
+                let ret_e = ret_direct.unwrap_or(else_);
+                self.lower(ret_e, Some(want))?;
+                // The guard's early return is an exit like the tail: a
+                // droppable value that may BORROW a local takes +1 before
+                // the frame's owners are released (#2001).
+                if self.rc_droppable(want) && !self.rc_owned_result(ret_e) {
+                    self.rc_inc_top();
+                }
+                let plan = self.exit_plan(crate::exit_plan::Continuation::GuardReturn);
+                self.emit_exit(&plan);
                 self.f.instructions().return_();
             }
             // main / Unit fn: the else IS the return — evaluate it in
@@ -175,12 +200,13 @@ impl Emitter<'_> {
             // A RESULT else in main is the err channel, not a discard:
             // `guard c else err(…)` must print `Error: {msg}` and exit 1
             // (#1734 — the discard silently swallowed the err). The
-            // early return skips the RC epilogue: a leak, never a
-            // dangle.
+            // early return releases the frame like the epilogue (#2001).
             None => {
                 if !self.try_lower_main_err_carrier(else_)? {
                     self.lower_stmt_expr(else_)?;
                 }
+                let plan = self.exit_plan(crate::exit_plan::Continuation::GuardReturn);
+                self.emit_exit(&plan);
                 self.f.instructions().return_();
             }
         }
@@ -213,12 +239,15 @@ impl Emitter<'_> {
         // by, so a borrowed rhs takes +1 — cells included). Maps and
         // Sets keep the bind copy: their mutations are functional
         // rebinds that never pass a COW gate.
+        // Every DROPPABLE shape shares on a borrowed rhs — the flat
+        // Option / Result / tuple blocks included (`let n1: Int? = n ?? none`
+        // read the nested option's payload as a view and, owning it
+        // without the +1, double-freed it beside `n2`). A Map / Set bind
+        // COPIES instead (their mutations are functional rebinds), and the
+        // copy is the local's own credit.
         if matches!(declared, SliceTy::Map(..) | SliceTy::Set(_)) {
             self.f.instructions().call(F_BLOCK_COPY);
-        }
-        if matches!(declared, SliceTy::List(_) | SliceTy::Scalar(Scalar::Str | Scalar::Bytes))
-            && !crate::rc_ownership::rc_certainly_fresh(&value.kind)
-        {
+        } else if self.rc_droppable(declared) && !self.rc_owned_result(value) {
             self.rc_inc_top();
         }
         if self.cells.contains(var) {
@@ -241,8 +270,9 @@ impl Emitter<'_> {
             // (loop rebinds; zero on the first pass) is released, and
             // the local joins the epilogue's owner set.
             if self.rc_droppable(declared) {
-                self.f.instructions().local_get(idx).call(F_DEC_FLAT);
-                self.rc_owned.insert(idx);
+                let dec = self.dec_fn_of(declared);
+                self.f.instructions().local_get(idx).call(dec);
+                self.rc_own(idx, declared);
                 if self.witness.is_some() {
                     self.witness_bind(idx, declared, value);
                 }
@@ -250,6 +280,12 @@ impl Emitter<'_> {
             self.f.instructions().local_set(idx);
         }
         Ok(())
+    }
+
+
+    pub(crate) fn rc_own(&mut self, idx: u32, ty: SliceTy) {
+        self.rc_owned.insert(idx);
+        self.owned_ty.insert(idx, ty);
     }
 
     pub(crate) fn lower_stmt(&mut self, s: &IrStmt) -> Result<(), EmitError> {
@@ -263,9 +299,13 @@ impl Emitter<'_> {
             IrStmtKind::FieldAssign { target, field, value } => {
                 self.lower_field_assign(target, field, value)
             }
-            // `m[k] = v` on a map var — the same write-back the
+            // `m[k] = v` on a map var — the in-place window when the var
+            // owns its block (#1219), else the same write-back the
             // `map.insert` mut form runs (functional `set`, rebind).
             IrStmtKind::MapInsert { target, key, value } => {
+                if self.try_map_set_in_place(target, key, value)? {
+                    return Ok(());
+                }
                 if self.cells.contains(target) {
                     return unsup("cell-write:map-insert");
                 }
@@ -279,7 +319,7 @@ impl Emitter<'_> {
                     def_id: None,
                 };
                 let args = [var_expr, key.clone(), value.clone()];
-                self.lower_map_call("set", &args, None)?;
+                self.arm_scope(|em| em.lower_map_call("set", &args, None))?;
                 self.f.instructions().local_set(var_idx);
                 Ok(())
             }
@@ -398,6 +438,14 @@ impl Emitter<'_> {
                             return unsup("bind:unmapped");
                         };
                         let (koff, voff, esz) = crate::collections::entry_layout(k, v);
+                        // #1219: the cursor below holds the block across
+                        // the body — a `map.insert(m, …)` there must not
+                        // grow it in place under us, so the subject
+                        // witnesses a second holder (the monotone Map rc;
+                        // the window then takes the functional copy).
+                        if !crate::rc_ownership::rc_certainly_fresh(&iterable.kind) {
+                            self.rc_inc_top();
+                        }
                         let bh = self.hold_i32()?;
                         let cur = self.hold_i32()?;
                         let end = self.hold_i32()?;
@@ -505,87 +553,6 @@ impl Emitter<'_> {
                 Ok(())
                 }
 
-    /// `xs[i] = v` — copy-on-write (split from lower_stmt for the complexity budget).
-    fn lower_index_assign(
-        &mut self,
-        target: &VarId,
-        index: &IrExpr,
-        value: &IrExpr,
-    ) -> Result<(), EmitError> {
-
-                let (is_local, declared) = match self.locals.get(target) {
-                    Some(&(_, d)) => (true, d),
-                    None => match self.globals.get(&(self.var_space, *target)) {
-                        Some(&(_, d)) => (false, d),
-                        None => return unsup("index-assign:unmapped"),
-                    },
-                };
-                let SliceTy::List(h) = declared else {
-                    return unsup(&format!("index-assign-ty:{declared:?}"));
-                };
-                let el = self.types.el(h);
-                let stride = el.slot_size() as i64;
-                // Interp order: index, then value, then the bounds check.
-                self.lower(index, Some(INT))?;
-                let hi = self.hold_i64()?;
-                self.f.instructions().local_set(hi);
-                self.lower(value, Some(el))?;
-                let hv = self.hold_val(el)?;
-                let hb = self.hold_i32()?;
-                self.f.instructions().local_set(hv);
-                let var_space = self.var_space;
-                let get_target = |f: &mut wasm_encoder::Function, locals: &HashMap<VarId, (u32, SliceTy)>, globals: &HashMap<GVar, (u32, SliceTy)>| {
-                    if is_local {
-                        f.instructions().local_get(locals[target].0);
-                    } else {
-                        f.instructions().global_get(globals[&(var_space, *target)].0);
-                    }
-                };
-                // OOB → the exact native frame + exit 1.
-                let msg = self.pool.intern("index out of bounds");
-                get_target(self.f, self.locals, self.globals);
-                {
-                    let mut i = self.f.instructions();
-                    i.i32_load(len_memarg())
-                        .i64_extend_i32_u()
-                        .i64_const(stride)
-                        .i64_div_s();
-                    i.local_get(hi).i64_le_s();
-                    i.local_get(hi).i64_const(0).i64_lt_s();
-                    i.i32_or().if_(BlockType::Empty);
-                    i.i32_const(msg as i32);
-                }
-                self.emit_error_frame_abort();
-                self.f.instructions().end();
-                // COW: the binding gets a fresh block, then the store.
-                get_target(self.f, self.locals, self.globals);
-                self.f.instructions().call(F_BLOCK_COPY).local_set(hb);
-                if is_local {
-                    let idx = self.locals[target].0;
-                    self.f.instructions().local_get(hb).local_set(idx);
-                } else {
-                    let g = self.globals[&(self.var_space, *target)].0;
-                    self.f.instructions().local_get(hb).global_set(g);
-                }
-                {
-                    let mut i = self.f.instructions();
-                    i.local_get(hb)
-                        .i64_extend_i32_u()
-                        .local_get(hi)
-                        .i64_const(stride)
-                        .i64_mul()
-                        .i64_add()
-                        .i32_wrap_i64()
-                        .i32_const(almide_layout::PAYLOAD as i32)
-                        .i32_add();
-                    i.local_get(hv);
-                }
-                self.store_ty_slot_raw(el);
-                self.release_i32();
-                self.release_val(el);
-                self.release_i64();
-                Ok(())
-    }
 }
 
 
@@ -600,6 +567,9 @@ impl Emitter<'_> {
                 if self.try_list_append_assign(var, value)? {
                     return Ok(());
                 }
+                if self.try_map_set_assign(var, value)? {
+                    return Ok(());
+                }
                 let (local, declared) = match self.locals.get(var) {
                     Some(&(idx, d)) => (Some(idx), d),
                     None => match self.globals.get(&(self.var_space, *var)) {
@@ -610,31 +580,19 @@ impl Emitter<'_> {
                         None => return unsup("assign:unmapped"),
                     },
                 };
-                // #1688: a droppable PARAM reassigned under an if/match
-                // arm — one path releases the caller's block, the other
-                // keeps it, and the epilogue's release set can't tell
-                // which ran. The C-132 fold rewrites the provable shapes
-                // away before lowering; whatever still reaches here is
-                // refused, never silently emitted (native `A&B`, wasm
-                // `\0\0\0` was this exact hole).
-                if let Some(idx) = local
-                    && idx < self.rc_param_ceiling
-                    && self.branch_depth > 0
-                    && self.rc_droppable(declared)
-                    && !self.cells.contains(var)
-                {
-                    return unsup("assign:mut-param-in-branch-arm(#1688)");
-                }
+                // #1688 once refused a droppable PARAM reassigned under an
+                // if/match arm ("one path releases the caller's block, the
+                // other keeps it"). Under the credit discipline the local
+                // holds exactly ONE credit on every path — the assign
+                // releases the old occupant and makes the local an owner,
+                // the epilogue releases the local once whichever arm ran —
+                // and the exit validator (E083) checks it; the refusal is
+                // retired (stage 2c-ii: records made the mut_port cell hit it).
                 self.lower(value, Some(declared))?;
                 // RC-5: same share discipline as Bind.
                 if matches!(declared, SliceTy::Map(..) | SliceTy::Set(_)) {
                     self.f.instructions().call(F_BLOCK_COPY);
-                }
-                if matches!(
-                    declared,
-                    SliceTy::List(_) | SliceTy::Scalar(Scalar::Str | Scalar::Bytes)
-                ) && !crate::rc_ownership::rc_certainly_fresh(&value.kind)
-                {
+                } else if self.rc_droppable(declared) && !self.rc_owned_result(value) {
                     self.rc_inc_top();
                 }
                 // RC-3: same ownership settlement as Bind — locals only
@@ -669,8 +627,9 @@ impl Emitter<'_> {
                     && self.rc_droppable(declared)
                     && !call_shaped_self
                 {
-                    self.f.instructions().local_get(idx).call(F_DEC_FLAT);
-                    self.rc_owned.insert(idx);
+                    let dec = self.dec_fn_of(declared);
+                    self.f.instructions().local_get(idx).call(dec);
+                    self.rc_own(idx, declared);
                 }
                 match local {
                     Some(idx) => self.emit_store_var(*var, idx, declared)?,
@@ -723,7 +682,12 @@ impl Emitter<'_> {
                     Ok(idx) => self.f.instructions().local_get(idx),
                     Err(gidx) => self.f.instructions().global_get(gidx),
                 };
-                self.f.instructions().call(F_BLOCK_COPY).local_tee(hb);
+                let copy = self.copy_fn_of(SliceTy::Named(ti));
+                self.f.instructions().call(copy).local_tee(hb);
+                // The replaced field's credit goes with it (stage 2c-ii).
+                if let Some(dec) = self.elem_is_handle(fty).then(|| self.dec_fn_of(fty)) {
+                    self.f.instructions().local_get(hb).i32_load(slot_memarg(off)).call(dec);
+                }
                 self.lower(value, Some(fty))?;
                 self.rc_share_guard(value, fty);
                 self.store_ty_slot(fty, off);

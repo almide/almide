@@ -1,0 +1,6 @@
+// A plain value handed to option.unwrap_or: there is nothing to unwrap — the
+// classic effect-fn confusion where values arrive already unwrapped.
+fn main() -> Unit = {
+  let n = option.unwrap_or(5, 0)
+  println(int.to_string(n))
+}

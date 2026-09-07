@@ -24,7 +24,7 @@ fn normalized_hash(stdout: &[u8]) -> String {
     let no_nul: String = text.chars().filter(|c| *c != '\0').collect();
     let trimmed = no_nul.trim_end_matches('\n');
     let text = if trimmed.is_empty() { String::new() } else { format!("{trimmed}\n") };
-    format!("{:x}", Sha256::digest(text.as_bytes()))
+    Sha256::digest(text.as_bytes()).iter().map(|b| format!("{b:02x}")).collect::<String>()
 }
 
 fn wasmtime_bin() -> String {
@@ -68,11 +68,12 @@ fn corpus_reproduces_on_stock_wasmtime() {
         // Structurally-refused fixtures (the CLI reroutes them to the
         // incumbent; the alloc ledger's `!` row asserts the refusal
         // stays a refusal) have no structural module to reproduce.
-        let Ok(bytes) = almide_wasm::emit_program(&ir) else {
+        let Ok((bytes, host_ops)) = almide_wasm::emit_program_with_ops(&ir) else {
             skipped += 1;
             continue;
         };
-        let wasi = almide_wasm_run::wasi::to_wasi(&bytes).expect("to_wasi");
+        let host_ops: Vec<i32> = host_ops.into_iter().collect();
+        let wasi = almide_wasm_run::wasi::to_wasi(&bytes, &host_ops).expect("to_wasi");
         let path = dir.join("m.wasm");
         std::fs::write(&path, &wasi).expect("write module");
         let out = Command::new(&wasmtime)

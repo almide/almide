@@ -580,4 +580,5 @@ include!("calls_p2.rs");
 include!("calls_p3.rs");
 include!("calls_p4.rs");
 include!("calls_p4_b.rs");
+include!("calls_p4_b_tail.rs");
 include!("calls_p4_c.rs");

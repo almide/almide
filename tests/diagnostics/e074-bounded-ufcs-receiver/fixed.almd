@@ -1,0 +1,11 @@
+// ALS-B7: a UFCS method call on a variable receiver resolves through the
+// receiver, not a module — outside the profile's admissible callees.
+type Point = { x: Int, y: Int }
+
+@bounded
+fn norm(p: Point) -> Int = p.x * p.x + p.y * p.y
+
+@bounded
+fn measure(p: Point) -> Int = norm(p)
+
+fn main() -> Unit = println("${measure(Point { x: 1, y: 2 })}")

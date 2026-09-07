@@ -758,7 +758,7 @@ Runs expressions concurrently. Returns results as a tuple. Only valid inside `ef
 
 `fan` is a SCHEDULING construct, not a semantic one: execution may be parallel, but the
 program's observable behaviour is defined to be exactly that of sequential evaluation in
-list order. See [the concurrency stance](./roadmap/active/concurrency-stance.md).
+list order. See [the concurrency stance](https://github.com/almide/almide/blob/develop/docs/roadmap/active/concurrency-stance.md).
 
 Rules:
 - All siblings are joined — there is no cancellation. If any returns `Err`, the block's
@@ -1193,7 +1193,7 @@ The `is_` prefix convention is used for predicates in the stdlib: `string.is_emp
 
 ## 16. Standard Library
 
-971 functions across 43 modules, defined in pure Almide (`stdlib/*.almd`). Runtime implementation: 100%.
+985 functions across 43 modules, defined in pure Almide (`stdlib/*.almd`). Runtime implementation: 100%.
 
 ### 16.1 Auto-Imported Modules
 

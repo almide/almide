@@ -1,0 +1,3 @@
+expects_code = "E048"
+expects_error = "destructures a Result, but the subject is `Option[Int]`"
+hint_substring = "Write `some(..)` here"

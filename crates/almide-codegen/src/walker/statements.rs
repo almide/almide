@@ -166,14 +166,14 @@ fn render_stmt_list_copy_slice(ctx: &RenderContext, dst: VarId, src: VarId, len:
 fn try_render_bind_shared_mut(ctx: &RenderContext, var: &VarId, ty: &Ty, value: &IrExpr) -> Option<String> {
     if !ctx.ann.is_shared_mut(var) { return None; }
     let name_s = ctx.var_name(*var).to_string();
-    // Copy scalars use `Rc<Cell<T>>` (P3); non-Copy values use `SharedMut`
+    // Copy scalars use `Rc<Cell<T>>` (P3); non-Copy values use `AlmideSharedMut`
     // (`Rc<RefCell<T>>`, P6). A `__cap_*` capture rename is an `Rc::clone`
     // of the original for either kind, so the closure shares the SAME cell.
     let is_copy = almide_ir::top_let_storage::capture_copy_cell(ty);
     let fresh_cell = |ctx: &RenderContext| if is_copy {
         format!("std::rc::Rc::new(std::cell::Cell::new({}))", render_expr(ctx, value))
     } else {
-        format!("SharedMut::new({})", render_expr(ctx, value))
+        format!("AlmideSharedMut::new({})", render_expr(ctx, value))
     };
     // A `__cap_N` capture rename is an `Rc::clone` of the original shared
     // cell. Its value is a bare `Var` or a `Clone{Var}` (CloneInsertionPass
@@ -308,14 +308,14 @@ fn render_bind_value_str(ctx: &RenderContext, ty: &Ty, value: &IrExpr) -> String
     }
 }
 
-/// Val-wrap: var of non-Copy type → RcCow<T> with RcCow::new(value) for
+/// Val-wrap: var of non-Copy type → AlmideRcCow<T> with AlmideRcCow::new(value) for
 /// COW. Extracted from `render_stmt_bind`: `Some` mirrors the original's
-/// early `return`, `None` means "not RcCow, fall through".
+/// early `return`, `None` means "not AlmideRcCow, fall through".
 fn try_render_bind_rc_cow(ctx: &RenderContext, var: &VarId, name_s: &str, type_s: &str, value: &IrExpr, value_s: &str) -> Option<String> {
     if !ctx.ann.is_rc_cow(var) { return None; }
-    let val_type = format!("RcCow<{}>", type_s);
+    let val_type = format!("AlmideRcCow<{}>", type_s);
     // If the value is a fn param passed by reference (&Vec<u8>, &[T]),
-    // clone it to get an owned value for RcCow::new().
+    // clone it to get an owned value for AlmideRcCow::new().
     let needs_clone = match &value.kind {
         IrExprKind::Var { id } => ctx.ref_params.contains(id),
         IrExprKind::Clone { expr: inner } => match &inner.kind {
@@ -325,21 +325,21 @@ fn try_render_bind_rc_cow(ctx: &RenderContext, var: &VarId, name_s: &str, type_s
         _ => false,
     };
     let val_value = if needs_clone {
-        format!("RcCow::new({}.clone())", value_s)
+        format!("AlmideRcCow::new({}.clone())", value_s)
     } else {
-        format!("RcCow::new({})", value_s)
+        format!("AlmideRcCow::new({})", value_s)
     };
     Some(ctx.templates.render_with("var_binding", None, &[], &[("name", name_s), ("type", val_type.as_str()), ("value", val_value.as_str())])
         .unwrap_or_else(|| if name_s == "_" { format!("let {}: {} = {};", name_s, val_type, val_value) } else { format!("let mut {}: {} = {};", name_s, val_type, val_value) }))
 }
 
-/// `render_stmt_bind`'s RcCow-clone type/value adjustment, extracted
-/// verbatim (cog>30 decomposition) — if `value` comes from an RcCow-wrapped
+/// `render_stmt_bind`'s AlmideRcCow-clone type/value adjustment, extracted
+/// verbatim (cog>30 decomposition) — if `value` comes from an AlmideRcCow-wrapped
 /// var (`Clone` or direct `Var`), re-derive the rendered `(type, value)`
-/// pair to wrap in `RcCow<..>`; otherwise pass `type_s`/`value_s` through
+/// pair to wrap in `AlmideRcCow<..>`; otherwise pass `type_s`/`value_s` through
 /// unchanged.
 fn rc_cow_clone_bind_type_value(ctx: &RenderContext, value: &IrExpr, type_s: String, value_s: String) -> (String, String) {
-    // Check if value comes from a RcCow-wrapped var (Clone or direct)
+    // Check if value comes from a AlmideRcCow-wrapped var (Clone or direct)
     let is_val_clone = match &value.kind {
         IrExprKind::Clone { expr: inner } => {
             if let IrExprKind::Var { id } = &inner.kind {
@@ -353,16 +353,16 @@ fn rc_cow_clone_bind_type_value(ctx: &RenderContext, value: &IrExpr, type_s: Str
         return (type_s, value_s);
     }
     match &value.kind {
-        // Direct Var from RcCow: use .clone() (Rc::clone O(1))
+        // Direct Var from AlmideRcCow: use .clone() (Rc::clone O(1))
         IrExprKind::Var { .. } => {
-            let val_type = format!("RcCow<{}>", type_s);
+            let val_type = format!("AlmideRcCow<{}>", type_s);
             let val_value = format!("{}.clone()", value_s);
             (val_type, val_value)
         }
-        // Clone of RcCow var: deref+clone returned T, re-wrap
+        // Clone of AlmideRcCow var: deref+clone returned T, re-wrap
         _ => {
-            let val_type = format!("RcCow<{}>", type_s);
-            let val_value = format!("RcCow::new({})", value_s);
+            let val_type = format!("AlmideRcCow<{}>", type_s);
+            let val_value = format!("AlmideRcCow::new({})", value_s);
             (val_type, val_value)
         }
     }
@@ -371,6 +371,9 @@ fn rc_cow_clone_bind_type_value(ctx: &RenderContext, value: &IrExpr, type_s: Str
 fn render_stmt_bind(ctx: &RenderContext, stmt: &IrStmt) -> String {
     let IrStmtKind::Bind { var, ty, value, mutability } = &stmt.kind else { unreachable!() };
     if let Some(rendered) = try_render_bind_shared_mut(ctx, var, ty, value) {
+        return rendered;
+    }
+    if let Some(rendered) = try_render_bind_counting_range(ctx, var, value) {
         return rendered;
     }
     let name_s = ctx.var_name(*var).to_string();
@@ -388,15 +391,15 @@ fn render_stmt_bind(ctx: &RenderContext, stmt: &IrStmt) -> String {
         ty_str == "Vec<u8>"
             || ty_str.starts_with("Vec<")
             || ty_str.starts_with("HashMap<")
-            // #617: Bytes/Matrix render as RcCow — their in-place mutators
+            // #617: Bytes/Matrix render as AlmideRcCow — their in-place mutators
             // (&mut deref-coerce = make_mut COW) still need a `mut` binding,
             // exactly like the raw spellings above.
-            || ty_str.starts_with("RcCow<")
+            || ty_str.starts_with("AlmideRcCow<")
     };
     if let Some(rendered) = try_render_bind_rc_cow(ctx, var, &name_s, &type_s, value, &value_s) {
         return rendered;
     }
-    // Non-RcCow binding whose initializer reads a borrowed param: the
+    // Non-AlmideRcCow binding whose initializer reads a borrowed param: the
     // binding's type is the OWNED form, so convert the borrow to an
     // owned value (slice→`.to_vec()`, `&str`→`.to_string()`, else
     // `.clone()`). Applies to both `let` and `var` — a slice cloned as
@@ -413,6 +416,23 @@ fn render_stmt_bind(ctx: &RenderContext, stmt: &IrStmt) -> String {
     };
     ctx.templates.render_with(construct, None, &[], &[("name", name_s.as_str()), ("type", type_s.as_str()), ("value", value_s.as_str())])
         .unwrap_or_else(|| format!("let _ = _;"))
+}
+
+/// #1857: a `let`-bound range `RangeCountingVarsPass` admitted — every read
+/// is a `for-in` head — binds the bare `std::ops::Range<i64>` (two scalars)
+/// instead of the `range_expr` template's materialized `Vec<i64>`. The heads
+/// iterate `r.clone()` (`render_expr_for_in`). The bounds are evaluated ONCE
+/// here, exactly as the materializing bind evaluated them.
+fn try_render_bind_counting_range(ctx: &RenderContext, var: &VarId, value: &IrExpr) -> Option<String> {
+    if !ctx.ann.range_counting_vars.contains(var) {
+        return None;
+    }
+    let IrExprKind::Range { start, end, inclusive } = &value.kind else { return None };
+    let (ty, op) = if *inclusive { ("std::ops::RangeInclusive<i64>", "..=") } else { ("std::ops::Range<i64>", "..") };
+    Some(format!(
+        "let {}: {} = {}{}{};",
+        ctx.var_name(*var), ty, render_expr(ctx, start), op, render_expr(ctx, end)
+    ))
 }
 
 fn render_stmt_assign(ctx: &RenderContext, stmt: &IrStmt) -> String {
@@ -433,7 +453,7 @@ fn render_stmt_assign(ctx: &RenderContext, stmt: &IrStmt) -> String {
     if let Some(info) = ctx.ann.global(*var) {
         use almide_ir::top_let_storage::TopLetStorage as Tls;
         // #617: the static stores the RAW Bytes/Matrix shape — un-wrap an
-        // RcCow-shaped value at the assign boundary (identity otherwise).
+        // AlmideRcCow-shaped value at the assign boundary (identity otherwise).
         let value_s = super::expressions::rc_cow_unglue(value_s.clone(), &value.ty);
         return match info.storage {
             Tls::Cell => format!("{}.with(|c| c.set({}));", info.static_name, value_s),
@@ -463,7 +483,7 @@ fn render_stmt_assign(ctx: &RenderContext, stmt: &IrStmt) -> String {
         return format!("{} = {};", target_s, value_s);
     }
     match ctx.ann.get_var_storage(var) {
-        VarStorage::RcCow => format!("{} = RcCow::new({});", target_s, value_s),
+        VarStorage::RcCow => format!("{} = AlmideRcCow::new({});", target_s, value_s),
         _ => ctx.templates.render_with("assignment", None, &[], &[("target", target_s.as_str()), ("value", value_s.as_str())])
             .unwrap_or_else(|| format!("_ = _;")),
     }
@@ -502,7 +522,16 @@ fn stmt_guard_has_continue(else_: &IrExpr) -> bool {
 fn render_stmt_guard(ctx: &RenderContext, stmt: &IrStmt) -> String {
     let IrStmtKind::Guard { cond, else_ } = &stmt.kind else { unreachable!() };
     let cond_str = render_expr(ctx, cond);
-    let else_str = render_expr(ctx, else_);
+    // `guard c else err(e)!` (#1926): the `!` on an `err` ctor is a
+    // propagation of that err, and the guard's else IS the early return —
+    // rendering it as `return (Err(..))?` handed `return` the `?`'s
+    // unwrapped `()` (rustc E0308 behind a green check). Return the err
+    // value itself; the `!` has nothing left to do.
+    let else_val: &IrExpr = match &else_.kind {
+        IrExprKind::Unwrap { expr: inner } if matches!(inner.kind, IrExprKind::ResultErr { .. }) => inner,
+        _ => else_,
+    };
+    let else_str = render_expr(ctx, else_val);
     // Determine action: break for loop guards, return for function guards.
     let action = if stmt_guard_is_loop_control(else_) {
         if stmt_guard_has_continue(else_) { "continue" } else { "break" }
@@ -534,7 +563,7 @@ fn render_stmt_index_assign(ctx: &RenderContext, stmt: &IrStmt) -> String {
     let var_ty = &ctx.var_table.get(*target).ty;
     let is_bytes = matches!(var_ty, Ty::Bytes);
     let cast_val = if is_bytes { format!("{} as u8", val_str) } else { val_str };
-    // Shared-mut non-Copy var (`SharedMut`, P6): index through the cell.
+    // Shared-mut non-Copy var (`AlmideSharedMut`, P6): index through the cell.
     if ctx.ann.is_shared_mut(target) {
         return format!("almide_index_set!({}.borrow_mut(), {}, {});", target_str, idx_str, cast_val);
     }
@@ -566,7 +595,7 @@ fn render_stmt_map_insert(ctx: &RenderContext, stmt: &IrStmt) -> String {
     let target_str = ctx.var_name(*target).to_string();
     let key_str = render_expr(ctx, key);
     let val_str = render_expr(ctx, value);
-    // Shared-mut non-Copy var (`SharedMut`, P6): insert through the cell.
+    // Shared-mut non-Copy var (`AlmideSharedMut`, P6): insert through the cell.
     if ctx.ann.is_shared_mut(target) {
         return format!("{}.borrow_mut().insert({}, {});", target_str, key_str, val_str);
     }
@@ -596,7 +625,7 @@ fn render_stmt_field_assign(ctx: &RenderContext, stmt: &IrStmt) -> String {
     // rustc E0308, #1560).
     let val_str = borrowed_param_owning_value(ctx, value)
         .unwrap_or_else(|| render_expr(ctx, value));
-    // Shared-mut non-Copy var (`SharedMut`, P6): assign the field through the cell.
+    // Shared-mut non-Copy var (`AlmideSharedMut`, P6): assign the field through the cell.
     if ctx.ann.is_shared_mut(target) {
         return format!("{}.borrow_mut().{} = {};", target_str, field, val_str);
     }

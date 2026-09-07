@@ -82,6 +82,17 @@ pub(crate) fn emit_alloc(oom_msg: u32) -> Function {
     i.local_get(want).i32_const(16 << (FREELIST_CLASSES - 1)).i32_le_u().if_(BlockType::Empty);
     i.local_get(base).local_get(want).i32_add().local_set(next);
     i.end();
+    // The bump head is an i32: a request whose end lies past 4 GiB WRAPS
+    // `next` below `base`, and the grow guard below (a comparison against
+    // memory.size) then sees a small, in-range frontier — the header
+    // store lands past the end of memory as a raw OOB trap, not the
+    // C-197 abort (#1908: a 2 GiB buffer's append growth). A wrapped
+    // frontier is an allocation the machine cannot satisfy: die in the
+    // defined form before the grow guard can misjudge it.
+    i.local_get(next).local_get(base).i32_lt_u().if_(BlockType::Empty);
+    i.i32_const(oom_msg as i32).call(F_EPRINTLN_BLOCK);
+    i.i32_const(1).call(F_EXIT_IMPORT).unreachable();
+    i.end();
     // if next > memory.size * 64Ki: grow GEOMETRICALLY — max(needed,
     // current) pages, i.e. at least doubling. Grow-just-enough produced
     // thousands of one-page grows on allocation-heavy kernels (~53ms of
@@ -216,10 +227,287 @@ pub(crate) fn emit_dec_flat() -> Function {
     i.return_();
     i.end();
     i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_sub().local_set(rc);
+    // Diagnostic knob (`ALMIDE_RC_TRAP_DOUBLE_FREE=1`, emit time): a dec
+    // of a block already at rc 0 — a freed block — traps instead of
+    // wrapping to 0xFFFF_FFFF and silently keeping a dangling block
+    // alive. Off by default: the proof-transcribed runtime tree (the
+    // hash below) is the shipped one.
+    if std::env::var_os("ALMIDE_RC_TRAP_DOUBLE_FREE").is_some() {
+        i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
+        i.unreachable();
+        i.end();
+    }
     i.local_get(block).local_get(rc).i32_store(word(almide_layout::RC.offset));
     i.local_get(rc).i32_eqz().if_(BlockType::Empty);
     i.local_get(block).call(F_FREE);
     i.end();
+    i.end();
+    f
+}
+
+/// `$drop_list(block)` — `$dec_flat` for a List of heap HANDLES (#2010
+/// stage 2b): the same heap-floor guard and trap knob; at rc 0 every
+/// element handle (a 4-byte slot) is released through `elem_dec` before
+/// the spine is freed.
+pub(crate) fn emit_drop_list(elem_dec: u32) -> Function {
+    // params: 0=block; locals: 1=rc, 2=p, 3=end
+    let (block, rc, p, end) = (0u32, 1u32, 2u32, 3u32);
+    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
+    let mut f = Function::new([(3, ValType::I32)]);
+    let mut i = f.instructions();
+    i.local_get(block).global_get(G_LINE_END).i32_lt_u().if_(BlockType::Empty);
+    i.return_();
+    i.end();
+    i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_sub().local_set(rc);
+    if std::env::var_os("ALMIDE_RC_TRAP_DOUBLE_FREE").is_some() {
+        i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
+        i.unreachable();
+        i.end();
+    }
+    i.local_get(block).local_get(rc).i32_store(word(almide_layout::RC.offset));
+    i.local_get(rc).i32_eqz().if_(BlockType::Empty);
+    i.local_get(block).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_set(p);
+    i.local_get(p).local_get(block).i32_load(word(almide_layout::LEN.offset)).i32_add().local_set(end);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(p).local_get(end).i32_ge_u().br_if(1);
+    i.local_get(p).i32_load(word(0)).call(elem_dec);
+    i.local_get(p).i32_const(4).i32_add().local_set(p);
+    i.br(0).end().end();
+    i.local_get(block).call(F_FREE);
+    i.end();
+    i.end();
+    f
+}
+
+/// `$drop_<shape>(block)` — the typed drop of a block with handle slots
+/// at fixed payload offsets (#2010 stage 2c): `$dec_flat`'s guard and
+/// trap knob; at rc 0 every `(offset, dec_fn)` slot is released, then
+/// the block freed. `tagged` names a tag word and per-tag slot tables
+/// (a Result: tag 0 = Ok payload, 1 = Err payload, both at SUM_FIELD).
+pub(crate) fn emit_drop_shape(slots: &[(u32, u32)], tagged: Option<(u32, Vec<(u32, Vec<(u32, u32)>)>)>) -> Function {
+    // params: 0=block; locals: 1=rc
+    let (block, rc) = (0u32, 1u32);
+    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
+    let mut f = Function::new([(1, ValType::I32)]);
+    let mut i = f.instructions();
+    i.local_get(block).global_get(G_LINE_END).i32_lt_u().if_(BlockType::Empty);
+    i.return_();
+    i.end();
+    i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_sub().local_set(rc);
+    if std::env::var_os("ALMIDE_RC_TRAP_DOUBLE_FREE").is_some() {
+        i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
+        i.unreachable();
+        i.end();
+    }
+    i.local_get(block).local_get(rc).i32_store(word(almide_layout::RC.offset));
+    i.local_get(rc).i32_eqz().if_(BlockType::Empty);
+    for &(off, dec) in slots {
+        i.local_get(block).i32_load(word(almide_layout::PAYLOAD + off)).call(dec);
+    }
+    if let Some((tag_off, cases)) = tagged {
+        for (tag, cslots) in cases {
+            i.local_get(block).i32_load(word(almide_layout::PAYLOAD + tag_off)).i32_const(tag as i32).i32_eq();
+            i.if_(BlockType::Empty);
+            for (off, dec) in cslots {
+                i.local_get(block).i32_load(word(almide_layout::PAYLOAD + off)).call(dec);
+            }
+            i.end();
+        }
+    }
+    i.local_get(block).call(F_FREE);
+    i.end();
+    i.end();
+    f
+}
+
+/// `$drop_map(block)` — `$dec_flat` for a Map: at rc 0 the index
+/// side-table entry for this address is cleared (a stale index on a
+/// reused address would answer for the wrong map), then the entries
+/// array freed. Entries keep their credits (Map stage a).
+pub(crate) fn emit_drop_map_spine(side_clear: u32) -> Function {
+    let (block, rc) = (0u32, 1u32);
+    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
+    let mut f = Function::new([(1, ValType::I32)]);
+    let mut i = f.instructions();
+    i.local_get(block).global_get(G_LINE_END).i32_lt_u().if_(BlockType::Empty);
+    i.return_();
+    i.end();
+    i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_sub().local_set(rc);
+    if std::env::var_os("ALMIDE_RC_TRAP_DOUBLE_FREE").is_some() {
+        i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
+        i.unreachable();
+        i.end();
+    }
+    i.local_get(block).local_get(rc).i32_store(word(almide_layout::RC.offset));
+    i.local_get(rc).i32_eqz().if_(BlockType::Empty);
+    i.global_get(G_MAPIDX).if_(BlockType::Empty);
+    i.local_get(block).i32_const(0).call(side_clear).drop();
+    i.end();
+    i.local_get(block).call(F_FREE);
+    i.end();
+    i.end();
+    f
+}
+
+/// `$inc_<shape>(block)`: +1 on every handle slot of a fixed-slot block
+/// (the tagged half per case, as `emit_drop_shape`).
+pub(crate) fn emit_inc_shape(slots: &[(u32, u32)], tagged: Option<(u32, Vec<(u32, Vec<(u32, u32)>)>)>) -> Function {
+    let block = 0u32;
+    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
+    let mut f = Function::new([]);
+    let mut i = f.instructions();
+    for &(off, _) in slots {
+        i.local_get(block).i32_load(word(almide_layout::PAYLOAD + off)).call(F_INC);
+    }
+    if let Some((tag_off, cases)) = tagged {
+        for (tag, cslots) in cases {
+            i.local_get(block).i32_load(word(almide_layout::PAYLOAD + tag_off)).i32_const(tag as i32).i32_eq();
+            i.if_(BlockType::Empty);
+            for (off, _) in cslots {
+                i.local_get(block).i32_load(word(almide_layout::PAYLOAD + off)).call(F_INC);
+            }
+            i.end();
+        }
+    }
+    i.end();
+    f
+}
+
+/// `$inc_elems(block)`: +1 on every element handle of a spine of 4-byte
+/// handle slots (the credits a copied spine must hold, #2010 stage 2b).
+pub(crate) fn emit_inc_elems() -> Function {
+    // params: 0=block; locals: 1=p, 2=end
+    let (block, p, end) = (0u32, 1u32, 2u32);
+    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
+    let mut f = Function::new([(2, ValType::I32)]);
+    let mut i = f.instructions();
+    i.local_get(block).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_set(p);
+    i.local_get(p).local_get(block).i32_load(word(almide_layout::LEN.offset)).i32_add().local_set(end);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(p).local_get(end).i32_ge_u().br_if(1);
+    i.local_get(p).i32_load(word(0)).call(F_INC);
+    i.local_get(p).i32_const(4).i32_add().local_set(p);
+    i.br(0).end().end();
+    i.end();
+    f
+}
+
+/// `$copy_elems(block) -> block`: `$block_copy`, then the copy takes its
+/// element credits.
+pub(crate) fn emit_copy_elems(inc_elems: u32) -> Function {
+    let block = 0u32;
+    let mut f = Function::new([(1, ValType::I32)]);
+    let mut i = f.instructions();
+    i.local_get(block).call(F_BLOCK_COPY).local_tee(1).call(inc_elems);
+    i.local_get(1);
+    i.end();
+    f
+}
+
+/// `$cow_elems(block) -> block`: `$cow`; when it copied (the result is a
+/// different block), the copy takes its element credits.
+pub(crate) fn emit_cow_elems(inc_elems: u32) -> Function {
+    let block = 0u32;
+    let mut f = Function::new([(1, ValType::I32)]);
+    let mut i = f.instructions();
+    i.local_get(block).call(F_COW).local_tee(1).local_get(block).i32_ne().if_(BlockType::Empty);
+    i.local_get(1).call(inc_elems);
+    i.end();
+    i.local_get(1);
+    i.end();
+    f
+}
+
+/// The signatures assembly promises for the rc-glue helpers (#2010).
+pub(crate) fn helper_params(h: &Helper) -> Option<Vec<ValType>> {
+    matches!(
+        h,
+        Helper::DropList { .. }
+            | Helper::IncElems
+            | Helper::CopyElems { .. }
+            | Helper::CowElems { .. }
+            | Helper::DropShape { .. }
+            | Helper::IncShape { .. }
+            | Helper::DropMapSpine { .. }
+    )
+    .then(|| vec![ValType::I32])
+}
+
+/// The result type of a helper: the drops and the credit walk return
+/// nothing; the copy variants hand the block back; everything else i32
+/// unless assembly says f64.
+pub(crate) fn helper_result(h: &Helper) -> Option<ValType> {
+    match h {
+        Helper::DropList { .. }
+        | Helper::IncElems
+        | Helper::DropShape { .. }
+        | Helper::IncShape { .. }
+        | Helper::DropMapSpine { .. } => None,
+        _ => Some(ValType::I32),
+    }
+}
+
+/// The rc-glue helper bodies; a `DropShape` body was built at registration
+/// (`work.drop_bodies`) — a missing one is a loud stub.
+pub(crate) fn helper_body(h: &Helper, work: &crate::work::FnWork) -> Option<Function> {
+    Some(match h {
+        Helper::DropList { elem_dec } => emit_drop_list(*elem_dec),
+        Helper::IncElems => emit_inc_elems(),
+        Helper::CopyElems { inc_elems } => emit_copy_elems(*inc_elems),
+        Helper::CowElems { inc_elems } => emit_cow_elems(*inc_elems),
+        Helper::DropMapSpine { side_clear } => emit_drop_map_spine(*side_clear),
+        Helper::DropShape { .. } | Helper::IncShape { .. } => {
+            let mut bodies = work.drop_bodies.borrow_mut();
+            let built = bodies.iter_mut().find(|(k, _)| k == h).and_then(|(_, f)| f.take());
+            built.unwrap_or_else(|| {
+                let mut f = Function::new([]);
+                f.instructions().unreachable().end();
+                f
+            })
+        }
+        _ => return None,
+    })
+}
+
+/// `$map_reserve(block, esz) -> block`: room for ONE more `esz`-byte
+/// map entry — `$list_push`'s growth discipline with the store left to
+/// the caller (the entry layout varies per key/value class, the growth
+/// does not). Class slack covers the entry → the same block; else the
+/// doubled block (min four entries) with the live entries copied and
+/// the outgrown block freed iff uniquely held. `len` stays at the OLD
+/// length: the caller writes the pair at `payload + len` and bumps it.
+/// (#1219 stage 1 — the in-place `map.set` window.)
+pub(crate) fn emit_map_reserve() -> Function {
+    // params: 0=block i32, 1=esz i32; locals: 2=la i32, 3=cap i32, 4=base i32
+    let (block, esz, la, cap, base) = (0u32, 1u32, 2u32, 3u32, 4u32);
+    let payload = almide_layout::PAYLOAD as i32;
+    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
+    let mut f = Function::new([(3, ValType::I32)]);
+    let mut i = f.instructions();
+    i.local_get(block).i32_load(len_memarg()).local_set(la);
+    i.local_get(block).i32_load(word(almide_layout::CAP.offset)).local_set(cap);
+    // fast path: the class slack holds one more entry → same block
+    i.local_get(cap).local_get(la).i32_sub().local_get(esz).i32_ge_u().if_(BlockType::Empty);
+    i.local_get(block).return_();
+    i.end();
+    // grow: newcap = max(cap * 2, 4 * esz)
+    i.local_get(cap).i32_const(1).i32_shl().local_set(cap);
+    i.local_get(cap).local_get(esz).i32_const(2).i32_shl().i32_lt_u().if_(BlockType::Empty);
+    i.local_get(esz).i32_const(2).i32_shl().local_set(cap);
+    i.end();
+    i.local_get(cap).call(F_ALLOC).local_set(base);
+    i.local_get(base).i32_const(payload).i32_add();
+    i.local_get(block).i32_const(payload).i32_add();
+    i.local_get(la);
+    i.call(F_COPY);
+    // live len = the old len (the caller appends and bumps)
+    i.local_get(base).local_get(la).i32_store(word(almide_layout::LEN.offset));
+    // the outgrown block is garbage iff this map is uniquely held —
+    // the window only reserves at rc == 1, so the chain never leaks.
+    i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_eq().if_(BlockType::Empty);
+    i.local_get(block).call(F_FREE);
+    i.end();
+    i.local_get(base);
     i.end();
     f
 }
@@ -290,7 +578,7 @@ mod tests {
         // the emitted trees moved: update proofs/StructuralRuntime.v to
         // the new trees (re-proving what changed), then this constant.
         assert_eq!(
-            got, 0x71738094f6c49c05,
+            got, 0x2312b47da07c14b0,
             "runtime tree bytes drifted from the proofs/StructuralRuntime.v transcription (got {got:#x})"
         );
     }

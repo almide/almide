@@ -1,0 +1,3 @@
+expects_code = "E011"
+expects_error = "mutated inside a closure in a pure function"
+hint_substring = "Move the mutation out of the closure"

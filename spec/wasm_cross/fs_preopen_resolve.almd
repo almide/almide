@@ -6,7 +6,7 @@
 //                                             longest-prefix preopen fd + the
 //                                             relative remainder.
 //
-// The gate (tests/wasm_runtime_test.rs::wasm_cross_target_spec) runs this on BOTH
+// The gate (tests/wasm_runtime_cross_target.rs::wasm_cross_target_spec) runs this on BOTH
 // native and wasm and asserts byte-identical stdout/stderr/exit. Native is the
 // oracle (std::fs, which has NO preopen concept — the path is used directly);
 // the wasm runtime must reproduce that observable behavior through the preopen

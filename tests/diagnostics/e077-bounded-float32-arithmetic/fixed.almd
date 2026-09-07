@@ -1,0 +1,5 @@
+// Fixed: double an Int inside the profile; Float32 values stay uncomputed.
+@bounded
+fn double(x: Int) -> Int = x + x
+
+fn main() -> Unit = println(int.to_string(double(3)))

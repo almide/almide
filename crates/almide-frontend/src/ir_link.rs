@@ -21,7 +21,11 @@ pub fn ir_link(program: &mut IrProgram) {
         }
     }
 
+    // #1839: a spelled stdlib type is a use of its owner module — the pulled
+    // owners join the set the call scan below builds.
+    let pulled_owners = pull_spelled_stdlib_type_decls(program);
     let mut stdlib_modules = std::mem::take(&mut program.used_stdlib_modules);
+    stdlib_modules.extend(pulled_owners);
     for module in &program.modules {
         // A module in program.modules was imported (explicitly or auto-import).
         // Its functions will be merged into root by IrLinkFlattenPass, so the
@@ -260,6 +264,133 @@ fn scan_stmt_stdlib(stmt: &IrStmt, used: &mut HashSet<String>) {
             scan_expr_stdlib(cond, used);
             scan_expr_stdlib(else_, used);
         }
+        _ => {}
+    }
+}
+
+// ── #1839: the type-owner pull ────────────────────────────────────────
+
+/// Hand the program the bundled declaration of every stdlib-DECLARED nominal
+/// type it SPELLS whose declaration did not arrive with a loaded module.
+///
+/// The checker auto-imports `bytes` (`ImportTable::new`'s seed) and registers
+/// every bundled `type` for name resolution, so `let e: Endian = BigEndian`
+/// type-checks with no `import`; but a bundled module's DECLARATIONS reach the
+/// IR only when the resolver loaded the module — the explicit-import path —
+/// and `bytes` is not resolve-time auto-loaded (`AUTO_IMPORT_BUNDLED`). Every
+/// consumer keyed on the declaration — the structural wasm emitter's type
+/// table, the incumbent's variant layouts, both repr generators — then met a
+/// `Named(Endian)` it could not resolve, and the wasm leg walled each shape
+/// the explicit import served (`bind-ty:Named`, an UNTRACKED match subject,
+/// an unlinked `__repr_Endian`).
+///
+/// Spelled from the PROGRAM, not from calls: a type annotation, a ctor's
+/// result type, a param, a match subject, a top-let — any `Ty::Named` in the
+/// linked IR (entry and modules alike). A name the program or a loaded module
+/// already declares is left alone (the user's own `type Endian` is the user's;
+/// an explicitly imported `bytes` carries its own). The pulled decl is the one
+/// `lower_module` would have produced (`lower_bundled_type_decl`), so the
+/// explicit-import and auto-import programs link the same IR. The type
+/// reference IS a use of the owner module, so the owners are returned for
+/// `used_stdlib_modules` — native's inline splice then defines the runtime
+/// twin (`AlmideEndian`) exactly as it does under `import bytes`.
+fn pull_spelled_stdlib_type_decls(program: &mut IrProgram) -> Vec<String> {
+    let declared: HashSet<String> = program
+        .type_decls
+        .iter()
+        .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()))
+        .map(|td| td.name.as_str().to_string())
+        .collect();
+    let mut spelled = SpelledNamedTypes::default();
+    for f in program.functions.iter().chain(program.modules.iter().flat_map(|m| m.functions.iter())) {
+        for p in &f.params {
+            collect_named_types(&p.ty, &mut spelled.names);
+        }
+        collect_named_types(&f.ret_ty, &mut spelled.names);
+        spelled.visit_expr(&f.body);
+    }
+    for tl in program.top_lets.iter().chain(program.modules.iter().flat_map(|m| m.top_lets.iter())) {
+        collect_named_types(&tl.ty, &mut spelled.names);
+        spelled.visit_expr(&tl.value);
+    }
+    let mut owners = Vec::new();
+    // BTreeSet: the pull order (and so the decl order) is deterministic.
+    for name in spelled.names {
+        if name.contains('.') || declared.contains(&name) {
+            continue;
+        }
+        let Some(module) = crate::bundled_sigs::bundled_type_owner(&name) else { continue };
+        let Some(td) = crate::lower::lower_bundled_type_decl(module, &name) else { continue };
+        program.type_decls.push(td);
+        owners.push(module.to_string());
+    }
+    owners
+}
+
+/// Every bare-or-qualified `Named` type name an IR tree spells: expression
+/// types, lambda params, `let` annotations — the walk `IrVisitor` gives, plus
+/// the type slots it does not visit.
+#[derive(Default)]
+struct SpelledNamedTypes {
+    names: std::collections::BTreeSet<String>,
+}
+
+impl IrVisitor for SpelledNamedTypes {
+    fn visit_expr(&mut self, expr: &IrExpr) {
+        collect_named_types(&expr.ty, &mut self.names);
+        if let IrExprKind::Lambda { params, .. } = &expr.kind {
+            for (_, ty) in params {
+                collect_named_types(ty, &mut self.names);
+            }
+        }
+        walk_expr(self, expr);
+    }
+    fn visit_stmt(&mut self, stmt: &IrStmt) {
+        if let IrStmtKind::Bind { ty, .. } = &stmt.kind {
+            collect_named_types(ty, &mut self.names);
+        }
+        walk_stmt(self, stmt);
+    }
+}
+
+/// The `Named` (and named `Variant`) type names inside one `Ty`, recursively
+/// through every container position.
+fn collect_named_types(ty: &crate::types::Ty, out: &mut std::collections::BTreeSet<String>) {
+    use crate::types::{Ty, VariantPayload};
+    match ty {
+        Ty::Named(name, args) => {
+            out.insert(name.as_str().to_string());
+            for a in args {
+                collect_named_types(a, out);
+            }
+        }
+        Ty::Variant { name, cases } => {
+            out.insert(name.as_str().to_string());
+            for c in cases {
+                match &c.payload {
+                    VariantPayload::Unit => {}
+                    VariantPayload::Tuple(tys) => tys.iter().for_each(|t| collect_named_types(t, out)),
+                    VariantPayload::Record(fs) => fs.iter().for_each(|(_, t)| collect_named_types(t, out)),
+                }
+            }
+        }
+        Ty::Applied(_, args) | Ty::Tuple(args) | Ty::Union(args) => {
+            for a in args {
+                collect_named_types(a, out);
+            }
+        }
+        Ty::Record { fields } | Ty::OpenRecord { fields } => {
+            for (_, t) in fields {
+                collect_named_types(t, out);
+            }
+        }
+        Ty::Fn { params, ret, .. } => {
+            for p in params {
+                collect_named_types(p, out);
+            }
+            collect_named_types(ret, out);
+        }
+        Ty::ConstParam { ty, .. } | Ty::ConstValue { ty, .. } => collect_named_types(ty, out),
         _ => {}
     }
 }

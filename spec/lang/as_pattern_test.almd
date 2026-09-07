@@ -1,0 +1,40 @@
+// #1461 — as-patterns (ALS-E18): `name @ pattern` binds the WHOLE value
+// at the position while the inner pattern destructures the same value.
+// Binds tighter than the arm-level `|`; an as-binder inside an
+// or-alternative is E080 like any other binder.
+type Shape = | Circle(Int) | Rect(Int, Int)
+
+fn describe(s: Shape) -> String = match s {
+  Circle(_) => "round",
+  Rect(_, _) => "angular",
+}
+
+fn area_note(s: Shape) -> String = match s {
+  c @ Circle(r) => "circle:${r}:${describe(c)}",
+  r @ Rect(_, _) => "rect:${describe(r)}",
+}
+
+fn pick(xs: List[Int]) -> String = match xs {
+  all @ [x] => "one:${x}:${list.len(all)}",
+  all @ [a, ..t] => "many:${a}:${list.len(all)}:${list.len(t)}",
+  _ => "none",
+}
+
+test "as binds the whole variant beside the payload" {
+  assert_eq(area_note(Circle(3)), "circle:3:round")
+  assert_eq(area_note(Rect(2, 5)), "rect:angular")
+}
+
+test "as over list patterns composes with rest" {
+  assert_eq(pick([9]), "one:9:1")
+  assert_eq(pick([1, 2, 3]), "many:1:3:2")
+  assert_eq(pick([]), "none")
+}
+
+test "as over option carriers" {
+  let w = match some(42) {
+    whole @ some(v) => v + (whole ?? 0),
+    none => -1,
+  }
+  assert_eq(w, 84)
+}

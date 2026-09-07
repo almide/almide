@@ -76,7 +76,7 @@ fn main() {
     let t = Instant::now();
     let mut sink = 0u64;
     for k in &keys {
-        sink = sink.wrapping_add(check_decl(&db, *k));
+        sink = sink.wrapping_add(*check_decl(&db, *k));
     }
     let cold_ms = t.elapsed().as_secs_f64() * 1e3;
     println!(
@@ -102,7 +102,7 @@ fn main() {
     let mut db = db;
     let recheck_all = |db: &almide_spine::SpineDb, keys: &[DeclKey], sink: &mut u64| {
         for k in keys {
-            *sink = sink.wrapping_add(check_decl(db, *k));
+            *sink = sink.wrapping_add(*check_decl(db, *k));
         }
     };
 

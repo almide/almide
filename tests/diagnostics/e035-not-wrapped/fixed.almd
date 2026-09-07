@@ -1,0 +1,12 @@
+// The fix: name the known case as a variant and match on it.
+type Fail = | Boom | Unknown(String)
+
+effect fn fetch() -> Result[Int, Fail] = err(Boom)
+
+effect fn main() -> Unit = {
+  match fetch() {
+    ok(n) => println(int.to_string(n)),
+    err(Boom) => println("known"),
+    err(Unknown(_)) => println("unknown"),
+  }
+}

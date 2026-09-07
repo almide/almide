@@ -118,7 +118,17 @@ pub enum Pattern {
     None,
     Ok { inner: Box<Pattern> },
     Err { inner: Box<Pattern> },
-    List { elements: Vec<Pattern> },
+    /// `rest` (#1461 list-rest): `[a, b, ..t]` binds the tail past the
+    /// prefix, `[a, ..]` ignores it — either way the pattern matches any
+    /// list of length >= elements.len(). `None` = the exact-length form.
+    List {
+        elements: Vec<Pattern>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rest: Option<Option<Sym>>,
+    },
+    /// As-pattern (#1461): `name @ pattern` — binds the WHOLE value at
+    /// this position while the inner pattern destructures/tests it.
+    As { name: Sym, inner: Box<Pattern> },
     /// Or-pattern (#1461): `a | b | c => body` — the arm matches when ANY
     /// alternative matches. Alternatives are binder-free (checker rule);
     /// lowering desugars the arm into one IR arm per alternative.
@@ -431,27 +441,49 @@ pub enum TestWhere {
 
 /// Comments attached to one EXPRESSION (#1404 / #1326).
 ///
-/// The attachment rule, ruled 2026-08-14: **a comment binds to the node it is
-/// adjacent to, on the side it was written**.
+/// The attachment rule, ruled 2026-08-14 and completed 2026-08-31 (the mixed
+/// rule): **an inline `/* */` binds to the node it is adjacent to, on the
+/// side it was written; a comment that ends a line binds to the line it
+/// ends** — that is, to the operand the line ends with.
 ///
 /// ```text
 /// foo(/* why */ a, b)      // LEADING on `a`  — travels with `a` if it moves
 /// f(1 /* x */, 2)          // TRAILING on `1` — does NOT cross the comma
+/// 1 /* x */ + 2            // TRAILING on `1` — an operator follows, not a node
 /// let y = 1 + // why
-///   2                      // TRAILING on `1` — the operand it follows
+///   2                      // LINE_TRAILING on `1` — the operand whose line
+///                          // the comment ends; fmt keeps the break after it
+/// xs
+///   // drop the empties
+///   |> list.filter(f)      // LINE_BETWEEN on `xs` — own-line comments between
+///                          // the operand and its continuation
 /// ```
 ///
 /// The leading half is the ruling as asked; the trailing half is its mirror,
 /// because taking "attach to the FOLLOWING node" literally would move
 /// `/* x */` across the comma and onto `2`, annotating a value its author
 /// never wrote it against. rustfmt and prettier bind the same way.
+///
+/// The two LINE slots are what a `//` needs that an inline `/* */` does not:
+/// a `//` comment consumes the rest of its physical line, so reprinting it
+/// inline (`1 // why + 2`) would comment out the continuation. fmt therefore
+/// prints a line slot exactly where the author's line break was — after the
+/// operand — and lets the operator (or `.` chain link) lead the next line.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ExprComments {
     /// Written before the node, on the same line.
     pub leading: Vec<String>,
-    /// Written after the node — an inline `/* */` or an end-of-line `//` whose
-    /// expression continues on the next line.
+    /// Written after the node, inline (`1 /* x */`), the line continuing
+    /// after it.
     pub trailing: Vec<String>,
+    /// Written after the node, ending its line, with the enclosing expression
+    /// continuing on a later line (`1 + // why` / `xs // note` before `|>`).
+    /// Reprinted after the node; the line breaks there.
+    pub line_trailing: Vec<String>,
+    /// Own-line comments between the node's line and the continuation line
+    /// that follows it. Reprinted each on its own line at the continuation
+    /// indent, above the operator / chain link.
+    pub line_between: Vec<String>,
 }
 
 /// A file's DIALECT STAMP — `@dialect(N)`, written above everything else.
@@ -501,6 +533,14 @@ pub struct Program {
     /// suppress cascading "undefined function" diagnostics from call sites.
     #[serde(skip)]
     pub failed_fn_names: std::collections::HashSet<String>,
+    /// True when the parser reported any error: recovery dropped source text
+    /// (a declaration, a fn body, a statement), so usage-based verdicts over
+    /// this file — the E060 unused-import pass — are judged on an incomplete
+    /// picture and stay silent; the parse error is already the diagnosis
+    /// (#1783's gauntlet `s3` cell, where the refused `ports.Store` bound
+    /// takes the only uses of `ports` with it).
+    #[serde(skip)]
+    pub parse_recovered: bool,
     /// #1404: comments bound to an EXPRESSION, keyed by `ExprId`.
     ///
     /// A SIDE TABLE rather than a field on `Expr`, deliberately: `Expr` is
@@ -590,7 +630,8 @@ fn visit_pattern_exprs_mut(pat: &mut Pattern, f: &mut impl FnMut(&mut Expr)) {
         Pattern::RecordPattern { fields, .. } => {
             for fp in fields.iter_mut() { if let Some(ref mut p) = fp.pattern { visit_pattern_exprs_mut(p, f); } }
         }
-        Pattern::Tuple { elements } | Pattern::List { elements } => { for e in elements.iter_mut() { visit_pattern_exprs_mut(e, f); } }
+        Pattern::Tuple { elements } | Pattern::List { elements, .. } => { for e in elements.iter_mut() { visit_pattern_exprs_mut(e, f); } }
+        Pattern::As { inner, .. } => visit_pattern_exprs_mut(inner, f),
         Pattern::Some { inner } | Pattern::Ok { inner } | Pattern::Err { inner } => visit_pattern_exprs_mut(inner, f),
         Pattern::Or { alts } => { for a in alts.iter_mut() { visit_pattern_exprs_mut(a, f); } }
         Pattern::Wildcard | Pattern::Ident { .. } | Pattern::None => {}
@@ -787,7 +828,8 @@ fn visit_pattern_exprs(pat: &Pattern, f: &mut impl FnMut(&Expr)) {
         Pattern::RecordPattern { fields, .. } => {
             for fp in fields.iter() { if let Some(ref p) = fp.pattern { visit_pattern_exprs(p, f); } }
         }
-        Pattern::Tuple { elements } | Pattern::List { elements } => { for e in elements.iter() { visit_pattern_exprs(e, f); } }
+        Pattern::Tuple { elements } | Pattern::List { elements, .. } => { for e in elements.iter() { visit_pattern_exprs(e, f); } }
+        Pattern::As { inner, .. } => visit_pattern_exprs(inner, f),
         Pattern::Some { inner } | Pattern::Ok { inner } | Pattern::Err { inner } => visit_pattern_exprs(inner, f),
         Pattern::Or { alts } => { for a in alts.iter() { visit_pattern_exprs(a, f); } }
         Pattern::Wildcard | Pattern::Ident { .. } | Pattern::None => {}

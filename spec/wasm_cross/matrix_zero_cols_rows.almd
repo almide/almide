@@ -1,0 +1,28 @@
+// @contract: C-161
+// An r×0 matrix keeps its r rows on both targets. `zeros(3, 0)` and a
+// `from_bytes_*` whose width clamps from a negative to 0 have empty data but
+// a row count of r: `rows` answers r and `to_lists` answers r empty rows.
+// The native row iterator was `data.chunks(cols.max(1))`, which yielded no
+// rows at all for empty data — `to_lists` printed `[]` while `rows` said 3
+// and the wasm leg printed `[[], [], []]` (differential fuzz, seed
+// 544254236199 index 170, a mutation of matrix_from_bytes_offset_domain).
+fn shape(m: Matrix) -> String = "rows=${matrix.rows(m)} cols=${matrix.cols(m)} lists=${matrix.to_lists(m)}"
+
+fn main() -> Unit = {
+  let f = bytes.new(8)
+  println("zeros3x0: ${shape(matrix.zeros(3, 0))}")
+  println("zeros1x-1: ${shape(matrix.zeros(1, -1))}")
+  println("zeros0x3: ${shape(matrix.zeros(0, 3))}")
+  println("ones2x0: ${shape(matrix.ones(2, 0))}")
+  println("f32 2x0: ${shape(matrix.from_bytes_f32_le(f, 0, 2, 0))}")
+  println("f32 past-end 1xMIN: ${shape(matrix.from_bytes_f32_le(f, 8, 1, -9223372036854775808))}")
+  println("f16 1x-1: ${shape(matrix.from_bytes_f16_le(f, 0, 1, -1))}")
+  println("f64 1x-1: ${shape(matrix.from_bytes_f64_le(f, 0, 1, -1))}")
+  println("lists3x0: ${shape(matrix.from_lists([
+    [],
+    [],
+    []
+  ]))}")
+  println("add3x0: ${shape(matrix.add(matrix.zeros(3, 0), matrix.zeros(3, 0)))}")
+  println("transpose3x0: ${shape(matrix.transpose(matrix.zeros(3, 0)))}")
+}

@@ -1,0 +1,6 @@
+// The negative control for #1853: a module that owns a type (`bytes` owns
+// `Endian`) imported with neither a `bytes.*` call nor a spelling of the
+// type is still unused — owning a type is not a use of it.
+
+
+fn main() -> Unit = println("no bytes used")

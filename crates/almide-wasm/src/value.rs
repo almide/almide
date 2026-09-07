@@ -32,32 +32,32 @@ impl Emitter<'_> {
         &mut self,
         func: &str,
         args: &[IrExpr],
-    ) -> Result<Option<Option<SliceTy>>, EmitError> {
+    ) -> Result<Option<Option<Lowered>>, EmitError> {
         let out = match (func, args) {
             ("null", []) => {
                 self.emit_value_box(VT_NULL, None)?;
-                Some(SliceTy::Value)
+                Some(Lowered::owned(SliceTy::Value))
             }
             ("int", [n]) => {
-                self.lower(n, Some(INT))?;
+                self.lower_arg(n, Some(INT), ArgMode::Borrow)?;
                 self.emit_value_box(VT_INT, Some(INT))?;
-                Some(SliceTy::Value)
+                Some(Lowered::owned(SliceTy::Value))
             }
             ("bool", [b]) => {
-                self.lower(b, Some(BOOL))?;
+                self.lower_arg(b, Some(BOOL), ArgMode::Borrow)?;
                 self.f.instructions().i64_extend_i32_u();
                 self.emit_value_box(VT_BOOL, Some(INT))?;
-                Some(SliceTy::Value)
+                Some(Lowered::owned(SliceTy::Value))
             }
             ("float", [x]) => {
-                self.lower(x, Some(FLOAT))?;
+                self.lower_arg(x, Some(FLOAT), ArgMode::Borrow)?;
                 self.emit_value_box(VT_FLOAT, Some(FLOAT))?;
-                Some(SliceTy::Value)
+                Some(Lowered::owned(SliceTy::Value))
             }
             ("str", [s]) => {
-                self.lower(s, Some(STR))?;
+                self.lower_arg(s, Some(STR), ArgMode::Retain)?;
                 self.emit_value_box(VT_STR, Some(STR))?;
-                Some(SliceTy::Value)
+                Some(Lowered::owned(SliceTy::Value))
             }
             ("merge", [va, vb]) => {
                 let ti = self.types.tuple(vec![STR, SliceTy::Value]);
@@ -66,20 +66,30 @@ impl Emitter<'_> {
                     key_off: def.fields[0].1,
                     val_off: def.fields[1].1,
                 });
-                self.lower(va, Some(SliceTy::Value))?;
-                self.lower(vb, Some(SliceTy::Value))?;
+                self.lower_arg(va, Some(SliceTy::Value), ArgMode::Retain)?;
+                self.lower_arg(vb, Some(SliceTy::Value), ArgMode::Retain)?;
                 self.f.instructions().call(m);
-                Some(SliceTy::Value)
+                Some(Lowered::owned(SliceTy::Value))
             }
             // pick/omit: keep (drop) the named keys, kept pairs SHARED with
             // the source (native filter+clone of the pair vec — the pair
             // blocks themselves are never copied). Non-object passes through.
-            ("pick" | "omit", [v, keys]) => Some(self.lower_value_pick_omit(func, v, keys)?),
+            ("pick" | "omit", [v, keys]) => Some(Lowered::owned(self.lower_value_pick_omit(func, v, keys)?)),
+            // to_camel_case / to_snake_case (#1423 stage 4): a SHALLOW key
+            // rename — every pair is rebuilt with a FRESH key from the
+            // linked self-host transform and its value SHARED (pick/omit's
+            // graveyard discipline). Non-object passes through.
+            ("to_camel_case" | "to_snake_case", [v]) => Some(Lowered::owned(self.lower_value_rename(func, v)?)),
             // Object: tag 6, payload = the (String, Value) pairs list —
             // insertion order IS the block, exactly the interp's ordered
             // object model.
             ("object", [pairs]) => {
-                let got = self.lower(pairs, None)?;
+                // The Value KEEPS the pairs spine (its entries are read
+                // through it forever): retained, like `array`'s elements.
+                // Declared Borrow, a born-here literal was released under
+                // the object the moment list spines became droppable
+                // (`{"":null}` across the codec family, #2010 stage 2).
+                let got = self.lower_arg(pairs, None, ArgMode::Retain)?;
                 let SliceTy::List(h) = got else {
                     return Err(EmitError::Unsupported(format!("value.object-of:{got:?}")));
                 };
@@ -96,10 +106,10 @@ impl Emitter<'_> {
                     return Err(EmitError::Unsupported("value.object-el".into()));
                 }
                 self.emit_value_box(VT_OBJECT, Some(STR))?;
-                Some(SliceTy::Value)
+                Some(Lowered::owned(SliceTy::Value))
             }
             ("array", [xs]) => {
-                let got = self.lower(xs, None)?;
+                let got = self.lower_arg(xs, None, ArgMode::Retain)?;
                 let SliceTy::List(h) = got else {
                     return Err(EmitError::Unsupported(format!("value.array-of:{got:?}")));
                 };
@@ -107,7 +117,7 @@ impl Emitter<'_> {
                     return Err(EmitError::Unsupported("value.array-el".into()));
                 }
                 self.emit_value_box(VT_ARRAY, Some(STR))?; // addr slot (i32 class)
-                Some(SliceTy::Value)
+                Some(Lowered::owned(SliceTy::Value))
             }
             _ => return self.lower_value_call_b(func, args),
         };
@@ -120,10 +130,10 @@ impl Emitter<'_> {
     /// blocks themselves are never copied). Non-object passes through.
     fn lower_value_pick_omit(&mut self, func: &str, v: &IrExpr, keys: &IrExpr) -> Result<SliceTy, EmitError> {
         let keep_found = i32::from(func == "pick");
-        self.lower(v, Some(SliceTy::Value))?;
+        self.lower_arg(v, Some(SliceTy::Value), ArgMode::Retain)?;
         let hv = self.hold_i32()?;
         self.f.instructions().local_set(hv);
-        match self.lower(keys, None)? {
+        match self.lower_arg(keys, None, ArgMode::Borrow)? {
             SliceTy::List(h) if self.types.el(h) == STR => {}
             other => return Err(EmitError::Unsupported(format!("value.{func}-keys:{other:?}"))),
         }
@@ -161,6 +171,83 @@ impl Emitter<'_> {
         i.local_get(hw).i32_const(4).i32_add().local_set(hw);
         i.end();
         i.local_get(hv).i32_const(4).i32_add().local_set(hv);
+        i.br(0).end().end();
+        i.local_get(ho).local_get(hw).i32_store(len_memarg());
+        // box a fresh Object value
+        i.i32_const(16).call(F_ALLOC).local_set(hp);
+        i.local_get(hp).i32_const(VT_OBJECT).i32_store(slot_memarg(almide_layout::SUM_TAG));
+        i.local_get(hp).local_get(ho).i32_store(slot_memarg(almide_layout::SUM_FIELD));
+        i.local_get(hp);
+        i.end();
+        let _ = i;
+        for _ in 0..5 {
+            self.release_i32();
+        }
+        Ok(SliceTy::Value)
+    }
+
+    /// A self-host module's PRIVATE helper by unique `.name` suffix —
+    /// registry modules carry ordinal names (`__selfhost_N`), so the
+    /// qualified key is not spellable up front. Ambiguity walls.
+    fn selfhost_helper(&self, helper: &str) -> Option<usize> {
+        let suffix = format!(".{helper}");
+        let mut hits = self.table.by_name.iter().filter(|(k, _)| k.ends_with(&suffix));
+        let first = hits.next()?;
+        if hits.next().is_some() {
+            return None;
+        }
+        Some(*first.1)
+    }
+
+    /// The rename walk: the key transform is the self-host helper
+    /// (`__vu_camel` / `__vu_snake` — own-buffer string builders on the
+    /// digest-shared string layout, the string_to_lower class), the
+    /// object walk is native: the incumbent's walk reads its tag/len
+    /// slots raw and cannot link against this layout.
+    fn lower_value_rename(&mut self, func: &str, v: &IrExpr) -> Result<SliceTy, EmitError> {
+        let helper = if func == "to_camel_case" { "__vu_camel" } else { "__vu_snake" };
+        let Some(hi) = self.selfhost_helper(helper) else {
+            return Err(EmitError::Unsupported(format!("value.{func}:unlinked:{helper}")));
+        };
+        if let Some(r) = &self.table.infos[hi].refuse {
+            return Err(EmitError::Unsupported(format!("call-fn:{helper}:{r}")));
+        }
+        let transform = self.table.infos[hi].wasm_index;
+        self.calls.insert(hi);
+        self.lower_arg(v, Some(SliceTy::Value), ArgMode::Retain)?;
+        let hv = self.hold_i32()?;
+        self.f.instructions().local_set(hv);
+        let ti = self.types.tuple(vec![STR, SliceTy::Value]);
+        let def = self.types.tuple_def(ti);
+        let (key_off, val_off, pair_size) = (def.fields[0].1, def.fields[1].1, def.size);
+        let hp = self.hold_i32()?;
+        let ho = self.hold_i32()?;
+        let hw = self.hold_i32()?;
+        let hq = self.hold_i32()?;
+        let mut i = self.f.instructions();
+        i.local_get(hv)
+            .i32_load(slot_memarg(almide_layout::SUM_TAG))
+            .i32_const(VT_OBJECT)
+            .i32_ne()
+            .if_(BlockType::Result(wasm_encoder::ValType::I32));
+        i.local_get(hv);
+        i.else_();
+        i.local_get(hv).i32_load(slot_memarg(almide_layout::SUM_FIELD)).local_set(hp);
+        i.local_get(hp).i32_load(len_memarg()).call(F_ALLOC).local_set(ho);
+        i.i32_const(0).local_set(hw); // one cursor: every pair is kept
+        i.block(BlockType::Empty).loop_(BlockType::Empty);
+        i.local_get(hw).local_get(hp).i32_load(len_memarg()).i32_ge_u().br_if(1);
+        i.local_get(hp).local_get(hw).i32_add().i32_load(slot_memarg(0)).local_set(hv);
+        i.i32_const(pair_size as i32).call(F_ALLOC).local_set(hq);
+        // key: +1 the borrowed source key (the callee's epilogue releases
+        // its param), the transform's fresh result is the pair's own.
+        i.local_get(hv).i32_load(slot_memarg(key_off)).call(F_INC);
+        i.local_get(hq);
+        i.local_get(hv).i32_load(slot_memarg(key_off)).call(transform);
+        i.i32_store(slot_memarg(key_off));
+        i.local_get(hq).local_get(hv).i32_load(slot_memarg(val_off)).i32_store(slot_memarg(val_off));
+        i.local_get(ho).local_get(hw).i32_add().local_get(hq).i32_store(slot_memarg(0));
+        i.local_get(hw).i32_const(4).i32_add().local_set(hw);
         i.br(0).end().end();
         i.local_get(ho).local_get(hw).i32_store(len_memarg());
         // box a fresh Object value
@@ -357,6 +444,10 @@ impl Emitter<'_> {
         i.local_get(hr).local_get(hv);
         let _ = i;
         self.load_ty_slot(payload, almide_layout::SUM_FIELD);
+        // The Value keeps its interior: the Result's payload is a SHARE of
+        // it (+1), released by the Result's typed drop (#2010 stage 2c —
+        // `value.as_array` twice on one Value freed its array).
+        self.share_handle_top(payload);
         self.store_ty_slot(payload, almide_layout::SUM_FIELD);
         let mut i = self.f.instructions();
         i.else_();
@@ -419,43 +510,43 @@ impl Emitter<'_> {
         &mut self,
         func: &str,
         args: &[IrExpr],
-    ) -> Result<Option<Option<SliceTy>>, EmitError> {
+    ) -> Result<Option<Option<Lowered>>, EmitError> {
         let out = match (func, args) {
             ("as_int", [v]) => {
-                self.lower(v, Some(SliceTy::Value))?;
+                self.lower_arg(v, Some(SliceTy::Value), ArgMode::Borrow)?;
                 self.emit_value_unbox(VT_INT, INT, "expected Int")?;
-                Some(SliceTy::Result(self.types.intern(INT), self.types.intern(STR)))
+                Some(Lowered::owned(SliceTy::Result(self.types.intern(INT), self.types.intern(STR))))
             }
             ("as_bool", [v]) => {
-                self.lower(v, Some(SliceTy::Value))?;
+                self.lower_arg(v, Some(SliceTy::Value), ArgMode::Borrow)?;
                 self.emit_value_unbox(VT_BOOL, BOOL, "expected Bool")?;
-                Some(SliceTy::Result(self.types.intern(BOOL), self.types.intern(STR)))
+                Some(Lowered::owned(SliceTy::Result(self.types.intern(BOOL), self.types.intern(STR))))
             }
             ("as_string", [v]) => {
-                self.lower(v, Some(SliceTy::Value))?;
+                self.lower_arg(v, Some(SliceTy::Value), ArgMode::Borrow)?;
                 self.emit_value_unbox(VT_STR, STR, "expected Str")?;
-                Some(SliceTy::Result(self.types.intern(STR), self.types.intern(STR)))
+                Some(Lowered::owned(SliceTy::Result(self.types.intern(STR), self.types.intern(STR))))
             }
             ("as_array", [v]) => {
-                self.lower(v, Some(SliceTy::Value))?;
+                self.lower_arg(v, Some(SliceTy::Value), ArgMode::Borrow)?;
                 let lv = SliceTy::List(self.types.intern(SliceTy::Value));
                 self.emit_value_unbox(VT_ARRAY, lv, "expected Array")?;
-                Some(SliceTy::Result(self.types.intern(lv), self.types.intern(STR)))
+                Some(Lowered::owned(SliceTy::Result(self.types.intern(lv), self.types.intern(STR))))
             }
             // #658: a JSON number has no int/float split — an Int Value
             // widens to a valid Float.
             ("as_float", [v]) => {
-                self.lower(v, Some(SliceTy::Value))?;
+                self.lower_arg(v, Some(SliceTy::Value), ArgMode::Borrow)?;
                 self.emit_value_as_float()?;
-                Some(SliceTy::Result(self.types.intern(FLOAT), self.types.intern(STR)))
+                Some(Lowered::owned(SliceTy::Result(self.types.intern(FLOAT), self.types.intern(STR))))
             }
             // The Codec-derive field accessor: tag check, first-match
             // scan, the incumbent's exact err lines.
             ("field", [v, key]) => {
-                self.lower(v, Some(SliceTy::Value))?;
+                self.lower_arg(v, Some(SliceTy::Value), ArgMode::Borrow)?;
                 let hv = self.hold_i32()?;
                 self.f.instructions().local_set(hv);
-                self.lower(key, Some(STR))?;
+                self.lower_arg(key, Some(STR), ArgMode::Borrow)?;
                 let hk = self.hold_i32()?;
                 self.f.instructions().local_set(hk);
                 let vf = self.work.helper(Helper::ValueField);
@@ -494,21 +585,21 @@ impl Emitter<'_> {
                 self.release_i32();
                 self.release_i32();
                 self.release_i32();
-                Some(SliceTy::Result(
+                Some(Lowered::owned(SliceTy::Result(
                     self.types.intern(SliceTy::Value),
                     self.types.intern(STR),
-                ))
+                )))
             }
             ("keys", [v]) => {
-                self.lower(v, Some(SliceTy::Value))?;
+                self.lower_arg(v, Some(SliceTy::Value), ArgMode::Borrow)?;
                 let vk = self.work.helper(Helper::ValueKeys);
                 self.f.instructions().call(vk);
-                Some(SliceTy::List(self.types.intern(STR)))
+                Some(Lowered::owned(SliceTy::List(self.types.intern(STR))))
             }
             ("stringify", [v]) => {
-                self.lower(v, Some(SliceTy::Value))?;
+                self.lower_arg(v, Some(SliceTy::Value), ArgMode::Borrow)?;
                 self.emit_value_stringify()?;
-                Some(STR)
+                Some(Lowered::owned(STR))
             }
             _ => return Ok(None),
         };
@@ -526,8 +617,8 @@ impl Emitter<'_> {
     pub(crate) fn lower_json_to_map(
         &mut self,
         j: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
-        self.lower(j, Some(SliceTy::Value))?;
+    ) -> ArmResult {
+        self.lower_arg(j, Some(SliceTy::Value), ArgMode::Borrow)?;
         let ti = self.types.tuple(vec![STR, SliceTy::Value]);
         let def = self.types.tuple_def(ti);
         let (key_off, val_off) = (def.fields[0].1, def.fields[1].1);
@@ -603,7 +694,7 @@ impl Emitter<'_> {
         }
         let sh = self.types.intern(STR);
         let mh = self.types.intern(SliceTy::Map(sh, sh));
-        Ok(Some(SliceTy::Option(mh)))
+        Ok(Some(Lowered::owned(SliceTy::Option(mh))))
     }
 }
 

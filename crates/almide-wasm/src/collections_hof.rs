@@ -13,7 +13,7 @@ use crate::*;
 impl Emitter<'_> {
     /// Shared prologue: lower the map, return (mh, k, v, layout).
     fn map_hof_open(&mut self, m: &IrExpr) -> Result<(u32, SliceTy, SliceTy), EmitError> {
-        let (k, v) = match self.lower(m, None)? {
+        let (k, v) = match self.lower_arg(m, None, ArgMode::Borrow)? {
             SliceTy::Map(kh, vh) => (self.types.el(kh), self.types.el(vh)),
             other => return unsup(&format!("map-hof-of:{other:?}")),
         };
@@ -27,7 +27,7 @@ impl Emitter<'_> {
         &mut self,
         m: &IrExpr,
         cb: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let (params, body) = self.hof_lambda(cb, 2)?;
         let (mh, k, v) = self.map_hof_open(m)?;
         let (koff, voff, esz) = entry_layout(k, v);
@@ -73,7 +73,7 @@ impl Emitter<'_> {
         for _ in 0..4 {
             self.release_i32();
         }
-        Ok(Some(SliceTy::Option(self.types.intern(SliceTy::Tuple(pair_ti)))))
+        Ok(Some(Lowered::owned(SliceTy::Option(self.types.intern(SliceTy::Tuple(pair_ti))))))
     }
 
     /// Kept entries, order preserved; the out block over-allocates and
@@ -82,7 +82,7 @@ impl Emitter<'_> {
         &mut self,
         m: &IrExpr,
         cb: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let (params, body) = self.hof_lambda(cb, 2)?;
         let (mh, k, v) = self.map_hof_open(m)?;
         let (koff, voff, esz) = entry_layout(k, v);
@@ -124,7 +124,7 @@ impl Emitter<'_> {
         for _ in 0..5 {
             self.release_i32();
         }
-        Ok(Some(SliceTy::Map(self.types.intern(k), self.types.intern(v))))
+        Ok(Some(Lowered::owned(SliceTy::Map(self.types.intern(k), self.types.intern(v)))))
     }
 
     /// #1423 stage 4 — the map predicate family: all / any (early-exit
@@ -135,7 +135,7 @@ impl Emitter<'_> {
         func: &str,
         m: &IrExpr,
         cb: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let (params, body) = self.hof_lambda(cb, 2)?;
         let (mh, k, v) = self.map_hof_open(m)?;
         let (koff, voff, esz) = entry_layout(k, v);
@@ -191,7 +191,7 @@ impl Emitter<'_> {
         for _ in 0..4 {
             self.release_i32();
         }
-        Ok(Some(if count { INT } else { BOOL }))
+        Ok(Some(Lowered::scalar(if count { INT } else { BOOL })))
     }
 
     /// Value transform (the 1-arg surface): keys copy, the value slot
@@ -201,7 +201,7 @@ impl Emitter<'_> {
         &mut self,
         m: &IrExpr,
         cb: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let (params, body) = self.hof_lambda(cb, 1)?;
         let (mh, k, v) = self.map_hof_open(m)?;
         let (koff, voff, esz) = entry_layout(k, v);
@@ -262,7 +262,7 @@ impl Emitter<'_> {
         for _ in 0..5 {
             self.release_i32();
         }
-        Ok(Some(SliceTy::Map(self.types.intern(k), self.types.intern(b_ty))))
+        Ok(Some(Lowered::owned(SliceTy::Map(self.types.intern(k), self.types.intern(b_ty)))))
     }
 
     /// Upsert merge (native `a.clone()` + inserts): a's entries keep
@@ -272,9 +272,9 @@ impl Emitter<'_> {
         &mut self,
         a: &IrExpr,
         b: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let (ah, k, v) = self.map_hof_open(a)?;
-        let (bk, bv) = match self.lower(b, None)? {
+        let (bk, bv) = match self.lower_arg(b, None, ArgMode::Borrow)? {
             SliceTy::Map(kh, vh) => (self.types.el(kh), self.types.el(vh)),
             other => return unsup(&format!("map-merge-of:{other:?}")),
         };
@@ -372,7 +372,7 @@ impl Emitter<'_> {
         for _ in 0..7 {
             self.release_i32();
         }
-        Ok(Some(SliceTy::Map(self.types.intern(k), self.types.intern(v))))
+        Ok(Some(Lowered::owned(SliceTy::Map(self.types.intern(k), self.types.intern(v)))))
     }
 
     /// Copy; a present key's value passes through the callback ONCE
@@ -382,14 +382,14 @@ impl Emitter<'_> {
         m: &IrExpr,
         key: &IrExpr,
         cb: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let (params, body) = self.hof_lambda(cb, 1)?;
         let (mh, k, v) = self.map_hof_open(m)?;
         let scan = self.map_scan_fn(k)?;
         let (koff, voff, esz) = entry_layout(k, v);
         let _ = koff;
         let hkey = self.hold_for(k)?;
-        self.lower(key, Some(k))?;
+        self.lower_arg(key, Some(k), ArgMode::Borrow)?;
         self.f.instructions().local_set(hkey);
         let ho = self.hold_i32()?;
         let he = self.hold_i32()?;
@@ -435,7 +435,7 @@ impl Emitter<'_> {
         self.release_i32();
         self.release_for(k);
         self.release_i32();
-        Ok(Some(SliceTy::Map(self.types.intern(k), self.types.intern(v))))
+        Ok(Some(Lowered::owned(SliceTy::Map(self.types.intern(k), self.types.intern(v)))))
     }
 
     /// Upsert (native): a present key keeps its POSITION and its value
@@ -447,16 +447,16 @@ impl Emitter<'_> {
         key: &IrExpr,
         init: &IrExpr,
         cb: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let (params, body) = self.hof_lambda(cb, 1)?;
         let (mh, k, v) = self.map_hof_open(m)?;
         let scan = self.map_scan_fn(k)?;
         let (koff, voff, esz) = entry_layout(k, v);
         let hkey = self.hold_for(k)?;
-        self.lower(key, Some(k))?;
+        self.lower_arg(key, Some(k), ArgMode::Retain)?;
         self.f.instructions().local_set(hkey);
         let hinit = self.hold_for(v)?;
-        self.lower(init, Some(v))?;
+        self.lower_arg(init, Some(v), ArgMode::Retain)?;
         self.f.instructions().local_set(hinit);
         let ho = self.hold_i32()?;
         let he = self.hold_i32()?;
@@ -526,7 +526,7 @@ impl Emitter<'_> {
         self.release_for(v);
         self.release_for(k);
         self.release_i32();
-        Ok(Some(SliceTy::Map(self.types.intern(k), self.types.intern(v))))
+        Ok(Some(Lowered::owned(SliceTy::Map(self.types.intern(k), self.types.intern(v)))))
     }
 
     /// `list.group_by(xs, f) -> Map[B, List[A]]` — first-seen key order,
@@ -538,12 +538,14 @@ impl Emitter<'_> {
         &mut self,
         xs: &IrExpr,
         cb: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let (params, body) = self.hof_lambda(cb, 1)?;
         let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
         let kt = self.infer(body)?;
         let SliceTy::Scalar(_) = kt else { return unsup("list-group-by-key-nonscalar") };
-        let scan = self.map_scan_fn(kt)?;
+        // the accumulator copy-grows per new key (a fresh address each
+        // time): the plain scan, never the index lane
+        let scan = self.scan_helper(kt)?;
         let inner = SliceTy::List(self.types.intern(elem));
         let (koff, voff, esz) = entry_layout(kt, inner);
         let push = match elem.slot_size() {
@@ -617,16 +619,13 @@ impl Emitter<'_> {
         for _ in 0..5 {
             self.release_i32();
         }
-        Ok(Some(SliceTy::Map(self.types.intern(kt), self.types.intern(inner))))
+        Ok(Some(Lowered::owned(SliceTy::Map(self.types.intern(kt), self.types.intern(inner)))))
     }
 
-    /// The scan helper for this key class (shared with the map ops).
+    /// The keyed lookup for a STABLE receiver (merge / update / upsert
+    /// probe the input map, which outlives the op): the index lane for
+    /// Int/String keys, the scan family otherwise (#1219 stage 2).
     fn map_scan_fn(&mut self, k: SliceTy) -> Result<u32, EmitError> {
-        match k {
-            INT => Ok(F_SCAN_W64),
-            BOOL => Ok(F_SCAN_W32),
-            STR => Ok(F_SCAN_STR),
-            _ => self.scan_helper(k),
-        }
+        self.keyed_find(k)
     }
 }

@@ -1,14 +1,19 @@
-/// Is a call's destination known to be side-effect free? Method/Computed
-/// dispatch can hide effects, so both are conservatively impure.
-fn call_target_is_pure(target: &CallTarget, pure_fns: &HashSet<Sym>) -> bool {
+/// The key a call target is looked up under in the pure-fn set: a user fn's
+/// bare name, a module fn's `module.func`. Method/Computed dispatch can hide
+/// effects, so neither has a key — they are conservatively impure.
+fn call_target_key(target: &CallTarget) -> Option<Sym> {
     match target {
         CallTarget::Module { module, func, .. } => {
-            let key = almide_base::intern::sym(&format!("{}.{}", module, func));
-            pure_fns.contains(&key)
+            Some(almide_base::intern::sym(&format!("{}.{}", module, func)))
         }
-        CallTarget::Named { name } => pure_fns.contains(name),
-        CallTarget::Method { .. } | CallTarget::Computed { .. } => false,
+        CallTarget::Named { name } => Some(*name),
+        CallTarget::Method { .. } | CallTarget::Computed { .. } => None,
     }
+}
+
+/// Is a call's destination known to be side-effect free?
+fn call_target_is_pure(target: &CallTarget, pure_fns: &HashSet<Sym>) -> bool {
+    call_target_key(target).is_some_and(|key| pure_fns.contains(&key))
 }
 
 /// May this BinOp trap at runtime? Integer division/modulo trap on a zero
@@ -260,142 +265,182 @@ fn has_mut_in_inline_rust(attrs: &[almide_lang::ast::Attribute]) -> bool {
     })
 }
 
-// ── User function purity analysis (fixpoint) ──────────────────
+// ── User function purity analysis (fixpoint) ──────────────
 
 /// Analyze all user functions and return the set of names that are
 /// SPECULATION-SAFE: the body contains no impure operations AND no
 /// possibly-trapping operations (see [`is_pure`] — a hoisted call runs even
 /// when the loop is zero-trip, so a callee that can trap must not be hoisted;
 /// almide#1424).
-/// Uses fixpoint iteration: mark impure functions, propagate, repeat until stable.
+///
+/// Fixpoint by WORKLIST (#1232): every body is evaluated once against the
+/// optimistic all-pure set; a body that evaluates pure was walked in full,
+/// so the same walk yields its complete callee list (see [`PurityQuery`]),
+/// and that is the only thing its verdict depends on. Removing a function
+/// therefore re-evaluates exactly its still-pure callers, and nothing else
+/// — the rescan-everything rounds it replaces re-walked every pure body per
+/// round. Both reach the same greatest fixpoint: a function is only ever
+/// removed when its body is impure against the current set, and every
+/// function left at the end has been re-checked after its last callee left.
 fn analyze_pure_functions(program: &IrProgram) -> HashSet<Sym> {
-
-    // Collect all function names
-    let mut all_fns: HashSet<Sym> = HashSet::new();
-    let mut fn_bodies: Vec<(Sym, &IrExpr)> = Vec::new();
-    for func in &program.functions {
-        all_fns.insert(func.name);
-        fn_bodies.push((func.name, &func.body));
-    }
-    for module in &program.modules {
-        for func in &module.functions {
-            all_fns.insert(func.name);
-            fn_bodies.push((func.name, &func.body));
-        }
-    }
+    let fn_bodies: Vec<(Sym, &IrExpr)> = program
+        .functions
+        .iter()
+        .chain(program.modules.iter().flat_map(|m| m.functions.iter()))
+        .map(|f| (f.name, &f.body))
+        .collect();
 
     // Start: assume all functions are pure
-    let mut pure_set = all_fns.clone();
+    let mut pure_set: HashSet<Sym> = fn_bodies.iter().map(|(name, _)| *name).collect();
+    // callee -> the body indices whose verdict consulted it
+    let mut callers: HashMap<Sym, Vec<usize>> = HashMap::new();
+    let mut worklist: Vec<Sym> = Vec::new();
 
-    // Fixpoint: remove functions whose body is impure, repeat until stable
-    loop {
-        let mut changed = false;
-        for &(name, body) in &fn_bodies {
-            if !pure_set.contains(&name) { continue; }
-            if !expr_is_pure_with(body, &pure_set) {
-                pure_set.remove(&name);
-                changed = true;
+    for (i, &(name, body)) in fn_bodies.iter().enumerate() {
+        let (pure, callees) = PurityQuery::judge(body, &pure_set);
+        if pure {
+            for callee in callees {
+                callers.entry(callee).or_default().push(i);
+            }
+        } else if pure_set.remove(&name) {
+            worklist.push(name);
+        }
+    }
+
+    while let Some(removed) = worklist.pop() {
+        let Some(dependents) = callers.get(&removed) else { continue };
+        for &i in dependents {
+            let (name, body) = fn_bodies[i];
+            if !pure_set.contains(&name) {
+                continue;
+            }
+            if !PurityQuery::judge(body, &pure_set).0 && pure_set.remove(&name) {
+                worklist.push(name);
             }
         }
-        if !changed { break; }
     }
 
     pure_set
 }
 
-/// Check if an expression is pure given a current set of known-pure user functions.
-/// Similar to `is_pure` but works on immutable IR (no VarTable needed).
-/// Grouped by CHILD SHAPE like [`is_pure`]. This variant covers a WIDER
-/// impure tail: without a VarTable it cannot reason about the loop and
-/// propagation nodes, so those stay conservatively impure here.
-fn expr_is_pure_with(expr: &IrExpr, pure_fns: &HashSet<Sym>) -> bool {
-    let pure = |e: &IrExpr| expr_is_pure_with(e, pure_fns);
-    match &expr.kind {
-        // ── No children: always pure ──
-        IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitStr { .. }
-        | IrExprKind::LitBool { .. } | IrExprKind::Unit | IrExprKind::OptionNone
-        | IrExprKind::Var { .. } | IrExprKind::FnRef { .. } | IrExprKind::Hole
-        | IrExprKind::Break | IrExprKind::Continue | IrExprKind::EmptyMap => true,
-
-        // ── Function calls ──
-        IrExprKind::Call { target, args, .. } => {
-            call_target_is_pure(target, pure_fns) && args.iter().all(pure)
-        }
-        IrExprKind::RustMacro { .. } | IrExprKind::RenderedCall { .. } => false,
-
-        // ── One child ──
-        IrExprKind::UnOp { operand: e, .. } | IrExprKind::Lambda { body: e, .. }
-        | IrExprKind::Member { object: e, .. } | IrExprKind::TupleIndex { object: e, .. }
-        | IrExprKind::OptionSome { expr: e } | IrExprKind::ResultOk { expr: e }
-        | IrExprKind::ResultErr { expr: e } | IrExprKind::Clone { expr: e }
-        | IrExprKind::Deref { expr: e } | IrExprKind::Borrow { expr: e, .. }
-        | IrExprKind::BoxNew { expr: e } | IrExprKind::ToVec { expr: e } => pure(e),
-
-        // ── Two children ──
-        IrExprKind::BinOp { op, left: a, right: b } => {
-            !binop_may_trap(*op, b) && pure(a) && pure(b)
-        }
-        IrExprKind::UnwrapOr { expr: a, fallback: b }
-        | IrExprKind::Range { start: a, end: b, .. } => pure(a) && pure(b),
-
-        // ── Three children ──
-        IrExprKind::If { cond, then, else_ } => pure(cond) && pure(then) && pure(else_),
-
-        // ── A flat sequence of children ──
-        IrExprKind::List { elements: xs } | IrExprKind::Tuple { elements: xs } => {
-            xs.iter().all(pure)
-        }
-
-        // ── Name-tagged children ──
-        IrExprKind::Record { fields, .. } => fields.iter().all(|(_, v)| pure(v)),
-
-        // ── Shapes with their own traversal ──
-        IrExprKind::Match { subject, arms } => {
-            pure(subject) && arms.iter().all(|a| pure(&a.body))
-        }
-        IrExprKind::Block { stmts, expr } => {
-            stmts.iter().all(|s| stmt_is_pure_with(s, pure_fns))
-                && expr.as_ref().is_none_or(|e| pure(e))
-        }
-        IrExprKind::StringInterp { parts } => parts.iter().all(|p| match p {
-            IrStringPart::Expr { expr } => pure(expr),
-            IrStringPart::Lit { .. } => true,
-        }),
-
-        // ForIn, While, Fan, Await, etc. — conservatively impure. IndexAccess
-        // and MapAccess sit here because they can trap: a function whose body
-        // indexes is not speculation-safe, so it must not enter the pure set
-        // that licenses hoisting (almide#1424). Listed explicitly so a new
-        // IrExprKind is a compile error here, not a silently-impure default.
-        IrExprKind::Fan { .. } | IrExprKind::ForIn { .. }
-        | IrExprKind::While { .. } | IrExprKind::TailCall { .. }
-        | IrExprKind::RuntimeCall { .. } | IrExprKind::MapLiteral { .. }
-        | IrExprKind::SpreadRecord { .. } | IrExprKind::MapAccess { .. }
-        | IrExprKind::IndexAccess { .. }
-        | IrExprKind::Try { .. } | IrExprKind::Unwrap { .. }
-        | IrExprKind::ToOption { .. } | IrExprKind::OptionalChain { .. }
-        | IrExprKind::RcWrap { .. }
-        | IrExprKind::InlineRust { .. } | IrExprKind::ClosureCreate { .. }
-        | IrExprKind::EnvLoad { .. } | IrExprKind::IterChain { .. }
-        | IrExprKind::Todo { .. } => false,
-    }
+/// One purity evaluation of a body against a fixed pure-fn set, recording
+/// every call-target key it consults. A body that evaluates pure has had
+/// EVERY node visited (the walk only short-circuits on the first impure
+/// node), so its `callees` are complete; an impure body's list is a prefix
+/// nobody reads.
+struct PurityQuery<'a> {
+    pure_fns: &'a HashSet<Sym>,
+    callees: HashSet<Sym>,
 }
 
-fn stmt_is_pure_with(stmt: &IrStmt, pure_fns: &HashSet<Sym>) -> bool {
-    match &stmt.kind {
-        IrStmtKind::Bind { value, .. } | IrStmtKind::BindDestructure { value, .. } => {
-            expr_is_pure_with(value, pure_fns)
+impl PurityQuery<'_> {
+    fn judge(body: &IrExpr, pure_fns: &HashSet<Sym>) -> (bool, HashSet<Sym>) {
+        let mut q = PurityQuery { pure_fns, callees: HashSet::new() };
+        let pure = q.expr(body);
+        (pure, q.callees)
+    }
+
+    fn call(&mut self, target: &CallTarget) -> bool {
+        let Some(key) = call_target_key(target) else { return false };
+        self.callees.insert(key);
+        self.pure_fns.contains(&key)
+    }
+
+    /// Check if an expression is pure given a current set of known-pure user functions.
+    /// Similar to `is_pure` but works on immutable IR (no VarTable needed).
+    /// Grouped by CHILD SHAPE like [`is_pure`]. This variant covers a WIDER
+    /// impure tail: without a VarTable it cannot reason about the loop and
+    /// propagation nodes, so those stay conservatively impure here.
+    fn expr(&mut self, expr: &IrExpr) -> bool {
+        match &expr.kind {
+            // ── No children: always pure ──
+            IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitStr { .. }
+            | IrExprKind::LitBool { .. } | IrExprKind::Unit | IrExprKind::OptionNone
+            | IrExprKind::Var { .. } | IrExprKind::FnRef { .. } | IrExprKind::Hole
+            | IrExprKind::Break | IrExprKind::Continue | IrExprKind::EmptyMap => true,
+
+            // ── Function calls ──
+            IrExprKind::Call { target, args, .. } => {
+                self.call(target) && args.iter().all(|a| self.expr(a))
+            }
+            IrExprKind::RustMacro { .. } | IrExprKind::RenderedCall { .. } => false,
+
+            // ── One child ──
+            IrExprKind::UnOp { operand: e, .. } | IrExprKind::Lambda { body: e, .. }
+            | IrExprKind::Member { object: e, .. } | IrExprKind::TupleIndex { object: e, .. }
+            | IrExprKind::OptionSome { expr: e } | IrExprKind::ResultOk { expr: e }
+            | IrExprKind::ResultErr { expr: e } | IrExprKind::Clone { expr: e }
+            | IrExprKind::Deref { expr: e } | IrExprKind::Borrow { expr: e, .. }
+            | IrExprKind::BoxNew { expr: e } | IrExprKind::ToVec { expr: e } => self.expr(e),
+
+            // ── Two children ──
+            IrExprKind::BinOp { op, left: a, right: b } => {
+                !binop_may_trap(*op, b) && self.expr(a) && self.expr(b)
+            }
+            IrExprKind::UnwrapOr { expr: a, fallback: b }
+            | IrExprKind::Range { start: a, end: b, .. } => self.expr(a) && self.expr(b),
+
+            // ── Three children ──
+            IrExprKind::If { cond, then, else_ } => {
+                self.expr(cond) && self.expr(then) && self.expr(else_)
+            }
+
+            // ── A flat sequence of children ──
+            IrExprKind::List { elements: xs } | IrExprKind::Tuple { elements: xs } => {
+                xs.iter().all(|e| self.expr(e))
+            }
+
+            // ── Name-tagged children ──
+            IrExprKind::Record { fields, .. } => fields.iter().all(|(_, v)| self.expr(v)),
+
+            // ── Shapes with their own traversal ──
+            IrExprKind::Match { subject, arms } => {
+                self.expr(subject) && arms.iter().all(|a| self.expr(&a.body))
+            }
+            IrExprKind::Block { stmts, expr } => {
+                stmts.iter().all(|s| self.stmt(s))
+                    && expr.as_ref().is_none_or(|e| self.expr(e))
+            }
+            IrExprKind::StringInterp { parts } => parts.iter().all(|p| match p {
+                IrStringPart::Expr { expr } => self.expr(expr),
+                IrStringPart::Lit { .. } => true,
+            }),
+
+            // ForIn, While, Fan, Await, etc. — conservatively impure. IndexAccess
+            // and MapAccess sit here because they can trap: a function whose body
+            // indexes is not speculation-safe, so it must not enter the pure set
+            // that licenses hoisting (almide#1424). Listed explicitly so a new
+            // IrExprKind is a compile error here, not a silently-impure default.
+            IrExprKind::Fan { .. } | IrExprKind::ForIn { .. }
+            | IrExprKind::While { .. } | IrExprKind::TailCall { .. }
+            | IrExprKind::RuntimeCall { .. } | IrExprKind::MapLiteral { .. }
+            | IrExprKind::SpreadRecord { .. } | IrExprKind::MapAccess { .. }
+            | IrExprKind::IndexAccess { .. }
+            | IrExprKind::Try { .. } | IrExprKind::Unwrap { .. }
+            | IrExprKind::ToOption { .. } | IrExprKind::OptionalChain { .. }
+            | IrExprKind::RcWrap { .. }
+            | IrExprKind::InlineRust { .. } | IrExprKind::ClosureCreate { .. }
+            | IrExprKind::EnvLoad { .. } | IrExprKind::IterChain { .. }
+            | IrExprKind::Todo { .. } => false,
         }
-        // Assignments are mutations → impure
-        IrStmtKind::Assign { .. } | IrStmtKind::IndexAssign { .. }
-        | IrStmtKind::FieldAssign { .. } | IrStmtKind::MapInsert { .. }
-        | IrStmtKind::ListSwap { .. } | IrStmtKind::ListReverse { .. }
-        | IrStmtKind::ListRotateLeft { .. } | IrStmtKind::ListCopySlice { .. } => false,
-        IrStmtKind::Expr { expr } => expr_is_pure_with(expr, pure_fns),
-        IrStmtKind::Guard { cond, else_ } => {
-            expr_is_pure_with(cond, pure_fns) && expr_is_pure_with(else_, pure_fns)
+    }
+
+    fn stmt(&mut self, stmt: &IrStmt) -> bool {
+        match &stmt.kind {
+            IrStmtKind::Bind { value, .. } | IrStmtKind::BindDestructure { value, .. } => {
+                self.expr(value)
+            }
+            // Assignments are mutations → impure
+            IrStmtKind::Assign { .. } | IrStmtKind::IndexAssign { .. }
+            | IrStmtKind::FieldAssign { .. } | IrStmtKind::MapInsert { .. }
+            | IrStmtKind::ListSwap { .. } | IrStmtKind::ListReverse { .. }
+            | IrStmtKind::ListRotateLeft { .. } | IrStmtKind::ListCopySlice { .. } => false,
+            IrStmtKind::Expr { expr } => self.expr(expr),
+            IrStmtKind::Guard { cond, else_ } => {
+                self.expr(cond) && self.expr(else_)
+            }
+            IrStmtKind::RcInc { .. } | IrStmtKind::RcDec { .. } => false,
+            IrStmtKind::Comment { .. } => true,
         }
-        IrStmtKind::RcInc { .. } | IrStmtKind::RcDec { .. } => false,
-        IrStmtKind::Comment { .. } => true,
     }
 }

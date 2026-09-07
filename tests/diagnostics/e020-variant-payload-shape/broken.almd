@@ -1,0 +1,6 @@
+// The same variant case names, but one Circle carries a record payload and
+// the other a positional one — distinct structures under one name.
+type Shape = | Circle { r: Float } | Dot
+type Shape = | Circle(Float) | Dot
+
+fn main() -> Unit = println("ok")

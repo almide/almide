@@ -122,7 +122,9 @@ The guarantee is **continuous, with an explicit, ledger-managed scope**: "byte-i
 This claim is not prose. Every observable promise is a named contract in the [behavior-contract ledger](docs/contracts/), each traceable to executable evidence, and the numbers below are regenerated from the ledger (`scripts/gen-claims.sh`, enforced by `scripts/check-contracts.sh` in CI):
 
 <!-- claims:generated:start — derived from docs/contracts/contracts.toml by scripts/gen-claims.sh; DO NOT EDIT between the markers -->
-> **Ledger: 328 contracts — 328 active, 0 flagged-for-revision.**
+> <!-- counts:generated:start (as of 2026-09-06) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
+> **Ledger: 342 contracts — 342 active, 0 flagged-for-revision.**
+> <!-- counts:generated:end -->
 >
 > **Divergences awaiting a fix: none.** Every contract in the ledger is
 > `active`, carrying executable evidence of class >= `fixture`. The one
@@ -143,9 +145,9 @@ No runtime, no GC, no interpreter — native compiles through Rust to machine co
 <!-- wasm-size:generated:start — rendered from docs/benchmarks/wasm-size.txt by scripts/gen-readme-stats.sh; DO NOT EDIT between the markers -->
 | Program (`almide build --target wasm`, verified, as shipped) | incumbent v1 leg | structural leg |
 |---|---:|---:|
-| Hello, world | **1,096 B** | **2,225 B** |
+| Hello, world | **1,096 B** | **1,337 B** |
 
-Measured on almide 0.61.0, 2026-08-31, from `docs/benchmarks/wasm-size.txt`; no post-hoc optimizer touches the shipped bytes (`--wasm-opt` is opt-in and its output is not the verified module).
+Measured on almide 0.62.0, 2026-09-07, from `docs/benchmarks/wasm-size.txt`; no post-hoc optimizer touches the shipped bytes (`--wasm-opt` is opt-in and its output is not the verified module).
 <!-- wasm-size:generated:end -->
 
 Rust on the same wasm target is 40 KB+ for Hello, world even fully size-tuned; the native minigit CLI binary is 418 KB stripped with 0 dependencies. The byte-by-byte dissection, measured 2026-07-23 on the incumbent leg: **[docs/wasm/WASM-OUTPUT.md](./docs/wasm/WASM-OUTPUT.md)**.
@@ -170,12 +172,17 @@ build. Regenerate with `almide run tools/almide-gates/src/main.almd -- bench`; t
 <!-- wasm-runtime:generated:start — rendered from docs/benchmarks/wasm-runtime.txt by scripts/gen-readme-stats.sh; DO NOT EDIT between the markers -->
 | Benchmark (`almide bench`, verify-then-time, median of 5) | wasm/native ratio |
 |---|---:|
-| nbody | **2.16×** |
-| spectralnorm | **2.25×** |
-| binarytrees | **0.81×** |
-| listbuild_append | **4.12×** |
+| nbody | **2.58×** |
+| spectralnorm | **2.61×** |
+| binarytrees | **0.94×** |
+| fft | **4.48×** |
+| strchurn | **1.04×** |
+| listbuild_append | **3.40×** |
+| listbuild_combinator | **3.45×** |
+| listbuild_prealloc | **3.36×** |
+| mapbuild | **0.97×** |
 
-Embedded wasm host (Perceus RC in linear memory) against the native binary, same machine, same run. Cross-engine ratios do NOT cancel hardware (a 2-core CI runner measures nbody ~10x worse), so the ratio verdict runs on the stamping machine class and CI gates the STATUS taxonomy below (`scripts/check-wasm-runtime-ratio.sh`). binarytrees runs its fan arms on the embedded host's thread pool, which is why wasm WINS there. The unmeasured corpus cells stay honest instead of estimated: 3 route to the incumbent artifact, 1 wall on the wasm build path, 4 exhaust the embedded heap (#1729) — each re-measured every gate run, so a cell that starts benching fails the gate until its row is promoted. Ledger: `docs/benchmarks/wasm-runtime.txt` (almide 0.61.0, 2026-09-01).
+Embedded wasm host (Perceus RC in linear memory) against the native binary, same machine, same run. Cross-engine ratios do NOT cancel hardware (a 2-core CI runner measures nbody ~10x worse), so the ratio verdict runs on the stamping machine class and CI gates the STATUS taxonomy below (`scripts/check-wasm-runtime-ratio.sh`). binarytrees runs its fan arms on the embedded host's thread pool, which is why wasm WINS there. The unmeasured corpus cells stay honest instead of estimated: 3 route to the incumbent artifact, 1 wall on the wasm build path, 0 exhaust the embedded heap (#1729) — each re-measured every gate run, so a cell that starts benching fails the gate until its row is promoted. Ledger: `docs/benchmarks/wasm-runtime.txt` (almide 0.61.1, 2026-09-04).
 <!-- wasm-runtime:generated:end -->
 
 ## How It Works
@@ -200,6 +207,7 @@ almide run app.almd                  # Compile + execute (native)
 almide build app.almd --target wasm  # Build WebAssembly (WASI)
 almide test                          # Find and run all test blocks (recursive)
 almide check app.almd                # Type check only
+almide check app.almd --target wasm  # + the wasm build route: E081/E082 at check time (#1922)
 almide fmt app.almd                  # Format source code
 ```
 
@@ -223,10 +231,12 @@ The Perceus proof above proves one compiler pass, once. v1 generalizes that prin
 | Playground | [Live](https://almide.github.io/playground/) — the compiler runs as WASM in the browser |
 
 <!-- stats:generated:start — derived from docs/stdlib/*.md, spec/, and docs/contracts/contracts.toml by scripts/gen-readme-stats.sh; DO NOT EDIT between the markers -->
+<!-- counts:generated:start (as of 2026-09-06) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
 | Derived count | Value |
 |---|---|
-| Stdlib | 971 functions across 43 modules — self-hosted `.almd`, signature indexes regenerated from the compiler by `tools/gen-stdlib-doc-index.py` |
-| Tests | 427 `.almd` test files under `spec/` (`almide test spec/`) + the 328-contract cross-target ledger |
+| Stdlib | 985 functions across 43 modules — self-hosted `.almd`, signature indexes regenerated from the compiler by `tools/gen-stdlib-doc-index.py` |
+| Tests | 433 `.almd` test files under `spec/` (`almide test spec/`) + the 342-contract cross-target ledger |
+<!-- counts:generated:end -->
 <!-- stats:generated:end -->
 
 ## Ecosystem and documentation

@@ -1,5 +1,5 @@
 // @contract: C-275
-// ALS-R7 (docs/specs/als/runtime.md): the http response-header surface.
+// ALS-R8 (docs/specs/als/runtime.md): the http response-header surface.
 // Field names are case-insensitive (RFC 9110 §5.1, ASCII fold), a response
 // carries at most one entry per field name, `with_headers` yields EXACTLY the
 // caller's map with no seeded Content-Type, and set-then-get round-trips under

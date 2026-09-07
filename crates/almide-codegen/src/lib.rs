@@ -34,6 +34,7 @@ pub mod pass_capture_clone;
 pub mod pass_shared_cell_borrow;
 pub mod pass_clone;
 pub mod pass_clone_loops;
+pub mod pass_clone_interp;
 pub mod pass_top_let_storage;
 pub mod pass_fan_lowering;
 pub mod pass_list_pattern;
@@ -47,6 +48,7 @@ pub mod pass_effect_inference;
 pub mod pass_tco;
 pub mod pass_licm;
 pub mod pass_peephole;
+pub mod pass_range_counting;
 pub mod perceus_verified;
 pub mod pass_egg_saturation;
 pub mod pass_matrix_shape_spec;
@@ -279,7 +281,7 @@ pub fn codegen_with(program: &mut IrProgram, target: Target, options: &CodegenOp
 
 
 /// The fixed runtime prelude: AlmideConcat trait + impls, the almide_eq!/almide_ne!
-/// macros, and the RcCow<T> COW value type with its impls.
+/// macros, and the AlmideRcCow<T> COW value type with its impls.
 ///
 /// `for_crate` toggles between two emission modes:
 /// - `false` (inline): private items, plain `macro_rules!` — one self-contained main.rs.
@@ -335,33 +337,33 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     // checked against len as usize; negative or >= len aborts.
     s.push_str(&format!("{macro_attr}macro_rules! almide_index {{ ($xs:expr, $i:expr) => {{{{ let (__xs, __i) = (&$xs, $i as i64); if __i < 0 || (__i as u64) >= __xs.len() as u64 {{ eprintln!(\"Error: index out of bounds\"); std::process::exit(1); }} __xs[__i as usize].clone() }}}}; }}\n"));
     s.push_str(&format!("{macro_attr}macro_rules! almide_index_set {{ ($xs:expr, $i:expr, $v:expr) => {{{{ let __i = $i as i64; if __i < 0 || (__i as u64) >= $xs.len() as u64 {{ eprintln!(\"Error: index out of bounds\"); std::process::exit(1); }} $xs[__i as usize] = $v; }}}}; }}\n"));
-    // RcCow<T>: COW value type. Clone = Rc::clone (O(1)), mutation = Rc::make_mut (COW).
+    // AlmideRcCow<T>: COW value type. Clone = Rc::clone (O(1)), mutation = Rc::make_mut (COW).
     // Inspired by Swift's value type semantics.
-    s.push_str(&format!("{vis}struct RcCow<T>({vis}std::rc::Rc<T>);\n"));
-    s.push_str("impl<T: std::fmt::Debug> std::fmt::Debug for RcCow<T> { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { self.0.fmt(f) } }\n");
-    s.push_str("impl<T: Clone> Clone for RcCow<T> { fn clone(&self) -> Self { RcCow(std::rc::Rc::clone(&self.0)) } }\n");
-    s.push_str("impl<T: PartialEq> PartialEq for RcCow<T> { fn eq(&self, other: &Self) -> bool { *self.0 == *other.0 } }\n");
-    s.push_str("impl<T: PartialEq> PartialEq<T> for RcCow<T> { fn eq(&self, other: &T) -> bool { *self.0 == *other } }\n");
-    s.push_str("impl PartialEq<&str> for RcCow<String> { fn eq(&self, other: &&str) -> bool { self.0.as_str() == *other } }\n");
-    s.push_str("impl<T> std::ops::Deref for RcCow<T> { type Target = T; fn deref(&self) -> &T { &self.0 } }\n");
-    s.push_str("impl<T: Clone> std::ops::DerefMut for RcCow<T> { fn deref_mut(&mut self) -> &mut T { std::rc::Rc::make_mut(&mut self.0) } }\n");
-    s.push_str(&format!("impl<T> RcCow<T> {{ {vis}fn new(v: T) -> Self {{ RcCow(std::rc::Rc::new(v)) }} {vis}fn make_mut(&mut self) -> &mut T where T: Clone {{ std::rc::Rc::make_mut(&mut self.0) }} {vis}fn into_inner(self) -> T where T: Clone {{ std::rc::Rc::try_unwrap(self.0).unwrap_or_else(|rc| (*rc).clone()) }} }}\n"));
-    s.push_str("impl<T> From<T> for RcCow<T> { fn from(v: T) -> Self { RcCow::new(v) } }\n");
-    s.push_str("impl<T: std::fmt::Display> std::fmt::Display for RcCow<T> { fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { self.0.fmt(f) } }\n");
-    s.push_str("impl<T: std::hash::Hash> std::hash::Hash for RcCow<T> { fn hash<H: std::hash::Hasher>(&self, state: &mut H) { self.0.hash(state) } }\n");
-    // Blanket AlmideConcat: RcCow<T> + Rhs and RcCow<T> + Val<U> — 2 impls cover all combos.
-    s.push_str("impl<T: Clone, Rhs> AlmideConcat<Rhs> for RcCow<T> where T: AlmideConcat<Rhs> { type Output = RcCow<<T as AlmideConcat<Rhs>>::Output>; #[inline(always)] fn concat(self, rhs: Rhs) -> Self::Output { RcCow::new((*self).clone().concat(rhs)) } }\n");
-    // SharedMut<T>: shared interior-mutable cell for a non-Copy `var` captured and
+    s.push_str(&format!("{vis}struct AlmideRcCow<T>({vis}std::rc::Rc<T>);\n"));
+    s.push_str("impl<T: std::fmt::Debug> std::fmt::Debug for AlmideRcCow<T> { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { self.0.fmt(f) } }\n");
+    s.push_str("impl<T: Clone> Clone for AlmideRcCow<T> { fn clone(&self) -> Self { AlmideRcCow(std::rc::Rc::clone(&self.0)) } }\n");
+    s.push_str("impl<T: PartialEq> PartialEq for AlmideRcCow<T> { fn eq(&self, other: &Self) -> bool { *self.0 == *other.0 } }\n");
+    s.push_str("impl<T: PartialEq> PartialEq<T> for AlmideRcCow<T> { fn eq(&self, other: &T) -> bool { *self.0 == *other } }\n");
+    s.push_str("impl PartialEq<&str> for AlmideRcCow<String> { fn eq(&self, other: &&str) -> bool { self.0.as_str() == *other } }\n");
+    s.push_str("impl<T> std::ops::Deref for AlmideRcCow<T> { type Target = T; fn deref(&self) -> &T { &self.0 } }\n");
+    s.push_str("impl<T: Clone> std::ops::DerefMut for AlmideRcCow<T> { fn deref_mut(&mut self) -> &mut T { std::rc::Rc::make_mut(&mut self.0) } }\n");
+    s.push_str(&format!("impl<T> AlmideRcCow<T> {{ {vis}fn new(v: T) -> Self {{ AlmideRcCow(std::rc::Rc::new(v)) }} {vis}fn make_mut(&mut self) -> &mut T where T: Clone {{ std::rc::Rc::make_mut(&mut self.0) }} {vis}fn into_inner(self) -> T where T: Clone {{ std::rc::Rc::try_unwrap(self.0).unwrap_or_else(|rc| (*rc).clone()) }} }}\n"));
+    s.push_str("impl<T> From<T> for AlmideRcCow<T> { fn from(v: T) -> Self { AlmideRcCow::new(v) } }\n");
+    s.push_str("impl<T: std::fmt::Display> std::fmt::Display for AlmideRcCow<T> { fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { self.0.fmt(f) } }\n");
+    s.push_str("impl<T: std::hash::Hash> std::hash::Hash for AlmideRcCow<T> { fn hash<H: std::hash::Hasher>(&self, state: &mut H) { self.0.hash(state) } }\n");
+    // Blanket AlmideConcat: AlmideRcCow<T> + Rhs and AlmideRcCow<T> + Val<U> — 2 impls cover all combos.
+    s.push_str("impl<T: Clone, Rhs> AlmideConcat<Rhs> for AlmideRcCow<T> where T: AlmideConcat<Rhs> { type Output = AlmideRcCow<<T as AlmideConcat<Rhs>>::Output>; #[inline(always)] fn concat(self, rhs: Rhs) -> Self::Output { AlmideRcCow::new((*self).clone().concat(rhs)) } }\n");
+    // AlmideSharedMut<T>: shared interior-mutable cell for a non-Copy `var` captured and
     // mutated through a closure (Closure v2, P6). The non-Copy analogue of the
     // `Rc<Cell<T>>` used for Copy captures: `Clone` is `Rc::clone` (O(1), shares the
     // SAME cell) so a `move` closure's mutation is visible to the enclosing scope —
-    // unlike `RcCow`, whose `make_mut` clones on a shared write and loses it. The
+    // unlike `AlmideRcCow`, whose `make_mut` clones on a shared write and loses it. The
     // `get`/`set` API mirrors `Cell` so reads/assigns lower identically for both.
-    s.push_str(&format!("{vis}struct SharedMut<T>({vis}std::rc::Rc<std::cell::RefCell<T>>);\n"));
-    s.push_str("impl<T> Clone for SharedMut<T> { fn clone(&self) -> Self { SharedMut(std::rc::Rc::clone(&self.0)) } }\n");
-    s.push_str("impl<T: std::fmt::Debug> std::fmt::Debug for SharedMut<T> { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { self.0.borrow().fmt(f) } }\n");
-    s.push_str("impl<T: PartialEq> PartialEq for SharedMut<T> { fn eq(&self, other: &Self) -> bool { *self.0.borrow() == *other.0.borrow() } }\n");
-    s.push_str(&format!("impl<T> SharedMut<T> {{ {vis}fn new(v: T) -> Self {{ SharedMut(std::rc::Rc::new(std::cell::RefCell::new(v))) }} {vis}fn get(&self) -> T where T: Clone {{ self.0.borrow().clone() }} {vis}fn set(&self, v: T) {{ *self.0.borrow_mut() = v; }} {vis}fn borrow(&self) -> std::cell::Ref<'_, T> {{ self.0.borrow() }} {vis}fn borrow_mut(&self) -> std::cell::RefMut<'_, T> {{ self.0.borrow_mut() }} }}\n"));
+    s.push_str(&format!("{vis}struct AlmideSharedMut<T>({vis}std::rc::Rc<std::cell::RefCell<T>>);\n"));
+    s.push_str("impl<T> Clone for AlmideSharedMut<T> { fn clone(&self) -> Self { AlmideSharedMut(std::rc::Rc::clone(&self.0)) } }\n");
+    s.push_str("impl<T: std::fmt::Debug> std::fmt::Debug for AlmideSharedMut<T> { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { self.0.borrow().fmt(f) } }\n");
+    s.push_str("impl<T: PartialEq> PartialEq for AlmideSharedMut<T> { fn eq(&self, other: &Self) -> bool { *self.0.borrow() == *other.0.borrow() } }\n");
+    s.push_str(&format!("impl<T> AlmideSharedMut<T> {{ {vis}fn new(v: T) -> Self {{ AlmideSharedMut(std::rc::Rc::new(std::cell::RefCell::new(v))) }} {vis}fn get(&self) -> T where T: Clone {{ self.0.borrow().clone() }} {vis}fn set(&self, v: T) {{ *self.0.borrow_mut() = v; }} {vis}fn borrow(&self) -> std::cell::Ref<'_, T> {{ self.0.borrow() }} {vis}fn borrow_mut(&self) -> std::cell::RefMut<'_, T> {{ self.0.borrow_mut() }} }}\n"));
     s.push_str(&almide_repr_prelude(vis));
     s
 }
@@ -417,9 +419,9 @@ fn almide_repr_prelude(vis: &str) -> String {
     s.push_str("impl<T: AlmideRepr> AlmideRepr for std::option::Option<T> { fn almide_repr(&self) -> String { match self { Some(v) => format!(\"some({})\", v.almide_repr()), None => \"none\".to_string() } } }\n");
     // Result: `ok(v)` / `err(e)`.
     s.push_str("impl<T: AlmideRepr, E: AlmideRepr> AlmideRepr for std::result::Result<T, E> { fn almide_repr(&self) -> String { match self { Ok(v) => format!(\"ok({})\", v.almide_repr()), Err(e) => format!(\"err({})\", e.almide_repr()) } } }\n");
-    // RcCow / SharedMut transparently forward to the wrapped value.
-    s.push_str("impl<T: AlmideRepr> AlmideRepr for RcCow<T> { fn almide_repr(&self) -> String { (**self).almide_repr() } }\n");
-    s.push_str("impl<T: AlmideRepr + Clone> AlmideRepr for SharedMut<T> { fn almide_repr(&self) -> String { self.0.borrow().almide_repr() } }\n");
+    // AlmideRcCow / AlmideSharedMut transparently forward to the wrapped value.
+    s.push_str("impl<T: AlmideRepr> AlmideRepr for AlmideRcCow<T> { fn almide_repr(&self) -> String { (**self).almide_repr() } }\n");
+    s.push_str("impl<T: AlmideRepr + Clone> AlmideRepr for AlmideSharedMut<T> { fn almide_repr(&self) -> String { self.0.borrow().almide_repr() } }\n");
     // Reference forwarders so `almide_repr(&&x)` and slice elements compose.
     s.push_str("impl<T: AlmideRepr + ?Sized> AlmideRepr for &T { fn almide_repr(&self) -> String { (**self).almide_repr() } }\n");
     s.push_str("impl<T: AlmideRepr + ?Sized> AlmideRepr for std::boxed::Box<T> { fn almide_repr(&self) -> String { (**self).almide_repr() } }\n");
@@ -457,20 +459,21 @@ fn resolve_runtime_deps(needed: &mut std::collections::HashSet<&str>) {
     }
 }
 
-/// Collect the runtime module bodies for the `needed` set: hoist top-level `use`
-/// to the front, deduplicate, and skip struct definitions the walker already
-/// emitted (present in `user_code`) to avoid E0428. Returns the assembled block.
 /// Process one runtime module's (already-test-block-stripped) source lines,
 /// appending top-level `use` lines into `use_set`/`use_lines` (deduped) and
-/// everything else into `body_lines` — skipping a `#[derive(...)] pub
-/// struct Name { ... }` block whose struct the walker already emitted into
-/// `user_code`. Extracted from `rust_runtime_modules` (cog>30
-/// decomposition, second round): a write-only accumulator over
+/// everything else into `body_lines`. Extracted from `rust_runtime_modules`
+/// (cog>30 decomposition, second round): a write-only accumulator over
 /// `use_set`/`use_lines`/`body_lines`, never read back to change its own
 /// branching within this call.
+///
+/// No runtime item is ever skipped in favour of a walker-emitted one: every
+/// runtime type carries a reserved `Almide*` spelling the walker never
+/// emits a decl for (walker/runtime_owned.rs, #1821). The former name-keyed
+/// `#[derive] pub struct` skip — which deduped the bundled `FileStat` /
+/// `ProcessStatus` twins — silently substituted a USER struct of that name
+/// for the runtime's, breaking the runtime's own constructors (E0560).
 fn append_runtime_module_lines(
     source: &str,
-    user_code: &str,
     use_set: &mut std::collections::HashSet<String>,
     use_lines: &mut Vec<String>,
     body_lines: &mut Vec<String>,
@@ -480,10 +483,6 @@ fn append_runtime_module_lines(
     let mut i = 0;
     while i < lines.len() {
         if let Some(next) = try_consume_use_line(&lines, i, use_set, use_lines) {
-            i = next;
-            continue;
-        }
-        if let Some(next) = try_skip_emitted_struct_block(&lines, i, user_code) {
             i = next;
             continue;
         }
@@ -514,33 +513,6 @@ fn try_consume_use_line(
     } else {
         None
     }
-}
-
-/// Try to consume a `#[derive(...)] pub struct Name { ... }` block starting
-/// at `lines[i]` whose struct `user_code` already contains (the walker
-/// already emitted it). Returns the index right after the closing brace when
-/// the block is skipped. Extracted from `append_runtime_module_lines`.
-fn try_skip_emitted_struct_block(lines: &[&str], i: usize, user_code: &str) -> Option<usize> {
-    let trimmed = lines[i].trim();
-    if !trimmed.starts_with("#[derive(") { return None; }
-    let next = lines.get(i + 1)?;
-    let struct_name = next.trim().strip_prefix("pub struct ")
-        .and_then(|s| s.split_whitespace().next())
-        .map(|s| s.trim_end_matches('{').trim())?;
-    let needle = format!("struct {}", struct_name);
-    if !user_code.contains(&needle) { return None; }
-    // Skip derive + struct + fields + closing brace
-    let mut j = i + 1; // skip #[derive]
-    let mut depth = 0u32;
-    while j < lines.len() {
-        if lines[j].contains('{') { depth += 1; }
-        if lines[j].contains('}') {
-            depth = depth.saturating_sub(1);
-            if depth == 0 { j += 1; break; }
-        }
-        j += 1;
-    }
-    Some(j)
 }
 
 /// Remove single-item `use a::b::X;` lines when a group `use
@@ -575,13 +547,13 @@ fn dedup_use_lines(use_lines: Vec<String>, use_set: &std::collections::HashSet<S
     }).collect()
 }
 
-fn rust_runtime_modules(needed: &std::collections::HashSet<&str>, user_code: &str) -> String {
+fn rust_runtime_modules(needed: &std::collections::HashSet<&str>) -> String {
     let mut use_set = std::collections::HashSet::new();
     let mut use_lines = Vec::new();
     let mut body_lines = Vec::new();
     for (name, source) in crate::generated::rust_runtime::RUST_RUNTIME_MODULES {
         if needed.contains(name) {
-            append_runtime_module_lines(source, user_code, &mut use_set, &mut use_lines, &mut body_lines);
+            append_runtime_module_lines(source, &mut use_set, &mut use_lines, &mut body_lines);
         }
     }
     let use_lines = dedup_use_lines(use_lines, &use_set);
@@ -615,7 +587,7 @@ pub fn emit_runtime_crate() -> String {
             needed.insert(*name);
         }
     }
-    out.push_str(&rust_runtime_modules(&needed, ""));
+    out.push_str(&rust_runtime_modules(&needed));
     // matrix.rs calls `almide_kernel::…`; embed the kernel as a crate-local module so
     // the single-crate runtime rlib resolves it (no extern). Always present here — the
     // shared rlib includes every std module, matrix among them.
@@ -664,8 +636,14 @@ fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetC
                     needed.insert(name);
                 }
             }
+            // A TYPE reference is a use of the module that defines the type
+            // (#1829): `let e: Endian = BigEndian` names bytes.rs's enum
+            // without calling a `bytes.*` fn, and the call-driven set above
+            // left the module out. The reserved spelling in the user code is
+            // the reference — see `walker::runtime_owned::modules_spelled_in`.
+            needed.extend(walker::runtime_owned::modules_spelled_in(&user_code));
             resolve_runtime_deps(&mut needed);
-            output.push_str(&rust_runtime_modules(&needed, &user_code));
+            output.push_str(&rust_runtime_modules(&needed));
             // matrix.rs calls `almide_kernel::…`; when matrix is included, drop the
             // embedded kernel in beside it — above the boundary, so it stays in the
             // runtime preamble (the rlib split and the inline build both keep it).

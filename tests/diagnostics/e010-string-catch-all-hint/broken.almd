@@ -1,0 +1,9 @@
+// String literal arms can never cover every String — the hint must name the
+// String subject and ask for a catch-all '_' arm.
+fn kind_to_rust(kind: String) -> String = match kind {
+  "int"    => "i64",
+  "float"  => "f64",
+  "string" => "String",
+}
+
+fn main() -> Unit = println(kind_to_rust("bool"))

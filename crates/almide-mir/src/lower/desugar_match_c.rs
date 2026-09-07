@@ -51,7 +51,7 @@ pub fn desugar_tuple_empty_list_match(body: &IrExpr) -> Option<IrExpr> {
                 subject: Box::new(refs[j].clone()),
                 arms: vec![
                     almide_ir::IrMatchArm {
-                        pattern: IrPattern::List { elements: Vec::new() },
+                        pattern: IrPattern::List { elements: Vec::new(), rest: Option::None },
                         guard: Option::None,
                         body: then_e,
                     },
@@ -145,7 +145,7 @@ pub fn desugar_tuple_empty_list_match(body: &IrExpr) -> Option<IrExpr> {
         let mut cond_n = 0usize;
         for p in pats {
             match p {
-                IrPattern::List { elements } if elements.is_empty() => {
+                IrPattern::List { elements, rest: Option::None } if elements.is_empty() => {
                     cps.push(Cp::Empty);
                     cond_n += 1;
                 }
@@ -326,7 +326,7 @@ pub fn desugar_list_pattern_match(body: &IrExpr) -> Option<IrExpr> {
         let mut groups: Vec<(usize, Vec<&almide_ir::IrMatchArm>)> = Vec::new();
         let mut interesting = false;
         for a in init {
-            let IrPattern::List { elements } = &a.pattern else { return None };
+            let IrPattern::List { elements, rest: Option::None } = &a.pattern else { return None };
             for p in elements {
                 match p {
                     IrPattern::Bind { .. } | IrPattern::Wildcard | IrPattern::Literal { .. } => {}
@@ -353,7 +353,7 @@ pub fn desugar_list_pattern_match(body: &IrExpr) -> Option<IrExpr> {
         groups.iter().any(|(_, gas)| {
             !gas.iter().any(|a| {
                 a.guard.is_none()
-                    && matches!(&a.pattern, IrPattern::List { elements }
+                    && matches!(&a.pattern, IrPattern::List { elements, rest: Option::None }
                         if elements.iter().all(|p| matches!(p,
                             IrPattern::Bind { .. } | IrPattern::Wildcard)))
             })
@@ -507,7 +507,7 @@ pub fn desugar_list_pattern_match(body: &IrExpr) -> Option<IrExpr> {
         let mut inner = last_body.clone();
         let mut terminated = false;
         for a in gas.iter().rev() {
-            let IrPattern::List { elements } = &a.pattern else { unreachable!() };
+            let IrPattern::List { elements, .. } = &a.pattern else { unreachable!() };
             let mut cond: Option<IrExpr> = Option::None;
             for (i, p) in elements.iter().enumerate() {
                 match p {

@@ -4,44 +4,44 @@
 // Copyright (C) 1993, 2004 by Sun Microsystems, Inc. All rights reserved.
 // ====================================================
 
-const S1: f64 = -1.66666666666666324348e-01; /* 0xBFC55555, 0x55555549 */
-const S2: f64 = 8.33333333332248946124e-03; /* 0x3F811111, 0x1110F8A6 */
-const S3: f64 = -1.98412698298579493134e-04; /* 0xBF2A01A0, 0x19C161D5 */
-const S4: f64 = 2.75573137070700676789e-06; /* 0x3EC71DE3, 0x57B1FE7D */
-const S5: f64 = -2.50507602534068634195e-08; /* 0xBE5AE5E6, 0x8A2B9CEB */
-const S6: f64 = 1.58969099521155010221e-10; /* 0x3DE5D93A, 0x5ACFD57C */
+const ALMIDE_S1: f64 = -1.66666666666666324348e-01; /* 0xBFC55555, 0x55555549 */
+const ALMIDE_S2: f64 = 8.33333333332248946124e-03; /* 0x3F811111, 0x1110F8A6 */
+const ALMIDE_S3: f64 = -1.98412698298579493134e-04; /* 0xBF2A01A0, 0x19C161D5 */
+const ALMIDE_S4: f64 = 2.75573137070700676789e-06; /* 0x3EC71DE3, 0x57B1FE7D */
+const ALMIDE_S5: f64 = -2.50507602534068634195e-08; /* 0xBE5AE5E6, 0x8A2B9CEB */
+const ALMIDE_S6: f64 = 1.58969099521155010221e-10; /* 0x3DE5D93A, 0x5ACFD57C */
 
 /// kernel sin on ~[-pi/4, pi/4]. y is the tail of x; iy != 0 means y is used.
 fn k_sin(x: f64, y: f64, iy: i32) -> f64 {
     let z = x * x;
     let w = z * z;
-    let r = S2 + z * (S3 + z * S4) + z * w * (S5 + z * S6);
+    let r = ALMIDE_S2 + z * (ALMIDE_S3 + z * ALMIDE_S4) + z * w * (ALMIDE_S5 + z * ALMIDE_S6);
     let v = z * x;
     if iy == 0 {
-        x + v * (S1 + z * r)
+        x + v * (ALMIDE_S1 + z * r)
     } else {
-        x - ((z * (0.5 * y - v * r) - y) - v * S1)
+        x - ((z * (0.5 * y - v * r) - y) - v * ALMIDE_S1)
     }
 }
 
-const C1: f64 = 4.16666666666666019037e-02; /* 0x3FA55555, 0x5555554C */
-const C2: f64 = -1.38888888888741095749e-03; /* 0xBF56C16C, 0x16C15177 */
-const C3: f64 = 2.48015872894767294178e-05; /* 0x3EFA01A0, 0x19CB1590 */
-const C4: f64 = -2.75573143513906633035e-07; /* 0xBE927E4F, 0x809C52AD */
-const C5: f64 = 2.08757232129817482790e-09; /* 0x3E21EE9E, 0xBDB4B1C4 */
-const C6: f64 = -1.13596475577881948265e-11; /* 0xBDA8FAE9, 0xBE8838D4 */
+const ALMIDE_C1: f64 = 4.16666666666666019037e-02; /* 0x3FA55555, 0x5555554C */
+const ALMIDE_C2: f64 = -1.38888888888741095749e-03; /* 0xBF56C16C, 0x16C15177 */
+const ALMIDE_C3: f64 = 2.48015872894767294178e-05; /* 0x3EFA01A0, 0x19CB1590 */
+const ALMIDE_C4: f64 = -2.75573143513906633035e-07; /* 0xBE927E4F, 0x809C52AD */
+const ALMIDE_C5: f64 = 2.08757232129817482790e-09; /* 0x3E21EE9E, 0xBDB4B1C4 */
+const ALMIDE_C6: f64 = -1.13596475577881948265e-11; /* 0xBDA8FAE9, 0xBE8838D4 */
 
 /// kernel cos on [-pi/4, pi/4]. y is the tail of x.
 fn k_cos(x: f64, y: f64) -> f64 {
     let z = x * x;
     let w = z * z;
-    let r = z * (C1 + z * (C2 + z * C3)) + w * w * (C4 + z * (C5 + z * C6));
+    let r = z * (ALMIDE_C1 + z * (ALMIDE_C2 + z * ALMIDE_C3)) + w * w * (ALMIDE_C4 + z * (ALMIDE_C5 + z * ALMIDE_C6));
     let hz = 0.5 * z;
     let w = 1.0 - hz;
     w + (((1.0 - w) - hz) + (z * r - x * y))
 }
 
-static T: [f64; 13] = [
+static ALMIDE_T: [f64; 13] = [
     3.33333333333334091986e-01,  /* 3FD55555, 55555563 */
     1.33333333333201242699e-01,  /* 3FC11111, 1110FE7A */
     5.39682539762260521377e-02,  /* 3FABA1BA, 1BB341FE */
@@ -56,8 +56,8 @@ static T: [f64; 13] = [
     -1.85586374855275456654e-05, /* BEF375CB, DB605373 */
     2.59073051863633712884e-05,  /* 3EFB2A70, 74BF7AD4 */
 ];
-const PIO4: f64 = 7.85398163397448278999e-01; /* 3FE921FB, 54442D18 */
-const PIO4_LO: f64 = 3.06161699786838301793e-17; /* 3C81A626, 33145C07 */
+const ALMIDE_PIO4: f64 = 7.85398163397448278999e-01; /* 3FE921FB, 54442D18 */
+const ALMIDE_PIO4_LO: f64 = 3.06161699786838301793e-17; /* 3C81A626, 33145C07 */
 
 #[inline]
 fn zero_low_word(x: f64) -> f64 {
@@ -74,15 +74,15 @@ fn k_tan(mut x: f64, mut y: f64, odd: i32) -> f64 {
             x = -x;
             y = -y;
         }
-        x = (PIO4 - x) + (PIO4_LO - y);
+        x = (ALMIDE_PIO4 - x) + (ALMIDE_PIO4_LO - y);
         y = 0.0;
     }
     let z = x * x;
     let w = z * z;
-    let r = T[1] + w * (T[3] + w * (T[5] + w * (T[7] + w * (T[9] + w * T[11]))));
-    let v = z * (T[2] + w * (T[4] + w * (T[6] + w * (T[8] + w * (T[10] + w * T[12])))));
+    let r = ALMIDE_T[1] + w * (ALMIDE_T[3] + w * (ALMIDE_T[5] + w * (ALMIDE_T[7] + w * (ALMIDE_T[9] + w * ALMIDE_T[11]))));
+    let v = z * (ALMIDE_T[2] + w * (ALMIDE_T[4] + w * (ALMIDE_T[6] + w * (ALMIDE_T[8] + w * (ALMIDE_T[10] + w * ALMIDE_T[12])))));
     let s = z * x;
-    let r = y + z * (s * (r + v) + y) + s * T[0];
+    let r = y + z * (s * (r + v) + y) + s * ALMIDE_T[0];
     let w = x + r;
     if big {
         let sign = hx >> 31;
@@ -224,15 +224,15 @@ fn with_set_low_word(x: f64, lo: u32) -> f64 {
 // Copyright (C) 2004 by Sun Microsystems, Inc. All rights reserved.
 // ====================================================
 
-const EXP_HALF: [f64; 2] = [0.5, -0.5];
-const LN2HI: f64 = 6.93147180369123816490e-01; /* 0x3fe62e42, 0xfee00000 */
-const LN2LO: f64 = 1.90821492927058770002e-10; /* 0x3dea39ef, 0x35793c76 */
-const EXP_INVLN2: f64 = 1.44269504088896338700e+00; /* 0x3ff71547, 0x652b82fe */
-const EXP_P1: f64 = 1.66666666666666019037e-01; /* 0x3FC55555, 0x5555553E */
-const EXP_P2: f64 = -2.77777777770155933842e-03; /* 0xBF66C16C, 0x16BEBD93 */
-const EXP_P3: f64 = 6.61375632143793436117e-05; /* 0x3F11566A, 0xAF25DE2C */
-const EXP_P4: f64 = -1.65339022054652515390e-06; /* 0xBEBBBD41, 0xC5D26BF1 */
-const EXP_P5: f64 = 4.13813679705723846039e-08; /* 0x3E663769, 0x72BEA4D0 */
+const ALMIDE_EXP_HALF: [f64; 2] = [0.5, -0.5];
+const ALMIDE_LN2HI: f64 = 6.93147180369123816490e-01; /* 0x3fe62e42, 0xfee00000 */
+const ALMIDE_LN2LO: f64 = 1.90821492927058770002e-10; /* 0x3dea39ef, 0x35793c76 */
+const ALMIDE_EXP_INVLN2: f64 = 1.44269504088896338700e+00; /* 0x3ff71547, 0x652b82fe */
+const ALMIDE_EXP_P1: f64 = 1.66666666666666019037e-01; /* 0x3FC55555, 0x5555553E */
+const ALMIDE_EXP_P2: f64 = -2.77777777770155933842e-03; /* 0xBF66C16C, 0x16BEBD93 */
+const ALMIDE_EXP_P3: f64 = 6.61375632143793436117e-05; /* 0x3F11566A, 0xAF25DE2C */
+const ALMIDE_EXP_P4: f64 = -1.65339022054652515390e-06; /* 0xBEBBBD41, 0xC5D26BF1 */
+const ALMIDE_EXP_P5: f64 = 4.13813679705723846039e-08; /* 0x3E663769, 0x72BEA4D0 */
 
 /// `exp(x)` — bit-identical reference (vendored libm 0.2.16).
 fn exp(mut x: f64) -> f64 {
@@ -279,12 +279,12 @@ fn exp(mut x: f64) -> f64 {
         /* if |x| > 0.5 ln2 */
         if hx >= 0x3ff0a2b2 {
             /* if |x| >= 1.5 ln2 */
-            k = (EXP_INVLN2 * x + EXP_HALF[sign as usize]) as i32;
+            k = (ALMIDE_EXP_INVLN2 * x + ALMIDE_EXP_HALF[sign as usize]) as i32;
         } else {
             k = 1 - sign - sign;
         }
-        hi = x - k as f64 * LN2HI; /* k*ln2hi is exact here */
-        lo = k as f64 * LN2LO;
+        hi = x - k as f64 * ALMIDE_LN2HI; /* k*ln2hi is exact here */
+        lo = k as f64 * ALMIDE_LN2LO;
         x = hi - lo;
     } else if hx > 0x3e300000 {
         /* if |x| > 2**-28 */
@@ -299,7 +299,7 @@ fn exp(mut x: f64) -> f64 {
 
     /* x is now in primary range */
     xx = x * x;
-    c = x - xx * (EXP_P1 + xx * (EXP_P2 + xx * (EXP_P3 + xx * (EXP_P4 + xx * EXP_P5))));
+    c = x - xx * (ALMIDE_EXP_P1 + xx * (ALMIDE_EXP_P2 + xx * (ALMIDE_EXP_P3 + xx * (ALMIDE_EXP_P4 + xx * ALMIDE_EXP_P5))));
     y = 1. + (x * c / (2. - c) - lo + hi);
     if k == 0 {
         y

@@ -1,9 +1,11 @@
 // @contract: C-238
-// #1400, the load-bearing cell, ALONE in its own file because it is the one cell
-// the reference interpreter cannot vote on: 4294967294 iterations exhaust the
-// tree-walker's fuel budget by construction, and a whole-file abstention would
-// cost the sibling guard rails in range_bind_no_materialize.almd their third
-// vote too. The abstention is ledgered for THIS file only.
+// #1400, the load-bearing cell, ALONE in its own file: 4294967294 iterations
+// exhausted the general tree-walker's fuel budget by construction, so this was
+// the corpus's one ledgered reference abstention (split off so the sibling
+// guard rails in range_bind_no_materialize.almd kept their third vote). The
+// reference now votes here through its registerized integer-loop tier — every
+// iteration still executes, at a cost the totality gate can afford — and the
+// abstain ledger is empty.
 //
 // A `let`-bound range used only as a `for-in` head is not materialized. A
 // materializing leg needs ~32 GB for the block; a counting leg needs two locals.

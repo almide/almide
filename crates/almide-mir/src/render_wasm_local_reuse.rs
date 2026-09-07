@@ -99,126 +99,16 @@ pub(crate) fn plan_local_reuse(func: &MirFunction) -> Option<LocalReusePlan> {
 
     let params: BTreeSet<ValueId> = func.params.iter().map(|p| p.value).collect();
 
-    // First-def / first-touch / last-touch indexes over the flat op list.
-    let mut def_at: BTreeMap<ValueId, usize> = BTreeMap::new();
-    let mut first_touch: BTreeMap<ValueId, usize> = BTreeMap::new();
-    let mut last_touch: BTreeMap<ValueId, usize> = BTreeMap::new();
-    let mut const_defined: BTreeSet<ValueId> = BTreeSet::new();
-    let mut vals_buf: Vec<ValueId> = Vec::new();
-    for (i, op) in func.ops.iter().enumerate() {
-        if let Some(d) = defined_value(op) {
-            def_at.entry(d).or_insert(i);
-            // `Op::Const` renders NOTHING (the local is wasm's zero default —
-            // a previous occupant's bytes would break it), and `Op::ConstInt`
-            // is the Fuser's fn-wide-constant invariant (`scan_consts` maps
-            // dst → value with no position: a merged id carrying two consts,
-            // or a const plus anything else, substitutes the WRONG number at
-            // some read — the forced sweep caught it as hash corruption and a
-            // softmax trap). Both are EXCLUDED outright: never remapped,
-            // never a rep.
-            if matches!(op, Op::Const { .. } | Op::ConstInt { .. }) {
-                const_defined.insert(d);
-            }
-        }
-        vals_buf.clear();
-        op_values(op, &mut vals_buf);
-        for v in &vals_buf {
-            first_touch.entry(*v).or_insert(i);
-            last_touch.insert(*v, i);
-        }
+    // Decomposed (codopsy A, cog 50 in one frame): the four scans below are
+    // verbatim text moves — each takes exactly the values its block used and
+    // returns exactly what it produced; the bail-outs are the same `None`s.
+    let mut touches = reuse_touch_indexes(func);
+    if !reuse_defs_precede_touches(&params, &touches) {
+        return None;
     }
-
-    // Guard: every non-param value must be defined at or before its first
-    // touch — a violation means an op-list shape this pass's model does not
-    // cover, so bail (no reuse, no risk).
-    for (v, ft) in &first_touch {
-        if params.contains(v) {
-            continue;
-        }
-        match def_at.get(v) {
-            Some(d) if d <= ft => {}
-            _ => return None,
-        }
-    }
-
-    // Loop regions (start, end) from the flat markers, plus a per-op nesting
-    // depth (LoopStart/IfThen open at their own index's depth; body ops sit
-    // one deeper) and each value's DEF depth.
-    let mut regions: Vec<(usize, usize)> = Vec::new();
-    let mut stack: Vec<usize> = Vec::new();
-    let mut depth_at: Vec<usize> = Vec::with_capacity(func.ops.len());
-    let mut def_depth: BTreeMap<ValueId, usize> = BTreeMap::new();
-    let mut depth = 0usize;
-    for (i, op) in func.ops.iter().enumerate() {
-        match op {
-            Op::LoopStart => {
-                depth_at.push(depth);
-                stack.push(i);
-                depth += 1;
-            }
-            Op::LoopEnd => {
-                depth = depth.saturating_sub(1);
-                depth_at.push(depth);
-                let s = stack.pop()?;
-                regions.push((s, i));
-            }
-            Op::IfThen { .. } => {
-                depth_at.push(depth);
-                depth += 1;
-            }
-            Op::Else { .. } => {
-                depth_at.push(depth.saturating_sub(1));
-            }
-            Op::EndIf { .. } => {
-                depth = depth.saturating_sub(1);
-                depth_at.push(depth);
-            }
-            _ => depth_at.push(depth),
-        }
-        if let Some(d) = defined_value(op) {
-            def_depth.entry(d).or_insert_with(|| depth_at[i].max(depth));
-        }
-    }
-    if !stack.is_empty() {
-        return None; // unbalanced markers — not a shape to touch
-    }
-
-    // Fixpoint loop extension, two rules per region:
-    //  (a) live-into-a-loop ⇒ live to its end (the pre-loop def read each
-    //      iteration);
-    //  (b) CONDITIONALLY defined inside a loop ⇒ live to its end. A def at
-    //      nesting depth deeper than the loop body's own (inside an if arm,
-    //      or a nested loop that may run zero iterations) is NOT re-executed
-    //      on every iteration — on the skipping iteration the local carries
-    //      the PREVIOUS iteration's value across the back edge, a liveness
-    //      the textual range cannot see. The forced-threshold sweep caught
-    //      the miss as data corruption in the base64/hash/softmax loops.
-    //      An UNCONDITIONAL body def (depth == body depth) redefines before
-    //      every use and keeps its narrow range.
-    loop {
-        let mut changed = false;
-        for (s, e) in &regions {
-            let body_depth = depth_at[*s] + 1;
-            for (v, d) in &def_at {
-                let u = match last_touch.get_mut(v) {
-                    Some(u) => u,
-                    None => continue,
-                };
-                let live_in = d < s && *u >= *s && *u < *e;
-                let cond_in = d > s
-                    && *d < *e
-                    && *u < *e
-                    && def_depth.get(v).copied().unwrap_or(0) > body_depth;
-                if live_in || cond_in {
-                    *u = *e;
-                    changed = true;
-                }
-            }
-        }
-        if !changed {
-            break;
-        }
-    }
+    let regions = reuse_loop_regions(func)?;
+    reuse_extend_loop_ranges(&regions, &touches.def_at, &mut touches.last_touch);
+    let ReuseTouches { def_at, last_touch, const_defined, .. } = touches;
 
     // Slot type pools: the SAME classification the local declaration uses.
     let reprs = value_reprs_wasm(func);
@@ -280,6 +170,168 @@ pub(crate) fn plan_local_reuse(func: &MirFunction) -> Option<LocalReusePlan> {
     Some(LocalReusePlan { remap, slot_count })
 }
 
+/// The flat-op-list indexes `plan_local_reuse` scans: first def, first touch,
+/// last touch, and the `Const`/`ConstInt`-defined exclusion set.
+struct ReuseTouches {
+    def_at: BTreeMap<ValueId, usize>,
+    first_touch: BTreeMap<ValueId, usize>,
+    last_touch: BTreeMap<ValueId, usize>,
+    const_defined: BTreeSet<ValueId>,
+}
+
+/// Verbatim from `plan_local_reuse`: the first-def / first-touch / last-touch
+/// scan over the flat op list.
+fn reuse_touch_indexes(func: &MirFunction) -> ReuseTouches {
+    // First-def / first-touch / last-touch indexes over the flat op list.
+    let mut def_at: BTreeMap<ValueId, usize> = BTreeMap::new();
+    let mut first_touch: BTreeMap<ValueId, usize> = BTreeMap::new();
+    let mut last_touch: BTreeMap<ValueId, usize> = BTreeMap::new();
+    let mut const_defined: BTreeSet<ValueId> = BTreeSet::new();
+    let mut vals_buf: Vec<ValueId> = Vec::new();
+    for (i, op) in func.ops.iter().enumerate() {
+        if let Some(d) = defined_value(op) {
+            def_at.entry(d).or_insert(i);
+            // `Op::Const` renders NOTHING (the local is wasm's zero default —
+            // a previous occupant's bytes would break it), and `Op::ConstInt`
+            // is the Fuser's fn-wide-constant invariant (`scan_consts` maps
+            // dst → value with no position: a merged id carrying two consts,
+            // or a const plus anything else, substitutes the WRONG number at
+            // some read — the forced sweep caught it as hash corruption and a
+            // softmax trap). Both are EXCLUDED outright: never remapped,
+            // never a rep.
+            if matches!(op, Op::Const { .. } | Op::ConstInt { .. }) {
+                const_defined.insert(d);
+            }
+        }
+        vals_buf.clear();
+        op_values(op, &mut vals_buf);
+        for v in &vals_buf {
+            first_touch.entry(*v).or_insert(i);
+            last_touch.insert(*v, i);
+        }
+    }
+    ReuseTouches { def_at, first_touch, last_touch, const_defined }
+}
+
+/// Verbatim from `plan_local_reuse`: `false` = a non-param value is touched
+/// before its def (the caller bails with `None`, exactly as before).
+fn reuse_defs_precede_touches(params: &BTreeSet<ValueId>, touches: &ReuseTouches) -> bool {
+    let ReuseTouches { def_at, first_touch, .. } = touches;
+    // Guard: every non-param value must be defined at or before its first
+    // touch — a violation means an op-list shape this pass's model does not
+    // cover, so bail (no reuse, no risk).
+    for (v, ft) in first_touch {
+        if params.contains(v) {
+            continue;
+        }
+        match def_at.get(v) {
+            Some(d) if d <= ft => {}
+            _ => return false,
+        }
+    }
+    true
+}
+
+/// The loop regions and nesting depths `plan_local_reuse` extends ranges over.
+struct ReuseRegions {
+    regions: Vec<(usize, usize)>,
+    depth_at: Vec<usize>,
+    def_depth: BTreeMap<ValueId, usize>,
+}
+
+/// Verbatim from `plan_local_reuse`: the region / depth scan. `None` on an
+/// unbalanced marker stream (the same two bail-outs).
+fn reuse_loop_regions(func: &MirFunction) -> Option<ReuseRegions> {
+    // Loop regions (start, end) from the flat markers, plus a per-op nesting
+    // depth (LoopStart/IfThen open at their own index's depth; body ops sit
+    // one deeper) and each value's DEF depth.
+    let mut regions: Vec<(usize, usize)> = Vec::new();
+    let mut stack: Vec<usize> = Vec::new();
+    let mut depth_at: Vec<usize> = Vec::with_capacity(func.ops.len());
+    let mut def_depth: BTreeMap<ValueId, usize> = BTreeMap::new();
+    let mut depth = 0usize;
+    for (i, op) in func.ops.iter().enumerate() {
+        match op {
+            Op::LoopStart => {
+                depth_at.push(depth);
+                stack.push(i);
+                depth += 1;
+            }
+            Op::LoopEnd => {
+                depth = depth.saturating_sub(1);
+                depth_at.push(depth);
+                let s = stack.pop()?;
+                regions.push((s, i));
+            }
+            Op::IfThen { .. } => {
+                depth_at.push(depth);
+                depth += 1;
+            }
+            Op::Else { .. } => {
+                depth_at.push(depth.saturating_sub(1));
+            }
+            Op::EndIf { .. } => {
+                depth = depth.saturating_sub(1);
+                depth_at.push(depth);
+            }
+            _ => depth_at.push(depth),
+        }
+        if let Some(d) = defined_value(op) {
+            def_depth.entry(d).or_insert_with(|| depth_at[i].max(depth));
+        }
+    }
+    if !stack.is_empty() {
+        return None; // unbalanced markers — not a shape to touch
+    }
+    Some(ReuseRegions { regions, depth_at, def_depth })
+}
+
+/// Verbatim from `plan_local_reuse`: the fixpoint loop-range extension.
+fn reuse_extend_loop_ranges(
+    r: &ReuseRegions,
+    def_at: &BTreeMap<ValueId, usize>,
+    last_touch: &mut BTreeMap<ValueId, usize>,
+) {
+    let ReuseRegions { regions, depth_at, def_depth } = r;
+    // Fixpoint loop extension, two rules per region:
+    //  (a) live-into-a-loop ⇒ live to its end (the pre-loop def read each
+    //      iteration);
+    //  (b) CONDITIONALLY defined inside a loop ⇒ live to its end. A def at
+    //      nesting depth deeper than the loop body's own (inside an if arm,
+    //      or a nested loop that may run zero iterations) is NOT re-executed
+    //      on every iteration — on the skipping iteration the local carries
+    //      the PREVIOUS iteration's value across the back edge, a liveness
+    //      the textual range cannot see. The forced-threshold sweep caught
+    //      the miss as data corruption in the base64/hash/softmax loops.
+    //      An UNCONDITIONAL body def (depth == body depth) redefines before
+    //      every use and keeps its narrow range.
+    loop {
+        let mut changed = false;
+        for (s, e) in regions {
+            let body_depth = depth_at[*s] + 1;
+            for (v, d) in def_at {
+                let u = match last_touch.get_mut(v) {
+                    Some(u) => u,
+                    None => continue,
+                };
+                let live_in = d < s && *u >= *s && *u < *e;
+                let cond_in = d > s
+                    && *d < *e
+                    && *u < *e
+                    && def_depth.get(v).copied().unwrap_or(0) > body_depth;
+                if live_in || cond_in {
+                    *u = *e;
+                    changed = true;
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+}
+
+
 /// Apply the plan to a CLONE — every op operand/dst runs through the remap.
 /// `params`, `ret` and `heap_slot_masks` keys were excluded from the plan, so
 /// they need no rewriting (their ids never appear as remap keys).
@@ -317,17 +369,7 @@ fn op_values_mut(op: &mut Op, f: &mut impl FnMut(&mut ValueId)) {
         Op::ChargeDyn { src, .. } => f(src),
         Op::Alloc { dst, init, .. } => {
             f(dst);
-            match init {
-                Init::DynStr { len } | Init::DynList { len } | Init::DynListStr { len } => f(len),
-                Init::OptSome { payload } | Init::ResOkScalar { payload } => f(payload),
-                Init::ResErrStr { piece } => f(piece),
-                Init::Opaque
-                | Init::Empty
-                | Init::OptNone
-                | Init::IntList(_)
-                | Init::Bytes(_)
-                | Init::Str(_) => {}
-            }
+            init_values_mut(init, f);
         }
         Op::Const { dst } | Op::ConstInt { dst, .. } | Op::FuncRef { dst, .. } => f(dst),
         Op::Dup { dst, src } => {
@@ -357,9 +399,7 @@ fn op_values_mut(op: &mut Op, f: &mut impl FnMut(&mut ValueId)) {
         | Op::MakeUnique { v } => f(v),
         Op::Pure { dst, uses } => {
             f(dst);
-            for u in uses {
-                f(u);
-            }
+            each_value_mut(uses, f);
         }
         Op::Call { dst, args, .. } | Op::CallFn { dst, args, .. } | Op::CallImport { dst, args, .. } => {
             opt(dst, f);
@@ -372,15 +412,11 @@ fn op_values_mut(op: &mut Op, f: &mut impl FnMut(&mut ValueId)) {
         }
         Op::ListLit { dst, elems } => {
             f(dst);
-            for e in elems {
-                f(e);
-            }
+            each_value_mut(elems, f);
         }
         Op::Prim { dst, args, .. } => {
             opt(dst, f);
-            for a in args {
-                f(a);
-            }
+            each_value_mut(args, f);
         }
         Op::ListGetScalar { dst, list, idx } => {
             f(dst);
@@ -409,6 +445,31 @@ fn op_values_mut(op: &mut Op, f: &mut impl FnMut(&mut ValueId)) {
         Op::LoopBreakUnless { cond } => f(cond),
     }
 }
+
+/// Visit every id of a plain operand list, in order (the `Pure`/`ListLit`/
+/// `Prim` arms of [`op_values_mut`]).
+fn each_value_mut(vals: &mut [ValueId], f: &mut dyn FnMut(&mut ValueId)) {
+    for v in vals {
+        f(v);
+    }
+}
+
+/// The `Init` half of [`op_values_mut`]: the operands an allocation reads.
+/// Exhaustive on purpose, the same registry discipline as the Op match.
+fn init_values_mut(init: &mut Init, f: &mut dyn FnMut(&mut ValueId)) {
+    match init {
+        Init::DynStr { len } | Init::DynList { len } | Init::DynListStr { len } => f(len),
+        Init::OptSome { payload } | Init::ResOkScalar { payload } => f(payload),
+        Init::ResErrStr { piece } => f(piece),
+        Init::Opaque
+        | Init::Empty
+        | Init::OptNone
+        | Init::IntList(_)
+        | Init::Bytes(_)
+        | Init::Str(_) => {}
+    }
+}
+
 
 // ── Deferred terminal drops (#1554, the half that makes reuse BITE) ─────────
 //
@@ -497,70 +558,11 @@ pub(crate) fn spill_terminal_drops(func: &MirFunction) -> Option<MirFunction> {
         return None;
     }
 
-    // Per-value facts: def count/index/depth, drop count, mutation targets.
-    let mut def_count: BTreeMap<ValueId, usize> = BTreeMap::new();
-    let mut def_depth: BTreeMap<ValueId, usize> = BTreeMap::new();
-    let mut def_index: BTreeMap<ValueId, usize> = BTreeMap::new();
-    let mut drop_count: BTreeMap<ValueId, usize> = BTreeMap::new();
-    let mut mutated: BTreeSet<ValueId> = BTreeSet::new();
-    let mut depth = 0usize;
-    let mut max_id = func.params.iter().map(|p| p.value.0).max().unwrap_or(0);
-    for (i, op) in func.ops.iter().enumerate() {
-        match op {
-            Op::IfThen { .. } | Op::LoopStart => depth += 1,
-            Op::EndIf { .. } | Op::LoopEnd => depth = depth.saturating_sub(1),
-            Op::SetLocal { local, .. } => {
-                mutated.insert(*local);
-            }
-            Op::MakeUnique { v } => {
-                mutated.insert(*v);
-            }
-            Op::Drop { v } => {
-                *drop_count.entry(*v).or_insert(0) += 1;
-            }
-            _ => {}
-        }
-        if let Some(d) = defined_value(op) {
-            *def_count.entry(d).or_insert(0) += 1;
-            def_depth.entry(d).or_insert(depth);
-            def_index.entry(d).or_insert(i);
-        }
-        let mut vals = Vec::new();
-        op_values(op, &mut vals);
-        for v in vals {
-            max_id = max_id.max(v.0);
-        }
-    }
-
-    let reprs = value_reprs_wasm(func);
-    let floats = classify_f64_locals(func);
-    let excluded: BTreeSet<ValueId> = func
-        .params
-        .iter()
-        .map(|p| p.value)
-        .chain(func.ret)
-        .chain(func.heap_slot_masks.keys().copied())
-        .collect();
-
-    // Eligible values, in cluster order (stable slot numbering).
-    let mut eligible: Vec<ValueId> = Vec::new();
-    let mut seen: BTreeSet<ValueId> = BTreeSet::new();
-    for op in &func.ops[cluster_start..] {
-        let Op::Drop { v } = op else { continue };
-        if seen.contains(v)
-            || excluded.contains(v)
-            || mutated.contains(v)
-            || floats.contains(v)
-            || def_count.get(v).copied() != Some(1)
-            || def_depth.get(v).copied() != Some(0)
-            || drop_count.get(v).copied() != Some(1)
-            || wasm_ty(reprs.get(v).copied().unwrap_or(SCALAR_REPR)) != "i32"
-        {
-            continue;
-        }
-        seen.insert(*v);
-        eligible.push(*v);
-    }
+    // Decomposed (codopsy A, cog 32 in one frame): the per-value facts and
+    // the eligibility filter are verbatim text moves.
+    let facts = spill_value_facts(func);
+    let eligible = spill_eligible_values(func, cluster_start, &facts);
+    let SpillFacts { def_index, max_id, .. } = facts;
     // Below this, the buffer + loop overhead outweighs the ~n saved locals.
     if eligible.len() < 64 {
         return None;
@@ -658,4 +660,90 @@ pub(crate) fn spill_terminal_drops(func: &MirFunction) -> Option<MirFunction> {
     let mut out = func.clone();
     out.ops = ops;
     Some(out)
+}
+
+/// The per-value facts `spill_terminal_drops` reads: def count / depth /
+/// index, flat-Drop count, mutation targets, and the highest value id.
+struct SpillFacts {
+    def_count: BTreeMap<ValueId, usize>,
+    def_depth: BTreeMap<ValueId, usize>,
+    def_index: BTreeMap<ValueId, usize>,
+    drop_count: BTreeMap<ValueId, usize>,
+    mutated: BTreeSet<ValueId>,
+    max_id: u32,
+}
+
+/// Verbatim from `spill_terminal_drops`: the one pass over the op list.
+fn spill_value_facts(func: &MirFunction) -> SpillFacts {
+    // Per-value facts: def count/index/depth, drop count, mutation targets.
+    let mut def_count: BTreeMap<ValueId, usize> = BTreeMap::new();
+    let mut def_depth: BTreeMap<ValueId, usize> = BTreeMap::new();
+    let mut def_index: BTreeMap<ValueId, usize> = BTreeMap::new();
+    let mut drop_count: BTreeMap<ValueId, usize> = BTreeMap::new();
+    let mut mutated: BTreeSet<ValueId> = BTreeSet::new();
+    let mut depth = 0usize;
+    let mut max_id = func.params.iter().map(|p| p.value.0).max().unwrap_or(0);
+    for (i, op) in func.ops.iter().enumerate() {
+        match op {
+            Op::IfThen { .. } | Op::LoopStart => depth += 1,
+            Op::EndIf { .. } | Op::LoopEnd => depth = depth.saturating_sub(1),
+            Op::SetLocal { local, .. } => {
+                mutated.insert(*local);
+            }
+            Op::MakeUnique { v } => {
+                mutated.insert(*v);
+            }
+            Op::Drop { v } => {
+                *drop_count.entry(*v).or_insert(0) += 1;
+            }
+            _ => {}
+        }
+        if let Some(d) = defined_value(op) {
+            *def_count.entry(d).or_insert(0) += 1;
+            def_depth.entry(d).or_insert(depth);
+            def_index.entry(d).or_insert(i);
+        }
+        let mut vals = Vec::new();
+        op_values(op, &mut vals);
+        for v in vals {
+            max_id = max_id.max(v.0);
+        }
+    }
+    SpillFacts { def_count, def_depth, def_index, drop_count, mutated, max_id }
+}
+
+/// Verbatim from `spill_terminal_drops`: the eligible values, in cluster
+/// order (stable slot numbering).
+fn spill_eligible_values(func: &MirFunction, cluster_start: usize, facts: &SpillFacts) -> Vec<ValueId> {
+    let SpillFacts { def_count, def_depth, drop_count, mutated, .. } = facts;
+    let reprs = value_reprs_wasm(func);
+    let floats = classify_f64_locals(func);
+    let excluded: BTreeSet<ValueId> = func
+        .params
+        .iter()
+        .map(|p| p.value)
+        .chain(func.ret)
+        .chain(func.heap_slot_masks.keys().copied())
+        .collect();
+
+    // Eligible values, in cluster order (stable slot numbering).
+    let mut eligible: Vec<ValueId> = Vec::new();
+    let mut seen: BTreeSet<ValueId> = BTreeSet::new();
+    for op in &func.ops[cluster_start..] {
+        let Op::Drop { v } = op else { continue };
+        if seen.contains(v)
+            || excluded.contains(v)
+            || mutated.contains(v)
+            || floats.contains(v)
+            || def_count.get(v).copied() != Some(1)
+            || def_depth.get(v).copied() != Some(0)
+            || drop_count.get(v).copied() != Some(1)
+            || wasm_ty(reprs.get(v).copied().unwrap_or(SCALAR_REPR)) != "i32"
+        {
+            continue;
+        }
+        seen.insert(*v);
+        eligible.push(*v);
+    }
+    eligible
 }

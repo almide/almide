@@ -52,6 +52,27 @@ pub struct Parser {
     pub(crate) inline_comments: std::collections::HashMap<usize, Vec<(String, CommentSide)>>,
     /// Attachments resolved so far, moved into `Program.expr_comments` at the end.
     pub(crate) expr_comments: std::collections::HashMap<ExprId, crate::ast::ExprComments>,
+    /// #1326: the comments collected from a continuation gap whose operator
+    /// has been SEEN but not yet CONSUMED, keyed by the operator's filtered
+    /// index. The Pratt loop that skips the gap may `break` on binding power
+    /// and leave the operator to an outer loop; the outer loop is the one
+    /// holding the operand the line actually ends with, so it drains this
+    /// slot when it takes the operator at that same index. A stale entry (a
+    /// speculative parse that backed out) never matches a later index and is
+    /// simply overwritten.
+    pub(crate) pending_gap: Option<(usize, Vec<GapComment>)>,
+}
+
+/// A comment collected from a continuation gap (#1326): the Newline/Comment
+/// run between an operand and the infix operator, `|>`, or `.` chain link
+/// that continues the expression on a later line.
+#[derive(Debug, Clone)]
+pub(crate) struct GapComment {
+    pub text: String,
+    /// A Newline precedes it within the run — it sits on a line of its own
+    /// between the operand and the continuation. Otherwise it ends the line
+    /// the operand is on.
+    pub own_line: bool,
 }
 
 /// Which side of a node a removed comment binds to (#1404's ruling).
@@ -67,7 +88,7 @@ pub(crate) enum CommentSide {
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
         let (tokens, inline_comments) = Self::drop_inline_comments(tokens);
-        Parser { tokens, pos: 0, inline_comments, expr_comments: std::collections::HashMap::new(), errors: Vec::new(), file: None, next_expr_id: 0, depth: 0, failed_fn_names: std::collections::HashSet::new(), delim_depth: 0 }
+        Parser { tokens, pos: 0, inline_comments, expr_comments: std::collections::HashMap::new(), pending_gap: None, errors: Vec::new(), file: None, next_expr_id: 0, depth: 0, failed_fn_names: std::collections::HashSet::new(), delim_depth: 0 }
     }
 
     /// Drop Comment tokens sitting INLINE mid-expression (`f(1 /* x */, 2)`) so the
@@ -98,14 +119,22 @@ impl Parser {
                     // #1404: removed from the stream so the grammar never sees
                     // it, but RECORDED against the position it was written at,
                     // so fmt can put it back. The side follows the ruling: a
-                    // comment whose next token CLOSES or SEPARATES something
-                    // was written after the node it follows and stays with it;
-                    // otherwise it introduces the node that comes next.
+                    // comment whose next token CLOSES or SEPARATES something,
+                    // or is an INFIX OPERATOR (`1 /* x */ + 2` — nothing an
+                    // operator can be a leading comment of), or is another
+                    // comment, was written after the node it follows and
+                    // stays with it; otherwise it introduces the node that
+                    // comes next. `-` is excluded from the operator set: it
+                    // may open the next operand (`f(a, /* c */ -1)`).
                     let side = match tokens.get(i + 1).map(|t| &t.token_type) {
                         Some(TokenType::Comma)
                         | Some(TokenType::RParen)
                         | Some(TokenType::RBracket)
-                        | Some(TokenType::RBrace) => CommentSide::Trailing,
+                        | Some(TokenType::RBrace)
+                        | Some(TokenType::Comment) => CommentSide::Trailing,
+                        Some(tt) if *tt != TokenType::Minus && Self::INFIX_TOKENS.contains(tt) => {
+                            CommentSide::Trailing
+                        }
                         _ => CommentSide::Leading,
                     };
                     inline.entry(kept.len()).or_default().push((tok.value.clone(), side));

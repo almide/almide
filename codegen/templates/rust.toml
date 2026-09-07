@@ -245,7 +245,7 @@ template = "bool"
 [type_unit]
 template = "()"
 
-# #617: Bytes/Matrix are RcCow VALUE types in generated code — copies (call
+# #617: Bytes/Matrix are AlmideRcCow VALUE types in generated code — copies (call
 # boundaries, member reads, closure captures, collection stores) are O(1)
 # Rc bumps; mutation goes through DerefMut = Rc::make_mut (copy-on-write), so
 # value semantics are observably unchanged. The runtime keeps its raw
@@ -253,10 +253,10 @@ template = "()"
 # deref-coerce, and runtime RESULTS are wrapped at the call site by the
 # walker's rc_cow_result_glue.
 [type_bytes]
-template = "RcCow<Vec<u8>>"
+template = "AlmideRcCow<Vec<u8>>"
 
 [type_matrix]
-template = "RcCow<AlmideMatrix>"
+template = "AlmideRcCow<AlmideMatrix>"
 
 [matrix_mul]
 template = "almide_rt_matrix_mul(&{left}, &{right})"

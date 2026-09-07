@@ -1,0 +1,3 @@
+expects_code = "E038"
+expects_error = "the ?? fallback is not on this line"
+hint_substring = "same line as `??`"

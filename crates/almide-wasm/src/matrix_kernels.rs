@@ -18,7 +18,7 @@ pub(crate) fn mat_elem() -> MemArg {
 impl Emitter<'_> {
     /// Lower a Matrix expr; returns (handle, rows i32, cols i32) holds.
     pub(crate) fn mat_open(&mut self, m: &IrExpr) -> Result<(u32, u32, u32), EmitError> {
-        match self.lower(m, None)? {
+        match self.lower_arg(m, None, ArgMode::Borrow)? {
             SliceTy::Matrix => {}
             other => return unsup(&format!("matrix-kernel-of:{other:?}")),
         }
@@ -66,11 +66,11 @@ impl Emitter<'_> {
         func: &str,
         m: &IrExpr,
         e_arg: Option<&IrExpr>,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let (hm, hr, hc) = self.mat_open(m)?;
         let he = self.hold_f64()?;
         if let Some(e) = e_arg {
-            self.lower(e, Some(FLOAT))?;
+            self.lower_arg(e, Some(FLOAT), ArgMode::Borrow)?;
             self.f.instructions().local_set(he);
         }
         let target = if func == "gelu" {
@@ -105,14 +105,14 @@ impl Emitter<'_> {
         for _ in 0..3 {
             self.release_i32();
         }
-        Ok(Some(SliceTy::Matrix))
+        Ok(Some(Lowered::owned(SliceTy::Matrix)))
     }
 
     /// softmax_rows: per row — max scan (init row[0], `>` keeps NaN out),
     /// fast-exp(x − max) into out, LEFT-TO-RIGHT sum, then RECIPROCAL
     /// MULTIPLY (#1197); a bad sum (≤0 or NaN) yields the uniform 1/n row.
     /// A zero-width matrix loops over nothing per row — no special case.
-    pub(crate) fn lower_matrix_softmax(&mut self, m: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    pub(crate) fn lower_matrix_softmax(&mut self, m: &IrExpr) -> ArmResult {
         let fe = self.work.helper(Helper::FastExp);
         let (hm, hr, hc) = self.mat_open(m)?;
         let ho = self.mat_alloc_out(hr, hc)?;
@@ -188,7 +188,7 @@ impl Emitter<'_> {
         for _ in 0..8 {
             self.release_i32();
         }
-        Ok(Some(SliceTy::Matrix))
+        Ok(Some(Lowered::owned(SliceTy::Matrix)))
     }
 
     /// rms_norm_rows: inv = 1/√(Σx²/c + eps) over the FULL row; the
@@ -199,15 +199,15 @@ impl Emitter<'_> {
         m: &IrExpr,
         gamma: &IrExpr,
         eps: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let (hm, hr, hc) = self.mat_open(m)?;
-        match self.lower(gamma, None)? {
+        match self.lower_arg(gamma, None, ArgMode::Borrow)? {
             SliceTy::List(h) if self.types.el(h) == FLOAT => {}
             other => return unsup(&format!("matrix-rms-gamma:{other:?}")),
         }
         let hg = self.hold_i32()?;
         self.f.instructions().local_set(hg);
-        self.lower(eps, Some(FLOAT))?;
+        self.lower_arg(eps, Some(FLOAT), ArgMode::Borrow)?;
         let heps = self.hold_f64()?;
         let hout_c = self.hold_i32()?;
         {
@@ -286,6 +286,6 @@ impl Emitter<'_> {
         for _ in 0..3 {
             self.release_i32();
         }
-        Ok(Some(SliceTy::Matrix))
+        Ok(Some(Lowered::owned(SliceTy::Matrix)))
     }
 }

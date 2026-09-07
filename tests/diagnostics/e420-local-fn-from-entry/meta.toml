@@ -1,0 +1,3 @@
+expects_code = "E420"
+expects_error = "function 'helper.secret' is not accessible"
+hint_substring = "accessible only within the same file"

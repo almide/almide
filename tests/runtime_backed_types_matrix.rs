@@ -40,21 +40,64 @@ fn collect_named(ty: &Ty, out: &mut BTreeSet<String>) {
     }
 }
 
-/// Type names DECLARED by any bundled module (`type FileStat = …` in
-/// fs.almd), bare spelling — these resolve through `register_bundled_types`
-/// and need no registry row.
-fn declared_bundled_type_names() -> BTreeSet<String> {
+/// `(module, type name)` for every `type` DECLARED by a bundled module
+/// (`type FileStat = …` in fs.almd).
+fn declared_bundled_types() -> BTreeSet<(String, String)> {
     let mut declared = BTreeSet::new();
     for module in almide_lang::stdlib_info::BUNDLED_MODULES {
         let Some(source) = almide_lang::stdlib_info::bundled_source(module) else { continue };
         let Some(program) = almide_lang::parse_cached(source) else { continue };
         for decl in &program.decls {
             if let almide_lang::ast::Decl::Type { name, .. } = decl {
-                declared.insert(name.as_str().to_string());
+                declared.insert((module.to_string(), name.as_str().to_string()));
             }
         }
     }
     declared
+}
+
+/// Type names DECLARED by any bundled module, bare spelling — these resolve
+/// through `register_bundled_types` and need no runtime-backed row.
+fn declared_bundled_type_names() -> BTreeSet<String> {
+    declared_bundled_types().into_iter().map(|(_, name)| name).collect()
+}
+
+/// The STDLIB_OWNED_TYPES matrix gate (#1828). A user declaration of one of
+/// these names takes the #433 module-qualified identity instead of the bare
+/// key the stdlib's type is; the registry must therefore be EXACTLY the
+/// builtin `Value`, every runtime-backed nominal, and every `type` a bundled
+/// module declares. A missing row lets a user declaration rebind a stdlib
+/// signature's type (the #1828 miscompile); a dead row qualifies a user type
+/// for no reason.
+#[test]
+fn stdlib_owned_types_are_value_plus_runtime_backed_plus_bundled_decls() {
+    let mut expected: BTreeSet<(String, String)> = declared_bundled_types();
+    expected.insert(("value".to_string(), "Value".to_string()));
+    for (m, t) in almide_lang::stdlib_info::RUNTIME_BACKED_TYPES {
+        expected.insert((m.to_string(), t.to_string()));
+    }
+    let registry: BTreeSet<(String, String)> = almide_lang::stdlib_info::STDLIB_OWNED_TYPES
+        .iter()
+        .map(|(m, t)| (m.to_string(), t.to_string()))
+        .collect();
+    let missing: Vec<_> = expected.difference(&registry).collect();
+    assert!(
+        missing.is_empty(),
+        "stdlib-owned type(s) absent from STDLIB_OWNED_TYPES — a user declaration \
+         of the name would rebind the stdlib's signatures (#1828); add the row(s): {missing:?}"
+    );
+    let dead: Vec<_> = registry.difference(&expected).collect();
+    assert!(
+        dead.is_empty(),
+        "STDLIB_OWNED_TYPES row(s) no stdlib module owns — remove them so a user \
+         type of that name keeps its bare identity: {dead:?}"
+    );
+    for (_, t) in almide_lang::stdlib_info::STDLIB_OWNED_TYPES {
+        assert!(
+            almide_lang::stdlib_info::stdlib_owned_type_owner(t).is_some(),
+            "stdlib_owned_type_owner must answer every registry row: {t}"
+        );
+    }
 }
 
 #[test]

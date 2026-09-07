@@ -1,0 +1,8 @@
+// A record field holding a function value called with the wrong arity:
+// the field's Fn type fixes the parameter count exactly.
+type Handler = { run: (Int) -> Int }
+
+fn main() -> Unit = {
+  let h = Handler { run: (n: Int) => n + 1 }
+  println(int.to_string(h.run(1)))
+}

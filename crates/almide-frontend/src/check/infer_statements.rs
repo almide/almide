@@ -23,10 +23,16 @@ impl Checker {
                 // position is the must-use error E042 — in EVERY fn kind, not
                 // only the old auto-? contexts. Queue unconditionally;
                 // post-solve keeps only Result-typed sites. The `!` insertion
-                // hint stays mechanical for a plain call.
+                // hint stays mechanical for a plain call, but only where `!`
+                // is legal (effect fn body / test block, the E022 predicate)
+                // — in a pure fn the applied fix could never compile, and a
+                // span fix that cannot compile is worse than no span fix
+                // (#1528: the e042-in-pure-fn fixture pins this).
                 self.deferred_implicit_prop_checks.push((
                     t.clone(), expr.span, "of this statement's result",
-                    matches!(expr.kind, ast::ExprKind::Call { .. }), true,
+                    matches!(expr.kind, ast::ExprKind::Call { .. })
+                        && (self.env.auto_unwrap || self.env.in_test_block),
+                    true,
                 ));
                 // #662: a discarded expression statement whose type carries an
                 // unconstrained phantom slot (e.g. a bare `result.or_else(r0,
@@ -404,10 +410,23 @@ impl Checker {
         match pattern {
             ast::Pattern::Wildcard => {}
             ast::Pattern::Ident { name } => { self.env.define_var(name, ty.clone()); }
+            // As-pattern (#1461): the name binds the WHOLE value at this
+            // position; the inner pattern destructures the same value.
+            ast::Pattern::As { name, inner } => {
+                self.env.define_var(name, ty.clone());
+                self.bind_pattern(inner, ty);
+            }
             ast::Pattern::Constructor { name, args } => self.bind_pattern_constructor(name, args, ty),
             ast::Pattern::RecordPattern { name, fields, .. } => self.bind_pattern_record(name, fields, ty),
             ast::Pattern::Tuple { elements } => self.bind_pattern_tuple(elements, ty),
-            ast::Pattern::List { elements } => self.bind_pattern_list(elements, ty),
+            ast::Pattern::List { elements, rest } => {
+                self.bind_pattern_list(elements, ty);
+                // #1461 list-rest: the tail binding carries the SAME list
+                // type as the subject (List[T] -> List[T]).
+                if let Some(Some(name)) = rest {
+                    self.env.define_var(name, resolve_ty(ty, &self.uf));
+                }
+            }
             ast::Pattern::Some { inner } => self.bind_pattern_some(inner, ty),
             ast::Pattern::Ok { inner } => self.bind_pattern_ok(inner, ty),
             ast::Pattern::Err { inner } => self.bind_pattern_err(inner, ty),
@@ -472,6 +491,7 @@ impl Checker {
                 if let Some(target) = self.env.opaque_alias_targets.get(tname).cloned() {
                     vec![target]
                 } else {
+                    self.reject_stdlib_shadow_pattern(&format!("{}(..)", name), &resolved);
                     vec![]
                 }
             }
@@ -509,6 +529,30 @@ impl Checker {
         );
     }
 
+    /// A constructor or record pattern aimed at the STDLIB's `Value` /
+    /// `FileStat` / … while the program declares a same-named type of its
+    /// own (#1828, #1835): the pattern is the user's, the subject is the
+    /// stdlib's, and the two only spell alike. Before this refusal the
+    /// pattern bound its payload `Ty::Unknown` and reached codegen — rustc
+    /// E0308 on native while the structural wasm leg read a json value's
+    /// payload as the user's String (ALS-T6). E048's foreign-case cell,
+    /// carrying the E013 shadow note that names both types. Silent for
+    /// every other subject: a program that declares no shadow is not
+    /// this cell's, and error recovery stays as it was.
+    fn reject_stdlib_shadow_pattern(&mut self, pattern: &str, resolved: &Ty) {
+        let Ty::Named(n, _) = resolved else { return };
+        let Some(note) = self.stdlib_shadow_note(resolved) else { return };
+        let owner = almide_lang::stdlib_info::stdlib_owned_type_owner(n.as_str()).unwrap_or("stdlib");
+        self.emit(
+            super::err(
+                format!("pattern `{}` is not a case of `{}`", pattern, resolved.display()),
+                format!("`{}` is the `{}` module's type and has no constructor to destructure.{}", n, owner, note),
+                "match pattern".to_string(),
+            )
+            .with_code("E048"),
+        );
+    }
+
     /// `ast::Pattern::RecordPattern` arm of [`Self::bind_pattern`]. Verbatim text move.
     fn bind_pattern_record(&mut self, name: &Sym, fields: &[ast::FieldPattern], ty: &Ty) {
         let resolved = self.env.resolve_named(ty);
@@ -532,7 +576,10 @@ impl Checker {
                     })
                     .unwrap_or_default()
             }
-            _ => vec![],
+            _ => {
+                self.reject_stdlib_shadow_pattern(&format!("{} {{ .. }}", name), &resolved);
+                vec![]
+            }
         };
         for f in fields {
             let ft = field_tys.iter().find(|(n, _)| *n == f.name).map(|(_, t)| t.clone()).unwrap_or(Ty::Unknown);
@@ -959,13 +1006,17 @@ fn foreign_ctor_case_list(bare_name: Sym, resolved: &Ty) -> Option<Vec<String>> 
 fn first_or_alt_binder(pat: &ast::Pattern) -> Option<almide_base::intern::Sym> {
     match pat {
         ast::Pattern::Ident { name } => Some(*name),
+        ast::Pattern::As { name, .. } => Some(*name),
         ast::Pattern::Constructor { args, .. } => args.iter().find_map(first_or_alt_binder),
         ast::Pattern::RecordPattern { fields, .. } => fields.iter().find_map(|f| {
             f.pattern.as_ref().map_or(Some(f.name), first_or_alt_binder)
         }),
-        ast::Pattern::Tuple { elements } | ast::Pattern::List { elements } => {
-            elements.iter().find_map(first_or_alt_binder)
-        }
+        ast::Pattern::Tuple { elements } => elements.iter().find_map(first_or_alt_binder),
+        // A NAMED rest is a binder for the or-alternative rule too.
+        ast::Pattern::List { elements, rest } => elements
+            .iter()
+            .find_map(first_or_alt_binder)
+            .or_else(|| rest.as_ref().and_then(|r| *r)),
         ast::Pattern::Some { inner } | ast::Pattern::Ok { inner } | ast::Pattern::Err { inner } => {
             first_or_alt_binder(inner)
         }

@@ -1,0 +1,3 @@
+expects_code = "E004"
+expects_error = "field 'run' expects 1 argument(s) but got 2"
+hint_substring = "Check the number of arguments"

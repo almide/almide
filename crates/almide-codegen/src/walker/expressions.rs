@@ -62,8 +62,8 @@ fn mangle_applied_for_mono(base: &str, args: &[Ty]) -> String {
     format!("{}_{}", base, inner)
 }
 
-/// Render an expression ensuring an owned value (not RcCow wrapper).
-/// For RcCow vars, produces `(*var).clone()` to yield the unwrapped T.
+/// Render an expression ensuring an owned value (not AlmideRcCow wrapper).
+/// For AlmideRcCow vars, produces `(*var).clone()` to yield the unwrapped T.
 /// Used at sites that need owned T: function args, record fields, concat operands.
 pub(crate) fn render_expr_owned(ctx: &RenderContext, expr: &IrExpr) -> String {
     if let IrExprKind::Var { id } = &expr.kind {
@@ -371,7 +371,16 @@ fn render_expr_index_access(ctx: &RenderContext, object: &IrExpr, index: &IrExpr
 /// `MapAccess { object, key }` case of `render_expr`.
 fn render_expr_map_access(ctx: &RenderContext, object: &IrExpr, key: &IrExpr) -> String {
     let obj_str = render_expr(ctx, object);
-    let key_str = render_expr(ctx, key);
+    let mut key_str = render_expr(ctx, key);
+    // The `map_get` template borrows the key itself (`.get(&{key})`), so the
+    // key must render as an OWNED `K`. A borrow-inferred String param is
+    // already `&str`, and `&&str` is not `&String` (rustc E0308, #1874) —
+    // materialize the owned key, the same `.to_string()` pass_clone gives a
+    // non-last use of that param. Every other key shape (a literal, a `let`
+    // String, a record field, a loop or lambda binder) renders owned already.
+    if is_borrowed_string_param(ctx, key) {
+        key_str = format!("{}.to_string()", key_str);
+    }
     ctx.templates.render_with("map_get", None, &[], &[("object", obj_str.as_str()), ("key", key_str.as_str())])
         .unwrap_or_else(|| "map_get(...)".into())
 }
@@ -633,7 +642,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
 
         // ── Pre-resolved runtime call (from @intrinsic / NormalizeRuntimeCalls) ──
         // #617: a raw NATIVE-runtime result whose type reaches Bytes/Matrix
-        // converts to the RcCow value shape at this boundary. A user-module fn
+        // converts to the AlmideRcCow value shape at this boundary. A user-module fn
         // normalized into the same RuntimeCall spelling already returns the
         // mapped types — no glue (double-wrap otherwise).
         IrExprKind::RuntimeCall { symbol, args } => {
@@ -777,7 +786,7 @@ fn render_expr_wrappers(ctx: &RenderContext, expr: &IrExpr) -> String {
 
 /// `RuntimeCall` rendering. A container-constructing runtime fn needs its
 /// turbofish pinned; #617: a raw NATIVE-runtime result whose type reaches
-/// Bytes/Matrix converts to the RcCow value shape at this boundary. A
+/// Bytes/Matrix converts to the AlmideRcCow value shape at this boundary. A
 /// user-module fn normalized into the same RuntimeCall spelling already returns
 /// the mapped types — no glue (double-wrap otherwise).
 fn render_expr_runtime_call(

@@ -185,7 +185,10 @@ fn generate_named_record_reprs(
 "));
         out.push_str("  let h = prim.handle(e)
 ");
-        let mut concat = format!("\"{tname} {{ \"");
+        // The DECLARED spelling: the last segment of `m.Cfg` (#1836, C-009) and of
+        // the entry program's stdlib-owned shadow `self.X` (#1828) — the bytes native prints.
+        let shown = almide_ir::declared_type_name(tname);
+        let mut concat = format!("\"{shown} {{ \"");
         for (i, (fld, ty)) in fields.iter().enumerate() {
             if i > 0 {
                 concat.push_str(" + \", \"");
@@ -581,7 +584,7 @@ fn generate_anon_and_tuple_interp_reprs(
         // anonymous otherwise.
         let (prefix, order): (String, Vec<usize>) = match resolve_nominal(fields) {
             Some((decl_name, decl_order)) => (
-                format!("{decl_name} {{ "),
+                format!("{} {{ ", almide_ir::declared_type_name(&decl_name)),
                 decl_order
                     .iter()
                     .map(|dn| fields.iter().position(|(n, _)| n.as_str() == dn.as_str()).expect("resolve_nominal only returns a decl whose (sorted) field-name set equals fields' (sorted) field-name set"))

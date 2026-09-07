@@ -1,0 +1,11 @@
+// E052 variant: params and return match but the replacement is an effect
+// fn — effect-ness is part of the signature, so the edit is not mechanical.
+@deprecated(since = 4, use = "announce")
+fn yell(s: String) -> String = s + "!"
+
+effect fn announce(s: String) -> String = {
+  println(s)
+  s + "!"
+}
+
+effect fn main() -> Unit = println(announce("hi")!)

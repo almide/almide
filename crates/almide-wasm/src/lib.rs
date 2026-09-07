@@ -57,6 +57,32 @@ pub enum EmitError {
     /// This IR shape is outside the current slice. The reason string feeds
     /// the burn-up histogram — precise, greppable, shrink-only.
     Unsupported(String),
+    /// E083 (#1996): the emitted exit operations of a function do not
+    /// implement its checked ExitPlan. A COMPILER defect — never a wall
+    /// (the build must not reroute a valid program around an ownership
+    /// bug), never a source error (the text says so).
+    OwnershipLowering(OwnDefect),
+}
+
+/// One E-OWN-LOWERING finding (exit_plan.rs `validate_exits`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnDefect {
+    pub headline: String,
+    pub function: String,
+    pub value: String,
+    pub expected: String,
+    pub emitted: String,
+}
+
+impl std::fmt::Display for OwnDefect {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "error[E083]: {}", self.headline)?;
+        writeln!(f, "  --> fn `{}`", self.function)?;
+        writeln!(f, "   = value: {}", self.value)?;
+        writeln!(f, "   = expected: {}", self.expected)?;
+        writeln!(f, "   = emitted: {}", self.emitted)?;
+        write!(f, "   = compiler contract failure; no artifact emitted (run `almide explain E083`)")
+    }
 }
 
 fn unsup<T>(what: &str) -> Result<T, EmitError> {
@@ -65,6 +91,8 @@ fn unsup<T>(what: &str) -> Result<T, EmitError> {
 
 mod bytes;
 mod bytes_rw;
+mod bytes_recv;
+mod bytes_split;
 pub mod heap_cap;
 pub mod witness;
 mod calls;
@@ -75,6 +103,8 @@ mod collect;
 mod collections;
 mod collections_hof;
 mod collections_set;
+mod map_inplace;
+mod map_index;
 mod emit;
 pub use emit::{emit_program, emit_program_with_ops};
 mod emitter;
@@ -84,6 +114,7 @@ mod patterns;
 mod prim;
 mod runtime;
 mod runtime_alloc;
+mod runtime_line;
 mod runtime_str;
 mod scalar_ext;
 mod data;
@@ -95,6 +126,7 @@ pub(crate) use func::*;
 pub(crate) mod ty;
 pub(crate) use ty::*;
 mod list;
+mod list_flat;
 mod list_comb;
 mod list_edit;
 mod list_search;
@@ -104,6 +136,7 @@ mod list_order;
 mod list_sort;
 mod string_scan;
 mod stmts;
+mod stmts_index;
 mod stmts_append;
 mod string_ext;
 pub(crate) mod work;
@@ -120,9 +153,16 @@ mod fs;
 mod fs_meta;
 mod host_env;
 mod json_path_helpers;
+mod newtype;
+mod arg_temps;
+mod arm;
+pub(crate) use arm::{ArgMode, ArmResult, Lowered, Own};
+mod exit_plan;
+pub use exit_plan::test_omit_first_release;
 mod fuel;
 mod ranges;
 mod rc_ownership;
+mod region;
 mod sums;
 mod tco;
 mod types_table;
@@ -132,7 +172,7 @@ mod value_helpers;
 mod whitelist;
 
 use collect::collect_binds;
-use emitter::{HOLD_F64_POOL, HOLD_I32_POOL, HOLD_I64_POOL};
+use emitter::{BORROW_POOL, HOLD_F64_POOL, HOLD_I32_POOL, HOLD_I64_POOL};
 use runtime::*;
 use runtime_str::*;
 use types_table::TypeTable;
@@ -159,7 +199,11 @@ const FREELIST_CLASSES: u32 = 16;
 /// guard `[0,PAYLOAD)`, padding to 16, scratch `[16,48)`, free-list
 /// heads `[48,112)`.
 const POOL_START: u32 = FREELIST_BASE + FREELIST_CLASSES * 4;
-/// Minimum room the line buffer must have beyond the pool.
+/// The line buffer's FIXED room beyond the pool — a floor, not a
+/// ceiling: a build that outgrows it relocates to a heap arena
+/// (`$line_grow`, runtime_line.rs, #1826) and continues, so an
+/// interpolation of any length renders. The room sits between the pool
+/// and the heap, which is why it cannot simply `memory.grow`.
 const LINE_BUF_MIN: u64 = 65536;
 
 // ── function / type / global indices ────────────────────────────────────
@@ -232,8 +276,17 @@ const F_STR_APPEND: u32 = 37;
 /// pushes retained Σn ≈ n²/2 bytes — `bytes.new(0)` + 69k pushes OOM'd
 /// where native and the incumbent complete (#1689).
 const F_BYTES_PUSH: u32 = 38;
+/// `$line_grow(cur, len)`: relocate the line-buffer region to a heap
+/// arena with room for `len` more bytes at logical cursor `cur`
+/// (#1826) — the append helpers call it instead of trapping.
+const F_LINE_GROW: u32 = 39;
+/// `$line_println(start, cur)` / `$line_eprintln(start, cur)`: flush a
+/// finished statement-position build to the stream import from its
+/// PHYSICAL address (`start + G_LINE_DELTA`).
+const F_LINE_PRINTLN: u32 = 40;
+const F_LINE_EPRINTLN: u32 = 41;
 /// First program-function index; `main` sits after every program function.
-const F_FN_BASE: u32 = 39;
+const F_FN_BASE: u32 = 42;
 /// Fixed type indices: 0 print(ptr,len)→(), 1 block-print(i32)→(),
 /// 2 append_copy, 3 append_i64, 4 main ()→(), 5 (i32,i32)→i32
 /// (append_bool/concat/str_eq), 6 (i64)→i32 (itoa/int_to_string),
@@ -244,17 +297,20 @@ const T_MAIN: u32 = 4;
 /// 12: (i32)→f64 f16_to_f64; 13: (i32,i64)→i32 cp_off/str_repeat;
 /// 14: (i32,i64,i64)→i32 str_slice.
 const T_FN_BASE: u32 = 18;
-// Global 0 is the immutable line-buffer start (= align16(pool end)); it
-// is emitted for inspectability but no instruction references it since
-// the build cursor (global 2) took over.
+/// Immutable i32 global: the line-buffer start (= align16(pool end)) —
+/// the LOGICAL origin every build cursor is measured from (#1826:
+/// `$line_grow` copies `[line_start, cur)` and re-bases the delta on it).
+const G_LINE_START: u32 = 0;
 /// Mutable i32 global: the bump-allocator head.
 const G_HEAP: u32 = 1;
 /// Mutable i32 global: the line-buffer BUILD CURSOR — stack-disciplined so
 /// interpolation builds NEST (a value-position `"${...}"` inside another
 /// build starts after the outer's partial content and restores on exit).
 const G_LINE_CURSOR: u32 = 2;
-/// Immutable i32 global: one past the line buffer (= heap start); the
-/// append helpers trap LOUDLY on overflow instead of corrupting the heap.
+/// Immutable i32 global: one past the FIXED line room (= heap start) —
+/// the heap FLOOR the `$inc`/`$dec_flat`/`$cow` guards and the
+/// `$str_append` window test against. The append helpers no longer trap
+/// against it: the room's live end is `G_LINE_ROOM` (#1826).
 const G_LINE_END: u32 = 3;
 /// Deterministic meter (ALS-DT2, mirrors the interp's det_* cells):
 /// remaining fuel units (i64, starts at i64::MAX — outside a region the
@@ -273,8 +329,27 @@ const G_DET_VERDICT: u32 = 6;
 const G_DET_SPEND: u32 = 7;
 /// Region nesting depth (i32) — the cut condition needs depth > 0.
 const G_DET_DEPTH: u32 = 8;
+/// Mutable i32 global: physical − logical for the line buffer (#1826).
+/// 0 while the region lives in the fixed room; after `$line_grow`
+/// relocates it to a heap arena, `arena_payload − line_start`. Every
+/// write to a cursor adds it; cursors themselves stay logical, so the
+/// `start` locals of nested builds never go stale.
+const G_LINE_DELTA: u32 = 12;
+/// Mutable i32 global: one past the LOGICAL room (`line_start +
+/// capacity`) — starts at the heap floor, moves up with each grow.
+const G_LINE_ROOM: u32 = 13;
+/// Mutable i32 global: the keyed-lookup index family's side table
+/// (#1219 stage 2, map_index.rs) — 0 until the first indexed lookup
+/// allocates it; a heap block address after.
+const G_MAPIDX: u32 = 14;
 /// Fixed runtime globals above; top-let globals start here.
-const G_FIXED_COUNT: u32 = 12;
+/// #1961: the heap HIGH-WATER mark. `G_HEAP` rewinds at a region
+/// window's close, so the alloc ledger's "final bump = allocation total"
+/// reading needs the peak kept separately; RegionRestore raises it
+/// before rewinding, and `__heap_high` is exported only when a window
+/// was emitted (the host reads max(__heap, __heap_high)).
+const G_HEAP_HIGH: u32 = 15;
+const G_FIXED_COUNT: u32 = 16;
 
 // ── slice value model ───────────────────────────────────────────────────
 
@@ -466,6 +541,9 @@ pub(crate) struct Ctx<'a> {
     /// (global index, slice type). Functions read them across function
     /// boundaries — the class main-local top-lets could never serve.
     pub(crate) globals: &'a HashMap<GVar, (u32, SliceTy)>,
+    /// Source name of a variable, by (var space, VarId) — for the E083
+    /// diagnostic (`value: local \`x\``). None for synthetic vars.
+    pub(crate) var_name: &'a dyn Fn(u32, VarId) -> Option<String>,
 }
 
 /// Function-VALUE work discovered during lowering: funcref-table entries
@@ -537,6 +615,8 @@ fn registry_impl_names() -> &'static std::collections::HashSet<&'static str> {
 fn pattern_irrefutable(p: &IrPattern) -> bool {
     match p {
         IrPattern::Wildcard | IrPattern::Bind { .. } => true,
+        // An as-pattern is exactly as refutable as its inner pattern.
+        IrPattern::As { inner, .. } => pattern_irrefutable(inner),
         // A tuple of irrefutable positions always matches.
         IrPattern::Tuple { elements } => elements.iter().all(pattern_irrefutable),
         _ => false,

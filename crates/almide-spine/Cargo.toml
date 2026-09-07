@@ -11,7 +11,7 @@ almide = { path = "../.." }
 almide-driver = { path = "../almide-driver" }
 almide-types = { path = "../almide-types" }
 almide-syntax = { path = "../almide-syntax" }
-salsa = "0.23"
+salsa = "0.28"
 serde_json = "1"
 
 [lints]
@@ -19,4 +19,4 @@ workspace = true
 
 [dev-dependencies]
 almide-corpus = { path = "../almide-corpus" }
-sha2 = "0.10"
+sha2 = "0.11"

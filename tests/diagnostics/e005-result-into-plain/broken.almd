@@ -1,0 +1,7 @@
+// A Result handed to a plain-Int param: the caller meant the payload, so the
+// hint must name the unwrap operators as the path (#1050).
+fn parse_score(s: String) -> Result[Int, String] = ok(string.len(s))
+
+fn double(n: Int) -> Int = n * 2
+
+fn main() -> Unit = println(int.to_string(double(parse_score("ab"))))

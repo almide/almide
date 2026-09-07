@@ -1,0 +1,5 @@
+// Arity is checked against the sibling's declaration: one argument for a
+// two-parameter module fn is E004.
+import self.calc as c
+
+fn main() -> Unit = println(int.to_string(c.add(1)))

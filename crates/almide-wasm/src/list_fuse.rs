@@ -64,7 +64,7 @@ impl Emitter<'_> {
         xs: &IrExpr,
         init: &IrExpr,
         cb: &IrExpr,
-    ) -> Result<Option<Option<SliceTy>>, EmitError> {
+    ) -> Result<Option<Option<Lowered>>, EmitError> {
         // Walk the chain source-side: fold(filter(map(src))).
         let mut stages_rev: Vec<Stage> = Vec::new();
         let mut cur = xs;
@@ -117,7 +117,7 @@ impl Emitter<'_> {
         let Some(acc_ty) = slice_ty_of(&init.ty, self.types) else {
             return unsup(&format!("list-fold-acc:{}", ty_name(&init.ty)));
         };
-        self.lower(init, Some(acc_ty))?;
+        self.lower_arg(init, Some(acc_ty), ArgMode::Retain)?;
         self.f.instructions().local_set(fold_params[0]);
 
         let (elem0, bh, ch, ih) = self.hof_loop_open(cur)?;
@@ -170,6 +170,6 @@ impl Emitter<'_> {
         self.release_i32();
         self.release_i32();
         self.release_i32();
-        Ok(Some(Some(acc_ty)))
+        Ok(Some(Some(Lowered::owned(acc_ty))))
     }
 }

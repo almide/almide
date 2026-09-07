@@ -1,0 +1,19 @@
+// @contract: C-340
+// `option.unwrap_or` / `result.unwrap_or` are ordinary STRICT calls: the
+// default is evaluated before the selection on both targets, so a default
+// that aborts aborts on a `some` / `ok` receiver too. The structural leg
+// used to branch and evaluate the default only in the none / err arm — the
+// lazy `??` semantics under the eager name — and the program continued
+// where native had already died (fuzz seeds 541740772277:11650 and
+// 541740772279:2788, #1906). The lazy form is `??` (≡ unwrap_or_else);
+// the eager fn is deprecated (ADR-0005 D4) and keeps its strictness
+// through its window.
+fn main() -> Unit = {
+  let o: Int? = some(7)
+  let r: Result[Int, String] = ok(9)
+  println("lazy keeps going: ${o ?? int.clamp(3, 3, 1)}")
+  println("eager on ok: ${result.unwrap_or(r, int.to_string(1) |> string.len)}")
+  println("strict default aborts before the select:")
+  println("${option.unwrap_or(o, int.clamp(3, 3, 1))}")
+  println("unreachable")
+}

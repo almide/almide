@@ -54,7 +54,38 @@ fail=0; n=0
 # 17 as of 2026-08-30 — gzip_inflate_members.almd (C-326) is structural-only,
 # the incumbent walls its loop-level tuple write-back (see the host twin and
 # proofs/walled-real-baseline.txt; prunes with #1696 steps 4-5).
-MAX_WALLED=18
+# 19 as of 2026-09-01: env_set_overlay.almd (C-329) — the determinism
+# harnesses build the almide.* module without the env host surface, so the
+# env.set/get fixture walls here; it executes on the embedded + stock-p1
+# sweeps (#1716), which is where its promise lives.
+# 20 as of 2026-09-01: zlib_selfhost.almd (C-331/#1700) — the incumbent
+# walls the promoted C-326 decoder's tuple write-back loops, the same
+# division the gzip_inflate_members rows record; prunes with #1696 4-5.
+# 22 as of 2026-09-02: list_rest_pattern.almd (C-332) and
+# as_pattern.almd (C-333) — the incumbent brick walls both #1461 forms
+# honestly (the structural leg is the default route and lowers them);
+# prunes with #1696 4-5.
+# 23 as of 2026-09-02: generic_record_fn_field.almd (C-092/#1676) — the
+# incumbent brick refuses the return-position computed call on the
+# instantiated closure field (the structural leg, the default route,
+# lowers it); prunes with #1696 4-5.
+# 24 as of 2026-09-02: list_unique_by_nonscalar_key.almd (C-053/#1797) —
+# the incumbent routes a non-scalar unique_by key to its unlinked `_x`
+# render wall (C-147; a render-phase refusal the walled-real ratchet
+# already classes "(b) acceptable", so no baseline row); the structural
+# leg lowers every equatable key. Prunes with #1696 4-5.
+# 25 as of 2026-09-03: bytes_temp_receiver.almd (C-213/#1849) — a TEMPORARY
+# receiver of a Unit-returning bytes mutator; the incumbent brick walls it
+# honestly (the receiver discipline names the call-result receiver, and the
+# `let _ =` Unit binding is outside its value subset) where the structural
+# leg, the default route, releases the mutated block. Prunes with #1696 4-5.
+# 26 as of 2026-09-03: mut_param_effect_can_err.almd (C-132/#1576) — the
+# can-err effect fn with a `mut` param takes the move-mode tuple rewrite
+# (`(T, Buf)` on the ok payload); the incumbent brick walls the synthesized
+# `let (r, b) = call!` destructure-unwrap honestly (`unwrap `!` in a
+# call-argument position`) where the structural leg, the default route,
+# lowers every cell byte-identical to native. Prunes with #1696 4-5.
+MAX_WALLED=27
 walled=0
 for fix in "$FIXTURE_DIR"/*.almd; do
   [ -e "$fix" ] || continue

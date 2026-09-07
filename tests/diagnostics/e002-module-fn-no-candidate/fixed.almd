@@ -1,0 +1,6 @@
+// A hallucinated function in a real stdlib module, far from every existing
+// name — no fuzzy candidate, so the hint points at the module docs instead.
+fn main() -> Unit = {
+  let r = string.to_upper("hi")
+  println(r)
+}

@@ -241,7 +241,3 @@ fn $__to_upper_walk
 fn $string.to_upper
   (call $rc_dec (local.get $v19))
   (call $rc_dec (local.get $v15))
-fn $__trim_start
-  (call $rc_dec (local.get $v4))
-fn $__trim_end
-  (call $rc_dec (local.get $v7))

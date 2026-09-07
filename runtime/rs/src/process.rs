@@ -1,10 +1,23 @@
 // process extern — Rust native implementations
 
+// The runtime-side twin of stdlib/process.almd's `type ProcessStatus = { code,
+// stdout, stderr }` — the AlmideFileStat treatment (fs.rs, #1821): the emitter
+// spells the type under this reserved name and skips the bundled decl, so a
+// user's own `type ProcessStatus` keeps the bare spelling. The repr prints the
+// Almide-level literal form.
 #[derive(Clone, Debug, PartialEq)]
-pub struct ProcessStatus {
+pub struct AlmideProcessStatus {
     pub code: i64,
     pub stdout: String,
     pub stderr: String,
+}
+impl AlmideRepr for AlmideProcessStatus {
+    fn almide_repr(&self) -> String {
+        format!(
+            "ProcessStatus {{ code: {}, stdout: {}, stderr: {} }}",
+            self.code.almide_repr(), self.stdout.almide_repr(), self.stderr.almide_repr()
+        )
+    }
 }
 
 pub fn almide_rt_process_exec(cmd: &str, args: &[String]) -> Result<String, String> {
@@ -87,13 +100,13 @@ mod tests {
     }
 }
 
-pub fn almide_rt_process_exec_status(cmd: &str, args: &[String]) -> Result<ProcessStatus, String> {
+pub fn almide_rt_process_exec_status(cmd: &str, args: &[String]) -> Result<AlmideProcessStatus, String> {
     match std::process::Command::new(cmd).args(args).output() {
         Ok(out) => {
             let code = out.status.code().unwrap_or(-1) as i64;
             let stdout = String::from_utf8_lossy(&out.stdout).to_string();
             let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-            Ok(ProcessStatus { code, stdout, stderr })
+            Ok(AlmideProcessStatus { code, stdout, stderr })
         }
         Err(e) => Err(format!("exec failed: {}", e)),
     }
@@ -112,7 +125,7 @@ pub fn almide_rt_process_exec_status_timeout(
     cmd: &str,
     args: &[String],
     timeout_ms: i64,
-) -> Result<ProcessStatus, String> {
+) -> Result<AlmideProcessStatus, String> {
     use std::io::Read;
     use std::process::{Command, Stdio};
     let mut child = Command::new(cmd)
@@ -153,7 +166,7 @@ pub fn almide_rt_process_exec_status_timeout(
     };
     let stdout = String::from_utf8_lossy(&out_h.join().unwrap_or_default()).to_string();
     let stderr = String::from_utf8_lossy(&err_h.join().unwrap_or_default()).to_string();
-    Ok(ProcessStatus { code: status.code().unwrap_or(-1) as i64, stdout, stderr })
+    Ok(AlmideProcessStatus { code: status.code().unwrap_or(-1) as i64, stdout, stderr })
 }
 
 pub fn almide_rt_process_pid() -> i64 {

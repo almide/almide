@@ -153,6 +153,10 @@ impl Emitter<'_> {
             && let Some(ret @ SliceTy::Result(..)) = self.fn_ret
         {
             self.lower(e, Some(ret))?;
+            // An exit like any other: the frame's owners are released
+            // before the jump (the err block already shares its payload).
+            let plan = self.exit_plan(crate::exit_plan::Continuation::ReturnError);
+            self.emit_exit(&plan);
             self.f.instructions().return_();
             return Ok(raw);
         }
@@ -303,12 +307,19 @@ impl Emitter<'_> {
                     match self.lower(expr, None)? {
                         SliceTy::Option(h) => {
                             let et = self.types.el(h);
-                            let mut i = self.f.instructions();
-                            i.local_tee(self.scr_i32_local).i32_eqz().if_(BlockType::Empty);
-                            i.i32_const(almide_layout::NULL_ADDR as i32).return_();
-                            i.end();
-                            i.local_get(self.scr_i32_local);
-                            let _ = i;
+                            self.f
+                                .instructions()
+                                .local_tee(self.scr_i32_local)
+                                .i32_eqz()
+                                .if_(BlockType::Empty);
+                            let plan = self.exit_plan(crate::exit_plan::Continuation::ReturnError);
+                            self.emit_exit(&plan);
+                            self.f
+                                .instructions()
+                                .i32_const(almide_layout::NULL_ADDR as i32)
+                                .return_()
+                                .end()
+                                .local_get(self.scr_i32_local);
                             self.load_ty_slot(et, almide_layout::OPTION_FIELD);
                             return Ok(et);
                         }
@@ -345,9 +356,10 @@ impl Emitter<'_> {
                                 .i32_store(slot_memarg(almide_layout::SUM_TAG))
                                 .local_get(self.tmp_i32_local)
                                 .i32_const(none_msg as i32)
-                                .i32_store(slot_memarg(almide_layout::SUM_FIELD))
-                                .local_get(self.tmp_i32_local)
-                                .return_();
+                                .i32_store(slot_memarg(almide_layout::SUM_FIELD));
+                            let plan = self.exit_plan(crate::exit_plan::Continuation::ReturnError);
+                            self.emit_exit(&plan);
+                            self.f.instructions().local_get(self.tmp_i32_local).return_();
                         } else if self.in_main {
                             let none_msg = self.pool.intern("none");
                             self.f.instructions().i32_const(none_msg as i32);
@@ -373,6 +385,14 @@ impl Emitter<'_> {
                             if fn_err != Some(ert) {
                                 return unsup("unwrap-err-ty-mismatch");
                             }
+                            // The propagated block is the operand's: a BORROWED
+                            // operand (a local the exit below releases) hands the
+                            // caller a share; an owned temporary moves out.
+                            if !self.rc_owned_result(expr) {
+                                self.f.instructions().local_get(self.scr_i32_local).call(F_INC);
+                            }
+                            let plan = self.exit_plan(crate::exit_plan::Continuation::ReturnError);
+                            self.emit_exit(&plan);
                             self.f.instructions().local_get(self.scr_i32_local).return_();
                         } else if self.in_main && ert == STR {
                             self.f.instructions().local_get(self.scr_i32_local);
@@ -418,8 +438,13 @@ impl Emitter<'_> {
                     }
                 }
                 let hold = self.hold_i32()?;
-                self.f.instructions().call(F_BLOCK_COPY).local_set(hold);
+                let copy = self.copy_fn_of(ty);
+                self.f.instructions().call(copy).local_set(hold);
                 for ((_, fexpr), (fty, off)) in fields.iter().zip(slots) {
+                    // The overwritten field's credit goes with it.
+                    if let Some(dec) = self.elem_is_handle(fty).then(|| self.dec_fn_of(fty)) {
+                        self.f.instructions().local_get(hold).i32_load(slot_memarg(off)).call(dec);
+                    }
                     self.f.instructions().local_get(hold);
                     self.lower(fexpr, Some(fty))?;
                     self.rc_share_guard(fexpr, fty);
@@ -535,6 +560,7 @@ impl Emitter<'_> {
                 for (fty, off, d) in defaults {
                     self.f.instructions().local_get(hold);
                     self.lower(&d, Some(fty))?;
+                    self.rc_share_guard(&d, fty);
                     self.store_ty_slot(fty, off);
                 }
                 self.f.instructions().local_get(hold);

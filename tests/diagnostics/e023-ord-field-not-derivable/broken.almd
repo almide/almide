@@ -1,0 +1,7 @@
+// Ord is field-recursive like Codec: a `: Ord` type whose field type does not
+// itself derive Ord would lower to a Rust #[derive(Ord)] over a field without
+// the impl. The checker rejects it structurally, naming Ord (not Codec).
+type Point = { x: Int, y: Int }
+type Edge: Ord = { a: Point, b: Point }
+
+fn main() -> Unit = println("unreachable")

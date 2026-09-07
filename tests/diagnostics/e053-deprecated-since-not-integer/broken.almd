@@ -1,0 +1,8 @@
+// #1518: @deprecated whose since is a STRING, not an integer dialect epoch —
+// unreadable, so the deprecation would never register.
+@deprecated(since = "two", use = "shout")
+fn yell(s: String) -> String = s
+
+fn shout(s: String) -> String = s
+
+fn main() -> Unit = println(shout("hi"))

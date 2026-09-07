@@ -1,0 +1,3 @@
+expects_code = "E077"
+expects_error = "a Float operation is not admissible"
+hint_substring = "held and passed, not computed on"

@@ -1,0 +1,6 @@
+// ALS-B7: a parenthesized callee is not a direct name — an indirect call the
+// profile rejects even when the value inside is a plain parameter.
+@bounded
+fn twice(f: (Int) -> Int, x: Int) -> Int = (f)(x)
+
+fn main() -> Unit = println("${twice((x: Int) => x + 1, 2)}")

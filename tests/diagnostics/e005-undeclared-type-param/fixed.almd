@@ -1,0 +1,7 @@
+// The fix: declare the type parameter on the fn.
+fn wrap[Item](x: Item) -> Item = x
+
+fn main() -> Unit = {
+  let _ = wrap(1)
+  println("ok")
+}

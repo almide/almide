@@ -1,0 +1,6 @@
+// ALS-B7: an immediately-invoked lambda is doubly inadmissible — the call is
+// indirect and the lambda creates a closure.
+@bounded
+fn shifted(n: Int) -> Int = n + 1
+
+fn main() -> Unit = println("${shifted(4)}")

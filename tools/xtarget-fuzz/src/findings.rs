@@ -135,12 +135,17 @@ fn render_meta(seed: u64, index: u64, family: &str, origin: &Origin, f: &Finding
         Origin::Identity { blocks } => {
             format!("identity family, {blocks} blocks (oracle: by construction, #1332)")
         }
+        Origin::Composition { probes } => {
+            format!("composition family, {probes} probes (oracle: by construction)")
+        }
     };
     // An identity repro carries its own oracle, so `ladder repro.almd` is
     // the more robust replay: it does not depend on the corpus (or this
     // generator) being byte-identical to the campaign's.
     let ladder_hint = match origin {
-        Origin::Identity { .. } => "\nreproduce2  = xtarget-fuzz ladder <this dir>/repro.almd",
+        Origin::Identity { .. } | Origin::Composition { .. } => {
+            "\nreproduce2  = xtarget-fuzz ladder <this dir>/repro.almd"
+        }
         _ => "",
     };
     format!(

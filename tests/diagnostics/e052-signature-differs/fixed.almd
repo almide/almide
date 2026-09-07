@@ -1,0 +1,8 @@
+// E052 variant: the replacement takes an extra parameter, so the edit is
+// classified as a signature change — shown, never auto-applied.
+@deprecated(since = 4, use = "shout_n")
+fn yell(s: String) -> String = s + "!"
+
+fn shout_n(s: String, times: Int) -> String = s + "!"
+
+effect fn main() -> Unit = println(shout_n("hi", 1))

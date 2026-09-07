@@ -1,0 +1,3 @@
+expects_code = "E037"
+expects_error = "operator '==' compares Option[Int] with Int"
+hint_substring = "Unwrap the Option operand"

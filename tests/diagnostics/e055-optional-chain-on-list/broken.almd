@@ -1,0 +1,5 @@
+// E055 variant: `?.` on a plain List value — the container is not an Option,
+// so the plain "Option-only" hint fires instead of the Result ladder.
+fn head_len(xs: List[String]) -> Int? = xs?.len
+
+fn main() -> Unit = println(int.to_string(head_len(["a"]) ?? 0))

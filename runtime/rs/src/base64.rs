@@ -13,15 +13,15 @@
 /// 0-9 (52..61). The two final symbols (62, 63) are alphabet-specific and
 /// appended below, so the relationship between the standard and URL-safe
 /// tables is explicit rather than two opaque 64-byte literals.
-const ALPHABET_PREFIX: &[u8; 62] =
+const ALMIDE_ALPHABET_PREFIX: &[u8; 62] =
     b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 
 /// Standard alphabet (RFC 4648 §4): prefix + '+' (62) + '/' (63).
-const STD_ALPHABET: [u8; 64] = build_alphabet(b'+', b'/');
+const ALMIDE_STD_ALPHABET: [u8; 64] = build_alphabet(b'+', b'/');
 /// URL-safe alphabet (RFC 4648 §5): prefix + '-' (62) + '_' (63).
-const URL_ALPHABET: [u8; 64] = build_alphabet(b'-', b'_');
+const ALMIDE_URL_ALPHABET: [u8; 64] = build_alphabet(b'-', b'_');
 
-const PAD: u8 = b'=';
+const ALMIDE_PAD: u8 = b'=';
 
 /// Build a full 64-entry alphabet from the shared prefix plus the two
 /// alphabet-specific trailing symbols (`s62`, `s63`).
@@ -29,7 +29,7 @@ const fn build_alphabet(s62: u8, s63: u8) -> [u8; 64] {
     let mut out = [0u8; 64];
     let mut i = 0;
     while i < 62 {
-        out[i] = ALPHABET_PREFIX[i];
+        out[i] = ALMIDE_ALPHABET_PREFIX[i];
         i += 1;
     }
     out[62] = s62;
@@ -55,15 +55,15 @@ fn encode_with(b: &[u8], alphabet: &[u8; 64]) -> String {
             let n = (rem[0] as u32) << 16;
             out.push(alphabet[((n >> 18) & 0x3f) as usize]);
             out.push(alphabet[((n >> 12) & 0x3f) as usize]);
-            out.push(PAD);
-            out.push(PAD);
+            out.push(ALMIDE_PAD);
+            out.push(ALMIDE_PAD);
         }
         2 => {
             let n = ((rem[0] as u32) << 16) | ((rem[1] as u32) << 8);
             out.push(alphabet[((n >> 18) & 0x3f) as usize]);
             out.push(alphabet[((n >> 12) & 0x3f) as usize]);
             out.push(alphabet[((n >> 6) & 0x3f) as usize]);
-            out.push(PAD);
+            out.push(ALMIDE_PAD);
         }
         _ => {}
     }
@@ -88,7 +88,7 @@ fn decode_char(c: u8) -> Option<u8> {
 // Two distinct, position-free error strings keep the WASM mirror cheap: a
 // constant invalid-character message, and a length message that only needs an
 // int-to-string of the original input length.
-const ERR_CHAR: &str = "invalid base64 character";
+const ALMIDE_ERR_CHAR: &str = "invalid base64 character";
 
 fn decode_str(s: &str) -> Result<Vec<u8>, String> {
     let bytes = s.as_bytes();
@@ -96,7 +96,7 @@ fn decode_str(s: &str) -> Result<Vec<u8>, String> {
     // significant chars. A '=' anywhere before the trailing run is invalid and
     // is rejected as a normal invalid character by `decode_char` below.
     let mut end = bytes.len();
-    while end > 0 && bytes[end - 1] == PAD {
+    while end > 0 && bytes[end - 1] == ALMIDE_PAD {
         end -= 1;
     }
     let body = &bytes[..end];
@@ -138,18 +138,18 @@ fn decode_str(s: &str) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
-/// Decode one Base64 character to its 0..63 value, reporting `ERR_CHAR` on
+/// Decode one Base64 character to its 0..63 value, reporting `ALMIDE_ERR_CHAR` on
 /// failure (a stray `=` in the body lands here too).
 fn nibble(c: u8) -> Result<u8, String> {
-    decode_char(c).ok_or_else(|| ERR_CHAR.to_string())
+    decode_char(c).ok_or_else(|| ALMIDE_ERR_CHAR.to_string())
 }
 
 pub fn almide_rt_base64_encode(b: &Vec<u8>) -> String {
-    encode_with(b, &STD_ALPHABET)
+    encode_with(b, &ALMIDE_STD_ALPHABET)
 }
 
 pub fn almide_rt_base64_encode_url(b: &Vec<u8>) -> String {
-    encode_with(b, &URL_ALPHABET)
+    encode_with(b, &ALMIDE_URL_ALPHABET)
 }
 
 pub fn almide_rt_base64_decode(s: &str) -> Result<Vec<u8>, String> {

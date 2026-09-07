@@ -1,0 +1,5 @@
+// The same-file tier holds without an alias too: `import self.util` and a
+// qualified `util.scratch()` reach a local fn from another file.
+import self.util
+
+fn main() -> Unit = println(util.label())

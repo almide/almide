@@ -1,0 +1,5 @@
+// Fixed: negate an Int inside the profile; Floats stay uncomputed.
+@bounded
+fn flip(x: Int) -> Int = -x
+
+fn main() -> Unit = println(int.to_string(flip(2)))

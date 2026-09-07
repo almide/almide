@@ -1,0 +1,5 @@
+// The reverse ordering of the duplicate pair: the module already has an
+// alias, so the later PLAIN import is the duplicate line.
+import regex as rx
+
+fn main() -> Unit = println(if rx.is_match("a", "a") and rx.is_match("b", "b") then "y" else "n")

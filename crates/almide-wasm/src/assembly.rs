@@ -14,6 +14,7 @@ use crate::*;
 pub(crate) struct AssembleIn<'a> {
     /// Pooled "Error: out of memory" block for the allocator's C-197 die.
     pub(crate) oom_msg: u32,
+    pub(crate) repeat_msg: u32,
     pub(crate) table: &'a FnTable,
     pub(crate) work: &'a FnWork,
     pub(crate) pool: &'a Pool,
@@ -40,6 +41,7 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
         work,
         pool,
         oom_msg,
+        repeat_msg,
         lowered,
         reachable,
         main_fn,
@@ -137,6 +139,9 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     functions.function(7); // F_COW ((i32) -> i32)
     functions.function(5); // F_STR_APPEND ((i32, i32) -> i32)
     functions.function(8); // F_BYTES_PUSH ((i32, i64) -> i32)
+    functions.function(0); // F_LINE_GROW ((i32, i32) -> ())
+    functions.function(0); // F_LINE_PRINTLN ((i32, i32) -> ())
+    functions.function(0); // F_LINE_EPRINTLN ((i32, i32) -> ())
     for i in 0..table.infos.len() {
         functions.function(T_FN_BASE + i as u32);
     }
@@ -202,6 +207,27 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
         GlobalType { val_type: ValType::I64, mutable: true, shared: false },
         &ConstExpr::i64_const(0),
     );
+    // #1826: the line buffer's relocation delta (0 = the fixed room) and
+    // its logical room end (starts at the heap floor) — globals 12/13.
+    globals.global(
+        GlobalType { val_type: ValType::I32, mutable: true, shared: false },
+        &ConstExpr::i32_const(0),
+    );
+    globals.global(
+        GlobalType { val_type: ValType::I32, mutable: true, shared: false },
+        &ConstExpr::i32_const(heap_start as i32),
+    );
+    // #1219 stage 2: the keyed-lookup side table (global 14, 0 = none yet).
+    globals.global(
+        GlobalType { val_type: ValType::I32, mutable: true, shared: false },
+        &ConstExpr::i32_const(0),
+    );
+    // #1961: the heap high-water mark (global 15), raised at region
+    // window closes.
+    globals.global(
+        GlobalType { val_type: ValType::I32, mutable: true, shared: false },
+        &ConstExpr::i32_const(heap_start as i32),
+    );
 
     // The funcref table always exists (a call_indirect in ANY body needs
     // it, entries or not); slot 0 stays uninitialized — null funcref =
@@ -242,6 +268,12 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     // observable (#1586). Behavior-neutral: nothing in-module reads
     // exports.
     exports.export("__heap", ExportKind::Global, G_HEAP);
+    // A region window (#1961) rewinds `__heap`; the peak the window
+    // reached lives in `__heap_high`, exported only when a window exists
+    // so a window-free module's bytes do not move.
+    if work.region_used.get() {
+        exports.export("__heap_high", ExportKind::Global, G_HEAP_HIGH);
+    }
     // #457: every clean-closure entry pub fn is host-callable.
     for (name, idx) in export_fns {
         exports.export(name, ExportKind::Func, *idx);
@@ -283,7 +315,7 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
         (F_F16_TO_F64, emit_f16_to_f64()),
         (F_CP_OFF, emit_cp_off()),
         (F_STR_SLICE, emit_str_slice()),
-        (F_STR_REPEAT, emit_str_repeat()),
+        (F_STR_REPEAT, emit_str_repeat(repeat_msg)),
         (F_STR_CMP, emit_str_cmp()),
         (F_STR_REPLACE, emit_str_replace()),
         (F_COPY, emit_copy()),
@@ -293,6 +325,9 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
         (F_COW, emit_cow()),
         (F_STR_APPEND, emit_str_append()),
         (F_BYTES_PUSH, emit_bytes_push()),
+        (F_LINE_GROW, emit_line_grow()),
+        (F_LINE_PRINTLN, emit_line_print(F_PRINTLN_IMPORT)),
+        (F_LINE_EPRINTLN, emit_line_print(F_EPRINTLN_IMPORT)),
     ];
     debug_assert!(
         static_helpers.iter().enumerate().all(|(i, (idx, _))| *idx == F_PRINTLN_BLOCK + i as u32),
@@ -392,10 +427,14 @@ fn helper_body(h: &Helper, work: &FnWork, helper_snapshot: &[Helper], hpos: usiz
     Helper::ValueKeys => value_helpers::emit_value_keys_helper(),
     Helper::StringSplit => value_helpers::emit_string_split_helper(),
     Helper::ScanF64 => runtime::emit_scan_f64(),
+    Helper::MapReserve => runtime_alloc::emit_map_reserve(),
     Helper::BytesToString { inv_pre, inv_mid, inc_pre } => {
         utf8_helpers::emit_bytes_to_string_helper(*inv_pre, *inv_mid, *inc_pre)
     }
-    _ => helper_body_b(h, work, helper_snapshot),
+    _ => match map_index::helper_body(h).or_else(|| runtime_alloc::helper_body(h, work)) {
+        Some(f) => f,
+        None => helper_body_b(h, work, helper_snapshot),
+    },
     }
 }
 
@@ -412,10 +451,12 @@ pub(crate) fn resolve_extras(
     // lowering; the table-entry extras follow.
     let helper_snapshot: Vec<Helper> = work.helpers.borrow().clone();
     for (hpos, h) in helper_snapshot.iter().enumerate() {
-        let params = match h {
-            Helper::ValueKeys | Helper::Utf8Lossy | Helper::BytesToString { .. } => {
-                vec![ValType::I32]
-            }
+        let params = match map_index::helper_params(h).or_else(|| runtime_alloc::helper_params(h)) {
+            Some(p) => p,
+            None => match h {
+            Helper::ValueKeys
+            | Helper::Utf8Lossy
+            | Helper::BytesToString { .. } => vec![ValType::I32],
             Helper::ScanF64 => vec![ValType::I32, ValType::I32, ValType::I32, ValType::F64],
             Helper::ScanDeep { .. } => {
                 vec![ValType::I32, ValType::I32, ValType::I32, ValType::I32]
@@ -429,12 +470,13 @@ pub(crate) fn resolve_extras(
             Helper::FastExp | Helper::GeluScalar { .. } => vec![ValType::F64],
             Helper::Q10Val => vec![ValType::I32, ValType::I64, ValType::I64],
             _ => vec![ValType::I32, ValType::I32],
+            },
         };
         let ret = match h {
-            Helper::FastExp | Helper::GeluScalar { .. } | Helper::Q10Val => ValType::F64,
-            _ => ValType::I32,
+            Helper::FastExp | Helper::GeluScalar { .. } | Helper::Q10Val => Some(ValType::F64),
+            _ => runtime_alloc::helper_result(h),
         };
-        let ti = work.itype(params, Some(ret));
+        let ti = work.itype(params, ret);
         let f = helper_body(h, work, helper_snapshot.as_slice(), hpos);
         extra_fns.push((ti, f));
     }
@@ -528,15 +570,27 @@ fn helper_body_b(h: &Helper, work: &FnWork, helper_snapshot: &[Helper]) -> Funct
 /// Roots are every body that ships after the helper block (the reachable
 /// lowered fns, `main`, the program-driven extras); edges INSIDE the helper
 /// set come from scanning each helper's own encoded body, folded to a
-/// fixpoint. The proven runtime core is seeded unconditionally.
+/// fixpoint.
+///
+/// #1962: the proven runtime core (`$alloc` / `$free` / `$inc` / `$dec_flat`
+/// / `$cow`) is NOT seeded any more — it is reached like every other
+/// helper, through a call from a shipped body. A program that never
+/// allocates (hello, world: one data-segment string through `$println`)
+/// ships the five as 2-byte `unreachable` stubs, index-stable, and drops
+/// ~2 KB from every such artifact. The byte-grounding gate
+/// (`proofs/check-structural-bytes.sh`) dumps the core bodies through
+/// `dump_runtime_bytes` at unit level, independent of any module, so the
+/// `StructuralDecode.v` theorems keep their subject either way. Nothing
+/// outside a body reaches the core: the exports are `memory` / `main` /
+/// `__heap` / the `@export` fns, and the WASI transforms park their
+/// buffers on their own page rather than calling `$alloc`.
 fn used_static_helpers<'a>(
     helpers: &[(u32, Function)],
     roots: impl Iterator<Item = &'a Function>,
 ) -> std::collections::HashSet<u32> {
     use std::collections::HashSet;
-    let mut used: HashSet<u32> =
-        [F_ALLOC, F_FREE, F_INC, F_DEC_FLAT, F_COW].into_iter().collect();
-    let mut pending: Vec<u32> = used.iter().copied().collect();
+    let mut used: HashSet<u32> = HashSet::new();
+    let mut pending: Vec<u32> = Vec::new();
     fn note(set: &mut HashSet<u32>, pending: &mut Vec<u32>, idx: u32) {
         if (F_PRINTLN_BLOCK..F_FN_BASE).contains(&idx) && set.insert(idx) {
             pending.push(idx);

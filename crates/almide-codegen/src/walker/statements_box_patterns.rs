@@ -77,6 +77,7 @@ fn box_shape_guard(ctx: &RenderContext, pat: &IrPattern, access: &str, counter: 
 fn guard_shape(ctx: &RenderContext, pat: &IrPattern, counter: &mut usize, subs: &mut Vec<String>) -> String {
     match pat {
         IrPattern::Wildcard | IrPattern::Bind { .. } => "_".to_string(),
+        IrPattern::As { inner, .. } => guard_shape(ctx, inner, counter, subs),
         IrPattern::Literal { .. } => render_pattern_hinted(ctx, pat, None),
         IrPattern::Some { inner } => format!("Some({})", guard_shape(ctx, inner, counter, subs)),
         IrPattern::None => "None".to_string(),
@@ -388,11 +389,13 @@ fn render_pattern_constructor(ctx: &RenderContext, name: &str, args: &[IrPattern
 
 /// `render_pattern_hinted`'s `RecordPattern` arm, extracted verbatim.
 fn render_pattern_record(ctx: &RenderContext, name: &str, fields: &[almide_ir::IrFieldPattern], rest: bool, enum_hint: Option<&str>) -> String {
-    // Qualify enum variant record patterns: Circle → Shape::Circle.
+    // Qualify enum variant record patterns: Circle → Shape::Circle. A plain
+    // record pattern on a runtime-owned struct (`FileStat`, #1821) spells the
+    // runtime's reserved name.
     let qualified_name = if let Some(enum_name) = resolve_pattern_enum_name(ctx, enum_hint, name) {
         format!("{}::{}", enum_name, name)
     } else {
-        name.to_string()
+        ctx.ann.runtime_owned_types.get(name).cloned().unwrap_or_else(|| name.to_string())
     };
     let fields_str = fields.iter()
         .map(|f| match &f.pattern {
@@ -419,6 +422,10 @@ pub fn render_pattern_hinted(ctx: &RenderContext, pat: &IrPattern, enum_hint: Op
     match pat {
         IrPattern::Wildcard => template_or(ctx, "pattern_wildcard", &[], "_"),
         IrPattern::Bind { var, .. } => ctx.var_name(*var).to_string(),
+        // As-pattern (#1461): Rust's own `name @ pat` carries it 1:1.
+        IrPattern::As { var, inner, .. } => {
+            format!("{} @ {}", ctx.var_name(*var), render_pattern(ctx, inner))
+        }
         IrPattern::Literal { expr } => render_pattern_literal(ctx, expr),
         IrPattern::Some { inner } => {
             let binding_s = render_pattern(ctx, inner);
@@ -444,7 +451,7 @@ pub fn render_pattern_hinted(ctx: &RenderContext, pat: &IrPattern, enum_hint: Op
             ctx.templates.render_with("tuple_literal", None, &[], &[("elements", elems.as_str())])
                 .unwrap_or_else(|| "tuple(...)".into())
         }
-        IrPattern::List { elements } => {
+        IrPattern::List { elements, .. } => {
             if elements.is_empty() {
                 "[]".to_string()
             } else {

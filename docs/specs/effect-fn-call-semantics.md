@@ -1,131 +1,138 @@
-> Last updated: 2026-07-25
+> Last updated: 2026-08-20
 
-# Effect Fn Call Semantics — 型の解釈
+# Effect Fn Call Semantics — 呼び出し式の型
 
-## 問題
+## 規則
 
-`effect fn` の呼び出しが、checker と codegen で異なる型を持つ。
+`effect fn foo() -> T` の呼び出し `foo()` は、**あらゆるコンテキストで**
+`Result[T, String]` 型の**値**である(宣言が `-> Result[T, E]` ならその
+`Result[T, E]`、二重包装はしない)。checker と codegen は同じ型を見る。
+伝搬は明示の `!` だけ(ADR-0008)— 位置依存の暗黙伝搬(auto-`?`)は 0.55 で
+機構ごと削除された。現行挙動の全体は
+[result-option-effect.md §3](./result-option-effect.md) と
+[effect-system.md](./effect-system.md) が記述する。本章は呼び出し式に絞る。
 
-```
-checker:  auth.authenticate() → Profile
-codegen:  auth.authenticate() → Result[Profile, String]
-```
-
-この不一致が `!` 演算子の型エラーや cross-module 呼び出しの不整合を引き起こす。
-
-## 設計方針
-
-### 選択肢
-
-| # | 方式 | 概要 | 問題点 |
-|---|------|------|--------|
-| A | **Codegen lift** (現状) | checker は `T` を返す。codegen の ResultPropagation が `Result[T, String]` に持ち上げ | checker と codegen の型が不一致。`!` が checker で通らない |
-| B | **Checker lift** | checker が `Result[T, String]` を返す。codegen はそのまま | match arm の型統一が壊れる。`let x = foo()` で x が Result になり、`.field` でエラー |
-| C | **Contextual erasure** | effect fn call は文脈に応じて型が変わる。effect body 内では `T`、lambda/test では `Result[T, String]` | 同じ式が文脈で型が変わるのは型システムとして不健全 |
-| D | **Checker lift + auto-`?`** | checker が `Result[T, String]` を返し、effect body 内の式文に auto-`?` を挿入 | 正しいが、全 effect fn call site の型が変わる大規模リファクタ |
-
-### 採用: D — Checker lift + auto-`?`
-
-**理由**: 型システムが一貫する唯一の選択肢。effect fn の呼び出し型は常に `Result[T, String]`。呼び出し元が effect fn なら auto-`?` で透過的に `T` を取り出す。
-
-## 正式な意味論
-
-### 1. `effect fn` の宣言型
+## 1. 宣言型
 
 ```almide
-effect fn foo(x: Int) -> String = ...
+effect fn foo(x: Int) -> String = "v${int.to_string(x)}"
 ```
 
-これは以下の糖衣構文:
+これは以下の型を持つ:
 
-```
+```text
 foo : (Int) -> Result[String, String]
 ```
 
 ただし、**関数本体内では** `String` を直接書ける。末尾式は暗黙に `ok(...)` で包まれる。
 
-### 2. 呼び出し型
-
-`effect fn foo() -> T` の呼び出し `foo()` は、**あらゆるコンテキストで** `Result[T, String]` 型を持つ。
+## 2. 呼び出し型 — どの文脈でも Result 値
 
 ```almide
+effect fn foo() -> String = "x"
+
 effect fn main() -> Unit = {
-  let r = foo()        // r: Result[T, String]  ← これが正式な型
-  let v = foo()!       // v: T                  ← ! で unwrap
-  let w = foo() ?? d   // w: T                  ← ?? で fallback
+  let r: Result[String, String] = foo()   // r: Result[String, String] ← これが正式な型
+  let v = foo()!                          // v: String                ← ! で unwrap(err は伝搬)
+  let w = foo() ?? "d"                    // w: String                ← ?? で fallback
+  println(v + w + (r ?? ""))
+}
+
+test "the call is a Result value" {
+  assert_eq(foo(), ok("x"))
 }
 ```
 
-### 3. Auto-`?` 挿入 (ergonomic sugar)
+## 3. 暗黙伝搬は存在しない(E041 / E042)
 
-effect fn body 内の **式文** (let 束縛の右辺、代入の右辺) で、effect fn call が `Result[T, String]` を返す場合、checker が自動的に `?` (Try) を挿入する。
+effect fn body 内であっても、un-annotated な `let` の右辺の effect call は
+剥がされない。旧 auto-`?` の位置は**ハードエラー**で、`!` 挿入の hint を伴う:
 
-```almide
+```almide check-fail=E041
+effect fn read_file(path: String) -> String = "contents of " + path
+
 effect fn main() -> Unit = {
-  let content = read_file("test.txt")   // ← auto-? 挿入
-  //            ↓ 脱糖
-  // let content = read_file("test.txt")?
-  println(content)   // content: String
+  let content = read_file("test.txt")   // E041: Result を暗黙に剥がす位置はもう無い — `!` を書く
+  println(content)
 }
 ```
 
-これにより、ユーザーは `!` なしで effect fn を呼び出せる。auto-`?` は以下の条件で挿入:
+文の位置で Result を捨てるのも同様にエラー(must-use):
 
-- 呼び出し元が `effect fn` body 内
-- 呼び出し先が user-defined `effect fn` (stdlib bundled は除外)
-- 呼び出し結果が `Result[T, E]` で、束縛先の期待型が `T`
+```almide check-fail=E042
+effect fn touch() -> Result[Unit, String] = ok(())
 
-auto-`?` は **match の subject** や **関数引数** では挿入しない。これらの文脈では明示的に `!` が必要。
+effect fn main() -> Unit = {
+  touch()           // E042: `touch()!` か `let _ = touch()` の 2 綴りのどちらか
+  println("done")
+}
+```
 
-### 4. `!` 演算子
+回帰テスト: `spec/lang/explicit_propagation_test.almd`
 
-`!` は `Result[T, E] → T` (error propagation) と `Option[T] → T` (None → panic/propagation)。
+## 4. `!` 演算子
 
-effect fn call が `Result[T, String]` を返すので、`foo()!` は自然に `T` を返す。checker が特別扱いする必要はない。
+`!` は `Result[T, E] → T`(err は囲む関数の失敗チャネルへ伝搬)と
+`Option[T] → T`(none は `err("none")` へ)。effect fn call が
+`Result[T, String]` を返すので、`foo()!` は自然に `T` を返す — checker が
+特別扱いする必要はない。合法な文脈は effect fn 本体・test ブロック・戻り値型が
+Result / Option / `T!` に解決される pure fn(C-211)。
 
-### 5. test ブロック
+## 5. test ブロック
 
-test ブロックは effect context。auto-`?` が同様に適用される。
+test ブロックは effect context だが、effect call の結果は**そのまま Result 値**:
+`!` で unwrap する(失敗は panic でテスト失敗)か、`??` / match で消費する。
 
 ```almide
-test "reads a file" {
-  let content = fs.read_text("test.txt")!   // 明示的 ! (stdlib)
-  let data = load_data()                     // auto-? (user effect fn)
+effect fn load_data() -> Result[String, String] = ok("data")
+
+test "effect calls inside tests" {
+  let data = load_data()!                  // 明示的 ! — test でも省略できない
   assert(string.len(data) > 0)
+  assert_eq(load_data(), ok("data"))       // Result 値としてそのまま比較もできる
 }
 ```
 
-### 6. lambda 内
+## 6. lambda 内
 
-lambda は `?` を enclosing fn に propagate できない。auto-`?` は挿入されない。
+lambda は `!` を enclosing fn に propagate できない(クロージャ境界 — ADR-0006 D1)。
+lambda 内の effect call も Result 値であり、`match` か lambda 自身の `!`
+(lambda の失敗チャネルに落ちる、[result-option-effect.md §3](./result-option-effect.md))で消費する:
 
 ```almide
+effect fn parse(n: Int) -> Result[Int, String] = if n > 0 then ok(n) else err("neg")
+
 effect fn main() -> Unit = {
-  let items = [1, 2, 3]
-  // lambda 内では明示的に ! or match が必要
-  items |> list.map((n) => {
-    match parse(n) {
-      ok(v) => v
-      err(_) => 0
+  let items = [1, -2, 3]
+  let parsed = items |> list.map((n) => {
+    match parse(n) {          // lambda 内では match か ! が必要 — 暗黙伝搬はない
+      ok(v) => v,
+      err(_) => 0,
     }
   })
+  println(int.to_string(list.len(parsed)))
+}
+
+test "effect calls in lambdas are Result values" {
+  assert_eq(parse(-1), err("neg"))
 }
 ```
 
-## 移行の記録（完了済み）
+## 経緯(完了済み)
 
-上記の checker lift（方式 D）は**実装済み**。lifted effect fn の ABI は
-v0.34.x で完全統一された: never-err な lifted effect fn は raw `T` を返し
-呼び出し網が rewrap、can-err は常時 `Result` wrap（#840 / #841）。
-現行挙動は [effect-system.md](./effect-system.md) と
-[../design/HIDDEN_OPERATIONS.md](../design/HIDDEN_OPERATIONS.md) §2 が記述する。
+checker が `T` を返し codegen が `Result` に持ち上げる旧方式は、`!` の型エラーと
+cross-module 呼び出しの不整合を生んだ。checker lift(呼び出し型を常に Result に
+統一)は v0.34.x で ABI まで含めて実装済み(#840 / #841)、その上に乗っていた
+auto-`?` は ADR-0008(v0.55)で削除された — 設計の選択肢比較と反証は ADR-0008 に
+ある。
 
 ## 検証テスト
 
-```
+```text
 spec/lang/effect_fn_test.almd
 spec/lang/effect_assign_unwrap_test.almd
 spec/lang/effect_if_branch_unwrap_test.almd
 spec/lang/effect_result_arg_test.almd
+spec/lang/explicit_propagation_test.almd
 spec/integration/codegen_effect_fn_test.almd
 ```

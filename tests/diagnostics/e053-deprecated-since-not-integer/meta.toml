@@ -1,0 +1,3 @@
+expects_code = "E053"
+expects_error = "must be an integer dialect epoch"
+hint_substring = "The epoch is what lets a caller"

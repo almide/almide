@@ -1,0 +1,16 @@
+// The fix: model retryability as a variant case and branch on structure.
+type Fetch = | Retry | Fatal(String)
+
+effect fn risky() -> Result[Int, Fetch] = err(Retry)
+
+effect fn main() -> Unit = {
+  match risky() {
+    ok(n) => println(int.to_string(n)),
+    err(Retry) => {
+      var tries = 0
+      while tries < 3 { tries = tries + 1 }
+      println("gave up after ${tries}")
+    },
+    err(Fatal(m)) => println("fatal: ${m}"),
+  }
+}

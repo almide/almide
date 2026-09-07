@@ -1,13 +1,37 @@
-diff --git a/crates/almide-mir/src/render_wasm_c.rs b/crates/almide-mir/src/render_wasm_c.rs
-index 3e2841157..b8a7d818b 100644
---- a/crates/almide-mir/src/render_wasm_c.rs
-+++ b/crates/almide-mir/src/render_wasm_c.rs
-@@ -707,7 +707,7 @@ fn render_call(dst: Option<ValueId>, func: &RtFn, args: &[CallArg]) -> String {
-             t = local(*t)
-         ),
-         (RtFn::PrintStr, [CallArg::Handle(v)]) => {
--            format!("    (call $print_str (local.get {}))\n", local(*v))
-+            format!("    (call $print_str (local.get {v}))\n    (call $print_str (local.get {v}))\n", v = local(*v))
+Mutant m5: emit every wasm print twice (the wasm-only divergence).
+
+Seeded into the STRUCTURAL emitter's print lowering (crates/almide-wasm
+lower_print, both the interpolation branch and the String-block branch):
+the default wasm leg since 0.60 (#1696), and the leg the conformance
+runner builds every corpus program on (48/48 via `almide build --target
+wasm` with no ALMIDE_WASM_INCUMBENT). The previous form of this mutant
+seeded the same bug into the incumbent renderer (almide-mir
+render_wasm_c.rs, RtFn::PrintStr) and SURVIVED seven nights once the
+route flipped: the runner never executed that code, so nothing could
+kill it (#1845). The incumbent carries no mutant now. A mutant on a leg
+the corpus does not build on is not evidence, it is noise.
+
+diff --git a/crates/almide-wasm/src/calls.rs b/crates/almide-wasm/src/calls.rs
+index 233ac135b..cde6d38c0 100644
+--- a/crates/almide-wasm/src/calls.rs
++++ b/crates/almide-wasm/src/calls.rs
+@@ -416,12 +416,19 @@ impl Emitter<'_> {
+                 .i32_sub()
+                 .call(import)
+                 .local_get(start)
++                .local_get(self.cursor_local)
++                .local_get(start)
++                .i32_sub()
++                .call(import)
++                .local_get(start)
+                 .global_set(G_LINE_CURSOR);
+             self.release_i32();
+             return Ok(());
          }
-         _ => panic!("malformed runtime call {func:?} with args {args:?}"),
+         self.lower(arg, Some(STR))?;
+         self.f.instructions().call(block_print);
++        self.lower(arg, Some(STR))?;
++        self.f.instructions().call(block_print);
+         Ok(())
      }
+ 

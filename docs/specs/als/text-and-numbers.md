@@ -1,6 +1,6 @@
 # ALS §T — Text and Number Semantics (normative)
 
-> Last updated: 2026-08-21
+> Last updated: 2026-08-27
 
 > **Status**: normative. これらの節は実装から独立した**規範**であり、v0（native）と
 > v1（MIR/wasm）の両実装がこの節に適合する義務を負う。適合の証拠は
@@ -46,10 +46,13 @@ Fixture: `spec/wasm_cross/float_parse.almd`。
 
 - 数値は ALS-T2 の値規範で binary64 化する
 - 文字列のサロゲートペア（`\uD800`–`\uDBFF` + `\uDC00`–`\uDFFF`）は合成する。
-  不対サロゲートはエラー
+  不対サロゲートは**黙って落ちる**（寛容 — `json_string_span.almd` が
+  両ターゲット同一で pin。厳格拒否は不採用）
+- 先頭が値として読める入力は**前置 parse**で受理される（`"[1] x"` →
+  `ok([1])` — RFC 8259 の全文一致要求への寛容拡張、0.59.1 実測）
 - エラー報告は**文字単位の位置**（バイトでなくコードポイント index）を含む
 
-Fixture: `spec/wasm_cross/json_*.almd` 群、read_message roundtrip。
+Fixture: `spec/wasm_cross/json_*.almd` 群（`json_string_span.almd` 含む）。
 
 ## ALS-T4 `list.chunk` / `list.windows`
 
@@ -147,7 +150,12 @@ Contracts: C-028, C-029。
 
 `float.to_fixed(x, n)` は**正確な二進値に対する round-half-to-even**（銀行丸め）。
 十進文字列経由の再丸めや half-up は不適合。n=0 の小数点無し、負数・境界値
-（0.5 ちょうど等）も同規則。
+（0.5 ちょうど等）も同規則。n の定義域は **0..=4096** で、域外は T6 形
+（`Error: to_fixed requires decimals in 0..=4096`、exit 1）で停止する。
+非有限値は表示形をそのまま返す: `inf`・`-inf`・`NaN`。ゼロ量の符号は保存
+（`to_fixed(-0.4, 0)` は `-0`）。Fixtures:
+`spec/wasm_cross/to_fixed_domain_abort.almd`、
+`spec/wasm_cross/to_fixed_wide_precision.almd`。
 Contracts: C-025。
 
 ## ALS-T10 数学関数の決定性
@@ -160,7 +168,9 @@ Contracts: C-026。
 ## ALS-T11 バイナリテキスト符号化
 
 `base64.encode/decode`（standard + URL-safe）と `hex.encode/decode` は RFC 4648
-に従い、decode エラーは**位置情報込みで**両ターゲット同文言。大文字小文字の
+に従い、decode エラーは両ターゲット同文言（base64 は位置なし —
+`invalid base64 character` / `invalid base64 length: N`; 位置付きは hex 側
+`invalid hex char at 0`、C-030）。大文字小文字の
 扱い・パディング規則・不正長の検出を含む。
 Contracts: C-027, C-030。
 
@@ -180,7 +190,10 @@ Contracts: C-023。
 ## ALS-T14 wrap / rotate のマスク飽和
 
 `int.wrap_*` / `int.rotate_*` の bits 引数が 64 を超える場合、マスクは
-`u64::MAX` に**飽和**する（モジュロではない）。bits ≤ 0 は ALS-T6 の abort。
+`u64::MAX` に**飽和**する（モジュロではない）。bits ≤ 0 は wrap 族では
+**黙って全域**（`wrap_add(1,1,0)` → 0、`wrap_add(1,1,-1)` → 2 — 0.59.1
+実測、abort しない）; abort するのは rotate 族のみ（`Error: rotate width
+must be positive`、ALS-T6）。
 Contracts: C-048。
 
 ## ALS-T15 符号と min/max の NaN 規則
@@ -262,7 +275,7 @@ Float 計算の観測可能な結果（stdout・stderr・exit code、および `
 フラグ・実行環境の浮動小数モードに依存しない。この一文が数値決定性の規範であり、
 次の節群がその構成要素である — 既存: T2（`float.parse` 正確丸め）・T9（`to_fixed`）・
 T10（超越関数の単一実装）・T13（最短往復表示）・T15（符号と NaN 無視）・
-ALS-C9（totalOrder）・ALS-E3（`-0.0` 表示）・ALS-M10（等値）・ALS-R4（非有限
+ALS-C9（totalOrder）・ALS-E3（`-0.0` 表示）・ALS-C3（等値）・ALS-R4（非有限
 定数表示）・C-210（NaN の正準観測）; 本ファミリーで新設: T20（丸めと縮約禁止）・
 T21（非正規数の保存）・T22（超越関数の誤差上限）・T23（符号付きゼロ）・
 T24（Float → Int 変換）。
@@ -368,7 +381,7 @@ Fixture: `spec/wasm_cross/math_transcendental_bits.almd`、
 （最近接偶数丸めでは異符号ゼロの和は `+0` — `+0.0` がリテラルでも同じで、
 `x + 0.0 → x` は `x = -0.0` に対して成り立たない恒等式なので、実装は畳み込んでは
 ならない。`x - 0.0 → x` と `x * 1.0 → x` は成り立つ）、`1.0 / -inf = -0.0`。等値は符号を
-無視する（`0.0 == -0.0` は真、ALS-M10）。表示は符号を保つ（`-0.0` → `-0.0`、
+無視する（`0.0 == -0.0` は真、ALS-C3）。表示は符号を保つ（`-0.0` → `-0.0`、
 ALS-E3）。`float.min/max`・`math.fmin/fmax` は **IEEE-754-2019 `minimum`/`maximum`
 のゼロ順序**に従う: `-0.0 < +0.0` として扱い、`min(-0.0, 0.0) = min(0.0, -0.0) = -0.0`、
 `max(-0.0, 0.0) = max(0.0, -0.0) = +0.0` — 引数順に依存せず（可換）、ALS-C9 の
@@ -398,10 +411,11 @@ test "signed zero propagates, compares equal, and orders -0 < +0 in min/max" {
 Fixture: `spec/wasm_cross/float_signed_zero_minmax.almd`、
 `spec/wasm_cross/float_sign_minmax_ieee.almd`、
 `spec/stdlib/float_determinism_test.almd`（伝播・等値）、
-`spec/stdlib/float_minmax_zero_order_test.almd`（±0 の順序 — 0.58.0 リリースは
+`spec/stdlib/float_minmax_zero_order_test.almd`（±0 の順序 — 0.59.1 まで
 旧規則のままなので、ピン前進までこのファイルが赤）、
-`spec/stdlib/float_signed_zero_sum_test.almd`（リテラル `0.0` との和 — 0.58.0 の
-native は `x + 0.0` を `x` に畳み込んでおり、このファイルの赤がその発見）。
+`spec/stdlib/float_signed_zero_sum_test.almd`（リテラル `0.0` との和 —
+0.58.0 native の `x + 0.0 -> x` 畳み込みをこのファイルの赤が発見し、
+0.59.1 が符号厳密な恒等式だけ残す形で修正済み・現緑）。
 Contracts: C-306。
 
 ## ALS-T24 Float → Int 変換
@@ -431,3 +445,32 @@ test "float.to_int truncates toward zero, saturates, and maps NaN to 0" {
 
 Fixture: `spec/wasm_cross/float_to_int_edges.almd`、
 `spec/stdlib/float_determinism_test.almd`。Contracts: C-307。
+
+## ALS-T25 正準 fast-exp
+
+`matrix.softmax_rows`・`matrix.gelu`・`matrix.swiglu_gate` の超越計算は
+libm exp（T22）ではなく**正準 fast-exp** — 両ターゲット・全 SIMD lane が
+同一に綴る唯一のアルゴリズム — を通る（C-223）。定義（f64、全ステップ
+**unfused**、融合積和は再現性を壊すため不使用）:
+
+1. clamp: `x = min(max(x0, -708.0), 708.0)`
+2. `k = nearest(x * 1.4426950408889634)` — **round-ties-to-even**
+   （wasm `f64.nearest`。`float.round` の half-away-from-zero ではない）
+3. `r = x - k * 0.6931471805599453`
+4. Horner 6 次（係数はこの10進綴りの f64 値そのもの）:
+   `p = 0.001388888888888889`;
+   `p = p*r + 0.008333333333333333`; `p = p*r + 0.041666666666666664`;
+   `p = p*r + 0.16666666666666666`; `p = p*r + 0.5`; `p = p*r + 1.0`;
+   `p = p*r + 1.0`
+5. `fast_exp(x0) = p * from_bits((int(k) + 1023) << 52)`
+
+softmax は行ごとに: 行 max（`row[0]` 起点、`>` 走査 — NaN 要素は max を
+変えない）を引き、要素ごと fast-exp、**左から右へ**の総和、`s <= 0.0` か
+NaN なら全要素 `1.0 / n`、それ以外は **reciprocal-multiply**
+（`inv = 1.0/s`; `v * inv` — `v / s` とは最大 1 ULP 異なる）。gelu は
+`inner = 0.7978845608028654 * (x + 0.044715 * ((x*x)*x))`（cube は
+`(x*x)*x` の結合）、`e2 = fast_exp(2.0 * inner)`、tanh は恒等式
+`t = 1.0 - 2.0/(e2 + 1.0)`（`(e2-1)/(e2+1)` は丸めが異なる）、仕上げは
+`(0.5 * x) * (1.0 + t)` — 先に半分にする結合で、float 上端の `x` でも
+有限に留まる。Fixtures: `spec/wasm_cross/matrix_softmax_fastexp.almd`、
+`spec/wasm_cross/matrix_domain_edges.almd`。Contracts: C-223。

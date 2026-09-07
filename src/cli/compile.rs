@@ -3,9 +3,15 @@ use crate::{parse_file, canonicalize, check, diagnostic, resolve, project, out, 
 /// Resolve a module name to a source file path.
 /// If the input looks like a file path (ends with .almd), use it directly.
 /// If it's a module name (e.g., "json", "parser"), resolve via the module system.
-pub(crate) fn resolve_module_to_file(module: &str) -> (String, bool) {
+///
+/// The second half is the module's name when the file is a BUNDLED stdlib
+/// module's staged source — the entry program then IS that module, and the
+/// checker must know (its own `type Endian` is the stdlib's bare `Endian`,
+/// not a user shadow `self.Endian`; and its body check is lenient, see
+/// `parse_and_typecheck_for_compile`). `None` for every user file.
+pub(crate) fn resolve_module_to_file(module: &str) -> (String, Option<String>) {
     if module.ends_with(".almd") {
-        return (module.to_string(), false);
+        return (module.to_string(), None);
     }
 
     // Stdlib modules are self-hosted `.almd` bundled into the compiler:
@@ -23,7 +29,7 @@ pub(crate) fn resolve_module_to_file(module: &str) -> (String, bool) {
                 err(&format!("error: cannot stage bundled stdlib source for '{}': {}", module, e));
                 std::process::exit(1);
             }
-            return (tmp.to_string_lossy().to_string(), true);
+            return (tmp.to_string_lossy().to_string(), Some(module.to_string()));
         }
         err(&format!("error: '{}' is a stdlib module with no bundled source wired in stdlib_info", module));
         std::process::exit(1);
@@ -46,7 +52,7 @@ pub(crate) fn resolve_module_to_file(module: &str) -> (String, bool) {
     ];
     for path in &candidates {
         if path.exists() {
-            return (path.to_string_lossy().to_string(), false);
+            return (path.to_string_lossy().to_string(), None);
         }
     }
 
@@ -60,7 +66,7 @@ pub(crate) fn resolve_module_to_file(module: &str) -> (String, bool) {
             ];
             for path in &dep_candidates {
                 if path.exists() {
-                    return (path.to_string_lossy().to_string(), false);
+                    return (path.to_string_lossy().to_string(), None);
                 }
             }
         }
@@ -100,7 +106,15 @@ fn resolve_module_name(module: Option<&str>) -> String {
 /// `cmd_compile`'s parse + resolve + type-check phase. Exits the process on
 /// any parse/resolve/type error, matching the original inline behavior.
 /// Extracted verbatim.
-pub(crate) fn parse_and_typecheck_for_compile(file: &str, lenient: bool) -> (almide::ast::Program, String, check::Checker) {
+///
+/// `bundled_module` is the entry program's identity when `file` is a bundled
+/// stdlib module's staged source (`resolve_module_to_file`): the checker
+/// keys that module's own owned types bare, and the body check is lenient —
+/// bundled sources reference runtime-backed nominal types (JsonPath,
+/// HttpRequest, ...) that only exist when the module is IMPORTED, and
+/// interface extraction doesn't need the body check to pass.
+pub(crate) fn parse_and_typecheck_for_compile(file: &str, bundled_module: Option<&str>) -> (almide::ast::Program, String, check::Checker) {
+    let lenient = bundled_module.is_some();
     let (mut program, source_text, parse_errors) = parse_file(file);
     if !parse_errors.is_empty() {
         for e in &parse_errors {
@@ -116,9 +130,10 @@ pub(crate) fn parse_and_typecheck_for_compile(file: &str, lenient: bool) -> (alm
         .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
 
     // Type check
-    let canon = canonicalize::canonicalize_program(
+    let canon = canonicalize::canonicalize_program_in(
         &program,
         resolved.modules.iter().map(|(n, p, _, s)| (n.as_str(), p, *s)),
+        bundled_module,
     );
     let mut checker = check::Checker::from_env(canon.env);
     checker.set_source(file, &source_text);
@@ -181,16 +196,13 @@ fn write_compile_output(iface: &almide::interface::ModuleInterface, ir: &almide:
 }
 
 pub fn cmd_compile(module: Option<&str>, json: bool, dry_run: bool, output_dir: Option<&str>) {
-    let (file, lenient) = match module {
+    let (file, bundled_module) = match module {
         Some(m) => resolve_module_to_file(m),
-        None => (crate::resolve_file(None), false),
+        None => (crate::resolve_file(None), None),
     };
     let module_name = resolve_module_name(module);
 
-    // Bundled stdlib sources reference runtime-backed nominal types
-    // (JsonPath, HttpRequest, ...) that only exist when the module is
-    // IMPORTED — interface extraction doesn't need the body check to pass.
-    let (program, source_text, checker) = parse_and_typecheck_for_compile(&file, lenient);
+    let (program, source_text, checker) = parse_and_typecheck_for_compile(&file, bundled_module.as_deref());
 
     // Lower to IR
     let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);

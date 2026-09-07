@@ -1,0 +1,17 @@
+// @contract: C-329
+// env.set → env.get round-trip: last write wins, the empty value survives,
+// an unset name stays none — identical on native, the embedded lane, and
+// stock p1 artifacts (#1716). Names are fixture-unique so no host
+// environment or sibling fixture can collide; the initial state is never
+// asserted (the embedded overlay is process-wide by design, matching
+// native's process-level setenv scope).
+import env
+
+effect fn main() -> Unit = {
+  env.set("ALMIDE_C329_KEY", "first")
+  env.set("ALMIDE_C329_KEY", "second")
+  println(env.get("ALMIDE_C329_KEY") ?? "unset")
+  env.set("ALMIDE_C329_EMPTY", "")
+  println("[${env.get("ALMIDE_C329_EMPTY") ?? "unset"}]")
+  println(env.get("ALMIDE_C329_NEVER_SET") ?? "unset")
+}

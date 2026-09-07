@@ -1,3 +1,4 @@
+// @contract: C-336
 // cell.update's spread-with-closure-override (`{ ...c, _val: f(c._val) }`)
 // across the generic instantiations ceangal exercises (#881): the closure
 // call is a Computed-callee field the spread construct moves into its slot.

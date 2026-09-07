@@ -1,0 +1,3 @@
+expects_code = "E001"
+expects_error = "`guard let` requires an Option or Result"
+hint_substring = "guard let v = some_option else"

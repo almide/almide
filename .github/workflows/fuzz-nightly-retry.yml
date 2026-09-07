@@ -1,0 +1,81 @@
+# fuzz-nightly RECLAIM RETRY (#924).
+#
+# The nightly's per-shard budget is 5 minutes, and the runner STILL gets a
+# shutdown signal mid-job on 2-4 of 8 shards most nights (exit 143, "The
+# runner has received a shutdown signal") — measured over 2026-08-23..09-05:
+# only 4 of 14 scheduled nights had every shard report. Job length is not
+# the cause, so no in-job mitigation can reach it; the campaign needs a
+# RE-RUN of exactly the reclaimed shards, from outside the run (a run can
+# only be re-run once it has completed, so the verdict job cannot do it).
+#
+# This workflow fires when a fuzz-nightly run completes. If any fuzz shard
+# job failed WITH the runner-shutdown annotation, and the run is still on
+# an early attempt, it re-runs the failed jobs: the reclaimed shards get a
+# fresh runner, the verdict job (their dependent) re-aggregates over the
+# run's artifacts — the surviving shards' uploads from attempt 1 are still
+# there, the retried shards add theirs — and the coverage line reports
+# shards=8/8 for a night whose only defect was infrastructure. A shard
+# that failed for any OTHER reason (a real crash of the harness) is never
+# retried: the annotation is the discriminator, not the exit code.
+#
+# Bounded: at most two retries (attempt 3 is the last that triggers one),
+# so a runner class that is reclaimed every time cannot loop.
+name: fuzz-nightly-retry
+
+on:
+  workflow_run:
+    workflows: ["Fuzz (nightly)"]
+    types: [completed]
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  retry-reclaimed-shards:
+    if: >-
+      github.event.workflow_run.conclusion != 'success' &&
+      github.event.workflow_run.run_attempt < 3
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Re-run the fuzz shards the runner reclaimed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Failed fuzz-shard jobs of THIS attempt.
+          failed=$(gh api --paginate "repos/$REPO/actions/runs/$RUN_ID/attempts/$ATTEMPT/jobs" \
+            --jq '.jobs[] | select(.conclusion == "failure") | select(.name | test("Generative differential fuzz")) | .id')
+          if [ -z "$failed" ]; then
+            echo "no failed fuzz shard on attempt $ATTEMPT — nothing to retry (a verdict failure is findings, not infrastructure)"
+            exit 0
+          fi
+          reclaimed=0
+          for job in $failed; do
+            # A reclaim leaves TWO marks and only the second is in the
+            # annotations: the step's `Process completed with exit code 143`
+            # (SIGTERM) annotation, and the runner's own `The runner has
+            # received a shutdown signal` line in the job LOG (measured on
+            # run 34012629910 shard 4: the first retry judged it "failed on
+            # its own" because it read the annotations alone). Either mark
+            # names the reclaim; a harness crash carries neither.
+            if gh api "repos/$REPO/actions/jobs/$job/logs" 2>/dev/null \
+                 | grep -q "runner has received a shutdown signal" \
+               || gh api --paginate "repos/$REPO/check-runs/$job/annotations" \
+                 --jq '.[].message' | grep -q "exit code 143"; then
+              echo "job $job: reclaimed by the runner"
+              reclaimed=$((reclaimed + 1))
+            else
+              echo "job $job: failed on its own — not an infrastructure kill"
+            fi
+          done
+          if [ "$reclaimed" -eq 0 ]; then
+            echo "no reclaimed shard — nothing to retry"
+            exit 0
+          fi
+          echo "re-running $reclaimed reclaimed shard(s) of run $RUN_ID (attempt $ATTEMPT -> $((ATTEMPT + 1)))"
+          gh run rerun "$RUN_ID" --repo "$REPO" --failed

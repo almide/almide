@@ -1,0 +1,9 @@
+// E043: the fs streaming walkers carry the try_-removal doctrine too (#1144) —
+// `fs.try_fold_lines` is not a spelling; the core fs.fold_lines is
+// fallibility-polymorphic like the list HOFs.
+import fs
+
+effect fn main() -> Unit = {
+  let n = fs.fold_lines("data.txt", 0, (a, l) => a + 1)!
+  println("${n}")
+}

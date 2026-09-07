@@ -1,0 +1,11 @@
+// A user `type HttpResponse` beside `http.response`, which hands back the
+// STDLIB's `HttpResponse` (a runtime-backed nominal with no declaration).
+// The user's type is `self.HttpResponse`; the stdlib's identity is never
+// rebound by a same-name declaration (#1828).
+import http
+type HttpResponse = { n: Int }
+
+effect fn main() -> Unit = {
+  let r = http.response(200, "body")
+  println(int.to_string(r.n))
+}

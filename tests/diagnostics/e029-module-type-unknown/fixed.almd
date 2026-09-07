@@ -1,0 +1,8 @@
+// A qualified type name the sibling does not declare is E029 at the
+// annotation — the module-scoped spelling is what the hint repeats.
+import self.geo as g
+
+fn main() -> Unit = {
+  let p: g.Point = g.origin()
+  println(int.to_string(p.x))
+}

@@ -1,0 +1,6 @@
+// `map.new()` passed straight to the element-agnostic map.len: the
+// key/value types never appear (constructor analogue of a bare `[:]`).
+fn main() -> Unit = {
+  let m: Map[String, Int] = map.new()
+  println(int.to_string(map.len(m)))
+}

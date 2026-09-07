@@ -1,0 +1,4 @@
+// The fix: the Int IS the value — use it directly.
+fn tag(n: Int) -> Int = n
+
+fn main() -> Unit = println(int.to_string(tag(7)))

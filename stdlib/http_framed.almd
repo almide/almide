@@ -1,0 +1,38 @@
+// http_framed — the WASM lowering of the 4-arg request family (#1710
+// increment 3). The host-op ABI carries exactly two buffers, so the
+// (method, body, headers) triple SERIALIZES into one frame that rides
+// beside the url: decimal-length cells `<len>\n<payload>`, method first,
+// body second, then each header key and value in map order. Lengths are
+// CHAR counts (string.len semantics) and the frame stays valid UTF-8 —
+// the embedded host parses it with the same char arithmetic. Native
+// keeps its direct intrinsics; this file only ever links on the wasm
+// legs through the self-host registry.
+//
+// The three `__http_framed_*` leaves are host ops (48 text / 49 status /
+// 50 bytes) served by the embedded host's transcription of the native
+// client, so transport-error texts match native byte-for-byte (C-328).
+// The status op answers `<code>\n<body>` — split at the FIRST newline;
+// the body may carry any number of its own.
+fn __http_cell(s: String) -> String = "${string.len(s)}\n${s}"
+
+fn __http_frame(method: String, body: String, headers: Map[String, String]) -> String = map.entries(headers) |> list.map(((k, v)) => "${__http_cell(k)}${__http_cell(v)}") |> list.fold("${__http_cell(method)}${__http_cell(body)}", (acc, cell) => acc + cell)
+
+effect fn __http_framed_text(url: String, frame: String) -> Result[String, String] = _
+
+effect fn __http_framed_status(url: String, frame: String) -> Result[String, String] = _
+
+effect fn __http_framed_bytes(url: String, frame: String) -> Result[Bytes, String] = _
+
+effect fn __request_impl(method: String, url: String, body: String, headers: Map[String, String]) -> Result[String, String] = __http_framed_text(url, __http_frame(method, body, headers))
+
+effect fn __request_status_impl(method: String, url: String, body: String, headers: Map[String, String]) -> Result[(Int, String), String] = {
+  let f = __http_framed_status(url, __http_frame(method, body, headers))!
+  let cut = string.index_of(f, "\n") ?? 0
+  ok((int.parse(string.take(f, cut)) ?? 0, string.drop(f, cut + 1)))
+}
+
+effect fn __get_status_impl(url: String) -> Result[(Int, String), String] = __request_status_impl("GET", url, "", map.new())
+
+effect fn __request_bytes_impl(method: String, url: String, body: String, headers: Map[String, String]) -> Result[Bytes, String] = __http_framed_bytes(url, __http_frame(method, body, headers))
+
+effect fn __get_bytes_impl(url: String) -> Result[Bytes, String] = __request_bytes_impl("GET", url, "", map.new())

@@ -494,6 +494,13 @@ fn source_to_ir_with(
     // it); excluded shapes (multi-mut-param, same-name, non-Unit effect) keep it
     // and keep walling.
     almide_ir::mut_param::lower_mut_params_move_mode(&mut ir);
+    // Block call-arguments absorb their call (shared with classify: desugar-before-both).
+    // BEFORE the guard restructure: a `guard … else err(m)!` inside an argument block
+    // (`f({ let g = r!; guard c else err("g")!; g })`) only reaches the fn-body tail
+    // chain once the block has absorbed its call — run after, the guard desugar never
+    // saw it and the raw Guard stmt survived to the lowering, whose fallback emitted
+    // the scalar continuation against the Result ABI: invalid wasm (#1968).
+    crate::lower::hoist_block_call_args(&mut ir);
     // Guard → if restructure at the fn-body tail chain (conditional early return
     // expressed without early-return control flow — see desugar_guard.rs; shared
     // with classify: desugar-before-both).
@@ -501,8 +508,6 @@ fn source_to_ir_with(
     // Tail err-raise ifs normalize to the proven bind-position `!` shape (fed by the
     // guard restructure above; shared with classify: desugar-before-both).
     crate::lower::normalize_tail_err_raise_ifs(&mut ir);
-    // Block call-arguments absorb their call (shared with classify: desugar-before-both).
-    crate::lower::hoist_block_call_args(&mut ir);
     // Call-bearing assert subjects bind first (shared with classify: desugar-before-both;
     // must precede the never-err/auto-wrap classification so the bind rewraps like a
     // user-written `let`).

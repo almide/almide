@@ -456,7 +456,11 @@ fn display_aggregate(obj: &IrExpr, ty: &Ty, registry: &RecordLayouts) -> Option<
         parts.push(lit_str("("));
     } else {
         let name = type_name?;
-        parts.push(lit_str(&format!("{name} {{ ")));
+        // The DECLARED spelling (#1836, C-009): `${record}` shows the last segment
+        // of `m.Cfg`, and of the entry program's stdlib-owned shadow `self.X`
+        // (#1828), as native and the structural leg do.
+        let shown = almide_ir::declared_type_name(&name);
+        parts.push(lit_str(&format!("{shown} {{ ")));
     }
     for (idx, (fname, fty)) in fields.iter().enumerate() {
         if idx > 0 {

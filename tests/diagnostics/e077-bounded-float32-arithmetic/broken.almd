@@ -1,0 +1,6 @@
+// ALS-B10: Float32 is Float-typed for the profile — arithmetic on it is
+// rejected the same as on Float.
+@bounded
+fn double(x: Float32) -> Float32 = x + x
+
+fn main() -> Unit = println(float32.to_string(double(float.to_float32(1.5))))

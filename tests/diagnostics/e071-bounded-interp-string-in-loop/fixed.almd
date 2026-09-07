@@ -1,0 +1,10 @@
+// ALS-B4: build the string once outside the loop.
+@bounded
+fn trace() -> Int = {
+  let label = "step"
+  var acc = 0
+  for i in 0..<3 { acc = acc + string.len(label) }
+  acc
+}
+
+fn main() -> Unit = println("${trace()}")

@@ -1,0 +1,5 @@
+// Fixed: compare Ints inside the profile; Floats stay uncomputed.
+@bounded
+fn same(a: Int, b: Int) -> Bool = a == b
+
+fn main() -> Unit = println(if same(1, 1) then "eq" else "ne")

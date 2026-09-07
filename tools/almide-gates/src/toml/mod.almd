@@ -9,9 +9,15 @@
 //   { path = "...", class = "...", ... }      369, only as array elements
 //
 // No nested tables, no dotted keys, no dates, no numbers, no multi-line basic strings. A
-// reader for this subset is a three-state line scanner. Anyone reaching for general TOML
-// should write a general parser instead of widening this one — the narrowness is the point,
-// and it is why this file is short enough to read in one sitting.
+// reader for this subset is a four-state line scanner (between blocks, in a block, in an
+// array, in a `'''` string). Anyone reaching for general TOML should write a general parser
+// instead of widening this one — the narrowness is the point, and it is why this file is
+// short enough to read in one sitting.
+//
+// Narrow is not the same as silent. The one thing the reader must never do is RECOVER from a
+// damaged block shape without saying so: `parse_doc` reports every recovery as a problem, and
+// the gate turns each into an error (#1843 — the shape that hid for three weeks is spelled
+// out at `step_array`).
 //
 // Unit 0.46. Modelled on stdlib/json*.almd, which
 // is the proof that a parser of this shape works in Almide.
@@ -39,18 +45,19 @@ fn scalar_key(line: String) -> String = {
   }
 }
 
-// The value after the FIRST `=`, with surrounding quotes stripped. Everything after the
-// first `=` is rejoined, so a statement containing `=` survives intact.
-fn scalar_value(line: String) -> String = {
+// The value after the FIRST `=`, trimmed but otherwise raw. Everything after the first `=`
+// is rejoined, so a statement containing `=` survives intact.
+fn raw_value(line: String) -> String = {
   let parts = string.split(line, "=")
   if list.len(parts) < 2 then ""
-  else {
-    let rest = list.slice(parts, 1, list.len(parts)) |> list.join("=")
-    let v = string.trim(rest)
-    if string.starts_with(v, '"') and string.ends_with(v, '"') and string.len(v) >= 2 then string.slice(v, 1, string.len(v) - 1)
-    else v
-  }
+  else string.trim(list.slice(parts, 1, list.len(parts)) |> list.join("="))
 }
+
+fn unquote(v: String) -> String = if string.starts_with(v, '"') and string.ends_with(v, '"') and string.len(v) >= 2 then string.slice(v, 1, string.len(v) - 1)
+else v
+
+// The value after the FIRST `=`, with surrounding quotes stripped.
+fn scalar_value(line: String) -> String = unquote(raw_value(line))
 
 // A field of an inline table element: `{ path = "a", class = "b" }` → `inline_get(s, "path")`
 // is `"a"`. "" when absent — the caller distinguishes absent from empty by context, matching
@@ -92,16 +99,28 @@ fn table_get(t: Table, key: String) -> String = {
   }
 }
 
-// The scanner. Three states, walked recursively rather than with a mutable index:
+// What the reader found wrong with the document. A subset reader that recovers SILENTLY is
+// how #1843 stayed invisible for three weeks: C-274's `evidence = [` had lost its `]`, so the
+// next `[[contract]]` header and everything after it were swallowed as array elements, and
+// the port rendered one contract fewer than the awk generators while every gate stayed green.
+// The scanner still recovers — a report can be rendered from a damaged ledger — but every
+// recovery is a named problem, and `ledger_gate` turns each into an error.
+type Doc = { tables: List[Table], problems: List[String] }
+
+// The scanner's threaded state — one record rather than seven positional arguments:
 //
-//   Idle          — between blocks; `[[contract]]` opens one
-//   InTable       — collecting `key = "value"`; `key = [` opens the array
-//   InArray       — collecting elements until the closing `]`
+//   open         a `[[…]]` header has been seen and `cur` is being filled
+//   in_array     inside `key = [ … ]`, collecting elements until the closing `]`
+//   multi        the key of a `'''` string being collected across lines; "" otherwise
 //
-// State is threaded as arguments (the accumulating table and the finished list) so there is
-// no mutable cursor to get out of step with the line index — the shape the CHEATSHEET
-// recommends over `var i` + `while`.
+// Walked recursively over the line index rather than with a mutable cursor, so there is no
+// counter to get out of step with the line — the shape the CHEATSHEET recommends over
+// `var i` + `while`.
+type Scan = { cur: Table, open: Bool, in_array: Bool, multi: String, multi_lines: List[String], out: List[Table], problems: List[String] }
+
 fn empty_table() -> Table = Table { scalars: [], array_key: "", array_items: [] }
+
+fn empty_scan() -> Scan = Scan { cur: empty_table(), open: false, in_array: false, multi: "", multi_lines: [], out: [], problems: [] }
 
 fn is_table_header(l: String) -> Bool = {
   let t = string.trim(l)
@@ -128,24 +147,145 @@ fn with_scalar(t: Table, k: String, v: String) -> Table = Table { scalars: t.sca
 
 fn with_item(t: Table, item: String) -> Table = Table { scalars: t.scalars, array_key: t.array_key, array_items: t.array_items + [item] }
 
-fn scan(lines: List[String], i: Int, cur: Table, open: Bool, in_array: Bool, out: List[Table]) -> List[Table] = if i >= list.len(lines) then {
-  if open then out + [cur]
-  else out
-} else {
-  let line = list.get_or(lines, i, "")
-  if is_blank_or_comment(line) then scan(lines, i + 1, cur, open, in_array, out)
-  else if in_array then {
-    if closes_array(line) then scan(lines, i + 1, cur, open, false, out)
-    else scan(lines, i + 1, with_item(cur, array_item(line)), open, true, out)
-  } else if is_table_header(line) then scan(lines, i + 1, empty_table(), true, false, if open then out + [cur]
-  else out)
-  else {
-    let k = scalar_key(line)
-    if k == "" then scan(lines, i + 1, cur, open, in_array, out)
-    else if opens_array(line) then scan(lines, i + 1, Table { scalars: cur.scalars, array_key: k, array_items: cur.array_items }, open, true, out)
-    else scan(lines, i + 1, with_scalar(cur, k, scalar_value(line)), open, false, out)
-  }
+fn has_key(t: Table, k: String) -> Bool = t.scalars |> list.any((p) => p.key == k)
+
+fn block_name(t: Table) -> String = {
+  let id = table_get(t, "id")
+  if id == "" then "the current block" else id
 }
 
-// Parse an array-of-tables document into its blocks, in source order.
-fn parse_tables(content: String) -> List[Table] = scan(string.split(content, "\n"), 0, empty_table(), false, false, [])
+fn problem(s: Scan, n: Int, msg: String) -> Scan = { ...s, problems: s.problems + ["line " + int.to_string(n) + ": " + msg] }
+
+// A `[[…]]` header: file the block being filled, start a fresh one.
+fn open_block(s: Scan) -> Scan = { ...s, cur: empty_table(), open: true, in_array: false, out: if s.open then s.out + [
+  s.cur
+]
+else s.out }
+
+// Inside `'''`: collect until the closer. The closer's own prefix is kept only when it is
+// non-empty, so a `'''` on a line of its own does not add a trailing blank line to the value.
+fn step_multi(s: Scan, line: String) -> Scan = if not string.contains(line, "'''") then { ...s, multi_lines: s.multi_lines + [line] } else {
+  let before = list.get_or(string.split(line, "'''"), 0, "")
+  let all = if before == "" then s.multi_lines
+  else s.multi_lines + [before]
+  let cleared: List[String] = []
+  { ...s, cur: with_scalar(s.cur, s.multi, list.join(all, "\n")), multi: "", multi_lines: cleared }
+}
+
+// Inside `key = [`: an element starts with `{`, the closer is `]`. Anything else — a scalar,
+// a header — means the array never closed. That is precisely the #1843 shape (C-274's array
+// ran on into C-275's header, and the old scanner swallowed the whole next contract as
+// elements): report it, close the array here, and read the line for what it is.
+fn step_array(s: Scan, n: Int, line: String) -> Scan = if closes_array(line) then { ...s, in_array: false } else if string.starts_with(string.trim(line), "{") then { ...s, cur: with_item(s.cur, array_item(line)) } else {
+  let msg = "`" + string.trim(line) + "` inside `" + s.cur.array_key + " = [` is not an inline-table element — the array is missing its `]`"
+  step(problem({ ...s, in_array: false }, n, msg), n, line)
+}
+
+// A scalar line in a block. A duplicate key is reported and the FIRST value stands — the
+// lookup `table_get` performs anyway — so a header-less block pasted into another (the other
+// half of #1843) reads as one contract with the original's keys, plus a problem per key.
+fn step_scalar(s: Scan, n: Int, line: String) -> Scan = {
+  let k = scalar_key(line)
+  let v = raw_value(line)
+  if k == "" then problem(s, n, "`" + string.trim(line) + "` is not a key, a table header, or a comment")
+  else if not s.open then problem(s, n, "`" + k + " = …` before any `[[…]]` header is dropped")
+  else if opens_array(line) then { ...s, cur: { ...s.cur, array_key: k }, in_array: true } else if string.starts_with(v, "'''") then {
+    let after = string.slice(v, 3, string.len(v))
+    // TOML drops the newline right after the opener, so an empty `after` starts no line.
+    let first: List[String] = if after == "" then []
+    else [after]
+    if string.contains(after, "'''") then { ...s, cur: with_scalar(s.cur, k, list.get_or(string.split(after, "'''"), 0, "")) } else { ...s, multi: k, multi_lines: first }
+  } else if has_key(s.cur, k) then problem(s, n, "duplicate key `" + k + "` in " + block_name(s.cur) + " — the first value stands")
+  else { ...s, cur: with_scalar(s.cur, k, unquote(v)) }
+}
+
+// One line, by state. A `'''` string is checked first so a comment-looking line inside it is
+// kept as content, exactly as TOML reads it.
+fn step(s: Scan, n: Int, line: String) -> Scan = if s.multi != "" then step_multi(s, line)
+else if is_blank_or_comment(line) then s
+else if s.in_array then step_array(s, n, line)
+else if is_table_header(line) then open_block(s)
+else step_scalar(s, n, line)
+
+// End of input: an unfinished array or string is a problem, and the block being filled is filed.
+fn finish(s: Scan, n: Int) -> Scan = {
+  let s1 = if s.in_array then problem(s, n, "end of file inside `" + s.cur.array_key + " = [` — missing its `]`")
+  else s
+  let s2 = if s1.multi != "" then problem(s1, n, "end of file inside the `'''` string of `" + s1.multi + "`")
+  else s1
+  { ...s2, out: if s2.open then s2.out + [
+    s2.cur
+  ]
+  else s2.out }
+}
+
+fn scan(lines: List[String], i: Int, s: Scan) -> Scan = if i >= list.len(lines) then finish(s, i)
+else scan(lines, i + 1, step(s, i + 1, list.get_or(lines, i, "")))
+
+// Parse an array-of-tables document into its blocks, in source order, with every recovery
+// the scanner made named in `problems` (line-numbered, 1-based).
+fn parse_doc(content: String) -> Doc = {
+  let s = scan(string.split(content, "\n"), 0, empty_scan())
+  Doc { tables: s.out, problems: s.problems }
+}
+
+// The tables only. A caller that must not render from a damaged document reads
+// `parse_doc(…).problems` instead; the generators use this so a report can still be rendered
+// while the gate is the one that refuses.
+fn parse_tables(content: String) -> List[Table] = parse_doc(content).tables
+
+test "a multi-line evidence array, comments and blank lines read as one block" {
+  let src = "# the ledger\n[[contract]]\nid = \"C-001\"\nspec = \"ALS-T1\"\n\nevidence = [\n  # weakest first\n  { path = \"spec/wasm_cross/a.almd\", class = \"fixture\" },\n  { path = \"x.rs\", name = \"f\", class = \"fuzz\", n = 1000 },\n]\n"
+  let d = parse_doc(src)
+  assert_eq(d.problems, [])
+  assert_eq(list.len(d.tables), 1)
+  let t = list.get_or(d.tables, 0, empty_table())
+  assert_eq(table_get(t, "spec"), "ALS-T1")
+  assert_eq(t.array_items |> list.map((it) => inline_get(it, "path")), ["spec/wasm_cross/a.almd", "x.rs"])
+  assert_eq(inline_num(list.get_or(t.array_items, 1, ""), "n"), "1000")
+}
+
+test "an unclosed evidence array is reported, and the next [[contract]] still opens its own block" {
+  // The #1843 shape: C-274's `]` was missing, and the old scanner swallowed C-275 whole —
+  // one contract fewer than the awk generators rendered, with no gate noticing.
+  let src = "[[contract]]\nid = \"C-274\"\nevidence = [\n  { path = \"a.almd\", class = \"fixture\" },\n\n[[contract]]\nid = \"C-275\"\nevidence = [\n  { path = \"b.almd\", class = \"fixture\" },\n]\n"
+  let d = parse_doc(src)
+  assert_eq(d.tables |> list.map((t) => table_get(t, "id")), ["C-274", "C-275"])
+  assert_eq(d.tables |> list.map((t) => list.len(t.array_items)), [1, 1])
+  assert_eq(d.problems, [
+    "line 6: `[[contract]]` inside `evidence = [` is not an inline-table element — the array is missing its `]`"
+  ])
+}
+
+test "a header-less block inside an array is reported, and the first value stands" {
+  // The other half of #1843: a whole contract pasted inside C-275's array with no header and
+  // no id. awk kept the LAST title and Python the FIRST spec; here the first of every key
+  // stands and each duplicate is a problem, so the fold cannot pass as a clean read.
+  let src = "[[contract]]\nid = \"C-275\"\nspec = \"ALS-R7\"\nevidence = [\n  { path = \"a.almd\", class = \"fixture\" },\n\nspec = \"ALS-I3\"\nevidence = [\n  { path = \"b.almd\", class = \"fixture\" },\n]\n"
+  let d = parse_doc(src)
+  assert_eq(d.tables |> list.map((t) => table_get(t, "spec")), ["ALS-R7"])
+  assert_eq(d.problems, [
+    "line 7: `spec = \"ALS-I3\"` inside `evidence = [` is not an inline-table element — the array is missing its `]`",
+    "line 7: duplicate key `spec` in C-275 — the first value stands"
+  ])
+}
+
+test "a ''' statement spanning lines is one value, and the key after it is read" {
+  // The awk generators toggle on `'''`; the reader must not treat the lines inside as keys
+  // or comments.
+  let src = "[[contract]]\nid = \"C-001\"\nstatement = '''\nfirst line\n# not a comment\nlast'''\nsince = \"0.1.0\"\n"
+  let d = parse_doc(src)
+  assert_eq(d.problems, [])
+  let t = list.get_or(d.tables, 0, empty_table())
+  assert_eq(table_get(t, "statement"), "first line\n# not a comment\nlast")
+  assert_eq(table_get(t, "since"), "0.1.0")
+}
+
+test "an array or a ''' string left open at end of file is reported" {
+  assert_eq(parse_doc("[[contract]]\nid = \"C-001\"\nevidence = [\n").problems, [
+    "line 4: end of file inside `evidence = [` — missing its `]`"
+  ])
+  assert_eq(parse_doc("[[contract]]\nstatement = '''\nnever closed\n").problems, [
+    "line 4: end of file inside the `'''` string of `statement`"
+  ])
+}

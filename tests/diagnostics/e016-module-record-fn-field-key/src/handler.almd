@@ -1,0 +1,3 @@
+type Handler = { name: String, run: (Int) -> Int }
+
+pub fn make(name: String) -> Handler = Handler { name: name, run: (n) => n + 1 }

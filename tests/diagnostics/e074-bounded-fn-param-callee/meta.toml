@@ -1,0 +1,3 @@
+expects_code = "E074"
+expects_error = "calling a function outside the profile"
+hint_substring = "mark the callee @bounded"

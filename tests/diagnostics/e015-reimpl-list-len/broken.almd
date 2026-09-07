@@ -1,0 +1,4 @@
+// A List -> Int fn under the bare stdlib name `len`.
+fn len(xs: List[Int]) -> Int = 0
+
+fn main() -> Unit = println(int.to_string(len([1, 2])))

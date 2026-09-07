@@ -225,6 +225,24 @@ fn subst(ty: &Ty, env: &HashMap<Sym, &Ty>) -> Ty {
         Ty::Applied(c, args) => Ty::Applied(c.clone(), args.iter().map(|a| subst(a, env)).collect()),
         Ty::Named(n, args) => Ty::Named(*n, args.iter().map(|a| subst(a, env)).collect()),
         Ty::Tuple(args) => Ty::Tuple(args.iter().map(|a| subst(a, env)).collect()),
+        // A function-typed field carries the parameter through its
+        // signature (`run: (Value) -> P[T]`, #1676): without this arm the
+        // instance builder saw a bare `T`, resolved nothing, and left the
+        // reserved index `Excluded` — the record literal then walled as
+        // `record-of-variant-ty` on the default leg while the monomorphic
+        // spelling lowered.
+        Ty::Fn { params, ret, is_effect } => Ty::Fn {
+            params: params.iter().map(|p| subst(p, env)).collect(),
+            ret: Box::new(subst(ret, env)),
+            is_effect: *is_effect,
+        },
+        // Anonymous record fields carry the parameter the same way.
+        Ty::Record { fields } => Ty::Record {
+            fields: fields.iter().map(|(n, t)| (*n, subst(t, env))).collect(),
+        },
+        Ty::OpenRecord { fields } => Ty::OpenRecord {
+            fields: fields.iter().map(|(n, t)| (*n, subst(t, env))).collect(),
+        },
         other => other.clone(),
     }
 }

@@ -1,41 +1,48 @@
 // ---- Regex Runtime ----
 
 #[derive(Clone)]
-enum RxNode {
+enum AlmideRxNode {
     Lit(char),
     Dot,
     Class(Vec<(char, char)>, bool), // ranges, negated
     AnchorStart,
     AnchorEnd,
-    Group(Vec<Vec<RxPiece>>, usize), // alternations, capture index (1-based; 0 = no capture)
+    WordBoundary(bool), // true = \b, false = \B
+    Group(Vec<Vec<AlmideRxPiece>>, usize), // alternations, capture index (1-based; 0 = no capture)
 }
 
 #[derive(Clone)]
-struct RxPiece {
-    node: RxNode,
+struct AlmideRxPiece {
+    node: AlmideRxNode,
     min: usize,
     max: Option<usize>,
+    lazy: bool,
 }
 
-struct RxPat {
-    alts: Vec<Vec<RxPiece>>,
+struct AlmideRxPat {
+    alts: Vec<Vec<AlmideRxPiece>>,
     ncap: usize,
+    multiline: bool, // a leading (?m): ^ and $ also match at line breaks
 }
 
-type RxCaps = Vec<Option<(usize, usize)>>;
+type AlmideRxCaps = Vec<Option<(usize, usize)>>;
 
 // ---- Parsing ----
 
-fn rx_compile(pat: &str) -> RxPat {
+fn rx_compile(pat: &str) -> AlmideRxPat {
     let chars: Vec<char> = pat.chars().collect();
     let mut pos = 0usize;
     let mut ncap = 0usize;
+    let multiline = chars.starts_with(&['(', '?', 'm', ')']);
+    if multiline {
+        pos = 4;
+    }
     let alts = rx_parse_alts(&chars, &mut pos, &mut ncap, false);
-    RxPat { alts, ncap }
+    AlmideRxPat { alts, ncap, multiline }
 }
 
-fn rx_parse_alts(chars: &[char], pos: &mut usize, ncap: &mut usize, in_group: bool) -> Vec<Vec<RxPiece>> {
-    let mut alts: Vec<Vec<RxPiece>> = vec![vec![]];
+fn rx_parse_alts(chars: &[char], pos: &mut usize, ncap: &mut usize, in_group: bool) -> Vec<Vec<AlmideRxPiece>> {
+    let mut alts: Vec<Vec<AlmideRxPiece>> = vec![vec![]];
     while *pos < chars.len() {
         if chars[*pos] == ')' && in_group { break; }
         if chars[*pos] == '|' {
@@ -49,8 +56,9 @@ fn rx_parse_alts(chars: &[char], pos: &mut usize, ncap: &mut usize, in_group: bo
     alts
 }
 
-fn rx_parse_piece(chars: &[char], pos: &mut usize, ncap: &mut usize) -> RxPiece {
+fn rx_parse_piece(chars: &[char], pos: &mut usize, ncap: &mut usize) -> AlmideRxPiece {
     let node = rx_parse_atom(chars, pos, ncap);
+    let atom_end = *pos;
     let (min, max) = if *pos < chars.len() {
         match chars[*pos] {
             '*' => { *pos += 1; (0, None) }
@@ -72,7 +80,12 @@ fn rx_parse_piece(chars: &[char], pos: &mut usize, ncap: &mut usize) -> RxPiece 
     } else {
         (1, Some(1))
     };
-    RxPiece { node, min, max }
+    let quantified = *pos > atom_end;
+    let lazy = quantified && *pos < chars.len() && chars[*pos] == '?';
+    if lazy {
+        *pos += 1;
+    }
+    AlmideRxPiece { node, min, max, lazy }
 }
 
 /// Parse a `{n}` / `{n,}` / `{n,m}` quantifier starting at the `{` at `start`.
@@ -105,45 +118,53 @@ fn rx_parse_brace(chars: &[char], start: usize) -> Option<(usize, Option<usize>,
     }
 }
 
-fn rx_parse_atom(chars: &[char], pos: &mut usize, ncap: &mut usize) -> RxNode {
+fn rx_parse_atom(chars: &[char], pos: &mut usize, ncap: &mut usize) -> AlmideRxNode {
     let c = chars[*pos];
     *pos += 1;
     match c {
-        '.' => RxNode::Dot,
-        '^' => RxNode::AnchorStart,
-        '$' => RxNode::AnchorEnd,
+        '.' => AlmideRxNode::Dot,
+        '^' => AlmideRxNode::AnchorStart,
+        '$' => AlmideRxNode::AnchorEnd,
         '\\' => rx_parse_escape(chars, pos),
         '[' => rx_parse_class(chars, pos),
         '(' => {
-            *ncap += 1;
-            let ci = *ncap;
+            let non_capturing = chars[*pos..].starts_with(&['?', ':']);
+            let ci = if non_capturing {
+                *pos += 2;
+                0
+            } else {
+                *ncap += 1;
+                *ncap
+            };
             let alts = rx_parse_alts(chars, pos, ncap, true);
             if *pos < chars.len() && chars[*pos] == ')' { *pos += 1; }
-            RxNode::Group(alts, ci)
+            AlmideRxNode::Group(alts, ci)
         }
-        _ => RxNode::Lit(c),
+        _ => AlmideRxNode::Lit(c),
     }
 }
 
-fn rx_parse_escape(chars: &[char], pos: &mut usize) -> RxNode {
-    if *pos >= chars.len() { return RxNode::Lit('\\'); }
+fn rx_parse_escape(chars: &[char], pos: &mut usize) -> AlmideRxNode {
+    if *pos >= chars.len() { return AlmideRxNode::Lit('\\'); }
     let c = chars[*pos];
     *pos += 1;
     match c {
-        'd' => RxNode::Class(vec![('0', '9')], false),
-        'D' => RxNode::Class(vec![('0', '9')], true),
-        'w' => RxNode::Class(vec![('a', 'z'), ('A', 'Z'), ('0', '9'), ('_', '_')], false),
-        'W' => RxNode::Class(vec![('a', 'z'), ('A', 'Z'), ('0', '9'), ('_', '_')], true),
-        's' => RxNode::Class(vec![(' ', ' '), ('\t', '\t'), ('\n', '\n'), ('\r', '\r')], false),
-        'S' => RxNode::Class(vec![(' ', ' '), ('\t', '\t'), ('\n', '\n'), ('\r', '\r')], true),
-        'n' => RxNode::Lit('\n'),
-        't' => RxNode::Lit('\t'),
-        'r' => RxNode::Lit('\r'),
-        _ => RxNode::Lit(c),
+        'd' => AlmideRxNode::Class(vec![('0', '9')], false),
+        'D' => AlmideRxNode::Class(vec![('0', '9')], true),
+        'w' => AlmideRxNode::Class(vec![('a', 'z'), ('A', 'Z'), ('0', '9'), ('_', '_')], false),
+        'W' => AlmideRxNode::Class(vec![('a', 'z'), ('A', 'Z'), ('0', '9'), ('_', '_')], true),
+        's' => AlmideRxNode::Class(vec![(' ', ' '), ('\t', '\t'), ('\n', '\n'), ('\r', '\r')], false),
+        'S' => AlmideRxNode::Class(vec![(' ', ' '), ('\t', '\t'), ('\n', '\n'), ('\r', '\r')], true),
+        'b' => AlmideRxNode::WordBoundary(true),
+        'B' => AlmideRxNode::WordBoundary(false),
+        'n' => AlmideRxNode::Lit('\n'),
+        't' => AlmideRxNode::Lit('\t'),
+        'r' => AlmideRxNode::Lit('\r'),
+        _ => AlmideRxNode::Lit(c),
     }
 }
 
-fn rx_parse_class(chars: &[char], pos: &mut usize) -> RxNode {
+fn rx_parse_class(chars: &[char], pos: &mut usize) -> AlmideRxNode {
     let neg = *pos < chars.len() && chars[*pos] == '^';
     if neg { *pos += 1; }
     let mut ranges: Vec<(char, char)> = vec![];
@@ -174,102 +195,169 @@ fn rx_parse_class(chars: &[char], pos: &mut usize) -> RxNode {
         }
     }
     if *pos < chars.len() { *pos += 1; } // skip ]
-    RxNode::Class(ranges, neg)
+    AlmideRxNode::Class(ranges, neg)
 }
 
 // ---- Matching ----
 
-fn rx_node_matches(node: &RxNode, c: char) -> bool {
+fn rx_node_matches(node: &AlmideRxNode, c: char) -> bool {
     match node {
-        RxNode::Lit(ch) => c == *ch,
-        RxNode::Dot => c != '\n',
-        RxNode::Class(ranges, neg) => {
-            let hit = ranges.iter().any(|&(lo, hi)| c >= lo && c <= hi);
+        AlmideRxNode::Lit(l) => *l == c,
+        AlmideRxNode::Dot => c != '\n',
+        AlmideRxNode::Class(ranges, neg) => {
+            let hit = ranges.iter().any(|(lo, hi)| *lo <= c && c <= *hi);
             hit != *neg
         }
         _ => false,
     }
 }
 
-fn rx_match_alts(alts: &[Vec<RxPiece>], s: &[char], p: usize, caps: &mut RxCaps) -> Option<usize> {
-    for alt in alts {
-        let save = caps.clone();
-        if let Some(e) = rx_match_seq(alt, 0, s, p, caps) {
-            return Some(e);
-        }
-        *caps = save;
-    }
-    None
+// ---- Matching (continuation-passing backtracker) ----
+//
+// Every matcher takes a continuation `k` that receives the end position (and
+// the capture table) once the piece it is responsible for has matched; `k`
+// returns Some(final_end) when the rest of the pattern matches from there and
+// None to demand backtracking. The twin self-host engine in
+// stdlib/regex_engine.almd keeps the same continuation frames on the heap, so
+// the two legs agree on every backtracking order: leftmost alternative first,
+// greedy quantifiers longest-first, lazy quantifiers shortest-first, and an
+// empty repetition instance ends the loop.
+
+type AlmideRxK<'a> = &'a mut dyn FnMut(usize, &mut AlmideRxCaps) -> Option<usize>;
+
+struct AlmideRxCx<'a> {
+    s: &'a [char],
+    multiline: bool,
 }
 
-fn rx_match_seq(seq: &[RxPiece], si: usize, s: &[char], p: usize, caps: &mut RxCaps) -> Option<usize> {
-    if si >= seq.len() { return Some(p); }
-    let piece = &seq[si];
-    match &piece.node {
-        RxNode::AnchorStart => {
-            if p == 0 { rx_match_seq(seq, si + 1, s, p, caps) } else { None }
-        }
-        RxNode::AnchorEnd => {
-            if p == s.len() { rx_match_seq(seq, si + 1, s, p, caps) } else { None }
-        }
-        _ => rx_match_rep(seq, si, s, p, caps, 0),
-    }
+fn rx_is_word(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_'
 }
 
-fn rx_match_rep(seq: &[RxPiece], si: usize, s: &[char], p: usize, caps: &mut RxCaps, count: usize) -> Option<usize> {
-    let piece = &seq[si];
-    let at_max = piece.max.map_or(false, |m| count >= m);
-    // Greedy: try to match one more first
-    if !at_max {
-        let save = caps.clone();
-        if let Some(consumed) = rx_match_one(&piece.node, s, p, caps) {
-            if consumed > 0 || count == 0 { // prevent infinite loop on zero-width
-                if let Some(e) = rx_match_rep(seq, si, s, p + consumed, caps, count + 1) {
-                    return Some(e);
-                }
-            }
-        }
-        *caps = save;
-    }
-    // Try rest of sequence if we have enough repetitions
-    if count >= piece.min {
-        return rx_match_seq(seq, si + 1, s, p, caps);
-    }
-    None
+fn rx_at_boundary(s: &[char], p: usize) -> bool {
+    let before = p > 0 && rx_is_word(s[p - 1]);
+    let after = p < s.len() && rx_is_word(s[p]);
+    before != after
 }
 
-fn rx_match_one(node: &RxNode, s: &[char], p: usize, caps: &mut RxCaps) -> Option<usize> {
+fn rx_zero_width(cx: &AlmideRxCx, node: &AlmideRxNode, p: usize) -> Option<bool> {
     match node {
-        RxNode::Lit(_) | RxNode::Dot | RxNode::Class(_, _) => {
-            if p < s.len() && rx_node_matches(node, s[p]) { Some(1) } else { None }
-        }
-        RxNode::Group(alts, ci) => {
-            let start = p;
-            if let Some(end) = rx_match_alts(alts, s, p, caps) {
-                if *ci > 0 {
-                    while caps.len() < *ci { caps.push(None); }
-                    caps[*ci - 1] = Some((start, end));
-                }
-                Some(end - p)
-            } else {
-                None
-            }
-        }
+        AlmideRxNode::AnchorStart => Some(p == 0 || (cx.multiline && cx.s[p - 1] == '\n')),
+        AlmideRxNode::AnchorEnd => Some(p == cx.s.len() || (cx.multiline && cx.s[p] == '\n')),
+        AlmideRxNode::WordBoundary(want) => Some(rx_at_boundary(cx.s, p) == *want),
         _ => None,
     }
 }
 
-// ---- Search ----
+fn rx_alts(cx: &AlmideRxCx, alts: &[Vec<AlmideRxPiece>], p: usize, caps: &mut AlmideRxCaps, k: AlmideRxK) -> Option<usize> {
+    for alt in alts {
+        if let Some(e) = rx_seq(cx, alt, 0, p, caps, k) {
+            return Some(e);
+        }
+    }
+    None
+}
 
-fn rx_find_at(rx: &RxPat, s: &[char], start: usize) -> Option<(usize, usize, RxCaps)> {
+fn rx_seq(cx: &AlmideRxCx, seq: &[AlmideRxPiece], si: usize, p: usize, caps: &mut AlmideRxCaps, k: AlmideRxK) -> Option<usize> {
+    if si >= seq.len() {
+        return k(p, caps);
+    }
+    match rx_zero_width(cx, &seq[si].node, p) {
+        Some(true) => rx_seq(cx, seq, si + 1, p, caps, k),
+        Some(false) => None,
+        None => rx_rep(cx, seq, si, p, caps, 0, k),
+    }
+}
+
+// The rest of the sequence after `count` instances of piece `si`.
+fn rx_rep_rest(cx: &AlmideRxCx, seq: &[AlmideRxPiece], si: usize, p: usize, caps: &mut AlmideRxCaps, count: usize, k: AlmideRxK) -> Option<usize> {
+    if count < seq[si].min {
+        None
+    } else {
+        rx_seq(cx, seq, si + 1, p, caps, k)
+    }
+}
+
+// One more instance of piece `si` (then loop), or hand over to the rest.
+fn rx_rep_more(cx: &AlmideRxCx, seq: &[AlmideRxPiece], si: usize, p: usize, caps: &mut AlmideRxCaps, count: usize, k: AlmideRxK) -> Option<usize> {
+    let piece = &seq[si];
+    let under_max = piece.max.map_or(true, |m| count < m);
+    if !under_max {
+        return None;
+    }
+    rx_one(cx, &piece.node, p, caps, &mut |e: usize, caps: &mut AlmideRxCaps| {
+        if e == p {
+            // An empty instance: count it, but never loop on it.
+            rx_rep_rest(cx, seq, si, e, caps, count + 1, k)
+        } else {
+            rx_rep(cx, seq, si, e, caps, count + 1, k)
+        }
+    })
+}
+
+fn rx_rep(cx: &AlmideRxCx, seq: &[AlmideRxPiece], si: usize, p: usize, caps: &mut AlmideRxCaps, count: usize, k: AlmideRxK) -> Option<usize> {
+    if seq[si].lazy {
+        if let Some(e) = rx_rep_rest(cx, seq, si, p, caps, count, k) {
+            return Some(e);
+        }
+        rx_rep_more(cx, seq, si, p, caps, count, k)
+    } else {
+        if let Some(e) = rx_rep_more(cx, seq, si, p, caps, count, k) {
+            return Some(e);
+        }
+        rx_rep_rest(cx, seq, si, p, caps, count, k)
+    }
+}
+
+// One instance of an atom at `p`; a group's capture is recorded before the
+// continuation runs and restored when the continuation backtracks.
+fn rx_one(cx: &AlmideRxCx, node: &AlmideRxNode, p: usize, caps: &mut AlmideRxCaps, k: AlmideRxK) -> Option<usize> {
+    match node {
+        AlmideRxNode::Group(alts, ci) => {
+            let ci = *ci;
+            rx_alts(cx, alts, p, caps, &mut |e: usize, caps: &mut AlmideRxCaps| {
+                if ci == 0 {
+                    return k(e, caps);
+                }
+                let saved = caps[ci - 1];
+                caps[ci - 1] = Some((p, e));
+                let r = k(e, caps);
+                if r.is_none() {
+                    caps[ci - 1] = saved;
+                }
+                r
+            })
+        }
+        _ => match rx_zero_width(cx, node, p) {
+            Some(true) => k(p, caps),
+            Some(false) => None,
+            None => {
+                if p < cx.s.len() && rx_node_matches(node, cx.s[p]) {
+                    k(p + 1, caps)
+                } else {
+                    None
+                }
+            }
+        },
+    }
+}
+
+fn rx_match_from(rx: &AlmideRxPat, s: &[char], p: usize, caps: &mut AlmideRxCaps, k: AlmideRxK) -> Option<usize> {
+    let cx = AlmideRxCx { s, multiline: rx.multiline };
+    rx_alts(&cx, &rx.alts, p, caps, k)
+}
+
+// Leftmost match at or after `start`: (start, end, captures).
+fn rx_find_at(rx: &AlmideRxPat, s: &[char], start: usize) -> Option<(usize, usize, AlmideRxCaps)> {
     for i in start..=s.len() {
-        let mut caps: RxCaps = vec![None; rx.ncap];
-        if let Some(end) = rx_match_alts(&rx.alts, s, i, &mut caps) {
+        let mut caps: AlmideRxCaps = vec![None; rx.ncap];
+        if let Some(end) = rx_match_from(rx, s, i, &mut caps, &mut |e: usize, _caps: &mut AlmideRxCaps| Some(e)) {
             return Some((i, end, caps));
         }
     }
     None
 }
+
 
 // ---- Public API ----
 
@@ -282,12 +370,9 @@ pub fn almide_regex_is_match(pat: &str, s: &str) -> bool {
 pub fn almide_regex_full_match(pat: &str, s: &str) -> bool {
     let rx = rx_compile(pat);
     let chars: Vec<char> = s.chars().collect();
-    let mut caps: RxCaps = vec![None; rx.ncap];
-    if let Some(end) = rx_match_alts(&rx.alts, &chars, 0, &mut caps) {
-        end == chars.len()
-    } else {
-        false
-    }
+    let mut caps: AlmideRxCaps = vec![None; rx.ncap];
+    let len = chars.len();
+    rx_match_from(&rx, &chars, 0, &mut caps, &mut |e: usize, _caps: &mut AlmideRxCaps| if e == len { Some(e) } else { None }).is_some()
 }
 
 pub fn almide_regex_find(pat: &str, s: &str) -> Option<String> {

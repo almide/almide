@@ -1,0 +1,5 @@
+// The callee's declared param types cross the module boundary intact: a
+// String where the sibling's fn wants Int is E005 at the call.
+import self.calc as c
+
+fn main() -> Unit = println(int.to_string(c.add(1, 2)))

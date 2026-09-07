@@ -1,0 +1,9 @@
+// ALS-B6: the counted loop already does the work — no self-call needed.
+@bounded
+fn churn(n: Int) -> Int = {
+  var acc = n
+  for i in 0..<2 { acc = acc - 1 }
+  acc
+}
+
+fn main() -> Unit = println("${churn(4)}")

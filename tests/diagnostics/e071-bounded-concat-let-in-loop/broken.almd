@@ -1,0 +1,13 @@
+// ALS-B4: string concatenation in a let inside a counted loop allocates per
+// iteration even without growing any binding.
+@bounded
+fn tick(s: String) -> Int = {
+  var n = 0
+  for i in 0..<4 {
+    let t = s + "-"
+    n = n + string.len(t)
+  }
+  n
+}
+
+fn main() -> Unit = println("${tick("go")}")

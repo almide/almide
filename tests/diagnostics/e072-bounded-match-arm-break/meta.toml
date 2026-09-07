@@ -1,0 +1,3 @@
+expects_code = "E072"
+expects_error = "`break`/`continue` is not admissible"
+hint_substring = "restructure without early exits"

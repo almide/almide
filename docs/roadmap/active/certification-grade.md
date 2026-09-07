@@ -65,7 +65,7 @@ Almide には Ferrocene より良い出発点がある: 実行可能な referenc
    まず gap audit: interp が評価できない言語機能・stdlib 関数の棚卸し
    (評価不能領域 = 仕様の穴として台帳化、ratchet で縮める)
    - ✅ **台帳 + 両方向ゲート着地** (issue #564): `crates/almide-interp/interp-abstain-ledger.txt`
-     + `wasm_runtime_test.rs::interp_abstain_ledger` (バックエンド不要 = CI で
+     + `wasm_runtime_interp_ledger.rs::interp_abstain_ledger` (バックエンド不要 = CI で
      self-skip しない)。新規 abstain は台帳更新を強制、解消済みエントリの放置も fail —
      台帳は縮む方向のみ。初回監査: **121 fixtures 中 評価可能 49 (40%) / 評価不能 72**。
      内訳: 設計上の除外 ~18 (transcendental 6 / in-place 5 / fan 非決定 7) + **glue 未実装

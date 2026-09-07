@@ -1,0 +1,10 @@
+// The fix: match on the variant's cases.
+type Shape = | Circle(Int) | Square(Int)
+
+fn main() -> Unit = {
+  let s = Circle(3)
+  match s {
+    Circle(r) => println(int.to_string(r)),
+    Square(w) => println(int.to_string(w)),
+  }
+}

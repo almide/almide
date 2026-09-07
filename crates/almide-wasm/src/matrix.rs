@@ -22,13 +22,13 @@ const MAX_ELEMS: i64 = 1 << 28;
 
 impl Emitter<'_> {
     /// `matrix.*` module calls (stage 1 set). Ok(None) = not handled here.
-    fn lower_matrix_fill_ctor(&mut self, func: &str, r: &IrExpr, c: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_matrix_fill_ctor(&mut self, func: &str, r: &IrExpr, c: &IrExpr) -> ArmResult {
         Ok({
             let ones = func == "ones";
-            self.lower(r, Some(INT))?;
+            self.lower_arg(r, Some(INT), ArgMode::Borrow)?;
             let hr = self.hold_i64()?;
             self.f.instructions().local_set(hr);
-            self.lower(c, Some(INT))?;
+            self.lower_arg(c, Some(INT), ArgMode::Borrow)?;
             let hc = self.hold_i64()?;
             let hb = self.hold_i32()?;
             let msg = self.pool.intern("matrix dimensions too large");
@@ -58,7 +58,13 @@ impl Emitter<'_> {
             {
                 let mut i = self.f.instructions();
                 i.end();
-                i.local_get(hr).local_get(hc).i64_mul().i64_const(MAX_ELEMS).i64_gt_s();
+                // c > MAX / r (r > 0): the DIVISION form the self-host body
+                // spells (stdlib/matrix_core.almd) — the product `r*c > MAX`
+                // wrapped for `ones(2, i64::MAX)` and passed (#1907).
+                i.local_get(hr).i64_const(0).i64_gt_s();
+                i.local_get(hc);
+                i.i64_const(MAX_ELEMS).local_get(hr).i64_const(1).local_get(hr).i64_const(0).i64_gt_s().select().i64_div_s();
+                i.i64_gt_s().i32_and();
                 i.if_(BlockType::Empty);
                 i.i32_const(msg as i32);
             }
@@ -125,13 +131,13 @@ impl Emitter<'_> {
             self.release_i32();
             self.release_i64();
             self.release_i64();
-            Some(SliceTy::Matrix)
+            Some(Lowered::owned(SliceTy::Matrix))
         })
     }
 
-    fn lower_matrix_shape(&mut self, m: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_matrix_shape(&mut self, m: &IrExpr) -> ArmResult {
         Ok({
-            self.lower(m, Some(SliceTy::Matrix))?;
+            self.lower_arg(m, Some(SliceTy::Matrix), ArgMode::Borrow)?;
             let hm = self.hold_i32()?;
             let hb = self.hold_i32()?;
             let pair = self.types.tuple(vec![INT, INT]);
@@ -151,31 +157,31 @@ impl Emitter<'_> {
             let _ = i;
             self.release_i32();
             self.release_i32();
-            Some(SliceTy::Tuple(pair))
+            Some(Lowered::owned(SliceTy::Tuple(pair)))
         })
     }
 
-    fn lower_matrix_dims_read(&mut self, func: &str, m: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_matrix_dims_read(&mut self, func: &str, m: &IrExpr) -> ArmResult {
         Ok({
             let off = if func == "rows" { 0 } else { 4 };
-            self.lower(m, Some(SliceTy::Matrix))?;
+            self.lower_arg(m, Some(SliceTy::Matrix), ArgMode::Borrow)?;
             self.f
                 .instructions()
                 .i32_load(slot_memarg(off))
                 .i64_extend_i32_u();
-            Some(INT)
+            Some(Lowered::scalar(INT))
         })
     }
 
-    fn lower_matrix_get(&mut self, m: &IrExpr, r: &IrExpr, c: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_matrix_get(&mut self, m: &IrExpr, r: &IrExpr, c: &IrExpr) -> ArmResult {
         Ok({
-            self.lower(m, Some(SliceTy::Matrix))?;
+            self.lower_arg(m, Some(SliceTy::Matrix), ArgMode::Borrow)?;
             let hm = self.hold_i32()?;
             self.f.instructions().local_set(hm);
-            self.lower(r, Some(INT))?;
+            self.lower_arg(r, Some(INT), ArgMode::Borrow)?;
             let hr = self.hold_i64()?;
             self.f.instructions().local_set(hr);
-            self.lower(c, Some(INT))?;
+            self.lower_arg(c, Some(INT), ArgMode::Borrow)?;
             let hc = self.hold_i64()?;
             self.f.instructions().local_set(hc);
             // The index-domain rule (C-282): an accessor with no
@@ -209,15 +215,15 @@ impl Emitter<'_> {
             self.release_i64();
             self.release_i64();
             self.release_i32();
-            Some(FLOAT)
+            Some(Lowered::scalar(FLOAT))
         })
     }
 
-    fn lower_matrix_from_lists(&mut self, rows: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_matrix_from_lists(&mut self, rows: &IrExpr) -> ArmResult {
         Ok({
             let fh = self.types.intern(FLOAT);
             let inner = self.types.intern(SliceTy::List(fh));
-            self.lower(rows, Some(SliceTy::List(inner)))?;
+            self.lower_arg(rows, Some(SliceTy::List(inner)), ArgMode::Borrow)?;
             let hl = self.hold_i32()?;
             let hr = self.hold_i32()?;
             let hc = self.hold_i32()?;
@@ -305,13 +311,13 @@ impl Emitter<'_> {
             for _ in 0..9 {
                 self.release_i32();
             }
-            Some(SliceTy::Matrix)
+            Some(Lowered::owned(SliceTy::Matrix))
         })
     }
 
-    fn lower_matrix_to_lists(&mut self, m: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_matrix_to_lists(&mut self, m: &IrExpr) -> ArmResult {
         Ok({
-            self.lower(m, Some(SliceTy::Matrix))?;
+            self.lower_arg(m, Some(SliceTy::Matrix), ArgMode::Borrow)?;
             let hm = self.hold_i32()?;
             let hr = self.hold_i32()?;
             let hc8 = self.hold_i32()?;
@@ -365,13 +371,13 @@ impl Emitter<'_> {
             }
             let fh = self.types.intern(FLOAT);
             let inner = self.types.intern(SliceTy::List(fh));
-            Some(SliceTy::List(inner))
+            Some(Lowered::owned(SliceTy::List(inner)))
         })
     }
 
-    fn lower_matrix_transpose(&mut self, m: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_matrix_transpose(&mut self, m: &IrExpr) -> ArmResult {
         Ok({
-            self.lower(m, Some(SliceTy::Matrix))?;
+            self.lower_arg(m, Some(SliceTy::Matrix), ArgMode::Borrow)?;
             let hm = self.hold_i32()?;
             let hr = self.hold_i32()?;
             let hc = self.hold_i32()?;
@@ -440,20 +446,20 @@ impl Emitter<'_> {
             for _ in 0..7 {
                 self.release_i32();
             }
-            Some(SliceTy::Matrix)
+            Some(Lowered::owned(SliceTy::Matrix))
         })
     }
 
-    fn lower_matrix_row_dot(&mut self, m: &IrExpr, r: &IrExpr, v: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_matrix_row_dot(&mut self, m: &IrExpr, r: &IrExpr, v: &IrExpr) -> ArmResult {
         Ok({
-            self.lower(m, Some(SliceTy::Matrix))?;
+            self.lower_arg(m, Some(SliceTy::Matrix), ArgMode::Borrow)?;
             let hm = self.hold_i32()?;
             self.f.instructions().local_set(hm);
-            self.lower(r, Some(INT))?;
+            self.lower_arg(r, Some(INT), ArgMode::Borrow)?;
             let hr = self.hold_i64()?;
             self.f.instructions().local_set(hr);
             let fh = self.types.intern(FLOAT);
-            self.lower(v, Some(SliceTy::List(fh)))?;
+            self.lower_arg(v, Some(SliceTy::List(fh)), ArgMode::Borrow)?;
             let hv = self.hold_i32()?;
             let hs = self.hold_f64()?;
             let hsrc = self.hold_i32()?;
@@ -513,7 +519,7 @@ impl Emitter<'_> {
             self.release_i32();
             self.release_i64();
             self.release_i32();
-            Some(FLOAT)
+            Some(Lowered::scalar(FLOAT))
         })
     }
 
@@ -521,7 +527,7 @@ impl Emitter<'_> {
         &mut self,
         func: &str,
         args: &[IrExpr],
-    ) -> Result<Option<Option<SliceTy>>, EmitError> {
+    ) -> Result<Option<Option<Lowered>>, EmitError> {
         let out = match (func, args) {
             ("zeros" | "ones", [r, c]) => self.lower_matrix_fill_ctor(func, r, c)?,
             ("shape", [m]) => self.lower_matrix_shape(m)?,

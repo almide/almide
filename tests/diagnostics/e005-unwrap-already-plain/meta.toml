@@ -1,0 +1,3 @@
+expects_code = "E005"
+expects_error = "expects Option[A] but got Int"
+hint_substring = "nothing to unwrap"

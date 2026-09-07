@@ -1,0 +1,7 @@
+// Enum brace construction as a LIST ELEMENT.
+type Shape = | Circle(Int) | Square { side: Int }
+
+fn main() -> Unit = {
+  let shapes: List[Shape] = [Square { side: 3 }]
+  println(int.to_string(list.len(shapes)))
+}

@@ -1,0 +1,5 @@
+# NOTE: the harness reads these as RAW text (trim the quotes, no TOML
+# unescaping), so backslashes here are literal.
+expects_code = "E047"
+expects_error = "unknown escape sequence `\xZZ`"
+hint_substring = "\xNN"

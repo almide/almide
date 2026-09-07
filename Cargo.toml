@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/almide-base", "crates/almide-syntax", "crates/almide-types", "crates/almide-lang", "crates/almide-ir", "crates/almide-mir", "crates/almide-dialect", "crates/almide-codegen", "crates/almide-optimize", "crates/almide-frontend", "crates/almide-driver", "crates/almide-interp", "crates/almide-tools", "crates/almide-egg-lab", "crates/almide-layout", "crates/almide-corpus", "crates/almide-wasm", "crates/almide-wasm-run", "crates/almide-spine"]
+members = [".", "crates/almide-base", "crates/almide-syntax", "crates/almide-types", "crates/almide-lang", "crates/almide-ir", "crates/almide-mir", "crates/almide-dialect", "crates/almide-codegen", "crates/almide-optimize", "crates/almide-frontend", "crates/almide-driver", "crates/almide-interp", "crates/almide-tools", "crates/almide-egg-lab", "crates/almide-layout", "crates/almide-corpus", "crates/almide-rt-core", "crates/almide-wasm", "crates/almide-wasm-run", "crates/almide-spine"]
 resolver = "3"
 exclude = ["crates/almide-kernel", "research/benchmark/stdlib/rust_wasm_compare", "tools/wasmgen-harness", "tools/wasmgen-harness-uu", "tools/xtarget-fuzz"]
 
@@ -17,7 +17,7 @@ unsafe_code = "forbid"
 
 [package]
 name = "almide"
-version = "0.61.1"
+version = "0.62.0"
 edition = "2024"
 # Runner-class MSRV: the binary embeds the wasmtime 47 host (the commissioned
 # wasm leg). Compiler crates keep their own 1.89 claim via workspace.package.
@@ -44,13 +44,18 @@ almide-mir = { path = "crates/almide-mir" }
 # the embedded almide.* host + the WASI transform for stock-runtime artifacts.
 almide-types = { path = "crates/almide-types" }
 almide-wasm = { path = "crates/almide-wasm" }
-almide-wasm-run = { path = "crates/almide-wasm-run" }
+# OPTIONAL: the embedded host carries wasmtime, which cannot be built for
+# wasm32-unknown-unknown. The CLI always has it (`default`); a LIBRARY consumer
+# that itself compiles to the browser (almide/playground) turns it off with
+# `default-features = false`. Only `src/cli/` references the crate, so the lib
+# surface is identical either way; `src/main.rs` refuses to build without it.
+almide-wasm-run = { path = "crates/almide-wasm-run", optional = true }
 # WAT (text) → wasm bytes: the v1 renderer emits WAT; the CLI assembles it to a module.
 wat = "1"
 # Structural validation of the assembled v1 module: `wat` assembles without full stack-shape
 # validation, so the test harness validates before accepting a v1 module (invalid → the test
 # harness falls back to native execution; there is no v0 wasm emitter anymore).
-wasmparser = "0.257"
+wasmparser = "0.258"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -62,8 +67,13 @@ lsp-server = "0.10"
 # channel type (#1470) — same crate lsp-server itself uses.
 crossbeam-channel = "0.5"
 lsp-types = "0.97"
-wit-component = "0.257"
+wit-component = "0.258"
 wasi-preview1-component-adapter-provider = "48.0.1"
+
+[features]
+default = ["embedded-host"]
+# The embedded `almide.*` host (wasmtime) behind `almide run/bench/build --target wasm`.
+embedded-host = ["dep:almide-wasm-run"]
 
 # Cross-platform advisory file lock (flock / LockFileEx) for the shared build
 # scratch dir (see BuildDirLock) — lets CI run the suite in parallel on every
@@ -85,3 +95,16 @@ tempfile = "3"
 [profile.release]
 incremental = true
 
+
+# The CI test archive (ci.yml `build` → the four `Test Rust` shards). It is the
+# dev profile with the debuginfo left out: the shards replay these binaries from
+# a nextest archive, and debuginfo was most of the 3.1 GB that every shard
+# downloaded. Semantics are UNCHANGED — `inherits = "dev"` keeps
+# debug_assertions and overflow checks, so the `cfg_attr(debug_assertions,
+# ignore = "…release-only…")` sweeps stay ignored here exactly as they were.
+# Symbols are kept (`strip = "debuginfo"`, not "symbols") so a panic in a shard
+# still names its frames.
+[profile.ci-test]
+inherits = "dev"
+debug = 0
+strip = "debuginfo"

@@ -252,10 +252,22 @@ TypeName(args...)          // constructor
 TypeName{ field1, field2 } // record pattern
 literal                    // int, float, string, bool
 a | b | c                  // or-pattern: any alternative matches (binder-free)
+[h, ..t]                   // list-rest: len >= 1, t binds the tail (a list)
+[a, b, ..]                 // rest ignored: len >= 2, rest slot is LAST-only
+c @ Circle(r)              // as-pattern: c binds the whole, r the payload
 ```
 **`_` can appear in match patterns, `let _ = x` (discard), `for _ in xs`, and lambda params `(_ ) => expr`.**
 
-**NOT supported in patterns:** no `...` spread, no range patterns (`1..5`), no `as` binding. Or-pattern alternatives (`"a" | "an" | "the" => …`) ARE supported at the top of an arm, but cannot bind variables — write separate arms when the body needs the payload.
+**NOT supported in patterns:** no range patterns (`1..5`), no rest anywhere but the LAST list slot (`[..t, x]` refuses). Or-pattern alternatives (`"a" | "an" | "the" => …`) ARE supported at the top of an arm, but cannot bind variables — write separate arms when the body needs the payload. List-rest (`[h, ..t]`) IS supported and is the idiomatic head/tail split:
+
+```almide check
+fn sum(xs: List[Int]) -> Int = match xs {
+  [] => 0,
+  [h, ..t] => h + sum(t),
+}
+
+fn main() -> Unit = println(int.to_string(sum([1, 2, 3])))
+```
 
 ### Lambda
 ```
@@ -438,7 +450,13 @@ expr!              // unwrap Result/Option, propagate the failure (effect fn, or
 expr ?? fallback   // unwrap or use fallback value
 expr?              // Result → Option (err → none)
 expr?.field        // optional chaining (Option[Record] → Option[FieldType])
+o?.x ?? default    // the idiom: read a field if present, else default (ADR-0005; `?.` is Option-only — on a Result write `(r?)?.x`)
 ```
+
+Each value-level operator is the desugaring of a named stdlib function (ADR-0005):
+`x ?? d` ≡ `option.unwrap_or_else(x, () => d)` / `result.unwrap_or_else(r, (_) => d)`
+(the fallback is lazy), `r?` ≡ `result.to_option(r)`, `o?.x` ≡ `option.map(o, (v) => v.x)`.
+`o?` on a value that is already an Option is a no-op and warns (E056).
 
 `!` on an effect CALL always compiles: if the fn never fails (`random.int`,
 `fs.exists`, …) the `!` is a silent no-op. You never need to know whether a

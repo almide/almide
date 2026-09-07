@@ -37,6 +37,13 @@
      instruction-level transcription joins the byte-binding half. Under
      the no-grow hypothesis it is unreached, which `bump_skips_grow`
      states.
+   - The WRAP guard (#1908): `next <u base` after the bump computation is
+     the i32 frontier having wrapped past 4 GiB; the tree dies in the
+     C-197 form there. Its body is the abstract `SOom` (an abort outcome,
+     `AAbort`), transcribed instruction-for-instruction by the
+     byte-binding half. Over Z the frontier never wraps, so on the proven
+     paths the guard is a skipped `if` — `bump_skips_grow` also states
+     the outcome is a return, never the abort.
    - i32 vs Z as in slice 1: nonnegative, well below 2^31, bounds carried
      explicitly. *)
 
@@ -105,12 +112,14 @@ Inductive astmt : Type :=
   | AStore (addr v : aexpr)
   | AIf (cond : aexpr) (body : list astmt)
   | ARetV (e : aexpr)
-  | SGrow.   (* the abstract grow step (see the header) *)
+  | SGrow    (* the abstract grow step (see the header) *)
+  | SOom.    (* the abstract C-197 abort (the wrap guard's body) *)
 
 (* Outcome: fell through, or returned a value. *)
 Inductive aout : Type :=
   | AFall (c : A)
-  | ARet (v : Z) (c : A).
+  | ARet (v : Z) (c : A)
+  | AAbort.   (* the defined out-of-memory exit: nothing is returned *)
 
 (* Grow's abstract semantics: enough pages appear (the policy is
    behavior-free); nothing else moves. *)
@@ -135,6 +144,7 @@ Fixpoint astep (s : astmt) (c : A) {struct s} : aout :=
                              (upd (am c) (aev a c) (aev v c)))
   | ARetV e => ARet (aev e c) c
   | SGrow => AFall (grow_sem c)
+  | SOom => AAbort
   | AIf e body =>
       if Z.eqb (aev e c) 0 then AFall c
       else
@@ -191,6 +201,8 @@ Definition alloc_body : list astmt :=
     ASetNext (ALand (AAdd (AAdd (AAdd ABase (AC 12)) ALen) (AC 3)) (AC (-4)));
     AIf (ALeU AWant (AC 524288))
       [ ASetNext (AAdd ABase AWant) ];
+    (* the wrap guard: a frontier below its base is the i32 having wrapped *)
+    AIf (ALtU ANext ABase) [ SOom ];
     AIf (AGtU ANext (AShl AMemSize (AC 16))) [ SGrow ];
     AStore ABase (AC 1);
     AStore (AAdd ABase (AC 4)) ALen;
@@ -332,6 +344,12 @@ Proof.
       { apply Z.pow_le_mono_r; [lia | lia]. }
       lia. }
   lit.
+  (* the wrap guard: over Z the frontier never falls below its base *)
+  replace (agh c + rounded <? agh c) with false.
+  2:{ symmetry. apply Z.ltb_ge. unfold rounded.
+      assert (0 < 2 ^ cl) by (apply Z.pow_pos_nonneg; lia).
+      lia. }
+  lit.
   (* the no-grow guard: next = base + rounded fits *)
   replace (Z.shiftl (apages c) 16 <? agh c + rounded) with false.
   2:{ symmetry. apply Z.ltb_ge. exact Hfit. }
@@ -341,8 +359,9 @@ Qed.
 
 (* Under the no-grow hypothesis the grow arm is UNREACHED — the abstract
    `SGrow` never executes on the proven paths (its concrete transcription
-   is the byte-binding half's business). Corollary of the theorem above:
-   the outcome carries `apages c` unchanged. *)
+   is the byte-binding half's business), and neither does the wrap
+   guard's `SOom`: the outcome is a RETURN (not `AAbort`) carrying
+   `apages c` unchanged. Corollary of the theorem above. *)
 Remark bump_skips_grow : forall c w cl,
   w = Z.land (len + 15) (-4) ->
   16 <= w ->

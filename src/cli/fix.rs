@@ -132,7 +132,7 @@ impl FixOutcome<'_> {
 fn print_fix_detail_lines(outcome: &FixOutcome, print: fn(&str)) {
     if outcome.operator_count > 0 {
         print(&format!(
-            "  Rewrote {} comparison function call(s) to operator form (int.gt/lt/eq/... → > < == ...)",
+            "  Rewrote {} comparison / fallback call(s) to operator form (int.gt/lt/eq/... → > < == ...; option/result.unwrap_or → ??)",
             outcome.operator_count
         ));
     }
@@ -398,7 +398,7 @@ fn apply_ast_family(file: &str, source: &str) -> (String, Vec<String>, usize) {
     // Almide never defined these comparison functions; LLMs reach for them
     // from Go-ish / Java-ish training data. Mechanically substituting to
     // `a > b` etc. turns the error case into working code.
-    let operator_count = rewrite_comparison_calls(&mut program);
+    let operator_count = rewrite_comparison_calls(&mut program) + rewrite_unwrap_or_calls(&mut program);
     // The rewrite can land INSIDE a `${…}` interpolation hole, and a string
     // literal reprints its own source text verbatim (#1263) — which would
     // reprint the pre-rewrite hole and silently drop the fix. Dropping the
@@ -494,6 +494,79 @@ fn rewrite_comparison_calls(program: &mut ast::Program) -> usize {
             right: right_box,
         };
         count += 1;
+    });
+    count
+}
+
+/// ADR-0005 D4: the eager `option.unwrap_or(o, d)` / `result.unwrap_or(r, d)`
+/// is the third spelling of a fallback with no definition relation to the
+/// other two, and it is deprecated (E052, `use = "??"`). Rewrite both call
+/// shapes to the operator — the direct call `m.unwrap_or(a, d)` and the
+/// pipe stage `a |> m.unwrap_or(d)` — into `a ?? d` (`ExprKind::UnwrapOr`,
+/// `≡ unwrap_or_else` per the spec: the default is evaluated only on the
+/// fallback path, which is the one observable difference and the reason
+/// the eager form is going away). Returns the number of rewrites.
+fn rewrite_unwrap_or_calls(program: &mut ast::Program) -> usize {
+    fn is_unwrap_or(callee: &Expr) -> bool {
+        matches!(extract_module_call(callee), Some((m, f)) if (m == "option" || m == "result") && f == "unwrap_or")
+    }
+    let mut count = 0;
+    let mut rewritten: std::collections::HashSet<ast::ExprId> = std::collections::HashSet::new();
+    ast::visit_exprs_mut(program, &mut |expr: &mut Expr| {
+        let (value, fallback) = match &mut expr.kind {
+            ExprKind::Call { callee, args, named_args, type_args } => {
+                if !named_args.is_empty() || type_args.is_some() || args.len() != 2 || !is_unwrap_or(callee) {
+                    return;
+                }
+                let mut drained = std::mem::take(args);
+                let fallback = drained.pop().unwrap();
+                let value = drained.pop().unwrap();
+                (value, fallback)
+            }
+            ExprKind::Pipe { left, right } => {
+                let ExprKind::Call { callee, args, named_args, type_args } = &mut right.kind else { return };
+                if !named_args.is_empty() || type_args.is_some() || args.len() != 1 || !is_unwrap_or(callee) {
+                    return;
+                }
+                let fallback = std::mem::take(args).pop().unwrap();
+                let value = (**left).clone();
+                (value, fallback)
+            }
+            _ => return,
+        };
+        expr.kind = ExprKind::UnwrapOr { expr: Box::new(value), fallback: Box::new(fallback) };
+        rewritten.insert(expr.id);
+        count += 1;
+    });
+    // `??` is an INFIX spelling where the call was a primary: as the object
+    // of a postfix access (`unwrap_or(o, d).0` → `(o ?? d).0`), the callee
+    // of a call, the operand of a prefix op, or the LEFT side of another
+    // `??` (`unwrap_or(o, none) ?? "d"` → `(o ?? none) ?? "d"`, since a bare
+    // chain nests to the right), the rewritten node needs the parentheses
+    // the call form never needed. The formatter prints an explicit `Paren`
+    // node as written, so the grouping is made here, once, in the tree.
+    let mut fresh = u32::MAX;
+    let mut wrap = |child: &mut Expr| {
+        if !rewritten.contains(&child.id) {
+            return;
+        }
+        fresh -= 1;
+        let inner = std::mem::replace(child, Expr::new(ast::ExprId(fresh), child.span, ExprKind::Unit));
+        child.kind = ExprKind::Paren { expr: Box::new(inner) };
+    };
+    ast::visit_exprs_mut(program, &mut |expr: &mut Expr| match &mut expr.kind {
+        ExprKind::Member { object, .. }
+        | ExprKind::TupleIndex { object, .. }
+        | ExprKind::IndexAccess { object, .. } => wrap(object),
+        ExprKind::Call { callee, .. } => wrap(callee),
+        ExprKind::OptionalChain { expr: e, .. }
+        | ExprKind::Unwrap { expr: e }
+        | ExprKind::Try { expr: e }
+        | ExprKind::ToOption { expr: e }
+        | ExprKind::TypeAscription { expr: e, .. }
+        | ExprKind::UnwrapOr { expr: e, .. } => wrap(e),
+        ExprKind::Unary { operand, .. } => wrap(operand),
+        _ => {}
     });
     count
 }

@@ -1,0 +1,7 @@
+// Enum brace construction as a fn's EXPRESSION BODY, pinned by the declared
+// return type.
+type Shape = | Circle(Int) | Square { side: Int }
+
+fn mk() -> Shape = Shape { side: 3 }
+
+fn main() -> Unit = println(match mk() { Square { side } => int.to_string(side), _ => "other" })

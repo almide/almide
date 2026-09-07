@@ -372,7 +372,11 @@ fn render_closed_shim_call(
     match (dst, ret_ty) {
         (Some(d), Some(t)) => {
             tys.insert(*d, t);
-            let ty_name = if t == NTy::Str { "String" } else { "i64" };
+            let ty_name = match t {
+                NTy::Str => "String",
+                NTy::Vec => "Vec<i64>",
+                _ => "i64",
+            };
             line!("let mut {}: {} = {};", var(*d), ty_name, call);
         }
         (None, _) => line!("{call};"),
@@ -401,6 +405,13 @@ fn shim_arg_in_declared_mode(
             }
             Ok(code)
         }
+        // A scalar-list param (#1869): borrowed at the MIR call boundary —
+        // an owned `Vec<i64>` local by reference, a `&[i64]` param as is.
+        NTy::VecRef | NTy::Vec => match got {
+            NTy::Vec => Ok(format!("&{code}")),
+            NTy::VecRef => Ok(code),
+            _ => Err(wall(format!("native: shim `{name}` arg type mismatch"))),
+        },
         _ => {
             if !got.is_stringy() {
                 return Err(wall(format!("native: shim `{name}` arg type mismatch")));

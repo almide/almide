@@ -11,7 +11,7 @@ use crate::*;
 impl Emitter<'_> {
 
     /// mut pop: some(last) + shrunken-copy write-back.
-    fn lower_list_pop(&mut self, xs: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_list_pop(&mut self, xs: &IrExpr) -> ArmResult {
         {
 
                 let IrExprKind::Var { id } = &xs.kind else {
@@ -25,6 +25,7 @@ impl Emitter<'_> {
                 };
                 let elem = self.types.el(h);
                 let stride = elem.slot_size() as i32;
+                let inc_elems = self.inc_elems_fn(elem);
                 let hb = self.hold_i32()?;
                 let hlen = self.hold_i32()?;
                 let hres = self.hold_i32()?;
@@ -52,6 +53,12 @@ impl Emitter<'_> {
                     i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32).i32_add();
                     i.local_get(hlen).i32_const(stride).i32_sub();
                     i.memory_copy(0, 0);
+                    if let Some(inc) = inc_elems {
+                        // The popped element moves out with one credit of
+                        // its own; the shrunken copy takes the rest.
+                        i.local_get(hnew).call(inc);
+                        i.local_get(hres).i32_load(slot_memarg(almide_layout::OPTION_FIELD)).call(F_INC);
+                    }
                     i.local_get(hnew);
                 }
                 self.emit_store_mut_var(*id, var_idx, var_ty, vglob)?;
@@ -63,7 +70,7 @@ impl Emitter<'_> {
                 for _ in 0..4 {
                     self.release_i32();
                 }
-                Ok(Some(SliceTy::Option(self.types.intern(elem))))
+                Ok(Some(Lowered::owned(SliceTy::Option(self.types.intern(elem)))))
         }
     }
 
@@ -72,7 +79,7 @@ impl Emitter<'_> {
         func: &str,
         args: &[IrExpr],
         ret_hint: Option<SliceTy>,
-    ) -> Result<Option<Option<SliceTy>>, EmitError> {
+    ) -> Result<Option<Option<Lowered>>, EmitError> {
         let _ = &ret_hint;
         match (func, args) {
             ("pop", [xs]) => self.lower_list_pop(xs),
@@ -106,8 +113,7 @@ impl Emitter<'_> {
                 };
                 let elem = self.types.el(h);
                 self.emit_read_mut_var_cow(id, var_idx, var_ty, vglob)?;
-                self.lower(v, Some(elem))?;
-                self.rc_share_guard(v, elem);
+                self.lower_arg(v, Some(elem), ArgMode::Retain)?;
                 // The 8-byte helper's value param is i64; an f64 element
                 // crosses the call boundary as its BIT PATTERN (memory is
                 // bytes — the consumer reloads the slot as f64).
@@ -133,7 +139,10 @@ impl Emitter<'_> {
             ("repeat", [x, n]) => {
                 let elem = self.infer(x)?;
                 let stride = elem.slot_size();
-                self.lower(x, Some(elem))?;
+                // Borrowed, not retained: every slot of the result takes its
+                // own credit below (a Retain shared the ONE handle once and
+                // the typed drop released it n times — fuzz 20260908/611).
+                self.lower_arg(x, Some(elem), ArgMode::Borrow)?;
                 enum Hx {
                     I64(u32),
                     F64(u32),
@@ -156,7 +165,7 @@ impl Emitter<'_> {
                         Hx::I32(h)
                     }
                 };
-                self.lower(n, Some(INT))?;
+                self.lower_arg(n, Some(INT), ArgMode::Borrow)?;
                 let hn = self.hold_i64()?;
                 let hb = self.hold_i32()?;
                 let hc = self.hold_i32()?;
@@ -208,6 +217,9 @@ impl Emitter<'_> {
                     i.br(0);
                     i.end();
                     i.end();
+                    let _ = i;
+                    self.emit_inc_elems(hb, elem);
+                    let mut i = self.f.instructions();
                     i.local_get(hb);
                 }
                 self.release_i32();
@@ -219,7 +231,10 @@ impl Emitter<'_> {
                     Hx::F64(_) => self.release_f64(),
                     Hx::I32(_) => self.release_i32(),
                 }
-                Ok(Some(SliceTy::List(self.types.intern(elem))))
+                // The list is this arm's allocation: OWNED (declared as a
+                // view, the bind took +1 and the block never went — 64 B
+                // per call, the list.repeat row of #2005).
+                Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(elem)))))
             }
             // Capacity is a HINT (native clamps it and the backing
             // buffer is unobservable) — the value is the empty list.
@@ -227,17 +242,17 @@ impl Emitter<'_> {
                 let Some(SliceTy::List(h)) = ret_hint else {
                     return unsup("list-with-capacity-no-hint");
                 };
-                self.lower(n, Some(INT))?;
+                self.lower_arg(n, Some(INT), ArgMode::Borrow)?;
                 self.f.instructions().drop().i32_const(0).call(F_ALLOC);
-                Ok(Some(SliceTy::List(h)))
+                Ok(Some(Lowered::owned(SliceTy::List(h))))
             }
             ("is_empty", [xs]) => {
-                match self.lower(xs, None)? {
+                match self.lower_arg(xs, None, ArgMode::Borrow)? {
                     SliceTy::List(_) => {}
                     other => return unsup(&format!("list-is-empty-of:{other:?}")),
                 }
                 self.f.instructions().i32_load(len_memarg()).i32_eqz();
-                Ok(Some(BOOL))
+                Ok(Some(Lowered::scalar(BOOL)))
             }
             _ => return Ok(None),
         }

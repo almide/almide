@@ -269,12 +269,11 @@ fn main() -> Bool = {
 }
 
 #[test]
-fn list_rest_pattern_hints_at_idiomatic_recursion() {
-    // Sonnet / other strong LLMs reach for rest patterns from Rust/JS
-    // (`[head, ...tail]`) or Haskell/OCaml (`head :: tail`). Neither is
-    // supported in Almide list patterns; the diagnostic must point to
-    // `list.first` / `list.drop` explicitly so the retry knows what to
-    // write instead.
+fn list_rest_pattern_hints_at_two_dot_spelling() {
+    // Rust/JS writers spell the rest with THREE dots (`[head, ...tail]`).
+    // Almide's rest form (#1461) is TWO dots — the diagnostic must teach
+    // the supported spelling so the retry lands on `[h, ..t]`, and the
+    // two-dot form itself must now PARSE (the mirror probe below).
     let p = write_tmp("try_rest_pattern_dotdotdot.almd", r#"
 fn sum(xs: List[Int]) -> Int =
     match xs {
@@ -283,9 +282,20 @@ fn sum(xs: List[Int]) -> Int =
     }
 "#);
     let (_, out) = check(&p);
-    assert!(out.contains("rest/spread patterns"), "dot-dot-dot hint missing:\n{}", out);
-    assert!(out.contains("list.first") && out.contains("list.drop"),
-        "idiomatic fix hint missing:\n{}", out);
+    assert!(out.contains("TWO dots"), "two-dot hint missing:\n{}", out);
+    assert!(out.contains("[h, ..t]"), "supported spelling missing:\n{}", out);
+
+    let ok_p = write_tmp("try_rest_pattern_dotdot.almd", r#"
+fn sum(xs: List[Int]) -> Int =
+    match xs {
+        [] => 0,
+        [head, ..tail] => head + sum(tail),
+    }
+
+fn main() -> Unit = println(int.to_string(sum([1, 2, 3])))
+"#);
+    let (ok, out) = check(&ok_p);
+    assert!(ok, "two-dot rest must check clean:\n{}", out);
 }
 
 #[test]

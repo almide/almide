@@ -10,7 +10,12 @@
 #                        functions/modules (summed from the signature indexes
 #                        tools/gen-stdlib-doc-index.py regenerates from the
 #                        compiler and CI checks), `.almd` test files under spec/,
-#                        contracts in the ledger (parsed as gen-claims.sh parses it)
+#                        contracts in the ledger. Every cell is a TOTAL, so the
+#                        rows render from the stamped record in
+#                        proofs/ledger-counts.toml (a dated `counts:generated`
+#                        block inside this one) — a fixture or contract PR never
+#                        rewrites them; `--counts` (or scripts/gen-ledger-counts.sh)
+#                        re-measures and restamps
 #   wasm-size:generated  the Hello, world size table, rendered from the COMMITTED,
 #                        stamped baseline docs/benchmarks/wasm-size.txt —
 #                        measuring and publishing are separate acts (the
@@ -22,6 +27,7 @@
 #                                               # compiler at hand, also rebuild Hello,
 #                                               # world and demand the baseline's bytes
 #   bash scripts/gen-readme-stats.sh --measure  # rebuild Hello, world, restamp, rewrite
+#   bash scripts/gen-readme-stats.sh --counts   # restamp proofs/ledger-counts.toml, rewrite
 #
 # ALMIDE_BIN names the compiler (default target/release/almide, then PATH).
 # scripts/check-readme-numbers.sh is the other half: it fails on any count the
@@ -41,6 +47,8 @@ SIZE_END="<!-- wasm-size:generated:end -->"
 RT_START="<!-- wasm-runtime:generated:start — rendered from docs/benchmarks/wasm-runtime.txt by scripts/gen-readme-stats.sh; DO NOT EDIT between the markers -->"
 RT_END="<!-- wasm-runtime:generated:end -->"
 RT_LEDGER="docs/benchmarks/wasm-runtime.txt"
+. scripts/lib/ledger-counts.sh
+[ "$MODE" = "--counts" ] && counts_stamp
 
 [ -f "$README" ] || { echo "::error::$README not found (run from repo root)"; exit 2; }
 [ -f "$LEDGER" ] || { echo "::error::$LEDGER not found"; exit 2; }
@@ -109,22 +117,18 @@ fi
 kv() { grep -E "^$1[[:space:]]*=" "$BASELINE" | head -1 | sed -E 's/^[^=]*=[[:space:]]*//'; }
 thousands() { printf '%s' "$1" | awk '{ n=$1; s=""; while (length(n) > 3) { s="," substr(n, length(n)-2) s; n=substr(n, 1, length(n)-3) } print n s }'; }
 
-stdlib_fns="$(grep -h '^## Signature index (' docs/stdlib/*.md | grep -oE '[0-9]+' | awk '{ s += $1 } END { print s + 0 }')"
-stdlib_mods="$(grep -l '^## Signature index (' docs/stdlib/*.md | wc -l | tr -d ' ')"
-test_files="$(grep -rlE '^[[:space:]]*test "' spec --include='*.almd' | wc -l | tr -d ' ')"
-contracts="$(awk '/'"'"''"'"''"'"'/ { s = !s; next } !s && /^\[\[contract\]\]/ { n++ } END { print n + 0 }' "$LEDGER")"
+# The stamped totals, as recorded (the measurement recipes: scripts/lib/ledger-counts.sh).
+stdlib_fns="$(counts_get stdlib_functions)"
+stdlib_mods="$(counts_get stdlib_modules)"
+test_files="$(counts_get spec_test_files)"
+contracts="$(counts_get contracts)"
 size_version="$(kv version)"; size_date="$(kv date)"
 size_struct="$(thousands "$(kv structural_bytes)")"; size_incumb="$(thousands "$(kv incumbent_bytes)")"
 
 stats_body="$(mktemp)"; size_body="$(mktemp)"; rt_body="$(mktemp)"; rendered="$(mktemp)"
 trap 'rm -f "$stats_body" "$size_body" "$rt_body" "$rendered"' EXIT
 
-cat > "$stats_body" <<EOF
-| Derived count | Value |
-|---|---|
-| Stdlib | ${stdlib_fns} functions across ${stdlib_mods} modules — self-hosted \`.almd\`, signature indexes regenerated from the compiler by \`tools/gen-stdlib-doc-index.py\` |
-| Tests | ${test_files} \`.almd\` test files under \`spec/\` (\`almide test spec/\`) + the ${contracts}-contract cross-target ledger |
-EOF
+counts_render_stats > "$stats_body"
 
 cat > "$size_body" <<EOF
 | Program (\`almide build --target wasm\`, verified, as shipped) | incumbent v1 leg | structural leg |
@@ -169,7 +173,7 @@ if [ "$MODE" = "--check" ]; then
     diff -u "$README" "$rendered" | head -40 || true
     exit 1
   fi
-  echo "readme-stats: blocks are fresh (stdlib ${stdlib_fns}/${stdlib_mods}, tests ${test_files}, contracts ${contracts})."
+  echo "readme-stats: blocks are fresh (stdlib ${stdlib_fns}/${stdlib_mods}, tests ${test_files}, contracts ${contracts} — as stamped $(counts_date))."
   if [ -n "$(almide_bin)" ]; then
     measure_both
     if [ "$S_BYTES" != "$(kv structural_bytes)" ] || [ "$I_BYTES" != "$(kv incumbent_bytes)" ]; then

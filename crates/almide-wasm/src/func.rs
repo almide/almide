@@ -104,6 +104,8 @@ fn emit_modinit_call(em: &mut crate::emitter::Emitter<'_>, il: &crate::InitLet, 
 /// How one function's body meets its wasm signature.
 #[derive(Clone)]
 pub(crate) struct FnPlan {
+    /// Qualified name, for the E083 diagnostic.
+    pub(crate) name: String,
     pub(crate) ret: Option<SliceTy>,
     /// The module this function belongs to (None = entry program).
     pub(crate) cur_module: Option<String>,
@@ -126,6 +128,13 @@ pub(crate) struct FnPlan {
     /// the straightline gate still decides; None = never (display
     /// helpers, lifted lambdas — later phases).
     pub(crate) witness_name: Option<String>,
+    /// This fn's own wasm index (program fns): a `return_call` to it is
+    /// LOOP-CONVERTED (tco.rs) — the frame is not replaced, so the
+    /// tail-site release covers the params only; the owned locals live
+    /// on into the next iteration and its rebind / the epilogue release
+    /// them (#1988: releasing them at the loop-back double-freed a Str
+    /// local in examples/lisp.almd's parse_list).
+    pub(crate) self_index: Option<u32>,
 }
 
 pub(crate) fn lower_fn(
@@ -136,8 +145,28 @@ pub(crate) fn lower_fn(
     ctx: &Ctx,
     pool: &mut Pool,
 ) -> Result<(Function, HashSet<usize>), EmitError> {
-    let FnPlan { ret, effect_raw, in_main, env_captures, cur_module, metered, charge_entry, var_space, witness_name } =
-        plan;
+    let FnPlan {
+        ret,
+        effect_raw,
+        in_main,
+        env_captures,
+        cur_module,
+        metered,
+        charge_entry,
+        var_space,
+        witness_name,
+        self_index,
+        name: fn_name,
+    } = plan;
+    // E083 (#1996): the exit ledger emit_exit records, and the names the
+    // diagnostic speaks — taken out of the emitter before its scope ends,
+    // validated against the bytes after the final `end`.
+    let exit_ledger: Vec<crate::exit_plan::ExitRecord>;
+    // The typed drop glues registered so far — every release in an exit
+    // window is `$dec_flat` or one of these (helper indices are
+    // append-only, so the set only grows).
+    let drop_fns: Vec<u32>;
+    let mut local_names: HashMap<u32, String> = HashMap::new();
     let cur_module = cur_module.as_deref();
     let env_shift: u32 = u32::from(env_captures.is_some());
     let mut locals: HashMap<VarId, (u32, SliceTy)> = HashMap::new();
@@ -216,9 +245,13 @@ pub(crate) fn lower_fn(
     local_decls.push((HOLD_I32_POOL, ValType::I32));
     local_decls.push((HOLD_I64_POOL, ValType::I64));
     local_decls.push((HOLD_F64_POOL, ValType::F64));
+    // The borrow pool (arm.rs): borrowed argument temporaries, disjoint
+    // from the scratch pools an arm re-acquires mid-op.
+    let borrow_base = hold_f64_base + HOLD_F64_POOL;
+    local_decls.push((BORROW_POOL, ValType::I32));
     // Deferred-range (start, end) i64 pairs after the pools.
     let mut deferred_ranges: HashMap<VarId, (u32, u32, bool)> = HashMap::new();
-    let mut next_extra = hold_f64_base + HOLD_F64_POOL;
+    let mut next_extra = borrow_base + BORROW_POOL;
     // C-320 repair locals: depth-at-entry (i32).
     let region_depth_entry = if region_saved_var.is_some() {
         local_decls.push((1, ValType::I32));
@@ -248,8 +281,15 @@ pub(crate) fn lower_fn(
             pool,
             locals: &locals,
             rc_param_ceiling: env_shift + params.len() as u32,
-            rc_droppable_params: Vec::new(),
+            tail_release_allowed: false,
+            rc_frame_params: Vec::new(),
+            self_index,
             rc_owned: std::collections::BTreeSet::new(),
+            owned_ty: std::collections::HashMap::new(),
+            owned_call_marks: Default::default(),
+            borrowed_temps: Vec::new(),
+            exit_ledger: Vec::new(),
+            borrow_base,
             table: ctx.table,
             types: ctx.types,
             calls: &mut calls,
@@ -287,7 +327,7 @@ pub(crate) fn lower_fn(
         // collecting and the straightline gate admits this body (no
         // effect wrap, no captures, no top-let prelude — every excluded
         // form has RC sites the two hooks do not cover yet).
-        if let Some(_name) = &witness_name
+        if let Some(name) = &witness_name
             && crate::witness::collecting()
             && effect_raw.is_none()
             && env_captures.is_none()
@@ -295,6 +335,7 @@ pub(crate) fn lower_fn(
             && crate::witness::straightline_subset(
                 body,
                 ret.is_some_and(crate::witness::heapish_ret),
+                name.rsplit('.').next().unwrap_or(name),
             )
             .is_none()
         {
@@ -355,7 +396,8 @@ pub(crate) fn lower_fn(
                     | SliceTy::Set(_)
                     | SliceTy::Scalar(Scalar::Bytes)
             ) {
-                em.f.instructions().call(F_BLOCK_COPY);
+                let copy = em.copy_fn_of(declared);
+                em.f.instructions().call(copy);
             }
             em.f.instructions().global_set(gidx);
         }
@@ -368,9 +410,12 @@ pub(crate) fn lower_fn(
                 em.lower_tail(body, Some(want))?;
                 // RC-3: a droppable result that may BORROW a local
                 // takes +1 before the epilogue releases the owners.
-                if em.rc_droppable(want)
-                    && !crate::rc_ownership::rc_certainly_fresh(&crate::rc_ownership::rc_tail(body).kind)
-                {
+                let owned_tail =
+                    em.rc_owned_result(crate::rc_ownership::rc_tail(body));
+                if em.rc_droppable(want) && owned_tail {
+                    em.witness_tail_owned();
+                }
+                if em.rc_droppable(want) && !owned_tail {
                     em.rc_inc_top();
                     if em.witness.is_some() {
                         let tail = crate::rc_ownership::rc_tail(body);
@@ -405,9 +450,7 @@ pub(crate) fn lower_fn(
                     // RC-3: the raw payload rides inside the ok carrier
                     // past the epilogue — same borrow rule as the pure
                     // arm, and the +1 must precede the wrap.
-                    if em.rc_droppable(raw)
-                        && !crate::rc_ownership::rc_certainly_fresh(&crate::rc_ownership::rc_tail(body).kind)
-                    {
+                    if em.rc_droppable(raw) && !em.rc_owned_result(crate::rc_ownership::rc_tail(body)) {
                         em.rc_inc_top();
                     }
                 }
@@ -417,27 +460,36 @@ pub(crate) fn lower_fn(
         // RC-3 epilogue: the fall-through exit releases every local the
         // Bind/Assign routes made an owner, then the droppable PARAMS —
         // the callee-owned half of the argument convention (call sites
-        // inc borrowed args; fresh temporaries are consumed here).
-        // Early returns and tail calls skip this — a leak, never a
-        // dangle. BTreeSet order keeps the release deterministic.
-        for idx in std::mem::take(&mut em.rc_owned) {
-            em.f.instructions().local_get(idx).call(F_DEC_FLAT);
-            em.witness_dec(idx);
-        }
-        for (k, &(_, pty)) in params.iter().enumerate() {
-            if em.rc_droppable(pty) {
-                // env_shift: a lifted lambda's raw param 0 is the closure
-                // ENV block — dec'ing it freed the closure after its
-                // first invoke (call_indirect then read a freelist
-                // pointer: "uninitialized element", the C-319 trio).
-                em.f.instructions().local_get(env_shift + k as u32).call(F_DEC_FLAT);
-                em.witness_dec(env_shift + k as u32);
-            }
-        }
+        // inc borrowed args; fresh temporaries are consumed here). The
+        // same ExitPlan the early-return and tail sites consume (#1995).
+        let plan = em.exit_plan(crate::exit_plan::Continuation::ReturnSuccess);
+        em.emit_exit(&plan);
+        em.rc_owned.clear();
         // The armed recorder's certificate goes to the sink — poisoned
         // or not (the floor test fails loudly on the sentinel).
         if let (Some(w), Some(name)) = (em.witness.take(), &witness_name) {
             crate::witness::push(name, w.certificate());
+        }
+        exit_ledger = std::mem::take(&mut em.exit_ledger);
+        drop_fns = {
+            let hs = em.work.helpers.borrow();
+            hs.iter()
+                .enumerate()
+                .filter(|(_, h)| {
+                matches!(
+                    h,
+                    crate::work::Helper::DropList { .. }
+                        | crate::work::Helper::DropShape { .. }
+                        | crate::work::Helper::DropMapSpine { .. }
+                )
+            })
+                .map(|(p, _)| em.work.helper_base.get() + p as u32)
+                .collect()
+        };
+        for (id, &(idx, _)) in em.locals.iter() {
+            if let Some(n) = (ctx.var_name)(var_space, *id) {
+                local_names.insert(idx, n);
+            }
         }
         // Hold-balance invariant: every arm releases exactly what it
         // held. An over-release WRAPS the u32 depth and poisons every
@@ -452,6 +504,9 @@ pub(crate) fn lower_fn(
         }
     }
     f.instructions().end();
+    crate::exit_plan::validate_exits(&f, &exit_ledger, &fn_name, &drop_fns, |idx| {
+        local_names.get(&idx).map_or_else(|| format!("local #{idx}"), |n| format!("local `{n}`"))
+    })?;
     Ok((f, calls))
 }
 
@@ -461,13 +516,11 @@ pub(crate) fn fn_signature(f: &IrFunction, types: &TypeTable) -> Result<(Vec<Sli
     }
     // The C-132 move-mode pass rewrote eligible mut-param fns (their
     // `mutated_params` is CLEARED, the write-back is explicit in the
-    // tree); a REMAINING entry marks the excluded shapes — the same key
-    // the incumbent's v1 wall uses. The dominant survivor is the can-err
-    // effect fn, #1576's unratified design question — name it (#1622).
+    // tree); a REMAINING entry marks the excluded shapes — two `mut`
+    // params, a same-scope duplicate name, a declared-Result effect fn
+    // with a non-String err carrier — the same key the incumbent's v1
+    // wall uses. (The can-err effect fn was admitted by #1576's ruling.)
     if !f.mutated_params.is_empty() {
-        if f.is_effect && !matches!(f.ret_ty, Ty::Unit) {
-            return Err("mut-param:can-err-effect(#1576)".into());
-        }
         return Err("mut-param".into());
     }
     let mut params = Vec::new();
@@ -516,13 +569,18 @@ fn body_region_enter_var(body: &IrExpr) -> Option<VarId> {
     None
 }
 
-/// Fill the tail-site param-release set (calls.rs `emit_tail_param_release`).
+/// Fill the frame's droppable-param set and decide the tail-site release rule (exit_plan.rs).
 /// Sound by construction: ENTRY fns only, never lambdas, and only when the
 /// body derives no raw addresses — a `prim.*` call like `prim.handle(s)`
 /// hands the tail callee a raw pointer into a param's block, and releasing
 /// that param at the tail site is a use-after-free (string.is_whitespace
 /// read garbage codepoints exactly this way). Pool/registry bodies keep the
-/// pre-existing accounting.
+/// pre-existing accounting — and MUST (#1990): the direct-prim scan is not
+/// transitive, and a registry body with no `prim` of its own can still tail
+/// into one that returns a raw VIEW into the param (the regex engine's
+/// fuzz batch printed freelist bytes and trapped when module-space bodies
+/// joined the set). The price is the leak the B1 witness names on those
+/// bodies (`iam|im`); lifting it needs a transitive raw-tier analysis.
 fn populate_tail_release_set(
     em: &mut Emitter<'_>,
     cur_module: Option<&str>,
@@ -530,12 +588,28 @@ fn populate_tail_release_set(
     params: &[(VarId, SliceTy)],
     body: &IrExpr,
 ) {
-    if cur_module.is_some() || env_shift != 0 || crate::rc_ownership::body_uses_prim(body) {
-        return;
-    }
+    // The raw-address rule: a prim-using body keeps every release on the
+    // epilogue (a raw view into a local or param may still be read by
+    // the code after the call); a lifted lambda's env block is not a
+    // frame of its own. MODULE SPACE is not an exclusion: the structural
+    // witness (#1696 B1) balanced every module-space certificate once
+    // params and owned locals were released at the tail site, and the
+    // two traps once blamed on it (regex captures, lisp's parse_list)
+    // were the loop-form double free (#1988) — 63 leaking wrappers
+    // (`fan_map`, `http_set_header`, `__gby_add`, …) said so.
+    let _ = cur_module;
+    // The frame's droppable params, for the ERROR exits (data.rs): those
+    // release exactly what the epilogue would, raw-address rule or not.
+    // A lifted lambda's raw param 0 is the closure ENV block, never a
+    // frame credit (the C-319 trio) — env_shift skips it.
     for (k, &(_, pty)) in params.iter().enumerate() {
         if em.rc_droppable(pty) {
-            em.rc_droppable_params.push(env_shift + k as u32);
+            em.rc_frame_params.push(env_shift + k as u32);
+            em.owned_ty.insert(env_shift + k as u32, pty);
         }
     }
+    if env_shift != 0 || crate::rc_ownership::body_uses_prim(body) {
+        return;
+    }
+    em.tail_release_allowed = true;
 }

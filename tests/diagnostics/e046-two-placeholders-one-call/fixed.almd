@@ -1,0 +1,8 @@
+// E046: TWO `_` in one call — each placeholder reports its own argument
+// position, and the shared steer names both lambda parameters.
+fn mk(a: Int, b: Int) -> Int = a * 10 + b
+
+fn main() -> Unit = {
+  let f = (x1: Int, x2: Int) => mk(x1, x2)
+  println(int.to_string(f(1, 2)))
+}

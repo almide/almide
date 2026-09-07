@@ -248,11 +248,12 @@ pub(crate) fn emit_json_quote_helper(frags: JsonFrags) -> Function {
         frag(&mut i, cursor, fr, 2);
         i.else_();
     }
-    // plain byte — bounds-guarded direct store
-    i.local_get(cursor).global_get(G_LINE_END).i32_ge_u().if_(BlockType::Empty);
-    i.unreachable();
+    // plain byte — a direct store at the PHYSICAL cursor, the room grown
+    // first when the byte would leave it (#1826; the guard used to trap).
+    i.local_get(cursor).global_get(G_LINE_ROOM).i32_ge_u().if_(BlockType::Empty);
+    i.local_get(cursor).i32_const(1).call(F_LINE_GROW);
     i.end();
-    i.local_get(cursor).local_get(b).i32_store8(raw8());
+    i.local_get(cursor).global_get(G_LINE_DELTA).i32_add().local_get(b).i32_store8(raw8());
     i.local_get(cursor).i32_const(1).i32_add().local_set(cursor);
     for _ in 0..5 {
         i.end();

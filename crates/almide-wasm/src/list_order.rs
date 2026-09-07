@@ -13,7 +13,7 @@ impl Emitter<'_> {
         &mut self,
         func: &str,
         args: &[IrExpr],
-    ) -> Result<Option<Option<SliceTy>>, EmitError> {
+    ) -> Result<Option<Option<Lowered>>, EmitError> {
         match (func, args) {
             // First n elements (native `take(n as usize)`): a NEGATIVE
             // n reinterprets huge and takes the WHOLE list.
@@ -30,7 +30,7 @@ impl Emitter<'_> {
             // native. The result may live in either ping-pong buffer —
             // both are layout-true blocks with the right len header.
             ("sort", [xs]) => {
-                let h = match self.lower(xs, None)? {
+                let h = match self.lower_arg(xs, None, ArgMode::Borrow)? {
                     SliceTy::List(h) => h,
                     other => return unsup(&format!("list-sort-of:{other:?}")),
                 };
@@ -46,9 +46,10 @@ impl Emitter<'_> {
                 ) {
                     return unsup(&format!("list-sort-elem:{elem:?}"));
                 }
-                self.f.instructions().call(F_BLOCK_COPY);
+                let copy = self.copy_fn_of(SliceTy::List(h));
+                self.f.instructions().call(copy);
                 self.emit_merge_sort(elem)?;
-                Ok(Some(Some(SliceTy::List(h))))
+                Ok(Some(Some(Lowered::owned(SliceTy::List(h)))))
             }
             ("chunk" | "windows", [xs, n_arg]) => {
                 self.lower_list_chunk_windows(func, xs, n_arg).map(Some)
@@ -57,14 +58,14 @@ impl Emitter<'_> {
             // skip(n as usize): a NEGATIVE n reinterprets huge — EMPTY
             // (take's mirror keeps the WHOLE list; the asymmetry is v0's).
             ("drop", [xs, n]) => {
-                let h = match self.lower(xs, None)? {
+                let h = match self.lower_arg(xs, None, ArgMode::Borrow)? {
                     SliceTy::List(h) => h,
                     other => return unsup(&format!("list-drop-of:{other:?}")),
                 };
                 let stride = self.types.el(h).slot_size() as i32;
                 let hb = self.hold_i32()?;
                 self.f.instructions().local_set(hb);
-                self.lower(n, Some(INT))?;
+                self.lower_arg(n, Some(INT), ArgMode::Borrow)?;
                 let hn = self.hold_i64()?;
                 let hc = self.hold_i32()?;
                 let ho = self.hold_i32()?;
@@ -96,18 +97,19 @@ impl Emitter<'_> {
                     .i32_sub();
                 i.local_get(hc);
                 i.call(F_COPY);
-                i.local_get(ho);
                 let _ = i;
+                self.emit_inc_elems(ho, self.types.el(h));
+                self.f.instructions().local_get(ho);
                 self.release_i32();
                 self.release_i32();
                 self.release_i64();
                 self.release_i32();
-                Ok(Some(Some(SliceTy::List(h))))
+                Ok(Some(Some(Lowered::owned(SliceTy::List(h)))))
             }
             // insert at min(i as usize, len): a NEGATIVE index appends
             // at the END (the huge-usize reinterpretation, v0 verbatim).
             ("insert", [xs, idx, v]) => {
-                let h = match self.lower(xs, None)? {
+                let h = match self.lower_arg(xs, None, ArgMode::Borrow)? {
                     SliceTy::List(h) => h,
                     other => return unsup(&format!("list-insert-of:{other:?}")),
                 };
@@ -115,10 +117,10 @@ impl Emitter<'_> {
                 let stride = elem.slot_size() as i32;
                 let hb = self.hold_i32()?;
                 self.f.instructions().local_set(hb);
-                self.lower(idx, Some(INT))?;
+                self.lower_arg(idx, Some(INT), ArgMode::Borrow)?;
                 let hn = self.hold_i64()?;
                 self.f.instructions().local_set(hn);
-                self.lower(v, Some(elem))?;
+                self.lower_arg(v, Some(elem), ArgMode::Retain)?;
                 let hv = self.hold_val(elem)?;
                 let hoff = self.hold_i32()?;
                 let ho = self.hold_i32()?;
@@ -166,14 +168,23 @@ impl Emitter<'_> {
                     .i32_add();
                 i.local_get(hb).i32_load(len_memarg()).local_get(hoff).i32_sub();
                 i.call(F_COPY);
-                i.local_get(ho);
                 let _ = i;
+                // The copied slots take their credits; the inserted value
+                // brought its own (Retain), so its slot gives the walk's
+                // extra one back.
+                if let Some(inc) = self.inc_elems_fn(elem) {
+                    let dec = self.dec_fn_of(elem);
+                    let mut i = self.f.instructions();
+                    i.local_get(ho).call(inc);
+                    i.local_get(ho).local_get(hoff).i32_add().i32_load(slot_memarg(0)).call(dec);
+                }
+                self.f.instructions().local_get(ho);
                 self.release_i32();
                 self.release_i32();
                 self.release_val(elem);
                 self.release_i64();
                 self.release_i32();
-                Ok(Some(Some(SliceTy::List(h))))
+                Ok(Some(Some(Lowered::owned(SliceTy::List(h)))))
             }
             _ => Ok(None),
         }
@@ -183,7 +194,7 @@ impl Emitter<'_> {
         &mut self,
         func: &str,
         xs: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
 
                 let is_min = func == "min";
                 let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
@@ -302,6 +313,9 @@ impl Emitter<'_> {
                 i.i32_const(0);
                 i.end();
                 let _ = i;
+                // The best element's handle inside the Option takes +1
+                // (leak-not-dangle until the Option's typed drop, 2c).
+                self.share_option_payload_top(elem);
                 self.release_i32();
                 self.release_i32();
                 self.release_i64();
@@ -309,7 +323,7 @@ impl Emitter<'_> {
                 self.release_i32();
                 self.release_i32();
                 self.release_i32();
-                Ok(Some(SliceTy::Option(self.types.intern(elem))))
+                Ok(Some(Lowered::owned(SliceTy::Option(self.types.intern(elem)))))
     }
 
 
@@ -318,18 +332,19 @@ impl Emitter<'_> {
         func: &str,
         xs: &IrExpr,
         n_arg: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
 
                 let windows = func == "windows";
-                let h = match self.lower(xs, None)? {
+                let h = match self.lower_arg(xs, None, ArgMode::Borrow)? {
                     SliceTy::List(h) => h,
                     other => return unsup(&format!("list-{func}-of:{other:?}")),
                 };
                 let elem = self.types.el(h);
                 let stride = elem.slot_size() as i32;
+                let inc_elems = self.inc_elems_fn(elem);
                 let hxs = self.hold_i32()?;
                 self.f.instructions().local_set(hxs);
-                self.lower(n_arg, Some(INT))?;
+                self.lower_arg(n_arg, Some(INT), ArgMode::Borrow)?;
                 let hn = self.hold_i64()?;
                 let msg = self.pool.intern(if windows {
                     "window size must be positive"
@@ -418,6 +433,9 @@ impl Emitter<'_> {
                     }
                     i.local_get(hcs).i32_wrap_i64().i32_const(stride).i32_mul();
                     i.memory_copy(0, 0);
+                    if let Some(inc) = inc_elems {
+                        i.local_get(hrow).call(inc);
+                    }
                     i.local_get(ho).local_get(hk).i32_const(2).i32_shl().i32_add();
                     i.local_get(hrow).i32_store(slot_memarg(0));
                     i.local_get(hk).i32_const(1).i32_add().local_set(hk);
@@ -432,7 +450,7 @@ impl Emitter<'_> {
                 self.release_i64();
                 self.release_i64();
                 self.release_i32();
-                Ok(Some(SliceTy::List(self.types.intern(SliceTy::List(h)))))
+                Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(SliceTy::List(h))))))
     }
 
     /// Keys precomputed ONCE per element into a parallel array (#560 —
@@ -440,7 +458,7 @@ impl Emitter<'_> {
     /// side-effectful keys), then the lockstep merge sort moves keys
     /// and values together. Stable; key orders are the scalar three
     /// (Int/Str Ord, Float totalOrder).
-    fn lower_list_sort_by(&mut self, xs: &IrExpr, cb: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_list_sort_by(&mut self, xs: &IrExpr, cb: &IrExpr) -> ArmResult {
         let (params, body) = self.hof_lambda(cb, 1)?;
         let Some(k) = slice_ty_of(&body.ty, self.types) else {
             return unsup(&format!("list-sort-by-key:{}", ty_name(&body.ty)));
@@ -448,13 +466,14 @@ impl Emitter<'_> {
         if !matches!(k, INT | FLOAT | STR | BOOL) {
             return unsup(&format!("list-sort-by-key:{k:?}"));
         }
-        let h = match self.lower(xs, None)? {
+        let h = match self.lower_arg(xs, None, ArgMode::Borrow)? {
             SliceTy::List(h) => h,
             other => return unsup(&format!("list-sort-by-of:{other:?}")),
         };
         let elem = self.types.el(h);
         let (vstride, kstride) = (elem.slot_size() as i32, k.slot_size() as i32);
-        self.f.instructions().call(F_BLOCK_COPY);
+        let copy = self.copy_fn_of(SliceTy::List(h));
+        self.f.instructions().call(copy);
         let hb = self.hold_i32()?;
         let hn = self.hold_i32()?;
         let hkeys = self.hold_i32()?;
@@ -479,6 +498,9 @@ impl Emitter<'_> {
             .i32_mul()
             .i32_add();
         self.lower(body, Some(k))?;
+        // A pass-through body hands back a VIEW (a captured var, the
+        // input itself): the block storing it is a holder and takes the share.
+        self.rc_share_guard(body, k);
         self.store_ty_slot(k, 0);
         {
             let mut i = self.f.instructions();
@@ -490,7 +512,7 @@ impl Emitter<'_> {
         self.release_i32();
         self.release_i32();
         self.release_i32();
-        Ok(Some(SliceTy::List(h)))
+        Ok(Some(Lowered::owned(SliceTy::List(h))))
     }
 }
 
@@ -498,15 +520,15 @@ impl Emitter<'_> {
     /// First n elements (native `take(n as usize)`; a NEGATIVE n
     /// reinterprets huge and takes the whole list) — split from
     /// `lower_list_order_call` for the complexity budget.
-    fn lower_list_take(&mut self, xs: &IrExpr, n: &IrExpr) -> Result<Option<Option<SliceTy>>, EmitError> {
-                let h = match self.lower(xs, None)? {
+    fn lower_list_take(&mut self, xs: &IrExpr, n: &IrExpr) -> Result<Option<Option<Lowered>>, EmitError> {
+                let h = match self.lower_arg(xs, None, ArgMode::Borrow)? {
                     SliceTy::List(h) => h,
                     other => return unsup(&format!("list-take-of:{other:?}")),
                 };
                 let stride = self.types.el(h).slot_size() as i32;
                 let hb = self.hold_i32()?;
                 self.f.instructions().local_set(hb);
-                self.lower(n, Some(INT))?;
+                self.lower_arg(n, Some(INT), ArgMode::Borrow)?;
                 let hn = self.hold_i64()?;
                 let hc = self.hold_i32()?;
                 let ho = self.hold_i32()?;
@@ -532,12 +554,13 @@ impl Emitter<'_> {
                 i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32).i32_add();
                 i.local_get(hc);
                 i.memory_copy(0, 0);
-                i.local_get(ho);
                 let _ = i;
+                self.emit_inc_elems(ho, self.types.el(h));
+                self.f.instructions().local_get(ho);
                 self.release_i32();
                 self.release_i32();
                 self.release_i64();
                 self.release_i32();
-                Ok(Some(Some(SliceTy::List(h))))
+                Ok(Some(Some(Lowered::owned(SliceTy::List(h)))))
     }
 }

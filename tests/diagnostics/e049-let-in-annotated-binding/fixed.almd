@@ -1,0 +1,4 @@
+// E049 variant: the `in` after a type-annotated let binding.
+fn main() -> Unit = {
+  let total: Int = 40 + 2 println(int.to_string(total))
+}

@@ -1,0 +1,7 @@
+// E044 variant: fn main declared to return a user-declared record type.
+type Summary = { ok: Int }
+
+fn main() -> Unit = {
+  let s = Summary { ok: 1 }
+  println(int.to_string(s.ok))
+}

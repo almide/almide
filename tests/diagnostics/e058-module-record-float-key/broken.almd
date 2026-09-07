@@ -1,0 +1,8 @@
+// Hashability resolves the sibling's record definition: a Float-carrying
+// module record as a Map key is E058.
+import self.geo as g
+
+fn main() -> Unit = {
+  let m: Map[g.Point, Int] = map.new()
+  println(int.to_string(map.len(m)))
+}

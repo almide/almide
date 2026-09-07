@@ -1,0 +1,4 @@
+// E036 in a TOP-LEVEL let — module-scope initialization drops the parse error.
+let parsed = int.parse("42") |> result.map_err((e) => "bad input")
+
+fn main() -> Unit = println(int.to_string(parsed ?? -1))

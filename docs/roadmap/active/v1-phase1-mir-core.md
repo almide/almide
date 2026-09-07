@@ -176,7 +176,7 @@ Call ...
 ### 5.2 renderer 忠実性ゲート(byte gate 群 — 既存資産)
 
 - **value-等価(byte gate)が load-bearing**(renderer 層で)。leak/RC-balance だけでは**不足** — AliasCow 回帰は RC バランスのまま wrong-output(alias_cow.rs で実証)。Perceus-belt 式 RC 検証器だけ積んでも value 破壊を通す。
-- **`new MIR-wasm == old emit_wasm`** を `wasm_cross_target_spec`(tests/wasm_runtime_test.rs:471, 両ターゲットで (exit,stdout,stderr) triple 比較)で。移行中は**凍結した旧 emit_wasm**を基準に broader corpus を replay(旧 emit が**独立版**として機能するのは移行中だけ — §5.3)。`@xt-allow` ratchet は down-only。
+- **`new MIR-wasm == old emit_wasm`** を `wasm_cross_target_spec`(tests/wasm_runtime_cross_target.rs, 両ターゲットで (exit,stdout,stderr) triple 比較)で。移行中は**凍結した旧 emit_wasm**を基準に broader corpus を replay(旧 emit が**独立版**として機能するのは移行中だけ — §5.3)。`@xt-allow` ratchet は down-only。
 - **host-determinism**(check-host-determinism.sh): MIR パスが drop/cow 順序に HashMap 反復を入れると value gate は通るが host gate が割れる。BTreeSet 順序を維持。
 - **heisenbug 対策**: corpus replay は必要だが歴史的に不十分(§643)。targeted drop-order fixture を併用。
 - **同一 `ALMIDE_WASM_FREES`** を新旧両方で(leak body と RC body を比べて phantom divergence を出さない)。

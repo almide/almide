@@ -1,0 +1,54 @@
+// @contract: C-229
+// The Q1_0 row selector on a `cols` that is NOT a 128-multiple (#1787): a
+// selected row is `cols / 128` whole 18-byte blocks on native's ROW schedule
+// (`row_off = off + rid * n_blocks * 18`), and the trailing `cols mod 128`
+// elements are 0.0 — the C-229 all-zero edge, per element. Both wasm legs ran
+// the global-k schedule `k = rid * cols + j` there, which agrees with native
+// only when cols is a 128-multiple; on cols = 127 the row bound admitted zero
+// bytes yet the loop decoded block 0 anyway (nightly fuzz 2026-09-01:
+// `q1_oob_sign=0.0,0.0` native vs `-0.5,0.0` wasm).
+//
+// The zeros are spelled through float.to_string so the SIGN is observed
+// (the C-229 fixture's lesson: -0.0 == 0.0 hides a dequantizer sign bug).
+import matrix
+import bytes
+
+fn sgn(x: Float) -> String = float.to_string(x)
+
+fn row_head(m: Matrix, r: Int) -> String = {
+  let rows = matrix.to_lists(m)
+  let row = list.get(rows, r) ?? []
+  "${sgn(list.get(row, 0) ?? 9.9)},${sgn(list.get(row, 1) ?? 9.9)},${sgn(list.get(row, 126) ?? 9.9)}"
+}
+
+effect fn main() -> Unit = {
+  // one full block with a 0.5 scale (fp16 0x3800) and bit 0 set on the first weight
+  var q1 = bytes.new(18)
+  bytes.set_at(q1, 1, 56)
+  bytes.set_at(q1, 2, 1)
+  // cols = 127: zero whole blocks per row — every selected row is all-zero
+  let m127 = matrix.select_rows_q1_0(q1, 0, 127, [1, 0])
+  println("c127 r0=${row_head(m127, 0)} r1=${row_head(m127, 1)}")
+  // cols = 128: the whole block decodes; row 1 leaves the buffer → zeros
+  let m128 = matrix.select_rows_q1_0(q1, 0, 128, [0, 1])
+  println("c128 r0=${row_head(m128, 0)} r1=${row_head(m128, 1)}")
+  // cols = 200 over a two-block buffer: one whole block per row, elements
+  // 128..199 are the zero tail; row 1 starts at byte 18 (its block is bytes
+  // 18..35, present) — the row schedule, not the global-k one
+  var q2 = bytes.new(36)
+  bytes.set_at(q2, 1, 56)
+  bytes.set_at(q2, 2, 1)
+  bytes.set_at(q2, 19, 60)
+  let m200 = matrix.select_rows_q1_0(q2, 0, 200, [0, 1])
+  let rows = matrix.to_lists(m200)
+  let r0 = list.get(rows, 0) ?? []
+  let r1 = list.get(rows, 1) ?? []
+  println("c200 r0=${sgn(list.get(r0, 0) ?? 9.9)},${sgn(list.get(r0, 127) ?? 9.9)},${sgn(list.get(r0, 128) ?? 9.9)},${sgn(list.get(r0, 199) ?? 9.9)}")
+  println("c200 r1=${sgn(list.get(r1, 0) ?? 9.9)},${sgn(list.get(r1, 1) ?? 9.9)},${sgn(list.get(r1, 128) ?? 9.9)}")
+  // the full loader keeps the global-k schedule on a sub-128 cols (the KAT shape)
+  let f = matrix.from_q1_0_bytes(q1, 0, 2, 8)
+  let fr = matrix.to_lists(f)
+  let f0 = list.get(fr, 0) ?? []
+  let f1 = list.get(fr, 1) ?? []
+  println("full 2x8 r0=${sgn(list.get(f0, 0) ?? 9.9)},${sgn(list.get(f0, 1) ?? 9.9)} r1=${sgn(list.get(f1, 0) ?? 9.9)}")
+}

@@ -1,0 +1,10 @@
+// E008 through a closure: the fan branch reads the mutable `scale` inside a
+// list.map callback — still a capture of a var across concurrent branches.
+effect fn main() -> Unit = {
+  var scale = 2
+  let (a, b) = fan {
+    [1, 2, 3] |> list.map((n) => n * scale) |> list.len
+    10
+  }
+  println(int.to_string(a + b))
+}

@@ -14,7 +14,7 @@ impl Emitter<'_> {
         func: &str,
         args: &[IrExpr],
         ret_hint: Option<SliceTy>,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let _ = &ret_hint;
         if let Some(out) = self.lower_list_order_call(func, args)? {
             return Ok(out);
@@ -58,8 +58,8 @@ impl Emitter<'_> {
         }
     }
 
-    fn lower_list_len_arm(&mut self, xs: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
-        let elem = match self.lower(xs, None)? {
+    fn lower_list_len_arm(&mut self, xs: &IrExpr) -> ArmResult {
+        let elem = match self.lower_arg(xs, None, ArgMode::Borrow)? {
             SliceTy::List(h) => self.types.el(h),
             other => return unsup(&format!("list-len-of:{other:?}")),
         };
@@ -69,25 +69,28 @@ impl Emitter<'_> {
             .i32_const(elem.slot_size() as i32)
             .i32_div_u()
             .i64_extend_i32_u();
-        Ok(Some(INT))
+        Ok(Some(Lowered::scalar(INT)))
     }
 
-    fn lower_list_get_arm(&mut self, xs: &IrExpr, idx: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
-        let h = match self.lower(xs, None)? {
+    fn lower_list_get_arm(&mut self, xs: &IrExpr, idx: &IrExpr) -> ArmResult {
+        let h = match self.lower_arg(xs, None, ArgMode::Borrow)? {
             SliceTy::List(h) => h,
             other => return unsup(&format!("list-get-of:{other:?}")),
         };
-        self.lower(idx, Some(INT))?;
+        self.lower_arg(idx, Some(INT), ArgMode::Borrow)?;
         let helper = match self.types.el(h).slot_size() {
             8 => F_LIST_GET_8,
             _ => F_LIST_GET_4,
         };
         self.f.instructions().call(helper);
-        Ok(Some(SliceTy::Option(h)))
+        // `$list_get` allocates the Option block: owned; its handle
+        // payload takes +1 (leak-not-dangle until stage 2c).
+        self.share_option_payload_top(self.types.el(h));
+        Ok(Some(Lowered::owned(SliceTy::Option(h))))
     }
 
-    fn lower_list_first_arm(&mut self, xs: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
-        let elem = match self.lower(xs, None)? {
+    fn lower_list_first_arm(&mut self, xs: &IrExpr) -> ArmResult {
+        let elem = match self.lower_arg(xs, None, ArgMode::Borrow)? {
             SliceTy::List(h) => self.types.el(h),
             other => return unsup(&format!("list-first-of:{other:?}")),
         };
@@ -97,21 +100,22 @@ impl Emitter<'_> {
             _ => F_LIST_GET_4,
         };
         self.f.instructions().call(helper);
-        Ok(Some(SliceTy::Option(self.types.intern(elem))))
+        self.share_option_payload_top(elem);
+        Ok(Some(Lowered::owned(SliceTy::Option(self.types.intern(elem)))))
     }
 
-    fn lower_list_join_arm(&mut self, xs: &IrExpr, sep: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
-        match self.lower(xs, None)? {
+    fn lower_list_join_arm(&mut self, xs: &IrExpr, sep: &IrExpr) -> ArmResult {
+        match self.lower_arg(xs, None, ArgMode::Borrow)? {
             SliceTy::List(h) if self.types.el(h) == STR => {}
             other => return unsup(&format!("list-join-of:{other:?}")),
         }
-        self.lower(sep, Some(STR))?;
+        self.lower_arg(sep, Some(STR), ArgMode::Borrow)?;
         self.f.instructions().call(F_LIST_JOIN);
-        Ok(Some(STR))
+        Ok(Some(Lowered::owned(STR)))
     }
 
-    fn lower_list_enumerate(&mut self, xs: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
-        let elem = match self.lower(xs, None)? {
+    fn lower_list_enumerate(&mut self, xs: &IrExpr) -> ArmResult {
+        let elem = match self.lower_arg(xs, None, ArgMode::Borrow)? {
             SliceTy::List(h) => self.types.el(h),
             other => return unsup(&format!("list-enumerate-of:{other:?}")),
         };
@@ -161,6 +165,9 @@ impl Emitter<'_> {
             .i32_mul()
             .i32_add();
         self.load_ty_slot(elem, 0);
+        // A handle stored into the pair block takes +1: the pair has no
+        // typed drop yet (stage 2c), so this is leak-not-dangle.
+        self.share_handle_top(elem);
         self.store_ty_slot(elem, eoff);
         // store pair addr into result
         self.f
@@ -187,21 +194,23 @@ impl Emitter<'_> {
         self.release_i32();
         self.release_i32();
         self.release_i32();
-        Ok(Some(SliceTy::List(self.types.intern(SliceTy::Tuple(pair_ti)))))
+        Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(SliceTy::Tuple(pair_ti))))))
     }
 
-    fn lower_list_slice(&mut self, xs: &IrExpr, a: &IrExpr, b: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
-        let (h, elem) = match self.lower(xs, None)? {
+    fn lower_list_slice(&mut self, xs: &IrExpr, a: &IrExpr, b: &IrExpr) -> ArmResult {
+        let (h, elem) = match self.lower_arg(xs, None, ArgMode::Borrow)? {
             SliceTy::List(h) => (h, self.types.el(h)),
             other => return unsup(&format!("list-slice-of:{other:?}")),
         };
         let stride = elem.slot_size() as i64;
+        let inc_elems = self.inc_elems_fn(elem);
+        let tmp = self.tmp_i32_local;
         let bh = self.hold_i32()?;
         self.f.instructions().local_set(bh);
-        self.lower(a, Some(INT))?;
+        self.lower_arg(a, Some(INT), ArgMode::Borrow)?;
         let ah = self.hold_i64()?;
         self.f.instructions().local_set(ah);
-        self.lower(b, Some(INT))?;
+        self.lower_arg(b, Some(INT), ArgMode::Borrow)?;
         let eh = self.hold_i64()?;
         // e = min(b, count); s = a; s < 0 or s >= e → []
         let mut ins = self.f.instructions();
@@ -255,15 +264,18 @@ impl Emitter<'_> {
             .i64_mul()
             .i32_wrap_i64();
         ins.memory_copy(0, 0);
-        ins.local_get(self.tmp_i32_local);
+        if let Some(inc) = inc_elems {
+            ins.local_get(tmp).call(inc);
+        }
+        ins.local_get(tmp);
         ins.end();
         self.release_i64();
         self.release_i64();
         self.release_i32();
-        Ok(Some(SliceTy::List(h)))
+        Ok(Some(Lowered::owned(SliceTy::List(h))))
     }
 
-    fn lower_list_find(&mut self, xs: &IrExpr, cb: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_list_find(&mut self, xs: &IrExpr, cb: &IrExpr) -> ArmResult {
         let (params, body) = self.hof_lambda(cb, 1)?;
         let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
         let rh = self.hold_i32()?;
@@ -279,6 +291,7 @@ impl Emitter<'_> {
             .call(F_ALLOC)
             .local_tee(rh)
             .local_get(params[0]);
+        self.share_handle_top(elem);
         self.store_ty_slot(elem, almide_layout::OPTION_FIELD);
         self.f.instructions().br(2);
         self.f.instructions().end();
@@ -288,14 +301,14 @@ impl Emitter<'_> {
         self.release_i32();
         self.release_i32();
         self.release_i32();
-        Ok(Some(SliceTy::Option(self.types.intern(elem))))
+        Ok(Some(Lowered::owned(SliceTy::Option(self.types.intern(elem)))))
     }
 
     fn lower_list_find_index(
         &mut self,
         xs: &IrExpr,
         cb: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let (params, body) = self.hof_lambda(cb, 1)?;
         let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
         let rh = self.hold_i32()?;
@@ -321,18 +334,18 @@ impl Emitter<'_> {
         self.release_i32();
         self.release_i32();
         self.release_i32();
-        Ok(Some(SliceTy::Option(self.types.intern(INT))))
+        Ok(Some(Lowered::owned(SliceTy::Option(self.types.intern(INT)))))
     }
 
-    fn lower_list_contains(&mut self, xs: &IrExpr, x: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_list_contains(&mut self, xs: &IrExpr, x: &IrExpr) -> ArmResult {
         let got = self.lower_list_index_of(xs, x)?;
         let _ = got;
         self.f.instructions().i32_const(0).i32_ne();
-        Ok(Some(BOOL))
+        Ok(Some(Lowered::scalar(BOOL)))
     }
 
-    fn lower_list_length_arm(&mut self, xs: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
-        match self.lower(xs, None)? {
+    fn lower_list_length_arm(&mut self, xs: &IrExpr) -> ArmResult {
+        match self.lower_arg(xs, None, ArgMode::Borrow)? {
             SliceTy::List(h) => {
                 let stride = self.types.el(h).slot_size() as i32;
                 self.f
@@ -341,68 +354,15 @@ impl Emitter<'_> {
                     .i32_const(stride)
                     .i32_div_u()
                     .i64_extend_i32_u();
-                Ok(Some(INT))
+                Ok(Some(Lowered::scalar(INT)))
             }
             other => unsup(&format!("list-length-of:{other:?}")),
         }
     }
 
-    fn lower_list_flat_map(&mut self, xs: &IrExpr, cb: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
-        let (params, body) = self.hof_lambda(cb, 1)?;
-        let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
-        let hs = self.hold_i32()?;
-        let hacc = self.hold_i32()?;
-        self.f.instructions().i32_const(0).call(F_ALLOC).local_set(hacc);
-        self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
-        self.hof_elem_into(elem, bh, ch, ih, params[0]);
-        let got = self.lower(body, None)?;
-        let SliceTy::List(bi) = got else {
-            return unsup(&format!("flat-map-body:{got:?}"));
-        };
-        self.f.instructions().local_set(hs);
-        self.f.instructions().local_get(hacc).local_get(hs).call(F_CONCAT);
-        self.f.instructions().local_set(hacc);
-        self.hof_step(ih);
-        self.f.instructions().local_get(hacc);
-        for _ in 0..5 {
-            self.release_i32();
-        }
-        Ok(Some(SliceTy::List(bi)))
-    }
 
-    fn lower_list_filter_map(&mut self, xs: &IrExpr, cb: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
-        let (params, body) = self.hof_lambda(cb, 1)?;
-        let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
-        let hr = self.hold_i32()?;
-        let hacc = self.hold_i32()?;
-        self.f.instructions().i32_const(0).call(F_ALLOC).local_set(hacc);
-        self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
-        self.hof_elem_into(elem, bh, ch, ih, params[0]);
-        let got = self.lower(body, None)?;
-        let SliceTy::Option(oi) = got else {
-            return unsup(&format!("filter-map-body:{got:?}"));
-        };
-        let b = self.types.el(oi);
-        self.f.instructions().local_tee(hr).if_(BlockType::Empty);
-        self.f.instructions().local_get(hacc).local_get(hr);
-        self.load_ty_slot(b, almide_layout::OPTION_FIELD);
-        if b.val_type() == ValType::F64 {
-            self.f.instructions().i64_reinterpret_f64();
-        }
-        let push = match b.slot_size() {
-            8 => F_LIST_PUSH_8,
-            _ => F_LIST_PUSH_4,
-        };
-        self.f.instructions().call(push).local_set(hacc).end();
-        self.hof_step(ih);
-        self.f.instructions().local_get(hacc);
-        for _ in 0..5 {
-            self.release_i32();
-        }
-        Ok(Some(SliceTy::List(self.types.intern(b))))
-    }
 
-    fn lower_list_fold_arm(&mut self, xs: &IrExpr, init: &IrExpr, cb: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_list_fold_arm(&mut self, xs: &IrExpr, init: &IrExpr, cb: &IrExpr) -> ArmResult {
         if let Some(out) = self.lower_list_fold_fused(xs, init, cb)? {
             return Ok(out);
         }
@@ -414,7 +374,7 @@ impl Emitter<'_> {
         &mut self,
         func: &str,
         xs: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         match func {
             "len" => self.lower_list_len_arm(xs),
             "length" => self.lower_list_length_arm(xs),
@@ -435,7 +395,7 @@ impl Emitter<'_> {
         func: &str,
         a: &IrExpr,
         b: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         match func {
             "get" => self.lower_list_get_arm(a, b),
             "join" => self.lower_list_join_arm(a, b),
@@ -463,7 +423,7 @@ impl Emitter<'_> {
         a: &IrExpr,
         b: &IrExpr,
         c: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         match func {
             "get_or" => self.lower_list_get_or(a, b, c),
             "set" => self.lower_list_set(a, b, c),
@@ -506,7 +466,7 @@ impl Emitter<'_> {
         &mut self,
         xs: &IrExpr,
     ) -> Result<(SliceTy, u32, u32, u32), EmitError> {
-        let elem = match self.lower(xs, None)? {
+        let elem = match self.lower_arg(xs, None, ArgMode::Borrow)? {
             // Set is layout-identical; order-preserving HOFs apply as-is.
             SliceTy::List(h) | SliceTy::Set(h) => self.types.el(h),
             other => return unsup(&format!("list-hof-of:{other:?}")),
@@ -549,10 +509,17 @@ impl Emitter<'_> {
         &mut self,
         xs: &IrExpr,
         cb: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         // A FN-VALUE callback (a HOF param forwarded to list.map, #653)
-        // has no body to inline — it call_indirects per element.
-        if !matches!(&cb.kind, IrExprKind::Lambda { .. }) {
+        // has no body to inline — it call_indirects per element. A lambda
+        // whose body still PROPAGATES takes the same route (#1406): its
+        // `!`s belong to the closure's own Result channel (`fan.settle`'s
+        // canonical `(p) => f(p)!` arrives here as `ok(unwrap(f(p)))`, and
+        // a compound body keeps its markers outright), and inlining it
+        // routed them into the ENCLOSING frame — the err escaped `main`
+        // where native captured it into the element's Result (the #1806
+        // class, on the mapper heads).
+        if !matches!(&cb.kind, IrExprKind::Lambda { .. }) || crate::fs_meta::body_propagates(cb) {
             return self.lower_list_map_fnvalue(xs, cb);
         }
         let (params, body) = self.hof_lambda(cb, 1)?;
@@ -580,6 +547,10 @@ impl Emitter<'_> {
             .i32_mul()
             .i32_add();
         self.lower(body, Some(u))?;
+        // A pass-through body (`(x) => x`, a field of x) hands back a
+        // VIEW of the source's element: the result spine is a holder and
+        // takes the share here (#2010 stage 2b).
+        self.rc_share_guard(body, u);
         self.store_ty_slot(u, 0);
         self.hof_step(ih);
         self.f.instructions().local_get(rh);
@@ -587,14 +558,14 @@ impl Emitter<'_> {
         self.release_i32();
         self.release_i32();
         self.release_i32();
-        Ok(Some(SliceTy::List(self.types.intern(u))))
+        Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(u)))))
     }
 
     pub(crate) fn lower_list_filter(
         &mut self,
         xs: &IrExpr,
         cb: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let (params, body) = self.hof_lambda(cb, 1)?;
         let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
         let stride = elem.slot_size() as i32;
@@ -630,24 +601,23 @@ impl Emitter<'_> {
         // len = cap = kept*stride
         {
             let mut i = self.f.instructions();
+            // LEN = kept; CAP stays what $alloc wrote — $free files a block
+            // by its CAP, and a cap shrunk to the kept count filed the
+            // result in a smaller class than the one the next filter
+            // draws from (64 B per call in the ownership matrix, #2005).
             i.local_get(rh).local_get(hw).i32_const(stride).i32_mul().i32_store(len_memarg());
-            i.local_get(rh)
-                .local_get(hw)
-                .i32_const(stride)
-                .i32_mul()
-                .i32_store(MemArg {
-                    offset: u64::from(almide_layout::CAP.offset),
-                    align: 2,
-                    memory_index: 0,
-                });
-            i.local_get(rh);
         }
+        // The kept elements are COPIES of the source's handles: the
+        // result spine takes its own credits (#2010 stage 2b) — after
+        // LEN is final, the walk reads it.
+        self.emit_inc_elems(rh, elem);
+        self.f.instructions().local_get(rh);
         self.release_i32();
         self.release_i32();
         self.release_i32();
         self.release_i32();
         self.release_i32();
-        Ok(Some(SliceTy::List(self.types.intern(elem))))
+        Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(elem)))))
     }
 
     pub(crate) fn lower_list_fold(
@@ -655,25 +625,33 @@ impl Emitter<'_> {
         xs: &IrExpr,
         init: &IrExpr,
         cb: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let (params, body) = self.hof_lambda(cb, 2)?;
         let (acc_p, x_p) = (params[0], params[1]);
         let Some(b) = slice_ty_of(&init.ty, self.types) else {
             return unsup(&format!("list-fold-acc:{}", ty_name(&init.ty)));
         };
-        self.lower(init, Some(b))?;
+        self.lower_arg(init, Some(b), ArgMode::Retain)?;
         self.f.instructions().local_set(acc_p);
         let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.hof_elem_into(elem, bh, ch, ih, x_p);
         self.lower(body, Some(b))?;
+        // The accumulator OWNS one credit on every step: a borrowed body
+        // result (a captured var, the accumulator itself) takes its share,
+        // and the previous accumulator is released before the rebind
+        // (fuzz 20260910: `fold(xs, y, (a, x) => y)` released y twice).
+        self.rc_share_guard(body, b);
+        if let Some(dec) = self.elem_is_handle(b).then(|| self.dec_fn_of(b)) {
+            self.f.instructions().local_get(acc_p).call(dec);
+        }
         self.f.instructions().local_set(acc_p);
         self.hof_step(ih);
         self.f.instructions().local_get(acc_p);
         self.release_i32();
         self.release_i32();
         self.release_i32();
-        Ok(Some(b))
+        Ok(Some(Lowered::owned(b)))
     }
 
     /// `list.get_or(xs, i, d)`: (xs.get(i)) ?? d, inlined via the get
@@ -683,27 +661,35 @@ impl Emitter<'_> {
         xs: &IrExpr,
         idx: &IrExpr,
         default: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
-        let elem = match self.lower(xs, None)? {
+    ) -> ArmResult {
+        let elem = match self.lower_arg(xs, None, ArgMode::Borrow)? {
             SliceTy::List(h) => self.types.el(h),
             other => return unsup(&format!("list-get-of:{other:?}")),
         };
-        self.lower(idx, Some(INT))?;
+        self.lower_arg(idx, Some(INT), ArgMode::Borrow)?;
         let helper = match elem.slot_size() {
             8 => F_LIST_GET_8,
             _ => F_LIST_GET_4,
         };
-        self.f
-            .instructions()
-            .call(helper)
-            .local_tee(self.scr_i32_local)
-            .i32_eqz()
-            .if_(BlockType::Result(elem.val_type()));
-        self.lower(default, Some(elem))?;
-        self.f.instructions().else_().local_get(self.scr_i32_local);
+        // The default ALWAYS evaluates, after the lookup and before the
+        // select — native argument order (#1919): an in-branch lowering
+        // skipped its effects (and its aborts) on a hit, so
+        // `list.get_or(xs, 0, int.clamp(5, 1, 0))` died on native and ran
+        // on wasm. The lookup's Option handle waits in a held local; the
+        // default's own lowering may use the scratch local.
+        let hres = self.hold_i32()?;
+        self.f.instructions().call(helper).local_set(hres);
+        let hd = self.hold_for(elem)?;
+        self.lower_arg(default, Some(elem), ArgMode::Retain)?;
+        self.f.instructions().local_set(hd);
+        self.f.instructions().local_get(hres).i32_eqz().if_(BlockType::Result(elem.val_type()));
+        self.f.instructions().local_get(hd);
+        self.f.instructions().else_().local_get(hres);
         self.load_ty_slot(elem, almide_layout::OPTION_FIELD);
         self.f.instructions().end();
-        Ok(Some(elem))
+        self.release_for(elem);
+        self.release_i32();
+        Ok(Some(Lowered::view(elem)))
     }
 }
 
@@ -715,7 +701,7 @@ impl Emitter<'_> {
         func: &str,
         a: &IrExpr,
         b: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         match func {
             "take_while" => self.lower_list_take_while(a, b),
             "drop_while" => self.lower_list_drop_while(a, b),

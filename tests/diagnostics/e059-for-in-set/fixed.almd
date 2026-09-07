@@ -1,0 +1,7 @@
+// The fix: materialize the set as a List with set.to_list.
+fn main() -> Unit = {
+  let s = set.from_list([1, 2, 3])
+  for x in set.to_list(s) {
+    println(int.to_string(x))
+  }
+}

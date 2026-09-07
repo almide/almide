@@ -1,0 +1,57 @@
+// @contract: C-344
+// `guard c else err(m)!` in an effect fn declared `-> T`, with a `!`- or
+// `??`-bound Result before it and a plain-fn call after it, behaves the same
+// on every leg — whether the block is the fn body or a CALL ARGUMENT, and
+// whether the guard condition is constant or not. Three defects hid behind
+// this one shape (composition fuzz family, seed 7, #1968):
+//   - the structural leg lowered the guard's `err(m)!` as an UNWRAP (payload
+//     type) against the fn's Result return and walled with a type mismatch,
+//     so the default build fell back to the incumbent;
+//   - the incumbent hoisted an argument block out of its call AFTER the guard
+//     restructure had run, so a guard inside `f({ ... })` reached the
+//     lowering raw and emitted the scalar continuation against the Result ABI
+//     (invalid wasm);
+//   - the incumbent's ok-wrap pass declined EVERY named call in return
+//     position on the theory that it already yields the carrier — true of an
+//     effect sibling, false of `big(g)` — so `{ let g = r!; big(g) }` returned
+//     a raw i64 where an i32 carrier was promised (invalid wasm).
+fn big(x: Int) -> Int = string.len(int.to_string(x)) * 0 + x
+
+fn w_ok(x: Int) -> Result[Int, String] = ok(x)
+
+effect fn arg_block(n: Int) -> Int = big({
+  let g = w_ok(n) ?? 6
+  guard g > 0 else err("g")!
+  g
+})
+
+effect fn arg_block_bang(n: Int) -> Int = big({
+  let g = w_ok(n)!
+  guard 5 > 0 else err("const")!
+  g
+})
+
+effect fn body_block(n: Int) -> Int = {
+  let g = w_ok(n)!
+  guard g > 0 else err("g")!
+  big(g)
+}
+
+effect fn bang_then_call(n: Int) -> Int = {
+  let g = w_ok(n)!
+  big(g)
+}
+
+fn render(r: Result[Int, String]) -> String = match r {
+  ok(v) => "ok ${v}",
+  err(e) => "err ${e}",
+}
+
+effect fn main() -> Unit = {
+  println("a5=${render(arg_block(5))}")
+  println("a0=${render(arg_block(0))}")
+  println("b5=${render(arg_block_bang(5))}")
+  println("c5=${render(body_block(5))}")
+  println("c0=${render(body_block(0))}")
+  println("d5=${render(bang_then_call(5))}")
+}

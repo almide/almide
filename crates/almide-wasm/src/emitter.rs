@@ -17,19 +17,62 @@ pub(crate) struct Emitter<'a> {
     /// through a plain Bytes param are the caller-visibility contract
     /// (bytes_param_writeback), exactly the pre-share behavior.
     pub(crate) rc_param_ceiling: u32,
-    /// Local indices of the DROPPABLE params (env_shift applied) — the
-    /// epilogue's release set, ALSO released at return_call sites: a tail
-    /// call REPLACES the frame, so the epilogue never runs there and a
-    /// droppable param (a Str accumulator in TCO) leaked every hop
-    /// (spec/churn/string_accumulator_churn's grow_tco half OOM'd at the
-    /// commissioning). Args are +1'd by rc_arg_guard BEFORE this release,
-    /// so a pass-through param survives its own dec.
-    pub(crate) rc_droppable_params: Vec<u32>,
+    /// Whether a `return_call` site may release ANY frame credit (params
+    /// and rc_owned locals alike): the raw-address rule (func.rs
+    /// `populate_tail_release_set`) — a body that derives no raw pointer.
+    /// A prim-using body keeps every release on the (dead) epilogue, i.e.
+    /// leaks rather than frees a block a raw view may still read (#1988:
+    /// releasing a display helper's Str local before its tail call
+    /// printed freelist bytes in examples/lisp.almd). Consumed by
+    /// exit_plan.rs only.
+    pub(crate) tail_release_allowed: bool,
+    /// Local indices of the DROPPABLE params (env_shift applied) — with
+    /// `rc_owned`, the frame's credits: every exit edge (exit_plan.rs)
+    /// partitions them into released ⊎ carried. A tail call REPLACES the
+    /// frame, so the epilogue never runs there and a droppable param (a
+    /// Str accumulator in TCO) leaked every hop before the tail-site
+    /// release (spec/churn/string_accumulator_churn's grow_tco half
+    /// OOM'd at the commissioning); the error and guard exits leaked
+    /// them until #2001. Args are +1'd by rc_arg_guard BEFORE a tail
+    /// release, so a pass-through param survives its own dec.
+    pub(crate) rc_frame_params: Vec<u32>,
+    /// This fn's own wasm index (see FnPlan::self_index).
+    pub(crate) self_index: Option<u32>,
     /// Locals the Bind/Assign routes made OWNERS of a droppable block
     /// (RC-3): exactly these get the fall-through epilogue dec. Pattern
     /// and loop binds never enter — they borrow their subject's
     /// interior. BTreeSet: the dec order must be deterministic.
     pub(crate) rc_owned: std::collections::BTreeSet<u32>,
+    /// The type each owned local (and droppable param) holds — the typed
+    /// release at every exit (`dec_fn_of_local`, #2010 stage 2b).
+    pub(crate) owned_ty: std::collections::HashMap<u32, SliceTy>,
+    /// The module-call nodes whose result the caller OWNS (#1990 / #2004):
+    /// the registry-table path (callee-owned convention) and the native
+    /// arms that DECLARE an owned result (arm.rs) mark the call's `CallTarget` node
+    /// here as they complete; `rc_owned_result` looks the bound / passed
+    /// / returned expression's tail call up by that identity — exact
+    /// through any `{ let t = …; op(t) }` wrapping (arg_temps.rs) and any
+    /// nesting, where a completion-order stamp was not.
+    pub(crate) owned_call_marks: std::collections::HashSet<usize>,
+    /// Temporaries the arms of the module call being lowered BORROWED
+    /// (`lower_arg`, arm.rs): released by the enclosing `arm_scope`. Each
+    /// entry is a local of the BORROW pool — disjoint from the scratch
+    /// pools, because an arm releases and re-acquires scratch holds
+    /// between the argument's lowering and the op's end (a hold taken
+    /// there would land on the temporary's slot: fs_write_errno's
+    /// `rename` decremented its own Result block, 2026-09-07).
+    pub(crate) borrowed_temps: Vec<(u32, SliceTy)>,
+    /// First local of the borrow pool (`BORROW_POOL` i32 slots).
+    pub(crate) borrow_base: u32,
+    /// Every exit `emit_exit` wrote, with the byte offset it started at —
+    /// the E083 validator (exit_plan.rs) reads the bytes back against it.
+    pub(crate) exit_ledger: Vec<crate::exit_plan::ExitRecord>,
+    // NOTE: rc_owned and rc_frame_params are BOTH dec'd by the
+    // epilogue — a local in the two sets at once is a double free. Use
+    // rc_own(), never a raw insert (#1770: a mut-param writeback's
+    // Assign made the PARAM an "owner", the epilogue dec'd it twice,
+    // and the freed-but-returned buffer's freelist link zeroed its
+    // first payload word).
     pub(crate) table: &'a FnTable,
     pub(crate) types: &'a TypeTable,
     pub(crate) calls: &'a mut HashSet<usize>,
@@ -111,6 +154,9 @@ pub(crate) struct Emitter<'a> {
 pub(crate) const HOLD_I32_POOL: u32 = 24;
 pub(crate) const HOLD_I64_POOL: u32 = 16;
 pub(crate) const HOLD_F64_POOL: u32 = 8;
+/// Borrowed argument temporaries in flight (arm.rs `lower_arg`): one per
+/// droppable call-result argument of the module calls currently nested.
+pub(crate) const BORROW_POOL: u32 = 8;
 
 impl Emitter<'_> {
     pub(crate) fn hold_i32(&mut self) -> Result<u32, EmitError> {
@@ -384,8 +430,8 @@ impl Emitter<'_> {
                 // The slice SYNTAX `xs[a..b]` desugars to this runtime
                 // symbol — one impl with `list.slice` (as in native rt).
                 if symbol.as_str() == "almide_rt_list_slice" && args.len() == 3 {
-                    match self.lower_list_call("slice", args, None)? {
-                        Some(t) => t,
+                    match self.arm_scope(|em| em.lower_list_call("slice", args, None))? {
+                        Some(t) => t.ty,
                         None => return unsup("rt:list-slice-unit"),
                     }
                 } else if let Some(t) = self.lower_budget_prim(symbol.as_str(), args)? {
@@ -547,8 +593,8 @@ impl Emitter<'_> {
             // (the interp's map_lookup contract).
             IrExprKind::MapAccess { object, key } => {
                 let args = [(**object).clone(), (**key).clone()];
-                match self.lower_map_call("get", &args, want)? {
-                    Some(t) => t,
+                match self.arm_scope(|em| em.lower_map_call("get", &args, want))? {
+                    Some(t) => t.ty,
                     None => return unsup("map-access-void"),
                 }
             }
