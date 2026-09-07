@@ -43,19 +43,14 @@ pub(crate) struct Emitter<'a> {
     /// and loop binds never enter — they borrow their subject's
     /// interior. BTreeSet: the dec order must be deterministic.
     pub(crate) rc_owned: std::collections::BTreeSet<u32>,
-    /// #1990: which module call handed back an OWNED result. Every
-    /// `lower_module_call` entry takes the next sequence number and keeps
-    /// it on the stack while its arguments lower; the registry TABLE path
-    /// (`lower_linked_call`, the only module route with the callee-owned
-    /// convention) stamps the enclosing call's number here. A bind /
-    /// assign / return route that captured the counter BEFORE lowering
-    /// its rhs asks `rc_owned_result(e, seq0)`: the rhs call was entry
-    /// `seq0 + 1`, so the stamp equals it exactly when the rhs itself
-    /// took the table path — a special form (its own conventions, the
-    /// conservative +1 stays) or a nested table call never matches.
-    pub(crate) module_call_seq: u32,
-    pub(crate) module_call_stack: Vec<u32>,
-    pub(crate) table_result_seq: Option<u32>,
+    /// The module-call nodes whose result the caller OWNS (#1990 / #2004):
+    /// the registry-table path (callee-owned convention) and the native
+    /// arms that DECLARE an owned result (arm.rs) mark the call's `CallTarget` node
+    /// here as they complete; `rc_owned_result` looks the bound / passed
+    /// / returned expression's tail call up by that identity — exact
+    /// through any `{ let t = …; op(t) }` wrapping (arg_temps.rs) and any
+    /// nesting, where a completion-order stamp was not.
+    pub(crate) owned_call_marks: std::collections::HashSet<usize>,
     // NOTE: rc_owned and rc_frame_params are BOTH dec'd by the
     // epilogue — a local in the two sets at once is a double free. Use
     // rc_own(), never a raw insert (#1770: a mut-param writeback's
@@ -417,7 +412,7 @@ impl Emitter<'_> {
                 // symbol — one impl with `list.slice` (as in native rt).
                 if symbol.as_str() == "almide_rt_list_slice" && args.len() == 3 {
                     match self.lower_list_call("slice", args, None)? {
-                        Some(t) => t,
+                        Some(t) => t.ty,
                         None => return unsup("rt:list-slice-unit"),
                     }
                 } else if let Some(t) = self.lower_budget_prim(symbol.as_str(), args)? {
@@ -580,7 +575,7 @@ impl Emitter<'_> {
             IrExprKind::MapAccess { object, key } => {
                 let args = [(**object).clone(), (**key).clone()];
                 match self.lower_map_call("get", &args, want)? {
-                    Some(t) => t,
+                    Some(t) => t.ty,
                     None => return unsup("map-access-void"),
                 }
             }

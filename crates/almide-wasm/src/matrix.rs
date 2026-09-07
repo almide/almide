@@ -22,7 +22,7 @@ const MAX_ELEMS: i64 = 1 << 28;
 
 impl Emitter<'_> {
     /// `matrix.*` module calls (stage 1 set). Ok(None) = not handled here.
-    fn lower_matrix_fill_ctor(&mut self, func: &str, r: &IrExpr, c: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_matrix_fill_ctor(&mut self, func: &str, r: &IrExpr, c: &IrExpr) -> ArmResult {
         Ok({
             let ones = func == "ones";
             self.lower(r, Some(INT))?;
@@ -131,11 +131,11 @@ impl Emitter<'_> {
             self.release_i32();
             self.release_i64();
             self.release_i64();
-            Some(SliceTy::Matrix)
+            Some(Lowered::owned(SliceTy::Matrix))
         })
     }
 
-    fn lower_matrix_shape(&mut self, m: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_matrix_shape(&mut self, m: &IrExpr) -> ArmResult {
         Ok({
             self.lower(m, Some(SliceTy::Matrix))?;
             let hm = self.hold_i32()?;
@@ -157,11 +157,11 @@ impl Emitter<'_> {
             let _ = i;
             self.release_i32();
             self.release_i32();
-            Some(SliceTy::Tuple(pair))
+            Some(Lowered::owned(SliceTy::Tuple(pair)))
         })
     }
 
-    fn lower_matrix_dims_read(&mut self, func: &str, m: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_matrix_dims_read(&mut self, func: &str, m: &IrExpr) -> ArmResult {
         Ok({
             let off = if func == "rows" { 0 } else { 4 };
             self.lower(m, Some(SliceTy::Matrix))?;
@@ -169,11 +169,11 @@ impl Emitter<'_> {
                 .instructions()
                 .i32_load(slot_memarg(off))
                 .i64_extend_i32_u();
-            Some(INT)
+            Some(Lowered::scalar(INT))
         })
     }
 
-    fn lower_matrix_get(&mut self, m: &IrExpr, r: &IrExpr, c: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_matrix_get(&mut self, m: &IrExpr, r: &IrExpr, c: &IrExpr) -> ArmResult {
         Ok({
             self.lower(m, Some(SliceTy::Matrix))?;
             let hm = self.hold_i32()?;
@@ -215,11 +215,11 @@ impl Emitter<'_> {
             self.release_i64();
             self.release_i64();
             self.release_i32();
-            Some(FLOAT)
+            Some(Lowered::scalar(FLOAT))
         })
     }
 
-    fn lower_matrix_from_lists(&mut self, rows: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_matrix_from_lists(&mut self, rows: &IrExpr) -> ArmResult {
         Ok({
             let fh = self.types.intern(FLOAT);
             let inner = self.types.intern(SliceTy::List(fh));
@@ -311,11 +311,11 @@ impl Emitter<'_> {
             for _ in 0..9 {
                 self.release_i32();
             }
-            Some(SliceTy::Matrix)
+            Some(Lowered::owned(SliceTy::Matrix))
         })
     }
 
-    fn lower_matrix_to_lists(&mut self, m: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_matrix_to_lists(&mut self, m: &IrExpr) -> ArmResult {
         Ok({
             self.lower(m, Some(SliceTy::Matrix))?;
             let hm = self.hold_i32()?;
@@ -371,11 +371,11 @@ impl Emitter<'_> {
             }
             let fh = self.types.intern(FLOAT);
             let inner = self.types.intern(SliceTy::List(fh));
-            Some(SliceTy::List(inner))
+            Some(Lowered::owned(SliceTy::List(inner)))
         })
     }
 
-    fn lower_matrix_transpose(&mut self, m: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_matrix_transpose(&mut self, m: &IrExpr) -> ArmResult {
         Ok({
             self.lower(m, Some(SliceTy::Matrix))?;
             let hm = self.hold_i32()?;
@@ -446,11 +446,11 @@ impl Emitter<'_> {
             for _ in 0..7 {
                 self.release_i32();
             }
-            Some(SliceTy::Matrix)
+            Some(Lowered::owned(SliceTy::Matrix))
         })
     }
 
-    fn lower_matrix_row_dot(&mut self, m: &IrExpr, r: &IrExpr, v: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_matrix_row_dot(&mut self, m: &IrExpr, r: &IrExpr, v: &IrExpr) -> ArmResult {
         Ok({
             self.lower(m, Some(SliceTy::Matrix))?;
             let hm = self.hold_i32()?;
@@ -519,7 +519,7 @@ impl Emitter<'_> {
             self.release_i32();
             self.release_i64();
             self.release_i32();
-            Some(FLOAT)
+            Some(Lowered::scalar(FLOAT))
         })
     }
 
@@ -527,7 +527,7 @@ impl Emitter<'_> {
         &mut self,
         func: &str,
         args: &[IrExpr],
-    ) -> Result<Option<Option<SliceTy>>, EmitError> {
+    ) -> Result<Option<Option<Lowered>>, EmitError> {
         let out = match (func, args) {
             ("zeros" | "ones", [r, c]) => self.lower_matrix_fill_ctor(func, r, c)?,
             ("shape", [m]) => self.lower_matrix_shape(m)?,

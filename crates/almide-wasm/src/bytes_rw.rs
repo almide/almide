@@ -20,7 +20,7 @@ impl Emitter<'_> {
         b: &IrExpr,
         pos: &IrExpr,
         count: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let lossy = self.work.helper(crate::work::Helper::Utf8Lossy);
         self.lower(b, Some(BYTES))?;
         let hb = self.hold_i32()?;
@@ -112,7 +112,7 @@ impl Emitter<'_> {
         }
         self.release_i64();
         self.release_i32();
-        Ok(Some(SliceTy::List(self.types.intern(STR))))
+        Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(STR)))))
     }
 
     /// Append `k` big-endian bytes of the value (LSB-only when k = 1 —
@@ -124,7 +124,7 @@ impl Emitter<'_> {
         v: &IrExpr,
         k: i32,
         float: bool,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         self.lower(b, Some(BYTES))?;
         let hb = self.hold_i32()?;
         self.f.instructions().local_set(hb);
@@ -155,12 +155,12 @@ impl Emitter<'_> {
         self.release_i32();
         self.release_i64();
         self.release_i32();
-        Ok(Some(BYTES))
+        Ok(Some(Lowered::owned(BYTES)))
     }
     /// chunks: `b.chunks(size)` — size <= 0 yields the empty list; a
     /// size past the buffer is one whole chunk (the i64 clamp precedes
     /// every i32 narrowing).
-    pub(crate) fn lower_bytes_chunks(&mut self, b: &IrExpr, size: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    pub(crate) fn lower_bytes_chunks(&mut self, b: &IrExpr, size: &IrExpr) -> ArmResult {
         self.lower(b, Some(BYTES))?;
         let hb = self.hold_i32()?;
         self.f.instructions().local_set(hb);
@@ -218,7 +218,7 @@ impl Emitter<'_> {
             self.release_i32();
         }
         self.release_i64();
-        Ok(Some(SliceTy::List(self.types.intern(BYTES))))
+        Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(BYTES)))))
     }
     /// C-229 totality: a read DEFAULTS and a write NO-OPS when the window
     /// [pos, pos+width) leaves the buffer — negative pos included, never a
@@ -376,7 +376,7 @@ impl Emitter<'_> {
         &mut self,
         func: &str,
         args: &[IrExpr],
-    ) -> Result<Option<Option<SliceTy>>, EmitError> {
+    ) -> Result<Option<Option<Lowered>>, EmitError> {
         let width_of = |f: &str| {
             if f.contains("16") {
                 2
@@ -391,9 +391,9 @@ impl Emitter<'_> {
                 self.lower_bytes_read_bits(b, i, 1, false, false)?;
                 if func == "read_bool" {
                     self.f.instructions().i64_const(0).i64_ne();
-                    return Ok(Some(Some(BOOL)));
+                    return Ok(Some(Some(Lowered::scalar(BOOL))));
                 }
-                Ok(Some(Some(INT)))
+                Ok(Some(Some(Lowered::scalar(INT))))
             }
             ("read_u16_le" | "read_u16_be" | "read_i16_le" | "read_i16_be" | "read_u32_le"
             | "read_u32_be" | "read_i32_le" | "read_i32_be" | "read_i64_le" | "read_i64_be", [b, i]) => {
@@ -404,7 +404,7 @@ impl Emitter<'_> {
                     func.starts_with("read_i"),
                     func.ends_with("_be"),
                 )?;
-                Ok(Some(Some(INT)))
+                Ok(Some(Some(Lowered::scalar(INT))))
             }
             ("set_at" | "set_u8", [b, i, v]) => {
                 self.lower_bytes_set(b, i, v, 1, false, false)?;
@@ -427,13 +427,13 @@ impl Emitter<'_> {
                 } else {
                     self.f.instructions().f64_reinterpret_i64();
                 }
-                Ok(Some(Some(FLOAT)))
+                Ok(Some(Some(Lowered::scalar(FLOAT))))
             }
             // f16 bits through the same total window; 0 bits = 0.0.
             ("read_f16_le", [b, i]) => {
                 self.lower_bytes_read_bits(b, i, 2, false, false)?;
                 self.f.instructions().i32_wrap_i64().call(F_F16_TO_F64);
-                Ok(Some(Some(FLOAT)))
+                Ok(Some(Some(Lowered::scalar(FLOAT))))
             }
             _ => Ok(None),
         }

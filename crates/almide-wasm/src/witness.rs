@@ -373,7 +373,6 @@ impl Emitter<'_> {
         idx: u32,
         declared: SliceTy,
         value: &almide_ir::IrExpr,
-        seq0: u32,
     ) {
         let src_local = if let almide_ir::IrExprKind::Var { id } = &value.kind {
             self.locals.get(id).map(|&(l, _)| l)
@@ -383,7 +382,7 @@ impl Emitter<'_> {
         // Mirrors the route exactly: an OWNED result (fresh, or a user-fn
         // call's handed-over credit, #1986) is a new object; a Map/Set Var
         // took `$block_copy`.
-        let owned = self.rc_owned_result(value, seq0);
+        let owned = self.rc_owned_result(value);
         let Some(w) = self.witness.as_mut() else { return };
         if owned || (src_local.is_some() && matches!(declared, SliceTy::Map(..) | SliceTy::Set(_))) {
             w.bind_fresh(idx);
@@ -400,7 +399,7 @@ impl Emitter<'_> {
     /// credit moves into the callee; a fresh temporary is born and moves.
     /// Non-droppable arguments have no RC site. Anything else under an
     /// armed recorder is a gate/hook disagreement — poison.
-    pub(crate) fn witness_arg(&mut self, e: &almide_ir::IrExpr, ty: SliceTy, seq0: u32) {
+    pub(crate) fn witness_arg(&mut self, e: &almide_ir::IrExpr, ty: SliceTy) {
         if self.witness.is_none() || !self.rc_droppable(ty) {
             return;
         }
@@ -412,7 +411,7 @@ impl Emitter<'_> {
         // Mirrors rc_arg_guard exactly: an OWNED argument (fresh literal
         // or a call result carrying its one credit) is born and moves
         // (`im`); a Var shares and moves (`am`).
-        let fresh = self.rc_owned_result(e, seq0);
+        let fresh = self.rc_owned_result(e);
         let Some(w) = self.witness.as_mut() else { return };
         match src_local {
             Some(l) if w.arg_share_move(l) => {}

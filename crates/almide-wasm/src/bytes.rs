@@ -1,9 +1,10 @@
 //! Bytes — the byte-packed buffer surface (String's layout twin). The
 //! oracle allows in-place `set_*` (a `mut`/buffer API); under the
 //! bind-deep-copy doctrine a local's block is uniquely its own, so the
-//! stores are unobservable through aliases. `bytes.new` relies on the
-//! bump allocator's zero guarantee (fresh pages are zero and the bump
-//! head never reuses).
+//! stores are unobservable through aliases. `bytes.new` zero-fills its
+//! payload itself: a block may come off a free list, so nothing may
+//! assume fresh memory (the bump path's zero pages were never a
+//! guarantee once frees became real, #2004).
 
 use almide_ir::{IrExpr, IrExprKind};
 use wasm_encoder::{BlockType, MemArg, ValType};
@@ -28,7 +29,7 @@ pub(crate) fn byte_k(k: u8) -> MemArg {
 
 impl Emitter<'_> {
 
-    fn lower_bytes_new(&mut self, n: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_bytes_new(&mut self, n: &IrExpr) -> ArmResult {
         self.lower(n, Some(INT))?;
         // native `len.max(0)` — a NEGATIVE size is the empty buffer,
         // never a wrapped 4 GiB ask.
@@ -48,11 +49,26 @@ impl Emitter<'_> {
         i.end();
         i.local_get(h).i32_wrap_i64().call(F_ALLOC);
         let _ = i;
+        // `bytes.new(n)` IS n zero bytes. The block may come off a free
+        // list with a previous life's contents — the "bump memory is
+        // zero" assumption held only while every block leaked (#2004
+        // made the frees real and `bytes_writer_family` printed a stale
+        // 32 in a fresh buffer's last byte). Fill, never assume.
+        let hb = self.hold_i32()?;
+        let mut i = self.f.instructions();
+        i.local_set(hb);
+        i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+        i.i32_const(0);
+        i.local_get(h).i32_wrap_i64();
+        i.memory_fill(0);
+        i.local_get(hb);
+        let _ = i;
+        self.release_i32();
         self.release_i64();
-        Ok(Some(BYTES))
+        Ok(Some(Lowered::owned(BYTES)))
     }
 
-    fn lower_bytes_get(&mut self, b: &IrExpr, idx: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_bytes_get(&mut self, b: &IrExpr, idx: &IrExpr) -> ArmResult {
         self.lower(b, Some(BYTES))?;
         let bh = self.hold_i32()?;
         self.f.instructions().local_set(bh);
@@ -75,10 +91,10 @@ impl Emitter<'_> {
         self.release_i32();
         self.release_i64();
         self.release_i32();
-        Ok(Some(SliceTy::Option(self.types.intern(INT))))
+        Ok(Some(Lowered::owned(SliceTy::Option(self.types.intern(INT)))))
     }
 
-    fn lower_bytes_set_arm(&mut self, b: &IrExpr, idx: &IrExpr, v: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_bytes_set_arm(&mut self, b: &IrExpr, idx: &IrExpr, v: &IrExpr) -> ArmResult {
         self.lower(b, Some(BYTES))?;
         self.f.instructions().call(F_BLOCK_COPY);
         let bh = self.hold_i32()?;
@@ -100,10 +116,10 @@ impl Emitter<'_> {
         self.release_i64();
         self.release_i64();
         self.release_i32();
-        Ok(Some(BYTES))
+        Ok(Some(Lowered::view(BYTES)))
     }
 
-    fn lower_bytes_slice(&mut self, b: &IrExpr, s: &IrExpr, e: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_bytes_slice(&mut self, b: &IrExpr, s: &IrExpr, e: &IrExpr) -> ArmResult {
         self.lower(b, Some(BYTES))?;
         let hb = self.hold_i32()?;
         self.f.instructions().local_set(hb);
@@ -145,10 +161,10 @@ impl Emitter<'_> {
         self.release_i64();
         self.release_i64();
         self.release_i32();
-        Ok(Some(BYTES))
+        Ok(Some(Lowered::owned(BYTES)))
     }
 
-    fn lower_bytes_fill(&mut self, b: &IrExpr, v: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_bytes_fill(&mut self, b: &IrExpr, v: &IrExpr) -> ArmResult {
         let recv = self.bytes_recv("fill", b)?;
         self.lower(b, Some(BYTES))?;
         let hb = self.hold_i32()?;
@@ -172,24 +188,24 @@ impl Emitter<'_> {
         Ok(None)
     }
 
-    fn lower_bytes_concat(&mut self, a: &IrExpr, b: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_bytes_concat(&mut self, a: &IrExpr, b: &IrExpr) -> ArmResult {
         self.lower(a, Some(BYTES))?;
         self.lower(b, Some(BYTES))?;
         self.f.instructions().call(F_CONCAT);
-        Ok(Some(BYTES))
+        Ok(Some(Lowered::owned(BYTES)))
     }
 
-    fn lower_bytes_to_string(&mut self, b: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_bytes_to_string(&mut self, b: &IrExpr) -> ArmResult {
         let inv_pre = self.pool.intern("invalid UTF-8: invalid utf-8 sequence of ");
         let inv_mid = self.pool.intern(" bytes from index ");
         let inc_pre = self.pool.intern("invalid UTF-8: incomplete utf-8 byte sequence from index ");
         let h = self.work.helper(Helper::BytesToString { inv_pre, inv_mid, inc_pre });
         self.lower(b, Some(BYTES))?;
         self.f.instructions().call(h);
-        Ok(Some(SliceTy::Result(self.types.intern(STR), self.types.intern(STR))))
+        Ok(Some(Lowered::owned(SliceTy::Result(self.types.intern(STR), self.types.intern(STR)))))
     }
 
-    fn lower_bytes_to_list(&mut self, b: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_bytes_to_list(&mut self, b: &IrExpr) -> ArmResult {
         self.lower(b, Some(BYTES))?;
         let bh = self.hold_i32()?;
         let hc = self.hold_i32()?;
@@ -211,10 +227,10 @@ impl Emitter<'_> {
         for _ in 0..3 {
             self.release_i32();
         }
-        Ok(Some(SliceTy::List(self.types.intern(INT))))
+        Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(INT)))))
     }
 
-    fn lower_bytes_repeat(&mut self, b: &IrExpr, n: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_bytes_repeat(&mut self, b: &IrExpr, n: &IrExpr) -> ArmResult {
         self.lower(b, Some(BYTES))?;
         let bh = self.hold_i32()?;
         self.f.instructions().local_set(bh);
@@ -256,29 +272,29 @@ impl Emitter<'_> {
         self.release_i32();
         self.release_i64();
         self.release_i32();
-        Ok(Some(BYTES))
+        Ok(Some(Lowered::owned(BYTES)))
     }
 
-    fn lower_bytes_lossy(&mut self, b: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_bytes_lossy(&mut self, b: &IrExpr) -> ArmResult {
         self.lower(b, Some(BYTES))?;
         let lossy = self.work.helper(Helper::Utf8Lossy);
         self.f.instructions().call(lossy);
-        Ok(Some(STR))
+        Ok(Some(Lowered::owned(STR)))
     }
 
-    fn lower_bytes_from_string(&mut self, s: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_bytes_from_string(&mut self, s: &IrExpr) -> ArmResult {
         self.lower(s, Some(STR))?;
         self.f.instructions().call(F_BLOCK_COPY);
-        Ok(Some(BYTES))
+        Ok(Some(Lowered::owned(BYTES)))
     }
 
-    fn lower_bytes_len(&mut self, b: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_bytes_len(&mut self, b: &IrExpr) -> ArmResult {
         self.lower(b, Some(BYTES))?;
         self.f.instructions().i32_load(len_memarg()).i64_extend_i32_u();
-        Ok(Some(INT))
+        Ok(Some(Lowered::scalar(INT)))
     }
 
-    fn lower_bytes_from_list(&mut self, xs: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_bytes_from_list(&mut self, xs: &IrExpr) -> ArmResult {
         match self.lower(xs, None)? {
             SliceTy::List(h) if self.types.el(h) == INT => {}
             other => return unsup(&format!("bytes-from-of:{other:?}")),
@@ -325,10 +341,10 @@ impl Emitter<'_> {
         self.release_i32();
         self.release_i32();
         self.release_i32();
-        Ok(Some(BYTES))
+        Ok(Some(Lowered::owned(BYTES)))
     }
 
-    fn lower_bytes_get_or(&mut self, b: &IrExpr, i: &IrExpr, d: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_bytes_get_or(&mut self, b: &IrExpr, i: &IrExpr, d: &IrExpr) -> ArmResult {
         self.lower(b, Some(BYTES))?;
         let bh = self.hold_i32()?;
         self.f.instructions().local_set(bh);
@@ -354,11 +370,11 @@ impl Emitter<'_> {
         self.release_i64();
         self.release_i64();
         self.release_i32();
-        Ok(Some(INT))
+        Ok(Some(Lowered::scalar(INT)))
     }
 
     /// One-arg names.
-    fn lower_bytes_unary(&mut self, func: &str, x: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_bytes_unary(&mut self, func: &str, x: &IrExpr) -> ArmResult {
         match func {
             "to_string" => self.lower_bytes_to_string(x),
             "to_list" => self.lower_bytes_to_list(x),
@@ -372,7 +388,7 @@ impl Emitter<'_> {
     }
 
     /// Two-arg names.
-    fn lower_bytes_pair(&mut self, func: &str, a: &IrExpr, b: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_bytes_pair(&mut self, func: &str, a: &IrExpr, b: &IrExpr) -> ArmResult {
         match func {
             "concat" => self.lower_bytes_concat(a, b),
             "chunks" => self.lower_bytes_chunks(a, b),
@@ -383,7 +399,7 @@ impl Emitter<'_> {
     }
 
     /// Three-arg names.
-    fn lower_bytes_triple(&mut self, func: &str, a: &IrExpr, b: &IrExpr, c: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_bytes_triple(&mut self, func: &str, a: &IrExpr, b: &IrExpr, c: &IrExpr) -> ArmResult {
         match func {
             "set" => self.lower_bytes_set_arm(a, b, c),
             "slice" => self.lower_bytes_slice(a, b, c),
@@ -395,7 +411,7 @@ impl Emitter<'_> {
         &mut self,
         func: &str,
         args: &[IrExpr],
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         if let Some(out) = self.lower_bytes_rw(func, args)? {
             return Ok(out);
         }
@@ -482,7 +498,7 @@ impl Emitter<'_> {
                 self.release_i64();
                 self.release_i64();
                 self.release_i32();
-                Ok(Some(BYTES))
+                Ok(Some(Lowered::owned(BYTES)))
             }
             // MUT window copy (native copy_from): either offset past its
             // buffer is a no-op; len clamps to both remainders.
@@ -686,7 +702,7 @@ impl Emitter<'_> {
             (f, [b, ..]) if f.starts_with("append_") || f.starts_with("write_") => {
                 let recv = self.bytes_recv("append", b)?;
                 match self.lower_linked_call("bytes", func, args, false)? {
-                    Some(SliceTy::Scalar(Scalar::Bytes)) => {}
+                    Some(Lowered { ty: SliceTy::Scalar(Scalar::Bytes), .. }) => {}
                     other => return unsup(&format!("bytes-append-ret:{other:?}")),
                 }
                 // #1990: the linked twin got the receiver callee-owned
@@ -717,7 +733,7 @@ impl Emitter<'_> {
     /// MUT push (native b.push): the `$bytes_push` helper — cap fast
     /// path, geometric growth, outgrown block freed at rc==1 (#1689) —
     /// then write back, exactly the `list.push` convention.
-    fn lower_bytes_push(&mut self, b: &IrExpr, v: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_bytes_push(&mut self, b: &IrExpr, v: &IrExpr) -> ArmResult {
         let recv = self.bytes_recv("push", b)?;
         self.emit_read_bytes_recv(&recv, b)?;
         self.lower(v, Some(INT))?;

@@ -63,7 +63,7 @@ impl Emitter<'_> {
         &mut self,
         func: &str,
         args: &[IrExpr],
-    ) -> Result<Option<Option<SliceTy>>, EmitError> {
+    ) -> Result<Option<Option<Lowered>>, EmitError> {
         let out = match (func, args) {
             ("file_size" | "modified_at", [p]) => {
                 let op = if func == "file_size" { OP_FILE_SIZE } else { OP_MODIFIED_AT };
@@ -137,7 +137,7 @@ impl Emitter<'_> {
             }
             _ => return Ok(None),
         };
-        Ok(Some(Some(out)))
+        Ok(Some(Some(Lowered::owned(out))))
     }
 
     /// no-arg host op: fs_call(op, 0,0,0,0) — ret on the stack.

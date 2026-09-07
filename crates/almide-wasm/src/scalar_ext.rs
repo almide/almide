@@ -12,13 +12,13 @@ impl Emitter<'_> {
         &mut self,
         target: &CallTarget,
         args: &[IrExpr],
-    ) -> Result<Option<Option<SliceTy>>, EmitError> {
+    ) -> Result<Option<Option<Lowered>>, EmitError> {
         let CallTarget::Module { module, func, .. } = target else {
             return Ok(None);
         };
         let out = match (module.as_str(), func.as_str(), args) {
             ("int" | "float", "clamp", [n, lo, hi]) => {
-                Some(self.lower_scalar_clamp(module.as_str() == "int", n, lo, hi)?)
+                Some(Lowered::owned(self.lower_scalar_clamp(module.as_str() == "int", n, lo, hi)?))
             }
             // f64::signum: ±1 by SIGN BIT (so sign(-0) = -1, sign(+0) = 1),
             // NaN stays NaN.
@@ -35,7 +35,7 @@ impl Emitter<'_> {
                 i.end();
                 let _ = i;
                 self.release_f64();
-                Some(FLOAT)
+                Some(Lowered::scalar(FLOAT))
             }
             // C-210: NaN OBSERVATION IS CANONICAL — to_bits collapses every
             // NaN to 0x7FF8000000000000; non-NaN bits stay raw.
@@ -52,34 +52,34 @@ impl Emitter<'_> {
                 i.end();
                 let _ = i;
                 self.release_f64();
-                Some(INT)
+                Some(Lowered::scalar(INT))
             }
             // The smuggling door C-210 tolerates: bits go in RAW (payload
             // NaNs live internally; only observation canonicalizes).
             ("int", "bits_to_float", [x]) => {
                 self.lower(x, Some(INT))?;
                 self.f.instructions().f64_reinterpret_i64();
-                Some(FLOAT)
+                Some(Lowered::scalar(FLOAT))
             }
             // IEEE-754 requires sqrt correctly rounded: wasm f64.sqrt and
             // Rust's `f64::sqrt` are the SAME function, bit for bit.
             ("math" | "float", "sqrt", [x]) => {
                 self.lower(x, Some(FLOAT))?;
                 self.f.instructions().f64_sqrt();
-                Some(FLOAT)
+                Some(Lowered::scalar(FLOAT))
             }
             ("float", "max" | "min", [a, b]) => {
-                Some(self.lower_float_min_max(func.as_str() == "max", a, b)?)
+                Some(Lowered::scalar(self.lower_float_min_max(func.as_str() == "max", a, b)?))
             }
             // Same square-and-multiply (wrapping) + negative-exponent
             // abort as the `**` operator — one definition, two spellings.
-            ("math", "pow", [b, e]) => Some(self.lower_pow_int(b, e)?),
+            ("math", "pow", [b, e]) => Some(Lowered::scalar(self.lower_pow_int(b, e)?)),
             // `n as f64` IS f64.convert_i64_s (IEEE round-to-nearest-even)
             // — int.to_float with the module spelled the other way.
             ("float" | "float64", "from_int", [n]) | ("int", "to_float64", [n]) => {
                 self.lower(n, Some(INT))?;
                 self.f.instructions().f64_convert_i64_s();
-                Some(FLOAT)
+                Some(Lowered::scalar(FLOAT))
             }
             ("int", "band" | "bor" | "bxor" | "bshl" | "bshr" | "wrap_add" | "wrap_mul"
                 | "bnot" | "to_u32" | "to_u8", _) => {
@@ -89,14 +89,14 @@ impl Emitter<'_> {
             ("float", "ceil", [x]) => {
                 self.lower(x, Some(FLOAT))?;
                 self.f.instructions().f64_ceil();
-                Some(FLOAT)
+                Some(Lowered::scalar(FLOAT))
             }
             ("float", "is_infinite", [x]) => {
                 self.lower(x, Some(FLOAT))?;
                 let mut i = self.f.instructions();
                 i.f64_abs().f64_const(f64::INFINITY.into()).f64_eq();
                 let _ = i;
-                Some(BOOL)
+                Some(Lowered::scalar(BOOL))
             }
             // Branchless (x ^ (x>>63)) - (x>>63): i64::MIN stays i64::MIN,
             // the release-build native wrap.
@@ -110,7 +110,7 @@ impl Emitter<'_> {
                 let _ = i;
                 self.release_i64();
                 self.release_i64();
-                Some(INT)
+                Some(Lowered::scalar(INT))
             }
             _ => return Ok(None),
         };
@@ -256,7 +256,7 @@ impl Emitter<'_> {
         &mut self,
         func: &str,
         args: &[IrExpr],
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         match (func, args) {
             ("band" | "bor" | "bxor" | "bshl" | "bshr", [a, b]) => {
                 self.lower(a, Some(INT))?;
@@ -269,7 +269,7 @@ impl Emitter<'_> {
                     "bshl" => i.i64_shl(),
                     _ => i.i64_shr_s(),
                 };
-                Ok(Some(INT))
+                Ok(Some(Lowered::scalar(INT)))
             }
             // #1423 stage 4: the pure bit family's unary/masking trio —
             // semantics verbatim from stdlib/int_wrap.almd (`bnot(n) =
@@ -278,17 +278,17 @@ impl Emitter<'_> {
             ("bnot", [a]) => {
                 self.lower(a, Some(INT))?;
                 self.f.instructions().i64_const(-1).i64_xor();
-                Ok(Some(INT))
+                Ok(Some(Lowered::scalar(INT)))
             }
             ("to_u32", [a]) => {
                 self.lower(a, Some(INT))?;
                 self.f.instructions().i64_const(0xFFFF_FFFF).i64_and();
-                Ok(Some(INT))
+                Ok(Some(Lowered::scalar(INT)))
             }
             ("to_u8", [a]) => {
                 self.lower(a, Some(INT))?;
                 self.f.instructions().i64_const(0xFF).i64_and();
-                Ok(Some(INT))
+                Ok(Some(Lowered::scalar(INT)))
             }
             ("wrap_add" | "wrap_mul", [a, b, bits]) => {
                 let mul = func == "wrap_mul";
@@ -310,7 +310,7 @@ impl Emitter<'_> {
                 i.select().i64_and();
                 let _ = i;
                 self.release_i64();
-                Ok(Some(INT))
+                Ok(Some(Lowered::scalar(INT)))
             }
             _ => unsup(&format!("call:int.{func}")),
         }

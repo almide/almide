@@ -16,7 +16,7 @@ impl Emitter<'_> {
         &mut self,
         xs: &IrExpr,
         idx: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let h = match self.lower(xs, None)? {
             SliceTy::List(h) => h,
             other => return unsup(&format!("list-remove-at-of:{other:?}")),
@@ -67,12 +67,12 @@ impl Emitter<'_> {
             self.release_i32();
         }
         self.release_i64();
-        Ok(Some(SliceTy::List(h)))
+        Ok(Some(Lowered::owned(SliceTy::List(h))))
     }
 
     /// Fresh block, elements copied back-to-front (native `iter().rev()`);
     /// slot-width raw moves carry f64 bits and heap handles alike.
-    pub(crate) fn lower_list_reverse(&mut self, xs: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    pub(crate) fn lower_list_reverse(&mut self, xs: &IrExpr) -> ArmResult {
         let h = match self.lower(xs, None)? {
             SliceTy::List(h) => h,
             other => return unsup(&format!("list-reverse-of:{other:?}")),
@@ -111,7 +111,7 @@ impl Emitter<'_> {
         for _ in 0..4 {
             self.release_i32();
         }
-        Ok(Some(SliceTy::List(h)))
+        Ok(Some(Lowered::owned(SliceTy::List(h))))
     }
 
     /// Native `if let Some(s) = r.get_mut(i) { *s = x }` over a fresh
@@ -122,7 +122,7 @@ impl Emitter<'_> {
         xs: &IrExpr,
         idx: &IrExpr,
         v: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let h = match self.lower(xs, None)? {
             SliceTy::List(h) => h,
             other => return unsup(&format!("list-set-of:{other:?}")),
@@ -171,7 +171,7 @@ impl Emitter<'_> {
         }
         self.release_i64();
         self.release_i32();
-        Ok(Some(SliceTy::List(h)))
+        Ok(Some(Lowered::owned(SliceTy::List(h))))
     }
 
     /// Last n elements (native `n as usize >= len ? whole : tail`):
@@ -180,7 +180,7 @@ impl Emitter<'_> {
         &mut self,
         xs: &IrExpr,
         n: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let h = match self.lower(xs, None)? {
             SliceTy::List(h) => h,
             other => return unsup(&format!("list-take-end-of:{other:?}")),
@@ -222,7 +222,7 @@ impl Emitter<'_> {
             self.release_i32();
         }
         self.release_i64();
-        Ok(Some(SliceTy::List(h)))
+        Ok(Some(Lowered::owned(SliceTy::List(h))))
     }
 
     /// All but the last n (native `n as usize >= len ? empty : head`):
@@ -231,7 +231,7 @@ impl Emitter<'_> {
         &mut self,
         xs: &IrExpr,
         n: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let h = match self.lower(xs, None)? {
             SliceTy::List(h) => h,
             other => return unsup(&format!("list-drop-end-of:{other:?}")),
@@ -268,7 +268,7 @@ impl Emitter<'_> {
             self.release_i32();
         }
         self.release_i64();
-        Ok(Some(SliceTy::List(h)))
+        Ok(Some(Lowered::owned(SliceTy::List(h))))
     }
 
     /// First position of an equal element (native `position(== x)`):
@@ -278,7 +278,7 @@ impl Emitter<'_> {
         &mut self,
         xs: &IrExpr,
         x: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let h = match self.lower(xs, None)? {
             SliceTy::List(h) => h,
             other => return unsup(&format!("list-index-of-of:{other:?}")),
@@ -351,7 +351,7 @@ impl Emitter<'_> {
         }
         self.release_val(elem);
         self.release_i32();
-        Ok(Some(SliceTy::Option(self.types.intern(INT))))
+        Ok(Some(Lowered::owned(SliceTy::Option(self.types.intern(INT)))))
     }
 
     /// Native `if let Some(s) = get_mut(i) { *s = f(s.clone()) }` over a
@@ -361,7 +361,7 @@ impl Emitter<'_> {
         xs: &IrExpr,
         idx: &IrExpr,
         cb: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let (params, body) = self.hof_lambda(cb, 1)?;
         let h = match self.lower(xs, None)? {
             SliceTy::List(h) => h,
@@ -402,7 +402,7 @@ impl Emitter<'_> {
         self.release_i32();
         self.release_i64();
         self.release_i32();
-        Ok(Some(SliceTy::List(h)))
+        Ok(Some(Lowered::view(SliceTy::List(h))))
     }
 
     /// Native `if a < len && b < len { r.swap(a, b) }` over a fresh copy:
@@ -412,7 +412,7 @@ impl Emitter<'_> {
         xs: &IrExpr,
         ia: &IrExpr,
         ib: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let h = match self.lower(xs, None)? {
             SliceTy::List(h) => h,
             other => return unsup(&format!("list-swap-of:{other:?}")),
@@ -462,6 +462,6 @@ impl Emitter<'_> {
         self.release_i64();
         self.release_i64();
         self.release_i32();
-        Ok(Some(SliceTy::List(h)))
+        Ok(Some(Lowered::owned(SliceTy::List(h))))
     }
 }

@@ -31,7 +31,7 @@ impl Emitter<'_> {
         &mut self,
         func: &str,
         args: &[IrExpr],
-    ) -> Result<Option<Option<SliceTy>>, EmitError> {
+    ) -> Result<Option<Option<Lowered>>, EmitError> {
         // ALMIDE_DBG_FAN=1: name the route each fan call takes (the
         // ALMIDE_DBG_ELEM precedent) — the p3 prefetch test asserts the
         // "prefetch" line so a pattern regression cannot pass silently
@@ -50,7 +50,7 @@ impl Emitter<'_> {
                 if dbg {
                     eprintln!("[fan-dbg] fan.map: prefetch lowering engaged");
                 }
-                Some(self.lower_fan_map_fs_prefetch(xs)?)
+                Some(Lowered::owned(self.lower_fan_map_fs_prefetch(xs)?))
             }
             // fan.any over the same shape (#1628 increment 2c): start every
             // read, await in ARM order, FIRST OK wins — and the remaining
@@ -62,7 +62,7 @@ impl Emitter<'_> {
                 if dbg {
                     eprintln!("[fan-dbg] fan.{func}: prefetch-any lowering engaged");
                 }
-                Some(self.lower_fan_any_fs_prefetch(xs)?)
+                Some(Lowered::owned(self.lower_fan_any_fs_prefetch(xs)?))
             }
             ("map" | "any" | "any_map", [xs, cb]) => {
                 if dbg {
@@ -217,12 +217,12 @@ impl Emitter<'_> {
                 if closure.is_some() {
                     self.release_i32();
                 }
-                Some(if first_ok_wins {
+                Some(Lowered::owned(if first_ok_wins {
                     SliceTy::Result(o, er)
                 } else {
                     let lb = self.types.intern(SliceTy::List(self.types.intern(b)));
                     SliceTy::Result(lb, er)
-                })
+                }))
             }
             // Block form: ONE literal list of 0-ary thunks, statically
             // unrolled — first Ok short-circuits, a pure arm Ok-adapts
@@ -288,7 +288,7 @@ impl Emitter<'_> {
                 let Some(t) = result_ty else {
                     return unsup("fan-any-armless");
                 };
-                Some(t)
+                Some(Lowered::owned(t))
             }
             _ => return Ok(None),
         };

@@ -23,7 +23,7 @@ impl Emitter<'_> {
         module: &str,
         func: &str,
         args: &[IrExpr],
-    ) -> Result<Option<Option<SliceTy>>, EmitError> {
+    ) -> Result<Option<Option<Lowered>>, EmitError> {
         let out = match (module, func, args) {
             ("result", "is_ok" | "is_err", [r]) => {
                 let SliceTy::Result(..) = self.lower(r, None)? else {
@@ -36,7 +36,7 @@ impl Emitter<'_> {
                 } else {
                     i.i32_const(0).i32_ne();
                 }
-                Some(BOOL)
+                Some(Lowered::scalar(BOOL))
             }
             ("option", "is_some" | "is_none", [o]) => {
                 let SliceTy::Option(_) = self.lower(o, None)? else {
@@ -47,12 +47,12 @@ impl Emitter<'_> {
                 if func == "is_some" {
                     i.i32_eqz();
                 }
-                Some(BOOL)
+                Some(Lowered::scalar(BOOL))
             }
             ("result", "map" | "map_err", [r, f]) => self.lower_result_map(func, r, f)?,
             // partition: one pass, oks/errs each an upper-bound alloc with
             // a final len patch (the filter doctrine).
-            ("result", "partition", [xs]) => Some(self.lower_result_partition(xs)?),
+            ("result", "partition", [xs]) => Some(Lowered::owned(self.lower_result_partition(xs)?)),
             ("result", "flat_map", [r, f]) => {
                 let SliceTy::Result(o, _) = self.lower(r, None)? else {
                     return unsup("result-flat_map-of-nonresult");
@@ -81,7 +81,7 @@ impl Emitter<'_> {
                 self.lower(body, Some(rb))?;
                 self.f.instructions().end();
                 self.release_i32();
-                Some(rb)
+                Some(Lowered::owned(rb))
             }
             ("result", "unwrap_or_else", [r, f]) => {
                 let SliceTy::Result(o, er) = self.lower(r, None)? else {
@@ -107,7 +107,7 @@ impl Emitter<'_> {
                 self.load_ty_slot(a, almide_layout::SUM_FIELD);
                 self.f.instructions().end();
                 self.release_i32();
-                Some(a)
+                Some(Lowered::owned(a))
             }
             ("result", "to_option" | "to_err_option", [r]) => {
                 let want_ok = func == "to_option";
@@ -139,7 +139,7 @@ impl Emitter<'_> {
                 self.f.instructions().local_get(hb).end();
                 self.release_i32();
                 self.release_i32();
-                Some(SliceTy::Option(side_h))
+                Some(Lowered::owned(SliceTy::Option(side_h)))
             }
             _ => return self.lower_sum_combinator_b(module, func, args),
         };
@@ -239,7 +239,7 @@ impl Emitter<'_> {
         func: &str,
         r: &IrExpr,
         f: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         Ok({
 
                 let on_ok = func == "map";
@@ -284,7 +284,7 @@ impl Emitter<'_> {
                 self.release_i32();
                 self.release_i32();
                 let bi = self.types.intern(b);
-                Some(if on_ok { SliceTy::Result(bi, er) } else { SliceTy::Result(o, bi) })
+                Some(Lowered::owned(if on_ok { SliceTy::Result(bi, er) } else { SliceTy::Result(o, bi) }))
         })
     }
 }
@@ -297,7 +297,7 @@ impl Emitter<'_> {
         module: &str,
         func: &str,
         args: &[IrExpr],
-    ) -> Result<Option<Option<SliceTy>>, EmitError> {
+    ) -> Result<Option<Option<Lowered>>, EmitError> {
         let out = match (module, func, args) {
             ("option", "map" | "flat_map", [o_arg, f]) => {
                 let flat = func == "flat_map";
@@ -342,7 +342,7 @@ impl Emitter<'_> {
                 self.f.instructions().end();
                 self.release_i32();
                 self.release_i32();
-                Some(out_ty)
+                Some(Lowered::owned(out_ty))
             }
             ("option", "flatten", [o_arg]) => {
                 let SliceTy::Option(h) = self.lower(o_arg, None)? else {
@@ -365,7 +365,7 @@ impl Emitter<'_> {
                 self.load_ty_slot(inner, almide_layout::OPTION_FIELD);
                 self.f.instructions().end();
                 self.release_i32();
-                Some(inner)
+                Some(Lowered::owned(inner))
             }
             ("option", "unwrap_or_else", [o_arg, f]) => {
                 let SliceTy::Option(h) = self.lower(o_arg, None)? else {
@@ -385,7 +385,7 @@ impl Emitter<'_> {
                 self.load_ty_slot(a, almide_layout::OPTION_FIELD);
                 self.f.instructions().end();
                 self.release_i32();
-                Some(a)
+                Some(Lowered::owned(a))
             }
             ("option", "or_else", [o_arg, f]) => {
                 let got @ SliceTy::Option(_) = self.lower(o_arg, None)? else {
@@ -402,7 +402,7 @@ impl Emitter<'_> {
                 self.lower(body, Some(got))?;
                 self.f.instructions().else_().local_get(hs).end();
                 self.release_i32();
-                Some(got)
+                Some(Lowered::owned(got))
             }
             ("option", "filter", [o_arg, f]) => {
                 let got @ SliceTy::Option(h) = self.lower(o_arg, None)? else {
@@ -433,7 +433,7 @@ impl Emitter<'_> {
                     i.end();
                 }
                 self.release_i32();
-                Some(got)
+                Some(Lowered::owned(got))
             }
             ("option", "zip", [a_arg, b_arg]) => {
                 let SliceTy::Option(ha) = self.lower(a_arg, None)? else {
@@ -485,7 +485,7 @@ impl Emitter<'_> {
                 self.release_i32();
                 self.release_i32();
                 self.release_i32();
-                Some(SliceTy::Option(self.types.intern(SliceTy::Tuple(ti))))
+                Some(Lowered::owned(SliceTy::Option(self.types.intern(SliceTy::Tuple(ti)))))
             }
             ("option", "to_list", [o_arg]) => {
                 let SliceTy::Option(h) = self.lower(o_arg, None)? else {
@@ -510,7 +510,7 @@ impl Emitter<'_> {
                 self.f.instructions().local_get(hb).end();
                 self.release_i32();
                 self.release_i32();
-                Some(SliceTy::List(h))
+                Some(Lowered::owned(SliceTy::List(h)))
             }
             _ => return Ok(None),
         };

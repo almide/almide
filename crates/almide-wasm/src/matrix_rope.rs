@@ -26,7 +26,7 @@ impl Emitter<'_> {
         head_dim: &IrExpr,
         theta: &IrExpr,
         start: Option<&IrExpr>,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let fpow = self.linked_math("math.fpow")?;
         let fsin = self.linked_math("math.sin")?;
         let fcos = self.linked_math("math.cos")?;
@@ -192,7 +192,7 @@ impl Emitter<'_> {
         for _ in 0..3 {
             self.release_i32();
         }
-        Ok(Some(SliceTy::Matrix))
+        Ok(Some(Lowered::owned(SliceTy::Matrix)))
     }
 
     /// multi_head_attention / masked_multi_head_attention: per (row,
@@ -206,7 +206,7 @@ impl Emitter<'_> {
         k: &IrExpr,
         v: &IrExpr,
         n_heads: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let fe = self.work.helper(Helper::FastExp);
         let (hq, hsq, hdm) = self.mat_open(q)?;
         let (hk, hsk, hkc) = self.mat_open(k)?;
@@ -408,6 +408,6 @@ impl Emitter<'_> {
         for _ in 0..15 {
             self.release_i32();
         }
-        Ok(Some(SliceTy::Matrix))
+        Ok(Some(Lowered::owned(SliceTy::Matrix)))
     }
 }
