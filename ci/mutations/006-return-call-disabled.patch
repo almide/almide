@@ -1,12 +1,12 @@
 diff --git a/crates/almide-wasm/src/calls.rs b/crates/almide-wasm/src/calls.rs
 --- a/crates/almide-wasm/src/calls.rs
 +++ b/crates/almide-wasm/src/calls.rs
-@@ -191,7 +191,7 @@ impl Emitter<'_> {
+@@ -207,7 +207,7 @@ impl Emitter<'_> {
                  // Tail position with a matching return type → return_call:
                  // constant stack for arbitrarily deep (incl. mutual)
                  // recursion, the C-292 contract.
--                if tail && ret.is_some() && ret == self.fn_ret {
-+                if false && tail && ret.is_some() && ret == self.fn_ret { // [MUTANT: tail calls disabled]
-                     // Same frame-replacement release as the indirect site —
-                     // unless the callee is THIS fn: tco.rs turns that
-                     // return_call into a loop-back, and the frame lives on.
+-                if tail
++                if false && tail // [MUTANT: tail calls disabled]
+                     && ret.is_some()
+                     && ret == self.fn_ret
+                     && self.tail_transfer_ok(Some(index) != self.self_index)
