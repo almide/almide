@@ -243,9 +243,11 @@ impl Emitter<'_> {
         if matches!(declared, SliceTy::Map(..) | SliceTy::Set(_)) {
             self.f.instructions().call(F_BLOCK_COPY);
         }
-        if matches!(declared, SliceTy::List(_) | SliceTy::Scalar(Scalar::Str | Scalar::Bytes))
-            && !self.rc_owned_result(value)
-        {
+        // Every DROPPABLE shape shares on a borrowed rhs — the flat
+        // Option / Result / tuple blocks included (`let n1: Int? = n ?? none`
+        // read the nested option's payload as a view and, owning it
+        // without the +1, double-freed it beside `n2`).
+        if self.rc_droppable(declared) && !self.rc_owned_result(value) {
             self.rc_inc_top();
         }
         if self.cells.contains(var) {
@@ -268,8 +270,9 @@ impl Emitter<'_> {
             // (loop rebinds; zero on the first pass) is released, and
             // the local joins the epilogue's owner set.
             if self.rc_droppable(declared) {
-                self.f.instructions().local_get(idx).call(F_DEC_FLAT);
-                self.rc_own(idx);
+                let dec = self.dec_fn_of(declared);
+                self.f.instructions().local_get(idx).call(dec);
+                self.rc_own(idx, declared);
                 if self.witness.is_some() {
                     self.witness_bind(idx, declared, value);
                 }
@@ -285,8 +288,9 @@ impl Emitter<'_> {
     /// exactly once (#1770: both passes firing on one local double-freed
     /// the returned buffer, and its freelist link zeroed the first
     /// payload word).
-    pub(crate) fn rc_own(&mut self, idx: u32) {
+    pub(crate) fn rc_own(&mut self, idx: u32, ty: SliceTy) {
         self.rc_owned.insert(idx);
+        self.owned_ty.insert(idx, ty);
     }
 
     pub(crate) fn lower_stmt(&mut self, s: &IrStmt) -> Result<(), EmitError> {
@@ -579,6 +583,9 @@ impl Emitter<'_> {
                 let hi = self.hold_i64()?;
                 self.f.instructions().local_set(hi);
                 self.lower(value, Some(el))?;
+                // A handle element stored into the spine is a holder: a
+                // borrowed rhs takes its +1 here (#2010 stage 2b).
+                self.rc_share_guard(value, el);
                 self.rc_map_value_share(value, el);
                 let hv = self.hold_val(el)?;
                 let hb = self.hold_i32()?;
@@ -616,7 +623,8 @@ impl Emitter<'_> {
                 // (#1729: the prealloc/fft rows OOM'd at 2^16 writes where
                 // the live payload is 512 KiB).
                 get_target(self.f, self.locals, self.globals);
-                self.f.instructions().call(F_COW).local_set(hb);
+                let cow = self.cow_fn_of(declared);
+                self.f.instructions().call(cow).local_set(hb);
                 if is_local {
                     let idx = self.locals[target].0;
                     self.f.instructions().local_get(hb).local_set(idx);
@@ -624,17 +632,30 @@ impl Emitter<'_> {
                     let g = self.globals[&(self.var_space, *target)].0;
                     self.f.instructions().local_get(hb).global_set(g);
                 }
+                // The replaced element's credit goes with it.
+                let old_dec = self.elem_is_handle(el).then(|| self.dec_fn_of(el));
                 {
                     let mut i = self.f.instructions();
-                    i.local_get(hb)
-                        .i64_extend_i32_u()
-                        .local_get(hi)
-                        .i64_const(stride)
-                        .i64_mul()
-                        .i64_add()
-                        .i32_wrap_i64()
-                        .i32_const(almide_layout::PAYLOAD as i32)
-                        .i32_add();
+                    for pass in 0..2 {
+                        if pass == 0 && old_dec.is_none() {
+                            continue;
+                        }
+                        i.local_get(hb)
+                            .i64_extend_i32_u()
+                            .local_get(hi)
+                            .i64_const(stride)
+                            .i64_mul()
+                            .i64_add()
+                            .i32_wrap_i64()
+                            .i32_const(almide_layout::PAYLOAD as i32)
+                            .i32_add();
+                        if pass == 0 {
+                            // The address already carries PAYLOAD (the
+                            // raw store below): a raw load, not a slot one.
+                            i.i32_load(wasm_encoder::MemArg { offset: 0, align: 2, memory_index: 0 })
+                                .call(old_dec.unwrap());
+                        }
+                    }
                     i.local_get(hv);
                 }
                 self.store_ty_slot_raw(el);
@@ -690,11 +711,7 @@ impl Emitter<'_> {
                 if matches!(declared, SliceTy::Map(..) | SliceTy::Set(_)) {
                     self.f.instructions().call(F_BLOCK_COPY);
                 }
-                if matches!(
-                    declared,
-                    SliceTy::List(_) | SliceTy::Scalar(Scalar::Str | Scalar::Bytes)
-                ) && !self.rc_owned_result(value)
-                {
+                if self.rc_droppable(declared) && !self.rc_owned_result(value) {
                     self.rc_inc_top();
                 }
                 // RC-3: same ownership settlement as Bind — locals only
@@ -729,8 +746,9 @@ impl Emitter<'_> {
                     && self.rc_droppable(declared)
                     && !call_shaped_self
                 {
-                    self.f.instructions().local_get(idx).call(F_DEC_FLAT);
-                    self.rc_own(idx);
+                    let dec = self.dec_fn_of(declared);
+                    self.f.instructions().local_get(idx).call(dec);
+                    self.rc_own(idx, declared);
                 }
                 match local {
                     Some(idx) => self.emit_store_var(*var, idx, declared)?,

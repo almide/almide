@@ -25,6 +25,7 @@ impl Emitter<'_> {
                 };
                 let elem = self.types.el(h);
                 let stride = elem.slot_size() as i32;
+                let inc_elems = self.inc_elems_fn(elem);
                 let hb = self.hold_i32()?;
                 let hlen = self.hold_i32()?;
                 let hres = self.hold_i32()?;
@@ -52,6 +53,12 @@ impl Emitter<'_> {
                     i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32).i32_add();
                     i.local_get(hlen).i32_const(stride).i32_sub();
                     i.memory_copy(0, 0);
+                    if let Some(inc) = inc_elems {
+                        // The popped element moves out with one credit of
+                        // its own; the shrunken copy takes the rest.
+                        i.local_get(hnew).call(inc);
+                        i.local_get(hres).i32_load(slot_memarg(almide_layout::OPTION_FIELD)).call(F_INC);
+                    }
                     i.local_get(hnew);
                 }
                 self.emit_store_mut_var(*id, var_idx, var_ty, vglob)?;
@@ -63,7 +70,7 @@ impl Emitter<'_> {
                 for _ in 0..4 {
                     self.release_i32();
                 }
-                Ok(Some(Lowered::view(SliceTy::Option(self.types.intern(elem)))))
+                Ok(Some(Lowered::owned(SliceTy::Option(self.types.intern(elem)))))
         }
     }
 

@@ -43,6 +43,9 @@ pub(crate) struct Emitter<'a> {
     /// and loop binds never enter — they borrow their subject's
     /// interior. BTreeSet: the dec order must be deterministic.
     pub(crate) rc_owned: std::collections::BTreeSet<u32>,
+    /// The type each owned local (and droppable param) holds — the typed
+    /// release at every exit (`dec_fn_of_local`, #2010 stage 2b).
+    pub(crate) owned_ty: std::collections::HashMap<u32, SliceTy>,
     /// The module-call nodes whose result the caller OWNS (#1990 / #2004):
     /// the registry-table path (callee-owned convention) and the native
     /// arms that DECLARE an owned result (arm.rs) mark the call's `CallTarget` node
@@ -58,7 +61,7 @@ pub(crate) struct Emitter<'a> {
     /// between the argument's lowering and the op's end (a hold taken
     /// there would land on the temporary's slot: fs_write_errno's
     /// `rename` decremented its own Result block, 2026-09-07).
-    pub(crate) borrowed_temps: Vec<u32>,
+    pub(crate) borrowed_temps: Vec<(u32, SliceTy)>,
     /// First local of the borrow pool (`BORROW_POOL` i32 slots).
     pub(crate) borrow_base: u32,
     /// Every exit `emit_exit` wrote, with the byte offset it started at —

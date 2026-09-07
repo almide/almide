@@ -94,6 +94,7 @@ impl Emitter<'_> {
             other => return unsup(&format!("list-window-of:{other:?}")),
         };
         let stride = e.slot_size() as i32;
+        let inc_elems = self.inc_elems_fn(e);
         let hb = self.hold_i32()?;
         self.f.instructions().local_set(hb);
         self.lower_arg(n, Some(INT), ArgMode::Borrow)?;
@@ -147,6 +148,9 @@ impl Emitter<'_> {
             .i32_add();
         i.local_get(hw).i32_const(stride).i32_mul();
         i.memory_copy(0, 0);
+        if let Some(inc) = inc_elems {
+            i.local_get(hwin).call(inc);
+        }
         i.local_get(ho).local_get(hk).i32_const(4).i32_mul().i32_add();
         i.local_get(hwin).i32_store(slot_memarg(0));
         i.local_get(hk).i32_const(1).i32_add().local_set(hk);
@@ -290,8 +294,11 @@ impl Emitter<'_> {
             // The seen-keys scratch block is this arm's own: released
             // here (it was never, #2005 — 64 B per call).
             i.local_get(hseen).call(F_DEC_FLAT);
-            i.local_get(hout);
         }
+        // The kept slots are COPIES of the source's handles (after LEN is
+        // final — the walk reads it).
+        self.emit_inc_elems(hout, elem);
+        self.f.instructions().local_get(hout);
         self.release_for(kt);
         for _ in 0..6 {
             self.release_i32();
@@ -377,8 +384,10 @@ impl Emitter<'_> {
         {
             let mut i = self.f.instructions();
             i.local_get(hout).local_get(hkept).i32_const(stride).i32_mul().i32_store(len_memarg());
-            i.local_get(hout);
         }
+        // The kept slots are COPIES of the source's handles (after LEN).
+        self.emit_inc_elems(hout, elem);
+        self.f.instructions().local_get(hout);
         for _ in 0..7 {
             self.release_i32();
         }

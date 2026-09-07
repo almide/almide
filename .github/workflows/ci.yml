@@ -1519,6 +1519,12 @@ jobs:
           echo "$HOME/.wasmtime/bin" >> "$GITHUB_PATH"
       - name: Carried gates in release shape
         run: cargo test --release --locked -p almide-wasm -p almide-wasm-run -p almide-spine -p almide-syntax -p almide-corpus -p almide-layout
+      # #2010 stage 2b: under the double-free trap a second release of a
+      # freed block traps instead of wrapping to 0xFFFF_FFFF — the corpus
+      # and the gauntlet must hold under it (five fixtures only showed
+      # their dangling reads with it armed, 2026-09-08).
+      - name: Double-free trap sweep (corpus burn-up + gauntlet)
+        run: ALMIDE_RC_TRAP_DOUBLE_FREE=1 cargo test --release --locked -p almide-wasm --test backend_parity --test gauntlet
       - name: Target-availability matrix (#1423 — declared == measured, both directions)
         run: cargo build --release --locked --bin almide && bash scripts/check-target-availability.sh
       # #1701: the wasm runtime RATIO ratchet. The ratio wasm/native cancels

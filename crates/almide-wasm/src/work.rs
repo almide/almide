@@ -96,6 +96,22 @@ pub(crate) enum Helper {
     MapIdxBuild { key: crate::map_index::IdxKey, hash: u32 },
     MapIdxFind { key: crate::map_index::IdxKey, fns: crate::map_index::IdxFns, build: u32 },
     MapIdxAppend { key: crate::map_index::IdxKey, fns: crate::map_index::IdxFns },
+    /// `$drop_list(block)` — the typed drop of a List whose elements are
+    /// heap HANDLES (#2010 stage 2b): the spine's credit down; at zero
+    /// every element released through `elem_dec` (`$dec_flat` for a
+    /// Str / Bytes element, the inner list's own drop glue for a nested
+    /// one), then the spine freed. One helper per element drop fn.
+    DropList { elem_dec: u32 },
+    /// `$inc_elems(block)`: +1 on every element handle of a spine whose
+    /// slots were COPIED from another spine — the copy holds its own
+    /// credits, so its typed drop releases exactly what it acquired.
+    IncElems,
+    /// `$copy_elems(block) -> block`: `$block_copy` plus the element
+    /// credits of the copy.
+    CopyElems { inc_elems: u32 },
+    /// `$cow_elems(block) -> block`: `$cow` plus the element credits of
+    /// the copy it made (none when the block was uniquely held).
+    CowElems { inc_elems: u32 },
 }
 
 /// The pretty printer's extra pooled fragments.

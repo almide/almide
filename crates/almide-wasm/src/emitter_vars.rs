@@ -68,7 +68,8 @@ impl Emitter<'_> {
             && (global || idx >= self.rc_param_ceiling)
         {
             let scr = self.scr_i32_local;
-            self.f.instructions().call(F_COW).local_set(scr);
+            let cow = self.cow_fn_of(ty);
+            self.f.instructions().call(cow).local_set(scr);
             self.f.instructions().local_get(scr);
             self.emit_store_mut_var(*id, idx, ty, global)?;
             self.f.instructions().local_get(scr);
