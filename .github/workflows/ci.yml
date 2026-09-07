@@ -733,6 +733,14 @@ jobs:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
           targets: wasm32-wasip1, wasm32-unknown-unknown
 
+      # The library must build for the BROWSER without the embedded host: this is
+      # the exact dependency shape almide/playground consumes (`default-features =
+      # false`). The playground's deploy went red (2026-08-30 onwards) when
+      # almide-wasm-run — wasmtime, hence ring/getrandom — became an unconditional
+      # dependency of the root crate; this step is the tripwire.
+      - name: Library builds for wasm32-unknown-unknown without the embedded host
+        run: cargo check --lib --no-default-features --target wasm32-unknown-unknown --locked
+
       - uses: actions/setup-node@v7
         with:
           node-version: 20
