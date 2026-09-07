@@ -77,6 +77,8 @@ fn corpus_burn_up() {
             Err(almide_wasm::EmitError::Unsupported(reason)) => {
                 *unsupported.entry(reason).or_default() += 1;
             }
+            // E083 is a compiler defect, not a wall: the burn-up fails on it.
+            Err(almide_wasm::EmitError::OwnershipLowering(d)) => panic!("{d}"),
         }
     }
 

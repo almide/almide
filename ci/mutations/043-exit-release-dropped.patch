@@ -1,0 +1,12 @@
+diff --git a/crates/almide-wasm/src/exit_plan.rs b/crates/almide-wasm/src/exit_plan.rs
+--- a/crates/almide-wasm/src/exit_plan.rs
++++ b/crates/almide-wasm/src/exit_plan.rs
+@@ -127,7 +127,7 @@ impl Emitter<'_> {
+             if omit_first && k == 0 {
+                 continue;
+             }
+-            self.f.instructions().local_get(idx).call(F_DEC_FLAT);
++            let _ = idx; // [MUTANT: exit releases dropped]
+         }
+         match plan.continuation {
+             Continuation::ReturnSuccess => {

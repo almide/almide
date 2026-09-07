@@ -119,7 +119,14 @@ impl Emitter<'_> {
     /// (`rc_share_guard` in lower_sum); a guard's borrowed value took its
     /// ret-inc before this; rc_owned holds only flat blocks.
     pub(crate) fn emit_exit(&mut self, plan: &ExitPlan) {
-        for &idx in &plan.released {
+        self.exit_ledger.push(ExitRecord { plan: plan.clone(), start: self.f.byte_len() });
+        // Negative-test hook (tests/exit_validation.rs): omit the first
+        // release so the validator has a defect to name. Off by default.
+        let omit_first = OMIT_FIRST_RELEASE.load(std::sync::atomic::Ordering::Relaxed);
+        for (k, &idx) in plan.released.iter().enumerate() {
+            if omit_first && k == 0 {
+                continue;
+            }
             self.f.instructions().local_get(idx).call(F_DEC_FLAT);
         }
         match plan.continuation {
@@ -147,4 +154,212 @@ impl Emitter<'_> {
             }
         }
     }
+}
+
+/// The negative-test switch: when set, `emit_exit` skips the first release
+/// of every plan. Process-wide; tests/exit_validation.rs is its one user.
+static OMIT_FIRST_RELEASE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Test hook (E083 negative half): make the emitter omit the first release
+/// of every exit plan, so the validator has a defect to name.
+#[doc(hidden)]
+pub fn test_omit_first_release(on: bool) {
+    OMIT_FIRST_RELEASE.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// One exit as `emit_exit` wrote it: the plan, and the function-body byte
+/// offset where its releases begin.
+#[derive(Clone, Debug)]
+pub(crate) struct ExitRecord {
+    pub(crate) plan: ExitPlan,
+    pub(crate) start: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Op {
+    LocalGet(u32),
+    Call(u32),
+    Return,
+    ReturnCall,
+    FnEnd,
+    Other,
+}
+
+/// E083 (#1996): read the function's bytes BACK and check that every exit
+/// window — from the plan's first release to the transfer instruction —
+/// implements the plan: each released credit is decremented exactly there,
+/// nothing carried is, nothing outside the plan is, the transfer is the
+/// instruction the continuation names, and a frame-replacing or returning
+/// edge leaves no credit outstanding. Independent of the writer: it parses
+/// wasm, not the emitter's intent. A mismatch is a compiler defect with its
+/// own diagnostic, never a wall.
+pub(crate) fn validate_exits(
+    f: &wasm_encoder::Function,
+    ledger: &[ExitRecord],
+    function: &str,
+    name_of: impl Fn(u32) -> String,
+) -> Result<(), EmitError> {
+    if ledger.is_empty() {
+        return Ok(());
+    }
+    use wasm_encoder::Encode;
+    let mut encoded = Vec::new();
+    f.encode(&mut encoded);
+    // Skip the LEB128 size prefix: what follows is the body `byte_len`
+    // measured (locals vector, then code).
+    let mut pos = 0;
+    while encoded[pos] & 0x80 != 0 {
+        pos += 1;
+    }
+    pos += 1;
+    let body = &encoded[pos..];
+    let defect = |headline: &str, value: String, expected: &str, emitted: &str| {
+        EmitError::OwnershipLowering(OwnDefect {
+            headline: headline.to_string(),
+            function: function.to_string(),
+            value,
+            expected: expected.to_string(),
+            emitted: emitted.to_string(),
+        })
+    };
+    let parse_fail = |what: String| {
+        defect("exit validator could not read the function back", what, "a parseable body", "wasmparser refused it")
+    };
+    let fb = wasmparser::FunctionBody::new(wasmparser::BinaryReader::new(body, 0));
+    let mut reader = fb.get_operators_reader().map_err(|e| parse_fail(e.to_string()))?;
+    let mut ops: Vec<(usize, Op)> = Vec::new();
+    let mut depth: u32 = 0;
+    while !reader.eof() {
+        let (op, off) = reader.read_with_offset().map_err(|e| parse_fail(e.to_string()))?;
+        use wasmparser::Operator as W;
+        let kind = match op {
+            W::LocalGet { local_index } => Op::LocalGet(local_index),
+            W::Call { function_index } => Op::Call(function_index),
+            W::Return => Op::Return,
+            W::ReturnCall { .. } | W::ReturnCallIndirect { .. } => Op::ReturnCall,
+            W::Block { .. } | W::Loop { .. } | W::If { .. } | W::TryTable { .. } => {
+                depth += 1;
+                Op::Other
+            }
+            W::End => {
+                if depth == 0 {
+                    Op::FnEnd
+                } else {
+                    depth -= 1;
+                    Op::Other
+                }
+            }
+            _ => Op::Other,
+        };
+        ops.push((off as usize, kind));
+    }
+    // Windows may nest (an early exit lowered inside a later-started
+    // exit's value): claim from the LATEST start backwards, and skip the
+    // ranges already claimed.
+    let mut order: Vec<usize> = (0..ledger.len()).collect();
+    order.sort_by_key(|&k| std::cmp::Reverse(ledger[k].start));
+    let mut claimed: Vec<(usize, usize)> = Vec::new();
+    for k in order {
+        let rec = &ledger[k];
+        let cont = rec.plan.continuation;
+        let cont_name = match cont {
+            Continuation::ReturnSuccess => "the epilogue return",
+            Continuation::ReturnError => "the error return",
+            Continuation::GuardReturn => "the guard return",
+            Continuation::TailTransfer { .. } => "the tail transfer",
+        };
+        let Some(first) = ops.iter().position(|&(off, _)| off >= rec.start) else {
+            return Err(defect(
+                "an exit plan has no instructions after it",
+                cont_name.to_string(),
+                "releases and a transfer",
+                "end of function",
+            ));
+        };
+        let mut decs: Vec<u32> = Vec::new();
+        let mut terminator: Option<(usize, Op)> = None;
+        let mut j = first;
+        while j < ops.len() {
+            let (off, kind) = ops[j];
+            if let Some(&(_, e)) = claimed.iter().find(|&&(s, e)| off >= s && off <= e) {
+                // Inside a nested exit's window: jump past it.
+                j = ops.iter().position(|&(o, _)| o > e).unwrap_or(ops.len());
+                continue;
+            }
+            match kind {
+                Op::Call(F_DEC_FLAT) => match (j > first).then(|| ops[j - 1].1) {
+                    Some(Op::LocalGet(i)) => decs.push(i),
+                    _ => {
+                        return Err(defect(
+                            "a release in an exit window names no local",
+                            cont_name.to_string(),
+                            "local.get <credit>; call $dec_flat",
+                            "call $dec_flat with another operand",
+                        ))
+                    }
+                },
+                Op::Return | Op::ReturnCall | Op::FnEnd => {
+                    terminator = Some((j, kind));
+                    break;
+                }
+                _ => {}
+            }
+            j += 1;
+        }
+        let Some((tj, tk)) = terminator else {
+            return Err(defect("an exit plan reaches no transfer", cont_name.to_string(), "return / return_call / end", "none"));
+        };
+        claimed.push((rec.start, ops[tj].0));
+        let want = match cont {
+            Continuation::ReturnSuccess => Op::FnEnd,
+            Continuation::ReturnError | Continuation::GuardReturn => Op::Return,
+            Continuation::TailTransfer { .. } => Op::ReturnCall,
+        };
+        if tk != want {
+            return Err(defect(
+                "an exit transfers by a different instruction than its plan",
+                cont_name.to_string(),
+                &format!("{want:?}"),
+                &format!("{tk:?}"),
+            ));
+        }
+        for &idx in &rec.plan.released {
+            if !decs.contains(&idx) {
+                return Err(defect(
+                    "an exit leaves a released credit undecremented",
+                    name_of(idx),
+                    &format!("release before {cont_name}"),
+                    "none",
+                ));
+            }
+        }
+        for &idx in &decs {
+            if rec.plan.carried.contains(&idx) {
+                return Err(defect(
+                    "an exit releases a credit its plan carries",
+                    name_of(idx),
+                    &format!("carried across {cont_name}"),
+                    "released",
+                ));
+            }
+            if !rec.plan.released.contains(&idx) {
+                return Err(defect(
+                    "an exit releases a value outside its plan",
+                    name_of(idx),
+                    "no release (not a frame credit at this edge)",
+                    "released",
+                ));
+            }
+        }
+        let replaces = !matches!(cont, Continuation::TailTransfer { replaces_frame: false });
+        if replaces && let Some(&idx) = rec.plan.carried.iter().next() {
+            return Err(defect(
+                "tail exit leaves an ownership credit outstanding",
+                name_of(idx),
+                "transfer or release before tail transfer",
+                "neither",
+            ));
+        }
+    }
+    Ok(())
 }
