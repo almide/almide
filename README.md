@@ -145,7 +145,7 @@ No runtime, no GC, no interpreter — native compiles through Rust to machine co
 <!-- wasm-size:generated:start — rendered from docs/benchmarks/wasm-size.txt by scripts/gen-readme-stats.sh; DO NOT EDIT between the markers -->
 | Program (`almide build --target wasm`, verified, as shipped) | incumbent v1 leg | structural leg |
 |---|---:|---:|
-| Hello, world | **1,096 B** | **1,335 B** |
+| Hello, world | **1,096 B** | **1,337 B** |
 
 Measured on almide 0.62.0, 2026-09-07, from `docs/benchmarks/wasm-size.txt`; no post-hoc optimizer touches the shipped bytes (`--wasm-opt` is opt-in and its output is not the verified module).
 <!-- wasm-size:generated:end -->
