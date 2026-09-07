@@ -103,6 +103,17 @@ pub(crate) fn collect_binds_data(
             }
             Ok(())
         }
+        // A map literal's keys and values are expressions like a list's
+        // elements: a callback lambda inside one (`["k": (if list.all(xs,
+        // (x) => …) then …)]`) needs its params as locals too — the
+        // `bind:unmapped` wall the 2026-09-08 campaign dumped (#1423).
+        IrExprKind::MapLiteral { entries } => {
+            for (k, v) in entries {
+                collect_binds(k, out, seen, types)?;
+                collect_binds(v, out, seen, types)?;
+            }
+            Ok(())
+        }
         IrExprKind::TupleIndex { object, .. } => collect_binds(object, out, seen, types),
         // Lambda params become locals (used when the lambda is inlined as
         // a direct HOF callback; harmless extras otherwise).
