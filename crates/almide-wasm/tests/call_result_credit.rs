@@ -97,6 +97,21 @@ fn a_return_call_releases_the_owned_locals_before_the_jump() {
     flat("let x = mk(i); take(x)", "    total = total + bind_then_tail(i)", "3000", "24000");
 }
 
+/// #2004 — a call result used directly as an ARGUMENT moves its one
+/// credit into the callee: no share-guard +1 (that is for borrowed
+/// args). Before, `take(mk(i))` and `string.len(int.to_string(i))` left
+/// the temporary at rc 1 forever (32 B and 16 B per call).
+#[test]
+fn a_call_result_argument_moves_into_the_callee() {
+    flat("take(mk(i))", "    total = total + take(mk(i))", "3000", "24000");
+    flat(
+        "string.len(int.to_string(i))",
+        "    total = total + string.len(int.to_string(i))",
+        "2890",
+        "30890",
+    );
+}
+
 /// The ERROR exits — `f()!` propagating an err, and a raised `err(..)` —
 /// are function exits like any other: the frame's owned locals and its
 /// droppable params must be released before the `return`. Measured as a

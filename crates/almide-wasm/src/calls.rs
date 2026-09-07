@@ -41,6 +41,7 @@ impl Emitter<'_> {
                 self.f.instructions().local_set(h);
                 self.f.instructions().local_get(h);
                 for (a, p) in args.iter().zip(def.params.iter()) {
+                    let seq0 = self.module_call_seq;
                     self.lower(a, Some(*p))?;
                     // RC-3 callee-owned args hold for a lifted lambda
                     // exactly as for a named fn: its epilogue decs every
@@ -50,8 +51,8 @@ impl Emitter<'_> {
                     // it `pred(v)` inside `ok(v) => …` freed the payload
                     // the caller still held (the nightly fuzz's
                     // zeroed-string findings).
-                    self.rc_arg_guard(a, *p);
-                    self.witness_arg(a, *p);
+                    self.rc_arg_guard(a, *p, seq0);
+                    self.witness_arg(a, *p, seq0);
                 }
                 self.f.instructions().local_get(h).i32_load(slot_memarg(0));
                 let mut ps: Vec<ValType> = vec![ValType::I32];
@@ -177,13 +178,14 @@ impl Emitter<'_> {
                     && self.region_window_opens(i, ret, args, &params);
                 let save = if window { Some(self.emit_region_save()?) } else { None };
                 for (a, want) in args.iter().zip(params) {
+                    let seq0 = self.module_call_seq;
                     self.lower(a, Some(want))?;
                     // RC-3 callee-owned args: a borrowed droppable
                     // argument gets +1 here, the callee's epilogue decs
                     // its params — the pair keeps a mut-param callee's
                     // realloc-free honest (rc reflects both holders).
-                    self.rc_arg_guard(a, want);
-                    self.witness_arg(a, want);
+                    self.rc_arg_guard(a, want, seq0);
+                    self.witness_arg(a, want, seq0);
                 }
                 self.calls.insert(i);
                 if let Some(blk) = save {
@@ -532,9 +534,10 @@ impl Emitter<'_> {
         }
         let (index, ret, params) = (info.wasm_index, info.ret, info.params.clone());
         for (a, want) in args.iter().zip(params) {
+            let seq0 = self.module_call_seq;
             self.lower(a, Some(want))?;
-            self.rc_arg_guard(a, want);
-            self.witness_arg(a, want);
+            self.rc_arg_guard(a, want, seq0);
+            self.witness_arg(a, want, seq0);
         }
         self.calls.insert(i);
         if tail && ret.is_some() && ret == self.fn_ret {
