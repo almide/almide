@@ -58,7 +58,7 @@ schema = 2
 # linked-impl whitelist, split and lines get native arms (their self-host
 # twins write the incumbent's 8-byte List slot stride raw), and the
 # i2f32 prim converts i64 -> f32 directly (single rounding).
-pending_self_host_ceiling = 36
+pending_self_host_ceiling = 34
 
 # The unprobed class (#1827), per leg. Today: the five HttpRequest
 # accessors (http.query_params / req_body / req_header / req_method /
@@ -88,11 +88,6 @@ legs = ["structural"]
 reason = "host-surface"
 issue = "#1827"
 
-[[unavailable]]
-fn = "datetime.parse_iso"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1423"
 
 [[unavailable]]
 fn = "env.millis"
@@ -828,11 +823,6 @@ legs = ["structural"]
 reason = "structural-leg-gap: the structural leg declines the self-host body's hole expression (expr:Hole); the incumbent serves it"
 issue = "#1827"
 
-[[unavailable]]
-fn = "string.split_once"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
 
 [[unavailable]]
 fn = "testing.assert_approx"
