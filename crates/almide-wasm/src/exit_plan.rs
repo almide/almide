@@ -185,52 +185,46 @@ enum Op {
     Other,
 }
 
-/// E083 (#1996): read the function's bytes BACK and check that every exit
-/// window — from the plan's first release to the transfer instruction —
-/// implements the plan: each released credit is decremented exactly there,
-/// nothing carried is, nothing outside the plan is, the transfer is the
-/// instruction the continuation names, and a frame-replacing or returning
-/// edge leaves no credit outstanding. Independent of the writer: it parses
-/// wasm, not the emitter's intent. A mismatch is a compiler defect with its
-/// own diagnostic, never a wall.
-pub(crate) fn validate_exits(
-    f: &wasm_encoder::Function,
-    ledger: &[ExitRecord],
-    function: &str,
-    name_of: impl Fn(u32) -> String,
-) -> Result<(), EmitError> {
-    if ledger.is_empty() {
-        return Ok(());
+/// The defect constructor every check shares: the function is fixed, the
+/// four lines vary.
+struct Defects<'a> {
+    function: &'a str,
+}
+
+impl Defects<'_> {
+    fn at(&self, headline: &str, value: String, expected: &str, emitted: &str) -> EmitError {
+        EmitError::OwnershipLowering(OwnDefect {
+            headline: headline.to_string(),
+            function: self.function.to_string(),
+            value,
+            expected: expected.to_string(),
+            emitted: emitted.to_string(),
+        })
     }
+}
+
+/// Re-encode the function and read its operators back with their body
+/// offsets (the offsets `byte_len` measured: locals vector, then code).
+fn read_ops(f: &wasm_encoder::Function, d: &Defects<'_>) -> Result<Vec<(usize, Op)>, EmitError> {
     use wasm_encoder::Encode;
     let mut encoded = Vec::new();
     f.encode(&mut encoded);
-    // Skip the LEB128 size prefix: what follows is the body `byte_len`
-    // measured (locals vector, then code).
+    // Skip the LEB128 size prefix.
     let mut pos = 0;
     while encoded[pos] & 0x80 != 0 {
         pos += 1;
     }
     pos += 1;
     let body = &encoded[pos..];
-    let defect = |headline: &str, value: String, expected: &str, emitted: &str| {
-        EmitError::OwnershipLowering(OwnDefect {
-            headline: headline.to_string(),
-            function: function.to_string(),
-            value,
-            expected: expected.to_string(),
-            emitted: emitted.to_string(),
-        })
-    };
-    let parse_fail = |what: String| {
-        defect("exit validator could not read the function back", what, "a parseable body", "wasmparser refused it")
+    let fail = |e: wasmparser::BinaryReaderError| {
+        d.at("exit validator could not read the function back", e.to_string(), "a parseable body", "wasmparser refused it")
     };
     let fb = wasmparser::FunctionBody::new(wasmparser::BinaryReader::new(body, 0));
-    let mut reader = fb.get_operators_reader().map_err(|e| parse_fail(e.to_string()))?;
+    let mut reader = fb.get_operators_reader().map_err(fail)?;
     let mut ops: Vec<(usize, Op)> = Vec::new();
     let mut depth: u32 = 0;
     while !reader.eof() {
-        let (op, off) = reader.read_with_offset().map_err(|e| parse_fail(e.to_string()))?;
+        let (op, off) = reader.read_with_offset().map_err(fail)?;
         use wasmparser::Operator as W;
         let kind = match op {
             W::LocalGet { local_index } => Op::LocalGet(local_index),
@@ -241,18 +235,111 @@ pub(crate) fn validate_exits(
                 depth += 1;
                 Op::Other
             }
+            W::End if depth == 0 => Op::FnEnd,
             W::End => {
-                if depth == 0 {
-                    Op::FnEnd
-                } else {
-                    depth -= 1;
-                    Op::Other
-                }
+                depth -= 1;
+                Op::Other
             }
             _ => Op::Other,
         };
         ops.push((off as usize, kind));
     }
+    Ok(ops)
+}
+
+/// One exit window: from `start` to the first transfer not inside an
+/// already-claimed (nested) window. Returns the locals decremented in it
+/// and the transfer's (op index, kind).
+fn scan_window(
+    ops: &[(usize, Op)],
+    start: usize,
+    claimed: &[(usize, usize)],
+    cont_name: &str,
+    d: &Defects<'_>,
+) -> Result<(Vec<u32>, usize, Op), EmitError> {
+    let Some(first) = ops.iter().position(|&(off, _)| off >= start) else {
+        return Err(d.at("an exit plan has no instructions after it", cont_name.to_string(), "releases and a transfer", "end of function"));
+    };
+    let mut decs: Vec<u32> = Vec::new();
+    let mut j = first;
+    while j < ops.len() {
+        let (off, kind) = ops[j];
+        if let Some(&(_, e)) = claimed.iter().find(|&&(s, e)| off >= s && off <= e) {
+            j = ops.iter().position(|&(o, _)| o > e).unwrap_or(ops.len());
+            continue;
+        }
+        match kind {
+            Op::Call(F_DEC_FLAT) => match (j > first).then(|| ops[j - 1].1) {
+                Some(Op::LocalGet(i)) => decs.push(i),
+                _ => {
+                    return Err(d.at(
+                        "a release in an exit window names no local",
+                        cont_name.to_string(),
+                        "local.get <credit>; call $dec_flat",
+                        "call $dec_flat with another operand",
+                    ))
+                }
+            },
+            Op::Return | Op::ReturnCall | Op::FnEnd => return Ok((decs, j, kind)),
+            _ => {}
+        }
+        j += 1;
+    }
+    Err(d.at("an exit plan reaches no transfer", cont_name.to_string(), "return / return_call / end", "none"))
+}
+
+/// The plan against the window: the transfer instruction, every released
+/// credit decremented, nothing carried or foreign decremented, nothing
+/// outstanding across a returning or frame-replacing edge.
+fn check_window(
+    rec: &ExitRecord,
+    decs: &[u32],
+    got: Op,
+    cont_name: &str,
+    name_of: &dyn Fn(u32) -> String,
+    d: &Defects<'_>,
+) -> Result<(), EmitError> {
+    let cont = rec.plan.continuation;
+    let want = match cont {
+        Continuation::ReturnSuccess => Op::FnEnd,
+        Continuation::ReturnError | Continuation::GuardReturn => Op::Return,
+        Continuation::TailTransfer { .. } => Op::ReturnCall,
+    };
+    if got != want {
+        return Err(d.at("an exit transfers by a different instruction than its plan", cont_name.to_string(), &format!("{want:?}"), &format!("{got:?}")));
+    }
+    if let Some(&idx) = rec.plan.released.iter().find(|i| !decs.contains(i)) {
+        return Err(d.at("an exit leaves a released credit undecremented", name_of(idx), &format!("release before {cont_name}"), "none"));
+    }
+    if let Some(&idx) = decs.iter().find(|i| rec.plan.carried.contains(i)) {
+        return Err(d.at("an exit releases a credit its plan carries", name_of(idx), &format!("carried across {cont_name}"), "released"));
+    }
+    if let Some(&idx) = decs.iter().find(|i| !rec.plan.released.contains(i)) {
+        return Err(d.at("an exit releases a value outside its plan", name_of(idx), "no release (not a frame credit at this edge)", "released"));
+    }
+    let replaces = !matches!(cont, Continuation::TailTransfer { replaces_frame: false });
+    if replaces && let Some(&idx) = rec.plan.carried.iter().next() {
+        return Err(d.at("tail exit leaves an ownership credit outstanding", name_of(idx), "transfer or release before tail transfer", "neither"));
+    }
+    Ok(())
+}
+
+/// E083 (#1996): read the function's bytes BACK and check that every exit
+/// window — from the plan's first release to the transfer instruction —
+/// implements the plan. Independent of the writer: it parses wasm, not the
+/// emitter's intent. A mismatch is a compiler defect with its own
+/// diagnostic, never a wall.
+pub(crate) fn validate_exits(
+    f: &wasm_encoder::Function,
+    ledger: &[ExitRecord],
+    function: &str,
+    name_of: impl Fn(u32) -> String,
+) -> Result<(), EmitError> {
+    if ledger.is_empty() {
+        return Ok(());
+    }
+    let d = Defects { function };
+    let ops = read_ops(f, &d)?;
     // Windows may nest (an early exit lowered inside a later-started
     // exit's value): claim from the LATEST start backwards, and skip the
     // ranges already claimed.
@@ -261,105 +348,15 @@ pub(crate) fn validate_exits(
     let mut claimed: Vec<(usize, usize)> = Vec::new();
     for k in order {
         let rec = &ledger[k];
-        let cont = rec.plan.continuation;
-        let cont_name = match cont {
+        let cont_name = match rec.plan.continuation {
             Continuation::ReturnSuccess => "the epilogue return",
             Continuation::ReturnError => "the error return",
             Continuation::GuardReturn => "the guard return",
             Continuation::TailTransfer { .. } => "the tail transfer",
         };
-        let Some(first) = ops.iter().position(|&(off, _)| off >= rec.start) else {
-            return Err(defect(
-                "an exit plan has no instructions after it",
-                cont_name.to_string(),
-                "releases and a transfer",
-                "end of function",
-            ));
-        };
-        let mut decs: Vec<u32> = Vec::new();
-        let mut terminator: Option<(usize, Op)> = None;
-        let mut j = first;
-        while j < ops.len() {
-            let (off, kind) = ops[j];
-            if let Some(&(_, e)) = claimed.iter().find(|&&(s, e)| off >= s && off <= e) {
-                // Inside a nested exit's window: jump past it.
-                j = ops.iter().position(|&(o, _)| o > e).unwrap_or(ops.len());
-                continue;
-            }
-            match kind {
-                Op::Call(F_DEC_FLAT) => match (j > first).then(|| ops[j - 1].1) {
-                    Some(Op::LocalGet(i)) => decs.push(i),
-                    _ => {
-                        return Err(defect(
-                            "a release in an exit window names no local",
-                            cont_name.to_string(),
-                            "local.get <credit>; call $dec_flat",
-                            "call $dec_flat with another operand",
-                        ))
-                    }
-                },
-                Op::Return | Op::ReturnCall | Op::FnEnd => {
-                    terminator = Some((j, kind));
-                    break;
-                }
-                _ => {}
-            }
-            j += 1;
-        }
-        let Some((tj, tk)) = terminator else {
-            return Err(defect("an exit plan reaches no transfer", cont_name.to_string(), "return / return_call / end", "none"));
-        };
+        let (decs, tj, tk) = scan_window(&ops, rec.start, &claimed, cont_name, &d)?;
         claimed.push((rec.start, ops[tj].0));
-        let want = match cont {
-            Continuation::ReturnSuccess => Op::FnEnd,
-            Continuation::ReturnError | Continuation::GuardReturn => Op::Return,
-            Continuation::TailTransfer { .. } => Op::ReturnCall,
-        };
-        if tk != want {
-            return Err(defect(
-                "an exit transfers by a different instruction than its plan",
-                cont_name.to_string(),
-                &format!("{want:?}"),
-                &format!("{tk:?}"),
-            ));
-        }
-        for &idx in &rec.plan.released {
-            if !decs.contains(&idx) {
-                return Err(defect(
-                    "an exit leaves a released credit undecremented",
-                    name_of(idx),
-                    &format!("release before {cont_name}"),
-                    "none",
-                ));
-            }
-        }
-        for &idx in &decs {
-            if rec.plan.carried.contains(&idx) {
-                return Err(defect(
-                    "an exit releases a credit its plan carries",
-                    name_of(idx),
-                    &format!("carried across {cont_name}"),
-                    "released",
-                ));
-            }
-            if !rec.plan.released.contains(&idx) {
-                return Err(defect(
-                    "an exit releases a value outside its plan",
-                    name_of(idx),
-                    "no release (not a frame credit at this edge)",
-                    "released",
-                ));
-            }
-        }
-        let replaces = !matches!(cont, Continuation::TailTransfer { replaces_frame: false });
-        if replaces && let Some(&idx) = rec.plan.carried.iter().next() {
-            return Err(defect(
-                "tail exit leaves an ownership credit outstanding",
-                name_of(idx),
-                "transfer or release before tail transfer",
-                "neither",
-            ));
-        }
+        check_window(rec, &decs, tk, cont_name, &name_of, &d)?;
     }
     Ok(())
 }
