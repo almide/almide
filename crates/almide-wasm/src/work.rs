@@ -119,6 +119,10 @@ pub(crate) enum Helper {
     /// built by the emitter at registration (`drop_bodies`) — the slot
     /// table needs the type table.
     DropShape { ty: SliceTy },
+    /// `$inc_<shape>(block)`: +1 on every handle slot of an Option /
+    /// Result / tuple / record / variant block — the credits a whole-block
+    /// COPY of it must hold (`CopyElems { inc_elems }` calls it).
+    IncShape { ty: SliceTy },
 }
 
 /// The pretty printer's extra pooled fragments.
@@ -182,7 +186,7 @@ pub(crate) struct FnWork {
     pub(crate) scan_bodies: std::cell::RefCell<HashMap<crate::ETy, DisplayBuild>>,
     /// `Helper::DropShape` bodies, built by `dec_fn_of` when the helper
     /// is first registered (assembly takes them by type).
-    pub(crate) drop_bodies: std::cell::RefCell<HashMap<SliceTy, wasm_encoder::Function>>,
+    pub(crate) drop_bodies: std::cell::RefCell<Vec<(Helper, Option<wasm_encoder::Function>)>>,
     /// Region-pure fns by table index (#1961) — the vocabulary the
     /// `consume(produce(scalars))` window recogniser consults.
     pub(crate) region_pure: crate::region::RegionPure,

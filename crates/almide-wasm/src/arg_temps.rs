@@ -68,6 +68,8 @@ fn droppable_ty(t: &Ty) -> bool {
         // Stage 2c: any Option / Result / tuple block (rc_droppable).
         Ty::Applied(TypeConstructorId::Option | TypeConstructorId::Result, _) => true,
         Ty::Tuple(_) => true,
+        // Stage 2c-ii: records and variants (an Excluded name binds a plain local).
+        Ty::Applied(TypeConstructorId::UserDefined(_), _) => true,
         _ => false,
     }
 }
