@@ -127,6 +127,11 @@ impl Emitter<'_> {
                             // the local already holds the cell address
                             self.f.instructions().i32_store(slot_memarg(*off));
                         } else {
+                            // The env is a holder: a captured handle takes +1
+                            // (leak-not-dangle until closures drop, #2010) —
+                            // a tail-called closure returning its capture read
+                            // the frame's released local (fuzz 20260909).
+                            self.share_handle_top(*t);
                             self.store_ty_slot(*t, *off);
                         }
                     }
