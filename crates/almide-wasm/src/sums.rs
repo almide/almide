@@ -105,6 +105,10 @@ impl Emitter<'_> {
                 self.lower(body, Some(a))?;
                 self.f.instructions().else_().local_get(hs);
                 self.load_ty_slot(a, almide_layout::SUM_FIELD);
+                // The payload handed out is a SHARE of the Option's (the
+                // borrowed source may be a temporary released next): +1,
+                // so both branches hand back an owned value.
+                self.share_handle_top(a);
                 self.f.instructions().end();
                 self.release_i32();
                 Some(Lowered::owned(a))
@@ -135,6 +139,9 @@ impl Emitter<'_> {
                 }
                 self.f.instructions().local_get(hs);
                 self.load_ty_slot(side, almide_layout::SUM_FIELD);
+                // The payload copied out is a SHARE (+1): the new block's
+                // typed drop releases it, the source keeps its own.
+                self.share_handle_top(side);
                 self.store_ty_slot(side, almide_layout::OPTION_FIELD);
                 self.f.instructions().local_get(hb).end();
                 self.release_i32();
@@ -279,6 +286,9 @@ impl Emitter<'_> {
                     .i32_store(slot_memarg(almide_layout::SUM_TAG));
                 self.f.instructions().local_get(hb);
                 self.lower(body, Some(b))?;
+                // A pass-through body hands back a VIEW (a captured var, the
+                // input itself): the block storing it is a holder and takes the share.
+                self.rc_share_guard(body, b);
                 self.store_ty_slot(b, almide_layout::SUM_FIELD);
                 self.f.instructions().local_get(hb).end();
                 self.release_i32();
@@ -340,6 +350,9 @@ impl Emitter<'_> {
                         .call(F_ALLOC)
                         .local_tee(hb);
                     self.lower(body, Some(b))?;
+                    // A pass-through body hands back a VIEW (a captured var, the
+                    // input itself): the block storing it is a holder and takes the share.
+                    self.rc_share_guard(body, b);
                     self.store_ty_slot(b, almide_layout::OPTION_FIELD);
                     self.f.instructions().local_get(hb);
                     SliceTy::Option(self.types.intern(b))
@@ -370,7 +383,9 @@ impl Emitter<'_> {
                 self.load_ty_slot(inner, almide_layout::OPTION_FIELD);
                 self.f.instructions().end();
                 self.release_i32();
-                Some(Lowered::owned(inner))
+                // The inner option is o's PAYLOAD, not a fresh block: a view
+                // (the bind takes its +1; a temporary source promotes it).
+                Some(Lowered::view(inner))
             }
             ("option", "unwrap_or_else", [o_arg, f]) => {
                 let SliceTy::Option(h) = self.lower_arg(o_arg, None, ArgMode::Borrow)? else {
@@ -388,6 +403,10 @@ impl Emitter<'_> {
                 self.lower(body, Some(a))?;
                 self.f.instructions().else_().local_get(hs);
                 self.load_ty_slot(a, almide_layout::OPTION_FIELD);
+                // The payload handed out is a SHARE of the Option's (the
+                // borrowed source may be a temporary released next): +1,
+                // so both branches hand back an owned value.
+                self.share_handle_top(a);
                 self.f.instructions().end();
                 self.release_i32();
                 Some(Lowered::owned(a))
@@ -513,6 +532,9 @@ impl Emitter<'_> {
                 }
                 self.f.instructions().local_get(hs);
                 self.load_ty_slot(a, almide_layout::OPTION_FIELD);
+                // The payload copied out is a SHARE (+1): the new block's
+                // typed drop releases it, the source keeps its own.
+                self.share_handle_top(a);
                 self.store_ty_slot(a, 0);
                 self.f.instructions().local_get(hb).end();
                 self.release_i32();

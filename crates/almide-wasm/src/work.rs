@@ -112,6 +112,13 @@ pub(crate) enum Helper {
     /// `$cow_elems(block) -> block`: `$cow` plus the element credits of
     /// the copy it made (none when the block was uniquely held).
     CowElems { inc_elems: u32 },
+    /// `$drop_<shape>(block)` — the typed drop of an Option / Result /
+    /// tuple block with handle payloads (#2010 stage 2c): the block's
+    /// credit down; at zero each handle slot released through its own
+    /// dec fn (a Result by its tag), then the block freed. The body is
+    /// built by the emitter at registration (`drop_bodies`) — the slot
+    /// table needs the type table.
+    DropShape { ty: SliceTy },
 }
 
 /// The pretty printer's extra pooled fragments.
@@ -173,6 +180,9 @@ pub(crate) struct FnWork {
     pub(crate) display_bodies: std::cell::RefCell<HashMap<u32, DisplayBuild>>,
     pub(crate) eq_bodies: std::cell::RefCell<HashMap<u32, DisplayBuild>>,
     pub(crate) scan_bodies: std::cell::RefCell<HashMap<crate::ETy, DisplayBuild>>,
+    /// `Helper::DropShape` bodies, built by `dec_fn_of` when the helper
+    /// is first registered (assembly takes them by type).
+    pub(crate) drop_bodies: std::cell::RefCell<HashMap<SliceTy, wasm_encoder::Function>>,
     /// Region-pure fns by table index (#1961) — the vocabulary the
     /// `consume(produce(scalars))` window recogniser consults.
     pub(crate) region_pure: crate::region::RegionPure,

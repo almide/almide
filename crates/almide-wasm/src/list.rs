@@ -167,9 +167,7 @@ impl Emitter<'_> {
         self.load_ty_slot(elem, 0);
         // A handle stored into the pair block takes +1: the pair has no
         // typed drop yet (stage 2c), so this is leak-not-dangle.
-        if self.elem_is_handle(elem) {
-            self.rc_inc_top();
-        }
+        self.share_handle_top(elem);
         self.store_ty_slot(elem, eoff);
         // store pair addr into result
         self.f
@@ -293,9 +291,7 @@ impl Emitter<'_> {
             .call(F_ALLOC)
             .local_tee(rh)
             .local_get(params[0]);
-        if self.elem_is_handle(elem) {
-            self.rc_inc_top();
-        }
+        self.share_handle_top(elem);
         self.store_ty_slot(elem, almide_layout::OPTION_FIELD);
         self.f.instructions().br(2);
         self.f.instructions().end();

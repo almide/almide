@@ -288,6 +288,22 @@ impl Emitter<'_> {
     /// exactly once (#1770: both passes firing on one local double-freed
     /// the returned buffer, and its freelist link zeroed the first
     /// payload word).
+    /// The byte address of element `hi` (i64) of the list in `hb`:
+    /// `block + PAYLOAD + hi * stride`.
+    fn emit_index_slot_addr(&mut self, hb: u32, hi: u32, stride: i64) {
+        self.f
+            .instructions()
+            .local_get(hb)
+            .i64_extend_i32_u()
+            .local_get(hi)
+            .i64_const(stride)
+            .i64_mul()
+            .i64_add()
+            .i32_wrap_i64()
+            .i32_const(almide_layout::PAYLOAD as i32)
+            .i32_add();
+    }
+
     pub(crate) fn rc_own(&mut self, idx: u32, ty: SliceTy) {
         self.rc_owned.insert(idx);
         self.owned_ty.insert(idx, ty);
@@ -633,31 +649,12 @@ impl Emitter<'_> {
                     self.f.instructions().local_get(hb).global_set(g);
                 }
                 // The replaced element's credit goes with it.
-                let old_dec = self.elem_is_handle(el).then(|| self.dec_fn_of(el));
-                {
-                    let mut i = self.f.instructions();
-                    for pass in 0..2 {
-                        if pass == 0 && old_dec.is_none() {
-                            continue;
-                        }
-                        i.local_get(hb)
-                            .i64_extend_i32_u()
-                            .local_get(hi)
-                            .i64_const(stride)
-                            .i64_mul()
-                            .i64_add()
-                            .i32_wrap_i64()
-                            .i32_const(almide_layout::PAYLOAD as i32)
-                            .i32_add();
-                        if pass == 0 {
-                            // The address already carries PAYLOAD (the
-                            // raw store below): a raw load, not a slot one.
-                            i.i32_load(wasm_encoder::MemArg { offset: 0, align: 2, memory_index: 0 })
-                                .call(old_dec.unwrap());
-                        }
-                    }
-                    i.local_get(hv);
+                if let Some(dec) = self.elem_is_handle(el).then(|| self.dec_fn_of(el)) {
+                    self.emit_index_slot_addr(hb, hi, stride);
+                    self.f.instructions().i32_load(wasm_encoder::MemArg { offset: 0, align: 2, memory_index: 0 }).call(dec);
                 }
+                self.emit_index_slot_addr(hb, hi, stride);
+                self.f.instructions().local_get(hv);
                 self.store_ty_slot_raw(el);
                 self.release_i32();
                 self.release_val(el);

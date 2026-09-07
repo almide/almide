@@ -133,9 +133,7 @@ impl Emitter<'_> {
                         // the callee-owned guard +1s it (the closure's
                         // epilogue decs its params).
                         self.f.instructions().local_get(hcl).local_get(param);
-                        if self.rc_droppable(elem) {
-                            self.rc_inc_top();
-                        }
+                        self.share_handle_top(elem);
                         self.f.instructions().local_get(hcl).i32_load(slot_memarg(0));
                         self.f.instructions().call_indirect(0, ti);
                         ret

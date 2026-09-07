@@ -619,6 +619,9 @@ impl Emitter<'_> {
                     .local_get(len_h)
                     .i32_add()
                     .local_get(xh);
+                // The element handle copied into the set takes +1: the set
+                // is a holder with no typed drop yet (leak-not-dangle).
+                self.share_handle_top(e);
                 self.store_ty_slot_raw(e);
                 self.f.instructions().local_get(nh).local_set(rh);
                 self.release_i32();

@@ -428,14 +428,10 @@ fn helper_body(h: &Helper, work: &FnWork, helper_snapshot: &[Helper], hpos: usiz
     Helper::StringSplit => value_helpers::emit_string_split_helper(),
     Helper::ScanF64 => runtime::emit_scan_f64(),
     Helper::MapReserve => runtime_alloc::emit_map_reserve(),
-    Helper::DropList { elem_dec } => runtime_alloc::emit_drop_list(*elem_dec),
-    Helper::IncElems => runtime_alloc::emit_inc_elems(),
-    Helper::CopyElems { inc_elems } => runtime_alloc::emit_copy_elems(*inc_elems),
-    Helper::CowElems { inc_elems } => runtime_alloc::emit_cow_elems(*inc_elems),
     Helper::BytesToString { inv_pre, inv_mid, inc_pre } => {
         utf8_helpers::emit_bytes_to_string_helper(*inv_pre, *inv_mid, *inc_pre)
     }
-    _ => match map_index::helper_body(h) {
+    _ => match map_index::helper_body(h).or_else(|| runtime_alloc::helper_body(h, work)) {
         Some(f) => f,
         None => helper_body_b(h, work, helper_snapshot),
     },
@@ -455,16 +451,12 @@ pub(crate) fn resolve_extras(
     // lowering; the table-entry extras follow.
     let helper_snapshot: Vec<Helper> = work.helpers.borrow().clone();
     for (hpos, h) in helper_snapshot.iter().enumerate() {
-        let params = match map_index::helper_params(h) {
+        let params = match map_index::helper_params(h).or_else(|| runtime_alloc::helper_params(h)) {
             Some(p) => p,
             None => match h {
             Helper::ValueKeys
             | Helper::Utf8Lossy
-            | Helper::BytesToString { .. }
-            | Helper::DropList { .. }
-            | Helper::IncElems
-            | Helper::CopyElems { .. }
-            | Helper::CowElems { .. } => vec![ValType::I32],
+            | Helper::BytesToString { .. } => vec![ValType::I32],
             Helper::ScanF64 => vec![ValType::I32, ValType::I32, ValType::I32, ValType::F64],
             Helper::ScanDeep { .. } => {
                 vec![ValType::I32, ValType::I32, ValType::I32, ValType::I32]
@@ -482,8 +474,7 @@ pub(crate) fn resolve_extras(
         };
         let ret = match h {
             Helper::FastExp | Helper::GeluScalar { .. } | Helper::Q10Val => Some(ValType::F64),
-            Helper::DropList { .. } | Helper::IncElems => None,
-            _ => Some(ValType::I32),
+            _ => runtime_alloc::helper_result(h),
         };
         let ti = work.itype(params, ret);
         let f = helper_body(h, work, helper_snapshot.as_slice(), hpos);

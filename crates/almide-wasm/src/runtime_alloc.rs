@@ -279,6 +279,47 @@ pub(crate) fn emit_drop_list(elem_dec: u32) -> Function {
     f
 }
 
+/// `$drop_<shape>(block)` — the typed drop of a block with handle slots
+/// at fixed payload offsets (#2010 stage 2c): `$dec_flat`'s guard and
+/// trap knob; at rc 0 every `(offset, dec_fn)` slot is released, then
+/// the block freed. `tagged` names a tag word and per-tag slot tables
+/// (a Result: tag 0 = Ok payload, 1 = Err payload, both at SUM_FIELD).
+pub(crate) fn emit_drop_shape(slots: &[(u32, u32)], tagged: Option<(u32, Vec<(u32, Vec<(u32, u32)>)>)>) -> Function {
+    // params: 0=block; locals: 1=rc
+    let (block, rc) = (0u32, 1u32);
+    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
+    let mut f = Function::new([(1, ValType::I32)]);
+    let mut i = f.instructions();
+    i.local_get(block).global_get(G_LINE_END).i32_lt_u().if_(BlockType::Empty);
+    i.return_();
+    i.end();
+    i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_sub().local_set(rc);
+    if std::env::var_os("ALMIDE_RC_TRAP_DOUBLE_FREE").is_some() {
+        i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
+        i.unreachable();
+        i.end();
+    }
+    i.local_get(block).local_get(rc).i32_store(word(almide_layout::RC.offset));
+    i.local_get(rc).i32_eqz().if_(BlockType::Empty);
+    for &(off, dec) in slots {
+        i.local_get(block).i32_load(word(almide_layout::PAYLOAD + off)).call(dec);
+    }
+    if let Some((tag_off, cases)) = tagged {
+        for (tag, cslots) in cases {
+            i.local_get(block).i32_load(word(almide_layout::PAYLOAD + tag_off)).i32_const(tag as i32).i32_eq();
+            i.if_(BlockType::Empty);
+            for (off, dec) in cslots {
+                i.local_get(block).i32_load(word(almide_layout::PAYLOAD + off)).call(dec);
+            }
+            i.end();
+        }
+    }
+    i.local_get(block).call(F_FREE);
+    i.end();
+    i.end();
+    f
+}
+
 /// `$inc_elems(block)`: +1 on every element handle of a spine of 4-byte
 /// handle slots (the credits a copied spine must hold, #2010 stage 2b).
 pub(crate) fn emit_inc_elems() -> Function {
@@ -322,6 +363,46 @@ pub(crate) fn emit_cow_elems(inc_elems: u32) -> Function {
     i.local_get(1);
     i.end();
     f
+}
+
+/// The signatures assembly promises for the rc-glue helpers (#2010).
+pub(crate) fn helper_params(h: &Helper) -> Option<Vec<ValType>> {
+    matches!(
+        h,
+        Helper::DropList { .. }
+            | Helper::IncElems
+            | Helper::CopyElems { .. }
+            | Helper::CowElems { .. }
+            | Helper::DropShape { .. }
+    )
+    .then(|| vec![ValType::I32])
+}
+
+/// The result type of a helper: the drops and the credit walk return
+/// nothing; the copy variants hand the block back; everything else i32
+/// unless assembly says f64.
+pub(crate) fn helper_result(h: &Helper) -> Option<ValType> {
+    match h {
+        Helper::DropList { .. } | Helper::IncElems | Helper::DropShape { .. } => None,
+        _ => Some(ValType::I32),
+    }
+}
+
+/// The rc-glue helper bodies; a `DropShape` body was built at registration
+/// (`work.drop_bodies`) — a missing one is a loud stub.
+pub(crate) fn helper_body(h: &Helper, work: &crate::work::FnWork) -> Option<Function> {
+    Some(match h {
+        Helper::DropList { elem_dec } => emit_drop_list(*elem_dec),
+        Helper::IncElems => emit_inc_elems(),
+        Helper::CopyElems { inc_elems } => emit_copy_elems(*inc_elems),
+        Helper::CowElems { inc_elems } => emit_cow_elems(*inc_elems),
+        Helper::DropShape { ty } => work.drop_bodies.borrow_mut().remove(ty).unwrap_or_else(|| {
+            let mut f = Function::new([]);
+            f.instructions().unreachable().end();
+            f
+        }),
+        _ => return None,
+    })
 }
 
 /// `$map_reserve(block, esz) -> block`: room for ONE more `esz`-byte

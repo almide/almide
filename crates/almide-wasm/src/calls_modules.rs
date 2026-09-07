@@ -260,6 +260,10 @@ impl Emitter<'_> {
                     et,
                     if is_option { almide_layout::OPTION_FIELD } else { almide_layout::SUM_FIELD },
                 );
+                // The payload handed out is a SHARE of the receiver's (+1):
+                // with the retained default, both branches hand back an
+                // owned value (#2010 stage 2c).
+                self.share_handle_top(et);
                 self.f.instructions().end();
                 match et.val_type() {
                     ValType::I64 => self.release_i64(),
@@ -267,7 +271,7 @@ impl Emitter<'_> {
                     _ => self.release_i32(),
                 }
                 self.release_i32();
-                Ok(Some(Lowered::view(et)))
+                Ok(Some(Lowered::owned(et)))
             }
             CallTarget::Module { module, func, .. } if module.as_str() == "matrix" => {
                 if let Some(out) = self.lower_matrix_call(func.as_str(), args)? {

@@ -444,6 +444,10 @@ impl Emitter<'_> {
         i.local_get(hr).local_get(hv);
         let _ = i;
         self.load_ty_slot(payload, almide_layout::SUM_FIELD);
+        // The Value keeps its interior: the Result's payload is a SHARE of
+        // it (+1), released by the Result's typed drop (#2010 stage 2c —
+        // `value.as_array` twice on one Value freed its array).
+        self.share_handle_top(payload);
         self.store_ty_slot(payload, almide_layout::SUM_FIELD);
         let mut i = self.f.instructions();
         i.else_();

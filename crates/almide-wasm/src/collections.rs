@@ -401,9 +401,7 @@ impl Emitter<'_> {
                     self.load_ty_slot(t, src_off);
                     // A handle copied into the pair block takes +1
                     // (leak-not-dangle until the pair's typed drop, 2c).
-                    if self.elem_is_handle(t) {
-                        self.rc_inc_top();
-                    }
+                    self.share_handle_top(t);
                     self.store_ty_slot(t, dst_off);
                 }
                 self.f
@@ -552,6 +550,10 @@ impl Emitter<'_> {
                     .i32_const((almide_layout::PAYLOAD + voff_p) as i32)
                     .i32_add();
                 self.load_ty_slot_at(v);
+                // Handles copied out of the pairs into the map take +1:
+                // the map is a holder with no typed drop yet (the pairs
+                // list releases its own credits, #2010 stage 2c).
+                self.share_handle_top(v);
                 self.store_ty_slot_raw(v);
                 self.f.instructions().else_();
                 let (len_h, nh) = self.emit_copy_grow(rh, lay.2)?;
@@ -565,6 +567,7 @@ impl Emitter<'_> {
                     .i32_const(lay.0 as i32)
                     .i32_add()
                     .local_get(kh);
+                self.share_handle_top(k);
                 self.store_ty_slot_raw(k);
                 self.f
                     .instructions()
@@ -581,6 +584,7 @@ impl Emitter<'_> {
                     .i32_const((almide_layout::PAYLOAD + voff_p) as i32)
                     .i32_add();
                 self.load_ty_slot_at(v);
+                self.share_handle_top(v);
                 self.store_ty_slot_raw(v);
                 self.f.instructions().local_get(nh).local_set(rh);
                 self.release_i32();

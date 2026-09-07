@@ -498,6 +498,9 @@ impl Emitter<'_> {
             .i32_mul()
             .i32_add();
         self.lower(body, Some(k))?;
+        // A pass-through body hands back a VIEW (a captured var, the
+        // input itself): the block storing it is a holder and takes the share.
+        self.rc_share_guard(body, k);
         self.store_ty_slot(k, 0);
         {
             let mut i = self.f.instructions();
