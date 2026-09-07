@@ -267,7 +267,6 @@ pub(crate) fn lower_fn(
             rc_param_ceiling: env_shift + params.len() as u32,
             rc_droppable_params: Vec::new(),
             tail_release_allowed: false,
-            tail_release_fresh_only: false,
             self_index,
             rc_owned: std::collections::BTreeSet::new(),
             module_call_seq: 0,
@@ -558,18 +557,20 @@ fn populate_tail_release_set(
     params: &[(VarId, SliceTy)],
     body: &IrExpr,
 ) {
+    // The raw-address rule: a prim-using body keeps every release on the
+    // epilogue (a raw view into a local or param may still be read by
+    // the code after the call); a lifted lambda's env block is not a
+    // frame of its own. MODULE SPACE is not an exclusion: the structural
+    // witness (#1696 B1) balanced every module-space certificate once
+    // params and owned locals were released at the tail site, and the
+    // two traps once blamed on it (regex captures, lisp's parse_list)
+    // were the loop-form double free (#1988) — 63 leaking wrappers
+    // (`fan_map`, `http_set_header`, `__gby_add`, …) said so.
+    let _ = cur_module;
     if env_shift != 0 || crate::rc_ownership::body_uses_prim(body) {
         return;
     }
-    // A module-space body releases at a tail site only when the callee
-    // is returns-fresh (#1990, fresh.rs): a prim-tier callee may hand
-    // back a VIEW of the param (the regex engine's capture buffer),
-    // and releasing under it printed freelist bytes.
-    if cur_module.is_some() {
-        em.tail_release_fresh_only = true;
-    } else {
-        em.tail_release_allowed = true;
-    }
+    em.tail_release_allowed = true;
     for (k, &(_, pty)) in params.iter().enumerate() {
         if em.rc_droppable(pty) {
             em.rc_droppable_params.push(env_shift + k as u32);

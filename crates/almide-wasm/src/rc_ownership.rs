@@ -169,12 +169,10 @@ impl Emitter<'_> {
             // counter the caller captured before lowering the rhs names
             // that call as entry `seq0 + 1`.
             // `prim.alloc_*` is a fresh block at rc 1: the bind OWNS it.
-            // (An earlier attempt to treat it as owned freed the regex
-            // engine's capture buffer under a live raw view — but the
-            // culprit was the module-space TAIL release of the same
-            // change, not this rule: with the tail release gated on a
-            // returns-fresh callee, fresh.rs, regex_engine / lisp are
-            // byte-identical and every alloc-ledger watermark went DOWN.)
+            // (An earlier attempt to treat it as owned was blamed for the
+            // regex engine's capture garbage; the culprit was the
+            // loop-form double free of #1988, co-landed at the time —
+            // owned allocs sent every alloc-ledger watermark DOWN.)
             almide_ir::CallTarget::Module { module, func, .. }
                 if module.as_str() == "prim" && func.as_str().starts_with("alloc_") =>
             {
