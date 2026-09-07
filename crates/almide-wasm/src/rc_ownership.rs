@@ -32,6 +32,9 @@ pub(crate) fn rc_certainly_fresh(k: &almide_ir::IrExprKind) -> bool {
             | K::ResultOk { .. }
             | K::ResultErr { .. }
             | K::OptionSome { .. }
+            // `none` is NULL_ADDR — no block, so "owned" costs nothing and
+            // lets an `if c then some(x) else none` tail count as owned.
+            | K::OptionNone
     )
 }
 
@@ -44,16 +47,35 @@ pub(crate) fn rc_tail(e: &almide_ir::IrExpr) -> &almide_ir::IrExpr {
 }
 
 impl Emitter<'_> {
-    /// The v1 droppable set: blocks with NO heap interiors (Str, Bytes,
-    /// List of non-handle scalars). Everything else stays on the bump
-    /// graveyard until its drop glue exists.
+    /// The droppable set (#2010 stage 1): every block shape with NO heap
+    /// interiors — Str, Bytes, and a List / tuple / record / variant /
+    /// Option / Result whose payload slots are all flat. Such a block is
+    /// released by `$dec_flat` alone: there is no shared field to
+    /// dangle and no glue to recurse into. A shape holding a block (a
+    /// `List[String]`, an `(Int, String)`, a `Map`) stays on the bump
+    /// graveyard until its typed drop glue exists (#2010 stages 2–4).
     pub(crate) fn rc_droppable(&self, t: SliceTy) -> bool {
         match t {
             SliceTy::Scalar(Scalar::Str | Scalar::Bytes) => true,
-            SliceTy::List(h) => matches!(
-                self.types.el(h),
-                SliceTy::Scalar(s) if !matches!(s, Scalar::Str | Scalar::Bytes)
-            ),
+            SliceTy::List(h) | SliceTy::Option(h) => self.flat_slot(self.types.el(h)),
+            SliceTy::Result(a, b) => self.flat_slot(self.types.el(a)) && self.flat_slot(self.types.el(b)),
+            SliceTy::Tuple(h) => self.types.tuple_def(h).fields.iter().all(|&(t, _)| self.flat_slot(t)),
+            // Records and variants wait for stage 1b: the `mut` param
+            // move-mode rewrite (C-132) carries a record through a
+            // (result, buffer) tuple and writes it back through the Assign
+            // route, whose ownership is not yet audited for a droppable
+            // record (mut_param_effect_never_err double-freed the Tally).
+            SliceTy::Named(_) => false,
+            _ => false,
+        }
+    }
+
+    /// A slot that holds no heap block: a non-Str/Bytes scalar, a flowing
+    /// Unit, or a fn value (a table index).
+    fn flat_slot(&self, t: SliceTy) -> bool {
+        match t {
+            SliceTy::Scalar(s) => !matches!(s, Scalar::Str | Scalar::Bytes),
+            SliceTy::Unit | SliceTy::Fn(_) => true,
             _ => false,
         }
     }

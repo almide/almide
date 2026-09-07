@@ -54,7 +54,7 @@ impl Emitter<'_> {
             // a final len patch (the filter doctrine).
             ("result", "partition", [xs]) => Some(Lowered::owned(self.lower_result_partition(xs)?)),
             ("result", "flat_map", [r, f]) => {
-                let SliceTy::Result(o, _) = self.lower_arg(r, None, ArgMode::Borrow)? else {
+                let SliceTy::Result(o, _) = self.lower_arg(r, None, ArgMode::Retain)? else {
                     return unsup("result-flat_map-of-nonresult");
                 };
                 let (params, body) = self.hof_lambda(f, 1)?;
@@ -243,7 +243,7 @@ impl Emitter<'_> {
         Ok({
 
                 let on_ok = func == "map";
-                let SliceTy::Result(o, er) = self.lower_arg(r, None, ArgMode::Borrow)? else {
+                let SliceTy::Result(o, er) = self.lower_arg(r, None, ArgMode::Retain)? else {
                     return unsup(&format!("result-{func}-of-nonresult"));
                 };
                 let (params, body) = self.hof_lambda(f, 1)?;
@@ -284,6 +284,11 @@ impl Emitter<'_> {
                 self.release_i32();
                 self.release_i32();
                 let bi = self.types.intern(b);
+                // The pass-through side hands the INPUT block back, so the
+                // input is RETAINED (a temporary's credit moves into the
+                // result; a Var takes the share) and the result is owned.
+                // On the mapped side the retained Var's share is a leak,
+                // never a dangle (the per-arm identity is #1996).
                 Some(Lowered::owned(if on_ok { SliceTy::Result(bi, er) } else { SliceTy::Result(o, bi) }))
         })
     }
@@ -388,7 +393,7 @@ impl Emitter<'_> {
                 Some(Lowered::owned(a))
             }
             ("option", "or_else", [o_arg, f]) => {
-                let got @ SliceTy::Option(_) = self.lower_arg(o_arg, None, ArgMode::Borrow)? else {
+                let got @ SliceTy::Option(_) = self.lower_arg(o_arg, None, ArgMode::Retain)? else {
                     return unsup("option-or_else-of-nonoption");
                 };
                 let (_params, body) = self.hof_lambda(f, 0)?;
@@ -402,10 +407,11 @@ impl Emitter<'_> {
                 self.lower(body, Some(got))?;
                 self.f.instructions().else_().local_get(hs).end();
                 self.release_i32();
+                // `some` hands the INPUT back: retained in, owned out (see result.map).
                 Some(Lowered::owned(got))
             }
             ("option", "filter", [o_arg, f]) => {
-                let got @ SliceTy::Option(h) = self.lower_arg(o_arg, None, ArgMode::Borrow)? else {
+                let got @ SliceTy::Option(h) = self.lower_arg(o_arg, None, ArgMode::Retain)? else {
                     return unsup("option-filter-of-nonoption");
                 };
                 let a = self.types.el(h);
@@ -433,6 +439,7 @@ impl Emitter<'_> {
                     i.end();
                 }
                 self.release_i32();
+                // kept = the INPUT block: retained in, owned out (see result.map).
                 Some(Lowered::owned(got))
             }
             ("option", "zip", [a_arg, b_arg]) => {
