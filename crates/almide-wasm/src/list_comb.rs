@@ -750,8 +750,11 @@ impl Emitter<'_> {
             i.call(push).local_set(hacc);
             i.local_get(hc).i32_const(stride).i32_add().local_set(hc);
             i.br(0).end().end();
-            i.local_get(hacc);
         }
+        // Every slot — the copied elements and each occurrence of the
+        // separator — holds its own credit.
+        self.emit_inc_elems(hacc, elem);
+        self.f.instructions().local_get(hacc);
         self.release_i32();
         self.release_i32();
         self.release_val(elem);

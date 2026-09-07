@@ -139,7 +139,10 @@ impl Emitter<'_> {
             ("repeat", [x, n]) => {
                 let elem = self.infer(x)?;
                 let stride = elem.slot_size();
-                self.lower_arg(x, Some(elem), ArgMode::Retain)?;
+                // Borrowed, not retained: every slot of the result takes its
+                // own credit below (a Retain shared the ONE handle once and
+                // the typed drop released it n times — fuzz 20260908/611).
+                self.lower_arg(x, Some(elem), ArgMode::Borrow)?;
                 enum Hx {
                     I64(u32),
                     F64(u32),
@@ -214,6 +217,9 @@ impl Emitter<'_> {
                     i.br(0);
                     i.end();
                     i.end();
+                    let _ = i;
+                    self.emit_inc_elems(hb, elem);
+                    let mut i = self.f.instructions();
                     i.local_get(hb);
                 }
                 self.release_i32();
