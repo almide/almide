@@ -45,7 +45,7 @@
 4288	spec/wasm_cross/bytes_set_value_semantics.almd
 5033	spec/wasm_cross/bytes_string_window_domain.almd
 10434	spec/wasm_cross/bytes_temp_receiver.almd
-14856	spec/wasm_cross/bytes_writer_family.almd
+14860	spec/wasm_cross/bytes_writer_family.almd
 2619	spec/wasm_cross/call_closure_lambda_param.almd
 1776	spec/wasm_cross/call_lambda_ctor.almd
 2386	spec/wasm_cross/callee_shadowing_family.almd
@@ -121,7 +121,7 @@
 8729	spec/wasm_cross/empty_collection_fold.almd
 2138	spec/wasm_cross/empty_from_list_mono.almd
 5246	spec/wasm_cross/encoding_base64.almd
-11906	spec/wasm_cross/endian_auto_import.almd
+11910	spec/wasm_cross/endian_auto_import.almd
 1471	spec/wasm_cross/enumerate_unnameable_element.almd
 1831	spec/wasm_cross/env_args.almd
 2229	spec/wasm_cross/env_get.almd
@@ -157,7 +157,7 @@
 7426	spec/wasm_cross/float_interp_forms.almd
 12894	spec/wasm_cross/float_no_contraction.almd
 16011	spec/wasm_cross/float_parse.almd
-12710	spec/wasm_cross/float_parse_special.almd
+12714	spec/wasm_cross/float_parse_special.almd
 7773	spec/wasm_cross/float_round_negzero.almd
 6798	spec/wasm_cross/float_shortest_roundtrip.almd
 8828	spec/wasm_cross/float_sign_minmax_ieee.almd
@@ -428,7 +428,7 @@
 1402	spec/wasm_cross/nested_tuple_pattern.almd
 2906	spec/wasm_cross/nested_tuples.almd
 10023	spec/wasm_cross/nested_unwrap_or_share.almd
-5229	spec/wasm_cross/nested_unwrap_propagation.almd
+5233	spec/wasm_cross/nested_unwrap_propagation.almd
 3484	spec/wasm_cross/nested_variant_match_bind.almd
 2284	spec/wasm_cross/nested_variant_tag_box.almd
 2005	spec/wasm_cross/nested_variant_tree.almd
