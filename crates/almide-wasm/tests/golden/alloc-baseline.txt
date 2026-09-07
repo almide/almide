@@ -17,7 +17,7 @@
 65952	spec/wasm_cross/autotry_result_first_arg.almd
 84464	spec/wasm_cross/availability_pure_batch.almd
 66912	spec/wasm_cross/bang_in_record_literal_field.almd
-70736	spec/wasm_cross/base64_encode.almd
+70608	spec/wasm_cross/base64_encode.almd
 70464	spec/wasm_cross/binary_operators.almd
 66912	spec/wasm_cross/binary_search_duplicate_keys.almd
 65840	spec/wasm_cross/binding_stmts.almd
@@ -41,10 +41,10 @@
 328208	spec/wasm_cross/bytes_push_growth.almd
 65856	spec/wasm_cross/bytes_push_inplace.almd
 67056	spec/wasm_cross/bytes_rawptr.almd
-89760	spec/wasm_cross/bytes_search_edit_family.almd
+88848	spec/wasm_cross/bytes_search_edit_family.almd
 67216	spec/wasm_cross/bytes_set_value_semantics.almd
 67728	spec/wasm_cross/bytes_string_window_domain.almd
-7750816	spec/wasm_cross/bytes_temp_receiver.almd
+7751632	spec/wasm_cross/bytes_temp_receiver.almd
 76464	spec/wasm_cross/bytes_writer_family.almd
 66160	spec/wasm_cross/call_closure_lambda_param.almd
 65984	spec/wasm_cross/call_lambda_ctor.almd
@@ -55,7 +55,7 @@
 67504	spec/wasm_cross/closure_borrowed_arg_guard.almd
 546416	spec/wasm_cross/closure_captured_map_records.almd
 482768	spec/wasm_cross/closure_rich_list_capture.almd
-82768	spec/wasm_cross/closure_scalar_captures.almd
+82832	spec/wasm_cross/closure_scalar_captures.almd
 65824	spec/wasm_cross/closure_tail_recursion.almd
 67088	spec/wasm_cross/closures_and_variants.almd
 66448	spec/wasm_cross/closures_hof.almd
@@ -218,10 +218,10 @@
 66448	spec/wasm_cross/grain_records_enums.almd
 66880	spec/wasm_cross/grain_string_escapes.almd
 70112	spec/wasm_cross/grouping_unary.almd
-66496	spec/wasm_cross/guard_err_in_call_arg_block.almd
+66432	spec/wasm_cross/guard_err_in_call_arg_block.almd
 66336	spec/wasm_cross/guard_let_statement.almd
 65888	spec/wasm_cross/guard_statement.almd
-774672	spec/wasm_cross/gzip_inflate_members.almd
+770576	spec/wasm_cross/gzip_inflate_members.almd
 71104	spec/wasm_cross/hash_digests.almd
 68816	spec/wasm_cross/heap_arena.almd
 65984	spec/wasm_cross/heap_result_err_interp.almd
@@ -267,7 +267,7 @@
 66064	spec/wasm_cross/interp_effect_unwrap_arg.almd
 66096	spec/wasm_cross/io_write_ordering.almd
 216608	spec/wasm_cross/json_gltf_walk.almd
-3513920	spec/wasm_cross/json_many_keys.almd
+3448256	spec/wasm_cross/json_many_keys.almd
 88848	spec/wasm_cross/json_number_unicode.almd
 74480	spec/wasm_cross/json_parse_lenient_edges.almd
 89296	spec/wasm_cross/json_path_edges.almd
@@ -312,7 +312,7 @@
 66736	spec/wasm_cross/list_float_equality_family.almd
 125536	spec/wasm_cross/list_float_total_order.almd
 220352	spec/wasm_cross/list_heapelem_rc.almd
-162688	spec/wasm_cross/list_index_element_append.almd
+162944	spec/wasm_cross/list_index_element_append.almd
 65920	spec/wasm_cross/list_index_element_append_oob.almd
 66304	spec/wasm_cross/list_insert_clamp.almd
 67024	spec/wasm_cross/list_iter_tco.almd
@@ -454,7 +454,7 @@
 71392	spec/wasm_cross/pipe_unwrap_or_family.almd
 66512	spec/wasm_cross/place_assign_ascription.almd
 66704	spec/wasm_cross/place_mutation.almd
-72160	spec/wasm_cross/playground_default.almd
+71968	spec/wasm_cross/playground_default.almd
 65904	spec/wasm_cross/pop_heap_element.almd
 65920	spec/wasm_cross/prim_alloc_count_domain.almd
 ~	spec/wasm_cross/process_args.almd
@@ -516,8 +516,8 @@
 74416	spec/wasm_cross/result_uoe_float.almd
 66560	spec/wasm_cross/result_value_int_tuple.almd
 66960	spec/wasm_cross/result_wall_escalations.almd
-195824	spec/wasm_cross/rope_at_family.almd
-176752	spec/wasm_cross/rope_geometry_family.almd
+195376	spec/wasm_cross/rope_at_family.almd
+176496	spec/wasm_cross/rope_geometry_family.almd
 66016	spec/wasm_cross/scalar_if_arm_effects.almd
 66384	spec/wasm_cross/scan_heap_acc.almd
 204512	spec/wasm_cross/set_index_order.almd
@@ -684,7 +684,7 @@
 71584	spec/wasm_cross/wide_function_body.almd
 65968	spec/wasm_cross/witness_straightline.almd
 71456	spec/wasm_cross/zip_view_shape.almd
-375680	spec/wasm_cross/zlib_selfhost.almd
+362624	spec/wasm_cross/zlib_selfhost.almd
 66224	spec/wasm_fail/effect_err_aborts_both_legs.almd
 66224	spec/wasm_fail/int_parse_err_propagates.almd
 66272	spec/wasm_fail/matrix_index_oob_aborts.almd
