@@ -123,6 +123,12 @@ pub(crate) enum Helper {
     /// Result / tuple / record / variant block — the credits a whole-block
     /// COPY of it must hold (`CopyElems { inc_elems }` calls it).
     IncShape { ty: SliceTy },
+    /// `$drop_map(block)` — a Map's SPINE drop (#2010, Map stage a): the
+    /// block's credit down; at zero its index side-table entry is cleared
+    /// (`side_clear` = `$mapidx_side_set`, so a reused address inherits no
+    /// stale index) and the entries array freed. Keys and values keep the
+    /// credits they hold today (stage b: the per-entry walk).
+    DropMapSpine { side_clear: u32 },
 }
 
 /// The pretty printer's extra pooled fragments.

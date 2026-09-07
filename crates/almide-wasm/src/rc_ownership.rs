@@ -67,6 +67,8 @@ impl Emitter<'_> {
             | SliceTy::Tuple(_) => true,
             // Stage 2c-ii: records and variants with a layout.
             SliceTy::Named(ti) => self.named_has_layout(ti),
+            // Map stage a: the spine is a credit its holder releases.
+            SliceTy::Map(..) | SliceTy::Set(_) => true,
             _ => false,
         }
     }
@@ -173,6 +175,11 @@ impl Emitter<'_> {
                     F_DEC_FLAT
                 }
             }
+            SliceTy::Map(..) => {
+                let raw = self.work.helper(crate::work::Helper::MapIdxSideRaw);
+                let side_clear = self.work.helper(crate::work::Helper::MapIdxSideSet { raw });
+                self.work.helper(crate::work::Helper::DropMapSpine { side_clear })
+            }
             _ => F_DEC_FLAT,
         }
     }
@@ -250,6 +257,9 @@ impl Emitter<'_> {
             // route, whose ownership is not yet audited for a droppable
             // record (mut_param_effect_never_err double-freed the Tally).
             SliceTy::Named(ti) => self.named_has_layout(ti),
+            // Map stage a (#2010): the entries array is released with its
+            // index side-table entry; keys and values keep their credits.
+            SliceTy::Map(..) | SliceTy::Set(_) => true,
             _ => false,
         }
     }
@@ -289,12 +299,6 @@ impl Emitter<'_> {
         // exactly what the in-place set window asks (rc == 1 ⇒ the
         // var's block is its alone). Binds/assigns copy, so a plain var
         // never shares; a fresh value has no other holder to witness.
-        if matches!(ty, SliceTy::Map(..)) {
-            if !rc_certainly_fresh(&e.kind) {
-                self.rc_inc_top();
-            }
-            return;
-        }
         match &e.kind {
             almide_ir::IrExprKind::Var { id } => {
                 if self.cells.contains(id) {

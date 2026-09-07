@@ -70,6 +70,8 @@ fn droppable_ty(t: &Ty) -> bool {
         Ty::Tuple(_) => true,
         // Stage 2c-ii: records and variants (an Excluded name binds a plain local).
         Ty::Applied(TypeConstructorId::UserDefined(_), _) => true,
+        // Map stage a: the entries array is a credit.
+        Ty::Applied(TypeConstructorId::Map | TypeConstructorId::Set, _) => true,
         _ => false,
     }
 }
