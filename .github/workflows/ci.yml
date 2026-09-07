@@ -1126,6 +1126,9 @@ jobs:
       - name: ALS pin — every contract id is known to the judge at proofs/als-pin.txt (als #60)
         run: bash scripts/check-als-pin.sh
 
+      - name: Exit sites — every frame exit of the structural emitter goes through the ExitPlan renderer (#1995)
+        run: bash scripts/check-exit-sites.sh
+
       - name: WASI/Component-Model pin policy (#1628 stage 4)
         run: bash scripts/check-wasi-pins.sh
 
