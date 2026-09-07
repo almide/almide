@@ -385,6 +385,12 @@ impl Emitter<'_> {
                             if fn_err != Some(ert) {
                                 return unsup("unwrap-err-ty-mismatch");
                             }
+                            // The propagated block is the operand's: a BORROWED
+                            // operand (a local the exit below releases) hands the
+                            // caller a share; an owned temporary moves out.
+                            if !self.rc_owned_result(expr) {
+                                self.f.instructions().local_get(self.scr_i32_local).call(F_INC);
+                            }
                             let plan = self.exit_plan(crate::exit_plan::Continuation::ReturnError);
                             self.emit_exit(&plan);
                             self.f.instructions().local_get(self.scr_i32_local).return_();

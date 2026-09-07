@@ -32,9 +32,7 @@ impl Emitter<'_> {
         self.load_ty_slot(elem, 0);
         // The element handle inside the Option block takes +1
         // (leak-not-dangle until the Option's typed drop, stage 2c).
-        if self.elem_is_handle(elem) {
-            self.rc_inc_top();
-        }
+        self.share_handle_top(elem);
         self.store_ty_slot(elem, almide_layout::OPTION_FIELD);
         self.f.instructions().local_get(hr).end();
         self.release_i32();
@@ -261,8 +259,10 @@ impl Emitter<'_> {
             i.end();
             i.local_get(hc).i32_const(stride).i32_add().local_set(hc);
             i.br(0).end().end();
-            i.local_get(hacc);
         }
+        // The kept elements are COPIES of the source's handles.
+        self.emit_inc_elems(hacc, elem);
+        self.f.instructions().local_get(hacc);
         self.release_val(elem);
         for _ in 0..3 {
             self.release_i32();
@@ -450,9 +450,7 @@ impl Emitter<'_> {
             .local_get(params[0]);
         // The element handle inside the Option block takes +1
         // (leak-not-dangle until the Option's typed drop, stage 2c).
-        if self.elem_is_handle(elem) {
-            self.rc_inc_top();
-        }
+        self.share_handle_top(elem);
         self.store_ty_slot(elem, almide_layout::OPTION_FIELD);
         self.f.instructions().local_get(hr).end();
         for _ in 0..4 {
@@ -563,10 +561,14 @@ impl Emitter<'_> {
             self.f.instructions().local_get(hp);
             self.f.instructions().local_get(ha).local_get(hi).i32_const(sa).i32_mul().i32_add();
             self.load_ty_slot(ea, 0);
+            // Handles copied into the pair block take +1 (the pair's typed
+            // drop releases them, #2010 stage 2c).
+            self.share_handle_top(ea);
             self.store_ty_slot(ea, def.fields[0].1);
             self.f.instructions().local_get(hp);
             self.f.instructions().local_get(hb).local_get(hi).i32_const(sb).i32_mul().i32_add();
             self.load_ty_slot(eb, 0);
+            self.share_handle_top(eb);
             self.store_ty_slot(eb, def.fields[1].1);
             self.f.instructions().local_get(hp);
             self.release_i32();

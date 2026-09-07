@@ -212,9 +212,7 @@ impl Emitter<'_> {
         // epilogue decs every droppable param, so the element — a borrowed
         // read the list still holds — takes the RC-3 +1 here, exactly as
         // the fs walkers' per-line call does.
-        if self.rc_droppable(elem) {
-            self.rc_inc_top();
-        }
+        self.share_handle_top(elem);
         self.f.instructions().local_get(henv).i32_load(slot_memarg(0));
         let ti = self.work.itype(
             vec![ValType::I32, elem.val_type()],

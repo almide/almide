@@ -97,6 +97,30 @@ fn a_copied_spine_holds_its_own_element_credits() {
     );
 }
 
+/// #2010 stage 2c: an Option / Result / tuple block whose payload is a
+/// heap handle releases the payload with the block (the typed shape
+/// drop) — `some(str)`, `ok(list)` and `(str, list)` per call stay flat.
+#[test]
+fn a_shape_block_releases_its_handle_payload() {
+    flat(
+        "let o = some(str); let r: Result[List[Int], String] = ok([i]); let t = (str, [i])",
+        "    let o = some(int.to_string(i))\n    let r: Result[List[Int], String] = ok([i])\n    let t = (int.to_string(i), [i, i])\n    let (a, b) = t\n    total = total + string.len(o ?? \"\") + list.len(r ?? []) + string.len(a) + list.len(b)",
+        "8780",
+        "85780",
+    );
+}
+
+/// #2010 stage 2c: a list of options of strings releases every level.
+#[test]
+fn a_list_of_options_of_strings_releases_every_level() {
+    flat(
+        "let xs: List[String?] = [some(str), none]",
+        "    let xs: List[String?] = [some(int.to_string(i)), none, some(\"k\")]\n    let ys = list.filter(xs, (o) => option.is_some(o))\n    total = total + list.len(xs) + list.len(ys)",
+        "5000",
+        "40000",
+    );
+}
+
 #[test]
 fn a_bound_call_result_is_released() {
     flat("let x = mk(i)", "    let x = mk(i)\n    total = total + list.len(x)", "3000", "24000");

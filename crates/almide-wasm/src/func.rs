@@ -475,7 +475,7 @@ pub(crate) fn lower_fn(
             let hs = em.work.helpers.borrow();
             hs.iter()
                 .enumerate()
-                .filter(|(_, h)| matches!(h, crate::work::Helper::DropList { .. }))
+                .filter(|(_, h)| matches!(h, crate::work::Helper::DropList { .. } | crate::work::Helper::DropShape { .. }))
                 .map(|(p, _)| em.work.helper_base.get() + p as u32)
                 .collect()
         };

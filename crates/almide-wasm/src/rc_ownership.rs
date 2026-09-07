@@ -54,11 +54,31 @@ impl Emitter<'_> {
     /// dangle and no glue to recurse into. A shape holding a block (a
     /// `List[String]`, an `(Int, String)`, a `Map`) stays on the bump
     /// graveyard until its typed drop glue exists (#2010 stages 2–4).
-    /// A List element whose slot is a heap HANDLE the spine holds one
-    /// credit of (#2010 stage 2b): Str / Bytes / a nested List. Option,
-    /// Result, tuple and record elements are inline payloads (stage 2c).
+    /// A slot whose value is a heap HANDLE the holder owns one credit of
+    /// (#2010 stage 2b/2c): Str / Bytes, a List, an Option / Result /
+    /// tuple block. Records and variants (2c-ii), Map / Set / Value / Fn
+    /// handles carry no credit the holder releases yet.
     pub(crate) fn elem_is_handle(&self, elem: SliceTy) -> bool {
-        matches!(elem, SliceTy::Scalar(Scalar::Str | Scalar::Bytes) | SliceTy::List(_))
+        matches!(
+            elem,
+            SliceTy::Scalar(Scalar::Str | Scalar::Bytes)
+                | SliceTy::List(_)
+                | SliceTy::Option(_)
+                | SliceTy::Result(..)
+                | SliceTy::Tuple(_)
+        )
+    }
+
+    /// The typed drop of a fixed-slot block (Option / Result / tuple):
+    /// registered once per type, its body built here (the slot table
+    /// needs the type table, which assembly does not have).
+    fn drop_shape(&self, ty: SliceTy, slots: Vec<(u32, u32)>, tagged: Option<(u32, Vec<(u32, Vec<(u32, u32)>)>)>) -> u32 {
+        let idx = self.work.helper(crate::work::Helper::DropShape { ty });
+        if !self.work.drop_bodies.borrow().contains_key(&ty) {
+            let f = crate::runtime_alloc::emit_drop_shape(&slots, tagged);
+            self.work.drop_bodies.borrow_mut().insert(ty, f);
+        }
+        idx
     }
 
     /// The release fn of a droppable block of type `t`: `$dec_flat` for a
@@ -73,6 +93,43 @@ impl Emitter<'_> {
                     self.work.helper(crate::work::Helper::DropList { elem_dec })
                 } else {
                     F_DEC_FLAT
+                }
+            }
+            SliceTy::Option(h) => {
+                let el = self.types.el(h);
+                if self.elem_is_handle(el) {
+                    let dec = self.dec_fn_of(el);
+                    self.drop_shape(t, vec![(almide_layout::OPTION_FIELD, dec)], None)
+                } else {
+                    F_DEC_FLAT
+                }
+            }
+            SliceTy::Result(a, b) => {
+                let (ta, tb) = (self.types.el(a), self.types.el(b));
+                let mut cases = Vec::new();
+                for (tag, pt) in [(0u32, ta), (1u32, tb)] {
+                    if self.elem_is_handle(pt) {
+                        let dec = self.dec_fn_of(pt);
+                        cases.push((tag, vec![(almide_layout::SUM_FIELD, dec)]));
+                    }
+                }
+                if cases.is_empty() {
+                    F_DEC_FLAT
+                } else {
+                    self.drop_shape(t, Vec::new(), Some((almide_layout::SUM_TAG, cases)))
+                }
+            }
+            SliceTy::Tuple(h) => {
+                let fields = self.types.tuple_def(h).fields.clone();
+                let slots: Vec<(u32, u32)> = fields
+                    .iter()
+                    .filter(|&&(ft, _)| self.elem_is_handle(ft))
+                    .map(|&(ft, off)| (off, self.dec_fn_of(ft)))
+                    .collect();
+                if slots.is_empty() {
+                    F_DEC_FLAT
+                } else {
+                    self.drop_shape(t, slots, None)
                 }
             }
             _ => F_DEC_FLAT,
@@ -134,9 +191,12 @@ impl Emitter<'_> {
             // fresh memory to be zero (now filled). Releasing the elements is
             // stage 2b: typed glue (#2010).
             SliceTy::List(_) => true,
-            SliceTy::Option(h) => self.flat_slot(self.types.el(h)),
-            SliceTy::Result(a, b) => self.flat_slot(self.types.el(a)) && self.flat_slot(self.types.el(b)),
-            SliceTy::Tuple(h) => self.types.tuple_def(h).fields.iter().all(|&(t, _)| self.flat_slot(t)),
+            // Stage 2c: an Option / Result / tuple block of ANY payload —
+            // a handle slot is released by the typed drop (`dec_fn_of`),
+            // a flat slot needs nothing, and a slot of a shape with no
+            // typed drop yet (a record, a Map) keeps its credit (leak,
+            // never a dangle).
+            SliceTy::Option(_) | SliceTy::Result(..) | SliceTy::Tuple(_) => true,
             // Records and variants wait for stage 1b: the `mut` param
             // move-mode rewrite (C-132) carries a record through a
             // (result, buffer) tuple and writes it back through the Assign
@@ -147,13 +207,12 @@ impl Emitter<'_> {
         }
     }
 
-    /// A slot that holds no heap block: a non-Str/Bytes scalar, a flowing
-    /// Unit, or a fn value (a table index).
-    fn flat_slot(&self, t: SliceTy) -> bool {
-        match t {
-            SliceTy::Scalar(s) => !matches!(s, Scalar::Str | Scalar::Bytes),
-            SliceTy::Unit | SliceTy::Fn(_) => true,
-            _ => false,
+    /// The handle on top of the stack is being COPIED into a block that
+    /// will release it (a pair, an Option, a set entry, a list slot): +1
+    /// when its type is one a holder owns a credit of, nothing otherwise.
+    pub(crate) fn share_handle_top(&mut self, t: SliceTy) {
+        if self.elem_is_handle(t) {
+            self.rc_inc_top();
         }
     }
 
@@ -195,22 +254,19 @@ impl Emitter<'_> {
                     return;
                 }
                 let Some(&(_, vt)) = self.locals.get(id) else { return };
-                if self.rc_droppable(vt) {
-                    self.rc_inc_top();
-                }
+                self.share_handle_top(vt);
             }
             // A control funnel can RETURN a var borrow through its arm
             // tails (`push(out, if c then a else b)`) — the O3 gap.
             // Conservative +1 when the stored type itself is droppable:
             // an over-inc on a fresh arm is a leak, never a dangle.
-            almide_ir::IrExprKind::If { .. }
-            | almide_ir::IrExprKind::Match { .. }
-            | almide_ir::IrExprKind::Block { .. }
-            | almide_ir::IrExprKind::Unwrap { .. }
-            | almide_ir::IrExprKind::UnwrapOr { .. }
-            | almide_ir::IrExprKind::Try { .. }
-                if self.rc_droppable(ty) =>
-            {
+            // Every other BORROWED droppable value takes +1: a control
+            // funnel returning a var borrow through its arm tails (the O3
+            // gap), an element / field read, an unwrap of a payload, a
+            // native arm's declared View. An OWNED value — a fresh
+            // construction, an owned call result, a funnel whose every arm
+            // is owned (`rc_owned_result`) — moves in with its credit.
+            _ if self.rc_droppable(ty) && !self.rc_owned_result(e) => {
                 self.rc_inc_top();
             }
             _ => {}

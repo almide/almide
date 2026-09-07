@@ -65,32 +65,11 @@ fn droppable_ty(t: &Ty) -> bool {
         Ty::String | Ty::Bytes => true,
         // Any List (stage 2a: the spine is released; elements are 2b).
         Ty::Applied(TypeConstructorId::List, _) => true,
-        Ty::Applied(TypeConstructorId::Option, args) => args.first().is_some_and(flat_ty),
-        Ty::Applied(TypeConstructorId::Result, args) => args.len() == 2 && args.iter().all(flat_ty),
-        Ty::Tuple(elems) => elems.iter().all(flat_ty),
+        // Stage 2c: any Option / Result / tuple block (rc_droppable).
+        Ty::Applied(TypeConstructorId::Option | TypeConstructorId::Result, _) => true,
+        Ty::Tuple(_) => true,
         _ => false,
     }
-}
-
-/// A slot holding no heap block.
-fn flat_ty(t: &Ty) -> bool {
-    matches!(
-        t,
-        Ty::Int
-            | Ty::Float
-            | Ty::Bool
-            | Ty::Unit
-            | Ty::Int8
-            | Ty::Int16
-            | Ty::Int32
-            | Ty::Int64
-            | Ty::UInt8
-            | Ty::UInt16
-            | Ty::UInt32
-            | Ty::UInt64
-            | Ty::Float32
-            | Ty::Float64
-    )
 }
 
 /// A call that produces its value: a Named user fn, or a module op
