@@ -28,8 +28,7 @@ impl Emitter<'_> {
         let Some(&(idx, SliceTy::Scalar(Scalar::Str))) = self.locals.get(var) else {
             return Ok(false);
         };
-        let IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, left, right } = &value.kind
-        else {
+        let Some((left, right)) = concat_operands(value, almide_ir::BinOp::ConcatStr) else {
             return Ok(false);
         };
         if !matches!(&left.kind, IrExprKind::Var { id } if id == var) {
@@ -62,8 +61,7 @@ impl Emitter<'_> {
         let Some(&(idx, SliceTy::List(h))) = self.locals.get(var) else {
             return Ok(false);
         };
-        let IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList, left, right } = &value.kind
-        else {
+        let Some((left, right)) = concat_operands(value, almide_ir::BinOp::ConcatList) else {
             return Ok(false);
         };
         if !matches!(&left.kind, IrExprKind::Var { id } if id == var) {
@@ -125,5 +123,27 @@ impl Emitter<'_> {
             return Ok(false);
         }
         self.try_map_set_in_place(var, key, val)
+    }
+}
+
+/// The operands of an append-shaped concat, through the temporaries
+/// binder's wrap: `x + rhs` arrives either bare or as
+/// `{ let t = rhs; x + t }` (arg_temps.rs binds a born-here / call-result
+/// operand). The fast paths consume `rhs` directly — the temporary never
+/// materialises, so nothing is left to release. Without this the append
+/// loop fell back to the concat path, whose >512 KB generations are exact
+/// allocations outside the freelist classes (2^17 appends OOM'd, #1701).
+fn concat_operands(value: &IrExpr, op: almide_ir::BinOp) -> Option<(&IrExpr, &IrExpr)> {
+    match &value.kind {
+        IrExprKind::BinOp { op: o, left, right } if *o == op => Some((left, right)),
+        IrExprKind::Block { stmts, expr: Some(tail) } if stmts.len() == 1 => {
+            let almide_ir::IrStmtKind::Bind { var: t, value: bound, .. } = &stmts[0].kind else { return None };
+            let IrExprKind::BinOp { op: o, left, right } = &tail.kind else { return None };
+            if *o != op || !matches!(&right.kind, IrExprKind::Var { id } if id == t) {
+                return None;
+            }
+            Some((left, bound))
+        }
+        _ => None,
     }
 }
