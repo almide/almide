@@ -468,7 +468,12 @@ impl Emitter<'_> {
     ) -> ArmResult {
         let (params, body) = self.hof_lambda(cb, 2)?;
         let b_ty = self.infer(body)?;
-        self.lower_arg(init, Some(b_ty), ArgMode::Retain)?;
+        // The seed is only READ (never pushed): a borrow, released by the
+        // scope after the loop. Every pushed accumulator is a value the
+        // result list holds — a borrowed body result (the seed, the
+        // previous accumulator) takes its share before the push (fuzz
+        // 20260910: `scan(xs, s, (a, x) => a)` pushed one block twice).
+        self.lower_arg(init, Some(b_ty), ArgMode::Borrow)?;
         self.f.instructions().local_set(params[0]);
         let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
         let hacc = self.hold_i32()?;
@@ -476,6 +481,7 @@ impl Emitter<'_> {
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.hof_elem_into(elem, bh, ch, ih, params[1]);
         self.lower(body, Some(b_ty))?;
+        self.rc_share_guard(body, b_ty);
         self.f.instructions().local_set(params[0]);
         self.f.instructions().local_get(hacc).local_get(params[0]);
         if b_ty.val_type() == ValType::F64 {
