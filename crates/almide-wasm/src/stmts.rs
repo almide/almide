@@ -240,14 +240,15 @@ impl Emitter<'_> {
         // by, so a borrowed rhs takes +1 — cells included). Maps and
         // Sets keep the bind copy: their mutations are functional
         // rebinds that never pass a COW gate.
-        if matches!(declared, SliceTy::Map(..) | SliceTy::Set(_)) {
-            self.f.instructions().call(F_BLOCK_COPY);
-        }
         // Every DROPPABLE shape shares on a borrowed rhs — the flat
         // Option / Result / tuple blocks included (`let n1: Int? = n ?? none`
         // read the nested option's payload as a view and, owning it
-        // without the +1, double-freed it beside `n2`).
-        if self.rc_droppable(declared) && !self.rc_owned_result(value) {
+        // without the +1, double-freed it beside `n2`). A Map / Set bind
+        // COPIES instead (their mutations are functional rebinds), and the
+        // copy is the local's own credit.
+        if matches!(declared, SliceTy::Map(..) | SliceTy::Set(_)) {
+            self.f.instructions().call(F_BLOCK_COPY);
+        } else if self.rc_droppable(declared) && !self.rc_owned_result(value) {
             self.rc_inc_top();
         }
         if self.cells.contains(var) {
@@ -700,8 +701,7 @@ impl Emitter<'_> {
                 // RC-5: same share discipline as Bind.
                 if matches!(declared, SliceTy::Map(..) | SliceTy::Set(_)) {
                     self.f.instructions().call(F_BLOCK_COPY);
-                }
-                if self.rc_droppable(declared) && !self.rc_owned_result(value) {
+                } else if self.rc_droppable(declared) && !self.rc_owned_result(value) {
                     self.rc_inc_top();
                 }
                 // RC-3: same ownership settlement as Bind — locals only

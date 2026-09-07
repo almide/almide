@@ -320,6 +320,35 @@ pub(crate) fn emit_drop_shape(slots: &[(u32, u32)], tagged: Option<(u32, Vec<(u3
     f
 }
 
+/// `$drop_map(block)` — `$dec_flat` for a Map: at rc 0 the index
+/// side-table entry for this address is cleared (a stale index on a
+/// reused address would answer for the wrong map), then the entries
+/// array freed. Entries keep their credits (Map stage a).
+pub(crate) fn emit_drop_map_spine(side_clear: u32) -> Function {
+    let (block, rc) = (0u32, 1u32);
+    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
+    let mut f = Function::new([(1, ValType::I32)]);
+    let mut i = f.instructions();
+    i.local_get(block).global_get(G_LINE_END).i32_lt_u().if_(BlockType::Empty);
+    i.return_();
+    i.end();
+    i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_sub().local_set(rc);
+    if std::env::var_os("ALMIDE_RC_TRAP_DOUBLE_FREE").is_some() {
+        i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
+        i.unreachable();
+        i.end();
+    }
+    i.local_get(block).local_get(rc).i32_store(word(almide_layout::RC.offset));
+    i.local_get(rc).i32_eqz().if_(BlockType::Empty);
+    i.global_get(G_MAPIDX).if_(BlockType::Empty);
+    i.local_get(block).i32_const(0).call(side_clear).drop();
+    i.end();
+    i.local_get(block).call(F_FREE);
+    i.end();
+    i.end();
+    f
+}
+
 /// `$inc_<shape>(block)`: +1 on every handle slot of a fixed-slot block
 /// (the tagged half per case, as `emit_drop_shape`).
 pub(crate) fn emit_inc_shape(slots: &[(u32, u32)], tagged: Option<(u32, Vec<(u32, Vec<(u32, u32)>)>)>) -> Function {
@@ -399,6 +428,7 @@ pub(crate) fn helper_params(h: &Helper) -> Option<Vec<ValType>> {
             | Helper::CowElems { .. }
             | Helper::DropShape { .. }
             | Helper::IncShape { .. }
+            | Helper::DropMapSpine { .. }
     )
     .then(|| vec![ValType::I32])
 }
@@ -408,7 +438,11 @@ pub(crate) fn helper_params(h: &Helper) -> Option<Vec<ValType>> {
 /// unless assembly says f64.
 pub(crate) fn helper_result(h: &Helper) -> Option<ValType> {
     match h {
-        Helper::DropList { .. } | Helper::IncElems | Helper::DropShape { .. } | Helper::IncShape { .. } => None,
+        Helper::DropList { .. }
+        | Helper::IncElems
+        | Helper::DropShape { .. }
+        | Helper::IncShape { .. }
+        | Helper::DropMapSpine { .. } => None,
         _ => Some(ValType::I32),
     }
 }
@@ -421,6 +455,7 @@ pub(crate) fn helper_body(h: &Helper, work: &crate::work::FnWork) -> Option<Func
         Helper::IncElems => emit_inc_elems(),
         Helper::CopyElems { inc_elems } => emit_copy_elems(*inc_elems),
         Helper::CowElems { inc_elems } => emit_cow_elems(*inc_elems),
+        Helper::DropMapSpine { side_clear } => emit_drop_map_spine(*side_clear),
         Helper::DropShape { .. } | Helper::IncShape { .. } => {
             let mut bodies = work.drop_bodies.borrow_mut();
             let built = bodies.iter_mut().find(|(k, _)| k == h).and_then(|(_, f)| f.take());
