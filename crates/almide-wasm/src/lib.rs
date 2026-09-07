@@ -90,6 +90,7 @@ fn unsup<T>(what: &str) -> Result<T, EmitError> {
 }
 
 mod bytes;
+mod param_borrow;
 mod bytes_rw;
 mod bytes_recv;
 mod bytes_split;
@@ -522,6 +523,10 @@ struct FnInfo {
     ret: Option<SliceTy>,
     /// Why call sites must refuse this function (None = callable).
     refuse: Option<String>,
+    /// Per param: does the CALLEE own it (the site shares, the exit plan
+    /// releases) or only borrow it (neither) — param_borrow.rs (#2028).
+    /// Both sides of every call edge read this one vector.
+    param_owned: Vec<bool>,
 }
 
 struct FnTable {

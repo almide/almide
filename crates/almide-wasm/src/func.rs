@@ -135,6 +135,10 @@ pub(crate) struct FnPlan {
     /// them (#1988: releasing them at the loop-back double-freed a Str
     /// local in examples/lisp.almd's parse_list).
     pub(crate) self_index: Option<u32>,
+    /// Per param, does THIS frame own it (param_borrow.rs, #2028)? None =
+    /// every droppable param is owned (main, lifted lambdas, display
+    /// helpers — frames outside the program-function table).
+    pub(crate) param_owned: Option<Vec<bool>>,
 }
 
 pub(crate) fn lower_fn(
@@ -156,6 +160,7 @@ pub(crate) fn lower_fn(
         var_space,
         witness_name,
         self_index,
+        param_owned,
         name: fn_name,
     } = plan;
     // E083 (#1996): the exit ledger emit_exit records, and the names the
@@ -307,6 +312,7 @@ pub(crate) fn lower_fn(
             scr_f64_local,
             loop_ctl: None,
             in_tail: false,
+            try_see_through: false,
             branch_depth: 0,
             witness: None,
             cur_module,
@@ -342,12 +348,16 @@ pub(crate) fn lower_fn(
             let mut w = crate::witness::WitnessRecorder::new();
             for (k, &(_, pty)) in params.iter().enumerate() {
                 if em.rc_droppable(pty) {
-                    w.param_owned(env_shift + k as u32);
+                    if param_is_owned(&param_owned, k) {
+                        w.param_owned(env_shift + k as u32);
+                    } else {
+                        w.param_borrowed(env_shift + k as u32);
+                    }
                 }
             }
             em.witness = Some(w);
         }
-        populate_tail_release_set(&mut em, cur_module, env_shift, params, body);
+        populate_tail_release_set(&mut em, cur_module, env_shift, params, body, &param_owned);
         if let Some((_, dl)) = em.region_repair {
             em.f.instructions().global_get(G_DET_DEPTH).local_set(dl);
         }
@@ -587,6 +597,7 @@ fn populate_tail_release_set(
     env_shift: u32,
     params: &[(VarId, SliceTy)],
     body: &IrExpr,
+    param_owned: &Option<Vec<bool>>,
 ) {
     // The raw-address rule: a prim-using body keeps every release on the
     // epilogue (a raw view into a local or param may still be read by
@@ -602,14 +613,23 @@ fn populate_tail_release_set(
     // release exactly what the epilogue would, raw-address rule or not.
     // A lifted lambda's raw param 0 is the closure ENV block, never a
     // frame credit (the C-319 trio) — env_shift skips it.
+    // A BORROWED param (param_borrow.rs, #2028) is not a frame credit: the
+    // caller keeps it, no exit releases it.
     for (k, &(_, pty)) in params.iter().enumerate() {
         if em.rc_droppable(pty) {
-            em.rc_frame_params.push(env_shift + k as u32);
             em.owned_ty.insert(env_shift + k as u32, pty);
+            if param_is_owned(param_owned, k) {
+                em.rc_frame_params.push(env_shift + k as u32);
+            }
         }
     }
     if env_shift != 0 || crate::rc_ownership::body_uses_prim(body) {
         return;
     }
     em.tail_release_allowed = true;
+}
+
+/// The plan's verdict for param `k`: None = every param owned.
+fn param_is_owned(param_owned: &Option<Vec<bool>>, k: usize) -> bool {
+    param_owned.as_ref().map_or(true, |v| v.get(k).copied().unwrap_or(true))
 }

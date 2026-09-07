@@ -1,0 +1,29 @@
+// treealloc — sequential allocate-then-walk of a variant tree (#2028).
+// No fan, no parallelism: one frame builds 2^19 nodes, one frame walks
+// them, twelve times. The row exists because the drop-glue arc made
+// `Node(Tree, Tree)` droppable and every `check(t)` call paid an inc/dec
+// pair per node (+51 % on the structural leg) while both runtime gates
+// stayed green: binarytrees runs its arms on the host thread pool and the
+// other rows never pass a variant through a call. This one does nothing
+// else.
+// Usage: almide run treealloc.almd
+
+type Tree = Leaf | Node(Tree, Tree)
+
+fn make(depth: Int) -> Tree =
+  if depth == 0 then Leaf else Node(make(depth - 1), make(depth - 1))
+
+fn check(t: Tree) -> Int = match t {
+  Leaf => 1,
+  Node(l, r) => check(l) + check(r) + 1,
+}
+
+fn main() -> Unit = {
+  var total = 0
+  var i = 0
+  while i < 12 {
+    total = total + check(make(19))
+    i = i + 1
+  }
+  println("${total}")
+}

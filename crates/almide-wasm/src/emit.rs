@@ -87,7 +87,13 @@ fn emit_program_pass(
             table.impl_index.insert(f.name.as_str().to_string(), i);
         }
         table.by_name.insert(key, i);
-        table.infos.push(FnInfo { wasm_index: F_FN_BASE + i as u32, params, ret, refuse });
+        table.infos.push(FnInfo { wasm_index: F_FN_BASE + i as u32, params, ret, refuse, param_owned: Vec::new() });
+    }
+    // Which params each callee owns (#2028): computed once, over the whole
+    // table, before any body lowers — the call sites and the exit plans
+    // read the same vector.
+    for (i, owned) in crate::param_borrow::infer(&program_fns, &table, &types).into_iter().enumerate() {
+        table.infos[i].param_owned = owned;
     }
     let main_index = F_FN_BASE + program_fns.len() as u32;
     let region_pure = region::region_pure_fns(ir, &program_fns, &table);
@@ -154,6 +160,7 @@ fn emit_program_pass(
                 qual.clone().unwrap_or_else(|| f.name.as_str().to_string()),
             ),
             self_index: Some(table.infos[i].wasm_index),
+            param_owned: Some(table.infos[i].param_owned.clone()),
         };
         match lower_fn(&params, plan, &f.body, &[], &ctx, &mut pool) {
             Ok(ok) => {
@@ -207,6 +214,7 @@ fn emit_program_pass(
         metered: !meter.user.is_empty(),
         charge_entry: false,
         self_index: None,
+        param_owned: None,
     };
     let (main_fn, main_calls) =
         lower_fn(&[], main_plan, &main.body, &init_lets, &ctx, &mut pool)?;
@@ -242,6 +250,7 @@ fn emit_program_pass(
                 metered: !meter.user.is_empty(),
                 charge_entry: !meter.user.is_empty() && ll.charge_hop,
                 self_index: None,
+        param_owned: None,
             };
             let (f, calls) = lower_fn(&ll.params, plan, &ll.body, &[], &ctx, &mut pool)?;
             display_helper_calls

@@ -22,10 +22,13 @@
 //! PHASE B1 (the call boundary, still certificate v0 — #1696): a Bind
 //! whose rhs is a call to a user fn over Var / literal arguments, and a
 //! tail that is such a call or a fresh literal, are admitted. The
-//! structural convention is CALLEE-OWNED: a droppable Var argument takes a
-//! real `rc_inc` at the site (`a`) and its credit leaves the frame into
-//! the callee (`m`); a fresh temporary argument is born (`i`) and leaves
-//! (`m`); the callee hands back exactly one credit with a droppable
+//! structural convention is CALLEE-OWNED for a param the callee consumes
+//! (param_borrow.rs, #2028 — a param it only reads is BORROWED: a Var
+//! argument records nothing, a fresh temporary is born and released by
+//! the site, `id`): a droppable Var argument takes a real `rc_inc` at the
+//! site (`a`) and its credit leaves the frame into the callee (`m`); a
+//! fresh temporary argument is born (`i`) and leaves (`m`); the callee
+//! hands back exactly one credit with a droppable
 //! result (#1986), which the bind receives as a new object (`i`). A tail
 //! call / fresh tail moves its one credit out (`im`). A `return_call`
 //! site releases the owned params before the jump and records each `d`.
@@ -89,6 +92,22 @@ impl WitnessRecorder {
     pub fn param_owned(&mut self, local: u32) {
         let o = self.fresh_obj(local);
         self.streams.entry(o).or_default().push('i');
+    }
+
+    /// A droppable param this frame only BORROWS (param_borrow.rs, #2028):
+    /// the object is known, no credit of it is held here — a share or a
+    /// ret-move on it balances against nothing this frame owns.
+    pub fn param_borrowed(&mut self, local: u32) {
+        let o = self.fresh_obj(local);
+        self.streams.entry(o).or_default();
+    }
+
+    /// A fresh temporary lent to a borrowed param: born at the site,
+    /// released by the site right after the call.
+    pub fn temp_borrowed(&mut self) {
+        let o = self.next_obj;
+        self.next_obj += 1;
+        self.streams.entry(o).or_default().push_str("id");
     }
 
     /// Bind of a certainly-fresh rhs (heap literal, block copy): a new
@@ -417,6 +436,22 @@ impl Emitter<'_> {
             Some(l) if w.arg_share_move(l) => {}
             None if fresh => w.temp_move(),
             _ => w.poison(),
+        }
+    }
+
+    /// The call-argument hook for a BORROWED callee param (#2028): a Var
+    /// argument has no RC site (the callee holds nothing); a fresh
+    /// temporary is born and released by the site (`id`).
+    pub(crate) fn witness_arg_borrowed(&mut self, e: &almide_ir::IrExpr, ty: SliceTy, fresh: bool) {
+        if self.witness.is_none() || !self.rc_droppable(ty) {
+            return;
+        }
+        let is_var = matches!(e.kind, almide_ir::IrExprKind::Var { .. });
+        let Some(w) = self.witness.as_mut() else { return };
+        if fresh {
+            w.temp_borrowed();
+        } else if !is_var && !matches!(e.kind, almide_ir::IrExprKind::LitStr { .. }) {
+            w.poison();
         }
     }
 
