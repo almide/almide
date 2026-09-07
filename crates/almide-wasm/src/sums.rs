@@ -79,6 +79,9 @@ impl Emitter<'_> {
                 self.load_ty_slot(a, almide_layout::SUM_FIELD);
                 self.f.instructions().local_set(params[0]);
                 self.lower(body, Some(rb))?;
+                // A callback result RETURNED as the arm's value: a view (a captured var,
+                // the input) takes its share so the value is owned on every path.
+                self.rc_share_guard(body, rb);
                 self.f.instructions().end();
                 self.release_i32();
                 Some(Lowered::owned(rb))
@@ -103,6 +106,9 @@ impl Emitter<'_> {
                 self.load_ty_slot(e, almide_layout::SUM_FIELD);
                 self.f.instructions().local_set(params[0]);
                 self.lower(body, Some(a))?;
+                // A callback result RETURNED as the arm's value: a view (a captured var,
+                // the input) takes its share so the value is owned on every path.
+                self.rc_share_guard(body, a);
                 self.f.instructions().else_().local_get(hs);
                 self.load_ty_slot(a, almide_layout::SUM_FIELD);
                 // The payload handed out is a SHARE of the Option's (the
@@ -342,6 +348,9 @@ impl Emitter<'_> {
                 self.f.instructions().local_set(params[0]);
                 let out_ty = if flat {
                     self.lower(body, Some(b))?;
+                    // A callback result RETURNED as the arm's value: a view (a captured var,
+                    // the input) takes its share so the value is owned on every path.
+                    self.rc_share_guard(body, b);
                     b
                 } else {
                     self.f
@@ -401,6 +410,9 @@ impl Emitter<'_> {
                     i.if_(BlockType::Result(a.val_type()));
                 }
                 self.lower(body, Some(a))?;
+                // A callback result RETURNED as the arm's value: a view (a captured var,
+                // the input) takes its share so the value is owned on every path.
+                self.rc_share_guard(body, a);
                 self.f.instructions().else_().local_get(hs);
                 self.load_ty_slot(a, almide_layout::OPTION_FIELD);
                 // The payload handed out is a SHARE of the Option's (the
@@ -424,6 +436,9 @@ impl Emitter<'_> {
                     i.if_(BlockType::Result(ValType::I32));
                 }
                 self.lower(body, Some(got))?;
+                // A callback result RETURNED as the arm's value: a view (a captured var,
+                // the input) takes its share so the value is owned on every path.
+                self.rc_share_guard(body, got);
                 self.f.instructions().else_().local_get(hs).end();
                 self.release_i32();
                 // `some` hands the INPUT back: retained in, owned out (see result.map).
