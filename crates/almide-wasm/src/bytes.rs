@@ -689,6 +689,21 @@ impl Emitter<'_> {
                     Some(SliceTy::Scalar(Scalar::Bytes)) => {}
                     other => return unsup(&format!("bytes-append-ret:{other:?}")),
                 }
+                // #1990: the linked twin got the receiver callee-owned
+                // (rc_arg_guard's +1, released by its epilogue) and built a
+                // FRESH block; the var's OLD block still holds the var's
+                // own credit, and a bare slot store orphaned it — one
+                // buffer per append, quadratic over a growing loop. The
+                // push intrinsic frees the outgrown block inside
+                // `$bytes_push`; the linked family releases it here.
+                if let crate::bytes_recv::BytesRecv::Var { id, idx, ty, global } = &recv {
+                    let hn = self.hold_i32()?;
+                    self.f.instructions().local_set(hn);
+                    self.emit_read_mut_var(id, *idx, *ty, *global);
+                    self.f.instructions().call(F_DEC_FLAT);
+                    self.f.instructions().local_get(hn);
+                    self.release_i32();
+                }
                 self.emit_bytes_writeback(&recv)?;
                 Ok(None)
             }

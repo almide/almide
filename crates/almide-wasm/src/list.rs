@@ -355,6 +355,7 @@ impl Emitter<'_> {
         self.f.instructions().i32_const(0).call(F_ALLOC).local_set(hacc);
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.hof_elem_into(elem, bh, ch, ih, params[0]);
+        let seq0 = self.module_call_seq;
         let got = self.lower(body, None)?;
         let SliceTy::List(bi) = got else {
             return unsup(&format!("flat-map-body:{got:?}"));
@@ -368,7 +369,7 @@ impl Emitter<'_> {
             // inc-before-dec, so the per-iteration dec balances fresh and
             // aliased alike; the move is by 8-byte bits, so Int and Float
             // share one loop and $dec_flat (shallow) is a full free.
-            if !self.rc_owned_result(crate::rc_ownership::rc_tail(body)) {
+            if !self.rc_owned_result(crate::rc_ownership::rc_tail(body), seq0) {
                 self.rc_inc_top();
             }
             self.f.instructions().local_set(hs);
