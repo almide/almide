@@ -411,7 +411,10 @@ impl Emitter<'_> {
                 STR
             }
             ("context", [r, msg]) => {
-                let got = self.lower_arg(r, None, ArgMode::Borrow)?;
+                // Pass-through arm: RETAINED in, owned out (the ok path hands the
+                // input back; the err path releases it after reading its message).
+                let got = self.lower_arg(r, None, ArgMode::Retain)?;
+                let dec_in = self.dec_fn_of(got);
                 let SliceTy::Result(ok_h, er) = got else {
                     return unsup(&format!("error-context-of:{got:?}"));
                 };
@@ -443,6 +446,7 @@ impl Emitter<'_> {
                     .i32_const(1)
                     .i32_store(slot_memarg(almide_layout::SUM_TAG));
                 i.local_get(hout).local_get(hm).i32_store(slot_memarg(almide_layout::SUM_FIELD));
+                i.local_get(hr).call(dec_in);
                 i.local_get(hout);
                 i.end();
                 let _ = i;
