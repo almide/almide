@@ -31,6 +31,10 @@ pub fn emit_program_with_ops(
     // (#1423 stage 4: the html/path SafeHtml/SafePath rows).
     let erased = crate::newtype::erase_transparent_aliases(ir);
     let ir = erased.as_ref().unwrap_or(ir);
+    // #2004: a call result consumed by a module op's argument gets an
+    // owner — bound first, released by the frame's exit plan.
+    let bound = crate::arg_temps::bind_native_temporaries(ir);
+    let ir = bound.as_ref().unwrap_or(ir);
     let (bytes, visited, total, ops) = emit_program_pass(ir, None)?;
     if visited.len() >= total {
         return Ok((bytes, ops));

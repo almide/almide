@@ -70,6 +70,10 @@ impl Emitter<'_> {
             {
                 self.lower(&args[0], Some(INT))?;
                 self.f.instructions().call(F_INT_TO_STRING);
+                // A fresh block at rc 1: the caller OWNS it (#2004 — the
+                // bind route's borrow +1 left every `int.to_string`
+                // temporary at rc 1 forever).
+                self.stamp_owned_result();
                 Ok(Some(STR))
             }
             // Two-value i64 min/max — one select each.
@@ -370,6 +374,21 @@ impl Emitter<'_> {
                 self.lower_linked_call(module.as_str(), func.as_str(), args, tail)
             }
             _ => unreachable!("module dispatch"),
+        }
+    }
+}
+
+impl Emitter<'_> {
+    /// A native arm that hands back a FRESH block (rc 1, nobody else
+    /// holds it) stamps the enclosing module call as OWNED — the same
+    /// stamp the registry-table path sets in `lower_linked_call`, read by
+    /// `rc_owned_result` at the bind / assign / return / argument sites.
+    /// Opt-in per arm, with a credit-row measurement as the evidence
+    /// (#2004): an arm that returns a VIEW (an element, a slice sharing
+    /// its source, a param passed through) must never stamp.
+    pub(crate) fn stamp_owned_result(&mut self) {
+        if let Some(&s) = self.module_call_stack.last() {
+            self.table_result_seq = Some(s);
         }
     }
 }

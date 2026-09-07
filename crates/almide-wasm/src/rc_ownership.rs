@@ -165,9 +165,10 @@ impl Emitter<'_> {
             almide_ir::CallTarget::Named { name } => name.as_str(),
             // A module call is owned exactly when IT took the registry
             // table path (#1990: the `bytes.append_*` rebind leaked the
-            // new buffer on every call, quadratic over a loop); the
-            // counter the caller captured before lowering the rhs names
-            // that call as entry `seq0 + 1`.
+            // new buffer on every call, quadratic over a loop) or a
+            // native arm stamped its fresh result (`stamp_owned_result`,
+            // #2004); the counter the caller captured before lowering
+            // the rhs names that call as entry `seq0 + 1`.
             // `prim.alloc_*` is a fresh block at rc 1: the bind OWNS it.
             // (An earlier attempt to treat it as owned was blamed for the
             // regex engine's capture garbage; the culprit was the
@@ -196,8 +197,15 @@ impl Emitter<'_> {
     /// certainly fresh get +1 at the call site (the callee's epilogue
     /// releases its params). Fresh temporaries transfer as-is — the
     /// callee's release is their consumption.
-    pub(crate) fn rc_arg_guard(&mut self, e: &almide_ir::IrExpr, ty: SliceTy) {
-        if self.rc_droppable(ty) && !rc_certainly_fresh(&e.kind) {
+    pub(crate) fn rc_arg_guard(&mut self, e: &almide_ir::IrExpr, ty: SliceTy, seq0: u32) {
+        // A BORROWED argument (a Var, a field or element read, a native
+        // arm's result) takes +1: the callee's epilogue decs its params.
+        // An OWNED argument — a fresh literal, or a call result that
+        // arrived with its one credit (#1986) — moves INTO the callee:
+        // no +1, the callee's dec spends the credit. Guarding an owned
+        // result left every `f(g(x))` temporary at rc 1 forever (#2004:
+        // `string.len(int.to_string(i))` grew 16 B per call).
+        if self.rc_droppable(ty) && !self.rc_owned_result(e, seq0) {
             self.rc_inc_top();
         }
     }
