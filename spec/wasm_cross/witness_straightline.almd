@@ -17,6 +17,19 @@ fn tag(prefix: String) -> String = {
   t
 }
 
+// Phase B1 — the CALL BOUNDARY: a droppable Var argument shares (`a`)
+// and its credit moves into the callee (`m`); a `return_call` releases
+// the owned param / local before the jump (`d`). `take` itself is the
+// callee-owned side: one owned param, released at its epilogue (`id`).
+fn take(xs: List[Int]) -> Int = 3
+
+fn pass(a: List[Int]) -> Int = take(a)
+
+fn bind_then_pass() -> Int = {
+  let x = shed()
+  take(x)
+}
+
 fn main() -> Unit = {
-  println("${list.len(shed())} ${tag("w")}")
+  println("${list.len(shed())} ${tag("w")} ${pass([1])} ${bind_then_pass()}")
 }

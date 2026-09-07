@@ -284,6 +284,24 @@ if [ "$src_rc" -ne 1 ]; then echo "FAIL structural-tamper: a leaked structural w
 kernel_verify ownership /tmp/structural.tamper 1   || { echo "FAIL structural-tamper: the kernel accepted the leak"; exit 1; }
 echo "ok   structural-tamper: a leaked structural witness is rejected by the binary AND the kernel"
 
+# ── #1696 phase B1: the CALL BOUNDARY through the same checker. A droppable
+# Var argument shares (`a`, the site's real rc_inc) and moves into the callee
+# (`m`); a `return_call` releases the owned param / local before the jump
+# (`d`); the callee's own param is released at its epilogue (`id`). The drill
+# strips the tail-site release — exactly the leak class the witness found in
+# 63 module-space wrappers (fan_map, http_set_header, __gby_add) before
+# module space joined the tail-release set.
+echo
+echo "== structural leg, call boundary  ⊳  proven checker (#1696 phase B1) =="
+run_structural spec/wasm_cross/witness_straightline.almd take 0
+run_structural spec/wasm_cross/witness_straightline.almd pass 0
+run_structural spec/wasm_cross/witness_straightline.almd bind_then_pass 0
+emit_structural spec/wasm_cross/witness_straightline.almd pass | sed 's/^iamd$/iam/' > /tmp/structural.tamper
+set +e; "$ROOT/proofs/checker" ownership /tmp/structural.tamper >/dev/null 2>&1; src_rc=$?; set -e
+if [ "$src_rc" -ne 1 ]; then echo "FAIL structural-tamper(B1): a return_call that skips its param release was accepted"; exit 1; fi
+kernel_verify ownership /tmp/structural.tamper 1   || { echo "FAIL structural-tamper(B1): the kernel accepted the unreleased param"; exit 1; }
+echo "ok   structural-tamper(B1): an unreleased tail-site param is rejected by the binary AND the kernel"
+
 echo
 echo "GATE OK: the kernel-proven checker re-verified per-build witnesses on THREE"
 echo "properties (ownership + name totality + capability bound), AND a REAL .almd"
