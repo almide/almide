@@ -17,20 +17,21 @@
 # Every non-measured row is RE-MEASURED by the gate: a row that starts
 # benching fails the run with the good news (flip it to measured in the
 # same change); a measured row that stops benching fails as a regression.
-version = almide 0.61.1
-date    = 2026-09-04
+version = almide 0.62.0
+date    = 2026-09-08
 machine = arm64 Darwin (local stamp; ratios are the gated quantity)
 
-nbody                 | measured         | 2.81  | 7.25 | 2.58
-spectralnorm          | measured         | 3.51  | 9.17 | 2.61
-binarytrees           | measured         | 7.05  | 6.65 | 0.94
-fasta                 | routed-incumbent | 3.07  | -    | -
-fannkuchredux         | routed-incumbent | 3.13  | -    | -
-mandelbrot            | routed-incumbent | 6.38  | -    | -
-onebrc                | walled           | 4.19  | -    | -
-fft                   | measured         | 51.00 | 228.52 | 4.48
-strchurn              | measured         | 62.35 | 64.90 | 1.04
-listbuild_append      | measured         | 29.67 | 100.93 | 3.40
-listbuild_combinator  | measured         | 30.82 | 106.37 | 3.45
-listbuild_prealloc    | measured         | 29.32 | 98.66 | 3.36
-mapbuild              | measured         | 13.31 | 12.96 | 0.97
+nbody                 | measured         | 2.74  | 7.37 | 2.69
+spectralnorm          | measured         | 3.59  | 9.53 | 2.65
+binarytrees           | measured         | 6.98  | 6.48 | 0.93
+treealloc             | measured         | 221.28 | 90.01 | 0.41
+fasta                 | routed-incumbent | 3.14  | -    | -
+fannkuchredux         | routed-incumbent | 3.38  | -    | -
+mandelbrot            | routed-incumbent | 6.47  | -    | -
+onebrc                | walled           | 4.35  | -    | -
+fft                   | measured         | 57.53 | 231.22 | 4.02
+strchurn              | measured         | 67.52 | 77.75 | 1.15
+listbuild_append      | measured         | 29.03 | 96.55 | 3.33
+listbuild_combinator  | measured         | 29.18 | 110.69 | 3.79
+listbuild_prealloc    | measured         | 29.15 | 103.20 | 3.54
+mapbuild              | measured         | 12.63 | 14.69 | 1.16

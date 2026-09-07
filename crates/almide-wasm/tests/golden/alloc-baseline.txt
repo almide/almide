@@ -15,7 +15,7 @@
 65904	spec/wasm_cross/assign_alias_rc.almd
 66144	spec/wasm_cross/autotry_construction.almd
 65872	spec/wasm_cross/autotry_result_first_arg.almd
-76640	spec/wasm_cross/availability_pure_batch.almd
+76720	spec/wasm_cross/availability_pure_batch.almd
 66896	spec/wasm_cross/bang_in_record_literal_field.almd
 69296	spec/wasm_cross/base64_encode.almd
 70320	spec/wasm_cross/binary_operators.almd
@@ -266,7 +266,7 @@
 66016	spec/wasm_cross/int_wrap_rotate_width.almd
 66064	spec/wasm_cross/interp_effect_unwrap_arg.almd
 66016	spec/wasm_cross/io_write_ordering.almd
-139680	spec/wasm_cross/json_gltf_walk.almd
+139712	spec/wasm_cross/json_gltf_walk.almd
 1300672	spec/wasm_cross/json_many_keys.almd
 74768	spec/wasm_cross/json_number_unicode.almd
 69232	spec/wasm_cross/json_parse_lenient_edges.almd
@@ -502,7 +502,7 @@
 97024	spec/wasm_cross/result_ctor_call_payload.almd
 66016	spec/wasm_cross/result_default_and_passthrough.almd
 65952	spec/wasm_cross/result_eq.almd
-130544	spec/wasm_cross/result_filter_heap_ok.almd
+258448	spec/wasm_cross/result_filter_heap_ok.almd
 66000	spec/wasm_cross/result_heap_err_match.almd
 65888	spec/wasm_cross/result_heap_ok_match.almd
 66128	spec/wasm_cross/result_list_str_int_tuple.almd
@@ -639,7 +639,7 @@
 82448	spec/wasm_cross/to_fixed_domain_abort_hi.almd
 108048	spec/wasm_cross/to_fixed_wide_precision.almd
 66032	spec/wasm_cross/to_result_custom_e.almd
-66256	spec/wasm_cross/to_result_nested_share.almd
+66304	spec/wasm_cross/to_result_nested_share.almd
 65856	spec/wasm_cross/top_let_div_eager.almd
 65856	spec/wasm_cross/top_let_div_used.almd
 65808	spec/wasm_cross/toplevel_const_wrapping.almd

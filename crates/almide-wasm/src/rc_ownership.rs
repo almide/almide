@@ -235,6 +235,14 @@ impl Emitter<'_> {
     }
 
     pub(crate) fn rc_droppable(&self, t: SliceTy) -> bool {
+        rc_droppable_ty(self.types, t)
+    }
+}
+
+/// `rc_droppable` as a free function: the param borrow inference
+/// (param_borrow.rs) runs before any Emitter exists.
+pub(crate) fn rc_droppable_ty(types: &crate::types_table::TypeTable, t: SliceTy) -> bool {
+    {
         match t {
             SliceTy::Scalar(Scalar::Str | Scalar::Bytes) => true,
             // A List of ANY element (stage 2a): `$dec_flat` frees the SPINE
@@ -256,14 +264,19 @@ impl Emitter<'_> {
             // (result, buffer) tuple and writes it back through the Assign
             // route, whose ownership is not yet audited for a droppable
             // record (mut_param_effect_never_err double-freed the Tally).
-            SliceTy::Named(ti) => self.named_has_layout(ti),
+            SliceTy::Named(ti) => matches!(
+                types.def(ti),
+                crate::types_table::NamedDef::Record(_) | crate::types_table::NamedDef::Variant(_)
+            ),
             // Map stage a (#2010): the entries array is released with its
             // index side-table entry; keys and values keep their credits.
             SliceTy::Map(..) | SliceTy::Set(_) => true,
             _ => false,
         }
     }
+}
 
+impl crate::emitter::Emitter<'_> {
     /// The handle on top of the stack is being COPIED into a block that
     /// will release it (a pair, an Option, a set entry, a list slot): +1
     /// when its type is one a holder owns a credit of, nothing otherwise.

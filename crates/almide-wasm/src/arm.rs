@@ -193,7 +193,7 @@ impl crate::emitter::Emitter<'_> {
     /// The scope's half: release every temporary the arms borrowed since
     /// `depth`, in reverse order (the holds are the top of the pool now —
     /// every hold an arm took inside has been released).
-    fn release_borrowed_temps(&mut self, depth: usize) {
+    pub(crate) fn release_borrowed_temps(&mut self, depth: usize) {
         while self.borrowed_temps.len() > depth {
             let (h, ty) = self.borrowed_temps.pop().unwrap();
             let dec = self.dec_fn_of(ty);

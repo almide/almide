@@ -125,6 +125,10 @@ pub(crate) struct Emitter<'a> {
     /// call in tail position with a matching return type emits
     /// `return_call` — constant stack for deep (incl. mutual) recursion.
     pub(crate) in_tail: bool,
+    /// The Try / Unwrap see-through armed this tail (below): the Named
+    /// arm MUST `return_call` — the wrap path after it is dead code.
+    /// Taken by lower_call_at.
+    pub(crate) try_see_through: bool,
     /// #1696 phase A: armed by lower_fn when the straightline gate
     /// admits the body — the Bind route and the epilogue record their
     /// RC events here; the certificate is pushed to the witness sink.
@@ -453,6 +457,7 @@ impl Emitter<'_> {
                     && self.effect_tail_callee_ret(expr) == self.fn_ret =>
             {
                 self.in_tail = true;
+                self.try_see_through = true;
                 self.lower(expr, self.fn_ret)?;
                 // The Named arm return_calls (ret == fn_ret by the guard),
                 // so control NEVER returns here — the stack is polymorphic
