@@ -63,9 +63,9 @@ pub(crate) fn bind_native_temporaries(ir: &IrProgram) -> Option<IrProgram> {
 fn droppable_ty(t: &Ty) -> bool {
     match t {
         Ty::String | Ty::Bytes => true,
-        Ty::Applied(TypeConstructorId::List | TypeConstructorId::Option, args) => {
-            args.first().is_some_and(flat_ty)
-        }
+        // Any List (stage 2a: the spine is released; elements are 2b).
+        Ty::Applied(TypeConstructorId::List, _) => true,
+        Ty::Applied(TypeConstructorId::Option, args) => args.first().is_some_and(flat_ty),
         Ty::Applied(TypeConstructorId::Result, args) => args.len() == 2 && args.iter().all(flat_ty),
         Ty::Tuple(elems) => elems.iter().all(flat_ty),
         _ => false,

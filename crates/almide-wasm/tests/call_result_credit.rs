@@ -33,6 +33,8 @@ fn grow(n: Int) -> String = {{
 
 fn pair(n: Int) -> (Int, Int) = (n, n + 1)
 
+fn words(n: Int) -> List[String] = ["a", "b"]
+
 fn maybe(n: Int) -> Int? = if n >= 0 then some(n) else none
 
 fn scratch_tail(n: Int) -> String = {{
@@ -345,5 +347,18 @@ fn a_flat_option_result_is_released() {
         "    let o = maybe(i)\n    total = total + (o ?? 0) - i + 1",
         "1000",
         "8000",
+    );
+}
+
+/// #2010 stage 2a: a List of ANY element type releases its SPINE like a
+/// List of scalars (the elements keep their own credits until stage 2b's
+/// glue) — every `List[String]` return stayed on the graveyard before.
+#[test]
+fn a_list_of_strings_spine_is_released() {
+    flat(
+        "let w = words(i)",
+        "    let w = words(i)\n    total = total + list.len(w)",
+        "2000",
+        "16000",
     );
 }
