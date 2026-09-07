@@ -61,8 +61,11 @@ impl Emitter<'_> {
         i.local_get(hl).local_get(hk).i32_sub();
         i.i32_const(stride).i32_const(0).local_get(hin).select().i32_sub();
         i.memory_copy(0, 0);
-        i.local_get(ho);
         let _ = i;
+        // The kept slots are COPIES of the source's handles: the result
+        // spine takes its own credits (#2010 stage 2b).
+        self.emit_inc_elems(ho, self.types.el(h));
+        self.f.instructions().local_get(ho);
         for _ in 0..5 {
             self.release_i32();
         }
@@ -106,8 +109,10 @@ impl Emitter<'_> {
         }
         i.local_get(hc).i32_const(stride).i32_add().local_set(hc);
         i.br(0).end().end();
-        i.local_get(ho);
         let _ = i;
+        // Reversed slots are COPIES of the source's handles.
+        self.emit_inc_elems(ho, self.types.el(h));
+        self.f.instructions().local_get(ho);
         for _ in 0..4 {
             self.release_i32();
         }
@@ -129,13 +134,16 @@ impl Emitter<'_> {
         };
         let et = self.types.el(h);
         let stride = et.slot_size() as i32;
-        self.f.instructions().call(F_BLOCK_COPY);
+        let copy = self.copy_fn_of(SliceTy::List(h));
+        self.f.instructions().call(copy);
         let hb = self.hold_i32()?;
         self.f.instructions().local_set(hb);
         self.lower_arg(idx, Some(INT), ArgMode::Borrow)?;
         let hn = self.hold_i64()?;
         self.f.instructions().local_set(hn);
         self.lower_arg(v, Some(et), ArgMode::Retain)?;
+        // The replaced element's credit (a handle element) goes with it.
+        let old_dec = self.elem_is_handle(et).then(|| self.dec_fn_of(et));
         enum Hv {
             I64(u32),
             F64(u32),
@@ -153,6 +161,10 @@ impl Emitter<'_> {
         i.local_get(hn);
         i.local_get(hb).i32_load(len_memarg()).i32_const(stride).i32_div_u().i64_extend_i32_u();
         i.i64_lt_s().i32_and().if_(BlockType::Empty);
+        if let Some(dec) = old_dec {
+            i.local_get(hb).local_get(hn).i32_wrap_i64().i32_const(stride).i32_mul().i32_add();
+            i.i32_load(slot_memarg(0)).call(dec);
+        }
         i.local_get(hb)
             .local_get(hn)
             .i32_wrap_i64()
@@ -215,8 +227,9 @@ impl Emitter<'_> {
             .i32_add();
         i.local_get(hl).local_get(hst).i32_sub();
         i.memory_copy(0, 0);
-        i.local_get(ho);
         let _ = i;
+        self.emit_inc_elems(ho, self.types.el(h));
+        self.f.instructions().local_get(ho);
         for _ in 0..4 {
             self.release_i32();
         }
@@ -261,8 +274,9 @@ impl Emitter<'_> {
         i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32).i32_add();
         i.local_get(hend);
         i.memory_copy(0, 0);
-        i.local_get(ho);
         let _ = i;
+        self.emit_inc_elems(ho, self.types.el(h));
+        self.f.instructions().local_get(ho);
         for _ in 0..4 {
             self.release_i32();
         }
@@ -368,7 +382,8 @@ impl Emitter<'_> {
         };
         let et = self.types.el(h);
         let stride = et.slot_size() as i32;
-        self.f.instructions().call(F_BLOCK_COPY);
+        let copy = self.copy_fn_of(SliceTy::List(h));
+        self.f.instructions().call(copy);
         let hb = self.hold_i32()?;
         self.f.instructions().local_set(hb);
         self.lower_arg(idx, Some(INT), ArgMode::Borrow)?;
@@ -418,7 +433,8 @@ impl Emitter<'_> {
             other => return unsup(&format!("list-swap-of:{other:?}")),
         };
         let stride = self.types.el(h).slot_size() as i32;
-        self.f.instructions().call(F_BLOCK_COPY);
+        let copy = self.copy_fn_of(SliceTy::List(h));
+        self.f.instructions().call(copy);
         let hb = self.hold_i32()?;
         self.f.instructions().local_set(hb);
         self.lower_arg(ia, Some(INT), ArgMode::Borrow)?;

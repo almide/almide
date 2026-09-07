@@ -73,7 +73,7 @@ impl Emitter<'_> {
         for _ in 0..4 {
             self.release_i32();
         }
-        Ok(Some(Lowered::view(SliceTy::Option(self.types.intern(SliceTy::Tuple(pair_ti))))))
+        Ok(Some(Lowered::owned(SliceTy::Option(self.types.intern(SliceTy::Tuple(pair_ti))))))
     }
 
     /// Kept entries, order preserved; the out block over-allocates and

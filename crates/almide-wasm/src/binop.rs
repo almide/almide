@@ -119,6 +119,14 @@ impl Emitter<'_> {
                 };
                 self.lower(right, Some(lt))?;
                 self.f.instructions().call(F_CONCAT);
+                // Both operands' handles are COPIED into the fresh spine:
+                // it takes its own element credits (#2010 stage 2b).
+                if let SliceTy::List(h) = lt
+                    && let Some(inc) = self.inc_elems_fn(self.types.el(h))
+                {
+                    let tmp = self.tmp_i32_local;
+                    self.f.instructions().local_tee(tmp).call(inc).local_get(tmp);
+                }
                 Ok(lt)
             }
             other => unsup(&format!("binop:{other:?}")),

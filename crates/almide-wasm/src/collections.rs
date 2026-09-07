@@ -183,7 +183,7 @@ impl Emitter<'_> {
                 self.release_i32(); // eh
                 self.release_for(k);
                 self.release_i32(); // mh
-                Ok(Some(Lowered::view(SliceTy::Option(self.types.intern(v)))))
+                Ok(Some(Lowered::owned(SliceTy::Option(self.types.intern(v)))))
             }
             ("get_or", [m, key, default]) => {
                 let (_mh, _kh, eh, k, v, lay) = self.map_scan(m, key, ArgMode::Borrow)?;
@@ -344,8 +344,12 @@ impl Emitter<'_> {
                 i.local_get(hw).i32_const(stride).i32_add().local_set(hw);
                 i.local_get(hcur).i32_const(esz as i32).i32_add().local_set(hcur);
                 i.br(0).end().end();
-                i.local_get(ho);
                 let _ = i;
+                // The keys / values are COPIES of the entries' handles: the
+                // list takes its own credits (#2010 stage 2b — `map.keys`
+                // handed to `list.join` freed the map's key strings).
+                self.emit_inc_elems(ho, side);
+                self.f.instructions().local_get(ho);
                 for _ in 0..5 {
                     self.release_i32();
                 }
@@ -395,6 +399,11 @@ impl Emitter<'_> {
                         .i32_mul()
                         .i32_add();
                     self.load_ty_slot(t, src_off);
+                    // A handle copied into the pair block takes +1
+                    // (leak-not-dangle until the pair's typed drop, 2c).
+                    if self.elem_is_handle(t) {
+                        self.rc_inc_top();
+                    }
                     self.store_ty_slot(t, dst_off);
                 }
                 self.f

@@ -373,6 +373,12 @@ impl Emitter<'_> {
                         i.local_get(hc);
                         i.call(F_COPY);
                         let _ = i;
+                        // The rest's slots are COPIES of the subject's
+                        // handles: the block holds its own credits.
+                        if let SliceTy::List(h) = subj_ty {
+                            let elem = self.types.el(h);
+                            self.emit_inc_elems(idx, elem);
+                        }
                         self.release_i32();
                 }
                 Ok(())

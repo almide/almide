@@ -245,6 +245,85 @@ pub(crate) fn emit_dec_flat() -> Function {
     f
 }
 
+/// `$drop_list(block)` — `$dec_flat` for a List of heap HANDLES (#2010
+/// stage 2b): the same heap-floor guard and trap knob; at rc 0 every
+/// element handle (a 4-byte slot) is released through `elem_dec` before
+/// the spine is freed.
+pub(crate) fn emit_drop_list(elem_dec: u32) -> Function {
+    // params: 0=block; locals: 1=rc, 2=p, 3=end
+    let (block, rc, p, end) = (0u32, 1u32, 2u32, 3u32);
+    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
+    let mut f = Function::new([(3, ValType::I32)]);
+    let mut i = f.instructions();
+    i.local_get(block).global_get(G_LINE_END).i32_lt_u().if_(BlockType::Empty);
+    i.return_();
+    i.end();
+    i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_sub().local_set(rc);
+    if std::env::var_os("ALMIDE_RC_TRAP_DOUBLE_FREE").is_some() {
+        i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
+        i.unreachable();
+        i.end();
+    }
+    i.local_get(block).local_get(rc).i32_store(word(almide_layout::RC.offset));
+    i.local_get(rc).i32_eqz().if_(BlockType::Empty);
+    i.local_get(block).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_set(p);
+    i.local_get(p).local_get(block).i32_load(word(almide_layout::LEN.offset)).i32_add().local_set(end);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(p).local_get(end).i32_ge_u().br_if(1);
+    i.local_get(p).i32_load(word(0)).call(elem_dec);
+    i.local_get(p).i32_const(4).i32_add().local_set(p);
+    i.br(0).end().end();
+    i.local_get(block).call(F_FREE);
+    i.end();
+    i.end();
+    f
+}
+
+/// `$inc_elems(block)`: +1 on every element handle of a spine of 4-byte
+/// handle slots (the credits a copied spine must hold, #2010 stage 2b).
+pub(crate) fn emit_inc_elems() -> Function {
+    // params: 0=block; locals: 1=p, 2=end
+    let (block, p, end) = (0u32, 1u32, 2u32);
+    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
+    let mut f = Function::new([(2, ValType::I32)]);
+    let mut i = f.instructions();
+    i.local_get(block).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_set(p);
+    i.local_get(p).local_get(block).i32_load(word(almide_layout::LEN.offset)).i32_add().local_set(end);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(p).local_get(end).i32_ge_u().br_if(1);
+    i.local_get(p).i32_load(word(0)).call(F_INC);
+    i.local_get(p).i32_const(4).i32_add().local_set(p);
+    i.br(0).end().end();
+    i.end();
+    f
+}
+
+/// `$copy_elems(block) -> block`: `$block_copy`, then the copy takes its
+/// element credits.
+pub(crate) fn emit_copy_elems(inc_elems: u32) -> Function {
+    let block = 0u32;
+    let mut f = Function::new([(1, ValType::I32)]);
+    let mut i = f.instructions();
+    i.local_get(block).call(F_BLOCK_COPY).local_tee(1).call(inc_elems);
+    i.local_get(1);
+    i.end();
+    f
+}
+
+/// `$cow_elems(block) -> block`: `$cow`; when it copied (the result is a
+/// different block), the copy takes its element credits.
+pub(crate) fn emit_cow_elems(inc_elems: u32) -> Function {
+    let block = 0u32;
+    let mut f = Function::new([(1, ValType::I32)]);
+    let mut i = f.instructions();
+    i.local_get(block).call(F_COW).local_tee(1).local_get(block).i32_ne().if_(BlockType::Empty);
+    i.local_get(1).call(inc_elems);
+    i.end();
+    i.local_get(1);
+    i.end();
+    f
+}
+
 /// `$map_reserve(block, esz) -> block`: room for ONE more `esz`-byte
 /// map entry — `$list_push`'s growth discipline with the store left to
 /// the caller (the entry layout varies per key/value class, the growth

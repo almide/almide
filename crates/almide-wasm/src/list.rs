@@ -83,7 +83,10 @@ impl Emitter<'_> {
             _ => F_LIST_GET_4,
         };
         self.f.instructions().call(helper);
-        Ok(Some(Lowered::view(SliceTy::Option(h))))
+        // `$list_get` allocates the Option block: owned; its handle
+        // payload takes +1 (leak-not-dangle until stage 2c).
+        self.share_option_payload_top(self.types.el(h));
+        Ok(Some(Lowered::owned(SliceTy::Option(h))))
     }
 
     fn lower_list_first_arm(&mut self, xs: &IrExpr) -> ArmResult {
@@ -97,7 +100,8 @@ impl Emitter<'_> {
             _ => F_LIST_GET_4,
         };
         self.f.instructions().call(helper);
-        Ok(Some(Lowered::view(SliceTy::Option(self.types.intern(elem)))))
+        self.share_option_payload_top(elem);
+        Ok(Some(Lowered::owned(SliceTy::Option(self.types.intern(elem)))))
     }
 
     fn lower_list_join_arm(&mut self, xs: &IrExpr, sep: &IrExpr) -> ArmResult {
@@ -161,6 +165,11 @@ impl Emitter<'_> {
             .i32_mul()
             .i32_add();
         self.load_ty_slot(elem, 0);
+        // A handle stored into the pair block takes +1: the pair has no
+        // typed drop yet (stage 2c), so this is leak-not-dangle.
+        if self.elem_is_handle(elem) {
+            self.rc_inc_top();
+        }
         self.store_ty_slot(elem, eoff);
         // store pair addr into result
         self.f
@@ -196,6 +205,8 @@ impl Emitter<'_> {
             other => return unsup(&format!("list-slice-of:{other:?}")),
         };
         let stride = elem.slot_size() as i64;
+        let inc_elems = self.inc_elems_fn(elem);
+        let tmp = self.tmp_i32_local;
         let bh = self.hold_i32()?;
         self.f.instructions().local_set(bh);
         self.lower_arg(a, Some(INT), ArgMode::Borrow)?;
@@ -255,7 +266,10 @@ impl Emitter<'_> {
             .i64_mul()
             .i32_wrap_i64();
         ins.memory_copy(0, 0);
-        ins.local_get(self.tmp_i32_local);
+        if let Some(inc) = inc_elems {
+            ins.local_get(tmp).call(inc);
+        }
+        ins.local_get(tmp);
         ins.end();
         self.release_i64();
         self.release_i64();
@@ -279,6 +293,9 @@ impl Emitter<'_> {
             .call(F_ALLOC)
             .local_tee(rh)
             .local_get(params[0]);
+        if self.elem_is_handle(elem) {
+            self.rc_inc_top();
+        }
         self.store_ty_slot(elem, almide_layout::OPTION_FIELD);
         self.f.instructions().br(2);
         self.f.instructions().end();
@@ -288,7 +305,7 @@ impl Emitter<'_> {
         self.release_i32();
         self.release_i32();
         self.release_i32();
-        Ok(Some(Lowered::view(SliceTy::Option(self.types.intern(elem)))))
+        Ok(Some(Lowered::owned(SliceTy::Option(self.types.intern(elem)))))
     }
 
     fn lower_list_find_index(
@@ -621,6 +638,10 @@ impl Emitter<'_> {
             .i32_mul()
             .i32_add();
         self.lower(body, Some(u))?;
+        // A pass-through body (`(x) => x`, a field of x) hands back a
+        // VIEW of the source's element: the result spine is a holder and
+        // takes the share here (#2010 stage 2b).
+        self.rc_share_guard(body, u);
         self.store_ty_slot(u, 0);
         self.hof_step(ih);
         self.f.instructions().local_get(rh);
@@ -676,8 +697,12 @@ impl Emitter<'_> {
             // result in a smaller class than the one the next filter
             // draws from (64 B per call in the ownership matrix, #2005).
             i.local_get(rh).local_get(hw).i32_const(stride).i32_mul().i32_store(len_memarg());
-            i.local_get(rh);
         }
+        // The kept elements are COPIES of the source's handles: the
+        // result spine takes its own credits (#2010 stage 2b) — after
+        // LEN is final, the walk reads it.
+        self.emit_inc_elems(rh, elem);
+        self.f.instructions().local_get(rh);
         self.release_i32();
         self.release_i32();
         self.release_i32();

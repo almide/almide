@@ -162,6 +162,10 @@ pub(crate) fn lower_fn(
     // diagnostic speaks — taken out of the emitter before its scope ends,
     // validated against the bytes after the final `end`.
     let exit_ledger: Vec<crate::exit_plan::ExitRecord>;
+    // The typed drop glues registered so far — every release in an exit
+    // window is `$dec_flat` or one of these (helper indices are
+    // append-only, so the set only grows).
+    let drop_fns: Vec<u32>;
     let mut local_names: HashMap<u32, String> = HashMap::new();
     let cur_module = cur_module.as_deref();
     let env_shift: u32 = u32::from(env_captures.is_some());
@@ -281,6 +285,7 @@ pub(crate) fn lower_fn(
             rc_frame_params: Vec::new(),
             self_index,
             rc_owned: std::collections::BTreeSet::new(),
+            owned_ty: std::collections::HashMap::new(),
             owned_call_marks: Default::default(),
             borrowed_temps: Vec::new(),
             exit_ledger: Vec::new(),
@@ -391,7 +396,8 @@ pub(crate) fn lower_fn(
                     | SliceTy::Set(_)
                     | SliceTy::Scalar(Scalar::Bytes)
             ) {
-                em.f.instructions().call(F_BLOCK_COPY);
+                let copy = em.copy_fn_of(declared);
+                em.f.instructions().call(copy);
             }
             em.f.instructions().global_set(gidx);
         }
@@ -465,6 +471,14 @@ pub(crate) fn lower_fn(
             crate::witness::push(name, w.certificate());
         }
         exit_ledger = std::mem::take(&mut em.exit_ledger);
+        drop_fns = {
+            let hs = em.work.helpers.borrow();
+            hs.iter()
+                .enumerate()
+                .filter(|(_, h)| matches!(h, crate::work::Helper::DropList { .. }))
+                .map(|(p, _)| em.work.helper_base.get() + p as u32)
+                .collect()
+        };
         for (id, &(idx, _)) in em.locals.iter() {
             if let Some(n) = (ctx.var_name)(var_space, *id) {
                 local_names.insert(idx, n);
@@ -483,7 +497,7 @@ pub(crate) fn lower_fn(
         }
     }
     f.instructions().end();
-    crate::exit_plan::validate_exits(&f, &exit_ledger, &fn_name, |idx| {
+    crate::exit_plan::validate_exits(&f, &exit_ledger, &fn_name, &drop_fns, |idx| {
         local_names.get(&idx).map_or_else(|| format!("local #{idx}"), |n| format!("local `{n}`"))
     })?;
     Ok((f, calls))
@@ -584,6 +598,7 @@ fn populate_tail_release_set(
     for (k, &(_, pty)) in params.iter().enumerate() {
         if em.rc_droppable(pty) {
             em.rc_frame_params.push(env_shift + k as u32);
+            em.owned_ty.insert(env_shift + k as u32, pty);
         }
     }
     if env_shift != 0 || crate::rc_ownership::body_uses_prim(body) {
