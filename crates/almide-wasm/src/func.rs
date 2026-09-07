@@ -309,7 +309,7 @@ pub(crate) fn lower_fn(
         // collecting and the straightline gate admits this body (no
         // effect wrap, no captures, no top-let prelude — every excluded
         // form has RC sites the two hooks do not cover yet).
-        if let Some(_name) = &witness_name
+        if let Some(name) = &witness_name
             && crate::witness::collecting()
             && effect_raw.is_none()
             && env_captures.is_none()
@@ -317,6 +317,7 @@ pub(crate) fn lower_fn(
             && crate::witness::straightline_subset(
                 body,
                 ret.is_some_and(crate::witness::heapish_ret),
+                name.rsplit('.').next().unwrap_or(name),
             )
             .is_none()
         {
@@ -391,7 +392,12 @@ pub(crate) fn lower_fn(
                 em.lower_tail(body, Some(want))?;
                 // RC-3: a droppable result that may BORROW a local
                 // takes +1 before the epilogue releases the owners.
-                if em.rc_droppable(want) && !em.rc_owned_result(crate::rc_ownership::rc_tail(body), seq0) {
+                let owned_tail =
+                    em.rc_owned_result(crate::rc_ownership::rc_tail(body), seq0);
+                if em.rc_droppable(want) && owned_tail {
+                    em.witness_tail_owned();
+                }
+                if em.rc_droppable(want) && !owned_tail {
                     em.rc_inc_top();
                     if em.witness.is_some() {
                         let tail = crate::rc_ownership::rc_tail(body);

@@ -262,7 +262,7 @@ impl Emitter<'_> {
                 self.f.instructions().local_get(idx).call(F_DEC_FLAT);
                 self.rc_own(idx);
                 if self.witness.is_some() {
-                    self.witness_bind(idx, declared, value);
+                    self.witness_bind(idx, declared, value, seq0);
                 }
             }
             self.f.instructions().local_set(idx);
