@@ -41,7 +41,8 @@ fn droppable(ret: &str) -> Option<&'static str> {
         "Bytes" => Some("bytes.len(t)"),
         "List[Int]" | "List[Float]" | "List[Bool]" | "List[Int8]" | "List[Int16]"
         | "List[Int32]" | "List[Int64]" | "List[UInt8]" | "List[UInt16]" | "List[UInt32]"
-        | "List[UInt64]" | "List[Float32]" | "List[Float64]" => Some("list.len(t)"),
+        | "List[UInt64]" | "List[Float32]" | "List[Float64]" | "List[String]" | "List[Bytes]"
+        | "List[List[Int]]" | "List[(Int, Int)]" | "List[Int?]" => Some("list.len(t)"),
         // Flat-payload blocks (#2010 stage 1): released by $dec_flat; the
         // bind keeps `t` alive, the reducer needs nothing from it.
         "Option[Int]" | "Int?" | "Option[Float]" | "Float?" | "Option[Bool]" | "Bool?" | "(Int, Int)"
