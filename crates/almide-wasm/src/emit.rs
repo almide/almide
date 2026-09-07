@@ -110,6 +110,12 @@ fn emit_program_pass(
     // Lower every callable function; a body that doesn't lower yet is
     // recorded (not fatal) — fatal only if `main` can reach it.
     let mut lowered: Vec<Result<(Function, HashSet<usize>), String>> = Vec::new();
+    // Source names for the E083 diagnostic, by (var space, VarId): space 0
+    // is the entry program, space i + 1 is modules[i] (collect_program_fns).
+    let var_name = |space: u32, id: VarId| -> Option<String> {
+        let vt = if space == 0 { &ir.var_table } else { &ir.modules.get(space as usize - 1)?.var_table };
+        vt.entries.get(id.0 as usize).map(|v| v.name.as_str().to_string())
+    };
     for (i, (f, qual, space)) in program_fns.iter().enumerate() {
         if let Some(r) = &table.infos[i].refuse {
             lowered.push(Err(r.clone()));
@@ -117,7 +123,7 @@ fn emit_program_pass(
         }
         let params: Vec<(VarId, SliceTy)> =
             f.params.iter().zip(&table.infos[i].params).map(|(p, &t)| (p.var, t)).collect();
-        let ctx = Ctx { table: &table, types: &types, work: &work, globals: &global_map };
+        let ctx = Ctx { table: &table, types: &types, work: &work, globals: &global_map, var_name: &var_name };
         let cur_module = qual.as_ref().and_then(|q| q.split('.').next());
         let effect_raw = if f.is_effect {
             match slice_ty_of(&f.ret_ty, &types) {
@@ -143,6 +149,7 @@ fn emit_program_pass(
             charge_entry: meter.user.contains(f.name.as_str())
                 && !meter.exempt.contains(f.name.as_str()),
             var_space: *space,
+            name: qual.clone().unwrap_or_else(|| f.name.as_str().to_string()),
             witness_name: Some(
                 qual.clone().unwrap_or_else(|| f.name.as_str().to_string()),
             ),
@@ -171,19 +178,26 @@ fn emit_program_pass(
                         lowered.push(Ok((body, fcalls)));
                     }
                     Err(EmitError::Unsupported(r)) => lowered.push(Err(r)),
+            // E083: a compiler defect is fatal for the whole program — a
+            // reachable-or-not leak is still a defect, never a wall.
+            Err(e @ EmitError::OwnershipLowering(_)) => return Err(e),
                 }
             }
             Err(EmitError::Unsupported(r)) => lowered.push(Err(r)),
+            // E083: a compiler defect is fatal for the whole program — a
+            // reachable-or-not leak is still a defect, never a wall.
+            Err(e @ EmitError::OwnershipLowering(_)) => return Err(e),
         }
     }
 
     // `main`: top-lets as the eager prelude, then the body. Failure here is
     // fatal — main is always reachable.
-    let ctx = Ctx { table: &table, types: &types, work: &work, globals: &global_map };
+    let ctx = Ctx { table: &table, types: &types, work: &work, globals: &global_map, var_name: &var_name };
     let main_plan = FnPlan {
         ret: None,
         cur_module: None,
         var_space: 0,
+        name: "main".to_string(),
         witness_name: Some("main".to_string()),
         effect_raw: None,
         in_main: true,
@@ -214,6 +228,7 @@ fn emit_program_pass(
                 ret: ll.ret,
                 cur_module: ll.cur_module.clone(),
                 var_space: ll.var_space,
+                name: "<lambda>".to_string(),
                 witness_name: None,
                 effect_raw: ll.effect_raw,
                 in_main: false,

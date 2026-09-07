@@ -104,6 +104,8 @@ fn emit_modinit_call(em: &mut crate::emitter::Emitter<'_>, il: &crate::InitLet, 
 /// How one function's body meets its wasm signature.
 #[derive(Clone)]
 pub(crate) struct FnPlan {
+    /// Qualified name, for the E083 diagnostic.
+    pub(crate) name: String,
     pub(crate) ret: Option<SliceTy>,
     /// The module this function belongs to (None = entry program).
     pub(crate) cur_module: Option<String>,
@@ -154,7 +156,13 @@ pub(crate) fn lower_fn(
         var_space,
         witness_name,
         self_index,
+        name: fn_name,
     } = plan;
+    // E083 (#1996): the exit ledger emit_exit records, and the names the
+    // diagnostic speaks — taken out of the emitter before its scope ends,
+    // validated against the bytes after the final `end`.
+    let exit_ledger: Vec<crate::exit_plan::ExitRecord>;
+    let mut local_names: HashMap<u32, String> = HashMap::new();
     let cur_module = cur_module.as_deref();
     let env_shift: u32 = u32::from(env_captures.is_some());
     let mut locals: HashMap<VarId, (u32, SliceTy)> = HashMap::new();
@@ -275,6 +283,7 @@ pub(crate) fn lower_fn(
             rc_owned: std::collections::BTreeSet::new(),
             owned_call_marks: Default::default(),
             borrowed_temps: Vec::new(),
+            exit_ledger: Vec::new(),
             borrow_base,
             table: ctx.table,
             types: ctx.types,
@@ -455,6 +464,12 @@ pub(crate) fn lower_fn(
         if let (Some(w), Some(name)) = (em.witness.take(), &witness_name) {
             crate::witness::push(name, w.certificate());
         }
+        exit_ledger = std::mem::take(&mut em.exit_ledger);
+        for (id, &(idx, _)) in em.locals.iter() {
+            if let Some(n) = (ctx.var_name)(var_space, *id) {
+                local_names.insert(idx, n);
+            }
+        }
         // Hold-balance invariant: every arm releases exactly what it
         // held. An over-release WRAPS the u32 depth and poisons every
         // later hold as a fake depth failure (string.get held 4, released
@@ -468,6 +483,9 @@ pub(crate) fn lower_fn(
         }
     }
     f.instructions().end();
+    crate::exit_plan::validate_exits(&f, &exit_ledger, &fn_name, |idx| {
+        local_names.get(&idx).map_or_else(|| format!("local #{idx}"), |n| format!("local `{n}`"))
+    })?;
     Ok((f, calls))
 }
 

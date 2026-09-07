@@ -57,6 +57,32 @@ pub enum EmitError {
     /// This IR shape is outside the current slice. The reason string feeds
     /// the burn-up histogram — precise, greppable, shrink-only.
     Unsupported(String),
+    /// E083 (#1996): the emitted exit operations of a function do not
+    /// implement its checked ExitPlan. A COMPILER defect — never a wall
+    /// (the build must not reroute a valid program around an ownership
+    /// bug), never a source error (the text says so).
+    OwnershipLowering(OwnDefect),
+}
+
+/// One E-OWN-LOWERING finding (exit_plan.rs `validate_exits`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnDefect {
+    pub headline: String,
+    pub function: String,
+    pub value: String,
+    pub expected: String,
+    pub emitted: String,
+}
+
+impl std::fmt::Display for OwnDefect {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "error[E083]: {}", self.headline)?;
+        writeln!(f, "  --> fn `{}`", self.function)?;
+        writeln!(f, "   = value: {}", self.value)?;
+        writeln!(f, "   = expected: {}", self.expected)?;
+        writeln!(f, "   = emitted: {}", self.emitted)?;
+        write!(f, "   = compiler contract failure; no artifact emitted (run `almide explain E083`)")
+    }
 }
 
 fn unsup<T>(what: &str) -> Result<T, EmitError> {
@@ -130,6 +156,7 @@ mod arg_temps;
 mod arm;
 pub(crate) use arm::{ArgMode, ArmResult, Lowered, Own};
 mod exit_plan;
+pub use exit_plan::test_omit_first_release;
 mod fuel;
 mod ranges;
 mod rc_ownership;
@@ -512,6 +539,9 @@ pub(crate) struct Ctx<'a> {
     /// (global index, slice type). Functions read them across function
     /// boundaries — the class main-local top-lets could never serve.
     pub(crate) globals: &'a HashMap<GVar, (u32, SliceTy)>,
+    /// Source name of a variable, by (var space, VarId) — for the E083
+    /// diagnostic (`value: local \`x\``). None for synthetic vars.
+    pub(crate) var_name: &'a dyn Fn(u32, VarId) -> Option<String>,
 }
 
 /// Function-VALUE work discovered during lowering: funcref-table entries

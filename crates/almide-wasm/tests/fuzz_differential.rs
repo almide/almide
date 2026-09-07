@@ -663,6 +663,8 @@ fn run_seed(seed: u64, tally: &mut Tally) -> Result<(), String> {
     };
     let bytes = match almide_wasm::emit_program(&ir) {
         Ok(b) => b,
+        // E083 is a compiler defect, not a refusal: a finding, loudly.
+        Err(almide_wasm::EmitError::OwnershipLowering(d)) => panic!("{d}"),
         Err(almide_wasm::EmitError::Unsupported(_)) => {
             tally.emit_refused += 1;
             return Ok(());
