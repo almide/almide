@@ -87,6 +87,7 @@ fn emit_program_pass(
     }
     let main_index = F_FN_BASE + program_fns.len() as u32;
     let region_pure = region::region_pure_fns(ir, &program_fns, &table);
+    let returns_fresh = fresh::returns_fresh_fns(&program_fns, &table);
 
     let mut pool = Pool::new();
     // Interned eagerly so $append_bool can carry their fixed addresses.
@@ -97,7 +98,11 @@ fn emit_program_pass(
 
     // Function-VALUE work shared by every lowering below (funcref table,
     // call_indirect types, lifted lambdas).
-    let work = FnWork { region_pure: std::cell::RefCell::new(region_pure), ..FnWork::default() };
+    let work = FnWork {
+        region_pure: std::cell::RefCell::new(region_pure),
+        returns_fresh: std::cell::RefCell::new(returns_fresh),
+        ..FnWork::default()
+    };
     // Calls made from display-helper bodies (BFS roots).
     let mut display_helper_calls: std::collections::HashSet<usize> = HashSet::new();
     work.itype_base.set(T_FN_BASE + table.infos.len() as u32);
