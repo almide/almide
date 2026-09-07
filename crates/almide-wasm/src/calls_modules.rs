@@ -20,6 +20,24 @@ impl Emitter<'_> {
         tail: bool,
         ret_hint: Option<SliceTy>,
     ) -> Result<Option<SliceTy>, EmitError> {
+        // #1990: number this entry and keep it on the stack while the
+        // dispatch (and the arguments beneath it) lower — the table path
+        // stamps it as an owned-result call (see `rc_owned_result`).
+        self.module_call_seq += 1;
+        let seq = self.module_call_seq;
+        self.module_call_stack.push(seq);
+        let r = self.lower_module_call_dispatch(target, args, tail, ret_hint);
+        self.module_call_stack.pop();
+        r
+    }
+
+    fn lower_module_call_dispatch(
+        &mut self,
+        target: &CallTarget,
+        args: &[IrExpr],
+        tail: bool,
+        ret_hint: Option<SliceTy>,
+    ) -> Result<Option<SliceTy>, EmitError> {
         if let Some(out) = self.lower_string_ext(target, args)? {
             return Ok(out);
         }

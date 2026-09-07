@@ -41,6 +41,19 @@ pub(crate) struct Emitter<'a> {
     /// and loop binds never enter — they borrow their subject's
     /// interior. BTreeSet: the dec order must be deterministic.
     pub(crate) rc_owned: std::collections::BTreeSet<u32>,
+    /// #1990: which module call handed back an OWNED result. Every
+    /// `lower_module_call` entry takes the next sequence number and keeps
+    /// it on the stack while its arguments lower; the registry TABLE path
+    /// (`lower_linked_call`, the only module route with the callee-owned
+    /// convention) stamps the enclosing call's number here. A bind /
+    /// assign / return route that captured the counter BEFORE lowering
+    /// its rhs asks `rc_owned_result(e, seq0)`: the rhs call was entry
+    /// `seq0 + 1`, so the stamp equals it exactly when the rhs itself
+    /// took the table path — a special form (its own conventions, the
+    /// conservative +1 stays) or a nested table call never matches.
+    pub(crate) module_call_seq: u32,
+    pub(crate) module_call_stack: Vec<u32>,
+    pub(crate) table_result_seq: Option<u32>,
     // NOTE: rc_owned and rc_droppable_params are BOTH dec'd by the
     // epilogue — a local in the two sets at once is a double free. Use
     // rc_own(), never a raw insert (#1770: a mut-param writeback's

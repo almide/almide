@@ -535,6 +535,11 @@ impl Emitter<'_> {
         } else {
             self.f.instructions().call(index);
         }
+        // #1990: this module call took the TABLE path — its droppable
+        // result is the callee's handed-over credit (see rc_owned_result).
+        if let Some(&s) = self.module_call_stack.last() {
+            self.table_result_seq = Some(s);
+        }
         Ok(ret)
     }
 }
