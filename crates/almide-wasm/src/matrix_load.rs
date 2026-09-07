@@ -30,7 +30,7 @@ impl Emitter<'_> {
         b: &IrExpr,
         c: &IrExpr,
         d: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         match func {
             "from_bytes_f32_le" => self.lower_matrix_from_bytes(false, a, b, c, d),
             "from_bytes_f16_le" => self.lower_matrix_from_bytes(true, a, b, c, d),
@@ -107,7 +107,7 @@ impl Emitter<'_> {
         offset: &IrExpr,
         rows: &IrExpr,
         cols: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         self.lower(data, Some(SliceTy::Scalar(Scalar::Bytes)))?;
         let hd = self.hold_i32()?;
         self.f.instructions().local_set(hd);
@@ -179,7 +179,7 @@ impl Emitter<'_> {
             self.release_i64();
         }
         self.release_i32();
-        Ok(Some(SliceTy::Matrix))
+        Ok(Some(Lowered::owned(SliceTy::Matrix)))
     }
 
     /// select_rows_f32: rid clamps to 0; a row whose f32 window leaves
@@ -190,7 +190,7 @@ impl Emitter<'_> {
         offset: &IrExpr,
         cols: &IrExpr,
         ids: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         self.lower(data, Some(SliceTy::Scalar(Scalar::Bytes)))?;
         let hd = self.hold_i32()?;
         self.f.instructions().local_set(hd);
@@ -282,7 +282,7 @@ impl Emitter<'_> {
         self.release_i64();
         self.release_i64();
         self.release_i32();
-        Ok(Some(SliceTy::Matrix))
+        Ok(Some(Lowered::owned(SliceTy::Matrix)))
     }
 
     /// from_q1_0_bytes / select_rows_q1_0: the Q1_0 decode on the
@@ -296,7 +296,7 @@ impl Emitter<'_> {
         offset: &IrExpr,
         dim_a: &IrExpr,
         dim_b: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let qv = self.work.helper(crate::work::Helper::Q10Val);
         self.lower(data, Some(SliceTy::Scalar(Scalar::Bytes)))?;
         let hd = self.hold_i32()?;
@@ -416,7 +416,7 @@ impl Emitter<'_> {
         self.release_i64();
         self.release_i64();
         self.release_i32();
-        Ok(Some(SliceTy::Matrix))
+        Ok(Some(Lowered::owned(SliceTy::Matrix)))
     }
 
     /// select_rows_q8_0_dq: 34-byte blocks of [fp16 scale][32 int8
@@ -428,7 +428,7 @@ impl Emitter<'_> {
         offset: &IrExpr,
         cols: &IrExpr,
         ids: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         self.lower(data, Some(SliceTy::Scalar(Scalar::Bytes)))?;
         let hd = self.hold_i32()?;
         self.f.instructions().local_set(hd);
@@ -533,7 +533,7 @@ impl Emitter<'_> {
         for _ in 0..5 {
             self.release_i32();
         }
-        Ok(Some(SliceTy::Matrix))
+        Ok(Some(Lowered::owned(SliceTy::Matrix)))
     }
 
     /// select_rows (plain): rid clamps to 0; rid < rows copies the row,
@@ -542,7 +542,7 @@ impl Emitter<'_> {
         &mut self,
         m: &IrExpr,
         ids: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let (hm, hr, hc) = self.mat_open(m)?;
         match self.lower(ids, None)? {
             SliceTy::List(h) if self.types.el(h) == INT => {}
@@ -610,6 +610,6 @@ impl Emitter<'_> {
         for _ in 0..3 {
             self.release_i32();
         }
-        Ok(Some(SliceTy::Matrix))
+        Ok(Some(Lowered::owned(SliceTy::Matrix)))
     }
 }

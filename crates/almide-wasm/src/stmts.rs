@@ -184,13 +184,12 @@ impl Emitter<'_> {
                     }
                     _ => None,
                 };
-                let seq0 = self.module_call_seq;
                 let ret_e = ret_direct.unwrap_or(else_);
                 self.lower(ret_e, Some(want))?;
                 // The guard's early return is an exit like the tail: a
                 // droppable value that may BORROW a local takes +1 before
                 // the frame's owners are released (#2001).
-                if self.rc_droppable(want) && !self.rc_owned_result(ret_e, seq0) {
+                if self.rc_droppable(want) && !self.rc_owned_result(ret_e) {
                     self.rc_inc_top();
                 }
                 let plan = self.exit_plan(crate::exit_plan::Continuation::GuardReturn);
@@ -234,7 +233,6 @@ impl Emitter<'_> {
         let Some(&(idx, declared)) = self.locals.get(var) else {
             return unsup("bind:unmapped");
         };
-        let seq0 = self.module_call_seq;
         self.lower(value, Some(declared))?;
         // RC-5: Lists and Bytes SHARE at bind — the COW judge at every
         // in-place mutation entry moved the value-semantics copy from
@@ -246,7 +244,7 @@ impl Emitter<'_> {
             self.f.instructions().call(F_BLOCK_COPY);
         }
         if matches!(declared, SliceTy::List(_) | SliceTy::Scalar(Scalar::Str | Scalar::Bytes))
-            && !self.rc_owned_result(value, seq0)
+            && !self.rc_owned_result(value)
         {
             self.rc_inc_top();
         }
@@ -273,7 +271,7 @@ impl Emitter<'_> {
                 self.f.instructions().local_get(idx).call(F_DEC_FLAT);
                 self.rc_own(idx);
                 if self.witness.is_some() {
-                    self.witness_bind(idx, declared, value, seq0);
+                    self.witness_bind(idx, declared, value);
                 }
             }
             self.f.instructions().local_set(idx);
@@ -687,7 +685,6 @@ impl Emitter<'_> {
                 {
                     return unsup("assign:mut-param-in-branch-arm(#1688)");
                 }
-                let seq0 = self.module_call_seq;
                 self.lower(value, Some(declared))?;
                 // RC-5: same share discipline as Bind.
                 if matches!(declared, SliceTy::Map(..) | SliceTy::Set(_)) {
@@ -696,7 +693,7 @@ impl Emitter<'_> {
                 if matches!(
                     declared,
                     SliceTy::List(_) | SliceTy::Scalar(Scalar::Str | Scalar::Bytes)
-                ) && !self.rc_owned_result(value, seq0)
+                ) && !self.rc_owned_result(value)
                 {
                     self.rc_inc_top();
                 }

@@ -269,9 +269,7 @@ pub(crate) fn lower_fn(
             rc_frame_params: Vec::new(),
             self_index,
             rc_owned: std::collections::BTreeSet::new(),
-            module_call_seq: 0,
-            module_call_stack: Vec::new(),
-            table_result_seq: None,
+            owned_call_marks: Default::default(),
             table: ctx.table,
             types: ctx.types,
             calls: &mut calls,
@@ -388,12 +386,11 @@ pub(crate) fn lower_fn(
         match (ret, effect_raw) {
             (None, _) => em.lower_stmt_expr(body)?,
             (Some(want), None) => {
-                let seq0 = em.module_call_seq;
                 em.lower_tail(body, Some(want))?;
                 // RC-3: a droppable result that may BORROW a local
                 // takes +1 before the epilogue releases the owners.
                 let owned_tail =
-                    em.rc_owned_result(crate::rc_ownership::rc_tail(body), seq0);
+                    em.rc_owned_result(crate::rc_ownership::rc_tail(body));
                 if em.rc_droppable(want) && owned_tail {
                     em.witness_tail_owned();
                 }
@@ -428,12 +425,11 @@ pub(crate) fn lower_fn(
                     em.lower_stmt_expr(body)?;
                     em.f.instructions().i32_const(0);
                 } else {
-                    let seq0 = em.module_call_seq;
                     em.lower_tail(body, Some(raw))?;
                     // RC-3: the raw payload rides inside the ok carrier
                     // past the epilogue — same borrow rule as the pure
                     // arm, and the +1 must precede the wrap.
-                    if em.rc_droppable(raw) && !em.rc_owned_result(crate::rc_ownership::rc_tail(body), seq0) {
+                    if em.rc_droppable(raw) && !em.rc_owned_result(crate::rc_ownership::rc_tail(body)) {
                         em.rc_inc_top();
                     }
                 }

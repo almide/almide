@@ -32,32 +32,32 @@ impl Emitter<'_> {
         &mut self,
         func: &str,
         args: &[IrExpr],
-    ) -> Result<Option<Option<SliceTy>>, EmitError> {
+    ) -> Result<Option<Option<Lowered>>, EmitError> {
         let out = match (func, args) {
             ("null", []) => {
                 self.emit_value_box(VT_NULL, None)?;
-                Some(SliceTy::Value)
+                Some(Lowered::owned(SliceTy::Value))
             }
             ("int", [n]) => {
                 self.lower(n, Some(INT))?;
                 self.emit_value_box(VT_INT, Some(INT))?;
-                Some(SliceTy::Value)
+                Some(Lowered::owned(SliceTy::Value))
             }
             ("bool", [b]) => {
                 self.lower(b, Some(BOOL))?;
                 self.f.instructions().i64_extend_i32_u();
                 self.emit_value_box(VT_BOOL, Some(INT))?;
-                Some(SliceTy::Value)
+                Some(Lowered::owned(SliceTy::Value))
             }
             ("float", [x]) => {
                 self.lower(x, Some(FLOAT))?;
                 self.emit_value_box(VT_FLOAT, Some(FLOAT))?;
-                Some(SliceTy::Value)
+                Some(Lowered::owned(SliceTy::Value))
             }
             ("str", [s]) => {
                 self.lower(s, Some(STR))?;
                 self.emit_value_box(VT_STR, Some(STR))?;
-                Some(SliceTy::Value)
+                Some(Lowered::owned(SliceTy::Value))
             }
             ("merge", [va, vb]) => {
                 let ti = self.types.tuple(vec![STR, SliceTy::Value]);
@@ -69,17 +69,17 @@ impl Emitter<'_> {
                 self.lower(va, Some(SliceTy::Value))?;
                 self.lower(vb, Some(SliceTy::Value))?;
                 self.f.instructions().call(m);
-                Some(SliceTy::Value)
+                Some(Lowered::owned(SliceTy::Value))
             }
             // pick/omit: keep (drop) the named keys, kept pairs SHARED with
             // the source (native filter+clone of the pair vec — the pair
             // blocks themselves are never copied). Non-object passes through.
-            ("pick" | "omit", [v, keys]) => Some(self.lower_value_pick_omit(func, v, keys)?),
+            ("pick" | "omit", [v, keys]) => Some(Lowered::owned(self.lower_value_pick_omit(func, v, keys)?)),
             // to_camel_case / to_snake_case (#1423 stage 4): a SHALLOW key
             // rename — every pair is rebuilt with a FRESH key from the
             // linked self-host transform and its value SHARED (pick/omit's
             // graveyard discipline). Non-object passes through.
-            ("to_camel_case" | "to_snake_case", [v]) => Some(self.lower_value_rename(func, v)?),
+            ("to_camel_case" | "to_snake_case", [v]) => Some(Lowered::owned(self.lower_value_rename(func, v)?)),
             // Object: tag 6, payload = the (String, Value) pairs list —
             // insertion order IS the block, exactly the interp's ordered
             // object model.
@@ -101,7 +101,7 @@ impl Emitter<'_> {
                     return Err(EmitError::Unsupported("value.object-el".into()));
                 }
                 self.emit_value_box(VT_OBJECT, Some(STR))?;
-                Some(SliceTy::Value)
+                Some(Lowered::owned(SliceTy::Value))
             }
             ("array", [xs]) => {
                 let got = self.lower(xs, None)?;
@@ -112,7 +112,7 @@ impl Emitter<'_> {
                     return Err(EmitError::Unsupported("value.array-el".into()));
                 }
                 self.emit_value_box(VT_ARRAY, Some(STR))?; // addr slot (i32 class)
-                Some(SliceTy::Value)
+                Some(Lowered::owned(SliceTy::Value))
             }
             _ => return self.lower_value_call_b(func, args),
         };
@@ -501,35 +501,35 @@ impl Emitter<'_> {
         &mut self,
         func: &str,
         args: &[IrExpr],
-    ) -> Result<Option<Option<SliceTy>>, EmitError> {
+    ) -> Result<Option<Option<Lowered>>, EmitError> {
         let out = match (func, args) {
             ("as_int", [v]) => {
                 self.lower(v, Some(SliceTy::Value))?;
                 self.emit_value_unbox(VT_INT, INT, "expected Int")?;
-                Some(SliceTy::Result(self.types.intern(INT), self.types.intern(STR)))
+                Some(Lowered::owned(SliceTy::Result(self.types.intern(INT), self.types.intern(STR))))
             }
             ("as_bool", [v]) => {
                 self.lower(v, Some(SliceTy::Value))?;
                 self.emit_value_unbox(VT_BOOL, BOOL, "expected Bool")?;
-                Some(SliceTy::Result(self.types.intern(BOOL), self.types.intern(STR)))
+                Some(Lowered::owned(SliceTy::Result(self.types.intern(BOOL), self.types.intern(STR))))
             }
             ("as_string", [v]) => {
                 self.lower(v, Some(SliceTy::Value))?;
                 self.emit_value_unbox(VT_STR, STR, "expected Str")?;
-                Some(SliceTy::Result(self.types.intern(STR), self.types.intern(STR)))
+                Some(Lowered::owned(SliceTy::Result(self.types.intern(STR), self.types.intern(STR))))
             }
             ("as_array", [v]) => {
                 self.lower(v, Some(SliceTy::Value))?;
                 let lv = SliceTy::List(self.types.intern(SliceTy::Value));
                 self.emit_value_unbox(VT_ARRAY, lv, "expected Array")?;
-                Some(SliceTy::Result(self.types.intern(lv), self.types.intern(STR)))
+                Some(Lowered::owned(SliceTy::Result(self.types.intern(lv), self.types.intern(STR))))
             }
             // #658: a JSON number has no int/float split — an Int Value
             // widens to a valid Float.
             ("as_float", [v]) => {
                 self.lower(v, Some(SliceTy::Value))?;
                 self.emit_value_as_float()?;
-                Some(SliceTy::Result(self.types.intern(FLOAT), self.types.intern(STR)))
+                Some(Lowered::owned(SliceTy::Result(self.types.intern(FLOAT), self.types.intern(STR))))
             }
             // The Codec-derive field accessor: tag check, first-match
             // scan, the incumbent's exact err lines.
@@ -576,21 +576,21 @@ impl Emitter<'_> {
                 self.release_i32();
                 self.release_i32();
                 self.release_i32();
-                Some(SliceTy::Result(
+                Some(Lowered::owned(SliceTy::Result(
                     self.types.intern(SliceTy::Value),
                     self.types.intern(STR),
-                ))
+                )))
             }
             ("keys", [v]) => {
                 self.lower(v, Some(SliceTy::Value))?;
                 let vk = self.work.helper(Helper::ValueKeys);
                 self.f.instructions().call(vk);
-                Some(SliceTy::List(self.types.intern(STR)))
+                Some(Lowered::owned(SliceTy::List(self.types.intern(STR))))
             }
             ("stringify", [v]) => {
                 self.lower(v, Some(SliceTy::Value))?;
                 self.emit_value_stringify()?;
-                Some(STR)
+                Some(Lowered::owned(STR))
             }
             _ => return Ok(None),
         };
@@ -608,7 +608,7 @@ impl Emitter<'_> {
     pub(crate) fn lower_json_to_map(
         &mut self,
         j: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         self.lower(j, Some(SliceTy::Value))?;
         let ti = self.types.tuple(vec![STR, SliceTy::Value]);
         let def = self.types.tuple_def(ti);
@@ -685,7 +685,7 @@ impl Emitter<'_> {
         }
         let sh = self.types.intern(STR);
         let mh = self.types.intern(SliceTy::Map(sh, sh));
-        Ok(Some(SliceTy::Option(mh)))
+        Ok(Some(Lowered::owned(SliceTy::Option(mh))))
     }
 }
 

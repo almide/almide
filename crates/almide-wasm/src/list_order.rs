@@ -13,7 +13,7 @@ impl Emitter<'_> {
         &mut self,
         func: &str,
         args: &[IrExpr],
-    ) -> Result<Option<Option<SliceTy>>, EmitError> {
+    ) -> Result<Option<Option<Lowered>>, EmitError> {
         match (func, args) {
             // First n elements (native `take(n as usize)`): a NEGATIVE
             // n reinterprets huge and takes the WHOLE list.
@@ -48,7 +48,7 @@ impl Emitter<'_> {
                 }
                 self.f.instructions().call(F_BLOCK_COPY);
                 self.emit_merge_sort(elem)?;
-                Ok(Some(Some(SliceTy::List(h))))
+                Ok(Some(Some(Lowered::owned(SliceTy::List(h)))))
             }
             ("chunk" | "windows", [xs, n_arg]) => {
                 self.lower_list_chunk_windows(func, xs, n_arg).map(Some)
@@ -102,7 +102,7 @@ impl Emitter<'_> {
                 self.release_i32();
                 self.release_i64();
                 self.release_i32();
-                Ok(Some(Some(SliceTy::List(h))))
+                Ok(Some(Some(Lowered::owned(SliceTy::List(h)))))
             }
             // insert at min(i as usize, len): a NEGATIVE index appends
             // at the END (the huge-usize reinterpretation, v0 verbatim).
@@ -174,7 +174,7 @@ impl Emitter<'_> {
                 self.release_val(elem);
                 self.release_i64();
                 self.release_i32();
-                Ok(Some(Some(SliceTy::List(h))))
+                Ok(Some(Some(Lowered::owned(SliceTy::List(h)))))
             }
             _ => Ok(None),
         }
@@ -184,7 +184,7 @@ impl Emitter<'_> {
         &mut self,
         func: &str,
         xs: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
 
                 let is_min = func == "min";
                 let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
@@ -310,7 +310,7 @@ impl Emitter<'_> {
                 self.release_i32();
                 self.release_i32();
                 self.release_i32();
-                Ok(Some(SliceTy::Option(self.types.intern(elem))))
+                Ok(Some(Lowered::view(SliceTy::Option(self.types.intern(elem)))))
     }
 
 
@@ -319,7 +319,7 @@ impl Emitter<'_> {
         func: &str,
         xs: &IrExpr,
         n_arg: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
 
                 let windows = func == "windows";
                 let h = match self.lower(xs, None)? {
@@ -433,7 +433,7 @@ impl Emitter<'_> {
                 self.release_i64();
                 self.release_i64();
                 self.release_i32();
-                Ok(Some(SliceTy::List(self.types.intern(SliceTy::List(h)))))
+                Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(SliceTy::List(h))))))
     }
 
     /// Keys precomputed ONCE per element into a parallel array (#560 —
@@ -441,7 +441,7 @@ impl Emitter<'_> {
     /// side-effectful keys), then the lockstep merge sort moves keys
     /// and values together. Stable; key orders are the scalar three
     /// (Int/Str Ord, Float totalOrder).
-    fn lower_list_sort_by(&mut self, xs: &IrExpr, cb: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_list_sort_by(&mut self, xs: &IrExpr, cb: &IrExpr) -> ArmResult {
         let (params, body) = self.hof_lambda(cb, 1)?;
         let Some(k) = slice_ty_of(&body.ty, self.types) else {
             return unsup(&format!("list-sort-by-key:{}", ty_name(&body.ty)));
@@ -491,7 +491,7 @@ impl Emitter<'_> {
         self.release_i32();
         self.release_i32();
         self.release_i32();
-        Ok(Some(SliceTy::List(h)))
+        Ok(Some(Lowered::owned(SliceTy::List(h))))
     }
 }
 
@@ -499,7 +499,7 @@ impl Emitter<'_> {
     /// First n elements (native `take(n as usize)`; a NEGATIVE n
     /// reinterprets huge and takes the whole list) — split from
     /// `lower_list_order_call` for the complexity budget.
-    fn lower_list_take(&mut self, xs: &IrExpr, n: &IrExpr) -> Result<Option<Option<SliceTy>>, EmitError> {
+    fn lower_list_take(&mut self, xs: &IrExpr, n: &IrExpr) -> Result<Option<Option<Lowered>>, EmitError> {
                 let h = match self.lower(xs, None)? {
                     SliceTy::List(h) => h,
                     other => return unsup(&format!("list-take-of:{other:?}")),
@@ -539,6 +539,6 @@ impl Emitter<'_> {
                 self.release_i32();
                 self.release_i64();
                 self.release_i32();
-                Ok(Some(Some(SliceTy::List(h))))
+                Ok(Some(Some(Lowered::owned(SliceTy::List(h)))))
     }
 }

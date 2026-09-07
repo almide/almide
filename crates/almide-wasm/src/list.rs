@@ -14,7 +14,7 @@ impl Emitter<'_> {
         func: &str,
         args: &[IrExpr],
         ret_hint: Option<SliceTy>,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let _ = &ret_hint;
         if let Some(out) = self.lower_list_order_call(func, args)? {
             return Ok(out);
@@ -58,7 +58,7 @@ impl Emitter<'_> {
         }
     }
 
-    fn lower_list_len_arm(&mut self, xs: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_list_len_arm(&mut self, xs: &IrExpr) -> ArmResult {
         let elem = match self.lower(xs, None)? {
             SliceTy::List(h) => self.types.el(h),
             other => return unsup(&format!("list-len-of:{other:?}")),
@@ -69,10 +69,10 @@ impl Emitter<'_> {
             .i32_const(elem.slot_size() as i32)
             .i32_div_u()
             .i64_extend_i32_u();
-        Ok(Some(INT))
+        Ok(Some(Lowered::scalar(INT)))
     }
 
-    fn lower_list_get_arm(&mut self, xs: &IrExpr, idx: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_list_get_arm(&mut self, xs: &IrExpr, idx: &IrExpr) -> ArmResult {
         let h = match self.lower(xs, None)? {
             SliceTy::List(h) => h,
             other => return unsup(&format!("list-get-of:{other:?}")),
@@ -83,10 +83,10 @@ impl Emitter<'_> {
             _ => F_LIST_GET_4,
         };
         self.f.instructions().call(helper);
-        Ok(Some(SliceTy::Option(h)))
+        Ok(Some(Lowered::view(SliceTy::Option(h))))
     }
 
-    fn lower_list_first_arm(&mut self, xs: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_list_first_arm(&mut self, xs: &IrExpr) -> ArmResult {
         let elem = match self.lower(xs, None)? {
             SliceTy::List(h) => self.types.el(h),
             other => return unsup(&format!("list-first-of:{other:?}")),
@@ -97,20 +97,20 @@ impl Emitter<'_> {
             _ => F_LIST_GET_4,
         };
         self.f.instructions().call(helper);
-        Ok(Some(SliceTy::Option(self.types.intern(elem))))
+        Ok(Some(Lowered::view(SliceTy::Option(self.types.intern(elem)))))
     }
 
-    fn lower_list_join_arm(&mut self, xs: &IrExpr, sep: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_list_join_arm(&mut self, xs: &IrExpr, sep: &IrExpr) -> ArmResult {
         match self.lower(xs, None)? {
             SliceTy::List(h) if self.types.el(h) == STR => {}
             other => return unsup(&format!("list-join-of:{other:?}")),
         }
         self.lower(sep, Some(STR))?;
         self.f.instructions().call(F_LIST_JOIN);
-        Ok(Some(STR))
+        Ok(Some(Lowered::owned(STR)))
     }
 
-    fn lower_list_enumerate(&mut self, xs: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_list_enumerate(&mut self, xs: &IrExpr) -> ArmResult {
         let elem = match self.lower(xs, None)? {
             SliceTy::List(h) => self.types.el(h),
             other => return unsup(&format!("list-enumerate-of:{other:?}")),
@@ -187,10 +187,10 @@ impl Emitter<'_> {
         self.release_i32();
         self.release_i32();
         self.release_i32();
-        Ok(Some(SliceTy::List(self.types.intern(SliceTy::Tuple(pair_ti)))))
+        Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(SliceTy::Tuple(pair_ti))))))
     }
 
-    fn lower_list_slice(&mut self, xs: &IrExpr, a: &IrExpr, b: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_list_slice(&mut self, xs: &IrExpr, a: &IrExpr, b: &IrExpr) -> ArmResult {
         let (h, elem) = match self.lower(xs, None)? {
             SliceTy::List(h) => (h, self.types.el(h)),
             other => return unsup(&format!("list-slice-of:{other:?}")),
@@ -260,10 +260,10 @@ impl Emitter<'_> {
         self.release_i64();
         self.release_i64();
         self.release_i32();
-        Ok(Some(SliceTy::List(h)))
+        Ok(Some(Lowered::owned(SliceTy::List(h))))
     }
 
-    fn lower_list_find(&mut self, xs: &IrExpr, cb: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_list_find(&mut self, xs: &IrExpr, cb: &IrExpr) -> ArmResult {
         let (params, body) = self.hof_lambda(cb, 1)?;
         let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
         let rh = self.hold_i32()?;
@@ -288,14 +288,14 @@ impl Emitter<'_> {
         self.release_i32();
         self.release_i32();
         self.release_i32();
-        Ok(Some(SliceTy::Option(self.types.intern(elem))))
+        Ok(Some(Lowered::view(SliceTy::Option(self.types.intern(elem)))))
     }
 
     fn lower_list_find_index(
         &mut self,
         xs: &IrExpr,
         cb: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let (params, body) = self.hof_lambda(cb, 1)?;
         let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
         let rh = self.hold_i32()?;
@@ -321,17 +321,17 @@ impl Emitter<'_> {
         self.release_i32();
         self.release_i32();
         self.release_i32();
-        Ok(Some(SliceTy::Option(self.types.intern(INT))))
+        Ok(Some(Lowered::owned(SliceTy::Option(self.types.intern(INT)))))
     }
 
-    fn lower_list_contains(&mut self, xs: &IrExpr, x: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_list_contains(&mut self, xs: &IrExpr, x: &IrExpr) -> ArmResult {
         let got = self.lower_list_index_of(xs, x)?;
         let _ = got;
         self.f.instructions().i32_const(0).i32_ne();
-        Ok(Some(BOOL))
+        Ok(Some(Lowered::scalar(BOOL)))
     }
 
-    fn lower_list_length_arm(&mut self, xs: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_list_length_arm(&mut self, xs: &IrExpr) -> ArmResult {
         match self.lower(xs, None)? {
             SliceTy::List(h) => {
                 let stride = self.types.el(h).slot_size() as i32;
@@ -341,13 +341,13 @@ impl Emitter<'_> {
                     .i32_const(stride)
                     .i32_div_u()
                     .i64_extend_i32_u();
-                Ok(Some(INT))
+                Ok(Some(Lowered::scalar(INT)))
             }
             other => unsup(&format!("list-length-of:{other:?}")),
         }
     }
 
-    fn lower_list_flat_map(&mut self, xs: &IrExpr, cb: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_list_flat_map(&mut self, xs: &IrExpr, cb: &IrExpr) -> ArmResult {
         let (params, body) = self.hof_lambda(cb, 1)?;
         let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
         let hs = self.hold_i32()?;
@@ -355,7 +355,6 @@ impl Emitter<'_> {
         self.f.instructions().i32_const(0).call(F_ALLOC).local_set(hacc);
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.hof_elem_into(elem, bh, ch, ih, params[0]);
-        let seq0 = self.module_call_seq;
         let got = self.lower(body, None)?;
         let SliceTy::List(bi) = got else {
             return unsup(&format!("flat-map-body:{got:?}"));
@@ -369,7 +368,7 @@ impl Emitter<'_> {
             // inc-before-dec, so the per-iteration dec balances fresh and
             // aliased alike; the move is by 8-byte bits, so Int and Float
             // share one loop and $dec_flat (shallow) is a full free.
-            if !self.rc_owned_result(crate::rc_ownership::rc_tail(body), seq0) {
+            if !self.rc_owned_result(crate::rc_ownership::rc_tail(body)) {
                 self.rc_inc_top();
             }
             self.f.instructions().local_set(hs);
@@ -402,10 +401,10 @@ impl Emitter<'_> {
         for _ in 0..5 {
             self.release_i32();
         }
-        Ok(Some(SliceTy::List(bi)))
+        Ok(Some(Lowered::owned(SliceTy::List(bi))))
     }
 
-    fn lower_list_filter_map(&mut self, xs: &IrExpr, cb: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_list_filter_map(&mut self, xs: &IrExpr, cb: &IrExpr) -> ArmResult {
         let (params, body) = self.hof_lambda(cb, 1)?;
         let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
         let hr = self.hold_i32()?;
@@ -434,10 +433,10 @@ impl Emitter<'_> {
         for _ in 0..5 {
             self.release_i32();
         }
-        Ok(Some(SliceTy::List(self.types.intern(b))))
+        Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(b)))))
     }
 
-    fn lower_list_fold_arm(&mut self, xs: &IrExpr, init: &IrExpr, cb: &IrExpr) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_list_fold_arm(&mut self, xs: &IrExpr, init: &IrExpr, cb: &IrExpr) -> ArmResult {
         if let Some(out) = self.lower_list_fold_fused(xs, init, cb)? {
             return Ok(out);
         }
@@ -449,7 +448,7 @@ impl Emitter<'_> {
         &mut self,
         func: &str,
         xs: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         match func {
             "len" => self.lower_list_len_arm(xs),
             "length" => self.lower_list_length_arm(xs),
@@ -470,7 +469,7 @@ impl Emitter<'_> {
         func: &str,
         a: &IrExpr,
         b: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         match func {
             "get" => self.lower_list_get_arm(a, b),
             "join" => self.lower_list_join_arm(a, b),
@@ -498,7 +497,7 @@ impl Emitter<'_> {
         a: &IrExpr,
         b: &IrExpr,
         c: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         match func {
             "get_or" => self.lower_list_get_or(a, b, c),
             "set" => self.lower_list_set(a, b, c),
@@ -584,7 +583,7 @@ impl Emitter<'_> {
         &mut self,
         xs: &IrExpr,
         cb: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         // A FN-VALUE callback (a HOF param forwarded to list.map, #653)
         // has no body to inline — it call_indirects per element. A lambda
         // whose body still PROPAGATES takes the same route (#1406): its
@@ -629,14 +628,14 @@ impl Emitter<'_> {
         self.release_i32();
         self.release_i32();
         self.release_i32();
-        Ok(Some(SliceTy::List(self.types.intern(u))))
+        Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(u)))))
     }
 
     pub(crate) fn lower_list_filter(
         &mut self,
         xs: &IrExpr,
         cb: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let (params, body) = self.hof_lambda(cb, 1)?;
         let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
         let stride = elem.slot_size() as i32;
@@ -689,7 +688,7 @@ impl Emitter<'_> {
         self.release_i32();
         self.release_i32();
         self.release_i32();
-        Ok(Some(SliceTy::List(self.types.intern(elem))))
+        Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(elem)))))
     }
 
     pub(crate) fn lower_list_fold(
@@ -697,7 +696,7 @@ impl Emitter<'_> {
         xs: &IrExpr,
         init: &IrExpr,
         cb: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let (params, body) = self.hof_lambda(cb, 2)?;
         let (acc_p, x_p) = (params[0], params[1]);
         let Some(b) = slice_ty_of(&init.ty, self.types) else {
@@ -715,7 +714,7 @@ impl Emitter<'_> {
         self.release_i32();
         self.release_i32();
         self.release_i32();
-        Ok(Some(b))
+        Ok(Some(Lowered::view(b)))
     }
 
     /// `list.get_or(xs, i, d)`: (xs.get(i)) ?? d, inlined via the get
@@ -725,7 +724,7 @@ impl Emitter<'_> {
         xs: &IrExpr,
         idx: &IrExpr,
         default: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         let elem = match self.lower(xs, None)? {
             SliceTy::List(h) => self.types.el(h),
             other => return unsup(&format!("list-get-of:{other:?}")),
@@ -753,7 +752,7 @@ impl Emitter<'_> {
         self.f.instructions().end();
         self.release_for(elem);
         self.release_i32();
-        Ok(Some(elem))
+        Ok(Some(Lowered::view(elem)))
     }
 }
 
@@ -765,7 +764,7 @@ impl Emitter<'_> {
         func: &str,
         a: &IrExpr,
         b: &IrExpr,
-    ) -> Result<Option<SliceTy>, EmitError> {
+    ) -> ArmResult {
         match func {
             "take_while" => self.lower_list_take_while(a, b),
             "drop_while" => self.lower_list_drop_while(a, b),
