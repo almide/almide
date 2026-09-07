@@ -548,6 +548,30 @@ impl Emitter<'_> {
 }
 
 impl Emitter<'_> {
+    /// An ERROR exit (`f()!` propagating its err, a raised `err(..)`,
+    /// `!` on none in an Option fn) leaves the frame exactly as the
+    /// fall-through epilogue would: every rc_owned local, then every
+    /// droppable param not among them (#1995's exit class — before this
+    /// the err path returned over them, 128 B per call in the probe).
+    /// Safe by the epilogue's own argument: the returned err block holds
+    /// its own share of any borrowed payload (`rc_share_guard` in
+    /// lower_sum). The witness is not branch-aware — an armed recorder
+    /// is poisoned rather than fed a one-path stream.
+    pub(crate) fn emit_error_exit_release(&mut self) {
+        let owned = self.rc_owned.clone();
+        for &idx in &owned {
+            self.f.instructions().local_get(idx).call(F_DEC_FLAT);
+        }
+        for idx in self.rc_frame_params.clone() {
+            if !owned.contains(&idx) {
+                self.f.instructions().local_get(idx).call(F_DEC_FLAT);
+            }
+        }
+        if let Some(w) = self.witness.as_mut() {
+            w.poison();
+        }
+    }
+
     /// Release this fn's droppable params before a `return_call` — the
     /// tail call replaces the frame and the epilogue never runs. The
     /// pending args on the wasm stack are unaffected ($dec_flat is

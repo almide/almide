@@ -184,7 +184,16 @@ impl Emitter<'_> {
                     }
                     _ => None,
                 };
-                self.lower(ret_direct.unwrap_or(else_), Some(want))?;
+                let seq0 = self.module_call_seq;
+                let ret_e = ret_direct.unwrap_or(else_);
+                self.lower(ret_e, Some(want))?;
+                // The guard's early return is an exit like the tail: a
+                // droppable value that may BORROW a local takes +1 before
+                // the frame's owners are released (#2001).
+                if self.rc_droppable(want) && !self.rc_owned_result(ret_e, seq0) {
+                    self.rc_inc_top();
+                }
+                self.emit_error_exit_release();
                 self.f.instructions().return_();
             }
             // main / Unit fn: the else IS the return — evaluate it in
@@ -192,12 +201,12 @@ impl Emitter<'_> {
             // A RESULT else in main is the err channel, not a discard:
             // `guard c else err(…)` must print `Error: {msg}` and exit 1
             // (#1734 — the discard silently swallowed the err). The
-            // early return skips the RC epilogue: a leak, never a
-            // dangle.
+            // early return releases the frame like the epilogue (#2001).
             None => {
                 if !self.try_lower_main_err_carrier(else_)? {
                     self.lower_stmt_expr(else_)?;
                 }
+                self.emit_error_exit_release();
                 self.f.instructions().return_();
             }
         }

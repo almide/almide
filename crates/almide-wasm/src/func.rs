@@ -267,6 +267,7 @@ pub(crate) fn lower_fn(
             rc_param_ceiling: env_shift + params.len() as u32,
             rc_droppable_params: Vec::new(),
             tail_release_allowed: false,
+            rc_frame_params: Vec::new(),
             self_index,
             rc_owned: std::collections::BTreeSet::new(),
             module_call_seq: 0,
@@ -573,6 +574,15 @@ fn populate_tail_release_set(
     // were the loop-form double free (#1988) — 63 leaking wrappers
     // (`fan_map`, `http_set_header`, `__gby_add`, …) said so.
     let _ = cur_module;
+    // The frame's droppable params, for the ERROR exits (data.rs): those
+    // release exactly what the epilogue would, raw-address rule or not.
+    // A lifted lambda's raw param 0 is the closure ENV block, never a
+    // frame credit (the C-319 trio) — env_shift skips it.
+    for (k, &(_, pty)) in params.iter().enumerate() {
+        if em.rc_droppable(pty) {
+            em.rc_frame_params.push(env_shift + k as u32);
+        }
+    }
     if env_shift != 0 || crate::rc_ownership::body_uses_prim(body) {
         return;
     }
