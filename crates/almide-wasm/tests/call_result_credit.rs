@@ -31,6 +31,10 @@ fn grow(n: Int) -> String = {{
   s
 }}
 
+fn pair(n: Int) -> (Int, Int) = (n, n + 1)
+
+fn maybe(n: Int) -> Int? = if n >= 0 then some(n) else none
+
 fn scratch_tail(n: Int) -> String = {{
   let blk = prim.alloc_list(468)
   let p = prim.handle(blk) + 12
@@ -317,5 +321,29 @@ fn a_prim_body_with_owned_locals_releases_them_after_its_tail_call() {
         "    let s = scratch_tail(i)\n    total = total + string.len(s)",
         "2000",
         "16000",
+    );
+}
+
+/// #2010 stage 1: a flat-payload block — a tuple or an Option of scalars —
+/// is droppable like a Str: the bind owns the call's one credit and the
+/// exit plan releases it (before: every `(Int, Int)` return and every
+/// `some(n)` stayed on the bump graveyard forever).
+#[test]
+fn a_flat_tuple_result_is_released() {
+    flat(
+        "let p = pair(i)",
+        "    let p = pair(i)\n    let (a, b) = p\n    total = total + b - a",
+        "1000",
+        "8000",
+    );
+}
+
+#[test]
+fn a_flat_option_result_is_released() {
+    flat(
+        "let o = maybe(i)",
+        "    let o = maybe(i)\n    total = total + (o ?? 0) - i + 1",
+        "1000",
+        "8000",
     );
 }

@@ -56,30 +56,41 @@ pub(crate) fn bind_native_temporaries(ir: &IrProgram) -> Option<IrProgram> {
 }
 
 /// The RC-droppable shapes (rc_ownership.rs `rc_droppable`, by Ty): Str,
-/// Bytes, and a List whose elements are non-Str scalars.
+/// Bytes, and the flat-payload blocks — a List / tuple / Option / Result
+/// whose slots are all non-Str scalars (#2010 stage 1). Records and
+/// variants need the type table and are bound by the emitter's own
+/// routes.
 fn droppable_ty(t: &Ty) -> bool {
     match t {
         Ty::String | Ty::Bytes => true,
-        Ty::Applied(TypeConstructorId::List, args) => matches!(
-            args.first(),
-            Some(
-                Ty::Int
-                    | Ty::Float
-                    | Ty::Bool
-                    | Ty::Int8
-                    | Ty::Int16
-                    | Ty::Int32
-                    | Ty::Int64
-                    | Ty::UInt8
-                    | Ty::UInt16
-                    | Ty::UInt32
-                    | Ty::UInt64
-                    | Ty::Float32
-                    | Ty::Float64
-            )
-        ),
+        Ty::Applied(TypeConstructorId::List | TypeConstructorId::Option, args) => {
+            args.first().is_some_and(flat_ty)
+        }
+        Ty::Applied(TypeConstructorId::Result, args) => args.len() == 2 && args.iter().all(flat_ty),
+        Ty::Tuple(elems) => elems.iter().all(flat_ty),
         _ => false,
     }
+}
+
+/// A slot holding no heap block.
+fn flat_ty(t: &Ty) -> bool {
+    matches!(
+        t,
+        Ty::Int
+            | Ty::Float
+            | Ty::Bool
+            | Ty::Unit
+            | Ty::Int8
+            | Ty::Int16
+            | Ty::Int32
+            | Ty::Int64
+            | Ty::UInt8
+            | Ty::UInt16
+            | Ty::UInt32
+            | Ty::UInt64
+            | Ty::Float32
+            | Ty::Float64
+    )
 }
 
 /// A call that produces its value: a Named user fn, or a module op
