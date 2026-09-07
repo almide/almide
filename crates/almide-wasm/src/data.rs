@@ -155,7 +155,8 @@ impl Emitter<'_> {
             self.lower(e, Some(ret))?;
             // An exit like any other: the frame's owners are released
             // before the jump (the err block already shares its payload).
-            self.emit_error_exit_release();
+            let plan = self.exit_plan(crate::exit_plan::Continuation::ReturnError);
+            self.emit_exit(&plan);
             self.f.instructions().return_();
             return Ok(raw);
         }
@@ -311,7 +312,8 @@ impl Emitter<'_> {
                                 .local_tee(self.scr_i32_local)
                                 .i32_eqz()
                                 .if_(BlockType::Empty);
-                            self.emit_error_exit_release();
+                            let plan = self.exit_plan(crate::exit_plan::Continuation::ReturnError);
+                            self.emit_exit(&plan);
                             self.f
                                 .instructions()
                                 .i32_const(almide_layout::NULL_ADDR as i32)
@@ -355,7 +357,8 @@ impl Emitter<'_> {
                                 .local_get(self.tmp_i32_local)
                                 .i32_const(none_msg as i32)
                                 .i32_store(slot_memarg(almide_layout::SUM_FIELD));
-                            self.emit_error_exit_release();
+                            let plan = self.exit_plan(crate::exit_plan::Continuation::ReturnError);
+                            self.emit_exit(&plan);
                             self.f.instructions().local_get(self.tmp_i32_local).return_();
                         } else if self.in_main {
                             let none_msg = self.pool.intern("none");
@@ -382,7 +385,8 @@ impl Emitter<'_> {
                             if fn_err != Some(ert) {
                                 return unsup("unwrap-err-ty-mismatch");
                             }
-                            self.emit_error_exit_release();
+                            let plan = self.exit_plan(crate::exit_plan::Continuation::ReturnError);
+                            self.emit_exit(&plan);
                             self.f.instructions().local_get(self.scr_i32_local).return_();
                         } else if self.in_main && ert == STR {
                             self.f.instructions().local_get(self.scr_i32_local);

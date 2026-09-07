@@ -63,7 +63,8 @@ impl Emitter<'_> {
                     // release never runs, so it runs HERE (args are already
                     // +1'd by rc_arg_guard, so a pass-through param
                     // survives its own dec).
-                    self.emit_tail_param_release(true);
+                    let plan = self.exit_plan(crate::exit_plan::Continuation::TailTransfer { replaces_frame: true });
+                    self.emit_exit(&plan);
                     self.f.instructions().return_call_indirect(0, ti);
                 } else {
                     self.f.instructions().call_indirect(0, ti);
@@ -197,7 +198,10 @@ impl Emitter<'_> {
                     // Same frame-replacement release as the indirect site —
                     // unless the callee is THIS fn: tco.rs turns that
                     // return_call into a loop-back, and the frame lives on.
-                    self.emit_tail_param_release(Some(index) != self.self_index);
+                    let plan = self.exit_plan(crate::exit_plan::Continuation::TailTransfer {
+                        replaces_frame: Some(index) != self.self_index,
+                    });
+                    self.emit_exit(&plan);
                     self.f.instructions().return_call(index);
                 } else {
                     self.f.instructions().call(index);
@@ -534,6 +538,14 @@ impl Emitter<'_> {
         }
         self.calls.insert(i);
         if tail && ret.is_some() && ret == self.fn_ret {
+            // The third tail site, found by scripts/check-exit-sites.sh
+            // the day the gate went in (#1995): a registry-table tail call
+            // replaced the frame with no release at all — a user fn whose
+            // tail is `string.to_upper(s)` leaked `s` on every call.
+            let plan = self.exit_plan(crate::exit_plan::Continuation::TailTransfer {
+                replaces_frame: Some(index) != self.self_index,
+            });
+            self.emit_exit(&plan);
             self.f.instructions().return_call(index);
         } else {
             self.f.instructions().call(index);
@@ -544,85 +556,5 @@ impl Emitter<'_> {
             self.table_result_seq = Some(s);
         }
         Ok(ret)
-    }
-}
-
-impl Emitter<'_> {
-    /// An ERROR exit (`f()!` propagating its err, a raised `err(..)`,
-    /// `!` on none in an Option fn) leaves the frame exactly as the
-    /// fall-through epilogue would: every rc_owned local, then every
-    /// droppable param not among them (#1995's exit class — before this
-    /// the err path returned over them, 128 B per call in the probe).
-    /// Safe by the epilogue's own argument: the returned err block holds
-    /// its own share of any borrowed payload (`rc_share_guard` in
-    /// lower_sum). The witness is not branch-aware — an armed recorder
-    /// is poisoned rather than fed a one-path stream.
-    pub(crate) fn emit_error_exit_release(&mut self) {
-        let owned = self.rc_owned.clone();
-        for &idx in &owned {
-            self.f.instructions().local_get(idx).call(F_DEC_FLAT);
-        }
-        for idx in self.rc_frame_params.clone() {
-            if !owned.contains(&idx) {
-                self.f.instructions().local_get(idx).call(F_DEC_FLAT);
-            }
-        }
-        if let Some(w) = self.witness.as_mut() {
-            w.poison();
-        }
-    }
-
-    /// Release this fn's droppable params before a `return_call` — the
-    /// tail call replaces the frame and the epilogue never runs. The
-    /// pending args on the wasm stack are unaffected ($dec_flat is
-    /// stack-neutral), and rc_arg_guard has already +1'd borrowed args.
-    pub(crate) fn emit_tail_param_release(&mut self, replaces_frame: bool) {
-        // The tail site's releases. The droppable PARAMS always: their
-        // old values are gone after the jump — replaced by the callee's
-        // frame, or by the loop-back's `local.set`s (tco.rs). The
-        // rc_owned LOCALS only when the frame is truly replaced (#1988: a
-        // `{ let x = mk(n); take(x) }` tail leaked x on every call): on a
-        // self tail call the loop form keeps them alive and the next
-        // iteration's rebind (dec-old) or the epilogue releases them —
-        // releasing here too double-freed `t` in examples/lisp.almd's
-        // parse_list. Safe by the epilogue's own argument: the tail
-        // call's arguments are lowered and rc_arg_guard-inc'd already,
-        // rc_owned holds only flat blocks, and a local is never the tail
-        // call's result. Gated on the raw-address rule (#1988): a
-        // prim-using body keeps every release on the epilogue — a raw
-        // view into a local may still be read. Module space is NOT a
-        // gate: every module-space `return_call` that skipped this
-        // release leaked its params and locals (the structural witness
-        // counted 63 such wrappers — `fan_map`, `http_set_header`,
-        // `__gby_add`), and the traps once blamed on releasing them
-        // were the loop-form double free above.
-        if !self.tail_release_allowed {
-            // No release here — but a real `return_call` still replaces
-            // the frame, and the witness must not credit the dead
-            // epilogue's decs: an unreleased owner shows up as an
-            // unbalanced stream, which is the honest certificate.
-            if replaces_frame && let Some(w) = self.witness.as_mut() {
-                w.frame_replaced();
-            }
-            return;
-        }
-        let owned = if replaces_frame { self.rc_owned.clone() } else { Default::default() };
-        for &idx in &owned {
-            self.f.instructions().local_get(idx).call(F_DEC_FLAT);
-            self.witness_dec(idx);
-        }
-        for idx in self.rc_droppable_params.clone() {
-            if !owned.contains(&idx) {
-                self.f.instructions().local_get(idx).call(F_DEC_FLAT);
-                self.witness_dec(idx);
-            }
-        }
-        // The witness: these were the frame's last releases; the dead
-        // epilogue the emitter still writes after the jump records nothing.
-        // A self tail call is loop-converted (tco.rs) — its frame lives
-        // on and the epilogue's decs are real.
-        if replaces_frame && let Some(w) = self.witness.as_mut() {
-            w.frame_replaced();
-        }
     }
 }

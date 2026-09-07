@@ -162,6 +162,44 @@ fn an_error_exit_releases_the_frame_like_the_ok_exit() {
     );
 }
 
+/// The registry-table tail call (`lower_linked_call`'s `return_call`) is
+/// the third tail site — found by scripts/check-exit-sites.sh the day it
+/// went in (#1995): a user fn whose tail is `string.to_upper(s)` replaced its
+/// frame with no release, so the owned `s` stayed at rc 1 on every call.
+#[test]
+fn a_linked_tail_call_releases_the_frame() {
+    fn heap(n: u32) -> (u64, String) {
+        let src = format!(
+            r#"fn wrap(s: String) -> String = string.to_upper(s)
+
+effect fn main() -> Unit = {{
+  var total = 0
+  for i in 0..<{n} {{
+    // Bound, not inline: a fresh temporary handed to a native op is a
+    // leak class of its own (#2004) and would mask this row; `to_upper`
+    // rather than `trim` because string_trim leaks inside its own body
+    // (#2005, 96 B per call) — the wrapper is what this row measures.
+    let s = " x" + "y"
+    let t = wrap(s)
+    total = total + string.len(t)
+  }}
+  println("${{total}}")
+}}
+"#
+        );
+        let ir = almide_spine::s5::lower_to_ir("linked_tail.almd", &src).expect("front");
+        let bytes = almide_wasm::emit_program(&ir).expect("the structural leg lowers the probe");
+        let out = run_wasm(&bytes).expect("run");
+        assert_eq!(out.exit, 0, "{}", out.stderr);
+        (out.heap_end.expect("__heap"), out.stdout.trim().to_string())
+    }
+    let (h1, o1) = heap(1000);
+    let (h8, o8) = heap(8000);
+    assert_eq!(o1, "3000");
+    assert_eq!(o8, "24000");
+    assert_eq!(h1, h8, "linked tail call: the high-water mark must not grow with N (N=1000 {h1} B, N=8000 {h8} B — {} B per call leaked)", (h8 - h1) / 7000);
+}
+
 /// #1990 — a `bytes.append_*` loop must grow LINEARLY: the linked impl
 /// returns a fresh buffer on every call and the old one has to go.
 /// Before the fix the old buffer stayed at rc 1 on every append (the
