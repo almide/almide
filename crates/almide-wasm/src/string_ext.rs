@@ -314,8 +314,12 @@ impl Emitter<'_> {
             Some(Lowered { ty: SliceTy::Scalar(Scalar::Bytes), .. }) => {}
             other => return unsup(&format!("from-bytes-of:{other:?}")),
         }
+        // The Bytes block is this arm's own intermediate: decoded, then
+        // released (the 16 B per call the ownership matrix showed).
+        let hb = self.hold_i32()?;
         let lossy = self.work.helper(Helper::Utf8Lossy);
-        self.f.instructions().call(lossy);
+        self.f.instructions().local_tee(hb).call(lossy).local_get(hb).call(F_DEC_FLAT);
+        self.release_i32();
         Ok(Some(Lowered::owned(STR)))
     }
 }
@@ -450,9 +454,14 @@ impl Emitter<'_> {
             ("chain", [outer, cause]) => {
                 self.lower_arg(outer, Some(STR), ArgMode::Borrow)?;
                 let sep = self.pool.intern("\ncaused by: ");
-                self.f.instructions().i32_const(sep as i32).call(F_CONCAT);
+                // The inner concat is a block of this arm's own making:
+                // parked, consumed by the outer concat, released (it was
+                // the 32 B per call the ownership matrix showed).
+                let hm = self.hold_i32()?;
+                self.f.instructions().i32_const(sep as i32).call(F_CONCAT).local_tee(hm);
                 self.lower_arg(cause, Some(STR), ArgMode::Borrow)?;
-                self.f.instructions().call(F_CONCAT);
+                self.f.instructions().call(F_CONCAT).local_get(hm).call(F_DEC_FLAT);
+                self.release_i32();
                 STR
             }
             _ => return Ok(None),

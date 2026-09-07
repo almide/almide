@@ -135,8 +135,7 @@ impl Emitter<'_> {
         self.lower_arg(idx, Some(INT), ArgMode::Borrow)?;
         let hn = self.hold_i64()?;
         self.f.instructions().local_set(hn);
-        self.lower_arg(v, Some(et), ArgMode::Borrow)?;
-        self.rc_map_value_share(v, et);
+        self.lower_arg(v, Some(et), ArgMode::Retain)?;
         enum Hv {
             I64(u32),
             F64(u32),
@@ -402,7 +401,8 @@ impl Emitter<'_> {
         self.release_i32();
         self.release_i64();
         self.release_i32();
-        Ok(Some(Lowered::view(SliceTy::List(h))))
+        // The block is this arm's copy: OWNED.
+        Ok(Some(Lowered::owned(SliceTy::List(h))))
     }
 
     /// Native `if a < len && b < len { r.swap(a, b) }` over a fresh copy:

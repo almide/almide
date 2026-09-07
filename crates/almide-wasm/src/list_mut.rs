@@ -107,7 +107,6 @@ impl Emitter<'_> {
                 let elem = self.types.el(h);
                 self.emit_read_mut_var_cow(id, var_idx, var_ty, vglob)?;
                 self.lower_arg(v, Some(elem), ArgMode::Retain)?;
-                self.rc_share_guard(v, elem);
                 // The 8-byte helper's value param is i64; an f64 element
                 // crosses the call boundary as its BIT PATTERN (memory is
                 // bytes — the consumer reloads the slot as f64).
@@ -134,9 +133,6 @@ impl Emitter<'_> {
                 let elem = self.infer(x)?;
                 let stride = elem.slot_size();
                 self.lower_arg(x, Some(elem), ArgMode::Retain)?;
-                // A repeated Map handle is n holders (#1219: the in-place
-                // window must see the share).
-                self.rc_map_value_share(x, elem);
                 enum Hx {
                     I64(u32),
                     F64(u32),
@@ -222,7 +218,10 @@ impl Emitter<'_> {
                     Hx::F64(_) => self.release_f64(),
                     Hx::I32(_) => self.release_i32(),
                 }
-                Ok(Some(Lowered::view(SliceTy::List(self.types.intern(elem)))))
+                // The list is this arm's allocation: OWNED (declared as a
+                // view, the bind took +1 and the block never went — 64 B
+                // per call, the list.repeat row of #2005).
+                Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(elem)))))
             }
             // Capacity is a HINT (native clamps it and the backing
             // buffer is unobservable) — the value is the empty list.

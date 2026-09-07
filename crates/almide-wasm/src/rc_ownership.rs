@@ -154,6 +154,14 @@ impl Emitter<'_> {
     /// forever (64 B per call, measured N=1000 vs N=8000). Ctors and
     /// module helpers keep the conservative +1 (a leak is never a
     /// dangle); helper-by-helper conventions are the follow-up.
+    /// The frame's droppable PARAM this expression is, when it is a plain
+    /// read of one (`b` in `__arr(b, …)`): its local index.
+    pub(crate) fn frame_param_var(&self, e: &almide_ir::IrExpr) -> Option<u32> {
+        let almide_ir::IrExprKind::Var { id } = &e.kind else { return None };
+        let &(idx, _) = self.locals.get(id)?;
+        self.rc_frame_params.contains(&idx).then_some(idx)
+    }
+
     pub(crate) fn rc_owned_result(&self, e: &almide_ir::IrExpr) -> bool {
         if rc_certainly_fresh(&e.kind) {
             return true;
@@ -162,6 +170,17 @@ impl Emitter<'_> {
         // is the tail's.
         if let almide_ir::IrExprKind::Block { expr: Some(tail), .. } = &e.kind {
             return self.rc_owned_result(tail);
+        }
+        // A conditional is owned when EVERY arm's value is: the return
+        // route then takes no +1 (an `if i >= 0 then int.to_string(i)
+        // else "neg"` tail leaked its result on every call, #2005). One
+        // borrowed arm makes the whole value borrowed — the per-arm
+        // identity is #1996.
+        if let almide_ir::IrExprKind::If { then, else_, .. } = &e.kind {
+            return self.rc_owned_result(then) && self.rc_owned_result(else_);
+        }
+        if let almide_ir::IrExprKind::Match { arms, .. } = &e.kind {
+            return !arms.is_empty() && arms.iter().all(|a| self.rc_owned_result(&a.body));
         }
         let almide_ir::IrExprKind::Call { target, .. } = &e.kind else {
             return false;

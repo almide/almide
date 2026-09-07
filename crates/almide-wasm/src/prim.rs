@@ -24,7 +24,7 @@ impl Emitter<'_> {
         match (func, args) {
             // handle: any BLOCK value's base address as Int.
             ("handle", [x]) => {
-                match self.lower_arg(x, None, ArgMode::Retain)? {
+                match self.lower_arg(x, None, ArgMode::Raw)? {
                     SliceTy::Scalar(Scalar::Str)
                     | SliceTy::Scalar(Scalar::Bytes)
                     | SliceTy::List(_)
@@ -40,44 +40,44 @@ impl Emitter<'_> {
                 Ok(Some(Lowered::scalar(INT)))
             }
             ("load8", [a]) => {
-                self.lower_arg(a, Some(INT), ArgMode::Retain)?;
+                self.lower_arg(a, Some(INT), ArgMode::Raw)?;
                 self.f.instructions().i32_wrap_i64().i32_load8_u(raw(())).i64_extend_i32_u();
                 Ok(Some(Lowered::scalar(INT)))
             }
             ("load32", [a]) => {
-                self.lower_arg(a, Some(INT), ArgMode::Retain)?;
+                self.lower_arg(a, Some(INT), ArgMode::Raw)?;
                 self.f.instructions().i32_wrap_i64().i32_load(raw(())).i64_extend_i32_u();
                 Ok(Some(Lowered::scalar(INT)))
             }
             ("load64", [a]) => {
-                self.lower_arg(a, Some(INT), ArgMode::Retain)?;
+                self.lower_arg(a, Some(INT), ArgMode::Raw)?;
                 self.f.instructions().i32_wrap_i64().i64_load(raw(()));
                 Ok(Some(Lowered::scalar(INT)))
             }
             ("store8", [a, v]) => {
-                self.lower_arg(a, Some(INT), ArgMode::Retain)?;
+                self.lower_arg(a, Some(INT), ArgMode::Raw)?;
                 self.f.instructions().i32_wrap_i64();
-                self.lower_arg(v, Some(INT), ArgMode::Retain)?;
+                self.lower_arg(v, Some(INT), ArgMode::Raw)?;
                 self.f.instructions().i32_wrap_i64().i32_store8(raw(()));
                 Ok(None)
             }
             ("store32", [a, v]) => {
-                self.lower_arg(a, Some(INT), ArgMode::Retain)?;
+                self.lower_arg(a, Some(INT), ArgMode::Raw)?;
                 self.f.instructions().i32_wrap_i64();
-                self.lower_arg(v, Some(INT), ArgMode::Retain)?;
+                self.lower_arg(v, Some(INT), ArgMode::Raw)?;
                 self.f.instructions().i32_wrap_i64().i32_store(raw(()));
                 Ok(None)
             }
             ("store64", [a, v]) => {
-                self.lower_arg(a, Some(INT), ArgMode::Retain)?;
+                self.lower_arg(a, Some(INT), ArgMode::Raw)?;
                 self.f.instructions().i32_wrap_i64();
-                self.lower_arg(v, Some(INT), ArgMode::Retain)?;
+                self.lower_arg(v, Some(INT), ArgMode::Raw)?;
                 self.f.instructions().i64_store(raw(()));
                 Ok(None)
             }
             // RawPtr <-> Int identity casts (both are the i64 address).
             ("int_to_ptr" | "ptr_to_int", [x]) => {
-                self.lower_arg(x, Some(INT), ArgMode::Retain)?;
+                self.lower_arg(x, Some(INT), ArgMode::Raw)?;
                 Ok(Some(Lowered::scalar(INT)))
             }
             // Host entropy (C-112): n bytes written at address p via the
@@ -95,10 +95,10 @@ impl Emitter<'_> {
     ) -> ArmResult {
         match (func, args) {
             ("random_get", [p, n]) => {
-                self.lower_arg(p, Some(INT), ArgMode::Retain)?;
+                self.lower_arg(p, Some(INT), ArgMode::Raw)?;
                 let hp = self.hold_i64()?;
                 self.f.instructions().local_set(hp);
-                self.lower_arg(n, Some(INT), ArgMode::Retain)?;
+                self.lower_arg(n, Some(INT), ArgMode::Raw)?;
                 let hn = self.hold_i64()?;
                 let mut i = self.f.instructions();
                 i.local_set(hn);
@@ -116,35 +116,35 @@ impl Emitter<'_> {
                 Ok(Some(Lowered::scalar(INT)))
             }
             ("alloc_bytes", [n]) => {
-                self.lower_arg(n, Some(INT), ArgMode::Retain)?;
+                self.lower_arg(n, Some(INT), ArgMode::Raw)?;
                 self.emit_alloc_size_guard(1)?;
                 self.f.instructions().i32_wrap_i64().call(F_ALLOC);
                 Ok(Some(Lowered::owned(SliceTy::Scalar(Scalar::Bytes))))
             }
             ("alloc_str", [n]) => {
-                self.lower_arg(n, Some(INT), ArgMode::Retain)?;
+                self.lower_arg(n, Some(INT), ArgMode::Raw)?;
                 self.emit_alloc_size_guard(1)?;
                 self.f.instructions().i32_wrap_i64().call(F_ALLOC);
                 Ok(Some(Lowered::owned(STR)))
             }
             ("alloc_list", [n]) => {
                 // List[Int]: n slots of 8 bytes.
-                self.lower_arg(n, Some(INT), ArgMode::Retain)?;
+                self.lower_arg(n, Some(INT), ArgMode::Raw)?;
                 self.emit_alloc_size_guard(8)?;
                 self.f.instructions().i32_wrap_i64().i32_const(8).i32_mul().call(F_ALLOC);
                 Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(INT)))))
             }
             ("alloc_list_f64", [n]) => {
                 // List[Float]: the same 8-byte slots, Float-typed.
-                self.lower_arg(n, Some(INT), ArgMode::Retain)?;
+                self.lower_arg(n, Some(INT), ArgMode::Raw)?;
                 self.emit_alloc_size_guard(8)?;
                 self.f.instructions().i32_wrap_i64().i32_const(8).i32_mul().call(F_ALLOC);
                 Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(FLOAT)))))
             }
             ("band", [a, b]) | ("bor", [a, b]) | ("bxor", [a, b]) | ("bshl", [a, b])
             | ("bshr", [a, b]) | ("bshr_u", [a, b]) => {
-                self.lower_arg(a, Some(INT), ArgMode::Retain)?;
-                self.lower_arg(b, Some(INT), ArgMode::Retain)?;
+                self.lower_arg(a, Some(INT), ArgMode::Raw)?;
+                self.lower_arg(b, Some(INT), ArgMode::Raw)?;
                 let mut i = self.f.instructions();
                 match func {
                     "band" => i.i64_and(),
@@ -171,7 +171,7 @@ impl Emitter<'_> {
                 // message block, and the host print appends one — print
                 // ptr/len directly with the trailing newline stripped so
                 // stderr is the interp's line VERBATIM, not doubled.
-                self.lower_arg(msg, Some(INT), ArgMode::Retain)?;
+                self.lower_arg(msg, Some(INT), ArgMode::Raw)?;
                 let b = self.tmp_i32_local;
                 let mut i = self.f.instructions();
                 i.i32_wrap_i64().local_set(b);
@@ -199,7 +199,7 @@ impl Emitter<'_> {
             // Bump world: refcounts are inert — evaluate for effect order,
             // drop the value.
             ("rc_inc", [x]) | ("rc_dec", [x]) => {
-                self.lower_arg(x, None, ArgMode::Retain)?;
+                self.lower_arg(x, None, ArgMode::Raw)?;
                 self.f.instructions().drop();
                 Ok(None)
             }
@@ -215,29 +215,29 @@ impl Emitter<'_> {
     ) -> ArmResult {
         match (func, args) {
             ("i2f", [a]) => {
-                self.lower_arg(a, Some(INT), ArgMode::Retain)?;
+                self.lower_arg(a, Some(INT), ArgMode::Raw)?;
                 self.f.instructions().f64_convert_i64_s();
                 Ok(Some(Lowered::scalar(FLOAT)))
             }
             // Rust `as i64` semantics = saturating truncation.
             ("f2i", [a]) => {
-                self.lower_arg(a, Some(FLOAT), ArgMode::Retain)?;
+                self.lower_arg(a, Some(FLOAT), ArgMode::Raw)?;
                 self.f.instructions().i64_trunc_sat_f64_s();
                 Ok(Some(Lowered::scalar(INT)))
             }
             ("fbits", [a]) => {
-                self.lower_arg(a, Some(FLOAT), ArgMode::Retain)?;
+                self.lower_arg(a, Some(FLOAT), ArgMode::Raw)?;
                 self.f.instructions().i64_reinterpret_f64();
                 Ok(Some(Lowered::scalar(INT)))
             }
             ("ffrombits", [a]) => {
-                self.lower_arg(a, Some(INT), ArgMode::Retain)?;
+                self.lower_arg(a, Some(INT), ArgMode::Raw)?;
                 self.f.instructions().f64_reinterpret_i64();
                 Ok(Some(Lowered::scalar(FLOAT)))
             }
             ("fadd", [a, b]) | ("fsub", [a, b]) | ("fmul", [a, b]) | ("fdiv", [a, b]) => {
-                self.lower_arg(a, Some(FLOAT), ArgMode::Retain)?;
-                self.lower_arg(b, Some(FLOAT), ArgMode::Retain)?;
+                self.lower_arg(a, Some(FLOAT), ArgMode::Raw)?;
+                self.lower_arg(b, Some(FLOAT), ArgMode::Raw)?;
                 let mut i = self.f.instructions();
                 match func {
                     "fadd" => i.f64_add(),
@@ -260,12 +260,12 @@ impl Emitter<'_> {
     ) -> ArmResult {
         match (func, args) {
             ("f2f32", [a]) => {
-                self.lower_arg(a, Some(FLOAT), ArgMode::Retain)?;
+                self.lower_arg(a, Some(FLOAT), ArgMode::Raw)?;
                 self.f.instructions().f32_demote_f64().f64_promote_f32();
                 Ok(Some(Lowered::scalar(FLOAT)))
             }
             ("f32_2f", [a]) => {
-                self.lower_arg(a, Some(FLOAT), ArgMode::Retain)?;
+                self.lower_arg(a, Some(FLOAT), ArgMode::Raw)?;
                 Ok(Some(Lowered::scalar(FLOAT)))
             }
             // i64 → f32 DIRECTLY (single rounding — native's `n as f32`
@@ -276,17 +276,17 @@ impl Emitter<'_> {
             // single rounding reads the true value above the tie (2^60 +
             // 2^37).
             ("i2f32", [a]) => {
-                self.lower_arg(a, Some(INT), ArgMode::Retain)?;
+                self.lower_arg(a, Some(INT), ArgMode::Raw)?;
                 self.f.instructions().f32_convert_i64_s().f64_promote_f32();
                 Ok(Some(Lowered::scalar(FLOAT)))
             }
             ("f32bits", [a]) => {
-                self.lower_arg(a, Some(FLOAT), ArgMode::Retain)?;
+                self.lower_arg(a, Some(FLOAT), ArgMode::Raw)?;
                 self.f.instructions().f32_demote_f64().i32_reinterpret_f32().i64_extend_i32_u();
                 Ok(Some(Lowered::scalar(INT)))
             }
             ("bits_to_f32", [a]) => {
-                self.lower_arg(a, Some(INT), ArgMode::Retain)?;
+                self.lower_arg(a, Some(INT), ArgMode::Raw)?;
                 self.f.instructions().i32_wrap_i64().f32_reinterpret_i32().f64_promote_f32();
                 Ok(Some(Lowered::scalar(FLOAT)))
             }
@@ -305,42 +305,42 @@ impl Emitter<'_> {
     ) -> ArmResult {
         match (func, args) {
             ("fceil", [a]) => {
-                self.lower_arg(a, Some(FLOAT), ArgMode::Retain)?;
+                self.lower_arg(a, Some(FLOAT), ArgMode::Raw)?;
                 self.f.instructions().f64_ceil();
                 Ok(Some(Lowered::scalar(FLOAT)))
             }
             ("ffloor", [a]) => {
-                self.lower_arg(a, Some(FLOAT), ArgMode::Retain)?;
+                self.lower_arg(a, Some(FLOAT), ArgMode::Raw)?;
                 self.f.instructions().f64_floor();
                 Ok(Some(Lowered::scalar(FLOAT)))
             }
             ("fneg", [a]) => {
-                self.lower_arg(a, Some(FLOAT), ArgMode::Retain)?;
+                self.lower_arg(a, Some(FLOAT), ArgMode::Raw)?;
                 self.f.instructions().f64_neg();
                 Ok(Some(Lowered::scalar(FLOAT)))
             }
             ("fabs", [a]) => {
-                self.lower_arg(a, Some(FLOAT), ArgMode::Retain)?;
+                self.lower_arg(a, Some(FLOAT), ArgMode::Raw)?;
                 self.f.instructions().f64_abs();
                 Ok(Some(Lowered::scalar(FLOAT)))
             }
             // f64.sqrt is IEEE-correctly-rounded on every target — the
             // one transcendental wasm itself guarantees bit-exact.
             ("fsqrt", [a]) => {
-                self.lower_arg(a, Some(FLOAT), ArgMode::Retain)?;
+                self.lower_arg(a, Some(FLOAT), ArgMode::Raw)?;
                 self.f.instructions().f64_sqrt();
                 Ok(Some(Lowered::scalar(FLOAT)))
             }
             ("fcopysign", [a, b]) => {
-                self.lower_arg(a, Some(FLOAT), ArgMode::Retain)?;
-                self.lower_arg(b, Some(FLOAT), ArgMode::Retain)?;
+                self.lower_arg(a, Some(FLOAT), ArgMode::Raw)?;
+                self.lower_arg(b, Some(FLOAT), ArgMode::Raw)?;
                 self.f.instructions().f64_copysign();
                 Ok(Some(Lowered::scalar(FLOAT)))
             }
             ("feq", [a, b]) | ("fne", [a, b]) | ("flt", [a, b]) | ("fle", [a, b])
             | ("fgt", [a, b]) | ("fge", [a, b]) => {
-                self.lower_arg(a, Some(FLOAT), ArgMode::Retain)?;
-                self.lower_arg(b, Some(FLOAT), ArgMode::Retain)?;
+                self.lower_arg(a, Some(FLOAT), ArgMode::Raw)?;
+                self.lower_arg(b, Some(FLOAT), ArgMode::Raw)?;
                 let mut i = self.f.instructions();
                 match func {
                     "feq" => i.f64_eq(),
