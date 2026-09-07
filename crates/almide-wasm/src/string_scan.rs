@@ -272,6 +272,7 @@ impl Emitter<'_> {
         let hs = self.hold_i32()?;
         let hw = self.hold_i32()?;
         let hb = self.hold_i32()?;
+        let hu = self.hold_i32()?;
         let mut i = self.f.instructions();
         i.local_set(hs);
         i.local_get(hs).i32_load(len_memarg()).i32_eqz();
@@ -290,8 +291,12 @@ impl Emitter<'_> {
         i.local_get(hs).i32_const(almide_layout::PAYLOAD as i32).i32_add();
         i.local_get(hw);
         i.memory_copy(0, 0);
-        i.local_get(hb).call(upper_idx);
-        // rest verbatim
+        // The first char moves into the linked to_upper (callee-owned);
+        // its RESULT is a block of this arm's making — parked in hu,
+        // consumed by the concat below, released after it.
+        i.local_get(hb).call(upper_idx).local_set(hu);
+        i.local_get(hu);
+        // rest verbatim — the same: parked in hb, released after the concat.
         i.local_get(hs).i32_load(len_memarg()).local_get(hw).i32_sub();
         i.call(F_ALLOC).local_set(hb);
         i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32).i32_add();
@@ -303,9 +308,11 @@ impl Emitter<'_> {
         i.local_get(hs).i32_load(len_memarg()).local_get(hw).i32_sub();
         i.memory_copy(0, 0);
         i.local_get(hb).call(F_CONCAT);
+        i.local_get(hu).call(F_DEC_FLAT);
+        i.local_get(hb).call(F_DEC_FLAT);
         i.end();
         let _ = i;
-        for _ in 0..3 {
+        for _ in 0..4 {
             self.release_i32();
         }
         Ok(Some(Lowered::owned(STR)))

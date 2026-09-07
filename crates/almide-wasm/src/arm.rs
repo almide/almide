@@ -72,10 +72,15 @@ pub(crate) enum ArgMode {
     /// result, a born-here literal) is released after the op by the
     /// wrapper — nobody else will.
     Borrow,
-    /// The arm keeps the block (stores it into a container, returns it,
-    /// or keeps a raw pointer into it): a temporary's credit moves into
-    /// the arm's result; a Var is shared by the arm itself.
+    /// The arm keeps the block (stores it into a container, returns it):
+    /// a temporary's credit moves into the arm's result; a block that
+    /// already has a holder takes the share +1 here.
     Retain,
+    /// The `prim` floor: the arm reads a raw address out of the block
+    /// (`prim.handle(buf)`) and the frame's raw-address rule owns every
+    /// release on the epilogue — no share, no release here. Only prim.rs
+    /// may declare it.
+    Raw,
 }
 
 impl crate::emitter::Emitter<'_> {
@@ -91,6 +96,15 @@ impl crate::emitter::Emitter<'_> {
         mode: ArgMode,
     ) -> Result<SliceTy, crate::EmitError> {
         let got = self.lower(a, want)?;
+        // Retain IS the share: a block the arm stores that already has a
+        // holder (a Var, a funnel over borrows) takes +1 here — the
+        // declaration carries the guard, no arm repeats it. (value.str
+        // stored a Var's string bare and only an over-borrow elsewhere kept
+        // it alive — heap_result_tuple_return, 2026-09-07.) An owned
+        // temporary moves in: `rc_share_guard` incs nothing fresh.
+        if mode == ArgMode::Retain {
+            self.rc_share_guard(a, got);
+        }
         // A string literal is a pool static (below the heap floor: $dec is
         // a no-op on it) — nothing to release, and no reason to ship the
         // rc core for a program that never allocates (#1962).

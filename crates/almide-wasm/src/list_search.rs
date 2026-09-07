@@ -287,6 +287,9 @@ impl Emitter<'_> {
         {
             let mut i = self.f.instructions();
             i.local_get(hout).local_get(hkept).i32_const(stride).i32_mul().i32_store(len_memarg());
+            // The seen-keys scratch block is this arm's own: released
+            // here (it was never, #2005 — 64 B per call).
+            i.local_get(hseen).call(F_DEC_FLAT);
             i.local_get(hout);
         }
         self.release_for(kt);

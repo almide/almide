@@ -671,16 +671,11 @@ impl Emitter<'_> {
         // len = cap = kept*stride
         {
             let mut i = self.f.instructions();
+            // LEN = kept; CAP stays what $alloc wrote — $free files a block
+            // by its CAP, and a cap shrunk to the kept count filed the
+            // result in a smaller class than the one the next filter
+            // draws from (64 B per call in the ownership matrix, #2005).
             i.local_get(rh).local_get(hw).i32_const(stride).i32_mul().i32_store(len_memarg());
-            i.local_get(rh)
-                .local_get(hw)
-                .i32_const(stride)
-                .i32_mul()
-                .i32_store(MemArg {
-                    offset: u64::from(almide_layout::CAP.offset),
-                    align: 2,
-                    memory_index: 0,
-                });
             i.local_get(rh);
         }
         self.release_i32();

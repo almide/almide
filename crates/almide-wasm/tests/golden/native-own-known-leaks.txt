@@ -1,33 +1,10 @@
 # Stdlib fns whose bound result still grows the heap (B per call) — #2004 / #2005.
 # Shrink-only: a row may shrink or vanish, never grow or appear. ALMIDE_UPDATE_NATIVE_OWN=1 regenerates.
-bytes.read_f16_le_array 16
-bytes.read_f32_be_array 16
-bytes.read_f32_le_array 16
-bytes.read_f64_be_array 16
-bytes.read_f64_le_array 16
-bytes.read_i16_be_array 16
-bytes.read_i16_le_array 16
-bytes.read_i32_be_array 16
-bytes.read_i32_le_array 16
-bytes.read_i64_be_array 16
-bytes.read_i64_le_array 16
-bytes.read_u16_be_array 16
-bytes.read_u16_le_array 16
-bytes.read_u32_be_array 16
-bytes.read_u32_le_array 16
-error.chain 32
-float.to_fixed 8192
-float.to_string 4096
-float32.to_string 4096
-float64.to_string 4096
 list.join 32
 regex.replace 16
 regex.replace_first 16
-string.capitalize 48
-string.from_bytes 16
 string.join 32
 string.trim 64
 string.trim_end 32
 string.trim_start 32
-uint64.to_string 16
 url.encode_component 208

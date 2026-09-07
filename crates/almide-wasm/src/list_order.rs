@@ -118,8 +118,7 @@ impl Emitter<'_> {
                 self.lower_arg(idx, Some(INT), ArgMode::Borrow)?;
                 let hn = self.hold_i64()?;
                 self.f.instructions().local_set(hn);
-                self.lower_arg(v, Some(elem), ArgMode::Borrow)?;
-                self.rc_map_value_share(v, elem);
+                self.lower_arg(v, Some(elem), ArgMode::Retain)?;
                 let hv = self.hold_val(elem)?;
                 let hoff = self.hold_i32()?;
                 let ho = self.hold_i32()?;

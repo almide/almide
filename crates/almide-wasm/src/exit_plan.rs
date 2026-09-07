@@ -68,6 +68,23 @@ impl Emitter<'_> {
     }
 
     /// Derive the plan for one edge from the frame state at the site.
+    /// May this frame END in a `return_call`? A tail transfer that
+    /// replaces the frame must release the frame's credits first; under
+    /// the raw-address rule (a prim body: `tail_release_allowed` false)
+    /// the releases cannot run before the jump — a raw pointer into an
+    /// owned block may be among the arguments — so a frame that HOLDS
+    /// credits keeps the call in non-tail form and lets the epilogue
+    /// release after it (#2005: `float.to_string` handed its 4 KB scratch
+    /// list to the dead epilogue on every call). A frame with nothing to
+    /// release, or a self tail call (loop form), transfers as before.
+    pub(crate) fn tail_transfer_ok(&self, replaces_frame: bool) -> bool {
+        if self.tail_release_allowed || !replaces_frame {
+            return true;
+        }
+        let (owned, params) = self.frame_credits();
+        owned.is_empty() && params.is_empty()
+    }
+
     pub(crate) fn exit_plan(&self, continuation: Continuation) -> ExitPlan {
         let (owned, params) = self.frame_credits();
         let frame: BTreeSet<u32> = owned.union(&params).copied().collect();

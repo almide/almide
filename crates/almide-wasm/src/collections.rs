@@ -216,7 +216,6 @@ impl Emitter<'_> {
                 let (mh, kh_local, eh, k, v, lay) = self.map_scan(m, key, ArgMode::Retain)?;
                 let vh = self.hold_for(v)?;
                 self.lower_arg(value, Some(v), ArgMode::Retain)?;
-                self.rc_map_value_share(value, v);
                 self.f.instructions().local_set(vh);
                 let holds = crate::map_inplace::MapSetHolds { mh, kh: kh_local, eh, vh };
                 self.emit_map_set_copy(holds, k, v, lay)?;
