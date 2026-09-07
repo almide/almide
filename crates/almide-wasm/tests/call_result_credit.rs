@@ -112,6 +112,38 @@ fn a_call_result_argument_moves_into_the_callee() {
     );
 }
 
+/// #2004 — the other READERS of a droppable value born in the expression
+/// (arg_temps.rs binds them so the frame owns them): a loop over a call
+/// result, a match on one, an index into one, an interpolation of one,
+/// nested concatenation over born-here operands.
+#[test]
+fn a_born_here_value_read_by_a_consumer_is_released() {
+    flat("for x in list.range(0, 3)", "    for x in list.range(0, 3) { total = total + x }", "3000", "24000");
+    flat(
+        "match string.slice(..)",
+        "    total = total + (match string.slice(\"abcdef\", 1, 3) { \"bc\" => 1, _ => 0 })",
+        "1000",
+        "8000",
+    );
+    flat("list.range(0, 4)[2]", "    total = total + list.range(0, 4)[2]", "2000", "16000");
+    flat(
+        "\"<${int.to_string(i)}>\"",
+        "    total = total + string.len(\"<${int.to_string(i)}>\")",
+        "4890",
+        "46890",
+    );
+    flat("mk(i) + [4] + [5, 6]", "    let t = mk(i) + [4] + [5, 6]\n    total = total + list.len(t)", "6000", "48000");
+    // `i % 10`: a constant-length digit, so the block class of the held
+    // string does not shift with N (a 4-digit tail moved the mark by one
+    // block, not per call).
+    flat(
+        "\"a\" + int.to_string(i % 10) + \"b\"",
+        "    let t = \"a\" + int.to_string(i % 10) + \"b\"\n    total = total + string.len(t)",
+        "3000",
+        "24000",
+    );
+}
+
 /// The ERROR exits — `f()!` propagating an err, and a raised `err(..)` —
 /// are function exits like any other: the frame's owned locals and its
 /// droppable params must be released before the `return`. Measured as a
