@@ -724,13 +724,21 @@ impl Emitter<'_> {
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.hof_elem_into(elem, bh, ch, ih, x_p);
         self.lower(body, Some(b))?;
+        // The accumulator OWNS one credit on every step: a borrowed body
+        // result (a captured var, the accumulator itself) takes its share,
+        // and the previous accumulator is released before the rebind
+        // (fuzz 20260910: `fold(xs, y, (a, x) => y)` released y twice).
+        self.rc_share_guard(body, b);
+        if let Some(dec) = self.elem_is_handle(b).then(|| self.dec_fn_of(b)) {
+            self.f.instructions().local_get(acc_p).call(dec);
+        }
         self.f.instructions().local_set(acc_p);
         self.hof_step(ih);
         self.f.instructions().local_get(acc_p);
         self.release_i32();
         self.release_i32();
         self.release_i32();
-        Ok(Some(Lowered::view(b)))
+        Ok(Some(Lowered::owned(b)))
     }
 
     /// `list.get_or(xs, i, d)`: (xs.get(i)) ?? d, inlined via the get
