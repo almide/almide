@@ -54,6 +54,75 @@ impl Emitter<'_> {
     /// dangle and no glue to recurse into. A shape holding a block (a
     /// `List[String]`, an `(Int, String)`, a `Map`) stays on the bump
     /// graveyard until its typed drop glue exists (#2010 stages 2–4).
+    /// A List element whose slot is a heap HANDLE the spine holds one
+    /// credit of (#2010 stage 2b): Str / Bytes / a nested List. Option,
+    /// Result, tuple and record elements are inline payloads (stage 2c).
+    pub(crate) fn elem_is_handle(&self, elem: SliceTy) -> bool {
+        matches!(elem, SliceTy::Scalar(Scalar::Str | Scalar::Bytes) | SliceTy::List(_))
+    }
+
+    /// The release fn of a droppable block of type `t`: `$dec_flat` for a
+    /// leaf, the typed drop glue for a List of handles — recursively the
+    /// inner list's glue for a nested one (work.rs `Helper::DropList`).
+    pub(crate) fn dec_fn_of(&self, t: SliceTy) -> u32 {
+        match t {
+            SliceTy::List(h) => {
+                let elem = self.types.el(h);
+                if self.elem_is_handle(elem) {
+                    let elem_dec = self.dec_fn_of(elem);
+                    self.work.helper(crate::work::Helper::DropList { elem_dec })
+                } else {
+                    F_DEC_FLAT
+                }
+            }
+            _ => F_DEC_FLAT,
+        }
+    }
+
+    /// The release fn of an owned LOCAL, by the type `rc_own` recorded
+    /// for it (a param is recorded at frame entry).
+    pub(crate) fn dec_fn_of_local(&self, idx: u32) -> u32 {
+        self.owned_ty.get(&idx).map_or(F_DEC_FLAT, |&t| self.dec_fn_of(t))
+    }
+
+    /// `Some($inc_elems)` when a spine of `elem` slots copied from another
+    /// spine must take its own element credits.
+    pub(crate) fn inc_elems_fn(&self, elem: SliceTy) -> Option<u32> {
+        self.elem_is_handle(elem).then(|| self.work.helper(crate::work::Helper::IncElems))
+    }
+
+    /// +1 on every element of the spine in local `h` (nothing for scalar
+    /// elements) — after a native arm's `memory_copy` of its slots.
+    pub(crate) fn emit_inc_elems(&mut self, h: u32, elem: SliceTy) {
+        if let Some(f) = self.inc_elems_fn(elem) {
+            self.f.instructions().local_get(h).call(f);
+        }
+    }
+
+    /// The whole-block copy of a value of type `t`: `$block_copy`, or for
+    /// a List of handles the variant whose copy takes its element credits.
+    pub(crate) fn copy_fn_of(&self, t: SliceTy) -> u32 {
+        match t {
+            SliceTy::List(h) => match self.inc_elems_fn(self.types.el(h)) {
+                Some(inc_elems) => self.work.helper(crate::work::Helper::CopyElems { inc_elems }),
+                None => F_BLOCK_COPY,
+            },
+            _ => F_BLOCK_COPY,
+        }
+    }
+
+    /// The copy-on-write judge for a value of type `t`: `$cow`, or for a
+    /// List of handles the variant whose copy takes its element credits.
+    pub(crate) fn cow_fn_of(&self, t: SliceTy) -> u32 {
+        match t {
+            SliceTy::List(h) => match self.inc_elems_fn(self.types.el(h)) {
+                Some(inc_elems) => self.work.helper(crate::work::Helper::CowElems { inc_elems }),
+                None => F_COW,
+            },
+            _ => F_COW,
+        }
+    }
+
     pub(crate) fn rc_droppable(&self, t: SliceTy) -> bool {
         match t {
             SliceTy::Scalar(Scalar::Str | Scalar::Bytes) => true,

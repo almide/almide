@@ -70,6 +70,33 @@ fn flat(name: &str, body: &str, expect_1000: &str, expect_8000: &str) {
     assert_eq!(h1, h8, "{name}: the high-water mark must not grow with N (N=1000 {h1} B, N=8000 {h8} B — {} B per call leaked)", (h8 - h1) / 7000);
 }
 
+/// #2010 stage 2b: a List of heap handles releases its ELEMENTS with the
+/// spine (the typed drop glue) — a list of two fresh strings per call
+/// stays flat (was 2 × 32 B per call at stage 2a, spine-only).
+#[test]
+fn a_list_of_strings_releases_its_elements() {
+    flat(
+        "let xs = [str(i), str(i + 1)]",
+        "    let xs = [int.to_string(i), int.to_string(i + 1)]\n    total = total + list.len(xs)",
+        "2000",
+        "16000",
+    );
+}
+
+/// #2010 stage 2b: a spine COPIED from another spine (slice / take /
+/// filter / concat / reverse …) holds its own element credits — the copy
+/// and the source each release exactly what they hold, flat and without
+/// a double free (the double-free trap is armed on the corpus sweep).
+#[test]
+fn a_copied_spine_holds_its_own_element_credits() {
+    flat(
+        "let ys = list.slice(xs, 0, 2) + list.reverse(xs)",
+        "    let xs = [int.to_string(i), \"b\", \"c\"]\n    let ys = list.slice(xs, 0, 2) + list.reverse(xs)\n    let zs = xs |> list.filter((s) => string.len(s) > 0)\n    total = total + list.len(ys) + list.len(zs)",
+        "8000",
+        "64000",
+    );
+}
+
 #[test]
 fn a_bound_call_result_is_released() {
     flat("let x = mk(i)", "    let x = mk(i)\n    total = total + list.len(x)", "3000", "24000");

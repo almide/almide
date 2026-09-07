@@ -30,7 +30,18 @@ impl Emitter<'_> {
         // scope releases every temporary an arm only BORROWED once the op
         // is done and its result sits on the stack ($dec_flat is
         // stack-neutral).
-        let lowered = self.arm_scope(|em| em.lower_module_call_dispatch(target, args, tail, ret_hint))?;
+        let depth = self.borrowed_temps.len();
+        let lowered = self.arm_scope(|em| {
+            let l = em.lower_module_call_dispatch(target, args, tail, ret_hint)?;
+            // A `View` into a temporary this scope releases next would
+            // dangle: it takes its share BEFORE the release (below).
+            Ok(match l {
+                Some(l) if l.own == Own::View && em.borrowed_temps.len() > depth => {
+                    Some(em.promote_escaping_view(l))
+                }
+                other => other,
+            })
+        })?;
         Ok(lowered.map(|l| {
             if l.own == Own::Owned && self.rc_droppable(l.ty) {
                 self.mark_owned_call(target);

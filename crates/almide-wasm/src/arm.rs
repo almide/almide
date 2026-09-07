@@ -115,7 +115,7 @@ impl crate::emitter::Emitter<'_> {
             }
             let h = self.borrow_base + self.borrowed_temps.len() as u32;
             self.f.instructions().local_tee(h);
-            self.borrowed_temps.push(h);
+            self.borrowed_temps.push((h, got));
         }
         Ok(got)
     }
@@ -136,13 +136,68 @@ impl crate::emitter::Emitter<'_> {
         Ok(out)
     }
 
+    /// A `View` result whose source is a temporary the scope is about
+    /// to release (#2010 stage 2b — `list.get(list.chunk(xs, 2), 1)`
+    /// read a row of the freed chunk list): the view takes its share
+    /// NOW. A droppable view becomes `Owned` (the bind moves it, exact);
+    /// a handle inside an Option / tuple block takes +1 in place — that
+    /// block has no typed drop yet (stage 2c), so this is leak-not-dangle,
+    /// the discipline every escaping handle already follows.
+    pub(crate) fn promote_escaping_view(&mut self, l: Lowered) -> Lowered {
+        let ty = l.ty;
+        if self.rc_droppable(ty) {
+            self.rc_inc_top();
+            return Lowered::owned(ty);
+        }
+        let tmp = self.scr_i32_local;
+        match ty {
+            SliceTy::Option(h) => self.share_option_payload_top(self.types.el(h)),
+            SliceTy::Tuple(ti) => {
+                let slots: Vec<u32> = self
+                    .types
+                    .tuple_def(ti)
+                    .fields
+                    .iter()
+                    .filter(|&&(t, _)| self.elem_is_handle(t))
+                    .map(|&(_, off)| off)
+                    .collect();
+                if slots.is_empty() {
+                    return l;
+                }
+                let mut i = self.f.instructions();
+                i.local_set(tmp);
+                for off in slots {
+                    i.local_get(tmp).i32_load(crate::slot_memarg(off)).call(crate::F_INC);
+                }
+                i.local_get(tmp);
+            }
+            _ => {}
+        }
+        l
+    }
+
+    /// The Option block on the stack top holds a handle payload: +1 on it
+    /// (a `none` is NULL_ADDR — nothing to share). Stack-neutral.
+    pub(crate) fn share_option_payload_top(&mut self, elem: SliceTy) {
+        if !self.elem_is_handle(elem) {
+            return;
+        }
+        let tmp = self.scr_i32_local;
+        let mut i = self.f.instructions();
+        i.local_tee(tmp).if_(wasm_encoder::BlockType::Empty);
+        i.local_get(tmp).i32_load(crate::slot_memarg(almide_layout::OPTION_FIELD)).call(crate::F_INC);
+        i.end();
+        i.local_get(tmp);
+    }
+
     /// The scope's half: release every temporary the arms borrowed since
     /// `depth`, in reverse order (the holds are the top of the pool now —
     /// every hold an arm took inside has been released).
     fn release_borrowed_temps(&mut self, depth: usize) {
         while self.borrowed_temps.len() > depth {
-            let h = self.borrowed_temps.pop().unwrap();
-            self.f.instructions().local_get(h).call(crate::F_DEC_FLAT);
+            let (h, ty) = self.borrowed_temps.pop().unwrap();
+            let dec = self.dec_fn_of(ty);
+            self.f.instructions().local_get(h).call(dec);
         }
     }
 }

@@ -46,7 +46,8 @@ impl Emitter<'_> {
                 ) {
                     return unsup(&format!("list-sort-elem:{elem:?}"));
                 }
-                self.f.instructions().call(F_BLOCK_COPY);
+                let copy = self.copy_fn_of(SliceTy::List(h));
+                self.f.instructions().call(copy);
                 self.emit_merge_sort(elem)?;
                 Ok(Some(Some(Lowered::owned(SliceTy::List(h)))))
             }
@@ -96,8 +97,9 @@ impl Emitter<'_> {
                     .i32_sub();
                 i.local_get(hc);
                 i.call(F_COPY);
-                i.local_get(ho);
                 let _ = i;
+                self.emit_inc_elems(ho, self.types.el(h));
+                self.f.instructions().local_get(ho);
                 self.release_i32();
                 self.release_i32();
                 self.release_i64();
@@ -166,8 +168,17 @@ impl Emitter<'_> {
                     .i32_add();
                 i.local_get(hb).i32_load(len_memarg()).local_get(hoff).i32_sub();
                 i.call(F_COPY);
-                i.local_get(ho);
                 let _ = i;
+                // The copied slots take their credits; the inserted value
+                // brought its own (Retain), so its slot gives the walk's
+                // extra one back.
+                if let Some(inc) = self.inc_elems_fn(elem) {
+                    let dec = self.dec_fn_of(elem);
+                    let mut i = self.f.instructions();
+                    i.local_get(ho).call(inc);
+                    i.local_get(ho).local_get(hoff).i32_add().i32_load(slot_memarg(0)).call(dec);
+                }
+                self.f.instructions().local_get(ho);
                 self.release_i32();
                 self.release_i32();
                 self.release_val(elem);
@@ -302,6 +313,9 @@ impl Emitter<'_> {
                 i.i32_const(0);
                 i.end();
                 let _ = i;
+                // The best element's handle inside the Option takes +1
+                // (leak-not-dangle until the Option's typed drop, 2c).
+                self.share_option_payload_top(elem);
                 self.release_i32();
                 self.release_i32();
                 self.release_i64();
@@ -309,7 +323,7 @@ impl Emitter<'_> {
                 self.release_i32();
                 self.release_i32();
                 self.release_i32();
-                Ok(Some(Lowered::view(SliceTy::Option(self.types.intern(elem)))))
+                Ok(Some(Lowered::owned(SliceTy::Option(self.types.intern(elem)))))
     }
 
 
@@ -327,6 +341,7 @@ impl Emitter<'_> {
                 };
                 let elem = self.types.el(h);
                 let stride = elem.slot_size() as i32;
+                let inc_elems = self.inc_elems_fn(elem);
                 let hxs = self.hold_i32()?;
                 self.f.instructions().local_set(hxs);
                 self.lower_arg(n_arg, Some(INT), ArgMode::Borrow)?;
@@ -418,6 +433,9 @@ impl Emitter<'_> {
                     }
                     i.local_get(hcs).i32_wrap_i64().i32_const(stride).i32_mul();
                     i.memory_copy(0, 0);
+                    if let Some(inc) = inc_elems {
+                        i.local_get(hrow).call(inc);
+                    }
                     i.local_get(ho).local_get(hk).i32_const(2).i32_shl().i32_add();
                     i.local_get(hrow).i32_store(slot_memarg(0));
                     i.local_get(hk).i32_const(1).i32_add().local_set(hk);
@@ -454,7 +472,8 @@ impl Emitter<'_> {
         };
         let elem = self.types.el(h);
         let (vstride, kstride) = (elem.slot_size() as i32, k.slot_size() as i32);
-        self.f.instructions().call(F_BLOCK_COPY);
+        let copy = self.copy_fn_of(SliceTy::List(h));
+        self.f.instructions().call(copy);
         let hb = self.hold_i32()?;
         let hn = self.hold_i32()?;
         let hkeys = self.hold_i32()?;
@@ -532,8 +551,9 @@ impl Emitter<'_> {
                 i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32).i32_add();
                 i.local_get(hc);
                 i.memory_copy(0, 0);
-                i.local_get(ho);
                 let _ = i;
+                self.emit_inc_elems(ho, self.types.el(h));
+                self.f.instructions().local_get(ho);
                 self.release_i32();
                 self.release_i32();
                 self.release_i64();

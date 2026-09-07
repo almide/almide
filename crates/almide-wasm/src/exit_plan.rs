@@ -127,7 +127,8 @@ impl Emitter<'_> {
             if omit_first && k == 0 {
                 continue;
             }
-            self.f.instructions().local_get(idx).call(F_DEC_FLAT);
+            let dec = self.dec_fn_of_local(idx);
+            self.f.instructions().local_get(idx).call(dec);
         }
         match plan.continuation {
             Continuation::ReturnSuccess => {
@@ -255,6 +256,7 @@ fn scan_window(
     start: usize,
     claimed: &[(usize, usize)],
     cont_name: &str,
+    drop_fns: &[u32],
     d: &Defects<'_>,
 ) -> Result<(Vec<u32>, usize, Op), EmitError> {
     let Some(first) = ops.iter().position(|&(off, _)| off >= start) else {
@@ -269,7 +271,7 @@ fn scan_window(
             continue;
         }
         match kind {
-            Op::Call(F_DEC_FLAT) => match (j > first).then(|| ops[j - 1].1) {
+            Op::Call(fi) if fi == F_DEC_FLAT || drop_fns.contains(&fi) => match (j > first).then(|| ops[j - 1].1) {
                 Some(Op::LocalGet(i)) => decs.push(i),
                 _ => {
                     return Err(d.at(
@@ -333,6 +335,7 @@ pub(crate) fn validate_exits(
     f: &wasm_encoder::Function,
     ledger: &[ExitRecord],
     function: &str,
+    drop_fns: &[u32],
     name_of: impl Fn(u32) -> String,
 ) -> Result<(), EmitError> {
     if ledger.is_empty() {
@@ -354,7 +357,7 @@ pub(crate) fn validate_exits(
             Continuation::GuardReturn => "the guard return",
             Continuation::TailTransfer { .. } => "the tail transfer",
         };
-        let (decs, tj, tk) = scan_window(&ops, rec.start, &claimed, cont_name, &d)?;
+        let (decs, tj, tk) = scan_window(&ops, rec.start, &claimed, cont_name, drop_fns, &d)?;
         claimed.push((rec.start, ops[tj].0));
         check_window(rec, &decs, tk, cont_name, &name_of, &d)?;
     }

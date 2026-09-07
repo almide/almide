@@ -30,11 +30,16 @@ impl Emitter<'_> {
         i.local_get(hb).local_get(hb).i32_load(len_memarg()).i32_add().i32_const(stride).i32_sub();
         let _ = i;
         self.load_ty_slot(elem, 0);
+        // The element handle inside the Option block takes +1
+        // (leak-not-dangle until the Option's typed drop, stage 2c).
+        if self.elem_is_handle(elem) {
+            self.rc_inc_top();
+        }
         self.store_ty_slot(elem, almide_layout::OPTION_FIELD);
         self.f.instructions().local_get(hr).end();
         self.release_i32();
         self.release_i32();
-        Ok(Some(Lowered::view(SliceTy::Option(self.types.intern(elem)))))
+        Ok(Some(Lowered::owned(SliceTy::Option(self.types.intern(elem)))))
     }
 
     /// Sequential product (native: Int wrapping_mul fold from 1;
@@ -443,12 +448,17 @@ impl Emitter<'_> {
             .call(F_ALLOC)
             .local_tee(hr)
             .local_get(params[0]);
+        // The element handle inside the Option block takes +1
+        // (leak-not-dangle until the Option's typed drop, stage 2c).
+        if self.elem_is_handle(elem) {
+            self.rc_inc_top();
+        }
         self.store_ty_slot(elem, almide_layout::OPTION_FIELD);
         self.f.instructions().local_get(hr).end();
         for _ in 0..4 {
             self.release_i32();
         }
-        Ok(Some(Lowered::view(SliceTy::Option(self.types.intern(elem)))))
+        Ok(Some(Lowered::owned(SliceTy::Option(self.types.intern(elem)))))
     }
 
     /// Running-accumulator list (native scan: push EVERY new acc).
@@ -681,8 +691,10 @@ impl Emitter<'_> {
             i.end();
             i.local_get(hc).i32_const(stride).i32_add().local_set(hc);
             i.br(0).end().end();
-            i.local_get(hacc);
         }
+        // The kept elements are COPIES of the source's handles.
+        self.emit_inc_elems(hacc, elem);
+        self.f.instructions().local_get(hacc);
         self.release_val(elem);
         for _ in 0..5 {
             self.release_i32();
