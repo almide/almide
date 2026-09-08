@@ -251,14 +251,15 @@ The Wgsl arm is the four rows marked W. Class:
 | 22 | `ResultPropagation` | `pass_result_propagation.rs` | all | Rust by design | effect fn `T → Result[T, String]`, `Try` at call sites | own effect lowering (`effect_raw`, `emit.rs`) |
 | 23 | `BuiltinLowering` | `pass_builtin_lowering.rs` | Rust | Rust by design | `assert_eq`/`println`/… → `RustMacro` | n/a |
 | 24 | `DecodeSlotHint` | `pass_decode_slot_hint.rs` | Rust | Rust by design | a derived `T.decode`'s borrowed field lookups carry their declaration index (`@codec_slots`), rendered as `almide_rt_value_field_ref_at` (#1679); the runtime tries `pairs[i]` before the scan, errors unchanged (C-084) | n/a (the wasm leg reads neither the attribute nor the `_at` symbol) |
-| 25 | `Peephole` | `pass_peephole.rs` | all | optimizer | idiomatic list loops → `ListSwap`/`ListReverse`/`ListRotateLeft`/`ListCopySlice` nodes | **no lowering for those nodes** — see E |
-| 26 | `RustLowering` | `pass_rust_lowering.rs` | Rust | Rust by design | push optimization, borrow index lift | n/a |
-| 27 | `FanLowering` | `pass_fan_lowering.rs` (wrapper in `pass.rs`) | all, W | enabler | strip auto-try from fan spawn closures | own fan lowering (`fan.rs`) |
-| 28 | `NormalizeRuntimeCalls` | `pass_normalize_runtime_calls.rs` | Rust | Rust by design | legacy `Named { almide_rt_* }` → `RuntimeCall` | n/a |
-| 29 | `IrLinkFlatten` | `pass_ir_link_flatten.rs` | Rust | Rust by design | flatten modules into the root for the walker | keeps modules, qualified names |
-| 30 | `SharedCellBorrow` | `pass_shared_cell_borrow.rs` | Rust | Rust by design | borrow a captured cell in place for statement-proven-safe reads (#1143) | n/a |
-| 31 | `RangeCountingVars` | `pass_range_counting.rs` | Rust | optimizer | a `let`-bound range read ONLY as `for-in` heads stays a bare `Range<i64>` instead of a materialized `Vec<i64>` (#1857); mirrors MIR's #1400 `range_counting_vars` admission rule and runs last so the set names the final IR | `ranges.rs` counting loop (#1400) — already has it |
-| 32 | `TopLetStorage` | `pass_top_let_storage.rs` | all | analysis | the unified top-let storage attribute for the walker (§4 Stage 1) | own globals plan (`build_globals`) |
+| 25 | `DecodeErrFrame` | `pass_decode_err_frame.rs` | Rust | Rust by design | a derived `T.decode`'s per-field error frame (`T___erratw_*`, #1675) becomes `.map_err(..)` on the field's own result, so the success path is a plain `?` with no payload clone and no key allocation (#2050) | n/a (the wasm leg lowers the worker itself) |
+| 26 | `Peephole` | `pass_peephole.rs` | all | optimizer | idiomatic list loops → `ListSwap`/`ListReverse`/`ListRotateLeft`/`ListCopySlice` nodes | **no lowering for those nodes** — see E |
+| 27 | `RustLowering` | `pass_rust_lowering.rs` | Rust | Rust by design | push optimization, borrow index lift | n/a |
+| 28 | `FanLowering` | `pass_fan_lowering.rs` (wrapper in `pass.rs`) | all, W | enabler | strip auto-try from fan spawn closures | own fan lowering (`fan.rs`) |
+| 29 | `NormalizeRuntimeCalls` | `pass_normalize_runtime_calls.rs` | Rust | Rust by design | legacy `Named { almide_rt_* }` → `RuntimeCall` | n/a |
+| 30 | `IrLinkFlatten` | `pass_ir_link_flatten.rs` | Rust | Rust by design | flatten modules into the root for the walker | keeps modules, qualified names |
+| 31 | `SharedCellBorrow` | `pass_shared_cell_borrow.rs` | Rust | Rust by design | borrow a captured cell in place for statement-proven-safe reads (#1143) | n/a |
+| 32 | `RangeCountingVars` | `pass_range_counting.rs` | Rust | optimizer | a `let`-bound range read ONLY as `for-in` heads stays a bare `Range<i64>` instead of a materialized `Vec<i64>` (#1857); mirrors MIR's #1400 `range_counting_vars` admission rule and runs last so the set names the final IR | `ranges.rs` counting loop (#1400) — already has it |
+| 33 | `TopLetStorage` | `pass_top_let_storage.rs` | all | analysis | the unified top-let storage attribute for the walker (§4 Stage 1) | own globals plan (`build_globals`) |
 
 ### C. Structural wasm leg — `crates/almide-wasm` (default `--target wasm`)
 
