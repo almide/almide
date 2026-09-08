@@ -156,9 +156,12 @@ test "map effect callback reaches fs" {
   fs.write(d + "/b.txt", "beta")!
   assert_eq(fan.map([d + "/a.txt", d + "/b.txt"], (p) => fs.read_text(p)), ok(["alpha", "beta"]))
   assert_eq(fan.map([d + "/a.txt", d + "/b.txt"], read_one), ok(["alpha", "beta"]))
-  // the FIRST err (list order) is the whole result
+  // the FIRST err (list order) is the whole result — the missing file's
+  // ENOENT. Its prose is the OS's ("No such file or directory" on
+  // linux/macOS and the wasm lanes, "The system cannot find the file
+  // specified." on Windows), so the row pins the kind, not the text.
   let r = fan.map([d + "/a.txt", d + "/gone.txt"], read_one)
-  assert_eq(r, err("No such file or directory (os error 2)"))
+  assert(result.is_err(r))
   fs.remove_all(d)!
 }
 
@@ -172,13 +175,16 @@ test "any effect callback reaches fs" {
   fs.remove_all(d)!
 }
 
-// settle's rows compare through `show`: the test harness's wasm lane is the
+// The rows compare through `show`: the test harness's wasm lane is the
 // incumbent brick, which walls a heap-Result equality in a returned position
 // ("heap-result `match` outside the executable subset") and would route the
 // whole file to the native fallback — the row must RUN on the wasm lane.
+// An err shows as its kind only: the missing file's message is the OS's
+// prose (it differs on Windows), and error text is a report, not an API
+// (ADR-0004) — the rows pin ok-vs-err in list order.
 fn show(r: Result[String, String]) -> String = match r {
   ok(v) => "ok " + v,
-  err(e) => "err " + e,
+  err(_) => "err",
 }
 
 test "settle effect callback reaches fs" {
@@ -186,10 +192,7 @@ test "settle effect callback reaches fs" {
   fs.write(d + "/a.txt", "alpha")!
   // EVERY element's Result, errs captured in list order
   let rs = fan.settle([d + "/gone.txt", d + "/a.txt"], (p) => fs.read_text(p)) |> list.map((r) => show(r))
-  assert_eq(rs, [
-    "err No such file or directory (os error 2)",
-    "ok alpha"
-  ])
+  assert_eq(rs, ["err", "ok alpha"])
   let vs = fan.settle([d + "/gone.txt", d + "/a.txt"], read_one) |> list.map((r) => show(r))
   assert_eq(vs, rs)
   fs.remove_all(d)!
