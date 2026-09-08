@@ -1,0 +1,59 @@
+// harness_common — the seeded value stream shared by every leg of the float-printer measurement.
+// Every driver feeds raw f64 bit patterns to `f: (Int) -> Int` and SUMS what f returns (a
+// checker returns 1 per mismatch, a dumper returns 0), so no captured mutable state is needed.
+// xorshift64 over the full 64-bit pattern space (so every exponent, including specials, is hit).
+fn __h_shr_u(x: Int, n: Int) -> Int = int.band(int.bshr(x, n), int.bshl(1, 64 - n) - 1)
+
+fn __h_next(x: Int) -> Int = {
+  let a = int.bxor(x, int.bshl(x, 13))
+  let b = int.bxor(a, __h_shr_u(a, 7))
+  int.bxor(b, int.bshl(b, 17))
+}
+
+// The boundary set: every biased exponent with the significands {0, 1, 2, 3, mid, max-1, max}
+// (the regular/irregular spacing edges, C_TINY, the subnormal top), then every decimal power
+// 10^k reachable by repeated float multiplication/division with its two bit-neighbours.
+fn __h_mant(i: Int) -> Int = if i == 0 then 0 else if i == 1 then 1 else if i == 2 then 2
+else if i == 3 then 3 else if i == 4 then 2251799813685248 else if i == 5 then 4503599627370494
+else 4503599627370495
+
+fn __h_exp_mants(e: Int, i: Int, f: (Int) -> Int, acc: Int) -> Int = if i >= 7 then acc
+else __h_exp_mants(e, i + 1, f, acc + f(int.bor(int.bshl(e, 52), __h_mant(i))))
+
+fn __h_exps(e: Int, f: (Int) -> Int, acc: Int) -> Int = if e >= 2048 then acc
+else __h_exps(e + 1, f, __h_exp_mants(e, 0, f, acc))
+
+fn __h_neighbours(b: Int, f: (Int) -> Int) -> Int = f(b) + f(b + 1) + f(b - 1)
+
+fn __h_pow_up(x: Float, n: Int, f: (Int) -> Int, acc: Int) -> Int = if n >= 310 then acc
+else __h_pow_up(x * 10.0, n + 1, f, acc + __h_neighbours(float.to_bits(x), f))
+
+fn __h_pow_down(x: Float, n: Int, f: (Int) -> Int, acc: Int) -> Int = if n >= 325 then acc
+else __h_pow_down(x / 10.0, n + 1, f, acc + __h_neighbours(float.to_bits(x), f))
+
+fn __h_both(b: Int, f: (Int) -> Int) -> Int = f(b) + f(int.bor(b, int.bshl(1, 63)))
+
+// Feed every boundary pattern (as raw f64 bits) to f, with the sign bit both clear and set.
+fn boundary_bits(f: (Int) -> Int) -> Int = {
+  let both = (b: Int) => __h_both(b, f)
+  let e = __h_exps(0, both, 0)
+  let u = __h_pow_up(1.0, 0, both, 0)
+  let d = __h_pow_down(1.0, 0, both, 0)
+  let x = both(float.to_bits(0.1 + 0.2))
+  let y = both(float.to_bits(1.0 / 3.0))
+  let z = both(float.to_bits(9007199254740993.0))
+  e + u + d + x + y + z
+}
+
+// Feed n seeded random patterns to f (a loop, not recursion: the native leg has no tail calls).
+fn random_bits(seed: Int, n: Int, f: (Int) -> Int) -> Int = {
+  var s = seed
+  var i = 0
+  var acc = 0
+  while i < n {
+    s = __h_next(s)
+    acc = acc + f(s)
+    i = i + 1
+  }
+  acc
+}

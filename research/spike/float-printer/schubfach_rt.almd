@@ -1,0 +1,351 @@
+// schubfach_rt — Schubfach (Giulietti, "The Schubfach way to render doubles") with the 126-bit
+// power-of-ten constant g(k) = floor(10^k * 2^-r) + 1 (r = floor(log2 10^k) - 125) DERIVED AT
+// RUN TIME by exact big-integer arithmetic instead of read from the 617-entry table:
+//   k >= 0: P = 10^k as a bignum, g = its top 126 bits (+1)
+//   k <  0: P = 10^-k as a bignum, g = the 126-bit quotient of 2^N / P (+1), by 126 shift-subtract steps
+// Same output contract as stdlib/float_to_string.almd (Rust `format!("{}", x)` + the `.0` suffix).
+//
+// Scratch block (byte offsets from sb = handle(block) + 12):
+//   P   @ 0    len word + up to 36 u32 limbs (10^324 is 1077 bits = 34 limbs)   160 bytes
+//   REM @ 160  same shape (remainder of the long division, < 2P)                 160 bytes
+//   G   @ 320  g1 @ +0, g0 @ +8 (two i64 slots, each < 2^63)                     16 bytes
+//   DP  @ 336  up to 17 decimal digits                                           24 bytes
+//   total 360 → prim.alloc_list(48) = 384 bytes.
+// ───────────────────────── floor-log helpers (exact over the f64 range, checked offline) ─────────
+fn __sf_flog10pow2(e: Int) -> Int = prim.bshr(e * 661971961083, 41)
+
+fn __sf_flog10_3q_pow2(e: Int) -> Int = prim.bshr(e * 661971961083 - 274743187321, 41)
+
+fn __sf_flog2pow10(e: Int) -> Int = prim.bshr(e * 913124641741, 38)
+
+// ───────────────────────── big-integer helpers (u32 limbs, [len][limb_0][limb_1]...) ────────────
+fn __sf_limb(p: Int, i: Int) -> Int = if i < prim.load32(p) then prim.load32(p + 4 + i * 4) else 0
+
+fn __sf_ms_body(p: Int, m: Int, len: Int, i: Int, carry: Int) -> Int = if i >= len then carry
+else {
+  let prod = prim.load32(p + 4 + i * 4) * m + carry
+  prim.store32(p + 4 + i * 4, prim.band(prod, 4294967295))
+  __sf_ms_body(p, m, len, i + 1, prim.bshr_u(prod, 32))
+}
+
+// p *= m (m < 2^31).
+fn __sf_mul_small(p: Int, m: Int) -> Unit = {
+  let len = prim.load32(p)
+  let carry = __sf_ms_body(p, m, len, 0, 0)
+  let len2 = if carry != 0 then {
+    prim.store32(p + 4 + len * 4, carry)
+    len + 1
+  } else len
+  prim.store32(p, len2)
+}
+
+fn __sf_pow10_small(n: Int) -> Int = if n == 0 then 1 else 10 * __sf_pow10_small(n - 1)
+
+fn __sf_pow10_loop(p: Int, j: Int) -> Unit = if j >= 9 then {
+  __sf_mul_small(p, 1000000000)
+  __sf_pow10_loop(p, j - 9)
+} else __sf_mul_small(p, __sf_pow10_small(j))
+
+// P = 10^j (j >= 0).
+fn __sf_pow10_into(p: Int, j: Int) -> Unit = {
+  prim.store32(p, 1)
+  prim.store32(p + 4, 1)
+  __sf_pow10_loop(p, j)
+}
+
+// p = 2^e: zero the limbs below, one bit in the top limb.
+fn __sf_zero_limbs(p: Int, n: Int, i: Int) -> Unit = if i >= n then prim.store32(p, n)
+else {
+  prim.store32(p + 4 + i * 4, 0)
+  __sf_zero_limbs(p, n, i + 1)
+}
+
+fn __sf_set_pow2(p: Int, e: Int) -> Unit = {
+  let idx = e / 32
+  __sf_zero_limbs(p, idx + 1, 0)
+  prim.store32(p + 4 + idx * 4, prim.bshl(1, e % 32))
+}
+
+fn __sf_shl1_body(p: Int, len: Int, i: Int, carry: Int) -> Int = if i >= len then carry
+else {
+  let v = prim.load32(p + 4 + i * 4) * 2 + carry
+  prim.store32(p + 4 + i * 4, prim.band(v, 4294967295))
+  __sf_shl1_body(p, len, i + 1, prim.bshr_u(v, 32))
+}
+
+// p <<= 1.
+fn __sf_shl1(p: Int) -> Unit = {
+  let len = prim.load32(p)
+  let carry = __sf_shl1_body(p, len, 0, 0)
+  if carry != 0 then {
+    prim.store32(p + 4 + len * 4, carry)
+    prim.store32(p, len + 1)
+  } else prim.store32(p, len)
+}
+
+fn __sf_cmp_limbs(a: Int, b: Int, i: Int) -> Int = if i == 0 then 0
+else {
+  let va = prim.load32(a + 4 + (i - 1) * 4)
+  let vb = prim.load32(b + 4 + (i - 1) * 4)
+  if va != vb then (if va < vb then 0 - 1 else 1)
+  else __sf_cmp_limbs(a, b, i - 1)
+}
+
+// cmp(a, b) -> -1/0/1; both normalized (no high zero limbs).
+fn __sf_cmp(a: Int, b: Int) -> Int = {
+  let la = prim.load32(a)
+  let lb = prim.load32(b)
+  if la != lb then (if la < lb then 0 - 1 else 1)
+  else __sf_cmp_limbs(a, b, la)
+}
+
+fn __sf_sub_body(dst: Int, src: Int, ld: Int, ls: Int, i: Int, borrow: Int) -> Int = if i >= ld then 0
+else {
+  let b = if i < ls then prim.load32(src + 4 + i * 4) else 0
+  let diff = prim.load32(dst + 4 + i * 4) - b - borrow
+  let nb = if diff < 0 then 1 else 0
+  let d2 = if diff < 0 then diff + 4294967296 else diff
+  prim.store32(dst + 4 + i * 4, d2)
+  __sf_sub_body(dst, src, ld, ls, i + 1, nb)
+}
+
+fn __sf_norm_loop(p: Int, len: Int) -> Int = {
+  let stop = if len <= 1 then true else (prim.load32(p + 4 + (len - 1) * 4) != 0)
+  if stop then len else __sf_norm_loop(p, len - 1)
+}
+
+// dst -= src (dst >= src), then drop high zero limbs.
+fn __sf_sub(dst: Int, src: Int) -> Unit = {
+  let _b = __sf_sub_body(dst, src, prim.load32(dst), prim.load32(src), 0, 0)
+  prim.store32(dst, __sf_norm_loop(dst, prim.load32(dst)))
+}
+
+// The n (<= 63) bits of bignum p starting at bit position pos; pos < 0 reads zeros below bit 0.
+fn __sf_getbits(p: Int, pos: Int, n: Int) -> Int = if pos + n <= 0 then 0
+else if pos < 0 then prim.bshl(__sf_getbits(p, 0, n + pos), 0 - pos)
+else {
+  let i = pos / 32
+  let s = pos % 32
+  let l0 = __sf_limb(p, i)
+  let l1 = __sf_limb(p, i + 1)
+  let l2 = __sf_limb(p, i + 2)
+  let hi = if s == 0 then 0 else prim.bshl(l2, 64 - s)
+  let v = prim.bor(prim.bor(prim.bshr_u(l0, s), prim.bshl(l1, 32 - s)), hi)
+  prim.band(v, prim.bshl(1, n) - 1)
+}
+
+// ───────────────────────── g(j) = floor(10^j * 2^-r) + 1, r = floor(log2 10^j) - 125 ────────────
+// 126 shift-subtract steps of 2^N / P into the 63-bit halves (g1, g0); rem starts at 2^(bitlen(P)-1).
+fn __sf_ldiv(rem: Int, p: Int, steps: Int, g1: Int, g0: Int, gout: Int) -> Unit = if steps == 0 then {
+  prim.store64(gout, g1)
+  prim.store64(gout + 8, g0)
+} else {
+  __sf_shl1(rem)
+  let bit = if __sf_cmp(rem, p) >= 0 then {
+    __sf_sub(rem, p)
+    1
+  } else 0
+  let n1 = prim.band(prim.bor(prim.bshl(g1, 1), prim.bshr_u(g0, 62)), 9223372036854775807)
+  let n0 = prim.band(prim.bor(prim.bshl(g0, 1), bit), 9223372036854775807)
+  __sf_ldiv(rem, p, steps - 1, n1, n0, gout)
+}
+
+// The final +1 on the 126-bit value at gout (g0 @ +8 carries into g1 @ +0).
+fn __sf_g_plus1(gout: Int) -> Unit = {
+  let g0 = prim.load64(gout + 8) + 1
+  if g0 == prim.bshl(1, 63) then {
+    prim.store64(gout + 8, 0)
+    prim.store64(gout, prim.load64(gout) + 1)
+  } else prim.store64(gout + 8, g0)
+}
+
+fn __sf_compute_g(j: Int, sb: Int) -> Unit = {
+  let p = sb
+  let rem = sb + 160
+  let gout = sb + 320
+  let _d = if j >= 0 then {
+    __sf_pow10_into(p, j)
+    let l = __sf_flog2pow10(j) + 1
+    prim.store64(gout, __sf_getbits(p, l - 63, 63))
+    prim.store64(gout + 8, __sf_getbits(p, l - 126, 63))
+    0
+  } else {
+    let m = 0 - j
+    __sf_pow10_into(p, m)
+    __sf_set_pow2(rem, __sf_flog2pow10(m))
+    __sf_ldiv(rem, p, 126, 0, 0, gout)
+    0
+  }
+  __sf_g_plus1(gout)
+}
+
+// ───────────────────────── 64x64 -> high 64 (unsigned) and the rounded product rop ──────────────
+fn __sf_mulhi(a: Int, b: Int) -> Int = {
+  let al = prim.band(a, 4294967295)
+  let ah = prim.bshr_u(a, 32)
+  let bl = prim.band(b, 4294967295)
+  let bh = prim.bshr_u(b, 32)
+  let ll = al * bl
+  let m1 = al * bh
+  let m2 = ah * bl
+  let t = prim.bshr_u(ll, 32) + prim.band(m1, 4294967295) + prim.band(m2, 4294967295)
+  ah * bh + prim.bshr_u(m1, 32) + prim.bshr_u(m2, 32) + prim.bshr_u(t, 32)
+}
+
+// rop(g, cp) = floor(g * cp / 2^127) with a sticky low bit when the discarded part is non-zero.
+fn __sf_rop(g1: Int, g0: Int, cp: Int) -> Int = {
+  let x1 = __sf_mulhi(g0, cp)
+  let y0 = g1 * cp
+  let y1 = __sf_mulhi(g1, cp)
+  let z = prim.bshr_u(y0, 1) + x1
+  let vbp = y1 + prim.bshr_u(z, 63)
+  let sticky = if prim.band(z, 9223372036854775807) != 0 then 1 else 0
+  prim.bor(vbp, sticky)
+}
+
+// ───────────────────────── rendering (byte-identical to the Dragon4 renderer) ───────────────────
+fn __sf_bcopy(src: Int, dst: Int, len: Int) -> Int = if len <= 0 then dst
+else {
+  prim.store8(dst, prim.load8(src))
+  __sf_bcopy(src + 1, dst + 1, len - 1)
+}
+
+fn __sf_zeros(dst: Int, count: Int) -> Int = if count <= 0 then dst
+else {
+  prim.store8(dst, 48)
+  __sf_zeros(dst + 1, count - 1)
+}
+
+// digits dp[0..m) with the decimal point after k of them (k <= 0 → leading "0." zeros, k >= m → ".0").
+fn __sf_render(dp: Int, m: Int, k: Int, neg: Bool) -> String = {
+  let body = if k <= 0 then 2 + (0 - k) + m
+  else if k >= m then k + 2 else m + 1
+  let sign_w = if neg then 1 else 0
+  let out_len = sign_w + body
+  let buf = prim.alloc_str(out_len)
+  let base = prim.handle(buf) + 12
+  let c0 = if neg then {
+    prim.store8(base, 45)
+    base + 1
+  } else base
+  let _e = if k <= 0 then {
+    prim.store8(c0, 48)
+    prim.store8(c0 + 1, 46)
+    let c1 = __sf_zeros(c0 + 2, 0 - k)
+    __sf_bcopy(dp, c1, m)
+  } else if k >= m then {
+    let c1 = __sf_bcopy(dp, c0, m)
+    let c2 = __sf_zeros(c1, k - m)
+    prim.store8(c2, 46)
+    prim.store8(c2 + 1, 48)
+    c2 + 2
+  } else {
+    let c1 = __sf_bcopy(dp, c0, k)
+    prim.store8(c1, 46)
+    __sf_bcopy(dp + k, c1 + 1, m - k)
+  }
+  buf
+}
+
+fn __sf_ndigits(f: Int, n: Int) -> Int = if f == 0 then n else __sf_ndigits(f / 10, n + 1)
+
+fn __sf_wdigits(dp: Int, f: Int, i: Int) -> Int = if f == 0 then 0
+else {
+  prim.store8(dp + i - 1, 48 + f % 10)
+  __sf_wdigits(dp, f / 10, i - 1)
+}
+
+// |v| = f * 10^e (f > 0): strip trailing zeros, write the digits, render.
+fn __sf_finish(f: Int, e: Int, neg: Bool, sb: Int) -> String = if f % 10 == 0 then __sf_finish(f / 10, e + 1, neg, sb)
+else {
+  let dp = sb + 336
+  let m = __sf_ndigits(f, 0)
+  let _w = __sf_wdigits(dp, f, m)
+  __sf_render(dp, m, m + e, neg)
+}
+
+// ───────────────────────── the Schubfach core ───────────────────────────────────────────────────
+fn __sf_core2(vb: Int, vbl: Int, vbr: Int, s: Int, out: Int, k: Int, neg: Bool, sb: Int) -> String = {
+  let t = s + 1
+  let uin = vbl + out <= prim.bshl(s, 2)
+  let win = prim.bshl(t, 2) + out <= vbr
+  let su = if uin then 1 else 0
+  let sw = if win then 2 else 0
+  let sel = su + sw
+  if sel == 1 then __sf_finish(s, k, neg, sb)
+  else if sel == 2 then __sf_finish(t, k, neg, sb)
+  else {
+    // Closest of the two; on an exact tie Rust's `{}` (Dragon4 "2R >= S") rounds the magnitude
+    // UP, not to even — Giulietti's `(s & 1) == 0` even-tie rule would print ...4.2 for
+    // 1669760939663944.25 where format! prints ...4.3.
+    let cmp = vb - prim.bshl(s + t, 1)
+    if cmp < 0 then __sf_finish(s, k, neg, sb) else __sf_finish(t, k, neg, sb)
+  }
+}
+
+// v = c * 2^q (c > 0); the shortest decimal in the rounding interval, closest on a draw, even on a tie.
+fn __sf_core(q: Int, c: Int, dk: Int, neg: Bool, sb: Int) -> String = {
+  let out = prim.band(c, 1)
+  let cb = prim.bshl(c, 2)
+  let cbr = cb + 2
+  let regular = if c != 4503599627370496 then true else q == 0 - 1074
+  let cbl = if regular then cb - 2 else cb - 1
+  let k = if regular then __sf_flog10pow2(q) else __sf_flog10_3q_pow2(q)
+  let h = q + __sf_flog2pow10(0 - k) + 2
+  __sf_compute_g(0 - k, sb)
+  let g1 = prim.load64(sb + 320)
+  let g0 = prim.load64(sb + 328)
+  let vb = __sf_rop(g1, g0, prim.bshl(cb, h))
+  let vbl = __sf_rop(g1, g0, prim.bshl(cbl, h))
+  let vbr = __sf_rop(g1, g0, prim.bshl(cbr, h))
+  let s = prim.bshr(vb, 2)
+  let sp10 = (s / 10) * 10
+  let tp10 = sp10 + 10
+  let upin = vbl + out <= prim.bshl(sp10, 2)
+  let wpin = prim.bshl(tp10, 2) + out <= vbr
+  let su = if upin then 1 else 0
+  let sw = if wpin then 2 else 0
+  // Giulietti guards this with `s >= 100` (Java prints at least two digits); the rounding
+  // interval is 1..10 units of 10^k wide so it holds at most one multiple of 10, and a
+  // subnormal's s can be two digits — 20 * 2^-1074 has s = 98 with 100 inside the interval,
+  // and format! prints the one-digit "1e-322". `s >= 10` keeps sp10 > 0.
+  let sel = if s >= 10 then su + sw else 0
+  if sel == 1 then __sf_finish(sp10, k + dk, neg, sb)
+  else if sel == 2 then __sf_finish(tp10, k + dk, neg, sb)
+  else __sf_core2(vb, vbl, vbr, s, out, k + dk, neg, sb)
+}
+
+fn __sf_main(x: Float) -> String = {
+  let bits0 = prim.fbits(x)
+  let neg = bits0 < 0
+  let bq = prim.band(prim.bshr_u(bits0, 52), 2047)
+  let t = prim.band(bits0, 4503599627370495)
+  let blk = prim.alloc_list(48)
+  let sb = prim.handle(blk) + 12
+  if bq != 0 then {
+    let mq = 1075 - bq
+    let c = t + 4503599627370496
+    // 0 < mq < 53 and c divisible by 2^mq: an integer below 2^53 prints its digits directly.
+    let fast = if mq > 0 then (if mq < 53 then prim.bshl(prim.bshr(c, mq), mq) == c else false)
+    else false
+    if fast then __sf_finish(prim.bshr(c, mq), 0, neg, sb)
+    else __sf_core(0 - mq, c, 0, neg, sb)
+  } else __sf_core(0 - 1074, t, 0, neg, sb)
+  // (Java's C_TINY = 3 branch, which feeds 10*t so that MIN_VALUE gets Java's mandatory second
+  // digit "4.9E-324", is deliberately absent: format! prints the one-digit shortest "5e-324".)
+}
+
+fn __sf_special(bits0: Int, raw_mant0: Int) -> String = if raw_mant0 != 0 then "NaN"
+else if bits0 < 0 then "-inf" else "inf"
+
+fn sf_float_to_string(x: Float) -> String = {
+  let bits0 = prim.fbits(x)
+  let raw_exp0 = prim.band(prim.bshr_u(bits0, 52), 2047)
+  let raw_mant0 = prim.band(bits0, 4503599627370495)
+  let is_special = raw_exp0 == 2047
+  let is_zero = prim.feq(x, 0.0)
+  let neg = bits0 < 0
+  if is_special then __sf_special(bits0, raw_mant0)
+  else if is_zero then (if neg then "-0.0" else "0.0")
+  else __sf_main(x)
+}
