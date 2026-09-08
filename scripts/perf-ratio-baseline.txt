@@ -46,6 +46,19 @@ spectralnorm 1.001
 # replaces it.
 binarytrees 0.610
 treealloc 0.610
+# `decode` (#1679) is reported and not anchored, like strchurn: N derived
+# `User.decode`s of one 8-field document against the same-shape hand-written
+# decode (`rust:decode`, borrowed field scan + owned `String` record fields).
+# Each op is eight short-string allocations on both sides, so the ratio is an
+# allocator reading first. M4 Pro, 2026-09-08, 2M decodes: 412 ns/op native
+# (422 before the slot hint) vs 205 ns/op reference — 2.0x, and the whole
+# 2x is the derived decode's `___erratw_*` frames (#1675) cloning the Ok
+# payload and allocating the path segment on the SUCCESS path: collapsing the
+# eleven frames in the emitted Rust reads 205 ns/op, level with the reference
+# (see BENCHMARKS.md). That is the row's next move, not the lookup. This
+# script's own reading of the row the day it landed was 2.46 (whole-process
+# wall clock at 1M, a loaded box); native/rust only until the wasm leg's
+# per-decode retention (#2046) is fixed.
 # Ablation deltas (#1466): ablated-native / optimized-native median per
 # anchored bench (ALMIDE_DISABLE_OPT=1 skips fold/DCE/propagate). Anchored at
 # the measured ~1.00: on the rustc-backed native leg these passes are

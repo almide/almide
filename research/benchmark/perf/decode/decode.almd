@@ -1,0 +1,67 @@
+// decode — the #1679 / #1673 Codec decode workload: one fixed document, an
+// 8-field `User` (a nested `Address` and a 3-element `List[String]` among the
+// fields), decoded N times through the derived `User.decode`.
+//
+// The document is parsed ONCE, outside the timed loop — `json.parse` has its
+// own row in #1678's measurements and this one is decode alone: every
+// iteration is a borrowed field lookup per field plus the owned `String`
+// copies the record's fields oblige (`name`, `email`, the three `tags`, the
+// three `Address` strings). Each decoded record feeds the accumulator so the
+// loop cannot be elided; the final line is byte-identical across native, wasm
+// and the Rust reference.
+//
+// The Rust reference is rust-ref/decode.rs: an ORDINARY hand-written decode
+// against the same `AlmideValue` shape (interned `Cow` keys, `Vec<(key,
+// value)>` objects, owned `String` payloads) — a borrowed linear field scan
+// and `to_string()` into owned record fields, i.e. the 168 ns row of #1679,
+// not the borrowed-`&str` 53 ns one. That is what a competent person writes
+// against this data model today; anything cheaper would be a different
+// record type, and the difference is the language-level decision #1679
+// still carries.
+import env
+import int
+import json
+
+type Address: Codec = { city: String, zip: String, country: String }
+
+type User: Codec = {
+  id: Int,
+  name: String,
+  email: String,
+  age: Int,
+  active: Bool,
+  score: Float,
+  tags: List[String],
+  address: Address,
+}
+
+let doc = """
+  {"id": 42, "name": "Ada Lovelace", "email": "ada@example.com", "age": 36,
+   "active": true, "score": 97.5, "tags": ["math", "engine", "poetry"],
+   "address": {"city": "London", "zip": "W1J 9AF", "country": "UK"}}
+  """
+
+fn weight(u: User) -> Int =
+  u.id + u.age + string.len(u.name) + string.len(u.email)
+    + list.len(u.tags) + string.len(u.address.city)
+    + (if u.active then 1 else 0)
+
+effect fn main() -> Unit = {
+  let args = env.args()
+  let n = match list.get(args, 0) {
+    some(s) => match int.parse(s) {
+      ok(v) => v,
+      err(_) => 1000000,
+    },
+    none => 1000000,
+  }
+  let v = json.parse(doc)!
+  var acc = 0
+  for i in 0..<n {
+    acc = acc + (match User.decode(v) {
+      ok(u) => weight(u) + (i % 3),
+      err(_) => -1,
+    })
+  }
+  println("n: ${n} acc: ${acc}")
+}
