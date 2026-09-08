@@ -67,17 +67,17 @@ fn every_field_frame_is_a_map_err_on_the_borrowed_lookup() {
     let rust = emitted(SRC, "frame");
     let decode = body_of(&rust, "User_decode");
     for (key, read) in [
-        ("id", "almide_rt_value_as_int(almide_rt_value_field_ref(_v, \"id\")?)"),
-        ("name", "almide_rt_value_as_string(almide_rt_value_field_ref(_v, \"name\")?)"),
-        ("tags", "almide_rt___decode_list_string(almide_rt_value_field_ref(_v, \"tags\")?)"),
-        ("address", "Address_decode(almide_rt_value_field_ref(_v, \"address\")?)"),
-        ("homes", "almide_rt_value_decode_list_ref(almide_rt_value_field_ref(_v, \"homes\")?, Address_decode)"),
+        ("id", "almide_rt_value_as_int(almide_rt_value_field_ref_at(_v, \"id\", 0)?)"),
+        ("name", "almide_rt_value_as_string(almide_rt_value_field_ref_at(_v, \"name\", 1)?)"),
+        ("tags", "almide_rt___decode_list_string(almide_rt_value_field_ref_at(_v, \"tags\", 2)?)"),
+        ("address", "Address_decode(almide_rt_value_field_ref_at(_v, \"address\", 3)?)"),
+        ("homes", "almide_rt_value_decode_list_ref(almide_rt_value_field_ref_at(_v, \"homes\", 4)?, Address_decode)"),
     ] {
         let frame = format!("({read}.map_err(|_we| almide_rt___err_at(_we, {key:?}.to_string())))?");
         assert!(decode.contains(&frame), "field `{key}` must read its borrowed lookup with the frame as a `.map_err` on it:\n{decode}");
     }
     let nested = body_of(&rust, "Address_decode");
-    assert!(nested.contains("(almide_rt_value_as_string(almide_rt_value_field_ref(_v, \"city\")?).map_err(|_we| almide_rt___err_at(_we, \"city\".to_string())))?"),
+    assert!(nested.contains("(almide_rt_value_as_string(almide_rt_value_field_ref_at(_v, \"city\", 0)?).map_err(|_we| almide_rt___err_at(_we, \"city\".to_string())))?"),
         "the nested record's own decode carries the same frame shape:\n{nested}");
 }
 
