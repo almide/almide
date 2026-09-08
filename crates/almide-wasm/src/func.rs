@@ -429,18 +429,7 @@ pub(crate) fn lower_fn(
                 if em.rc_droppable(want) && !owned_tail {
                     em.rc_inc_top();
                     if em.witness.is_some() {
-                        let tail = crate::rc_ownership::rc_tail(body);
-                        let src = if let almide_ir::IrExprKind::Var { id } = &tail.kind {
-                            em.locals.get(id).map(|&(l, _)| l)
-                        } else {
-                            None
-                        };
-                        if let Some(w) = em.witness.as_mut() {
-                            match src {
-                                Some(l) if w.ret_move(l) => {}
-                                _ => w.poison(),
-                            }
-                        }
+                        em.witness_tail_var(crate::rc_ownership::rc_tail(body));
                     }
                 }
             }

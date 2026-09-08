@@ -33,6 +33,19 @@
 //! call / fresh tail moves its one credit out (`im`). A `return_call`
 //! site releases the owned params before the jump and records each `d`.
 //!
+//! STEP 4 (#1696, statement calls + module calls): a statement-position
+//! call over Var / literal args is admitted — its argument sites are the
+//! call hooks', and an OWNED droppable result is released by the discard
+//! route right there (`id`). A `CallTarget::Module` call is admitted in
+//! every call position: the registry route consults the callee's
+//! param_owned table exactly as the Named route does, and a native arm's
+//! declared `ArgMode` is recorded at `lower_arg` (witness_hooks.rs). What
+//! the arms do NOT yet cover DECLINES at emission time with a counted
+//! reason (`!decline:…`, the measurement channel this step opened):
+//! an arm that lowers an argument outside `lower_arg`, a droppable View
+//! result, a Retain of a flat / cell local. The frame's certificate is
+//! withdrawn, never under-recorded.
+//!
 //! Event vocabulary (certificate v0, the format `proofs/` checks):
 //!   `i` = an ownership +1 backed by a real Alloc/copy (a fresh bind, or a
 //!         droppable param — the structural convention is CALLEE-OWNED:
@@ -67,6 +80,9 @@ pub struct WitnessRecorder {
     /// The certificate becomes `!decline:<reason>` — counted by the
     /// histogram, neither a certificate nor a poison.
     declined: Option<String>,
+    /// Argument hooks fired so far (step 4): the module-call wrapper
+    /// audits an arm by this count against its argument count.
+    arg_hooks: u32,
 }
 
 impl Default for WitnessRecorder {
@@ -84,7 +100,23 @@ impl WitnessRecorder {
             poisoned: false,
             frame_replaced: false,
             declined: None,
+            arg_hooks: 0,
         }
+    }
+
+    /// One argument hook fired (any convention, droppable or not).
+    pub fn note_arg(&mut self) {
+        self.arg_hooks += 1;
+    }
+
+    pub fn arg_hooks(&self) -> u32 {
+        self.arg_hooks
+    }
+
+    /// An owned droppable call result discarded in statement position:
+    /// born (the callee's handed-over credit) and released by the route.
+    pub fn temp_discarded(&mut self) {
+        self.temp_borrowed();
     }
 
     fn fresh_obj(&mut self, local: u32) -> u32 {
@@ -265,6 +297,14 @@ pub fn straightline_subset(body: &IrExpr, ret_is_heap: bool, self_name: &str) ->
                     return Some(r);
                 }
             }
+            // Step 4: a statement-position call over Var / literal args —
+            // its argument sites are the call hooks', and an owned
+            // droppable result is released by the discard route (`id`).
+            IrStmtKind::Expr { expr } if matches!(expr.kind, IrExprKind::Call { .. }) => {
+                if let Some(r) = call_subset(expr) {
+                    return Some(format!("stmt:Expr:{r}"));
+                }
+            }
             IrStmtKind::Expr { expr } => return Some(format!("stmt:Expr:{}", expr_tag(expr))),
             other => return Some(format!("stmt:{}", tag(other))),
         }
@@ -292,7 +332,7 @@ pub fn straightline_subset(body: &IrExpr, ret_is_heap: bool, self_name: &str) ->
         {
             Some("tail:self-call-loop".into())
         }
-        Some(IrExprKind::Call { .. }) => expr.as_deref().and_then(user_call_subset),
+        Some(IrExprKind::Call { .. }) => expr.as_deref().and_then(call_subset),
         Some(k @ (IrExprKind::LitStr { .. } | IrExprKind::List { .. })) if ret_is_heap => {
             subset_rhs_literal(k)
         }
@@ -316,19 +356,29 @@ fn expr_tag(e: &IrExpr) -> String {
     }
 }
 
-/// A call the B1 hooks cover: a Named user fn (lowercase — ctors are
+/// A call the hooks cover: a Named user fn (lowercase — ctors are
 /// capitalized, the builtin `some`/`ok`/`err` are IR kinds, not calls)
-/// over Var / literal arguments only. Module helpers have their own
-/// borrow conventions and stay out.
-fn user_call_subset(e: &IrExpr) -> Option<String> {
+/// or, since step 4, a Module call (the native arms' declared modes are
+/// recorded at `lower_arg`; the registry route consults the callee's
+/// param_owned table like the Named route), over Var / literal
+/// arguments only.
+fn call_subset(e: &IrExpr) -> Option<String> {
     let IrExprKind::Call { target, args, .. } = &e.kind else {
         return Some("call:not-a-call".into());
     };
-    let almide_ir::CallTarget::Named { name } = target else {
-        return Some(format!("call:target:{}", tag(target)));
-    };
-    if !name.as_str().starts_with(|c: char| c.is_ascii_lowercase() || c == '_') {
-        return Some("call:ctor".into());
+    match target {
+        almide_ir::CallTarget::Named { name } => {
+            if !name.as_str().starts_with(|c: char| c.is_ascii_lowercase() || c == '_') {
+                return Some("call:ctor".into());
+            }
+            // The http_framed host-op leaves (calls.rs) intercept before
+            // resolution and lower their args outside every hook.
+            if name.as_str().starts_with("__http_framed_") {
+                return Some("call:host-splice".into());
+            }
+        }
+        almide_ir::CallTarget::Module { .. } => {}
+        other => return Some(format!("call:target:{}", tag(other))),
     }
     for a in args {
         match &a.kind {
@@ -376,7 +426,7 @@ fn subset_rhs(value: &IrExpr) -> Option<String> {
         IrExprKind::List { .. } => subset_rhs_literal(&value.kind),
         // B1: a user-fn call — its arguments' RC sites are the call-arg
         // hook's, its droppable result is a received credit (#1986).
-        IrExprKind::Call { .. } => user_call_subset(value),
+        IrExprKind::Call { .. } => call_subset(value),
         other => Some(format!("rhs:{}", tag(other))),
     }
 }
@@ -424,104 +474,9 @@ pub(crate) fn push_decline(name: &str, reason: &str) {
     push(name, format!("{DECLINE_PREFIX}{reason}\n"));
 }
 
-// ── the Emitter-side hooks ──────────────────────────────────────────────
+// The Emitter-side hooks live in witness_hooks.rs.
 
-use crate::emitter::Emitter;
 use crate::{Scalar, SliceTy};
-
-impl Emitter<'_> {
-    /// The Bind-route hook (stmts.rs): called right after the local joins
-    /// `rc_owned`. Attribution mirrors the instructions the route just
-    /// emitted: a certainly-fresh rhs (heap literal) and a Map/Set Var rhs
-    /// (which took `$block_copy`) are NEW objects; a List/Str/Bytes Var
-    /// rhs took `rc_inc_top`, so the SOURCE object gains a share. Anything
-    /// else under an armed recorder is a gate/hook disagreement — poison.
-    pub(crate) fn witness_bind(
-        &mut self,
-        idx: u32,
-        declared: SliceTy,
-        value: &almide_ir::IrExpr,
-    ) {
-        let src_local = if let almide_ir::IrExprKind::Var { id } = &value.kind {
-            self.locals.get(id).map(|&(l, _)| l)
-        } else {
-            None
-        };
-        // Mirrors the route exactly: an OWNED result (fresh, or a user-fn
-        // call's handed-over credit, #1986) is a new object; a Map/Set Var
-        // took `$block_copy`.
-        let owned = self.rc_owned_result(value);
-        let Some(w) = self.witness.as_mut() else { return };
-        if owned || (src_local.is_some() && matches!(declared, SliceTy::Map(..) | SliceTy::Set(_))) {
-            w.bind_fresh(idx);
-            return;
-        }
-        match src_local {
-            Some(src) if w.bind_alias(idx, src) => {}
-            _ => w.poison(),
-        }
-    }
-
-    /// The call-argument hook (calls.rs, right after `rc_arg_guard`):
-    /// a droppable Var argument's object gained a real `rc_inc` and its
-    /// credit moves into the callee; a fresh temporary is born and moves.
-    /// Non-droppable arguments have no RC site. Anything else under an
-    /// armed recorder is a gate/hook disagreement — poison.
-    pub(crate) fn witness_arg(&mut self, e: &almide_ir::IrExpr, ty: SliceTy) {
-        if self.witness.is_none() || !self.rc_droppable(ty) {
-            return;
-        }
-        let src_local = if let almide_ir::IrExprKind::Var { id } = &e.kind {
-            self.locals.get(id).map(|&(l, _)| l)
-        } else {
-            None
-        };
-        // Mirrors rc_arg_guard exactly: an OWNED argument (fresh literal
-        // or a call result carrying its one credit) is born and moves
-        // (`im`); a Var shares and moves (`am`).
-        let fresh = self.rc_owned_result(e);
-        let Some(w) = self.witness.as_mut() else { return };
-        match src_local {
-            Some(l) if w.arg_share_move(l) => {}
-            None if fresh => w.temp_move(),
-            _ => w.poison(),
-        }
-    }
-
-    /// The call-argument hook for a BORROWED callee param (#2028): a Var
-    /// argument has no RC site (the callee holds nothing); a fresh
-    /// temporary is born and released by the site (`id`).
-    pub(crate) fn witness_arg_borrowed(&mut self, e: &almide_ir::IrExpr, ty: SliceTy, fresh: bool) {
-        if self.witness.is_none() || !self.rc_droppable(ty) {
-            return;
-        }
-        let is_var = matches!(e.kind, almide_ir::IrExprKind::Var { .. });
-        let Some(w) = self.witness.as_mut() else { return };
-        if fresh {
-            w.temp_borrowed();
-        } else if !is_var && !matches!(e.kind, almide_ir::IrExprKind::LitStr { .. }) {
-            w.poison();
-        }
-    }
-
-    /// The owned-tail hook (func.rs): a droppable tail that needs no
-    /// ret-inc — a user-fn call result or a fresh literal — moves its
-    /// one credit out of the frame.
-    pub(crate) fn witness_tail_owned(&mut self) {
-        if let Some(w) = self.witness.as_mut() {
-            w.tail_owned_move();
-        }
-    }
-
-    /// The epilogue hook (func.rs): one `d` per `$dec_flat` emitted.
-    pub(crate) fn witness_dec(&mut self, idx: u32) {
-        if let Some(w) = self.witness.as_mut()
-            && !w.dec_local(idx)
-        {
-            w.poison();
-        }
-    }
-}
 
 /// Is the slice type outside the phase-A scalar/Unit return set?
 pub(crate) fn heapish_ret(t: SliceTy) -> bool {
