@@ -659,6 +659,12 @@ impl Emitter<'_> {
             // key
             i.local_get(hw).i32_const(koff as i32).i32_add();
             i.local_get(hpair).i32_load(slot_memarg(key_off));
+        }
+        // the map co-owns the key string it copied out of the pair (its
+        // typed drop releases it; the Value keeps its own credit)
+        self.rc_inc_top();
+        {
+            let mut i = self.f.instructions();
             i.i32_store(raw_mem());
             // value: Str payload verbatim, else the canonical stringify.
             i.local_get(hw).i32_const(voff as i32).i32_add();
@@ -669,6 +675,11 @@ impl Emitter<'_> {
                 .i32_eq()
                 .if_(BlockType::Result(wasm_encoder::ValType::I32));
             i.local_get(hpair).i32_load(slot_memarg(almide_layout::SUM_FIELD));
+        }
+        // a Str payload is shared with the Value: the map takes +1
+        self.rc_inc_top();
+        {
+            let mut i = self.f.instructions();
             i.else_();
             i.local_get(hpair);
         }

@@ -110,6 +110,32 @@ fn a_shape_block_releases_its_handle_payload() {
     );
 }
 
+/// #2010 Map stage b: a Map releases its ENTRIES with its entries array —
+/// handle keys and values through the typed entry walk; the functional
+/// set / remove copies and a bind of a shared map take their own entry
+/// credits; the in-place overwrite releases the value it replaced.
+#[test]
+fn a_map_releases_its_entries() {
+    flat(
+        "let m = map.from_list([(str, [str])]); map.insert(m, k, v); let m2 = m",
+        "    var m = map.from_list([(int.to_string(i % 7), [int.to_string(i % 7)]), (\"b\", [\"y\"])])\n    map.insert(m, \"c\" + int.to_string(i % 7), [\"z\"])\n    map.insert(m, \"b\", [int.to_string(i % 7)])\n    let m2 = m\n    let m3 = map.set(m2, \"b\", [\"q\"])\n    let m4 = map.remove(m3, \"c\" + int.to_string(i % 7))\n    total = total + map.len(m) + map.len(m2) + map.len(m3) + map.len(m4)",
+        "11000",
+        "88000",
+    );
+}
+
+/// #2010 Map stage b, the Set half: a Set releases its MEMBERS; every
+/// algebra result and `to_list` copy hold their own member credits.
+#[test]
+fn a_set_releases_its_members() {
+    flat(
+        "let s = set.from_list([str, \"b\"]); set.insert / union / to_list",
+        "    let s = set.from_list([int.to_string(i % 7), \"b\"])\n    let t = set.insert(s, \"c\" + int.to_string(i % 7))\n    let u = set.union(t, set.from_list([\"d\", int.to_string(i % 7)]))\n    total = total + set.len(s) + set.len(t) + set.len(u) + list.len(set.to_list(u))",
+        "13000",
+        "104000",
+    );
+}
+
 /// #2010 stage 2c: a list of options of strings releases every level.
 #[test]
 fn a_list_of_options_of_strings_releases_every_level() {

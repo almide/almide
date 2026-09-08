@@ -58,7 +58,6 @@ impl Emitter<'_> {
                 // A handle element stored into the spine is a holder: a
                 // borrowed rhs takes its +1 here (#2010 stage 2b).
                 self.rc_share_guard(value, el);
-                self.rc_map_value_share(value, el);
                 let hv = self.hold_val(el)?;
                 let hb = self.hold_i32()?;
                 self.f.instructions().local_set(hv);

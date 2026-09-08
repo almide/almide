@@ -126,7 +126,6 @@ impl Emitter<'_> {
             i.end();
             i.local_get(hcur).i32_const(stride).i32_add().local_set(hcur);
             i.br(0).end().end();
-            i.local_get(ho);
         } else {
             // intersection/difference: over-allocate a's len, keep the
             // (dis)qualified members, patch the len header down.
@@ -157,13 +156,16 @@ impl Emitter<'_> {
             i.local_get(ho);
             i.local_get(hw).local_get(ho).i32_const(almide_layout::PAYLOAD as i32).i32_add().i32_sub();
             i.i32_store(len_memarg());
-            i.local_get(ho);
         }
+        // every member of the result is a copy: the set takes its credits
+        let st = SliceTy::Set(self.types.intern(e));
+        self.emit_inc_entries(ho, st, None);
+        self.f.instructions().local_get(ho);
         self.release_for(e);
         for _ in 0..6 {
             self.release_i32();
         }
-        Ok(Some(Lowered::owned(SliceTy::Set(self.types.intern(e)))))
+        Ok(Some(Lowered::owned(st)))
     }
 
     /// is_subset: every member of a found in b; is_disjoint: none.
@@ -254,14 +256,18 @@ impl Emitter<'_> {
             .i32_sub();
         i.memory_copy(0, 0);
         i.end();
-        i.local_get(ho);
         let _ = i;
+        // the copy holds its own member credits (the removed member's
+        // stays with the input)
+        let st = SliceTy::Set(self.types.intern(e));
+        self.emit_inc_entries(ho, st, None);
+        self.f.instructions().local_get(ho);
         self.release_i32();
         self.release_i32();
         self.release_i32(); // eh
         self.release_for(e);
         self.release_i32(); // sh
-        Ok(Some(Lowered::owned(SliceTy::Set(self.types.intern(e)))))
+        Ok(Some(Lowered::owned(st)))
     }
 
     /// (a - b) ++ (b - a): the two filters are DISJOINT, so the
@@ -329,13 +335,15 @@ impl Emitter<'_> {
                 .i32_add()
                 .i32_sub();
             i.i32_store(len_memarg());
-            i.local_get(ho);
         }
+        let st = SliceTy::Set(self.types.intern(e));
+        self.emit_inc_entries(ho, st, None);
+        self.f.instructions().local_get(ho);
         self.release_for(e);
         for _ in 0..6 {
             self.release_i32();
         }
-        Ok(Some(Lowered::owned(SliceTy::Set(self.types.intern(e)))))
+        Ok(Some(Lowered::owned(st)))
     }
 
     /// Transform + first-seen dedup (a set stays a set).
@@ -371,15 +379,25 @@ impl Emitter<'_> {
         self.load_ty_slot_at(e);
         self.f.instructions().local_set(params[0]);
         self.lower(body, Some(b_ty))?;
+        // the callback's member: stored when absent (a borrowed one takes
+        // +1), dropped when present (an owned one is released)
+        let owned = self.rc_owned_result(body);
         {
             let mut i = self.f.instructions();
             i.local_set(hv);
             i.local_get(hacc).i32_const(bstride).i32_const(0).local_get(hv);
-            i.call(scan).i32_eqz().if_(BlockType::Empty);
-            i.local_get(hacc).local_get(hv);
-            if b_ty.val_type() == wasm_encoder::ValType::F64 {
-                i.i64_reinterpret_f64();
-            }
+            i.call(scan).if_(BlockType::Empty);
+        }
+        if owned {
+            self.emit_release_hold(hv, b_ty);
+        }
+        self.f.instructions().else_();
+        self.f.instructions().local_get(hacc).local_get(hv);
+        if !owned {
+            self.share_handle_top(b_ty);
+        }
+        if b_ty.val_type() == wasm_encoder::ValType::F64 {
+            self.f.instructions().i64_reinterpret_f64();
         }
         let push = match b_ty.slot_size() {
             8 => F_LIST_PUSH_8,
@@ -466,13 +484,19 @@ impl Emitter<'_> {
                 Ok(Some(Lowered::scalar(BOOL)))
             }
             ("to_list", [s]) => {
-                // Layout-identical; sharing the base is unobservable
-                // (no in-place list/set mutation exists, binds deep-copy).
-                let e = match self.lower_arg(s, None, ArgMode::Retain)? {
+                // Layout-identical, but the list is a COPY with its own
+                // member credits: a set block must reach rc 0 through the
+                // entries drop (which clears its index side-table entry),
+                // never through a list's — a shared block freed by the
+                // list drop would leave a stale index on a reused address.
+                let e = match self.lower_arg(s, None, ArgMode::Borrow)? {
                     SliceTy::Set(h) => self.types.el(h),
                     other => return unsup(&format!("set-op-of:{other:?}")),
                 };
-                Ok(Some(Lowered::view(SliceTy::List(self.types.intern(e)))))
+                let lt = SliceTy::List(self.types.intern(e));
+                let copy = self.copy_fn_of(lt);
+                self.f.instructions().call(copy);
+                Ok(Some(Lowered::owned(lt)))
             }
             ("contains", [s, x]) => {
                 let (_sh, _xh, eh, e) = self.set_scan(s, x, ArgMode::Borrow)?;
@@ -490,10 +514,16 @@ impl Emitter<'_> {
                     .i32_const(0)
                     .i32_ne()
                     .if_(BlockType::Result(wasm_encoder::ValType::I32));
-                // already present: the functional result IS the input.
+                // already present: the functional result IS the input
+                // block, which the owned result co-owns (+1); the unstored
+                // member's Retain credit goes back.
+                self.emit_release_hold(xh, e);
                 self.f.instructions().local_get(sh);
+                self.rc_inc_top();
                 self.f.instructions().else_();
                 let (len_h, rh) = self.emit_copy_grow(sh, e.slot_size())?;
+                let st = SliceTy::Set(self.types.intern(e));
+                self.emit_inc_entries(rh, st, Some(len_h));
                 self.f
                     .instructions()
                     .local_get(rh)
@@ -560,7 +590,9 @@ impl Emitter<'_> {
                 Ok(Some(Lowered::view(b)))
             }
             ("from_list", [xs]) => {
-                let e = match self.lower_arg(xs, None, ArgMode::Retain)? {
+                // the members are shared one by one below; the list itself
+                // is only read (a born-here literal is released after)
+                let e = match self.lower_arg(xs, None, ArgMode::Borrow)? {
                     SliceTy::List(h) => self.types.el(h),
                     other => return unsup(&format!("set-from-of:{other:?}")),
                 };
@@ -619,10 +651,12 @@ impl Emitter<'_> {
                     .local_get(len_h)
                     .i32_add()
                     .local_get(xh);
-                // The element handle copied into the set takes +1: the set
-                // is a holder with no typed drop yet (leak-not-dangle).
+                // The member handle copied into the set takes +1: the set
+                // releases it through its typed drop (#2010 Map stage b).
                 self.share_handle_top(e);
                 self.store_ty_slot_raw(e);
+                // the outgrown block is ours alone and its members moved
+                self.f.instructions().local_get(rh).call(F_FREE);
                 self.f.instructions().local_get(nh).local_set(rh);
                 self.release_i32();
                 self.release_i32();

@@ -56,8 +56,8 @@ impl Emitter<'_> {
     /// graveyard until its typed drop glue exists (#2010 stages 2–4).
     /// A slot whose value is a heap HANDLE the holder owns one credit of
     /// (#2010 stage 2b/2c): Str / Bytes, a List, an Option / Result /
-    /// tuple block. Records and variants (2c-ii), Map / Set / Value / Fn
-    /// handles carry no credit the holder releases yet.
+    /// tuple block, a record / variant (2c-ii), a Map / Set (Map stage
+    /// b). Value and Fn handles carry no credit the holder releases yet.
     pub(crate) fn elem_is_handle(&self, elem: SliceTy) -> bool {
         match elem {
             SliceTy::Scalar(Scalar::Str | Scalar::Bytes)
@@ -67,7 +67,7 @@ impl Emitter<'_> {
             | SliceTy::Tuple(_) => true,
             // Stage 2c-ii: records and variants with a layout.
             SliceTy::Named(ti) => self.named_has_layout(ti),
-            // Map stage a: the spine is a credit its holder releases.
+            // Map stage b: the entries array and its entries are credits.
             SliceTy::Map(..) | SliceTy::Set(_) => true,
             _ => false,
         }
@@ -175,12 +175,62 @@ impl Emitter<'_> {
                     F_DEC_FLAT
                 }
             }
-            SliceTy::Map(..) => {
+            SliceTy::Map(..) | SliceTy::Set(_) => {
                 let raw = self.work.helper(crate::work::Helper::MapIdxSideRaw);
                 let side_clear = self.work.helper(crate::work::Helper::MapIdxSideSet { raw });
-                self.work.helper(crate::work::Helper::DropMapSpine { side_clear })
+                let (stride, decs) = self.entry_slots(t);
+                let slots: [Option<(u32, u32)>; 2] =
+                    [decs[0].map(|(off, ft)| (off, self.dec_fn_of(ft))), decs[1].map(|(off, ft)| (off, self.dec_fn_of(ft)))];
+                if slots.iter().all(Option::is_none) {
+                    self.work.helper(crate::work::Helper::DropMapSpine { side_clear })
+                } else {
+                    self.work.helper(crate::work::Helper::DropEntries { stride, slots, side_clear })
+                }
             }
             _ => F_DEC_FLAT,
+        }
+    }
+
+    /// The entry layout of a Map / Set: `(stride, [key slot, value slot])`
+    /// where a slot is `Some((offset, type))` only when the type is a heap
+    /// handle the entries array holds a credit of (a Set has one slot at
+    /// offset 0; a flat key or value is `None`).
+    fn entry_slots(&self, t: SliceTy) -> (u32, [Option<(u32, SliceTy)>; 2]) {
+        let handle = |ft: SliceTy, off: u32| self.elem_is_handle(ft).then_some((off, ft));
+        match t {
+            SliceTy::Map(kh, vh) => {
+                let (k, v) = (self.types.el(kh), self.types.el(vh));
+                let (koff, voff, stride) = crate::collections::entry_layout(k, v);
+                (stride, [handle(k, koff), handle(v, voff)])
+            }
+            SliceTy::Set(h) => {
+                let e = self.types.el(h);
+                (e.slot_size(), [handle(e, 0), None])
+            }
+            _ => (0, [None, None]),
+        }
+    }
+
+    /// `Some($inc_entries)` when the entries of a Map / Set of type `t`
+    /// hold handle slots a copied entries array must take credits on.
+    pub(crate) fn inc_entries_fn(&self, t: SliceTy) -> Option<u32> {
+        let (stride, decs) = self.entry_slots(t);
+        let slots = [decs[0].map(|(off, _)| off), decs[1].map(|(off, _)| off)];
+        (!slots.iter().all(Option::is_none)).then(|| self.work.helper(crate::work::Helper::IncEntries { stride, slots }))
+    }
+
+    /// +1 on every handle slot of the entries in local `h` (the whole
+    /// LEN, or the first `nbytes` from local `nbytes_local`) — after a
+    /// native arm copied entries out of another Map / Set.
+    pub(crate) fn emit_inc_entries(&mut self, h: u32, t: SliceTy, nbytes_local: Option<u32>) {
+        if let Some(f) = self.inc_entries_fn(t) {
+            let mut i = self.f.instructions();
+            i.local_get(h);
+            match nbytes_local {
+                Some(n) => i.local_get(n),
+                None => i.local_get(h).i32_load(len_memarg()),
+            };
+            i.call(f);
         }
     }
 
@@ -218,6 +268,11 @@ impl Emitter<'_> {
                 let inc_elems = self.shape_helper(crate::work::Helper::IncShape { ty: t }, t);
                 self.work.helper(crate::work::Helper::CopyElems { inc_elems })
             }
+            // Map stage b: a copied entries array takes its entry credits.
+            SliceTy::Map(..) | SliceTy::Set(_) => match self.inc_entries_fn(t) {
+                Some(inc_entries) => self.work.helper(crate::work::Helper::CopyEntries { inc_entries }),
+                None => F_BLOCK_COPY,
+            },
             _ => F_BLOCK_COPY,
         }
     }
@@ -268,8 +323,9 @@ pub(crate) fn rc_droppable_ty(types: &crate::types_table::TypeTable, t: SliceTy)
                 types.def(ti),
                 crate::types_table::NamedDef::Record(_) | crate::types_table::NamedDef::Variant(_)
             ),
-            // Map stage a (#2010): the entries array is released with its
-            // index side-table entry; keys and values keep their credits.
+            // Map stage b (#2010): the entries array is released with its
+            // index side-table entry, and every handle key / value / member
+            // through the typed entry walk (`DropEntries`).
             SliceTy::Map(..) | SliceTy::Set(_) => true,
             _ => false,
         }
