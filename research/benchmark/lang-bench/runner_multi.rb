@@ -21,9 +21,8 @@
 require 'json'
 require 'fileutils'
 require 'time'
-require 'open3'
-require 'timeout'
 require 'shellwords'
+require_relative 'lib/bench_common'
 
 SCRIPT_DIR   = File.expand_path(__dir__)
 UPSTREAM_DIR = File.join(SCRIPT_DIR, 'upstream')
@@ -31,7 +30,6 @@ RAW_DIR      = File.join(SCRIPT_DIR, 'raw')
 WORK_DIR     = File.join(SCRIPT_DIR, '.work')
 LOGS_DIR     = File.join(SCRIPT_DIR, '.logs')
 CHEATSHEET   = File.expand_path(File.join(SCRIPT_DIR, '..', '..', '..', 'docs', 'CHEATSHEET.md'))
-NPM_BIN      = File.join(SCRIPT_DIR, '.npm-prefix', 'node_modules', '.bin')
 
 MODEL     = 'claude-sonnet-5'
 MODEL_TAG = 'sonnet5'
@@ -91,7 +89,7 @@ LANGUAGES = {
   },
 }.freeze
 
-EXCLUDE_DIR_FRAGMENTS = %w[/node_modules/ /target/ /build/ /_build/ /.minigit/ /deps/ /zig-out/ /.zig-cache/].freeze
+EXCLUDE_DIR_FRAGMENTS = BENCH_EXCLUDE_DIR_FRAGMENTS
 
 # --- Arg parsing -----------------------------------------------------------
 
@@ -134,34 +132,6 @@ RAW_JSONL = File.join(RAW_DIR, "#{lang}-#{MODEL_TAG}.jsonl")
 existing = File.exist?(RAW_JSONL) ? File.readlines(RAW_JSONL).map { |l| JSON.parse(l) } : []
 start_trial = start_override || ((existing.map { |r| r['trial'] }.max || 0) + 1)
 
-def extra_path
-  "#{File.join(Dir.home, '.moon', 'bin')}:#{NPM_BIN}:/opt/homebrew/bin"
-end
-
-def run_cmd(cmd, dir: nil, timeout: 600)
-  opts = {}
-  opts[:chdir] = dir if dir
-  stdin, stdout, stderr, wait_thr = Open3.popen3("export PATH=#{extra_path}:$PATH && #{cmd}", **opts)
-  stdin.close
-  stdout.set_encoding('UTF-8')
-  stderr.set_encoding('UTF-8')
-  out = err = +''
-  begin
-    Timeout.timeout(timeout) do
-      out = stdout.read
-      err = stderr.read
-    end
-  rescue Timeout::Error
-    (Process.kill('TERM', wait_thr.pid) rescue nil)
-    out = (stdout.read rescue '')
-    err = "Timeout after #{timeout}s"
-  end
-  stdout.close
-  stderr.close
-  status = wait_thr.value
-  { stdout: out, stderr: err, exit_code: status.exitstatus, success: status.success? }
-end
-
 upstream_rev = `cd #{Shellwords.escape(UPSTREAM_DIR)} && git rev-parse --short HEAD`.strip
 toolchain_ver = begin
   r = run_cmd(config[:version_cmd])
@@ -181,77 +151,7 @@ puts "Trials to run:   #{start_trial}..#{start_trial + trials - 1}"
 puts "Dry run:         #{dry_run}"
 puts
 
-# --- Helpers ---------------------------------------------------------------
-
-def parse_claude_json(raw)
-  raw = raw.dup.force_encoding('UTF-8')
-  events = JSON.parse(raw.strip)
-  events = [events] unless events.is_a?(Array)
-  result = events.reverse.find { |e| e.is_a?(Hash) && e['type'] == 'result' }
-  return nil unless result
-
-  usage = result['usage'] || {}
-  {
-    'input_tokens' => usage['input_tokens'] || 0,
-    'output_tokens' => usage['output_tokens'] || 0,
-    'cache_creation_tokens' => usage['cache_creation_input_tokens'] || 0,
-    'cache_read_tokens' => usage['cache_read_input_tokens'] || 0,
-    'cost_usd' => result['total_cost_usd'] || 0.0,
-    'num_turns' => result['num_turns'] || 0,
-    'duration_ms' => result['duration_ms'] || 0,
-  }
-rescue JSON::ParserError => e
-  warn "warn: failed to parse Claude JSON: #{e.message}"
-  nil
-end
-
-def run_claude(prompt, dir:, log_path: nil)
-  cmd = "unset CLAUDECODE && claude -p #{Shellwords.escape(prompt)} " \
-        "--dangerously-skip-permissions --output-format json --model #{MODEL}"
-  puts "  Running Claude (#{MODEL})..."
-  t0 = Time.now
-  result = run_cmd(cmd, dir: dir, timeout: 1800)
-  elapsed = (Time.now - t0).round(1)
-  if log_path
-    FileUtils.mkdir_p(File.dirname(log_path))
-    File.write(log_path, result[:stdout])
-  end
-  {
-    success: result[:success],
-    elapsed: elapsed,
-    claude_data: parse_claude_json(result[:stdout]),
-  }
-end
-
-def run_tests(script, dir:)
-  result = run_cmd("bash #{Shellwords.escape(script)}", dir: dir, timeout: 300)
-  output = result[:stdout] + result[:stderr]
-  passed = output[/PASSED:\s*(\d+)/, 1]&.to_i || 0
-  failed = output[/FAILED:\s*(\d+)/, 1]&.to_i || 0
-  { success: result[:success], passed: passed, failed: failed, total: passed + failed }
-end
-
-def count_loc(dir, exts)
-  files = exts.flat_map { |e| Dir.glob(File.join(dir, '**', "*.#{e}")) }
-  files.reject! { |f| EXCLUDE_DIR_FRAGMENTS.any? { |frag| f.include?(frag) } }
-
-  # For scripting languages the executable `minigit` may BE the source
-  minigit = File.join(dir, 'minigit')
-  if File.exist?(minigit) && !files.include?(minigit)
-    begin
-      content = File.read(minigit, encoding: 'UTF-8')
-      files << minigit if content.valid_encoding?
-    rescue StandardError
-      # skip binary
-    end
-  end
-
-  files.sum do |f|
-    File.readlines(f).count { |l| !l.strip.empty? }
-  rescue StandardError
-    0
-  end
-end
+# run_cmd / run_claude / run_tests / count_loc / parse_claude_json live in lib/bench_common.rb
 
 # --- Warmup ----------------------------------------------------------------
 
@@ -260,7 +160,7 @@ unless dry_run
   warmup = File.join(WORK_DIR, ".warmup-#{lang}")
   FileUtils.rm_rf(warmup)
   FileUtils.mkdir_p(warmup)
-  w = run_claude('Respond with just the word OK.', dir: warmup)
+  w = run_claude('Respond with just the word OK.', dir: warmup, model: MODEL)
   puts "  done in #{w[:elapsed]}s (success=#{w[:success]})"
   FileUtils.rm_rf(warmup)
   puts
@@ -301,7 +201,7 @@ trials.times do |idx|
     record['v1_time'] = 0
   else
     v1 = run_claude(config[:v1_prompt] || generic_v1_prompt(config[:display]),
-                    dir: v1_dir, log_path: File.join(LOGS_DIR, "#{slug}-v1.json"))
+                    dir: v1_dir, model: MODEL, log_path: File.join(LOGS_DIR, "#{slug}-v1.json"))
     record['v1_time'] = v1[:elapsed]
     record['v1_claude'] = v1[:claude_data]
 
@@ -327,7 +227,7 @@ trials.times do |idx|
     record['v2_time'] = 0
   else
     v2 = run_claude(config[:v2_prompt] || GENERIC_V2_PROMPT,
-                    dir: v2_dir, log_path: File.join(LOGS_DIR, "#{slug}-v2.json"))
+                    dir: v2_dir, model: MODEL, log_path: File.join(LOGS_DIR, "#{slug}-v2.json"))
     record['v2_time'] = v2[:elapsed]
     record['v2_claude'] = v2[:claude_data]
 

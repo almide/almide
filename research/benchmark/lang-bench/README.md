@@ -122,3 +122,25 @@ material belongs there, see the repo-boundary rule in the top-level `CLAUDE.md`)
 the cross-language driver lives here in lang-bench because Dojo's harness is
 Almide-only by rule. The design, the scoring conjunction, the ledger format and
 the run cost are laid out on #1963.
+
+| Path | Purpose |
+|---|---|
+| `lib/bench_common.rb` | `run_cmd` / `run_claude` / `run_tests` / `count_loc` / `parse_claude_json`, shared by both runners |
+| `runner_edits.rb` | task-dir driven driver: seed + ordered edits, accumulating tree, hidden oracle, prefix survival; `--dry-run` is the bank gate |
+| `aggregate_edits.rb` | ledger: MSR-seq with Wilson 95 % CI, MSR-edit, first failure mode, $/sequence; prints `INCONCLUSIVE_BANK_SATURATED` at the ceiling |
+| `tasks-example/xlang/` | a two-language smoke fixture so the gate can be exercised locally |
+| `test/aggregate_edits_test.rb` | `ruby -Itest test/aggregate_edits_test.rb` |
+
+```bash
+ruby runner_edits.rb --tasks tasks-example/xlang --dry-run        # gate, no model call
+ruby runner_edits.rb --tasks ../../../../almide-dojo/tasks/xlang --lang rust --trials 5   # measure (spends money)
+ruby aggregate_edits.rb --tasks ../../../../almide-dojo/tasks/xlang                        # ledger
+```
+
+Per edit `k`: `survive_k = compile ∧ visible ∧ hidden ∧ scope_clean`, where
+`scope_clean` means every file the model changed (git diff against the
+pre-edit snapshot, new files included) matches a glob in `scope.txt`. The tree
+contract is language-agnostic: `bash build.sh` leaves an executable at `./app`;
+`visible.sh` / `hidden.sh` run with the tree as cwd, drive `./app` over stdin
+and report `PASSED:`/`FAILED:`. For interpreted languages `build.sh` type-checks
+and writes a `./app` wrapper script.
