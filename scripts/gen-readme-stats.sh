@@ -47,12 +47,15 @@ SIZE_END="<!-- wasm-size:generated:end -->"
 RT_START="<!-- wasm-runtime:generated:start — rendered from docs/benchmarks/wasm-runtime.txt by scripts/gen-readme-stats.sh; DO NOT EDIT between the markers -->"
 RT_END="<!-- wasm-runtime:generated:end -->"
 RT_LEDGER="docs/benchmarks/wasm-runtime.txt"
+VIC_START="<!-- native-victory:generated:start — rendered from docs/benchmarks/native-victory.txt by scripts/gen-readme-stats.sh; DO NOT EDIT between the markers -->"
+VIC_END="<!-- native-victory:generated:end -->"
+VIC_LEDGER="docs/benchmarks/native-victory.txt"
 . scripts/lib/ledger-counts.sh
 [ "$MODE" = "--counts" ] && counts_stamp
 
 [ -f "$README" ] || { echo "::error::$README not found (run from repo root)"; exit 2; }
 [ -f "$LEDGER" ] || { echo "::error::$LEDGER not found"; exit 2; }
-for m in "$STATS_START" "$STATS_END" "$SIZE_START" "$SIZE_END" "$RT_START" "$RT_END"; do
+for m in "$STATS_START" "$STATS_END" "$SIZE_START" "$SIZE_END" "$RT_START" "$RT_END" "$VIC_START" "$VIC_END"; do
   grep -qxF "$m" "$README" || { echo "::error::marker missing from $README: $m"; exit 2; }
 done
 
@@ -159,13 +162,32 @@ rt_date="$(grep -E '^date' "$RT_LEDGER" | head -1 | sed -E 's/^[^=]*=[[:space:]]
     ' — each re-measured every gate run, so a cell that starts benching fails the gate until its row is promoted. Ledger: `docs/benchmarks/wasm-runtime.txt` ('"${rt_version}, ${rt_date}"').' 
 } > "$rt_body"
 
+# The native-victory block (#1330), rendered from the committed ledger — the
+# gate (scripts/check-perf-ratio.sh, VICTORY rows) re-measures the claim
+# (ratio < 1.0) and the ablation every CI round; this renderer only formats
+# what is committed, same rule as the two blocks above.
+vic_version="$(grep -E '^version' "$VIC_LEDGER" | head -1 | sed -E 's/^[^=]*=[[:space:]]*//')"
+vic_date="$(grep -E '^date' "$VIC_LEDGER" | head -1 | sed -E 's/^[^=]*=[[:space:]]*//')"
+vic_body=$(mktemp -t readme-vic.XXXXXX)
+{
+  echo '| Workload (`bench.py`, median of 9, interleaved) | optimization | Almide / ordinary Rust | without it (`ALMIDE_REGION_OFF=1`) | CI runner |'
+  echo "|---|---|---:|---:|---:|"
+  grep -E '^[a-z][a-z_-]* *\|' "$VIC_LEDGER" | while IFS='|' read -r n opt small large abl runner; do
+    printf '| %s | %s | **%s** / **%s** | %s | %s |\n' "$(echo "$n" | xargs)" "$(echo "$opt" | xargs)" \
+      "$(echo "$small" | xargs)" "$(echo "$large" | xargs)" "$(echo "$abl" | xargs)" "$(echo "$runner" | xargs)"
+  done
+  echo
+  printf '%s\n' \
+    'Two ratios per row are the two input sizes (the win holds at both); the Rust side is the ordinary program a person writes for it — a `Box` per node, one thread, no arena, no `unsafe`, no SIMD — compiled with the same `rustc` flags, and the "without it" column is the same Almide source with the region window turned off, so the whole gap is that one optimization. The absolute ratio is allocator-dependent (the CI runner frees a `Box` cheaper), the direction is not: the `perf-ratchet` job fails if either row reaches 1.0 or the ablation stops paying. Declaration and methodology: [docs/project/BENCHMARKS.md](./docs/project/BENCHMARKS.md#faster-than-ordinary-rust-1330). Ledger: `docs/benchmarks/native-victory.txt` ('"${vic_version}, ${vic_date}"').'
+} > "$vic_body"
+
 splice() { # $1 start marker, $2 end marker, $3 body file; stdin → stdout
   awk -v S="$1" -v E="$2" -v B="$3" '
     $0 == S { print; while ((getline l < B) > 0) print l; close(B); skip = 1; next }
     $0 == E { skip = 0 }
     !skip { print }'
 }
-splice "$STATS_START" "$STATS_END" "$stats_body" < "$README" | splice "$SIZE_START" "$SIZE_END" "$size_body" | splice "$RT_START" "$RT_END" "$rt_body" > "$rendered"
+splice "$STATS_START" "$STATS_END" "$stats_body" < "$README" | splice "$SIZE_START" "$SIZE_END" "$size_body" | splice "$RT_START" "$RT_END" "$rt_body" | splice "$VIC_START" "$VIC_END" "$vic_body" > "$rendered"
 
 if [ "$MODE" = "--check" ]; then
   if ! cmp -s "$rendered" "$README"; then

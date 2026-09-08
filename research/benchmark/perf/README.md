@@ -41,14 +41,25 @@ nothing is published that `bench.py` did not produce.
   overhead; `nbody.rs` is the canonical array-of-bodies shape people actually
   write. Almide currently beats the latter (bounds checks) — that comparison
   is reported, not gated.
-- `fannkuchredux` and `mandelbrot` use `fan` parallelism, so a scalar Rust
-  reference would be a lie — they run Almide-native vs Almide-wasm only.
-  `binarytrees` has a reference since #1991: its `fan.map` is sequential on the
-  native leg, so `rust-ref/binarytrees.rs` (the same-shape `Box` program, one
-  thread) is the honest comparison; the row is REPORTED by
-  `check-perf-ratio.sh` rather than anchored (0.31 on an M4 Pro, 0.61 on the
-  CI runner — allocator-dependent like listbuild), below 1 because
-  `check(make(d))` runs inside a region window natively.
+- `fannkuchredux` and `mandelbrot` are written with `fan`, and since #1330
+  they have ORDINARY sequential Rust references (`rust-ref/fannkuchredux.rs`,
+  `rust-ref/mandelbrot.rs`: one thread, no `unsafe`, no SIMD). That is not a
+  lie on the native leg, because the native leg gives `fan` no parallelism
+  today — `fan.map` runs sequentially over an `Rc<dyn Fn>` thunk, a `fan { }`
+  block spawns one thread for the whole block, and `AutoParallelPass` never
+  fires (it matches `Call { Named }` and `StdlibLowering` emits
+  `RuntimeCall`). The rows read ~1.0 (0.96–1.06 and 1.01–1.12, M4 Pro, two
+  sizes) and are REPORTED by `check-perf-ratio.sh`, so a data-parallel win,
+  when it lands, is a number and not a claim.
+  `binarytrees` (#1991) and `treealloc` (#2028) have same-shape `Box`
+  references (`rust-ref/binarytrees.rs`, `rust-ref/treealloc.rs`: one thread,
+  a `Box` per node, a free per node — no arena, no `unsafe`). Both sit BELOW
+  1 because `check(make(d))` runs inside a region window natively; they are
+  the VICTORY rows of `check-perf-ratio.sh` (#1330), gated on the claim
+  itself and on the `ALMIDE_REGION_OFF=1` ablation rather than on a ±band
+  around a number that is allocator-dependent (0.32 on an M4 Pro, 0.61 on
+  the CI runner — like listbuild). The declaration, with the ablation and
+  both sizes, is in `docs/project/BENCHMARKS.md`.
 - `onebrc` is a scaled One Billion Row Challenge (`station;temp` lines →
   sorted per-station min/mean/max): the one row whose hot loop is file I/O,
   `string.split`, and map updates rather than arithmetic. Temperatures are
@@ -173,7 +184,10 @@ almide-native / handwritten-Rust ratio per benchmark against
 `scripts/perf-ratio-baseline.txt` on the `--quick` workloads. Ratios, not
 absolute times — the ratio cancels the runner. Regressing or improving
 durably = move the baseline in the same change. See the script header for the
-full policy.
+full policy. Three row classes: PAIRS (anchored in a ±band), REPORTED
+(printed, allocator-dependent), and VICTORY (#1330: rows where Almide is
+faster than the ordinary Rust, gated on `ratio < 1.0` and on the same-source
+ablation of the optimization the row is attributed to).
 
 ## Not yet covered
 
