@@ -62,7 +62,14 @@ RUNS="${PERF_RATIO_RUNS:-9}"
 # README states for onebrc), and what is gated is the relation between them —
 # which is the property #1337 is about and which IS machine-stable: 1.018x on
 # the M4 Pro, 1.045x on the CI runner, from the same commit.
-PAIRS="nbody=rust:nbody_unrolled spectralnorm=rust:spectralnorm fasta=rust:fasta fft=rust:fft"
+#
+# `binarytrees` (#1991) is anchored BELOW 1: the reference is the same-shape
+# `Box` program, and the native leg runs `check(make(d))` inside a region
+# window (RegionWindowPass — twin fns over a bump arena, one rewind per
+# tree instead of one free per node). The floor is what guards it: a ratio
+# drifting back toward 1 means the window stopped firing, and the two-sided
+# band turns that into a red build rather than a quiet 3x loss.
+PAIRS="nbody=rust:nbody_unrolled spectralnorm=rust:spectralnorm fasta=rust:fasta fft=rust:fft binarytrees=rust:binarytrees"
 # Rows measured for the record and printed, but not anchored (see above), as
 # `bench=rust-ref-variant`.
 #
@@ -109,7 +116,7 @@ trap 'rm -f "$out"' EXIT
 
 python3 research/benchmark/perf/bench.py \
   --quick --runs "$RUNS" --legs native,rust \
-  --bench nbody,spectralnorm,fasta,fft,listbuild,listbuild-append,listbuild-comb,strchurn \
+  --bench nbody,spectralnorm,fasta,fft,binarytrees,listbuild,listbuild-append,listbuild-comb,strchurn \
   --label ratchet --out "$out"
 
 # ABLATION LEG (#1466): the same anchored benchmarks with the IR optimizer's
@@ -127,7 +134,7 @@ abl_out=$(mktemp -t perf-ratio-abl.XXXXXX.json)
 trap 'rm -f "$out" "$abl_out"' EXIT
 ALMIDE_DISABLE_OPT=1 python3 research/benchmark/perf/bench.py \
   --quick --runs "$RUNS" --legs native \
-  --bench nbody,spectralnorm,fasta,fft \
+  --bench nbody,spectralnorm,fasta,fft,binarytrees \
   --label ratchet-ablated --out "$abl_out"
 
 python3 - "$out" "$BASELINE_FILE" "$BUDGET_PCT" "$PAIRS" "$MIN_SECONDS" "$IDIOM_CEILING" "$REPORTED" "$abl_out" <<'PY'
