@@ -61,6 +61,7 @@
 3341	spec/wasm_cross/closures_hof.almd
 26642	spec/wasm_cross/codec_decode_error_surface.almd
 32359	spec/wasm_cross/codec_decode_errors.almd
+40536	spec/wasm_cross/codec_decode_field_order.almd
 29923	spec/wasm_cross/codec_deep_nesting.almd
 23908	spec/wasm_cross/codec_doc_array.almd
 32153	spec/wasm_cross/codec_empty_and_bool.almd

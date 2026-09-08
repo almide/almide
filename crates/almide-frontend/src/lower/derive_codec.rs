@@ -937,13 +937,27 @@ pub(super) fn auto_derive_decode(wk: &mut CodecWk, type_ty: &Ty, fields: &[IrFie
         ty: result_ty.clone(), span: None, def_id: None,
     };
 
+    // `@codec_slots("k0", "k1", …)` (#1679): the object keys in DECLARATION
+    // order — the order `T.encode` writes them, so the order a round-tripped
+    // document carries them. The native `DecodeSlotHintPass` reads it to hand
+    // every `value.field(_v, "k_i")` in this body its slot index; the wasm leg
+    // ignores the attribute, and a user-written decode never carries it.
+    let codec_slots = almide_lang::ast::Attribute {
+        name: sym("codec_slots"),
+        args: fields.iter().map(|f| almide_lang::ast::AttrArg {
+            name: None,
+            value: almide_lang::ast::AttrValue::String { value: key_name(f) },
+        }).collect(),
+        span: None,
+    };
+
     IrFunction {
         name: sym(&format!("{}.decode", type_name)),
         params: vec![IrParam { var: var_v, ty: value_ty, name: sym("_v"), borrow: ParamBorrow::Own, is_mut: false, open_record: None, default: None, attrs: vec![] }],
         ret_ty: result_ty,
         body,
         is_effect: false, is_test: false,
-        generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![], visibility: IrVisibility::Public,
+        generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![codec_slots], visibility: IrVisibility::Public,
         doc: None, blank_lines_before: 0,
         def_id: None,
         mutated_params: vec![], module_origin: None, // fresh-fn: derived codec worker, no params carry mut

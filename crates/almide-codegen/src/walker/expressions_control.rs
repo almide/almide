@@ -710,15 +710,28 @@ fn try_render_borrow_already_ref_param(ctx: &RenderContext, inner: &IrExpr, as_s
 /// same two error strings on a miss, and lives exactly as long as the
 /// borrowed argument would have: the operand of a `Borrow` is consumed by
 /// the call it sits in. Only the shared, non-`as_str` borrow qualifies.
+///
+/// The slot-hinted twin (`DecodeSlotHintPass`, #1679): `almide_rt_value_field_at`
+/// in the same shape folds to `almide_rt_value_field_ref_at(v, k, i)?`, the
+/// hint rendered as the bare `usize` literal the runtime's signature takes —
+/// the IR carries it as an `Int`, whose `i64` suffix would not type.
 fn try_render_borrowed_field_lookup(ctx: &RenderContext, inner: &IrExpr) -> Option<String> {
     let IrExprKind::Try { expr: tried } = &inner.kind else { return None; };
-    let args = match &tried.kind {
-        IrExprKind::RuntimeCall { symbol, args } if symbol.as_str() == "almide_rt_value_field" => args,
-        IrExprKind::Call { target: CallTarget::Named { name }, args, .. } if name.as_str() == "almide_rt_value_field" => args,
+    let (symbol, args) = match &tried.kind {
+        IrExprKind::RuntimeCall { symbol, args } => (symbol.as_str(), args),
+        IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => (name.as_str(), args),
         _ => return None,
     };
-    let rendered: Vec<String> = args.iter().map(|a| render_expr(ctx, a)).collect();
-    Some(format!("almide_rt_value_field_ref({})?", rendered.join(", ")))
+    let (twin, hinted) = match symbol {
+        "almide_rt_value_field" => ("almide_rt_value_field_ref", false),
+        "almide_rt_value_field_at" => ("almide_rt_value_field_ref_at", true),
+        _ => return None,
+    };
+    let rendered: Vec<String> = args.iter().enumerate().map(|(i, a)| match &a.kind {
+        IrExprKind::LitInt { value } if hinted && i == 2 => value.to_string(),
+        _ => render_expr(ctx, a),
+    }).collect();
+    Some(format!("{}({})?", twin, rendered.join(", ")))
 }
 
 fn render_expr_borrow(ctx: &RenderContext, expr: &IrExpr) -> String {

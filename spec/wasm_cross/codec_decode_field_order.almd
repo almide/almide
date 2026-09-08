@@ -1,0 +1,46 @@
+// @contract: C-084
+// A derived decode reads each field with a SLOT HINT on the native leg
+// (#1679): `almide_rt_value_field_ref_at(_v, "key", i)` tries `pairs[i]` —
+// the field's declaration index, where `T.encode` writes it — before falling
+// back to the linear scan. The hint is only a guess about the document, so a
+// document whose keys arrive in a different order, with extra keys in front,
+// with a key missing, or sparser than the declaration must decode to the
+// same record, and a miss must produce the same error string, as the plain
+// scan does. The wasm leg has no hint and is the oracle: both legs must print
+// identical bytes on every shape below.
+import json
+
+type Address: Codec = { city: String, zip: String, country: String }
+
+type User: Codec = {
+  id: Int,
+  name: String,
+  email: String,
+  age: Int,
+  active: Bool,
+  score: Float,
+  tags: List[String],
+  address: Address,
+}
+
+fn show(v: Value) -> String = match User.decode(v) {
+  ok(u) => "${u.id} ${u.name} ${u.email} ${u.age} ${u.active} ${u.score} ${list.join(u.tags, ",")} ${u.address.city}/${u.address.zip}/${u.address.country}",
+  err(e) => "err: ${e}",
+}
+
+fn main() -> Unit = {
+  // Declaration order: every hint hits.
+  println(show(json.parse('{"id": 1, "name": "Ada", "email": "ada@x", "age": 36, "active": true, "score": 1.5, "tags": ["a", "b"], "address": {"city": "London", "zip": "W1", "country": "UK"}}') ?? value.null()))
+  // Fully reversed, nested object reversed too: every hint misses, the scan finds each key.
+  println(show(json.parse('{"address": {"country": "UK", "zip": "W1", "city": "London"}, "tags": ["a", "b"], "score": 1.5, "active": true, "age": 36, "email": "ada@x", "name": "Ada", "id": 1}') ?? value.null()))
+  // Extra keys in front shift every slot by two; a hint lands on the wrong key and must not be trusted.
+  println(show(json.parse('{"extra": 0, "more": "x", "id": 2, "name": "Bob", "email": "bob@x", "age": 41, "active": false, "score": 2.0, "tags": [], "address": {"city": "Paris", "zip": "75", "country": "FR"}}') ?? value.null()))
+  // Same-length key at the hinted slot (`name`/`mail`-style collision): bytes, not length, decide.
+  println(show(json.parse('{"id": 3, "mail": "no", "name": "Cy", "email": "cy@x", "age": 5, "active": true, "score": 0.5, "tags": ["z"], "address": {"city": "Rome", "zip": "00", "country": "IT"}}') ?? value.null()))
+  // A missing field: the hinted slot holds a different key and the scan reports the miss with the same text as the plain path.
+  println(show(json.parse('{"id": 4, "name": "Di", "age": 7, "active": true, "score": 0.0, "tags": [], "address": {"city": "Oslo", "zip": "01", "country": "NO"}}') ?? value.null()))
+  // A nested miss under a reordered parent: the path splice is unchanged.
+  println(show(json.parse('{"id": 5, "name": "Ed", "email": "ed@x", "age": 8, "active": false, "score": 3.0, "tags": [], "address": {"country": "SE", "city": "Umea"}}') ?? value.null()))
+  // Fewer pairs than the declaration index: the hint is out of range, the scan runs.
+  println(show(json.parse('{"address": {"city": "Bern", "zip": "30", "country": "CH"}, "tags": ["q"], "score": 4.0, "active": true, "age": 9, "email": "fi@x", "name": "Fi", "id": 6}') ?? value.null()))
+}

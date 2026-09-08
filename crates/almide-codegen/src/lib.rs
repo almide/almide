@@ -30,6 +30,7 @@ pub mod pass_auto_parallel;
 pub mod pass_borrow_inference;
 pub mod pass_box_deref;
 pub mod pass_builtin_lowering;
+pub mod pass_decode_slot_hint;
 pub mod pass_capture_clone;
 pub mod pass_shared_cell_borrow;
 pub mod pass_clone;
