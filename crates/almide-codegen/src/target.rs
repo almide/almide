@@ -19,6 +19,7 @@ use super::pass_shared_cell_borrow::SharedCellBorrowPass;
 use super::pass_clone::CloneInsertionPass;
 use super::pass_builtin_lowering::BuiltinLoweringPass;
 use super::pass_decode_slot_hint::DecodeSlotHintPass;
+use super::pass_decode_err_frame::DecodeErrFramePass;
 use super::pass_result_propagation::ResultPropagationPass;
 use super::pass_intrinsic_lowering::IntrinsicLoweringPass;
 use super::pass_normalize_runtime_calls::NormalizeRuntimeCallsPass;
@@ -151,6 +152,12 @@ fn build_pipeline(target: Target) -> Pipeline {
         // lookups carry their declaration index. After BuiltinLowering
         // (the codec reroutes are final), before NormalizeRuntimeCalls.
         .add(DecodeSlotHintPass)
+        // DecodeErrFrame (#2050): a derived decode's per-field error frame
+        // becomes `.map_err(..)` on the field's own result — the success
+        // path is a plain `?`. After BuiltinLowering (so after
+        // BorrowInsertion: the lookups inside the frame keep their
+        // borrow decoration), before NormalizeRuntimeCalls.
+        .add(DecodeErrFramePass)
         // Peephole: swap/reverse/rotate/copy → specialized IR nodes
                 .add(PeepholePass)
                 // Rust-specific: push optimization, borrow index lift
