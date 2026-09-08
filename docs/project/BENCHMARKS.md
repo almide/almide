@@ -61,6 +61,37 @@ codegen overhead (≤1%). The `perf-ratchet` CI job
 ([scripts/check-perf-ratio.sh](../../scripts/check-perf-ratio.sh)) gates these
 ratios against a committed baseline so they can only move on purpose.
 
+### Allocation: the region window on the native leg (2026-09-08, #1991)
+
+`binarytrees` is the allocation row: `check(make(depth))` builds a tree whose
+whole lifetime is that one expression, and the emitted Rust used to be exactly
+what a person writes — a `Box` per node in, a free per node out. That program
+and a hand-written Rust `Box` program measured the same, and both lost to an
+arena by 2.6× (issue #1991: 228 ms vs Zig's 88 ms, d16, arm64). The structural
+wasm leg had already closed that gap with a region window (#1961/#1980); the
+native leg now has the same recogniser (`RegionWindowPass`): the pair runs over
+`__rgn_` twin fns whose recursive fields are handles into a thread-local bump
+arena in the prelude, and the site rewinds the arena once instead of freeing
+per node. Same box, same session, interleaved, median of 9 (arg 16 — the
+issue's workload; arg 18 in brackets):
+
+| binarytrees | before | after | |
+|---|---:|---:|---|
+| Almide native | 230 ms [1027 ms] | **72 ms** [309 ms] | 3.2× faster than itself |
+| Rust, same-shape `Box` (`rust-ref/binarytrees.rs`) | 222 ms | 222 ms | Almide now 0.33× |
+| Zig 0.16 arena (issue #1991, same shape) | 88 ms | 88 ms | Almide 0.82× — inside the 1.3× acceptance |
+
+The row joins the ratchet's anchored pairs (`binarytrees=rust:binarytrees`,
+baseline 0.33, quick arg 17) so the window cannot silently stop firing: a
+ratio climbing back toward 1 is a red build. What fires: every
+`consume(produce(scalars))` site whose pair is region-pure and whose produced
+type is a root variant enum with scalar / region-enum payloads. What does not:
+a held tree (`let t = make(d)` read twice keeps its `Box`), a consumer that
+returns the tree's shape as a `String`, anything reaching a global, a `mut`
+param, a lambda or a non-scalar stdlib module. Output is byte-identical across
+native, wasm and the reference on every shape in
+`spec/lang/region_window_test.almd`.
+
 ### Build shape: what the recommended idiom costs (2026-08-13)
 
 `listbuild` is one workload written three ways — the same 2^23-element
