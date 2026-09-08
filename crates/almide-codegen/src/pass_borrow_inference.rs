@@ -87,6 +87,15 @@ thread_local! {
     // keep `data: &Vec<u8>` instead of collapsing to `Vec<u8>` on the first
     // pass and never recovering.
     static CURRENT_FN: RefCell<Option<String>> = RefCell::new(None);
+    // Every fn this pass WILL analyse (bare name for program fns,
+    // `mod::name` for module fns). A call to one of these whose signature
+    // is not in the snapshot yet is a forward or MUTUALLY RECURSIVE
+    // reference inside the same fixed-point round — treated optimistically
+    // like a self-call (#2040): the first round seeds it as borrowed, and a
+    // callee that turns out to consume the slot promotes the caller to Own
+    // in the next round. Seeding it Own on the first miss locked every
+    // `parse_rule ↔ parse_seq ↔ …` group to by-value + clone per call.
+    static PENDING_USER_FNS: RefCell<std::collections::HashSet<String>> = RefCell::new(std::collections::HashSet::new());
     // Names of user-declared RECORD types (`type Tok = { … }`). A param of such a
     // type is `Ty::Named("Tok")` (not a structural `Ty::Record`), so without this
     // set `is_borrow_eligible`/`intrinsic_borrow_mode` treat it as Own and every reader
@@ -99,6 +108,51 @@ thread_local! {
 /// Is `name` a user-declared record type (eligible for record borrow inference)?
 fn is_record_type_name(name: &str) -> bool {
     RECORD_NAMES.with(|r| r.borrow().contains(name))
+}
+
+/// Is `callee` a fn this pass analyses whose signature the snapshot does not
+/// hold YET (a forward reference or a mutual-recursion partner in the current
+/// round)? Same `mod::name`-then-bare resolution as `lookup_user_borrows`.
+pub(crate) fn is_pending_user_fn(callee: &str) -> bool {
+    PENDING_USER_FNS.with(|p| {
+        let p = p.borrow();
+        MOD_SCOPE.with(|m| {
+            let m = m.borrow();
+            if let Some(mod_name) = m.as_deref()
+                && p.contains(&format!("{}::{}", mod_name, callee))
+            {
+                return true;
+            }
+            p.contains(callee)
+        })
+    })
+}
+
+/// The predicate `infer_program_fn_borrows` / `infer_program_module_borrows`
+/// apply: a fn whose borrows this pass infers (tests, generics and
+/// monomorphized instances are left to their own routes).
+fn is_analysed_fn(func: &IrFunction) -> bool {
+    let derived = is_derive_fn(func);
+    !func.is_test
+        && (derived
+            || !(is_monomorphized(&func.name) || func.generics.as_ref().map_or(false, |g| !g.is_empty())))
+}
+
+fn seed_pending_user_fns(program: &IrProgram) {
+    let mut set = std::collections::HashSet::new();
+    for func in &program.functions {
+        if is_analysed_fn(func) {
+            set.insert(func.name.to_string());
+        }
+    }
+    for module in &program.modules {
+        for func in &module.functions {
+            if is_analysed_fn(func) {
+                set.insert(format!("{}::{}", module.name, func.name));
+            }
+        }
+    }
+    PENDING_USER_FNS.with(|p| *p.borrow_mut() = set);
 }
 
 fn lookup_user_borrows(callee: &str) -> Option<Vec<ParamBorrow>> {
@@ -511,8 +565,13 @@ pub fn infer_borrow_signatures(program: &mut IrProgram) -> HashMap<String, Vec<P
     seed_record_names(program);
     seed_intrinsic_sigs(&mut sigs);
     alias_float_variant_sigs(&mut sigs);
+    seed_pending_user_fns(program);
 
-    for _iter in 0..6 {
+    // The lattice is finite — a slot moves Ref → Own at most once — so the
+    // rounds converge; the cap only bounds a pathological chain. (#2040:
+    // the optimistic first round makes the cap load-bearing, where the
+    // pessimistic seed used to leave a stale Own behind harmlessly.)
+    for _iter in 0..64 {
         // Snapshot current sigs into thread-local so check_needs_ownership can see them.
         SIGS_SNAPSHOT.with(|s| *s.borrow_mut() = sigs.clone());
         let prev_sigs = sigs.clone();
@@ -536,6 +595,7 @@ pub fn infer_borrow_signatures(program: &mut IrProgram) -> HashMap<String, Vec<P
     // Clean up thread-locals so they don't leak across separate compilations.
     SIGS_SNAPSHOT.with(|s| s.borrow_mut().clear());
     MOD_SCOPE.with(|m| *m.borrow_mut() = None);
+    PENDING_USER_FNS.with(|p| p.borrow_mut().clear());
 
     sigs
 }
