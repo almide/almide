@@ -482,7 +482,10 @@ fn render_enum_constructor(ctx: &RenderContext, ctor_name: &str, enum_name: &str
         // boxed the closure value (a direct lambda → `RcWrap`, a capture-clone
         // `{ let __cap; lambda }` → boxes the tail, a `Var` is already `Rc`), so no
         // ctor-side boxing — wrapping again here double-boxed `Block`-shaped args.
-        if needs_box {
+        if needs_box && ctx.ann.region_enums.contains(enum_name) {
+            // A region twin's recursive field is an arena handle (#1991).
+            format!("almide_rgn_alloc({})", rendered)
+        } else if needs_box {
             format!("std::boxed::Box::new({})", rendered)
         } else {
             rendered

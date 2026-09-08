@@ -83,6 +83,12 @@ pub struct CodegenAnnotations {
     /// `..` to cover fields the user didn't name.
     pub record_field_counts: HashMap<String, usize>,
     pub recursive_enums: HashSet<String>,
+    /// The `__rgn_` twin enums `RegionWindowPass` synthesized (#1991): the
+    /// walker renders their recursive fields as `AlmideRgn<T>` handles into
+    /// the prelude's bump arena instead of `Box<T>`, constructs them with
+    /// `almide_rgn_alloc` instead of `Box::new`, and adds `impl Copy`. A
+    /// subset of `recursive_enums` whenever the twin is recursive.
+    pub region_enums: HashSet<String>,
     pub boxed_fields: HashSet<(String, String)>,
     pub default_fields: HashMap<(String, String), IrExpr>,
     /// User-defined record/enum names whose generated Rust struct cannot

@@ -197,6 +197,9 @@ fn remap_codegen_annotations(ann: &mut CodegenAnnotations, map: &HashMap<String,
     // the ctor-keyed boxed_fields and wrap in Box::new — invalid Rust.
     ann.recursive_enums = std::mem::take(&mut ann.recursive_enums).into_iter()
         .map(|n| remap(&n)).collect();
+    // Same keying as recursive_enums (root-only in v1, so a no-op today).
+    ann.region_enums = std::mem::take(&mut ann.region_enums).into_iter()
+        .map(|n| remap(&n)).collect();
 }
 
 fn rename_type_decl_kind(kind: &mut IrTypeDeclKind, map: &HashMap<String, Sym>) {

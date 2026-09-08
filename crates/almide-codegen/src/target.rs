@@ -36,6 +36,7 @@ use super::pass_rust_lowering::RustLoweringPass;
 use super::pass_lambda_type_resolve::LambdaTypeResolvePass;
 use super::pass_concretize_types::ConcretizeTypesPass;
 use super::pass_resolve_calls::ResolveCallsPass;
+use super::pass_region_window::RegionWindowPass;
 use super::pass_list_pattern::ListPatternLoweringPass;
 use super::pass_unify_var_tables::UnifyVarTablesPass;
 use super::pass_top_let_storage::TopLetStoragePass;
@@ -100,6 +101,11 @@ fn build_pipeline(target: Target) -> Pipeline {
                 .add(PatternLiteralGuardPass)
                 // Verify all user-module calls resolve to known IrFunctions.
                 .add(ResolveCallsPass)
+                // RegionWindow (#1991): `consume(produce(scalars))` sites run
+                // over `__rgn_` twins in a bump arena. After ResolveCalls
+                // (reads its call spelling), before BoxDeref (the twin enums
+                // must be in the recursive-enum set it computes).
+                .add(RegionWindowPass)
                 // BoxDeref: insert Deref IR nodes for Box'd pattern vars (before CloneInsertion)
                 .add(BoxDerefPass)
                 // LICM: hoist loop-invariant expressions before loops

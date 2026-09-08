@@ -147,7 +147,7 @@ No runtime, no GC, no interpreter — native compiles through Rust to machine co
 |---|---:|---:|
 | Hello, world | **1,096 B** | **1,337 B** |
 
-Measured on almide 0.62.0, 2026-09-07, from `docs/benchmarks/wasm-size.txt`; no post-hoc optimizer touches the shipped bytes (`--wasm-opt` is opt-in and its output is not the verified module).
+Measured on almide 0.62.0, 2026-09-08, from `docs/benchmarks/wasm-size.txt`; no post-hoc optimizer touches the shipped bytes (`--wasm-opt` is opt-in and its output is not the verified module).
 <!-- wasm-size:generated:end -->
 
 Rust on the same wasm target is 40 KB+ for Hello, world even fully size-tuned; the native minigit CLI binary is 418 KB stripped with 0 dependencies. The byte-by-byte dissection, measured 2026-07-23 on the incumbent leg: **[docs/wasm/WASM-OUTPUT.md](./docs/wasm/WASM-OUTPUT.md)**.
@@ -172,17 +172,18 @@ build. Regenerate with `almide run tools/almide-gates/src/main.almd -- bench`; t
 <!-- wasm-runtime:generated:start — rendered from docs/benchmarks/wasm-runtime.txt by scripts/gen-readme-stats.sh; DO NOT EDIT between the markers -->
 | Benchmark (`almide bench`, verify-then-time, median of 5) | wasm/native ratio |
 |---|---:|
-| nbody | **2.58×** |
-| spectralnorm | **2.61×** |
-| binarytrees | **0.94×** |
-| fft | **4.48×** |
-| strchurn | **1.04×** |
-| listbuild_append | **3.40×** |
-| listbuild_combinator | **3.45×** |
-| listbuild_prealloc | **3.36×** |
-| mapbuild | **0.97×** |
+| nbody | **2.69×** |
+| spectralnorm | **2.65×** |
+| binarytrees | **0.93×** |
+| treealloc | **0.41×** |
+| fft | **4.02×** |
+| strchurn | **1.15×** |
+| listbuild_append | **3.33×** |
+| listbuild_combinator | **3.79×** |
+| listbuild_prealloc | **3.54×** |
+| mapbuild | **1.16×** |
 
-Embedded wasm host (Perceus RC in linear memory) against the native binary, same machine, same run. Cross-engine ratios do NOT cancel hardware (a 2-core CI runner measures nbody ~10x worse), so the ratio verdict runs on the stamping machine class and CI gates the STATUS taxonomy below (`scripts/check-wasm-runtime-ratio.sh`). binarytrees runs its fan arms on the embedded host's thread pool, which is why wasm WINS there. The unmeasured corpus cells stay honest instead of estimated: 3 route to the incumbent artifact, 1 wall on the wasm build path, 0 exhaust the embedded heap (#1729) — each re-measured every gate run, so a cell that starts benching fails the gate until its row is promoted. Ledger: `docs/benchmarks/wasm-runtime.txt` (almide 0.61.1, 2026-09-04).
+Embedded wasm host (Perceus RC in linear memory) against the native binary, same machine, same run. Cross-engine ratios do NOT cancel hardware (a 2-core CI runner measures nbody ~10x worse), so the ratio verdict runs on the stamping machine class and CI gates the STATUS taxonomy below (`scripts/check-wasm-runtime-ratio.sh`). binarytrees runs its fan arms on the embedded host's thread pool, which is why wasm WINS there. The unmeasured corpus cells stay honest instead of estimated: 3 route to the incumbent artifact, 1 wall on the wasm build path, 0 exhaust the embedded heap (#1729) — each re-measured every gate run, so a cell that starts benching fails the gate until its row is promoted. Ledger: `docs/benchmarks/wasm-runtime.txt` (almide 0.62.0, 2026-09-08).
 <!-- wasm-runtime:generated:end -->
 
 ## How It Works

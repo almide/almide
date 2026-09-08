@@ -1,0 +1,240 @@
+// schubfach (table variant) — Schubfach (Giulietti, "The Schubfach way to render doubles") with the 126-bit
+// power-of-ten constant g(j) = floor(10^j * 2^-r) + 1 (r = floor(log2 10^j) - 125) DERIVED AT
+// RUN TIME by exact big-integer arithmetic instead of read from the 617-entry table:
+//   j >= 0: P = 10^j as a bignum (chunked *10^9), g = its top 126 bits (+1)
+//   j <  0: P = 2^N as a bignum, divided by 10^-j (chunked /10^9: floor(floor(x/a)/b) = floor(x/ab)
+//           is exact on integers), which leaves exactly the 126 bits of g (+1)
+// so the whole "table" is one multiply-by-small and one divide-by-small loop over u32 limbs.
+// Same output contract as stdlib/float_to_string.almd (Rust `format!("{}", x)` + the `.0` suffix).
+//
+// Scratch block (byte offsets from sb = handle(block) + 12):
+//   P   @ 0    len word + up to 38 u32 limbs (2^1202 needs 38)     160 bytes
+//   G   @ 160  g1 @ +0, g0 @ +8 (two i64 slots, each < 2^63)         16 bytes
+//   DP  @ 176  17 decimal digits, written backwards from +196        24 bytes
+//   total 200 → prim.alloc_list(26) = 208 bytes.
+// ───────────────────────── floor-log helpers (exact over the f64 range, checked offline) ─────────
+fn __sf_flog10pow2(e: Int) -> Int = prim.bshr(e * 661971961083, 41)
+
+fn __sf_flog10_3q_pow2(e: Int) -> Int = prim.bshr(e * 661971961083 - 274743187321, 41)
+
+fn __sf_flog2pow10(e: Int) -> Int = prim.bshr(e * 913124641741, 38)
+
+// ───────────────────────── big-integer helpers kept for the rescale ─────────────────────────────
+// ───────────────────────── big-integer helpers (u32 limbs, [len][limb_0][limb_1]...) ────────────
+fn __sf_limb(p: Int, i: Int) -> Int = if i < prim.load32(p) then prim.load32(p + 4 + i * 4) else 0
+
+fn __sf_ms_body(p: Int, m: Int, len: Int, i: Int, carry: Int) -> Int = if i >= len then carry
+else {
+  let prod = prim.load32(p + 4 + i * 4) * m + carry
+  prim.store32(p + 4 + i * 4, prim.band(prod, 4294967295))
+  __sf_ms_body(p, m, len, i + 1, prim.bshr_u(prod, 32))
+}
+
+// p *= m (m < 2^31).
+fn __sf_mul_small(p: Int, m: Int) -> Unit = {
+  let len = prim.load32(p)
+  let carry = __sf_ms_body(p, m, len, 0, 0)
+  let len2 = if carry != 0 then {
+    prim.store32(p + 4 + len * 4, carry)
+    len + 1
+  } else len
+  prim.store32(p, len2)
+}
+
+fn __sf_pow10_small(n: Int) -> Int = if n == 0 then 1 else 10 * __sf_pow10_small(n - 1)
+
+// The n (<= 63) bits of bignum p starting at bit position pos; pos < 0 reads zeros below bit 0.
+fn __sf_getbits(p: Int, pos: Int, n: Int) -> Int = if pos + n <= 0 then 0
+else if pos < 0 then prim.bshl(__sf_getbits(p, 0, n + pos), 0 - pos)
+else {
+  let i = prim.bshr(pos, 5)
+  let s = prim.band(pos, 31)
+  let l0 = __sf_limb(p, i)
+  let l1 = __sf_limb(p, i + 1)
+  let l2 = __sf_limb(p, i + 2)
+  let hi = if s == 0 then 0 else prim.bshl(l2, 64 - s)
+  let v = prim.bor(prim.bor(prim.bshr_u(l0, s), prim.bshl(l1, 32 - s)), hi)
+  prim.band(v, prim.bshl(1, n) - 1)
+}
+
+// ───────────────────────── g(j) from the COMPACT every-8th table ─────────────────────────────────
+// 78 entries k0 = -296, -288, ..., 320: T(k0) = floor(10^k0 * 2^-r'), 189 bits, as three
+// 63-bit words (low first). g(j) - 1 = the top 126 bits of T(k0) * 10^(j - k0), j - k0 in 0..7:
+// the truncation error of T is < 1, times 10^7 < 2^24, so it sits 2^-63 below the 126-bit
+// granularity — exact for every j in -292..324 (checked offline against the exact g).
+fn __sf_t_table() -> List[Int] = [4601401616468269336, 485662916782926776, 7540071506325551061, 6331866482490014547, 6032811387162639116, 5617791046444737211, 2243389918904870370, 8389308921011453914, 8371160993642713444, 7150542083646077945, 3930675837543742387, 6237000967295999411, 4207632854816507939, 2249998320508814054, 4646927838993072071, 1461354145522703641, 9125493878965589186, 6924462078501391516, 1847685405770583016, 3777599994440458756, 5159126280621730921, 2118398996719842591, 4523745595132871321, 7687697232696013035, 8160217956250045335, 8151217634151930731, 5727780783694992240, 630844296325708102, 7583551416783411466, 8535058474086213470, 9206048926440802435, 3414676654757950444, 6359114106063703798, 3393169193584643096, 1194002452706084763, 4737909217226284592, 2230031423124852534, 3438215814094889639, 7060034896770543742, 7172906074463401164, 2222739346921486195, 5260135901548373507, 7329446145442113831, 1075082168258445909, 7838213297051747899, 2171915781809122284, 7938553132791110303, 5839923990556409879, 4540163624171608390, 8579702197267850928, 8702164874309912144, 5907797516582530265, 6231654060133073877, 6483618076376551497, 6091434400884747821, 8016861483245230029, 4830671903771572930, 1836739686865485026, 4582739501051995120, 7198262071269114212, 242296325436658401, 7651801668875831095, 5363123171977038839, 6651135780381802495, 3107251736068716279, 7991676288808940112, 1434072030957141840, 3505440625960509962, 5954262829429611647, 3837394552741336235, 6003727033359828405, 8872543021186607550, 1404788496005841665, 4788342003941625297, 6610559687902485989, 946180016612633277, 4933397350530608389, 4925250774549309901, 3953501906012161947, 1426181102480179182, 7339195571168228837, 4630743960278167220, 8589316563156989190, 5468126811957529810, 201452880473063984, 680525786702379116, 8148143905337944345, 379425829519709542, 5749098043168053385, 6070840288205403346, 6162553640941738625, 4302548137625868740, 9046256971665327767, 5137592082033131238, 6149718093871667028, 6739986666787659948, 2840742013550461061, 633014213657192453, 5021681388309344611, 4713970647487322931, 1871111759924843196, 7482888383134222941, 6553167103701500065, 3541125243107954000, 5575186299632655785, 8641894777172065808, 5984069606361426540, 8307674973655724205, 2857999807265123631, 4571297979082645263, 6189700196426901374, 0, 0, 4611686018427387904, 0, 0, 6871947673600000000, 0, 0, 5120000000000000000, 0, 0, 7629394531250000000, 0, 8937393460516749312, 5684341886080801486, 0, 6301638422566010880, 8470329472543003390, 0, 2710089775864365056, 6310887241768094443, 288230376151711744, 8069953843416418409, 4701977403289150031, 7646831791810019328, 5706019893239531902, 7006492321624085354, 4173955899269840896, 3396371052836654195, 5220243574398819621, 5067425965565965832, 8578474484080507457, 7778769097326427133, 2803329580166816573, 1898505199416013256, 5795634610449095915, 5121072192265530510, 3563466967739958279, 8636168555094444625, 8126127049763270238, 6213695507501100437, 6434446986835036147, 1050743752455299602, 70003547160262508, 4794036587204811087, 1727156102020039057, 7827388640652509294, 7143671195514218638, 6937406547251239847, 8186361988875305037, 5322449800010188399, 8506159571188688772, 6745298575577483228, 7931068241611403822, 5132236526524428811, 6324610901913141865, 5909106315382870899, 3281705197282434229, 6894050166264862554, 8805254571710334568, 2625662288701633452, 1575949922397804546, 6560425886295985109, 6873110927781327930, 2611754858345611792, 4887898181599367491, 6495301443787707118, 6872180620830963519, 7283535870312701897, 3224255682273813211, 7483032843395558601, 5426657103235052449, 7053254138487654006, 2409136169475294469, 8086349223904389813, 7499653268159873651, 3245474835884234870, 6024799662757210294, 5822474223830943157, 7628014293257544352, 8977651093538418850, 5845098373125247355, 6585757488346680740, 6688871304346933104, 8611472619154517905, 6966887050417449627, 4983597475548783767, 6574166557350945575, 5587072233075333539, 7426138930840468060, 2336766267805611271, 7724407183888759754, 5532904662818065330, 5486506760792478487, 4893983223587622098, 8244670425084330634, 8116552607716892465, 8606066656235469485, 6142758149716504390, 2034021703884862440, 8883600081239572548, 9153422936374700651, 1298235950792201269, 1354283389261828998, 6819831532519087681, 1141881197197006464, 3945947253462071418, 5081170449047600985, 4342685653585896496, 2080887032334240836, 7571533991467358150, 7395823471442328683, 1996343570975935732, 5641232424577592425, 3296540197514942167, 5904691951894693914, 8406091369059074558, 7648095710546921288, 2193665226883099992, 6263026125028039931, 304511109223779421, 8766332956520552848, 4666318092516094394]
+
+fn __sf_word(tbl: List[Int], i: Int) -> Int = list.get(tbl, i) ?? 0
+
+fn __sf_compute_g(j: Int, sb: Int) -> Unit = {
+  let k0 = prim.bshl(prim.bshr(j, 3), 3)
+  let d = j - k0
+  let e = (prim.bshr(j, 3) + 37) * 3
+  let tbl = __sf_t_table()
+  let w0 = __sf_word(tbl, e)
+  let w1 = __sf_word(tbl, e + 1)
+  let w2 = __sf_word(tbl, e + 2)
+  // T as six u32 limbs: bits [0,63) [63,126) [126,189) → limbs at 32-bit steps
+  prim.store32(sb, 6)
+  prim.store32(sb + 4, prim.band(w0, 4294967295))
+  prim.store32(sb + 8, prim.bor(prim.bshr_u(w0, 32), prim.bshl(prim.band(w1, 1), 31)))
+  prim.store32(sb + 12, prim.band(prim.bshr_u(w1, 1), 4294967295))
+  prim.store32(sb + 16, prim.bor(prim.bshr_u(w1, 33), prim.bshl(prim.band(w2, 3), 30)))
+  prim.store32(sb + 20, prim.band(prim.bshr_u(w2, 2), 4294967295))
+  prim.store32(sb + 24, prim.bshr_u(w2, 34))
+  __sf_mul_small(sb, __sf_pow10_small(d))
+  // bit length of the exact 10^j * 2^-r' where r' = floor(log2 10^k0) - 188
+  let l = __sf_flog2pow10(j) - (__sf_flog2pow10(k0) - 188) + 1
+  let g0 = __sf_getbits(sb, l - 126, 63) + 1
+  let carry = if g0 == prim.bshl(1, 63) then 1 else 0
+  prim.store64(sb + 160, __sf_getbits(sb, l - 63, 63) + carry)
+  prim.store64(sb + 168, prim.band(g0, 9223372036854775807))
+}
+
+// ───────────────────────── 64x64 -> high 64 (unsigned) and the rounded product rop ──────────────
+fn __sf_mulhi(a: Int, b: Int) -> Int = {
+  let al = prim.band(a, 4294967295)
+  let ah = prim.bshr_u(a, 32)
+  let bl = prim.band(b, 4294967295)
+  let bh = prim.bshr_u(b, 32)
+  let m1 = al * bh
+  let m2 = ah * bl
+  let t = prim.bshr_u(al * bl, 32) + prim.band(m1, 4294967295) + prim.band(m2, 4294967295)
+  ah * bh + prim.bshr_u(m1, 32) + prim.bshr_u(m2, 32) + prim.bshr_u(t, 32)
+}
+
+// rop(g, cp) = floor(g * cp / 2^127) with a sticky low bit when the discarded part is non-zero.
+fn __sf_rop(g1: Int, g0: Int, cp: Int) -> Int = {
+  let z = prim.bshr_u(g1 * cp, 1) + __sf_mulhi(g0, cp)
+  let vbp = __sf_mulhi(g1, cp) + prim.bshr_u(z, 63)
+  if prim.band(z, 9223372036854775807) != 0 then prim.bor(vbp, 1) else vbp
+}
+
+// ───────────────────────── rendering (byte-identical to the Dragon4 renderer) ───────────────────
+fn __sf_bcopy(src: Int, dst: Int, len: Int) -> Int = if len <= 0 then dst
+else {
+  prim.store8(dst, prim.load8(src))
+  __sf_bcopy(src + 1, dst + 1, len - 1)
+}
+
+fn __sf_zeros(dst: Int, count: Int) -> Int = if count <= 0 then dst
+else {
+  prim.store8(dst, 48)
+  __sf_zeros(dst + 1, count - 1)
+}
+
+// digits dp[0..m) with the decimal point after k of them (k <= 0 → leading "0." zeros, k >= m → ".0").
+fn __sf_render(dp: Int, m: Int, k: Int, neg: Bool) -> String = {
+  let body = if k <= 0 then 2 + (0 - k) + m
+  else if k >= m then k + 2 else m + 1
+  let sign_w = if neg then 1 else 0
+  let out_len = sign_w + body
+  let buf = prim.alloc_str(out_len)
+  let base = prim.handle(buf) + 12
+  let c0 = if neg then {
+    prim.store8(base, 45)
+    base + 1
+  } else base
+  let _e = if k <= 0 then {
+    prim.store8(c0, 48)
+    prim.store8(c0 + 1, 46)
+    let c1 = __sf_zeros(c0 + 2, 0 - k)
+    __sf_bcopy(dp, c1, m)
+  } else if k >= m then {
+    let c1 = __sf_bcopy(dp, c0, m)
+    let c2 = __sf_zeros(c1, k - m)
+    prim.store8(c2, 46)
+    prim.store8(c2 + 1, 48)
+    c2 + 2
+  } else {
+    let c1 = __sf_bcopy(dp, c0, k)
+    prim.store8(c1, 46)
+    __sf_bcopy(dp + k, c1 + 1, m - k)
+  }
+  buf
+}
+
+// Write f's digits backwards ending just before `end`; returns the address of the first digit.
+fn __sf_wdigits(f: Int, end: Int) -> Int = {
+  let q = f / 10
+  prim.store8(end - 1, 48 + (f - q * 10))
+  if q == 0 then end - 1 else __sf_wdigits(q, end - 1)
+}
+
+// |v| = f * 10^e (f > 0): strip trailing zeros, write the digits, render.
+fn __sf_finish(f: Int, e: Int, neg: Bool, sb: Int) -> String = if (f / 10) * 10 == f then __sf_finish(f / 10, e + 1, neg, sb)
+else {
+  let end = sb + 196
+  let dp = __sf_wdigits(f, end)
+  let m = end - dp
+  __sf_render(dp, m, m + e, neg)
+}
+
+// ───────────────────────── the Schubfach core ───────────────────────────────────────────────────
+// Which of the candidates lo < hi lies in the rounding interval [vbl, vbr] (open when out = 1):
+// 1 = only lo, 2 = only hi, 0 = neither, 3 = both.
+fn __sf_pick(vbl: Int, vbr: Int, out: Int, lo: Int, hi: Int) -> Int = {
+  let su = if vbl + out <= prim.bshl(lo, 2) then 1 else 0
+  let sw = if prim.bshl(hi, 2) + out <= vbr then 2 else 0
+  su + sw
+}
+
+// v = c * 2^q (c > 0): the shortest decimal in the rounding interval, closest on a draw, and on
+// an exact tie the LARGER magnitude — Rust's `{}` (Dragon4 "2R >= S") rounds a half up, not to
+// even: format! prints 1669760939663944.3 for ...944.25 where Giulietti's even rule gives ...4.2.
+fn __sf_core(q: Int, c: Int, neg: Bool, sb: Int) -> String = {
+  let out = prim.band(c, 1)
+  let cb = prim.bshl(c, 2)
+  let regular = if c != 4503599627370496 then true else q == 0 - 1074
+  let cbl = if regular then cb - 2 else cb - 1
+  let k = if regular then __sf_flog10pow2(q) else __sf_flog10_3q_pow2(q)
+  let h = q + __sf_flog2pow10(0 - k) + 2
+  __sf_compute_g(0 - k, sb)
+  let g1 = prim.load64(sb + 160)
+  let g0 = prim.load64(sb + 168)
+  let vb = __sf_rop(g1, g0, prim.bshl(cb, h))
+  let vbl = __sf_rop(g1, g0, prim.bshl(cbl, h))
+  let vbr = __sf_rop(g1, g0, prim.bshl(cb + 2, h))
+  let s = prim.bshr(vb, 2)
+  let sp10 = (s / 10) * 10
+  // Giulietti guards the shorter (multiple-of-10) candidate with `s >= 100` because Java prints
+  // at least two digits; the interval is 1..10 units of 10^k wide so it holds at most one
+  // multiple of 10, and a subnormal's s can be two digits — 20 * 2^-1074 has s = 98 with 100
+  // inside the interval, and format! prints the one-digit "1e-322". `s >= 10` keeps sp10 > 0.
+  let sel10 = if s >= 10 then __sf_pick(vbl, vbr, out, sp10, sp10 + 10) else 0
+  let sel = if sel10 == 0 then __sf_pick(vbl, vbr, out, s, s + 1) else 0
+  let f = if sel10 == 1 then sp10
+  else if sel10 == 2 then sp10 + 10
+  else if sel == 1 then s
+  else if sel == 2 then s + 1
+  else if vb < prim.bshl(s + s + 1, 1) then s else s + 1
+  __sf_finish(f, k, neg, sb)
+}
+
+fn __sf_main(x: Float) -> String = {
+  let bits0 = prim.fbits(x)
+  let neg = bits0 < 0
+  let bq = prim.band(prim.bshr_u(bits0, 52), 2047)
+  let t = prim.band(bits0, 4503599627370495)
+  let blk = prim.alloc_list(26)
+  let sb = prim.handle(blk) + 12
+  // (Java's C_TINY branch, which feeds 10*t so that MIN_VALUE gets Java's mandatory second
+  // digit "4.9E-324", is deliberately absent: format! prints the one-digit shortest "5e-324".)
+  if bq != 0 then __sf_core(bq - 1075, t + 4503599627370496, neg, sb)
+  else __sf_core(0 - 1074, t, neg, sb)
+}
+
+fn __sf_special(bits0: Int, raw_mant0: Int) -> String = if raw_mant0 != 0 then "NaN"
+else if bits0 < 0 then "-inf" else "inf"
+
+fn sf_float_to_string(x: Float) -> String = {
+  let bits0 = prim.fbits(x)
+  let raw_exp0 = prim.band(prim.bshr_u(bits0, 52), 2047)
+  let raw_mant0 = prim.band(bits0, 4503599627370495)
+  let is_special = raw_exp0 == 2047
+  let is_zero = prim.feq(x, 0.0)
+  let neg = bits0 < 0
+  if is_special then __sf_special(bits0, raw_mant0)
+  else if is_zero then (if neg then "-0.0" else "0.0")
+  else __sf_main(x)
+}

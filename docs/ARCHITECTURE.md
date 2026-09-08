@@ -233,30 +233,31 @@ The Wgsl arm is the four rows marked W. Class:
 | 4 | `ConcretizeTypes` | `pass_concretize_types.rs`, `pass_concretize_types_call_ret.rs`, `pass_concretize_types_signatures.rs`, `pass_concretize_types_unresolved.rs`, `pass_concretize_types_walker.rs` | all, W | enabler | sync every `IrExpr.ty` with its authoritative concrete type | `TypeTable` |
 | 5 | `PatternLiteralGuard` | `pass_pattern_literal_guard.rs` | Rust | Rust by design | hoist payload-nested string literals into guards (the `as_deref` subject form) | n/a |
 | 6 | `ResolveCalls` | `pass_resolve_calls.rs` | all | enabler | verify-and-rewrite every `CallTarget::Module` to a known fn | `FnTable` resolution (`emit.rs`) |
-| 7 | `BoxDeref` | `pass_box_deref.rs` | Rust | Rust by design | `*deref` for pattern vars bound from `Box`'d fields | n/a |
-| 8 | `LICM` | `pass_licm.rs`, `pass_licm_hoist.rs`, `pass_licm_purity.rs` | all | optimizer | hoist loop-invariant pure expressions to `let`s before the loop | **no equivalent** — see E |
-| 9 | `EggSaturation` | `pass_egg_saturation.rs` | all | optimizer | equality-saturation fusion of matrix and list combinator chains (`almide-egg-lab`, rules from stdlib `@rewrite`) | list half: `list_fuse.rs` (map/filter → fold); matrix half: **no equivalent** — see E |
-| 10 | `MatrixShapeSpec` | `pass_matrix_shape_spec.rs` | Rust | Rust by design | small-shape matmul → fully unrolled `InlineRust` | n/a (hand-written kernels, `matrix_kernels.rs`) |
-| 11 | `ConstFold` | `pass_const_fold.rs` | all | optimizer | fold literal arithmetic left by rows 9–10 | superseded by A.1 (`fold`) — see E |
-| 12 | `IntrinsicLowering` | `pass_intrinsic_lowering.rs` | all | enabler | `@intrinsic` stdlib calls → `RuntimeCall { symbol }` | self-host registry link (`src/wasm_leg.rs`); intrinsics are walls |
-| 13 | `BorrowInsertion` | `pass_borrow_inference.rs`, `pass_borrow_inference_call_sites.rs`, `pass_borrow_inference_ownership.rs` (wrapper in `pass.rs`) | Rust | Rust by design | Roc-style borrow-by-default signatures, `Borrow` nodes at call sites | RC-3 borrow/fresh classifier (`rc_ownership.rs`) |
-| 14 | `TailCallOpt` | `pass_tco.rs`, `pass_tco_loop_rewrite.rs`, `pass_tco_owned_reads.rs` | all | optimizer | self-recursive tail calls → loop | equivalent: `tco.rs` (`loop_convert` over the encoded body; `return_call` otherwise) |
-| 15 | `CaptureClone` | `pass_capture_clone.rs` | Rust | Rust by design | pre-clone variables captured by `move` closures | n/a |
-| 16 | `CloneInsertion` | `pass_clone.rs`, `pass_clone_interp.rs`, `pass_clone_loops.rs` | Rust | Rust by design | `Clone` nodes for heap-typed reuse (loops, interpolation, E0505 guards) | RC inc/share guards (`rc_ownership.rs`) |
-| 17 | `MatchSubject` | `pass_match_subject.rs` | Rust | Rust by design | `.as_str()` / `.as_deref()` on match subjects | n/a |
-| 18 | `EffectInference` | `pass_effect_inference.rs` | all | analysis | infer capability categories from transitive stdlib use | shared by another route: `cli::check_permissions` runs this pass standalone on the pre-mono IR for every leg |
-| 19 | `StdlibLowering` | `pass_stdlib_lowering.rs`, `pass_stdlib_lowering_ufcs.rs` | Rust | Rust by design | `Module` calls → `Named` runtime calls with arg decoration | self-hosted stdlib bodies are emitted as wasm fns |
-| 20 | `AutoParallel` | `pass_auto_parallel.rs` | Rust | Rust by design | pure `list.map/filter/any/all` → `std::thread::scope` variants | n/a (single-threaded wasm) |
-| 21 | `ResultPropagation` | `pass_result_propagation.rs` | all | Rust by design | effect fn `T → Result[T, String]`, `Try` at call sites | own effect lowering (`effect_raw`, `emit.rs`) |
-| 22 | `BuiltinLowering` | `pass_builtin_lowering.rs` | Rust | Rust by design | `assert_eq`/`println`/… → `RustMacro` | n/a |
-| 23 | `Peephole` | `pass_peephole.rs` | all | optimizer | idiomatic list loops → `ListSwap`/`ListReverse`/`ListRotateLeft`/`ListCopySlice` nodes | **no lowering for those nodes** — see E |
-| 24 | `RustLowering` | `pass_rust_lowering.rs` | Rust | Rust by design | push optimization, borrow index lift | n/a |
-| 25 | `FanLowering` | `pass_fan_lowering.rs` (wrapper in `pass.rs`) | all, W | enabler | strip auto-try from fan spawn closures | own fan lowering (`fan.rs`) |
-| 26 | `NormalizeRuntimeCalls` | `pass_normalize_runtime_calls.rs` | Rust | Rust by design | legacy `Named { almide_rt_* }` → `RuntimeCall` | n/a |
-| 27 | `IrLinkFlatten` | `pass_ir_link_flatten.rs` | Rust | Rust by design | flatten modules into the root for the walker | keeps modules, qualified names |
-| 28 | `SharedCellBorrow` | `pass_shared_cell_borrow.rs` | Rust | Rust by design | borrow a captured cell in place for statement-proven-safe reads (#1143) | n/a |
-| 29 | `RangeCountingVars` | `pass_range_counting.rs` | Rust | optimizer | a `let`-bound range read ONLY as `for-in` heads stays a bare `Range<i64>` instead of a materialized `Vec<i64>` (#1857); mirrors MIR's #1400 `range_counting_vars` admission rule and runs last so the set names the final IR | `ranges.rs` counting loop (#1400) — already has it |
-| 30 | `TopLetStorage` | `pass_top_let_storage.rs` | all | analysis | the unified top-let storage attribute for the walker (§4 Stage 1) | own globals plan (`build_globals`) |
+| 7 | `RegionWindow` | `pass_region_window.rs`, `pass_region_window_clone.rs` | Rust | optimizer | `consume(produce(scalars))` sites run over `__rgn_` twin fns and `Copy` twin enums in the prelude's thread-local bump arena (#1991); v1 admits root-module fns and root variant enums with scalar / region-enum tuple payloads | equivalent: `region.rs` (`RegionSave`/`RegionRestore` over the allocator, #1961) |
+| 8 | `BoxDeref` | `pass_box_deref.rs` | Rust | Rust by design | `*deref` for pattern vars bound from `Box`'d fields | n/a |
+| 9 | `LICM` | `pass_licm.rs`, `pass_licm_hoist.rs`, `pass_licm_purity.rs` | all | optimizer | hoist loop-invariant pure expressions to `let`s before the loop | **no equivalent** — see E |
+| 10 | `EggSaturation` | `pass_egg_saturation.rs` | all | optimizer | equality-saturation fusion of matrix and list combinator chains (`almide-egg-lab`, rules from stdlib `@rewrite`) | list half: `list_fuse.rs` (map/filter → fold); matrix half: **no equivalent** — see E |
+| 11 | `MatrixShapeSpec` | `pass_matrix_shape_spec.rs` | Rust | Rust by design | small-shape matmul → fully unrolled `InlineRust` | n/a (hand-written kernels, `matrix_kernels.rs`) |
+| 12 | `ConstFold` | `pass_const_fold.rs` | all | optimizer | fold literal arithmetic left by rows 10–11 | superseded by A.1 (`fold`) — see E |
+| 13 | `IntrinsicLowering` | `pass_intrinsic_lowering.rs` | all | enabler | `@intrinsic` stdlib calls → `RuntimeCall { symbol }` | self-host registry link (`src/wasm_leg.rs`); intrinsics are walls |
+| 14 | `BorrowInsertion` | `pass_borrow_inference.rs`, `pass_borrow_inference_call_sites.rs`, `pass_borrow_inference_ownership.rs` (wrapper in `pass.rs`) | Rust | Rust by design | Roc-style borrow-by-default signatures, `Borrow` nodes at call sites | RC-3 borrow/fresh classifier (`rc_ownership.rs`) |
+| 15 | `TailCallOpt` | `pass_tco.rs`, `pass_tco_loop_rewrite.rs`, `pass_tco_owned_reads.rs` | all | optimizer | self-recursive tail calls → loop | equivalent: `tco.rs` (`loop_convert` over the encoded body; `return_call` otherwise) |
+| 16 | `CaptureClone` | `pass_capture_clone.rs` | Rust | Rust by design | pre-clone variables captured by `move` closures | n/a |
+| 17 | `CloneInsertion` | `pass_clone.rs`, `pass_clone_interp.rs`, `pass_clone_loops.rs` | Rust | Rust by design | `Clone` nodes for heap-typed reuse (loops, interpolation, E0505 guards) | RC inc/share guards (`rc_ownership.rs`) |
+| 18 | `MatchSubject` | `pass_match_subject.rs` | Rust | Rust by design | `.as_str()` / `.as_deref()` on match subjects | n/a |
+| 19 | `EffectInference` | `pass_effect_inference.rs` | all | analysis | infer capability categories from transitive stdlib use | shared by another route: `cli::check_permissions` runs this pass standalone on the pre-mono IR for every leg |
+| 20 | `StdlibLowering` | `pass_stdlib_lowering.rs`, `pass_stdlib_lowering_ufcs.rs` | Rust | Rust by design | `Module` calls → `Named` runtime calls with arg decoration | self-hosted stdlib bodies are emitted as wasm fns |
+| 21 | `AutoParallel` | `pass_auto_parallel.rs` | Rust | Rust by design | pure `list.map/filter/any/all` → `std::thread::scope` variants | n/a (single-threaded wasm) |
+| 22 | `ResultPropagation` | `pass_result_propagation.rs` | all | Rust by design | effect fn `T → Result[T, String]`, `Try` at call sites | own effect lowering (`effect_raw`, `emit.rs`) |
+| 23 | `BuiltinLowering` | `pass_builtin_lowering.rs` | Rust | Rust by design | `assert_eq`/`println`/… → `RustMacro` | n/a |
+| 24 | `Peephole` | `pass_peephole.rs` | all | optimizer | idiomatic list loops → `ListSwap`/`ListReverse`/`ListRotateLeft`/`ListCopySlice` nodes | **no lowering for those nodes** — see E |
+| 25 | `RustLowering` | `pass_rust_lowering.rs` | Rust | Rust by design | push optimization, borrow index lift | n/a |
+| 26 | `FanLowering` | `pass_fan_lowering.rs` (wrapper in `pass.rs`) | all, W | enabler | strip auto-try from fan spawn closures | own fan lowering (`fan.rs`) |
+| 27 | `NormalizeRuntimeCalls` | `pass_normalize_runtime_calls.rs` | Rust | Rust by design | legacy `Named { almide_rt_* }` → `RuntimeCall` | n/a |
+| 28 | `IrLinkFlatten` | `pass_ir_link_flatten.rs` | Rust | Rust by design | flatten modules into the root for the walker | keeps modules, qualified names |
+| 29 | `SharedCellBorrow` | `pass_shared_cell_borrow.rs` | Rust | Rust by design | borrow a captured cell in place for statement-proven-safe reads (#1143) | n/a |
+| 30 | `RangeCountingVars` | `pass_range_counting.rs` | Rust | optimizer | a `let`-bound range read ONLY as `for-in` heads stays a bare `Range<i64>` instead of a materialized `Vec<i64>` (#1857); mirrors MIR's #1400 `range_counting_vars` admission rule and runs last so the set names the final IR | `ranges.rs` counting loop (#1400) — already has it |
+| 31 | `TopLetStorage` | `pass_top_let_storage.rs` | all | analysis | the unified top-let storage attribute for the walker (§4 Stage 1) | own globals plan (`build_globals`) |
 
 ### C. Structural wasm leg — `crates/almide-wasm` (default `--target wasm`)
 
@@ -269,9 +270,9 @@ IR→IR pass in the nanopass sense; each is a route inside `emit_program`.
 | reachability DCE | `emit.rs` (two-pass) | pass 1 records what `main` reaches; pass 2 re-emits with only the reachable set |
 | deterministic meter plan | `fuel.rs` | which fns charge, whose entry is exempt (ALS-DT2, mirrors the interp) |
 | self-tail-call loop conversion | `tco.rs` | `return_call $self` → param `local.set` + `br` to a wrapping `loop` |
-| map/filter → fold fusion | `list_fuse.rs` | deforestation over observation-free callbacks (the list half of B.9) |
+| map/filter → fold fusion | `list_fuse.rs` | deforestation over observation-free callbacks (the list half of B.10) |
 | counted-while partial unroll | `unroll.rs` | the loop-control headroom LLVM takes on the native leg |
-| RC-3 ownership guards | `rc_ownership.rs` | borrow/fresh classification, droppable set, inc/share/arg guards (the wasm twin of B.13/B.16) |
+| RC-3 ownership guards | `rc_ownership.rs` | borrow/fresh classification, droppable set, inc/share/arg guards (the wasm twin of B.14/B.17) |
 | heap cap | `heap_cap.rs` | harness-set linear-memory ceiling (#1729), not an optimization |
 
 No SIMD (`v128`) is emitted anywhere on this leg; the matrix routines are
@@ -306,11 +307,11 @@ join it. Verdict per candidate:
 
 | Pass | Move pre-split today? | Blocker / reason |
 |---|---|---|
-| `ConstFold` (B.11) | no move needed | A.1 folds the same literal arithmetic before the split; on the Rust arm the pass only cleans artifacts of B.9–B.10, which exist on no other leg |
-| `TailCallOpt` (B.14) | no move needed | the structural leg converts self tail calls at the encoded-body level (`tco.rs`) and keeps `return_call` for the rest — the same constant-stack guarantee |
-| `LICM` (B.8) | **not today — follow-up** | (1) layering: `almide-driver` (owner of the cut point) depends on `almide-optimize`, not `almide-codegen`, and the pass is written against `NanoPass`/`Target` there — relocating three files, not a one-line pipeline change; (2) the cut point is also the interp oracle's and the incumbent's input, so a pre-split hoist needs an `ALMIDE_ONLY_PASS=licm` axis and `spec/pass_isolated/` rows before it lands; (3) the win on the structural leg is unmeasured — measure on the loop-bound ledger rows (`nbody`, `spectralnorm`) first |
-| `EggSaturation` (B.9) | **not today — follow-up** | pulls `almide-egg-lab` below the driver; the matrix half rewrites into fused `matrix.*` forms only the Rust stdlib lowering consumes, and the list half already has a structural twin (`list_fuse.rs`) |
-| `Peephole` (B.23) | **not today — follow-up** | its output nodes (`ListSwap` …) have no lowering in `almide-wasm`; pre-split it would wall every fixture that hits a pattern (the incumbent's `lower/mod_p5.rs` and the interp are the only consumers) |
+| `ConstFold` (B.12) | no move needed | A.1 folds the same literal arithmetic before the split; on the Rust arm the pass only cleans artifacts of B.10–B.11, which exist on no other leg |
+| `TailCallOpt` (B.15) | no move needed | the structural leg converts self tail calls at the encoded-body level (`tco.rs`) and keeps `return_call` for the rest — the same constant-stack guarantee |
+| `LICM` (B.9) | **not today — follow-up** | (1) layering: `almide-driver` (owner of the cut point) depends on `almide-optimize`, not `almide-codegen`, and the pass is written against `NanoPass`/`Target` there — relocating three files, not a one-line pipeline change; (2) the cut point is also the interp oracle's and the incumbent's input, so a pre-split hoist needs an `ALMIDE_ONLY_PASS=licm` axis and `spec/pass_isolated/` rows before it lands; (3) the win on the structural leg is unmeasured — measure on the loop-bound ledger rows (`nbody`, `spectralnorm`) first |
+| `EggSaturation` (B.10) | **not today — follow-up** | pulls `almide-egg-lab` below the driver; the matrix half rewrites into fused `matrix.*` forms only the Rust stdlib lowering consumes, and the list half already has a structural twin (`list_fuse.rs`) |
+| `Peephole` (B.24) | **not today — follow-up** | its output nodes (`ListSwap` …) have no lowering in `almide-wasm`; pre-split it would wall every fixture that hits a pattern (the incumbent's `lower/mod_p5.rs` and the interp are the only consumers) |
 
 `--target wasm32`/`wasi` is a different beast: it compiles the codegen v3 Rust
 source with `rustc`, so it gets the full Rust arm of table B plus LLVM.

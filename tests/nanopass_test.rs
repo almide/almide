@@ -766,6 +766,217 @@ mod box_deref {
     }
 }
 
+// ── RegionWindowPass (#1991) ─────────────────────────────────────
+
+mod region_window {
+    use super::*;
+    use almide::codegen::pass_region_window::RegionWindowPass;
+
+    fn tree_ty() -> Ty { Ty::Named(sym("Tree"), vec![]) }
+
+    fn call(name: &str, args: Vec<IrExpr>, ty: Ty) -> IrExpr {
+        mk_expr(IrExprKind::Call { target: CallTarget::Named { name: sym(name) }, args, type_args: vec![] }, ty)
+    }
+
+    fn var(id: VarId, ty: Ty) -> IrExpr { mk_expr(IrExprKind::Var { id }, ty) }
+
+    fn lit(v: i64) -> IrExpr { mk_expr(IrExprKind::LitInt { value: v }, Ty::Int) }
+
+    /// `type Tree = Leaf | Node(<payload>...)` with `Tree, Tree` after `extra`.
+    fn tree_decl(extra: Vec<Ty>) -> IrTypeDecl {
+        let mut fields = extra;
+        fields.extend([tree_ty(), tree_ty()]);
+        IrTypeDecl {
+            name: sym("Tree"),
+            kind: IrTypeDeclKind::Variant {
+                cases: vec![
+                    IrVariantDecl { name: sym("Leaf"), kind: IrVariantKind::Unit },
+                    IrVariantDecl { name: sym("Node"), kind: IrVariantKind::Tuple { fields } },
+                ],
+                is_generic: false,
+                boxed_args: Default::default(),
+                boxed_record_fields: Default::default(),
+            },
+            deriving: None,
+            generics: None,
+            visibility: IrVisibility::Public,
+            doc: None,
+            blank_lines_before: 0,
+        }
+    }
+
+    /// `fn make(d) = if d == 0 then Leaf else Node(<extra>, make(d - 1), make(d - 1))`.
+    fn make_fn(vt: &mut VarTable, extra: Vec<IrExpr>) -> IrFunction {
+        let d = mk_param(vt, "depth", Ty::Int);
+        let dv = d.var;
+        let rec = || call("make", vec![mk_expr(IrExprKind::BinOp { op: BinOp::SubInt, left: Box::new(var(dv, Ty::Int)), right: Box::new(lit(1)) }, Ty::Int)], tree_ty());
+        let mut args = extra;
+        args.extend([rec(), rec()]);
+        let body = mk_expr(IrExprKind::If {
+            cond: Box::new(mk_expr(IrExprKind::BinOp { op: BinOp::Eq, left: Box::new(var(dv, Ty::Int)), right: Box::new(lit(0)) }, Ty::Bool)),
+            then: Box::new(call("Leaf", vec![], tree_ty())),
+            else_: Box::new(call("Node", args, tree_ty())),
+        }, tree_ty());
+        mk_fn("make", vec![d], tree_ty(), body, false)
+    }
+
+    /// `fn check(t) = match t { Leaf => 1, Node(<wild>..., l, r) => check(l) + check(r) + 1 }`.
+    fn check_fn(vt: &mut VarTable, extra_wild: usize) -> IrFunction {
+        let t = mk_param(vt, "tree", tree_ty());
+        let tv = t.var;
+        let l = vt.alloc(sym("left"), tree_ty(), Mutability::Let, None);
+        let r = vt.alloc(sym("right"), tree_ty(), Mutability::Let, None);
+        let mut args: Vec<IrPattern> = (0..extra_wild).map(|_| IrPattern::Wildcard).collect();
+        args.extend([IrPattern::Bind { var: l, ty: tree_ty() }, IrPattern::Bind { var: r, ty: tree_ty() }]);
+        let sum = mk_expr(IrExprKind::BinOp {
+            op: BinOp::AddInt,
+            left: Box::new(call("check", vec![var(l, tree_ty())], Ty::Int)),
+            right: Box::new(call("check", vec![var(r, tree_ty())], Ty::Int)),
+        }, Ty::Int);
+        let body = mk_expr(IrExprKind::Match {
+            subject: Box::new(var(tv, tree_ty())),
+            arms: vec![
+                IrMatchArm { pattern: IrPattern::Constructor { name: "Leaf".into(), args: vec![] }, guard: None, body: lit(1) },
+                IrMatchArm { pattern: IrPattern::Constructor { name: "Node".into(), args }, guard: None, body: sum },
+            ],
+        }, Ty::Int);
+        mk_fn("check", vec![t], Ty::Int, body, false)
+    }
+
+    fn has_window(e: &IrExpr) -> bool {
+        match &e.kind {
+            IrExprKind::InlineRust { template, .. } if template.contains("almide_region_window") => true,
+            _ => {
+                let mut found = false;
+                e.clone().map_children(&mut |c| { found |= has_window(&c); c });
+                found
+            }
+        }
+    }
+
+    fn fn_names(p: &IrProgram) -> Vec<String> { p.functions.iter().map(|f| f.name.to_string()).collect() }
+
+    #[test]
+    fn window_fires_on_check_of_make() {
+        let mut vt = VarTable::new();
+        let make = make_fn(&mut vt, vec![]);
+        let check = check_fn(&mut vt, 0);
+        let d = mk_param(&mut vt, "d", Ty::Int);
+        let site = call("check", vec![call("make", vec![var(d.var, Ty::Int)], tree_ty())], Ty::Int);
+        let caller = mk_fn("run", vec![d], Ty::Int, site, false);
+        let mut program = mk_program(vec![make, check, caller], vt);
+        program.type_decls.push(tree_decl(vec![]));
+
+        let (out, changed) = run_pass_changed(&RegionWindowPass, program, Target::Rust);
+        assert!(changed);
+        let names = fn_names(&out);
+        assert!(names.contains(&"__rgn_make".to_string()) && names.contains(&"__rgn_check".to_string()), "{names:?}");
+        assert!(out.type_decls.iter().any(|td| td.name.as_str() == "__rgn_Tree"));
+        assert!(out.codegen_annotations.region_enums.contains("__rgn_Tree"));
+        let run = out.functions.iter().find(|f| f.name.as_str() == "run").unwrap();
+        assert!(has_window(&run.body), "the site was not rewritten: {:?}", run.body.kind);
+        // The originals are untouched: `make` still constructs `Node`.
+        let make = out.functions.iter().find(|f| f.name.as_str() == "make").unwrap();
+        assert!(!has_window(&make.body));
+    }
+
+    #[test]
+    fn twin_enum_is_copy_admissible() {
+        let mut vt = VarTable::new();
+        let make = make_fn(&mut vt, vec![]);
+        let check = check_fn(&mut vt, 0);
+        let d = mk_param(&mut vt, "d", Ty::Int);
+        let site = call("check", vec![call("make", vec![var(d.var, Ty::Int)], tree_ty())], Ty::Int);
+        let mut program = mk_program(vec![make, check, mk_fn("run", vec![d], Ty::Int, site, false)], vt);
+        program.type_decls.push(tree_decl(vec![]));
+        let out = run_pass(&RegionWindowPass, program, Target::Rust);
+        let twin = out.type_decls.iter().find(|td| td.name.as_str() == "__rgn_Tree").expect("twin enum");
+        let IrTypeDeclKind::Variant { cases, .. } = &twin.kind else { panic!("twin is a variant") };
+        assert_eq!(cases.iter().map(|c| c.name.to_string()).collect::<Vec<_>>(), vec!["__rgn_Leaf", "__rgn_Node"]);
+        let IrVariantKind::Tuple { fields } = &cases[1].kind else { panic!("Node is a tuple case") };
+        // Every payload is the twin itself: the walker renders it as a
+        // `Copy` `AlmideRgn` handle and the enum gets `impl Copy`.
+        assert!(fields.iter().all(|f| matches!(f, Ty::Named(n, _) if n.as_str() == "__rgn_Tree")), "{fields:?}");
+        // The twin fn's param carries the twin type and a FRESH VarId.
+        let check = out.functions.iter().find(|f| f.name.as_str() == "check").unwrap();
+        let twin_check = out.functions.iter().find(|f| f.name.as_str() == "__rgn_check").unwrap();
+        assert_eq!(twin_check.params[0].ty, Ty::Named(sym("__rgn_Tree"), vec![]));
+        assert_ne!(twin_check.params[0].var, check.params[0].var);
+    }
+
+    #[test]
+    fn held_tree_is_not_a_window() {
+        let mut vt = VarTable::new();
+        let make = make_fn(&mut vt, vec![]);
+        let check = check_fn(&mut vt, 0);
+        let d = mk_param(&mut vt, "d", Ty::Int);
+        let t = vt.alloc(sym("t"), tree_ty(), Mutability::Let, None);
+        let body = mk_expr(IrExprKind::Block {
+            stmts: vec![IrStmt { kind: IrStmtKind::Bind { var: t, mutability: Mutability::Let, ty: tree_ty(), value: call("make", vec![var(d.var, Ty::Int)], tree_ty()) }, span: None }],
+            expr: Some(Box::new(call("check", vec![var(t, tree_ty())], Ty::Int))),
+        }, Ty::Int);
+        let mut program = mk_program(vec![make, check, mk_fn("run", vec![d], Ty::Int, body, false)], vt);
+        program.type_decls.push(tree_decl(vec![]));
+        let (out, changed) = run_pass_changed(&RegionWindowPass, program, Target::Rust);
+        assert!(!changed);
+        assert!(!fn_names(&out).iter().any(|n| n.starts_with("__rgn_")));
+        assert!(out.type_decls.len() == 1);
+    }
+
+    /// v1 is root-module only: a dependency module declaring a SAME-NAMED
+    /// `Tree` / `make` / `check` (#1955's collision shape) is neither
+    /// scanned for sites nor twinned, and the root twins are the root's.
+    #[test]
+    fn same_named_dependency_module_fns_and_types_are_left_alone() {
+        let mut vt = VarTable::new();
+        let make = make_fn(&mut vt, vec![]);
+        let check = check_fn(&mut vt, 0);
+        let d = mk_param(&mut vt, "d", Ty::Int);
+        let site = call("check", vec![call("make", vec![var(d.var, Ty::Int)], tree_ty())], Ty::Int);
+        let mut program = mk_program(vec![make, check, mk_fn("run", vec![d], Ty::Int, site, false)], vt);
+        program.type_decls.push(tree_decl(vec![]));
+        let dep_make = make_fn(&mut program.var_table, vec![]);
+        let dep_check = check_fn(&mut program.var_table, 0);
+        let dd = mk_param(&mut program.var_table, "d", Ty::Int);
+        let dep_site = call("check", vec![call("make", vec![var(dd.var, Ty::Int)], tree_ty())], Ty::Int);
+        program.modules.push(IrModule {
+            name: sym("dep.shape"),
+            versioned_name: None,
+            type_decls: vec![tree_decl(vec![])],
+            functions: vec![dep_make, dep_check, mk_fn("run", vec![dd], Ty::Int, dep_site, false)],
+            top_lets: vec![],
+            var_table: VarTable::new(),
+            exports: vec![],
+            imports: vec![],
+        });
+        let out = run_pass(&RegionWindowPass, program, Target::Rust);
+        let twins = fn_names(&out).iter().filter(|n| n.starts_with("__rgn_")).count();
+        assert_eq!(twins, 2, "exactly the root pair is twinned");
+        assert_eq!(out.type_decls.iter().filter(|td| td.name.as_str() == "__rgn_Tree").count(), 1);
+        let dep = &out.modules[0];
+        assert!(dep.functions.iter().all(|f| !f.name.as_str().starts_with("__rgn_")));
+        assert!(dep.type_decls.iter().all(|td| !td.name.as_str().starts_with("__rgn_")));
+        assert!(!has_window(&dep.functions[2].body), "a module site is not rewritten in v1");
+    }
+
+    #[test]
+    fn non_scalar_payload_refuses() {
+        let mut vt = VarTable::new();
+        let label = mk_expr(IrExprKind::LitStr { value: "n".into() }, Ty::String);
+        let make = make_fn(&mut vt, vec![label]);
+        let check = check_fn(&mut vt, 1);
+        let d = mk_param(&mut vt, "d", Ty::Int);
+        let site = call("check", vec![call("make", vec![var(d.var, Ty::Int)], tree_ty())], Ty::Int);
+        let mut program = mk_program(vec![make, check, mk_fn("run", vec![d], Ty::Int, site, false)], vt);
+        program.type_decls.push(tree_decl(vec![Ty::String]));
+        let (out, changed) = run_pass_changed(&RegionWindowPass, program, Target::Rust);
+        assert!(!changed, "a String payload cannot be Copy — no twin");
+        assert!(!fn_names(&out).iter().any(|n| n.starts_with("__rgn_")));
+        let run = out.functions.iter().find(|f| f.name.as_str() == "run").unwrap();
+        assert!(!has_window(&run.body));
+    }
+}
+
 // ── AutoParallelPass ────────────────────────────────────────────
 
 mod auto_parallel {

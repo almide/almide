@@ -30,6 +30,10 @@ fft 1.176
 # same-shape reference and 1.94x against the idiomatic one.
 nbody 0.997
 spectralnorm 1.001
+# `binarytrees` (#1991) is reported and not anchored, like the listbuild rows:
+# against the same-shape `Box` reference the region-window native leg reads
+# 0.31 on an M4 Pro and 0.61 on the ubuntu-latest runner (2026-09-08, same
+# commit) — the reference's allocator is what differs between the machines.
 # Ablation deltas (#1466): ablated-native / optimized-native median per
 # anchored bench (ALMIDE_DISABLE_OPT=1 skips fold/DCE/propagate). Anchored at
 # the measured ~1.00: on the rustc-backed native leg these passes are

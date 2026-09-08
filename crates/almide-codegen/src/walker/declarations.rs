@@ -143,7 +143,7 @@ fn render_type_decl_variant(ctx: &RenderContext, td: &IrTypeDecl, generics_str: 
                     let rendered = render_type_field_fn(ctx, t);
                     // Box a field referencing ANY cycle member (mutual recursion), not
                     // just the enclosing type's own name (#656).
-                    if is_recursive && super::ty_contains_any_recursive(t, &ctx.ann.recursive_enums) { format!("std::boxed::Box<{}>", rendered) } else { rendered }
+                    if is_recursive && super::ty_contains_any_recursive(t, &ctx.ann.recursive_enums) { format!("{}<{}>", recursive_field_wrapper(ctx, &td.name), rendered) } else { rendered }
                 }).collect();
                 let fields_str = types.join(", ");
                 // Named params via fn_param template (respects JS/TS)
@@ -165,7 +165,7 @@ fn render_type_decl_variant(ctx: &RenderContext, td: &IrTypeDecl, generics_str: 
                     .map(|f| {
                         let rendered = render_type_field_fn(ctx, &f.ty);
                         let boxed = if ctx.ann.recursive_enums.contains(&*td.name) && super::ty_contains_any_recursive(&f.ty, &ctx.ann.recursive_enums) {
-                            format!("std::boxed::Box<{}>", rendered)
+                            format!("{}<{}>", recursive_field_wrapper(ctx, &td.name), rendered)
                         } else {
                             rendered
                         };
@@ -203,8 +203,23 @@ fn render_type_decl_variant(ctx: &RenderContext, td: &IrTypeDecl, generics_str: 
     } else {
         format!("{}pub enum {} {{\n{}\n}}", repr_prefix, full_name, &variants_str)
     };
-    ctx.templates.render_with("enum_decl", None, &enum_attrs, &[("name", full_name.as_str()), ("variants", variants_str.as_str())])
-        .unwrap_or(fallback)
+    let decl = ctx.templates.render_with("enum_decl", None, &enum_attrs, &[("name", full_name.as_str()), ("variants", variants_str.as_str())])
+        .unwrap_or(fallback);
+    // A region twin (#1991) is `Copy`: its payloads are scalars, other
+    // region twins, or `AlmideRgn` handles (all `Copy`), and the derived
+    // `Clone` above is what `Copy` requires.
+    if ctx.ann.region_enums.contains(&*td.name) {
+        format!("{decl}\nimpl Copy for {full_name} {{}}")
+    } else {
+        decl
+    }
+}
+
+/// The wrapper a recursive variant field takes: a region twin's field is an
+/// `AlmideRgn` handle into the prelude arena (#1991), any other recursive
+/// enum's field is a `Box`.
+fn recursive_field_wrapper(ctx: &RenderContext, enum_name: &str) -> &'static str {
+    if ctx.ann.region_enums.contains(enum_name) { "AlmideRgn" } else { "std::boxed::Box" }
 }
 
 /// Build `impl AlmideRepr for <Type>` for a record or variant type, mirroring

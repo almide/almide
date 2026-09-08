@@ -184,30 +184,87 @@ impl Emitter<'_> {
                 // of every `bytes.read_*_array` (#2005).
                 let loop_form_raw = tail && Some(index) == self.self_index && !self.tail_release_allowed;
                 let mut moved: Vec<u32> = Vec::new();
-                for (a, want) in args.iter().zip(params) {
+                let param_owned = self.table.infos[i].param_owned.clone();
+                // Owned temporaries handed to BORROWED params are parked
+                // here and released right after the call (the arm.rs
+                // borrow pool): the callee spends nothing on them. A TRUE
+                // tail site cannot release after the jump — and the Try
+                // see-through (emitter.rs) relies on the Named arm
+                // return_calling whenever ret == fn_ret — so there a fresh
+                // temporary moves in under the owned convention instead
+                // (param_borrow.rs marks such params owned; this is the
+                // fallback, leak-not-dangle).
+                let true_tail = tail && ret.is_some() && ret == self.fn_ret;
+                // The Try see-through armed this site: it MUST transfer.
+                // Any other tail site may stay a plain call and let the
+                // epilogue release after it (`no_transfer`).
+                let must_transfer = std::mem::take(&mut self.try_see_through) && true_tail;
+                let mut no_transfer = false;
+                let depth = self.borrowed_temps.len();
+                for (k, (a, want)) in args.iter().zip(params).enumerate() {
                     self.lower(a, Some(want))?;
                     if loop_form_raw && let Some(p) = self.frame_param_var(a) && !moved.contains(&p) {
                         moved.push(p);
                         self.witness_arg(a, want);
                         continue;
                     }
-                    // RC-3 callee-owned args: a borrowed droppable
-                    // argument gets +1 here, the callee's epilogue decs
-                    // its params — the pair keeps a mut-param callee's
-                    // realloc-free honest (rc reflects both holders).
-                    self.rc_arg_guard(a, want);
-                    self.witness_arg(a, want);
+                    let is_static = matches!(a.kind, IrExprKind::LitStr { .. });
+                    let fresh = self.rc_droppable(want) && self.rc_owned_result(a) && !is_static;
+                    // Past a true tail site only a value THIS frame does
+                    // not own survives the exit plan: a param it borrows
+                    // itself, or a pool static (param_borrow.rs
+                    // `tail_safe_arg`).
+                    let tail_safe = !true_tail
+                        || is_static
+                        || matches!(&a.kind, IrExprKind::Var { id }
+                            if self.locals.get(id).is_some_and(|&(idx, _)| {
+                                idx < self.rc_param_ceiling && !self.rc_frame_params.contains(&idx)
+                            }));
+                    // A borrowed POSITION: droppable, and not owned by the
+                    // callee (a scalar param has no convention at all).
+                    let borrowed_pos =
+                        self.rc_droppable(want) && !param_owned.get(k).copied().unwrap_or(true);
+                    if borrowed_pos && !tail_safe && !must_transfer {
+                        no_transfer = true;
+                    }
+                    if !borrowed_pos || (must_transfer && !tail_safe) {
+                        // RC-3 callee-owned args: a borrowed droppable
+                        // argument gets +1 here, the callee's epilogue decs
+                        // its params — the pair keeps a mut-param callee's
+                        // realloc-free honest (rc reflects both holders).
+                        self.rc_arg_guard(a, want);
+                        self.witness_arg(a, want);
+                    } else {
+                        // A borrowed param (#2028): a Var passes as is; an
+                        // owned temporary is parked for release after the
+                        // call (a string literal is a pool static: nothing
+                        // to release).
+                        if fresh {
+                            if self.borrowed_temps.len() as u32 >= crate::emitter::BORROW_POOL {
+                                return unsup("borrow-depth");
+                            }
+                            let h = self.borrow_base + self.borrowed_temps.len() as u32;
+                            self.f.instructions().local_tee(h);
+                            self.borrowed_temps.push((h, want));
+                        }
+                        self.witness_arg_borrowed(a, want, fresh);
+                    }
                 }
+                let parked = self.borrowed_temps.len() > depth;
                 self.calls.insert(i);
                 if let Some(blk) = save {
                     self.f.instructions().call(index);
+                    self.release_borrowed_temps(depth);
                     self.emit_region_restore(blk);
                     return Ok(ret);
                 }
                 // Tail position with a matching return type → return_call:
                 // constant stack for arbitrarily deep (incl. mutual)
-                // recursion, the C-292 contract.
+                // recursion, the C-292 contract. A parked temporary must
+                // outlive the callee, so its site stays a plain call.
                 if tail
+                    && !parked
+                    && !no_transfer
                     && ret.is_some()
                     && ret == self.fn_ret
                     && self.tail_transfer_ok(Some(index) != self.self_index)
@@ -222,6 +279,7 @@ impl Emitter<'_> {
                     self.f.instructions().return_call(index);
                 } else {
                     self.f.instructions().call(index);
+                    self.release_borrowed_temps(depth);
                 }
                 Ok(ret)
             }

@@ -50,7 +50,12 @@ SUITE = [
     # onebrc writes/reads a measurements file; the wasm leg has no preopened
     # dir under `wasmtime run` so the row is native/rust only.
     ("onebrc",       "onebrc/onebrc.almd",               ["onebrc.rs"],                     "10000000", "50000", "bytes", ["native", "rust"]),
-    ("binarytrees",  "binarytrees/binarytrees.almd",     [],                                "18",       "10",   "bytes", None),
+    # binarytrees (#1991): `binarytrees.rs` is the same-shape `Box` program a
+    # Rust programmer writes, sequential (Almide's `fan.map` is sequential on
+    # the native leg). The native leg beats it — `check(make(d))` runs in a
+    # region window — so the ratio sits below 1; reported, not anchored
+    # (allocator-dependent across machines, like listbuild).
+    ("binarytrees",  "binarytrees/binarytrees.almd",     ["binarytrees.rs"],                "18",       "10",   "bytes", None),
     ("mandelbrot",   "mandelbrot/mandelbrot.almd",       [],                                "4000",     "200",  "bytes", None),
     # listbuild (#1337): the SAME materializing workload written three ways.
     # The rows differ only in the build loop — same arithmetic, same checksum
@@ -86,7 +91,9 @@ QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
     "fft-wasm": "16",
     "fannkuchredux": "9",
     "onebrc": "1000000",
-    "binarytrees": "14",
+    # 17, not 14: the region window (#1991) took the native row to ~18 ms at
+    # 14, under the spawn-noise floor; 17 reads ~145 ms native / ~435 ms ref.
+    "binarytrees": "17",
     "mandelbrot": "1000",
     "listbuild": "23",
     "listbuild-append": "23",

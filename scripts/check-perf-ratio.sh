@@ -77,7 +77,17 @@ PAIRS="nbody=rust:nbody_unrolled spectralnorm=rust:spectralnorm fasta=rust:fasta
 # Promoting this row to PAIRS wants a second architecture's number first; note
 # that unlike `listbuild` both sides here allocate identically, so it may well
 # turn out to be anchorable. See research/benchmark/perf/string-gap-1004.md.
-REPORTED="listbuild=rust:listbuild listbuild-append=rust:listbuild listbuild-comb=rust:listbuild strchurn=rust:strchurn"
+#
+# `binarytrees` (#1991) is the same class, measured the same day the row was
+# added: against the same-shape `Box` reference the native leg (which runs
+# `check(make(d))` inside a region window — twin fns over a bump arena, one
+# rewind per tree instead of one free per node) reads 0.31 on an M4 Pro and
+# 0.61 on the ubuntu-latest runner, both sides of the +40%/-50% band of
+# either number. What differs is the allocator the REFERENCE pays for (glibc
+# malloc frees a Box far cheaper than macOS's), not the window, so the row
+# is reported here and the window's own A/B (ALMIDE_REGION_OFF=1, same
+# binary, same machine) is the measurement that says whether it fires.
+REPORTED="listbuild=rust:listbuild listbuild-append=rust:listbuild listbuild-comb=rust:listbuild strchurn=rust:strchurn binarytrees=rust:binarytrees"
 # IDIOM GATE (#1337). The three listbuild rows build the SAME result three
 # ways, so beyond each row's own ratio there is a relation between them that
 # the mission depends on: CLAUDE.md and docs/CHEATSHEET.md tell authors (and
@@ -109,7 +119,7 @@ trap 'rm -f "$out"' EXIT
 
 python3 research/benchmark/perf/bench.py \
   --quick --runs "$RUNS" --legs native,rust \
-  --bench nbody,spectralnorm,fasta,fft,listbuild,listbuild-append,listbuild-comb,strchurn \
+  --bench nbody,spectralnorm,fasta,fft,binarytrees,listbuild,listbuild-append,listbuild-comb,strchurn \
   --label ratchet --out "$out"
 
 # ABLATION LEG (#1466): the same anchored benchmarks with the IR optimizer's
