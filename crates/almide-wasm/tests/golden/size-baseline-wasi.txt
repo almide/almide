@@ -665,6 +665,7 @@
 5812	spec/wasm_cross/unwrap_or_tail_result.almd
 2853	spec/wasm_cross/unwrap_or_tuple_payload_extract.almd
 30389	spec/wasm_cross/unwrap_or_unwrap_fallback.almd
+21841	spec/wasm_cross/unwrap_or_value_fn_named_parse.almd
 6839	spec/wasm_cross/uoe_heap_ok_share.almd
 3493	spec/wasm_cross/user_box_recursive_enum.almd
 3014	spec/wasm_cross/value_array_leak_loop.almd

@@ -676,6 +676,7 @@ evidence  = [
   { path = "spec/wasm_cross/match_result.almd", class = "fixture" },
   { path = "spec/wasm_cross/option_result.almd", class = "fixture" },
   { path = "spec/wasm_cross/control_flow.almd", class = "fixture" },
+  { path = "spec/wasm_cross/unwrap_or_value_fn_named_parse.almd", class = "fixture" },
 ]
 
 # ── LIST[STRING] PARAM CODEGEN ───────────────────────────────────────

@@ -677,15 +677,19 @@ impl<'a> Interpreter<'a> {
     /// The lowered Almide body `module.func` resolves to, paired with whether
     /// the eager-dispatch `mut`-parameter gate applies to it.
     ///
-    /// Three sources in order: the module's own fn table; a top-level fn named
-    /// exactly `func` (some stdlib helpers flatten); and LAST the self-hosted
-    /// stdlib body from the shared registry (stdlib_pool) — the SAME source the
-    /// wasm leg links for this call name, lowered once and layered into
-    /// `self.fns` at construction. Consulted last so the interp-native surfaces
-    /// above keep their vote provenance; what a pool body itself cannot
-    /// evaluate (a heap/effect prim outside the scalar floor) abstains from
-    /// inside with that prim named — a skip, never a guess — so the mut gate
-    /// does not apply to it.
+    /// Three sources in order: the module's own fn table; a flattened
+    /// top-level fn named exactly `func` (some stdlib helpers flatten) that is
+    /// NOT the entry program's own — a `module.func` call never names a
+    /// program-root fn, so a user `fn parse` must not capture `json.parse`
+    /// (#2058: its body calls `json.parse`, which resolved back to itself and
+    /// spun to fuel exhaustion; the module-identity class, #1087–#1094); and
+    /// LAST the self-hosted stdlib body from the shared registry (stdlib_pool)
+    /// — the SAME source the wasm leg links for this call name, lowered once
+    /// and layered into `self.fns` at construction. Consulted last so the
+    /// interp-native surfaces above keep their vote provenance; what a pool
+    /// body itself cannot evaluate (a heap/effect prim outside the scalar
+    /// floor) abstains from inside with that prim named — a skip, never a
+    /// guess — so the mut gate does not apply to it.
     ///
     /// A `Hole` body is an intrinsic stub, not an interpretable definition:
     /// each source skips it and falls through to the next.
@@ -696,7 +700,10 @@ impl<'a> Interpreter<'a> {
         if let Some(d) = self.module_fns.get(&(module, func)).copied().filter(bodied) {
             return Some((d, true));
         }
-        if let Some(d) = self.fns.get(&func).copied().filter(bodied) {
+        let program_root = |d: &&almide_ir::IrFunction| {
+            self.fn_space.get(&(*d as *const almide_ir::IrFunction as usize)) == Some(&0)
+        };
+        if let Some(d) = self.fns.get(&func).copied().filter(bodied).filter(|d| !program_root(d)) {
             return Some((d, true));
         }
         let impl_name = crate::stdlib_pool::impl_fn(module, func)?;

@@ -649,6 +649,36 @@ fn main() -> Unit = {
     assert_eq!(stdout, "105\n");
 }
 
+// ── Module call vs a program fn of the same bare name (#2058) ───
+
+/// `json.parse(s) ?? value.null()` inside a program fn NAMED `parse` spun to
+/// fuel exhaustion: the module-call resolver's flattened-helper tier answered
+/// `module.func` with the program's own `func`, so the body called itself.
+/// A `module.func` call never names a program-root fn. Pinned json-free
+/// (the eval_test recipe loads no `json` module): the same shapes over
+/// `int.parse` and `value.stringify`, expression-bodied and block-bodied.
+#[test]
+fn module_call_never_resolves_to_the_program_fn_of_the_same_name() {
+    expect_out(
+        r#"
+fn parse(s: String) -> Int = int.parse(s) ?? 0
+
+fn parse_block(s: String) -> Int = {
+  let n = int.parse(s) ?? -1
+  n
+}
+
+fn stringify(v: Value) -> String = value.stringify(v)
+
+fn main() -> Unit = {
+  println("${parse("12")} ${parse("x")}")
+  println("${parse_block("7")} ${parse_block("")}")
+  println(stringify(value.int(3)))
+}"#,
+        "12 0\n7 -1\n3\n",
+    );
+}
+
 include!("eval_test_parts/sort_and_mut.rs");
 include!("eval_test_parts/fallible_hofs.rs");
 include!("eval_test_parts/result_blocks.rs");
