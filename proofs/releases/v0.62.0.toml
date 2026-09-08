@@ -1,0 +1,27 @@
+# Release evidence seal — v0.62.0. IMMUTABLE: every [derived] field is
+# re-measured from the tag's tree by `scripts/release-seal.sh check`;
+# an edit that disagrees with the tag fails CI. [recorded] fields are
+# facts the tag cannot re-derive (fill them in before committing).
+
+[release]
+version = "0.62.0"
+tag = "v0.62.0"
+tag_commit = "f32cedf533c973bcf9aa785179e5ab3f3c0e4792"
+date = "2026-09-08"
+url = "https://github.com/almide/almide/releases/tag/v0.62.0"
+
+[derived]
+cargo_version = "0.62.0"
+contracts_sha256 = "2b24e1f4ab8ba5e89ede53bf19809f842a0a34c56bdf475a0f60fb039d56e249"
+contracts_total = "347"
+contracts_flagged = "0"
+abstain_ledger_sha256 = "2d28d541b12f29b9d4aacef7e6b590a2891657fcb47a49ec58eb127702bde720"
+abstain_ledger_entries = "21"
+wasm_cross_fixtures = "693"
+rust_toolchain = "1.94.0"
+wasmtime = "v47.0.3"
+
+[recorded]
+release_gate = "Minor release through the rc channel (#1484): v0.62.0-rc1 (fb9532068, 2026-09-08) soaked; the soak found #2028 (sequential allocation +51 % on the structural wasm leg, a regression of the #2010 drop-glue arc) — fixed before the final tag by parameter borrow inference on the structural leg (#2030: a droppable param the callee only reads is borrowed; module arms, assignments and true tail sites keep the owned convention; tree walk 142 -> 81 ms; treealloc row added to the runtime ratchet), plus the stale mutants the arc moved (#2029, #2031). On the owner's call the final also carries the native region window (#2032, closes #1991: binarytrees native 252 -> 71 ms, 0.81x Zig's arena, prelude bump arena over Copy twin enums) and the table-free Schubfach float printer (#2033, closes #1985: one-float probe 7,783 -> 5,508 B, size corpus -13.9 %, byte-exact against Rust Display over 2,736,458 differential values, to_fixed byte-identical). Blocker gate at the tag: 0 (#1482). Interface diff v0.61.1 -> v0.62.0: additive (added=14 removed=0; #1488): the http *_response family, int.is_even/is_odd, testing.assert_snapshot, zlib.adler32/crc32. Tag-tree CI: the release PR (#2034) ran the full battery on the content-identical develop head f32cedf5's parent 8b086836e; every required check green; the one red is Test Rust (windows-latest), a spec-only portability defect (fan_mapper_matrix_test asserts the OS's ENOENT prose) present since cd050b8ce before rc1, fixed on develop as #2035 right after the tag. Fuzz: no dedicated tag dispatch — latest nightly generative differential fuzz 34096107214 (2026-09-07): 10,133 programs over 7/8 shards, findings=0 correctness=0 slow=0; the ALMIDE_RC_TRAP_DOUBLE_FREE corpus burn-up is a CI step since #2022 and ran green on every rider."
+assets = "7: almide-linux-x86_64.tar.gz, almide-linux-aarch64.tar.gz, almide-macos-x86_64.tar.gz, almide-macos-aarch64.tar.gz, almide-windows-x86_64.zip, almide-checksums.sha256, almide-dossier-v0.62.0.md (the qualification dossier, the minor-release Trust Spine artifact)"
+known_problems = "None release-blocking. Standing, all visible-by-design: (1) #1696 step 4 — the structural leg's witness does not yet cover the full wasm_cross corpus, and step 5 (incumbent retirement) waits on it; (2) #1963 — the MSR thesis has no current measurement (the MiniGit bench saturates at 20/20 for every language); (3) Test Rust (windows-latest) red on the tag tree for the spec-only reason above (#2035 on develop); (4) the region window's native perf-ratchet row is REPORTED, not anchored — the Box-reference ratio flips 0.33 (macOS) / 0.61 (glibc) with the allocator; (5) C-023's title named Dragon4 at the tag; the statement (byte-equality with Rust Display) is unchanged and the title follows in the seal commit (als #63)."
