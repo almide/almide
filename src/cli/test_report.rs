@@ -379,10 +379,13 @@ fn strip_libtest_progress(l: &str) -> &str {
     if !l.starts_with("test ") {
         return l;
     }
-    match l.find(" ... Error: ") {
-        Some(pos) => &l[pos + " ... ".len()..],
-        None => l,
-    }
+    // Three interleavings reach here: `... Error:` (the fragment flushed
+    // before the abort), `... okError:` (the PREVIOUS test's verdict flushed
+    // without its newline — one queue run, PR #2038), and the plain line.
+    let Some(pos) = l.find(" ... ") else { return l };
+    let tail = &l[pos + " ... ".len()..];
+    let tail = tail.strip_prefix("ok").filter(|t| t.starts_with("Error: ")).unwrap_or(tail);
+    if tail.starts_with("Error: ") { tail } else { l }
 }
 
 /// The `  key: value` tail of a T18 block. `expected` ends where `  found: `
@@ -699,6 +702,15 @@ mod tests {
         assert!(r.contains("accept: snapshot drift — run `almide test --update-snapshots plain_test.almd`"), "{r}");
         // A program line that merely mentions the words is not a header.
         assert!(parse("f.almd", "", "note: Error: snapshot mismatch is what it prints\n").is_empty());
+        // The previous test's `ok` verdict flushed without its newline and the
+        // header followed it directly (one queue run, PR #2038).
+        let glued = "running 3 tests\ntest tests::__test_a ... okError: snapshot mismatch\n  at: line 10\n  expected: item 1\nitem 2\n  found: item 1\nitem 2\nitem 3\n";
+        let fs = parse("plain_test.almd", "", glued);
+        assert_eq!(fs.len(), 1, "{fs:?}");
+        assert_eq!(fs[0].line, Some(10));
+        assert!(fs[0].render().contains("accept: snapshot drift"), "{}", fs[0].render());
+        // `test x ... ok` alone is a verdict line, not a header.
+        assert!(parse("f.almd", "", "test tests::__test_a ... ok\n").is_empty());
     }
 
     #[test]
