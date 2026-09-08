@@ -1,24 +1,27 @@
 // @contract: C-066
 // #2010 Map stage b, the Set half: a Set's MEMBERS are released with its
 // entries array, every algebra result (union / intersection / difference /
-// symmetric_difference / map / filter / remove / insert) taking its own
-// member credits, `to_list` handing out a copy with its own. 2000 rounds of
+// symmetric_difference / filter / remove / insert) taking its own member
+// credits, `to_list` handing out a copy with its own. 2000 rounds of
 // building and combining Set[String]s per round; the checksum pins value
 // correctness byte-identical native == wasm, and the alloc ledger pins the
-// watermark (it does not grow with the round count).
+// watermark (it does not grow with the round count). Shapes stay inside the
+// incumbent's linked registry (no `set.map` over strings) so the v1 leg
+// lowers the fixture too.
 fn build(i: Int) -> Set[String] = {
   let si = int.to_string(i)
-  let a = set.from_list(["a" + si, "b", "c" + int.to_string(i % 2)])
-  let b = set.from_list(["b", "d" + si])
+  let xs = ["a" + si, "b", "c" + int.to_string(i % 2)]
+  let a = set.from_list(xs)
+  let ys = ["b", "d" + si]
+  let b = set.from_list(ys)
   let u = set.union(a, b)
   let x = set.intersection(u, a)
   let d = set.difference(u, b)
   let sd = set.symmetric_difference(a, b)
-  let m = set.map(sd, (s) => s + "!")
-  let f = set.filter(m, (s) => string.len(s) > 2)
-  let present = set.insert(f, "b!")
+  let f = set.filter(sd, (s) => string.len(s) > 1)
+  let present = set.insert(f, "b")
   let absent = set.insert(present, "e" + si)
-  set.union(absent, x) |> set.union(d)
+  set.union(set.union(absent, x), d)
 }
 
 fn main() -> Unit = {
