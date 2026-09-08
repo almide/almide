@@ -203,6 +203,31 @@ pub fn almide_rt_value_field_ref<'a>(v: &'a AlmideValue, key: &str) -> Result<&'
         Err(format!("expected Object, received {}", almide_rt_value_kind(v)))
     }
 }
+/// `almide_rt_value_field_ref` with a slot hint (#1679, slot-indexed lookup). A
+/// derived `T.decode` knows the declaration index of every field, and a
+/// document written by `T.encode` (or by hand in declaration order — the
+/// common case) carries its keys in that order, so the field is usually
+/// sitting at `pairs[hint]`: one bounds check and one key compare, no scan.
+/// The compare is length-then-pointer-then-bytes: the key literal the derive
+/// passes and the interned `Cow::Borrowed` key are distinct allocations, so
+/// the pointer test is only the cheap identity short-cut (a key the program
+/// itself interned), and a same-length key falls through to one short byte
+/// compare. A miss at the
+/// hint (a reordered, sparse, or hand-built document) falls back to the plain
+/// scan, so the result and the two error strings (C-084) are exactly
+/// `almide_rt_value_field_ref`'s for every document.
+#[inline]
+pub fn almide_rt_value_field_ref_at<'a>(v: &'a AlmideValue, key: &str, hint: usize) -> Result<&'a AlmideValue, String> {
+    if let AlmideValue::Object(pairs) = v {
+        if let Some((k, val)) = pairs.get(hint) {
+            let k: &str = k.as_ref();
+            if k.len() == key.len() && (std::ptr::eq(k.as_ptr(), key.as_ptr()) || k == key) {
+                return Ok(val);
+            }
+        }
+    }
+    almide_rt_value_field_ref(v, key)
+}
 pub fn almide_rt_value_decode_with_default<T: Clone, F: Fn(AlmideValue) -> Result<T, String>>(v: &AlmideValue, key: &str, default: T, f: F) -> Result<T, String> {
     match almide_rt_value_field(v, key) {
         Ok(AlmideValue::Null) => Ok(default),

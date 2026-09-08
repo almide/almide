@@ -18,6 +18,7 @@ use super::pass_capture_clone::CaptureClonePass;
 use super::pass_shared_cell_borrow::SharedCellBorrowPass;
 use super::pass_clone::CloneInsertionPass;
 use super::pass_builtin_lowering::BuiltinLoweringPass;
+use super::pass_decode_slot_hint::DecodeSlotHintPass;
 use super::pass_result_propagation::ResultPropagationPass;
 use super::pass_intrinsic_lowering::IntrinsicLoweringPass;
 use super::pass_normalize_runtime_calls::NormalizeRuntimeCallsPass;
@@ -146,6 +147,10 @@ fn build_pipeline(target: Target) -> Pipeline {
         .add(ResultPropagationPass)
         // 3. Builtin last: Named calls (assert_eq, println, etc.) → RustMacro
         .add(BuiltinLoweringPass)
+        // DecodeSlotHint (#1679): a derived `T.decode`'s borrowed field
+        // lookups carry their declaration index. After BuiltinLowering
+        // (the codec reroutes are final), before NormalizeRuntimeCalls.
+        .add(DecodeSlotHintPass)
         // Peephole: swap/reverse/rotate/copy → specialized IR nodes
                 .add(PeepholePass)
                 // Rust-specific: push optimization, borrow index lift
