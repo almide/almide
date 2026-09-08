@@ -81,9 +81,13 @@ issue's workload; arg 18 in brackets):
 | Rust, same-shape `Box` (`rust-ref/binarytrees.rs`) | 222 ms | 222 ms | Almide now 0.33× |
 | Zig 0.16 arena (issue #1991, same shape) | 88 ms | 88 ms | Almide 0.82× — inside the 1.3× acceptance |
 
-The row joins the ratchet's anchored pairs (`binarytrees=rust:binarytrees`,
-baseline 0.33, quick arg 17) so the window cannot silently stop firing: a
-ratio climbing back toward 1 is a red build. What fires: every
+The row joins the ratchet's REPORTED rows (`binarytrees=rust:binarytrees`,
+quick arg 17), not the anchored ones: the same commit reads 0.31 on the M4 Pro
+and 0.61 on the ubuntu-latest runner, because what differs between the two
+machines is how cheaply the *reference* frees a `Box` (glibc malloc vs macOS),
+not the window — the same allocator-dependence that keeps the listbuild rows
+reported. The window's own A/B is `ALMIDE_REGION_OFF=1` on the same binary and
+machine (3.5× here). What fires: every
 `consume(produce(scalars))` site whose pair is region-pure and whose produced
 type is a root variant enum with scalar / region-enum payloads. What does not:
 a held tree (`let t = make(d)` read twice keeps its `Box`), a consumer that
