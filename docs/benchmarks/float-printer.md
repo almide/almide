@@ -38,6 +38,28 @@ neighbours, 0.1+0.2, 1/3, 2^53+1 — each with the sign bit clear and set. The s
 variant was additionally run against the Dragon4 port on the wasm leg over the same
 stream: 0 mismatches.
 
+### Targeted sets (beyond uniform bit patterns)
+
+The same wired `float.to_string` on the wasm leg against native `format!`, one program per
+set run on both legs and `cmp`-compared (`research/spike/float-printer/gen_evidence.py`;
+where a parser is involved the line also carries the parsed bits, so a parser divergence
+would be told apart from a printer one — none occurred). The 0.62.0 release binary (the
+Dragon4 printer) was run on the same programs as a second reference.
+
+| set | tested | mismatches vs native `format!` | vs 0.62.0 Dragon4 |
+|---|---:|---:|---|
+| 1. exponent field 1000..1060 (~1e-7..1e10), random sign and significand | 1,000,000 | **0** | identical on the 519,151 values it printed before running out of memory (3,744 B of scratch per call) |
+| 2. decimal round-trips: 1..17 significant digits as `d.dddd`, `dd.dd`, `-d.ddd`, `d.ddde±N`, `ddde±N` (N in −330..309), parsed with `float.parse`, then printed | 500,000 | **0** | identical |
+| 3. every integer 0..100000; 10^k for k in −320..308; 2^k for k in −1074..1023; the 201 doubles around 1.0, 1e15, 1e16, 1e17, 1e22, 1e23; the halfway decimals between doubles at those anchors; the subnormal minimum, the max finite; 0.1/0.2/0.3/0.7/1.1/2.675/5e-324/9007199254740993 | 103,969 | **0** | identical |
+| 4. `float.to_fixed` (the retained Dragon4 fixed path), random bit patterns × precision 0..10 | 100,000 | **0** | identical, byte for byte |
+
+Set 2 is run under `wasmtime` directly: the wasm-leg `float.parse` takes ~0.3 ms per
+string and the `almide run` host interrupts at 30 s. No rule change came out of these
+sets; the two Java-vs-Rust departures below were both found by the boundary set. The
+out-of-memory in set 1's Dragon4 reference run is the old printer's 3,744 B scratch block
+per call under the 0.62.0 release; the shipped printer completes a 10,000,000-call probe
+(208 B of scratch per call) on the same host.
+
 Timing is `almide bench` (median of 3 after a warm-up) of 1,000,000 conversions of the
 seeded stream — uniformly random bit patterns, so mostly huge and tiny magnitudes, the
 expensive end for every printer. Native has no Almide printer: `float.to_string` is
