@@ -354,6 +354,24 @@ fn seed_intrinsic_sig_for_fn(
     sigs.insert(symbol.clone(), borrows);
 }
 
+/// The generated primitive codec helpers a derived decode calls by bare name
+/// — `__decode_option_<prim>(v, key)` and `__decode_default_<prim|list_prim>(v,
+/// key, default)` — reach this pass with no declaration behind them (the
+/// native runtime twins are prelude fns, not bundled `@intrinsic` decls), so
+/// the unknown-callee fallback forced every derived decode that used one to
+/// OWN its `Value` (#2052): the whole document was moved or cloned per field,
+/// and an outer decode that borrowed (`alt: Addr?`) handed its `&Value` to the
+/// by-value option driver — rustc E0308 on a program `check` had accepted.
+/// The runtime twins take `&AlmideValue` (runtime/rs/src/value.rs), so slot 0
+/// borrows here; the key and the default are consumed.
+fn seed_codec_helper_sigs(sigs: &mut HashMap<String, Vec<ParamBorrow>>) {
+    for prim in ["string", "int", "float", "bool"] {
+        sigs.insert(format!("__decode_option_{prim}"), vec![ParamBorrow::Ref, ParamBorrow::Own]);
+        sigs.insert(format!("__decode_default_{prim}"), vec![ParamBorrow::Ref, ParamBorrow::Own, ParamBorrow::Own]);
+        sigs.insert(format!("__decode_default_list_{prim}"), vec![ParamBorrow::Ref, ParamBorrow::Own, ParamBorrow::Own]);
+    }
+}
+
 fn seed_intrinsic_sigs(sigs: &mut HashMap<String, Vec<ParamBorrow>>) {
     use almide_lang::ast::Decl;
     for &mod_name in almide_lang::stdlib_info::BUNDLED_MODULES {
@@ -564,6 +582,7 @@ pub fn infer_borrow_signatures(program: &mut IrProgram) -> HashMap<String, Vec<P
 
     seed_record_names(program);
     seed_intrinsic_sigs(&mut sigs);
+    seed_codec_helper_sigs(&mut sigs);
     alias_float_variant_sigs(&mut sigs);
     seed_pending_user_fns(program);
 

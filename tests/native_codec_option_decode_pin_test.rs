@@ -108,3 +108,48 @@ type Thing: Codec = {
         "s1\nnone\n2",
     );
 }
+
+/// #2052 (0.62.0, the same "check green must build" class, single module).
+/// The `T?` × {record with a default field, record without, list, primitive}
+/// matrix on one derived decode, the outer record itself carrying a default
+/// (so its own decode uses `__decode_default_*`), and a third level wrapping
+/// the whole thing in an Option. Before the fix the record-with-default cell
+/// emitted `decode_option_custom(_v, ..)` with `_v: &AlmideValue` — E0308.
+#[test]
+fn option_field_matrix_with_defaulted_records_builds_native() {
+    run_prints(
+        "opt_matrix",
+        &[(
+            "src/main.almd",
+            r#"import json
+
+type WithDefault: Codec = { city: String, zip: String = "0" }
+type Plain: Codec = { city: String }
+type Rec: Codec = { name: String, a: WithDefault?, b: Plain?, c: List[Int]?, d: Int?, e: List[WithDefault]?, f: String = "t" }
+type Outer: Codec = { r: Rec?, n: Int = 1 }
+
+fn show(r: Rec) -> String = {
+  let a = match r.a { some(x) => x.city + "/" + x.zip, none => "-" }
+  let b = match r.b { some(x) => x.city, none => "-" }
+  let c = match r.c { some(xs) => int.to_string(list.len(xs)), none => "-" }
+  let d = match r.d { some(x) => int.to_string(x), none => "-" }
+  let e = match r.e { some(xs) => int.to_string(list.len(xs)), none => "-" }
+  r.name + " " + a + " " + b + " " + c + " " + d + " " + e + " " + r.f
+}
+
+effect fn main() -> Unit = {
+  let full = json.parse("{\"name\":\"x\",\"a\":{\"city\":\"p\"},\"b\":{\"city\":\"q\"},\"c\":[1,2],\"d\":7,\"e\":[{\"city\":\"r\",\"zip\":\"9\"}],\"f\":\"u\"}")!
+  match Rec.decode(full) { ok(r) => println(show(r)), err(e) => println(e) }
+  let bare = json.parse("{\"name\":\"y\"}")!
+  match Rec.decode(bare) { ok(r) => println(show(r)), err(e) => println(e) }
+  let outer = json.parse("{\"r\":{\"name\":\"z\",\"a\":{\"city\":\"s\",\"zip\":\"1\"}}}")!
+  match Outer.decode(outer) {
+    ok(o) => match o.r { some(r) => println(show(r) + " " + int.to_string(o.n)), none => println("none") },
+    err(e) => println(e),
+  }
+}
+"#,
+        )],
+        "x p/0 q 2 7 1 u\ny - - - - - t\nz s/1 - - - - t 1",
+    );
+}

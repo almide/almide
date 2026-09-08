@@ -37,6 +37,10 @@ type Shape: Codec = | Circle(Float) | Point | Label { text: String, hint: String
 
 type Deep: Codec = { lo: List[Int?], ll: List[List[Int]], dp: List[String?]?, lc: List[Inner?] }
 
+type Defaulted: Codec = { city: String, zip: String = "0" }
+
+type OptCells: Codec = { d: Defaulted?, p: Inner?, l: List[Int]?, s: String?, tag: String = "t" }
+
 fn enc_scalars(x: Scalars) -> String = json.stringify(Scalars.encode(x))
 
 fn enc_opts(x: Opts) -> String = json.stringify(Opts.encode(x))
@@ -182,4 +186,33 @@ test "variant record case: Option field omits none, folds missing/null to none" 
   assert_eq(Shape.decode(parse('{"Label":{"text":"a"}}')), ok(Label { text: "a", hint: none }))
   assert_eq(Shape.decode(parse('{"Label":{"text":"a","hint":null}}')), ok(Label { text: "a", hint: none }))
   assert_eq(Shape.decode(Shape.encode(Label { text: "c", hint: some("h") })), ok(Label { text: "c", hint: some("h") }))
+}
+
+// #2052: Option × {record with a default field, record without, list,
+// primitive} on one record that itself carries a default. The
+// record-with-default cell failed to BUILD on native (its inner decode owned
+// the document while the outer borrowed it); the cells must agree on both legs.
+test "Option × {record with default, record without, list, primitive}: present decodes, missing/null fold to none, defaults fill" {
+  match OptCells.decode(parse('{"d":{"city":"x"},"p":{"n":1},"l":[1],"s":"s"}')) {
+    ok(c) => {
+      assert_eq(c.d, some(Defaulted { city: "x", zip: "0" }))
+      assert_eq(c.p, some(Inner { n: 1 }))
+      assert_eq(c.l, some([1]))
+      assert_eq(c.s, some("s"))
+      assert_eq(c.tag, "t")
+    },
+    err(_) => assert(false),
+  }
+  match OptCells.decode(parse('{"d":null,"tag":null}')) {
+    ok(c) => {
+      assert_eq(c.d, none)
+      assert_eq(c.p, none)
+      assert_eq(c.l, none)
+      assert_eq(c.s, none)
+      assert_eq(c.tag, "t")
+    },
+    err(_) => assert(false),
+  }
+  let full = OptCells { d: some(Defaulted { city: "y", zip: "9" }), p: some(Inner { n: 2 }), l: some([3]), s: some("z"), tag: "u" }
+  assert_eq(OptCells.decode(OptCells.encode(full)), ok(full))
 }

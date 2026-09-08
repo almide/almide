@@ -114,6 +114,47 @@ fn list_and_option_drivers_take_the_by_reference_twin() {
     assert!(rust.contains("__decode_option_Address(_v: &AlmideValue, _key: String)"), "the derived option worker borrows its AlmideValue too:\n{}", grep(&rust, "__decode_option_Address"));
 }
 
+/// #2052: the primitive option/default helpers (`__decode_option_<prim>`,
+/// `__decode_default_*`) were the last decode helpers taking the document BY
+/// VALUE, and BorrowInsertion had no signature for them — so a decode that
+/// used one owned its input (a whole-document move/clone per field), and an
+/// outer `T?` field of such a record handed a borrowed `_v` to the by-value
+/// `decode_option_custom` driver (E0308). The `T?` × {record with a default
+/// field, record without, list, primitive} matrix, plus a defaulted scalar and
+/// a defaulted list on the outer record: every derived decode borrows, every
+/// helper receives the borrow, no driver receives a mismatched document.
+const OPT_MATRIX_SRC: &str = "type WithDefault: Codec = { city: String, zip: String = \"0\" }\n\
+    type Plain: Codec = { city: String }\n\
+    type Rec: Codec = { name: String, a: WithDefault?, b: Plain?, c: List[Int]?, d: Int?, tag: String = \"t\", xs: List[Int] = [] }\n\
+    fn main() -> Unit = {\n\
+      let v = value.object([(\"name\", value.str(\"a\"))])\n\
+      match Rec.decode(v) { ok(r) => println(r.name), err(e) => println(e) }\n\
+    }\n";
+
+#[test]
+fn primitive_option_and_default_helpers_borrow_the_document() {
+    if !tool_available() { eprintln!("skipping: almide binary not available"); return; }
+    let rust = emitted(OPT_MATRIX_SRC, "opt-matrix");
+    for decode in ["WithDefault_decode", "Plain_decode", "Rec_decode"] {
+        assert!(rust.contains(&format!("pub fn {decode}(_v: &AlmideValue)")),
+            "every derived decode borrows its document, defaulted fields or not (#2052):\n{}", grep(&rust, "_decode("));
+    }
+    assert!(rust.contains("almide_rt_value_decode_option_custom_ref(_v, \"a\".to_string(), WithDefault_decode)"),
+        "an Option[record-with-default] field routes to the by-reference option driver:\n{}", grep(&rust, "decode_option_custom"));
+    assert!(rust.contains("almide_rt_value_decode_option_custom_ref(_v, \"b\".to_string(), Plain_decode)"),
+        "an Option[record] field routes to the by-reference option driver:\n{}", grep(&rust, "decode_option_custom"));
+    assert!(!rust.contains("almide_rt_value_decode_option_custom("),
+        "the by-value option driver must never be handed a borrowed document:\n{}", grep(&rust, "decode_option_custom"));
+    assert!(rust.contains("almide_rt___decode_option_int(_v, \"d\".to_string())"),
+        "a primitive Option field hands the helper the borrowed document, not a clone:\n{}", grep(&rust, "__decode_option_int"));
+    assert!(rust.contains("almide_rt___decode_default_string(_v, \"tag\".to_string()"),
+        "a defaulted scalar field hands the helper the borrowed document:\n{}", grep(&rust, "__decode_default_string"));
+    assert!(rust.contains("almide_rt___decode_default_list_int(_v, \"xs\".to_string()"),
+        "a defaulted list field hands the helper the borrowed document:\n{}", grep(&rust, "__decode_default_list_int"));
+    assert!(!rust.contains("_v.clone()"),
+        "no whole-document clone survives in a derived decode:\n{}", grep(&rust, "_v.clone()"));
+}
+
 /// The lines of `rust` mentioning `needle` — a failure names the shapes that
 /// were emitted instead of dumping the whole program.
 fn grep(rust: &str, needle: &str) -> String {

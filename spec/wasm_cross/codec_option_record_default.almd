@@ -1,0 +1,60 @@
+// @contract: C-084
+// #2052: a Codec record with an optional field whose record type carries a
+// defaulted field — `alt: Addr?` with `Addr = { city, zip = "0" }`. Every
+// derived decode borrows its document (#1679), but the primitive option and
+// default helpers the inner decode called took the document BY VALUE, so the
+// inner decode owned its input and the outer handed a borrowed `_v` to the
+// by-value option driver: rustc E0308 on a program `check` had accepted (the
+// wasm leg was fine). The helpers borrow now, and both legs print the same
+// bytes on the success path and on the error path — the inner decode's own
+// frames (`at city`, `missing field 'city'`) as the option driver forwards
+// them, identically on both legs.
+import json
+
+type Addr: Codec = { city: String, zip: String = "0" }
+
+type Plain: Codec = { city: String }
+
+type Rec: Codec = { name: String, alt: Addr?, home: Plain?, ns: List[Int]?, n: Int?, tag: String = "t" }
+
+fn show(r: Rec) -> String = {
+  let alt = match r.alt {
+    some(a) => a.city + "/" + a.zip,
+    none => "-",
+  }
+  let home = match r.home {
+    some(h) => h.city,
+    none => "-",
+  }
+  let ns = match r.ns {
+    some(xs) => int.to_string(list.len(xs)),
+    none => "-",
+  }
+  let n = match r.n {
+    some(x) => int.to_string(x),
+    none => "-",
+  }
+  r.name + " " + alt + " " + home + " " + ns + " " + n + " " + r.tag
+}
+
+// The document is parsed inline here rather than through a `parse(s) =
+// json.parse(s) ?? value.null()` helper: that one-expression helper spins the
+// pre-codegen interpreter to fuel exhaustion (a run-parity abstain), while
+// the same `??` inside a match subject runs fine on all three legs.
+fn report(doc: String) -> String = match Rec.decode(json.parse(doc) ?? value.null()) {
+  ok(r) => show(r),
+  err(e) => e,
+}
+
+fn main() -> Unit = {
+  // The issue's shape: the optional record is present, its default fills in.
+  println(report('{"name":"a","alt":{"city":"x"}}'))
+  // Every option cell present, every default overridden.
+  println(report('{"name":"b","alt":{"city":"y","zip":"9"},"home":{"city":"h"},"ns":[1,2,3],"n":4,"tag":"u"}'))
+  // Explicit nulls fold: the option to none, the defaulted field to its default.
+  println(report('{"name":"c","alt":null,"tag":null}'))
+  // Error frames through the option field: a type mismatch inside it, and a
+  // missing required field of the optional record.
+  println(report('{"name":"d","alt":{"city":5}}'))
+  println(report('{"name":"e","alt":{"zip":"1"}}'))
+}

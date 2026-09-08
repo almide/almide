@@ -1136,6 +1136,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/codec_decode_errors.almd", class = "fixture" },
   { path = "spec/wasm_cross/codec_decode_field_order.almd", class = "fixture" },
+  { path = "spec/wasm_cross/codec_option_record_default.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-085"

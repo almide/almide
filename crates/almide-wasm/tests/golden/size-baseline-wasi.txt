@@ -74,6 +74,7 @@
 31985	spec/wasm_cross/codec_nested_records.almd
 40761	spec/wasm_cross/codec_none_omission.almd
 28403	spec/wasm_cross/codec_option_numeric.almd
+33992	spec/wasm_cross/codec_option_record_default.almd
 26039	spec/wasm_cross/codec_string_escapes.almd
 29808	spec/wasm_cross/codec_triple_list.almd
 33651	spec/wasm_cross/codec_variant_roundtrip.almd
