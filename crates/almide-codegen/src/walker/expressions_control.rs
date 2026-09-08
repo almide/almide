@@ -482,7 +482,15 @@ fn render_expr_spread_record(ctx: &RenderContext, expr: &IrExpr) -> String {
         // former (module_origin || lazy_vars) probe.
         use almide_ir::top_let_storage::TopLetStorage as Tls;
         let needs_clone = ctx.ann.global_alias.contains_key(id)
-            || matches!(ctx.ann.global(*id).map(|i| i.storage), Some(Tls::Lazy { .. }));
+            || matches!(ctx.ann.global(*id).map(|i| i.storage), Some(Tls::Lazy { .. }))
+            // A param emitted as a reference (`&T` / `&mut T` for a `mut`
+            // param) spreads a borrow into a struct-update expression —
+            // `..st` where `st: &mut State` is E0308 in the generated Rust
+            // (#2037: `st = { ...st, pos: st.pos + 1 }` passed the checker
+            // and failed the build). `.clone()` autoderefs to the owned
+            // record the update needs.
+            || ctx.ref_params.contains(id)
+            || ctx.ref_mut_params.contains(id);
         if needs_clone && !base_str.ends_with(".clone()") {
             base_str = format!("{}.clone()", base_str);
         }

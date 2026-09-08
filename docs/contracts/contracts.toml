@@ -2784,6 +2784,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/mut_param_call_chain.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_writeback_growth.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mut_param_spread_reassign.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-227"

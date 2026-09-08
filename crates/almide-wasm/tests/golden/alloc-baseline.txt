@@ -400,6 +400,7 @@
 391568	spec/wasm_cross/mut_param_call_chain.almd
 69088	spec/wasm_cross/mut_param_effect_can_err.almd
 66064	spec/wasm_cross/mut_param_effect_never_err.almd
+65904	spec/wasm_cross/mut_param_spread_reassign.almd
 66416	spec/wasm_cross/mut_param_writeback_growth.almd
 70400	spec/wasm_cross/mutable_global_bytes_arena.almd
 66176	spec/wasm_cross/mutable_global_bytes_copy_from.almd
