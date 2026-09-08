@@ -328,7 +328,19 @@ fn check_needs_ownership_call_self_recursive(target: &CallTarget, args: &[IrExpr
 /// Same `bool` return convention as the other branches.
 fn check_needs_ownership_call_user_named(target: &CallTarget, args: &[IrExpr], var: VarId, needs: &mut bool) -> bool {
     let CallTarget::Named { name } = target else { return false; };
-    let Some(borrows) = lookup_user_borrows(name.as_str()) else { return false; };
+    let Some(borrows) = lookup_user_borrows(name.as_str()) else {
+        // A user fn this pass analyses whose signature is not in the
+        // snapshot yet: a forward reference or a mutual-recursion partner
+        // (#2040). Optimistic, exactly like the self-recursive branch — the
+        // next round sees its real signature and promotes this param to Own
+        // if the callee consumes the slot. An unknown NON-user name keeps
+        // the pessimistic fallback.
+        if crate::pass_borrow_inference::is_pending_user_fn(name.as_str()) {
+            for arg in args { check_needs_ownership(arg, var, needs); }
+            return true;
+        }
+        return false;
+    };
     for (i, arg) in args.iter().enumerate() {
         // The callee borrows slot `i` (Ref/RefSlice/RefStr)
         // → forwarding a heap-typed var into it does NOT
