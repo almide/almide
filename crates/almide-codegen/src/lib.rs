@@ -49,6 +49,8 @@ pub mod pass_tco;
 pub mod pass_licm;
 pub mod pass_peephole;
 pub mod pass_range_counting;
+pub mod pass_region_window;
+pub mod pass_region_window_clone;
 pub mod perceus_verified;
 pub mod pass_egg_saturation;
 pub mod pass_matrix_shape_spec;
@@ -365,6 +367,65 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     s.push_str("impl<T: PartialEq> PartialEq for AlmideSharedMut<T> { fn eq(&self, other: &Self) -> bool { *self.0.borrow() == *other.0.borrow() } }\n");
     s.push_str(&format!("impl<T> AlmideSharedMut<T> {{ {vis}fn new(v: T) -> Self {{ AlmideSharedMut(std::rc::Rc::new(std::cell::RefCell::new(v))) }} {vis}fn get(&self) -> T where T: Clone {{ self.0.borrow().clone() }} {vis}fn set(&self, v: T) {{ *self.0.borrow_mut() = v; }} {vis}fn borrow(&self) -> std::cell::Ref<'_, T> {{ self.0.borrow() }} {vis}fn borrow_mut(&self) -> std::cell::RefMut<'_, T> {{ self.0.borrow_mut() }} }}\n"));
     s.push_str(&almide_repr_prelude(vis));
+    s.push_str(&region_arena_prelude(vis));
+    s
+}
+
+/// The region-window arena (#1991): `AlmideRgn<T>`, the `Copy` handle a
+/// `__rgn_` twin enum's recursive fields hold instead of `Box<T>`, and the
+/// thread-local bump arena behind it. `almide_region_window(|| body)` saves
+/// the arena mark, runs the pair, rewinds — every block allocated inside is
+/// released at once, no per-node free. Nothing is dropped on rewind: every
+/// region type is `Copy` by construction (`RegionWindowPass` admits only
+/// scalar / region-enum payloads), so a rewound block owns nothing. Chunks
+/// are kept for the next window (64 KiB, doubling to a 64 MiB cap). The
+/// handle holds a raw pointer, so it is `!Send` / `!Sync` by construction
+/// and a window never spans threads (`fan.*` bodies are outside the pure
+/// vocabulary). Lives in the prelude, not the user code, so the rlib split
+/// (`slim_main_with_external_runtime`) keeps it.
+fn region_arena_prelude(vis: &str) -> String {
+    let mut s = String::new();
+    s.push_str(&format!("{vis}struct AlmideRgn<T>({vis}*const T);\n"));
+    s.push_str("impl<T> Clone for AlmideRgn<T> { #[inline(always)] fn clone(&self) -> Self { *self } }\n");
+    s.push_str("impl<T> Copy for AlmideRgn<T> {}\n");
+    s.push_str("impl<T> std::ops::Deref for AlmideRgn<T> { type Target = T; #[inline(always)] fn deref(&self) -> &T { unsafe { &*self.0 } } }\n");
+    s.push_str("impl<T: std::fmt::Debug> std::fmt::Debug for AlmideRgn<T> { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { (**self).fmt(f) } }\n");
+    s.push_str("impl<T: PartialEq> PartialEq for AlmideRgn<T> { fn eq(&self, other: &Self) -> bool { **self == **other } }\n");
+    // By-value forwarding of every derive a twin enum may carry from its
+    // original (`has_ord` / `has_hash` templates).
+    s.push_str("impl<T: Eq> Eq for AlmideRgn<T> {}\n");
+    s.push_str("impl<T: PartialOrd> PartialOrd for AlmideRgn<T> { fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> { (**self).partial_cmp(&**other) } }\n");
+    s.push_str("impl<T: Ord> Ord for AlmideRgn<T> { fn cmp(&self, other: &Self) -> std::cmp::Ordering { (**self).cmp(&**other) } }\n");
+    s.push_str("impl<T: std::hash::Hash> std::hash::Hash for AlmideRgn<T> { fn hash<H: std::hash::Hasher>(&self, state: &mut H) { (**self).hash(state) } }\n");
+    s.push_str(&format!("{vis}struct AlmideArena {{ chunks: Vec<Box<[std::mem::MaybeUninit<u8>]>>, cur: usize, off: usize }}\n"));
+    s.push_str("impl AlmideArena {\n");
+    s.push_str("    #[inline(always)] fn alloc(&mut self, size: usize, align: usize) -> *mut u8 {\n");
+    s.push_str("        if self.cur < self.chunks.len() {\n");
+    s.push_str("            let chunk = &mut self.chunks[self.cur];\n");
+    s.push_str("            let base = chunk.as_mut_ptr() as usize;\n");
+    s.push_str("            let start = (base + self.off + align - 1) & !(align - 1);\n");
+    s.push_str("            if start + size <= base + chunk.len() { self.off = start + size - base; return start as *mut u8; }\n");
+    s.push_str("        }\n");
+    s.push_str("        self.alloc_slow(size, align)\n");
+    s.push_str("    }\n");
+    s.push_str("    #[inline(never)] fn alloc_slow(&mut self, size: usize, align: usize) -> *mut u8 {\n");
+    s.push_str("        let mut next = if self.chunks.is_empty() { 0 } else { self.cur + 1 };\n");
+    s.push_str("        while next < self.chunks.len() && self.chunks[next].len() < size + align { next += 1; }\n");
+    s.push_str("        if next == self.chunks.len() {\n");
+    s.push_str("            let want = ((64usize << 10) << self.chunks.len().min(10)).max(size + align);\n");
+    s.push_str("            self.chunks.push(vec![std::mem::MaybeUninit::uninit(); want].into_boxed_slice());\n");
+    s.push_str("        }\n");
+    s.push_str("        self.cur = next; self.off = 0;\n");
+    s.push_str("        self.alloc(size, align)\n");
+    s.push_str("    }\n");
+    s.push_str("}\n");
+    s.push_str("thread_local! { static ALMIDE_ARENA: std::cell::UnsafeCell<AlmideArena> = const { std::cell::UnsafeCell::new(AlmideArena { chunks: Vec::new(), cur: 0, off: 0 }) }; }\n");
+    // SAFETY (all three): the cell is thread-local and the `&mut` never
+    // leaves the closure; `alloc` calls no user code, so no re-entry.
+    s.push_str(&format!("#[inline(always)] {vis}fn almide_rgn_alloc<T: Copy>(v: T) -> AlmideRgn<T> {{ ALMIDE_ARENA.with(|a| {{ let a = unsafe {{ &mut *a.get() }}; let p = a.alloc(std::mem::size_of::<T>(), std::mem::align_of::<T>()) as *mut T; unsafe {{ p.write(v) }}; AlmideRgn(p) }}) }}\n"));
+    s.push_str(&format!("#[inline(always)] {vis}fn almide_region_save() -> (usize, usize) {{ ALMIDE_ARENA.with(|a| {{ let a = unsafe {{ &*a.get() }}; (a.cur, a.off) }}) }}\n"));
+    s.push_str(&format!("#[inline(always)] {vis}fn almide_region_restore(mark: (usize, usize)) {{ ALMIDE_ARENA.with(|a| {{ let a = unsafe {{ &mut *a.get() }}; a.cur = mark.0; a.off = mark.1; }}) }}\n"));
+    s.push_str(&format!("#[inline(always)] {vis}fn almide_region_window<R>(body: impl FnOnce() -> R) -> R {{ let mark = almide_region_save(); let r = body(); almide_region_restore(mark); r }}\n"));
     s
 }
 
