@@ -14,6 +14,12 @@
 //!      A scalar-only body yields an EMPTY certificate (true, and vacuous:
 //!      2,767 of them after B1 admitted scalar tail calls) — counted as
 //!      admitted but not as the floor, so the floor measures RC coverage.
+//!   4. (step 4) a DECLINED frame (`!decline:<reason>`, the gate's or an
+//!      emission-time withdrawal) is neither certificate nor poison: it is
+//!      counted, and under ALMIDE_WITNESS_DUMP each is printed as
+//!      `!decline:<reason> <fixture> :: <fn>` — the histogram
+//!      (`grep -o '^!decline:[^ ]*' | sort | uniq -c | sort -rn`) names
+//!      the next shape to admit.
 //!
 //! Phase A2 wires these certificates into proofs/gate.sh so the EXTRACTED
 //! kernel-proven checker re-verifies them — this test is the Rust-side
@@ -40,9 +46,15 @@ fn structural_witnesses_balance_and_hold_the_floor() {
     .expect("run manifest");
 
     let mut certs: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
+    // The step-4 measurement channel: every frame the gate turned away,
+    // with its reason — dumped as `!decline:<reason> <key>` lines under
+    // ALMIDE_WITNESS_DUMP so `grep -o '^!decline:[^ ]*' | sort | uniq -c`
+    // is the histogram that picks the next shape to admit.
+    let mut declined: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
     let mut poisoned: Vec<String> = Vec::new();
     let mut unbalanced: Vec<(String, String)> = Vec::new();
     let mut nondet: Vec<String> = Vec::new();
+    let dump = std::env::var("ALMIDE_WITNESS_DUMP").is_ok();
     for line in manifest.lines() {
         let rel = line.splitn(3, '\t').nth(2).expect("manifest row");
         let text = std::fs::read_to_string(almide_corpus::resolve(&root, rel)).expect("fixture readable");
@@ -51,12 +63,14 @@ fn structural_witnesses_balance_and_hold_the_floor() {
         let _ = almide_wasm::emit_program(&ir);
         for (name, cert) in almide_wasm::witness::take() {
             let key = format!("{rel} :: {name}");
-            if cert.starts_with('!') {
+            if let Some(reason) = cert.strip_prefix(almide_wasm::witness::DECLINE_PREFIX) {
+                declined.insert(key, reason.trim().to_string());
+            } else if cert.starts_with('!') {
                 poisoned.push(key);
             } else if !almide_wasm::witness::balanced(&cert) {
                 unbalanced.push((key, cert));
             } else {
-                if std::env::var("ALMIDE_WITNESS_DUMP").is_ok() {
+                if dump {
                     eprintln!("[witness] {key}\n{cert}");
                 }
                 // emit_program lowers every fn once per emission pass
@@ -71,7 +85,19 @@ fn structural_witnesses_balance_and_hold_the_floor() {
     }
     let admitted = certs.len();
     let witnessed = certs.values().filter(|c| !c.trim().is_empty()).count();
-    eprintln!("[witness-floor] admitted {admitted} function(s), {witnessed} with RC events");
+    // A frame both passes admit AND decline is a pass disagreement too.
+    for key in declined.keys().filter(|k| certs.contains_key(*k)) {
+        nondet.push(key.clone());
+    }
+    if dump {
+        for (key, reason) in &declined {
+            eprintln!("{}{reason} {key}", almide_wasm::witness::DECLINE_PREFIX);
+        }
+    }
+    eprintln!(
+        "[witness-floor] admitted {admitted} function(s), {witnessed} with RC events, {} declined",
+        declined.len()
+    );
     assert!(
         nondet.is_empty(),
         "the two emission passes disagree on {} witness(es): {nondet:?}",

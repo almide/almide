@@ -332,30 +332,31 @@ pub(crate) fn lower_fn(
         // #1696 phase A: arm the witness recorder when the sweep is
         // collecting and the straightline gate admits this body (no
         // effect wrap, no captures, no top-let prelude — every excluded
-        // form has RC sites the two hooks do not cover yet).
+        // form has RC sites the two hooks do not cover yet). A turned-away
+        // frame pushes its reason instead (the step-4 histogram).
         if let Some(name) = &witness_name
             && crate::witness::collecting()
-            && effect_raw.is_none()
-            && env_captures.is_none()
-            && top_lets.is_empty()
-            && crate::witness::straightline_subset(
-                body,
-                ret.is_some_and(crate::witness::heapish_ret),
-                name.rsplit('.').next().unwrap_or(name),
-            )
-            .is_none()
         {
-            let mut w = crate::witness::WitnessRecorder::new();
-            for (k, &(_, pty)) in params.iter().enumerate() {
-                if em.rc_droppable(pty) {
-                    if param_is_owned(&param_owned, k) {
-                        w.param_owned(env_shift + k as u32);
-                    } else {
-                        w.param_borrowed(env_shift + k as u32);
-                    }
-                }
+            let pre_gate = if effect_raw.is_some() {
+                Some("effect".to_string())
+            } else if env_captures.is_some() {
+                Some("captures".to_string())
+            } else if !top_lets.is_empty() {
+                Some("top-lets".to_string())
+            } else {
+                None
+            };
+            let verdict = pre_gate.or_else(|| {
+                crate::witness::straightline_subset(
+                    body,
+                    ret.is_some_and(crate::witness::heapish_ret),
+                    name.rsplit('.').next().unwrap_or(name),
+                )
+            });
+            match verdict {
+                Some(reason) => crate::witness::push_decline(name, &reason),
+                None => arm_witness(&mut em, params, env_shift, &param_owned),
             }
-            em.witness = Some(w);
         }
         populate_tail_release_set(&mut em, cur_module, env_shift, params, body, &param_owned);
         if let Some((_, dl)) = em.region_repair {
@@ -627,6 +628,28 @@ fn populate_tail_release_set(
         return;
     }
     em.tail_release_allowed = true;
+}
+
+/// Arm the witness recorder (#1696): seed each droppable param under its
+/// declared convention — callee-owned (born owned here, `i`) or borrowed
+/// (param_borrow.rs: known, no credit held).
+fn arm_witness(
+    em: &mut Emitter<'_>,
+    params: &[(VarId, SliceTy)],
+    env_shift: u32,
+    param_owned: &Option<Vec<bool>>,
+) {
+    let mut w = crate::witness::WitnessRecorder::new();
+    for (k, &(_, pty)) in params.iter().enumerate() {
+        if em.rc_droppable(pty) {
+            if param_is_owned(param_owned, k) {
+                w.param_owned(env_shift + k as u32);
+            } else {
+                w.param_borrowed(env_shift + k as u32);
+            }
+        }
+    }
+    em.witness = Some(w);
 }
 
 /// The plan's verdict for param `k`: None = every param owned.

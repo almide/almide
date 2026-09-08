@@ -61,6 +61,12 @@ pub struct WitnessRecorder {
     /// frame's last events, and the fall-through epilogue the emitter still
     /// writes after the jump is dead code — its decs are not recorded.
     frame_replaced: bool,
+    /// An EMISSION-TIME decline (#1696 step 4): the gate admitted the
+    /// body's shape, but the route it took has an RC site this phase does
+    /// not record (a View result, a native arm that bypasses `lower_arg`).
+    /// The certificate becomes `!decline:<reason>` — counted by the
+    /// histogram, neither a certificate nor a poison.
+    declined: Option<String>,
 }
 
 impl Default for WitnessRecorder {
@@ -77,6 +83,7 @@ impl WitnessRecorder {
             streams: BTreeMap::new(),
             poisoned: false,
             frame_replaced: false,
+            declined: None,
         }
     }
 
@@ -181,10 +188,23 @@ impl WitnessRecorder {
         self.poisoned = true;
     }
 
-    /// One line per object, in object order — certificate v0.
+    /// Withdraw this frame's certificate: the first reason wins (the
+    /// shape that turned the recorder away is the one to count).
+    pub fn decline(&mut self, reason: &str) {
+        if self.declined.is_none() {
+            self.declined = Some(reason.to_string());
+        }
+    }
+
+    /// One line per object, in object order — certificate v0. A poison
+    /// outranks a decline: a hook disagreement is a bug even in a frame
+    /// that withdrew.
     pub fn certificate(&self) -> String {
         if self.poisoned {
             return "!poison\n".to_string();
+        }
+        if let Some(r) = &self.declined {
+            return format!("{DECLINE_PREFIX}{r}\n");
         }
         let mut s = String::new();
         for stream in self.streams.values() {
@@ -245,7 +265,8 @@ pub fn straightline_subset(body: &IrExpr, ret_is_heap: bool, self_name: &str) ->
                     return Some(r);
                 }
             }
-            other => return Some(format!("stmt:{other:?}").chars().take(40).collect()),
+            IrStmtKind::Expr { expr } => return Some(format!("stmt:Expr:{}", expr_tag(expr))),
+            other => return Some(format!("stmt:{}", tag(other))),
         }
     }
     match expr.as_deref().map(|t| &t.kind) {
@@ -275,7 +296,23 @@ pub fn straightline_subset(body: &IrExpr, ret_is_heap: bool, self_name: &str) ->
         Some(k @ (IrExprKind::LitStr { .. } | IrExprKind::List { .. })) if ret_is_heap => {
             subset_rhs_literal(k)
         }
-        other => Some(format!("tail:{other:?}").chars().take(40).collect()),
+        Some(other) => Some(format!("tail:{}", tag(other))),
+        None => Some("tail:Unit-heap".into()),
+    }
+}
+
+/// A space-free tag of an IR node's variant, for the decline histogram
+/// (`grep -o '^!decline:[^ ]*' | sort | uniq -c` over the floor dump).
+fn tag<T: std::fmt::Debug>(v: &T) -> String {
+    format!("{v:?}").chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect()
+}
+
+/// A statement-position expression's tag, one level deeper for a call
+/// (its target family is what the next increment chooses by).
+fn expr_tag(e: &IrExpr) -> String {
+    match &e.kind {
+        IrExprKind::Call { target, .. } => format!("Call:{}", tag(target)),
+        other => tag(other),
     }
 }
 
@@ -288,7 +325,7 @@ fn user_call_subset(e: &IrExpr) -> Option<String> {
         return Some("call:not-a-call".into());
     };
     let almide_ir::CallTarget::Named { name } = target else {
-        return Some("call:not-named".into());
+        return Some(format!("call:target:{}", tag(target)));
     };
     if !name.as_str().starts_with(|c: char| c.is_ascii_lowercase() || c == '_') {
         return Some("call:ctor".into());
@@ -305,7 +342,7 @@ fn user_call_subset(e: &IrExpr) -> Option<String> {
                     return Some(r);
                 }
             }
-            other => return Some(format!("call-arg:{other:?}").chars().take(40).collect()),
+            other => return Some(format!("call-arg:{}", tag(other))),
         }
     }
     None
@@ -325,7 +362,7 @@ fn subset_rhs_literal(k: &IrExprKind) -> Option<String> {
             }
             None
         }
-        other => Some(format!("rhs:{other:?}").chars().take(40).collect()),
+        other => Some(format!("rhs:{}", tag(other))),
     }
 }
 
@@ -340,7 +377,7 @@ fn subset_rhs(value: &IrExpr) -> Option<String> {
         // B1: a user-fn call — its arguments' RC sites are the call-arg
         // hook's, its droppable result is a received credit (#1986).
         IrExprKind::Call { .. } => user_call_subset(value),
-        other => Some(format!("rhs:{other:?}").chars().take(40).collect()),
+        other => Some(format!("rhs:{}", tag(other))),
     }
 }
 
@@ -373,6 +410,18 @@ pub(crate) fn push(name: &str, cert: String) {
     if let Some(v) = sink().lock().expect("witness sink").as_mut() {
         v.push((name.to_string(), cert));
     }
+}
+
+/// The certificate prefix of a DECLINED frame — the measurement channel
+/// (#1696 step 4): `!decline:<reason>`, one space-free reason tag. The
+/// floor test counts these and fails on neither; only `!poison` fails.
+pub const DECLINE_PREFIX: &str = "!decline:";
+
+/// A frame the pre-gate or the straightline gate turned away, while the
+/// sweep collects: its reason goes to the sink so the corpus histogram
+/// names the next shape to admit.
+pub(crate) fn push_decline(name: &str, reason: &str) {
+    push(name, format!("{DECLINE_PREFIX}{reason}\n"));
 }
 
 // ── the Emitter-side hooks ──────────────────────────────────────────────
@@ -530,5 +579,16 @@ mod tests {
         assert!(!balanced("idd\n"));
         assert!(!balanced("ia\n"));
         assert!(balanced("iadd\nid\n"));
+    }
+
+    #[test]
+    fn a_decline_withdraws_the_certificate_and_a_poison_outranks_it() {
+        let mut w = WitnessRecorder::new();
+        w.bind_fresh(3);
+        w.decline("module-result:view");
+        w.decline("second-reason-loses");
+        assert_eq!(w.certificate(), "!decline:module-result:view\n");
+        w.poison();
+        assert_eq!(w.certificate(), "!poison\n");
     }
 }
