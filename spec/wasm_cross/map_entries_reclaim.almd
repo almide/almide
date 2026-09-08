@@ -1,0 +1,63 @@
+// @contract: C-066
+// #2010 Map stage b: a Map's ENTRIES are released with its entries array —
+// handle keys and values dropped through the typed entry walk, a copied
+// entries array (functional set / remove / filter / merge / update / upsert,
+// a bind of a shared map) taking its own entry credits, an overwrite
+// releasing the value it replaced. 2000 rounds of building, sharing,
+// mutating and walking a Map[String, List[String]] per round; the checksum
+// pins value correctness byte-identical native == wasm, and the alloc ledger
+// pins the watermark (it does not grow with the round count).
+fn build(i: Int) -> Map[String, List[String]] = {
+  let si = int.to_string(i)
+  let m0 = map.from_list([
+    ("a" + si, ["x", si]),
+    ("b", ["y"])
+  ])
+  let m1 = map.update(m0, "b", (v) => v + ["z" + si])
+  let m2 = map.upsert(m1, "c" + int.to_string(i % 2), ["init"], (v) => v)
+  let m3 = map.filter(m2, (k, v) => list.len(v) > 1)
+  let m4 = map.merge(m3, map.from_list([
+    ("d", ["w" + si])
+  ]))
+  let m5 = map.map(m4, (v) => v)
+  map.remove(m5, "b")
+}
+
+fn counter(i: Int) -> Int = {
+  var m: Map[String, Int] = map.new()
+  map.insert(m, "a" + int.to_string(i), i)
+  let shared = m
+  map.insert(m, "b", 2)
+  map.insert(m, "a" + int.to_string(i), 7)
+  var t: Map[Int, String] = map.new()
+  t[i] = "v" + int.to_string(i)
+  t[i] = "w" + int.to_string(i)
+  let vs = map.values(t) |> list.join("")
+  map.len(m) + map.len(shared) + string.len(vs) + map.fold(m, 0, (acc, k, v) => acc + v)
+}
+
+fn main() -> Unit = {
+  var sink = 0
+  var i = 0
+  while i < 2000 {
+    let m = build(i)
+    var n = 0
+    for (k, v) in m {
+      n = n + string.len(k) + list.len(v)
+    }
+    let ks = map.keys(m) |> list.join(",")
+    let found = map.find(m, (k, v) => k == "d")
+    let g = map.get(m, "d")
+    let f = match found {
+      some((k, v)) => list.len(v),
+      none => 0,
+    }
+    let gl = match g {
+      some(v) => list.len(v),
+      none => 0,
+    }
+    sink = sink + n + string.len(ks) + map.len(m) + f + gl + counter(i)
+    i = i + 1
+  }
+  println(int.to_string(sink))
+}

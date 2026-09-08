@@ -123,12 +123,27 @@ pub(crate) enum Helper {
     /// Result / tuple / record / variant block — the credits a whole-block
     /// COPY of it must hold (`CopyElems { inc_elems }` calls it).
     IncShape { ty: SliceTy },
-    /// `$drop_map(block)` — a Map's SPINE drop (#2010, Map stage a): the
-    /// block's credit down; at zero its index side-table entry is cleared
-    /// (`side_clear` = `$mapidx_side_set`, so a reused address inherits no
-    /// stale index) and the entries array freed. Keys and values keep the
-    /// credits they hold today (stage b: the per-entry walk).
+    /// `$drop_map(block)` — the drop of a Map / Set whose entries hold NO
+    /// heap handle (flat keys and values): the block's credit down; at
+    /// zero its index side-table entry is cleared (`side_clear` =
+    /// `$mapidx_side_set`, so a reused address inherits no stale index)
+    /// and the entries array freed. Handle entries take `DropEntries`.
     DropMapSpine { side_clear: u32 },
+    /// `$drop_entries(block)` — the typed drop of a Map / Set whose
+    /// entries hold heap HANDLES (#2010, Map stage b): the block's credit
+    /// down; at zero every entry's handle slots (`slots` = up to two
+    /// `(offset, dec fn)` pairs — a Map's key and value, a Set's member)
+    /// released, the index side-table entry cleared, the entries array
+    /// freed. One helper per entry layout.
+    DropEntries { stride: u32, slots: [Option<(u32, u32)>; 2], side_clear: u32 },
+    /// `$inc_entries(block, nbytes)`: +1 on every handle slot of the
+    /// entries in the first `nbytes` payload bytes — the credits a copied
+    /// entries array must hold (`nbytes` is explicit so an append copy
+    /// can walk the copied prefix and leave its fresh tail entry alone).
+    IncEntries { stride: u32, slots: [Option<u32>; 2] },
+    /// `$copy_entries(block) -> block`: `$block_copy` plus the entry
+    /// credits of the whole copy.
+    CopyEntries { inc_entries: u32 },
 }
 
 /// The pretty printer's extra pooled fragments.

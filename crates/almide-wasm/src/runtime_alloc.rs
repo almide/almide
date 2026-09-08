@@ -349,6 +349,82 @@ pub(crate) fn emit_drop_map_spine(side_clear: u32) -> Function {
     f
 }
 
+/// `$drop_entries(block)` — the typed drop of a Map / Set with handle
+/// slots in its entries (#2010, Map stage b): `$dec_flat`'s guard and
+/// trap knob; at rc 0 every entry's `(offset, dec_fn)` slots are
+/// released in insertion order, the index side-table entry cleared, and
+/// the entries array freed.
+pub(crate) fn emit_drop_entries(stride: u32, slots: [Option<(u32, u32)>; 2], side_clear: u32) -> Function {
+    // params: 0=block; locals: 1=rc, 2=p, 3=end
+    let (block, rc, p, end) = (0u32, 1u32, 2u32, 3u32);
+    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
+    let mut f = Function::new([(3, ValType::I32)]);
+    let mut i = f.instructions();
+    i.local_get(block).global_get(G_LINE_END).i32_lt_u().if_(BlockType::Empty);
+    i.return_();
+    i.end();
+    i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_sub().local_set(rc);
+    if std::env::var_os("ALMIDE_RC_TRAP_DOUBLE_FREE").is_some() {
+        i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
+        i.unreachable();
+        i.end();
+    }
+    i.local_get(block).local_get(rc).i32_store(word(almide_layout::RC.offset));
+    i.local_get(rc).i32_eqz().if_(BlockType::Empty);
+    i.local_get(block).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_set(p);
+    i.local_get(p).local_get(block).i32_load(word(almide_layout::LEN.offset)).i32_add().local_set(end);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(p).local_get(end).i32_ge_u().br_if(1);
+    for (off, dec) in slots.into_iter().flatten() {
+        i.local_get(p).i32_load(word(off)).call(dec);
+    }
+    i.local_get(p).i32_const(stride as i32).i32_add().local_set(p);
+    i.br(0).end().end();
+    i.global_get(G_MAPIDX).if_(BlockType::Empty);
+    i.local_get(block).i32_const(0).call(side_clear).drop();
+    i.end();
+    i.local_get(block).call(F_FREE);
+    i.end();
+    i.end();
+    f
+}
+
+/// `$inc_entries(block, nbytes)`: +1 on every handle slot of the entries
+/// in the first `nbytes` payload bytes (the credits a copied entries
+/// array holds, #2010 Map stage b).
+pub(crate) fn emit_inc_entries(stride: u32, slots: [Option<u32>; 2]) -> Function {
+    // params: 0=block, 1=nbytes; locals: 2=p, 3=end
+    let (block, nbytes, p, end) = (0u32, 1u32, 2u32, 3u32);
+    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
+    let mut f = Function::new([(2, ValType::I32)]);
+    let mut i = f.instructions();
+    i.local_get(block).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_set(p);
+    i.local_get(p).local_get(nbytes).i32_add().local_set(end);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(p).local_get(end).i32_ge_u().br_if(1);
+    for off in slots.into_iter().flatten() {
+        i.local_get(p).i32_load(word(off)).call(F_INC);
+    }
+    i.local_get(p).i32_const(stride as i32).i32_add().local_set(p);
+    i.br(0).end().end();
+    i.end();
+    f
+}
+
+/// `$copy_entries(block) -> block`: `$block_copy`, then the copy takes
+/// the credits of every entry it holds.
+pub(crate) fn emit_copy_entries(inc_entries: u32) -> Function {
+    let block = 0u32;
+    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
+    let mut f = Function::new([(1, ValType::I32)]);
+    let mut i = f.instructions();
+    i.local_get(block).call(F_BLOCK_COPY).local_tee(1);
+    i.local_get(1).i32_load(word(almide_layout::LEN.offset)).call(inc_entries);
+    i.local_get(1);
+    i.end();
+    f
+}
+
 /// `$inc_<shape>(block)`: +1 on every handle slot of a fixed-slot block
 /// (the tagged half per case, as `emit_drop_shape`).
 pub(crate) fn emit_inc_shape(slots: &[(u32, u32)], tagged: Option<(u32, Vec<(u32, Vec<(u32, u32)>)>)>) -> Function {
@@ -420,6 +496,9 @@ pub(crate) fn emit_cow_elems(inc_elems: u32) -> Function {
 
 /// The signatures assembly promises for the rc-glue helpers (#2010).
 pub(crate) fn helper_params(h: &Helper) -> Option<Vec<ValType>> {
+    if matches!(h, Helper::IncEntries { .. }) {
+        return Some(vec![ValType::I32, ValType::I32]);
+    }
     matches!(
         h,
         Helper::DropList { .. }
@@ -429,6 +508,8 @@ pub(crate) fn helper_params(h: &Helper) -> Option<Vec<ValType>> {
             | Helper::DropShape { .. }
             | Helper::IncShape { .. }
             | Helper::DropMapSpine { .. }
+            | Helper::DropEntries { .. }
+            | Helper::CopyEntries { .. }
     )
     .then(|| vec![ValType::I32])
 }
@@ -442,7 +523,9 @@ pub(crate) fn helper_result(h: &Helper) -> Option<ValType> {
         | Helper::IncElems
         | Helper::DropShape { .. }
         | Helper::IncShape { .. }
-        | Helper::DropMapSpine { .. } => None,
+        | Helper::DropMapSpine { .. }
+        | Helper::DropEntries { .. }
+        | Helper::IncEntries { .. } => None,
         _ => Some(ValType::I32),
     }
 }
@@ -456,6 +539,9 @@ pub(crate) fn helper_body(h: &Helper, work: &crate::work::FnWork) -> Option<Func
         Helper::CopyElems { inc_elems } => emit_copy_elems(*inc_elems),
         Helper::CowElems { inc_elems } => emit_cow_elems(*inc_elems),
         Helper::DropMapSpine { side_clear } => emit_drop_map_spine(*side_clear),
+        Helper::DropEntries { stride, slots, side_clear } => emit_drop_entries(*stride, *slots, *side_clear),
+        Helper::IncEntries { stride, slots } => emit_inc_entries(*stride, *slots),
+        Helper::CopyEntries { inc_entries } => emit_copy_entries(*inc_entries),
         Helper::DropShape { .. } | Helper::IncShape { .. } => {
             let mut bodies = work.drop_bodies.borrow_mut();
             let built = bodies.iter_mut().find(|(k, _)| k == h).and_then(|(_, f)| f.take());
