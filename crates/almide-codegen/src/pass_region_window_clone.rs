@@ -299,7 +299,10 @@ fn twin_fn(
         doc: None,
         blank_lines_before: 1,
         def_id: None,
-        mutated_params: vec![],
+        // A clone propagates its original's flags (fn_clone_discipline): the
+        // pure seed admits no `mut` param, so this is empty in practice, but
+        // the twin must never DROP a writeback flag its original carried.
+        mutated_params: f.mutated_params.clone(),
         module_origin: None,
     }
 }

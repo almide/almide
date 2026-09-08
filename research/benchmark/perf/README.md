@@ -45,9 +45,10 @@ nothing is published that `bench.py` did not produce.
   reference would be a lie — they run Almide-native vs Almide-wasm only.
   `binarytrees` has a reference since #1991: its `fan.map` is sequential on the
   native leg, so `rust-ref/binarytrees.rs` (the same-shape `Box` program, one
-  thread) is the honest comparison, and the row is anchored in
-  `check-perf-ratio.sh` — below 1, because `check(make(d))` runs inside a
-  region window natively.
+  thread) is the honest comparison; the row is REPORTED by
+  `check-perf-ratio.sh` rather than anchored (0.31 on an M4 Pro, 0.61 on the
+  CI runner — allocator-dependent like listbuild), below 1 because
+  `check(make(d))` runs inside a region window natively.
 - `onebrc` is a scaled One Billion Row Challenge (`station;temp` lines →
   sorted per-station min/mean/max): the one row whose hot loop is file I/O,
   `string.split`, and map updates rather than arithmetic. Temperatures are

@@ -397,7 +397,10 @@ fn region_arena_prelude(vis: &str) -> String {
     s.push_str("impl<T: PartialOrd> PartialOrd for AlmideRgn<T> { fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> { (**self).partial_cmp(&**other) } }\n");
     s.push_str("impl<T: Ord> Ord for AlmideRgn<T> { fn cmp(&self, other: &Self) -> std::cmp::Ordering { (**self).cmp(&**other) } }\n");
     s.push_str("impl<T: std::hash::Hash> std::hash::Hash for AlmideRgn<T> { fn hash<H: std::hash::Hasher>(&self, state: &mut H) { (**self).hash(state) } }\n");
-    s.push_str(&format!("{vis}struct AlmideArena {{ chunks: Vec<Box<[std::mem::MaybeUninit<u8>]>>, cur: usize, off: usize }}\n"));
+    // `std::boxed::Box`, never bare `Box`: the prelude shares the user
+    // program's module, and a user `type Box = { .. }` shadows the std name
+    // (tests/dep_qualified_type_collision_test.rs).
+    s.push_str(&format!("{vis}struct AlmideArena {{ chunks: std::vec::Vec<std::boxed::Box<[std::mem::MaybeUninit<u8>]>>, cur: usize, off: usize }}\n"));
     s.push_str("impl AlmideArena {\n");
     s.push_str("    #[inline(always)] fn alloc(&mut self, size: usize, align: usize) -> *mut u8 {\n");
     s.push_str("        if self.cur < self.chunks.len() {\n");
@@ -419,7 +422,7 @@ fn region_arena_prelude(vis: &str) -> String {
     s.push_str("        self.alloc(size, align)\n");
     s.push_str("    }\n");
     s.push_str("}\n");
-    s.push_str("thread_local! { static ALMIDE_ARENA: std::cell::UnsafeCell<AlmideArena> = const { std::cell::UnsafeCell::new(AlmideArena { chunks: Vec::new(), cur: 0, off: 0 }) }; }\n");
+    s.push_str("thread_local! { static ALMIDE_ARENA: std::cell::UnsafeCell<AlmideArena> = const { std::cell::UnsafeCell::new(AlmideArena { chunks: std::vec::Vec::new(), cur: 0, off: 0 }) }; }\n");
     // SAFETY (all three): the cell is thread-local and the `&mut` never
     // leaves the closure; `alloc` calls no user code, so no re-entry.
     s.push_str(&format!("#[inline(always)] {vis}fn almide_rgn_alloc<T: Copy>(v: T) -> AlmideRgn<T> {{ ALMIDE_ARENA.with(|a| {{ let a = unsafe {{ &mut *a.get() }}; let p = a.alloc(std::mem::size_of::<T>(), std::mem::align_of::<T>()) as *mut T; unsafe {{ p.write(v) }}; AlmideRgn(p) }}) }}\n"));

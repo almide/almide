@@ -923,6 +923,42 @@ mod region_window {
         assert!(out.type_decls.len() == 1);
     }
 
+    /// v1 is root-module only: a dependency module declaring a SAME-NAMED
+    /// `Tree` / `make` / `check` (#1955's collision shape) is neither
+    /// scanned for sites nor twinned, and the root twins are the root's.
+    #[test]
+    fn same_named_dependency_module_fns_and_types_are_left_alone() {
+        let mut vt = VarTable::new();
+        let make = make_fn(&mut vt, vec![]);
+        let check = check_fn(&mut vt, 0);
+        let d = mk_param(&mut vt, "d", Ty::Int);
+        let site = call("check", vec![call("make", vec![var(d.var, Ty::Int)], tree_ty())], Ty::Int);
+        let mut program = mk_program(vec![make, check, mk_fn("run", vec![d], Ty::Int, site, false)], vt);
+        program.type_decls.push(tree_decl(vec![]));
+        let dep_make = make_fn(&mut program.var_table, vec![]);
+        let dep_check = check_fn(&mut program.var_table, 0);
+        let dd = mk_param(&mut program.var_table, "d", Ty::Int);
+        let dep_site = call("check", vec![call("make", vec![var(dd.var, Ty::Int)], tree_ty())], Ty::Int);
+        program.modules.push(IrModule {
+            name: sym("dep.shape"),
+            versioned_name: None,
+            type_decls: vec![tree_decl(vec![])],
+            functions: vec![dep_make, dep_check, mk_fn("run", vec![dd], Ty::Int, dep_site, false)],
+            top_lets: vec![],
+            var_table: VarTable::new(),
+            exports: vec![],
+            imports: vec![],
+        });
+        let out = run_pass(&RegionWindowPass, program, Target::Rust);
+        let twins = fn_names(&out).iter().filter(|n| n.starts_with("__rgn_")).count();
+        assert_eq!(twins, 2, "exactly the root pair is twinned");
+        assert_eq!(out.type_decls.iter().filter(|td| td.name.as_str() == "__rgn_Tree").count(), 1);
+        let dep = &out.modules[0];
+        assert!(dep.functions.iter().all(|f| !f.name.as_str().starts_with("__rgn_")));
+        assert!(dep.type_decls.iter().all(|td| !td.name.as_str().starts_with("__rgn_")));
+        assert!(!has_window(&dep.functions[2].body), "a module site is not rewritten in v1");
+    }
+
     #[test]
     fn non_scalar_payload_refuses() {
         let mut vt = VarTable::new();

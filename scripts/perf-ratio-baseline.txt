@@ -30,21 +30,16 @@ fft 1.176
 # same-shape reference and 1.94x against the idiomatic one.
 nbody 0.997
 spectralnorm 1.001
-# binarytrees (#1991), anchored 2026-09-08 BELOW 1 against the same-shape
-# `Box` reference: the native leg runs `check(make(d))` inside a region
-# window (RegionWindowPass: `__rgn_` twins over a bump arena, one rewind per
-# tree instead of one free per node). Quick arg 17: ~145 ms native against
-# ~435 ms reference on an M4 Pro. The FLOOR is decorative here; the CEILING
-# is the guard — a ratio climbing back toward 1 means the window stopped
-# firing (the recogniser lost the shape, or the twins fell back to `Box`).
-binarytrees 0.330
+# `binarytrees` (#1991) is reported and not anchored, like the listbuild rows:
+# against the same-shape `Box` reference the region-window native leg reads
+# 0.31 on an M4 Pro and 0.61 on the ubuntu-latest runner (2026-09-08, same
+# commit) — the reference's allocator is what differs between the machines.
 # Ablation deltas (#1466): ablated-native / optimized-native median per
 # anchored bench (ALMIDE_DISABLE_OPT=1 skips fold/DCE/propagate). Anchored at
 # the measured ~1.00: on the rustc-backed native leg these passes are
 # SUBSUMED by LLVM, which runs the same folds downstream — the recorded
 # finding, published in docs/project/BENCHMARKS.md. Floor 0.90 (the optimizer
 # must never COST), ceiling +budget (a new earning re-anchors on purpose).
-ablation/binarytrees 1.000
 ablation/fasta 1.000
 ablation/fft 1.000
 ablation/nbody 1.000

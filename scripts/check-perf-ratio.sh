@@ -62,14 +62,7 @@ RUNS="${PERF_RATIO_RUNS:-9}"
 # README states for onebrc), and what is gated is the relation between them —
 # which is the property #1337 is about and which IS machine-stable: 1.018x on
 # the M4 Pro, 1.045x on the CI runner, from the same commit.
-#
-# `binarytrees` (#1991) is anchored BELOW 1: the reference is the same-shape
-# `Box` program, and the native leg runs `check(make(d))` inside a region
-# window (RegionWindowPass — twin fns over a bump arena, one rewind per
-# tree instead of one free per node). The floor is what guards it: a ratio
-# drifting back toward 1 means the window stopped firing, and the two-sided
-# band turns that into a red build rather than a quiet 3x loss.
-PAIRS="nbody=rust:nbody_unrolled spectralnorm=rust:spectralnorm fasta=rust:fasta fft=rust:fft binarytrees=rust:binarytrees"
+PAIRS="nbody=rust:nbody_unrolled spectralnorm=rust:spectralnorm fasta=rust:fasta fft=rust:fft"
 # Rows measured for the record and printed, but not anchored (see above), as
 # `bench=rust-ref-variant`.
 #
@@ -84,7 +77,17 @@ PAIRS="nbody=rust:nbody_unrolled spectralnorm=rust:spectralnorm fasta=rust:fasta
 # Promoting this row to PAIRS wants a second architecture's number first; note
 # that unlike `listbuild` both sides here allocate identically, so it may well
 # turn out to be anchorable. See research/benchmark/perf/string-gap-1004.md.
-REPORTED="listbuild=rust:listbuild listbuild-append=rust:listbuild listbuild-comb=rust:listbuild strchurn=rust:strchurn"
+#
+# `binarytrees` (#1991) is the same class, measured the same day the row was
+# added: against the same-shape `Box` reference the native leg (which runs
+# `check(make(d))` inside a region window — twin fns over a bump arena, one
+# rewind per tree instead of one free per node) reads 0.31 on an M4 Pro and
+# 0.61 on the ubuntu-latest runner, both sides of the +40%/-50% band of
+# either number. What differs is the allocator the REFERENCE pays for (glibc
+# malloc frees a Box far cheaper than macOS's), not the window, so the row
+# is reported here and the window's own A/B (ALMIDE_REGION_OFF=1, same
+# binary, same machine) is the measurement that says whether it fires.
+REPORTED="listbuild=rust:listbuild listbuild-append=rust:listbuild listbuild-comb=rust:listbuild strchurn=rust:strchurn binarytrees=rust:binarytrees"
 # IDIOM GATE (#1337). The three listbuild rows build the SAME result three
 # ways, so beyond each row's own ratio there is a relation between them that
 # the mission depends on: CLAUDE.md and docs/CHEATSHEET.md tell authors (and
@@ -134,7 +137,7 @@ abl_out=$(mktemp -t perf-ratio-abl.XXXXXX.json)
 trap 'rm -f "$out" "$abl_out"' EXIT
 ALMIDE_DISABLE_OPT=1 python3 research/benchmark/perf/bench.py \
   --quick --runs "$RUNS" --legs native \
-  --bench nbody,spectralnorm,fasta,fft,binarytrees \
+  --bench nbody,spectralnorm,fasta,fft \
   --label ratchet-ablated --out "$abl_out"
 
 python3 - "$out" "$BASELINE_FILE" "$BUDGET_PCT" "$PAIRS" "$MIN_SECONDS" "$IDIOM_CEILING" "$REPORTED" "$abl_out" <<'PY'
