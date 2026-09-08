@@ -119,7 +119,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-081 | Generic fn in an inferred-param lambda resolves its type parameter | 0.27.6 | active | fixture | 1 |
 | C-082 | Calling a closure-typed lambda parameter yields the call result, not the closure | 0.27.6 | active | fixture | 1 |
 | C-083 | A negated i64::MIN literal is representable, not folded to zero | 0.27.6 | active | fixture | 1 |
-| C-084 | Codec/value decode error messages are byte-identical across targets | 0.27.6 | active | fixture | 2 |
+| C-084 | Codec/value decode error messages are byte-identical across targets | 0.27.6 | active | fixture | 3 |
 | C-085 | Float decode widens an integral JSON number to f64 | 0.27.6 | active | fixture | 1 |
 | C-086 | Pass-through stdlib combinators give their result its own reference | 0.27.6 | active | fixture | 1 |
 | C-087 | JSON number and \\u string decoding are byte-identical across targets | 0.27.6 | active | fixture | 4 |
