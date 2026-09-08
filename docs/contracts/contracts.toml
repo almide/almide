@@ -372,7 +372,7 @@ evidence  = [
 [[contract]]
 id        = "C-023"
 spec      = "ALS-T13"
-title     = "float.to_string is shortest round-tripping decimal (Dragon4)"
+title     = "float.to_string is shortest round-tripping decimal, byte-equal to Rust Display"
 statement = "`float.to_string` produces the SAME bytes as native Rust f64 Display — the shortest round-tripping decimal in fixed notation, with the `.0` integer suffix — byte-identical native == wasm. The wasm runtime implements Dragon4 with exact big-integer arithmetic (rt_dragon.rs); there is no fixed-precision drift (native 0.30000000000000004 vs the old wasm 0.3) and no `i64_trunc` trap for |x| >= 2^63."
 since     = "0.24.0"
 status    = "active"
