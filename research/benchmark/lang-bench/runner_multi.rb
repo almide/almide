@@ -16,7 +16,7 @@
 # Requirements:
 #   - git submodule initialized (upstream/)
 #   - claude CLI in PATH
-#   - per-language toolchain in PATH (almide / gleam / moon / rustc / tsx)
+#   - per-language toolchain in PATH (almide / gleam / moon / rustc / tsx / go / zig)
 
 require 'json'
 require 'fileutils'
@@ -83,9 +83,15 @@ LANGUAGES = {
   'typescript' => {
     display: 'TypeScript', exts: %w[ts], version_cmd: 'tsx --version',
   },
+  'go' => {
+    display: 'Go', exts: %w[go], version_cmd: 'go version',
+  },
+  'zig' => {
+    display: 'Zig', exts: %w[zig], version_cmd: 'zig version',
+  },
 }.freeze
 
-EXCLUDE_DIR_FRAGMENTS = %w[/node_modules/ /target/ /build/ /_build/ /.minigit/ /deps/].freeze
+EXCLUDE_DIR_FRAGMENTS = %w[/node_modules/ /target/ /build/ /_build/ /.minigit/ /deps/ /zig-out/ /.zig-cache/].freeze
 
 # --- Arg parsing -----------------------------------------------------------
 
