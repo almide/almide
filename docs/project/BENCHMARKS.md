@@ -61,6 +61,83 @@ codegen overhead (≤1%). The `perf-ratchet` CI job
 ([scripts/check-perf-ratio.sh](../../scripts/check-perf-ratio.sh)) gates these
 ratios against a committed baseline so they can only move on purpose.
 
+### Faster than ordinary Rust (#1330)
+
+The declaration axis B2 asked for: named workloads where the almide-native /
+handwritten-Rust ratio is **below 1.0**, CI-ratcheted, with the honesty
+constraints stated up front.
+
+**Methodology.** The Rust side is the *ordinary* program a competent person
+writes for the workload — `rust-ref/binarytrees.rs` and `rust-ref/treealloc.rs`
+are a `Box`-linked recursive enum with `make` / `check` by value, one thread,
+no arena, no custom allocator, no `unsafe`, no SIMD — compiled with the same
+`rustc` flags as Almide's emitted Rust (opt-level=3, LTO, 1 CGU). Both sides
+print byte-identical stdout (verified before timing), every number is the
+median of 9 interleaved runs after a warmup, and each row is measured at two
+input sizes so a win that exists at one size only would show. The ablation
+column is the *same Almide source* rebuilt with the one optimization turned
+off (`ALMIDE_REGION_OFF=1`), so the gap between the two Almide columns is
+that optimization and nothing else. arm64 Apple M4 Pro, almide 0.62.0,
+2026-09-08; raw rows in
+[results/2026-09-08-m4pro-victory-1330.json](../../research/benchmark/perf/results/2026-09-08-m4pro-victory-1330.json).
+
+| Workload | size | Almide native | ordinary Rust | **ratio** | Almide, window off | ratio, window off |
+|---|---:|---:|---:|---:|---:|---:|
+| binarytrees | d17 | **134 ms** | 382 ms | **0.35×** | 482 ms | 1.26× |
+| binarytrees | d19 | **581 ms** | 1826 ms | **0.32×** | 2290 ms | 1.25× |
+| treealloc | d20 | **112 ms** | 375 ms | **0.30×** | 416 ms | 1.11× |
+| treealloc | d21 | **221 ms** | 748 ms | **0.30×** | 825 ms | 1.10× |
+
+**Which optimization did it: the region window (#1991), and only that.** Both
+programs spend their time in `check(make(depth))` — a tree whose whole
+lifetime is one expression. The effect system proves the pair region-pure
+(no effect, no global, no `mut` param, a scalar result), so the native leg
+runs it over `__rgn_` twin fns in a thread-local bump arena and rewinds once
+per tree; the ordinary Rust pays a `malloc` per node in and a `free` per node
+out, and cannot know it is allowed not to. With the window off, the same
+Almide source is 1.1–1.26× *slower* than the reference — the emitted `Box`
+code is what the reference already is, plus the drop glue — so the whole win
+is the information Rust does not have. The win holds at both sizes of both
+rows; the ratio is flat in size because both sides are linear in node count.
+
+**What the numbers are not.** The absolute ratio is allocator-dependent: the
+same binarytrees commit reads 0.61× on the ubuntu-latest CI runner, because
+glibc frees a `Box` far cheaper than macOS's allocator — the *reference* gets
+faster, the window does not change. The direction is machine-stable, which
+is what the ratchet gates: the VICTORY rows of
+[scripts/check-perf-ratio.sh](../../scripts/check-perf-ratio.sh) fail the
+build if either row reaches 1.0, if it regresses past +40% of the committed
+runner-class baseline, or if the `ALMIDE_REGION_OFF=1` ablation stops costing
+the row at least 1.3× (the declaration would then be attributing the win to
+the wrong thing). Two workloads, one mechanism: this is stated rather than
+dressed up — the second row exists to show the window is a property of the
+shape `consume(produce(scalars))`, not of one benchmark.
+
+**The candidates the issue named, measured and not claimed.** Both were
+measured the same day with ordinary sequential Rust references added for the
+purpose (`rust-ref/fannkuchredux.rs`, `rust-ref/mandelbrot.rs`, byte-identical
+output):
+
+| Workload | size | Almide native | ordinary Rust (one thread) | ratio |
+|---|---:|---:|---:|---:|
+| fannkuchredux (`fan { list.map }`) | 9 / 11 | 19 ms / 2147 ms | 20 ms / 2028 ms | 0.96× / 1.06× |
+| mandelbrot (`fan.map`) | 1000 / 4000 | 50 ms / 609 ms | 44 ms / 601 ms | 1.12× / 1.01× |
+
+- *Deterministic data parallelism (`fan`)* gives the native leg nothing
+  today: `fan.map` runs sequentially over an `Rc<dyn Fn>` thunk (the uniform
+  closure representation is not `Send`), a `fan { … }` block spawns one
+  thread for the whole block, and `AutoParallelPass` — the pass that would
+  turn a pure `list.map` into a threaded one — never fires, because it
+  matches a `Call { Named }` that `StdlibLowering` stopped emitting (it emits
+  `RuntimeCall`). A single-thread reference is therefore the honest one, and
+  the rows sit at parity. They are REPORTED by the ratchet so that a real
+  parallel win becomes a number the day it lands.
+- *Stream fusion of `|>` chains* does not fire on the Rust target
+  (`IterChain` never lowers there; see the perf suite's "Not yet covered"),
+  and ordinary Rust iterator chains are already fused by LLVM, so there is no
+  fusion win to claim; the listbuild rows read 1.47–1.69× here and 0.91× on
+  the runner for the allocator reason above.
+
 ### Allocation: the region window on the native leg (2026-09-08, #1991)
 
 `binarytrees` is the allocation row: `check(make(depth))` builds a tree whose
@@ -81,13 +158,14 @@ issue's workload; arg 18 in brackets):
 | Rust, same-shape `Box` (`rust-ref/binarytrees.rs`) | 222 ms | 222 ms | Almide now 0.33× |
 | Zig 0.16 arena (issue #1991, same shape) | 88 ms | 88 ms | Almide 0.82× — inside the 1.3× acceptance |
 
-The row joins the ratchet's REPORTED rows (`binarytrees=rust:binarytrees`,
-quick arg 17), not the anchored ones: the same commit reads 0.31 on the M4 Pro
-and 0.61 on the ubuntu-latest runner, because what differs between the two
-machines is how cheaply the *reference* frees a `Box` (glibc malloc vs macOS),
-not the window — the same allocator-dependence that keeps the listbuild rows
-reported. The window's own A/B is `ALMIDE_REGION_OFF=1` on the same binary and
-machine (3.5× here). What fires: every
+The row is a VICTORY row of the ratchet (`binarytrees=rust:binarytrees`,
+quick arg 17; see "Faster than ordinary Rust" above), not a ±band-anchored
+one: the same commit reads 0.31 on the M4 Pro and 0.61 on the ubuntu-latest
+runner, because what differs between the two machines is how cheaply the
+*reference* frees a `Box` (glibc malloc vs macOS), not the window — the same
+allocator-dependence that keeps the listbuild rows reported. The window's own
+A/B is `ALMIDE_REGION_OFF=1` on the same source and machine (3.5× here), and
+that A/B is what the ratchet gates. What fires: every
 `consume(produce(scalars))` site whose pair is region-pure and whose produced
 type is a root variant enum with scalar / region-enum payloads. What does not:
 a held tree (`let t = make(d)` read twice keeps its `Box`), a consumer that

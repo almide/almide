@@ -1,0 +1,25 @@
+# Native victory ledger (#1330) — the SOURCE for the README's native-victory block.
+# Regenerate the block: bash scripts/gen-readme-stats.sh
+# Gate:  bash scripts/check-perf-ratio.sh — the VICTORY rows re-measure the
+#        claim (almide-native / ordinary-Rust ratio < 1.0) and the same-source
+#        ablation (ALMIDE_REGION_OFF=1 must still cost the row more than the
+#        script's VICTORY_ABLATION_FLOOR) every CI round; a row that stops
+#        being faster fails the gate.
+# Method: research/benchmark/perf/bench.py shape — both sides compiled with
+#        the same rustc flags (opt-level=3, lto, 1 CGU), byte-identical stdout
+#        verified before timing, median of 9 interleaved runs after a warmup.
+#        The Rust side is the ORDINARY program for the workload (a `Box` per
+#        node, one thread, no arena, no `unsafe`, no SIMD).
+#
+# Rows: name | optimization | ratio at the small size (arg) | ratio at the
+#       large size (arg) | ratio with the optimization off, large size |
+#       ratio on the ubuntu-latest CI runner (quick arg)
+# The CI column is the runner-class number the ratchet baseline carries
+# (scripts/perf-ratio-baseline.txt); treealloc's is binarytrees' until the
+# first runner measurement replaces it (same shape, same window).
+version = almide 0.62.0
+date    = 2026-09-08
+machine = arm64 Darwin, Apple M4 Pro (local stamp); runner = ubuntu-latest
+
+binarytrees | region window (#1991) | 0.35 (d17) | 0.32 (d19) | 1.25 | 0.61
+treealloc   | region window (#1991) | 0.30 (d20) | 0.30 (d21) | 1.10 | 0.61 (est.)

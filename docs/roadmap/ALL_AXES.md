@@ -131,6 +131,18 @@ HKT stream fusion（Phase 1–3 出荷済）**。手書き Rust が `for` ルー
 `fan` による決定的データ並列。手書き Rust 側は「同じ最適化を人間が手で書いていない、普通に書かれた Rust」
 であることを明記する（`unsafe` チューニング済み Rust に勝つ主張はしない）。
 
+**2026-09-08 宣言済**（`docs/project/BENCHMARKS.md` "Faster than ordinary Rust"、README の
+native-victory ブロック、`check-perf-ratio.sh` の VICTORY 行）: **binarytrees 0.35× / 0.32×、
+treealloc 0.31× / 0.30×**（M4 Pro、2 サイズずつ、中央値 9 回インターリーブ）、同ソースで
+`ALMIDE_REGION_OFF=1` にすると 1.25× / 1.11× — 勝ち分は全部 **region window**（#1991、
+`check(make(d))` を bump arena で 1 回巻き戻す）。CI runner では 0.61×（glibc が `Box` を安く
+解放する）。ゲートは ±バンドではなく「主張そのもの」（ratio < 1.0）と ablation の下限。
+**当初の候補 2 つは今日勝てない**と実測で判明: `fan` は native では逐次
+（`fan.map` は `Rc<dyn Fn>` 逐次、`fan { }` はブロック全体で 1 スレッド、AutoParallel は
+`RuntimeCall` を見ないので死んでいる）で fannkuchredux 0.96–1.06× / mandelbrot 1.01–1.12×、
+`|>` チェーンの stream fusion は Rust ターゲットで発火しない（perf README「Not yet covered」の 6.6×）。
+2 本とも同じ 1 機構であることは宣言に明記。次の勝ち筋は `fan` の実並列化と IterChain の点火。
+
 ### B3（別階級）: fan → GPU で桁を変える ← [#1331](https://github.com/almide/almide/issues/1331)
 
 `--target wgsl` は既に存在する。`fan` が決定的データ並列の構文である以上、同じソースが GPU に落ちる
