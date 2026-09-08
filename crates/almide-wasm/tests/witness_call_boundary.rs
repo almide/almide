@@ -68,7 +68,13 @@ fn the_call_boundary_shapes_witness_exactly_and_balance() {
     // again — a loop, which the straight-line recorder must decline rather
     // than certify (it recorded `iamdd`, an over-release, before the gate
     // learned the shape).
-    assert!(w.get("self_tail").is_none(), "self_tail is a loop, out of the straight-line subset");
+    // Since step 4 the gate's refusal is itself recorded (the decline
+    // channel): a counted reason, never a certificate.
+    assert_eq!(
+        w.get("self_tail").map(String::as_str),
+        Some("!decline:tail:self-call-loop\n"),
+        "self_tail is a loop, out of the straight-line subset"
+    );
     // The callee `take` itself: one owned param, released at the epilogue.
     assert_eq!(w.get("take").map(String::as_str), Some("id\n"));
 }

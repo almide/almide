@@ -1,6 +1,6 @@
 66432	spec/wasm_cross/adr0005_operator_equivalence.almd
 66576	spec/wasm_cross/alias_combinator_rc.almd
-69280	spec/wasm_cross/alias_cow.almd
+69248	spec/wasm_cross/alias_cow.almd
 2162932	spec/wasm_cross/allocation_within_limits.almd
 66288	spec/wasm_cross/anon_record_variant_payloads.almd
 66016	spec/wasm_cross/anon_records_and_fusion.almd
@@ -15,7 +15,7 @@
 65904	spec/wasm_cross/assign_alias_rc.almd
 66144	spec/wasm_cross/autotry_construction.almd
 65872	spec/wasm_cross/autotry_result_first_arg.almd
-72688	spec/wasm_cross/availability_pure_batch.almd
+72608	spec/wasm_cross/availability_pure_batch.almd
 66896	spec/wasm_cross/bang_in_record_literal_field.almd
 69296	spec/wasm_cross/base64_encode.almd
 66544	spec/wasm_cross/binary_operators.almd
@@ -103,7 +103,7 @@
 66464	spec/wasm_cross/edge_closure_matrix.almd
 77664	spec/wasm_cross/edge_float_formatting.almd
 67408	spec/wasm_cross/edge_int_boundaries.almd
-67216	spec/wasm_cross/edge_map_order.almd
+66640	spec/wasm_cross/edge_map_order.almd
 113248	spec/wasm_cross/edge_string_unicode.almd
 66480	spec/wasm_cross/effect_assign_unwrap.almd
 66912	spec/wasm_cross/effect_fn_value.almd
@@ -318,7 +318,7 @@
 66064	spec/wasm_cross/list_iter_tco.almd
 66096	spec/wasm_cross/list_minmax_str.almd
 67280	spec/wasm_cross/list_modify_heap.almd
-66032	spec/wasm_cross/list_of_maps_loop_build.almd
+65968	spec/wasm_cross/list_of_maps_loop_build.almd
 65920	spec/wasm_cross/list_of_tuples_equality.almd
 66064	spec/wasm_cross/list_product_overflow.almd
 66016	spec/wasm_cross/list_remove_at_oob.almd
@@ -342,7 +342,7 @@
 65776	spec/wasm_cross/literal_unit.almd
 65776	spec/wasm_cross/loop_break_continue.almd
 3211556	spec/wasm_cross/loop_buffer_churn.almd
-66144	spec/wasm_cross/loop_effect_match_stmt.almd
+66016	spec/wasm_cross/loop_effect_match_stmt.almd
 66064	spec/wasm_cross/loop_outer_inplace_mutate_rc.almd
 29357848	spec/wasm_cross/loop_push_trailing_increment.almd
 67136	spec/wasm_cross/map_core_trio.almd
@@ -355,7 +355,7 @@
 67232	spec/wasm_cross/map_index_string_key_shapes.almd
 74944	spec/wasm_cross/map_insertion_order.almd
 71824	spec/wasm_cross/map_interp_string_value.almd
-65984	spec/wasm_cross/map_of_maps_value.almd
+65952	spec/wasm_cross/map_of_maps_value.almd
 65856	spec/wasm_cross/map_rich_variant_key.almd
 67440	spec/wasm_cross/map_set_eq.almd
 335936	spec/wasm_cross/map_set_in_place.almd
@@ -390,7 +390,7 @@
 93376	spec/wasm_cross/matrix_select_rows_q1_partial_block.almd
 68752	spec/wasm_cross/matrix_softmax_fastexp.almd
 !	spec/wasm_cross/matrix_zero_cols_rows.almd
-84128	spec/wasm_cross/memory_stress.almd
+83808	spec/wasm_cross/memory_stress.almd
 67072	spec/wasm_cross/mg_rebuild_two_phase.almd
 65968	spec/wasm_cross/module_global_const.almd
 66720	spec/wasm_cross/module_var_alias_cow.almd
@@ -418,7 +418,7 @@
 66928	spec/wasm_cross/nested_list_list_int.almd
 66912	spec/wasm_cross/nested_list_list_string.almd
 66576	spec/wasm_cross/nested_list_option_result.almd
-66320	spec/wasm_cross/nested_map_list_values.almd
+66224	spec/wasm_cross/nested_map_list_values.almd
 66416	spec/wasm_cross/nested_match_heap_arm.almd
 65856	spec/wasm_cross/nested_payload_guard.almd
 66192	spec/wasm_cross/nested_scalar_record_append.almd
@@ -502,7 +502,7 @@
 97024	spec/wasm_cross/result_ctor_call_payload.almd
 66016	spec/wasm_cross/result_default_and_passthrough.almd
 65952	spec/wasm_cross/result_eq.almd
-258448	spec/wasm_cross/result_filter_heap_ok.almd
+130544	spec/wasm_cross/result_filter_heap_ok.almd
 66000	spec/wasm_cross/result_heap_err_match.almd
 65888	spec/wasm_cross/result_heap_ok_match.almd
 66128	spec/wasm_cross/result_list_str_int_tuple.almd
@@ -639,7 +639,7 @@
 82448	spec/wasm_cross/to_fixed_domain_abort_hi.almd
 108048	spec/wasm_cross/to_fixed_wide_precision.almd
 66032	spec/wasm_cross/to_result_custom_e.almd
-66304	spec/wasm_cross/to_result_nested_share.almd
+66256	spec/wasm_cross/to_result_nested_share.almd
 65856	spec/wasm_cross/top_let_div_eager.almd
 65856	spec/wasm_cross/top_let_div_used.almd
 65808	spec/wasm_cross/toplevel_const_wrapping.almd
@@ -682,7 +682,7 @@
 65776	spec/wasm_cross/while_loops.almd
 66032	spec/wasm_cross/whilep_str.almd
 71584	spec/wasm_cross/wide_function_body.almd
-65904	spec/wasm_cross/witness_straightline.almd
+86864	spec/wasm_cross/witness_straightline.almd
 67632	spec/wasm_cross/zip_view_shape.almd
 227024	spec/wasm_cross/zlib_selfhost.almd
 66160	spec/wasm_fail/effect_err_aborts_both_legs.almd

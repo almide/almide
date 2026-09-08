@@ -109,13 +109,19 @@ impl crate::emitter::Emitter<'_> {
         // a no-op on it) — nothing to release, and no reason to ship the
         // rc core for a program that never allocates (#1962).
         let is_static = matches!(a.kind, almide_ir::IrExprKind::LitStr { .. });
-        if mode == ArgMode::Borrow && !is_static && self.rc_droppable(got) && self.rc_owned_result(a) {
+        let park = mode == ArgMode::Borrow && !is_static && self.rc_droppable(got) && self.rc_owned_result(a);
+        if park {
             if self.borrowed_temps.len() as u32 >= crate::emitter::BORROW_POOL {
                 return Err(crate::EmitError::Unsupported("borrow-depth".into()));
             }
             let h = self.borrow_base + self.borrowed_temps.len() as u32;
             self.f.instructions().local_tee(h);
             self.borrowed_temps.push((h, got));
+        }
+        // The witness (#1696 step 4) records the declaration's RC
+        // instruction — this is the one place an argument enters an arm.
+        if self.witness.is_some() {
+            self.witness_module_arg(a, got, mode, park);
         }
         Ok(got)
     }

@@ -31,9 +31,9 @@ impl Emitter<'_> {
             }
             IrExprKind::Call { target, args, .. } => {
                 // Unit-position call: a value-returning callee's result is
-                // dropped (a bare non-Unit call statement is legal IR).
-                if self.lower_call(target, args)?.is_some() {
-                    self.f.instructions().drop();
+                // discarded (a bare non-Unit call statement is legal IR).
+                if let Some(ty) = self.lower_call(target, args)? {
+                    self.discard_result(e, ty);
                 }
                 Ok(())
             }
@@ -82,6 +82,21 @@ impl Emitter<'_> {
                 }
                 Ok(())
             }
+        }
+    }
+
+    /// A value-returning call's result in statement position. An OWNED
+    /// droppable result arrived with its one credit (the callee-owned
+    /// convention, #1986; a native arm's declared `Owned`, #2004) — the
+    /// route releases it here, never leaks it (the witness records the
+    /// pair, `id`). A View or a scalar carries no credit: plain drop.
+    fn discard_result(&mut self, e: &IrExpr, ty: SliceTy) {
+        if self.rc_droppable(ty) && self.rc_owned_result(e) {
+            let dec = self.dec_fn_of(ty);
+            self.f.instructions().call(dec);
+            self.witness_discard();
+        } else {
+            self.f.instructions().drop();
         }
     }
 

@@ -208,46 +208,9 @@ impl Emitter<'_> {
                         self.witness_arg(a, want);
                         continue;
                     }
-                    let is_static = matches!(a.kind, IrExprKind::LitStr { .. });
-                    let fresh = self.rc_droppable(want) && self.rc_owned_result(a) && !is_static;
-                    // Past a true tail site only a value THIS frame does
-                    // not own survives the exit plan: a param it borrows
-                    // itself, or a pool static (param_borrow.rs
-                    // `tail_safe_arg`).
-                    let tail_safe = !true_tail
-                        || is_static
-                        || matches!(&a.kind, IrExprKind::Var { id }
-                            if self.locals.get(id).is_some_and(|&(idx, _)| {
-                                idx < self.rc_param_ceiling && !self.rc_frame_params.contains(&idx)
-                            }));
-                    // A borrowed POSITION: droppable, and not owned by the
-                    // callee (a scalar param has no convention at all).
-                    let borrowed_pos =
-                        self.rc_droppable(want) && !param_owned.get(k).copied().unwrap_or(true);
-                    if borrowed_pos && !tail_safe && !must_transfer {
+                    let owned_pos = param_owned.get(k).copied().unwrap_or(true);
+                    if self.lower_conv_arg(a, want, owned_pos, true_tail, must_transfer)? {
                         no_transfer = true;
-                    }
-                    if !borrowed_pos || (must_transfer && !tail_safe) {
-                        // RC-3 callee-owned args: a borrowed droppable
-                        // argument gets +1 here, the callee's epilogue decs
-                        // its params — the pair keeps a mut-param callee's
-                        // realloc-free honest (rc reflects both holders).
-                        self.rc_arg_guard(a, want);
-                        self.witness_arg(a, want);
-                    } else {
-                        // A borrowed param (#2028): a Var passes as is; an
-                        // owned temporary is parked for release after the
-                        // call (a string literal is a pool static: nothing
-                        // to release).
-                        if fresh {
-                            if self.borrowed_temps.len() as u32 >= crate::emitter::BORROW_POOL {
-                                return unsup("borrow-depth");
-                            }
-                            let h = self.borrow_base + self.borrowed_temps.len() as u32;
-                            self.f.instructions().local_tee(h);
-                            self.borrowed_temps.push((h, want));
-                        }
-                        self.witness_arg_borrowed(a, want, fresh);
                     }
                 }
                 let parked = self.borrowed_temps.len() > depth;
@@ -597,6 +560,59 @@ impl Emitter<'_> {
         Ok(start)
     }
 
+    /// One already-lowered argument under the callee's declared convention
+    /// (param_borrow.rs, #2028) — the Named and the registry route share
+    /// it, so the two cannot disagree with the ONE `param_owned` table.
+    /// `owned_pos` = the callee owns this param (releases it at its exit
+    /// plan). Returns true when a borrowed position forbids a
+    /// `return_call` at this site (`no_transfer`).
+    pub(crate) fn lower_conv_arg(
+        &mut self,
+        a: &IrExpr,
+        want: SliceTy,
+        owned_pos: bool,
+        true_tail: bool,
+        must_transfer: bool,
+    ) -> Result<bool, EmitError> {
+        let is_static = matches!(a.kind, IrExprKind::LitStr { .. });
+        let fresh = self.rc_droppable(want) && self.rc_owned_result(a) && !is_static;
+        // Past a true tail site only a value THIS frame does not own
+        // survives the exit plan: a param it borrows itself, or a pool
+        // static (param_borrow.rs `tail_safe_arg`).
+        let tail_safe = !true_tail
+            || is_static
+            || matches!(&a.kind, IrExprKind::Var { id }
+                if self.locals.get(id).is_some_and(|&(idx, _)| {
+                    idx < self.rc_param_ceiling && !self.rc_frame_params.contains(&idx)
+                }));
+        // A borrowed POSITION: droppable, and not owned by the callee (a
+        // scalar param has no convention at all).
+        let borrowed_pos = self.rc_droppable(want) && !owned_pos;
+        let no_transfer = borrowed_pos && !tail_safe && !must_transfer;
+        if !borrowed_pos || (must_transfer && !tail_safe) {
+            // RC-3 callee-owned args: a borrowed droppable argument gets
+            // +1 here, the callee's epilogue decs its params — the pair
+            // keeps a mut-param callee's realloc-free honest (rc reflects
+            // both holders).
+            self.rc_arg_guard(a, want);
+            self.witness_arg(a, want);
+        } else {
+            // A borrowed param (#2028): a Var passes as is; an owned
+            // temporary is parked for release after the call (a string
+            // literal is a pool static: nothing to release).
+            if fresh {
+                if self.borrowed_temps.len() as u32 >= crate::emitter::BORROW_POOL {
+                    return Err(EmitError::Unsupported("borrow-depth".into()));
+                }
+                let h = self.borrow_base + self.borrowed_temps.len() as u32;
+                self.f.instructions().local_tee(h);
+                self.borrowed_temps.push((h, want));
+            }
+            self.witness_arg_borrowed(a, want, fresh);
+        }
+        Ok(no_transfer)
+    }
+
     /// Linked module functions live in the table under their qualified
     /// name. A stdlib SURFACE call additionally resolves through the
     /// self-host registry to its loaded implementation (same registry
@@ -621,13 +637,31 @@ impl Emitter<'_> {
             return unsup(&format!("call-arity:{key}"));
         }
         let (index, ret, params) = (info.wasm_index, info.ret, info.params.clone());
-        for (a, want) in args.iter().zip(params) {
+        // The SAME per-argument convention as the Named route (#2028 /
+        // #1696 step 4): the callee's param_owned table decides share-and-
+        // move vs borrow; a borrowed position past a true tail site keeps
+        // the call plain (`no_transfer`), a parked temporary too.
+        let param_owned = self.table.infos[i].param_owned.clone();
+        let true_tail = tail && ret.is_some() && ret == self.fn_ret;
+        let must_transfer = std::mem::take(&mut self.try_see_through) && true_tail;
+        let depth = self.borrowed_temps.len();
+        let mut no_transfer = false;
+        for (k, (a, want)) in args.iter().zip(params).enumerate() {
             self.lower(a, Some(want))?;
-            self.rc_arg_guard(a, want);
-            self.witness_arg(a, want);
+            let owned_pos = param_owned.get(k).copied().unwrap_or(true);
+            if self.lower_conv_arg(a, want, owned_pos, true_tail, must_transfer)? {
+                no_transfer = true;
+            }
         }
+        let parked = self.borrowed_temps.len() > depth;
         self.calls.insert(i);
-        if tail && ret.is_some() && ret == self.fn_ret && self.tail_transfer_ok(Some(index) != self.self_index) {
+        if tail
+            && !parked
+            && !no_transfer
+            && ret.is_some()
+            && ret == self.fn_ret
+            && self.tail_transfer_ok(Some(index) != self.self_index)
+        {
             // The third tail site, found by scripts/check-exit-sites.sh
             // the day the gate went in (#1995): a registry-table tail call
             // replaced the frame with no release at all — a user fn whose
@@ -639,6 +673,7 @@ impl Emitter<'_> {
             self.f.instructions().return_call(index);
         } else {
             self.f.instructions().call(index);
+            self.release_borrowed_temps(depth);
         }
         // The callee-owned convention IS the declaration: a table callee
         // hands its droppable result over with exactly one credit (#1986 /

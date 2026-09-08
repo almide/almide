@@ -31,8 +31,15 @@ impl Emitter<'_> {
         // is done and its result sits on the stack ($dec_flat is
         // stack-neutral).
         let depth = self.borrowed_temps.len();
+        let hooks_before = self.witness.as_ref().map(|w| w.arg_hooks());
         let lowered = self.arm_scope(|em| {
             let l = em.lower_module_call_dispatch(target, args, tail, ret_hint)?;
+            // The witness audit (#1696 step 4): the arm fired one argument
+            // hook per argument, and declared no droppable View — or the
+            // frame declines, before the promotion below adds a +1.
+            if let (Some(before), CallTarget::Module { module, func, .. }) = (hooks_before, target) {
+                em.witness_module_result(&format!("{module}.{func}"), args.len(), before, l);
+            }
             // A `View` into a temporary this scope releases next would
             // dangle: it takes its share BEFORE the release (below).
             Ok(match l {

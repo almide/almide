@@ -30,6 +30,29 @@ fn bind_then_pass() -> Int = {
   take(x)
 }
 
+// Step 4 — STATEMENT CALLS and MODULE CALLS (#1696). `discard` drops an
+// owned call result in statement position: the route releases the
+// credit it arrived with (`id`), never leaks it. `stamp` binds a native
+// arm's declared-Owned result (`i`, released at the epilogue); `shout`
+// tails a registry-route module call under the callee's param_owned
+// convention; `say` hands a borrowed param to the println arm (Borrow:
+// no RC site at all).
+fn discard(xs: List[Int]) -> Int = {
+  shed()
+  list.len(xs)
+}
+
+fn stamp(n: Int) -> String = {
+  let t = int.to_string(n)
+  t
+}
+
+fn shout(s: String) -> String = string.to_upper(s)
+
+fn say(name: String) -> Unit = println(name)
+
 fn main() -> Unit = {
   println("${list.len(shed())} ${tag("w")} ${pass([1])} ${bind_then_pass()}")
+  println("${discard([1, 2])} ${stamp(7)} ${shout("w")}")
+  say("hi")
 }

@@ -302,6 +302,27 @@ if [ "$src_rc" -ne 1 ]; then echo "FAIL structural-tamper(B1): a return_call tha
 kernel_verify ownership /tmp/structural.tamper 1   || { echo "FAIL structural-tamper(B1): the kernel accepted the unreleased param"; exit 1; }
 echo "ok   structural-tamper(B1): an unreleased tail-site param is rejected by the binary AND the kernel"
 
+# ── #1696 step 4: STATEMENT CALLS and MODULE CALLS through the same checker.
+# `discard` drops an owned call result in statement position — the route
+# releases the credit it arrived with (`id`); `stamp` binds a native arm's
+# declared-Owned result (`i` … `d`); `shout` tails a registry-route module
+# call under the callee's param_owned convention (`iamd` + the result `im`);
+# `say` lends a param to the println arm (Borrow: no RC site, `id` is the
+# param's own pair). The drill strips the discard release — the leak class
+# the structural leg had before the discard route (a bare `f(x)` statement
+# dropped its owned result on the floor).
+echo
+echo "== structural leg, statement + module calls  ⊳  proven checker (#1696 step 4) =="
+run_structural spec/wasm_cross/witness_straightline.almd discard 0
+run_structural spec/wasm_cross/witness_straightline.almd stamp 0
+run_structural spec/wasm_cross/witness_straightline.almd shout 0
+run_structural spec/wasm_cross/witness_straightline.almd say 0
+emit_structural spec/wasm_cross/witness_straightline.almd discard | sed '2s/^id$/i/' > /tmp/structural.tamper
+set +e; "$ROOT/proofs/checker" ownership /tmp/structural.tamper >/dev/null 2>&1; src_rc=$?; set -e
+if [ "$src_rc" -ne 1 ]; then echo "FAIL structural-tamper(step4): a discarded result that was never released was accepted"; exit 1; fi
+kernel_verify ownership /tmp/structural.tamper 1   || { echo "FAIL structural-tamper(step4): the kernel accepted the unreleased discard"; exit 1; }
+echo "ok   structural-tamper(step4): an unreleased statement-call result is rejected by the binary AND the kernel"
+
 echo
 echo "GATE OK: the kernel-proven checker re-verified per-build witnesses on THREE"
 echo "properties (ownership + name totality + capability bound), AND a REAL .almd"

@@ -96,6 +96,7 @@ mod bytes_recv;
 mod bytes_split;
 pub mod heap_cap;
 pub mod witness;
+mod witness_hooks;
 mod calls;
 mod calls_modules;
 mod cells;
