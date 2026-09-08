@@ -46,17 +46,28 @@ SUITE = [
     ("fasta",        "fasta/fasta.almd",                 ["fasta.rs"],                      "25000000", "1000", "bytes", None),
     ("fft",          "fft/fft.almd",                     ["fft.rs"],                        "22",       "10",   "line1", ["native", "rust"]),
     ("fft-wasm",     "fft/fft.almd",                     ["fft.rs"],                        "18",       "10",   "line1", ["native", "wasm", "rust"]),
-    ("fannkuchredux","fannkuchredux/fannkuchredux.almd", [],                                "11",       "7",    "bytes", None),
+    # fannkuchredux / mandelbrot (#1330): the `fan` kernels against ORDINARY
+    # sequential Rust (`rust-ref/fannkuchredux.rs`, `rust-ref/mandelbrot.rs`
+    # — one thread, no `unsafe`, no SIMD). The native leg gives them no
+    # parallelism today (`fan.map` is sequential, `fan { .. }` spawns one
+    # thread for the block, AutoParallel does not fire), so the rows read
+    # ~1.0 and are REPORTED by check-perf-ratio.sh, not anchored — and the
+    # day a data-parallel win appears it shows up as a number here.
+    ("fannkuchredux","fannkuchredux/fannkuchredux.almd", ["fannkuchredux.rs"],              "11",       "7",    "bytes", None),
     # onebrc writes/reads a measurements file; the wasm leg has no preopened
     # dir under `wasmtime run` so the row is native/rust only.
     ("onebrc",       "onebrc/onebrc.almd",               ["onebrc.rs"],                     "10000000", "50000", "bytes", ["native", "rust"]),
-    # binarytrees (#1991): `binarytrees.rs` is the same-shape `Box` program a
-    # Rust programmer writes, sequential (Almide's `fan.map` is sequential on
-    # the native leg). The native leg beats it — `check(make(d))` runs in a
-    # region window — so the ratio sits below 1; reported, not anchored
-    # (allocator-dependent across machines, like listbuild).
+    # binarytrees (#1991) and treealloc (#2028): the references are the
+    # same-shape `Box` programs a Rust programmer writes, sequential (Almide's
+    # `fan.map` is sequential on the native leg). The native leg beats both —
+    # `check(make(d))` runs in a region window — so the ratio sits below 1.
+    # They are the VICTORY rows of check-perf-ratio.sh (#1330): gated on the
+    # claim (< 1.0) and on the `ALMIDE_REGION_OFF=1` ablation, because the
+    # absolute ratio is allocator-dependent across machines (0.32 on an M4
+    # Pro, 0.61 on the ubuntu runner) and no one ±band holds both.
     ("binarytrees",  "binarytrees/binarytrees.almd",     ["binarytrees.rs"],                "18",       "10",   "bytes", None),
-    ("mandelbrot",   "mandelbrot/mandelbrot.almd",       [],                                "4000",     "200",  "bytes", None),
+    ("treealloc",    "treealloc/treealloc.almd",         ["treealloc.rs"],                  "21",       "10",   "bytes", None),
+    ("mandelbrot",   "mandelbrot/mandelbrot.almd",       ["mandelbrot.rs"],                 "4000",     "200",  "bytes", None),
     # listbuild (#1337): the SAME materializing workload written three ways.
     # The rows differ only in the build loop — same arithmetic, same checksum
     # consumer — so the spread between them is the cost of the SHAPE, and the
@@ -89,12 +100,17 @@ QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
     "fasta": "2500000",
     "fft": "22",
     "fft-wasm": "16",
-    "fannkuchredux": "9",
+    # 10, not 9: 9 reads ~20 ms on both sides, under the spawn-noise floor.
+    "fannkuchredux": "10",
     "onebrc": "1000000",
     # 17, not 14: the region window (#1991) took the native row to ~18 ms at
     # 14, under the spawn-noise floor; 17 reads ~145 ms native / ~435 ms ref.
     "binarytrees": "17",
-    "mandelbrot": "1000",
+    # 20, not the #2028 default 19: with the window the native row reads
+    # ~60 ms at 19, under the spawn-noise floor; 20 reads ~120 ms / ~400 ms ref.
+    "treealloc": "20",
+    # 2000, not 1000: 1000 reads ~45 ms, under the spawn-noise floor.
+    "mandelbrot": "2000",
     "listbuild": "23",
     "listbuild-append": "23",
     "listbuild-comb": "23",
