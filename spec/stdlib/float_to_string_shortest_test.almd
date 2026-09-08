@@ -1,0 +1,66 @@
+// float.to_string — the shortest round-trip printer's corner cases (#1985, Schubfach).
+// Every expected string is Rust's `format!("{}", x)` + the `.0` integer suffix; the values
+// are the ones where Giulietti's Java rules and Rust's differ, plus the exponent extremes.
+// Bit patterns go through int.bits_to_float so subnormals and exact ties are pinned by bits.
+test "float.to_string plain values" {
+  assert_eq(float.to_string(1.5), "1.5")
+  assert_eq(float.to_string(3.0), "3.0")
+  assert_eq(float.to_string(100.0), "100.0")
+  assert_eq(float.to_string(0.1), "0.1")
+  assert_eq(float.to_string(0.001), "0.001")
+  assert_eq(float.to_string(123456.789), "123456.789")
+  assert_eq(float.to_string(-2.5), "-2.5")
+  assert_eq(float.to_string(0.1 + 0.2), "0.30000000000000004")
+  assert_eq(float.to_string(1.0 / 3.0), "0.3333333333333333")
+}
+
+test "float.to_string zero, sign and specials" {
+  assert_eq(float.to_string(0.0), "0.0")
+  assert_eq(float.to_string(-0.0), "-0.0")
+  assert_eq(float.to_string(1.0 / 0.0), "inf")
+  assert_eq(float.to_string(-1.0 / 0.0), "-inf")
+  assert_eq(float.to_string(0.0 / 0.0), "NaN")
+}
+
+test "float.to_string large magnitudes stay in fixed notation" {
+  assert_eq(float.to_string(1e15), "1000000000000000.0")
+  assert_eq(float.to_string(1e16), "10000000000000000.0")
+  assert_eq(float.to_string(1e21), "1000000000000000000000.0")
+  assert_eq(float.to_string(9007199254740993.0), "9007199254740992.0")
+  // 2^64: the asymmetric (power-of-two) rounding interval keeps the last significant digit
+  assert_eq(float.to_string(18446744073709551616.0), "18446744073709552000.0")
+  // f64::MAX = 17976931348623157 followed by 292 zeros
+  let max = int.bits_to_float(0x7FEFFFFFFFFFFFFF)
+  assert_eq(float.to_string(max), "17976931348623157" + string.repeat("0", 292) + ".0")
+}
+
+test "float.to_string small magnitudes and subnormals" {
+  assert_eq(float.to_string(1e-7), "0.0000001")
+  // f64::MIN_POSITIVE = 2.2250738585072014e-308
+  let min_normal = int.bits_to_float(0x0010000000000000)
+  assert_eq(float.to_string(min_normal), "0." + string.repeat("0", 307) + "22250738585072014")
+  // MIN_VALUE = 5e-324: ONE digit (Java's C_TINY rule would print 4.9e-324)
+  assert_eq(float.to_string(int.bits_to_float(1)), "0." + string.repeat("0", 323) + "5")
+  assert_eq(float.to_string(int.bits_to_float(2)), "0." + string.repeat("0", 322) + "1")
+  assert_eq(float.to_string(int.bits_to_float(3)), "0." + string.repeat("0", 322) + "15")
+  // 20 * 2^-1074 = 9.88e-323: the rounding interval holds 1e-322, and the shorter candidate
+  // must be tried even though s = 98 has only two digits (Java guards it with s >= 100)
+  assert_eq(float.to_string(int.bits_to_float(20)), "0." + string.repeat("0", 321) + "1")
+  // largest subnormal
+  let max_sub = int.bits_to_float(0x000FFFFFFFFFFFFF)
+  assert_eq(float.to_string(max_sub), "0." + string.repeat("0", 307) + "2225073858507201")
+}
+
+test "float.to_string exact tie between the two closest candidates rounds the magnitude up" {
+  // 1669760939663944.25 and -1737470848118124.25: both ...4.2 and ...4.3 round-trip and are
+  // equally close; Rust's `{}` (Dragon4 "2R >= S") prints ...4.3 — round-half-even would
+  // print ...4.2.
+  assert_eq(float.to_string(int.bits_to_float(4834537844299827489)), "1669760939663944.3")
+  assert_eq(float.to_string(int.bits_to_float(-4388563352921131599)), "-1737470848118124.3")
+}
+
+test "float.to_fixed keeps its own (Dragon4 fixed-mode) digit loop" {
+  assert_eq(float.to_fixed(1.5, 3), "1.500")
+  assert_eq(float.to_fixed(0.125, 2), "0.12")
+  assert_eq(float.to_fixed(2.5, 0), "2")
+}
