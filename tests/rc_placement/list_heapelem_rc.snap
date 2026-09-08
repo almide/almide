@@ -250,8 +250,10 @@ fn $__drop_opt_str_str
   (call $rc_dec (i32.wrap_i64 (local.get $v25)))
   (call $rc_dec (i32.wrap_i64 (local.get $v14)))
   (call $rc_dec (i32.wrap_i64 (local.get $v1)))
-fn $__dg_string_main
-  (call $rc_dec (local.get $v34))
+fn $__sf_finish
+  (call $rc_dec (local.get $v4))
+fn $__sf_main
+  (call $rc_dec (local.get $v11))
 fn $__lsh_copy
   (call $rc_inc (i32.wrap_i64 (local.get $v12)))
 fn $__lsh_set
