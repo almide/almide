@@ -1,0 +1,24 @@
+// @contract: C-044
+// A user fn whose bare name is the stdlib fn it calls (`fn parse` over
+// `json.parse`) with a `??` fallback to a `Value` constructor, in both the
+// expression-bodied and the block-bodied form. All three legs must print the
+// parsed document and the fallback.
+// (#2058: the interpreter resolved `json.parse` to the program's own `parse`
+// and spun to fuel exhaustion; native and wasm were already identical.)
+import json
+
+fn parse(s: String) -> Value = json.parse(s) ?? value.null()
+
+fn parse_block(s: String) -> Value = {
+  let v = json.parse(s) ?? value.null()
+  v
+}
+
+fn show(v: Value) -> String = json.stringify(v)
+
+fn main() -> Unit = {
+  println(show(parse("{\"a\":1}")))
+  println(show(parse("{")))
+  println(show(parse_block("[1,2]")))
+  println(show(parse_block("nope")))
+}

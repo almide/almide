@@ -79,7 +79,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-041 | Heap / RC primitives honour the Lean-certified Perceus discipline | 0.24.0 | active | lean | 5 |
 | C-042 | fs preopen-dir scan + path resolution is observable-equivalent | 0.24.0 | active | fixture | 1 |
 | C-043 | A user type named Box coexists with recursive-enum heap indirection | 0.24.0 | active | fixture | 1 |
-| C-044 | Result/Option construction and matching are byte-identical | 0.24.0 | active | fixture | 3 |
+| C-044 | Result/Option construction and matching are byte-identical | 0.24.0 | active | fixture | 4 |
 | C-045 | A List[String] param works across join / len / index / iteration | 0.24.0 | active | fixture | 3 |
 | C-046 | Record spread-update and cross-module monomorphization are byte-identical | 0.24.0 | active | fixture | 1 |
 | C-047 | math.pow negative exponent and rotate non-positive width are total — they abort, never trap/wrap | 0.24.0 | active | fixture | 3 |
