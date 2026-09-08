@@ -12,16 +12,7 @@ import json
 
 type Address: Codec = { city: String, zip: String, country: String }
 
-type User: Codec = {
-  id: Int,
-  name: String,
-  email: String,
-  age: Int,
-  active: Bool,
-  score: Float,
-  tags: List[String],
-  address: Address,
-}
+type User: Codec = { id: Int, name: String, email: String, age: Int, active: Bool, score: Float, tags: List[String], address: Address }
 
 fn show(v: Value) -> String = match User.decode(v) {
   ok(u) => "${u.id} ${u.name} ${u.email} ${u.age} ${u.active} ${u.score} ${list.join(u.tags, ",")} ${u.address.city}/${u.address.zip}/${u.address.country}",
