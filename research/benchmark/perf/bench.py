@@ -90,6 +90,19 @@ SUITE = [
     # (see the REPORTED comment there). string-gap-1004.md has the attribution.
     ("strchurn",     "strchurn/strchurn.almd", ["strchurn.rs", "strchurn_idiomatic.rs"],
      "4000000", "1000", "bytes", ["native", "rust"]),
+    # decode (#1679, #1673): N derived `User.decode`s of one fixed 8-field
+    # document (nested `Address`, 3-element `List[String]`), parsed once
+    # outside the loop. `decode.rs` is the ordinary hand-written decode against
+    # the SAME `AlmideValue` shape — a borrowed linear field scan and owned
+    # `String` record fields (the issue's 168 ns row), not the borrowed-`&str`
+    # record the language cannot express. REPORTED, not anchored: the row is
+    # eight short-string allocations per op, an allocator comparison first,
+    # like strchurn. Native/rust only for now: the wasm leg retains the decoded
+    # record on every call (#2046 — ~800 B per decode; 1M decodes peak at
+    # 786 MB and the 5M timing arg is out of memory), so the row would measure
+    # the leak. The wasm leg prints the same bytes at small N (checked by hand
+    # at 1000 and 1M); re-add "wasm" to the legs when #2046 closes.
+    ("decode",       "decode/decode.almd",               ["decode.rs"],                     "5000000",  "1000", "bytes", ["native", "rust"]),
 ]
 
 QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
@@ -117,6 +130,9 @@ QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
     # ~0.12s / ~210 MB RSS for the native leg — over the 0.08s spawn-noise
     # floor with room, and small enough to stay polite on a CI runner.
     "strchurn": "2000000",
+    # ~0.2s native / ~0.16s reference at 1M decodes on an M4 Pro — over the
+    # 0.08s spawn-noise floor on both sides; the docs quote ns/op at this N.
+    "decode": "1000000",
 }
 
 RUSTC_FLAGS = ["-C", "opt-level=3", "-C", "lto=yes", "-C", "codegen-units=1",

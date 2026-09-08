@@ -255,6 +255,47 @@ rlib-boundary hypothesis, and the resulting work list:
 Like the listbuild rows, this one is reported rather than anchored — an
 allocation-dominated ratio is an allocator comparison first.
 
+### Codec decode: what the derived `T.decode` costs (2026-09-08, #1679)
+
+`decode` is the #1673/#1679 workload: one fixed 8-field `User` document (a
+nested `Address`, a 3-element `List[String]`), parsed once, then N derived
+`User.decode`s whose records feed an accumulator. The reference
+(`rust-ref/decode.rs`) is the ordinary hand-written decode against the SAME
+`AlmideValue` shape — a borrowed linear field scan into owned `String` record
+fields, the issue's 168 ns row — not the borrowed-`&str` record (53 ns) the
+language cannot express. Same box, same session, interleaved, median of 7,
+2M decodes, arm64; process floor subtracted:
+
+| decode (per op) | ns/op | |
+|---|---:|---|
+| Almide native, field scan (before the slot hint) | 422 | — |
+| Almide native, slot-indexed lookup (`_field_ref_at`, this change) | **412** | 2.0× the reference |
+| Almide native, the same emit with the `___erratw_*` frames collapsed | 205 | level with the reference |
+| Rust, same shape (`rust-ref/decode.rs`) | 205 | — |
+| zod 4.5.2 `safeParse` / `z.compile`, same schema (issue #1679, same box) | 78 / 17 | context, not the same data model |
+
+The slot hint is the issue's "shape specialization" step: a derived decode
+knows each field's declaration index — the slot `T.encode` writes it to — and
+`almide_rt_value_field_ref_at` tries that slot before falling back to the scan
+(`spec/wasm_cross/codec_decode_field_order.almd` drives the reordered, shifted,
+sparse and missing-key fallbacks on both legs). It buys 10 ns on an 8-field
+record because the scan was never the cost: the row's whole 2× is the #1675
+error-path frames (`T___erratw_<field>`) that clone the `Ok` payload and
+allocate the path segment `"name".to_string()` on the SUCCESS path — eleven
+of them per decode, ~200 ns. Collapsing them in the emitted Rust is the third
+row, and it reads exactly the reference. That frame is the row's next move;
+the representation half (owned `String` fields vs a shared string) stays the
+ADR-level decision #1679 records. The row joins the ratchet's REPORTED rows
+(`decode=rust:decode`, quick arg 1M): eight short-string allocations per op on
+both sides make it an allocator reading first, like strchurn. The ratchet's own
+reading of the same build the day the row landed was 2.46 (whole-process wall
+clock, no floor subtracted, alongside other work on the box); the rlib-linked
+release build and the monolithic one measure the same, so the spread to the
+2.0 above is load, not linking. The wasm leg is off the row until #2046
+closes: a derived decode in a loop retains ~800 B per call there (786 MB
+peak at 1M, out of memory at the 5M timing arg), so the leg would time the
+leak. Its output is byte-identical at small N.
+
 The wasm leg is measured in the same dated results file: within 1.1–1.2× of
 native on the compute kernels (n-body 1.278s, spectral-norm 0.764s,
 fannkuch-redux 1.892s) and *faster* than native on binary-trees (0.239s vs
