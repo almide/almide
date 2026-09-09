@@ -123,7 +123,14 @@ fi
 # `let (r, b) = call!` destructure-unwrap honestly (`unwrap `!` in a
 # call-argument position`) where the structural leg, the default route,
 # lowers every cell byte-identical to native. Prunes with #1696 4-5.
-MAX_WALLED=27
+# 28 as of 2026-09-09: record_option_none_cells.almd (C-255/#2057) is
+# a NEW structural fixture, covering absent and present Option record cells.
+# Host CI run 34321896641 confirms it walls on BOTH incumbent hosts; every
+# emitted fixture still compares identical. Native and the structural leg
+# execute the complete field matrix (none/some), with size and allocation
+# ledgers pinning its current emission. This adds one unsupported incumbent
+# input, not a loss of coverage for a previously emitted fixture.
+MAX_WALLED=28
 corpus=$(ls "$FIXTURE_DIR"/*.almd 2>/dev/null | wc -l | tr -d ' ')
 if [ "$corpus" -eq 0 ] || [ $((n + walled)) -ne "$corpus" ]; then
   echo "::error::host-determinism: compared $n + walled $walled != corpus $corpus in $FIXTURE_DIR — the scan went blind (#985)"
