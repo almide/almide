@@ -682,10 +682,18 @@ fn try_render_borrowed_field_lookup(ctx: &RenderContext, inner: &IrExpr) -> Opti
 fn render_expr_borrow(ctx: &RenderContext, expr: &IrExpr) -> String {
     let IrExprKind::Borrow { expr: inner, as_str, mutable } = &expr.kind else { unreachable!() };
     if !*mutable && let IrExprKind::IndexAccess { object, index } = &inner.kind
-        && crate::pass_clone_projection::root(object).is_some()
+        && let Some(root) = crate::pass_clone_projection::root(object)
+        // Global and captured-cell reads can render an owned snapshot. A
+        // reference returned from the index macro would outlive that temporary.
+        && ctx.ann.global(root).is_none()
+        && (!ctx.ann.is_shared_mut(&root) || ctx.param_vars.contains(&root))
         && matches!(index.kind, IrExprKind::Var { .. } | IrExprKind::LitInt { .. })
     {
         return format!("almide_index_ref!({}, {})", render_expr(ctx, object), render_expr(ctx, index));
+    }
+    if !*mutable && matches!(inner.kind, IrExprKind::IndexAccess { .. }) {
+        // Keep a following field projection outside the borrow: (&value).field.
+        return format!("(&{})", render_expr(ctx, inner));
     }
     if let Some(rendered) = try_render_borrow_shared_mut(ctx, inner, *mutable) {
         return rendered;

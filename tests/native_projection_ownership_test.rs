@@ -104,3 +104,14 @@ fn borrowed_index_keeps_bounds_errors() {
         }
     }
 }
+
+#[test]
+fn global_index_snapshot_survives_argument_and_field_reads() {
+    let bin = std::env::var("ALMIDE_BIN").unwrap_or_else(|_| format!("{}/target/release/almide", env!("CARGO_MANIFEST_DIR")));
+    let source = format!("{}/spec/wasm_cross/mg_rebuild_two_phase.almd", env!("CARGO_MANIFEST_DIR"));
+    for target in ["rust", "wasm"] {
+        let out = Command::new(&bin).arg("run").arg(&source).args(["--target", target]).output().unwrap();
+        assert!(out.status.success(), "{target}: {}", String::from_utf8_lossy(&out.stderr));
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "110.0 4.0");
+    }
+}
