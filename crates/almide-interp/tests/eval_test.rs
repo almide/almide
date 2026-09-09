@@ -62,6 +62,30 @@ fn main_print(body: &str) -> String {
     format!("fn main() -> Unit = {{\n{}\n}}", body)
 }
 
+#[test]
+fn heap_branch_outlining_preserves_enclosing_writes() {
+    expect_out(
+        &main_print(r#"
+            var total = 0
+            for n in 1..<3 {
+                let label = match some(n) {
+                    some(v) => { total = total + v; "some" },
+                    none => "none",
+                }
+                println(label)
+            }
+            println(int.to_string(total))
+            let label = match some(7) {
+                some(v) => { total = v; "written" },
+                none => "none",
+            }
+            println(label)
+            println(int.to_string(total))
+        "#),
+        "some\nsome\n3\nwritten\n7\n",
+    );
+}
+
 // ── Literals ────────────────────────────────────────────────────
 
 #[test]
