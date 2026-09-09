@@ -11,6 +11,7 @@ use almide_ir::*;
 use almide_base::{Span, Sym};
 use almide_lang::types::Ty;
 use super::pass::{NanoPass, PassResult, Target};
+use super::pass_clone_places::{insert_clones_index_access, insert_clones_map_access, insert_clones_member};
 use super::pass_clone_loops::{insert_clones_for_in, insert_clones_while, take_borrowed_loop_vars};
 
 #[path = "pass_clone_calls.rs"]
@@ -54,6 +55,7 @@ impl NanoPass for CloneInsertionPass {
         // Loop binders the bodies only borrowed (#1673): the walker binds them
         // `&T` off `xs.iter()`.
         program.codegen_annotations.borrowed_loop_vars = take_borrowed_loop_vars();
+        program.codegen_annotations.consumed_loop_vars = super::pass_clone_loops::take_consumed_loop_vars();
         PassResult { program, changed: true }
     }
 }
@@ -169,14 +171,16 @@ impl BodyScope {
 fn rewrite_bodies(functions: &mut [IrFunction], top_lets: &mut [IrTopLet], syntactic: &SyntacticCounts, sets: &ClassSets, tco_fns: &HashSet<Sym>) {
     for (func, mentioned) in functions.iter_mut().zip(&syntactic.fn_bodies) {
         let (always, eligible) = sets.for_fn(tco_fns.contains(&func.name));
-        func.body = rewrite_body(std::mem::take(&mut func.body), mentioned, always, eligible, &syntactic.total);
+        let owned = func.params.iter().filter(|p| p.borrow == ParamBorrow::Own).map(|p| p.var).collect();
+        func.body = rewrite_body(std::mem::take(&mut func.body), mentioned, always, eligible, &syntactic.total, owned);
     }
     for (tl, mentioned) in top_lets.iter_mut().zip(&syntactic.top_let_bodies) {
-        tl.value = rewrite_body(std::mem::take(&mut tl.value), mentioned, &sets.always, &sets.eligible, &syntactic.total);
+        tl.value = rewrite_body(std::mem::take(&mut tl.value), mentioned, &sets.always, &sets.eligible, &syntactic.total, HashSet::new());
     }
 }
 
-fn rewrite_body(body: IrExpr, mentioned: &HashMap<VarId, u32>, always: &HashSet<VarId>, eligible: &HashSet<VarId>, total: &HashMap<VarId, u32>) -> IrExpr {
+fn rewrite_body(body: IrExpr, mentioned: &HashMap<VarId, u32>, always: &HashSet<VarId>, eligible: &HashSet<VarId>, total: &HashMap<VarId, u32>, mut owned: HashSet<VarId>) -> IrExpr {
+    owned.extend(almide_ir::free_vars::bound_vars(&body));
     let mut scope = BodyScope::narrow(mentioned, always, eligible, total);
     // #1230: any id the branch walk can deduct lives in `remaining`, whose
     // key set is exactly `scope.eligible` — so the branch-count memo only
@@ -191,6 +195,7 @@ fn rewrite_body(body: IrExpr, mentioned: &HashMap<VarId, u32>, always: &HashSet<
         in_loop: false,
         memo: &memo,
         fresh: &no_fresh,
+        owned: &owned,
     })
 }
 
@@ -374,7 +379,7 @@ impl IrVisitor for BranchPrecounter<'_> {
 
 // ── Clone ID classification ────────────────────────────────────────
 
-fn needs_clone(ty: &Ty) -> bool {
+pub(super) fn needs_clone(ty: &Ty) -> bool {
     // §4 stage 2c (#531): derived from THE copy-ness classifier — see the
     // projection table in almide_ir::top_let_storage.
     !almide_ir::top_let_storage::clone_free(ty)
@@ -440,6 +445,8 @@ fn split_clone_ids(
 /// flips to `true` for a nested loop body/cond — built as a fresh `CloneCtx`
 /// reborrowing `remaining` (same shape as `HoistCtx` in pass_licm_hoist.rs).
 pub(crate) struct CloneCtx<'a> {
+    /// Value bindings and explicitly owned parameters; excludes borrowed parameters.
+    pub(crate) owned: &'a HashSet<VarId>,
     pub(crate) always: &'a HashSet<VarId>,
     pub(crate) eligible: &'a HashSet<VarId>,
     pub(crate) remaining: &'a mut HashMap<VarId, u32>,
@@ -586,73 +593,8 @@ fn insert_clones_match(subject: IrExpr, arms: Vec<IrMatchArm>, ctx: &mut CloneCt
     IrExprKind::Match { subject: Box::new(new_subject), arms: new_arms }
 }
 
-/// `IndexAccess { object, index }` arm of [`insert_clones_live`]: borrow the
-/// container, clone the element.
-fn insert_clones_index_access(object: IrExpr, index: IrExpr, ty: Ty, span: Option<Span>, ctx: &mut CloneCtx) -> IrExpr {
-    let mut processed_object = insert_clones_live(object, ctx);
-    // Strip top-level Clone from container (indexing borrows)
-    if let IrExprKind::Clone { expr } = processed_object.kind {
-        processed_object = *expr;
-    }
-    let processed_index = insert_clones_live(index, ctx);
-    let access = IrExpr {
-        kind: IrExprKind::IndexAccess {
-            object: Box::new(processed_object),
-            index: Box::new(processed_index),
-        },
-        ty: ty.clone(), span, def_id: None,
-    };
-    if needs_clone(&ty) {
-        return IrExpr { kind: IrExprKind::Clone { expr: Box::new(access) }, ty, span, def_id: None };
-    }
-    access
-}
-
-/// `MapAccess { object, key }` arm of [`insert_clones_live`]: borrow the
-/// container, clone the element.
-fn insert_clones_map_access(object: IrExpr, key: IrExpr, ty: Ty, span: Option<Span>, ctx: &mut CloneCtx) -> IrExpr {
-    let mut processed_object = insert_clones_live(object, ctx);
-    if let IrExprKind::Clone { expr } = processed_object.kind {
-        processed_object = *expr;
-    }
-    let processed_key = insert_clones_live(key, ctx);
-    let access = IrExpr {
-        kind: IrExprKind::MapAccess {
-            object: Box::new(processed_object),
-            key: Box::new(processed_key),
-        },
-        ty: ty.clone(), span, def_id: None,
-    };
-    if needs_clone(&ty) {
-        return IrExpr { kind: IrExprKind::Clone { expr: Box::new(access) }, ty, span, def_id: None };
-    }
-    access
-}
-
-/// `Member { object, field }` arm of [`insert_clones_live`]. Mirrors
-/// IndexAccess/MapAccess: the container is borrowed (Record may be a `&T`
-/// after BorrowInference), and a heap-typed field can't be moved out
-/// through the reference. Wrap the access in Clone when the field itself
-/// needs cloning.
-fn insert_clones_member(object: IrExpr, field: Sym, ty: Ty, span: Option<Span>, ctx: &mut CloneCtx) -> IrExpr {
-    let mut processed_object = insert_clones_live(object, ctx);
-    if let IrExprKind::Clone { expr } = processed_object.kind {
-        processed_object = *expr;
-    }
-    let access = IrExpr {
-        kind: IrExprKind::Member {
-            object: Box::new(processed_object),
-            field,
-        },
-        ty: ty.clone(), span, def_id: None,
-    };
-    if needs_clone(&ty) {
-        return IrExpr { kind: IrExprKind::Clone { expr: Box::new(access) }, ty, span, def_id: None };
-    }
-    access
-}
-
-pub(crate) fn insert_clones_live(expr: IrExpr, ctx: &mut CloneCtx) -> IrExpr {
+pub(crate) fn insert_clones_live(mut expr: IrExpr, ctx: &mut CloneCtx) -> IrExpr {
+    if super::pass_clone_compare::rewrite(&mut expr, ctx) { return expr; }
     let ty = expr.ty.clone();
     let span = expr.span;
 
@@ -709,7 +651,7 @@ pub(crate) fn insert_clones_live(expr: IrExpr, ctx: &mut CloneCtx) -> IrExpr {
         // the lambda with an empty `fresh` set, otherwise unchanged.
         kind @ IrExprKind::Lambda { .. } => {
             let no_fresh: HashSet<VarId> = HashSet::new();
-            let mut lam_ctx = CloneCtx { always: ctx.always, eligible: ctx.eligible, remaining: ctx.remaining, in_loop: ctx.in_loop, memo: ctx.memo, fresh: &no_fresh };
+            let mut lam_ctx = CloneCtx { always: ctx.always, eligible: ctx.eligible, remaining: ctx.remaining, in_loop: ctx.in_loop, memo: ctx.memo, fresh: &no_fresh, owned: ctx.owned };
             let e = IrExpr { kind, ty: ty.clone(), span, def_id: None };
             return e.map_children(&mut |child| insert_clones_live(child, &mut lam_ctx));
         }
