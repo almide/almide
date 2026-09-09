@@ -49,3 +49,11 @@ files (427 WASM and 12 native fallback). The 43 nanopass tests, 13 codegen
 snapshots, 11 loop-ownership tests, projection regressions and borrow/
 capture regressions pass. Codegen remains 90/A under the existing
 codopsy thresholds; the commissioned WASM crate also remains 90/A.
+
+The CI cross-target fixture `mg_rebuild_two_phase` exposed a further lifetime
+boundary: a module-global `Var` renders a cloned snapshot, not a stable Rust
+place. Shared captured cells have the same boundary. Indexed borrows retain the
+owned-index path for those roots; ordinary local/parameter projections keep the
+reference path. Rust's pinned `as_operand` implementation documents that an
+operand is only valid through its temporary scope. The regression exercises both
+call-argument and scalar-field reads across two global-list rebuilds.
