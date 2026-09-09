@@ -998,11 +998,11 @@ mod fan_parallel_routing {
 
     use almide::types::constructor::TypeConstructorId as TC;
 
-    fn list_ty(t: Ty) -> Ty { Ty::Applied(TC::List, vec![t]) }
+    pub(super) fn list_ty(t: Ty) -> Ty { Ty::Applied(TC::List, vec![t]) }
     fn result_ty(t: Ty) -> Ty { Ty::Applied(TC::Result, vec![t, Ty::String]) }
 
     /// `(x) => ok(<body>)` with `x: Int`; `body` is built from the param var.
-    fn ok_lambda(vt: &mut VarTable, body: impl FnOnce(VarId) -> IrExpr) -> IrExpr {
+    pub(super) fn ok_lambda(vt: &mut VarTable, body: impl FnOnce(VarId) -> IrExpr) -> IrExpr {
         let x = vt.alloc(sym("x"), Ty::Int, Mutability::Let, None);
         let inner = body(x);
         let ret = result_ty(inner.ty.clone());
@@ -1013,11 +1013,11 @@ mod fan_parallel_routing {
         )
     }
 
-    fn int_list() -> IrExpr {
+    pub(super) fn int_list() -> IrExpr {
         mk_expr(IrExprKind::List { elements: vec![mk_expr(IrExprKind::LitInt { value: 1 }, Ty::Int)] }, list_ty(Ty::Int))
     }
 
-    fn fan_map(lambda: IrExpr) -> IrExpr {
+    pub(super) fn fan_map(lambda: IrExpr) -> IrExpr {
         let elem = match &lambda.ty { Ty::Fn { ret, .. } => match &**ret { Ty::Applied(_, a) => a[0].clone(), _ => unreachable!() }, _ => unreachable!() };
         mk_expr(
             IrExprKind::Call {
@@ -1162,5 +1162,106 @@ mod fan_parallel_routing {
         let out = route(program);
         assert_eq!(runtime_symbol(&out.functions[0].body), "almide_rt_list_par_map");
         assert_eq!(runtime_symbol(&out.functions[1].body), "almide_rt_list_map");
+    }
+}
+
+// ── RustLowering: closure boxing INSIDE a fan callback (#2059) ──────
+//
+// A `fan.map` callback used to exempt its WHOLE subtree from closure boxing,
+// so a `list.map((x) => …)` nested in the callback handed a raw closure to
+// `almide_rt_list_map` (an `Rc<dyn Fn>` parameter) and rustc had nothing to
+// infer `x` from (E0282). The full RustLoweringPass must now leave the nested
+// combinator's lambda boxed with its cast type, on BOTH fan.map routes: the
+// sequential twin (callback boxed as `Rc<dyn Fn>`) and the parallel twin
+// (callback un-boxed back to the raw `impl Fn` its `F: Fn` bound wants).
+mod fan_nested_closure_boxing {
+    use super::*;
+    use super::fan_parallel_routing::{fan_map, int_list, list_ty, ok_lambda};
+    use almide::codegen::pass_rust_lowering::RustLoweringPass;
+
+    /// `almide_rt_list_map([1], (y) => y)` — the nested combinator call.
+    fn nested_list_map(vt: &mut VarTable) -> IrExpr {
+        let y = vt.alloc(sym("y"), Ty::Int, Mutability::Let, None);
+        let lambda = mk_expr(
+            IrExprKind::Lambda { params: vec![(y, Ty::Int)], body: Box::new(mk_expr(IrExprKind::Var { id: y }, Ty::Int)), lambda_id: None },
+            Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Int), is_effect: false },
+        );
+        mk_expr(IrExprKind::RuntimeCall { symbol: sym("almide_rt_list_map"), args: vec![int_list(), lambda] }, list_ty(Ty::Int))
+    }
+
+    fn lower(program: IrProgram) -> IrProgram {
+        run_pass(&RustLoweringPass, program, Target::Rust)
+    }
+
+    /// (func name, the mapper arg) of the `fan.map` call that is `main`'s body.
+    fn fan_call(program: &IrProgram) -> (String, &IrExpr) {
+        match &program.functions[0].body.kind {
+            IrExprKind::Call { target: CallTarget::Module { func, .. }, args, .. } => (func.to_string(), &args[1]),
+            other => panic!("unexpected body {other:?}"),
+        }
+    }
+
+    /// The `almide_rt_list_map` call's lambda arg, found anywhere under `e`.
+    fn nested_list_map_lambda(e: &IrExpr) -> Option<IrExpr> {
+        use almide::ir::visit::{IrVisitor, walk_expr};
+        struct Find(Option<IrExpr>);
+        impl IrVisitor for Find {
+            fn visit_expr(&mut self, e: &IrExpr) {
+                if let IrExprKind::RuntimeCall { symbol, args } = &e.kind {
+                    if symbol.as_str() == "almide_rt_list_map" && self.0.is_none() {
+                        self.0 = args.last().cloned();
+                    }
+                }
+                walk_expr(self, e);
+            }
+        }
+        let mut f = Find(None);
+        f.visit_expr(e);
+        f.0
+    }
+
+    fn assert_boxed_with_cast(lambda: &IrExpr) {
+        match &lambda.kind {
+            IrExprKind::RcWrap { expr, cast_ty, wrap } => {
+                assert_eq!(*wrap, FnBox::Rc, "nested combinator closure is the uniform Rc<dyn Fn>");
+                assert!(matches!(&expr.kind, IrExprKind::Lambda { .. }), "RcWrap wraps the lambda literal");
+                assert!(matches!(cast_ty.as_deref(), Some(Ty::Fn { .. })), "the cast carries the Fn type that annotates the params");
+            }
+            other => panic!("nested list.map closure must be boxed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn nested_combinator_closure_is_boxed_under_sequential_fan_map() {
+        // fan.map([1], (x) => ok(list.map([1], (y) => y))) — List result: sequential twin.
+        let mut vt = VarTable::new();
+        let inner = nested_list_map(&mut vt);
+        let lambda = ok_lambda(&mut vt, |_| inner);
+        let program = mk_program(vec![mk_fn("main", vec![], Ty::Unit, fan_map(lambda), true)], vt);
+        let out = lower(program);
+        let (func, mapper) = fan_call(&out);
+        assert_eq!(func, "map");
+        assert!(matches!(&mapper.kind, IrExprKind::RcWrap { wrap: FnBox::Rc, .. }), "sequential fan.map callback stays Rc<dyn Fn>, got {mapper:?}");
+        assert_boxed_with_cast(&nested_list_map_lambda(mapper).expect("nested list.map lambda"));
+    }
+
+    #[test]
+    fn nested_combinator_closure_is_boxed_under_parallel_fan_map() {
+        // fan.map([1], (x) => ok({ list.map([1], (y) => y); x })) — Int result, pure: parallel twin.
+        let mut vt = VarTable::new();
+        let inner = nested_list_map(&mut vt);
+        let lambda = ok_lambda(&mut vt, |x| mk_expr(
+            IrExprKind::Block {
+                stmts: vec![IrStmt { kind: IrStmtKind::Expr { expr: inner }, span: None }],
+                expr: Some(Box::new(mk_expr(IrExprKind::Var { id: x }, Ty::Int))),
+            },
+            Ty::Int,
+        ));
+        let program = mk_program(vec![mk_fn("main", vec![], Ty::Unit, fan_map(lambda), true)], vt);
+        let out = lower(program);
+        let (func, mapper) = fan_call(&out);
+        assert_eq!(func, "map_par");
+        assert!(matches!(&mapper.kind, IrExprKind::Lambda { .. }), "parallel fan.map mapper is un-boxed to the raw impl Fn, got {mapper:?}");
+        assert_boxed_with_cast(&nested_list_map_lambda(mapper).expect("nested list.map lambda"));
     }
 }

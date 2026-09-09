@@ -59,6 +59,7 @@ pub mod pass_egg_saturation;
 pub mod pass_matrix_shape_spec;
 pub mod pass_const_fold;
 pub mod pass_rust_lowering;
+mod pass_rust_lowering_stmts;
 pub mod pass_rust_lowering_fan;
 pub mod pass_lambda_type_resolve;
 pub mod pass_concretize_types;

@@ -143,6 +143,7 @@
 66112	spec/wasm_cross/fan_map_err.almd
 66112	spec/wasm_cross/fan_map_inline_err.almd
 68400	spec/wasm_cross/fan_map_inline_lambda.almd
+!	spec/wasm_cross/fan_map_nested_combinators.almd
 !	spec/wasm_cross/fan_map_parallel_scalar.almd
 ~	spec/wasm_cross/fan_prefetch_fs.almd
 66624	spec/wasm_cross/fan_pure_thunks.almd
