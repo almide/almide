@@ -1,0 +1,47 @@
+// @contract: C-004
+// #2044: on the native leg `fan.map` and a `list.map` under `fan { … }` run
+// on a thread per core when the callback is a pure lambda over Send-safe
+// scalars (Int/Float/Bool/Unit and tuples/records of those). The wasm leg is
+// the sequential twin, so this fixture is the byte-identity evidence for the
+// parallel runtime: results joined in LIST ORDER, the first Err in list order
+// as the map's Err even when a later chunk has already finished, and the
+// sequential fallback for a callback the pass must decline (a List capture).
+// The workload per element is large enough that the chunks really overlap.
+type Cell = { idx: Int, score: Float }
+
+fn churn(x: Int, k: Int) -> Int = {
+  var acc = 0
+  var i = 0
+  while i < 20000 {
+    acc = (acc + x * i + k) % 1000003
+    i = i + 1
+  }
+  acc
+}
+
+effect fn main() -> Unit = {
+  let k = 7
+  // Tuple result, scalar capture: the parallel path.
+  let pairs = fan.map(list.range(0, 40), (x) => ok((x, churn(x, k))))!
+  let (p0, p1) = pairs[39]
+  println("pairs=" + int.to_string(list.len(pairs)) + " last=" + int.to_string(p0) + "," + int.to_string(p1))
+  // Record result: the parallel path.
+  let cells = fan.map(list.range(0, 8), (x) => ok(Cell { idx: x, score: float.from_int(churn(x, 1)) / 7.0 }))!
+  println("cell=" + int.to_string(cells[7].idx) + " " + float.to_string(cells[7].score))
+  // First Err in LIST ORDER: index 3 fails while indices 4.. are heavier and
+  // still in flight on other workers; the map's Err must be index 3's.
+  let r = fan.map(list.range(0, 40), (x) => if x == 3 or x == 30 then err("bad " + int.to_string(x)) else ok(churn(x, k)))
+  match r {
+    ok(_) => println("unexpected ok"),
+    err(e) => println("err=" + e),
+  }
+  // A list.map UNDER a fan block over scalars: the parallel twin.
+  let sums = fan {
+    list.map(list.range(0, 16), (c) => churn(c, k) + churn(c + 1, k))
+  }
+  println("sums=" + int.to_string(sums[0]) + "," + int.to_string(sums[15]))
+  // A List capture: declined by the pass, sequential fallback, same answer.
+  let table = [3, 1, 4, 1, 5]
+  let picked = fan.map(list.range(0, 5), (i) => ok(churn(list.get(table, i) ?? 0, k)))!
+  println("picked=" + int.to_string(picked[2]) + "," + int.to_string(picked[4]))
+}

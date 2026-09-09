@@ -572,9 +572,12 @@ impl Emitter<'_> {
                 i.local_get(hv).i32_const(1).i32_eq().if_(BlockType::Empty);
                 i.local_get(hr).i32_const(1).i32_store(m_tag);
                 i.local_get(hr);
-                i.i32_const(miss_pre as i32).local_get(hk).call(F_CONCAT);
+                // The key is no longer needed. Park the intermediate
+                // prefix so the second concatenation can release it.
+                i.i32_const(miss_pre as i32).local_get(hk).call(F_CONCAT).local_tee(hk);
                 i.i32_const(miss_post as i32).call(F_CONCAT);
                 i.i32_store(m_pay);
+                i.local_get(hk).call(F_DEC_FLAT);
                 i.else_();
                 i.local_get(hr).i32_const(0).i32_store(m_tag);
                 i.local_get(hr).local_get(hv).i32_store(m_pay);

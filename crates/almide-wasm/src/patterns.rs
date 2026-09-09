@@ -106,7 +106,14 @@ impl Emitter<'_> {
         let r = match result {
             Some(ty) => {
                 self.in_tail = tail;
-                self.lower(body, Some(ty)).map(|_| ())
+                self.lower(body, Some(ty)).map(|_| {
+                    // Every value arm hands the join one credit. A fresh
+                    // error beside a borrowed success must not receive a
+                    // second credit at the enclosing return (#2046).
+                    if self.rc_droppable(ty) && !self.rc_owned_result(body) {
+                        self.rc_inc_top();
+                    }
+                })
             }
             None => self.lower_stmt_expr(body),
         };

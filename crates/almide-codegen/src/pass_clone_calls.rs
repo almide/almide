@@ -44,6 +44,7 @@ pub(super) fn insert_clones_runtime_call(args: Vec<IrExpr>, ctx: &mut CloneCtx) 
         in_loop: ctx.in_loop,
         memo: ctx.memo,
         fresh: ctx.fresh,
+        owned: ctx.owned,
     };
     args.into_iter().map(|a| insert_clones_live(a, &mut call_ctx)).collect()
 }
@@ -66,6 +67,7 @@ pub(super) fn insert_clones_call(target: CallTarget, args: Vec<IrExpr>, type_arg
             in_loop: ctx.in_loop,
             memo: ctx.memo,
             fresh: ctx.fresh,
+            owned: ctx.owned,
         };
         let args = args.into_iter().map(|a| insert_clones_live(a, &mut call_ctx)).collect();
         let target = match target {

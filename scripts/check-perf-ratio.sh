@@ -81,22 +81,21 @@ PAIRS="nbody=rust:nbody_unrolled spectralnorm=rust:spectralnorm fasta=rust:fasta
 # that unlike `listbuild` both sides here allocate identically, so it may well
 # turn out to be anchorable. See research/benchmark/perf/string-gap-1004.md.
 #
-# `fannkuchredux` and `mandelbrot` (#1330) are the `fan` kernels against
-# ORDINARY sequential Rust. They read ~1.0 (0.96-1.06 / 1.01-1.12 on an M4
-# Pro, two sizes each) because the native leg gives them no parallelism
-# today: `fan.map` runs sequentially over an `Rc<dyn Fn>` thunk, `fan { .. }`
-# spawns ONE thread for the whole block, and the AutoParallel pass matches a
-# `Call { Named }` that StdlibLowering no longer emits (it emits
-# `RuntimeCall`). Reported so the day a data-parallel win appears it is a
-# visible number and not a claim; a single-thread reference is the honest
-# comparison until then.
+# `mandelbrot` (#1330) is a `fan.map` kernel against ORDINARY sequential
+# Rust and still reads ~1.0 (0.97-1.02 on an M4 Pro, two sizes): its callback
+# returns `Bytes`, whose native repr is an `Rc` (`AlmideRcCow<Vec<u8>>`), so
+# #2044's Send-safe-scalar fan routing (RustLowering) declines it and the map
+# runs sequentially. It needs the thread-shared flip ADR-0018 specifies, not
+# a routing change. Reported so the day it reaches parallel execution the win
+# is a visible number; a single-thread reference is the honest comparison
+# until then. (`fannkuchredux`, the other `fan` kernel, moved to VICTORY.)
 #
 # `decode` (#1679) is the Codec decode row: N derived `User.decode`s of one
 # fixed 8-field document, against `rust:decode` — the ordinary hand-written
 # decode over the SAME `AlmideValue` shape (borrowed field scan, owned `String`
 # record fields). Reported like strchurn: each op is eight short-string
 # allocations, so the ratio compares allocators before it compares codegen.
-REPORTED="listbuild=rust:listbuild listbuild-append=rust:listbuild listbuild-comb=rust:listbuild strchurn=rust:strchurn fannkuchredux=rust:fannkuchredux mandelbrot=rust:mandelbrot decode=rust:decode"
+REPORTED="listbuild=rust:listbuild listbuild-append=rust:listbuild listbuild-comb=rust:listbuild strchurn=rust:strchurn mandelbrot=rust:mandelbrot decode=rust:decode"
 # VICTORY rows (#1330): the workloads where Almide native is FASTER than the
 # ordinary Rust for the program, and the gate is the claim itself. Each entry
 # is `bench=rust-ref-variant:ABLATION_ENV` — the env knob that turns off the
@@ -121,7 +120,17 @@ REPORTED="listbuild=rust:listbuild listbuild-append=rust:listbuild listbuild-com
 # (c) the ablation delta ablated/optimized must stay above
 # VICTORY_ABLATION_FLOOR — the optimization named in the declaration must
 # still be what earns the row, or the declaration is stale.
-VICTORY="binarytrees=rust:binarytrees:ALMIDE_REGION_OFF treealloc=rust:treealloc:ALMIDE_REGION_OFF"
+#
+# `fannkuchredux` (#2044) is the data-parallelism row: `fan { list.map(chunks,
+# (c) => process_chunk(..)) }` over Int captures with an `(Int, Int)` result
+# is exactly the Send-safe-scalar subset AutoParallel now routes to
+# `almide_rt_list_par_map` (a thread per core, joined in list order), and the
+# reference is the ordinary ONE-THREAD Rust for the program. Measured
+# 2026-09-08 (M4 Pro, 14 cores): 0.21 at n=10 / 0.12 at n=11, and with
+# `ALMIDE_FAN_SEQUENTIAL=1` (the same binary's sequential path) 1.07 / 1.06 —
+# the whole win is the parallel map. The ratio scales with the runner's core
+# count, which is why it is a VICTORY row and not a PAIRS anchor.
+VICTORY="binarytrees=rust:binarytrees:ALMIDE_REGION_OFF treealloc=rust:treealloc:ALMIDE_REGION_OFF fannkuchredux=rust:fannkuchredux:ALMIDE_FAN_SEQUENTIAL"
 VICTORY_ABLATION_FLOOR=1.30
 # IDIOM GATE (#1337). The three listbuild rows build the SAME result three
 # ways, so beyond each row's own ratio there is a relation between them that
@@ -163,7 +172,10 @@ python3 research/benchmark/perf/bench.py \
 vic_dir=$(mktemp -d -t perf-ratio-vic.XXXXXX)
 trap 'rm -f "$out"; rm -rf "$vic_dir"' EXIT
 for knob in $(for v in $VICTORY; do echo "${v##*:}"; done | sort -u); do
-  benches=$(for v in $VICTORY; do [ "${v##*:}" = "$knob" ] && echo "${v%%=*}"; done | paste -sd, -)
+  # `|| true`: under `set -e` + pipefail the subshell's status is the LAST
+  # test's, so a knob whose final VICTORY entry belongs to another knob
+  # would abort the script here (latent while every row shared one knob).
+  benches=$(for v in $VICTORY; do [ "${v##*:}" = "$knob" ] && echo "${v%%=*}" || true; done | paste -sd, -)
   env "$knob=1" python3 research/benchmark/perf/bench.py \
     --quick --runs "$RUNS" --legs native \
     --bench "$benches" \

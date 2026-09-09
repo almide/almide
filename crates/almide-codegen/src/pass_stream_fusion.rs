@@ -41,6 +41,7 @@
 //! Ablation: `ALMIDE_STREAM_FUSION_OFF=1` skips the pass entirely.
 
 use std::collections::HashSet;
+use std::borrow::Cow;
 
 use almide_base::intern::{sym, Sym};
 use almide_ir::*;
@@ -66,7 +67,7 @@ impl NanoPass for StreamFusionPass {
             return PassResult { program, changed: false };
         }
         let purity = Purity::of(&program);
-        let mut v = Fuser { purity: &purity, changed: false };
+        let mut v = Fuser { purity: &purity, changed: false, in_fan: false };
         for f in &mut program.functions { v.visit_expr_mut(&mut f.body); }
         for tl in &mut program.top_lets { v.visit_expr_mut(&mut tl.value); }
         for m in &mut program.modules {
@@ -99,17 +100,25 @@ fn stdlib_module_is_pure(module: &str) -> bool {
 
 /// Purity uses a greatest fixpoint; recursion alone is not an effect.
 /// Totality uses a least fixpoint: a recursive cycle is not a termination proof.
-struct Purity {
+pub(super) struct Purity {
     pure: HashSet<Sym>,
     total: HashSet<Sym>,
 }
 
 impl Purity {
-    fn of(program: &IrProgram) -> Purity {
-        let mut bodies: Vec<(Vec<Sym>, &IrExpr)> = Vec::new();
+    pub(super) fn of(program: &IrProgram) -> Purity {
+        Self::analyze(program, false)
+    }
+
+    pub(super) fn for_fan(program: &IrProgram) -> Purity {
+        Self::analyze(program, true)
+    }
+
+    fn analyze(program: &IrProgram, local_state: bool) -> Purity {
+        let mut bodies: Vec<(Vec<Sym>, Cow<'_, IrExpr>)> = Vec::new();
         for f in &program.functions {
             if !f.is_effect && !f.is_test {
-                bodies.push((vec![f.name], &f.body));
+                if let Some(body) = proof_body(f, local_state) { bodies.push((vec![f.name], body)); }
             }
         }
         for m in &program.modules {
@@ -126,7 +135,7 @@ impl Purity {
                     sym(&format!("{}.{}", m.name, f.name)),
                     sym(&format!("almide_rt_{}_{}", mod_ident, f.name.as_str().replace('.', "_"))),
                 ];
-                bodies.push((spellings, &f.body));
+                if let Some(body) = proof_body(f, local_state) { bodies.push((spellings, body)); }
             }
         }
         let fixpoint = |total: bool| -> HashSet<Sym> {
@@ -149,11 +158,18 @@ impl Purity {
             }
             set
         };
-        Purity { pure: fixpoint(false), total: fixpoint(true) }
+        // Erasing loop-local writes proves neither termination nor absence of
+        // aborts. Fan only consumes purity; never derive totality from this view.
+        Purity { pure: fixpoint(false), total: if local_state { HashSet::new() } else { fixpoint(true) } }
     }
 
-    fn pure(&self, e: &IrExpr) -> bool { expr_ok(e, &Cx { fns: &self.pure, total: false }) }
+    pub(super) fn pure(&self, e: &IrExpr) -> bool { expr_ok(e, &Cx { fns: &self.pure, total: false }) }
     fn total(&self, e: &IrExpr) -> bool { expr_ok(e, &Cx { fns: &self.total, total: true }) }
+}
+
+fn proof_body(f: &IrFunction, local_state: bool) -> Option<Cow<'_, IrExpr>> {
+    if local_state { super::pass_fan_local_state::view(f).map(Cow::Owned) }
+    else { Some(Cow::Borrowed(&f.body)) }
 }
 
 struct Cx<'a> {
@@ -330,17 +346,29 @@ fn call_ok(e: &IrExpr, cx: &Cx) -> Option<bool> {
 // ── The rewrite ───────────────────────────────────────────────────────
 
 struct Fuser<'a> {
+    in_fan: bool,
     purity: &'a Purity,
     changed: bool,
 }
 
 impl<'a> IrMutVisitor for Fuser<'a> {
     fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
-        walk_expr_mut(self, expr);
-        if let Some(fused) = self.rewrite(expr) {
-            *expr = fused;
-            self.changed = true;
+        let enclosing_fan = self.in_fan;
+        match &expr.kind {
+            IrExprKind::Fan { .. } => self.in_fan = true,
+            // Callback internals are sequential unless they explicitly fan out.
+            IrExprKind::Lambda { .. } => self.in_fan = false,
+            _ => {}
         }
+        walk_expr_mut(self, expr);
+        // Leave explicit fan operations available for RustLowering's routing.
+        if !self.in_fan {
+            if let Some(fused) = self.rewrite(expr) {
+                *expr = fused;
+                self.changed = true;
+            }
+        }
+        self.in_fan = enclosing_fan;
     }
 }
 
@@ -546,6 +574,59 @@ mod tests {
             is_effect: false, is_test: false, generics: None, extern_attrs: vec![],
             export_attrs: vec![], attrs: vec![], visibility: IrVisibility::Private,
             doc: None, blank_lines_before: 0, def_id: None, mutated_params: vec![], module_origin: None, // fresh-fn: parameterless purity test fixture
+        }
+    }
+
+    fn local_loop_function(name: &str) -> IrFunction {
+        let mut f = function(name, None);
+        let int = |kind| IrExpr { kind, ty: Ty::Int, span: None, def_id: None };
+        let write = IrStmt { kind: IrStmtKind::Assign {
+            var: VarId(0), value: int(IrExprKind::LitInt { value: 2 }),
+        }, span: None };
+        f.body = int(IrExprKind::Block {
+            stmts: vec![
+                IrStmt { kind: IrStmtKind::Bind { var: VarId(0), ty: Ty::Int,
+                    mutability: Mutability::Var, value: int(IrExprKind::LitInt { value: 1 }) }, span: None },
+                IrStmt { kind: IrStmtKind::Expr { expr: IrExpr {
+                    kind: IrExprKind::While { cond: Box::new(IrExpr {
+                        kind: IrExprKind::LitBool { value: false }, ty: Ty::Bool, span: None, def_id: None,
+                    }), body: vec![write] }, ty: Ty::Unit, span: None, def_id: None,
+                } }, span: None },
+            ], expr: Some(Box::new(int(IrExprKind::Var { id: VarId(0) }))),
+        });
+        f
+    }
+
+    #[test]
+    fn fan_local_state_proof_preserves_effects_and_rejects_external_writes() {
+        let local = local_loop_function("local");
+        let mut effect = local.clone();
+        effect.name = sym("effect");
+        if let IrExprKind::Block { stmts, .. } = &mut effect.body.kind {
+            // The local write is erased in the analysis view, but its effectful
+            // RHS must remain visible even inside a loop.
+            let IrStmtKind::Expr { expr } = &mut stmts[1].kind else { panic!("loop statement") };
+            let IrExprKind::While { body, .. } = &mut expr.kind else { panic!("while loop") };
+            body[0].kind = IrStmtKind::Assign { var: VarId(0), value: IrExpr {
+                kind: IrExprKind::RuntimeCall { symbol: sym("almide_rt_random_int"), args: vec![] },
+                ty: Ty::Int, span: None, def_id: None,
+            } };
+        }
+        let mut external = local.clone();
+        external.name = sym("external");
+        if let IrExprKind::Block { stmts, .. } = &mut external.body.kind { stmts.remove(0); }
+        let mut param = external.clone();
+        param.name = sym("param");
+        param.params.push(IrParam { var: VarId(0), ty: Ty::Int, name: sym("n"),
+            borrow: ParamBorrow::Own, is_mut: true, open_record: None, default: None, attrs: vec![] });
+        let program = IrProgram { functions: vec![local, effect, external, param], ..Default::default() };
+        let fusion = Purity::of(&program);
+        let fan = Purity::for_fan(&program);
+        assert!(!fusion.pure.contains(&sym("local")), "fusion keeps its original admission rule");
+        assert!(fan.pure.contains(&sym("local")));
+        assert!(fan.total.is_empty(), "local state is not a termination proof");
+        for name in ["effect", "external", "param"] {
+            assert!(!fan.pure.contains(&sym(name)), "unproven function: {name}");
         }
     }
 
