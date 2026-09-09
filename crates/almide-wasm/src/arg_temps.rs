@@ -22,6 +22,9 @@
 //! call arrives wrapped in `Try`/`Unwrap` and is left alone — so the
 //! evaluation order change against the non-hoisted operands (Vars,
 //! literals, reads) is unobservable.
+//! Extraction (`Try`, `Unwrap`, `UnwrapOr`) binds its single input at the
+//! extraction site as well. The wrapper then survives payload reads and
+//! joins the normal frame releases, including the propagation edge.
 
 use almide_base::intern::sym;
 use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
@@ -35,18 +38,18 @@ pub(crate) fn bind_native_temporaries(ir: &IrProgram) -> Option<IrProgram> {
     let mut out = ir.clone();
     let mut changed = false;
     {
-        let mut v = Binder { vars: &mut out.var_table, changed: &mut changed };
+        let mut v = Binder { vars: &mut out.var_table, changed: &mut changed, tail: false };
         for f in out.functions.iter_mut() {
-            v.visit_expr_mut(&mut f.body);
+            v.visit_with_tail(&mut f.body, true);
         }
         for tl in out.top_lets.iter_mut() {
             v.visit_expr_mut(&mut tl.value);
         }
     }
     for m in out.modules.iter_mut() {
-        let mut v = Binder { vars: &mut m.var_table, changed: &mut changed };
+        let mut v = Binder { vars: &mut m.var_table, changed: &mut changed, tail: false };
         for f in m.functions.iter_mut() {
-            v.visit_expr_mut(&mut f.body);
+            v.visit_with_tail(&mut f.body, true);
         }
         for tl in m.top_lets.iter_mut() {
             v.visit_expr_mut(&mut tl.value);
@@ -96,6 +99,39 @@ fn tail_of(e: &IrExpr) -> &IrExpr {
 struct Binder<'a> {
     vars: &'a mut VarTable,
     changed: &'a mut bool,
+    tail: bool,
+}
+
+impl Binder<'_> {
+    fn visit_with_tail(&mut self, e: &mut IrExpr, tail: bool) {
+        let saved = self.tail;
+        self.tail = tail;
+        self.visit_expr_mut(e);
+        self.tail = saved;
+    }
+
+    fn walk_with_tail(&mut self, e: &mut IrExpr, tail: bool) {
+        match &mut e.kind {
+            IrExprKind::Block { stmts, expr } => {
+                for stmt in stmts { self.visit_stmt_mut(stmt); }
+                if let Some(expr) = expr { self.visit_with_tail(expr, tail); }
+            }
+            IrExprKind::If { cond, then, else_ } => {
+                self.visit_expr_mut(cond);
+                self.visit_with_tail(then, tail);
+                self.visit_with_tail(else_, tail);
+            }
+            IrExprKind::Match { subject, arms } => {
+                self.visit_expr_mut(subject);
+                for arm in arms {
+                    self.visit_pattern_mut(&mut arm.pattern);
+                    if let Some(guard) = &mut arm.guard { self.visit_expr_mut(guard); }
+                    self.visit_with_tail(&mut arm.body, tail);
+                }
+            }
+            _ => walk_expr_mut(self, e),
+        }
+    }
 }
 
 /// A droppable operand of a concatenation that is born in the
@@ -111,7 +147,15 @@ fn is_born_here(e: &IrExpr) -> bool {
 
 impl IrMutVisitor for Binder<'_> {
     fn visit_expr_mut(&mut self, e: &mut IrExpr) {
-        walk_expr_mut(self, e);
+        let tail = self.tail;
+        self.tail = false;
+        self.walk_with_tail(e, tail);
+        self.tail = tail;
+        // Tail extraction has a dedicated carrier-transfer route. Naming
+        // its operand would hide the call and disable constant-stack TCO.
+        if tail && matches!(e.kind, IrExprKind::Try { .. } | IrExprKind::Unwrap { .. }) {
+            return;
+        }
         let operands: Vec<&mut IrExpr> = match &mut e.kind {
             // A binary op over droppable operands — concatenation, or an
             // equality / ordering test on strings and lists — reads both
@@ -121,6 +165,16 @@ impl IrMutVisitor for Binder<'_> {
             // match on it, an index into it, an interpolation of it.
             IrExprKind::ForIn { iterable, .. } => vec![iterable.as_mut()],
             IrExprKind::Match { subject, .. } => vec![subject.as_mut()],
+            // Extraction borrows the payload; keep the temporary wrapper
+            // owned so both success and propagation release its credit.
+            IrExprKind::Try { expr } | IrExprKind::Unwrap { expr }
+            | IrExprKind::UnwrapOr { expr, .. }
+                if matches!(expr.ty, Ty::Applied(TypeConstructorId::Result | TypeConstructorId::Option, _)) =>
+            {
+                // Move-mode effect calls can carry a raw payload type here;
+                // their carrier is supplied by the ABI, not this annotation.
+                vec![expr.as_mut()]
+            }
             IrExprKind::IndexAccess { object, .. } => vec![object.as_mut()],
             IrExprKind::StringInterp { parts } => parts
                 .iter_mut()

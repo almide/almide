@@ -455,7 +455,8 @@ impl Emitter<'_> {
             return self.rc_owned_result(then) && self.rc_owned_result(else_);
         }
         if let almide_ir::IrExprKind::Match { arms, .. } = &e.kind {
-            return !arms.is_empty() && arms.iter().all(|a| self.rc_owned_result(&a.body));
+            // lower_arm_body normalizes every value arm to one credit.
+            return !arms.is_empty();
         }
         let almide_ir::IrExprKind::Call { target, .. } = &e.kind else {
             return false;
