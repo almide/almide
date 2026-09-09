@@ -210,6 +210,14 @@ fn check_needs_ownership_concat(left: &IrExpr, right: &IrExpr, var: VarId, needs
 /// those interleaved steps.
 fn check_needs_ownership_record(fields: &[(Sym, IrExpr)], var: VarId, needs: &mut bool) {
     for (_, v) in fields { if is_var(v, var) { *needs = true; return; } }
+    for (_, v) in fields {
+        if let IrExprKind::Member { object, .. } = &v.kind
+            && is_var(object, var) && super::pass_clone::needs_clone(&v.ty)
+        {
+            *needs = true;
+            return;
+        }
+    }
     for (_, v) in fields { check_needs_ownership(v, var, needs); }
 }
 
@@ -763,4 +771,3 @@ fn stmt_uses_var(stmt: &IrStmt, var: VarId) -> bool {
         _ => false,
     }
 }
-

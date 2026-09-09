@@ -199,3 +199,70 @@ fn binder_that_is_consumed_or_matched_keeps_the_element_copy() {
     assert!(body.contains("for v in data.iter().cloned() {") && body.contains("keep(v)"), "an owned-arg call consumes the element — it must be copied out of the list, then moved:\n{body}");
     assert!(body.contains("for u in us.iter().cloned() {"), "a match subject binds payloads by value — the element stays owned:\n{body}");
 }
+
+#[test]
+fn record_field_loop_borrows_the_collection_and_read_only_elements() {
+    let body = field_loop_emitted(r#"type Kid = { name: String, value: Int }
+type Parent = { kids: List[Kid] }
+effect fn main() -> Unit = {
+  let h = Parent { kids: [Kid { name: "a", value: 2 }, Kid { name: "b", value: 3 }] }
+  var total = 0
+  for k in h.kids { total = total + k.value }
+  assert_eq(total, 5)
+  assert_eq(list.len(h.kids), 2)
+}
+"#, "record-field");
+    assert!(body.contains("for k in h.kids.iter()"), "read-only field loop copies its collection or elements:\n{body}");
+}
+
+#[test]
+fn record_field_loop_keeps_snapshot_when_body_replaces_parent() {
+    let body = field_loop_emitted(r#"type Parent = { kids: List[Int] }
+effect fn main() -> Unit = {
+  var h = Parent { kids: [2, 3] }
+  var total = 0
+  for k in h.kids {
+    total = total + k
+    h = Parent { kids: [99] }
+  }
+  assert_eq(total, 5)
+  assert_eq(h.kids, [99])
+}
+"#, "record-field-write");
+    assert!(body.contains("h.kids.clone().iter()"), "writing the parent requires a snapshot of the loop input:\n{body}");
+}
+
+fn field_loop_emitted(source: &str, tag: &str) -> String {
+    let emitted = emitted_main(source, tag);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("main.almd");
+    std::fs::write(&path, source).unwrap();
+    for target in ["rust", "wasm"] {
+        let out = Command::new(almide_bin()).arg("run").arg(&path)
+            .args(["--target", target]).output().unwrap();
+        assert!(out.status.success(), "{tag} {target}: {}", String::from_utf8_lossy(&out.stderr));
+    }
+    emitted
+}
+
+#[test]
+fn final_owned_record_field_loop_moves_consumed_elements() {
+    let body = field_loop_emitted(r#"type Kid = { name: String, value: Int }
+type Parent = { kids: List[Kid] }
+fn consume(k: Kid) -> Int = list.len([k])
+fn read_parent(h: Parent) -> Int = {
+  var total = 0
+  for k in h.kids { total = total + consume(k) }
+  total
+}
+effect fn main() -> Unit = {
+  let h = Parent { kids: [Kid { name: "a", value: 2 }, Kid { name: "b", value: 3 }] }
+  assert_eq(read_parent(h), 2)
+  assert_eq(list.len(h.kids), 2)
+  var total = 0
+  for k in h.kids { total = total + consume(k) }
+  assert_eq(total, 2)
+}
+"#, "owned-field");
+    assert!(body.contains("for k in h.kids.into_iter()"), "final owned field should transfer elements:\n{body}");
+}

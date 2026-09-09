@@ -22,6 +22,7 @@ thread_local! {
     /// [`insert_clones_for_in`], drained into `CodegenAnnotations::borrowed_loop_vars`
     /// by the pass's `run` (see [`take_borrowed_loop_vars`]).
     static BORROWED_LOOP_VARS: RefCell<HashSet<VarId>> = RefCell::new(HashSet::new());
+    static CONSUMED_LOOP_VARS: RefCell<HashSet<VarId>> = RefCell::new(HashSet::new());
 }
 
 /// Hand the collected set to the pass and reset for the next program.
@@ -29,12 +30,26 @@ pub(crate) fn take_borrowed_loop_vars() -> HashSet<VarId> {
     BORROWED_LOOP_VARS.with(|c| std::mem::take(&mut *c.borrow_mut()))
 }
 
+pub(crate) fn take_consumed_loop_vars() -> HashSet<VarId> {
+    CONSUMED_LOOP_VARS.with(|c| std::mem::take(&mut *c.borrow_mut()))
+}
+
+fn owns_final_field_read(iterable: &IrExpr, body: &[IrStmt], ctx: &CloneCtx) -> bool {
+    if ctx.in_loop || !matches!(iterable.kind, IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }) {
+        return false;
+    }
+    let Some(root) = iterable_root(iterable) else { return false; };
+    ctx.owned.contains(&root) && !ctx.always.contains(&root) && ctx.remaining.get(&root).copied().unwrap_or(1) <= 1
+        && !body_writes_var(body, root)
+}
+
 /// `ForIn { var, var_tuple, iterable, body }` arm of [`insert_clones_live`]:
 /// the iterable is NOT in the loop, the body IS.
 pub(crate) fn insert_clones_for_in(var: VarId, var_tuple: Option<Vec<VarId>>, iterable: IrExpr, body: Vec<IrStmt>, ctx: &mut CloneCtx) -> IrExprKind {
+    let owns_field = owns_final_field_read(&iterable, &body, ctx);
     let new_iterable = strip_list_iterable_clone(insert_clones_live(iterable, ctx), &body);
     let fresh = loop_fresh_vars(Some(var), var_tuple.as_deref(), &body);
-    let mut loop_ctx = CloneCtx { always: ctx.always, eligible: ctx.eligible, remaining: ctx.remaining, in_loop: true, memo: ctx.memo, fresh: &fresh };
+    let mut loop_ctx = CloneCtx { always: ctx.always, eligible: ctx.eligible, remaining: ctx.remaining, in_loop: true, memo: ctx.memo, fresh: &fresh, owned: ctx.owned };
     let new_body = insert_clone_stmts_live(body, &mut loop_ctx);
     // With the body's clones and moves placed, a binder every use of which
     // sits under a shared borrow / field read / clone never needs an owned
@@ -43,6 +58,8 @@ pub(crate) fn insert_clones_for_in(var: VarId, var_tuple: Option<Vec<VarId>>, it
     let is_list = matches!(&new_iterable.ty, Ty::Applied(TypeConstructorId::List, _));
     if is_list && var_tuple.is_none() && only_borrowed_uses(&new_body, var) {
         BORROWED_LOOP_VARS.with(|c| { c.borrow_mut().insert(var); });
+    } else if is_list && owns_field {
+        CONSUMED_LOOP_VARS.with(|c| { c.borrow_mut().insert(var); });
     }
     IrExprKind::ForIn { var, var_tuple, iterable: Box::new(new_iterable), body: new_body }
 }
@@ -98,7 +115,7 @@ fn uses_var_anywhere(e: &IrExpr, v: VarId) -> bool {
 /// both in the loop.
 pub(crate) fn insert_clones_while(cond: IrExpr, body: Vec<IrStmt>, ctx: &mut CloneCtx) -> IrExprKind {
     let fresh = loop_fresh_vars(None, None, &body);
-    let mut loop_ctx = CloneCtx { always: ctx.always, eligible: ctx.eligible, remaining: ctx.remaining, in_loop: true, memo: ctx.memo, fresh: &fresh };
+    let mut loop_ctx = CloneCtx { always: ctx.always, eligible: ctx.eligible, remaining: ctx.remaining, in_loop: true, memo: ctx.memo, fresh: &fresh, owned: ctx.owned };
     let new_cond = insert_clones_live(cond, &mut loop_ctx);
     let new_body = insert_clone_stmts_live(body, &mut loop_ctx);
     IrExprKind::While { cond: Box::new(new_cond), body: new_body }
@@ -115,11 +132,21 @@ fn strip_list_iterable_clone(iterable: IrExpr, body: &[IrStmt]) -> IrExpr {
     let is_list = matches!(&iterable.ty, Ty::Applied(TypeConstructorId::List, _));
     match iterable.kind {
         IrExprKind::Clone { expr: inner }
-            if is_list && matches!(&inner.kind, IrExprKind::Var { id } if !body_writes_var(body, *id)) =>
+            if is_list && iterable_root(&inner).is_some_and(|id| !body_writes_var(body, id)) =>
         {
             *inner
         }
         kind => IrExpr { kind, ..iterable },
+    }
+}
+
+/// A field projection borrows its root for the loop duration, just like a bare list.
+fn iterable_root(expr: &IrExpr) -> Option<VarId> {
+    match &expr.kind {
+        IrExprKind::Var { id } => Some(*id),
+        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
+        | IrExprKind::Deref { expr: object } => iterable_root(object),
+        _ => None,
     }
 }
 
@@ -145,7 +172,7 @@ fn body_writes_var(body: &[IrStmt], v: VarId) -> bool {
     impl almide_ir::visit::IrVisitor for W {
         fn visit_expr(&mut self, e: &IrExpr) {
             if let IrExprKind::Borrow { expr: inner, mutable: true, .. } = &e.kind
-                && matches!(&inner.kind, IrExprKind::Var { id } if *id == self.v)
+                && iterable_root(inner) == Some(self.v)
             {
                 self.hit = true;
             }
@@ -156,7 +183,11 @@ fn body_writes_var(body: &[IrStmt], v: VarId) -> bool {
                 IrStmtKind::Assign { var, .. } if *var == self.v => self.hit = true,
                 IrStmtKind::IndexAssign { target, .. }
                 | IrStmtKind::MapInsert { target, .. }
-                | IrStmtKind::FieldAssign { target, .. } if *target == self.v => self.hit = true,
+                | IrStmtKind::FieldAssign { target, .. }
+                | IrStmtKind::ListSwap { target, .. }
+                | IrStmtKind::ListReverse { target, .. }
+                | IrStmtKind::ListRotateLeft { target, .. } if *target == self.v => self.hit = true,
+                IrStmtKind::ListCopySlice { dst, .. } if *dst == self.v => self.hit = true,
                 _ => {}
             }
             almide_ir::visit::walk_stmt(self, s);

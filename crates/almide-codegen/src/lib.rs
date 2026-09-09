@@ -26,7 +26,6 @@ pub mod annotations;
 pub mod generated;
 pub mod pass;
 pub mod verify_names;
-pub mod pass_auto_parallel;
 pub mod pass_borrow_inference;
 pub mod pass_box_deref;
 pub mod pass_builtin_lowering;
@@ -37,6 +36,10 @@ pub mod pass_shared_cell_borrow;
 pub mod pass_clone;
 pub mod pass_clone_loops;
 pub mod pass_clone_interp;
+mod pass_clone_compare;
+mod pass_clone_places;
+mod pass_clone_projection;
+mod pass_clone_record_fields;
 pub mod pass_top_let_storage;
 pub mod pass_fan_lowering;
 pub mod pass_list_pattern;
@@ -47,6 +50,7 @@ pub mod pass_intrinsic_lowering;
 pub mod pass_normalize_runtime_calls;
 pub mod pass_stdlib_lowering;
 pub mod pass_stream_fusion;
+mod pass_fan_local_state;
 pub mod pass_effect_inference;
 pub mod pass_tco;
 pub mod pass_licm;
@@ -59,6 +63,8 @@ pub mod pass_egg_saturation;
 pub mod pass_matrix_shape_spec;
 pub mod pass_const_fold;
 pub mod pass_rust_lowering;
+mod pass_rust_lowering_stmts;
+pub mod pass_rust_lowering_fan;
 pub mod pass_lambda_type_resolve;
 pub mod pass_concretize_types;
 pub mod pass_resolve_calls;
@@ -340,7 +346,9 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     // native OOB index matches the wasm trap and the div/mod abort contract
     // (#554/C-072) instead of a raw Rust panic (exit 101). i64 index is range-
     // checked against len as usize; negative or >= len aborts.
+    s.push_str(&format!("{macro_attr}macro_rules! almide_index_ref {{ ($xs:expr, $i:expr) => {{{{ let (__xs, __i) = (&$xs, $i as i64); if __i < 0 || (__i as u64) >= __xs.len() as u64 {{ eprintln!(\"Error: index out of bounds\"); std::process::exit(1); }} &__xs[__i as usize] }}}}; }}\n"));
     s.push_str(&format!("{macro_attr}macro_rules! almide_index {{ ($xs:expr, $i:expr) => {{{{ let (__xs, __i) = (&$xs, $i as i64); if __i < 0 || (__i as u64) >= __xs.len() as u64 {{ eprintln!(\"Error: index out of bounds\"); std::process::exit(1); }} __xs[__i as usize].clone() }}}}; }}\n"));
+    s.push_str(&format!("{macro_attr}macro_rules! almide_list_get_ref {{ ($xs:expr, $i:expr) => {{ ($xs).get(($i) as usize) }}; }}\n"));
     s.push_str(&format!("{macro_attr}macro_rules! almide_index_set {{ ($xs:expr, $i:expr, $v:expr) => {{{{ let __i = $i as i64; if __i < 0 || (__i as u64) >= $xs.len() as u64 {{ eprintln!(\"Error: index out of bounds\"); std::process::exit(1); }} $xs[__i as usize] = $v; }}}}; }}\n"));
     // AlmideRcCow<T>: COW value type. Clone = Rc::clone (O(1)), mutation = Rc::make_mut (COW).
     // Inspired by Swift's value type semantics.

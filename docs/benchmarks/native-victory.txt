@@ -2,9 +2,10 @@
 # Regenerate the block: bash scripts/gen-readme-stats.sh
 # Gate:  bash scripts/check-perf-ratio.sh — the VICTORY rows re-measure the
 #        claim (almide-native / ordinary-Rust ratio < 1.0) and the same-source
-#        ablation (ALMIDE_REGION_OFF=1 must still cost the row more than the
-#        script's VICTORY_ABLATION_FLOOR) every CI round; a row that stops
-#        being faster fails the gate.
+#        ablation (the row's knob — ALMIDE_REGION_OFF=1 for the region-window
+#        rows, ALMIDE_FAN_SEQUENTIAL=1 for the parallel-fan row — must still
+#        cost the row more than the script's VICTORY_ABLATION_FLOOR) every CI
+#        round; a row that stops being faster fails the gate.
 # Method: research/benchmark/perf/bench.py shape — both sides compiled with
 #        the same rustc flags (opt-level=3, lto, 1 CGU), byte-identical stdout
 #        verified before timing, median of 9 interleaved runs after a warmup.
@@ -23,3 +24,4 @@ machine = arm64 Darwin, Apple M4 Pro (local stamp); runner = ubuntu-latest
 
 binarytrees | region window (#1991) | 0.35 (d17) | 0.32 (d19) | 1.25 | 0.61
 treealloc   | region window (#1991) | 0.30 (d20) | 0.30 (d21) | 1.10 | 0.61 (est.)
+fannkuchredux | parallel fan (#2044) | 0.21 (n10) | 0.12 (n11) | 1.06 | 0.60 (est.)

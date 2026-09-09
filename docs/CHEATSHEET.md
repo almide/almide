@@ -580,6 +580,10 @@ let report  = fan.settle(jobs, (j) => run(j))             // List[Result[B, Stri
 // The callback may be an EFFECT fn, in either spelling — an inline lambda that
 // calls one, or a bare effect-fn value. Same rule as the block heads' arms.
 let checked = fan.map(paths, read_meta)                   // read_meta: an `effect fn`, passed by name
+// A heavy PURE callback over scalars is parallelised (a thread per core, results in list
+// order) ONLY by writing `fan.map` / `fan { list.map(...) }` — the compiler never threads
+// an implicit `|>` chain (those are fused sequentially).
+let sums = fan.map(chunks, (c) => ok(heavy(c)))!            // parallel natively; sequential and byte-identical on wasm
 
 // Block heads — arms are parallel siblings separated by `,` or newline
 // (`;` between arms is an error: it means sequencing, and stays legal only

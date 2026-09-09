@@ -34,6 +34,9 @@ pub struct CodegenAnnotations {
     /// placed the body's clones and moves. A bare (moving) use, a `&mut`, a
     /// closure capture, a match on `x`, or a tuple binder keeps `.cloned()`.
     pub borrowed_loop_vars: HashSet<VarId>,
+    /// List-field loops whose owned root is dead after the head evaluation.
+    /// The body needs owned elements, so move them with into_iter rather than clone.
+    pub consumed_loop_vars: HashSet<VarId>,
     /// `let r = <lit>..<e` binders whose EVERY read is a single-variable
     /// `for-in` head (#1857, the native twin of the wasm leg's #1400
     /// `range_counting_vars`). The walker binds them as a bare

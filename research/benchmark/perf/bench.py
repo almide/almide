@@ -48,11 +48,11 @@ SUITE = [
     ("fft-wasm",     "fft/fft.almd",                     ["fft.rs"],                        "18",       "10",   "line1", ["native", "wasm", "rust"]),
     # fannkuchredux / mandelbrot (#1330): the `fan` kernels against ORDINARY
     # sequential Rust (`rust-ref/fannkuchredux.rs`, `rust-ref/mandelbrot.rs`
-    # — one thread, no `unsafe`, no SIMD). The native leg gives them no
-    # parallelism today (`fan.map` is sequential, `fan { .. }` spawns one
-    # thread for the block, AutoParallel does not fire), so the rows read
-    # ~1.0 and are REPORTED by check-perf-ratio.sh, not anchored — and the
-    # day a data-parallel win appears it shows up as a number here.
+    # — one thread, no `unsafe`, no SIMD). Since #2044 the native leg runs
+    # fannkuchredux's `fan { list.map }` on a thread per core (a VICTORY row
+    # in check-perf-ratio.sh, ablated with ALMIDE_FAN_SEQUENTIAL=1);
+    # mandelbrot's `fan.map` returns `Bytes` (an `Rc` natively), outside the
+    # Send-safe subset, so it still reads ~1.0 and stays REPORTED.
     ("fannkuchredux","fannkuchredux/fannkuchredux.almd", ["fannkuchredux.rs"],              "11",       "7",    "bytes", None),
     # onebrc writes/reads a measurements file; the wasm leg has no preopened
     # dir under `wasmtime run` so the row is native/rust only.
@@ -113,8 +113,9 @@ QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
     "fasta": "2500000",
     "fft": "22",
     "fft-wasm": "16",
-    # 10, not 9: 9 reads ~20 ms on both sides, under the spawn-noise floor.
-    "fannkuchredux": "10",
+    # Parallel native n=10 reached 79.5 ms on CI, below the 80 ms floor.
+    # n=11 keeps the measured work above process-spawn noise.
+    "fannkuchredux": "11",
     "onebrc": "1000000",
     # 17, not 14: the region window (#1991) took the native row to ~18 ms at
     # 14, under the spawn-noise floor; 17 reads ~145 ms native / ~435 ms ref.

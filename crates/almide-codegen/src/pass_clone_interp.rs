@@ -118,6 +118,7 @@ pub(crate) fn insert_clones_string_interp(parts: Vec<IrStringPart>, ctx: &mut Cl
                     in_loop: ctx.in_loop,
                     memo: ctx.memo,
                     fresh: ctx.fresh,
+                    owned: ctx.owned,
                 };
                 insert_clones_live(expr, &mut guard)
             };
