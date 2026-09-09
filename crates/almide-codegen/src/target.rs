@@ -24,6 +24,7 @@ use super::pass_result_propagation::ResultPropagationPass;
 use super::pass_intrinsic_lowering::IntrinsicLoweringPass;
 use super::pass_normalize_runtime_calls::NormalizeRuntimeCallsPass;
 use super::pass_stdlib_lowering::StdlibLoweringPass;
+use super::pass_stream_fusion::StreamFusionPass;
 use super::pass_match_subject::MatchSubjectPass;
 use super::pass_pattern_literal_guard::PatternLiteralGuardPass;
 use super::pass_effect_inference::EffectInferencePass;
@@ -64,10 +65,12 @@ pub fn configure(target: Target) -> TargetConfig {
 }
 
 fn build_pipeline(target: Target) -> Pipeline {
-    // Stage 1 egg flip landed: `EggSaturationPass` is the sole
-    // fusion driver for both matrix and list combinator chains.
-    // The imperative `MatrixFusionPass` and `StreamFusionPass`
-    // have been retired. The `fma / fma3` legacy optimisations
+    // Stage 1 egg flip landed: `EggSaturationPass` is the fusion driver
+    // for matrix chains. The imperative `MatrixFusionPass` was retired
+    // with it; list-combinator fusion is `StreamFusionPass` (#2045,
+    // after StdlibLowering — the egg list rules composed lambdas by
+    // substitution and duplicated callback side effects, so the list
+    // arm of the saturation target is off). The `fma / fma3` legacy optimisations
     // the imperative matrix pass also handled are not yet ported
     // to egg; they were performance-only (no spec depends on
     // them) and are earmarked for Stage 4's profile-guided cost
@@ -142,6 +145,11 @@ fn build_pipeline(target: Target) -> Pipeline {
         // Semantic lowering (order matters!)
         // 1. Stdlib first: Module calls → Named calls with arg decoration
         .add(StdlibLoweringPass)
+        // 1b. StreamFusion (#2045): `RuntimeCall { almide_rt_list_* }` with a
+        //     lambda literal → `IterChain`; pure `|>` chains flatten into one
+        //     iterator expression. Before AutoParallel, so a fusable chain is
+        //     never split across threads first.
+        .add(StreamFusionPass)
         // 2. AutoParallel: rewrite pure list ops to parallel variants
         .add(AutoParallelPass)
         // 3. ResultPropagation: insert Try (?) for effect fn calls

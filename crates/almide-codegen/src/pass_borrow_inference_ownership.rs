@@ -397,10 +397,11 @@ fn check_needs_ownership_iter_chain(expr: &IrExpr, var: VarId, needs: &mut bool)
             | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => {
                 if uses_var(lambda, var) { *needs = true; return; }
             }
+            IterStep::Take { n } => check_needs_ownership(n, var, needs),
         }
     }
     match collector {
-        IterCollector::Collect => {}
+        IterCollector::Collect | IterCollector::Sum { .. } | IterCollector::Len => {}
         IterCollector::Fold { init, lambda } => {
             if is_var(init, var) { *needs = true; return; }
             if uses_var(lambda, var) { *needs = true; return; }
@@ -654,9 +655,10 @@ fn iter_chain_uses_var(source: &IrExpr, steps: &[IterStep], collector: &IterColl
     || steps.iter().any(|s| match s {
         IterStep::Map { lambda } | IterStep::Filter { lambda }
         | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => uses_var(lambda, var),
+        IterStep::Take { n } => uses_var(n, var),
     })
     || match collector {
-        IterCollector::Collect => false,
+        IterCollector::Collect | IterCollector::Sum { .. } | IterCollector::Len => false,
         IterCollector::Fold { init, lambda } => uses_var(init, var) || uses_var(lambda, var),
         IterCollector::Any { lambda } | IterCollector::All { lambda }
         | IterCollector::Find { lambda } | IterCollector::Count { lambda } => uses_var(lambda, var),

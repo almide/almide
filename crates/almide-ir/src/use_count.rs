@@ -226,10 +226,11 @@ fn count_uses_in_iter_chain(
             | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => {
                 count_uses_in_expr(lambda, table);
             }
+            IterStep::Take { n } => count_uses_in_expr(n, table),
         }
     }
     match collector {
-        IterCollector::Collect => {}
+        IterCollector::Collect | IterCollector::Sum { .. } | IterCollector::Len => {}
         IterCollector::Fold { init, lambda } => {
             count_uses_in_expr(init, table);
             count_uses_in_expr(lambda, table);

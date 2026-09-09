@@ -453,12 +453,15 @@ pub enum IrExprKind {
         index: u32,
     },
 
-    // ── Iterator chain (inserted by StdlibLoweringPass, Rust target) ──
+    // ── Iterator chain (inserted by StreamFusionPass, Rust target) ──
     /// Replaces runtime function calls for list operations with Rust iterator chains.
     /// `source.into_iter().step1().step2()...collector()`
     IterChain {
         source: Box<IrExpr>,
-        /// true = into_iter() (consumes Vec), false = iter() (borrows Vec)
+        /// true = `into_iter()` (consumes the Vec), false = `iter().cloned()`
+        /// (the source is a borrow; every step still sees an OWNED element,
+        /// exactly like the `almide_rt_list_*` runtime twins that clone per
+        /// element out of a `&[A]`).
         consume: bool,
         steps: Vec<IterStep>,
         collector: IterCollector,
@@ -476,6 +479,21 @@ pub enum IterStep {
     Filter { lambda: Box<IrExpr> },
     FlatMap { lambda: Box<IrExpr> },
     FilterMap { lambda: Box<IrExpr> },
+    /// `.take(n as usize)` — `list.take` fused into a pure chain (a
+    /// negative `n` wraps to a huge count and takes everything, the
+    /// runtime twin's `n as usize` behaviour).
+    Take { n: Box<IrExpr> },
+}
+
+impl IterStep {
+    /// The step's callback, when it has one (`Take` carries a count, not a lambda).
+    pub fn lambda(&self) -> Option<&IrExpr> {
+        match self {
+            IterStep::Map { lambda } | IterStep::Filter { lambda }
+            | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => Some(lambda),
+            IterStep::Take { .. } => None,
+        }
+    }
 }
 
 /// The terminal operation of an iterator chain.
@@ -493,6 +511,22 @@ pub enum IterCollector {
     Find { lambda: Box<IrExpr> },
     /// `.filter(|x| body).count() as i64`
     Count { lambda: Box<IrExpr> },
+    /// `list.sum` over the chain: `wrapping_add` fold for Int (C-056), `.sum()` for Float.
+    Sum { float: bool },
+    /// `list.len` over the chain: `.count() as i64`
+    Len,
+}
+
+impl IterCollector {
+    /// The collector's callback, when it has one.
+    pub fn lambda(&self) -> Option<&IrExpr> {
+        match self {
+            IterCollector::Fold { lambda, .. } | IterCollector::Any { lambda }
+            | IterCollector::All { lambda } | IterCollector::Find { lambda }
+            | IterCollector::Count { lambda } => Some(lambda),
+            IterCollector::Collect | IterCollector::Sum { .. } | IterCollector::Len => None,
+        }
+    }
 }
 
 // ── Structural recursion helpers ────────────────────────────────
@@ -690,6 +724,7 @@ impl IterStep {
             IterStep::Filter { lambda } => IterStep::Filter { lambda: Box::new(f(*lambda)) },
             IterStep::FlatMap { lambda } => IterStep::FlatMap { lambda: Box::new(f(*lambda)) },
             IterStep::FilterMap { lambda } => IterStep::FilterMap { lambda: Box::new(f(*lambda)) },
+            IterStep::Take { n } => IterStep::Take { n: Box::new(f(*n)) },
         }
     }
 }
@@ -703,6 +738,8 @@ impl IterCollector {
             IterCollector::All { lambda } => IterCollector::All { lambda: Box::new(f(*lambda)) },
             IterCollector::Find { lambda } => IterCollector::Find { lambda: Box::new(f(*lambda)) },
             IterCollector::Count { lambda } => IterCollector::Count { lambda: Box::new(f(*lambda)) },
+            IterCollector::Sum { float } => IterCollector::Sum { float },
+            IterCollector::Len => IterCollector::Len,
         }
     }
 }

@@ -51,7 +51,9 @@ fn test_emit_end_to_end_rust() {
     eprintln!("=== codegen::codegen Rust ===\n{}", output);
 
     assert!(output.contains("pub fn find_price"), "should have pub fn");
-    assert!(output.contains("almide_rt_list_find"), "should have stdlib call");
+    // `list.find` with a lambda literal fuses into an iterator chain on the
+    // Rust target (#2045); the runtime call is the unfused spelling.
+    assert!(output.contains(".into_iter().find(") || output.contains("almide_rt_list_find"), "should have the find stage");
     assert!(output.contains("Vec<Product>"), "should have Vec<Product>");
     assert!(output.contains("format!"), "should have format!");
 }
