@@ -1513,10 +1513,24 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Cache stock WASI runtime
+        uses: actions/cache@v6
+        with:
+          path: /tmp/wasmtime.tar.xz
+          key: wasmtime-v27.0.0-x86_64-linux
       - name: Install wasmtime (stock CLI — the WASI gate's third-party runtime)
         run: |
-          curl https://wasmtime.dev/install.sh -sSf | bash -s -- --version v27.0.0
-          echo "$HOME/.wasmtime/bin" >> "$GITHUB_PATH"
+          set -euo pipefail
+          VERSION=v27.0.0
+          TARBALL=/tmp/wasmtime.tar.xz
+          if ! tar -tf "$TARBALL" >/dev/null 2>&1; then
+            curl --fail --location --retry 5 --retry-all-errors \
+              "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/wasmtime-${VERSION}-x86_64-linux.tar.xz" \
+              --output "$TARBALL"
+          fi
+          tar -xf "$TARBALL" -C /tmp
+          sudo install -m 755 "/tmp/wasmtime-${VERSION}-x86_64-linux/wasmtime" /usr/local/bin/wasmtime
+          wasmtime --version
       - name: Carried gates in release shape
         run: cargo test --release --locked -p almide-wasm -p almide-wasm-run -p almide-spine -p almide-syntax -p almide-corpus -p almide-layout
       # #2010 stage 2b: under the double-free trap a second release of a
