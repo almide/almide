@@ -290,7 +290,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-252 | Expression statements and comments: Unit calls execute, discards are explicit, comments are invisible | 0.57.1 | active | fixture | 1 |
 | C-253 | Place assignments and type ascription behave identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-254 | Type ascription supplies an expected type without changing the value on either target | 0.57.1 | active | fixture | 1 |
-| C-255 | Record literals, member reads, and spread updates preserve value semantics identically on both targets | 0.57.1 | active | fixture | 1 |
+| C-255 | Record literals, member reads, and spread updates preserve value semantics identically on both targets | 0.57.1 | active | fixture | 2 |
 | C-256 | break and continue take effect at their statement position, identically on both targets and the interp | 0.57.1 | active | fixture | 1 |
 | C-257 | The scalar error operators evaluate identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-258 | Named calls and lambdas evaluate identically on both targets | 0.57.1 | active | fixture | 1 |

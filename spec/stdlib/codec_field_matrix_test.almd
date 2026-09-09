@@ -203,16 +203,9 @@ test "Option × {record with default, record without, list, primitive}: present 
     },
     err(_) => assert(false),
   }
-  match OptCells.decode(parse('{"d":null,"tag":null}')) {
-    ok(c) => {
-      assert_eq(c.d, none)
-      assert_eq(c.p, none)
-      assert_eq(c.l, none)
-      assert_eq(c.s, none)
-      assert_eq(c.tag, "t")
-    },
-    err(_) => assert(false),
-  }
+  let empty = OptCells { d: none, p: none, l: none, s: none, tag: "t" }
+  assert_eq(OptCells.decode(parse('{"d":null,"tag":null}')), ok(empty))
+  assert_eq(OptCells.decode(parse('{}')), ok(empty))
   let full = OptCells { d: some(Defaulted { city: "y", zip: "9" }), p: some(Inner { n: 2 }), l: some([3]), s: some("z"), tag: "u" }
   assert_eq(OptCells.decode(OptCells.encode(full)), ok(full))
 }
