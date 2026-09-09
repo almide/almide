@@ -217,40 +217,57 @@ pub fn almide_rt_list_window<T: Clone>(xs: Vec<T>, n: i64) -> Vec<Vec<T>> {
     xs.windows(n as usize).map(|w| w.to_vec()).collect()
 }
 
-// ── Parallel variants (auto-parallelization for pure lambdas) ──
-// Uses std::thread::scope for work-stealing parallelism.
-// Falls back to sequential below ALMIDE_PARALLEL_THRESHOLD elements.
-
-// Parallel when there are at least 2 elements.
-// Each element may represent arbitrarily heavy work (e.g., fan { list.map(chunks, heavy_fn) }).
-// Using a high threshold would skip parallelism for small lists with expensive per-element work.
+// ── Parallel variants (pure list ops under a `fan` block, #2044) ──
+// Reached ONLY through `fan { … }`: RustLowering's fan routing rewrites a pure
+// `list.map/filter/any/all` whose element, result and captured types are all
+// Send-safe scalars to these twins when the call sits under a fan block — the
+// explicit fan-out is the user's signal that each element is a task worth a
+// thread, so the threshold is 2 elements, not a "big list" cut-off (a 64-chunk
+// fan over 14 cores would never clear one). The callback is a NAMED `F: Fn`
+// generic in LAST position on purpose: build.rs derives `takes_raw_fn_last_arg`
+// from exactly that shape, which is what keeps the closure a raw `impl Fn`
+// instead of the uniform `Rc<dyn Fn>` (neither Send nor Sync). `par_map` joins
+// into pre-sized slots by index, so its output is byte-identical to `list_map`.
+// `ALMIDE_FAN_SEQUENTIAL=1` (read once per process) forces the sequential path
+// — the ablation knob check-perf-ratio.sh's fan VICTORY rows use.
 const ALMIDE_PARALLEL_THRESHOLD: usize = 2;
 
-pub fn almide_rt_list_par_map<A: Send + Sync + Clone, B: Send + Sync>(xs: Vec<A>, f: impl Fn(A) -> B + Send + Sync) -> Vec<B> {
-    if xs.len() < ALMIDE_PARALLEL_THRESHOLD {
-        return xs.into_iter().map(&f).collect();
-    }
-    let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
-    let chunk_size = (xs.len() + cpus - 1) / cpus;
-    let chunks: Vec<Vec<A>> = xs.chunks(chunk_size).map(|c| c.to_vec()).collect();
-    let mut results: Vec<Option<Vec<B>>> = (0..chunks.len()).map(|_| None).collect();
-    std::thread::scope(|s| {
-        let mut handles = Vec::new();
-        for chunk in &chunks {
-            let f = &f;
-            handles.push(s.spawn(move || {
-                chunk.iter().map(|x| f(x.clone())).collect::<Vec<B>>()
-            }));
-        }
-        for (i, handle) in handles.into_iter().enumerate() {
-            results[i] = Some(handle.join().unwrap());
-        }
-    });
-    results.into_iter().flatten().flatten().collect()
+/// `ALMIDE_FAN_SEQUENTIAL` — set (non-empty, not "0") means every parallel
+/// twin takes its sequential path. Read once; the value is process-wide.
+pub fn almide_rt_list_par_sequential() -> bool {
+    static SEQ: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *SEQ.get_or_init(|| {
+        std::env::var("ALMIDE_FAN_SEQUENTIAL").map(|v| !v.is_empty() && v != "0").unwrap_or(false)
+    })
 }
 
-pub fn almide_rt_list_par_filter<A: Send + Sync + Clone>(xs: Vec<A>, f: impl Fn(A) -> bool + Send + Sync) -> Vec<A> {
-    if xs.len() < ALMIDE_PARALLEL_THRESHOLD {
+/// Worker count for `len` items: one per available core, never more than `len`.
+pub fn almide_rt_list_par_workers(len: usize) -> usize {
+    let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+    cpus.max(1).min(len.max(1))
+}
+
+pub fn almide_rt_list_par_map<A: Send + Sync + Clone, B: Send, F: Fn(A) -> B + Send + Sync>(xs: Vec<A>, f: F) -> Vec<B> {
+    if xs.len() < ALMIDE_PARALLEL_THRESHOLD || almide_rt_list_par_sequential() {
+        return xs.into_iter().map(&f).collect();
+    }
+    let chunk_size = xs.len().div_ceil(almide_rt_list_par_workers(xs.len()));
+    let mut slots: Vec<Option<B>> = (0..xs.len()).map(|_| None).collect();
+    std::thread::scope(|s| {
+        for (chunk, out) in xs.chunks(chunk_size).zip(slots.chunks_mut(chunk_size)) {
+            let f = &f;
+            s.spawn(move || {
+                for (slot, x) in out.iter_mut().zip(chunk) {
+                    *slot = Some(f(x.clone()));
+                }
+            });
+        }
+    });
+    slots.into_iter().map(|b| b.expect("list.par_map: every slot is written by its worker")).collect()
+}
+
+pub fn almide_rt_list_par_filter<A: Send + Sync + Clone, F: Fn(A) -> bool + Send + Sync>(xs: Vec<A>, f: F) -> Vec<A> {
+    if xs.len() < ALMIDE_PARALLEL_THRESHOLD || almide_rt_list_par_sequential() {
         return xs.into_iter().filter(|x| f(x.clone())).collect();
     }
     let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
@@ -272,8 +289,8 @@ pub fn almide_rt_list_par_filter<A: Send + Sync + Clone>(xs: Vec<A>, f: impl Fn(
     results.into_iter().flatten().flatten().collect()
 }
 
-pub fn almide_rt_list_par_any<A: Send + Sync + Clone>(xs: &[A], f: impl Fn(A) -> bool + Send + Sync) -> bool {
-    if xs.len() < ALMIDE_PARALLEL_THRESHOLD {
+pub fn almide_rt_list_par_any<A: Send + Sync + Clone, F: Fn(A) -> bool + Send + Sync>(xs: &[A], f: F) -> bool {
+    if xs.len() < ALMIDE_PARALLEL_THRESHOLD || almide_rt_list_par_sequential() {
         return xs.iter().any(|x| f(x.clone()));
     }
     let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
@@ -298,8 +315,8 @@ pub fn almide_rt_list_par_any<A: Send + Sync + Clone>(xs: &[A], f: impl Fn(A) ->
     found.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-pub fn almide_rt_list_par_all<A: Send + Sync + Clone>(xs: &[A], f: impl Fn(A) -> bool + Send + Sync) -> bool {
-    if xs.len() < ALMIDE_PARALLEL_THRESHOLD {
+pub fn almide_rt_list_par_all<A: Send + Sync + Clone, F: Fn(A) -> bool + Send + Sync>(xs: &[A], f: F) -> bool {
+    if xs.len() < ALMIDE_PARALLEL_THRESHOLD || almide_rt_list_par_sequential() {
         return xs.iter().all(|x| f(x.clone()));
     }
     let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);

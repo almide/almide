@@ -138,6 +138,7 @@ evidence  = [
   { path = "spec/wasm_cross/fan_effect_mapper.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_effect_mapper_capability.almd", class = "fixture" },
   { path = "spec/embedded_cross/fan_mapper_effect_callback_forms.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fan_map_parallel_scalar.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-005"

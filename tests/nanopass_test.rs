@@ -977,16 +977,190 @@ mod region_window {
     }
 }
 
-// ── AutoParallelPass ────────────────────────────────────────────
+// ── RustLowering: fan parallel routing (#2044) ─────────────────
 
-mod auto_parallel {
+mod fan_parallel_routing {
     use super::*;
-    use almide::codegen::pass_auto_parallel::AutoParallelPass;
+    use almide::codegen::pass_rust_lowering_fan::route_fan_parallel;
+
+    /// The routing step alone (RustLoweringPass calls it first).
+    fn route(mut program: IrProgram) -> IrProgram {
+        route_fan_parallel(&mut program);
+        program
+    }
 
     #[test]
     fn empty_program_unchanged() {
-        let program = mk_program(vec![], VarTable::new());
-        let result = run_pass(&AutoParallelPass, program, Target::Rust);
-        assert!(result.functions.is_empty());
+        let mut program = mk_program(vec![], VarTable::new());
+        assert!(!route_fan_parallel(&mut program));
+        assert!(program.functions.is_empty());
+    }
+
+    use almide::types::constructor::TypeConstructorId as TC;
+
+    fn list_ty(t: Ty) -> Ty { Ty::Applied(TC::List, vec![t]) }
+    fn result_ty(t: Ty) -> Ty { Ty::Applied(TC::Result, vec![t, Ty::String]) }
+
+    /// `(x) => ok(<body>)` with `x: Int`; `body` is built from the param var.
+    fn ok_lambda(vt: &mut VarTable, body: impl FnOnce(VarId) -> IrExpr) -> IrExpr {
+        let x = vt.alloc(sym("x"), Ty::Int, Mutability::Let, None);
+        let inner = body(x);
+        let ret = result_ty(inner.ty.clone());
+        let body = mk_expr(IrExprKind::ResultOk { expr: Box::new(inner) }, ret.clone());
+        mk_expr(
+            IrExprKind::Lambda { params: vec![(x, Ty::Int)], body: Box::new(body), lambda_id: None },
+            Ty::Fn { params: vec![Ty::Int], ret: Box::new(ret), is_effect: false },
+        )
+    }
+
+    fn int_list() -> IrExpr {
+        mk_expr(IrExprKind::List { elements: vec![mk_expr(IrExprKind::LitInt { value: 1 }, Ty::Int)] }, list_ty(Ty::Int))
+    }
+
+    fn fan_map(lambda: IrExpr) -> IrExpr {
+        let elem = match &lambda.ty { Ty::Fn { ret, .. } => match &**ret { Ty::Applied(_, a) => a[0].clone(), _ => unreachable!() }, _ => unreachable!() };
+        mk_expr(
+            IrExprKind::Call {
+                target: CallTarget::Module { module: sym("fan"), func: sym("map"), def_id: None },
+                args: vec![int_list(), lambda],
+                type_args: vec![],
+            },
+            result_ty(list_ty(elem)),
+        )
+    }
+
+    fn fan_func_name(program: &IrProgram) -> String {
+        match &program.functions[0].body.kind {
+            IrExprKind::Call { target: CallTarget::Module { func, .. }, .. } => func.to_string(),
+            other => panic!("unexpected body {other:?}"),
+        }
+    }
+
+    #[test]
+    fn fan_map_pure_scalar_lambda_goes_parallel() {
+        // fan.map([1], (x) => ok(x)) — Int in, Int out, no captures.
+        let mut vt = VarTable::new();
+        let lambda = ok_lambda(&mut vt, |x| mk_expr(IrExprKind::Var { id: x }, Ty::Int));
+        let program = mk_program(vec![mk_fn("main", vec![], Ty::Unit, fan_map(lambda), true)], vt);
+        let out = route(program);
+        assert_eq!(fan_func_name(&out), "map_par");
+    }
+
+    #[test]
+    fn fan_map_string_result_stays_sequential() {
+        // fan.map([1], (x) => ok("s")) — String crosses the thread: declined.
+        let mut vt = VarTable::new();
+        let lambda = ok_lambda(&mut vt, |_| mk_expr(IrExprKind::LitStr { value: "s".into() }, Ty::String));
+        let program = mk_program(vec![mk_fn("main", vec![], Ty::Unit, fan_map(lambda), true)], vt);
+        let out = route(program);
+        assert_eq!(fan_func_name(&out), "map");
+    }
+
+    #[test]
+    fn fan_map_list_capture_stays_sequential() {
+        // let ls: List[Int]; fan.map([1], (x) => ok(x)) whose body reads `ls`
+        // (an Rc-shaped capture): declined even though the lambda is pure.
+        let mut vt = VarTable::new();
+        let ls = vt.alloc(sym("ls"), list_ty(Ty::Int), Mutability::Let, None);
+        let lambda = ok_lambda(&mut vt, |x| mk_expr(
+            IrExprKind::Block {
+                stmts: vec![IrStmt { kind: IrStmtKind::Expr { expr: mk_expr(IrExprKind::Var { id: ls }, list_ty(Ty::Int)) }, span: None }],
+                expr: Some(Box::new(mk_expr(IrExprKind::Var { id: x }, Ty::Int))),
+            },
+            Ty::Int,
+        ));
+        let program = mk_program(vec![mk_fn("main", vec![], Ty::Unit, fan_map(lambda), true)], vt);
+        let out = route(program);
+        assert_eq!(fan_func_name(&out), "map");
+    }
+
+    #[test]
+    fn fan_map_effect_callback_stays_sequential() {
+        // fan.map([1], (x) => ok(probe(x))) with `probe` an effect fn.
+        let mut vt = VarTable::new();
+        let lambda = ok_lambda(&mut vt, |x| mk_expr(
+            IrExprKind::Call {
+                target: CallTarget::Named { name: sym("probe") },
+                args: vec![mk_expr(IrExprKind::Var { id: x }, Ty::Int)],
+                type_args: vec![],
+            },
+            Ty::Int,
+        ));
+        let probe = mk_fn("probe", vec![], Ty::Int, mk_expr(IrExprKind::LitInt { value: 0 }, Ty::Int), true);
+        let program = mk_program(vec![mk_fn("main", vec![], Ty::Unit, fan_map(lambda), true), probe], vt);
+        let out = route(program);
+        assert_eq!(fan_func_name(&out), "map");
+    }
+
+    #[test]
+    fn fan_map_plain_effect_helper_stays_sequential() {
+        // A plain function can reach an effect even without an effect declaration.
+        let mut vt = VarTable::new();
+        let lambda = ok_lambda(&mut vt, |x| mk_expr(
+            IrExprKind::Call {
+                target: CallTarget::Named { name: sym("probe") },
+                args: vec![mk_expr(IrExprKind::Var { id: x }, Ty::Int)],
+                type_args: vec![],
+            },
+            Ty::Int,
+        ));
+        let probe = mk_fn("probe", vec![], Ty::Int, mk_expr(
+            IrExprKind::RuntimeCall { symbol: sym("almide_rt_random_int"), args: vec![] },
+            Ty::Int,
+        ), false);
+        let program = mk_program(vec![mk_fn("main", vec![], Ty::Unit, fan_map(lambda), true), probe], vt);
+        let out = route(program);
+        assert_eq!(fan_func_name(&out), "map");
+    }
+
+    fn list_map_call(vt: &mut VarTable) -> IrExpr {
+        let x = vt.alloc(sym("x"), Ty::Int, Mutability::Let, None);
+        let lambda = mk_expr(
+            IrExprKind::Lambda { params: vec![(x, Ty::Int)], body: Box::new(mk_expr(IrExprKind::Var { id: x }, Ty::Int)), lambda_id: None },
+            Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Int), is_effect: false },
+        );
+        mk_expr(IrExprKind::RuntimeCall { symbol: sym("almide_rt_list_map"), args: vec![int_list(), lambda] }, list_ty(Ty::Int))
+    }
+
+    #[test]
+    fn fusion_preserves_explicit_fan_routing() {
+        use almide::codegen::pass_stream_fusion::StreamFusionPass;
+        for explicit in [false, true] {
+            let mut vt = VarTable::new();
+            let call = list_map_call(&mut vt);
+            let body = if explicit {
+                mk_expr(IrExprKind::Fan { exprs: vec![call] }, list_ty(Ty::Int))
+            } else { call };
+            let program = mk_program(vec![mk_fn("main", vec![], Ty::Unit, body, true)], vt);
+            let fused = StreamFusionPass.run(program, Target::Rust).program;
+            let out = route(fused);
+            if explicit {
+                assert_eq!(runtime_symbol(&out.functions[0].body), "almide_rt_list_par_map");
+            } else {
+                assert!(matches!(out.functions[0].body.kind, IrExprKind::IterChain { .. }));
+            }
+        }
+    }
+
+    fn runtime_symbol(e: &IrExpr) -> String {
+        match &e.kind {
+            IrExprKind::RuntimeCall { symbol, .. } => symbol.to_string(),
+            IrExprKind::Fan { exprs } => runtime_symbol(&exprs[0]),
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn list_map_under_fan_block_goes_parallel_but_not_outside() {
+        let mut vt = VarTable::new();
+        let under = mk_expr(IrExprKind::Fan { exprs: vec![list_map_call(&mut vt)] }, list_ty(Ty::Int));
+        let outside = list_map_call(&mut vt);
+        let program = mk_program(vec![
+            mk_fn("a", vec![], Ty::Unit, under, false),
+            mk_fn("b", vec![], Ty::Unit, outside, false),
+        ], vt);
+        let out = route(program);
+        assert_eq!(runtime_symbol(&out.functions[0].body), "almide_rt_list_par_map");
+        assert_eq!(runtime_symbol(&out.functions[1].body), "almide_rt_list_map");
     }
 }

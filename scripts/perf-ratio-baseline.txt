@@ -59,6 +59,14 @@ treealloc 0.610
 # script's own reading of the row the day it landed was 2.46 (whole-process
 # wall clock at 1M, a loaded box); native/rust only until the wasm leg's
 # per-decode retention (#2046) is fixed.
+# `fannkuchredux` (#2044): the parallel `fan { list.map }` against the ordinary
+# one-thread Rust. M4 Pro (14 cores), 2026-09-08: 0.21 (n=10) / 0.12 (n=11),
+# 1.07 / 1.06 with ALMIDE_FAN_SEQUENTIAL=1. The ratio is the reciprocal of
+# the core count the runner grants (ubuntu-latest: 4 vCPU, so ~0.35-0.45 at
+# the quick n=10, 10 chunks over 4 workers); 0.600 is an ESTIMATE that
+# leaves the +40% ceiling at 0.84 until the first runner measurement
+# replaces it — same rule treealloc's number followed.
+fannkuchredux 0.600
 # Ablation deltas (#1466): ablated-native / optimized-native median per
 # anchored bench (ALMIDE_DISABLE_OPT=1 skips fold/DCE/propagate). Anchored at
 # the measured ~1.00: on the rustc-backed native leg these passes are
@@ -76,3 +84,7 @@ ablation/spectralnorm 1.000
 # gates a floor of 1.30 and prints the number — these rows are the record.
 ablation/binarytrees 3.600
 ablation/treealloc 3.700
+# fannkuchredux (#2044): ALMIDE_FAN_SEQUENTIAL=1 native / parallel native,
+# same binary. M4 Pro: 5.1 (n=10) / 8.9 (n=11); on a 4-vCPU runner the
+# delta is ~2.5-3 (10 chunks over 4 workers). Floor 1.30 gates it.
+ablation/fannkuchredux 3.000

@@ -32,6 +32,13 @@ impl NanoPass for RustLoweringPass {
         //     and un-boxes the closure, which is what keeps the per-element
         //     call static. See `lower_flat_map_arrays`.
         if lower_flat_map_arrays(&mut program) { changed = true; }
+        // (A1, #2044) `fan.map` / list ops UNDER a `fan { … }` block with a pure
+        //     lambda over Send-safe scalars → the thread-per-core runtime
+        //     twins. Also BEFORE boxing, for the same reason as A0: the fan
+        //     subtree stays raw, and `almide_rt_list_par_*`'s `F: Fn` last
+        //     arg is un-boxed through the registry. See
+        //     `pass_rust_lowering_fan`.
+        if super::pass_rust_lowering_fan::route_fan_parallel(&mut program) { changed = true; }
         // (A) Box closures sitting in type-erased join slots as `Rc<dyn Fn>`.
         //     Single source of truth — see `box_closures_program` below.
         if box_closures_program(&mut program) { changed = true; }

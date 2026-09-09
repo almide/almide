@@ -48,11 +48,11 @@ SUITE = [
     ("fft-wasm",     "fft/fft.almd",                     ["fft.rs"],                        "18",       "10",   "line1", ["native", "wasm", "rust"]),
     # fannkuchredux / mandelbrot (#1330): the `fan` kernels against ORDINARY
     # sequential Rust (`rust-ref/fannkuchredux.rs`, `rust-ref/mandelbrot.rs`
-    # — one thread, no `unsafe`, no SIMD). The native leg gives them no
-    # parallelism today (`fan.map` is sequential, `fan { .. }` spawns one
-    # thread for the block, AutoParallel does not fire), so the rows read
-    # ~1.0 and are REPORTED by check-perf-ratio.sh, not anchored — and the
-    # day a data-parallel win appears it shows up as a number here.
+    # — one thread, no `unsafe`, no SIMD). Since #2044 the native leg runs
+    # fannkuchredux's `fan { list.map }` on a thread per core (a VICTORY row
+    # in check-perf-ratio.sh, ablated with ALMIDE_FAN_SEQUENTIAL=1);
+    # mandelbrot's `fan.map` returns `Bytes` (an `Rc` natively), outside the
+    # Send-safe subset, so it still reads ~1.0 and stays REPORTED.
     ("fannkuchredux","fannkuchredux/fannkuchredux.almd", ["fannkuchredux.rs"],              "11",       "7",    "bytes", None),
     # onebrc writes/reads a measurements file; the wasm leg has no preopened
     # dir under `wasmtime run` so the row is native/rust only.

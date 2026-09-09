@@ -4,9 +4,14 @@
 /// element fn (value codec combinators) — extracted from the signatures.
 pub fn takes_raw_fn_last_arg(name: &str) -> bool {
     matches!(name,
+        "almide_rt_fan_map_par" |
         "almide_rt_fs_fold_lines_chunked" |
         "almide_rt_fs_fold_lines_range" |
         "almide_rt_list_flat_map_arr" |
+        "almide_rt_list_par_all" |
+        "almide_rt_list_par_any" |
+        "almide_rt_list_par_filter" |
+        "almide_rt_list_par_map" |
         "almide_rt_value_decode_list" |
         "almide_rt_value_decode_list_ref" |
         "almide_rt_value_decode_option" |
@@ -220,6 +225,7 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_fan_any" => &[false],
         "almide_rt_fan_any_map" => &[false, false],
         "almide_rt_fan_map" => &[false, false],
+        "almide_rt_fan_map_par" => &[false, false],
         "almide_rt_fan_race" => &[false],
         "almide_rt_fan_settle" => &[false],
         "almide_rt_float_abs" => &[false],
@@ -421,6 +427,8 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_list_par_any" => &[false, false],
         "almide_rt_list_par_filter" => &[false, false],
         "almide_rt_list_par_map" => &[false, false],
+        "almide_rt_list_par_sequential" => &[],
+        "almide_rt_list_par_workers" => &[false],
         "almide_rt_list_partition" => &[false, false],
         "almide_rt_list_pop" => &[true],
         "almide_rt_list_product" => &[false],
