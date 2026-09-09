@@ -1,5 +1,5 @@
 //! #2063: Almide callbacks (including shared mutation) cross the streaming ABI.
-use std::io::{Read, Write};
+use std::io::{BufRead, Write};
 use std::net::TcpListener;
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -59,8 +59,14 @@ effect fn main() -> Unit = {{
             socket
                 .set_read_timeout(Some(Duration::from_secs(5)))
                 .unwrap();
-            let mut request = [0; 4096];
-            socket.read(&mut request).unwrap();
+            let mut reader = std::io::BufReader::new(&mut socket);
+            loop {
+                let mut line = String::new();
+                assert!(reader.read_line(&mut line).unwrap() > 0, "truncated request");
+                if line == "\r\n" {
+                    break;
+                }
+            }
             socket.write_all(response.as_bytes()).unwrap();
         }
     });
