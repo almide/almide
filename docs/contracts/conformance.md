@@ -77,7 +77,7 @@
 | ALS-E20 | C-250 | `spec/wasm_cross/pipe_compose_forms.almd` (byte-compare)<br>`spec/wasm_cross/pipe_tuple_pattern_lambda.almd` (byte-compare) |
 | ALS-E21 | C-251 | `spec/wasm_cross/if_let_forms.almd` (byte-compare) |
 | ALS-E22 | C-254 | `spec/wasm_cross/place_assign_ascription.almd` (byte-compare) |
-| ALS-E23 | C-255 | `spec/wasm_cross/record_forms.almd` (byte-compare) |
+| ALS-E23 | C-255 | `spec/wasm_cross/record_forms.almd` (byte-compare)<br>`spec/wasm_cross/record_option_none_cells.almd` (byte-compare) |
 | ALS-E24 | C-256 | `spec/wasm_cross/loop_break_continue.almd` (byte-compare) |
 | ALS-E25 | C-257, C-271 | `spec/wasm_cross/error_operators.almd` (byte-compare)<br>`spec/wasm_cross/unwrap_or_unwrap_fallback.almd` (byte-compare) |
 | ALS-E26 | C-258 | `spec/wasm_cross/call_lambda_ctor.almd` (byte-compare) |

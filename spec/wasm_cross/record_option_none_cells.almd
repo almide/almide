@@ -1,0 +1,27 @@
+// @contract: C-255
+// #2057: literal none receives each record field's Option payload layout.
+type Item = { n: Int }
+
+type OptCells = { i: Int?, f: Float?, b: Bool?, s: String?, l: List[Int]?, r: Item? }
+
+fn cells(full: Bool) -> Result[OptCells, String] = if full then ok(OptCells { i: some(7), f: some(0.5), b: some(true), s: some("x"), l: some([1, 2]), r: some(Item { n: 9 }) })
+else ok(OptCells { i: none, f: none, b: none, s: none, l: none, r: none })
+
+effect fn main() -> Unit = {
+  let empty = cells(false)!
+  assert_eq(empty.i, none)
+  assert_eq(empty.f, none)
+  assert_eq(empty.b, none)
+  assert_eq(empty.s, none)
+  assert_eq(empty.l, none)
+  assert_eq(empty.r, none)
+  println("none")
+  let full = cells(true)!
+  assert_eq(full.i, some(7))
+  assert_eq(full.f, some(0.5))
+  assert_eq(full.b, some(true))
+  assert_eq(full.s, some("x"))
+  assert_eq(full.l, some([1, 2]))
+  assert_eq(full.r, some(Item { n: 9 }))
+  println("some")
+}

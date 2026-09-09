@@ -481,6 +481,7 @@
 7454	spec/wasm_cross/rc_alloc_stress.almd
 3115	spec/wasm_cross/rc_reclaim_churn.almd
 2159	spec/wasm_cross/record_forms.almd
+14556	spec/wasm_cross/record_option_none_cells.almd
 8401	spec/wasm_cross/record_pair_result_return.almd
 2898	spec/wasm_cross/records_variants.almd
 1944	spec/wasm_cross/recursion_depth_within_limits.almd
