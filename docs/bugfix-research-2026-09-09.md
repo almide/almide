@@ -96,3 +96,12 @@ resolved merely because a PR exists.
   the new fixture's measured rows; existing oracle hashes were not rewritten.
 - File discipline, pass roster, layout discipline, libm determinism, fixture
   formatting, and `git diff --check`: passed.
+
+### CI coverage follow-up
+
+The legacy v1 `almide test` path declines the list-element mutation case,
+although the structural `almide run --target wasm` path supports it. The
+three scalar/record spec cases stay on the v1 WASM path. The list case is
+pinned separately in `tests/branch_lift_heap_mutation_test.rs`, which runs
+the native and structural WASM targets and checks the final element is 2.
+The fallback baseline is unchanged.
