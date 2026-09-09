@@ -16,3 +16,14 @@ Only the new fixture's measured rows were added to the allocation and both size
 ledgers: heap watermark 69984, emitted size 14022, shipped WASI size 14556 bytes.
 Existing rows are unchanged. AST/diagnostic manifests also include the new fixture
 and the changed Codec fixture's AST hash. The contract evidence links are symmetric.
+
+## Incumbent determinism domain
+
+Host CI run 34321896641 emits identical bytes for all compared fixtures,
+but the new `record_option_none_cells.almd` fixture walls on both incumbent
+hosts. It increases their unsupported-input count from 27 to 28. The host
+and browser determinism ceilings are updated with this specific reason,
+following their existing structural-only fixture policy. This is not a
+claim that the incumbent supports the field matrix: the native and current
+structural paths execute it, and its allocation/size ledgers cover those
+structural bytes. No previously compared fixture is excluded.
