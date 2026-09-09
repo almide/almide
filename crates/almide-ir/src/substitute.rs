@@ -263,9 +263,12 @@ pub fn substitute_var_in_expr(expr: &IrExpr, var: VarId, replacement: &IrExpr) -
                     IterStep::Filter { lambda } => IterStep::Filter { lambda: Box::new(sub(lambda)) },
                     IterStep::FlatMap { lambda } => IterStep::FlatMap { lambda: Box::new(sub(lambda)) },
                     IterStep::FilterMap { lambda } => IterStep::FilterMap { lambda: Box::new(sub(lambda)) },
+                    IterStep::Take { n } => IterStep::Take { n: Box::new(sub(n)) },
                 }).collect(),
                 collector: match collector {
                     IterCollector::Collect => IterCollector::Collect,
+                    IterCollector::Sum { float } => IterCollector::Sum { float: *float },
+                    IterCollector::Len => IterCollector::Len,
                     IterCollector::Fold { init, lambda } => IterCollector::Fold {
                         init: Box::new(sub(init)), lambda: Box::new(sub(lambda)),
                     },

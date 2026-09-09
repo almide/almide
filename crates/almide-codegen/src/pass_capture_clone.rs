@@ -348,10 +348,11 @@ fn transform_expr_iter_chain(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &
             | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => {
                 changed |= transform_expr(lambda, vt, scope_vars);
             }
+            IterStep::Take { n } => changed |= transform_expr(n, vt, scope_vars),
         }
     }
     match collector {
-        IterCollector::Collect => {}
+        IterCollector::Collect | IterCollector::Sum { .. } | IterCollector::Len => {}
         IterCollector::Fold { init, lambda } => {
             changed |= transform_expr(init, vt, scope_vars);
             changed |= transform_expr(lambda, vt, scope_vars);
@@ -635,10 +636,11 @@ fn replace_vars_iter_chain(expr: &mut IrExpr, renames: &Renames) {
             | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => {
                 replace_vars(lambda, renames);
             }
+            IterStep::Take { n } => replace_vars(n, renames),
         }
     }
     match collector {
-        IterCollector::Collect => {}
+        IterCollector::Collect | IterCollector::Sum { .. } | IterCollector::Len => {}
         IterCollector::Fold { init, lambda } => {
             replace_vars(init, renames);
             replace_vars(lambda, renames);

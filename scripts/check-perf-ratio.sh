@@ -370,7 +370,8 @@ if penalty > ceiling:
           "CLAUDE.md and docs/CHEATSHEET.md tell authors to write `list.range |> list.flat_map` "
           "instead of `var` + `for`; that guidance is only honest while this holds. The usual "
           "cause is the flat_map lambda losing its array return "
-          "(RustLoweringPass::lower_flat_map_arrays) and going back to a heap Vec per element. "
+          "(StreamFusionPass's fused `flat_map` step, or RustLoweringPass::lower_flat_map_arrays "
+          "under ALMIDE_STREAM_FUSION_OFF) and going back to a heap Vec per element. "
           "Either restore the lowering or change the guidance — not the ceiling.")
     sys.exit(1)
 print(f"perf-ratio: {'listbuild-idiom':16s} {penalty:.4f}x the append loop "

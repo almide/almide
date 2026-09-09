@@ -209,7 +209,8 @@ fn try_flat_map_array(expr: &mut IrExpr) -> bool {
 /// of the (possibly nested) block it ends in — into an `InlineRust` array
 /// literal. Declines on a block with no tail expression, on a non-literal
 /// tail (a call, a branch), and on an arity outside the array band.
-fn rewrite_tail_list_to_array(e: &mut IrExpr) -> bool {
+/// Shared with `StreamFusionPass` (the fused `flat_map` step).
+pub(crate) fn rewrite_tail_list_to_array(e: &mut IrExpr) -> bool {
     match &mut e.kind {
         IrExprKind::Block { expr: Some(tail), .. } => return rewrite_tail_list_to_array(tail),
         IrExprKind::List { elements } => {
@@ -253,14 +254,20 @@ fn is_fan_call(expr: &IrExpr) -> bool {
 /// value distinction and no per-API allow-list is needed. A non-literal stays
 /// as-is (a stored `Rc<dyn Fn>` is already what every non-fused consumer wants).
 fn unbox_consumed(e: &mut IrExpr) -> bool {
-    if let IrExprKind::RcWrap { expr, .. } = &mut e.kind {
-        if matches!(&expr.kind, IrExprKind::Lambda { .. } | IrExprKind::FnRef { .. }) {
+    match &mut e.kind {
+        IrExprKind::RcWrap { expr, .. }
+            if matches!(&expr.kind, IrExprKind::Lambda { .. } | IrExprKind::FnRef { .. }) =>
+        {
             let inner = std::mem::replace(expr.as_mut(), unit_ir());
             *e = inner;
-            return true;
+            true
         }
+        // CaptureClone's `{ let __cap = v.clone(); <lambda> }` — a fused step
+        // keeps the block whole (it renders as a closure expression); the
+        // boxed lambda is its tail.
+        IrExprKind::Block { expr: Some(tail), .. } => unbox_consumed(tail),
+        _ => false,
     }
-    false
 }
 
 /// `fan.*` method name (`map`/`race`/`any`/`settle`) for a fan call in
@@ -466,9 +473,11 @@ fn try_box_fan_thunks(expr: &mut IrExpr) -> Option<bool> {
 /// structural bare-closure sites.
 fn box_node_unbox_consumed(expr: &mut IrExpr) -> bool {
     match &mut expr.kind {
-        // Fused combinator chain: un-box every consumed step lambda. Closures the
-        // map PRODUCES (nested in the body) are already boxed by the default arm.
-        IrExprKind::IterChain { steps, .. } => {
+        // Fused combinator chain: un-box every consumed step AND collector
+        // lambda — `Iterator::fold/any/all/find/filter` want an `impl FnMut`,
+        // which `Rc<dyn Fn>` is not. Closures the map PRODUCES (nested in
+        // the body) are already boxed by the default arm.
+        IrExprKind::IterChain { steps, collector, .. } => {
             let mut c = false;
             for step in steps.iter_mut() {
                 match step {
@@ -476,7 +485,14 @@ fn box_node_unbox_consumed(expr: &mut IrExpr) -> bool {
                     | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => {
                         c |= unbox_consumed(lambda);
                     }
+                    IterStep::Take { .. } => {}
                 }
+            }
+            match collector {
+                IterCollector::Fold { lambda, .. } | IterCollector::Any { lambda }
+                | IterCollector::All { lambda } | IterCollector::Find { lambda }
+                | IterCollector::Count { lambda } => c |= unbox_consumed(lambda),
+                IterCollector::Collect | IterCollector::Sum { .. } | IterCollector::Len => {}
             }
             c
         }

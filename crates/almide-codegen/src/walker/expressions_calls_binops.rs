@@ -1,9 +1,12 @@
 fn render_iter_chain(ctx: &RenderContext, source: &IrExpr, consume: bool, steps: &[IterStep], collector: &IterCollector) -> String {
     let src = render_expr(ctx, source);
+    // A borrowed source still hands every step an OWNED element (`.cloned()`),
+    // mirroring the `&[A]` runtime twins that clone per element — so a step
+    // lambda is prepared the same way whichever form the source takes.
     let mut chain = if consume {
         format!("({}).into_iter()", src)
     } else {
-        format!("({}).iter()", src)
+        format!("({}).iter().cloned()", src)
     };
 
     for step in steps {
@@ -12,6 +15,7 @@ fn render_iter_chain(ctx: &RenderContext, source: &IrExpr, consume: bool, steps:
             IterStep::Filter { lambda } => chain = format!("{}.filter({})", chain, render_expr(ctx, lambda)),
             IterStep::FlatMap { lambda } => chain = format!("{}.flat_map({})", chain, render_expr(ctx, lambda)),
             IterStep::FilterMap { lambda } => chain = format!("{}.filter_map({})", chain, render_expr(ctx, lambda)),
+            IterStep::Take { n } => chain = format!("{}.take(({}) as usize)", chain, render_expr(ctx, n)),
         }
     }
 
@@ -22,6 +26,11 @@ fn render_iter_chain(ctx: &RenderContext, source: &IrExpr, consume: bool, steps:
         IterCollector::All { lambda } => format!("{}.all({})", chain, render_expr(ctx, lambda)),
         IterCollector::Find { lambda } => format!("{}.find({})", chain, render_expr(ctx, lambda)),
         IterCollector::Count { lambda } => format!("{}.filter({}).count() as i64", chain, render_expr(ctx, lambda)),
+        // Same law as `almide_rt_list_sum` (C-056): two's-complement wrapping,
+        // never the profile-dependent `Iterator::sum` overflow check.
+        IterCollector::Sum { float: false } => format!("{}.fold(0i64, |a: i64, b: i64| a.wrapping_add(b))", chain),
+        IterCollector::Sum { float: true } => format!("{}.sum::<f64>()", chain),
+        IterCollector::Len => format!("{}.count() as i64", chain),
     }
 }
 

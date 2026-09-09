@@ -46,6 +46,7 @@ pub mod pass_result_propagation;
 pub mod pass_intrinsic_lowering;
 pub mod pass_normalize_runtime_calls;
 pub mod pass_stdlib_lowering;
+pub mod pass_stream_fusion;
 pub mod pass_effect_inference;
 pub mod pass_tco;
 pub mod pass_licm;

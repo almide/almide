@@ -421,26 +421,13 @@ fn prefix_intra_module_named_calls(program: &mut IrProgram) {
 /// call to a different node or leaves it as a `Module` call — so it never
 /// falls through to the generic `kind = ...` tail.
 fn rewrite_expr_call_module(module: Sym, func: Sym, args: Vec<IrExpr>, type_args: Vec<Ty>, ty: Ty, span: Option<almide_base::Span>) -> IrExpr {
-    // Stage 3c: list operations migrate to bundled `@inline_rust`
-    // like every other module, BUT the Rust target needs the
-    // fused-iterator lowering (`IterChain`) for isolated closure
-    // ops (`list.map(xs, f)` outside a pipe) to stay zero-copy.
-    // `StreamFusionPass` (runs earlier, pipeline-level) already
-    // handles pipe chains; `try_lower_to_iter_chain` is the
-    // fallback for single-call shape. Putting it BEFORE the
-    // `inline_rust_spec` intercept keeps the perf win — if it
-    // declines (non-closure ops like `len`, `push`), we fall
-    // through to the declarative bundled dispatch below.
-    if module.as_ref() == "list" {
-        let args_for_fusion: Vec<IrExpr> = args.iter().cloned()
-            .map(|a| rewrite_expr(a))
-            .collect();
-        if let Some(iter_expr) = try_lower_to_iter_chain(
-            &func, args_for_fusion, &ty, span,
-        ) {
-            return iter_expr;
-        }
-    }
+    // The list combinators (`map`/`filter`/`fold`/…) never reach this arm:
+    // they are `@intrinsic` and `IntrinsicLoweringPass` has already turned
+    // them into `RuntimeCall { almide_rt_list_* }`. Their fused-iterator
+    // form (`IterChain`) is built from THAT shape by `StreamFusionPass`,
+    // which runs right after this pass (#2045 — the intercept that used to
+    // sit here matched `Module { list, .. }` and was dead).
+    //
     // Stdlib Unification Stage 1: if a bundled stdlib fn
     // declares `@inline_rust("template")`, produce an
     // InlineRust IR node with the template + param-keyed args.
@@ -526,13 +513,6 @@ fn rewrite_expr_call_module(module: Sym, func: Sym, args: Vec<IrExpr>, type_args
 
     // Recurse into args first (fan auto-try is handled by FanLoweringPass)
     let args: Vec<IrExpr> = args.into_iter().map(|a| rewrite_expr(a)).collect();
-
-    // Try to lower list operations to iterator chains (Rust-only optimization)
-    if module.as_ref() == "list" {
-        if let Some(iter_expr) = try_lower_to_iter_chain(&func, args.clone(), &ty, span) {
-            return iter_expr;
-        }
-    }
 
     // Inline math/float/int intrinsics as native Rust expressions
     if let Some(inlined) = try_inline_intrinsic(&module, &func, &args, &ty, span) {

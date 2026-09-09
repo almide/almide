@@ -1,0 +1,250 @@
+// Stream fusion (#2045): on the Rust target a `|>` chain of list combinators
+// lowers to ONE iterator expression when every callback is pure. The
+// language semantics are the spec leg's: each stage runs over the whole list
+// before the next starts. So a fused chain must be unobservable — the values
+// below pin the results, and the `println` callbacks pin the ORDER (the
+// 3-way oracle compares stdout across native / wasm / interp): a callback
+// that prints keeps the stage-by-stage order, `take` after a printing `map`
+// still runs the map over every element, and the fallible `!` form keeps its
+// first-err short-circuit.
+// ── pure chains: fused on native, same values everywhere ──
+fn sum_evens_doubled(xs: List[Int]) -> Int = xs |> list.filter((x) => x % 2 == 0) |> list.map((x) => x * 2) |> list.fold(0, (acc, x) => acc + x)
+
+fn short_words_upper(ws: List[String]) -> List[String] = ws |> list.filter((w) => string.len(w) <= 3) |> list.map((w) => string.to_upper(w))
+
+fn first_five_multiples(n: Int) -> List[Int] = list.range(1, 1000) |> list.map((i) => i * n) |> list.filter((x) => x % 2 == 0) |> list.take(5)
+
+fn pair_sum(n: Int) -> Int = list.range(0, n) |> list.flat_map((i) => [i, i * 10]) |> list.sum
+
+fn long_count(ws: List[String]) -> Int = ws |> list.map((w) => string.len(w)) |> list.filter((n) => n > 2) |> list.len
+
+fn parsed_total(ss: List[String]) -> Int = ss |> list.filter_map((s) => int.parse(s)?) |> list.map((n) => n + 1) |> list.fold(0, (a, x) => a + x)
+
+fn any_big(xs: List[Int], k: Int) -> Bool = xs |> list.map((x) => x * k) |> list.any((x) => x > 10)
+
+fn all_small(xs: List[Int]) -> Bool = xs |> list.map((x) => x - 1) |> list.all((x) => x < 5)
+
+fn first_odd_over(xs: List[Int], lo: Int) -> Int? = xs |> list.filter((x) => x > lo) |> list.find((x) => x % 2 == 1)
+
+fn count_over(xs: List[Int], lo: Int) -> Int = xs |> list.map((x) => x + 1) |> list.count((x) => x > lo)
+
+fn float_total(xs: List[Int]) -> Float = xs |> list.map((x) => float.from_int(x) / 4.0) |> list.fold(0.0, (a, x) => a + x)
+
+test "fused filter-map-fold" {
+  assert_eq(sum_evens_doubled([
+    1,
+    2,
+    3,
+    4,
+    5,
+    6
+  ]), 24)
+  assert_eq(sum_evens_doubled([]), 0)
+}
+
+test "fused filter-map over strings" {
+  assert_eq(short_words_upper(["ab", "long", "xyz", "abcd"]), ["AB", "XYZ"])
+}
+
+test "fused map-filter-take stops at the count" {
+  assert_eq(first_five_multiples(3), [6, 12, 18, 24, 30])
+  assert_eq(first_five_multiples(2), [2, 4, 6, 8, 10])
+}
+
+test "fused flat_map-sum" {
+  assert_eq(pair_sum(4), 66)
+  assert_eq(pair_sum(0), 0)
+}
+
+test "fused map-filter-len" {
+  assert_eq(long_count(["a", "bb", "ccc", "dddd"]), 2)
+}
+
+test "fused filter_map-map-fold" {
+  assert_eq(parsed_total(["1", "x", "20", "", "3"]), 27)
+}
+
+test "fused map into any / all / find / count" {
+  assert(any_big([1, 2, 3], 4))
+  assert(not any_big([1, 2, 3], 3))
+  assert(all_small([1, 2, 3]))
+  assert(not all_small([1, 2, 7]))
+  assert_eq(first_odd_over([1, 2, 3, 4, 5], 2), some(3))
+  assert_eq(first_odd_over([2, 4, 6], 2), none)
+  assert_eq(count_over([1, 2, 3, 4], 2), 3)
+}
+
+test "fused float fold keeps sequential IEEE order" {
+  assert_eq(float_total([1, 2, 3]), 1.5)
+}
+
+fn drop_sep(ws: List[String], sep: String) -> List[String] = ws |> list.filter((w) => w != sep) |> list.map((w) => w + sep)
+
+test "heap captures ride the fused chain" {
+  assert_eq(drop_sep(["a", "-", "b"], "-"), ["a-", "b-"])
+}
+
+test "borrowed source survives the chain" {
+  let xs = [3, 1, 2]
+  let big = xs |> list.any((x) => x > 2)
+  let n = xs |> list.count((x) => x > 1)
+  assert(big)
+  assert_eq(n, 2)
+  assert_eq(list.len(xs), 3)
+}
+
+// ── side-effect order: a printing callback keeps stage-by-stage order ──
+fn traced_len(xs: List[Int]) -> Int = {
+  let ys = xs |> list.map((x) => {
+    println("map ${int.to_string(x)}")
+    x * 10
+  }) |> list.filter((x) => {
+    println("filter ${int.to_string(x)}")
+    x > 10
+  })
+  list.len(ys)
+}
+
+fn traced_fold(xs: List[Int]) -> Int = xs |> list.map((x) => {
+  println("m ${int.to_string(x)}")
+  x + 1
+}) |> list.fold(0, (acc, x) => {
+  println("f ${int.to_string(x)}")
+  acc + x
+})
+
+test "printing map then filter runs every map before the first filter" {
+  // stdout: map 1, map 2, map 3, filter 10, filter 20, filter 30
+  assert_eq(traced_len([1, 2, 3]), 2)
+}
+
+test "printing map then fold runs every map before the first fold step" {
+  // stdout: m 1, m 2, f 2, f 3
+  assert_eq(traced_fold([1, 2]), 5)
+}
+
+// ── take: a printing map before take still visits every element ──
+fn traced_take(xs: List[Int]) -> List[Int] = xs |> list.map((x) => {
+  println("visit ${int.to_string(x)}")
+  x * 2
+}) |> list.take(2)
+
+fn take_then_map(xs: List[Int]) -> List[Int] = xs |> list.take(2) |> list.map((x) => {
+  println("after take ${int.to_string(x)}")
+  x * 2
+})
+
+test "map then take visits the whole list, take then map only the prefix" {
+  // stdout: visit 1, visit 2, visit 3, visit 4
+  assert_eq(traced_take([1, 2, 3, 4]), [2, 4])
+  // stdout: after take 1, after take 2
+  assert_eq(take_then_map([1, 2, 3, 4]), [2, 4])
+}
+
+// ── the same orders as VALUES: a callback that appends to a captured `var`
+//    (an effect fn's closure) is impure, so the chain stays stage-by-stage ──
+effect fn logged_len(xs: List[Int]) -> List[String] = {
+  var log: List[String] = []
+  let ys = xs |> list.map((x) => {
+    log = log + [
+      "m${int.to_string(x)}"
+    ]
+    x * 10
+  }) |> list.filter((x) => {
+    log = log + [
+      "f${int.to_string(x)}"
+    ]
+    x > 10
+  })
+  log + [int.to_string(list.len(ys))]
+}
+
+effect fn logged_fold(xs: List[Int]) -> List[String] = {
+  var log: List[String] = []
+  let total = xs |> list.map((x) => {
+    log = log + [
+      "m${int.to_string(x)}"
+    ]
+    x + 1
+  }) |> list.fold(0, (acc, x) => {
+    log = log + [
+      "f${int.to_string(x)}"
+    ]
+    acc + x
+  })
+  log + [int.to_string(total)]
+}
+
+effect fn logged_take(xs: List[Int]) -> List[String] = {
+  var log: List[String] = []
+  let ys = xs |> list.map((x) => {
+    log = log + [
+      "v${int.to_string(x)}"
+    ]
+    x * 2
+  }) |> list.take(2)
+  log + [int.to_string(list.len(ys))]
+}
+
+effect fn logged_any(xs: List[Int]) -> List[String] = {
+  var log: List[String] = []
+  let hit = xs |> list.map((x) => {
+    log = log + [
+      "m${int.to_string(x)}"
+    ]
+    x * 2
+  }) |> list.any((x) => x > 2)
+  log + [
+    if hit then "hit" else "miss"
+  ]
+}
+
+test "logged map then filter: every map before the first filter" {
+  assert_eq(logged_len([1, 2, 3])!, [
+    "m1",
+    "m2",
+    "m3",
+    "f10",
+    "f20",
+    "f30",
+    "2"
+  ])
+}
+
+test "logged map then fold: every map before the first fold step" {
+  assert_eq(logged_fold([1, 2])!, ["m1", "m2", "f2", "f3", "5"])
+}
+
+test "logged map then take visits the whole list" {
+  assert_eq(logged_take([1, 2, 3, 4])!, ["v1", "v2", "v3", "v4", "2"])
+}
+
+test "logged map then any visits the whole list before the short-circuit" {
+  assert_eq(logged_any([1, 2, 3])!, ["m1", "m2", "m3", "hit"])
+}
+
+// ── the fallible form: first-err short-circuit, untouched by fusion ──
+fn parse_pos(s: String) -> Int! = {
+  let n = int.parse(s)!
+  guard n > 0 else err("not positive: ${s}")
+  ok(n)
+}
+
+fn fallible_total(ss: List[String]) -> Int! = {
+  let ns = ss |> list.map((s) => {
+    println("parse ${s}")
+    parse_pos(s)!
+  })!
+  ok(ns |> list.fold(0, (a, x) => a + x))
+}
+
+fn fallible_msg(ss: List[String]) -> String = match fallible_total(ss) {
+  ok(v) => "ok ${int.to_string(v)}",
+  err(e) => e,
+}
+
+test "fallible map stops at the first err" {
+  // stdout: parse 1, parse 2, parse -3   (never "parse 4")
+  assert_eq(fallible_msg(["1", "2", "-3", "4"]), "not positive: -3")
+  assert_eq(fallible_msg(["1", "2"]), "ok 3")
+}

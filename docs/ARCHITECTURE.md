@@ -236,7 +236,7 @@ The Wgsl arm is the four rows marked W. Class:
 | 7 | `RegionWindow` | `pass_region_window.rs`, `pass_region_window_clone.rs` | Rust | optimizer | `consume(produce(scalars))` sites run over `__rgn_` twin fns and `Copy` twin enums in the prelude's thread-local bump arena (#1991); v1 admits root-module fns and root variant enums with scalar / region-enum tuple payloads | equivalent: `region.rs` (`RegionSave`/`RegionRestore` over the allocator, #1961) |
 | 8 | `BoxDeref` | `pass_box_deref.rs` | Rust | Rust by design | `*deref` for pattern vars bound from `Box`'d fields | n/a |
 | 9 | `LICM` | `pass_licm.rs`, `pass_licm_hoist.rs`, `pass_licm_purity.rs` | all | optimizer | hoist loop-invariant pure expressions to `let`s before the loop | **no equivalent** — see E |
-| 10 | `EggSaturation` | `pass_egg_saturation.rs` | all | optimizer | equality-saturation fusion of matrix and list combinator chains (`almide-egg-lab`, rules from stdlib `@rewrite`) | list half: `list_fuse.rs` (map/filter → fold); matrix half: **no equivalent** — see E |
+| 10 | `EggSaturation` | `pass_egg_saturation.rs` | all | optimizer | equality-saturation fusion of matrix chains (`almide-egg-lab`, rules from stdlib `@rewrite`); the list arm is off since #2045 (its lambda substitution duplicated callback side effects) | **no equivalent** — see E |
 | 11 | `MatrixShapeSpec` | `pass_matrix_shape_spec.rs` | Rust | Rust by design | small-shape matmul → fully unrolled `InlineRust` | n/a (hand-written kernels, `matrix_kernels.rs`) |
 | 12 | `ConstFold` | `pass_const_fold.rs` | all | optimizer | fold literal arithmetic left by rows 10–11 | superseded by A.1 (`fold`) — see E |
 | 13 | `IntrinsicLowering` | `pass_intrinsic_lowering.rs` | all | enabler | `@intrinsic` stdlib calls → `RuntimeCall { symbol }` | self-host registry link (`src/wasm_leg.rs`); intrinsics are walls |
@@ -247,6 +247,7 @@ The Wgsl arm is the four rows marked W. Class:
 | 18 | `MatchSubject` | `pass_match_subject.rs` | Rust | Rust by design | `.as_str()` / `.as_deref()` on match subjects | n/a |
 | 19 | `EffectInference` | `pass_effect_inference.rs` | all | analysis | infer capability categories from transitive stdlib use | shared by another route: `cli::check_permissions` runs this pass standalone on the pre-mono IR for every leg |
 | 20 | `StdlibLowering` | `pass_stdlib_lowering.rs`, `pass_stdlib_lowering_ufcs.rs` | Rust | Rust by design | `Module` calls → `Named` runtime calls with arg decoration | self-hosted stdlib bodies are emitted as wasm fns |
+| 20b | `StreamFusion` | `pass_stream_fusion.rs` | Rust | optimizer | `RuntimeCall { almide_rt_list_* }` with a lambda literal → `IterChain`; a `\|>` chain flattens into one iterator expression only when every callback is pure and the interleaving is unobservable (#2045); `ALMIDE_STREAM_FUSION_OFF` ablates | **no equivalent** — the spec order is stage-by-stage; see E |
 | 21 | `AutoParallel` | `pass_auto_parallel.rs` | Rust | Rust by design | pure `list.map/filter/any/all` → `std::thread::scope` variants | n/a (single-threaded wasm) |
 | 22 | `ResultPropagation` | `pass_result_propagation.rs` | all | Rust by design | effect fn `T → Result[T, String]`, `Try` at call sites | own effect lowering (`effect_raw`, `emit.rs`) |
 | 23 | `BuiltinLowering` | `pass_builtin_lowering.rs` | Rust | Rust by design | `assert_eq`/`println`/… → `RustMacro` | n/a |

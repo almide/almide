@@ -37,10 +37,8 @@ impl NanoPass for EggSaturationPass {
     fn targets(&self) -> Option<Vec<Target>> { None }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
-        // Full rule set — list combinators + matrix. Using only
-        // `matrix_fusion_rules()` silently disabled the Stream fusion
-        // rewrites and was the source of the `snapshot_pipe_chain`
-        // regression on v1 of this pass.
+        // Full rule set, matrix + list; only matrix Calls are lifted
+        // (`is_saturation_target`), so the list half is inert here.
         let rules = almide_egg_lab::fusion_rules();
         let mut v = EggVisitor { rules: &rules, vt: &mut program.var_table, changed: false };
         for func in &mut program.functions {
@@ -86,23 +84,21 @@ impl<'a> IrMutVisitor for EggVisitor<'a> {
     }
 }
 
-/// Whether `expr` is a Call the bridge knows how to lift. Currently:
-/// all `matrix.<op>` Calls, plus the list combinators the bridge has
-/// a lift rule for (`map / filter / fold / flat_map / filter_map`).
-/// Other list calls (e.g. `list.len`) lift as opaque slots — cheap
-/// but skippable, so we avoid paying saturation cost for them.
+/// Whether `expr` is a Call the bridge knows how to lift: every
+/// `matrix.<op>` Call. The list combinators are NOT lifted any more
+/// (#2045): the bridge's list rules compose lambdas by substituting one
+/// body into another (`map-filter-fuse` copies `f`'s body three times),
+/// which duplicates and reorders a callback's side effects — the
+/// native leg printed `m1 f1 m1 m1` where the spec leg prints
+/// `m1 m2 m3 f1`. List fusion is `StreamFusionPass` (after
+/// StdlibLowering), which keeps each callback intact and fuses only
+/// when the interleaving is unobservable. The rules themselves stay in
+/// `almide-egg-lab` (its bridge tests cover them).
 fn is_saturation_target(expr: &IrExpr) -> bool {
-    let IrExprKind::Call { target: almide_ir::CallTarget::Module { module, func, .. }, .. } = &expr.kind else {
+    let IrExprKind::Call { target: almide_ir::CallTarget::Module { module, .. }, .. } = &expr.kind else {
         return false;
     };
-    match module.as_str() {
-        "matrix" => true,
-        "list" => matches!(
-            func.as_str(),
-            "map" | "filter" | "fold" | "flat_map" | "filter_map"
-        ),
-        _ => false,
-    }
+    module.as_str() == "matrix"
 }
 
 fn try_saturate(
