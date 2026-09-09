@@ -128,11 +128,16 @@ pub fn almide_rt_process_exec_status_timeout(
 ) -> Result<AlmideProcessStatus, String> {
     use std::io::Read;
     use std::process::{Command, Stdio};
-    let mut child = Command::new(cmd)
-        .args(args)
+    let mut command = Command::new(cmd);
+    command.args(args)
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
+        .stderr(Stdio::piped());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    let mut child = command.spawn()
         .map_err(|e| format!("exec failed: {}", e))?;
     fn drain<R: Read + Send + 'static>(r: Option<R>) -> std::thread::JoinHandle<Vec<u8>> {
         std::thread::spawn(move || {
@@ -147,26 +152,56 @@ pub fn almide_rt_process_exec_status_timeout(
     let err_h = drain(child.stderr.take());
     let deadline = std::time::Instant::now()
         + std::time::Duration::from_millis(timeout_ms.max(0) as u64);
+    let mut exit_status = None;
     let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) => {
-                if std::time::Instant::now() >= deadline {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    // Join the drains so the pipes close cleanly before we return.
-                    let _ = out_h.join();
-                    let _ = err_h.join();
-                    return Err(format!("exec timed out after {}ms", timeout_ms));
+        if exit_status.is_none() {
+            match child.try_wait() {
+                Ok(status) => exit_status = status,
+                Err(e) => {
+                    almide_process_stop_tree(&mut child);
+                    return Err(format!("exec failed: {}", e));
                 }
-                std::thread::sleep(std::time::Duration::from_millis(5));
             }
-            Err(e) => return Err(format!("exec failed: {}", e)),
         }
+        // #2065: child exit does not imply pipe EOF: descendants may still
+        // hold either pipe. The same deadline covers BOTH process and drains.
+        if let Some(status) = exit_status {
+            if out_h.is_finished() && err_h.is_finished() { break status; }
+        }
+        if std::time::Instant::now() >= deadline {
+            almide_process_stop_tree(&mut child);
+            // Never join an unfinished reader on the error path. Even a
+            // descendant that escaped the group must not extend the deadline.
+            return Err(format!("exec timed out after {}ms", timeout_ms));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
     };
     let stdout = String::from_utf8_lossy(&out_h.join().unwrap_or_default()).to_string();
     let stderr = String::from_utf8_lossy(&err_h.join().unwrap_or_default()).to_string();
     Ok(AlmideProcessStatus { code: status.code().unwrap_or(-1) as i64, stdout, stderr })
+}
+
+fn almide_process_stop_tree(child: &mut std::process::Child) {
+    #[cfg(unix)]
+    {
+        // process_group(0) above gives this invocation its own group. An
+        // absolute tool path avoids depending on the executed command's PATH.
+        let _ = std::process::Command::new("/bin/kill")
+            .args(["-KILL", "--", &format!("-{}", child.id())])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+    #[cfg(windows)]
+    {
+        let _ = std::process::Command::new("taskkill")
+            .args(["/PID", &child.id().to_string(), "/T", "/F"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 pub fn almide_rt_process_pid() -> i64 {

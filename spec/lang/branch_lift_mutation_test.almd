@@ -1,0 +1,68 @@
+// #2062: outlining a heap-valued branch must preserve writes to its enclosing scope.
+type MutationStep = | MutationGot(String) | MutationRetry(String)
+
+type MutationReply = { text: String, cost: Float }
+
+fn mutation_call(n: Int) -> Result[MutationReply, String] = if n > 0 then ok(MutationReply { text: "t", cost: 0.25 })
+else err("e")
+
+test "let-bound match in a retry loop preserves outer assignments" {
+  var cost = 0.0
+  var n = 0
+  var finished = false
+  while not finished {
+    n = n + 1
+    let outcome: MutationStep = match mutation_call(n) {
+      err(m) => MutationRetry(m),
+      ok(r) => {
+        cost = cost + r.cost
+        if n < 2 then MutationRetry("again")
+        else MutationGot(r.text)
+      },
+    }
+    match outcome {
+      MutationGot(_) => {
+        finished = true
+      },
+      MutationRetry(_) => (),
+    }
+  }
+  assert_eq(cost, 0.5)
+  assert_eq(n, 2)
+}
+
+test "match preserves a write-only capture outside a loop" {
+  var total = 0
+  let label = match some(7) {
+    some(n) => {
+      total = n
+      "some"
+    },
+    none => "none",
+  }
+  assert_eq(label, "some")
+  assert_eq(total, 7)
+}
+
+test "heap if in a loop preserves outer list writes" {
+  var xs = [0]
+  for n in 1..<3 {
+    let label = if n > 0 then {
+      xs[0] = n
+      "yes"
+    } else "no"
+    assert_eq(label, "yes")
+  }
+  assert_eq(xs, [2])
+}
+
+test "a branch-local mutation remains local" {
+  for n in 1..<3 {
+    let label = if n > 0 then {
+      var count = n
+      count = count + 1
+      int.to_string(count)
+    } else "no"
+    assert_eq(label, int.to_string(n + 1))
+  }
+}

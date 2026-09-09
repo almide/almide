@@ -305,6 +305,22 @@ impl<'a> BranchLifter<'a> {
     /// Replace the heap-branch `value` in place with a call to a freshly
     /// synthesized tail helper `fn __branch_lift_N(p…) -> ty = <original branch>`.
     fn lift_bind_value(&mut self, ty: Ty, value: &mut IrExpr) {
+        // #2062: helper parameters are values, not the enclosing storage places.
+        // Outlining a write would update a snapshot and silently lose the write.
+        // Local bindings may still mutate, and globals keep their own storage.
+        // Include write-only targets and specialized collection mutations too.
+        let mut assigned = HashSet::new();
+        almide_ir::collect_assigned_vars(value, &mut assigned);
+        if !assigned.is_empty() {
+            let locals = almide_ir::free_vars::bound_vars(value);
+            if assigned.iter().any(|id| {
+                let var = VarId(*id);
+                !locals.contains(&var) && !self.globals.contains(&var)
+            }) {
+                return;
+            }
+        }
+
         // 1. The branch is evaluated in the enclosing scope BEFORE the bind takes
         //    effect, so its free variables are exactly the enclosing locals it
         //    references (params, prior `let`s, loop binders). The bound var itself
