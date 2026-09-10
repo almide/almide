@@ -1,0 +1,23 @@
+// @contract: C-348
+fn main() -> Unit = {
+  let s = "aé🦀z"
+  assert_eq(string.byte_slice(s, 1, 3), some("é"))
+  assert_eq(string.byte_slice(s, 3, 7), some("🦀"))
+  assert_eq(string.byte_slice(s, 0, 8), some(s))
+  assert_eq(string.byte_slice(s, 8, 8), some(""))
+  assert_eq(string.byte_slice(s, 2, 3), none)
+  assert_eq(string.byte_slice(s, 3, 6), none)
+  assert_eq(string.byte_slice(s, -1, 1), none)
+  assert_eq(string.byte_slice(s, 4, 3), none)
+  assert_eq(string.byte_slice(s, 0, 9), none)
+  assert_eq(string.byte_slice(s, 0, 9223372036854775807), none)
+  assert_eq(string.byte_slice("", 0, 0), some(""))
+  assert_eq(string.slice(s, 1, 3), "é🦀")
+  assert_eq(string.slice(s, -1, 2), "aé")
+  assert_eq(string.slice(s, 99, 100), "")
+  assert_eq(string.slice(s, 3, 1), "")
+  assert_eq(string.slice(s, 2), "🦀z")
+  let long = "aé🦀z" + string.repeat("suffix", 10000)
+  assert_eq(string.slice(long, 1, 3), "é🦀")
+  println("byte offsets and codepoints ok")
+}

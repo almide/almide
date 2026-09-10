@@ -1,0 +1,9 @@
+#!/usr/bin/env -S almide run
+
+fn main() -> Unit = {
+  println("shebang ok")
+}
+
+test "script test" {
+  assert_eq(1 + 1, 2)
+}

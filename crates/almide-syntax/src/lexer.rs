@@ -137,8 +137,10 @@ fn lex_trivia(chars: &[char], cur: &mut Cursor, tokens: &mut Vec<Token>) -> bool
         cur.pos += 1; cur.line += 1; cur.col = 1;
         return true;
     }
-    // Line comment
-    if ch == '/' && peek(chars, cur.pos + 1) == Some('/') {
+    // A shebang is trivia only at the logical source start (after BOM).
+    // Preserve its spelling as a comment so fmt can keep the executable header.
+    let shebang = cur.pos == 0 && ch == '#' && peek(chars, 1) == Some('!');
+    if shebang || (ch == '/' && peek(chars, cur.pos + 1) == Some('/')) {
         let (tok, new_pos) = lex_line_comment(chars, cur.pos, cur.line, cur.col);
         cur.col += new_pos - cur.pos;
         cur.pos = new_pos;

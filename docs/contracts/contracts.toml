@@ -4257,3 +4257,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/composition_fuzz_batch.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-348"
+spec      = "ALS-S4"
+title     = "Byte-indexed string slices validate UTF-8 boundaries"
+statement = "string.byte_slice(s, start, end) uses half-open UTF-8 byte offsets and returns some(copy) exactly when 0 <= start <= end <= byte length and both endpoints are codepoint boundaries. Otherwise it returns none. An empty range at a valid boundary returns some(empty string). string.slice retains its clamped codepoint-indexed behavior. Byte slicing checks endpoints without scanning the unrequested source; character slicing need not count the suffix after end."
+since     = "0.63.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/string_byte_slice.almd", class = "fixture" },
+]

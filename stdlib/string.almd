@@ -47,6 +47,10 @@ fn ends_with(s: String, suffix: String) -> Bool = _
 @intrinsic("almide_rt_string_slice")
 fn slice(s: String, start: Int, end: Int = 9223372036854775807) -> String = _
 
+// UTF-8 byte offsets, half-open. Invalid ranges or split codepoints return none.
+@intrinsic("almide_rt_string_byte_slice")
+fn byte_slice(s: String, start: Int, end: Int) -> String? = _
+
 @intrinsic("almide_rt_string_pad_left")
 fn pad_start(s: String, n: Int, ch: String) -> String = _
 

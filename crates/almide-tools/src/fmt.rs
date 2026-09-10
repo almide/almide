@@ -479,10 +479,15 @@ pub fn format_program(program: &Program) -> String {
 fn format_program_inner(program: &Program) -> String {
     let mut out = String::new();
     let cm = &program.comment_map;
+    // Auto-imports can move comment slots; the executable header must precede
+    // imports and even the dialect stamp, wherever its slot currently lives.
+    if let Some(shebang) = cm.iter().flatten().find(|c| c.starts_with("#!")) {
+        wln!(out, "{shebang}");
+    }
     let mut ci = 0;
     let emit_comments = |out: &mut String, idx: &mut usize| {
         if let Some(comments) = cm.get(*idx) {
-            for c in comments { wln!(out, "{c}"); }
+            for c in comments.iter().filter(|c| !c.starts_with("#!")) { wln!(out, "{c}"); }
         }
         *idx += 1;
     };
@@ -533,7 +538,7 @@ fn format_program_inner(program: &Program) -> String {
     if let Some(comments) = cm.get(ci) {
         if !comments.is_empty() {
             out.push('\n');
-            for c in comments { wln!(out, "{c}"); }
+            for c in comments.iter().filter(|c| !c.starts_with("#!")) { wln!(out, "{c}"); }
         }
     }
     out

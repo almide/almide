@@ -674,6 +674,7 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_set_union" => &[false, false],
         "almide_rt_sse_anthropic_messages" => &[false, false, false],
         "almide_rt_sse_openai_chat" => &[false, false, false, false],
+        "almide_rt_string_byte_slice" => &[false, false, false],
         "almide_rt_string_capitalize" => &[false],
         "almide_rt_string_char_at" => &[false, false],
         "almide_rt_string_char_count" => &[false],

@@ -1,0 +1,56 @@
+{
+  "source": "/Users/o6lvl4/.goenv/versions/1.26.1/src/cmd/compile/internal/ssa/opGen.go",
+  "source_bytes": 2973586,
+  "source_sha256": "fd9bb20543045745f38417ac47439685c3b35bf71af65858ce8392f9eb2c5dc8",
+  "gramide_revision": "c6933d2ef93b9c5890540b1b57910da9d90d8b73",
+  "compiler_sha256": "a074ab7c6ab157f0135f40a0553684d2d8cecd9bc69029b1c312812cc096391f",
+  "samples": {
+    "baseline": [
+      {
+        "seconds": 0.49,
+        "rss_bytes": 128712704
+      },
+      {
+        "seconds": 0.49,
+        "rss_bytes": 125665280
+      },
+      {
+        "seconds": 0.5,
+        "rss_bytes": 144588800
+      }
+    ],
+    "compact_bytes": [
+      {
+        "seconds": 0.5,
+        "rss_bytes": 107986944
+      },
+      {
+        "seconds": 0.49,
+        "rss_bytes": 123650048
+      },
+      {
+        "seconds": 0.49,
+        "rss_bytes": 122093568
+      }
+    ],
+    "compact_spans": [
+      {
+        "seconds": 0.48,
+        "rss_bytes": 107937792
+      },
+      {
+        "seconds": 0.48,
+        "rss_bytes": 123666432
+      },
+      {
+        "seconds": 0.49,
+        "rss_bytes": 108101632
+      }
+    ]
+  },
+  "token_output_sha256": {
+    "baseline": "57a99908ef20b139b7941fcb242e7b69b3fadb24e7a9009c9e72fe0b21bac56b",
+    "compact_bytes": "57a99908ef20b139b7941fcb242e7b69b3fadb24e7a9009c9e72fe0b21bac56b",
+    "compact_spans": "57a99908ef20b139b7941fcb242e7b69b3fadb24e7a9009c9e72fe0b21bac56b"
+  }
+}

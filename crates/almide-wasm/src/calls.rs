@@ -407,6 +407,9 @@ impl Emitter<'_> {
             // The proxy guards hand-written block internals; it misfires
             // on constructor-built sums.
             const VERIFIED_SUM_BUILDERS: &[&str] = &[
+                // C-348: reads the shared string header/data, writes only its
+                // own string buffer, and builds Option via typed constructors.
+                "string_byte_slice",
                 "string_to_int",
                 "int_from_hex",
                 "float_parse",

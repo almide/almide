@@ -543,6 +543,7 @@
 69664	spec/wasm_cross/stdlib_type_shadow.almd
 66624	spec/wasm_cross/str_result_heap_bind.almd
 66064	spec/wasm_cross/string_bool_ordering.almd
+204880	spec/wasm_cross/string_byte_slice.almd
 115072	spec/wasm_cross/string_case_unicode.almd
 67728	spec/wasm_cross/string_codepoint.almd
 67168	spec/wasm_cross/string_codepoint_index.almd
