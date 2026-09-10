@@ -1,402 +1,396 @@
 diff --git i/src/lex.almd w/src/lex.almd
-index 38eca09..1f33c53 100644
+index 38eca09..84933b1 100644
 --- i/src/lex.almd
 +++ w/src/lex.almd
-@@ -1 +1 @@
--// lex — bytes in, tokens out, for every language.
-+// lex — buffer in, tokens out, for every language.
-@@ -27 +27 @@ import self.tree
--// ── character classes over bytes ──────────────────────────────────────────
-+// ── character classes over buffer ──────────────────────────────────────────
 @@ -36 +36 @@ fn is_space(b: Int) -> Bool = b == 32 or b == 9 or b == 13
 -fn at(bytes: List[Int], i: Int) -> Int = list.get(bytes, i) ?? -1
 +fn source_byte_at(buffer: Bytes, i: Int) -> Int = bytes.get_or(buffer, i, -1)
-@@ -38 +38 @@ fn at(bytes: List[Int], i: Int) -> Int = list.get(bytes, i) ?? -1
+@@ -38,10 +38,4 @@ fn at(bytes: List[Int], i: Int) -> Int = list.get(bytes, i) ?? -1
 -// The text of bytes[s, e). Built with list.get rather than list.slice: the
-+// The text of buffer[s, e). Built with list.get rather than list.slice: the
-@@ -42,6 +42,2 @@ fn at(bytes: List[Int], i: Int) -> Int = list.get(bytes, i) ?? -1
+-// native backend borrows a list parameter only while every use of it is a
+-// borrowing one, and list.slice consumes its argument, which would make
+-// every token clone the whole source.
 -fn text(bytes: List[Int], s: Int, e: Int) -> String = {
 -  var out: List[Int] = []
 -  var k = s
 -  while k < e { list.push(out, at(bytes, k)); k = k + 1 }
 -  string.from_bytes(out)
 -}
++// Copy only buffer[s, e) from the compact byte source, preserving the
++// existing lossy UTF-8 decoding behavior for token text.
 +fn text(buffer: Bytes, s: Int, e: Int) -> String =
 +  bytes.to_string_lossy(bytes.slice(buffer, s, e))
-@@ -49,2 +45,2 @@ fn text(bytes: List[Int], s: Int, e: Int) -> String = {
+@@ -49,2 +43,2 @@ fn text(bytes: List[Int], s: Int, e: Int) -> String = {
 -fn mk(bytes: List[Int], kind: String, s: Int, e: Int, line: Int, line_start: Int) -> tree.Token =
 -  tree.Token { kind: kind, text: text(bytes, s, e), start: s, end: e, line: line, col: s - line_start + 1 }
 +fn mk(buffer: Bytes, kind: String, s: Int, e: Int, line: Int, line_start: Int) -> tree.Token =
 +  tree.Token { kind: kind, text: text(buffer, s, e), start: s, end: e, line: line, col: s - line_start + 1 }
-@@ -79 +75 @@ type Spec = {
--  line_comment: List[Int],          // bytes; empty for a language with none
-+  line_comment: List[Int],          // buffer; empty for a language with none
-@@ -91 +87 @@ type Spec = {
+@@ -91 +85 @@ type Spec = {
 -fn matches_at(bytes: List[Int], i: Int, pat: List[Int]) -> Bool = {
 +fn matches_at(buffer: Bytes, i: Int, pat: List[Int]) -> Bool = {
-@@ -98 +94 @@ fn matches_at(bytes: List[Int], i: Int, pat: List[Int]) -> Bool = {
+@@ -98 +92 @@ fn matches_at(bytes: List[Int], i: Int, pat: List[Int]) -> Bool = {
 -      if at(bytes, i + k) != (match list.get(pat, k) { some(v) => v, none => -2 }) then same = false else k = k + 1
 +      if source_byte_at(buffer, i + k) != (match list.get(pat, k) { some(v) => v, none => -2 }) then same = false else k = k + 1
-@@ -104 +100 @@ fn matches_at(bytes: List[Int], i: Int, pat: List[Int]) -> Bool = {
+@@ -104 +98 @@ fn matches_at(bytes: List[Int], i: Int, pat: List[Int]) -> Bool = {
 -fn scan_word(bytes: List[Int], start: Int) -> Int = {
 +fn scan_word(buffer: Bytes, start: Int) -> Int = {
-@@ -106 +102 @@ fn scan_word(bytes: List[Int], start: Int) -> Int = {
+@@ -106 +100 @@ fn scan_word(bytes: List[Int], start: Int) -> Int = {
 -  while is_ident(at(bytes, i)) { i = i + 1 }
 +  while is_ident(source_byte_at(buffer, i)) { i = i + 1 }
-@@ -112,3 +108,3 @@ fn scan_word(bytes: List[Int], start: Int) -> Int = {
+@@ -112,3 +106,3 @@ fn scan_word(bytes: List[Int], start: Int) -> Int = {
 -fn scan_backtick(bytes: List[Int], start: Int) -> Int = {
 -  let e = scan_word(bytes, start + 1)
 -  if e == start + 1 then start else if at(bytes, e) == 96 then e + 1 else e
 +fn scan_backtick(buffer: Bytes, start: Int) -> Int = {
 +  let e = scan_word(buffer, start + 1)
 +  if e == start + 1 then start else if source_byte_at(buffer, e) == 96 then e + 1 else e
-@@ -117,2 +113,2 @@ fn scan_backtick(bytes: List[Int], start: Int) -> Int = {
+@@ -117,2 +111,2 @@ fn scan_backtick(bytes: List[Int], start: Int) -> Int = {
 -fn starts_number(bytes: List[Int], i: Int, family: Int) -> Bool =
 -  is_digit(at(bytes, i)) or (family == N_GO and at(bytes, i) == 46 and is_digit(at(bytes, i + 1)))
 +fn starts_number(buffer: Bytes, i: Int, family: Int) -> Bool =
 +  is_digit(source_byte_at(buffer, i)) or (family == N_GO and source_byte_at(buffer, i) == 46 and is_digit(source_byte_at(buffer, i + 1)))
-@@ -120 +116 @@ fn starts_number(bytes: List[Int], i: Int, family: Int) -> Bool =
+@@ -120 +114 @@ fn starts_number(bytes: List[Int], i: Int, family: Int) -> Bool =
 -// How many bytes the character starting with this byte takes.
 +// How many buffer the character starting with this byte takes.
-@@ -127 +123 @@ fn utf8_len(b: Int) -> Int = if b < 128 then 1 else if b < 224 then 2 else if b
+@@ -127 +121 @@ fn utf8_len(b: Int) -> Int = if b < 128 then 1 else if b < 224 then 2 else if b
 -fn rust_char_end(bytes: List[Int], q: Int) -> Int = {
 +fn rust_char_end(buffer: Bytes, q: Int) -> Int = {
-@@ -129 +125 @@ fn rust_char_end(bytes: List[Int], q: Int) -> Int = {
+@@ -129 +123 @@ fn rust_char_end(bytes: List[Int], q: Int) -> Int = {
 -  let b = at(bytes, j)
 +  let b = source_byte_at(buffer, j)
-@@ -131 +127 @@ fn rust_char_end(bytes: List[Int], q: Int) -> Int = {
+@@ -131 +125 @@ fn rust_char_end(bytes: List[Int], q: Int) -> Int = {
 -    let k = if at(bytes, j + 1) == 117 then {          // \u{…}
 +    let k = if source_byte_at(buffer, j + 1) == 117 then {          // \u{…}
-@@ -133 +129 @@ fn rust_char_end(bytes: List[Int], q: Int) -> Int = {
+@@ -133 +127 @@ fn rust_char_end(bytes: List[Int], q: Int) -> Int = {
 -      while m < j + 16 and at(bytes, m) != 125 and at(bytes, m) != -1 { m = m + 1 }
 +      while m < j + 16 and source_byte_at(buffer, m) != 125 and source_byte_at(buffer, m) != -1 { m = m + 1 }
-@@ -136 +132 @@ fn rust_char_end(bytes: List[Int], q: Int) -> Int = {
+@@ -136 +130 @@ fn rust_char_end(bytes: List[Int], q: Int) -> Int = {
 -    if at(bytes, k) == 39 then k + 1 else -1
 +    if source_byte_at(buffer, k) == 39 then k + 1 else -1
-@@ -141 +137 @@ fn rust_char_end(bytes: List[Int], q: Int) -> Int = {
+@@ -141 +135 @@ fn rust_char_end(bytes: List[Int], q: Int) -> Int = {
 -    if at(bytes, e) == 39 then e + 1 else -1
 +    if source_byte_at(buffer, e) == 39 then e + 1 else -1
-@@ -145,2 +141,2 @@ fn rust_char_end(bytes: List[Int], q: Int) -> Int = {
+@@ -145,2 +139,2 @@ fn rust_char_end(bytes: List[Int], q: Int) -> Int = {
 -fn starts_string(bytes: List[Int], i: Int, family: Int) -> Bool = {
 -  let b = at(bytes, i)
 +fn starts_string(buffer: Bytes, i: Int, family: Int) -> Bool = {
 +  let b = source_byte_at(buffer, i)
-@@ -150 +146 @@ fn starts_string(bytes: List[Int], i: Int, family: Int) -> Bool = {
+@@ -150 +144 @@ fn starts_string(bytes: List[Int], i: Int, family: Int) -> Bool = {
 -    let c = at(bytes, q)
 +    let c = source_byte_at(buffer, q)
-@@ -152 +148 @@ fn starts_string(bytes: List[Int], i: Int, family: Int) -> Bool = {
+@@ -152 +146 @@ fn starts_string(bytes: List[Int], i: Int, family: Int) -> Bool = {
 -    else if c == 39 then rust_char_end(bytes, q) >= 0
 +    else if c == 39 then rust_char_end(buffer, q) >= 0
-@@ -155,2 +151,2 @@ fn starts_string(bytes: List[Int], i: Int, family: Int) -> Bool = {
+@@ -155,2 +149,2 @@ fn starts_string(bytes: List[Int], i: Int, family: Int) -> Bool = {
 -      while at(bytes, k) == 35 { k = k + 1 }
 -      at(bytes, k) == 34
 +      while source_byte_at(buffer, k) == 35 { k = k + 1 }
 +      source_byte_at(buffer, k) == 34
-@@ -160 +156 @@ fn starts_string(bytes: List[Int], i: Int, family: Int) -> Bool = {
+@@ -160 +154 @@ fn starts_string(bytes: List[Int], i: Int, family: Int) -> Bool = {
 -  else b == 34 or b == 39 or (b == 114 and at(bytes, i + 1) == 34)
 +  else b == 34 or b == 39 or (b == 114 and source_byte_at(buffer, i + 1) == 34)
-@@ -164,3 +160,3 @@ fn starts_string(bytes: List[Int], i: Int, family: Int) -> Bool = {
+@@ -164,3 +158,3 @@ fn starts_string(bytes: List[Int], i: Int, family: Int) -> Bool = {
 -fn literal_kind(bytes: List[Int], i: Int, family: Int) -> String =
 -  if family == S_GO then (if at(bytes, i) == 39 then "rune" else "string")
 -  else if family == S_RUST then (if at(bytes, if at(bytes, i) == 98 then i + 1 else i) == 39 then "rune" else "string")
 +fn literal_kind(buffer: Bytes, i: Int, family: Int) -> String =
 +  if family == S_GO then (if source_byte_at(buffer, i) == 39 then "rune" else "string")
 +  else if family == S_RUST then (if source_byte_at(buffer, if source_byte_at(buffer, i) == 98 then i + 1 else i) == 39 then "rune" else "string")
-@@ -169 +165 @@ fn literal_kind(bytes: List[Int], i: Int, family: Int) -> String =
+@@ -169 +163 @@ fn literal_kind(bytes: List[Int], i: Int, family: Int) -> String =
 -fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
 +fn scan_number(buffer: Bytes, start: Int, family: Int) -> (Int, String) = {
-@@ -171 +167 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
+@@ -171 +165 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
 -  let b1 = at(bytes, i + 1)
 +  let b1 = source_byte_at(buffer, i + 1)
-@@ -174 +170 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
+@@ -174 +168 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
 -    if at(bytes, i) == 48 and (b1 == 120 or b1 == 88) then {           // 0x
 +    if source_byte_at(buffer, i) == 48 and (b1 == 120 or b1 == 88) then {           // 0x
-@@ -176,2 +172,2 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
+@@ -176,2 +170,2 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
 -      while is_hex(at(bytes, i)) or at(bytes, i) == 95 { i = i + 1 }
 -    } else if at(bytes, i) == 48 and (b1 == 111 or b1 == 79) then {    // 0o
 +      while is_hex(source_byte_at(buffer, i)) or source_byte_at(buffer, i) == 95 { i = i + 1 }
 +    } else if source_byte_at(buffer, i) == 48 and (b1 == 111 or b1 == 79) then {    // 0o
-@@ -179,2 +175,2 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
+@@ -179,2 +173,2 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
 -      while (at(bytes, i) >= 48 and at(bytes, i) <= 55) or at(bytes, i) == 95 { i = i + 1 }
 -    } else if at(bytes, i) == 48 and (b1 == 98 or b1 == 66) then {     // 0b
 +      while (source_byte_at(buffer, i) >= 48 and source_byte_at(buffer, i) <= 55) or source_byte_at(buffer, i) == 95 { i = i + 1 }
 +    } else if source_byte_at(buffer, i) == 48 and (b1 == 98 or b1 == 66) then {     // 0b
-@@ -182 +178 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
+@@ -182 +176 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
 -      while at(bytes, i) == 48 or at(bytes, i) == 49 or at(bytes, i) == 95 { i = i + 1 }
 +      while source_byte_at(buffer, i) == 48 or source_byte_at(buffer, i) == 49 or source_byte_at(buffer, i) == 95 { i = i + 1 }
-@@ -184 +180 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
+@@ -184 +178 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
 -      while is_digit(at(bytes, i)) or at(bytes, i) == 95 { i = i + 1 }
 +      while is_digit(source_byte_at(buffer, i)) or source_byte_at(buffer, i) == 95 { i = i + 1 }
-@@ -186 +182 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
+@@ -186 +180 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
 -      if at(bytes, i) == 46 and is_digit(at(bytes, i + 1)) then {
 +      if source_byte_at(buffer, i) == 46 and is_digit(source_byte_at(buffer, i + 1)) then {
-@@ -189,2 +185,2 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
+@@ -189,2 +183,2 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
 -        while is_digit(at(bytes, i)) or at(bytes, i) == 95 { i = i + 1 }
 -      } else if at(bytes, i) == 46 and not is_ident(at(bytes, i + 1)) and at(bytes, i + 1) != 46 then {
 +        while is_digit(source_byte_at(buffer, i)) or source_byte_at(buffer, i) == 95 { i = i + 1 }
 +      } else if source_byte_at(buffer, i) == 46 and not is_ident(source_byte_at(buffer, i + 1)) and source_byte_at(buffer, i + 1) != 46 then {
-@@ -194,3 +190,3 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
+@@ -194,3 +188,3 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
 -      if at(bytes, i) == 101 or at(bytes, i) == 69 then {
 -        let sign = if at(bytes, i + 1) == 43 or at(bytes, i + 1) == 45 then 1 else 0
 -        if is_digit(at(bytes, i + 1 + sign)) then {
 +      if source_byte_at(buffer, i) == 101 or source_byte_at(buffer, i) == 69 then {
 +        let sign = if source_byte_at(buffer, i + 1) == 43 or source_byte_at(buffer, i + 1) == 45 then 1 else 0
 +        if is_digit(source_byte_at(buffer, i + 1 + sign)) then {
-@@ -199 +195 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
+@@ -199 +193 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
 -          while is_digit(at(bytes, i)) or at(bytes, i) == 95 { i = i + 1 }
 +          while is_digit(source_byte_at(buffer, i)) or source_byte_at(buffer, i) == 95 { i = i + 1 }
-@@ -204 +200 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
+@@ -204 +198 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
 -    while is_ident(at(bytes, i)) { i = i + 1 }
 +    while is_ident(source_byte_at(buffer, i)) { i = i + 1 }
-@@ -207 +203 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
+@@ -207 +201 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
 -    if at(bytes, i) == 48 and (b1 == 120 or b1 == 88) then {           // 0x, may be a hex float
 +    if source_byte_at(buffer, i) == 48 and (b1 == 120 or b1 == 88) then {           // 0x, may be a hex float
-@@ -209,3 +205,3 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
+@@ -209,3 +203,3 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
 -      while is_hex(at(bytes, i)) or at(bytes, i) == 95 { i = i + 1 }
 -      if at(bytes, i) == 46 then { i = i + 1; kind = "float"; while is_hex(at(bytes, i)) or at(bytes, i) == 95 { i = i + 1 } } else ()
 -      if at(bytes, i) == 112 or at(bytes, i) == 80 then {              // p exponent
 +      while is_hex(source_byte_at(buffer, i)) or source_byte_at(buffer, i) == 95 { i = i + 1 }
 +      if source_byte_at(buffer, i) == 46 then { i = i + 1; kind = "float"; while is_hex(source_byte_at(buffer, i)) or source_byte_at(buffer, i) == 95 { i = i + 1 } } else ()
 +      if source_byte_at(buffer, i) == 112 or source_byte_at(buffer, i) == 80 then {              // p exponent
-@@ -214,2 +210,2 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
+@@ -214,2 +208,2 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
 -        if at(bytes, i) == 43 or at(bytes, i) == 45 then i = i + 1 else ()
 -        while is_digit(at(bytes, i)) or at(bytes, i) == 95 { i = i + 1 }
 +        if source_byte_at(buffer, i) == 43 or source_byte_at(buffer, i) == 45 then i = i + 1 else ()
 +        while is_digit(source_byte_at(buffer, i)) or source_byte_at(buffer, i) == 95 { i = i + 1 }
-@@ -217 +213 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
+@@ -217 +211 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
 -    } else if at(bytes, i) == 48 and (b1 == 98 or b1 == 66 or b1 == 111 or b1 == 79) then {   // 0b 0o
 +    } else if source_byte_at(buffer, i) == 48 and (b1 == 98 or b1 == 66 or b1 == 111 or b1 == 79) then {   // 0b 0o
-@@ -219 +215 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
+@@ -219 +213 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
 -      while is_hex(at(bytes, i)) or at(bytes, i) == 95 { i = i + 1 }
 +      while is_hex(source_byte_at(buffer, i)) or source_byte_at(buffer, i) == 95 { i = i + 1 }
-@@ -221,2 +217,2 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
+@@ -221,2 +215,2 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
 -      while is_digit(at(bytes, i)) or at(bytes, i) == 95 { i = i + 1 }
 -      if at(bytes, i) == 46 then {                                       // 1.5 and 1. are floats
 +      while is_digit(source_byte_at(buffer, i)) or source_byte_at(buffer, i) == 95 { i = i + 1 }
 +      if source_byte_at(buffer, i) == 46 then {                                       // 1.5 and 1. are floats
-@@ -225 +221 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
+@@ -225 +219 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
 -        while is_digit(at(bytes, i)) or at(bytes, i) == 95 { i = i + 1 }
 +        while is_digit(source_byte_at(buffer, i)) or source_byte_at(buffer, i) == 95 { i = i + 1 }
-@@ -227 +223 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
+@@ -227 +221 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
 -      if at(bytes, i) == 101 or at(bytes, i) == 69 then {
 +      if source_byte_at(buffer, i) == 101 or source_byte_at(buffer, i) == 69 then {
-@@ -230,2 +226,2 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
+@@ -230,2 +224,2 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
 -        if at(bytes, i) == 43 or at(bytes, i) == 45 then i = i + 1 else ()
 -        while is_digit(at(bytes, i)) or at(bytes, i) == 95 { i = i + 1 }
 +        if source_byte_at(buffer, i) == 43 or source_byte_at(buffer, i) == 45 then i = i + 1 else ()
 +        while is_digit(source_byte_at(buffer, i)) or source_byte_at(buffer, i) == 95 { i = i + 1 }
-@@ -234 +230 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
+@@ -234 +228 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
 -    if at(bytes, i) == 105 then (i + 1, "imaginary") else (i, kind)      // 2i
 +    if source_byte_at(buffer, i) == 105 then (i + 1, "imaginary") else (i, kind)      // 2i
-@@ -236 +232 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
+@@ -236 +230 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
 -    if at(bytes, i) == 48 and (b1 == 120 or b1 == 88) then {           // 0x
 +    if source_byte_at(buffer, i) == 48 and (b1 == 120 or b1 == 88) then {           // 0x
-@@ -238 +234 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
+@@ -238 +232 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
 -      while is_hex(at(bytes, i)) or at(bytes, i) == 95 { i = i + 1 }
 +      while is_hex(source_byte_at(buffer, i)) or source_byte_at(buffer, i) == 95 { i = i + 1 }
-@@ -240 +236 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
+@@ -240 +234 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
 -    } else if at(bytes, i) == 48 and (b1 == 98 or b1 == 66) then {     // 0b
 +    } else if source_byte_at(buffer, i) == 48 and (b1 == 98 or b1 == 66) then {     // 0b
-@@ -242 +238 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
+@@ -242 +236 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
 -      while at(bytes, i) == 48 or at(bytes, i) == 49 or at(bytes, i) == 95 { i = i + 1 }
 +      while source_byte_at(buffer, i) == 48 or source_byte_at(buffer, i) == 49 or source_byte_at(buffer, i) == 95 { i = i + 1 }
-@@ -244 +240 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
+@@ -244 +238 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
 -    } else if at(bytes, i) == 48 and (b1 == 111 or b1 == 79) then {    // 0o
 +    } else if source_byte_at(buffer, i) == 48 and (b1 == 111 or b1 == 79) then {    // 0o
-@@ -246 +242 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
+@@ -246 +240 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
 -      while (at(bytes, i) >= 48 and at(bytes, i) <= 55) or at(bytes, i) == 95 { i = i + 1 }
 +      while (source_byte_at(buffer, i) >= 48 and source_byte_at(buffer, i) <= 55) or source_byte_at(buffer, i) == 95 { i = i + 1 }
-@@ -249 +245 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
+@@ -249 +243 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
 -      while is_digit(at(bytes, i)) or at(bytes, i) == 95 { i = i + 1 }
 +      while is_digit(source_byte_at(buffer, i)) or source_byte_at(buffer, i) == 95 { i = i + 1 }
-@@ -251 +247 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
+@@ -251 +245 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
 -      if at(bytes, i) == 46 and is_digit(at(bytes, i + 1)) then {
 +      if source_byte_at(buffer, i) == 46 and is_digit(source_byte_at(buffer, i + 1)) then {
-@@ -253 +249 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
+@@ -253 +247 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
 -        while is_digit(at(bytes, i)) or at(bytes, i) == 95 { i = i + 1 }
 +        while is_digit(source_byte_at(buffer, i)) or source_byte_at(buffer, i) == 95 { i = i + 1 }
-@@ -256,3 +252,3 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
+@@ -256,3 +250,3 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
 -      if at(bytes, i) == 101 or at(bytes, i) == 69 then {
 -        let sign = if at(bytes, i + 1) == 43 or at(bytes, i + 1) == 45 then 1 else 0
 -        if is_digit(at(bytes, i + 1 + sign)) then {
 +      if source_byte_at(buffer, i) == 101 or source_byte_at(buffer, i) == 69 then {
 +        let sign = if source_byte_at(buffer, i + 1) == 43 or source_byte_at(buffer, i + 1) == 45 then 1 else 0
 +        if is_digit(source_byte_at(buffer, i + 1 + sign)) then {
-@@ -260 +256 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
+@@ -260 +254 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
 -          while is_digit(at(bytes, i)) { i = i + 1 }
 +          while is_digit(source_byte_at(buffer, i)) { i = i + 1 }
-@@ -273 +269 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
+@@ -273 +267 @@ fn scan_number(bytes: List[Int], start: Int, family: Int) -> (Int, String) = {
 -fn scan_string(bytes: List[Int], start: Int, family: Int) -> Option[Int] = {
 +fn scan_string(buffer: Bytes, start: Int, family: Int) -> Option[Int] = {
-@@ -275,2 +271,2 @@ fn scan_string(bytes: List[Int], start: Int, family: Int) -> Option[Int] = {
+@@ -275,2 +269,2 @@ fn scan_string(bytes: List[Int], start: Int, family: Int) -> Option[Int] = {
 -    let q = if at(bytes, start) == 98 then start + 1 else start   // a `b` prefix
 -    let c = at(bytes, q)
 +    let q = if source_byte_at(buffer, start) == 98 then start + 1 else start   // a `b` prefix
 +    let c = source_byte_at(buffer, q)
-@@ -278 +274 @@ fn scan_string(bytes: List[Int], start: Int, family: Int) -> Option[Int] = {
+@@ -278 +272 @@ fn scan_string(bytes: List[Int], start: Int, family: Int) -> Option[Int] = {
 -      let e = rust_char_end(bytes, q)
 +      let e = rust_char_end(buffer, q)
-@@ -284,2 +280,2 @@ fn scan_string(bytes: List[Int], start: Int, family: Int) -> Option[Int] = {
+@@ -284,2 +278,2 @@ fn scan_string(bytes: List[Int], start: Int, family: Int) -> Option[Int] = {
 -      while at(bytes, k) == 35 { h = h + 1; k = k + 1 }
 -      if at(bytes, k) != 34 then none
 +      while source_byte_at(buffer, k) == 35 { h = h + 1; k = k + 1 }
 +      if source_byte_at(buffer, k) != 34 then none
-@@ -291 +287 @@ fn scan_string(bytes: List[Int], start: Int, family: Int) -> Option[Int] = {
+@@ -291 +285 @@ fn scan_string(bytes: List[Int], start: Int, family: Int) -> Option[Int] = {
 -          let b = at(bytes, i)
 +          let b = source_byte_at(buffer, i)
-@@ -297 +293 @@ fn scan_string(bytes: List[Int], start: Int, family: Int) -> Option[Int] = {
+@@ -297 +291 @@ fn scan_string(bytes: List[Int], start: Int, family: Int) -> Option[Int] = {
 -            while all and j < h { if at(bytes, i + 1 + j) != 35 then all = false else j = j + 1 }
 +            while all and j < h { if source_byte_at(buffer, i + 1 + j) != 35 then all = false else j = j + 1 }
-@@ -310 +306 @@ fn scan_string(bytes: List[Int], start: Int, family: Int) -> Option[Int] = {
+@@ -310 +304 @@ fn scan_string(bytes: List[Int], start: Int, family: Int) -> Option[Int] = {
 -        let b = at(bytes, i)
 +        let b = source_byte_at(buffer, i)
-@@ -320 +316 @@ fn scan_string(bytes: List[Int], start: Int, family: Int) -> Option[Int] = {
+@@ -320 +314 @@ fn scan_string(bytes: List[Int], start: Int, family: Int) -> Option[Int] = {
 -    let quote = at(bytes, start)
 +    let quote = source_byte_at(buffer, start)
-@@ -325 +321 @@ fn scan_string(bytes: List[Int], start: Int, family: Int) -> Option[Int] = {
+@@ -325 +319 @@ fn scan_string(bytes: List[Int], start: Int, family: Int) -> Option[Int] = {
 -      let b = at(bytes, i)
 +      let b = source_byte_at(buffer, i)
-@@ -334 +330 @@ fn scan_string(bytes: List[Int], start: Int, family: Int) -> Option[Int] = {
+@@ -334 +328 @@ fn scan_string(bytes: List[Int], start: Int, family: Int) -> Option[Int] = {
 -    let raw = at(bytes, start) == 114                                   // r"""
 +    let raw = source_byte_at(buffer, start) == 114                                   // r"""
-@@ -336,2 +332,2 @@ fn scan_string(bytes: List[Int], start: Int, family: Int) -> Option[Int] = {
+@@ -336,2 +330,2 @@ fn scan_string(bytes: List[Int], start: Int, family: Int) -> Option[Int] = {
 -    let triple = at(bytes, q) == 34 and at(bytes, q + 1) == 34 and at(bytes, q + 2) == 34
 -    let quote = at(bytes, q)                                             // 34 `"` or 39 `'`
 +    let triple = source_byte_at(buffer, q) == 34 and source_byte_at(buffer, q + 1) == 34 and source_byte_at(buffer, q + 2) == 34
 +    let quote = source_byte_at(buffer, q)                                             // 34 `"` or 39 `'`
-@@ -343 +339 @@ fn scan_string(bytes: List[Int], start: Int, family: Int) -> Option[Int] = {
+@@ -343 +337 @@ fn scan_string(bytes: List[Int], start: Int, family: Int) -> Option[Int] = {
 -      let b = at(bytes, i)
 +      let b = source_byte_at(buffer, i)
-@@ -349 +345 @@ fn scan_string(bytes: List[Int], start: Int, family: Int) -> Option[Int] = {
+@@ -349 +343 @@ fn scan_string(bytes: List[Int], start: Int, family: Int) -> Option[Int] = {
 -          match scan_string(bytes, i, family) { some(e) => { i = e - 1 }, none => { done = true; good = false } }
 +          match scan_string(buffer, i, family) { some(e) => { i = e - 1 }, none => { done = true; good = false } }
-@@ -356 +352 @@ fn scan_string(bytes: List[Int], start: Int, family: Int) -> Option[Int] = {
+@@ -356 +350 @@ fn scan_string(bytes: List[Int], start: Int, family: Int) -> Option[Int] = {
 -      else if b == 36 and at(bytes, i + 1) == 123 and not raw then { depth = 1; i = i + 2 }
 +      else if b == 36 and source_byte_at(buffer, i + 1) == 123 and not raw then { depth = 1; i = i + 2 }
-@@ -358 +354 @@ fn scan_string(bytes: List[Int], start: Int, family: Int) -> Option[Int] = {
+@@ -358 +352 @@ fn scan_string(bytes: List[Int], start: Int, family: Int) -> Option[Int] = {
 -        if b == 34 and at(bytes, i + 1) == 34 and at(bytes, i + 2) == 34 then { i = i + 3; done = true }
 +        if b == 34 and source_byte_at(buffer, i + 1) == 34 and source_byte_at(buffer, i + 2) == 34 then { i = i + 3; done = true }
-@@ -369,3 +365,3 @@ fn scan_string(bytes: List[Int], start: Int, family: Int) -> Option[Int] = {
+@@ -369,3 +363,3 @@ fn scan_string(bytes: List[Int], start: Int, family: Int) -> Option[Int] = {
 -// captured `bytes` clones the whole source per call.
 -fn scan_operator(bytes: List[Int], start: Int, ops: List[String]) -> Option[String] = {
 -  var found: Option[String] = none
 +// captured `buffer` clones the whole source per call.
 +fn scan_operator(buffer: Bytes, start: Int, ops: List[String], patterns: List[Bytes]) -> Option[String] = {
 +  var found = -1
-@@ -373,3 +369,2 @@ fn scan_operator(bytes: List[Int], start: Int, ops: List[String]) -> Option[Stri
+@@ -373,3 +367,2 @@ fn scan_operator(bytes: List[Int], start: Int, ops: List[String]) -> Option[Stri
 -  while option.is_none(found) and idx < list.len(ops) {
 -    let op = match list.get(ops, idx) { some(o) => o, none => "" }
 -    let ob = string.to_bytes(op)
 +  while found < 0 and idx < list.len(ops) {
 +    let pattern = patterns[idx]
-@@ -378,2 +373,2 @@ fn scan_operator(bytes: List[Int], start: Int, ops: List[String]) -> Option[Stri
+@@ -378,2 +371,2 @@ fn scan_operator(bytes: List[Int], start: Int, ops: List[String]) -> Option[Stri
 -    while same and k < list.len(ob) {
 -      if at(bytes, start + k) != (match list.get(ob, k) { some(v) => v, none => -2 }) then same = false else k = k + 1
 +    while same and k < bytes.len(pattern) {
 +      if source_byte_at(buffer, start + k) != bytes.get_or(pattern, k, -2) then same = false else k = k + 1
-@@ -381 +376 @@ fn scan_operator(bytes: List[Int], start: Int, ops: List[String]) -> Option[Stri
+@@ -381 +374 @@ fn scan_operator(bytes: List[Int], start: Int, ops: List[String]) -> Option[Stri
 -    if same then found = some(op) else idx = idx + 1
 +    if same then found = idx else idx = idx + 1
-@@ -383 +378 @@ fn scan_operator(bytes: List[Int], start: Int, ops: List[String]) -> Option[Stri
+@@ -383 +376 @@ fn scan_operator(bytes: List[Int], start: Int, ops: List[String]) -> Option[Stri
 -  found
 +  list.get(ops, found)
-@@ -413,2 +408,2 @@ fn tokenize_recovering(source: String, spec: Spec) -> List[tree.Token] =
+@@ -413,2 +406,2 @@ fn tokenize_recovering(source: String, spec: Spec) -> List[tree.Token] =
 -fn to_eol(bytes: List[Int], from: Int) -> Int = {
 -  let n = list.len(bytes)
 +fn to_eol(buffer: Bytes, from: Int) -> Int = {
 +  let n = bytes.len(buffer)
-@@ -416 +411 @@ fn to_eol(bytes: List[Int], from: Int) -> Int = {
+@@ -416 +409 @@ fn to_eol(bytes: List[Int], from: Int) -> Int = {
 -  while e < n and at(bytes, e) != 10 { e = e + 1 }
 +  while e < n and source_byte_at(buffer, e) != 10 { e = e + 1 }
-@@ -421,2 +416,3 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
+@@ -421,2 +414,3 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
 -  let bytes = string.to_bytes(source)
 -  let n = list.len(bytes)
 +  let buffer = bytes.from_string(source)
 +  let operator_patterns = list.map(spec.operators, (op) => bytes.from_string(op))
 +  let n = bytes.len(buffer)
-@@ -428 +424 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
+@@ -428 +422 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
 -  // (no closure here on purpose: one that read `bytes` would clone it per call,
 +  // (no closure here on purpose: one that read `buffer` would clone it per call,
-@@ -431 +427 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
+@@ -431 +425 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
 -    let b = at(bytes, i)
 +    let b = source_byte_at(buffer, i)
-@@ -434 +430 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
+@@ -434 +428 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
 -      if wants_newline(toks, spec.newlines, spec.ends_kw) then list.push(toks, mk(bytes, "newline", i, i, line, line_start)) else ()
 +      if wants_newline(toks, spec.newlines, spec.ends_kw) then list.push(toks, mk(buffer, "newline", i, i, line, line_start)) else ()
-@@ -439,2 +435,2 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
+@@ -439,2 +433,2 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
 -    else if matches_at(bytes, i, spec.line_comment) then {
 -      while i < n and at(bytes, i) != 10 { i = i + 1 }
 +    else if matches_at(buffer, i, spec.line_comment) then {
 +      while i < n and source_byte_at(buffer, i) != 10 { i = i + 1 }
-@@ -442 +438 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
+@@ -442 +436 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
 -    else if matches_at(bytes, i, spec.block_open) then {
 +    else if matches_at(buffer, i, spec.block_open) then {
-@@ -450,2 +446,2 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
+@@ -450,2 +444,2 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
 -        if spec.nested_block and matches_at(bytes, i, spec.block_open) then { depth = depth + 1; i = i + open_len }
 -        else if matches_at(bytes, i, spec.block_close) then { depth = depth - 1; i = i + close_len }
 +        if spec.nested_block and matches_at(buffer, i, spec.block_open) then { depth = depth + 1; i = i + open_len }
 +        else if matches_at(buffer, i, spec.block_close) then { depth = depth - 1; i = i + close_len }
-@@ -453 +449 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
+@@ -453 +447 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
 -          if at(bytes, i) == 10 then { had_newline = true; line = line + 1; line_start = i + 1 } else ()
 +          if source_byte_at(buffer, i) == 10 then { had_newline = true; line = line + 1; line_start = i + 1 } else ()
-@@ -460 +456 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
+@@ -460 +454 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
 -        if recover and not spec.nested_block then list.push(toks, mk(bytes, "error", s, n, line, line_start))
 +        if recover and not spec.nested_block then list.push(toks, mk(buffer, "error", s, n, line, line_start))
-@@ -464 +460 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
+@@ -464 +458 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
 -        list.push(toks, mk(bytes, "newline", s, s, line, line_start))
 +        list.push(toks, mk(buffer, "newline", s, s, line, line_start))
-@@ -467,2 +463,2 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
+@@ -467,2 +461,2 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
 -    else if starts_string(bytes, i, spec.strings) then {
 -      match scan_string(bytes, i, spec.strings) {
 +    else if starts_string(buffer, i, spec.strings) then {
 +      match scan_string(buffer, i, spec.strings) {
-@@ -470 +466 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
+@@ -470 +464 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
 -          list.push(toks, mk(bytes, literal_kind(bytes, i, spec.strings), i, e, line, line_start))
 +          list.push(toks, mk(buffer, literal_kind(buffer, i, spec.strings), i, e, line, line_start))
-@@ -473 +469 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
+@@ -473 +467 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
 -          while k < e { if at(bytes, k) == 10 then { line = line + 1; line_start = k + 1 } else (); k = k + 1 }
 +          while k < e { if source_byte_at(buffer, k) == 10 then { line = line + 1; line_start = k + 1 } else (); k = k + 1 }
-@@ -477,2 +473,2 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
+@@ -477,2 +471,2 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
 -          let e = to_eol(bytes, i)
 -          list.push(toks, mk(bytes, "error", i, e, line, line_start))
 +          let e = to_eol(buffer, i)
 +          list.push(toks, mk(buffer, "error", i, e, line, line_start))
-@@ -483,3 +479,3 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
+@@ -483,3 +477,3 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
 -    else if starts_number(bytes, i, spec.numbers) then {
 -      let (e, kind) = scan_number(bytes, i, spec.numbers)
 -      list.push(toks, mk(bytes, kind, i, e, line, line_start))
 +    else if starts_number(buffer, i, spec.numbers) then {
 +      let (e, kind) = scan_number(buffer, i, spec.numbers)
 +      list.push(toks, mk(buffer, kind, i, e, line, line_start))
-@@ -489,2 +485,2 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
+@@ -489,2 +483,2 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
 -      let e = scan_word(bytes, i)
 -      let word = text(bytes, i, e)
 +      let e = scan_word(buffer, i)
 +      let word = text(buffer, i, e)
-@@ -494 +490 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
+@@ -494 +488 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
 -      list.push(toks, mk(bytes, kind, i, e, line, line_start))
 +      list.push(toks, mk(buffer, kind, i, e, line, line_start))
-@@ -498 +494 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
+@@ -498 +492 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
 -      let e = scan_backtick(bytes, i)
 +      let e = scan_backtick(buffer, i)
-@@ -500 +496 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
+@@ -500 +494 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
 -        list.push(toks, mk(bytes, "error", i, i + 1, line, line_start))
 +        list.push(toks, mk(buffer, "error", i, i + 1, line, line_start))
-@@ -505 +501 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
+@@ -505 +499 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
 -        list.push(toks, mk(bytes, if spec.upper_is_type and is_upper(at(bytes, i + 1)) then "type_name" else "identifier", i, e, line, line_start))
 +        list.push(toks, mk(buffer, if spec.upper_is_type and is_upper(source_byte_at(buffer, i + 1)) then "type_name" else "identifier", i, e, line, line_start))
-@@ -509 +505 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
+@@ -509 +503 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
 -    else match scan_operator(bytes, i, spec.operators) {
 +    else match scan_operator(buffer, i, spec.operators, operator_patterns) {
-@@ -514,2 +510,2 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
+@@ -514,2 +508,2 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
 -        let glued = spec.neg_token and op == "-" and at_line_start and not is_space(at(bytes, i + 1)) and at(bytes, i + 1) != 10
 -        list.push(toks, mk(bytes, if glued then "neg" else "punct", i, i + string.len(op), line, line_start))
 +        let glued = spec.neg_token and op == "-" and at_line_start and not is_space(source_byte_at(buffer, i + 1)) and source_byte_at(buffer, i + 1) != 10
 +        list.push(toks, mk(buffer, if glued then "neg" else "punct", i, i + string.len(op), line, line_start))
-@@ -519 +515 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
+@@ -519 +513 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
 -        list.push(toks, mk(bytes, "error", i, i + 1, line, line_start))
 +        list.push(toks, mk(buffer, "error", i, i + 1, line, line_start))
-@@ -527,2 +523,2 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
+@@ -527,2 +521,2 @@ fn tokenize_with(source: String, spec: Spec, recover: Bool) -> Result[List[tree.
 -      if wants_newline(toks, spec.newlines, spec.ends_kw) then list.push(toks, mk(bytes, "newline", n, n, line, line_start)) else ()
 -      list.push(toks, mk(bytes, "eof", n, n, line, line_start))
 +      if wants_newline(toks, spec.newlines, spec.ends_kw) then list.push(toks, mk(buffer, "newline", n, n, line, line_start)) else ()

@@ -2,8 +2,8 @@
 
 2026-09-10, Apple M3/macOS. Apply `gramide-cached-operators.patch` with
 `git apply --unidiff-zero` to gramide `c6933d2ef93b9c5890540b1b57910da9d90d8b73`.
-This is a client patch; it is not pushed to gramide and does not redesign Almide
-String or Token representation. It uses the existing compact Bytes API and
+The client patch is published as [gramide PR #1](https://github.com/O6lvl4/gramide/pull/1).
+It does not redesign Almide String or Token representation. It uses the existing compact Bytes API and
 precomputes operator byte patterns once per tokenization. Only a successfully
 matched operator clones its text. The source helper is named `source_byte_at`
 to avoid a test compilation collision with balance.almd's List[Int] helper `at`.
