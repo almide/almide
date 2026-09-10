@@ -101,6 +101,12 @@ probe = 'string.slice("café7", 0, 4)'
 expect = "café"
 
 [[string.fn]]
+name = "byte_slice"
+index_unit = "byte"
+probe = 'string.byte_slice("café7", 3, 5) ?? "?"'
+expect = "é"
+
+[[string.fn]]
 name = "pad_start"
 index_unit = "codepoint"
 probe = 'string.pad_start("é", 3, "x")'
