@@ -53,13 +53,19 @@ pub fn cmd_init() {
 /// Print what the run actually executed, then decide the "nothing ran" verdict.
 ///
 /// One rule covers every shape of zero (#2084): no test file discovered, a named
-/// file with no `test` block, a directory of files that have none. What it must
-/// NOT catch is a `--run` pattern that excluded everything — that is the
-/// caller's own narrowing and stays green, which is why the verdict reads
-/// `filtered_out` and not just `ran`.
-fn finish_test_run(counts: TestCounts, files: usize, allow_no_tests: bool) {
+/// file with no `test` block, a directory of files that have none.
+///
+/// Two zeroes are NOT that verdict, and both would otherwise be caught here:
+///
+/// - a `--run` pattern that excluded everything — the caller's own narrowing,
+///   which is why the check reads `filtered_out` and not just `ran`;
+/// - a file this leg DECLINED (`// wasm:skip`, or a wall routing it to native).
+///   A skip means "these tests exist and this leg cannot run them", the opposite
+///   of "there were none", and `wasm_skip_marker_stays_a_green_skip` pins that a
+///   genuine skip stays green.
+fn finish_test_run(counts: TestCounts, files: usize, declined: usize, allow_no_tests: bool) {
     err(&counts.summary(files));
-    if counts.found_nothing() && !allow_no_tests {
+    if counts.found_nothing() && declined == 0 && !allow_no_tests {
         err("no tests to run — pass --allow-no-tests if a run with no tests is expected");
         std::process::exit(NO_TESTS_EXIT);
     }
@@ -223,7 +229,7 @@ pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>, allow_no_t
     }
     err(&format!("All {} test file(s) passed", test_files.len()));
     scratch.finish();
-    finish_test_run(counts, test_files.len(), allow_no_tests);
+    finish_test_run(counts, test_files.len(), 0, allow_no_tests);
 }
 
 enum WasmTestOutcome {
@@ -633,7 +639,8 @@ pub fn cmd_test_wasm(file: &str, run_filter: Option<&str>, allow_no_tests: bool)
     if failed > 0 {
         std::process::exit(1);
     }
-    finish_test_run(counts, test_files.len(), allow_no_tests);
+    // `skipped` files are declines, not absences — see finish_test_run.
+    finish_test_run(counts, test_files.len(), skipped, allow_no_tests);
 }
 
 /// `cmd_test_fast`'s Phase 1: run every file on the fast rustc-free WASM
@@ -806,7 +813,9 @@ pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>, allow
         std::process::exit(1);
     }
     err(&format!("All {} test file(s) passed", test_files.len()));
-    finish_test_run(counts, test_files.len(), allow_no_tests);
+    // Nothing is declined on this lane: a wasm wall routes the file to the
+    // native leg, so every discovered file was actually run somewhere.
+    finish_test_run(counts, test_files.len(), 0, allow_no_tests);
 }
 
 /// `almide test --update-snapshots` (#1314): the accept step. Each file runs
