@@ -107,12 +107,24 @@ almide test --update-snapshots x_test.almd  # スナップショットの受理(
 
 | オプション | 説明 |
 |---|---|
-| `-r, --run <pattern>` | テスト名のパターンフィルタ |
+| `-r, --run <pattern>` | テスト名のパターンフィルタ(下記) |
 | `--no-check` | 型チェックをスキップ |
 | `--json` | JSON 形式で結果出力 |
 | `--target wasm` | wasmtime で実行 |
 | `--update-snapshots` | `testing.assert_snapshot` の不一致を受理し、呼び出し側の期待値リテラルをソース内で書き換える(`ALMIDE_UPDATE_SNAPSHOTS=1` でも同じ) |
 | `--ci` | CI モード: スナップショットを一切書かない(`CI=true` でも同じ)。新規・乖離はどちらも失敗 |
+
+`--run <pattern>` は **生成された関数名に対する大文字小文字を区別する部分文字列一致**で、
+`test "…"` のラベルそのものではない。ラベルは `__test_almd_` を前置し、空白・記号を `_` に
+畳んだ綴りになる（`crates/almide-base/src/names.rs`）。したがって `test "beta fails"` は
+`--run beta` と `--run beta_fails` では選ばれるが、`--run "beta fails"`（空白のまま）では
+選ばれない。`--run __test_almd_` は全件を選ぶ。
+
+この規則は **native レグと wasm レグで同一**である（#2085）。native はパターンを Rust の
+テストハーネスに渡し、wasm はランナー合成の時点で同じ述語で絞る。どちらのレグでも、
+1件も一致しないパターンは 0 件を実行して成功終了する。
+
+テスト: `tests/wasm_test_filter_parity_test.rs`
 
 スクラッチ成果物（wasm レグが wasmtime に渡す `.wasm` モジュール）は実行ごとに固有の
 `$TMPDIR/almide-test-<pid>-<nonce>/` 配下に、ファイルの**絶対パス**のハッシュで命名して
