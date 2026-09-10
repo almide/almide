@@ -610,7 +610,7 @@ pub fn try_render_wasm_source(
     self_modules: &[(String, almide_lang::ast::Program, bool)],
     verbose: bool,
 ) -> Result<String, LowerError> {
-    try_render_wasm_source_impl(source, self_modules, verbose, RenderMode::Run)
+    try_render_wasm_source_impl(source, self_modules, verbose, RenderMode::Run, None)
 }
 
 /// LIBRARY-mode variant for `almide build --target wasm` (#881): a module with
@@ -625,7 +625,7 @@ pub fn try_render_wasm_source_library(
     self_modules: &[(String, almide_lang::ast::Program, bool)],
     verbose: bool,
 ) -> Result<String, LowerError> {
-    try_render_wasm_source_impl(source, self_modules, verbose, RenderMode::Library)
+    try_render_wasm_source_impl(source, self_modules, verbose, RenderMode::Library, None)
 }
 
 /// TEST-mode variant for the `almide test` wasm harness: when the file has NO `main`,
@@ -637,12 +637,17 @@ pub fn try_render_wasm_source_library(
 /// Programs with top-let globals WALL in test mode (v0 re-inits globals before EVERY
 /// test; the v1 `_start` inits once — shipping that silently would leak one test's
 /// mutations into the next).
+/// `run_filter` is `almide test --run <pattern>`: `None` runs every test, and
+/// `Some(p)` synthesizes a runner over exactly the tests the NATIVE leg's Rust
+/// harness would select for the same `p` (`almide_base::names`). Dropping it
+/// here was #2085 — this leg ran every test whatever the caller asked for.
 pub fn try_render_wasm_source_tests(
     source: &str,
     self_modules: &[(String, almide_lang::ast::Program, bool)],
     verbose: bool,
+    run_filter: Option<&str>,
 ) -> Result<String, LowerError> {
-    try_render_wasm_source_impl(source, self_modules, verbose, RenderMode::Tests)
+    try_render_wasm_source_impl(source, self_modules, verbose, RenderMode::Tests, run_filter)
 }
 
 /// How the caller intends to use the rendered module — decides main synthesis.
@@ -662,6 +667,7 @@ fn try_render_wasm_source_impl(
     self_modules: &[(String, almide_lang::ast::Program, bool)],
     verbose: bool,
     mode: RenderMode,
+    run_filter: Option<&str>,
 ) -> Result<String, LowerError> {
     crate::charge_probe::reset_budget_used();
     // STRICT VALUE MODE spans the WHOLE render, not just the IR phase. `strict_values()`
@@ -676,7 +682,7 @@ fn try_render_wasm_source_impl(
     // finding, seed 1785217538023450905). Own it here, at the entrypoint that spans both
     // phases, so the scope matches what the mode actually protects.
     let _strict = crate::lower::StrictValuesGuard::set(true);
-    let mut ir = build_ir_with_drops(source, self_modules, mode == RenderMode::Tests)?;
+    let mut ir = build_ir_with_drops(source, self_modules, mode == RenderMode::Tests, run_filter)?;
     if mode == RenderMode::Library {
         synthesize_library_main(&mut ir);
     }
