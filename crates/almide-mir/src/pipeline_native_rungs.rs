@@ -284,6 +284,8 @@ let mut sigs: crate::render_native::NativeSigs = Default::default();
     Ok(sigs)
 }
 
+include!("pipeline_native_concurrency.rs");
+
 pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
     // Debug aid: ALMIDE_DUMP_MIR=1 prints every lowered fn's op stream (the
     // same view `debug_dump_mir` builds) before the native render runs.
@@ -295,6 +297,7 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
     crate::charge_probe::reset_budget_used();
     let _strict = crate::lower::StrictValuesGuard::set(true);
     let ir = source_to_ir_with(source, &[])?;
+    require_native_concurrency_support(&ir)?;
     // Rung-5 records slab: the layout registries the wasm leg threads — without
     // them a record literal lowers as an Opaque skeleton and every field read
     // strict-walls (the probe_native trap recorded in the trust-spine ledger).

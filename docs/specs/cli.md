@@ -1,6 +1,6 @@
 # CLI Specification
 
-> Last updated: 2026-09-03
+> Last updated: 2026-09-10
 
 ## Overview
 
@@ -35,6 +35,31 @@ almide run app.almd -- arg1 arg2        # ファイル指定 + プログラム�
 `almide` 自身のフラグ（`--target` / `--no-check` / `--release`）は `--` の前で解釈され、`--` 以降はそのままプログラムに渡る（`cargo run` と同じ規約）。プログラム内で `env.args()` を呼ぶと `--` 以降の引数が `List[String]` で返る。
 
 テスト: `tests/run_target_flag_test.rs`
+
+### 実行可能なスクリプト
+
+ファイル先頭に shebang を書き、実行権限を付ければ直接実行できる。
+`/usr/bin/env -S` に対応した環境で、`almide` が PATH に必要。
+
+```almd
+#!/usr/bin/env -S almide run
+
+fn main() -> Unit = {
+  println("shebang ok")
+}
+```
+
+```bash
+chmod +x script.almd
+./script.almd
+```
+
+shebang は先頭（任意のUTF-8 BOMの直後を含む）だけで認識される。
+行番号を保ち、`fmt` は shebang を imports や dialect stamp より前に保持する。
+ほかの位置の `#` は従来どおりエラー。
+
+テスト: `spec/cli/shebang.almd`, `tests/hot_native_regressions_test.rs`
+
 
 ---
 

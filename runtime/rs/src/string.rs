@@ -80,11 +80,17 @@ pub fn almide_rt_string_from_codepoint(cp: i64) -> String {
 pub fn almide_rt_string_slice(s: &str, start: i64, end: i64) -> String {
     // CODEPOINT indices, clamped to [0, char_count]; the `end = i64::MAX`
     // default degrades to "to the end".
-    let count = s.chars().count();
-    let s_idx = (start.max(0) as usize).min(count);
-    let e_idx = (end.max(0) as usize).min(count);
+    let s_idx = start.max(0) as usize;
+    let e_idx = end.max(0) as usize;
     if s_idx >= e_idx { String::new() }
     else { s.chars().skip(s_idx).take(e_idx - s_idx).collect() }
+}
+
+// str::get checks UTF-8 boundaries without scanning or copying the source.
+pub fn almide_rt_string_byte_slice(s: &str, start: i64, end: i64) -> Option<String> {
+    let start = usize::try_from(start).ok()?;
+    let end = usize::try_from(end).ok()?;
+    s.get(start..end).map(str::to_owned)
 }
 
 // A NEGATIVE width means "no padding needed" — the SAME answer the wasm self-host
