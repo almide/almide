@@ -1,17 +1,28 @@
 // @contract: C-348
+// Match Option explicitly so the MIR determinism harness exercises these cases too.
+fn expect_slice(s: String, start: Int, end: Int, expected: String) -> Unit = match string.byte_slice(s, start, end) {
+  some(value) => assert_eq(value, expected),
+  none => assert(false),
+}
+
+fn expect_invalid(s: String, start: Int, end: Int) -> Unit = match string.byte_slice(s, start, end) {
+  some(_) => assert(false),
+  none => (),
+}
+
 fn main() -> Unit = {
   let s = "aé🦀z"
-  assert_eq(string.byte_slice(s, 1, 3), some("é"))
-  assert_eq(string.byte_slice(s, 3, 7), some("🦀"))
-  assert_eq(string.byte_slice(s, 0, 8), some(s))
-  assert_eq(string.byte_slice(s, 8, 8), some(""))
-  assert_eq(string.byte_slice(s, 2, 3), none)
-  assert_eq(string.byte_slice(s, 3, 6), none)
-  assert_eq(string.byte_slice(s, -1, 1), none)
-  assert_eq(string.byte_slice(s, 4, 3), none)
-  assert_eq(string.byte_slice(s, 0, 9), none)
-  assert_eq(string.byte_slice(s, 0, 9223372036854775807), none)
-  assert_eq(string.byte_slice("", 0, 0), some(""))
+  expect_slice(s, 1, 3, "é")
+  expect_slice(s, 3, 7, "🦀")
+  expect_slice(s, 0, 8, s)
+  expect_slice(s, 8, 8, "")
+  expect_invalid(s, 2, 3)
+  expect_invalid(s, 3, 6)
+  expect_invalid(s, -1, 1)
+  expect_invalid(s, 4, 3)
+  expect_invalid(s, 0, 9)
+  expect_invalid(s, 0, 9223372036854775807)
+  expect_slice("", 0, 0, "")
   assert_eq(string.slice(s, 1, 3), "é🦀")
   assert_eq(string.slice(s, -1, 2), "aé")
   assert_eq(string.slice(s, 99, 100), "")

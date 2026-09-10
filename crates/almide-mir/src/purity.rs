@@ -275,6 +275,7 @@ pub const PURE_MODULES: &[&str] = &[
     "string_rle",
     "string_search",
     "string_slice",
+    "string_byte_slice",
     "string_slice2",
     "string_split",
     "string_split_once",

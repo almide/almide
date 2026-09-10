@@ -35,6 +35,7 @@ fn native_mir_declines_serializing_fan() {
     for source in [block, mapper] {
         let error = almide_mir::pipeline::try_render_rust_source(source).unwrap_err();
         assert!(format!("{error:?}").contains("fan concurrency"), "{error:?}");
+        assert!(matches!(error, almide_mir::lower::LowerError::UnsupportedAt { .. }), "fan wall must retain its source location");
     }
     assert!(almide_mir::pipeline::try_render_rust_source("fn main() -> Unit = println(\"ordinary\")").is_ok());
 }

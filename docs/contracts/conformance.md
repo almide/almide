@@ -114,7 +114,7 @@
 | ALS-S1 | C-016, C-065 | `spec/wasm_cross/string_codepoint.almd` (byte-compare)<br>`spec/wasm_cross/string_ops.almd` (byte-compare)<br>`spec/wasm_cross/string_codepoint_index.almd` (byte-compare)<br>`spec/wasm_cross/string_lines.almd` (byte-compare) |
 | ALS-S2 | C-017 | `spec/wasm_cross/string_empty_pattern.almd` (byte-compare) |
 | ALS-S3 | C-018, C-019 | `spec/wasm_cross/string_predicates.almd` (byte-compare)<br>`spec/wasm_cross/string_ops_drain.almd` (byte-compare)<br>`spec/wasm_cross/string_rle.almd` (byte-compare) |
-| ALS-S4 | C-022 | `spec/wasm_cross/string_from_bytes.almd` (byte-compare) |
+| ALS-S4 | C-022, C-348 | `spec/wasm_cross/string_from_bytes.almd` (byte-compare)<br>`spec/wasm_cross/string_byte_slice.almd` (byte-compare) |
 | ALS-S5 | C-050 | `spec/wasm_cross/string_split_rle_codepoint.almd` (byte-compare) |
 | ALS-S6 | C-074 | `spec/wasm_cross/r5_wasm_split_replace_iterative.almd` (byte-compare) |
 | ALS-ST1 | C-241 | `spec/wasm_cross/binding_stmts.almd` (byte-compare) |
