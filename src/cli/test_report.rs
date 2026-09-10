@@ -50,6 +50,16 @@ pub fn test_harness_args(run_filter: Option<&str>) -> std::sync::Arc<Vec<String>
     std::sync::Arc::new(args)
 }
 
+/// The inverse of [`test_harness_args`]: recover `--run <pattern>` from an argv
+/// that was already built for the native harness.
+///
+/// The wasm leg does not take argv — it selects at synthesis (#2085) — so the
+/// paths that carry only the built argv (the snapshot-accept loop) need the
+/// pattern back. Kept adjacent to its producer so the two cannot drift.
+pub fn harness_filter(program_args: &[String]) -> Option<&str> {
+    program_args.iter().find(|a| *a != "--nocapture").map(String::as_str)
+}
+
 /// Report one failing test file as a STRUCTURED record: the assertion's `.almd`
 /// site, expected/found, and a real diff for multi-line strings, lists and
 /// records. Falls back to the raw captured output when nothing parses — a

@@ -7,7 +7,10 @@
 /// `self_modules` are the caller-resolved `import self.<submodule>` siblings (empty ⇒ single file).
 /// Promote a NO-`main` test file's `test` fns to ordinary effect fns and synthesize the
 /// runner `main` (v0 `__test_runner` protocol). See [`try_render_wasm_source_tests`].
-fn synthesize_test_runner_main(ir: &mut almide_ir::IrProgram) -> Result<(), LowerError> {
+fn synthesize_test_runner_main(
+    ir: &mut almide_ir::IrProgram,
+    run_filter: Option<&str>,
+) -> Result<(), LowerError> {
     use almide_ir::{CallTarget, IrExpr, IrExprKind, IrStmt, IrStmtKind};
     use almide_lang::intern::sym;
     use almide_lang::types::Ty;
@@ -191,6 +194,18 @@ fn synthesize_test_runner_main(ir: &mut almide_ir::IrProgram) -> Result<(), Lowe
         },
         span: None,
     };
+    // `--run <pattern>` (#2085). Dropped here rather than before the wall checks
+    // above so a filtered run walls exactly where an unfiltered one does —
+    // otherwise `--run` would quietly change WHICH files reach the wasm leg.
+    // The predicate is `almide_base::names`, the same one the native leg's
+    // emitted fn name comes from: the two legs must select the same tests, and
+    // when this leg selected all of them regardless, no gate could see it.
+    if let Some(pattern) = run_filter {
+        ir.functions.retain(|f| {
+            !f.is_test
+                || almide_lang::almide_base::names::test_name_matches_filter(f.name.as_str(), pattern)
+        });
+    }
     let mut stmts: Vec<IrStmt> = Vec::new();
     let mut idx = 0usize;
     for f in ir.functions.iter_mut() {

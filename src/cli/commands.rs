@@ -362,7 +362,7 @@ fn lower_wasm_test_modules(program: &almide_lang::ast::Program, checker: &mut ch
     Ok(ir_program)
 }
 
-fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::PathBuf) -> WasmTestOutcome {
+fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::PathBuf, run_filter: Option<&str>) -> WasmTestOutcome {
     let skip = |reason: String| WasmTestOutcome::Skip { file: test_file.to_string(), reason };
     let compile_error = |detail: String| WasmTestOutcome::CompileError { file: test_file.to_string(), detail };
     let prof = std::env::var_os("ALMIDE_PROFILE").is_some();
@@ -433,7 +433,7 @@ fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::PathBuf) -> 
     let explain = std::env::var_os("ALMIDE_WALL_REASON").is_some();
 
     let v1_bytes: Option<Vec<u8>> =
-        match almide_mir::pipeline::try_render_wasm_source_tests(&source_text, &v1_self_modules, explain) {
+        match almide_mir::pipeline::try_render_wasm_source_tests(&source_text, &v1_self_modules, explain, run_filter) {
             Err(e) => {
                 if explain { err(&format!("[wall] {}: render: {:?}", test_file, e)); }
                 None
@@ -515,8 +515,10 @@ fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::PathBuf) -> 
     }
 }
 
-pub fn cmd_test_wasm(file: &str, _run_filter: Option<&str>) {
+pub fn cmd_test_wasm(file: &str, run_filter: Option<&str>) {
     let test_files: Vec<String> = discover_test_files(file, &[]);
+    // Owned so each worker thread can carry it (#2085 — this leg used to drop it).
+    let run_filter: Option<String> = run_filter.map(str::to_string);
 
     let scratch = std::sync::Arc::new(TestScratch::new());
 
@@ -534,9 +536,10 @@ pub fn cmd_test_wasm(file: &str, _run_filter: Option<&str>) {
         let scratch = scratch.clone();
         let sem_rx = sem_rx.clone();
         let sem_tx = sem_tx.clone();
+        let run_filter = run_filter.clone();
         handles.push(std::thread::spawn(move || {
             let _ = sem_rx.lock().unwrap().recv();
-            let outcome = compile_and_run_wasm_test(&test_file, scratch.wasm_module_path(&test_file));
+            let outcome = compile_and_run_wasm_test(&test_file, scratch.wasm_module_path(&test_file), run_filter.as_deref());
             let _ = sem_tx.send(());
             let _ = tx.send(outcome);
         }));
@@ -596,7 +599,8 @@ pub fn cmd_test_wasm(file: &str, _run_filter: Option<&str>) {
 
 /// `cmd_test_fast`'s Phase 1: run every file on the fast rustc-free WASM
 /// path, in parallel (bounded by `cpus`). Extracted verbatim.
-fn run_wasm_test_phase(test_files: &[String], scratch: &std::sync::Arc<TestScratch>, cpus: usize) -> Vec<WasmTestOutcome> {
+fn run_wasm_test_phase(test_files: &[String], scratch: &std::sync::Arc<TestScratch>, cpus: usize, run_filter: Option<&str>) -> Vec<WasmTestOutcome> {
+    let run_filter: Option<String> = run_filter.map(str::to_string);
     let (tx, rx) = std::sync::mpsc::channel();
     let (sem_tx, sem_rx) = std::sync::mpsc::sync_channel::<()>(cpus);
     for _ in 0..cpus { let _ = sem_tx.send(()); }
@@ -608,9 +612,10 @@ fn run_wasm_test_phase(test_files: &[String], scratch: &std::sync::Arc<TestScrat
         let scratch = scratch.clone();
         let sr = sem_rx.clone();
         let st = sem_tx.clone();
+        let run_filter = run_filter.clone();
         handles.push(std::thread::spawn(move || {
             let _ = sr.lock().unwrap().recv();
-            let o = compile_and_run_wasm_test(&tf, scratch.wasm_module_path(&tf));
+            let o = compile_and_run_wasm_test(&tf, scratch.wasm_module_path(&tf), run_filter.as_deref());
             let _ = st.send(());
             let _ = tx.send(o);
         }));
@@ -666,7 +671,7 @@ pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>) {
     let scratch = std::sync::Arc::new(TestScratch::new());
 
     // Phase 1: WASM (fast, rustc-free), parallel.
-    let wasm_outcomes = run_wasm_test_phase(&test_files, &scratch, cpus);
+    let wasm_outcomes = run_wasm_test_phase(&test_files, &scratch, cpus, run_filter);
 
     let mut wasm_pass = 0usize;
     let mut fallback: Vec<String> = Vec::new();
@@ -854,7 +859,7 @@ fn run_test_file_once(
     // The scratch layout (#1877) hands the wasm module path to the runner;
     // the accept loop keeps its own per-invocation dir and mirrors the name.
     let wasm_path = tmp_dir.join(file.replace(['/', '.'], "_") + ".wasm");
-    match compile_and_run_wasm_test(file, wasm_path) {
+    match compile_and_run_wasm_test(file, wasm_path, super::test_report::harness_filter(program_args)) {
         WasmTestOutcome::Pass { .. } => return Ok((0, String::new())),
         WasmTestOutcome::Fail { raw, .. } => return Ok((1, raw)),
         WasmTestOutcome::CompileError { detail, .. } => {
