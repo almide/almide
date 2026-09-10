@@ -1,6 +1,7 @@
 pub mod intern;
 pub mod span;
 pub mod diagnostic;
+pub mod names;
 pub mod profile;
 
 // Re-export commonly used items at crate root

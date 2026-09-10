@@ -340,25 +340,12 @@ fn render_fn_generics_str(ctx: &RenderContext, fn_ctx: &RenderContext, func: &Ir
 /// non-ASCII character, an 8-hex FNV-1a of its UTF-8 bytes is appended so
 /// the mapping is injective per distinct original. ASCII-only names keep
 /// their exact historical spelling (zero churn for the existing corpus).
-pub fn rust_safe_fn_name(raw: &str) -> String {
-    let s = raw
-        .replace([' ', '-', '.', ',', ':', '[', ']'], "_")
-        .replace(['(', ')'], "")
-        .replace('+', "_plus_").replace('/', "_div_").replace('*', "_mul_")
-        .replace('=', "_eq_").replace('!', "_bang_").replace('?', "_q_")
-        .replace('<', "_lt_").replace('>', "_gt_")
-        .replace('|', "_pipe_").replace('&', "_amp_").replace('%', "_mod_");
-    let mut safe: String = s.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).collect();
-    if raw.chars().any(|c| !c.is_ascii()) {
-        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-        for b in raw.as_bytes() {
-            h ^= *b as u64;
-            h = h.wrapping_mul(0x0000_0100_0000_01b3);
-        }
-        safe.push_str(&format!("_{:08x}", (h >> 32) as u32 ^ h as u32));
-    }
-    safe
-}
+///
+/// The body now lives in `almide_base::names` (#2085): the wasm test-runner
+/// synthesis in almide-mir has to select the SAME tests `--run` selects here,
+/// and almide-mir cannot see this crate. Re-exported so every caller — the
+/// walker below and the test-report name recovery — keeps its spelling.
+pub use almide_base::names::rust_safe_fn_name;
 
 #[cfg(test)]
 mod rust_safe_fn_name_tests {
