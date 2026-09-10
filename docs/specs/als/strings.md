@@ -1,6 +1,6 @@
 # ALS — 文字列（Strings）
 
-> Last updated: 2026-08-21
+> Last updated: 2026-09-10
 
 Almide Language Specification の文字列規範。実装（v0 native / v1 wasm）から独立に、
 観測可能な振る舞い（stdout・stderr・終了コード）を定義する。各節は契約台帳
@@ -13,9 +13,9 @@ Almide Language Specification の文字列規範。実装（v0 native / v1 wasm�
 `index_of` は**コードポイント単位**で数える（バイトでも grapheme でもない;
 `s[i]` 添字構文は String に対して E026 で拒否され、要素アクセスは
 `string.get(s, i) -> Option[String]`）。
-マルチバイト文字（CJK・絵文字・結合文字を含む）に対する全操作は、この単位で
+これらの操作は、マルチバイト文字（CJK・絵文字・結合文字を含む）に対して、この単位で
 一貫していなければならない。範囲外は `string.get` が none、`slice` が
-空文字列を返す。
+空文字列を返す。バイト単位の明示的な操作は ALS-S4 に定める。
 Contracts: C-016。
 
 ## ALS-S2 空パターンの検索規則
@@ -65,7 +65,15 @@ Contracts: C-018, C-019。
 置換、`String::from_utf8_lossy` と同一の置換規則）。`string.to_bytes` は
 UTF-8 バイト列をそのまま返し、有効な文字列に対して `from_bytes ∘ to_bytes`
 は恒等。
-Contracts: C-022。
+`string.byte_slice(s, start, end)` は UTF-8 バイト単位の半開区間をコピーし、
+両端がコードポイント境界かつ `0 <= start <= end <= バイト長` の場合だけ
+`some(String)` を返す。それ以外は `none`。有効な境界上の空区間は
+`some("")`。端点の検査は区間外を走査せず、コピー量は指定区間のバイト数。
+コードポイント単位の `string.slice` のクランプ規則は変わらない。
+
+Fixture: `spec/wasm_cross/string_from_bytes.almd`、
+`spec/wasm_cross/string_byte_slice.almd`。
+Contracts: C-022, C-348。
 
 ## ALS-S5 split の区切り規範
 

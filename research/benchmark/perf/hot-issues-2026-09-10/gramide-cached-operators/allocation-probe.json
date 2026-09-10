@@ -1,0 +1,18 @@
+{
+  "source_sha256": "fd9bb20543045745f38417ac47439685c3b35bf71af65858ce8392f9eb2c5dc8",
+  "source_bytes": 2973586,
+  "variants": {
+    "baseline": {
+      "stdout": "1142484379396\n",
+      "counters": "allocations=22961527 requested_bytes=307280840 small_allocations=22735318"
+    },
+    "compact": {
+      "stdout": "1142484379396\n",
+      "counters": "allocations=22961528 requested_bytes=286465777 small_allocations=22735318"
+    },
+    "spans": {
+      "stdout": "1142484379396\n",
+      "counters": "allocations=22743986 requested_bytes=268361639 small_allocations=22284889"
+    }
+  }
+}
