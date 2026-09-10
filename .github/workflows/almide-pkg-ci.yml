@@ -21,18 +21,10 @@ jobs:
         run: almide compile
 
       - name: Test
-        # `|| echo` swallowed EVERY failure, real test failures included
-        # (#993). "No tests in this package" is the one tolerated case, and it
-        # is identified by the harness's message — not by ignoring the exit
-        # code wholesale.
-        run: |
-          set +e
-          out=$(almide test 2>&1)
-          code=$?
-          set -e
-          printf '%s\n' "$out"
-          if [ "$code" -ne 0 ] && printf '%s' "$out" | grep -q "No .almd files with test blocks found"; then
-            echo "no tests in this package — OK"
-            exit 0
-          fi
-          exit "$code"
+        # "No tests in this package" is the one tolerated case. This used to be
+        # twelve lines that grepped the harness's prose to tell it apart from a
+        # real failure, because there was no exit code to test — and the `|| echo`
+        # before THAT had swallowed every failure (#993). `almide test` now exits
+        # 5 for "nothing to run", distinct from 1, and this flag is the opt-out
+        # (#2084).
+        run: almide test --allow-no-tests
