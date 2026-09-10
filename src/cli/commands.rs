@@ -50,12 +50,31 @@ pub fn cmd_init() {
     err(&format!("  CLAUDE.md"));
 }
 
+/// Print what the run actually executed, then decide the "nothing ran" verdict.
+///
+/// One rule covers every shape of zero (#2084): no test file discovered, a named
+/// file with no `test` block, a directory of files that have none. What it must
+/// NOT catch is a `--run` pattern that excluded everything — that is the
+/// caller's own narrowing and stays green, which is why the verdict reads
+/// `filtered_out` and not just `ran`.
+fn finish_test_run(counts: TestCounts, files: usize, allow_no_tests: bool) {
+    err(&counts.summary(files));
+    if counts.found_nothing() && !allow_no_tests {
+        err("no tests to run — pass --allow-no-tests if a run with no tests is expected");
+        std::process::exit(NO_TESTS_EXIT);
+    }
+}
+
 /// Shared "resolve `almide test [file]`'s target file list" logic — used by
-/// `cmd_test`/`cmd_test_fast` (search `spec/` and `exercises/`, `.`
-/// fallback) and `cmd_test_wasm` (search `.` directly, i.e. an empty
-/// `fallback_dirs`). Extracted verbatim from `cmd_test`'s identical block —
-/// exits the process on an empty result, exactly as all three call sites
-/// already did.
+/// `cmd_test`/`cmd_test_fast` (search `spec/` and `exercises/`, `.` fallback)
+/// and `cmd_test_wasm` (search `.` directly, i.e. an empty `fallback_dirs`).
+///
+/// An empty result is reported but no longer exits here (#2084): "nothing to
+/// run" is one verdict decided by [`finish_test_run`], so a discovery that
+/// found no file and a named file that turned out to hold no `test` block get
+/// the same exit code instead of 1 and 0 respectively. The "no almide.toml"
+/// refusal below is a different thing — a misaimed command, not an empty one —
+/// and keeps exiting 1.
 fn discover_test_files(file: &str, fallback_dirs: &[&str]) -> Vec<String> {
     if !file.is_empty() {
         let path = std::path::Path::new(file);
@@ -64,7 +83,6 @@ fn discover_test_files(file: &str, fallback_dirs: &[&str]) -> Vec<String> {
             files.sort();
             if files.is_empty() {
                 err(&format!("No .almd files with test blocks found in {}", file));
-                std::process::exit(1);
             }
             files
         } else {
@@ -97,7 +115,6 @@ fn discover_test_files(file: &str, fallback_dirs: &[&str]) -> Vec<String> {
         files.sort();
         if files.is_empty() {
             err(&format!("No .almd files with test blocks found."));
-            std::process::exit(1);
         }
         files
     }
@@ -138,7 +155,9 @@ fn compile_test_files_parallel(test_files: &[String], no_check: bool, scratch: &
     results
 }
 
-use super::test_report::{report_test_failure, test_harness_args, TestRun};
+use super::test_report::{
+    libtest_counts, report_test_failure, test_harness_args, TestCounts, TestRun, NO_TESTS_EXIT,
+};
 
 /// `cmd_test`'s Phase 2: execute every compiled test binary in parallel
 /// (bounded by CPU count). Output is CAPTURED, not inherited: it feeds
@@ -174,7 +193,7 @@ fn run_test_binaries_parallel(compiled: Vec<(String, Result<std::path::PathBuf, 
     results
 }
 
-pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>) {
+pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>, allow_no_tests: bool) {
     let test_files: Vec<String> = discover_test_files(file, &["spec", "exercises"]);
 
     let program_args = test_harness_args(run_filter);
@@ -187,23 +206,28 @@ pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>) {
     let results = run_test_binaries_parallel(compiled, &program_args);
 
     let mut failed = 0;
+    let mut counts = TestCounts::default();
     for (file, code, output) in &results {
+        counts.add(libtest_counts(output).unwrap_or_default());
         if *code != 0 {
             report_test_failure(file, output);
             failed += 1;
         }
     }
+    err("");
     if failed > 0 {
-        err(&format!("\n{}/{} test file(s) failed", failed, test_files.len()));
+        err(&counts.summary(test_files.len()));
+        err(&format!("{}/{} test file(s) failed", failed, test_files.len()));
         scratch.finish();
         std::process::exit(1);
     }
-    err(&format!("\nAll {} test file(s) passed", test_files.len()));
+    err(&format!("All {} test file(s) passed", test_files.len()));
     scratch.finish();
+    finish_test_run(counts, test_files.len(), allow_no_tests);
 }
 
 enum WasmTestOutcome {
-    Pass { file: String, count: usize, bytes: usize },
+    Pass { file: String, count: usize, filtered_out: usize, bytes: usize },
     /// `raw` is the run's whole stdout+stderr (the same concatenation the
     /// native capture makes) — the accept step reads the snapshot block out
     /// of it (#1314); `detail` is the two-line summary the harness prints.
@@ -369,6 +393,12 @@ fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::PathBuf, run
     let mut marks: Vec<(&'static str, std::time::Instant)> = vec![("start", std::time::Instant::now())];
 
     let (mut program, source_text, parse_errors) = parse_file(test_file);
+    // Counted before any filtering so the summary can say what `--run` excluded.
+    let declared_tests = program
+        .decls
+        .iter()
+        .filter(|d| matches!(d, almide_lang::ast::Decl::Test { .. }))
+        .count();
     mark(prof, &mut marks, "parse");
     // `// wasm:skip` marker / parse errors (a real Fail, not a benign skip —
     // see `wasm_test_preflight_outcome`'s doc comment) / the main+test
@@ -478,10 +508,16 @@ fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::PathBuf, run
                 let stdout = String::from_utf8_lossy(&result.stdout);
                 let stderr = String::from_utf8_lossy(&result.stderr);
                 if result.status.success() {
-                    WasmTestOutcome::Pass {
-                        file: test_file.to_string(),
-                        count: stdout.matches("ok\n").count(),
-                        bytes: bytes.len(),
+                    {
+                        let ran = stdout.matches("ok\n").count();
+                        WasmTestOutcome::Pass {
+                            file: test_file.to_string(),
+                            count: ran,
+                            // The runner is synthesized over the SELECTED tests, so
+                            // what `--run` excluded is only knowable from the source.
+                            filtered_out: declared_tests.saturating_sub(ran),
+                            bytes: bytes.len(),
+                        }
                     }
                 } else {
                     let mut last_test = String::new();
@@ -515,7 +551,7 @@ fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::PathBuf, run
     }
 }
 
-pub fn cmd_test_wasm(file: &str, run_filter: Option<&str>) {
+pub fn cmd_test_wasm(file: &str, run_filter: Option<&str>, allow_no_tests: bool) {
     let test_files: Vec<String> = discover_test_files(file, &[]);
     // Owned so each worker thread can carry it (#2085 — this leg used to drop it).
     let run_filter: Option<String> = run_filter.map(str::to_string);
@@ -558,10 +594,12 @@ pub fn cmd_test_wasm(file: &str, run_filter: Option<&str>) {
     let mut failed = 0;
     let mut passed = 0;
     let mut skipped = 0;
+    let mut counts = TestCounts::default();
     for o in &outcomes {
         match o {
-            WasmTestOutcome::Pass { file, count, bytes } => {
+            WasmTestOutcome::Pass { file, count, filtered_out, bytes } => {
                 err(&format!("{}: {} tests passed ({} bytes)", file, count, bytes));
+                counts.add(TestCounts { ran: *count, filtered_out: *filtered_out });
                 passed += 1;
             }
             WasmTestOutcome::Fail { file, detail, .. } => {
@@ -595,6 +633,7 @@ pub fn cmd_test_wasm(file: &str, run_filter: Option<&str>) {
     if failed > 0 {
         std::process::exit(1);
     }
+    finish_test_run(counts, test_files.len(), allow_no_tests);
 }
 
 /// `cmd_test_fast`'s Phase 1: run every file on the fast rustc-free WASM
@@ -664,7 +703,7 @@ fn run_native_fallback_phase(fallback: &[String], program_args: &std::sync::Arc<
 /// any file the WASM path can't pass (emitter gap, wasm:skip, or a trap), fall
 /// back to the native rustc path, which is authoritative. The common case (most
 /// tests pass on WASM) is ~9x faster; the native fallback preserves correctness.
-pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>) {
+pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>, allow_no_tests: bool) {
     let test_files: Vec<String> = discover_test_files(file, &["spec", "exercises"]);
 
     let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
@@ -676,9 +715,15 @@ pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>) {
     let mut wasm_pass = 0usize;
     let mut fallback: Vec<String> = Vec::new();
     let mut trapped: Vec<(String, String)> = Vec::new();
+    // Counted per LEG, because a file that walls on wasm is re-run natively and
+    // would otherwise be counted twice.
+    let mut counts = TestCounts::default();
     for o in wasm_outcomes {
         match o {
-            WasmTestOutcome::Pass { .. } => wasm_pass += 1,
+            WasmTestOutcome::Pass { count, filtered_out, .. } => {
+                counts.add(TestCounts { ran: count, filtered_out });
+                wasm_pass += 1
+            }
             // A `Fail` is DIFFERENT IN KIND from the benign fallback classes
             // (#1166): the wasm leg COMPILED the file, claimed it, and produced
             // a runtime failure. Whether that is a plain failing test or a
@@ -709,6 +754,7 @@ pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>) {
 
     let mut failed = 0;
     for (file, code, output) in &native_results {
+        counts.add(libtest_counts(output).unwrap_or_default());
         if *code != 0 { report_test_failure(file, output); failed += 1; }
     }
     // The #1166 divergence class: the wasm leg compiled the file and failed at
@@ -760,6 +806,7 @@ pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>) {
         std::process::exit(1);
     }
     err(&format!("All {} test file(s) passed", test_files.len()));
+    finish_test_run(counts, test_files.len(), allow_no_tests);
 }
 
 /// `almide test --update-snapshots` (#1314): the accept step. Each file runs
@@ -880,7 +927,7 @@ fn run_test_file_once(
     }
 }
 
-pub fn cmd_test_json(file: &str, run_filter: Option<&str>) {
+pub fn cmd_test_json(file: &str, run_filter: Option<&str>, allow_no_tests: bool) {
     let test_files: Vec<String> = if !file.is_empty() {
         let path = std::path::Path::new(file);
         if path.is_dir() {
@@ -897,6 +944,7 @@ pub fn cmd_test_json(file: &str, run_filter: Option<&str>) {
     };
 
     let program_args = test_harness_args(run_filter);
+    let mut counts = TestCounts::default();
 
     // JSONL, one line per file, in sorted file order — a run is diffable
     // against the next one. Each failing file also emits its per-assertion
@@ -910,14 +958,23 @@ pub fn cmd_test_json(file: &str, run_filter: Option<&str>) {
         };
         let source = std::fs::read_to_string(test_file).unwrap_or_default();
         let failures = super::test_report::parse(test_file, &source, &output);
+        let file_counts = libtest_counts(&output).unwrap_or_default();
+        counts.add(file_counts);
         let status = if code == 0 { "pass" } else { "fail" };
         out(&format!(
-            r#"{{"file":{},"status":"{}","exit_code":{},"failures":[{}]}}"#,
+            r#"{{"file":{},"status":"{}","exit_code":{},"tests":{},"filtered_out":{},"failures":[{}]}}"#,
             serde_json::Value::from(test_file.as_str()),
             status,
             code,
+            file_counts.ran,
+            file_counts.filtered_out,
             failures.iter().map(|f| f.to_json()).collect::<Vec<_>>().join(","),
         ));
+    }
+    // No summary line on this lane — the records ARE the output — but the
+    // verdict still applies, so a `--json` consumer sees the same exit code.
+    if counts.found_nothing() && !allow_no_tests {
+        std::process::exit(NO_TESTS_EXIT);
     }
 }
 
