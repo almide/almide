@@ -786,6 +786,23 @@ impl Checker {
             return Ty::Unknown;
         }
         let mut diag = super::err(format!("undefined function '{}'", name), hint, format!("call to {}()", name)).with_code("E002");
+        // #2088: the caret must cover the CALLEE. `emit` fills an unset span from
+        // `current_span`, which by this point is the last argument the checker
+        // walked — so `list.nope(xs)` underlined `xs` (and a call inside a `${}`
+        // interpolation underlined 22 columns of unrelated text) while the
+        // zero-argument `list.nope()` happened to be right, because there was no
+        // argument to move the cursor. The message names the function and the
+        // caret has to point at it, or the reader edits the argument instead.
+        if let Some(span) = self.callee_span_hint {
+            if let Some(file) = &self.source_file {
+                diag.file = Some(file.clone());
+            }
+            diag.line = Some(span.line);
+            diag.col = Some(span.col);
+            if span.end_col > span.col {
+                diag.end_col = Some(span.end_col);
+            }
+        }
         // `try_replace` (Phase 3): when the hint is a clean rename and the callee's source span is available, emit both a concise `try` and the exact replacement range so `Diagnostic::apply_try_to` can rewrite the source. Rich multi-line snippets (conversion wrappers, operator suggestions) stay display-only via `with_try`.
         if let Some(rich) = rich_snippet {
             diag = diag.with_try(rich.to_string());
