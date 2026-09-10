@@ -88,3 +88,15 @@ numerical and cross-target evidence before claiming an arena win.
 - Release allocation ledger and structural witness floor pass; existing allocation
   rows are unchanged, with one new fixture row. Docs generation check passes.
 - Codopsy codegen and WASM both retain A (90/100), existing 20/30 thresholds.
+
+## CI integration follow-up
+
+The new fixture uses explicit Option matches so the incumbent MIR host harness
+also compiles every case; the expected results and invalid-boundary cases are
+unchanged. Native, wasm32-wasip1 and the browser ABI emit identical 17,620-byte
+incumbent modules for it, with no new refused fixture. The structural emitted /
+WASI sizes are 5,098 / 5,608 bytes. Only its rows are added to the size baselines;
+existing rows and refusal ceilings remain unchanged. The new API is registered
+as pure, in the exercised surface, in IDE snapshots and in the contract tables.
+The native concurrency refusal now carries its source span, checked by a regression
+test and the spanless-wall ratchet.
