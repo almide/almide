@@ -15,6 +15,10 @@ test "string.slice unit=codepoint" {
   assert_eq("${string.slice("café7", 0, 4)}", "café")
 }
 
+test "string.byte_slice unit=byte" {
+  assert_eq("${string.byte_slice("café7", 3, 5) ?? "?"}", "é")
+}
+
 test "string.pad_start unit=codepoint" {
   assert_eq("${string.pad_start("é", 3, "x")}", "xxé")
 }
