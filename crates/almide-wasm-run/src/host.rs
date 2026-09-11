@@ -98,11 +98,52 @@ impl StdinSource {
     }
 }
 
-/// io_err = Display — VERBATIM the native runtime's formatting, so error
-/// strings ("No such file or directory (os error 2)") match by
-/// construction.
-fn io_err(e: impl std::fmt::Display) -> String {
-    format!("{e}")
+/// io_err — VERBATIM the native runtime's formatting, so error strings
+/// (`fs.read_text("/nope/x"): No such file or directory (os error 2)`) match by
+/// construction. The twin lives in `runtime/rs/src/fs.rs`; #2090 gave both the
+/// call name and the operand, and they move together or C-215 breaks.
+///
+/// The structural wasm leg crosses `almide.fs_call` to THIS host for every
+/// `fs.*` call, so this file — not the generated WAT — is where the default
+/// `--target wasm` message is built.
+fn io_err(call: &str, args: &str, e: impl std::fmt::Display) -> String {
+    format!("{call}({args}): {e}")
+}
+/// Source-shaped quoting — the twin of `fs.rs`'s `q`. Deliberately not `{:?}`;
+/// see that file for why the escape table is not reproduced.
+fn q(s: &str) -> String {
+    format!("\"{s}\"")
+}
+/// The Almide call an fs op came from, so the message names what the WRITER
+/// wrote rather than the host primitive that served it. `fold_lines` /
+/// `for_each_line` have their own ops for exactly this reason (#2090).
+fn fs_op_name(op: i32) -> &'static str {
+    match op {
+        1 => "fs.read_text",
+        2 => "fs.write",
+        3 => "fs.write_bytes",
+        7 => "fs.mkdir_p",
+        8 => "fs.remove",
+        9 => "fs.remove_all",
+        10 => "fs.create_temp_dir",
+        11 => "fs.list_dir",
+        12 => "fs.read_lines",
+        13 => "fs.read_text_if_exists",
+        14 => "fs.read_bytes",
+        15 => "fs.write_bytes_raw",
+        16 => "fs.append",
+        17 => "fs.file_size",
+        18 => "fs.modified_at",
+        19 => "fs.copy",
+        20 => "fs.rename",
+        21 => "fs.create_temp_file",
+        23 => "fs.walk",
+        24 => "fs.read_lines_if_exists",
+        25 => "fs.read_bytes_if_exists",
+        51 => "fs.fold_lines",
+        52 => "fs.for_each_line",
+        _ => "fs",
+    }
 }
 
 /// Length-prefixed string frames (u32 LE + bytes) — the list-of-strings
@@ -161,29 +202,29 @@ fn fs_dispatch_w(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
         Err(m) => err_s(m),
     };
     match op {
-        2 | 15 => unit(std::fs::write(a, b).map_err(io_err)),
+        2 | 15 => unit(std::fs::write(a, b).map_err(|e| io_err(fs_op_name(op), &q(a), e))),
         // write_bytes: b is the guest List[Int] payload — i64 LE slots,
         // low byte each (native `x as u8`).
         3 => {
             let (slots, _) = b.as_chunks::<8>();
             let data: Vec<u8> = slots.iter().map(|c| i64::from_le_bytes(*c) as u8).collect();
-            unit(std::fs::write(a, &data).map_err(io_err))
+            unit(std::fs::write(a, &data).map_err(|e| io_err(fs_op_name(op), &q(a), e)))
         }
-        7 => unit(std::fs::create_dir_all(a).map_err(io_err)),
+        7 => unit(std::fs::create_dir_all(a).map_err(|e| io_err(fs_op_name(op), &q(a), e))),
         8 => {
             let p = Path::new(a);
             unit(if p.is_dir() {
-                std::fs::remove_dir(a).map_err(io_err)
+                std::fs::remove_dir(a).map_err(|e| io_err(fs_op_name(op), &q(a), e))
             } else {
-                std::fs::remove_file(a).map_err(io_err)
+                std::fs::remove_file(a).map_err(|e| io_err(fs_op_name(op), &q(a), e))
             })
         }
         9 => {
             let p = Path::new(a);
             unit(if p.is_dir() {
-                std::fs::remove_dir_all(a).map_err(io_err)
+                std::fs::remove_dir_all(a).map_err(|e| io_err(fs_op_name(op), &q(a), e))
             } else {
-                std::fs::remove_file(a).map_err(io_err)
+                std::fs::remove_file(a).map_err(|e| io_err(fs_op_name(op), &q(a), e))
             })
         }
         _ => unit(
@@ -192,7 +233,7 @@ fn fs_dispatch_w(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
                 .append(true)
                 .open(a)
                 .and_then(|mut f| std::io::Write::write_all(&mut f, b))
-                .map_err(io_err),
+                .map_err(|e| io_err(fs_op_name(op), &q(a), e)),
         ),
     }
 }
@@ -215,7 +256,7 @@ fn fs_dispatch_r2(op: i32, a: &str) -> (i64, Vec<u8>) {
                     .as_nanos()
             );
             let path = dir.join(&name);
-            match std::fs::create_dir_all(&path).map_err(io_err) {
+            match std::fs::create_dir_all(&path).map_err(|e| io_err(fs_op_name(op), &q(&path.to_string_lossy()), e)) {
                 Ok(()) => ok_text(path.to_string_lossy().replace('\\', "/")),
                 Err(m) => err_s(m),
             }
@@ -226,14 +267,14 @@ fn fs_dispatch_r2(op: i32, a: &str) -> (i64, Vec<u8>) {
                 for entry in entries {
                     match entry {
                         Ok(e) => names.push(e.file_name().to_string_lossy().to_string()),
-                        Err(e) => return err_s(io_err(e)),
+                        Err(e) => return err_s(io_err(fs_op_name(op), &q(a), e)),
                     }
                 }
                 names.sort();
                 let buf = frames(&names);
                 (pack(0, buf.len()), buf)
             }
-            Err(e) => err_s(io_err(e)),
+            Err(e) => err_s(io_err(fs_op_name(op), &q(a), e)),
         },
         12 => match std::fs::read_to_string(a) {
             Ok(t) => {
@@ -241,13 +282,13 @@ fn fs_dispatch_r2(op: i32, a: &str) -> (i64, Vec<u8>) {
                 let buf = frames(&lines);
                 (pack(0, buf.len()), buf)
             }
-            Err(e) => err_s(io_err(e)),
+            Err(e) => err_s(io_err(fs_op_name(op), &q(a), e)),
         },
         13 => {
             if Path::new(a).exists() {
                 match std::fs::read_to_string(a) {
                     Ok(t) => ok_text(t),
-                    Err(e) => err_s(io_err(e)),
+                    Err(e) => err_s(io_err(fs_op_name(op), &q(a), e)),
                 }
             } else {
                 (pack(2, 0), Vec::new())
@@ -255,7 +296,7 @@ fn fs_dispatch_r2(op: i32, a: &str) -> (i64, Vec<u8>) {
         }
         _ => match std::fs::read(a) {
             Ok(bytes) => (pack(0, bytes.len()), bytes),
-            Err(e) => err_s(io_err(e)),
+            Err(e) => err_s(io_err(fs_op_name(op), &q(a), e)),
         },
     }
 }
@@ -273,9 +314,11 @@ fn fs_dispatch_meta(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     match op {
         17 => match std::fs::metadata(a) {
             Ok(m) => ok_i64(m.len() as i64),
-            Err(e) => err_s(io_err(e)),
+            Err(e) => err_s(io_err(fs_op_name(op), &q(a), e)),
         },
-        18 => match std::fs::metadata(a).map_err(io_err).and_then(|m| m.modified().map_err(io_err))
+        18 => match std::fs::metadata(a)
+            .map_err(|e| io_err(fs_op_name(op), &q(a), e))
+            .and_then(|m| m.modified().map_err(|e| io_err(fs_op_name(op), &q(a), e)))
         {
             Ok(t) => ok_i64(
                 t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64,
@@ -283,9 +326,13 @@ fn fs_dispatch_meta(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
             Err(m) => err_s(m),
         },
         19 => unit(
-            std::fs::copy(a, String::from_utf8_lossy(b).as_ref()).map(|_| ()).map_err(io_err),
+            std::fs::copy(a, String::from_utf8_lossy(b).as_ref()).map(|_| ()).map_err(|e| {
+                io_err(fs_op_name(op), &format!("{}, {}", q(a), q(&String::from_utf8_lossy(b))), e)
+            }),
         ),
-        20 => unit(std::fs::rename(a, String::from_utf8_lossy(b).as_ref()).map_err(io_err)),
+        20 => unit(std::fs::rename(a, String::from_utf8_lossy(b).as_ref()).map_err(|e| {
+            io_err(fs_op_name(op), &format!("{}, {}", q(a), q(&String::from_utf8_lossy(b))), e)
+        })),
         21 => fs_temp_file(a),
         22 => (pack(0, usize::from(Path::new(a).is_symlink())), Vec::new()),
         23 => fs_walk_sorted(a),
@@ -293,7 +340,7 @@ fn fs_dispatch_meta(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
         25 => match std::fs::read(a) {
             Ok(bytes) => (pack(0, bytes.len()), bytes),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => (pack(2, 0), Vec::new()),
-            Err(e) => err_s(io_err(e)),
+            Err(e) => err_s(io_err(fs_op_name(op), &q(a), e)),
         },
         _ => fs_dispatch_host(op, a, b),
     }
@@ -309,7 +356,7 @@ fn fs_read_lines(path: &str) -> (i64, Vec<u8>) {
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => (pack(2, 0), Vec::new()),
         Err(e) => {
-            let m = io_err(e);
+            let m = io_err("fs.read_lines_if_exists", &q(path), e);
             (pack(1, m.len()), m.into_bytes())
         }
     }
@@ -326,7 +373,9 @@ fn fs_temp_file(prefix: &str) -> (i64, Vec<u8>) {
             .as_nanos()
     );
     let path = std::env::temp_dir().join(&name);
-    match std::fs::write(&path, "").map_err(io_err) {
+    match std::fs::write(&path, "")
+        .map_err(|e| io_err("fs.create_temp_file", &q(&path.to_string_lossy()), e))
+    {
         Ok(()) => {
             let t = path.to_string_lossy().replace('\\', "/");
             (pack(0, t.len()), t.into_bytes())
@@ -339,8 +388,11 @@ fn fs_temp_file(prefix: &str) -> (i64, Vec<u8>) {
 fn fs_walk_sorted(root: &str) -> (i64, Vec<u8>) {
     use std::path::Path;
     fn walk(dir: &Path, out: &mut Vec<String>) -> Result<(), String> {
-        for entry in std::fs::read_dir(dir).map_err(io_err)? {
-            let entry = entry.map_err(io_err)?;
+        for entry in
+            std::fs::read_dir(dir).map_err(|e| io_err("fs.walk", &q(&dir.to_string_lossy()), e))?
+        {
+            let entry =
+                entry.map_err(|e| io_err("fs.walk", &q(&dir.to_string_lossy()), e))?;
             let path = entry.path();
             out.push(path.to_string_lossy().replace('\\', "/"));
             if path.is_dir() {
@@ -503,7 +555,7 @@ fn fs_dispatch_env(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
         // cwd — the same std::env the native runtime reads.
         33 => match std::env::current_dir() {
             Ok(p) => ok_text(p.to_string_lossy().replace('\\', "/")),
-            Err(e) => err_s(io_err(e)),
+            Err(e) => err_s(io_err("env.cwd", "", e)),
         },
         // host entropy: n = b_len bytes from a seeded-by-time xorshift
         // (the range property is the only observable, C-112).
@@ -529,7 +581,9 @@ fn fs_dispatch(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     if matches!(op, 2 | 3 | 7..=9 | 15 | 16) {
         return fs_dispatch_w(op, a, b);
     }
-    if matches!(op, 10..=14) {
+    // 51/52 are `fold_lines` / `for_each_line`: the SAME framed-lines body as
+    // op 12, carrying their own name so the message matches native (#2090).
+    if matches!(op, 10..=14 | 51 | 52) {
         return fs_dispatch_r2(op, a);
     }
     if op >= 17 {
@@ -540,7 +594,7 @@ fn fs_dispatch(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     match op {
         1 => match std::fs::read_to_string(a) {
             Ok(t) => ok_text(t),
-            Err(e) => err_s(io_err(e)),
+            Err(e) => err_s(io_err(fs_op_name(op), &q(a), e)),
         },
         4 => (pack(0, usize::from(Path::new(a).exists())), Vec::new()),
         5 => (pack(0, usize::from(Path::new(a).is_dir())), Vec::new()),
