@@ -57,7 +57,8 @@ effect fn fs_fold_lines_msi(path: String, init: Map[String, Int], f: (Map[String
     // expression in a ResultErr arm (`[heap-if-arm] declined arm kind ResultErr`)
     // for several accumulator shapes, and the twin then loses its wasm leg —
     // the file silently drops to the NATIVE FALLBACK instead of erroring.
-    let named = if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m)) else m
+    let named = if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m))
+    else m
     err(named)
   } else {
     let text: String = prim.load_handle(rh + 12)
@@ -100,7 +101,8 @@ effect fn fs_fallible_fold_lines_msi(path: String, init: Map[String, Int], f: (M
     // expression in a ResultErr arm (`[heap-if-arm] declined arm kind ResultErr`)
     // for several accumulator shapes, and the twin then loses its wasm leg —
     // the file silently drops to the NATIVE FALLBACK instead of erroring.
-    let named = if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m)) else m
+    let named = if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m))
+    else m
     err(named)
   } else {
     let text: String = prim.load_handle(rh + 12)
@@ -160,7 +162,8 @@ effect fn fs_fold_lines_chunked_msi(path: String, workers: Int, init: Map[String
     // expression in a ResultErr arm (`[heap-if-arm] declined arm kind ResultErr`)
     // for several accumulator shapes, and the twin then loses its wasm leg —
     // the file silently drops to the NATIVE FALLBACK instead of erroring.
-    let named = if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m)) else m
+    let named = if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m))
+    else m
     err(named)
   } else {
     let text: String = prim.load_handle(rh + 12)
@@ -212,7 +215,8 @@ effect fn fs_fold_lines_chunked_i(path: String, workers: Int, init: Int, f: (Int
     // expression in a ResultErr arm (`[heap-if-arm] declined arm kind ResultErr`)
     // for several accumulator shapes, and the twin then loses its wasm leg —
     // the file silently drops to the NATIVE FALLBACK instead of erroring.
-    let named = if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m)) else m
+    let named = if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m))
+    else m
     err(named)
   } else {
     let text: String = prim.load_handle(rh + 12)
@@ -269,7 +273,8 @@ effect fn fs_fold_lines_chunked_ls(path: String, workers: Int, init: List[String
     // expression in a ResultErr arm (`[heap-if-arm] declined arm kind ResultErr`)
     // for several accumulator shapes, and the twin then loses its wasm leg —
     // the file silently drops to the NATIVE FALLBACK instead of erroring.
-    let named = if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m)) else m
+    let named = if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m))
+    else m
     err(named)
   } else {
     let text: String = prim.load_handle(rh + 12)
@@ -298,7 +303,8 @@ effect fn fs_fold_lines_range_ls(path: String, start: Int, endp: Int, init: List
     // expression in a ResultErr arm (`[heap-if-arm] declined arm kind ResultErr`)
     // for several accumulator shapes, and the twin then loses its wasm leg —
     // the file silently drops to the NATIVE FALLBACK instead of erroring.
-    let named = if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m)) else m
+    let named = if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m))
+    else m
     err(named)
   } else {
     let text: String = prim.load_handle(rh + 12)
@@ -334,7 +340,8 @@ effect fn fs_fold_lines_s(path: String, init: String, f: (String, String) -> Str
     // expression in a ResultErr arm (`[heap-if-arm] declined arm kind ResultErr`)
     // for several accumulator shapes, and the twin then loses its wasm leg —
     // the file silently drops to the NATIVE FALLBACK instead of erroring.
-    let named = if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m)) else m
+    let named = if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m))
+    else m
     err(named)
   } else {
     let text: String = prim.load_handle(rh + 12)
@@ -367,7 +374,8 @@ effect fn fs_fold_lines_i(path: String, init: Int, f: (Int, String) -> Int) -> R
     // expression in a ResultErr arm (`[heap-if-arm] declined arm kind ResultErr`)
     // for several accumulator shapes, and the twin then loses its wasm leg —
     // the file silently drops to the NATIVE FALLBACK instead of erroring.
-    let named = if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m)) else m
+    let named = if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m))
+    else m
     err(named)
   } else {
     let text: String = prim.load_handle(rh + 12)
@@ -400,7 +408,8 @@ effect fn fs_fold_lines_ls(path: String, init: List[String], f: (List[String], S
     // expression in a ResultErr arm (`[heap-if-arm] declined arm kind ResultErr`)
     // for several accumulator shapes, and the twin then loses its wasm leg —
     // the file silently drops to the NATIVE FALLBACK instead of erroring.
-    let named = if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m)) else m
+    let named = if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m))
+    else m
     err(named)
   } else {
     let text: String = prim.load_handle(rh + 12)
@@ -435,7 +444,8 @@ effect fn fs_for_each_line(path: String, f: (String) -> Unit) -> Result[Unit, St
     // expression in a ResultErr arm (`[heap-if-arm] declined arm kind ResultErr`)
     // for several accumulator shapes, and the twin then loses its wasm leg —
     // the file silently drops to the NATIVE FALLBACK instead of erroring.
-    let named = if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m)) else m
+    let named = if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m))
+    else m
     err(named)
   } else {
     let text: String = prim.load_handle(rh + 12)
@@ -472,7 +482,8 @@ effect fn fs_fallible_fold_lines_i(path: String, init: Int, f: (Int, String) -> 
     // expression in a ResultErr arm (`[heap-if-arm] declined arm kind ResultErr`)
     // for several accumulator shapes, and the twin then loses its wasm leg —
     // the file silently drops to the NATIVE FALLBACK instead of erroring.
-    let named = if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m)) else m
+    let named = if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m))
+    else m
     err(named)
   } else {
     let text: String = prim.load_handle(rh + 12)
@@ -504,7 +515,8 @@ effect fn fs_fallible_for_each_line(path: String, f: (String) -> Result[Unit, St
     // expression in a ResultErr arm (`[heap-if-arm] declined arm kind ResultErr`)
     // for several accumulator shapes, and the twin then loses its wasm leg —
     // the file silently drops to the NATIVE FALLBACK instead of erroring.
-    let named = if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m)) else m
+    let named = if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m))
+    else m
     err(named)
   } else {
     let text: String = prim.load_handle(rh + 12)
@@ -530,7 +542,8 @@ effect fn fs_fold_lines_range_i(path: String, start: Int, endp: Int, init: Int, 
     // expression in a ResultErr arm (`[heap-if-arm] declined arm kind ResultErr`)
     // for several accumulator shapes, and the twin then loses its wasm leg —
     // the file silently drops to the NATIVE FALLBACK instead of erroring.
-    let named = if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m)) else m
+    let named = if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m))
+    else m
     err(named)
   } else {
     let text: String = prim.load_handle(rh + 12)
@@ -564,7 +577,8 @@ effect fn fs_fold_lines_range_s(path: String, start: Int, endp: Int, init: Strin
     // expression in a ResultErr arm (`[heap-if-arm] declined arm kind ResultErr`)
     // for several accumulator shapes, and the twin then loses its wasm leg —
     // the file silently drops to the NATIVE FALLBACK instead of erroring.
-    let named = if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m)) else m
+    let named = if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m))
+    else m
     err(named)
   } else {
     let text: String = prim.load_handle(rh + 12)
@@ -590,7 +604,8 @@ effect fn fs_fold_lines_range_msi(path: String, start: Int, endp: Int, init: Map
     // expression in a ResultErr arm (`[heap-if-arm] declined arm kind ResultErr`)
     // for several accumulator shapes, and the twin then loses its wasm leg —
     // the file silently drops to the NATIVE FALLBACK instead of erroring.
-    let named = if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m)) else m
+    let named = if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m))
+    else m
     err(named)
   } else {
     let text: String = prim.load_handle(rh + 12)
@@ -629,7 +644,8 @@ effect fn fs_fold_lines_chunked_s(path: String, workers: Int, init: String, f: (
     // expression in a ResultErr arm (`[heap-if-arm] declined arm kind ResultErr`)
     // for several accumulator shapes, and the twin then loses its wasm leg —
     // the file silently drops to the NATIVE FALLBACK instead of erroring.
-    let named = if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m)) else m
+    let named = if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m))
+    else m
     err(named)
   } else {
     let text: String = prim.load_handle(rh + 12)
