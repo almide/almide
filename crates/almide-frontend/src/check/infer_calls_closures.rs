@@ -761,7 +761,21 @@ impl Checker {
         self.check_unwrap_propagation_context(&resolved);
         if let Some(inner_ty) = resolved.option_inner().or_else(|| resolved.result_ok_ty()) {
             inner_ty
-        } else if matches!(&resolved, Ty::Unknown | Ty::TypeVar(_)) {
+        } else if matches!(&resolved, Ty::Unknown) {
+            // Recovery residue in, recovery residue out (#2096). `Unknown` here
+            // means a PRIOR error already reported this expression — an E002 on
+            // the callee, say — and minting a fresh var instead would hand the
+            // post-solve validator an unbound `?N` it cannot distinguish from a
+            // genuinely undecidable slot. It then reported E025 on top of the
+            // E002, with a hint telling the reader to annotate a binding that
+            // only exists because recovery put it there. `validate_unresolved_
+            // binding_types` already skips a wholly-`Unknown` site for exactly
+            // this reason; propagating the marker is what lets that guard see it.
+            Ty::Unknown
+        } else if matches!(&resolved, Ty::TypeVar(_)) {
+            // A bare inference var is NOT recovery: the operand may still be
+            // pinned by context, so the unwrap keeps its own fresh slot and E025
+            // stays available for the genuinely undecidable case.
             self.fresh_var()
         } else if self.is_effect_call_expr(inner) {
             // #1049: `!` on a NEVER-ERR effect call is a silent no-op. The
