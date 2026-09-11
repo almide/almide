@@ -32,6 +32,29 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
         fs_errno_msg_wat("            ", RDIR_ERR_ADDR, RDIR_ERR_LEN, "directory not found");
     let rename_errno_map =
         fs_errno_msg_wat("        ", WRITE_ERR_ADDR, WRITE_ERR_LEN, "write failed");
+    // #2090 — the message BUILD that follows each map above, naming the call and
+    // its path. One source (`fs_err_msg_wat`), one row of the derived prefix
+    // table per floor, so the eight sites cannot drift into eight spellings the
+    // way the pre-#1385 fixed strings did.
+    let rtf_err_msg = fs_err_msg_wat("        ", &fs_msg_pfx_by_validate("        "), &["$path"]);
+    // The same builder at the UTF-8 arm's deeper indent.
+    let rtf_utf8_err_msg =
+        fs_err_msg_wat("            ", &fs_msg_pfx_by_validate("            "), &["$path"]);
+    let write_err_msg =
+        fs_err_msg_wat("        ", &fs_msg_pfx_fixed("        ", FS_MSG_WRITE), &["$path"]);
+    let write_fd_err_msg =
+        fs_err_msg_wat("            ", &fs_msg_pfx_fixed("            ", FS_MSG_WRITE), &["$path"]);
+    let mkdir_err_msg =
+        fs_err_msg_wat("        ", &fs_msg_pfx_fixed("        ", FS_MSG_MKDIR), &["$path"]);
+    let remove_err_msg =
+        fs_err_msg_wat("        ", &fs_msg_pfx_fixed("        ", FS_MSG_REMOVE), &["$path"]);
+    let rdir_err_msg =
+        fs_err_msg_wat("        ", &fs_msg_pfx_fixed("        ", FS_MSG_LIST_DIR), &["$path"]);
+    let rdir_rd_err_msg =
+        fs_err_msg_wat("            ", &fs_msg_pfx_fixed("            ", FS_MSG_LIST_DIR), &["$path"]);
+    let rename_err_msg =
+        fs_err_msg_wat("        ", &fs_msg_pfx_fixed("        ", FS_MSG_RENAME), &["$src", "$dst"]);
+    let msg_locals = fs_err_msg_locals();
     // The ONE preopen → dirfd resolution step, spliced into `$path_norm`'s tail
     // (#1394). All 13 WASI path-call sites take their dirfd from its result, so
     // the rule has exactly one source.
@@ -186,6 +209,7 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
     (local $fd i32) (local $stat i32) (local $fsize i32) (local $iov i32)
     (local $nread i32) (local $data i32) (local $datb i32) (local $str i32) (local $result i32)
     (local $j i32) (local $msg i32) (local $maddr i32) (local $mlen i32)
+    {msg_locals}
     ;; dirfd + path bytes + length via $path_norm (the preopen the path belongs to,
     ;; and its remainder relative to that preopen — #1394).
     (call $path_norm (local.get $path))
@@ -253,8 +277,7 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
     ;; maps to the EXACT text native std::fs emits ($fs_errno_msg), so `err(e)` byte-matches.
     (if (i32.ne (local.get $errno) (i32.const 0))
       (then
-{rtf_errno_map}        (local.set $msg (call $rtf_str (local.get $maddr) (local.get $mlen)))
-        (local.set $result (call $rtf_result (local.get $msg) (i32.const 1))))
+{rtf_errno_map}{rtf_err_msg}        (local.set $result (call $rtf_result (local.get $msg) (i32.const 1))))
       (else
         ;; the actual byte count read (may be < the stat size) is the String length.
         (local.set $fsize (i32.load (local.get $nread)))
@@ -263,7 +286,13 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
             ;; #1506 — the text floor refuses invalid UTF-8 exactly like native
             ;; std::fs::read_to_string: Err with its InvalidData message. The bytes floor
             ;; ($validate = 0) never takes this arm.
-            (local.set $msg (call $rtf_str (i32.const {FS_ERR_UTF8_ADDR}) (i32.const {FS_ERR_UTF8_LEN})))
+            ;; #2090 — the UTF-8 refusal is NOT an errno site (no $errno branch feeds
+            ;; it), so it sets $maddr/$mlen itself and then shares the ONE message
+            ;; builder. Missing this site is what made native name the call while
+            ;; wasm answered bare `stream did not contain valid UTF-8`.
+            (local.set $maddr (i32.const {FS_ERR_UTF8_ADDR}))
+            (local.set $mlen (i32.const {FS_ERR_UTF8_LEN}))
+{rtf_utf8_err_msg}
             (local.set $result (call $rtf_result (local.get $msg) (i32.const 1))))
           (else
             ;; build the canonical String + copy the bytes, then wrap it Ok.
@@ -342,6 +371,7 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
     (local $pdata i32) (local $plen i32) (local $dirfd i32) (local $fd_out i32) (local $errno i32)
     (local $fd i32) (local $iov i32) (local $nwritten i32) (local $obj i32) (local $msg i32)
     (local $maddr i32) (local $mlen i32) (local $wbase i32) (local $wrem i32) (local $wgot i32)
+    {msg_locals}
     ;; dirfd + path bytes + length via $path_norm (#1394).
     (call $path_norm (local.get $path))
     (local.set $plen)
@@ -357,7 +387,7 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
     ;; On a path_open error build Err(<native std::io Display>).
     (if (result i32) (i32.ne (local.get $errno) (i32.const 0))
       (then
-{write_errno_map}        (local.set $msg (call $rtf_str (local.get $maddr) (local.get $mlen)))
+{write_errno_map}{write_err_msg}
         (call $rtf_result (local.get $msg) (i32.const 1)))
       (else
         (local.set $fd (i32.load (local.get $fd_out)))
@@ -389,7 +419,7 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
             (if (i32.eq (local.get $errno) (i32.const -1)) (then
               (local.set $maddr (i32.const {FS_ERR_WRITEZERO_ADDR}))
               (local.set $mlen (i32.const {FS_ERR_WRITEZERO_LEN}))))
-            (local.set $msg (call $rtf_str (local.get $maddr) (local.get $mlen)))
+{write_fd_err_msg}
             (call $rtf_result (local.get $msg) (i32.const 1)))
           (else
             ;; Build Ok(()) — a 1-slot block with len@4=0 (no owned payload — the
@@ -413,6 +443,7 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
   (func $make_dir (param $path i32) (result i32)
     (local $pdata i32) (local $plen i32) (local $dirfd i32) (local $seg i32) (local $errno i32)
     (local $obj i32) (local $msg i32) (local $maddr i32) (local $mlen i32)
+    {msg_locals}
     ;; dirfd + path bytes + length via $path_norm (#1394).
     (call $path_norm (local.get $path))
     (local.set $plen)
@@ -448,7 +479,7 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
         (i32.store (i32.add (local.get $obj) (i32.const {LIST_LEN_OFFSET})) (i32.const 0))
         (local.get $obj))
       (else
-{mkdir_errno_map}        (local.set $msg (call $rtf_str (local.get $maddr) (local.get $mlen)))
+{mkdir_errno_map}{mkdir_err_msg}
         (call $rtf_result (local.get $msg) (i32.const 1)))))
 
   ;; fs.exists(path) — the WASI path-stat floor. $path is a BORROWED canonical String, resolved
@@ -520,6 +551,7 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
     (local $sdata i32) (local $slen i32) (local $sfd i32)
     (local $ddata i32) (local $dlen i32) (local $dfd i32)
     (local $errno i32) (local $maddr i32) (local $mlen i32) (local $msg i32) (local $obj i32)
+    {msg_locals}
     ;; The two paths resolve INDEPENDENTLY (#1394): under more than one preopen
     ;; they can legitimately land on different dirfds, which path_rename takes.
     (call $path_norm (local.get $src))
@@ -540,7 +572,7 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
         (i32.store (i32.add (local.get $obj) (i32.const {LIST_LEN_OFFSET})) (i32.const 0))
         (local.get $obj))
       (else
-{rename_errno_map}        (local.set $msg (call $rtf_str (local.get $maddr) (local.get $mlen)))
+{rename_errno_map}{rename_err_msg}
         (call $rtf_result (local.get $msg) (i32.const 1)))))
 
   (func $path_exists (param $path i32) (result i32)
@@ -723,6 +755,7 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
     (local $pdata i32) (local $plen i32) (local $dirfd i32)
     (local $errno i32) (local $obj i32) (local $msg i32)
     (local $maddr i32) (local $mlen i32)
+    {msg_locals}
     (call $path_norm (local.get $path))
     (local.set $plen)
     (local.set $pdata)
@@ -737,7 +770,7 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
         (i32.store (i32.add (local.get $obj) (i32.const {LIST_LEN_OFFSET})) (i32.const 0))
         (local.get $obj))
       (else
-{remove_errno_map}        (local.set $msg (call $rtf_str (local.get $maddr) (local.get $mlen)))
+{remove_errno_map}{remove_err_msg}
         (call $rtf_result (local.get $msg) (i32.const 1)))))
 
   ;; helper: lexicographic LESS-THAN over two canonical String handles $a, $b (byte order =
@@ -797,6 +830,7 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
     (local $off i32) (local $namlen i32) (local $skip i32) (local $count i32)
     (local $list i32) (local $ci i32) (local $name i32) (local $msg i32)
     (local $maddr i32) (local $mlen i32)
+    {msg_locals}
     (local $namebase i32) (local $si i32) (local $sj i32) (local $hi i64) (local $hj i64)
     (local $buflen i32) (local $cookie i64) (local $good i32) (local $rderr i32)
     (local $acc i32) (local $accbase i32) (local $acccap i32) (local $accused i32)
@@ -814,7 +848,7 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
                        (i32.const 2) (i64.const 16384) (i64.const 16384) (i32.const 0) (local.get $fd_out)))
     (if (result i32) (i32.ne (local.get $errno) (i32.const 0))
       (then
-{rdir_errno_map}        (local.set $msg (call $rtf_str (local.get $maddr) (local.get $mlen)))
+{rdir_errno_map}{rdir_err_msg}
         (call $rtf_result (local.get $msg) (i32.const 1)))
       (else
         (local.set $fd (i32.load (local.get $fd_out)))
@@ -906,7 +940,7 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
         (if (local.get $rderr)
           (then
             (call $rc_dec (local.get $acc))
-{rdir_rd_errno_map}            (local.set $msg (call $rtf_str (local.get $maddr) (local.get $mlen)))
+{rdir_rd_errno_map}{rdir_rd_err_msg}
             (return (call $rtf_result (local.get $msg) (i32.const 1)))))
         ;; PASS 1 — count entries (skip "." and ".."). 24-byte dirent header; d_namlen @16, name @24.
         (local.set $off (i32.const 0))
@@ -1069,4 +1103,127 @@ fn fs_errno_msg_wat(indent: &str, def_addr: u32, def_len: u32, def_text: &str) -
         ));
     }
     out
+}
+
+/// #2090 — build `<call>("<path>"): <native std::io Display>` as ONE canonical
+/// String, INLINE at each fs error site.
+///
+/// Before this, every wasm fs failure answered with the errno text alone, so
+/// `fs.read_text("/nope/x")` and a missing executable were byte-identical — and
+/// the native leg, which HAS the path at the failure site, said so. C-215 makes
+/// the two legs' text a promise, so naming the call natively without naming it
+/// here would have manufactured the very divergence that contract exists to
+/// forbid (measured: `fan_prefetch_fs` reported
+/// `err=fs.read_text("…"): Is a directory (os error 21)` native against
+/// `err=Is a directory (os error 21)` on wasm).
+///
+/// Like [`fs_errno_msg_wat`] and [`utf8_validate_wat`] this is INLINE — §4.1
+/// forbids a new hand-written WAT function — so the loops are duplicated in the
+/// OUTPUT while having exactly one SOURCE, here.
+///
+/// The pieces are four byte runs: the call prefix (`fs.read_text("`), the path's
+/// OWN bytes (`$path`, not the `$path_norm` remainder — native reports the path
+/// the writer passed, preopen-relative resolution is ours, not theirs), the
+/// shared `"): `, and the errno text `fs_errno_msg_wat` already selected into
+/// `$maddr`/`$mlen`. Reads `$path`, `$maddr`, `$mlen`; writes `$msg`.
+///
+/// `pfx` is `(addr, len)` from [`fs_msg_prefix`], or a `$validate`-selected pair
+/// where one floor serves two calls (`$read_text_file` is `fs.read_text` at
+/// `$validate = 1` and `fs.read_bytes` at 0).
+fn fs_err_msg_wat(indent: &str, pfx_setup: &str, operands: &[&str]) -> String {
+    let elem_round_add = ELEM_SIZE - 1;
+    let elem_round_mask = -(ELEM_SIZE as i32);
+    let elem_shift = ELEM_SIZE.trailing_zeros();
+    let (mid_addr, mid_len) = fs_msg_mid();
+    let (sep_addr, sep_len) = fs_msg_sep();
+
+    // One copy loop: `$clen` bytes from `$csrc` to `$msg`+header+`$moff`, then
+    // advance `$moff`. Emitted four times from this one expression.
+    let copy = |n: usize, src: &str, len: &str| {
+        format!(
+            "{indent}(local.set $csrc {src}) (local.set $clen {len})\n\
+             {indent}(local.set $mj (i32.const 0))\n\
+             {indent}(block $mdone{n} (loop $mloop{n}\n\
+             {indent}  (br_if $mdone{n} (i32.ge_u (local.get $mj) (local.get $clen)))\n\
+             {indent}  (i32.store8 (i32.add (i32.add (local.get $msg) (i32.const {LIST_HEADER}))\n\
+             {indent}                       (i32.add (local.get $moff) (local.get $mj)))\n\
+             {indent}              (i32.load8_u (i32.add (local.get $csrc) (local.get $mj))))\n\
+             {indent}  (local.set $mj (i32.add (local.get $mj) (i32.const 1)))\n\
+             {indent}  (br $mloop{n})))\n\
+             {indent}(local.set $moff (i32.add (local.get $moff) (local.get $clen)))\n"
+        )
+    };
+
+    // Total length: prefix + every operand + one separator between each pair +
+    // the mid + the errno text. `$mplen` accumulates the runtime half.
+    let fixed_len = mid_len + sep_len * (operands.len() as u32 - 1);
+    let mut oplen = format!("{indent}(local.set $mplen (i32.const 0))\n");
+    for v in operands {
+        oplen.push_str(&format!(
+            "{indent}(local.set $mplen (i32.add (local.get $mplen)\n\
+             {indent}  (i32.load (i32.add (local.get {v}) (i32.const {LIST_LEN_OFFSET})))))\n"
+        ));
+    }
+    // The operand copies, separated by `", "` — one `copy` per piece, all from
+    // the same emitter, so a two-path call cannot drift from a one-path call.
+    let mut cops = String::new();
+    for (k, v) in operands.iter().enumerate() {
+        if k > 0 {
+            cops.push_str(&copy(
+                10 + k,
+                &format!("(i32.const {sep_addr})"),
+                &format!("(i32.const {sep_len})"),
+            ));
+        }
+        cops.push_str(&copy(
+            20 + k,
+            &format!("(i32.add (local.get {v}) (i32.const {LIST_HEADER}))"),
+            &format!("(i32.load (i32.add (local.get {v}) (i32.const {LIST_LEN_OFFSET})))"),
+        ));
+    }
+    format!(
+        "{indent};; #2090 — name the call and its operand, then the errno text VERBATIM as a\n\
+         {indent};; suffix (C-215's classification and #1368's fix both read that tail).\n\
+         {pfx_setup}\
+         {oplen}\
+         {indent}(local.set $mtot (i32.add (i32.add (local.get $pfxl) (local.get $mplen))\n\
+         {indent}                          (i32.add (i32.const {fixed_len}) (local.get $mlen))))\n\
+         {indent}(local.set $msg (call $list_new (local.get $mtot)\n\
+         {indent}  (i32.shr_u (i32.and (i32.add (local.get $mtot) (i32.const {elem_round_add}))\n\
+         {indent}                      (i32.const {elem_round_mask}))\n\
+         {indent}             (i32.const {elem_shift}))))\n\
+         {indent}(local.set $moff (i32.const 0))\n\
+         {c0}{cops}{c2}{c3}",
+        c0 = copy(0, "(local.get $pfxa)", "(local.get $pfxl)"),
+        c2 = copy(
+            2,
+            &format!("(i32.const {mid_addr})"),
+            &format!("(i32.const {mid_len})")
+        ),
+        c3 = copy(3, "(local.get $maddr)", "(local.get $mlen)"),
+    )
+}
+
+/// `$pfxa`/`$pfxl` set to a FIXED prefix row — the usual case, one floor per call.
+fn fs_msg_pfx_fixed(indent: &str, idx: usize) -> String {
+    let (addr, len) = fs_msg_prefix(idx);
+    format!("{indent}(local.set $pfxa (i32.const {addr})) (local.set $pfxl (i32.const {len}))\n")
+}
+
+/// `$pfxa`/`$pfxl` chosen by `$validate`: `$read_text_file` is the floor for BOTH
+/// `fs.read_text` (validate = 1) and `fs.read_bytes` (0), and the message has to
+/// name the one the writer actually called.
+fn fs_msg_pfx_by_validate(indent: &str) -> String {
+    let (ta, tl) = fs_msg_prefix(FS_MSG_READ_TEXT);
+    let (ba, bl) = fs_msg_prefix(FS_MSG_READ_BYTES);
+    format!(
+        "{indent}(if (local.get $validate)\n\
+         {indent}  (then (local.set $pfxa (i32.const {ta})) (local.set $pfxl (i32.const {tl})))\n\
+         {indent}  (else (local.set $pfxa (i32.const {ba})) (local.set $pfxl (i32.const {bl}))))\n"
+    )
+}
+
+/// The locals every [`fs_err_msg_wat`] site needs, as a declaration line.
+fn fs_err_msg_locals() -> &'static str {
+    "(local $mplen i32) (local $mtot i32) (local $moff i32) (local $csrc i32) (local $clen i32) (local $mj i32) (local $pfxa i32) (local $pfxl i32)"
 }

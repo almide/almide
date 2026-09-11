@@ -89,6 +89,154 @@ const FS_ERR_WRITEZERO_LEN: u32 = 28;
 // independent). The text floor's UTF-8 refusal (#1506) copies it into the Err String.
 const FS_ERR_UTF8_ADDR: u32 = 432; // "stream did not contain valid UTF-8" — 432..466
 const FS_ERR_UTF8_LEN: u32 = 34;
+
+// #2090 — the message pieces that name the failing call and its operand, so a
+// wasm-leg `fs` failure reads `fs.read_text("/nope/x"): No such file or
+// directory (os error 2)` like the native one instead of errno alone.
+//
+// Every address ABOVE was hand-assigned, and the ranges in those comments are
+// hand-maintained: nothing checks them, and an overlap corrupts a string
+// silently rather than failing. These are DERIVED instead — [`fs_msg_regions`]
+// walks the table from one base — and `static_data_regions_do_not_overlap`
+// (tests/wasm_static_data_layout_test.rs) gates the whole map, the hand-assigned
+// entries included. Adding a call here cannot land on a neighbour's bytes.
+const FS_MSG_BASE: u32 = 512; // first free address above FS_ERR_UTF8 (432..466)
+/// Closes the operand and separates it from the platform text: `"): `.
+const FS_MSG_MID: &str = "\"): ";
+/// Between two operands of a two-path call: `fs.rename("a", "b")`.
+const FS_MSG_SEP: &str = "\", \"";
+/// `<call>("` — one per fs floor call that can fail with a path in hand. The
+/// ORDER is the address order; append, never insert, and the gate proves it.
+const FS_MSG_PREFIXES: &[&str] = &[
+    "fs.read_text(\"",
+    "fs.read_bytes(\"",
+    "fs.write(\"",
+    "fs.mkdir_p(\"",
+    "fs.remove_all(\"",
+    "fs.list_dir(\"",
+    "fs.rename(\"",
+];
+// Index into FS_MSG_PREFIXES — named, so a site cannot cite the wrong row.
+const FS_MSG_READ_TEXT: usize = 0;
+const FS_MSG_READ_BYTES: usize = 1;
+const FS_MSG_WRITE: usize = 2;
+const FS_MSG_MKDIR: usize = 3;
+const FS_MSG_REMOVE: usize = 4;
+const FS_MSG_LIST_DIR: usize = 5;
+const FS_MSG_RENAME: usize = 6;
+
+/// `(text, addr, len)` for every #2090 message piece, in address order: the
+/// [`FS_MSG_PREFIXES`] rows, then [`FS_MSG_MID`], then [`FS_MSG_SEP`].
+///
+/// Each piece starts 4-byte aligned, so a mis-stated length rounds into its own
+/// padding instead of the next string's first bytes.
+pub(crate) fn fs_msg_regions() -> Vec<(&'static str, u32, u32)> {
+    let mut out = Vec::new();
+    let mut addr = FS_MSG_BASE;
+    for text in FS_MSG_PREFIXES
+        .iter()
+        .chain(std::iter::once(&FS_MSG_MID))
+        .chain(std::iter::once(&FS_MSG_SEP))
+    {
+        let len = text.len() as u32;
+        out.push((*text, addr, len));
+        addr += (len + 3) & !3;
+    }
+    out
+}
+
+/// `(addr, len)` of [`FS_MSG_PREFIXES`]`[i]`.
+fn fs_msg_prefix(i: usize) -> (u32, u32) {
+    let r = fs_msg_regions();
+    (r[i].1, r[i].2)
+}
+
+/// `(addr, len)` of [`FS_MSG_MID`] — the row after the prefixes.
+fn fs_msg_mid() -> (u32, u32) {
+    let r = fs_msg_regions();
+    let row = r[FS_MSG_PREFIXES.len()];
+    (row.1, row.2)
+}
+
+/// A WAT data-segment literal for `text`, escaping `"` and `\` as `\HH` HEX
+/// rather than as `\"` / `\\`.
+///
+/// Not cosmetic: `render_wasm_dce`'s `match_paren` skips string literals by
+/// toggling on every `"` and its header states the invariant it relies on —
+/// *"this codebase's WAT output has no backslash-escaped quotes"*. The #2090
+/// prefixes are the first preamble strings that CONTAIN a quote (`fs.read_text("`),
+/// so a `{:?}` rendering desynced the preamble scan and silently dropped every
+/// data segment after it — the message then copied zeroed memory and printed as
+/// BLANKS where the call name should be. A `\22` byte keeps the invariant true
+/// and still assembles to exactly one byte, so the derived lengths stay right.
+fn wat_data_literal(text: &str) -> String {
+    let mut out = String::from("\"");
+    for b in text.bytes() {
+        match b {
+            b'"' => out.push_str("\\22"),
+            b'\\' => out.push_str("\\5c"),
+            _ => out.push(b as char),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// `(addr, len)` of [`FS_MSG_SEP`] — the last row.
+fn fs_msg_sep() -> (u32, u32) {
+    let r = fs_msg_regions();
+    let row = r[FS_MSG_PREFIXES.len() + 1];
+    (row.1, row.2)
+}
+
+/// Every statically placed byte run in the emitted module, as
+/// `(name, addr, len)` — the hand-assigned constants above AND the derived
+/// [`fs_msg_regions`]. The overlap gate reads this; it is the only place the map
+/// exists as data rather than as prose in a comment.
+pub fn static_data_regions() -> Vec<(String, u32, u32)> {
+    let mut out: Vec<(String, u32, u32)> = vec![
+        ("NWRITTEN".into(), NWRITTEN_ADDR, I32_SIZE),
+        ("IOVEC".into(), IOVEC_ADDR, I32_SIZE * 2),
+        ("RTF_NOTFOUND".into(), RTF_NOTFOUND_ADDR, RTF_NOTFOUND_LEN),
+        ("RDIR_ERR".into(), RDIR_ERR_ADDR, RDIR_ERR_LEN),
+        ("WRITE_ERR".into(), WRITE_ERR_ADDR, WRITE_ERR_LEN),
+        ("MKDIR_ERR".into(), MKDIR_ERR_ADDR, MKDIR_ERR_LEN),
+        ("REMOVE_ERR".into(), REMOVE_ERR_ADDR, REMOVE_ERR_LEN),
+        // "Error: division by zero\n" — 24 bytes; $__main_err reuses its first 7
+        // and its byte 23, so the region covers the whole line.
+        ("DIVZERO_MSG".into(), DIVZERO_MSG_ADDR, 24),
+        ("OVERFLOW_MSG".into(), OVERFLOW_MSG_ADDR, 24),
+        ("BOUNDS_MSG".into(), BOUNDS_MSG_ADDR, 27),
+        ("OOM_MSG".into(), OOM_MSG_ADDR, 21),
+        ("FS_ERR_NOENT".into(), FS_ERR_NOENT_ADDR, FS_ERR_NOENT_LEN),
+        ("FS_ERR_ACCES".into(), FS_ERR_ACCES_ADDR, FS_ERR_ACCES_LEN),
+        ("FS_ERR_NOTDIR".into(), FS_ERR_NOTDIR_ADDR, FS_ERR_NOTDIR_LEN),
+        ("FS_ERR_ISDIR".into(), FS_ERR_ISDIR_ADDR, FS_ERR_ISDIR_LEN),
+        (
+            "FS_ERR_WRITEZERO".into(),
+            FS_ERR_WRITEZERO_ADDR,
+            FS_ERR_WRITEZERO_LEN,
+        ),
+        ("FS_ERR_UTF8".into(), FS_ERR_UTF8_ADDR, FS_ERR_UTF8_LEN),
+    ];
+    for (text, addr, len) in fs_msg_regions() {
+        out.push((format!("FS_MSG {text:?}"), addr, len));
+    }
+    out
+}
+
+/// The address the statically placed data must stay below: the mutable-global
+/// slot region / bump-allocator base.
+pub fn static_data_ceiling() -> u32 {
+    HEAP_BASE
+}
+
+/// The fixed preamble as emitted, for the layout gates to read. The preamble
+/// itself stays `pub(crate)`; this exposes only the rendered text so
+/// `wasm_static_data_layout_test` can assert over the bytes that actually ship.
+pub fn preamble_text_for_gates() -> String {
+    preamble()
+}
 // The bump allocator's DEFAULT start — also the mutable-global slot region's base
 // (`crate::MG_SLOT_BASE`, one authoritative value): a program with N mutable
 // module-level `var`s shifts its allocator base to `HEAP_BASE + 8*N` so the slots
