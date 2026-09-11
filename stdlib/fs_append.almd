@@ -30,6 +30,12 @@ effect fn fs_append(path: String, content: String) -> Result[Unit, String] = {
   let wh = prim.handle(w)
   if prim.load32(wh + 16) != 0 then {
     let m: String = prim.load_handle(wh + 12)
-    err(m)
+    // #2090 — the shared floor answers `fs.write(...)`, but the writer called
+    // `fs.append`. Relabel the CALL, keep the operand and the errno tail.
+    // LET-BOUND, not inline: the heap-if-arm lowering declines a COMPUTED
+    // expression in a ResultErr arm (`[heap-if-arm] declined arm kind
+    // ResultErr`), and the function then reads as an unlinked stdlib call.
+    let named = if string.starts_with(m, "fs.write(") then "fs.append(" + string.slice(m, string.len("fs.write("), string.len(m)) else m
+    err(named)
   } else ok(())
 }

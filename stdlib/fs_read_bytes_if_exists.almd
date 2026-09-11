@@ -11,7 +11,10 @@ effect fn fs_read_bytes_if_exists(path: String) -> Result[List[Int]?, String] = 
         let xs = bytes.to_list(b)
         ok(some(xs))
       },
-      err(e) => err(e),
+      // #2090 — the shared floor answers `fs.read_bytes(...)`, but the writer
+      // called `fs.read_bytes_if_exists`. ONE expression on the `err(` line: a
+      // newline straight after the paren does not parse.
+      err(e) => err(if string.starts_with(e, "fs.read_bytes(") then "fs.read_bytes_if_exists(" + string.slice(e, string.len("fs.read_bytes("), string.len(e)) else e),
     }
   } else ok(none)
 }
