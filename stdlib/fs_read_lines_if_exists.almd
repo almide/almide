@@ -10,7 +10,11 @@ effect fn fs_read_lines_if_exists(path: String) -> Result[List[String]?, String]
     let rh = prim.handle(r)
     if prim.load32(rh + 16) != 0 then {
       let m: String = prim.load_handle(rh + 12)
-      err(m)
+      // #2090 — the shared floor answers `fs.read_text(...)`, but the writer called
+      // `fs.read_lines_if_exists`. Relabel the CALL; the operand and the errno tail ride through.
+      // ONE expression, on this line: these twins live in a narrow subset and a
+      // newline after `err(` does not parse.
+      err(if string.starts_with(m, "fs.read_text(") then "fs.read_lines_if_exists(" + string.slice(m, string.len("fs.read_text("), string.len(m)) else m)
     } else {
       let t: String = prim.load_handle(rh + 12)
       let lines = string.lines(t)

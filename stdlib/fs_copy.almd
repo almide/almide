@@ -24,7 +24,13 @@ effect fn fs_copy(src: String, dst: String) -> Result[Unit, String] = {
   let rh = prim.handle(r)
   if prim.load32(rh + 16) != 0 then {
     let m: String = prim.load_handle(rh + 12)
-    err(m)
+    // #2090 — the shared floor answers `fs.read_text(...)`, but the writer called
+    // `fs.copy`. Relabel the CALL, keep the operand and the errno tail.
+    // LET-BOUND, not inline: the heap-if-arm lowering declines a COMPUTED
+    // expression in a ResultErr arm (`[heap-if-arm] declined arm kind
+    // ResultErr`), and the function then reads as an unlinked stdlib call.
+    let named = if string.starts_with(m, "fs.read_text(") then "fs.copy(" + string.slice(m, string.len("fs.read_text("), string.len(m)) else m
+    err(named)
   } else {
     let t: String = prim.load_handle(rh + 12)
     __copy_write(dst, t)

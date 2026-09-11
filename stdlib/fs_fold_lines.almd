@@ -49,7 +49,11 @@ effect fn fs_fold_lines_msi(path: String, init: Map[String, Int], f: (Map[String
   let rh = prim.handle(r)
   if prim.load32(rh + 16) != 0 then {
     let m: String = prim.load_handle(rh + 12)
-    err(m)
+    // #2090 — the shared floor answers `fs.read_text(...)`, but the writer called
+    // `fs.fold_lines`. Relabel the CALL; the operand and the errno tail ride through.
+    // ONE expression, on this line: these twins live in a narrow subset and a
+    // newline after `err(` does not parse.
+    err(if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m)) else m)
   } else {
     let text: String = prim.load_handle(rh + 12)
     let th = prim.handle(text)
@@ -83,7 +87,11 @@ effect fn fs_fallible_fold_lines_msi(path: String, init: Map[String, Int], f: (M
   let rh = prim.handle(r)
   if prim.load32(rh + 16) != 0 then {
     let m: String = prim.load_handle(rh + 12)
-    err(m)
+    // #2090 — the shared floor answers `fs.read_text(...)`, but the writer called
+    // `fs.fold_lines`. Relabel the CALL; the operand and the errno tail ride through.
+    // ONE expression, on this line: these twins live in a narrow subset and a
+    // newline after `err(` does not parse.
+    err(if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m)) else m)
   } else {
     let text: String = prim.load_handle(rh + 12)
     let th = prim.handle(text)
@@ -134,7 +142,11 @@ effect fn fs_fold_lines_chunked_msi(path: String, workers: Int, init: Map[String
   let rh = prim.handle(r)
   if prim.load32(rh + 16) != 0 then {
     let m: String = prim.load_handle(rh + 12)
-    err(m)
+    // #2090 — the shared floor answers `fs.read_text(...)`, but the writer called
+    // `fs.fold_lines`. Relabel the CALL; the operand and the errno tail ride through.
+    // ONE expression, on this line: these twins live in a narrow subset and a
+    // newline after `err(` does not parse.
+    err(if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m)) else m)
   } else {
     let text: String = prim.load_handle(rh + 12)
     let th = prim.handle(text)
@@ -177,7 +189,11 @@ effect fn fs_fold_lines_chunked_i(path: String, workers: Int, init: Int, f: (Int
   let rh = prim.handle(r)
   if prim.load32(rh + 16) != 0 then {
     let m: String = prim.load_handle(rh + 12)
-    err(m)
+    // #2090 — the shared floor answers `fs.read_text(...)`, but the writer called
+    // `fs.fold_lines`. Relabel the CALL; the operand and the errno tail ride through.
+    // ONE expression, on this line: these twins live in a narrow subset and a
+    // newline after `err(` does not parse.
+    err(if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m)) else m)
   } else {
     let text: String = prim.load_handle(rh + 12)
     let th = prim.handle(text)
@@ -225,7 +241,11 @@ effect fn fs_fold_lines_chunked_ls(path: String, workers: Int, init: List[String
   let rh = prim.handle(r)
   if prim.load32(rh + 16) != 0 then {
     let m: String = prim.load_handle(rh + 12)
-    err(m)
+    // #2090 — the shared floor answers `fs.read_text(...)`, but the writer called
+    // `fs.fold_lines`. Relabel the CALL; the operand and the errno tail ride through.
+    // ONE expression, on this line: these twins live in a narrow subset and a
+    // newline after `err(` does not parse.
+    err(if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m)) else m)
   } else {
     let text: String = prim.load_handle(rh + 12)
     let th = prim.handle(text)
@@ -245,7 +265,11 @@ effect fn fs_fold_lines_range_ls(path: String, start: Int, endp: Int, init: List
   let rh = prim.handle(r)
   if prim.load32(rh + 16) != 0 then {
     let m: String = prim.load_handle(rh + 12)
-    err(m)
+    // #2090 — the shared floor answers `fs.read_text(...)`, but the writer called
+    // `fs.fold_lines`. Relabel the CALL; the operand and the errno tail ride through.
+    // ONE expression, on this line: these twins live in a narrow subset and a
+    // newline after `err(` does not parse.
+    err(if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m)) else m)
   } else {
     let text: String = prim.load_handle(rh + 12)
     let th = prim.handle(text)
@@ -272,7 +296,11 @@ effect fn fs_fold_lines_s(path: String, init: String, f: (String, String) -> Str
   let rh = prim.handle(r)
   if prim.load32(rh + 16) != 0 then {
     let m: String = prim.load_handle(rh + 12)
-    err(m)
+    // #2090 — the shared floor answers `fs.read_text(...)`, but the writer called
+    // `fs.fold_lines`. Relabel the CALL; the operand and the errno tail ride through.
+    // ONE expression, on this line: these twins live in a narrow subset and a
+    // newline after `err(` does not parse.
+    err(if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m)) else m)
   } else {
     let text: String = prim.load_handle(rh + 12)
     let th = prim.handle(text)
@@ -296,7 +324,11 @@ effect fn fs_fold_lines_i(path: String, init: Int, f: (Int, String) -> Int) -> R
   let rh = prim.handle(r)
   if prim.load32(rh + 16) != 0 then {
     let m: String = prim.load_handle(rh + 12)
-    err(m)
+    // #2090 — the shared floor answers `fs.read_text(...)`, but the writer called
+    // `fs.fold_lines`. Relabel the CALL; the operand and the errno tail ride through.
+    // ONE expression, on this line: these twins live in a narrow subset and a
+    // newline after `err(` does not parse.
+    err(if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m)) else m)
   } else {
     let text: String = prim.load_handle(rh + 12)
     let th = prim.handle(text)
@@ -320,7 +352,11 @@ effect fn fs_fold_lines_ls(path: String, init: List[String], f: (List[String], S
   let rh = prim.handle(r)
   if prim.load32(rh + 16) != 0 then {
     let m: String = prim.load_handle(rh + 12)
-    err(m)
+    // #2090 — the shared floor answers `fs.read_text(...)`, but the writer called
+    // `fs.fold_lines`. Relabel the CALL; the operand and the errno tail ride through.
+    // ONE expression, on this line: these twins live in a narrow subset and a
+    // newline after `err(` does not parse.
+    err(if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m)) else m)
   } else {
     let text: String = prim.load_handle(rh + 12)
     let th = prim.handle(text)
@@ -346,7 +382,11 @@ effect fn fs_for_each_line(path: String, f: (String) -> Unit) -> Result[Unit, St
   let rh = prim.handle(r)
   if prim.load32(rh + 16) != 0 then {
     let m: String = prim.load_handle(rh + 12)
-    err(m)
+    // #2090 — the shared floor answers `fs.read_text(...)`, but the writer called
+    // `fs.fold_lines`. Relabel the CALL; the operand and the errno tail ride through.
+    // ONE expression, on this line: these twins live in a narrow subset and a
+    // newline after `err(` does not parse.
+    err(if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m)) else m)
   } else {
     let text: String = prim.load_handle(rh + 12)
     let th = prim.handle(text)
@@ -374,7 +414,11 @@ effect fn fs_fallible_fold_lines_i(path: String, init: Int, f: (Int, String) -> 
   let rh = prim.handle(r)
   if prim.load32(rh + 16) != 0 then {
     let m: String = prim.load_handle(rh + 12)
-    err(m)
+    // #2090 — the shared floor answers `fs.read_text(...)`, but the writer called
+    // `fs.fold_lines`. Relabel the CALL; the operand and the errno tail ride through.
+    // ONE expression, on this line: these twins live in a narrow subset and a
+    // newline after `err(` does not parse.
+    err(if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m)) else m)
   } else {
     let text: String = prim.load_handle(rh + 12)
     let th = prim.handle(text)
@@ -397,7 +441,11 @@ effect fn fs_fallible_for_each_line(path: String, f: (String) -> Result[Unit, St
   let rh = prim.handle(r)
   if prim.load32(rh + 16) != 0 then {
     let m: String = prim.load_handle(rh + 12)
-    err(m)
+    // #2090 — the shared floor answers `fs.read_text(...)`, but the writer called
+    // `fs.fold_lines`. Relabel the CALL; the operand and the errno tail ride through.
+    // ONE expression, on this line: these twins live in a narrow subset and a
+    // newline after `err(` does not parse.
+    err(if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m)) else m)
   } else {
     let text: String = prim.load_handle(rh + 12)
     let th = prim.handle(text)
@@ -414,7 +462,11 @@ effect fn fs_fold_lines_range_i(path: String, start: Int, endp: Int, init: Int, 
   let rh = prim.handle(r)
   if prim.load32(rh + 16) != 0 then {
     let m: String = prim.load_handle(rh + 12)
-    err(m)
+    // #2090 — the shared floor answers `fs.read_text(...)`, but the writer called
+    // `fs.fold_lines`. Relabel the CALL; the operand and the errno tail ride through.
+    // ONE expression, on this line: these twins live in a narrow subset and a
+    // newline after `err(` does not parse.
+    err(if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m)) else m)
   } else {
     let text: String = prim.load_handle(rh + 12)
     let th = prim.handle(text)
@@ -439,7 +491,11 @@ effect fn fs_fold_lines_range_s(path: String, start: Int, endp: Int, init: Strin
   let rh = prim.handle(r)
   if prim.load32(rh + 16) != 0 then {
     let m: String = prim.load_handle(rh + 12)
-    err(m)
+    // #2090 — the shared floor answers `fs.read_text(...)`, but the writer called
+    // `fs.fold_lines`. Relabel the CALL; the operand and the errno tail ride through.
+    // ONE expression, on this line: these twins live in a narrow subset and a
+    // newline after `err(` does not parse.
+    err(if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m)) else m)
   } else {
     let text: String = prim.load_handle(rh + 12)
     let th = prim.handle(text)
@@ -456,7 +512,11 @@ effect fn fs_fold_lines_range_msi(path: String, start: Int, endp: Int, init: Map
   let rh = prim.handle(r)
   if prim.load32(rh + 16) != 0 then {
     let m: String = prim.load_handle(rh + 12)
-    err(m)
+    // #2090 — the shared floor answers `fs.read_text(...)`, but the writer called
+    // `fs.fold_lines`. Relabel the CALL; the operand and the errno tail ride through.
+    // ONE expression, on this line: these twins live in a narrow subset and a
+    // newline after `err(` does not parse.
+    err(if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m)) else m)
   } else {
     let text: String = prim.load_handle(rh + 12)
     let th = prim.handle(text)
@@ -486,7 +546,11 @@ effect fn fs_fold_lines_chunked_s(path: String, workers: Int, init: String, f: (
   let rh = prim.handle(r)
   if prim.load32(rh + 16) != 0 then {
     let m: String = prim.load_handle(rh + 12)
-    err(m)
+    // #2090 — the shared floor answers `fs.read_text(...)`, but the writer called
+    // `fs.fold_lines`. Relabel the CALL; the operand and the errno tail ride through.
+    // ONE expression, on this line: these twins live in a narrow subset and a
+    // newline after `err(` does not parse.
+    err(if string.starts_with(m, "fs.read_text(") then "fs.fold_lines(" + string.slice(m, string.len("fs.read_text("), string.len(m)) else m)
   } else {
     let text: String = prim.load_handle(rh + 12)
     let th = prim.handle(text)
