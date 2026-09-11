@@ -16,7 +16,8 @@ effect fn fs_read_text_if_exists(path: String) -> Result[String?, String] = {
       // `fs.read_text_if_exists`. Relabel the CALL; the operand and the errno tail ride through.
       // ONE expression, on this line: these twins live in a narrow subset and a
       // newline after `err(` does not parse.
-      err(if string.starts_with(m, "fs.read_text(") then "fs.read_text_if_exists(" + string.slice(m, string.len("fs.read_text("), string.len(m)) else m)
+      err(if string.starts_with(m, "fs.read_text(") then "fs.read_text_if_exists(" + string.slice(m, string.len("fs.read_text("), string.len(m))
+      else m)
     } else {
       let t: String = prim.load_handle(rh + 12)
       let owned = t + ""

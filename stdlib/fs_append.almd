@@ -35,7 +35,8 @@ effect fn fs_append(path: String, content: String) -> Result[Unit, String] = {
     // LET-BOUND, not inline: the heap-if-arm lowering declines a COMPUTED
     // expression in a ResultErr arm (`[heap-if-arm] declined arm kind
     // ResultErr`), and the function then reads as an unlinked stdlib call.
-    let named = if string.starts_with(m, "fs.write(") then "fs.append(" + string.slice(m, string.len("fs.write("), string.len(m)) else m
+    let named = if string.starts_with(m, "fs.write(") then "fs.append(" + string.slice(m, string.len("fs.write("), string.len(m))
+    else m
     err(named)
   } else ok(())
 }
