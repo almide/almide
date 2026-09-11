@@ -1,5 +1,21 @@
 // process extern — Rust native implementations
 
+// #2090: a host call that fails at the syscall names ITSELF and the operand
+// that identifies it, then the platform's own text verbatim as a SUFFIX:
+//
+//     process.exec("ghh-not-a-binary"): No such file or directory (os error 2)
+//
+// The suffix is load-bearing. A reader who recognises `(os error 2)` keeps
+// recognising it, and anything classifying on the errno tail keeps working.
+// `fs.rs` carries the twin of this pair (its `io_err`), as does the embedded
+// wasm host — per-file copies are the pattern here because each runtime file is
+// an independently embedded chunk.
+fn call_err(call: &str, args: &str, e: impl std::fmt::Display) -> String {
+    format!("{call}({args}): {e}")
+}
+/// Source-shaped quoting, so the operand reads back as the writer spelled it.
+fn q(s: &str) -> String { format!("{s:?}") }
+
 // The runtime-side twin of stdlib/process.almd's `type ProcessStatus = { code,
 // stdout, stderr }` — the AlmideFileStat treatment (fs.rs, #1821): the emitter
 // spells the type under this reserved name and skips the bundled decl, so a
@@ -34,7 +50,11 @@ pub fn almide_rt_process_exec(cmd: &str, args: &[String]) -> Result<String, Stri
                 }
             }
         }
-        Err(e) => Err(e.to_string()),
+        // The SPAWN failure (#2090). The branches above already name the
+        // command when the process RAN and failed; "could not start it" said
+        // errno and nothing else, so `process.exec("nope")` and a missing file
+        // were byte-identical.
+        Err(e) => Err(call_err("process.exec", &q(cmd), e)),
     }
 }
 
@@ -52,7 +72,10 @@ pub fn almide_rt_process_stdin_lines() -> Result<Vec<String>, String> {
         .lock()
         .lines()
         .collect::<Result<Vec<String>, _>>()
-        .map_err(|e| e.to_string())
+        // No identifying operand — stdin is the one the writer did not name —
+        // so the call alone is what this can add, and it is still the
+        // difference between "which of my host calls failed" and errno alone.
+        .map_err(|e| call_err("process.stdin_lines", "", e))
 }
 
 pub fn almide_rt_process_exec_in(dir: &str, cmd: &str, args: &[String]) -> Result<String, String> {
@@ -64,7 +87,12 @@ pub fn almide_rt_process_exec_in(dir: &str, cmd: &str, args: &[String]) -> Resul
                 Err(String::from_utf8_lossy(&out.stderr).to_string())
             }
         }
-        Err(e) => Err(e.to_string()),
+        // A bad `dir` fails here too, so both operands are named.
+        Err(e) => Err(call_err(
+            "process.exec_in",
+            &format!("{}, {}", q(dir), q(cmd)),
+            e,
+        )),
     }
 }
 
@@ -76,11 +104,19 @@ pub fn almide_rt_process_exec_with_stdin(cmd: &str, args: &[String], input: &str
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
-        .map_err(|e| e.to_string())?;
+        // The pipe write and the wait are INNER steps of this one call, so they
+        // report the call the writer made — naming `write_all` or
+        // `wait_with_output`, which they never invoked, would be worse than
+        // today's bare errno.
+        .map_err(|e| call_err("process.exec_with_stdin", &q(cmd), e))?;
     if let Some(stdin) = child.stdin.as_mut() {
-        stdin.write_all(input.as_bytes()).map_err(|e| e.to_string())?;
+        stdin
+            .write_all(input.as_bytes())
+            .map_err(|e| call_err("process.exec_with_stdin", &q(cmd), e))?;
     }
-    let out = child.wait_with_output().map_err(|e| e.to_string())?;
+    let out = child
+        .wait_with_output()
+        .map_err(|e| call_err("process.exec_with_stdin", &q(cmd), e))?;
     if out.status.success() {
         Ok(String::from_utf8_lossy(&out.stdout).to_string())
     } else {
@@ -108,6 +144,13 @@ pub fn almide_rt_process_exec_status(cmd: &str, args: &[String]) -> Result<Almid
             let stderr = String::from_utf8_lossy(&out.stderr).to_string();
             Ok(AlmideProcessStatus { code, stdout, stderr })
         }
+        // THE DECLARED EXCEPTION to #2090's one form, and the reason is the
+        // ledger, not the code: C-214's statement quotes `exec failed:` as the
+        // missing-binary path of this function's timeout twin, and the judge
+        // (almide/als) holds that statement normatively. Unifying it is an als
+        // PR first, then here — and the twins move together, so this one waits
+        // with it rather than splitting the pair. `process_error_matrix_test`
+        // carries the row and refuses a SECOND exception.
         Err(e) => Err(format!("exec failed: {}", e)),
     }
 }
@@ -137,6 +180,7 @@ pub fn almide_rt_process_exec_status_timeout(
         use std::os::unix::process::CommandExt;
         command.process_group(0);
     }
+    // `exec failed:` here is C-214's quoted promise — see the twin above.
     let mut child = command.spawn()
         .map_err(|e| format!("exec failed: {}", e))?;
     fn drain<R: Read + Send + 'static>(r: Option<R>) -> std::thread::JoinHandle<Vec<u8>> {
@@ -218,7 +262,9 @@ pub fn almide_rt_process_spawn(cmd: &str, args: &[String]) -> Result<i64, String
         .stdin(std::process::Stdio::null())
         .spawn()
         .map(|child| child.id() as i64)
-        .map_err(|e| format!("spawn '{}' failed: {}", cmd, e))
+        // Was `spawn '{cmd}' failed: {e}` — it named the command, in a spelling
+        // shared with nothing else (#2090). Nothing pinned it.
+        .map_err(|e| call_err("process.spawn", &q(cmd), e))
 }
 
 pub fn almide_rt_process_kill(pid: i64, signal: i64) -> Result<(), String> {
@@ -227,7 +273,7 @@ pub fn almide_rt_process_kill(pid: i64, signal: i64) -> Result<(), String> {
         let cmd = std::process::Command::new("kill")
             .args([&format!("-{}", signal), &pid.to_string()])
             .output()
-            .map_err(|e| format!("kill failed: {}", e))?;
+            .map_err(|e| call_err("process.kill", &format!("{pid}, {signal}"), e))?;
         if cmd.status.success() { Ok(()) }
         else { Err(String::from_utf8_lossy(&cmd.stderr).trim().to_string()) }
     }
@@ -236,7 +282,7 @@ pub fn almide_rt_process_kill(pid: i64, signal: i64) -> Result<(), String> {
         let cmd = std::process::Command::new("taskkill")
             .args(["/PID", &pid.to_string(), "/F"])
             .output()
-            .map_err(|e| format!("kill failed: {}", e))?;
+            .map_err(|e| call_err("process.kill", &format!("{pid}, {signal}"), e))?;
         if cmd.status.success() { Ok(()) }
         else { Err(String::from_utf8_lossy(&cmd.stderr).trim().to_string()) }
     }
