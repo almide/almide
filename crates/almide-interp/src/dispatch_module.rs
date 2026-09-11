@@ -461,6 +461,28 @@ impl<'a> Interpreter<'a> {
         }
     }
 
+    /// #2090 — the third oracle names the failing call too, or the ledger's
+    /// "all three legs agree" claim stops being true the moment the other two
+    /// name theirs.
+    ///
+    /// The prefix goes on HERE, at the dispatch layer, and not in `vfs.rs`: that
+    /// file holds ONE spelling of each platform string (its header says so), and
+    /// keeping it that way is what made the errno-as-suffix design work. The
+    /// dispatcher is the layer that knows which call it is serving.
+    fn fs_prim_err(func: &str, operands: &str, e: String) -> String {
+        let call = match func {
+            "read_text_file" => "fs.read_text",
+            "read_bytes_file" => "fs.read_bytes",
+            "write_text_file" => "fs.write",
+            "read_dir" => "fs.list_dir",
+            "rename" => "fs.rename",
+            "make_dir" => "fs.mkdir_p",
+            "remove_all" => "fs.remove_all",
+            other => other,
+        };
+        format!("{call}({operands}): {e}")
+    }
+
     fn vfs_prim(&mut self, func: &str, args: &[Value]) -> Option<Flow> {
         match func {
             "read_text_file" => {
@@ -470,7 +492,11 @@ impl<'a> Interpreter<'a> {
                 };
                 Some(Flow::val(match crate::vfs::read_text(&self.vfs, &path) {
                     Ok(s) => Value::Result(Ok(Box::new(Value::str(s)))),
-                    Err(e) => Value::Result(Err(Box::new(Value::str(e)))),
+                    Err(e) => Value::Result(Err(Box::new(Value::str(Self::fs_prim_err(
+                        func,
+                        &format!("{path:?}"),
+                        e,
+                    ))))),
                 }))
             }
             "write_text_file" => {
@@ -487,7 +513,11 @@ impl<'a> Interpreter<'a> {
                 };
                 Some(Flow::val(match crate::vfs::write_bytes(&mut self.vfs, &path, &content) {
                     Ok(()) => Value::Result(Ok(Box::new(Value::Unit))),
-                    Err(e) => Value::Result(Err(Box::new(Value::str(e)))),
+                    Err(e) => Value::Result(Err(Box::new(Value::str(Self::fs_prim_err(
+                        func,
+                        &format!("{path:?}"),
+                        e,
+                    ))))),
                 }))
             }
             "read_bytes_file" => {
@@ -499,7 +529,11 @@ impl<'a> Interpreter<'a> {
                     Ok(b) => Value::Result(Ok(Box::new(Value::List(std::rc::Rc::new(
                         b.into_iter().map(|x| Value::Int(x as i64)).collect(),
                     ))))),
-                    Err(e) => Value::Result(Err(Box::new(Value::str(e)))),
+                    Err(e) => Value::Result(Err(Box::new(Value::str(Self::fs_prim_err(
+                        func,
+                        &format!("{path:?}"),
+                        e,
+                    ))))),
                 }))
             }
             // `prim.path_filestat(buf, path)`: the WASI filestat lands in the
@@ -551,7 +585,11 @@ impl<'a> Interpreter<'a> {
                     Ok(names) => Value::Result(Ok(Box::new(Value::List(std::rc::Rc::new(
                         names.into_iter().map(Value::str).collect(),
                     ))))),
-                    Err(e) => Value::Result(Err(Box::new(Value::str(e)))),
+                    Err(e) => Value::Result(Err(Box::new(Value::str(Self::fs_prim_err(
+                        func,
+                        &format!("{path:?}"),
+                        e,
+                    ))))),
                 }))
             }
             "rename" => {
@@ -568,7 +606,11 @@ impl<'a> Interpreter<'a> {
                         Flow::val(Value::Result(Ok(Box::new(Value::Unit))))
                     }
                     crate::vfs::RenameOutcome::Failed(e) => {
-                        Flow::val(Value::Result(Err(Box::new(Value::str(e)))))
+                        Flow::val(Value::Result(Err(Box::new(Value::str(Self::fs_prim_err(
+                            func,
+                            &format!("{src:?}, {dst:?}"),
+                            e,
+                        ))))))
                     }
                     crate::vfs::RenameOutcome::HostOnly => Flow::Unsupported(
                         "prim.rename of a host-only path (the overlay is read-only toward the host)"
@@ -583,7 +625,11 @@ impl<'a> Interpreter<'a> {
                 let path = path.to_string();
                 Some(Flow::val(match crate::vfs::make_dir(&mut self.vfs, &path) {
                     Ok(()) => Value::Result(Ok(Box::new(Value::Unit))),
-                    Err(e) => Value::Result(Err(Box::new(Value::str(e)))),
+                    Err(e) => Value::Result(Err(Box::new(Value::str(Self::fs_prim_err(
+                        func,
+                        &format!("{path:?}"),
+                        e,
+                    ))))),
                 }))
             }
             "path_exists" => {
@@ -608,9 +654,11 @@ impl<'a> Interpreter<'a> {
                         "prim.remove_all on a host path (the overlay is read-only toward the real fs)".into(),
                     ),
                     crate::vfs::RemoveOutcome::Missing => {
-                        Flow::val(Value::Result(Err(Box::new(Value::str(
+                        Flow::val(Value::Result(Err(Box::new(Value::str(Self::fs_prim_err(
+                            func,
+                            &format!("{path:?}"),
                             "No such file or directory (os error 2)".to_string(),
-                        )))))
+                        ))))))
                     }
                 })
             }
