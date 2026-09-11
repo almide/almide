@@ -28,6 +28,16 @@ const OP_READ_TEXT_IF_EXISTS: i32 = 13;
 const OP_READ_BYTES: i32 = 14;
 const OP_WRITE_BYTES_RAW: i32 = 15;
 const OP_APPEND: i32 = 16;
+// #2090 — `fold_lines` / `for_each_line` are implemented on this leg as
+// read_lines + a walk, so they used to hand the host OP_READ_LINES. That was
+// invisible while every failure printed errno alone; once the message names the
+// CALL, sharing the op would make the wasm leg say `fs.read_lines(...)` where
+// native says `fs.fold_lines(...)` — a divergence introduced by the fix. The
+// body the host runs is identical; only the name it reports differs.
+// 43..=50 is the http family and 26..=37 the env/host family, so these take
+// the first numbers above both.
+const OP_FOLD_LINES: i32 = 51;
+const OP_FOR_EACH_LINE: i32 = 52;
 
 impl Emitter<'_> {
     /// `fs.*` module calls. Ok(None) = not handled here.
@@ -460,7 +470,7 @@ impl Emitter<'_> {
                 };
                 self.lower_arg(init, Some(acc_ty), ArgMode::Retain)?;
                 self.f.instructions().local_set(params[0]);
-                self.fs_call_1(p, OP_READ_LINES)?;
+                self.fs_call_1(p, OP_FOLD_LINES)?;
                 let (hraw, hlen, herr) = self.fs_frames_or_err()?;
                 // walk the frames, folding
                 self.fs_frames_foreach(hraw, hlen, |em| {
@@ -493,7 +503,7 @@ impl Emitter<'_> {
             }
             ("for_each_line", [p, cb]) => {
                 let (params, body) = self.hof_lambda(cb, 1)?;
-                self.fs_call_1(p, OP_READ_LINES)?;
+                self.fs_call_1(p, OP_FOR_EACH_LINE)?;
                 let (hraw, hlen, herr) = self.fs_frames_or_err()?;
                 self.fs_frames_foreach(hraw, hlen, |em| {
                     em.f.instructions().local_set(params[0]);
