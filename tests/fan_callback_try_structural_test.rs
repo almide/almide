@@ -62,7 +62,11 @@ fn unbanged_fallible_fan_map_err_is_a_value_on_the_structural_leg() {
     std::fs::write(d.join("present.txt"), "hello").expect("write");
     let src = d.join("unbanged.almd");
     std::fs::write(&src, UNBANGED).expect("write");
-    let want = "err=No such file or directory (os error 2)\nafter\n";
+    // #2090 — the message names the call and its operand now; the errno tail is
+    // VERBATIM, which is the half this test actually cares about (the err is a
+    // VALUE, not a propagated abort). Both legs assert the same string below, so
+    // the cross-target claim this test makes is unchanged.
+    let want = "err=fs.read_text(\"gone.txt\"): No such file or directory (os error 2)\nafter\n";
 
     let (nout, nerr, ncode) = run(None, &["run", "unbanged.almd"], &d);
     assert_eq!(nout, want, "native diverged from the contracted value form (stderr: {nerr})");
