@@ -562,11 +562,20 @@ impl Parser {
         // Sub-parse the expression with current id counter
         let mut tokens = crate::lexer::Lexer::tokenize(&expr_str);
         // Adjust spans: sub-lexer produces line=1,col=1-based; remap to parent source
+        let to_parent = |c: usize| str_col + 1 + expr_col_start + (c - 1);
         for t in &mut tokens {
             t.line = str_line;
             // col: sub-lexer 1-based → 0-based offset + parent string position
             // str_col is the opening quote col, +1 for quote char, + template offset
-            t.col = str_col + 1 + expr_col_start + (t.col - 1);
+            t.col = to_parent(t.col);
+            // end_col rides the SAME shift (#2095). Remapping only the start left
+            // every token in an interpolation with a parent-space start next to a
+            // sub-string-space end — a number smaller than its own beginning —
+            // which downstream reads as "no end". The cost was not only the
+            // fix-it the issue names: a diagnostic with no measurable end draws a
+            // one-column caret, so `"${list.nope(x)}"` underlined a single column
+            // where the same call outside the string underlined all nine.
+            t.end_col = to_parent(t.end_col);
         }
         let id_offset = self.expr_id_counter();
         let mut sub_parser = super::Parser::new_with_id_offset(tokens, id_offset);
