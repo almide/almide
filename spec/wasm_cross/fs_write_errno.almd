@@ -14,6 +14,15 @@ import fs
 
 fn rep(s: String, n: Int) -> String = if n <= 0 then "" else s + rep(s, n - 1)
 
+// #2090 gave every fs message a `fs.<call>("<operand>"): ` prefix, so these
+// messages now CONTAIN the path. `fs.create_temp_dir` answers a different
+// directory on every run — and the two legs run as separate processes — so
+// printing a message verbatim would compare two different temp paths and fail
+// for a reason that is not a divergence. `redact` swaps the run-specific
+// directory for a stable token, leaving everything the contract actually pins
+// (the call name, the operand's SHAPE, the errno tail) byte-comparable.
+fn redact(msg: String, dir: String) -> String = string.replace(msg, dir, "<TMP>")
+
 effect fn main() -> Unit = {
   let d = fs.create_temp_dir("wer")!
   let f = d + "/f.txt"
@@ -21,37 +30,37 @@ effect fn main() -> Unit = {
   let w_dir = fs.write(d, "x")
   match w_dir {
     ok(_) => println("write_dir=OK"),
-    err(e) => println("write_dir=ERR[${e}]"),
+    err(e) => println("write_dir=ERR[${redact(e, d)}]"),
   }
   let w_thru = fs.write(f + "/x.txt", "x")
   match w_thru {
     ok(_) => println("write_thru_file=OK"),
-    err(e) => println("write_thru_file=ERR[${e}]"),
+    err(e) => println("write_thru_file=ERR[${redact(e, d)}]"),
   }
   let mk_thru = fs.mkdir_p(f + "/sub")
   match mk_thru {
     ok(_) => println("mkdir_thru_file=OK"),
-    err(e) => println("mkdir_thru_file=ERR[${e}]"),
+    err(e) => println("mkdir_thru_file=ERR[${redact(e, d)}]"),
   }
   let rm_missing = fs.remove_all(d + "/nope")
   match rm_missing {
     ok(_) => println("remove_missing=ERR-NONE"),
-    err(e) => println("remove_missing=ERR[${e}]"),
+    err(e) => println("remove_missing=ERR[${redact(e, d)}]"),
   }
   let ld_file = fs.list_dir(f)
   match ld_file {
     ok(_) => println("list_plain_file=OK"),
-    err(e) => println("list_plain_file=ERR[${e}]"),
+    err(e) => println("list_plain_file=ERR[${redact(e, d)}]"),
   }
   let ld_missing = fs.list_dir(d + "/nope")
   match ld_missing {
     ok(_) => println("list_missing=OK"),
-    err(e) => println("list_missing=ERR[${e}]"),
+    err(e) => println("list_missing=ERR[${redact(e, d)}]"),
   }
   let rn_missing = fs.rename(d + "/nope", d + "/x")
   match rn_missing {
     ok(_) => println("rename_missing=OK"),
-    err(e) => println("rename_missing=ERR[${e}]"),
+    err(e) => println("rename_missing=ERR[${redact(e, d)}]"),
   }
   // the write_all loop: a body far past any single-iteration assumption, and the
   // zero-length edge that never enters the loop at all.
