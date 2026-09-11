@@ -14,7 +14,11 @@ fn call_err(call: &str, args: &str, e: impl std::fmt::Display) -> String {
     format!("{call}({args}): {e}")
 }
 /// Source-shaped quoting, so the operand reads back as the writer spelled it.
-fn q(s: &str) -> String { format!("{s:?}") }
+// Name-spaced like `fs.rs`'s twin (both chunks land in ONE generated crate),
+// and rendering the SAME way: plain quotes, no escape table. `fs` has to
+// reproduce its quoting in hand-written WAT, so the family uses the rule the
+// hardest leg can honour rather than two rules that agree only on easy input.
+fn proc_q(s: &str) -> String { format!("\"{s}\"") }
 
 // The runtime-side twin of stdlib/process.almd's `type ProcessStatus = { code,
 // stdout, stderr }` — the AlmideFileStat treatment (fs.rs, #1821): the emitter
@@ -54,7 +58,7 @@ pub fn almide_rt_process_exec(cmd: &str, args: &[String]) -> Result<String, Stri
         // command when the process RAN and failed; "could not start it" said
         // errno and nothing else, so `process.exec("nope")` and a missing file
         // were byte-identical.
-        Err(e) => Err(call_err("process.exec", &q(cmd), e)),
+        Err(e) => Err(call_err("process.exec", &proc_q(cmd), e)),
     }
 }
 
@@ -90,7 +94,7 @@ pub fn almide_rt_process_exec_in(dir: &str, cmd: &str, args: &[String]) -> Resul
         // A bad `dir` fails here too, so both operands are named.
         Err(e) => Err(call_err(
             "process.exec_in",
-            &format!("{}, {}", q(dir), q(cmd)),
+            &format!("{}, {}", proc_q(dir), proc_q(cmd)),
             e,
         )),
     }
@@ -108,15 +112,15 @@ pub fn almide_rt_process_exec_with_stdin(cmd: &str, args: &[String], input: &str
         // report the call the writer made — naming `write_all` or
         // `wait_with_output`, which they never invoked, would be worse than
         // today's bare errno.
-        .map_err(|e| call_err("process.exec_with_stdin", &q(cmd), e))?;
+        .map_err(|e| call_err("process.exec_with_stdin", &proc_q(cmd), e))?;
     if let Some(stdin) = child.stdin.as_mut() {
         stdin
             .write_all(input.as_bytes())
-            .map_err(|e| call_err("process.exec_with_stdin", &q(cmd), e))?;
+            .map_err(|e| call_err("process.exec_with_stdin", &proc_q(cmd), e))?;
     }
     let out = child
         .wait_with_output()
-        .map_err(|e| call_err("process.exec_with_stdin", &q(cmd), e))?;
+        .map_err(|e| call_err("process.exec_with_stdin", &proc_q(cmd), e))?;
     if out.status.success() {
         Ok(String::from_utf8_lossy(&out.stdout).to_string())
     } else {
@@ -264,7 +268,7 @@ pub fn almide_rt_process_spawn(cmd: &str, args: &[String]) -> Result<i64, String
         .map(|child| child.id() as i64)
         // Was `spawn '{cmd}' failed: {e}` — it named the command, in a spelling
         // shared with nothing else (#2090). Nothing pinned it.
-        .map_err(|e| call_err("process.spawn", &q(cmd), e))
+        .map_err(|e| call_err("process.spawn", &proc_q(cmd), e))
 }
 
 pub fn almide_rt_process_kill(pid: i64, signal: i64) -> Result<(), String> {
