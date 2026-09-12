@@ -63,8 +63,8 @@ pub fn almide_rt_value_str(s: &str) -> AlmideValue { AlmideValue::Str(s.to_strin
 pub fn almide_rt_value_int(n: i64) -> AlmideValue { AlmideValue::Int(n) }
 pub fn almide_rt_value_float(f: f64) -> AlmideValue { AlmideValue::Float(f) }
 pub fn almide_rt_value_bool(b: bool) -> AlmideValue { AlmideValue::Bool(b) }
-pub fn almide_rt_value_array(items: &Vec<AlmideValue>) -> AlmideValue { AlmideValue::Array(items.clone()) }
-pub fn almide_rt_value_object(pairs: &Vec<(String, AlmideValue)>) -> AlmideValue { AlmideValue::Object(pairs.iter().map(|(k, v)| (almide_rt_intern_key(k), v.clone())).collect()) }
+pub fn almide_rt_value_array(items: &[AlmideValue]) -> AlmideValue { AlmideValue::Array(items.to_vec()) }
+pub fn almide_rt_value_object(pairs: &[(String, AlmideValue)]) -> AlmideValue { AlmideValue::Object(pairs.iter().map(|(k, v)| (almide_rt_intern_key(k), v.clone())).collect()) }
 pub fn almide_rt_value_null() -> AlmideValue { AlmideValue::Null }
 // Structural equality (`value.eq`). The wasm leg had this in its self-host
 // registry all along; native only ever reached AlmideValue equality through user

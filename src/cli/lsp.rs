@@ -190,7 +190,7 @@ fn find_stdlib_call_on_func(line_text: &str, word: &str, start: usize) -> Option
 /// Step 4a of `find_node`: variant constructor lookup. Extracted verbatim.
 fn find_variant_constructor(doc: &AnalyzedDoc, word: &str) -> Option<Located> {
     for decl in &doc.program.decls {
-        if let crate::ast::Decl::Type { name: type_name, ty: crate::ast::TypeExpr::Variant { cases }, .. } = decl {
+        if let crate::ast::Decl::Type { name: type_name, ty: crate::ast::TypeExpr::Variant { cases, .. }, .. } = decl {
             for case in cases {
                 let (case_name, fields) = match case {
                     crate::ast::VariantCase::Unit { name } => (name.as_str(), vec![]),
@@ -217,7 +217,7 @@ fn find_type_decl(doc: &AnalyzedDoc, word: &str) -> Option<Located> {
         if let crate::ast::Decl::Type { name, ty, .. } = decl {
             if name.as_str() == word {
                 let detail = match ty {
-                    crate::ast::TypeExpr::Variant { cases } => {
+                    crate::ast::TypeExpr::Variant { cases, .. } => {
                         let case_strs: Vec<String> = cases.iter().map(|c| match c {
                             crate::ast::VariantCase::Unit { name } => format!("| {}", name.as_str()),
                             crate::ast::VariantCase::Tuple { name, fields } => format!("| {}({})", name.as_str(), fields.iter().map(|f| format_type_expr(f)).collect::<Vec<_>>().join(", ")),

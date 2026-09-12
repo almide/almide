@@ -106,7 +106,10 @@ fn render_lambda(ctx: &RenderContext, params: &[(VarId, Ty)], body: &IrExpr, ann
         let cast = super::helpers::render_type_rc_fn(ctx, &body.ty);
         body_str = format!("{} as {}", wrapped, cast);
     }
-    ctx.templates.render_with("lambda_single", None, &[], &[("params", params_str.as_str()), ("body", body_str.as_str())])
+    let template = if params.first().is_some_and(|(id, _)| ctx.ann.borrowed_lambda_params.contains(id)) {
+        "lambda_borrowed"
+    } else { "lambda_single" };
+    ctx.templates.render_with(template, None, &[], &[("params", params_str.as_str()), ("body", body_str.as_str())])
         .unwrap_or_else(|| "|_| { }".to_string())
 }
 

@@ -27,6 +27,18 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
 pub fn emit_program_with_ops(
     ir: &IrProgram,
 ) -> Result<(Vec<u8>, std::collections::BTreeSet<i32>), EmitError> {
+    emit_with_ops(ir, false)
+}
+
+/// Library ABI: `_start` initializes globals; every public function must
+/// export successfully. Ordinary program emission still requires `main`.
+pub fn emit_library_with_ops(
+    ir: &IrProgram,
+) -> Result<(Vec<u8>, std::collections::BTreeSet<i32>), EmitError> {
+    emit_with_ops(ir, true)
+}
+
+fn emit_with_ops(ir: &IrProgram, library: bool) -> Result<(Vec<u8>, std::collections::BTreeSet<i32>), EmitError> {
     // Transparent newtypes erase FIRST, so both passes read one tree
     // (#1423 stage 4: the html/path SafeHtml/SafePath rows).
     let erased = crate::newtype::erase_transparent_aliases(ir);
@@ -35,11 +47,11 @@ pub fn emit_program_with_ops(
     // owner — bound first, released by the frame's exit plan.
     let bound = crate::arg_temps::bind_native_temporaries(ir);
     let ir = bound.as_ref().unwrap_or(ir);
-    let (bytes, visited, total, ops) = emit_program_pass(ir, None)?;
+    let (bytes, visited, total, ops) = emit_program_pass(ir, None, library)?;
     if visited.len() >= total {
         return Ok((bytes, ops));
     }
-    let (bytes, _, _, ops) = emit_program_pass(ir, Some(&visited))?;
+    let (bytes, _, _, ops) = emit_program_pass(ir, Some(&visited), library)?;
     Ok((bytes, ops))
 }
 
@@ -47,10 +59,14 @@ pub fn emit_program_with_ops(
 fn emit_program_pass(
     ir: &IrProgram,
     keep: Option<&HashSet<usize>>,
+    library: bool,
 ) -> Result<(Vec<u8>, HashSet<usize>, usize, std::collections::BTreeSet<i32>), EmitError> {
-    let Some(main) = ir.functions.iter().find(|f| f.name.as_str() == "main") else {
+    let main = ir.functions.iter().find(|f| f.name.as_str() == "main");
+    if main.is_none() && !library {
         return unsup("no main function");
-    };
+    }
+    let empty_main = almide_ir::IrExpr::default();
+    let main_body = main.map_or(&empty_main, |f| &f.body);
     // Program functions PLUS every linked module's functions — module fns
     // register under their QUALIFIED name ("url.encode_component"), which
     // is exactly the `CallTarget::Module` lookup key. A module carrying
@@ -217,7 +233,7 @@ fn emit_program_pass(
         param_owned: None,
     };
     let (main_fn, main_calls) =
-        lower_fn(&[], main_plan, &main.body, &init_lets, &ctx, &mut pool)?;
+        lower_fn(&[], main_plan, main_body, &init_lets, &ctx, &mut pool)?;
     display_helper_calls.extend(display::build_display_helpers(&table, &types, &work, &mut pool)?);
 
     // Lift lambdas to extra functions (they may register further lambdas
@@ -323,7 +339,10 @@ fn emit_program_pass(
                 continue;
             }
             match &lowered[j] {
-                Err(_) => {
+                Err(reason) => {
+                    if library {
+                        return unsup(&format!("exported function `{name}` cannot be lowered: {reason}"));
+                    }
                     clean = false;
                     break;
                 }

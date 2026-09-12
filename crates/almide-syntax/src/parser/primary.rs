@@ -134,6 +134,11 @@ impl Parser {
     /// expressions, and a bare `=` in expression position (chained/misplaced
     /// assignment). Falls back to a generic "Expected expression" error.
     fn parse_primary_error(&mut self, tok: &crate::lexer::Token) -> Result<Expr, String> {
+        if let Some(error) = self.reject_retired_range(
+            "a prefix expression", "Ranges require a start: `start..<end` or `start...end`. Calls do not support argument spread. To combine lists use `xs + [item]`; `..rest` is a list-pattern rest marker in the final slot.")
+        {
+            return Err(error);
+        }
         // `let x = expr in body` — ML-style let-in expression
         if tok.token_type == TokenType::Let {
             let msg = "'let' is not an expression in Almide";
@@ -274,12 +279,13 @@ impl Parser {
         // delimited-context rule every other bracketed literal (list, record,
         // map) already follows: newlines are insignificant between `(` and
         // `)`, around elements and after commas.
-        self.skip_newlines();
+        let pending = self.skip_newlines_collecting();
         if self.check(TokenType::RParen) {
             self.advance();
             return Ok(Expr::new(self.next_id(), span, ExprKind::Unit));
         }
         let first = self.parse_expr()?;
+        self.attach_leading_comments(first.id, pending);
         self.skip_newlines();
         // Type ascription inside parens: `(expr: Type)` — e.g. `([]: List[String])`.
         // The bare call-arg form `[]: T` is accepted as a call argument, but a
@@ -304,9 +310,11 @@ impl Parser {
             let mut elements = vec![first];
             while self.check(TokenType::Comma) {
                 self.advance();
-                self.skip_newlines();
+                let pending = self.skip_newlines_collecting();
                 if self.check(TokenType::RParen) { break; }
-                elements.push(self.parse_expr()?);
+                let element = self.parse_expr()?;
+                self.attach_leading_comments(element.id, pending);
+                elements.push(element);
                 self.skip_newlines();
             }
             self.expect_closing(TokenType::RParen, open.line, open.col, "tuple")?;
@@ -355,49 +363,13 @@ impl Parser {
             self.skip_newlines();
             let open_rec = self.current().clone();
             self.advance(); // skip {
-            self.skip_newlines();
-            // Spread record: Foo { ...base, field: value }
+            let pending = self.skip_newlines_collecting();
             if self.check(TokenType::DotDotDot) {
-                self.advance(); // skip ...
-                let base = self.parse_expr()?;
-                let mut fields = Vec::new();
-                while self.check(TokenType::Comma) {
-                    self.advance();
-                    self.skip_newlines();
-                    if self.check(TokenType::RBrace) { break; }
-                    let field_name = self.expect_any_name()?;
-                    self.expect(TokenType::Colon)?;
-                    self.skip_newlines();
-                    let field_value = self.parse_expr()?;
-                    fields.push(FieldInit { name: field_name, value: field_value });
-                }
-                self.skip_newlines();
-                self.expect_closing(TokenType::RBrace, open_rec.line, open_rec.col, "spread record")?;
-                return Ok(Expr::new(self.next_id(), span, ExprKind::SpreadRecord {
-                    base: Box::new(base), fields,
-                }));
+                return self.parse_spread_record(span, open_rec, pending);
             }
-            // Regular named record: Foo { x: 1, y: 2 }
-            let mut fields = Vec::new();
-            while !self.check(TokenType::RBrace) {
-                self.skip_newlines();
-                let field_name = self.expect_any_name()?;
-                if self.check(TokenType::Colon) {
-                    self.advance();
-                    self.skip_newlines();
-                    let field_value = self.parse_expr()?;
-                    fields.push(FieldInit { name: field_name, value: field_value });
-                } else {
-                    fields.push(FieldInit {
-                        name: field_name.clone(),
-                        value: Expr::new(self.next_id(), None, ExprKind::Ident { name: field_name }),
-                    });
-                }
-                self.skip_newlines();
-                if self.check(TokenType::Comma) { self.advance(); self.skip_newlines(); }
-            }
-            self.expect_closing(TokenType::RBrace, open_rec.line, open_rec.col, "record construction")?;
-            return Ok(Expr::new(self.next_id(), span, ExprKind::Record { name: Some(name), fields }));
+            let mut record = self.parse_record_literal(span, open_rec, pending)?;
+            if let ExprKind::Record { name: record_name, .. } = &mut record.kind { *record_name = Some(name); }
+            return Ok(record);
         }
         Ok(Expr::new(self.next_id(), span, ExprKind::TypeName { name }))
     }

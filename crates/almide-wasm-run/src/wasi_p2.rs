@@ -38,7 +38,7 @@ use wasm_encoder::{
 };
 
 use crate::wasi::{
-    mem, mem8, parse_module, reencode_body, type_index, Parsed, Remap, DATA, MSG, PARK_SPAN,
+    mem, mem8, parse_module, reencode_body, type_index, Parsed, Remap, MSG, PARK_SPAN,
     UNSUPPORTED_MSG,
 };
 
@@ -334,7 +334,6 @@ fn shim_fs_call(
     g_stderr: u32,
 ) -> Function {
     let (op, _a_ptr, a_len, b_ptr, b_len) = (0u32, 1u32, 2u32, 3u32, 4u32);
-    let total = 5u32;
     let n = 6u32;
     let mut f = Function::new([(2, ValType::I32)]);
     let mut i = f.instructions();
@@ -377,35 +376,6 @@ fn shim_fs_call(
     i.i32_const(0).global_set(g_plen);
     i.end();
     i.global_get(g_plen).i64_extend_i32_u().return_();
-    i.end();
-
-    // op 31: stdin read-to-end — loop take-4096 into the park data span
-    // (contiguous, host_read's contract); overflow takes the refusal.
-    i.local_get(op).i32_const(31).i32_eq().if_(BlockType::Empty);
-    i.i32_const(0).local_set(total);
-    i.block(BlockType::Empty).loop_(BlockType::Empty);
-    load_handle(&mut i, g_stdin, I_GET_STDIN);
-    i.i64_const(4096);
-    i.i32_const((park + RET) as i32);
-    i.call(I_BLOCKING_READ);
-    i.i32_const((park + RET) as i32).i32_load(mem(0)).i32_eqz().i32_eqz().br_if(1); // err -> EOF
-    i.i32_const((park + RET) as i32).i32_load(mem(8)).local_set(n);
-    i.local_get(n).i32_eqz().br_if(1);
-    // room check: DATA span is the park's tail.
-    i.local_get(total).local_get(n).i32_add();
-    i.i32_const((PARK_SPAN - DATA) as i32).i32_gt_u();
-    i.if_(BlockType::Empty);
-    i.i32_const(1).call(I_EXIT).unreachable();
-    i.end();
-    i.i32_const((park + DATA) as i32).local_get(total).i32_add();
-    i.i32_const((park + RET) as i32).i32_load(mem(4));
-    i.local_get(n);
-    i.memory_copy(0, 0);
-    i.local_get(total).local_get(n).i32_add().local_set(total);
-    i.br(0).end().end();
-    i.i32_const((park + DATA) as i32).global_set(g_ppos);
-    i.local_get(total).global_set(g_plen);
-    i.local_get(total).i64_extend_i32_u().return_();
     i.end();
 
     // op 32: entropy — n rides b_len; the list lands via cabi_realloc.

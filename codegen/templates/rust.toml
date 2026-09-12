@@ -311,6 +311,9 @@ template = "move |{params}| {{ {body} }}"
 [lambda_single]
 template = "move |{params}| {body}"
 
+[lambda_borrowed]
+template = "|{params}| {body}"
+
 # ── Type declarations ──
 
 [type_alias]

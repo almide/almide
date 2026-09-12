@@ -138,7 +138,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-100 | Self-hosted String classification/transform ops byte-match native on wasm | 0.27.6 | active | fixture | 4 |
 | C-101 | List ops over heap elements (String/Value) byte-match native and are leak/double-free free | 0.27.6 | active | fixture | 16 |
 | C-102 | List iteration, call-result element materialization, and tail-recursive list traversal byte-match native | 0.27.6 | active | fixture | 3 |
-| C-103 | Self-hosted dynamic Value model (merge, array/as_array roundtrip, tuple TCO) byte-matches native and is leak-free in a loop | 0.27.6 | active | fixture | 5 |
+| C-103 | Self-hosted dynamic Value model (merge, array/as_array roundtrip, tuple TCO) byte-matches native and is leak-free in a loop | 0.27.6 | active | fixture | 6 |
 | C-104 | Tail-recursive accumulator shapes lower to bounded-stack loops byte-matching native | 0.27.6 | active | fixture | 6 |
 | C-105 | var/append accumulator loops (scalar, owned-handle, cross-dep, mutual-recursion) byte-match native on wasm | 0.27.6 | active | fixture | 5 |
 | C-106 | Heap value bound from an if/match arm byte-matches native on the v1 wasm path | 0.27.6 | active | fixture | 16 |

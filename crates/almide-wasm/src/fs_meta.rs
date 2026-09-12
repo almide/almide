@@ -23,7 +23,6 @@ pub(crate) const OP_ENV_OS: i32 = 27;
 pub(crate) const OP_TEMP_DIR: i32 = 28;
 pub(crate) const OP_ARGS: i32 = 29;
 pub(crate) const OP_STDOUT_RAW: i32 = 30;
-pub(crate) const OP_STDIN_READ: i32 = 31;
 pub(crate) const OP_STDIN_TAKE: i32 = 35;
 pub(crate) const OP_RANDOM_GET: i32 = 32;
 pub(crate) const OP_CWD: i32 = 33;

@@ -376,6 +376,12 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
     // env opt-in until the fan lowering lands on the same plumbing and
     // the corpus gates cover it.
     let direct_p3 = direct_p2 && std::env::var_os("ALMIDE_COMPONENT_P3").is_some();
+    if direct_p2
+        && let Err(message) = almide_wasm_run::component_availability::check(&host_ops, direct_p3)
+    {
+        err(&message);
+        std::process::exit(1);
+    }
     let bytes = if direct_p3 {
         match almide_wasm_run::wasi_p3::to_p3(&bytes, wants_http) {
             Ok(c) => c,
@@ -818,9 +824,8 @@ fn check_no_native_only_matrix(ir_program: &almide::ir::IrProgram) -> Result<(),
 /// produced the bytes is named in the `Built …` line / `--time-report`:
 ///   - `ALMIDE_WASM_INCUMBENT=1`     → incumbent (the reversible switch,
 ///                                      kept for one release)
-///   - main-less library module      → incumbent (#881 export mode — the
-///                                      structural emitter has no library
-///                                      form yet)
+///   - main-less library module      → structural library mode (#2110),
+///                                      with every public export required
 ///   - host-variant program on the BUILD path → incumbent (its artifact
 ///                                      speaks real WASI fs/env; the WASI
 ///                                      transform's shims cover less)
@@ -853,7 +858,7 @@ fn render_wasm_module_routed(
     let incumbent = !force_structural
         && (std::env::var_os("ALMIDE_WASM_INCUMBENT").is_some()
             || std::env::var_os("ALMIDE_FUEL_PROBE").is_some()
-            || !has_main
+            || (!has_main && !library_ok)
             || uses_incumbent_features);
     if incumbent {
         let r = render_wasm_module(source_text, v1_self_modules, library_ok).map(|(b, _)| (b, false, Vec::new()));
@@ -862,8 +867,8 @@ fn render_wasm_module_routed(
         // structural attempt — the same verified-to-verified doctrine as
         // the forward reroute below, in the other direction. The forced
         // routes (ALMIDE_WASM_INCUMBENT / FUEL_PROBE) and the main-less
-        // library form stay final: an explicit choice is not rerouted, and
-        // the structural leg has no library form to hand over to.
+        // library form stay final on this reverse path; ordinary library
+        // builds already use the structural library emitter below.
         let shape_routed = std::env::var_os("ALMIDE_WASM_INCUMBENT").is_none()
             && std::env::var_os("ALMIDE_FUEL_PROBE").is_none()
             && has_main
@@ -923,7 +928,12 @@ fn render_wasm_module_routed(
         Ok(ir) => ir,
         Err(e) => return reroute(&format!("front: {e}")),
     };
-    match almide_wasm::emit_program_with_ops(&ir) {
+    let emitted = if has_main || !library_ok {
+        almide_wasm::emit_program_with_ops(&ir)
+    } else {
+        almide_wasm::emit_library_with_ops(&ir)
+    };
+    match emitted {
         Ok((bytes, host_ops)) => {
             // Same emit-time validation discipline as the incumbent leg:
             // never ship bytes wasmtime would refuse at load.
@@ -1404,4 +1414,3 @@ fn run_wasm_opt(path: &str) -> Result<usize, String> {
     let meta = std::fs::metadata(path).map_err(|e| format!("stat {}: {}", path, e))?;
     Ok(meta.len() as usize)
 }
-

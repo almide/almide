@@ -192,13 +192,14 @@ pub(crate) fn emit_str_replace() -> Function {
 /// appends in place, and each spill doubles the class. `src` is borrowed
 /// (F_CONCAT's contract); `dst`'s ownership transfers through the call.
 pub(crate) fn emit_str_append() -> Function {
-    // params: 0=dst, 1=src; locals: 2=la, 3=lb, 4=out, 5=p, 6=q, 7=end
+    // params: 0=dst, 1=src; locals: 2=la, 3=lb, 4=out, 5=p, 6=q, 7=end,
+    // 8=want
     let (dst, src, la, lb, out) = (0u32, 1u32, 2u32, 3u32, 4u32);
-    let (p, q, endp) = (5u32, 6u32, 7u32);
+    let (p, q, endp, want) = (5u32, 6u32, 7u32, 8u32);
     let payload = almide_layout::PAYLOAD as i32;
     let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
     let byte = MemArg { offset: 0, align: 0, memory_index: 0 };
-    let mut f = Function::new([(6, ValType::I32)]);
+    let mut f = Function::new([(7, ValType::I32)]);
     let mut i = f.instructions();
     i.local_get(dst).i32_load(len_memarg()).local_set(la);
     i.local_get(src).i32_load(len_memarg()).local_set(lb);
@@ -232,6 +233,46 @@ pub(crate) fn emit_str_append() -> Function {
         i.end();
         i.local_get(dst).local_get(la).local_get(lb).i32_add().i32_store(len_memarg());
         i.local_get(dst).return_();
+    }
+    i.end();
+    // #2117: above the largest size class $alloc stops rounding up, so a
+    // grown block comes back with cap == len and the window above can
+    // never fire again — every further append reallocated the whole
+    // string and $free abandons blocks that big, which is how a 5 MB
+    // accumulator walked the heap into C-197. Ask for DOUBLE there and
+    // keep the slack in cap: the policy $list_push and $map_reserve
+    // already use, applied where the allocator's own rounding stops.
+    // Below the ceiling nothing changes — the class slack still serves.
+    i.local_get(la).local_get(lb).i32_add();
+    i.i32_const((16 << (FREELIST_CLASSES - 1)) - almide_layout::PAYLOAD as i32);
+    i.i32_gt_u();
+    i.local_get(dst).global_get(G_LINE_END).i32_ge_u();
+    i.i32_and();
+    i.local_get(dst).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_eq();
+    i.i32_and();
+    i.if_(BlockType::Empty);
+    {
+        // want = max(la + lb, cap * 2); a cap whose double wraps reads as
+        // 0 under the unsigned compare and falls back to the exact size,
+        // where $alloc's own frontier guard takes the defined abort.
+        i.local_get(dst).i32_load(word(almide_layout::CAP.offset)).i32_const(1).i32_shl().local_set(want);
+        i.local_get(want).local_get(la).local_get(lb).i32_add().i32_lt_u().if_(BlockType::Empty);
+        i.local_get(la).local_get(lb).i32_add().local_set(want);
+        i.end();
+        i.local_get(want).call(F_ALLOC).local_set(out);
+        i.local_get(out).i32_const(payload).i32_add();
+        i.local_get(dst).i32_const(payload).i32_add();
+        i.local_get(la);
+        i.call(F_COPY);
+        i.local_get(out).i32_const(payload).i32_add().local_get(la).i32_add();
+        i.local_get(src).i32_const(payload).i32_add();
+        i.local_get(lb);
+        i.call(F_COPY);
+        // The block keeps the capacity it was given; only the live length
+        // is the concatenation.
+        i.local_get(out).local_get(la).local_get(lb).i32_add().i32_store(len_memarg());
+        i.local_get(dst).call(F_DEC_FLAT);
+        i.local_get(out).return_();
     }
     i.end();
     // Outgrown (or shared, or static): fresh concat, release the old

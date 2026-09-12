@@ -6,6 +6,16 @@ use super::Parser;
 
 impl Parser {
     pub(crate) fn parse_pattern(&mut self) -> Result<Pattern, String> {
+        let pattern = self.parse_pattern_inner()?;
+        if let Some(error) = self.reject_retired_range(
+            "a range pattern", "Range patterns do not exist. Use separate match arms or a guard; `..<` and `...` construct ranges only in expressions.")
+        {
+            return Err(error);
+        }
+        Ok(pattern)
+    }
+
+    fn parse_pattern_inner(&mut self) -> Result<Pattern, String> {
         if let Some(p) = self.parse_structural_pattern() {
             return p;
         }
@@ -271,6 +281,7 @@ impl Parser {
                 } else {
                     fields.push(FieldPattern { name: field_name, pattern: None });
                 }
+                self.skip_newlines();
                 if self.check(TokenType::Comma) { self.advance(); self.skip_newlines(); }
             }
             self.expect(TokenType::RBrace)?;

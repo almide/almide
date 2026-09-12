@@ -16,9 +16,9 @@
 //! (`wasmtime run --dir=.`).
 //! Canonical-ABI facts (variant discriminants, payload offsets) are
 //! DERIVED from the vendored WIT at emit time (`FsAbi`), never
-//! hand-counted. fs writes, env and process keep the DEFINED refusal;
-//! the fs-program route flip to this leg waits on the write surface
-//! (until then it is exercised via ALMIDE_WASM_STRUCTURAL=1). The
+//! hand-counted. Requested p3 filesystem programs route here without an
+//! ALMIDE_WASM_STRUCTURAL override. Env and process operations outside
+//! this world's imports retain the defined refusal. The
 //! transform is a post-pass — the emitter's verified envelope is
 //! untouched.
 //!

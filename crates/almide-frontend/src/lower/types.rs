@@ -49,7 +49,7 @@ pub(super) fn lower_type_decl(ctx: &mut LowerCtx, decl: &TypeToLower<'_>) -> IrT
             }).collect();
             IrTypeDeclKind::Record { fields: fs }
         }
-        ast::TypeExpr::Variant { cases } => {
+        ast::TypeExpr::Variant { cases, .. } => {
             let is_generic = matches!(generics, Some(gs) if !gs.is_empty());
             let cs = cases.iter().map(|c| lower_variant_case(ctx, c, name, module_prefix)).collect();
             IrTypeDeclKind::Variant {

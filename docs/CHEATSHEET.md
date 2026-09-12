@@ -355,7 +355,7 @@ while i < 10 {
 ```
 0..<5           // [0, 1, 2, 3, 4]  (exclusive end)
 1...5           // [1, 2, 3, 4, 5]  (inclusive end)
-for i in 0..n { ... }    // optimized: no list allocation
+for i in 0..<n { ... }   // optimized: no list allocation
 let xs = list.map(0..<10, (i) => i * i)  // range as List[Int]
 ```
 

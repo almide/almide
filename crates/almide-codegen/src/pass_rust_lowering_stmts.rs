@@ -247,47 +247,5 @@ fn try_rewrite_push(var: VarId, value: &IrExpr, span: Option<almide_base::Span>,
 
 /// Check if expr references the given variable (for borrow conflict detection).
 fn expr_references_var(expr: &IrExpr, var: VarId) -> bool {
-    match &expr.kind {
-        IrExprKind::Var { id } => *id == var,
-        IrExprKind::BinOp { left, right, .. } => {
-            expr_references_var(left, var) || expr_references_var(right, var)
-        }
-        IrExprKind::UnOp { operand, .. } => expr_references_var(operand, var),
-        IrExprKind::Call { target, args, .. } => {
-            call_target_references_var(target, var) || args.iter().any(|a| expr_references_var(a, var))
-        }
-        IrExprKind::RuntimeCall { args, .. } => {
-            args.iter().any(|a| expr_references_var(a, var))
-        }
-        IrExprKind::IndexAccess { object, index } | IrExprKind::MapAccess { object, key: index } => {
-            expr_references_var(object, var) || expr_references_var(index, var)
-        }
-        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => {
-            expr_references_var(object, var)
-        }
-        IrExprKind::Clone { expr: e } | IrExprKind::Borrow { expr: e, .. }
-        | IrExprKind::Deref { expr: e } | IrExprKind::ToVec { expr: e }
-        | IrExprKind::OptionSome { expr: e } | IrExprKind::Try { expr: e }
-        | IrExprKind::Unwrap { expr: e } | IrExprKind::ToOption { expr: e } => {
-            expr_references_var(e, var)
-        }
-        IrExprKind::UnwrapOr { expr: e, fallback: f } => {
-            expr_references_var(e, var) || expr_references_var(f, var)
-        }
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
-            elements.iter().any(|e| expr_references_var(e, var))
-        }
-        IrExprKind::If { cond, then, else_ } => {
-            expr_references_var(cond, var) || expr_references_var(then, var) || expr_references_var(else_, var)
-        }
-        _ => false,
-    }
-}
-
-fn call_target_references_var(target: &CallTarget, var: VarId) -> bool {
-    match target {
-        CallTarget::Method { object, .. } | CallTarget::Computed { callee: object } =>
-            expr_references_var(object, var),
-        _ => false,
-    }
+    almide_ir::free_vars::free_vars(expr, &HashSet::new()).contains(&var)
 }

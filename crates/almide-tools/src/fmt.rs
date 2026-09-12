@@ -306,7 +306,7 @@ fn collect_module_refs_type(te: &TypeExpr, used: &mut std::collections::HashSet<
         TypeExpr::Tuple { elements } | TypeExpr::Union { members: elements } => {
             collect_module_refs_types(elements, used)
         }
-        TypeExpr::Variant { cases } => {
+        TypeExpr::Variant { cases, .. } => {
             for c in cases {
                 collect_module_refs_variant_case(c, used);
             }
@@ -1016,7 +1016,22 @@ fn fmt_union_members(out: &mut String, members: &[TypeExpr], depth: usize) {
 
 /// A variant type's cases, with a LEADING `|` on the first case too — the
 /// declaration style `type T =\n  | A\n  | B` round-trips only if it is emitted.
-fn fmt_variant_cases(out: &mut String, cases: &[VariantCase], depth: usize) {
+fn fmt_variant_cases(out: &mut String, cases: &[VariantCase], comments: &[ExprComments], depth: usize) {
+    let multiline = comments.iter().any(|c| !c.leading.is_empty() || !c.line_trailing.is_empty());
+    if multiline {
+        for (index, case) in cases.iter().enumerate() {
+            out.push('\n');
+            if let Some(c) = comments.get(index) {
+                for line in &c.leading { wln!(out, "{}{}", ind(depth + 1), line); }
+            }
+            w!(out, "{}| ", ind(depth + 1));
+            fmt_variant_case(out, case, depth + 1);
+            if let Some(c) = comments.get(index) {
+                for line in &c.line_trailing { w!(out, " {line}"); }
+            }
+        }
+        return;
+    }
     for (i, case) in cases.iter().enumerate() {
         out.push_str(if i > 0 { " | " } else { "| " });
         fmt_variant_case(out, case, depth);
@@ -1120,7 +1135,7 @@ fn fmt_type(out: &mut String, ty: &TypeExpr, depth: usize) {
         TypeExpr::ConstLit { value } => {
             out.push_str(&value.to_string());
         }
-        TypeExpr::Variant { cases } => fmt_variant_cases(out, cases, depth),
+        TypeExpr::Variant { cases, comments } => fmt_variant_cases(out, cases, comments, depth),
     }
 }
 
@@ -1181,4 +1196,5 @@ fn fmt_field_type(out: &mut String, f: &FieldType, depth: usize) {
 }
 
 include!("fmt_expr.rs");
+include!("fmt_delimited.rs");
 include!("fmt_tests.rs");

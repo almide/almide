@@ -1130,15 +1130,8 @@ impl Checker {
         std::mem::take(&mut self.diagnostics)
     }
 
-    /// Reimpl lint — detect top-level user fns whose name is close to a
-    /// stdlib fn AND whose signature matches exactly. Emits a Warning
-    /// with a `try:` delegation shim so LLM retries can converge on
-    /// the idiomatic one-liner. Opt-in strictness: a miss on any of
-    /// (name distance ≤ 2, param count, param types, return type)
-    /// suppresses the suggestion.
-    ///
-    /// Scope: top-level, non-monomorphized, non-derive, non-test fns.
-    /// Roadmap: `docs/roadmap/active/reimpl-lint.md`.
+    /// Advisory name/signature comparison for computational stdlib functions.
+    /// Bodies are not compared, so E015 carries no replacement edit (#2113).
     pub(crate) fn check_reimpl_lint(&mut self, program: &ast::Program) {
         for decl in &program.decls {
             let ast::Decl::Fn { name, params, return_type, span, .. } = decl else { continue };
@@ -1153,27 +1146,15 @@ impl Checker {
             if matches!(user_ret, Ty::Unknown) { continue; }
             let Some((module, stdlib_fn)) = self.find_stdlib_reimpl(user_name, &user_param_tys, &user_ret)
                 else { continue };
-            let try_shim = format!(
-                "fn {name}({params}) -> {ret} =\n    {module}.{fn}({args})",
-                name = user_name,
-                params = params.iter()
-                    .map(|p| format!("{}: {}", p.name, self.resolve_type_expr(&p.ty).display()))
-                    .collect::<Vec<_>>()
-                    .join(", "),
-                ret = user_ret.display(),
-                module = module,
-                fn = stdlib_fn,
-                args = params.iter().map(|p| p.name.to_string()).collect::<Vec<_>>().join(", "),
-            );
             let mut diag = Diagnostic::warning(
                 format!("fn '{}' has the same signature as stdlib `{}.{}`", user_name, module, stdlib_fn),
                 format!(
-                    "If this is the standard algorithm, delegate to stdlib. \
-                     Keep the local impl only if you need the specific behaviour that differs from `{}.{}`.",
+                    "Only the name and signature were compared; equivalent behaviour is not established. \
+                     Review `{}.{}` before deciding whether it implements your intended operation.",
                     module, stdlib_fn
                 ),
                 format!("fn {}", user_name),
-            ).with_code("E015").with_try(try_shim);
+            ).with_code("E015");
             if let Some(s) = span {
                 diag.file = self.source_file.clone();
                 diag.line = Some(s.line);
@@ -1197,62 +1178,25 @@ impl Checker {
         user_param_tys: &[Ty],
         user_ret: &Ty,
     ) -> Option<(&'static str, &'static str)> {
-        let user_lc = user_name.to_ascii_lowercase();
-        // Codepoint count, not `len()`: a byte-length gap overstates the
-        // edit distance for non-ASCII identifiers and would drop a real
-        // candidate.
-        let user_chars = user_name.chars().count();
-        // Best match, not first match. `atan` passes the gates against
-        // both `math.atan` (distance 0) and `math.tan` (distance 1), so
-        // taking the first candidate named whichever of the two the
-        // module's fn list happened to yield first. Ranking by distance
-        // makes the suggestion the closest name, and `module_fn_names`
-        // is sorted, so the enumeration order breaks ties the same way
-        // on every run.
-        let mut best: Option<(usize, &'static str, &'static str)> = Option::None;
+        // #2113: only exact names in computational modules are candidates.
+        // Host/environment wrappers (including pure-looking args.option) must
+        // never be suggested as replacements for a portable helper.
         for &module in almide_lang::stdlib_info::BUNDLED_MODULES {
+            if !matches!(module, "list" | "int" | "float" | "math" | "bytes"
+                | "string" | "map" | "set" | "option" | "result" | "value"
+                | "base64" | "hex" | "hash" | "regex" | "json" | "matrix"
+                | "path" | "html" | "url" | "zlib") { continue; }
             for fn_name in crate::stdlib::module_functions_all(module) {
-                // Name-similarity filter, cheapest gate first. Edit
-                // distance is never below the length difference, so a
-                // gap over the `≤ 2` cap rules a candidate out without
-                // running the O(len²) matrix. Then a substring gate (one
-                // scan) so that common-shape collisions like
-                // `fn add(Int, Int) -> Int` don't false-positive
-                // against `int.band`. Require one name to contain
-                // the other (case-insensitive) — catches typos
-                // (`maps` ⊃ `map`), qualified renames
-                // (`my_binary_search` ⊃ `binary_search`), and exact
-                // matches, while excluding short stdlib names with
-                // unrelated user fns. Only survivors reach `levenshtein`,
-                // which used to run on every stdlib fn for every user fn
-                // and dominated `almide check` (12.8% of self time on a
-                // 3200-fn program that emits no diagnostics at all).
-                if user_chars.abs_diff(fn_name.chars().count()) > 2 {
-                    continue;
-                }
-                let fn_lc = fn_name.to_ascii_lowercase();
-                if !(user_lc.contains(&fn_lc) || fn_lc.contains(&user_lc)) {
-                    continue;
-                }
-                let dist = almide_base::diagnostic::levenshtein(user_name, fn_name);
-                if dist > 2 {
-                    continue;
-                }
-                if best.as_ref().is_some_and(|(d, _, _)| *d <= dist) {
-                    continue;
-                }
+                if user_name != fn_name { continue; }
                 let Some(sig) = crate::stdlib::lookup_sig(module, fn_name) else { continue };
-                if sig.params.len() != user_param_tys.len() { continue; }
+                if sig.is_effect || sig.params.len() != user_param_tys.len() { continue; }
                 if !sigs_match_structurally(&sig.params, &sig.ret, user_param_tys, user_ret) {
                     continue;
                 }
-                if dist == 0 {
-                    return Some((module, fn_name));
-                }
-                best = Some((dist, module, fn_name));
+                return Some((module, fn_name));
             }
         }
-        best.map(|(_, module, fn_name)| (module, fn_name))
+        None
     }
 
 }
@@ -1377,7 +1321,7 @@ fn import_spellings(program: &mut ast::Program) -> ImportSpellings {
             ast::TypeExpr::Tuple { elements } | ast::TypeExpr::Union { members: elements } => {
                 for e in elements { walk_ty(e, s); }
             }
-            ast::TypeExpr::Variant { cases } => {
+            ast::TypeExpr::Variant { cases, .. } => {
                 for c in cases {
                     match c {
                         ast::VariantCase::Tuple { fields, .. } => for t in fields { walk_ty(t, s); },
@@ -1443,7 +1387,7 @@ fn import_spellings(program: &mut ast::Program) -> ImportSpellings {
             ast::Decl::TopLet { ty: Some(t), .. } => walk_ty(t, &mut s),
             ast::Decl::Type { name, ty, generics, .. } => {
                 s.declared.insert(*name);
-                if let ast::TypeExpr::Variant { cases } = ty {
+                if let ast::TypeExpr::Variant { cases, .. } = ty {
                     for c in cases {
                         let (ast::VariantCase::Unit { name } | ast::VariantCase::Tuple { name, .. }
                             | ast::VariantCase::Record { name, .. }) = c;
