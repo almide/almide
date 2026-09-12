@@ -202,6 +202,15 @@ impl Emitter<'_> {
                 let mut no_transfer = false;
                 let depth = self.borrowed_temps.len();
                 for (k, (a, want)) in args.iter().zip(params).enumerate() {
+                    // #2117: `build(acc + s, …)` at a self tail call in loop
+                    // form is the growing accumulator one position over from
+                    // the assign `try_str_append_assign` already routes. The
+                    // generic path emits concat + a release of the old block
+                    // at the exit; `$str_append` does both in one call, in
+                    // place when the block is uniquely held.
+                    if self.tail_str_append_arg(k, a, want, Some(index) == self.self_index && tail)? {
+                        continue;
+                    }
                     self.lower(a, Some(want))?;
                     if loop_form_raw && let Some(p) = self.frame_param_var(a) && !moved.contains(&p) {
                         moved.push(p);
@@ -569,6 +578,47 @@ impl Emitter<'_> {
     /// `owned_pos` = the callee owns this param (releases it at its exit
     /// plan). Returns true when a borrowed position forbids a
     /// `return_call` at this site (`no_transfer`).
+    /// The #2117 window: an argument of a LOOP-FORM self tail call that is
+    /// `p + rhs` for the very parameter `p` it rebinds. `$str_append` takes
+    /// `p`'s credit and answers the grown block, so the exit must not release
+    /// `p` as well — `tail_consumed` tells the exit PLAN, which is what the
+    /// E083 validator checks the emitted releases against.
+    fn tail_str_append_arg(
+        &mut self,
+        k: usize,
+        a: &IrExpr,
+        want: SliceTy,
+        self_tail: bool,
+    ) -> Result<bool, EmitError> {
+        if !self_tail || self.metered || !self.tail_release_allowed || want != STR {
+            return Ok(false);
+        }
+        let Some((left, right)) = crate::stmts_append::concat_operands(a, almide_ir::BinOp::ConcatStr)
+        else {
+            return Ok(false);
+        };
+        let IrExprKind::Var { id } = &left.kind else { return Ok(false) };
+        if self.cells.contains(id) {
+            return Ok(false);
+        }
+        let Some(&(idx, SliceTy::Scalar(Scalar::Str))) = self.locals.get(id) else {
+            return Ok(false);
+        };
+        // The loop-back writes this argument into local `k`: only the
+        // parameter being rebound may have its credit spent here.
+        if idx != k as u32 || !self.rc_frame_params.contains(&idx) {
+            return Ok(false);
+        }
+        self.f.instructions().local_get(idx);
+        self.lower(right, Some(STR))?;
+        self.f.instructions().call(F_STR_APPEND);
+        // The credit MOVES through the helper — one in, one out — which is
+        // what a moved param records, not a freshly born block.
+        self.witness_arg(left, want);
+        self.tail_consumed.insert(idx);
+        Ok(true)
+    }
+
     pub(crate) fn lower_conv_arg(
         &mut self,
         a: &IrExpr,

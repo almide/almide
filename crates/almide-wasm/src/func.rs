@@ -288,6 +288,7 @@ pub(crate) fn lower_fn(
             rc_param_ceiling: env_shift + params.len() as u32,
             tail_release_allowed: false,
             rc_frame_params: Vec::new(),
+            tail_consumed: Default::default(),
             self_index,
             rc_owned: std::collections::BTreeSet::new(),
             owned_ty: std::collections::HashMap::new(),

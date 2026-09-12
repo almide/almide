@@ -77,3 +77,37 @@ fn an_accumulator_past_the_class_ceiling_completes_on_both_legs() {
     assert_eq!(run(&native, false), expected, "native");
     assert_eq!(run(&core, true), expected, "core wasm");
 }
+
+/// #2117's other half: the spelling `CLAUDE.md` tells writers to prefer.
+/// `build(acc + s, n - 1)` never reached `$str_append` — the tail call emitted
+/// a concat and a release of the old block — so the accumulator reallocated
+/// per iteration and abandoned every outgrown copy, exactly as the `var` form
+/// did before the allocator change. Under the same ceiling both legs must
+/// finish, and the answer must be the imperative spelling's.
+#[test]
+fn a_tail_recursive_accumulator_grows_like_the_assign_form() {
+    let dir = tempfile::tempdir().expect("scratch");
+    let source = dir.path().join("rec.almd");
+    std::fs::write(
+        &source,
+        r#"fn dbl(acc: String, n: Int) -> String =
+  if n == 0 then acc else dbl(acc + acc, n - 1)
+
+fn build(acc: String, n: Int) -> String =
+  if n == 0 then acc else build(acc + "aaaaaaaaaaaaaaaa", n - 1)
+
+effect fn main() -> Unit = {
+  let acc = build(dbl("a", 19), 2000)
+  println("len=${string.len(acc)}")
+  println("tail=${string.slice(acc, string.len(acc) - 3, string.len(acc))}")
+}
+"#,
+    )
+    .expect("source");
+    let cap = ["--heap-cap", "33554432"];
+    let native = build(dir.path(), &source, "native", &cap);
+    let core = build(dir.path(), &source, "core.wasm", &[&cap[..], &["--target", "wasm"]].concat());
+    let expected = "len=556288\ntail=aaa\n";
+    assert_eq!(run(&native, false), expected, "native");
+    assert_eq!(run(&core, true), expected, "core wasm");
+}
