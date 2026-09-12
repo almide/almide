@@ -501,3 +501,68 @@ the ceiling and the gate demanded the header be ratcheted down.
 The check's own row is one of the 80. It reads a TOML ledger in bash, so by its
 own boundary it belongs in Almide; saying so is what the honest-debt bucket is
 for.
+## #2133 — not an OOM, a case payload that never took ownership
+
+Reported as `Error: out of memory` on a 273-byte input. On develop it had
+already moved on to `wasm trap: out of bounds memory access`, with the faulting
+address `0x30384238` — four printable ASCII bytes, which is what a string's
+payload looks like when it reaches `$rc_inc` as a block handle. Neither shape
+was the defect; both were downstream of it.
+
+**The reduction**, by deleting from the reporter's tree rather than guessing:
+`report.render` → the `match j.verdict` → the `Supported` arm → one
+`probe_rows(matched)` → the `list.map` inside it → and finally out of the tree
+entirely, to thirteen lines:
+
+```almide
+type Probe = { kind: String }
+type Verdict = | Supported{ matched: List[Probe] } | Nothing
+
+fn of(xs: List[String]) -> List[Probe] = list.map(xs, (f) => Probe { kind: f })
+
+fn verdict_of(xs: List[String]) -> Verdict = {
+  let checked = of(xs)
+  Supported { matched: checked }
+}
+
+fn tags(v: Verdict) -> List[String] =
+  match v { Supported{ matched } => list.map(matched, (p) => p.kind), Nothing => [] }
+
+effect fn main() -> Unit = println(list.join(tags(verdict_of(["a", "b"])), ","))
+```
+
+Native prints `a,b`. The wasm leg printed bytes of freed memory, **exit 0 on
+both** — so the shape the user hit as a trap is, one step smaller, a silent
+wrong answer. That is the class the differential corpus exists for, and the
+corpus had no cell for it.
+
+**The emit said it outright.** `verdict_of` rendered as:
+
+```wat
+local.get 7
+local.get 1            ;; checked
+i32.store offset=20    ;; the payload store — no rc_inc anywhere near it
+local.get 7
+local.get 1
+call 48                ;; the epilogue releases checked
+```
+
+**The cause** is one missing call, in `lower_named_record`'s variant branch:
+the record branch ten lines below stores every field through
+`self.rc_share_guard(fexpr, fty)`, and the record-shaped CASE branch did not —
+neither for written fields nor for declared defaults. A `let`-bound heap value
+moved into a payload was therefore stored without the co-owning `+1` while the
+frame still owned the binding, and the epilogue freed a block the case held.
+
+Only the `let` spelling carried it. `Supported { matched: of(xs) }` inlines the
+producer and was always correct — a fresh value moves in with its credit — and
+the TUPLE-shaped constructor (`lower_variant_ctor`) has carried the guard since
+it was written. A defect that hides behind a spelling rather than a feature is
+one no feature-shaped fixture will find, which is why the new corpus fixture
+exercises the `let` form, the default-field form, and the shape read back out
+after every producer frame has returned.
+
+The pinned oracle (`almide@a877d2138`) WALLS on the fixture — a heap-result
+`match` outside its MIR-lowering subset — so it joins
+`scripts/lib/run-oracle-exclusions.txt` with that reason rather than carrying a
+run row; its check and AST rows are real.

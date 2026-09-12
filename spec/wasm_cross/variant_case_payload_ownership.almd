@@ -1,0 +1,69 @@
+// @contract: C-076
+// A record-shaped variant CASE co-owns the handles it stores (#2133).
+//
+// `lower_named_record`'s variant branch stored each case field without the
+// RC-3 share guard its own record branch applies ten lines below, so a
+// LET-BOUND heap value moved into a payload was stored with no co-owning +1
+// and then freed by the frame epilogue that still owned the binding. The case
+// held a dangling block, and the wasm leg printed whatever had been allocated
+// over it — exit 0, no diagnostic, a different answer from native.
+//
+// The binding is what matters: `Supported { matched: of(xs) }` inlines the
+// producer call and was always correct, because a fresh value moves in with
+// its credit. Only the `let` spelling carried a second owner.
+//
+// Native is the oracle; the gate asserts byte-identical stdout.
+
+type Probe = { kind: String, value: String }
+
+type Verdict =
+  | Supported{ matched: List[Probe], source: String }
+  | Unsupported{ missing: List[Probe], note: String = "none" }
+  | Nothing
+
+type Judged = { id: String, verdict: Verdict }
+
+fn probes_of(xs: List[String]) -> List[Probe] =
+  list.map(list.filter(xs, (f) => f != ""), (f) => Probe { kind: "figure", value: f })
+    + list.map(list.filter(xs, (q) => q != ""), (q) => Probe { kind: "quote", value: q })
+
+// The let-bound payload: `checked` is a local the epilogue releases.
+fn verdict_of(xs: List[String]) -> Verdict = {
+  let checked = probes_of(xs)
+  match list.len(checked) > 0 {
+    true => Supported { matched: checked, source: "https://a" },
+    false => Nothing,
+  }
+}
+
+// The same move into a case whose OTHER field is a declared default — the
+// second store loop in the same branch, which had the same omission.
+fn refusal_of(xs: List[String]) -> Verdict = {
+  let missing = probes_of(xs)
+  Unsupported { missing: missing }
+}
+
+fn render(v: Verdict) -> List[String] =
+  match v {
+    Supported{ matched, source } => list.map(matched, (p) => p.kind + ":" + p.value + "@" + source),
+    Unsupported{ missing, note } => list.map(missing, (p) => p.kind + "!" + p.value + "/" + note),
+    Nothing => ["none"],
+  }
+
+fn main() -> Unit = {
+  // Through a list of records built by a loop: every producer frame is gone
+  // before any payload is read.
+  var judged: List[Judged] = []
+  for i in 0..<2 {
+    list.push(judged, Judged {
+      id: "c" + int.to_string(i),
+      verdict: verdict_of(["5148.1", "53.3"]),
+    })
+  }
+  list.push(judged, Judged { id: "c2", verdict: refusal_of(["7.7859"]) })
+  list.push(judged, Judged { id: "c3", verdict: verdict_of([]) })
+
+  for j in judged {
+    println(j.id + " " + list.join(render(j.verdict), ","))
+  }
+}
