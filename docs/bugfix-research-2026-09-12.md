@@ -562,7 +562,14 @@ one no feature-shaped fixture will find, which is why the new corpus fixture
 exercises the `let` form, the default-field form, and the shape read back out
 after every producer frame has returned.
 
-The pinned oracle (`almide@a877d2138`) WALLS on the fixture — a heap-result
-`match` outside its MIR-lowering subset — so it joins
-`scripts/lib/run-oracle-exclusions.txt` with that reason rather than carrying a
-run row; its check and AST rows are real.
+**The evidence is a differential TEST, not a corpus fixture, and the gates are
+why.** A fixture for this needs a function RETURNING a heap variant case, and
+the incumbent brick cannot lower that at all — not exported, not `local`, with
+or without the `match`. Carrying it in `spec/wasm_cross/` therefore cost three
+shrink-only ratchets at once: the host- and browser-determinism wall ceilings
+(28 -> 29 each) and two new entries in `proofs/walled-real-baseline.txt`, whose
+own gate says adding entries is "a reviewed regression, not a fix". Three
+ratchets loosened to buy coverage `tests/variant_case_payload_ownership_test.rs`
+already provides — it builds and runs both legs and compares — is a bad trade,
+and the gates were right to refuse it. The fixture was withdrawn and the
+ceilings restored.
