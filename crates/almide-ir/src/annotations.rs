@@ -34,6 +34,9 @@ pub struct CodegenAnnotations {
     /// placed the body's clones and moves. A bare (moving) use, a `&mut`, a
     /// closure capture, a match on `x`, or a tuple binder keeps `.cloned()`.
     pub borrowed_loop_vars: HashSet<VarId>,
+    /// First parameter of a synchronous scalar fold closure whose captures
+    /// may be borrowed until the fold returns. Decided by CaptureClone.
+    pub borrowed_lambda_params: HashSet<VarId>,
     /// List-field loops whose owned root is dead after the head evaluation.
     /// The body needs owned elements, so move them with into_iter rather than clone.
     pub consumed_loop_vars: HashSet<VarId>,

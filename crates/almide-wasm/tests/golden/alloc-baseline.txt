@@ -680,6 +680,7 @@
 66400	spec/wasm_cross/value_array_tuple_tco.almd
 3266224	spec/wasm_cross/value_as_array_leak_loop.almd
 66752	spec/wasm_cross/value_as_array_roundtrip.almd
+67296	spec/wasm_cross/value_borrowed_constructors.almd
 69920	spec/wasm_cross/value_deep_eq.almd
 67136	spec/wasm_cross/value_domain_arith.almd
 67024	spec/wasm_cross/value_eq.almd

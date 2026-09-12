@@ -7,6 +7,12 @@ impl Parser {
         self.enter_depth()?;
         let result = self.parse_type_expr_inner();
         self.exit_depth();
+        if result.is_ok()
+            && let Some(error) = self.reject_retired_range(
+                "a type", "Range types do not exist. Use an element type such as `List[Int]`; construct ranges in expressions with `start..<end` or `start...end`.")
+        {
+            return Err(error);
+        }
         result
     }
     fn parse_type_expr_inner(&mut self) -> Result<TypeExpr, String> {
@@ -251,7 +257,7 @@ impl Parser {
             // lookahead leaves those tokens for the caller.
             self.skip_newlines_if_followed_by(TokenType::Pipe);
         }
-        Ok(TypeExpr::Variant { cases })
+        Ok(TypeExpr::Variant { cases, comments: Vec::new() })
     }
     fn try_parse_inline_variant(&mut self, first_name: Sym, first_args: Vec<TypeExpr>) -> Result<TypeExpr, String> {
         let mut cases = Vec::new();
@@ -301,7 +307,7 @@ impl Parser {
                 .collect();
             Ok(TypeExpr::Union { members })
         } else {
-            Ok(TypeExpr::Variant { cases })
+            Ok(TypeExpr::Variant { cases, comments: Vec::new() })
         }
     }
     fn parse_record_type(&mut self) -> Result<TypeExpr, String> {

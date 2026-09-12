@@ -46,19 +46,24 @@ use wasmparser::{Parser, Payload};
 /// path audits an artifact's emitted op set against this before shipping
 /// (an unserved op = a runtime refusal on a runtime the developer never
 /// ran — the env.set lesson): extend the shim and this list TOGETHER.
-pub const P1_SERVED_OPS: &[i32] = &[26, 29, 30, 31, 32, 34, 35, 36, 37];
+pub const P1_SERVED_OPS: &[i32] = &[26, 29, 30, 32, 34, 35, 36, 37];
 
 pub(crate) const UNSUPPORTED_MSG: &[u8] = b"Error: host op unsupported in the WASI build\n";
+/// The env.set overlay log's own refusal. It used to borrow the line above,
+/// which names an operation the build supports and had just performed — the
+/// #2103 defect (an error that does not say what failed) in the shim.
+pub(crate) const ENV_FULL_MSG: &[u8] = b"Error: env.set log full (64 KiB of names and values)\n";
 // Park-page layout (offsets from park base).
 pub(crate) const IOV: u64 = 0; // two iovec entries (16 bytes)
 pub(crate) const NREAD: u64 = 16;
 pub(crate) const NL: u64 = 24;
 pub(crate) const MSG: u64 = 64;
+/// The second message slot, clear of MSG's text and below DATA.
+pub(crate) const MSG2: u64 = 256;
 pub(crate) const DATA: u64 = 1024; // stdin/entropy bytes + op result staging
 /// The env.set overlay log (#1716): [klen u32][vlen u32][key][val] entries,
-/// append-only, scanned last-write-wins by op 26. Its page sits ABOVE the
-/// stdin ceiling (g_pcap inits to park+OVL), so read-to-end can never run
-/// into it.
+/// append-only, scanned last-write-wins by op 26. Its page sits above the
+/// staging span the other ops use.
 pub(crate) const OVL: u64 = 4 * 65536;
 /// The park span: five pages carved out at the original heap base — four
 /// for iovecs/messages/stdin, one for the env overlay log.
@@ -320,10 +325,10 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
         .1
         .ok_or_else(|| anyhow::anyhow!("__heap init not i32"))? as u32 as u64;
     let park: u64 = heap_init;
-    let (g_plen, g_pcap) = (global_count, global_count + 1);
+    let g_plen = global_count;
     // g_ovl (the overlay log length) exists only when an env service
     // ships — nothing else reads or writes the log.
-    let g_ovl = (services.env_get || services.env_set).then_some(global_count + 2);
+    let g_ovl = (services.env_get || services.env_set).then_some(global_count + 1);
     let mut globals = GlobalSection::new();
     for (idx, (gt, i32v, i64v, f64v)) in parsed_globals.iter().enumerate() {
         let init = if idx as u32 == heap_global {
@@ -421,12 +426,6 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
         GlobalType { val_type: ValType::I32, mutable: true, shared: false },
         &ConstExpr::i32_const(0),
     );
-    // g_pcap: the stdin read-to-end ceiling — the overlay page above it
-    // is the env log's, never stdin's.
-    globals.global(
-        GlobalType { val_type: ValType::I32, mutable: true, shared: false },
-        &ConstExpr::i32_const((park + OVL) as i32),
-    );
     // g_ovl: bytes appended to the env overlay log so far.
     if g_ovl.is_some() {
         globals.global(
@@ -464,7 +463,7 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
         code.function(&stub);
         code.function(&stub);
     } else {
-        code.function(&shim_fs_call(park, g_plen, g_pcap, f_env_get, f_env_set, f_args));
+        code.function(&shim_fs_call(park, g_plen, f_env_get, f_env_set, f_args));
         code.function(&shim_host_read(park, g_plen));
     }
     if f_env_get.is_some() {
@@ -491,6 +490,9 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
         &ConstExpr::i32_const((park + MSG) as i32),
         UNSUPPORTED_MSG.iter().copied(),
     );
+    if f_env_set.is_some() {
+        data.active(0, &ConstExpr::i32_const((park + MSG2) as i32), ENV_FULL_MSG.iter().copied());
+    }
 
     let mut m = Module::new();
     m.section(&type_sec)

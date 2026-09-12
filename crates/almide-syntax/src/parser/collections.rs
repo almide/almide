@@ -19,7 +19,10 @@ impl Parser {
         }
         // Spread record: { ...base, field: value }
         if self.check(TokenType::DotDotDot) {
-            return self.parse_spread_record(span, open);
+            let pending = initial_comments.into_iter().filter_map(|s| match s {
+                Stmt::Comment { text } => Some(text), _ => None,
+            }).collect();
+            return self.parse_spread_record(span, open, pending);
         }
         // Record literal: { field: value, ... } — the field name may be a
         // soft-keyword (ok/err/some/none/todo), so accept those here too, else
@@ -27,54 +30,63 @@ impl Parser {
         if (self.check(TokenType::Ident) || self.is_soft_keyword_name())
             && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Colon)
         {
-            return self.parse_record_literal(span, open);
+            let pending = initial_comments.into_iter().filter_map(|s| match s {
+                Stmt::Comment { text } => Some(text), _ => None,
+            }).collect();
+            return self.parse_record_literal(span, open, pending);
         }
         // Block expression
         self.parse_block_body(initial_comments, span, open)
     }
 
-    fn parse_spread_record(&mut self, span: Option<Span>, open: crate::lexer::Token) -> Result<Expr, String> {
+    pub(crate) fn parse_spread_record(&mut self, span: Option<Span>, open: crate::lexer::Token, pending: Vec<String>) -> Result<Expr, String> {
         self.advance(); // skip ...
         let base = self.parse_expr()?;
-        let mut fields = Vec::new();
-        while self.check(TokenType::Comma) {
+        self.attach_leading_comments(base.id, pending);
+        let gap = self.walk_newline_run();
+        self.attach_gap_comments(base.id, gap);
+        let fields = if self.check(TokenType::Comma) {
             self.advance();
-            self.skip_newlines();
-            if self.check(TokenType::RBrace) { break; }
-            let field_name = self.expect_any_name()?;
-            self.expect(TokenType::Colon)?;
-            self.skip_newlines();
-            let field_value = self.parse_expr()?;
-            fields.push(FieldInit { name: field_name, value: field_value });
-        }
-        self.skip_newlines();
+            let pending = self.skip_newlines_collecting();
+            if self.check(TokenType::RBrace) {
+                self.expr_comments.entry(base.id).or_default().line_between.extend(pending);
+                Vec::new()
+            } else { self.parse_record_fields(pending)? }
+        } else { Vec::new() };
         self.expect_closing(TokenType::RBrace, open.line, open.col, "spread record")?;
-        Ok(Expr::new(self.next_id(), span, ExprKind::SpreadRecord {
-            base: Box::new(base), fields,
-        }))
+        Ok(Expr::new(self.next_id(), span, ExprKind::SpreadRecord { base: Box::new(base), fields }))
     }
 
-    fn parse_record_literal(&mut self, span: Option<Span>, open: crate::lexer::Token) -> Result<Expr, String> {
-        let mut fields = Vec::new();
-        while !self.check(TokenType::RBrace) {
-            self.skip_newlines();
-            let field_name = self.expect_any_name()?;
-            if self.check(TokenType::Colon) {
-                self.advance();
-                self.skip_newlines();
-                let field_value = self.parse_expr()?;
-                fields.push(FieldInit { name: field_name, value: field_value });
-            } else {
-                fields.push(FieldInit {
-                    name: field_name.clone(),
-                    value: Expr::new(self.next_id(), None, ExprKind::Ident { name: field_name }),
-                });
-            }
-            self.skip_newlines();
-            if self.check(TokenType::Comma) { self.advance(); self.skip_newlines(); }
-        }
+    pub(crate) fn parse_record_literal(&mut self, span: Option<Span>, open: crate::lexer::Token, pending: Vec<String>) -> Result<Expr, String> {
+        let fields = self.parse_record_fields(pending)?;
         self.expect_closing(TokenType::RBrace, open.line, open.col, "record literal")?;
         Ok(Expr::new(self.next_id(), span, ExprKind::Record { name: None, fields }))
+    }
+
+    fn parse_record_fields(&mut self, mut pending: Vec<String>) -> Result<Vec<FieldInit>, String> {
+        let mut fields: Vec<FieldInit> = Vec::new();
+        while !self.check(TokenType::RBrace) {
+            pending.extend(self.skip_newlines_collecting());
+            if self.check(TokenType::RBrace) { break; }
+            let field_name = self.expect_any_name()?;
+            let value = if self.check(TokenType::Colon) {
+                self.advance();
+                pending.extend(self.skip_newlines_collecting());
+                self.parse_expr()?
+            } else {
+                Expr::new(self.next_id(), None, ExprKind::Ident { name: field_name })
+            };
+            self.attach_leading_comments(value.id, std::mem::take(&mut pending));
+            let gap = self.walk_newline_run();
+            self.attach_gap_comments(value.id, gap);
+            let id = value.id;
+            fields.push(FieldInit { name: field_name, value });
+            if self.check(TokenType::Comma) { self.advance(); pending.extend(self.comments_after_separator(id)); }
+        }
+        if let Some(last) = fields.last() {
+            self.expr_comments.entry(last.value.id).or_default().line_between.extend(pending);
+        }
+        Ok(fields)
     }
 
     fn parse_block_body(&mut self, initial_comments: Vec<Stmt>, span: Option<Span>, open: crate::lexer::Token) -> Result<Expr, String> {

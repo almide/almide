@@ -44,6 +44,13 @@ test "a chatty child cannot deadlock the drain" {
 test "a missing binary is the exec error, not a timeout" {
   match process.exec_status_timeout("almide-no-such-binary-1040", [], 1000) {
     ok(_) => assert(false),
-    err(e) => assert(string.starts_with(e, "exec failed:")),
+    err(e) => assert(string.starts_with(e, 'process.exec_status_timeout("almide-no-such-binary-1040", 1000): ')),
+  }
+}
+
+test "the non-timeout twin names the missing command" {
+  match process.exec_status("almide-no-such-binary-1040", []) {
+    ok(_) => assert(false),
+    err(e) => assert(string.starts_with(e, 'process.exec_status("almide-no-such-binary-1040"): ')),
   }
 }

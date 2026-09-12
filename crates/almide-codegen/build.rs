@@ -17,13 +17,14 @@ mod runtime_registry;
 #[path = "buildscript/matrix_desugar.rs"]
 mod matrix_desugar;
 
-fn main() {
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")?;
     let workspace_root = std::path::Path::new(&manifest_dir).join("../..");
     let out_dir = std::path::Path::new("src/generated");
-    std::fs::create_dir_all(out_dir).unwrap();
+    std::fs::create_dir_all(out_dir)?;
 
-    runtime_registry::generate(&workspace_root, out_dir);
+    runtime_registry::generate(&workspace_root, out_dir)?;
     // Reverse of the @rewrite fusion rules → desugar fallback (see matrix_desugar.rs).
     matrix_desugar::generate(&workspace_root, out_dir);
+    Ok(())
 }

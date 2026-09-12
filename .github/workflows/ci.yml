@@ -1319,6 +1319,24 @@ jobs:
       - name: Edit-loop cost stays scale-independent (#1383 / #1396)
         run: ALMIDE_BIN=/tmp/almide-bin/almide scripts/check-edit-loop-scale.sh
 
+      # #2098: the cost of the spelling the DOCS recommend, against the
+      # spelling they tell writers to avoid — one program, one leg, one
+      # round-robin run, so the ratio cancels this runner the way the
+      # native/Rust ratio above does. wasmtime is what runs the wasm leg.
+      - name: Install wasmtime (the spelling gate's wasm leg)
+        run: |
+          VERSION=v47.0.3
+          TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
+          for i in 1 2 3 4 5; do
+            curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
+            echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
+          done
+          tar -xf "$TARBALL"
+          sudo mv wasmtime-*/wasmtime /usr/local/bin/
+          wasmtime --version
+      - name: The documented spelling's tax stays bounded (#2098)
+        run: ALMIDE_BIN=/tmp/almide-bin/almide scripts/check-spelling-ratio.sh
+
   # ═══════════════════════════════════════════════
   # Full CI — cross-platform (PRs to main only)
   # ═══════════════════════════════════════════════

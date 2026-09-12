@@ -186,30 +186,6 @@ fn shim_fs_call(g: P3Globals, abi: &FsAbi, f_self: u32, f_http: Option<u32>) -> 
     i.global_get(g_plen).i64_extend_i32_u().return_();
     i.end();
 
-    // op 31: stdin read-to-end — sync reads into the park data span until
-    // DROPPED/empty; overflow takes the refusal.
-    i.local_get(op).i32_const(31).i32_eq().if_(BlockType::Empty);
-    open_stdin(&mut i, g_in_rx, g_in_fut, park);
-    i.i32_const(0).local_set(total);
-    i.block(BlockType::Empty).loop_(BlockType::Empty);
-    // room check: DATA span is the park's tail.
-    i.local_get(total).i32_const((PARK_SPAN - DATA) as i32).i32_ge_u();
-    i.if_(BlockType::Empty);
-    i.i32_const(1).call(I_EXIT).unreachable();
-    i.end();
-    i.global_get(g_in_rx);
-    i.i32_const((park + DATA) as i32).local_get(total).i32_add();
-    i.i32_const((PARK_SPAN - DATA) as i32).local_get(total).i32_sub();
-    i.call(I_STDIN_READ);
-    i.i32_const(4).i32_shr_u().local_set(n);
-    i.local_get(n).i32_eqz().br_if(1);
-    i.local_get(total).local_get(n).i32_add().local_set(total);
-    i.br(0).end().end();
-    i.i32_const((park + DATA) as i32).global_set(g_ppos);
-    i.local_get(total).global_set(g_plen);
-    i.local_get(total).i64_extend_i32_u().return_();
-    i.end();
-
     // op 32: entropy — n rides b_len; the list lands via cabi_realloc.
     i.local_get(op).i32_const(32).i32_eq().if_(BlockType::Empty);
     i.local_get(b_len).i64_extend_i32_u();

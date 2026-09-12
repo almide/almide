@@ -49,10 +49,14 @@ impl NanoPass for CaptureClonePass {
         // skips for `Copy` — `SHARED_MUT` forces it, and `wrap_lambda_with_clones`
         // adds the `__cap` renames to the set so their reads/writes are cells too.
         let shared = detect_shared_mut(&program);
+        let borrowed = borrowed_fold_params(&program, &shared);
+        lower_borrowed_folds(&mut program, &borrowed);
+        program.codegen_annotations.borrowed_lambda_params.extend(borrowed.iter().copied());
+        BORROWED_FOLDS.with(|m| *m.borrow_mut() = borrowed);
         for v in &shared { program.codegen_annotations.shared_mut_vars.insert(*v); }
         SHARED_MUT.with(|m| *m.borrow_mut() = shared);
 
-        let mut changed = false;
+        let mut changed = !program.codegen_annotations.borrowed_lambda_params.is_empty();
         let IrProgram { functions, modules, var_table, codegen_annotations, .. } = &mut program;
         for func in functions.iter_mut() {
             let param_vars: HashSet<VarId> = func.params.iter().map(|p| p.var).collect();
@@ -81,6 +85,7 @@ impl NanoPass for CaptureClonePass {
             m.borrow_mut().clear();
         });
         PARAM_BORROWS.with(|m| m.borrow_mut().clear());
+        BORROWED_FOLDS.with(|m| m.borrow_mut().clear());
         for i in vt_start..program.var_table.len() {
             program.codegen_annotations.always_clone_vars.insert(VarId(i as u32));
         }
@@ -90,6 +95,7 @@ impl NanoPass for CaptureClonePass {
 
 use std::cell::RefCell;
 thread_local! {
+    static BORROWED_FOLDS: RefCell<HashSet<VarId>> = RefCell::new(HashSet::new());
     static PARAM_BORROWS: RefCell<std::collections::HashMap<VarId, ParamBorrow>> =
         RefCell::new(std::collections::HashMap::new());
     /// Vars that must be lowered to a shared `Rc<Cell<T>>` on the Rust target
@@ -468,6 +474,9 @@ fn transform_expr(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashSet<Var
 
     // Now check: is this expr itself a Lambda with captured vars that need cloning?
     if let IrExprKind::Lambda { params, body, .. } = &expr.kind {
+        if params.first().is_some_and(|(id, _)| BORROWED_FOLDS.with(|m| m.borrow().contains(id))) {
+            return changed;
+        }
         let param_set: HashSet<VarId> = params.iter().map(|(v, _)| *v).collect();
         // Capture set via the single shared analysis (`almide_ir::free_vars`) — the
         // same one WASM ClosureConversion uses. Returns a VarId-sorted Vec, so the
@@ -501,6 +510,8 @@ fn transform_expr(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashSet<Var
 
     changed
 }
+
+include!("pass_capture_borrow.rs");
 
 fn transform_stmt(stmt: &mut IrStmt, vt: &mut VarTable, scope_vars: &HashSet<VarId>) -> bool {
     match &mut stmt.kind {

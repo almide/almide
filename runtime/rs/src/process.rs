@@ -148,14 +148,8 @@ pub fn almide_rt_process_exec_status(cmd: &str, args: &[String]) -> Result<Almid
             let stderr = String::from_utf8_lossy(&out.stderr).to_string();
             Ok(AlmideProcessStatus { code, stdout, stderr })
         }
-        // THE DECLARED EXCEPTION to #2090's one form, and the reason is the
-        // ledger, not the code: C-214's statement quotes `exec failed:` as the
-        // missing-binary path of this function's timeout twin, and the judge
-        // (almide/als) holds that statement normatively. Unifying it is an als
-        // PR first, then here — and the twins move together, so this one waits
-        // with it rather than splitting the pair. `process_error_matrix_test`
-        // carries the row and refuses a SECOND exception.
-        Err(e) => Err(format!("exec failed: {}", e)),
+        // C-214: quote the command, omit arguments, retain the host error.
+        Err(e) => Err(call_err("process.exec_status", &format!("{cmd:?}"), e)),
     }
 }
 
@@ -184,9 +178,8 @@ pub fn almide_rt_process_exec_status_timeout(
         use std::os::unix::process::CommandExt;
         command.process_group(0);
     }
-    // `exec failed:` here is C-214's quoted promise — see the twin above.
     let mut child = command.spawn()
-        .map_err(|e| format!("exec failed: {}", e))?;
+        .map_err(|e| call_err("process.exec_status_timeout", &format!("{cmd:?}, {timeout_ms}"), e))?;
     fn drain<R: Read + Send + 'static>(r: Option<R>) -> std::thread::JoinHandle<Vec<u8>> {
         std::thread::spawn(move || {
             let mut buf = Vec::new();
@@ -207,7 +200,7 @@ pub fn almide_rt_process_exec_status_timeout(
                 Ok(status) => exit_status = status,
                 Err(e) => {
                     almide_process_stop_tree(&mut child);
-                    return Err(format!("exec failed: {}", e));
+                    return Err(call_err("process.exec_status_timeout", &format!("{cmd:?}, {timeout_ms}"), e));
                 }
             }
         }

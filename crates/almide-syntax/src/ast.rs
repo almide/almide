@@ -54,7 +54,7 @@ pub enum TypeExpr {
     OpenRecord { fields: Vec<FieldType> },
     Fn { params: Vec<TypeExpr>, ret: Box<TypeExpr>, is_effect: bool },
     Tuple { elements: Vec<TypeExpr> },
-    Variant { cases: Vec<VariantCase> },
+    Variant { cases: Vec<VariantCase>, #[serde(skip)] comments: Vec<ExprComments> },
     Union { members: Vec<TypeExpr> },
     /// Compile-time literal value in type argument position (e.g., `Array[Float, 128]`).
     ConstLit { value: i64 },

@@ -22,16 +22,8 @@
 //! > it, its identifying operands, then the platform's own text VERBATIM as a
 //! > suffix.
 //!
-//! Two deliberate exclusions, both asserted rather than assumed:
-//!
-//! - **The ran-and-failed path is not in this family.** A child that starts and
-//!   then exits non-zero already passes its stderr through, and `exec` reports
-//!   `process '{cmd}' exited with status {s}`. The issue calls this out as
-//!   already-correct; a gate that swept it in would break working behaviour.
-//! - **`exec_status` / `exec_status_timeout` keep `exec failed:`** — C-214's
-//!   statement quotes it and the judge holds that ledger normatively, so
-//!   unifying the twins is an almide/als PR first. That is ONE exception and
-//!   `the_exception_list_does_not_grow` is what keeps it one.
+//! A child that starts and exits non-zero retains its own stderr/status.
+//! C-214 now includes both status twins after almide/als#65 merged.
 //!
 //! `process` has no wasm host binding (E081: no wasm host binding for the
 //! module), so this is the only leg that renders these strings — there is no
@@ -65,6 +57,14 @@ const MISSING: &str = "almide-no-such-binary-2090";
 
 fn rows() -> Vec<(&'static str, String)> {
     vec![
+        (
+            "let _ = process.exec_status(\"almide-no-such-binary-2090\", [])!",
+            format!("process.exec_status({MISSING:?}):"),
+        ),
+        (
+            "let _ = process.exec_status_timeout(\"almide-no-such-binary-2090\", [], 1000)!",
+            format!("process.exec_status_timeout({MISSING:?}, 1000):"),
+        ),
         (
             "let _ = process.exec(\"almide-no-such-binary-2090\", [])!",
             format!("process.exec({MISSING:?}):"),
@@ -195,23 +195,45 @@ fn the_process_surface_has_no_second_leg_to_keep_equal() {
     );
 }
 
-/// The exception list is ONE entry long — the `exec_status` twins, held by
-/// C-214. This test is what makes "we will unify them later" a commitment
-/// instead of a comment: a new `exec failed:` site, or any other bare-errno
-/// spawn failure, fails here.
+/// The status twins joined the family after the normative amendment.
 #[test]
-fn the_exception_list_does_not_grow() {
+fn no_anonymous_process_failure_remains() {
     let src = include_str!("../runtime/rs/src/process.rs");
-    let n = src.matches("\"exec failed: {}\"").count();
-    assert_eq!(
-        n, 3,
-        "the C-214 exception is exec_status (1 site) + exec_status_timeout (2 sites). \
-         Found {n}. Unifying them is an almide/als statement PR first; ADDING one is \
-         a new spelling and is what this gate refuses."
-    );
-    // No spawn-failure site may go back to a bare stringified io::Error.
-    assert!(
-        !src.contains(".map_err(|e| e.to_string())"),
-        "a process.* failure went back to the anonymous `e.to_string()` form (#2090)"
-    );
+    assert!(!src.contains("exec failed:"));
+    assert!(!src.contains(".map_err(|e| e.to_string())"));
+}
+
+#[test]
+fn status_errors_escape_commands_and_omit_arguments() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let file = dir.path().join("quoted.almd");
+    let app = dir.path().join("quoted");
+    std::fs::write(&file, r#"import process
+import env
+effect fn main() -> Unit = {
+  let cmd = env.args()[0]
+  match process.exec_status(cmd, ["private-argument-2103"]) {
+    ok(_) => println("unexpected success"),
+    err(e) => println(e),
+  }
+  match process.exec_status_timeout(cmd, ["private-argument-2103"], 1000) {
+    ok(_) => println("unexpected success"),
+    err(e) => println(e),
+  }
+}
+"#).expect("fixture");
+    let built = Command::new(almide()).arg("build").arg(&file).arg("-o").arg(&app).output().expect("build");
+    assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
+    for (cmd, quoted) in [
+        ("missing-2103-\"quote", "\"missing-2103-\\\"quote\""),
+        ("missing-2103-\\slash", "\"missing-2103-\\\\slash\""),
+        ("missing-2103-\n\r\tcontrol", "\"missing-2103-\\n\\r\\tcontrol\""),
+        ("missing-2103-日本語", "\"missing-2103-日本語\""),
+    ] {
+        let host = Command::new(cmd).arg("private-argument-2103").output().expect_err("missing command").to_string();
+        let output = Command::new(&app).arg(cmd).output().expect("run");
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(String::from_utf8_lossy(&output.stdout), format!(
+            "process.exec_status({quoted}): {host}\nprocess.exec_status_timeout({quoted}, 1000): {host}\n"));
+    }
 }

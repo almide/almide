@@ -34,8 +34,8 @@ struct Host {
     exit: Arc<Mutex<Option<i32>>>,
     /// The fs result parking buffer (host_read copies it to the guest).
     fs_buf: Arc<Mutex<Vec<u8>>>,
-    /// The stdin stream (op 31 drains it — the guest caps counts on its
-    /// side); tests run with a fixed buffer, the runner reads lazily.
+    /// The stdin stream (op 35 takes chunks off its cursor); tests run
+    /// with a fixed buffer, the runner reads lazily.
     stdin: Arc<Mutex<StdinSource>>,
     /// Program args for op 29 (#1716): framed as [argv0, args...] — the
     /// guest's args arm skips the first frame, matching native argv[1..].
@@ -44,35 +44,20 @@ struct Host {
     limits: wasmtime::StoreLimits,
 }
 
-/// Where op 31 gets its bytes: a fixed buffer (tests, piped runs), or
+/// Where op 35 gets its bytes: a fixed buffer (tests, piped runs), or
 /// the process's real stdin read at the FIRST guest read — so a program
 /// that never touches stdin never blocks on an open terminal.
 pub enum StdinSource {
     Buf(Vec<u8>),
     RealOnce,
-    Drained,
 }
 
 impl StdinSource {
-    fn drain(&mut self) -> Vec<u8> {
-        match std::mem::replace(self, StdinSource::Drained) {
-            StdinSource::Buf(b) => b,
-            StdinSource::RealOnce => {
-                use std::io::Read;
-                let mut v = Vec::new();
-                let _ = std::io::stdin().read_to_end(&mut v);
-                v
-            }
-            StdinSource::Drained => Vec::new(),
-        }
-    }
-
-    /// Take UP TO `n` bytes off the stream's cursor (op 35 — the
-    /// incremental sibling of op 31's drain). A fixed buffer serves its
-    /// front; the real stream reads lazily WITHOUT draining, so a
-    /// terminal program keeps native's line-at-a-time interleaving (a
-    /// line-buffered read blocks until Enter, not until EOF). A later
-    /// op-31 drain still answers the remainder.
+    /// Take UP TO `n` bytes off the stream's cursor (op 35 — the only
+    /// stdin op since #2116 retired the op-31 drain). A fixed buffer
+    /// serves its front; the real stream reads lazily, so a terminal
+    /// program keeps native's line-at-a-time interleaving (a
+    /// line-buffered read blocks until Enter, not until EOF).
     fn take(&mut self, n: usize) -> Vec<u8> {
         if n == 0 {
             return Vec::new();
@@ -93,7 +78,6 @@ impl StdinSource {
                     Err(_) => Vec::new(),
                 }
             }
-            StdinSource::Drained => Vec::new(),
         }
     }
 }
@@ -435,7 +419,6 @@ fn fs_dispatch_host(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
         // http and env arms live in `fs_dispatch_http` / `fs_dispatch_env`.
         43..=50 => fs_dispatch_http(op, a, b),
         26 | 27 | 28 | 29 | 33 | 37 => fs_dispatch_env(op, a, b),
-        31 => (pack(0, 0), Vec::new()),
         // incremental stdin (op 35) — same empty answer in the harness.
         35 => (pack(0, 0), Vec::new()),
         32 => {
@@ -768,14 +751,6 @@ fn run_wasm_src(
             // op 30 = raw stdout append (io.write / io.write_bytes):
             // PROGRAM order with println is the C-contract, so it goes
             // straight into the same sink, no trailing newline.
-            // op 31 = stdin: drain the remaining stream into the
-            // parking buffer (native read-to-end semantics).
-            if op == 31 {
-                let drained = caller.data().stdin.lock().expect("stdin").drain();
-                let len = drained.len();
-                *caller.data().fs_buf.lock().expect("fs buf") = drained;
-                return Ok((len as i64) & 0xFFFF_FFFF);
-            }
             // op 34 = wall clock (nanos, RAW i64 — no status packing).
             if op == 34 {
                 let now = std::time::SystemTime::now()

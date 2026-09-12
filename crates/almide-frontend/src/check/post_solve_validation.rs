@@ -33,7 +33,7 @@ fn fill_example_ty(ty: &Ty) -> Ty {
 /// Infer types for default value expressions in type declarations.
 /// Prevents ICE "missing type for expr" during lowering.
 fn infer_default_exprs(checker: &mut Checker, ty: &mut ast::TypeExpr) {
-    if let ast::TypeExpr::Variant { cases } = ty {
+    if let ast::TypeExpr::Variant { cases, .. } = ty {
         for case in cases {
             if let ast::VariantCase::Record { fields, .. } = case {
                 for field in fields {

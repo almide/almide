@@ -108,7 +108,7 @@ mod collections_set;
 mod map_inplace;
 mod map_index;
 mod emit;
-pub use emit::{emit_program, emit_program_with_ops};
+pub use emit::{emit_library_with_ops, emit_program, emit_program_with_ops};
 mod emitter;
 mod emitter_values;
 mod emitter_vars;
@@ -133,6 +133,7 @@ mod list_comb;
 mod list_edit;
 mod list_search;
 mod list_fuse;
+mod list_enumerate_fold;
 mod list_mut;
 mod list_order;
 mod list_sort;
@@ -154,6 +155,8 @@ mod fan;
 mod fs;
 mod fs_meta;
 mod host_env;
+mod host_read_all;
+mod host_read_line;
 mod json_path_helpers;
 mod newtype;
 mod arg_temps;
@@ -741,4 +744,3 @@ fn collect_program_fns(ir: &IrProgram) -> Vec<(&IrFunction, Option<String>, u32)
     // Signature table first: call sites need indices and types up front.
     program_fns
 }
-

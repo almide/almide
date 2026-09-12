@@ -41,16 +41,15 @@ fn shim_exit() -> Function {
 fn shim_fs_call(
     park: u64,
     g_plen: u32,
-    g_pcap: u32,
     f_env_get: Option<u32>,
     f_env_set: Option<u32>,
     f_args: Option<u32>,
 ) -> Function {
-    // params: 0=op 1=a_ptr 2=a_len 3=b_ptr 4=b_len; locals: 5=total 6=nread
-    // 7=deadline (i64, op 36)
-    let (op, a_len, b_ptr, b_len, total, nread) = (0u32, 2u32, 3u32, 4u32, 5u32, 6u32);
-    let deadline = 7u32;
-    let mut f = Function::new([(2, ValType::I32), (1, ValType::I64)]);
+    // params: 0=op 1=a_ptr 2=a_len 3=b_ptr 4=b_len; locals: 5=nread
+    // 6=deadline (i64, op 36)
+    let (op, a_len, b_ptr, b_len, nread) = (0u32, 2u32, 3u32, 4u32, 5u32);
+    let deadline = 6u32;
+    let mut f = Function::new([(1, ValType::I32), (1, ValType::I64)]);
     let mut i = f.instructions();
 
     // ops 26/37/29: env.get / env.set / args — forwarded whole to the
@@ -110,44 +109,6 @@ fn shim_fs_call(
     i.i32_const(park as i32).i32_load(mem(NREAD)).local_set(nread);
     i.local_get(nread).global_set(g_plen);
     i.local_get(nread).i64_extend_i32_u().return_();
-    i.end();
-
-    // op 31: stdin read-to-end into the park data region (grown on demand).
-    i.local_get(op).i32_const(31).i32_eq().if_(BlockType::Empty);
-    i.i32_const(0).local_set(total);
-    i.block(BlockType::Empty).loop_(BlockType::Empty);
-    // Room: the park span is FIXED (the heap owns everything above) —
-    // a stdin larger than it takes the defined refusal, never a
-    // truncation.
-    i.i32_const((park + DATA + 4096) as i32).local_get(total).i32_add();
-    i.global_get(g_pcap).i32_ge_u().if_(BlockType::Empty);
-    i.i32_const(park as i32).i32_const((park + MSG) as i32).i32_store(mem(IOV));
-    i.i32_const(park as i32).i32_const(UNSUPPORTED_MSG.len() as i32).i32_store(mem(IOV + 4));
-    i.i32_const(2);
-    i.i32_const((park + IOV) as i32);
-    i.i32_const(1);
-    i.i32_const((park + NREAD) as i32);
-    i.call(0).drop();
-    i.i32_const(1).call(1);
-    i.unreachable();
-    i.end();
-    // iovec = (park+DATA+total, 4096)
-    i.i32_const(park as i32);
-    i.i32_const((park + DATA) as i32).local_get(total).i32_add();
-    i.i32_store(mem(IOV));
-    i.i32_const(park as i32).i32_const(4096).i32_store(mem(IOV + 4));
-    i.i32_const(0);
-    i.i32_const((park + IOV) as i32);
-    i.i32_const(1);
-    i.i32_const((park + NREAD) as i32);
-    i.call(4); // fd_read
-    i.br_if(1); // errno != 0 → done with what we have
-    i.i32_const(park as i32).i32_load(mem(NREAD)).local_set(nread);
-    i.local_get(nread).i32_eqz().br_if(1); // EOF
-    i.local_get(total).local_get(nread).i32_add().local_set(total);
-    i.br(0).end().end();
-    i.local_get(total).global_set(g_plen);
-    i.local_get(total).i64_extend_i32_u().return_();
     i.end();
 
     // op 32: entropy into the park data region (count rides in b_len).
@@ -226,8 +187,8 @@ fn shim_env_set(park: u64, g_ovl: u32) -> Function {
     // Room check: entry must fit under the park end.
     i.local_get(at).i32_const(8).i32_add().local_get(a_len).i32_add().local_get(b_len).i32_add();
     i.i32_const((park + PARK_SPAN) as i32).i32_gt_u().if_(BlockType::Empty);
-    i.i32_const(park as i32).i32_const((park + MSG) as i32).i32_store(mem(IOV));
-    i.i32_const(park as i32).i32_const(UNSUPPORTED_MSG.len() as i32).i32_store(mem(IOV + 4));
+    i.i32_const(park as i32).i32_const((park + MSG2) as i32).i32_store(mem(IOV));
+    i.i32_const(park as i32).i32_const(ENV_FULL_MSG.len() as i32).i32_store(mem(IOV + 4));
     i.i32_const(2);
     i.i32_const((park + IOV) as i32);
     i.i32_const(1);
