@@ -48,17 +48,7 @@ fn wasm_cross_fixtures_run_identically_on_the_interpreter() {
     // takes the fixture out of all of them (#2129 lost `regex.*` from the wasm
     // leg's surface that way) — and only this comparison skips them. Shrink-only
     // in both directions: a row that starts agreeing again must be deleted.
-    let stale: BTreeMap<String, String> = std::fs::read_to_string(
-        root.join("scripts/lib/run-oracle-stale.txt"),
-    )
-    .expect("scripts/lib/run-oracle-stale.txt")
-    .lines()
-    .filter(|l| !l.trim_start().starts_with('#') && !l.trim().is_empty())
-    .map(|l| {
-        let (p, why) = l.split_once('\t').expect("path<TAB>reason");
-        (p.to_string(), why.to_string())
-    })
-    .collect();
+    let stale = almide_corpus::stale_oracle_rows(&root);
     for p in stale.keys() {
         assert!(manifest.contains_key(p), "{p}: stale-row register names a fixture with no manifest row");
     }

@@ -566,10 +566,15 @@ silently un-covered the thing it fixed.
 
 `scripts/lib/run-oracle-stale.txt` is the precise mechanism the existing
 register did not provide: the row STAYS in the manifest, every other sweep
-still walks the fixture, and only the run-parity comparison skips it. It is
-shrink-only in both directions — a registration that starts agreeing with the
-oracle again fails the gate and must be deleted (demonstrated with a forged
-row naming a fixture that does agree). Their allocation watermarks moved DOWN
+still walks the fixture, and only the comparisons AGAINST the oracle's answer
+skip it. There are THREE of those, not one — `run_parity`, `backend_parity` and
+the WASI gate all compare the same hash, and the second and third went red in
+turn as the first was fixed. The reader lives in `almide_corpus` so a fourth
+comparison cannot quietly forget it; the four sweeps that use the manifest only
+as a corpus LIST (exercised surface, allocation, size, witness floor) are
+untouched by design. It is shrink-only in both directions — a registration that
+starts agreeing with the oracle again fails, demonstrated with a forged row
+naming a fixture that does agree, in all three comparisons. Their allocation watermarks moved DOWN
 (87,824 from 88,144; 290,608 from 291,248 — the split fix allocates fewer
 fields) and are ratified with the change.
 
