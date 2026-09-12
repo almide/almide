@@ -510,14 +510,24 @@ impl Emitter<'_> {
                         .local_tee(hold)
                         .i32_const(tag as i32)
                         .i32_store(slot_memarg(almide_layout::SUM_TAG));
+                    // Every handle store into a block takes the RC-3 share
+                    // guard, exactly as the record branch below does. Without
+                    // it a `let`-bound list moved into a case payload was
+                    // stored WITHOUT the co-owning +1 and then freed by the
+                    // frame epilogue that still owned the binding, so the
+                    // case held a dangling block — `Supported { matched:
+                    // checked }` printed freed memory where native printed
+                    // the elements (#2133).
                     for (fty, off, d) in defaults {
                         self.f.instructions().local_get(hold);
                         self.lower(&d, Some(fty))?;
+                        self.rc_share_guard(&d, fty);
                         self.store_ty_slot(fty, off);
                     }
                     for ((_, fexpr), (fty, off)) in fields.iter().zip(slots) {
                         self.f.instructions().local_get(hold);
                         self.lower(fexpr, Some(fty))?;
+                        self.rc_share_guard(fexpr, fty);
                         self.store_ty_slot(fty, off);
                     }
                     self.f.instructions().local_get(hold);
