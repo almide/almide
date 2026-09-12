@@ -501,3 +501,47 @@ the ceiling and the gate demanded the header be ratcheted down.
 The check's own row is one of the 80. It reads a TOML ledger in bash, so by its
 own boundary it belongs in Almide; saying so is what the honest-debt bucket is
 for.
+## #2134 — one mistake, two codes, and only the indirect spelling readable
+
+`none()` reported
+
+```
+error[E001]: type mismatch in function call: expected Option[?0] but got fn() -> Option[Int]
+  hint: Fix the expression type or change the expected type
+```
+
+The same mistake written through a binding already reported the useful thing:
+
+```
+error[E002]: `f` is not a function — it has type Option[?0]
+  hint: `f` is a value; only functions and closures can be called
+```
+
+So the diagnostic existed and the direct spelling did not reach it. `none` is
+`ExprKind::None`, which falls to the COMPUTED-callee arm of the call dispatch,
+and that arm's only move is `constrain(callee_ty, fn(args) -> ?ret)`. The
+message a reader saw was the two sides of that unification, and where the
+expected type was an inference slot the unresolved `?ret` produced a second,
+RED-HERRING E025 telling them to add a type annotation — one typo, two errors,
+the second pointing away from the fix.
+
+A value in callee position is now E002 wherever it appears, with `none` earning
+its own fix line and a `try:` (the parentheses are the entire error, and `some`
+taking an argument is exactly why the symmetric spelling looks right). The E025
+cascade is gone with it: nothing is constrained, so nothing is left unpinned.
+
+The OTHER direction is the same shape reflected, and no name-distance
+suggestion can reach either — nothing is misspelled:
+
+| actual | expected | what happened |
+|---|---|---|
+| `fn(A) -> T` | `T` | the arguments were never supplied (`some` for `some(x)`) |
+| `fn() -> T` | `T` | the call was never made |
+
+Both are decided by the types alone — the actual is a function whose RESULT
+head matches the expected head — so `arity_shape_hint` joins the E001 hint
+chain beside the existing fallible-callback shape hint.
+
+C-237 named the old code in its own statement (`none()` is E001), with the
+parenthetical `(none is a value, not a function)` describing E002's message
+rather than E001's; the ledger is corrected in the same change.
