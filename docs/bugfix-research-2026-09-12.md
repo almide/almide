@@ -550,6 +550,29 @@ Both engines carry the fix — `runtime/rs/src/regex.rs` and the self-hosted twi
 byte; fixing only the native one turned that fuzz red immediately, which is the
 gate working.
 
+
+### The exclusion that removed more than it meant to
+
+Holding the two regex fixtures out of the run-parity manifest looked right —
+the pinned oracle recorded their PRE-fix answers, so it cannot referee them —
+and it was wrong in a way only a gate saw. The run manifest is also the corpus
+list for the exercised-surface, allocation and size sweeps, so subtracting a
+row removes the fixture from ALL of them: `surface_matrix` went red naming
+eight constructs that had DISAPPEARED from the wasm leg's exercised surface —
+`regex.captures`, `find`, `find_all`, `full_match`, `is_match`, `replace`,
+`replace_first`, `split` — because those two fixtures were the only ones
+exercising the module there. Excluding them would have shipped the fix and
+silently un-covered the thing it fixed.
+
+`scripts/lib/run-oracle-stale.txt` is the precise mechanism the existing
+register did not provide: the row STAYS in the manifest, every other sweep
+still walks the fixture, and only the run-parity comparison skips it. It is
+shrink-only in both directions — a registration that starts agreeing with the
+oracle again fails the gate and must be deleted (demonstrated with a forged
+row naming a fixture that does agree). Their allocation watermarks moved DOWN
+(87,824 from 88,144; 290,608 from 291,248 — the split fix allocates fewer
+fields) and are ratified with the change.
+
 **The standing gate is the durable half.** C-032's oracle is our own native
 engine: it certifies the legs AGREE and is blind to a rule both read the same
 way and both read wrong, which is exactly how both defects survived. The new

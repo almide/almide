@@ -1,0 +1,19 @@
+# RUN-ORACLE STALE-ROW REGISTER — fixtures whose manifest row the oracle
+# recorded before a fix that postdates the port SHA.
+#
+# Different from run-oracle-exclusions.txt, and the difference is the whole
+# reason this file exists. That register is for a fixture the oracle cannot
+# referee AT ALL, and its rows are SUBTRACTED from the manifest. The manifest is
+# also the corpus list for the exercised-surface, allocation and size sweeps, so
+# subtracting a row silently removes the fixture from all of them — which is how
+# excluding the two regex fixtures took `regex.*` off the wasm leg's exercised
+# surface entirely (caught by surface_matrix, #2129).
+#
+# A row here stays IN the manifest, so every other sweep still walks the
+# fixture; only run_parity skips it, because the hash it would compare against
+# is the oracle's PRE-FIX answer. Shrink-only: a row that starts matching again
+# must be deleted, and the gate fails if one does.
+#
+# path<TAB>reason
+spec/wasm_cross/regex_engine.almd	C-032's #2129 correction postdates a877d2138: a leading `]` in a class is a literal member, and `split` no longer eats a character on a zero-width match. The oracle's recorded answer is the pre-fix one; both greenfield legs carry the fix, byte-identical to each other and to the outside reference engine (scripts/check-regex-reference.sh, 6,624 cases). Re-enters when the port catches up.
+spec/wasm_cross/regex_fuzz_batch.almd	C-032's #2129 correction postdates a877d2138 — same as regex_engine: the oracle recorded the pre-fix answers for the class and split rules this fixture sweeps.
