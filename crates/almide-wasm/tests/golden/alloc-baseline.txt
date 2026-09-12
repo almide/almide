@@ -663,7 +663,7 @@
 66384	spec/wasm_cross/unsigned_literal_domain.almd
 66064	spec/wasm_cross/unwrap_in_callarg.almd
 66048	spec/wasm_cross/unwrap_in_if_arm.almd
-66032	spec/wasm_cross/unwrap_in_recursion.almd
+66048	spec/wasm_cross/unwrap_in_recursion.almd
 66656	spec/wasm_cross/unwrap_or_heap_arg_and_subject.almd
 66336	spec/wasm_cross/unwrap_or_heap_payload.almd
 66208	spec/wasm_cross/unwrap_or_operand.almd

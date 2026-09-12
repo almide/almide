@@ -62,8 +62,12 @@ impl Emitter<'_> {
     /// an owner is released once — the #1770 double free).
     fn frame_credits(&self) -> (BTreeSet<u32>, BTreeSet<u32>) {
         let owned: BTreeSet<u32> = self.rc_owned.clone();
-        let params: BTreeSet<u32> =
-            self.rc_frame_params.iter().copied().filter(|p| !owned.contains(p)).collect();
+        let params: BTreeSet<u32> = self
+            .rc_frame_params
+            .iter()
+            .copied()
+            .filter(|p| !owned.contains(p) && !self.tail_consumed.contains(p))
+            .collect();
         (owned, params)
     }
 
