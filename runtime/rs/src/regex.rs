@@ -168,6 +168,15 @@ fn rx_parse_class(chars: &[char], pos: &mut usize) -> AlmideRxNode {
     let neg = *pos < chars.len() && chars[*pos] == '^';
     if neg { *pos += 1; }
     let mut ranges: Vec<(char, char)> = vec![];
+    // A `]` in the FIRST position is a literal member, not the terminator —
+    // POSIX, and every engine follows it (PCRE, Python, Rust, Go, JS). Read as
+    // a terminator, `[]]` became the empty class followed by a stray `]`, so
+    // the pattern silently never matched: no error, no match, no way to see it
+    // from the outside (#2129).
+    if *pos < chars.len() && chars[*pos] == ']' {
+        ranges.push((']', ']'));
+        *pos += 1;
+    }
     while *pos < chars.len() && chars[*pos] != ']' {
         if chars[*pos] == '\\' && *pos + 1 < chars.len() {
             *pos += 1;
@@ -440,30 +449,33 @@ pub fn almide_regex_replace_first(pat: &str, s: &str, rep: &str) -> String {
     }
 }
 
+/// A field is the text BETWEEN two matches, so the split point and the scan
+/// position are two different things — conflating them is what made a
+/// zero-width match eat a character (#2129): `split("^", "abc")` answered
+/// `["a", "bc"]`, moving the `a` out of the field it belongs to, where Python,
+/// Rust and Go all answer `["", "abc"]`.
+///
+/// The rule is the one those three share: walk the matches exactly as
+/// `find_all` does (an empty match advances the scan by one character so the
+/// walk terminates), emit the text from the previous match's END to this
+/// match's START as a field, and ALWAYS emit the trailing field — including
+/// when it is empty, which is how `split("$", "a")` is `["a", ""]` rather than
+/// `["a"]`. Sharing `find_all`'s walk is what keeps the two answers consistent
+/// with each other, which matters more than matching any one engine's
+/// treatment of an empty alternation arm (there the three disagree among
+/// themselves).
 pub fn almide_regex_split(pat: &str, s: &str) -> Vec<String> {
     let rx = rx_compile(pat);
     let chars: Vec<char> = s.chars().collect();
     let mut results: Vec<String> = vec![];
-    let mut pos = 0;
-    while pos <= chars.len() {
-        if let Some((start, end, _)) = rx_find_at(&rx, &chars, pos) {
-            if end == start && start == pos {
-                // Zero-width match at current position: take one char and move on
-                if pos < chars.len() {
-                    results.push(chars[pos..pos + 1].iter().collect());
-                    pos = pos + 1;
-                } else {
-                    break;
-                }
-                continue;
-            }
-            results.push(chars[pos..start].iter().collect());
-            pos = end;
-        } else {
-            results.push(chars[pos..].iter().collect());
-            break;
-        }
+    let (mut last, mut scan) = (0usize, 0usize);
+    while scan <= chars.len() {
+        let Some((start, end, _)) = rx_find_at(&rx, &chars, scan) else { break };
+        results.push(chars[last..start].iter().collect());
+        last = end;
+        scan = if end > start { end } else { end + 1 };
     }
+    results.push(chars[last..].iter().collect());
     results
 }
 

@@ -47,6 +47,11 @@
 # each needs a fixture design of its own), and this ceiling returns to 0 there.
 
 [[gate]]
+path = "scripts/check-regex-reference.sh"
+class = "NEGATIVE_TESTED"
+evidence = "#2129 landing (2026-09-13): a forged reference row (is_match `[]]` over `]` flipped true -> false) turned BOTH legs red naming the case and printing the op/pattern/subject/reference/leg columns, restored green at 6624 cases. The gate's own first run is what found the two defects it now pins — `[]]` read as an empty class plus a stray `]` (silently never matched) and `split` over an empty-matching pattern eating a character (`split(\"^\", \"abc\")` -> `[\"a\", \"bc\"]`) — neither of which C-032's native-vs-wasm fuzz can see, because both legs agreed on the wrong answer. The table floor (6000 rows) fails a subset that shrank: a gate that stopped looking must not pass."
+
+[[gate]]
 path = "scripts/check-doc-fences.sh"
 reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
