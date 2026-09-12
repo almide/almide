@@ -51,6 +51,11 @@ fn corpus_reproduces_on_stock_wasmtime() {
     let mut swept = 0usize;
     let mut skipped = 0usize;
     let mut failures: Vec<String> = Vec::new();
+    // Rows whose ORACLE answer predates a fix that postdates the port SHA (#2129):
+    // in the manifest for every sweep that uses it as a corpus list, out of the
+    // comparison against that answer.
+    let stale = almide_corpus::stale_oracle_rows(&root);
+    let mut stale_agreed: Vec<String> = Vec::new();
     for line in manifest.lines() {
         let mut it = line.splitn(3, '\t');
         let want_hash = it.next().expect("manifest row");
@@ -84,7 +89,15 @@ fn corpus_reproduces_on_stock_wasmtime() {
             .expect("wasmtime runs");
         let got_exit = out.status.code().unwrap_or(-1);
         let got_hash = normalized_hash(&out.stdout);
-        if got_hash != want_hash || got_exit != want_exit {
+        let agrees = got_hash == want_hash && got_exit == want_exit;
+        if stale.contains_key(rel) {
+            if agrees {
+                stale_agreed.push(rel.to_string());
+            }
+            skipped += 1;
+            continue;
+        }
+        if !agrees {
             failures.push(format!(
                 "{rel}: exit {got_exit} (want {want_exit}), hash {}",
                 if got_hash == want_hash { "ok" } else { "DIFFERS" }
@@ -93,6 +106,12 @@ fn corpus_reproduces_on_stock_wasmtime() {
         swept += 1;
     }
     let _ = std::fs::remove_dir_all(&dir);
+    assert!(
+        stale_agreed.is_empty(),
+        "{} stale-row registration(s) now AGREE with the oracle — delete them from \
+         scripts/lib/run-oracle-stale.txt (the register is shrink-only): {stale_agreed:?}",
+        stale_agreed.len()
+    );
     assert!(
         failures.is_empty(),
         "{} of {swept} WASI runs diverge from the manifest on stock wasmtime:\n{}",
