@@ -47,6 +47,7 @@ use almide_base::intern::{sym, Sym};
 use almide_ir::*;
 
 use super::pass::{NanoPass, PassResult, Target};
+use super::pass_capture_clone::collect_mutated_vars;
 use super::pass_rust_lowering::rewrite_tail_list_to_array;
 use super::pass_stdlib_lowering::{prepare_lambda, prepare_lambda_borrowed};
 
@@ -332,6 +333,7 @@ fn call_ok(e: &IrExpr, cx: &Cx) -> Option<bool> {
             expr_ok(source, cx)
                 && steps.iter().all(|s| match s {
                     IterStep::Take { n } => expr_ok(n, cx),
+                    IterStep::Enumerate => true,
                     _ => s.lambda().is_some_and(|l| expr_ok(l, cx)),
                 })
                 && match collector {
@@ -407,13 +409,65 @@ fn lambda_body_mut(callback: &mut IrExpr) -> Option<&mut IrExpr> {
     }
 }
 
-/// `(source, consume)`: a borrowed source (`&xs`, the `&[A]` runtime twins'
-/// arg shape) iterates as `.iter().cloned()`, anything else is consumed.
-fn source_of(arg: IrExpr) -> (IrExpr, bool) {
-    match arg.kind {
-        IrExprKind::Borrow { expr, .. } => (*expr, false),
-        _ => (arg, true),
+/// `(source, consume, prefix)`: a borrowed source (`&xs`, the `&[A]` runtime
+/// twins' arg shape) iterates as `.iter().cloned()`, anything else is
+/// consumed. `list.enumerate` in source position is not a source at all but an
+/// ADAPTER over one (#2098): its pairs become an `Enumerate` step, so the
+/// `Vec<(i64, T)>` the next stage would immediately walk is never built.
+fn source_of(arg: IrExpr) -> (IrExpr, bool, Vec<IterStep>) {
+    if let IrExprKind::RuntimeCall { symbol, args } = &arg.kind
+        && symbol.as_str() == "almide_rt_list_enumerate"
+        && args.len() == 1
+    {
+        let mut args = args.clone();
+        let (inner, consume, mut prefix) = source_of(args.remove(0));
+        prefix.push(IterStep::Enumerate);
+        return (inner, consume, prefix);
     }
+    match arg.kind {
+        IrExprKind::Borrow { expr, .. } => (*expr, false, vec![]),
+        _ => (arg, true, vec![]),
+    }
+}
+
+/// The `Clone` in front of an adapted source is DEAD by construction (#2098):
+/// CloneInsertion put it there so the consuming runtime call could not take
+/// the caller's value, and fusing that call away removed the consumer. What
+/// remains is an iteration, which `.iter().cloned()` serves from a borrow —
+/// so `list.enumerate(v)` over a 1,200-element capture stops copying the
+/// whole vector once per closure call.
+///
+/// The one way a borrow could still be wrong is a callback that MUTATES the
+/// same variable while the chain walks it, so that is exactly the condition
+/// checked — and it is checked on the FINAL chain, after any merge, because a
+/// merge can only add callbacks and they belong in the same scan. Only a plain
+/// variable qualifies: a temporary would be correct too (Rust extends it to
+/// the end of the statement) but buys nothing.
+fn borrow_adapted_source(mut expr: IrExpr) -> IrExpr {
+    let IrExprKind::IterChain { source, consume, steps, collector } = &mut expr.kind else {
+        return expr;
+    };
+    if !*consume || !steps.iter().any(|s| matches!(s, IterStep::Enumerate)) {
+        return expr;
+    }
+    let IrExprKind::Clone { expr: inner } = &source.kind else { return expr };
+    let IrExprKind::Var { id } = &inner.kind else { return expr };
+    let id = *id;
+    let mut mutated = HashSet::new();
+    for lambda in steps.iter().filter_map(IterStep::lambda).chain(collector.lambda()) {
+        collect_mutated_vars(lambda, &mut mutated);
+    }
+    if let IterCollector::Fold { init, .. } = &*collector {
+        collect_mutated_vars(init, &mut mutated);
+    }
+    if mutated.contains(&id) {
+        return expr;
+    }
+    let taken = std::mem::replace(&mut source.kind, IrExprKind::Unit);
+    let IrExprKind::Clone { expr: inner } = taken else { unreachable!("checked above") };
+    *source = inner;
+    *consume = false;
+    expr
 }
 
 fn chain(expr: &IrExpr, source: IrExpr, consume: bool, steps: Vec<IterStep>, collector: IterCollector) -> IrExpr {
@@ -438,7 +492,7 @@ impl<'a> Fuser<'a> {
             "sum" | "sum_float" | "len" if args.len() == 1 => return self.reducer(expr, op),
             _ => return None,
         };
-        Some(self.merge(single))
+        Some(borrow_adapted_source(self.merge(single)))
     }
 
     /// Rewrite 1: one runtime combinator call with a lambda literal → a
@@ -446,12 +500,12 @@ impl<'a> Fuser<'a> {
     fn single_stage(&self, expr: &IrExpr, op: &str) -> Option<IrExpr> {
         let IrExprKind::RuntimeCall { args, .. } = &expr.kind else { return None };
         let callback = take_lambda(args.last()?.clone())?;
-        let (source, consume) = source_of(args[0].clone());
+        let (source, consume, prefix) = source_of(args[0].clone());
         // Rust hands `filter` / `find` / the `count` filter a `&T`; every
         // other adapter (and the `.iter().cloned()` borrowed source) an owned `T`.
         let borrowed = matches!(op, "filter" | "find" | "count");
         let lambda = map_lambda(callback, if borrowed { &prepare_lambda_borrowed } else { &prepare_lambda });
-        let (steps, collector) = match op {
+        let (mut steps, collector) = match op {
             "map" => (vec![IterStep::Map { lambda: Box::new(lambda) }], IterCollector::Collect),
             "filter" => (vec![IterStep::Filter { lambda: Box::new(lambda) }], IterCollector::Collect),
             "filter_map" => (vec![IterStep::FilterMap { lambda: Box::new(lambda) }], IterCollector::Collect),
@@ -472,6 +526,8 @@ impl<'a> Fuser<'a> {
             "count" => (vec![], IterCollector::Count { lambda: Box::new(lambda) }),
             _ => return None,
         };
+        // The source adapter runs BEFORE whatever this call contributes.
+        steps.splice(0..0, prefix);
         Some(chain(expr, source, consume, steps, collector))
     }
 
@@ -479,9 +535,10 @@ impl<'a> Fuser<'a> {
     /// point, so it needs the merge's totality rule.
     fn take(&self, expr: &IrExpr) -> Option<IrExpr> {
         let IrExprKind::RuntimeCall { args, .. } = &expr.kind else { return None };
-        let (source, consume) = source_of(args[0].clone());
+        let (source, consume, mut steps) = source_of(args[0].clone());
         let n = args[1].clone();
-        let outer = chain(expr, source, consume, vec![IterStep::Take { n: Box::new(n) }], IterCollector::Collect);
+        steps.push(IterStep::Take { n: Box::new(n) });
+        let outer = chain(expr, source, consume, steps, IterCollector::Collect);
         let merged = self.merge(outer);
         // A `take` over a non-chain (or an unmergeable one) is left to the runtime.
         match &merged.kind {
@@ -495,7 +552,7 @@ impl<'a> Fuser<'a> {
     /// purity condition.
     fn reducer(&self, expr: &IrExpr, op: &str) -> Option<IrExpr> {
         let IrExprKind::RuntimeCall { args, .. } = &expr.kind else { return None };
-        let (inner, _) = source_of(args[0].clone());
+        let (inner, _, _) = source_of(args[0].clone());
         let IrExprKind::IterChain { source, consume, steps, collector: IterCollector::Collect } = inner.kind else { return None };
         let collector = match op {
             "sum" => IterCollector::Sum { float: false },
@@ -531,6 +588,10 @@ impl<'a> Fuser<'a> {
         for s in inner_steps.iter().chain(outer_steps.iter()) {
             match s {
                 IterStep::Take { n } => stages.push((vec![n.as_ref()], true)),
+                // The source adapter runs no program text: pure, total, and
+                // order-preserving, so it neither adds a stage to reorder nor
+                // an abort to sequence.
+                IterStep::Enumerate => {}
                 _ => stages.push((vec![s.lambda().expect("non-take step has a lambda")], false)),
             }
         }

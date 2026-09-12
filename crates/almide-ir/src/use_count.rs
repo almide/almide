@@ -227,6 +227,7 @@ fn count_uses_in_iter_chain(
                 count_uses_in_expr(lambda, table);
             }
             IterStep::Take { n } => count_uses_in_expr(n, table),
+            IterStep::Enumerate => {}
         }
     }
     match collector {

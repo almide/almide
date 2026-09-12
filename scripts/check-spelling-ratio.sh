@@ -12,22 +12,30 @@
 # run. That ratio cancels the machine the way the native/Rust ratio does, so a
 # slow shared runner changes the numbers and not the verdict.
 #
-# Measured 2026-09-12 (local, n=1200, 5 samples after warmup, outputs verified
+# Measured 2026-09-13 (local, n=1200, 5 samples after warmup, outputs verified
 # identical across all six artifacts):
 #
-#   native  imperative 1.00   indexed 1.42   enumerate 1.72
-#   wasm    imperative 1.00   indexed 0.89   enumerate 0.72
+#   native  imperative 1.00   indexed 1.43   enumerate 1.01
+#   wasm    imperative 1.00   indexed 1.14   enumerate 0.91
 #
-# The wasm leg is where the documented spellings now WIN; the native leg still
-# pays for the outer capture copy (#2098's mechanism 1, partially fixed). The
-# budget sits above the native figure with room for runner noise — it exists to
-# catch the return of a 4x, not to hold a decimal place. Lower it when the
-# native side lands; never raise it to make a red build green.
+# It builds with the DEFAULT profile, which is what a plain `almide build`
+# ships (opt-level 1). At `--release` every ratio is within noise of 1.00 —
+# `compare.py --release` prints that reading — so the native indexed figure
+# above is what LLVM declines to do to an iterator chain at opt-level 1, not a
+# tax the lowering emits. The default profile is the one gated because it is
+# the one a user gets without asking, and because a LOWERING regression shows
+# at both levels anyway; `--release` is not the faster build here (it is slower
+# for the two spellings opt-level 1 already handles well), so neither column is
+# a recommendation — see the corpus README.
+#
+# The budget sits above the worst figure with room for runner noise — it exists
+# to catch the return of a 4x, not to hold a decimal place. Lower it as the
+# measurements improve; never raise it to make a red build green.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 BIN="${ALMIDE_BIN:-target/release/almide}"
-BUDGET="${SPELLING_RATIO_BUDGET:-2.5}"
+BUDGET="${SPELLING_RATIO_BUDGET:-2.0}"
 N="${SPELLING_RATIO_N:-1200}"
 RUNS="${SPELLING_RATIO_RUNS:-5}"
 

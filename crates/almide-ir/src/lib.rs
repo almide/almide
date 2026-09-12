@@ -483,6 +483,11 @@ pub enum IterStep {
     /// negative `n` wraps to a huge count and takes everything, the
     /// runtime twin's `n as usize` behaviour).
     Take { n: Box<IrExpr> },
+    /// `.enumerate()` re-indexed to Almide's `Int` (#2098): `list.enumerate`
+    /// as a chain SOURCE, so the pairs stream instead of materializing a
+    /// `Vec<(i64, T)>` the next stage immediately walks. Carries nothing —
+    /// the position comes from the iterator, not from the program.
+    Enumerate,
 }
 
 impl IterStep {
@@ -491,7 +496,7 @@ impl IterStep {
         match self {
             IterStep::Map { lambda } | IterStep::Filter { lambda }
             | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => Some(lambda),
-            IterStep::Take { .. } => None,
+            IterStep::Take { .. } | IterStep::Enumerate => None,
         }
     }
 }
@@ -725,6 +730,7 @@ impl IterStep {
             IterStep::FlatMap { lambda } => IterStep::FlatMap { lambda: Box::new(f(*lambda)) },
             IterStep::FilterMap { lambda } => IterStep::FilterMap { lambda: Box::new(f(*lambda)) },
             IterStep::Take { n } => IterStep::Take { n: Box::new(f(*n)) },
+            IterStep::Enumerate => IterStep::Enumerate,
         }
     }
 }

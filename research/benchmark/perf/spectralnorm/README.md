@@ -25,38 +25,59 @@ corpus baseline uses `for` and growing output lists; it is not the preallocated
 reported as reproducing those exact measurements. The variants intentionally
 retain the same iteration and floating-point accumulation order.
 
-General capture borrowing and enumerate fusion remain implementation work.
-Synchronous scalar folds now borrow captures proven to be read-only through
+Synchronous scalar folds borrow captures proven to be read-only through
 indexing, explicit borrowing or cloning, with no escaping nested closure.
-Scalar enumerate/fold now snapshots the source into a scalar list and
-reuses one private tuple slot when the callback cannot expose that tuple.
-It removes the intermediate tuple list and per-element tuple allocation.
+Scalar enumerate/fold on the wasm leg snapshots the source into a scalar list
+and reuses one private tuple slot when the callback cannot expose that tuple.
+On the native leg `list.enumerate` in SOURCE position is now a chain adapter
+(`.iter().cloned().enumerate()`) rather than a `Vec<(Int, T)>` the next stage
+walks and drops; the clone that fed the consumed runtime call goes with it.
 
-Measured on 2026-09-12 with the local v0.62.0 release build and Wasmtime
-47.0.3, n=1200, nine samples after warmup:
+`--release` builds with opt-level 3 and LTO; without it `almide build` uses the
+project's default profile, which is opt-level 1 (load-bearing for correctness —
+see `src/cli/cargo_build.rs`). The two profiles answer different questions and
+both are recorded below: the default profile is what a plain `almide build`
+ships, and the release profile isolates the lowering from what LLVM would have
+cleaned up anyway.
+
+Measured on 2026-09-13 with the local v0.62.0 release build and Wasmtime
+47.0.3, n=1200, five samples after warmup. Every run printed `1.274224150`
+plus a newline with empty stderr, on all six artifacts.
+
+Default profile (`almide build`, opt-level 1):
 
 | Target | Imperative | Indexed fold | Enumerate fold |
 | --- | ---: | ---: | ---: |
-| Native median | 41.34 ms | 97.39 ms (2.36×) | 84.10 ms (2.03×) |
-| Wasm median | 114.11 ms | 149.04 ms (1.31×) | 365.81 ms (3.21×) |
+| Native | 41.09 ms | 58.29 ms (1.42x) | 41.66 ms (1.01x) |
+| Wasm | 93.20 ms | 118.51 ms (1.27x) | 96.12 ms (1.03x) |
 
-Every run printed `1.274224150` plus a newline, with empty stderr. Wasm
-samples were noisy (imperative 97.92–161.90 ms); these are local comparative
-measurements, not a portable timing guarantee. The n=80, three-sample smoke
-run also passed output agreement.
+Release profile (`almide build --release`, opt-level 3 + LTO):
 
-After scalar enumerate/fold lowering, the same command measured wasm
-enumerate at **129.72 ms**, versus **110.60 ms** imperative (**1.17×**);
-the prior enumerate median was 365.81 ms. Artifact size fell from 12,905
-to 12,775 bytes. Outputs remain identical. Native code was not changed
-(indexed 2.34×, enumerate 2.05× in this run). Wasm samples remain noisy,
-so the timing comparison is supporting evidence, not an exact speedup
-guarantee or completion of the full #2098 optimization work.
+| Target | Imperative | Indexed fold | Enumerate fold |
+| --- | ---: | ---: | ---: |
+| Native | 47.95 ms | 48.23 ms (1.01x) | 48.14 ms (1.01x) |
+| Wasm | — | 1.13x | 0.91x |
 
-After native scalar-fold capture borrowing, the indexed median is
-**58.28 ms / 1.42×**, down from 97.39 ms / 2.36× before optimization.
-The native enumerate median is **68.88 ms / 1.68×**. Native indexed
-artifact size drops from 510,184 to 491,848 bytes. The repeated six-way
-output check still passes. This removes per-row capture copies for the
-indexed fold; outer map captures and more general combinators remain
-outside the current borrowing rule.
+What moved, and what it says:
+
+- **Native enumerate 1.68x → 1.01x** is the source-adapter fusion. The old
+  emit copied the captured 1,200-element vector and built a `Vec<(i64, f64)>`
+  per row — 48,000 of each per run — and both are gone.
+- **Native indexed is 1.42x at the default profile and 1.01x at release**, and
+  the release column is what says why: at opt-level 3 all three spellings
+  converge on ~48 ms. The indexed residual is what LLVM declines to do to an
+  iterator chain at opt-level 1, not a tax the lowering emits.
+- The release column is NOT a recommendation. Measured round-robin against the
+  same sources, `--release` is *slower* than the default profile for the two
+  spellings the default already handles well (imperative 47.95 vs 41.93 ms,
+  enumerate 48.14 vs 41.77 ms) and faster only for indexed (48.23 vs 59.65 ms).
+  Whichever profile a program ships with, its spellings should cost the same —
+  that is the property this corpus gates, and both profiles now hold it within
+  measurement noise except for the indexed case at opt-level 1.
+- Wasm samples remain noisy; these are local comparative measurements, not a
+  portable timing guarantee.
+
+Earlier readings kept for the record: before the wasm scalar enumerate/fold
+lowering, wasm enumerate measured 365.81 ms (3.21x); after it, 129.72 ms
+(1.17x). Before native scalar-fold capture borrowing, native indexed measured
+97.39 ms (2.36x); after it, 58.28 ms (1.42x).
