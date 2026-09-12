@@ -65,13 +65,23 @@ effect fn main() -> Unit = {
     .expect("source");
     let native = build(dir.path(), &source, "native", &[]);
     let core = build(dir.path(), &source, "core.wasm", &["--target", "wasm"]);
-    // 260,000 fits the old page; 262,000 is just past its 261,120 cliff;
-    // 900,000 is past it by an order of magnitude.
-    for len in [16usize, 260_000, 262_000, 900_000] {
+    // The ceiling is on the environ BLOCK, so the sizes are reached with
+    // several variables rather than one: Linux caps a single environment
+    // string at 128 KiB (MAX_ARG_STRLEN) and refuses the exec outright,
+    // where macOS only bounds the total.
+    //
+    // 4 x 60,000 fits the old page; 4 x 100,000 is past its 261,120 cliff;
+    // 8 x 100,000 is past it by three times.
+    for (count, len) in [(1usize, 16usize), (4, 60_000), (4, 100_000), (8, 100_000)] {
         let value = marked(len);
+        let mut env: Vec<(String, &str)> = vec![("BIGVAR".to_string(), value.as_str())];
+        for i in 1..count {
+            env.push((format!("FILLER{i}"), value.as_str()));
+        }
+        let env: Vec<(&str, &str)> = env.iter().map(|(k, v)| (k.as_str(), *v)).collect();
         let want = format!("len={len} tail=TAIL\n");
-        assert_eq!(run(&native, false, &[], &[("BIGVAR", &value)]), want, "native {len}");
-        assert_eq!(run(&core, true, &[], &[("BIGVAR", &value)]), want, "core wasm {len}");
+        assert_eq!(run(&native, false, &[], &env), want, "native {count}x{len}");
+        assert_eq!(run(&core, true, &[], &env), want, "core wasm {count}x{len}");
     }
 }
 
@@ -92,11 +102,14 @@ effect fn main() -> Unit = {
     .expect("source");
     let native = build(dir.path(), &source, "native", &[]);
     let core = build(dir.path(), &source, "core.wasm", &["--target", "wasm"]);
-    for len in [16usize, 262_000, 900_000] {
+    // Same reason as above: argv's per-string cap is 128 KiB on Linux, so the
+    // block is grown with several arguments instead of one giant one.
+    for (count, len) in [(1usize, 16usize), (4, 100_000), (8, 100_000)] {
         let value = marked(len);
-        let want = format!("count=1 len={len} tail=TAIL\n");
-        assert_eq!(run(&native, false, &[&value], &[]), want, "native {len}");
-        assert_eq!(run(&core, true, &[&value], &[]), want, "core wasm {len}");
+        let args: Vec<&str> = std::iter::repeat_n(value.as_str(), count).collect();
+        let want = format!("count={count} len={len} tail=TAIL\n");
+        assert_eq!(run(&native, false, &args, &[]), want, "native {count}x{len}");
+        assert_eq!(run(&core, true, &args, &[]), want, "core wasm {count}x{len}");
     }
     // Several small arguments keep their order and their framing.
     let want = "count=3 len=3 tail=one\n";
