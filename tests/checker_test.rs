@@ -747,3 +747,53 @@ fn present_record_field_is_clean() {
         diags
     );
 }
+
+// #2134: a VALUE in callee position is the not-a-function diagnostic, in
+// process — the CLI-level twin in ctor_diag_test.rs pins the rendered form,
+// but a subprocess contributes no coverage, so the arms that decide the
+// message are exercised here.
+#[test]
+fn a_value_in_callee_position_is_not_a_function() {
+    let diags = check_with_hints("fn a(n: Int) -> Int? = if n > 0 then some(n) else none()\n");
+    let (_, msg, hint) = diags
+        .iter()
+        .find(|(_, m, _)| m.contains("is not a function"))
+        .unwrap_or_else(|| panic!("expected the not-a-function diagnostic, got: {diags:?}"));
+    assert!(msg.contains("`none`"), "{msg}");
+    assert!(hint.contains("drop the parentheses"), "{hint}");
+}
+
+#[test]
+fn any_other_uncallable_callee_names_its_type() {
+    for (src, ty) in [
+        ("fn main() -> Unit = {\n  let _ = (1)(2)\n  println(\"x\")\n}\n", "Int"),
+        ("fn main() -> Unit = {\n  let _ = \"abc\"()\n  println(\"x\")\n}\n", "String"),
+        ("fn main() -> Unit = {\n  let _ = [1, 2](3)\n  println(\"x\")\n}\n", "List[Int]"),
+    ] {
+        let diags = check_with_hints(src);
+        let (_, msg, hint) = diags
+            .iter()
+            .find(|(_, m, _)| m.contains("is not a function"))
+            .unwrap_or_else(|| panic!("{src}: expected the diagnostic, got: {diags:?}"));
+        assert!(msg.contains("this expression"), "{src}: {msg}");
+        assert!(msg.contains(ty), "{src}: the type must be named: {msg}");
+        assert!(hint.contains("Only functions and closures can be called"), "{src}: {hint}");
+    }
+}
+
+// The other direction of the same shape: a function where its RESULT is
+// expected. Nothing is misspelled, so no name-distance suggestion reaches it —
+// the hint is chosen from the types alone.
+#[test]
+fn a_function_where_its_result_is_expected_names_the_missing_half() {
+    let hints = error_hints("fn c(n: Int) -> Int? = some\n");
+    assert!(
+        hints.iter().any(|h| h.contains("the arguments were never supplied")),
+        "expected the missing-argument hint, got: {hints:?}"
+    );
+    let hints = error_hints("fn gen() -> Int = 7\nfn g() -> Int = gen\n");
+    assert!(
+        hints.iter().any(|h| h.contains("the call was never made")),
+        "expected the missing-call hint, got: {hints:?}"
+    );
+}

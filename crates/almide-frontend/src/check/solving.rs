@@ -42,7 +42,9 @@ impl Checker {
         // generic "fix the expression type", which names neither the cause nor
         // a way out. Detect the SHAPE (a Result nested one level inside the
         // actual where the expected has it outside) and say what happened.
-        let hint = match fallible_callback_shape_hint(&exp, &act) {
+        let hint = match fallible_callback_shape_hint(&exp, &act)
+            .or_else(|| arity_shape_hint(&exp, &act))
+        {
             Some(h) => h,
             None => Self::hint_with_conversion(mismatch_hint(&c.context), &exp, &act),
         };
@@ -315,6 +317,59 @@ fn fallible_callback_shape_hint(expected: &Ty, actual: &Ty) -> Option<String> {
          other containers and for user HOFs is #1108 Phase 2b-iii."
             .to_string(),
     )
+}
+
+/// `Some(hint)` when the actual type is a FUNCTION whose result is what the
+/// position expects (#2134) — the arity mistake, which no name-distance
+/// suggestion can reach because nothing is misspelled.
+///
+/// Two directions, and the types alone tell them apart:
+///
+/// | actual | expected | what happened |
+/// |---|---|---|
+/// | `fn(A) -> T` | `T` | the arguments were never supplied (`some` for `some(x)`) |
+/// | `fn() -> T` | `T` | the call was never made |
+///
+/// The head of the function's result must match the expected head, or this is
+/// an unrelated mismatch that happens to involve a function value and the hint
+/// would be a guess. An inference var on either side matches: it is exactly
+/// the case where the position is waiting for this expression to pin it.
+fn arity_shape_hint(expected: &Ty, actual: &Ty) -> Option<String> {
+    let Ty::Fn { params, ret, .. } = actual else { return None };
+    if matches!(expected, Ty::Fn { .. }) {
+        return None;
+    }
+    if !same_head(ret, expected) {
+        return None;
+    }
+    Some(if params.is_empty() {
+        "This names a FUNCTION and the position expects what CALLING it \
+         produces — the call was never made. Add the parentheses."
+            .to_string()
+    } else {
+        format!(
+            "This names a FUNCTION of {} argument(s) and the position expects \
+             what CALLING it produces — the arguments were never supplied. A \
+             constructor used as a value is the common way in: `some` builds an \
+             Option FROM a value, so the expression is `some(x)`, not `some`.",
+            params.len()
+        )
+    })
+}
+
+/// Do two types share a head constructor? An inference var or `Unknown` on
+/// either side counts as a match — that is the position still waiting to be
+/// pinned, not a disagreement.
+fn same_head(a: &Ty, b: &Ty) -> bool {
+    if matches!(a, Ty::Unknown | Ty::TypeVar(_)) || matches!(b, Ty::Unknown | Ty::TypeVar(_)) {
+        return true;
+    }
+    match (a, b) {
+        (Ty::Applied(ca, _), Ty::Applied(cb, _)) => ca == cb,
+        (Ty::Named(na, _), Ty::Named(nb, _)) => na == nb,
+        (Ty::Fn { .. }, Ty::Fn { .. }) => true,
+        _ => a == b,
+    }
 }
 
 /// The actionable half of an E001 hint, chosen by the constraint's context.
