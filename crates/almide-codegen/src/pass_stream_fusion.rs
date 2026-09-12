@@ -552,8 +552,14 @@ impl<'a> Fuser<'a> {
     /// purity condition.
     fn reducer(&self, expr: &IrExpr, op: &str) -> Option<IrExpr> {
         let IrExprKind::RuntimeCall { args, .. } = &expr.kind else { return None };
-        let (inner, _, _) = source_of(args[0].clone());
-        let IrExprKind::IterChain { source, consume, steps, collector: IterCollector::Collect } = inner.kind else { return None };
+        // A source adapter over the inner chain runs AFTER its steps, so it is
+        // appended rather than dropped: `list.len` happens to be invariant
+        // under `enumerate` and `sum` is not typeable over its pairs, but a
+        // step silently discarded here would be a defect waiting for the next
+        // adapter that is neither.
+        let (inner, _, prefix) = source_of(args[0].clone());
+        let IrExprKind::IterChain { source, consume, mut steps, collector: IterCollector::Collect } = inner.kind else { return None };
+        steps.extend(prefix);
         let collector = match op {
             "sum" => IterCollector::Sum { float: false },
             "sum_float" => IterCollector::Sum { float: true },
