@@ -18,10 +18,16 @@
 // Result channel.
 //
 // SELF-CONTAINED: its own temp dir (never printed — the suffix differs per
-// run), removed at the end. An fs program routes to the incumbent on the
+// run; the ABSENT paths below are fixed literals for the same reason, #2122),
+// removed at the end. An fs program routes to the incumbent on the
 // BUILD path, so this lives in the embedded lane (`run --target wasm`),
 // where the structural leg serves it.
 import fs
+
+/// A directory that does not exist, named the same on every run: the error
+/// text names its path (#2090), so a temp-dir suffix here would put a
+/// nanosecond stamp on stdout and the cross net could not compare the runs.
+let absent = "almide-no-such-directory"
 
 effect fn helper(p: String) -> Result[String, String] = fs.read_text(p)
 
@@ -34,9 +40,13 @@ effect fn main() -> Unit = {
   let d = fs.create_temp_dir("fanForms")!
   fs.write(d + "/a.txt", "alpha")!
   fs.write(d + "/b.txt", "beta")!
-  let mixed = [d + "/missing.txt", d + "/b.txt", d + "/a.txt"]
+  // #2122: the absent paths are fixed literals. They only ever have to not
+  // exist, and the temp directory's name is a nanosecond stamp that reaches
+  // stdout through the fs error — which made this fixture's output differ
+  // between its own two runs and the net unable to compare them.
+  let mixed = [absent + "/missing.txt", d + "/b.txt", d + "/a.txt"]
   let good = [d + "/a.txt", d + "/b.txt"]
-  let bad_last = [d + "/a.txt", d + "/gone.txt"]
+  let bad_last = [d + "/a.txt", absent + "/gone.txt"]
   // ── fan.any: first Ok wins, an element's err skips ──
   println("any bang fs: " + fan.any(mixed, (p) => fs.read_text(p)!)!)
   println("any bang helper: " + fan.any(mixed, (p) => helper(p)!)!)
@@ -45,7 +55,7 @@ effect fn main() -> Unit = {
     fs.read_text(t)!
   })!)
   println("any value: " + fan.any(mixed, helper)!)
-  println("any all-fail: " + (fan.any([d + "/x.txt"], (p) => fs.read_text(p)!) ?? "fb"))
+  println("any all-fail: " + (fan.any([absent + "/x.txt"], (p) => fs.read_text(p)!) ?? "fb"))
   // ── fan.settle: EVERY element's Result, errs captured ──
   let s1 = fan.settle(mixed, (p) => fs.read_text(p)!)
   println("settle bang fs: " + list.join(s1 |> list.map((r) => show(r)), " | "))
