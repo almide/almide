@@ -94,3 +94,27 @@ fn unannotated_ok_binding_is_e041() {
         "un-annotated `ok(3)` binding must be rejected at check time, got:\n{out}"
     );
 }
+
+/// The other half of the same arm: any VALUE in callee position, not just
+/// `none`. A parenthesised literal and a string both reach the computed-callee
+/// path, where the old code compared the callee's type against a function type
+/// and printed the unification instead of the mistake.
+#[test]
+fn any_value_in_callee_position_is_the_not_a_function_diagnostic() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    for (src, ty) in [("(1)(2)", "Int"), ("\"abc\"()", "String"), ("[1, 2](3)", "List[Int]")] {
+        let out = check(
+            dir.path(),
+            &format!("fn main() -> Unit = {{\n  let _ = {src}\n  println(\"x\")\n}}\n"),
+        );
+        assert!(out.contains("E002"), "{src}: got:\n{out}");
+        assert!(
+            out.contains(&format!("this expression is not a function — it has type {ty}")),
+            "{src}: the type the caller actually has must be named, got:\n{out}"
+        );
+        assert!(
+            out.contains("Only functions and closures can be called"),
+            "{src}: got:\n{out}"
+        );
+    }
+}
