@@ -501,3 +501,35 @@ the ceiling and the gate demanded the header be ratcheted down.
 The check's own row is one of the 80. It reads a TOML ledger in bash, so by its
 own boundary it belongs in Almide; saying so is what the honest-debt bucket is
 for.
+## #2130 step 1 — the diff that was specified and never built, and what it found
+
+Unit 0.46 ported seven gates to `tools/almide-gates/` with byte-identity
+against the `.sh` original as the stated acceptance check. CI runs only the
+`.sh` side; the twins are exercised by `almide test tools/almide-gates/` and
+nothing ever compared the two. The tool's own comment names the cost — "the
+freshness gates compare the bash against the committed docs, never the port
+against either".
+
+**The diff found drift on its first run**, which is the whole argument for
+building it before promoting anything. `stamp`'s FATAL path — the PATH binary
+disagreeing with the workspace build — had diverged twice:
+
+- the bash had learned to name the cause (a `cargo test` relinking
+  `target/release` after the last `make install`) and the fix; the port still
+  carried the original one-liner;
+- the bash RETURNS there, so the toolchain lines and the closing rule never
+  print on that path, while the port went on to print all of them.
+
+Either would have shipped different evidence text the day the twin was
+promoted, and the FATAL path is the one a developer actually meets. The port
+now matches byte for byte on both paths (the mismatch branch and the ordinary
+listing), which needed the early return expressed as structure rather than a
+`return` — Almide has none.
+
+`check-contracts` was already byte-identical, exit code included.
+
+Two twins remain outside the comparison and are named rather than faked:
+`output-parity` sweeps the whole corpus and `fuzz-track-record` queries the
+GitHub API, so both need a fixture design of their own before a diff of theirs
+means anything. Nothing is promoted and no `.sh` is deleted — that is step 3,
+after the soak.
