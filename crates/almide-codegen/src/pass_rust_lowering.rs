@@ -504,7 +504,7 @@ fn box_node_unbox_consumed(expr: &mut IrExpr) -> bool {
                     | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => {
                         c |= unbox_consumed(lambda);
                     }
-                    IterStep::Take { .. } => {}
+                    IterStep::Take { .. } | IterStep::Enumerate => {}
                 }
             }
             match collector {

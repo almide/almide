@@ -189,6 +189,7 @@ fn collect_varids_in_iter_chain(expr: &IrExpr, out: &mut Vec<VarId>) {
             IterStep::Map { lambda } | IterStep::Filter { lambda }
             | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => collect_varids_in_expr(lambda, out),
             IterStep::Take { n } => collect_varids_in_expr(n, out),
+            IterStep::Enumerate => {}
         }
     }
     match collector {
@@ -405,6 +406,7 @@ fn remap_iter_chain_varids(expr: &mut IrExpr, remap: &HashMap<VarId, VarId>) {
             IterStep::Map { lambda } | IterStep::Filter { lambda }
             | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => remap_expr_varids(lambda, remap),
             IterStep::Take { n } => remap_expr_varids(n, remap),
+            IterStep::Enumerate => {}
         }
     }
     match collector {

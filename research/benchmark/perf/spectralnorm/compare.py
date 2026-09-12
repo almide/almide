@@ -17,6 +17,9 @@ def main():
     parser.add_argument("--n", type=int, default=1200)
     parser.add_argument("--runs", type=int, default=9)
     parser.add_argument("--max-ratio", type=float)
+    parser.add_argument("--release", action="store_true",
+                        help="build with --release (opt-level 3 + LTO) instead of the "
+                             "default profile `almide build` uses (opt-level 1)")
     args = parser.parse_args()
     if args.n < 1 or args.runs < 1:
         parser.error("--n and --runs must be positive")
@@ -26,7 +29,8 @@ def main():
     for name in ("ALMIDE_WASM_STRUCTURAL", "ALMIDE_WASM_INCUMBENT",
                  "ALMIDE_FUEL_PROBE", "ALMIDE_COMPONENT_P3", "ALMIDE_COMPONENT_ADAPTER"):
         env.pop(name, None)
-    result = {"n": args.n, "runs": args.runs, "targets": {}}
+    result = {"n": args.n, "runs": args.runs,
+              "profile": "release" if args.release else "default", "targets": {}}
     expected = None
     failed = False
     with tempfile.TemporaryDirectory(prefix="almide-spectralnorm-") as temporary:
@@ -35,8 +39,11 @@ def main():
             for spelling in ("imperative", "indexed", "enumerate"):
                 suffix = "" if spelling == "imperative" else "_" + spelling
                 artifact = Path(temporary) / (spelling + (".wasm" if target == "wasm" else ".bin"))
-                subprocess.run([compiler, "build", str(sources / f"spectralnorm{suffix}.almd"),
-                                "--target", target, "-o", str(artifact)], env=env, check=True,
+                build = [compiler, "build", str(sources / f"spectralnorm{suffix}.almd"),
+                         "--target", target, "-o", str(artifact)]
+                if args.release:
+                    build.append("--release")
+                subprocess.run(build, env=env, check=True,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 command = (["wasmtime", "run"] if target == "wasm" else []) + [str(artifact), str(args.n)]
                 programs[spelling] = (command, artifact.stat().st_size)

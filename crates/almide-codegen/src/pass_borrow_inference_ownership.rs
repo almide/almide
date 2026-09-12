@@ -406,6 +406,7 @@ fn check_needs_ownership_iter_chain(expr: &IrExpr, var: VarId, needs: &mut bool)
                 if uses_var(lambda, var) { *needs = true; return; }
             }
             IterStep::Take { n } => check_needs_ownership(n, var, needs),
+            IterStep::Enumerate => {}
         }
     }
     match collector {
@@ -664,6 +665,7 @@ fn iter_chain_uses_var(source: &IrExpr, steps: &[IterStep], collector: &IterColl
         IterStep::Map { lambda } | IterStep::Filter { lambda }
         | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => uses_var(lambda, var),
         IterStep::Take { n } => uses_var(n, var),
+        IterStep::Enumerate => false,
     })
     || match collector {
         IterCollector::Collect | IterCollector::Sum { .. } | IterCollector::Len => false,

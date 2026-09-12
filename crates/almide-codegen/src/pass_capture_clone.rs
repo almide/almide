@@ -177,7 +177,9 @@ fn detect_shared_mut(program: &IrProgram) -> HashSet<VarId> {
 
 /// Collect VarIds an expression mutates: assignment targets and `&mut`-borrowed
 /// vars (the form `list.push(v, …)` etc. take after `BorrowInsertionPass`).
-fn collect_mutated_vars(expr: &IrExpr, out: &mut HashSet<VarId>) {
+/// Shared with StreamFusion, which asks the same question of a chain's
+/// callbacks before it borrows their source (#2098).
+pub(crate) fn collect_mutated_vars(expr: &IrExpr, out: &mut HashSet<VarId>) {
     struct M<'a> { out: &'a mut HashSet<VarId> }
     impl almide_ir::visit::IrVisitor for M<'_> {
         fn visit_expr(&mut self, e: &IrExpr) {
@@ -355,6 +357,7 @@ fn transform_expr_iter_chain(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &
                 changed |= transform_expr(lambda, vt, scope_vars);
             }
             IterStep::Take { n } => changed |= transform_expr(n, vt, scope_vars),
+            IterStep::Enumerate => {}
         }
     }
     match collector {
@@ -648,6 +651,7 @@ fn replace_vars_iter_chain(expr: &mut IrExpr, renames: &Renames) {
                 replace_vars(lambda, renames);
             }
             IterStep::Take { n } => replace_vars(n, renames),
+            IterStep::Enumerate => {}
         }
     }
     match collector {

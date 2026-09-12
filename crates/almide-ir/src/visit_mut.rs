@@ -149,6 +149,7 @@ fn walk_expr_mut_iter_chain<V: IrMutVisitor>(
                 v.visit_expr_mut(lambda);
             }
             IterStep::Take { n } => v.visit_expr_mut(n),
+            IterStep::Enumerate => {}
         }
     }
     match collector {

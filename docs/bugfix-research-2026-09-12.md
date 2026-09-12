@@ -395,3 +395,66 @@ residual is stated in C-197 rather than left to be discovered.
 `tests/component_realloc_oom_test.rs` pins both directions — the line and exit 1
 must appear, and `cannot leave component instance` and `wasm trap` must not —
 and was demonstrated to fail with the op-35 reservation removed.
+
+## #2098 — two measurements, one of them of the build profile
+
+The issue's native figures (indexed 2.36x, enumerate 1.68x after the earlier
+fixes) were taken through `almide build` with no `--release`, which is the
+project's DEFAULT profile: `opt-level = 1`, no LTO. That level is deliberate
+and load-bearing — LLVM's tail-call optimisation does not run below it, and
+`spec/wasm_cross/mutual_tail_recursion.almd` overflows the native stack without
+it (`src/cli/cargo_build.rs` records the day that was learned) — but it is also
+the level at which LLVM declines to flatten an iterator chain.
+
+Measured on the same tree, same machine, same round-robin harness:
+
+| spelling | default profile | `--release` |
+|---|---:|---:|
+| indexed fold | 1.42x | **1.01x** |
+| enumerate fold (before) | 1.68x | 1.37x |
+
+So the indexed spelling's remaining gap is not something the compiler emits: at
+opt-level 3 the same emitted source matches the imperative form exactly. The
+enumerate spelling's gap survived the optimiser, which is what made it the real
+finding.
+
+The obvious next inference — that `almide build` should default to `--release`
+— does not survive its own measurement. Round-robin over both profiles,
+`--release` is SLOWER for the two spellings opt-level 1 already handles well
+(imperative 47.95 vs 41.93 ms, enumerate 48.14 vs 41.77 ms) and faster only for
+indexed (48.23 vs 59.65). At opt-level 3 all three converge on ~48 ms; at
+opt-level 1 two of them are at ~42 and one is at ~60. The property worth
+holding is that the spellings cost the SAME, not that one profile wins.
+
+**Where the enumerate tax actually was.** Bisected by hand-editing the emit and
+rebuilding (n=1200, nine samples, round-robin, identical output):
+
+| emit | ratio |
+|---|---:|
+| as emitted | 1.38x |
+| `.enumerate()` fused, capture still cloned | 1.14x |
+| fused AND source borrowed | **1.01x** |
+
+Two mechanisms, both per row and therefore 48,000 times per run: a
+`Vec<(i64, f64)>` built by `almide_rt_list_enumerate` for the fold to walk once
+and drop, and a full copy of the captured 1,200-element vector to feed it.
+
+**The fix.** `list.enumerate` in SOURCE position is not a source; it is an
+ADAPTER over one. `IterStep::Enumerate` carries no program text — the position
+comes from the iterator — so it is pure, total and order-preserving, and it
+adds no stage to the merge rule's purity and abort accounting. The clone in
+front of the adapted source is dead by construction: CloneInsertion put it
+there so the CONSUMING runtime call could not take the caller's value, and
+fusing that call away removed the consumer. What survives the drop is a
+callback that MUTATES the same variable, which is checked rather than assumed —
+though in practice such a variable is already a shared cell whose reads
+snapshot, which the mutation fixture pins on both legs.
+
+Result: native enumerate 1.68x → **1.01x** at the default profile, with the
+wasm leg untouched (`IterChain` is Rust-only). `tests/enumerate_source_fusion_test.rs`
+pins the borrowed shape, the snapshot shape, four chain positions and
+native/wasm agreement; both shape assertions were demonstrated to fail with the
+source-adapter rule disabled.
+
+The perf corpus now records both profiles and says which question each answers,
+and the CI budget drops 2.5x → 2.0x.

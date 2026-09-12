@@ -16,6 +16,10 @@ fn render_iter_chain(ctx: &RenderContext, source: &IrExpr, consume: bool, steps:
             IterStep::FlatMap { lambda } => chain = format!("{}.flat_map({})", chain, render_expr(ctx, lambda)),
             IterStep::FilterMap { lambda } => chain = format!("{}.filter_map({})", chain, render_expr(ctx, lambda)),
             IterStep::Take { n } => chain = format!("{}.take(({}) as usize)", chain, render_expr(ctx, n)),
+            // `(usize, T)` re-indexed to Almide's `Int`, which is what the
+            // `almide_rt_list_enumerate` twin returns — same pairs, same
+            // order, no `Vec<(i64, T)>` in between (#2098).
+            IterStep::Enumerate => chain = format!("{}.enumerate().map(|(__ei, __ex)| (__ei as i64, __ex))", chain),
         }
     }
 

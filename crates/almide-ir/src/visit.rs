@@ -148,6 +148,7 @@ fn walk_expr_iter_chain<V: IrVisitor>(
                 v.visit_expr(lambda);
             }
             IterStep::Take { n } => v.visit_expr(n),
+            IterStep::Enumerate => {}
         }
     }
     match collector {
