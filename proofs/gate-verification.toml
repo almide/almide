@@ -17,356 +17,453 @@
 #                     Honest debt: the gate may be decorative and we would
 #                     not know. Burn-down tracked by the ceiling.
 #
-# unverified_ceiling = "0"
+# A second axis (#2128) says what the gate READS, which decides the language it
+# belongs in. The roadmap decision: a gate that reads STRUCTURED data (TOML,
+# markdown, a ledger, generated-output comparison) is written in Almide, where a
+# typed TOML and markdown reader already exists and the next such gate gets it
+# free; a gate that greps and exits stays bash. The check enforces one
+# direction — a row declaring `structured` whose path is a `.sh` FAILS — because
+# a rule alone did not hold: the previous "no committed .sh" goal shipped with a
+# done-criterion nobody implemented, and committed shell went 50 -> 124 files in
+# six weeks with 50 of the 81 additions being `scripts/check-*.sh`.
+#
+#   structured      — reads TOML / markdown / a ledger / generated output.
+#   scalar          — greps, counts, compares strings; exits.
+#   UNCLASSIFIED    — not yet decided. Honest debt, shrink-only, same idiom as
+#                     UNVERIFIED: classifying 80 existing rows must not block
+#                     the mechanism from landing.
+#
+# unverified_ceiling = "2"
+# unclassified_reads_ceiling = "80"
+#
+# The ceiling moved 0 -> 2 for the first time since it reached 0, and the reason
+# is the opposite of a regression: enumerating the Almide gates (#2128) brought
+# `output-parity` and `fuzz-track-record` INTO the ledger's field of view. Their
+# debt is not new — nothing has ever compared either twin to its `.sh` original,
+# which is exactly what #2130 is open about; what is new is that the ledger can
+# see it. A gate the ledger cannot see is worse than one it records as
+# unverified. The burn-down is #2130 step 1 for those two twins (`output-parity`
+# sweeps the whole corpus and `fuzz-track-record` queries the GitHub API, so
+# each needs a fixture design of its own), and this ceiling returns to 0 there.
 
 [[gate]]
 path = "scripts/check-doc-fences.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "#1490 landing (2026-08-28): the output-drift direction demonstrated before first green — the list.md run-fence's pinned output hand-flipped 3->4 went red with the diff shown, restored green. The probe also caught the gate's own first bug: unescaped backticks in two FAIL messages parsed as command substitution and swallowed the run/cmp block entirely, so the corrupted doc passed — fixed before landing (the reason the negative probe is mandatory). Blind-scan floor: zero marked fences under docs/stdlib/ is a hard FAIL (#976 class)."
 
 [[gate]]
 path = "proofs/check-structural-bytes.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "#576 slice-3 landing (2026-08-28): a hand-corrupted byte in StructuralDecode.v's inc_bytes list (65;1 -> 65;2) failed the gate naming the exact emitter-vs-proven diff, restored green (23/37/70/259 bytes matched; slice 4 added the $alloc row with LEB-aware wrapper stripping). The gate re-derives BOTH sides per run — the emitter's bytes through its own dump helper, the proven lists parsed out of the .v source — so neither can drift silently against the decode theorems."
 
 [[gate]]
 path = "scripts/check-als-pin.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "als #60 second-half landing (2026-09-07, almide #1982): a judge ledger with C-347 removed (ALS_LEDGER=<file>) went red naming the id and the remedy (land it in almide/als first, then advance proofs/als-pin.txt; ours 347, judge 346 at 12099f3), the live judge ledger at the pin green (347/347). A fetch failure is exit 2, red in CI — the gate cannot pass by not looking."
 
 [[gate]]
 path = "scripts/check-exit-sites.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "#1995 landing (2026-09-07): with the `emit_exit(&plan)` line removed from data.rs's raised-err exit the gate went red naming `data.rs:159 ends the frame without the ExitPlan renderer` with the five lines above it, restored green (9 frame exits). On its first run it found a third `return_call` site (lower_linked_call) that released nothing — pinned by `a_linked_tail_call_releases_the_frame`."
 
 [[gate]]
 path = "scripts/check-arm-args.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "#2004 landing (2026-09-07): with one declared site (string_ext.rs `starts_with` prefix) hand-reverted to the bare `self.lower(`, the gate went red naming `string_ext.rs:274 lowers an argument without declaring its mode`, restored green (341 declared sites across 23 arm files). The declaration is a type at the site (arm.rs ArgMode); the gate makes the undeclared form a failed build, the ownership matrix (tests/native_result_ownership.rs) judges a wrong Retain, the cross-target fixtures a wrong Borrow (set.insert / map.set found both on the first run)."
 
 [[gate]]
 path = "scripts/check-wasi-pins.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "#1628 stage-4 landing (2026-08-28): policy crate_major hand-flipped 47->48 went red naming the exact drifted pin (wasmtime Cargo pin is 47, policy says 48), restored green. The gate re-derives every fact the policy states from the tree per run — vendored WIT versions, the p3 shim's import versions, the wasmtime Cargo/CI pins, the p3 harness flag surface, the wasm-tools lockstep family — so the WASI-minor compat target is a checked ledger row, not an assumption."
 
 [[gate]]
 path = "scripts/check-target-availability.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "#1423 stage-2+3 landing (2026-08-28): a declared row hand-renamed (int.bnot -> int.bnot_GONE) went red in BOTH directions at once — the measured wall named as UNDECLARED, restored green. Stage 3 doubled the sweep: the DEFAULT-routing measurement diffs against the [[wasm-unavailable]] table the E081 check-time diagnostic consumes (four directions total: 323 lower / 66 native-only / 31 ratchet / 34 both-legs). The gate re-measures the whole surface per run with the renderer's own verdict (tools/target_availability_probe.py, ALMIDE_WASM_STRUCTURAL=1 hard-wall probe per public stdlib fn), so neither a silent new wall nor a stale row survives; name-diff false positives are structurally impossible (the ~199-row over-report experiment is the design's reason)."
 
 [[gate]]
 path = "scripts/check-contracts.sh"
+reads = "UNCLASSIFIED"
 class = "MUTATION_TESTED"
 evidence = "flight-evidence-gaps.md F1 progress-2 (2026-07-04): spec-resolution mutation test (nonexistent ALS section reference => FAIL) SIGPIPE FLAKE FIXED (2026-08-16): seven membership tests were `printf '%s\\n' \"$SET\" | grep -q \"$x\"`, which is a RACE under this script's `set -o pipefail` — `grep -q` exits the instant it matches and closes the pipe, so a `printf` still writing dies of SIGPIPE and the PIPELINE reports failure even though the element WAS found. The gate then declared a contract \"not in the ledger\", naming whichever id lost the race, so it accused a DIFFERENT contract every time (observed: C-084, C-059, C-087). Measured on the 286-id ledger: an EARLY match false-failed 1 run in 400 and a LATE match never did — exactly the shape the race predicts, since a late match leaves nothing left to write. Locally the gate was red about 1 run in 6. All seven now read from a here-string via a single `has()` helper, so there is no pipe to break: 25 consecutive runs green, 0 red. This is not cosmetic — a verdict-bearing gate that is randomly red teaches everyone to re-run until green, which is also what you do to a real failure, and CI's green history on this gate was therefore luck rather than evidence. 2026-08-27: the #1544 canonical reservation range emptied (C-310..C-318 ported verbatim with the 0.59.2 checker landing); negative directions re-demonstrated at the closure — a gap inside the formerly-reserved range now fails the CONTIGUITY branch (C-315 removed locally: red, restored: green), and the retired collision branch is unreachable by construction (LO>HI)."
 
 [[gate]]
 path = "scripts/check-scalar-read-audit.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "PR #1185 (Stage 1 landing): unclassified/stale/UNGUARDED negative cases demonstrated to fail"
 
 [[gate]]
 path = "scripts/check-wat-prelude-audit.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "PR #1209 (Stage 1c landing): 5/5 negative tests (unclassified fn, stale row, digest drift, missing via, UNREACHED)"
 
 [[gate]]
 path = "scripts/check-ratchet-separation.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "flight-evidence-gaps.md F5 close (2026-07-03): mixed impl+baseline commit => exit 1, clean => exit 0"
 
 [[gate]]
 path = "scripts/release-seal.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "PR #1241 + #1243: forged derived count and unfilled [recorded] field each demonstrated to FAIL check"
 
 [[gate]]
 path = "scripts/fuzz-night-verdict.sh"
+reads = "UNCLASSIFIED"
 class = "EXERCISED"
 evidence = "PR #1238: slow-only/mixed/legacy 3-mode local exercise; production class-split verdict on run 31515916427 (correctness=1 => red)"
 
 [[gate]]
 path = "proofs/check-wasm-fallback.sh"
+reads = "UNCLASSIFIED"
 class = "EXERCISED"
 evidence = "2026-08-12: fail direction fired on a stale-binary measurement, pass direction on the #1240 prune (18->17)"
 
 [[gate]]
 path = "proofs/check.sh"
+reads = "UNCLASSIFIED"
 class = "KERNEL_PROVEN"
 evidence = "the object under check IS the proof: coqchk De-Bruijn re-check + Print Assumptions closed + cross-version 9.1.1/9.2 (TRUSTED_BASE.md)"
 
 [[gate]]
 path = "proofs/gate.sh"
+reads = "UNCLASSIFIED"
 class = "KERNEL_PROVEN"
 evidence = "verdict core = extracted checker (qualified-by-proof); toolchain stamp FATAL demonstrated live 2026-08-12 (PATH != workspace build)"
 
 [[gate]]
 path = "proofs/corpus-wall.sh"
+reads = "UNCLASSIFIED"
 class = "KERNEL_PROVEN"
 evidence = "checker-phase ACCEPTs are kernel-proven; flight-evidence-gaps.md F8: a live REJECT exposed the via_if miscompile (the fail direction caught a real bug)"
 
 [[gate]]
 path = "proofs/output-parity.sh"
+reads = "UNCLASSIFIED"
 class = "EXERCISED"
 evidence = "flight-evidence-gaps.md F4 close: 5 consecutive full-run greens after the LC_ALL root-cause; regression direction fired throughout the parity war"
 
 [[gate]]
 path = "proofs/build-checker.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "#1244 round 5 (coqc/ocamlopt present locally, so the gate RAN): the forge went into the TRUSTED GLUE the proof does not cover — driver.ml's ownership arm rubber-stamped to `true` gave 'FAIL double_free.cert: got exit 0 want 1 (ACCEPT)', and to `false` gave 'FAIL balanced.cert: got exit 1 want 0 (REJECT)'; both the accept and the reject assertions therefore bind. Restored green (26/26)"
 
 [[gate]]
 path = "proofs/mcdc-mutation.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "Landing run (2026-08-27): all 6 vectors-resolved sites' operator-swap mutants killed (green unmutated, red mutated, 79 s wall, sources hash-verified restored). Fail directions each demonstrated and restored: a site's tests pointed at an unrelated always-green test -> 'MUTANT SURVIVED' naming site, mutation and tests, exit 1; a named vector assertion inverted -> 'vectors FAIL UNMUTATED — fix the tests first' (a red baseline cannot fake kills); the source pre-mutated by hand -> the site's id no longer scans and the row goes red. The smoke run caught the gate's own first bug: the scanner emits CHARACTER offsets but the mutator read bytes, so multi-byte comments shifted the site — fixed to text-mode before landing."
 
 [[gate]]
 path = "proofs/mcdc-ledger.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "Landing run (2026-08-26), each restored to green: a dropped row -> 'boolean site … has NO ledger row' naming file:line and excerpt; a vectors row naming a nonexistent test fn -> red with the fn and file named; pending ceiling raised by one -> 'BELOW ceiling — ratchet it down'; a pending row hand-flipped to refactored while the site still scans -> red at the site. Zero-sites-scanned is a hard error (broken instrument). Scanner honesty was tuned by its own first runs: closure heads (.or_else(|| …)) are excluded by the preceding-token rule, and sites past a file's first #[cfg(test)] are the tests themselves and are not ledgered."
 
 [[gate]]
 path = "proofs/coverage.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "#1244 round 5: the FIRST probe exposed a real hole — `find -perm /111` is GNU-only, so on any BSD/macOS host the gate died at step 2/4 with 'illegal mode string' and never reached the ratchet; fixed portably (same PR) plus a hard error when discovery finds no test binaries (a 0-binary run would still have reported a number). Then the ratchet itself: proofs/coverage-baseline.txt forged 5819 -> 9900 gave 'COVERAGE RATCHET FAIL: TOTAL 70.09% < baseline 99.00%' on a full real measurement, and `coverage.sh --bogus` gave the #990 usage error exit 2. Measured 70.09% is above the real 58.19% floor, so the same measurement is the pass direction. 2026-08-26 (#566 rung 2, safety floors): a canary row with floor 99.99 -> 'SAFETY COVERAGE FAIL: … 55.16% < floor 99.99%' and a row naming a nonexistent file -> 'not found in the report', both on one full run, exit 1; clean run -> 'safety floors OK (10 file(s))', exit 0. The FIRST canary run caught the gate's own bug: the floor block died of SIGPIPE (printf | early-exit awk under pipefail) and produced no output at all — fixed to a herestring in its own commit"
 
 [[gate]]
 path = "proofs/diff-fuzz.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "#1244 round 5: no live miscompile was needed — one was PLANTED in the v1 renderer (render_wasm_calls.rs int_binop_instr) and the generative net caught it at N=40 SEED=12345. IntOp::Mul => i64.add gave 'match=9 mismatch=10' with each failing program's source printed for repro; IntOp::Mul => an unassemblable mnemonic gave the other branch, 'RUNERR (v1 traps)'. Unforged: match=19 mismatch=0 runerr=0, OK"
 
 [[gate]]
 path = "proofs/receipt.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "#1244 round 5: the #984 guard demonstrated on the DERIVED path (no .verified-fingerprint present, so all four verdicts were really re-run). Forging the certified translation table (translation_validation.rs: Op::Dup's pattern -> a name the renderer never emits) rendered 'C-SAFE | PASS / FAIL' while C-PROVEN/C-WALL stayed PASS, and the script exited 1 with 'receipt: a verdict above is FAIL — refusing to exit green (#984)'. Restored; the VTEST cell is green again"
 
 [[gate]]
 path = "proofs/check-stdlib-purity-registry.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "#1244 round 2: effectful module 'fs' forged into PURE_MODULES demonstrated to fail with the accept-but-unsafe rationale; restored green"
 
 [[gate]]
 path = "proofs/check-wasm-bytes.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "#1244 round 5: the forge was in the SHIPPING RENDERER, not the proof — rc_inc's `(i32.const 1)` bumped to 2 in render_wasm_p3.rs gave 'FAIL rc_inc: the RENDERER'S bytes do not match WasmEncode.rc_inc_bytes', and deleting rc_dec's double-free sentinel line gave 'FAIL rc_dec: ... do not match WasmExec.rc_dec_bytes — drift'; restored green"
 
 [[gate]]
 path = "proofs/check-wasm-exec.sh"
+reads = "UNCLASSIFIED"
 class = "MUTATION_TESTED"
 evidence = "#1244 round 5: wabt installed locally, so the gate RAN (not skipped). Two mutations of the module under test each failed it — the cell seed 4->7 gave 'FAIL exec: rc_inc cell 4 -> 5 — wasmtime got 8 want 5', and deleting rc_dec's `(if (i32.eqz $rc) (unreachable))` sentinel gave 'FAIL exec: rc_dec on rc=0 did NOT trap'; restored green"
 
 [[gate]]
 path = "proofs/check-wasm-reachability.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "#1244 round 4: a dropped baseline row (env.set) demonstrated to fail as WASM PARITY REGRESSION naming the fn; restored green (394 parity / 0 frontier)"
 
 [[gate]]
 path = "scripts/check-abstain-classes.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "#1244 burn-down PR: the first probe EXPOSED a real hole (a bogus class name sailed through green) — fixed with a pinned vocabulary, then both directions demonstrated (bogus class, unclassified entry)"
 
 [[gate]]
 path = "scripts/check-workflows.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "#1234 landing PR: forged a workflow with a duplicate `if:` key (the exact 0.57.0 fuzz-nightly incident shape) — the strict loader rejected it with the key named and exit 1; the empty-glob path also fails loud (no find-nothing-exit-0)"
 
 [[gate]]
 path = "scripts/check-browser-determinism.sh"
+reads = "UNCLASSIFIED"
 class = "EXERCISED"
 evidence = "PR #1599 rounds 4-5 (2026-08-26): both verdict directions in real operation — the gate FAILED correctly when the graduated wall corpus entered spec/wasm_cross (16 fixtures the incumbent renderer walls reported 'native errored', run 32946512713), and passed after gaining the wall-vs-error discipline (tracked skips, ceiling 16, asymmetric render-vs-wall still FAILS). The completeness check counts n + walled against the corpus, so a blind scan cannot pass."
 
 [[gate]]
 path = "scripts/check-embedded-size.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "#1244 round 2: baseline forged DOWN (measured > ceiling) demonstrated to fail with the raise-in-same-change instruction; restored green"
 
 [[gate]]
 path = "scripts/check-forbidden-impurities.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "#1244 round 2: a std::time::Instant::now planted in almide-codegen demonstrated to fail naming the exact line; restored green"
 
 [[gate]]
 path = "scripts/check-frees-churn.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "#1244 round 3: corpus-floor direction (1 fixture => FAIL, the #976 vacuous-pass guard) and a REAL cross-leg divergence (an env-reading probe fixture: native sees the var, wasmtime passes no environ => output diverges => FAIL) both demonstrated; restored green"
 
 [[gate]]
 path = "scripts/check-host-determinism.sh"
+reads = "UNCLASSIFIED"
 class = "EXERCISED"
 evidence = "PR #1599 rounds 4-5 (2026-08-26): both verdict directions in real operation — MAX_WALLED=0 FAILED correctly when the graduated wall corpus added 16 incumbent walls (run 32946512713), and passed after the conscious ceiling bump to the locally re-measured 16. The n + walled == corpus completeness check and the one-host-walls asymmetry FAIL were already in the script; the ceiling firing proved the counting path live."
 
 [[gate]]
 path = "scripts/check-libm-determinism.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "#1244 burn-down PR: dropped-site (UNCLASSIFIED) and bogus-verdict (BAD VERDICT) both demonstrated with LANDED forgeries — the first probe round was a dud (wrong block/field names) and wrongly suggested a hole; probes must diff-verify they landed"
 
 [[gate]]
 path = "scripts/check-cap-effect-consistency.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "#1515 introduction: forging `datetime.now` back to a plain fn turns the gate red naming exactly that fn ('+ datetime.now'); restored, it reads '10 public fn(s) reach the nondet floor, every one effect-declared'. The twin-bypass direction is sealed separately by measurement: `random.choice_str` (a registry twin with no surface decl) is E002 from source, so no plain-fn path can name a nondet impl directly."
 
 [[gate]]
 path = "scripts/check-pass-isolated.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "#1487 introduction: three seeded emitter mutants each turn the gate red through their DEDICATED fixture — m1-swap-match-arms (3 errors), m4-reverse-stmt-order (6), m5-double-wasm-print (9) — applied via git apply, rebuilt, measured, reverted; the unforged tree reads '8 fixture(s), each byte-identical'. m2/m3 deliberately die in the conformance-mutations gate instead (emitted-code-visible / silent-fallback damage an output-identity runner structurally cannot see; the division of labor is in the script header)."
 
 [[gate]]
 path = "scripts/check-perf-ratio.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "#1244 round 5: three forged baselines, each a REAL measurement run (bench.py --quick). fft 1.272->0.500 => 'fft 1.275 (baseline 0.500) OVER ceiling 0.700'; nbody 0.997->5.000 => 'nbody 1.004 UNDER floor 2.500 (broken bench or durable win)' — so the two-sided band both bites; the spectralnorm line deleted => 'baseline has no entry for [spectralnorm] — a gated benchmark was added without anchoring it'. Unforged run: all four ok"
 
 [[gate]]
 path = "scripts/check-rt-oracle-registry.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "#1244 round 2: the tombstone RE-ARM demonstrated — a recreated emit_wasm/ with a compile_* fn fails on the missing registry; removal returns to the RETIRED tombstone"
 
 [[gate]]
 path = "scripts/check-semantics-manifest.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "#1244 burn-down PR: a LANDED bogus-unit forge sailed through green (real hole — unit spellings unvalidated); fixed with measured pinned vocabularies (21 entry units, 5 default units, 4 required fields), then default-unit and entry-unit branches each demonstrated to fail"
 
 [[gate]]
 path = "scripts/check-gate-verification.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
-evidence = "bootstrap run (PR that landed this ledger): a mis-pathed row failed as STALE and this script's own missing row failed as UNCLASSIFIED — both fail directions demonstrated before first green"
+evidence = "bootstrap run (PR that landed this ledger): a mis-pathed row failed as STALE and this script's own missing row failed as UNCLASSIFIED — both fail directions demonstrated before first green. #2128 added the reads axis with three more demonstrated directions (2026-09-13): a row declaring `structured` on a .sh path failed naming the port, an Almide gate with no row failed as UNCLASSIFIED through the new subcommand enumeration, and a row with no `reads` field failed as undeclared. The ratchet was shown to bite in BOTH directions — classifying one row took the UNCLASSIFIED count below the ceiling and the gate demanded the header be ratcheted down. This script is itself one of the 80: it reads a TOML ledger in bash, so by the boundary it belongs in Almide, and the ceiling exists exactly so saying that does not block the mechanism from landing."
 
 [[gate]]
 path = "scripts/check-tor-refs.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "landing PR: a TOR row retargeted to a nonexistent instrument demonstrated to FAIL before first green"
 
 [[gate]]
 path = "scripts/check-keyed-container-index.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "#1363 (landing PR): five forged inputs, each diff-verified to have LANDED before the run, each demonstrated to FAIL — (1) a real index rowed linear (map_core indexed->linear:#1219) => 'NOW carries sidecar helper(s): _reindex _probe _idx_put'; (2) a scanning repr rowed indexed (map_str linear->indexed) => 'missing sidecar helper(s)'; (3) a row retargeted off its module (set_core->set_gone) => STALE row AND the orphaned module's NO-row error, so both directions of the row<->module bijection bite; (4) a bogus state word (map_if n/a->indexedish) => 'unknown state'; (5) a new repr module with no row (stdlib/map_forgeprobe.almd) => NO-row error. The FIRST probe round exposed a real weakness: a single `_reindex(` grep would pass a half-reverted index, so the marker set was tightened to all three sidecar helpers before the evidence was recorded. Restored green (19 rowed: 2 indexed, 8 linear, 9 n/a)"
 
 [[gate]]
 path = "scripts/check-als-element-coverage.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "landing PR: an unresolvable section (ALS-Z999) and a dropped row (UNCLASSIFIED) each demonstrated to FAIL before first green, with the below-ceiling ratchet demand firing in both"
 
 [[gate]]
 path = "scripts/check-lark-grammar.sh"
+reads = "UNCLASSIFIED"
 class = "MUTATION_TESTED"
 evidence = "#1310 landing PR: 5 fail directions demonstrated before first green — keyword respelled (fan->fann: parity BOTH ways + 4 corpus under-accepts), EXCLUDED '..=' re-declared in OPERATORS (leak), param type annotation made optional (negative fixture 'param-without-type' ACCEPTED), '++' fixture shown to still PARSE with the compiler (stale-fixture direction, fixture retired), and an .almd-free corpus dir (blind-gate guard). CORPUS MEMO (2026-08-27): the Earley pass over the 1,556-file corpus was ~5 min of the always-on checks job, so ACCEPTED verdicts are memoized under sha256(grammar text, lark version, gate script) and only acceptance is memoized — rejected files are re-parsed every run because their verdict is what the compiler oracle is consulted on. Negative-tested locally with the no-memo run as the baseline (1553/1556 accepted, 3 rejected by both, 0 disagreements, 104.6s on 8 workers): a cold memo parses all 1,556 and reproduces the baseline verdict; a warm memo re-parses exactly the 3 rejected files (0.4s) with the same verdict; one corpus file with a comment appended is re-parsed on top of those 3 (4 parsed); a memo whose key is moved and a memo holding non-JSON each fall back to parsing all 1,556 with the baseline verdict. The memo is a memo of a pure function, never a relaxation; CI caches are branch-scoped, so a PR reads develop's memo and develop never reads a PR's."
 
 [[gate]]
 path = "scripts/check-clippy-warnings.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "#1462 landing (2026-08-28): three fail directions demonstrated before first green — a compile-failing tree (clippy deny-level overly_complex_bool_expr in the parser: the gate refused to count, and the finding itself was a real vestigial `|| true`), a wrong baseline (ratchet-down demand), and the shared count-compare with its 40-unit blindness floor inherited verbatim from the rustc sibling. The FIRST CI RUN fired the ratchet-down branch for real (1,480 under the pinned 1.94.0 vs a 1,494 baseline measured on a local 1.96) — which exposed that the count is TOOLCHAIN-COUPLED; the gate now runs the pinned toolchain for its verdict and demotes non-pinned local runs to informative 2026-09-03 (the one-way PR verdict): a PR count BELOW the baseline is a ::warning and exit 0 (measured on the PR merged with develop, a sibling landing drops every open PR at once — four PRs went red in turn on 2026-09-03); the shrink is enforced nightly by .github/workflows/clippy-baseline.yml with CLIPPY_RATCHET_STRICT=1. Negative controls via CLIPPY_RATCHET_COUNT_OVERRIDE on the pinned toolchain: baseline+1 → exit 1 (growth still fails), baseline-1 strict → exit 1, baseline-1 non-strict → exit 0 with the warning, CLIPPY_RATCHET_WRITE=1 rewrites the file to the measured count."
 
 [[gate]]
 path = "scripts/check-rustc-warnings.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "#1228 landing PR: all four fail directions demonstrated before first green — an injected unused import (1 > 0), a raised baseline (0 < 5, ratchet-down demand), a failing cargo invocation, and an empty message stream (0 units < the 40 floor, #976 blindness class)"
 
 [[gate]]
 path = "scripts/check-release-only-tests.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "#2122 landing (2026-09-12): the gate's FIRST RUN was the fail direction, before any forging — with no release step naming them it reported both root-package release-only targets (`tests/embedded_cross_test.rs`, `tests/module_type_repr_test.rs`) as running in NO job, exit 1; adding the release-only step to the commissioned wasm gates job turned it green (2 targets, both named). That is the condition it exists for: `cfg_attr(debug_assertions, ignore)` makes a test invisible to every shard (the ci-test profile inherits dev), so a release-only test no release job names is skipped everywhere while CI reads green — which is exactly how the native⇄embedded cross net sat failing on a nondeterministic fixture, unreported, until a local workspace run found it. The second arm (the commissioned wasm gates must still run almide-wasm in release, or that crate's six release-only tests join them) is asserted the same way. NOT demonstrated: a NEW release-only test appearing and being caught — the gate is new; its fail direction was the state of the tree when it was written."
 
 [[gate]]
 path = "scripts/check-spelling-ratio.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "#2098 landing (2026-09-12): both verdict directions demonstrated before first green, each restored and re-confirmed green (rust 1.00/1.39/1.70, wasm 1.00/0.89/0.72 at n=1200, five samples, six artifacts byte-identical). (1) THE BUDGET — the same unforged run under SPELLING_RATIO_BUDGET=1.2 went red naming the excess and printing every spelling's median and ratio (rust indexed 1.41x, enumerate 1.71x over the budget; the wasm column, 0.97x and 0.79x, correctly stayed silent), which is the direction the 4.25x this gate exists for would take. (2) OUTPUT DIVERGENCE — spectralnorm_enumerate.almd's printed value shifted by +0.001 failed the run before any timing was compared: `output divergence: rust/enumerate answered (b'1.275223601\\n', b''), the imperative spelling answered (b'1.274223601\\n', b'')`, so a spelling that gets FASTER by computing something else cannot buy a green. The ratio is the gated quantity precisely because it cancels the runner: spellings are compared on ONE leg inside one round-robin run, the same discipline check-perf-ratio.sh applies to the native/Rust pair. NOT demonstrated: a real idiom regression caught in production (the gate is new)."
 
 [[gate]]
 path = "scripts/check-edit-loop-scale.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "#1334 (landing PR): two forged inputs demonstrated to FAIL before first green, both restored and re-confirmed green (slope 1.113, ratio 4.424, exit 0). (1) A GENUINELY SUPERLINEAR COMPILER — a shim run via ALMIDE_BIN that performs the real `almide check` and then burns a delay proportional to (project lines)^2 — moved the anchored slope from 1.11-1.15 to 1.486 / 1.567 / 1.643 across three runs, over the 1.302 ceiling, exit 1. This is the fail direction the gate exists for, and the hook that makes it reproducible is documented in the script. The shim's own ~27ms spawn cost also pushed `ratio` UNDER its 3.302 floor, so the two-sided band on the second anchor fired in the same run. (2) A COLLAPSED CORPUS — the ladder's source glob forged down to 39 modules / 3,926 lines — fired all four blindness floors at once (corpus modules under 250, top rung under 25,000 lines, no rung in the 9k-12k headline band, top-rung min 24.8ms under the 40ms spawn-noise floor), exit 1: the #976 'gate went blind and read green forever' direction. NOT demonstrated: a real compiler regression caught in production (the gate is new). — #1311 (per-phase extension) added four more, each a REBUILT compiler rather than a shim because the phase numbers are produced inside the binary, each restored and re-confirmed green (slope 1.1435, ratio 4.3282, slope_check 1.1460, share_lex 0.1317, share_parse 0.1336, share_check 0.7347, exit 0). (3) A UNIFORMLY SLOWER LEXER — a spin loop of 1us per 100 source bytes inside `Lexer::tokenize`, top-rung lex 12.7ms -> 25.9ms — fired ONLY `share_lex 0.2426 OVER ceiling 0.1594`, exit 1, while `slope` 1.1346, `ratio` 4.3148 and `slope_check` 1.1401 ALL read ok: a 2x regression in one phase that the aggregate anchors cannot see, which is the whole claim of the per-phase resolution. (4) A QUADRATIC CHECKER — a spin loop proportional to the module count so far inside `infer_module`, top-rung check 66.0ms -> 120.2ms, phase slope 1.14 -> 1.35 — fired `slope_check 1.3497 OVER ceiling 1.3156` plus `share_lex 0.0845` and `share_parse 0.0858` UNDER their floors, exit 1, while `slope` 1.2821 and `ratio` 5.2907 BOTH stayed inside their bands: the mirror case, and confirmation that the sensitive detector of a big-phase regression is the SMALL phases' share floors (share_check itself read 0.8297, still under its 0.8784 ceiling). (5) DELETED INSTRUMENTATION — both `phase_scope(Phase::Check)` calls removed, so the checker reported 0.000ms — fired the per-phase blindness floor ('a phase that reports ~0 is an instrumentation hole ... it would poison every share it appears in rather than fail one band'), exit 1, NOT a share band. (6) A BINARY THAT ANSWERS `--timings` WITH NOTHING — an ALMIDE_BIN shim stripping the flag — fired 'printed no `almide-timings` line', exit 1, instead of letting the gate report green on the wall-clock half alone."
 
 [[gate]]
 path = "scripts/check-layout-discipline.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "#1316 (landing PR): nine forged inputs, each run and each demonstrated to FAIL — (1) a type in a [scope] glob file with no row (crates/almide-mir/src/clif_probe.rs) => UNREGISTERED with the remedy text; (2) that row set to FLAT while the struct held `name: String` and `next: Box<ClifProbe>` => 'row says FLAT but the type holds ...', naming BOTH fields and why each is ruled out; (3) a stub deviation note (20 chars) => the one-paragraph demand, and in the same run DEVIATION count 3 over ceiling 2; (4) the probe struct then flattened to three u32s while its row still said DEVIATION => 'reclassify as FLAT and ratchet deviation_ceiling DOWN' (the shrink direction pulls); (5) the row retargeted off its type (ClifProbe->ClifProbeGone) => STALE row AND the orphaned type's UNREGISTERED error, so the row<->type bijection bites both ways; (6) a serde-deriving struct in a NON-frozen file (crates/almide-driver/src/artifact_probe.rs) => UNREGISTERED via the persistent-artifact signal; (7) FROZEN DRIFT measured from real source — that file frozen at serde_types=1 passed green, appending a second serde type gave '2 serde-deriving type(s), ledger says 1'; (8) ceiling raised to 3 with 2 deviations => the below-ceiling ratchet demand; (9) blind-gate guard — SCAN_ROOTS typo'd in the enumerator => 'found only 35 type declaration(s) ... refusing to pass'. All probe files deleted, ledger restored, green (594 type declarations scanned once tests/examples were excluded, 9 frozen files, 6 registered: 4 FLAT / 2 DEVIATION, ceiling 2)"
 
 [[gate]]
 path = "scripts/check-downstream-grammar.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "Landing PR (#1422): the gate's FIRST LIVE RUN failed on both real drift directions before any forging — tokens.toml still listed `strict` (removed from the language; STALE direction) and did not list `**` (lexed as the `^` alias, documented only in a comment; LAGS direction) — both fixed in almide-grammar PR #3, after which a fresh-clone run reads green (38 keywords + 42 operators mirrored, 0 stale). Forged confirmations on a local grammar copy, both restored: (1) a fabricated keyword `florble` appended to the flow list => STALE error naming it, exit 1; (2) `fan` renamed to `xfan` => BOTH directions fire in one run (`fan` missing = LAGS, `xfan` = STALE), exit 1. Blind-gate guard: the lexer extraction refuses to pass when `const KEYWORDS`/`const OPERATORS` cannot be found ('the extraction broke, not the grammar'), so a lexer refactor that moves the tables turns the gate loud instead of green-forever. NOT demonstrated: drift in the downstream GENERATORS (tree-sitter-almide, vscode-almide) — this gate pins the fan-out point they consume, not their consumption."
 
 [[gate]]
 path = "scripts/check-l1-verdicts.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "survey4-tier12 landing (2026-08-15): companion negative-control script check-l1-verdicts-negative.sh feeds four forged ledgers, each demonstrated to FAIL — (1) msr_measured stripped from every block => missing-field error; (2) verdict=\"maybe\" => closed-vocabulary error; (3) every id forged to LV-001 => ascending-id error; (4) an EMPTY ledger => 'no [[verdict]] blocks' (the #976 find-nothing-exit-0 direction) — while the committed ledger reads green as the positive control. CI-wired directly after the gate's own step, so the proof-it-fires reruns on every push. The gate gained a path-override argument for exactly this harness; the default target is unchanged."
 
 [[gate]]
 path = "scripts/check-l1-verdicts-negative.sh"
+reads = "UNCLASSIFIED"
 class = "EXERCISED"
 evidence = "survey4-tier12 landing (2026-08-15): both verdict directions observed before first green. Fail direction fired on a REAL harness defect: the forging seds assumed single-space `key = ` while the ledger aligns keys with padding, so forge (2) was a byte-level no-op, the gate passed the 'forged' ledger, and this script correctly reported 'closed vocabulary is not enforced', exit 1 — a genuine catch (of its own harness, not the gate). After matching the aligned keys, the 1-positive + 4-negative exercise reads green, exit 0. Runs in the checks job on every push."
 
 [[gate]]
 path = "scripts/check-conformance-negative.sh"
+reads = "UNCLASSIFIED"
 class = "EXERCISED"
 evidence = "survey4-tier12 landing (2026-08-15): recorded 4-mode exercise on every run — a pristine corpus copy must PASS conformancegen --check (positive control, so a broken harness cannot report vacuous green), then a flipped byte in gen_00.expected, an appended byte in gen_00.almd, and a deleted gen_47 pair must each FAIL it (Main.lean treats a missing file as '<MISSING FILE>' drift, so silent shrink is covered by construction). All four modes confirmed locally at landing and re-run in the lean-proofs CI job on every push, right after the in-sync check it guards."
 
 [[gate]]
 path = "scripts/check-conformance-mutations.sh"
+reads = "UNCLASSIFIED"
 class = "EXERCISED"
 evidence = "survey4-tier12 landing (2026-08-15): both verdict directions observed in real operation before first green. FIRST RUN was a genuine catch: mutants m1 (Ok/Err arm swap in render_pattern_constructor) and m4 (statement reversal in expressions.rs render_stmts) SURVIVED => exit 1 — those walker paths are not what the corpus exercises (user-enum ctor patterns and nested-block lambdas sit outside the lambda-almd fragment; Result arms render through the pattern_ok/pattern_err templates, fn bodies through render_fn_body_str). Retargeted at the real paths, the gate reads 5/5 killed, exit 0 (m2 kills via the almide#1428 turbofish, m3 via the almide#1429 ok-lift, m5 via the wasm-only double print — which is why the script hard-refuses to run without a wasm runtime). Nightly + workflow_dispatch (conformance-mutations.yml), deliberately not a PR gate (five compiler rebuilds). Fail direction fired again in operation 2026-08-27..09-02 (#1845): the 0.60 route flip moved the default wasm leg to the structural emitter, m5 (seeded into the incumbent's render_wasm_c.rs) SURVIVED seven nights because the runner never built on that leg — a genuine finding about the mutant, not the corpus. 2026-09-03: m5 retargeted at crates/almide-wasm lower_print (48/48 corpus programs build structural; the incumbent carries no mutant), the gate builds under its own CARGO_TARGET_DIR (target/mutations) so a mutant binary cannot outlive it, and a mutant rustc rejects is reported as DID NOT BUILD rather than counted as a kill. Reads 5/5 killed, exit 0."
 
 [[gate]]
 path = "proofs/check-wall-corpus.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "wall-corpus landing (2026-08-17, #1481): four refusal fixtures pinned (enumerate over an unnameable element -> list.enumerate_x; heap-element pop -> list.pop_x; rich-variant Map key -> _key_wall; non-flat unique -> list.unique_x), each verified to fail `build --target wasm` with its declared substring at landing. Negative controls demonstrated before first green: (1) a COMPILING program with an @wall header makes the gate exit 1 with the graduation instruction (the silent-admission direction this gate exists for); (2) a fixture failing with a DIFFERENT message exits 1 as reason drift; (3) an emptied corpus (<3 fixtures) exits 1 (the #976 vacuous direction). Graduation is shrink-only and explicit: a shape that starts lowering must move to spec/wasm_cross/ under a contract in the same PR."
 
 [[gate]]
 path = "scripts/check-str-twin-ratchet.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "str-twin ratchet landing (2026-08-17, #1460 item 2): freezes the stdlib _str-suffix twin count at 118 (the triage watched it creep 119 -> 120 in one day) while the protocol-vs-suffix direction stays a mob decision. Two-directional: count above baseline fails as growth needing the decision (demonstrated before first green by forging the baseline to 117 — exit 1 naming both numbers), count below fails as STALE demanding the shrink be recorded. Both controls restored to green at 118."
 
 [[gate]]
 path = "scripts/check-diagnostic-code-coverage.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "diagnostic-code coverage floor landing (2026-08-18, attack-list A1-3): every documented E-code must carry >=1 fixture family under tests/diagnostics/ (three no-fixture codes exempted with documented reasons: E054 internal-defect trigger, E033/E420 need module projects). Landed alongside the 4x fixture expansion (99 -> 335 dirs); negative control demonstrated before first green by renaming e055-* dirs aside — the gate exited 1 naming E055 as an uncovered documented code — then restored. Codes below the 3-family tier-1 bar are reported as backlog, not failed: the floor is deliberate (a zero-fixture documented code is unrefactorable), the bar is the roadmap target."
 
 
 [[gate]]
 path = "scripts/check-intrinsic-boundary.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "intrinsic-boundary landing (2026-08-17, #1468 option b): the join is re-derived from the sources on every run (the check-stdlib-purity-registry discipline — no hand-maintained row file to drift). Three provider classes verified: runtime/rs tokens (pub fns AND macro-minted names, which a pub-fn grep alone missed — cursor_read_float! mints 129 of them), the compiler-lowered PRIM FLOOR (an almide_rt_prim_* target is satisfied by its short op name having a lowering arm in crates/almide-mir), and the http/json families that predate the rt_ prefix. Negative control demonstrated before first green: a forged @intrinsic(almide_rt_totally_bogus_fn) appended to stdlib/bool.almd made the gate exit 1 naming the target, then restored to green. Accounting leg: 107 untargeted runtime pub-fns are all template-referenced from crates/ or src/ (the Codec __decode_* glue class); an orphan would be listed, never silently carried. Measured at landing: 768 targets, 0 dangling."
 
 [[gate]]
 path = "scripts/check-wasm-runtime-ratio.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "wasm-runtime landing (2026-08-31, #1701): BOTH verdict directions were paid for by reality before green. Status direction: the first local gate run against the hand-typed ledger failed loud on onebrc — 'expected the incumbent-routing refusal, got: wall (structural leg, the default): call:string.split_once' — which forced the walled status class into the taxonomy; a second real red fired when a routed-incumbent row was re-measured as benching. Ratio direction: the FIRST CI run (33351796226) failed all three measured rows (nbody 19.95 vs stamped 2.09), which exposed that cross-engine ratios do not cancel hardware — answered by binding the ratio verdict to the stamping machine class (local / WASM_RUNTIME_RATIO_VERDICT=1) while CI keeps the status taxonomy as its verdict; both modes re-verified green locally (full verdict, and GITHUB_ACTIONS=1 simulation with informational ratios). Vacuous-pass guard: an UNCLASSIFIED row committed to the ledger fails the run by name, and a measured row that stops benching fails as a regression, so the gate cannot rot into find-nothing-exit-0."
 
 [[gate]]
 path = "scripts/check-llm-surface.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "llm-surface landing (2026-08-17, #1483): the negative control was paid for by REALITY on the first run — docs/CHEATSHEET.md's own '## Complete example' used process.args() without `import process` and the gate failed loud on it (E003 with the import hint); the example was fixed in the same landing and the gate went green over 5 `almide check`-marked fences. The vacuous direction is guarded separately: zero extracted fences exits 1 (the #976 find-nothing-exit-0 class), demonstrated by running against a tree with no marked fences before the markers landed. Scope contract: only the ```almide check info-string opts a fence in, so highlighting-only fragments and deliberate wrong-examples cannot produce false reds; the allowlist is shrink-only and empty at landing."
 
 [[gate]]
 path = "scripts/check-interface-diff.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "interface-differ landing (2026-08-17, #1488): the classifier is demonstrated against REAL release history rather than forged inputs — v0.55.0 -> v0.56.0 (the ADR-0006 try_* removal release) classifies `breaking` with the seven removed signatures listed and EXITS 1 without --allow-breaking (the negative control), and exits 0 WITH the flag (the declared-break path); v0.56.0 -> v0.57.0 classifies `additive` (2 added, 0 removed, exit 0); v0.57.0 -> HEAD at landing classified `identical`. Internal `__`-prefixed carrier names are excluded from the surface, which is what keeps the v0.56->v0.57 verdict honest (its only removals were checker-inserted __try_* carriers, not writable API). The surface is read from the committed machine-generated signature-index blocks in docs/stdlib/*.md at each ref — themselves CI-gated fresh by the 'Stdlib doc signature indexes up to date' job — so the measurement is build-free, deterministic, and derivable at any ref pair forever. 2026-09-03 (#1860): the matcher anchored at the module head and never saw an `effect ` line, so an added effect twin was uncounted and a REMOVED effect fn classified `identical` — the release gate would not have refused it. Fixed to admit the writer's only modifier; re-measured history moved accordingly: v0.56.0 -> v0.57.0 is `breaking (added=7 removed=1)`, not the `additive (2, 0)` recorded above — `effect http.serve` changed its callback type to `Result[HttpResponse, String]` and four `effect fs.fold_lines*` fns arrived unseen; v0.57.0 -> v0.58.0 `breaking (6, 2)`; v0.60.0 -> HEAD moved from (50, 48) to (53, 49). The companion check-interface-diff-negative.sh now holds the forged-input controls (row below), and its A/B against the pre-fix matcher FAILS on the removed-effect control (`identical`), which is the proof the control is not decorative. The control also caught a second latent flaw: an EMPTY surface made the trailing grep exit 1 under pipefail and `set -e` killed the gate silently with exit 1 before its loud exit-2 guard ran — fixed in the same change."
 
 [[gate]]
 path = "scripts/check-interface-diff-negative.sh"
+reads = "UNCLASSIFIED"
 class = "EXERCISED"
 evidence = "#1860 landing (2026-09-03): recorded 9-mode exercise on every run against a scratch git repository carrying a copy of docs/stdlib/*.md (the gate reads refs, so a forged index is a commit, fed through INTERFACE_DIFF_ROOT) — one positive control (base vs base must be `identical`, so a harness blind to the index cannot report vacuous green) plus eight forged inputs: an EFFECT fn deleted (breaking, named, exit 1 — the #1860 direction); a pure fn deleted (breaking); the same effect fn with its return type changed (breaking, 1 added / 1 removed — the http.serve v0.56->v0.57 shape); the effect removal with --allow-breaking (declared path, exit 0); an effect fn added and a pure fn added (each `additive (1, 0)` and listed); the effect removal reversed (additive); and every signature stripped from the index (must exit 2 naming the missing index, not classify). The pre-#1860 matcher, run through INTERFACE_DIFF_GATE, fails the removed-effect control with `identical` — the demonstration that the control fires. Wired into the checks job directly after the dialect-epoch negatives."
 
 [[gate]]
 path = "scripts/check-dialect-epochs.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "dialect-stamp landing (2026-08-16): companion check-dialect-epochs-negative.sh feeds five forged inputs, each demonstrated to FAIL before first green, with the committed ledger + real constant as the positive control — (1) an EMPTY ledger (the #976 find-nothing-exit-0 direction); (2) a GAPPED epoch sequence 1,2,4, which would let a `@dialect(3)` stamp name an epoch that never existed; (3) an epoch above 1 with an empty `breaks` list, i.e. a release masquerading as a dialect break; (4) CURRENT_DIALECT forged to 7 against a ledger topping out at 3 — the two-hand-maintained-numbers drift this gate exists for, the rustc CURRENT_RUSTC_VERSION pattern; (5) the constant RENAMED so the extraction cannot find it, which must go loud rather than green (blind-gate guard). All five restored and re-confirmed green (3 epochs, constant agrees)."
 
 [[gate]]
 path = "scripts/check-dialect-epochs-negative.sh"
+reads = "UNCLASSIFIED"
 class = "EXERCISED"
 evidence = "dialect-stamp landing (2026-08-16): recorded 6-mode exercise on every run — one positive control (the committed ledger and constant must PASS, so a broken harness cannot report vacuous green) plus the five forged-input negatives enumerated in the row above. Wired into the checks job directly after the gate it guards, so the proof-it-fires reruns on every push."
 
 [[gate]]
 path = "scripts/check-retired-spellings.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "retired-spelling ledger landing (2026-08-16): companion check-retired-spellings-negative.sh feeds four forged ledgers, each demonstrated to FAIL, with the committed ledger as the positive control — (1) an EMPTY ledger (#976 find-nothing-exit-0); (2) a row claiming the LIVE `list.map` is retired, which passes only if the gate is not actually executing its rows; (3) every row's `code` forged to a diagnostic the compiler never emits, proving the ledger stays joined to the diagnostic; (4) the three `kind = \"carrier\"` rows reclassified as `\"spelling\"`, which must fail because a carrier IS defined in stdlib on purpose. The gate itself is unusual in being EXECUTED rather than asserted: it compiles a probe per row and requires the declared code to come out, so deleting an arm of the hardcoded `match` in check/infer.rs — the way this enforcement could previously die unnoticed — now reddens the build. Its own first run caught an over-broad rule in this script (carriers legitimately keep their stdlib definition), which is why `kind` exists."
 
 [[gate]]
 path = "scripts/check-retired-spellings-negative.sh"
+reads = "UNCLASSIFIED"
 class = "EXERCISED"
 evidence = "retired-spelling ledger landing (2026-08-16): recorded 5-mode exercise on every run — one positive control (the committed ledger must PASS, so a broken harness cannot report vacuous green) plus the four forged-ledger negatives enumerated in the row above. Wired into the checks job directly after the gate it guards."
 
 [[gate]]
 path = "scripts/check-domain-edges.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "PR #1449 (landing): the ledger row `datetime.to_iso:ts:i64_max` was DELETED and the gate exited 1 naming that exact cell as UNDECLARED; restoring the row returned exit 0. The reverse direction is enforced by the same run — a row whose cell no longer diverges is reported as stale and also fails, so the ledger cannot decay into a list of things that used to be true. SOLO RETRY (2026-08-16): a DIVERGE is re-measured once, alone, before it is believed, because the sweep deliberately feeds u32::MAX and i64::MAX to parameters that SIZE AN ALLOCATION — so a cell just inside the 2 GiB ceiling asks both legs for 2 GiB, and under memory pressure one can lose that race while the other wins. Measured: a full sweep run concurrently with another heavy job reported `string.pad_start:n:i32_max` and `pad_end:n:i32_max` divergent; on a quiet machine both agree, and so does the ceiling value itself. Two phantoms out of 7767 is enough to poison a SHRINK-ONLY ledger, because a phantom that lands once is declared forever. Negative-tested both directions with forged verdicts: a first-pass DIVERGE whose re-run agrees is dropped and NAMED as a load artifact rather than silently discarded; a DIVERGE on both passes is kept (243 rows survived the sticky variant, 0 dropped). The retry can only ever REMOVE a finding, never add one."
 
@@ -374,50 +471,104 @@ evidence = "PR #1449 (landing): the ledger row `datetime.to_iso:ts:i64_max` was 
 
 [[gate]]
 path = "scripts/check-alloc-ceilings.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "alloc-ceiling landing (2026-08-16): four forged trees, each demonstrated to FAIL, with the committed tree as the positive control — (1) ALMIDE_MATRIX_MAX_ELEMS doubled to `1 << 29`, caught as 4294967296 bytes against the shared 2147483648; (2) a self-host `prim.die` threshold moved off by one to 2147483647, caught as an undeclared ceiling value; (3) a native abort rewritten to compare against the bare literal 9999999999, caught as unnamed; (4) ALMIDE_BYTES_MAX_BYTES renamed, caught as missing from the roster. Directions (3) and (4) are the ones that matter for recurrence: they fail a NEW ceiling that is invented rather than shared, which is how this class kept coming back. Every one of these sites previously carried only a `keep in sync with X` comment, and that comment was in place throughout the period when `bytes.new(u32::MAX)` allocated 4 GiB natively and aborted on wasm. A SECOND SECTION covers CROSS-LEG PAIRS — a limit written once per leg that must be the same number, whatever it means. `read_n_bytes`'s per-call maximum is not an allocation ceiling (it is what the wasm host-floor buffer can take, measured at 2^26 with 2^27 failing), but it IS written twice, once as a native constant and once as an .almd literal, and that is the same drift shape wearing different clothes: if the halves part, the two legs read different amounts for the same call and nothing else notices. Negative-tested four more ways, each demonstrated to FAIL with the committed tree as the positive control — (1) the native half halved; (2) the self-host literal changed; (3) the pair constant renamed; (4) the self-host clamp deleted outright, which is the one a reviewer is least likely to catch by eye because the code still reads correctly. SCOPE NARROWED (ratified A, 2026-08-17): the widened plain-allocation caps this gate briefly held together were withdrawn before release — the roster is back to the REPEAT family's released 0.57.0 ceiling (string/list/matrix constants plus the stdlib literals) and the io cross-leg pair. The negative tests above still hold for the remaining roster; the two directions that matter for recurrence (a renamed constant, an invented threshold near an abort) are unchanged."
 
 [[gate]]
 path = "scripts/check-stability-closure.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "#1485 landing drill (2026-08-20): the gate is INFORMATIONAL by design (always exit 0 — its verdict is the per-criterion standing, its failure mode is MISREPORT). Report-follows-input demonstrated: a COMPILER_FRONTIER row forged out of proofs/wasm-fallback-baseline.txt moved the wasm-frontier standing 5→4 in the printed report; restored, it read 5 again. The blockers criterion was cross-checked against the live tracker (0 open I-severity issues, matching the printed PASS)."
 
 [[gate]]
 path = "scripts/check-file-discipline.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "Commissioning PR (2026-08-26): an 801-line probe file under crates/almide-wasm/src => exit 1 naming the file; removed => exit 0. Adopted from the greenfield burn, where the 800-line cap was the measured primary driver of codopsy slippage (stages 39 and 51)."
 
 [[gate]]
 path = "scripts/check-ferrocene-lane.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "Lane landing (2026-08-28, #573): both fail directions demonstrated with wrapper shims and the committed tree as the positive control — (1) an emitter shim prepending a nightly feature gate => exit 1 naming the fixture (line-start-anchored grep, no string-literal false positives); (2) a build shim emitting a rustc-style error[E0308] => exit 1 with the compiler text verbatim. The WALL SPLIT (first dispatched run, 2026-08-27): an almide-side subset refusal (fan budgets are trust-spine-only — fan_race_mapper) is toolchain-independent and counts as a design-wall SKIP, never a lane failure; a silent non-rustc build failure likewise (probed: rc 0 with the skip counted). Full local sweep: 633 fixtures, 0 failures, 1 design-wall skip. The pin (Ferrocene 26.05.0 == upstream 1.95.0, als ADR-0015 clause 4) lives in the weekly workflow."
 
 [[gate]]
 path = "scripts/check-mutation-gate.sh"
+reads = "UNCLASSIFIED"
 class = "EXERCISED"
 evidence = "Greenfield CI mutation-gate job (2026-08-20..26, PORTLOG stages 74+): both verdict directions observed in real operation — 40-42 pre-authored mutants caught green on every push, and the no-longer-applies direction fired at the stage-39 split refresh (a drifted patch went red until refreshed, never retired). All 40 patches re-verified apply-clean against this tree at commissioning. Split evidence model since #1619: PR runs are INCREMENTAL (a mutant is in scope when the PR's change set touches its patched files, the patch itself, or the shared killer infrastructure — crates/almide-wasm/tests/ or the runner script, which put EVERY mutant in scope), and the FULL 40-mutant sweep's standing evidence is .github/workflows/mutation-sweep.yml: develop pushes in an uncancelable concurrency group plus the 05:15 UTC nightly, 4-way positional shard. Under ci.yml's cancel-in-progress group the develop sweep was routinely canceled mid-run (run 33045982751: 18/40 then canceled), which is why push-side evidence moved to the sweep workflow. Killer-first (2026-08-28, #1619 item 3): the net suites run sequentially with a stop at the first red — the verdict is unchanged (caught == net red) and the killer is named in the log; both directions revalidated at the change (mutant 003 caught by backend_parity in the first two suites; a comment-only survivor probe reported SURVIVED and the gate red)."
 
 [[gate]]
 path = "scripts/check-fmt-gate.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "Commissioning PR (2026-08-26): a drift probe appended to spec/wasm_cross/while_loops.almd => exit 1; restored => exit 0. The wrapper exists because the gauntlet's deliberately-invalid REJECT cells cannot parse, and the bare `fmt --check spec/` exits 1 on parse-skips even at zero drift; the gauntlet manifest's reject rows are the single exclusion source (the fmt-corpus test applies the same ruling). tools/almide-gates/ joined the roots (2026-09-03, #1855) after drifting to 10 of 16 files with no step formatting it: with the freshly formatted tree as the positive control (exit 0, 1310 files), an unused `import toml` re-added to tools/almide-gates/src/ledger_speckey.almd => exit 1 ('1 of 1310 file(s) need formatting'); the same file with a one-line body broken across two lines => exit 1; restored => exit 0."
 
 [[gate]]
 path = "scripts/check-ledger-counts.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "Stamped-counts landing (2026-09-02): the aggregate totals the generated docs quote (README claims + stats, proofs/STAGE-STATUS.md, docs/contracts/README.md, docs/contracts/conformance.md) moved out of per-PR derivation into proofs/ledger-counts.toml, rendered inside a dated counts:generated block, because every fixture or contract PR rewrote the same 'N fixtures / N contracts' lines and any two conflicted at the merge queue (verified on the day: conformance.md 705->706 and STAGE-STATUS 629/656->630/657 collided). The PR gates now compare structure and require the block to equal the record; this gate re-measures the record against the tree and runs nightly (.github/workflows/ledger-counts.yml) — red is a refresh signal, never a fixture-PR fix. Negative-tested with the freshly stamped tree as the positive control (pass, 22 counts): (1) the README claims total hand-edited 334->333 => FAIL naming README.md block #1 with the two-line diff; (2) a throwaway spec/wasm_cross fixture added without a restamp => FAIL 'wasm_cross_fixtures: recorded 656, measured 657'; (3) the ledger date rewritten to 'yesterday' => FAIL on the date shape AND every doc block (the start marker carries the date, so a corrupted stamp cannot render as fresh); (4) the tor_rows row deleted => FAIL as a missing row, and STAGE-STATUS's block no longer renders (empty total shown in the diff); the restored tree passed again as the control. The merge-conflict claim itself was demonstrated with git merge-tree --write-tree on two throwaway fixture branches, recorded in the landing PR."
 
 [[gate]]
 path = "scripts/check-readme-numbers.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "README resync landing (2026-08-27, PR #1605): the rule is that every count the README quotes is either derived inside a generated block or carries its measurement date on the same line — the '164-contract' ledger (real count 311), '310 test files' (421), and the 703 B Hello, world measured four releases earlier were each a bare number no gate read. Negative-tested with the committed tree as the positive control (pass): (1) an appended undated '999 test files and 12 contracts' => FAIL; (2) the same line with '(measured 2026-08-27)' => pass, so the date is the escape hatch and nothing else; (3) 'the sole wasm path' => FAIL and (4) '164-contract' => FAIL, the two retired phrases the fossil list refuses; (5) '41 Theorems' with a capital => FAIL (the match is case-folded, so a heading cannot hide a count); (6) '96 audited theorems' => pass, the one exemption, because proofs/check.sh asserts that count where it is computed and now lists README.md in its COUNT_DOCS. The companion generator scripts/gen-readme-stats.sh --check was forged twice the same day: a stats row hand-edited from 421 to 420 => FAIL (stale block), and the stamped baseline docs/benchmarks/wasm-size.txt with incumbent_bytes 1096 rewritten to 1000 => FAIL naming both legs' bytes ('structural 4361 vs 4361, incumbent 1096 vs 1000'), with the restored tree passing again as the control."
 
 [[gate]]
 path = "scripts/check-docs-only.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "docs-only short-circuit landing (2026-08-27): the classifier decides whether a change set can be observed by the compiler's test matrix — a wrong `true` skips twenty minutes of tests, so the allow-list is short and the bias is toward CODE. Negative-tested on 17 change sets with the committed tree's own README-only PR shape as the positive control: README.md alone => true; README + ARCHITECTURE + a banner image + LICENSE-MIT => true; docs/wasm/README.md + a figure => true; an issue template => true; README + src/cli/build.rs => false (the first code path is named in the reason); docs/diagnostics/E041.md alone => false (tests/explain_docs_test.rs reads it); docs/project/CLAUDE_TEMPLATE.md alone => false (include_str! into the binary); docs/benchmarks/build-speed.txt, docs/contracts/contracts.toml, scripts/check-readme-numbers.sh, .github/workflows/ci.yml, llms.txt, spec/lang/expr_test.almd, stdlib/string.almd, Cargo.lock => each false; the EMPTY change set => false (nothing to classify is a full run, never a skip); an unknown git ref => non-zero exit, never a verdict. The fail-safe direction is structural as well as tested: the CI step is continue-on-error, so a crashed classifier leaves the job output EMPTY and every heavy job's `docs_only != 'true'` guard holds — breakage costs a full run, not a skipped suite."
 
 [[gate]]
 path = "scripts/check-pass-roster.sh"
+reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
 evidence = "#929 roster landing (2026-09-03): the per-target optimization pass roster in docs/ARCHITECTURE.md is re-derived from the code per run — every almide-codegen pass_*.rs basename and NanoPass::name() string, every almide-optimize pass module and ALMIDE_ONLY_PASS axis name must appear inside the roster SECTION (heading to next `## `). Negative-tested with the committed tree as the positive control (pass, 81 names: 43 pass files / 29 NanoPass names / 6 optimize modules / 3 axis names; 86 names on 2026-09-08 once #1991 added `RegionWindow`: 46 pass files / 31 NanoPass names): (1) the doc's `SharedCellBorrow` hand-renamed to `SharedCellBorrowX` => FAIL naming the missing NanoPass name; (2) a forged empty crates/almide-codegen/src/pass_forged_probe.rs => FAIL naming the unrowed file (a new pass cannot land without its row); (3) the helper file `pass_licm_purity.rs` deleted from LICM's row => FAIL naming it (helper files are rowed, not just the pass); (4) the axis name `propagate` moved OUT of the section into the following `## Stdlib` section => FAIL, so a mention elsewhere in the document cannot stand in for a roster row; the restored tree passed again as the control. Blind-scan floors: zero pass files, zero NanoPass names, zero optimize modules or zero axis names each hard-FAIL (a moved directory or changed `fn name` signature cannot turn the gate decorative)."
+
+# ── THE ALMIDE GATES ─ they had no rows at all, so an Almide gate could never
+# carry a verification class; the enumeration now reads the subcommand dispatch
+# in tools/almide-gates/src/main.almd, so the two cannot drift.
+
+[[gate]]
+path = "tools/almide-gates:check-contracts"
+reads = "structured"
+class = "NEGATIVE_TESTED"
+evidence = "#2130 step 1 (2026-09-13): tests/almide_gate_twin_parity_test.rs compares this twin against scripts/check-contracts.sh — exit code and output, byte for byte — and the comparator itself was demonstrated to name the first differing line. The twin was already identical on its first run; the same harness caught real drift in the `stamp` twin, which is what makes the green here evidence rather than assumption."
+
+[[gate]]
+path = "tools/almide-gates:stamp"
+reads = "scalar"
+class = "NEGATIVE_TESTED"
+evidence = "#2130 step 1 (2026-09-13): the twin parity test found this one DRIFTED from proofs/lib/stamp.sh on its first run — the bash had learned to name the cause of a hash mismatch (a `cargo test` relinking target/release after the last `make install`) and to RETURN there, while the port carried the original one-liner and went on printing the toolchain lines. Fixed to byte-identity on both paths; a forged message line was demonstrated to fail the comparison naming `line 8`."
+
+[[gate]]
+path = "tools/almide-gates:output-parity"
+reads = "structured"
+class = "UNVERIFIED"
+
+[[gate]]
+path = "tools/almide-gates:bench"
+reads = "structured"
+class = "EXERCISED"
+evidence = "The only Almide twin wired as a LIVE gate: ci.yml runs `bench docs/benchmarks --check-readme` in both the almide-gates job and the checks job, so its verdict is observed on every push. #999's ratchet is the failing direction."
+
+[[gate]]
+path = "tools/almide-gates:conformance"
+reads = "structured"
+class = "NEGATIVE_TESTED"
+evidence = "#1843: `the conformance rendering is byte-identical to the committed docs/contracts/conformance.md` in tools/almide-gates/src/main.almd, run by the almide-gates job. The rendering reads the contract ledger through the typed TOML reader, which is why it is structured."
+
+[[gate]]
+path = "tools/almide-gates:contracts-readme"
+reads = "structured"
+class = "NEGATIVE_TESTED"
+evidence = "#1843: `the index rendering is byte-identical to the committed docs/contracts/README.md` in tools/almide-gates/src/main.almd, run by the almide-gates job."
+
+[[gate]]
+path = "tools/almide-gates:fuzz-track-record"
+reads = "structured"
+class = "UNVERIFIED"

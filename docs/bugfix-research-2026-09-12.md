@@ -458,3 +458,46 @@ source-adapter rule disabled.
 
 The perf corpus now records both profiles and says which question each answers,
 and the CI budget drops 2.5x → 2.0x.
+
+## #2128 — a boundary that is a check, because a rule alone already failed once
+
+The roadmap decision is that a gate reading STRUCTURED data (TOML, markdown, a
+ledger, generated output) is written in Almide and a gate that greps and exits
+stays bash — a cost asymmetry, not taste: the 60-odd `check-*.sh` each re-derive
+their own grep/awk/sed, while the Almide side already paid for a typed TOML and
+markdown reader the next structured gate gets free.
+
+A rule alone does not hold, and the project has the measurement to prove it: the
+previous "no committed `.sh`" goal shipped with a done-criterion reading "a gate
+fails CI when the count goes up", it was never implemented, and committed shell
+went 50 -> 124 files in six weeks with 50 of the 81 additions being
+`scripts/check-*.sh`. Nobody noticed because nothing measured it.
+
+So the boundary joins the ledger that already exists. Each `[[gate]]` row now
+carries a second axis — `reads = structured | scalar | UNCLASSIFIED` — and the
+check fails a row that declares `structured` while its path is a `.sh`.
+`UNCLASSIFIED` is the same honest-debt idiom the ledger uses for `UNVERIFIED`,
+shrink-only in both directions, so classifying the 80 existing rows does not
+block the mechanism from landing.
+
+**The Almide gates existed nowhere in the ledger.** The enumeration was
+`scripts/check-*.sh` plus two named scripts, so an Almide gate could never carry
+a verification class at all. It now also reads the subcommand dispatch in
+`tools/almide-gates/src/main.almd` — from the dispatch itself, so the two cannot
+drift, and with a floor that fails if the parse goes blind — and addresses them
+as `tools/almide-gates:<subcommand>`.
+
+That visibility cost a ceiling: `unverified_ceiling` moved 0 -> 2, because
+`output-parity` and `fuzz-track-record` came into view with no acceptance check
+against their `.sh` originals. The debt is not new — that is what #2130 is open
+about — and a gate the ledger cannot see is worse than one it records as
+unverified.
+
+Three fail directions were demonstrated before landing: a `structured` row on a
+`.sh` path, an Almide gate with no row, and a row with no `reads` field. The
+ratchet was shown to bite both ways — classifying one row took the count below
+the ceiling and the gate demanded the header be ratcheted down.
+
+The check's own row is one of the 80. It reads a TOML ledger in bash, so by its
+own boundary it belongs in Almide; saying so is what the honest-debt bucket is
+for.
