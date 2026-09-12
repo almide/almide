@@ -1,0 +1,6624 @@
+is_match	abc		false
+full_match	abc		false
+find	abc		<none>
+find_all	abc		[]
+split	abc		[]
+captures	abc		<none>
+is_match	abc	a	false
+full_match	abc	a	false
+find	abc	a	<none>
+find_all	abc	a	[]
+split	abc	a	[a]
+captures	abc	a	<none>
+is_match	abc	abc	true
+full_match	abc	abc	true
+find	abc	abc	<abc>
+find_all	abc	abc	[abc]
+split	abc	abc	[|]
+captures	abc	abc	[abc]
+is_match	abc	aXc	false
+full_match	abc	aXc	false
+find	abc	aXc	<none>
+find_all	abc	aXc	[]
+split	abc	aXc	[aXc]
+captures	abc	aXc	<none>
+is_match	abc	aaabccc	true
+full_match	abc	aaabccc	false
+find	abc	aaabccc	<abc>
+find_all	abc	aaabccc	[abc]
+split	abc	aaabccc	[aa|cc]
+captures	abc	aaabccc	[abc]
+is_match	abc	xyz	false
+full_match	abc	xyz	false
+find	abc	xyz	<none>
+find_all	abc	xyz	[]
+split	abc	xyz	[xyz]
+captures	abc	xyz	<none>
+is_match	abc	word boundary word	false
+full_match	abc	word boundary word	false
+find	abc	word boundary word	<none>
+find_all	abc	word boundary word	[]
+split	abc	word boundary word	[word boundary word]
+captures	abc	word boundary word	<none>
+is_match	abc	123-4567	false
+full_match	abc	123-4567	false
+find	abc	123-4567	<none>
+find_all	abc	123-4567	[]
+split	abc	123-4567	[123-4567]
+captures	abc	123-4567	<none>
+is_match	abc	3.14 and 2.718	false
+full_match	abc	3.14 and 2.718	false
+find	abc	3.14 and 2.718	<none>
+find_all	abc	3.14 and 2.718	[]
+split	abc	3.14 and 2.718	[3.14 and 2.718]
+captures	abc	3.14 and 2.718	<none>
+is_match	abc	  spaced  	false
+full_match	abc	  spaced  	false
+find	abc	  spaced  	<none>
+find_all	abc	  spaced  	[]
+split	abc	  spaced  	[  spaced  ]
+captures	abc	  spaced  	<none>
+is_match	abc	AaBbCc	false
+full_match	abc	AaBbCc	false
+find	abc	AaBbCc	<none>
+find_all	abc	AaBbCc	[]
+split	abc	AaBbCc	[AaBbCc]
+captures	abc	AaBbCc	<none>
+is_match	abc	foobaz barbaz	false
+full_match	abc	foobaz barbaz	false
+find	abc	foobaz barbaz	<none>
+find_all	abc	foobaz barbaz	[]
+split	abc	foobaz barbaz	[foobaz barbaz]
+captures	abc	foobaz barbaz	<none>
+is_match	abc	xx	false
+full_match	abc	xx	false
+find	abc	xx	<none>
+find_all	abc	xx	[]
+split	abc	xx	[xx]
+captures	abc	xx	<none>
+is_match	abc	xxx	false
+full_match	abc	xxx	false
+find	abc	xxx	<none>
+find_all	abc	xxx	[]
+split	abc	xxx	[xxx]
+captures	abc	xxx	<none>
+is_match	abc	xxxx	false
+full_match	abc	xxxx	false
+find	abc	xxxx	<none>
+find_all	abc	xxxx	[]
+split	abc	xxxx	[xxxx]
+captures	abc	xxxx	<none>
+is_match	abc	a.b	false
+full_match	abc	a.b	false
+find	abc	a.b	<none>
+find_all	abc	a.b	[]
+split	abc	a.b	[a.b]
+captures	abc	a.b	<none>
+is_match	abc	a\b	false
+full_match	abc	a\b	false
+find	abc	a\b	<none>
+find_all	abc	a\b	[]
+split	abc	a\b	[a\b]
+captures	abc	a\b	<none>
+is_match	abc	-a-z-	false
+full_match	abc	-a-z-	false
+find	abc	-a-z-	<none>
+find_all	abc	-a-z-	[]
+split	abc	-a-z-	[-a-z-]
+captures	abc	-a-z-	<none>
+is_match	abc	[bracket]	false
+full_match	abc	[bracket]	false
+find	abc	[bracket]	<none>
+find_all	abc	[bracket]	[]
+split	abc	[bracket]	[[bracket]]
+captures	abc	[bracket]	<none>
+is_match	abc	ab	false
+full_match	abc	ab	false
+find	abc	ab	<none>
+find_all	abc	ab	[]
+split	abc	ab	[ab]
+captures	abc	ab	<none>
+is_match	abc	b	false
+full_match	abc	b	false
+find	abc	b	<none>
+find_all	abc	b	[]
+split	abc	b	[b]
+captures	abc	b	<none>
+is_match	abc	]	false
+full_match	abc	]	false
+find	abc	]	<none>
+find_all	abc	]	[]
+split	abc	]	[]]
+captures	abc	]	<none>
+is_match	abc	a]b	false
+full_match	abc	a]b	false
+find	abc	a]b	<none>
+find_all	abc	a]b	[]
+split	abc	a]b	[a]b]
+captures	abc	a]b	<none>
+is_match	a.c		false
+full_match	a.c		false
+find	a.c		<none>
+find_all	a.c		[]
+split	a.c		[]
+captures	a.c		<none>
+is_match	a.c	a	false
+full_match	a.c	a	false
+find	a.c	a	<none>
+find_all	a.c	a	[]
+split	a.c	a	[a]
+captures	a.c	a	<none>
+is_match	a.c	abc	true
+full_match	a.c	abc	true
+find	a.c	abc	<abc>
+find_all	a.c	abc	[abc]
+split	a.c	abc	[|]
+captures	a.c	abc	[abc]
+is_match	a.c	aXc	true
+full_match	a.c	aXc	true
+find	a.c	aXc	<aXc>
+find_all	a.c	aXc	[aXc]
+split	a.c	aXc	[|]
+captures	a.c	aXc	[aXc]
+is_match	a.c	aaabccc	true
+full_match	a.c	aaabccc	false
+find	a.c	aaabccc	<abc>
+find_all	a.c	aaabccc	[abc]
+split	a.c	aaabccc	[aa|cc]
+captures	a.c	aaabccc	[abc]
+is_match	a.c	xyz	false
+full_match	a.c	xyz	false
+find	a.c	xyz	<none>
+find_all	a.c	xyz	[]
+split	a.c	xyz	[xyz]
+captures	a.c	xyz	<none>
+is_match	a.c	word boundary word	false
+full_match	a.c	word boundary word	false
+find	a.c	word boundary word	<none>
+find_all	a.c	word boundary word	[]
+split	a.c	word boundary word	[word boundary word]
+captures	a.c	word boundary word	<none>
+is_match	a.c	123-4567	false
+full_match	a.c	123-4567	false
+find	a.c	123-4567	<none>
+find_all	a.c	123-4567	[]
+split	a.c	123-4567	[123-4567]
+captures	a.c	123-4567	<none>
+is_match	a.c	3.14 and 2.718	false
+full_match	a.c	3.14 and 2.718	false
+find	a.c	3.14 and 2.718	<none>
+find_all	a.c	3.14 and 2.718	[]
+split	a.c	3.14 and 2.718	[3.14 and 2.718]
+captures	a.c	3.14 and 2.718	<none>
+is_match	a.c	  spaced  	false
+full_match	a.c	  spaced  	false
+find	a.c	  spaced  	<none>
+find_all	a.c	  spaced  	[]
+split	a.c	  spaced  	[  spaced  ]
+captures	a.c	  spaced  	<none>
+is_match	a.c	AaBbCc	false
+full_match	a.c	AaBbCc	false
+find	a.c	AaBbCc	<none>
+find_all	a.c	AaBbCc	[]
+split	a.c	AaBbCc	[AaBbCc]
+captures	a.c	AaBbCc	<none>
+is_match	a.c	foobaz barbaz	false
+full_match	a.c	foobaz barbaz	false
+find	a.c	foobaz barbaz	<none>
+find_all	a.c	foobaz barbaz	[]
+split	a.c	foobaz barbaz	[foobaz barbaz]
+captures	a.c	foobaz barbaz	<none>
+is_match	a.c	xx	false
+full_match	a.c	xx	false
+find	a.c	xx	<none>
+find_all	a.c	xx	[]
+split	a.c	xx	[xx]
+captures	a.c	xx	<none>
+is_match	a.c	xxx	false
+full_match	a.c	xxx	false
+find	a.c	xxx	<none>
+find_all	a.c	xxx	[]
+split	a.c	xxx	[xxx]
+captures	a.c	xxx	<none>
+is_match	a.c	xxxx	false
+full_match	a.c	xxxx	false
+find	a.c	xxxx	<none>
+find_all	a.c	xxxx	[]
+split	a.c	xxxx	[xxxx]
+captures	a.c	xxxx	<none>
+is_match	a.c	a.b	false
+full_match	a.c	a.b	false
+find	a.c	a.b	<none>
+find_all	a.c	a.b	[]
+split	a.c	a.b	[a.b]
+captures	a.c	a.b	<none>
+is_match	a.c	a\b	false
+full_match	a.c	a\b	false
+find	a.c	a\b	<none>
+find_all	a.c	a\b	[]
+split	a.c	a\b	[a\b]
+captures	a.c	a\b	<none>
+is_match	a.c	-a-z-	false
+full_match	a.c	-a-z-	false
+find	a.c	-a-z-	<none>
+find_all	a.c	-a-z-	[]
+split	a.c	-a-z-	[-a-z-]
+captures	a.c	-a-z-	<none>
+is_match	a.c	[bracket]	false
+full_match	a.c	[bracket]	false
+find	a.c	[bracket]	<none>
+find_all	a.c	[bracket]	[]
+split	a.c	[bracket]	[[bracket]]
+captures	a.c	[bracket]	<none>
+is_match	a.c	ab	false
+full_match	a.c	ab	false
+find	a.c	ab	<none>
+find_all	a.c	ab	[]
+split	a.c	ab	[ab]
+captures	a.c	ab	<none>
+is_match	a.c	b	false
+full_match	a.c	b	false
+find	a.c	b	<none>
+find_all	a.c	b	[]
+split	a.c	b	[b]
+captures	a.c	b	<none>
+is_match	a.c	]	false
+full_match	a.c	]	false
+find	a.c	]	<none>
+find_all	a.c	]	[]
+split	a.c	]	[]]
+captures	a.c	]	<none>
+is_match	a.c	a]b	false
+full_match	a.c	a]b	false
+find	a.c	a]b	<none>
+find_all	a.c	a]b	[]
+split	a.c	a]b	[a]b]
+captures	a.c	a]b	<none>
+is_match	a.*c		false
+full_match	a.*c		false
+find	a.*c		<none>
+find_all	a.*c		[]
+split	a.*c		[]
+captures	a.*c		<none>
+is_match	a.*c	a	false
+full_match	a.*c	a	false
+find	a.*c	a	<none>
+find_all	a.*c	a	[]
+split	a.*c	a	[a]
+captures	a.*c	a	<none>
+is_match	a.*c	abc	true
+full_match	a.*c	abc	true
+find	a.*c	abc	<abc>
+find_all	a.*c	abc	[abc]
+split	a.*c	abc	[|]
+captures	a.*c	abc	[abc]
+is_match	a.*c	aXc	true
+full_match	a.*c	aXc	true
+find	a.*c	aXc	<aXc>
+find_all	a.*c	aXc	[aXc]
+split	a.*c	aXc	[|]
+captures	a.*c	aXc	[aXc]
+is_match	a.*c	aaabccc	true
+full_match	a.*c	aaabccc	true
+find	a.*c	aaabccc	<aaabccc>
+find_all	a.*c	aaabccc	[aaabccc]
+split	a.*c	aaabccc	[|]
+captures	a.*c	aaabccc	[aaabccc]
+is_match	a.*c	xyz	false
+full_match	a.*c	xyz	false
+find	a.*c	xyz	<none>
+find_all	a.*c	xyz	[]
+split	a.*c	xyz	[xyz]
+captures	a.*c	xyz	<none>
+is_match	a.*c	word boundary word	false
+full_match	a.*c	word boundary word	false
+find	a.*c	word boundary word	<none>
+find_all	a.*c	word boundary word	[]
+split	a.*c	word boundary word	[word boundary word]
+captures	a.*c	word boundary word	<none>
+is_match	a.*c	123-4567	false
+full_match	a.*c	123-4567	false
+find	a.*c	123-4567	<none>
+find_all	a.*c	123-4567	[]
+split	a.*c	123-4567	[123-4567]
+captures	a.*c	123-4567	<none>
+is_match	a.*c	3.14 and 2.718	false
+full_match	a.*c	3.14 and 2.718	false
+find	a.*c	3.14 and 2.718	<none>
+find_all	a.*c	3.14 and 2.718	[]
+split	a.*c	3.14 and 2.718	[3.14 and 2.718]
+captures	a.*c	3.14 and 2.718	<none>
+is_match	a.*c	  spaced  	true
+full_match	a.*c	  spaced  	false
+find	a.*c	  spaced  	<ac>
+find_all	a.*c	  spaced  	[ac]
+split	a.*c	  spaced  	[  sp|ed  ]
+captures	a.*c	  spaced  	[ac]
+is_match	a.*c	AaBbCc	true
+full_match	a.*c	AaBbCc	false
+find	a.*c	AaBbCc	<aBbCc>
+find_all	a.*c	AaBbCc	[aBbCc]
+split	a.*c	AaBbCc	[A|]
+captures	a.*c	AaBbCc	[aBbCc]
+is_match	a.*c	foobaz barbaz	false
+full_match	a.*c	foobaz barbaz	false
+find	a.*c	foobaz barbaz	<none>
+find_all	a.*c	foobaz barbaz	[]
+split	a.*c	foobaz barbaz	[foobaz barbaz]
+captures	a.*c	foobaz barbaz	<none>
+is_match	a.*c	xx	false
+full_match	a.*c	xx	false
+find	a.*c	xx	<none>
+find_all	a.*c	xx	[]
+split	a.*c	xx	[xx]
+captures	a.*c	xx	<none>
+is_match	a.*c	xxx	false
+full_match	a.*c	xxx	false
+find	a.*c	xxx	<none>
+find_all	a.*c	xxx	[]
+split	a.*c	xxx	[xxx]
+captures	a.*c	xxx	<none>
+is_match	a.*c	xxxx	false
+full_match	a.*c	xxxx	false
+find	a.*c	xxxx	<none>
+find_all	a.*c	xxxx	[]
+split	a.*c	xxxx	[xxxx]
+captures	a.*c	xxxx	<none>
+is_match	a.*c	a.b	false
+full_match	a.*c	a.b	false
+find	a.*c	a.b	<none>
+find_all	a.*c	a.b	[]
+split	a.*c	a.b	[a.b]
+captures	a.*c	a.b	<none>
+is_match	a.*c	a\b	false
+full_match	a.*c	a\b	false
+find	a.*c	a\b	<none>
+find_all	a.*c	a\b	[]
+split	a.*c	a\b	[a\b]
+captures	a.*c	a\b	<none>
+is_match	a.*c	-a-z-	false
+full_match	a.*c	-a-z-	false
+find	a.*c	-a-z-	<none>
+find_all	a.*c	-a-z-	[]
+split	a.*c	-a-z-	[-a-z-]
+captures	a.*c	-a-z-	<none>
+is_match	a.*c	[bracket]	true
+full_match	a.*c	[bracket]	false
+find	a.*c	[bracket]	<ac>
+find_all	a.*c	[bracket]	[ac]
+split	a.*c	[bracket]	[[br|ket]]
+captures	a.*c	[bracket]	[ac]
+is_match	a.*c	ab	false
+full_match	a.*c	ab	false
+find	a.*c	ab	<none>
+find_all	a.*c	ab	[]
+split	a.*c	ab	[ab]
+captures	a.*c	ab	<none>
+is_match	a.*c	b	false
+full_match	a.*c	b	false
+find	a.*c	b	<none>
+find_all	a.*c	b	[]
+split	a.*c	b	[b]
+captures	a.*c	b	<none>
+is_match	a.*c	]	false
+full_match	a.*c	]	false
+find	a.*c	]	<none>
+find_all	a.*c	]	[]
+split	a.*c	]	[]]
+captures	a.*c	]	<none>
+is_match	a.*c	a]b	false
+full_match	a.*c	a]b	false
+find	a.*c	a]b	<none>
+find_all	a.*c	a]b	[]
+split	a.*c	a]b	[a]b]
+captures	a.*c	a]b	<none>
+is_match	a.*?c		false
+full_match	a.*?c		false
+find	a.*?c		<none>
+find_all	a.*?c		[]
+split	a.*?c		[]
+captures	a.*?c		<none>
+is_match	a.*?c	a	false
+full_match	a.*?c	a	false
+find	a.*?c	a	<none>
+find_all	a.*?c	a	[]
+split	a.*?c	a	[a]
+captures	a.*?c	a	<none>
+is_match	a.*?c	abc	true
+full_match	a.*?c	abc	true
+find	a.*?c	abc	<abc>
+find_all	a.*?c	abc	[abc]
+split	a.*?c	abc	[|]
+captures	a.*?c	abc	[abc]
+is_match	a.*?c	aXc	true
+full_match	a.*?c	aXc	true
+find	a.*?c	aXc	<aXc>
+find_all	a.*?c	aXc	[aXc]
+split	a.*?c	aXc	[|]
+captures	a.*?c	aXc	[aXc]
+is_match	a.*?c	aaabccc	true
+full_match	a.*?c	aaabccc	true
+find	a.*?c	aaabccc	<aaabc>
+find_all	a.*?c	aaabccc	[aaabc]
+split	a.*?c	aaabccc	[|cc]
+captures	a.*?c	aaabccc	[aaabc]
+is_match	a.*?c	xyz	false
+full_match	a.*?c	xyz	false
+find	a.*?c	xyz	<none>
+find_all	a.*?c	xyz	[]
+split	a.*?c	xyz	[xyz]
+captures	a.*?c	xyz	<none>
+is_match	a.*?c	word boundary word	false
+full_match	a.*?c	word boundary word	false
+find	a.*?c	word boundary word	<none>
+find_all	a.*?c	word boundary word	[]
+split	a.*?c	word boundary word	[word boundary word]
+captures	a.*?c	word boundary word	<none>
+is_match	a.*?c	123-4567	false
+full_match	a.*?c	123-4567	false
+find	a.*?c	123-4567	<none>
+find_all	a.*?c	123-4567	[]
+split	a.*?c	123-4567	[123-4567]
+captures	a.*?c	123-4567	<none>
+is_match	a.*?c	3.14 and 2.718	false
+full_match	a.*?c	3.14 and 2.718	false
+find	a.*?c	3.14 and 2.718	<none>
+find_all	a.*?c	3.14 and 2.718	[]
+split	a.*?c	3.14 and 2.718	[3.14 and 2.718]
+captures	a.*?c	3.14 and 2.718	<none>
+is_match	a.*?c	  spaced  	true
+full_match	a.*?c	  spaced  	false
+find	a.*?c	  spaced  	<ac>
+find_all	a.*?c	  spaced  	[ac]
+split	a.*?c	  spaced  	[  sp|ed  ]
+captures	a.*?c	  spaced  	[ac]
+is_match	a.*?c	AaBbCc	true
+full_match	a.*?c	AaBbCc	false
+find	a.*?c	AaBbCc	<aBbCc>
+find_all	a.*?c	AaBbCc	[aBbCc]
+split	a.*?c	AaBbCc	[A|]
+captures	a.*?c	AaBbCc	[aBbCc]
+is_match	a.*?c	foobaz barbaz	false
+full_match	a.*?c	foobaz barbaz	false
+find	a.*?c	foobaz barbaz	<none>
+find_all	a.*?c	foobaz barbaz	[]
+split	a.*?c	foobaz barbaz	[foobaz barbaz]
+captures	a.*?c	foobaz barbaz	<none>
+is_match	a.*?c	xx	false
+full_match	a.*?c	xx	false
+find	a.*?c	xx	<none>
+find_all	a.*?c	xx	[]
+split	a.*?c	xx	[xx]
+captures	a.*?c	xx	<none>
+is_match	a.*?c	xxx	false
+full_match	a.*?c	xxx	false
+find	a.*?c	xxx	<none>
+find_all	a.*?c	xxx	[]
+split	a.*?c	xxx	[xxx]
+captures	a.*?c	xxx	<none>
+is_match	a.*?c	xxxx	false
+full_match	a.*?c	xxxx	false
+find	a.*?c	xxxx	<none>
+find_all	a.*?c	xxxx	[]
+split	a.*?c	xxxx	[xxxx]
+captures	a.*?c	xxxx	<none>
+is_match	a.*?c	a.b	false
+full_match	a.*?c	a.b	false
+find	a.*?c	a.b	<none>
+find_all	a.*?c	a.b	[]
+split	a.*?c	a.b	[a.b]
+captures	a.*?c	a.b	<none>
+is_match	a.*?c	a\b	false
+full_match	a.*?c	a\b	false
+find	a.*?c	a\b	<none>
+find_all	a.*?c	a\b	[]
+split	a.*?c	a\b	[a\b]
+captures	a.*?c	a\b	<none>
+is_match	a.*?c	-a-z-	false
+full_match	a.*?c	-a-z-	false
+find	a.*?c	-a-z-	<none>
+find_all	a.*?c	-a-z-	[]
+split	a.*?c	-a-z-	[-a-z-]
+captures	a.*?c	-a-z-	<none>
+is_match	a.*?c	[bracket]	true
+full_match	a.*?c	[bracket]	false
+find	a.*?c	[bracket]	<ac>
+find_all	a.*?c	[bracket]	[ac]
+split	a.*?c	[bracket]	[[br|ket]]
+captures	a.*?c	[bracket]	[ac]
+is_match	a.*?c	ab	false
+full_match	a.*?c	ab	false
+find	a.*?c	ab	<none>
+find_all	a.*?c	ab	[]
+split	a.*?c	ab	[ab]
+captures	a.*?c	ab	<none>
+is_match	a.*?c	b	false
+full_match	a.*?c	b	false
+find	a.*?c	b	<none>
+find_all	a.*?c	b	[]
+split	a.*?c	b	[b]
+captures	a.*?c	b	<none>
+is_match	a.*?c	]	false
+full_match	a.*?c	]	false
+find	a.*?c	]	<none>
+find_all	a.*?c	]	[]
+split	a.*?c	]	[]]
+captures	a.*?c	]	<none>
+is_match	a.*?c	a]b	false
+full_match	a.*?c	a]b	false
+find	a.*?c	a]b	<none>
+find_all	a.*?c	a]b	[]
+split	a.*?c	a]b	[a]b]
+captures	a.*?c	a]b	<none>
+is_match	a+b		false
+full_match	a+b		false
+find	a+b		<none>
+find_all	a+b		[]
+split	a+b		[]
+captures	a+b		<none>
+is_match	a+b	a	false
+full_match	a+b	a	false
+find	a+b	a	<none>
+find_all	a+b	a	[]
+split	a+b	a	[a]
+captures	a+b	a	<none>
+is_match	a+b	abc	true
+full_match	a+b	abc	false
+find	a+b	abc	<ab>
+find_all	a+b	abc	[ab]
+split	a+b	abc	[|c]
+captures	a+b	abc	[ab]
+is_match	a+b	aXc	false
+full_match	a+b	aXc	false
+find	a+b	aXc	<none>
+find_all	a+b	aXc	[]
+split	a+b	aXc	[aXc]
+captures	a+b	aXc	<none>
+is_match	a+b	aaabccc	true
+full_match	a+b	aaabccc	false
+find	a+b	aaabccc	<aaab>
+find_all	a+b	aaabccc	[aaab]
+split	a+b	aaabccc	[|ccc]
+captures	a+b	aaabccc	[aaab]
+is_match	a+b	xyz	false
+full_match	a+b	xyz	false
+find	a+b	xyz	<none>
+find_all	a+b	xyz	[]
+split	a+b	xyz	[xyz]
+captures	a+b	xyz	<none>
+is_match	a+b	word boundary word	false
+full_match	a+b	word boundary word	false
+find	a+b	word boundary word	<none>
+find_all	a+b	word boundary word	[]
+split	a+b	word boundary word	[word boundary word]
+captures	a+b	word boundary word	<none>
+is_match	a+b	123-4567	false
+full_match	a+b	123-4567	false
+find	a+b	123-4567	<none>
+find_all	a+b	123-4567	[]
+split	a+b	123-4567	[123-4567]
+captures	a+b	123-4567	<none>
+is_match	a+b	3.14 and 2.718	false
+full_match	a+b	3.14 and 2.718	false
+find	a+b	3.14 and 2.718	<none>
+find_all	a+b	3.14 and 2.718	[]
+split	a+b	3.14 and 2.718	[3.14 and 2.718]
+captures	a+b	3.14 and 2.718	<none>
+is_match	a+b	  spaced  	false
+full_match	a+b	  spaced  	false
+find	a+b	  spaced  	<none>
+find_all	a+b	  spaced  	[]
+split	a+b	  spaced  	[  spaced  ]
+captures	a+b	  spaced  	<none>
+is_match	a+b	AaBbCc	false
+full_match	a+b	AaBbCc	false
+find	a+b	AaBbCc	<none>
+find_all	a+b	AaBbCc	[]
+split	a+b	AaBbCc	[AaBbCc]
+captures	a+b	AaBbCc	<none>
+is_match	a+b	foobaz barbaz	false
+full_match	a+b	foobaz barbaz	false
+find	a+b	foobaz barbaz	<none>
+find_all	a+b	foobaz barbaz	[]
+split	a+b	foobaz barbaz	[foobaz barbaz]
+captures	a+b	foobaz barbaz	<none>
+is_match	a+b	xx	false
+full_match	a+b	xx	false
+find	a+b	xx	<none>
+find_all	a+b	xx	[]
+split	a+b	xx	[xx]
+captures	a+b	xx	<none>
+is_match	a+b	xxx	false
+full_match	a+b	xxx	false
+find	a+b	xxx	<none>
+find_all	a+b	xxx	[]
+split	a+b	xxx	[xxx]
+captures	a+b	xxx	<none>
+is_match	a+b	xxxx	false
+full_match	a+b	xxxx	false
+find	a+b	xxxx	<none>
+find_all	a+b	xxxx	[]
+split	a+b	xxxx	[xxxx]
+captures	a+b	xxxx	<none>
+is_match	a+b	a.b	false
+full_match	a+b	a.b	false
+find	a+b	a.b	<none>
+find_all	a+b	a.b	[]
+split	a+b	a.b	[a.b]
+captures	a+b	a.b	<none>
+is_match	a+b	a\b	false
+full_match	a+b	a\b	false
+find	a+b	a\b	<none>
+find_all	a+b	a\b	[]
+split	a+b	a\b	[a\b]
+captures	a+b	a\b	<none>
+is_match	a+b	-a-z-	false
+full_match	a+b	-a-z-	false
+find	a+b	-a-z-	<none>
+find_all	a+b	-a-z-	[]
+split	a+b	-a-z-	[-a-z-]
+captures	a+b	-a-z-	<none>
+is_match	a+b	[bracket]	false
+full_match	a+b	[bracket]	false
+find	a+b	[bracket]	<none>
+find_all	a+b	[bracket]	[]
+split	a+b	[bracket]	[[bracket]]
+captures	a+b	[bracket]	<none>
+is_match	a+b	ab	true
+full_match	a+b	ab	true
+find	a+b	ab	<ab>
+find_all	a+b	ab	[ab]
+split	a+b	ab	[|]
+captures	a+b	ab	[ab]
+is_match	a+b	b	false
+full_match	a+b	b	false
+find	a+b	b	<none>
+find_all	a+b	b	[]
+split	a+b	b	[b]
+captures	a+b	b	<none>
+is_match	a+b	]	false
+full_match	a+b	]	false
+find	a+b	]	<none>
+find_all	a+b	]	[]
+split	a+b	]	[]]
+captures	a+b	]	<none>
+is_match	a+b	a]b	false
+full_match	a+b	a]b	false
+find	a+b	a]b	<none>
+find_all	a+b	a]b	[]
+split	a+b	a]b	[a]b]
+captures	a+b	a]b	<none>
+is_match	a?b		false
+full_match	a?b		false
+find	a?b		<none>
+find_all	a?b		[]
+split	a?b		[]
+captures	a?b		<none>
+is_match	a?b	a	false
+full_match	a?b	a	false
+find	a?b	a	<none>
+find_all	a?b	a	[]
+split	a?b	a	[a]
+captures	a?b	a	<none>
+is_match	a?b	abc	true
+full_match	a?b	abc	false
+find	a?b	abc	<ab>
+find_all	a?b	abc	[ab]
+split	a?b	abc	[|c]
+captures	a?b	abc	[ab]
+is_match	a?b	aXc	false
+full_match	a?b	aXc	false
+find	a?b	aXc	<none>
+find_all	a?b	aXc	[]
+split	a?b	aXc	[aXc]
+captures	a?b	aXc	<none>
+is_match	a?b	aaabccc	true
+full_match	a?b	aaabccc	false
+find	a?b	aaabccc	<ab>
+find_all	a?b	aaabccc	[ab]
+split	a?b	aaabccc	[aa|ccc]
+captures	a?b	aaabccc	[ab]
+is_match	a?b	xyz	false
+full_match	a?b	xyz	false
+find	a?b	xyz	<none>
+find_all	a?b	xyz	[]
+split	a?b	xyz	[xyz]
+captures	a?b	xyz	<none>
+is_match	a?b	word boundary word	true
+full_match	a?b	word boundary word	false
+find	a?b	word boundary word	<b>
+find_all	a?b	word boundary word	[b]
+split	a?b	word boundary word	[word |oundary word]
+captures	a?b	word boundary word	[b]
+is_match	a?b	123-4567	false
+full_match	a?b	123-4567	false
+find	a?b	123-4567	<none>
+find_all	a?b	123-4567	[]
+split	a?b	123-4567	[123-4567]
+captures	a?b	123-4567	<none>
+is_match	a?b	3.14 and 2.718	false
+full_match	a?b	3.14 and 2.718	false
+find	a?b	3.14 and 2.718	<none>
+find_all	a?b	3.14 and 2.718	[]
+split	a?b	3.14 and 2.718	[3.14 and 2.718]
+captures	a?b	3.14 and 2.718	<none>
+is_match	a?b	  spaced  	false
+full_match	a?b	  spaced  	false
+find	a?b	  spaced  	<none>
+find_all	a?b	  spaced  	[]
+split	a?b	  spaced  	[  spaced  ]
+captures	a?b	  spaced  	<none>
+is_match	a?b	AaBbCc	true
+full_match	a?b	AaBbCc	false
+find	a?b	AaBbCc	<b>
+find_all	a?b	AaBbCc	[b]
+split	a?b	AaBbCc	[AaB|Cc]
+captures	a?b	AaBbCc	[b]
+is_match	a?b	foobaz barbaz	true
+full_match	a?b	foobaz barbaz	false
+find	a?b	foobaz barbaz	<b>
+find_all	a?b	foobaz barbaz	[b|b|b]
+split	a?b	foobaz barbaz	[foo|az |ar|az]
+captures	a?b	foobaz barbaz	[b]
+is_match	a?b	xx	false
+full_match	a?b	xx	false
+find	a?b	xx	<none>
+find_all	a?b	xx	[]
+split	a?b	xx	[xx]
+captures	a?b	xx	<none>
+is_match	a?b	xxx	false
+full_match	a?b	xxx	false
+find	a?b	xxx	<none>
+find_all	a?b	xxx	[]
+split	a?b	xxx	[xxx]
+captures	a?b	xxx	<none>
+is_match	a?b	xxxx	false
+full_match	a?b	xxxx	false
+find	a?b	xxxx	<none>
+find_all	a?b	xxxx	[]
+split	a?b	xxxx	[xxxx]
+captures	a?b	xxxx	<none>
+is_match	a?b	a.b	true
+full_match	a?b	a.b	false
+find	a?b	a.b	<b>
+find_all	a?b	a.b	[b]
+split	a?b	a.b	[a.|]
+captures	a?b	a.b	[b]
+is_match	a?b	a\b	true
+full_match	a?b	a\b	false
+find	a?b	a\b	<b>
+find_all	a?b	a\b	[b]
+split	a?b	a\b	[a\|]
+captures	a?b	a\b	[b]
+is_match	a?b	-a-z-	false
+full_match	a?b	-a-z-	false
+find	a?b	-a-z-	<none>
+find_all	a?b	-a-z-	[]
+split	a?b	-a-z-	[-a-z-]
+captures	a?b	-a-z-	<none>
+is_match	a?b	[bracket]	true
+full_match	a?b	[bracket]	false
+find	a?b	[bracket]	<b>
+find_all	a?b	[bracket]	[b]
+split	a?b	[bracket]	[[|racket]]
+captures	a?b	[bracket]	[b]
+is_match	a?b	ab	true
+full_match	a?b	ab	true
+find	a?b	ab	<ab>
+find_all	a?b	ab	[ab]
+split	a?b	ab	[|]
+captures	a?b	ab	[ab]
+is_match	a?b	b	true
+full_match	a?b	b	true
+find	a?b	b	<b>
+find_all	a?b	b	[b]
+split	a?b	b	[|]
+captures	a?b	b	[b]
+is_match	a?b	]	false
+full_match	a?b	]	false
+find	a?b	]	<none>
+find_all	a?b	]	[]
+split	a?b	]	[]]
+captures	a?b	]	<none>
+is_match	a?b	a]b	true
+full_match	a?b	a]b	false
+find	a?b	a]b	<b>
+find_all	a?b	a]b	[b]
+split	a?b	a]b	[a]|]
+captures	a?b	a]b	[b]
+is_match	[abc]+		false
+full_match	[abc]+		false
+find	[abc]+		<none>
+find_all	[abc]+		[]
+split	[abc]+		[]
+captures	[abc]+		<none>
+is_match	[abc]+	a	true
+full_match	[abc]+	a	true
+find	[abc]+	a	<a>
+find_all	[abc]+	a	[a]
+split	[abc]+	a	[|]
+captures	[abc]+	a	[a]
+is_match	[abc]+	abc	true
+full_match	[abc]+	abc	true
+find	[abc]+	abc	<abc>
+find_all	[abc]+	abc	[abc]
+split	[abc]+	abc	[|]
+captures	[abc]+	abc	[abc]
+is_match	[abc]+	aXc	true
+full_match	[abc]+	aXc	false
+find	[abc]+	aXc	<a>
+find_all	[abc]+	aXc	[a|c]
+split	[abc]+	aXc	[|X|]
+captures	[abc]+	aXc	[a]
+is_match	[abc]+	aaabccc	true
+full_match	[abc]+	aaabccc	true
+find	[abc]+	aaabccc	<aaabccc>
+find_all	[abc]+	aaabccc	[aaabccc]
+split	[abc]+	aaabccc	[|]
+captures	[abc]+	aaabccc	[aaabccc]
+is_match	[abc]+	xyz	false
+full_match	[abc]+	xyz	false
+find	[abc]+	xyz	<none>
+find_all	[abc]+	xyz	[]
+split	[abc]+	xyz	[xyz]
+captures	[abc]+	xyz	<none>
+is_match	[abc]+	word boundary word	true
+full_match	[abc]+	word boundary word	false
+find	[abc]+	word boundary word	<b>
+find_all	[abc]+	word boundary word	[b|a]
+split	[abc]+	word boundary word	[word |ound|ry word]
+captures	[abc]+	word boundary word	[b]
+is_match	[abc]+	123-4567	false
+full_match	[abc]+	123-4567	false
+find	[abc]+	123-4567	<none>
+find_all	[abc]+	123-4567	[]
+split	[abc]+	123-4567	[123-4567]
+captures	[abc]+	123-4567	<none>
+is_match	[abc]+	3.14 and 2.718	true
+full_match	[abc]+	3.14 and 2.718	false
+find	[abc]+	3.14 and 2.718	<a>
+find_all	[abc]+	3.14 and 2.718	[a]
+split	[abc]+	3.14 and 2.718	[3.14 |nd 2.718]
+captures	[abc]+	3.14 and 2.718	[a]
+is_match	[abc]+	  spaced  	true
+full_match	[abc]+	  spaced  	false
+find	[abc]+	  spaced  	<ac>
+find_all	[abc]+	  spaced  	[ac]
+split	[abc]+	  spaced  	[  sp|ed  ]
+captures	[abc]+	  spaced  	[ac]
+is_match	[abc]+	AaBbCc	true
+full_match	[abc]+	AaBbCc	false
+find	[abc]+	AaBbCc	<a>
+find_all	[abc]+	AaBbCc	[a|b|c]
+split	[abc]+	AaBbCc	[A|B|C|]
+captures	[abc]+	AaBbCc	[a]
+is_match	[abc]+	foobaz barbaz	true
+full_match	[abc]+	foobaz barbaz	false
+find	[abc]+	foobaz barbaz	<ba>
+find_all	[abc]+	foobaz barbaz	[ba|ba|ba]
+split	[abc]+	foobaz barbaz	[foo|z |r|z]
+captures	[abc]+	foobaz barbaz	[ba]
+is_match	[abc]+	xx	false
+full_match	[abc]+	xx	false
+find	[abc]+	xx	<none>
+find_all	[abc]+	xx	[]
+split	[abc]+	xx	[xx]
+captures	[abc]+	xx	<none>
+is_match	[abc]+	xxx	false
+full_match	[abc]+	xxx	false
+find	[abc]+	xxx	<none>
+find_all	[abc]+	xxx	[]
+split	[abc]+	xxx	[xxx]
+captures	[abc]+	xxx	<none>
+is_match	[abc]+	xxxx	false
+full_match	[abc]+	xxxx	false
+find	[abc]+	xxxx	<none>
+find_all	[abc]+	xxxx	[]
+split	[abc]+	xxxx	[xxxx]
+captures	[abc]+	xxxx	<none>
+is_match	[abc]+	a.b	true
+full_match	[abc]+	a.b	false
+find	[abc]+	a.b	<a>
+find_all	[abc]+	a.b	[a|b]
+split	[abc]+	a.b	[|.|]
+captures	[abc]+	a.b	[a]
+is_match	[abc]+	a\b	true
+full_match	[abc]+	a\b	false
+find	[abc]+	a\b	<a>
+find_all	[abc]+	a\b	[a|b]
+split	[abc]+	a\b	[|\|]
+captures	[abc]+	a\b	[a]
+is_match	[abc]+	-a-z-	true
+full_match	[abc]+	-a-z-	false
+find	[abc]+	-a-z-	<a>
+find_all	[abc]+	-a-z-	[a]
+split	[abc]+	-a-z-	[-|-z-]
+captures	[abc]+	-a-z-	[a]
+is_match	[abc]+	[bracket]	true
+full_match	[abc]+	[bracket]	false
+find	[abc]+	[bracket]	<b>
+find_all	[abc]+	[bracket]	[b|ac]
+split	[abc]+	[bracket]	[[|r|ket]]
+captures	[abc]+	[bracket]	[b]
+is_match	[abc]+	ab	true
+full_match	[abc]+	ab	true
+find	[abc]+	ab	<ab>
+find_all	[abc]+	ab	[ab]
+split	[abc]+	ab	[|]
+captures	[abc]+	ab	[ab]
+is_match	[abc]+	b	true
+full_match	[abc]+	b	true
+find	[abc]+	b	<b>
+find_all	[abc]+	b	[b]
+split	[abc]+	b	[|]
+captures	[abc]+	b	[b]
+is_match	[abc]+	]	false
+full_match	[abc]+	]	false
+find	[abc]+	]	<none>
+find_all	[abc]+	]	[]
+split	[abc]+	]	[]]
+captures	[abc]+	]	<none>
+is_match	[abc]+	a]b	true
+full_match	[abc]+	a]b	false
+find	[abc]+	a]b	<a>
+find_all	[abc]+	a]b	[a|b]
+split	[abc]+	a]b	[|]|]
+captures	[abc]+	a]b	[a]
+is_match	[^abc]+		false
+full_match	[^abc]+		false
+find	[^abc]+		<none>
+find_all	[^abc]+		[]
+split	[^abc]+		[]
+captures	[^abc]+		<none>
+is_match	[^abc]+	a	false
+full_match	[^abc]+	a	false
+find	[^abc]+	a	<none>
+find_all	[^abc]+	a	[]
+split	[^abc]+	a	[a]
+captures	[^abc]+	a	<none>
+is_match	[^abc]+	abc	false
+full_match	[^abc]+	abc	false
+find	[^abc]+	abc	<none>
+find_all	[^abc]+	abc	[]
+split	[^abc]+	abc	[abc]
+captures	[^abc]+	abc	<none>
+is_match	[^abc]+	aXc	true
+full_match	[^abc]+	aXc	false
+find	[^abc]+	aXc	<X>
+find_all	[^abc]+	aXc	[X]
+split	[^abc]+	aXc	[a|c]
+captures	[^abc]+	aXc	[X]
+is_match	[^abc]+	aaabccc	false
+full_match	[^abc]+	aaabccc	false
+find	[^abc]+	aaabccc	<none>
+find_all	[^abc]+	aaabccc	[]
+split	[^abc]+	aaabccc	[aaabccc]
+captures	[^abc]+	aaabccc	<none>
+is_match	[^abc]+	xyz	true
+full_match	[^abc]+	xyz	true
+find	[^abc]+	xyz	<xyz>
+find_all	[^abc]+	xyz	[xyz]
+split	[^abc]+	xyz	[|]
+captures	[^abc]+	xyz	[xyz]
+is_match	[^abc]+	word boundary word	true
+full_match	[^abc]+	word boundary word	false
+find	[^abc]+	word boundary word	<word >
+find_all	[^abc]+	word boundary word	[word |ound|ry word]
+split	[^abc]+	word boundary word	[|b|a|]
+captures	[^abc]+	word boundary word	[word ]
+is_match	[^abc]+	123-4567	true
+full_match	[^abc]+	123-4567	true
+find	[^abc]+	123-4567	<123-4567>
+find_all	[^abc]+	123-4567	[123-4567]
+split	[^abc]+	123-4567	[|]
+captures	[^abc]+	123-4567	[123-4567]
+is_match	[^abc]+	3.14 and 2.718	true
+full_match	[^abc]+	3.14 and 2.718	false
+find	[^abc]+	3.14 and 2.718	<3.14 >
+find_all	[^abc]+	3.14 and 2.718	[3.14 |nd 2.718]
+split	[^abc]+	3.14 and 2.718	[|a|]
+captures	[^abc]+	3.14 and 2.718	[3.14 ]
+is_match	[^abc]+	  spaced  	true
+full_match	[^abc]+	  spaced  	false
+find	[^abc]+	  spaced  	<  sp>
+find_all	[^abc]+	  spaced  	[  sp|ed  ]
+split	[^abc]+	  spaced  	[|ac|]
+captures	[^abc]+	  spaced  	[  sp]
+is_match	[^abc]+	AaBbCc	true
+full_match	[^abc]+	AaBbCc	false
+find	[^abc]+	AaBbCc	<A>
+find_all	[^abc]+	AaBbCc	[A|B|C]
+split	[^abc]+	AaBbCc	[|a|b|c]
+captures	[^abc]+	AaBbCc	[A]
+is_match	[^abc]+	foobaz barbaz	true
+full_match	[^abc]+	foobaz barbaz	false
+find	[^abc]+	foobaz barbaz	<foo>
+find_all	[^abc]+	foobaz barbaz	[foo|z |r|z]
+split	[^abc]+	foobaz barbaz	[|ba|ba|ba|]
+captures	[^abc]+	foobaz barbaz	[foo]
+is_match	[^abc]+	xx	true
+full_match	[^abc]+	xx	true
+find	[^abc]+	xx	<xx>
+find_all	[^abc]+	xx	[xx]
+split	[^abc]+	xx	[|]
+captures	[^abc]+	xx	[xx]
+is_match	[^abc]+	xxx	true
+full_match	[^abc]+	xxx	true
+find	[^abc]+	xxx	<xxx>
+find_all	[^abc]+	xxx	[xxx]
+split	[^abc]+	xxx	[|]
+captures	[^abc]+	xxx	[xxx]
+is_match	[^abc]+	xxxx	true
+full_match	[^abc]+	xxxx	true
+find	[^abc]+	xxxx	<xxxx>
+find_all	[^abc]+	xxxx	[xxxx]
+split	[^abc]+	xxxx	[|]
+captures	[^abc]+	xxxx	[xxxx]
+is_match	[^abc]+	a.b	true
+full_match	[^abc]+	a.b	false
+find	[^abc]+	a.b	<.>
+find_all	[^abc]+	a.b	[.]
+split	[^abc]+	a.b	[a|b]
+captures	[^abc]+	a.b	[.]
+is_match	[^abc]+	a\b	true
+full_match	[^abc]+	a\b	false
+find	[^abc]+	a\b	<\>
+find_all	[^abc]+	a\b	[\]
+split	[^abc]+	a\b	[a|b]
+captures	[^abc]+	a\b	[\]
+is_match	[^abc]+	-a-z-	true
+full_match	[^abc]+	-a-z-	false
+find	[^abc]+	-a-z-	<->
+find_all	[^abc]+	-a-z-	[-|-z-]
+split	[^abc]+	-a-z-	[|a|]
+captures	[^abc]+	-a-z-	[-]
+is_match	[^abc]+	[bracket]	true
+full_match	[^abc]+	[bracket]	false
+find	[^abc]+	[bracket]	<[>
+find_all	[^abc]+	[bracket]	[[|r|ket]]
+split	[^abc]+	[bracket]	[|b|ac|]
+captures	[^abc]+	[bracket]	[[]
+is_match	[^abc]+	ab	false
+full_match	[^abc]+	ab	false
+find	[^abc]+	ab	<none>
+find_all	[^abc]+	ab	[]
+split	[^abc]+	ab	[ab]
+captures	[^abc]+	ab	<none>
+is_match	[^abc]+	b	false
+full_match	[^abc]+	b	false
+find	[^abc]+	b	<none>
+find_all	[^abc]+	b	[]
+split	[^abc]+	b	[b]
+captures	[^abc]+	b	<none>
+is_match	[^abc]+	]	true
+full_match	[^abc]+	]	true
+find	[^abc]+	]	<]>
+find_all	[^abc]+	]	[]]
+split	[^abc]+	]	[|]
+captures	[^abc]+	]	[]]
+is_match	[^abc]+	a]b	true
+full_match	[^abc]+	a]b	false
+find	[^abc]+	a]b	<]>
+find_all	[^abc]+	a]b	[]]
+split	[^abc]+	a]b	[a|b]
+captures	[^abc]+	a]b	[]]
+is_match	\d+		false
+full_match	\d+		false
+find	\d+		<none>
+find_all	\d+		[]
+split	\d+		[]
+captures	\d+		<none>
+is_match	\d+	a	false
+full_match	\d+	a	false
+find	\d+	a	<none>
+find_all	\d+	a	[]
+split	\d+	a	[a]
+captures	\d+	a	<none>
+is_match	\d+	abc	false
+full_match	\d+	abc	false
+find	\d+	abc	<none>
+find_all	\d+	abc	[]
+split	\d+	abc	[abc]
+captures	\d+	abc	<none>
+is_match	\d+	aXc	false
+full_match	\d+	aXc	false
+find	\d+	aXc	<none>
+find_all	\d+	aXc	[]
+split	\d+	aXc	[aXc]
+captures	\d+	aXc	<none>
+is_match	\d+	aaabccc	false
+full_match	\d+	aaabccc	false
+find	\d+	aaabccc	<none>
+find_all	\d+	aaabccc	[]
+split	\d+	aaabccc	[aaabccc]
+captures	\d+	aaabccc	<none>
+is_match	\d+	xyz	false
+full_match	\d+	xyz	false
+find	\d+	xyz	<none>
+find_all	\d+	xyz	[]
+split	\d+	xyz	[xyz]
+captures	\d+	xyz	<none>
+is_match	\d+	word boundary word	false
+full_match	\d+	word boundary word	false
+find	\d+	word boundary word	<none>
+find_all	\d+	word boundary word	[]
+split	\d+	word boundary word	[word boundary word]
+captures	\d+	word boundary word	<none>
+is_match	\d+	123-4567	true
+full_match	\d+	123-4567	false
+find	\d+	123-4567	<123>
+find_all	\d+	123-4567	[123|4567]
+split	\d+	123-4567	[|-|]
+captures	\d+	123-4567	[123]
+is_match	\d+	3.14 and 2.718	true
+full_match	\d+	3.14 and 2.718	false
+find	\d+	3.14 and 2.718	<3>
+find_all	\d+	3.14 and 2.718	[3|14|2|718]
+split	\d+	3.14 and 2.718	[|.| and |.|]
+captures	\d+	3.14 and 2.718	[3]
+is_match	\d+	  spaced  	false
+full_match	\d+	  spaced  	false
+find	\d+	  spaced  	<none>
+find_all	\d+	  spaced  	[]
+split	\d+	  spaced  	[  spaced  ]
+captures	\d+	  spaced  	<none>
+is_match	\d+	AaBbCc	false
+full_match	\d+	AaBbCc	false
+find	\d+	AaBbCc	<none>
+find_all	\d+	AaBbCc	[]
+split	\d+	AaBbCc	[AaBbCc]
+captures	\d+	AaBbCc	<none>
+is_match	\d+	foobaz barbaz	false
+full_match	\d+	foobaz barbaz	false
+find	\d+	foobaz barbaz	<none>
+find_all	\d+	foobaz barbaz	[]
+split	\d+	foobaz barbaz	[foobaz barbaz]
+captures	\d+	foobaz barbaz	<none>
+is_match	\d+	xx	false
+full_match	\d+	xx	false
+find	\d+	xx	<none>
+find_all	\d+	xx	[]
+split	\d+	xx	[xx]
+captures	\d+	xx	<none>
+is_match	\d+	xxx	false
+full_match	\d+	xxx	false
+find	\d+	xxx	<none>
+find_all	\d+	xxx	[]
+split	\d+	xxx	[xxx]
+captures	\d+	xxx	<none>
+is_match	\d+	xxxx	false
+full_match	\d+	xxxx	false
+find	\d+	xxxx	<none>
+find_all	\d+	xxxx	[]
+split	\d+	xxxx	[xxxx]
+captures	\d+	xxxx	<none>
+is_match	\d+	a.b	false
+full_match	\d+	a.b	false
+find	\d+	a.b	<none>
+find_all	\d+	a.b	[]
+split	\d+	a.b	[a.b]
+captures	\d+	a.b	<none>
+is_match	\d+	a\b	false
+full_match	\d+	a\b	false
+find	\d+	a\b	<none>
+find_all	\d+	a\b	[]
+split	\d+	a\b	[a\b]
+captures	\d+	a\b	<none>
+is_match	\d+	-a-z-	false
+full_match	\d+	-a-z-	false
+find	\d+	-a-z-	<none>
+find_all	\d+	-a-z-	[]
+split	\d+	-a-z-	[-a-z-]
+captures	\d+	-a-z-	<none>
+is_match	\d+	[bracket]	false
+full_match	\d+	[bracket]	false
+find	\d+	[bracket]	<none>
+find_all	\d+	[bracket]	[]
+split	\d+	[bracket]	[[bracket]]
+captures	\d+	[bracket]	<none>
+is_match	\d+	ab	false
+full_match	\d+	ab	false
+find	\d+	ab	<none>
+find_all	\d+	ab	[]
+split	\d+	ab	[ab]
+captures	\d+	ab	<none>
+is_match	\d+	b	false
+full_match	\d+	b	false
+find	\d+	b	<none>
+find_all	\d+	b	[]
+split	\d+	b	[b]
+captures	\d+	b	<none>
+is_match	\d+	]	false
+full_match	\d+	]	false
+find	\d+	]	<none>
+find_all	\d+	]	[]
+split	\d+	]	[]]
+captures	\d+	]	<none>
+is_match	\d+	a]b	false
+full_match	\d+	a]b	false
+find	\d+	a]b	<none>
+find_all	\d+	a]b	[]
+split	\d+	a]b	[a]b]
+captures	\d+	a]b	<none>
+is_match	\w+		false
+full_match	\w+		false
+find	\w+		<none>
+find_all	\w+		[]
+split	\w+		[]
+captures	\w+		<none>
+is_match	\w+	a	true
+full_match	\w+	a	true
+find	\w+	a	<a>
+find_all	\w+	a	[a]
+split	\w+	a	[|]
+captures	\w+	a	[a]
+is_match	\w+	abc	true
+full_match	\w+	abc	true
+find	\w+	abc	<abc>
+find_all	\w+	abc	[abc]
+split	\w+	abc	[|]
+captures	\w+	abc	[abc]
+is_match	\w+	aXc	true
+full_match	\w+	aXc	true
+find	\w+	aXc	<aXc>
+find_all	\w+	aXc	[aXc]
+split	\w+	aXc	[|]
+captures	\w+	aXc	[aXc]
+is_match	\w+	aaabccc	true
+full_match	\w+	aaabccc	true
+find	\w+	aaabccc	<aaabccc>
+find_all	\w+	aaabccc	[aaabccc]
+split	\w+	aaabccc	[|]
+captures	\w+	aaabccc	[aaabccc]
+is_match	\w+	xyz	true
+full_match	\w+	xyz	true
+find	\w+	xyz	<xyz>
+find_all	\w+	xyz	[xyz]
+split	\w+	xyz	[|]
+captures	\w+	xyz	[xyz]
+is_match	\w+	word boundary word	true
+full_match	\w+	word boundary word	false
+find	\w+	word boundary word	<word>
+find_all	\w+	word boundary word	[word|boundary|word]
+split	\w+	word boundary word	[| | |]
+captures	\w+	word boundary word	[word]
+is_match	\w+	123-4567	true
+full_match	\w+	123-4567	false
+find	\w+	123-4567	<123>
+find_all	\w+	123-4567	[123|4567]
+split	\w+	123-4567	[|-|]
+captures	\w+	123-4567	[123]
+is_match	\w+	3.14 and 2.718	true
+full_match	\w+	3.14 and 2.718	false
+find	\w+	3.14 and 2.718	<3>
+find_all	\w+	3.14 and 2.718	[3|14|and|2|718]
+split	\w+	3.14 and 2.718	[|.| | |.|]
+captures	\w+	3.14 and 2.718	[3]
+is_match	\w+	  spaced  	true
+full_match	\w+	  spaced  	false
+find	\w+	  spaced  	<spaced>
+find_all	\w+	  spaced  	[spaced]
+split	\w+	  spaced  	[  |  ]
+captures	\w+	  spaced  	[spaced]
+is_match	\w+	AaBbCc	true
+full_match	\w+	AaBbCc	true
+find	\w+	AaBbCc	<AaBbCc>
+find_all	\w+	AaBbCc	[AaBbCc]
+split	\w+	AaBbCc	[|]
+captures	\w+	AaBbCc	[AaBbCc]
+is_match	\w+	foobaz barbaz	true
+full_match	\w+	foobaz barbaz	false
+find	\w+	foobaz barbaz	<foobaz>
+find_all	\w+	foobaz barbaz	[foobaz|barbaz]
+split	\w+	foobaz barbaz	[| |]
+captures	\w+	foobaz barbaz	[foobaz]
+is_match	\w+	xx	true
+full_match	\w+	xx	true
+find	\w+	xx	<xx>
+find_all	\w+	xx	[xx]
+split	\w+	xx	[|]
+captures	\w+	xx	[xx]
+is_match	\w+	xxx	true
+full_match	\w+	xxx	true
+find	\w+	xxx	<xxx>
+find_all	\w+	xxx	[xxx]
+split	\w+	xxx	[|]
+captures	\w+	xxx	[xxx]
+is_match	\w+	xxxx	true
+full_match	\w+	xxxx	true
+find	\w+	xxxx	<xxxx>
+find_all	\w+	xxxx	[xxxx]
+split	\w+	xxxx	[|]
+captures	\w+	xxxx	[xxxx]
+is_match	\w+	a.b	true
+full_match	\w+	a.b	false
+find	\w+	a.b	<a>
+find_all	\w+	a.b	[a|b]
+split	\w+	a.b	[|.|]
+captures	\w+	a.b	[a]
+is_match	\w+	a\b	true
+full_match	\w+	a\b	false
+find	\w+	a\b	<a>
+find_all	\w+	a\b	[a|b]
+split	\w+	a\b	[|\|]
+captures	\w+	a\b	[a]
+is_match	\w+	-a-z-	true
+full_match	\w+	-a-z-	false
+find	\w+	-a-z-	<a>
+find_all	\w+	-a-z-	[a|z]
+split	\w+	-a-z-	[-|-|-]
+captures	\w+	-a-z-	[a]
+is_match	\w+	[bracket]	true
+full_match	\w+	[bracket]	false
+find	\w+	[bracket]	<bracket>
+find_all	\w+	[bracket]	[bracket]
+split	\w+	[bracket]	[[|]]
+captures	\w+	[bracket]	[bracket]
+is_match	\w+	ab	true
+full_match	\w+	ab	true
+find	\w+	ab	<ab>
+find_all	\w+	ab	[ab]
+split	\w+	ab	[|]
+captures	\w+	ab	[ab]
+is_match	\w+	b	true
+full_match	\w+	b	true
+find	\w+	b	<b>
+find_all	\w+	b	[b]
+split	\w+	b	[|]
+captures	\w+	b	[b]
+is_match	\w+	]	false
+full_match	\w+	]	false
+find	\w+	]	<none>
+find_all	\w+	]	[]
+split	\w+	]	[]]
+captures	\w+	]	<none>
+is_match	\w+	a]b	true
+full_match	\w+	a]b	false
+find	\w+	a]b	<a>
+find_all	\w+	a]b	[a|b]
+split	\w+	a]b	[|]|]
+captures	\w+	a]b	[a]
+is_match	\s+		false
+full_match	\s+		false
+find	\s+		<none>
+find_all	\s+		[]
+split	\s+		[]
+captures	\s+		<none>
+is_match	\s+	a	false
+full_match	\s+	a	false
+find	\s+	a	<none>
+find_all	\s+	a	[]
+split	\s+	a	[a]
+captures	\s+	a	<none>
+is_match	\s+	abc	false
+full_match	\s+	abc	false
+find	\s+	abc	<none>
+find_all	\s+	abc	[]
+split	\s+	abc	[abc]
+captures	\s+	abc	<none>
+is_match	\s+	aXc	false
+full_match	\s+	aXc	false
+find	\s+	aXc	<none>
+find_all	\s+	aXc	[]
+split	\s+	aXc	[aXc]
+captures	\s+	aXc	<none>
+is_match	\s+	aaabccc	false
+full_match	\s+	aaabccc	false
+find	\s+	aaabccc	<none>
+find_all	\s+	aaabccc	[]
+split	\s+	aaabccc	[aaabccc]
+captures	\s+	aaabccc	<none>
+is_match	\s+	xyz	false
+full_match	\s+	xyz	false
+find	\s+	xyz	<none>
+find_all	\s+	xyz	[]
+split	\s+	xyz	[xyz]
+captures	\s+	xyz	<none>
+is_match	\s+	word boundary word	true
+full_match	\s+	word boundary word	false
+find	\s+	word boundary word	< >
+find_all	\s+	word boundary word	[ | ]
+split	\s+	word boundary word	[word|boundary|word]
+captures	\s+	word boundary word	[ ]
+is_match	\s+	123-4567	false
+full_match	\s+	123-4567	false
+find	\s+	123-4567	<none>
+find_all	\s+	123-4567	[]
+split	\s+	123-4567	[123-4567]
+captures	\s+	123-4567	<none>
+is_match	\s+	3.14 and 2.718	true
+full_match	\s+	3.14 and 2.718	false
+find	\s+	3.14 and 2.718	< >
+find_all	\s+	3.14 and 2.718	[ | ]
+split	\s+	3.14 and 2.718	[3.14|and|2.718]
+captures	\s+	3.14 and 2.718	[ ]
+is_match	\s+	  spaced  	true
+full_match	\s+	  spaced  	false
+find	\s+	  spaced  	<  >
+find_all	\s+	  spaced  	[  |  ]
+split	\s+	  spaced  	[|spaced|]
+captures	\s+	  spaced  	[  ]
+is_match	\s+	AaBbCc	false
+full_match	\s+	AaBbCc	false
+find	\s+	AaBbCc	<none>
+find_all	\s+	AaBbCc	[]
+split	\s+	AaBbCc	[AaBbCc]
+captures	\s+	AaBbCc	<none>
+is_match	\s+	foobaz barbaz	true
+full_match	\s+	foobaz barbaz	false
+find	\s+	foobaz barbaz	< >
+find_all	\s+	foobaz barbaz	[ ]
+split	\s+	foobaz barbaz	[foobaz|barbaz]
+captures	\s+	foobaz barbaz	[ ]
+is_match	\s+	xx	false
+full_match	\s+	xx	false
+find	\s+	xx	<none>
+find_all	\s+	xx	[]
+split	\s+	xx	[xx]
+captures	\s+	xx	<none>
+is_match	\s+	xxx	false
+full_match	\s+	xxx	false
+find	\s+	xxx	<none>
+find_all	\s+	xxx	[]
+split	\s+	xxx	[xxx]
+captures	\s+	xxx	<none>
+is_match	\s+	xxxx	false
+full_match	\s+	xxxx	false
+find	\s+	xxxx	<none>
+find_all	\s+	xxxx	[]
+split	\s+	xxxx	[xxxx]
+captures	\s+	xxxx	<none>
+is_match	\s+	a.b	false
+full_match	\s+	a.b	false
+find	\s+	a.b	<none>
+find_all	\s+	a.b	[]
+split	\s+	a.b	[a.b]
+captures	\s+	a.b	<none>
+is_match	\s+	a\b	false
+full_match	\s+	a\b	false
+find	\s+	a\b	<none>
+find_all	\s+	a\b	[]
+split	\s+	a\b	[a\b]
+captures	\s+	a\b	<none>
+is_match	\s+	-a-z-	false
+full_match	\s+	-a-z-	false
+find	\s+	-a-z-	<none>
+find_all	\s+	-a-z-	[]
+split	\s+	-a-z-	[-a-z-]
+captures	\s+	-a-z-	<none>
+is_match	\s+	[bracket]	false
+full_match	\s+	[bracket]	false
+find	\s+	[bracket]	<none>
+find_all	\s+	[bracket]	[]
+split	\s+	[bracket]	[[bracket]]
+captures	\s+	[bracket]	<none>
+is_match	\s+	ab	false
+full_match	\s+	ab	false
+find	\s+	ab	<none>
+find_all	\s+	ab	[]
+split	\s+	ab	[ab]
+captures	\s+	ab	<none>
+is_match	\s+	b	false
+full_match	\s+	b	false
+find	\s+	b	<none>
+find_all	\s+	b	[]
+split	\s+	b	[b]
+captures	\s+	b	<none>
+is_match	\s+	]	false
+full_match	\s+	]	false
+find	\s+	]	<none>
+find_all	\s+	]	[]
+split	\s+	]	[]]
+captures	\s+	]	<none>
+is_match	\s+	a]b	false
+full_match	\s+	a]b	false
+find	\s+	a]b	<none>
+find_all	\s+	a]b	[]
+split	\s+	a]b	[a]b]
+captures	\s+	a]b	<none>
+is_match	^abc		false
+full_match	^abc		false
+find	^abc		<none>
+find_all	^abc		[]
+split	^abc		[]
+captures	^abc		<none>
+is_match	^abc	a	false
+full_match	^abc	a	false
+find	^abc	a	<none>
+find_all	^abc	a	[]
+split	^abc	a	[a]
+captures	^abc	a	<none>
+is_match	^abc	abc	true
+full_match	^abc	abc	true
+find	^abc	abc	<abc>
+find_all	^abc	abc	[abc]
+split	^abc	abc	[|]
+captures	^abc	abc	[abc]
+is_match	^abc	aXc	false
+full_match	^abc	aXc	false
+find	^abc	aXc	<none>
+find_all	^abc	aXc	[]
+split	^abc	aXc	[aXc]
+captures	^abc	aXc	<none>
+is_match	^abc	aaabccc	false
+full_match	^abc	aaabccc	false
+find	^abc	aaabccc	<none>
+find_all	^abc	aaabccc	[]
+split	^abc	aaabccc	[aaabccc]
+captures	^abc	aaabccc	<none>
+is_match	^abc	xyz	false
+full_match	^abc	xyz	false
+find	^abc	xyz	<none>
+find_all	^abc	xyz	[]
+split	^abc	xyz	[xyz]
+captures	^abc	xyz	<none>
+is_match	^abc	word boundary word	false
+full_match	^abc	word boundary word	false
+find	^abc	word boundary word	<none>
+find_all	^abc	word boundary word	[]
+split	^abc	word boundary word	[word boundary word]
+captures	^abc	word boundary word	<none>
+is_match	^abc	123-4567	false
+full_match	^abc	123-4567	false
+find	^abc	123-4567	<none>
+find_all	^abc	123-4567	[]
+split	^abc	123-4567	[123-4567]
+captures	^abc	123-4567	<none>
+is_match	^abc	3.14 and 2.718	false
+full_match	^abc	3.14 and 2.718	false
+find	^abc	3.14 and 2.718	<none>
+find_all	^abc	3.14 and 2.718	[]
+split	^abc	3.14 and 2.718	[3.14 and 2.718]
+captures	^abc	3.14 and 2.718	<none>
+is_match	^abc	  spaced  	false
+full_match	^abc	  spaced  	false
+find	^abc	  spaced  	<none>
+find_all	^abc	  spaced  	[]
+split	^abc	  spaced  	[  spaced  ]
+captures	^abc	  spaced  	<none>
+is_match	^abc	AaBbCc	false
+full_match	^abc	AaBbCc	false
+find	^abc	AaBbCc	<none>
+find_all	^abc	AaBbCc	[]
+split	^abc	AaBbCc	[AaBbCc]
+captures	^abc	AaBbCc	<none>
+is_match	^abc	foobaz barbaz	false
+full_match	^abc	foobaz barbaz	false
+find	^abc	foobaz barbaz	<none>
+find_all	^abc	foobaz barbaz	[]
+split	^abc	foobaz barbaz	[foobaz barbaz]
+captures	^abc	foobaz barbaz	<none>
+is_match	^abc	xx	false
+full_match	^abc	xx	false
+find	^abc	xx	<none>
+find_all	^abc	xx	[]
+split	^abc	xx	[xx]
+captures	^abc	xx	<none>
+is_match	^abc	xxx	false
+full_match	^abc	xxx	false
+find	^abc	xxx	<none>
+find_all	^abc	xxx	[]
+split	^abc	xxx	[xxx]
+captures	^abc	xxx	<none>
+is_match	^abc	xxxx	false
+full_match	^abc	xxxx	false
+find	^abc	xxxx	<none>
+find_all	^abc	xxxx	[]
+split	^abc	xxxx	[xxxx]
+captures	^abc	xxxx	<none>
+is_match	^abc	a.b	false
+full_match	^abc	a.b	false
+find	^abc	a.b	<none>
+find_all	^abc	a.b	[]
+split	^abc	a.b	[a.b]
+captures	^abc	a.b	<none>
+is_match	^abc	a\b	false
+full_match	^abc	a\b	false
+find	^abc	a\b	<none>
+find_all	^abc	a\b	[]
+split	^abc	a\b	[a\b]
+captures	^abc	a\b	<none>
+is_match	^abc	-a-z-	false
+full_match	^abc	-a-z-	false
+find	^abc	-a-z-	<none>
+find_all	^abc	-a-z-	[]
+split	^abc	-a-z-	[-a-z-]
+captures	^abc	-a-z-	<none>
+is_match	^abc	[bracket]	false
+full_match	^abc	[bracket]	false
+find	^abc	[bracket]	<none>
+find_all	^abc	[bracket]	[]
+split	^abc	[bracket]	[[bracket]]
+captures	^abc	[bracket]	<none>
+is_match	^abc	ab	false
+full_match	^abc	ab	false
+find	^abc	ab	<none>
+find_all	^abc	ab	[]
+split	^abc	ab	[ab]
+captures	^abc	ab	<none>
+is_match	^abc	b	false
+full_match	^abc	b	false
+find	^abc	b	<none>
+find_all	^abc	b	[]
+split	^abc	b	[b]
+captures	^abc	b	<none>
+is_match	^abc	]	false
+full_match	^abc	]	false
+find	^abc	]	<none>
+find_all	^abc	]	[]
+split	^abc	]	[]]
+captures	^abc	]	<none>
+is_match	^abc	a]b	false
+full_match	^abc	a]b	false
+find	^abc	a]b	<none>
+find_all	^abc	a]b	[]
+split	^abc	a]b	[a]b]
+captures	^abc	a]b	<none>
+is_match	abc$		false
+full_match	abc$		false
+find	abc$		<none>
+find_all	abc$		[]
+split	abc$		[]
+captures	abc$		<none>
+is_match	abc$	a	false
+full_match	abc$	a	false
+find	abc$	a	<none>
+find_all	abc$	a	[]
+split	abc$	a	[a]
+captures	abc$	a	<none>
+is_match	abc$	abc	true
+full_match	abc$	abc	true
+find	abc$	abc	<abc>
+find_all	abc$	abc	[abc]
+split	abc$	abc	[|]
+captures	abc$	abc	[abc]
+is_match	abc$	aXc	false
+full_match	abc$	aXc	false
+find	abc$	aXc	<none>
+find_all	abc$	aXc	[]
+split	abc$	aXc	[aXc]
+captures	abc$	aXc	<none>
+is_match	abc$	aaabccc	false
+full_match	abc$	aaabccc	false
+find	abc$	aaabccc	<none>
+find_all	abc$	aaabccc	[]
+split	abc$	aaabccc	[aaabccc]
+captures	abc$	aaabccc	<none>
+is_match	abc$	xyz	false
+full_match	abc$	xyz	false
+find	abc$	xyz	<none>
+find_all	abc$	xyz	[]
+split	abc$	xyz	[xyz]
+captures	abc$	xyz	<none>
+is_match	abc$	word boundary word	false
+full_match	abc$	word boundary word	false
+find	abc$	word boundary word	<none>
+find_all	abc$	word boundary word	[]
+split	abc$	word boundary word	[word boundary word]
+captures	abc$	word boundary word	<none>
+is_match	abc$	123-4567	false
+full_match	abc$	123-4567	false
+find	abc$	123-4567	<none>
+find_all	abc$	123-4567	[]
+split	abc$	123-4567	[123-4567]
+captures	abc$	123-4567	<none>
+is_match	abc$	3.14 and 2.718	false
+full_match	abc$	3.14 and 2.718	false
+find	abc$	3.14 and 2.718	<none>
+find_all	abc$	3.14 and 2.718	[]
+split	abc$	3.14 and 2.718	[3.14 and 2.718]
+captures	abc$	3.14 and 2.718	<none>
+is_match	abc$	  spaced  	false
+full_match	abc$	  spaced  	false
+find	abc$	  spaced  	<none>
+find_all	abc$	  spaced  	[]
+split	abc$	  spaced  	[  spaced  ]
+captures	abc$	  spaced  	<none>
+is_match	abc$	AaBbCc	false
+full_match	abc$	AaBbCc	false
+find	abc$	AaBbCc	<none>
+find_all	abc$	AaBbCc	[]
+split	abc$	AaBbCc	[AaBbCc]
+captures	abc$	AaBbCc	<none>
+is_match	abc$	foobaz barbaz	false
+full_match	abc$	foobaz barbaz	false
+find	abc$	foobaz barbaz	<none>
+find_all	abc$	foobaz barbaz	[]
+split	abc$	foobaz barbaz	[foobaz barbaz]
+captures	abc$	foobaz barbaz	<none>
+is_match	abc$	xx	false
+full_match	abc$	xx	false
+find	abc$	xx	<none>
+find_all	abc$	xx	[]
+split	abc$	xx	[xx]
+captures	abc$	xx	<none>
+is_match	abc$	xxx	false
+full_match	abc$	xxx	false
+find	abc$	xxx	<none>
+find_all	abc$	xxx	[]
+split	abc$	xxx	[xxx]
+captures	abc$	xxx	<none>
+is_match	abc$	xxxx	false
+full_match	abc$	xxxx	false
+find	abc$	xxxx	<none>
+find_all	abc$	xxxx	[]
+split	abc$	xxxx	[xxxx]
+captures	abc$	xxxx	<none>
+is_match	abc$	a.b	false
+full_match	abc$	a.b	false
+find	abc$	a.b	<none>
+find_all	abc$	a.b	[]
+split	abc$	a.b	[a.b]
+captures	abc$	a.b	<none>
+is_match	abc$	a\b	false
+full_match	abc$	a\b	false
+find	abc$	a\b	<none>
+find_all	abc$	a\b	[]
+split	abc$	a\b	[a\b]
+captures	abc$	a\b	<none>
+is_match	abc$	-a-z-	false
+full_match	abc$	-a-z-	false
+find	abc$	-a-z-	<none>
+find_all	abc$	-a-z-	[]
+split	abc$	-a-z-	[-a-z-]
+captures	abc$	-a-z-	<none>
+is_match	abc$	[bracket]	false
+full_match	abc$	[bracket]	false
+find	abc$	[bracket]	<none>
+find_all	abc$	[bracket]	[]
+split	abc$	[bracket]	[[bracket]]
+captures	abc$	[bracket]	<none>
+is_match	abc$	ab	false
+full_match	abc$	ab	false
+find	abc$	ab	<none>
+find_all	abc$	ab	[]
+split	abc$	ab	[ab]
+captures	abc$	ab	<none>
+is_match	abc$	b	false
+full_match	abc$	b	false
+find	abc$	b	<none>
+find_all	abc$	b	[]
+split	abc$	b	[b]
+captures	abc$	b	<none>
+is_match	abc$	]	false
+full_match	abc$	]	false
+find	abc$	]	<none>
+find_all	abc$	]	[]
+split	abc$	]	[]]
+captures	abc$	]	<none>
+is_match	abc$	a]b	false
+full_match	abc$	a]b	false
+find	abc$	a]b	<none>
+find_all	abc$	a]b	[]
+split	abc$	a]b	[a]b]
+captures	abc$	a]b	<none>
+is_match	^a.*z$		false
+full_match	^a.*z$		false
+find	^a.*z$		<none>
+find_all	^a.*z$		[]
+split	^a.*z$		[]
+captures	^a.*z$		<none>
+is_match	^a.*z$	a	false
+full_match	^a.*z$	a	false
+find	^a.*z$	a	<none>
+find_all	^a.*z$	a	[]
+split	^a.*z$	a	[a]
+captures	^a.*z$	a	<none>
+is_match	^a.*z$	abc	false
+full_match	^a.*z$	abc	false
+find	^a.*z$	abc	<none>
+find_all	^a.*z$	abc	[]
+split	^a.*z$	abc	[abc]
+captures	^a.*z$	abc	<none>
+is_match	^a.*z$	aXc	false
+full_match	^a.*z$	aXc	false
+find	^a.*z$	aXc	<none>
+find_all	^a.*z$	aXc	[]
+split	^a.*z$	aXc	[aXc]
+captures	^a.*z$	aXc	<none>
+is_match	^a.*z$	aaabccc	false
+full_match	^a.*z$	aaabccc	false
+find	^a.*z$	aaabccc	<none>
+find_all	^a.*z$	aaabccc	[]
+split	^a.*z$	aaabccc	[aaabccc]
+captures	^a.*z$	aaabccc	<none>
+is_match	^a.*z$	xyz	false
+full_match	^a.*z$	xyz	false
+find	^a.*z$	xyz	<none>
+find_all	^a.*z$	xyz	[]
+split	^a.*z$	xyz	[xyz]
+captures	^a.*z$	xyz	<none>
+is_match	^a.*z$	word boundary word	false
+full_match	^a.*z$	word boundary word	false
+find	^a.*z$	word boundary word	<none>
+find_all	^a.*z$	word boundary word	[]
+split	^a.*z$	word boundary word	[word boundary word]
+captures	^a.*z$	word boundary word	<none>
+is_match	^a.*z$	123-4567	false
+full_match	^a.*z$	123-4567	false
+find	^a.*z$	123-4567	<none>
+find_all	^a.*z$	123-4567	[]
+split	^a.*z$	123-4567	[123-4567]
+captures	^a.*z$	123-4567	<none>
+is_match	^a.*z$	3.14 and 2.718	false
+full_match	^a.*z$	3.14 and 2.718	false
+find	^a.*z$	3.14 and 2.718	<none>
+find_all	^a.*z$	3.14 and 2.718	[]
+split	^a.*z$	3.14 and 2.718	[3.14 and 2.718]
+captures	^a.*z$	3.14 and 2.718	<none>
+is_match	^a.*z$	  spaced  	false
+full_match	^a.*z$	  spaced  	false
+find	^a.*z$	  spaced  	<none>
+find_all	^a.*z$	  spaced  	[]
+split	^a.*z$	  spaced  	[  spaced  ]
+captures	^a.*z$	  spaced  	<none>
+is_match	^a.*z$	AaBbCc	false
+full_match	^a.*z$	AaBbCc	false
+find	^a.*z$	AaBbCc	<none>
+find_all	^a.*z$	AaBbCc	[]
+split	^a.*z$	AaBbCc	[AaBbCc]
+captures	^a.*z$	AaBbCc	<none>
+is_match	^a.*z$	foobaz barbaz	false
+full_match	^a.*z$	foobaz barbaz	false
+find	^a.*z$	foobaz barbaz	<none>
+find_all	^a.*z$	foobaz barbaz	[]
+split	^a.*z$	foobaz barbaz	[foobaz barbaz]
+captures	^a.*z$	foobaz barbaz	<none>
+is_match	^a.*z$	xx	false
+full_match	^a.*z$	xx	false
+find	^a.*z$	xx	<none>
+find_all	^a.*z$	xx	[]
+split	^a.*z$	xx	[xx]
+captures	^a.*z$	xx	<none>
+is_match	^a.*z$	xxx	false
+full_match	^a.*z$	xxx	false
+find	^a.*z$	xxx	<none>
+find_all	^a.*z$	xxx	[]
+split	^a.*z$	xxx	[xxx]
+captures	^a.*z$	xxx	<none>
+is_match	^a.*z$	xxxx	false
+full_match	^a.*z$	xxxx	false
+find	^a.*z$	xxxx	<none>
+find_all	^a.*z$	xxxx	[]
+split	^a.*z$	xxxx	[xxxx]
+captures	^a.*z$	xxxx	<none>
+is_match	^a.*z$	a.b	false
+full_match	^a.*z$	a.b	false
+find	^a.*z$	a.b	<none>
+find_all	^a.*z$	a.b	[]
+split	^a.*z$	a.b	[a.b]
+captures	^a.*z$	a.b	<none>
+is_match	^a.*z$	a\b	false
+full_match	^a.*z$	a\b	false
+find	^a.*z$	a\b	<none>
+find_all	^a.*z$	a\b	[]
+split	^a.*z$	a\b	[a\b]
+captures	^a.*z$	a\b	<none>
+is_match	^a.*z$	-a-z-	false
+full_match	^a.*z$	-a-z-	false
+find	^a.*z$	-a-z-	<none>
+find_all	^a.*z$	-a-z-	[]
+split	^a.*z$	-a-z-	[-a-z-]
+captures	^a.*z$	-a-z-	<none>
+is_match	^a.*z$	[bracket]	false
+full_match	^a.*z$	[bracket]	false
+find	^a.*z$	[bracket]	<none>
+find_all	^a.*z$	[bracket]	[]
+split	^a.*z$	[bracket]	[[bracket]]
+captures	^a.*z$	[bracket]	<none>
+is_match	^a.*z$	ab	false
+full_match	^a.*z$	ab	false
+find	^a.*z$	ab	<none>
+find_all	^a.*z$	ab	[]
+split	^a.*z$	ab	[ab]
+captures	^a.*z$	ab	<none>
+is_match	^a.*z$	b	false
+full_match	^a.*z$	b	false
+find	^a.*z$	b	<none>
+find_all	^a.*z$	b	[]
+split	^a.*z$	b	[b]
+captures	^a.*z$	b	<none>
+is_match	^a.*z$	]	false
+full_match	^a.*z$	]	false
+find	^a.*z$	]	<none>
+find_all	^a.*z$	]	[]
+split	^a.*z$	]	[]]
+captures	^a.*z$	]	<none>
+is_match	^a.*z$	a]b	false
+full_match	^a.*z$	a]b	false
+find	^a.*z$	a]b	<none>
+find_all	^a.*z$	a]b	[]
+split	^a.*z$	a]b	[a]b]
+captures	^a.*z$	a]b	<none>
+is_match	\bword\b		false
+full_match	\bword\b		false
+find	\bword\b		<none>
+find_all	\bword\b		[]
+split	\bword\b		[]
+captures	\bword\b		<none>
+is_match	\bword\b	a	false
+full_match	\bword\b	a	false
+find	\bword\b	a	<none>
+find_all	\bword\b	a	[]
+split	\bword\b	a	[a]
+captures	\bword\b	a	<none>
+is_match	\bword\b	abc	false
+full_match	\bword\b	abc	false
+find	\bword\b	abc	<none>
+find_all	\bword\b	abc	[]
+split	\bword\b	abc	[abc]
+captures	\bword\b	abc	<none>
+is_match	\bword\b	aXc	false
+full_match	\bword\b	aXc	false
+find	\bword\b	aXc	<none>
+find_all	\bword\b	aXc	[]
+split	\bword\b	aXc	[aXc]
+captures	\bword\b	aXc	<none>
+is_match	\bword\b	aaabccc	false
+full_match	\bword\b	aaabccc	false
+find	\bword\b	aaabccc	<none>
+find_all	\bword\b	aaabccc	[]
+split	\bword\b	aaabccc	[aaabccc]
+captures	\bword\b	aaabccc	<none>
+is_match	\bword\b	xyz	false
+full_match	\bword\b	xyz	false
+find	\bword\b	xyz	<none>
+find_all	\bword\b	xyz	[]
+split	\bword\b	xyz	[xyz]
+captures	\bword\b	xyz	<none>
+is_match	\bword\b	word boundary word	true
+full_match	\bword\b	word boundary word	false
+find	\bword\b	word boundary word	<word>
+find_all	\bword\b	word boundary word	[word|word]
+split	\bword\b	word boundary word	[| boundary |]
+captures	\bword\b	word boundary word	[word]
+is_match	\bword\b	123-4567	false
+full_match	\bword\b	123-4567	false
+find	\bword\b	123-4567	<none>
+find_all	\bword\b	123-4567	[]
+split	\bword\b	123-4567	[123-4567]
+captures	\bword\b	123-4567	<none>
+is_match	\bword\b	3.14 and 2.718	false
+full_match	\bword\b	3.14 and 2.718	false
+find	\bword\b	3.14 and 2.718	<none>
+find_all	\bword\b	3.14 and 2.718	[]
+split	\bword\b	3.14 and 2.718	[3.14 and 2.718]
+captures	\bword\b	3.14 and 2.718	<none>
+is_match	\bword\b	  spaced  	false
+full_match	\bword\b	  spaced  	false
+find	\bword\b	  spaced  	<none>
+find_all	\bword\b	  spaced  	[]
+split	\bword\b	  spaced  	[  spaced  ]
+captures	\bword\b	  spaced  	<none>
+is_match	\bword\b	AaBbCc	false
+full_match	\bword\b	AaBbCc	false
+find	\bword\b	AaBbCc	<none>
+find_all	\bword\b	AaBbCc	[]
+split	\bword\b	AaBbCc	[AaBbCc]
+captures	\bword\b	AaBbCc	<none>
+is_match	\bword\b	foobaz barbaz	false
+full_match	\bword\b	foobaz barbaz	false
+find	\bword\b	foobaz barbaz	<none>
+find_all	\bword\b	foobaz barbaz	[]
+split	\bword\b	foobaz barbaz	[foobaz barbaz]
+captures	\bword\b	foobaz barbaz	<none>
+is_match	\bword\b	xx	false
+full_match	\bword\b	xx	false
+find	\bword\b	xx	<none>
+find_all	\bword\b	xx	[]
+split	\bword\b	xx	[xx]
+captures	\bword\b	xx	<none>
+is_match	\bword\b	xxx	false
+full_match	\bword\b	xxx	false
+find	\bword\b	xxx	<none>
+find_all	\bword\b	xxx	[]
+split	\bword\b	xxx	[xxx]
+captures	\bword\b	xxx	<none>
+is_match	\bword\b	xxxx	false
+full_match	\bword\b	xxxx	false
+find	\bword\b	xxxx	<none>
+find_all	\bword\b	xxxx	[]
+split	\bword\b	xxxx	[xxxx]
+captures	\bword\b	xxxx	<none>
+is_match	\bword\b	a.b	false
+full_match	\bword\b	a.b	false
+find	\bword\b	a.b	<none>
+find_all	\bword\b	a.b	[]
+split	\bword\b	a.b	[a.b]
+captures	\bword\b	a.b	<none>
+is_match	\bword\b	a\b	false
+full_match	\bword\b	a\b	false
+find	\bword\b	a\b	<none>
+find_all	\bword\b	a\b	[]
+split	\bword\b	a\b	[a\b]
+captures	\bword\b	a\b	<none>
+is_match	\bword\b	-a-z-	false
+full_match	\bword\b	-a-z-	false
+find	\bword\b	-a-z-	<none>
+find_all	\bword\b	-a-z-	[]
+split	\bword\b	-a-z-	[-a-z-]
+captures	\bword\b	-a-z-	<none>
+is_match	\bword\b	[bracket]	false
+full_match	\bword\b	[bracket]	false
+find	\bword\b	[bracket]	<none>
+find_all	\bword\b	[bracket]	[]
+split	\bword\b	[bracket]	[[bracket]]
+captures	\bword\b	[bracket]	<none>
+is_match	\bword\b	ab	false
+full_match	\bword\b	ab	false
+find	\bword\b	ab	<none>
+find_all	\bword\b	ab	[]
+split	\bword\b	ab	[ab]
+captures	\bword\b	ab	<none>
+is_match	\bword\b	b	false
+full_match	\bword\b	b	false
+find	\bword\b	b	<none>
+find_all	\bword\b	b	[]
+split	\bword\b	b	[b]
+captures	\bword\b	b	<none>
+is_match	\bword\b	]	false
+full_match	\bword\b	]	false
+find	\bword\b	]	<none>
+find_all	\bword\b	]	[]
+split	\bword\b	]	[]]
+captures	\bword\b	]	<none>
+is_match	\bword\b	a]b	false
+full_match	\bword\b	a]b	false
+find	\bword\b	a]b	<none>
+find_all	\bword\b	a]b	[]
+split	\bword\b	a]b	[a]b]
+captures	\bword\b	a]b	<none>
+is_match	(a)(b)		false
+full_match	(a)(b)		false
+find	(a)(b)		<none>
+find_all	(a)(b)		[]
+split	(a)(b)		[]
+captures	(a)(b)		<none>
+is_match	(a)(b)	a	false
+full_match	(a)(b)	a	false
+find	(a)(b)	a	<none>
+find_all	(a)(b)	a	[]
+split	(a)(b)	a	[a]
+captures	(a)(b)	a	<none>
+is_match	(a)(b)	abc	true
+full_match	(a)(b)	abc	false
+find	(a)(b)	abc	<ab>
+find_all	(a)(b)	abc	[ab]
+split	(a)(b)	abc	[|c]
+captures	(a)(b)	abc	[ab|a|b]
+is_match	(a)(b)	aXc	false
+full_match	(a)(b)	aXc	false
+find	(a)(b)	aXc	<none>
+find_all	(a)(b)	aXc	[]
+split	(a)(b)	aXc	[aXc]
+captures	(a)(b)	aXc	<none>
+is_match	(a)(b)	aaabccc	true
+full_match	(a)(b)	aaabccc	false
+find	(a)(b)	aaabccc	<ab>
+find_all	(a)(b)	aaabccc	[ab]
+split	(a)(b)	aaabccc	[aa|ccc]
+captures	(a)(b)	aaabccc	[ab|a|b]
+is_match	(a)(b)	xyz	false
+full_match	(a)(b)	xyz	false
+find	(a)(b)	xyz	<none>
+find_all	(a)(b)	xyz	[]
+split	(a)(b)	xyz	[xyz]
+captures	(a)(b)	xyz	<none>
+is_match	(a)(b)	word boundary word	false
+full_match	(a)(b)	word boundary word	false
+find	(a)(b)	word boundary word	<none>
+find_all	(a)(b)	word boundary word	[]
+split	(a)(b)	word boundary word	[word boundary word]
+captures	(a)(b)	word boundary word	<none>
+is_match	(a)(b)	123-4567	false
+full_match	(a)(b)	123-4567	false
+find	(a)(b)	123-4567	<none>
+find_all	(a)(b)	123-4567	[]
+split	(a)(b)	123-4567	[123-4567]
+captures	(a)(b)	123-4567	<none>
+is_match	(a)(b)	3.14 and 2.718	false
+full_match	(a)(b)	3.14 and 2.718	false
+find	(a)(b)	3.14 and 2.718	<none>
+find_all	(a)(b)	3.14 and 2.718	[]
+split	(a)(b)	3.14 and 2.718	[3.14 and 2.718]
+captures	(a)(b)	3.14 and 2.718	<none>
+is_match	(a)(b)	  spaced  	false
+full_match	(a)(b)	  spaced  	false
+find	(a)(b)	  spaced  	<none>
+find_all	(a)(b)	  spaced  	[]
+split	(a)(b)	  spaced  	[  spaced  ]
+captures	(a)(b)	  spaced  	<none>
+is_match	(a)(b)	AaBbCc	false
+full_match	(a)(b)	AaBbCc	false
+find	(a)(b)	AaBbCc	<none>
+find_all	(a)(b)	AaBbCc	[]
+split	(a)(b)	AaBbCc	[AaBbCc]
+captures	(a)(b)	AaBbCc	<none>
+is_match	(a)(b)	foobaz barbaz	false
+full_match	(a)(b)	foobaz barbaz	false
+find	(a)(b)	foobaz barbaz	<none>
+find_all	(a)(b)	foobaz barbaz	[]
+split	(a)(b)	foobaz barbaz	[foobaz barbaz]
+captures	(a)(b)	foobaz barbaz	<none>
+is_match	(a)(b)	xx	false
+full_match	(a)(b)	xx	false
+find	(a)(b)	xx	<none>
+find_all	(a)(b)	xx	[]
+split	(a)(b)	xx	[xx]
+captures	(a)(b)	xx	<none>
+is_match	(a)(b)	xxx	false
+full_match	(a)(b)	xxx	false
+find	(a)(b)	xxx	<none>
+find_all	(a)(b)	xxx	[]
+split	(a)(b)	xxx	[xxx]
+captures	(a)(b)	xxx	<none>
+is_match	(a)(b)	xxxx	false
+full_match	(a)(b)	xxxx	false
+find	(a)(b)	xxxx	<none>
+find_all	(a)(b)	xxxx	[]
+split	(a)(b)	xxxx	[xxxx]
+captures	(a)(b)	xxxx	<none>
+is_match	(a)(b)	a.b	false
+full_match	(a)(b)	a.b	false
+find	(a)(b)	a.b	<none>
+find_all	(a)(b)	a.b	[]
+split	(a)(b)	a.b	[a.b]
+captures	(a)(b)	a.b	<none>
+is_match	(a)(b)	a\b	false
+full_match	(a)(b)	a\b	false
+find	(a)(b)	a\b	<none>
+find_all	(a)(b)	a\b	[]
+split	(a)(b)	a\b	[a\b]
+captures	(a)(b)	a\b	<none>
+is_match	(a)(b)	-a-z-	false
+full_match	(a)(b)	-a-z-	false
+find	(a)(b)	-a-z-	<none>
+find_all	(a)(b)	-a-z-	[]
+split	(a)(b)	-a-z-	[-a-z-]
+captures	(a)(b)	-a-z-	<none>
+is_match	(a)(b)	[bracket]	false
+full_match	(a)(b)	[bracket]	false
+find	(a)(b)	[bracket]	<none>
+find_all	(a)(b)	[bracket]	[]
+split	(a)(b)	[bracket]	[[bracket]]
+captures	(a)(b)	[bracket]	<none>
+is_match	(a)(b)	ab	true
+full_match	(a)(b)	ab	true
+find	(a)(b)	ab	<ab>
+find_all	(a)(b)	ab	[ab]
+split	(a)(b)	ab	[|]
+captures	(a)(b)	ab	[ab|a|b]
+is_match	(a)(b)	b	false
+full_match	(a)(b)	b	false
+find	(a)(b)	b	<none>
+find_all	(a)(b)	b	[]
+split	(a)(b)	b	[b]
+captures	(a)(b)	b	<none>
+is_match	(a)(b)	]	false
+full_match	(a)(b)	]	false
+find	(a)(b)	]	<none>
+find_all	(a)(b)	]	[]
+split	(a)(b)	]	[]]
+captures	(a)(b)	]	<none>
+is_match	(a)(b)	a]b	false
+full_match	(a)(b)	a]b	false
+find	(a)(b)	a]b	<none>
+find_all	(a)(b)	a]b	[]
+split	(a)(b)	a]b	[a]b]
+captures	(a)(b)	a]b	<none>
+is_match	(ab)+		false
+full_match	(ab)+		false
+find	(ab)+		<none>
+find_all	(ab)+		[]
+split	(ab)+		[]
+captures	(ab)+		<none>
+is_match	(ab)+	a	false
+full_match	(ab)+	a	false
+find	(ab)+	a	<none>
+find_all	(ab)+	a	[]
+split	(ab)+	a	[a]
+captures	(ab)+	a	<none>
+is_match	(ab)+	abc	true
+full_match	(ab)+	abc	false
+find	(ab)+	abc	<ab>
+find_all	(ab)+	abc	[ab]
+split	(ab)+	abc	[|c]
+captures	(ab)+	abc	[ab|ab]
+is_match	(ab)+	aXc	false
+full_match	(ab)+	aXc	false
+find	(ab)+	aXc	<none>
+find_all	(ab)+	aXc	[]
+split	(ab)+	aXc	[aXc]
+captures	(ab)+	aXc	<none>
+is_match	(ab)+	aaabccc	true
+full_match	(ab)+	aaabccc	false
+find	(ab)+	aaabccc	<ab>
+find_all	(ab)+	aaabccc	[ab]
+split	(ab)+	aaabccc	[aa|ccc]
+captures	(ab)+	aaabccc	[ab|ab]
+is_match	(ab)+	xyz	false
+full_match	(ab)+	xyz	false
+find	(ab)+	xyz	<none>
+find_all	(ab)+	xyz	[]
+split	(ab)+	xyz	[xyz]
+captures	(ab)+	xyz	<none>
+is_match	(ab)+	word boundary word	false
+full_match	(ab)+	word boundary word	false
+find	(ab)+	word boundary word	<none>
+find_all	(ab)+	word boundary word	[]
+split	(ab)+	word boundary word	[word boundary word]
+captures	(ab)+	word boundary word	<none>
+is_match	(ab)+	123-4567	false
+full_match	(ab)+	123-4567	false
+find	(ab)+	123-4567	<none>
+find_all	(ab)+	123-4567	[]
+split	(ab)+	123-4567	[123-4567]
+captures	(ab)+	123-4567	<none>
+is_match	(ab)+	3.14 and 2.718	false
+full_match	(ab)+	3.14 and 2.718	false
+find	(ab)+	3.14 and 2.718	<none>
+find_all	(ab)+	3.14 and 2.718	[]
+split	(ab)+	3.14 and 2.718	[3.14 and 2.718]
+captures	(ab)+	3.14 and 2.718	<none>
+is_match	(ab)+	  spaced  	false
+full_match	(ab)+	  spaced  	false
+find	(ab)+	  spaced  	<none>
+find_all	(ab)+	  spaced  	[]
+split	(ab)+	  spaced  	[  spaced  ]
+captures	(ab)+	  spaced  	<none>
+is_match	(ab)+	AaBbCc	false
+full_match	(ab)+	AaBbCc	false
+find	(ab)+	AaBbCc	<none>
+find_all	(ab)+	AaBbCc	[]
+split	(ab)+	AaBbCc	[AaBbCc]
+captures	(ab)+	AaBbCc	<none>
+is_match	(ab)+	foobaz barbaz	false
+full_match	(ab)+	foobaz barbaz	false
+find	(ab)+	foobaz barbaz	<none>
+find_all	(ab)+	foobaz barbaz	[]
+split	(ab)+	foobaz barbaz	[foobaz barbaz]
+captures	(ab)+	foobaz barbaz	<none>
+is_match	(ab)+	xx	false
+full_match	(ab)+	xx	false
+find	(ab)+	xx	<none>
+find_all	(ab)+	xx	[]
+split	(ab)+	xx	[xx]
+captures	(ab)+	xx	<none>
+is_match	(ab)+	xxx	false
+full_match	(ab)+	xxx	false
+find	(ab)+	xxx	<none>
+find_all	(ab)+	xxx	[]
+split	(ab)+	xxx	[xxx]
+captures	(ab)+	xxx	<none>
+is_match	(ab)+	xxxx	false
+full_match	(ab)+	xxxx	false
+find	(ab)+	xxxx	<none>
+find_all	(ab)+	xxxx	[]
+split	(ab)+	xxxx	[xxxx]
+captures	(ab)+	xxxx	<none>
+is_match	(ab)+	a.b	false
+full_match	(ab)+	a.b	false
+find	(ab)+	a.b	<none>
+find_all	(ab)+	a.b	[]
+split	(ab)+	a.b	[a.b]
+captures	(ab)+	a.b	<none>
+is_match	(ab)+	a\b	false
+full_match	(ab)+	a\b	false
+find	(ab)+	a\b	<none>
+find_all	(ab)+	a\b	[]
+split	(ab)+	a\b	[a\b]
+captures	(ab)+	a\b	<none>
+is_match	(ab)+	-a-z-	false
+full_match	(ab)+	-a-z-	false
+find	(ab)+	-a-z-	<none>
+find_all	(ab)+	-a-z-	[]
+split	(ab)+	-a-z-	[-a-z-]
+captures	(ab)+	-a-z-	<none>
+is_match	(ab)+	[bracket]	false
+full_match	(ab)+	[bracket]	false
+find	(ab)+	[bracket]	<none>
+find_all	(ab)+	[bracket]	[]
+split	(ab)+	[bracket]	[[bracket]]
+captures	(ab)+	[bracket]	<none>
+is_match	(ab)+	ab	true
+full_match	(ab)+	ab	true
+find	(ab)+	ab	<ab>
+find_all	(ab)+	ab	[ab]
+split	(ab)+	ab	[|]
+captures	(ab)+	ab	[ab|ab]
+is_match	(ab)+	b	false
+full_match	(ab)+	b	false
+find	(ab)+	b	<none>
+find_all	(ab)+	b	[]
+split	(ab)+	b	[b]
+captures	(ab)+	b	<none>
+is_match	(ab)+	]	false
+full_match	(ab)+	]	false
+find	(ab)+	]	<none>
+find_all	(ab)+	]	[]
+split	(ab)+	]	[]]
+captures	(ab)+	]	<none>
+is_match	(ab)+	a]b	false
+full_match	(ab)+	a]b	false
+find	(ab)+	a]b	<none>
+find_all	(ab)+	a]b	[]
+split	(ab)+	a]b	[a]b]
+captures	(ab)+	a]b	<none>
+is_match	a|b		false
+full_match	a|b		false
+find	a|b		<none>
+find_all	a|b		[]
+split	a|b		[]
+captures	a|b		<none>
+is_match	a|b	a	true
+full_match	a|b	a	true
+find	a|b	a	<a>
+find_all	a|b	a	[a]
+split	a|b	a	[|]
+captures	a|b	a	[a]
+is_match	a|b	abc	true
+full_match	a|b	abc	false
+find	a|b	abc	<a>
+find_all	a|b	abc	[a|b]
+split	a|b	abc	[||c]
+captures	a|b	abc	[a]
+is_match	a|b	aXc	true
+full_match	a|b	aXc	false
+find	a|b	aXc	<a>
+find_all	a|b	aXc	[a]
+split	a|b	aXc	[|Xc]
+captures	a|b	aXc	[a]
+is_match	a|b	aaabccc	true
+full_match	a|b	aaabccc	false
+find	a|b	aaabccc	<a>
+find_all	a|b	aaabccc	[a|a|a|b]
+split	a|b	aaabccc	[||||ccc]
+captures	a|b	aaabccc	[a]
+is_match	a|b	xyz	false
+full_match	a|b	xyz	false
+find	a|b	xyz	<none>
+find_all	a|b	xyz	[]
+split	a|b	xyz	[xyz]
+captures	a|b	xyz	<none>
+is_match	a|b	word boundary word	true
+full_match	a|b	word boundary word	false
+find	a|b	word boundary word	<b>
+find_all	a|b	word boundary word	[b|a]
+split	a|b	word boundary word	[word |ound|ry word]
+captures	a|b	word boundary word	[b]
+is_match	a|b	123-4567	false
+full_match	a|b	123-4567	false
+find	a|b	123-4567	<none>
+find_all	a|b	123-4567	[]
+split	a|b	123-4567	[123-4567]
+captures	a|b	123-4567	<none>
+is_match	a|b	3.14 and 2.718	true
+full_match	a|b	3.14 and 2.718	false
+find	a|b	3.14 and 2.718	<a>
+find_all	a|b	3.14 and 2.718	[a]
+split	a|b	3.14 and 2.718	[3.14 |nd 2.718]
+captures	a|b	3.14 and 2.718	[a]
+is_match	a|b	  spaced  	true
+full_match	a|b	  spaced  	false
+find	a|b	  spaced  	<a>
+find_all	a|b	  spaced  	[a]
+split	a|b	  spaced  	[  sp|ced  ]
+captures	a|b	  spaced  	[a]
+is_match	a|b	AaBbCc	true
+full_match	a|b	AaBbCc	false
+find	a|b	AaBbCc	<a>
+find_all	a|b	AaBbCc	[a|b]
+split	a|b	AaBbCc	[A|B|Cc]
+captures	a|b	AaBbCc	[a]
+is_match	a|b	foobaz barbaz	true
+full_match	a|b	foobaz barbaz	false
+find	a|b	foobaz barbaz	<b>
+find_all	a|b	foobaz barbaz	[b|a|b|a|b|a]
+split	a|b	foobaz barbaz	[foo||z ||r||z]
+captures	a|b	foobaz barbaz	[b]
+is_match	a|b	xx	false
+full_match	a|b	xx	false
+find	a|b	xx	<none>
+find_all	a|b	xx	[]
+split	a|b	xx	[xx]
+captures	a|b	xx	<none>
+is_match	a|b	xxx	false
+full_match	a|b	xxx	false
+find	a|b	xxx	<none>
+find_all	a|b	xxx	[]
+split	a|b	xxx	[xxx]
+captures	a|b	xxx	<none>
+is_match	a|b	xxxx	false
+full_match	a|b	xxxx	false
+find	a|b	xxxx	<none>
+find_all	a|b	xxxx	[]
+split	a|b	xxxx	[xxxx]
+captures	a|b	xxxx	<none>
+is_match	a|b	a.b	true
+full_match	a|b	a.b	false
+find	a|b	a.b	<a>
+find_all	a|b	a.b	[a|b]
+split	a|b	a.b	[|.|]
+captures	a|b	a.b	[a]
+is_match	a|b	a\b	true
+full_match	a|b	a\b	false
+find	a|b	a\b	<a>
+find_all	a|b	a\b	[a|b]
+split	a|b	a\b	[|\|]
+captures	a|b	a\b	[a]
+is_match	a|b	-a-z-	true
+full_match	a|b	-a-z-	false
+find	a|b	-a-z-	<a>
+find_all	a|b	-a-z-	[a]
+split	a|b	-a-z-	[-|-z-]
+captures	a|b	-a-z-	[a]
+is_match	a|b	[bracket]	true
+full_match	a|b	[bracket]	false
+find	a|b	[bracket]	<b>
+find_all	a|b	[bracket]	[b|a]
+split	a|b	[bracket]	[[|r|cket]]
+captures	a|b	[bracket]	[b]
+is_match	a|b	ab	true
+full_match	a|b	ab	false
+find	a|b	ab	<a>
+find_all	a|b	ab	[a|b]
+split	a|b	ab	[||]
+captures	a|b	ab	[a]
+is_match	a|b	b	true
+full_match	a|b	b	true
+find	a|b	b	<b>
+find_all	a|b	b	[b]
+split	a|b	b	[|]
+captures	a|b	b	[b]
+is_match	a|b	]	false
+full_match	a|b	]	false
+find	a|b	]	<none>
+find_all	a|b	]	[]
+split	a|b	]	[]]
+captures	a|b	]	<none>
+is_match	a|b	a]b	true
+full_match	a|b	a]b	false
+find	a|b	a]b	<a>
+find_all	a|b	a]b	[a|b]
+split	a|b	a]b	[|]|]
+captures	a|b	a]b	[a]
+is_match	(a|b)+c		false
+full_match	(a|b)+c		false
+find	(a|b)+c		<none>
+find_all	(a|b)+c		[]
+split	(a|b)+c		[]
+captures	(a|b)+c		<none>
+is_match	(a|b)+c	a	false
+full_match	(a|b)+c	a	false
+find	(a|b)+c	a	<none>
+find_all	(a|b)+c	a	[]
+split	(a|b)+c	a	[a]
+captures	(a|b)+c	a	<none>
+is_match	(a|b)+c	abc	true
+full_match	(a|b)+c	abc	true
+find	(a|b)+c	abc	<abc>
+find_all	(a|b)+c	abc	[abc]
+split	(a|b)+c	abc	[|]
+captures	(a|b)+c	abc	[abc|b]
+is_match	(a|b)+c	aXc	false
+full_match	(a|b)+c	aXc	false
+find	(a|b)+c	aXc	<none>
+find_all	(a|b)+c	aXc	[]
+split	(a|b)+c	aXc	[aXc]
+captures	(a|b)+c	aXc	<none>
+is_match	(a|b)+c	aaabccc	true
+full_match	(a|b)+c	aaabccc	false
+find	(a|b)+c	aaabccc	<aaabc>
+find_all	(a|b)+c	aaabccc	[aaabc]
+split	(a|b)+c	aaabccc	[|cc]
+captures	(a|b)+c	aaabccc	[aaabc|b]
+is_match	(a|b)+c	xyz	false
+full_match	(a|b)+c	xyz	false
+find	(a|b)+c	xyz	<none>
+find_all	(a|b)+c	xyz	[]
+split	(a|b)+c	xyz	[xyz]
+captures	(a|b)+c	xyz	<none>
+is_match	(a|b)+c	word boundary word	false
+full_match	(a|b)+c	word boundary word	false
+find	(a|b)+c	word boundary word	<none>
+find_all	(a|b)+c	word boundary word	[]
+split	(a|b)+c	word boundary word	[word boundary word]
+captures	(a|b)+c	word boundary word	<none>
+is_match	(a|b)+c	123-4567	false
+full_match	(a|b)+c	123-4567	false
+find	(a|b)+c	123-4567	<none>
+find_all	(a|b)+c	123-4567	[]
+split	(a|b)+c	123-4567	[123-4567]
+captures	(a|b)+c	123-4567	<none>
+is_match	(a|b)+c	3.14 and 2.718	false
+full_match	(a|b)+c	3.14 and 2.718	false
+find	(a|b)+c	3.14 and 2.718	<none>
+find_all	(a|b)+c	3.14 and 2.718	[]
+split	(a|b)+c	3.14 and 2.718	[3.14 and 2.718]
+captures	(a|b)+c	3.14 and 2.718	<none>
+is_match	(a|b)+c	  spaced  	true
+full_match	(a|b)+c	  spaced  	false
+find	(a|b)+c	  spaced  	<ac>
+find_all	(a|b)+c	  spaced  	[ac]
+split	(a|b)+c	  spaced  	[  sp|ed  ]
+captures	(a|b)+c	  spaced  	[ac|a]
+is_match	(a|b)+c	AaBbCc	false
+full_match	(a|b)+c	AaBbCc	false
+find	(a|b)+c	AaBbCc	<none>
+find_all	(a|b)+c	AaBbCc	[]
+split	(a|b)+c	AaBbCc	[AaBbCc]
+captures	(a|b)+c	AaBbCc	<none>
+is_match	(a|b)+c	foobaz barbaz	false
+full_match	(a|b)+c	foobaz barbaz	false
+find	(a|b)+c	foobaz barbaz	<none>
+find_all	(a|b)+c	foobaz barbaz	[]
+split	(a|b)+c	foobaz barbaz	[foobaz barbaz]
+captures	(a|b)+c	foobaz barbaz	<none>
+is_match	(a|b)+c	xx	false
+full_match	(a|b)+c	xx	false
+find	(a|b)+c	xx	<none>
+find_all	(a|b)+c	xx	[]
+split	(a|b)+c	xx	[xx]
+captures	(a|b)+c	xx	<none>
+is_match	(a|b)+c	xxx	false
+full_match	(a|b)+c	xxx	false
+find	(a|b)+c	xxx	<none>
+find_all	(a|b)+c	xxx	[]
+split	(a|b)+c	xxx	[xxx]
+captures	(a|b)+c	xxx	<none>
+is_match	(a|b)+c	xxxx	false
+full_match	(a|b)+c	xxxx	false
+find	(a|b)+c	xxxx	<none>
+find_all	(a|b)+c	xxxx	[]
+split	(a|b)+c	xxxx	[xxxx]
+captures	(a|b)+c	xxxx	<none>
+is_match	(a|b)+c	a.b	false
+full_match	(a|b)+c	a.b	false
+find	(a|b)+c	a.b	<none>
+find_all	(a|b)+c	a.b	[]
+split	(a|b)+c	a.b	[a.b]
+captures	(a|b)+c	a.b	<none>
+is_match	(a|b)+c	a\b	false
+full_match	(a|b)+c	a\b	false
+find	(a|b)+c	a\b	<none>
+find_all	(a|b)+c	a\b	[]
+split	(a|b)+c	a\b	[a\b]
+captures	(a|b)+c	a\b	<none>
+is_match	(a|b)+c	-a-z-	false
+full_match	(a|b)+c	-a-z-	false
+find	(a|b)+c	-a-z-	<none>
+find_all	(a|b)+c	-a-z-	[]
+split	(a|b)+c	-a-z-	[-a-z-]
+captures	(a|b)+c	-a-z-	<none>
+is_match	(a|b)+c	[bracket]	true
+full_match	(a|b)+c	[bracket]	false
+find	(a|b)+c	[bracket]	<ac>
+find_all	(a|b)+c	[bracket]	[ac]
+split	(a|b)+c	[bracket]	[[br|ket]]
+captures	(a|b)+c	[bracket]	[ac|a]
+is_match	(a|b)+c	ab	false
+full_match	(a|b)+c	ab	false
+find	(a|b)+c	ab	<none>
+find_all	(a|b)+c	ab	[]
+split	(a|b)+c	ab	[ab]
+captures	(a|b)+c	ab	<none>
+is_match	(a|b)+c	b	false
+full_match	(a|b)+c	b	false
+find	(a|b)+c	b	<none>
+find_all	(a|b)+c	b	[]
+split	(a|b)+c	b	[b]
+captures	(a|b)+c	b	<none>
+is_match	(a|b)+c	]	false
+full_match	(a|b)+c	]	false
+find	(a|b)+c	]	<none>
+find_all	(a|b)+c	]	[]
+split	(a|b)+c	]	[]]
+captures	(a|b)+c	]	<none>
+is_match	(a|b)+c	a]b	false
+full_match	(a|b)+c	a]b	false
+find	(a|b)+c	a]b	<none>
+find_all	(a|b)+c	a]b	[]
+split	(a|b)+c	a]b	[a]b]
+captures	(a|b)+c	a]b	<none>
+is_match	x{2}		false
+full_match	x{2}		false
+find	x{2}		<none>
+find_all	x{2}		[]
+split	x{2}		[]
+captures	x{2}		<none>
+is_match	x{2}	a	false
+full_match	x{2}	a	false
+find	x{2}	a	<none>
+find_all	x{2}	a	[]
+split	x{2}	a	[a]
+captures	x{2}	a	<none>
+is_match	x{2}	abc	false
+full_match	x{2}	abc	false
+find	x{2}	abc	<none>
+find_all	x{2}	abc	[]
+split	x{2}	abc	[abc]
+captures	x{2}	abc	<none>
+is_match	x{2}	aXc	false
+full_match	x{2}	aXc	false
+find	x{2}	aXc	<none>
+find_all	x{2}	aXc	[]
+split	x{2}	aXc	[aXc]
+captures	x{2}	aXc	<none>
+is_match	x{2}	aaabccc	false
+full_match	x{2}	aaabccc	false
+find	x{2}	aaabccc	<none>
+find_all	x{2}	aaabccc	[]
+split	x{2}	aaabccc	[aaabccc]
+captures	x{2}	aaabccc	<none>
+is_match	x{2}	xyz	false
+full_match	x{2}	xyz	false
+find	x{2}	xyz	<none>
+find_all	x{2}	xyz	[]
+split	x{2}	xyz	[xyz]
+captures	x{2}	xyz	<none>
+is_match	x{2}	word boundary word	false
+full_match	x{2}	word boundary word	false
+find	x{2}	word boundary word	<none>
+find_all	x{2}	word boundary word	[]
+split	x{2}	word boundary word	[word boundary word]
+captures	x{2}	word boundary word	<none>
+is_match	x{2}	123-4567	false
+full_match	x{2}	123-4567	false
+find	x{2}	123-4567	<none>
+find_all	x{2}	123-4567	[]
+split	x{2}	123-4567	[123-4567]
+captures	x{2}	123-4567	<none>
+is_match	x{2}	3.14 and 2.718	false
+full_match	x{2}	3.14 and 2.718	false
+find	x{2}	3.14 and 2.718	<none>
+find_all	x{2}	3.14 and 2.718	[]
+split	x{2}	3.14 and 2.718	[3.14 and 2.718]
+captures	x{2}	3.14 and 2.718	<none>
+is_match	x{2}	  spaced  	false
+full_match	x{2}	  spaced  	false
+find	x{2}	  spaced  	<none>
+find_all	x{2}	  spaced  	[]
+split	x{2}	  spaced  	[  spaced  ]
+captures	x{2}	  spaced  	<none>
+is_match	x{2}	AaBbCc	false
+full_match	x{2}	AaBbCc	false
+find	x{2}	AaBbCc	<none>
+find_all	x{2}	AaBbCc	[]
+split	x{2}	AaBbCc	[AaBbCc]
+captures	x{2}	AaBbCc	<none>
+is_match	x{2}	foobaz barbaz	false
+full_match	x{2}	foobaz barbaz	false
+find	x{2}	foobaz barbaz	<none>
+find_all	x{2}	foobaz barbaz	[]
+split	x{2}	foobaz barbaz	[foobaz barbaz]
+captures	x{2}	foobaz barbaz	<none>
+is_match	x{2}	xx	true
+full_match	x{2}	xx	true
+find	x{2}	xx	<xx>
+find_all	x{2}	xx	[xx]
+split	x{2}	xx	[|]
+captures	x{2}	xx	[xx]
+is_match	x{2}	xxx	true
+full_match	x{2}	xxx	false
+find	x{2}	xxx	<xx>
+find_all	x{2}	xxx	[xx]
+split	x{2}	xxx	[|x]
+captures	x{2}	xxx	[xx]
+is_match	x{2}	xxxx	true
+full_match	x{2}	xxxx	false
+find	x{2}	xxxx	<xx>
+find_all	x{2}	xxxx	[xx|xx]
+split	x{2}	xxxx	[||]
+captures	x{2}	xxxx	[xx]
+is_match	x{2}	a.b	false
+full_match	x{2}	a.b	false
+find	x{2}	a.b	<none>
+find_all	x{2}	a.b	[]
+split	x{2}	a.b	[a.b]
+captures	x{2}	a.b	<none>
+is_match	x{2}	a\b	false
+full_match	x{2}	a\b	false
+find	x{2}	a\b	<none>
+find_all	x{2}	a\b	[]
+split	x{2}	a\b	[a\b]
+captures	x{2}	a\b	<none>
+is_match	x{2}	-a-z-	false
+full_match	x{2}	-a-z-	false
+find	x{2}	-a-z-	<none>
+find_all	x{2}	-a-z-	[]
+split	x{2}	-a-z-	[-a-z-]
+captures	x{2}	-a-z-	<none>
+is_match	x{2}	[bracket]	false
+full_match	x{2}	[bracket]	false
+find	x{2}	[bracket]	<none>
+find_all	x{2}	[bracket]	[]
+split	x{2}	[bracket]	[[bracket]]
+captures	x{2}	[bracket]	<none>
+is_match	x{2}	ab	false
+full_match	x{2}	ab	false
+find	x{2}	ab	<none>
+find_all	x{2}	ab	[]
+split	x{2}	ab	[ab]
+captures	x{2}	ab	<none>
+is_match	x{2}	b	false
+full_match	x{2}	b	false
+find	x{2}	b	<none>
+find_all	x{2}	b	[]
+split	x{2}	b	[b]
+captures	x{2}	b	<none>
+is_match	x{2}	]	false
+full_match	x{2}	]	false
+find	x{2}	]	<none>
+find_all	x{2}	]	[]
+split	x{2}	]	[]]
+captures	x{2}	]	<none>
+is_match	x{2}	a]b	false
+full_match	x{2}	a]b	false
+find	x{2}	a]b	<none>
+find_all	x{2}	a]b	[]
+split	x{2}	a]b	[a]b]
+captures	x{2}	a]b	<none>
+is_match	x{2,}		false
+full_match	x{2,}		false
+find	x{2,}		<none>
+find_all	x{2,}		[]
+split	x{2,}		[]
+captures	x{2,}		<none>
+is_match	x{2,}	a	false
+full_match	x{2,}	a	false
+find	x{2,}	a	<none>
+find_all	x{2,}	a	[]
+split	x{2,}	a	[a]
+captures	x{2,}	a	<none>
+is_match	x{2,}	abc	false
+full_match	x{2,}	abc	false
+find	x{2,}	abc	<none>
+find_all	x{2,}	abc	[]
+split	x{2,}	abc	[abc]
+captures	x{2,}	abc	<none>
+is_match	x{2,}	aXc	false
+full_match	x{2,}	aXc	false
+find	x{2,}	aXc	<none>
+find_all	x{2,}	aXc	[]
+split	x{2,}	aXc	[aXc]
+captures	x{2,}	aXc	<none>
+is_match	x{2,}	aaabccc	false
+full_match	x{2,}	aaabccc	false
+find	x{2,}	aaabccc	<none>
+find_all	x{2,}	aaabccc	[]
+split	x{2,}	aaabccc	[aaabccc]
+captures	x{2,}	aaabccc	<none>
+is_match	x{2,}	xyz	false
+full_match	x{2,}	xyz	false
+find	x{2,}	xyz	<none>
+find_all	x{2,}	xyz	[]
+split	x{2,}	xyz	[xyz]
+captures	x{2,}	xyz	<none>
+is_match	x{2,}	word boundary word	false
+full_match	x{2,}	word boundary word	false
+find	x{2,}	word boundary word	<none>
+find_all	x{2,}	word boundary word	[]
+split	x{2,}	word boundary word	[word boundary word]
+captures	x{2,}	word boundary word	<none>
+is_match	x{2,}	123-4567	false
+full_match	x{2,}	123-4567	false
+find	x{2,}	123-4567	<none>
+find_all	x{2,}	123-4567	[]
+split	x{2,}	123-4567	[123-4567]
+captures	x{2,}	123-4567	<none>
+is_match	x{2,}	3.14 and 2.718	false
+full_match	x{2,}	3.14 and 2.718	false
+find	x{2,}	3.14 and 2.718	<none>
+find_all	x{2,}	3.14 and 2.718	[]
+split	x{2,}	3.14 and 2.718	[3.14 and 2.718]
+captures	x{2,}	3.14 and 2.718	<none>
+is_match	x{2,}	  spaced  	false
+full_match	x{2,}	  spaced  	false
+find	x{2,}	  spaced  	<none>
+find_all	x{2,}	  spaced  	[]
+split	x{2,}	  spaced  	[  spaced  ]
+captures	x{2,}	  spaced  	<none>
+is_match	x{2,}	AaBbCc	false
+full_match	x{2,}	AaBbCc	false
+find	x{2,}	AaBbCc	<none>
+find_all	x{2,}	AaBbCc	[]
+split	x{2,}	AaBbCc	[AaBbCc]
+captures	x{2,}	AaBbCc	<none>
+is_match	x{2,}	foobaz barbaz	false
+full_match	x{2,}	foobaz barbaz	false
+find	x{2,}	foobaz barbaz	<none>
+find_all	x{2,}	foobaz barbaz	[]
+split	x{2,}	foobaz barbaz	[foobaz barbaz]
+captures	x{2,}	foobaz barbaz	<none>
+is_match	x{2,}	xx	true
+full_match	x{2,}	xx	true
+find	x{2,}	xx	<xx>
+find_all	x{2,}	xx	[xx]
+split	x{2,}	xx	[|]
+captures	x{2,}	xx	[xx]
+is_match	x{2,}	xxx	true
+full_match	x{2,}	xxx	true
+find	x{2,}	xxx	<xxx>
+find_all	x{2,}	xxx	[xxx]
+split	x{2,}	xxx	[|]
+captures	x{2,}	xxx	[xxx]
+is_match	x{2,}	xxxx	true
+full_match	x{2,}	xxxx	true
+find	x{2,}	xxxx	<xxxx>
+find_all	x{2,}	xxxx	[xxxx]
+split	x{2,}	xxxx	[|]
+captures	x{2,}	xxxx	[xxxx]
+is_match	x{2,}	a.b	false
+full_match	x{2,}	a.b	false
+find	x{2,}	a.b	<none>
+find_all	x{2,}	a.b	[]
+split	x{2,}	a.b	[a.b]
+captures	x{2,}	a.b	<none>
+is_match	x{2,}	a\b	false
+full_match	x{2,}	a\b	false
+find	x{2,}	a\b	<none>
+find_all	x{2,}	a\b	[]
+split	x{2,}	a\b	[a\b]
+captures	x{2,}	a\b	<none>
+is_match	x{2,}	-a-z-	false
+full_match	x{2,}	-a-z-	false
+find	x{2,}	-a-z-	<none>
+find_all	x{2,}	-a-z-	[]
+split	x{2,}	-a-z-	[-a-z-]
+captures	x{2,}	-a-z-	<none>
+is_match	x{2,}	[bracket]	false
+full_match	x{2,}	[bracket]	false
+find	x{2,}	[bracket]	<none>
+find_all	x{2,}	[bracket]	[]
+split	x{2,}	[bracket]	[[bracket]]
+captures	x{2,}	[bracket]	<none>
+is_match	x{2,}	ab	false
+full_match	x{2,}	ab	false
+find	x{2,}	ab	<none>
+find_all	x{2,}	ab	[]
+split	x{2,}	ab	[ab]
+captures	x{2,}	ab	<none>
+is_match	x{2,}	b	false
+full_match	x{2,}	b	false
+find	x{2,}	b	<none>
+find_all	x{2,}	b	[]
+split	x{2,}	b	[b]
+captures	x{2,}	b	<none>
+is_match	x{2,}	]	false
+full_match	x{2,}	]	false
+find	x{2,}	]	<none>
+find_all	x{2,}	]	[]
+split	x{2,}	]	[]]
+captures	x{2,}	]	<none>
+is_match	x{2,}	a]b	false
+full_match	x{2,}	a]b	false
+find	x{2,}	a]b	<none>
+find_all	x{2,}	a]b	[]
+split	x{2,}	a]b	[a]b]
+captures	x{2,}	a]b	<none>
+is_match	x{2,3}		false
+full_match	x{2,3}		false
+find	x{2,3}		<none>
+find_all	x{2,3}		[]
+split	x{2,3}		[]
+captures	x{2,3}		<none>
+is_match	x{2,3}	a	false
+full_match	x{2,3}	a	false
+find	x{2,3}	a	<none>
+find_all	x{2,3}	a	[]
+split	x{2,3}	a	[a]
+captures	x{2,3}	a	<none>
+is_match	x{2,3}	abc	false
+full_match	x{2,3}	abc	false
+find	x{2,3}	abc	<none>
+find_all	x{2,3}	abc	[]
+split	x{2,3}	abc	[abc]
+captures	x{2,3}	abc	<none>
+is_match	x{2,3}	aXc	false
+full_match	x{2,3}	aXc	false
+find	x{2,3}	aXc	<none>
+find_all	x{2,3}	aXc	[]
+split	x{2,3}	aXc	[aXc]
+captures	x{2,3}	aXc	<none>
+is_match	x{2,3}	aaabccc	false
+full_match	x{2,3}	aaabccc	false
+find	x{2,3}	aaabccc	<none>
+find_all	x{2,3}	aaabccc	[]
+split	x{2,3}	aaabccc	[aaabccc]
+captures	x{2,3}	aaabccc	<none>
+is_match	x{2,3}	xyz	false
+full_match	x{2,3}	xyz	false
+find	x{2,3}	xyz	<none>
+find_all	x{2,3}	xyz	[]
+split	x{2,3}	xyz	[xyz]
+captures	x{2,3}	xyz	<none>
+is_match	x{2,3}	word boundary word	false
+full_match	x{2,3}	word boundary word	false
+find	x{2,3}	word boundary word	<none>
+find_all	x{2,3}	word boundary word	[]
+split	x{2,3}	word boundary word	[word boundary word]
+captures	x{2,3}	word boundary word	<none>
+is_match	x{2,3}	123-4567	false
+full_match	x{2,3}	123-4567	false
+find	x{2,3}	123-4567	<none>
+find_all	x{2,3}	123-4567	[]
+split	x{2,3}	123-4567	[123-4567]
+captures	x{2,3}	123-4567	<none>
+is_match	x{2,3}	3.14 and 2.718	false
+full_match	x{2,3}	3.14 and 2.718	false
+find	x{2,3}	3.14 and 2.718	<none>
+find_all	x{2,3}	3.14 and 2.718	[]
+split	x{2,3}	3.14 and 2.718	[3.14 and 2.718]
+captures	x{2,3}	3.14 and 2.718	<none>
+is_match	x{2,3}	  spaced  	false
+full_match	x{2,3}	  spaced  	false
+find	x{2,3}	  spaced  	<none>
+find_all	x{2,3}	  spaced  	[]
+split	x{2,3}	  spaced  	[  spaced  ]
+captures	x{2,3}	  spaced  	<none>
+is_match	x{2,3}	AaBbCc	false
+full_match	x{2,3}	AaBbCc	false
+find	x{2,3}	AaBbCc	<none>
+find_all	x{2,3}	AaBbCc	[]
+split	x{2,3}	AaBbCc	[AaBbCc]
+captures	x{2,3}	AaBbCc	<none>
+is_match	x{2,3}	foobaz barbaz	false
+full_match	x{2,3}	foobaz barbaz	false
+find	x{2,3}	foobaz barbaz	<none>
+find_all	x{2,3}	foobaz barbaz	[]
+split	x{2,3}	foobaz barbaz	[foobaz barbaz]
+captures	x{2,3}	foobaz barbaz	<none>
+is_match	x{2,3}	xx	true
+full_match	x{2,3}	xx	true
+find	x{2,3}	xx	<xx>
+find_all	x{2,3}	xx	[xx]
+split	x{2,3}	xx	[|]
+captures	x{2,3}	xx	[xx]
+is_match	x{2,3}	xxx	true
+full_match	x{2,3}	xxx	true
+find	x{2,3}	xxx	<xxx>
+find_all	x{2,3}	xxx	[xxx]
+split	x{2,3}	xxx	[|]
+captures	x{2,3}	xxx	[xxx]
+is_match	x{2,3}	xxxx	true
+full_match	x{2,3}	xxxx	false
+find	x{2,3}	xxxx	<xxx>
+find_all	x{2,3}	xxxx	[xxx]
+split	x{2,3}	xxxx	[|x]
+captures	x{2,3}	xxxx	[xxx]
+is_match	x{2,3}	a.b	false
+full_match	x{2,3}	a.b	false
+find	x{2,3}	a.b	<none>
+find_all	x{2,3}	a.b	[]
+split	x{2,3}	a.b	[a.b]
+captures	x{2,3}	a.b	<none>
+is_match	x{2,3}	a\b	false
+full_match	x{2,3}	a\b	false
+find	x{2,3}	a\b	<none>
+find_all	x{2,3}	a\b	[]
+split	x{2,3}	a\b	[a\b]
+captures	x{2,3}	a\b	<none>
+is_match	x{2,3}	-a-z-	false
+full_match	x{2,3}	-a-z-	false
+find	x{2,3}	-a-z-	<none>
+find_all	x{2,3}	-a-z-	[]
+split	x{2,3}	-a-z-	[-a-z-]
+captures	x{2,3}	-a-z-	<none>
+is_match	x{2,3}	[bracket]	false
+full_match	x{2,3}	[bracket]	false
+find	x{2,3}	[bracket]	<none>
+find_all	x{2,3}	[bracket]	[]
+split	x{2,3}	[bracket]	[[bracket]]
+captures	x{2,3}	[bracket]	<none>
+is_match	x{2,3}	ab	false
+full_match	x{2,3}	ab	false
+find	x{2,3}	ab	<none>
+find_all	x{2,3}	ab	[]
+split	x{2,3}	ab	[ab]
+captures	x{2,3}	ab	<none>
+is_match	x{2,3}	b	false
+full_match	x{2,3}	b	false
+find	x{2,3}	b	<none>
+find_all	x{2,3}	b	[]
+split	x{2,3}	b	[b]
+captures	x{2,3}	b	<none>
+is_match	x{2,3}	]	false
+full_match	x{2,3}	]	false
+find	x{2,3}	]	<none>
+find_all	x{2,3}	]	[]
+split	x{2,3}	]	[]]
+captures	x{2,3}	]	<none>
+is_match	x{2,3}	a]b	false
+full_match	x{2,3}	a]b	false
+find	x{2,3}	a]b	<none>
+find_all	x{2,3}	a]b	[]
+split	x{2,3}	a]b	[a]b]
+captures	x{2,3}	a]b	<none>
+is_match	[a-z]{1,3}		false
+full_match	[a-z]{1,3}		false
+find	[a-z]{1,3}		<none>
+find_all	[a-z]{1,3}		[]
+split	[a-z]{1,3}		[]
+captures	[a-z]{1,3}		<none>
+is_match	[a-z]{1,3}	a	true
+full_match	[a-z]{1,3}	a	true
+find	[a-z]{1,3}	a	<a>
+find_all	[a-z]{1,3}	a	[a]
+split	[a-z]{1,3}	a	[|]
+captures	[a-z]{1,3}	a	[a]
+is_match	[a-z]{1,3}	abc	true
+full_match	[a-z]{1,3}	abc	true
+find	[a-z]{1,3}	abc	<abc>
+find_all	[a-z]{1,3}	abc	[abc]
+split	[a-z]{1,3}	abc	[|]
+captures	[a-z]{1,3}	abc	[abc]
+is_match	[a-z]{1,3}	aXc	true
+full_match	[a-z]{1,3}	aXc	false
+find	[a-z]{1,3}	aXc	<a>
+find_all	[a-z]{1,3}	aXc	[a|c]
+split	[a-z]{1,3}	aXc	[|X|]
+captures	[a-z]{1,3}	aXc	[a]
+is_match	[a-z]{1,3}	aaabccc	true
+full_match	[a-z]{1,3}	aaabccc	false
+find	[a-z]{1,3}	aaabccc	<aaa>
+find_all	[a-z]{1,3}	aaabccc	[aaa|bcc|c]
+split	[a-z]{1,3}	aaabccc	[|||]
+captures	[a-z]{1,3}	aaabccc	[aaa]
+is_match	[a-z]{1,3}	xyz	true
+full_match	[a-z]{1,3}	xyz	true
+find	[a-z]{1,3}	xyz	<xyz>
+find_all	[a-z]{1,3}	xyz	[xyz]
+split	[a-z]{1,3}	xyz	[|]
+captures	[a-z]{1,3}	xyz	[xyz]
+is_match	[a-z]{1,3}	word boundary word	true
+full_match	[a-z]{1,3}	word boundary word	false
+find	[a-z]{1,3}	word boundary word	<wor>
+find_all	[a-z]{1,3}	word boundary word	[wor|d|bou|nda|ry|wor|d]
+split	[a-z]{1,3}	word boundary word	[|| ||| ||]
+captures	[a-z]{1,3}	word boundary word	[wor]
+is_match	[a-z]{1,3}	123-4567	false
+full_match	[a-z]{1,3}	123-4567	false
+find	[a-z]{1,3}	123-4567	<none>
+find_all	[a-z]{1,3}	123-4567	[]
+split	[a-z]{1,3}	123-4567	[123-4567]
+captures	[a-z]{1,3}	123-4567	<none>
+is_match	[a-z]{1,3}	3.14 and 2.718	true
+full_match	[a-z]{1,3}	3.14 and 2.718	false
+find	[a-z]{1,3}	3.14 and 2.718	<and>
+find_all	[a-z]{1,3}	3.14 and 2.718	[and]
+split	[a-z]{1,3}	3.14 and 2.718	[3.14 | 2.718]
+captures	[a-z]{1,3}	3.14 and 2.718	[and]
+is_match	[a-z]{1,3}	  spaced  	true
+full_match	[a-z]{1,3}	  spaced  	false
+find	[a-z]{1,3}	  spaced  	<spa>
+find_all	[a-z]{1,3}	  spaced  	[spa|ced]
+split	[a-z]{1,3}	  spaced  	[  ||  ]
+captures	[a-z]{1,3}	  spaced  	[spa]
+is_match	[a-z]{1,3}	AaBbCc	true
+full_match	[a-z]{1,3}	AaBbCc	false
+find	[a-z]{1,3}	AaBbCc	<a>
+find_all	[a-z]{1,3}	AaBbCc	[a|b|c]
+split	[a-z]{1,3}	AaBbCc	[A|B|C|]
+captures	[a-z]{1,3}	AaBbCc	[a]
+is_match	[a-z]{1,3}	foobaz barbaz	true
+full_match	[a-z]{1,3}	foobaz barbaz	false
+find	[a-z]{1,3}	foobaz barbaz	<foo>
+find_all	[a-z]{1,3}	foobaz barbaz	[foo|baz|bar|baz]
+split	[a-z]{1,3}	foobaz barbaz	[|| ||]
+captures	[a-z]{1,3}	foobaz barbaz	[foo]
+is_match	[a-z]{1,3}	xx	true
+full_match	[a-z]{1,3}	xx	true
+find	[a-z]{1,3}	xx	<xx>
+find_all	[a-z]{1,3}	xx	[xx]
+split	[a-z]{1,3}	xx	[|]
+captures	[a-z]{1,3}	xx	[xx]
+is_match	[a-z]{1,3}	xxx	true
+full_match	[a-z]{1,3}	xxx	true
+find	[a-z]{1,3}	xxx	<xxx>
+find_all	[a-z]{1,3}	xxx	[xxx]
+split	[a-z]{1,3}	xxx	[|]
+captures	[a-z]{1,3}	xxx	[xxx]
+is_match	[a-z]{1,3}	xxxx	true
+full_match	[a-z]{1,3}	xxxx	false
+find	[a-z]{1,3}	xxxx	<xxx>
+find_all	[a-z]{1,3}	xxxx	[xxx|x]
+split	[a-z]{1,3}	xxxx	[||]
+captures	[a-z]{1,3}	xxxx	[xxx]
+is_match	[a-z]{1,3}	a.b	true
+full_match	[a-z]{1,3}	a.b	false
+find	[a-z]{1,3}	a.b	<a>
+find_all	[a-z]{1,3}	a.b	[a|b]
+split	[a-z]{1,3}	a.b	[|.|]
+captures	[a-z]{1,3}	a.b	[a]
+is_match	[a-z]{1,3}	a\b	true
+full_match	[a-z]{1,3}	a\b	false
+find	[a-z]{1,3}	a\b	<a>
+find_all	[a-z]{1,3}	a\b	[a|b]
+split	[a-z]{1,3}	a\b	[|\|]
+captures	[a-z]{1,3}	a\b	[a]
+is_match	[a-z]{1,3}	-a-z-	true
+full_match	[a-z]{1,3}	-a-z-	false
+find	[a-z]{1,3}	-a-z-	<a>
+find_all	[a-z]{1,3}	-a-z-	[a|z]
+split	[a-z]{1,3}	-a-z-	[-|-|-]
+captures	[a-z]{1,3}	-a-z-	[a]
+is_match	[a-z]{1,3}	[bracket]	true
+full_match	[a-z]{1,3}	[bracket]	false
+find	[a-z]{1,3}	[bracket]	<bra>
+find_all	[a-z]{1,3}	[bracket]	[bra|cke|t]
+split	[a-z]{1,3}	[bracket]	[[|||]]
+captures	[a-z]{1,3}	[bracket]	[bra]
+is_match	[a-z]{1,3}	ab	true
+full_match	[a-z]{1,3}	ab	true
+find	[a-z]{1,3}	ab	<ab>
+find_all	[a-z]{1,3}	ab	[ab]
+split	[a-z]{1,3}	ab	[|]
+captures	[a-z]{1,3}	ab	[ab]
+is_match	[a-z]{1,3}	b	true
+full_match	[a-z]{1,3}	b	true
+find	[a-z]{1,3}	b	<b>
+find_all	[a-z]{1,3}	b	[b]
+split	[a-z]{1,3}	b	[|]
+captures	[a-z]{1,3}	b	[b]
+is_match	[a-z]{1,3}	]	false
+full_match	[a-z]{1,3}	]	false
+find	[a-z]{1,3}	]	<none>
+find_all	[a-z]{1,3}	]	[]
+split	[a-z]{1,3}	]	[]]
+captures	[a-z]{1,3}	]	<none>
+is_match	[a-z]{1,3}	a]b	true
+full_match	[a-z]{1,3}	a]b	false
+find	[a-z]{1,3}	a]b	<a>
+find_all	[a-z]{1,3}	a]b	[a|b]
+split	[a-z]{1,3}	a]b	[|]|]
+captures	[a-z]{1,3}	a]b	[a]
+is_match	(foo|bar)baz		false
+full_match	(foo|bar)baz		false
+find	(foo|bar)baz		<none>
+find_all	(foo|bar)baz		[]
+split	(foo|bar)baz		[]
+captures	(foo|bar)baz		<none>
+is_match	(foo|bar)baz	a	false
+full_match	(foo|bar)baz	a	false
+find	(foo|bar)baz	a	<none>
+find_all	(foo|bar)baz	a	[]
+split	(foo|bar)baz	a	[a]
+captures	(foo|bar)baz	a	<none>
+is_match	(foo|bar)baz	abc	false
+full_match	(foo|bar)baz	abc	false
+find	(foo|bar)baz	abc	<none>
+find_all	(foo|bar)baz	abc	[]
+split	(foo|bar)baz	abc	[abc]
+captures	(foo|bar)baz	abc	<none>
+is_match	(foo|bar)baz	aXc	false
+full_match	(foo|bar)baz	aXc	false
+find	(foo|bar)baz	aXc	<none>
+find_all	(foo|bar)baz	aXc	[]
+split	(foo|bar)baz	aXc	[aXc]
+captures	(foo|bar)baz	aXc	<none>
+is_match	(foo|bar)baz	aaabccc	false
+full_match	(foo|bar)baz	aaabccc	false
+find	(foo|bar)baz	aaabccc	<none>
+find_all	(foo|bar)baz	aaabccc	[]
+split	(foo|bar)baz	aaabccc	[aaabccc]
+captures	(foo|bar)baz	aaabccc	<none>
+is_match	(foo|bar)baz	xyz	false
+full_match	(foo|bar)baz	xyz	false
+find	(foo|bar)baz	xyz	<none>
+find_all	(foo|bar)baz	xyz	[]
+split	(foo|bar)baz	xyz	[xyz]
+captures	(foo|bar)baz	xyz	<none>
+is_match	(foo|bar)baz	word boundary word	false
+full_match	(foo|bar)baz	word boundary word	false
+find	(foo|bar)baz	word boundary word	<none>
+find_all	(foo|bar)baz	word boundary word	[]
+split	(foo|bar)baz	word boundary word	[word boundary word]
+captures	(foo|bar)baz	word boundary word	<none>
+is_match	(foo|bar)baz	123-4567	false
+full_match	(foo|bar)baz	123-4567	false
+find	(foo|bar)baz	123-4567	<none>
+find_all	(foo|bar)baz	123-4567	[]
+split	(foo|bar)baz	123-4567	[123-4567]
+captures	(foo|bar)baz	123-4567	<none>
+is_match	(foo|bar)baz	3.14 and 2.718	false
+full_match	(foo|bar)baz	3.14 and 2.718	false
+find	(foo|bar)baz	3.14 and 2.718	<none>
+find_all	(foo|bar)baz	3.14 and 2.718	[]
+split	(foo|bar)baz	3.14 and 2.718	[3.14 and 2.718]
+captures	(foo|bar)baz	3.14 and 2.718	<none>
+is_match	(foo|bar)baz	  spaced  	false
+full_match	(foo|bar)baz	  spaced  	false
+find	(foo|bar)baz	  spaced  	<none>
+find_all	(foo|bar)baz	  spaced  	[]
+split	(foo|bar)baz	  spaced  	[  spaced  ]
+captures	(foo|bar)baz	  spaced  	<none>
+is_match	(foo|bar)baz	AaBbCc	false
+full_match	(foo|bar)baz	AaBbCc	false
+find	(foo|bar)baz	AaBbCc	<none>
+find_all	(foo|bar)baz	AaBbCc	[]
+split	(foo|bar)baz	AaBbCc	[AaBbCc]
+captures	(foo|bar)baz	AaBbCc	<none>
+is_match	(foo|bar)baz	foobaz barbaz	true
+full_match	(foo|bar)baz	foobaz barbaz	false
+find	(foo|bar)baz	foobaz barbaz	<foobaz>
+find_all	(foo|bar)baz	foobaz barbaz	[foobaz|barbaz]
+split	(foo|bar)baz	foobaz barbaz	[| |]
+captures	(foo|bar)baz	foobaz barbaz	[foobaz|foo]
+is_match	(foo|bar)baz	xx	false
+full_match	(foo|bar)baz	xx	false
+find	(foo|bar)baz	xx	<none>
+find_all	(foo|bar)baz	xx	[]
+split	(foo|bar)baz	xx	[xx]
+captures	(foo|bar)baz	xx	<none>
+is_match	(foo|bar)baz	xxx	false
+full_match	(foo|bar)baz	xxx	false
+find	(foo|bar)baz	xxx	<none>
+find_all	(foo|bar)baz	xxx	[]
+split	(foo|bar)baz	xxx	[xxx]
+captures	(foo|bar)baz	xxx	<none>
+is_match	(foo|bar)baz	xxxx	false
+full_match	(foo|bar)baz	xxxx	false
+find	(foo|bar)baz	xxxx	<none>
+find_all	(foo|bar)baz	xxxx	[]
+split	(foo|bar)baz	xxxx	[xxxx]
+captures	(foo|bar)baz	xxxx	<none>
+is_match	(foo|bar)baz	a.b	false
+full_match	(foo|bar)baz	a.b	false
+find	(foo|bar)baz	a.b	<none>
+find_all	(foo|bar)baz	a.b	[]
+split	(foo|bar)baz	a.b	[a.b]
+captures	(foo|bar)baz	a.b	<none>
+is_match	(foo|bar)baz	a\b	false
+full_match	(foo|bar)baz	a\b	false
+find	(foo|bar)baz	a\b	<none>
+find_all	(foo|bar)baz	a\b	[]
+split	(foo|bar)baz	a\b	[a\b]
+captures	(foo|bar)baz	a\b	<none>
+is_match	(foo|bar)baz	-a-z-	false
+full_match	(foo|bar)baz	-a-z-	false
+find	(foo|bar)baz	-a-z-	<none>
+find_all	(foo|bar)baz	-a-z-	[]
+split	(foo|bar)baz	-a-z-	[-a-z-]
+captures	(foo|bar)baz	-a-z-	<none>
+is_match	(foo|bar)baz	[bracket]	false
+full_match	(foo|bar)baz	[bracket]	false
+find	(foo|bar)baz	[bracket]	<none>
+find_all	(foo|bar)baz	[bracket]	[]
+split	(foo|bar)baz	[bracket]	[[bracket]]
+captures	(foo|bar)baz	[bracket]	<none>
+is_match	(foo|bar)baz	ab	false
+full_match	(foo|bar)baz	ab	false
+find	(foo|bar)baz	ab	<none>
+find_all	(foo|bar)baz	ab	[]
+split	(foo|bar)baz	ab	[ab]
+captures	(foo|bar)baz	ab	<none>
+is_match	(foo|bar)baz	b	false
+full_match	(foo|bar)baz	b	false
+find	(foo|bar)baz	b	<none>
+find_all	(foo|bar)baz	b	[]
+split	(foo|bar)baz	b	[b]
+captures	(foo|bar)baz	b	<none>
+is_match	(foo|bar)baz	]	false
+full_match	(foo|bar)baz	]	false
+find	(foo|bar)baz	]	<none>
+find_all	(foo|bar)baz	]	[]
+split	(foo|bar)baz	]	[]]
+captures	(foo|bar)baz	]	<none>
+is_match	(foo|bar)baz	a]b	false
+full_match	(foo|bar)baz	a]b	false
+find	(foo|bar)baz	a]b	<none>
+find_all	(foo|bar)baz	a]b	[]
+split	(foo|bar)baz	a]b	[a]b]
+captures	(foo|bar)baz	a]b	<none>
+is_match	a(?:bc)?d		false
+full_match	a(?:bc)?d		false
+find	a(?:bc)?d		<none>
+find_all	a(?:bc)?d		[]
+split	a(?:bc)?d		[]
+captures	a(?:bc)?d		<none>
+is_match	a(?:bc)?d	a	false
+full_match	a(?:bc)?d	a	false
+find	a(?:bc)?d	a	<none>
+find_all	a(?:bc)?d	a	[]
+split	a(?:bc)?d	a	[a]
+captures	a(?:bc)?d	a	<none>
+is_match	a(?:bc)?d	abc	false
+full_match	a(?:bc)?d	abc	false
+find	a(?:bc)?d	abc	<none>
+find_all	a(?:bc)?d	abc	[]
+split	a(?:bc)?d	abc	[abc]
+captures	a(?:bc)?d	abc	<none>
+is_match	a(?:bc)?d	aXc	false
+full_match	a(?:bc)?d	aXc	false
+find	a(?:bc)?d	aXc	<none>
+find_all	a(?:bc)?d	aXc	[]
+split	a(?:bc)?d	aXc	[aXc]
+captures	a(?:bc)?d	aXc	<none>
+is_match	a(?:bc)?d	aaabccc	false
+full_match	a(?:bc)?d	aaabccc	false
+find	a(?:bc)?d	aaabccc	<none>
+find_all	a(?:bc)?d	aaabccc	[]
+split	a(?:bc)?d	aaabccc	[aaabccc]
+captures	a(?:bc)?d	aaabccc	<none>
+is_match	a(?:bc)?d	xyz	false
+full_match	a(?:bc)?d	xyz	false
+find	a(?:bc)?d	xyz	<none>
+find_all	a(?:bc)?d	xyz	[]
+split	a(?:bc)?d	xyz	[xyz]
+captures	a(?:bc)?d	xyz	<none>
+is_match	a(?:bc)?d	word boundary word	false
+full_match	a(?:bc)?d	word boundary word	false
+find	a(?:bc)?d	word boundary word	<none>
+find_all	a(?:bc)?d	word boundary word	[]
+split	a(?:bc)?d	word boundary word	[word boundary word]
+captures	a(?:bc)?d	word boundary word	<none>
+is_match	a(?:bc)?d	123-4567	false
+full_match	a(?:bc)?d	123-4567	false
+find	a(?:bc)?d	123-4567	<none>
+find_all	a(?:bc)?d	123-4567	[]
+split	a(?:bc)?d	123-4567	[123-4567]
+captures	a(?:bc)?d	123-4567	<none>
+is_match	a(?:bc)?d	3.14 and 2.718	false
+full_match	a(?:bc)?d	3.14 and 2.718	false
+find	a(?:bc)?d	3.14 and 2.718	<none>
+find_all	a(?:bc)?d	3.14 and 2.718	[]
+split	a(?:bc)?d	3.14 and 2.718	[3.14 and 2.718]
+captures	a(?:bc)?d	3.14 and 2.718	<none>
+is_match	a(?:bc)?d	  spaced  	false
+full_match	a(?:bc)?d	  spaced  	false
+find	a(?:bc)?d	  spaced  	<none>
+find_all	a(?:bc)?d	  spaced  	[]
+split	a(?:bc)?d	  spaced  	[  spaced  ]
+captures	a(?:bc)?d	  spaced  	<none>
+is_match	a(?:bc)?d	AaBbCc	false
+full_match	a(?:bc)?d	AaBbCc	false
+find	a(?:bc)?d	AaBbCc	<none>
+find_all	a(?:bc)?d	AaBbCc	[]
+split	a(?:bc)?d	AaBbCc	[AaBbCc]
+captures	a(?:bc)?d	AaBbCc	<none>
+is_match	a(?:bc)?d	foobaz barbaz	false
+full_match	a(?:bc)?d	foobaz barbaz	false
+find	a(?:bc)?d	foobaz barbaz	<none>
+find_all	a(?:bc)?d	foobaz barbaz	[]
+split	a(?:bc)?d	foobaz barbaz	[foobaz barbaz]
+captures	a(?:bc)?d	foobaz barbaz	<none>
+is_match	a(?:bc)?d	xx	false
+full_match	a(?:bc)?d	xx	false
+find	a(?:bc)?d	xx	<none>
+find_all	a(?:bc)?d	xx	[]
+split	a(?:bc)?d	xx	[xx]
+captures	a(?:bc)?d	xx	<none>
+is_match	a(?:bc)?d	xxx	false
+full_match	a(?:bc)?d	xxx	false
+find	a(?:bc)?d	xxx	<none>
+find_all	a(?:bc)?d	xxx	[]
+split	a(?:bc)?d	xxx	[xxx]
+captures	a(?:bc)?d	xxx	<none>
+is_match	a(?:bc)?d	xxxx	false
+full_match	a(?:bc)?d	xxxx	false
+find	a(?:bc)?d	xxxx	<none>
+find_all	a(?:bc)?d	xxxx	[]
+split	a(?:bc)?d	xxxx	[xxxx]
+captures	a(?:bc)?d	xxxx	<none>
+is_match	a(?:bc)?d	a.b	false
+full_match	a(?:bc)?d	a.b	false
+find	a(?:bc)?d	a.b	<none>
+find_all	a(?:bc)?d	a.b	[]
+split	a(?:bc)?d	a.b	[a.b]
+captures	a(?:bc)?d	a.b	<none>
+is_match	a(?:bc)?d	a\b	false
+full_match	a(?:bc)?d	a\b	false
+find	a(?:bc)?d	a\b	<none>
+find_all	a(?:bc)?d	a\b	[]
+split	a(?:bc)?d	a\b	[a\b]
+captures	a(?:bc)?d	a\b	<none>
+is_match	a(?:bc)?d	-a-z-	false
+full_match	a(?:bc)?d	-a-z-	false
+find	a(?:bc)?d	-a-z-	<none>
+find_all	a(?:bc)?d	-a-z-	[]
+split	a(?:bc)?d	-a-z-	[-a-z-]
+captures	a(?:bc)?d	-a-z-	<none>
+is_match	a(?:bc)?d	[bracket]	false
+full_match	a(?:bc)?d	[bracket]	false
+find	a(?:bc)?d	[bracket]	<none>
+find_all	a(?:bc)?d	[bracket]	[]
+split	a(?:bc)?d	[bracket]	[[bracket]]
+captures	a(?:bc)?d	[bracket]	<none>
+is_match	a(?:bc)?d	ab	false
+full_match	a(?:bc)?d	ab	false
+find	a(?:bc)?d	ab	<none>
+find_all	a(?:bc)?d	ab	[]
+split	a(?:bc)?d	ab	[ab]
+captures	a(?:bc)?d	ab	<none>
+is_match	a(?:bc)?d	b	false
+full_match	a(?:bc)?d	b	false
+find	a(?:bc)?d	b	<none>
+find_all	a(?:bc)?d	b	[]
+split	a(?:bc)?d	b	[b]
+captures	a(?:bc)?d	b	<none>
+is_match	a(?:bc)?d	]	false
+full_match	a(?:bc)?d	]	false
+find	a(?:bc)?d	]	<none>
+find_all	a(?:bc)?d	]	[]
+split	a(?:bc)?d	]	[]]
+captures	a(?:bc)?d	]	<none>
+is_match	a(?:bc)?d	a]b	false
+full_match	a(?:bc)?d	a]b	false
+find	a(?:bc)?d	a]b	<none>
+find_all	a(?:bc)?d	a]b	[]
+split	a(?:bc)?d	a]b	[a]b]
+captures	a(?:bc)?d	a]b	<none>
+is_match	\.		false
+full_match	\.		false
+find	\.		<none>
+find_all	\.		[]
+split	\.		[]
+captures	\.		<none>
+is_match	\.	a	false
+full_match	\.	a	false
+find	\.	a	<none>
+find_all	\.	a	[]
+split	\.	a	[a]
+captures	\.	a	<none>
+is_match	\.	abc	false
+full_match	\.	abc	false
+find	\.	abc	<none>
+find_all	\.	abc	[]
+split	\.	abc	[abc]
+captures	\.	abc	<none>
+is_match	\.	aXc	false
+full_match	\.	aXc	false
+find	\.	aXc	<none>
+find_all	\.	aXc	[]
+split	\.	aXc	[aXc]
+captures	\.	aXc	<none>
+is_match	\.	aaabccc	false
+full_match	\.	aaabccc	false
+find	\.	aaabccc	<none>
+find_all	\.	aaabccc	[]
+split	\.	aaabccc	[aaabccc]
+captures	\.	aaabccc	<none>
+is_match	\.	xyz	false
+full_match	\.	xyz	false
+find	\.	xyz	<none>
+find_all	\.	xyz	[]
+split	\.	xyz	[xyz]
+captures	\.	xyz	<none>
+is_match	\.	word boundary word	false
+full_match	\.	word boundary word	false
+find	\.	word boundary word	<none>
+find_all	\.	word boundary word	[]
+split	\.	word boundary word	[word boundary word]
+captures	\.	word boundary word	<none>
+is_match	\.	123-4567	false
+full_match	\.	123-4567	false
+find	\.	123-4567	<none>
+find_all	\.	123-4567	[]
+split	\.	123-4567	[123-4567]
+captures	\.	123-4567	<none>
+is_match	\.	3.14 and 2.718	true
+full_match	\.	3.14 and 2.718	false
+find	\.	3.14 and 2.718	<.>
+find_all	\.	3.14 and 2.718	[.|.]
+split	\.	3.14 and 2.718	[3|14 and 2|718]
+captures	\.	3.14 and 2.718	[.]
+is_match	\.	  spaced  	false
+full_match	\.	  spaced  	false
+find	\.	  spaced  	<none>
+find_all	\.	  spaced  	[]
+split	\.	  spaced  	[  spaced  ]
+captures	\.	  spaced  	<none>
+is_match	\.	AaBbCc	false
+full_match	\.	AaBbCc	false
+find	\.	AaBbCc	<none>
+find_all	\.	AaBbCc	[]
+split	\.	AaBbCc	[AaBbCc]
+captures	\.	AaBbCc	<none>
+is_match	\.	foobaz barbaz	false
+full_match	\.	foobaz barbaz	false
+find	\.	foobaz barbaz	<none>
+find_all	\.	foobaz barbaz	[]
+split	\.	foobaz barbaz	[foobaz barbaz]
+captures	\.	foobaz barbaz	<none>
+is_match	\.	xx	false
+full_match	\.	xx	false
+find	\.	xx	<none>
+find_all	\.	xx	[]
+split	\.	xx	[xx]
+captures	\.	xx	<none>
+is_match	\.	xxx	false
+full_match	\.	xxx	false
+find	\.	xxx	<none>
+find_all	\.	xxx	[]
+split	\.	xxx	[xxx]
+captures	\.	xxx	<none>
+is_match	\.	xxxx	false
+full_match	\.	xxxx	false
+find	\.	xxxx	<none>
+find_all	\.	xxxx	[]
+split	\.	xxxx	[xxxx]
+captures	\.	xxxx	<none>
+is_match	\.	a.b	true
+full_match	\.	a.b	false
+find	\.	a.b	<.>
+find_all	\.	a.b	[.]
+split	\.	a.b	[a|b]
+captures	\.	a.b	[.]
+is_match	\.	a\b	false
+full_match	\.	a\b	false
+find	\.	a\b	<none>
+find_all	\.	a\b	[]
+split	\.	a\b	[a\b]
+captures	\.	a\b	<none>
+is_match	\.	-a-z-	false
+full_match	\.	-a-z-	false
+find	\.	-a-z-	<none>
+find_all	\.	-a-z-	[]
+split	\.	-a-z-	[-a-z-]
+captures	\.	-a-z-	<none>
+is_match	\.	[bracket]	false
+full_match	\.	[bracket]	false
+find	\.	[bracket]	<none>
+find_all	\.	[bracket]	[]
+split	\.	[bracket]	[[bracket]]
+captures	\.	[bracket]	<none>
+is_match	\.	ab	false
+full_match	\.	ab	false
+find	\.	ab	<none>
+find_all	\.	ab	[]
+split	\.	ab	[ab]
+captures	\.	ab	<none>
+is_match	\.	b	false
+full_match	\.	b	false
+find	\.	b	<none>
+find_all	\.	b	[]
+split	\.	b	[b]
+captures	\.	b	<none>
+is_match	\.	]	false
+full_match	\.	]	false
+find	\.	]	<none>
+find_all	\.	]	[]
+split	\.	]	[]]
+captures	\.	]	<none>
+is_match	\.	a]b	false
+full_match	\.	a]b	false
+find	\.	a]b	<none>
+find_all	\.	a]b	[]
+split	\.	a]b	[a]b]
+captures	\.	a]b	<none>
+is_match	\\		false
+full_match	\\		false
+find	\\		<none>
+find_all	\\		[]
+split	\\		[]
+captures	\\		<none>
+is_match	\\	a	false
+full_match	\\	a	false
+find	\\	a	<none>
+find_all	\\	a	[]
+split	\\	a	[a]
+captures	\\	a	<none>
+is_match	\\	abc	false
+full_match	\\	abc	false
+find	\\	abc	<none>
+find_all	\\	abc	[]
+split	\\	abc	[abc]
+captures	\\	abc	<none>
+is_match	\\	aXc	false
+full_match	\\	aXc	false
+find	\\	aXc	<none>
+find_all	\\	aXc	[]
+split	\\	aXc	[aXc]
+captures	\\	aXc	<none>
+is_match	\\	aaabccc	false
+full_match	\\	aaabccc	false
+find	\\	aaabccc	<none>
+find_all	\\	aaabccc	[]
+split	\\	aaabccc	[aaabccc]
+captures	\\	aaabccc	<none>
+is_match	\\	xyz	false
+full_match	\\	xyz	false
+find	\\	xyz	<none>
+find_all	\\	xyz	[]
+split	\\	xyz	[xyz]
+captures	\\	xyz	<none>
+is_match	\\	word boundary word	false
+full_match	\\	word boundary word	false
+find	\\	word boundary word	<none>
+find_all	\\	word boundary word	[]
+split	\\	word boundary word	[word boundary word]
+captures	\\	word boundary word	<none>
+is_match	\\	123-4567	false
+full_match	\\	123-4567	false
+find	\\	123-4567	<none>
+find_all	\\	123-4567	[]
+split	\\	123-4567	[123-4567]
+captures	\\	123-4567	<none>
+is_match	\\	3.14 and 2.718	false
+full_match	\\	3.14 and 2.718	false
+find	\\	3.14 and 2.718	<none>
+find_all	\\	3.14 and 2.718	[]
+split	\\	3.14 and 2.718	[3.14 and 2.718]
+captures	\\	3.14 and 2.718	<none>
+is_match	\\	  spaced  	false
+full_match	\\	  spaced  	false
+find	\\	  spaced  	<none>
+find_all	\\	  spaced  	[]
+split	\\	  spaced  	[  spaced  ]
+captures	\\	  spaced  	<none>
+is_match	\\	AaBbCc	false
+full_match	\\	AaBbCc	false
+find	\\	AaBbCc	<none>
+find_all	\\	AaBbCc	[]
+split	\\	AaBbCc	[AaBbCc]
+captures	\\	AaBbCc	<none>
+is_match	\\	foobaz barbaz	false
+full_match	\\	foobaz barbaz	false
+find	\\	foobaz barbaz	<none>
+find_all	\\	foobaz barbaz	[]
+split	\\	foobaz barbaz	[foobaz barbaz]
+captures	\\	foobaz barbaz	<none>
+is_match	\\	xx	false
+full_match	\\	xx	false
+find	\\	xx	<none>
+find_all	\\	xx	[]
+split	\\	xx	[xx]
+captures	\\	xx	<none>
+is_match	\\	xxx	false
+full_match	\\	xxx	false
+find	\\	xxx	<none>
+find_all	\\	xxx	[]
+split	\\	xxx	[xxx]
+captures	\\	xxx	<none>
+is_match	\\	xxxx	false
+full_match	\\	xxxx	false
+find	\\	xxxx	<none>
+find_all	\\	xxxx	[]
+split	\\	xxxx	[xxxx]
+captures	\\	xxxx	<none>
+is_match	\\	a.b	false
+full_match	\\	a.b	false
+find	\\	a.b	<none>
+find_all	\\	a.b	[]
+split	\\	a.b	[a.b]
+captures	\\	a.b	<none>
+is_match	\\	a\b	true
+full_match	\\	a\b	false
+find	\\	a\b	<\>
+find_all	\\	a\b	[\]
+split	\\	a\b	[a|b]
+captures	\\	a\b	[\]
+is_match	\\	-a-z-	false
+full_match	\\	-a-z-	false
+find	\\	-a-z-	<none>
+find_all	\\	-a-z-	[]
+split	\\	-a-z-	[-a-z-]
+captures	\\	-a-z-	<none>
+is_match	\\	[bracket]	false
+full_match	\\	[bracket]	false
+find	\\	[bracket]	<none>
+find_all	\\	[bracket]	[]
+split	\\	[bracket]	[[bracket]]
+captures	\\	[bracket]	<none>
+is_match	\\	ab	false
+full_match	\\	ab	false
+find	\\	ab	<none>
+find_all	\\	ab	[]
+split	\\	ab	[ab]
+captures	\\	ab	<none>
+is_match	\\	b	false
+full_match	\\	b	false
+find	\\	b	<none>
+find_all	\\	b	[]
+split	\\	b	[b]
+captures	\\	b	<none>
+is_match	\\	]	false
+full_match	\\	]	false
+find	\\	]	<none>
+find_all	\\	]	[]
+split	\\	]	[]]
+captures	\\	]	<none>
+is_match	\\	a]b	false
+full_match	\\	a]b	false
+find	\\	a]b	<none>
+find_all	\\	a]b	[]
+split	\\	a]b	[a]b]
+captures	\\	a]b	<none>
+is_match	[.]		false
+full_match	[.]		false
+find	[.]		<none>
+find_all	[.]		[]
+split	[.]		[]
+captures	[.]		<none>
+is_match	[.]	a	false
+full_match	[.]	a	false
+find	[.]	a	<none>
+find_all	[.]	a	[]
+split	[.]	a	[a]
+captures	[.]	a	<none>
+is_match	[.]	abc	false
+full_match	[.]	abc	false
+find	[.]	abc	<none>
+find_all	[.]	abc	[]
+split	[.]	abc	[abc]
+captures	[.]	abc	<none>
+is_match	[.]	aXc	false
+full_match	[.]	aXc	false
+find	[.]	aXc	<none>
+find_all	[.]	aXc	[]
+split	[.]	aXc	[aXc]
+captures	[.]	aXc	<none>
+is_match	[.]	aaabccc	false
+full_match	[.]	aaabccc	false
+find	[.]	aaabccc	<none>
+find_all	[.]	aaabccc	[]
+split	[.]	aaabccc	[aaabccc]
+captures	[.]	aaabccc	<none>
+is_match	[.]	xyz	false
+full_match	[.]	xyz	false
+find	[.]	xyz	<none>
+find_all	[.]	xyz	[]
+split	[.]	xyz	[xyz]
+captures	[.]	xyz	<none>
+is_match	[.]	word boundary word	false
+full_match	[.]	word boundary word	false
+find	[.]	word boundary word	<none>
+find_all	[.]	word boundary word	[]
+split	[.]	word boundary word	[word boundary word]
+captures	[.]	word boundary word	<none>
+is_match	[.]	123-4567	false
+full_match	[.]	123-4567	false
+find	[.]	123-4567	<none>
+find_all	[.]	123-4567	[]
+split	[.]	123-4567	[123-4567]
+captures	[.]	123-4567	<none>
+is_match	[.]	3.14 and 2.718	true
+full_match	[.]	3.14 and 2.718	false
+find	[.]	3.14 and 2.718	<.>
+find_all	[.]	3.14 and 2.718	[.|.]
+split	[.]	3.14 and 2.718	[3|14 and 2|718]
+captures	[.]	3.14 and 2.718	[.]
+is_match	[.]	  spaced  	false
+full_match	[.]	  spaced  	false
+find	[.]	  spaced  	<none>
+find_all	[.]	  spaced  	[]
+split	[.]	  spaced  	[  spaced  ]
+captures	[.]	  spaced  	<none>
+is_match	[.]	AaBbCc	false
+full_match	[.]	AaBbCc	false
+find	[.]	AaBbCc	<none>
+find_all	[.]	AaBbCc	[]
+split	[.]	AaBbCc	[AaBbCc]
+captures	[.]	AaBbCc	<none>
+is_match	[.]	foobaz barbaz	false
+full_match	[.]	foobaz barbaz	false
+find	[.]	foobaz barbaz	<none>
+find_all	[.]	foobaz barbaz	[]
+split	[.]	foobaz barbaz	[foobaz barbaz]
+captures	[.]	foobaz barbaz	<none>
+is_match	[.]	xx	false
+full_match	[.]	xx	false
+find	[.]	xx	<none>
+find_all	[.]	xx	[]
+split	[.]	xx	[xx]
+captures	[.]	xx	<none>
+is_match	[.]	xxx	false
+full_match	[.]	xxx	false
+find	[.]	xxx	<none>
+find_all	[.]	xxx	[]
+split	[.]	xxx	[xxx]
+captures	[.]	xxx	<none>
+is_match	[.]	xxxx	false
+full_match	[.]	xxxx	false
+find	[.]	xxxx	<none>
+find_all	[.]	xxxx	[]
+split	[.]	xxxx	[xxxx]
+captures	[.]	xxxx	<none>
+is_match	[.]	a.b	true
+full_match	[.]	a.b	false
+find	[.]	a.b	<.>
+find_all	[.]	a.b	[.]
+split	[.]	a.b	[a|b]
+captures	[.]	a.b	[.]
+is_match	[.]	a\b	false
+full_match	[.]	a\b	false
+find	[.]	a\b	<none>
+find_all	[.]	a\b	[]
+split	[.]	a\b	[a\b]
+captures	[.]	a\b	<none>
+is_match	[.]	-a-z-	false
+full_match	[.]	-a-z-	false
+find	[.]	-a-z-	<none>
+find_all	[.]	-a-z-	[]
+split	[.]	-a-z-	[-a-z-]
+captures	[.]	-a-z-	<none>
+is_match	[.]	[bracket]	false
+full_match	[.]	[bracket]	false
+find	[.]	[bracket]	<none>
+find_all	[.]	[bracket]	[]
+split	[.]	[bracket]	[[bracket]]
+captures	[.]	[bracket]	<none>
+is_match	[.]	ab	false
+full_match	[.]	ab	false
+find	[.]	ab	<none>
+find_all	[.]	ab	[]
+split	[.]	ab	[ab]
+captures	[.]	ab	<none>
+is_match	[.]	b	false
+full_match	[.]	b	false
+find	[.]	b	<none>
+find_all	[.]	b	[]
+split	[.]	b	[b]
+captures	[.]	b	<none>
+is_match	[.]	]	false
+full_match	[.]	]	false
+find	[.]	]	<none>
+find_all	[.]	]	[]
+split	[.]	]	[]]
+captures	[.]	]	<none>
+is_match	[.]	a]b	false
+full_match	[.]	a]b	false
+find	[.]	a]b	<none>
+find_all	[.]	a]b	[]
+split	[.]	a]b	[a]b]
+captures	[.]	a]b	<none>
+is_match	a{0,1}b		false
+full_match	a{0,1}b		false
+find	a{0,1}b		<none>
+find_all	a{0,1}b		[]
+split	a{0,1}b		[]
+captures	a{0,1}b		<none>
+is_match	a{0,1}b	a	false
+full_match	a{0,1}b	a	false
+find	a{0,1}b	a	<none>
+find_all	a{0,1}b	a	[]
+split	a{0,1}b	a	[a]
+captures	a{0,1}b	a	<none>
+is_match	a{0,1}b	abc	true
+full_match	a{0,1}b	abc	false
+find	a{0,1}b	abc	<ab>
+find_all	a{0,1}b	abc	[ab]
+split	a{0,1}b	abc	[|c]
+captures	a{0,1}b	abc	[ab]
+is_match	a{0,1}b	aXc	false
+full_match	a{0,1}b	aXc	false
+find	a{0,1}b	aXc	<none>
+find_all	a{0,1}b	aXc	[]
+split	a{0,1}b	aXc	[aXc]
+captures	a{0,1}b	aXc	<none>
+is_match	a{0,1}b	aaabccc	true
+full_match	a{0,1}b	aaabccc	false
+find	a{0,1}b	aaabccc	<ab>
+find_all	a{0,1}b	aaabccc	[ab]
+split	a{0,1}b	aaabccc	[aa|ccc]
+captures	a{0,1}b	aaabccc	[ab]
+is_match	a{0,1}b	xyz	false
+full_match	a{0,1}b	xyz	false
+find	a{0,1}b	xyz	<none>
+find_all	a{0,1}b	xyz	[]
+split	a{0,1}b	xyz	[xyz]
+captures	a{0,1}b	xyz	<none>
+is_match	a{0,1}b	word boundary word	true
+full_match	a{0,1}b	word boundary word	false
+find	a{0,1}b	word boundary word	<b>
+find_all	a{0,1}b	word boundary word	[b]
+split	a{0,1}b	word boundary word	[word |oundary word]
+captures	a{0,1}b	word boundary word	[b]
+is_match	a{0,1}b	123-4567	false
+full_match	a{0,1}b	123-4567	false
+find	a{0,1}b	123-4567	<none>
+find_all	a{0,1}b	123-4567	[]
+split	a{0,1}b	123-4567	[123-4567]
+captures	a{0,1}b	123-4567	<none>
+is_match	a{0,1}b	3.14 and 2.718	false
+full_match	a{0,1}b	3.14 and 2.718	false
+find	a{0,1}b	3.14 and 2.718	<none>
+find_all	a{0,1}b	3.14 and 2.718	[]
+split	a{0,1}b	3.14 and 2.718	[3.14 and 2.718]
+captures	a{0,1}b	3.14 and 2.718	<none>
+is_match	a{0,1}b	  spaced  	false
+full_match	a{0,1}b	  spaced  	false
+find	a{0,1}b	  spaced  	<none>
+find_all	a{0,1}b	  spaced  	[]
+split	a{0,1}b	  spaced  	[  spaced  ]
+captures	a{0,1}b	  spaced  	<none>
+is_match	a{0,1}b	AaBbCc	true
+full_match	a{0,1}b	AaBbCc	false
+find	a{0,1}b	AaBbCc	<b>
+find_all	a{0,1}b	AaBbCc	[b]
+split	a{0,1}b	AaBbCc	[AaB|Cc]
+captures	a{0,1}b	AaBbCc	[b]
+is_match	a{0,1}b	foobaz barbaz	true
+full_match	a{0,1}b	foobaz barbaz	false
+find	a{0,1}b	foobaz barbaz	<b>
+find_all	a{0,1}b	foobaz barbaz	[b|b|b]
+split	a{0,1}b	foobaz barbaz	[foo|az |ar|az]
+captures	a{0,1}b	foobaz barbaz	[b]
+is_match	a{0,1}b	xx	false
+full_match	a{0,1}b	xx	false
+find	a{0,1}b	xx	<none>
+find_all	a{0,1}b	xx	[]
+split	a{0,1}b	xx	[xx]
+captures	a{0,1}b	xx	<none>
+is_match	a{0,1}b	xxx	false
+full_match	a{0,1}b	xxx	false
+find	a{0,1}b	xxx	<none>
+find_all	a{0,1}b	xxx	[]
+split	a{0,1}b	xxx	[xxx]
+captures	a{0,1}b	xxx	<none>
+is_match	a{0,1}b	xxxx	false
+full_match	a{0,1}b	xxxx	false
+find	a{0,1}b	xxxx	<none>
+find_all	a{0,1}b	xxxx	[]
+split	a{0,1}b	xxxx	[xxxx]
+captures	a{0,1}b	xxxx	<none>
+is_match	a{0,1}b	a.b	true
+full_match	a{0,1}b	a.b	false
+find	a{0,1}b	a.b	<b>
+find_all	a{0,1}b	a.b	[b]
+split	a{0,1}b	a.b	[a.|]
+captures	a{0,1}b	a.b	[b]
+is_match	a{0,1}b	a\b	true
+full_match	a{0,1}b	a\b	false
+find	a{0,1}b	a\b	<b>
+find_all	a{0,1}b	a\b	[b]
+split	a{0,1}b	a\b	[a\|]
+captures	a{0,1}b	a\b	[b]
+is_match	a{0,1}b	-a-z-	false
+full_match	a{0,1}b	-a-z-	false
+find	a{0,1}b	-a-z-	<none>
+find_all	a{0,1}b	-a-z-	[]
+split	a{0,1}b	-a-z-	[-a-z-]
+captures	a{0,1}b	-a-z-	<none>
+is_match	a{0,1}b	[bracket]	true
+full_match	a{0,1}b	[bracket]	false
+find	a{0,1}b	[bracket]	<b>
+find_all	a{0,1}b	[bracket]	[b]
+split	a{0,1}b	[bracket]	[[|racket]]
+captures	a{0,1}b	[bracket]	[b]
+is_match	a{0,1}b	ab	true
+full_match	a{0,1}b	ab	true
+find	a{0,1}b	ab	<ab>
+find_all	a{0,1}b	ab	[ab]
+split	a{0,1}b	ab	[|]
+captures	a{0,1}b	ab	[ab]
+is_match	a{0,1}b	b	true
+full_match	a{0,1}b	b	true
+find	a{0,1}b	b	<b>
+find_all	a{0,1}b	b	[b]
+split	a{0,1}b	b	[|]
+captures	a{0,1}b	b	[b]
+is_match	a{0,1}b	]	false
+full_match	a{0,1}b	]	false
+find	a{0,1}b	]	<none>
+find_all	a{0,1}b	]	[]
+split	a{0,1}b	]	[]]
+captures	a{0,1}b	]	<none>
+is_match	a{0,1}b	a]b	true
+full_match	a{0,1}b	a]b	false
+find	a{0,1}b	a]b	<b>
+find_all	a{0,1}b	a]b	[b]
+split	a{0,1}b	a]b	[a]|]
+captures	a{0,1}b	a]b	[b]
+is_match	(a+)(b+)		false
+full_match	(a+)(b+)		false
+find	(a+)(b+)		<none>
+find_all	(a+)(b+)		[]
+split	(a+)(b+)		[]
+captures	(a+)(b+)		<none>
+is_match	(a+)(b+)	a	false
+full_match	(a+)(b+)	a	false
+find	(a+)(b+)	a	<none>
+find_all	(a+)(b+)	a	[]
+split	(a+)(b+)	a	[a]
+captures	(a+)(b+)	a	<none>
+is_match	(a+)(b+)	abc	true
+full_match	(a+)(b+)	abc	false
+find	(a+)(b+)	abc	<ab>
+find_all	(a+)(b+)	abc	[ab]
+split	(a+)(b+)	abc	[|c]
+captures	(a+)(b+)	abc	[ab|a|b]
+is_match	(a+)(b+)	aXc	false
+full_match	(a+)(b+)	aXc	false
+find	(a+)(b+)	aXc	<none>
+find_all	(a+)(b+)	aXc	[]
+split	(a+)(b+)	aXc	[aXc]
+captures	(a+)(b+)	aXc	<none>
+is_match	(a+)(b+)	aaabccc	true
+full_match	(a+)(b+)	aaabccc	false
+find	(a+)(b+)	aaabccc	<aaab>
+find_all	(a+)(b+)	aaabccc	[aaab]
+split	(a+)(b+)	aaabccc	[|ccc]
+captures	(a+)(b+)	aaabccc	[aaab|aaa|b]
+is_match	(a+)(b+)	xyz	false
+full_match	(a+)(b+)	xyz	false
+find	(a+)(b+)	xyz	<none>
+find_all	(a+)(b+)	xyz	[]
+split	(a+)(b+)	xyz	[xyz]
+captures	(a+)(b+)	xyz	<none>
+is_match	(a+)(b+)	word boundary word	false
+full_match	(a+)(b+)	word boundary word	false
+find	(a+)(b+)	word boundary word	<none>
+find_all	(a+)(b+)	word boundary word	[]
+split	(a+)(b+)	word boundary word	[word boundary word]
+captures	(a+)(b+)	word boundary word	<none>
+is_match	(a+)(b+)	123-4567	false
+full_match	(a+)(b+)	123-4567	false
+find	(a+)(b+)	123-4567	<none>
+find_all	(a+)(b+)	123-4567	[]
+split	(a+)(b+)	123-4567	[123-4567]
+captures	(a+)(b+)	123-4567	<none>
+is_match	(a+)(b+)	3.14 and 2.718	false
+full_match	(a+)(b+)	3.14 and 2.718	false
+find	(a+)(b+)	3.14 and 2.718	<none>
+find_all	(a+)(b+)	3.14 and 2.718	[]
+split	(a+)(b+)	3.14 and 2.718	[3.14 and 2.718]
+captures	(a+)(b+)	3.14 and 2.718	<none>
+is_match	(a+)(b+)	  spaced  	false
+full_match	(a+)(b+)	  spaced  	false
+find	(a+)(b+)	  spaced  	<none>
+find_all	(a+)(b+)	  spaced  	[]
+split	(a+)(b+)	  spaced  	[  spaced  ]
+captures	(a+)(b+)	  spaced  	<none>
+is_match	(a+)(b+)	AaBbCc	false
+full_match	(a+)(b+)	AaBbCc	false
+find	(a+)(b+)	AaBbCc	<none>
+find_all	(a+)(b+)	AaBbCc	[]
+split	(a+)(b+)	AaBbCc	[AaBbCc]
+captures	(a+)(b+)	AaBbCc	<none>
+is_match	(a+)(b+)	foobaz barbaz	false
+full_match	(a+)(b+)	foobaz barbaz	false
+find	(a+)(b+)	foobaz barbaz	<none>
+find_all	(a+)(b+)	foobaz barbaz	[]
+split	(a+)(b+)	foobaz barbaz	[foobaz barbaz]
+captures	(a+)(b+)	foobaz barbaz	<none>
+is_match	(a+)(b+)	xx	false
+full_match	(a+)(b+)	xx	false
+find	(a+)(b+)	xx	<none>
+find_all	(a+)(b+)	xx	[]
+split	(a+)(b+)	xx	[xx]
+captures	(a+)(b+)	xx	<none>
+is_match	(a+)(b+)	xxx	false
+full_match	(a+)(b+)	xxx	false
+find	(a+)(b+)	xxx	<none>
+find_all	(a+)(b+)	xxx	[]
+split	(a+)(b+)	xxx	[xxx]
+captures	(a+)(b+)	xxx	<none>
+is_match	(a+)(b+)	xxxx	false
+full_match	(a+)(b+)	xxxx	false
+find	(a+)(b+)	xxxx	<none>
+find_all	(a+)(b+)	xxxx	[]
+split	(a+)(b+)	xxxx	[xxxx]
+captures	(a+)(b+)	xxxx	<none>
+is_match	(a+)(b+)	a.b	false
+full_match	(a+)(b+)	a.b	false
+find	(a+)(b+)	a.b	<none>
+find_all	(a+)(b+)	a.b	[]
+split	(a+)(b+)	a.b	[a.b]
+captures	(a+)(b+)	a.b	<none>
+is_match	(a+)(b+)	a\b	false
+full_match	(a+)(b+)	a\b	false
+find	(a+)(b+)	a\b	<none>
+find_all	(a+)(b+)	a\b	[]
+split	(a+)(b+)	a\b	[a\b]
+captures	(a+)(b+)	a\b	<none>
+is_match	(a+)(b+)	-a-z-	false
+full_match	(a+)(b+)	-a-z-	false
+find	(a+)(b+)	-a-z-	<none>
+find_all	(a+)(b+)	-a-z-	[]
+split	(a+)(b+)	-a-z-	[-a-z-]
+captures	(a+)(b+)	-a-z-	<none>
+is_match	(a+)(b+)	[bracket]	false
+full_match	(a+)(b+)	[bracket]	false
+find	(a+)(b+)	[bracket]	<none>
+find_all	(a+)(b+)	[bracket]	[]
+split	(a+)(b+)	[bracket]	[[bracket]]
+captures	(a+)(b+)	[bracket]	<none>
+is_match	(a+)(b+)	ab	true
+full_match	(a+)(b+)	ab	true
+find	(a+)(b+)	ab	<ab>
+find_all	(a+)(b+)	ab	[ab]
+split	(a+)(b+)	ab	[|]
+captures	(a+)(b+)	ab	[ab|a|b]
+is_match	(a+)(b+)	b	false
+full_match	(a+)(b+)	b	false
+find	(a+)(b+)	b	<none>
+find_all	(a+)(b+)	b	[]
+split	(a+)(b+)	b	[b]
+captures	(a+)(b+)	b	<none>
+is_match	(a+)(b+)	]	false
+full_match	(a+)(b+)	]	false
+find	(a+)(b+)	]	<none>
+find_all	(a+)(b+)	]	[]
+split	(a+)(b+)	]	[]]
+captures	(a+)(b+)	]	<none>
+is_match	(a+)(b+)	a]b	false
+full_match	(a+)(b+)	a]b	false
+find	(a+)(b+)	a]b	<none>
+find_all	(a+)(b+)	a]b	[]
+split	(a+)(b+)	a]b	[a]b]
+captures	(a+)(b+)	a]b	<none>
+is_match	\d{3}-\d{4}		false
+full_match	\d{3}-\d{4}		false
+find	\d{3}-\d{4}		<none>
+find_all	\d{3}-\d{4}		[]
+split	\d{3}-\d{4}		[]
+captures	\d{3}-\d{4}		<none>
+is_match	\d{3}-\d{4}	a	false
+full_match	\d{3}-\d{4}	a	false
+find	\d{3}-\d{4}	a	<none>
+find_all	\d{3}-\d{4}	a	[]
+split	\d{3}-\d{4}	a	[a]
+captures	\d{3}-\d{4}	a	<none>
+is_match	\d{3}-\d{4}	abc	false
+full_match	\d{3}-\d{4}	abc	false
+find	\d{3}-\d{4}	abc	<none>
+find_all	\d{3}-\d{4}	abc	[]
+split	\d{3}-\d{4}	abc	[abc]
+captures	\d{3}-\d{4}	abc	<none>
+is_match	\d{3}-\d{4}	aXc	false
+full_match	\d{3}-\d{4}	aXc	false
+find	\d{3}-\d{4}	aXc	<none>
+find_all	\d{3}-\d{4}	aXc	[]
+split	\d{3}-\d{4}	aXc	[aXc]
+captures	\d{3}-\d{4}	aXc	<none>
+is_match	\d{3}-\d{4}	aaabccc	false
+full_match	\d{3}-\d{4}	aaabccc	false
+find	\d{3}-\d{4}	aaabccc	<none>
+find_all	\d{3}-\d{4}	aaabccc	[]
+split	\d{3}-\d{4}	aaabccc	[aaabccc]
+captures	\d{3}-\d{4}	aaabccc	<none>
+is_match	\d{3}-\d{4}	xyz	false
+full_match	\d{3}-\d{4}	xyz	false
+find	\d{3}-\d{4}	xyz	<none>
+find_all	\d{3}-\d{4}	xyz	[]
+split	\d{3}-\d{4}	xyz	[xyz]
+captures	\d{3}-\d{4}	xyz	<none>
+is_match	\d{3}-\d{4}	word boundary word	false
+full_match	\d{3}-\d{4}	word boundary word	false
+find	\d{3}-\d{4}	word boundary word	<none>
+find_all	\d{3}-\d{4}	word boundary word	[]
+split	\d{3}-\d{4}	word boundary word	[word boundary word]
+captures	\d{3}-\d{4}	word boundary word	<none>
+is_match	\d{3}-\d{4}	123-4567	true
+full_match	\d{3}-\d{4}	123-4567	true
+find	\d{3}-\d{4}	123-4567	<123-4567>
+find_all	\d{3}-\d{4}	123-4567	[123-4567]
+split	\d{3}-\d{4}	123-4567	[|]
+captures	\d{3}-\d{4}	123-4567	[123-4567]
+is_match	\d{3}-\d{4}	3.14 and 2.718	false
+full_match	\d{3}-\d{4}	3.14 and 2.718	false
+find	\d{3}-\d{4}	3.14 and 2.718	<none>
+find_all	\d{3}-\d{4}	3.14 and 2.718	[]
+split	\d{3}-\d{4}	3.14 and 2.718	[3.14 and 2.718]
+captures	\d{3}-\d{4}	3.14 and 2.718	<none>
+is_match	\d{3}-\d{4}	  spaced  	false
+full_match	\d{3}-\d{4}	  spaced  	false
+find	\d{3}-\d{4}	  spaced  	<none>
+find_all	\d{3}-\d{4}	  spaced  	[]
+split	\d{3}-\d{4}	  spaced  	[  spaced  ]
+captures	\d{3}-\d{4}	  spaced  	<none>
+is_match	\d{3}-\d{4}	AaBbCc	false
+full_match	\d{3}-\d{4}	AaBbCc	false
+find	\d{3}-\d{4}	AaBbCc	<none>
+find_all	\d{3}-\d{4}	AaBbCc	[]
+split	\d{3}-\d{4}	AaBbCc	[AaBbCc]
+captures	\d{3}-\d{4}	AaBbCc	<none>
+is_match	\d{3}-\d{4}	foobaz barbaz	false
+full_match	\d{3}-\d{4}	foobaz barbaz	false
+find	\d{3}-\d{4}	foobaz barbaz	<none>
+find_all	\d{3}-\d{4}	foobaz barbaz	[]
+split	\d{3}-\d{4}	foobaz barbaz	[foobaz barbaz]
+captures	\d{3}-\d{4}	foobaz barbaz	<none>
+is_match	\d{3}-\d{4}	xx	false
+full_match	\d{3}-\d{4}	xx	false
+find	\d{3}-\d{4}	xx	<none>
+find_all	\d{3}-\d{4}	xx	[]
+split	\d{3}-\d{4}	xx	[xx]
+captures	\d{3}-\d{4}	xx	<none>
+is_match	\d{3}-\d{4}	xxx	false
+full_match	\d{3}-\d{4}	xxx	false
+find	\d{3}-\d{4}	xxx	<none>
+find_all	\d{3}-\d{4}	xxx	[]
+split	\d{3}-\d{4}	xxx	[xxx]
+captures	\d{3}-\d{4}	xxx	<none>
+is_match	\d{3}-\d{4}	xxxx	false
+full_match	\d{3}-\d{4}	xxxx	false
+find	\d{3}-\d{4}	xxxx	<none>
+find_all	\d{3}-\d{4}	xxxx	[]
+split	\d{3}-\d{4}	xxxx	[xxxx]
+captures	\d{3}-\d{4}	xxxx	<none>
+is_match	\d{3}-\d{4}	a.b	false
+full_match	\d{3}-\d{4}	a.b	false
+find	\d{3}-\d{4}	a.b	<none>
+find_all	\d{3}-\d{4}	a.b	[]
+split	\d{3}-\d{4}	a.b	[a.b]
+captures	\d{3}-\d{4}	a.b	<none>
+is_match	\d{3}-\d{4}	a\b	false
+full_match	\d{3}-\d{4}	a\b	false
+find	\d{3}-\d{4}	a\b	<none>
+find_all	\d{3}-\d{4}	a\b	[]
+split	\d{3}-\d{4}	a\b	[a\b]
+captures	\d{3}-\d{4}	a\b	<none>
+is_match	\d{3}-\d{4}	-a-z-	false
+full_match	\d{3}-\d{4}	-a-z-	false
+find	\d{3}-\d{4}	-a-z-	<none>
+find_all	\d{3}-\d{4}	-a-z-	[]
+split	\d{3}-\d{4}	-a-z-	[-a-z-]
+captures	\d{3}-\d{4}	-a-z-	<none>
+is_match	\d{3}-\d{4}	[bracket]	false
+full_match	\d{3}-\d{4}	[bracket]	false
+find	\d{3}-\d{4}	[bracket]	<none>
+find_all	\d{3}-\d{4}	[bracket]	[]
+split	\d{3}-\d{4}	[bracket]	[[bracket]]
+captures	\d{3}-\d{4}	[bracket]	<none>
+is_match	\d{3}-\d{4}	ab	false
+full_match	\d{3}-\d{4}	ab	false
+find	\d{3}-\d{4}	ab	<none>
+find_all	\d{3}-\d{4}	ab	[]
+split	\d{3}-\d{4}	ab	[ab]
+captures	\d{3}-\d{4}	ab	<none>
+is_match	\d{3}-\d{4}	b	false
+full_match	\d{3}-\d{4}	b	false
+find	\d{3}-\d{4}	b	<none>
+find_all	\d{3}-\d{4}	b	[]
+split	\d{3}-\d{4}	b	[b]
+captures	\d{3}-\d{4}	b	<none>
+is_match	\d{3}-\d{4}	]	false
+full_match	\d{3}-\d{4}	]	false
+find	\d{3}-\d{4}	]	<none>
+find_all	\d{3}-\d{4}	]	[]
+split	\d{3}-\d{4}	]	[]]
+captures	\d{3}-\d{4}	]	<none>
+is_match	\d{3}-\d{4}	a]b	false
+full_match	\d{3}-\d{4}	a]b	false
+find	\d{3}-\d{4}	a]b	<none>
+find_all	\d{3}-\d{4}	a]b	[]
+split	\d{3}-\d{4}	a]b	[a]b]
+captures	\d{3}-\d{4}	a]b	<none>
+is_match	[0-9]+\.[0-9]+		false
+full_match	[0-9]+\.[0-9]+		false
+find	[0-9]+\.[0-9]+		<none>
+find_all	[0-9]+\.[0-9]+		[]
+split	[0-9]+\.[0-9]+		[]
+captures	[0-9]+\.[0-9]+		<none>
+is_match	[0-9]+\.[0-9]+	a	false
+full_match	[0-9]+\.[0-9]+	a	false
+find	[0-9]+\.[0-9]+	a	<none>
+find_all	[0-9]+\.[0-9]+	a	[]
+split	[0-9]+\.[0-9]+	a	[a]
+captures	[0-9]+\.[0-9]+	a	<none>
+is_match	[0-9]+\.[0-9]+	abc	false
+full_match	[0-9]+\.[0-9]+	abc	false
+find	[0-9]+\.[0-9]+	abc	<none>
+find_all	[0-9]+\.[0-9]+	abc	[]
+split	[0-9]+\.[0-9]+	abc	[abc]
+captures	[0-9]+\.[0-9]+	abc	<none>
+is_match	[0-9]+\.[0-9]+	aXc	false
+full_match	[0-9]+\.[0-9]+	aXc	false
+find	[0-9]+\.[0-9]+	aXc	<none>
+find_all	[0-9]+\.[0-9]+	aXc	[]
+split	[0-9]+\.[0-9]+	aXc	[aXc]
+captures	[0-9]+\.[0-9]+	aXc	<none>
+is_match	[0-9]+\.[0-9]+	aaabccc	false
+full_match	[0-9]+\.[0-9]+	aaabccc	false
+find	[0-9]+\.[0-9]+	aaabccc	<none>
+find_all	[0-9]+\.[0-9]+	aaabccc	[]
+split	[0-9]+\.[0-9]+	aaabccc	[aaabccc]
+captures	[0-9]+\.[0-9]+	aaabccc	<none>
+is_match	[0-9]+\.[0-9]+	xyz	false
+full_match	[0-9]+\.[0-9]+	xyz	false
+find	[0-9]+\.[0-9]+	xyz	<none>
+find_all	[0-9]+\.[0-9]+	xyz	[]
+split	[0-9]+\.[0-9]+	xyz	[xyz]
+captures	[0-9]+\.[0-9]+	xyz	<none>
+is_match	[0-9]+\.[0-9]+	word boundary word	false
+full_match	[0-9]+\.[0-9]+	word boundary word	false
+find	[0-9]+\.[0-9]+	word boundary word	<none>
+find_all	[0-9]+\.[0-9]+	word boundary word	[]
+split	[0-9]+\.[0-9]+	word boundary word	[word boundary word]
+captures	[0-9]+\.[0-9]+	word boundary word	<none>
+is_match	[0-9]+\.[0-9]+	123-4567	false
+full_match	[0-9]+\.[0-9]+	123-4567	false
+find	[0-9]+\.[0-9]+	123-4567	<none>
+find_all	[0-9]+\.[0-9]+	123-4567	[]
+split	[0-9]+\.[0-9]+	123-4567	[123-4567]
+captures	[0-9]+\.[0-9]+	123-4567	<none>
+is_match	[0-9]+\.[0-9]+	3.14 and 2.718	true
+full_match	[0-9]+\.[0-9]+	3.14 and 2.718	false
+find	[0-9]+\.[0-9]+	3.14 and 2.718	<3.14>
+find_all	[0-9]+\.[0-9]+	3.14 and 2.718	[3.14|2.718]
+split	[0-9]+\.[0-9]+	3.14 and 2.718	[| and |]
+captures	[0-9]+\.[0-9]+	3.14 and 2.718	[3.14]
+is_match	[0-9]+\.[0-9]+	  spaced  	false
+full_match	[0-9]+\.[0-9]+	  spaced  	false
+find	[0-9]+\.[0-9]+	  spaced  	<none>
+find_all	[0-9]+\.[0-9]+	  spaced  	[]
+split	[0-9]+\.[0-9]+	  spaced  	[  spaced  ]
+captures	[0-9]+\.[0-9]+	  spaced  	<none>
+is_match	[0-9]+\.[0-9]+	AaBbCc	false
+full_match	[0-9]+\.[0-9]+	AaBbCc	false
+find	[0-9]+\.[0-9]+	AaBbCc	<none>
+find_all	[0-9]+\.[0-9]+	AaBbCc	[]
+split	[0-9]+\.[0-9]+	AaBbCc	[AaBbCc]
+captures	[0-9]+\.[0-9]+	AaBbCc	<none>
+is_match	[0-9]+\.[0-9]+	foobaz barbaz	false
+full_match	[0-9]+\.[0-9]+	foobaz barbaz	false
+find	[0-9]+\.[0-9]+	foobaz barbaz	<none>
+find_all	[0-9]+\.[0-9]+	foobaz barbaz	[]
+split	[0-9]+\.[0-9]+	foobaz barbaz	[foobaz barbaz]
+captures	[0-9]+\.[0-9]+	foobaz barbaz	<none>
+is_match	[0-9]+\.[0-9]+	xx	false
+full_match	[0-9]+\.[0-9]+	xx	false
+find	[0-9]+\.[0-9]+	xx	<none>
+find_all	[0-9]+\.[0-9]+	xx	[]
+split	[0-9]+\.[0-9]+	xx	[xx]
+captures	[0-9]+\.[0-9]+	xx	<none>
+is_match	[0-9]+\.[0-9]+	xxx	false
+full_match	[0-9]+\.[0-9]+	xxx	false
+find	[0-9]+\.[0-9]+	xxx	<none>
+find_all	[0-9]+\.[0-9]+	xxx	[]
+split	[0-9]+\.[0-9]+	xxx	[xxx]
+captures	[0-9]+\.[0-9]+	xxx	<none>
+is_match	[0-9]+\.[0-9]+	xxxx	false
+full_match	[0-9]+\.[0-9]+	xxxx	false
+find	[0-9]+\.[0-9]+	xxxx	<none>
+find_all	[0-9]+\.[0-9]+	xxxx	[]
+split	[0-9]+\.[0-9]+	xxxx	[xxxx]
+captures	[0-9]+\.[0-9]+	xxxx	<none>
+is_match	[0-9]+\.[0-9]+	a.b	false
+full_match	[0-9]+\.[0-9]+	a.b	false
+find	[0-9]+\.[0-9]+	a.b	<none>
+find_all	[0-9]+\.[0-9]+	a.b	[]
+split	[0-9]+\.[0-9]+	a.b	[a.b]
+captures	[0-9]+\.[0-9]+	a.b	<none>
+is_match	[0-9]+\.[0-9]+	a\b	false
+full_match	[0-9]+\.[0-9]+	a\b	false
+find	[0-9]+\.[0-9]+	a\b	<none>
+find_all	[0-9]+\.[0-9]+	a\b	[]
+split	[0-9]+\.[0-9]+	a\b	[a\b]
+captures	[0-9]+\.[0-9]+	a\b	<none>
+is_match	[0-9]+\.[0-9]+	-a-z-	false
+full_match	[0-9]+\.[0-9]+	-a-z-	false
+find	[0-9]+\.[0-9]+	-a-z-	<none>
+find_all	[0-9]+\.[0-9]+	-a-z-	[]
+split	[0-9]+\.[0-9]+	-a-z-	[-a-z-]
+captures	[0-9]+\.[0-9]+	-a-z-	<none>
+is_match	[0-9]+\.[0-9]+	[bracket]	false
+full_match	[0-9]+\.[0-9]+	[bracket]	false
+find	[0-9]+\.[0-9]+	[bracket]	<none>
+find_all	[0-9]+\.[0-9]+	[bracket]	[]
+split	[0-9]+\.[0-9]+	[bracket]	[[bracket]]
+captures	[0-9]+\.[0-9]+	[bracket]	<none>
+is_match	[0-9]+\.[0-9]+	ab	false
+full_match	[0-9]+\.[0-9]+	ab	false
+find	[0-9]+\.[0-9]+	ab	<none>
+find_all	[0-9]+\.[0-9]+	ab	[]
+split	[0-9]+\.[0-9]+	ab	[ab]
+captures	[0-9]+\.[0-9]+	ab	<none>
+is_match	[0-9]+\.[0-9]+	b	false
+full_match	[0-9]+\.[0-9]+	b	false
+find	[0-9]+\.[0-9]+	b	<none>
+find_all	[0-9]+\.[0-9]+	b	[]
+split	[0-9]+\.[0-9]+	b	[b]
+captures	[0-9]+\.[0-9]+	b	<none>
+is_match	[0-9]+\.[0-9]+	]	false
+full_match	[0-9]+\.[0-9]+	]	false
+find	[0-9]+\.[0-9]+	]	<none>
+find_all	[0-9]+\.[0-9]+	]	[]
+split	[0-9]+\.[0-9]+	]	[]]
+captures	[0-9]+\.[0-9]+	]	<none>
+is_match	[0-9]+\.[0-9]+	a]b	false
+full_match	[0-9]+\.[0-9]+	a]b	false
+find	[0-9]+\.[0-9]+	a]b	<none>
+find_all	[0-9]+\.[0-9]+	a]b	[]
+split	[0-9]+\.[0-9]+	a]b	[a]b]
+captures	[0-9]+\.[0-9]+	a]b	<none>
+is_match	^$		true
+full_match	^$		true
+find	^$		<>
+find_all	^$		[]
+split	^$		[|]
+captures	^$		[]
+is_match	^$	a	false
+full_match	^$	a	false
+find	^$	a	<none>
+find_all	^$	a	[]
+split	^$	a	[a]
+captures	^$	a	<none>
+is_match	^$	abc	false
+full_match	^$	abc	false
+find	^$	abc	<none>
+find_all	^$	abc	[]
+split	^$	abc	[abc]
+captures	^$	abc	<none>
+is_match	^$	aXc	false
+full_match	^$	aXc	false
+find	^$	aXc	<none>
+find_all	^$	aXc	[]
+split	^$	aXc	[aXc]
+captures	^$	aXc	<none>
+is_match	^$	aaabccc	false
+full_match	^$	aaabccc	false
+find	^$	aaabccc	<none>
+find_all	^$	aaabccc	[]
+split	^$	aaabccc	[aaabccc]
+captures	^$	aaabccc	<none>
+is_match	^$	xyz	false
+full_match	^$	xyz	false
+find	^$	xyz	<none>
+find_all	^$	xyz	[]
+split	^$	xyz	[xyz]
+captures	^$	xyz	<none>
+is_match	^$	word boundary word	false
+full_match	^$	word boundary word	false
+find	^$	word boundary word	<none>
+find_all	^$	word boundary word	[]
+split	^$	word boundary word	[word boundary word]
+captures	^$	word boundary word	<none>
+is_match	^$	123-4567	false
+full_match	^$	123-4567	false
+find	^$	123-4567	<none>
+find_all	^$	123-4567	[]
+split	^$	123-4567	[123-4567]
+captures	^$	123-4567	<none>
+is_match	^$	3.14 and 2.718	false
+full_match	^$	3.14 and 2.718	false
+find	^$	3.14 and 2.718	<none>
+find_all	^$	3.14 and 2.718	[]
+split	^$	3.14 and 2.718	[3.14 and 2.718]
+captures	^$	3.14 and 2.718	<none>
+is_match	^$	  spaced  	false
+full_match	^$	  spaced  	false
+find	^$	  spaced  	<none>
+find_all	^$	  spaced  	[]
+split	^$	  spaced  	[  spaced  ]
+captures	^$	  spaced  	<none>
+is_match	^$	AaBbCc	false
+full_match	^$	AaBbCc	false
+find	^$	AaBbCc	<none>
+find_all	^$	AaBbCc	[]
+split	^$	AaBbCc	[AaBbCc]
+captures	^$	AaBbCc	<none>
+is_match	^$	foobaz barbaz	false
+full_match	^$	foobaz barbaz	false
+find	^$	foobaz barbaz	<none>
+find_all	^$	foobaz barbaz	[]
+split	^$	foobaz barbaz	[foobaz barbaz]
+captures	^$	foobaz barbaz	<none>
+is_match	^$	xx	false
+full_match	^$	xx	false
+find	^$	xx	<none>
+find_all	^$	xx	[]
+split	^$	xx	[xx]
+captures	^$	xx	<none>
+is_match	^$	xxx	false
+full_match	^$	xxx	false
+find	^$	xxx	<none>
+find_all	^$	xxx	[]
+split	^$	xxx	[xxx]
+captures	^$	xxx	<none>
+is_match	^$	xxxx	false
+full_match	^$	xxxx	false
+find	^$	xxxx	<none>
+find_all	^$	xxxx	[]
+split	^$	xxxx	[xxxx]
+captures	^$	xxxx	<none>
+is_match	^$	a.b	false
+full_match	^$	a.b	false
+find	^$	a.b	<none>
+find_all	^$	a.b	[]
+split	^$	a.b	[a.b]
+captures	^$	a.b	<none>
+is_match	^$	a\b	false
+full_match	^$	a\b	false
+find	^$	a\b	<none>
+find_all	^$	a\b	[]
+split	^$	a\b	[a\b]
+captures	^$	a\b	<none>
+is_match	^$	-a-z-	false
+full_match	^$	-a-z-	false
+find	^$	-a-z-	<none>
+find_all	^$	-a-z-	[]
+split	^$	-a-z-	[-a-z-]
+captures	^$	-a-z-	<none>
+is_match	^$	[bracket]	false
+full_match	^$	[bracket]	false
+find	^$	[bracket]	<none>
+find_all	^$	[bracket]	[]
+split	^$	[bracket]	[[bracket]]
+captures	^$	[bracket]	<none>
+is_match	^$	ab	false
+full_match	^$	ab	false
+find	^$	ab	<none>
+find_all	^$	ab	[]
+split	^$	ab	[ab]
+captures	^$	ab	<none>
+is_match	^$	b	false
+full_match	^$	b	false
+find	^$	b	<none>
+find_all	^$	b	[]
+split	^$	b	[b]
+captures	^$	b	<none>
+is_match	^$	]	false
+full_match	^$	]	false
+find	^$	]	<none>
+find_all	^$	]	[]
+split	^$	]	[]]
+captures	^$	]	<none>
+is_match	^$	a]b	false
+full_match	^$	a]b	false
+find	^$	a]b	<none>
+find_all	^$	a]b	[]
+split	^$	a]b	[a]b]
+captures	^$	a]b	<none>
+is_match	^		true
+full_match	^		true
+find	^		<>
+find_all	^		[]
+split	^		[|]
+captures	^		[]
+is_match	^	a	true
+full_match	^	a	false
+find	^	a	<>
+find_all	^	a	[]
+split	^	a	[|a]
+captures	^	a	[]
+is_match	^	abc	true
+full_match	^	abc	false
+find	^	abc	<>
+find_all	^	abc	[]
+split	^	abc	[|abc]
+captures	^	abc	[]
+is_match	^	aXc	true
+full_match	^	aXc	false
+find	^	aXc	<>
+find_all	^	aXc	[]
+split	^	aXc	[|aXc]
+captures	^	aXc	[]
+is_match	^	aaabccc	true
+full_match	^	aaabccc	false
+find	^	aaabccc	<>
+find_all	^	aaabccc	[]
+split	^	aaabccc	[|aaabccc]
+captures	^	aaabccc	[]
+is_match	^	xyz	true
+full_match	^	xyz	false
+find	^	xyz	<>
+find_all	^	xyz	[]
+split	^	xyz	[|xyz]
+captures	^	xyz	[]
+is_match	^	word boundary word	true
+full_match	^	word boundary word	false
+find	^	word boundary word	<>
+find_all	^	word boundary word	[]
+split	^	word boundary word	[|word boundary word]
+captures	^	word boundary word	[]
+is_match	^	123-4567	true
+full_match	^	123-4567	false
+find	^	123-4567	<>
+find_all	^	123-4567	[]
+split	^	123-4567	[|123-4567]
+captures	^	123-4567	[]
+is_match	^	3.14 and 2.718	true
+full_match	^	3.14 and 2.718	false
+find	^	3.14 and 2.718	<>
+find_all	^	3.14 and 2.718	[]
+split	^	3.14 and 2.718	[|3.14 and 2.718]
+captures	^	3.14 and 2.718	[]
+is_match	^	  spaced  	true
+full_match	^	  spaced  	false
+find	^	  spaced  	<>
+find_all	^	  spaced  	[]
+split	^	  spaced  	[|  spaced  ]
+captures	^	  spaced  	[]
+is_match	^	AaBbCc	true
+full_match	^	AaBbCc	false
+find	^	AaBbCc	<>
+find_all	^	AaBbCc	[]
+split	^	AaBbCc	[|AaBbCc]
+captures	^	AaBbCc	[]
+is_match	^	foobaz barbaz	true
+full_match	^	foobaz barbaz	false
+find	^	foobaz barbaz	<>
+find_all	^	foobaz barbaz	[]
+split	^	foobaz barbaz	[|foobaz barbaz]
+captures	^	foobaz barbaz	[]
+is_match	^	xx	true
+full_match	^	xx	false
+find	^	xx	<>
+find_all	^	xx	[]
+split	^	xx	[|xx]
+captures	^	xx	[]
+is_match	^	xxx	true
+full_match	^	xxx	false
+find	^	xxx	<>
+find_all	^	xxx	[]
+split	^	xxx	[|xxx]
+captures	^	xxx	[]
+is_match	^	xxxx	true
+full_match	^	xxxx	false
+find	^	xxxx	<>
+find_all	^	xxxx	[]
+split	^	xxxx	[|xxxx]
+captures	^	xxxx	[]
+is_match	^	a.b	true
+full_match	^	a.b	false
+find	^	a.b	<>
+find_all	^	a.b	[]
+split	^	a.b	[|a.b]
+captures	^	a.b	[]
+is_match	^	a\b	true
+full_match	^	a\b	false
+find	^	a\b	<>
+find_all	^	a\b	[]
+split	^	a\b	[|a\b]
+captures	^	a\b	[]
+is_match	^	-a-z-	true
+full_match	^	-a-z-	false
+find	^	-a-z-	<>
+find_all	^	-a-z-	[]
+split	^	-a-z-	[|-a-z-]
+captures	^	-a-z-	[]
+is_match	^	[bracket]	true
+full_match	^	[bracket]	false
+find	^	[bracket]	<>
+find_all	^	[bracket]	[]
+split	^	[bracket]	[|[bracket]]
+captures	^	[bracket]	[]
+is_match	^	ab	true
+full_match	^	ab	false
+find	^	ab	<>
+find_all	^	ab	[]
+split	^	ab	[|ab]
+captures	^	ab	[]
+is_match	^	b	true
+full_match	^	b	false
+find	^	b	<>
+find_all	^	b	[]
+split	^	b	[|b]
+captures	^	b	[]
+is_match	^	]	true
+full_match	^	]	false
+find	^	]	<>
+find_all	^	]	[]
+split	^	]	[|]]
+captures	^	]	[]
+is_match	^	a]b	true
+full_match	^	a]b	false
+find	^	a]b	<>
+find_all	^	a]b	[]
+split	^	a]b	[|a]b]
+captures	^	a]b	[]
+is_match	$		true
+full_match	$		true
+find	$		<>
+find_all	$		[]
+split	$		[|]
+captures	$		[]
+is_match	$	a	true
+full_match	$	a	false
+find	$	a	<>
+find_all	$	a	[]
+split	$	a	[a|]
+captures	$	a	[]
+is_match	$	abc	true
+full_match	$	abc	false
+find	$	abc	<>
+find_all	$	abc	[]
+split	$	abc	[abc|]
+captures	$	abc	[]
+is_match	$	aXc	true
+full_match	$	aXc	false
+find	$	aXc	<>
+find_all	$	aXc	[]
+split	$	aXc	[aXc|]
+captures	$	aXc	[]
+is_match	$	aaabccc	true
+full_match	$	aaabccc	false
+find	$	aaabccc	<>
+find_all	$	aaabccc	[]
+split	$	aaabccc	[aaabccc|]
+captures	$	aaabccc	[]
+is_match	$	xyz	true
+full_match	$	xyz	false
+find	$	xyz	<>
+find_all	$	xyz	[]
+split	$	xyz	[xyz|]
+captures	$	xyz	[]
+is_match	$	word boundary word	true
+full_match	$	word boundary word	false
+find	$	word boundary word	<>
+find_all	$	word boundary word	[]
+split	$	word boundary word	[word boundary word|]
+captures	$	word boundary word	[]
+is_match	$	123-4567	true
+full_match	$	123-4567	false
+find	$	123-4567	<>
+find_all	$	123-4567	[]
+split	$	123-4567	[123-4567|]
+captures	$	123-4567	[]
+is_match	$	3.14 and 2.718	true
+full_match	$	3.14 and 2.718	false
+find	$	3.14 and 2.718	<>
+find_all	$	3.14 and 2.718	[]
+split	$	3.14 and 2.718	[3.14 and 2.718|]
+captures	$	3.14 and 2.718	[]
+is_match	$	  spaced  	true
+full_match	$	  spaced  	false
+find	$	  spaced  	<>
+find_all	$	  spaced  	[]
+split	$	  spaced  	[  spaced  |]
+captures	$	  spaced  	[]
+is_match	$	AaBbCc	true
+full_match	$	AaBbCc	false
+find	$	AaBbCc	<>
+find_all	$	AaBbCc	[]
+split	$	AaBbCc	[AaBbCc|]
+captures	$	AaBbCc	[]
+is_match	$	foobaz barbaz	true
+full_match	$	foobaz barbaz	false
+find	$	foobaz barbaz	<>
+find_all	$	foobaz barbaz	[]
+split	$	foobaz barbaz	[foobaz barbaz|]
+captures	$	foobaz barbaz	[]
+is_match	$	xx	true
+full_match	$	xx	false
+find	$	xx	<>
+find_all	$	xx	[]
+split	$	xx	[xx|]
+captures	$	xx	[]
+is_match	$	xxx	true
+full_match	$	xxx	false
+find	$	xxx	<>
+find_all	$	xxx	[]
+split	$	xxx	[xxx|]
+captures	$	xxx	[]
+is_match	$	xxxx	true
+full_match	$	xxxx	false
+find	$	xxxx	<>
+find_all	$	xxxx	[]
+split	$	xxxx	[xxxx|]
+captures	$	xxxx	[]
+is_match	$	a.b	true
+full_match	$	a.b	false
+find	$	a.b	<>
+find_all	$	a.b	[]
+split	$	a.b	[a.b|]
+captures	$	a.b	[]
+is_match	$	a\b	true
+full_match	$	a\b	false
+find	$	a\b	<>
+find_all	$	a\b	[]
+split	$	a\b	[a\b|]
+captures	$	a\b	[]
+is_match	$	-a-z-	true
+full_match	$	-a-z-	false
+find	$	-a-z-	<>
+find_all	$	-a-z-	[]
+split	$	-a-z-	[-a-z-|]
+captures	$	-a-z-	[]
+is_match	$	[bracket]	true
+full_match	$	[bracket]	false
+find	$	[bracket]	<>
+find_all	$	[bracket]	[]
+split	$	[bracket]	[[bracket]|]
+captures	$	[bracket]	[]
+is_match	$	ab	true
+full_match	$	ab	false
+find	$	ab	<>
+find_all	$	ab	[]
+split	$	ab	[ab|]
+captures	$	ab	[]
+is_match	$	b	true
+full_match	$	b	false
+find	$	b	<>
+find_all	$	b	[]
+split	$	b	[b|]
+captures	$	b	[]
+is_match	$	]	true
+full_match	$	]	false
+find	$	]	<>
+find_all	$	]	[]
+split	$	]	[]|]
+captures	$	]	[]
+is_match	$	a]b	true
+full_match	$	a]b	false
+find	$	a]b	<>
+find_all	$	a]b	[]
+split	$	a]b	[a]b|]
+captures	$	a]b	[]
+is_match	a*		true
+full_match	a*		true
+find	a*		<>
+find_all	a*		[]
+split	a*		[|]
+captures	a*		[]
+is_match	a*	a	true
+full_match	a*	a	true
+find	a*	a	<a>
+find_all	a*	a	[a|]
+split	a*	a	[||]
+captures	a*	a	[a]
+is_match	a*	abc	true
+full_match	a*	abc	false
+find	a*	abc	<a>
+find_all	a*	abc	[a|||]
+split	a*	abc	[||b|c|]
+captures	a*	abc	[a]
+is_match	a*	aXc	true
+full_match	a*	aXc	false
+find	a*	aXc	<a>
+find_all	a*	aXc	[a|||]
+split	a*	aXc	[||X|c|]
+captures	a*	aXc	[a]
+is_match	a*	aaabccc	true
+full_match	a*	aaabccc	false
+find	a*	aaabccc	<aaa>
+find_all	a*	aaabccc	[aaa|||||]
+split	a*	aaabccc	[||b|c|c|c|]
+captures	a*	aaabccc	[aaa]
+is_match	a*	xyz	true
+full_match	a*	xyz	false
+find	a*	xyz	<>
+find_all	a*	xyz	[|||]
+split	a*	xyz	[|x|y|z|]
+captures	a*	xyz	[]
+is_match	a*	word boundary word	true
+full_match	a*	word boundary word	false
+find	a*	word boundary word	<>
+find_all	a*	word boundary word	[||||||||||a||||||||]
+split	a*	word boundary word	[|w|o|r|d| |b|o|u|n|d||r|y| |w|o|r|d|]
+captures	a*	word boundary word	[]
+is_match	a*	123-4567	true
+full_match	a*	123-4567	false
+find	a*	123-4567	<>
+find_all	a*	123-4567	[||||||||]
+split	a*	123-4567	[|1|2|3|-|4|5|6|7|]
+captures	a*	123-4567	[]
+is_match	a*	3.14 and 2.718	true
+full_match	a*	3.14 and 2.718	false
+find	a*	3.14 and 2.718	<>
+find_all	a*	3.14 and 2.718	[|||||a|||||||||]
+split	a*	3.14 and 2.718	[|3|.|1|4| ||n|d| |2|.|7|1|8|]
+captures	a*	3.14 and 2.718	[]
+is_match	a*	  spaced  	true
+full_match	a*	  spaced  	false
+find	a*	  spaced  	<>
+find_all	a*	  spaced  	[||||a||||||]
+split	a*	  spaced  	[| | |s|p||c|e|d| | |]
+captures	a*	  spaced  	[]
+is_match	a*	AaBbCc	true
+full_match	a*	AaBbCc	false
+find	a*	AaBbCc	<>
+find_all	a*	AaBbCc	[|a|||||]
+split	a*	AaBbCc	[|A||B|b|C|c|]
+captures	a*	AaBbCc	[]
+is_match	a*	foobaz barbaz	true
+full_match	a*	foobaz barbaz	false
+find	a*	foobaz barbaz	<>
+find_all	a*	foobaz barbaz	[||||a||||a|||a||]
+split	a*	foobaz barbaz	[|f|o|o|b||z| |b||r|b||z|]
+captures	a*	foobaz barbaz	[]
+is_match	a*	xx	true
+full_match	a*	xx	false
+find	a*	xx	<>
+find_all	a*	xx	[||]
+split	a*	xx	[|x|x|]
+captures	a*	xx	[]
+is_match	a*	xxx	true
+full_match	a*	xxx	false
+find	a*	xxx	<>
+find_all	a*	xxx	[|||]
+split	a*	xxx	[|x|x|x|]
+captures	a*	xxx	[]
+is_match	a*	xxxx	true
+full_match	a*	xxxx	false
+find	a*	xxxx	<>
+find_all	a*	xxxx	[||||]
+split	a*	xxxx	[|x|x|x|x|]
+captures	a*	xxxx	[]
+is_match	a*	a.b	true
+full_match	a*	a.b	false
+find	a*	a.b	<a>
+find_all	a*	a.b	[a|||]
+split	a*	a.b	[||.|b|]
+captures	a*	a.b	[a]
+is_match	a*	a\b	true
+full_match	a*	a\b	false
+find	a*	a\b	<a>
+find_all	a*	a\b	[a|||]
+split	a*	a\b	[||\|b|]
+captures	a*	a\b	[a]
+is_match	a*	-a-z-	true
+full_match	a*	-a-z-	false
+find	a*	-a-z-	<>
+find_all	a*	-a-z-	[|a||||]
+split	a*	-a-z-	[|-||-|z|-|]
+captures	a*	-a-z-	[]
+is_match	a*	[bracket]	true
+full_match	a*	[bracket]	false
+find	a*	[bracket]	<>
+find_all	a*	[bracket]	[|||a||||||]
+split	a*	[bracket]	[|[|b|r||c|k|e|t|]|]
+captures	a*	[bracket]	[]
+is_match	a*	ab	true
+full_match	a*	ab	false
+find	a*	ab	<a>
+find_all	a*	ab	[a||]
+split	a*	ab	[||b|]
+captures	a*	ab	[a]
+is_match	a*	b	true
+full_match	a*	b	false
+find	a*	b	<>
+find_all	a*	b	[|]
+split	a*	b	[|b|]
+captures	a*	b	[]
+is_match	a*	]	true
+full_match	a*	]	false
+find	a*	]	<>
+find_all	a*	]	[|]
+split	a*	]	[|]|]
+captures	a*	]	[]
+is_match	a*	a]b	true
+full_match	a*	a]b	false
+find	a*	a]b	<a>
+find_all	a*	a]b	[a|||]
+split	a*	a]b	[||]|b|]
+captures	a*	a]b	[a]
+is_match	(a*)*b		false
+full_match	(a*)*b		false
+find	(a*)*b		<none>
+find_all	(a*)*b		[]
+split	(a*)*b		[]
+captures	(a*)*b		<none>
+is_match	(a*)*b	a	false
+full_match	(a*)*b	a	false
+find	(a*)*b	a	<none>
+find_all	(a*)*b	a	[]
+split	(a*)*b	a	[a]
+captures	(a*)*b	a	<none>
+is_match	(a*)*b	abc	true
+full_match	(a*)*b	abc	false
+find	(a*)*b	abc	<ab>
+find_all	(a*)*b	abc	[ab]
+split	(a*)*b	abc	[|c]
+captures	(a*)*b	abc	[ab|]
+is_match	(a*)*b	aXc	false
+full_match	(a*)*b	aXc	false
+find	(a*)*b	aXc	<none>
+find_all	(a*)*b	aXc	[]
+split	(a*)*b	aXc	[aXc]
+captures	(a*)*b	aXc	<none>
+is_match	(a*)*b	aaabccc	true
+full_match	(a*)*b	aaabccc	false
+find	(a*)*b	aaabccc	<aaab>
+find_all	(a*)*b	aaabccc	[aaab]
+split	(a*)*b	aaabccc	[|ccc]
+captures	(a*)*b	aaabccc	[aaab|]
+is_match	(a*)*b	xyz	false
+full_match	(a*)*b	xyz	false
+find	(a*)*b	xyz	<none>
+find_all	(a*)*b	xyz	[]
+split	(a*)*b	xyz	[xyz]
+captures	(a*)*b	xyz	<none>
+is_match	(a*)*b	word boundary word	true
+full_match	(a*)*b	word boundary word	false
+find	(a*)*b	word boundary word	<b>
+find_all	(a*)*b	word boundary word	[b]
+split	(a*)*b	word boundary word	[word |oundary word]
+captures	(a*)*b	word boundary word	[b|]
+is_match	(a*)*b	123-4567	false
+full_match	(a*)*b	123-4567	false
+find	(a*)*b	123-4567	<none>
+find_all	(a*)*b	123-4567	[]
+split	(a*)*b	123-4567	[123-4567]
+captures	(a*)*b	123-4567	<none>
+is_match	(a*)*b	3.14 and 2.718	false
+full_match	(a*)*b	3.14 and 2.718	false
+find	(a*)*b	3.14 and 2.718	<none>
+find_all	(a*)*b	3.14 and 2.718	[]
+split	(a*)*b	3.14 and 2.718	[3.14 and 2.718]
+captures	(a*)*b	3.14 and 2.718	<none>
+is_match	(a*)*b	  spaced  	false
+full_match	(a*)*b	  spaced  	false
+find	(a*)*b	  spaced  	<none>
+find_all	(a*)*b	  spaced  	[]
+split	(a*)*b	  spaced  	[  spaced  ]
+captures	(a*)*b	  spaced  	<none>
+is_match	(a*)*b	AaBbCc	true
+full_match	(a*)*b	AaBbCc	false
+find	(a*)*b	AaBbCc	<b>
+find_all	(a*)*b	AaBbCc	[b]
+split	(a*)*b	AaBbCc	[AaB|Cc]
+captures	(a*)*b	AaBbCc	[b|]
+is_match	(a*)*b	foobaz barbaz	true
+full_match	(a*)*b	foobaz barbaz	false
+find	(a*)*b	foobaz barbaz	<b>
+find_all	(a*)*b	foobaz barbaz	[b|b|b]
+split	(a*)*b	foobaz barbaz	[foo|az |ar|az]
+captures	(a*)*b	foobaz barbaz	[b|]
+is_match	(a*)*b	xx	false
+full_match	(a*)*b	xx	false
+find	(a*)*b	xx	<none>
+find_all	(a*)*b	xx	[]
+split	(a*)*b	xx	[xx]
+captures	(a*)*b	xx	<none>
+is_match	(a*)*b	xxx	false
+full_match	(a*)*b	xxx	false
+find	(a*)*b	xxx	<none>
+find_all	(a*)*b	xxx	[]
+split	(a*)*b	xxx	[xxx]
+captures	(a*)*b	xxx	<none>
+is_match	(a*)*b	xxxx	false
+full_match	(a*)*b	xxxx	false
+find	(a*)*b	xxxx	<none>
+find_all	(a*)*b	xxxx	[]
+split	(a*)*b	xxxx	[xxxx]
+captures	(a*)*b	xxxx	<none>
+is_match	(a*)*b	a.b	true
+full_match	(a*)*b	a.b	false
+find	(a*)*b	a.b	<b>
+find_all	(a*)*b	a.b	[b]
+split	(a*)*b	a.b	[a.|]
+captures	(a*)*b	a.b	[b|]
+is_match	(a*)*b	a\b	true
+full_match	(a*)*b	a\b	false
+find	(a*)*b	a\b	<b>
+find_all	(a*)*b	a\b	[b]
+split	(a*)*b	a\b	[a\|]
+captures	(a*)*b	a\b	[b|]
+is_match	(a*)*b	-a-z-	false
+full_match	(a*)*b	-a-z-	false
+find	(a*)*b	-a-z-	<none>
+find_all	(a*)*b	-a-z-	[]
+split	(a*)*b	-a-z-	[-a-z-]
+captures	(a*)*b	-a-z-	<none>
+is_match	(a*)*b	[bracket]	true
+full_match	(a*)*b	[bracket]	false
+find	(a*)*b	[bracket]	<b>
+find_all	(a*)*b	[bracket]	[b]
+split	(a*)*b	[bracket]	[[|racket]]
+captures	(a*)*b	[bracket]	[b|]
+is_match	(a*)*b	ab	true
+full_match	(a*)*b	ab	true
+find	(a*)*b	ab	<ab>
+find_all	(a*)*b	ab	[ab]
+split	(a*)*b	ab	[|]
+captures	(a*)*b	ab	[ab|]
+is_match	(a*)*b	b	true
+full_match	(a*)*b	b	true
+find	(a*)*b	b	<b>
+find_all	(a*)*b	b	[b]
+split	(a*)*b	b	[|]
+captures	(a*)*b	b	[b|]
+is_match	(a*)*b	]	false
+full_match	(a*)*b	]	false
+find	(a*)*b	]	<none>
+find_all	(a*)*b	]	[]
+split	(a*)*b	]	[]]
+captures	(a*)*b	]	<none>
+is_match	(a*)*b	a]b	true
+full_match	(a*)*b	a]b	false
+find	(a*)*b	a]b	<b>
+find_all	(a*)*b	a]b	[b]
+split	(a*)*b	a]b	[a]|]
+captures	(a*)*b	a]b	[b|]
+is_match	[-a-z]+		false
+full_match	[-a-z]+		false
+find	[-a-z]+		<none>
+find_all	[-a-z]+		[]
+split	[-a-z]+		[]
+captures	[-a-z]+		<none>
+is_match	[-a-z]+	a	true
+full_match	[-a-z]+	a	true
+find	[-a-z]+	a	<a>
+find_all	[-a-z]+	a	[a]
+split	[-a-z]+	a	[|]
+captures	[-a-z]+	a	[a]
+is_match	[-a-z]+	abc	true
+full_match	[-a-z]+	abc	true
+find	[-a-z]+	abc	<abc>
+find_all	[-a-z]+	abc	[abc]
+split	[-a-z]+	abc	[|]
+captures	[-a-z]+	abc	[abc]
+is_match	[-a-z]+	aXc	true
+full_match	[-a-z]+	aXc	false
+find	[-a-z]+	aXc	<a>
+find_all	[-a-z]+	aXc	[a|c]
+split	[-a-z]+	aXc	[|X|]
+captures	[-a-z]+	aXc	[a]
+is_match	[-a-z]+	aaabccc	true
+full_match	[-a-z]+	aaabccc	true
+find	[-a-z]+	aaabccc	<aaabccc>
+find_all	[-a-z]+	aaabccc	[aaabccc]
+split	[-a-z]+	aaabccc	[|]
+captures	[-a-z]+	aaabccc	[aaabccc]
+is_match	[-a-z]+	xyz	true
+full_match	[-a-z]+	xyz	true
+find	[-a-z]+	xyz	<xyz>
+find_all	[-a-z]+	xyz	[xyz]
+split	[-a-z]+	xyz	[|]
+captures	[-a-z]+	xyz	[xyz]
+is_match	[-a-z]+	word boundary word	true
+full_match	[-a-z]+	word boundary word	false
+find	[-a-z]+	word boundary word	<word>
+find_all	[-a-z]+	word boundary word	[word|boundary|word]
+split	[-a-z]+	word boundary word	[| | |]
+captures	[-a-z]+	word boundary word	[word]
+is_match	[-a-z]+	123-4567	true
+full_match	[-a-z]+	123-4567	false
+find	[-a-z]+	123-4567	<->
+find_all	[-a-z]+	123-4567	[-]
+split	[-a-z]+	123-4567	[123|4567]
+captures	[-a-z]+	123-4567	[-]
+is_match	[-a-z]+	3.14 and 2.718	true
+full_match	[-a-z]+	3.14 and 2.718	false
+find	[-a-z]+	3.14 and 2.718	<and>
+find_all	[-a-z]+	3.14 and 2.718	[and]
+split	[-a-z]+	3.14 and 2.718	[3.14 | 2.718]
+captures	[-a-z]+	3.14 and 2.718	[and]
+is_match	[-a-z]+	  spaced  	true
+full_match	[-a-z]+	  spaced  	false
+find	[-a-z]+	  spaced  	<spaced>
+find_all	[-a-z]+	  spaced  	[spaced]
+split	[-a-z]+	  spaced  	[  |  ]
+captures	[-a-z]+	  spaced  	[spaced]
+is_match	[-a-z]+	AaBbCc	true
+full_match	[-a-z]+	AaBbCc	false
+find	[-a-z]+	AaBbCc	<a>
+find_all	[-a-z]+	AaBbCc	[a|b|c]
+split	[-a-z]+	AaBbCc	[A|B|C|]
+captures	[-a-z]+	AaBbCc	[a]
+is_match	[-a-z]+	foobaz barbaz	true
+full_match	[-a-z]+	foobaz barbaz	false
+find	[-a-z]+	foobaz barbaz	<foobaz>
+find_all	[-a-z]+	foobaz barbaz	[foobaz|barbaz]
+split	[-a-z]+	foobaz barbaz	[| |]
+captures	[-a-z]+	foobaz barbaz	[foobaz]
+is_match	[-a-z]+	xx	true
+full_match	[-a-z]+	xx	true
+find	[-a-z]+	xx	<xx>
+find_all	[-a-z]+	xx	[xx]
+split	[-a-z]+	xx	[|]
+captures	[-a-z]+	xx	[xx]
+is_match	[-a-z]+	xxx	true
+full_match	[-a-z]+	xxx	true
+find	[-a-z]+	xxx	<xxx>
+find_all	[-a-z]+	xxx	[xxx]
+split	[-a-z]+	xxx	[|]
+captures	[-a-z]+	xxx	[xxx]
+is_match	[-a-z]+	xxxx	true
+full_match	[-a-z]+	xxxx	true
+find	[-a-z]+	xxxx	<xxxx>
+find_all	[-a-z]+	xxxx	[xxxx]
+split	[-a-z]+	xxxx	[|]
+captures	[-a-z]+	xxxx	[xxxx]
+is_match	[-a-z]+	a.b	true
+full_match	[-a-z]+	a.b	false
+find	[-a-z]+	a.b	<a>
+find_all	[-a-z]+	a.b	[a|b]
+split	[-a-z]+	a.b	[|.|]
+captures	[-a-z]+	a.b	[a]
+is_match	[-a-z]+	a\b	true
+full_match	[-a-z]+	a\b	false
+find	[-a-z]+	a\b	<a>
+find_all	[-a-z]+	a\b	[a|b]
+split	[-a-z]+	a\b	[|\|]
+captures	[-a-z]+	a\b	[a]
+is_match	[-a-z]+	-a-z-	true
+full_match	[-a-z]+	-a-z-	true
+find	[-a-z]+	-a-z-	<-a-z->
+find_all	[-a-z]+	-a-z-	[-a-z-]
+split	[-a-z]+	-a-z-	[|]
+captures	[-a-z]+	-a-z-	[-a-z-]
+is_match	[-a-z]+	[bracket]	true
+full_match	[-a-z]+	[bracket]	false
+find	[-a-z]+	[bracket]	<bracket>
+find_all	[-a-z]+	[bracket]	[bracket]
+split	[-a-z]+	[bracket]	[[|]]
+captures	[-a-z]+	[bracket]	[bracket]
+is_match	[-a-z]+	ab	true
+full_match	[-a-z]+	ab	true
+find	[-a-z]+	ab	<ab>
+find_all	[-a-z]+	ab	[ab]
+split	[-a-z]+	ab	[|]
+captures	[-a-z]+	ab	[ab]
+is_match	[-a-z]+	b	true
+full_match	[-a-z]+	b	true
+find	[-a-z]+	b	<b>
+find_all	[-a-z]+	b	[b]
+split	[-a-z]+	b	[|]
+captures	[-a-z]+	b	[b]
+is_match	[-a-z]+	]	false
+full_match	[-a-z]+	]	false
+find	[-a-z]+	]	<none>
+find_all	[-a-z]+	]	[]
+split	[-a-z]+	]	[]]
+captures	[-a-z]+	]	<none>
+is_match	[-a-z]+	a]b	true
+full_match	[-a-z]+	a]b	false
+find	[-a-z]+	a]b	<a>
+find_all	[-a-z]+	a]b	[a|b]
+split	[-a-z]+	a]b	[|]|]
+captures	[-a-z]+	a]b	[a]
+is_match	[a-]		false
+full_match	[a-]		false
+find	[a-]		<none>
+find_all	[a-]		[]
+split	[a-]		[]
+captures	[a-]		<none>
+is_match	[a-]	a	true
+full_match	[a-]	a	true
+find	[a-]	a	<a>
+find_all	[a-]	a	[a]
+split	[a-]	a	[|]
+captures	[a-]	a	[a]
+is_match	[a-]	abc	true
+full_match	[a-]	abc	false
+find	[a-]	abc	<a>
+find_all	[a-]	abc	[a]
+split	[a-]	abc	[|bc]
+captures	[a-]	abc	[a]
+is_match	[a-]	aXc	true
+full_match	[a-]	aXc	false
+find	[a-]	aXc	<a>
+find_all	[a-]	aXc	[a]
+split	[a-]	aXc	[|Xc]
+captures	[a-]	aXc	[a]
+is_match	[a-]	aaabccc	true
+full_match	[a-]	aaabccc	false
+find	[a-]	aaabccc	<a>
+find_all	[a-]	aaabccc	[a|a|a]
+split	[a-]	aaabccc	[|||bccc]
+captures	[a-]	aaabccc	[a]
+is_match	[a-]	xyz	false
+full_match	[a-]	xyz	false
+find	[a-]	xyz	<none>
+find_all	[a-]	xyz	[]
+split	[a-]	xyz	[xyz]
+captures	[a-]	xyz	<none>
+is_match	[a-]	word boundary word	true
+full_match	[a-]	word boundary word	false
+find	[a-]	word boundary word	<a>
+find_all	[a-]	word boundary word	[a]
+split	[a-]	word boundary word	[word bound|ry word]
+captures	[a-]	word boundary word	[a]
+is_match	[a-]	123-4567	true
+full_match	[a-]	123-4567	false
+find	[a-]	123-4567	<->
+find_all	[a-]	123-4567	[-]
+split	[a-]	123-4567	[123|4567]
+captures	[a-]	123-4567	[-]
+is_match	[a-]	3.14 and 2.718	true
+full_match	[a-]	3.14 and 2.718	false
+find	[a-]	3.14 and 2.718	<a>
+find_all	[a-]	3.14 and 2.718	[a]
+split	[a-]	3.14 and 2.718	[3.14 |nd 2.718]
+captures	[a-]	3.14 and 2.718	[a]
+is_match	[a-]	  spaced  	true
+full_match	[a-]	  spaced  	false
+find	[a-]	  spaced  	<a>
+find_all	[a-]	  spaced  	[a]
+split	[a-]	  spaced  	[  sp|ced  ]
+captures	[a-]	  spaced  	[a]
+is_match	[a-]	AaBbCc	true
+full_match	[a-]	AaBbCc	false
+find	[a-]	AaBbCc	<a>
+find_all	[a-]	AaBbCc	[a]
+split	[a-]	AaBbCc	[A|BbCc]
+captures	[a-]	AaBbCc	[a]
+is_match	[a-]	foobaz barbaz	true
+full_match	[a-]	foobaz barbaz	false
+find	[a-]	foobaz barbaz	<a>
+find_all	[a-]	foobaz barbaz	[a|a|a]
+split	[a-]	foobaz barbaz	[foob|z b|rb|z]
+captures	[a-]	foobaz barbaz	[a]
+is_match	[a-]	xx	false
+full_match	[a-]	xx	false
+find	[a-]	xx	<none>
+find_all	[a-]	xx	[]
+split	[a-]	xx	[xx]
+captures	[a-]	xx	<none>
+is_match	[a-]	xxx	false
+full_match	[a-]	xxx	false
+find	[a-]	xxx	<none>
+find_all	[a-]	xxx	[]
+split	[a-]	xxx	[xxx]
+captures	[a-]	xxx	<none>
+is_match	[a-]	xxxx	false
+full_match	[a-]	xxxx	false
+find	[a-]	xxxx	<none>
+find_all	[a-]	xxxx	[]
+split	[a-]	xxxx	[xxxx]
+captures	[a-]	xxxx	<none>
+is_match	[a-]	a.b	true
+full_match	[a-]	a.b	false
+find	[a-]	a.b	<a>
+find_all	[a-]	a.b	[a]
+split	[a-]	a.b	[|.b]
+captures	[a-]	a.b	[a]
+is_match	[a-]	a\b	true
+full_match	[a-]	a\b	false
+find	[a-]	a\b	<a>
+find_all	[a-]	a\b	[a]
+split	[a-]	a\b	[|\b]
+captures	[a-]	a\b	[a]
+is_match	[a-]	-a-z-	true
+full_match	[a-]	-a-z-	false
+find	[a-]	-a-z-	<->
+find_all	[a-]	-a-z-	[-|a|-|-]
+split	[a-]	-a-z-	[|||z|]
+captures	[a-]	-a-z-	[-]
+is_match	[a-]	[bracket]	true
+full_match	[a-]	[bracket]	false
+find	[a-]	[bracket]	<a>
+find_all	[a-]	[bracket]	[a]
+split	[a-]	[bracket]	[[br|cket]]
+captures	[a-]	[bracket]	[a]
+is_match	[a-]	ab	true
+full_match	[a-]	ab	false
+find	[a-]	ab	<a>
+find_all	[a-]	ab	[a]
+split	[a-]	ab	[|b]
+captures	[a-]	ab	[a]
+is_match	[a-]	b	false
+full_match	[a-]	b	false
+find	[a-]	b	<none>
+find_all	[a-]	b	[]
+split	[a-]	b	[b]
+captures	[a-]	b	<none>
+is_match	[a-]	]	false
+full_match	[a-]	]	false
+find	[a-]	]	<none>
+find_all	[a-]	]	[]
+split	[a-]	]	[]]
+captures	[a-]	]	<none>
+is_match	[a-]	a]b	true
+full_match	[a-]	a]b	false
+find	[a-]	a]b	<a>
+find_all	[a-]	a]b	[a]
+split	[a-]	a]b	[|]b]
+captures	[a-]	a]b	[a]
+is_match	\S+		false
+full_match	\S+		false
+find	\S+		<none>
+find_all	\S+		[]
+split	\S+		[]
+captures	\S+		<none>
+is_match	\S+	a	true
+full_match	\S+	a	true
+find	\S+	a	<a>
+find_all	\S+	a	[a]
+split	\S+	a	[|]
+captures	\S+	a	[a]
+is_match	\S+	abc	true
+full_match	\S+	abc	true
+find	\S+	abc	<abc>
+find_all	\S+	abc	[abc]
+split	\S+	abc	[|]
+captures	\S+	abc	[abc]
+is_match	\S+	aXc	true
+full_match	\S+	aXc	true
+find	\S+	aXc	<aXc>
+find_all	\S+	aXc	[aXc]
+split	\S+	aXc	[|]
+captures	\S+	aXc	[aXc]
+is_match	\S+	aaabccc	true
+full_match	\S+	aaabccc	true
+find	\S+	aaabccc	<aaabccc>
+find_all	\S+	aaabccc	[aaabccc]
+split	\S+	aaabccc	[|]
+captures	\S+	aaabccc	[aaabccc]
+is_match	\S+	xyz	true
+full_match	\S+	xyz	true
+find	\S+	xyz	<xyz>
+find_all	\S+	xyz	[xyz]
+split	\S+	xyz	[|]
+captures	\S+	xyz	[xyz]
+is_match	\S+	word boundary word	true
+full_match	\S+	word boundary word	false
+find	\S+	word boundary word	<word>
+find_all	\S+	word boundary word	[word|boundary|word]
+split	\S+	word boundary word	[| | |]
+captures	\S+	word boundary word	[word]
+is_match	\S+	123-4567	true
+full_match	\S+	123-4567	true
+find	\S+	123-4567	<123-4567>
+find_all	\S+	123-4567	[123-4567]
+split	\S+	123-4567	[|]
+captures	\S+	123-4567	[123-4567]
+is_match	\S+	3.14 and 2.718	true
+full_match	\S+	3.14 and 2.718	false
+find	\S+	3.14 and 2.718	<3.14>
+find_all	\S+	3.14 and 2.718	[3.14|and|2.718]
+split	\S+	3.14 and 2.718	[| | |]
+captures	\S+	3.14 and 2.718	[3.14]
+is_match	\S+	  spaced  	true
+full_match	\S+	  spaced  	false
+find	\S+	  spaced  	<spaced>
+find_all	\S+	  spaced  	[spaced]
+split	\S+	  spaced  	[  |  ]
+captures	\S+	  spaced  	[spaced]
+is_match	\S+	AaBbCc	true
+full_match	\S+	AaBbCc	true
+find	\S+	AaBbCc	<AaBbCc>
+find_all	\S+	AaBbCc	[AaBbCc]
+split	\S+	AaBbCc	[|]
+captures	\S+	AaBbCc	[AaBbCc]
+is_match	\S+	foobaz barbaz	true
+full_match	\S+	foobaz barbaz	false
+find	\S+	foobaz barbaz	<foobaz>
+find_all	\S+	foobaz barbaz	[foobaz|barbaz]
+split	\S+	foobaz barbaz	[| |]
+captures	\S+	foobaz barbaz	[foobaz]
+is_match	\S+	xx	true
+full_match	\S+	xx	true
+find	\S+	xx	<xx>
+find_all	\S+	xx	[xx]
+split	\S+	xx	[|]
+captures	\S+	xx	[xx]
+is_match	\S+	xxx	true
+full_match	\S+	xxx	true
+find	\S+	xxx	<xxx>
+find_all	\S+	xxx	[xxx]
+split	\S+	xxx	[|]
+captures	\S+	xxx	[xxx]
+is_match	\S+	xxxx	true
+full_match	\S+	xxxx	true
+find	\S+	xxxx	<xxxx>
+find_all	\S+	xxxx	[xxxx]
+split	\S+	xxxx	[|]
+captures	\S+	xxxx	[xxxx]
+is_match	\S+	a.b	true
+full_match	\S+	a.b	true
+find	\S+	a.b	<a.b>
+find_all	\S+	a.b	[a.b]
+split	\S+	a.b	[|]
+captures	\S+	a.b	[a.b]
+is_match	\S+	a\b	true
+full_match	\S+	a\b	true
+find	\S+	a\b	<a\b>
+find_all	\S+	a\b	[a\b]
+split	\S+	a\b	[|]
+captures	\S+	a\b	[a\b]
+is_match	\S+	-a-z-	true
+full_match	\S+	-a-z-	true
+find	\S+	-a-z-	<-a-z->
+find_all	\S+	-a-z-	[-a-z-]
+split	\S+	-a-z-	[|]
+captures	\S+	-a-z-	[-a-z-]
+is_match	\S+	[bracket]	true
+full_match	\S+	[bracket]	true
+find	\S+	[bracket]	<[bracket]>
+find_all	\S+	[bracket]	[[bracket]]
+split	\S+	[bracket]	[|]
+captures	\S+	[bracket]	[[bracket]]
+is_match	\S+	ab	true
+full_match	\S+	ab	true
+find	\S+	ab	<ab>
+find_all	\S+	ab	[ab]
+split	\S+	ab	[|]
+captures	\S+	ab	[ab]
+is_match	\S+	b	true
+full_match	\S+	b	true
+find	\S+	b	<b>
+find_all	\S+	b	[b]
+split	\S+	b	[|]
+captures	\S+	b	[b]
+is_match	\S+	]	true
+full_match	\S+	]	true
+find	\S+	]	<]>
+find_all	\S+	]	[]]
+split	\S+	]	[|]
+captures	\S+	]	[]]
+is_match	\S+	a]b	true
+full_match	\S+	a]b	true
+find	\S+	a]b	<a]b>
+find_all	\S+	a]b	[a]b]
+split	\S+	a]b	[|]
+captures	\S+	a]b	[a]b]
+is_match	\W		false
+full_match	\W		false
+find	\W		<none>
+find_all	\W		[]
+split	\W		[]
+captures	\W		<none>
+is_match	\W	a	false
+full_match	\W	a	false
+find	\W	a	<none>
+find_all	\W	a	[]
+split	\W	a	[a]
+captures	\W	a	<none>
+is_match	\W	abc	false
+full_match	\W	abc	false
+find	\W	abc	<none>
+find_all	\W	abc	[]
+split	\W	abc	[abc]
+captures	\W	abc	<none>
+is_match	\W	aXc	false
+full_match	\W	aXc	false
+find	\W	aXc	<none>
+find_all	\W	aXc	[]
+split	\W	aXc	[aXc]
+captures	\W	aXc	<none>
+is_match	\W	aaabccc	false
+full_match	\W	aaabccc	false
+find	\W	aaabccc	<none>
+find_all	\W	aaabccc	[]
+split	\W	aaabccc	[aaabccc]
+captures	\W	aaabccc	<none>
+is_match	\W	xyz	false
+full_match	\W	xyz	false
+find	\W	xyz	<none>
+find_all	\W	xyz	[]
+split	\W	xyz	[xyz]
+captures	\W	xyz	<none>
+is_match	\W	word boundary word	true
+full_match	\W	word boundary word	false
+find	\W	word boundary word	< >
+find_all	\W	word boundary word	[ | ]
+split	\W	word boundary word	[word|boundary|word]
+captures	\W	word boundary word	[ ]
+is_match	\W	123-4567	true
+full_match	\W	123-4567	false
+find	\W	123-4567	<->
+find_all	\W	123-4567	[-]
+split	\W	123-4567	[123|4567]
+captures	\W	123-4567	[-]
+is_match	\W	3.14 and 2.718	true
+full_match	\W	3.14 and 2.718	false
+find	\W	3.14 and 2.718	<.>
+find_all	\W	3.14 and 2.718	[.| | |.]
+split	\W	3.14 and 2.718	[3|14|and|2|718]
+captures	\W	3.14 and 2.718	[.]
+is_match	\W	  spaced  	true
+full_match	\W	  spaced  	false
+find	\W	  spaced  	< >
+find_all	\W	  spaced  	[ | | | ]
+split	\W	  spaced  	[||spaced||]
+captures	\W	  spaced  	[ ]
+is_match	\W	AaBbCc	false
+full_match	\W	AaBbCc	false
+find	\W	AaBbCc	<none>
+find_all	\W	AaBbCc	[]
+split	\W	AaBbCc	[AaBbCc]
+captures	\W	AaBbCc	<none>
+is_match	\W	foobaz barbaz	true
+full_match	\W	foobaz barbaz	false
+find	\W	foobaz barbaz	< >
+find_all	\W	foobaz barbaz	[ ]
+split	\W	foobaz barbaz	[foobaz|barbaz]
+captures	\W	foobaz barbaz	[ ]
+is_match	\W	xx	false
+full_match	\W	xx	false
+find	\W	xx	<none>
+find_all	\W	xx	[]
+split	\W	xx	[xx]
+captures	\W	xx	<none>
+is_match	\W	xxx	false
+full_match	\W	xxx	false
+find	\W	xxx	<none>
+find_all	\W	xxx	[]
+split	\W	xxx	[xxx]
+captures	\W	xxx	<none>
+is_match	\W	xxxx	false
+full_match	\W	xxxx	false
+find	\W	xxxx	<none>
+find_all	\W	xxxx	[]
+split	\W	xxxx	[xxxx]
+captures	\W	xxxx	<none>
+is_match	\W	a.b	true
+full_match	\W	a.b	false
+find	\W	a.b	<.>
+find_all	\W	a.b	[.]
+split	\W	a.b	[a|b]
+captures	\W	a.b	[.]
+is_match	\W	a\b	true
+full_match	\W	a\b	false
+find	\W	a\b	<\>
+find_all	\W	a\b	[\]
+split	\W	a\b	[a|b]
+captures	\W	a\b	[\]
+is_match	\W	-a-z-	true
+full_match	\W	-a-z-	false
+find	\W	-a-z-	<->
+find_all	\W	-a-z-	[-|-|-]
+split	\W	-a-z-	[|a|z|]
+captures	\W	-a-z-	[-]
+is_match	\W	[bracket]	true
+full_match	\W	[bracket]	false
+find	\W	[bracket]	<[>
+find_all	\W	[bracket]	[[|]]
+split	\W	[bracket]	[|bracket|]
+captures	\W	[bracket]	[[]
+is_match	\W	ab	false
+full_match	\W	ab	false
+find	\W	ab	<none>
+find_all	\W	ab	[]
+split	\W	ab	[ab]
+captures	\W	ab	<none>
+is_match	\W	b	false
+full_match	\W	b	false
+find	\W	b	<none>
+find_all	\W	b	[]
+split	\W	b	[b]
+captures	\W	b	<none>
+is_match	\W	]	true
+full_match	\W	]	true
+find	\W	]	<]>
+find_all	\W	]	[]]
+split	\W	]	[|]
+captures	\W	]	[]]
+is_match	\W	a]b	true
+full_match	\W	a]b	false
+find	\W	a]b	<]>
+find_all	\W	a]b	[]]
+split	\W	a]b	[a|b]
+captures	\W	a]b	[]]
+is_match	\D		false
+full_match	\D		false
+find	\D		<none>
+find_all	\D		[]
+split	\D		[]
+captures	\D		<none>
+is_match	\D	a	true
+full_match	\D	a	true
+find	\D	a	<a>
+find_all	\D	a	[a]
+split	\D	a	[|]
+captures	\D	a	[a]
+is_match	\D	abc	true
+full_match	\D	abc	false
+find	\D	abc	<a>
+find_all	\D	abc	[a|b|c]
+split	\D	abc	[|||]
+captures	\D	abc	[a]
+is_match	\D	aXc	true
+full_match	\D	aXc	false
+find	\D	aXc	<a>
+find_all	\D	aXc	[a|X|c]
+split	\D	aXc	[|||]
+captures	\D	aXc	[a]
+is_match	\D	aaabccc	true
+full_match	\D	aaabccc	false
+find	\D	aaabccc	<a>
+find_all	\D	aaabccc	[a|a|a|b|c|c|c]
+split	\D	aaabccc	[|||||||]
+captures	\D	aaabccc	[a]
+is_match	\D	xyz	true
+full_match	\D	xyz	false
+find	\D	xyz	<x>
+find_all	\D	xyz	[x|y|z]
+split	\D	xyz	[|||]
+captures	\D	xyz	[x]
+is_match	\D	word boundary word	true
+full_match	\D	word boundary word	false
+find	\D	word boundary word	<w>
+find_all	\D	word boundary word	[w|o|r|d| |b|o|u|n|d|a|r|y| |w|o|r|d]
+split	\D	word boundary word	[||||||||||||||||||]
+captures	\D	word boundary word	[w]
+is_match	\D	123-4567	true
+full_match	\D	123-4567	false
+find	\D	123-4567	<->
+find_all	\D	123-4567	[-]
+split	\D	123-4567	[123|4567]
+captures	\D	123-4567	[-]
+is_match	\D	3.14 and 2.718	true
+full_match	\D	3.14 and 2.718	false
+find	\D	3.14 and 2.718	<.>
+find_all	\D	3.14 and 2.718	[.| |a|n|d| |.]
+split	\D	3.14 and 2.718	[3|14|||||2|718]
+captures	\D	3.14 and 2.718	[.]
+is_match	\D	  spaced  	true
+full_match	\D	  spaced  	false
+find	\D	  spaced  	< >
+find_all	\D	  spaced  	[ | |s|p|a|c|e|d| | ]
+split	\D	  spaced  	[||||||||||]
+captures	\D	  spaced  	[ ]
+is_match	\D	AaBbCc	true
+full_match	\D	AaBbCc	false
+find	\D	AaBbCc	<A>
+find_all	\D	AaBbCc	[A|a|B|b|C|c]
+split	\D	AaBbCc	[||||||]
+captures	\D	AaBbCc	[A]
+is_match	\D	foobaz barbaz	true
+full_match	\D	foobaz barbaz	false
+find	\D	foobaz barbaz	<f>
+find_all	\D	foobaz barbaz	[f|o|o|b|a|z| |b|a|r|b|a|z]
+split	\D	foobaz barbaz	[|||||||||||||]
+captures	\D	foobaz barbaz	[f]
+is_match	\D	xx	true
+full_match	\D	xx	false
+find	\D	xx	<x>
+find_all	\D	xx	[x|x]
+split	\D	xx	[||]
+captures	\D	xx	[x]
+is_match	\D	xxx	true
+full_match	\D	xxx	false
+find	\D	xxx	<x>
+find_all	\D	xxx	[x|x|x]
+split	\D	xxx	[|||]
+captures	\D	xxx	[x]
+is_match	\D	xxxx	true
+full_match	\D	xxxx	false
+find	\D	xxxx	<x>
+find_all	\D	xxxx	[x|x|x|x]
+split	\D	xxxx	[||||]
+captures	\D	xxxx	[x]
+is_match	\D	a.b	true
+full_match	\D	a.b	false
+find	\D	a.b	<a>
+find_all	\D	a.b	[a|.|b]
+split	\D	a.b	[|||]
+captures	\D	a.b	[a]
+is_match	\D	a\b	true
+full_match	\D	a\b	false
+find	\D	a\b	<a>
+find_all	\D	a\b	[a|\|b]
+split	\D	a\b	[|||]
+captures	\D	a\b	[a]
+is_match	\D	-a-z-	true
+full_match	\D	-a-z-	false
+find	\D	-a-z-	<->
+find_all	\D	-a-z-	[-|a|-|z|-]
+split	\D	-a-z-	[|||||]
+captures	\D	-a-z-	[-]
+is_match	\D	[bracket]	true
+full_match	\D	[bracket]	false
+find	\D	[bracket]	<[>
+find_all	\D	[bracket]	[[|b|r|a|c|k|e|t|]]
+split	\D	[bracket]	[|||||||||]
+captures	\D	[bracket]	[[]
+is_match	\D	ab	true
+full_match	\D	ab	false
+find	\D	ab	<a>
+find_all	\D	ab	[a|b]
+split	\D	ab	[||]
+captures	\D	ab	[a]
+is_match	\D	b	true
+full_match	\D	b	true
+find	\D	b	<b>
+find_all	\D	b	[b]
+split	\D	b	[|]
+captures	\D	b	[b]
+is_match	\D	]	true
+full_match	\D	]	true
+find	\D	]	<]>
+find_all	\D	]	[]]
+split	\D	]	[|]
+captures	\D	]	[]]
+is_match	\D	a]b	true
+full_match	\D	a]b	false
+find	\D	a]b	<a>
+find_all	\D	a]b	[a|]|b]
+split	\D	a]b	[|||]
+captures	\D	a]b	[a]
+is_match	(x)|(y)		false
+full_match	(x)|(y)		false
+find	(x)|(y)		<none>
+find_all	(x)|(y)		[]
+split	(x)|(y)		[]
+captures	(x)|(y)		<none>
+is_match	(x)|(y)	a	false
+full_match	(x)|(y)	a	false
+find	(x)|(y)	a	<none>
+find_all	(x)|(y)	a	[]
+split	(x)|(y)	a	[a]
+captures	(x)|(y)	a	<none>
+is_match	(x)|(y)	abc	false
+full_match	(x)|(y)	abc	false
+find	(x)|(y)	abc	<none>
+find_all	(x)|(y)	abc	[]
+split	(x)|(y)	abc	[abc]
+captures	(x)|(y)	abc	<none>
+is_match	(x)|(y)	aXc	false
+full_match	(x)|(y)	aXc	false
+find	(x)|(y)	aXc	<none>
+find_all	(x)|(y)	aXc	[]
+split	(x)|(y)	aXc	[aXc]
+captures	(x)|(y)	aXc	<none>
+is_match	(x)|(y)	aaabccc	false
+full_match	(x)|(y)	aaabccc	false
+find	(x)|(y)	aaabccc	<none>
+find_all	(x)|(y)	aaabccc	[]
+split	(x)|(y)	aaabccc	[aaabccc]
+captures	(x)|(y)	aaabccc	<none>
+is_match	(x)|(y)	xyz	true
+full_match	(x)|(y)	xyz	false
+find	(x)|(y)	xyz	<x>
+find_all	(x)|(y)	xyz	[x|y]
+split	(x)|(y)	xyz	[||z]
+captures	(x)|(y)	xyz	[x|x|]
+is_match	(x)|(y)	word boundary word	true
+full_match	(x)|(y)	word boundary word	false
+find	(x)|(y)	word boundary word	<y>
+find_all	(x)|(y)	word boundary word	[y]
+split	(x)|(y)	word boundary word	[word boundar| word]
+captures	(x)|(y)	word boundary word	[y||y]
+is_match	(x)|(y)	123-4567	false
+full_match	(x)|(y)	123-4567	false
+find	(x)|(y)	123-4567	<none>
+find_all	(x)|(y)	123-4567	[]
+split	(x)|(y)	123-4567	[123-4567]
+captures	(x)|(y)	123-4567	<none>
+is_match	(x)|(y)	3.14 and 2.718	false
+full_match	(x)|(y)	3.14 and 2.718	false
+find	(x)|(y)	3.14 and 2.718	<none>
+find_all	(x)|(y)	3.14 and 2.718	[]
+split	(x)|(y)	3.14 and 2.718	[3.14 and 2.718]
+captures	(x)|(y)	3.14 and 2.718	<none>
+is_match	(x)|(y)	  spaced  	false
+full_match	(x)|(y)	  spaced  	false
+find	(x)|(y)	  spaced  	<none>
+find_all	(x)|(y)	  spaced  	[]
+split	(x)|(y)	  spaced  	[  spaced  ]
+captures	(x)|(y)	  spaced  	<none>
+is_match	(x)|(y)	AaBbCc	false
+full_match	(x)|(y)	AaBbCc	false
+find	(x)|(y)	AaBbCc	<none>
+find_all	(x)|(y)	AaBbCc	[]
+split	(x)|(y)	AaBbCc	[AaBbCc]
+captures	(x)|(y)	AaBbCc	<none>
+is_match	(x)|(y)	foobaz barbaz	false
+full_match	(x)|(y)	foobaz barbaz	false
+find	(x)|(y)	foobaz barbaz	<none>
+find_all	(x)|(y)	foobaz barbaz	[]
+split	(x)|(y)	foobaz barbaz	[foobaz barbaz]
+captures	(x)|(y)	foobaz barbaz	<none>
+is_match	(x)|(y)	xx	true
+full_match	(x)|(y)	xx	false
+find	(x)|(y)	xx	<x>
+find_all	(x)|(y)	xx	[x|x]
+split	(x)|(y)	xx	[||]
+captures	(x)|(y)	xx	[x|x|]
+is_match	(x)|(y)	xxx	true
+full_match	(x)|(y)	xxx	false
+find	(x)|(y)	xxx	<x>
+find_all	(x)|(y)	xxx	[x|x|x]
+split	(x)|(y)	xxx	[|||]
+captures	(x)|(y)	xxx	[x|x|]
+is_match	(x)|(y)	xxxx	true
+full_match	(x)|(y)	xxxx	false
+find	(x)|(y)	xxxx	<x>
+find_all	(x)|(y)	xxxx	[x|x|x|x]
+split	(x)|(y)	xxxx	[||||]
+captures	(x)|(y)	xxxx	[x|x|]
+is_match	(x)|(y)	a.b	false
+full_match	(x)|(y)	a.b	false
+find	(x)|(y)	a.b	<none>
+find_all	(x)|(y)	a.b	[]
+split	(x)|(y)	a.b	[a.b]
+captures	(x)|(y)	a.b	<none>
+is_match	(x)|(y)	a\b	false
+full_match	(x)|(y)	a\b	false
+find	(x)|(y)	a\b	<none>
+find_all	(x)|(y)	a\b	[]
+split	(x)|(y)	a\b	[a\b]
+captures	(x)|(y)	a\b	<none>
+is_match	(x)|(y)	-a-z-	false
+full_match	(x)|(y)	-a-z-	false
+find	(x)|(y)	-a-z-	<none>
+find_all	(x)|(y)	-a-z-	[]
+split	(x)|(y)	-a-z-	[-a-z-]
+captures	(x)|(y)	-a-z-	<none>
+is_match	(x)|(y)	[bracket]	false
+full_match	(x)|(y)	[bracket]	false
+find	(x)|(y)	[bracket]	<none>
+find_all	(x)|(y)	[bracket]	[]
+split	(x)|(y)	[bracket]	[[bracket]]
+captures	(x)|(y)	[bracket]	<none>
+is_match	(x)|(y)	ab	false
+full_match	(x)|(y)	ab	false
+find	(x)|(y)	ab	<none>
+find_all	(x)|(y)	ab	[]
+split	(x)|(y)	ab	[ab]
+captures	(x)|(y)	ab	<none>
+is_match	(x)|(y)	b	false
+full_match	(x)|(y)	b	false
+find	(x)|(y)	b	<none>
+find_all	(x)|(y)	b	[]
+split	(x)|(y)	b	[b]
+captures	(x)|(y)	b	<none>
+is_match	(x)|(y)	]	false
+full_match	(x)|(y)	]	false
+find	(x)|(y)	]	<none>
+find_all	(x)|(y)	]	[]
+split	(x)|(y)	]	[]]
+captures	(x)|(y)	]	<none>
+is_match	(x)|(y)	a]b	false
+full_match	(x)|(y)	a]b	false
+find	(x)|(y)	a]b	<none>
+find_all	(x)|(y)	a]b	[]
+split	(x)|(y)	a]b	[a]b]
+captures	(x)|(y)	a]b	<none>
+is_match	[[]		false
+full_match	[[]		false
+find	[[]		<none>
+find_all	[[]		[]
+split	[[]		[]
+captures	[[]		<none>
+is_match	[[]	a	false
+full_match	[[]	a	false
+find	[[]	a	<none>
+find_all	[[]	a	[]
+split	[[]	a	[a]
+captures	[[]	a	<none>
+is_match	[[]	abc	false
+full_match	[[]	abc	false
+find	[[]	abc	<none>
+find_all	[[]	abc	[]
+split	[[]	abc	[abc]
+captures	[[]	abc	<none>
+is_match	[[]	aXc	false
+full_match	[[]	aXc	false
+find	[[]	aXc	<none>
+find_all	[[]	aXc	[]
+split	[[]	aXc	[aXc]
+captures	[[]	aXc	<none>
+is_match	[[]	aaabccc	false
+full_match	[[]	aaabccc	false
+find	[[]	aaabccc	<none>
+find_all	[[]	aaabccc	[]
+split	[[]	aaabccc	[aaabccc]
+captures	[[]	aaabccc	<none>
+is_match	[[]	xyz	false
+full_match	[[]	xyz	false
+find	[[]	xyz	<none>
+find_all	[[]	xyz	[]
+split	[[]	xyz	[xyz]
+captures	[[]	xyz	<none>
+is_match	[[]	word boundary word	false
+full_match	[[]	word boundary word	false
+find	[[]	word boundary word	<none>
+find_all	[[]	word boundary word	[]
+split	[[]	word boundary word	[word boundary word]
+captures	[[]	word boundary word	<none>
+is_match	[[]	123-4567	false
+full_match	[[]	123-4567	false
+find	[[]	123-4567	<none>
+find_all	[[]	123-4567	[]
+split	[[]	123-4567	[123-4567]
+captures	[[]	123-4567	<none>
+is_match	[[]	3.14 and 2.718	false
+full_match	[[]	3.14 and 2.718	false
+find	[[]	3.14 and 2.718	<none>
+find_all	[[]	3.14 and 2.718	[]
+split	[[]	3.14 and 2.718	[3.14 and 2.718]
+captures	[[]	3.14 and 2.718	<none>
+is_match	[[]	  spaced  	false
+full_match	[[]	  spaced  	false
+find	[[]	  spaced  	<none>
+find_all	[[]	  spaced  	[]
+split	[[]	  spaced  	[  spaced  ]
+captures	[[]	  spaced  	<none>
+is_match	[[]	AaBbCc	false
+full_match	[[]	AaBbCc	false
+find	[[]	AaBbCc	<none>
+find_all	[[]	AaBbCc	[]
+split	[[]	AaBbCc	[AaBbCc]
+captures	[[]	AaBbCc	<none>
+is_match	[[]	foobaz barbaz	false
+full_match	[[]	foobaz barbaz	false
+find	[[]	foobaz barbaz	<none>
+find_all	[[]	foobaz barbaz	[]
+split	[[]	foobaz barbaz	[foobaz barbaz]
+captures	[[]	foobaz barbaz	<none>
+is_match	[[]	xx	false
+full_match	[[]	xx	false
+find	[[]	xx	<none>
+find_all	[[]	xx	[]
+split	[[]	xx	[xx]
+captures	[[]	xx	<none>
+is_match	[[]	xxx	false
+full_match	[[]	xxx	false
+find	[[]	xxx	<none>
+find_all	[[]	xxx	[]
+split	[[]	xxx	[xxx]
+captures	[[]	xxx	<none>
+is_match	[[]	xxxx	false
+full_match	[[]	xxxx	false
+find	[[]	xxxx	<none>
+find_all	[[]	xxxx	[]
+split	[[]	xxxx	[xxxx]
+captures	[[]	xxxx	<none>
+is_match	[[]	a.b	false
+full_match	[[]	a.b	false
+find	[[]	a.b	<none>
+find_all	[[]	a.b	[]
+split	[[]	a.b	[a.b]
+captures	[[]	a.b	<none>
+is_match	[[]	a\b	false
+full_match	[[]	a\b	false
+find	[[]	a\b	<none>
+find_all	[[]	a\b	[]
+split	[[]	a\b	[a\b]
+captures	[[]	a\b	<none>
+is_match	[[]	-a-z-	false
+full_match	[[]	-a-z-	false
+find	[[]	-a-z-	<none>
+find_all	[[]	-a-z-	[]
+split	[[]	-a-z-	[-a-z-]
+captures	[[]	-a-z-	<none>
+is_match	[[]	[bracket]	true
+full_match	[[]	[bracket]	false
+find	[[]	[bracket]	<[>
+find_all	[[]	[bracket]	[[]
+split	[[]	[bracket]	[|bracket]]
+captures	[[]	[bracket]	[[]
+is_match	[[]	ab	false
+full_match	[[]	ab	false
+find	[[]	ab	<none>
+find_all	[[]	ab	[]
+split	[[]	ab	[ab]
+captures	[[]	ab	<none>
+is_match	[[]	b	false
+full_match	[[]	b	false
+find	[[]	b	<none>
+find_all	[[]	b	[]
+split	[[]	b	[b]
+captures	[[]	b	<none>
+is_match	[[]	]	false
+full_match	[[]	]	false
+find	[[]	]	<none>
+find_all	[[]	]	[]
+split	[[]	]	[]]
+captures	[[]	]	<none>
+is_match	[[]	a]b	false
+full_match	[[]	a]b	false
+find	[[]	a]b	<none>
+find_all	[[]	a]b	[]
+split	[[]	a]b	[a]b]
+captures	[[]	a]b	<none>
+is_match	[]]		false
+full_match	[]]		false
+find	[]]		<none>
+find_all	[]]		[]
+split	[]]		[]
+captures	[]]		<none>
+is_match	[]]	a	false
+full_match	[]]	a	false
+find	[]]	a	<none>
+find_all	[]]	a	[]
+split	[]]	a	[a]
+captures	[]]	a	<none>
+is_match	[]]	abc	false
+full_match	[]]	abc	false
+find	[]]	abc	<none>
+find_all	[]]	abc	[]
+split	[]]	abc	[abc]
+captures	[]]	abc	<none>
+is_match	[]]	aXc	false
+full_match	[]]	aXc	false
+find	[]]	aXc	<none>
+find_all	[]]	aXc	[]
+split	[]]	aXc	[aXc]
+captures	[]]	aXc	<none>
+is_match	[]]	aaabccc	false
+full_match	[]]	aaabccc	false
+find	[]]	aaabccc	<none>
+find_all	[]]	aaabccc	[]
+split	[]]	aaabccc	[aaabccc]
+captures	[]]	aaabccc	<none>
+is_match	[]]	xyz	false
+full_match	[]]	xyz	false
+find	[]]	xyz	<none>
+find_all	[]]	xyz	[]
+split	[]]	xyz	[xyz]
+captures	[]]	xyz	<none>
+is_match	[]]	word boundary word	false
+full_match	[]]	word boundary word	false
+find	[]]	word boundary word	<none>
+find_all	[]]	word boundary word	[]
+split	[]]	word boundary word	[word boundary word]
+captures	[]]	word boundary word	<none>
+is_match	[]]	123-4567	false
+full_match	[]]	123-4567	false
+find	[]]	123-4567	<none>
+find_all	[]]	123-4567	[]
+split	[]]	123-4567	[123-4567]
+captures	[]]	123-4567	<none>
+is_match	[]]	3.14 and 2.718	false
+full_match	[]]	3.14 and 2.718	false
+find	[]]	3.14 and 2.718	<none>
+find_all	[]]	3.14 and 2.718	[]
+split	[]]	3.14 and 2.718	[3.14 and 2.718]
+captures	[]]	3.14 and 2.718	<none>
+is_match	[]]	  spaced  	false
+full_match	[]]	  spaced  	false
+find	[]]	  spaced  	<none>
+find_all	[]]	  spaced  	[]
+split	[]]	  spaced  	[  spaced  ]
+captures	[]]	  spaced  	<none>
+is_match	[]]	AaBbCc	false
+full_match	[]]	AaBbCc	false
+find	[]]	AaBbCc	<none>
+find_all	[]]	AaBbCc	[]
+split	[]]	AaBbCc	[AaBbCc]
+captures	[]]	AaBbCc	<none>
+is_match	[]]	foobaz barbaz	false
+full_match	[]]	foobaz barbaz	false
+find	[]]	foobaz barbaz	<none>
+find_all	[]]	foobaz barbaz	[]
+split	[]]	foobaz barbaz	[foobaz barbaz]
+captures	[]]	foobaz barbaz	<none>
+is_match	[]]	xx	false
+full_match	[]]	xx	false
+find	[]]	xx	<none>
+find_all	[]]	xx	[]
+split	[]]	xx	[xx]
+captures	[]]	xx	<none>
+is_match	[]]	xxx	false
+full_match	[]]	xxx	false
+find	[]]	xxx	<none>
+find_all	[]]	xxx	[]
+split	[]]	xxx	[xxx]
+captures	[]]	xxx	<none>
+is_match	[]]	xxxx	false
+full_match	[]]	xxxx	false
+find	[]]	xxxx	<none>
+find_all	[]]	xxxx	[]
+split	[]]	xxxx	[xxxx]
+captures	[]]	xxxx	<none>
+is_match	[]]	a.b	false
+full_match	[]]	a.b	false
+find	[]]	a.b	<none>
+find_all	[]]	a.b	[]
+split	[]]	a.b	[a.b]
+captures	[]]	a.b	<none>
+is_match	[]]	a\b	false
+full_match	[]]	a\b	false
+find	[]]	a\b	<none>
+find_all	[]]	a\b	[]
+split	[]]	a\b	[a\b]
+captures	[]]	a\b	<none>
+is_match	[]]	-a-z-	false
+full_match	[]]	-a-z-	false
+find	[]]	-a-z-	<none>
+find_all	[]]	-a-z-	[]
+split	[]]	-a-z-	[-a-z-]
+captures	[]]	-a-z-	<none>
+is_match	[]]	[bracket]	true
+full_match	[]]	[bracket]	false
+find	[]]	[bracket]	<]>
+find_all	[]]	[bracket]	[]]
+split	[]]	[bracket]	[[bracket|]
+captures	[]]	[bracket]	[]]
+is_match	[]]	ab	false
+full_match	[]]	ab	false
+find	[]]	ab	<none>
+find_all	[]]	ab	[]
+split	[]]	ab	[ab]
+captures	[]]	ab	<none>
+is_match	[]]	b	false
+full_match	[]]	b	false
+find	[]]	b	<none>
+find_all	[]]	b	[]
+split	[]]	b	[b]
+captures	[]]	b	<none>
+is_match	[]]	]	true
+full_match	[]]	]	true
+find	[]]	]	<]>
+find_all	[]]	]	[]]
+split	[]]	]	[|]
+captures	[]]	]	[]]
+is_match	[]]	a]b	true
+full_match	[]]	a]b	false
+find	[]]	a]b	<]>
+find_all	[]]	a]b	[]]
+split	[]]	a]b	[a|b]
+captures	[]]	a]b	[]]
+is_match	[]a]		false
+full_match	[]a]		false
+find	[]a]		<none>
+find_all	[]a]		[]
+split	[]a]		[]
+captures	[]a]		<none>
+is_match	[]a]	a	true
+full_match	[]a]	a	true
+find	[]a]	a	<a>
+find_all	[]a]	a	[a]
+split	[]a]	a	[|]
+captures	[]a]	a	[a]
+is_match	[]a]	abc	true
+full_match	[]a]	abc	false
+find	[]a]	abc	<a>
+find_all	[]a]	abc	[a]
+split	[]a]	abc	[|bc]
+captures	[]a]	abc	[a]
+is_match	[]a]	aXc	true
+full_match	[]a]	aXc	false
+find	[]a]	aXc	<a>
+find_all	[]a]	aXc	[a]
+split	[]a]	aXc	[|Xc]
+captures	[]a]	aXc	[a]
+is_match	[]a]	aaabccc	true
+full_match	[]a]	aaabccc	false
+find	[]a]	aaabccc	<a>
+find_all	[]a]	aaabccc	[a|a|a]
+split	[]a]	aaabccc	[|||bccc]
+captures	[]a]	aaabccc	[a]
+is_match	[]a]	xyz	false
+full_match	[]a]	xyz	false
+find	[]a]	xyz	<none>
+find_all	[]a]	xyz	[]
+split	[]a]	xyz	[xyz]
+captures	[]a]	xyz	<none>
+is_match	[]a]	word boundary word	true
+full_match	[]a]	word boundary word	false
+find	[]a]	word boundary word	<a>
+find_all	[]a]	word boundary word	[a]
+split	[]a]	word boundary word	[word bound|ry word]
+captures	[]a]	word boundary word	[a]
+is_match	[]a]	123-4567	false
+full_match	[]a]	123-4567	false
+find	[]a]	123-4567	<none>
+find_all	[]a]	123-4567	[]
+split	[]a]	123-4567	[123-4567]
+captures	[]a]	123-4567	<none>
+is_match	[]a]	3.14 and 2.718	true
+full_match	[]a]	3.14 and 2.718	false
+find	[]a]	3.14 and 2.718	<a>
+find_all	[]a]	3.14 and 2.718	[a]
+split	[]a]	3.14 and 2.718	[3.14 |nd 2.718]
+captures	[]a]	3.14 and 2.718	[a]
+is_match	[]a]	  spaced  	true
+full_match	[]a]	  spaced  	false
+find	[]a]	  spaced  	<a>
+find_all	[]a]	  spaced  	[a]
+split	[]a]	  spaced  	[  sp|ced  ]
+captures	[]a]	  spaced  	[a]
+is_match	[]a]	AaBbCc	true
+full_match	[]a]	AaBbCc	false
+find	[]a]	AaBbCc	<a>
+find_all	[]a]	AaBbCc	[a]
+split	[]a]	AaBbCc	[A|BbCc]
+captures	[]a]	AaBbCc	[a]
+is_match	[]a]	foobaz barbaz	true
+full_match	[]a]	foobaz barbaz	false
+find	[]a]	foobaz barbaz	<a>
+find_all	[]a]	foobaz barbaz	[a|a|a]
+split	[]a]	foobaz barbaz	[foob|z b|rb|z]
+captures	[]a]	foobaz barbaz	[a]
+is_match	[]a]	xx	false
+full_match	[]a]	xx	false
+find	[]a]	xx	<none>
+find_all	[]a]	xx	[]
+split	[]a]	xx	[xx]
+captures	[]a]	xx	<none>
+is_match	[]a]	xxx	false
+full_match	[]a]	xxx	false
+find	[]a]	xxx	<none>
+find_all	[]a]	xxx	[]
+split	[]a]	xxx	[xxx]
+captures	[]a]	xxx	<none>
+is_match	[]a]	xxxx	false
+full_match	[]a]	xxxx	false
+find	[]a]	xxxx	<none>
+find_all	[]a]	xxxx	[]
+split	[]a]	xxxx	[xxxx]
+captures	[]a]	xxxx	<none>
+is_match	[]a]	a.b	true
+full_match	[]a]	a.b	false
+find	[]a]	a.b	<a>
+find_all	[]a]	a.b	[a]
+split	[]a]	a.b	[|.b]
+captures	[]a]	a.b	[a]
+is_match	[]a]	a\b	true
+full_match	[]a]	a\b	false
+find	[]a]	a\b	<a>
+find_all	[]a]	a\b	[a]
+split	[]a]	a\b	[|\b]
+captures	[]a]	a\b	[a]
+is_match	[]a]	-a-z-	true
+full_match	[]a]	-a-z-	false
+find	[]a]	-a-z-	<a>
+find_all	[]a]	-a-z-	[a]
+split	[]a]	-a-z-	[-|-z-]
+captures	[]a]	-a-z-	[a]
+is_match	[]a]	[bracket]	true
+full_match	[]a]	[bracket]	false
+find	[]a]	[bracket]	<a>
+find_all	[]a]	[bracket]	[a|]]
+split	[]a]	[bracket]	[[br|cket|]
+captures	[]a]	[bracket]	[a]
+is_match	[]a]	ab	true
+full_match	[]a]	ab	false
+find	[]a]	ab	<a>
+find_all	[]a]	ab	[a]
+split	[]a]	ab	[|b]
+captures	[]a]	ab	[a]
+is_match	[]a]	b	false
+full_match	[]a]	b	false
+find	[]a]	b	<none>
+find_all	[]a]	b	[]
+split	[]a]	b	[b]
+captures	[]a]	b	<none>
+is_match	[]a]	]	true
+full_match	[]a]	]	true
+find	[]a]	]	<]>
+find_all	[]a]	]	[]]
+split	[]a]	]	[|]
+captures	[]a]	]	[]]
+is_match	[]a]	a]b	true
+full_match	[]a]	a]b	false
+find	[]a]	a]b	<a>
+find_all	[]a]	a]b	[a|]]
+split	[]a]	a]b	[||b]
+captures	[]a]	a]b	[a]
+is_match	[^]]		false
+full_match	[^]]		false
+find	[^]]		<none>
+find_all	[^]]		[]
+split	[^]]		[]
+captures	[^]]		<none>
+is_match	[^]]	a	true
+full_match	[^]]	a	true
+find	[^]]	a	<a>
+find_all	[^]]	a	[a]
+split	[^]]	a	[|]
+captures	[^]]	a	[a]
+is_match	[^]]	abc	true
+full_match	[^]]	abc	false
+find	[^]]	abc	<a>
+find_all	[^]]	abc	[a|b|c]
+split	[^]]	abc	[|||]
+captures	[^]]	abc	[a]
+is_match	[^]]	aXc	true
+full_match	[^]]	aXc	false
+find	[^]]	aXc	<a>
+find_all	[^]]	aXc	[a|X|c]
+split	[^]]	aXc	[|||]
+captures	[^]]	aXc	[a]
+is_match	[^]]	aaabccc	true
+full_match	[^]]	aaabccc	false
+find	[^]]	aaabccc	<a>
+find_all	[^]]	aaabccc	[a|a|a|b|c|c|c]
+split	[^]]	aaabccc	[|||||||]
+captures	[^]]	aaabccc	[a]
+is_match	[^]]	xyz	true
+full_match	[^]]	xyz	false
+find	[^]]	xyz	<x>
+find_all	[^]]	xyz	[x|y|z]
+split	[^]]	xyz	[|||]
+captures	[^]]	xyz	[x]
+is_match	[^]]	word boundary word	true
+full_match	[^]]	word boundary word	false
+find	[^]]	word boundary word	<w>
+find_all	[^]]	word boundary word	[w|o|r|d| |b|o|u|n|d|a|r|y| |w|o|r|d]
+split	[^]]	word boundary word	[||||||||||||||||||]
+captures	[^]]	word boundary word	[w]
+is_match	[^]]	123-4567	true
+full_match	[^]]	123-4567	false
+find	[^]]	123-4567	<1>
+find_all	[^]]	123-4567	[1|2|3|-|4|5|6|7]
+split	[^]]	123-4567	[||||||||]
+captures	[^]]	123-4567	[1]
+is_match	[^]]	3.14 and 2.718	true
+full_match	[^]]	3.14 and 2.718	false
+find	[^]]	3.14 and 2.718	<3>
+find_all	[^]]	3.14 and 2.718	[3|.|1|4| |a|n|d| |2|.|7|1|8]
+split	[^]]	3.14 and 2.718	[||||||||||||||]
+captures	[^]]	3.14 and 2.718	[3]
+is_match	[^]]	  spaced  	true
+full_match	[^]]	  spaced  	false
+find	[^]]	  spaced  	< >
+find_all	[^]]	  spaced  	[ | |s|p|a|c|e|d| | ]
+split	[^]]	  spaced  	[||||||||||]
+captures	[^]]	  spaced  	[ ]
+is_match	[^]]	AaBbCc	true
+full_match	[^]]	AaBbCc	false
+find	[^]]	AaBbCc	<A>
+find_all	[^]]	AaBbCc	[A|a|B|b|C|c]
+split	[^]]	AaBbCc	[||||||]
+captures	[^]]	AaBbCc	[A]
+is_match	[^]]	foobaz barbaz	true
+full_match	[^]]	foobaz barbaz	false
+find	[^]]	foobaz barbaz	<f>
+find_all	[^]]	foobaz barbaz	[f|o|o|b|a|z| |b|a|r|b|a|z]
+split	[^]]	foobaz barbaz	[|||||||||||||]
+captures	[^]]	foobaz barbaz	[f]
+is_match	[^]]	xx	true
+full_match	[^]]	xx	false
+find	[^]]	xx	<x>
+find_all	[^]]	xx	[x|x]
+split	[^]]	xx	[||]
+captures	[^]]	xx	[x]
+is_match	[^]]	xxx	true
+full_match	[^]]	xxx	false
+find	[^]]	xxx	<x>
+find_all	[^]]	xxx	[x|x|x]
+split	[^]]	xxx	[|||]
+captures	[^]]	xxx	[x]
+is_match	[^]]	xxxx	true
+full_match	[^]]	xxxx	false
+find	[^]]	xxxx	<x>
+find_all	[^]]	xxxx	[x|x|x|x]
+split	[^]]	xxxx	[||||]
+captures	[^]]	xxxx	[x]
+is_match	[^]]	a.b	true
+full_match	[^]]	a.b	false
+find	[^]]	a.b	<a>
+find_all	[^]]	a.b	[a|.|b]
+split	[^]]	a.b	[|||]
+captures	[^]]	a.b	[a]
+is_match	[^]]	a\b	true
+full_match	[^]]	a\b	false
+find	[^]]	a\b	<a>
+find_all	[^]]	a\b	[a|\|b]
+split	[^]]	a\b	[|||]
+captures	[^]]	a\b	[a]
+is_match	[^]]	-a-z-	true
+full_match	[^]]	-a-z-	false
+find	[^]]	-a-z-	<->
+find_all	[^]]	-a-z-	[-|a|-|z|-]
+split	[^]]	-a-z-	[|||||]
+captures	[^]]	-a-z-	[-]
+is_match	[^]]	[bracket]	true
+full_match	[^]]	[bracket]	false
+find	[^]]	[bracket]	<[>
+find_all	[^]]	[bracket]	[[|b|r|a|c|k|e|t]
+split	[^]]	[bracket]	[||||||||]]
+captures	[^]]	[bracket]	[[]
+is_match	[^]]	ab	true
+full_match	[^]]	ab	false
+find	[^]]	ab	<a>
+find_all	[^]]	ab	[a|b]
+split	[^]]	ab	[||]
+captures	[^]]	ab	[a]
+is_match	[^]]	b	true
+full_match	[^]]	b	true
+find	[^]]	b	<b>
+find_all	[^]]	b	[b]
+split	[^]]	b	[|]
+captures	[^]]	b	[b]
+is_match	[^]]	]	false
+full_match	[^]]	]	false
+find	[^]]	]	<none>
+find_all	[^]]	]	[]
+split	[^]]	]	[]]
+captures	[^]]	]	<none>
+is_match	[^]]	a]b	true
+full_match	[^]]	a]b	false
+find	[^]]	a]b	<a>
+find_all	[^]]	a]b	[a|b]
+split	[^]]	a]b	[|]|]
+captures	[^]]	a]b	[a]
+is_match	[a\]b]		false
+full_match	[a\]b]		false
+find	[a\]b]		<none>
+find_all	[a\]b]		[]
+split	[a\]b]		[]
+captures	[a\]b]		<none>
+is_match	[a\]b]	a	true
+full_match	[a\]b]	a	true
+find	[a\]b]	a	<a>
+find_all	[a\]b]	a	[a]
+split	[a\]b]	a	[|]
+captures	[a\]b]	a	[a]
+is_match	[a\]b]	abc	true
+full_match	[a\]b]	abc	false
+find	[a\]b]	abc	<a>
+find_all	[a\]b]	abc	[a|b]
+split	[a\]b]	abc	[||c]
+captures	[a\]b]	abc	[a]
+is_match	[a\]b]	aXc	true
+full_match	[a\]b]	aXc	false
+find	[a\]b]	aXc	<a>
+find_all	[a\]b]	aXc	[a]
+split	[a\]b]	aXc	[|Xc]
+captures	[a\]b]	aXc	[a]
+is_match	[a\]b]	aaabccc	true
+full_match	[a\]b]	aaabccc	false
+find	[a\]b]	aaabccc	<a>
+find_all	[a\]b]	aaabccc	[a|a|a|b]
+split	[a\]b]	aaabccc	[||||ccc]
+captures	[a\]b]	aaabccc	[a]
+is_match	[a\]b]	xyz	false
+full_match	[a\]b]	xyz	false
+find	[a\]b]	xyz	<none>
+find_all	[a\]b]	xyz	[]
+split	[a\]b]	xyz	[xyz]
+captures	[a\]b]	xyz	<none>
+is_match	[a\]b]	word boundary word	true
+full_match	[a\]b]	word boundary word	false
+find	[a\]b]	word boundary word	<b>
+find_all	[a\]b]	word boundary word	[b|a]
+split	[a\]b]	word boundary word	[word |ound|ry word]
+captures	[a\]b]	word boundary word	[b]
+is_match	[a\]b]	123-4567	false
+full_match	[a\]b]	123-4567	false
+find	[a\]b]	123-4567	<none>
+find_all	[a\]b]	123-4567	[]
+split	[a\]b]	123-4567	[123-4567]
+captures	[a\]b]	123-4567	<none>
+is_match	[a\]b]	3.14 and 2.718	true
+full_match	[a\]b]	3.14 and 2.718	false
+find	[a\]b]	3.14 and 2.718	<a>
+find_all	[a\]b]	3.14 and 2.718	[a]
+split	[a\]b]	3.14 and 2.718	[3.14 |nd 2.718]
+captures	[a\]b]	3.14 and 2.718	[a]
+is_match	[a\]b]	  spaced  	true
+full_match	[a\]b]	  spaced  	false
+find	[a\]b]	  spaced  	<a>
+find_all	[a\]b]	  spaced  	[a]
+split	[a\]b]	  spaced  	[  sp|ced  ]
+captures	[a\]b]	  spaced  	[a]
+is_match	[a\]b]	AaBbCc	true
+full_match	[a\]b]	AaBbCc	false
+find	[a\]b]	AaBbCc	<a>
+find_all	[a\]b]	AaBbCc	[a|b]
+split	[a\]b]	AaBbCc	[A|B|Cc]
+captures	[a\]b]	AaBbCc	[a]
+is_match	[a\]b]	foobaz barbaz	true
+full_match	[a\]b]	foobaz barbaz	false
+find	[a\]b]	foobaz barbaz	<b>
+find_all	[a\]b]	foobaz barbaz	[b|a|b|a|b|a]
+split	[a\]b]	foobaz barbaz	[foo||z ||r||z]
+captures	[a\]b]	foobaz barbaz	[b]
+is_match	[a\]b]	xx	false
+full_match	[a\]b]	xx	false
+find	[a\]b]	xx	<none>
+find_all	[a\]b]	xx	[]
+split	[a\]b]	xx	[xx]
+captures	[a\]b]	xx	<none>
+is_match	[a\]b]	xxx	false
+full_match	[a\]b]	xxx	false
+find	[a\]b]	xxx	<none>
+find_all	[a\]b]	xxx	[]
+split	[a\]b]	xxx	[xxx]
+captures	[a\]b]	xxx	<none>
+is_match	[a\]b]	xxxx	false
+full_match	[a\]b]	xxxx	false
+find	[a\]b]	xxxx	<none>
+find_all	[a\]b]	xxxx	[]
+split	[a\]b]	xxxx	[xxxx]
+captures	[a\]b]	xxxx	<none>
+is_match	[a\]b]	a.b	true
+full_match	[a\]b]	a.b	false
+find	[a\]b]	a.b	<a>
+find_all	[a\]b]	a.b	[a|b]
+split	[a\]b]	a.b	[|.|]
+captures	[a\]b]	a.b	[a]
+is_match	[a\]b]	a\b	true
+full_match	[a\]b]	a\b	false
+find	[a\]b]	a\b	<a>
+find_all	[a\]b]	a\b	[a|b]
+split	[a\]b]	a\b	[|\|]
+captures	[a\]b]	a\b	[a]
+is_match	[a\]b]	-a-z-	true
+full_match	[a\]b]	-a-z-	false
+find	[a\]b]	-a-z-	<a>
+find_all	[a\]b]	-a-z-	[a]
+split	[a\]b]	-a-z-	[-|-z-]
+captures	[a\]b]	-a-z-	[a]
+is_match	[a\]b]	[bracket]	true
+full_match	[a\]b]	[bracket]	false
+find	[a\]b]	[bracket]	<b>
+find_all	[a\]b]	[bracket]	[b|a|]]
+split	[a\]b]	[bracket]	[[|r|cket|]
+captures	[a\]b]	[bracket]	[b]
+is_match	[a\]b]	ab	true
+full_match	[a\]b]	ab	false
+find	[a\]b]	ab	<a>
+find_all	[a\]b]	ab	[a|b]
+split	[a\]b]	ab	[||]
+captures	[a\]b]	ab	[a]
+is_match	[a\]b]	b	true
+full_match	[a\]b]	b	true
+find	[a\]b]	b	<b>
+find_all	[a\]b]	b	[b]
+split	[a\]b]	b	[|]
+captures	[a\]b]	b	[b]
+is_match	[a\]b]	]	true
+full_match	[a\]b]	]	true
+find	[a\]b]	]	<]>
+find_all	[a\]b]	]	[]]
+split	[a\]b]	]	[|]
+captures	[a\]b]	]	[]]
+is_match	[a\]b]	a]b	true
+full_match	[a\]b]	a]b	false
+find	[a\]b]	a]b	<a>
+find_all	[a\]b]	a]b	[a|]|b]
+split	[a\]b]	a]b	[|||]
+captures	[a\]b]	a]b	[a]
