@@ -31,10 +31,15 @@
 #   scalar          — greps, counts, compares strings; exits.
 #   UNCLASSIFIED    — not yet decided. Honest debt, shrink-only, same idiom as
 #                     UNVERIFIED: classifying 80 existing rows must not block
-#                     the mechanism from landing.
+#                     the mechanism from landing. 81 as of #2129: the regex
+#                     reference gate reads a committed answer table, which is
+#                     structured by this rule, and porting it needs the probe
+#                     to take the table as an ARGUMENT (process.exec has no
+#                     stdin) — a deliberate change, not one to make inside a
+#                     regex fix. Declared undecided rather than mislabelled.
 #
 # unverified_ceiling = "2"
-# unclassified_reads_ceiling = "80"
+# unclassified_reads_ceiling = "81"
 #
 # The ceiling moved 0 -> 2 for the first time since it reached 0, and the reason
 # is the opposite of a regression: enumerating the Almide gates (#2128) brought
@@ -45,6 +50,19 @@
 # unverified. The burn-down is #2130 step 1 for those two twins (`output-parity`
 # sweeps the whole corpus and `fuzz-track-record` queries the GitHub API, so
 # each needs a fixture design of its own), and this ceiling returns to 0 there.
+
+[[gate]]
+path = "scripts/check-regex-reference.sh"
+# NOT YET DECIDED, and the honest answer is uncomfortable: this gate reads a
+# committed answer TABLE, which the boundary calls structured — so by #2128's
+# own rule it belongs in Almide. It is not classified `scalar` to make itself
+# pass. Porting it needs the probe to take the table as an argument rather than
+# on stdin (`process.exec` has no stdin), which is a change worth making
+# deliberately rather than inside a regex fix. Recorded as debt with the port
+# named, which is what this bucket is for.
+reads = "UNCLASSIFIED"
+class = "NEGATIVE_TESTED"
+evidence = "#2129 landing (2026-09-13): a forged reference row (is_match `[]]` over `]` flipped true -> false) turned BOTH legs red naming the case and printing the op/pattern/subject/reference/leg columns, restored green at 6624 cases. The gate's own first run is what found the two defects it now pins — `[]]` read as an empty class plus a stray `]` (silently never matched) and `split` over an empty-matching pattern eating a character (`split(\"^\", \"abc\")` -> `[\"a\", \"bc\"]`) — neither of which C-032's native-vs-wasm fuzz can see, because both legs agreed on the wrong answer. The table floor (6000 rows) fails a subset that shrank: a gate that stopped looking must not pass."
 
 [[gate]]
 path = "scripts/check-doc-fences.sh"

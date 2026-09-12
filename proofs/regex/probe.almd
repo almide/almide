@@ -1,0 +1,31 @@
+// The regex reference probe (#2129). Reads `op<TAB>pattern<TAB>subject` lines
+// and answers one line per case, in a shape a text diff can read.
+//
+// It exists so `scripts/check-regex-reference.sh` can ask BOTH legs the same
+// questions the committed reference table already answers — see
+// proofs/regex/README.md for what that table is and is not.
+import io
+import regex
+
+// One case per line: op<TAB>pattern<TAB>subject. Answers one line per case.
+fn answer(op: String, pat: String, s: String) -> String =
+  match op {
+    "is_match" => if regex.is_match(pat, s) then "true" else "false",
+    "full_match" => if regex.full_match(pat, s) then "true" else "false",
+    "find" => match regex.find(pat, s) { some(m) => "<" + m + ">", none => "<none>" },
+    "find_all" => "[" + list.join(regex.find_all(pat, s), "|") + "]",
+    "split" => "[" + list.join(regex.split(pat, s), "|") + "]",
+    "captures" => match regex.captures(pat, s) { some(cs) => "[" + list.join(cs, "|") + "]", none => "<none>" },
+    _ => "<bad-op>",
+  }
+
+effect fn main() -> Unit = {
+  let lines = string.split(io.read_all(), "\n")
+  let out = lines
+    |> list.filter((l) => l != "")
+    |> list.map((l) => {
+      let f = string.split(l, "\t")
+      answer(list.get_or(f, 0, ""), list.get_or(f, 1, ""), list.get_or(f, 2, ""))
+    })
+  println(list.join(out, "\n"))
+}

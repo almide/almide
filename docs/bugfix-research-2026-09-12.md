@@ -501,3 +501,87 @@ the ceiling and the gate demanded the header be ratcheted down.
 The check's own row is one of the 80. It reads a TOML ledger in bash, so by its
 own boundary it belongs in Almide; saying so is what the honest-debt bucket is
 for.
+## #2129 — the three mis-reads were the BASH regexes, and two real ones were elsewhere
+
+The comment the issue quotes —
+
+> Written as a scanner rather than a regex because the regex is the part that
+> has silently mis-read its input three times in this Unit already.
+
+— sits in `tools/almide-gates/src/ledger_coverage.almd`, written while PORTING
+bash gates. The Unit 0.46 log names the three it means, and all three are bash
+patterns the port had to reproduce, not `stdlib/regex` calls: a `spec = "..."`
+key matched with a spacing-sensitive pattern so differently-spaced rows were
+silently DROPPED; `grep -qE "^## $sec"` without the boundary alternation, so
+`ALS-T1` resolved against `## ALS-T14` and a bogus key passed; and a comment
+line counted as a class because the rank was the line order after stripping.
+
+So the issue's step 1 as written has no target. What it is RIGHT about is the
+gap: `regex` is the module nobody here trusts, and nothing measured whether the
+distrust was earned. So the measurement came first.
+
+**5,922 cases against an outside engine** (Python's `re`, over a subset chosen
+so the reference engines agree with each other) found **114 divergences in 5
+classes**. Three were dialect and two were defects:
+
+| class | verdict |
+|---|---|
+| `split` returning capture groups | dialect — Python includes them, Rust/Go/Almide do not |
+| empty alternation arm (`\|ab`) | dialect — Python 3.7+ retries a non-empty match at an empty match's position; **verified against ripgrep that Rust agrees with Almide** |
+| `[]]` never matches | **DEFECT** |
+| `split` over an empty-matching pattern | **DEFECT** |
+| trailing empty field dropped by `split` | **DEFECT** (same site) |
+
+**`[]]`.** A `]` in the FIRST position of a class is a literal member — POSIX,
+and PCRE, Python, Rust, Go and JS all follow it. Read as the terminator, the
+pattern became an empty class plus a stray `]`: no error, no match, nothing
+visible from outside. That is precisely the shape the comment distrusted.
+
+**`split` over a zero-width match.** The loop used one cursor for two different
+things — where the next field starts and where the next search starts — so a
+zero-width match ATE a character: `split("^", "abc")` answered `["a", "bc"]`,
+moving the `a` out of the field it belongs to. Python, Rust and Go all answer
+`["", "abc"]`. Separating the cursors and always emitting the trailing field
+(`split("$", "a")` = `["a", ""]`) brought 114 divergences down to 6, all of them
+the one confirmed dialect class.
+
+Both engines carry the fix — `runtime/rs/src/regex.rs` and the self-hosted twin
+`stdlib/regex_engine.almd` — because C-032 requires the legs to agree byte for
+byte; fixing only the native one turned that fuzz red immediately, which is the
+gate working.
+
+
+### The exclusion that removed more than it meant to
+
+Holding the two regex fixtures out of the run-parity manifest looked right —
+the pinned oracle recorded their PRE-fix answers, so it cannot referee them —
+and it was wrong in a way only a gate saw. The run manifest is also the corpus
+list for the exercised-surface, allocation and size sweeps, so subtracting a
+row removes the fixture from ALL of them: `surface_matrix` went red naming
+eight constructs that had DISAPPEARED from the wasm leg's exercised surface —
+`regex.captures`, `find`, `find_all`, `full_match`, `is_match`, `replace`,
+`replace_first`, `split` — because those two fixtures were the only ones
+exercising the module there. Excluding them would have shipped the fix and
+silently un-covered the thing it fixed.
+
+`scripts/lib/run-oracle-stale.txt` is the precise mechanism the existing
+register did not provide: the row STAYS in the manifest, every other sweep
+still walks the fixture, and only the comparisons AGAINST the oracle's answer
+skip it. There are THREE of those, not one — `run_parity`, `backend_parity` and
+the WASI gate all compare the same hash, and the second and third went red in
+turn as the first was fixed. The reader lives in `almide_corpus` so a fourth
+comparison cannot quietly forget it; the four sweeps that use the manifest only
+as a corpus LIST (exercised surface, allocation, size, witness floor) are
+untouched by design. It is shrink-only in both directions — a registration that
+starts agreeing with the oracle again fails, demonstrated with a forged row
+naming a fixture that does agree, in all three comparisons. Their allocation watermarks moved DOWN
+(87,824 from 88,144; 290,608 from 291,248 — the split fix allocates fewer
+fields) and are ratified with the change.
+
+**The standing gate is the durable half.** C-032's oracle is our own native
+engine: it certifies the legs AGREE and is blind to a rule both read the same
+way and both read wrong, which is exactly how both defects survived. The new
+`scripts/check-regex-reference.sh` asks both legs 6,624 questions an outside
+engine has already answered, in 0.15 s, with the subset and its deliberate
+exclusions stated in `proofs/regex/README.md`. A forged reference row was
+demonstrated to turn both legs red before it was registered.
