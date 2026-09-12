@@ -200,6 +200,19 @@ impl Emitter<'_> {
                 // epilogue release after it (`no_transfer`).
                 let must_transfer = std::mem::take(&mut self.try_see_through) && true_tail;
                 let mut no_transfer = false;
+                // #2117: may an accumulator argument spend its parameter's
+                // credit here? Only where the site is CERTAIN to take the tail
+                // transfer — a fallback to a plain call would leave the
+                // epilogue releasing a block the helper already consumed.
+                // Parking and `no_transfer` both come from a DROPPABLE param
+                // declared borrowed; a scalar carries no convention at all.
+                let append_window_ok = tail
+                    && Some(index) == self.self_index
+                    && ret.is_some()
+                    && ret == self.fn_ret
+                    && params.iter().enumerate().all(|(k2, &w2)| {
+                        param_owned.get(k2).copied().unwrap_or(true) || !self.rc_droppable(w2)
+                    });
                 let depth = self.borrowed_temps.len();
                 for (k, (a, want)) in args.iter().zip(params).enumerate() {
                     // #2117: `build(acc + s, …)` at a self tail call in loop
@@ -208,7 +221,16 @@ impl Emitter<'_> {
                     // generic path emits concat + a release of the old block
                     // at the exit; `$str_append` does both in one call, in
                     // place when the block is uniquely held.
-                    if self.tail_str_append_arg(k, a, want, Some(index) == self.self_index && tail)? {
+                    // The window may only fire where the site is CERTAIN to
+                    // take the tail transfer: it spends the parameter's credit,
+                    // and a fallback to a plain call would leave the epilogue
+                    // releasing a block the helper already consumed. Parking
+                    // and `no_transfer` both come from BORROWED params, so a
+                    // callee whose params are all owned cannot reach either.
+                    let self_tail = append_window_ok;
+                    if self.tail_str_append_arg(k, a, want, self_tail)?
+                        || self.tail_list_append_arg(k, a, want, self_tail)?
+                    {
                         continue;
                     }
                     self.lower(a, Some(want))?;
@@ -248,8 +270,13 @@ impl Emitter<'_> {
                         replaces_frame: Some(index) != self.self_index,
                     });
                     self.emit_exit(&plan);
+                    // #2117: the consumed set belongs to THIS exit only.
+                    self.tail_consumed.clear();
                     self.f.instructions().return_call(index);
                 } else {
+                    // The window above fires only where the tail transfer is
+                    // certain, so nothing may have been consumed here.
+                    debug_assert!(self.tail_consumed.is_empty());
                     self.f.instructions().call(index);
                     self.release_borrowed_temps(depth);
                 }
@@ -614,6 +641,54 @@ impl Emitter<'_> {
         self.f.instructions().call(F_STR_APPEND);
         // The credit MOVES through the helper — one in, one out — which is
         // what a moved param records, not a freshly born block.
+        self.witness_arg(left, want);
+        self.tail_consumed.insert(idx);
+        Ok(true)
+    }
+
+    /// The list twin of [`Self::tail_str_append_arg`] (#2117): `f(acc + [e], …)`
+    /// for the parameter it rebinds. `$cow` + `$list_push_8` grows amortized
+    /// in place where the generic path took `$concat`'s full copy and then
+    /// released the outgrown block — at a size class the free list abandons,
+    /// which is how a 200,000-element accumulator reached C-197. Scalar
+    /// 8-byte elements only, the same bound the assign window carries: a
+    /// 4-byte handle slot needs the literal builder's Dup discipline.
+    fn tail_list_append_arg(
+        &mut self,
+        k: usize,
+        a: &IrExpr,
+        want: SliceTy,
+        self_tail: bool,
+    ) -> Result<bool, EmitError> {
+        if !self_tail || self.metered || !self.tail_release_allowed {
+            return Ok(false);
+        }
+        let SliceTy::List(h) = want else { return Ok(false) };
+        let Some((left, right)) = crate::stmts_append::concat_operands(a, almide_ir::BinOp::ConcatList)
+        else {
+            return Ok(false);
+        };
+        let IrExprKind::Var { id } = &left.kind else { return Ok(false) };
+        if self.cells.contains(id) {
+            return Ok(false);
+        }
+        let Some(&(idx, SliceTy::List(lh))) = self.locals.get(id) else { return Ok(false) };
+        if lh != h || idx != k as u32 || !self.rc_frame_params.contains(&idx) {
+            return Ok(false);
+        }
+        let IrExprKind::List { elements } = &right.kind else { return Ok(false) };
+        let [elem] = &elements[..] else { return Ok(false) };
+        let el = self.types.el(h);
+        if el != INT && el != FLOAT {
+            return Ok(false);
+        }
+        let cow = self.cow_fn_of(SliceTy::List(h));
+        self.f.instructions().local_get(idx).call(cow);
+        self.lower(elem, Some(el))?;
+        if el.val_type() == ValType::F64 {
+            self.f.instructions().i64_reinterpret_f64();
+        }
+        self.f.instructions().call(F_LIST_PUSH_8);
         self.witness_arg(left, want);
         self.tail_consumed.insert(idx);
         Ok(true)

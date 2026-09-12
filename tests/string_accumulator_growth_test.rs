@@ -111,3 +111,31 @@ effect fn main() -> Unit = {
     assert_eq!(run(&native, false), expected, "native");
     assert_eq!(run(&core, true), expected, "core wasm");
 }
+
+/// The list twin of the same shape: `build(acc + [e], n - 1)` took `$concat`'s
+/// full copy per iteration and abandoned every outgrown block, so 200,000
+/// elements — 1.6 MB — aborted where the `var` + `while` spelling finished
+/// instantly.
+#[test]
+fn a_tail_recursive_list_accumulator_grows_like_the_assign_form() {
+    let dir = tempfile::tempdir().expect("scratch");
+    let source = dir.path().join("listrec.almd");
+    std::fs::write(
+        &source,
+        r#"fn build(acc: List[Int], n: Int) -> List[Int] =
+  if n == 0 then acc else build(acc + [n], n - 1)
+
+effect fn main() -> Unit = {
+  let xs = build([], 200000)
+  println("len=${list.len(xs)} head=${list.get(xs, 0) ?? -1} last=${list.get(xs, list.len(xs) - 1) ?? -1}")
+}
+"#,
+    )
+    .expect("source");
+    let cap = ["--heap-cap", "33554432"];
+    let native = build(dir.path(), &source, "native", &cap);
+    let core = build(dir.path(), &source, "core.wasm", &[&cap[..], &["--target", "wasm"]].concat());
+    let expected = "len=200000 head=200000 last=1\n";
+    assert_eq!(run(&native, false), expected, "native");
+    assert_eq!(run(&core, true), expected, "core wasm");
+}
