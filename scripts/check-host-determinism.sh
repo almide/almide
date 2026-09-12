@@ -130,16 +130,7 @@ fi
 # execute the complete field matrix (none/some), with size and allocation
 # ledgers pinning its current emission. This adds one unsupported incumbent
 # input, not a loss of coverage for a previously emitted fixture.
-# 29 as of 2026-09-13: variant_case_payload_ownership.almd (C-076/#2133) is a
-# NEW structural fixture for a defect that only the structural leg can express
-# — a producer RETURNING a heap variant case, which the incumbent brick refuses
-# outright ("heap-result Record cannot be faithfully returned in this brick"),
-# with or without the `match` around it. Both incumbent hosts wall identically
-# (the wall is the shape, not the host), and every emitted fixture still
-# compares byte-identical. The fixture's own cross-target evidence is the
-# structural leg against native, where the bug lived; this adds one unsupported
-# incumbent input, not a loss of coverage for a previously emitted fixture.
-MAX_WALLED=29
+MAX_WALLED=28
 corpus=$(ls "$FIXTURE_DIR"/*.almd 2>/dev/null | wc -l | tr -d ' ')
 if [ "$corpus" -eq 0 ] || [ $((n + walled)) -ne "$corpus" ]; then
   echo "::error::host-determinism: compared $n + walled $walled != corpus $corpus in $FIXTURE_DIR — the scan went blind (#985)"
