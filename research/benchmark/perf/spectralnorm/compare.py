@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import statistics
 import subprocess
+import sys
 import tempfile
 import time
 
@@ -50,7 +51,12 @@ def main():
                     if expected is None:
                         expected = observable
                     if observable != expected:
-                        raise RuntimeError(f"output divergence: {target}/{spelling}: {observable!r} != {expected!r}")
+                        # A spelling that gets faster by computing something
+                        # else must not buy a green: say what diverged, on
+                        # stderr, without a traceback the reader has to parse.
+                        print(f"output divergence: {target}/{spelling} answered {observable!r}, "
+                              f"the imperative spelling answered {expected!r}", file=sys.stderr)
+                        return 1
                     if iteration:
                         samples[spelling].append(elapsed)
             baseline = statistics.median(samples["imperative"])

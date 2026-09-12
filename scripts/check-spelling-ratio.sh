@@ -36,9 +36,14 @@ RUNS="${SPELLING_RATIO_RUNS:-5}"
 python3 research/benchmark/perf/spectralnorm/compare.py \
   --almide "$BIN" --n "$N" --runs "$RUNS" --max-ratio "$BUDGET" > /tmp/spelling-ratio.json || {
     echo "::error::spelling-ratio: a spelling exceeded ${BUDGET}x its imperative twin, or the six artifacts disagreed on output"
+    # An output divergence exits before any JSON is written and says so on
+    # stderr; only the ratio verdict leaves a table to print.
     python3 - <<'PY'
 import json
-d = json.load(open("/tmp/spelling-ratio.json"))
+try:
+    d = json.load(open("/tmp/spelling-ratio.json"))
+except (OSError, ValueError):
+    raise SystemExit(0)
 for target, spellings in d.get("targets", {}).items():
     for name, s in spellings.items():
         print(f"  {target:7} {name:11} {s['median_ms']:8.2f} ms  {s['ratio']:.2f}x")
