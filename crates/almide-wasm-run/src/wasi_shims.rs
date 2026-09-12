@@ -85,7 +85,7 @@ fn shim_exit() -> Function {
 fn shim_fs_call(
     park: u64,
     g_plen: u32,
-    g_ppos: u32,
+    g_ppos: Option<u32>,
     f_env_get: Option<u32>,
     f_env_set: Option<u32>,
     f_args: Option<u32>,
@@ -97,7 +97,9 @@ fn shim_fs_call(
     let mut f = Function::new([(1, ValType::I32), (1, ValType::I64)]);
     let mut i = f.instructions();
     // Every op stages in the park unless it says otherwise (#2120).
-    i.i32_const((park + DATA) as i32).global_set(g_ppos);
+    if let Some(g) = g_ppos {
+        i.i32_const((park + DATA) as i32).global_set(g);
+    }
 
     // ops 26/37/29: env.get / env.set / args — forwarded whole to the
     // service shim, when the op set shipped one (an absent service falls
@@ -203,12 +205,15 @@ fn shim_fs_call(
 /// `(dst) -> ()`: copy the staged bytes into guest memory. The source is
 /// `g_ppos` rather than a fixed address, so a service can stage a result the
 /// park cannot hold (#2120) and still answer through this one path.
-fn shim_host_read(g_plen: u32, g_ppos: u32) -> Function {
+fn shim_host_read(park: u64, g_plen: u32, g_ppos: Option<u32>) -> Function {
     let dst = 0u32;
     let mut f = Function::new([]);
     let mut i = f.instructions();
     i.local_get(dst);
-    i.global_get(g_ppos);
+    match g_ppos {
+        Some(g) => i.global_get(g),
+        None => i.i32_const((park + DATA) as i32),
+    };
     i.global_get(g_plen);
     i.memory_copy(0, 0);
     i.end();

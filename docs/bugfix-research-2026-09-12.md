@@ -283,3 +283,35 @@ with no bound — unreachable from source today, every stdlib caller passes 8),
 against C-197's form), and #2120 (`env.get` answers `none` and `env.args`
 answers `[]` above the park's 261,120-byte staging room, where native returns
 the value — a silent wrong answer, and the worst of the family).
+
+## #2120 — the park stops being where a result has to fit
+
+`env.get` answered `none` and `env.args` answered `[]` when the environ block or
+argv outgrew the park's data page — 261,120 bytes, measured to the byte — where
+native answers the value. Both are ordinary, valid-looking answers, so a program
+took its `??` fallback or its no-argument path with nothing on stderr and exit 0.
+
+The shim's `host_read` now copies from a `g_ppos` global rather than a fixed
+address, which is the indirection the p2 shim already carries. Three consequences:
+
+- A result larger than the page stages at the TOP of freshly grown memory.
+  `stage_for` grows by twice the pages the result needs and takes the top
+  `need` bytes 8-aligned (a host that checks alignment rejects an odd pointer
+  array outright — measured: `Pointer not aligned to 4`). The guest's own
+  allocation between `fs_call` and `host_read` starts at the bump head, at or
+  below the old memory end, and is at most `need` bytes, so it cannot reach the
+  staged bytes.
+- An overlay hit and an environ hit answer IN PLACE — the value is already in
+  memory, so the copy into the page is gone, and so is `env.args`'s slide of the
+  whole frame payload down to `park + DATA`.
+- A grow the machine refuses takes C-197's form (`Error: out of memory`, exit 1)
+  rather than a wrong answer.
+
+`tests/env_staging_capacity_test.rs` pins native against stock WASI at 16,
+260,000 (inside the old page), 262,000 (just past its cliff) and 900,000 bytes,
+for both services, plus argument order and framing for three small arguments.
+
+The indirection ships only for the services that can use it: 688 of the 697
+corpus modules are byte-identical, and the nine that reach env/args pay 96–101
+bytes. `env.set`'s 64 KiB overlay keeps its own bound — a loud, named refusal
+since #2116, not a silent one — and is the last park-sized limit left.
