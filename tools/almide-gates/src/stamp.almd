@@ -29,49 +29,49 @@ effect fn mtime(path: String) -> String = {
   else run("stat", ["-c", "%y", path])!
 }
 
-// The stamp, as the bash prints it. `ok = false` means the caller must abort — the PATH
-// binary and the workspace build disagree, so no measurement taken now would describe the
-// tree being tested.
-effect fn toolchain(root: String) -> Stamp = {
+// The identity half: the `almide` line, and the FATAL block when the PATH binary
+// and the workspace build disagree. `ok = false` means the caller must abort AND
+// that the stamp ENDS here — the bash `return`s on that path, so the toolchain
+// lines and the closing rule are never printed.
+effect fn identity(root: String) -> Stamp = {
   let alm = which("almide")!
-  let ws = root + "/target/release/almide"
-  var lines: List[String] = ["── toolchain stamp ──"]
-  // `ok` is the Result constructor and cannot be a binding name here.
-  var agrees = true
-  if alm == "" then {
-    lines = lines + ["  almide: NOT ON PATH"]
-  } else {
+  if alm == "" then Stamp { ok: true, lines: ["  almide: NOT ON PATH"] } else {
     let ver = run("almide", ["--version"])!
     let hash = sha16(alm)!
     let mt = mtime(alm)!
-    lines = lines + ["  almide: " + ver + "  sha256:" + hash + "  mtime:" + mt + "  (" + alm + ")"]
-    let wshash = sha16(ws)!
-    if wshash != "" and hash != wshash then {
-      lines = lines + ["  FATAL: PATH almide (" + hash + ") != workspace build (" + wshash + ")."] + [
-        "  The evidence this gate produces would not describe the tree under test."
-      ] + [
-        "  Run 'make install' (or fix PATH) and re-run."
-      ]
-      agrees = false
-    } else ()
+    let line = "  almide: " + ver + "  sha256:" + hash + "  mtime:" + mt + "  (" + alm + ")"
+    let wshash = sha16(root + "/target/release/almide")!
+    if wshash != "" and hash != wshash then Stamp { ok: false, lines: [
+      line,
+      "  FATAL: PATH almide (" + hash + ") != workspace build (" + wshash + ").",
+      "  The evidence this gate produces would not describe the tree under test.",
+      "  Most common cause: a 'cargo test' ran after your last 'make install' —",
+      "  the test profile relinks target/release/almide with a different feature",
+      "  unification, so the hashes diverge even with identical sources.",
+      "  Fix: make install && make verify-trust  (and do not run cargo",
+      "  concurrently with the gate — a mid-gate relink invalidates the stamp)."
+    ] } else Stamp { ok: true, lines: [line] }
   }
-  lines = lines + [
-    "  rustc:    " + run("rustc", ["--version"])!
-  ]
-  lines = lines + [
-    "  wasmtime: " + run("wasmtime", ["--version"])!
-  ]
-  // `coqc --version | head -1` — the Rocq banner is multi-line.
-  let coq = run("coqc", ["--version"])!
-  lines = lines + [
-    "  coqc:     " + list.get_or(string.split(coq, "\n"), 0, "n/a")
-  ]
-  let head = run("git", ["-C", root, "rev-parse", "--short", "HEAD"])!
-  let porcelain = string.trim(run("git", ["-C", root, "status", "--porcelain"])!)
-  let dirty = if porcelain == "" then 0 else list.len(string.split(porcelain, "\n"))
-  lines = lines + ["  tree:     " + head + " " + int.to_string(dirty) + " dirty file(s)"]
-  lines = lines + [
-    "─────────────────────"
-  ]
-  Stamp { ok: agrees, lines: lines }
+}
+
+// The stamp, as the bash prints it. `ok = false` means the caller must abort — the PATH
+// binary and the workspace build disagree, so no measurement taken now would describe the
+// tree being tested, and the stamp stops at the FATAL block exactly as the bash does.
+effect fn toolchain(root: String) -> Stamp = {
+  let id = identity(root)!
+  let head_lines = ["── toolchain stamp ──"] + id.lines
+  if not id.ok then Stamp { ok: false, lines: head_lines } else {
+    // `coqc --version | head -1` — the Rocq banner is multi-line.
+    let coq = run("coqc", ["--version"])!
+    let head = run("git", ["-C", root, "rev-parse", "--short", "HEAD"])!
+    let porcelain = string.trim(run("git", ["-C", root, "status", "--porcelain"])!)
+    let dirty = if porcelain == "" then 0 else list.len(string.split(porcelain, "\n"))
+    Stamp { ok: true, lines: head_lines + [
+      "  rustc:    " + run("rustc", ["--version"])!,
+      "  wasmtime: " + run("wasmtime", ["--version"])!,
+      "  coqc:     " + list.get_or(string.split(coq, "\n"), 0, "n/a"),
+      "  tree:     " + head + " " + int.to_string(dirty) + " dirty file(s)",
+      "─────────────────────"
+    ] }
+  }
 }
