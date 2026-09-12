@@ -1,3 +1,4 @@
+<!-- description: Make heap-result match total rather than recognised, in lowering only -->
 # Camp-4, generalised: make heap-result `match` total instead of recognised
 
 Status: **plan + first landed arc.** Written 2026-08-17 from a fresh outside wall

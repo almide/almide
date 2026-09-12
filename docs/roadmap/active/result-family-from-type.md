@@ -1,3 +1,4 @@
+<!-- description: Derive call-result layout from the type, not from module/func name tables -->
 # result-family-from-type — layout is a function of the type, names only choose code
 
 **Status**: active (phase 0 landed 2026-08-14; this doc is the arc's constitution)

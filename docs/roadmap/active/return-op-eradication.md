@@ -1,3 +1,4 @@
+<!-- description: One desugar for the ! operator, deleting the per-position return-op zoo -->
 # Return-op eradication: one desugar for `!`, position zoo deleted
 
 Status: R2 IN PROGRESS (ratified ○ 2026-08-15; R1 landed 3358f26f6+53439f582 —

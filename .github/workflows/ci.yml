@@ -1246,6 +1246,19 @@ jobs:
           git diff --exit-code -- docs/contracts/README.md \
             || { echo "::error::docs/contracts/README.md is stale — run: bash docs/contracts/generate-readme.sh > docs/contracts/README.md"; exit 1; }
 
+      # The same guard the contract index has had, for the roadmap index, which had
+      # only the lefthook pre-commit hook. lefthook is an opt-in local install, so an
+      # author who never ran `lefthook install` bypasses it silently — and did: the
+      # committed index was found stale on 2026-09-12, missing nine rows. Two generated
+      # indexes, one guarded twice and one guarded once, was an oversight rather than a
+      # decision. The Almide twin's half of this comparison is the dogfood test
+      # `the roadmap index rendering is byte-identical …` in the almide-gates job.
+      - name: Roadmap README up to date (regenerate and diff)
+        run: |
+          bash docs/roadmap/generate-readme.sh > docs/roadmap/README.md
+          git diff --exit-code -- docs/roadmap/README.md \
+            || { echo "::error::docs/roadmap/README.md is stale — run: bash docs/roadmap/generate-readme.sh > docs/roadmap/README.md"; exit 1; }
+
       # The three gates below were written but never wired to a job. A gate that
       # has never run is indistinguishable from one that does not exist, so they
       # are attached here rather than left as scripts someone remembers to call.
