@@ -315,3 +315,15 @@ The indirection ships only for the services that can use it: 688 of the 697
 corpus modules are byte-identical, and the nine that reach env/args pay 96–101
 bytes. `env.set`'s 64 KiB overlay keeps its own bound — a loud, named refusal
 since #2116, not a silent one — and is the last park-sized limit left.
+
+## #2118 — the one writer into the span with no bound
+
+Op 32 wrote `b_len` bytes at the staging address and checked nothing, so a
+length past the span would have reached the env.set overlay and then live guest
+blocks. No source can reach it — every `prim.random_get` call site in the stdlib
+asks for 8 — which is exactly why the bound belongs in the emitter rather than
+in every artifact's shim: `prim.rs` refuses a length that is not a literal
+inside `ENTROPY_MAX`, so the check costs no bytes and no runtime branch, and the
+p2/p3 arms inherit it because the refusal happens before a target is chosen.
+`entropy_length_ok` is unit-tested on both sides of the bound and on the
+computed-length shape; the corpus lowers byte-identically.
