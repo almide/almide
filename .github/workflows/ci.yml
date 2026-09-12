@@ -1131,6 +1131,11 @@ jobs:
       - name: Contract ledger traceability (every contract evidenced, every fixture contracted)
         run: scripts/check-contracts.sh
 
+      # #2122: a release-only test the shards skip and no release job names
+      # runs in no job at all — and reads green forever.
+      - name: Release-only tests are named by a release job (#2122)
+        run: bash scripts/check-release-only-tests.sh
+
       - name: ALS pin — every contract id is known to the judge at proofs/als-pin.txt (als #60)
         run: bash scripts/check-als-pin.sh
 
@@ -1551,6 +1556,14 @@ jobs:
           wasmtime --version
       - name: Carried gates in release shape
         run: cargo test --release --locked -p almide-wasm -p almide-wasm-run -p almide-spine -p almide-syntax -p almide-corpus -p almide-layout
+      # #2122: the ROOT package's release-only tests. A test marked
+      # `cfg_attr(debug_assertions, ignore)` is skipped by every shard (the
+      # ci-test profile inherits dev), so without this step it runs in NO
+      # job — which is how the native⇄embedded cross net sat broken and
+      # unreported. scripts/check-release-only-tests.sh keeps this list
+      # honest; the wasm crate's six ride the step above.
+      - name: Release-only root tests (the shards skip these by profile)
+        run: cargo test --release --locked --test embedded_cross_test --test module_type_repr_test
       # #2010 stage 2b: under the double-free trap a second release of a
       # freed block traps instead of wrapping to 0xFFFF_FFFF — the corpus
       # and the gauntlet must hold under it (five fixtures only showed
