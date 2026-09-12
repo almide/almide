@@ -53,6 +53,9 @@ pub(crate) const UNSUPPORTED_MSG: &[u8] = b"Error: host op unsupported in the WA
 /// which names an operation the build supports and had just performed — the
 /// #2103 defect (an error that does not say what failed) in the shim.
 pub(crate) const ENV_FULL_MSG: &[u8] = b"Error: env.set log full (64 KiB of names and values)\n";
+/// C-197's line, for the shim-side stagings that ask the machine for pages
+/// (#2120). The guest allocator prints the same words from its own path.
+pub(crate) const OOM_MSG: &[u8] = b"Error: out of memory\n";
 // Park-page layout (offsets from park base).
 pub(crate) const IOV: u64 = 0; // two iovec entries (16 bytes)
 pub(crate) const NREAD: u64 = 16;
@@ -60,6 +63,8 @@ pub(crate) const NL: u64 = 24;
 pub(crate) const MSG: u64 = 64;
 /// The second message slot, clear of MSG's text and below DATA.
 pub(crate) const MSG2: u64 = 256;
+/// The third: the shim-side out-of-memory line.
+pub(crate) const MSG3: u64 = 384;
 pub(crate) const DATA: u64 = 1024; // stdin/entropy bytes + op result staging
 /// The env.set overlay log (#1716): [klen u32][vlen u32][key][val] entries,
 /// append-only, scanned last-write-wins by op 26. Its page sits above the
@@ -325,10 +330,10 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
         .1
         .ok_or_else(|| anyhow::anyhow!("__heap init not i32"))? as u32 as u64;
     let park: u64 = heap_init;
-    let g_plen = global_count;
+    let (g_plen, g_ppos) = (global_count, global_count + 1);
     // g_ovl (the overlay log length) exists only when an env service
     // ships — nothing else reads or writes the log.
-    let g_ovl = (services.env_get || services.env_set).then_some(global_count + 1);
+    let g_ovl = (services.env_get || services.env_set).then_some(global_count + 2);
     let mut globals = GlobalSection::new();
     for (idx, (gt, i32v, i64v, f64v)) in parsed_globals.iter().enumerate() {
         let init = if idx as u32 == heap_global {
@@ -426,6 +431,13 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
         GlobalType { val_type: ValType::I32, mutable: true, shared: false },
         &ConstExpr::i32_const(0),
     );
+    // g_ppos: where host_read copies FROM (#2120). The staging page is the
+    // default; a service whose result outgrows it stages above the heap and
+    // points this at those bytes instead of answering a wrong value.
+    globals.global(
+        GlobalType { val_type: ValType::I32, mutable: true, shared: false },
+        &ConstExpr::i32_const((park + DATA) as i32),
+    );
     // g_ovl: bytes appended to the env overlay log so far.
     if g_ovl.is_some() {
         globals.global(
@@ -463,19 +475,19 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
         code.function(&stub);
         code.function(&stub);
     } else {
-        code.function(&shim_fs_call(park, g_plen, f_env_get, f_env_set, f_args));
-        code.function(&shim_host_read(park, g_plen));
+        code.function(&shim_fs_call(park, g_plen, g_ppos, f_env_get, f_env_set, f_args));
+        code.function(&shim_host_read(g_plen, g_ppos));
     }
     if f_env_get.is_some() {
         let (i_sizes, i_get) = environ_imports.expect("env_get service imports its pair");
-        code.function(&shim_env_get(park, g_plen, g_ovl.expect("env service global"), i_sizes, i_get));
+        code.function(&shim_env_get(park, g_plen, g_ppos, g_ovl.expect("env service global"), i_sizes, i_get));
     }
     if f_env_set.is_some() {
         code.function(&shim_env_set(park, g_ovl.expect("env service global")));
     }
     if f_args.is_some() {
         let (i_sizes, i_get) = args_imports.expect("args service imports its pair");
-        code.function(&shim_args(park, g_plen, i_sizes, i_get));
+        code.function(&shim_args(park, g_plen, g_ppos, i_sizes, i_get));
     }
 
     let mut element_sec = ElementSection::new();
@@ -492,6 +504,10 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     );
     if f_env_set.is_some() {
         data.active(0, &ConstExpr::i32_const((park + MSG2) as i32), ENV_FULL_MSG.iter().copied());
+    }
+    // The high-staging services are the only shim-side callers of memory.grow.
+    if f_env_get.is_some() || f_args.is_some() {
+        data.active(0, &ConstExpr::i32_const((park + MSG3) as i32), OOM_MSG.iter().copied());
     }
 
     let mut m = Module::new();
