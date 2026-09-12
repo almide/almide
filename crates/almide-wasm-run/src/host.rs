@@ -276,7 +276,12 @@ fn fs_dispatch_r2(op: i32, a: &str) -> (i64, Vec<u8>) {
             }
             Err(e) => err_s(io_err(fs_op_name(op), &q(a), e)),
         },
-        12 => match std::fs::read_to_string(a) {
+        // 51/52 (fold_lines / for_each_line) are op 12's body under their own
+        // name (#2090). They MUST share this arm: the `_` fallthrough below is the
+        // raw-BYTES reader, and routing them there fed the guest bytes where it
+        // decodes length-prefixed frames — `fs.fold_lines` then summed an empty
+        // walk and answered 0 instead of 6, silently.
+        12 | 51 | 52 => match std::fs::read_to_string(a) {
             Ok(t) => {
                 let lines: Vec<String> = t.lines().map(str::to_string).collect();
                 let buf = frames(&lines);
