@@ -70,6 +70,9 @@ pub(crate) const DATA: u64 = 1024; // stdin/entropy bytes + op result staging
 /// append-only, scanned last-write-wins by op 26. Its page sits above the
 /// staging span the other ops use.
 pub(crate) const OVL: u64 = 4 * 65536;
+/// The staging room the emitter refuses to overrun (#2118) and this layout
+/// provides: one number, checked here rather than trusted.
+const _: () = assert!((OVL - DATA) as i64 == almide_wasm::WASI_STAGING_ROOM);
 /// The park span: five pages carved out at the original heap base — four
 /// for iovecs/messages/stdin, one for the env overlay log.
 pub(crate) const PARK_SPAN: u64 = 5 * 65536;

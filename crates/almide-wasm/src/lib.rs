@@ -52,6 +52,16 @@ use almide_ir::{IrExpr, IrExprKind, IrFunction, IrPattern, IrProgram, IrStmtKind
 use almide_types::types::{Ty, TypeConstructorId};
 use wasm_encoder::{Function, MemArg, ValType};
 
+/// The staging room a host op's result must fit, in bytes (#2118/#2120).
+///
+/// The `to_wasi` transform parks op results in a fixed span between its data
+/// base and the env.set overlay page; this is that span, declared HERE because
+/// the emitter is what decides whether a call can be lowered at all, and
+/// `crates/almide-wasm-run/src/wasi.rs` asserts at compile time that its own
+/// layout still denotes the same number. One limit, two readers, no comment
+/// asking anyone to keep them in sync.
+pub const WASI_STAGING_ROOM: i64 = 4 * 65536 - 1024;
+
 #[derive(Debug)]
 pub enum EmitError {
     /// This IR shape is outside the current slice. The reason string feeds
