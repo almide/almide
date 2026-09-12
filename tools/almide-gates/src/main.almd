@@ -234,6 +234,20 @@ test "the index rendering is byte-identical to the committed docs/contracts/READ
   assert_eq(first_divergence(fs.read_text("docs/contracts/README.md")!, gen_contracts_readme("docs/contracts")!), "")
 }
 
+// The roadmap index is this tool's DEFAULT subcommand and was the one twin with no
+// acceptance check at all — #1843 covered the two contracts renderings and left this one
+// out. The omission was not theoretical: docs/roadmap/README.md was found stale on
+// 2026-09-12, missing nine rows, because its only guard was the lefthook pre-commit hook,
+// which an author who has not run `lefthook install` never fires. This test closes both
+// holes at once — it re-renders from active/, on-hold/ and done/ and compares against the
+// committed index, so a roadmap item added without regenerating fails here, and a port
+// that drifts from the bash original fails here too. The bash generator's own freshness is
+// the `checks` job's "Roadmap README up to date" step; green on both means all three
+// renderings agree.
+test "the roadmap index rendering is byte-identical to the committed docs/roadmap/README.md" {
+  assert_eq(first_divergence(fs.read_text("docs/roadmap/README.md")!, gen_roadmap_readme("docs/roadmap")!), "")
+}
+
 test "the ledger is well-formed under the subset reader — no block shape had to be recovered" {
   assert_eq(toml.parse_doc(fs.read_text("docs/contracts/contracts.toml")!).problems, [])
 }

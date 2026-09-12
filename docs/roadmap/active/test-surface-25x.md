@@ -1,3 +1,4 @@
+<!-- description: Grow the committed test surface 25x toward reference-compiler scale -->
 # Test-surface 25× — the road to reference-compiler scale
 
 Set 2026-08-17, after the reference-suite mining sweep (#1508) measured the
