@@ -9,14 +9,12 @@ use wasm_encoder::{BlockType, MemArg, ValType};
 
 use crate::emitter::Emitter;
 
-/// The largest entropy request the emitter will lower (#2118). The host
-/// shims stage the bytes in a span this crate cannot see, so the bound is
-/// the conservative one every leg already serves — the 4096-byte chunk the
-/// stdin take is clamped to — rather than a copy of a span size that would
-/// then need a gate to stay honest. Every stdlib caller asks for 8; a
-/// computed length is refused outright, because that is the shape that
-/// could reach past the span.
-const ENTROPY_MAX: i64 = 4096;
+/// The largest entropy request the emitter will lower (#2118): the staging
+/// room itself, which `crates/almide-wasm-run/src/wasi.rs` re-asserts against
+/// its own layout. Every stdlib caller asks for 8; a computed length is
+/// refused outright, because that is the shape that could reach past the span
+/// and the host checks nothing.
+const ENTROPY_MAX: i64 = crate::WASI_STAGING_ROOM;
 
 /// Is this entropy length one the emitter will lower? A literal inside the
 /// bound; nothing else. Split out so the rule is testable without a program
