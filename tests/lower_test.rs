@@ -612,3 +612,84 @@ fn for_tuple_loop_var_no_spurious_unused_warning() {
         warnings.iter().map(|w| w.message.clone()).collect::<Vec<_>>(),
     );
 }
+
+// #2134: the not-a-function diagnostic and the arity-shape hint are decided in
+// `check/calls.rs` and `check/solving.rs`. The CLI-level fixtures live in
+// ctor_diag_test.rs; these run the checker IN PROCESS, in a binary the
+// coverage sweep measures, so the arms that choose the message are exercised
+// rather than merely reached through a subprocess the profile cannot see.
+fn diagnose(input: &str) -> Vec<(String, String)> {
+    let tokens = Lexer::tokenize(input);
+    let mut parser = Parser::new(tokens);
+    let mut prog = parser.parse().expect("parse failed");
+    let canon = canonicalize::canonicalize_program(&prog, std::iter::empty());
+    let mut checker = Checker::from_env(canon.env);
+    checker.diagnostics = canon.diagnostics;
+    checker
+        .infer_program(&mut prog)
+        .into_iter()
+        .map(|d| (d.message, d.hint))
+        .collect()
+}
+
+fn diagnostic_containing<'a>(diags: &'a [(String, String)], needle: &str) -> &'a (String, String) {
+    diags
+        .iter()
+        .find(|(m, _)| m.contains(needle))
+        .unwrap_or_else(|| panic!("no diagnostic containing {needle:?}, got: {diags:?}"))
+}
+
+#[test]
+fn calling_none_names_the_parentheses() {
+    let diags = diagnose("fn a(n: Int) -> Int? = if n > 0 then some(n) else none()\n");
+    let (msg, hint) = diagnostic_containing(&diags, "is not a function");
+    assert!(msg.contains("`none`"), "{msg}");
+    assert!(hint.contains("drop the parentheses"), "{hint}");
+}
+
+#[test]
+fn any_other_uncallable_callee_names_its_type() {
+    for (src, ty) in [
+        ("fn main() -> Unit = {\n  let _ = (1)(2)\n  println(\"x\")\n}\n", "Int"),
+        ("fn main() -> Unit = {\n  let _ = \"abc\"()\n  println(\"x\")\n}\n", "String"),
+        ("fn main() -> Unit = {\n  let _ = [1, 2](3)\n  println(\"x\")\n}\n", "List[Int]"),
+    ] {
+        let diags = diagnose(src);
+        let (msg, hint) = diagnostic_containing(&diags, "is not a function");
+        assert!(msg.contains("this expression"), "{src}: {msg}");
+        assert!(msg.contains(ty), "{src}: the type must be named: {msg}");
+        assert!(hint.contains("Only functions and closures can be called"), "{src}: {hint}");
+    }
+}
+
+// The other direction: a function where its RESULT is expected. Nothing is
+// misspelled, so no name-distance suggestion reaches it and the hint is chosen
+// from the types alone.
+#[test]
+fn a_function_where_its_result_is_expected_names_the_missing_half() {
+    let diags = diagnose("fn c(n: Int) -> Int? = some\n");
+    assert!(
+        diags.iter().any(|(_, h)| h.contains("the arguments were never supplied")),
+        "got: {diags:?}"
+    );
+    let diags = diagnose("fn gen() -> Int = 7\nfn g() -> Int = gen\n");
+    assert!(
+        diags.iter().any(|(_, h)| h.contains("the call was never made")),
+        "got: {diags:?}"
+    );
+}
+
+// A callee whose type is still an inference var must keep the ordinary
+// constraint — the early return in `report_uncallable_callee`, which is what
+// stops the diagnostic from firing on every higher-order call.
+#[test]
+fn a_callable_computed_callee_still_type_checks() {
+    let diags = diagnose(
+        "fn apply(f: (Int) -> Int, n: Int) -> Int = f(n)\n\
+         fn main() -> Unit = println(int.to_string(apply((x) => x + 1, 2)))\n",
+    );
+    assert!(
+        !diags.iter().any(|(m, _)| m.contains("is not a function")),
+        "a real call must not be diagnosed: {diags:?}"
+    );
+}

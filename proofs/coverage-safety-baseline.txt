@@ -7,7 +7,20 @@
 # lowering needs its own justified commit.
 crates/almide-codegen/src/perceus_verified.rs 5016
 crates/almide-codegen/src/pass_effect_inference.rs 7632
-crates/almide-frontend/src/check/calls.rs 6457
+# LOWERED 6457 -> 6428 (2026-09-13, #2134), its own justified commit as this
+# file's header requires. The measured set is nine BACKEND/LOWERING binaries —
+# alias_semantics, almide_codegen, almide_mir, almide_wasm, backend_parity,
+# fuzz_differential, render_program, section_dump, tail_calls — and no
+# root-package integration test is in it. A type-error DIAGNOSTIC in this file
+# is therefore unreachable from everything that counts: those suites lower
+# programs that type-check. #2134 added the not-a-function arm for a value in
+# callee position, tested three ways (in-process in tests/checker_test.rs and
+# tests/lower_test.rs, at the CLI in tests/ctor_diag_test.rs) and reached by
+# none of the measured binaries, so the file's percentage fell with the line
+# count while its tested surface grew. Local and CI measured the same 64.28%,
+# so the new floor takes no extra margin. The floor still bites: it is the
+# measured value, not a round-down.
+crates/almide-frontend/src/check/calls.rs 6428
 crates/almide-frontend/src/check/infer_calls_closures.rs 6827
 crates/almide-mir/src/certificate.rs 7229
 crates/almide-mir/src/certificate_b.rs 7510
