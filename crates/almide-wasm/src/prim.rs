@@ -4,10 +4,49 @@
 //! block BASE, payload begins at base + PAYLOAD), so load/store use
 //! align-hint 0 — the ops do arbitrary byte arithmetic by design.
 
-use almide_ir::IrExpr;
+use almide_ir::{IrExpr, IrExprKind};
 use wasm_encoder::{BlockType, MemArg, ValType};
 
 use crate::emitter::Emitter;
+
+/// The largest entropy request the emitter will lower (#2118). The host
+/// shims stage the bytes in a span this crate cannot see, so the bound is
+/// the conservative one every leg already serves — the 4096-byte chunk the
+/// stdin take is clamped to — rather than a copy of a span size that would
+/// then need a gate to stay honest. Every stdlib caller asks for 8; a
+/// computed length is refused outright, because that is the shape that
+/// could reach past the span.
+const ENTROPY_MAX: i64 = 4096;
+
+/// Is this entropy length one the emitter will lower? A literal inside the
+/// bound; nothing else. Split out so the rule is testable without a program
+/// that can reach `prim.random_get` — no source can, which is the point.
+fn entropy_length_ok(n: &IrExpr) -> bool {
+    matches!(&n.kind, IrExprKind::LitInt { value } if *value >= 0 && *value <= ENTROPY_MAX)
+}
+
+#[cfg(test)]
+mod entropy_bound_tests {
+    use super::*;
+    use almide_types::types::Ty;
+
+    fn expr(kind: IrExprKind) -> IrExpr {
+        IrExpr { kind, ty: Ty::Int, span: None, def_id: None }
+    }
+
+    #[test]
+    fn only_a_literal_inside_the_bound_lowers() {
+        for value in [0, 8, ENTROPY_MAX] {
+            assert!(entropy_length_ok(&expr(IrExprKind::LitInt { value })), "{value}");
+        }
+        for value in [-1, ENTROPY_MAX + 1, i64::MAX] {
+            assert!(!entropy_length_ok(&expr(IrExprKind::LitInt { value })), "{value}");
+        }
+        // A computed length is the shape that could reach past the staging
+        // span, and the one the host checks nothing about.
+        assert!(!entropy_length_ok(&expr(IrExprKind::Var { id: almide_ir::VarId(0) })));
+    }
+}
 use crate::*;
 
 fn raw(align_unused: ()) -> MemArg {
@@ -95,6 +134,22 @@ impl Emitter<'_> {
     ) -> ArmResult {
         match (func, args) {
             ("random_get", [p, n]) => {
+                // #2118: the host writes `n` bytes at the park's staging
+                // address and checks nothing — it is the one writer into that
+                // span without a bound, and a length past it would reach the
+                // env.set overlay and then live guest blocks. The span is a
+                // compile-time constant and every stdlib caller asks for 8,
+                // so the bound belongs HERE, before an artifact exists,
+                // rather than as a branch every module carries for a case it
+                // cannot reach.
+                if !entropy_length_ok(n) {
+                    return match &n.kind {
+                        IrExprKind::LitInt { value } => {
+                            unsup(&format!("random_get:length-{value}-over-{ENTROPY_MAX}"))
+                        }
+                        _ => unsup("random_get:non-literal-length"),
+                    };
+                }
                 self.lower_arg(p, Some(INT), ArgMode::Raw)?;
                 let hp = self.hold_i64()?;
                 self.f.instructions().local_set(hp);
