@@ -42,6 +42,28 @@ fn wasm_cross_fixtures_run_identically_on_the_interpreter() {
     }
     assert!(manifest.len() > 550, "suspiciously small manifest");
 
+    // Rows whose ORACLE answer predates a fix that postdates the port SHA. They
+    // stay in the manifest — it is also the corpus list for the
+    // exercised-surface, allocation and size sweeps, and subtracting a row
+    // takes the fixture out of all of them (#2129 lost `regex.*` from the wasm
+    // leg's surface that way) — and only this comparison skips them. Shrink-only
+    // in both directions: a row that starts agreeing again must be deleted.
+    let stale: BTreeMap<String, String> = std::fs::read_to_string(
+        root.join("scripts/lib/run-oracle-stale.txt"),
+    )
+    .expect("scripts/lib/run-oracle-stale.txt")
+    .lines()
+    .filter(|l| !l.trim_start().starts_with('#') && !l.trim().is_empty())
+    .map(|l| {
+        let (p, why) = l.split_once('\t').expect("path<TAB>reason");
+        (p.to_string(), why.to_string())
+    })
+    .collect();
+    for p in stale.keys() {
+        assert!(manifest.contains_key(p), "{p}: stale-row register names a fixture with no manifest row");
+    }
+    let mut stale_agreed = Vec::new();
+
     // The interpreter is the incumbent's PRE-codegen oracle: a fixture using
     // an intrinsic outside its bridge coverage returns Unsupported (exit -2),
     // and the incumbent's own 3-way gate SKIPS those rather than voting.
@@ -77,7 +99,12 @@ fn wasm_cross_fixtures_run_identically_on_the_interpreter() {
                 n_fuel += 1;
             }
             Ok(out) => {
-                if normalized_hash(&out.stdout) != *want_hash || out.exit != *want_exit {
+                let agrees = normalized_hash(&out.stdout) == *want_hash && out.exit == *want_exit;
+                if stale.contains_key(rel) {
+                    if agrees {
+                        stale_agreed.push(rel.clone());
+                    }
+                } else if !agrees {
                     mismatches.push(format!("{rel} (exit {} vs {want_exit})", out.exit));
                 } else {
                     n_ok += 1;
@@ -100,6 +127,20 @@ fn wasm_cross_fixtures_run_identically_on_the_interpreter() {
         "unsupported count {n_unsupported} exceeds the shrink-only ceiling {MAX_UNSUPPORTED}"
     );
     assert!(n_fuel <= MAX_FUEL, "fuel-exhausted count {n_fuel} exceeds ceiling {MAX_FUEL}");
+    if !stale.is_empty() {
+        println!(
+            "run parity: {} row(s) skipped as stale oracle answers: {:?}",
+            stale.len(),
+            stale.keys().collect::<Vec<_>>()
+        );
+    }
+    assert!(
+        stale_agreed.is_empty(),
+        "{} stale-row registration(s) now AGREE with the oracle — delete them from \
+         scripts/lib/run-oracle-stale.txt (the register is shrink-only): {:?}",
+        stale_agreed.len(),
+        stale_agreed
+    );
     assert!(
         mismatches.is_empty(),
         "{} of {} fixtures diverge from the oracle run, first: {}",
