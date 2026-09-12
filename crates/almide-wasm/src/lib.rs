@@ -151,6 +151,7 @@ mod string_scan;
 mod stmts;
 mod stmts_index;
 mod stmts_append;
+mod tail_append;
 mod string_ext;
 pub(crate) mod work;
 pub(crate) use work::*;
