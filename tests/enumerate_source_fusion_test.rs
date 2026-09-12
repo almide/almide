@@ -142,8 +142,10 @@ fn both_legs_agree_on_the_captured_and_mutated_shapes() {
     assert_eq!(run_both_legs(MUTATED).trim(), "6 99");
 }
 
-/// The adapter composes: `enumerate` under a `map`, under a `filter`, and as
-/// the source of a `take` — every chain position where a step list is built.
+/// The adapter composes: `enumerate` under a `map`, under a `filter`, as the
+/// source of a `take`, and OVER a chain rather than over a list — every chain
+/// position where a step list is built, including the reducer's, where the
+/// adapter has to survive the collector swap.
 const COMPOSED: &str = r#"
 fn main() -> Unit = {
   let xs = [10, 20, 30, 40]
@@ -151,7 +153,8 @@ fn main() -> Unit = {
   let kept = list.filter(list.enumerate(xs), (p) => p.0 % 2 == 0)
   let head = list.take(list.enumerate(xs), 2)
   let counted = list.count(list.enumerate(xs), (p) => p.1 > 15)
-  println("${doubled} ${kept} ${head} ${counted}")
+  let over_chain = list.len(list.enumerate(list.filter(xs, (x) => x > 15)))
+  println("${doubled} ${kept} ${head} ${counted} ${over_chain}")
 }
 "#;
 
@@ -159,6 +162,6 @@ fn main() -> Unit = {
 fn the_adapter_composes_with_every_chain_position() {
     assert_eq!(
         run_both_legs(COMPOSED).trim(),
-        "[10, 120, 230, 340] [(0, 10), (2, 30)] [(0, 10), (1, 20)] 3"
+        "[10, 120, 230, 340] [(0, 10), (2, 30)] [(0, 10), (1, 20)] 3 3"
     );
 }
