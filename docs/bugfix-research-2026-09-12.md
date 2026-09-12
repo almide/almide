@@ -339,3 +339,59 @@ inside `ENTROPY_MAX`, so the check costs no bytes and no runtime branch, and the
 p2/p3 arms inherit it because the refusal happens before a target is chosen.
 `entropy_length_ok` is unit-tested on both sides of the bound and on the
 computed-length shape; the corpus lowers byte-identically.
+
+## #2119 — the canonical ABI's mute corner
+
+The issue asked whether the C-197 line may be written from `cabi_realloc`, and
+listed writing it there as the preferred option. The answer is no, and the
+evidence is in the host rather than in the spec prose: wasmtime 47.0.4's
+`src/runtime/component/func.rs` wraps every lowering in
+`set_may_leave(false)` with the comment "while this is running the component is
+forbidden from calling imports", `func/host.rs` does the same around
+`lower_result_and_exit_call` (the window that calls realloc for a host-produced
+value), and `wasmtime-internal-cranelift`'s `compiler/component.rs` enforces it
+for `Trampoline::LowerImport` — `trapz may_leave, TRAP_CANNOT_LEAVE_COMPONENT`.
+A host call from realloc is therefore not merely unproven; it traps.
+
+Which is what the shim was doing. Measured on a p2 component built with
+`--heap-cap 1048576` draining 1.2 MB of stdin:
+
+```
+2: wasm trap: cannot leave component instance
+EXIT=134
+```
+
+So the defect was not the silence the issue described but a raw trap in T6's
+forbidden form, blaming the component's structure for a memory shortage. The
+issue's option 1 is closed by the host's own source; its option 3 — ledger the
+silence — would have ledgered the wrong thing.
+
+**The reservation discipline (option 2, made total for the ops the shims
+serve).** Every landing is reserved one step earlier, in ordinary guest code,
+where an abort is admissible:
+
+- `$reserve(need)` grows memory and, on a refused grow, prints
+  `Error: out of memory` and exits 1 — the same line `$alloc` prints.
+- Before an import whose result lands via `cabi_realloc`, the shim reserves the
+  bound IT chose for that call: `a_len` for op 35's blocking-read, `b_len` for
+  op 32's entropy. The host cannot answer with more than it was asked for, so
+  the reservation is exact and realloc's own grow becomes unreachable.
+- Guest-side allocations (p3's read-to-end buffer, the fan slot table, the http
+  body buffer) route through `$alloc`, which is `$reserve` then the same bump —
+  a one-index change at each call site rather than a duplicated size expression.
+- `cabi_realloc`'s failed-grow branch is now a bare `unreachable`, documented as
+  the corner with no channel. Answering with a pointer memory cannot back would
+  corrupt the guest silently, which is worse than ending.
+
+The cohort ends the same way. wit-bindgen's `cabi_realloc` calls Rust's
+`handle_alloc_error`, which aborts; wasi-libc's aborts too. No guest in the
+ecosystem reports from that position, because none can.
+
+What stays outside the proof is the one landing whose size the host alone picks:
+p3's preopen table, reserved at a declared 64 KiB (`PREOPEN_RESERVE`). A host
+whose preopen paths exceed that under a heap cap still ends in the trap; the
+residual is stated in C-197 rather than left to be discovered.
+
+`tests/component_realloc_oom_test.rs` pins both directions — the line and exit 1
+must appear, and `cannot leave component instance` and `wasm trap` must not —
+and was demonstrated to fail with the op-35 reservation removed.

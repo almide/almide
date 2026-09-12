@@ -53,10 +53,14 @@ pub fn to_p3(bytes: &[u8], wants_http: bool) -> anyhow::Result<Vec<u8>> {
     let shift = n_imports - 5;
     let shim_base = n_imports + n_funcs;
     // Shim order mirrors the almide.* import order (println, eprintln,
-    // exit, fs_call, host_read), then cabi_realloc, run, callback.
+    // exit, fs_call, host_read), then cabi_realloc, run, callback, the
+    // #2119 reservation pair, and the optional http shim.
     let f_realloc = shim_base + 5;
     let f_run = shim_base + 6;
     let f_callback = shim_base + 7;
+    let f_reserve = shim_base + 8;
+    let f_alloc = shim_base + 9;
+    let f_eprintln = shim_base + 1;
 
     let heap_init = parsed_globals[heap_global as usize]
         .1
@@ -254,7 +258,11 @@ pub fn to_p3(bytes: &[u8], wants_http: bool) -> anyhow::Result<Vec<u8>> {
     for ti in &func_types {
         functions.function(*ti);
     }
-    for ti in [t_print, t_print, t_exit, t_fs, t_hread, t_realloc, t_status, t_callback] {
+    // `$reserve` shares `exit`'s `(i32) -> ()` shape and `$alloc` shares
+    // `cabi_realloc`'s, so the pair adds no type-section entry.
+    for ti in
+        [t_print, t_print, t_exit, t_fs, t_hread, t_realloc, t_status, t_callback, t_exit, t_realloc]
+    {
         functions.function(ti);
     }
     if wants_http {
@@ -290,8 +298,8 @@ pub fn to_p3(bytes: &[u8], wants_http: bool) -> anyhow::Result<Vec<u8>> {
         code.function(&reencode_body(&b, &mut remap, I_EXIT)?);
     }
     let g = P3Globals {
-        park, f_realloc, g_plen, g_ppos, g_in_rx, g_in_fut, g_out_tx, g_out_fut,
-        g_err_tx, g_err_fut, g_pre, g_wset, g_slots, g_slotn,
+        park, f_alloc, g_plen, g_ppos, g_in_rx, g_in_fut, g_out_tx, g_out_fut,
+        g_err_tx, g_err_fut, g_pre, g_wset, g_slots, g_slotn, f_reserve,
     };
     let out_port = PrintPort { g_tx: g_out_tx, g_fut: g_out_fut, call_import: I_OUT_CALL, new_import: I_OUT_NEW, write_import: I_OUT_WRITE };
     let err_port = PrintPort { g_tx: g_err_tx, g_fut: g_err_fut, call_import: I_ERR_CALL, new_import: I_ERR_NEW, write_import: I_ERR_WRITE };
@@ -299,14 +307,22 @@ pub fn to_p3(bytes: &[u8], wants_http: bool) -> anyhow::Result<Vec<u8>> {
     code.function(&shim_print(err_port, park, true));
     code.function(&shim_exit());
     let f_fs_self = shim_base + 3;
-    let f_http = wants_http.then_some(shim_base + 8);
+    let f_http = wants_http.then_some(shim_base + 10);
     code.function(&shim_fs_call(g, &abi, f_fs_self, f_http));
     code.function(&shim_host_read(g_plen, g_ppos));
     code.function(&shim_cabi_realloc(heap_global));
     code.function(&shim_run(main_index + shift, g));
     code.function(&shim_callback());
+    code.function(&shim_reserve(
+        heap_global,
+        f_eprintln,
+        I_EXIT,
+        (park + MSG_OOM) as u32,
+        OOM_MSG.len() - 1,
+    ));
+    code.function(&shim_realloc_checked(f_reserve, f_realloc));
     if let Some(h) = habi.as_ref() {
-        code.function(&shim_http(park, g_plen, g_ppos, f_realloc, h));
+        code.function(&shim_http(park, g_plen, g_ppos, f_alloc, h));
     }
 
     // Elements re-encode through the Remap (#1716): the import shift must
@@ -320,6 +336,7 @@ pub fn to_p3(bytes: &[u8], wants_http: bool) -> anyhow::Result<Vec<u8>> {
     }
 
     data.active(0, &ConstExpr::i32_const((park + MSG) as i32), UNSUPPORTED_MSG.iter().copied());
+    data.active(0, &ConstExpr::i32_const((park + MSG_OOM) as i32), OOM_MSG.iter().copied());
     for (off, msg) in [
         (MSG_NOENT, E_NOENT),
         (MSG_ACCES, E_ACCES),

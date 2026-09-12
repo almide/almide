@@ -83,7 +83,7 @@ fn http_frame_cell(
 /// `pack(1, len)` with the static E_HTTP text (host-specific wording is
 /// bounded by contract — fixtures assert err-ness). The p3 stream delivers
 /// the DECODED body, so no chunked handling exists here by design.
-fn shim_http(park: u64, g_plen: u32, g_ppos: u32, f_realloc: u32, h: &HttpAbi) -> Function {
+fn shim_http(park: u64, g_plen: u32, g_ppos: u32, f_alloc: u32, h: &HttpAbi) -> Function {
     // Emit-time bisect knob (#1710 PR B bring-up): ALMIDE_P3_HTTP_STOP=N
     // makes the shim answer the static err right after stage N, so a hang
     // localizes to the first stage whose stop-build still hangs. Stages:
@@ -481,7 +481,7 @@ fn shim_http(park: u64, g_plen: u32, g_ppos: u32, f_realloc: u32, h: &HttpAbi) -
     i.local_get(response).local_get(cb_rx).i32_const((park + RET) as i32).call(I_HTTP_CONSUME);
     i.i32_const((park + RET) as i32).i32_load(mem(0)).local_set(body_rx);
     i.i32_const((park + RET) as i32).i32_load(mem(4)).local_set(trlfut);
-    i.i32_const(0).i32_const(0).i32_const(8).i32_const(65536).call(f_realloc).local_set(buf);
+    i.i32_const(0).i32_const(0).i32_const(8).i32_const(65536).call(f_alloc).local_set(buf);
     i.i32_const(65536).local_set(cap);
     i.i32_const(0).local_set(total);
     // op 49 (`request_status`): `<status>\n` precedes the body — the host
@@ -512,7 +512,7 @@ fn shim_http(park: u64, g_plen: u32, g_ppos: u32, f_realloc: u32, h: &HttpAbi) -
     i.if_(BlockType::Empty);
     i.local_get(buf).local_get(cap).i32_const(8);
     i.local_get(cap).i32_const(1).i32_shl();
-    i.call(f_realloc).local_set(buf);
+    i.call(f_alloc).local_set(buf);
     i.local_get(cap).i32_const(1).i32_shl().local_set(cap);
     i.end();
     i.local_get(body_rx);
