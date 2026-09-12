@@ -1,115 +1,219 @@
-<!-- description: Drive committed shell to zero; the two primitives that block it -->
-# Zero Committed Shell
+<!-- description: Which gates belong in Almide and which stay bash, and how the line is held -->
+# The gate language boundary
 
-**The goal is not "stop using shell." It is: no `.sh` file is committed to this repository.**
-Interactive shell stays exactly where it is — a one-liner in a terminal, `grep | sort | uniq -c`,
-`for f in *.png` — and nothing here argues otherwise. What changes is that anything durable
-enough to be committed, reviewed, and depended on becomes a program.
+> **2026-09-12 に目標を差し替えた。** 旧目標は「このリポジトリに `.sh` を1本も置かない」。
+> 六週間の実測がそれを否定したので、線を引き直した。経緯と旧目標の記録は下の
+> 「なぜ目標を差し替えたか」に残してある。ファイル名は参照を切らさないため据え置き。
+>
+> 外向きの対の項目: [shell-scripting-surface.md](./shell-scripting-surface.md)
+> （利用者と LLM が書く言語としてのシェルスクリプト）。本項は内向き
+> — このリポジトリ自身のゲートをどの言語で書くか。
 
-## This is not a proposal. It is an extrapolation from a measurement.
+## 決定
 
-Unit 0.46 ported seven of this repository's gates from bash to Almide with **byte-identity as
-the acceptance check**, and the last one additionally against **15 mutations**:
+**構造化データを読むゲートは Almide で書く。grep して終わるゲートは bash のままでよい。**
+
+「committed shell をゼロにする」ではない。ゼロは目標として間違っていた。
+
+## なぜこれ以外にないのか
+
+決め手は好みではなく、**限界コストと再利用の非対称**である。
+
+bash のゲートは1本あたりが安い。新規ファイル、CI に1行、`proofs/gate-verification.toml`
+に1行 — **触るのは3箇所**で、ファイルは完全に独立している。その代わり**再利用がゼロ**で、
+60本の `scripts/check-*.sh` はそれぞれ独立に `grep` と `awk` と `sed` を書き直している。
+
+Almide 側は初期コストが高かった。`tools/almide-gates/src/toml/mod.almd` は 291 行の
+サブセット TOML リーダ、`src/mdmeta/mod.almd` は 68 行の markdown フロントマター読み。
+bash なら `grep` 三発で済むものを、型の付いたパーサとして書き起こしている。
+
+**その投資はもう払い終わっている。** 次に TOML や markdown や台帳を読むゲートを書く人は、
+359 行のパーサをタダで使える。つまり構造化データを読むゲートに限れば、**いまや Almide の
+ほうが安い**。そして Unit 0.46 の移植で見つかった欠陥 8 件は、全部この種の「判定ルール」の
+側に出ている（後述）。
+
+逆に `grep -q foo file || exit 1` の形のゲートには、この投資が一切効かない。触る箇所が
+3 から 5〜6 に増え、共用の 245 行ファイルを編集し、得るものが無い。**そこに線がある。**
+
+## 線の定義
+
+| ゲートが読むもの | 言語 | 例 |
+|---|---|---|
+| 構造化データ（TOML / markdown / 台帳 / 生成物の突き合わせ） | **Almide** | contracts.toml の整合、ロードマップ README の再生成、台帳カウント |
+| 文字列の有無・単純な形（grep して落とす） | **bash** | 禁止綴りの検出、退役 API の再出現、ファイル存在 |
+
+判定に迷うものが出たら、それは「構造化」側に倒す。パーサを書いているなら構造化である。
+
+## どう守るか
+
+規則だけでは守られない。それがこの六週間の実測結果そのものである（下記）。
+
+`proofs/gate-verification.toml` を使う。**全ゲート 79 行の台帳**で、1 行ごとに `path` /
+`class`（KERNEL_PROVEN / MUTATION_TESTED / NEGATIVE_TESTED / EXERCISED / UNVERIFIED）/
+`evidence` を持ち、`scripts/check-gate-verification.sh` が列挙・欠落・陳腐化を落とす。
+UNVERIFIED は **縮小のみ許す上限**で burn-down される。
+
+ここに分類フィールドを 1 つ足す。**構造化と宣言されたゲートが bash で書かれていたら落ちる。**
+
+- 初期値は `UNCLASSIFIED`、上限 79、**縮小のみ**。台帳が UNVERIFIED で既にやっている作法を
+  そのまま借りる。79 行の分類が仕組みの導入をブロックしない。
+- 新規ゲートは宣言必須。
+- 列挙は `scripts/check-*.sh` だけでなく `tools/almide-gates/` のサブコマンドにも広げる
+  （現在は bash 側しか列挙していないので、Almide のゲートは台帳に存在しない）。
+
+**`.sh` の本数を数える ratchet は作らない。** 旧目標の done-criteria に書かれていたが、
+grep-and-exit のゲートは bash のままで正しいと決めた以上、本数は正当に増える。本数は
+もう指標ではない。
+
+## twin は、検証してから昇格する
+
+Unit 0.46 は 7 本のゲートを Almide に移植した。その 7 本 — `contracts-readme` /
+`conformance` / `roadmap-readme` / `check-contracts` / `output-parity` / `stamp` /
+`fuzz-track-record` — は `tools/almide-gates/` に存在し、`almide test` でユニットテストが
+走る。
+
+**しかし `.sh` 原本との突き合わせは存在しない。** CI が実際に走らせているのは `.sh` の側
+だけで（`ci.yml:1132`、`ci.yml:1240`、`ci-cross-target.yml:142`)、ライブのゲートとして
+使われている twin は `bench` の 1 本だけである。`main.almd` のバイト一致テストは
+`docs/contracts/conformance.md` と `docs/contracts/README.md` の 2 本を覆うのみ。
+
+この文書は以前「the byte-diff runs in CI」と書いていた。**書いていただけで、実装されて
+いなかった。** 記録として残す — リスク吸収策を宣言して実装しないのは、宣言しないより悪い。
+
+だから順序を固定する:
+
+1. **diff を作る。** 該当ゲートについて「Almide twin の出力 == `.sh` 原本の出力 ==
+   コミット済み生成物」を CI で検証する。
+2. **緑を確認する。**
+3. **そこで初めて昇格する。** Almide 側をライブのゲートにし、`.sh` を消す。
+
+根拠なしに `.sh` を消してはならない。壊れても気づけないからである。
+
+**1 本目は `roadmap-readme`。** 7 本で最小・最安全（markdown を読んで表を出すだけ、副作用
+なし）で、かつ `main.almd` のデフォルトサブコマンドでありながら検証が一つも無い。そして
+`docs/roadmap/README.md` は実際にドリフトしていた（2026-09-12 に 8 項目の欠落を発見）ので、
+この 1 ステップで **README の staleness と twin の無検証が同時に片づく**。
+
+## なぜ目標を差し替えたか
+
+旧目標は「`git ls-files '*.sh'` が 0」だった。2026-08-01 の起草時点で 50 ファイル /
+6,159 行。
+
+**2026-09-12 の実測: 124 ファイル / 13,579 行。**
 
 | | |
 |---|---|
-| bash replaced | ~1,300 lines across 7 gates |
-| Almide written | ~2,300 lines, 14 modules |
-| tests | 47, on decision rules that in bash were reachable only through their I/O |
-| defects found by porting | **8** |
+| 追加 | 81 |
+| 削除 | 7 |
+| **うち `scripts/check-*.sh`** | **50** |
 
-Five of the eight were the same shape — **a rule duplicated because duplication was cheaper
-than the abstraction** — and that shape is not an accident of who wrote the scripts. Shell has
-no modules and no type checker, so duplication IS the cheapest option, and every copy agrees
-on the day it is written. A locale pin in eleven scripts; an unquoting expression in five
-extractors; an evidence-class enum in two places. The port did not find them by being clever;
-a byte-diff refused a plausible restatement.
+新しい CI ゲートは、六週間のあいだ**一本残らず bash で書かれた**。移植した 7 本に対して、
+新規流入が約 7 倍。ポートが遅かったのではなく、蛇口が開いたままだった。
 
-## Where it stands
+そして誰も気づかなかった。旧 done-criteria の「A gate fails CI when the count goes up」が
+**実装されていなかった**からである。
 
-**50 committed `.sh` files, 6,159 lines**, of which 7 gates have byte-identical Almide twins
-today (the `.sh` originals stay as the oracle until the ratchet says otherwise).
+ここから読めることは二つある。一つ、**規則を掲げるだけでは守られない** — だから上の
+「どう守るか」は台帳による宣言と機械検査にした。二つ、**六週間の実際の選択は、書き手が
+毎回正しく判断した結果かもしれない** — grep 一発のゲートに Almide を使う理由は本当に無い。
+ゼロという目標のほうが現実と合っていなかった。
 
-The count is the ratchet: **down only**. A new `.sh` file added to the repository is the thing
-this item exists to prevent, and a gate that counts them is one line.
+## 残すもの — Unit 0.46 の測定
 
-## The two primitives that block the rest
+目標は差し替えたが、この項目の最も価値ある部分は測定であり、そこは変わらない。
 
-Measured, by hitting them:
+7 本のゲートを **byte-identity を受け入れ条件として**移植し、最後の 1 本は追加で
+**15 の mutation** に対しても検証した。
 
-### 1. A timeout — and the honest form it can take
+| | |
+|---|---|
+| 置き換えた bash | 7 ゲート、約 1,300 行 |
+| 書いた Almide | 約 2,300 行、14 モジュール |
+| テスト | 47。bash では I/O 経由でしか到達できなかった判定ルールに対して |
+| 移植が見つけた欠陥 | **8** |
 
-`output-parity` needed to bound a subprocess and **still shells out to
-`perl -e 'alarm …; exec …'`**. The Almide port depends on perl, which is absurd for a program
-whose point is that the shell dependency is gone.
+8 件のうち **5 件が同じ形**だった — **抽象化より複製のほうが安いから複製され、書いた日には
+全部が一致していた規則**。11 のスクリプトに散ったロケール固定、5 つの抽出器に散った
+unquote 式、2 箇所に書かれた evidence クラスの enum。
 
-`fan.timeout` used to exist and was **removed in 0.29.0**, correctly: a timeout on a PURE
-computation makes its result a function of the machine, and byte-identity across native and
-wasm is the one thing the model exists to guarantee. Reintroducing it as it was would be
-undoing the decision, not improving on it.
+この形は書き手の怠慢ではない。shell にはモジュールも型検査も無いので、**複製が本当に最も
+安い選択肢**である。移植が見つけられたのは賢かったからではなく、byte-diff が
+「もっともらしい言い換え」を拒否したからである。
 
-**The line that can be drawn**: a timeout is admissible exactly where **the operation it
-bounds is already outside the byte-identity contract.**
+## タイムアウトの可容範囲（この項目が確定させた契約）
 
-| bounded thing | already nondeterministic? | timeout admissible |
+`output-parity` はサブプロセスに制限時間をかける必要があり、当時 `perl -e 'alarm …; exec …'`
+に外注していた。`fan.timeout` は 0.29.0 で撤去されている — **純粋な計算**に制限時間をかけると
+結果が機械の関数になり、native ⇄ wasm のバイト一致が壊れるからである。
+
+引ける線はこうだった。**制限時間が許されるのは、それが囲む操作が既にバイト一致契約の外に
+ある場合に限る。**
+
+| 囲む対象 | 既に非決定的か | 制限時間 |
 |---|---|---|
-| `process.exec_status` (spawns a process) | yes | **yes** |
-| `http.get` (network) | yes | **yes** |
-| reading a pipe / a socket | yes | **yes** |
-| a pure `fan` sibling | **no** | **no — this is what 0.29.0 removed** |
+| `process.exec_status`（プロセスを起動する） | yes | **可** |
+| `http.get`（ネットワーク） | yes | **可** |
+| パイプ / ソケットの読み取り | yes | **可** |
+| 純粋な `fan` の兄弟 | **no** | **不可 — 0.29.0 が撤去したのはこれ** |
 
-Bounding a subprocess adds no nondeterminism that spawning it did not already add. Bounding
-`fib(35)` invents some.
+契約は二つに分けて述べられる:
 
-And the contract can be stated precisely rather than waved at, in two halves:
+> **バイト一致を保証する**: 制限時間が発火した場合、両ターゲットは同じエラー値、同じ
+> メッセージ、同じ終了経路を出す。
+> **保証しない**: 発火するかどうか。それはホストの関数である。
 
-> **Guaranteed byte-identical**: IF the timeout fires, both targets produce the same error
-> value, the same message, and the same exit path.
-> **NOT guaranteed**: whether it fires. That is a function of the host.
+[#1040](https://github.com/almide/almide/issues/1040) で **着地済み** —
+`process.exec_status_timeout` として効果表面にのみ入った。`fan.timeout` は撤去されたまま。
 
-A fixture can pin the first half by making the second half not a coin flip — a 5-second sleep
-against a 100ms bound fires on any plausible machine. That is exactly how C-200's fan-sibling
-trap fixture already works (a 1.5s sleeping sibling, both targets aborting in ~0s).
+## 解けた障害
 
-So the shape is a bound on the **effect surface**, not a general combinator:
-`process.exec_status(cmd, args, timeout_ms)` and its siblings — never `fan.timeout(thunk, ms)`.
+旧版が「the two primitives that block the rest」として挙げた 2 件は、**両方とも closed**。
 
-Tracked as [#1040](https://github.com/almide/almide/issues/1040).
+- [#1040](https://github.com/almide/almide/issues/1040) — 上記のタイムアウト。着地済み。
+- [#1041](https://github.com/almide/almide/issues/1041) — `list.map` の callback が純粋で、
+  effect を含むパイプラインが `var` + `for` に落ちる問題。解決済み（ADR-0006、callback 内の
+  `!` が fallible 形を instantiate する）。
 
-### 2. Effectful list combinators
+ただし `tools/almide-gates/` には `var` + `for` が 13 箇所残っている
+（`parity_sweep.almd:71-79` ほか）。これは #1041 以前に書かれたコードであって、言語の制約
+ではない。書き換えは摩擦の実測と合わせて進める。
 
-`list.map`'s callback is PURE, so `list.map(files, (f) => read_text(f))` types the element as
-`Result[T, E]` and every downstream stage has to unwrap it. The dogfood's own code works around
-this with `var` + `for` — the exact pattern
-[CLAUDE.md](../../../CLAUDE.md#prefer-list-combinators-over-var--for) tells contributors not to
-write. A tool whose own idiom guide it violates is evidence the surface is missing something,
-not evidence the author was lazy.
+## 既知の摩擦（Almide 側でゲートを書くときのコスト）
 
-Tracked as [#1041](https://github.com/almide/almide/issues/1041).
+線を引いた以上、Almide 側にゲートが増える。実測された摩擦を記録しておく。
 
-## Two more frictions, named but not blocking
+- **新規ゲート 1 本で 5〜6 箇所**（bash は 3）。うち一つが**全ゲート共用の 245 行
+  `main.almd`** — import の追加、`cmd` の match アーム追加、root デフォルトの match アーム追加。
+- **罠**: ゲート型（終了コードを返す）のコマンドは、`main.almd` 末尾のジェネレータ向け
+  `println` を避けるため、アームの中で `process.exit` しなければならない。知らないと踏む。
+- **雛形が無い**（bash 側にも無い）。
+- **CI で Almide のゲートを動かすと Rust toolchain が要る**。bash は何も要らない。
+- `list.sort_by` は比較器ではなくキー抽出器を取り、`string.compare` が無いので降順は
+  「昇順にして reverse」になる（`main.almd:70` に記録あり）。
 
-- **No lazy pipeline composition.** `exec_with_stdin` exists; `A | B` streaming does not, so a
-  large intermediate output is held in memory. No gate has needed it yet.
-- **Startup + compile latency.** 13.3ms process startup, 0.37s warm build, 0.93s cold. **This
-  is shell's real moat** and this item does not claim to cross it: nobody pays 0.4s for a
-  throwaway three-liner. It is also why the goal is scoped to COMMITTED shell — a file worth
-  committing is a file worth 0.4 seconds.
+これらは**想像で先に直さない**。次に書く 1 本（`roadmap-readme` の diff）で実際に踏み、
+踏んだ順に直す。
 
 ## Done-criteria
 
-- `git ls-files '*.sh'` returns **zero**, or every remaining entry carries a written reason.
-- A gate fails CI when the count goes up.
-- Each replacement is byte-identical to the script it replaces, or — where there is no stable
-  output to diff — carries a mutation suite, as `check-contracts` does.
-- #1040 and #1041 are closed or explicitly deferred with the numbers that justify it.
+- `proofs/gate-verification.toml` に分類フィールドがあり、構造化と宣言されたゲートが
+  bash で書かれていたら CI が落ちる。`UNCLASSIFIED` の上限は縮小のみ。
+- 台帳の列挙が `tools/almide-gates/` のサブコマンドを含む。
+- 7 本の twin それぞれについて「Almide 出力 == `.sh` 出力 == コミット済み生成物」の diff が
+  CI にあり、緑。
+- 緑が確認された twin から順に昇格し、対応する `.sh` が消えている。
+- 新規に追加される構造化ゲートが Almide で書かれている（台帳が強制する）。
 
 ## Risks
 
-- **R1 — porting for its own sake.** A script nobody runs is not worth a program. Absorption:
-  order by blast radius, gates first; a script with no consumer gets deleted, not ported.
-- **R2 — the Almide twin drifts from the `.sh` oracle.** Absorption: the `.sh` original stays
-  in-tree until the twin has a mutation suite, and the byte-diff runs in CI.
-- **R3 — the timeout design reopens what 0.29.0 closed.** Absorption: the admissibility rule
-  above is a CONTRACT, not a convention — `fan.timeout` stays removed, and the tombstone
-  diagnostic keeps pointing at the effect-surface form.
+- **R1 — 移植のための移植。** 誰も走らせないスクリプトはプログラムにする価値がない。
+  吸収: 線の定義が範囲を決める。grep-and-exit は対象外であって、移植しないことが正解。
+- **R2 — twin が `.sh` オラクルから乖離する。** 吸収: **diff を実装する**（旧版はこれを
+  宣言だけして実装しなかった。それが R2 が現実になった経路である）。diff が緑になるまで
+  `.sh` は消さない。
+- **R3 — タイムアウトの設計が 0.29.0 の決定を再び開く。** 吸収: 上の可容範囲の規則は
+  **契約であって慣習ではない**。`fan.timeout` は撤去されたまま、tombstone 診断が効果表面の
+  形を指し続ける。
+- **R4 — 線が判定不能になる。** 「構造化か grep か」が毎回議論になると、台帳のフィールドが
+  形骸化する。吸収: 迷ったら構造化に倒す、という既定を上に書いた。パーサを書いているなら
+  構造化である。
