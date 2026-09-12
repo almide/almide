@@ -1,6 +1,50 @@
 // `include!`d part of wasi.rs (codopsy max-lines split, mechanical text move —
 // the p1 shims; shares the parent module's imports and items).
 
+/// The defined refusal: one line on fd 2, exit 1 — never a silent stop and
+/// never a line that names a different operation (#2103's rule, applied to
+/// the shims by #2116).
+fn refuse(i: &mut wasm_encoder::InstructionSink<'_>, park: u64, msg: u64, len: usize) {
+    i.i32_const(park as i32).i32_const((park + msg) as i32).i32_store(mem(IOV));
+    i.i32_const(park as i32).i32_const(len as i32).i32_store(mem(IOV + 4));
+    i.i32_const(2);
+    i.i32_const((park + IOV) as i32);
+    i.i32_const(1);
+    i.i32_const((park + NREAD) as i32);
+    i.call(0).drop();
+    i.i32_const(1).call(1);
+    i.unreachable();
+}
+
+/// Pick where a service stages `need` bytes (#2120): the park's data page
+/// when the result fits it, else fresh pages at the TOP of memory.
+///
+/// The park is a fixed five-page span, so before this a result larger than it
+/// had nowhere to go and `env.get` answered `none` for a variable that was
+/// set. The high staging grows by TWICE the pages the result needs and takes
+/// the top `need` bytes: the guest's own allocation between this call and
+/// `host_read` starts at the bump head (at or below the old memory end) and
+/// is at most `need` bytes long, so it can never reach the staged bytes.
+fn stage_for(i: &mut wasm_encoder::InstructionSink<'_>, park: u64, need: u32, stage: u32) {
+    i.i32_const((park + DATA) as i32).local_get(need).i32_add();
+    i.i32_const((park + OVL) as i32).i32_le_u();
+    i.if_(BlockType::Empty);
+    i.i32_const((park + DATA) as i32).local_set(stage);
+    i.else_();
+    i.local_get(need).i32_const(0xFFFF).i32_add().i32_const(16).i32_shr_u();
+    i.i32_const(1).i32_shl();
+    i.memory_grow(0);
+    i.i32_const(0).i32_lt_s();
+    i.if_(BlockType::Empty);
+    refuse(i, park, MSG3, OOM_MSG.len());
+    i.end();
+    // 8-aligned: `args_get`/`environ_get` write a pointer ARRAY first, and a
+    // host that checks alignment rejects an odd base outright (measured:
+    // "Pointer not aligned to 4"). The grown span has room to round down.
+    i.memory_size(0).i32_const(16).i32_shl().local_get(need).i32_sub().i32_const(-8).i32_and().local_set(stage);
+    i.end();
+}
+
 /// `(ptr, len) -> ()`: fd_write(fd, [(ptr,len),("\n",1)]).
 fn shim_print(fd: i32, park: u64) -> Function {
     let (ptr, len) = (0u32, 1u32);
@@ -41,6 +85,7 @@ fn shim_exit() -> Function {
 fn shim_fs_call(
     park: u64,
     g_plen: u32,
+    g_ppos: u32,
     f_env_get: Option<u32>,
     f_env_set: Option<u32>,
     f_args: Option<u32>,
@@ -51,6 +96,8 @@ fn shim_fs_call(
     let deadline = 6u32;
     let mut f = Function::new([(1, ValType::I32), (1, ValType::I64)]);
     let mut i = f.instructions();
+    // Every op stages in the park unless it says otherwise (#2120).
+    i.i32_const((park + DATA) as i32).global_set(g_ppos);
 
     // ops 26/37/29: env.get / env.set / args — forwarded whole to the
     // service shim, when the op set shipped one (an absent service falls
@@ -148,26 +195,20 @@ fn shim_fs_call(
     i.end();
 
     // Everything else: the defined refusal.
-    i.i32_const(park as i32).i32_const((park + MSG) as i32).i32_store(mem(IOV));
-    i.i32_const(park as i32).i32_const(UNSUPPORTED_MSG.len() as i32).i32_store(mem(IOV + 4));
-    i.i32_const(2);
-    i.i32_const((park + IOV) as i32);
-    i.i32_const(1);
-    i.i32_const((park + NREAD) as i32);
-    i.call(0).drop();
-    i.i32_const(1).call(1); // proc_exit(1)
-    i.unreachable();
+    refuse(&mut i, park, MSG, UNSUPPORTED_MSG.len());
     i.end();
     f
 }
 
-/// `(dst) -> ()`: copy the parked bytes into guest memory.
-fn shim_host_read(park: u64, g_plen: u32) -> Function {
+/// `(dst) -> ()`: copy the staged bytes into guest memory. The source is
+/// `g_ppos` rather than a fixed address, so a service can stage a result the
+/// park cannot hold (#2120) and still answer through this one path.
+fn shim_host_read(g_plen: u32, g_ppos: u32) -> Function {
     let dst = 0u32;
     let mut f = Function::new([]);
     let mut i = f.instructions();
     i.local_get(dst);
-    i.i32_const((park + DATA) as i32);
+    i.global_get(g_ppos);
     i.global_get(g_plen);
     i.memory_copy(0, 0);
     i.end();
@@ -187,15 +228,7 @@ fn shim_env_set(park: u64, g_ovl: u32) -> Function {
     // Room check: entry must fit under the park end.
     i.local_get(at).i32_const(8).i32_add().local_get(a_len).i32_add().local_get(b_len).i32_add();
     i.i32_const((park + PARK_SPAN) as i32).i32_gt_u().if_(BlockType::Empty);
-    i.i32_const(park as i32).i32_const((park + MSG2) as i32).i32_store(mem(IOV));
-    i.i32_const(park as i32).i32_const(ENV_FULL_MSG.len() as i32).i32_store(mem(IOV + 4));
-    i.i32_const(2);
-    i.i32_const((park + IOV) as i32);
-    i.i32_const(1);
-    i.i32_const((park + NREAD) as i32);
-    i.call(0).drop();
-    i.i32_const(1).call(1);
-    i.unreachable();
+    refuse(&mut i, park, MSG2, ENV_FULL_MSG.len());
     i.end();
     i.local_get(at).local_get(a_len).i32_store(mem(0));
     i.local_get(at).local_get(b_len).i32_store(mem(4));
@@ -216,12 +249,14 @@ fn shim_env_set(park: u64, g_ovl: u32) -> Function {
 /// Found: value bytes stage at park+DATA (host_read's landing zone),
 /// answer `pack(0, len)`. Absent: `pack(2, 0)` — the ok-none tag.
 /// `i_sizes` / `i_get` are the import indices the environ pair landed on.
-fn shim_env_get(park: u64, g_plen: u32, g_ovl: u32, i_sizes: u32, i_get: u32) -> Function {
+fn shim_env_get(park: u64, g_plen: u32, g_ppos: u32, g_ovl: u32, i_sizes: u32, i_get: u32) -> Function {
     // params: 0=op 1=a_ptr 2=a_len 3=b_ptr 4=b_len
     // locals: 5=p 6=end 7=klen 8=vlen 9=best 10=j 11=s 12=count
+    //         13=stage 14=need
     let (a_ptr, a_len) = (1u32, 2u32);
     let (p, endp, klen, vlen, best, j, s, count) = (5u32, 6u32, 7u32, 8u32, 9u32, 10u32, 11u32, 12u32);
-    let mut f = Function::new([(8, ValType::I32)]);
+    let (stage, need) = (13u32, 14u32);
+    let mut f = Function::new([(10, ValType::I32)]);
     let mut i = f.instructions();
 
     // ── overlay scan, last match wins ──
@@ -248,12 +283,11 @@ fn shim_env_get(park: u64, g_plen: u32, g_ovl: u32, i_sizes: u32, i_get: u32) ->
     i.end();
     i.local_get(p).i32_const(8).i32_add().local_get(klen).i32_add().local_get(vlen).i32_add().local_set(p);
     i.br(0).end().end();
+    // A hit: the value already sits in the overlay log, so point at it in
+    // place rather than copying it into a page that may not hold it (#2120).
     i.local_get(best).i32_const(0).i32_ne().if_(BlockType::Empty);
     i.local_get(best).i32_load(mem(4)).local_set(vlen);
-    i.i32_const((park + DATA) as i32);
-    i.local_get(best).i32_const(8).i32_add().local_get(best).i32_load(mem(0)).i32_add();
-    i.local_get(vlen);
-    i.memory_copy(0, 0);
+    i.local_get(best).i32_const(8).i32_add().local_get(best).i32_load(mem(0)).i32_add().global_set(g_ppos);
     i.local_get(vlen).global_set(g_plen);
     i.local_get(vlen).i64_extend_i32_u().return_();
     i.end();
@@ -264,15 +298,13 @@ fn shim_env_get(park: u64, g_plen: u32, g_ovl: u32, i_sizes: u32, i_get: u32) ->
     i.i64_const(2).i64_const(32).i64_shl().return_();
     i.end();
     i.i32_const(park as i32).i32_load(mem(NREAD)).local_set(count);
-    // Oversized environ (ptrs + buf past the overlay page's start) → none:
-    // the staging area is DATA..OVL.
-    i.i32_const((park + DATA) as i32).local_get(count).i32_const(4).i32_mul().i32_add();
-    i.i32_const(park as i32).i32_load(mem(NREAD + 4)).i32_add();
-    i.i32_const((park + OVL) as i32).i32_gt_u().if_(BlockType::Empty);
-    i.i64_const(2).i64_const(32).i64_shl().return_();
-    i.end();
-    i.i32_const((park + DATA) as i32);
-    i.i32_const((park + DATA) as i32).local_get(count).i32_const(4).i32_mul().i32_add();
+    // ptrs + buf. An environ larger than the park's page stages above the
+    // heap instead of answering `none` for a variable that IS set (#2120).
+    i.local_get(count).i32_const(4).i32_mul();
+    i.i32_const(park as i32).i32_load(mem(NREAD + 4)).i32_add().local_set(need);
+    stage_for(&mut i, park, need, stage);
+    i.local_get(stage);
+    i.local_get(stage).local_get(count).i32_const(4).i32_mul().i32_add();
     i.call(i_get); // environ_get(ptrs, buf)
     i.if_(BlockType::Empty);
     i.i64_const(2).i64_const(32).i64_shl().return_();
@@ -281,7 +313,7 @@ fn shim_env_get(park: u64, g_plen: u32, g_ovl: u32, i_sizes: u32, i_get: u32) ->
     i.i32_const(0).local_set(p);
     i.block(BlockType::Empty).loop_(BlockType::Empty);
     i.local_get(p).local_get(count).i32_ge_u().br_if(1);
-    i.i32_const((park + DATA) as i32).local_get(p).i32_const(4).i32_mul().i32_add().i32_load(mem(0)).local_set(s);
+    i.local_get(stage).local_get(p).i32_const(4).i32_mul().i32_add().i32_load(mem(0)).local_set(s);
     // key bytes equal AND s[a_len] == '='
     i.i32_const(0).local_set(j);
     i.block(BlockType::Empty).loop_(BlockType::Empty);
@@ -294,7 +326,7 @@ fn shim_env_get(park: u64, g_plen: u32, g_ovl: u32, i_sizes: u32, i_get: u32) ->
     i.local_get(s).local_get(vlen).i32_add().i32_load8_u(mem8(0)).i32_eqz().br_if(1);
     i.local_get(vlen).i32_const(1).i32_add().local_set(vlen);
     i.br(0).end().end();
-    i.i32_const((park + DATA) as i32).local_get(s).local_get(vlen).memory_copy(0, 0);
+    i.local_get(s).global_set(g_ppos);
     i.local_get(vlen).global_set(g_plen);
     i.local_get(vlen).i64_extend_i32_u().return_();
     i.end();
@@ -316,11 +348,12 @@ fn shim_env_get(park: u64, g_plen: u32, g_ovl: u32, i_sizes: u32, i_get: u32) ->
 /// contract), re-framed as `[len u32][bytes]` per entry — the almide
 /// frames encoding — staged at park+DATA. Answer `pack(0, total)`.
 /// `i_sizes` / `i_get` are the import indices the args pair landed on.
-fn shim_args(park: u64, g_plen: u32, i_sizes: u32, i_get: u32) -> Function {
+fn shim_args(park: u64, g_plen: u32, g_ppos: u32, i_sizes: u32, i_get: u32) -> Function {
     // params 0..4 unused beyond the ABI; locals: 5=argc 6=i 7=s 8=n 9=out
-    // 10=frames_base
+    // 10=frames_base 11=stage 12=need
     let (argc, idx, s, n, out, frames_base) = (5u32, 6u32, 7u32, 8u32, 9u32, 10u32);
-    let mut f = Function::new([(6, ValType::I32)]);
+    let (stage, need) = (11u32, 12u32);
+    let mut f = Function::new([(8, ValType::I32)]);
     let mut i = f.instructions();
     i.i32_const((park + NREAD) as i32).i32_const((park + NREAD + 4) as i32).call(i_sizes); // args_sizes_get
     i.if_(BlockType::Empty);
@@ -328,30 +361,28 @@ fn shim_args(park: u64, g_plen: u32, i_sizes: u32, i_get: u32) -> Function {
     i.i64_const(0).return_();
     i.end();
     i.i32_const(park as i32).i32_load(mem(NREAD)).local_set(argc);
-    // Staging: raw ptrs+buf at DATA, frames rebuilt behind them. The raw
-    // area is argc*4 + bufsize; frames need at most bufsize + 4*argc more.
-    // Both must sit under the overlay page.
-    i.i32_const((park + DATA) as i32).local_get(argc).i32_const(8).i32_mul().i32_add();
-    i.i32_const(park as i32).i32_load(mem(NREAD + 4)).i32_const(2).i32_mul().i32_add();
-    i.i32_const((park + OVL) as i32).i32_gt_u().if_(BlockType::Empty);
-    i.i32_const(0).global_set(g_plen);
-    i.i64_const(0).return_();
-    i.end();
-    i.i32_const((park + DATA) as i32);
-    i.i32_const((park + DATA) as i32).local_get(argc).i32_const(4).i32_mul().i32_add();
+    // Staging: raw ptrs+buf first, frames rebuilt behind them. The raw area
+    // is argc*4 + bufsize; frames need at most bufsize + 4*argc more. An argv
+    // past the park's page stages above the heap instead of answering the
+    // empty list for a process that WAS given arguments (#2120).
+    i.local_get(argc).i32_const(8).i32_mul();
+    i.i32_const(park as i32).i32_load(mem(NREAD + 4)).i32_const(2).i32_mul().i32_add().local_set(need);
+    stage_for(&mut i, park, need, stage);
+    i.local_get(stage);
+    i.local_get(stage).local_get(argc).i32_const(4).i32_mul().i32_add();
     i.call(i_get); // args_get(ptrs, buf)
     i.if_(BlockType::Empty);
     i.i32_const(0).global_set(g_plen);
     i.i64_const(0).return_();
     i.end();
-    // Build frames after the raw area: out = DATA + argc*4 + bufsize.
-    i.i32_const((park + DATA) as i32).local_get(argc).i32_const(4).i32_mul().i32_add();
+    // Build frames after the raw area: out = stage + argc*4 + bufsize.
+    i.local_get(stage).local_get(argc).i32_const(4).i32_mul().i32_add();
     i.i32_const(park as i32).i32_load(mem(NREAD + 4)).i32_add();
     i.local_tee(out).local_set(frames_base);
     i.i32_const(0).local_set(idx);
     i.block(BlockType::Empty).loop_(BlockType::Empty);
     i.local_get(idx).local_get(argc).i32_ge_u().br_if(1);
-    i.i32_const((park + DATA) as i32).local_get(idx).i32_const(4).i32_mul().i32_add().i32_load(mem(0)).local_set(s);
+    i.local_get(stage).local_get(idx).i32_const(4).i32_mul().i32_add().i32_load(mem(0)).local_set(s);
     // n = strlen(s)
     i.i32_const(0).local_set(n);
     i.block(BlockType::Empty).loop_(BlockType::Empty);
@@ -363,9 +394,10 @@ fn shim_args(park: u64, g_plen: u32, i_sizes: u32, i_get: u32) -> Function {
     i.local_get(out).i32_const(4).i32_add().local_get(n).i32_add().local_set(out);
     i.local_get(idx).i32_const(1).i32_add().local_set(idx);
     i.br(0).end().end();
-    // Slide the frames down to DATA (memmove semantics) and answer.
+    // Answer where the frames already are — the slide down to DATA the park
+    // used to require is a copy of the whole payload for nothing (#2120).
     i.local_get(out).local_get(frames_base).i32_sub().local_set(n); // total
-    i.i32_const((park + DATA) as i32).local_get(frames_base).local_get(n).memory_copy(0, 0);
+    i.local_get(frames_base).global_set(g_ppos);
     i.local_get(n).global_set(g_plen);
     i.local_get(n).i64_extend_i32_u().return_();
     i.unreachable();
