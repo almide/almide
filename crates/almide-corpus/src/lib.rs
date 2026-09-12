@@ -83,6 +83,32 @@ pub fn walk_spec(root: &Path) -> Vec<(String, PathBuf)> {
     out
 }
 
+/// Fixtures whose ORACLE row in the run manifest predates a fix that postdates
+/// the port SHA — `scripts/lib/run-oracle-stale.txt`, as `path -> reason`.
+///
+/// The row STAYS in the manifest, because the manifest is also the corpus list
+/// for the exercised-surface, allocation, size and witness sweeps: subtracting
+/// a row removes the fixture from all of them, which is how excluding the two
+/// regex fixtures took `regex.*` off the wasm leg's exercised surface entirely
+/// (#2129). Only the comparisons AGAINST the oracle hash skip these rows —
+/// run-parity, backend-parity and the WASI gate — and they read the register
+/// through this one function so a fourth comparison cannot quietly forget it.
+///
+/// Shrink-only: a registration that starts agreeing with the oracle again must
+/// be deleted, and each caller fails if one does.
+pub fn stale_oracle_rows(root: &Path) -> std::collections::BTreeMap<String, String> {
+    let path = root.join("scripts/lib/run-oracle-stale.txt");
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+        .lines()
+        .filter(|l| !l.trim_start().starts_with('#') && !l.trim().is_empty())
+        .map(|l| {
+            let (p, why) = l.split_once('\t').expect("path<TAB>reason");
+            (p.to_string(), why.to_string())
+        })
+        .collect()
+}
+
 fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
     for entry in std::fs::read_dir(dir).expect("readable directory") {
         let p = entry.expect("directory entry").path();
