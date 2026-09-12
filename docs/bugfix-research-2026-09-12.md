@@ -307,6 +307,18 @@ address, which is the indirection the p2 shim already carries. Three consequence
 - A grow the machine refuses takes C-197's form (`Error: out of memory`, exit 1)
   rather than a wrong answer.
 
+The cohort answers the same question the other way round. Zig
+(`../almide-references/zig` @ `e4cbd752c8c0`, `lib/std/process.zig`, the WASI
+arm of `getEnvMap`) calls `environ_sizes_get`, then allocates BOTH the pointer
+array and the buffer from the caller's allocator and frees them on the way out;
+wasi-libc does the same with `malloc`. The destination is guest memory in every
+case — what differs is who owns it. A shim cannot take that route: a block it
+allocated would outlive the call with nobody left to free it, since the guest's
+`host_read` runs after `fs_call` has returned. Growing memory and staging above
+the frontier is the same answer with the ownership left where the shim can
+honour it — the bytes are transient by construction, and the bump allocator
+reuses the pages afterwards.
+
 `tests/env_staging_capacity_test.rs` pins native against stock WASI at 16,
 260,000 (inside the old page), 262,000 (just past its cliff) and 900,000 bytes,
 for both services, plus argument order and framing for three small arguments.
