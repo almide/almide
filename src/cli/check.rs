@@ -138,6 +138,30 @@ fn report_timings(r: &almide_base::profile::PhaseReport, total_secs: f64) {
 }
 
 pub fn cmd_check(file: &str, deny_warnings: bool, timings: bool, stamp: bool, critical: Option<&[String]>, wasm_target: bool) {
+    check_one(file, deny_warnings, timings, stamp, critical, wasm_target);
+    err(&format!("No errors found"));
+}
+
+/// `almide check` with no file inside a package (#2165): every `.almd` under
+/// `src/` is an entry the package owns, so every one is judged. Before this,
+/// the bare form checked `src/mod.almd` alone and still printed
+/// `No errors found` while `src/main.almd` in the same package did not
+/// type-check — a green that meant nothing. Each file names itself on its
+/// own line so the verdict says what it covered; the summary keeps the
+/// `No errors found` wording so existing readers of that line still match.
+///
+/// A failure in any file exits through the same path a single-file check
+/// does, after printing its diagnostics — the files before it have already
+/// reported `ok`, so the reader sees how far the check got.
+pub fn cmd_check_package(files: &[String], deny_warnings: bool, timings: bool, stamp: bool, critical: Option<&[String]>, wasm_target: bool) {
+    for file in files {
+        check_one(file, deny_warnings, timings, stamp, critical, wasm_target);
+        err(&format!("{file}: ok"));
+    }
+    err(&format!("Checked {} files — No errors found", files.len()));
+}
+
+fn check_one(file: &str, deny_warnings: bool, timings: bool, stamp: bool, critical: Option<&[String]>, wasm_target: bool) {
     // Arm the accounting BEFORE the first source is read; a phase counter that
     // starts mid-pipeline reports a front end with no lexer.
     if timings {
@@ -204,8 +228,6 @@ pub fn cmd_check(file: &str, deny_warnings: bool, timings: bool, stamp: bool, cr
     if stamp {
         write_dialect_stamp(file, &source_text);
     }
-
-    err(&format!("No errors found"));
 }
 
 /// `--stamp`: advance the file's dialect stamp after a clean check.

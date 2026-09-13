@@ -214,7 +214,7 @@ test "render" {
 型チェックのみ実行。バイナリ生成なし。CI やエディタ統合用。
 
 ```bash
-almide check                            # src/main.almd をチェック
+almide check                            # パッケージ内: src/ 配下の .almd を全部チェック (#2165)
 almide check app.almd                   # 指定ファイルをチェック
 almide check --deny-warnings            # 警告をエラーとして扱う
 almide check --json                     # 診断を JSON で出力
