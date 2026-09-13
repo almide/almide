@@ -38,6 +38,8 @@
 //! `almide-mir`, which is the only placement that introduces no cycle and no layering
 //! inversion.
 
+pub mod test_runner;
+
 use almide_ir::IrProgram;
 
 /// Run the post-typecheck stage order on an already-lowered `IrProgram`.
