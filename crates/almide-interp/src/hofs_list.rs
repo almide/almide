@@ -278,14 +278,18 @@ impl<'a> Interpreter<'a> {
         // keys, ties preserved in input order (probe /tmp/sorti.almd).
         //
         // Key ordering: native `B: Ord` means the only key types a *compilable*
-        // program can use are Ord types — Int, String, Bool (and Ord-composites).
-        // A Float key is a hard compile error in BOTH backends (`f64: !Ord`,
-        // verified: the type checker rejects `sort_by(xs, (x: Float) => x)` with
-        // an `Ord` bound failure), so a Float-key sort_by never reaches a runnable
-        // program and therefore never reaches this interpreter on the 3-way
-        // oracle. `Value::partial_cmp_val` still orders floats sensibly (and falls
-        // back to "Equal → no swap", preserving stability) so a defensive path
-        // never panics, but it casts no third vote a backend could disagree with.
+        // program can use are Ord types — the scalars, and every composite built
+        // from them: tuples, nested lists, Options (#2154), and records and
+        // variants that DECLARE the derive (#2167). `TotalOrder` covers that
+        // whole domain, in the KEY position and the ELEMENT position alike;
+        // restating it here in a shorter list is the defect both of those issues
+        // were. A Float key is a hard compile error in BOTH backends (`f64:
+        // !Ord`, verified: the type checker rejects `sort_by(xs, (x: Float) =>
+        // x)` with an `Ord` bound failure), so a Float-key sort_by never reaches
+        // a runnable program and therefore never reaches this interpreter on the
+        // 3-way oracle. The `Equal` fallback below is therefore unreachable for
+        // anything the checker admits; it keeps a defensive path from panicking
+        // and, being `Equal`, leaves the stable sort's input order alone.
         let items = match Self::recv_items(args) {
             Ok(i) => i,
             Err(f) => return f,
@@ -308,8 +312,9 @@ impl<'a> Interpreter<'a> {
         // IEEE-754 totalOrder so a Float key now sorts byte-identically to the
         // native `_float` variant and the wasm bit-trick — C-055). Genuinely
         // incomparable keys collapse to `Equal` (stable → input order).
+        let order = crate::value::TotalOrder::new(&self.variant_tags);
         keyed.sort_by(|(ka, _), (kb, _)| {
-            ka.total_cmp_val(kb).unwrap_or(std::cmp::Ordering::Equal)
+            order.cmp(ka, kb).unwrap_or(std::cmp::Ordering::Equal)
         });
         Flow::val(Value::list(keyed.into_iter().map(|(_, item)| item).collect()))
     }
