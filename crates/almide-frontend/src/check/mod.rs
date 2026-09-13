@@ -89,6 +89,17 @@ pub struct Checker {
     /// CLI boundary. Empty = deny-all.
     pub critical_allow: Vec<String>,
     pub(crate) current_span: Option<crate::ast::Span>,
+    /// #2097: the source span of each `let` binding's value, by name, so an
+    /// E005 on a bare identifier can look at the call that produced it.
+    /// Overwritten on shadowing; the sibling hint re-derives the origin's
+    /// return type from the text and refuses when it does not match what
+    /// the checker saw, so a stale span cannot teach a wrong rename.
+    pub(crate) let_value_spans: std::collections::HashMap<almide_base::intern::Sym, crate::ast::Span>,
+    /// #2097: a postfix `!` / `?` node's span covers only the operator
+    /// character, so the argument text under an E005 caret is `!`. This
+    /// maps that span to the operand's span (the full call text), keyed by
+    /// (line, col, end_col). Recorded where the postfix is inferred.
+    pub(crate) postfix_inner_spans: std::collections::HashMap<(usize, usize, usize), crate::ast::Span>,
     /// Span of the current call's callee expression (the identifier
     /// / member reference). Set by `check_named_call_spanned` so E002
     /// can emit a `try_replace` range pointing exactly at the name
@@ -506,6 +517,8 @@ impl Checker {
             profile_critical: false,
             critical_allow: Vec::new(),
             current_span: None,
+            let_value_spans: std::collections::HashMap::new(),
+            postfix_inner_spans: std::collections::HashMap::new(),
             callee_span_hint: None,
             call_span_hint: None,
             last_mut_params: Vec::new(),

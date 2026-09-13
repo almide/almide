@@ -186,7 +186,13 @@ impl Checker {
             None
         };
         let tys = MismatchTys { expected, arg: arg_ty, expected_resolved, arg_resolved };
-        let hint = self.call_arg_mismatch_hint(fn_name, tys, float_sibling);
+        // #2097: the value came straight from a stdlib call whose module holds
+        // a same-stem sibling returning exactly the expected type — name it.
+        let stdlib_sibling = if float_sibling.is_none() { self.stdlib_sibling_rewrite(tys) } else { None };
+        let hint = match &stdlib_sibling {
+            Some((hint, _)) => hint.clone(),
+            None => self.call_arg_mismatch_hint(fn_name, tys, float_sibling),
+        };
         // #1108 Phase 2b: a FALLIBLE callback into a plain fn-typed slot —
         // the one shape the bit does not yet flow through (2b-iii). Name the
         // two working spellings instead of the generic "fix the type".
@@ -212,7 +218,9 @@ impl Checker {
         if let Some(&(line, col)) = self.env.fn_decl_spans.get(&sym(fn_name)) {
             diag = diag.with_secondary(line, Some(col), format!("fn {}() defined here", fn_name));
         }
-        // Show fix code: replace argument with conversion expression. Suppressed for the math-Float-sibling case (#740): the fix is to change the function, not to wrap the arg in a truncating cast.
+        if let Some((_, fixed)) = &stdlib_sibling {
+            diag = diag.with_try(format!("// Try:\n{}", fixed));
+        } else // Show fix code: replace argument with conversion expression. Suppressed for the math-Float-sibling case (#740): the fix is to change the function, not to wrap the arg in a truncating cast.
         if float_sibling.is_none() {
             if let Some(span) = self.current_span {
                 if let Some((_, template)) = Self::conversion_template(expected, arg_ty) {
@@ -225,6 +233,107 @@ impl Checker {
         }
         self.emit(diag);
     }
+    /// #2097: the mismatched argument is a DIRECT stdlib call (optionally
+    /// `!`-unwrapped), and that call's module has a same-stem sibling whose
+    /// return type — seen through the same unwrap — is the expected type.
+    /// `fs.read_bytes` returns `List[Int]`, `fs.read_bytes_raw` returns
+    /// `Bytes`, four lines apart; nothing in the first name suggests the
+    /// second exists, and "Fix the argument type" was the only hint.
+    ///
+    /// Returns the hint and the argument text with the callee renamed. A
+    /// lookup, not a guess: the sibling must share the stem (`read_bytes` /
+    /// `read_bytes_raw`), take the same number of arguments, and return the
+    /// expected type exactly. Anything else keeps today's wording.
+    fn stdlib_sibling_rewrite(&self, tys: MismatchTys<'_>) -> Option<(String, String)> {
+        let is_ident = |s: &str| {
+            !s.is_empty()
+                && s.chars().next().map_or(false, |c| c.is_ascii_alphabetic() || c == '_')
+                && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        };
+        // A postfix node's span is the operator alone; `!` means the payload
+        // was handed on. `?` is `narrowed_try_hint`'s case — leave it.
+        let through_postfix = |span: crate::ast::Span| -> Option<(String, bool)> {
+            let text = self.source_slice(span)?;
+            match text.trim() {
+                "!" => {
+                    let inner = *self.postfix_inner_spans.get(&(span.line, span.col, span.end_col))?;
+                    Some((self.source_slice(inner)?, true))
+                }
+                "?" => None,
+                t => Some((t.to_string(), false)),
+            }
+        };
+        let arg_span = self.current_span?;
+        let (arg_text, arg_unwrapped) = through_postfix(arg_span)?;
+        // A bare name: follow it to the `let` that bound it, and rewrite there.
+        let (call_text, unwrapped, bound_name) = if is_ident(arg_text.trim()) {
+            let name = arg_text.trim().to_string();
+            let span = *self.let_value_spans.get(&sym(&name))?;
+            let (text, unwrapped) = through_postfix(span)?;
+            (text, unwrapped, Some(name))
+        } else {
+            (arg_text, arg_unwrapped, None)
+        };
+        let call = call_text.trim();
+        let (head, rest) = call.split_once('(')?;
+        if !rest.ends_with(')') {
+            return None;
+        }
+        let (module, func) = head.split_once('.')?;
+        if !is_ident(module) || !is_ident(func) {
+            return None;
+        }
+        let origin = crate::stdlib::lookup_sig(module, func)?;
+        // Seen through the argument's own unwrap: `call()!` hands the payload on.
+        let through = |ret: &Ty| -> Option<Ty> {
+            if unwrapped { ret.result_ok_ty().or_else(|| ret.option_inner()) } else { Some(ret.clone()) }
+        };
+        // The origin must actually produce what the checker saw — otherwise
+        // the text under the caret is not the call we think it is.
+        let origin_view = self.env.resolve_named(&through(&origin.ret)?);
+        if types_mismatch(&origin_view, tys.arg_resolved) {
+            return None;
+        }
+        let same_stem = |a: &str, b: &str| {
+            a.starts_with(b) && a[b.len()..].starts_with('_')
+                || b.starts_with(a) && b[a.len()..].starts_with('_')
+        };
+        let mut siblings = crate::stdlib::module_functions(module);
+        siblings.sort_unstable();
+        for name in siblings {
+            if name == func || !same_stem(name, func) {
+                continue;
+            }
+            let Some(sig) = crate::stdlib::lookup_sig(module, name) else { continue };
+            if sig.params.len() != origin.params.len() {
+                continue;
+            }
+            let Some(view) = through(&sig.ret) else { continue };
+            if types_mismatch(tys.expected_resolved, &self.env.resolve_named(&view)) {
+                continue;
+            }
+            let renamed = format!("{module}.{name}({rest}{}", if unwrapped { "!" } else { "" });
+            let (hint, fixed) = match &bound_name {
+                Some(b) => (
+                    format!(
+                        "`{b}` came from `{module}.{func}`, which returns {} — `{module}.{name}` returns {}, which is what this argument expects",
+                        origin.ret.display(), sig.ret.display()
+                    ),
+                    format!("let {b} = {renamed}"),
+                ),
+                None => (
+                    format!(
+                        "`{module}.{func}` returns {} — `{module}.{name}` returns {}, which is what this argument expects",
+                        origin.ret.display(), sig.ret.display()
+                    ),
+                    renamed,
+                ),
+            };
+            return Some((hint, fixed));
+        }
+        None
+    }
+
     // Whether the argument expression currently under the E005 caret is a
     // `?` postfix. The checker unifies on types, not AST nodes, so the arg
     // expression itself is out of reach here — but `current_span` covers

@@ -131,6 +131,9 @@ impl Checker {
         if let Some(s) = span {
             self.env.var_decl_locs.insert(sym(name), (s.line, s.col));
         }
+        if let Some(vs) = value.span {
+            self.let_value_spans.insert(sym(name), vs);
+        }
         self.check_collection_element_types(&final_ty);
         self.env.define_var(name, final_ty);
     }
