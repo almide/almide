@@ -87,14 +87,15 @@ An MCP client (Claude Code, …) gets the same answers as tool calls via
 
 ### Prefer match over if-chains
 
-```almide
+```almide check
 // ✗
-if kind == "int" then "i64"
-else if kind == "float" then "f64"
-else "unknown"
+fn rust_type_chain(kind: String) -> String =
+  if kind == "int" then "i64"
+  else if kind == "float" then "f64"
+  else "unknown"
 
 // ✓
-match kind {
+fn rust_type(kind: String) -> String = match kind {
   "int"   => "i64",
   "float" => "f64",
   _       => "unknown",
@@ -103,19 +104,26 @@ match kind {
 
 ### Prefer list combinators over `var + for`
 
-```almide
+```almide check
+fn transform(item: String) -> String = string.to_upper(item)
+
 // ✗
-var result: List[String] = []
-for item in items { result = result + [transform(item)] }
-result
+fn shout_loop(items: List[String]) -> List[String] = {
+  var result: List[String] = []
+  for item in items { result = result + [transform(item)] }
+  result
+}
 
 // ✓
-items |> list.map(transform)
+fn shout(items: List[String]) -> List[String] = items |> list.map(transform)
 ```
 
 ### Recursion for stateful loops (no head :: tail)
 
-```almide
+```almide check
+fn peek(s: String, p: Int) -> String = string.slice(s, p, p + 1)
+fn is_ws(c: String) -> Bool = c == " " or c == "\t"
+
 fn skip_ws(s: String, p: Int) -> Int =
   if p < string.len(s) and is_ws(peek(s, p)) then skip_ws(s, p + 1)
   else p
@@ -123,20 +131,22 @@ fn skip_ws(s: String, p: Int) -> Int =
 
 For head/tail on lists, use `list.first` / `list.drop(xs, 1)`:
 
-```almide
-match xs {
-  [] => base,
+```almide check
+fn sum(xs: List[Int]) -> Int = match xs {
+  [] => 0,
   _  => {
-    let h = list.first(xs)!
+    let h = list.first(xs) ?? 0
     let t = list.drop(xs, 1)
-    // ...
+    h + sum(t)
   },
 }
 ```
 
 ### Effect fn with `guard else err(...)`
 
-```almide
+```almide check
+import fs
+
 effect fn open_file(path: String) -> Result[String, String] = {
   guard fs.is_file(path) else err("not a file: ${path}")
   fs.read_text(path)!
@@ -145,10 +155,14 @@ effect fn open_file(path: String) -> Result[String, String] = {
 
 ### `??` / `?` / `!`
 
-```almide
-option.get(v, key) ?? default        // Option fallback
-result.get(v, key)?                  // Result → Option (inside a fn returning Option)
-parse_int(s)!                        // unwrap a Result, propagate err (effect fn only)
+```almide check
+fn port(v: Value) -> Int =
+  result.to_option(value.as_int(value.field(v, "port") ?? value.null())) ?? 8080   // Option fallback
+
+fn host(v: Value) -> Option[String] =
+  value.as_string(value.field(v, "host") ?? value.null())?                          // Result → Option (inside a fn returning Option)
+
+effect fn parse_port(s: String) -> Result[Int, String] = ok(int.parse(s)!)          // unwrap a Result, propagate err (effect fn only)
 ```
 
 ### Which error type — a layer, not a taste call
@@ -161,15 +175,22 @@ AND the domain is closed — a module or package that takes care of that error
 itself. Leaving that domain, demote to String; the demotion is always spelled
 as a `map_err`, because there is no conversion hook to hide it.
 
-```almide
+```almide check
+import fs
+
 // erasure (default) — add context, never replace silently
-fs.read_text(p) |> result.map_err((e) => "loading config: ${e}")!
+effect fn read_config(p: String) -> Result[String, String] =
+  fs.read_text(p) |> result.map_err((e) => "loading config: ${e}")
 
 // refinement — inside the module that handles these kinds
 type LoadError = | NotFound(String) | BadValue(String)
 
+fn load(p: String) -> Result[String, LoadError] =
+  if p == "" then err(NotFound(p)) else ok(p)
+
 // demotion at the boundary — visible, never implicit
-load(p) |> result.map_err((e) => "${e}")
+fn load_at_boundary(p: String) -> Result[String, String] =
+  load(p) |> result.map_err((e) => "${e}")
 ```
 
 Do not branch on message TEXT (`string.contains(e, …)`, `e == "..."`) — E035.
@@ -187,9 +208,12 @@ Equality (`==` / `!=`) works on any type.
 
 `int.sqrt` does not exist. Convert, sqrt, optionally convert back:
 
-```almide
-let root_f = float.sqrt(int.to_float(n))
-let root_i = float.to_int(root_f)    // truncating
+```almide check
+fn isqrt(n: Int) -> Int = {
+  let root_f = float.sqrt(int.to_float(n))
+  let root_i = float.to_int(root_f)    // truncating
+  root_i
+}
 ```
 
 `int.abs`, `float.abs` do exist.

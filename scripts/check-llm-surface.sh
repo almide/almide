@@ -50,6 +50,15 @@ for f in "${FILES[@]}"; do
     /^```/              { on=0; next }
     on                  { print > (out "." n ".almd") }
   ' "$f"
+  # #2144: the gate reports the size of its own hole. Every ```almide fence
+  # is a promise; only the ```almide check ones are verified. Printing
+  # checked/total per file makes "the arc moved in one file only" something
+  # the gate says every run instead of something someone has to count.
+  labeled=$(grep -cE '^```almide check[ \t]*$' "$f" || true)
+  plain=$(grep -cE '^```almide[ \t]*$' "$f" || true)
+  all=$((labeled + plain))
+  pct=0; [ "$all" -gt 0 ] && pct=$((labeled * 100 / all))
+  echo "llm-surface: $base checked $labeled/$all fence(s) (${pct}%), $plain plain"
   for snip in "$TMP/$base".*.almd; do
     [ -e "$snip" ] || continue
     total=$((total + 1))
