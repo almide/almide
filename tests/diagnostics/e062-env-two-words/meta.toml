@@ -1,0 +1,3 @@
+expects_code = "E062"
+expects_error = "does not run on Linux"
+hint_substring = "Use `-S` to split portably"
