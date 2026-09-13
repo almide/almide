@@ -335,15 +335,29 @@ fn check_needs_ownership_call_self_recursive(target: &CallTarget, args: &[IrExpr
 /// skip ownership when the arg is Bytes AND the callee borrows that slot.
 /// Same `bool` return convention as the other branches.
 fn check_needs_ownership_call_user_named(target: &CallTarget, args: &[IrExpr], var: VarId, needs: &mut bool) -> bool {
-    let CallTarget::Named { name } = target else { return false; };
-    let Some(borrows) = lookup_user_borrows(name.as_str()) else {
+    // #2164: a call into a sibling user module (`other.get_far(ts, i)`) is a
+    // user callee too. Its borrow signature sits in the snapshot under
+    // `module::func` — the key `check_needs_refmut_call` already reads — but
+    // this branch only accepted `Named`, so the Module target fell through
+    // to the pessimistic fallback: a one-line wrapper forwarding a list to
+    // another module took it BY VALUE, and every call cloned the list.
+    // A read-only accessor called once per element went quadratic over one
+    // linear pass (3.6 s for 10 000 tokens; the same wrapper into the same
+    // file, borrowed, 0.00 s). Bundled stdlib modules never reach here —
+    // `check_needs_ownership_call_bundled_module` answers them first.
+    let name: String = match target {
+        CallTarget::Named { name } => name.to_string(),
+        CallTarget::Module { module, func, .. } => format!("{}::{}", module, func),
+        _ => return false,
+    };
+    let Some(borrows) = lookup_user_borrows(&name) else {
         // A user fn this pass analyses whose signature is not in the
         // snapshot yet: a forward reference or a mutual-recursion partner
         // (#2040). Optimistic, exactly like the self-recursive branch — the
         // next round sees its real signature and promotes this param to Own
         // if the callee consumes the slot. An unknown NON-user name keeps
         // the pessimistic fallback.
-        if crate::pass_borrow_inference::is_pending_user_fn(name.as_str()) {
+        if crate::pass_borrow_inference::is_pending_user_fn(&name) {
             for arg in args { check_needs_ownership(arg, var, needs); }
             return true;
         }
