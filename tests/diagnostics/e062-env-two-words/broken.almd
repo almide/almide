@@ -1,0 +1,3 @@
+#!/usr/bin/env almide run
+
+fn main() -> Unit = println("ok")

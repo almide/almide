@@ -50,7 +50,10 @@ pub fn split_string_warning(file: &str, source: &str) -> Option<Diagnostic> {
         )
         .with_code("E062")
         .with_here(first)
-        .with_try(fixed)
+        // Inserting `-S` is a pure re-spelling of the same command line —
+        // `almide fix` may apply it unattended. Columns are 1-indexed
+        // characters, end exclusive: the whole of line 1.
+        .with_machine_fix(1, 1, first.chars().count() + 1, fixed)
         .at(file, 1),
     )
 }
@@ -79,6 +82,8 @@ mod tests {
         assert_eq!(d.code, Some("E062"));
         assert_eq!(d.line, Some(1));
         assert_eq!(d.try_snippet.as_deref(), Some("#!/usr/bin/env -S almide run"));
+        assert_eq!(d.try_replace_span, Some((1, 1, 26)), "the fix replaces the whole of line 1");
+        assert!(d.try_applicability.is_machine_applicable(), "inserting -S is a pure re-spelling");
         assert!(d.hint.contains("`almide run`"), "hint names what Linux looks for: {}", d.hint);
     }
 

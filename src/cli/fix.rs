@@ -276,7 +276,13 @@ fn collect_diagnostics(file: &str, source: &str) -> (Vec<Diagnostic>, usize) {
     let mut checker = Checker::from_env(canon.env);
     checker.set_source(file, source);
     checker.diagnostics = canon.diagnostics;
-    (checker.infer_program(&mut prog), 0)
+    let mut diagnostics = checker.infer_program(&mut prog);
+    // E062 (#2159) is decided from the text of line 1, outside the checker;
+    // its `-S` insertion is machine-applicable, so the engine must see it.
+    if let Some(d) = almide::lint_shebang::split_string_warning(file, source) {
+        diagnostics.push(d);
+    }
+    (diagnostics, 0)
 }
 
 /// True when two single-line replacement ranges touch. Half-open
