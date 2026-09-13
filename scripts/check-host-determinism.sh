@@ -141,7 +141,13 @@ fi
 # by the one input the incumbent stopped mis-rendering. The structural leg, the
 # default route, orders it byte-identical to native across the whole key
 # lattice, and tests/sort_by_compound_key_test.rs pins the refusal itself.
-MAX_WALLED=29
+# 30 as of 2026-09-13: ord_record_variant.almd (C-053/#2167) — same shape of
+# bump as the row above, one type lattice further in. A record or variant that
+# derives Ord sorted on native and BOTH wasm legs refused it; the structural
+# leg now orders it (field declaration order / case order then payload, native's
+# derive) and the incumbent keeps its standing refusal of every non-scalar
+# element (C-147). Nothing that emitted before stopped emitting.
+MAX_WALLED=30
 corpus=$(ls "$FIXTURE_DIR"/*.almd 2>/dev/null | wc -l | tr -d ' ')
 if [ "$corpus" -eq 0 ] || [ $((n + walled)) -ne "$corpus" ]; then
   echo "::error::host-determinism: compared $n + walled $walled != corpus $corpus in $FIXTURE_DIR — the scan went blind (#985)"

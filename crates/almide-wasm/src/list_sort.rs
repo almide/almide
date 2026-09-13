@@ -7,6 +7,14 @@ use wasm_encoder::{BlockType, ValType};
 use crate::emitter::Emitter;
 use crate::*;
 
+/// The two orderable shapes a `SliceTy::Named` can be, read off the
+/// TypeTable once so [`emit_named_cmp`](Emitter::emit_named_cmp) branches on a
+/// value rather than holding a borrow of the table across emission.
+enum NamedCmpShape {
+    Record(Vec<(SliceTy, u32)>),
+    Variant(Vec<(u32, Vec<(SliceTy, u32)>)>),
+}
+
 impl Emitter<'_> {
     /// Type-directed total-order compare: consumes (a, b) of `t`'s wasm
     /// type, leaves an i32 whose SIGN is the verdict (only <0 / 0 / >0
@@ -14,6 +22,16 @@ impl Emitter<'_> {
     /// the shorter-first prefix tiebreak, none < some; floats order by
     /// the sign-flipped bit key (the total order the scalar path uses).
     pub(crate) fn emit_val_cmp(&mut self, t: SliceTy) -> Result<(), EmitError> {
+        self.emit_val_cmp_at(t, &mut Vec::new())
+    }
+
+    /// `emit_val_cmp` with the named types currently being emitted, so a
+    /// RECURSIVE user type (`type Tree: Ord = { v: Int, kids: List[Tree] }`)
+    /// walls instead of recursing forever at emit time. The equality twin
+    /// escapes the same cycle by emitting an out-of-line `$eq_<ti>` and
+    /// CALLING it; ordering has no such helper yet (#2172), so a cycle is a
+    /// wall — a refusal the caller can read, never a compiler stack overflow.
+    pub(crate) fn emit_val_cmp_at(&mut self, t: SliceTy, path: &mut Vec<u32>) -> Result<(), EmitError> {
         match t {
             INT | FLOAT => {
                 let hb = self.hold_i64()?;
@@ -69,7 +87,7 @@ impl Emitter<'_> {
                     self.load_ty_slot(*fty, *off);
                     self.f.instructions().local_get(hb);
                     self.load_ty_slot(*fty, *off);
-                    self.emit_val_cmp(*fty)?;
+                    self.emit_val_cmp_at(*fty, path)?;
                     let mut i = self.f.instructions();
                     i.local_tee(hc);
                     if n + 1 < fields.len() {
@@ -129,7 +147,7 @@ impl Emitter<'_> {
                     .local_get(hk)
                     .i32_add();
                 self.load_ty_slot_at(el);
-                self.emit_val_cmp(el)?;
+                self.emit_val_cmp_at(el, path)?;
                 {
                     let mut i = self.f.instructions();
                     i.local_tee(hc).i32_const(0).i32_ne().br_if(1);
@@ -178,13 +196,129 @@ impl Emitter<'_> {
                 self.load_ty_slot(et, almide_layout::OPTION_FIELD);
                 self.f.instructions().local_get(hb);
                 self.load_ty_slot(et, almide_layout::OPTION_FIELD);
-                self.emit_val_cmp(et)?;
+                self.emit_val_cmp_at(et, path)?;
                 self.f.instructions().end().end();
                 self.release_i32();
                 self.release_i32();
             }
+            // A user RECORD or VARIANT that declares `: Ord` (#2167). Native
+            // derives the order, so this must match the derive exactly: a
+            // record is lexicographic in FIELD DECLARATION ORDER (the same
+            // chain the Tuple arm above emits — `pack_fields` assigns offsets
+            // in input order, so the def's field list IS declaration order),
+            // and a variant compares its TAG first and the payload of the
+            // matching case second (the general form of the Option arm's
+            // none < some). C-053 has claimed both since 0.24.0; nothing
+            // executed the claim, and both legs walled it.
+            SliceTy::Named(ti) => {
+                if path.contains(&ti) {
+                    return unsup(&format!("cmp-recursive-named:{ti}"));
+                }
+                path.push(ti);
+                let r = self.emit_named_cmp(ti, path);
+                path.pop();
+                r?;
+            }
             other => return unsup(&format!("list-cmp-elem:{other:?}")),
         }
+        Ok(())
+    }
+
+    /// The `SliceTy::Named` body of [`emit_val_cmp_at`]: consumes (a, b) as
+    /// i32 block addresses, leaves the i32 verdict. Split out for the
+    /// complexity budget; `path` already carries `ti`.
+    fn emit_named_cmp(&mut self, ti: u32, path: &mut Vec<u32>) -> Result<(), EmitError> {
+        let def = match &self.types.def(ti) {
+            crate::types_table::NamedDef::Record(r) => {
+                NamedCmpShape::Record(r.fields.iter().map(|f| (f.ty, f.offset)).collect())
+            }
+            crate::types_table::NamedDef::Variant(v) => NamedCmpShape::Variant(
+                v.cases.iter().map(|c| (c.tag, c.fields.iter().map(|f| (f.ty, f.offset)).collect())).collect(),
+            ),
+            crate::types_table::NamedDef::Excluded => return unsup("cmp-named-excluded"),
+        };
+        match def {
+            NamedCmpShape::Record(fields) => self.emit_field_chain_cmp(&fields, path),
+            NamedCmpShape::Variant(cases) => self.emit_variant_cmp(&cases, path),
+        }
+    }
+
+    /// Lexicographic compare of a field list already loaded from two block
+    /// addresses: compare field k, and a non-zero verdict short-circuits.
+    /// Shared by the record shape and each variant case's payload.
+    fn emit_field_chain_cmp(&mut self, fields: &[(SliceTy, u32)], path: &mut Vec<u32>) -> Result<(), EmitError> {
+        let hb = self.hold_i32()?;
+        let ha = self.hold_i32()?;
+        let hc = self.hold_i32()?;
+        self.f.instructions().local_set(hb).local_set(ha);
+        for (n, (fty, off)) in fields.iter().enumerate() {
+            self.f.instructions().local_get(ha);
+            self.load_ty_slot(*fty, *off);
+            self.f.instructions().local_get(hb);
+            self.load_ty_slot(*fty, *off);
+            self.emit_val_cmp_at(*fty, path)?;
+            let mut i = self.f.instructions();
+            i.local_tee(hc);
+            if n + 1 < fields.len() {
+                i.i32_eqz().if_(BlockType::Result(ValType::I32));
+            }
+        }
+        let mut i = self.f.instructions();
+        for _ in 0..fields.len().saturating_sub(1) {
+            i.else_();
+            i.local_get(hc);
+            i.end();
+        }
+        // A fieldless record (and a unit variant case) compares equal: there
+        // is nothing left to distinguish once the tag has.
+        if fields.is_empty() {
+            i.i32_const(0);
+        }
+        let _ = i;
+        self.release_i32();
+        self.release_i32();
+        self.release_i32();
+        Ok(())
+    }
+
+    /// Variant order = TAG first, payload second — native's derive compares
+    /// the discriminant and only then the case's fields. Tags are assigned in
+    /// declaration order, so this is `Low < Mid < High` for a unit variant and
+    /// the payload chain for the case both sides landed in.
+    fn emit_variant_cmp(&mut self, cases: &[(u32, Vec<(SliceTy, u32)>)], path: &mut Vec<u32>) -> Result<(), EmitError> {
+        let m = slot_memarg(almide_layout::SUM_TAG);
+        let hb = self.hold_i32()?;
+        let ha = self.hold_i32()?;
+        {
+            let mut i = self.f.instructions();
+            i.local_set(hb).local_set(ha);
+            i.local_get(ha).i32_load(m).local_get(hb).i32_load(m).i32_ne();
+            i.if_(BlockType::Result(ValType::I32));
+            // tags differ: the tag IS the verdict (-1 / 1, unsigned).
+            i.i32_const(-1);
+            i.i32_const(1);
+            i.local_get(ha).i32_load(m).local_get(hb).i32_load(m).i32_lt_u();
+            i.select();
+            i.else_();
+        }
+        // Same tag: dispatch to that case's payload chain. A case with no
+        // fields needs no arm — the trailing 0 covers it.
+        let payload: Vec<&(u32, Vec<(SliceTy, u32)>)> = cases.iter().filter(|(_, fs)| !fs.is_empty()).collect();
+        let arms = payload.len();
+        for (tag, fields) in &payload {
+            self.f.instructions().local_get(ha).i32_load(m).i32_const(*tag as i32).i32_eq();
+            self.f.instructions().if_(BlockType::Result(ValType::I32));
+            self.f.instructions().local_get(ha).local_get(hb);
+            self.emit_field_chain_cmp(fields, path)?;
+            self.f.instructions().else_();
+        }
+        self.f.instructions().i32_const(0);
+        for _ in 0..arms {
+            self.f.instructions().end();
+        }
+        self.f.instructions().end();
+        self.release_i32();
+        self.release_i32();
         Ok(())
     }
 
