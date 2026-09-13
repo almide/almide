@@ -106,7 +106,7 @@
 
 ## On Hold
 
-30 items
+31 items
 
 | Item | Description |
 |------|-------------|
@@ -129,6 +129,7 @@
 | [Package Version Resolution](on-hold/package-version-resolution.md) | MVS version resolution with semver constraints for almide.toml |
 | [Performance Research: Path to World #1](on-hold/performance-research.md) | Research plan to surpass hand-written Rust via semantic-aware optimization |
 | [Porta Embedded — Sub-10KB Almide IoT Agents on WASI Hosts](on-hold/porta-embedded.md) | Porta-style WASI agent runtime for IoT: <10KB Almide guests on tiny hosts |
+| [Process composition: a pipeline is a value, running it is a separate step](on-hold/process-composition.md) | Build a command pipeline as a value and make running it one explicit step; parked until a real need appears |
 | [Rainbow Bridge — Wrap External Code as Almide Packages](on-hold/rainbow-bridge.md) | Wrap external Rust/TS/Python code as native Almide packages via @extern |
 | [Region-based Memory Management](on-hold/region-inference.md) | Region-based memory management — Phase 1+2 shipped, Phase 3 (full inference) on hold for server workloads |
 | [Research: Modification Survival Rate Paper](on-hold/research-modification-survival-rate-paper.md) | Academic paper measuring LLM code modification survival across languages |
