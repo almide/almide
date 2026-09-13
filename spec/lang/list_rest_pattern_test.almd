@@ -1,3 +1,8 @@
+// wasm:skip — the TEST lane renders through the incumbent brick, which walls
+// `pub fn total` (a `match` over an untracked subject, outside its lowering
+// subset). The DEFAULT build leg is the structural one and this lane never
+// asks it; giving the lane that route is #2179, and this marker retires with
+// it.
 // #1461 — list-rest patterns (ALS-E18): `[h, ..t]` matches any list of
 // length >= the prefix and binds the tail as a list; `[h, ..]` ignores
 // it. The rest slot is last-only (parse error otherwise). The Rust leg's

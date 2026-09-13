@@ -246,7 +246,25 @@ enum WasmTestOutcome {
     /// authoritatively); the standalone `--target wasm` harness counts them
     /// FAILED, matching the default harness's verdict on the same file.
     CompileError { file: String, detail: String },
-    Skip { file: String, reason: String },
+    Skip { file: String, reason: String, kind: SkipKind },
+}
+
+/// WHY a file's tests did not run on wasm. The distinction is the whole point
+/// of #2121: a skip the author DECLARED and a skip a RENDERER decided are not
+/// the same verdict, and reporting both as "skipped" let `almide test --target
+/// wasm` exit 0 having run nothing on the target the caller asked for.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SkipKind {
+    /// `// wasm:skip` in the first three lines — the author said so, with a
+    /// reason a reader can audit. Benign.
+    Declared,
+    /// The host cannot run the lane at all (no wasmtime, an unwritable scratch
+    /// path). Not a statement about the program. Benign.
+    Environment,
+    /// A RENDERER declined this program. The caller asked for wasm and did not
+    /// get it, and nothing in the file says that was expected — so the run
+    /// reports it as a failure rather than counting it as a skip.
+    Wall,
 }
 
 /// Compile one `.almd` file to WASM and run it under wasmtime. Pure per-file
@@ -265,7 +283,11 @@ fn wasm_test_preflight_outcome(
     parse_errors: &[crate::diagnostic::Diagnostic],
 ) -> Option<WasmTestOutcome> {
     if source_text.lines().take(3).any(|line| line.contains("// wasm:skip")) {
-        return Some(WasmTestOutcome::Skip { file: test_file.to_string(), reason: "wasm:skip".to_string() });
+        return Some(WasmTestOutcome::Skip {
+            file: test_file.to_string(),
+            reason: "wasm:skip".to_string(),
+            kind: SkipKind::Declared,
+        });
     }
     if parse_errors.iter().any(|d| d.level == crate::diagnostic::Level::Error) {
         let mut detail = String::new();
@@ -450,7 +472,16 @@ fn lower_wasm_test_modules(program: &almide_lang::ast::Program, checker: &mut ch
 }
 
 fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::PathBuf, run_filter: Option<&str>) -> WasmTestOutcome {
-    let skip = |reason: String| WasmTestOutcome::Skip { file: test_file.to_string(), reason };
+    let skip = |reason: String| WasmTestOutcome::Skip {
+        file: test_file.to_string(),
+        reason,
+        kind: SkipKind::Wall,
+    };
+    let skip_env = |reason: String| WasmTestOutcome::Skip {
+        file: test_file.to_string(),
+        reason,
+        kind: SkipKind::Environment,
+    };
     let compile_error = |detail: String| WasmTestOutcome::CompileError { file: test_file.to_string(), detail };
     let prof = std::env::var_os("ALMIDE_PROFILE").is_some();
     let mut marks: Vec<(&'static str, std::time::Instant)> = vec![("start", std::time::Instant::now())];
@@ -550,7 +581,7 @@ fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::PathBuf, run
     // does (the env cross-target contract).
     let run_module = |bytes: &[u8]| -> WasmTestOutcome {
         if let Err(e) = std::fs::write(&wasm_path, bytes) {
-            return skip(format!("write: {}", e));
+            return skip_env(format!("write: {}", e));
         }
         let mut cmd = std::process::Command::new("wasmtime");
         super::run::wasmtime_fs_args(&mut cmd);
@@ -593,7 +624,7 @@ fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::PathBuf, run
                     WasmTestOutcome::Fail { file: test_file.to_string(), detail, raw: format!("{stdout}{stderr}") }
                 }
             }
-            Err(e) => skip(format!("wasmtime: {}", e)),
+            Err(e) => skip_env(format!("wasmtime: {}", e)),
         }
     };
     if prof {
@@ -612,10 +643,15 @@ fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::PathBuf, run
         Some(b) => run_module(&b),
         None => match structural_handover(test_file, &source_text, &ir_program, declared_tests, explain) {
             Some(b) => run_module(&b),
+            // Name the LEG. "no verified wasm rendering" was a claim about the
+            // PRODUCT, and the product's default wasm leg is the structural one —
+            // which this lane asks only for a test-free main file (#2121). Four
+            // of the five files this reported it for build `structural leg,
+            // verified` under `almide build --target wasm`.
             None if declared_tests > 0 => skip(format!(
-                "v1 wall — no verified wasm rendering ({declared_tests} test block(s) route to native; the structural leg has no test mode)"
+                "the incumbent leg walled; this lane has no structural-leg test route ({declared_tests} test block(s) route to native, #2179)"
             )),
-            None => skip("v1 wall — no verified wasm rendering".to_string()),
+            None => skip("the incumbent leg walled; this lane has no structural-leg test route (#2179)".to_string()),
         },
     }
 }
@@ -663,6 +699,7 @@ pub fn cmd_test_wasm(file: &str, run_filter: Option<&str>, allow_no_tests: bool)
     let mut failed = 0;
     let mut passed = 0;
     let mut skipped = 0;
+    let mut walled: Vec<String> = Vec::new();
     let mut counts = TestCounts::default();
     for o in &outcomes {
         match o {
@@ -683,7 +720,15 @@ pub fn cmd_test_wasm(file: &str, run_filter: Option<&str>, allow_no_tests: bool)
                 err_no_nl(&format!("{}", detail));
                 failed += 1;
             }
-            WasmTestOutcome::Skip { file, reason } => {
+            // A DECLARED or ENVIRONMENT skip is a skip. A WALL is not: the
+            // caller asked for wasm, this file's tests did not run there, and
+            // nothing in the file says that was expected (#2121).
+            WasmTestOutcome::Skip { file, reason, kind: SkipKind::Wall } => {
+                err(&format!("FAIL {} (tests did not run on wasm: {})", file, reason));
+                walled.push(file.clone());
+                failed += 1;
+            }
+            WasmTestOutcome::Skip { file, reason, .. } => {
                 err(&format!("SKIP {} ({})", file, reason));
                 skipped += 1;
             }
@@ -697,6 +742,19 @@ pub fn cmd_test_wasm(file: &str, run_filter: Option<&str>, allow_no_tests: bool)
     } else {
         err(&format!("{} passed, {} failed (of {} files)",
             passed, failed, test_files.len()));
+    }
+    if !walled.is_empty() {
+        err("");
+        err(&format!(
+            "{} file(s) asked to run on wasm and did not. A renderer declined them, and no \
+             `// wasm:skip` in the file says that was expected:",
+            walled.len()
+        ));
+        for f in &walled {
+            err(&format!("  {}", f));
+        }
+        err("Fix the route, or declare the skip in the file's first three lines with a");
+        err("`// wasm:skip — <why, and what retires it>` line so the gap is greppable.");
     }
     scratch.finish();
     if failed > 0 {

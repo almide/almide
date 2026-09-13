@@ -1,3 +1,8 @@
+// wasm:skip — the TEST lane renders through the incumbent brick, which leaves
+// `Pt.repr` / `__repr_list_rec_reprlib_Cfg` unlinked (a dangling call would be
+// invalid wasm, so it refuses honestly). The DEFAULT build leg is the
+// structural one and this lane never asks it; giving the lane that route is
+// #2179, and this marker retires with it.
 // @contract: C-009
 // The sibling of cross_module_repr_test.almd (#1836): a module type's derived
 // `Repr` and a list of module records spell the DECLARED name too — the
