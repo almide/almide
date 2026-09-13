@@ -1,0 +1,79 @@
+// @contract: C-053
+// list.sort_by with a COMPOUND key — the key half of the C-053 lattice.
+//
+// C-053 already promised sort_by was byte-identical native == wasm "for any
+// key type the callback returns", and the ELEMENT half was gated. The KEY half
+// was not: `list.sort_by(entries, ((w, c)) => (0 - c, w))` — the word-count
+// idiom, and the shape an LLM writes first — walled the structural leg
+// (`list-sort-by-key:Tuple(4)`), so the build fell to the incumbent, which
+// accepted it and emitted a `call_indirect` against `f: (Int) -> Int` while the
+// key closure returns an i32 HANDLE: `wasm trap: indirect call type mismatch`
+// at run time, out of an artifact the build reported `verified`, while native
+// printed the answer (#2154). Had the signatures lined up, the cached key would
+// have been compared as a raw i64 — the key's ADDRESS, a silent wrong order.
+//
+// Every compound key `emit_val_cmp` orders now takes the structural leg's
+// type-directed comparator, the same one `list.sort` uses for a compound
+// ELEMENT; the incumbent REFUSES them (`list.sort_by_x`, an unlinked render
+// wall) instead of mis-rendering. Key shapes with no order (a record, a Map)
+// are still rejected at check time on both targets, unchanged.
+effect fn main() -> Unit = {
+  let entries = [("pear", 2), ("fig", 3), ("apple", 2), ("date", 1)]
+  // ── the issue's shape: (Int, String), count DESC then word ASC ──
+  let by_count = entries |> list.sort_by(((w, c)) => (0 - c, w))
+  for (w, c) in by_count {
+    println("count ${w} ${c}")
+  }
+  // ── (Int, Int): both fields scalar, second field decides ties ──
+  let pairs = [(1, 30), (2, 10), (1, 10), (2, 5)]
+  for (a, b) in pairs |> list.sort_by(((a, b)) => (a, b)) {
+    println("ii ${a} ${b}")
+  }
+  // ── (String, Int): a heap field FIRST — the mirror of the lattice's
+  //    (scalar, String) cell, which the incumbent twins never had ──
+  for (w, c) in entries |> list.sort_by(((w, c)) => (w, 0 - c)) {
+    println("si ${w} ${c}")
+  }
+  // ── (Bool, Int) and an i64::MIN field: the slot must not be truncated ──
+  for (a, b) in pairs |> list.sort_by(((a, b)) => (b > 10, -9223372036854775808 + a)) {
+    println("bi ${a} ${b}")
+  }
+  // ── nested List key: lexicographic, shorter-first prefix tiebreak ──
+  for (w, c) in entries |> list.sort_by(((w, c)) => [c, string.len(w)]) {
+    println("lk ${w} ${c}")
+  }
+  // ── Option key: none < some, some by payload ──
+  for (w, c) in entries |> list.sort_by(((w, c)) => (if c > 1 then some(0 - c) else none)) {
+    println("ok ${w} ${c}")
+  }
+  // ── SCALAR element with a compound key: the non-`_rc` route ──
+  let scalars = [3, 1, 4, 2]
+  for n in scalars |> list.sort_by((x) => (x % 2, 0 - x)) {
+    println("sc ${n}")
+  }
+  // ── STABILITY: every key below is equal, so the input order must survive
+  //    on both legs (the merge takes the left run first) ──
+  let same = [("z", 1), ("y", 1), ("x", 1), ("w", 1)]
+  for (w, c) in same |> list.sort_by(((w, c)) => (c, c)) {
+    println("st ${w}")
+  }
+  // ── degenerate sizes: the key buffer is allocated from the length ──
+  let empty: List[(String, Int)] = []
+  println("empty=${list.len(empty |> list.sort_by(((w, c)) => (c, w)))}")
+  let one = [("solo", 7)]
+  for (w, c) in one |> list.sort_by(((w, c)) => (0 - c, w)) {
+    println("one ${w} ${c}")
+  }
+  // ── the key is cached ONCE per element (C-055's rule) and the cached
+  //    compound keys are RELEASED: 200 rounds over 2,000 elements leaked
+  //    ~7.8x the steady-state heap before the sort released its key buffer ──
+  let many = list.range(0, 2000) |> list.map((n) => ("w${int.to_string(n % 97)}", n % 31))
+  let rounds = list.range(0, 200) |> list.map((r) => {
+    let s = many |> list.sort_by(((w, c)) => (0 - c, w))
+    match list.get(s, 0) {
+      some((w, c)) => c + string.len(w),
+      none => 0,
+    }
+  })
+  println("rounds=${list.sum(rounds)}")
+}

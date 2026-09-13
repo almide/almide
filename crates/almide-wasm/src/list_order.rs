@@ -456,16 +456,19 @@ impl Emitter<'_> {
     /// Keys precomputed ONCE per element into a parallel array (#560 —
     /// per-comparison evaluation was an observable divergence for
     /// side-effectful keys), then the lockstep merge sort moves keys
-    /// and values together. Stable; key orders are the scalar three
-    /// (Int/Str Ord, Float totalOrder).
+    /// and values together. Stable; the key order is whatever
+    /// `emit_val_cmp` gives its type — the scalar three (Int/Str Ord,
+    /// Float totalOrder) and, since #2154, every COMPOUND key it orders
+    /// (tuple lexicographic, nested list, Option none<some). The key
+    /// domain is NOT restated here: `emit_val_cmp` is the single source
+    /// of truth for what the language can order, and walls
+    /// `list-cmp-elem:<ty>` for a key shape it cannot (a record, a Map)
+    /// instead of this arm keeping a second copy of that list to drift.
     fn lower_list_sort_by(&mut self, xs: &IrExpr, cb: &IrExpr) -> ArmResult {
         let (params, body) = self.hof_lambda(cb, 1)?;
         let Some(k) = slice_ty_of(&body.ty, self.types) else {
             return unsup(&format!("list-sort-by-key:{}", ty_name(&body.ty)));
         };
-        if !matches!(k, INT | FLOAT | STR | BOOL) {
-            return unsup(&format!("list-sort-by-key:{k:?}"));
-        }
         let h = match self.lower_arg(xs, None, ArgMode::Borrow)? {
             SliceTy::List(h) => h,
             other => return unsup(&format!("list-sort-by-of:{other:?}")),
