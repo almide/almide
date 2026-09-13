@@ -280,6 +280,7 @@ fn isqrt(n: Int) -> Int = {
 | E059 | `for` over a non-iterable head (`for x in 5`) — the loop head must be a List or a Map | Iterate a List, a range (`for i in 0...n`), or a Map (`for (k, v) in m`) |
 | E060 | (warning) Import hygiene: a module imported and never used, or imported twice under two names | Remove the unused/duplicate import; `import _name` suppresses a deliberate one |
 | E061 | Top-level `let` bound to a lambda — the closure has no home in a module constant and the binding is not callable | Declare it as a function: `fn name(…) = …`; a `let`-bound lambda inside a fn/test body is fine |
+| E062 | (warning) Shebang without `-S`: `#!/usr/bin/env almide run` runs on macOS and dies on Linux, whose kernel hands `env` the rest of the line as ONE argument | Write `#!/usr/bin/env -S almide run` — `-S` makes `env` split the line on both kernels |
 | E070 | `@bounded`: a loop without a compile-time trip count (`while`, `for` over a container, run-time range bounds) | Use a counted range with literal bounds: `for i in 0..<N` (ALS-B3) |
 | E071 | `@bounded`: allocation inside a counted loop (list/map/string construction, concat, push, closure) | Allocate outside the loop; accumulate scalars inside (ALS-B4) |
 | E072 | `@bounded`: `break`/`continue` inside a counted loop | Single exit: run every iteration and select with a branch (ALS-B5) |

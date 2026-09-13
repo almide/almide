@@ -6,6 +6,7 @@ mod bench;
 mod compile;
 mod emit;
 mod check;
+pub mod shebang;
 mod dialect_stamp;
 mod commands;
 mod test_scratch;
