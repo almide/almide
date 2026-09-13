@@ -34,18 +34,12 @@ impl Emitter<'_> {
                     SliceTy::List(h) => h,
                     other => return unsup(&format!("list-sort-of:{other:?}")),
                 };
+                // The element domain is NOT restated here (#2167, the #2154
+                // move applied to its sibling): `emit_val_cmp` is the single
+                // source of truth for what this language can order, and it
+                // walls `list-cmp-elem:<ty>` for a shape it cannot. A copy of
+                // that list living here is what let the two drift apart.
                 let elem = self.types.el(h);
-                if !matches!(
-                    elem,
-                    INT | FLOAT
-                        | STR
-                        | BOOL
-                        | SliceTy::Tuple(_)
-                        | SliceTy::List(_)
-                        | SliceTy::Option(_)
-                ) {
-                    return unsup(&format!("list-sort-elem:{elem:?}"));
-                }
                 let copy = self.copy_fn_of(SliceTy::List(h));
                 self.f.instructions().call(copy);
                 self.emit_merge_sort(elem)?;
@@ -198,17 +192,9 @@ impl Emitter<'_> {
 
                 let is_min = func == "min";
                 let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
-                if !matches!(
-                    elem,
-                    INT | FLOAT
-                        | STR
-                        | BOOL
-                        | SliceTy::Tuple(_)
-                        | SliceTy::List(_)
-                        | SliceTy::Option(_)
-                ) {
-                    return unsup(&format!("list-{func}-elem:{elem:?}"));
-                }
+                // Same single source of truth as the `sort` arm above: the
+                // extremum walks with `emit_val_cmp`, so `emit_val_cmp` says
+                // what it can walk.
                 let wide = elem.slot_size() == 8;
                 let hbest = self.hold_i64()?;
                 let hcur = self.hold_i64()?;

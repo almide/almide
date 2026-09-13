@@ -295,8 +295,20 @@ impl Checker {
             }
             let mut diag = err(
                 format!("type '{}' has no ordering — cannot be used with {}", ty_name, fn_name),
-                "Ordering needs Int, Bool, String, Float, or lists/tuples/records of those.                  Map, Set, and function values have no order; Float inside a compound                  element has none either (compare via an explicit key instead)."
-                    .to_string(),
+                // Adjacent literals, not one line with the source indentation baked
+                // into it (#2167): the hint used to render with 18-space runs where
+                // its line breaks had been. It must also name the DERIVE — a record
+                // or variant orders, but only when it declares `: Ord` (#1521), and a
+                // reader whose record was rejected for exactly that reason was being
+                // told records are fine.
+                concat!(
+                    "Ordering needs Int, Bool, String or Float, or a tuple/list/Option of those. ",
+                    "A record or variant orders too \u{2014} by field declaration order, by case ",
+                    "order \u{2014} but only when it DECLARES the derive: `type T: Ord = { ... }`. ",
+                    "Map, Set and function values have no order, and a Float INSIDE a compound has ",
+                    "none either (native's derive cannot order f64) \u{2014} compare via an explicit key instead.",
+                )
+                .to_string(),
                 format!("call to {}", fn_name),
             ).with_code("E030");
             if let Some(s) = span {
