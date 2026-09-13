@@ -15,8 +15,9 @@
 //! The negative cells matter as much as the positive ones. Ordering a record
 //! WITHOUT `: Ord` must stay E030 on both targets (#1521 — native's monomorph
 //! needs the derive, and structural orderability of the fields is deliberately
-//! not enough), and a recursive orderable type must WALL rather than take the
-//! compiler's stack down with it (#2172).
+//! not enough). The recursive cell walled when this landed and is closed by
+//! #2172, which moved every `Named` comparator out of line — its evidence
+//! lives in tests/ord_recursive_test.rs.
 
 use std::process::Command;
 
@@ -66,21 +67,6 @@ type NoDerive = { a: Int }
 effect fn main() -> Unit = {
   for k in [NoDerive { a: 2 }, NoDerive { a: 1 }] |> list.sort {
     println("${k.a}")
-  }
-}
-"#;
-
-/// A RECURSIVE orderable type. Native derives `Ord` for it, so it is legal;
-/// the structural leg refuses, because `emit_val_cmp` recurses inline and
-/// would otherwise exhaust the compiler's own stack. A wall the caller can
-/// read is the right failure until ordering gets an out-of-line `$cmp_<ti>`
-/// the way equality has `$eq_<ti>` (#2172).
-const RECURSIVE_ORD_TYPE: &str = r#"
-type Tree: Ord = { v: Int, kids: List[Tree] }
-effect fn main() -> Unit = {
-  let ts = [Tree { v: 2, kids: [] }, Tree { v: 1, kids: [Tree { v: 9, kids: [] }] }]
-  for t in ts |> list.sort {
-    println("${t.v}")
   }
 }
 "#;
@@ -225,27 +211,4 @@ fn a_record_without_the_derive_is_refused_identically_on_both_targets() {
              write, and the hint used to claim records order without saying so:\n{report}"
         );
     }
-}
-
-/// A recursive orderable type walls with a reason, rather than recursing the
-/// compiler to death — the guard, not the feature (#2172 carries the feature).
-#[test]
-fn a_recursive_ord_type_walls_with_a_reason_instead_of_overflowing_the_compiler() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let source = dir.path().join("main.almd");
-    std::fs::write(&source, RECURSIVE_ORD_TYPE).expect("source");
-    let native = build(dir.path(), &source, "rust");
-    assert!(
-        native.status.success(),
-        "native derives Ord for a recursive type — it must still build:\n{}",
-        String::from_utf8_lossy(&native.stderr)
-    );
-    let built = build(dir.path(), &source, "wasm");
-    let report =
-        String::from_utf8_lossy(&built.stdout).to_string() + &String::from_utf8_lossy(&built.stderr);
-    assert!(!built.status.success(), "the recursive type built on wasm:\n{report}");
-    assert!(
-        report.contains("cmp-recursive-named"),
-        "the wall must name the cycle it refused, not fail some other way:\n{report}"
-    );
 }

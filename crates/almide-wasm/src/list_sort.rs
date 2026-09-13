@@ -21,17 +21,14 @@ impl Emitter<'_> {
     /// is promised). Tuples chain fields, lists are lexicographic with
     /// the shorter-first prefix tiebreak, none < some; floats order by
     /// the sign-flipped bit key (the total order the scalar path uses).
+    ///
+    /// Structural shapes INLINE (they are a finite DAG), and a user `Named`
+    /// type is always a CALL to its one out-of-line `$named_cmp_<ti>` (#2172).
+    /// Calling rather than inlining is what makes a RECURSIVE orderable type
+    /// emit at all — `type Tree: Ord = { v: Int, kids: List[Tree] }` and the
+    /// mutually recursive pair alike — and it is also why a record sorted in
+    /// three places emits its field chain once instead of three times.
     pub(crate) fn emit_val_cmp(&mut self, t: SliceTy) -> Result<(), EmitError> {
-        self.emit_val_cmp_at(t, &mut Vec::new())
-    }
-
-    /// `emit_val_cmp` with the named types currently being emitted, so a
-    /// RECURSIVE user type (`type Tree: Ord = { v: Int, kids: List[Tree] }`)
-    /// walls instead of recursing forever at emit time. The equality twin
-    /// escapes the same cycle by emitting an out-of-line `$eq_<ti>` and
-    /// CALLING it; ordering has no such helper yet (#2172), so a cycle is a
-    /// wall — a refusal the caller can read, never a compiler stack overflow.
-    pub(crate) fn emit_val_cmp_at(&mut self, t: SliceTy, path: &mut Vec<u32>) -> Result<(), EmitError> {
         match t {
             INT | FLOAT => {
                 let hb = self.hold_i64()?;
@@ -87,7 +84,7 @@ impl Emitter<'_> {
                     self.load_ty_slot(*fty, *off);
                     self.f.instructions().local_get(hb);
                     self.load_ty_slot(*fty, *off);
-                    self.emit_val_cmp_at(*fty, path)?;
+                    self.emit_val_cmp(*fty)?;
                     let mut i = self.f.instructions();
                     i.local_tee(hc);
                     if n + 1 < fields.len() {
@@ -147,7 +144,7 @@ impl Emitter<'_> {
                     .local_get(hk)
                     .i32_add();
                 self.load_ty_slot_at(el);
-                self.emit_val_cmp_at(el, path)?;
+                self.emit_val_cmp(el)?;
                 {
                     let mut i = self.f.instructions();
                     i.local_tee(hc).i32_const(0).i32_ne().br_if(1);
@@ -196,7 +193,7 @@ impl Emitter<'_> {
                 self.load_ty_slot(et, almide_layout::OPTION_FIELD);
                 self.f.instructions().local_get(hb);
                 self.load_ty_slot(et, almide_layout::OPTION_FIELD);
-                self.emit_val_cmp_at(et, path)?;
+                self.emit_val_cmp(et)?;
                 self.f.instructions().end().end();
                 self.release_i32();
                 self.release_i32();
@@ -211,23 +208,30 @@ impl Emitter<'_> {
             // none < some). C-053 has claimed both since 0.24.0; nothing
             // executed the claim, and both legs walled it.
             SliceTy::Named(ti) => {
-                if path.contains(&ti) {
-                    return unsup(&format!("cmp-recursive-named:{ti}"));
+                // ALWAYS out-of-line, never inlined at the use site. That is
+                // what lets a type that contains itself emit: the cycle
+                // becomes a call, not an infinite unfolding of the emitter.
+                // It also bounds the hold-pool depth — a mutually recursive
+                // pair (`Node` holding `List[Leaf]` holding `List[Node]`)
+                // exhausted the i32 pool when the first level was inlined.
+                if matches!(
+                    self.work.named_bodies.borrow().get(&(crate::work::NamedOp::Cmp, ti)),
+                    Some(crate::work::DisplayBuild::Failed)
+                ) {
+                    return unsup("cmp-helper-failed");
                 }
-                path.push(ti);
-                let r = self.emit_named_cmp(ti, path);
-                path.pop();
-                r?;
+                let idx = self.work.helper(Helper::NamedOp { op: crate::work::NamedOp::Cmp, ti });
+                self.f.instructions().call(idx);
             }
             other => return unsup(&format!("list-cmp-elem:{other:?}")),
         }
         Ok(())
     }
 
-    /// The `SliceTy::Named` body of [`emit_val_cmp_at`]: consumes (a, b) as
+    /// The `SliceTy::Named` body of [`emit_val_cmp`]: consumes (a, b) as
     /// i32 block addresses, leaves the i32 verdict. Split out for the
-    /// complexity budget; `path` already carries `ti`.
-    fn emit_named_cmp(&mut self, ti: u32, path: &mut Vec<u32>) -> Result<(), EmitError> {
+    /// complexity budget.
+    pub(crate) fn emit_named_cmp(&mut self, ti: u32) -> Result<(), EmitError> {
         let def = match &self.types.def(ti) {
             crate::types_table::NamedDef::Record(r) => {
                 NamedCmpShape::Record(r.fields.iter().map(|f| (f.ty, f.offset)).collect())
@@ -238,15 +242,15 @@ impl Emitter<'_> {
             crate::types_table::NamedDef::Excluded => return unsup("cmp-named-excluded"),
         };
         match def {
-            NamedCmpShape::Record(fields) => self.emit_field_chain_cmp(&fields, path),
-            NamedCmpShape::Variant(cases) => self.emit_variant_cmp(&cases, path),
+            NamedCmpShape::Record(fields) => self.emit_field_chain_cmp(&fields),
+            NamedCmpShape::Variant(cases) => self.emit_variant_cmp(&cases),
         }
     }
 
     /// Lexicographic compare of a field list already loaded from two block
     /// addresses: compare field k, and a non-zero verdict short-circuits.
     /// Shared by the record shape and each variant case's payload.
-    fn emit_field_chain_cmp(&mut self, fields: &[(SliceTy, u32)], path: &mut Vec<u32>) -> Result<(), EmitError> {
+    fn emit_field_chain_cmp(&mut self, fields: &[(SliceTy, u32)]) -> Result<(), EmitError> {
         let hb = self.hold_i32()?;
         let ha = self.hold_i32()?;
         let hc = self.hold_i32()?;
@@ -256,7 +260,7 @@ impl Emitter<'_> {
             self.load_ty_slot(*fty, *off);
             self.f.instructions().local_get(hb);
             self.load_ty_slot(*fty, *off);
-            self.emit_val_cmp_at(*fty, path)?;
+            self.emit_val_cmp(*fty)?;
             let mut i = self.f.instructions();
             i.local_tee(hc);
             if n + 1 < fields.len() {
@@ -285,7 +289,7 @@ impl Emitter<'_> {
     /// the discriminant and only then the case's fields. Tags are assigned in
     /// declaration order, so this is `Low < Mid < High` for a unit variant and
     /// the payload chain for the case both sides landed in.
-    fn emit_variant_cmp(&mut self, cases: &[(u32, Vec<(SliceTy, u32)>)], path: &mut Vec<u32>) -> Result<(), EmitError> {
+    fn emit_variant_cmp(&mut self, cases: &[(u32, Vec<(SliceTy, u32)>)]) -> Result<(), EmitError> {
         let m = slot_memarg(almide_layout::SUM_TAG);
         let hb = self.hold_i32()?;
         let ha = self.hold_i32()?;
@@ -309,7 +313,7 @@ impl Emitter<'_> {
             self.f.instructions().local_get(ha).i32_load(m).i32_const(*tag as i32).i32_eq();
             self.f.instructions().if_(BlockType::Result(ValType::I32));
             self.f.instructions().local_get(ha).local_get(hb);
-            self.emit_field_chain_cmp(fields, path)?;
+            self.emit_field_chain_cmp(fields)?;
             self.f.instructions().else_();
         }
         self.f.instructions().i32_const(0);

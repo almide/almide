@@ -540,7 +540,7 @@ fn helper_body_b(h: &Helper, work: &FnWork, helper_snapshot: &[Helper]) -> Funct
             }
         }
     }
-    Helper::NamedEq { ti } => match work.eq_bodies.borrow_mut().remove(ti) {
+    Helper::NamedOp { op, ti } => match work.named_bodies.borrow_mut().remove(&(*op, *ti)) {
         Some(work::DisplayBuild::Built(f)) => f,
         _ => {
             let mut f = Function::new([]);

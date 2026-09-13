@@ -9,6 +9,16 @@ use wasm_encoder::ValType;
 
 use crate::*;
 
+/// Which type-directed body a [`Helper::NamedOp`] carries. The two walk
+/// the same fields in the same order and differ only in what the i32 they
+/// leave MEANS — a 0/1 verdict for `Eq`, a signed three-way verdict for
+/// `Cmp` — which is why one builder emits both (#2172).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub(crate) enum NamedOp {
+    Eq,
+    Cmp,
+}
+
 /// A per-program emitted helper (assembled right after `main`, BEFORE the
 /// table-entry extras — call sites need these indices DURING lowering).
 #[derive(Clone, PartialEq)]
@@ -43,9 +53,13 @@ pub(crate) enum Helper {
     Utf8Lossy,
     /// `$fast_exp(f64) -> f64` — the canonical unfused fast-exp (#1197).
     FastExp,
-    /// `$named_eq_<ti>(a, b) -> i32` — runtime-recursive deep equality
-    /// of a RECURSIVE Named type (the DisplayNamed doctrine for `==`).
-    NamedEq { ti: u32 },
+    /// `$named_<op>_<ti>(a, b) -> i32` — the runtime-recursive body of a
+    /// type-directed walk over a RECURSIVE Named type (the DisplayNamed
+    /// doctrine for `==` and for the total order). Both ops have the same
+    /// `(a, b) -> i32` signature and the same reason to exist: the emitter
+    /// inlines the type's shape, so a type that contains itself has to
+    /// become a CALL somewhere or the emitter recurses forever.
+    NamedOp { op: NamedOp, ti: u32 },
     /// `$jp_set(j, path, k, nv) -> Value` — json.set_path's recursive
     /// core over THIS backend's Value layout.
     JsonPathSet,
@@ -203,7 +217,10 @@ pub(crate) struct FnWork {
     /// callers see Failed and refuse themselves, and assembly stubs the
     /// promised index with `unreachable`).
     pub(crate) display_bodies: std::cell::RefCell<HashMap<u32, DisplayBuild>>,
-    pub(crate) eq_bodies: std::cell::RefCell<HashMap<u32, DisplayBuild>>,
+    /// `Helper::NamedOp` bodies, keyed by `(op, ti)` — ONE map for both
+    /// ops, so neither the build loop nor assembly can learn about one and
+    /// forget the other (#2172).
+    pub(crate) named_bodies: std::cell::RefCell<HashMap<(NamedOp, u32), DisplayBuild>>,
     pub(crate) scan_bodies: std::cell::RefCell<HashMap<crate::ETy, DisplayBuild>>,
     /// `Helper::DropShape` bodies, built by `dec_fn_of` when the helper
     /// is first registered (assembly takes them by type).

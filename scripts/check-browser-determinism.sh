@@ -109,7 +109,15 @@ fail=0; n=0
 # leg now orders it (field declaration order / case order then payload, native's
 # derive) and the incumbent keeps its standing refusal of every non-scalar
 # element (C-147). Nothing that emitted before stopped emitting.
-MAX_WALLED=30
+# 31 as of 2026-09-14: ord_recursive.almd (C-053/#2172) — the third bump in
+# this family and the same shape as the two above. A RECURSIVE type that
+# derives Ord built natively and neither wasm leg could emit it; the structural
+# leg now does, because a `Named` comparator is emitted once out of line and
+# CALLED instead of inlined at the use site, and the incumbent keeps its
+# standing refusal of every non-scalar element (C-147). Measured directly on
+# this tree: 676 emitted, 31 walled, 707 total — the emitted count is unchanged,
+# so this is one more input the incumbent never rendered, not coverage lost.
+MAX_WALLED=31
 walled=0
 for fix in "$FIXTURE_DIR"/*.almd; do
   [ -e "$fix" ] || continue

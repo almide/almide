@@ -1,0 +1,120 @@
+// @contract: C-053
+// A RECURSIVE type that derives Ord orders on both targets.
+//
+// #2167 made records and variants orderable on the structural leg by inlining
+// their field chain at the use site. That left one cell of C-053's lattice
+// walled: a type that contains ITSELF unfolds forever at emit time, so the
+// emitter refused with `cmp-recursive-named:` rather than exhaust its own
+// stack. Native derives `Ord` for such a type and printed the answer, so the
+// wall was still a divergence — an honest one, but a divergence (#2172).
+//
+// The fix is the escape display and equality already take: the comparator of a
+// user `Named` type is emitted ONCE as an out-of-line `$named_cmp_<ti>` and
+// CALLED. A cycle is then a recursive call rather than an infinite unfolding,
+// and a MUTUALLY recursive pair — which the cycle guard alone did not save,
+// since its first level still inlined and exhausted the i32 hold pool — falls
+// out for free. The comparator being emitted once per type rather than once
+// per use site is the same change seen from the size side.
+//
+// What this fixture pins is the ORDER, not just that it builds: a recursive
+// type orders exactly as native's derive does, which means the nested list of
+// children compares lexicographically with the shorter-prefix-first tiebreak,
+// all the way down.
+type Tree: Ord = { v: Int, kids: List[Tree] }
+
+// A recursive VARIANT: the tag decides first, and only then the payload, whose
+// fields are themselves lists of this same type.
+type Expr: Ord = | Lit { n: Int } | Add { l: List[Expr], r: List[Expr] }
+
+// A MUTUALLY recursive pair — neither type contains itself directly, so the
+// cycle only shows up one level in.
+type Node: Ord = { tag: String, next: List[Leaf] }
+
+type Leaf: Ord = { back: List[Node], w: Int }
+
+fn show(t: Tree) -> String =
+  "${t.v}(${t.kids |> list.map((k) => show(k)) |> list.join(",")})"
+
+// The mutually recursive pair printed so the ORDER is visible: two nodes that
+// differ only inside their `next` leaves must still come out in a pinned
+// order, and a line that showed only the tag would not say which.
+fn show_leaf(l: Leaf) -> String =
+  "[${l.back |> list.map((n) => n.tag) |> list.join(",")}]/${l.w}"
+
+fn show_node(n: Node) -> String =
+  "${n.tag}<${n.next |> list.map((l) => show_leaf(l)) |> list.join(",")}>"
+
+effect fn main() -> Unit = {
+  // ── the recursive record: `v` decides, then the children lexicographically
+  let ts = [
+    Tree { v: 1, kids: [Tree { v: 9, kids: [] }] },
+    Tree { v: 1, kids: [Tree { v: 2, kids: [] }] },
+    Tree { v: 1, kids: [] },
+    Tree { v: 1, kids: [Tree { v: 2, kids: [Tree { v: 5, kids: [] }] }] },
+    Tree { v: 0, kids: [Tree { v: 9, kids: [] }] },
+  ]
+  for t in ts |> list.sort {
+    println("tree ${show(t)}")
+  }
+
+  // Depth beyond one level: the child list's own children decide the order, so
+  // the comparator really does recurse rather than stop at the first slot.
+  let deep = [
+    Tree { v: 0, kids: [Tree { v: 1, kids: [Tree { v: 3, kids: [] }] }] },
+    Tree { v: 0, kids: [Tree { v: 1, kids: [Tree { v: 2, kids: [] }] }] },
+    Tree { v: 0, kids: [Tree { v: 1, kids: [Tree { v: 2, kids: [Tree { v: 7, kids: [] }] }] }] },
+  ]
+  for t in deep |> list.sort {
+    println("deep ${show(t)}")
+  }
+
+  // ── the recursive variant: tag first, then the case's own payload lists
+  let es = [
+    Add { l: [Lit { n: 2 }], r: [] },
+    Lit { n: 5 },
+    Add { l: [Lit { n: 1 }], r: [Lit { n: 0 }] },
+    Lit { n: 1 },
+    Add { l: [Lit { n: 1 }], r: [] },
+  ]
+  for e in es |> list.sort {
+    println("expr ${e}")
+  }
+
+  // ── the mutually recursive pair, in both positions
+  let ns = [
+    Node { tag: "b", next: [] },
+    Node { tag: "a", next: [Leaf { back: [], w: 3 }] },
+    Node { tag: "a", next: [Leaf { back: [Node { tag: "z", next: [] }], w: 1 }] },
+    Node { tag: "a", next: [] },
+  ]
+  for n in ns |> list.sort {
+    println("node ${show_node(n)}")
+  }
+  let ls = [
+    Leaf { back: [Node { tag: "m", next: [] }], w: 0 },
+    Leaf { back: [], w: 9 },
+    Leaf { back: [Node { tag: "a", next: [] }], w: 0 },
+  ]
+  for l in ls |> list.sort {
+    println("leaf ${show_leaf(l)}")
+  }
+
+  // ── the extremum arms walk the same out-of-line comparator
+  println("min_tree=${list.min(ts) |> option.map((t) => show(t)) ?? "-"}")
+  println("max_tree=${list.max(ts) |> option.map((t) => show(t)) ?? "-"}")
+  println("min_expr=${list.min(es)}")
+  println("max_expr=${list.max(es)}")
+
+  // ── and the KEY position: the same helper, reached through sort_by
+  for (w, c) in [("x", 2), ("y", 1), ("z", 2)] |> list.sort_by(((w, c)) =>
+    Tree { v: 0 - c, kids: [Tree { v: string.len(w), kids: [] }] }
+  ) {
+    println("key ${w} ${c}")
+  }
+
+  // ── the empty and single-element ends
+  let none_t: List[Tree] = []
+  println("empty=${list.len(none_t |> list.sort)}")
+  println("empty_min=${list.min(none_t) |> option.map((t) => show(t)) ?? "-"}")
+  println("one=${[Tree { v: 7, kids: [] }] |> list.sort |> list.len}")
+}
