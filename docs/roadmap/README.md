@@ -7,11 +7,12 @@
 
 ## Active
 
-91 items
+92 items
 
 | Item | Description |
 |------|-------------|
 | [AlmidePerceusBelt](active/almide-perceus-belt.md) | AlmidePerceusBelt — formal memory safety guarantee for Almide |
+| [全軸制覇への突破点 — アリーナと近隣比較から導いた設計指針](active/arena-breakthroughs.md) | 全軸制覇への突破点台帳 — 近隣アリーナの実測と 18 近隣コンパイラの機構読みから、どの軸で負けていて何を突破すれば世界一かを、勝利条件・ゲート・順序つきで固定する |
 | [Async Inception — logical time as the language's time base](active/async-inception.md) | The async inception: thesis, grammar, semantics, proofs, claim and plan in one charter |
 | [The 2026 Async Claim — audit and the runaway plan](active/async-world-claim.md) | Audit of the best-async-of-2026 claim: the axis, the rivals, the five runaway moves |
 | [Behavioral Contract — 機械生成コードの「機能正しさ」を、王者の土俵を避けて取る層](active/behavioral-contract.md) | 機能正しさを王者(Dafny/F*/SPARK/Lean)の土俵を避けて取る層。C-FAITHFUL の上に C-PRESERVED(差分保存)と C-ASSERTED(批准性質)を積む。仕様の出所を機械生成レジームへずらす戦略。 |
