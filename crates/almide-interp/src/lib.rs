@@ -160,6 +160,11 @@ pub struct Interpreter<'a> {
     /// before the fn-table lookup. First declaration wins on a shared case
     /// name, exactly like the scan it replaces.
     pub(crate) variant_ctors: HashMap<Sym, (Sym, dispatch::CtorKind)>,
+    /// Declaration index of every variant case, from the SAME walk as
+    /// `variant_ctors` — the tag `TotalOrder` compares a variant by, so
+    /// `list.sort` / `min` / `max` / `sort_by` order a variant by case order
+    /// then payload, exactly as native's derived `Ord` and both wasm legs do.
+    pub(crate) variant_tags: crate::value::VariantTags,
     /// The opaque NEWTYPE decls (`mod type SafeHtml = String`, `local type
     /// JsonPath = Int`) under the identity their ctor call and ctor pattern
     /// carry into the IR — bare for a bundled module's own or the entry
@@ -357,21 +362,28 @@ fn index_named_records(program: &IrProgram) -> HashMap<Vec<Sym>, (Sym, Vec<Sym>)
 /// Mirrors the linear scan `variant_ctor` used to run per Named call:
 /// `program.type_decls` only (module decls were never scanned), in decl
 /// order, first declaration of a shared case name wins (`or_insert`).
-fn index_variant_ctors(program: &IrProgram) -> HashMap<Sym, (Sym, dispatch::CtorKind)> {
+fn index_variant_ctors(
+    program: &IrProgram,
+) -> (HashMap<Sym, (Sym, dispatch::CtorKind)>, crate::value::VariantTags) {
     use almide_ir::{IrTypeDeclKind, IrVariantKind};
     let mut out: HashMap<Sym, (Sym, dispatch::CtorKind)> = HashMap::new();
+    let mut tags = crate::value::VariantTags::new();
     for td in &program.type_decls {
         let IrTypeDeclKind::Variant { cases, .. } = &td.kind else { continue };
-        for case in cases {
+        for (i, case) in cases.iter().enumerate() {
             let kind = match case.kind {
                 IrVariantKind::Unit => dispatch::CtorKind::Unit,
                 IrVariantKind::Tuple { .. } => dispatch::CtorKind::Tuple,
                 IrVariantKind::Record { .. } => dispatch::CtorKind::Record,
             };
             out.entry(case.name).or_insert((td.name, kind));
+            // The ORDER of the same cases, from the same walk: the registry
+            // that decides a case's identity is the one that decides where it
+            // sorts, so the two cannot drift (`TotalOrder`).
+            tags.entry((td.name, case.name)).or_insert(i as u32);
         }
     }
-    out
+    (out, tags)
 }
 
 /// The opaque-newtype decl names (program + modules) — a non-public `Alias`
@@ -486,7 +498,7 @@ impl<'a> Interpreter<'a> {
         }
         index_private_module_helpers(program, &mut fns);
         let named_records = index_named_records(program);
-        let variant_ctors = index_variant_ctors(program);
+        let (variant_ctors, variant_tags) = index_variant_ctors(program);
         let newtype_ctors = index_newtype_ctors(program);
         let record_decls = index_record_decls(program);
 
@@ -503,6 +515,7 @@ impl<'a> Interpreter<'a> {
             record_decls,
             named_records,
             variant_ctors,
+            variant_tags,
             newtype_ctors,
             globals: env::Scope::root(),
             module_globals: program.modules.iter().map(|_| env::Scope::root()).collect(),

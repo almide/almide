@@ -606,9 +606,12 @@ impl<'a> Interpreter<'a> {
                 // TOTAL order (C-055): Float compares by `total_cmp`, matching
                 // the backends' `List[Float]` totalOrder. `partial_cmp_val`
                 // would leave NaNs in place and break agreement with native ==
-                // wasm.
+                // wasm. Records and variants order through the same comparator
+                // — by field declaration order, by case order then payload
+                // (#2167).
+                let order = crate::value::TotalOrder::new(&self.variant_tags);
                 items.sort_by(|a, b| {
-                    a.total_cmp_val(b).unwrap_or_else(|| {
+                    order.cmp(a, b).unwrap_or_else(|| {
                         ok = false;
                         std::cmp::Ordering::Equal
                     })
@@ -631,11 +634,12 @@ impl<'a> Interpreter<'a> {
     fn list_min_max(&mut self, args: &[Value], want_max: bool) -> Flow {
         match args.first().and_then(|v| v.as_iter_items()) {
             Some(items) => {
+                let order = crate::value::TotalOrder::new(&self.variant_tags);
                 let mut best: Option<Value> = None;
                 for v in items {
                     let take = match &best {
                         None => true,
-                        Some(b) => match v.total_cmp_val(b) {
+                        Some(b) => match order.cmp(&v, b) {
                             Some(ord) => if want_max { ord.is_gt() } else { ord.is_lt() },
                             // Non-comparable element: abstain rather than vote
                             // wrong (a wrong third vote is worse than a skip).

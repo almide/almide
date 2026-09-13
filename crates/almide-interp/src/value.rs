@@ -365,31 +365,108 @@ impl Value {
         Some(a.len().cmp(&b.len()))
     }
 
-    /// TOTAL order used by the list ordering ops (`list.sort`/`min`/`max`/
-    /// `sort_by`) — distinct from `partial_cmp_val`, which the SCALAR `<`/`>`
-    /// operators use and which keeps IEEE partiality for NaN (C-049). Here
-    /// Float compares by IEEE-754 totalOrder (`f64::total_cmp`: NaN at the top,
-    /// `-0.0 < +0.0`), mirroring native's `_float` runtime variants and the
-    /// wasm sign-magnitude bit trick, so the 3-way oracle agrees on
-    /// `List[Float]` ordering (C-055). Returns `None` only for genuinely
-    /// incomparable shapes (the sort then reports a non-comparable abort).
-    pub fn total_cmp_val(&self, other: &Value) -> Option<std::cmp::Ordering> {
+}
+
+/// The declaration index of every variant CASE, keyed by `(type, case)`.
+///
+/// Keyed by the pair rather than by the case name alone: two variant types may
+/// spell the same case, and a tag read off the wrong type would be a wrong
+/// third vote — the one thing this crate must never cast.
+pub type VariantTags = std::collections::HashMap<(Sym, Sym), u32>;
+
+/// The TOTAL order the list ordering ops (`list.sort` / `min` / `max` /
+/// `sort_by`) compare by — distinct from [`Value::partial_cmp_val`], which the
+/// SCALAR `<`/`>` operators use and which keeps IEEE partiality for NaN
+/// (C-049). Here Float compares by IEEE-754 totalOrder (`f64::total_cmp`: NaN
+/// at the top, `-0.0 < +0.0`), mirroring native's `_float` runtime variants and
+/// the wasm sign-magnitude bit trick, so the 3-way oracle agrees on
+/// `List[Float]` ordering (C-055).
+///
+/// It is a struct rather than a `Value` method because ordering a VARIANT needs
+/// one fact a `Value` alone cannot carry: the case's declaration index. Native's
+/// derived `Ord` compares the discriminant and both wasm legs compare the stored
+/// `SUM_TAG`; each IS declaration order. The interp reads the same fact from the
+/// program's type decls, so this order has ONE spelling here too — a tag copied
+/// into every variant value would be the second copy of one truth that #2154 and
+/// #2167 were on the emit side.
+///
+/// `None` means genuinely incomparable (the caller aborts or abstains — never
+/// guesses).
+pub struct TotalOrder<'a> {
+    tags: &'a VariantTags,
+}
+
+impl<'a> TotalOrder<'a> {
+    pub fn new(tags: &'a VariantTags) -> Self {
+        TotalOrder { tags }
+    }
+
+    pub fn cmp(&self, a: &Value, b: &Value) -> Option<std::cmp::Ordering> {
         use Value::*;
-        match (self, other) {
-            (Float(a), Float(b)) => Some(a.total_cmp(b)),
-            (List(a), List(b)) => Self::total_cmp_seq(a, b),
-            (Tuple(a), Tuple(b)) => Self::total_cmp_seq(a, b),
+        match (a, b) {
+            (Float(x), Float(y)) => Some(x.total_cmp(y)),
+            (List(x), List(y)) => self.cmp_seq(x, y),
+            (Tuple(x), Tuple(y)) => self.cmp_seq(x, y),
             // Option payloads stay on the TOTAL order (a Float inside a some
             // must totalOrder like a bare Float would); the none/some shell
             // ordering itself is shared with `partial_cmp_val`.
-            (Option(Some(x)), Option(Some(y))) => x.total_cmp_val(y),
-            _ => self.partial_cmp_val(other),
+            (Option(Some(x)), Option(Some(y))) => self.cmp(x, y),
+            // A record orders lexicographically in FIELD DECLARATION order —
+            // native's derive, and the order `almide_layout::pack_fields` gives
+            // the wasm comparator. A named record's fields are ALWAYS rebuilt in
+            // declaration order here (`fill_record_defaults`), so POSITION is
+            // declaration order and a permuted literal compares identically.
+            (Record { fields: x, .. }, Record { fields: y, .. }) => self.cmp_fields(x, y),
+            // A variant compares its CASE first and breaks the tie on that
+            // case's payload — native's discriminant-then-fields derive, and
+            // the wasm legs' tag-then-payload emit.
+            (
+                Variant { ty: tx, ctor: cx, payload: px },
+                Variant { ty: ty_y, ctor: cy, payload: py },
+            ) => match self.tag(*tx, *cx)?.cmp(&self.tag(*ty_y, *cy)?) {
+                std::cmp::Ordering::Equal => self.cmp_payload(px, py),
+                ord => Some(ord),
+            },
+            _ => a.partial_cmp_val(b),
         }
     }
 
-    fn total_cmp_seq(a: &[Value], b: &[Value]) -> Option<std::cmp::Ordering> {
+    /// The case's declaration index, or `None` when this value's type is not in
+    /// the program's decls — the bundled `bytes.Endian`, whose decl never
+    /// reaches `IrProgram`. Abstaining there is right: guessing an order for a
+    /// case whose declaration we cannot read is guessing.
+    fn tag(&self, ty: Option<Sym>, ctor: Sym) -> Option<u32> {
+        self.tags.get(&(ty?, ctor)).copied()
+    }
+
+    fn cmp_payload(&self, a: &VariantPayload, b: &VariantPayload) -> Option<std::cmp::Ordering> {
+        match (a, b) {
+            (VariantPayload::Unit, VariantPayload::Unit) => Some(std::cmp::Ordering::Equal),
+            (VariantPayload::Tuple(x), VariantPayload::Tuple(y)) => self.cmp_seq(x, y),
+            (VariantPayload::Record(x), VariantPayload::Record(y)) => self.cmp_fields(x, y),
+            // Same case, different payload shape — unreachable through the
+            // checker, and not something to invent an answer for.
+            _ => None,
+        }
+    }
+
+    fn cmp_seq(&self, a: &[Value], b: &[Value]) -> Option<std::cmp::Ordering> {
         for (x, y) in a.iter().zip(b.iter()) {
-            match x.total_cmp_val(y)? {
+            match self.cmp(x, y)? {
+                std::cmp::Ordering::Equal => continue,
+                ord => return Some(ord),
+            }
+        }
+        Some(a.len().cmp(&b.len()))
+    }
+
+    fn cmp_fields(
+        &self,
+        a: &[(Sym, Value)],
+        b: &[(Sym, Value)],
+    ) -> Option<std::cmp::Ordering> {
+        for ((_, x), (_, y)) in a.iter().zip(b.iter()) {
+            match self.cmp(x, y)? {
                 std::cmp::Ordering::Equal => continue,
                 ord => return Some(ord),
             }
