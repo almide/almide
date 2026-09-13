@@ -130,7 +130,18 @@ fi
 # execute the complete field matrix (none/some), with size and allocation
 # ledgers pinning its current emission. This adds one unsupported incumbent
 # input, not a loss of coverage for a previously emitted fixture.
-MAX_WALLED=28
+# 29 as of 2026-09-13: sort_by_compound_key.almd (C-053/#2154) is a NEW
+# structural fixture, and its wall here is the FIX rather than a gap. The
+# incumbent rendered a compound sort key by comparing the cached key as a raw
+# i64 while the key closure returned an i32 handle — `indirect call type
+# mismatch` at run time, out of an artifact it reported `verified`. It now
+# REFUSES the shape (`list.sort_by_x`, an unlinked render wall), the same
+# refusal it already makes for a non-scalar `unique_by` key (C-147). There was
+# never a correct incumbent emission of this fixture to lose; the ceiling rises
+# by the one input the incumbent stopped mis-rendering. The structural leg, the
+# default route, orders it byte-identical to native across the whole key
+# lattice, and tests/sort_by_compound_key_test.rs pins the refusal itself.
+MAX_WALLED=29
 corpus=$(ls "$FIXTURE_DIR"/*.almd 2>/dev/null | wc -l | tr -d ' ')
 if [ "$corpus" -eq 0 ] || [ $((n + walled)) -ne "$corpus" ]; then
   echo "::error::host-determinism: compared $n + walled $walled != corpus $corpus in $FIXTURE_DIR — the scan went blind (#985)"

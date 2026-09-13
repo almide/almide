@@ -64,11 +64,14 @@ effect fn main() -> Unit = {
   for (w, c) in one |> list.sort_by(((w, c)) => (0 - c, w)) {
     println("one ${w} ${c}")
   }
-  // ── the key is cached ONCE per element (C-055's rule) and the cached
-  //    compound keys are RELEASED: 200 rounds over 2,000 elements leaked
-  //    ~7.8x the steady-state heap before the sort released its key buffer ──
-  let many = list.range(0, 2000) |> list.map((n) => ("w${int.to_string(n % 97)}", n % 31))
-  let rounds = list.range(0, 200) |> list.map((r) => {
+  // ── REPEATED sorts over the same source: the key buffer is allocated,
+  //    filled and released once per round, so a round that over-released a
+  //    key would read a reused block here and the answer would drift. (The
+  //    LEAK this path also had is not observable from inside the program —
+  //    it is pinned by the allocation ledger, whose list_total_order row the
+  //    same release lowered, and measured in #2154: 146 MB -> 10.7 MB.) ──
+  let many = list.range(0, 400) |> list.map((n) => ("w${int.to_string(n % 97)}", n % 31))
+  let rounds = list.range(0, 40) |> list.map((r) => {
     let s = many |> list.sort_by(((w, c)) => (0 - c, w))
     match list.get(s, 0) {
       some((w, c)) => c + string.len(w),
