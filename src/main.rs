@@ -201,7 +201,8 @@ enum Commands {
     },
     /// Type check only
     Check {
-        /// Source file (default: src/main.almd)
+        /// Source file. Omitted inside a package: every `.almd` under `src/`
+        /// is checked and named (#2165)
         file: Option<String>,
         /// Treat warnings as errors
         #[arg(long)]
@@ -708,7 +709,15 @@ fn dispatch_check(file: Option<String>, deny_warnings: bool, json: bool, explain
             std::process::exit(1);
         }
     };
-    let file = resolve_file(file);
+    // #2165: the bare form inside a package judges EVERY entry under `src/`,
+    // not the first one `resolve_file` happens to find. `--json` and
+    // `--effects` are per-file reports with no multi-file shape, so they keep
+    // the single-entry resolution.
+    let package_entries = if file.is_none() && !json && !effects { package_check_entries() } else { None };
+    let file = match &package_entries {
+        Some(entries) => entries[0].clone(),
+        None => resolve_file(file),
+    };
     if wasm_target && (effects || json) {
         eprintln!("error: --target wasm is not supported with --effects or --json");
         std::process::exit(1);
@@ -721,8 +730,46 @@ fn dispatch_check(file: Option<String>, deny_warnings: bool, json: bool, explain
         cli::cmd_check_effects(&file);
     } else if json {
         cli::cmd_check_json(&file, critical.as_deref());
+    } else if let Some(entries) = package_entries {
+        cli::cmd_check_package(&entries, deny_warnings, timings, stamp, critical.as_deref(), wasm_target);
     } else {
         cli::cmd_check(&file, deny_warnings, timings, stamp, critical.as_deref(), wasm_target);
+    }
+}
+
+/// Every `.almd` under `src/` when the cwd is a package, `src/mod.almd` and
+/// `src/main.almd` first so the output reads in the order a reader expects.
+/// `None` outside a package, or when `src/` holds no `.almd` at all — both
+/// fall through to `resolve_file`, whose messages already cover them.
+fn package_check_entries() -> Option<Vec<String>> {
+    if !std::path::Path::new("almide.toml").exists() {
+        return None;
+    }
+    let mut found: Vec<String> = Vec::new();
+    collect_almd(std::path::Path::new("src"), &mut found);
+    if found.is_empty() {
+        return None;
+    }
+    found.sort();
+    let mut ordered: Vec<String> = Vec::new();
+    for lead in ["src/mod.almd", "src/main.almd"] {
+        if let Some(pos) = found.iter().position(|f| f == lead) {
+            ordered.push(found.remove(pos));
+        }
+    }
+    ordered.extend(found);
+    Some(ordered)
+}
+
+fn collect_almd(dir: &std::path::Path, out: &mut Vec<String>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_almd(&path, out);
+        } else if path.extension().and_then(|e| e.to_str()) == Some("almd") {
+            out.push(path.to_string_lossy().replace('\\', "/"));
+        }
     }
 }
 
