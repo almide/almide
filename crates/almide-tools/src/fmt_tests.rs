@@ -568,3 +568,73 @@ mod marker_collapse {
         assert_eq!(once, twice);
     }
 }
+
+
+/// #2161 — line width. `fmt` had no limit: arguments and record fields the
+/// author had split across lines were folded back onto one line no matter
+/// how long it became. A container stays one-member-per-line when the author
+/// split it, or when its one-line form would pass `MAX_WIDTH`; a short
+/// one-line container stays as it is; both layouts are idempotent.
+#[cfg(test)]
+mod line_width_tests {
+    use almide_lang::lexer::Lexer;
+    use almide_lang::parser::Parser;
+    use crate::fmt::format_program;
+
+    fn fmt_src(src: &str) -> String {
+        let tokens = Lexer::tokenize(src);
+        let mut parser = Parser::new(tokens);
+        let program = parser.parse().expect("parse succeeds");
+        assert!(parser.errors.is_empty(), "parse errors: {:?}",
+            parser.errors.iter().map(|d| d.display()).collect::<Vec<_>>());
+        format_program(&program)
+    }
+
+    #[test]
+    fn a_short_call_stays_on_one_line() {
+        let src = "fn f(a: Int, b: Int) -> Int = g(a, b)\nfn g(a: Int, b: Int) -> Int = a + b\n";
+        let out = fmt_src(src);
+        assert!(out.contains("g(a, b)"), "{out}");
+    }
+
+    #[test]
+    fn a_call_the_author_split_stays_split() {
+        let src = "fn f(s: String) -> String = describe(\n  make(\n    s,\n    \"author\",\n    \"https://example.invalid/avatar.png\"))\n\
+                   fn make(a: String, b: String, c: String) -> String = a + b + c\n\
+                   fn describe(s: String) -> String = s\n";
+        let out = fmt_src(src);
+        assert!(out.contains("make(\n"), "the split is kept:\n{out}");
+        assert!(out.lines().any(|l| l.trim() == "s,"), "one member per line, trailing comma:\n{out}");
+        assert!(!out.contains("make(s, \"author\""), "must not fold the author's split:\n{out}");
+    }
+
+    #[test]
+    fn a_call_that_would_pass_the_width_is_stacked() {
+        let long = "\"".to_string() + &"x".repeat(60) + "\"";
+        let src = format!("fn f() -> String = concat({long}, {long})\nfn concat(a: String, b: String) -> String = a + b\n");
+        let out = fmt_src(&src);
+        assert!(out.contains("concat(\n"), "stacked past the width:\n{out}");
+        assert!(out.lines().all(|l| l.chars().count() <= crate::fmt::MAX_WIDTH + 4), "no line runs far past the width:\n{out}");
+    }
+
+    #[test]
+    fn a_record_literal_follows_the_same_rules() {
+        let src = "type P = { a: Int, b: Int }\nfn f() -> P = P {\n  a: 1,\n  b: 2,\n}\n";
+        let out = fmt_src(src);
+        assert!(out.contains("P {\n"), "{out}");
+        assert!(out.lines().any(|l| l.trim() == "a: 1,") && out.lines().any(|l| l.trim() == "b: 2,"), "{out}");
+        let one = "type P = { a: Int, b: Int }\nfn f() -> P = P { a: 1, b: 2 }\n";
+        assert!(fmt_src(one).contains("P { a: 1, b: 2 }"), "short one-liner stays");
+    }
+
+    #[test]
+    fn both_layouts_are_idempotent() {
+        let split = "fn f(s: String) -> String = make(\n  s,\n  \"b\",\n  \"c\")\nfn make(a: String, b: String, c: String) -> String = a + b + c\n";
+        let once = fmt_src(split);
+        assert_eq!(fmt_src(&once), once, "stacked layout must be a fixed point");
+        let long = "\"".to_string() + &"y".repeat(70) + "\"";
+        let wide = format!("fn f() -> String = concat({long}, {long})\nfn concat(a: String, b: String) -> String = a + b\n");
+        let once = fmt_src(&wide);
+        assert_eq!(fmt_src(&once), once, "width-driven layout must be a fixed point");
+    }
+}

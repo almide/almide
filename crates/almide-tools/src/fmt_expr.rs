@@ -342,8 +342,16 @@ fn fmt_expr_record(out: &mut String, expr: &Expr, depth: usize) {
         fmt_commented_members(out, &members, '}', depth);
         return;
     }
-    if fields.is_empty() { out.push_str("{}"); }
-    else { out.push_str("{ "); comma_sep(out, fields, |out, f| { w!(out, "{}: ", f.name); fmt_expr(out, &f.value, depth); }); out.push_str(" }"); }
+    if fields.is_empty() { out.push_str("{}"); return; }
+    let mut one = String::from("{ ");
+    comma_sep(&mut one, fields, |out, f| { w!(out, "{}: ", f.name); fmt_expr(out, &f.value, depth); });
+    one.push_str(" }");
+    if stack_members(out, &members, &one) {
+        out.push('{');
+        fmt_members_expanded(out, &members, '}', depth);
+    } else {
+        out.push_str(&one);
+    }
 }
 
 fn fmt_expr_spread_record(out: &mut String, expr: &Expr, depth: usize) {
@@ -360,6 +368,61 @@ fn fmt_expr_spread_record(out: &mut String, expr: &Expr, depth: usize) {
     out.push_str(" }");
 }
 
+/// #2161: line width. `almide fmt` had no limit — argument lists and record
+/// literals the author had split across lines were folded back onto one
+/// line regardless of length (394 characters in a real file). Two rules,
+/// either of which lays a container out one member per line:
+///
+/// - the author already split it — its members sit on different source
+///   lines — so the split is kept (idempotent: the expanded form is itself
+///   split, and stays that way);
+/// - the one-line form would run past `MAX_WIDTH` from where it starts.
+///
+/// Single-member containers never expand (there is nothing to stack), and a
+/// container carrying comments keeps the comment layout that already knows
+/// how to place them.
+pub const MAX_WIDTH: usize = 100;
+
+fn current_col(out: &str) -> usize {
+    out.rsplit('\n').next().map_or(0, |l| l.chars().count())
+}
+
+fn members_span_lines(members: &[(Option<&str>, &Expr)]) -> bool {
+    let mut lines = members.iter().filter_map(|(_, e)| e.span.map(|s| s.line));
+    match lines.next() {
+        Some(first) => lines.any(|l| l != first),
+        None => false,
+    }
+}
+
+/// One member per line, trailing comma on each, the closer back at `depth`
+/// — the shape `fmt_commented_members` already produces, minus its gate.
+fn fmt_members_expanded(out: &mut String, members: &[(Option<&str>, &Expr)], close: char, depth: usize) {
+    out.push('\n');
+    for (name, expr) in members {
+        emit_leading_comment_lines(out, expr.id, depth + 1);
+        out.push_str(&ind(depth + 1));
+        match name {
+            Some("...") => out.push_str("..."),
+            Some(name) => w!(out, "{name}: "),
+            None => {}
+        }
+        fmt_expr_sans_leading(out, expr, depth + 1);
+        out.push(',');
+        out.push('\n');
+    }
+    out.push_str(&ind(depth));
+    out.push(close);
+}
+
+/// Decide the layout for `members`, given the one-line rendering `one` (the
+/// text after the opener, closer included). Comments are only handled by the
+/// stacked path when present, so a commented container is left to its
+/// existing branch and never reaches here.
+fn stack_members(out: &str, members: &[(Option<&str>, &Expr)], one: &str) -> bool {
+    members.len() >= 2 && (members_span_lines(members) || current_col(out) + one.chars().count() > MAX_WIDTH)
+}
+
 fn fmt_expr_call(out: &mut String, expr: &Expr, depth: usize) {
     let ExprKind::Call { callee, args, type_args, named_args, .. } = &expr.kind else { unreachable!() };
     if try_fmt_fan_block_resugar(out, callee, args, depth) {
@@ -371,15 +434,21 @@ fn fmt_expr_call(out: &mut String, expr: &Expr, depth: usize) {
     let members: Vec<_> = args.iter().map(|e| (None, e))
         .chain(named_args.iter().map(|(n, e)| (Some(n.as_str()), e))).collect();
     if fmt_commented_members(out, &members, ')', depth) { return; }
-    comma_sep(out, args, |out, a| fmt_expr(out, a, depth));
+    let mut one = String::new();
+    comma_sep(&mut one, args, |out, a| fmt_expr(out, a, depth));
     if !named_args.is_empty() {
-        if !args.is_empty() { out.push_str(", "); }
-        comma_sep(out, named_args, |out, (name, expr)| {
+        if !args.is_empty() { one.push_str(", "); }
+        comma_sep(&mut one, named_args, |out, (name, expr)| {
             w!(out, "{name}: ");
             fmt_expr(out, expr, depth);
         });
     }
-    out.push(')');
+    one.push(')');
+    if stack_members(out, &members, &one) {
+        fmt_members_expanded(out, &members, ')', depth);
+    } else {
+        out.push_str(&one);
+    }
 }
 
 /// Wave 1 block forms: the parser synthesizes `fan.__any_block([() => …])`
