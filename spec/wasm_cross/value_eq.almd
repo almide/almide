@@ -9,10 +9,13 @@ effect fn main() -> Unit = {
   println(cmp(value.str("x"), value.str("x")) + cmp(value.str("xy"), value.str("xz")))
   println(cmp(value.array([value.int(1), value.int(2)]), value.array([value.int(1), value.int(2)])))
   println(cmp(value.object([("a", value.int(1))]), value.object([("a", value.int(2))])))
-  println(cmp(value.object([
-    ("a", value.array([value.int(1)]))
-  ]), value.object([
-    ("a", value.array([value.int(1)]))
-  ])))
+  println(cmp(
+    value.object([
+      ("a", value.array([value.int(1)]))
+    ]),
+    value.object([
+      ("a", value.array([value.int(1)]))
+    ]),
+  ))
   println(cmp(value.int(1), value.str("1")))
 }

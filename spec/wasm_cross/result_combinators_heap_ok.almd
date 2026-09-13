@@ -7,9 +7,15 @@
 // Each combinator sits in its own fn so the v1 leg verifies it independently.
 fn c_map(r: Result[String, String]) -> Result[String, String] = result.map(r, ((y) => y + "?"))
 
-fn c_map_err(r: Result[String, String]) -> Result[String, String] = result.map_err(r, ((y) => y + "!"))
+fn c_map_err(r: Result[String, String]) -> Result[String, String] = result.map_err(
+  r,
+  ((y) => y + "!"),
+)
 
-fn c_flat_map(r: Result[String, String]) -> Result[String, String] = result.flat_map(r, ((y) => ok(y + "F")))
+fn c_flat_map(r: Result[String, String]) -> Result[String, String] = result.flat_map(
+  r,
+  ((y) => ok(y + "F")),
+)
 
 fn c_uoe(r: Result[String, String]) -> String = result.unwrap_or_else(r, ((y) => "fb:" + y))
 

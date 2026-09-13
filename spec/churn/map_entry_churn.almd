@@ -14,7 +14,11 @@ fn main() -> Unit = {
   var sink = 0
   var i = 0
   while i < 200000 {
-    let m = map.set(map.set(map.new(), "k" + int.to_string(i % 10), "v" + int.to_string(i % 7)), "b", "y")
+    let m = map.set(
+      map.set(map.new(), "k" + int.to_string(i % 10), "v" + int.to_string(i % 7)),
+      "b",
+      "y",
+    )
     sink = sink + map.len(m)
     i = i + 1
   }

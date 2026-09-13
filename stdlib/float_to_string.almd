@@ -397,7 +397,12 @@ fn __sf_wdigits(f: Int, end: Int) -> Int = {
 }
 
 // |v| = f * 10^e (f > 0): strip trailing zeros, write the digits, render.
-fn __sf_finish(f: Int, e: Int, neg: Bool, sb: Int) -> String = if (f / 10) * 10 == f then __sf_finish(f / 10, e + 1, neg, sb)
+fn __sf_finish(f: Int, e: Int, neg: Bool, sb: Int) -> String = if (f / 10) * 10 == f then __sf_finish(
+  f / 10,
+  e + 1,
+  neg,
+  sb,
+)
 else {
   let end = sb + 196
   let dp = __sf_wdigits(f, end)

@@ -24,21 +24,30 @@ fn pass1(node: Node, line: Line) -> Float = {
 }
 
 test "member-container index borrow in for-in" {
-  let n = { children: [
-    { grow: 1.0, shrink: 0.5 },
-    { grow: 2.0, shrink: 1.0 }
-  ], gap: 4.0 }
-  let ln = { items: [
-    { idx: 0, basis: 2.0 },
-    { idx: 1, basis: 3.0 }
-  ], used: 0.0 }
+  let n = {
+    children: [
+      { grow: 1.0, shrink: 0.5 },
+      { grow: 2.0, shrink: 1.0 }
+    ],
+    gap: 4.0,
+  }
+  let ln = {
+    items: [
+      { idx: 0, basis: 2.0 },
+      { idx: 1, basis: 3.0 }
+    ],
+    used: 0.0,
+  }
   assert(pass1(n, ln) == 7.0)
 }
 
 test "member-container index borrow direct" {
-  let n = { children: [
-    { grow: 5.0, shrink: 0.0 }
-  ], gap: 0.0 }
+  let n = {
+    children: [
+      { grow: 5.0, shrink: 0.0 }
+    ],
+    gap: 0.0,
+  }
   assert(n.children[0].grow == 5.0)
 }
 
@@ -52,14 +61,20 @@ fn pass2(node: Node, line: Line, n: Int) -> Float = {
 }
 
 test "chained index-member scalar reads" {
-  let nd = { children: [
-    { grow: 2.0, shrink: 0.0 },
-    { grow: 5.0, shrink: 0.0 }
-  ], gap: 0.0 }
-  let ln = { items: [
-    { idx: 1, basis: 3.0 },
-    { idx: 0, basis: 4.0 }
-  ], used: 0.0 }
+  let nd = {
+    children: [
+      { grow: 2.0, shrink: 0.0 },
+      { grow: 5.0, shrink: 0.0 }
+    ],
+    gap: 0.0,
+  }
+  let ln = {
+    items: [
+      { idx: 1, basis: 3.0 },
+      { idx: 0, basis: 4.0 }
+    ],
+    used: 0.0,
+  }
   assert(pass2(nd, ln, 2) == 23.0)
 }
 
@@ -72,10 +87,13 @@ fn sum_items(line: Line, n: Int) -> Float = {
 }
 
 test "scalar index through a member-field list" {
-  let ln = { items: [
-    { idx: 0, basis: 1.5 },
-    { idx: 1, basis: 2.5 }
-  ], used: 0.0 }
+  let ln = {
+    items: [
+      { idx: 0, basis: 1.5 },
+      { idx: 1, basis: 2.5 }
+    ],
+    used: 0.0,
+  }
   assert(sum_items(ln, 2) == 4.0)
 }
 

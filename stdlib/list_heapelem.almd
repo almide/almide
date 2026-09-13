@@ -113,7 +113,12 @@ fn list_insert_heapelem(xs: List[Value], i: Int, x: Value) -> List[Value] = {
   buf
 }
 
-fn __lsh_remove_fill(srcbase: Int, dstbase: Int, n: Int, i: Int, oob: Int) -> Int = if oob == 1 then __lsh_copy(srcbase, dstbase, n, 0)
+fn __lsh_remove_fill(srcbase: Int, dstbase: Int, n: Int, i: Int, oob: Int) -> Int = if oob == 1 then __lsh_copy(
+  srcbase,
+  dstbase,
+  n,
+  0,
+)
 else {
   let _a = __lsh_copy(srcbase, dstbase, i, 0)
   let i1 = i + 1

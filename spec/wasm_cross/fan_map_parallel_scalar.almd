@@ -26,11 +26,17 @@ effect fn main() -> Unit = {
   let (p0, p1) = pairs[39]
   println("pairs=" + int.to_string(list.len(pairs)) + " last=" + int.to_string(p0) + "," + int.to_string(p1))
   // Record result: the parallel path.
-  let cells = fan.map(list.range(0, 8), (x) => ok(Cell { idx: x, score: float.from_int(churn(x, 1)) / 7.0 }))!
+  let cells = fan.map(
+    list.range(0, 8),
+    (x) => ok(Cell { idx: x, score: float.from_int(churn(x, 1)) / 7.0 }),
+  )!
   println("cell=" + int.to_string(cells[7].idx) + " " + float.to_string(cells[7].score))
   // First Err in LIST ORDER: index 3 fails while indices 4.. are heavier and
   // still in flight on other workers; the map's Err must be index 3's.
-  let r = fan.map(list.range(0, 40), (x) => if x == 3 or x == 30 then err("bad " + int.to_string(x)) else ok(churn(x, k)))
+  let r = fan.map(
+    list.range(0, 40),
+    (x) => if x == 3 or x == 30 then err("bad " + int.to_string(x)) else ok(churn(x, k)),
+  )
   match r {
     ok(_) => println("unexpected ok"),
     err(e) => println("err=" + e),

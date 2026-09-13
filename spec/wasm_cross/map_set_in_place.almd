@@ -10,7 +10,11 @@
 // same bytes: lengths, checksums, insertion order, every alias observation.
 type Holder = { snap: Map[Int, Int], tag: Int }
 
-fn checksum(m: Map[Int, Int]) -> Int = map.fold(m, 0, (acc, k, v) => (acc * 31 + k * 7 + v) % 1000000007)
+fn checksum(m: Map[Int, Int]) -> Int = map.fold(
+  m,
+  0,
+  (acc, k, v) => (acc * 31 + k * 7 + v) % 1000000007,
+)
 
 fn render(m: Map[Int, Int]) -> String = {
   var out = ""
@@ -51,7 +55,10 @@ fn main() -> Unit = {
   var b = map.set(a, 5000, 1)
   map.insert(m, 5001, 2)
   println("C.a=" + int.to_string(map.len(a)) + " b=" + int.to_string(map.len(b)) + " m=" + int.to_string(map.len(m)))
-  println("C.a.has5000=" + (if map.contains(a, 5000) then "yes" else "no") + " a.has5001=" + (if map.contains(a, 5001) then "yes" else "no") + " b.has5001=" + (if map.contains(b, 5001) then "yes" else "no"))
+  println("C.a.has5000=" + (if map.contains(a, 5000) then "yes" else "no") + " a.has5001=" + (if map.contains(
+    a,
+    5001,
+  ) then "yes" else "no") + " b.has5001=" + (if map.contains(b, 5001) then "yes" else "no"))
   // D. holders other than a var — a record field, an option payload, a tuple
   // slot — keep the pre-write entries across an overwrite AND an append
   var d: Map[Int, Int] = map.from_list([(1, 10), (2, 20)])

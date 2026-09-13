@@ -58,12 +58,16 @@ fn to_list[A](o: A?) -> List[A] = _
 // the monomorphised callsites the walker emits; this layer is the
 // behavioural source of truth and works on both Rust and WASM
 // targets without per-target dispatch arms.
-fn collect[T](xs: List[T?]) -> List[T]? = list.fold(xs, some([]), (acc, item) => match acc {
-  some(vals) => match item {
-    some(v) => some(vals + [v]),
+fn collect[T](xs: List[T?]) -> List[T]? = list.fold(
+  xs,
+  some([]),
+  (acc, item) => match acc {
+    some(vals) => match item {
+      some(v) => some(vals + [v]),
+      none => none,
+    },
     none => none,
   },
-  none => none,
-})
+)
 
 fn collect_map[T, U](xs: List[T], f: (T) -> U?) -> List[U]? = option.collect(list.map(xs, f))

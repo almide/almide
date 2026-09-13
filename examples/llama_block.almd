@@ -49,7 +49,20 @@ effect fn main() -> Unit = {
   let w_gate = matrix.ones(d_inner, d)
   let w_up = matrix.ones(d_inner, d)
   let w_down = matrix.ones(d, d_inner)
-  let out = llama_block(x, gamma_attn, gamma_ffn, wq, wk, wv, wo, w_gate, w_up, w_down, n_heads, eps)
+  let out = llama_block(
+    x,
+    gamma_attn,
+    gamma_ffn,
+    wq,
+    wk,
+    wv,
+    wo,
+    w_gate,
+    w_up,
+    w_down,
+    n_heads,
+    eps,
+  )
   let (rows, cols) = matrix.shape(out)
   println("llama_block output shape: " + int.to_string(rows) + " x " + int.to_string(cols))
 }

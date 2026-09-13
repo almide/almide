@@ -31,7 +31,10 @@ fn rotate_from(ps: List[P], start: Int) -> List[P] = {
 
 // The heap-result `if` the wall actually surfaced on: one arm returns the input
 // list, the other builds a rotated copy.
-fn maybe_rotate(ps: List[P], start: Int) -> List[P] = if start <= 0 then ps else rotate_from(ps, start)
+fn maybe_rotate(ps: List[P], start: Int) -> List[P] = if start <= 0 then ps else rotate_from(
+  ps,
+  start,
+)
 
 fn show(ps: List[P]) -> String = ps |> list.map((p) => float.to_string(p.x)) |> list.join(",")
 

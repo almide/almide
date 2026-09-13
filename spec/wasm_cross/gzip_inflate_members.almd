@@ -362,7 +362,15 @@ fn dynamic(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes) -> (Int, In
   }
   let lencode = construct(cl, 19)
   let (status, p5, b5, c5, lengths) = read_lengths(p, b, c, inp, lencode, nlen + ndis)
-  let (s2, p6, b6, c6) = codes(p5, b5, c5, inp, out, construct(lengths, nlen), construct(list.slice(lengths, nlen, nlen + ndis), ndis))
+  let (s2, p6, b6, c6) = codes(
+    p5,
+    b5,
+    c5,
+    inp,
+    out,
+    construct(lengths, nlen),
+    construct(list.slice(lengths, nlen, nlen + ndis), ndis),
+  )
   (if status != 0 then status else s2, p6, b6, c6)
 }
 
@@ -435,17 +443,30 @@ fn crc32(t: List[Int], b: Bytes, start: Int) -> Int = {
   int.bxor(cc, 4294967295)
 }
 
-fn u32_le(b: Bytes, p: Int) -> Int = int.bor(int.bor(bytes.get_or(b, p, 0), int.bshl(bytes.get_or(b, p + 1, 0), 8)), int.bor(int.bshl(bytes.get_or(b, p + 2, 0), 16), int.bshl(bytes.get_or(b, p + 3, 0), 24)))
+fn u32_le(b: Bytes, p: Int) -> Int = int.bor(
+  int.bor(bytes.get_or(b, p, 0), int.bshl(bytes.get_or(b, p + 1, 0), 8)),
+  int.bor(int.bshl(bytes.get_or(b, p + 2, 0), 16), int.bshl(bytes.get_or(b, p + 3, 0), 24)),
+)
 
-fn skip_zstr(b: Bytes, p: Int) -> Int = if bytes.get_or(b, p, 0) == 0 then p + 1 else skip_zstr(b, p + 1)
+fn skip_zstr(b: Bytes, p: Int) -> Int = if bytes.get_or(b, p, 0) == 0 then p + 1 else skip_zstr(
+  b,
+  p + 1,
+)
 
 // Position of the deflate stream after the gzip member header at `pos`, or -1 if not a gzip member.
 fn header_end(inp: Bytes, pos: Int) -> Int = {
-  if bytes.get_or(inp, pos, 0) != 31 or bytes.get_or(inp, pos + 1, 0) != 139 or bytes.get_or(inp, pos + 2, 0) != 8 then 0 - 1
+  if bytes.get_or(inp, pos, 0) != 31 or bytes.get_or(inp, pos + 1, 0) != 139 or bytes.get_or(
+    inp,
+    pos + 2,
+    0,
+  ) != 8 then 0 - 1
   else {
     let flg = bytes.get_or(inp, pos + 3, 0)
     let p0 = pos + 10
-    let p1 = if int.band(flg, 4) != 0 then p0 + 2 + int.bor(bytes.get_or(inp, p0, 0), int.bshl(bytes.get_or(inp, p0 + 1, 0), 8))
+    let p1 = if int.band(flg, 4) != 0 then p0 + 2 + int.bor(
+      bytes.get_or(inp, p0, 0),
+      int.bshl(bytes.get_or(inp, p0 + 1, 0), 8),
+    )
     else p0
     let p2 = if int.band(flg, 8) != 0 then skip_zstr(inp, p1) else p1
     let p3 = if int.band(flg, 16) != 0 then skip_zstr(inp, p2) else p2

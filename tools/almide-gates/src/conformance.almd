@@ -13,7 +13,10 @@ import counts
 // `string.is_digit`, not a hand-written `c >= "0" and c <= "9"` — that spelling emits
 // invalid Rust natively (#1033: only the left operand of the `and` gets `.to_string()`),
 // and the checker points at the stdlib function anyway (E015).
-fn zero_pad(s: String, width: Int) -> String = if string.len(s) >= width then s else zero_pad("0" + s, width)
+fn zero_pad(s: String, width: Int) -> String = if string.len(s) >= width then s else zero_pad(
+  "0" + s,
+  width,
+)
 
 fn als_sort_key(spec: String) -> String = {
   let body = if string.starts_with(spec, "ALS-") then string.slice(spec, 4, string.len(spec))
@@ -64,6 +67,9 @@ fn measure(tables: List[toml.Table]) -> String = int.to_string(list.len(sections
 fn report_body(tables: List[toml.Table], record: List[String]) -> String = {
   let secs = sections_of(tables)
   let rows = secs |> list.map((s) => row(tables, s)) |> list.join("\n")
-  let totals = counts.get(record, "conformance_sections") + " normative sections; " + counts.get(record, "conformance_fixtures") + " distinct executable fixtures."
+  let totals = counts.get(record, "conformance_sections") + " normative sections; " + counts.get(
+    record,
+    "conformance_fixtures",
+  ) + " distinct executable fixtures."
   counts.block(counts.get(record, "date"), totals) + "\n" + "| Section | Contracts | Fixtures (how CI runs each) |\n" + "|---------|-----------|------------------------------|\n" + rows + "\n"
 }

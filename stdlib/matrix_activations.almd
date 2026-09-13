@@ -244,7 +244,17 @@ else {
   let row = prim.alloc_list_f64(cols)
   let dh = prim.handle(row)
   let _cp = __rope_copy(dh, sh, cols, 0)
-  let _ht = __rope_heads(dh, sh, int.to_float(start + p), head_dim_f, theta, n_heads, head_dim, half, 0)
+  let _ht = __rope_heads(
+    dh,
+    sh,
+    int.to_float(start + p),
+    head_dim_f,
+    theta,
+    n_heads,
+    head_dim,
+    half,
+    0,
+  )
   prim.store_str(ho + 12 + p * 8, row)
   __rope_rows(ho, hx, n_heads, head_dim, half, head_dim_f, theta, cols, rows, start, p + 1)
 }
@@ -282,7 +292,17 @@ else {
   let row = prim.alloc_list_f64(cols)
   let dh = prim.handle(row)
   let _cp = __rope_copy(dh, sh, cols, 0)
-  let _ht = __rope_neox_heads(dh, sh, int.to_float(start + p), head_dim_f, theta, n_heads, head_dim, half, 0)
+  let _ht = __rope_neox_heads(
+    dh,
+    sh,
+    int.to_float(start + p),
+    head_dim_f,
+    theta,
+    n_heads,
+    head_dim,
+    half,
+    0,
+  )
   prim.store_str(ho + 12 + p * 8, row)
   __rope_neox_rows(ho, hx, n_heads, head_dim, half, head_dim_f, theta, cols, rows, start, p + 1)
 }
@@ -299,7 +319,19 @@ fn matrix_rope_rotate(x: List[List[Float]], n_heads: Int, head_dim: Int, theta: 
   let half = head_dim / 2
   let nh = __mx_head_geometry(__mx_head_count(n_heads), head_dim, rows, cols)
   let out: List[List[Float]] = prim.alloc_list_str(rows)
-  let _x = __rope_rows(prim.handle(out), hx, nh, head_dim, half, int.to_float(head_dim), theta, cols, rows, 0, 0)
+  let _x = __rope_rows(
+    prim.handle(out),
+    hx,
+    nh,
+    head_dim,
+    half,
+    int.to_float(head_dim),
+    theta,
+    cols,
+    rows,
+    0,
+    0,
+  )
   out
 }
 
@@ -317,7 +349,19 @@ fn matrix_rope_rotate_at(x: List[List[Float]], n_heads: Int, head_dim: Int, thet
   let nh = __mx_head_geometry(__mx_head_count(n_heads), head_dim, rows, cols)
   let start = if start_pos < 0 then 0 else start_pos
   let out: List[List[Float]] = prim.alloc_list_str(rows)
-  let _x = __rope_rows(prim.handle(out), hx, nh, head_dim, half, int.to_float(head_dim), theta, cols, rows, start, 0)
+  let _x = __rope_rows(
+    prim.handle(out),
+    hx,
+    nh,
+    head_dim,
+    half,
+    int.to_float(head_dim),
+    theta,
+    cols,
+    rows,
+    start,
+    0,
+  )
   out
 }
 
@@ -330,7 +374,19 @@ fn matrix_rope_rotate_neox_at(x: List[List[Float]], n_heads: Int, head_dim: Int,
   let nh = __mx_head_geometry(__mx_head_count(n_heads), head_dim, rows, cols)
   let start = if start_pos < 0 then 0 else start_pos
   let out: List[List[Float]] = prim.alloc_list_str(rows)
-  let _x = __rope_neox_rows(prim.handle(out), hx, nh, head_dim, half, int.to_float(head_dim), theta, cols, rows, start, 0)
+  let _x = __rope_neox_rows(
+    prim.handle(out),
+    hx,
+    nh,
+    head_dim,
+    half,
+    int.to_float(head_dim),
+    theta,
+    cols,
+    rows,
+    start,
+    0,
+  )
   out
 }
 
@@ -437,13 +493,25 @@ fn __mha_impl(q: List[List[Float]], k: List[List[Float]], v: List[List[Float]], 
   out
 }
 
-fn matrix_multi_head_attention(q: List[List[Float]], k: List[List[Float]], v: List[List[Float]], n_heads: Int) -> List[List[Float]] = __mha_impl(q, k, v, n_heads, false)
+fn matrix_multi_head_attention(q: List[List[Float]], k: List[List[Float]], v: List[List[Float]], n_heads: Int) -> List[List[Float]] = __mha_impl(
+  q,
+  k,
+  v,
+  n_heads,
+  false,
+)
 
 // from_q1_0_bytes(data, offset, rows, cols) — Q1_0 dequant. 18 bytes / 128 weights:
 // [0..2] fp16 scale (LE), [2..18] 16 sign bytes (LSB-first). bit 1 → +scale, 0 → -scale.
 // v0 (emit_wasm/calls_matrix_p4.rs "from_q1_0_bytes"); pure bit-ops (no exp). Byte data at
 // handle(data)+12+offset. scale recomputed per element (block = k>>7 → identical value).
-fn matrix_masked_multi_head_attention(q: List[List[Float]], k: List[List[Float]], v: List[List[Float]], n_heads: Int) -> List[List[Float]] = __mha_impl(q, k, v, n_heads, true)
+fn matrix_masked_multi_head_attention(q: List[List[Float]], k: List[List[Float]], v: List[List[Float]], n_heads: Int) -> List[List[Float]] = __mha_impl(
+  q,
+  k,
+  v,
+  n_heads,
+  true,
+)
 
 // The dequantization-zero ruling (#1358, C-229): a dequantized element whose
 // MAGNITUDE is zero is +0.0. A quantized element is magnitude (the block's fp16
@@ -457,7 +525,11 @@ fn __dq_zero(v: Float) -> Float = if v == 0.0 then 0.0 else v
 // Normalize an fp16 SUBNORMAL mantissa: shift left until bit 10 is set, dropping
 // one from the exponent per shift — native's `while m & 0x400 == 0` loop in
 // `fp16_bits_to_f32`, as a recursion. `e` enters at 1 - 15 = -14.
-fn __fp16_subnormal_bits(signbits: Int, m: Int, e: Int) -> Int = if prim.band(m, 1024) == 0 then __fp16_subnormal_bits(signbits, prim.bshl(m, 1), e - 1)
+fn __fp16_subnormal_bits(signbits: Int, m: Int, e: Int) -> Int = if prim.band(m, 1024) == 0 then __fp16_subnormal_bits(
+  signbits,
+  prim.bshl(m, 1),
+  e - 1,
+)
 else prim.bor(prim.bor(signbits, prim.bshl(e + 127, 23)), prim.bshl(prim.band(m, 1023), 13))
 
 // fp16 bit pattern -> f32 bit pattern, the exact mirror of native's
@@ -471,11 +543,17 @@ fn __fp16_bits(raw: Int) -> Int = {
   let mant = prim.band(raw, 1023)
   if expv == 0 and mant == 0 then 0
   else if expv == 0 then __fp16_subnormal_bits(signbits, mant, 0 - 14)
-  else if expv == 31 then prim.bor(prim.bor(signbits, prim.bshl(255, 23)), prim.bshl(mant, 13)) else prim.bor(prim.bor(signbits, prim.bshl(expv + 112, 23)), prim.bshl(mant, 13))
+  else if expv == 31 then prim.bor(prim.bor(signbits, prim.bshl(255, 23)), prim.bshl(mant, 13)) else prim.bor(
+    prim.bor(signbits, prim.bshl(expv + 112, 23)),
+    prim.bshl(mant, 13),
+  )
 }
 
 fn __q10_scale(base: Int, block_start: Int) -> Float = {
-  let raw = prim.bor(prim.load8(base + block_start), prim.bshl(prim.load8(base + block_start + 1), 8))
+  let raw = prim.bor(
+    prim.load8(base + block_start),
+    prim.bshl(prim.load8(base + block_start + 1), 8),
+  )
   prim.bits_to_f32(__fp16_bits(raw))
 }
 

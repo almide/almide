@@ -5,10 +5,13 @@
 import recshape
 
 test "cross-module recursive record-variant constructs and recurses" {
-  let p = recshape.Group { name: "g", patterns: [
-    recshape.Leaf("a"),
-    recshape.Group { name: "h", patterns: [recshape.Leaf("b")] }
-  ] }
+  let p = recshape.Group {
+    name: "g",
+    patterns: [
+      recshape.Leaf("a"),
+      recshape.Group { name: "h", patterns: [recshape.Leaf("b")] }
+    ],
+  }
   assert_eq(recshape.emit(p), "g[a,h[b]]")
 }
 

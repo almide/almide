@@ -15,7 +15,10 @@
 // keeps every recursive structure inside the self-hosted Value machinery, so
 // the whole interpreter runs byte-identical on native and wasm.
 // ── Tokenizer ────────────────────────────────────────────────────────────
-fn tokenize(src: String) -> List[String] = src |> string.replace("(", " ( ") |> string.replace(")", " ) ") |> string.replace("\n", " ") |> string.split(" ") |> list.filter((t) => t != "")
+fn tokenize(src: String) -> List[String] = src |> string.replace("(", " ( ") |> string.replace(
+  ")",
+  " ) ",
+) |> string.replace("\n", " ") |> string.split(" ") |> list.filter((t) => t != "")
 
 fn is_number(t: String) -> Bool = {
   let head = string.slice(t, 0, 1)
@@ -75,7 +78,10 @@ fn scope_bind(env2: Value, pairs: List[(Value, Value)]) -> Value = match list.fi
   },
 }
 
-fn scope_child(parent: Value, names: List[Value], vals: List[Value]) -> Value = scope_bind(value.object([("#parent", parent)]), list.zip(names, vals))
+fn scope_child(parent: Value, names: List[Value], vals: List[Value]) -> Value = scope_bind(
+  value.object([("#parent", parent)]),
+  list.zip(names, vals),
+)
 
 fn scope_chain_get(env: Value, name: String) -> Result[Value, String] = match value.field(env, name) {
   ok(v) => ok(v),
@@ -98,7 +104,10 @@ fn scope_get(env: Value, name: String, genv: Value) -> Value = match scope_chain
   },
 }
 
-fn scope_define(env: Value, name: String, v: Value) -> Value = value.merge(env, value.object([(name, v)]))
+fn scope_define(env: Value, name: String, v: Value) -> Value = value.merge(
+  env,
+  value.object([(name, v)]),
+)
 
 fn sym_name(v: Value) -> String = value.as_string(v) ?? ""
 
@@ -230,7 +239,10 @@ fn builtin(name: String, args: List[Value]) -> Value = {
 }
 
 // ── Driver: run a program (a list of forms), threading `define`s ────────
-fn run_forms(forms: List[Value], env: Value, out: List[String]) -> List[String] = match list.get(forms, 0) {
+fn run_forms(forms: List[Value], env: Value, out: List[String]) -> List[String] = match list.get(
+  forms,
+  0,
+) {
   none => out,
   some(form) => {
     let rest = list.tail(forms)
@@ -249,7 +261,11 @@ fn run_forms(forms: List[Value], env: Value, out: List[String]) -> List[String] 
   },
 }
 
-fn run(src: String) -> List[String] = run_forms(parse_program(tokenize(src), 0, []), scope_new(), [])
+fn run(src: String) -> List[String] = run_forms(
+  parse_program(tokenize(src), 0, []),
+  scope_new(),
+  [],
+)
 
 fn show(title: String, src: String) -> Unit = {
   println("; " + title)
@@ -261,8 +277,20 @@ fn show(title: String, src: String) -> Unit = {
 }
 
 fn main() -> Unit = {
-  show("recursion — factorial and fibonacci", "\n    (define fact (lambda (n) (if (< n 2) 1 (* n (fact (- n 1))))))\n    (define fib (lambda (n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2))))))\n    (fact 10)\n    (fib 15)\n  ")
-  show("closures — make-adder captures its environment", "\n    (define make-adder (lambda (n) (lambda (x) (+ x n))))\n    (define add5 (make-adder 5))\n    (define add40 (make-adder 40))\n    (add5 2)\n    (+ (add40 2) (add5 0))\n  ")
-  show("higher-order — map, defined in lisp itself", "\n    (define map (lambda (f xs)\n      (if (null? xs) (quote ())\n          (cons (f (car xs)) (map f (cdr xs))))))\n    (map (lambda (x) (* x x)) (list 1 2 3 4 5))\n  ")
-  show("quicksort — in lisp, on the interpreter, on both targets", "\n    (define filter (lambda (p xs)\n      (if (null? xs) (quote ())\n          (if (p (car xs))\n              (cons (car xs) (filter p (cdr xs)))\n              (filter p (cdr xs))))))\n    (define qsort (lambda (xs)\n      (if (null? xs) (quote ())\n          (let ((pivot (car xs)) (rest (cdr xs)))\n            (append\n              (qsort (filter (lambda (x) (< x pivot)) rest))\n              (cons pivot\n                (qsort (filter (lambda (x) (> x pivot)) rest))))))))\n    (qsort (list 5 3 8 1 9 2 7 4 6))\n  ")
+  show(
+    "recursion — factorial and fibonacci",
+    "\n    (define fact (lambda (n) (if (< n 2) 1 (* n (fact (- n 1))))))\n    (define fib (lambda (n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2))))))\n    (fact 10)\n    (fib 15)\n  ",
+  )
+  show(
+    "closures — make-adder captures its environment",
+    "\n    (define make-adder (lambda (n) (lambda (x) (+ x n))))\n    (define add5 (make-adder 5))\n    (define add40 (make-adder 40))\n    (add5 2)\n    (+ (add40 2) (add5 0))\n  ",
+  )
+  show(
+    "higher-order — map, defined in lisp itself",
+    "\n    (define map (lambda (f xs)\n      (if (null? xs) (quote ())\n          (cons (f (car xs)) (map f (cdr xs))))))\n    (map (lambda (x) (* x x)) (list 1 2 3 4 5))\n  ",
+  )
+  show(
+    "quicksort — in lisp, on the interpreter, on both targets",
+    "\n    (define filter (lambda (p xs)\n      (if (null? xs) (quote ())\n          (if (p (car xs))\n              (cons (car xs) (filter p (cdr xs)))\n              (filter p (cdr xs))))))\n    (define qsort (lambda (xs)\n      (if (null? xs) (quote ())\n          (let ((pivot (car xs)) (rest (cdr xs)))\n            (append\n              (qsort (filter (lambda (x) (< x pivot)) rest))\n              (cons pivot\n                (qsort (filter (lambda (x) (> x pivot)) rest))))))))\n    (qsort (list 5 3 8 1 9 2 7 4 6))\n  ",
+  )
 }

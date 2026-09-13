@@ -19,7 +19,11 @@
 // implementation of all seven is `crates/almide-interp/tests/eval_test.rs`.
 local fn add(acc: Int, n: Int) -> Result[Int, String] = ok(acc + n)
 
-local fn sum_from(xs: List[Int], init: Int) -> Result[Int, String] = list.fold(xs, init, (acc, n) => add(acc, n)!)
+local fn sum_from(xs: List[Int], init: Int) -> Result[Int, String] = list.fold(
+  xs,
+  init,
+  (acc, n) => add(acc, n)!,
+)
 
 local fn first_hit(xs: List[Int]) -> Result[Int?, String] = list.find(xs, (n) => ok(n > 9)!)
 

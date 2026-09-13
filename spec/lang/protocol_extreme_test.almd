@@ -112,7 +112,10 @@ protocol Mergeable {
 
 type Counter: Mergeable = { total: Int, count: Int }
 
-fn Counter.merge(a: Counter, b: Counter) -> Counter = Counter { total: a.total + b.total, count: a.count + b.count }
+fn Counter.merge(a: Counter, b: Counter) -> Counter = Counter {
+  total: a.total + b.total,
+  count: a.count + b.count,
+}
 
 fn Counter.empty() -> Counter = Counter { total: 0, count: 0 }
 

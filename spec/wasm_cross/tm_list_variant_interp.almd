@@ -6,9 +6,12 @@ type V = | A(Int) | B(String)
 
 fn main() -> Unit = {
   let v: List[V] = [A(1), B("t"), A(2)]
-  let msg = "got=${list.join(list.map(v, (e) => match e {
-    A(n) => int.to_string(n),
-    B(s) => s,
-  }), "/")}"
+  let msg = "got=${list.join(
+    list.map(v, (e) => match e {
+      A(n) => int.to_string(n),
+      B(s) => s,
+    }),
+    "/",
+  )}"
   println(msg)
 }

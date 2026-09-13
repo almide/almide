@@ -479,19 +479,25 @@ test "list.zip different lengths" {
 // list.zip
 // ============================================================
 test "list.flatten basic" {
-  assert_eq(list.flatten([
-    [1, 2],
-    [3],
-    [4, 5]
-  ]), [1, 2, 3, 4, 5])
+  assert_eq(
+    list.flatten([
+      [1, 2],
+      [3],
+      [4, 5]
+    ]),
+    [1, 2, 3, 4, 5],
+  )
 }
 
 test "list.flatten empty inner" {
-  assert_eq(list.flatten([
-    [1],
-    [],
-    [2]
-  ]), [1, 2])
+  assert_eq(
+    list.flatten([
+      [1],
+      [],
+      [2]
+    ]),
+    [1, 2],
+  )
 }
 
 // ============================================================
@@ -531,10 +537,13 @@ test "list.sort_by string key" {
     some(v) => v,
     none => "",
   })
-  assert_eq(list.map(sorted, (x) => match list.get(x, 0) {
-    some(v) => v,
-    none => "",
-  }), ["a", "b", "c"])
+  assert_eq(
+    list.map(sorted, (x) => match list.get(x, 0) {
+      some(v) => v,
+      none => "",
+    }),
+    ["a", "b", "c"],
+  )
 }
 
 // ============================================================

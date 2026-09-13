@@ -38,7 +38,11 @@ fn counter(i: Int) -> Int = {
   t["k" + int.to_string(i)] = "v" + int.to_string(i)
   t["k" + int.to_string(i)] = "w" + int.to_string(i)
   let vs = map.values(t) |> list.join("")
-  map.len(m) + map.len(shared) + string.len(vs) + f + list.len(map.entries(doubled)) + map.fold(m, 0, (acc, k, v) => acc + v)
+  map.len(m) + map.len(shared) + string.len(vs) + f + list.len(map.entries(doubled)) + map.fold(
+    m,
+    0,
+    (acc, k, v) => acc + v,
+  )
 }
 
 fn main() -> Unit = {

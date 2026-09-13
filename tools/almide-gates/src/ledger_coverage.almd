@@ -49,14 +49,20 @@ fn has_source_suffix(path: String) -> Bool = [".rs", ".almd", ".lean", ".toml", 
 // the scan walks each line looking for a prefix and then takes the longest run of path
 // characters from there. Written as a scanner rather than a regex because the regex is the
 // part that has silently mis-read its input three times in this Unit already.
-fn is_path_char(c: String) -> Bool = string.contains("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-/", c)
+fn is_path_char(c: String) -> Bool = string.contains(
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-/",
+  c,
+)
 
 fn take_path_run(s: String, start: Int) -> String = {
   let e = scan_path(s, start)
   string.slice(s, start, e)
 }
 
-fn scan_path(s: String, p: Int) -> Int = if p < string.len(s) and is_path_char(string.slice(s, p, p + 1)) then scan_path(s, p + 1) else p
+fn scan_path(s: String, p: Int) -> Int = if p < string.len(s) and is_path_char(string.slice(s, p, p + 1)) then scan_path(
+  s,
+  p + 1,
+) else p
 
 // One line's candidates, in the order they appear — the bash sorts and de-dups them globally,
 // so per-line order does not survive, but keeping it makes the function testable.
@@ -65,18 +71,28 @@ else {
   let rest = string.slice(line, at)
   if is_source_prefix(rest) then {
     let run = take_path_run(line, at)
-    cited_paths_in(line, at + string.len(run), if has_source_suffix(run) then acc + [run]
-    else acc)
+    cited_paths_in(
+      line,
+      at + string.len(run),
+      if has_source_suffix(run) then acc + [run]
+      else acc,
+    )
   } else cited_paths_in(line, at + 1, acc)
 }
 
 test "a cited path is extracted from prose, and only when it looks like a source file" {
   // Statements legitimately contain prose around the path, and a bare directory or a doc file
   // is not this rule's business.
-  assert_eq(cited_paths_in("see crates/almide-mir/src/x.rs for the pass", 0, []), ["crates/almide-mir/src/x.rs"])
+  assert_eq(
+    cited_paths_in("see crates/almide-mir/src/x.rs for the pass", 0, []),
+    ["crates/almide-mir/src/x.rs"],
+  )
   assert_eq(cited_paths_in("the docs/contracts/README.md index", 0, []), [])
   assert_eq(cited_paths_in("spec/wasm_cross/ has fixtures", 0, []), [])
-  assert_eq(cited_paths_in("both tests/a.rs and proofs/b.lean", 0, []), ["tests/a.rs", "proofs/b.lean"])
+  assert_eq(
+    cited_paths_in("both tests/a.rs and proofs/b.lean", 0, []),
+    ["tests/a.rs", "proofs/b.lean"],
+  )
 }
 
 test "the scan does not run off the end or loop on a non-prefix line" {
@@ -95,7 +111,10 @@ fn coverage_gaps(ids: List[String], maxnum: Int) -> List[String] = {
   1...maxnum |> list.filter((i) => not list.contains(ids, "C-" + pad3(i))) |> list.map((i) => "coverage gap: C-" + pad3(i) + " is missing (C-001..C-" + pad3(maxnum) + " must be contiguous)")
 }
 
-fn max_id_num(ids: List[String]) -> Int = ids |> list.map((id) => int.parse(string.slice(id, 2)) ?? 0) |> list.fold(0, (a, b) => if b > a then b else a)
+fn max_id_num(ids: List[String]) -> Int = ids |> list.map((id) => int.parse(string.slice(id, 2)) ?? 0) |> list.fold(
+  0,
+  (a, b) => if b > a then b else a,
+)
 
 // ── (f) RATCHET: the flagged count may only shrink ──────────────────────────
 //
@@ -118,7 +137,10 @@ test "the retired-subsystem rule fires on a dead PARENT, not a dead file" {
   // A statement may legitimately name an illustrative file inside a live directory. Flagging
   // those would make the check useless within a week; flagging a vanished directory catches
   // the actual signature — a whole subsystem deleted out from under the prose.
-  assert_eq(parent_dir("crates/almide-codegen/src/emit_wasm/rt_dragon.rs"), "crates/almide-codegen/src/emit_wasm")
+  assert_eq(
+    parent_dir("crates/almide-codegen/src/emit_wasm/rt_dragon.rs"),
+    "crates/almide-codegen/src/emit_wasm",
+  )
   assert_eq(parent_dir("top.rs"), ".")
   assert_eq(list.len(dead_path_error("a/b.rs", "a")), 1)
 }

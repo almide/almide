@@ -238,7 +238,12 @@ fn bytes_copy_within(b: Bytes, src_start: Int, src_end: Int, dst: Int) -> Unit =
   let e = if src_end >= 0 then (if src_end < n then src_end else n)
   else n
   let cnt = e - src_start
-  let _ = if src_start >= 0 then (if src_start < e then (if dst >= 0 then (if dst + cnt <= n then __cw_move(base, src_start, dst, cnt)
+  let _ = if src_start >= 0 then (if src_start < e then (if dst >= 0 then (if dst + cnt <= n then __cw_move(
+    base,
+    src_start,
+    dst,
+    cnt,
+  )
   else 0)
   else 0)
   else 0)

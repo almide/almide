@@ -42,7 +42,10 @@ fn crc32(data: Bytes) -> Int = {
     acc = int.bxor(acc, bytes.get_or(data, i, 0))
     var k = 0
     while k < 8 {
-      acc = if int.band(acc, 1) == 1 then int.bxor(3988292384, int.bshr(acc, 1)) else int.bshr(acc, 1)
+      acc = if int.band(acc, 1) == 1 then int.bxor(3988292384, int.bshr(acc, 1)) else int.bshr(
+        acc,
+        1,
+      )
       k = k + 1
     }
     i = i + 1

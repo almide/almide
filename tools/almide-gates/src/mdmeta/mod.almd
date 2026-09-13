@@ -64,5 +64,9 @@ fn basename_stem(path: String) -> String = {
 fn parse(path: String, content: String) -> Meta = {
   let lines = string.split(content, "\n")
   let t = find_title(lines)
-  Meta { title: if t == "" then basename_stem(path) else t, description: find_description(lines), done: find_done(lines) }
+  Meta {
+    title: if t == "" then basename_stem(path) else t,
+    description: find_description(lines),
+    done: find_done(lines),
+  }
 }

@@ -62,9 +62,12 @@ fn main() -> Unit = {
     ok(hit) => println(show_hit(hit)),
     err(e) => println(e),
   }
-  match find_row([
-    Row { id: "a" }
-  ], "zz") {
+  match find_row(
+    [
+      Row { id: "a" }
+    ],
+    "zz",
+  ) {
     ok(hit) => println(show_hit(hit)),
     err(e) => println(e),
   }
@@ -90,15 +93,21 @@ fn main() -> Unit = {
     err(e) => println(e),
   }
   // bare-call if-tail, record — the asymmetric cell, both branches
-  match pick_row([
-    Row { id: "p" }
-  ], true) {
+  match pick_row(
+    [
+      Row { id: "p" }
+    ],
+    true,
+  ) {
     ok(hit) => println(show_hit(hit)),
     err(e) => println(e),
   }
-  match pick_row([
-    Row { id: "p" }
-  ], false) {
+  match pick_row(
+    [
+      Row { id: "p" }
+    ],
+    false,
+  ) {
     ok(hit) => println(show_hit(hit)),
     err(e) => println(e),
   }

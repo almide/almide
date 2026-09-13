@@ -66,7 +66,12 @@ fn list_insert_str(xs: List[String], i: Int, x: String) -> List[String] = {
   buf
 }
 
-fn __ls_remove_fill(srcbase: Int, dstbase: Int, n: Int, i: Int, oob: Int) -> Int = if oob == 1 then __copy_slots_rc(srcbase, dstbase, n, 0)
+fn __ls_remove_fill(srcbase: Int, dstbase: Int, n: Int, i: Int, oob: Int) -> Int = if oob == 1 then __copy_slots_rc(
+  srcbase,
+  dstbase,
+  n,
+  0,
+)
 else {
   let _a = __copy_slots_rc(srcbase, dstbase, i, 0)
   let i1 = i + 1
@@ -267,7 +272,12 @@ fn list_insert(xs: List[Int], i: Int, x: Int) -> List[Int] = {
 // list.remove_at(xs, i): drop element i (length n-1) when 0<=i<n, else an unchanged
 // length-n copy (v0's `(i as usize) < len`). newlen + the copy plan are scalar, so the
 // length-dependent branch lives in __remove_fill, keeping a plain heap tail.
-fn __remove_fill(srcbase: Int, dstbase: Int, n: Int, i: Int, oob: Int) -> Int = if oob == 1 then __copy_slots(srcbase, dstbase, n, 0)
+fn __remove_fill(srcbase: Int, dstbase: Int, n: Int, i: Int, oob: Int) -> Int = if oob == 1 then __copy_slots(
+  srcbase,
+  dstbase,
+  n,
+  0,
+)
 else {
   let _a = __copy_slots(srcbase, dstbase, i, 0)
   // src[0,i) -> dst[0,i)

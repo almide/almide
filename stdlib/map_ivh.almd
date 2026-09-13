@@ -110,7 +110,11 @@ else match list.get(pairs, i) {
   none => m,
 }
 
-fn map_from_list_ivh(pairs: List[(Int, String)]) -> Map[Int, String] = __ivh_from_list_at(pairs, 0, map_new_ivh())
+fn map_from_list_ivh(pairs: List[(Int, String)]) -> Map[Int, String] = __ivh_from_list_at(
+  pairs,
+  0,
+  map_new_ivh(),
+)
 
 // `${Map[Int, String]}` display — v0's `[10: "x", 20: "y"]` (insertion order, raw int
 // keys, QUOTED + escaped String values; empty map → `[:]`). Escaping via the

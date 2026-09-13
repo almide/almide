@@ -48,6 +48,9 @@ fn main() -> Unit = {
   println("lit=${by_lit(m) ?? -1} let=${by_let(m) ?? -1}")
   println("param=${by_param(m, "c") ?? -1} miss=${by_param(m, "zz") ?? -1}")
   println("param_let=${by_param_let(m, "a")} interp=${by_param_interp(m, "b")} twice=${by_param_twice(m, "c")}")
-  println("field=${by_field(m, Rec { name: "b" }) ?? -1} loop=${by_loop(m, ["a", "b", "zz"])} lambda=${by_lambda(m, ["c", "zz", "a"])}")
+  println("field=${by_field(m, Rec { name: "b" }) ?? -1} loop=${by_loop(m, ["a", "b", "zz"])} lambda=${by_lambda(
+    m,
+    ["c", "zz", "a"],
+  )}")
   println("int=${by_int_param([1: "x", 2: "y"], 2) ?? "-"} get=${by_get(m, "c") ?? -1}")
 }

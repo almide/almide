@@ -92,7 +92,10 @@ effect fn gen_contracts_readme(root: String) -> String = {
   // The total is the stamped record rendered, not `list.len(rs)`: the rows are derived every
   // run, the count only at `gen-ledger-counts.sh` time (see counts.almd).
   let record = counts.load("proofs/ledger-counts.toml")!
-  header + counts.block(counts.get(record, "date"), counts.get(record, "contracts") + " contracts") + "\n" + "| ID | Contract | Since | Status | Strongest Evidence | # Fixtures |\n" + "|----|----------|-------|--------|--------------------|-----------:|\n" + list.join(rs, "\n") + "\n\n"
+  header + counts.block(counts.get(record, "date"), counts.get(record, "contracts") + " contracts") + "\n" + "| ID | Contract | Since | Status | Strongest Evidence | # Fixtures |\n" + "|----|----------|-------|--------|--------------------|-----------:|\n" + list.join(
+    rs,
+    "\n",
+  ) + "\n\n"
 }
 
 effect fn gen_conformance(root: String) -> String = {
@@ -108,12 +111,16 @@ effect fn main() -> Unit = {
   let cmd = list.get_or(args, 0, "roadmap-readme")
   // `output-parity` is the one subcommand whose root is the REPOSITORY, not a doc
   // directory — it walks `spec/` and reads a baseline under `proofs/`.
-  let root = list.get_or(args, 1, match cmd {
-    "output-parity" => ".",
-    "check-contracts" => "docs/contracts",
-    "bench" => "docs/benchmarks",
-    _ => "docs/roadmap",
-  })
+  let root = list.get_or(
+    args,
+    1,
+    match cmd {
+      "output-parity" => ".",
+      "check-contracts" => "docs/contracts",
+      "bench" => "docs/benchmarks",
+      _ => "docs/roadmap",
+    },
+  )
   let body = match cmd {
     "contracts-readme" => gen_contracts_readme(root)!,
     "conformance" => gen_conformance(root)!,
@@ -125,7 +132,10 @@ effect fn main() -> Unit = {
     // implementation rather than a shell copy and an Almide copy.
     "fuzz-track-record" => {
       let n = int.parse(list.get_or(args, 2, "20")) ?? 20
-      list.join(track_record.report("almide/almide", n, "Generative differential fuzz", "Run fuzz campaign")!, "\n") + "\n"
+      list.join(
+        track_record.report("almide/almide", n, "Generative differential fuzz", "Run fuzz campaign")!,
+        "\n",
+      ) + "\n"
     },
     // The contract-ledger gate. Like `output-parity` it reports through its EXIT CODE — the
     // `::error::` prefix is how GitHub Actions annotates a line, and the non-zero exit is what
@@ -214,7 +224,11 @@ fn first_divergence(expected: String, actual: String) -> String = {
   let a = string.split(actual, "\n")
   let hit = list.range(0, int.max(list.len(e), list.len(a))) |> list.find((i) => list.get_or(e, i, "<missing>") != list.get_or(a, i, "<missing>"))
   match hit {
-    some(i) => "line " + int.to_string(i + 1) + "\n  committed: " + list.get_or(e, i, "<missing>") + "\n  rendered:  " + list.get_or(a, i, "<missing>"),
+    some(i) => "line " + int.to_string(i + 1) + "\n  committed: " + list.get_or(e, i, "<missing>") + "\n  rendered:  " + list.get_or(
+      a,
+      i,
+      "<missing>",
+    ),
     none => "",
   }
 }
@@ -227,11 +241,23 @@ fn first_divergence(expected: String, actual: String) -> String = {
 // root, as CI's "Almide dogfood tests" step does, and read the committed docs the bash
 // generators produced.
 test "the conformance rendering is byte-identical to the committed docs/contracts/conformance.md" {
-  assert_eq(first_divergence(fs.read_text("docs/contracts/conformance.md")!, gen_conformance("docs/contracts")!), "")
+  assert_eq(
+    first_divergence(
+      fs.read_text("docs/contracts/conformance.md")!,
+      gen_conformance("docs/contracts")!,
+    ),
+    "",
+  )
 }
 
 test "the index rendering is byte-identical to the committed docs/contracts/README.md" {
-  assert_eq(first_divergence(fs.read_text("docs/contracts/README.md")!, gen_contracts_readme("docs/contracts")!), "")
+  assert_eq(
+    first_divergence(
+      fs.read_text("docs/contracts/README.md")!,
+      gen_contracts_readme("docs/contracts")!,
+    ),
+    "",
+  )
 }
 
 // The roadmap index is this tool's DEFAULT subcommand and was the one twin with no
@@ -245,7 +271,10 @@ test "the index rendering is byte-identical to the committed docs/contracts/READ
 // the `checks` job's "Roadmap README up to date" step; green on both means all three
 // renderings agree.
 test "the roadmap index rendering is byte-identical to the committed docs/roadmap/README.md" {
-  assert_eq(first_divergence(fs.read_text("docs/roadmap/README.md")!, gen_roadmap_readme("docs/roadmap")!), "")
+  assert_eq(
+    first_divergence(fs.read_text("docs/roadmap/README.md")!, gen_roadmap_readme("docs/roadmap")!),
+    "",
+  )
 }
 
 test "the ledger is well-formed under the subset reader — no block shape had to be recovered" {

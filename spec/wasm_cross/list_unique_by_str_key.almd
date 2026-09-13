@@ -27,12 +27,18 @@ fn main() -> Unit = {
 test "unique_by over scalar and String keys" {
   assert_eq(list.unique_by([true, true, false], ((x) => "same")), [true])
   assert_eq(list.unique_by([1, 2, 3, 4], ((x) => x % 2)), [1, 2])
-  assert_eq(list.unique_by([
-    1,
-    2,
-    3,
-    4,
-    5,
-    6
-  ], ((x) => int.to_string(x % 3))), [1, 2, 3])
+  assert_eq(
+    list.unique_by(
+      [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ],
+      ((x) => int.to_string(x % 3)),
+    ),
+    [1, 2, 3],
+  )
 }

@@ -11,10 +11,14 @@ fn decode_container(v: Value) -> Container = match Container.decode(v) {
 }
 
 test "list encode-decode roundtrip" {
-  let c = Container { name: "box", items: [
-    Item { id: 1, value: "a" },
-    Item { id: 2, value: "b" }
-  ], tags: ["x", "y"] }
+  let c = Container {
+    name: "box",
+    items: [
+      Item { id: 1, value: "a" },
+      Item { id: 2, value: "b" }
+    ],
+    tags: ["x", "y"],
+  }
   let text = json.stringify(c.encode())
   println(text)
   match json.parse(text) {

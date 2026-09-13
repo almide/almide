@@ -1,6 +1,10 @@
 // @contract: C-348
 // Match Option explicitly so the MIR determinism harness exercises these cases too.
-fn expect_slice(s: String, start: Int, end: Int, expected: String) -> Unit = match string.byte_slice(s, start, end) {
+fn expect_slice(s: String, start: Int, end: Int, expected: String) -> Unit = match string.byte_slice(
+  s,
+  start,
+  end,
+) {
   some(value) => assert_eq(value, expected),
   none => assert(false),
 }

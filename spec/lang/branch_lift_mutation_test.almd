@@ -3,7 +3,10 @@ type MutationStep = | MutationGot(String) | MutationRetry(String)
 
 type MutationReply = { text: String, cost: Float }
 
-fn mutation_call(n: Int) -> Result[MutationReply, String] = if n > 0 then ok(MutationReply { text: "t", cost: 0.25 })
+fn mutation_call(n: Int) -> Result[MutationReply, String] = if n > 0 then ok(MutationReply {
+  text: "t",
+  cost: 0.25,
+})
 else err("e")
 
 test "let-bound match in a retry loop preserves outer assignments" {

@@ -34,7 +34,11 @@ test "take_end and tail co-own Value elements" {
 }
 
 test "the fuzz chain shape survives end to end" {
-  let r = list.get_or(list.drop_while(list.flat_map(list.take_end(["hello"], 3), ((x) => [x])), ((s) => false)), 0, "  spaced  ")
+  let r = list.get_or(
+    list.drop_while(list.flat_map(list.take_end(["hello"], 3), ((x) => [x])), ((s) => false)),
+    0,
+    "  spaced  ",
+  )
   assert_eq(r, "hello")
 }
 

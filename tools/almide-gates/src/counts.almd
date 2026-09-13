@@ -40,5 +40,8 @@ test "a record value is read back with its quotes stripped, and an absent key as
 }
 
 test "the block is the bash renderer's shape: dated start marker, body, end marker" {
-  assert_eq(block("2026-09-02", "334 contracts"), "<!-- counts:generated:start (as of 2026-09-02) — " + note() + " -->\n334 contracts\n<!-- counts:generated:end -->\n")
+  assert_eq(
+    block("2026-09-02", "334 contracts"),
+    "<!-- counts:generated:start (as of 2026-09-02) — " + note() + " -->\n334 contracts\n<!-- counts:generated:end -->\n",
+  )
 }

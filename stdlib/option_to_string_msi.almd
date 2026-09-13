@@ -34,11 +34,20 @@ else {
   __omsi_fill_esc(src, slen, i + 1, pos1)
 }
 
-fn __omsi_digits(n: Int, acc: Int) -> Int = if n < 10 then acc + 1 else __omsi_digits(n / 10, acc + 1)
+fn __omsi_digits(n: Int, acc: Int) -> Int = if n < 10 then acc + 1 else __omsi_digits(
+  n / 10,
+  acc + 1,
+)
 
-fn __omsi_count_neg(n: Int, acc: Int) -> Int = if n > 0 - 10 then acc + 1 else __omsi_count_neg(n / 10, acc + 1)
+fn __omsi_count_neg(n: Int, acc: Int) -> Int = if n > 0 - 10 then acc + 1 else __omsi_count_neg(
+  n / 10,
+  acc + 1,
+)
 
-fn __omsi_int_width(v: Int) -> Int = if v < 0 then __omsi_count_neg(v, 0) + 1 else __omsi_digits(v, 0)
+fn __omsi_int_width(v: Int) -> Int = if v < 0 then __omsi_count_neg(v, 0) + 1 else __omsi_digits(
+  v,
+  0,
+)
 
 fn __omsi_fill_digits(n: Int, pos: Int) -> Int = if n < 10 then {
   prim.store8(pos, 48 + n)

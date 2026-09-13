@@ -17,7 +17,12 @@ test "basic variant record construction and matching" {
 
 test "nested variant record" {
   let inner = Match { scope: "string", regex: '".*"' }
-  let outer = BeginEnd { scope: "block", begin: "\\{", end_pat: "\\}", patterns: [inner, Include("#ref")] }
+  let outer = BeginEnd {
+    scope: "block",
+    begin: "\\{",
+    end_pat: "\\}",
+    patterns: [inner, Include("#ref")],
+  }
   assert_eq(describe(outer), "begin-end: block (2 sub)")
 }
 
@@ -99,11 +104,14 @@ test "variant record count by type" {
   assert_eq(count_matches(pats), 2)
 }
 
-fn extract_scopes(pats: List[Pat]) -> List[String] = list.filter_map(pats, (p) => match p {
-  Match { scope, .. } => some(scope),
-  BeginEnd { scope, .. } => some(scope),
-  _ => none,
-})
+fn extract_scopes(pats: List[Pat]) -> List[String] = list.filter_map(
+  pats,
+  (p) => match p {
+    Match { scope, .. } => some(scope),
+    BeginEnd { scope, .. } => some(scope),
+    _ => none,
+  },
+)
 
 test "variant record extract fields" {
   let pats = [
@@ -120,7 +128,12 @@ test "variant record deeply nested" {
   let inner1 = Match { scope: "s1", regex: "r1" }
   let inner2 = Match { scope: "s2", regex: "r2" }
   let mid = BeginEnd { scope: "mid", begin: "(", end_pat: ")", patterns: [inner1, inner2] }
-  let outer = BeginEnd { scope: "outer", begin: "[", end_pat: "]", patterns: [mid, Include("#end")] }
+  let outer = BeginEnd {
+    scope: "outer",
+    begin: "[",
+    end_pat: "]",
+    patterns: [mid, Include("#end")],
+  }
   assert_eq(describe(outer), "begin-end: outer (2 sub)")
 }
 

@@ -30,11 +30,14 @@ test "lambda returning string" {
 }
 
 test "lambda with block body" {
-  let result = apply((x) => {
-    let doubled = x * 2
-    let added = doubled + 1
-    added
-  }, 5)
+  let result = apply(
+    (x) => {
+      let doubled = x * 2
+      let added = doubled + 1
+      added
+    },
+    5,
+  )
   assert_eq(result, 11)
 }
 

@@ -33,7 +33,10 @@ fn Range.split(r: Range) -> (Range, Range) = {
   (Range { lo: r.lo, hi: mid }, Range { lo: mid, hi: r.hi })
 }
 
-fn Range.merge(a: Range, b: Range) -> Range = Range { lo: math.min(a.lo, b.lo), hi: math.max(a.hi, b.hi) }
+fn Range.merge(a: Range, b: Range) -> Range = Range {
+  lo: math.min(a.lo, b.lo),
+  hi: math.max(a.hi, b.hi),
+}
 
 test "recursive Self in split and merge" {
   let r = Range { lo: 0, hi: 100 }
@@ -205,7 +208,11 @@ type Package: Weighted = { grams: Int }
 
 fn Package.weight(p: Package) -> Int = p.grams
 
-fn total_weight(packages: List[Package]) -> Int = list.fold(packages, 0, (acc, p) => acc + Package.weight(p))
+fn total_weight(packages: List[Package]) -> Int = list.fold(
+  packages,
+  0,
+  (acc, p) => acc + Package.weight(p),
+)
 
 test "protocol method used in higher-order function" {
   let pkgs = [

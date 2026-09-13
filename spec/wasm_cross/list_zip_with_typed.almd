@@ -11,7 +11,11 @@ fn zw_cap(a: List[String], k: String) -> List[String] = list.zip_with(a, a, ((x,
 
 fn zw_int(a: List[Int]) -> List[Int] = list.zip_with(a, a, ((x, y) => x + y))
 
-fn zw_mixed(a: List[String]) -> List[Int] = list.zip_with(a, a, ((x, y) => string.len(x) + string.len(y)))
+fn zw_mixed(a: List[String]) -> List[Int] = list.zip_with(
+  a,
+  a,
+  ((x, y) => string.len(x) + string.len(y)),
+)
 
 fn main() -> Unit = {
   println("s = ${zw_str(["a", "b"], ["c", "d", "e"])}")

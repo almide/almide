@@ -7,7 +7,10 @@ mod type SafeHtml = String
 
 // Escape HTML special characters: & < > " '
 fn escape(s: String) -> SafeHtml = {
-  let escaped = s |> string.replace("&", "&amp;") |> string.replace("<", "&lt;") |> string.replace(">", "&gt;") |> string.replace('"', "&quot;") |> string.replace("'", "&#39;")
+  let escaped = s |> string.replace("&", "&amp;") |> string.replace("<", "&lt;") |> string.replace(
+    ">",
+    "&gt;",
+  ) |> string.replace('"', "&quot;") |> string.replace("'", "&#39;")
   SafeHtml(escaped)
 }
 

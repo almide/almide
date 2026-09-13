@@ -103,7 +103,12 @@ else {
   else __glob_segs_match(pats, pi + 1, segs, si + 1)
 }
 
-fn __glob_dstar_match(pats: List[String], pi: Int, segs: List[String], si: Int) -> Bool = if __glob_segs_match(pats, pi + 1, segs, si) then true
+fn __glob_dstar_match(pats: List[String], pi: Int, segs: List[String], si: Int) -> Bool = if __glob_segs_match(
+  pats,
+  pi + 1,
+  segs,
+  si,
+) then true
 else if si < list.len(segs) then __glob_dstar_match(pats, pi, segs, si + 1)
 else false
 
@@ -134,7 +139,14 @@ fn __glob_collect(all: List[String], i: Int, pats: List[String], cut: Int, prefi
 else {
   let p = list.get(all, i) ?? ""
   let rel = string.slice(p, cut, string.len(p))
-  if __glob_segs_match(pats, 0, string.split(rel, "/"), 0) then __glob_collect(all, i + 1, pats, cut, prefix, acc + [prefix + rel])
+  if __glob_segs_match(pats, 0, string.split(rel, "/"), 0) then __glob_collect(
+    all,
+    i + 1,
+    pats,
+    cut,
+    prefix,
+    acc + [prefix + rel],
+  )
   else __glob_collect(all, i + 1, pats, cut, prefix, acc)
 }
 
@@ -143,7 +155,10 @@ effect fn fs_glob(pattern: String) -> Result[List[String], String] = {
   let segs = __glob_segs(string.split(pattern, "/"), 0, empty)
   let k = __glob_lit_count(segs, 0)
   let pats = list.drop(segs, k)
-  let base = (if string.starts_with(pattern, "/") then "/" else "") + list.join(list.take(segs, k), "/")
+  let base = (if string.starts_with(pattern, "/") then "/" else "") + list.join(
+    list.take(segs, k),
+    "/",
+  )
   if list.len(pats) == 0 then {
     if string.len(base) > 0 and prim.path_exists(base) then ok([base])
     else ok(empty)

@@ -21,8 +21,11 @@ effect fn main() -> Unit = {
   println(list.join(tags, "+"))
   let mixed = json.parse('[{"id": 1, "tag": "a"}, {"id": "bad", "tag": "b"}]')!
   let rs = value.as_array(mixed)! |> (xs) => list.map(xs, (v) => Row.decode(v))
-  println(list.join(list.map(rs, (r) => match r {
-    ok(row) => row.tag,
-    err(e) => "<" + e + ">",
-  }), "|"))
+  println(list.join(
+    list.map(rs, (r) => match r {
+      ok(row) => row.tag,
+      err(e) => "<" + e + ">",
+    }),
+    "|",
+  ))
 }

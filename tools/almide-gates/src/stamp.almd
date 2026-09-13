@@ -41,16 +41,19 @@ effect fn identity(root: String) -> Stamp = {
     let mt = mtime(alm)!
     let line = "  almide: " + ver + "  sha256:" + hash + "  mtime:" + mt + "  (" + alm + ")"
     let wshash = sha16(root + "/target/release/almide")!
-    if wshash != "" and hash != wshash then Stamp { ok: false, lines: [
-      line,
-      "  FATAL: PATH almide (" + hash + ") != workspace build (" + wshash + ").",
-      "  The evidence this gate produces would not describe the tree under test.",
-      "  Most common cause: a 'cargo test' ran after your last 'make install' —",
-      "  the test profile relinks target/release/almide with a different feature",
-      "  unification, so the hashes diverge even with identical sources.",
-      "  Fix: make install && make verify-trust  (and do not run cargo",
-      "  concurrently with the gate — a mid-gate relink invalidates the stamp)."
-    ] } else Stamp { ok: true, lines: [line] }
+    if wshash != "" and hash != wshash then Stamp {
+      ok: false,
+      lines: [
+        line,
+        "  FATAL: PATH almide (" + hash + ") != workspace build (" + wshash + ").",
+        "  The evidence this gate produces would not describe the tree under test.",
+        "  Most common cause: a 'cargo test' ran after your last 'make install' —",
+        "  the test profile relinks target/release/almide with a different feature",
+        "  unification, so the hashes diverge even with identical sources.",
+        "  Fix: make install && make verify-trust  (and do not run cargo",
+        "  concurrently with the gate — a mid-gate relink invalidates the stamp)."
+      ],
+    } else Stamp { ok: true, lines: [line] }
   }
 }
 
@@ -66,12 +69,15 @@ effect fn toolchain(root: String) -> Stamp = {
     let head = run("git", ["-C", root, "rev-parse", "--short", "HEAD"])!
     let porcelain = string.trim(run("git", ["-C", root, "status", "--porcelain"])!)
     let dirty = if porcelain == "" then 0 else list.len(string.split(porcelain, "\n"))
-    Stamp { ok: true, lines: head_lines + [
-      "  rustc:    " + run("rustc", ["--version"])!,
-      "  wasmtime: " + run("wasmtime", ["--version"])!,
-      "  coqc:     " + list.get_or(string.split(coq, "\n"), 0, "n/a"),
-      "  tree:     " + head + " " + int.to_string(dirty) + " dirty file(s)",
-      "─────────────────────"
-    ] }
+    Stamp {
+      ok: true,
+      lines: head_lines + [
+        "  rustc:    " + run("rustc", ["--version"])!,
+        "  wasmtime: " + run("wasmtime", ["--version"])!,
+        "  coqc:     " + list.get_or(string.split(coq, "\n"), 0, "n/a"),
+        "  tree:     " + head + " " + int.to_string(dirty) + " dirty file(s)",
+        "─────────────────────"
+      ],
+    }
   }
 }

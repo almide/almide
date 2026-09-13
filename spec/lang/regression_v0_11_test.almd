@@ -112,7 +112,11 @@ test "effect fn err" {
   assert_eq(safe_div(1, 0), err("div by zero"))
 }
 
-fn frequencies(xs: List[String]) -> Map[String, Int] = list.fold(xs, [:], (acc, x) => map.set(acc, x, (map.get(acc, x) ?? 0) + 1))
+fn frequencies(xs: List[String]) -> Map[String, Int] = list.fold(
+  xs,
+  [:],
+  (acc, x) => map.set(acc, x, (map.get(acc, x) ?? 0) + 1),
+)
 
 test "frequencies" {
   let f = frequencies(["a", "b", "a", "c", "a"])
@@ -130,22 +134,25 @@ fn quicksort(xs: List[Int]) -> List[Int] = match xs {
 }
 
 test "quicksort" {
-  assert_eq(quicksort([
-    3,
-    6,
-    8,
-    10,
-    1,
-    2,
-    1
-  ]), [
-    1,
-    1,
-    2,
-    3,
-    6,
-    8,
-    10
-  ])
+  assert_eq(
+    quicksort([
+      3,
+      6,
+      8,
+      10,
+      1,
+      2,
+      1
+    ]),
+    [
+      1,
+      1,
+      2,
+      3,
+      6,
+      8,
+      10
+    ],
+  )
   assert_eq(quicksort([]), [])
 }

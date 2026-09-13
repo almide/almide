@@ -6,7 +6,10 @@
 // freed within the cond frame (per-cond i…d balance). Each branch is exercised; native is the
 // oracle and native == wasm output is the certified invariant.
 // Option[String] == some(literal): the exact toml blocker shape.
-fn drop_leading_empty(xs: List[String]) -> List[String] = if list.first(xs) == some("") then list.drop(xs, 1) else xs
+fn drop_leading_empty(xs: List[String]) -> List[String] = if list.first(xs) == some("") then list.drop(
+  xs,
+  1,
+) else xs
 
 // Option[String] != some(call/ctor over a literal).
 fn classify(xs: List[String]) -> String = if list.first(xs) != some("hi") then "no-hi" else "got-hi"

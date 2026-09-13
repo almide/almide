@@ -82,7 +82,10 @@ test "pipe: map then fold" {
 }
 
 test "pipe: string processing chain" {
-  let result = "  Hello, World!  " |> string.trim() |> string.to_lower() |> string.replace(",", "") |> string.replace("!", "")
+  let result = "  Hello, World!  " |> string.trim() |> string.to_lower() |> string.replace(",", "") |> string.replace(
+    "!",
+    "",
+  )
   assert_eq(result, "hello world")
 }
 

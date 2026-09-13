@@ -8,7 +8,10 @@
 // still runs the map over every element, and the fallible `!` form keeps its
 // first-err short-circuit.
 // ── pure chains: fused on native, same values everywhere ──
-fn sum_evens_doubled(xs: List[Int]) -> Int = xs |> list.filter((x) => x % 2 == 0) |> list.map((x) => x * 2) |> list.fold(0, (acc, x) => acc + x)
+fn sum_evens_doubled(xs: List[Int]) -> Int = xs |> list.filter((x) => x % 2 == 0) |> list.map((x) => x * 2) |> list.fold(
+  0,
+  (acc, x) => acc + x,
+)
 
 fn short_words_upper(ws: List[String]) -> List[String] = ws |> list.filter((w) => string.len(w) <= 3) |> list.map((w) => string.to_upper(w))
 
@@ -18,7 +21,10 @@ fn pair_sum(n: Int) -> Int = list.range(0, n) |> list.flat_map((i) => [i, i * 10
 
 fn long_count(ws: List[String]) -> Int = ws |> list.map((w) => string.len(w)) |> list.filter((n) => n > 2) |> list.len
 
-fn parsed_total(ss: List[String]) -> Int = ss |> list.filter_map((s) => int.parse(s)?) |> list.map((n) => n + 1) |> list.fold(0, (a, x) => a + x)
+fn parsed_total(ss: List[String]) -> Int = ss |> list.filter_map((s) => int.parse(s)?) |> list.map((n) => n + 1) |> list.fold(
+  0,
+  (a, x) => a + x,
+)
 
 fn any_big(xs: List[Int], k: Int) -> Bool = xs |> list.map((x) => x * k) |> list.any((x) => x > 10)
 
@@ -28,17 +34,23 @@ fn first_odd_over(xs: List[Int], lo: Int) -> Int? = xs |> list.filter((x) => x >
 
 fn count_over(xs: List[Int], lo: Int) -> Int = xs |> list.map((x) => x + 1) |> list.count((x) => x > lo)
 
-fn float_total(xs: List[Int]) -> Float = xs |> list.map((x) => float.from_int(x) / 4.0) |> list.fold(0.0, (a, x) => a + x)
+fn float_total(xs: List[Int]) -> Float = xs |> list.map((x) => float.from_int(x) / 4.0) |> list.fold(
+  0.0,
+  (a, x) => a + x,
+)
 
 test "fused filter-map-fold" {
-  assert_eq(sum_evens_doubled([
-    1,
-    2,
-    3,
-    4,
-    5,
-    6
-  ]), 24)
+  assert_eq(
+    sum_evens_doubled([
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ]),
+    24,
+  )
   assert_eq(sum_evens_doubled([]), 0)
 }
 
@@ -166,12 +178,15 @@ effect fn logged_fold(xs: List[Int]) -> List[String] = {
       "m${int.to_string(x)}"
     ]
     x + 1
-  }) |> list.fold(0, (acc, x) => {
-    log = log + [
-      "f${int.to_string(x)}"
-    ]
-    acc + x
-  })
+  }) |> list.fold(
+    0,
+    (acc, x) => {
+      log = log + [
+        "f${int.to_string(x)}"
+      ]
+      acc + x
+    },
+  )
   log + [int.to_string(total)]
 }
 
@@ -200,15 +215,18 @@ effect fn logged_any(xs: List[Int]) -> List[String] = {
 }
 
 test "logged map then filter: every map before the first filter" {
-  assert_eq(logged_len([1, 2, 3])!, [
-    "m1",
-    "m2",
-    "m3",
-    "f10",
-    "f20",
-    "f30",
-    "2"
-  ])
+  assert_eq(
+    logged_len([1, 2, 3])!,
+    [
+      "m1",
+      "m2",
+      "m3",
+      "f10",
+      "f20",
+      "f30",
+      "2"
+    ],
+  )
 }
 
 test "logged map then fold: every map before the first fold step" {

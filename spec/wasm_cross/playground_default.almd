@@ -2,7 +2,10 @@
 // Mini Markdown → HTML — ADT + pattern match + pipes + string interp
 type Block = | Heading(Int, String) | Bullet(String) | Para(String) | Blank
 
-fn parse_line(line: String) -> Block = if string.starts_with(line, "### ") then Heading(3, string.drop(line, 4))
+fn parse_line(line: String) -> Block = if string.starts_with(line, "### ") then Heading(
+  3,
+  string.drop(line, 4),
+)
 else if string.starts_with(line, "## ") then Heading(2, string.drop(line, 3))
 else if string.starts_with(line, "# ") then Heading(1, string.drop(line, 2))
 else if string.starts_with(line, "- ") then Bullet(string.drop(line, 2))
@@ -25,16 +28,19 @@ fn render(block: Block) -> String = match block {
 }
 
 fn wrap_lists(blocks: List[Block]) -> List[String] = {
-  let result = blocks |> list.fold({ out: [], in_ul: false }, (st, b) => {
-    let is_bullet = match b {
-      Bullet(_) => true,
-      _ => false,
-    }
-    let opened = if is_bullet and not st.in_ul then st.out + ["<ul>"]
-    else if not is_bullet and st.in_ul then st.out + ["</ul>"]
-    else st.out
-    { out: opened + [render(b)], in_ul: is_bullet }
-  })
+  let result = blocks |> list.fold(
+    { out: [], in_ul: false },
+    (st, b) => {
+      let is_bullet = match b {
+        Bullet(_) => true,
+        _ => false,
+      }
+      let opened = if is_bullet and not st.in_ul then st.out + ["<ul>"]
+      else if not is_bullet and st.in_ul then st.out + ["</ul>"]
+      else st.out
+      { out: opened + [render(b)], in_ul: is_bullet }
+    },
+  )
   if result.in_ul then result.out + ["</ul>"]
   else result.out
 }

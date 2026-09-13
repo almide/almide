@@ -46,9 +46,15 @@ fn coverage_summary() -> String = "spec-coverage: every normative ALS section is
 // reader has to reconstruct gets worked around instead of run.
 fn stale_error(what: String, cmd: String) -> List[String] = [what + " is stale — run: " + cmd]
 
-fn conformance_stale_error() -> List[String] = stale_error("docs/contracts/conformance.md", "bash docs/contracts/generate-conformance.sh > docs/contracts/conformance.md")
+fn conformance_stale_error() -> List[String] = stale_error(
+  "docs/contracts/conformance.md",
+  "bash docs/contracts/generate-conformance.sh > docs/contracts/conformance.md",
+)
 
-fn index_stale_error() -> List[String] = stale_error("docs/contracts/README.md", "bash docs/contracts/generate-readme.sh > docs/contracts/README.md")
+fn index_stale_error() -> List[String] = stale_error(
+  "docs/contracts/README.md",
+  "bash docs/contracts/generate-readme.sh > docs/contracts/README.md",
+)
 
 fn distinct_sorted(xs: List[String]) -> List[String] = xs |> list.filter((x) => x != "") |> list.unique |> list.sort
 
@@ -78,17 +84,26 @@ test "both directions of the spec-key check have their own message" {
 
 test "the summary lines are the bash's exact wording" {
   assert_eq(speckey_summary(64), "spec-keying: 64 distinct ALS section(s) referenced; all resolve.")
-  assert_eq(coverage_summary(), "spec-coverage: every normative ALS section is cited by >=1 contract.")
+  assert_eq(
+    coverage_summary(),
+    "spec-coverage: every normative ALS section is cited by >=1 contract.",
+  )
 }
 
 test "a staleness error names the command that repairs it" {
   // A derived-file error whose fix the reader has to reconstruct gets worked around, not run.
-  assert_eq(conformance_stale_error(), [
-    "docs/contracts/conformance.md is stale — run: bash docs/contracts/generate-conformance.sh > docs/contracts/conformance.md"
-  ])
-  assert_eq(index_stale_error(), [
-    "docs/contracts/README.md is stale — run: bash docs/contracts/generate-readme.sh > docs/contracts/README.md"
-  ])
+  assert_eq(
+    conformance_stale_error(),
+    [
+      "docs/contracts/conformance.md is stale — run: bash docs/contracts/generate-conformance.sh > docs/contracts/conformance.md"
+    ],
+  )
+  assert_eq(
+    index_stale_error(),
+    [
+      "docs/contracts/README.md is stale — run: bash docs/contracts/generate-readme.sh > docs/contracts/README.md"
+    ],
+  )
 }
 
 test "spec keys are counted DISTINCT and byte-sorted" {

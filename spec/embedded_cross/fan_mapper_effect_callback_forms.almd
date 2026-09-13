@@ -71,15 +71,21 @@ effect fn main() -> Unit = {
   // ── fan.map: collect in order, the FIRST err is the result ──
   println("map bang fs: " + list.join(fan.map(good, (p) => fs.read_text(p)!)!, ","))
   println("map bang helper: " + list.join(fan.map(good, (p) => helper(p)!)!, ","))
-  println("map compound: " + list.join(fan.map(good, (p) => {
-    let t = string.trim(p)
-    fs.read_text(t)!
-  })!, ","))
+  println("map compound: " + list.join(
+    fan.map(good, (p) => {
+      let t = string.trim(p)
+      fs.read_text(t)!
+    })!,
+    ",",
+  ))
   println("map value: " + list.join(fan.map(good, helper)!, ","))
-  println("map first err: " + list.join(fan.map(bad_last, (p) => {
-    let t = string.trim(p)
-    fs.read_text(t)!
-  }) ?? ["fb"], ","))
+  println("map first err: " + list.join(
+    fan.map(bad_last, (p) => {
+      let t = string.trim(p)
+      fs.read_text(t)!
+    }) ?? ["fb"],
+    ",",
+  ))
   println("map value err: " + show(match fan.map(bad_last, helper) {
     ok(vs) => ok(list.join(vs, ",")),
     err(e) => err(e),

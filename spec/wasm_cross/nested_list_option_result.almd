@@ -4,10 +4,14 @@
 // and the some(list) / ok(list) payload drops.
 fn sum_opts(xs: List[Int?]) -> Int = list.fold(xs, 0, (a, o) => a + (o ?? 0))
 
-fn tally(rs: List[Result[Int, String]]) -> String = list.fold(rs, "", (a, r) => a + match r {
-  ok(n) => int.to_string(n),
-  err(e) => e,
-})
+fn tally(rs: List[Result[Int, String]]) -> String = list.fold(
+  rs,
+  "",
+  (a, r) => a + match r {
+    ok(n) => int.to_string(n),
+    err(e) => e,
+  },
+)
 
 fn main() -> Unit = {
   let opts: List[Int?] = [some(1), none, some(3), none]

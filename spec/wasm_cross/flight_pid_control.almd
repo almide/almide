@@ -23,7 +23,11 @@ fn fmul(a: Int, b: Int) -> Int = (a * b) / SCALE
 
 // One PID step over pre-updated state. PURE: no capability, no heap.
 // kp·e + ki·∫e + kd·de, saturated to the actuator range.
-fn pid_step(kp: Int, ki: Int, kd: Int, e: Int, integ: Int, prev_e: Int) -> Int = int.clamp(fmul(kp, e) + fmul(ki, integ) + fmul(kd, e - prev_e), OUT_MIN, OUT_MAX)
+fn pid_step(kp: Int, ki: Int, kd: Int, e: Int, integ: Int, prev_e: Int) -> Int = int.clamp(
+  fmul(kp, e) + fmul(ki, integ) + fmul(kd, e - prev_e),
+  OUT_MIN,
+  OUT_MAX,
+)
 
 effect fn main() -> Unit = {
   var integral = 0

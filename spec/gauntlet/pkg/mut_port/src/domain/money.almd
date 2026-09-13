@@ -14,4 +14,8 @@ fn times(m: Money, n: Int) -> Money! = {
   Money { cents: m.cents * n }
 }
 
-fn display(m: Money) -> String = "$" + int.to_string(m.cents / 100) + "." + string.pad_start(int.to_string(m.cents % 100), 2, "0")
+fn display(m: Money) -> String = "$" + int.to_string(m.cents / 100) + "." + string.pad_start(
+  int.to_string(m.cents % 100),
+  2,
+  "0",
+)

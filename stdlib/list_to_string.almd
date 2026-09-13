@@ -15,7 +15,10 @@ fn __lts_digits(n: Int, acc: Int) -> Int = if n < 10 then acc + 1 else __lts_dig
 
 // Byte width of element value v: digits, plus 1 for a leading '-' when negative.
 // Negative path WITHOUT negating (i64::MIN safe, #660): count digits of n <= 0 directly.
-fn __lts_count_neg(n: Int, acc: Int) -> Int = if n > 0 - 10 then acc + 1 else __lts_count_neg(n / 10, acc + 1)
+fn __lts_count_neg(n: Int, acc: Int) -> Int = if n > 0 - 10 then acc + 1 else __lts_count_neg(
+  n / 10,
+  acc + 1,
+)
 
 fn __lts_int_width(v: Int) -> Int = if v < 0 then __lts_count_neg(v, 0) + 1 else __lts_digits(v, 0)
 

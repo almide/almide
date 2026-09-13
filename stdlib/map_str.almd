@@ -88,7 +88,10 @@ fn __store_copy(addr: Int, s: String) -> Int = {
 }
 
 // Store the value slot: a deep copy of `newv` when the key matched (eq), else of the old value.
-fn __mset_value(eq: Bool, addr: Int, newv: String, oldv: String) -> Int = if eq then __store_copy(addr, newv) else __store_copy(addr, oldv)
+fn __mset_value(eq: Bool, addr: Int, newv: String, oldv: String) -> Int = if eq then __store_copy(
+  addr,
+  newv,
+) else __store_copy(addr, oldv)
 
 // Copy every entry (key + value) from sh to rh; the entry whose key equals k gets `newv` as its
 // value (the in-place update), all others keep their old value. Keys are always deep-copied.
@@ -251,7 +254,11 @@ fn __store_fv(addr: Int, oldv: String, f: (String) -> String) -> Int = {
   0
 }
 
-fn __mupdate_val(eq: Bool, addr: Int, oldv: String, f: (String) -> String) -> Int = if eq then __store_fv(addr, oldv, f)
+fn __mupdate_val(eq: Bool, addr: Int, oldv: String, f: (String) -> String) -> Int = if eq then __store_fv(
+  addr,
+  oldv,
+  f,
+)
 else __store_copy(addr, oldv)
 
 fn __mupdate_copy(sh: Int, rh: Int, entries: Int, k: String, f: (String) -> String, i: Int) -> Int = if i >= entries then 0
@@ -279,7 +286,10 @@ fn map_update_str(m: Map[String, String], k: String, f: (String) -> String) -> M
 // a PRESENT key updates via f (map_update_str's rebuild), an ABSENT one
 // appends (k, init) (map_set_str's rebuild). v0's intrinsic does the same in
 // one walk; byte-equality of the RESULT is the contract, not the walk count.
-fn map_upsert_str(m: Map[String, String], k: String, init: String, f: (String) -> String) -> Map[String, String] = if map_contains_str(m, k) then map_update_str(m, k, f)
+fn map_upsert_str(m: Map[String, String], k: String, init: String, f: (String) -> String) -> Map[String, String] = if map_contains_str(
+  m,
+  k,
+) then map_update_str(m, k, f)
 else map_set_str(m, k, init)
 
 // ── Higher-order Map[String,String] (closures machinery; the predicate f is a TWO-arity closure

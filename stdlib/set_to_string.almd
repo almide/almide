@@ -5,7 +5,10 @@
 // `set.from_list(` … `)`. Two passes (measure, fill) keep the alloc exact.
 fn __sts_digits(n: Int, acc: Int) -> Int = if n < 10 then acc + 1 else __sts_digits(n / 10, acc + 1)
 
-fn __sts_count_neg(n: Int, acc: Int) -> Int = if n > 0 - 10 then acc + 1 else __sts_count_neg(n / 10, acc + 1)
+fn __sts_count_neg(n: Int, acc: Int) -> Int = if n > 0 - 10 then acc + 1 else __sts_count_neg(
+  n / 10,
+  acc + 1,
+)
 
 fn __sts_int_width(v: Int) -> Int = if v < 0 then __sts_count_neg(v, 0) + 1 else __sts_digits(v, 0)
 
