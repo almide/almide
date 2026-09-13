@@ -1,0 +1,3 @@
+#!/usr/bin/env ALMIDE_CWD=. almide run
+
+fn main() -> Unit = println("ok")

@@ -1,4 +1,6 @@
 pub mod check;
+/// E062 — the `env` shebang that runs on macOS and dies on Linux (#2159).
+pub mod lint_shebang;
 pub mod canonicalize;
 pub mod lower;
 pub mod ir_link;
