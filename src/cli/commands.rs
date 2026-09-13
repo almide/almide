@@ -301,18 +301,75 @@ fn print_wasm_test_profile(test_file: &str, marks: &[(&'static str, std::time::I
 /// `compile_and_run_wasm_test`'s dependency-fetch + import-resolution
 /// phase. Extracted verbatim.
 fn resolve_wasm_test_deps(test_file: &str, program: &almide_lang::ast::Program) -> Result<resolve::ResolvedModules, String> {
-    let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> =
-        if std::path::Path::new("almide.toml").exists() {
-            if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
-                project_fetch::fetch_all_deps(&proj)
-                    .unwrap_or_else(|_| vec![])
-                    .into_iter()
-                    .map(|fd| (fd.pkg_id, fd.source_dir))
-                    .collect()
-            } else { vec![] }
-        } else { vec![] };
+    resolve::resolve_imports_with_deps(test_file, program, &wasm_test_dep_paths())
+}
 
-    resolve::resolve_imports_with_deps(test_file, program, &dep_paths)
+/// The dependency table the test runner resolves against — the cwd
+/// package's fetched deps, or nothing outside a package.
+fn wasm_test_dep_paths() -> Vec<(project::PkgId, std::path::PathBuf)> {
+    if std::path::Path::new("almide.toml").exists() {
+        if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
+            return project_fetch::fetch_all_deps(&proj)
+                .unwrap_or_else(|_| vec![])
+                .into_iter()
+                .map(|fd| (fd.pkg_id, fd.source_dir))
+                .collect();
+        }
+    }
+    vec![]
+}
+
+/// #2121: the incumbent walled, but `almide build --target wasm` would have
+/// handed the same entry to the structural leg (build.rs's reverse
+/// handover) and shipped it. The test runner took only the incumbent's
+/// verdict, so a program that builds and runs on wasm reported SKIP here —
+/// and, the other way round, a structural-leg defect in that program could
+/// hide behind the SKIP. Mirror the build's route: a `main`-carrying,
+/// export-free entry gets one structural attempt, validated and audited
+/// against the p1 host surface wasmtime serves. Anything else stays the
+/// honest skip that routes the file to native.
+fn structural_handover(test_file: &str, source_text: &str, ir_program: &almide::ir::IrProgram, declared_tests: usize, explain: bool) -> Option<Vec<u8>> {
+    let has_main = ir_program.functions.iter().any(|f| f.name.as_str() == "main");
+    let has_exports = ir_program.functions.iter().any(|f| !f.export_attrs.is_empty());
+    // The structural leg has no test mode: its `_start` runs `main` and
+    // nothing else. That IS the incumbent's protocol for a main file with
+    // no test blocks, so those hand over; a file that declares tests keeps
+    // the honest skip — running its main and ignoring its tests would
+    // report a pass over nothing (or a FAIL over a main that wanted stdin).
+    if !has_main || has_exports || declared_tests > 0 {
+        return None;
+    }
+    let wall = |stage: &str, detail: String| {
+        if explain { err(&format!("[wall] {}: structural {}: {}", test_file, stage, detail)); }
+    };
+    let ir = match almide::wasm_leg::lower_to_ir_with_deps(test_file, source_text, &wasm_test_dep_paths()) {
+        Ok(ir) => ir,
+        Err(e) => { wall("lower", e); return None; }
+    };
+    let (bytes, host_ops) = match almide_wasm::emit_program_with_ops(&ir) {
+        Ok(x) => x,
+        Err(e) => { wall("emit", format!("{e:?}")); return None; }
+    };
+    if let Err(e) = wasmparser::validate(&bytes) {
+        wall("validate", e.to_string());
+        return None;
+    }
+    if let Some(op) = host_ops.iter().find(|op| !almide_wasm_run::wasi::P1_SERVED_OPS.contains(op)) {
+        wall("host audit", format!("op {op} is not served by the p1 shim"));
+        return None;
+    }
+    // The structural module imports `almide.*` (the embedded host's surface);
+    // wasmtime is a stock runtime, so the same `to_wasi` rewrite the build
+    // ships applies here.
+    let ops: Vec<i32> = host_ops.iter().copied().collect();
+    let bytes = match almide_wasm_run::wasi::to_wasi(&bytes, &ops) {
+        Ok(w) => w,
+        Err(e) => { wall("to_wasi", e.to_string()); return None; }
+    };
+    if explain {
+        err(&format!("[handover] {}: incumbent walled — structural leg took the test ({} bytes)", test_file, bytes.len()));
+    }
+    Some(bytes)
 }
 
 /// `compile_and_run_wasm_test`'s type-check phase. Unlike `almide
@@ -553,7 +610,13 @@ fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::PathBuf, run
     // the file to native — the shrinking #813 remainder.
     match v1_bytes {
         Some(b) => run_module(&b),
-        None => skip("v1 wall — no verified wasm rendering".to_string()),
+        None => match structural_handover(test_file, &source_text, &ir_program, declared_tests, explain) {
+            Some(b) => run_module(&b),
+            None if declared_tests > 0 => skip(format!(
+                "v1 wall — no verified wasm rendering ({declared_tests} test block(s) route to native; the structural leg has no test mode)"
+            )),
+            None => skip("v1 wall — no verified wasm rendering".to_string()),
+        },
     }
 }
 
