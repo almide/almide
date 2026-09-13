@@ -1,3 +1,7 @@
 expects_code = "E030"
 expects_error = "no ordering"
-hint_substring = "Ordering needs Int, Bool, String, Float"
+# The element here is a Map, so pin the clause that tells THIS reader why:
+# the opening list was reworded in #2167 to name the `: Ord` derive, and a
+# substring of a sentence that gets reworded for accuracy is not a check of
+# anything. The derive clause is pinned by tests/ord_record_variant_test.rs.
+hint_substring = "Map, Set and function values have no order"
