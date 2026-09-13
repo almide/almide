@@ -118,9 +118,11 @@ impl Checker {
     /// order. `None` means "not my group" — the router tries the groups in that
     /// order, so the dispatch is unchanged.
     pub(super) fn infer_expr_g3_grouping(&mut self, expr: &mut ast::Expr) -> Option<Ty> {
+        let outer_span = expr.span;
         Some(match &mut expr.kind {
-            ExprKind::Try { expr, .. } => {
-                let ty = self.infer_expr(expr);
+            ExprKind::Try { expr: operand, .. } => {
+                self.record_postfix_inner(outer_span, operand.span);
+                let ty = self.infer_expr(operand);
                 match &ty {
                     Ty::Applied(TypeConstructorId::Result, args) if args.len() >= 1 => args[0].clone(),
                     _ => ty,
@@ -755,7 +757,9 @@ impl Checker {
     /// `expr!` — unwrap with propagation (Option[T] → T, Result[T,E] → T).
     /// `ExprKind::Unwrap` arm of [`Self::infer_expr_inner_g3`]. Verbatim text move.
     fn infer_expr_g3_unwrap(&mut self, expr: &mut ast::Expr) -> Ty {
+        let outer_span = expr.span;
         let ExprKind::Unwrap { expr: inner, .. } = &mut expr.kind else { unreachable!() };
+        self.record_postfix_inner(outer_span, inner.span);
         let t = self.infer_expr(inner);
         let resolved = resolve_ty(&t, &self.uf);
         self.check_unwrap_propagation_context(&resolved);
@@ -1348,4 +1352,14 @@ fn both_result_arity_two(ra: &[Ty], oa: &[Ty]) -> bool {
         return false;
     }
     oa.len() == 2
+}
+
+impl Checker {
+    /// #2097: remember which expression a postfix `!` / `?` wraps, keyed by
+    /// the operator's own (operator-only) span.
+    pub(crate) fn record_postfix_inner(&mut self, outer: Option<ast::Span>, inner: Option<ast::Span>) {
+        if let (Some(o), Some(i)) = (outer, inner) {
+            self.postfix_inner_spans.insert((o.line, o.col, o.end_col), i);
+        }
+    }
 }
