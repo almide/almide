@@ -149,7 +149,11 @@ fn is_ident_start(c: Int) -> Bool = (c >= 65 and c <= 90) or (c >= 97 and c <= 1
 
 fn is_ident_char(c: Int) -> Bool = is_ident_start(c) or is_digit(c)
 
-fn scan_while(src: List[Int], i: Int, pred: (Int) -> Bool) -> Int = if i < list.len(src) and pred(src[i]) then scan_while(src, i + 1, pred)
+fn scan_while(src: List[Int], i: Int, pred: (Int) -> Bool) -> Int = if i < list.len(src) and pred(src[i]) then scan_while(
+  src,
+  i + 1,
+  pred,
+)
 else i
 
 // End of a quoted run starting at i (opening quote q, doubled q escapes).
@@ -204,7 +208,10 @@ fn scan_identifier(src: List[Int], i: Int) -> Int = {
 
 fn upper(c: Int) -> Int = if c >= 97 and c <= 122 then c - 32 else c
 
-fn is_keyword(word: List[Int]) -> Bool = list.contains(keywords, string.from_bytes(word |> list.map(upper)))
+fn is_keyword(word: List[Int]) -> Bool = list.contains(
+  keywords,
+  string.from_bytes(word |> list.map(upper)),
+)
 
 fn is_op2(a: Int, b: Int) -> Bool = (a == 124 and b == 124) or (a == 60 and b == 60) or (a == 62 and b == 62) or (a == 60 and b == 61) or (a == 62 and b == 61) or (a == 61 and b == 61) or (a == 33 and b == 61) or (a == 60 and b == 62)
 

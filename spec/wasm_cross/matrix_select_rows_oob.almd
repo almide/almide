@@ -49,7 +49,10 @@ effect fn main() -> Unit = {
   let qrows = matrix.to_lists(mq)
   let qr0 = list.get(qrows, 0) ?? []
   let qr1 = list.get(qrows, 1) ?? []
-  println("q8_oob=${list.get(qr0, 0) ?? 9.9},${list.get(qr0, 1) ?? 9.9} q8_row0=${list.get(qr1, 0) ?? 9.9},${list.get(qr1, 1) ?? 9.9}")
+  println("q8_oob=${list.get(qr0, 0) ?? 9.9},${list.get(qr0, 1) ?? 9.9} q8_row0=${list.get(qr1, 0) ?? 9.9},${list.get(
+    qr1,
+    1,
+  ) ?? 9.9}")
   println("q8_oob_sign=${sgn(list.get(qr0, 0) ?? 9.9)},${sgn(list.get(qr0, 1) ?? 9.9)}")
   let mq2 = matrix.select_rows_q8_0_dq(q8, 0 - 34, 32, [0])
   let q2r0 = list.get(matrix.to_lists(mq2), 0) ?? []

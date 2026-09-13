@@ -19,7 +19,10 @@ type Dep: Codec = { name: String, tags: List[String] = [], weights: List[Int] = 
 effect fn main() -> Unit = {
   println(json.stringify(Dep.encode(Dep { name: "x" })))
   let missing = Dep.decode(json.parse('{"name": "y"}')!)!
-  println(missing.name + "/" + int.to_string(list.len(missing.tags)) + "/" + list.join(list.map(missing.weights, (w) => int.to_string(w)), "+"))
+  println(missing.name + "/" + int.to_string(list.len(missing.tags)) + "/" + list.join(
+    list.map(missing.weights, (w) => int.to_string(w)),
+    "+",
+  ))
   let given = Dep.decode(json.parse('{"name": "z", "tags": ["a", "b"], "weights": [9]}')!)!
   println(given.name + "/" + list.join(given.tags, ",") + "/" + int.to_string(list.len(given.weights)))
   let nulled = Dep.decode(json.parse('{"name": "n", "tags": null}')!)!

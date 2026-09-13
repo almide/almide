@@ -17,7 +17,10 @@ fn main() -> Unit = {
     bytes.push(b, int.band(i, 255))
     i = i + 1
   }
-  println("${bytes.len(b)},${bytes.get(b, 0) ?? -1},${bytes.get(b, 255) ?? -1},${bytes.get(b, 65536) ?? -1},${bytes.get(b, 69999) ?? -1}")
+  println("${bytes.len(b)},${bytes.get(b, 0) ?? -1},${bytes.get(b, 255) ?? -1},${bytes.get(b, 65536) ?? -1},${bytes.get(
+    b,
+    69999,
+  ) ?? -1}")
   var a = bytes.new(0)
   bytes.push(a, 1)
   var alias = a

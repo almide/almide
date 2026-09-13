@@ -11,7 +11,18 @@
 // block interaction is fixed. Once green, the fix is verified.
 type Tw = { a: Float, b: Float, c: Float, d: Float, e: Int, f: Int, g: Int, h: Float, i: Int, j: Int }
 
-fn tw_make(a: Float, b: Float, c: Float) -> Tw = Tw { a: a, b: b, c: c, d: 0.0, e: 0, f: 0, g: 0, h: 0.0, i: 1, j: 0 }
+fn tw_make(a: Float, b: Float, c: Float) -> Tw = Tw {
+  a: a,
+  b: b,
+  c: c,
+  d: 0.0,
+  e: 0,
+  f: 0,
+  g: 0,
+  h: 0.0,
+  i: 1,
+  j: 0,
+}
 
 fn tw_tick(tw: Tw, dt: Float) -> Tw = {
   if tw.i != 1 then tw

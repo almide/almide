@@ -42,7 +42,10 @@ fn verdict_full(oracle_ok: Bool, render_ok: Bool, wasm_ok: Bool, oracle_out: Str
   let base = verdict_of(oracle_ok, render_ok, wasm_ok, oracle_out, wasm_out)
   if base != "match" then base
   else if oracle_ok then "match"
-  else if oracle_code == wasm_code and normalize_oracle_err(oracle_err) == normalize_wasm_err(wasm_err, wat_path) then "match" else "xfail"
+  else if oracle_code == wasm_code and normalize_oracle_err(oracle_err) == normalize_wasm_err(
+    wasm_err,
+    wat_path,
+  ) then "match" else "xfail"
 }
 
 // COMPILER noise is not a program observable, and both legs emit their own kind.
@@ -87,7 +90,10 @@ fn strip_backtrace_index(line: String) -> String = {
   else string.slice(line, scan_class(line, after_digits + 1, " "))
 }
 
-fn scan_class(s: String, p: Int, cls: String) -> Int = if p < string.len(s) and string.contains(cls, string.slice(s, p, p + 1)) then scan_class(s, p + 1, cls)
+fn scan_class(s: String, p: Int, cls: String) -> Int = if p < string.len(s) and string.contains(
+  cls,
+  string.slice(s, p, p + 1),
+) then scan_class(s, p + 1, cls)
 else p
 
 effect fn exit_ok(cmd: String, args: List[String]) -> Bool = {
@@ -120,18 +126,63 @@ test "a failing oracle whose output still matches is a match" {
 
 test "a trap fixture must agree on exit code and stderr, not just stdout" {
   // Same stdout, same exit, same message — a genuine cross-target trap agreement.
-  assert_eq(verdict_full(false, true, true, "", "", 1, 1, "Error: divide by zero", "Error: divide by zero", ""), "match")
+  assert_eq(
+    verdict_full(
+      false,
+      true,
+      true,
+      "",
+      "",
+      1,
+      1,
+      "Error: divide by zero",
+      "Error: divide by zero",
+      "",
+    ),
+    "match",
+  )
   // Same stdout and message, DIFFERENT exit code: not agreement.
-  assert_eq(verdict_full(false, true, true, "", "", 1, 134, "Error: divide by zero", "Error: divide by zero", ""), "xfail")
+  assert_eq(
+    verdict_full(
+      false,
+      true,
+      true,
+      "",
+      "",
+      1,
+      134,
+      "Error: divide by zero",
+      "Error: divide by zero",
+      "",
+    ),
+    "xfail",
+  )
   // Same exit, different message: not agreement either.
-  assert_eq(verdict_full(false, true, true, "", "", 1, 1, "Error: divide by zero", "Error: index out of bounds", ""), "xfail")
+  assert_eq(
+    verdict_full(
+      false,
+      true,
+      true,
+      "",
+      "",
+      1,
+      1,
+      "Error: divide by zero",
+      "Error: index out of bounds",
+      "",
+    ),
+    "xfail",
+  )
 }
 
 test "the trap comparison masks the module path before deciding" {
   // The wat lives in a temp file whose name differs every run, so an unmasked path is a
   // guaranteed xfail for a reason that has nothing to do with the program.
   let v1 = "Error: failed to run main module `/tmp/x.wat`\n\nCaused by:\n    0: boom at /tmp/x.wat"
-  assert_eq(verdict_full(false, true, true, "", "", 1, 1, "boom at <module>", v1, "/tmp/x.wat"), "match")
+  assert_eq(
+    verdict_full(false, true, true, "", "", 1, 1, "boom at <module>", v1, "/tmp/x.wat"),
+    "match",
+  )
 }
 
 test "a succeeding oracle never reaches the trap comparison" {

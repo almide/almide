@@ -61,6 +61,9 @@ fn main() -> Unit = {
   // Negative n: native casts `n as usize` (a negative i64 -> huge), so take/take_end
   // return the WHOLE string and drop/drop_end return EMPTY. WASM must match.
   for s in ["héllo", "日本語", "a😀b"] {
-    println("neg take=[${string.take(s, 0 - 2)}] drop=[${string.drop(s, 0 - 2)}] take_end=[${string.take_end(s, 0 - 2)}] drop_end=[${string.drop_end(s, 0 - 2)}]")
+    println("neg take=[${string.take(s, 0 - 2)}] drop=[${string.drop(s, 0 - 2)}] take_end=[${string.take_end(
+      s,
+      0 - 2,
+    )}] drop_end=[${string.drop_end(s, 0 - 2)}]")
   }
 }

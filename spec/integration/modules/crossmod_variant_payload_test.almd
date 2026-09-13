@@ -21,8 +21,11 @@ test "cross-module record-variant payload field (#484)" {
 }
 
 test "cross-module generic variant payload (#484)" {
-  assert_eq(describe(Wrapped([
-    varlib.Never,
-    varlib.Always
-  ])), "wrap:2")
+  assert_eq(
+    describe(Wrapped([
+      varlib.Never,
+      varlib.Always
+    ])),
+    "wrap:2",
+  )
 }

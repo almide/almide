@@ -245,7 +245,10 @@ type Container[T] = { items: List[T], label: String }
 
 fn container_len[T](c: Container[T]) -> Int = list.len(c.items)
 
-fn container_add[T](c: Container[T], item: T) -> Container[T] = { items: c.items + [item], label: c.label }
+fn container_add[T](c: Container[T], item: T) -> Container[T] = {
+  items: c.items + [item],
+  label: c.label,
+}
 
 fn make_container[T](label: String) -> Container[T] = { items: [], label: label }
 

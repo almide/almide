@@ -32,7 +32,10 @@ test "a reused source stays intact (consume + clone-on-later-use)" {
 }
 
 test "fold aggregation shape" {
-  let counts = ["x", "y", "x"] |> list.fold(map.new(), (acc, k) => map.upsert(acc, k, 1, (n) => n + 1))
+  let counts = ["x", "y", "x"] |> list.fold(
+    map.new(),
+    (acc, k) => map.upsert(acc, k, 1, (n) => n + 1),
+  )
   assert_eq(map.get_or(counts, "x", 0), 2)
   assert_eq(map.get_or(counts, "y", 0), 1)
 }

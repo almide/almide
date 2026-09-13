@@ -40,7 +40,11 @@ fn test_string_builder() -> String = {
   for i in 0..<50 {
     dots = dots + "." + int.to_string(i % 10)
   }
-  int.to_string(string.len(s)) + " " + int.to_string(string.len(dots)) + " " + string.slice(dots, 0, 6)
+  int.to_string(string.len(s)) + " " + int.to_string(string.len(dots)) + " " + string.slice(
+    dots,
+    0,
+    6,
+  )
 }
 
 // rc_inc/rc_dec balance: build many nested structures, drop them, churn the heap.

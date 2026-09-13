@@ -78,7 +78,12 @@ fn __hr_find(resp: List[String], i: Int, key: String) -> String? = if i >= list.
 else if __hr_ci_eq(list.get(resp, i) ?? "", key) then list.get(resp, i + 1)
 else __hr_find(resp, i + 2, key)
 
-fn http_set_header(resp: List[String], key: String, value: String) -> List[String] = __hr_set(resp, 2, key, value)
+fn http_set_header(resp: List[String], key: String, value: String) -> List[String] = __hr_set(
+  resp,
+  2,
+  key,
+  value,
+)
 
 fn __hr_set(resp: List[String], i: Int, key: String, value: String) -> List[String] = if i >= list.len(resp) then resp + [key, value]
 else if __hr_ci_eq(list.get(resp, i) ?? "", key) then list.set(resp, i + 1, value)
@@ -91,9 +96,14 @@ fn http_status_code(resp: List[String]) -> Int = int.parse(list.get(resp, 0) ?? 
 fn http_header_values(resp: List[String], key: String) -> List[String] = __hr_all(resp, 2, key, [])
 
 fn __hr_all(resp: List[String], i: Int, key: String, acc: List[String]) -> List[String] = if i >= list.len(resp) then acc
-else if __hr_ci_eq(list.get(resp, i) ?? "", key) then __hr_all(resp, i + 2, key, acc + [
-  list.get(resp, i + 1) ?? ""
-])
+else if __hr_ci_eq(list.get(resp, i) ?? "", key) then __hr_all(
+  resp,
+  i + 2,
+  key,
+  acc + [
+    list.get(resp, i + 1) ?? ""
+  ],
+)
 else __hr_all(resp, i + 2, key, acc)
 
 // ASCII-lowercase a field name through the same per-char fold get_header

@@ -73,6 +73,9 @@ test "deeply nested pipe" {
   let r = [
     [1, 2, 3],
     [4, 5, 6]
-  ] |> list.map((row) => row |> list.filter((x) => x % 2 != 0) |> list.map((x) => x * x)) |> list.flatten |> list.fold(0, (a, x) => a + x)
+  ] |> list.map((row) => row |> list.filter((x) => x % 2 != 0) |> list.map((x) => x * x)) |> list.flatten |> list.fold(
+    0,
+    (a, x) => a + x,
+  )
   assert_eq(r, 1 + 9 + 25)
 }

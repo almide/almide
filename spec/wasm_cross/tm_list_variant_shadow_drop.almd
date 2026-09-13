@@ -7,8 +7,11 @@ type V = | A(Int) | B(String)
 fn main() -> Unit = {
   var v: List[V] = [A(1), B("t"), A(2)]
   v = [A(1)]
-  println(list.join(list.map(v, (e) => match e {
-    A(n) => int.to_string(n),
-    B(s) => s,
-  }), "/"))
+  println(list.join(
+    list.map(v, (e) => match e {
+      A(n) => int.to_string(n),
+      B(s) => s,
+    }),
+    "/",
+  ))
 }

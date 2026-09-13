@@ -8,6 +8,9 @@ fn main() -> Unit = {
   let o: (String, String)? = if string.is_empty(r2) then some((r2, "H")) else some(("A", "B"))
   let r6: (String, String) = option.unwrap_or_else(o, (() => ("C", r2)))
   println("r6 = ${r6}")
-  let direct: (String, String) = option.unwrap_or_else((if string.is_empty(r2) then some((r2, "H")) else some(("A", "B"))), (() => ("D", r2)))
+  let direct: (String, String) = option.unwrap_or_else(
+    (if string.is_empty(r2) then some((r2, "H")) else some(("A", "B"))),
+    (() => ("D", r2)),
+  )
   println("direct = ${direct}")
 }

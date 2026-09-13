@@ -83,7 +83,10 @@ else if c >= 48 and c <= 57 then c + 4
 else if c == 43 or c == 45 then 62
 else if c == 47 or c == 95 then 63 else 0 - 1
 
-fn __b64d_strip(p: Int, end: Int) -> Int = if end > 0 and prim.load8(p + end - 1) == 61 then __b64d_strip(p, end - 1) else end
+fn __b64d_strip(p: Int, end: Int) -> Int = if end > 0 and prim.load8(p + end - 1) == 61 then __b64d_strip(
+  p,
+  end - 1,
+) else end
 
 fn __b64d_scan(p: Int, n: Int, i: Int) -> Bool = if i >= n then true
 else if __b64d_val(prim.load8(p + i)) < 0 then false

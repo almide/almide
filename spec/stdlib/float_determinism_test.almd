@@ -57,9 +57,12 @@ test "T24: the checked family is some only for exactly representable values" {
   assert_eq(float.to_int64_checked(1.0 / 0.0), none)
   assert_eq(float.to_int64_checked(9.3e18), none)
   assert_eq(float.to_int8_checked(200.0), none)
-  assert_eq(match float.to_uint8_checked(255.0) {
-    some(v) => "some ${v}",
-    none => "none",
-  }, "some 255")
+  assert_eq(
+    match float.to_uint8_checked(255.0) {
+      some(v) => "some ${v}",
+      none => "none",
+    },
+    "some 255",
+  )
   assert_eq(float.to_float32_checked(0.1), none)
 }

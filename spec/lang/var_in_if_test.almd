@@ -41,18 +41,36 @@ effect fn main() -> Unit = {
     var sny = 0.0
     var snz = 0.0
     if w0 > 0.0 then {
-      sx = sx + w0 * (mg(jm, mo) * px + mg(jm, mo + 16) * py + mg(jm, mo + 32) * pz + mg(jm, mo + 48))
-      sy = sy + w0 * (mg(jm, mo + 4) * px + mg(jm, mo + 20) * py + mg(jm, mo + 36) * pz + mg(jm, mo + 52))
-      sz = sz + w0 * (mg(jm, mo + 8) * px + mg(jm, mo + 24) * py + mg(jm, mo + 40) * pz + mg(jm, mo + 56))
+      sx = sx + w0 * (mg(jm, mo) * px + mg(jm, mo + 16) * py + mg(jm, mo + 32) * pz + mg(
+        jm,
+        mo + 48,
+      ))
+      sy = sy + w0 * (mg(jm, mo + 4) * px + mg(jm, mo + 20) * py + mg(jm, mo + 36) * pz + mg(
+        jm,
+        mo + 52,
+      ))
+      sz = sz + w0 * (mg(jm, mo + 8) * px + mg(jm, mo + 24) * py + mg(jm, mo + 40) * pz + mg(
+        jm,
+        mo + 56,
+      ))
       snx = snx + w0 * (mg(jm, mo) * nx + mg(jm, mo + 16) * ny + mg(jm, mo + 32) * nz)
       sny = sny + w0 * (mg(jm, mo + 4) * nx + mg(jm, mo + 20) * ny + mg(jm, mo + 36) * nz)
       snz = snz + w0 * (mg(jm, mo + 8) * nx + mg(jm, mo + 24) * ny + mg(jm, mo + 40) * nz)
     } else {
     }
     if w1 > 0.0 then {
-      sx = sx + w1 * (mg(jm, mo) * px + mg(jm, mo + 16) * py + mg(jm, mo + 32) * pz + mg(jm, mo + 48))
-      sy = sy + w1 * (mg(jm, mo + 4) * px + mg(jm, mo + 20) * py + mg(jm, mo + 36) * pz + mg(jm, mo + 52))
-      sz = sz + w1 * (mg(jm, mo + 8) * px + mg(jm, mo + 24) * py + mg(jm, mo + 40) * pz + mg(jm, mo + 56))
+      sx = sx + w1 * (mg(jm, mo) * px + mg(jm, mo + 16) * py + mg(jm, mo + 32) * pz + mg(
+        jm,
+        mo + 48,
+      ))
+      sy = sy + w1 * (mg(jm, mo + 4) * px + mg(jm, mo + 20) * py + mg(jm, mo + 36) * pz + mg(
+        jm,
+        mo + 52,
+      ))
+      sz = sz + w1 * (mg(jm, mo + 8) * px + mg(jm, mo + 24) * py + mg(jm, mo + 40) * pz + mg(
+        jm,
+        mo + 56,
+      ))
       snx = snx + w1 * (mg(jm, mo) * nx + mg(jm, mo + 16) * ny + mg(jm, mo + 32) * nz)
       sny = sny + w1 * (mg(jm, mo + 4) * nx + mg(jm, mo + 20) * ny + mg(jm, mo + 36) * nz)
       snz = snz + w1 * (mg(jm, mo + 8) * nx + mg(jm, mo + 24) * ny + mg(jm, mo + 40) * nz)

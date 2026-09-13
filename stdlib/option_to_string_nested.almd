@@ -210,11 +210,20 @@ fn option_to_string_ooi(o: ((Int?)?)?) -> String = match o {
 }
 
 // A BARE `[1, 2, 3]` int-list for composing `some(some([…]))` / `some(ok([…]))`. Negate-free negatives.
-fn __onest_digits(n: Int, acc: Int) -> Int = if n < 10 then acc + 1 else __onest_digits(n / 10, acc + 1)
+fn __onest_digits(n: Int, acc: Int) -> Int = if n < 10 then acc + 1 else __onest_digits(
+  n / 10,
+  acc + 1,
+)
 
-fn __onest_count_neg(n: Int, acc: Int) -> Int = if n > 0 - 10 then acc + 1 else __onest_count_neg(n / 10, acc + 1)
+fn __onest_count_neg(n: Int, acc: Int) -> Int = if n > 0 - 10 then acc + 1 else __onest_count_neg(
+  n / 10,
+  acc + 1,
+)
 
-fn __onest_int_width(v: Int) -> Int = if v < 0 then __onest_count_neg(v, 0) + 1 else __onest_digits(v, 0)
+fn __onest_int_width(v: Int) -> Int = if v < 0 then __onest_count_neg(v, 0) + 1 else __onest_digits(
+  v,
+  0,
+)
 
 fn __onest_fill_digits(n: Int, pos: Int) -> Int = if n < 10 then {
   prim.store8(pos, 48 + n)

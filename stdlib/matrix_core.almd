@@ -577,7 +577,10 @@ else {
 fn __mx_f32_row(rh: Int, hd: Int, base: Int, c: Int, j: Int) -> Int = if j >= c then 0
 else {
   let p = hd + 12 + base + j * 4
-  let bits = prim.bor(prim.bor(prim.load8(p), prim.bshl(prim.load8(p + 1), 8)), prim.bor(prim.bshl(prim.load8(p + 2), 16), prim.bshl(prim.load8(p + 3), 24)))
+  let bits = prim.bor(
+    prim.bor(prim.load8(p), prim.bshl(prim.load8(p + 1), 8)),
+    prim.bor(prim.bshl(prim.load8(p + 2), 16), prim.bshl(prim.load8(p + 3), 24)),
+  )
   prim.store64(rh + 12 + j * 8, prim.fbits(prim.bits_to_f32(bits)))
   __mx_f32_row(rh, hd, base, c, j + 1)
 }

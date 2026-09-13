@@ -25,11 +25,17 @@ fn apply_all[T](xs: List[T], f: (T) -> String) -> List[String] = list.map(xs, f)
 fn labels[T: Labelled](xs: List[T]) -> List[String] = apply_all(xs, (e) => e.name())
 
 fn main() -> Unit = {
-  println(string.join(names([
-    A { x: 1 },
-    A { x: 2 }
-  ]), ","))
-  println(string.join(labels([
-    A { x: 7 }
-  ]), ","))
+  println(string.join(
+    names([
+      A { x: 1 },
+      A { x: 2 }
+    ]),
+    ",",
+  ))
+  println(string.join(
+    labels([
+      A { x: 7 }
+    ]),
+    ",",
+  ))
 }

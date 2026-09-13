@@ -28,24 +28,51 @@ local fn pair(x: Int) -> List[Int] = [x, x]
 // bare-name spellings (fusion fires)
 local fn bare_map_fold(xs: List[Int]) -> Int = xs |> list.map(dbl) |> list.fold(0, add)
 
-local fn bare_map_filter_fold(xs: List[Int]) -> Int = xs |> list.map(dbl) |> list.filter(pos) |> list.fold(0, add)
+local fn bare_map_filter_fold(xs: List[Int]) -> Int = xs |> list.map(dbl) |> list.filter(pos) |> list.fold(
+  0,
+  add,
+)
 
-local fn bare_long(xs: List[Int]) -> Int = xs |> list.map(dbl) |> list.filter(pos) |> list.map(inc) |> list.fold(0, add)
+local fn bare_long(xs: List[Int]) -> Int = xs |> list.map(dbl) |> list.filter(pos) |> list.map(inc) |> list.fold(
+  0,
+  add,
+)
 
-local fn bare_flatmap_fold(xs: List[Int]) -> Int = xs |> list.flat_map(pair) |> list.map(dbl) |> list.fold(0, add)
+local fn bare_flatmap_fold(xs: List[Int]) -> Int = xs |> list.flat_map(pair) |> list.map(dbl) |> list.fold(
+  0,
+  add,
+)
 
-local fn bare_mul_fold(xs: List[Int]) -> Int = xs |> list.filter(pos) |> list.map(dbl) |> list.fold(1, mul)
+local fn bare_mul_fold(xs: List[Int]) -> Int = xs |> list.filter(pos) |> list.map(dbl) |> list.fold(
+  1,
+  mul,
+)
 
 // lambda spellings (the oracle)
-local fn lam_map_fold(xs: List[Int]) -> Int = xs |> list.map((v) => dbl(v)) |> list.fold(0, (p, q) => add(p, q))
+local fn lam_map_fold(xs: List[Int]) -> Int = xs |> list.map((v) => dbl(v)) |> list.fold(
+  0,
+  (p, q) => add(p, q),
+)
 
-local fn lam_map_filter_fold(xs: List[Int]) -> Int = xs |> list.map((v) => dbl(v)) |> list.filter((v) => pos(v)) |> list.fold(0, (p, q) => add(p, q))
+local fn lam_map_filter_fold(xs: List[Int]) -> Int = xs |> list.map((v) => dbl(v)) |> list.filter((v) => pos(v)) |> list.fold(
+  0,
+  (p, q) => add(p, q),
+)
 
-local fn lam_long(xs: List[Int]) -> Int = xs |> list.map((v) => dbl(v)) |> list.filter((v) => pos(v)) |> list.map((v) => inc(v)) |> list.fold(0, (p, q) => add(p, q))
+local fn lam_long(xs: List[Int]) -> Int = xs |> list.map((v) => dbl(v)) |> list.filter((v) => pos(v)) |> list.map((v) => inc(v)) |> list.fold(
+  0,
+  (p, q) => add(p, q),
+)
 
-local fn lam_flatmap_fold(xs: List[Int]) -> Int = xs |> list.flat_map((v) => pair(v)) |> list.map((v) => dbl(v)) |> list.fold(0, (p, q) => add(p, q))
+local fn lam_flatmap_fold(xs: List[Int]) -> Int = xs |> list.flat_map((v) => pair(v)) |> list.map((v) => dbl(v)) |> list.fold(
+  0,
+  (p, q) => add(p, q),
+)
 
-local fn lam_mul_fold(xs: List[Int]) -> Int = xs |> list.filter((v) => pos(v)) |> list.map((v) => dbl(v)) |> list.fold(1, (p, q) => mul(p, q))
+local fn lam_mul_fold(xs: List[Int]) -> Int = xs |> list.filter((v) => pos(v)) |> list.map((v) => dbl(v)) |> list.fold(
+  1,
+  (p, q) => mul(p, q),
+)
 
 test "a bare-name pipeline agrees with its lambda spelling" {
   let xs = [1, 2, 3]

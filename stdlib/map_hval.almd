@@ -127,7 +127,11 @@ else match list.get(pairs, i) {
   none => m,
 }
 
-fn map_from_list_hval(pairs: List[(String, List[Int])]) -> Map[String, List[Int]] = __hvf_at(pairs, 0, map_new_hval())
+fn map_from_list_hval(pairs: List[(String, List[Int])]) -> Map[String, List[Int]] = __hvf_at(
+  pairs,
+  0,
+  map_new_hval(),
+)
 
 // `${Map[String, List[Int]]}` display — v0's `["xs": [1, 2, 3], "ys": [4, 5]]`
 // (insertion order, QUOTED + escaped String keys, list values through their own

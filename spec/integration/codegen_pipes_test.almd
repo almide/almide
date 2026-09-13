@@ -52,7 +52,10 @@ test "pipe mixed with operations" {
 
 // ── Pipe with fold ──
 test "pipe ending with fold" {
-  let result = ["hello", "world", "foo", "bar"] |> list.map((s) => string.len(s)) |> list.fold(0, (acc, n) => acc + n)
+  let result = ["hello", "world", "foo", "bar"] |> list.map((s) => string.len(s)) |> list.fold(
+    0,
+    (acc, n) => acc + n,
+  )
   assert_eq(result, 16)
 }
 

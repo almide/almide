@@ -41,10 +41,13 @@ fn main() -> Unit = {
   // when the acquire and the recursive drop balance exactly.
   var i = 0
   while i < 20000 {
-    let s = list.sort_by([
-      ["y", "1"],
-      ["x", "0"]
-    ], (r) => key_of(r))
+    let s = list.sort_by(
+      [
+        ["y", "1"],
+        ["x", "0"]
+      ],
+      (r) => key_of(r),
+    )
     let _ = list.len(s)
     i = i + 1
   }

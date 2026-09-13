@@ -82,14 +82,17 @@ test "repr result err" {
 
 // ── Nesting ──
 test "repr nested list of maps" {
-  assert_eq("${[
-    [
-      "a": [1, 2]
-    ],
-    [
-      "b": [3]
-    ]
-  ]}", '[["a": [1, 2]], ["b": [3]]]')
+  assert_eq(
+    "${[
+      [
+        "a": [1, 2]
+      ],
+      [
+        "b": [3]
+      ]
+    ]}",
+    '[["a": [1, 2]], ["b": [3]]]',
+  )
 }
 
 // ── String escaping inside a container ──

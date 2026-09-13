@@ -26,11 +26,14 @@ test "if element with runtime cond, else arm" {
 
 test "if element inside a HOF condition list" {
   let c = runtime_flag("x")
-  let hit = list.any([
-    "αβγ",
-    (if c then "日本語" else "ﬁle"),
-    "café"
-  ], ((s) => s == "ﬁle"))
+  let hit = list.any(
+    [
+      "αβγ",
+      (if c then "日本語" else "ﬁle"),
+      "café"
+    ],
+    ((s) => s == "ﬁle"),
+  )
   assert_eq(hit, true)
 }
 

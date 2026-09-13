@@ -75,10 +75,13 @@ test "filter variant records by constructor" {
 }
 
 // ── Extracting fields from variant records ──
-fn extract_click_positions(events: List[Event]) -> List[(Int, Int)] = list.filter_map(events, (e) => match e {
-  Click { x, y, .. } => some((x, y)),
-  _ => none,
-})
+fn extract_click_positions(events: List[Event]) -> List[(Int, Int)] = list.filter_map(
+  events,
+  (e) => match e {
+    Click { x, y, .. } => some((x, y)),
+    _ => none,
+  },
+)
 
 test "extract fields from variant records" {
   let events = [

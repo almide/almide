@@ -274,7 +274,11 @@ else {
 }
 
 // ── numbers ──
-fn __jp_digits(base: Int, len: Int, p: Int) -> Int = if p < len and prim.load8(base + p) >= 48 and prim.load8(base + p) <= 57 then __jp_digits(base, len, p + 1)
+fn __jp_digits(base: Int, len: Int, p: Int) -> Int = if p < len and prim.load8(base + p) >= 48 and prim.load8(base + p) <= 57 then __jp_digits(
+  base,
+  len,
+  p + 1,
+)
 else p
 
 fn __jp_number(base: Int, len: Int, p: Int) -> Result[(Value, Int), String] = {
@@ -304,10 +308,26 @@ fn __jp_number(base: Int, len: Int, p: Int) -> Result[(Value, Int), String] = {
 // ── literals ──
 fn __jp_lit_at(base: Int, len: Int, p: Int, b0: Int, b1: Int, b2: Int, b3: Int) -> Bool = p + 4 <= len and prim.load8(base + p) == b0 and prim.load8(base + p + 1) == b1 and prim.load8(base + p + 2) == b2 and prim.load8(base + p + 3) == b3
 
-fn __jp_bool(base: Int, len: Int, p: Int) -> Result[(Value, Int), String] = if __jp_lit_at(base, len, p, 116, 114, 117, 101) then ok((value.bool(true), p + 4))
+fn __jp_bool(base: Int, len: Int, p: Int) -> Result[(Value, Int), String] = if __jp_lit_at(
+  base,
+  len,
+  p,
+  116,
+  114,
+  117,
+  101,
+) then ok((value.bool(true), p + 4))
 else if __jp_lit_at(base, len, p, 102, 97, 108, 115) and p + 5 <= len and prim.load8(base + p + 4) == 101 then ok((value.bool(false), p + 5)) else err("expected bool")
 
-fn __jp_null(base: Int, len: Int, p: Int) -> Result[(Value, Int), String] = if __jp_lit_at(base, len, p, 110, 117, 108, 108) then ok((value.null(), p + 4)) else err("expected null")
+fn __jp_null(base: Int, len: Int, p: Int) -> Result[(Value, Int), String] = if __jp_lit_at(
+  base,
+  len,
+  p,
+  110,
+  117,
+  108,
+  108,
+) then ok((value.null(), p + 4)) else err("expected null")
 
 // ── collections ──
 // p is at the first element (post-`[`, post-ws, non-`]`).

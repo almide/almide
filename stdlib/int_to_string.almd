@@ -15,7 +15,10 @@
 // (toward zero). This is exact for ALL negatives including i64::MIN (#660).
 // Count the decimal digits of `n` (n >= 0), accumulator-style so the recursion is a
 // tail call (no `acc + count(...)` arithmetic over a call).
-fn __itos_count_digits(n: Int, acc: Int) -> Int = if n < 10 then acc + 1 else __itos_count_digits(n / 10, acc + 1)
+fn __itos_count_digits(n: Int, acc: Int) -> Int = if n < 10 then acc + 1 else __itos_count_digits(
+  n / 10,
+  acc + 1,
+)
 
 // Write the decimal bytes of `n` (n >= 0) starting at byte address `pos`, most
 // significant first (the recursion writes the high digits before the low one).
@@ -42,7 +45,10 @@ fn __itos_pos(n: Int) -> String = {
 
 // Count the decimal digits of `n` (n <= 0), without negating — `n > 0 - 10` means a
 // single magnitude digit (i64::MIN included: it is far below -9, so it recurses).
-fn __itos_count_digits_neg(n: Int, acc: Int) -> Int = if n > 0 - 10 then acc + 1 else __itos_count_digits_neg(n / 10, acc + 1)
+fn __itos_count_digits_neg(n: Int, acc: Int) -> Int = if n > 0 - 10 then acc + 1 else __itos_count_digits_neg(
+  n / 10,
+  acc + 1,
+)
 
 // Write the magnitude bytes of `n` (n <= 0) starting at `pos`, MSD-first — extracting
 // `digit = -(n % 10)` directly so i64::MIN never has to be negated.

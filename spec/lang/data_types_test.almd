@@ -218,14 +218,17 @@ test "list sort" {
 }
 
 test "list unique" {
-  assert_eq(list.unique([
-    1,
-    2,
-    2,
-    3,
-    3,
-    3
-  ]), [1, 2, 3])
+  assert_eq(
+    list.unique([
+      1,
+      2,
+      2,
+      3,
+      3,
+      3
+    ]),
+    [1, 2, 3],
+  )
   assert_eq(list.unique(["a", "a", "b"]), ["a", "b"])
 }
 

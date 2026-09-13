@@ -70,8 +70,20 @@ test "pow with 0.5 = sqrt" {
     [16.0, 25.0]
   ])
   let s = matrix.pow(a, 0.5)
-  assert(float.abs(matrix.get(s, 0, 0) - 2.0) < 0.001, "got " + float.to_string(matrix.get(s, 0, 0)))
-  assert(float.abs(matrix.get(s, 0, 1) - 3.0) < 0.001, "got " + float.to_string(matrix.get(s, 0, 1)))
-  assert(float.abs(matrix.get(s, 1, 0) - 4.0) < 0.001, "got " + float.to_string(matrix.get(s, 1, 0)))
-  assert(float.abs(matrix.get(s, 1, 1) - 5.0) < 0.001, "got " + float.to_string(matrix.get(s, 1, 1)))
+  assert(
+    float.abs(matrix.get(s, 0, 0) - 2.0) < 0.001,
+    "got " + float.to_string(matrix.get(s, 0, 0)),
+  )
+  assert(
+    float.abs(matrix.get(s, 0, 1) - 3.0) < 0.001,
+    "got " + float.to_string(matrix.get(s, 0, 1)),
+  )
+  assert(
+    float.abs(matrix.get(s, 1, 0) - 4.0) < 0.001,
+    "got " + float.to_string(matrix.get(s, 1, 0)),
+  )
+  assert(
+    float.abs(matrix.get(s, 1, 1) - 5.0) < 0.001,
+    "got " + float.to_string(matrix.get(s, 1, 1)),
+  )
 }

@@ -27,7 +27,10 @@
 // resolution) and removes it at the end.
 import fs
 
-effect fn read_all(paths: List[String]) -> Result[List[String], String] = fan.map(paths, (p) => fs.read_text(p)!)
+effect fn read_all(paths: List[String]) -> Result[List[String], String] = fan.map(
+  paths,
+  (p) => fs.read_text(p)!,
+)
 
 effect fn main() -> Unit = {
   let dir = "almide_xt_fanpf_tmp"
@@ -50,7 +53,10 @@ effect fn main() -> Unit = {
   // The same probe as the UN-banged fallible form in the caller (#1663):
   // the callback's `!` instantiates the fallible form and the first err
   // in ARM order is the block's Result VALUE — never an abort.
-  let direct = fan.map(["almide_xt_fanpf_tmp/a.txt", "almide_xt_fanpf_tmp", "almide_xt_fanpf_tmp/gone.txt"], (p) => fs.read_text(p)!)
+  let direct = fan.map(
+    ["almide_xt_fanpf_tmp/a.txt", "almide_xt_fanpf_tmp", "almide_xt_fanpf_tmp/gone.txt"],
+    (p) => fs.read_text(p)!,
+  )
   match direct {
     ok(_) => println("BAD: direct err arm did not decide"),
     err(m) => println("direct-err=${m}"),

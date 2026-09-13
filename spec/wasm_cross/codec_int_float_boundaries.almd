@@ -8,7 +8,12 @@ import json
 type N: Codec = { big: Int, small: Int, f: Float, g: Float }
 
 effect fn main() -> Unit = {
-  let n = N { big: 9223372036854775807, small: (0 - 9223372036854775807) - 1, f: 0.1, g: 1000000000000000.5 }
+  let n = N {
+    big: 9223372036854775807,
+    small: (0 - 9223372036854775807) - 1,
+    f: 0.1,
+    g: 1000000000000000.5,
+  }
   let enc = json.stringify(N.encode(n))
   println(enc)
   let d = N.decode(json.parse(enc)!)!

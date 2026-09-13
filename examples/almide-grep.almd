@@ -4,7 +4,13 @@
 import env
 import fs
 
-fn is_searchable(path: String) -> Bool = string.ends_with(path, ".almd") or string.ends_with(path, ".txt") or string.ends_with(path, ".md") or string.ends_with(path, ".toml") or string.ends_with(path, ".rs") or string.ends_with(path, ".ts")
+fn is_searchable(path: String) -> Bool = string.ends_with(path, ".almd") or string.ends_with(
+  path,
+  ".txt",
+) or string.ends_with(path, ".md") or string.ends_with(path, ".toml") or string.ends_with(
+  path,
+  ".rs",
+) or string.ends_with(path, ".ts")
 
 effect fn main() -> Unit = {
   let args = env.args()

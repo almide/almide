@@ -11,7 +11,11 @@ else match f(list.get(xs, i) ?? 0) {
   err(_) => __fan_any_go(xs, f, i + 1),
 }
 
-fn fan_any(xs: List[Int], f: (Int) -> Result[Int, String]) -> Result[Int, String] = __fan_any_go(xs, f, 0)
+fn fan_any(xs: List[Int], f: (Int) -> Result[Int, String]) -> Result[Int, String] = __fan_any_go(
+  xs,
+  f,
+  0,
+)
 
 // ── (Int → String) ──
 fn __fan_any_is_go(xs: List[Int], f: (Int) -> Result[String, String], i: Int) -> Result[String, String] = if i >= list.len(xs) then err("fan.any: all candidates failed")
@@ -20,7 +24,11 @@ else match f(list.get(xs, i) ?? 0) {
   err(_) => __fan_any_is_go(xs, f, i + 1),
 }
 
-fn fan_any_is(xs: List[Int], f: (Int) -> Result[String, String]) -> Result[String, String] = __fan_any_is_go(xs, f, 0)
+fn fan_any_is(xs: List[Int], f: (Int) -> Result[String, String]) -> Result[String, String] = __fan_any_is_go(
+  xs,
+  f,
+  0,
+)
 
 // ── (String → String) ──
 fn __fan_any_ss_go(xs: List[String], f: (String) -> Result[String, String], i: Int) -> Result[String, String] = if i >= list.len(xs) then err("fan.any: all candidates failed")
@@ -29,7 +37,11 @@ else match f(list.get(xs, i) ?? "") {
   err(_) => __fan_any_ss_go(xs, f, i + 1),
 }
 
-fn fan_any_ss(xs: List[String], f: (String) -> Result[String, String]) -> Result[String, String] = __fan_any_ss_go(xs, f, 0)
+fn fan_any_ss(xs: List[String], f: (String) -> Result[String, String]) -> Result[String, String] = __fan_any_ss_go(
+  xs,
+  f,
+  0,
+)
 
 // ── (String → Int) ──
 fn __fan_any_si_go(xs: List[String], f: (String) -> Result[Int, String], i: Int) -> Result[Int, String] = if i >= list.len(xs) then err("fan.any: all candidates failed")
@@ -38,7 +50,11 @@ else match f(list.get(xs, i) ?? "") {
   err(_) => __fan_any_si_go(xs, f, i + 1),
 }
 
-fn fan_any_si(xs: List[String], f: (String) -> Result[Int, String]) -> Result[Int, String] = __fan_any_si_go(xs, f, 0)
+fn fan_any_si(xs: List[String], f: (String) -> Result[Int, String]) -> Result[Int, String] = __fan_any_si_go(
+  xs,
+  f,
+  0,
+)
 
 // ── (Int → Float) ──
 fn __fan_any_if_go(xs: List[Int], f: (Int) -> Result[Float, String], i: Int) -> Result[Float, String] = if i >= list.len(xs) then err("fan.any: all candidates failed")
@@ -47,7 +63,11 @@ else match f(list.get(xs, i) ?? 0) {
   err(_) => __fan_any_if_go(xs, f, i + 1),
 }
 
-fn fan_any_if(xs: List[Int], f: (Int) -> Result[Float, String]) -> Result[Float, String] = __fan_any_if_go(xs, f, 0)
+fn fan_any_if(xs: List[Int], f: (Int) -> Result[Float, String]) -> Result[Float, String] = __fan_any_if_go(
+  xs,
+  f,
+  0,
+)
 
 // ── (Float → Int) ──
 fn __fan_any_fi_go(xs: List[Float], f: (Float) -> Result[Int, String], i: Int) -> Result[Int, String] = if i >= list.len(xs) then err("fan.any: all candidates failed")
@@ -56,7 +76,11 @@ else match f(list.get(xs, i) ?? 0.0) {
   err(_) => __fan_any_fi_go(xs, f, i + 1),
 }
 
-fn fan_any_fi(xs: List[Float], f: (Float) -> Result[Int, String]) -> Result[Int, String] = __fan_any_fi_go(xs, f, 0)
+fn fan_any_fi(xs: List[Float], f: (Float) -> Result[Int, String]) -> Result[Int, String] = __fan_any_fi_go(
+  xs,
+  f,
+  0,
+)
 
 // ── (Float → Float) ──
 fn __fan_any_ff_go(xs: List[Float], f: (Float) -> Result[Float, String], i: Int) -> Result[Float, String] = if i >= list.len(xs) then err("fan.any: all candidates failed")
@@ -65,7 +89,11 @@ else match f(list.get(xs, i) ?? 0.0) {
   err(_) => __fan_any_ff_go(xs, f, i + 1),
 }
 
-fn fan_any_ff(xs: List[Float], f: (Float) -> Result[Float, String]) -> Result[Float, String] = __fan_any_ff_go(xs, f, 0)
+fn fan_any_ff(xs: List[Float], f: (Float) -> Result[Float, String]) -> Result[Float, String] = __fan_any_ff_go(
+  xs,
+  f,
+  0,
+)
 
 // ── (Float → String) ──
 fn __fan_any_fs_go(xs: List[Float], f: (Float) -> Result[String, String], i: Int) -> Result[String, String] = if i >= list.len(xs) then err("fan.any: all candidates failed")
@@ -74,7 +102,11 @@ else match f(list.get(xs, i) ?? 0.0) {
   err(_) => __fan_any_fs_go(xs, f, i + 1),
 }
 
-fn fan_any_fs(xs: List[Float], f: (Float) -> Result[String, String]) -> Result[String, String] = __fan_any_fs_go(xs, f, 0)
+fn fan_any_fs(xs: List[Float], f: (Float) -> Result[String, String]) -> Result[String, String] = __fan_any_fs_go(
+  xs,
+  f,
+  0,
+)
 
 // ── (String → Float) ──
 fn __fan_any_sf_go(xs: List[String], f: (String) -> Result[Float, String], i: Int) -> Result[Float, String] = if i >= list.len(xs) then err("fan.any: all candidates failed")
@@ -83,4 +115,8 @@ else match f(list.get(xs, i) ?? "") {
   err(_) => __fan_any_sf_go(xs, f, i + 1),
 }
 
-fn fan_any_sf(xs: List[String], f: (String) -> Result[Float, String]) -> Result[Float, String] = __fan_any_sf_go(xs, f, 0)
+fn fan_any_sf(xs: List[String], f: (String) -> Result[Float, String]) -> Result[Float, String] = __fan_any_sf_go(
+  xs,
+  f,
+  0,
+)

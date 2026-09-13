@@ -7,12 +7,18 @@ import http
 
 test "http.response unit=status-code" {
   let r = http.response(200, "hi")
-  assert_eq("${http.body(r) + " " + (http.get_header(r, "Content-Type") ?? "none")}", "hi text/plain")
+  assert_eq(
+    "${http.body(r) + " " + (http.get_header(r, "Content-Type") ?? "none")}",
+    "hi text/plain",
+  )
 }
 
 test "http.json unit=status-code" {
   let r = http.json(201, "{}")
-  assert_eq("${http.body(r) + " " + (http.get_header(r, "Content-Type") ?? "none")}", "{} application/json")
+  assert_eq(
+    "${http.body(r) + " " + (http.get_header(r, "Content-Type") ?? "none")}",
+    "{} application/json",
+  )
 }
 
 test "http.with_headers unit=status-code" {
@@ -22,7 +28,10 @@ test "http.with_headers unit=status-code" {
 
 test "http.status unit=status-code" {
   let r = http.status(http.response(200, "sb"), 404)
-  assert_eq("${http.body(r) + " " + (http.get_header(r, "Content-Type") ?? "none")}", "sb text/plain")
+  assert_eq(
+    "${http.body(r) + " " + (http.get_header(r, "Content-Type") ?? "none")}",
+    "sb text/plain",
+  )
 }
 
 test "http.status_code unit=status-code" {

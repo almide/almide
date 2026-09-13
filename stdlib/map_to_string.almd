@@ -38,7 +38,10 @@ else {
 fn __mts_digits(n: Int, acc: Int) -> Int = if n < 10 then acc + 1 else __mts_digits(n / 10, acc + 1)
 
 // Negative path WITHOUT negating (i64::MIN safe, #660): count digits of n <= 0 directly.
-fn __mts_count_neg(n: Int, acc: Int) -> Int = if n > 0 - 10 then acc + 1 else __mts_count_neg(n / 10, acc + 1)
+fn __mts_count_neg(n: Int, acc: Int) -> Int = if n > 0 - 10 then acc + 1 else __mts_count_neg(
+  n / 10,
+  acc + 1,
+)
 
 fn __mts_int_width(v: Int) -> Int = if v < 0 then __mts_count_neg(v, 0) + 1 else __mts_digits(v, 0)
 

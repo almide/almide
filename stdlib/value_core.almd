@@ -272,7 +272,12 @@ else {
 }
 
 fn __leq_int(ah: Int, bh: Int, i: Int, n: Int) -> Bool = if i >= n then true
-else if prim.load64(ah + 12 + i * 8) == prim.load64(bh + 12 + i * 8) then __leq_int(ah, bh, i + 1, n)
+else if prim.load64(ah + 12 + i * 8) == prim.load64(bh + 12 + i * 8) then __leq_int(
+  ah,
+  bh,
+  i + 1,
+  n,
+)
 else false
 
 fn list_eq_int(a: List[Int], b: List[Int]) -> Bool = {
@@ -283,7 +288,12 @@ fn list_eq_int(a: List[Int], b: List[Int]) -> Bool = {
 }
 
 fn __leq_float(ah: Int, bh: Int, i: Int, n: Int) -> Bool = if i >= n then true
-else if prim.ffrombits(prim.load64(ah + 12 + i * 8)) == prim.ffrombits(prim.load64(bh + 12 + i * 8)) then __leq_float(ah, bh, i + 1, n)
+else if prim.ffrombits(prim.load64(ah + 12 + i * 8)) == prim.ffrombits(prim.load64(bh + 12 + i * 8)) then __leq_float(
+  ah,
+  bh,
+  i + 1,
+  n,
+)
 else false
 
 fn list_eq_float(a: List[Float], b: List[Float]) -> Bool = {
@@ -485,9 +495,19 @@ fn value_eq(a: Value, b: Value) -> Bool = {
   else if ta == 2 then prim.load64(ha + 12) == prim.load64(hb + 12)
   else if ta == 3 then prim.ffrombits(prim.load64(ha + 12)) == prim.ffrombits(prim.load64(hb + 12))
   else if ta == 4 then __veq_strval(prim.load_str(ha + 12), prim.load_str(hb + 12))
-  else if ta == 5 then (if prim.load32(ha + 8) == prim.load32(hb + 8) then __varr_eq(a, b, 0, prim.load32(ha + 8))
+  else if ta == 5 then (if prim.load32(ha + 8) == prim.load32(hb + 8) then __varr_eq(
+    a,
+    b,
+    0,
+    prim.load32(ha + 8),
+  )
   else false)
-  else if ta == 6 then (if prim.load32(ha + 8) == prim.load32(hb + 8) then __vobj_eq(a, b, 0, prim.load32(ha + 8) / 2)
+  else if ta == 6 then (if prim.load32(ha + 8) == prim.load32(hb + 8) then __vobj_eq(
+    a,
+    b,
+    0,
+    prim.load32(ha + 8) / 2,
+  )
   else false)
   else false
 }
@@ -548,7 +568,12 @@ fn list_insert_value(xs: List[Value], i: Int, x: Value) -> List[Value] = {
   buf
 }
 
-fn __lsv_remove_fill(srcbase: Int, dstbase: Int, n: Int, i: Int, oob: Int) -> Int = if oob == 1 then __lsv_copy(srcbase, dstbase, n, 0)
+fn __lsv_remove_fill(srcbase: Int, dstbase: Int, n: Int, i: Int, oob: Int) -> Int = if oob == 1 then __lsv_copy(
+  srcbase,
+  dstbase,
+  n,
+  0,
+)
 else {
   let _a = __lsv_copy(srcbase, dstbase, i, 0)
   let i1 = i + 1
@@ -1112,7 +1137,12 @@ fn __drop_list_str_str(xs: List[(String, String)]) -> Unit = {
   prim.rc_dec(h)
 }
 
-fn map_entries_str(m: Map[String, String]) -> List[(String, String)] = __ment_build(m, prim.load32(prim.handle(m) + 4) / 2, 0, [])
+fn map_entries_str(m: Map[String, String]) -> List[(String, String)] = __ment_build(
+  m,
+  prim.load32(prim.handle(m) + 4) / 2,
+  0,
+  [],
+)
 
 // value.as_array — read the tag; a tag-5 Array yields `Ok(<a fresh List[Value] of its elements>)`,
 // else `Err("expected Array")`. The fresh list SHALLOW-COPIES the Array's inline element handles
@@ -1227,7 +1257,10 @@ else {
   let h = prim.handle(v)
   let k: String = prim.load_handle(h + 12 + (2 * i) * 8)
   let val: Value = prim.load_handle(h + 12 + (2 * i + 1) * 8)
-  let piece = __vsp_sep(i) + __vsp_indent(d + 1) + __json_quote(k) + ": " + json_stringify_pretty_at(val, d + 1)
+  let piece = __vsp_sep(i) + __vsp_indent(d + 1) + __json_quote(k) + ": " + json_stringify_pretty_at(
+    val,
+    d + 1,
+  )
   __vsp_obj(v, i + 1, n, d, acc + piece)
 }
 

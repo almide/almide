@@ -70,11 +70,15 @@ test "fold_lines drives a Map accumulator (the aggregation shape)" {
   let d = tmp()!
   let p = d + "/kv.txt"
   fs.write(p, "a;1\nb;2\na;3\n")!
-  let counts = fs.fold_lines(p, map.new(), (acc, line) => {
-    let parts = string.split(line, ";")
-    let key = parts[0]
-    map.set(acc, key, map.get_or(acc, key, 0) + 1)
-  })!
+  let counts = fs.fold_lines(
+    p,
+    map.new(),
+    (acc, line) => {
+      let parts = string.split(line, ";")
+      let key = parts[0]
+      map.set(acc, key, map.get_or(acc, key, 0) + 1)
+    },
+  )!
   assert_eq(map.get(counts, "a"), some(2))
   assert_eq(map.get(counts, "b"), some(1))
 }
@@ -97,7 +101,11 @@ local effect fn traced_note(log: String, line: String) -> Unit = {
   if line == "bad" then err("boom") else ok(())
 }
 
-local effect fn fold_traced(p: String, log: String) -> Int = fs.fold_lines(p, 0, (acc, line) => traced_step(log, acc, line)!)!
+local effect fn fold_traced(p: String, log: String) -> Int = fs.fold_lines(
+  p,
+  0,
+  (acc, line) => traced_step(log, acc, line)!,
+)!
 
 // `each_traced` is a REAL function in the corpus-wall scan (proofs/corpus-wall.sh
 // enumerates functions, not runnable files, so this file's `wasm:skip` does not
@@ -107,7 +115,10 @@ local effect fn fold_traced(p: String, log: String) -> Int = fs.fold_lines(p, 0,
 // (crates/almide-mir/src/lower/calls.rs), so the honest refusal lands in the
 // RENDERER on the unlinked twin name — the same layer the total family's `_x`
 // accumulator cells wall at, not in lower_function.
-local effect fn each_traced(p: String, log: String) -> Unit = fs.for_each_line(p, (line) => traced_note(log, line)!)!
+local effect fn each_traced(p: String, log: String) -> Unit = fs.for_each_line(
+  p,
+  (line) => traced_note(log, line)!,
+)!
 
 // `tmp()` keys its suffix on the clock, so two tests entering it in the same
 // tick share a directory — the generated test binary runs these in PARALLEL

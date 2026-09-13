@@ -4,7 +4,10 @@
 // (cert i, like int.to_string). Nibbles are read with `(n >> 4*pos) & 0xF` (the arithmetic
 // shift's sign extension is masked off). `n` borrowed; result owned.
 // Digit count for n > 0: how many times n divides by 16 before reaching 0.
-fn __hex_count_pos(n: Int, acc: Int) -> Int = if n == 0 then acc else __hex_count_pos(n / 16, acc + 1)
+fn __hex_count_pos(n: Int, acc: Int) -> Int = if n == 0 then acc else __hex_count_pos(
+  n / 16,
+  acc + 1,
+)
 
 fn __hex_count(n: Int) -> Int = if n == 0 then 1
 else if n < 0 then 16 else __hex_count_pos(n, 0)

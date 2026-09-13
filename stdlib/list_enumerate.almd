@@ -11,7 +11,12 @@ else {
   __enum_str_rec(xs, i + 1, n, acc + [(i, line)])
 }
 
-fn list_enumerate_str(xs: List[String]) -> List[(Int, String)] = __enum_str_rec(xs, 0, list.len(xs), [])
+fn list_enumerate_str(xs: List[String]) -> List[(Int, String)] = __enum_str_rec(
+  xs,
+  0,
+  list.len(xs),
+  [],
+)
 
 // The recursive free of a `List[(Int, String)]` (the render of a `list_int_str` DropVariant calls this).
 fn __isdrop_list(xs: List[(Int, String)], i: Int, n: Int) -> Unit = if i >= n then ()

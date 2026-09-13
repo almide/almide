@@ -10,19 +10,27 @@ import fs
 import json
 
 effect fn main() -> Unit = {
-  let read_file_tool = almai.Tool { name: "read_file", description: "Read the contents of a source file", parameters: value.object([
-    ("type", value.str("object")),
-    ("properties", value.object([
-      ("path", value.object([("type", value.str("string")), ("description", value.str("File path to read"))]))
-    ])),
-    ("required", value.array([value.str("path")]))
-  ]) }
+  let read_file_tool = almai.Tool {
+    name: "read_file",
+    description: "Read the contents of a source file",
+    parameters: value.object([
+      ("type", value.str("object")),
+      ("properties", value.object([
+        ("path", value.object([("type", value.str("string")), ("description", value.str("File path to read"))]))
+      ])),
+      ("required", value.array([value.str("path")]))
+    ]),
+  }
   let opts = almai.defaults() |> almai.with_system("You are a code reviewer. Review Almide source files for quality, correctness, and style.") |> almai.with_tools([read_file_tool])
   let model = "anthropic/claude-sonnet-4-6"
   // First call: ask for review, model may request to read a file
-  match almai.call_with(model, [
-    almai.user("Review this project's examples/csv-to-json.almd for code quality.")
-  ], opts) {
+  match almai.call_with(
+    model,
+    [
+      almai.user("Review this project's examples/csv-to-json.almd for code quality.")
+    ],
+    opts,
+  ) {
     err(e) => println("Error: " + e),
     ok(r) => if almai.has_tool_calls(r) then {
       let tc = almai.first_tool_call(r) |> option.unwrap_or(almai.ToolCall { id: "", name: "", arguments: "{}" })
@@ -37,11 +45,15 @@ effect fn main() -> Unit = {
             err(e) => println("Failed to read file: " + e),
             ok(content) => {
               // Send tool result back
-              match almai.call_with(model, [
-                almai.user("Review this project's examples/csv-to-json.almd"),
-                almai.assistant(""),
-                almai.tool_result(tc.id, content)
-              ], almai.defaults() |> almai.with_system("Provide a concise code review.")) {
+              match almai.call_with(
+                model,
+                [
+                  almai.user("Review this project's examples/csv-to-json.almd"),
+                  almai.assistant(""),
+                  almai.tool_result(tc.id, content)
+                ],
+                almai.defaults() |> almai.with_system("Provide a concise code review."),
+              ) {
                 err(e) => println("Error: " + e),
                 ok(review) => {
                   println("\n--- Code Review ---\n")

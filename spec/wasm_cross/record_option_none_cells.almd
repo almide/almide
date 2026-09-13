@@ -4,7 +4,14 @@ type Item = { n: Int }
 
 type OptCells = { i: Int?, f: Float?, b: Bool?, s: String?, l: List[Int]?, r: Item? }
 
-fn cells(full: Bool) -> Result[OptCells, String] = if full then ok(OptCells { i: some(7), f: some(0.5), b: some(true), s: some("x"), l: some([1, 2]), r: some(Item { n: 9 }) })
+fn cells(full: Bool) -> Result[OptCells, String] = if full then ok(OptCells {
+  i: some(7),
+  f: some(0.5),
+  b: some(true),
+  s: some("x"),
+  l: some([1, 2]),
+  r: some(Item { n: 9 }),
+})
 else ok(OptCells { i: none, f: none, b: none, s: none, l: none, r: none })
 
 effect fn main() -> Unit = {

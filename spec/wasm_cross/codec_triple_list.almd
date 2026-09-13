@@ -27,6 +27,10 @@ effect fn main() -> Unit = {
   println(enc)
   let d = T.decode(json.parse(enc)!)!
   println(int.to_string(list.len(d.ll)))
-  let flat = list.fold(d.ll, 0, (a, mid) => a + list.fold(mid, 0, (b, leaf) => b + list.fold(leaf, 0, (c, n) => c + n)))
+  let flat = list.fold(
+    d.ll,
+    0,
+    (a, mid) => a + list.fold(mid, 0, (b, leaf) => b + list.fold(leaf, 0, (c, n) => c + n)),
+  )
   println(int.to_string(flat))
 }

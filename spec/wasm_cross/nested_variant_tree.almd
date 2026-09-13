@@ -11,10 +11,14 @@ fn sum(t: Tree) -> Int = match t {
 
 fn depth(t: Tree) -> Int = match t {
   Leaf(_) => 1,
-  Branch(kids) => 1 + list.fold(kids, 0, (a, k) => {
-    let d = depth(k)
-    if d > a then d else a
-  }),
+  Branch(kids) => 1 + list.fold(
+    kids,
+    0,
+    (a, k) => {
+      let d = depth(k)
+      if d > a then d else a
+    },
+  ),
 }
 
 fn main() -> Unit = {
