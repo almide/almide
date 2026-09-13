@@ -570,6 +570,18 @@ fn list_call_name_sort_by(arg_tys: &[Ty]) -> Option<String> {
             "list.sort_by_str_key".to_string()
         });
     }
+    // #2154: a HEAP key that is not a String — a tuple `(0 - c, w)`, a
+    // record, a list — has no incumbent twin. `sort_by_rc` takes
+    // `f: (Int) -> Int`, a scalar key; handing it a heap-returning key fn
+    // emitted a `call_indirect` whose type did not match and TRAPPED at run
+    // time, in a module labelled verified, while native answered (an
+    // I-divergence). The honest wall is the `_x` twin every other unlinked
+    // shape takes (`list.sort_x` above): the link step reports it as an
+    // unlinked call, the structural leg walls the same key
+    // (`list-sort-by-key:Tuple`), and `check --target wasm` says E082.
+    if is_heap_ty(ret) {
+        return Some("list.sort_by_x".to_string());
+    }
     if heap_elem {
         return Some("list.sort_by_rc".to_string());
     }
