@@ -92,7 +92,18 @@ fail=0; n=0
 # execute the complete field matrix (none/some), with size and allocation
 # ledgers pinning its current emission. This adds one unsupported incumbent
 # input, not a loss of coverage for a previously emitted fixture.
-MAX_WALLED=28
+# 29 as of 2026-09-13: sort_by_compound_key.almd (C-053/#2154) is a NEW
+# structural fixture, and its wall here is the FIX rather than a gap. The
+# incumbent rendered a compound sort key by comparing the cached key as a raw
+# i64 while the key closure returned an i32 handle — `indirect call type
+# mismatch` at run time, out of an artifact it reported `verified`. It now
+# REFUSES the shape (`list.sort_by_x`, an unlinked render wall), the same
+# refusal it already makes for a non-scalar `unique_by` key (C-147). There was
+# never a correct incumbent emission of this fixture to lose; the ceiling rises
+# by the one input the incumbent stopped mis-rendering. The structural leg, the
+# default route, orders it byte-identical to native across the whole key
+# lattice, and tests/sort_by_compound_key_test.rs pins the refusal itself.
+MAX_WALLED=29
 walled=0
 for fix in "$FIXTURE_DIR"/*.almd; do
   [ -e "$fix" ] || continue

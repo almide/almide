@@ -13,8 +13,9 @@
 //!
 //! The structural leg now hands the key type to `emit_val_cmp`, the same
 //! type-directed comparator `list.sort` uses for a compound ELEMENT, so the
-//! key domain is stated in exactly one place. The two checks below are the two
-//! halves of the fix: the answer agrees, and the incumbent's mis-render is
+//! key domain is stated in exactly one place. The checks below are the three
+//! halves of the fix: the answer agrees on the leg that now orders it, the
+//! cached keys are released exactly once, and the incumbent's mis-render is
 //! gone rather than merely unreachable.
 
 use std::process::Command;
@@ -62,13 +63,21 @@ fn wasmtime_available() -> bool {
 /// wasm build must also come from the STRUCTURAL leg: an answer that agrees
 /// only because the build silently fell back is the state this issue was.
 fn agree_on_the_structural_leg(program: &str, label: &str) -> String {
+    agree_on_the_structural_leg_with(program, label, false)
+}
+
+/// `trap_double_free` arms `ALMIDE_RC_TRAP_DOUBLE_FREE` on the wasm BUILD (the
+/// flag is read at emit time, not at run time): a second release of a freed
+/// block then traps instead of wrapping its refcount to 0xFFFF_FFFF.
+fn agree_on_the_structural_leg_with(program: &str, label: &str, trap_double_free: bool) -> String {
     let dir = tempfile::tempdir().expect("tempdir");
     let source = dir.path().join("main.almd");
     std::fs::write(&source, program).expect("source");
     let mut native_stdout: Option<String> = None;
     for target in ["rust", "wasm"] {
         let artifact = dir.path().join(if target == "rust" { "native" } else { "m.wasm" });
-        let built = Command::new(almide_bin())
+        let mut build = Command::new(almide_bin());
+        build
             .args([
                 "build",
                 source.to_str().expect("path"),
@@ -78,9 +87,12 @@ fn agree_on_the_structural_leg(program: &str, label: &str) -> String {
                 artifact.to_str().expect("path"),
             ])
             .env_remove("ALMIDE_WASM_INCUMBENT")
-            .env_remove("ALMIDE_COMPONENT_P3")
-            .output()
-            .expect("build");
+            .env_remove("ALMIDE_COMPONENT_P3");
+        match trap_double_free && target == "wasm" {
+            true => build.env("ALMIDE_RC_TRAP_DOUBLE_FREE", "1"),
+            false => build.env_remove("ALMIDE_RC_TRAP_DOUBLE_FREE"),
+        };
+        let built = build.output().expect("build");
         assert!(
             built.status.success(),
             "{label}/{target} build failed:\n{}",
@@ -148,6 +160,45 @@ fn an_option_sort_key_over_scalar_elements_orders_the_same_on_both_legs() {
     }
     let out = agree_on_the_structural_leg(OPTION_KEY_SCALAR_ELEM, "option key");
     assert_eq!(out, "1\n1\n5\n4\n3\n", "none < some, some by payload");
+}
+
+/// The other half of the release: the sort now hands the cached keys to the
+/// typed `$drop_list` for the key type instead of freeing the buffer flat. A
+/// release too many is the failure mode that trade buys, and it is invisible
+/// without the trap armed — a second release of a freed block just wraps the
+/// refcount to 0xFFFF_FFFF and the program prints the right answer anyway. The
+/// loop sorts the same source repeatedly so a key block handed back twice is
+/// reused while still referenced.
+const REPEATED_TUPLE_KEY_SORTS: &str = r#"
+fn round(xs: List[(String, Int)], i: Int) -> Int = {
+  let s = xs |> list.sort_by(((w, c)) => (0 - c + i % 3, w))
+  match list.get(s, 0) {
+    some((w, c)) => c + string.len(w),
+    none => 0,
+  }
+}
+
+fn go(xs: List[(String, Int)], i: Int, acc: Int) -> Int =
+  if i <= 0 then acc else go(xs, i - 1, acc + round(xs, i))
+
+effect fn main() -> Unit = {
+  let xs = list.range(0, 200) |> list.map((n) => ("w${int.to_string(n % 17)}", n % 7))
+  println("${go(xs, 50, 0)}")
+}
+"#;
+
+#[test]
+fn the_cached_compound_keys_are_released_exactly_once() {
+    if !wasmtime_available() {
+        eprintln!("wasmtime unavailable — skipping");
+        return;
+    }
+    let out = agree_on_the_structural_leg_with(
+        REPEATED_TUPLE_KEY_SORTS,
+        "repeated tuple-key sorts under the double-free trap",
+        true,
+    );
+    assert_eq!(out, "400\n", "50 rounds x (c=6 + len(\"w0\")=2): the max count, ties broken by the word");
 }
 
 /// The kill-check. The incumbent leg has no compound-key route, and the
