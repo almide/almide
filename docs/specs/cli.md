@@ -41,6 +41,11 @@ almide run app.almd -- arg1 arg2        # ファイル指定 + プログラム�
 ファイル先頭に shebang を書き、実行権限を付ければ直接実行できる。
 `/usr/bin/env -S` に対応した環境で、`almide` が PATH に必要。
 
+`-S` は飾りではない。Linux のカーネルは shebang の残りを**一つの引数**として
+`env` に渡すので、`-S` 無しの `#!/usr/bin/env almide run` は `almide run` という
+名前のプログラムを探して死ぬ。macOS は空白で分割するので通ってしまう。
+`almide check` は `-S` の無い二語以上の `env` shebang を E062 として警告する。
+
 ```almd
 #!/usr/bin/env -S almide run
 

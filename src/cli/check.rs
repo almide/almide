@@ -157,10 +157,17 @@ pub fn cmd_check(file: &str, deny_warnings: bool, timings: bool, stamp: bool, cr
         Vec::new()
     };
 
+    // #2159: a shebang that only runs on macOS. Text-only, so it sits with
+    // the other file-level warnings rather than in the checker.
+    let shebang_warning = super::shebang::split_string_warning(file, &source_text);
+
     let mut warnings: Vec<&diagnostic::Diagnostic> = diagnostics.iter()
         .filter(|d| d.level == diagnostic::Level::Warning)
         .collect();
     for d in &unused_warnings {
+        warnings.push(d);
+    }
+    if let Some(d) = &shebang_warning {
         warnings.push(d);
     }
     for d in &warnings {
@@ -278,6 +285,9 @@ pub fn cmd_check_json(file: &str, critical: Option<&[String]>) {
     }
     for d in &diagnostics {
         out(&format!("{}", crate::diagnostic_render::to_json(d)));
+    }
+    if let Some(d) = super::shebang::split_string_warning(file, &source_text) {
+        out(&format!("{}", crate::diagnostic_render::to_json(&d)));
     }
 
     // Lower to IR for unused variable warnings (skip if type errors)
