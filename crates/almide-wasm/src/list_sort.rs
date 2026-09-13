@@ -314,6 +314,17 @@ impl Emitter<'_> {
         hn: u32,
     ) -> Result<(), EmitError> {
         let (kstride, vstride) = (k.slot_size() as i32, elem.slot_size() as i32);
+        // A COMPOUND key (#2154) is a freshly built HANDLE per element, and
+        // the key buffers are raw blocks: freeing the winner flat would leak
+        // every key. The winner takes the typed `$drop_list` for the key type
+        // (rc_dec each slot, then free); the loser holds only STALE duplicates
+        // of the same handles, so it keeps the flat free. A scalar key has no
+        // credit to release and both stay flat.
+        let key_release = if self.elem_is_handle(k) {
+            self.dec_fn_of(SliceTy::List(self.types.intern(k)))
+        } else {
+            F_FREE
+        };
         let hkb = self.hold_i32()?;
         let hvb = self.hold_i32()?;
         let hw = self.hold_i32()?;
@@ -414,7 +425,7 @@ impl Emitter<'_> {
             i.end();
             // Keys (both buffers) and the loser vals buffer are
             // sort-private and dead past this point (RC-2).
-            i.local_get(hka).call(F_FREE);
+            i.local_get(hka).call(key_release);
             i.local_get(hkb).call(F_FREE);
             i.local_get(hvb).call(F_FREE);
             i.local_get(hva);
