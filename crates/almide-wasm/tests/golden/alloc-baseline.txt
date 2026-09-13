@@ -334,7 +334,7 @@
 66176	spec/wasm_cross/list_sort_str.almd
 66192	spec/wasm_cross/list_string_param_join_len.almd
 66016	spec/wasm_cross/list_swap_oob.almd
-72224	spec/wasm_cross/list_total_order.almd
+72208	spec/wasm_cross/list_total_order.almd
 69856	spec/wasm_cross/list_unique_by_nonscalar_key.almd
 66304	spec/wasm_cross/list_unique_by_str_key.almd
 68512	spec/wasm_cross/list_update_heap.almd
