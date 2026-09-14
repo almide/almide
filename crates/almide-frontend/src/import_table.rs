@@ -41,11 +41,9 @@ pub struct ImportTable {
 /// named const rather than a literal inside `ImportTable::new` so the
 /// diagnostics side can ask the same question the resolver answers. Together
 /// with `AUTO_IMPORT_BUNDLED` this is the whole auto-import surface, and
-/// `stdlib::is_import_suggestable` derives its complement from the two.
-pub const TIER1_ALWAYS_ACCESSIBLE: &[&str] = &[
-    "string", "int", "float", "list", "bytes", "matrix",
-    "map", "set", "option", "result", "value", "prim",
-];
+/// `stdlib::is_import_suggestable` derives its complement from the two. The
+/// list itself lives in `stdlib_info` so `almide fmt` reads the same one.
+pub use almide_lang::stdlib_info::TIER1_ALWAYS_ACCESSIBLE;
 
 impl ImportTable {
     /// Create with Tier 1 auto-imported stdlib modules.

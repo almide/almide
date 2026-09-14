@@ -208,11 +208,12 @@ pub fn auto_imports(program: &mut Program, source: &str, dep_names: &[String], d
     }
     let token_refs = token_module_refs(source);
 
-    // Also check auto-imported stdlib (Tier 1) — these don't need explicit import
+    // Also check auto-imported stdlib (Tier 1) — these don't need explicit import.
+    // Both lists come from the registry: the resolver seeds `ImportTable::new`
+    // from the same `TIER1_ALWAYS_ACCESSIBLE`, so fmt cannot add an import the
+    // checker would report as redundant.
     let auto_imported: HashSet<&str> = almide_lang::stdlib_info::AUTO_IMPORT_BUNDLED.iter().copied().collect();
-    // Tier 1 hardcoded stdlib modules that don't need import (matches types/env.rs)
-    let tier1: HashSet<&str> = ["string", "list", "int", "float", "bytes", "matrix", "map", "set",
-        "value", "option", "result"].iter().copied().collect();
+    let tier1: HashSet<&str> = almide_lang::stdlib_info::TIER1_ALWAYS_ACCESSIBLE.iter().copied().collect();
 
     let dep_set: HashSet<&str> = dep_names.iter().map(|s| s.as_str()).collect();
 
