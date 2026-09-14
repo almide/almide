@@ -196,7 +196,7 @@ The ONE stage order every leg and the interp oracle consume (`tests/one_driver_t
 fails on a second spelling). `optimize_half` = rows 1–7; `link_half` = rows 8–9.
 `ALMIDE_DISABLE_OPT=1` skips the three perf rows (the ablation leg of the perf
 ratchet); `ALMIDE_ONLY_PASS=fold|dce|propagate` runs exactly one of them
-(`scripts/check-pass-isolated.sh`, `spec/pass_isolated/`).
+(`scripts/check-pass-isolated.sh` over `spec/pass_isolated/`, run by the CI `checks` job).
 
 | # | Pass | Module | Kind | Does |
 |---|---|---|---|---|

@@ -1,0 +1,54 @@
+name: Domain edges (weekly)
+
+# The integer-domain edge gate (scripts/check-domain-edges.sh): every public
+# stdlib fn x every Int parameter x the declared edge set, run on BOTH targets
+# and diffed bidirectionally against proofs/domain-edges.toml — a new
+# divergence fails, a row that stopped diverging fails too. The gate carried a
+# NEGATIVE_TESTED row in proofs/gate-verification.toml from its landing
+# (PR #1449) but was invoked by nothing (#2207): one module alone measures for
+# the better part of an hour, so it has no place in the PR `checks` job. This
+# is its home — one job per module, weekly and on dispatch, the fuzz-night
+# ethos: red is a finding to act on (fix the guard, or record the divergence
+# with a reason and re-measure), never a reason to loosen the ledger.
+
+on:
+  schedule:
+    # 06:40 UTC Sunday — clear of the nightly fuzz / conformance / ledger
+    # windows and the Monday shard-balance ratchet.
+    - cron: "40 6 * * 0"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: "1.94.0"  # runner-class MSRV: the almide binary embeds wasmtime 47 (commissioned host); compiler crates keep the 1.89 claim per-crate
+
+permissions:
+  contents: read
+
+jobs:
+  edges:
+    name: Edge matrix (${{ matrix.module }}) vs the declared ledger
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        # The six modules the ledger was measured over (proofs/domain-edges.toml
+        # header); `--only` scopes both the measurement and the declared rows.
+        module: [bytes, list, string, datetime, io, math]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: linux-release-${{ env.RUST_TOOLCHAIN }}
+
+      - name: Build the compiler (release, embedded wasm host)
+        run: cargo build --release
+
+      - name: Measure ${{ matrix.module }} on both targets and diff against proofs/domain-edges.toml
+        run: bash scripts/check-domain-edges.sh --only ${{ matrix.module }}

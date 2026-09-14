@@ -1229,6 +1229,12 @@ jobs:
       - name: Gate verification ledger (every gate classified by how it can fail — no decorative gates)
         run: bash scripts/check-gate-verification.sh
 
+      - name: Capability / effect consistency (#1515 — every fn reaching the nondet floor is effect-declared)
+        run: bash scripts/check-cap-effect-consistency.sh
+
+      - name: Pass-isolated fixtures (#1487 — byte-identical under full / ablated / only-pass, native == wasm)
+        run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-pass-isolated.sh
+
       - name: TOR references (every operational requirement keeps its enforcing instrument)
         run: bash scripts/check-tor-refs.sh
 
