@@ -1,0 +1,10 @@
+// E042: a guard's else value is the fn's early return (#2182). In a `-> Unit`
+// effect fn a fallible call there drops its Result exactly like a tail call.
+import fs
+
+effect fn clean(n: Int) -> Unit = {
+  guard n > 0 else fs.remove("b")
+  println("pos")
+}
+
+effect fn main() -> Unit = clean(1)!

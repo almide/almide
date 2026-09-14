@@ -1,0 +1,8 @@
+// E041: an un-annotated binding of an if whose ELSE arm is a fallible call
+// (#2182) — the if types as its then arm, so the binding rule saw an Int.
+effect fn pick() -> Int = {
+  let x = if 1 > 0 then 0 else int.parse("1")!
+  x
+}
+
+effect fn main() -> Unit = println(int.to_string(pick()!))

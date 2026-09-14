@@ -28,12 +28,11 @@ impl Checker {
                 // — in a pure fn the applied fix could never compile, and a
                 // span fix that cannot compile is worse than no span fix
                 // (#1528: the e042-in-pure-fn fixture pins this).
-                self.deferred_implicit_prop_checks.push((
-                    t.clone(), expr.span, "of this statement's result",
-                    matches!(expr.kind, ast::ExprKind::Call { .. })
-                        && (self.env.auto_unwrap || self.env.in_test_block),
-                    true,
-                ));
+                // Queued at the statement's TAIL LEAVES (#2182): a `match`
+                // whose arms are effect calls typed as their stripped join,
+                // and an `if` whose `else` carries the Result, discarded the
+                // value with no report — the leaf is where the `!` goes.
+                self.queue_implicit_prop_leaves(expr, "of this statement's result", true);
                 // #662: a discarded expression statement whose type carries an
                 // unconstrained phantom slot (e.g. a bare `result.or_else(r0,
                 // (e) => ok(0))`) is undecidable — re-check post-solve.
@@ -64,6 +63,16 @@ impl Checker {
         let er = resolve_ty(&ety, &self.uf);
         if er == Ty::Never {
             return;
+        }
+        // #2182: the else value flows out through the fn's lifted channel
+        // exactly like a tail value — the same explicit-`!` rule applies.
+        if self.env.auto_unwrap {
+            if ret.is_result() {
+                self.unqueue_implicit_prop_leaves(else_);
+            } else {
+                let must_use = resolve_ty(&ret, &self.uf) == Ty::Unit;
+                self.queue_implicit_prop_leaves(else_, "of this guard's else value", must_use);
+            }
         }
         self.constrain_guard_else(ret, ety, er);
     }
@@ -117,7 +126,7 @@ impl Checker {
             // matched on ok/err later, a ctor-shaped RHS, or the sanctioned
             // discard `let _ = f()` (D2's second spelling: the Result binds
             // dead, nothing propagates, no error).
-            let unwrapped = self.effect_unwrap_rhs_warned(t, value.span, "of this binding's value", matches!(value.kind, ast::ExprKind::Call { .. }), name == "_"
+            let unwrapped = self.effect_unwrap_rhs_warned(t, value, "of this binding's value", matches!(value.kind, ast::ExprKind::Call { .. }), name == "_"
                 || self.env.skip_auto_unwrap_for.contains(&sym(name))
                 || Self::rhs_keeps_result_shape(value));
             // #662: an un-annotated binding whose value type carries an
@@ -161,7 +170,7 @@ impl Checker {
         } else {
             let t = resolve_ty(&val_ty, &self.uf);
             // Same rule as Let, including the usage-skip and the `_` discard.
-            let unwrapped = self.effect_unwrap_rhs_warned(t, value.span, "of this binding's value", matches!(value.kind, ast::ExprKind::Call { .. }), name == "_"
+            let unwrapped = self.effect_unwrap_rhs_warned(t, value, "of this binding's value", matches!(value.kind, ast::ExprKind::Call { .. }), name == "_"
                 || self.env.skip_auto_unwrap_for.contains(&sym(name))
                 || Self::rhs_keeps_result_shape(value));
             // #662: same undecidable-phantom-slot re-check as Let.
@@ -186,7 +195,7 @@ impl Checker {
     fn check_stmt_assign(&mut self, stmt: &mut ast::Stmt) {
         let ast::Stmt::Assign { name, value, .. } = stmt else { unreachable!() };
         let val_ty = self.infer_expr(value);
-        self.check_stmt_assign_unify(name, &val_ty, value.span);
+        self.check_stmt_assign_unify(name, &val_ty, value);
         self.check_stmt_assign_immutable(name);
         self.check_stmt_assign_escape(name);
     }
@@ -202,7 +211,7 @@ impl Checker {
     /// mutates) or rebuild a fresh value. Otherwise, unify the assigned
     /// value's type with the variable's declared type. Verbatim text move
     /// out of [`Self::check_stmt_assign`].
-    fn check_stmt_assign_unify(&mut self, name: &Sym, val_ty: &Ty, value_span: Option<ast::Span>) {
+    fn check_stmt_assign_unify(&mut self, name: &Sym, val_ty: &Ty, value: &ast::Expr) {
         // A local binding (`lookup_var`) OR a module-level `var`
         // (`top_lets`) — both are valid assignment targets and both carry
         // a concrete declared type to flow into the value.
@@ -264,7 +273,7 @@ impl Checker {
                 // lifted Result[Int, E]; a Result-typed target keeps it.
                 // Only substitute when the unwrap actually fires, so an
                 // unresolved TypeVar RHS keeps flowing through inference.
-                let unwrapped = self.effect_unwrap_rhs_warned(val_resolved.clone(), value_span, "of this assignment's value", false, var_resolved.is_result());
+                let unwrapped = self.effect_unwrap_rhs_warned(val_resolved.clone(), value, "of this assignment's value", false, var_resolved.is_result());
                 let constrain_val = if unwrapped != val_resolved { unwrapped } else { val_ty.clone() };
                 self.constrain(var_ty.clone(), constrain_val, format!("assign {}", name));
             }

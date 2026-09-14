@@ -19,7 +19,7 @@ effect fn do_nothing() -> Unit = {
 
 effect fn do_nothing_twice() -> Unit = {
   do_nothing()!
-  do_nothing()
+  do_nothing()!
 }
 
 effect fn tail_unit_call() -> Result[Unit, String] = {

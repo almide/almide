@@ -244,9 +244,24 @@ impl Checker {
     /// [`Self::effect_unwrap_rhs`] + the #1123 E041 queue: when the strip
     /// will fire (auto_unwrap, target doesn't keep, t is Result), record the
     /// site so post-solve emits the deprecation warning with the `!` insert.
-    fn effect_unwrap_rhs_warned(&mut self, t: Ty, span: Option<ast::Span>, what: &'static str, mechanical: bool, target_keeps_result: bool) -> Ty {
-        if self.env.auto_unwrap && !target_keeps_result {
-            self.deferred_implicit_prop_checks.push((t.clone(), span, what, mechanical, false));
+    fn effect_unwrap_rhs_warned(&mut self, t: Ty, value: &ast::Expr, what: &'static str, mechanical: bool, target_keeps_result: bool) -> Ty {
+        if self.env.auto_unwrap {
+            // #2182: a branching RHS (`let x = match … { _ => f() }`, a block
+            // whose tail is the call) reports at its Result-typed tail
+            // leaves — the whole-RHS span could neither carry the `!`
+            // insertion nor see an arm the join had already stripped. A
+            // target that KEEPS the Result (an annotated Result binding, the
+            // `let _ =` discard, a later ok/err consumer) consumes the arm
+            // values as Results, so what the arm join queued is withdrawn.
+            if target_keeps_result {
+                if Self::is_branching(value) {
+                    self.unqueue_implicit_prop_leaves(value);
+                }
+            } else if Self::is_branching(value) {
+                self.queue_implicit_prop_leaves(value, what, false);
+            } else {
+                self.deferred_implicit_prop_checks.push((t.clone(), value.span, what, mechanical, false));
+            }
         }
         self.effect_unwrap_rhs(t, target_keeps_result)
     }
