@@ -50,7 +50,7 @@ import fs
 effect fn main() -> Unit = {
   let body = "report body"
   match args.option("output") {
-    some(path) => fs.write(path, body),
+    some(path) => fs.write(path, body)!,
     none => println(body),
   }
 }
