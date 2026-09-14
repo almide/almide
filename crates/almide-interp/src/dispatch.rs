@@ -510,6 +510,7 @@ include!("dispatch_module.rs");
 include!("dispatch_sync.rs");
 include!("dispatch_heap.rs");
 include!("dispatch_body.rs");
+include!("dispatch_vfs.rs");
 
 // ── Constructor registry ────────────────────────────────────────
 

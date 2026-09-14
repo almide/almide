@@ -4,7 +4,7 @@
 // Reaching the floors carries Capability::FsRead.
 effect fn fs_read_bytes_raw_if_exists(path: String) -> Result[Bytes?, String] = {
   if prim.path_exists(path) then {
-    let r = prim.read_bytes_file(path)
+    let r = prim.read_bytes_file_as(path, "fs.read_bytes_raw_if_exists")
     match r {
       ok(b) => ok(some(b)),
       err(e) => err(e),

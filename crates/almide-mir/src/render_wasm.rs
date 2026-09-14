@@ -105,42 +105,47 @@ const FS_MSG_BASE: u32 = 512; // first free address above FS_ERR_UTF8 (432..466)
 /// grew into unnoticed: the second `println` of an EEXIST message carried a
 /// `\n` where its `e` was.
 pub const PRINT_NL_SCRATCH_ADDR: u32 = 768;
-/// Closes the operand and separates it from the platform text: `"): `.
-const FS_MSG_MID: &str = "\"): ";
+/// Opens the operand list after the call name: `("`.
+const FS_MSG_OPEN: &str = "(\"";
+/// Closes the operand list and separates it from the platform text: `"): `.
+const FS_MSG_CLOSE: &str = "\"): ";
 /// Between two operands of a two-path call: `fs.rename("a", "b")`.
 const FS_MSG_SEP: &str = "\", \"";
-/// `<call>("` — one per fs floor call that can fail with a path in hand. The
-/// ORDER is the address order; append, never insert, and the gate proves it.
-const FS_MSG_PREFIXES: &[&str] = &[
-    "fs.read_text(\"",
-    "fs.read_bytes(\"",
-    "fs.write(\"",
-    "fs.mkdir_p(\"",
-    "fs.remove_all(\"",
-    "fs.list_dir(\"",
-    "fs.rename(\"",
+/// `fs.<call>` — the call names the floors spell from STATIC data: one per fs
+/// floor that is reached without a call head. A floor reached through a #2206
+/// `_as` twin (`prim.read_text_file_as(path, "fs.read_lines")`) takes its head
+/// from the twin at run time and needs no row here, so the composites' names
+/// live in the stdlib that owns them, not in a second table. The ORDER is the
+/// address order; append, never insert, and the gate proves it.
+const FS_MSG_CALLS: &[&str] = &[
+    "fs.read_text",
+    "fs.read_bytes",
+    "fs.write",
+    "fs.mkdir_p",
+    "fs.remove_all",
+    "fs.list_dir",
+    "fs.rename",
 ];
-// Index into FS_MSG_PREFIXES — named, so a site cannot cite the wrong row.
-const FS_MSG_READ_TEXT: usize = 0;
-const FS_MSG_READ_BYTES: usize = 1;
-const FS_MSG_WRITE: usize = 2;
-const FS_MSG_MKDIR: usize = 3;
-const FS_MSG_REMOVE: usize = 4;
-const FS_MSG_LIST_DIR: usize = 5;
-const FS_MSG_RENAME: usize = 6;
+// Index into FS_MSG_CALLS — named, so a site cannot cite the wrong row.
+pub(crate) const FS_MSG_READ_TEXT: usize = 0;
+pub(crate) const FS_MSG_READ_BYTES: usize = 1;
+pub(crate) const FS_MSG_WRITE: usize = 2;
+pub(crate) const FS_MSG_MKDIR: usize = 3;
+pub(crate) const FS_MSG_REMOVE: usize = 4;
+pub(crate) const FS_MSG_LIST_DIR: usize = 5;
+pub(crate) const FS_MSG_RENAME: usize = 6;
 
 /// `(text, addr, len)` for every #2090 message piece, in address order: the
-/// [`FS_MSG_PREFIXES`] rows, then [`FS_MSG_MID`], then [`FS_MSG_SEP`].
+/// [`FS_MSG_CALLS`] rows, then [`FS_MSG_OPEN`], [`FS_MSG_CLOSE`], [`FS_MSG_SEP`].
 ///
 /// Each piece starts 4-byte aligned, so a mis-stated length rounds into its own
 /// padding instead of the next string's first bytes.
 pub(crate) fn fs_msg_regions() -> Vec<(&'static str, u32, u32)> {
     let mut out = Vec::new();
     let mut addr = FS_MSG_BASE;
-    for text in FS_MSG_PREFIXES
+    for text in FS_MSG_CALLS
         .iter()
-        .chain(std::iter::once(&FS_MSG_MID))
-        .chain(std::iter::once(&FS_MSG_SEP))
+        .chain([&FS_MSG_OPEN, &FS_MSG_CLOSE, &FS_MSG_SEP])
     {
         let len = text.len() as u32;
         out.push((*text, addr, len));
@@ -171,16 +176,24 @@ pub(crate) fn fs_errno_regions() -> Vec<(&'static almide_base::fs_errno::FsErrno
     out
 }
 
-/// `(addr, len)` of [`FS_MSG_PREFIXES`]`[i]`.
-fn fs_msg_prefix(i: usize) -> (u32, u32) {
+/// `(addr, len)` of [`FS_MSG_CALLS`]`[i]` — a static call head. The renderer hands
+/// these to a floor's `$ha`/`$hl` when the call is the floor's own.
+pub(crate) fn fs_msg_call(i: usize) -> (u32, u32) {
     let r = fs_msg_regions();
     (r[i].1, r[i].2)
 }
 
-/// `(addr, len)` of [`FS_MSG_MID`] — the row after the prefixes.
-fn fs_msg_mid() -> (u32, u32) {
+/// `(addr, len)` of [`FS_MSG_OPEN`] — the first row after the call names.
+fn fs_msg_open() -> (u32, u32) {
     let r = fs_msg_regions();
-    let row = r[FS_MSG_PREFIXES.len()];
+    let row = r[FS_MSG_CALLS.len()];
+    (row.1, row.2)
+}
+
+/// `(addr, len)` of [`FS_MSG_CLOSE`] — the row after [`FS_MSG_OPEN`].
+fn fs_msg_close() -> (u32, u32) {
+    let r = fs_msg_regions();
+    let row = r[FS_MSG_CALLS.len() + 1];
     (row.1, row.2)
 }
 
@@ -190,7 +203,7 @@ fn fs_msg_mid() -> (u32, u32) {
 /// Not cosmetic: `render_wasm_dce`'s `match_paren` skips string literals by
 /// toggling on every `"` and its header states the invariant it relies on —
 /// *"this codebase's WAT output has no backslash-escaped quotes"*. The #2090
-/// prefixes are the first preamble strings that CONTAIN a quote (`fs.read_text("`),
+/// pieces are the first preamble strings that CONTAIN a quote (`("`, `"): `),
 /// so a `{:?}` rendering desynced the preamble scan and silently dropped every
 /// data segment after it — the message then copied zeroed memory and printed as
 /// BLANKS where the call name should be. A `\22` byte keeps the invariant true
@@ -211,7 +224,7 @@ fn wat_data_literal(text: &str) -> String {
 /// `(addr, len)` of [`FS_MSG_SEP`] — the last row.
 fn fs_msg_sep() -> (u32, u32) {
     let r = fs_msg_regions();
-    let row = r[FS_MSG_PREFIXES.len() + 1];
+    let row = r[FS_MSG_CALLS.len() + 2];
     (row.1, row.2)
 }
 

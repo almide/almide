@@ -1,0 +1,91 @@
+// @contract: C-215
+// #2206 — every fs message names the CALL the writer made, not the floor that
+// served it. On the wasm leg a dozen composites (`fs.read_lines`,
+// `fs.fold_lines_chunked`, `fs.copy`, `fs.walk`, …) reach one of five shared
+// prim floors, and until now the floor spelled ITS name (`fs.read_text(…)`),
+// which the composites patched over by string surgery after the fact — a patch
+// that could not know a two-path call's second operand (`fs.copy("src")`
+// where native says `fs.copy("src", "dst")`) and that several composites never
+// received at all (`fs.read_bytes_raw` answered as `fs.read_bytes`, `fs.walk`
+// as `fs.list_dir`, `fs.remove` as `fs.remove_all`). The floors now take the
+// call head as an argument, so this prints the FULL message for every
+// composite and pins it byte-for-byte against native, temp dir redacted.
+import fs
+
+fn redact(msg: String, dir: String) -> String = string.replace(msg, dir, "<TMP>")
+
+fn unit(name: String, r: Result[Unit, String], d: String) -> Unit = println(match r {
+  ok(_) => "${name}=OK",
+  err(m) => "${name}=ERR[${redact(m, d)}]",
+})
+
+fn count(name: String, r: Result[Int, String], d: String) -> Unit = println(match r {
+  ok(n) => "${name}=OK(${n})",
+  err(m) => "${name}=ERR[${redact(m, d)}]",
+})
+
+effect fn main() -> Unit = {
+  let d = fs.create_temp_dir("callhead")!
+  let f = d + "/f.txt"
+  fs.write(f, "one\ntwo\n")!
+  let dir = d + "/sub"
+  fs.mkdir_p(dir)!
+  let missing = d + "/nope"
+  // The read floor, through every composite that reaches it.
+  count("fold_lines", fs.fold_lines(missing, 0, (acc, line) => acc + 1), d)
+  println(match fs.fold_lines_chunked(missing, 2, 0, (acc, line) => acc + 1) {
+    ok(parts) => "fold_lines_chunked=OK(${list.len(parts)})",
+    err(m) => "fold_lines_chunked=ERR[${redact(m, d)}]",
+  })
+  count("fold_lines_range", fs.fold_lines_range(missing, 0, 4, 0, (acc, line) => acc + 1), d)
+  unit("for_each_line", fs.for_each_line(missing, (line) => println(line)), d)
+  println(match fs.read_lines(missing) {
+    ok(xs) => "read_lines=OK(${list.len(xs)})",
+    err(m) => "read_lines=ERR[${redact(m, d)}]",
+  })
+  println(match fs.read_lines_if_exists(dir) {
+    ok(_) => "read_lines_if_exists=OK",
+    err(m) => "read_lines_if_exists=ERR[${redact(m, d)}]",
+  })
+  println(match fs.read_text_if_exists(dir) {
+    ok(_) => "read_text_if_exists=OK",
+    err(m) => "read_text_if_exists=ERR[${redact(m, d)}]",
+  })
+  println(match fs.read_bytes_if_exists(dir) {
+    ok(_) => "read_bytes_if_exists=OK",
+    err(m) => "read_bytes_if_exists=ERR[${redact(m, d)}]",
+  })
+  println(match fs.read_bytes_raw(missing) {
+    ok(_) => "read_bytes_raw=OK",
+    err(m) => "read_bytes_raw=ERR[${redact(m, d)}]",
+  })
+  println(match fs.read_bytes_raw_if_exists(dir) {
+    ok(_) => "read_bytes_raw_if_exists=OK",
+    err(m) => "read_bytes_raw_if_exists=ERR[${redact(m, d)}]",
+  })
+  // The write floor: the composites, and both halves of the two-path fs.copy —
+  // a missing source fails the read half, a directory destination the write
+  // half, and BOTH name both paths in native's order.
+  unit("copy_missing_src", fs.copy(missing, d + "/x"), d)
+  unit("copy_onto_dir", fs.copy(f, dir), d)
+  unit("append_dir", fs.append(dir, "z"), d)
+  unit("write_bytes_dir", fs.write_bytes(dir, [1, 2]), d)
+  unit("write_bytes_raw_dir", fs.write_bytes_raw(dir, bytes.from_list([1, 2])), d)
+  // The directory floors: list_dir through fs.walk, remove_all through fs.remove.
+  println(match fs.walk(missing) {
+    ok(_) => "walk=OK",
+    err(m) => "walk=ERR[${redact(m, d)}]",
+  })
+  unit("remove_missing", fs.remove(missing), d)
+  // The floors' own calls keep their own names.
+  println(match fs.read_text(missing) {
+    ok(_) => "read_text=OK",
+    err(m) => "read_text=ERR[${redact(m, d)}]",
+  })
+  unit("write_dir", fs.write(dir, "z"), d)
+  println(match fs.list_dir(missing) {
+    ok(_) => "list_dir=OK",
+    err(m) => "list_dir=ERR[${redact(m, d)}]",
+  })
+  fs.remove_all(d)!
+}

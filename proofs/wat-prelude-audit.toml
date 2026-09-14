@@ -67,14 +67,14 @@ via = "alias_combinator_rc.almd"
 
 [[fn]]
 name = "__export_"
-site = "crates/almide-mir/src/render_wasm.rs:878"
+site = "crates/almide-mir/src/render_wasm.rs:891"
 digest = "d1959ff9df04"
 class = "TEMPLATE"
 why = "`(func $__export_{internal}…)` — the export-wrapper TEMPLATE; each instance carries a user function's name."
 
 [[fn]]
 name = "__import_"
-site = "crates/almide-mir/src/render_wasm.rs:748"
+site = "crates/almide-mir/src/render_wasm.rs:761"
 digest = "e7030093815d"
 class = "TEMPLATE"
 why = "`(import … (func $__import_{sym}…))` — the extern-import TEMPLATE, one instance per declared import."
@@ -88,7 +88,7 @@ via = "args_surface.almd"
 
 [[fn]]
 name = "__mg_take"
-site = "crates/almide-mir/src/render_wasm.rs:895"
+site = "crates/almide-mir/src/render_wasm.rs:908"
 digest = "4185da3f48a0"
 class = "CORPUS"
 via = "mg_rebuild_two_phase.almd"
@@ -237,7 +237,7 @@ via = "alias_combinator_rc.almd"
 
 [[fn]]
 name = "is_dot_entry"
-site = "crates/almide-mir/src/render_wasm_fs_wat.rs:1013"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:1048"
 digest = "c3ca7c77e168"
 class = "CORPUS"
 via = "fs_relative_path.almd"
@@ -280,14 +280,14 @@ via = "alias_combinator_rc.almd"
 
 [[fn]]
 name = "make_dir"
-site = "crates/almide-mir/src/render_wasm_fs_wat.rs:445"
-digest = "01990896fdc5"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:477"
+digest = "283c0b6132d2"
 class = "CORPUS"
 via = "fs_write_errno.almd"
 
 [[fn]]
 name = "name"
-site = "crates/almide-mir/src/render_wasm.rs:358"
+site = "crates/almide-mir/src/render_wasm.rs:371"
 digest = "fa03a4a87d6a"
 class = "TEMPLATE"
 why = "`(func ${}` — the MirFunction rendering template (render_wasm_b.rs); every program function is an instance."
@@ -309,7 +309,7 @@ via = "fs_relative_path.almd"
 
 [[fn]]
 name = "path_exists"
-site = "crates/almide-mir/src/render_wasm_fs_wat.rs:592"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:624"
 digest = "af4eadc9189b"
 class = "CORPUS"
 via = "fs_preopen_resolve.almd"
@@ -323,7 +323,7 @@ via = "fs_preopen_resolve.almd"
 
 [[fn]]
 name = "path_filestat_q"
-site = "crates/almide-mir/src/render_wasm_fs_wat.rs:509"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:541"
 digest = "7e0c267a9b1a"
 class = "FALLBACK_ONLY"
 via = "fs.stat"
@@ -331,8 +331,8 @@ why = "reached through prim.path_filestat; every fixture that would exercise it 
 
 [[fn]]
 name = "path_norm"
-site = "crates/almide-mir/src/render_wasm_fs_wat.rs:92"
-digest = "485067c36bbd"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:116"
+digest = "662b4b34cacf"
 class = "CORPUS"
 via = "fan_settle_tuple.almd"
 
@@ -411,14 +411,14 @@ proof = "proofs/FreeList.v"
 
 [[fn]]
 name = "read_dir"
-site = "crates/almide-mir/src/render_wasm_fs_wat.rs:841"
-digest = "606c57e914e0"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:876"
+digest = "4a21fc053572"
 class = "CORPUS"
 via = "fs_list_dir_multipass.almd"
 
 [[fn]]
 name = "read_line"
-site = "crates/almide-mir/src/render_wasm_fs_wat.rs:613"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:645"
 digest = "a2f59da171ed"
 class = "FALLBACK_ONLY"
 via = "io.read_line"
@@ -426,7 +426,7 @@ why = "reached through prim.read_line; every fixture that would exercise it is i
 
 [[fn]]
 name = "read_n_bytes"
-site = "crates/almide-mir/src/render_wasm_fs_wat.rs:645"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:677"
 digest = "212672a20dec"
 class = "FALLBACK_ONLY"
 via = "io.read_all"
@@ -434,42 +434,42 @@ why = "reached through prim.read_n_bytes; every fixture that would exercise it i
 
 [[fn]]
 name = "read_text_file"
-site = "crates/almide-mir/src/render_wasm_fs_wat.rs:206"
-digest = "7adb5cb18755"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:234"
+digest = "c25a4a1c8158"
 class = "CORPUS"
 via = "fan_settle_tuple.almd"
 
 [[fn]]
 name = "remove_all"
-site = "crates/almide-mir/src/render_wasm_fs_wat.rs:768"
-digest = "a3ebfbed76df"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:801"
+digest = "3fefc17bd004"
 class = "CORPUS"
 via = "fs_write_errno.almd"
 
 [[fn]]
 name = "remove_path"
-site = "crates/almide-mir/src/render_wasm_fs_wat.rs:683"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:715"
 digest = "6bed8fbd3dde"
 class = "CORPUS"
 via = "fs_relative_path.almd"
 
 [[fn]]
 name = "rtf_result"
-site = "crates/almide-mir/src/render_wasm_fs_wat.rs:346"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:375"
 digest = "28f779ae7f2d"
 class = "CORPUS"
 via = "fan_settle_tuple.almd"
 
 [[fn]]
 name = "rtf_str"
-site = "crates/almide-mir/src/render_wasm_fs_wat.rs:329"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:358"
 digest = "c9fe904ab5dd"
 class = "CORPUS"
 via = "args_surface.almd"
 
 [[fn]]
 name = "str_lt"
-site = "crates/almide-mir/src/render_wasm_fs_wat.rs:795"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:828"
 digest = "8a2c5967004c"
 class = "FALLBACK_ONLY"
 via = "fs.list_dir"
@@ -484,8 +484,8 @@ why = "`(import … (func ${sym}…))` — the import-symbol template, and a doc
 
 [[fn]]
 name = "write_text_file"
-site = "crates/almide-mir/src/render_wasm_fs_wat.rs:370"
-digest = "242d409a3f98"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:400"
+digest = "39109b9714da"
 class = "CORPUS"
 via = "fs_write_errno.almd"
 
@@ -498,14 +498,14 @@ via = "fs_composition_family.almd"
 
 [[fn]]
 name = "rename"
-site = "crates/almide-mir/src/render_wasm_fs_wat.rs:564"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:596"
 digest = "3afa7c4e27e1"
 class = "CORPUS"
 via = "fs_write_errno.almd"
 
 [[fn]]
 name = "path_filestat_nf"
-site = "crates/almide-mir/src/render_wasm_fs_wat.rs:536"
+site = "crates/almide-mir/src/render_wasm_fs_wat.rs:568"
 digest = "71bbbab37fc0"
 class = "CORPUS"
 via = "fs_composition_family.almd"

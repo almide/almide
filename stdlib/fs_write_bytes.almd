@@ -16,7 +16,7 @@ effect fn fs_write_bytes(path: String, bytes: List[Int]) -> Result[Unit, String]
   let n = list.len(bytes)
   let s = prim.alloc_str(n)
   let _f = __wb_fill(prim.handle(s) + 12, bytes, n, 0)
-  let w: Result[Unit, String] = prim.write_text_file(path, s)
+  let w: Result[Unit, String] = prim.write_text_file_as(path, s, "fs.write_bytes")
   let wh = prim.handle(w)
   if prim.load32(wh + 16) != 0 then {
     let m: String = prim.load_handle(wh + 12)
