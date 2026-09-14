@@ -37,6 +37,46 @@ fn a_same_stem_sibling_with_the_expected_return_is_named() {
 }
 
 #[test]
+fn a_let_in_another_fn_never_names_the_origin_for_a_same_named_param() {
+    // `a` binds `b` from `fs.read_bytes`; `c` has a PARAMETER `b` of the
+    // same type. The origin table is scoped with the binding, so `c`'s E005
+    // must not claim `b` came from `fs.read_bytes` or offer a `let` rewrite
+    // into a function that has no such `let`.
+    let (ok, text) = check(
+        "import fs\n\
+         effect fn a() -> Unit = {\n\
+         \x20 let b = fs.read_bytes(\"Cargo.toml\")!\n\
+         \x20 println(int.to_string(list.len(b)))\n\
+         }\n\
+         fn c(b: List[Int]) -> Int = bytes.len(bytes.slice(b, 0, 1))\n\
+         fn main() -> Unit = println(int.to_string(c([1])))\n",
+    );
+    assert!(!ok, "{text}");
+    assert!(text.contains("error[E005]"), "{text}");
+    assert!(!text.contains("came from `fs.read_bytes`"), "another fn's let leaked into the hint:\n{text}");
+    assert!(!text.contains("read_bytes_raw"), "no sibling may be claimed for a parameter:\n{text}");
+    assert!(text.contains("Fix the argument type"), "the generic hint must stay:\n{text}");
+}
+
+#[test]
+fn a_param_shadowing_a_let_in_the_same_fn_drops_the_origin() {
+    // Same fn: the `let b` is real, but the lambda's parameter `b` shadows
+    // it at the E005 site. A non-`let` binding clears the origin.
+    let (ok, text) = check(
+        "import fs\n\
+         effect fn a() -> Unit = {\n\
+         \x20 let b = fs.read_bytes(\"Cargo.toml\")!\n\
+         \x20 let f = (b: List[Int]) => bytes.len(bytes.slice(b, 0, 1))\n\
+         \x20 println(int.to_string(f(b)))\n\
+         }\n",
+    );
+    assert!(!ok, "{text}");
+    assert!(text.contains("error[E005]"), "{text}");
+    assert!(!text.contains("came from `fs.read_bytes`"), "the shadowed let leaked into the hint:\n{text}");
+    assert!(!text.contains("read_bytes_raw"), "no sibling may be claimed for a parameter:\n{text}");
+}
+
+#[test]
 fn without_a_sibling_the_generic_hint_stays() {
     // `list.sum` has no Float form: a conversion, not a rename, so no
     // sibling is claimed and the wording is what it was.

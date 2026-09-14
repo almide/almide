@@ -265,10 +265,13 @@ impl Checker {
         };
         let arg_span = self.current_span?;
         let (arg_text, arg_unwrapped) = through_postfix(arg_span)?;
-        // A bare name: follow it to the `let` that bound it, and rewrite there.
+        // A bare name: follow it to the `let` that bound it, and rewrite
+        // there. The origin is scoped with the binding (`TypeEnv::let_origin`):
+        // a parameter, a pattern, or another function's `let` of the same
+        // name answers `None`, never a stale span.
         let (call_text, unwrapped, bound_name) = if is_ident(arg_text.trim()) {
             let name = arg_text.trim().to_string();
-            let span = *self.let_value_spans.get(&sym(&name))?;
+            let span = self.env.let_origin(&name)?;
             let (text, unwrapped) = through_postfix(span)?;
             (text, unwrapped, Some(name))
         } else {

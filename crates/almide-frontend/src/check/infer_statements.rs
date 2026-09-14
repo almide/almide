@@ -131,11 +131,13 @@ impl Checker {
         if let Some(s) = span {
             self.env.var_decl_locs.insert(sym(name), (s.line, s.col));
         }
-        if let Some(vs) = value.span {
-            self.let_value_spans.insert(sym(name), vs);
-        }
         self.check_collection_element_types(&final_ty);
         self.env.define_var(name, final_ty);
+        // #2097: after `define_var` — it clears the origin of any binding it
+        // shadows, and the `let`'s own value span goes in on top of that.
+        if let Some(vs) = value.span {
+            self.env.record_let_origin(name, vs);
+        }
     }
 
     /// `ast::Stmt::Var` arm of [`Self::check_stmt`]. Verbatim text move.
