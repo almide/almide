@@ -14,6 +14,14 @@
 //! Adding a genuinely native-only test: put its file in [`GENUINE_SKIPS`] with
 //! the category. Adding one because the wasm leg walls: don't — fix the wall,
 //! or the ledger will fail and say so.
+//!
+//! This ledger is blind to the OTHER way a file fails to reach the wasm leg,
+//! and by construction: a renderer WALL carries no marker, so it appears in no
+//! row here. Four such files were running nowhere on wasm with nothing red
+//! (#2121). Those are registered in `tests/wasm_test_lane_wall_test.rs`
+//! (`TEST_LANE_WALLS`), shrink-only in both directions, and the two registers
+//! must stay disjoint — a file is either something wasm cannot do, or subset
+//! debt, never both.
 
 use std::path::{Path, PathBuf};
 
