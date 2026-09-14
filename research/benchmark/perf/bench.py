@@ -103,6 +103,19 @@ SUITE = [
     # the leak. The wasm leg prints the same bytes at small N (checked by hand
     # at 1000 and 1M); re-add "wasm" to the legs when #2046 closes.
     ("decode",       "decode/decode.almd",               ["decode.rs"],                     "5000000",  "1000", "bytes", ["native", "rust"]),
+    # wordfreq (#2150, #2157): the keyed-aggregation row — N draws from a
+    # 5 000-word vocabulary counted in a `Map[String, Int]`, top 10. TWO
+    # spellings of one workload against ONE reference, like listbuild:
+    # `wordfreq` is the imperative `var` Map + `m[w] = map.get_or(m, w, 0) + 1`
+    # loop (the shape #2157's probe attributed the native Map's cost to),
+    # `wordfreq-group` the CHEATSHEET's `list.group_by` + `map.map`. The
+    # reference (`wordfreq.rs`) is same-shape/same-semantics: `HashMap<String,
+    # i64>`, an OWNED key cloned out of the vocabulary per draw, one `entry`
+    # per draw. REPORTED, not anchored — a hash-map row compares allocators and
+    # hashers before it compares codegen; the relation between the two rows is
+    # the T5 reading. Native/rust: the wasm leg's `group_by` is #2156's 110×.
+    ("wordfreq",       "wordfreq/wordfreq.almd",       ["wordfreq.rs"], "2000000", "20000", "bytes", ["native", "rust"]),
+    ("wordfreq-group", "wordfreq/wordfreq_group.almd", ["wordfreq.rs"], "2000000", "20000", "bytes", ["native", "rust"]),
 ]
 
 QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
@@ -134,6 +147,10 @@ QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
     # ~0.2s native / ~0.16s reference at 1M decodes on an M4 Pro — over the
     # 0.08s spawn-noise floor on both sides; the docs quote ns/op at this N.
     "decode": "1000000",
+    # ~0.09s native / ~0.05s reference at 1M draws on an M4 Pro (2026-09-14);
+    # 2M is the docs' number, 1M keeps the two rows polite on a runner.
+    "wordfreq": "1000000",
+    "wordfreq-group": "1000000",
 }
 
 RUSTC_FLAGS = ["-C", "opt-level=3", "-C", "lto=yes", "-C", "codegen-units=1",

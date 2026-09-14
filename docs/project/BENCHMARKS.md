@@ -303,6 +303,64 @@ fannkuch-redux 1.892s) and *faster* than native on binary-trees (0.239s vs
 mandelbrot (~130×) — those two cliffs are the current wasm perf arc, tracked in
 #917's follow-up.
 
+### Map: what the native keyed lookup costs (2026-09-14, #2150, #2157)
+
+`wordfreq` is the keyed-aggregation row: 2M draws from a 5 000-word vocabulary
+counted in a `Map[String, Int]`, top 10 by count desc / word asc — the shape
+of every word-count, group-by and histogram program. #2157 found the native
+leg 1.5–2.3× SLOWER than the same program under wasmtime, and its probe put
+the whole native gap on the Map: the same loop with the Map removed ran in
+87 ms, with it in 180 ms (`almide bench`, median of 5–7, M4 Pro, a loaded
+box). Three changes, one row (`research/benchmark/perf/wordfreq/`, both
+spellings, against `rust-ref/wordfreq.rs` — a `HashMap<String, i64>` with an
+owned key per draw):
+
+| wordfreq, imperative (2M) | before | after | |
+|---|---:|---:|---|
+| Almide native | 180 ms | **142 ms** | |
+| … of which the Map (loop minus the Map-free probe) | 93 ms | **55 ms** | 46 ns → 27 ns per `get_or` + `m[w] = …` pair |
+| Almide wasm (structural leg) | 127 ms | 130 ms | its Map: ~73 ms over its 57 ms probe |
+| Rust, same shape (`rust-ref/wordfreq.rs`) | 80 ms | 80 ms | |
+
+1. **The index is a compact-ordered-dict** (CPython 3.6+, Roc's `Dict`):
+   the insertion-ordered entry vector stays the source of truth for order,
+   equality and repr, and beside it sits an open-addressing slot table of
+   entry POSITIONS with the full 64-bit hash cached per entry, one
+   multiply-fold hash per operation. The previous sidecar SipHashed the key
+   through `dyn Any`, then SipHashed the fingerprint again inside a
+   `HashMap<u64, u32>` — four SipHash passes per `get_or` + insert pair.
+   Threshold (16 entries), insertion order, order-independent equality, the
+   Float/NaN linear path: all unchanged and pinned by the 77 Map/Set fixtures
+   in `spec/wasm_cross`, byte-identical native == wasm.
+2. **The read side borrows its key.** `map.get` / `get_or` / `contains` and
+   `set.contains` are `@borrow_ref(key)`; the runtime takes `&Q` with
+   `K: Borrow<Q>`, so a `&str` parameter probes a `Map[String, _]` without
+   materializing a `String` and `map.get_or(counts, w, 0)` no longer
+   consumes `w`.
+3. **The write moves the key.** `m[w] = f(&w)` with a plain-variable key
+   evaluates the value FIRST (a var read has no effect, so the order is
+   unobservable and stays byte-identical with the wasm leg's key-first
+   ANF), which makes the key position the var's last use: the clone pass
+   moves `w` into the insert instead of cloning it. `tests/map_key_move_test.rs`
+   pins both the borrow and the move in the emitted Rust.
+
+Measured in isolation on the emitted Rust (bare `rustc`, same source): the
+old shape 152 ms, the borrowed lookup alone 128 ms, a single-lookup
+get-or-insert 110 ms — the key clone and the second lookup each cost more
+than the hashing did. The native Map is now cheaper than the structural wasm
+leg's (55 vs ~73 ms for the same 2M operations); what keeps the native row
+above the wasm row is the Map-FREE loop (87 vs 57 ms: the `let w = vocab[i]`
+read clones twice, `list.range` is a real 16 MB `Vec`), which is codegen and
+is #2157's open probe, not the Map. The recommended spelling
+(`wordfreq-group`: `list.group_by` + `map.map`) reads 229 ms natively: its
+cost is the per-element key clone `group_by`'s `Rc<dyn Fn(A) -> B>` callback
+forces plus the intermediate `List[String]`, not the lookups — the T5
+relation this row now watches. `mapbuild` (20k Int + 20k String keys, build
+then read back) reads 5.6 ms from 6.6. Both wordfreq rows join the ratchet's
+REPORTED rows (`wordfreq=rust:wordfreq wordfreq-group=rust:wordfreq`, quick
+arg 1M): a hash-map row compares an allocator and a hasher before it
+compares codegen, like strchurn.
+
 ### Ablation: what the IR optimizer buys (2026-08-18)
 
 Koka's benchmark methodology publishes ablation legs (`std` = no FIP reuse
