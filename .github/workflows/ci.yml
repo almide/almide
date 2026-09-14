@@ -617,6 +617,14 @@ jobs:
           ALMIDE=/tmp/almide-bin/almide
           $ALMIDE test spec/ --target wasm
 
+      # #2121: the step above reports a file a RENDERER declined the same way
+      # it reports a file the author declared `// wasm:skip` for, and its exit
+      # code is about test results, not about walls — so five files' tests had
+      # stopped running on wasm with nothing red. This holds the wall set equal
+      # to the committed register, both directions.
+      - name: WASM test-lane wall register (shrink-only)
+        run: ALMIDE=/tmp/almide-bin/almide bash scripts/check-wasm-test-walls.sh
+
   # ═══════════════════════════════════════════════
   # WASM on a WINDOWS host (#1066)
   #

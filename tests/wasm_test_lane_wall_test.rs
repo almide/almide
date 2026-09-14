@@ -11,9 +11,12 @@
 //! verdict as if it were the product's.
 //!
 //! The distinction this pins: a skip the AUTHOR declared and a skip a RENDERER
-//! decided are not the same verdict. A declared `// wasm:skip` (with its reason,
-//! greppable, reviewable) stays a skip. A wall is a failure of the target the
-//! caller explicitly asked for.
+//! decided are not the same verdict, and the lane must say which one it made.
+//! A declared `// wasm:skip` means wasm CANNOT run the file; a WALL means a leg
+//! has not lowered the shape yet. The marker is not a place to park the second
+//! — `tests/wasm_skip_ledger_test.rs` refuses subset debt outright (#812) —
+//! so the walls get their own shrink-only register, `proofs/wasm-test-walls.txt`,
+//! gated by `scripts/check-wasm-test-walls.sh`.
 
 use std::process::Command;
 
@@ -65,17 +68,14 @@ fn test_on_wasm(dir: &std::path::Path, source: &str) -> (Option<i32>, String) {
 }
 
 #[test]
-fn a_renderer_wall_fails_the_run_instead_of_passing_as_a_skip() {
+fn a_renderer_wall_is_reported_as_a_wall_not_as_a_plain_skip() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let (code, report) = test_on_wasm(dir.path(), WALLS_THE_INCUMBENT);
-    assert_eq!(
-        code,
-        Some(1),
-        "a file whose tests did not run on the requested target must not exit 0:\n{report}"
-    );
+    let (_code, report) = test_on_wasm(dir.path(), WALLS_THE_INCUMBENT);
     assert!(
-        report.contains("tests did not run on wasm"),
-        "the verdict must say the tests did not run, not merely that the file was skipped:\n{report}"
+        report.contains("WALL ") && report.contains("tests did not run on wasm"),
+        "a renderer wall must be reported under its own greppable verdict — the register's \
+         gate reads these lines, and a wall that looked like every other skip is how five \
+         files stopped running on wasm unnoticed:\n{report}"
     );
     assert!(
         !report.contains("no verified wasm rendering"),
@@ -83,6 +83,39 @@ fn a_renderer_wall_fails_the_run_instead_of_passing_as_a_skip() {
          rendering — `almide build --target wasm` renders this same file on the structural \
          leg and reports `verified`:\n{report}"
     );
+    assert!(
+        report.contains("#2179"),
+        "and must name the issue that removes the wall:\n{report}"
+    );
+}
+
+/// The register's gate is the thing that makes a wall non-silent in THIS
+/// repository, so it must actually agree with the lane it reads.
+#[test]
+fn the_wall_register_lists_exactly_the_specs_that_wall() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let register = std::fs::read_to_string(root.join("proofs/wasm-test-walls.txt"))
+        .expect("proofs/wasm-test-walls.txt");
+    let rows: Vec<&str> = register
+        .lines()
+        .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+        .map(|l| l.split('\t').next().unwrap_or(""))
+        .collect();
+    assert!(!rows.is_empty(), "the register must not be empty while #2179 is open");
+    for r in &rows {
+        assert!(
+            root.join(r).exists(),
+            "the register names a file that does not exist: {r}"
+        );
+        assert!(
+            !std::fs::read_to_string(root.join(r))
+                .unwrap_or_default()
+                .lines()
+                .any(|l| l.trim_start().starts_with("// wasm:skip")),
+            "{r} is registered as subset debt AND carries a platform-limit marker — it must \
+             be one or the other (#812)"
+        );
+    }
 }
 
 #[test]

@@ -1,0 +1,32 @@
+# WASM TEST-LANE WALL REGISTER — spec files whose tests do NOT run on wasm
+# because a renderer declined them.
+#
+# This is the OTHER way a spec file can fail to reach the wasm leg, and until
+# #2121 nothing watched it. `tests/wasm_skip_ledger_test.rs` gates the declared
+# `// wasm:skip` markers and is blind to walls by construction: a wall carries
+# no marker, so it never appeared in any ledger, and `almide test spec/
+# --target wasm` — a CI gate — reported green while five files' tests had not
+# run there.
+#
+# A row here is NOT the same claim as a `// wasm:skip`. That marker says wasm
+# CANNOT run the file (an OS API, an `@extern` binding, a caught panic) and its
+# ledger refuses subset debt outright (#812, "fix the wall rather than parking
+# it here"). A row here says a LEG has not lowered the shape yet, and names the
+# issue that removes it.
+#
+# SHRINK-ONLY, both directions (scripts/check-wasm-test-walls.sh):
+#   - a wall with no row FAILS — a new one cannot join silently
+#   - a row whose file no longer walls FAILS — delete the row
+#
+# Format: <repo-relative path><TAB><why, and what retires it>
+#
+# Every row below is ONE cause: the test lane renders through the incumbent
+# brick alone, while `build`/`run`/`check --target wasm` render through the
+# two-leg router whose default is the structural leg. `almide build --target
+# wasm` reports `structural leg, verified` for every one of these four files.
+# #2179 gives the lane that route and empties this register.
+
+spec/integration/modules/cross_module_repr_derive_test.almd	#2179 — the incumbent leaves `Pt.repr` / `__repr_list_rec_reprlib_Cfg` unlinked; a dangling call would be invalid wasm, so it refuses honestly. The structural leg renders the file.
+spec/lang/as_pattern_test.almd	#2179 — the incumbent walls `pub fn area_note`: a heap-result `match` outside its executable subset (the #2160 shape). The structural leg renders the file.
+spec/lang/list_rest_pattern_test.almd	#2179 — the incumbent walls `pub fn total`: a `match` over an untracked subject with a call- or assign-carrying arm. The structural leg renders the file.
+spec/stdlib/zlib_test.almd	#2179 — the incumbent leaves `zli_gunzip_members` / `zli_inflate_stream` unlinked. NOTE: the skip ledger retired this file's row on 2026-09-01 saying it "runs the wasm leg for real" after #1700, and docs/stdlib/zlib.md still says the file is marked `// wasm:skip`. Neither was true, and the silent wall is why nobody noticed. The structural leg renders the file.
