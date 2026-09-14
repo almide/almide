@@ -119,34 +119,7 @@ impl<'a> Interpreter<'a> {
                     for a in args {
                         evaled.push(val!(self.eval_expr(a, scope)));
                     }
-                    if let Some(result) = self.eval_container_op(m.as_str(), f.as_str(), &evaled)
-                    {
-                        return result;
-                    }
-                    // Same two-tier rule as `dispatch_module_resolved`: inside
-                    // the pool tier the bridge is the floor a body consumes.
-                    let floor_first = self.pool_depth > 0;
-                    if floor_first
-                        && let Some(result) = crate::bridge::dispatch(m.as_str(), f.as_str(), &evaled)
-                    {
-                        self.record_bridge_floor(m, f);
-                        return result;
-                    }
-                    let root = self.root_scope();
-                    let flow = self.call_pool_tier(func, evaled.clone(), &root);
-                    // #1226 return sync at the NAMED spelling too — the same
-                    // body reachable both ways must read back the same way.
-                    // Pool bodies only: a program fn that happens to share an
-                    // impl name keeps the fixture tier's raw address model.
-                    let flow = if self.pool_fns.contains(&func.name) {
-                        self.sync_at_pool_boundary(func, flow)
-                    } else {
-                        flow
-                    };
-                    return match flow {
-                        Flow::Unsupported(why) if !floor_first => self.bridge_fallback(m, f, &evaled, why),
-                        other => other,
-                    };
+                    return self.eval_named_stdlib_impl(func, m, f, evaled);
                 }
             }
             return self.eval_lowered_fn_call(func, args, scope);
@@ -536,6 +509,7 @@ impl<'a> Interpreter<'a> {
 include!("dispatch_module.rs");
 include!("dispatch_sync.rs");
 include!("dispatch_heap.rs");
+include!("dispatch_body.rs");
 
 // ── Constructor registry ────────────────────────────────────────
 
