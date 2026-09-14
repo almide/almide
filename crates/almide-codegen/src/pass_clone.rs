@@ -11,7 +11,7 @@ use almide_ir::*;
 use almide_base::{Span, Sym};
 use almide_lang::types::Ty;
 use super::pass::{NanoPass, PassResult, Target};
-use super::pass_clone_places::{insert_clones_index_access, insert_clones_map_access, insert_clones_member};
+use super::pass_clone_places::{insert_clones_index_access, insert_clones_map_access, insert_clones_member, map_insert_value_first};
 use super::pass_clone_loops::{insert_clones_for_in, insert_clones_while, take_borrowed_loop_vars};
 
 #[path = "pass_clone_calls.rs"]
@@ -748,6 +748,15 @@ pub(crate) fn insert_clone_stmts_live(stmts: Vec<IrStmt>, ctx: &mut CloneCtx) ->
                 let value = insert_clones_live(value, ctx);
                 count_target_use(target, ctx.eligible, ctx.remaining);
                 IrStmtKind::FieldAssign { target, field, value }
+            }
+            // Value before key when the key is a plain var (see
+            // `map_insert_value_first`): the key position becomes the var's
+            // last use, so `m[w] = f(&w)` moves `w` instead of cloning it.
+            IrStmtKind::MapInsert { target, key, value } if map_insert_value_first(&key, &value) => {
+                let value = insert_clones_live(value, ctx);
+                let key = insert_clones_live(key, ctx);
+                count_target_use(target, ctx.eligible, ctx.remaining);
+                IrStmtKind::MapInsert { target, key, value }
             }
             IrStmtKind::MapInsert { target, key, value } => {
                 let key = insert_clones_live(key, ctx);

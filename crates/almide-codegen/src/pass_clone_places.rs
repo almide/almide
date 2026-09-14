@@ -4,6 +4,26 @@ use almide_base::{Span, Sym};
 use almide_lang::types::Ty;
 use super::pass_clone::{CloneCtx, insert_clones_live, needs_clone};
 
+/// `MapInsert { key, value }` (#2157): may the VALUE be evaluated before the
+/// KEY? Yes when the key is a plain variable (optionally already Clone-wrapped)
+/// that the value never assigns — reading a var has no observable effect, so
+/// the order cannot be told apart from the key-first order the wasm leg
+/// evaluates. The clone pass and the walker BOTH consult this: the pass then
+/// visits the value first, which makes the key position the var's last use
+/// (`m[w] = f(&w)` moves `w` in instead of cloning it), and the walker binds
+/// the value to a temporary before the insert so rustc sees the same order.
+/// Any other key shape — a call, an index read, a field — keeps key-first.
+pub(crate) fn map_insert_value_first(key: &IrExpr, value: &IrExpr) -> bool {
+    let inner = match &key.kind {
+        IrExprKind::Clone { expr } => &expr.kind,
+        other => other,
+    };
+    let IrExprKind::Var { id } = inner else { return false };
+    let mut assigned = std::collections::HashSet::new();
+    collect_assigned_vars(value, &mut assigned);
+    !assigned.contains(&id.0)
+}
+
 /// `IndexAccess { object, index }` arm of [`insert_clones_live`]: borrow the
 /// container, clone the element.
 pub(super) fn insert_clones_index_access(object: IrExpr, index: IrExpr, ty: Ty, span: Option<Span>, ctx: &mut CloneCtx) -> IrExpr {
