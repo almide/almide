@@ -262,7 +262,7 @@ dependencies = [
  "almide-wasm-run",
  "anyhow",
  "sha2 0.11.0",
- "wasm-encoder 0.258.0",
+ "wasm-encoder 0.259.0",
  "wasmparser 0.258.0",
  "wasmtime",
 ]
@@ -275,7 +275,7 @@ dependencies = [
  "almide-rt-core",
  "almide-wasm",
  "anyhow",
- "wasm-encoder 0.258.0",
+ "wasm-encoder 0.259.0",
  "wasmparser 0.258.0",
  "wasmtime",
  "wit-component 0.258.0",
@@ -2379,6 +2379,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "wasm-encoder"
+version = "0.259.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1d0246511d901aacf25d2dc9111f0054947de5e093fe662099e709ff7530dc3"
+dependencies = [
+ "leb128fmt",
+ "wasmparser 0.259.0",
+]
+
+[[package]]
 name = "wasm-metadata"
 version = "0.244.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2438,6 +2448,17 @@ dependencies = [
  "indexmap",
  "semver",
  "serde",
+]
+
+[[package]]
+name = "wasmparser"
+version = "0.259.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0f7c12eac7bb587801590f6a67ff0bc84d0748513864b71108e4b311cc3df694"
+dependencies = [
+ "bitflags 2.11.1",
+ "indexmap",
+ "semver",
 ]
 
 [[package]]
