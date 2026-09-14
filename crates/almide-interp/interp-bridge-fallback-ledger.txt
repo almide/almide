@@ -1,0 +1,62 @@
+# interp-bridge-fallback-ledger — the `module.func` names the hand-mirrored
+# bridge (crates/almide-interp/src/bridge.rs) answers over the spec/wasm_cross
+# corpus (#2185): `floor:` rows are consumed INSIDE a self-hosted body (the
+# bridge is that tier's floor, like prim.*); the others are boundary
+# fallbacks where the body abstained or has no body. The body is the third
+# vote; this is the bridge's measured residue. An arm absent here is dead.
+#
+# Format: <module.func>  <first fixture>  <floor: … | why the body abstained>
+# Gate:   wasm_runtime_interp_ledger.rs::interp_bridge_fallback_ledger —
+#         fails on a name missing here AND on a ledgered name the corpus no
+#         longer reaches through the bridge (a shadowed arm: delete it).
+# Regenerate (then review the diff!):
+#   ALMIDE_UPDATE_INTERP_LEDGER=1 cargo test --test wasm_runtime_interp_ledger interp_bridge_fallback_ledger
+
+bytes.len  bytes_string_window_domain  floor: consumed inside a self-hosted body
+bytes.new  bytes_new_exhaustion  prim.alloc_bytes(9223372036854775807) beyond the interp arena ceiling
+bytes.to_list  fs_composition_family  floor: consumed inside a self-hosted body
+float.from_int  fan_map_parallel_scalar  floor: consumed inside a self-hosted body
+float.is_infinite  checked_conversion_value_match  floor: consumed inside a self-hosted body
+float.is_nan  checked_conversion_value_match  floor: consumed inside a self-hosted body
+float.sqrt  matrix_head_count_domain  floor: consumed inside a self-hosted body
+float.to_float32  bytes_writer_family  floor: consumed inside a self-hosted body
+float.to_float64  uint64_upper_half  floor: consumed inside a self-hosted body
+float.to_string  availability_pure_batch  floor: consumed inside a self-hosted body
+float32.to_string  float32_literal_excess_precision  no lowered body for float32.to_string
+int.band  fan_effect_mapper_capability  floor: consumed inside a self-hosted body
+int.bor  zlib_selfhost  floor: consumed inside a self-hosted body
+int.bshl  matrix_domain_edges  floor: consumed inside a self-hosted body
+int.bshr  zlib_selfhost  floor: consumed inside a self-hosted body
+int.bxor  zlib_selfhost  floor: consumed inside a self-hosted body
+int.from_int16  int_bit_family  floor: consumed inside a self-hosted body
+int.from_int32  checked_conversion_value_match  floor: consumed inside a self-hosted body
+int.from_int64  checked_conversion_value_match  floor: consumed inside a self-hosted body
+int.from_int8  checked_conversion_value_match  floor: consumed inside a self-hosted body
+int.from_uint16  int_bit_family  floor: consumed inside a self-hosted body
+int.from_uint32  int_bit_family  floor: consumed inside a self-hosted body
+int.from_uint64  checked_conversion_value_match  floor: consumed inside a self-hosted body
+int.from_uint8  checked_conversion_value_match  floor: consumed inside a self-hosted body
+int.parse  json_path_edges  floor: consumed inside a self-hosted body
+int.to_float  checked_conversion_value_match  floor: consumed inside a self-hosted body
+int.to_string  availability_pure_batch  floor: consumed inside a self-hosted body
+math.cos  matrix_head_count_domain  floor: consumed inside a self-hosted body
+math.fpow  matrix_head_count_domain  floor: consumed inside a self-hosted body
+math.log  math_log_gamma  floor: consumed inside a self-hosted body
+math.log10  edge_float_formatting  floor: consumed inside a self-hosted body
+math.sin  matrix_head_count_domain  floor: consumed inside a self-hosted body
+string.chars  http_response_headers  floor: consumed inside a self-hosted body
+string.contains  fs_glob_segments  floor: consumed inside a self-hosted body
+string.drop  json_path_edges  floor: consumed inside a self-hosted body
+string.drop_end  json_number_unicode  floor: consumed inside a self-hosted body
+string.ends_with  availability_pure_batch  floor: consumed inside a self-hosted body
+string.index_of  http_response_headers  floor: consumed inside a self-hosted body
+string.len  bytes_f16_offset_overflow  floor: consumed inside a self-hosted body
+string.lines  fs_composition_family  floor: consumed inside a self-hosted body
+string.repeat  availability_pure_batch  floor: consumed inside a self-hosted body
+string.replace  availability_pure_batch  floor: consumed inside a self-hosted body
+string.slice  codec_decode_error_surface  floor: consumed inside a self-hosted body
+string.split  fs_glob_segments  floor: consumed inside a self-hosted body
+string.starts_with  codec_decode_error_surface  floor: consumed inside a self-hosted body
+string.take  json_path_edges  floor: consumed inside a self-hosted body
+string.to_upper  string_case_unicode  floor: consumed inside a self-hosted body
+string.trim  ctor_scalar_call_payload  floor: consumed inside a self-hosted body

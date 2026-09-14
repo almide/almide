@@ -136,9 +136,16 @@ fn lower_for_interp(source: &str) -> Result<almide_ir::IrProgram, String> {
 /// self-reported scope limits to a `Skip`; everything else is a real third vote.
 /// stdout/stderr are `.trim()`-ed to match the native/wasm legs' comparison.
 fn run_interp_capture(source: &str) -> InterpLeg {
+    run_interp_capture_with_fallbacks(source).0
+}
+
+/// [`run_interp_capture`] plus the module calls the hand-mirrored bridge
+/// answered as the lowered body's FALLBACK (#2185: `(module.func, why the
+/// body abstained)`), the residue `interp_bridge_fallback_ledger` audits.
+fn run_interp_capture_with_fallbacks(source: &str) -> (InterpLeg, Vec<(String, String)>) {
     let ir = match lower_for_interp(source) {
         Ok(ir) => ir,
-        Err(reason) => return InterpLeg::Skip(reason),
+        Err(reason) => return (InterpLeg::Skip(reason), Vec::new()),
     };
     // The interpreter is single-shot per program; catch a defensive panic so an
     // evaluator bug surfaces as a loud skip rather than poisoning the gate.
@@ -146,9 +153,10 @@ fn run_interp_capture(source: &str) -> InterpLeg {
         Interpreter::new(&ir).run_main()
     })) {
         Ok(o) => o,
-        Err(_) => return InterpLeg::Skip("interp evaluation panicked".to_string()),
+        Err(_) => return (InterpLeg::Skip("interp evaluation panicked".to_string()), Vec::new()),
     };
-    match &outcome.status {
+    let fallbacks = outcome.bridge_fallbacks.clone();
+    let leg = match &outcome.status {
         // `Exited(n)` RAN — it is an explicit `process.exit(n)`, a real
         // observable outcome the backends reproduce exactly, so it casts a
         // vote like Ok and Aborted. Folding it into a skip would have hidden
@@ -165,5 +173,6 @@ fn run_interp_capture(source: &str) -> InterpLeg {
         RunStatus::FuelExhausted => {
             InterpLeg::Skip("interp fuel/recursion budget exhausted".to_string())
         }
-    }
+    };
+    (leg, fallbacks)
 }

@@ -1,19 +1,43 @@
-//! Scalar / string / math native bridge.
+//! The scalar floor under the self-hosted bodies, and the bridge's measured residue.
 //!
-//! The monomorphic, concrete-typed runtime surface (`int.*`, `float.*`,
-//! `string.*`, `math.*`) is dispatched here by `(module, func)` name. Each glue
-//! reproduces the native runtime fn's behavior directly over `Value` — the
-//! runtime fns are mostly one-liners over Rust std, so the bridge stays small
-//! and stays byte-identical to native (the std behavior IS the oracle).
+//! The reference interpreter's third vote comes from the SELF-HOSTED stdlib
+//! bodies — the same sources the wasm leg links and the native leg compiles
+//! (`almide_lang::self_host_registry`, lowered once by `stdlib_pool`) — and
+//! `dispatch_module.rs` consults that body FIRST at the pool boundary
+//! (#2185). This file is what a body cannot be, in two tiers:
 //!
-//! Deliberately NOT taking a path dependency on the `almide_rt` crate in this
-//! phase: that crate pulls in rustls/webpki (network/TLS), bloating the build
-//! and importing effectful surface the interp does not need. The pure scalar
-//! fns are reproduced inline. Wiring `almide_rt` as a path dep to cover the
-//! full ~200-fn surface is the documented next-phase expansion.
+//! - INSIDE the pool tier (`pool_depth > 0`), the bridge is part of the FLOOR
+//!   a body consumes, exactly like `prim.*`: the json decoder's `string.len`,
+//!   a codec path's `int.to_string`, `math.sin` under a self-hosted `math.*`.
+//!   The tier evaluates one body over the block heap; nesting another body
+//!   there is what it cannot yet do faithfully (the first body-first
+//!   measurement voted WRONG on 9 fixtures — json paths, glob, header lookup,
+//!   codec error paths — and crashed on 2), so a body's helper calls are
+//!   answered over `Value`s here.
+//! - AT the boundary, the bridge answers only where the body abstains or does
+//!   not exist: `bytes.new` past the arena ceiling, the sized-numeric
+//!   `to_string` observers.
 //!
-//! Returns `None` when `(module, func)` is not a bridged scalar fn (the caller
-//! then tries an almide-bodied stdlib fn or reports `Unsupported`).
+//! Every arm here is one the spec/wasm_cross corpus REACHES on one of those
+//! two tiers; the ~90 others the file used to carry (`path.*`, `uint64.*`,
+//! `bool.*`, the int/float/string/math arms no body consumes) were Rust
+//! restatements of bodies the interp evaluates itself and are gone. The gate
+//! that keeps it so is
+//! `tests/wasm_runtime_interp_ledger.rs::interp_bridge_fallback_ledger`: every
+//! non-`prim` name the bridge answers is recorded per run
+//! (`RunOutcome::bridge_fallbacks`, tagged floor or fallback) and held equal
+//! to `interp-bridge-fallback-ledger.txt` in both directions — a new
+//! dependence on a Rust copy is a reviewed ledger edit, and an entry the
+//! corpus stops reaching is a dead arm to delete.
+//!
+//! Each glue reproduces the native runtime fn's behavior directly over
+//! `Value` (the runtime fns are one-liners over Rust std, so the floor stays
+//! byte-identical to native). Deliberately NOT taking a path dependency on the
+//! `almide_rt` crate: it pulls in rustls/webpki (network/TLS) and effectful
+//! surface the interp does not need.
+//!
+//! Returns `None` when `(module, func)` is not served here (the caller then
+//! abstains with the body's own reason).
 
 use crate::value::{float_to_string, Value};
 use crate::Flow;
@@ -25,10 +49,7 @@ pub(crate) fn dispatch(module: &str, func: &str, args: &[Value]) -> Option<Flow>
         "float" => float_fn(func, args),
         "string" => string_fn(func, args),
         "math" => math_fn(func, args),
-        "bool" => bool_fn(func, args),
-        "path" => path_fn(func, args),
         "bytes" => bytes_fn(func, args),
-        "uint64" => uint64_fn(func, args),
         "int8" | "int16" | "int32" | "int64" | "uint8" | "uint16" | "uint32"
         | "float32" | "float64" => sized_numeric_fn(module, func, args),
         // The scalar prim floor — consumed by the self-hosted stdlib bodies the
@@ -59,86 +80,14 @@ fn sized_numeric_fn(module: &str, func: &str, args: &[Value]) -> Option<Flow> {
     }
 }
 
-/// `uint64.*` — the UNSIGNED 64-bit observers (#872, C-179). The interpreter
-/// carries integers in the same `i64` slot the IR does, so the upper half of
-/// `UInt64` arrives here as a NEGATIVE `i64` bit pattern: read it back as
-/// `u64` rather than pivoting through the signed value (which printed `-1`
-/// for `u64::MAX`). Bridged so the third oracle EVALUATES the lane instead of
-/// abstaining — an abstention is a hole in the executable spec.
-fn uint64_fn(func: &str, args: &[Value]) -> Option<Flow> {
-    let n = as_int(args.first())? as u64;
-    let f = match func {
-        "to_string" => Flow::val(Value::str(n.to_string())),
-        // `to_float32` rounds through f32 exactly as the backends do (the
-        // int_bit_family fixture's u64 column: 2147483647 prints 2147483648.0).
-        "to_float32" => Flow::val(Value::Float(n as f32 as f64)),
-        "to_float64" => Flow::val(Value::Float(n as f64)),
-        _ => return None,
-    };
-    Some(f)
-}
 
-/// `path.*` — pure path-STRING manipulation, so the third oracle can evaluate it
-/// (nothing here touches the filesystem). Added to stop the bundled-module and
-/// docs fixtures abstaining: an abstention is a hole in the executable spec.
-fn path_fn(func: &str, args: &[Value]) -> Option<Flow> {
-    let s = as_str(args.first())?;
-    let f = match func {
-        "join" => {
-            let child = as_str(args.get(1))?;
-            let base = s.trim_end_matches('/');
-            Flow::val(Value::str(format!("{}/{}", base, child.trim_start_matches('/'))))
-        }
-        "dirname" => Flow::val(Value::str(match s.rfind('/') {
-            Some(0) => "/".to_string(),
-            Some(i) => s[..i].to_string(),
-            None => ".".to_string(),
-        })),
-        "basename" => Flow::val(Value::str(
-            s.rsplit('/').next().unwrap_or(s).to_string(),
-        )),
-        "is_absolute" => Flow::val(Value::Bool(s.starts_with('/'))),
-        "extension" => {
-            let base = s.rsplit('/').next().unwrap_or(s);
-            // A leading-dot name (`.gitignore`) has no extension.
-            let ext = base.rfind('.').filter(|i| *i > 0).map(|i| base[i + 1..].to_string());
-            Flow::val(Value::Option(ext.map(|e| Box::new(Value::str(e)))))
-        }
-        "stem" => {
-            let base = s.rsplit('/').next().unwrap_or(s);
-            let stem = match base.rfind('.').filter(|i| *i > 0) {
-                Some(i) => &base[..i],
-                None => base,
-            };
-            Flow::val(Value::str(stem.to_string()))
-        }
-        _ => return None,
-    };
-    Some(f)
-}
 
-/// `bytes.*` — the subset with a pure list-of-int model. A `Bytes` value is a
-/// `List[Int]` in the interp, so `to_list` is the identity and `to_string_lossy`
-/// decodes. The mutating and raw-pointer surface stays out of scope.
+/// `bytes.*` — the three the corpus still reaches: `to_list` (the identity —
+/// a `Bytes` is a `List[Int]` here) and `len` as the floor inside bodies, and
+/// `new`, whose body abstains past the interp arena ceiling where both
+/// backends take the C-197 defined abort.
 fn bytes_fn(func: &str, args: &[Value]) -> Option<Flow> {
     let f = match func {
-        // `to_list` is the identity — every stored element is already a
-        // truncated octet. `from_list` is NOT: the native runtime maps each
-        // element `x as u8` (almide_rt_bytes_from_list), so an out-of-range
-        // element must truncate HERE too — the identity kept `-128` in the
-        // model, and every read voted `-128` where both targets print `128`
-        // (#1505, the 0x80-as-signed wrong vote).
-        "from_list" => {
-            let items = args.first()?.as_iter_items()?;
-            let out: Vec<Value> = items
-                .iter()
-                .map(|v| match v {
-                    Value::Int(n) => Value::Int((*n as u8) as i64),
-                    other => other.clone(),
-                })
-                .collect();
-            Flow::val(Value::List(std::rc::Rc::new(out)))
-        }
         "to_list" => Flow::val(args.first()?.clone()),
         "len" => Flow::val(Value::Int(args.first()?.as_iter_items()?.len() as i64)),
         // C-197: an unsatisfiable size is the defined abort on every leg —
@@ -154,97 +103,14 @@ fn bytes_fn(func: &str, args: &[Value]) -> Option<Flow> {
                 Flow::val(Value::list(v))
             }
         }
-        "from_string" => Flow::val(Value::list(
-            as_str(args.first())?.bytes().map(|b| Value::Int(b as i64)).collect(),
-        )),
-        "to_string_lossy" => {
-            let raw = as_byte_buf(args.first())?;
-            Flow::val(Value::str(String::from_utf8_lossy(&raw).into_owned()))
-        }
-        // The WASM-only arena pair. Native is literally `almide_rt_bytes_heap_save()
-        // -> 0` and `almide_rt_bytes_heap_restore(_) {}` (runtime/rs/src/bytes.rs) —
-        // there is no arena to check-point outside wasm, and the interp models
-        // `Bytes` as an owned `List` with no arena either. Mirroring the native
-        // no-ops is the faithful vote; anything else would invent a behaviour
-        // neither backend has on this leg (#1021).
-        "heap_save" => Flow::val(Value::Int(0)),
-        "heap_restore" => Flow::val(Value::Unit),
-        "read_uint16" | "read_uint32" | "read_int32" | "read_float32" => {
-            return bytes_read_fn(func, args)
-        }
         _ => return None,
     };
     Some(f)
 }
 
-/// A `Bytes` receiver as raw octets. The interp models `Bytes` as `List[Int]`,
-/// so every element is truncated with `as u8` exactly as the native runtime does.
-fn as_byte_buf(v: Option<&Value>) -> Option<Vec<u8>> {
-    Some(
-        v?.as_iter_items()?
-            .iter()
-            .map(|v| match v { Value::Int(i) => *i as u8, _ => 0 })
-            .collect(),
-    )
-}
 
-/// The Endian-parameterized sized reads (#1098): dispatch on the ctor of the
-/// `Endian` argument and mirror the native guards exactly — an out-of-range
-/// window reads the documented 0 / 0.0 default, never aborts
-/// (`almide_rt_bytes_read_u16_le`'s `checked_add` shape).
-fn bytes_read_fn(func: &str, args: &[Value]) -> Option<Flow> {
-    let raw = as_byte_buf(args.first())?;
-    let pos = as_int(args.get(1))?;
-    let big = endian_is_big(args.get(2)?)?;
-    let width = if func == "read_uint16" { 2 } else { 4 };
-    let p = pos as usize;
-    let window = (pos >= 0)
-        .then(|| p.checked_add(width))
-        .flatten()
-        .filter(|end| *end <= raw.len())
-        .map(|_| &raw[p..p + width]);
-    let Some(w) = window else {
-        // Out of range: the documented default for the read's result type.
-        let zero = if func == "read_float32" { Value::Float(0.0) } else { Value::Int(0) };
-        return Some(Flow::val(zero));
-    };
-    Some(Flow::val(decode_sized(func, w, big)?))
-}
 
-/// The `Endian` variant argument as "is big-endian".
-fn endian_is_big(v: &Value) -> Option<bool> {
-    let Value::Variant { ctor, .. } = v else { return None };
-    match ctor.as_str() {
-        "LittleEndian" => Some(false),
-        "BigEndian" => Some(true),
-        _ => None,
-    }
-}
 
-/// Decode an in-range window for one of the sized reads. `w` is exactly the
-/// read's width, so the array conversions cannot fail.
-fn decode_sized(func: &str, w: &[u8], big: bool) -> Option<Value> {
-    let v = match func {
-        "read_uint16" => {
-            let b = [w[0], w[1]];
-            Value::Int((if big { u16::from_be_bytes(b) } else { u16::from_le_bytes(b) }) as i64)
-        }
-        "read_uint32" => {
-            let b = [w[0], w[1], w[2], w[3]];
-            Value::Int((if big { u32::from_be_bytes(b) } else { u32::from_le_bytes(b) }) as i64)
-        }
-        "read_int32" => {
-            let b = [w[0], w[1], w[2], w[3]];
-            Value::Int((if big { i32::from_be_bytes(b) } else { i32::from_le_bytes(b) }) as i64)
-        }
-        "read_float32" => {
-            let b = [w[0], w[1], w[2], w[3]];
-            Value::Float((if big { f32::from_be_bytes(b) } else { f32::from_le_bytes(b) }) as f64)
-        }
-        _ => return None,
-    };
-    Some(v)
-}
 
 // ── helpers to pull typed args ──────────────────────────────────
 
@@ -265,10 +131,6 @@ fn as_str(v: Option<&Value>) -> Option<&str> {
         Some(Value::Str(s)) => Some(s.as_str()),
         _ => None,
     }
-}
-
-fn abort_args(module: &str, func: &str) -> Flow {
-    Flow::Abort(format!("internal: bad args to {}.{}", module, func))
 }
 
 // ── int ─────────────────────────────────────────────────────────
@@ -447,21 +309,6 @@ fn int_fn_a(func: &str, args: &[Value]) -> Option<Flow> {
             let n = as_int(args.first())?;
             Flow::val(Value::Float(n as f64))
         }
-        "abs" => Flow::val(Value::Int(as_int(args.first())?.abs())),
-        "min" => Flow::val(Value::Int(as_int(args.first())?.min(as_int(args.get(1))?))),
-        "max" => Flow::val(Value::Int(as_int(args.first())?.max(as_int(args.get(1))?))),
-        "clamp" => {
-            let n = as_int(args.first())?;
-            let lo = as_int(args.get(1))?;
-            let hi = as_int(args.get(2))?;
-            // ALS-T6: an inverted range is the abort form (a raw Rust clamp
-            // here would panic the harness instead of voting).
-            if lo > hi {
-                return Some(Flow::Abort("clamp requires min <= max".to_string()));
-            }
-            Flow::val(Value::Int(n.clamp(lo, hi)))
-        }
-        "to_hex" => Flow::val(Value::str(format!("{:x}", as_int(args.first())?))),
         _ => return None,
     };
     Some(f)
@@ -485,7 +332,6 @@ fn int_fn_b(func: &str, args: &[Value]) -> Option<Flow> {
         "band" => Flow::val(Value::Int(as_int(args.first())? & as_int(args.get(1))?)),
         "bor" => Flow::val(Value::Int(as_int(args.first())? | as_int(args.get(1))?)),
         "bxor" => Flow::val(Value::Int(as_int(args.first())? ^ as_int(args.get(1))?)),
-        "bnot" => Flow::val(Value::Int(!as_int(args.first())?)),
         "bshl" => Flow::val(Value::Int(as_int(args.first())? << as_int(args.get(1))?)),
         "bshr" => Flow::val(Value::Int(as_int(args.first())? >> as_int(args.get(1))?)),
         _ => return None,
@@ -493,30 +339,258 @@ fn int_fn_b(func: &str, args: &[Value]) -> Option<Flow> {
     Some(f)
 }
 
-include!("bridge_float_string.rs");
+// ── float ───────────────────────────────────────────────────────
 
-#[cfg(test)]
-mod bytes_model_tests {
-    use super::*;
-
-    /// #1505: `bytes.from_list` must truncate each element to an octet the
-    /// way the native runtime's `x as u8` does — the identity model kept
-    /// `-128`/`300` in the list and every later read voted a value both
-    /// targets never print (0x80 came back `-128` where they print `128`).
-    #[test]
-    fn from_list_truncates_to_octets_like_the_native_cast() {
-        let src = Value::List(std::rc::Rc::new(vec![
-            Value::Int(1),
-            Value::Int(128),
-            Value::Int(255),
-            Value::Int(-128),
-            Value::Int(300),
-        ]));
-        let Some(Flow::Value(Value::List(out))) = bytes_fn("from_list", &[src]) else {
-            panic!("from_list did not evaluate");
-        };
-        let got: Vec<i64> =
-            out.iter().map(|v| match v { Value::Int(n) => *n, _ => panic!("non-int") }).collect();
-        assert_eq!(got, vec![1, 128, 255, 128, 44]);
+/// The sized-float CONVERSIONS (`float.to_float32`/`to_float64`/
+/// `from_float32`/`from_float64`): the interpreter carries every float in one
+/// `f64`, and `Float32`/`Float64` are the SAME carrier at the language level
+/// (the narrowing to f32 precision is the emitters' concern), so each of these
+/// is the identity here. Bridged so a fixture that merely NAMES a sized float
+/// still evaluates in the third oracle instead of abstaining.
+fn float_sized_conv(func: &str, args: &[Value]) -> Option<Flow> {
+    let n = as_float(args.first())?;
+    match func {
+        "to_float64" | "from_float64" => Some(Flow::val(Value::Float(n))),
+        // f32 round-trips through the narrower precision, exactly as both
+        // emitters do — the value a `Float32` can actually hold.
+        "to_float32" | "from_float32" => Some(Flow::val(Value::Float(n as f32 as f64))),
+        _ => None,
     }
+}
+
+fn float_fn(func: &str, args: &[Value]) -> Option<Flow> {
+    float_sized_conv(func, args)
+        .or_else(|| float_unary_fn(func, args))
+        .or_else(|| float_text_fn(func, args))
+}
+
+/// The one-operand surface: rounding, sign, width conversion and the
+/// classification predicates.
+fn float_unary_fn(func: &str, args: &[Value]) -> Option<Flow> {
+    let f = match func {
+        "from_int" => Value::Float(as_int(args.first())? as f64),
+        "sqrt" => Value::Float(as_float(args.first())?.sqrt()),
+        "is_nan" => Value::Bool(as_float(args.first())?.is_nan()),
+        "is_infinite" => Value::Bool(as_float(args.first())?.is_infinite()),
+        _ => return None,
+    };
+    Some(Flow::val(f))
+}
+
+
+
+
+/// The text surface: rendering to a string and parsing back.
+fn float_text_fn(func: &str, args: &[Value]) -> Option<Flow> {
+    let f = match func {
+        "to_string" => Flow::val(Value::str(float_to_string(as_float(args.first())?))),
+        _ => return None,
+    };
+    Some(f)
+}
+
+// ── math ────────────────────────────────────────────────────────
+
+/// The vendored-musl-libm transcendentals, by stdlib name. `None` = not a
+/// vendored transcendental (the caller then decides: honest abstain, or one of
+/// the platform-exact ops like sqrt/abs).
+fn math_vendored_libm(func: &str, args: &[Value]) -> Option<f64> {
+    use crate::vendored_libm as vl;
+    let x = as_float(args.first())?;
+    Some(match func {
+        "sin" => vl::almide_rt_libm_sin(x),
+        "cos" => vl::almide_rt_libm_cos(x),
+        "ln" | "log" => vl::almide_rt_libm_log(x),
+        "log10" => vl::almide_rt_libm_log10(x),
+        "fpow" | "powf" | "pow" => {
+            let y = as_float(args.get(1))?;
+            vl::almide_rt_libm_pow(x, y)
+        }
+        _ => return None,
+    })
+}
+
+fn math_fn(func: &str, args: &[Value]) -> Option<Flow> {
+    // The transcendental floor is the VENDORED musl-libm both backends run
+    // (`crate::vendored_libm`, included from runtime/rs/src/libm.rs — see that
+    // module's header for why include! beats a copy or a crate dep). Before
+    // this the interp abstained here, because Rust `std`'s `f64::sin` calls the
+    // PLATFORM libm and would diverge from the native==wasm consensus in the
+    // last ULP (`0.799441007199113` vs `0.7994410071991129`), casting a WRONG
+    // third vote. Computing the consensus algorithm restores the third judge.
+    //
+    // `sqrt` / `abs` / `pi` / `e` and the rest of `math.*` come from the
+    // self-hosted bodies now (#2185); only the five transcendentals a body
+    // consumes as its floor stay here.
+    //
+    // NOT bridged, and still honestly Unsupported: names the vendored file does
+    // not provide (`asin`/`acos`/`atan2`/`sinh`/`cosh`/`exp2`/`log1p`/`cbrt`/
+    // `hypot`). The runtime's own asin/acos/atan2 delegate to the PLATFORM
+    // libm, so they have no stable oracle either — they are unreachable from
+    // Almide today (no `@intrinsic` in stdlib/math.almd) and must not be
+    // bridged here on a guess.
+    //
+    // The float `**` OPERATOR is the same floor and routes to the same
+    // `pow` in the binop path (`eval_match.rs`, `BinOp::PowFloat`) — #924's
+    // rule stands: a transcendental reachable through an OPERATOR must agree
+    // in both places.
+    if let Some(v) = math_vendored_libm(func, args) {
+        return Some(Flow::val(Value::Float(v)));
+    }
+    if matches!(
+        func,
+        "asin" | "acos" | "atan2" | "sinh" | "cosh"
+            | "exp2" | "log1p" | "cbrt" | "hypot"
+    ) {
+        return Some(Flow::Unsupported(format!(
+            "transcendental `math.{func}` (no vendored musl-libm implementation;              the runtime's own delegates to the platform libm — no oracle match)"
+        )));
+    }
+    None
+}
+
+// ── string ──────────────────────────────────────────────────────
+
+fn string_fn(func: &str, args: &[Value]) -> Option<Flow> {
+    string_fn_whole(func, args)
+        .or_else(|| string_fn_slice(func, args))
+        .or_else(|| string_fn_structural(func, args))
+}
+
+/// Whole-string predicates and transforms — no index arithmetic.
+///
+/// Extracted from `string_fn` (name-router split, arms verbatim and in source
+/// order). `None` means "not my group", so the router's order is the only
+/// ordering that matters.
+fn string_fn_whole(func: &str, args: &[Value]) -> Option<Flow> {
+    let f = match func {
+        "len" | "length" => Flow::val(Value::Int(as_str(args.first())?.chars().count() as i64)),
+        "to_upper" => Flow::val(Value::str(as_str(args.first())?.to_uppercase())),
+        "trim" => Flow::val(Value::str(as_str(args.first())?.trim().to_string())),
+        "contains" => Flow::val(Value::Bool(
+            as_str(args.first())?.contains(as_str(args.get(1))?),
+        )),
+        "starts_with" => Flow::val(Value::Bool(
+            as_str(args.first())?.starts_with(as_str(args.get(1))?),
+        )),
+        "ends_with" => Flow::val(Value::Bool(
+            as_str(args.first())?.ends_with(as_str(args.get(1))?),
+        )),
+        "replace" => Flow::val(Value::str(
+            as_str(args.first())?
+                .replace(as_str(args.get(1))?, as_str(args.get(2))?),
+        )),
+        "repeat" => {
+            // Negative counts clamp to 0 (C-054) and a result past the shared
+            // 2^31-byte ceiling aborts in the T6 form (C-169) — both mirror
+            // runtime/rs almide_rt_string_repeat exactly; without the ceiling
+            // the interp materialized multi-GB strings and dissented from the
+            // two backends' identical abort (nightly-fuzz OutputDivergence,
+            // seed 1785045556318379299 index 11).
+            let s = as_str(args.first())?;
+            let n = as_int(args.get(1))?.max(0);
+            if (s.len() as i64).saturating_mul(n) > (1_i64 << 31) {
+                Flow::Abort("repeat result too large".to_string())
+            } else {
+                Flow::val(Value::str(s.repeat(n as usize)))
+            }
+        }
+        // Codepoint-count take, the C-054 unsigned discipline (mirrors
+        // runtime/rs almide_rt_string_take: `chars().take(n as usize)` — a
+        // negative n is enormous as usize, so take(-1) keeps the whole string).
+        _ => return None,
+    };
+    Some(f)
+}
+
+/// Codepoint-indexed slicing and counting. Every clamp mirrors C-034: an
+/// UNSIGNED count saturates (a negative one is enormous as a `usize`), and
+/// `slice`'s start/end clamp SIGNED — the one documented exception.
+///
+/// Extracted from `string_fn` (name-router split, arms verbatim and in source
+/// order). `None` means "not my group", so the router's order is the only
+/// ordering that matters.
+fn string_fn_slice(func: &str, args: &[Value]) -> Option<Flow> {
+    let f = match func {
+        "take" => Flow::val(Value::str(
+            as_str(args.first())?
+                .chars()
+                .take(as_int(args.get(1))? as usize)
+                .collect::<String>(),
+        )),
+        // `drop`/`take_end`/`drop_end` are `take`'s unsigned-count siblings, and
+        // `slice` clamps its start/end SIGNED (the one C-034 exception: the native
+        // oracle is `(x.max(0) as usize).min(len)`), with a reversed range empty.
+        "drop" => Flow::val(Value::str(
+            as_str(args.first())?
+                .chars()
+                .skip(as_int(args.get(1))? as usize)
+                .collect::<String>(),
+        )),
+        "take_end" | "drop_end" => {
+            let cs: Vec<char> = as_str(args.first())?.chars().collect();
+            let raw = as_int(args.get(1))?;
+            // Unsigned: a negative count is enormous, so it saturates to all.
+            let k = if raw < 0 { cs.len() } else { (raw as usize).min(cs.len()) };
+            let kept: String = if func == "take_end" {
+                cs[cs.len() - k..].iter().collect()
+            } else {
+                cs[..cs.len() - k].iter().collect()
+            };
+            Flow::val(Value::str(kept))
+        }
+        "slice" => {
+            let cs: Vec<char> = as_str(args.first())?.chars().collect();
+            let clamp = |i: i64| -> usize { (i.max(0) as usize).min(cs.len()) };
+            let start = clamp(as_int(args.get(1))?);
+            let end = match args.get(2) {
+                Some(Value::Int(e)) => clamp(*e),
+                _ => cs.len(),
+            };
+            let out: String = if end > start { cs[start..end].iter().collect() } else { String::new() };
+            Flow::val(Value::str(out))
+        }
+        // index_of returns Option[Int] of the CODEPOINT index (#419 unified
+        // the unit; the old byte-offset comment predated that change).
+        _ => return None,
+    };
+    Some(f)
+}
+
+/// Search, split/join, and parsing — the arms that build or consume lists.
+///
+/// Extracted from `string_fn` (name-router split, arms verbatim and in source
+/// order). `None` means "not my group", so the router's order is the only
+/// ordering that matters.
+fn string_fn_structural(func: &str, args: &[Value]) -> Option<Flow> {
+    let f = match func {
+        "index_of" => {
+            let s = as_str(args.first())?;
+            Flow::val(Value::Option(
+                s.find(as_str(args.get(1))?)
+                    .map(|b| Box::new(Value::Int(s[..b].chars().count() as i64))),
+            ))
+        }
+        "split" => {
+            let s = as_str(args.first())?;
+            let sep = as_str(args.get(1))?;
+            Flow::val(Value::list(
+                s.split(sep).map(|p| Value::str(p.to_string())).collect(),
+            ))
+        }
+        "lines" => Flow::val(Value::list(
+            as_str(args.first())?
+                .lines()
+                .map(|l| Value::str(l.to_string()))
+                .collect(),
+        )),
+        "chars" => Flow::val(Value::list(
+            as_str(args.first())?
+                .chars()
+                .map(|c| Value::str(c.to_string()))
+                .collect(),
+        )),
+        _ => return None,
+    };
+    Some(f)
 }

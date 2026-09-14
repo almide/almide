@@ -57,6 +57,7 @@ impl<'a> Interpreter<'a> {
                 // clean no-op run (matches `almide run` on a fn-only file,
                 // which also produces no output).
                 return RunOutcome {
+                bridge_fallbacks: self.bridge_fallbacks.borrow().clone(),
                     status: RunStatus::Ok,
                     stdout: self.stdout,
                     stderr: self.stderr,
@@ -79,6 +80,7 @@ impl<'a> Interpreter<'a> {
             Flow::Value(v) => match unhandled_main_error(&v) {
                 Some(msg) => self.outcome_from_flow(Flow::Abort(msg)),
                 None => RunOutcome {
+                bridge_fallbacks: self.bridge_fallbacks.borrow().clone(),
                     status: RunStatus::Ok,
                     stdout: self.stdout,
                     stderr: self.stderr,
@@ -220,6 +222,7 @@ impl<'a> Interpreter<'a> {
     fn outcome_from_flow(&self, flow: Flow) -> RunOutcome {
         match flow {
             Flow::Value(_) | Flow::Return(_) | Flow::Break | Flow::Continue => RunOutcome {
+                bridge_fallbacks: self.bridge_fallbacks.borrow().clone(),
                 status: RunStatus::Ok,
                 stdout: self.stdout.clone(),
                 stderr: self.stderr.clone(),
@@ -231,12 +234,14 @@ impl<'a> Interpreter<'a> {
                 // main-error termination).
                 stderr.push_str(&format!("Error: {}\n", msg));
                 RunOutcome {
+                bridge_fallbacks: self.bridge_fallbacks.borrow().clone(),
                     status: RunStatus::Aborted,
                     stdout: self.stdout.clone(),
                     stderr,
                 }
             }
             Flow::Exit(code) => RunOutcome {
+                bridge_fallbacks: self.bridge_fallbacks.borrow().clone(),
                 status: match code {
                     0 => RunStatus::Ok,
                     1 => RunStatus::Aborted,
@@ -246,11 +251,13 @@ impl<'a> Interpreter<'a> {
                 stderr: self.stderr.clone(),
             },
             Flow::Fuel => RunOutcome {
+                bridge_fallbacks: self.bridge_fallbacks.borrow().clone(),
                 status: RunStatus::FuelExhausted,
                 stdout: self.stdout.clone(),
                 stderr: self.stderr.clone(),
             },
             Flow::Unsupported(what) => RunOutcome {
+                bridge_fallbacks: self.bridge_fallbacks.borrow().clone(),
                 status: RunStatus::Unsupported(what),
                 stdout: self.stdout.clone(),
                 stderr: self.stderr.clone(),
@@ -260,11 +267,15 @@ impl<'a> Interpreter<'a> {
 
     /// Burn one unit of fuel; returns `Err(Flow::Fuel)` when exhausted.
     pub(crate) fn step(&self) -> Result<(), Flow> {
-        let f = self.fuel.get();
+        // A step inside a self-hosted stdlib body charges the pool's own
+        // budget (`POOL_FUEL`, #2185); the program's budget bounds only the
+        // program's own evaluation.
+        let budget = if self.pool_depth > 0 { &self.pool_fuel } else { &self.fuel };
+        let f = budget.get();
         if f == 0 {
             return Err(Flow::Fuel);
         }
-        self.fuel.set(f - 1);
+        budget.set(f - 1);
         Ok(())
     }
 

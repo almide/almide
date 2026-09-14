@@ -49,6 +49,9 @@ pub struct RunOutcome {
     pub status: RunStatus,
     pub stdout: String,
     pub stderr: String,
+    /// #2185: the module calls the bridge answered as the lowered body's
+    /// fallback (`(module.func, why the body abstained)`), in call order.
+    pub bridge_fallbacks: Vec<(String, String)>,
 }
 
 impl RunOutcome {
@@ -207,6 +210,9 @@ pub struct Interpreter<'a> {
     pub(crate) stderr: String,
     /// Decremented per eval step; 0 → `FuelExhausted`.
     pub(crate) fuel: Cell<u64>,
+    /// The pool tier's own step budget (`POOL_FUEL`), charged while a
+    /// self-hosted stdlib body is on the stack (`pool_depth > 0`).
+    pub(crate) pool_fuel: Cell<u64>,
     /// Current call-stack depth, bounded to avoid a native stack overflow on
     /// adversarial deep recursion.
     pub(crate) depth: Cell<u32>,
@@ -247,6 +253,11 @@ pub struct Interpreter<'a> {
     /// both backends admitted `{ work() }` (zero surviving charges) while this
     /// meter voted exhaust (xtarget-fuzz seed=20260817 index=578).
     det_exempt: std::cell::RefCell<Option<HashSet<Sym>>>,
+    /// #2185: every module call the hand-mirrored bridge answered because the
+    /// lowered body ABSTAINED (`(module.func, the body's reason)`, in call
+    /// order). The body is consulted first; this is the measured residue the
+    /// bridge still serves, audited by `interp_bridge_fallback_ledger`.
+    pub(crate) bridge_fallbacks: std::cell::RefCell<Vec<(String, String)>>,
     /// T5-1 wall-deadline mirror (fan.timeout): absolute deadline (ns since
     /// interp start; i64::MAX = none), hit flag, persisted verdict, and the
     /// wall-check ordinal (the ω of T5-2). Replay/record ride the same env
@@ -261,6 +272,15 @@ pub struct Interpreter<'a> {
 /// Default fuel budget — high enough for any real corpus program, low enough to
 /// bound an adversarial loop. Roughly 100M eval steps.
 pub const DEFAULT_FUEL: u64 = 100_000_000;
+/// The self-hosted stdlib bodies' OWN budget (#2185). A pool body is the
+/// executable spec itself — the definition both backends run — so its cost
+/// is the spec's cost, not the fixture's: `float.parse` is an exact bignum
+/// parser and a 1 000 000-char `string.pad_end` walks every char, and both
+/// were charged to the program's budget once the body replaced the bridge's
+/// one-line Rust copy (two fixtures left the executable spec). Metered
+/// separately so a fixture's budget still bounds the fixture's own loops,
+/// and a stuck body is still bounded — at ten programs' worth.
+pub const POOL_FUEL: u64 = 10 * DEFAULT_FUEL;
 /// Recursion-depth ceiling (interp call frames, not Rust frames per se). This is
 /// a *semantic* fuel-like bound on call nesting: a clean `FuelExhausted` once a
 /// program nests calls this deep, never a native stack overflow. The native
@@ -525,6 +545,7 @@ impl<'a> Interpreter<'a> {
             stdout: String::new(),
             stderr: String::new(),
             fuel: Cell::new(DEFAULT_FUEL),
+            pool_fuel: Cell::new(POOL_FUEL),
             depth: Cell::new(0),
             det_fuel: Cell::new(i64::MAX),
             det_entry: Cell::new(-1),
@@ -535,6 +556,7 @@ impl<'a> Interpreter<'a> {
             det_saved: Cell::new(0),
             user_fn_names,
             det_exempt: std::cell::RefCell::new(None),
+            bridge_fallbacks: std::cell::RefCell::new(Vec::new()),
             t_deadline: Cell::new(i64::MAX),
             t_hit: Cell::new(false),
             t_verdict: Cell::new(0),
