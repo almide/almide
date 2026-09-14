@@ -131,6 +131,38 @@ jobs:
       - name: Verdict
         run: echo "docs_only=${{ steps.classify.outputs.docs_only }} (empty means the classifier failed — full run)"
 
+  ratchet-separation:
+    # #2183: scripts/check-ratchet-separation.sh ran only as a lefthook
+    # pre-commit hook, so the commits that re-recorded a parity golden in the
+    # same change as the implementation it judged — exactly the class the
+    # rule exists to split — were never seen by CI. This checks EVERY commit
+    # of the change set on its own, over the same base the classifier above
+    # uses; a merge_group or push without a comparable base is reported, not
+    # silently green.
+    name: Ratchet-commit separation (each commit keeps verification artifacts apart from implementation)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Check every commit in the range
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            git fetch -q origin "${{ github.base_ref }}"
+            BASE="$(git merge-base "origin/${{ github.base_ref }}" HEAD)"
+          elif [ "${{ github.event_name }}" = merge_group ]; then
+            BASE="${{ github.event.merge_group.base_sha }}"
+          else
+            BASE="${{ github.event.before }}"
+          fi
+          case "$BASE" in ""|0000000000000000000000000000000000000000) BASE="";; esac
+          if [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            echo "ratchet-separation: no comparable base for this ${{ github.event_name }} — checking HEAD alone"
+            BASE="$(git rev-parse HEAD~1)"
+          fi
+          bash scripts/check-ratchet-separation.sh "$BASE" HEAD
+
   # ═══════════════════════════════════════════════
   # Build — shared by all jobs
   # ═══════════════════════════════════════════════
@@ -471,6 +503,17 @@ jobs:
             crates/almide-codegen/src/generated/rust_runtime.rs \
             crates/almide-codegen/src/generated/runtime_fn_modes.rs \
             || { echo "::error::generated runtime registry is stale — a runtime/rs/src edit was not committed, or a generated file was hand-edited. Rebuild almide-codegen and commit crates/almide-codegen/src/generated/*.rs"; exit 1; }
+
+      # #2183: the AST / check / run parity goldens the greenfield legs are
+      # judged by claimed a pinned old oracle while being re-recorded from the
+      # tree under test, and nothing could tell a regeneration from a hand
+      # edit. The oracle is now defined as the CLI built from THIS commit —
+      # the release artifact this job downloads — and the goldens must equal
+      # what it produces. Regenerate all three and fail on any row diff (the
+      # informational `# oracle:` header is excluded). Needs wasmtime for the
+      # run leg, which is why it lives here and not in `checks`.
+      - name: Parity goldens equal the CLI's own output (regenerate and diff, #2183)
+        run: ORACLE=/tmp/almide-bin/almide bash scripts/check-parity-goldens.sh
 
       - name: Almide spec tests (Rust target)
         run: |

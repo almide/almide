@@ -128,7 +128,15 @@ evidence = "PR #1209 (Stage 1c landing): 5/5 negative tests (unclassified fn, st
 path = "scripts/check-ratchet-separation.sh"
 reads = "UNCLASSIFIED"
 class = "NEGATIVE_TESTED"
-evidence = "flight-evidence-gaps.md F5 close (2026-07-03): mixed impl+baseline commit => exit 1, clean => exit 0"
+evidence = "flight-evidence-gaps.md F5 close (2026-07-03): mixed impl+baseline commit => exit 1, clean => exit 0. Range form (#2183, 2026-09-14): over the PR's own commits the golden+impl mix was demonstrated red naming the commit, the split series green; CI runs it per commit in the ratchet-separation job."
+
+[[gate]]
+path = "scripts/check-parity-goldens.sh"
+# Reads nothing structured itself: it runs the three generators against the
+# built CLI and asks git whether the committed goldens changed.
+reads = "scalar"
+class = "NEGATIVE_TESTED"
+evidence = "#2183 landing (2026-09-14): a forged run-manifest row (spec/wasm_cross/alias_combinator_rc.almd's hash, first char c -> z) staged and gated => exit 1 printing the row diff; the clean tree at cf4a9d135 => exit 0 naming the HEAD it regenerated at, with the header's SHA differing from the committed one (e85edb8e3) and correctly ignored by -I."
 
 [[gate]]
 path = "scripts/release-seal.sh"
