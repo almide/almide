@@ -484,11 +484,24 @@ impl<'a> Interpreter<'a> {
             fns.insert(f.name, f);
         }
         // The deterministic meter's user-fn set: program fns + user-module fns,
-        // captured before the pool layers in (pool bodies are unmetered).
-        let mut user_fn_names: HashSet<Sym> = fns.keys().copied().collect();
+        // captured before the pool layers in (pool bodies are unmetered). A
+        // self-hosted fn the driver LINKED into the program (`string_len` and
+        // its `__strlen_count` helper under the wasm leg's lowering — the
+        // spine's run_parity recipe) is a stdlib body all the same, not user
+        // code: both backends meter user functions only, and metering it
+        // charged `string.len` an entry unit per recursion hop the moment the
+        // body answered instead of the bridge (#2185 — the C-204
+        // fuel_dyn_charge verdict flipped a row early). Membership is by the
+        // pool's own fn table, which holds every fn a registry source defines,
+        // helpers included.
+        let is_stdlib_impl = |name: &Sym| stdlib_pool::pool().fns.contains_key(name);
+        let mut user_fn_names: HashSet<Sym> =
+            fns.keys().copied().filter(|n| !is_stdlib_impl(n)).collect();
         for m in &program.modules {
             for f in &m.functions {
-                user_fn_names.insert(f.name);
+                if !is_stdlib_impl(&f.name) {
+                    user_fn_names.insert(f.name);
+                }
             }
         }
         // Layer in the self-hosted stdlib bodies (lowered once, process-wide) so
