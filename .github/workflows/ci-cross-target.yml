@@ -88,8 +88,10 @@ jobs:
             # Skip files marked with wasm:skip
             if head -3 "$f" | grep -q 'wasm:skip'; then continue; fi
 
-            $ALMIDE test "$f" > /dev/null 2>&1; rust_code=$?
-            $ALMIDE test "$f" --target wasm > /dev/null 2>&1; wasm_code=$?
+            # `|| code=$?`, not `; code=$?`: the step shell is `bash -e`, and a
+            # bare non-zero command (the first exit 5) would end the whole loop.
+            rust_code=0; $ALMIDE test "$f" > /dev/null 2>&1 || rust_code=$?
+            wasm_code=0; $ALMIDE test "$f" --target wasm > /dev/null 2>&1 || wasm_code=$?
 
             if [ "$rust_code" -eq 0 ]; then rust_pass=$((rust_pass + 1)); else rust_fail=$((rust_fail + 1)); fi
             if [ "$wasm_code" -eq 0 ]; then wasm_pass=$((wasm_pass + 1)); else wasm_fail=$((wasm_fail + 1)); fi
