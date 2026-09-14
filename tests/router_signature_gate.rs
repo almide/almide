@@ -36,8 +36,9 @@ use almide_mir::lower::{routers_call_name, RouterHints};
 
 /// Instantiations (over the surface below) where the routers' own verdict does
 /// not fit the registered signature and the caller-side inversion is what
-/// refuses it. Shrink-only: lowering it means a router learned to choose its
-/// typed twin or its own `_x`; raising it means a router regressed.
+/// refuses it. Shrink-only, and already at its floor: the two holes the first
+/// sweep found (`map.map`, `result.map_err`) were closed in their routers.
+/// Raising it means a router regressed to leaning on the net.
 const ROUTER_HOLE_CEILING: usize = 0;
 
 fn list(t: Ty) -> Ty {
@@ -204,10 +205,12 @@ fn router_holes_are_ratcheted() {
     for (k, n) in &table {
         eprintln!("  {n:4}  {k}");
     }
-    assert!(
-        holes.len() <= ROUTER_HOLE_CEILING,
-        "router holes rose to {} (ceiling {ROUTER_HOLE_CEILING}): a router emits a name its call's types cannot reach — choose the typed twin or the `_x` twin in the router",
-        holes.len()
+    // Pinned exactly: the ceiling is zero, so any hole is a rise, and a lower
+    // number does not exist — the ratchet has already been driven to its end.
+    assert_eq!(
+        holes.len(),
+        ROUTER_HOLE_CEILING,
+        "router holes rose above the ceiling: a router emits a name its call's types cannot reach — choose the typed twin or the `_x` twin in the router"
     );
 }
 
