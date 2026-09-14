@@ -33,6 +33,11 @@ pub struct TypeEnv {
     pub attr_diagnostics: Vec<almide_base::diagnostic::Diagnostic>,
     /// Local variable scopes (stack of scopes)
     pub scopes: Vec<std::collections::HashMap<Sym, Ty>>,
+    /// #2097: parallel to `scopes` — the value span of each `let` bound in
+    /// that scope, so an E005 on a bare identifier can look at the call that
+    /// produced it. Popped with the scope; cleared by any non-`let` binding
+    /// of the same name (`define_var`), so it never outlives its binding.
+    pub let_origins: Vec<std::collections::HashMap<Sym, crate::ast::Span>>,
     /// Current function's return type
     pub current_ret: Option<Ty>,
     /// ADR-0006 D1 (#1108 Phase 2b): the INNERMOST lambda's provisional
@@ -191,6 +196,7 @@ impl TypeEnv {
             types: std::collections::HashMap::new(),
             functions: std::collections::HashMap::new(),
             scopes: vec![std::collections::HashMap::new()],
+            let_origins: vec![std::collections::HashMap::new()],
             current_ret: None,
             lambda_ret: None,
             lambda_prop_used: false,
@@ -494,16 +500,44 @@ impl TypeEnv {
 
     pub fn push_scope(&mut self) {
         self.scopes.push(std::collections::HashMap::new());
+        self.let_origins.push(std::collections::HashMap::new());
     }
 
     pub fn pop_scope(&mut self) {
         self.scopes.pop();
+        self.let_origins.pop();
     }
 
     pub fn define_var(&mut self, name: &str, ty: Ty) {
         if let Some(scope) = self.scopes.last_mut() {
             scope.insert(sym(name), ty);
         }
+        // Any binding that is not a `let` (a parameter, a pattern, a loop
+        // variable) shadows an earlier `let` of the same name in this
+        // scope: it has no call origin, so the entry must not survive it.
+        if let Some(origins) = self.let_origins.last_mut() {
+            origins.remove(&sym(name));
+        }
+    }
+
+    /// #2097: remember the value expression a `let` bound in the CURRENT
+    /// scope. Call after `define_var` for the same name.
+    pub fn record_let_origin(&mut self, name: &str, value_span: crate::ast::Span) {
+        if let Some(origins) = self.let_origins.last_mut() {
+            origins.insert(sym(name), value_span);
+        }
+    }
+
+    /// #2097: the value span of the `let` that `name` currently resolves to
+    /// — `None` when the visible binding is not a `let` (a parameter, a
+    /// pattern, a loop variable) or lives in another function. Scoped with
+    /// the binding itself, so a `let` in one fn can never answer for a
+    /// same-named binding in another.
+    pub fn let_origin(&self, name: &str) -> Option<crate::ast::Span> {
+        let key = sym(name);
+        self.scopes.iter().zip(self.let_origins.iter()).rev()
+            .find(|(scope, _)| scope.contains_key(&key))
+            .and_then(|(_, origins)| origins.get(&key).copied())
     }
 
     pub fn define_var_at(&mut self, name: &str, ty: Ty, line: usize, col: usize) {
