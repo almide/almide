@@ -12,8 +12,9 @@
 
 use std::collections::HashSet;
 use almide_ir::*;
+use almide_ir::visit::{walk_stmt, IrVisitor};
 use almide_base::intern::{Sym, sym};
-use super::pass::{NanoPass, PassResult, Target};
+use super::pass::{NanoPass, PassResult, Postcondition, Target};
 use super::pass_rust_lowering_stmts::rewrite_stmts_in_expr;
 
 #[derive(Debug)]
@@ -23,6 +24,7 @@ impl NanoPass for RustLoweringPass {
     fn name(&self) -> &str { "RustLowering" }
     fn targets(&self) -> Option<Vec<Target>> { Some(vec![Target::Rust]) }
     fn depends_on(&self) -> Vec<&'static str> { vec!["CloneInsertion"] }
+    fn postconditions(&self) -> Vec<Postcondition> { vec![Postcondition::Custom(verify_push_targets_are_places)] }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         let mut changed = false;
@@ -77,6 +79,47 @@ fn collect_assign_exempt_vars(program: &IrProgram) -> HashSet<VarId> {
         }
     }
     shared
+}
+
+/// Postcondition (#2186, the #501 island): after the rewrite, every
+/// `xs.push(v)` STATEMENT writes a var that is a direct Rust place. A push
+/// whose object is one of [`collect_assign_exempt_vars`] would render as
+/// `xs.get().push(v)` / `UPPER.with(|c| (**c.borrow()).clone()).push(v)` —
+/// a write onto a discarded clone that rustc accepts and the program never
+/// sees. The allowlist keeps such vars as `Assign`; this check is the
+/// IR-level witness that it did, independent of the rewrite's own guard.
+pub fn verify_push_targets_are_places(program: &IrProgram) -> Vec<String> {
+    struct PushTargets<'a> {
+        exempt: &'a HashSet<VarId>,
+        vt: &'a VarTable,
+        out: Vec<String>,
+    }
+    impl IrVisitor for PushTargets<'_> {
+        fn visit_stmt(&mut self, stmt: &IrStmt) {
+            if let IrStmtKind::Expr { expr } = &stmt.kind
+                && let IrExprKind::Call { target: CallTarget::Method { object, method }, .. } = &expr.kind
+                && method.as_str() == "push"
+                && let IrExprKind::Var { id } = &object.kind
+                && self.exempt.contains(id)
+            {
+                let name = self.vt.entries.get(id.0 as usize).map_or("?", |v| v.name.as_str());
+                self.out.push(format!(
+                    "RustLowering: `{name}.push(..)` targets a shared cell / mutable top-let — the write would land on a discarded clone (#501)"
+                ));
+            }
+            walk_stmt(self, stmt);
+        }
+    }
+    let exempt = collect_assign_exempt_vars(program);
+    let mut check = PushTargets { exempt: &exempt, vt: &program.var_table, out: Vec::new() };
+    let bodies = program.functions.iter().map(|f| &f.body)
+        .chain(program.top_lets.iter().map(|tl| &tl.value))
+        .chain(program.modules.iter().flat_map(|m| m.functions.iter().map(|f| &f.body)))
+        .chain(program.modules.iter().flat_map(|m| m.top_lets.iter().map(|tl| &tl.value)));
+    for body in bodies {
+        check.visit_expr(body);
+    }
+    check.out
 }
 
 /// Run [`rewrite_stmts_in_expr`] over every function body and top-let value,
