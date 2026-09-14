@@ -83,19 +83,36 @@ pub fn walk_spec(root: &Path) -> Vec<(String, PathBuf)> {
     out
 }
 
+/// The data rows of a parity manifest (`spec-{ast,check,run}-manifest.txt`):
+/// every line except the `# oracle: …` header the generators write (which
+/// names the `almide --version` and git HEAD the rows were recorded from —
+/// informational, never compared, since a rebase changes the SHA) and blanks.
+///
+/// Every reader of a manifest goes through here, whether it compares against
+/// the recorded hash (run-parity, backend-parity, the WASI gate) or only uses
+/// the manifest as the corpus list (exercised surface, allocation, size,
+/// witness floor) — so the header cannot be mistaken for a row by any of them.
+pub fn manifest_rows(text: &str) -> impl Iterator<Item = &str> {
+    text.lines().filter(|l| !l.trim_start().starts_with('#') && !l.trim().is_empty())
+}
+
+/// A shrink-only ceiling recorded under `proofs/` as `name<TAB>value` rows
+/// (comment lines start with `#`). The test that enforces the ceiling reads
+/// it here instead of carrying a `const`, so the number lives in a ratchet
+/// artifact `scripts/check-ratchet-separation.sh` sees, in its own commit.
+pub fn ratchet_ceiling(root: &Path, file: &str, name: &str) -> usize {
+    let path = root.join(file);
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    manifest_rows(&text)
+        .find_map(|l| {
+            let (k, v) = l.split_once('\t').expect("name<TAB>value");
+            (k == name).then(|| v.trim().parse::<usize>().unwrap_or_else(|e| panic!("{file}: {name}: {e}")))
+        })
+        .unwrap_or_else(|| panic!("{}: no `{name}` row", path.display()))
+}
+
 /// Fixtures whose ORACLE row in the run manifest predates a fix that postdates
 /// the port SHA — `scripts/lib/run-oracle-stale.txt`, as `path -> reason`.
-///
-/// The row STAYS in the manifest, because the manifest is also the corpus list
-/// for the exercised-surface, allocation, size and witness sweeps: subtracting
-/// a row removes the fixture from all of them, which is how excluding the two
-/// regex fixtures took `regex.*` off the wasm leg's exercised surface entirely
-/// (#2129). Only the comparisons AGAINST the oracle hash skip these rows —
-/// run-parity, backend-parity and the WASI gate — and they read the register
-/// through this one function so a fourth comparison cannot quietly forget it.
-///
-/// Shrink-only: a registration that starts agreeing with the oracle again must
-/// be deleted, and each caller fails if one does.
 pub fn stale_oracle_rows(root: &Path) -> std::collections::BTreeMap<String, String> {
     let path = root.join("scripts/lib/run-oracle-stale.txt");
     std::fs::read_to_string(&path)
