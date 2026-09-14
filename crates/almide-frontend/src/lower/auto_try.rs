@@ -178,6 +178,14 @@ fn insert_try_body(expr: IrExpr, fn_returns_result: bool, ret_ty: &Ty, ctx: &mut
     // it here, unconditionally, at every tail position `strip_tail_try` itself reaches
     // (Block/If/Match) — the SAME recursive shape, stripping `ResultOk` instead of `Try`.
     let result = insert_try(expr, false, ctx);
+    // #2202: a BARE body `int.parse(s)! + 1` — the explicit `!` as a binop
+    // operand at the ROOT of a lifted fn. Every other position lowers on the
+    // incumbent through the MIR's own ANF lift (a block tail, an if branch, a
+    // ctor payload); the bare root walled as a heap-result match. Hoist the
+    // operands into binds so the body reaches MIR as `{ let t = int.parse(s)!;
+    // t + 1 }`, the shape it proves — the same bricks the auto-inserted `Try`
+    // operand took through the BinOp arm above.
+    let result = hoist_root_binop_unwrap(result, ctx);
     // ONLY safe when the body never constructs an `err(...)` of its own anywhere (`fetch`'s
     // shape) — a fn whose body CAN take an Err branch (`validate`'s `if n>0 then ok(n) else
     // err("negative")`, this file's own no-regress guard: "must still type (and run) as a
@@ -193,6 +201,39 @@ fn insert_try_body(expr: IrExpr, fn_returns_result: bool, ret_ty: &Ty, ctx: &mut
     } else {
         result
     }
+}
+
+/// A bare fn body that IS a binop with an explicit-`!` (`Unwrap`) operand: hoist each such
+/// operand into a `let` so the body becomes a Block whose tail reads the bound vars — the
+/// bind-position shape the MIR proves (#2202). Any other body is returned unchanged; the
+/// hoist never reaches into a ctor payload or a nested position (those lower already).
+fn hoist_root_binop_unwrap(body: IrExpr, ctx: &mut TryCtx) -> IrExpr {
+    let IrExprKind::BinOp { op, left, right } = body.kind else { return body };
+    let needs = |e: &IrExpr| matches!(e.kind, IrExprKind::Unwrap { .. });
+    if !needs(&left) && !needs(&right) {
+        return IrExpr { kind: IrExprKind::BinOp { op, left, right }, ty: body.ty, span: body.span, def_id: body.def_id };
+    }
+    let mut stmts = Vec::new();
+    let mut hoist = |e: IrExpr, name: &str, stmts: &mut Vec<IrStmt>| -> IrExpr {
+        if !needs(&e) { return e; }
+        let ty = e.ty.clone();
+        let span = e.span;
+        let var = ctx.var_table.alloc(sym(name), ty.clone(), Mutability::Let, span);
+        stmts.push(IrStmt {
+            kind: IrStmtKind::Bind { var, mutability: Mutability::Let, ty: ty.clone(), value: e },
+            span,
+        });
+        IrExpr { kind: IrExprKind::Var { id: var }, ty, span, def_id: None }
+    };
+    let left = hoist(*left, "__opnd_l", &mut stmts);
+    let right = hoist(*right, "__opnd_r", &mut stmts);
+    let bin = IrExpr {
+        kind: IrExprKind::BinOp { op, left: Box::new(left), right: Box::new(right) },
+        ty: body.ty.clone(),
+        span: body.span,
+        def_id: None,
+    };
+    IrExpr { kind: IrExprKind::Block { stmts, expr: Some(Box::new(bin)) }, ty: body.ty, span: body.span, def_id: body.def_id }
 }
 
 /// Does `body` construct an `err(...)` (`ResultErr`) ANYWHERE in its own AST? Does NOT follow
@@ -398,12 +439,8 @@ fn insert_try_control(kind: IrExprKind, ty: &Ty, ctx: &mut TryCtx) -> Result<IrE
             // `int.parse(s) + 1` reaches MIR as the same bricks as
             // `let t = int.parse(s); t + 1`. When the RIGHT operand hoists,
             // the left hoists with it so the left still evaluates first.
-            // #2196: the operand is spelled `!` now (`IrExprKind::Unwrap`),
-            // and it needs the same hoist the auto-inserted `Try` got — an
-            // `Unwrap` operand of a can-err call walled the wasm leg
-            // (`parse_sum`, the walled-real ratchet on the #2202 head).
-            let l_try = matches!(left.kind, IrExprKind::Try { .. } | IrExprKind::Unwrap { .. });
-            let r_try = matches!(right.kind, IrExprKind::Try { .. } | IrExprKind::Unwrap { .. });
+            let l_try = matches!(left.kind, IrExprKind::Try { .. });
+            let r_try = matches!(right.kind, IrExprKind::Try { .. });
             if l_try || r_try {
                 let mut stmts = Vec::new();
                 let hoist = |e: IrExpr, name: &str, stmts: &mut Vec<IrStmt>, ctx: &mut TryCtx| -> IrExpr {
