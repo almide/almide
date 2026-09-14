@@ -520,7 +520,17 @@ impl Checker {
             return t;
         }
         let resolved = resolve_ty(&t, &self.uf);
-        resolved.result_ok_ty().unwrap_or(t)
+        match resolved.result_ok_ty() {
+            Some(ok) => {
+                // #2196 / ADR-0008: the strip is RECOVERY for the operator's
+                // typing; the operand's Result is implicit propagation and is
+                // reported (E041, the `!` insertion — a plain call, so the fix
+                // is mechanical). `f() + 1` ran and propagated with no `!`.
+                self.deferred_implicit_prop_checks.push((t.clone(), operand.span, "of this operand", true, false));
+                ok
+            }
+            None => t,
+        }
     }
 
     /// ADR-0001 S3: the time-type operator matrix. `None` = no time operand

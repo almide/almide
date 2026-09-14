@@ -1,16 +1,18 @@
-// #1050: operand-position implicit unwrap. In an effect-fn body a
-// Result-typed CALL is auto-?'d in binding position; binary-operator
-// operands take the SAME rule — `helper() + 1` and `let x = helper()` are
-// one rule. Vars are untouched (their unwrap is decided at the binding).
+// #1050 / #2196: a Result-typed CALL as a binary-operator operand takes the
+// SAME rule as one in binding position — since ADR-0008 that rule is the
+// explicit `!` (`helper()! + 1`, like `let x = helper()!`; the bare operand
+// is E041). The lowering still A-normalizes the Try operand into the proven
+// heap-result-bind brick. Vars are untouched (their unwrap is decided at the
+// binding).
 // The can-err propagation twin lives in effect_operand_unwrap_err_test.almd
 // (its String err payload walls the wasm test leg — trust-spine lane).
 effect fn helper() -> Int = 3
 
-effect fn sum_direct() -> Int = helper() + 1
+effect fn sum_direct() -> Int = helper()! + 1
 
-effect fn product_and_sum() -> Int = helper() * 2 + helper()
+effect fn product_and_sum() -> Int = helper()! * 2 + helper()!
 
-effect fn cmp_direct() -> Bool = helper() == 3
+effect fn cmp_direct() -> Bool = helper()! == 3
 
 test "user effect call unwraps as a + operand" {
   assert_eq(sum_direct()!, 4)

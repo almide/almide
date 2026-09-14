@@ -721,12 +721,15 @@ fn render_expr_borrow(ctx: &RenderContext, expr: &IrExpr) -> String {
         // `&String` (`borrowed_loop_vars`, #1673). `&*c` re-derefs that to
         // `&String`, and an ordering against a `&str` literal has no
         // `PartialOrd<&str> for &String` (only `==` survived, through the
-        // blanket `PartialEq<str> for String`). `String::as_str` reaches the
-        // `&str` through the reference and the owned binding alike; ref
-        // params keep `&*` because they are already `&str` and `str::as_str`
-        // is still unstable.
+        // blanket `PartialEq<str> for String`). The view is spelled
+        // `&c[..]`: `Index<RangeFull>` reaches `str` from `String`, `&String`
+        // and `&str` alike through auto-deref, so it does not care how the
+        // binder is bound — and the same VarId IS bound differently where
+        // the branch lift hoists a loop body into a synthesized fn whose
+        // param is already `&str` (#2194: `c.as_str()` there resolved to the
+        // unstable `str::as_str`, E0658 on stable rustc).
         if let IrExprKind::Var { id } = &inner.kind && ctx.ann.borrowed_loop_vars.contains(id) {
-            return format!("{}.as_str()", render_expr(ctx, inner));
+            return format!("&{}[..]", render_expr(ctx, inner));
         }
         format!("&*{}", render_expr(ctx, inner))
     } else {

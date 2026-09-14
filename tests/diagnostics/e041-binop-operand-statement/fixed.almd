@@ -1,0 +1,9 @@
+// E041: the same operand in STATEMENT position (#2196). The sum is an Int
+// the statement may drop; the call's Result is what propagated implicitly,
+// so the report lands on the operand, not the statement.
+effect fn f() -> Int = err("boom")!
+
+effect fn main() -> Unit = {
+  f()! + 1
+  println("done")
+}

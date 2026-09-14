@@ -123,3 +123,32 @@ fn borrowed_loop_binder_compares_as_str_and_borrowed_param_stores_owned() {
         assert_eq!(String::from_utf8_lossy(&out.stdout).trim_end(), EXPECTED, "{label}");
     }
 }
+
+/// #2194: the branch lift hoists a loop body's `if` into a synthesized fn
+/// whose param is the loop binder as `&str`. The binder's `as_str` view must
+/// not assume the `&String` the loop bound it as — `c.as_str()` there was
+/// the unstable `str::as_str` (E0658) on stable rustc.
+#[test]
+fn a_lifted_branch_over_a_borrowed_loop_binder_still_builds() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("main.almd");
+    std::fs::write(&source, r#"fn kinds() -> String = {
+  var out = ""
+  for key in ["tools", "handoffs", "agents", "tasks"] {
+    let kind = if key == "agents" then "agent" else "task"
+    out = out + kind + ","
+  }
+  out
+}
+
+fn other(s: String) -> Int = string.len(s)
+
+effect fn main() -> Unit = println(kinds() + int.to_string(other("x")))
+"#).unwrap();
+    let bin = almide_bin();
+    for (label, args) in [("native", vec![]), ("wasm", vec!["--target", "wasm"])] {
+        let out = Command::new(&bin).arg("run").arg(&source).args(&args).output().unwrap();
+        assert!(out.status.success(), "{label}: {}", String::from_utf8_lossy(&out.stderr));
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim_end(), "task,task,agent,task,1", "{label}");
+    }
+}

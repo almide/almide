@@ -398,8 +398,12 @@ fn insert_try_control(kind: IrExprKind, ty: &Ty, ctx: &mut TryCtx) -> Result<IrE
             // `int.parse(s) + 1` reaches MIR as the same bricks as
             // `let t = int.parse(s); t + 1`. When the RIGHT operand hoists,
             // the left hoists with it so the left still evaluates first.
-            let l_try = matches!(left.kind, IrExprKind::Try { .. });
-            let r_try = matches!(right.kind, IrExprKind::Try { .. });
+            // #2196: the operand is spelled `!` now (`IrExprKind::Unwrap`),
+            // and it needs the same hoist the auto-inserted `Try` got — an
+            // `Unwrap` operand of a can-err call walled the wasm leg
+            // (`parse_sum`, the walled-real ratchet on the #2202 head).
+            let l_try = matches!(left.kind, IrExprKind::Try { .. } | IrExprKind::Unwrap { .. });
+            let r_try = matches!(right.kind, IrExprKind::Try { .. } | IrExprKind::Unwrap { .. });
             if l_try || r_try {
                 let mut stmts = Vec::new();
                 let hoist = |e: IrExpr, name: &str, stmts: &mut Vec<IrStmt>, ctx: &mut TryCtx| -> IrExpr {

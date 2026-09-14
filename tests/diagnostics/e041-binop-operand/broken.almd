@@ -1,0 +1,9 @@
+// E041: an effect call as a binary-operator OPERAND (#2196). The operand
+// strip handed the operator the payload and the lowering wrapped the call in
+// an auto-?, so `f() + 1` propagated with no `!`.
+effect fn f() -> Int = err("boom")!
+
+effect fn main() -> Unit = {
+  let x = f() + 1
+  println(int.to_string(x))
+}
