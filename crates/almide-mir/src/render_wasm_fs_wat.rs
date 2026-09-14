@@ -433,7 +433,9 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
   ;; fs.mkdir_p(path) — the WASI directory-CREATE floor. $path is a BORROWED canonical String.
   ;; Creates the directory at $path RECURSIVELY (each '/'-delimited prefix in turn, so `a/b/c`
   ;; makes all three), relative to the $path_norm-resolved preopen dirfd (same resolution as
-  ;; $write_text_file). An already-existing dir (errno 20 = EEXIST) counts as success. Builds a
+  ;; $write_text_file). An already-existing DIRECTORY (errno 20 = EEXIST, stat says filetype 3)
+  ;; counts as success — create_dir_all's idempotence; a FILE at the path keeps the EEXIST
+  ;; error, as native answers (#2206). Builds a
   ;; fresh OWNED `Result[Unit, String]`: Ok(()) as a 1-slot block with len@4=0 + @12=0 + tag@16=0
   ;; (the `materialize_result_ok` convention, IDENTICAL to $write_text_file — the scope-end flat
   ;; $drop_list_str frees nothing at @12), or Err(<native std::io Display>) via $rtf_result on a
@@ -442,7 +444,7 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
   ;; caller's scope-end DropListStr balances.
   (func $make_dir (param $path i32) (result i32)
     (local $pdata i32) (local $plen i32) (local $dirfd i32) (local $seg i32) (local $errno i32)
-    (local $obj i32) (local $msg i32) (local $maddr i32) (local $mlen i32)
+    (local $obj i32) (local $msg i32) (local $maddr i32) (local $mlen i32) (local $scratch i32)
     {msg_locals}
     ;; dirfd + path bytes + length via $path_norm (#1394).
     (call $path_norm (local.get $path))
@@ -467,10 +469,22 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
     ;; Final attempt: create the full path, capture errno (EEXIST = 20 here once the loop made it).
     (local.set $errno
       (call $path_create_directory (local.get $dirfd) (local.get $pdata) (local.get $plen)))
-    ;; errno 0 OR 20 (EEXIST) -> Ok(()), else Err(<native std::io Display>) — the shared errno
-    ;; mapping, "mkdir failed" only for an errno outside it (#1385).
-    (if (result i32)
-        (i32.or (i32.eqz (local.get $errno)) (i32.eq (local.get $errno) (i32.const 20)))
+    ;; EEXIST is success ONLY when what exists is a directory: stat the path (8-aligned
+    ;; scratch, symlink_follow — the $path_filestat_q discipline) and clear the errno on
+    ;; filetype@16 == 3. A file there keeps errno 20 and renders the table's EEXIST text.
+    (if (i32.eq (local.get $errno) (i32.const 20))
+      (then
+        (local.set $scratch
+          (i32.and (i32.add (call $alloc8 (i32.const 72)) (i32.const 7)) (i32.const -8)))
+        (if (i32.eqz (call $path_filestat_get (local.get $dirfd) (i32.const 1)
+                                              (local.get $pdata) (local.get $plen)
+                                              (local.get $scratch)))
+          (then
+            (if (i32.eq (i32.load8_u (i32.add (local.get $scratch) (i32.const 16))) (i32.const 3))
+              (then (local.set $errno (i32.const 0))))))))
+    ;; errno 0 -> Ok(()), else Err(<native std::io Display>) — the shared errno mapping,
+    ;; "mkdir failed" only for an errno outside it (#1385).
+    (if (result i32) (i32.eqz (local.get $errno))
       (then
         ;; Build Ok(()) — a 1-slot block with len@4=0 (no owned payload — the
         ;; `materialize_result_ok` convention), @12/@16 zeroed by the i64.store.
@@ -1087,16 +1101,12 @@ fn utf8_validate_wat(indent: &str) -> String {
 fn fs_errno_msg_wat(indent: &str, def_addr: u32, def_len: u32, def_text: &str) -> String {
     let mut out = format!(
         "{indent};; errno → the EXACT native std::io Display text, INLINE (§4.1: no new wat func).\n\
-         {indent};; NOENT(44)/ACCES(2)/NOTDIR(54)/ISDIR(31); anything else keeps \"{def_text}\".\n\
+         {indent};; every row of almide_base::fs_errno (#2206); anything else keeps \"{def_text}\".\n\
          {indent}(local.set $maddr (i32.const {def_addr}))\n\
          {indent}(local.set $mlen (i32.const {def_len}))\n"
     );
-    for (errno, addr, len) in [
-        (44, FS_ERR_NOENT_ADDR, FS_ERR_NOENT_LEN),
-        (2, FS_ERR_ACCES_ADDR, FS_ERR_ACCES_LEN),
-        (54, FS_ERR_NOTDIR_ADDR, FS_ERR_NOTDIR_LEN),
-        (31, FS_ERR_ISDIR_ADDR, FS_ERR_ISDIR_LEN),
-    ] {
+    for (row, addr, len) in crate::render_wasm::fs_errno_regions() {
+        let errno = row.wasi;
         out.push_str(&format!(
             "{indent}(if (i32.eq (local.get $errno) (i32.const {errno})) (then\n\
              {indent}  (local.set $maddr (i32.const {addr})) (local.set $mlen (i32.const {len}))))\n"

@@ -690,7 +690,7 @@ impl<'a> Interpreter<'a> {
                         Flow::val(Value::Result(Err(Box::new(Value::str(Self::fs_prim_err(
                             func,
                             &format!("{path:?}"),
-                            "No such file or directory (os error 2)".to_string(),
+                            almide_base::fs_errno::ENOENT.text.to_string(),
                         ))))))
                     }
                 })

@@ -11,7 +11,7 @@
 //! retired here rather than navigated. `static_data_regions()` is the map as
 //! DATA; this asserts the properties the comments used to assert informally.
 
-use almide_mir::render_wasm::{static_data_ceiling, static_data_regions};
+use almide_mir::render_wasm::{static_data_ceiling, static_data_regions, PRINT_NL_SCRATCH_ADDR};
 
 #[test]
 fn no_two_static_regions_overlap() {
@@ -134,4 +134,97 @@ fn every_message_piece_is_emitted_as_a_data_segment() {
         "message pieces have addresses but no bytes — the copy would read zeros:\n{}",
         missing.join("\n")
     );
+}
+
+/// #2206: every errno the table spells is emitted as a data segment with its
+/// EXACT text, so the incumbent's `err(e)` bytes are the table's — the same
+/// bytes `crates/almide-base/tests/fs_errno_table.rs` pins against the host's
+/// `std::io::Error` `Display`.
+#[test]
+fn every_fs_errno_row_is_emitted_as_a_data_segment() {
+    let wat = almide_mir::render_wasm::preamble_text_for_gates();
+    for row in almide_base::fs_errno::FS_ERRNOS {
+        let needle = format!("{:?}", row.text);
+        assert!(
+            wat.contains(&needle),
+            "{}: the preamble carries no data segment for {needle}",
+            row.name
+        );
+    }
+    let errno_rows = static_data_regions()
+        .into_iter()
+        .filter(|(name, _, _)| name.starts_with("FS_ERR_"))
+        .count();
+    assert_eq!(
+        errno_rows,
+        almide_base::fs_errno::FS_ERRNOS.len() + 2,
+        "the layout map lists one region per table row plus WRITEZERO and UTF8"
+    );
+}
+
+/// The self-hosted stdlib pokes linear memory at LITERAL addresses (`prim.store8(768, 10)`
+/// is println's newline). Almide source cannot read the preamble's constants, so
+/// every such literal must land inside a REGISTERED region of the map — the
+/// print scratch is `PRINT_NL_SCRATCH`, the iovec/nwritten slots are `IOVEC` /
+/// `NWRITTEN`. A literal outside the map is the #2206 defect class: a byte the
+/// overlap gate cannot see, which a derived row will one day be laid over.
+#[test]
+fn every_literal_address_the_stdlib_pokes_is_a_registered_region() {
+    let regions = static_data_regions();
+    let covered = |addr: u32| regions.iter().any(|(_, a, l)| addr >= *a && addr < a + l);
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib");
+    let mut seen_scratch = 0;
+    let mut stray = Vec::new();
+    for entry in std::fs::read_dir(&dir).expect("stdlib dir") {
+        let path = entry.expect("entry").path();
+        if path.extension().is_none_or(|e| e != "almd") {
+            continue;
+        }
+        let src = std::fs::read_to_string(&path).expect("read");
+        for (ln, line) in src.lines().enumerate() {
+            let Some(pos) = line.find("prim.store") else { continue };
+            let Some(open) = line[pos..].find('(') else { continue };
+            let args = &line[pos + open + 1..];
+            let Some(comma) = args.find(',') else { continue };
+            let Ok(addr) = args[..comma].trim().parse::<u32>() else { continue };
+            if addr == PRINT_NL_SCRATCH_ADDR && args[comma + 1..].trim().starts_with("10)") {
+                seen_scratch += 1;
+            }
+            if !covered(addr) {
+                stray.push(format!("  {}:{}: {}", path.display(), ln + 1, line.trim()));
+            }
+        }
+    }
+    assert!(
+        stray.is_empty(),
+        "stdlib literal addresses outside the static-data map:\n{}",
+        stray.join("\n")
+    );
+    assert_eq!(
+        seen_scratch, 2,
+        "print_str and eprintln each store their newline at PRINT_NL_SCRATCH ({PRINT_NL_SCRATCH_ADDR})"
+    );
+}
+
+/// The derived errno rows sit above EVERY fixed region (the property that makes
+/// a new fixed row move the table instead of colliding with it).
+#[test]
+fn the_errno_rows_are_laid_out_above_every_fixed_region() {
+    let regions = static_data_regions();
+    let fixed_end = regions
+        .iter()
+        .filter(|(n, _, _)| !n.starts_with("FS_ERR_") || n == "FS_ERR_WRITEZERO" || n == "FS_ERR_UTF8")
+        .map(|(_, a, l)| a + l)
+        .max()
+        .expect("fixed rows");
+    let first_row = regions
+        .iter()
+        .filter(|(n, _, _)| {
+            n.starts_with("FS_ERR_") && n != "FS_ERR_WRITEZERO" && n != "FS_ERR_UTF8"
+        })
+        .map(|(_, a, _)| *a)
+        .min()
+        .expect("errno rows");
+    assert!(first_row >= fixed_end, "errno rows start at {first_row}, fixed regions end at {fixed_end}");
+    assert!(first_row > PRINT_NL_SCRATCH_ADDR, "the rows must clear the print scratch");
 }

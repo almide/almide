@@ -87,7 +87,8 @@ fn fs_err(
 }
 
 /// Error-code discriminant in local `n` -> the fs_err mapping (no-entry
-/// / access / not-permitted / is-directory / generic). Always returns.
+/// / access / not-permitted / is-directory / not-directory / exist /
+/// generic — the texts are `almide_base::fs_errno`'s, #2206). Always returns.
 #[allow(clippy::too_many_arguments)]
 fn fs_open_err_map(
     i: &mut wasm_encoder::InstructionSink<'_>,
@@ -109,6 +110,14 @@ fn fs_open_err_map(
     i.local_get(n).i32_const(abi.ec_is_directory).i32_eq();
     i.if_(BlockType::Empty);
     fs_err(i, g_ppos, g_plen, park, MSG_ISDIR, E_ISDIR.len());
+    i.end();
+    i.local_get(n).i32_const(abi.ec_not_directory).i32_eq();
+    i.if_(BlockType::Empty);
+    fs_err(i, g_ppos, g_plen, park, MSG_NOTDIR, E_NOTDIR.len());
+    i.end();
+    i.local_get(n).i32_const(abi.ec_exist).i32_eq();
+    i.if_(BlockType::Empty);
+    fs_err(i, g_ppos, g_plen, park, MSG_EXIST, E_EXIST.len());
     i.end();
     fs_err(i, g_ppos, g_plen, park, MSG_GEN, E_GEN.len());
 }
@@ -512,15 +521,29 @@ fn shim_fs_call(g: P3Globals, abi: &FsAbi, f_self: u32, f_http: Option<u32>) -> 
     i.local_get(a_ptr).local_get(j);
     i.i32_const((park + RET) as i32);
     i.call(I_FS_MKDIR);
-    // the FULL path's error decides; 'exist' is success (idempotent).
+    // the FULL path's error decides; 'exist' is success ONLY for a directory
+    // (create_dir_all's idempotence) — a file at the path is the EEXIST error
+    // native answers (#2206), so stat decides which.
     i.local_get(j).local_get(a_len).i32_eq();
     i.i32_const((park + RET) as i32).i32_load8_u(mem8(0)).i32_and();
     i.if_(BlockType::Empty);
     i.i32_const((park + RET) as i32).i32_load8_u(mem8(abi.unit_payload)).local_set(n);
-    i.local_get(n).i32_const(abi.ec_exist).i32_ne();
+    i.local_get(n).i32_const(abi.ec_exist).i32_eq();
     i.if_(BlockType::Empty);
-    fs_open_err_map(&mut i, g_ppos, g_plen, park, abi, n);
+    i.global_get(g_pre);
+    i.i32_const(1);
+    i.local_get(a_ptr).local_get(a_len);
+    i.i32_const((park + STATRET) as i32);
+    i.call(I_FS_STAT);
+    i.i32_const((park + STATRET) as i32).i32_load8_u(mem8(0)).i32_eqz();
+    i.i32_const((park + STATRET) as i32).i32_load8_u(mem8(abi.stat_payload));
+    i.i32_const(abi.dt_directory).i32_eq();
+    i.i32_and();
+    i.if_(BlockType::Empty);
+    i.i64_const(0).return_();
     i.end();
+    i.end();
+    fs_open_err_map(&mut i, g_ppos, g_plen, park, abi, n);
     i.end();
     i.end();
     i.local_get(j).i32_const(1).i32_add().local_set(j);

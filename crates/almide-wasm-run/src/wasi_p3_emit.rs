@@ -341,6 +341,8 @@ pub fn to_p3(bytes: &[u8], wants_http: bool) -> anyhow::Result<Vec<u8>> {
         (MSG_NOENT, E_NOENT),
         (MSG_ACCES, E_ACCES),
         (MSG_ISDIR, E_ISDIR),
+        (MSG_NOTDIR, E_NOTDIR),
+        (MSG_EXIST, E_EXIST),
         (MSG_GEN, E_GEN),
         (MSG_NOPRE, E_NOPRE),
     ] {

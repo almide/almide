@@ -1,6 +1,7 @@
 // eprintln — the SELF-HOSTED bare `eprintln(s)` for v1 over the prim floor:
 // print_str's STDERR twin (fd 2), byte-for-byte the same two single-iovec
-// fd_write discipline (string bytes, then "\n" at scratch 768). Previously the
+// fd_write discipline (string bytes, then "\n" at scratch 768 — `PRINT_NL_SCRATCH`
+// in the preamble's static-data map, pinned by the layout gate). Previously the
 // bare builtin was UNLINKED on the v1 leg (an honest wall) and the v0 emitter
 // ICE'd on it — user stderr diagnostics and every non-test assert desugar
 // (ALS-T18's `Error: assertion failed…` line) ride this.

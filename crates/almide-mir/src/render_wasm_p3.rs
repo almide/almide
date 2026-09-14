@@ -30,6 +30,13 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
     // makes the copies in `fs_err_msg_wat` read real bytes instead of the zeroed
     // memory a missing segment leaves behind — which renders as BLANKS in the
     // message, not as an error.
+    // #2206: one `(data)` per errno the table spells, so the WAT carries the
+    // bytes `almide_base::fs_errno` pins against the host's `Display`.
+    let fs_errno_data = fs_errno_regions()
+        .into_iter()
+        .map(|(row, addr, _)| format!("  (data (i32.const {addr}) {})", wat_data_literal(row.text)))
+        .collect::<Vec<_>>()
+        .join("\n");
     let fs_msg_data = fs_msg_regions()
         .into_iter()
         .map(|(text, addr, _)| format!("  (data (i32.const {addr}) {})", wat_data_literal(text)))
@@ -133,10 +140,7 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
   (data (i32.const {BOUNDS_MSG_ADDR}) "Error: index out of bounds\n")
   ;; the fs.read_text path_open error message — a CONST byte run the Err arm copies.
   (data (i32.const {RTF_NOTFOUND_ADDR}) "file not found")
-  (data (i32.const {FS_ERR_NOENT_ADDR}) "No such file or directory (os error 2)")
-  (data (i32.const {FS_ERR_ACCES_ADDR}) "Permission denied (os error 13)")
-  (data (i32.const {FS_ERR_NOTDIR_ADDR}) "Not a directory (os error 20)")
-  (data (i32.const {FS_ERR_ISDIR_ADDR}) "Is a directory (os error 21)")
+{fs_errno_data}
   (data (i32.const {FS_ERR_WRITEZERO_ADDR}) "failed to write whole buffer")
   (data (i32.const {FS_ERR_UTF8_ADDR}) "stream did not contain valid UTF-8")
   ;; the fs.list_dir path_open(O_DIRECTORY) error message — a CONST byte run the Err arm copies.
