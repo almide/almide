@@ -59,11 +59,43 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Every runner invocation is logged in full (the positive control to the
+# console as well): a gate that swallows the runner's output can only say
+# "did not pass", and that verdict stood unexplained for eleven nights
+# (2026-09-03 → 09-13) because nobody could see WHICH program diverged.
+# On a positive-control failure the log's tail also lands in the job
+# summary when the gate runs under GitHub Actions.
+RUNNER_LOG="$CARGO_TARGET_DIR/conformance-mutations.log"
+mkdir -p "$CARGO_TARGET_DIR"
+run_runner() {
+  # $1 = log file, rest = extra runner args; stdout+stderr go to the log.
+  local log="$1"
+  shift
+  "${RUNNER[@]}" "$@" >"$log" 2>&1
+}
+report_failure() {
+  # $1 = log file, $2 = headline for the job summary.
+  local log="$1" title="$2"
+  echo "---- runner output (last 80 lines of $log) ----" >&2
+  tail -n 80 "$log" >&2
+  if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+    {
+      echo "## conformance mutation gate: $title"
+      echo
+      echo '```'
+      tail -n 80 "$log"
+      echo '```'
+    } >>"$GITHUB_STEP_SUMMARY"
+  fi
+}
+
 echo "== positive control: unmutated tree must pass the corpus runner (CARGO_TARGET_DIR=$CARGO_TARGET_DIR) =="
-if ! "${RUNNER[@]}" >/dev/null 2>&1; then
+if ! run_runner "$RUNNER_LOG"; then
   echo "FAIL: the unmutated tree does not pass the corpus runner — fix that before judging mutants" >&2
+  report_failure "$RUNNER_LOG" "positive control failed (unmutated tree)"
   exit 1
 fi
+grep -E "^kernel_conformance:|^test result:" "$RUNNER_LOG" || true
 
 survived=()
 unbuilt=()
@@ -77,10 +109,12 @@ for patch in "$PATCH_DIR"/m*.patch; do
     exit 1
   fi
   applied="$patch"
-  if ! "${RUNNER[@]}" --no-run >/dev/null 2>&1; then
+  mutant_log="$CARGO_TARGET_DIR/conformance-mutations-${name%.patch}.log"
+  if ! run_runner "$mutant_log" --no-run; then
     unbuilt+=("$name")
     echo "   DID NOT BUILD (rustc rejected the mutant — that is not a corpus kill)"
-  elif "${RUNNER[@]}" >/dev/null 2>&1; then
+    report_failure "$mutant_log" "$name did not build"
+  elif run_runner "$mutant_log"; then
     survived+=("$name")
     echo "   SURVIVED (runner stayed green under the seeded bug)"
   else
