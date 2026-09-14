@@ -731,6 +731,18 @@ fn map_variant_other_scalar_key(r: MapRoute<'_>) -> Option<MapName> {
         Some(MapName::Suffix("_if"))
     }
     (false, false) if func == "to_string_if" => Some(MapName::Suffix("")),
+    // TYPE-CHANGING `map.map` core → heap value (`map.map(mii, (v) =>
+    // int.to_string(v))`): the plain map_core impl declares `f: (Int) -> Int`,
+    // so the closure's i32-handle return is a `call_indirect` type mismatch at
+    // run time — the #2154 class, found by the #2184 router gate. No
+    // scalar-key/heap-value `map` twin exists yet: refuse, never fall through.
+    (false, false)
+        if func == "map"
+            && matches!(result_ty, Ty::Applied(TypeConstructorId::Map, a)
+                if a.len() == 2 && is_heap_ty(&a[1])) =>
+    {
+        Some(MapName::Suffix("_x"))
+    }
         _ => None,
     }
 }
