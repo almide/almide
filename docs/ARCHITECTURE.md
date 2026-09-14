@@ -70,6 +70,13 @@ and serves as the cross-target oracle / executable spec.
     (#1596), host-variant BUILD artifacts, and `ALMIDE_FUEL_PROBE`
     instrumentation; `ALMIDE_WASM_INCUMBENT=1` forces it (the reversible
     switch, kept for one release).
+  Every `ALMIDE_*` switch the tree reads — the forced routes here, the gate
+  bypasses, the ablations, the trace channels — is one registry,
+  `almide_base::env::SWITCHES` (`almide switches` lists it; `docs/specs/cli.md`
+  embeds its table; #2205). The compiler proper reads only through
+  `almide_base::env::{flag, var}`: one boolean semantics, and a forced route
+  or a bypassed gate inherited from the environment is announced once on
+  stderr, so a verdict produced under it says so.
   A structural WALL reroutes to the incumbent renderer (both legs are
   VERIFIED — this is not #782's sin, which was falling into unverified v0
   codegen; `ALMIDE_VERIFIED_DEBUG=1` names the wall that rerouted). A shape

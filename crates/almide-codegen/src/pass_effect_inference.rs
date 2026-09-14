@@ -60,7 +60,7 @@ impl NanoPass for EffectInferencePass {
         close_effects_transitively(&call_graph, &mut effect_map);
 
         // Debug output
-        if std::env::var("ALMIDE_DEBUG_EFFECTS").is_ok() {
+        if almide_base::env::flag("ALMIDE_DEBUG_EFFECTS") {
             debug_print_effects(&effect_map);
         }
 

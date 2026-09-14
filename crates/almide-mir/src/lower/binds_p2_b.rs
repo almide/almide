@@ -512,7 +512,7 @@ impl LowerCtx {
                     | IrExprKind::Range { .. }
             )
         {
-            if std::env::var_os("ALMIDE_DBG_BANG").is_some() {
+            if almide_base::env::flag("ALMIDE_DBG_BANG") {
                 eprintln!(
                     "BIND-TERMINAL-WALL {} :: kind={} ty={:?}",
                     self.fn_name,

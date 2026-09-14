@@ -232,7 +232,7 @@ pub(crate) fn emit_dec_flat() -> Function {
     // wrapping to 0xFFFF_FFFF and silently keeping a dangling block
     // alive. Off by default: the proof-transcribed runtime tree (the
     // hash below) is the shipped one.
-    if std::env::var_os("ALMIDE_RC_TRAP_DOUBLE_FREE").is_some() {
+    if almide_base::env::flag("ALMIDE_RC_TRAP_DOUBLE_FREE") {
         i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
         i.unreachable();
         i.end();
@@ -259,7 +259,7 @@ pub(crate) fn emit_drop_list(elem_dec: u32) -> Function {
     i.return_();
     i.end();
     i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_sub().local_set(rc);
-    if std::env::var_os("ALMIDE_RC_TRAP_DOUBLE_FREE").is_some() {
+    if almide_base::env::flag("ALMIDE_RC_TRAP_DOUBLE_FREE") {
         i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
         i.unreachable();
         i.end();
@@ -294,7 +294,7 @@ pub(crate) fn emit_drop_shape(slots: &[(u32, u32)], tagged: Option<(u32, Vec<(u3
     i.return_();
     i.end();
     i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_sub().local_set(rc);
-    if std::env::var_os("ALMIDE_RC_TRAP_DOUBLE_FREE").is_some() {
+    if almide_base::env::flag("ALMIDE_RC_TRAP_DOUBLE_FREE") {
         i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
         i.unreachable();
         i.end();
@@ -333,7 +333,7 @@ pub(crate) fn emit_drop_map_spine(side_clear: u32) -> Function {
     i.return_();
     i.end();
     i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_sub().local_set(rc);
-    if std::env::var_os("ALMIDE_RC_TRAP_DOUBLE_FREE").is_some() {
+    if almide_base::env::flag("ALMIDE_RC_TRAP_DOUBLE_FREE") {
         i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
         i.unreachable();
         i.end();
@@ -364,7 +364,7 @@ pub(crate) fn emit_drop_entries(stride: u32, slots: [Option<(u32, u32)>; 2], sid
     i.return_();
     i.end();
     i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_sub().local_set(rc);
-    if std::env::var_os("ALMIDE_RC_TRAP_DOUBLE_FREE").is_some() {
+    if almide_base::env::flag("ALMIDE_RC_TRAP_DOUBLE_FREE") {
         i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
         i.unreachable();
         i.end();

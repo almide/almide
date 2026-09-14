@@ -1153,6 +1153,16 @@ jobs:
       - name: Doc fences execute (#1490 — marked stdlib examples check/run byte-exactly)
         run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-doc-fences.sh
 
+      # #2205: the ALMIDE_* switches are one registry. The grep half refuses an
+      # unregistered name anywhere in the tree and a direct std::env read in
+      # the compiler proper; the Almide half refuses drift between the registry
+      # and the table docs/specs/cli.md embeds.
+      - name: Environment switches are registered (#2205 — no unregistered ALMIDE_* name, no direct read in the compiler proper)
+        run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-env-switches.sh
+
+      - name: Environment switch table matches the registry (#2205 — docs/specs/cli.md is `almide switches --md`)
+        run: /tmp/almide-bin/almide run tools/almide-gates/src/main.almd -- env-switches-doc . /tmp/almide-bin/almide
+
       - name: Regex answers what an outside engine answers (#2129 — C-032's fuzz is blind to a rule both legs read wrong)
         run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-regex-reference.sh
 

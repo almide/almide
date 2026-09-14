@@ -149,7 +149,7 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
     ;; it (Node execFileSync cwd option, IDE run configs). `almide run/test` pins it
     ;; via `wasmtime --env`; without the pin the fallback PWD scan below keeps
     ;; the old behavior. The 11-byte key match is two overlapping loads:
-    ;; bytes 0..8 "ALMIDE_C" (LE i64) and bytes 7..11 "CWD=" (LE i32).
+    ;; bytes 0..8 = ALMIDE_C (LE i64) and bytes 7..11 = CWD= (LE i32).
     (local.set $pwd (i32.const 0))
     (local.set $i (i32.const 0))
     (block $adone (loop $aloop

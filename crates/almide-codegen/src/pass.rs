@@ -291,13 +291,13 @@ impl Pipeline {
         // Debug aid: name each pass BEFORE it runs, so a pass that never
         // returns (infinite recursion → stack overflow) is identifiable —
         // the ALMIDE_PROFILE line only prints on completion.
-        if std::env::var_os("ALMIDE_TRACE_PASSES").is_some() {
+        if almide_base::env::flag("ALMIDE_TRACE_PASSES") {
             eprintln!("[pass:start] {}", pass_name);
         }
         // Time only through the wasm-safe shim (raw std::time is forbidden in
         // this crate — it panics on the wasm32-unknown-unknown playground).
         let _pass_t = almide_base::profile::ProfileTimer::start(
-            std::env::var_os("ALMIDE_PROFILE").is_some(),
+            almide_base::env::flag("ALMIDE_PROFILE"),
         );
         let result = pass.run(program, target);
         if let Some(t) = &_pass_t {
@@ -358,7 +358,7 @@ impl Pipeline {
         let mut executed: Vec<&str> = Vec::new();
 
         // ALMIDE_DUMP_IR: dump IR after specified passes (comma-separated, or "all")
-        let dump_filter = std::env::var("ALMIDE_DUMP_IR").ok();
+        let dump_filter = almide_base::env::var("ALMIDE_DUMP_IR");
         let dump_all = dump_filter.as_deref() == Some("all");
         let dump_passes: Vec<&str> = dump_filter.as_deref()
             .filter(|s| *s != "all")
@@ -379,7 +379,7 @@ impl Pipeline {
         // release it can't even fail hard, yet it dominates codegen time
         // (~1.2s/file: 20 passes × verify(user + all merged stdlib functions)).
         // Run it only in debug (cargo test / CI) or when explicitly requested.
-        let verify_ir = hard_fail || std::env::var_os("ALMIDE_VERIFY_IR").is_some();
+        let verify_ir = hard_fail || almide_base::env::flag("ALMIDE_VERIFY_IR");
 
         // #912 pass-ordering lens: `ALMIDE_SKIP_PASS=Name[,Name…]` skips the
         // named passes. A hunt instrument, not a user feature: the spec suite
@@ -387,8 +387,7 @@ impl Pipeline {
         // a silent value diff is a pass-dependency hole, while a dep-edge
         // panic or compile error is the system refusing loudly. Zero-cost
         // when unset (parsed once, out of the loop).
-        let skip_passes: Vec<String> = std::env::var("ALMIDE_SKIP_PASS")
-            .ok()
+        let skip_passes: Vec<String> = almide_base::env::var("ALMIDE_SKIP_PASS")
             .map(|s| s.split(',').map(|x| x.trim().to_string()).collect())
             .unwrap_or_default();
 

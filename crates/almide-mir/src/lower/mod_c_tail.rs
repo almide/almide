@@ -158,7 +158,7 @@ pub fn auto_wrap_abi_body(func: &IrFunction) -> Option<IrExpr> {
         // inner answering the EXACT carrier; a typed-E mismatch keeps its
         // honest wall.
         if let IrExprKind::Unwrap { expr: inner } | IrExprKind::Try { expr: inner } = &body.kind {
-            if std::env::var("ALMIDE_TMPDBG").is_ok() {
+            if almide_base::env::flag("ALMIDE_TMPDBG") {
                 eprintln!("[tmpdbg] passthrough-check fn={} inner_ty={:?} result_ty={:?} eq={}",
                     func.name.as_str(), inner.ty, result_ty, inner.ty == result_ty);
             }

@@ -104,7 +104,7 @@ fn rewrite_to_loop(
     // those keep the pre-existing (bounded-per-call) leak rather than risk a
     // double-free now that frees are live.
     let dec_params: Vec<VarId> = tco_managed_params(&func.body, &params, fn_name.as_str());
-    if std::env::var("ALMIDE_TCO_DEBUG").is_ok() {
+    if almide_base::env::flag("ALMIDE_TCO_DEBUG") {
         let names = |vs: &[VarId]| vs.iter().map(|v| var_table.get(*v).name.as_str().to_string()).collect::<Vec<_>>();
         eprintln!("[tco] {} dec_params={:?}", fn_name.as_str(), names(&dec_params));
     }

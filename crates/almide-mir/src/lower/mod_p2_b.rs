@@ -72,7 +72,7 @@ pub fn rewrite_never_err_effect_match(
             };
             let body_expr = ok_arm.body.clone();
             let result_ty = expr.ty.clone();
-            if std::env::var_os("ALMIDE_DBG_NEMATCH").is_some() {
+            if almide_base::env::flag("ALMIDE_DBG_NEMATCH") {
                 eprintln!("NEMATCH-REWRITE fired: subject={:?} ty={:?}", subject.kind, result_ty);
             }
             expr.kind = IrExprKind::Block { stmts: vec![bind_stmt], expr: Some(Box::new(body_expr)) };
@@ -132,7 +132,7 @@ pub fn populate_abi_registries(fns: &[IrFunction], _record_layouts: &RecordLayou
         *s.borrow_mut() =
             lifted_effect_fns.iter().filter(|n| !can_err.contains(*n)).cloned().collect();
     });
-    let abi_probe = std::env::var("ALMIDE_ABI_PROBE").is_ok();
+    let abi_probe = almide_base::env::flag("ALMIDE_ABI_PROBE");
     AUTO_WRAP_ABI_FNS.with(|s| {
         *s.borrow_mut() = fns
             .iter()

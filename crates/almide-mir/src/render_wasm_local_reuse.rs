@@ -65,8 +65,7 @@ pub(crate) const LOCAL_REUSE_THRESHOLD: usize = 8_000;
 /// cross-validating it against shapes far beyond any hand-written probe.
 /// Production builds never set it.
 pub(crate) fn local_reuse_threshold() -> usize {
-    std::env::var("ALMIDE_LOCAL_REUSE_THRESHOLD")
-        .ok()
+    almide_base::env::var("ALMIDE_LOCAL_REUSE_THRESHOLD")
         .and_then(|v| v.parse().ok())
         .unwrap_or(LOCAL_REUSE_THRESHOLD)
 }

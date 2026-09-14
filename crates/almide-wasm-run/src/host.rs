@@ -796,7 +796,7 @@ fn run_wasm_src(
         (Ok(()), None) => 0,
         (Err(_), Some(code)) => code,
         (Err(e), None) => {
-            if std::env::var("ALMIDE_DBG_TRAP").is_ok() {
+            if almide_base::env::flag("ALMIDE_DBG_TRAP") {
                 eprintln!("TRAP: {e:?}");
             }
             // A genuine trap is a runtime abort: exit 1, and (#1826) the

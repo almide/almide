@@ -136,7 +136,7 @@ pub(crate) fn plan_switch(
     start: usize,
     limit: usize,
 ) -> Option<SwitchPlan> {
-    if std::env::var("ALMIDE_NO_BR_TABLE").is_ok() {
+    if almide_base::env::flag("ALMIDE_NO_BR_TABLE") {
         return None;
     }
     let (subj, _, _) = eq_test_at(ops, occ, start)?;
@@ -247,7 +247,7 @@ fn render_switch(
     st.fuser.flush_all(body);
     let id = st.switch_ctr;
     st.switch_ctr += 1;
-    if std::env::var("ALMIDE_DBG_SWITCH").is_ok() {
+    if almide_base::env::flag("ALMIDE_DBG_SWITCH") {
         eprintln!("[switch] {} arms={}", ctx.func.name, plan.arms.len());
     }
     let res = match plan.dst {

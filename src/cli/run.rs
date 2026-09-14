@@ -117,7 +117,7 @@ pub(crate) struct PhaseTimer {
 impl PhaseTimer {
     pub(crate) fn start() -> Self {
         let now = std::time::Instant::now();
-        Self { on: std::env::var_os("ALMIDE_TIME_PHASES").is_some(), start: now, last: std::cell::Cell::new(now) }
+        Self { on: almide_base::env::flag("ALMIDE_TIME_PHASES"), start: now, last: std::cell::Cell::new(now) }
     }
     pub(crate) fn lap(&self, label: &str) {
         if !self.on { return; }
@@ -183,7 +183,7 @@ pub(crate) fn build_native_cached(
     // run truly in parallel instead of serializing on the shared dir's
     // `BUILD_LOCK`. Otherwise: `ALMIDE_RUN_PROJECT_DIR`, else a shared default.
     let project_dir = project_dir_override.map(std::path::PathBuf::from)
-        .or_else(|| std::env::var_os("ALMIDE_RUN_PROJECT_DIR").map(std::path::PathBuf::from))
+        .or_else(|| almide_base::env::var("ALMIDE_RUN_PROJECT_DIR").map(std::path::PathBuf::from))
         .unwrap_or_else(|| std::env::temp_dir().join("almide-run"));
     std::fs::create_dir_all(&project_dir)
         .map_err(|e| format!("Failed to create temp directory: {}", e))?;

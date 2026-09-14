@@ -249,7 +249,7 @@ impl<'a> Interpreter<'a> {
             "almide_rt_prim_timeout_exit" => {
                 let hit = self.t_hit.get();
                 self.t_verdict.set(hit as i64);
-                if hit && std::env::var("ALMIDE_OMEGA_RECORD").is_ok_and(|v| v == "1") {
+                if hit && almide_base::env::flag("ALMIDE_OMEGA_RECORD") {
                     self.stderr.push_str(&format!("__ALMD_OMEGA {}\n", self.t_ord.get()));
                 }
                 self.t_hit.set(false);

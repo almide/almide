@@ -586,7 +586,7 @@ impl<'a> Interpreter<'a> {
 
     /// T5-2: the replay ordinal (env, same contract as the compile-time bake).
     pub(crate) fn omega_replay() -> i64 {
-        std::env::var("ALMIDE_OMEGA").ok().and_then(|v| v.parse().ok()).unwrap_or(-1)
+        almide_base::env::var("ALMIDE_OMEGA").and_then(|v| v.parse().ok()).unwrap_or(-1)
     }
 
     /// T5-1: the wall-deadline check at a charge site — ordinal + replay or

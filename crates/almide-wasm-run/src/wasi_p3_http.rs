@@ -89,8 +89,7 @@ fn shim_http(park: u64, g_plen: u32, g_ppos: u32, f_alloc: u32, h: &HttpAbi) -> 
     // localizes to the first stage whose stop-build still hangs. Stages:
     // 1 = fields+trailers written, 2 = request.new, 3 = setters,
     // 4 = body fed + writable dropped, 5 = sent-future dropped.
-    let stop = std::env::var("ALMIDE_P3_HTTP_STOP")
-        .ok()
+    let stop = almide_base::env::var("ALMIDE_P3_HTTP_STOP")
         .and_then(|v| v.parse::<u32>().ok())
         .unwrap_or(0);
     let (op, a_ptr, a_len, b_ptr, b_len) = (0u32, 1u32, 2u32, 3u32, 4u32);

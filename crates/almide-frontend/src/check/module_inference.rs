@@ -511,7 +511,7 @@ impl Checker {
         // reads the prefixed key and gets `Ty::Unknown`.
         let prefixed_key = self.current_module_prefix.as_ref()
             .map(|p| sym(&format!("{}.{}", p, name)));
-        debug_trace("TOPLET", || format!(
+        debug_trace("ALMIDE_TOPLET_DEBUG", || format!(
             "refresh: name={} prefix={:?} resolved={:?} existing_prefixed={:?}",
             name, self.current_module_prefix, resolved,
             prefixed_key.as_ref().map(|k| self.env.top_lets.get(k))));

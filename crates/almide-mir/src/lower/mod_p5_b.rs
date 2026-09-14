@@ -229,7 +229,7 @@ pub(crate) fn try_tco_rewrite(
     // result is exactly the cert-clean scalar-loop form (`tco_empty_for` has scalar
     // empties since brick 1), so admit it; the collect/carried gates below still decline
     // anything outside the loop subset, falling back to the real recursion as before.
-    let dbg_tco = std::env::var_os("ALMIDE_DBG_TCO").is_some();
+    let dbg_tco = almide_base::env::flag("ALMIDE_DBG_TCO");
     macro_rules! tco_trace {
         ($msg:expr) => {
             if dbg_tco {

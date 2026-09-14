@@ -137,7 +137,7 @@ impl LowerCtx {
         if !crate::lower::bang_return_probe() {
             return Ok(false);
         }
-        let dbg = std::env::var_os("ALMIDE_DBG_BANG").is_some();
+        let dbg = almide_base::env::flag("ALMIDE_DBG_BANG");
         macro_rules! decline {
             ($gate:expr) => {{
                 if dbg {
@@ -648,7 +648,7 @@ impl LowerCtx {
         let dst = self.fresh_value();
         self.value_of.insert(var, dst);
         if crate::lower::strict_values() {
-            if std::env::var("ALMIDE_BOUNDED_DEBUG").is_ok() {
+            if almide_base::env::flag("ALMIDE_BOUNDED_DEBUG") {
                 eprintln!("[bounded-debug] deferred bind var={var:?} value kind = {}",
                     match &value.kind {
                         IrExprKind::RuntimeCall { symbol, .. } => format!("RuntimeCall {}", symbol.as_str()),
