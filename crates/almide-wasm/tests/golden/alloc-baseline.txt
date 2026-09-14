@@ -53,6 +53,7 @@
 67056	spec/wasm_cross/chunk_str.almd
 66112	spec/wasm_cross/closure_accumulator.almd
 67408	spec/wasm_cross/closure_borrowed_arg_guard.almd
+66464	spec/wasm_cross/closure_captured_list_mutation.almd
 450416	spec/wasm_cross/closure_captured_map_records.almd
 418720	spec/wasm_cross/closure_rich_list_capture.almd
 66544	spec/wasm_cross/closure_scalar_captures.almd
@@ -185,6 +186,7 @@
 66032	spec/wasm_cross/fuel_bare_result.almd
 65824	spec/wasm_cross/fuel_block_body.almd
 65856	spec/wasm_cross/fuel_bounded_boundary.almd
+65760	spec/wasm_cross/fuel_cut_in_arm_loop.almd
 65776	spec/wasm_cross/fuel_divergence_cut.almd
 69872	spec/wasm_cross/fuel_dyn_charge.almd
 65856	spec/wasm_cross/fuel_race_boundary.almd
@@ -360,6 +362,7 @@
 67040	spec/wasm_cross/map_index_string_key_shapes.almd
 73952	spec/wasm_cross/map_insertion_order.almd
 71408	spec/wasm_cross/map_interp_string_value.almd
+67616	spec/wasm_cross/map_literal_ctor_values.almd
 65920	spec/wasm_cross/map_of_maps_value.almd
 65856	spec/wasm_cross/map_rich_variant_key.almd
 67056	spec/wasm_cross/map_set_eq.almd
@@ -367,6 +370,7 @@
 152160	spec/wasm_cross/map_set_index_threshold.almd
 67104	spec/wasm_cross/map_set_ops.almd
 67968	spec/wasm_cross/map_set_typechange.almd
+67968	spec/wasm_cross/map_upsert_str.almd
 66096	spec/wasm_cross/map_wide_int_key.almd
 65920	spec/wasm_cross/match_box_pattern_backstop.almd
 66624	spec/wasm_cross/match_container_literal.almd
@@ -451,6 +455,8 @@
 66640	spec/wasm_cross/option_unwrap_or_else_heap.almd
 65856	spec/wasm_cross/optional_chain_scalar.almd
 66176	spec/wasm_cross/or_pattern.almd
+70912	spec/wasm_cross/ord_record_variant.almd
+70288	spec/wasm_cross/ord_recursive.almd
 66608	spec/wasm_cross/path_extension_hidden.almd
 65936	spec/wasm_cross/phantom_type_param.almd
 65792	spec/wasm_cross/pipe_chain_scalar_bind.almd
@@ -482,6 +488,7 @@
 65952	spec/wasm_cross/range_materialize_oom.almd
 494080	spec/wasm_cross/rc_alloc_stress.almd
 65984	spec/wasm_cross/rc_reclaim_churn.almd
+66272	spec/wasm_cross/record_default_field_omitted.almd
 65856	spec/wasm_cross/record_forms.almd
 69984	spec/wasm_cross/record_option_none_cells.almd
 131808	spec/wasm_cross/record_pair_result_return.almd
@@ -535,6 +542,7 @@
 66208	spec/wasm_cross/sized_numeric_literals.almd
 66112	spec/wasm_cross/snapshot_mismatch_abort.almd
 67088	spec/wasm_cross/sort_by_call_count.almd
+116672	spec/wasm_cross/sort_by_compound_key.almd
 707440	spec/wasm_cross/sort_by_str_key_heap.almd
 66448	spec/wasm_cross/split_empty_sep.almd
 66720	spec/wasm_cross/spread_record_share.almd
