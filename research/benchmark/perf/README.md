@@ -164,6 +164,27 @@ nothing is published that `bench.py` did not produce.
   issue title blamed not present on the path at all — in
   [string-gap-1004.md](./string-gap-1004.md); `strchurn/ladder.py` rebuilds it
   from scratch.
+- **`wordfreq` is the Map row** (#2150, #2157): N draws from a 5 000-word
+  vocabulary counted in a `Map[String, Int]`, top 10 by count desc / word asc
+  — the keyed-aggregation shape every word-count, group-by and histogram
+  program has. Two spellings of one workload, like listbuild: `wordfreq` is
+  the imperative `var` Map + `m[w] = map.get_or(m, w, 0) + 1` loop, and
+  `wordfreq-group` the CHEATSHEET's `list.group_by` + `map.map`; identical
+  vocabulary, draws, sort and output, so the spread between them is what the
+  recommended idiom costs. The reference (`rust-ref/wordfreq.rs`) is
+  same-shape and same-semantics: a `HashMap<String, i64>` (hashbrown +
+  SipHash), an OWNED key cloned out of the vocabulary per draw (Almide's
+  `let w = vocab[i]` owns), one `entry` per draw. Native/rust only: the wasm
+  leg's `group_by` is #2156's 110× and would measure that. Reported, not
+  anchored, like strchurn — the row compares an allocator and a hasher
+  before it compares codegen. What the native `AlmideMap` is since #2150: a
+  compact-ordered-dict (insertion-ordered entry vector + an open-addressing
+  slot table of positions with the full hash cached per entry, one
+  multiply-fold hash per operation), with the read side (`map.get` /
+  `get_or` / `contains`, `set.contains`) borrowing its key and the
+  plain-variable-key write `m[w] = …` moving it — the 2M-draw loop's Map
+  cost fell from ~93 ms to ~55 ms on an M4 Pro, under the structural wasm
+  leg's ~73 ms for the same program.
 
 ## Run
 
@@ -191,9 +212,6 @@ ablation of the optimization the row is attributed to).
 
 ## Not yet covered
 
-- The MAP-churn micro-benchmark #917 asks for. The string half of that ask is
-  covered by `strchurn` as of #1004; `AlmideMap`'s linear scan is still
-  measured only incidentally, inside `onebrc`.
 - **List-combinator laziness.** `IterChain`, the fused-iterator IR node, never
   fires on the Rust target: `list.map`/`filter`/`fold` all emit
   `almide_rt_list_*(Vec, Rc<dyn Fn>)` over a materialized `Vec`, in a pipe, in

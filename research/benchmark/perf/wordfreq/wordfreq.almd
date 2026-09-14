@@ -1,0 +1,57 @@
+// wordfreq — the keyed-aggregation row (#2150, #2157): N draws from a 5 000-word
+// LCG vocabulary counted in a `Map[String, Int]`, top 10 by count desc / word
+// asc. This is the imperative spelling — `var` Map + `for` + `m[w] = map.get_or(m, w, 0) + 1`
+// — the shape #2157's attribution probe named: with the Map removed the same
+// loop ran 163 ms natively, with it 404 ms, so the row measures the native
+// Map's lookup + insert and nothing else the language does.
+//
+// The Rust reference (rust-ref/wordfreq.rs) is same-shape and same-semantics:
+// a `HashMap<String, i64>` with an OWNED key cloned out of the vocabulary per
+// draw (Almide's `let w = vocab[i]` owns), one `entry` per draw. The idiomatic
+// twin wordfreq_group.almd (`list.group_by` + `map.map`) is the spelling the
+// CHEATSHEET recommends; the spread between the two rows is the recommended
+// idiom's cost, the T5 relation.
+import env
+import int
+
+let vocab_size = 5000
+let modulus = 2147483648
+
+fn next(s: Int) -> Int = (s * 1103515245 + 12345) % modulus
+
+fn letters(s: Int, k: Int, acc: String) -> String =
+  if k == 0 then acc
+  else {
+    let s2 = next(s)
+    letters(s2, k - 1, acc + string.from_codepoint(97 + (s2 / 65536) % 26))
+  }
+
+fn word_of(i: Int) -> String = {
+  let s = next(i * 7919 + 17)
+  letters(s, 3 + (s / 65536) % 6, "")
+}
+
+fn draw(i: Int) -> Int = (next(next((i * 2654435761 + 1) % modulus)) / 65536) % vocab_size
+
+effect fn main() -> Unit = {
+  let args = env.args()
+  let n = match list.get(args, 0) {
+    some(s) => match int.parse(s) {
+      ok(v) => v,
+      err(_) => 2000000,
+    },
+    none => 2000000,
+  }
+  let vocab = list.range(0, vocab_size) |> list.map(word_of)
+  var counts: Map[String, Int] = [:]
+  for i in list.range(0, n) {
+    let w = vocab[draw(i)]
+    counts[w] = map.get_or(counts, w, 0) + 1
+  }
+  let top = map.entries(counts)
+    |> list.sort_by(((w, c)) => (0 - c, w))
+    |> list.take(10)
+  for (w, c) in top {
+    println("${w} ${c}")
+  }
+}

@@ -95,7 +95,15 @@ PAIRS="nbody=rust:nbody_unrolled spectralnorm=rust:spectralnorm fasta=rust:fasta
 # decode over the SAME `AlmideValue` shape (borrowed field scan, owned `String`
 # record fields). Reported like strchurn: each op is eight short-string
 # allocations, so the ratio compares allocators before it compares codegen.
-REPORTED="listbuild=rust:listbuild listbuild-append=rust:listbuild listbuild-comb=rust:listbuild strchurn=rust:strchurn mandelbrot=rust:mandelbrot decode=rust:decode"
+#
+# `wordfreq` / `wordfreq-group` (#2150, #2157) are the keyed-aggregation row in
+# its imperative and its CHEATSHEET (`list.group_by`) spelling, both against
+# `rust:wordfreq` — a `HashMap<String, i64>` with an owned key per draw, the
+# ordinary Rust for the program. Reported like strchurn: the row compares the
+# native `AlmideMap` (compact-ordered-dict, insertion order kept) against
+# std's hashbrown + SipHash, an allocator-and-hasher reading first. The
+# relation between the two spellings is the T5 reading (recommended = fastest).
+REPORTED="listbuild=rust:listbuild listbuild-append=rust:listbuild listbuild-comb=rust:listbuild strchurn=rust:strchurn mandelbrot=rust:mandelbrot decode=rust:decode wordfreq=rust:wordfreq wordfreq-group=rust:wordfreq"
 # VICTORY rows (#1330): the workloads where Almide native is FASTER than the
 # ordinary Rust for the program, and the gate is the claim itself. Each entry
 # is `bench=rust-ref-variant:ABLATION_ENV` — the env knob that turns off the
@@ -163,7 +171,7 @@ trap 'rm -f "$out"' EXIT
 
 python3 research/benchmark/perf/bench.py \
   --quick --runs "$RUNS" --legs native,rust \
-  --bench nbody,spectralnorm,fasta,fft,binarytrees,treealloc,listbuild,listbuild-append,listbuild-comb,strchurn,fannkuchredux,mandelbrot,decode \
+  --bench nbody,spectralnorm,fasta,fft,binarytrees,treealloc,listbuild,listbuild-append,listbuild-comb,strchurn,fannkuchredux,mandelbrot,decode,wordfreq,wordfreq-group \
   --label ratchet --out "$out"
 
 # VICTORY ABLATION LEG (#1330): each victory row rebuilt from the same source
