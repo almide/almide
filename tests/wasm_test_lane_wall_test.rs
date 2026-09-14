@@ -29,7 +29,7 @@ use std::process::Command;
 /// A `pub fn` matching a variant produced INSIDE it and returning a String —
 /// the #2160 shape. The incumbent brick walls it ("heap-result `match` outside
 /// the executable subset"); `almide build --target wasm` renders the same file
-/// on the structural leg and reports `verified`.
+/// on the structural leg and reports it as such.
 const WALLS_THE_INCUMBENT: &str = r#"
 type T = | A(String) | B
 
@@ -87,7 +87,7 @@ fn a_renderer_wall_is_reported_as_a_wall_not_as_a_plain_skip() {
         !report.contains("no verified wasm rendering"),
         "the reason must name the LEG that declined, not claim the product has no wasm \
          rendering — `almide build --target wasm` renders this same file on the structural \
-         leg and reports `verified`:\n{report}"
+         leg and says so:\n{report}"
     );
     assert!(
         report.contains("#2179"),
@@ -108,7 +108,7 @@ fn a_renderer_wall_is_reported_as_a_wall_not_as_a_plain_skip() {
 /// Every row below is ONE cause: the test lane renders through the incumbent
 /// brick alone, while `build`/`run`/`check --target wasm` render through the
 /// two-leg router whose default is the structural leg. `almide build --target
-/// wasm` reports `structural leg, verified` for all four. #2179 gives the lane
+/// wasm` reports `structural leg` for all four. #2179 gives the lane
 /// that route and empties this table.
 const TEST_LANE_WALLS: &[(&str, &str)] = &[
     // The incumbent leaves `Pt.repr` / `__repr_list_rec_reprlib_Cfg` unlinked;
@@ -237,8 +237,8 @@ fn the_build_lane_renders_the_file_the_test_lane_walls() {
         String::from_utf8_lossy(&out.stdout).to_string() + &String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success(), "the build lane must render this file:\n{report}");
     assert!(
-        report.contains("structural leg") && report.contains("verified"),
+        report.contains("structural leg") && report.contains("trusted, certificate pending"),
         "and must render it on the structural leg — that is the leg the test lane never \
-         asks (#2179):\n{report}"
+         asks (#2179) — under that leg's own trust label (#2184):\n{report}"
     );
 }

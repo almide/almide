@@ -454,10 +454,17 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
         (true, true) => "structural leg, WASI 0.2 component (adapter)",
         (false, true) => "incumbent v1 leg, WASI 0.2 component (adapter)",
     };
+    // The trust word belongs to the leg that earned it. The incumbent's bytes
+    // carry the per-function ownership certificate the kernel-proven checker
+    // re-verifies; the structural leg is trusted end to end with its
+    // certificate PENDING (#1696, docs/contracts/proven-vs-trusted.md). This
+    // line printed `verified` for both, which attached the word to output no
+    // certificate covered — #2154's run-time trap shipped under it (#2184).
+    let trust = if structural { "trusted, certificate pending" } else { "verified" };
     if !wasm_opt {
         err(&format!(
-            "Built {} ({} bytes, {}, verified — wasm-opt skipped; pass --wasm-opt for a smaller, non-verified build)",
-            output, pre_size, leg
+            "Built {} ({} bytes, {}, {} — wasm-opt skipped; pass --wasm-opt for a smaller build rewritten outside the renderer)",
+            output, pre_size, leg, trust
         ));
         return;
     }
@@ -466,14 +473,14 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
         Ok(post_size) => {
             let pct = if pre_size > 0 { 100.0 * (pre_size - post_size) as f64 / pre_size as f64 } else { 0.0 };
             err(&format!(
-                "Built {} ({} bytes → {} bytes, -{:.1}%) — wasm-opt applied: this is NOT the trust-spine-verified module",
-                output, pre_size, post_size, pct
+                "Built {} ({} bytes → {} bytes, -{:.1}%, {}) — wasm-opt applied: these are NOT the renderer's own bytes",
+                output, pre_size, post_size, pct, leg
             ));
         }
         Err(why) => {
             err(&format!(
-                "Built {} ({} bytes) — --wasm-opt requested but not applied: {}; shipped the verified module unoptimized",
-                output, pre_size, why
+                "Built {} ({} bytes, {}, {}) — --wasm-opt requested but not applied: {}; shipped the renderer's own module unoptimized",
+                output, pre_size, leg, trust, why
             ));
         }
     }
