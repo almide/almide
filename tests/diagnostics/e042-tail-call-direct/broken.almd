@@ -1,0 +1,9 @@
+// E042: a bare fallible call as the TAIL of a `-> Unit` effect fn (#2182).
+// The value is the fn's value, the fn returns Unit, so the Result is dropped —
+// the same must-use rule as a statement, with the same `!` spelling.
+import fs
+
+effect fn main() -> Unit = {
+  println("x")
+  fs.remove("b")
+}

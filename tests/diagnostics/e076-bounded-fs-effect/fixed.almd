@@ -2,4 +2,4 @@
 @bounded
 effect fn peek() -> Unit = println("bounded")
 
-effect fn main() -> Unit = peek()
+effect fn main() -> Unit = peek()!

@@ -818,6 +818,7 @@ impl Checker {
 include!("infer_control_ops.rs");
 include!("infer_calls_closures.rs");
 include!("infer_statements.rs");
+include!("infer_implicit_tail.rs");
 include!("infer_ident_collection.rs");
 include!("infer_loops_records.rs");
 

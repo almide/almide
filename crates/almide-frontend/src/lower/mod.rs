@@ -66,7 +66,9 @@ pub struct LowerCtx<'a> {
     /// (`let r: Result[Int, String] = step()`). auto_try keeps these as
     /// Result instead of inserting `?`. Only the annotation distinguishes
     /// them in the IR: an un-annotated `let v = boom()` where boom DECLARES
-    /// `-> Result[..]` has the identical Bind.ty but must auto-unwrap (#485).
+    /// `-> Result[..]` has the identical Bind.ty but must auto-unwrap (#485)
+    /// — a shape the checker rejects as E041 since ADR-0008, so it is now
+    /// recovery-only (#2182).
     pub annotated_result_vars: std::collections::HashSet<VarId>,
     /// Functions synthesized during expression lowering (fan.bounded outlining).
     pub synthesized_fns: Vec<almide_ir::IrFunction>,
@@ -576,6 +578,12 @@ fn finalize_ir_program(program: &mut IrProgram, env: &TypeEnv, annotated_result_
     // Auto-? insertion: wrap Result-typed calls in Try nodes.
     // This bridges the gap between checker (auto_unwrap strips Result
     // from bindings) and IR (Call nodes carry Result types).
+    // Since #2182 every position the checker strips is an E041/E042 error, so
+    // for an ACCEPTED program this pass only meets the explicit `!` (already a
+    // Try) and the Result-typed tails the language does accept — a
+    // `-> Result[..]` fn returning a Result-valued arm beside a plain-value arm,
+    // a `-> T!` marker fn's lifted tail — where the wrap/ok-strip is the
+    // declared return, not a propagation the writer left out.
     // #558: callees whose FIRST parameter is Result/Option must NOT have that
     // arg auto-?'d (it would unwrap the very value the callee consumes —
     // `error.context(inner(), msg)`, `result.unwrap_or(r, d)`, …). Derive the

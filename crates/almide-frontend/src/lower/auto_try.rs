@@ -8,6 +8,17 @@
 //
 // Moved from codegen (pass_result_propagation.rs Phase 3) to lowering
 // because this is desugaring, not code generation.
+//
+// ADR-0008 / #2182: the checker now reports every position it strips
+// (E041 / E042 — let/var/assign, statement, fn tail, match arm, if branch,
+// guard else), so on an accepted program the Try this pass inserts is the
+// one the writer spelled as `!`. What remains real work here is the
+// Result-typed tail the language accepts as the declared return: a
+// `-> Result[..]` fn whose tail match mixes a Result-valued arm with a
+// plain-value arm (`"greet" => greet(name), _ => ()`), and the `-> T!`
+// marker fn's lifted tail — the wrap and the ok-sugar strip below normalise
+// those to the fn's ABI shape. Deleting the pass therefore waits on those
+// two shapes getting their own lowering, not on the checker.
 
 use std::collections::{HashMap, HashSet};
 use almide_ir::*;

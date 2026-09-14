@@ -452,19 +452,43 @@ impl Checker {
     /// mechanical apply (`almide check --json` + span apply).
     fn validate_implicit_propagation(&mut self) {
         let checks = std::mem::take(&mut self.deferred_implicit_prop_checks);
-        let mut reported: std::collections::HashSet<(usize, usize)> = std::collections::HashSet::new();
+        // One report per span. A leaf several sites reach (#2182: a `match`
+        // arm's value queued by the arm join AND by the statement or `-> Unit`
+        // tail that discards it) keeps its first entry, upgraded to must-use
+        // when any later entry says the value is discarded — E042 outranks
+        // E041, and the discarding position names itself.
+        let mut order: Vec<(usize, usize)> = Vec::new();
+        let mut by_span: std::collections::HashMap<(usize, usize), (Ty, ast::Span, &'static str, bool, bool)> =
+            std::collections::HashMap::new();
         for (ty, span, what, mechanical, must_use) in checks {
             let resolved = resolve_ty(&ty, &self.uf);
             if !resolved.is_result() {
                 continue;
             }
             let Some(s) = span else { continue };
-            if !reported.insert((s.line, s.col)) {
-                continue;
+            match by_span.entry((s.line, s.col)) {
+                std::collections::hash_map::Entry::Vacant(e) => {
+                    order.push((s.line, s.col));
+                    e.insert((ty, s, what, mechanical, must_use));
+                }
+                std::collections::hash_map::Entry::Occupied(mut e) => {
+                    if must_use && !e.get().4 {
+                        e.get_mut().2 = what;
+                        e.get_mut().4 = true;
+                    }
+                }
             }
+        }
+        for key in order {
+            let Some((_, s, what, mechanical, must_use)) = by_span.remove(&key) else { continue };
             let mut d = if must_use {
+                let discarded = match what {
+                    "of this fn's tail value" => "the tail value of this `-> Unit` fn discards a Result — the error would be silently dropped",
+                    "of this guard's else value" => "this guard's else value discards a Result — the fn returns Unit, so the error would be silently dropped",
+                    _ => "this statement discards a Result — the error would be silently dropped",
+                };
                 Diagnostic::error(
-                    "this statement discards a Result — the error would be silently dropped".to_string(),
+                    discarded.to_string(),
                     "Propagate it with `expr!`, or discard it on purpose with `let _ = expr` \
                      (the explicit-discard spelling, ADR-0008 D2). Matching on ok/err also \
                      consumes it.",

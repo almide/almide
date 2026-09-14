@@ -241,8 +241,29 @@ impl Checker {
 
     /// Constrain an effect fn body against its return type signature.
     /// Effect fns accept: Unit body (control-flow returns), unwrapped T, or full Result[T, E].
-    fn constrain_effect_body(&mut self, name: &str, ret_ty: &Ty, body_ty: Ty) {
+    fn constrain_effect_body(&mut self, name: &str, ret_ty: &Ty, body_ty: Ty, body: &ast::Expr) {
         let body_resolved = resolve_ty(&body_ty, &self.uf);
+        // ADR-0008 / #2182: a Result-typed tail leaf of a fn declared `-> T`
+        // is implicit propagation — the auto-unwrap below is RECOVERY (so one
+        // error does not cascade), never acceptance. Queued before the Unit
+        // early-return: a block whose tail `if` carries the Result on its
+        // `else` types as Unit (the `if` takes its `then` arm's type) and
+        // slipped through here. `-> T` with T = Unit discards the value
+        // (E042); any other T uses it (E041). The `-> T!` marker fn keeps its
+        // lifted tail (ADR-0002 Phase 1b) — `auto_unwrap` is effect-only.
+        if self.env.auto_unwrap {
+            if ret_ty.is_result() {
+                // A Result-typed tail leaf of a fn declared `-> Result[..]` IS
+                // the return value, not a propagation — withdraw what the arm
+                // join / `if` comparison queued for it. Before the Unit
+                // early-return: the join of a stripped arm and a block-bodied
+                // `ok(())` arm resolves to Unit and would skip the withdrawal.
+                self.unqueue_implicit_prop_leaves(body);
+            } else {
+                let must_use = resolve_ty(ret_ty, &self.uf) == Ty::Unit;
+                self.queue_implicit_prop_leaves(body, "of this fn's tail value", must_use);
+            }
+        }
         if body_resolved == Ty::Unit { return; } // while loops, guard patterns return via control flow
         if let Ty::Applied(crate::types::TypeConstructorId::Result, args) = ret_ty {
             // ret_ty is Result[T, E]: body can be Result[T, E] or unwrapped T
@@ -369,7 +390,7 @@ impl Checker {
         // lowering wraps the T-typed exits in ok(...).
         let fallible_marker = matches!(return_type, ast::TypeExpr::Generic { name: g, .. } if g.as_str() == "!");
         if effect.unwrap_or(false) || fallible_marker {
-            self.constrain_effect_body(name, &ret_ty, body_ity);
+            self.constrain_effect_body(name, &ret_ty, body_ity, body);
         } else {
             // Capture the trailing `let` binding name (if any) to specialize
             // the Unit-leak E001 try: snippet downstream.

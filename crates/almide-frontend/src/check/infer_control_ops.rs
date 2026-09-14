@@ -273,7 +273,14 @@ impl Checker {
             return arm_ty;
         }
         match resolve_ty(&arm_ty, &self.uf) {
-            Ty::Applied(TypeConstructorId::Result, ref args) if args.len() == 2 => args[0].clone(),
+            Ty::Applied(TypeConstructorId::Result, ref args) if args.len() == 2 => {
+                // #2182: the strip is RECOVERY for the join; the arm's value
+                // is implicit propagation and is reported (E041 here — a
+                // statement-position or `-> Unit`-tail match upgrades it to
+                // the must-use E042 through the same leaf span).
+                self.queue_implicit_prop_leaves(&arm.body, "of this match arm's value", false);
+                args[0].clone()
+            }
             _ => arm_ty,
         }
     }
@@ -389,6 +396,16 @@ impl Checker {
                     }
                 };
                 let (cmp_then, cmp_else) = if self.env.auto_unwrap {
+                    // #2182: a branch whose Result the comparison strips is
+                    // implicit propagation — report it at the branch's tail
+                    // leaves (the `else` side never reached any report: the
+                    // `if` types as its `then` arm, so no consumer saw the
+                    // Result). The strip itself stays, as recovery.
+                    for branch in [&**then, &**else_] {
+                        if resolve_ty(&self.type_map.get(&branch.id).cloned().unwrap_or(Ty::Unknown), &self.uf).is_result() {
+                            self.queue_implicit_prop_leaves(branch, "of this if branch's value", false);
+                        }
+                    }
                     (cmp_unwrap(&then_ty, &self.uf), cmp_unwrap(&else_ty, &self.uf))
                 } else {
                     (then_ty.clone(), else_ty.clone())

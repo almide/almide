@@ -119,7 +119,7 @@ effect fn returns_string() -> String = "hello"
 
 // NOTE: effect fn calling another effect fn works via direct call within effect fn bodies.
 // In test blocks, effect fn calls return Result[T, String] — use ! for explicit unwrap.
-effect fn calls_effect() -> Int = returns_int()
+effect fn calls_effect() -> Int = returns_int()!
 
 test "effect fn returns value directly" {
   assert_eq(returns_int()!, 42)

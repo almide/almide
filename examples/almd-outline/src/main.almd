@@ -135,5 +135,5 @@ effect fn main() -> Unit = {
   let path = list.first(args)!
   let text = fs.read_text(path)!
   let iface = json.parse(text)!
-  print_outline(iface)
+  print_outline(iface)!
 }
