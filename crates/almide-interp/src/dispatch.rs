@@ -102,10 +102,11 @@ impl<'a> Interpreter<'a> {
 
         // 3. A user / stdlib free function lowered into the program. A stdlib
         //    IMPL name (`string_slice` — how a lowered MODULE body spells
-        //    `string.slice`) first tries the SAME native bridge a
-        //    module-spelled call takes, so both spellings share one resolution
-        //    order; the lowered body stays the fallback. Mut-param impls skip
-        //    the shortcut (the bridge has no write-back path, #1022).
+        //    `string.slice`) takes the SAME resolution order a module-spelled
+        //    call takes: the interp-native container op, then the lowered
+        //    body, then the bridge only where the body abstains (#2185).
+        //    Mut-param impls skip the shortcut (the bridge has no write-back
+        //    path, #1022).
         if let Some(func) = self.fns.get(&name).copied() {
             if let Some((m, f)) = crate::stdlib_pool::module_of_impl(name) {
                 // The in-interp HOFs take closure ARGUMENTS and must see the
@@ -122,20 +123,29 @@ impl<'a> Interpreter<'a> {
                     {
                         return result;
                     }
-                    if let Some(result) = crate::bridge::dispatch(m.as_str(), f.as_str(), &evaled)
+                    // Same two-tier rule as `dispatch_module_resolved`: inside
+                    // the pool tier the bridge is the floor a body consumes.
+                    let floor_first = self.pool_depth > 0;
+                    if floor_first
+                        && let Some(result) = crate::bridge::dispatch(m.as_str(), f.as_str(), &evaled)
                     {
+                        self.record_bridge_floor(m, f);
                         return result;
                     }
                     let root = self.root_scope();
-                    let flow = self.call_pool_tier(func, evaled, &root);
+                    let flow = self.call_pool_tier(func, evaled.clone(), &root);
                     // #1226 return sync at the NAMED spelling too — the same
                     // body reachable both ways must read back the same way.
                     // Pool bodies only: a program fn that happens to share an
                     // impl name keeps the fixture tier's raw address model.
-                    return if self.pool_fns.contains(&func.name) {
+                    let flow = if self.pool_fns.contains(&func.name) {
                         self.sync_at_pool_boundary(func, flow)
                     } else {
                         flow
+                    };
+                    return match flow {
+                        Flow::Unsupported(why) if !floor_first => self.bridge_fallback(m, f, &evaled, why),
+                        other => other,
                     };
                 }
             }

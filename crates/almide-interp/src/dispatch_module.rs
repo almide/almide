@@ -261,8 +261,9 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    /// interp-native container ops → scalar/string bridge → almide-bodied
-    /// stdlib fn → unsupported.
+    /// interp-native container ops → the prim floors that hold interpreter
+    /// state → the lowered (self-hosted) body → the bridge only where that
+    /// body abstains or does not exist (#2185) → unsupported.
     pub(crate) fn dispatch_module_resolved(
         &mut self,
         module: Sym,
@@ -293,28 +294,74 @@ impl<'a> Interpreter<'a> {
         if let Some(flow) = self.prim_floor(module.as_str(), func.as_str(), &args) {
             return flow;
         }
-        // Scalar / string / math native bridge (intrinsic-symbol surface).
-        if let Some(result) = crate::bridge::dispatch(module.as_str(), func.as_str(), &args) {
-            return result;
+        // #2185: the self-hosted body — the SAME source the wasm leg links for
+        // this call name, and the definition the native leg compiles — is
+        // consulted FIRST, so the third vote is the linked body's, not a
+        // hand-mirrored Rust copy of it. The bridge is the FALLBACK, in two
+        // cases only: a name with no lowered body (a true `@intrinsic` stub),
+        // and a body that abstains from inside (a heap/effect prim outside
+        // the scalar floor, or the `mut`-parameter gate below). There the
+        // bridge's Rust-std answer is still an implementation independent of
+        // both backends' codegen, and without it every string fixture would
+        // leave the executable spec — the abstain ledger only shrinks.
+        // `bridge_fallbacks` records each such fallback by name, so the arms
+        // a body now shadows are measurable (and deletable) rather than
+        // assumed.
+        // INSIDE the pool tier (a self-hosted body evaluating), the bridge is
+        // part of the FLOOR the bodies consume, exactly like `prim.*`: a
+        // body's helper calls (`string.len` from the json decoder) are
+        // answered over `Value`s here, where nesting another body over the
+        // block heap is what the tier cannot yet do faithfully (the 11
+        // wrong votes of the first body-first measurement: json paths, glob,
+        // header lookup, codec error paths, two unbound-VarId crashes).
+        let floor_first = self.pool_depth > 0;
+        if floor_first {
+            if let Some(result) = crate::bridge::dispatch(module.as_str(), func.as_str(), &args) {
+                self.record_bridge_floor(module, func);
+                return result;
+            }
         }
-
         let Some((func_def, gate_mut)) = self.resolve_lowered_body(module, func) else {
-            return Flow::Unsupported(format!("{}.{}", module, func));
+            let why = format!("no lowered body for {}.{}", module, func);
+            return if floor_first { Flow::Unsupported(why) } else { self.bridge_fallback(module, func, &args, why) };
+        };
+        // An ARITY overload (`string.slice(s, start)` beside `string.slice(s,
+        // start, end)`): the frontend admits the short form without padding
+        // it, and the registry links it as its own impl under the arity
+        // suffix (`string.slice2`) — the same spelling the wasm leg routes
+        // to. Binding the short call to the long body left its last param
+        // unbound (`unbound variable VarId(11)` in the codepoint fixtures).
+        // No suffixed twin → the body cannot take this call; say so.
+        let (func, func_def, gate_mut) = if func_def.params.len() == args.len() {
+            (func, func_def, gate_mut)
+        } else {
+            let twin = almide_base::intern::sym(&format!("{}{}", func.as_str(), args.len()));
+            match self.resolve_lowered_body(module, twin) {
+                Some((d, g)) if d.params.len() == args.len() => (twin, d, g),
+                _ => {
+                    let why = format!(
+                        "{}.{} called with {} argument(s); its lowered body takes {}",
+                        module, func, args.len(), func_def.params.len()
+                    );
+                    return if floor_first { Flow::Unsupported(why) } else { self.bridge_fallback(module, func, &args, why) };
+                }
+            }
         };
         // These sites receive EAGERLY-evaluated args, so a `mut` parameter's
         // caller lvalue is already gone — the Named path's copy-out (#1022)
         // cannot run here. A mut-param callee must abstain rather than
         // silently drop the write-back (a wrong third vote).
         if gate_mut && func_def.params.iter().any(|p| p.is_mut) {
-            return Flow::Unsupported(format!(
+            let why = format!(
                 "module call `{}.{}` with a `mut` parameter through the \
                  eager dispatch path (no caller lvalue to copy out — #1022)",
                 module.as_str(),
                 func.as_str()
-            ));
+            );
+            return if floor_first { Flow::Unsupported(why) } else { self.bridge_fallback(module, func, &args, why) };
         }
         let root = self.root_scope();
-        let flow = self.call_pool_tier(func_def, args, &root);
+        let flow = self.call_pool_tier(func_def, args.clone(), &root);
         // #1226 RETURN SYNC. A self-hosted body that allocated a block returns
         // the block's ADDRESS (`prim.alloc_str` is an Int), so the value has to
         // be read back out of the arena before it leaves the pool tier —
@@ -329,8 +376,47 @@ impl<'a> Interpreter<'a> {
         // (`pool_depth == 0` at the call): inside the tier a heap value IS its
         // address, and an eager rebuild there snapshots blocks the caller is
         // still writing through (see `pool_fns`).
-        self.sync_at_pool_boundary(func_def, flow)
+        let flow = self.sync_at_pool_boundary(func_def, flow);
+        match flow {
+            Flow::Unsupported(why) if !floor_first => self.bridge_fallback(module, func, &args, why),
+            other => other,
+        }
     }
+
+    /// A bridge answer INSIDE the pool tier (#2185): the floor a body
+    /// consumed, recorded under the same ledger as the boundary fallbacks so
+    /// an arm no body and no fixture reaches is visibly dead.
+    pub(crate) fn record_bridge_floor(&mut self, module: Sym, func: Sym) {
+        if module.as_str() == "prim" {
+            return;
+        }
+        let name = format!("{}.{}", module, func);
+        let mut seen = self.bridge_fallbacks.borrow_mut();
+        if !seen.iter().any(|(n, _)| *n == name) {
+            seen.push((name, "floor: consumed inside a self-hosted body".to_string()));
+        }
+    }
+
+    /// The bridge as the body's fallback (#2185): there is no lowered body, or
+    /// it abstained — `why` says which. Answer from the hand-mirrored bridge
+    /// when it has this name, recording the fallback so every bridge answer
+    /// over the corpus is measurable (`interp_bridge_fallback_ledger`), else
+    /// abstain with that reason.
+    fn bridge_fallback(&mut self, module: Sym, func: Sym, args: &[Value], why: String) -> Flow {
+        match crate::bridge::dispatch(module.as_str(), func.as_str(), args) {
+            Some(result) => {
+                // The `prim.*` scalar floor is the spec's own vocabulary (the
+                // MIR ops both backends render from), consumed BY the bodies —
+                // not a mirror of one, so it is not a fallback to ledger.
+                if module.as_str() != "prim" {
+                    self.bridge_fallbacks.borrow_mut().push((format!("{}.{}", module, func), why));
+                }
+                result
+            }
+            None => Flow::Unsupported(why),
+        }
+    }
+
 
     /// The `prim` floors that read or MUTATE per-run interpreter state, which
     /// the stateless `bridge::prim_fn` cannot hold: the block heap, the guarded
@@ -733,11 +819,12 @@ impl<'a> Interpreter<'a> {
     /// spun to fuel exhaustion; the module-identity class, #1087–#1094); and
     /// LAST the self-hosted stdlib body from the shared registry (stdlib_pool)
     /// — the SAME source the wasm leg links for this call name, lowered once
-    /// and layered into `self.fns` at construction. Consulted last so the
-    /// interp-native surfaces above keep their vote provenance; what a pool
-    /// body itself cannot evaluate (a heap/effect prim outside the scalar
-    /// floor) abstains from inside with that prim named — a skip, never a
-    /// guess — so the mut gate does not apply to it.
+    /// and layered into `self.fns` at construction. Consulted after the two
+    /// module-owned sources so a user module keeps its vote provenance; what
+    /// a pool body itself cannot evaluate (a heap/effect prim outside the
+    /// scalar floor) abstains from inside with that prim named — a skip,
+    /// never a guess (the caller then tries the bridge, #2185) — so the mut
+    /// gate does not apply to it.
     ///
     /// A `Hole` body is an intrinsic stub, not an interpretable definition:
     /// each source skips it and falls through to the next.
