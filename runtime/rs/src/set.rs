@@ -8,24 +8,23 @@
 // records-without-Hash work too.
 //
 // Membership: `items` stays the source of truth for order, equality and repr;
-// past `ALMIDE_MAP_INDEX_THRESHOLD` a sidecar fingerprint index (same design and
-// invariants as `AlmideMap` — the helper and threshold live in map.rs and
-// resolve via flat inlining; the `almide_rt_map_` reference also declares the
-// map dependency to RUNTIME_DEPS) makes `insert` / `contains` O(1).
-// Non-fingerprintable element types (Float et al) stay on the linear path.
+// past `ALMIDE_MAP_INDEX_THRESHOLD` the same `AlmideKeyIndex` a map carries
+// (compact-ordered-dict: slot table of positions + cached hashes — the type,
+// the hasher and the threshold live in map.rs and resolve via flat inlining;
+// the `almide_rt_map_` reference also declares the map dependency to
+// RUNTIME_DEPS) makes `insert` / `contains` O(1). Element types with no hash
+// (Float et al) stay on the linear path.
 
 
 #[derive(Clone, Debug, Default)]
 pub struct AlmideSet<T> {
     items: Vec<T>,
-    /// fingerprint → position in `items` (flat, last write wins — see the
-    /// AlmideMap index doc in map.rs for the collision rule).
-    index: Option<std::collections::HashMap<u64, u32>>,
+    lookup: AlmideKeyLookup,
 }
 
 impl<T> AlmideSet<T> {
     pub fn new() -> Self {
-        AlmideSet { items: Vec::new(), index: None }
+        AlmideSet { items: Vec::new(), lookup: AlmideKeyLookup::Linear }
     }
     pub fn len(&self) -> usize {
         self.items.len()
@@ -39,61 +38,55 @@ impl<T> AlmideSet<T> {
 }
 
 impl<T: PartialEq + 'static> AlmideSet<T> {
-    fn position(&self, value: &T) -> Option<usize> {
-        if let Some(idx) = &self.index {
-            if let Some(fp) = almide_rt_map_key_fingerprint(value) {
-                return match idx.get(&fp) {
-                    None => None,
-                    Some(&p) if self.items[p as usize] == *value => Some(p as usize),
-                    Some(_) => self.items.iter().position(|x| x == value),
-                };
+    /// `Q` is the borrowed member form (`str` for a `String` set), as in map.rs.
+    #[inline]
+    fn position_with<Q: ?Sized + PartialEq>(&self, value: &Q, h: Option<u64>) -> Option<usize>
+    where T: std::borrow::Borrow<Q> {
+        match (&self.lookup, h) {
+            (AlmideKeyLookup::Built(ix), Some(h)) => ix.find(h, |p| self.items[p].borrow() == value),
+            _ => self.items.iter().position(|x| x.borrow() == value),
+        }
+    }
+
+    #[inline]
+    fn position<Q: ?Sized + PartialEq + AlmideMapKey>(&self, value: &Q) -> Option<usize>
+    where T: std::borrow::Borrow<Q> {
+        self.position_with(value, self.lookup.hash_for(value))
+    }
+
+    /// A new item was appended: extend the index, or build it at the threshold.
+    #[inline]
+    fn note_push(&mut self, h: Option<u64>) {
+        if let AlmideKeyLookup::Built(ix) = &mut self.lookup {
+            if let Some(h) = h {
+                ix.push(h);
             }
-        }
-        self.items.iter().position(|x| x == value)
-    }
-
-    fn maybe_build_index(&mut self) {
-        if self.index.is_some() || self.items.len() < ALMIDE_MAP_INDEX_THRESHOLD {
             return;
         }
-        let mut idx: std::collections::HashMap<u64, u32> = std::collections::HashMap::with_capacity(self.items.len());
-        for (i, x) in self.items.iter().enumerate() {
-            let Some(fp) = almide_rt_map_key_fingerprint(x) else { return };
-            idx.insert(fp, i as u32);
+        if matches!(self.lookup, AlmideKeyLookup::Linear) && self.items.len() >= ALMIDE_MAP_INDEX_THRESHOLD {
+            self.lookup.build(self.items.iter(), self.items.len());
         }
-        self.index = Some(idx);
-    }
-
-    fn rebuild_index(&mut self) {
-        if self.index.is_none() {
-            return;
-        }
-        self.index = None;
-        self.maybe_build_index();
     }
 
     /// Append if absent (preserves first-seen order). Returns true if inserted.
     pub fn insert(&mut self, value: T) -> bool {
-        if self.position(&value).is_some() {
+        let h = self.lookup.hash_for(&value);
+        if self.position_with(&value, h).is_some() {
             return false;
         }
-        if let Some(idx) = self.index.as_mut() {
-            if let Some(fp) = almide_rt_map_key_fingerprint(&value) {
-                idx.insert(fp, self.items.len() as u32);
-            }
-        }
         self.items.push(value);
-        self.maybe_build_index();
+        self.note_push(h);
         true
     }
-    pub fn contains(&self, value: &T) -> bool {
+    pub fn contains<Q: ?Sized + PartialEq + AlmideMapKey>(&self, value: &Q) -> bool
+    where T: std::borrow::Borrow<Q> {
         self.position(value).is_some()
     }
     /// Remove, keeping the order of the survivors. Returns true if present.
     pub fn remove(&mut self, value: &T) -> bool {
         if let Some(i) = self.position(value) {
             self.items.remove(i);
-            self.rebuild_index();
+            self.lookup.removed_at(i);
             true
         } else {
             false
@@ -161,7 +154,9 @@ pub fn almide_rt_set_new<T>() -> AlmideSet<T> { AlmideSet::new() }
 pub fn almide_rt_set_from_list<T: PartialEq + Clone + 'static>(xs: &[T]) -> AlmideSet<T> { xs.iter().cloned().collect() }
 pub fn almide_rt_set_insert<T: PartialEq + Clone + 'static>(s: &AlmideSet<T>, value: T) -> AlmideSet<T> { let mut s = s.clone(); s.insert(value); s }
 pub fn almide_rt_set_remove<T: PartialEq + Clone + 'static>(s: &AlmideSet<T>, value: T) -> AlmideSet<T> { let mut s = s.clone(); s.remove(&value); s }
-pub fn almide_rt_set_contains<T: PartialEq + 'static>(s: &AlmideSet<T>, value: T) -> bool { s.contains(&value) }
+// Borrowed member (`@borrow_ref(value)` in stdlib/set.almd), as map.get is.
+pub fn almide_rt_set_contains<T: PartialEq + 'static, Q: ?Sized + PartialEq + AlmideMapKey>(s: &AlmideSet<T>, value: &Q) -> bool
+where T: std::borrow::Borrow<Q> { s.contains(value) }
 pub fn almide_rt_set_len<T>(s: &AlmideSet<T>) -> i64 { s.len() as i64 }
 pub fn almide_rt_set_is_empty<T>(s: &AlmideSet<T>) -> bool { s.is_empty() }
 pub fn almide_rt_set_to_list<T: Clone>(s: &AlmideSet<T>) -> Vec<T> { s.iter().cloned().collect() }
