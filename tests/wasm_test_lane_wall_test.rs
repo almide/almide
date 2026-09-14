@@ -14,9 +14,15 @@
 //! decided are not the same verdict, and the lane must say which one it made.
 //! A declared `// wasm:skip` means wasm CANNOT run the file; a WALL means a leg
 //! has not lowered the shape yet. The marker is not a place to park the second
-//! — `tests/wasm_skip_ledger_test.rs` refuses subset debt outright (#812) —
-//! so the walls get their own shrink-only register, `proofs/wasm-test-walls.txt`,
-//! gated by `scripts/check-wasm-test-walls.sh`.
+//! — `tests/wasm_skip_ledger_test.rs` refuses subset debt outright (#812) — so
+//! the walls get [`TEST_LANE_WALLS`] below, held shrink-only in both directions
+//! by [`the_wall_register_lists_exactly_the_specs_that_wall`].
+//!
+//! That register lives HERE rather than in a `scripts/check-*.sh`: it is a
+//! ledger, and #2128's decision is that a gate reading a ledger is written in
+//! Almide, not shell — every `.sh` row in `proofs/gate-verification.toml` is
+//! UNCLASSIFIED debt under a shrink-only ceiling, and adding one more would
+//! have needed that ceiling raised to land a fix for a different problem.
 
 use std::process::Command;
 
@@ -89,30 +95,90 @@ fn a_renderer_wall_is_reported_as_a_wall_not_as_a_plain_skip() {
     );
 }
 
-/// The register's gate is the thing that makes a wall non-silent in THIS
-/// repository, so it must actually agree with the lane it reads.
+/// The spec files whose tests do NOT run on the wasm lane because a renderer
+/// declined them — the other way a file can fail to reach that leg, and the one
+/// `tests/wasm_skip_ledger_test.rs` is blind to by construction (a wall carries
+/// no marker, so it appeared in no ledger at all).
+///
+/// A row here is NOT the claim a `// wasm:skip` makes. That marker says wasm
+/// CANNOT run the file and its ledger refuses subset debt outright (#812, "fix
+/// the wall rather than parking it here"). A row here says a LEG has not
+/// lowered the shape yet, and names the issue that removes it.
+///
+/// Every row below is ONE cause: the test lane renders through the incumbent
+/// brick alone, while `build`/`run`/`check --target wasm` render through the
+/// two-leg router whose default is the structural leg. `almide build --target
+/// wasm` reports `structural leg, verified` for all four. #2179 gives the lane
+/// that route and empties this table.
+const TEST_LANE_WALLS: &[(&str, &str)] = &[
+    // The incumbent leaves `Pt.repr` / `__repr_list_rec_reprlib_Cfg` unlinked;
+    // a dangling call would be invalid wasm, so it refuses honestly.
+    ("spec/integration/modules/cross_module_repr_derive_test.almd", "#2179"),
+    // `pub fn area_note`: a heap-result `match` outside the incumbent's
+    // executable subset — the #2160 shape.
+    ("spec/lang/as_pattern_test.almd", "#2179"),
+    // `pub fn total`: a `match` over an untracked subject with a call- or
+    // assign-carrying arm.
+    ("spec/lang/list_rest_pattern_test.almd", "#2179"),
+    // `zli_gunzip_members` / `zli_inflate_stream` unlinked. NOTE: the skip
+    // ledger retired this file's row on 2026-09-01 saying it "runs the wasm leg
+    // for real" after #1700, and docs/stdlib/zlib.md still says the file is
+    // marked `// wasm:skip`. Neither was true, and the silent wall is why
+    // nobody noticed.
+    ("spec/stdlib/zlib_test.almd", "#2179"),
+];
+
+/// The register, held equal to what the lane actually reports — BOTH
+/// directions. A new wall cannot join silently, and a row whose file now runs
+/// must be deleted: this only shrinks.
+///
+/// It runs the lane over `spec/` rather than re-deriving the verdict, so there
+/// is no second spelling of "does this file wall" to drift from the first. The
+/// wall verdict is decided at RENDER time, so this is correct with or without
+/// wasmtime on the box (without it the files that do run become Environment
+/// skips, which are not walls).
 #[test]
 fn the_wall_register_lists_exactly_the_specs_that_wall() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let register = std::fs::read_to_string(root.join("proofs/wasm-test-walls.txt"))
-        .expect("proofs/wasm-test-walls.txt");
-    let rows: Vec<&str> = register
+    let out = Command::new(almide_bin())
+        .args(["test", "spec/", "--target", "wasm"])
+        .current_dir(root)
+        .output()
+        .expect("run the lane");
+    let report =
+        String::from_utf8_lossy(&out.stdout).to_string() + &String::from_utf8_lossy(&out.stderr);
+    let observed: std::collections::BTreeSet<&str> = report
         .lines()
-        .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
-        .map(|l| l.split('\t').next().unwrap_or(""))
+        .filter_map(|l| l.strip_prefix("WALL "))
+        .filter_map(|l| l.split_whitespace().next())
         .collect();
-    assert!(!rows.is_empty(), "the register must not be empty while #2179 is open");
-    for r in &rows {
+    let registered: std::collections::BTreeSet<&str> =
+        TEST_LANE_WALLS.iter().map(|(f, _)| *f).collect();
+
+    let new: Vec<&&str> = observed.difference(&registered).collect();
+    assert!(
+        new.is_empty(),
+        "these files' tests did not run on wasm and are not in TEST_LANE_WALLS: {new:?}\n\
+         Fix the wall, or add a row naming the issue that removes it. A `// wasm:skip` is NOT \
+         the place — that says wasm CANNOT run the file, and its ledger refuses subset debt \
+         (#812)."
+    );
+    let stale: Vec<&&str> = registered.difference(&observed).collect();
+    assert!(
+        stale.is_empty(),
+        "TEST_LANE_WALLS lists files that now run on wasm: {stale:?}\nDelete the row — the \
+         register only shrinks."
+    );
+
+    for (f, issue) in TEST_LANE_WALLS {
+        assert!(root.join(f).exists(), "the register names a file that does not exist: {f}");
+        assert!(!issue.is_empty(), "{f}: a row must name the issue that removes it");
         assert!(
-            root.join(r).exists(),
-            "the register names a file that does not exist: {r}"
-        );
-        assert!(
-            !std::fs::read_to_string(root.join(r))
+            !std::fs::read_to_string(root.join(f))
                 .unwrap_or_default()
                 .lines()
                 .any(|l| l.trim_start().starts_with("// wasm:skip")),
-            "{r} is registered as subset debt AND carries a platform-limit marker — it must \
+            "{f} is registered as subset debt AND carries a platform-limit marker — it must \
              be one or the other (#812)"
         );
     }
