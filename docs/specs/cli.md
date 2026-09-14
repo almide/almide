@@ -135,7 +135,12 @@ almide test --update-snapshots x_test.almd  # スナップショットの受理(
 `test` ブロックが無かった場合の両方**に適用される。5 は 1(テスト失敗)と区別するための
 専用コードで、呼び出し側が出力を読まずに判別できる。
 
-テスト: `tests/test_zero_outcomes_test.rs`
+この表は**ターゲットを問わない**: 同じファイル・同じ引数なら `--target wasm` も同じ終了
+コードと同じ件数行(`0 tests in 1 file`)を返す。`main` も `test` ブロックも無いファイルは
+レンダラの壁(WALL、そのレグが辞退した)ではなく「走らせるものが無かった」であり、両レグで
+5 になる(#2204)。
+
+テスト: `tests/test_zero_outcomes_test.rs`、両ターゲット一致は `tests/test_zero_exit_parity_test.rs`
 
 `--run <pattern>` は **生成された関数名に対する大文字小文字を区別する部分文字列一致**で、
 `test "…"` のラベルそのものではない。ラベルは `__test_almd_` を前置し、空白・記号を `_` に
