@@ -1,24 +1,35 @@
 
-/// The `prim.*` fs floors that take a #2206 CALL HEAD, by base name. `prim.<base>`
-/// names the floor's own call (`fs.read_text`, `fs.write`, `fs.list_dir`,
-/// `fs.mkdir_p`, `fs.remove_all`); `prim.<base>_as(…, call)` names the composite
-/// it serves (`fs.read_lines`, `fs.walk`, `fs.remove`, …); and, for the two FILE
-/// floors only, `prim.<base>_as_pair(…, call, first, second)` names both paths
-/// of a two-path call (`fs.copy(src, dst)`) in message order.
-pub(crate) const FS_FLOOR_BASES: &[&str] =
-    &["read_text_file", "read_bytes_file", "write_text_file", "read_dir", "make_dir", "remove_all"];
+/// The `prim.*` fs floors that take a #2206 CALL HEAD: every spelling, with the
+/// floor it reaches. `prim.<floor>` names the floor's own call (`fs.read_text`,
+/// `fs.write`, `fs.list_dir`, `fs.mkdir_p`, `fs.remove_all`); `prim.<floor>_as(…,
+/// call)` names the composite it serves (`fs.read_lines`, `fs.walk`, `fs.remove`,
+/// …); and, for the two FILE floors only, `prim.<floor>_as_pair(…, call, first,
+/// second)` names both paths of a two-path call (`fs.copy(src, dst)`) in message
+/// order. Every spelling is a literal here — `scripts/check-intrinsic-boundary.sh`
+/// proves each `@intrinsic("almide_rt_prim_<name>")` in stdlib/prim.almd has a
+/// lowering by finding its name in this crate.
+pub(crate) const FS_FLOOR_PRIMS: &[(&str, &str)] = &[
+    ("read_text_file", "read_text_file"),
+    ("read_text_file_as", "read_text_file"),
+    ("read_text_file_as_pair", "read_text_file"),
+    ("read_bytes_file", "read_bytes_file"),
+    ("read_bytes_file_as", "read_bytes_file"),
+    ("write_text_file", "write_text_file"),
+    ("write_text_file_as", "write_text_file"),
+    ("write_text_file_as_pair", "write_text_file"),
+    ("read_dir", "read_dir"),
+    ("read_dir_as", "read_dir"),
+    ("make_dir", "make_dir"),
+    ("make_dir_as", "make_dir"),
+    ("remove_all", "remove_all"),
+    ("remove_all_as", "remove_all"),
+];
 
-/// The floor a `prim.*` name reaches, as its BASE name — `None` for a name that is
-/// not an fs floor or not a twin the floor has. ONE decoder: the lowering router,
-/// the floor lowering and the can-err analysis all read it, so a twin is known
-/// everywhere at once.
+/// The floor a `prim.*` name reaches — `None` for a name that is not an fs floor
+/// spelling. ONE decoder: the lowering router, the floor lowering and the
+/// can-err analysis all read it, so a twin is known everywhere at once.
 pub(crate) fn fs_floor_base(func: &str) -> Option<&'static str> {
-    let pair = func.ends_with("_as_pair");
-    let base = func.strip_suffix("_as_pair").or_else(|| func.strip_suffix("_as")).unwrap_or(func);
-    FS_FLOOR_BASES
-        .iter()
-        .copied()
-        .find(|b| *b == base && (!pair || matches!(*b, "read_text_file" | "write_text_file")))
+    FS_FLOOR_PRIMS.iter().find(|(name, _)| *name == func).map(|(_, floor)| *floor)
 }
 
 /// The closed set of primitive-floor operations (the trusted, wasm-spec-faithful
