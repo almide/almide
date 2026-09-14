@@ -717,6 +717,17 @@ fn render_expr_borrow(ctx: &RenderContext, expr: &IrExpr) -> String {
                 .replace('\n', "\\n").replace('\t', "\\t").replace('\r', "\\r");
             return format!("\"{}\"", escaped);
         }
+        // #2188: a loop binder the body only borrows is bound by `.iter()` as
+        // `&String` (`borrowed_loop_vars`, #1673). `&*c` re-derefs that to
+        // `&String`, and an ordering against a `&str` literal has no
+        // `PartialOrd<&str> for &String` (only `==` survived, through the
+        // blanket `PartialEq<str> for String`). `String::as_str` reaches the
+        // `&str` through the reference and the owned binding alike; ref
+        // params keep `&*` because they are already `&str` and `str::as_str`
+        // is still unstable.
+        if let IrExprKind::Var { id } = &inner.kind && ctx.ann.borrowed_loop_vars.contains(id) {
+            return format!("{}.as_str()", render_expr(ctx, inner));
+        }
         format!("&*{}", render_expr(ctx, inner))
     } else {
         if let Some(rendered) = try_render_borrowed_field_lookup(ctx, inner) {
