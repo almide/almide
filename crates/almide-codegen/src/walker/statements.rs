@@ -599,14 +599,28 @@ fn render_stmt_index_assign(ctx: &RenderContext, stmt: &IrStmt) -> String {
 
 fn render_stmt_map_insert(ctx: &RenderContext, stmt: &IrStmt) -> String {
     let IrStmtKind::MapInsert { target, key, value } = &stmt.kind else { unreachable!() };
-    let target_str = ctx.var_name(*target).to_string();
     let key_str = render_expr(ctx, key);
     let val_str = render_expr(ctx, value);
+    // A plain-var key: the clone pass counted the value's uses FIRST (so the
+    // key is the var's last use and moves), and rustc evaluates call
+    // arguments key-then-value — bind the value to a temporary ahead of the
+    // insert so the borrow inside it ends before the key moves.
+    if crate::pass_clone_places::map_insert_value_first(key, value) {
+        let insert = render_map_insert_form(ctx, *target, &key_str, "__almide_mv");
+        return format!("{{ let __almide_mv = {val_str}; {insert} }}");
+    }
+    render_map_insert_form(ctx, *target, &key_str, &val_str)
+}
+
+/// The insert statement for `target`'s storage form, with the key and value
+/// already rendered.
+fn render_map_insert_form(ctx: &RenderContext, target: VarId, key_str: &str, val_str: &str) -> String {
+    let target_str = ctx.var_name(target).to_string();
     // Shared-mut non-Copy var (`AlmideSharedMut`, P6): insert through the cell.
-    if ctx.ann.is_shared_mut(target) {
+    if ctx.ann.is_shared_mut(&target) {
         return format!("{}.borrow_mut().insert({}, {});", target_str, key_str, val_str);
     }
-    if let Some(info) = ctx.ann.global(*target) {
+    if let Some(info) = ctx.ann.global(target) {
         use almide_ir::top_let_storage::TopLetStorage as Tls;
         return match info.storage {
             Tls::RcRefCell => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut()).insert({}, {}));", info.static_name, key_str, val_str),
@@ -616,9 +630,9 @@ fn render_stmt_map_insert(ctx: &RenderContext, stmt: &IrStmt) -> String {
             ),
         };
     }
-    match ctx.ann.get_var_storage(target) {
+    match ctx.ann.get_var_storage(&target) {
         VarStorage::RcCow => format!("{}.make_mut().insert({}, {});", target_str, key_str, val_str),
-        _ => ctx.templates.render_with("map_insert", None, &[], &[("target", target_str.as_str()), ("key", key_str.as_str()), ("value", val_str.as_str())])
+        _ => ctx.templates.render_with("map_insert", None, &[], &[("target", target_str.as_str()), ("key", key_str), ("value", val_str)])
             .unwrap_or_else(|| "map_set(...)".into()),
     }
 }
