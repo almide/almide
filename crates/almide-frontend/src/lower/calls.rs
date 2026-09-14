@@ -422,8 +422,8 @@ fn lower_call_json_convenience(
 fn lower_call_fill_defaults(ctx: &mut LowerCtx, ir_args: &mut Vec<IrExpr>, args: &[ast::Expr], target: &CallTarget) {
     let Some(key) = target_fn_key(target) else { return };
     let Some(defaults) = target_defaults(ctx, target) else { return };
-    let param_names: Vec<Sym> = ctx.env.functions.get(&key)
-        .map(|sig| sig.params.iter().map(|(n, _)| almide_base::intern::sym(&n.to_string())).collect())
+    let (param_names, param_tys): (Vec<Sym>, Vec<Ty>) = ctx.env.functions.get(&key)
+        .map(|sig| sig.params.iter().map(|(n, t)| (almide_base::intern::sym(&n.to_string()), t.clone())).unzip())
         .unwrap_or_default();
     let n_provided = ir_args.len();
     let aligned = n_provided == args.len() && !param_names.is_empty();
@@ -435,15 +435,33 @@ fn lower_call_fill_defaults(ctx: &mut LowerCtx, ir_args: &mut Vec<IrExpr>, args:
     }
     for j in n_provided..defaults.len() {
         if let Some(default_expr) = defaults.get(j).and_then(|d| d.as_ref()) {
-            if aligned {
+            let mut filled = if aligned {
                 let mut d = default_expr.clone();
                 substitute_call_params(&mut d, &param_values);
                 if let Some(pn) = param_names.get(j) { param_values.insert(*pn, d.clone()); }
-                ir_args.push(lower_expr(ctx, &d));
+                lower_expr(ctx, &d)
             } else {
-                ir_args.push(lower_expr(ctx, default_expr));
-            }
+                lower_expr(ctx, default_expr)
+            };
+            retype_filled_default(&mut filled, param_tys.get(j));
+            ir_args.push(filled);
         }
+    }
+}
+
+/// A default's AST is cloned from the CALLEE's declaration, so its node ids
+/// index the callee's parse, not this program's TypeMap: `expr_ty` on it reads
+/// whichever node of THIS program shares the id — `string.slice(s, 2)`'s
+/// filled `end` bound came out `Unit`-typed, and the #2184 router gate refused
+/// the call for it. The checker never saw the cloned node, so the declared
+/// parameter type is the only authority for it; a concrete declaration wins,
+/// a generic one leaves the lowered type alone.
+fn retype_filled_default(filled: &mut IrExpr, declared: Option<&Ty>) {
+    if let Some(t) = declared
+        && *t != Ty::Unknown
+        && !almide_lang::types::contains_typevar(t)
+    {
+        filled.ty = t.clone();
     }
 }
 
