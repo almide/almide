@@ -541,7 +541,7 @@ fn source_to_ir_with(
 
 /// Single-file convenience (no cross-module siblings) — the bundled-runtime / drop-source
 /// re-lowering paths, which never carry `import self.*`.
-fn source_to_ir(source: &str) -> Result<almide_ir::IrProgram, LowerError> {
+pub(crate) fn source_to_ir(source: &str) -> Result<almide_ir::IrProgram, LowerError> {
     source_to_ir_with(source, &[])
 }
 

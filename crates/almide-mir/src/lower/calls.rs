@@ -257,10 +257,7 @@ impl LowerCtx {
             // A String-field-record key/element (C-015) — the generated `__krec_*` twin.
             krec
         } else {
-            let key_nullary = self.map_key_is_nullary_variant(&arg_tys, result_ty);
-            let key_scalar_rec = self.map_key_is_scalar_record(&arg_tys, result_ty);
-            let enum_rich = self.enumerate_elem_is_rich_variant(&arg_tys);
-            list_heap_call_name(module, func, &arg_tys, result_ty, key_nullary, key_scalar_rec, enum_rich)
+            list_heap_call_name(module, func, &arg_tys, result_ty, self.router_hints(&arg_tys, result_ty))
         };
         self.ops.push(Op::CallFn {
             dst: Some(dst),
@@ -461,11 +458,8 @@ impl LowerCtx {
         // this position exactly as from value position. (`list.pop`'s
         // original special case — a heap-element pop must never link the
         // scalar impl — is subsumed.)
-        let key_nullary = self.map_key_is_nullary_variant(&arg_tys, result_ty);
-        let key_scalar_rec = self.map_key_is_scalar_record(&arg_tys, result_ty);
-        let enum_rich = self.enumerate_elem_is_rich_variant(&arg_tys);
         let call_name =
-            list_heap_call_name(module, func, &arg_tys, result_ty, key_nullary, key_scalar_rec, enum_rich);
+            list_heap_call_name(module, func, &arg_tys, result_ty, self.router_hints(&arg_tys, result_ty));
         if is_heap_ty(result_ty) {
             let dst = self.fresh_value();
             let repr = repr_of(result_ty)?;

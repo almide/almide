@@ -322,6 +322,17 @@ impl LowerCtx {
         Some(dst)
     }
 
+    /// The layout facts `list_heap_call_name`'s routers need for this call —
+    /// the one place the three predicates below are bundled, so the value
+    /// position and the effect position cannot drift apart.
+    pub(crate) fn router_hints(&self, arg_tys: &[Ty], result_ty: &Ty) -> crate::lower::RouterHints {
+        crate::lower::RouterHints {
+            map_key_nullary: self.map_key_is_nullary_variant(arg_tys, result_ty),
+            map_key_scalar_rec: self.map_key_is_scalar_record(arg_tys, result_ty),
+            enum_rich_variant: self.enumerate_elem_is_rich_variant(arg_tys),
+        }
+    }
+
     /// Is the Map KEY type (of the first-arg/result Map) a NULLARY-ONLY variant
     /// (every case fieldless — `Direction`)? Gates the `_vtag` tag-normalized map
     /// family in `list_heap_call_name` (a free fn without layout access).
