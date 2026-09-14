@@ -27,6 +27,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LEDGER="$ROOT/proofs/gate-verification.toml"
 
 python3 - "$ROOT" "$LEDGER" <<'EOF'
+import os
 import re
 import subprocess
 import sys
@@ -59,8 +60,26 @@ VOCAB = {"KERNEL_PROVEN", "MUTATION_TESTED", "NEGATIVE_TESTED", "EXERCISED", "UN
 # What the gate READS, which decides the language it belongs in (#2128).
 READS = {"structured", "scalar", "UNCLASSIFIED"}
 
+# THE THIRD AXIS (#2207): who RUNS the gate. A NEGATIVE_TESTED row on a script
+# nobody invokes is the decorative gate this ledger exists to expose, and three
+# of them sat here for a month (check-cap-effect-consistency, check-pass-isolated,
+# check-domain-edges: rows with evidence, no consumer). `wired_by` names the
+# consumer(s) — a workflow, the hook file, the Makefile, another script, a test
+# — and each named file must exist AND actually mention the gate (the script's
+# basename; for `tools/almide-gates:<cmd>`, an almide-gates invocation of that
+# subcommand). `UNWIRED` is the honest-debt spelling, counted under the
+# shrink-only `# unwired_ceiling` like the other two debts.
+UNWIRED = "UNWIRED"
+
+def names_gate(consumer_text, gate_path):
+    if gate_path.startswith("tools/almide-gates:"):
+        cmd = gate_path.split(":", 1)[1]
+        return re.search(r"almide-gates\S*\s+(?:--\s+)?" + re.escape(cmd) + r"\b", consumer_text) is not None
+    return os.path.basename(gate_path) in consumer_text
+
 ceiling = None
 unclassified_ceiling = None
+unwired_ceiling = None
 rows, cur = [], None
 for raw in open(ledger_path, encoding="utf-8"):
     line = raw.strip()
@@ -70,6 +89,9 @@ for raw in open(ledger_path, encoding="utf-8"):
     m = re.match(r'#\s*unclassified_reads_ceiling\s*=\s*"(\d+)"', line)
     if m:
         unclassified_ceiling = int(m.group(1))
+    m = re.match(r'#\s*unwired_ceiling\s*=\s*"(\d+)"', line)
+    if m:
+        unwired_ceiling = int(m.group(1))
     if line == "[[gate]]":
         if cur:
             rows.append(cur)
@@ -86,9 +108,12 @@ if ceiling is None:
     errs.append("ledger header is missing `# unverified_ceiling = \"N\"`")
 if unclassified_ceiling is None:
     errs.append("ledger header is missing `# unclassified_reads_ceiling = \"N\"`")
+if unwired_ceiling is None:
+    errs.append("ledger header is missing `# unwired_ceiling = \"N\"`")
 seen = set()
 unverified = 0
 unclassified = 0
+unwired = 0
 for r in rows:
     p = r.get("path")
     if not p:
@@ -120,6 +145,22 @@ for r in rows:
         errs.append(f"{p}: declares `reads = \"structured\"` and is a .sh — a gate that reads "
                     f"TOML / markdown / a ledger / generated output belongs in Almide, where the "
                     f"typed readers already exist. Port it, or say what it actually reads.")
+    wired = r.get("wired_by", "")
+    if not wired:
+        errs.append(f"{p}: no `wired_by` — name the workflow / hook / Makefile / script / test "
+                    f"that runs this gate, or declare it UNWIRED under the ceiling. A gate "
+                    f"nobody invokes cannot fail anyone (#2207)")
+    elif wired == UNWIRED:
+        unwired += 1
+    else:
+        for c in [x.strip() for x in wired.split(",") if x.strip()]:
+            cp = os.path.join(root, c)
+            if not os.path.isfile(cp):
+                errs.append(f"{p}: wired_by names {c!r}, which does not exist — the consumer "
+                            f"moved or was deleted; the gate runs nowhere now")
+            elif not names_gate(open(cp, encoding="utf-8", errors="replace").read(), p):
+                errs.append(f"{p}: wired_by names {c!r}, but that file never invokes the gate "
+                            f"(no {os.path.basename(p)!r} in it) — a consumer in name only")
 
 for p in sorted(enumerated - seen):
     errs.append(f"{p}: UNCLASSIFIED — a verdict-bearing gate with no row. How would we "
@@ -133,6 +174,15 @@ if unclassified_ceiling is not None:
         errs.append(f"UNCLASSIFIED reads count {unclassified} is BELOW the ceiling "
                     f"{unclassified_ceiling} — ratchet it down in the ledger header (the debt "
                     f"may only shrink, and the ledger must say so)")
+
+if unwired_ceiling is not None:
+    if unwired > unwired_ceiling:
+        errs.append(f"UNWIRED count {unwired} exceeds the ceiling {unwired_ceiling} — a new gate "
+                    f"lands wired into the job that runs it (#2207)")
+    elif unwired < unwired_ceiling:
+        errs.append(f"UNWIRED count {unwired} is BELOW the ceiling {unwired_ceiling} — ratchet it "
+                    f"down in the ledger header (the debt may only shrink, and the ledger must "
+                    f"say so)")
 
 if ceiling is not None:
     if unverified > ceiling:
@@ -160,4 +210,5 @@ print("gate-verification OK: " + str(len(rows)) + " gate(s) — "
       + f" (unverified ceiling {ceiling})")
 print("  reads: " + " / ".join(f"{k} {v}" for k, v in sorted(reads_by.items()))
       + f" (unclassified ceiling {unclassified_ceiling})")
+print(f"  wired: {len(rows) - unwired} consumer-verified / UNWIRED {unwired} (ceiling {unwired_ceiling})")
 EOF

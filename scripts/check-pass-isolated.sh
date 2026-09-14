@@ -30,7 +30,10 @@ set -uo pipefail
 export LC_ALL=C
 cd "$(git rev-parse --show-toplevel)"
 
-ALMIDE="${ALMIDE:-almide}"
+# ALMIDE_BIN is the spelling every other compiler-driven gate in the CI
+# `checks` job takes (#2207: this gate ran nowhere for its first month —
+# nothing invoked it — so it never met the job's binary).
+ALMIDE="${ALMIDE:-${ALMIDE_BIN:-almide}}"
 fail=0
 count=0
 
