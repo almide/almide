@@ -239,8 +239,10 @@ fn read_bytes_file(path: String) -> Result[Bytes, String] = _
 // Result block, same capability as the plain form.
 @intrinsic("almide_rt_prim_read_text_file_as")
 fn read_text_file_as(path: String, call: String) -> Result[String, String] = _
+
 @intrinsic("almide_rt_prim_read_bytes_file_as")
 fn read_bytes_file_as(path: String, call: String) -> Result[Bytes, String] = _
+
 @intrinsic("almide_rt_prim_read_text_file_as_pair")
 fn read_text_file_as_pair(path: String, call: String, first: String, second: String) -> Result[String, String] = _
 
@@ -255,6 +257,7 @@ fn read_text_file_as_pair(path: String, call: String, first: String, second: Str
 // sequence. No native runtime impl — the native target uses fs.list_dir's own @intrinsic.
 @intrinsic("almide_rt_prim_read_dir")
 fn read_dir(path: String) -> Result[List[String], String] = _
+
 // The call-head twin (#2206): `fs.walk`, `fs.glob` and `fs.remove` list through this
 // floor and native names each of them. See `read_text_file_as`.
 @intrinsic("almide_rt_prim_read_dir_as")
@@ -277,6 +280,7 @@ fn write_text_file(path: String, content: String) -> Result[Unit, String] = _
 // native names each of them. See `read_text_file_as`.
 @intrinsic("almide_rt_prim_write_text_file_as")
 fn write_text_file_as(path: String, content: String, call: String) -> Result[Unit, String] = _
+
 @intrinsic("almide_rt_prim_write_text_file_as_pair")
 fn write_text_file_as_pair(path: String, content: String, call: String, first: String, second: String) -> Result[Unit, String] = _
 
@@ -292,6 +296,7 @@ fn write_text_file_as_pair(path: String, content: String, call: String, first: S
 // @intrinsic.
 @intrinsic("almide_rt_prim_make_dir")
 fn make_dir(path: String) -> Result[Unit, String] = _
+
 // The call-head twin (#2206): `fs.create_temp_dir` creates through this floor and
 // native names it. See `read_text_file_as`.
 @intrinsic("almide_rt_prim_make_dir_as")
@@ -309,6 +314,7 @@ fn make_dir_as(path: String, call: String) -> Result[Unit, String] = _
 // runtime impl — the native target uses fs.remove_all's own @intrinsic.
 @intrinsic("almide_rt_prim_remove_all")
 fn remove_all(path: String) -> Result[Unit, String] = _
+
 // The call-head twin (#2206): `fs.remove` removes through this floor and native
 // names it. See `read_text_file_as`.
 @intrinsic("almide_rt_prim_remove_all_as")
