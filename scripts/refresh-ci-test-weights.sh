@@ -40,7 +40,25 @@ if [ -z "$RUN_ID" ]; then
   echo "using latest green develop ci.yml run: $RUN_ID"
 fi
 
-JOB_IDS=$(gh run view "$RUN_ID" --json jobs --jq '.jobs[] | select(.name | test("Test Rust \\(shard")) | .databaseId')
+# The shard logs carry cargo's ANSI colour, and a newer `gh` (the one on
+# ubuntu-latest since 2026-09) refuses to print a response containing escape
+# sequences unless told to: "pass --allow-escape-sequences to output it
+# anyway" — which is what turned the weekly balance ratchet red twice (#2207)
+# before anyone saw the skew it was meant to report. The python below strips
+# the escapes itself, so the flag is safe; it is passed only where this `gh`
+# knows it (an older `gh` has neither the refusal nor the flag).
+gh_escape_flag() {
+  # $1 = the gh subcommand whose --help is consulted ("api" or "run view").
+  # shellcheck disable=SC2086
+  if gh $1 --help 2>&1 | grep -q -- '--allow-escape-sequences'; then
+    echo "--allow-escape-sequences"
+  fi
+}
+API_ESC=$(gh_escape_flag api)
+VIEW_ESC=$(gh_escape_flag "run view")
+
+# shellcheck disable=SC2086
+JOB_IDS=$(gh run view $VIEW_ESC "$RUN_ID" --json jobs --jq '.jobs[] | select(.name | test("Test Rust \\(shard")) | .databaseId')
 if [ "$(echo "$JOB_IDS" | grep -c .)" -eq 0 ]; then
   echo "FAIL: run $RUN_ID has no 'Test Rust (shard N/4)' jobs" >&2
   exit 1
@@ -50,7 +68,8 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
 for job in $JOB_IDS; do
-  gh api "repos/{owner}/{repo}/actions/jobs/$job/logs" > "$TMP/$job.log"
+  # shellcheck disable=SC2086
+  gh api $API_ESC "repos/{owner}/{repo}/actions/jobs/$job/logs" > "$TMP/$job.log"
 done
 
 python3 - "$TMP" "$CHECK" "${WEIGHTS_SKEW_RATIO:-1.4}" <<'EOF'
@@ -138,7 +157,12 @@ with open(path) as fh:
 
 import datetime
 stamp = os.environ.get("WEIGHTS_DATE") or datetime.date.today().isoformat()
-head = [l for l in head if not l.startswith("# Captured ") and not l.startswith("# Refreshed ")]
+# Drop the previous stamp AND its continuation line: filtering only the
+# "# Refreshed" line left one orphaned "# shard logs (…)" line per refresh
+# (four had piled up by 2026-09-14).
+head = [l for l in head
+        if not l.startswith("# Captured ") and not l.startswith("# Refreshed ")
+        and not l.startswith("# shard logs (")]
 head.append(f"# Refreshed {stamp} by scripts/refresh-ci-test-weights.sh from a CI run's own\n")
 head.append("# shard logs (nextest per-test lines, or Running/finished-in pairs, summed per target across shards).\n")
 
