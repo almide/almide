@@ -5,8 +5,9 @@
 //! program, and the artifact runs. The test runner took only the incumbent's
 //! verdict, so the same entry reported SKIP — and a structural-leg defect in
 //! it could hide behind that SKIP. Now a test-free main file takes the same
-//! route; a file with test blocks keeps the honest skip, since the structural
-//! leg has no test mode and running its main alone would report nothing.
+//! route; a file with test blocks reports a WALL (not a declared SKIP —
+//! #2180), since the structural leg has no test mode and running its main
+//! alone would report nothing.
 
 use std::path::Path;
 use std::process::Command;
@@ -59,11 +60,13 @@ fn a_test_free_main_the_incumbent_walls_runs_on_the_structural_leg() {
 }
 
 #[test]
-fn a_file_with_test_blocks_keeps_the_honest_skip_and_says_why() {
+fn a_file_with_test_blocks_reports_the_wall_and_says_why() {
     let dir = tempfile::tempdir().expect("tempdir");
     package(dir.path(), MAIN_WITH_TEST);
     let (_, text) = test_wasm(dir.path(), &[]);
-    assert!(text.contains("SKIP"), "tests cannot run on the structural leg:\n{text}");
-    assert!(text.contains("route to native"), "the skip names the reason:\n{text}");
-    assert!(text.contains("no test mode"), "{text}");
+    // A renderer wall is its own verdict (WALL), never a declared `// wasm:skip`.
+    assert!(text.contains("WALL") && text.contains("tests did not run on wasm"), "tests cannot run on the structural leg:\n{text}");
+    assert!(!text.contains("no verified wasm rendering"), "the wall names the leg, not the product:\n{text}");
+    assert!(text.contains("route to native"), "the wall names the reason:\n{text}");
+    assert!(text.contains("no structural-leg test route"), "{text}");
 }
