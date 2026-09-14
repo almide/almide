@@ -460,6 +460,9 @@ impl Checker {
                         site.negated = negated;
                     }
                 }
+                // #2196: `-f()` / `not g()` on an effect call — the same
+                // operand rule as a binary operand, reported at the call.
+                let t = self.operand_effect_unwrap(operand, t);
                 match op.as_str() { "not" => Ty::Bool, _ => t }
     }
 
@@ -467,11 +470,11 @@ impl Checker {
         let ExprKind::Binary { op, left, right, .. } = &mut expr.kind else { unreachable!("infer_expr_g2_binary called on the wrong ExprKind") };
         let lt = self.infer_expr(left);
         let rt = self.infer_expr(right);
-        // #1050: operand-position implicit unwrap. In an effect-fn body the
-        // checker strips Result from a CALL in binding position and the
-        // lowering auto-?'s it; `insert_auto_try` wraps every Result-typed
-        // call, operand position included — so the checker admitting
-        // `helper() + 1` is the same one rule as `let x = helper()`. VARs are
+        // #1050: operand-position strip. In an effect-fn body the checker
+        // strips Result from a CALL operand so the operator check reads the
+        // OK type — and, since #2196, reports the call (E041, or E042 when
+        // the operator's value is discarded), so `helper() + 1` is the same
+        // explicit-`!` rule as `let x = helper()` (ADR-0008). VARs are
         // untouched: a var's unwrap is decided at its binding, and a
         // Result-typed var operand stays a type error (whose hint names the
         // unwrap operators). This also closes an acceptance-parity hole:
@@ -510,17 +513,30 @@ impl Checker {
         }
     }
 
-    /// The #1050 operand strip: `expr` is a binary operand; when it is a CALL
-    /// whose type resolved to `Result[T, E]` inside an auto-unwrap context
-    /// (an effect-fn body outside lambdas), give the operator `T` — the
-    /// lowering's `insert_auto_try` wraps exactly this shape in a `?`.
-    /// Anything else (vars, ctors, non-effect contexts) passes through.
+    /// The #1050 operand strip: `expr` is a binary or unary operand; when it
+    /// is a CALL whose type resolved to `Result[T, E]` inside an auto-unwrap
+    /// context (an effect-fn body outside lambdas), give the operator `T` so
+    /// the operator check reads the value the writer meant. Anything else
+    /// (vars, ctors, non-effect contexts) passes through.
+    ///
+    /// The strip is RECOVERY, not acceptance (ADR-0008, #2196): the call is
+    /// queued for the post-solve E041 report at its own span — where the `!`
+    /// goes — and a position that discards the operator's value (a statement)
+    /// upgrades it to E042 through `queue_implicit_prop_leaves`. Before this,
+    /// `let x = f() + 1` passed check and the lowering's `insert_auto_try`
+    /// propagated the error with no `!` in the source.
     fn operand_effect_unwrap(&mut self, operand: &ast::Expr, t: Ty) -> Ty {
         if !self.env.auto_unwrap || !matches!(operand.kind, ExprKind::Call { .. }) {
             return t;
         }
         let resolved = resolve_ty(&t, &self.uf);
-        resolved.result_ok_ty().unwrap_or(t)
+        match resolved.result_ok_ty() {
+            Some(ok) => {
+                self.deferred_implicit_prop_checks.push((t, operand.span, "of this operand", true, false));
+                ok
+            }
+            None => t,
+        }
     }
 
     /// ADR-0001 S3: the time-type operator matrix. `None` = no time operand
