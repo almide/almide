@@ -4,8 +4,9 @@
 // discipline, #1856; the `val!`/`val_opt!` macros and the imports are
 // dispatch.rs's own). This part holds the `(module, func)` tier:
 // `eval_module_call` → HOF / in-place mutation / fan / budget prims →
-// `dispatch_module_resolved` (container ops → the prim floors → bridge →
-// almide-bodied pool fn) and the pool-tier boundary sync entry points.
+// `dispatch_module_resolved` (container ops → the prim floors → the lowered
+// self-hosted body, with the bridge around it in part 5, `dispatch_body.rs`)
+// and the pool-tier boundary sync entry points.
 
 impl<'a> Interpreter<'a> {
     // ── Module calls ────────────────────────────────────────────
@@ -321,31 +322,12 @@ impl<'a> Interpreter<'a> {
                 return result;
             }
         }
-        let Some((func_def, gate_mut)) = self.resolve_lowered_body(module, func) else {
-            let why = format!("no lowered body for {}.{}", module, func);
-            return if floor_first { Flow::Unsupported(why) } else { self.bridge_fallback(module, func, &args, why) };
-        };
-        // An ARITY overload (`string.slice(s, start)` beside `string.slice(s,
-        // start, end)`): the frontend admits the short form without padding
-        // it, and the registry links it as its own impl under the arity
-        // suffix (`string.slice2`) — the same spelling the wasm leg routes
-        // to. Binding the short call to the long body left its last param
-        // unbound (`unbound variable VarId(11)` in the codepoint fixtures).
-        // No suffixed twin → the body cannot take this call; say so.
-        let (func, func_def, gate_mut) = if func_def.params.len() == args.len() {
-            (func, func_def, gate_mut)
-        } else {
-            let twin = almide_base::intern::sym(&format!("{}{}", func.as_str(), args.len()));
-            match self.resolve_lowered_body(module, twin) {
-                Some((d, g)) if d.params.len() == args.len() => (twin, d, g),
-                _ => {
-                    let why = format!(
-                        "{}.{} called with {} argument(s); its lowered body takes {}",
-                        module, func, args.len(), func_def.params.len()
-                    );
-                    return if floor_first { Flow::Unsupported(why) } else { self.bridge_fallback(module, func, &args, why) };
-                }
-            }
+        // The body for THIS arity (an overload routes to its suffixed twin,
+        // `string.slice2` — see `resolve_body_for_arity`); no body, no twin →
+        // the body cannot take this call, and the reason says so.
+        let (func, func_def, gate_mut) = match self.resolve_body_for_arity(module, func, args.len()) {
+            Ok(found) => found,
+            Err(why) => return self.abstain_or_bridge(floor_first, module, func, &args, why),
         };
         // These sites receive EAGERLY-evaluated args, so a `mut` parameter's
         // caller lvalue is already gone — the Named path's copy-out (#1022)
@@ -358,7 +340,7 @@ impl<'a> Interpreter<'a> {
                 module.as_str(),
                 func.as_str()
             );
-            return if floor_first { Flow::Unsupported(why) } else { self.bridge_fallback(module, func, &args, why) };
+            return self.abstain_or_bridge(floor_first, module, func, &args, why);
         }
         let root = self.root_scope();
         let flow = self.call_pool_tier(func_def, args.clone(), &root);
@@ -378,45 +360,10 @@ impl<'a> Interpreter<'a> {
         // still writing through (see `pool_fns`).
         let flow = self.sync_at_pool_boundary(func_def, flow);
         match flow {
-            Flow::Unsupported(why) if !floor_first => self.bridge_fallback(module, func, &args, why),
+            Flow::Unsupported(why) => self.abstain_or_bridge(floor_first, module, func, &args, why),
             other => other,
         }
     }
-
-    /// A bridge answer INSIDE the pool tier (#2185): the floor a body
-    /// consumed, recorded under the same ledger as the boundary fallbacks so
-    /// an arm no body and no fixture reaches is visibly dead.
-    pub(crate) fn record_bridge_floor(&mut self, module: Sym, func: Sym) {
-        if module.as_str() == "prim" {
-            return;
-        }
-        let name = format!("{}.{}", module, func);
-        let mut seen = self.bridge_fallbacks.borrow_mut();
-        if !seen.iter().any(|(n, _)| *n == name) {
-            seen.push((name, "floor: consumed inside a self-hosted body".to_string()));
-        }
-    }
-
-    /// The bridge as the body's fallback (#2185): there is no lowered body, or
-    /// it abstained — `why` says which. Answer from the hand-mirrored bridge
-    /// when it has this name, recording the fallback so every bridge answer
-    /// over the corpus is measurable (`interp_bridge_fallback_ledger`), else
-    /// abstain with that reason.
-    fn bridge_fallback(&mut self, module: Sym, func: Sym, args: &[Value], why: String) -> Flow {
-        match crate::bridge::dispatch(module.as_str(), func.as_str(), args) {
-            Some(result) => {
-                // The `prim.*` scalar floor is the spec's own vocabulary (the
-                // MIR ops both backends render from), consumed BY the bodies —
-                // not a mirror of one, so it is not a fallback to ledger.
-                if module.as_str() != "prim" {
-                    self.bridge_fallbacks.borrow_mut().push((format!("{}.{}", module, func), why));
-                }
-                result
-            }
-            None => Flow::Unsupported(why),
-        }
-    }
-
 
     /// The `prim` floors that read or MUTATE per-run interpreter state, which
     /// the stateless `bridge::prim_fn` cannot hold: the block heap, the guarded
@@ -806,42 +753,5 @@ impl<'a> Interpreter<'a> {
             Ok(None) => flow,
             Err(why) => Flow::Unsupported(why),
         }
-    }
-
-    /// The lowered Almide body `module.func` resolves to, paired with whether
-    /// the eager-dispatch `mut`-parameter gate applies to it.
-    ///
-    /// Three sources in order: the module's own fn table; a flattened
-    /// top-level fn named exactly `func` (some stdlib helpers flatten) that is
-    /// NOT the entry program's own — a `module.func` call never names a
-    /// program-root fn, so a user `fn parse` must not capture `json.parse`
-    /// (#2058: its body calls `json.parse`, which resolved back to itself and
-    /// spun to fuel exhaustion; the module-identity class, #1087–#1094); and
-    /// LAST the self-hosted stdlib body from the shared registry (stdlib_pool)
-    /// — the SAME source the wasm leg links for this call name, lowered once
-    /// and layered into `self.fns` at construction. Consulted after the two
-    /// module-owned sources so a user module keeps its vote provenance; what
-    /// a pool body itself cannot evaluate (a heap/effect prim outside the
-    /// scalar floor) abstains from inside with that prim named — a skip,
-    /// never a guess (the caller then tries the bridge, #2185) — so the mut
-    /// gate does not apply to it.
-    ///
-    /// A `Hole` body is an intrinsic stub, not an interpretable definition:
-    /// each source skips it and falls through to the next.
-    fn resolve_lowered_body(&self, module: Sym, func: Sym) -> Option<(&'a almide_ir::IrFunction, bool)> {
-        fn bodied(d: &&almide_ir::IrFunction) -> bool {
-            !matches!(d.body.kind, almide_ir::IrExprKind::Hole)
-        }
-        if let Some(d) = self.module_fns.get(&(module, func)).copied().filter(bodied) {
-            return Some((d, true));
-        }
-        let program_root = |d: &&almide_ir::IrFunction| {
-            self.fn_space.get(&(*d as *const almide_ir::IrFunction as usize)) == Some(&0)
-        };
-        if let Some(d) = self.fns.get(&func).copied().filter(bodied).filter(|d| !program_root(d)) {
-            return Some((d, true));
-        }
-        let impl_name = crate::stdlib_pool::impl_fn(module, func)?;
-        self.fns.get(&impl_name).copied().filter(bodied).map(|d| (d, false))
     }
 }
