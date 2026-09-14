@@ -81,6 +81,42 @@ effect fn main() -> Unit = {
 
 const EXPECTED: &str = "digit\nnone\n1\n111\n2\nopenai/gpt-4o\n\n3\nC";
 
+/// #2194: a heap-typed `let`-bound `if` inside the loop body is lifted into a
+/// tail helper (`optimize/branch_lift.rs`) whose params KEEP the enclosing
+/// fn's VarIds — so the borrowed loop binder `key` reappears there as a `&str`
+/// param. The `as_str` view keyed on `borrowed_loop_vars` alone rendered
+/// `key.as_str()` on that param: `str::as_str` is unstable (E0658) on stable
+/// rustc. Both heads (a list literal and a `List[String]` param) and both
+/// shapes the reporter combined (`var` re-assigned under `if key == …` next
+/// to the lifted `let`).
+const LIFTED_PROGRAM: &str = r#"fn kinds_of_literal() -> List[String] = {
+  var out: List[String] = []
+  for key in ["tools", "context", "agents", "tasks"] {
+    let child_kind = if key == "agents" then "agent" else "task"
+    out = out + [child_kind]
+  }
+  out
+}
+
+fn kinds_of(keys: List[String]) -> List[String] = {
+  var out: List[String] = []
+  for key in keys {
+    var relation = "uses"
+    if key == "context" then { relation = "context" } else ()
+    let child_kind = if key == "agents" then "agent" else "task"
+    out = out + [child_kind + ":" + relation]
+  }
+  out
+}
+
+effect fn main() -> Unit = {
+  println(kinds_of_literal() |> list.join(","))
+  println(kinds_of(["tools", "context", "agents"]) |> list.join(","))
+}
+"#;
+
+const LIFTED_EXPECTED: &str = "task,task,agent,task\ntask:uses,task:context,agent:uses";
+
 fn almide_bin() -> String {
     std::env::var("ALMIDE_BIN").unwrap_or_else(|_| format!("{}/target/release/almide", env!("CARGO_MANIFEST_DIR")))
 }
@@ -109,17 +145,33 @@ fn borrowed_loop_binder_compares_as_str_and_borrowed_param_stores_owned() {
     assert!(fn_body(&rust, "keep").contains("model = lit.to_string();"), "{}", fn_body(&rust, "keep"));
     assert!(fn_body(&rust, "keep_list").contains("out = xs.to_vec();"), "{}", fn_body(&rust, "keep_list"));
 
+    run_on_every_leg(&bin, &source, EXPECTED);
+}
+
+/// `almide run` on the default native route, the pinned v0 leg, and wasm.
+fn run_on_every_leg(bin: &str, source: &std::path::Path, expected: &str) {
     let runs: [(&str, &[&str], &[(&str, &str)]); 3] = [
         ("native", &[], &[]),
         ("native v0", &["--no-verified"], &[("ALMIDE_NO_VERIFIED_OK", "1")]),
         ("wasm", &["--target", "wasm"], &[]),
     ];
     for (label, args, envs) in runs {
-        let mut cmd = Command::new(&bin);
-        cmd.arg("run").arg(&source).args(args);
+        let mut cmd = Command::new(bin);
+        cmd.arg("run").arg(source).args(args);
         for (k, v) in envs { cmd.env(k, v); }
         let out = cmd.output().unwrap();
         assert!(out.status.success(), "{label}: {}", String::from_utf8_lossy(&out.stderr));
-        assert_eq!(String::from_utf8_lossy(&out.stdout).trim_end(), EXPECTED, "{label}");
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim_end(), expected, "{label}");
     }
+}
+
+/// The lift runs in the shared optimizer (`build` / `run`), not in `emit`, so
+/// the evidence is the build itself: on a22cfb7f the native leg failed rustc
+/// with E0658 `str_as_str` on the helper's `key.as_str()`.
+#[test]
+fn borrowed_loop_binder_lifted_into_branch_helper_compares_without_as_str() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("main.almd");
+    std::fs::write(&source, LIFTED_PROGRAM).unwrap();
+    run_on_every_leg(&almide_bin(), &source, LIFTED_EXPECTED);
 }
