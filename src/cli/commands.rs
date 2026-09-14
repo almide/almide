@@ -261,9 +261,14 @@ enum SkipKind {
     /// The host cannot run the lane at all (no wasmtime, an unwritable scratch
     /// path). Not a statement about the program. Benign.
     Environment,
-    /// A RENDERER declined this program. The caller asked for wasm and did not
-    /// get it, and nothing in the file says that was expected — so the run
-    /// reports it as a failure rather than counting it as a skip.
+    /// A RENDERER declined this program. The caller asked for wasm and this
+    /// file's tests did not run there — so the summary says exactly that,
+    /// separately from the skips the author declared. `// wasm:skip` is NOT
+    /// the place to park one: that marker means "wasm cannot do this", and a
+    /// wall means "this leg has not lowered this shape yet"
+    /// (tests/wasm_skip_ledger_test.rs, #812). This repository's own walls are
+    /// registered in proofs/wasm-test-walls.txt and gated shrink-only by
+    /// scripts/check-wasm-test-walls.sh.
     Wall,
 }
 
@@ -724,9 +729,12 @@ pub fn cmd_test_wasm(file: &str, run_filter: Option<&str>, allow_no_tests: bool)
             // caller asked for wasm, this file's tests did not run there, and
             // nothing in the file says that was expected (#2121).
             WasmTestOutcome::Skip { file, reason, kind: SkipKind::Wall } => {
-                err(&format!("FAIL {} (tests did not run on wasm: {})", file, reason));
+                // A stable, greppable prefix: the wall register's gate reads
+                // these lines, and a wall that looked like every other skip is
+                // how five of them went unnoticed (#2121).
+                err(&format!("WALL {} (tests did not run on wasm: {})", file, reason));
                 walled.push(file.clone());
-                failed += 1;
+                skipped += 1;
             }
             WasmTestOutcome::Skip { file, reason, .. } => {
                 err(&format!("SKIP {} ({})", file, reason));
@@ -746,15 +754,15 @@ pub fn cmd_test_wasm(file: &str, run_filter: Option<&str>, allow_no_tests: bool)
     if !walled.is_empty() {
         err("");
         err(&format!(
-            "{} file(s) asked to run on wasm and did not. A renderer declined them, and no \
-             `// wasm:skip` in the file says that was expected:",
+            "{} file(s) did not run on wasm: a renderer declined them. This is not the same \
+             verdict as a declared `// wasm:skip`, which says wasm CANNOT run the file —",
             walled.len()
         ));
         for f in &walled {
             err(&format!("  {}", f));
         }
-        err("Fix the route, or declare the skip in the file's first three lines with a");
-        err("`// wasm:skip — <why, and what retires it>` line so the gap is greppable.");
+        err("it says a leg has not lowered the shape yet. Fix the wall rather than marking");
+        err("the file: a `// wasm:skip` for subset debt is refused by the skip ledger (#812).");
     }
     scratch.finish();
     if failed > 0 {

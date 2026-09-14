@@ -1,8 +1,3 @@
-// wasm:skip — the TEST lane renders through the incumbent brick, which walls
-// `pub fn area_note` (a heap-result `match` outside its executable subset —
-// the same shape as #2160). The DEFAULT build leg is the structural one and
-// this lane never asks it; giving the lane that route is #2179, and this
-// marker retires with it.
 // #1461 — as-patterns (ALS-E18): `name @ pattern` binds the WHOLE value
 // at the position while the inner pattern destructures the same value.
 // Binds tighter than the arm-level `|`; an as-binder inside an
