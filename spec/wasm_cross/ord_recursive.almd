@@ -51,11 +51,14 @@ effect fn main() -> Unit = {
       Tree { v: 2, kids: [] }
     ] },
     Tree { v: 1, kids: [] },
-    Tree { v: 1, kids: [
-      Tree { v: 2, kids: [
-        Tree { v: 5, kids: [] }
-      ] }
-    ] },
+    Tree {
+      v: 1,
+      kids: [
+        Tree { v: 2, kids: [
+          Tree { v: 5, kids: [] }
+        ] }
+      ],
+    },
     Tree { v: 0, kids: [
       Tree { v: 9, kids: [] }
     ] }
@@ -66,42 +69,63 @@ effect fn main() -> Unit = {
   // Depth beyond one level: the child list's own children decide the order, so
   // the comparator really does recurse rather than stop at the first slot.
   let deep = [
-    Tree { v: 0, kids: [
-      Tree { v: 1, kids: [
-        Tree { v: 3, kids: [] }
-      ] }
-    ] },
-    Tree { v: 0, kids: [
-      Tree { v: 1, kids: [
-        Tree { v: 2, kids: [] }
-      ] }
-    ] },
-    Tree { v: 0, kids: [
-      Tree { v: 1, kids: [
-        Tree { v: 2, kids: [
-          Tree { v: 7, kids: [] }
+    Tree {
+      v: 0,
+      kids: [
+        Tree { v: 1, kids: [
+          Tree { v: 3, kids: [] }
         ] }
-      ] }
-    ] }
+      ],
+    },
+    Tree {
+      v: 0,
+      kids: [
+        Tree { v: 1, kids: [
+          Tree { v: 2, kids: [] }
+        ] }
+      ],
+    },
+    Tree {
+      v: 0,
+      kids: [
+        Tree {
+          v: 1,
+          kids: [
+            Tree { v: 2, kids: [
+              Tree { v: 7, kids: [] }
+            ] }
+          ],
+        }
+      ],
+    }
   ]
   for t in deep |> list.sort {
     println("deep ${show(t)}")
   }
   // ── the recursive variant: tag first, then the case's own payload lists
   let es = [
-    Add { l: [
-      Lit { n: 2 }
-    ], r: [] },
+    Add {
+      l: [
+        Lit { n: 2 }
+      ],
+      r: [],
+    },
     Lit { n: 5 },
-    Add { l: [
-      Lit { n: 1 }
-    ], r: [
-      Lit { n: 0 }
-    ] },
+    Add {
+      l: [
+        Lit { n: 1 }
+      ],
+      r: [
+        Lit { n: 0 }
+      ],
+    },
     Lit { n: 1 },
-    Add { l: [
-      Lit { n: 1 }
-    ], r: [] }
+    Add {
+      l: [
+        Lit { n: 1 }
+      ],
+      r: [],
+    }
   ]
   for e in es |> list.sort {
     println("expr ${e}")
@@ -112,24 +136,36 @@ effect fn main() -> Unit = {
     Node { tag: "a", next: [
       Leaf { back: [], w: 3 }
     ] },
-    Node { tag: "a", next: [
-      Leaf { back: [
-        Node { tag: "z", next: [] }
-      ], w: 1 }
-    ] },
+    Node {
+      tag: "a",
+      next: [
+        Leaf {
+          back: [
+            Node { tag: "z", next: [] }
+          ],
+          w: 1,
+        }
+      ],
+    },
     Node { tag: "a", next: [] }
   ]
   for n in ns |> list.sort {
     println("node ${show_node(n)}")
   }
   let ls = [
-    Leaf { back: [
-      Node { tag: "m", next: [] }
-    ], w: 0 },
+    Leaf {
+      back: [
+        Node { tag: "m", next: [] }
+      ],
+      w: 0,
+    },
     Leaf { back: [], w: 9 },
-    Leaf { back: [
-      Node { tag: "a", next: [] }
-    ], w: 0 }
+    Leaf {
+      back: [
+        Node { tag: "a", next: [] }
+      ],
+      w: 0,
+    }
   ]
   for l in ls |> list.sort {
     println("leaf ${show_leaf(l)}")
