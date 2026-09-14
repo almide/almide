@@ -44,7 +44,7 @@ const DRAIN: &str = r#"import io
 
 effect fn count(n: Int) -> Int = {
   let line = io.read_line()!
-  if string.len(line) == 0 then n else count(n + 1)
+  if string.len(line) == 0 then n else count(n + 1)!
 }
 
 effect fn main() -> Unit = println(int.to_string(count(0)!))
