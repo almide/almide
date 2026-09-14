@@ -31,7 +31,7 @@
 
 /// Is the stale-handle trap armed for this build?
 pub(crate) fn region_trap_armed() -> bool {
-    std::env::var_os("ALMIDE_REGION_TRAP_STALE").is_some()
+    almide_base::env::flag("ALMIDE_REGION_TRAP_STALE")
 }
 
 /// The arena prelude as emitted into a program (`vis` is `pub ` for the

@@ -23,7 +23,7 @@ impl<'a> Interpreter<'a> {
             .or_else(|| self.heap_prim_load(func, args))
             .or_else(|| self.heap_prim_store(func, args))
             .or_else(|| self.heap_prim_slot_io(func, args));
-        if std::env::var("ALMIDE_HEAP_TRACE").is_ok_and(|v| v == "1") {
+        if almide_base::env::flag("ALMIDE_HEAP_TRACE") {
             if let Some(f) = &out {
                 let shown = match f {
                     Flow::Value(v) => format!("{v:?}"),

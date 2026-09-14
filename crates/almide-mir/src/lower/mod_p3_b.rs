@@ -475,7 +475,7 @@ impl LowerCtx {
                 // a Unit effect call, a nested branch, or a deferred value whose calls
                 // we capture (its value is discarded in statement position).
                 IrExprKind::Block { stmts, expr: tail } => {
-                    if std::env::var_os("ALMIDE_DBG_WHILE").is_some() {
+                    if almide_base::env::flag("ALMIDE_DBG_WHILE") {
                         eprintln!("STMT-BLOCK lowering ({} stmts, tail={})", stmts.len(), tail.is_some());
                     }
                     for s in stmts {

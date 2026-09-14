@@ -237,7 +237,7 @@ fn link_self_host(
         needed.sort();
         // ALMIDE_DBG_LINK=1: dump the demand set and what each key resolves
         // to — the probe that caught #1675's missed __err_at demand.
-        if std::env::var_os("ALMIDE_DBG_LINK").is_some() {
+        if almide_base::env::flag("ALMIDE_DBG_LINK") {
             for n in &needed {
                 eprintln!("[link] demand {} -> {}", n, registry.get(n).map(|_| "registered").unwrap_or("UNREGISTERED"));
             }

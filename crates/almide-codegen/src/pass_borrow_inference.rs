@@ -601,7 +601,7 @@ pub fn infer_borrow_signatures(program: &mut IrProgram) -> HashMap<String, Vec<P
 
         // ALMIDE_DBG_BORROW=<substr>: dump every matching sig key per
         // fixed-point iteration (the probe that caught #1713's frozen mirrors).
-        if let Ok(filter) = std::env::var("ALMIDE_DBG_BORROW") {
+        if let Some(filter) = almide_base::env::var("ALMIDE_DBG_BORROW") {
             for (k, v) in &sigs {
                 if k.contains(&filter) { eprintln!("[borrow iter {_iter}] {k} -> {v:?}"); }
             }

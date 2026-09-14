@@ -680,7 +680,7 @@ fn collect_mut_fns(program: &IrProgram) -> MutFns {
             }
         }
     }
-    if std::env::var("ALMIDE_MP_PROBE").is_ok() {
+    if almide_base::env::flag("ALMIDE_MP_PROBE") {
         for (k, v) in &mut_fns {
             eprintln!("[mp] fn {} → {:?}", k, v);
         }
@@ -690,7 +690,7 @@ fn collect_mut_fns(program: &IrProgram) -> MutFns {
 
 /// One function's [`MutFns`] entry, or `None` when it is not eligible.
 fn mut_fn_entry(func: &IrFunction, same_scope_count: usize) -> Option<(usize, Ty, bool, Ty)> {
-    let probe = std::env::var("ALMIDE_MP_PROBE").is_ok();
+    let probe = almide_base::env::flag("ALMIDE_MP_PROBE");
     if func.mutated_params.len() != 1 {
         if probe && !func.mutated_params.is_empty() {
             eprintln!("[mp-reject] {} mutated_params={:?}", func.name, func.mutated_params);
@@ -990,7 +990,7 @@ impl IrMutVisitor for CallSiteRewriter<'_> {
             return;
         }
 
-        if std::env::var("ALMIDE_MP_PROBE").is_ok()
+        if almide_base::env::flag("ALMIDE_MP_PROBE")
             && let IrExprKind::Call { target, .. } = &expr.kind
         {
             eprintln!("[mp-call] scope={:?} target={:?}", self.scope, target);

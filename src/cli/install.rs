@@ -190,7 +190,7 @@ fn resolve_source(
 }
 
 fn default_install_dir() -> PathBuf {
-    if let Ok(env_dir) = std::env::var("ALMIDE_INSTALL") {
+    if let Some(env_dir) = almide_base::env::var("ALMIDE_INSTALL") {
         return PathBuf::from(env_dir);
     }
     if let Ok(home) = std::env::var("HOME") {

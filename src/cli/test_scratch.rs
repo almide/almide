@@ -50,7 +50,7 @@ impl TestScratch {
         let root = std::env::temp_dir().join(format!("almide-test-{}-{:016x}", std::process::id(), nonce));
         std::fs::create_dir_all(root.join("wasm")).ok();
         let native_cache = std::env::temp_dir().join("almide-test").join("native");
-        let keep = std::env::var_os("ALMIDE_KEEP_SCRATCH").is_some_and(|v| !v.is_empty() && v != "0");
+        let keep = almide_base::env::flag("ALMIDE_KEEP_SCRATCH");
         TestScratch { root, native_cache, keep }
     }
 

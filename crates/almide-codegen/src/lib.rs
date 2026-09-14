@@ -248,7 +248,7 @@ pub fn program_uses_native_only_matrix_on_wasm(program: &IrProgram) -> Option<&'
 
 pub fn codegen_with(program: &mut IrProgram, target: Target, options: &CodegenOptions) -> CodegenOutput {
     let config = target::configure(target);
-    let prof = std::env::var_os("ALMIDE_PROFILE").is_some();
+    let prof = almide_base::env::flag("ALMIDE_PROFILE");
     // Time only through the sanctioned, wasm-safe shim. Raw std::time is
     // forbidden in this crate (it panics on wasm32-unknown-unknown, the browser
     // playground target) — see almide_base::profile and the forbidden-impurities

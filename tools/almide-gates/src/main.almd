@@ -18,6 +18,7 @@ import stamp
 import parity_sweep
 import track_record
 import ledger_gate
+import env_switches_doc
 import bench
 import env
 
@@ -116,6 +117,7 @@ effect fn main() -> Unit = {
     1,
     match cmd {
       "output-parity" => ".",
+      "env-switches-doc" => ".",
       "check-contracts" => "docs/contracts",
       "bench" => "docs/benchmarks",
       _ => "docs/roadmap",
@@ -186,6 +188,14 @@ effect fn main() -> Unit = {
       let g = ledger_gate.run(root)!
       println(list.join(g.lines, "\n"))
       if g.ok then process.exit(0) else process.exit(1)
+    },
+    // #2205: the switch table docs/specs/cli.md embeds must be what the compiler under
+    // test renders from the registry. Args: root, then the almide binary to ask.
+    "env-switches-doc" => {
+      let alm = list.get_or(args, 2, root + "/target/release/almide")
+      let v = env_switches_doc.run(root, alm)!
+      println(list.join(v.lines, "\n"))
+      if v.ok then process.exit(0) else process.exit(1)
     },
     "output-parity" => {
       // F6-2: the identity of the evidence comes first. If the PATH binary and the workspace

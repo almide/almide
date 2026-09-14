@@ -37,7 +37,7 @@ impl Emitter<'_> {
         // "prefetch" line so a pattern regression cannot pass silently
         // (the import-section assertion alone is vacuous: to_p3 declares
         // the async imports unconditionally).
-        let dbg = std::env::var_os("ALMIDE_DBG_FAN").is_some();
+        let dbg = almide_base::env::flag("ALMIDE_DBG_FAN");
         let out = match (func, args) {
             // The PREFETCH form (#1628 increment 2b): a map whose whole
             // arm body is one fs.read_text on the element starts every

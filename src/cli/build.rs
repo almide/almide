@@ -369,13 +369,13 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
     // p1-shaped).
     let direct_p2 = component
         && structural
-        && std::env::var_os("ALMIDE_COMPONENT_ADAPTER").is_none();
+        && !almide_base::env::flag("ALMIDE_COMPONENT_ADAPTER");
     // `ALMIDE_COMPONENT_P3=1` (#1628 stage 2, experimental): the WASI 0.3
     // component — stdio over component-model streams on the async
     // canonical ABI. Needs a p3-capable runtime (wasmtime 46+); stays an
     // env opt-in until the fan lowering lands on the same plumbing and
     // the corpus gates cover it.
-    let direct_p3 = direct_p2 && std::env::var_os("ALMIDE_COMPONENT_P3").is_some();
+    let direct_p3 = direct_p2 && almide_base::env::flag("ALMIDE_COMPONENT_P3");
     if direct_p2
         && let Err(message) = almide_wasm_run::component_availability::check(&host_ops, direct_p3)
     {
@@ -680,7 +680,7 @@ fn check_wasm_availability(ir_program: &almide::ir::IrProgram, embedded_leg: boo
     // The measurement escape: the availability PROBE builds through this
     // binary to measure the ground truth the table declares — with the
     // check armed it would measure its own declaration (circular).
-    if std::env::var_os("ALMIDE_NO_AVAIL_CHECK").is_some() {
+    if almide_base::env::flag("ALMIDE_NO_AVAIL_CHECK") {
         return Ok(());
     }
     use std::collections::BTreeMap;
@@ -768,7 +768,7 @@ fn check_wasm_availability(ir_program: &almide::ir::IrProgram, embedded_leg: boo
     // ALMIDE_COMPONENT_P3 the ops-43..=50 fns ship through the to_p3 http
     // shim, so their stock-p1 rows do not bar THIS build path — the same
     // predicate that flips fs routing structural for p3.
-    if std::env::var_os("ALMIDE_COMPONENT_P3").is_some() {
+    if almide_base::env::flag("ALMIDE_COMPONENT_P3") {
         for k in [
             "http.get",
             "http.post",
@@ -861,10 +861,10 @@ fn render_wasm_module_routed(
     // This is how a routed-away shape (#1596 self-import, #1598 matrix/io)
     // is exercised while its structural support is built, and the lever the
     // eventual route flip is verified with.
-    let force_structural = std::env::var_os("ALMIDE_WASM_STRUCTURAL").is_some();
+    let force_structural = almide_base::env::flag("ALMIDE_WASM_STRUCTURAL");
     let incumbent = !force_structural
-        && (std::env::var_os("ALMIDE_WASM_INCUMBENT").is_some()
-            || std::env::var_os("ALMIDE_FUEL_PROBE").is_some()
+        && (almide_base::env::flag("ALMIDE_WASM_INCUMBENT")
+            || almide_base::env::flag("ALMIDE_FUEL_PROBE")
             || (!has_main && !library_ok)
             || uses_incumbent_features);
     if incumbent {
@@ -876,8 +876,8 @@ fn render_wasm_module_routed(
         // routes (ALMIDE_WASM_INCUMBENT / FUEL_PROBE) and the main-less
         // library form stay final on this reverse path; ordinary library
         // builds already use the structural library emitter below.
-        let shape_routed = std::env::var_os("ALMIDE_WASM_INCUMBENT").is_none()
-            && std::env::var_os("ALMIDE_FUEL_PROBE").is_none()
+        let shape_routed = !almide_base::env::flag("ALMIDE_WASM_INCUMBENT")
+            && !almide_base::env::flag("ALMIDE_FUEL_PROBE")
             && has_main
             && !uses_incumbent_features;
         if r.is_err()
@@ -890,7 +890,7 @@ fn render_wasm_module_routed(
                     .iter()
                     .all(|op| almide_wasm_run::wasi::P1_SERVED_OPS.contains(op)))
         {
-            if std::env::var_os("ALMIDE_VERIFIED_DEBUG").is_some() {
+            if almide_base::env::flag("ALMIDE_VERIFIED_DEBUG") {
                 err(&format!(
                     "[almide] incumbent walled — structural leg took the build ({} bytes)",
                     bytes.len()
@@ -911,7 +911,7 @@ fn render_wasm_module_routed(
             err(&format!("error: structural leg walled under ALMIDE_WASM_STRUCTURAL ({why})"));
             return Err(());
         }
-        if std::env::var_os("ALMIDE_VERIFIED_DEBUG").is_some() {
+        if almide_base::env::flag("ALMIDE_VERIFIED_DEBUG") {
             err(&format!("[almide] structural leg declined ({why}) — incumbent renderer"));
         }
         let res = render_wasm_module(source_text, v1_self_modules, library_ok).map(|(b, _)| (b, false, Vec::new()));
@@ -962,7 +962,7 @@ fn render_wasm_module_routed(
             // op the p3 transform cannot map still fails loudly there.
             if library_ok
                 && !force_structural
-                && std::env::var_os("ALMIDE_COMPONENT_P3").is_none()
+                && !almide_base::env::flag("ALMIDE_COMPONENT_P3")
                 && let Some(op) = host_ops
                     .iter()
                     .find(|op| !almide_wasm_run::wasi::P1_SERVED_OPS.contains(op))
@@ -974,7 +974,7 @@ fn render_wasm_module_routed(
             // With the debug env, ALWAYS name the winning leg — the
             // incumbent path and the reroute already speak, so a silent
             // structural success made the env an incomplete oracle.
-            if std::env::var_os("ALMIDE_VERIFIED_DEBUG").is_some() {
+            if almide_base::env::flag("ALMIDE_VERIFIED_DEBUG") {
                 err(&format!(
                     "[almide] structural leg emitted the module ({} bytes)",
                     bytes.len()
@@ -1010,7 +1010,7 @@ fn render_wasm_module(source_text: &str, v1_self_modules: &[(String, almide_lang
     match render(
         source_text,
         v1_self_modules,
-        std::env::var("ALMIDE_VERIFIED_DEBUG").is_ok(),
+        almide_base::env::flag("ALMIDE_VERIFIED_DEBUG"),
     ) {
         Ok(wat) => match wat::parse_str(&wat) {
             Ok(bytes) => {
@@ -1038,7 +1038,7 @@ fn render_wasm_module(source_text: &str, v1_self_modules: &[(String, almide_lang
                     return Err(());
                 }
                 let bytes = strip_wasm_name_section(bytes);
-                if std::env::var("ALMIDE_VERIFIED_DEBUG").is_ok() {
+                if almide_base::env::flag("ALMIDE_VERIFIED_DEBUG") {
                     err(&format!(
                         "[almide] v1 trust-spine emitted the module ({} bytes)",
                         bytes.len()

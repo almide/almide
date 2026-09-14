@@ -108,7 +108,7 @@ fn cl_lift_in_fns(
             continue;
         }
         // Validate: every piece must lower AND certify without poison.
-        let dbg = std::env::var_os("ALMIDE_DBG_CONTLIFT").is_some();
+        let dbg = almide_base::env::flag("ALMIDE_DBG_CONTLIFT");
         let all_clean = std::iter::once(&functions[i]).chain(chain.iter()).all(|f| {
             match lower_function(f, globals_ty) {
                 Ok(mir) => {

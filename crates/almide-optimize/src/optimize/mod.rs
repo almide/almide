@@ -31,14 +31,14 @@ pub fn optimize_program(program: &mut IrProgram) {
     // walling shape, which then walls honestly and falls back (measured: 12
     // fallbacks normally, 13 ablated) — which is the correct trade for a
     // measurement mode: an honest wall, never a changed answer.
-    let ablate = std::env::var_os("ALMIDE_DISABLE_OPT").is_some();
+    let ablate = almide_base::env::flag("ALMIDE_DISABLE_OPT");
     // ALMIDE_ONLY_PASS=fold|dce|propagate runs EXACTLY ONE perf pass — the
     // rustc `-Zmir-enable-passes=+X` analogue (#1487), so a pass-isolated
     // fixture's behavior is a function of one pass plus the always-on
     // enabler/correctness passes, never of a sibling. Composes with the
     // ablation switch as the "none" point of the same axis; an unknown name
     // is a hard error, not a silent full pipeline.
-    let only = std::env::var("ALMIDE_ONLY_PASS").ok();
+    let only = almide_base::env::var("ALMIDE_ONLY_PASS");
     if let Some(name) = only.as_deref() {
         if !matches!(name, "fold" | "dce" | "propagate") {
             panic!("ALMIDE_ONLY_PASS={name} names no pass (fold | dce | propagate)");

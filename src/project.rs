@@ -227,7 +227,7 @@ pub fn parse_toml(path: &Path) -> Result<Project, String> {
 /// Returns `Err` with a human-readable message when the pin is violated.
 /// `ALMIDE_SKIP_VERSION_CHECK=1` bypasses the check.
 pub fn check_compiler_version(project: &Project) -> Result<(), String> {
-    let skip = std::env::var("ALMIDE_SKIP_VERSION_CHECK").is_ok();
+    let skip = almide_base::env::flag("ALMIDE_SKIP_VERSION_CHECK");
     check_compiler_version_with(project, skip)
 }
 

@@ -57,7 +57,7 @@ fn wrap_call_args_for_target(args: Vec<IrExpr>, target: &CallTarget, sigs: &Hash
     let Some(name) = callee_name else { return args; };
     // ALMIDE_DBG_BORROW=<substr>: name the two keys this call site consults
     // and what each resolved to (companion of the per-iteration sig dump).
-    if let Ok(filter) = std::env::var("ALMIDE_DBG_BORROW")
+    if let Some(filter) = almide_base::env::var("ALMIDE_DBG_BORROW")
         && name.contains(&filter)
     {
         let direct = sigs.get(&name).cloned();

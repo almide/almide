@@ -36,7 +36,7 @@ effect fn main() -> Unit = {
 const ENV_SET: &str = r#"import env
 
 effect fn main() -> Unit = {
-  env.set("ALMIDE_PIN", "1")
+  env.set("WASI_SERVICES_PIN", "1")
   println("set")
 }
 "#;
@@ -44,8 +44,8 @@ effect fn main() -> Unit = {
 const ENV_ROUND_TRIP: &str = r#"import env
 
 effect fn main() -> Unit = {
-  env.set("ALMIDE_PIN", "1")
-  println(env.get("ALMIDE_PIN") ?? "(none)")
+  env.set("WASI_SERVICES_PIN", "1")
+  println(env.get("WASI_SERVICES_PIN") ?? "(none)")
   println(int.to_string(list.len(env.args())))
 }
 "#;

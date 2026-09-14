@@ -3,12 +3,12 @@ impl LowerCtx {
         // First try to EXECUTE it as a real scalar-state loop; on any out-of-subset
         // feature this rolls back cleanly and we reach the model-one-iteration form below.
         if self.try_lower_scalar_while(cond, body) {
-            if std::env::var_os("ALMIDE_DBG_WHILE").is_some() {
+            if almide_base::env::flag("ALMIDE_DBG_WHILE") {
                 eprintln!("WHILE scalar-loop OK fn={} ({} body stmts)", self.fn_name, body.len());
             }
             return Ok(());
         }
-        if std::env::var_os("ALMIDE_DBG_WHILE").is_some() {
+        if almide_base::env::flag("ALMIDE_DBG_WHILE") {
             eprintln!("WHILE scalar-loop DECLINED fn={} ({} body stmts)", self.fn_name, body.len());
         }
         // The fallback below runs the body straight-line ONCE (the model-one-iteration

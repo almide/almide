@@ -395,7 +395,7 @@ pub fn lower_function_all_with_globals(
     let out = lower_function_all_impl(func, globals, global_inits, record_layouts, variant_layouts);
     // Debug aid (wasm-leg parity with the native rungs' ALMIDE_DUMP_MIR):
     // `ALMIDE_DUMP_WMIR=<substr>` prints the lowered op stream of matching fns.
-    if let (Ok(pat), Ok(ms)) = (std::env::var("ALMIDE_DUMP_WMIR"), &out) {
+    if let (Some(pat), Ok(ms)) = (almide_base::env::var("ALMIDE_DUMP_WMIR"), &out) {
         if func.name.as_str().contains(&pat) {
             for m in ms {
                 eprintln!("== WMIR {} ==", m.name);

@@ -493,7 +493,7 @@ fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::PathBuf, run
         kind: SkipKind::Environment,
     };
     let compile_error = |detail: String| WasmTestOutcome::CompileError { file: test_file.to_string(), detail };
-    let prof = std::env::var_os("ALMIDE_PROFILE").is_some();
+    let prof = almide_base::env::flag("ALMIDE_PROFILE");
     let mut marks: Vec<(&'static str, std::time::Instant)> = vec![("start", std::time::Instant::now())];
 
     let (mut program, source_text, parse_errors) = parse_file(test_file);
@@ -572,7 +572,7 @@ fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::PathBuf, run
     // `ALMIDE_WALL_REASON=1` prints WHICH of the three stages declined. Without it a
     // fallback file reports only "v1 wall", and diagnosing the #813 remainder meant
     // re-deriving each one by hand through `render_program`.
-    let explain = std::env::var_os("ALMIDE_WALL_REASON").is_some();
+    let explain = almide_base::env::flag("ALMIDE_WALL_REASON");
 
     let v1_bytes: Option<Vec<u8>> =
         match almide_mir::pipeline::try_render_wasm_source_tests(&source_text, &v1_self_modules, explain, run_filter) {
@@ -930,14 +930,14 @@ pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>, allow
         .filter(|(f, _)| native_code.get(f).copied() == Some(0))
         .collect();
     for (file, detail) in &diverged {
-        err(&format!("WASM TRAP {} (compiled for wasm, failed at runtime; native re-run PASSED — CI's Test WASM will fail this)", file));
+        err(&format!("WASM TRAP {} (compiled for wasm, failed at runtime; native re-run PASSED — a wasm-only miscompile)", file));
         err_no_nl(detail);
     }
     // The wasm COVERAGE ratchet's data feed (mission-critical arc): every
     // file the wasm leg did not pass, one per line, so
     // proofs/check-wasm-fallback.sh can diff the set against its shrink-only
     // baseline. Names only under the flag — the summary line stays stable.
-    if std::env::var_os("ALMIDE_FALLBACK_NAMES").is_some() {
+    if almide_base::env::flag("ALMIDE_FALLBACK_NAMES") {
         let mut sorted = fallback.clone();
         sorted.sort();
         for f in &sorted {
@@ -955,15 +955,25 @@ pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>, allow
     if failed > 0 {
         std::process::exit(1);
     }
-    // Pre-push strict mode: a diverged trap fails the run even though the
-    // native re-run passed — CI's Test WASM verdict, surfaced locally instead
-    // of on the PR (#1166).
-    if !diverged.is_empty() && std::env::var_os("ALMIDE_TEST_STRICT_WASM").is_some() {
-        err(&format!(
-            "STRICT WASM: {} file(s) trapped on the wasm leg (native re-run passed; CI's Test WASM will fail)",
-            diverged.len()
-        ));
-        std::process::exit(1);
+    // A diverged trap FAILS the run even though the native re-run passed: it is
+    // a wasm-only miscompile signal, and the run was asked for the wasm target.
+    // Before #2205 this needed ALMIDE_TEST_STRICT_WASM, which nothing in CI or
+    // the scripts set — so this lane (the default `almide test`: wasm first,
+    // native fallback) passed over a diverged leg everywhere. ALMIDE_TEST_LAX_WASM
+    // is the documented opt-out (a gate bypass: announced on stderr when on).
+    if !diverged.is_empty() {
+        if almide_base::env::flag("ALMIDE_TEST_LAX_WASM") {
+            err(&format!(
+                "LAX WASM: {} file(s) trapped on the wasm leg (native re-run passed) — passing only because ALMIDE_TEST_LAX_WASM is set",
+                diverged.len()
+            ));
+        } else {
+            err(&format!(
+                "{} file(s) trapped on the wasm leg (native re-run passed) — a wasm-only miscompile fails a --target wasm run; ALMIDE_TEST_LAX_WASM=1 to pass over it",
+                diverged.len()
+            ));
+            std::process::exit(1);
+        }
     }
     err(&format!("All {} test file(s) passed", test_files.len()));
     // Nothing is declined on this lane: a wasm wall routes the file to the

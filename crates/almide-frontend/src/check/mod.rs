@@ -42,13 +42,16 @@ use types::{Constraint, FixHint, UnionFind, resolve_ty};
 /// Cross-module top-let types are written in one pass and read in another, and
 /// the failure mode (a `Ty::Unknown` reaching lowering, which then emits
 /// `LazyLock<_>`) is invisible in the compiler's normal output — so the write
-/// and the read each announce themselves under `ALMIDE_<CHANNEL>_DEBUG`.
+/// and the read each announce themselves under the channel's switch
+/// (`ALMIDE_TOPLET_DEBUG`, registered in `almide_base::env`; the name is spelled
+/// in full at the call site so the switch gate can see it — #2205).
 ///
 /// Traces go to stderr because stdout is the compiler's data channel: `almide
 /// compile --json` and `--target rust` write their real output there, and a
 /// trace line mixed into it would corrupt a machine-read result.
-pub(crate) fn debug_trace(channel: &str, line: impl FnOnce() -> String) {
-    if std::env::var_os(format!("ALMIDE_{channel}_DEBUG")).is_some() {
+pub(crate) fn debug_trace(switch: &str, line: impl FnOnce() -> String) {
+    if almide_base::env::flag(switch) {
+        let channel = switch.trim_start_matches("ALMIDE_").trim_end_matches("_DEBUG");
         eprintln!("[{}-debug] {}", channel.to_lowercase(), line());
     }
 }

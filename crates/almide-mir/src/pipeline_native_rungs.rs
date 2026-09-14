@@ -289,7 +289,7 @@ include!("pipeline_native_concurrency.rs");
 pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
     // Debug aid: ALMIDE_DUMP_MIR=1 prints every lowered fn's op stream (the
     // same view `debug_dump_mir` builds) before the native render runs.
-    if std::env::var("ALMIDE_DUMP_MIR").is_ok() {
+    if almide_base::env::flag("ALMIDE_DUMP_MIR") {
         if let Ok(dump) = debug_dump_mir(source) {
             eprintln!("{dump}");
         }

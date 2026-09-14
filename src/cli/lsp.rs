@@ -500,7 +500,7 @@ fn handle_notification(notif: Notification, connection: &Connection, documents: 
             }
         }
         "textDocument/didChange" => {
-            let trace = std::env::var("ALMIDE_LSP_TRACE").is_ok();
+            let trace = almide_base::env::flag("ALMIDE_LSP_TRACE");
             match serde_json::from_value::<DidChangeTextDocumentParams>(notif.params) {
                 Ok(params) => {
                     let uri = params.text_document.uri.clone();
@@ -576,7 +576,7 @@ pub fn run_lsp() {
         match msg {
             Message::Request(req) => {
                 if connection.handle_shutdown(&req).unwrap_or(false) { return; }
-                if std::env::var("ALMIDE_LSP_TRACE").is_ok() {
+                if almide_base::env::flag("ALMIDE_LSP_TRACE") {
                     eprintln!("[lsp-trace] request  {} id={:?}", req.method, req.id);
                 }
                 flush_dirty(&connection, &documents, &mut analyzed, &mut dep_cache, &mut dirty);
@@ -598,7 +598,7 @@ pub fn run_lsp() {
                 connection.sender.send(Message::Response(r)).ok();
             }
             Message::Notification(notif) => {
-                if std::env::var("ALMIDE_LSP_TRACE").is_ok() {
+                if almide_base::env::flag("ALMIDE_LSP_TRACE") {
                     eprintln!("[lsp-trace] notification {}", notif.method);
                 }
                 handle_notification(notif, &connection, &mut documents, &mut analyzed, &mut dep_cache, &mut dirty)

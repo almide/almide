@@ -1,0 +1,65 @@
+// `env-switches-doc` — the docs half of the #2205 switch gate: the table
+// `docs/specs/cli.md` embeds between its `almide switches --md` markers must
+// equal what the compiler under test renders from `almide_base::env::SWITCHES`.
+// A registry row added, reworded or removed without regenerating the block is
+// a drift; so is a hand edit of the table. The grep half (every `ALMIDE_*`
+// literal registered, no direct reads in the compiler proper) is
+// `scripts/check-env-switches.sh` — it greps and exits, so it stays bash
+// (#2128); this half reads markdown and compares generated output, so it is
+// Almide.
+import fs
+import process
+
+type Verdict = { lines: List[String], ok: Bool }
+
+fn begin_marker() -> String = "<!-- almide switches --md: begin -->"
+
+fn end_marker() -> String = "<!-- almide switches --md: end -->"
+
+// The lines strictly between the two markers, or none when either is missing.
+fn embedded_block(doc: String) -> List[String]? = {
+  let lines = string.split(doc, "\n")
+  let b = list.index_of(lines, begin_marker())
+  let e = list.index_of(lines, end_marker())
+  match (b, e) {
+    (some(bi), some(ei)) => if ei > bi then some(list.slice(lines, bi + 1, ei))
+    else none,
+    _ => none,
+  }
+}
+
+// The first index where the two line lists differ, if any.
+fn first_diff(a: List[String], b: List[String], i: Int) -> Int? = if i >= list.len(a) and i >= list.len(b) then none
+else if i >= list.len(a) or i >= list.len(b) then some(i)
+else if list.get_or(a, i, "") != list.get_or(b, i, "") then some(i)
+else first_diff(a, b, i + 1)
+
+effect fn run(root: String, almide_bin: String) -> Verdict = {
+  let doc_path = root + "/docs/specs/cli.md"
+  let doc = fs.read_text(doc_path)!
+  let rendered = process.exec(almide_bin, ["switches", "--md"])!
+  // `switches --md` ends with a newline; the block between the markers does not carry
+  // that trailing empty line.
+  let want = string.split(string.trim_end(rendered), "\n")
+  match embedded_block(doc) {
+    none => Verdict {
+      lines: ["::error::" + doc_path + " has no `" + begin_marker() + "` … `" + end_marker() + "` block"],
+      ok: false,
+    },
+    some(got) => match first_diff(got, want, 0) {
+      none => Verdict {
+        lines: ["env-switches-doc OK: " + int.to_string(list.len(want)) + " switch row(s) match the registry"],
+        ok: true,
+      },
+      some(i) => Verdict {
+        lines: [
+          "::error::" + doc_path + " switch table differs from `almide switches --md` at row " + int.to_string(i + 1),
+          "  doc:      " + list.get_or(got, i, "<end>"),
+          "  registry: " + list.get_or(want, i, "<end>"),
+          "  regenerate: replace the block between the markers with the output of `almide switches --md`"
+        ],
+        ok: false,
+      },
+    },
+  }
+}

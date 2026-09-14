@@ -152,11 +152,14 @@ fn divzero_abort_matches_v0() {
         String::from_utf8_lossy(&v1.stdout),
         "divzero stdout diverges"
     );
-    assert_eq!(
-        String::from_utf8_lossy(&v0.stderr),
-        String::from_utf8_lossy(&v1.stderr),
-        "divzero stderr diverges"
-    );
+    // The v0 run is forced through a gate bypass (ALMIDE_NO_VERIFIED_OK), which the
+    // CLI announces on stderr (#2205); the program's own stderr is what is compared.
+    let v0_err: String = String::from_utf8_lossy(&v0.stderr)
+        .lines()
+        .filter(|l| !l.starts_with("[almide] ALMIDE_"))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    assert_eq!(v0_err, String::from_utf8_lossy(&v1.stderr), "divzero stderr diverges");
 }
 
 #[test]

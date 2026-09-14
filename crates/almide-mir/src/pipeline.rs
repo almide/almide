@@ -523,7 +523,7 @@ fn source_to_ir_with(
     // walls or still poisons rolls the fn back untouched.
     crate::lower::lift_poisoning_continuations(&mut ir);
     // Debug aid: `ALMIDE_DUMP_IR=<substr>` dumps the post-chain body of matching fns.
-    if let Ok(pat) = std::env::var("ALMIDE_DUMP_IR") {
+    if let Some(pat) = almide_base::env::var("ALMIDE_DUMP_IR") {
         for f in ir
             .functions
             .iter()
