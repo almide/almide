@@ -725,7 +725,16 @@ fn render_expr_borrow(ctx: &RenderContext, expr: &IrExpr) -> String {
         // `&str` through the reference and the owned binding alike; ref
         // params keep `&*` because they are already `&str` and `str::as_str`
         // is still unstable.
-        if let IrExprKind::Var { id } = &inner.kind && ctx.ann.borrowed_loop_vars.contains(id) {
+        //
+        // #2194: the set is keyed by VarId and program-wide, and a
+        // `branch_lift` helper (`optimize/branch_lift.rs`) KEEPS the enclosing
+        // fn's ids as its params — so the loop binder reappears there as a
+        // `&str` param, where `.as_str()` is E0658. Fn-local truth beats the
+        // annotation: a param of the current fn is never this fn's binder.
+        if let IrExprKind::Var { id } = &inner.kind
+            && ctx.ann.borrowed_loop_vars.contains(id)
+            && !ctx.param_vars.contains(id)
+        {
             return format!("{}.as_str()", render_expr(ctx, inner));
         }
         format!("&*{}", render_expr(ctx, inner))
