@@ -657,12 +657,14 @@ evidence = "#929 roster landing (2026-09-03): the per-target optimization pass r
 
 [[gate]]
 path = "scripts/check-env-switches.sh"
+wired_by = ".github/workflows/ci.yml"
 reads = "scalar"
 class = "NEGATIVE_TESTED"
 evidence = "#2205 landing (2026-09-14): a tracked scratch file carrying `std::env::var(\"ALMIDE_NOT_REGISTERED_PROBE\")` made BOTH rules fire before first green — the unregistered-name error named the file:line, the direct-read error named the same site — and removing it restored green. The reverse rule (a registered row nothing spells) fired for real during landing: `ALMIDE_TOPLET_DEBUG` was registered before its call sites spelled the full name, and the gate said so."
 
 [[gate]]
 path = "tools/almide-gates:env-switches-doc"
+wired_by = ".github/workflows/ci.yml"
 reads = "structured"
 class = "NEGATIVE_TESTED"
 evidence = "#2205 landing (2026-09-14): one cell of the embedded table in docs/specs/cli.md hand-flipped (`debug` -> `route` on the ALMIDE_ABI_PROBE row) went red naming row 3 with the doc line and the registry line side by side; restoring the block went green. Reads the markdown block between the `almide switches --md` markers and the compiler's rendered table (process.exec), so it is structured by #2128's rule and lives in Almide."
