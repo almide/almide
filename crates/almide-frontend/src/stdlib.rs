@@ -207,9 +207,8 @@ const ALIASES: &[(&str, &str, &str)] = &[
     ("string", "index", "string.index_of"),
     ("string", "all", "string.chars + list.all"),
     // Common LLM hallucinations from MSR testing
-    ("string", "get_char", "string.char_at"),
-    ("string", "charAt", "string.char_at"),
-    ("string", "get", "string.char_at"),
+    ("string", "get_char", "string.get"),
+    ("string", "charAt", "string.get"),
     ("string", "from_char", "string.from_codepoint"),
     ("string", "from_char_code", "string.from_codepoint"),
     ("string", "chr", "string.from_codepoint"),
@@ -373,6 +372,30 @@ mod tests {
         for (module, func, fix) in ALIASES {
             assert!(!fix.is_empty(), "empty suggestion for {module}.{func}");
         }
+    }
+
+    /// A bare `module.fn` suggestion must resolve through the same registry
+    /// the checker consults, or the hint sends the reader from one E002 to
+    /// another. Three rows pointed at `string.char_at` — a function that never
+    /// existed (the char-at-index member is `string.get`) — and one of them
+    /// keyed on `string.get` itself, so the real function was "corrected" into
+    /// the phantom. Prose suggestions (a space or a paren) are not looked up.
+    #[test]
+    fn alias_targets_resolve_in_the_registry() {
+        let mut bad = Vec::new();
+        for (module, func, fix) in ALIASES {
+            if fix.contains(' ') || fix.contains('(') {
+                continue;
+            }
+            let Some((m, f)) = fix.split_once('.') else {
+                bad.push(format!("{module}.{func} -> {fix}: not module.fn"));
+                continue;
+            };
+            if !module_functions_all(m).contains(&f) {
+                bad.push(format!("{module}.{func} -> {fix}: no such function"));
+            }
+        }
+        assert!(bad.is_empty(), "alias rows pointing at nothing:\n{}", bad.join("\n"));
     }
 
     /// A module with no description falls back to "standard library module",
