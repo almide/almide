@@ -600,7 +600,9 @@ fn try_render_borrow_shared_mut(ctx: &RenderContext, inner: &IrExpr, mutable: bo
     // this read can borrow the cell in place (every use in its statement is
     // a shared call-arg read), so skip the `.get()` whole-value clone. The
     // shape cannot occur otherwise on a AlmideSharedMut var (the cell has no
-    // Deref impl, so the generic `&*v` render would not compile).
+    // Deref impl, so the generic `&*v` render would not compile). The read
+    // goes through `borrow_proven(<almide name>)` (#2186): a `RefCell` panic
+    // here is a wrong proof, and the message says whose.
     if let IrExprKind::Deref { expr: dinner } = &inner.kind {
         if let IrExprKind::Var { id } = &dinner.kind {
             if !mutable
@@ -608,7 +610,8 @@ fn try_render_borrow_shared_mut(ctx: &RenderContext, inner: &IrExpr, mutable: bo
                 && !ctx.param_vars.contains(id)
                 && !almide_ir::top_let_storage::capture_copy_cell(&ctx.var_table.get(*id).ty)
             {
-                return Some(format!("&*{}.borrow()", ctx.var_name(*id)));
+                let almide_name = source_var_name(ctx, *id);
+                return Some(format!("&*{}.borrow_proven({almide_name:?})", ctx.var_name(*id)));
             }
         }
     }
@@ -629,6 +632,25 @@ fn try_render_borrow_shared_mut(ctx: &RenderContext, inner: &IrExpr, mutable: bo
         // where `x` is a block-local (`let outer = () => { var a = …; …; a })`.
         format!("&{}.get()", var_name)
     })
+}
+
+/// The Almide-source name behind a var: a closure capture is renamed
+/// `__cap_<origin VarId>` by `capture_bindings`, so the origin's name is
+/// recovered by following that suffix (chained captures included); any
+/// other var already carries its source name.
+fn source_var_name(ctx: &RenderContext, id: VarId) -> String {
+    let mut cur = id;
+    for _ in 0..8 {
+        let name = ctx.var_table.get(cur).name.as_str();
+        let Some(origin) = name.strip_prefix("__cap_").and_then(|n| n.parse::<u32>().ok()) else {
+            return name.to_string();
+        };
+        if origin as usize >= ctx.var_table.len() {
+            return name.to_string();
+        }
+        cur = VarId(origin);
+    }
+    ctx.var_table.get(cur).name.as_str().to_string()
 }
 
 /// If the borrowed operand is a Var referencing a fn param already emitted
