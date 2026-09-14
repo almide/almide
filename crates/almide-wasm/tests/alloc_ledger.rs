@@ -102,7 +102,7 @@ fn corpus_allocation_watermarks_hold() {
 
     let mut rows = String::new();
     let mut offences = Vec::new();
-    for line in manifest.lines() {
+    for line in almide_corpus::manifest_rows(&manifest) {
         let rel = line.splitn(3, '\t').nth(2).expect("manifest row");
         let text = std::fs::read_to_string(almide_corpus::resolve(&root, rel)).expect("fixture readable");
         // A `!` row: the structural leg REFUSES this fixture (the CLI

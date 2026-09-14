@@ -1,15 +1,24 @@
 //! Run-parity gate (unit 3): the ported interpreter must reproduce the
 //! ORACLE's execution of every wasm_cross / wasm_fail fixture — stdout
 //! (sha256, bash-normalized: NUL bytes stripped, exactly one trailing
-//! newline when nonempty) and exit code. The oracle leg is `almide run
-//! --target wasm` (clean a877d2138 build), legitimate as reference because
-//! wasm_cross fixtures are cross-target byte-identical by the incumbent's
-//! own CI definition. This is the new engine joining the incumbent's
-//! 3-way-oracle bench as a measured, not trusted, participant.
+//! newline when nonempty) and exit code. The oracle is the CLI built from
+//! THIS tree — `almide run --target wasm` at HEAD — legitimate as reference
+//! because wasm_cross fixtures are cross-target byte-identical by the
+//! incumbent's own CI definition. This is the new engine joining the
+//! incumbent's 3-way-oracle bench as a measured, not trusted, participant.
+//!
+//! The goldens are not pinned to an old binary: `scripts/check-parity-goldens.sh`
+//! (CI, almide-gates job) regenerates them from the release binary of the
+//! same commit and fails on any diff, so a manifest row can only change by
+//! the CLI's own output changing — never by hand, never from a stale build.
 
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+
+/// The measured, shrink-only ceilings this gate enforces (see the comment at
+/// their use).
+const BASELINE: &str = "proofs/run-parity-unsupported-baseline.txt";
 
 fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().expect("test harness invariant")
@@ -30,10 +39,8 @@ fn wasm_cross_fixtures_run_identically_on_the_interpreter() {
     let root = workspace_root();
     let golden = root.join("crates/almide-spine/tests/golden");
     let mut manifest: BTreeMap<String, (String, i32)> = BTreeMap::new();
-    for l in std::fs::read_to_string(golden.join("spec-run-manifest.txt"))
-        .expect("run scripts/gen-run-manifest.sh")
-        .lines()
-    {
+    let text = std::fs::read_to_string(golden.join("spec-run-manifest.txt")).expect("run scripts/gen-run-manifest.sh");
+    for l in almide_corpus::manifest_rows(&text) {
         let mut it = l.splitn(3, '\t');
         let h = it.next().expect("test harness invariant").to_string();
         let rc: i32 = it.next().expect("test harness invariant").parse().expect("test harness invariant");
@@ -42,35 +49,21 @@ fn wasm_cross_fixtures_run_identically_on_the_interpreter() {
     }
     assert!(manifest.len() > 550, "suspiciously small manifest");
 
-    // Rows whose ORACLE answer predates a fix that postdates the port SHA. They
-    // stay in the manifest — it is also the corpus list for the
-    // exercised-surface, allocation and size sweeps, and subtracting a row
-    // takes the fixture out of all of them (#2129 lost `regex.*` from the wasm
-    // leg's surface that way) — and only this comparison skips them. Shrink-only
-    // in both directions: a row that starts agreeing again must be deleted.
-    let stale = almide_corpus::stale_oracle_rows(&root);
-    for p in stale.keys() {
-        assert!(manifest.contains_key(p), "{p}: stale-row register names a fixture with no manifest row");
-    }
-    let mut stale_agreed = Vec::new();
-
     // The interpreter is the incumbent's PRE-codegen oracle: a fixture using
     // an intrinsic outside its bridge coverage returns Unsupported (exit -2),
     // and the incumbent's own 3-way gate SKIPS those rather than voting.
     // Same doctrine here — skipped WITH the reason printed, and the count is
-    // a shrink-only ceiling so coverage can only grow.
-    // A pin advance may raise the ceiling by exactly the fixtures it brings
-    // (named in PORTLOG.md); otherwise it lowers. The 2026-08-20 advance
-    // brought none: its two #1226-gap fixtures have NO referee at the port
-    // SHA (the oracle's wasm leg walls at build) and sit in
-    // scripts/lib/run-oracle-exclusions.txt instead.
-    const MAX_UNSUPPORTED: usize = 121;
+    // a shrink-only ceiling so coverage can only grow. The ceilings live in
+    // proofs/run-parity-unsupported-baseline.txt (measured, lowered in their
+    // own commit — a ratchet artifact, not a constant next to the code it
+    // judges); a fixture that newly lands in the manifest and is unsupported
+    // must be carried by a bridge extension, not by raising the number.
+    let max_unsupported = almide_corpus::ratchet_ceiling(&root, BASELINE, "unsupported");
     // FuelExhausted (-3) is the interpreter's second distinguished outcome
-    // ("NOT a hang or panic"); the one huge-range fixture hits it. Ceiling 1 —
-    // 2 after the same pin advance: effect_tco_err_rewrap pins a TCO the
-    // a877d2138 interpreter does not perform on the err-rewrap path (the
-    // contract was written with that fix); it spins to fuel exhaustion here.
-    const MAX_FUEL: usize = 2;
+    // ("NOT a hang or panic"): the one huge-range fixture hits it, and
+    // effect_tco_err_rewrap pins a TCO the interpreter does not perform on
+    // the err-rewrap path, so it spins to fuel exhaustion there.
+    let max_fuel = almide_corpus::ratchet_ceiling(&root, BASELINE, "fuel_exhausted");
     let mut mismatches = Vec::new();
     let mut front_end_failures = Vec::new();
     let mut unsupported: BTreeMap<String, usize> = BTreeMap::new();
@@ -89,15 +82,10 @@ fn wasm_cross_fixtures_run_identically_on_the_interpreter() {
                 n_fuel += 1;
             }
             Ok(out) => {
-                let agrees = normalized_hash(&out.stdout) == *want_hash && out.exit == *want_exit;
-                if stale.contains_key(rel) {
-                    if agrees {
-                        stale_agreed.push(rel.clone());
-                    }
-                } else if !agrees {
-                    mismatches.push(format!("{rel} (exit {} vs {want_exit})", out.exit));
-                } else {
+                if normalized_hash(&out.stdout) == *want_hash && out.exit == *want_exit {
                     n_ok += 1;
+                } else {
+                    mismatches.push(format!("{rel} (exit {} vs {want_exit})", out.exit));
                 }
             }
             Err(e) => front_end_failures.push(format!("{rel}: {e}")),
@@ -113,24 +101,10 @@ fn wasm_cross_fixtures_run_identically_on_the_interpreter() {
         front_end_failures.len(), front_end_failures[0]
     );
     assert!(
-        n_unsupported <= MAX_UNSUPPORTED,
-        "unsupported count {n_unsupported} exceeds the shrink-only ceiling {MAX_UNSUPPORTED}"
+        n_unsupported <= max_unsupported,
+        "unsupported count {n_unsupported} exceeds the shrink-only ceiling {max_unsupported} ({BASELINE})"
     );
-    assert!(n_fuel <= MAX_FUEL, "fuel-exhausted count {n_fuel} exceeds ceiling {MAX_FUEL}");
-    if !stale.is_empty() {
-        println!(
-            "run parity: {} row(s) skipped as stale oracle answers: {:?}",
-            stale.len(),
-            stale.keys().collect::<Vec<_>>()
-        );
-    }
-    assert!(
-        stale_agreed.is_empty(),
-        "{} stale-row registration(s) now AGREE with the oracle — delete them from \
-         scripts/lib/run-oracle-stale.txt (the register is shrink-only): {:?}",
-        stale_agreed.len(),
-        stale_agreed
-    );
+    assert!(n_fuel <= max_fuel, "fuel-exhausted count {n_fuel} exceeds ceiling {max_fuel} ({BASELINE})");
     assert!(
         mismatches.is_empty(),
         "{} of {} fixtures diverge from the oracle run, first: {}",

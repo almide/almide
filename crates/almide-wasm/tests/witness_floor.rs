@@ -55,7 +55,7 @@ fn structural_witnesses_balance_and_hold_the_floor() {
     let mut unbalanced: Vec<(String, String)> = Vec::new();
     let mut nondet: Vec<String> = Vec::new();
     let dump = std::env::var("ALMIDE_WITNESS_DUMP").is_ok();
-    for line in manifest.lines() {
+    for line in almide_corpus::manifest_rows(&manifest) {
         let rel = line.splitn(3, '\t').nth(2).expect("manifest row");
         let text = std::fs::read_to_string(almide_corpus::resolve(&root, rel)).expect("fixture readable");
         let Ok(ir) = almide_spine::s5::lower_to_ir(rel, &text) else { continue };

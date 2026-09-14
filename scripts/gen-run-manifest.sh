@@ -4,8 +4,18 @@
 # legitimate as the reference because wasm_cross fixtures are BY DEFINITION
 # cross-target byte-identical under the incumbent's own CI — and records
 # sha256(stdout) + exit code. The greenfield interpreter must reproduce both.
+# The oracle is the CLI built from THIS tree (target/release/almide; #2183):
+# CI regenerates and diffs the outputs (scripts/check-parity-goldens.sh), so
+# a committed row can only change by the CLI's own output changing. A fixture
+# the CLI itself cannot run (exit >= 2: a build wall, a trap) lands in the
+# exclusions with that exit — there is no hand-maintained register.
 #
-#   ORACLE=/path/to/almide bash scripts/gen-run-manifest.sh
+#   ORACLE=target/release/almide bash scripts/gen-run-manifest.sh
+#
+# Outputs (committed; the manifest starts with one `# oracle:` header line —
+# see scripts/lib/oracle-header.sh):
+#   crates/almide-spine/tests/golden/spec-run-manifest.txt     sha256<TAB>exit<TAB>path
+#   crates/almide-spine/tests/golden/spec-run-exclusions.txt   path<TAB>reason
 #
 # Requires wasmtime (memory: /opt/homebrew/bin off the sandbox PATH).
 # wasm_cross and wasm_fail are judge-owned: they live under the almide/als
@@ -16,14 +26,15 @@ export LC_ALL=C
 export PATH="/opt/homebrew/bin:$PATH"
 cd "$(dirname "$0")/.." || exit 2
 
-ORACLE="${ORACLE:?set ORACLE to the almide binary built from the port SHA}"
+ORACLE="${ORACLE:?set ORACLE to the almide binary built from this tree (target/release/almide)}"
 case "$ORACLE" in /*) ;; *) ORACLE="$PWD/$ORACLE" ;; esac
+"$ORACLE" --version >/dev/null || exit 2
+. scripts/lib/oracle-header.sh
 OUT_DIR="$PWD/crates/almide-spine/tests/golden"
 mkdir -p "$OUT_DIR"
 MANIFEST="$OUT_DIR/spec-run-manifest.txt"
 EXCLUDED="$OUT_DIR/spec-run-exclusions.txt"
 : > "$MANIFEST"; : > "$EXCLUDED"
-REPO_ROOT="$PWD"
 # Judge-mounted form sweeps the als/ corpus; the main repo sweeps in-tree.
 if [ -d als/spec/wasm_cross ]; then cd als || exit 2
 else [ -d spec/wasm_cross ] || { echo "::error::spec/wasm_cross missing"; exit 2; }
@@ -45,17 +56,9 @@ export -f run_one; export ORACLE
 find spec/wasm_cross spec/wasm_fail -name '*.almd' | sort \
   | xargs -P 8 -I{} bash -c 'run_one "$@"' _ {} > /tmp/run-manifest-raw.$$
 
-# The hand-maintained register of fixtures the oracle cannot referee (see its
-# header): dropped from the manifest, carried into the exclusions with reason.
-REGISTER="$REPO_ROOT/scripts/lib/run-oracle-exclusions.txt"
-reg_file="/tmp/run-oracle-reg.$$"
-grep -vE '^[[:space:]]*(#|$)' "$REGISTER" | cut -f1 > "$reg_file"
-{ grep -v $'\tEXCLUDED\t' /tmp/run-manifest-raw.$$ \
-    | awk -F'\t' -v rf="$reg_file" 'BEGIN{while ((getline l < rf) > 0) drop[l]=1} !($3 in drop)' \
-    | sort -t$'\t' -k3; } > "$MANIFEST"
-rm -f "$reg_file"
-{ grep $'\tEXCLUDED\t' /tmp/run-manifest-raw.$$ | cut -f1,3 || true
-  grep -vE '^[[:space:]]*(#|$)' "$REGISTER" | sed 's/\t/\tregister: /'; } | sort > "$EXCLUDED"
+grep -v $'\tEXCLUDED\t' /tmp/run-manifest-raw.$$ | sort -t$'\t' -k3 > "$MANIFEST"
+{ grep $'\tEXCLUDED\t' /tmp/run-manifest-raw.$$ | cut -f1,3 || true; } | sort > "$EXCLUDED"
 rm -f /tmp/run-manifest-raw.$$ /tmp/run-err.$$.* 2>/dev/null
+stamp_oracle_header "$MANIFEST"
 
 echo "manifest: $(wc -l < "$MANIFEST" | tr -d ' ') files, exclusions: $(wc -l < "$EXCLUDED" | tr -d ' ')"
