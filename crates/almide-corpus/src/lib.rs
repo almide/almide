@@ -110,22 +110,6 @@ pub fn ratchet_ceiling(root: &Path, file: &str, name: &str) -> usize {
         })
         .unwrap_or_else(|| panic!("{}: no `{name}` row", path.display()))
 }
-
-/// Fixtures whose ORACLE row in the run manifest predates a fix that postdates
-/// the port SHA — `scripts/lib/run-oracle-stale.txt`, as `path -> reason`.
-pub fn stale_oracle_rows(root: &Path) -> std::collections::BTreeMap<String, String> {
-    let path = root.join("scripts/lib/run-oracle-stale.txt");
-    std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("{}: {e}", path.display()))
-        .lines()
-        .filter(|l| !l.trim_start().starts_with('#') && !l.trim().is_empty())
-        .map(|l| {
-            let (p, why) = l.split_once('\t').expect("path<TAB>reason");
-            (p.to_string(), why.to_string())
-        })
-        .collect()
-}
-
 fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
     for entry in std::fs::read_dir(dir).expect("readable directory") {
         let p = entry.expect("directory entry").path();
