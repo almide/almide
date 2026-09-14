@@ -31,10 +31,21 @@ pub const BUNDLED_MODULES: &[&str] = &[
     "prim",
 ];
 
+/// Tier-1 modules every file can reach without writing an `import`: the seed
+/// of `almide-frontend::import_table::ImportTable::new`. Held here, beside
+/// `AUTO_IMPORT_BUNDLED`, so every consumer of the auto-import surface — the
+/// resolver, the import-hint derivation, and `almide fmt`'s import editor —
+/// reads ONE list. The formatter used to carry its own eleven-name copy
+/// "matching types/env.rs", a file that no longer existed; the copy lacked
+/// `prim`.
+pub const TIER1_ALWAYS_ACCESSIBLE: &[&str] = &[
+    "string", "int", "float", "list", "bytes", "matrix",
+    "map", "set", "option", "result", "value", "prim",
+];
+
 /// Bundled modules that should be auto-imported (Tier 1 behavior).
 /// Tier-1 stdlib modules with no bundled-Almide content (option, result, etc.)
-/// are auto-imported via the hardcoded list in
-/// `almide-frontend::import_table::ImportTable::new`; this list is for
+/// are auto-imported via `TIER1_ALWAYS_ACCESSIBLE` above; this list is for
 /// bundled `.almd` modules that need resolve-time loading.
 pub const AUTO_IMPORT_BUNDLED: &[&str] = &[
     "list", "int", "float",
