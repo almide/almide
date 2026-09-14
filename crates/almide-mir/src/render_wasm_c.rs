@@ -716,4 +716,5 @@ fn render_call(dst: Option<ValueId>, func: &RtFn, args: &[CallArg]) -> String {
 
 include!("render_wasm_p2.rs");
 include!("render_wasm_p2_b.rs");
+include!("render_wasm_prim_floors.rs");
 include!("render_wasm_p3.rs");

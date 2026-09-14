@@ -16,7 +16,7 @@ fn __rm_ftype(path: String) -> Int = {
 }
 
 fn __rm_floor(path: String) -> Result[Unit, String] = {
-  let r: Result[Unit, String] = prim.remove_all(path)
+  let r: Result[Unit, String] = prim.remove_all_as(path, "fs.remove")
   let rh = prim.handle(r)
   if prim.load32(rh + 16) != 0 then {
     let m: String = prim.load_handle(rh + 12)
@@ -27,7 +27,7 @@ fn __rm_floor(path: String) -> Result[Unit, String] = {
 effect fn fs_remove(path: String) -> Result[Unit, String] = {
   let t = __rm_ftype(path)
   if t == 3 then {
-    let r: Result[List[String], String] = prim.read_dir(path)
+    let r: Result[List[String], String] = prim.read_dir_as(path, "fs.remove")
     let rh = prim.handle(r)
     if prim.load32(rh + 16) != 0 then {
       let m: String = prim.load_handle(rh + 12)

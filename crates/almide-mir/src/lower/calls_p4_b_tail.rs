@@ -241,11 +241,10 @@ impl LowerCtx {
         }
         if matches!(
             func,
-            "args_get_list" | "args_get_list_full" | "env_get" | "read_text_file"
-                | "read_bytes_file" | "read_dir" | "write_text_file" | "make_dir"
-                | "remove_all" | "path_filestat" | "path_filestat_nofollow" | "path_exists"
-                | "rename"
-        ) {
+            "args_get_list" | "args_get_list_full" | "env_get" | "path_filestat"
+                | "path_filestat_nofollow" | "path_exists" | "rename"
+        ) || crate::fs_floor_base(func).is_some()
+        {
             return self.lower_prim_call_fs_env(func, args);
         }
         if matches!(func, "ptr_to_int" | "int_to_ptr" | "read_line" | "read_n_bytes") {

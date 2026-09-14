@@ -4,10 +4,12 @@
 // walk_recursive — and the flat result is sorted ONCE at the end (per-level
 // read_dir order is already sorted, but native sorts the flattened full-path
 // list, which interleaves levels differently). A read_dir error anywhere
-// (including the root) propagates on the err channel like native's `?`.
-// Reaching read_dir + path_filestat carries Capability::FsRead. `depth` bounds
-// the recursion: the count of levels still to visit below `dir` (1 = list `dir`
-// only); any negative value is unbounded (fs.walk).
+// (including the root) propagates on the err channel like native's `?`, named
+// for the call the writer made (`call` — `fs.walk` or `fs.glob` — rides the
+// recursion into the floor's #2206 call-head twin). Reaching read_dir +
+// path_filestat carries Capability::FsRead. `depth` bounds the recursion: the
+// count of levels still to visit below `dir` (1 = list `dir` only); any
+// negative value is unbounded (fs.walk).
 fn __walk_ftype(path: String) -> Int = {
   let buf = prim.alloc_bytes(64)
   let p = prim.handle(buf) + 12
@@ -15,31 +17,31 @@ fn __walk_ftype(path: String) -> Int = {
   if errno != 0 then 0 else prim.load8(p + 16)
 }
 
-effect fn __walk_entries(dir: String, entries: List[String], i: Int, depth: Int, acc: List[String]) -> Result[List[String], String] = if i >= list.len(entries) then ok(acc)
+effect fn __walk_entries(dir: String, entries: List[String], i: Int, depth: Int, acc: List[String], call: String) -> Result[List[String], String] = if i >= list.len(entries) then ok(acc)
 else {
   let name = list.get(entries, i) ?? ""
   let p = dir + "/" + name
   let acc2 = acc + [p]
   if depth != 1 and __walk_ftype(p) == 3 then {
-    let sub = __walk_into(p, depth - 1, acc2)!
-    __walk_entries(dir, entries, i + 1, depth, sub)
-  } else __walk_entries(dir, entries, i + 1, depth, acc2)
+    let sub = __walk_into(p, depth - 1, acc2, call)!
+    __walk_entries(dir, entries, i + 1, depth, sub, call)
+  } else __walk_entries(dir, entries, i + 1, depth, acc2, call)
 }
 
-effect fn __walk_into(dir: String, depth: Int, acc: List[String]) -> Result[List[String], String] = {
-  let r: Result[List[String], String] = prim.read_dir(dir)
+effect fn __walk_into(dir: String, depth: Int, acc: List[String], call: String) -> Result[List[String], String] = {
+  let r: Result[List[String], String] = prim.read_dir_as(dir, call)
   let rh = prim.handle(r)
   if prim.load32(rh + 16) != 0 then {
     let m: String = prim.load_handle(rh + 12)
     err(m)
   } else {
     let entries: List[String] = prim.load_handle(rh + 12)
-    __walk_entries(dir, entries, 0, depth, acc)
+    __walk_entries(dir, entries, 0, depth, acc, call)
   }
 }
 
 effect fn fs_walk(dir: String) -> Result[List[String], String] = {
-  let all = __walk_into(dir, -1, [])!
+  let all = __walk_into(dir, -1, [], "fs.walk")!
   let sorted = list.sort(all)
   ok(sorted)
 }
@@ -167,7 +169,7 @@ effect fn fs_glob(pattern: String) -> Result[List[String], String] = {
     let root = if string.len(base) == 0 then "." else base
     let prefix = if string.len(base) == 0 or base == "/" then base else base + "/"
     let depth = if __glob_has_dstar(pats, 0) then -1 else list.len(pats)
-    let all = __walk_into(root, depth, empty)!
+    let all = __walk_into(root, depth, empty, "fs.glob")!
     let self_hit = if string.len(base) > 0 and __glob_segs_match(pats, 0, empty, 0) then [base]
     else empty
     let matched = __glob_collect(all, 0, pats, string.len(root) + 1, prefix, self_hit)

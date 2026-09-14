@@ -36,24 +36,48 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
     // its path. One source (`fs_err_msg_wat`), one row of the derived prefix
     // table per floor, so the eight sites cannot drift into eight spellings the
     // way the pre-#1385 fixed strings did.
-    let rtf_err_msg = fs_err_msg_wat("        ", &fs_msg_pfx_by_validate("        "), &["$path"]);
+    // The read and write floors take their call head and operands as PARAMETERS
+    // (#2206): they serve every self-hosted composite, and the message has to name
+    // the call the writer made — with both paths, for `fs.copy(src, dst)`.
+    let rtf_err_msg = fs_err_msg_wat(
+        "        ",
+        &fs_msg_pfx_param("        "),
+        FS_MSG_OP1_OR_PATH,
+        Some("(local.get $op2)"),
+    );
     // The same builder at the UTF-8 arm's deeper indent.
-    let rtf_utf8_err_msg =
-        fs_err_msg_wat("            ", &fs_msg_pfx_by_validate("            "), &["$path"]);
-    let write_err_msg =
-        fs_err_msg_wat("        ", &fs_msg_pfx_fixed("        ", FS_MSG_WRITE), &["$path"]);
-    let write_fd_err_msg =
-        fs_err_msg_wat("            ", &fs_msg_pfx_fixed("            ", FS_MSG_WRITE), &["$path"]);
-    let mkdir_err_msg =
-        fs_err_msg_wat("        ", &fs_msg_pfx_fixed("        ", FS_MSG_MKDIR), &["$path"]);
-    let remove_err_msg =
-        fs_err_msg_wat("        ", &fs_msg_pfx_fixed("        ", FS_MSG_REMOVE), &["$path"]);
-    let rdir_err_msg =
-        fs_err_msg_wat("        ", &fs_msg_pfx_fixed("        ", FS_MSG_LIST_DIR), &["$path"]);
+    let rtf_utf8_err_msg = fs_err_msg_wat(
+        "            ",
+        &fs_msg_pfx_param("            "),
+        FS_MSG_OP1_OR_PATH,
+        Some("(local.get $op2)"),
+    );
+    let write_err_msg = fs_err_msg_wat(
+        "        ",
+        &fs_msg_pfx_param("        "),
+        FS_MSG_OP1_OR_PATH,
+        Some("(local.get $op2)"),
+    );
+    let write_fd_err_msg = fs_err_msg_wat(
+        "            ",
+        &fs_msg_pfx_param("            "),
+        FS_MSG_OP1_OR_PATH,
+        Some("(local.get $op2)"),
+    );
+    // The directory floors serve several calls too (`fs.walk` / `fs.glob` / `fs.remove`
+    // reach $read_dir, `fs.remove` $remove_all, `fs.create_temp_dir` $make_dir): the
+    // head is a parameter, the one operand is the path.
+    let mkdir_err_msg = fs_err_msg_wat("        ", &fs_msg_pfx_param("        "), "(local.get $path)", None);
+    let remove_err_msg = fs_err_msg_wat("        ", &fs_msg_pfx_param("        "), "(local.get $path)", None);
+    let rdir_err_msg = fs_err_msg_wat("        ", &fs_msg_pfx_param("        "), "(local.get $path)", None);
     let rdir_rd_err_msg =
-        fs_err_msg_wat("            ", &fs_msg_pfx_fixed("            ", FS_MSG_LIST_DIR), &["$path"]);
-    let rename_err_msg =
-        fs_err_msg_wat("        ", &fs_msg_pfx_fixed("        ", FS_MSG_RENAME), &["$src", "$dst"]);
+        fs_err_msg_wat("            ", &fs_msg_pfx_param("            "), "(local.get $path)", None);
+    let rename_err_msg = fs_err_msg_wat(
+        "        ",
+        &fs_msg_pfx_fixed("        ", FS_MSG_RENAME),
+        "(local.get $src)",
+        Some("(local.get $dst)"),
+    );
     let msg_locals = fs_err_msg_locals();
     // The ONE preopen → dirfd resolution step, spliced into `$path_norm`'s tail
     // (#1394). All 13 WASI path-call sites take their dirfd from its result, so
@@ -203,7 +227,12 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
     (local.set $plen (local.get $w)))
 {preopen_resolve}
 
-  (func $read_text_file (param $path i32) (param $validate i32) (result i32)
+  ;; #2206 — $ha/$hl are the call head's bytes (a static fs.read_text / fs.read_bytes row,
+  ;; or the call-name String a `_as` twin passed), $op1/$op2 the message operands' String
+  ;; handles (0 = "the path itself" / "none"): `fs.copy(src, dst)` reports BOTH paths from
+  ;; a floor that only ever sees one of them.
+  (func $read_text_file (param $path i32) (param $validate i32)
+                        (param $ha i32) (param $hl i32) (param $op1 i32) (param $op2 i32) (result i32)
     (local $pdata i32) (local $plen i32) (local $dirfd i32) (local $fd_out i32) (local $errno i32)
     (local $valid i32) (local $vi i32) (local $vb0 i32) (local $vb1 i32) (local $vw i32) (local $vlo i32) (local $vhi i32) (local $vk i32)
     (local $fd i32) (local $stat i32) (local $fsize i32) (local $iov i32)
@@ -367,7 +396,9 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
   ;; is native's ErrorKind::WriteZero ("failed to write whole buffer"). The FIFTH host-write
   ;; sandbox exit (Capability::FsWrite — DISTINCT from FsRead). The result is an owned heap
   ;; handle the caller's scope-end DropListStr balances.
-  (func $write_text_file (param $path i32) (param $content i32) (result i32)
+  ;; #2206 — $ha/$hl/$op1/$op2: the call head and message operands, as in $read_text_file.
+  (func $write_text_file (param $path i32) (param $content i32)
+                         (param $ha i32) (param $hl i32) (param $op1 i32) (param $op2 i32) (result i32)
     (local $pdata i32) (local $plen i32) (local $dirfd i32) (local $fd_out i32) (local $errno i32)
     (local $fd i32) (local $iov i32) (local $nwritten i32) (local $obj i32) (local $msg i32)
     (local $maddr i32) (local $mlen i32) (local $wbase i32) (local $wrem i32) (local $wgot i32)
@@ -442,7 +473,8 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
   ;; path_create_directory error (len@4=1, @12=msg, tag@16=1). A mkdir IS a filesystem write
   ;; (Capability::FsWrite — the SAME cap as fs.write). The result is an owned heap handle the
   ;; caller's scope-end DropListStr balances.
-  (func $make_dir (param $path i32) (result i32)
+  ;; #2206 — $ha/$hl: the call head's bytes (the fs.mkdir_p row, or fs.create_temp_dir's name).
+  (func $make_dir (param $path i32) (param $ha i32) (param $hl i32) (result i32)
     (local $pdata i32) (local $plen i32) (local $dirfd i32) (local $seg i32) (local $errno i32)
     (local $obj i32) (local $msg i32) (local $maddr i32) (local $mlen i32) (local $scratch i32)
     {msg_locals}
@@ -765,7 +797,8 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
   ;; errno — the shared mapping, "remove failed" only outside it (#1385). A
   ;; recursive remove IS a filesystem write (Capability::FsWrite — the SAME cap as fs.write). The
   ;; result is an owned heap handle the caller's scope-end DropListStr balances.
-  (func $remove_all (param $path i32) (result i32)
+  ;; #2206 — $ha/$hl: the call head's bytes (the fs.remove_all row, or fs.remove's name).
+  (func $remove_all (param $path i32) (param $ha i32) (param $hl i32) (result i32)
     (local $pdata i32) (local $plen i32) (local $dirfd i32)
     (local $errno i32) (local $obj i32) (local $msg i32)
     (local $maddr i32) (local $mlen i32)
@@ -838,7 +871,9 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
   ;;     COMPLETE record's `d_next` — a half-read name can never reach $rtf_str.
   ;; A name too long to ever fit would make a pass yield no complete record at all; that doubles
   ;; the pass buffer and retries the SAME cookie instead of spinning.
-  (func $read_dir (param $path i32) (result i32)
+  ;; #2206 — $ha/$hl: the call head's bytes (the fs.list_dir row, or fs.walk / fs.glob /
+  ;; fs.remove's name).
+  (func $read_dir (param $path i32) (param $ha i32) (param $hl i32) (result i32)
     (local $pdata i32) (local $plen i32) (local $dirfd i32) (local $fd_out i32) (local $errno i32)
     (local $fd i32) (local $buf i32) (local $bufbase i32) (local $bufused_p i32) (local $bufused i32)
     (local $off i32) (local $namlen i32) (local $skip i32) (local $count i32)
@@ -1115,40 +1150,50 @@ fn fs_errno_msg_wat(indent: &str, def_addr: u32, def_len: u32, def_text: &str) -
     out
 }
 
-/// #2090 — build `<call>("<path>"): <native std::io Display>` as ONE canonical
-/// String, INLINE at each fs error site.
+/// The #2090 message BUILD every fs floor's error arm runs: `<call>("<op1>"[, "<op2>"]): <errno>`,
+/// assembled into a fresh canonical String in `$msg`.
 ///
-/// Before this, every wasm fs failure answered with the errno text alone, so
+/// Before #2090, every wasm fs failure answered with the errno text alone, so
 /// `fs.read_text("/nope/x")` and a missing executable were byte-identical — and
 /// the native leg, which HAS the path at the failure site, said so. C-215 makes
 /// the two legs' text a promise, so naming the call natively without naming it
 /// here would have manufactured the very divergence that contract exists to
 /// forbid (measured: `fan_prefetch_fs` reported
 /// `err=fs.read_text("…"): Is a directory (os error 21)` native against
-/// `err=Is a directory (os error 21)` on wasm).
+/// `err=Is a directory (os error 21)` on wasm). #2206 then made the CALL a
+/// parameter of the floor: the composites that share a floor (`fs.read_lines`,
+/// `fs.copy`, `fs.walk`, …) used to patch the floor's own name over after the
+/// fact, which could not name a second path and skipped five composites.
 ///
 /// Like [`fs_errno_msg_wat`] and [`utf8_validate_wat`] this is INLINE — §4.1
 /// forbids a new hand-written WAT function — so the loops are duplicated in the
 /// OUTPUT while having exactly one SOURCE, here.
 ///
-/// The pieces are four byte runs: the call prefix (`fs.read_text("`), the path's
-/// OWN bytes (`$path`, not the `$path_norm` remainder — native reports the path
-/// the writer passed, preopen-relative resolution is ours, not theirs), the
-/// shared `"): `, and the errno text `fs_errno_msg_wat` already selected into
-/// `$maddr`/`$mlen`. Reads `$path`, `$maddr`, `$mlen`; writes `$msg`.
+/// The pieces are byte runs: the call head (`$pfxa`/`$pfxl` — a static
+/// [`FS_MSG_CALLS`] row, or the bytes of the call-name String a #2206 `_as` twin
+/// handed the floor), `("`, the first operand's OWN bytes (`$path` by default —
+/// not the `$path_norm` remainder: native reports the path the writer passed,
+/// preopen-relative resolution is ours, not theirs), an optional `", "` + second
+/// operand, the shared `"): `, and the errno text `fs_errno_msg_wat` already
+/// selected into `$maddr`/`$mlen`. Reads `$maddr`, `$mlen` and the operands;
+/// writes `$msg`.
 ///
-/// `pfx` is `(addr, len)` from [`fs_msg_prefix`], or a `$validate`-selected pair
-/// where one floor serves two calls (`$read_text_file` is `fs.read_text` at
-/// `$validate = 1` and `fs.read_bytes` at 0).
-fn fs_err_msg_wat(indent: &str, pfx_setup: &str, operands: &[&str]) -> String {
+/// `head_setup` sets `$pfxa`/`$pfxl` (see [`fs_msg_pfx_fixed`] / [`fs_msg_pfx_param`]).
+/// `op1` is a WAT expression for the first operand's String handle; `op2` is
+/// `None` for a one-operand floor, or an expression for the second operand's
+/// handle where 0 means "no second operand" — a runtime choice, because the read
+/// and write floors serve one-path calls AND `fs.copy(src, dst)` through the
+/// same body.
+fn fs_err_msg_wat(indent: &str, head_setup: &str, op1: &str, op2: Option<&str>) -> String {
     let elem_round_add = ELEM_SIZE - 1;
     let elem_round_mask = -(ELEM_SIZE as i32);
     let elem_shift = ELEM_SIZE.trailing_zeros();
-    let (mid_addr, mid_len) = fs_msg_mid();
+    let (open_addr, open_len) = fs_msg_open();
+    let (close_addr, close_len) = fs_msg_close();
     let (sep_addr, sep_len) = fs_msg_sep();
 
     // One copy loop: `$clen` bytes from `$csrc` to `$msg`+header+`$moff`, then
-    // advance `$moff`. Emitted four times from this one expression.
+    // advance `$moff`. Emitted once per piece from this one expression.
     let copy = |n: usize, src: &str, len: &str| {
         format!(
             "{indent}(local.set $csrc {src}) (local.set $clen {len})\n\
@@ -1163,39 +1208,36 @@ fn fs_err_msg_wat(indent: &str, pfx_setup: &str, operands: &[&str]) -> String {
              {indent}(local.set $moff (i32.add (local.get $moff) (local.get $clen)))\n"
         )
     };
+    let data_of = |h: &str| format!("(i32.add {h} (i32.const {LIST_HEADER}))");
+    let len_of = |h: &str| format!("(i32.load (i32.add {h} (i32.const {LIST_LEN_OFFSET})))");
 
-    // Total length: prefix + every operand + one separator between each pair +
-    // the mid + the errno text. `$mplen` accumulates the runtime half.
-    let fixed_len = mid_len + sep_len * (operands.len() as u32 - 1);
-    let mut oplen = format!("{indent}(local.set $mplen (i32.const 0))\n");
-    for v in operands {
-        oplen.push_str(&format!(
-            "{indent}(local.set $mplen (i32.add (local.get $mplen)\n\
-             {indent}  (i32.load (i32.add (local.get {v}) (i32.const {LIST_LEN_OFFSET})))))\n"
+    // The operands: `$mo1` always; `$mo2` when the floor has a second one AND it is
+    // non-zero at run time. `$mplen` accumulates their byte lengths (+ the separator).
+    let mut ops = format!(
+        "{indent}(local.set $mo1 {op1})\n\
+         {indent}(local.set $mplen {})\n",
+        len_of("(local.get $mo1)")
+    );
+    let mut op2_copy = String::new();
+    if let Some(o2) = op2 {
+        ops.push_str(&format!(
+            "{indent}(local.set $mo2 {o2})\n\
+             {indent}(if (local.get $mo2) (then (local.set $mplen (i32.add (local.get $mplen)\n\
+             {indent}  (i32.add (i32.const {sep_len}) {})))))\n",
+            len_of("(local.get $mo2)")
         ));
+        op2_copy = format!(
+            "{indent}(if (local.get $mo2) (then\n{}{}{indent}))\n",
+            copy(11, &format!("(i32.const {sep_addr})"), &format!("(i32.const {sep_len})")),
+            copy(21, &data_of("(local.get $mo2)"), &len_of("(local.get $mo2)")),
+        );
     }
-    // The operand copies, separated by `", "` — one `copy` per piece, all from
-    // the same emitter, so a two-path call cannot drift from a one-path call.
-    let mut cops = String::new();
-    for (k, v) in operands.iter().enumerate() {
-        if k > 0 {
-            cops.push_str(&copy(
-                10 + k,
-                &format!("(i32.const {sep_addr})"),
-                &format!("(i32.const {sep_len})"),
-            ));
-        }
-        cops.push_str(&copy(
-            20 + k,
-            &format!("(i32.add (local.get {v}) (i32.const {LIST_HEADER}))"),
-            &format!("(i32.load (i32.add (local.get {v}) (i32.const {LIST_LEN_OFFSET})))"),
-        ));
-    }
+    let fixed_len = open_len + close_len;
     format!(
-        "{indent};; #2090 — name the call and its operand, then the errno text VERBATIM as a\n\
+        "{indent};; #2090 — name the call and its operand(s), then the errno text VERBATIM as a\n\
          {indent};; suffix (C-215's classification and #1368's fix both read that tail).\n\
-         {pfx_setup}\
-         {oplen}\
+         {head_setup}\
+         {ops}\
          {indent}(local.set $mtot (i32.add (i32.add (local.get $pfxl) (local.get $mplen))\n\
          {indent}                          (i32.add (i32.const {fixed_len}) (local.get $mlen))))\n\
          {indent}(local.set $msg (call $list_new (local.get $mtot)\n\
@@ -1203,37 +1245,34 @@ fn fs_err_msg_wat(indent: &str, pfx_setup: &str, operands: &[&str]) -> String {
          {indent}                      (i32.const {elem_round_mask}))\n\
          {indent}             (i32.const {elem_shift}))))\n\
          {indent}(local.set $moff (i32.const 0))\n\
-         {c0}{cops}{c2}{c3}",
+         {c0}{c1}{c20}{op2_copy}{c3}{c4}",
         c0 = copy(0, "(local.get $pfxa)", "(local.get $pfxl)"),
-        c2 = copy(
-            2,
-            &format!("(i32.const {mid_addr})"),
-            &format!("(i32.const {mid_len})")
-        ),
-        c3 = copy(3, "(local.get $maddr)", "(local.get $mlen)"),
+        c1 = copy(1, &format!("(i32.const {open_addr})"), &format!("(i32.const {open_len})")),
+        c20 = copy(20, &data_of("(local.get $mo1)"), &len_of("(local.get $mo1)")),
+        c3 = copy(3, &format!("(i32.const {close_addr})"), &format!("(i32.const {close_len})")),
+        c4 = copy(4, "(local.get $maddr)", "(local.get $mlen)"),
     )
 }
 
-/// `$pfxa`/`$pfxl` set to a FIXED prefix row — the usual case, one floor per call.
+/// `$pfxa`/`$pfxl` set to a FIXED call-name row — a floor that is its call.
 fn fs_msg_pfx_fixed(indent: &str, idx: usize) -> String {
-    let (addr, len) = fs_msg_prefix(idx);
+    let (addr, len) = fs_msg_call(idx);
     format!("{indent}(local.set $pfxa (i32.const {addr})) (local.set $pfxl (i32.const {len}))\n")
 }
 
-/// `$pfxa`/`$pfxl` chosen by `$validate`: `$read_text_file` is the floor for BOTH
-/// `fs.read_text` (validate = 1) and `fs.read_bytes` (0), and the message has to
-/// name the one the writer actually called.
-fn fs_msg_pfx_by_validate(indent: &str) -> String {
-    let (ta, tl) = fs_msg_prefix(FS_MSG_READ_TEXT);
-    let (ba, bl) = fs_msg_prefix(FS_MSG_READ_BYTES);
-    format!(
-        "{indent}(if (local.get $validate)\n\
-         {indent}  (then (local.set $pfxa (i32.const {ta})) (local.set $pfxl (i32.const {tl})))\n\
-         {indent}  (else (local.set $pfxa (i32.const {ba})) (local.set $pfxl (i32.const {bl}))))\n"
-    )
+/// `$pfxa`/`$pfxl` taken from the floor's `$ha`/`$hl` PARAMETERS — the read and
+/// write floors, which serve many calls (#2206): the renderer passes a static
+/// [`FS_MSG_CALLS`] row for `fs.read_text` / `fs.read_bytes` / `fs.write`, or the
+/// bytes of the call-name String a `_as` twin supplied.
+fn fs_msg_pfx_param(indent: &str) -> String {
+    format!("{indent}(local.set $pfxa (local.get $ha)) (local.set $pfxl (local.get $hl))\n")
 }
+
+/// The first operand of the read and write floors: the caller-supplied `$op1`
+/// when a `_as_pair` twin named the operands, else the floor's own `$path`.
+const FS_MSG_OP1_OR_PATH: &str = "(select (local.get $op1) (local.get $path) (local.get $op1))";
 
 /// The locals every [`fs_err_msg_wat`] site needs, as a declaration line.
 fn fs_err_msg_locals() -> &'static str {
-    "(local $mplen i32) (local $mtot i32) (local $moff i32) (local $csrc i32) (local $clen i32) (local $mj i32) (local $pfxa i32) (local $pfxl i32)"
+    "(local $mplen i32) (local $mtot i32) (local $moff i32) (local $csrc i32) (local $clen i32) (local $mj i32) (local $pfxa i32) (local $pfxl i32) (local $mo1 i32) (local $mo2 i32)"
 }

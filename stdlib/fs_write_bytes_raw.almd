@@ -17,7 +17,7 @@ effect fn fs_write_bytes_raw(path: String, data: Bytes) -> Result[Unit, String] 
   let n = prim.load32(h + 4)
   let s = prim.alloc_str(n)
   let _c = __wbr_copy(prim.handle(s) + 12, h + 12, n, 0)
-  let w: Result[Unit, String] = prim.write_text_file(path, s)
+  let w: Result[Unit, String] = prim.write_text_file_as(path, s, "fs.write_bytes_raw")
   let wh = prim.handle(w)
   if prim.load32(wh + 16) != 0 then {
     let m: String = prim.load_handle(wh + 12)

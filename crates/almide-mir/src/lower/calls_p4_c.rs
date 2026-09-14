@@ -1,4 +1,35 @@
 impl LowerCtx {
+    /// Every argument of an fs-floor prim (`prim.read_text_file*` / `write_text_file*` /
+    /// `read_dir*` / `make_dir*` / `remove_all*`) as a lowered scalar/handle, in call
+    /// order: the path, the content (write only), and — for the #2206 call-head twins —
+    /// the call name and the two message operands. One walk for every floor, so their
+    /// arities cannot drift apart.
+    fn lower_floor_args(&mut self, func: &str, args: &[IrExpr]) -> Result<Vec<ValueId>, LowerError> {
+        args.iter()
+            .enumerate()
+            .map(|(i, a)| {
+                // The call head is a LITERAL at every twin's call site
+                // (`prim.read_text_file_as(path, "fs.read_lines")`): materialize it
+                // exactly as `prim.handle("…")` does — an owned Alloc the scope's end
+                // drops — and hand the floor its handle (the floor only borrows bytes).
+                if let IrExprKind::LitStr { value } = &a.kind {
+                    let dst = self.fresh_value();
+                    self.ops.push(Op::Alloc {
+                        dst,
+                        repr: repr_of(&a.ty)?,
+                        init: crate::Init::Str(value.clone()),
+                    });
+                    self.live_heap_handles.push(dst);
+                    return Ok(dst);
+                }
+                self.lower_scalar_value(a).ok_or_else(|| {
+                    LowerError::Unsupported(format!(
+                        "prim.{func} argument {i} is not a lowerable scalar/handle"
+                    ))
+                })
+            })
+            .collect()
+    }
 
     /// Extracted from `Self::lower_prim_call_fs_env` (twelfth-round split, cog
     /// reduction): the WASI filesystem-floor name group, verbatim (only ever called
@@ -18,19 +49,25 @@ impl LowerCtx {
         // AND the scope-end drop is the flat `DropListStr` (frees the one owned String @12 +
         // the block — a flat `Drop` would leak the String). Carries Capability::FsRead
         // (counted in cap_witness). The render emits the WASI path_open/fd_read sequence.
-        if func == "read_text_file" || func == "read_bytes_file" {
+        let base = crate::fs_floor_base(func);
+        if matches!(base, Some("read_text_file" | "read_bytes_file")) {
             // read_bytes_file is the raw-bytes twin: the SAME WASI floor + Result block
             // (the render's $read_text_file reads raw bytes; only the almd-level Ok TYPE
             // differs) — two PrimKinds, one WAT helper with a `$validate` flag.
-            let path = self.lower_scalar_value(&args[0]).ok_or_else(|| {
-                LowerError::Unsupported("prim.read_text_file path is not a lowerable scalar/handle".into())
-            })?;
+            // #2206 — the `_as` / `_as_pair` twins carry the call head (and the two
+            // operands of a two-path call) as further BORROWED String args; the floor
+            // composes the message from them. Every arg is a scalar/handle.
+            let floor_args = self.lower_floor_args(func, args)?;
             let dst = self.fresh_value();
             // #1506 — the two twins now differ in ONE thing: the text floor validates UTF-8
             // (native read_to_string refuses invalid bytes with an Err), the bytes floor does not
             // (native std::fs::read hands them back). Same layout, cap and drop otherwise.
-            let kind = if func == "read_text_file" { PrimKind::ReadTextFile } else { PrimKind::ReadBytesFile };
-            self.ops.push(Op::Prim { kind, dst: Some(dst), args: vec![path] });
+            let kind = if base == Some("read_text_file") {
+                PrimKind::ReadTextFile
+            } else {
+                PrimKind::ReadBytesFile
+            };
+            self.ops.push(Op::Prim { kind, dst: Some(dst), args: floor_args });
             self.value_shapes.insert(dst, crate::lower::VariantShape::ResultHeapOk);
             self.value_drops.entry(dst).or_default().flat_elems = true;
             return Ok(Some(dst));
@@ -45,12 +82,11 @@ impl LowerCtx {
         // `DropListStr` would leak them) — checked BEFORE heap_elem_lists in `drop_op_for`.
         // Carries Capability::FsRead (counted in cap_witness). The render emits the WASI
         // path_open(O_DIRECTORY)/fd_readdir sequence (skip `.`/`..`, sort, build the list).
-        if func == "read_dir" {
-            let path = self.lower_scalar_value(&args[0]).ok_or_else(|| {
-                LowerError::Unsupported("prim.read_dir path is not a lowerable scalar/handle".into())
-            })?;
+        // #2206 — `read_dir_as` appends the call head (`fs.walk` / `fs.glob` / `fs.remove`).
+        if base == Some("read_dir") {
+            let floor_args = self.lower_floor_args(func, args)?;
             let dst = self.fresh_value();
-            self.ops.push(Op::Prim { kind: PrimKind::ReadDir, dst: Some(dst), args: vec![path] });
+            self.ops.push(Op::Prim { kind: PrimKind::ReadDir, dst: Some(dst), args: floor_args });
             self.value_shapes.insert(dst, crate::lower::VariantShape::ResultHeapOk);
             self.value_drops.entry(dst).or_default().flat_elems = true;
             self.value_drops.entry(dst).or_default().list_str_result = true;
@@ -67,18 +103,15 @@ impl LowerCtx {
         // the `len@4 = 0` Ok convention — NO `list_str_result_results`: there is no nested payload).
         // Carries Capability::FsWrite (counted in cap_witness). The render emits the WASI
         // path_open(O_CREAT|O_TRUNC)/fd_write sequence.
-        if func == "write_text_file" {
-            let path = self.lower_scalar_value(&args[0]).ok_or_else(|| {
-                LowerError::Unsupported("prim.write_text_file path is not a lowerable scalar/handle".into())
-            })?;
-            let content = self.lower_scalar_value(&args[1]).ok_or_else(|| {
-                LowerError::Unsupported("prim.write_text_file content is not a lowerable scalar/handle".into())
-            })?;
+        // #2206 — the `_as` / `_as_pair` twins append the call head (and the two operands
+        // of a two-path call) after `content`, exactly as the read floor's do.
+        if base == Some("write_text_file") {
+            let floor_args = self.lower_floor_args(func, args)?;
             let dst = self.fresh_value();
             self.ops.push(Op::Prim {
                 kind: PrimKind::WriteTextFile,
                 dst: Some(dst),
-                args: vec![path, content],
+                args: floor_args,
             });
             self.value_shapes.insert(dst, crate::lower::VariantShape::ResultHeapOk);
             self.value_drops.entry(dst).or_default().flat_elems = true;
@@ -95,15 +128,14 @@ impl LowerCtx {
         // scope-end drop is the flat `DropListStr`. Carries Capability::FsWrite (a mkdir IS a
         // filesystem write — counted in cap_witness). The render emits the WASI recursive
         // path_create_directory sequence.
-        if func == "make_dir" {
-            let path = self.lower_scalar_value(&args[0]).ok_or_else(|| {
-                LowerError::Unsupported("prim.make_dir path is not a lowerable scalar/handle".into())
-            })?;
+        // #2206 — `make_dir_as` appends the call head (`fs.create_temp_dir`).
+        if base == Some("make_dir") {
+            let floor_args = self.lower_floor_args(func, args)?;
             let dst = self.fresh_value();
             self.ops.push(Op::Prim {
                 kind: PrimKind::MakeDir,
                 dst: Some(dst),
-                args: vec![path],
+                args: floor_args,
             });
             self.value_shapes.insert(dst, crate::lower::VariantShape::ResultHeapOk);
             self.value_drops.entry(dst).or_default().flat_elems = true;
@@ -120,15 +152,14 @@ impl LowerCtx {
         // `DropListStr`. Carries Capability::FsWrite (a recursive remove IS a filesystem write —
         // counted in cap_witness). The render emits the WASI recursive
         // path_remove_directory/path_unlink_file sequence.
-        if func == "remove_all" {
-            let path = self.lower_scalar_value(&args[0]).ok_or_else(|| {
-                LowerError::Unsupported("prim.remove_all path is not a lowerable scalar/handle".into())
-            })?;
+        // #2206 — `remove_all_as` appends the call head (`fs.remove`).
+        if base == Some("remove_all") {
+            let floor_args = self.lower_floor_args(func, args)?;
             let dst = self.fresh_value();
             self.ops.push(Op::Prim {
                 kind: PrimKind::RemoveAll,
                 dst: Some(dst),
-                args: vec![path],
+                args: floor_args,
             });
             self.value_shapes.insert(dst, crate::lower::VariantShape::ResultHeapOk);
             self.value_drops.entry(dst).or_default().flat_elems = true;
