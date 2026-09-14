@@ -10,6 +10,7 @@ license.workspace = true
 description = "The greenfield wasm HOST: the almide.* import surface (print/exit/fs_call/host_read) over wasmtime, as a library and a CLI runner"
 
 [dependencies]
+almide-base = { path = "../almide-base" }
 almide-wasm = { path = "../almide-wasm" }
 # The shared native-runtime client core (#1715): the http client the
 # embedded host serves through fs_call ops 43..=47 — the SAME source the

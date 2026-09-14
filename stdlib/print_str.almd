@@ -7,8 +7,12 @@
 //
 // It writes the string's UTF-8 bytes + a trailing "\n" to stdout via a 2-element
 // iovec `fd_write` (zero-copy — the OS gathers; no byte-copy loop). Addresses match
-// the preamble layout: NWRITTEN@0, IOVEC@8 (two {ptr,len} pairs), SCRATCH@768
-// (512..768 is the fixed fs-errno message region — do NOT write below 768).
+// the preamble layout: NWRITTEN@0, IOVEC@8 (two {ptr,len} pairs), and the "\n"
+// scratch byte at 768 — `PRINT_NL_SCRATCH` in the preamble's static-data map
+// (crates/almide-mir/src/render_wasm.rs). The map, not this comment, keeps every
+// other static byte away from it: the derived rows (the fs errno table, #2206)
+// are laid out ABOVE every registered region, and the layout gate
+// (tests/wasm_static_data_layout_test.rs) pins this literal against the map.
 fn print_str(s: String) -> Unit = {
   let h = prim.handle(s)
   // i64 address of the [rc][len][cap][bytes] block

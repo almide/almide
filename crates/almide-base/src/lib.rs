@@ -3,6 +3,7 @@ pub mod span;
 pub mod diagnostic;
 pub mod names;
 pub mod profile;
+pub mod fs_errno;
 
 // Re-export commonly used items at crate root
 pub use intern::{Sym, sym, resolve};

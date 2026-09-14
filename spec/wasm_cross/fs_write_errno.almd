@@ -1,7 +1,8 @@
 // @contract: C-273
 // The fs WRITE-side floors answer a failure with the SAME native std::io Display
 // text on both legs: fs.write onto a directory / through a file component,
-// fs.mkdir_p through a file component, fs.remove_all of a missing path,
+// fs.mkdir_p through a file component and ONTO a plain file (#2206: the wasm
+// legs answered Ok for the latter), fs.remove_all of a missing path,
 // fs.list_dir of a plain file and of a missing path, fs.rename of a missing
 // source. Before #1385 the wasm leg collapsed each of these to one fixed string
 // per floor ("write failed" / "mkdir failed" / "remove failed" / "directory not
@@ -41,6 +42,11 @@ effect fn main() -> Unit = {
   match mk_thru {
     ok(_) => println("mkdir_thru_file=OK"),
     err(e) => println("mkdir_thru_file=ERR[${redact(e, d)}]"),
+  }
+  let mk_on = fs.mkdir_p(f)
+  match mk_on {
+    ok(_) => println("mkdir_on_file=OK"),
+    err(e) => println("mkdir_on_file=ERR[${redact(e, d)}]"),
   }
   let rm_missing = fs.remove_all(d + "/nope")
   match rm_missing {

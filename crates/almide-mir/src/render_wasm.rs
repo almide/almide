@@ -69,17 +69,11 @@ const MAIN_ERR_NL_ADDR: u32 = DIVZERO_MSG_ADDR + 23; // the div-zero line's "\n"
 const OVERFLOW_MSG_ADDR: u32 = 176; // "Error: integer overflow\n" — 176..200 (__div_trap)
 const BOUNDS_MSG_ADDR: u32 = 208; // "Error: index out of bounds\n" — 208..235 (__div_trap)
 const OOM_MSG_ADDR: u32 = 376; // "Error: out of memory\n" — 376..397 ($oom, C-197)
-                               // fs errno → native std::io Display strings (240..376, FIXED): path_open errors
-                               // map to the EXACT message native std::fs emits, so `err(e)` observes byte-identical
-                               // text (C-042 kin).
-const FS_ERR_NOENT_ADDR: u32 = 240; // "No such file or directory (os error 2)" — WASI NOENT(44)
-const FS_ERR_NOENT_LEN: u32 = 38;
-const FS_ERR_ACCES_ADDR: u32 = 280; // "Permission denied (os error 13)" — WASI ACCES(2)
-const FS_ERR_ACCES_LEN: u32 = 31;
-const FS_ERR_NOTDIR_ADDR: u32 = 312; // "Not a directory (os error 20)" — WASI NOTDIR(54)
-const FS_ERR_NOTDIR_LEN: u32 = 29;
-const FS_ERR_ISDIR_ADDR: u32 = 344; // "Is a directory (os error 21)" — WASI ISDIR(31)
-const FS_ERR_ISDIR_LEN: u32 = 28;
+                               // fs errno → native std::io Display strings: the rows of
+                               // `almide_base::fs_errno::FS_ERRNOS`, laid out by `fs_errno_regions`
+                               // ABOVE the #2090 message pieces (240..376 used to hold four of them
+                               // by hand — #2206 made the table the source, so `err(e)` observes
+                               // byte-identical text on every leg by construction).
 // native `write_all`'s ErrorKind::WriteZero Display — NOT an OS string (Rust's own
 // const message), so it is platform-independent like the four above. Reached when
 // fd_write accepts 0 bytes with no errno (#1385's latent short-write arm).
@@ -101,6 +95,16 @@ const FS_ERR_UTF8_LEN: u32 = 34;
 // (tests/wasm_static_data_layout_test.rs) gates the whole map, the hand-assigned
 // entries included. Adding a call here cannot land on a neighbour's bytes.
 const FS_MSG_BASE: u32 = 512; // first free address above FS_ERR_UTF8 (432..466)
+/// The byte the SELF-HOSTED print floors (`stdlib/print_str.almd`,
+/// `stdlib/eprintln.almd`) store `"\n"` into before their second `fd_write`.
+/// The stdlib spells the literal — Almide source cannot read this constant —
+/// so the two spellings are pinned against each other by
+/// `tests/wasm_static_data_layout_test.rs`, and the region is REGISTERED here so
+/// every derived row (`fs_errno_regions`) is laid out above it. Before #2206 it
+/// was a comment in the stdlib ("do NOT write below 768"), which the errno rows
+/// grew into unnoticed: the second `println` of an EEXIST message carried a
+/// `\n` where its `e` was.
+pub const PRINT_NL_SCRATCH_ADDR: u32 = 768;
 /// Closes the operand and separates it from the platform text: `"): `.
 const FS_MSG_MID: &str = "\"): ";
 /// Between two operands of a two-path call: `fs.rename("a", "b")`.
@@ -140,6 +144,28 @@ pub(crate) fn fs_msg_regions() -> Vec<(&'static str, u32, u32)> {
     {
         let len = text.len() as u32;
         out.push((*text, addr, len));
+        addr += (len + 3) & !3;
+    }
+    out
+}
+
+/// `(row, addr, len)` for every fs errno the incumbent spells, in table order,
+/// packed 4-byte aligned ABOVE every fixed region (#2206) — the first address no
+/// hand-placed byte, message piece or self-host scratch reaches, so a new fixed
+/// row moves the table instead of colliding with it. The dispatch
+/// (`fs_errno_msg_wat`), the data segments (`preamble_with_bump_base`) and the
+/// layout gate all read this one walk.
+pub(crate) fn fs_errno_regions() -> Vec<(&'static almide_base::fs_errno::FsErrno, u32, u32)> {
+    let ceiling = fixed_static_regions()
+        .iter()
+        .map(|(_, a, l)| a + l)
+        .max()
+        .unwrap_or(FS_MSG_BASE);
+    let mut addr = (ceiling + 3) & !3;
+    let mut out = Vec::new();
+    for row in almide_base::fs_errno::FS_ERRNOS {
+        let len = row.text.len() as u32;
+        out.push((row, addr, len));
         addr += (len + 3) & !3;
     }
     out
@@ -189,11 +215,11 @@ fn fs_msg_sep() -> (u32, u32) {
     (row.1, row.2)
 }
 
-/// Every statically placed byte run in the emitted module, as
-/// `(name, addr, len)` — the hand-assigned constants above AND the derived
-/// [`fs_msg_regions`]. The overlap gate reads this; it is the only place the map
-/// exists as data rather than as prose in a comment.
-pub fn static_data_regions() -> Vec<(String, u32, u32)> {
+/// Every FIXED byte run in the emitted module, as `(name, addr, len)`: the
+/// hand-assigned constants above, the derived [`fs_msg_regions`] (anchored at
+/// [`FS_MSG_BASE`]), and the self-host's print scratch. [`fs_errno_regions`]
+/// is laid out above the highest of these.
+fn fixed_static_regions() -> Vec<(String, u32, u32)> {
     let mut out: Vec<(String, u32, u32)> = vec![
         ("NWRITTEN".into(), NWRITTEN_ADDR, I32_SIZE),
         ("IOVEC".into(), IOVEC_ADDR, I32_SIZE * 2),
@@ -208,19 +234,28 @@ pub fn static_data_regions() -> Vec<(String, u32, u32)> {
         ("OVERFLOW_MSG".into(), OVERFLOW_MSG_ADDR, 24),
         ("BOUNDS_MSG".into(), BOUNDS_MSG_ADDR, 27),
         ("OOM_MSG".into(), OOM_MSG_ADDR, 21),
-        ("FS_ERR_NOENT".into(), FS_ERR_NOENT_ADDR, FS_ERR_NOENT_LEN),
-        ("FS_ERR_ACCES".into(), FS_ERR_ACCES_ADDR, FS_ERR_ACCES_LEN),
-        ("FS_ERR_NOTDIR".into(), FS_ERR_NOTDIR_ADDR, FS_ERR_NOTDIR_LEN),
-        ("FS_ERR_ISDIR".into(), FS_ERR_ISDIR_ADDR, FS_ERR_ISDIR_LEN),
         (
             "FS_ERR_WRITEZERO".into(),
             FS_ERR_WRITEZERO_ADDR,
             FS_ERR_WRITEZERO_LEN,
         ),
         ("FS_ERR_UTF8".into(), FS_ERR_UTF8_ADDR, FS_ERR_UTF8_LEN),
+        ("PRINT_NL_SCRATCH".into(), PRINT_NL_SCRATCH_ADDR, 1),
     ];
     for (text, addr, len) in fs_msg_regions() {
         out.push((format!("FS_MSG {text:?}"), addr, len));
+    }
+    out
+}
+
+/// Every statically placed byte run in the emitted module, as
+/// `(name, addr, len)` — [`fixed_static_regions`] AND the derived
+/// [`fs_errno_regions`]. The overlap gate reads this; it is the only place the
+/// map exists as data rather than as prose in a comment.
+pub fn static_data_regions() -> Vec<(String, u32, u32)> {
+    let mut out = fixed_static_regions();
+    for (row, addr, len) in fs_errno_regions() {
+        out.push((format!("FS_ERR_{}", row.name), addr, len));
     }
     out
 }

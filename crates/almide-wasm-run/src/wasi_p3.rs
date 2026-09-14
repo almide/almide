@@ -168,15 +168,21 @@ const STATRET: u64 = 128;
 const SENDRET: u64 = STATRET;
 // Static fs error messages (canonical-ABI error-code -> the SAME strings
 // the native runtime's io::Error Display produces, so the common error
-// legs stay byte-identical). Offsets within the park span.
+// legs stay byte-identical). The bytes are `almide_base::fs_errno`'s rows
+// (#2206) — the table every leg spells from, pinned against the host's
+// `Display` by its own test. Offsets within the park span.
 const MSG_NOENT: u64 = 256;
-const MSG_ACCES: u64 = 320;
-const MSG_ISDIR: u64 = 384;
+const MSG_ACCES: u64 = 296;
+const MSG_ISDIR: u64 = 328;
+const MSG_NOTDIR: u64 = 360;
+const MSG_EXIST: u64 = 392;
 const MSG_GEN: u64 = 448;
 const MSG_NOPRE: u64 = 512;
-const E_NOENT: &[u8] = b"No such file or directory (os error 2)";
-const E_ACCES: &[u8] = b"Permission denied (os error 13)";
-const E_ISDIR: &[u8] = b"Is a directory (os error 21)";
+const E_NOENT: &[u8] = almide_base::fs_errno::ENOENT.text.as_bytes();
+const E_ACCES: &[u8] = almide_base::fs_errno::EACCES.text.as_bytes();
+const E_ISDIR: &[u8] = almide_base::fs_errno::EISDIR.text.as_bytes();
+const E_NOTDIR: &[u8] = almide_base::fs_errno::ENOTDIR.text.as_bytes();
+const E_EXIST: &[u8] = almide_base::fs_errno::EEXIST.text.as_bytes();
 const E_GEN: &[u8] = b"filesystem operation failed";
 const E_NOPRE: &[u8] = b"no filesystem preopen (run with --dir)";
 // The p3 http transport-error static (#1710 PR B): transport-error TEXT is
@@ -206,7 +212,9 @@ const _: () = {
     assert!(MSG + UNSUPPORTED_MSG.len() as u64 <= STATRET);
     assert!(MSG_NOENT + E_NOENT.len() as u64 <= MSG_ACCES);
     assert!(MSG_ACCES + E_ACCES.len() as u64 <= MSG_ISDIR);
-    assert!(MSG_ISDIR + E_ISDIR.len() as u64 <= MSG_GEN);
+    assert!(MSG_ISDIR + E_ISDIR.len() as u64 <= MSG_NOTDIR);
+    assert!(MSG_NOTDIR + E_NOTDIR.len() as u64 <= MSG_EXIST);
+    assert!(MSG_EXIST + E_EXIST.len() as u64 <= MSG_GEN);
     assert!(MSG_GEN + E_GEN.len() as u64 <= MSG_NOPRE);
     assert!(MSG_NOPRE + E_NOPRE.len() as u64 <= MSG_HTTP);
     assert!(MSG_HTTP + E_HTTP.len() as u64 <= MSG_CLEN);
@@ -242,6 +250,7 @@ struct FsAbi {
     ec_access: i32,
     ec_not_permitted: i32,
     ec_is_directory: i32,
+    ec_not_directory: i32,
     ec_exist: i32,
     dt_directory: i32,     // descriptor-type case index
     dt_regular_file: i32,
@@ -301,6 +310,7 @@ fn fs_abi(resolve: &wit_parser::Resolve) -> anyhow::Result<FsAbi> {
         ec_access: case(ec, "access")?,
         ec_not_permitted: case(ec, "not-permitted")?,
         ec_is_directory: case(ec, "is-directory")?,
+        ec_not_directory: case(ec, "not-directory")?,
         ec_exist: case(ec, "exist")?,
         dt_directory: case(dt, "directory")?,
         dt_regular_file: case(dt, "regular-file")?,

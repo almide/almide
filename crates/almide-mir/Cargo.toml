@@ -10,6 +10,7 @@ description = "Almide v1 Middle IR — the single source of truth for ownership 
 # EXISTING frontend IR as a TEMPORARY feeder (the v1 risk-first build order, §6)
 # — these deps go away once the frontend is greenfielded.
 [dependencies]
+almide-base = { path = "../almide-base" }
 almide-ir = { path = "../almide-ir" }
 almide-lang = { path = "../almide-lang" }
 # The v1 execution pipeline (`pipeline::try_render_wasm_source`, the lib form of the
