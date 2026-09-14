@@ -177,23 +177,43 @@ pub(crate) fn base_stdlib_fn_name(func: &str) -> &str {
     }
 }
 
-pub(crate) fn list_heap_call_name(
-    module: &str,
-    func: &str,
-    arg_tys: &[Ty],
-    result_ty: &Ty,
-    // Is the Map KEY type (of the first-arg/result Map) a NULLARY-ONLY variant?
-    // Computed by the caller (LowerCtx has the variant_layouts; this router is a
-    // free fn) — gates the `_vtag` tag-normalized map family. `map_key_scalar_rec`
-    // is the all-Int/Bool-field record-key twin, gating `_srec`.
-    map_key_nullary: bool,
-    map_key_scalar_rec: bool,
-    // Is `list.enumerate`'s source element a RICH named variant the drop
-    // generator covers? Computed by the caller (LowerCtx has the layouts;
-    // this router is a free fn) — gates `list.enumerate_h` (#1496); any
-    // other rich element keeps the honest `_x` wall.
-    enum_rich_variant: bool,
-) -> String {
+/// The layout facts the routers cannot compute themselves (they are free fns
+/// without layout access); the `LowerCtx` computes them per call
+/// ([`LowerCtx::router_hints`]). `Default` is "no layout says otherwise" —
+/// what the router gate drives with.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RouterHints {
+    /// Is the Map KEY type (of the first-arg/result Map) a NULLARY-ONLY
+    /// variant? Gates the `_vtag` tag-normalized map family.
+    pub map_key_nullary: bool,
+    /// Is the Map KEY an all-Int/Bool-field record? Gates the `_srec` twin.
+    pub map_key_scalar_rec: bool,
+    /// Is `list.enumerate`'s source element a RICH named variant the drop
+    /// generator covers? Gates `list.enumerate_h` (#1496); any other rich
+    /// element keeps the honest `_x` wall.
+    pub enum_rich_variant: bool,
+}
+
+pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], result_ty: &Ty, hints: RouterHints) -> String {
+    let func = base_stdlib_fn_name(func);
+    let routed = routers_call_name(module, func, arg_tys, result_ty, hints);
+    // #2184: the routers' verdict is not the last word. A router that declined
+    // used to fall through to the PLAIN scalar impl whatever the call's types
+    // were (the #2154 trap: a tuple sort key through `sort_by_rc`'s `(Int) ->
+    // Int` closure slot, out of a build labelled verified). Every emitted name
+    // — routed twin or plain fallthrough — is now checked against the
+    // signature the registry actually links; a repr mismatch routes to the
+    // module's `_x` refusal twin instead. The routers stay the place typed
+    // twins are CHOSEN; this is the place a wrong choice cannot escape.
+    crate::lower::registry_sig::refuse_unless_fits(module, func, routed, arg_tys)
+}
+
+/// The routers' own verdict for a stdlib call — the typed twin they choose, or
+/// the plain `module.func` name when every router declines — BEFORE the #2184
+/// signature check in [`list_heap_call_name`]. Public for the router gate
+/// (`tests/router_signature_gate.rs`), which drives it over a type lattice and
+/// counts how often the routers alone would have mislinked.
+pub fn routers_call_name(module: &str, func: &str, arg_tys: &[Ty], result_ty: &Ty, hints: RouterHints) -> String {
     // A MONO-SPECIALIZED stdlib call name (`result.or_else__Int_String_String` —
     // the optimizer suffixes a generic intrinsic's instantiation) must route by
     // its BASE name: the registry links base names only, so the suffixed form
@@ -209,7 +229,7 @@ pub(crate) fn list_heap_call_name(
     // heap-accumulator `fold` guard fires BEFORE the per-module tables (a
     // scalar-acc fold over heap elements falls through to `list.fold_str`).
     let routed = list_heap_call_name_special_cases(module, func, arg_tys, result_ty).or_else(
-        || list_heap_call_name_module_routed(module, func, arg_tys, result_ty, map_key_nullary, map_key_scalar_rec, enum_rich_variant),
+        || list_heap_call_name_module_routed(module, func, arg_tys, result_ty, hints),
     );
     routed.unwrap_or_else(|| format!("{module}.{func}"))
 }
@@ -266,10 +286,9 @@ fn list_heap_call_name_module_routed(
     func: &str,
     arg_tys: &[Ty],
     result_ty: &Ty,
-    map_key_nullary: bool,
-    map_key_scalar_rec: bool,
-    enum_rich_variant: bool,
+    hints: RouterHints,
 ) -> Option<String> {
+    let RouterHints { map_key_nullary, map_key_scalar_rec, enum_rich_variant } = hints;
     match module {
         "list" => list_call_name(func, arg_tys, result_ty, enum_rich_variant),
         "set" => set_call_name(func, arg_tys, result_ty),

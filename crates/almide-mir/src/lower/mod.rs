@@ -25,6 +25,8 @@ use almide_ir::{
 use almide_lang::types::Ty;
 use std::collections::{HashMap, HashSet};
 
+pub mod registry_sig;
+
 /// The KNOWN wall shapes (#931): a coarse classification of the constructs
 /// the verified renderer most often refuses. Each known shape carries a
 /// plain-language headline and the documented rewrite (the CHEATSHEET idioms)

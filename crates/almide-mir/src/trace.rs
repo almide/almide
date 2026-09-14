@@ -39,6 +39,10 @@ pub(crate) const CHANNELS: &[(&str, &str)] = &[
         "wasm references with no resolvable definition",
     ),
     (
+        "ALMIDE_DBG_ROUTER",
+        "a stdlib call name refused for its registered signature (#2184), with the mismatch and the argument types",
+    ),
+    (
         "ALMIDE_ABI_PROBE",
         "the lifted-effect-fn ABI decision per function",
     ),
