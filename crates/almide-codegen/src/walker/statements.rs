@@ -438,12 +438,19 @@ fn try_render_bind_counting_range(ctx: &RenderContext, var: &VarId, value: &IrEx
 fn render_stmt_assign(ctx: &RenderContext, stmt: &IrStmt) -> String {
     let IrStmtKind::Assign { var, value } = &stmt.kind else { unreachable!() };
     let target_s = ctx.var_name(*var).to_string();
+    // A `var` re-assigned from a borrowed param reads `&str` / `&[T]` / `&T`
+    // into an OWNED binding, so the borrow converts exactly as a `let`
+    // initializer's does (`render_stmt_bind`, #624). This arm never had the
+    // conversion: `model = lit` with `lit: &str` was E0308 the moment the
+    // program reached the v0 leg (#2189) — and every store below (a cell
+    // `.set`, a global, a `*p =` through a `mut` param, an `AlmideRcCow::new`)
+    // needs the owned value just the same.
+    let value_s = borrowed_param_owning_value(ctx, value).unwrap_or_else(|| render_expr(ctx, value));
     // Shared-mut local (`Rc<Cell<T>>`): write through the cell. Cell's
     // interior mutability means the binding need not be `mut`. (Closure v2, P3.)
     if ctx.ann.is_shared_mut(var) {
-        return format!("{}.set({});", target_s, render_expr(ctx, value));
+        return format!("{}.set({});", target_s, value_s);
     }
-    let value_s = render_expr(ctx, value);
     // §4 Stage 2: module globals dispatch on the alias-resolved
     // attribute (one lookup owns storage AND the emitted name) —
     // replaces the name-keyed get_var_storage probe whose prefixing
