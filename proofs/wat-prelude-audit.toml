@@ -332,7 +332,7 @@ why = "reached through prim.path_filestat; every fixture that would exercise it 
 [[fn]]
 name = "path_norm"
 site = "crates/almide-mir/src/render_wasm_fs_wat.rs:116"
-digest = "662b4b34cacf"
+digest = "61dacf564fba"
 class = "CORPUS"
 via = "fan_settle_tuple.almd"
 
