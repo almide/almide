@@ -774,27 +774,20 @@ fn collect_almd(dir: &std::path::Path, out: &mut Vec<String>) {
 }
 
 /// `--allow` capability names → the effect-module names the bounded checker
-/// denies (E076). The vocabulary is the effect-inference capability set minus
-/// `Fan`: `fan.*` scheduling stays outside the critical profile until the
-/// component-model async mapping gives its arms a bounded-cost story (#1628).
+/// denies (E076). The table is `check::CAPABILITY_GRANTS`, held next to the
+/// denied set so the two are tested against each other and the registry.
 fn expand_capability_grants(allow: &[String]) -> Vec<String> {
     let mut modules: Vec<String> = Vec::new();
     for cap in allow {
-        let granted: &[&str] = match cap.as_str() {
-            "IO" => &["io", "fs", "log"],
-            "Net" => &["http", "net"],
-            "Env" => &["env", "args"],
-            "Time" => &["datetime", "time", "duration"],
-            "Rand" => &["random"],
-            "Process" => &["process"],
-            other => {
-                eprintln!(
-                    "error: unknown capability `{other}` — grantable capabilities are IO, Net, Env, Time, Rand, Process"
-                );
-                std::process::exit(1);
-            }
+        let Some((_, granted)) = almide::check::CAPABILITY_GRANTS.iter().find(|(c, _)| c == cap) else {
+            let names: Vec<&str> = almide::check::CAPABILITY_GRANTS.iter().map(|(c, _)| *c).collect();
+            eprintln!(
+                "error: unknown capability `{cap}` — grantable capabilities are {}",
+                names.join(", ")
+            );
+            std::process::exit(1);
         };
-        for m in granted {
+        for m in *granted {
             if !modules.iter().any(|x| x == m) {
                 modules.push(m.to_string());
             }

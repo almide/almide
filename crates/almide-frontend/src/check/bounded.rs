@@ -91,18 +91,102 @@ impl Checker {
 }
 
 /// Pure stdlib modules a @bounded fn may call FIRST-ORDER members of (ALS-B7).
+/// `hash` and `error` reach intrinsics, but the intrinsics are computations
+/// (FNV/SHA over bytes, error-chain text) with no host effect; `path` is string
+/// arithmetic on separators and never touches the filesystem.
 const BOUNDED_PURE_MODULES: &[&str] = &[
     "int", "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64", "float",
-    "float32", "string", "list", "map", "set", "tuple", "math", "option", "result", "value",
-    "json", "bytes", "regex", "matrix", "bool", "char", "hex", "base64", "url", "html",
+    "float32", "float64", "string", "list", "map", "set", "math", "option", "result", "value",
+    "json", "bytes", "regex", "matrix", "hex", "base64", "url", "html", "hash", "error", "path",
 ];
 
 /// Effect / host-reaching modules E076 rejects outright (ALS-B9); `io` is
 /// special-cased to its print family, the bare `println` builtins are allowed.
+/// `compute` / `duration` are the ADR-0001 clock constructors (compiler-known,
+/// `time_units::TIME_MODULES`) and `fan` the scheduling primitive — none is a
+/// registry module, so `bounded_tables_name_real_modules` admits them by name.
+/// `prim` is the raw-memory floor; nothing bounded may reach it directly.
 const BOUNDED_DENIED_MODULES: &[&str] = &[
     "env", "fs", "http", "net", "process", "random", "zlib", "datetime", "args", "mem",
-    "testing", "fan", "compute", "duration", "log", "time",
+    "testing", "fan", "compute", "duration", "prim",
 ];
+
+/// `--allow` capability names → the modules a grant un-denies (#567). Kept
+/// beside the denied set so a grant cannot name a module the profile never
+/// denies. The vocabulary is the effect-inference capability set minus `Fan`:
+/// `fan.*` scheduling stays outside the critical profile until the
+/// component-model async mapping gives its arms a bounded-cost story (#1628).
+pub const CAPABILITY_GRANTS: &[(&str, &[&str])] = &[
+    ("IO", &["io", "fs"]),
+    ("Net", &["http", "net"]),
+    ("Env", &["env", "args"]),
+    ("Time", &["datetime", "duration"]),
+    ("Rand", &["random"]),
+    ("Process", &["process"]),
+];
+
+#[cfg(test)]
+mod bounded_tables_tests {
+    use super::{BOUNDED_DENIED_MODULES, BOUNDED_PURE_MODULES, CAPABILITY_GRANTS};
+    use almide_lang::stdlib_info::{BUNDLED_MODULES, STDLIB_MODULES};
+    use almide_lang::time_units::TIME_MODULES;
+
+    /// Modules a program can actually name: the registry plus the
+    /// compiler-known pseudo-modules the checker resolves by hand.
+    fn is_nameable(m: &str) -> bool {
+        STDLIB_MODULES.contains(&m)
+            || BUNDLED_MODULES.contains(&m)
+            || TIME_MODULES.iter().any(|(t, _)| *t == m)
+            || m == "fan"
+    }
+
+    /// A row naming a module nothing resolves is dead text that reads as
+    /// policy. The denied set carried `log` and `time`, the pure set `tuple`,
+    /// `bool` and `char`, and `--allow IO` granted `log` — six names no program
+    /// could ever spell, each looking like a decision someone had made.
+    #[test]
+    fn bounded_tables_name_real_modules() {
+        let mut phantom = Vec::new();
+        for m in BOUNDED_PURE_MODULES.iter().chain(BOUNDED_DENIED_MODULES) {
+            if !is_nameable(m) {
+                phantom.push(format!("profile table: {m}"));
+            }
+        }
+        for (cap, mods) in CAPABILITY_GRANTS {
+            for m in *mods {
+                if !is_nameable(m) {
+                    phantom.push(format!("--allow {cap}: {m}"));
+                }
+                if *m != "io" && !BOUNDED_DENIED_MODULES.contains(m) {
+                    phantom.push(format!("--allow {cap}: {m} is never denied, so the grant is a no-op"));
+                }
+            }
+        }
+        assert!(phantom.is_empty(), "names that resolve to no module:\n{}", phantom.join("\n"));
+    }
+
+    /// Every registry module is classified pure or denied (or is `io`, the
+    /// print-family special case), so a new host-reaching module cannot slip
+    /// past the profile unclassified: an unlisted module is E074 today by
+    /// accident of the fall-through, not by decision.
+    #[test]
+    fn every_registry_module_is_classified() {
+        let unclassified: Vec<&str> = STDLIB_MODULES
+            .iter()
+            .chain(BUNDLED_MODULES)
+            .copied()
+            .filter(|m| {
+                *m != "io" && !BOUNDED_PURE_MODULES.contains(m) && !BOUNDED_DENIED_MODULES.contains(m)
+            })
+            .collect();
+        assert!(unclassified.is_empty(), "registry modules the profile does not classify: {unclassified:?}");
+        let both: Vec<&&str> = BOUNDED_PURE_MODULES
+            .iter()
+            .filter(|m| BOUNDED_DENIED_MODULES.contains(m))
+            .collect();
+        assert!(both.is_empty(), "modules both pure and denied: {both:?}");
+    }
+}
 
 /// Run-time-length heap constructors (ALS-B8): fn -> the size-argument slots
 /// that must be compile-time constants.
