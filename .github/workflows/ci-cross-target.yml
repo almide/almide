@@ -1,15 +1,19 @@
 name: Cross-Target CI
 
 # Runs spec/ on both Rust and WASM targets, reports mismatches.
+#
+# No `paths-ignore`: a workflow filtered out by a path filter leaves its checks
+# in the Expected state forever on a PR that touches only the ignored paths
+# (see the `changes` job in ci.yml for the GitHub-docs citation), and the two
+# `proofs/` steps below are gates that must produce a verdict on every ref.
+# `pull_request` so a fix to this very workflow is visible green before it
+# merges; `merge_group` so the queue runs the same gates before develop moves.
 
 on:
   push:
     branches: [develop]
-    paths-ignore:
-      - 'docs/**'
-      - '*.md'
-      - 'LICENSE'
-      - '.tasks/**'
+  pull_request:
+  merge_group:
 
 # Cancel superseded runs on the same ref so a burst of pushes doesn't fire N
 # concurrent runs that all re-download tools and trip the per-IP rate limit.
@@ -72,33 +76,30 @@ jobs:
 
       - name: Cross-target spec (Rust vs WASM)
         run: |
+          # Per file, the two lanes must reach the SAME EXIT CODE — not merely the
+          # same pass/fail bit. `almide test` has three verdicts (0 pass, 1 fail,
+          # 5 nothing to run — docs/specs/cli.md), and a 5/5 on a generated stub
+          # with no test block is agreement, not a "Rust FAIL (WASM OK)" (#2204:
+          # the boolean form read exactly that split as a mismatch on 22 runs).
           ALMIDE=./target/release/almide
-          rust_pass=0; wasm_pass=0; rust_fail=0; wasm_fail=0; both_pass=0; errors=""
+          rust_pass=0; wasm_pass=0; rust_fail=0; wasm_fail=0; agree=0; both_pass=0; empty=0; errors=""
 
           for f in $(find spec/ -name '*_test.almd' -type f | sort); do
             # Skip files marked with wasm:skip
             if head -3 "$f" | grep -q 'wasm:skip'; then continue; fi
 
-            rust_ok=false; wasm_ok=false
+            $ALMIDE test "$f" > /dev/null 2>&1; rust_code=$?
+            $ALMIDE test "$f" --target wasm > /dev/null 2>&1; wasm_code=$?
 
-            if $ALMIDE test "$f" > /dev/null 2>&1; then
-              rust_ok=true; rust_pass=$((rust_pass + 1))
+            if [ "$rust_code" -eq 0 ]; then rust_pass=$((rust_pass + 1)); else rust_fail=$((rust_fail + 1)); fi
+            if [ "$wasm_code" -eq 0 ]; then wasm_pass=$((wasm_pass + 1)); else wasm_fail=$((wasm_fail + 1)); fi
+
+            if [ "$rust_code" -ne "$wasm_code" ]; then
+              errors="$errors\n  Rust exit $rust_code / WASM exit $wasm_code: $f"
             else
-              rust_fail=$((rust_fail + 1))
-            fi
-
-            if $ALMIDE test "$f" --target wasm > /dev/null 2>&1; then
-              wasm_ok=true; wasm_pass=$((wasm_pass + 1))
-            else
-              wasm_fail=$((wasm_fail + 1))
-            fi
-
-            if $rust_ok && $wasm_ok; then
-              both_pass=$((both_pass + 1))
-            elif $rust_ok && ! $wasm_ok; then
-              errors="$errors\n  WASM FAIL (Rust OK): $f"
-            elif ! $rust_ok && $wasm_ok; then
-              errors="$errors\n  Rust FAIL (WASM OK): $f"
+              agree=$((agree + 1))
+              if [ "$rust_code" -eq 0 ]; then both_pass=$((both_pass + 1)); fi
+              if [ "$rust_code" -eq 5 ]; then empty=$((empty + 1)); fi
             fi
           done
 
@@ -107,20 +108,21 @@ jobs:
           echo "=== Cross-Target Results ==="
           echo "Rust:  $rust_pass pass / $rust_fail fail"
           echo "WASM:  $wasm_pass pass / $wasm_fail fail"
-          echo "Both:  $both_pass / $total"
+          echo "Agree: $agree / $total (both pass $both_pass, both empty $empty)"
 
           if [ -n "$errors" ]; then
-            echo -e "\nMismatches:$errors"
+            echo -e "\nMismatches (exit codes differ):$errors"
             echo "::error::Cross-target mismatches found — see above"
             exit 1
           fi
 
-          echo "::notice::Cross-target: Rust $rust_pass, WASM $wasm_pass, both $both_pass / $total"
+          echo "::notice::Cross-target: Rust $rust_pass, WASM $wasm_pass, agree $agree / $total (both pass $both_pass, both empty $empty)"
 
       - name: v1 trust-spine differential fuzz (render_program v0==v1)
         run: |
           # PER-PR generative byte-match of the V1 TRUST-SPINE path (render_program -> wasm). The
-          # cross-target step above exercises the OLD wasm codegen, NOT the trust spine, and the
+          # cross-target step above compares the two `almide test` lanes' VERDICTS per file, not
+          # the bytes either lane produced, and the
           # nightly xtarget-fuzz emits only `let`-bound expressions — so the imperative
           # `var v = w; … v = …` shape had NO per-PR gate, which is how the scalar-aliasing miscompile
           # shipped. This synthesizes that class (var reassignment, loops, accumulators, the sha1

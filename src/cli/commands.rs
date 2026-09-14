@@ -247,6 +247,11 @@ enum WasmTestOutcome {
     /// FAILED, matching the default harness's verdict on the same file.
     CompileError { file: String, detail: String },
     Skip { file: String, reason: String, kind: SkipKind },
+    /// No `main` and no `test` block: nothing for ANY leg to run. Not a wall
+    /// (no renderer declined it) and not a skip (nothing was declined), so it
+    /// contributes zero to the counts and lets `finish_test_run` reach the same
+    /// exit-5 verdict native does on the same file (#2204).
+    Empty { file: String },
 }
 
 /// WHY a file's tests did not run on wasm. The distinction is the whole point
@@ -532,6 +537,14 @@ fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::PathBuf, run
         Err(detail) => return compile_error(detail),
     };
     mark(prof, &mut marks, "lower_modules");
+    // Nothing to run on any leg — the v1 renderer would refuse this program
+    // ("no `main` and no test blocks") and the refusal read as a WALL, i.e. a
+    // decline, which the zero-test verdict rightly exempts; so the same file
+    // exited 5 on native and 0 here (#2204). Decided after the checks above so
+    // a file that does not compile still fails as one on both targets.
+    if declared_tests == 0 && !ir_program.functions.iter().any(|f| f.name.as_str() == "main") {
+        return WasmTestOutcome::Empty { file: test_file.to_string() };
+    }
     // The ONE driver — see the note in src/cli/build.rs. This is the site whose order the
     // migration FLIPPED (ir_link first → last), so its acceptance check is byte-identity of
     // spec/wasm_cross against the pre-migration capture, not merely a green suite.
@@ -697,7 +710,8 @@ pub fn cmd_test_wasm(file: &str, run_filter: Option<&str>, allow_no_tests: bool)
         WasmTestOutcome::Pass { file, .. }
         | WasmTestOutcome::Fail { file, .. }
         | WasmTestOutcome::CompileError { file, .. }
-        | WasmTestOutcome::Skip { file, .. } => file.clone(),
+        | WasmTestOutcome::Skip { file, .. }
+        | WasmTestOutcome::Empty { file } => file.clone(),
     };
     outcomes.sort_by(|a, b| file_of(a).cmp(&file_of(b)));
 
@@ -739,6 +753,12 @@ pub fn cmd_test_wasm(file: &str, run_filter: Option<&str>, allow_no_tests: bool)
             WasmTestOutcome::Skip { file, reason, .. } => {
                 err(&format!("SKIP {} ({})", file, reason));
                 skipped += 1;
+            }
+            // Counted with the passes, as native counts a file whose binary
+            // ran zero tests; the zero-test verdict below is what fails it.
+            WasmTestOutcome::Empty { file } => {
+                err(&format!("{}: no test blocks (nothing to run)", file));
+                passed += 1;
             }
         }
     }
@@ -860,6 +880,10 @@ pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>, allow
                 counts.add(TestCounts { ran: count, filtered_out });
                 wasm_pass += 1
             }
+            // Nothing to run on any leg: no native re-run would find a test
+            // either, so it is claimed here with zero counts and the zero-test
+            // verdict at the end fails the run as it does on every lane (#2204).
+            WasmTestOutcome::Empty { .. } => wasm_pass += 1,
             // A `Fail` is DIFFERENT IN KIND from the benign fallback classes
             // (#1166): the wasm leg COMPILED the file, claimed it, and produced
             // a runtime failure. Whether that is a plain failing test or a
@@ -1045,7 +1069,7 @@ fn run_test_file_once(
     // the accept loop keeps its own per-invocation dir and mirrors the name.
     let wasm_path = tmp_dir.join(file.replace(['/', '.'], "_") + ".wasm");
     match compile_and_run_wasm_test(file, wasm_path, super::test_report::harness_filter(program_args)) {
-        WasmTestOutcome::Pass { .. } => return Ok((0, String::new())),
+        WasmTestOutcome::Pass { .. } | WasmTestOutcome::Empty { .. } => return Ok((0, String::new())),
         WasmTestOutcome::Fail { raw, .. } => return Ok((1, raw)),
         WasmTestOutcome::CompileError { detail, .. } => {
             return Err(format!("Compile error for {file}:\n{detail}"));
