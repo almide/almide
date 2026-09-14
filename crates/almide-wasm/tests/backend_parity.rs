@@ -41,13 +41,8 @@ fn corpus_burn_up() {
     let mut unsupported: BTreeMap<String, usize> = BTreeMap::new();
     let mut front_skipped = 0usize;
     let mut total = 0usize;
-    // Rows whose ORACLE answer predates a fix that postdates the port SHA: they
-    // stay in the manifest for every sweep that uses it as a corpus list, and
-    // only the comparison against that answer skips them (#2129).
-    let stale = almide_corpus::stale_oracle_rows(&root);
-    let mut stale_agreed: Vec<String> = Vec::new();
 
-    for line in manifest.lines() {
+    for line in almide_corpus::manifest_rows(&manifest) {
         let mut it = line.splitn(3, '\t');
         let want_hash = it.next().expect("test harness invariant");
         let want_exit: i32 = it.next().expect("test harness invariant").parse().expect("test harness invariant");
@@ -68,12 +63,7 @@ fn corpus_burn_up() {
             // hashes stdout only, so stderr stays fuzz-verified for now.
             Ok(bytes) => match run_wasm(&bytes) {
                 Ok(r) => {
-                    let agrees = normalized_hash(&r.stdout) == want_hash && r.exit == want_exit;
-                    if stale.contains_key(rel) {
-                        if agrees {
-                            stale_agreed.push(rel.to_string());
-                        }
-                    } else if agrees {
+                    if normalized_hash(&r.stdout) == want_hash && r.exit == want_exit {
                         supported += 1;
                     } else {
                         divergent.push(format!(
@@ -98,12 +88,6 @@ fn corpus_burn_up() {
     for (reason, n) in hist.iter().take(15) {
         println!("  ×{n}: {reason}");
     }
-    assert!(
-        stale_agreed.is_empty(),
-        "{} stale-row registration(s) now AGREE with the oracle — delete them from \
-         scripts/lib/run-oracle-stale.txt (the register is shrink-only): {stale_agreed:?}",
-        stale_agreed.len()
-    );
     assert!(
         divergent.is_empty(),
         "{} fixtures the backend claims to support DIVERGE from the oracle: {:?}",

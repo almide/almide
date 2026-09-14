@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 # Diagnostics-parity golden generator (unit 4). Runs the ORACLE almide binary
-# (clean a877d2138 build) as `almide check <file> --json` over every
-# spec/**/*.almd and records the sha256 of its stdout. The greenfield
-# `check_file_json` query must reproduce every hash byte-for-byte
-# (crates/almide-spine/tests/check_parity.rs).
+# — the CLI built from THIS tree (target/release/almide; #2183) — as
+# `almide check <file> --json` over every spec/**/*.almd and records the
+# sha256 of its stdout. The greenfield `check_file_json` query must reproduce
+# every hash byte-for-byte (crates/almide-spine/tests/check_parity.rs).
+# CI regenerates and diffs the outputs (scripts/check-parity-goldens.sh), so a
+# committed row can only change by the CLI's own output changing.
 #
-#   ORACLE=/path/to/almide bash scripts/gen-check-manifest.sh
+#   ORACLE=target/release/almide bash scripts/gen-check-manifest.sh
 #
-# Outputs (committed):
+# Outputs (committed; the manifest starts with one `# oracle:` header line —
+# see scripts/lib/oracle-header.sh):
 #   crates/almide-spine/tests/golden/spec-check-manifest.txt   sha256<TAB>exit<TAB>path
 #   crates/almide-spine/tests/golden/spec-check-exclusions.txt path<TAB>reason
 # A file lands in exclusions only when the oracle DIED without producing
@@ -21,9 +24,10 @@ set -uo pipefail
 export LC_ALL=C
 cd "$(dirname "$0")/.." || exit 2
 
-ORACLE="${ORACLE:?set ORACLE to the almide binary built from the port SHA}"
+ORACLE="${ORACLE:?set ORACLE to the almide binary built from this tree (target/release/almide)}"
 case "$ORACLE" in /*) ;; *) ORACLE="$PWD/$ORACLE" ;; esac
 "$ORACLE" --version >/dev/null || exit 2
+. scripts/lib/oracle-header.sh
 
 OUT_DIR="crates/almide-spine/tests/golden"
 mkdir -p "$OUT_DIR"
@@ -75,5 +79,6 @@ while IFS=$'\t' read -r want _rc f; do
   [ "$got" = "$want" ] || { echo "::error::nondeterministic check output for $f"; ndet=$((ndet + 1)); }
 done <<< "$(head -25 "$MANIFEST")"
 [ "$ndet" -eq 0 ] || exit 1
+stamp_oracle_header "$MANIFEST"
 
 echo "manifest: $n_ok files, exclusions: $n_skip (see $EXCLUDED)"

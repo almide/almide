@@ -1,0 +1,23 @@
+# RUN-PARITY SKIP CEILINGS (#2183) — read by crates/almide-spine/tests/run_parity.rs.
+#
+# The ported interpreter is the incumbent's pre-codegen oracle: a fixture using
+# an intrinsic outside its bridge coverage returns Unsupported (exit -2), and
+# the incumbent's own 3-way gate SKIPS those rather than voting. run_parity
+# does the same, printing the reason, and holds the count under `unsupported`.
+# `fuel_exhausted` is the interpreter's second distinguished outcome (-3, "not
+# a hang or panic"): the one huge-range fixture and effect_tco_err_rewrap (a
+# TCO the interpreter does not perform on the err-rewrap path).
+#
+# Both are MEASURED and shrink-only: lower them in their own commit citing the
+# solo run (scripts/check-ratchet-separation.sh keeps that commit free of
+# implementation); a fixture that lands unsupported is carried by extending
+# the bridge, never by raising a number. Seeded 2026-09-14 (#2183) from the
+# solo run at 8fd969af4: 710-row manifest, 688 identical, 20 unsupported
+# (env.set, env.sleep_ms, 3× prim.fd_write, 2× prim.int_to_ptr, three arena-
+# ceiling allocations, three prim.handle shapes), 2 fuel-exhausted, 0
+# diverge. The `const MAX_UNSUPPORTED = 121` it replaces had not moved since
+# 2026-08-26 while the interpreter caught up: 101 rows of slack.
+#
+# name<TAB>value
+unsupported	20
+fuel_exhausted	2
