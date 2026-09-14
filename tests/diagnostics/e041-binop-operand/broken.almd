@@ -1,0 +1,9 @@
+// E041: a fallible call as a binary-operator OPERAND (#2196). The operator
+// reads the call's OK value, so the Result was stripped and propagated with
+// no `!` in the source; the report lands on the call, where the `!` goes.
+effect fn parse_one() -> Int = int.parse("1")!
+
+effect fn main() -> Unit = {
+  let x = parse_one() + 1
+  println(int.to_string(x))
+}

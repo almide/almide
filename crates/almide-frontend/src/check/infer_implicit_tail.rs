@@ -33,6 +33,27 @@ impl Checker {
         }
     }
 
+    /// The effect calls an operator leaf reaches through its operands —
+    /// `f() + 1`, `-f()`, `(f()) * 2` — through parentheses and nested
+    /// operators. The operand strip (`operand_effect_unwrap`) already queued
+    /// each as E041 at its own span; a position that DISCARDS the operator's
+    /// value re-queues them as must-use so the post-solve report upgrades
+    /// that same span to E042 (#2196). Not part of [`Self::tail_leaves`]: an
+    /// operand is never the position's value, so the withdrawal for a
+    /// `-> Result` tail must not reach it.
+    fn operand_call_leaves<'e>(expr: &'e ast::Expr, out: &mut Vec<&'e ast::Expr>) {
+        match &expr.kind {
+            ExprKind::Paren { expr } => Self::operand_call_leaves(expr, out),
+            ExprKind::Binary { left, right, .. } => {
+                Self::operand_call_leaves(left, out);
+                Self::operand_call_leaves(right, out);
+            }
+            ExprKind::Unary { operand, .. } => Self::operand_call_leaves(operand, out),
+            ExprKind::Call { .. } => out.push(expr),
+            _ => {}
+        }
+    }
+
     /// Does the value of `expr` come from more than the expression itself?
     fn is_branching(expr: &ast::Expr) -> bool {
         let mut leaves = Vec::new();
@@ -50,6 +71,12 @@ impl Checker {
     pub(crate) fn queue_implicit_prop_leaves(&mut self, expr: &ast::Expr, what: &'static str, must_use: bool) {
         let mut leaves = Vec::new();
         Self::tail_leaves(expr, &mut leaves);
+        let operators: Vec<&ast::Expr> = leaves.iter().copied()
+            .filter(|leaf| matches!(leaf.kind, ExprKind::Binary { .. } | ExprKind::Unary { .. }))
+            .collect();
+        for operator in operators {
+            Self::operand_call_leaves(operator, &mut leaves);
+        }
         let bang_legal = self.env.auto_unwrap || self.env.in_test_block;
         for leaf in leaves {
             if matches!(leaf.kind, ExprKind::Ok { .. } | ExprKind::Err { .. }) {
