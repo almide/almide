@@ -691,6 +691,20 @@ class = "NEGATIVE_TESTED"
 evidence = "#2186 step 4 landing (2026-09-15): the harness is itself a set of negatives — a stand-in compiler whose output spells the seed, one that panics under a seed, and an empty corpus each turned the gate red on the first run; the order-independent stand-in stayed green."
 
 [[gate]]
+path = "scripts/check-ownership-certifier.sh"
+wired_by = ".github/workflows/ci.yml"
+reads = "scalar"
+class = "NEGATIVE_TESTED"
+evidence = "#2231 landing (2026-09-15): the first corpus sweep raised 752 lines; two certifier rules (a reference passing bare through a call slot / a bind / an iterable is not a move) brought it to the real set of 293 — capture-by-clone at last use (C3, 194), owned params no occurrence needs owned (C4, 99; monomorphised generics among them), no C1 — anchored in proofs/ownership-certifier-baseline.txt. scripts/check-ownership-certifier-negative.sh re-proves the verdict on every run; tests/ownership_certifier_test.rs pins C3 and C4 firing and a clean body certifying on the real compiler."
+
+[[gate]]
+path = "scripts/check-ownership-certifier-negative.sh"
+wired_by = ".github/workflows/ci.yml"
+reads = "scalar"
+class = "NEGATIVE_TESTED"
+evidence = "#2231 landing (2026-09-15): stand-in compilers raising one line beyond the ledger, raising nothing while the ledger holds a line, panicking under report mode, and an empty corpus each turned the gate red on the first run; the stand-in raising exactly the ledger stayed green."
+
+[[gate]]
 path = "tools/almide-gates:env-switches-doc"
 wired_by = ".github/workflows/ci.yml"
 reads = "structured"

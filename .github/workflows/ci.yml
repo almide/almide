@@ -1270,6 +1270,15 @@ jobs:
       - name: Pass-order shuffle negative controls (#2186 — an order-dependent or panicking stand-in turns the gate red)
         run: bash scripts/check-pass-shuffle-negative.sh
 
+      # #2231: the native ownership certifier re-derives every occurrence's
+      # use from the final IR and checks the passes' verdicts; the corpus's
+      # violations are a shrink-only ledger (proofs/ownership-certifier-baseline.txt).
+      - name: Ownership certifier (#2231 — every corpus violation is in the shrink-only ledger, none new, none silently gone)
+        run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-ownership-certifier.sh
+
+      - name: Ownership certifier negative controls (#2231 — a new violation, a vanished one, a panic and an empty corpus each turn the gate red)
+        run: bash scripts/check-ownership-certifier-negative.sh
+
       - name: ALS element coverage (every syntax element rowed; UNWRITTEN shrink-only — the freeze precondition)
         run: bash scripts/check-als-element-coverage.sh
 
