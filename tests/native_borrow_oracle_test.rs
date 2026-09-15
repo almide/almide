@@ -286,8 +286,23 @@ fn alloc_ledger_path() -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/native-borrow-oracle-alloc.txt")
 }
 
-/// The counting allocator's report for one program: `(allocs, deallocs)`.
+/// The counting allocator's report for one program, NET of the process's
+/// fixed cost: the report of a one-line program compiled the same way is
+/// subtracted, so what the ledger pins is the program's own work. The fixed
+/// cost differs by one allocation between macOS and Linux (the first
+/// ubuntu run of the ledger read every row one below its macOS pin), and a
+/// ledger that had to be regenerated per OS would be a ledger nobody could
+/// regenerate from a laptop.
 fn alloc_report(almide: &str, src: &Path) -> Result<(u64, u64), String> {
+    let (a, d) = raw_alloc_report(almide, src)?;
+    let base = src.with_file_name("baseline.almd");
+    std::fs::write(&base, "fn main() -> Unit = println(\"baseline\")\n").unwrap();
+    let (ba, bd) = raw_alloc_report(almide, &base)?;
+    Ok((a.saturating_sub(ba), d.saturating_sub(bd)))
+}
+
+/// The counting allocator's raw report for one program: `(allocs, deallocs)`.
+fn raw_alloc_report(almide: &str, src: &Path) -> Result<(u64, u64), String> {
     let out = Command::new(almide).arg("run").arg(src).env("ALMIDE_ALLOC_COUNT", "1").output().expect("almide");
     let stderr = String::from_utf8_lossy(&out.stderr);
     if !out.status.success() {
@@ -392,9 +407,13 @@ fn the_allocation_lane_fires_on_a_moved_count_and_on_a_missing_report() {
     let pinned = read_alloc_ledger().values().filter(|v| v.is_some()).count();
     assert!(pinned > 0, "the ledger pins no row — the negatives would be vacuous");
 
-    // A compiler whose every program allocates once: no pinned row reads 1/1.
+    // A compiler whose every program allocates once net of the baseline:
+    // no pinned row reads 1/1.
     let moved = stand_in("moved", r#"
-echo "__ALMD_ALLOC allocs=1 deallocs=1 reallocs=0 peak=8" >&2
+case "$*" in
+  *baseline.almd*) echo "__ALMD_ALLOC allocs=0 deallocs=0 reallocs=0 peak=0" >&2 ;;
+  *) echo "__ALMD_ALLOC allocs=1 deallocs=1 reallocs=0 peak=8" >&2 ;;
+esac
 exit 0"#);
     let f = alloc_lane(&moved);
     assert_eq!(f.len(), pinned, "one moved-count failure per pinned row: {f:?}");
