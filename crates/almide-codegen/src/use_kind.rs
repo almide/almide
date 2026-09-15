@@ -142,6 +142,10 @@ pub struct Use {
     /// Inside the operand of a `&mut` borrow (the operand itself included):
     /// the value is reachable through a live mutable borrow.
     pub in_mut: bool,
+    /// Inside a `for` / `while` body below the analysed root: the occurrence
+    /// runs once per iteration, so a variable bound outside the loop has a
+    /// "later" use at every one of its own occurrences in the body.
+    pub in_loop: bool,
 }
 
 impl Use {
@@ -189,14 +193,14 @@ impl UseSites {
     /// The occurrences in `expr`, which sits in `root` position (a fn body
     /// is a [`Site::Result`]).
     pub fn of_expr(expr: &IrExpr, root: Site, oracle: &dyn SlotOracle) -> Self {
-        let mut w = Walk { oracle, uses: Vec::new(), depth: 0, in_chain: false, mut_depth: 0 };
+        let mut w = Walk { oracle, uses: Vec::new(), depth: 0, in_chain: false, mut_depth: 0, loop_depth: 0 };
         w.expr(expr, root);
         UseSites { uses: w.uses }
     }
 
     /// The occurrences in a statement list (a loop body).
     pub fn of_stmts(stmts: &[IrStmt], oracle: &dyn SlotOracle) -> Self {
-        let mut w = Walk { oracle, uses: Vec::new(), depth: 0, in_chain: false, mut_depth: 0 };
+        let mut w = Walk { oracle, uses: Vec::new(), depth: 0, in_chain: false, mut_depth: 0, loop_depth: 0 };
         for s in stmts { w.stmt(s); }
         UseSites { uses: w.uses }
     }
@@ -247,12 +251,14 @@ struct Walk<'a> {
     depth: u32,
     in_chain: bool,
     mut_depth: u32,
+    loop_depth: u32,
 }
 
 impl Walk<'_> {
     fn record(&mut self, var: VarId, site: Site, chain: Option<Chain>) {
         self.uses.push(Use {
             var, site, chain, depth: self.depth, in_chain: self.in_chain, in_mut: self.mut_depth > 0,
+            in_loop: self.loop_depth > 0,
         });
     }
 
@@ -344,11 +350,15 @@ impl Walk<'_> {
             }
             IrExprKind::ForIn { iterable, body, .. } => {
                 self.expr(iterable, Site::Iterable { consumed: true });
+                self.loop_depth += 1;
                 for s in body { self.stmt(s); }
+                self.loop_depth -= 1;
             }
             IrExprKind::While { cond, body } => {
+                self.loop_depth += 1;
                 self.expr(cond, Site::Operand);
                 for s in body { self.stmt(s); }
+                self.loop_depth -= 1;
             }
 
             // ── Calls ──
