@@ -287,8 +287,59 @@ pub fn verify_program(program: &IrProgram) -> Vec<IrVerifyError> {
     for m in &program.modules {
         verify_module(m, &program.var_table, &known, &mut errors);
     }
+    verify_binder_ownership(program, &mut errors);
 
     errors
+}
+
+/// Every local is bound in exactly ONE function: a VarId that is a param or
+/// a binder of two bodies is an error. The ownership passes annotate locals
+/// by VarId (`borrowed_loop_vars`, `shared_mut_vars`, `tco_owned_params`,
+/// the clone pass's use counts), and an annotation can only mean one thing
+/// if the id has one binding site. The optimizer's branch-lift helpers used
+/// to reuse the enclosing fn's ids as their params (#2186), and every reader
+/// of those annotations grew a "fn-local truth" gate to survive it. A
+/// top-level let is a global, not a local, and is not a binder here; the
+/// binders INSIDE its initializer (a lambda's params) are.
+///
+/// Ids are compared within one VarTable: before `UnifyVarTablesPass` every
+/// module indexes its own table, so a module fn and a root fn may spell the
+/// same number for different locals; after it (the module table is empty)
+/// everything indexes the program table and the check spans all of them.
+fn verify_binder_ownership(program: &IrProgram, errors: &mut Vec<IrVerifyError>) {
+    let mut owner: std::collections::HashMap<(String, VarId), String> = std::collections::HashMap::new();
+    let mut claim = |table: &str, id: VarId, scope: &str, span: Option<Span>, errors: &mut Vec<IrVerifyError>| {
+        match owner.get(&(table.to_string(), id)) {
+            Some(first) if first != scope => errors.push(IrVerifyError {
+                message: format!("VarId({}) is bound in two functions: '{}' and '{}'", id.0, first, scope),
+                fn_name: scope.to_string(),
+                span,
+            }),
+            Some(_) => {}
+            None => {
+                owner.insert((table.to_string(), id), scope.to_string());
+            }
+        }
+    };
+    let mut scan = |table: &str, f: &IrFunction, scope: String, errors: &mut Vec<IrVerifyError>| {
+        for p in &f.params {
+            claim(table, p.var, &scope, None, errors);
+        }
+        let mut bound: Vec<VarId> = super::free_vars::bound_vars(&f.body).into_iter().collect();
+        bound.sort_by_key(|v| v.0);
+        for v in bound {
+            claim(table, v, &scope, f.body.span, errors);
+        }
+    };
+    for f in &program.functions {
+        scan("", f, f.name.to_string(), errors);
+    }
+    for m in &program.modules {
+        let table = if m.var_table.entries.is_empty() { String::new() } else { m.name.to_string() };
+        for f in &m.functions {
+            scan(&table, f, format!("{}::{}", m.name, f.name), errors);
+        }
+    }
 }
 
 /// module name → the function names a `module.func` call may legally name.
