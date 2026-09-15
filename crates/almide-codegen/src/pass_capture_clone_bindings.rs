@@ -139,12 +139,12 @@ pub(super) fn capture_bindings(
 }
 
 /// Per var of a fn body, the facts the capture-move rule reads: every
-/// occurrence as `(index in evaluation order, outer lambda, statement)`, and
-/// whether the var is CLEAN — no write, no reach through `&mut`, no
-/// occurrence inside a loop. See [`capture_moves`].
+/// occurrence as `(index in evaluation order, outer lambda, held across by
+/// an enclosing node)`, and whether the var is CLEAN — no write, no reach
+/// through `&mut`, no occurrence inside a loop. See [`capture_moves`].
 #[derive(Default)]
 pub(super) struct CaptureUses {
-    pub(super) uses: HashMap<VarId, Vec<(usize, Option<u32>, u32)>>,
+    pub(super) uses: HashMap<VarId, Vec<(usize, Option<u32>, bool)>>,
     pub(super) clean: HashSet<VarId>,
 }
 
@@ -158,7 +158,7 @@ pub(super) fn capture_uses(body: &IrExpr) -> CaptureUses {
     let mut out = CaptureUses::default();
     let mut unclean: HashSet<VarId> = HashSet::new();
     for (i, u) in sites.iter().enumerate() {
-        out.uses.entry(u.var).or_default().push((i, u.outer_lambda, u.stmt));
+        out.uses.entry(u.var).or_default().push((i, u.outer_lambda, u.held_across));
         if u.in_loop || u.in_mut || u.is_write(true) || matches!(u.site, Site::Borrow { mutable: true }) {
             unclean.insert(u.var);
         }
@@ -170,25 +170,23 @@ pub(super) fn capture_uses(body: &IrExpr) -> CaptureUses {
 /// May the capture of `var` by the lambda `lambda` MOVE the value instead of
 /// cloning it? The Perceus rule (a lambda dups its free variables only while
 /// they stay live): yes when the lambda holds the var's LAST occurrence, the
-/// var is clean, and no occurrence outside the lambda shares a statement
-/// with one inside it — a `map.fold(m, init, (k, v) => … m …)` borrows `m`
-/// through the runtime template while the closure is built, and a move there
-/// is the #809 E0505. Different statements cannot hold that borrow.
+/// var is clean, and no node enclosing the lambda holds a borrow of the var
+/// across the closure's construction — `map.fold(m, init, (k, v) => … m …)`
+/// borrows `m` through the runtime template while the closure is built, and
+/// a move there is the #809 E0505. A borrow that a SIBLING subexpression
+/// took and released (`fs.list_dir(dir) ?? [] |> list.map((n) => dir + n)`)
+/// is over by then, so the closure moves `dir`.
 pub(super) fn capture_moves(table: &CaptureUses, var: VarId, lambda: Option<u32>) -> bool {
     let Some(lambda) = lambda else { return false };
     if !table.clean.contains(&var) {
         return false;
     }
     let Some(uses) = table.uses.get(&var) else { return false };
-    let inside: Vec<&(usize, Option<u32>, u32)> = uses.iter().filter(|(_, l, _)| *l == Some(lambda)).collect();
+    let inside: Vec<&(usize, Option<u32>, bool)> = uses.iter().filter(|(_, l, _)| *l == Some(lambda)).collect();
     if inside.is_empty() {
         return false;
     }
     let last_inside = inside.iter().map(|(i, _, _)| *i).max().unwrap_or(0);
     let last_any = uses.iter().map(|(i, _, _)| *i).max().unwrap_or(0);
-    if last_any != last_inside {
-        return false;
-    }
-    let stmts: HashSet<u32> = inside.iter().map(|(_, _, s)| *s).collect();
-    !uses.iter().any(|(_, l, s)| *l != Some(lambda) && stmts.contains(s))
+    last_any == last_inside && !inside.iter().any(|(_, _, held)| *held)
 }

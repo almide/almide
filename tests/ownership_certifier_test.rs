@@ -22,6 +22,7 @@ fn certify_with(tag: &str, src: &str, env: &[(&str, &str)]) -> (bool, String) {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_almide"));
     cmd.arg(&file).arg("--target").arg("rust").env("ALMIDE_CERTIFY_OWNERSHIP", "fail");
     for (k, v) in env { cmd.env(k, v); }
+    if let Some(unset) = env.iter().find(|(k, _)| k.is_empty()).map(|(_, v)| *v) { cmd.env_remove(unset); }
     let out = cmd.output().expect("almide");
     let _ = std::fs::remove_dir_all(Path::new(&dir));
     (out.status.success(), String::from_utf8_lossy(&out.stderr).into_owned())
@@ -75,5 +76,22 @@ fn a_body_whose_verdicts_are_right_certifies() {
     // nothing: every verdict is the one the certifier would derive.
     let (ok, err) = certify("clean", "fn shout(s: String, tail: String) -> String = s + \"!\" + int.to_string(string.len(tail))\nfn main() -> Unit = {\n  let t = \"abc\"\n  println(shout(\"hey\", t))\n  println(t)\n}\n");
     assert!(ok, "a clean body must certify:\n{err}");
+    assert!(!err.contains("[CERTIFY OWNERSHIP]"), "{err}");
+}
+
+/// Unset, the switch means `fail` in a debug build and `off` in a release
+/// build — the certifier is the debug build's own gate now that the corpus
+/// ledger is empty. `off` opts out of either.
+#[test]
+fn a_debug_build_certifies_by_default_and_off_opts_out() {
+    let (ok, err) = certify_with("default", GREETER, &[("ALMIDE_CAPTURE_MOVE_OFF", "1"), ("", "ALMIDE_CERTIFY_OWNERSHIP")]);
+    if cfg!(debug_assertions) {
+        assert!(!ok, "a debug build must fail with the switch unset:\n{err}");
+        assert!(err.contains("[C3 clone-at-last-use]"), "{err}");
+    } else {
+        assert!(ok, "a release build must skip the certifier with the switch unset:\n{err}");
+    }
+    let (ok, err) = certify_with("off", GREETER, &[("ALMIDE_CAPTURE_MOVE_OFF", "1"), ("ALMIDE_CERTIFY_OWNERSHIP", "off")]);
+    assert!(ok, "`off` must build the violating program:\n{err}");
     assert!(!err.contains("[CERTIFY OWNERSHIP]"), "{err}");
 }

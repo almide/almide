@@ -289,9 +289,13 @@ pub fn codegen_with(program: &mut IrProgram, target: Target, options: &CodegenOp
 
     // Ownership certifier (#2231): re-derive each occurrence's use from the
     // final IR and check the passes' verdicts. `ALMIDE_CERTIFY_OWNERSHIP` =
-    // `report` prints, `fail` aborts; unset = off.
+    // `report` prints, `fail` aborts, `off` skips. Unset, a DEBUG build
+    // certifies and fails — the corpus ledger is empty, so every violation
+    // is a defect the build that made it should refuse (rustc's debug-only
+    // MIR validation, Swift's SIL verifier); a release build skips it.
     if target == Target::Rust {
-        let mode = almide_base::env::var("ALMIDE_CERTIFY_OWNERSHIP").unwrap_or_default();
+        let mode = almide_base::env::var("ALMIDE_CERTIFY_OWNERSHIP")
+            .unwrap_or_else(|| if cfg!(debug_assertions) { "fail".to_string() } else { "off".to_string() });
         if mode == "report" || mode == "fail" {
             let violations = certify_ownership::certify(program);
             for v in &violations {
