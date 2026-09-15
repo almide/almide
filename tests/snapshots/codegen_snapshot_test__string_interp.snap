@@ -130,6 +130,6 @@ pub fn almide_rt_int_from_uint32(n: u32) -> i64 { n as i64 }
 pub fn almide_rt_int_from_uint64(n: u64) -> i64 { n as i64 }
 
 //__ALMIDE_RT_BOUNDARY__
-pub fn describe(name: String, age: i64) -> String {
+pub fn describe(name: &str, age: i64) -> String {
     format!("{} is {} years old", name, almide_rt_int_to_string(age))
 }
