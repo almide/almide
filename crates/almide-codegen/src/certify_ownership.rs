@@ -42,7 +42,7 @@
 use std::collections::HashSet;
 use almide_ir::*;
 use almide_ir::annotations::CodegenAnnotations;
-use crate::use_kind::{ExplicitBorrows, Site, SlotMode, Use, UseSites};
+use crate::use_kind::{Ctor, ExplicitBorrows, Site, SlotMode, Use, UseSites};
 
 /// Every violation in `program`, one line each: the function, the variable,
 /// the check and what was seen.
@@ -134,11 +134,14 @@ fn definitely_consumes(u: &Use) -> bool {
     if u.depth > 0 {
         return false;
     }
+    // An interpolation part is formatted through `format_args!`, which
+    // borrows it for the call: not a move (the clone pass keeps a bare
+    // `String` part bare for the same reason).
     let moving = |s: &Site| matches!(
         s,
-        Site::Result | Site::Concat | Site::Construct(_) | Site::Arg(SlotMode::Consume)
+        Site::Result | Site::Concat | Site::Arg(SlotMode::Consume)
             | Site::Callback | Site::Iterable { consumed: true } | Site::FoldInit | Site::Assigned
-    );
+    ) || matches!(s, Site::Construct(c) if *c != Ctor::Interp);
     match u.chain {
         // `p.field` moved out of a borrowed `p` is the same defect (E0507).
         Some(c) => c.heap && moving(&c.top),
@@ -168,7 +171,7 @@ fn justifies_ownership(u: &Use) -> bool {
         || matches!(
             u.site,
             Site::Scrutinee | Site::Receiver | Site::Callee | Site::Iterable { .. }
-                | Site::Arg(SlotMode::Mut) | Site::Borrow { mutable: true }
+                | Site::Arg(SlotMode::Mut) | Site::Borrow { mutable: true } | Site::Construct(Ctor::Interp)
         )
         || matches!(u.chain, Some(c) if c.heap && matches!(c.top, Site::Scrutinee | Site::Receiver | Site::Callee | Site::Borrow { mutable: true }))
 }
