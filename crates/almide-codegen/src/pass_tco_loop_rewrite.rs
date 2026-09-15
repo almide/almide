@@ -4,7 +4,6 @@ fn rewrite_to_loop(
     var_table: &mut VarTable,
     infer_bindings: &mut std::collections::BTreeSet<VarId>,
     tco_owned_params: &mut HashSet<VarId>,
-    tco_rewritten_fns: &mut HashSet<almide_base::intern::Sym>,
     always_clone_vars: &HashSet<VarId>,
 ) -> HashSet<usize> {
     let fn_name = func.name.clone();
@@ -139,8 +138,6 @@ fn rewrite_to_loop(
         },
     );
     tco_owned_params.extend(owned_params.iter().copied());
-    // #1130: the exemption is a promise about THIS body — record its scope.
-    tco_rewritten_fns.insert(func.name);
 
     // Build the default value for the result variable
     let default_val = default_for_type(&ret_ty);
