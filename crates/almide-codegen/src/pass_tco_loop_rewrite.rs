@@ -49,7 +49,6 @@ fn rewrite_to_loop(
             param.borrow = almide_ir::ParamBorrow::Own;
         }
     }
-    TCO_BORROWED_PARAMS.with(|s| *s.borrow_mut() = bytes_borrowed_params.clone());
 
     // Allocate a result variable
     let result_var = var_table.alloc(
@@ -136,6 +135,7 @@ fn rewrite_to_loop(
             is_effect,
             dec_params: &dec_params,
             owned_params: &owned_params,
+            borrowed_params: &bytes_borrowed_params,
         },
     );
     tco_owned_params.extend(owned_params.iter().copied());
@@ -325,6 +325,10 @@ struct TailFrame<'a> {
     is_effect: bool,
     dec_params: &'a [VarId],
     owned_params: &'a HashSet<VarId>,
+    /// Param positions whose borrow is preserved across loop iterations
+    /// (currently: `Bytes` params) — a tail-call arg there keeps its
+    /// `Borrow` wrapper instead of being stripped to the owned form.
+    borrowed_params: &'a HashSet<usize>,
 }
 
 /// Rewrite an expression in tail position:
@@ -333,7 +337,7 @@ struct TailFrame<'a> {
 /// - Block: recurse into trailing expr
 /// - Anything else (base case): assign to result var, break
 fn rewrite_tail_expr(expr: IrExpr, f: &TailFrame<'_>) -> IrExpr {
-    let TailFrame { fn_name, params: _, temps: _, result_var, is_effect, dec_params, owned_params } = *f;
+    let TailFrame { fn_name, result_var, is_effect, dec_params, owned_params, .. } = *f;
     match expr.kind {
         // Self-recursive call in tail position -> reassign params and continue
         IrExprKind::Call { target: CallTarget::Named { name }, args, .. } if name == fn_name => {
@@ -533,7 +537,7 @@ fn movable_accumulators(
 }
 
 fn emit_tail_call_replacement(args: Vec<IrExpr>, f: &TailFrame<'_>) -> IrExpr {
-    let TailFrame { params, temps, dec_params, owned_params, .. } = *f;
+    let TailFrame { params, temps, dec_params, owned_params, borrowed_params, .. } = *f;
     let mut stmts: Vec<IrStmt> = Vec::new();
 
     // F5 (#527): an IDENTITY CARRY — argument i is the bare Var of param i —
@@ -550,8 +554,7 @@ fn emit_tail_call_replacement(args: Vec<IrExpr>, f: &TailFrame<'_>) -> IrExpr {
     // (e.g. Bytes borrow preserved across iterations).
     let args: Vec<Option<IrExpr>> = args.into_iter().enumerate().map(|(i, arg)| {
         if identity_carry[i] { return None; }
-        let keep = TCO_BORROWED_PARAMS.with(|s| s.borrow().contains(&i));
-        Some(if keep { arg } else { strip_borrow(arg) })
+        Some(if borrowed_params.contains(&i) { arg } else { strip_borrow(arg) })
     }).collect();
 
     let moved = movable_accumulators(&args, params, &identity_carry, owned_params);

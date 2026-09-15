@@ -268,6 +268,18 @@ The Wgsl arm is the four rows marked W. Class:
 | 30 | `RangeCountingVars` | `pass_range_counting.rs` | Rust | optimizer | a `let`-bound range read ONLY as `for-in` heads stays a bare `Range<i64>` instead of a materialized `Vec<i64>` (#1857); mirrors MIR's #1400 `range_counting_vars` admission rule and runs last so the set names the final IR | `ranges.rs` counting loop (#1400) — already has it |
 | 31 | `TopLetStorage` | `pass_top_let_storage.rs` | all | analysis | the unified top-let storage attribute for the walker (§4 Stage 1) | own globals plan (`build_globals`) |
 
+Rows 14, 16 and 17 read their ownership facts from ONE walk, `use_kind.rs`
+(#2186): every occurrence of every local, tagged with the position its parent
+puts it in (`Site`) and whether a closure, a fused chain or a `&mut` encloses
+it. `BorrowInsertion`'s "does this param need owning / `&mut`" is a predicate
+over those sites with a `SlotOracle` supplying the callee slot modes from the
+fixed-point snapshot; `CaptureClone`'s "which captures does the closure
+write" and `CloneInsertion`'s use counts and loop-binder verdicts are
+predicates over the same walk with the explicit-borrow oracle. The fixed
+point is a monotone ascent (`Ref` → `RefMut` → `Own`, every key the rounds
+will publish seeded optimistic) with no round cap: a slot moving down or a
+run past the lattice height is an ICE.
+
 ### C. Structural wasm leg — `crates/almide-wasm` (default `--target wasm`)
 
 Rewrites the emitter applies to the linked IR or the encoded body. None is an

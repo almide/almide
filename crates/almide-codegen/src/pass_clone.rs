@@ -12,7 +12,8 @@ use almide_base::{Span, Sym};
 use almide_lang::types::Ty;
 use super::pass::{NanoPass, PassResult, Target};
 use super::pass_clone_places::{insert_clones_index_access, insert_clones_map_access, insert_clones_member, map_insert_value_first};
-use super::pass_clone_loops::{insert_clones_for_in, insert_clones_while, take_borrowed_loop_vars};
+use super::pass_clone_loops::{insert_clones_for_in, insert_clones_while, LoopMarks};
+use super::use_kind::{ExplicitBorrows, Site, UseSites};
 
 #[path = "pass_clone_calls.rs"]
 mod calls;
@@ -47,19 +48,20 @@ impl NanoPass for CloneInsertionPass {
             tco_fns: program.codegen_annotations.tco_rewritten_fns.clone(),
         };
         let sets = ClassSets::split(&program.var_table, &top_let_vars, &syntactic.total, &marks);
-        rewrite_bodies(&mut program.functions, &mut program.top_lets, &syntactic, &sets, &marks);
+        let mut loops = LoopMarks::default();
+        rewrite_bodies(&mut program.functions, &mut program.top_lets, &syntactic, &sets, &marks, &mut loops);
 
         let IrProgram { modules, var_table, .. } = &mut program;
         for module in modules.iter_mut() {
             let module_top_lets: HashSet<VarId> = module.top_lets.iter().map(|tl| tl.var).collect();
             let module_syntactic = SyntacticCounts::of(&module.functions, &module.top_lets);
             let m_sets = ClassSets::split(var_table, &module_top_lets, &module_syntactic.total, &marks);
-            rewrite_bodies(&mut module.functions, &mut module.top_lets, &module_syntactic, &m_sets, &marks);
+            rewrite_bodies(&mut module.functions, &mut module.top_lets, &module_syntactic, &m_sets, &marks, &mut loops);
         }
         // Loop binders the bodies only borrowed (#1673): the walker binds them
         // `&T` off `xs.iter()`.
-        program.codegen_annotations.borrowed_loop_vars = take_borrowed_loop_vars();
-        program.codegen_annotations.consumed_loop_vars = super::pass_clone_loops::take_consumed_loop_vars();
+        program.codegen_annotations.borrowed_loop_vars = loops.borrowed;
+        program.codegen_annotations.consumed_loop_vars = loops.consumed;
         PassResult { program, changed: true }
     }
 }
@@ -88,8 +90,7 @@ impl SyntacticCounts {
     fn of(functions: &[IrFunction], top_lets: &[IrTopLet]) -> SyntacticCounts {
         let mut total = HashMap::new();
         let count = |body: &IrExpr, total: &mut HashMap<VarId, u32>| {
-            let mut counts = HashMap::new();
-            count_syntactic(body, &mut counts);
+            let counts = count_syntactic(body);
             for (id, n) in &counts {
                 *total.entry(*id).or_insert(0) += n;
             }
@@ -172,29 +173,40 @@ impl BodyScope {
 }
 
 /// Rewrite every body of one function group under its own [`BodyScope`].
-fn rewrite_bodies(functions: &mut [IrFunction], top_lets: &mut [IrTopLet], syntactic: &SyntacticCounts, sets: &ClassSets, marks: &CloneMarks) {
+fn rewrite_bodies(functions: &mut [IrFunction], top_lets: &mut [IrTopLet], syntactic: &SyntacticCounts, sets: &ClassSets, marks: &CloneMarks, loops: &mut LoopMarks) {
     for (func, mentioned) in functions.iter_mut().zip(&syntactic.fn_bodies) {
         let (always, eligible) = sets.for_fn(marks.tco_fns.contains(&func.name));
         let owned = func.params.iter().filter(|p| p.borrow == ParamBorrow::Own).map(|p| p.var).collect();
-        func.body = rewrite_body(std::mem::take(&mut func.body), mentioned, always, eligible, &syntactic.total, owned, &marks.tco_owned);
+        let body = Body { mentioned, always, eligible, total: &syntactic.total, tco_owned: &marks.tco_owned };
+        func.body = rewrite_body(std::mem::take(&mut func.body), &body, owned, loops);
     }
     for (tl, mentioned) in top_lets.iter_mut().zip(&syntactic.top_let_bodies) {
-        tl.value = rewrite_body(std::mem::take(&mut tl.value), mentioned, &sets.always, &sets.eligible, &syntactic.total, HashSet::new(), &marks.tco_owned);
+        let body = Body { mentioned, always: &sets.always, eligible: &sets.eligible, total: &syntactic.total, tco_owned: &marks.tco_owned };
+        tl.value = rewrite_body(std::mem::take(&mut tl.value), &body, HashSet::new(), loops);
     }
 }
 
-fn rewrite_body(body: IrExpr, mentioned: &HashMap<VarId, u32>, always: &HashSet<VarId>, eligible: &HashSet<VarId>, total: &HashMap<VarId, u32>, mut owned: HashSet<VarId>, tco_owned: &HashSet<VarId>) -> IrExpr {
-    owned.extend(almide_ir::free_vars::bound_vars(&body));
+/// The classification one body is rewritten under.
+struct Body<'a> {
+    mentioned: &'a HashMap<VarId, u32>,
+    always: &'a HashSet<VarId>,
+    eligible: &'a HashSet<VarId>,
+    total: &'a HashMap<VarId, u32>,
+    tco_owned: &'a HashSet<VarId>,
+}
+
+fn rewrite_body(expr: IrExpr, body: &Body, mut owned: HashSet<VarId>, loops: &mut LoopMarks) -> IrExpr {
+    owned.extend(almide_ir::free_vars::bound_vars(&expr));
     // TCO manages these moves itself and exempts them from our use counts.
-    owned.retain(|v| !tco_owned.contains(v));
-    let mut scope = BodyScope::narrow(mentioned, always, eligible, total);
+    owned.retain(|v| !body.tco_owned.contains(v));
+    let mut scope = BodyScope::narrow(body.mentioned, body.always, body.eligible, body.total);
     // #1230: any id the branch walk can deduct lives in `remaining`, whose
     // key set is exactly `scope.eligible` — so the branch-count memo only
     // needs to track that set. Counts for other ids are deduct no-ops.
-    let memo = BranchCounts::compute(&body, &scope.eligible);
+    let memo = BranchCounts::compute(&expr, &scope.eligible);
     // Nothing is fresh at function top level — see `CloneCtx::fresh`.
     let no_fresh: HashSet<VarId> = HashSet::new();
-    insert_clones_live(body, &mut CloneCtx {
+    insert_clones_live(expr, &mut CloneCtx {
         always: &scope.always,
         eligible: &scope.eligible,
         remaining: &mut scope.remaining,
@@ -202,48 +214,22 @@ fn rewrite_body(body: IrExpr, mentioned: &HashMap<VarId, u32>, always: &HashSet<
         memo: &memo,
         fresh: &no_fresh,
         owned: &owned,
+        loops,
     })
 }
 
-/// Counts every syntactic `Var` use by riding the exhaustive `IrVisitor` walk —
-/// so no node kind (incl. `IterChain`/`RcWrap`/`TailCall`, present here because
-/// StreamFusion/TCO run before this pass) can silently drop a subtree and
-/// under-count a var, which would desync the `remaining` last-use tracking.
-struct SyntacticCounter<'a> {
-    counts: &'a mut HashMap<VarId, u32>,
-}
-
-impl IrVisitor for SyntacticCounter<'_> {
-    fn visit_expr(&mut self, expr: &IrExpr) {
-        if let IrExprKind::Var { id } = &expr.kind {
-            *self.counts.entry(*id).or_insert(0) += 1;
-        }
-        walk_expr(self, expr); // exhaustive recursion into all children
-    }
-
-    fn visit_stmt(&mut self, stmt: &IrStmt) {
-        // An in-place mutation `a[i]=v` / `a.f=v` / `a[k]=v` reads-and-writes `a`,
-        // but the target is a bare `VarId` field — NOT a `Var` expr node — so the
-        // expr walk above never sees it. Count it explicitly: this makes the
-        // mutation a *use* of `a`, so when an alias `var b = a` precedes it, the
-        // bind is no longer `a`'s last use → the eligible-move path clones at the
-        // bind instead of moving, and the later in-place write operates on owned
-        // `a` (not a moved value → no E0382). Without this, shapes B/C/I above
-        // emit `let mut b = a;`/`a.clone(); f(a);` then mutate the moved `a`.
-        match &stmt.kind {
-            IrStmtKind::IndexAssign { target, .. }
-            | IrStmtKind::MapInsert { target, .. }
-            | IrStmtKind::FieldAssign { target, .. } => {
-                *self.counts.entry(*target).or_insert(0) += 1;
-            }
-            _ => {}
-        }
-        walk_stmt(self, stmt); // exhaustive recursion into the stmt's expr children
-    }
-}
-
-fn count_syntactic(expr: &IrExpr, counts: &mut HashMap<VarId, u32>) {
-    SyntacticCounter { counts }.visit_expr(expr);
+/// Every syntactic `Var` use, plus every in-place mutation target — the
+/// shared use-kind walk's count (`UseSites::counts`), so no node kind (incl.
+/// `IterChain`/`RcWrap`/`TailCall`, present here because StreamFusion/TCO run
+/// before this pass) can silently drop a subtree and under-count a var, which
+/// would desync the `remaining` last-use tracking. An in-place mutation
+/// `a[i]=v` / `a.f=v` / `a[k]=v` reads-and-writes `a` through a bare `VarId`
+/// target, not a `Var` node; counting it makes the mutation a *use* of `a`,
+/// so when an alias `var b = a` precedes it the bind is no longer `a`'s last
+/// use → the eligible-move path clones at the bind instead of moving, and
+/// the later in-place write operates on owned `a` (no E0382).
+fn count_syntactic(expr: &IrExpr) -> HashMap<VarId, u32> {
+    UseSites::of_expr(expr, Site::Result, &ExplicitBorrows).counts()
 }
 
 // ── Branch-count memo (#1230) ──────────────────────────────────────
@@ -286,9 +272,7 @@ impl BranchCounts {
         if let Some(c) = self.map.get(&std::ptr::from_ref(node)) {
             return Rc::clone(c);
         }
-        let mut c = HashMap::new();
-        count_syntactic(node, &mut c);
-        Rc::new(c)
+        Rc::new(count_syntactic(node))
     }
 
     /// Combined guard+body counts for one match arm (keyed by the body node),
@@ -297,11 +281,12 @@ impl BranchCounts {
         if let Some(c) = self.map.get(&std::ptr::from_ref(&arm.body)) {
             return Rc::clone(c);
         }
-        let mut c = HashMap::new();
+        let mut c = count_syntactic(&arm.body);
         if let Some(g) = &arm.guard {
-            count_syntactic(g, &mut c);
+            for (id, n) in count_syntactic(g) {
+                *c.entry(id).or_insert(0) += n;
+            }
         }
-        count_syntactic(&arm.body, &mut c);
         Rc::new(c)
     }
 }
@@ -465,6 +450,9 @@ pub(crate) struct CloneCtx<'a> {
     /// the next iteration binds a fresh value. Empty outside loops and
     /// inside lambda bodies (a closure may run many times per iteration).
     pub(crate) fresh: &'a HashSet<VarId>,
+    /// The loop binders this walk has classified so far (#1673) — handed to
+    /// the walker as `borrowed_loop_vars` / `consumed_loop_vars`.
+    pub(crate) loops: &'a mut LoopMarks,
 }
 
 fn make_clone(id: VarId, ty: Ty, span: Option<Span>) -> IrExpr {
@@ -600,7 +588,7 @@ fn insert_clones_match(subject: IrExpr, arms: Vec<IrMatchArm>, ctx: &mut CloneCt
         let owned: HashSet<_> = ctx.owned.iter().copied()
             .filter(|v| !borrowed.as_ref().is_some_and(|vars| vars.contains(v))).collect();
         let mut arm_ctx = CloneCtx { owned: &owned, always: ctx.always, eligible: ctx.eligible,
-            remaining: ctx.remaining, in_loop: ctx.in_loop, memo: ctx.memo, fresh: ctx.fresh };
+            remaining: ctx.remaining, in_loop: ctx.in_loop, memo: ctx.memo, fresh: ctx.fresh, loops: ctx.loops };
         let new_guard = arm.guard.map(|g| insert_clones_live(g, &mut arm_ctx));
         let new_body = insert_clones_live(arm.body, &mut arm_ctx);
         new_arms.push(IrMatchArm { pattern: arm.pattern, guard: new_guard, body: new_body });
@@ -684,7 +672,7 @@ pub(crate) fn insert_clones_live(mut expr: IrExpr, ctx: &mut CloneCtx) -> IrExpr
             // Captured values belong to the reusable closure. Only values
             // introduced inside this invocation may have fields moved out.
             let owned = almide_ir::free_vars::bound_vars(&e);
-            let mut lam_ctx = CloneCtx { always: ctx.always, eligible: ctx.eligible, remaining: ctx.remaining, in_loop: ctx.in_loop, memo: ctx.memo, fresh: &no_fresh, owned: &owned };
+            let mut lam_ctx = CloneCtx { always: ctx.always, eligible: ctx.eligible, remaining: ctx.remaining, in_loop: ctx.in_loop, memo: ctx.memo, fresh: &no_fresh, owned: &owned, loops: ctx.loops };
             return e.map_children(&mut |child| insert_clones_live(child, &mut lam_ctx));
         }
         // Default: recurse into every child through the exhaustive `map_children`

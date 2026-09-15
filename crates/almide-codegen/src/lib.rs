@@ -26,6 +26,7 @@ pub mod annotations;
 pub mod generated;
 pub mod pass;
 pub mod verify_names;
+pub mod use_kind;
 pub mod pass_borrow_inference;
 pub mod pass_box_deref;
 pub mod pass_builtin_lowering;

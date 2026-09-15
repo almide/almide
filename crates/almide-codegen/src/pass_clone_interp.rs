@@ -19,8 +19,8 @@
 
 use std::collections::HashSet;
 use almide_ir::*;
-use almide_ir::visit::{IrVisitor, walk_expr};
 use super::pass_clone::{CloneCtx, insert_clones_live};
+use super::use_kind::{ExplicitBorrows, Site, UseSites};
 
 /// The root variable of a place-expression part — a `Var`, a field/deref
 /// chain on one, or a `Borrow` of either — which `format_args!` borrows in
@@ -38,53 +38,17 @@ fn place_root(expr: &IrExpr) -> Option<VarId> {
     }
 }
 
-/// Finds an occurrence of `var` that reads it BY VALUE: a `Var` node that is
-/// not the object of a field/index access nor the operand of a borrow or
-/// deref. Such an occurrence renders as a move when it is the variable's
+/// Is there an occurrence of `var` that reads it BY VALUE: a `Var` node that
+/// is not the object of a field/index access nor the operand of a borrow or
+/// deref? Such an occurrence renders as a move when it is the variable's
 /// last use — the conflicting half of the E0505.
-struct ByValueUse {
-    var: VarId,
-    found: bool,
-}
-
-impl IrVisitor for ByValueUse {
-    fn visit_expr(&mut self, expr: &IrExpr) {
-        if self.found {
-            return;
-        }
-        match &expr.kind {
-            IrExprKind::Var { id } => self.found = *id == self.var,
-            // The object of an access, the operand of a borrow/deref: a read
-            // through the place, never a move of the variable itself.
-            IrExprKind::Member { object, .. }
-            | IrExprKind::TupleIndex { object, .. }
-            | IrExprKind::IndexAccess { object, .. }
-            | IrExprKind::MapAccess { object, .. }
-            | IrExprKind::Borrow { expr: object, .. }
-            | IrExprKind::Deref { expr: object }
-                if matches!(object.kind, IrExprKind::Var { .. }) =>
-            {
-                match &expr.kind {
-                    IrExprKind::IndexAccess { index: rest, .. } | IrExprKind::MapAccess { key: rest, .. } => self.visit_expr(rest),
-                    // Member / TupleIndex / Borrow / Deref: the only child is the
-                    // Var object the guard just judged a place read — nothing
-                    // left to walk.
-                    IrExprKind::Member { .. }
-                    | IrExprKind::TupleIndex { .. }
-                    | IrExprKind::Borrow { .. }
-                    | IrExprKind::Deref { .. } => {}
-                    _ => unreachable!("the guarded arm admits only place accesses"),
-                }
-            }
-            _ => walk_expr(self, expr),
-        }
-    }
-}
-
 fn moves_var(expr: &IrExpr, var: VarId) -> bool {
-    let mut scan = ByValueUse { var, found: false };
-    scan.visit_expr(expr);
-    scan.found
+    UseSites::of_expr(expr, Site::Operand, &ExplicitBorrows).of(var).any(|u| {
+        u.is_node() && !matches!(
+            u.site,
+            Site::Member | Site::TupleIndex | Site::Index | Site::MapKeyed | Site::Borrow { .. } | Site::Deref
+        )
+    })
 }
 
 fn part_expr(part: &IrStringPart) -> Option<&IrExpr> {
@@ -119,6 +83,7 @@ pub(crate) fn insert_clones_string_interp(parts: Vec<IrStringPart>, ctx: &mut Cl
                     memo: ctx.memo,
                     fresh: ctx.fresh,
                     owned: ctx.owned,
+                    loops: ctx.loops,
                 };
                 insert_clones_live(expr, &mut guard)
             };

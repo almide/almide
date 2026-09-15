@@ -1,7 +1,7 @@
 //! Proofs for reading projections without copying their containing values.
 use std::collections::HashSet;
 use almide_ir::*;
-use almide_ir::visit::{IrVisitor, walk_expr, walk_stmt};
+use super::use_kind::{ExplicitBorrows, Site, UseSites};
 
 pub(super) fn root(e: &IrExpr) -> Option<VarId> {
     match &e.kind {
@@ -16,42 +16,15 @@ fn mentions(e: &IrExpr, v: VarId) -> bool {
     almide_ir::free_vars::free_vars(e, &HashSet::new()).contains(&v)
 }
 
+/// Does every occurrence of `var` in `e` read it through a borrow the walker
+/// renders identically for a `&T` binding — a shared `Borrow`, a `Clone`, a
+/// field read? A bare occurrence, a write, anything under a `&mut`, and any
+/// use a closure or fused chain captures says no.
 fn reads_binding(e: &IrExpr, var: VarId) -> bool {
-    struct Scan { var: VarId, ok: bool }
-    impl IrVisitor for Scan {
-        fn visit_expr(&mut self, e: &IrExpr) {
-            if !self.ok { return; }
-            let direct = |x: &IrExpr| matches!(x.kind, IrExprKind::Var { id } if id == self.var);
-            match &e.kind {
-                IrExprKind::Borrow { expr, mutable: false, .. }
-                | IrExprKind::Clone { expr } if direct(expr) => return,
-                IrExprKind::Member { object, .. } if direct(object) => return,
-                IrExprKind::Borrow { mutable: true, .. }
-                | IrExprKind::Lambda { .. } | IrExprKind::IterChain { .. } if mentions(e, self.var) => {
-                    self.ok = false;
-                    return;
-                }
-                IrExprKind::Var { id } if *id == self.var => self.ok = false,
-                _ => {}
-            }
-            walk_expr(self, e);
-        }
-        fn visit_stmt(&mut self, s: &IrStmt) {
-            match &s.kind {
-                IrStmtKind::Assign { var, .. } if *var == self.var => self.ok = false,
-                IrStmtKind::FieldAssign { target, .. } | IrStmtKind::IndexAssign { target, .. }
-                | IrStmtKind::MapInsert { target, .. } | IrStmtKind::ListSwap { target, .. }
-                | IrStmtKind::ListReverse { target, .. } | IrStmtKind::ListRotateLeft { target, .. }
-                    if *target == self.var => self.ok = false,
-                IrStmtKind::ListCopySlice { dst, .. } if *dst == self.var => self.ok = false,
-                _ => {}
-            }
-            walk_stmt(self, s);
-        }
-    }
-    let mut scan = Scan { var, ok: true };
-    scan.visit_expr(e);
-    scan.ok
+    UseSites::of_expr(e, Site::Result, &ExplicitBorrows).of(var).all(|u| {
+        u.depth == 0 && !u.in_chain && !u.in_mut
+            && matches!(u.site, Site::Borrow { mutable: false } | Site::Clone | Site::Member)
+    })
 }
 
 pub(super) fn match_binders(subject: &IrExpr, arms: &[IrMatchArm]) -> Option<HashSet<VarId>> {
