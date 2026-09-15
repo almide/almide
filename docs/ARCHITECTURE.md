@@ -268,6 +268,7 @@ The Wgsl arm is the four rows marked W. Class:
 | 30 | `VarStorage` | `pass_var_storage.rs` | Rust | Rust by design | which non-Copy `var` locals a closure captures and so live in an `AlmideRcCow` (`var_storage`); was the walker's own program-setup scan (#2186) | RC-3 borrow/fresh classifier (`rc_ownership.rs`) |
 | 31 | `RangeCountingVars` | `pass_range_counting.rs` | Rust | optimizer | a `let`-bound range read ONLY as `for-in` heads stays a bare `Range<i64>` instead of a materialized `Vec<i64>` (#1857); mirrors MIR's #1400 `range_counting_vars` admission rule and runs last so the set names the final IR | `ranges.rs` counting loop (#1400) — already has it |
 | 32 | `TopLetStorage` | `pass_top_let_storage.rs` | all | analysis | the unified top-let storage attribute for the walker (§4 Stage 1) | own globals plan (`build_globals`) |
+| 33 | `BorrowLowering` | `pass_borrow_lowering.rs` | Rust | Rust by design | the last word on every `Borrow` / `Clone` / stored read of a by-reference param — drop the `&` a `&T` param already has, `.to_string()` / `.to_vec()` / `.clone()` an owned read, `.clone()` a spread base, borrow INTO a list (`almide_index_ref!`), the `_ref` field-lookup twin, `.as_str()` a `&String` loop binder, deref a `&T` param in an equality — and publishes `param_borrows`; the walker renders what it sees (#2186) | n/a (the wasm leg has no references) |
 
 Rows 14, 16 and 17 read their ownership facts from ONE walk, `use_kind.rs`
 (#2186): every occurrence of every local, tagged with the position its parent

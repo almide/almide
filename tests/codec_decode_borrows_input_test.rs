@@ -59,7 +59,7 @@ fn derived_decode_takes_its_input_by_reference() {
     assert!(rust.contains("pub fn User_decode(_v: &AlmideValue)"), "derived decode must borrow its AlmideValue input:\n{}", grep(&rust, "_decode("));
     assert!(rust.contains("pub fn Address_decode(_v: &AlmideValue)"), "nested record decode must borrow too:\n{}", grep(&rust, "_decode("));
     assert!(rust.contains("User_decode(&v)"), "the call site hands over a borrow, not a copy:\n{}", grep(&rust, "User_decode("));
-    assert!(rust.contains("Address_decode(almide_rt_value_field_ref_at(_v, \"address\", 2)?)"), "a nested field decodes a BORROW into the object — no copy of the field:\n{}", grep(&rust, "Address_decode("));
+    assert!(rust.contains("Address_decode((almide_rt_value_field_ref_at(_v, \"address\", 2))?)"), "a nested field decodes a BORROW into the object — no copy of the field:\n{}", grep(&rust, "Address_decode("));
 }
 
 #[test]
@@ -67,8 +67,8 @@ fn every_field_read_is_a_borrowed_lookup() {
     if !tool_available() { eprintln!("skipping: almide binary not available"); return; }
     let rust = emitted(SRC, "field-ref");
     let decode = rust.lines().skip_while(|l| !l.starts_with("pub fn User_decode(")).take_while(|l| !l.starts_with('}')).collect::<Vec<_>>().join("\n");
-    assert!(decode.contains("almide_rt_value_as_string(almide_rt_value_field_ref_at(_v, \"name\", 0)?)"), "a primitive field is read straight off the borrowed lookup:\n{decode}");
-    assert!(decode.contains("almide_rt___decode_list_string(almide_rt_value_field_ref_at(_v, \"tags\", 1)?)"), "a List[String] field hands the primitive list decoder a borrow:\n{decode}");
+    assert!(decode.contains("almide_rt_value_as_string((almide_rt_value_field_ref_at(_v, \"name\", 0))?)"), "a primitive field is read straight off the borrowed lookup:\n{decode}");
+    assert!(decode.contains("almide_rt___decode_list_string((almide_rt_value_field_ref_at(_v, \"tags\", 1))?)"), "a List[String] field hands the primitive list decoder a borrow:\n{decode}");
     assert!(!decode.contains("almide_rt_value_field(_v"), "an owned field lookup survived in the decode body — that is a copy nobody needs:\n{decode}");
 }
 
@@ -84,11 +84,11 @@ fn derived_field_reads_carry_their_declaration_slot() {
     let rust = emitted(SRC, "slot");
     let decode = rust.lines().skip_while(|l| !l.starts_with("pub fn User_decode(")).take_while(|l| !l.starts_with('}')).collect::<Vec<_>>().join("\n");
     for (key, slot) in [("name", 0), ("tags", 1), ("address", 2), ("homes", 3)] {
-        assert!(decode.contains(&format!("almide_rt_value_field_ref_at(_v, \"{key}\", {slot})?")), "field `{key}` must carry slot {slot}:\n{decode}");
+        assert!(decode.contains(&format!("(almide_rt_value_field_ref_at(_v, \"{key}\", {slot}))?")), "field `{key}` must carry slot {slot}:\n{decode}");
     }
     assert!(!decode.contains("almide_rt_value_field_ref(_v"), "a derived field read without its slot hint:\n{decode}");
     let address = rust.lines().skip_while(|l| !l.starts_with("pub fn Address_decode(")).take_while(|l| !l.starts_with('}')).collect::<Vec<_>>().join("\n");
-    assert!(address.contains("almide_rt_value_field_ref_at(_v, \"city\", 0)?"), "the nested record's own decode is hinted too:\n{address}");
+    assert!(address.contains("(almide_rt_value_field_ref_at(_v, \"city\", 0))?"), "the nested record's own decode is hinted too:\n{address}");
 
     // A hand-written lookup on a Value stays on the plain path — the hint is
     // the derive's knowledge of the declaration, not a property of `value.field`.
@@ -108,7 +108,7 @@ fn derived_field_reads_carry_their_declaration_slot() {
 fn list_and_option_drivers_take_the_by_reference_twin() {
     if !tool_available() { eprintln!("skipping: almide binary not available"); return; }
     let rust = emitted(SRC, "drivers");
-    assert!(rust.contains("almide_rt_value_decode_list_ref(almide_rt_value_field_ref_at(_v, \"homes\", 3)?, Address_decode)"),
+    assert!(rust.contains("almide_rt_value_decode_list_ref((almide_rt_value_field_ref_at(_v, \"homes\", 3))?, Address_decode)"),
         "a List[Record] field must route to the `&AlmideValue` list driver with the by-ref element decoder:\n{}", grep(&rust, "decode_list"));
     assert!(!rust.contains("almide_rt_value_decode_list(&"), "the by-value list driver must never receive a borrow:\n{}", grep(&rust, "decode_list"));
     assert!(rust.contains("__decode_option_Address(_v: &AlmideValue, _key: String)"), "the derived option worker borrows its AlmideValue too:\n{}", grep(&rust, "__decode_option_Address"));
