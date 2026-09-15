@@ -64,7 +64,6 @@ fn shapes(t: &TypeSpec) -> Vec<Shape> {
     let r = t.read;
     let ty = t.ty;
     let tag = t.tag;
-    let ident = |s: &str| s.to_string();
     let read_result: fn(&TypeSpec, &str) -> String = |t, e| (t.read)(e);
     let box_result: fn(&TypeSpec, &str) -> String = |t, e| (t.read)(&format!("{e}.v"));
     let list_result: fn(&TypeSpec, &str) -> String = |_, e| format!("int.to_string(list.len({e}))");
@@ -84,7 +83,6 @@ fn shapes(t: &TypeSpec) -> Vec<Shape> {
         Shape { name: "twice".into(), def: format!("fn u_twice_{tag}(p: {ty}) -> String = {} + u_read_{tag}(p)", r("p")), extra: "", show: ident_show, needs_var: false },
         Shape { name: "pair".into(), def: format!("fn u_pair_{tag}(p: {ty}, q: {ty}) -> String = {} + {}", r("p"), r("q")), extra: "", show: ident_show, needs_var: false },
     ];
-    let _ = ident;
     if t.concat {
         out.push(Shape { name: "cat".into(), def: format!("fn u_cat_{tag}(p: {ty}) -> {ty} = p + p"), extra: "", show: read_result, needs_var: false });
     }
@@ -161,10 +159,11 @@ fn run(almide: &str, args: &[&str], src: &Path) -> (bool, String, String) {
     (out.status.success(), String::from_utf8_lossy(&out.stdout).into_owned(), String::from_utf8_lossy(&out.stderr).into_owned())
 }
 
-#[test]
-fn every_use_and_call_shape_builds_natively_and_agrees_with_wasm() {
-    let almide = env!("CARGO_BIN_EXE_almide");
-    let dir = std::env::temp_dir().join(format!("almide-borrow-oracle-{}", std::process::id()));
+/// Run the oracle with `almide` as the compiler: every failure it finds, as
+/// one message each naming the type and the arm (check / native build /
+/// wasm leg / divergence). Empty means the property held for every type.
+fn oracle(almide: &str) -> Vec<String> {
+    let dir = std::env::temp_dir().join(format!("almide-borrow-oracle-{}-{}", std::process::id(), Path::new(almide).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()));
     std::fs::create_dir_all(&dir).unwrap();
     let mut failures = Vec::new();
     for t in TYPES {
@@ -188,7 +187,11 @@ fn every_use_and_call_shape_builds_natively_and_agrees_with_wasm() {
             continue;
         }
         if native_out != wasm_out {
-            let diff: Vec<String> = native_out.lines().zip(wasm_out.lines()).filter(|(a, b)| a != b).map(|(a, b)| format!("  native: {a}\n  wasm:   {b}")).collect();
+            let mut diff: Vec<String> = native_out.lines().zip(wasm_out.lines()).filter(|(a, b)| a != b).map(|(a, b)| format!("  native: {a}\n  wasm:   {b}")).collect();
+            let (n, w) = (native_out.lines().count(), wasm_out.lines().count());
+            if n != w {
+                diff.push(format!("  native printed {n} line(s), wasm {w}"));
+            }
             failures.push(format!("[{}] native and wasm disagree — a clone or move changed a value:\n{}", t.tag, diff.join("\n")));
         }
         let lines = native_out.lines().count();
@@ -199,5 +202,64 @@ fn every_use_and_call_shape_builds_natively_and_agrees_with_wasm() {
     } else {
         eprintln!("generated programs kept under {}", dir.display());
     }
+    failures
+}
+
+#[test]
+fn every_use_and_call_shape_builds_natively_and_agrees_with_wasm() {
+    let failures = oracle(env!("CARGO_BIN_EXE_almide"));
     assert!(failures.is_empty(), "{}", failures.join("\n\n"));
+}
+
+/// A stand-in compiler: a script that answers `check` / `run` /
+/// `run --target wasm` the way `body` says, so the oracle's arms can be
+/// shown to FIRE. The real compiler above is the positive control; without
+/// these the oracle could be comparing a leg with itself and nobody would
+/// know (the tautology the shuffle gate's negatives guard against too).
+fn stand_in(name: &str, body: &str) -> String {
+    let path = std::env::temp_dir().join(format!("almide-oracle-standin-{}-{name}", std::process::id()));
+    std::fs::write(&path, format!("#!/usr/bin/env bash\n{body}\n")).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    path.to_string_lossy().into_owned()
+}
+
+#[test]
+#[cfg(unix)]
+fn the_oracle_fires_on_a_divergent_compiler_and_on_an_unbuildable_one() {
+    // Seventy identical witnesses on both legs, except the wasm leg's last
+    // line: the divergence arm must name it.
+    let drifts = stand_in("drifts", r#"
+case "$*" in
+  check*) exit 0 ;;
+  *--target\ wasm*) for i in $(seq 1 69); do echo "w$i"; done; echo "wasm-only"; exit 0 ;;
+  *) for i in $(seq 1 69); do echo "w$i"; done; echo "native-only"; exit 0 ;;
+esac"#);
+    let f = oracle(&drifts);
+    assert_eq!(f.len(), TYPES.len(), "one divergence per type: {f:?}");
+    assert!(f.iter().all(|m| m.contains("native and wasm disagree") && m.contains("native-only") && m.contains("wasm-only")), "{f:?}");
+
+    // A compiler whose native build rustc refuses: the build arm must fire
+    // with the rustc line, before any leg is compared.
+    let refuses = stand_in("refuses", r#"
+case "$*" in
+  check*) exit 0 ;;
+  *--target\ wasm*) echo "unreachable"; exit 0 ;;
+  *) echo "error[E0382]: borrow of moved value: \`p\`" >&2; exit 1 ;;
+esac"#);
+    let f = oracle(&refuses);
+    assert_eq!(f.len(), TYPES.len(), "one build failure per type: {f:?}");
+    assert!(f.iter().all(|m| m.contains("the native build failed") && m.contains("E0382")), "{f:?}");
+
+    // And a compiler that agrees with itself is not a failure: the positive
+    // control of the harness itself, independent of the real compiler.
+    let steady = stand_in("steady", r#"
+case "$*" in
+  check*) exit 0 ;;
+  *) for i in $(seq 1 70); do echo "w$i"; done; exit 0 ;;
+esac"#);
+    assert!(oracle(&steady).is_empty());
 }
