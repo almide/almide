@@ -180,14 +180,15 @@ walker sees only typed IR nodes — it never checks what target it renders for.
    allocates exactly the (allocs, deallocs) pair pinned per program in
    `tests/golden/native-borrow-oracle-alloc.txt`: a clone where a borrow
    would do changes neither stdout nor the build, only that count (#2228).
-   The verdicts themselves are certified on every native build that asks
-   (`ALMIDE_CERTIFY_OWNERSHIP=report|fail`,
+   The verdicts themselves are certified on every DEBUG native build, and on
+   a release build that asks (`ALMIDE_CERTIFY_OWNERSHIP=report|fail|off`,
    `crates/almide-codegen/src/certify_ownership.rs`, #2231): the final IR is
    re-walked and each param's borrow mode and each `Clone` is checked against
    what the occurrences actually do — a borrowed param consumed, an owned
    value cloned at its last use, an owned param nothing needs owned. The
-   corpus's violations are a shrink-only ledger
-   (`proofs/ownership-certifier-baseline.txt`, `scripts/check-ownership-certifier.sh`).
+   corpus ledger (`proofs/ownership-certifier-baseline.txt`,
+   `scripts/check-ownership-certifier.sh`) is shrink-only and EMPTY: a
+   violation is a defect, and the debug build refuses to emit it.
 
 ## WASM Trust-Spine (almide-mir)
 
