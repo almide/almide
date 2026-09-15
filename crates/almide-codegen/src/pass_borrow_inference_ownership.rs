@@ -259,10 +259,12 @@ fn param_borrow(param: &IrParam, uses: &UseSites, scope: &Scope, body: &IrExpr) 
     // pattern's fall-through re-reads the subject inside the arm), or when a
     // direct `&v` argument of the same call keeps the var borrowed through
     // it (`map.fold(&base, base.clone(), λ)`: the E0505 guard clones).
-    // `UseSites::keeps_live` and `Use::guard_forced` are the same facts the
-    // clone pass acts on.
+    // A consuming use inside a loop body is cloned on every iteration (a
+    // param is never one of the loop's own fresh binders). `UseSites::keeps_live`,
+    // `Use::guard_forced` and `Use::in_loop` are the same facts the clone
+    // pass acts on.
     let all: Vec<&Use> = uses.of(param.var).collect();
-    let cloned_anyway = |u: &Use| u.guard_forced
+    let cloned_anyway = |u: &Use| u.guard_forced || u.in_loop
         || all.iter().any(|w| !std::ptr::eq(*w, u) && after(u, w) && uses.keeps_live(u, w));
     if all.iter().any(|u| consumes(u) && !read_by_ref(u) && !cloned_anyway(u)) {
         return ParamBorrow::Own;
