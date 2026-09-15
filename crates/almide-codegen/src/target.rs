@@ -42,6 +42,7 @@ use super::pass_region_window::RegionWindowPass;
 use super::pass_list_pattern::ListPatternLoweringPass;
 use super::pass_unify_var_tables::UnifyVarTablesPass;
 use super::pass_top_let_storage::TopLetStoragePass;
+use super::pass_var_storage::VarStoragePass;
 use super::pass_ir_link_flatten::IrLinkFlattenPass;
 use super::template::TemplateSet;
 
@@ -177,6 +178,11 @@ fn build_pipeline(target: Target) -> Pipeline {
                 // after every Borrow-shaping pass, so it sees final call
                 // and borrow forms.
                 .add(SharedCellBorrowPass)
+                // VarStorage (#2186): which non-Copy `var` locals a closure
+                // captures and so live in an `AlmideRcCow`. After every pass
+                // that adds or renames a capture (CaptureClone's `__cap_*`
+                // binds, the flatten) — the walker only reads the verdict.
+                .add(VarStoragePass)
                 // #1857: `let`-bound ranges read ONLY as for-in heads stay a
                 // bare `Range<i64>` (the wasm leg's #1400 counting loop, for
                 // the v3 fallback). Last, so the set names the final IR.

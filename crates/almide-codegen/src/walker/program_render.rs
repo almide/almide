@@ -58,8 +58,8 @@ fn collect_repr_named_types(program: &IrProgram) -> std::collections::HashSet<al
 /// layered onto the caller's base `ctx.ann`: which user types cannot
 /// derive PartialEq (contain Matrix, Fn, or a field whose type itself
 /// blocks equality — considering type decls from every module, since user
-/// programs reference types defined in other modules), phantom-param
-/// structs, and function-local var storage classification.
+/// programs reference types defined in other modules) and phantom-param
+/// structs — facts about the type declarations' SHAPE, not about ownership.
 fn build_program_ann(ctx: &RenderContext, program: &IrProgram) -> CodegenAnnotations {
     // One deliberate deep clone, once per program render (the per-function
     // sharing happens after this, via the Rc in RenderContext).
@@ -77,13 +77,8 @@ fn build_program_ann(ctx: &RenderContext, program: &IrProgram) -> CodegenAnnotat
     // attribute computed by TopLetStoragePass, and the agreement verifier
     // that soaked the flip (v0.27.2) retired with the predicates it
     // compared. One rule, one place.
-    // Classify function-local `var` bindings:
-    //   LocalMut (let mut T)  — not captured by closures, no AlmideRcCow overhead
-    //   AlmideRcCow                 — captured by a lambda, needs COW semantics
-    //
-    // Scan IR Bind statements for `var` of non-Copy types, then check if
-    // any lambda in the same function captures that var.
-    classify_local_var_storage(program, &mut ann);
+    // Function-local `var` storage (`let mut T` vs `AlmideRcCow<T>`) is
+    // `VarStoragePass`'s verdict, already in `ann.var_storage` (#2186).
     ann
 }
 
@@ -295,136 +290,6 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
 // (each already lived inside its own `{ }` block or loop), taking the same
 // state (`program`/`ann` or `ctx`/`parts`) the phase already threaded through.
 // No behavior change.
-
-/// Classify function-local `var` bindings:
-///   LocalMut (let mut T)  — not captured by closures, no AlmideRcCow overhead
-///   AlmideRcCow                 — captured by a lambda, needs COW semantics
-///
-/// Scan IR Bind statements for `var` of non-Copy types, then check if
-/// any lambda in the same function captures that var.
-/// Var/params that must NEVER get AlmideRcCow storage: mutable top-lets (module
-/// globals, handled by the `ModuleRc`/`ModuleCell` path) and every fn
-/// param (borrow inference owns those). Extracted from
-/// `classify_local_var_storage` (cog>30 decomposition, pattern 2:
-/// sequential independent phases).
-/// Insert every mutable top-let's VarId into `exclude` (module globals,
-/// handled by the `ModuleRc`/`ModuleCell` path).
-fn exclude_mutable_top_lets(program: &IrProgram, exclude: &mut std::collections::HashSet<u32>) {
-    for tl in &program.top_lets {
-        if tl.mutable { exclude.insert(tl.var.0); }
-    }
-    for module in &program.modules {
-        for tl in &module.top_lets {
-            if tl.mutable { exclude.insert(tl.var.0); }
-        }
-    }
-}
-
-/// Insert every fn param's VarId into `exclude` (borrow inference owns those).
-fn exclude_fn_params(program: &IrProgram, exclude: &mut std::collections::HashSet<u32>) {
-    for func in &program.functions {
-        for p in &func.params { exclude.insert(p.var.0); }
-    }
-    for module in &program.modules {
-        for func in &module.functions {
-            for p in &func.params { exclude.insert(p.var.0); }
-        }
-    }
-}
-
-fn collect_var_storage_exclusions(program: &IrProgram) -> std::collections::HashSet<u32> {
-    let mut exclude: std::collections::HashSet<u32> = std::collections::HashSet::new();
-    exclude_mutable_top_lets(program, &mut exclude);
-    exclude_fn_params(program, &mut exclude);
-    exclude
-}
-
-/// Phase 1: Collect all non-Copy `var` bindings.
-fn collect_non_copy_var_binds(program: &IrProgram) -> std::collections::HashSet<u32> {
-    struct VarBindCollector { vars: std::collections::HashSet<u32> }
-    impl almide_ir::visit::IrVisitor for VarBindCollector {
-        fn visit_stmt(&mut self, stmt: &IrStmt) {
-            if let IrStmtKind::Bind { var, mutability: almide_ir::Mutability::Var, ty, .. } = &stmt.kind {
-                // §4 stage 2c (#531): derived from THE copy-ness
-                // classifier (projection table in top_let_storage).
-                if !almide_ir::top_let_storage::rccow_copyish(ty) {
-                    self.vars.insert(var.0);
-                }
-            }
-            almide_ir::visit::walk_stmt(self, stmt);
-        }
-        fn visit_expr(&mut self, expr: &IrExpr) {
-            almide_ir::visit::walk_expr(self, expr);
-        }
-    }
-    let mut collector = VarBindCollector { vars: std::collections::HashSet::new() };
-    use almide_ir::visit::IrVisitor;
-    for func in &program.functions {
-        collector.visit_expr(&func.body);
-    }
-    for module in &program.modules {
-        for func in &module.functions {
-            collector.visit_expr(&func.body);
-        }
-    }
-    collector.vars
-}
-
-/// Phase 2: Find vars captured by any lambda — via the single shared
-/// free-variable analysis (`almide_ir::free_vars`), the same one the WASM
-/// closure path uses. A lambda's captures are the free vars of its body
-/// relative to its params; the union over every lambda is the full captured
-/// set. `free_vars` tracks all binders (block lets incl. destructure, match
-/// arms, for-in vars, nested lambdas), so this is strictly more accurate than
-/// the old hand-rolled lambda-depth walker. (Closure v2, P4: one capture
-/// analysis for both targets.)
-fn collect_lambda_captured_vars(program: &IrProgram) -> std::collections::HashSet<u32> {
-    struct CaptureUnion { captured: std::collections::HashSet<u32> }
-    impl almide_ir::visit::IrVisitor for CaptureUnion {
-        fn visit_expr(&mut self, expr: &IrExpr) {
-            if let IrExprKind::Lambda { params, body, .. } = &expr.kind {
-                let param_set: std::collections::HashSet<VarId> =
-                    params.iter().map(|(v, _)| *v).collect();
-                for v in almide_ir::free_vars::free_vars(body, &param_set) {
-                    self.captured.insert(v.0);
-                }
-            }
-            almide_ir::visit::walk_expr(self, expr);
-        }
-    }
-    use almide_ir::visit::IrVisitor;
-    let mut cap = CaptureUnion { captured: std::collections::HashSet::new() };
-    for func in &program.functions { cap.visit_expr(&func.body); }
-    for module in &program.modules {
-        for func in &module.functions { cap.visit_expr(&func.body); }
-    }
-    cap.captured
-}
-
-fn classify_local_var_storage(program: &IrProgram, ann: &mut CodegenAnnotations) {
-    use almide_ir::annotations::VarStorage;
-    let exclude = collect_var_storage_exclusions(program);
-    let non_copy_var_binds = collect_non_copy_var_binds(program);
-    let captured = collect_lambda_captured_vars(program);
-
-    // Phase 3: Only vars captured by lambdas get AlmideRcCow; rest are LocalMut (let mut)
-    for var_id in non_copy_var_binds {
-        if exclude.contains(&var_id) { continue; }
-        // Captured mutable vars that became shared cells (`Rc<Cell>` for Copy via
-        // P3, `AlmideSharedMut` for non-Copy via P6) are driven by the shared-mut path,
-        // NOT AlmideRcCow — AlmideRcCow's copy-on-write would lose a mutation made through the
-        // closure. (Closure v2 P6.)
-        if ann.is_shared_mut(&VarId(var_id)) { continue; }
-        if captured.contains(&var_id) {
-            ann.var_storage.insert(VarId(var_id), VarStorage::RcCow);
-        }
-        // LocalMut: no entry in var_storage → walker emits plain `let mut T`
-    }
-    // Note: captured Copy-type mutable vars (Int/Float/Bool) are classified as
-    // `shared_mut_vars` (→ `Rc<Cell<T>>`) by CaptureClonePass, which runs before
-    // it must decide whether to clone-wrap the (now non-Copy) capture. Those
-    // flow in via `program.codegen_annotations` → `ctx.ann`. (Closure v2, P3.)
-}
 
 /// Anonymous record struct definitions (only if anon_records is populated).
 /// SORTED iteration: anon_records is a HashMap, and emitting in its raw
