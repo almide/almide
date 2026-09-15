@@ -108,7 +108,6 @@ fn emit_ast_output(program: &almide::ast::Program) {
 /// verbatim.
 fn emit_codegen_output(ir_program: &mut Option<almide::ir::IrProgram>, target: &str, repr_c: bool, trace_map: bool, src_file: &str) {
     let ir = ir_program.as_mut().expect("IR required for codegen");
-    almide::ir_link::ir_link(ir);
     let t = match target {
         "rust" | "rs" => codegen::pass::Target::Rust,
         "wgsl" => codegen::pass::Target::Wgsl,
@@ -195,9 +194,14 @@ pub fn cmd_emit(args: EmitArgs) {
         }
     }
 
-    // Monomorphize row-polymorphic functions
+    // The SAME post-typecheck stages `almide build` / `almide run` apply
+    // (`almide-driver` owns the order): what this command prints is the
+    // source the build compiles. It used to monomorphize and link only —
+    // no optimizer, no top-let reclassification — so `--target rust` showed
+    // a program the product never built (no branch-lift helpers, no DCE,
+    // no folding), and a byte-diff over its output could not judge them.
     if let Some(ref mut ir) = ir_program {
-        almide::mono::monomorphize(ir);
+        almide_driver::link_ir(ir);
     }
 
     if emit_dialect {
