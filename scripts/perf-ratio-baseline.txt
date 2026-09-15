@@ -67,16 +67,13 @@ treealloc 0.610
 # leaves the +40% ceiling at 0.84 until the first runner measurement
 # replaces it — same rule treealloc's number followed.
 fannkuchredux 0.600
-# Ablation deltas (#1466): ablated-native / optimized-native median per
-# anchored bench (ALMIDE_DISABLE_OPT=1 skips fold/DCE/propagate). Anchored at
-# the measured ~1.00: on the rustc-backed native leg these passes are
-# SUBSUMED by LLVM, which runs the same folds downstream — the recorded
-# finding, published in docs/project/BENCHMARKS.md. Floor 0.90 (the optimizer
-# must never COST), ceiling +budget (a new earning re-anchors on purpose).
-ablation/fasta 1.000
-ablation/fft 1.000
-ablation/nbody 1.000
-ablation/spectralnorm 1.000
+# Ablation deltas (#1466, retired #2234): the four `ablation/<bench>` rows for
+# the anchored benches (ALMIDE_DISABLE_OPT=1 skips fold/DCE/propagate) were
+# anchored at "~1.00, SUBSUMED by LLVM". On 2026-09-15 the ablated native
+# binary proved BYTE-IDENTICAL to the optimized one for all 15 suite benches:
+# the delta was 1.0 by construction and every reading away from it was runner
+# noise. The rows are gone; the script now WAKES UP (fails, asking for a row)
+# the first time the knob reaches a bench's native binary.
 # Victory ablations (#1330): ALMIDE_REGION_OFF=1 native / optimized native,
 # same source, same machine. M4 Pro: binarytrees 3.6, treealloc 3.7. The
 # delta is machine-dependent in size (the ablated leg pays the machine's

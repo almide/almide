@@ -195,21 +195,17 @@ for knob in $(for v in $VICTORY; do echo "${v##*:}"; done | sort -u); do
     --label "ratchet-$knob" --out "$vic_dir/$knob.json"
 done
 
-# ABLATION (#1466): ablated/optimized per anchored bench. Until 2026-09-15 the
-# ablated binaries were timed in a SECOND bench.py invocation minutes after the
-# first, so the delta divided medians taken under different runner load — a
-# 0.87 fft reading on the merge-queue run of #2226 turned to 0.99 on the push of
-# the same commit forty minutes later. The ablated twin is now a variant of the
-# same run (`<bench>/native:ablated`), interleaved run by run with its optimized
-# binary, so what the delta measures is the optimizer and not the runner's
-# mood. The gated number is the DELTA ablated/optimized per bench. MEASURED
-# FINDING at introduction (M4 Pro + CI runner agree): the deltas sit at ~1.00
-# on every anchored bench — on the rustc-backed native leg these passes are
-# SUBSUMED by LLVM, which runs the same folds downstream. The gate therefore
-# holds the honest band: ablation must never SLOW the build's output past noise
-# (floor — the optimizer must not COST), and a delta leaving the band upward is
-# a new real earning that gets re-anchored on purpose, exactly like the main
-# rows.
+# ABLATION (#1466 → #2234): the optimizer-ablated native binary is built
+# alongside every anchored bench (`--ablate ALMIDE_DISABLE_OPT` above). On
+# 2026-09-15 every one of the 15 suite benches came out BYTE-IDENTICAL with
+# and without the knob — the IR optimizer's perf passes change the emitted
+# Rust on some programs (nbody: 53 lines) and rustc/LLVM compiles both
+# spellings to one machine code — so the four `ablation/<bench>` ratio rows
+# this script gated since #1466 had measured the runner timing one file
+# against itself, and were retired. What remains is the WAKE-UP rule below:
+# a bench whose ablated binary DIFFERS is a program the optimizer now reaches
+# on native, and the ratio must be anchored on purpose before the gate is
+# green again — the gate has a measurand exactly when one exists.
 
 python3 - "$out" "$BASELINE_FILE" "$BUDGET_PCT" "$PAIRS" "$MIN_SECONDS" "$IDIOM_CEILING" "$REPORTED" "$VICTORY" "$VICTORY_ABLATION_FLOOR" "$vic_dir" <<'PY'
 import json, os, sys
@@ -337,24 +333,24 @@ print(f"perf-ratio: {'listbuild-idiom':16s} {penalty:.3f}x the append loop "
 # the measurement supports — the optimizer must never COST more than noise;
 # the +budget ceiling flags a NEW earning so it gets re-anchored on purpose.
 for bench in sorted(pairs):
+    identical = data[bench].get("ablated_identical")
+    key = f"ablation/{bench}"
+    base = baseline.get(key)
     o = data[bench]["variants"][f"{bench}/native"]["median"]
     a = data[bench]["variants"][f"{bench}/native:ablated"]["median"]
     delta = a / o
-    key = f"ablation/{bench}"
-    base = baseline.get(key)
+    if identical and base is None:
+        print(f"perf-ratio: {key:16s} optimizer no-op — the ablated native binary is byte-identical to the optimized one (timed {delta:.3f}, not gated)")
+        continue
+    if identical and base is not None:
+        sys.exit(f"::error::perf-ratio: `{key}` has a baseline row but the ablated binary is byte-identical "
+                 "to the optimized one — the row gates nothing; remove it (#2234).")
     if base is None:
-        sys.exit(f"::error::perf-ratio: baseline has no `{key}` row — the ablation leg was "
-                 "added without anchoring it; add the line on purpose.")
+        sys.exit(f"::error::perf-ratio: the optimizer now REACHES {bench}'s native binary (ablated != optimized, "
+                 f"delta {delta:.3f}) and `{key}` has no baseline row — anchor it on purpose in this change (#2234).")
     ceiling = base * (1 + budget / 100)
     floor = 0.90
     verdict = "ok"
-    if data[bench].get("ablated_identical"):
-        # The knob changed nothing in this program: the two binaries are one
-        # file, and a "delta" between them is the runner's noise and nothing
-        # else (fft and spectralnorm on 2026-09-15). Say so, and hold 1.0.
-        print(f"perf-ratio: {key:16s} 1.000 by construction — the ablated binary is byte-identical "
-              f"to the optimized one; the optimizer is a no-op on this program (timed {delta:.3f})")
-        continue
     if delta < floor:
         verdict = f"UNDER floor {floor:.2f} — the optimizer is COSTING runtime; find the pass and fix or retire it"
         failed = True
