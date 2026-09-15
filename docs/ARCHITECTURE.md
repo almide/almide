@@ -171,7 +171,11 @@ walker sees only typed IR nodes — it never checks what target it renders for.
    storage class and renders every node by its kind alone. It runs no
    analysis walk, keeps no per-function ownership set, and never decides on
    the text it just rendered — `scripts/check-walker-reads-annotations.sh`
-   holds that line.
+   holds that line. The ownership verdicts themselves are held by a
+   property, not only by fixtures: `tests/native_borrow_oracle_test.rs`
+   generates, per borrow-eligible type, every use a body can make of a
+   param crossed with every call-site shape, and asserts the program
+   checks, builds natively and prints what the wasm leg prints.
 
 ## WASM Trust-Spine (almide-mir)
 
