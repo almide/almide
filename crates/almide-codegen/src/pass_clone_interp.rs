@@ -71,16 +71,15 @@ pub(crate) fn insert_clones_string_interp(parts: Vec<IrStringPart>, ctx: &mut Cl
         .collect();
     let merged: HashSet<VarId> = ctx.always.union(&conflicted).copied().collect();
     let parts = parts.into_iter().map(|p| match p {
-        // A bare `String` variable part is a PLACE part: `format_args!`
-        // borrows it for the call, so it is neither moved nor needs a clone
-        // — `"-- ${s} --"` rendered `s.clone()` for a value the macro only
+        // A bare variable part is a PLACE part: the arm formats it by
+        // reference (`format_args!` borrows a `String`, `almide_repr(&x)`
+        // borrows the rest), so it is neither moved nor needs a clone —
+        // `"-- ${s} --"` rendered `s.clone()` for a value the macro only
         // reads (#2231). The occurrence still counts toward the var's
-        // remaining uses. An `always` var (a static, a COW local) keeps its
-        // clone; a conflicted root is handled by the guard below.
-        IrStringPart::Expr { expr } if matches!(expr.kind, IrExprKind::Var { .. })
-            && matches!(expr.ty, almide_lang::types::Ty::String)
-            && matches!(&expr.kind, IrExprKind::Var { id } if ctx.eligible.contains(id) && !merged.contains(id)) =>
-        {
+        // remaining uses. A conflicting VALUE part (a sibling that moves the
+        // root) is what the guard below clones, so the place part stays bare
+        // even then. An `always` var (a static, a COW local) keeps its clone.
+        IrStringPart::Expr { expr } if matches!(&expr.kind, IrExprKind::Var { id } if ctx.eligible.contains(id)) => {
             if let IrExprKind::Var { id } = &expr.kind
                 && let Some(r) = ctx.remaining.get_mut(id)
             {
