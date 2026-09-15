@@ -27,6 +27,9 @@ impl NanoPass for TopLetStoragePass {
 
     fn targets(&self) -> Option<Vec<Target>> { None } // both targets
 
+    /// VarIds final, modules flattened.
+    fn depends_on(&self) -> Vec<&'static str> { vec!["IrLinkFlatten", "SharedCellBorrow", "RangeCountingVars"] }
+
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         let mut inputs: Vec<(bool, TopLetKind, VarId, bool)> = Vec::new();
         for tl in &program.top_lets {

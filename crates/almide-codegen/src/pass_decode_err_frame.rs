@@ -50,7 +50,8 @@ pub struct DecodeErrFramePass;
 impl NanoPass for DecodeErrFramePass {
     fn name(&self) -> &str { "DecodeErrFrame" }
     fn targets(&self) -> Option<Vec<Target>> { Some(vec![Target::Rust]) }
-    fn depends_on(&self) -> Vec<&'static str> { vec!["BuiltinLowering"] }
+
+    fn depends_on(&self) -> Vec<&'static str> { vec!["BuiltinLowering", "DecodeSlotHint"] }
     fn run_before(&self) -> Vec<&'static str> { vec!["NormalizeRuntimeCalls"] }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {

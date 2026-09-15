@@ -37,7 +37,10 @@ pub struct DecodeSlotHintPass;
 impl NanoPass for DecodeSlotHintPass {
     fn name(&self) -> &str { "DecodeSlotHint" }
     fn targets(&self) -> Option<Vec<Target>> { Some(vec![Target::Rust]) }
+
+    /// The hinted lookup keeps the borrowed shape the error-frame pass reads.
     fn depends_on(&self) -> Vec<&'static str> { vec!["BuiltinLowering"] }
+    fn run_before(&self) -> Vec<&'static str> { vec!["DecodeErrFrame", "NormalizeRuntimeCalls"] }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         let mut changed = false;

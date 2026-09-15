@@ -56,6 +56,11 @@ impl NanoPass for ConcretizeTypesPass {
         None
     }
 
+    /// Every type concrete from here on (the `AllTypesConcrete`
+    /// postcondition): a representation boundary the passes after it
+    /// assume without naming it (see `NanoPass::barrier`).
+    fn barrier(&self) -> bool { true }
+
     fn depends_on(&self) -> Vec<&'static str> {
         vec!["LambdaTypeResolve"]
     }

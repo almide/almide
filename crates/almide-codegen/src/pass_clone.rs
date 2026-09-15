@@ -29,7 +29,12 @@ impl NanoPass for CloneInsertionPass {
         Some(vec![Target::Rust])
     }
 
-    fn depends_on(&self) -> Vec<&'static str> { vec!["BorrowInsertion"] }
+    /// The last ownership pass over the pre-lowering IR: it counts the binds
+    /// every earlier pass adds and places the `Clone` / move every later pass
+    /// reads — the match-subject rewrite and the stdlib lowering both look at
+    /// what it left.
+    fn depends_on(&self) -> Vec<&'static str> { vec!["BorrowInsertion", "CaptureClone", "TailCallOpt", "BoxDeref", "LICM"] }
+    fn run_before(&self) -> Vec<&'static str> { vec!["MatchSubject", "StdlibLowering"] }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         for f in &mut program.functions { super::pass_clone_projection::fold_bindings(&mut f.body); }

@@ -36,6 +36,11 @@ impl NanoPass for CaptureClonePass {
         Some(vec![Target::Rust])
     }
 
+    /// Reads the final param borrow modes; CloneInsertion clones the `__cap_*`
+    /// binds it adds.
+    fn depends_on(&self) -> Vec<&'static str> { vec!["BorrowInsertion", "TailCallOpt"] }
+    fn run_before(&self) -> Vec<&'static str> { vec!["CloneInsertion"] }
+
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         // Every VarId this pass allocates is a `__cap_*` clone binding (one
         // alloc site); snapshot the table length and mark the new ids in

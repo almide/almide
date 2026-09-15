@@ -94,6 +94,15 @@ pub trait NanoPass: std::fmt::Debug {
     /// declare the reverse dependency. Default: none.
     fn run_before(&self) -> Vec<&'static str> { vec![] }
 
+    /// A REPRESENTATION BOUNDARY: every pass declared before this one stays
+    /// before it and every pass declared after stays after, without each of
+    /// them naming it. `UnifyVarTables` (per-module var tables → one table)
+    /// and `IrLinkFlatten` (modules → root) change what a VarId or a fn name
+    /// MEANS, so an edge to each of them would be on every pass; a barrier
+    /// says it once. The shuffle (`ALMIDE_SHUFFLE_PASSES`) never crosses one.
+    /// Default: not a barrier.
+    fn barrier(&self) -> bool { false }
+
     /// Postconditions: structural invariants guaranteed after this pass runs.
     /// Verified on every build. Debug builds panic on violation; release
     /// builds print a `[POSTCONDITION VIOLATION]` diagnostic and keep
@@ -231,6 +240,81 @@ impl Pipeline {
     pub fn add<P: NanoPass + 'static>(mut self, pass: P) -> Self {
         self.passes.push(Box::new(pass));
         self
+    }
+
+    /// The pass names in the order `target` would run them under `seed`
+    /// (the declared order when `seed` is `None`) — what the shuffle gate
+    /// prints, and what the shuffle's own tests read.
+    pub fn order_names(&self, target: Target, seed: Option<&str>) -> Vec<&str> {
+        self.order(target, seed).into_iter().map(|i| self.passes[i].name()).collect()
+    }
+
+    /// The indices of the passes that run for `target`, in the DECLARED order
+    /// — or, under a shuffle seed, in a random order consistent with every
+    /// declared `depends_on` / `run_before` edge and every barrier. Kahn's
+    /// algorithm over those edges, the ready set drawn by a seeded
+    /// generator; a seed that does not parse runs the declared order.
+    pub(crate) fn order(&self, target: Target, seed: Option<&str>) -> Vec<usize> {
+        let live: Vec<usize> = (0..self.passes.len())
+            .filter(|&i| self.passes[i].targets().map_or(true, |ts| ts.contains(&target)))
+            .collect();
+        let Some(seed) = seed.and_then(|s| s.trim().parse::<u64>().ok()) else { return live; };
+        let name_of = |i: usize| self.passes[i].name();
+        let position = |name: &str| live.iter().position(|&i| name_of(i) == name);
+        // must_precede[a] holds every live b that must run AFTER a.
+        let n = live.len();
+        let mut after: Vec<Vec<usize>> = vec![Vec::new(); n];
+        let mut edge = |a: usize, b: usize| if a != b && !after[a].contains(&b) { after[a].push(b); };
+        for (bi, &b) in live.iter().enumerate() {
+            for dep in self.passes[b].depends_on() {
+                if let Some(ai) = position(dep) { edge(ai, bi); }
+            }
+            for succ in self.passes[b].run_before() {
+                if let Some(ci) = position(succ) { edge(bi, ci); }
+            }
+            if self.passes[b].barrier() {
+                for ai in 0..bi { edge(ai, bi); }
+                for ci in bi + 1..n { edge(bi, ci); }
+            }
+        }
+        // `ALMIDE_PASS_EDGES=A<B,C<D`: extra edges for the shuffle only — the
+        // bisection instrument behind `scripts/pass-shuffle-bisect.sh`, which
+        // finds the pair a divergence needs declared.
+        if let Some(extra) = almide_base::env::var("ALMIDE_PASS_EDGES") {
+            for pair in extra.split(',').filter(|p| !p.trim().is_empty()) {
+                if let Some((a, b)) = pair.split_once('<')
+                    && let (Some(ai), Some(bi)) = (position(a.trim()), position(b.trim()))
+                {
+                    edge(ai, bi);
+                }
+            }
+        }
+        let mut indegree = vec![0usize; n];
+        for succs in &after {
+            for &b in succs { indegree[b] += 1; }
+        }
+        let mut rng = seed ^ 0x9E37_79B9_7F4A_7C15;
+        let mut next = move || {
+            // splitmix64 — deterministic, dependency-free
+            rng = rng.wrapping_add(0x9E37_79B9_7F4A_7C15);
+            let mut z = rng;
+            z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+            z ^ (z >> 31)
+        };
+        let mut ready: Vec<usize> = (0..n).filter(|&i| indegree[i] == 0).collect();
+        let mut out = Vec::with_capacity(n);
+        while !ready.is_empty() {
+            let pick = (next() % ready.len() as u64) as usize;
+            let a = ready.swap_remove(pick);
+            out.push(live[a]);
+            for &b in &after[a] {
+                indegree[b] -= 1;
+                if indegree[b] == 0 { ready.push(b); }
+            }
+        }
+        assert!(out.len() == n, "[ICE] the declared pass edges form a cycle");
+        out
     }
 
     // ── `Pipeline::run` main-loop-body extraction (cog>100 decomposition,
@@ -399,13 +483,20 @@ impl Pipeline {
             .filter(|p| p.targets().map_or(true, |ts| ts.contains(&target)))
             .map(|p| p.name())
             .collect();
-        for pass in &self.passes {
-            // Skip passes not relevant to this target
-            if let Some(targets) = pass.targets() {
-                if !targets.contains(&target) {
-                    continue;
-                }
-            }
+        // #2186 step 4: `ALMIDE_SHUFFLE_PASSES=<seed>` runs the passes in a
+        // random order that respects every DECLARED edge and barrier — and
+        // nothing else. The declared order is one such order; if another
+        // one emits different Rust, a dependency is missing its declaration.
+        // `scripts/check-pass-shuffle.sh` byte-diffs the corpus under it.
+        let shuffle_seed = almide_base::env::var("ALMIDE_SHUFFLE_PASSES");
+        let order = self.order(target, shuffle_seed.as_deref());
+        if let Some(seed) = &shuffle_seed {
+            // The order under this seed, so a byte-diff names its witness.
+            let names: Vec<&str> = order.iter().map(|&i| self.passes[i].name()).collect();
+            eprintln!("[almide] ALMIDE_SHUFFLE_PASSES={seed} order: {}", names.join(" "));
+        }
+        for &idx in &order {
+            let pass = &self.passes[idx];
             // #912 lens skip: the skipped pass stays OUT of `executed`, so a
             // later pass that declared a dep edge on it panics loudly in
             // `validate_pass_deps` — an undeclared dependency is exactly what
@@ -479,8 +570,88 @@ impl NanoPass for FanLoweringPass {
     fn targets(&self) -> Option<Vec<Target>> {
         None // All targets need this
     }
+
+    /// Strips the auto-`Try` inside fan arms, so the `Try` has to be there.
+    fn depends_on(&self) -> Vec<&'static str> { vec!["ResultPropagation"] }
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         super::pass_fan_lowering::strip_fan_auto_try(&mut program);
         PassResult { program, changed: true }
+    }
+}
+
+#[cfg(test)]
+mod shuffle_tests {
+    //! The seeded order respects every declared edge and barrier, is
+    //! deterministic per seed, actually varies across seeds, and refuses a
+    //! cycle — the properties `ALMIDE_SHUFFLE_PASSES` rests on (#2186).
+    use super::*;
+
+    #[derive(Debug)]
+    struct P { name: &'static str, after: Vec<&'static str>, before: Vec<&'static str>, barrier: bool, rust_only: bool }
+    impl NanoPass for P {
+        fn name(&self) -> &str { self.name }
+        fn targets(&self) -> Option<Vec<Target>> { if self.rust_only { Some(vec![Target::Rust]) } else { None } }
+        fn depends_on(&self) -> Vec<&'static str> { self.after.clone() }
+        fn run_before(&self) -> Vec<&'static str> { self.before.clone() }
+        fn barrier(&self) -> bool { self.barrier }
+        fn run(&self, program: IrProgram, _: Target) -> PassResult { PassResult { program, changed: false } }
+    }
+    fn p(name: &'static str) -> P { P { name, after: vec![], before: vec![], barrier: false, rust_only: false } }
+
+    fn pipeline() -> Pipeline {
+        Pipeline::new()
+            .add(p("Unify"))
+            .add(P { name: "Barrier", after: vec![], before: vec![], barrier: true, rust_only: false })
+            .add(p("A"))
+            .add(P { name: "B", after: vec!["A"], before: vec![], barrier: false, rust_only: false })
+            .add(P { name: "C", after: vec![], before: vec!["D"], barrier: false, rust_only: false })
+            .add(p("D"))
+            .add(p("E"))
+    }
+
+    fn pos(order: &[&str], name: &str) -> usize { order.iter().position(|n| *n == name).unwrap() }
+
+    #[test]
+    fn the_declared_order_is_the_order_without_a_seed() {
+        assert_eq!(pipeline().order_names(Target::Rust, None), vec!["Unify", "Barrier", "A", "B", "C", "D", "E"]);
+        // An unparsable seed is no seed.
+        assert_eq!(pipeline().order_names(Target::Rust, Some("x")), vec!["Unify", "Barrier", "A", "B", "C", "D", "E"]);
+    }
+
+    #[test]
+    fn every_seed_respects_the_edges_and_the_barrier_and_some_seed_moves_something() {
+        let pl = pipeline();
+        let mut moved = false;
+        for seed in 0..64u64 {
+            let o = pl.order_names(Target::Rust, Some(&seed.to_string()));
+            assert_eq!(o.len(), 7, "every pass runs once: {o:?}");
+            assert_eq!(o[0], "Unify", "everything declared before the barrier stays before it: {o:?}");
+            assert_eq!(o[1], "Barrier", "{o:?}");
+            assert!(pos(&o, "A") < pos(&o, "B"), "depends_on: {o:?}");
+            assert!(pos(&o, "C") < pos(&o, "D"), "run_before: {o:?}");
+            moved |= o != vec!["Unify", "Barrier", "A", "B", "C", "D", "E"];
+            assert_eq!(o, pl.order_names(Target::Rust, Some(&seed.to_string())), "deterministic per seed");
+        }
+        assert!(moved, "the free passes never moved — the shuffle would be decorative");
+    }
+
+    #[test]
+    fn a_pass_absent_from_the_target_is_neither_run_nor_an_edge() {
+        // A Rust-only pass that must precede `X`: the Wgsl arm runs `X`
+        // alone, and the edge to the absent pass is vacuous, not a panic.
+        let pl = Pipeline::new()
+            .add(P { name: "R", after: vec![], before: vec!["X"], barrier: false, rust_only: true })
+            .add(p("X"));
+        assert_eq!(pl.order_names(Target::Wgsl, Some("1")), vec!["X"]);
+        assert_eq!(pl.order_names(Target::Rust, Some("1")), vec!["R", "X"]);
+    }
+
+    #[test]
+    #[should_panic(expected = "form a cycle")]
+    fn a_cycle_in_the_declared_edges_is_an_ice() {
+        let pl = Pipeline::new()
+            .add(P { name: "A", after: vec!["B"], before: vec![], barrier: false, rust_only: false })
+            .add(P { name: "B", after: vec!["A"], before: vec![], barrier: false, rust_only: false });
+        let _ = pl.order_names(Target::Rust, Some("1"));
     }
 }

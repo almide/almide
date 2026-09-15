@@ -644,6 +644,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_ONLY_PASS=value` | ablation | run the optimiser with ONLY the named optional pass (plus the always-on enablers); an unknown name is a hard error |
 | `ALMIDE_ORG_DIR=value` | ci | the checkout directory of the org repos the cross-repo verification scripts walk |
 | `ALMIDE_P3_HTTP_STOP=value` | ablation | make the p3 http shim answer its static error right after stage N of the request build (1..=5), to localise a hang |
+| `ALMIDE_PASS_EDGES=value` | harness | extra `A<B` pass-order edges (comma-separated) the shuffle honours — the bisection instrument that names the pair a shuffle divergence needs declared |
 | `ALMIDE_PROBE_DUMP=value` | harness | the path the heap probe writes its emitted wasm to |
 | `ALMIDE_PROBE_IR=value` | harness | the path the heap probe writes its lowered IR to |
 | `ALMIDE_PROBE_SRC=value` | harness | the source file the heap probe compiles (unset = the probe is skipped) |
@@ -656,6 +657,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_REPO=value` | ci | the repository slug a release script targets |
 | `ALMIDE_RUN_PROJECT_DIR=value` | tool | the project root `almide run` resolves dependencies from, when the file is run from outside it |
 | `ALMIDE_SEMLAW_CASES=value` | harness | how many cases the semantic-laws property test draws |
+| `ALMIDE_SHUFFLE_PASSES=value` | gate | run the native passes in the seeded random order the declared dependency edges permit — a pass-dependency probe: the emitted Rust must not change (#2186) |
 | `ALMIDE_SKIP_PASS=value` | ablation | skip the named optional passes (comma-separated) — a pass-dependency probe: output must not change |
 | `ALMIDE_SKIP_VERSION_CHECK` | gate | skip the project's `almide` version requirement check |
 | `ALMIDE_STREAM_FUSION_OFF` | ablation | turn the stream-fusion pass off |

@@ -235,7 +235,9 @@ fn ast_expr_to_ir_literal(expr: &almide_lang::ast::Expr) -> Option<IrExpr> {
 impl NanoPass for StdlibLoweringPass {
     fn name(&self) -> &str { "StdlibLowering" }
     fn targets(&self) -> Option<Vec<Target>> { Some(vec![Target::Rust]) }
+
     fn depends_on(&self) -> Vec<&'static str> { vec!["EffectInference"] }
+    fn run_before(&self) -> Vec<&'static str> { vec!["ResultPropagation", "BuiltinLowering"] }
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         seed_bundled_fns(&program);
         seed_inline_rust_table(&program);

@@ -19,6 +19,10 @@ impl NanoPass for BoxDerefPass {
         Some(vec![Target::Rust])
     }
 
+    /// Deref nodes for Box'd pattern vars are in place before clone insertion
+    /// decides what to clone.
+    fn run_before(&self) -> Vec<&'static str> { vec!["CloneInsertion"] }
+
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         // Step 1: Collect deref vars and insert Deref IR nodes.
         //         Post `UnifyVarTablesPass` every VarId indexes into

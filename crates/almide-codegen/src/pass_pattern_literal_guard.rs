@@ -43,6 +43,11 @@ impl NanoPass for PatternLiteralGuardPass {
         Some(vec![Target::Rust])
     }
 
+    /// Hoists payload literals into binds + `==` guards so MatchSubject sees
+    /// only top-level literals, and before the ownership passes count the
+    /// binds it adds.
+    fn run_before(&self) -> Vec<&'static str> { vec!["MatchSubject", "BorrowInsertion"] }
+
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         let IrProgram { functions, top_lets, modules, var_table, .. } = &mut program;
         let mut v = LiteralGuardVisitor { var_table, counter: 0 };

@@ -154,7 +154,12 @@ walker sees only typed IR nodes — it never checks what target it renders for.
 
 1. **Nanopass pipeline** — each `pass_*.rs` receives `&mut IrProgram` and does
    one semantic rewrite (StdlibLowering, ResultPropagation, CloneInsertion,
-   BuiltinLowering, FanLowering, ...).
+   BuiltinLowering, FanLowering, ...). The order is DECLARED, not merely
+   spelled: every pass names the passes it needs before it (`depends_on`) and
+   the ones it must precede (`run_before`), three representation boundaries
+   are barriers, and `scripts/check-pass-shuffle.sh` proves the declarations
+   are the whole truth by running seeded random orders they permit and
+   byte-diffing the emitted Rust (#2186).
 2. **Template renderer** — TOML files define syntax patterns; the walker calls
    `templates.render_with("if_expr", ...)`. All string rendering happens here.
 3. **Walker** — target-agnostic IR tree renderer; zero `if target == Rust`
