@@ -232,6 +232,20 @@ pub struct Pipeline {
     passes: Vec<Box<dyn NanoPass>>,
 }
 
+/// splitmix64 — the shuffle's seeded generator: deterministic per seed and
+/// dependency-free, so `ALMIDE_SHUFFLE_PASSES=<seed>` names one order.
+struct SplitMix64(u64);
+
+impl SplitMix64 {
+    fn next(&mut self) -> u64 {
+        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = self.0;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    }
+}
+
 impl Pipeline {
     pub fn new() -> Self {
         Self { passes: Vec::new() }
@@ -259,9 +273,37 @@ impl Pipeline {
             .filter(|&i| self.passes[i].targets().map_or(true, |ts| ts.contains(&target)))
             .collect();
         let Some(seed) = seed.and_then(|s| s.trim().parse::<u64>().ok()) else { return live; };
-        let name_of = |i: usize| self.passes[i].name();
-        let position = |name: &str| live.iter().position(|&i| name_of(i) == name);
-        // must_precede[a] holds every live b that must run AFTER a.
+        let after = self.declared_edges(&live);
+        let n = live.len();
+        let mut indegree = vec![0usize; n];
+        for succs in &after {
+            for &b in succs { indegree[b] += 1; }
+        }
+        let mut rng = SplitMix64(seed ^ 0x9E37_79B9_7F4A_7C15);
+        let mut ready: Vec<usize> = (0..n).filter(|&i| indegree[i] == 0).collect();
+        let mut out = Vec::with_capacity(n);
+        while !ready.is_empty() {
+            let pick = (rng.next() % ready.len() as u64) as usize;
+            let a = ready.swap_remove(pick);
+            out.push(live[a]);
+            for &b in &after[a] {
+                indegree[b] -= 1;
+                if indegree[b] == 0 { ready.push(b); }
+            }
+        }
+        assert!(out.len() == n, "[ICE] the declared pass edges form a cycle");
+        out
+    }
+
+    /// The edges the shuffle must respect, over positions in `live`:
+    /// `after[a]` holds every live `b` that must run AFTER `a` — from each
+    /// pass's `depends_on` / `run_before`, from every barrier (everything
+    /// declared before it precedes it, everything after follows it), and
+    /// from `ALMIDE_PASS_EDGES=A<B,C<D`, the extra edges the bisection
+    /// instrument (`scripts/pass-shuffle-bisect.py`) forces to find the
+    /// pair a divergence needs declared.
+    fn declared_edges(&self, live: &[usize]) -> Vec<Vec<usize>> {
+        let position = |name: &str| live.iter().position(|&i| self.passes[i].name() == name);
         let n = live.len();
         let mut after: Vec<Vec<usize>> = vec![Vec::new(); n];
         let mut edge = |a: usize, b: usize| if a != b && !after[a].contains(&b) { after[a].push(b); };
@@ -277,44 +319,13 @@ impl Pipeline {
                 for ci in bi + 1..n { edge(bi, ci); }
             }
         }
-        // `ALMIDE_PASS_EDGES=A<B,C<D`: extra edges for the shuffle only — the
-        // bisection instrument behind `scripts/pass-shuffle-bisect.sh`, which
-        // finds the pair a divergence needs declared.
-        if let Some(extra) = almide_base::env::var("ALMIDE_PASS_EDGES") {
-            for pair in extra.split(',').filter(|p| !p.trim().is_empty()) {
-                if let Some((a, b)) = pair.split_once('<')
-                    && let (Some(ai), Some(bi)) = (position(a.trim()), position(b.trim()))
-                {
-                    edge(ai, bi);
-                }
+        let extra = almide_base::env::var("ALMIDE_PASS_EDGES").unwrap_or_default();
+        for (a, b) in extra.split(',').filter_map(|pair| pair.split_once('<')) {
+            if let (Some(ai), Some(bi)) = (position(a.trim()), position(b.trim())) {
+                edge(ai, bi);
             }
         }
-        let mut indegree = vec![0usize; n];
-        for succs in &after {
-            for &b in succs { indegree[b] += 1; }
-        }
-        let mut rng = seed ^ 0x9E37_79B9_7F4A_7C15;
-        let mut next = move || {
-            // splitmix64 — deterministic, dependency-free
-            rng = rng.wrapping_add(0x9E37_79B9_7F4A_7C15);
-            let mut z = rng;
-            z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-            z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-            z ^ (z >> 31)
-        };
-        let mut ready: Vec<usize> = (0..n).filter(|&i| indegree[i] == 0).collect();
-        let mut out = Vec::with_capacity(n);
-        while !ready.is_empty() {
-            let pick = (next() % ready.len() as u64) as usize;
-            let a = ready.swap_remove(pick);
-            out.push(live[a]);
-            for &b in &after[a] {
-                indegree[b] -= 1;
-                if indegree[b] == 0 { ready.push(b); }
-            }
-        }
-        assert!(out.len() == n, "[ICE] the declared pass edges form a cycle");
-        out
+        after
     }
 
     // ── `Pipeline::run` main-loop-body extraction (cog>100 decomposition,
@@ -609,7 +620,7 @@ mod shuffle_tests {
             .add(p("E"))
     }
 
-    fn pos(order: &[&str], name: &str) -> usize { order.iter().position(|n| *n == name).unwrap() }
+    fn pos(order: &[&str], name: &str) -> usize { order.iter().position(|n| *n == name).unwrap_or_else(|| panic!("{name} missing from {order:?}")) }
 
     #[test]
     fn the_declared_order_is_the_order_without_a_seed() {
