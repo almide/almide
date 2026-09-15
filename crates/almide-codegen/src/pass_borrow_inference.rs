@@ -15,13 +15,17 @@ use almide_base::intern::{sym, Sym};
 use super::use_kind::{Chain, Ctor, Site, SlotMode, SlotOracle, Use, UseSites};
 
 /// The predicate `infer_program_fn_borrows` / `infer_program_module_borrows`
-/// apply: a fn whose borrows this pass infers (tests, generics and
-/// monomorphized instances are left to their own routes).
+/// apply: a fn whose borrows this pass infers. Tests and the generic
+/// TEMPLATES (erased after monomorphisation) are left out; a monomorphised
+/// INSTANCE is a concrete fn with a concrete body and is analysed like any
+/// other — until #2231 every instance was skipped wholesale and so owned
+/// every param (`first__Int(xs: Vec<i64>)` borrowing `&xs` once: 30 of the
+/// certifier's C4 lines). Its `mut` params keep the by-ref convention
+/// through `param_borrow`, which reads `is_mut` before the body policy.
 fn is_analysed_fn(func: &IrFunction) -> bool {
     let derived = is_derive_fn(func);
     !func.is_test
-        && (derived
-            || !(is_monomorphized(&func.name) || func.generics.as_ref().map_or(false, |g| !g.is_empty())))
+        && (derived || !func.generics.as_ref().map_or(false, |g| !g.is_empty()))
 }
 
 /// Every key the rounds WILL publish a signature under — the canonical
@@ -276,40 +280,6 @@ fn alias_float_variant_sigs(sigs: &mut HashMap<String, Vec<ParamBorrow>>) {
     }
 }
 
-/// The KEYWORD-only borrow rule for a MONOMORPHIZED instance (#1551): the
-/// full body inference stays skipped for `name__Suffix` fns (the historical
-/// contract below), but the explicit `mut` convention is authoritative and
-/// must survive specialization — the generic `fn f[C: Counter](mut c: C)`
-/// declared it, the instance's param clones `is_mut`, and dropping it emitted
-/// a by-value `c: Tally` while the specialized body (cloned from call sites
-/// inferred against the CONCRETE method sigs) still passes `&mut c` — rustc
-/// E0596, check green. Only the keyword rule runs: no body heuristics, so no
-/// other monomorphized sig can shift.
-fn seed_monomorphized_mut_params(
-    func: &mut IrFunction,
-    sigs: &mut HashMap<String, Vec<ParamBorrow>>,
-    sig_key: String,
-    records: &HashSet<String>,
-) {
-    let borrows: Vec<ParamBorrow> = func
-        .params
-        .iter()
-        .map(|p| {
-            if p.is_mut && is_borrow_eligible(&p.ty, records) {
-                ParamBorrow::RefMut
-            } else {
-                p.borrow
-            }
-        })
-        .collect();
-    if borrows.iter().any(|b| matches!(b, ParamBorrow::RefMut)) {
-        sigs.insert(sig_key, borrows.clone());
-        for (param, borrow) in func.params.iter_mut().zip(borrows) {
-            param.borrow = borrow;
-        }
-    }
-}
-
 /// One function's signature for this round: the derive-restricted or the
 /// full inference, then the TCO bake.
 fn round_borrows(func: &IrFunction, round: &Round, module: Option<&str>) -> Vec<ParamBorrow> {
@@ -324,11 +294,6 @@ fn round_borrows(func: &IrFunction, round: &Round, module: Option<&str>) -> Vec<
 /// signatures only through the round's frozen snapshot.
 fn infer_program_fn_borrows(program: &mut IrProgram, sigs: &mut HashMap<String, Vec<ParamBorrow>>, round: &Round) {
     for func in &mut program.functions {
-        if is_monomorphized(&func.name) && !func.is_test && !is_derive_fn(func) {
-            let key = func.name.to_string();
-            seed_monomorphized_mut_params(func, sigs, key, round.records);
-            continue;
-        }
         if !is_analysed_fn(func) { continue; }
         let borrows = round_borrows(func, round, None);
         // Always record the signature (including all-Own) so that the
@@ -429,11 +394,6 @@ fn infer_program_module_borrows(program: &mut IrProgram, sigs: &mut HashMap<Stri
     for module in &mut program.modules {
         let mod_name = module.name.to_string();
         for func in &mut module.functions {
-            if is_monomorphized(&func.name) && !func.is_test && !is_derive_fn(func) {
-                let key = format!("{}::{}", mod_name, func.name);
-                seed_monomorphized_mut_params(func, sigs, key, round.records);
-                continue;
-            }
             if !is_analysed_fn(func) { continue; }
             let borrows = round_borrows(func, round, Some(&mod_name));
             let owner = format!("{}::{}", mod_name, func.name);
@@ -546,9 +506,6 @@ fn is_derive_fn(func: &IrFunction) -> bool {
     func.attrs.iter().any(|a| a.name.as_str() == "derived")
 }
 
-fn is_monomorphized(name: &str) -> bool {
-    name.contains("__")
-}
 
 /// AST-side variant of `intrinsic_borrow_mode` — derives the borrow
 /// mode directly from an `ast::TypeExpr` (no resolve pass needed).
