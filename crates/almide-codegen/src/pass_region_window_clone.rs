@@ -168,18 +168,22 @@ fn subst_ty(t: &Ty, twins: &HashMap<Sym, Sym>) -> Ty {
 }
 
 /// Append the twin enums and twin fns of `plan` to the root program and
-/// record the twin enum names for the walker.
+/// record the twin enum names for the walker. Twins are emitted in the
+/// DECLARATION order of their originals, not in the plan's set order: the
+/// sets hash by `Sym`, and iterating them put `__rgn_make` before or after
+/// its siblings from one run to the next — an emitted-source hash that
+/// varied per process defeated the rlib cache and any byte-diff of the
+/// emitted Rust.
 pub(crate) fn synthesize_twins(program: &mut IrProgram, plan: &TwinPlan) {
     let twins: HashMap<Sym, Sym> = plan.enums.iter().map(|e| (*e, twin_name(*e))).collect();
     let mut ctors: HashMap<String, String> = HashMap::new();
     let mut new_decls = Vec::new();
-    for e in &plan.enums {
-        let td = program.type_decls.iter().find(|td| td.name == *e).expect("admitted enum decl");
+    for td in program.type_decls.iter().filter(|td| plan.enums.contains(&td.name)) {
         new_decls.push(twin_decl(td, &twins, &mut ctors));
     }
     let mut new_fns = Vec::new();
-    for n in &plan.fns {
-        let f = program.functions.iter().find(|f| f.name == *n).expect("closure fn");
+    let closure: Vec<&IrFunction> = program.functions.iter().filter(|f| plan.fns.contains(&f.name)).collect();
+    for f in closure {
         new_fns.push(twin_fn(f, &mut program.var_table, &twins, &ctors, &plan.fns));
     }
     program.codegen_annotations.region_enums.extend(twins.values().map(|s| s.as_str().to_string()));
