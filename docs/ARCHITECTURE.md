@@ -158,7 +158,15 @@ walker sees only typed IR nodes — it never checks what target it renders for.
 2. **Template renderer** — TOML files define syntax patterns; the walker calls
    `templates.render_with("if_expr", ...)`. All string rendering happens here.
 3. **Walker** — target-agnostic IR tree renderer; zero `if target == Rust`
-   checks.
+   checks, and no ownership decisions of its own (#2186): whether a value is
+   moved, cloned, borrowed or owned at a site is a pass's verdict, carried to
+   the walker as an IR node (`Borrow`, `Clone`, `Deref`, an owning method
+   call) or a `CodegenAnnotations` entry (`var_storage`, `shared_mut_vars`,
+   `borrowed_loop_vars`, `param_borrows`, …). The walker picks a SPELLING per
+   storage class and renders every node by its kind alone. It runs no
+   analysis walk, keeps no per-function ownership set, and never decides on
+   the text it just rendered — `scripts/check-walker-reads-annotations.sh`
+   holds that line.
 
 ## WASM Trust-Spine (almide-mir)
 

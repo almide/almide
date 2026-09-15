@@ -1251,6 +1251,16 @@ jobs:
       - name: Optimization pass roster (#929 — every pass file and NanoPass name rowed per target in ARCHITECTURE.md)
         run: bash scripts/check-pass-roster.sh
 
+      # #2186: the native walker renders ownership, it does not decide it.
+      # Every move / clone / borrow / owned verdict is a pass's IR or
+      # annotation; the walker may run no analysis walk, keep no fn-local
+      # ownership set, and never decide on the text it just rendered.
+      - name: Walker only reads annotations (#2186 — no analysis walk, no fn-local ownership set, no rendered-text sniffing in walker/)
+        run: bash scripts/check-walker-reads-annotations.sh
+
+      - name: Walker gate negative controls (#2186 — each ownership-decision shape turns the gate red)
+        run: bash scripts/check-walker-reads-annotations-negative.sh
+
       - name: ALS element coverage (every syntax element rowed; UNWRITTEN shrink-only — the freeze precondition)
         run: bash scripts/check-als-element-coverage.sh
 

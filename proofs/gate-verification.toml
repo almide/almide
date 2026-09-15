@@ -663,6 +663,20 @@ class = "NEGATIVE_TESTED"
 evidence = "#2205 landing (2026-09-14): a tracked scratch file carrying `std::env::var(\"ALMIDE_NOT_REGISTERED_PROBE\")` made BOTH rules fire before first green — the unregistered-name error named the file:line, the direct-read error named the same site — and removing it restored green. The reverse rule (a registered row nothing spells) fired for real during landing: `ALMIDE_TOPLET_DEBUG` was registered before its call sites spelled the full name, and the gate said so."
 
 [[gate]]
+path = "scripts/check-walker-reads-annotations.sh"
+wired_by = ".github/workflows/ci.yml"
+reads = "scalar"
+class = "NEGATIVE_TESTED"
+evidence = "#2186 step 3 landing (2026-09-15): run against the pre-change walker (origin/develop's walker/ copied to a scratch dir) all three shapes fired — the walker's own IrVisitor scans (program_render.rs), the fn-local ref_params / ref_mut_params / param_vars sets (mod.rs, expressions_control.rs, statements.rs) and the rendered-text sniff (starts_with(\"match \") in render_expr_borrow) — each naming file:line; the rewritten walker is green. scripts/check-walker-reads-annotations-negative.sh re-proves every shape on every run."
+
+[[gate]]
+path = "scripts/check-walker-reads-annotations-negative.sh"
+wired_by = ".github/workflows/ci.yml"
+reads = "scalar"
+class = "NEGATIVE_TESTED"
+evidence = "#2186 step 3 landing (2026-09-15): the harness is itself a set of negatives — five forged walkers (an IrVisitor impl, a ref_params read, a starts_with(\"match \") sniff, a ParamBorrow match outside the two spelling files, an empty directory) each turned the gate red on the first run, and the committed walker stayed green."
+
+[[gate]]
 path = "tools/almide-gates:env-switches-doc"
 wired_by = ".github/workflows/ci.yml"
 reads = "structured"
