@@ -40,7 +40,8 @@ pub struct RangeCountingVarsPass;
 impl NanoPass for RangeCountingVarsPass {
     fn name(&self) -> &str { "RangeCountingVars" }
     fn targets(&self) -> Option<Vec<Target>> { Some(vec![Target::Rust]) }
-    fn depends_on(&self) -> Vec<&'static str> { vec!["CloneInsertion", "IrLinkFlatten"] }
+
+    fn depends_on(&self) -> Vec<&'static str> { vec!["CloneInsertion", "IrLinkFlatten", "SharedCellBorrow"] }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         let mut vars: HashSet<VarId> = HashSet::new();

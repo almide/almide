@@ -56,6 +56,9 @@ impl NanoPass for SharedCellBorrowPass {
         Some(vec![Target::Rust])
     }
 
+    /// Reads the final call and borrow forms of every fn in the root.
+    fn depends_on(&self) -> Vec<&'static str> { vec!["IrLinkFlatten", "CloneInsertion", "CaptureClone"] }
+
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         let cells: HashSet<VarId> = program
             .codegen_annotations

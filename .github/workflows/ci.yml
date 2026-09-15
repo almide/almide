@@ -1261,6 +1261,15 @@ jobs:
       - name: Walker gate negative controls (#2186 — each ownership-decision shape turns the gate red)
         run: bash scripts/check-walker-reads-annotations-negative.sh
 
+      # #2186: the declared pass edges are the WHOLE ordering truth. Under
+      # three seeded random orders the edges permit, every spec/lang and
+      # spec/wasm_cross program must emit byte-identical Rust.
+      - name: Pass-order shuffle (#2186 — byte-identical Rust under every order the declared dependency edges permit)
+        run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-pass-shuffle.sh
+
+      - name: Pass-order shuffle negative controls (#2186 — an order-dependent or panicking stand-in turns the gate red)
+        run: bash scripts/check-pass-shuffle-negative.sh
+
       - name: ALS element coverage (every syntax element rowed; UNWRITTEN shrink-only — the freeze precondition)
         run: bash scripts/check-als-element-coverage.sh
 

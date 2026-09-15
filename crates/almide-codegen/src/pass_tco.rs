@@ -36,6 +36,12 @@ impl NanoPass for TailCallOptPass {
         None // All targets benefit from TCO
     }
 
+    /// Runs on finalized param types (a String/&str mismatch otherwise); the
+    /// loop params it forces owned and `tco_owned_params` are read by the two
+    /// passes after it.
+    fn depends_on(&self) -> Vec<&'static str> { vec!["BorrowInsertion"] }
+    fn run_before(&self) -> Vec<&'static str> { vec!["CaptureClone", "CloneInsertion"] }
+
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         // Collect: TCO'd function name → param positions whose borrow annotation
         // was forced back to Own by the loop rewrite (i.e. NOT in the

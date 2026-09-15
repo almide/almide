@@ -60,8 +60,12 @@ pub struct StreamFusionPass;
 impl NanoPass for StreamFusionPass {
     fn name(&self) -> &str { "StreamFusion" }
     fn targets(&self) -> Option<Vec<Target>> { Some(vec![Target::Rust]) }
-    fn depends_on(&self) -> Vec<&'static str> { vec!["StdlibLowering"] }
-    fn run_before(&self) -> Vec<&'static str> { vec!["RustLowering"] }
+
+    /// Fuses the lowered chains; reads the `Clone` nodes clone insertion placed
+    /// on a chain's source, and runs before the `Try` insertion that would
+    /// otherwise sit inside a chain it fuses.
+    fn depends_on(&self) -> Vec<&'static str> { vec!["StdlibLowering", "CloneInsertion"] }
+    fn run_before(&self) -> Vec<&'static str> { vec!["RustLowering", "ResultPropagation"] }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         if std::env::var_os(ABLATION_ENV).is_some() {

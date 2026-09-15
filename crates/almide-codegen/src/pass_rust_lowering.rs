@@ -23,7 +23,10 @@ pub struct RustLoweringPass;
 impl NanoPass for RustLoweringPass {
     fn name(&self) -> &str { "RustLowering" }
     fn targets(&self) -> Option<Vec<Target>> { Some(vec![Target::Rust]) }
+
+    /// Routes `fan` shapes before the fan lowering strips their auto-try.
     fn depends_on(&self) -> Vec<&'static str> { vec!["CloneInsertion"] }
+    fn run_before(&self) -> Vec<&'static str> { vec!["FanLowering"] }
     fn postconditions(&self) -> Vec<Postcondition> { vec![Postcondition::Custom(verify_push_targets_are_places)] }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {

@@ -36,6 +36,10 @@ impl NanoPass for EggSaturationPass {
     fn name(&self) -> &str { "EggSaturation" }
     fn targets(&self) -> Option<Vec<Target>> { None }
 
+    /// Matches the `CallTarget::Module` matrix chains the intrinsic and stdlib
+    /// lowerings replace.
+    fn run_before(&self) -> Vec<&'static str> { vec!["IntrinsicLowering", "StdlibLowering"] }
+
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         // Full rule set, matrix + list; only matrix Calls are lifted
         // (`is_saturation_target`), so the list half is inert here.

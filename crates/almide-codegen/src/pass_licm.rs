@@ -22,6 +22,13 @@ impl NanoPass for LICMPass {
     fn name(&self) -> &str { "LICM" }
     fn targets(&self) -> Option<Vec<Target>> { None }
 
+    /// Judges purity on the resolved call targets (a `value.int` still spelled
+    /// as a Module call hoisted where its resolved form does not), and the
+    /// hoisted `__licm_*` binds are counted and borrowed like any other local
+    /// by the ownership passes that follow.
+    fn depends_on(&self) -> Vec<&'static str> { vec!["ResolveCalls", "RegionWindow", "BoxDeref"] }
+    fn run_before(&self) -> Vec<&'static str> { vec!["EggSaturation", "BorrowInsertion", "CloneInsertion"] }
+
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         // Every VarId this pass allocates is a `__licm_*` hoist binding (one
         // alloc site); snapshot + mark, replacing the name-prefix test in

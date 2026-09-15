@@ -55,6 +55,11 @@ impl NanoPass for ResolveCallsPass {
         None
     }
 
+    /// The bundled → `Named { almide_rt_<m>_<f> }` rewrite is the key borrow
+    /// inference looks signatures up by; the intrinsic and matrix rewrites read
+    /// the targets it leaves.
+    fn run_before(&self) -> Vec<&'static str> { vec!["BorrowInsertion", "IntrinsicLowering", "EggSaturation"] }
+
     fn postconditions(&self) -> Vec<Postcondition> {
         vec![Postcondition::Custom(verify_all_calls_resolved)]
     }

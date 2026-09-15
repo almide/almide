@@ -62,6 +62,10 @@ impl NanoPass for NormalizeRuntimeCallsPass {
 
     fn targets(&self) -> Option<Vec<Target>> { Some(vec![Target::Rust]) }
 
+    /// The final collapse of `Named { almide_rt_* }` into `RuntimeCall` — after
+    /// every pass that emits or reads the Named spelling.
+    fn depends_on(&self) -> Vec<&'static str> { vec!["BuiltinLowering", "DecodeSlotHint", "DecodeErrFrame"] }
+
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         struct Rewriter;
         impl IrMutVisitor for Rewriter {

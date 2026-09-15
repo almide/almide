@@ -47,6 +47,9 @@ impl NanoPass for EffectInferencePass {
     fn name(&self) -> &str { "EffectInference" }
     fn targets(&self) -> Option<Vec<Target>> { None } // All targets
 
+    /// An analysis over Module calls, taken before the lowerings replace them.
+    fn run_before(&self) -> Vec<&'static str> { vec!["StdlibLowering", "ResultPropagation"] }
+
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         let mut effect_map = EffectMap::default();
 
