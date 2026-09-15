@@ -21,6 +21,18 @@
 #
 # The Almide gates are enumerated too — they had no rows at all, so an Almide
 # gate could never carry a verification class.
+#
+# #2234 adds a FOURTH axis: what the gate MEASURES, and whether that quantity
+# has ever been seen to VARY. The perf ratchet's four `ablation/*` rows passed
+# every negative control for three months while measuring a constant (the
+# optimizer-ablated binary was byte-identical to the optimized one), because
+# the ledger recorded only that the gate could fail on a forged input, never
+# that its measurand exists. `measures` names the quantity and the artifact
+# it is read from (required on every row); `varies` records the observation
+# that the quantity took two different values (a commit, a PR, a run). A
+# RATCHET — a gate whose script compares against a committed `*-baseline.txt`,
+# an in-source `MAX_*=` ceiling or a `*_ceiling` — must carry `varies`; any
+# other row may leave it empty under the shrink-only `# unvaried_ceiling`.
 set -euo pipefail
 export LC_ALL=C
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -77,9 +89,24 @@ def names_gate(consumer_text, gate_path):
         return re.search(r"almide-gates\S*\s+(?:--\s+)?" + re.escape(cmd) + r"\b", consumer_text) is not None
     return os.path.basename(gate_path) in consumer_text
 
+# THE FOURTH AXIS (#2234): a ratchet is a gate that compares a measurement
+# against a committed anchor. Detected from the gate's own text so the rule
+# cannot be opted out of by omission: a `*-baseline.txt` reference, an
+# in-source `MAX_<NAME>=<digits>` ceiling, or a `<name>_ceiling`. Almide gates
+# are not scanned (none of them is a ratchet today; output-parity's baseline
+# is read by its .sh original, which is).
+RATCHET_RE = re.compile(r'-baseline\.txt|\bMAX_[A-Z_]+=[0-9]|_ceiling\b')
+
+def is_ratchet(gate_path):
+    fp = os.path.join(root, gate_path)
+    if not gate_path.endswith(".sh") or not os.path.isfile(fp):
+        return False
+    return bool(RATCHET_RE.search(open(fp, encoding="utf-8", errors="replace").read()))
+
 ceiling = None
 unclassified_ceiling = None
 unwired_ceiling = None
+unvaried_ceiling = None
 rows, cur = [], None
 for raw in open(ledger_path, encoding="utf-8"):
     line = raw.strip()
@@ -92,6 +119,9 @@ for raw in open(ledger_path, encoding="utf-8"):
     m = re.match(r'#\s*unwired_ceiling\s*=\s*"(\d+)"', line)
     if m:
         unwired_ceiling = int(m.group(1))
+    m = re.match(r'#\s*unvaried_ceiling\s*=\s*"(\d+)"', line)
+    if m:
+        unvaried_ceiling = int(m.group(1))
     if line == "[[gate]]":
         if cur:
             rows.append(cur)
@@ -110,10 +140,14 @@ if unclassified_ceiling is None:
     errs.append("ledger header is missing `# unclassified_reads_ceiling = \"N\"`")
 if unwired_ceiling is None:
     errs.append("ledger header is missing `# unwired_ceiling = \"N\"`")
+if unvaried_ceiling is None:
+    errs.append("ledger header is missing `# unvaried_ceiling = \"N\"`")
 seen = set()
 unverified = 0
 unclassified = 0
 unwired = 0
+unvaried = 0
+ratchets = 0
 for r in rows:
     p = r.get("path")
     if not p:
@@ -162,6 +196,25 @@ for r in rows:
                 errs.append(f"{p}: wired_by names {c!r}, but that file never invokes the gate "
                             f"(no {os.path.basename(p)!r} in it) — a consumer in name only")
 
+    # The fourth axis (#2234): what is measured, and has it ever varied.
+    if "measures" not in r:
+        errs.append(f"{p}: no `measures` — say what quantity this gate reads and from which "
+                    f"artifact; a gate whose measurand nobody can name may be measuring a constant")
+    elif not r["measures"].strip():
+        errs.append(f"{p}: `measures` is empty — name the quantity and the artifact it is read from")
+    if "varies" not in r:
+        errs.append(f"{p}: no `varies` field — record where the measured quantity was observed to "
+                    f"take two values, or leave it empty under the unvaried ceiling")
+    elif not r["varies"].strip():
+        if is_ratchet(p):
+            errs.append(f"{p}: a RATCHET (compares against a committed baseline or ceiling) with "
+                        f"empty `varies` — the ablation/* rows measured a constant for three months "
+                        f"this way (#2234); record the commit, PR or run where the quantity moved")
+        else:
+            unvaried += 1
+    if is_ratchet(p):
+        ratchets += 1
+
 for p in sorted(enumerated - seen):
     errs.append(f"{p}: UNCLASSIFIED — a verdict-bearing gate with no row. How would we "
                 f"know if this gate can no longer fail?")
@@ -181,6 +234,15 @@ if unwired_ceiling is not None:
                     f"lands wired into the job that runs it (#2207)")
     elif unwired < unwired_ceiling:
         errs.append(f"UNWIRED count {unwired} is BELOW the ceiling {unwired_ceiling} — ratchet it "
+                    f"down in the ledger header (the debt may only shrink, and the ledger must "
+                    f"say so)")
+
+if unvaried_ceiling is not None:
+    if unvaried > unvaried_ceiling:
+        errs.append(f"unvaried count {unvaried} exceeds the ceiling {unvaried_ceiling} — a new gate "
+                    f"lands with the observation that its measurand varies (#2234)")
+    elif unvaried < unvaried_ceiling:
+        errs.append(f"unvaried count {unvaried} is BELOW the ceiling {unvaried_ceiling} — ratchet it "
                     f"down in the ledger header (the debt may only shrink, and the ledger must "
                     f"say so)")
 
@@ -210,5 +272,7 @@ print("gate-verification OK: " + str(len(rows)) + " gate(s) — "
       + f" (unverified ceiling {ceiling})")
 print("  reads: " + " / ".join(f"{k} {v}" for k, v in sorted(reads_by.items()))
       + f" (unclassified ceiling {unclassified_ceiling})")
+print(f"  measures: {len(rows)} named / ratchets {ratchets}, every one with `varies` / "
+      f"unvaried {unvaried} (ceiling {unvaried_ceiling})")
 print(f"  wired: {len(rows) - unwired} consumer-verified / UNWIRED {unwired} (ceiling {unwired_ceiling})")
 EOF
