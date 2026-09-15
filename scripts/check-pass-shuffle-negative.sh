@@ -4,6 +4,7 @@
 # using stand-in compilers whose behaviour is known. The real compiler under
 # the real gate is the positive control (the CI step before this one).
 set -euo pipefail
+export LC_ALL=C
 cd "$(git rev-parse --show-toplevel)"
 
 GATE="bash scripts/check-pass-shuffle.sh"
@@ -12,7 +13,8 @@ trap 'rm -rf "$tmp"' EXIT
 
 # Five real fixtures as the corpus: the stand-ins never compile them, they
 # only spell their name, so the list just has to exist.
-find spec/wasm_cross -name '*.almd' | sort | head -5 > "$tmp/corpus"
+find spec/wasm_cross -name '*.almd' | sort > "$tmp/all"
+head -5 "$tmp/all" > "$tmp/corpus"
 
 expect_pass() { ALMIDE_BIN="$1" SEEDS=1 CORPUS="$tmp/corpus" $GATE >/dev/null 2>&1 || { echo "FAIL: $2" >&2; exit 1; }; }
 expect_fail() { ALMIDE_BIN="$1" SEEDS=1 CORPUS="$tmp/corpus" $GATE >/dev/null 2>&1 && { echo "FAIL: $2" >&2; exit 1; }; return 0; }
