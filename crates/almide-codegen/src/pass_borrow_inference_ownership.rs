@@ -217,6 +217,12 @@ fn scrutinee_only_compares(body: &IrExpr, var: VarId) -> bool {
     scan.ok
 }
 
+/// Is `later` after `earlier` in evaluation order? Occurrences are recorded
+/// in that order, so pointer position in the table decides.
+fn after(earlier: &Use, later: &Use) -> bool {
+    (later as *const Use) > (earlier as *const Use)
+}
+
 /// One param's mode from the body's occurrences of it.
 fn param_borrow(param: &IrParam, uses: &UseSites, scope: &Scope, body: &IrExpr) -> ParamBorrow {
     if !scope.is_borrow_eligible(&param.ty) || almide_base::env::flag("ALMIDE_BORROW_OWN_ALL") {
@@ -240,7 +246,25 @@ fn param_borrow(param: &IrParam, uses: &UseSites, scope: &Scope, body: &IrExpr) 
     let literal_subject = is_string && scrutinee_only_compares(body, param.var);
     let read_by_ref = |u: &Use| (literal_subject && u.site == Site::Scrutinee)
         || (is_string && u.site == Site::Construct(Ctor::Interp) && u.depth == 0);
-    if uses.of(param.var).any(|u| consumes(u) && !read_by_ref(u)) {
+    // A consuming use that a LATER statement follows with another use of
+    // the param can never move it — `CloneInsertion` clones it because the
+    // var stays live — so it earns the param nothing by being owned; only a
+    // consuming use with no later-statement use can be the move ownership
+    // exists for (#2231: `show_list(xs)` consumed `xs` as a chain source and
+    // read `list.len(xs)` on the next line — owned, and cloned anyway).
+    // Refined further: a consuming use is CLONED ANYWAY — and so earns
+    // nothing by ownership — when a later occurrence can still run after it
+    // (same arm, an enclosing one, or a nested one — anything but a sibling
+    // branch: the var stays live, `CloneInsertion` clones; a guarded list
+    // pattern's fall-through re-reads the subject inside the arm), or when a
+    // direct `&v` argument of the same call keeps the var borrowed through
+    // it (`map.fold(&base, base.clone(), λ)`: the E0505 guard clones).
+    // `UseSites::keeps_live` and `Use::guard_forced` are the same facts the
+    // clone pass acts on.
+    let all: Vec<&Use> = uses.of(param.var).collect();
+    let cloned_anyway = |u: &Use| u.guard_forced
+        || all.iter().any(|w| !std::ptr::eq(*w, u) && after(u, w) && uses.keeps_live(u, w));
+    if all.iter().any(|u| consumes(u) && !read_by_ref(u) && !cloned_anyway(u)) {
         return ParamBorrow::Own;
     }
     // Implicit mut for bundled bodies: when the body forwards this param into

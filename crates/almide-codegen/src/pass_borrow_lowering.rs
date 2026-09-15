@@ -219,14 +219,19 @@ impl Lower<'_> {
 
     /// `p.clone()` of a `&str` param yields a `&str`; the owned `String` the
     /// context expects is `.to_string()`.
+    /// A `Clone` of a by-reference `String` / `List` param is its owned
+    /// form (`.to_string()` / `.to_vec()`): `.clone()` of a `&str` or a
+    /// `&[T]` would copy the REFERENCE and mismatch the owned type the
+    /// consuming site expects (a guarded list pattern's `list.drop(xs, 1)`
+    /// on a borrowed `xs`, #2231).
     fn lower_clone(&self, expr: &mut IrExpr) {
         let IrExprKind::Clone { expr: inner } = &mut expr.kind else { return };
         if let Some(id) = var_id(inner)
             && is_ref_param(self.params, id)
-            && matches!(inner.ty, Ty::String)
+            && matches!(inner.ty, Ty::String | Ty::Applied(TypeConstructorId::List, _))
         {
             let receiver = std::mem::replace(inner.as_mut(), mk(IrExprKind::Unit, Ty::Unit, None));
-            *expr = method_call(receiver, "to_string", expr.ty.clone());
+            *expr = owned_read(receiver);
         }
     }
 
