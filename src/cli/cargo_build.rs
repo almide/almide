@@ -450,6 +450,11 @@ fn run_cargo_build_and_locate_binary(project_dir: &std::path::Path, release: boo
     let mut cmd = std::process::Command::new("cargo");
     inject_almide_par_if_rayon(&mut cmd, project_dir);
     cmd.arg("build").current_dir(project_dir);
+    // The binary is located under `project_dir/target` below; an inherited
+    // `CARGO_TARGET_DIR` (a common user setting, and what `cargo test` hands
+    // the harness's own child processes) would send it elsewhere and turn the
+    // build into "expected binary not found" (#2228 hit it first-hand).
+    cmd.arg("--target-dir").arg(project_dir.join("target"));
     if release {
         cmd.arg("--release");
     }
