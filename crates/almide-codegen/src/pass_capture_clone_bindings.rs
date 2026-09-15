@@ -138,23 +138,57 @@ pub(super) fn capture_bindings(
     (stmts, renames)
 }
 
-/// The vars of `body` every occurrence of which is a plain read at closure
-/// depth 1, outside every loop and never a write — with their occurrence
-/// count. See `Facts::sole_capture_uses`. `ALMIDE_CAPTURE_MOVE_OFF=1` empties
-/// the table (the ablation the certifier's sensitivity test drives).
-pub(super) fn sole_capture_uses(body: &IrExpr) -> HashMap<VarId, usize> {
+/// Per var of a fn body, the facts the capture-move rule reads: every
+/// occurrence as `(index in evaluation order, outer lambda, statement)`, and
+/// whether the var is CLEAN — no write, no reach through `&mut`, no
+/// occurrence inside a loop. See [`capture_moves`].
+#[derive(Default)]
+pub(super) struct CaptureUses {
+    pub(super) uses: HashMap<VarId, Vec<(usize, Option<u32>, u32)>>,
+    pub(super) clean: HashSet<VarId>,
+}
+
+/// The use table [`capture_moves`] decides from. `ALMIDE_CAPTURE_MOVE_OFF=1`
+/// empties it (the ablation the certifier's sensitivity test drives).
+pub(super) fn capture_uses(body: &IrExpr) -> CaptureUses {
     if almide_base::env::flag("ALMIDE_CAPTURE_MOVE_OFF") {
-        return HashMap::new();
+        return CaptureUses::default();
     }
     let sites = UseSites::of_expr(body, Site::Result, &ExplicitBorrows);
-    let mut count: HashMap<VarId, usize> = HashMap::new();
+    let mut out = CaptureUses::default();
     let mut unclean: HashSet<VarId> = HashSet::new();
-    for u in sites.iter() {
-        *count.entry(u.var).or_default() += 1;
-        if u.depth != 1 || u.in_loop || u.in_mut || u.is_write(true) || matches!(u.site, Site::Borrow { mutable: true }) {
+    for (i, u) in sites.iter().enumerate() {
+        out.uses.entry(u.var).or_default().push((i, u.outer_lambda, u.stmt));
+        if u.in_loop || u.in_mut || u.is_write(true) || matches!(u.site, Site::Borrow { mutable: true }) {
             unclean.insert(u.var);
         }
     }
-    count.retain(|v, _| !unclean.contains(v));
-    count
+    out.clean = out.uses.keys().copied().filter(|v| !unclean.contains(v)).collect();
+    out
+}
+
+/// May the capture of `var` by the lambda `lambda` MOVE the value instead of
+/// cloning it? The Perceus rule (a lambda dups its free variables only while
+/// they stay live): yes when the lambda holds the var's LAST occurrence, the
+/// var is clean, and no occurrence outside the lambda shares a statement
+/// with one inside it — a `map.fold(m, init, (k, v) => … m …)` borrows `m`
+/// through the runtime template while the closure is built, and a move there
+/// is the #809 E0505. Different statements cannot hold that borrow.
+pub(super) fn capture_moves(table: &CaptureUses, var: VarId, lambda: Option<u32>) -> bool {
+    let Some(lambda) = lambda else { return false };
+    if !table.clean.contains(&var) {
+        return false;
+    }
+    let Some(uses) = table.uses.get(&var) else { return false };
+    let inside: Vec<&(usize, Option<u32>, u32)> = uses.iter().filter(|(_, l, _)| *l == Some(lambda)).collect();
+    if inside.is_empty() {
+        return false;
+    }
+    let last_inside = inside.iter().map(|(i, _, _)| *i).max().unwrap_or(0);
+    let last_any = uses.iter().map(|(i, _, _)| *i).max().unwrap_or(0);
+    if last_any != last_inside {
+        return false;
+    }
+    let stmts: HashSet<u32> = inside.iter().map(|(_, _, s)| *s).collect();
+    !uses.iter().any(|(_, l, s)| *l != Some(lambda) && stmts.contains(s))
 }
