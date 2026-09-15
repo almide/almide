@@ -348,6 +348,13 @@ for bench in sorted(pairs):
     ceiling = base * (1 + budget / 100)
     floor = 0.90
     verdict = "ok"
+    if data[bench].get("ablated_identical"):
+        # The knob changed nothing in this program: the two binaries are one
+        # file, and a "delta" between them is the runner's noise and nothing
+        # else (fft and spectralnorm on 2026-09-15). Say so, and hold 1.0.
+        print(f"perf-ratio: {key:16s} 1.000 by construction — the ablated binary is byte-identical "
+              f"to the optimized one; the optimizer is a no-op on this program (timed {delta:.3f})")
+        continue
     if delta < floor:
         verdict = f"UNDER floor {floor:.2f} — the optimizer is COSTING runtime; find the pass and fix or retire it"
         failed = True

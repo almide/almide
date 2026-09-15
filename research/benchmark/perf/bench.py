@@ -203,6 +203,7 @@ def main():
         suite = [b for b in SUITE if b[0] in keep]
 
     ablate_benches = set(args.ablate_bench.split(",")) if args.ablate_bench else None
+    ablated_identical = {}  # bench -> the ablated native binary is byte-identical to the optimized one
     work = tempfile.mkdtemp(prefix="almide-perf-")
     variants = {}  # bench -> [(variant_name, argv_prefix)]
 
@@ -216,9 +217,15 @@ def main():
             run([almide, "build", src, "--release", "-o", out])
             vs.append((f"{name}/native", [out]))
             if args.ablate and (ablate_benches is None or name in ablate_benches):
-                out = os.path.join(work, f"{name}_native_ablated")
-                run([almide, "build", src, "--release", "-o", out], env={**os.environ, args.ablate: "1"})
-                vs.append((f"{name}/native:ablated", [out]))
+                abl = os.path.join(work, f"{name}_native_ablated")
+                run([almide, "build", src, "--release", "-o", abl], env={**os.environ, args.ablate: "1"})
+                vs.append((f"{name}/native:ablated", [abl]))
+                # A knob that changes nothing in the emitted program yields the
+                # SAME binary (rustc is deterministic): record that, so the
+                # consumer can report the delta as 1.0 by construction instead
+                # of timing two copies of one file against each other.
+                with open(out, "rb") as f1, open(abl, "rb") as f2:
+                    ablated_identical[name] = f1.read() == f2.read()
         if "wasm" in row:
             out = os.path.join(work, f"{name}.wasm")
             run([almide, "build", src, "--target", "wasm", "-o", out])
@@ -230,7 +237,8 @@ def main():
                 run([rustc, *RUSTC_FLAGS, os.path.join(HERE, "rust-ref", ref), "-o", out])
                 vs.append((f"{name}/rust:{stem}", [out]))
         variants[name] = vs
-        print(f"  {name}: {len(vs)} variant(s)")
+        note = " (ablated binary identical to optimized)" if ablated_identical.get(name) else ""
+        print(f"  {name}: {len(vs)} variant(s){note}")
 
     print("== verify (small workload, output equivalence across variants)")
     for name, _, _, _, verify_arg, mode, _ in suite:
@@ -266,6 +274,7 @@ def main():
                 times[vname].append(dt)
         results[name] = {
             "arg": arg,
+            **({"ablated_identical": ablated_identical[name]} if name in ablated_identical else {}),
             "variants": {
                 vname: {
                     "min": round(min(ts), 4),
