@@ -146,6 +146,15 @@ pub struct Use {
     /// runs once per iteration, so a variable bound outside the loop has a
     /// "later" use at every one of its own occurrences in the body.
     pub in_loop: bool,
+    /// The OUTERMOST lambda (its `lambda_id`) this occurrence sits in, when
+    /// `depth > 0`: the closure that captures the variable from the analysed
+    /// body. `None` outside every closure, or for a lambda without an id.
+    pub outer_lambda: Option<u32>,
+    /// The statement the occurrence belongs to, as an ordinal over the walk:
+    /// two occurrences with the same ordinal evaluate inside one statement
+    /// (or one block tail), so a borrow one of them holds can still be live
+    /// when the other runs.
+    pub stmt: u32,
 }
 
 impl Use {
@@ -193,14 +202,14 @@ impl UseSites {
     /// The occurrences in `expr`, which sits in `root` position (a fn body
     /// is a [`Site::Result`]).
     pub fn of_expr(expr: &IrExpr, root: Site, oracle: &dyn SlotOracle) -> Self {
-        let mut w = Walk { oracle, uses: Vec::new(), depth: 0, in_chain: false, mut_depth: 0, loop_depth: 0 };
+        let mut w = Walk { oracle, uses: Vec::new(), depth: 0, in_chain: false, mut_depth: 0, loop_depth: 0, outer_lambda: None, stmt: 0 };
         w.expr(expr, root);
         UseSites { uses: w.uses }
     }
 
     /// The occurrences in a statement list (a loop body).
     pub fn of_stmts(stmts: &[IrStmt], oracle: &dyn SlotOracle) -> Self {
-        let mut w = Walk { oracle, uses: Vec::new(), depth: 0, in_chain: false, mut_depth: 0, loop_depth: 0 };
+        let mut w = Walk { oracle, uses: Vec::new(), depth: 0, in_chain: false, mut_depth: 0, loop_depth: 0, outer_lambda: None, stmt: 0 };
         for s in stmts { w.stmt(s); }
         UseSites { uses: w.uses }
     }
@@ -252,13 +261,15 @@ struct Walk<'a> {
     in_chain: bool,
     mut_depth: u32,
     loop_depth: u32,
+    outer_lambda: Option<u32>,
+    stmt: u32,
 }
 
 impl Walk<'_> {
     fn record(&mut self, var: VarId, site: Site, chain: Option<Chain>) {
         self.uses.push(Use {
             var, site, chain, depth: self.depth, in_chain: self.in_chain, in_mut: self.mut_depth > 0,
-            in_loop: self.loop_depth > 0,
+            in_loop: self.loop_depth > 0, outer_lambda: self.outer_lambda, stmt: self.stmt,
         });
     }
 
@@ -302,10 +313,12 @@ impl Walk<'_> {
             | IrExprKind::ToVec { expr: x } | IrExprKind::RcWrap { expr: x, .. } => {
                 self.expr(x, Site::Operand)
             }
-            IrExprKind::Lambda { body, .. } => {
+            IrExprKind::Lambda { body, lambda_id, .. } => {
+                if self.depth == 0 { self.outer_lambda = *lambda_id; }
                 self.depth += 1;
                 self.expr(body, Site::Result);
                 self.depth -= 1;
+                if self.depth == 0 { self.outer_lambda = None; }
             }
 
             // ── Two children ──
@@ -346,7 +359,10 @@ impl Walk<'_> {
             }
             IrExprKind::Block { stmts, expr } => {
                 for s in stmts { self.stmt(s); }
-                if let Some(tail) = expr { self.expr(tail, Site::Result); }
+                if let Some(tail) = expr {
+                    self.stmt += 1;
+                    self.expr(tail, Site::Result);
+                }
             }
             IrExprKind::ForIn { iterable, body, .. } => {
                 self.expr(iterable, Site::Iterable { consumed: true });
@@ -474,6 +490,7 @@ impl Walk<'_> {
     }
 
     fn stmt(&mut self, s: &IrStmt) {
+        self.stmt += 1;
         match &s.kind {
             IrStmtKind::Bind { value, .. } => self.expr(value, Site::Assigned),
             IrStmtKind::BindDestructure { pattern, value } => {
