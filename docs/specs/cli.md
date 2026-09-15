@@ -638,6 +638,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_NO_AVAIL_CHECK` | gate | bypass the E081 stdlib availability check (the measurement escape the availability probe builds through) |
 | `ALMIDE_NO_BR_TABLE` | route | render every switch as an if-chain instead of `br_table` (v1 wasm render) |
 | `ALMIDE_NO_RTLIB` | route | build the native runtime inline instead of linking the prebuilt runtime crate (the self-contained cargo path; `almide test` sets it for the harness build) |
+| `ALMIDE_ORACLE_KEEP` | harness | keep the programs the native borrow-mode oracle generates (tests/native_borrow_oracle_test.rs) instead of deleting them after the run |
 | `ALMIDE_NO_VERIFIED_OK` | gate | re-enable the retired `--no-verified` legs (the v0 fallback) instead of refusing the flag |
 | `ALMIDE_OMEGA=value` | route | the baked ω ordinal for deterministic wall-deadline replay: the artifact cuts at the n-th wall check without reading the clock (`-1` / unset = live) |
 | `ALMIDE_OMEGA_RECORD` | route | make the native artifact print `__ALMD_OMEGA <ord>` at each region exit whose deadline fired (record on native, replay anywhere) |

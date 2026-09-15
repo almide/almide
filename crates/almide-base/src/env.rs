@@ -145,6 +145,7 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_NO_AVAIL_CHECK", Flag, Gate, "bypass the E081 stdlib availability check (the measurement escape the availability probe builds through)"),
     sw("ALMIDE_NO_BR_TABLE", Flag, Route, "render every switch as an if-chain instead of `br_table` (v1 wasm render)"),
     sw("ALMIDE_NO_RTLIB", Flag, Route, "build the native runtime inline instead of linking the prebuilt runtime crate (the self-contained cargo path; `almide test` sets it for the harness build)"),
+    sw("ALMIDE_ORACLE_KEEP", Flag, Harness, "keep the programs the native borrow-mode oracle generates (tests/native_borrow_oracle_test.rs) instead of deleting them after the run"),
     sw("ALMIDE_NO_VERIFIED_OK", Flag, Gate, "re-enable the retired `--no-verified` legs (the v0 fallback) instead of refusing the flag"),
     sw("ALMIDE_OMEGA", Value, Route, "the baked ω ordinal for deterministic wall-deadline replay: the artifact cuts at the n-th wall check without reading the clock (`-1` / unset = live)"),
     sw("ALMIDE_OMEGA_RECORD", Flag, Route, "make the native artifact print `__ALMD_OMEGA <ord>` at each region exit whose deadline fired (record on native, replay anywhere)"),
