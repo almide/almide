@@ -103,11 +103,11 @@ pub trait NanoPass: std::fmt::Debug {
     /// Default: not a barrier.
     fn barrier(&self) -> bool { false }
 
-    /// Postconditions: structural invariants guaranteed after this pass runs.
-    /// Verified on every build. Debug builds panic on violation; release
-    /// builds print a `[POSTCONDITION VIOLATION]` diagnostic and keep
-    /// running. Violations are compiler bugs — downstream passes may rely
-    /// on the invariants unconditionally.
+    /// Postconditions: structural invariants guaranteed after this pass runs
+    /// — and from then on: they are MONOTONE, re-verified after every later
+    /// pass (debug / `ALMIDE_VERIFY_IR`) and once at the end of the pipeline
+    /// in every profile, so a later pass that undoes them is named. A
+    /// violation is a compiler bug and fails the build.
     fn postconditions(&self) -> Vec<Postcondition> { vec![] }
 
     /// Run the pass. Takes ownership of the program, returns modified program
@@ -418,9 +418,10 @@ impl Pipeline {
     }
 
     /// Inter-pass IR verification (debug / opt-in only — see `verify_ir`
-    /// in `run`).
-    fn verify_after_pass(pass: &dyn NanoPass, program: &IrProgram) {
-        let pass_name = pass.name();
+    /// in `run`): the IR verifier, then the postconditions of the pass that
+    /// just ran (`idx`) AND of every pass that ran before it (`done`).
+    fn verify_after_pass(passes: &[Box<dyn NanoPass>], idx: usize, done: &[usize], program: &IrProgram) {
+        let pass_name = passes[idx].name();
         let errors = almide_ir::verify_program(program);
         if !errors.is_empty() {
             eprintln!("[IR CHECK] {} error(s) after pass '{}':", errors.len(), pass_name);
@@ -435,22 +436,38 @@ impl Pipeline {
             panic!("IR verification failed after pass '{}'", pass_name);
         }
 
-        // Postcondition verification.
-        let postconds = pass.postconditions();
-        if !postconds.is_empty() {
-            let violations = verify_postconditions(pass_name, program, &postconds);
-            for v in &violations {
-                eprintln!("[POSTCONDITION VIOLATION] {}", v);
-            }
-            if !violations.is_empty() {
-                panic!("Postcondition violation after pass '{}'", pass_name);
-            }
+        // Postcondition verification: the pass's own, then every one
+        // established earlier that must still hold.
+        let mut violations = verify_postconditions(pass_name, program, &passes[idx].postconditions());
+        violations.extend(Self::established_violations(passes, done, pass_name, program));
+        for v in &violations {
+            eprintln!("[POSTCONDITION VIOLATION] {}", v);
         }
+        if !violations.is_empty() {
+            panic!("Postcondition violation after pass '{}'", pass_name);
+        }
+    }
+
+    /// A postcondition is MONOTONE: it holds from the pass that establishes
+    /// it to the end of the pipeline (rustc's `validate_body` is indexed by
+    /// `MirPhase`, Swift's SIL verifier by `SILStage`, for the same reason).
+    /// A later pass that reintroduces a shape an earlier pass lowered breaks
+    /// the invariant downstream passes rely on; this names both passes.
+    fn established_violations(passes: &[Box<dyn NanoPass>], done: &[usize], after: &str, program: &IrProgram) -> Vec<String> {
+        done.iter()
+            .flat_map(|&i| {
+                let by = passes[i].name();
+                verify_postconditions(by, program, &passes[i].postconditions())
+                    .into_iter()
+                    .map(move |v| format!("{v} — established by '{by}', no longer holds after '{after}'"))
+            })
+            .collect()
     }
 
     pub fn run(&self, program: IrProgram, target: Target) -> IrProgram {
         let mut program = program;
         let mut executed: Vec<&str> = Vec::new();
+        let mut done: Vec<usize> = Vec::new();
 
         // ALMIDE_DUMP_IR: dump IR after specified passes (comma-separated, or "all")
         let dump_filter = almide_base::env::var("ALMIDE_DUMP_IR");
@@ -522,10 +539,11 @@ impl Pipeline {
 
             // Inter-pass IR verification (debug / opt-in only — see verify_ir).
             if verify_ir {
-                Self::verify_after_pass(pass.as_ref(), &program);
+                Self::verify_after_pass(&self.passes, idx, &done, &program);
             }
 
             executed.push(pass_name);
+            done.push(idx);
         }
 
         // §10 release promotion (#532): one FINAL verification runs in EVERY
@@ -535,7 +553,10 @@ impl Pipeline {
         // the same trade wasmparser::validate makes on the wasm side. A
         // violation is a compiler bug and fails the build in release too.
         if !verify_ir {
-            let errors = almide_ir::verify_program(&program);
+            let mut errors: Vec<String> = almide_ir::verify_program(&program).iter().map(|e| e.to_string()).collect();
+            // Every pass's postcondition must still hold at the end (the
+            // monotone reading above): six cheap walks, one line each.
+            errors.extend(Self::established_violations(&self.passes, &done, "the last pass", &program));
             if !errors.is_empty() {
                 eprintln!("[IR CHECK] {} error(s) at end of pipeline:", errors.len());
                 for e in &errors {
