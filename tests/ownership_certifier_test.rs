@@ -11,26 +11,41 @@ use std::path::Path;
 use std::process::Command;
 
 fn certify(tag: &str, src: &str) -> (bool, String) {
+    certify_with(tag, src, &[])
+}
+
+fn certify_with(tag: &str, src: &str, env: &[(&str, &str)]) -> (bool, String) {
     let dir = std::env::temp_dir().join(format!("almide-certify-{}-{tag}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let file = dir.join("prog.almd");
     std::fs::write(&file, src).unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_almide"))
-        .arg(&file).arg("--target").arg("rust")
-        .env("ALMIDE_CERTIFY_OWNERSHIP", "fail")
-        .output().expect("almide");
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_almide"));
+    cmd.arg(&file).arg("--target").arg("rust").env("ALMIDE_CERTIFY_OWNERSHIP", "fail");
+    for (k, v) in env { cmd.env(k, v); }
+    let out = cmd.output().expect("almide");
     let _ = std::fs::remove_dir_all(Path::new(&dir));
     (out.status.success(), String::from_utf8_lossy(&out.stderr).into_owned())
 }
 
+const GREETER: &str = "fn greeter(name: String) -> (String) -> String = (x) => name + \", \" + x\nfn main() -> Unit = println(greeter(\"hi\")(\"you\"))\n";
+
 #[test]
 fn a_capture_cloned_at_its_last_use_is_a_c3_violation() {
-    // `name` is cloned into the closure and never used again: ownership was
-    // available, the clone copies for nothing. Builds and prints correctly
-    // on both legs — only the certifier and the allocation count see it.
-    let (ok, err) = certify("c3", "fn greeter(name: String) -> (String) -> String = (x) => name + \", \" + x\nfn main() -> Unit = println(greeter(\"hi\")(\"you\"))\n");
+    // With last-use moves ablated, `name` is cloned into the closure and
+    // never used again: ownership was available, the clone copies for
+    // nothing. Builds and prints correctly on both legs — only the certifier
+    // and the allocation count see it.
+    let (ok, err) = certify_with("c3", GREETER, &[("ALMIDE_CAPTURE_MOVE_OFF", "1")]);
     assert!(!ok, "the build must fail under ALMIDE_CERTIFY_OWNERSHIP=fail:\n{err}");
     assert!(err.contains("[C3 clone-at-last-use] greeter: `name: String`"), "{err}");
+}
+
+#[test]
+fn a_capture_whose_closure_is_its_sole_user_moves_and_certifies() {
+    // The same program with CaptureClone's last-use move (#2231): the bind
+    // is `let __cap = name`, and the body certifies clean.
+    let (ok, err) = certify("c3-fixed", GREETER);
+    assert!(ok, "the greeter must certify once the capture moves:\n{err}");
 }
 
 #[test]
