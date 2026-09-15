@@ -71,6 +71,23 @@ pub(crate) fn insert_clones_string_interp(parts: Vec<IrStringPart>, ctx: &mut Cl
         .collect();
     let merged: HashSet<VarId> = ctx.always.union(&conflicted).copied().collect();
     let parts = parts.into_iter().map(|p| match p {
+        // A bare `String` variable part is a PLACE part: `format_args!`
+        // borrows it for the call, so it is neither moved nor needs a clone
+        // — `"-- ${s} --"` rendered `s.clone()` for a value the macro only
+        // reads (#2231). The occurrence still counts toward the var's
+        // remaining uses. An `always` var (a static, a COW local) keeps its
+        // clone; a conflicted root is handled by the guard below.
+        IrStringPart::Expr { expr } if matches!(expr.kind, IrExprKind::Var { .. })
+            && matches!(expr.ty, almide_lang::types::Ty::String)
+            && matches!(&expr.kind, IrExprKind::Var { id } if ctx.eligible.contains(id) && !merged.contains(id)) =>
+        {
+            if let IrExprKind::Var { id } = &expr.kind
+                && let Some(r) = ctx.remaining.get_mut(id)
+            {
+                *r = r.saturating_sub(1);
+            }
+            IrStringPart::Expr { expr }
+        }
         IrStringPart::Expr { expr } => {
             let expr = if conflicted.is_empty() || place_root(&expr).is_some() {
                 insert_clones_live(expr, ctx)
