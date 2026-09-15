@@ -11,7 +11,7 @@ pub(super) fn wrap_fan_with_clones(expr: &mut IrExpr, cx: &mut Cx, scope: &HashS
         let captures: Vec<VarId> = almide_ir::free_vars::free_vars(arm, &HashSet::new())
             .into_iter().filter(|v| scope.contains(v)
                 && needs_clone_type(&cx.vt.get(*v).ty) && !mutated.contains(v)).collect();
-        let (stmts, renames) = capture_bindings(&captures, cx, &mutated, Some("__fan_cap"));
+        let (stmts, renames) = capture_bindings(&captures, cx, &mutated, Some("__fan_cap"), &std::collections::HashSet::new());
         replace_vars(arm, &renames);
         bindings.extend(stmts);
     }
@@ -27,6 +27,7 @@ pub(super) fn capture_bindings(
     cx: &mut Cx,
     lam_mutated: &HashSet<VarId>,
     prefix: Option<&str>,
+    move_now: &HashSet<VarId>,
 ) -> (Vec<IrStmt>, std::collections::HashMap<VarId, VarId>) {
     let mut stmts = Vec::new();
     let mut renames = std::collections::HashMap::new();
@@ -80,6 +81,16 @@ pub(super) fn capture_bindings(
                 },
                 ty: ty.clone(), span: None, def_id: None,
             },
+            // The lambda is the var's sole user (#2231): the bind MOVES it.
+            // Nothing else — no later statement, no sibling closure, no
+            // runtime-template borrow in the same call — can name the var
+            // again, so the #809 hazard below cannot arise.
+            _ if move_now.contains(&var_id) => IrExpr {
+                kind: IrExprKind::Var { id: var_id },
+                ty: ty.clone(),
+                span: None,
+                def_id: None,
+            },
             // The default capture bind CLONES explicitly (#809): CloneInsertion's
             // last-use analysis would MOVE the var here when this is its last
             // syntactic use — but a runtime-template borrow (`&{m}` — e.g.
@@ -125,4 +136,25 @@ pub(super) fn capture_bindings(
     }
 
     (stmts, renames)
+}
+
+/// The vars of `body` every occurrence of which is a plain read at closure
+/// depth 1, outside every loop and never a write — with their occurrence
+/// count. See `Facts::sole_capture_uses`. `ALMIDE_CAPTURE_MOVE_OFF=1` empties
+/// the table (the ablation the certifier's sensitivity test drives).
+pub(super) fn sole_capture_uses(body: &IrExpr) -> HashMap<VarId, usize> {
+    if almide_base::env::flag("ALMIDE_CAPTURE_MOVE_OFF") {
+        return HashMap::new();
+    }
+    let sites = UseSites::of_expr(body, Site::Result, &ExplicitBorrows);
+    let mut count: HashMap<VarId, usize> = HashMap::new();
+    let mut unclean: HashSet<VarId> = HashSet::new();
+    for u in sites.iter() {
+        *count.entry(u.var).or_default() += 1;
+        if u.depth != 1 || u.in_loop || u.in_mut || u.is_write(true) || matches!(u.site, Site::Borrow { mutable: true }) {
+            unclean.insert(u.var);
+        }
+    }
+    count.retain(|v, _| !unclean.contains(v));
+    count
 }
