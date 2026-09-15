@@ -249,6 +249,12 @@ pub fn hoist_conflicting_reads(program: &mut IrProgram) {
     }
 }
 
+/// Does `arg` read `var` anywhere (closure bodies included)? A sibling of a
+/// `&mut var` argument that does is the conflicting read the hoist moves out.
+fn reads_var(arg: &IrExpr, var: VarId) -> bool {
+    UseSites::of_expr(arg, Site::Operand, &super::use_kind::ExplicitBorrows).occurs(var)
+}
+
 /// Find VarId of a `&mut Var(x)` argument.
 fn find_mut_borrow_var(arg: &IrExpr) -> Option<VarId> {
     if let IrExprKind::Borrow { expr, mutable: true, .. } = &arg.kind {
@@ -418,7 +424,7 @@ fn hoist_runtime_call(
         .map(|arg| {
             if find_mut_borrow_var(&arg).is_some() {
                 arg // keep the &mut arg as-is
-            } else if uses_var(&arg, mut_id) {
+            } else if reads_var(&arg, mut_id) {
                 hoist_one_arg(arg, &mut hoisted_stmts, vt)
             } else {
                 arg
@@ -451,7 +457,7 @@ fn hoist_call_if_needed(target: CallTarget, args: Vec<IrExpr>, type_args: Vec<al
         let new_args: Vec<IrExpr> = args.into_iter().map(|arg| {
             if find_mut_borrow_var(&arg).is_some() {
                 arg
-            } else if uses_var(&arg, mut_id) {
+            } else if reads_var(&arg, mut_id) {
                 hoist_one_arg(arg, &mut hoisted_stmts, vt)
             } else {
                 arg

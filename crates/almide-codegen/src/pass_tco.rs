@@ -20,20 +20,11 @@
 //! This eliminates stack growth for self-recursive tail calls, critical for
 //! WASM where the stack is limited and there is no native tail call support.
 
-use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use almide_ir::*;
 use almide_lang::types::Ty;
 use almide_lang::types::constructor::TypeConstructorId;
 use super::pass::{NanoPass, PassResult, Target};
-
-// Param indices for the currently-being-rewritten TCO function whose borrow
-// should be preserved across loop iterations (currently: Bytes params).
-// Filled in `rewrite_to_loop`, read by `emit_tail_call_replacement` to decide
-// whether to strip a `Borrow` wrapper from that arg position.
-thread_local! {
-    static TCO_BORROWED_PARAMS: RefCell<HashSet<usize>> = RefCell::new(HashSet::new());
-}
 
 #[derive(Debug)]
 pub struct TailCallOptPass;

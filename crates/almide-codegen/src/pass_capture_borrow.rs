@@ -20,17 +20,14 @@ fn borrowed_fold_params(program: &IrProgram, shared: &HashSet<VarId>) -> HashSet
             {
                 let bound = params.iter().map(|(id, _)| *id).collect();
                 let captures = almide_ir::free_vars::free_vars(body, &bound);
-                let mut mutated = HashSet::new();
-                collect_mutated_vars(body, &mut mutated);
+                let mutated = written_vars(body);
                 let mut nested = Nested(false);
                 nested.visit_expr(body);
                 let owned: HashSet<_> = captures.iter().copied().filter(|v| needs_clone_type(&self.vt.get(*v).ty)).collect();
-                let mut reads = Reads { owned: &owned, ok: true };
-                reads.visit_expr(body);
                 // Capture-free folds need no ownership workaround. Leave them
                 // to stream fusion so promotion does not force an intermediate
                 // collection between an existing map/filter chain and its fold.
-                if !owned.is_empty() && !nested.0 && reads.ok && captures.iter().all(|v| !self.shared.contains(v) && !mutated.contains(v)) {
+                if !owned.is_empty() && !nested.0 && only_borrows(body, &owned) && captures.iter().all(|v| !self.shared.contains(v) && !mutated.contains(v)) {
                     self.out.insert(*first);
                 }
             }
@@ -44,37 +41,20 @@ fn borrowed_fold_params(program: &IrProgram, shared: &HashSet<VarId>) -> HashSet
             if !self.0 { walk_expr(self, e); }
         }
     }
-    // Moving an owned capture would turn the closure into FnOnce. Only
-    // explicit borrows, explicit clones, and indexed reads bypass this scan.
-    struct Reads<'a> { owned: &'a HashSet<VarId>, ok: bool }
-    impl IrVisitor for Reads<'_> {
-        // Guards rather than a match with a default arm: every kind this
-        // does not name still reaches `walk_expr`, which the traversal
-        // totality lint reads off the shape of the code (DIV2).
-        fn visit_expr(&mut self, e: &IrExpr) {
-            if let IrExprKind::Borrow { expr, mutable: false, .. } | IrExprKind::Clone { expr } = &e.kind
-                && matches!(expr.kind, IrExprKind::Var { .. })
-            {
-                return;
-            }
-            if let IrExprKind::IndexAccess { object, index } = &e.kind
-                && matches!(object.kind, IrExprKind::Var { .. })
-            {
-                self.visit_expr(index);
-                return;
-            }
-            if let IrExprKind::Var { id } = &e.kind
-                && self.owned.contains(id)
-            {
-                self.ok = false;
-            }
-            if self.ok { walk_expr(self, e); }
-        }
-    }
     let mut scan = Scan { shared, vt: &program.var_table, out: HashSet::new() };
     for f in &program.functions { scan.visit_expr(&f.body); }
     for m in &program.modules { for f in &m.functions { scan.visit_expr(&f.body); } }
     scan.out
+}
+
+/// Moving an owned capture would turn the closure into `FnOnce`. Only an
+/// explicit shared borrow, an explicit clone, and an indexed read of the
+/// bare variable keep it borrowed; any other occurrence — a field read
+/// included — moves it.
+fn only_borrows(body: &IrExpr, owned: &HashSet<VarId>) -> bool {
+    UseSites::of_expr(body, Site::Result, &ExplicitBorrows).iter()
+        .filter(|u| owned.contains(&u.var))
+        .all(|u| matches!(u.site, Site::Borrow { mutable: false } | Site::Clone | Site::Index))
 }
 
 // The legacy runtime fold takes Rc<dyn Fn + 'static>. Promote only the

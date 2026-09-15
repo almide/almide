@@ -47,7 +47,7 @@ use almide_base::intern::{sym, Sym};
 use almide_ir::*;
 
 use super::pass::{NanoPass, PassResult, Target};
-use super::pass_capture_clone::collect_mutated_vars;
+use super::use_kind::written_vars;
 use super::pass_rust_lowering::rewrite_tail_list_to_array;
 use super::pass_stdlib_lowering::{prepare_lambda, prepare_lambda_borrowed};
 
@@ -453,14 +453,13 @@ fn borrow_adapted_source(mut expr: IrExpr) -> IrExpr {
     let IrExprKind::Clone { expr: inner } = &source.kind else { return expr };
     let IrExprKind::Var { id } = &inner.kind else { return expr };
     let id = *id;
-    let mut mutated = HashSet::new();
-    for lambda in steps.iter().filter_map(IterStep::lambda).chain(collector.lambda()) {
-        collect_mutated_vars(lambda, &mut mutated);
-    }
-    if let IterCollector::Fold { init, .. } = &*collector {
-        collect_mutated_vars(init, &mut mutated);
-    }
-    if mutated.contains(&id) {
+    let init = match &*collector {
+        IterCollector::Fold { init, .. } => Some(&**init),
+        _ => None,
+    };
+    let writes_source = steps.iter().filter_map(IterStep::lambda).chain(collector.lambda()).chain(init)
+        .any(|e| written_vars(e).contains(&id));
+    if writes_source {
         return expr;
     }
     let taken = std::mem::replace(&mut source.kind, IrExprKind::Unit);
