@@ -118,6 +118,19 @@ fn certify_last_use_clones(f: &IrFunction, vars: &VarTable, ann: &CodegenAnnotat
         if !candidate || clone_is_special(v, ann) || is_closure_value(&vars.get(v).ty) {
             continue;
         }
+        // Another occurrence in the SAME statement that holds a borrow of
+        // the var while this clone's consumer runs — a `&v` argument, a
+        // place read (`v.f`, `v[i]`), a bare interpolation part `format_args!`
+        // borrows — makes the clone necessary (the E0505 the clone pass's
+        // guards exist for, #809 / #866 / #1829).
+        let borrowed_in_stmt = uses.iter().any(|w| w.var == v && w.stmt == u.stmt && !std::ptr::eq(*w, *u) && matches!(
+            w.site,
+            Site::Borrow { .. } | Site::Arg(SlotMode::Borrow | SlotMode::Mut) | Site::Member | Site::TupleIndex
+                | Site::Index | Site::MapKeyed | Site::Deref | Site::Receiver | Site::Construct(Ctor::Interp)
+        ));
+        if borrowed_in_stmt {
+            continue;
+        }
         if !uses[i + 1..].iter().any(|w| w.var == v) {
             out.push(format!(
                 "[C3 clone-at-last-use] {}: `{}: {:?}` is cloned at its last occurrence — the value was owned and never used again, so the clone copies for nothing (CloneInsertion)",
@@ -173,7 +186,10 @@ fn justifies_ownership(u: &Use) -> bool {
             Site::Scrutinee | Site::Receiver | Site::Callee | Site::Iterable { .. }
                 | Site::Arg(SlotMode::Mut) | Site::Borrow { mutable: true } | Site::Construct(Ctor::Interp)
         )
-        || matches!(u.chain, Some(c) if c.heap && matches!(c.top, Site::Scrutinee | Site::Receiver | Site::Callee | Site::Borrow { mutable: true }))
+        // A heap field moved straight off the param into a record literal:
+        // `CloneInsertion` moves it out of an owned final-use record
+        // (`pass_clone_record_fields`) — the borrow pass owns for it too.
+        || matches!(u.chain, Some(c) if c.heap && matches!(c.top, Site::Scrutinee | Site::Receiver | Site::Callee | Site::Borrow { mutable: true } | Site::Construct(Ctor::Record)))
 }
 
 /// Is an `Own` verdict on `p` one this file can judge? Entry points, tests,
