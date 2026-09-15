@@ -8,7 +8,7 @@
 use std::collections::{HashSet, HashMap};
 use std::rc::Rc;
 use almide_ir::*;
-use almide_base::{Span, Sym};
+use almide_base::Span;
 use almide_lang::types::Ty;
 use super::pass::{NanoPass, PassResult, Target};
 use super::pass_clone_places::{insert_clones_index_access, insert_clones_map_access, insert_clones_member, map_insert_value_first};
@@ -45,7 +45,6 @@ impl NanoPass for CloneInsertionPass {
         let marks = CloneMarks {
             always: program.codegen_annotations.always_clone_vars.clone(),
             tco_owned: program.codegen_annotations.tco_owned_params.clone(),
-            tco_fns: program.codegen_annotations.tco_rewritten_fns.clone(),
         };
         let sets = ClassSets::split(&program.var_table, &top_let_vars, &syntactic.total, &marks);
         let mut loops = LoopMarks::default();
@@ -106,37 +105,23 @@ impl SyntacticCounts {
 struct CloneMarks {
     always: HashSet<VarId>,
     tco_owned: HashSet<VarId>,
-    tco_fns: HashSet<Sym>,
 }
 
-/// The `always` / `eligible` classification of one function group, in both
-/// flavours: with the TCO-owned exemption (for the bodies TailCallOpt
-/// rewrote, and every top-let) and without it.
+/// The `always` / `eligible` classification of one function group. The
+/// TCO-owned exemption applies wherever its ids occur: a local is bound in
+/// exactly one function (`verify_ir`, #2186), so a TCO loop param can only
+/// be read inside the body TailCallOpt rewrote — the one place its clone
+/// plan holds. (#1130 was the branch-lift helper that used to share the
+/// enclosing fn's ids and inherited the exemption without the plan.)
 struct ClassSets {
     always: HashSet<VarId>,
     eligible: HashSet<VarId>,
-    always_plain: HashSet<VarId>,
-    eligible_plain: HashSet<VarId>,
 }
 
 impl ClassSets {
     fn split(vt: &VarTable, top_let_vars: &HashSet<VarId>, syntactic: &HashMap<VarId, u32>, marks: &CloneMarks) -> ClassSets {
         let (always, eligible) = split_clone_ids(vt, top_let_vars, syntactic, &marks.always, &marks.tco_owned);
-        // #1130: the TCO exemption holds ONLY inside the body TailCallOpt
-        // rewrote. A VarId can live in another function too — `branch_lift`
-        // lifts an in-loop branch into a helper whose params ARE the
-        // enclosing fn's vars — and there the compensating clone plan does
-        // not exist, so its bare moves were a rustc E0382. Everything else
-        // gets the ordinary last-use analysis.
-        let no_exempt: HashSet<VarId> = HashSet::new();
-        let (always_plain, eligible_plain) = split_clone_ids(vt, top_let_vars, syntactic, &marks.always, &no_exempt);
-        ClassSets { always, eligible, always_plain, eligible_plain }
-    }
-
-    /// The pair a function body walks under: the exempting flavour inside a
-    /// TCO-rewritten body, the plain one everywhere else.
-    fn for_fn(&self, tco_here: bool) -> (&HashSet<VarId>, &HashSet<VarId>) {
-        if tco_here { (&self.always, &self.eligible) } else { (&self.always_plain, &self.eligible_plain) }
+        ClassSets { always, eligible }
     }
 }
 
@@ -175,9 +160,8 @@ impl BodyScope {
 /// Rewrite every body of one function group under its own [`BodyScope`].
 fn rewrite_bodies(functions: &mut [IrFunction], top_lets: &mut [IrTopLet], syntactic: &SyntacticCounts, sets: &ClassSets, marks: &CloneMarks, loops: &mut LoopMarks) {
     for (func, mentioned) in functions.iter_mut().zip(&syntactic.fn_bodies) {
-        let (always, eligible) = sets.for_fn(marks.tco_fns.contains(&func.name));
         let owned = func.params.iter().filter(|p| p.borrow == ParamBorrow::Own).map(|p| p.var).collect();
-        let body = Body { mentioned, always, eligible, total: &syntactic.total, tco_owned: &marks.tco_owned };
+        let body = Body { mentioned, always: &sets.always, eligible: &sets.eligible, total: &syntactic.total, tco_owned: &marks.tco_owned };
         func.body = rewrite_body(std::mem::take(&mut func.body), &body, owned, loops);
     }
     for (tl, mentioned) in top_lets.iter_mut().zip(&syntactic.top_let_bodies) {
