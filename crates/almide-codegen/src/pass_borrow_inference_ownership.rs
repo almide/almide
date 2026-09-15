@@ -233,8 +233,14 @@ fn param_borrow(param: &IrParam, uses: &UseSites, scope: &Scope, body: &IrExpr) 
     if param.is_mut {
         return ParamBorrow::RefMut;
     }
-    let literal_subject = matches!(param.ty, Ty::String) && scrutinee_only_compares(body, param.var);
-    if uses.of(param.var).any(|u| consumes(u) && !(literal_subject && u.site == Site::Scrutinee)) {
+    // A `String` param a `match` only compares, or an interpolation only
+    // formats (`format_args!` borrows its parts), is read by reference at
+    // those positions (#2231).
+    let is_string = matches!(param.ty, Ty::String);
+    let literal_subject = is_string && scrutinee_only_compares(body, param.var);
+    let read_by_ref = |u: &Use| (literal_subject && u.site == Site::Scrutinee)
+        || (is_string && u.site == Site::Construct(Ctor::Interp) && u.depth == 0);
+    if uses.of(param.var).any(|u| consumes(u) && !read_by_ref(u)) {
         return ParamBorrow::Own;
     }
     // Implicit mut for bundled bodies: when the body forwards this param into
