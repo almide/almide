@@ -849,10 +849,15 @@ pub(super) fn auto_derive_decode(wk: &mut CodecWk, type_ty: &Ty, fields: &[IrFie
                 // the default, a present value decodes strictly.
                 let fv = wk.vt.alloc(sym(&format!("_dv_{}", f.name)), value_ty.clone(), Mutability::Let, None);
                 let fv_expr = e_(IrExprKind::Var { id: fv }, value_ty.clone());
-                let is_null = call_mod_("value", "eq", vec![
-                    fv_expr.clone(),
-                    call_mod_("value", "null", vec![], value_ty.clone()),
-                ], Ty::Bool);
+                // `==` on two Values, as user code lowers it (BinOp::Eq —
+                // every target's eq lowering handles it). Not a `value.eq`
+                // Module call: no such fn exists in `stdlib/value.almd`, so
+                // ResolveCalls' postcondition names it unresolved (#2186).
+                let is_null = e_(IrExprKind::BinOp {
+                    op: BinOp::Eq,
+                    left: Box::new(fv_expr.clone()),
+                    right: Box::new(call_mod_("value", "null", vec![], value_ty.clone())),
+                }, Ty::Bool);
                 let decoded = dec_field_expr(wk, fv_expr, &f.ty, &value_ty, &key_name(f));
                 IrExpr {
                     kind: IrExprKind::Match {
