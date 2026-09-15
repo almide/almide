@@ -166,6 +166,14 @@ pub struct Use {
     /// (`call_borrowed_vars`, #809 / #866) forces a clone here regardless of
     /// last use, so this occurrence can never be a move.
     pub guard_forced: bool,
+    /// For an occurrence inside a closure (`depth > 0`): a call, `match` or
+    /// loop enclosing the OUTERMOST closure holds a borrow of this variable
+    /// while that closure is built — a direct `&v` / `&v.f` argument or
+    /// receiver, a match subject, a by-reference iterable. The closure cannot
+    /// move the variable then (E0505); a borrow a sibling subexpression took
+    /// has ended by then, and one inside the closure body happens when the
+    /// closure runs. `false` outside closures.
+    pub held_across: bool,
 }
 
 impl Use {
@@ -305,6 +313,14 @@ struct Walk<'a> {
     /// set per enclosing call): the clone pass forces every other
     /// occurrence of those vars among that call's arguments to clone.
     guarded: Vec<HashSet<VarId>>,
+    /// The vars an enclosing call, `match` or loop holds a borrow of across
+    /// its operands (one set per such node) — see [`Use::held_across`].
+    held: Vec<HashSet<VarId>>,
+    /// How many `held` sets were pushed OUTSIDE the outermost lambda being
+    /// walked: only those hold across the closure's construction; a call
+    /// inside the lambda body borrows when the closure runs, not when it is
+    /// built.
+    held_outside: usize,
 }
 
 impl<'a> Walk<'a> {
@@ -312,15 +328,17 @@ impl<'a> Walk<'a> {
         Walk {
             oracle, uses: Vec::new(), depth: 0, in_chain: false, mut_depth: 0, loop_depth: 0,
             outer_lambda: None, stmt: 0, arm: 0, next_arm: 0, arm_parent: HashMap::new(), guarded: Vec::new(),
+            held: Vec::new(), held_outside: 0,
         }
     }
 
     fn record(&mut self, var: VarId, site: Site, chain: Option<Chain>) {
         let guard_forced = self.guarded.iter().any(|g| g.contains(&var));
+        let held_across = self.depth > 0 && self.held[..self.held_outside].iter().any(|h| h.contains(&var));
         self.uses.push(Use {
             var, site, chain, depth: self.depth, in_chain: self.in_chain, in_mut: self.mut_depth > 0,
             in_loop: self.loop_depth > 0, outer_lambda: self.outer_lambda, stmt: self.stmt,
-            arm: self.arm, guard_forced,
+            arm: self.arm, guard_forced, held_across,
         });
     }
 
@@ -404,6 +422,25 @@ impl<'a> Walk<'a> {
         UseSites::of_expr(arg, Site::Operand, &ExplicitBorrows).occurs(var)
     }
 
+    /// The variables a call holds a borrow of across its argument list — a
+    /// `&v` or `&v.f` argument, a bare place at a `Borrow` / `Mut` slot, a
+    /// method receiver — for [`Use::held_across`]. Broader than
+    /// [`Self::direct_borrows`] (which mirrors the clone pass's E0505 guard
+    /// exactly): a borrow through a field or index holds the root too.
+    fn held_operands(args: &[IrExpr], modes: &[SlotMode], target: Option<&CallTarget>) -> HashSet<VarId> {
+        let mut out = HashSet::new();
+        for (a, mode) in args.iter().zip(modes) {
+            let root = match &a.kind {
+                IrExprKind::Borrow { .. } => borrow_root(a),
+                _ if matches!(mode, SlotMode::Borrow | SlotMode::Mut) => place_root(a),
+                _ => None,
+            };
+            out.extend(root);
+        }
+        if let Some(CallTarget::Method { object, .. }) = target { out.extend(place_root(object)); }
+        out
+    }
+
     /// The variables a call keeps borrowed through its argument list: a
     /// direct `&v` argument (the clone pass's guard set after
     /// `BorrowInsertion` spelled it), or a bare `v` handed to a slot the
@@ -459,7 +496,7 @@ impl<'a> Walk<'a> {
                 self.expr(x, Site::Operand)
             }
             IrExprKind::Lambda { body, lambda_id, .. } => {
-                if self.depth == 0 { self.outer_lambda = *lambda_id; }
+                if self.depth == 0 { self.outer_lambda = *lambda_id; self.held_outside = self.held.len(); }
                 self.depth += 1;
                 self.arm_expr(body, Site::Result);
                 self.depth -= 1;
@@ -495,6 +532,7 @@ impl<'a> Walk<'a> {
                 self.arm_expr(else_, Site::Result);
             }
             IrExprKind::Match { subject, arms } => {
+                self.held.push(place_root(subject).into_iter().collect());
                 self.expr(subject, Site::Scrutinee);
                 for arm in arms {
                     let parent = self.arm;
@@ -506,6 +544,7 @@ impl<'a> Walk<'a> {
                     self.expr(&arm.body, Site::Result);
                     self.arm = parent;
                 }
+                self.held.pop();
             }
             IrExprKind::Block { stmts, expr } => {
                 for s in stmts { self.stmt(s); }
@@ -515,10 +554,12 @@ impl<'a> Walk<'a> {
                 }
             }
             IrExprKind::ForIn { iterable, body, .. } => {
+                self.held.push(borrow_root(iterable).into_iter().collect());
                 self.expr(iterable, Site::Iterable { consumed: true });
                 self.loop_depth += 1;
                 self.arm_stmts(body);
                 self.loop_depth -= 1;
+                self.held.pop();
             }
             IrExprKind::While { cond, body } => {
                 self.loop_depth += 1;
@@ -536,18 +577,22 @@ impl<'a> Walk<'a> {
             IrExprKind::Call { target, args, .. } | IrExprKind::TailCall { target, args } => {
                 let modes: Vec<SlotMode> = args.iter().enumerate().map(|(i, a)| self.oracle.call_slot(target, i, a)).collect();
                 self.guarded.push(Self::direct_borrows(args, &modes, Some(target)));
+                self.held.push(Self::held_operands(args, &modes, Some(target)));
                 match target {
                     CallTarget::Method { object, .. } => self.guarded_operand(object, SlotMode::Borrow, Site::Receiver),
                     CallTarget::Computed { callee } => self.expr(callee, Site::Callee),
                     CallTarget::Named { .. } | CallTarget::Module { .. } => {}
                 }
                 self.call_args(args, &modes);
+                self.held.pop();
                 self.guarded.pop();
             }
             IrExprKind::RuntimeCall { symbol, args } => {
                 let modes: Vec<SlotMode> = args.iter().enumerate().map(|(i, a)| self.oracle.runtime_slot(*symbol, i, a)).collect();
                 self.guarded.push(Self::direct_borrows(args, &modes, None));
+                self.held.push(Self::held_operands(args, &modes, None));
                 self.call_args(args, &modes);
+                self.held.pop();
                 self.guarded.pop();
             }
 
@@ -708,4 +753,24 @@ pub fn written_vars(expr: &IrExpr) -> HashSet<VarId> {
 /// classifier every clone decision derives from (#531).
 fn heap(ty: &Ty) -> bool {
     !almide_ir::top_let_storage::clone_free(ty)
+}
+
+/// The variable a place expression reads — through fields, tuple indices,
+/// indexes, keys, derefs and shared borrows.
+fn place_root(e: &IrExpr) -> Option<VarId> {
+    match &e.kind {
+        IrExprKind::Var { id } => Some(*id),
+        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
+        | IrExprKind::IndexAccess { object, .. } | IrExprKind::MapAccess { object, .. }
+        | IrExprKind::Deref { expr: object } | IrExprKind::Borrow { expr: object, .. } => place_root(object),
+        _ => None,
+    }
+}
+
+/// The variable a `Borrow` node holds; `None` for a by-value expression.
+fn borrow_root(e: &IrExpr) -> Option<VarId> {
+    match &e.kind {
+        IrExprKind::Borrow { expr, .. } => place_root(expr),
+        _ => None,
+    }
 }
