@@ -177,12 +177,49 @@ fn infer_function_borrows(func: &IrFunction, scope: &Scope) -> Vec<ParamBorrow> 
         return func.params.iter().map(|p| intrinsic_borrow_mode(&p.ty, scope.round.records)).collect();
     }
     let uses = UseSites::of_fn(func, scope);
-    func.params.iter().map(|param| param_borrow(param, &uses, scope)).collect()
+    func.params.iter().map(|param| param_borrow(param, &uses, scope, &func.body)).collect()
+}
+
+/// Does every `match` in `body` whose subject is the bare variable `var`
+/// bind nothing — literal, wildcard and nullary patterns only? Such a match
+/// on a `String` renders as `match &*s { "lit" => .. }` (`MatchSubject`),
+/// which borrows: the subject position does not consume the param (#2231 —
+/// `fn string_match(s: String) -> Int = match s { "alpha" => 1, .. }` owned
+/// `s` for three literal comparisons). A pattern that binds may move a
+/// payload out, so any binding keeps the conservative verdict.
+fn scrutinee_only_compares(body: &IrExpr, var: VarId) -> bool {
+    use almide_ir::visit::{IrVisitor, walk_expr, walk_stmt};
+    struct Scan { var: VarId, ok: bool }
+    fn binds_nothing(p: &IrPattern) -> bool {
+        match p {
+            IrPattern::Wildcard | IrPattern::Literal { .. } | IrPattern::None => true,
+            IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => binds_nothing(inner),
+            IrPattern::Constructor { args, .. } => args.iter().all(binds_nothing),
+            IrPattern::Tuple { elements } => elements.iter().all(binds_nothing),
+            IrPattern::List { elements, rest } => elements.iter().all(binds_nothing) && rest.as_deref().map_or(true, binds_nothing),
+            IrPattern::Bind { .. } | IrPattern::RecordPattern { .. } | IrPattern::As { .. } => false,
+        }
+    }
+    impl IrVisitor for Scan {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if let IrExprKind::Match { subject, arms } = &e.kind
+                && matches!(subject.kind, IrExprKind::Var { id } if id == self.var)
+                && !arms.iter().all(|a| binds_nothing(&a.pattern))
+            {
+                self.ok = false;
+            }
+            walk_expr(self, e);
+        }
+        fn visit_stmt(&mut self, s: &IrStmt) { walk_stmt(self, s); }
+    }
+    let mut scan = Scan { var, ok: true };
+    scan.visit_expr(body);
+    scan.ok
 }
 
 /// One param's mode from the body's occurrences of it.
-fn param_borrow(param: &IrParam, uses: &UseSites, scope: &Scope) -> ParamBorrow {
-    if !scope.is_borrow_eligible(&param.ty) {
+fn param_borrow(param: &IrParam, uses: &UseSites, scope: &Scope, body: &IrExpr) -> ParamBorrow {
+    if !scope.is_borrow_eligible(&param.ty) || almide_base::env::flag("ALMIDE_BORROW_OWN_ALL") {
         return ParamBorrow::Own;
     }
     // Explicit `mut` heap param → passed by mutable reference, and it is
@@ -196,7 +233,8 @@ fn param_borrow(param: &IrParam, uses: &UseSites, scope: &Scope) -> ParamBorrow 
     if param.is_mut {
         return ParamBorrow::RefMut;
     }
-    if uses.of(param.var).any(consumes) {
+    let literal_subject = matches!(param.ty, Ty::String) && scrutinee_only_compares(body, param.var);
+    if uses.of(param.var).any(|u| consumes(u) && !(literal_subject && u.site == Site::Scrutinee)) {
         return ParamBorrow::Own;
     }
     // Implicit mut for bundled bodies: when the body forwards this param into
@@ -275,7 +313,7 @@ fn intrinsic_borrow_mode(ty: &Ty, records: &HashSet<String>) -> ParamBorrow {
 /// layer loop gets `.clone()` inserted on every iteration (observed on
 /// bonsai-almide at 72% inclusive time, cf.
 /// memory/feedback_almide_bytes_clone.md).
-fn is_borrow_eligible(ty: &Ty, records: &HashSet<String>) -> bool {
+pub(crate) fn is_borrow_eligible(ty: &Ty, records: &HashSet<String>) -> bool {
     matches!(ty,
         Ty::String
         | Ty::Bytes

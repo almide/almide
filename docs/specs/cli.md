@@ -577,6 +577,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_BANG_RETURN` | ablation | turn OFF the per-position `!` desugars of the v1 lowering so every `!` reaches the bind-position rule or walls loudly (the decline-matrix probe) |
 | `ALMIDE_BENCH_DIR=value` | harness | the fixture directory of the structural leg's perf probe (default `crates/almide-wasm/tests/perf`) |
 | `ALMIDE_BIN=value` | harness | path of the `almide` binary the test harnesses, scripts and workflows drive (default: `target/release/almide`, then PATH) |
+| `ALMIDE_BORROW_OWN_ALL` | ablation | make BorrowInsertion own every borrow-eligible param, as before inference existed — the ablation the ownership certifier's C4 sensitivity test drives, and the borrow-inference perf knob |
 | `ALMIDE_BOUNDED_DEBUG` | debug | print why a bounded-loop bind declined (v1 lowering) |
 | `ALMIDE_CAPTURE_MOVE_OFF` | ablation | make CaptureClone clone every capture again, as before #2231, instead of moving a value whose sole user is the closure — the ablation the ownership certifier's sensitivity test drives |
 | `ALMIDE_CERTIFY_OWNERSHIP=value` | debug | run the native ownership certifier after the pass pipeline (#2231): `report` prints every violation, `fail` aborts the build on one; unset = off |
