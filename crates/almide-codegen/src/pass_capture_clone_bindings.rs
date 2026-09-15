@@ -144,7 +144,7 @@ pub(super) fn capture_bindings(
 /// occurrence inside a loop. See [`capture_moves`].
 #[derive(Default)]
 pub(super) struct CaptureUses {
-    pub(super) uses: HashMap<VarId, Vec<(usize, Option<u32>, u32)>>,
+    pub(super) uses: HashMap<VarId, Vec<(usize, Option<u32>, u32, bool)>>,
     pub(super) clean: HashSet<VarId>,
 }
 
@@ -158,13 +158,27 @@ pub(super) fn capture_uses(body: &IrExpr) -> CaptureUses {
     let mut out = CaptureUses::default();
     let mut unclean: HashSet<VarId> = HashSet::new();
     for (i, u) in sites.iter().enumerate() {
-        out.uses.entry(u.var).or_default().push((i, u.outer_lambda, u.stmt));
+        out.uses.entry(u.var).or_default().push((i, u.outer_lambda, u.stmt, holds_a_borrow(u)));
         if u.in_loop || u.in_mut || u.is_write(true) || matches!(u.site, Site::Borrow { mutable: true }) {
             unclean.insert(u.var);
         }
     }
     out.clean = out.uses.keys().copied().filter(|v| !unclean.contains(v)).collect();
     out
+}
+
+/// Does this occurrence hold a BORROW of the variable while the rest of its
+/// statement evaluates — a `&v` / `&mut v` argument, a place read (`v.f`,
+/// `v[i]`, a receiver, an operand, a by-reference iterable)? A by-value use
+/// (a consumed argument, a concat operand, a constructor field, a bind) is
+/// cloned or moved and holds nothing afterwards.
+fn holds_a_borrow(u: &crate::use_kind::Use) -> bool {
+    matches!(
+        u.site,
+        Site::Borrow { .. } | Site::Arg(crate::use_kind::SlotMode::Borrow | crate::use_kind::SlotMode::Mut)
+            | Site::Member | Site::TupleIndex | Site::Index | Site::MapKeyed | Site::Deref
+            | Site::Receiver | Site::Operand | Site::Scrutinee | Site::Iterable { consumed: false }
+    ) || u.in_mut
 }
 
 /// May the capture of `var` by the lambda `lambda` MOVE the value instead of
@@ -180,15 +194,18 @@ pub(super) fn capture_moves(table: &CaptureUses, var: VarId, lambda: Option<u32>
         return false;
     }
     let Some(uses) = table.uses.get(&var) else { return false };
-    let inside: Vec<&(usize, Option<u32>, u32)> = uses.iter().filter(|(_, l, _)| *l == Some(lambda)).collect();
+    let inside: Vec<&(usize, Option<u32>, u32, bool)> = uses.iter().filter(|(_, l, _, _)| *l == Some(lambda)).collect();
     if inside.is_empty() {
         return false;
     }
-    let last_inside = inside.iter().map(|(i, _, _)| *i).max().unwrap_or(0);
-    let last_any = uses.iter().map(|(i, _, _)| *i).max().unwrap_or(0);
+    let last_inside = inside.iter().map(|(i, _, _, _)| *i).max().unwrap_or(0);
+    let last_any = uses.iter().map(|(i, _, _, _)| *i).max().unwrap_or(0);
     if last_any != last_inside {
         return false;
     }
-    let stmts: HashSet<u32> = inside.iter().map(|(_, _, s)| *s).collect();
-    !uses.iter().any(|(_, l, s)| *l != Some(lambda) && stmts.contains(s))
+    // Only an outside occurrence that HOLDS a borrow through the statement
+    // conflicts with the move; a by-value sibling (`or_else(s1, (v) => s1)`
+    // hands a clone of `s1` to the first slot) holds nothing.
+    let stmts: HashSet<u32> = inside.iter().map(|(_, _, s, _)| *s).collect();
+    !uses.iter().any(|(_, l, s, borrows)| *l != Some(lambda) && *borrows && stmts.contains(s))
 }
