@@ -183,6 +183,11 @@ def main():
     ap.add_argument("--quick", action="store_true", help="small workloads (CI ratchet)")
     ap.add_argument("--bench", default=None, help="comma-separated subset of bench names")
     ap.add_argument("--out", default=None, help="results JSON path (default: results/<date>-<label>.json)")
+    ap.add_argument("--ablate", default=None, metavar="KNOB",
+                    help="also build each native row with KNOB=1 in the compiler's environment and time it "
+                         "INTERLEAVED with the optimized binary as `<bench>/native:ablated` — the ablated/optimized "
+                         "delta then comes from one run, not from two invocations minutes apart")
+    ap.add_argument("--ablate-bench", default=None, help="comma-separated subset of benches to ablate (default: all)")
     args = ap.parse_args()
     legs = args.legs.split(",")
 
@@ -197,6 +202,7 @@ def main():
         keep = set(args.bench.split(","))
         suite = [b for b in SUITE if b[0] in keep]
 
+    ablate_benches = set(args.ablate_bench.split(",")) if args.ablate_bench else None
     work = tempfile.mkdtemp(prefix="almide-perf-")
     variants = {}  # bench -> [(variant_name, argv_prefix)]
 
@@ -209,6 +215,10 @@ def main():
             out = os.path.join(work, f"{name}_native")
             run([almide, "build", src, "--release", "-o", out])
             vs.append((f"{name}/native", [out]))
+            if args.ablate and (ablate_benches is None or name in ablate_benches):
+                out = os.path.join(work, f"{name}_native_ablated")
+                run([almide, "build", src, "--release", "-o", out], env={**os.environ, args.ablate: "1"})
+                vs.append((f"{name}/native:ablated", [out]))
         if "wasm" in row:
             out = os.path.join(work, f"{name}.wasm")
             run([almide, "build", src, "--target", "wasm", "-o", out])

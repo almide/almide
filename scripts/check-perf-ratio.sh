@@ -169,9 +169,14 @@ MIN_SECONDS=0.08
 out=$(mktemp -t perf-ratio.XXXXXX.json)
 trap 'rm -f "$out"' EXIT
 
+# The four anchored rows are ALSO built with the IR optimizer's perf passes
+# off (`--ablate ALMIDE_DISABLE_OPT`: fold/DCE/propagate skipped, the lowering
+# enablers and the #872 correctness re-fold stay) and timed in the SAME
+# interleaved loop as their optimized twin — see ABLATION below.
 python3 research/benchmark/perf/bench.py \
   --quick --runs "$RUNS" --legs native,rust \
   --bench nbody,spectralnorm,fasta,fft,binarytrees,treealloc,listbuild,listbuild-append,listbuild-comb,strchurn,fannkuchredux,mandelbrot,decode,wordfreq,wordfreq-group \
+  --ablate ALMIDE_DISABLE_OPT --ablate-bench nbody,spectralnorm,fasta,fft \
   --label ratchet --out "$out"
 
 # VICTORY ABLATION LEG (#1330): each victory row rebuilt from the same source
@@ -190,29 +195,27 @@ for knob in $(for v in $VICTORY; do echo "${v##*:}"; done | sort -u); do
     --label "ratchet-$knob" --out "$vic_dir/$knob.json"
 done
 
-# ABLATION LEG (#1466): the same anchored benchmarks with the IR optimizer's
-# perf passes disabled (ALMIDE_DISABLE_OPT skips fold/DCE/propagate; the
-# lowering enablers and the #872 correctness re-fold stay). The gated number
-# is the DELTA ablated/optimized per bench — a same-machine, same-run ratio,
-# so it anchors where absolute times cannot. MEASURED FINDING at introduction
-# (M4 Pro + CI runner agree): the deltas sit at ~1.00 on every anchored
-# bench — on the rustc-backed native leg these passes are SUBSUMED by LLVM,
-# which runs the same folds downstream. The gate therefore holds the honest
-# band: ablation must never SLOW the build's output past noise (floor —
-# the optimizer must not COST), and a delta leaving the band upward is a new
-# real earning that gets re-anchored on purpose, exactly like the main rows.
-abl_out=$(mktemp -t perf-ratio-abl.XXXXXX.json)
-trap 'rm -f "$out" "$abl_out"; rm -rf "$vic_dir"' EXIT
-ALMIDE_DISABLE_OPT=1 python3 research/benchmark/perf/bench.py \
-  --quick --runs "$RUNS" --legs native \
-  --bench nbody,spectralnorm,fasta,fft \
-  --label ratchet-ablated --out "$abl_out"
+# ABLATION (#1466): ablated/optimized per anchored bench. Until 2026-09-15 the
+# ablated binaries were timed in a SECOND bench.py invocation minutes after the
+# first, so the delta divided medians taken under different runner load — a
+# 0.87 fft reading on the merge-queue run of #2226 turned to 0.99 on the push of
+# the same commit forty minutes later. The ablated twin is now a variant of the
+# same run (`<bench>/native:ablated`), interleaved run by run with its optimized
+# binary, so what the delta measures is the optimizer and not the runner's
+# mood. The gated number is the DELTA ablated/optimized per bench. MEASURED
+# FINDING at introduction (M4 Pro + CI runner agree): the deltas sit at ~1.00
+# on every anchored bench — on the rustc-backed native leg these passes are
+# SUBSUMED by LLVM, which runs the same folds downstream. The gate therefore
+# holds the honest band: ablation must never SLOW the build's output past noise
+# (floor — the optimizer must not COST), and a delta leaving the band upward is
+# a new real earning that gets re-anchored on purpose, exactly like the main
+# rows.
 
-python3 - "$out" "$BASELINE_FILE" "$BUDGET_PCT" "$PAIRS" "$MIN_SECONDS" "$IDIOM_CEILING" "$REPORTED" "$abl_out" "$VICTORY" "$VICTORY_ABLATION_FLOOR" "$vic_dir" <<'PY'
+python3 - "$out" "$BASELINE_FILE" "$BUDGET_PCT" "$PAIRS" "$MIN_SECONDS" "$IDIOM_CEILING" "$REPORTED" "$VICTORY" "$VICTORY_ABLATION_FLOOR" "$vic_dir" <<'PY'
 import json, os, sys
 
-(out_path, baseline_path, budget_pct, pairs_arg, min_s, idiom_ceiling, reported_arg, abl_path,
- victory_arg, victory_floor, vic_dir) = sys.argv[1:12]
+(out_path, baseline_path, budget_pct, pairs_arg, min_s, idiom_ceiling, reported_arg,
+ victory_arg, victory_floor, vic_dir) = sys.argv[1:11]
 budget = float(budget_pct)
 min_s = float(min_s)
 idiom_ceiling = float(idiom_ceiling)
@@ -333,10 +336,9 @@ print(f"perf-ratio: {'listbuild-idiom':16s} {penalty:.3f}x the append loop "
 # baseline rows keyed `ablation/<bench>`. Floor 0.90 is the honest direction
 # the measurement supports — the optimizer must never COST more than noise;
 # the +budget ceiling flags a NEW earning so it gets re-anchored on purpose.
-abl = json.load(open(abl_path))["results"]
 for bench in sorted(pairs):
     o = data[bench]["variants"][f"{bench}/native"]["median"]
-    a = abl[bench]["variants"][f"{bench}/native"]["median"]
+    a = data[bench]["variants"][f"{bench}/native:ablated"]["median"]
     delta = a / o
     key = f"ablation/{bench}"
     base = baseline.get(key)
@@ -371,7 +373,7 @@ PY
 if command -v valgrind >/dev/null 2>&1; then
   ALMIDE="${ALMIDE_BIN:-almide}"
   idiom_dir=$(mktemp -d -t perf-idiom.XXXXXX)
-  trap 'rm -f "$out" "$abl_out"; rm -rf "$idiom_dir" "$vic_dir"' EXIT
+  trap 'rm -f "$out"; rm -rf "$idiom_dir" "$vic_dir"' EXIT
   "$ALMIDE" build research/benchmark/perf/listbuild/listbuild_combinator.almd -o "$idiom_dir/comb" >/dev/null
   "$ALMIDE" build research/benchmark/perf/listbuild/listbuild_append.almd -o "$idiom_dir/append" >/dev/null
   ir_of() {
