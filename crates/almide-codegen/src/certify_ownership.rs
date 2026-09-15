@@ -97,7 +97,7 @@ pub fn certify_fn(f: &IrFunction, vars: &VarTable, ann: &CodegenAnnotations) -> 
         }
         let v = u.var;
         let candidate = owned_params.contains(&v) || let_bound.contains(&v);
-        if !candidate || clone_is_special(v, ann) {
+        if !candidate || clone_is_special(v, ann) || is_closure_value(&vars.get(v).ty) {
             continue;
         }
         if !uses[i + 1..].iter().any(|w| w.var == v) {
@@ -206,6 +206,15 @@ fn let_bound_by_value(body: &IrExpr) -> HashSet<VarId> {
     let mut b = Binds(HashSet::new());
     b.visit_expr(body);
     b.0
+}
+
+/// A closure value is an `Rc<dyn Fn>` handle on the native leg and
+/// `CloneInsertion` clones it at every consuming use by declared convention
+/// (`split_clone_ids`: `Ty::Fn` is always-clone). Its clone is a refcount
+/// increment, not an allocation — outside what C3 exists to catch — so it
+/// is not judged here.
+fn is_closure_value(ty: &almide_lang::types::Ty) -> bool {
+    matches!(ty, almide_lang::types::Ty::Fn { .. })
 }
 
 fn heap(ty: &almide_lang::types::Ty) -> bool {
