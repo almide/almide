@@ -573,6 +573,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | 変数 | 種別 | 説明 |
 |---|---|---|
 | `ALMIDE_ABI_PROBE` | debug | print the lifted-effect-fn ABI decision per function (v1 lowering) |
+| `ALMIDE_ALLOC_COUNT` | harness | build the native program with a counting allocator that prints `__ALMD_ALLOC allocs=N deallocs=N reallocs=N peak=N` on stderr when `__almide_main` returns (the native borrow oracle's allocation lane, tests/native_borrow_oracle_test.rs) |
 | `ALMIDE_BANG_RETURN` | ablation | turn OFF the per-position `!` desugars of the v1 lowering so every `!` reaches the bind-position rule or walls loudly (the decline-matrix probe) |
 | `ALMIDE_BENCH_DIR=value` | harness | the fixture directory of the structural leg's perf probe (default `crates/almide-wasm/tests/perf`) |
 | `ALMIDE_BIN=value` | harness | path of the `almide` binary the test harnesses, scripts and workflows drive (default: `target/release/almide`, then PATH) |
