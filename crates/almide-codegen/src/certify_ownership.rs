@@ -48,49 +48,67 @@ use crate::use_kind::{ExplicitBorrows, Site, SlotMode, Use, UseSites};
 /// the check and what was seen.
 pub fn certify(program: &IrProgram) -> Vec<String> {
     let ann = &program.codegen_annotations;
-    program.functions.iter().flat_map(|f| certify_fn(f, &program.var_table, ann)).collect()
+    let records = crate::pass_borrow_inference::seed_record_names(program);
+    program.functions.iter().flat_map(|f| certify_fn(f, &program.var_table, ann, &records)).collect()
 }
 
-/// The violations in one function.
-pub fn certify_fn(f: &IrFunction, vars: &VarTable, ann: &CodegenAnnotations) -> Vec<String> {
+/// The violations in one function. `records` is the record-type set the
+/// borrow pass admits (`is_borrow_eligible`): C4 judges a verdict only over
+/// the types the pass can borrow at all — an enum, tuple or matrix param has
+/// no borrowed form yet, so its `Own` is the only mode, not a wrong one.
+pub fn certify_fn(f: &IrFunction, vars: &VarTable, ann: &CodegenAnnotations, records: &HashSet<String>) -> Vec<String> {
     let sites = UseSites::of_expr(&f.body, Site::Result, &ExplicitBorrows);
     let uses: Vec<&Use> = sites.iter().collect();
-    let name = |v: VarId| vars.get(v).name.to_string();
-    let mut out = Vec::new();
-    for p in &f.params {
-        if !heap(&p.ty) || p.open_record.is_some() {
-            continue;
-        }
-        let mine: Vec<&Use> = uses.iter().copied().filter(|u| u.var == p.var).collect();
-        match p.borrow {
-            ParamBorrow::Ref | ParamBorrow::RefStr | ParamBorrow::RefSlice => {
-                // A reference handed bare to a call slot, bound to a local, or
-                // iterated is the reference itself passing through (`g(v)`,
-                // `let w = v`, `for x in v.items` with `v: &T`), not a move of
-                // the value — those positions C1 does not count for a param
-                // that IS a reference; what remains is returning it, building
-                // it into a value, or concatenating it.
-                if let Some(u) = mine.iter().find(|u| definitely_consumes(u) && !reference_passes_through(u)) {
-                    out.push(format!(
-                        "[C1 borrowed-then-consumed] {}: param `{}: {:?}` is rendered {:?} but is consumed at a {:?} position (chain {:?}) — BorrowInsertion's verdict is wrong for this body",
-                        f.name, p.name, p.ty, p.borrow, u.site, u.chain
-                    ));
-                }
-            }
-            ParamBorrow::Own if owned_verdict_is_checkable(f, p, ann) => {
-                if !mine.iter().any(|u| justifies_ownership(u)) {
-                    out.push(format!(
-                        "[C4 owned-never-consumed] {}: param `{}: {:?}` is rendered owned but no occurrence moves, mutates, captures or hands it on ({} occurrence(s): {}) — every caller pays a clone the body never uses",
-                        f.name, p.name, p.ty, mine.len(),
-                        mine.iter().map(|u| format!("{:?}", u.site)).collect::<Vec<_>>().join(", ")
-                    ));
-                }
-            }
-            _ => {}
-        }
+    let mut out: Vec<String> = f.params.iter().filter_map(|p| certify_param(f, p, &uses, ann, records)).collect();
+    out.extend(certify_last_use_clones(f, vars, ann, &uses));
+    out
+}
+
+/// C1 / C4 for one param: `None` when its verdict holds.
+fn certify_param(f: &IrFunction, p: &IrParam, uses: &[&Use], ann: &CodegenAnnotations, records: &HashSet<String>) -> Option<String> {
+    if !heap(&p.ty) || p.open_record.is_some() {
+        return None;
     }
+    let mine: Vec<&Use> = uses.iter().copied().filter(|u| u.var == p.var).collect();
+    match p.borrow {
+        ParamBorrow::Ref | ParamBorrow::RefStr | ParamBorrow::RefSlice => {
+            // A reference handed bare to a call slot, bound to a local, or
+            // iterated is the reference itself passing through (`g(v)`,
+            // `let w = v`, `for x in v.items` with `v: &T`), not a move of
+            // the value — those positions C1 does not count for a param
+            // that IS a reference; what remains is returning it, building
+            // it into a value, or concatenating it.
+            let u = mine.iter().find(|u| definitely_consumes(u) && !reference_passes_through(u))?;
+            Some(format!(
+                "[C1 borrowed-then-consumed] {}: param `{}: {:?}` is rendered {:?} but is consumed at a {:?} position (chain {:?}) — BorrowInsertion's verdict is wrong for this body",
+                f.name, p.name, p.ty, p.borrow, u.site, u.chain
+            ))
+        }
+        ParamBorrow::Own if owned_verdict_is_checkable(f, p, ann) && crate::pass_borrow_inference::is_borrow_eligible(&p.ty, records) => {
+            // A param whose every occurrence is a `Clone` (a capture
+            // materialised per closure) costs the same owned or borrowed —
+            // each clone would be a `to_owned()` — so its ownership is not
+            // a defect.
+            let only_cloned = !mine.is_empty() && mine.iter().all(|u| u.site == Site::Clone && u.depth == 0);
+            if only_cloned || mine.iter().any(|u| justifies_ownership(u)) {
+                return None;
+            }
+            Some(format!(
+                "[C4 owned-never-consumed] {}: param `{}: {:?}` is rendered owned but no occurrence moves, mutates, captures or hands it on ({} occurrence(s): {}) — every caller pays a clone the body never uses",
+                f.name, p.name, p.ty, mine.len(),
+                mine.iter().map(|u| format!("{:?}", u.site)).collect::<Vec<_>>().join(", ")
+            ))
+        }
+        _ => None,
+    }
+}
+
+/// C3 over the body: every `Clone` of an owned local or owned param that is
+/// the variable's last occurrence.
+fn certify_last_use_clones(f: &IrFunction, vars: &VarTable, ann: &CodegenAnnotations, uses: &[&Use]) -> Vec<String> {
     let owned_params: HashSet<VarId> = f.params.iter().filter(|p| p.borrow == ParamBorrow::Own && !p.is_mut).map(|p| p.var).collect();
     let let_bound = let_bound_by_value(&f.body);
+    let mut out = Vec::new();
     for (i, u) in uses.iter().enumerate() {
         if u.site != Site::Clone || u.depth > 0 || u.in_loop || u.in_chain || u.chain.is_some() {
             continue;
@@ -103,7 +121,7 @@ pub fn certify_fn(f: &IrFunction, vars: &VarTable, ann: &CodegenAnnotations) -> 
         if !uses[i + 1..].iter().any(|w| w.var == v) {
             out.push(format!(
                 "[C3 clone-at-last-use] {}: `{}: {:?}` is cloned at its last occurrence — the value was owned and never used again, so the clone copies for nothing (CloneInsertion)",
-                f.name, name(v), vars.get(v).ty
+                f.name, vars.get(v).name, vars.get(v).ty
             ));
         }
     }
