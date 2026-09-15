@@ -43,6 +43,7 @@ use super::pass_list_pattern::ListPatternLoweringPass;
 use super::pass_unify_var_tables::UnifyVarTablesPass;
 use super::pass_top_let_storage::TopLetStoragePass;
 use super::pass_var_storage::VarStoragePass;
+use super::pass_borrow_lowering::BorrowLoweringPass;
 use super::pass_ir_link_flatten::IrLinkFlattenPass;
 use super::template::TemplateSet;
 
@@ -191,6 +192,13 @@ fn build_pipeline(target: Target) -> Pipeline {
                 // at pipeline end (VarIds final, modules flattened); the
                 // walker asserts every legacy predicate agrees with it.
                 .add(TopLetStoragePass)
+                // BorrowLowering (#2186): every borrow / clone / owning read
+                // of a by-reference param takes its final IR spelling, and
+                // `param_borrows` is published. Last of all — after every
+                // pass that shapes or reads a `Borrow`, and after the top-let
+                // storage attribute it consults; the walker renders what it
+                // sees.
+                .add(BorrowLoweringPass)
         }
 
         Target::Wgsl => Pipeline::new()

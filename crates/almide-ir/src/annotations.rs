@@ -1,5 +1,5 @@
 use std::collections::{HashSet, HashMap, BTreeSet};
-use crate::{VarId, IrExpr};
+use crate::{VarId, IrExpr, ParamBorrow};
 
 /// How a variable is stored at the Rust codegen level.
 ///
@@ -157,6 +157,12 @@ pub struct CodegenAnnotations {
     /// bare move: a wrong decision here is a LOUD E0382/E0505 codegen bug,
     /// never a silent wrong value.
     pub tco_owned_params: HashSet<VarId>,
+    /// Every fn param's final borrow mode, by var (#2186): the ONE table the
+    /// walker consults where a param's mode still decides a statement's
+    /// spelling — a reassignment THROUGH a `&mut` param is `*p = v`. Published
+    /// by `BorrowLoweringPass` after TCO has forced its loop params owned, so
+    /// the modes are the ones the signatures render with.
+    pub param_borrows: HashMap<VarId, ParamBorrow>,
     /// The functions TailCallOpt actually rewrote into loops — the SCOPE of
     /// `tco_owned_params`. The exemption is a promise about the rewritten
     /// body ("every consuming read there is Clone-wrapped or a deliberate

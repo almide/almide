@@ -60,9 +60,7 @@ fn render_expr_var(ctx: &RenderContext, expr: &IrExpr) -> String {
     let IrExprKind::Var { id } = &expr.kind else { unreachable!() };
     let raw_name = ctx.var_name(*id).to_string();
     // Shared-mut local (`Rc<Cell<T>>`): read the cell. (Closure v2, P3.)
-    // Fn-local truth first: a branch-lift helper's param KEEPS the captured
-    // var's id, and there the binding is a plain snapshot, not a cell (#1143).
-    if ctx.ann.is_shared_mut(id) && !ctx.param_vars.contains(id) {
+    if ctx.ann.is_shared_mut(id) {
         return format!("{}.get()", raw_name);
     }
     // §4 Stage 2: a module global is decided by ONE alias-resolved
@@ -417,29 +415,10 @@ fn render_expr_record(ctx: &RenderContext, expr: &IrExpr) -> String {
 
 fn render_expr_spread_record(ctx: &RenderContext, expr: &IrExpr) -> String {
     let IrExprKind::SpreadRecord { base, fields } = &expr.kind else { unreachable!() };
-    let mut base_str = render_expr(ctx, base);
-    // Spread requires an owned value. If base is a LazyLock deref
-    // (module top_let), clone to get owned.
-    if let IrExprKind::Var { id } = &base.kind {
-        // §4 Stage 2: a Lazy global derefs a LazyLock and every
-        // cross-module use renders through an accessor — both need
-        // an owned clone for the spread. Attribute equivalent of the
-        // former (module_origin || lazy_vars) probe.
-        use almide_ir::top_let_storage::TopLetStorage as Tls;
-        let needs_clone = ctx.ann.global_alias.contains_key(id)
-            || matches!(ctx.ann.global(*id).map(|i| i.storage), Some(Tls::Lazy { .. }))
-            // A param emitted as a reference (`&T` / `&mut T` for a `mut`
-            // param) spreads a borrow into a struct-update expression —
-            // `..st` where `st: &mut State` is E0308 in the generated Rust
-            // (#2037: `st = { ...st, pos: st.pos + 1 }` passed the checker
-            // and failed the build). `.clone()` autoderefs to the owned
-            // record the update needs.
-            || ctx.ref_params.contains(id)
-            || ctx.ref_mut_params.contains(id);
-        if needs_clone && !base_str.ends_with(".clone()") {
-            base_str = format!("{}.clone()", base_str);
-        }
-    }
+    // Spread requires an owned value; a borrowed base (a by-reference
+    // param, a lazy global, a cross-module accessor read) arrives wrapped
+    // in the `Clone` `BorrowLowering` spelled for it.
+    let base_str = render_expr(ctx, base);
     let fields_str = fields.iter()
         .map(|(k, v)| format!("{}: {}", k, render_expr(ctx, v)))
         .collect::<Vec<_>>()
@@ -545,19 +524,6 @@ fn render_expr_unwrap(ctx: &RenderContext, expr: &IrExpr) -> String {
     }
 }
 
-/// A String-typed Var that is a fn param rendered by BorrowInference as
-/// `&str` (Rust target). Its owned form is `.to_string()`, not `.clone()`
-/// (which on `&str` yields `&str`), and a template that borrows it again
-/// (`&{key}`) would produce `&&str` — a shape no `&String` slot accepts.
-fn is_borrowed_string_param(ctx: &RenderContext, expr: &IrExpr) -> bool {
-    matches!(ctx.target, super::super::pass::Target::Rust)
-        && matches!(expr.ty, Ty::String)
-        && match &expr.kind {
-            IrExprKind::Var { id } => ctx.ref_params.contains(id),
-            _ => false,
-        }
-}
-
 fn render_expr_clone(ctx: &RenderContext, expr: &IrExpr) -> String {
     let IrExprKind::Clone { expr: inner } = &expr.kind else { unreachable!() };
     // Val-wrapped var: deref then clone to get T. Bind handler re-wraps in AlmideRcCow::new().
@@ -576,14 +542,6 @@ fn render_expr_clone(ctx: &RenderContext, expr: &IrExpr) -> String {
         }
     }
     let expr_s = render_expr(ctx, inner);
-    // Special case: cloning a String-typed Var that's a fn param
-    // (so it's actually emitted as `&str` in Rust). `.clone()` on
-    // `&str` returns `&str`, not `String`. Use `.to_string()` so
-    // the surrounding context (which expects an owned `String`)
-    // type-checks.
-    if is_borrowed_string_param(ctx, inner) {
-        return format!("{}.to_string()", expr_s);
-    }
     ctx.templates.render_with("clone_expr", None, &[], &[("expr", expr_s.as_str())])
         .unwrap_or_else(|| format!("{}.clone()", expr_s))
 }
@@ -607,7 +565,6 @@ fn try_render_borrow_shared_mut(ctx: &RenderContext, inner: &IrExpr, mutable: bo
         if let IrExprKind::Var { id } = &dinner.kind {
             if !mutable
                 && ctx.ann.is_shared_mut(id)
-                && !ctx.param_vars.contains(id)
                 && !almide_ir::top_let_storage::capture_copy_cell(&ctx.var_table.get(*id).ty)
             {
                 let almide_name = source_var_name(ctx, *id);
@@ -617,9 +574,6 @@ fn try_render_borrow_shared_mut(ctx: &RenderContext, inner: &IrExpr, mutable: bo
     }
     let IrExprKind::Var { id } = &inner.kind else { return None; };
     if !ctx.ann.is_shared_mut(id) { return None; }
-    // A branch-lift helper's param keeps the captured var's id but binds a
-    // plain snapshot, not the cell — fn-local truth wins (#1143).
-    if ctx.param_vars.contains(id) { return None; }
     if almide_ir::top_let_storage::capture_copy_cell(&ctx.var_table.get(*id).ty) { return None; }
     let var_name = ctx.var_name(*id).to_string();
     Some(if mutable {
@@ -653,74 +607,13 @@ fn source_var_name(ctx: &RenderContext, id: VarId) -> String {
     ctx.var_table.get(cur).name.as_str().to_string()
 }
 
-/// If the borrowed operand is a Var referencing a fn param already emitted
-/// as a reference (`&T`, `&[T]`, `&str` for a shared borrow; `&mut T` for a
-/// mutable one), skip the outer `&`/`&mut` — Rust auto-reborrows when you
-/// pass the naked var, so this avoids a `&&T`/`&mut &mut T` double-borrow.
-/// Extracted from `render_expr_borrow`.
-fn try_render_borrow_already_ref_param(ctx: &RenderContext, inner: &IrExpr, as_str: bool, mutable: bool) -> Option<String> {
-    let IrExprKind::Var { id } = &inner.kind else { return None; };
-    if !as_str && !mutable && ctx.ref_params.contains(id) {
-        return Some(render_expr(ctx, inner));
-    }
-    if mutable && ctx.ref_mut_params.contains(id) {
-        return Some(render_expr(ctx, inner));
-    }
-    None
-}
-
-/// `&(almide_rt_value_field(v, k))?` → `almide_rt_value_field_ref(v, k)?`
-/// (#1679). A derived decode reads every field through this exact shape —
-/// look the field up (a clone of it), propagate the miss, borrow the copy for
-/// the `as_*` / nested decode that only reads it — so the copy was the whole
-/// cost of the read. The `_ref` twin returns a borrow into the object, the
-/// same two error strings on a miss, and lives exactly as long as the
-/// borrowed argument would have: the operand of a `Borrow` is consumed by
-/// the call it sits in. Only the shared, non-`as_str` borrow qualifies.
-///
-/// The slot-hinted twin (`DecodeSlotHintPass`, #1679): `almide_rt_value_field_at`
-/// in the same shape folds to `almide_rt_value_field_ref_at(v, k, i)?`, the
-/// hint rendered as the bare `usize` literal the runtime's signature takes —
-/// the IR carries it as an `Int`, whose `i64` suffix would not type.
-fn try_render_borrowed_field_lookup(ctx: &RenderContext, inner: &IrExpr) -> Option<String> {
-    let IrExprKind::Try { expr: tried } = &inner.kind else { return None; };
-    let (symbol, args) = match &tried.kind {
-        IrExprKind::RuntimeCall { symbol, args } => (symbol.as_str(), args),
-        IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => (name.as_str(), args),
-        _ => return None,
-    };
-    let (twin, hinted) = match symbol {
-        "almide_rt_value_field" => ("almide_rt_value_field_ref", false),
-        "almide_rt_value_field_at" => ("almide_rt_value_field_ref_at", true),
-        _ => return None,
-    };
-    let rendered: Vec<String> = args.iter().enumerate().map(|(i, a)| match &a.kind {
-        IrExprKind::LitInt { value } if hinted && i == 2 => value.to_string(),
-        _ => render_expr(ctx, a),
-    }).collect();
-    Some(format!("{}({})?", twin, rendered.join(", ")))
-}
-
 fn render_expr_borrow(ctx: &RenderContext, expr: &IrExpr) -> String {
     let IrExprKind::Borrow { expr: inner, as_str, mutable } = &expr.kind else { unreachable!() };
-    if !*mutable && let IrExprKind::IndexAccess { object, index } = &inner.kind
-        && let Some(root) = crate::pass_clone_projection::root(object)
-        // Global and captured-cell reads can render an owned snapshot. A
-        // reference returned from the index macro would outlive that temporary.
-        && ctx.ann.global(root).is_none()
-        && (!ctx.ann.is_shared_mut(&root) || ctx.param_vars.contains(&root))
-        && matches!(index.kind, IrExprKind::Var { .. } | IrExprKind::LitInt { .. })
-    {
-        return format!("almide_index_ref!({}, {})", render_expr(ctx, object), render_expr(ctx, index));
-    }
     if !*mutable && matches!(inner.kind, IrExprKind::IndexAccess { .. }) {
         // Keep a following field projection outside the borrow: (&value).field.
         return format!("(&{})", render_expr(ctx, inner));
     }
     if let Some(rendered) = try_render_borrow_shared_mut(ctx, inner, *mutable) {
-        return rendered;
-    }
-    if let Some(rendered) = try_render_borrow_already_ref_param(ctx, inner, *as_str, *mutable) {
         return rendered;
     }
     if *mutable {
@@ -739,54 +632,16 @@ fn render_expr_borrow(ctx: &RenderContext, expr: &IrExpr) -> String {
                 .replace('\n', "\\n").replace('\t', "\\t").replace('\r', "\\r");
             return format!("\"{}\"", escaped);
         }
-        // #2188: a loop binder the body only borrows is bound by `.iter()` as
-        // `&String` (`borrowed_loop_vars`, #1673). `&*c` re-derefs that to
-        // `&String`, and an ordering against a `&str` literal has no
-        // `PartialOrd<&str> for &String` (only `==` survived, through the
-        // blanket `PartialEq<str> for String`). `String::as_str` reaches the
-        // `&str` through the reference and the owned binding alike; ref
-        // params keep `&*` because they are already `&str` and `str::as_str`
-        // is still unstable.
-        //
-        // #2194: the set is keyed by VarId and program-wide, and a
-        // `branch_lift` helper (`optimize/branch_lift.rs`) KEEPS the enclosing
-        // fn's ids as its params — so the loop binder reappears there as a
-        // `&str` param, where `.as_str()` is E0658. Fn-local truth beats the
-        // annotation: a param of the current fn is never this fn's binder.
-        if let IrExprKind::Var { id } = &inner.kind
-            && ctx.ann.borrowed_loop_vars.contains(id)
-            && !ctx.param_vars.contains(id)
-        {
-            return format!("{}.as_str()", render_expr(ctx, inner));
-        }
         format!("&*{}", render_expr(ctx, inner))
     } else {
-        if let Some(rendered) = try_render_borrowed_field_lookup(ctx, inner) {
-            return rendered;
-        }
-        let rendered = render_expr(ctx, inner);
-        // #1210: a Bytes/Matrix-typed RVALUE that renders as a type-propagating
-        // expression (the `??` lowering's `match`, an `if`/`else`, a block)
-        // defeats the deref coercion `&var` relies on — rustc propagates the
-        // callee's expected `&Vec<u8>` INTO the arms, so the AlmideRcCow-typed arms
-        // fail E0308 ("expected Vec<u8>, found AlmideRcCow<Vec<u8>>"). `&*(…)` derefs
-        // through the AlmideRcCow explicitly — the same layer coercion strips from a
-        // plain var. Bytes/Matrix only: they are the two types whose value
-        // convention (AlmideRcCow) differs from the raw runtime signature (#617).
+        // `&*(rvalue)`: a deref the pass spelled over a propagating
+        // expression (`BorrowLowering`, #1210) — the parenthesised spelling.
+        if let IrExprKind::Deref { expr: value } = &inner.kind
+            && !matches!(value.kind, IrExprKind::Var { .. })
         {
-            use almide_lang::types::constructor::TypeConstructorId as TC;
-            let rc_cow_valued = matches!(
-                inner.ty,
-                Ty::Bytes | Ty::Matrix | Ty::Applied(TC::Matrix, _)
-            );
-            let propagating = rendered.starts_with("match ")
-                || rendered.starts_with("if ")
-                || rendered.starts_with('{');
-            if rc_cow_valued && propagating {
-                return format!("&*({})", rendered);
-            }
+            return format!("&*({})", render_expr(ctx, value));
         }
-        format!("&{}", rendered)
+        format!("&{}", render_expr(ctx, inner))
     }
 }
 
