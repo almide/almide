@@ -13,7 +13,9 @@ trap 'rm -rf "$tmp"' EXIT
 
 find spec/wasm_cross -name '*.almd' | sort > "$tmp/all"
 head -3 "$tmp/all" > "$tmp/corpus"
-printf '[C3 clone-at-last-use] f: `x: String` is cloned at its last occurrence\n' > "$tmp/ledger"
+# The gate keys every line by its corpus file, so the ledger holds one
+# prefixed line per corpus file for the stand-in's single violation.
+while read -r f; do printf '%s: [C3 clone-at-last-use] f: `x: String` is cloned at its last occurrence\n' "$f"; done < "$tmp/corpus" > "$tmp/ledger"
 
 expect_pass() { ALMIDE_BIN="$1" CORPUS="$tmp/corpus" LEDGER="$tmp/ledger" $GATE >/dev/null 2>&1 || { echo "FAIL: $2" >&2; exit 1; }; }
 expect_fail() { ALMIDE_BIN="$1" CORPUS="$tmp/corpus" LEDGER="$tmp/ledger" $GATE >/dev/null 2>&1 && { echo "FAIL: $2" >&2; exit 1; }; return 0; }
