@@ -263,3 +263,146 @@ case "$*" in
 esac"#);
     assert!(oracle(&steady).is_empty());
 }
+
+// ── Allocation lane (#2228) ──────────────────────────────────────────────
+//
+// stdout equality and rustc acceptance are both blind to a value cloned where
+// a borrow would do, or kept alive past its last use: such a program builds,
+// prints the right lines on both legs, and only allocates more than it should.
+// `ALMIDE_ALLOC_COUNT=1` builds the native program with a counting allocator
+// that reports `__ALMD_ALLOC allocs=N deallocs=N …` when `__almide_main`
+// returns, and this lane pins the (allocs, deallocs) pair of every generated
+// program EXACTLY in tests/golden/native-borrow-oracle-alloc.txt, the wasm
+// ledger's shape (crates/almide-wasm/tests/alloc_ledger.rs): a borrow verdict
+// that starts cloning a `Map` param on every call moves the `map` row even
+// while every other arm stays green. Ratify a deliberate change with
+//
+//   ALMIDE_UPDATE_ALLOC=1 cargo test --test native_borrow_oracle_test alloc
+//
+// which runs every program twice and pins `~` (calibrated out) where the two
+// runs disagree — an excluded row stays listed, never silently absent.
+
+fn alloc_ledger_path() -> std::path::PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/native-borrow-oracle-alloc.txt")
+}
+
+/// The counting allocator's report for one program: `(allocs, deallocs)`.
+fn alloc_report(almide: &str, src: &Path) -> Result<(u64, u64), String> {
+    let out = Command::new(almide).arg("run").arg(src).env("ALMIDE_ALLOC_COUNT", "1").output().expect("almide");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    if !out.status.success() {
+        return Err(format!("the counted native run failed:\n{stderr}"));
+    }
+    let line = stderr.lines().find(|l| l.starts_with("__ALMD_ALLOC ")).ok_or_else(|| {
+        format!("no `__ALMD_ALLOC` line on stderr — the allocation lane did not arm (ALMIDE_ALLOC_COUNT was set):\n{stderr}")
+    })?;
+    let field = |key: &str| -> Result<u64, String> {
+        line.split_whitespace()
+            .find_map(|kv| kv.strip_prefix(key).and_then(|v| v.strip_prefix('=')))
+            .and_then(|v| v.parse().ok())
+            .ok_or_else(|| format!("malformed report `{line}`: no `{key}=N`"))
+    };
+    Ok((field("allocs")?, field("deallocs")?))
+}
+
+/// Ledger rows: `tag -> Some((allocs, deallocs))` pinned, `None` calibrated out.
+fn read_alloc_ledger() -> std::collections::BTreeMap<String, Option<(u64, u64)>> {
+    let text = std::fs::read_to_string(alloc_ledger_path())
+        .expect("tests/golden/native-borrow-oracle-alloc.txt — generate with ALMIDE_UPDATE_ALLOC=1");
+    text.lines()
+        .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+        .map(|l| {
+            let mut cols = l.split('\t');
+            let (a, d, tag) = (cols.next().unwrap_or(""), cols.next().unwrap_or(""), cols.next().unwrap_or("").to_string());
+            let pin = if a == "~" { None } else { Some((a.parse().expect("allocs"), d.parse().expect("deallocs"))) };
+            (tag, pin)
+        })
+        .collect()
+}
+
+/// The allocation lane with `almide` as the compiler: one failure message per
+/// program whose counted report does not match its pinned row (or that has no
+/// row, or no report). Under `ALMIDE_UPDATE_ALLOC=1` it rewrites the ledger
+/// from two runs and reports nothing.
+fn alloc_lane(almide: &str) -> Vec<String> {
+    // One directory per call: the negatives run this concurrently with the
+    // positive test in the same process, and each call removes its own dir.
+    static CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let call = CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("almide-borrow-oracle-alloc-{}-{call}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let update = almide_base::env::flag("ALMIDE_UPDATE_ALLOC");
+    let ledger = if update { Default::default() } else { read_alloc_ledger() };
+    let mut failures = Vec::new();
+    let mut rows = String::from(
+        "# native borrow oracle — allocation ledger (#2228). allocs\\tdeallocs\\ttag, exact, per generated\n\
+         # program (tests/native_borrow_oracle_test.rs) counted by ALMIDE_ALLOC_COUNT over __almide_main;\n\
+         # `~` = calibrated out (two runs disagreed). Regenerate: ALMIDE_UPDATE_ALLOC=1 cargo test --test native_borrow_oracle_test alloc\n",
+    );
+    for t in TYPES {
+        let src = dir.join(format!("oracle_{}.almd", t.tag));
+        std::fs::write(&src, program(t)).unwrap();
+        let got = alloc_report(almide, &src);
+        if update {
+            let again = alloc_report(almide, &src);
+            let row = match (&got, &again) {
+                (Ok(a), Ok(b)) if a == b => format!("{}\t{}\t{}\n", a.0, a.1, t.tag),
+                (Ok(_), Ok(_)) => format!("~\t~\t{}\n", t.tag),
+                (Err(e), _) | (_, Err(e)) => {
+                    failures.push(format!("[{}] {e}", t.tag));
+                    continue;
+                }
+            };
+            rows.push_str(&row);
+            continue;
+        }
+        let pinned: Option<Option<(u64, u64)>> = ledger.get(t.tag).copied();
+        match (pinned, got) {
+            (_, Err(e)) => failures.push(format!("[{}] {e}", t.tag)),
+            (None, Ok(_)) => failures.push(format!("[{}] not in the allocation ledger — regenerate to ratify", t.tag)),
+            (Some(None), Ok(_)) => {}
+            (Some(Some(want)), Ok(got)) if want == got => {}
+            (Some(Some(want)), Ok(got)) => failures.push(format!(
+                "[{}] allocations moved: counted allocs={} deallocs={}, pinned allocs={} deallocs={} — a borrow, clone or move verdict changed; if on purpose, ratify with ALMIDE_UPDATE_ALLOC=1",
+                t.tag, got.0, got.1, want.0, want.1
+            )),
+        }
+    }
+    if update && failures.is_empty() {
+        let path = alloc_ledger_path();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, rows).unwrap();
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    failures
+}
+
+#[test]
+fn every_generated_program_allocates_exactly_what_the_ledger_pins() {
+    let failures = alloc_lane(env!("CARGO_BIN_EXE_almide"));
+    assert!(failures.is_empty(), "{}", failures.join("\n\n"));
+}
+
+#[test]
+#[cfg(unix)]
+fn the_allocation_lane_fires_on_a_moved_count_and_on_a_missing_report() {
+    if almide_base::env::flag("ALMIDE_UPDATE_ALLOC") {
+        return; // the negatives read the ledger the positive run is rewriting
+    }
+    let pinned = read_alloc_ledger().values().filter(|v| v.is_some()).count();
+    assert!(pinned > 0, "the ledger pins no row — the negatives would be vacuous");
+
+    // A compiler whose every program allocates once: no pinned row reads 1/1.
+    let moved = stand_in("moved", r#"
+echo "__ALMD_ALLOC allocs=1 deallocs=1 reallocs=0 peak=8" >&2
+exit 0"#);
+    let f = alloc_lane(&moved);
+    assert_eq!(f.len(), pinned, "one moved-count failure per pinned row: {f:?}");
+    assert!(f.iter().all(|m| m.contains("allocations moved") && m.contains("counted allocs=1")), "{f:?}");
+
+    // A compiler that ignores the switch: no report is a failure, never a pass.
+    let silent = stand_in("silent", "exit 0");
+    let f = alloc_lane(&silent);
+    assert_eq!(f.len(), TYPES.len(), "one missing-report failure per type: {f:?}");
+    assert!(f.iter().all(|m| m.contains("did not arm")), "{f:?}");
+}
