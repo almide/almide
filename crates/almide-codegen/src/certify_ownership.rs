@@ -1,0 +1,213 @@
+//! Native ownership certifier (#2231): re-derive what each variable
+//! occurrence DOES from the final IR and check it against the verdicts the
+//! ownership passes committed to — a param's borrow mode, a `Clone` node —
+//! independently of the passes that produced them.
+//!
+//! rustc is the linear-lifetime checker for every move and borrow the emitted
+//! Rust spells, and a wrong verdict in that direction is a loud build error.
+//! The direction rustc cannot see is the OTHER one: a value cloned where a
+//! borrow would do, a param owned that no occurrence ever consumes. Such a
+//! program builds, prints the right lines on both legs, and only allocates
+//! more than it should (the allocation ledger, #2228, pins six programs; this
+//! certifier checks every function of every build). roc's `arc_certify` and
+//! Swift's `SILOwnershipVerifier` are the references: the emitted schedule is
+//! re-checked against the ownership rules on every debug compile.
+//!
+//! The evidence is the one use-kind walk the passes themselves read
+//! ([`UseSites`], `ExplicitBorrows` oracle: after `BorrowInsertion` every
+//! borrow is a `Borrow` node, so a bare argument is consumed). Three checks:
+//!
+//! - **C1 borrowed-then-consumed**: a param rendered `&T` / `&str` / `&[T]`
+//!   has an occurrence that moves it (returned, concatenated, built into a
+//!   constructor, handed bare to a call slot, assigned, iterated by value)
+//!   outside any closure and not under a `Clone`. rustc refuses this too
+//!   (E0507); the certifier names the pass instead of the borrow checker.
+//! - **C3 clone-at-last-use**: a `Clone` of an owned local or owned param
+//!   outside every loop and closure, with no later occurrence of that
+//!   variable anywhere in the body. Ownership was available; the clone is a
+//!   copy for nothing. rustc is blind to it.
+//! - **C4 owned-never-consumed**: a heap-typed param rendered owned with no
+//!   occurrence that needs ownership — nothing moves it, mutates it, captures
+//!   it, or hands it on — so every caller pays a clone the body never uses.
+//!   rustc is blind to it.
+//!
+//! Each check errs towards silence: an occurrence whose meaning depends on
+//! the callee (a method receiver, a match scrutinee, a computed callee, a
+//! capture) JUSTIFIES ownership for C4 and is NOT a consumption for C1, and
+//! C3 skips every variable the passes treat specially (shared cells, COW
+//! locals, always-clone vars, loop binders, TCO-owned params, globals,
+//! pattern binders). A violation is therefore a real defect or a rule the
+//! pass holds and this file does not yet state — never noise.
+
+use std::collections::HashSet;
+use almide_ir::*;
+use almide_ir::annotations::CodegenAnnotations;
+use crate::use_kind::{ExplicitBorrows, Site, SlotMode, Use, UseSites};
+
+/// Every violation in `program`, one line each: the function, the variable,
+/// the check and what was seen.
+pub fn certify(program: &IrProgram) -> Vec<String> {
+    let ann = &program.codegen_annotations;
+    program.functions.iter().flat_map(|f| certify_fn(f, &program.var_table, ann)).collect()
+}
+
+/// The violations in one function.
+pub fn certify_fn(f: &IrFunction, vars: &VarTable, ann: &CodegenAnnotations) -> Vec<String> {
+    let sites = UseSites::of_expr(&f.body, Site::Result, &ExplicitBorrows);
+    let uses: Vec<&Use> = sites.iter().collect();
+    let name = |v: VarId| vars.get(v).name.to_string();
+    let mut out = Vec::new();
+    for p in &f.params {
+        if !heap(&p.ty) || p.open_record.is_some() {
+            continue;
+        }
+        let mine: Vec<&Use> = uses.iter().copied().filter(|u| u.var == p.var).collect();
+        match p.borrow {
+            ParamBorrow::Ref | ParamBorrow::RefStr | ParamBorrow::RefSlice => {
+                // A reference handed bare to a call slot, bound to a local, or
+                // iterated is the reference itself passing through (`g(v)`,
+                // `let w = v`, `for x in v.items` with `v: &T`), not a move of
+                // the value — those positions C1 does not count for a param
+                // that IS a reference; what remains is returning it, building
+                // it into a value, or concatenating it.
+                if let Some(u) = mine.iter().find(|u| definitely_consumes(u) && !reference_passes_through(u)) {
+                    out.push(format!(
+                        "[C1 borrowed-then-consumed] {}: param `{}: {:?}` is rendered {:?} but is consumed at a {:?} position (chain {:?}) — BorrowInsertion's verdict is wrong for this body",
+                        f.name, p.name, p.ty, p.borrow, u.site, u.chain
+                    ));
+                }
+            }
+            ParamBorrow::Own if owned_verdict_is_checkable(f, p, ann) => {
+                if !mine.iter().any(|u| justifies_ownership(u)) {
+                    out.push(format!(
+                        "[C4 owned-never-consumed] {}: param `{}: {:?}` is rendered owned but no occurrence moves, mutates, captures or hands it on ({} occurrence(s): {}) — every caller pays a clone the body never uses",
+                        f.name, p.name, p.ty, mine.len(),
+                        mine.iter().map(|u| format!("{:?}", u.site)).collect::<Vec<_>>().join(", ")
+                    ));
+                }
+            }
+            _ => {}
+        }
+    }
+    let owned_params: HashSet<VarId> = f.params.iter().filter(|p| p.borrow == ParamBorrow::Own && !p.is_mut).map(|p| p.var).collect();
+    let let_bound = let_bound_by_value(&f.body);
+    for (i, u) in uses.iter().enumerate() {
+        if u.site != Site::Clone || u.depth > 0 || u.in_loop || u.in_chain || u.chain.is_some() {
+            continue;
+        }
+        let v = u.var;
+        let candidate = owned_params.contains(&v) || let_bound.contains(&v);
+        if !candidate || clone_is_special(v, ann) {
+            continue;
+        }
+        if !uses[i + 1..].iter().any(|w| w.var == v) {
+            out.push(format!(
+                "[C3 clone-at-last-use] {}: `{}: {:?}` is cloned at its last occurrence — the value was owned and never used again, so the clone copies for nothing (CloneInsertion)",
+                f.name, name(v), vars.get(v).ty
+            ));
+        }
+    }
+    out
+}
+
+/// A position that MOVES the value out of the variable, read at closure
+/// depth 0 and not under a `Clone` (a cloned operand records `Site::Clone`).
+fn definitely_consumes(u: &Use) -> bool {
+    if u.depth > 0 {
+        return false;
+    }
+    let moving = |s: &Site| matches!(
+        s,
+        Site::Result | Site::Concat | Site::Construct(_) | Site::Arg(SlotMode::Consume)
+            | Site::Callback | Site::Iterable { consumed: true } | Site::FoldInit | Site::Assigned
+    );
+    match u.chain {
+        // `p.field` moved out of a borrowed `p` is the same defect (E0507).
+        Some(c) => c.heap && moving(&c.top),
+        None => moving(&u.site),
+    }
+}
+
+/// The moving positions a REFERENCE flows through unchanged: a bare call
+/// argument, a bind, an iterable (the renderer iterates `&v.items`), and a
+/// projection chain ending in one of those.
+fn reference_passes_through(u: &Use) -> bool {
+    let through = |s: &Site| matches!(s, Site::Arg(SlotMode::Consume) | Site::Assigned | Site::Iterable { .. });
+    match u.chain {
+        Some(c) => through(&c.top),
+        None => through(&u.site),
+    }
+}
+
+/// A position that NEEDS the variable owned, or whose need this file cannot
+/// decide and therefore grants: any capture, any write, any `&mut` reach, a
+/// receiver, a scrutinee, a computed callee, an iterable, a `Mut` slot.
+fn justifies_ownership(u: &Use) -> bool {
+    definitely_consumes(u)
+        || u.depth > 0
+        || u.in_mut
+        || u.is_write(true)
+        || matches!(
+            u.site,
+            Site::Scrutinee | Site::Receiver | Site::Callee | Site::Iterable { .. }
+                | Site::Arg(SlotMode::Mut) | Site::Borrow { mutable: true }
+        )
+        || matches!(u.chain, Some(c) if c.heap && matches!(c.top, Site::Scrutinee | Site::Receiver | Site::Callee | Site::Borrow { mutable: true }))
+}
+
+/// Is an `Own` verdict on `p` one this file can judge? Entry points, tests,
+/// attributed / extern / exported fns, `mut` params, defaulted params and
+/// the TCO-owned accumulators all own for reasons outside the body.
+fn owned_verdict_is_checkable(f: &IrFunction, p: &IrParam, ann: &CodegenAnnotations) -> bool {
+    !p.is_mut
+        && p.default.is_none()
+        && p.attrs.is_empty()
+        && f.attrs.is_empty()
+        && f.extern_attrs.is_empty()
+        && f.export_attrs.is_empty()
+        && !f.is_test
+        && f.name.as_str() != "main"
+        && !ann.tco_owned_params.contains(&p.var)
+}
+
+/// A variable whose `Clone` the passes place for a reason this file does not
+/// model: shared cells, COW locals, always-clone vars, loop binders, counting
+/// vars, TCO accumulators, module globals.
+fn clone_is_special(v: VarId, ann: &CodegenAnnotations) -> bool {
+    ann.shared_mut_vars.contains(&v)
+        || ann.needs_cow.contains(&v)
+        || ann.always_clone_vars.contains(&v)
+        || ann.borrowed_loop_vars.contains(&v)
+        || ann.consumed_loop_vars.contains(&v)
+        || ann.range_counting_vars.contains(&v)
+        || ann.tco_owned_params.contains(&v)
+        || ann.globals.contains_key(&v)
+        || ann.global_alias.contains_key(&v)
+        || ann.is_rc_cow(&v)
+}
+
+/// The variables `let` / `var`-bound BY VALUE in `body` — not a pattern
+/// binder (which may bind a reference into a borrowed scrutinee) and not a
+/// bind whose value is itself a `Borrow`.
+fn let_bound_by_value(body: &IrExpr) -> HashSet<VarId> {
+    use almide_ir::visit::{IrVisitor, walk_expr, walk_stmt};
+    struct Binds(HashSet<VarId>);
+    impl IrVisitor for Binds {
+        fn visit_stmt(&mut self, s: &IrStmt) {
+            if let IrStmtKind::Bind { var, value, .. } = &s.kind
+                && !matches!(value.kind, IrExprKind::Borrow { .. })
+            {
+                self.0.insert(*var);
+            }
+            walk_stmt(self, s);
+        }
+        fn visit_expr(&mut self, e: &IrExpr) { walk_expr(self, e); }
+    }
+    let mut b = Binds(HashSet::new());
+    b.visit_expr(body);
+    b.0
+}
+
+fn heap(ty: &almide_lang::types::Ty) -> bool {
+    !almide_ir::top_let_storage::clone_free(ty) && !matches!(ty, almide_lang::types::Ty::Fn { .. })
+}

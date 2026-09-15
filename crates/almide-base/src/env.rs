@@ -85,6 +85,7 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_BENCH_DIR", Value, Harness, "the fixture directory of the structural leg's perf probe (default `crates/almide-wasm/tests/perf`)"),
     sw("ALMIDE_BIN", Value, Harness, "path of the `almide` binary the test harnesses, scripts and workflows drive (default: `target/release/almide`, then PATH)"),
     sw("ALMIDE_BOUNDED_DEBUG", Flag, Dbg, "print why a bounded-loop bind declined (v1 lowering)"),
+    sw("ALMIDE_CERTIFY_OWNERSHIP", Value, Dbg, "run the native ownership certifier after the pass pipeline (#2231): `report` prints every violation, `fail` aborts the build on one; unset = off"),
     sw("ALMIDE_COMPILER_STACK", Value, Tool, "stack size in bytes of the compiler driver thread (default 256 MiB); a deep input that overflows it is the regression test's subject"),
     sw("ALMIDE_COMPONENT_ADAPTER", Flag, Route, "route `--component` through the preview1 adapter instead of the direct component emission"),
     sw("ALMIDE_COMPONENT_P3", Flag, Route, "emit a WASI 0.3 component (stdio over component-model streams, the async canonical ABI) under `--component`; needs a p3-capable wasmtime"),

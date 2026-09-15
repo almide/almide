@@ -27,6 +27,7 @@ pub mod generated;
 pub mod pass;
 pub mod verify_names;
 pub mod use_kind;
+pub mod certify_ownership;
 pub mod pass_borrow_inference;
 pub mod pass_box_deref;
 pub mod pass_builtin_lowering;
@@ -285,6 +286,22 @@ pub fn codegen_with(program: &mut IrProgram, target: Target, options: &CodegenOp
     // span-tagged diagnostic (a controlled error, not an ICE). Stage-1(iv) of
     // the correctness completeness roadmap.
     pass_concretize_types::assert_types_concretized(program);
+
+    // Ownership certifier (#2231): re-derive each occurrence's use from the
+    // final IR and check the passes' verdicts. `ALMIDE_CERTIFY_OWNERSHIP` =
+    // `report` prints, `fail` aborts; unset = off.
+    if target == Target::Rust {
+        let mode = almide_base::env::var("ALMIDE_CERTIFY_OWNERSHIP").unwrap_or_default();
+        if mode == "report" || mode == "fail" {
+            let violations = certify_ownership::certify(program);
+            for v in &violations {
+                eprintln!("[CERTIFY OWNERSHIP] {v}");
+            }
+            if mode == "fail" && !violations.is_empty() {
+                panic!("ownership certifier: {} violation(s) (#2231)", violations.len());
+            }
+        }
+    }
 
     let _et = almide_base::profile::ProfileTimer::start(prof);
 
