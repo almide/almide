@@ -84,6 +84,7 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_BANG_RETURN", Flag, Ablation, "turn OFF the per-position `!` desugars of the v1 lowering so every `!` reaches the bind-position rule or walls loudly (the decline-matrix probe)"),
     sw("ALMIDE_BENCH_DIR", Value, Harness, "the fixture directory of the structural leg's perf probe (default `crates/almide-wasm/tests/perf`)"),
     sw("ALMIDE_BIN", Value, Harness, "path of the `almide` binary the test harnesses, scripts and workflows drive (default: `target/release/almide`, then PATH)"),
+    sw("ALMIDE_BORROW_OWN_ALL", Flag, Ablation, "make BorrowInsertion own every borrow-eligible param, as before inference existed — the ablation the ownership certifier's C4 sensitivity test drives, and the borrow-inference perf knob"),
     sw("ALMIDE_BOUNDED_DEBUG", Flag, Dbg, "print why a bounded-loop bind declined (v1 lowering)"),
     sw("ALMIDE_CAPTURE_MOVE_OFF", Flag, Ablation, "make CaptureClone clone every capture again, as before #2231, instead of moving a value whose sole user is the closure — the ablation the ownership certifier's sensitivity test drives"),
     sw("ALMIDE_CERTIFY_OWNERSHIP", Value, Dbg, "run the native ownership certifier after the pass pipeline (#2231): `report` prints every violation, `fail` aborts the build on one; unset = off"),

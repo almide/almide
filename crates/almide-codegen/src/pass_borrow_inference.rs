@@ -82,7 +82,7 @@ fn tco_owned_params(func: &IrFunction, mut borrows: Vec<ParamBorrow>) -> Vec<Par
 /// Record the names of every user-declared RECORD type so a `t: Tok` param
 /// (`Ty::Named`) is borrow-inferred like a structural record instead of being
 /// deep-cloned at every read (#647).
-fn seed_record_names(program: &IrProgram) -> HashSet<String> {
+pub(crate) fn seed_record_names(program: &IrProgram) -> HashSet<String> {
     let mut set = HashSet::new();
     let mut collect = |decls: &[IrTypeDecl]| {
         for td in decls {
@@ -246,6 +246,18 @@ fn seed_codec_helper_sigs(sigs: &mut HashMap<String, Vec<ParamBorrow>>) {
         sigs.insert(format!("__decode_option_{prim}"), vec![ParamBorrow::Ref, ParamBorrow::Own]);
         sigs.insert(format!("__decode_default_{prim}"), vec![ParamBorrow::Ref, ParamBorrow::Own, ParamBorrow::Own]);
         sigs.insert(format!("__decode_default_list_{prim}"), vec![ParamBorrow::Ref, ParamBorrow::Own, ParamBorrow::Own]);
+    }
+}
+
+/// The built-in output fns (`println(x)` and kin) are free calls with no
+/// declaration in any bundled module, so the oracle saw an UNKNOWN callee
+/// and consumed their argument — a `fn say(name: String) = println(name)`
+/// owned `name` for a value the `println!` arm only formats by reference
+/// (#2231, the certifier's C4 on `say` / `show` / `report` / `flag`). They
+/// borrow.
+fn seed_builtin_output_sigs(sigs: &mut HashMap<String, Vec<ParamBorrow>>) {
+    for name in ["println", "print", "eprintln", "eprint"] {
+        sigs.entry(name.to_string()).or_insert_with(|| vec![ParamBorrow::Ref]);
     }
 }
 
@@ -432,6 +444,7 @@ pub fn infer_borrow_signatures(program: &mut IrProgram) -> HashMap<String, Vec<P
 
     let records = seed_record_names(program);
     seed_intrinsic_sigs(&mut sigs);
+    seed_builtin_output_sigs(&mut sigs);
     seed_codec_helper_sigs(&mut sigs);
     alias_float_variant_sigs(&mut sigs);
     let pending = seed_pending_user_fns(program);
