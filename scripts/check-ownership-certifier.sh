@@ -45,9 +45,15 @@ count=$(wc -l < "$tmp/corpus" | tr -d ' ')
 mkdir -p "$tmp/err"
 export ALMIDE tmp
 # shellcheck disable=SC2016
+# Each violation line is prefixed with the corpus file it came from, so two
+# files' `main`s never collapse into one ledger line and a line names where
+# to look.
+# shellcheck disable=SC2016
 xargs -P "$JOBS" -I{} bash -c '
   f="$1"; key="$(printf "%s" "$f" | tr "/" "_")"
-  ALMIDE_CERTIFY_OWNERSHIP=report "$ALMIDE" "$f" --target rust > /dev/null 2> "$tmp/err/$key" < /dev/null
+  ALMIDE_CERTIFY_OWNERSHIP=report "$ALMIDE" "$f" --target rust > /dev/null 2> "$tmp/err/$key.raw" < /dev/null
+  sed "s#^\[CERTIFY OWNERSHIP\] #[CERTIFY OWNERSHIP] $f: #" "$tmp/err/$key.raw" > "$tmp/err/$key"
+  rm -f "$tmp/err/$key.raw"
 ' _ {} < "$tmp/corpus"
 
 panics=$(grep -l "panicked" "$tmp/err"/* 2>/dev/null | wc -l | tr -d ' ')
@@ -87,7 +93,7 @@ if [ -s "$tmp/gone" ]; then
   fail=1
 fi
 if [ "$fail" = 0 ]; then
-  by=$(sed 's/^\[\(C[0-9]\)[^]]*\].*/\1/' "$tmp/now" | sort | uniq -c | awk '{printf "%s=%s ", $2, $1}')
+  by=$(sed 's/^[^[]*\[\(C[0-9]\)[^]]*\].*/\1/' "$tmp/now" | sort | uniq -c | awk '{printf "%s=%s ", $2, $1}')
   echo "ownership-certifier OK: $n_now violation(s) over $count file(s), exactly the ledger (${by:-none})"
 fi
 exit $fail

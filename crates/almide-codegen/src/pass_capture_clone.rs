@@ -59,7 +59,7 @@ impl NanoPass for CaptureClonePass {
         lower_borrowed_folds(&mut program, &borrowed_folds);
         program.codegen_annotations.borrowed_lambda_params.extend(borrowed_folds.iter().copied());
         for v in &shared_mut { program.codegen_annotations.shared_mut_vars.insert(*v); }
-        let mut facts = Facts { param_borrows: HashMap::new(), shared_mut, borrowed_folds, sole_capture_uses: HashMap::new() };
+        let mut facts = Facts { param_borrows: HashMap::new(), shared_mut, borrowed_folds, capture_uses: bindings::CaptureUses::default() };
 
         let mut changed = !program.codegen_annotations.borrowed_lambda_params.is_empty();
         let IrProgram { functions, modules, var_table, codegen_annotations, .. } = &mut program;
@@ -67,7 +67,7 @@ impl NanoPass for CaptureClonePass {
         for func in functions.iter_mut().chain(module_fns) {
             let param_vars: HashSet<VarId> = func.params.iter().map(|p| p.var).collect();
             facts.param_borrows = func.params.iter().map(|p| (p.var, p.borrow)).collect();
-            facts.sole_capture_uses = bindings::sole_capture_uses(&func.body);
+            facts.capture_uses = bindings::capture_uses(&func.body);
             let mut cx = Cx { vt: var_table, facts: &mut facts };
             if transform_expr(&mut func.body, &mut cx, &param_vars) {
                 changed = true;
@@ -96,14 +96,11 @@ struct Facts {
     /// First params of the fold closures whose captures stay borrowed
     /// (`borrowed_fold_params`): those lambdas get no pre-clone wrap.
     borrowed_folds: HashSet<VarId>,
-    /// Per var of the current fn: how many times it occurs in the body, when
-    /// EVERY occurrence is a read directly inside one closure level (depth
-    /// 1), outside every loop, and never a write. A lambda whose own body
-    /// holds exactly that many occurrences is the var's only user: the
-    /// capture bind may MOVE the value instead of cloning it (#2231, the
-    /// Perceus rule — a lambda dups its free variables only when they stay
-    /// live). Absent otherwise.
-    sole_capture_uses: HashMap<VarId, usize>,
+    /// Per var of the current fn: every occurrence with the lambda and the
+    /// statement it sits in, and whether the var is clean — what the
+    /// capture-move rule reads (`bindings::capture_moves`, #2231: the Perceus
+    /// rule, a lambda dups its free variables only while they stay live).
+    capture_uses: bindings::CaptureUses,
 }
 
 /// What the walk threads through every node: the table it allocates the
@@ -536,24 +533,16 @@ fn wrap_lambda_with_clones(
     cx: &mut Cx,
     lam_mutated: &HashSet<VarId>,
 ) {
-    // A capture this lambda is the sole user of moves instead of cloning:
-    // every occurrence of the var in the fn body sits in this lambda's own
-    // body (the counts agree), none is a write, none is in a loop, and the
-    // var is not a shared cell (a moved `Rc<Cell>` would still share, but
-    // the cell wiring pattern-matches the bind — it stays bare/cloned).
-    let mut move_now: HashSet<VarId> = HashSet::new();
-    if let IrExprKind::Lambda { body, .. } = &expr.kind {
-        let inner = UseSites::of_expr(body, Site::Result, &ExplicitBorrows);
-        for &v in captures {
-            if lam_mutated.contains(&v) || cx.facts.shared_mut.contains(&v) {
-                continue;
-            }
-            let here = inner.iter().filter(|u| u.var == v).count();
-            if here > 0 && cx.facts.sole_capture_uses.get(&v) == Some(&here) {
-                move_now.insert(v);
-            }
-        }
-    }
+    // A capture whose LAST occurrence this lambda holds moves instead of
+    // cloning (`bindings::capture_moves`): the var is clean (no write, no
+    // loop, no `&mut` reach), nothing outside the lambda shares its
+    // statement, and it is not a shared cell nor a capture this lambda
+    // mutates (the cell wiring pattern-matches those binds).
+    let lambda_id = match &expr.kind { IrExprKind::Lambda { lambda_id, .. } => *lambda_id, _ => None };
+    let move_now: HashSet<VarId> = captures.iter().copied()
+        .filter(|v| !lam_mutated.contains(v) && !cx.facts.shared_mut.contains(v))
+        .filter(|v| bindings::capture_moves(&cx.facts.capture_uses, *v, lambda_id))
+        .collect();
     let (stmts, renames) = capture_bindings(captures, cx, lam_mutated, None, &move_now);
 
     // Rename captured vars inside the lambda body

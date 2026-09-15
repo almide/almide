@@ -177,12 +177,55 @@ fn infer_function_borrows(func: &IrFunction, scope: &Scope) -> Vec<ParamBorrow> 
         return func.params.iter().map(|p| intrinsic_borrow_mode(&p.ty, scope.round.records)).collect();
     }
     let uses = UseSites::of_fn(func, scope);
-    func.params.iter().map(|param| param_borrow(param, &uses, scope)).collect()
+    func.params.iter().map(|param| param_borrow(param, &uses, scope, &func.body)).collect()
+}
+
+/// Does every `match` in `body` whose subject is the bare variable `var`
+/// bind nothing — literal, wildcard and nullary patterns only? Such a match
+/// on a `String` renders as `match &*s { "lit" => .. }` (`MatchSubject`),
+/// which borrows: the subject position does not consume the param (#2231 —
+/// `fn string_match(s: String) -> Int = match s { "alpha" => 1, .. }` owned
+/// `s` for three literal comparisons). A pattern that binds may move a
+/// payload out, so any binding keeps the conservative verdict.
+fn scrutinee_only_compares(body: &IrExpr, var: VarId) -> bool {
+    use almide_ir::visit::{IrVisitor, walk_expr, walk_stmt};
+    struct Scan { var: VarId, ok: bool }
+    fn binds_nothing(p: &IrPattern) -> bool {
+        match p {
+            IrPattern::Wildcard | IrPattern::Literal { .. } | IrPattern::None => true,
+            IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => binds_nothing(inner),
+            IrPattern::Constructor { args, .. } => args.iter().all(binds_nothing),
+            IrPattern::Tuple { elements } => elements.iter().all(binds_nothing),
+            IrPattern::List { elements, rest } => elements.iter().all(binds_nothing) && rest.as_deref().map_or(true, binds_nothing),
+            IrPattern::Bind { .. } | IrPattern::RecordPattern { .. } | IrPattern::As { .. } => false,
+        }
+    }
+    impl IrVisitor for Scan {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if let IrExprKind::Match { subject, arms } = &e.kind
+                && matches!(subject.kind, IrExprKind::Var { id } if id == self.var)
+                && !arms.iter().all(|a| binds_nothing(&a.pattern))
+            {
+                self.ok = false;
+            }
+            walk_expr(self, e);
+        }
+        fn visit_stmt(&mut self, s: &IrStmt) { walk_stmt(self, s); }
+    }
+    let mut scan = Scan { var, ok: true };
+    scan.visit_expr(body);
+    scan.ok
+}
+
+/// Is `later` after `earlier` in evaluation order? Occurrences are recorded
+/// in that order, so pointer position in the table decides.
+fn after(earlier: &Use, later: &Use) -> bool {
+    (later as *const Use) > (earlier as *const Use)
 }
 
 /// One param's mode from the body's occurrences of it.
-fn param_borrow(param: &IrParam, uses: &UseSites, scope: &Scope) -> ParamBorrow {
-    if !scope.is_borrow_eligible(&param.ty) {
+fn param_borrow(param: &IrParam, uses: &UseSites, scope: &Scope, body: &IrExpr) -> ParamBorrow {
+    if !scope.is_borrow_eligible(&param.ty) || almide_base::env::flag("ALMIDE_BORROW_OWN_ALL") {
         return ParamBorrow::Own;
     }
     // Explicit `mut` heap param → passed by mutable reference, and it is
@@ -196,7 +239,34 @@ fn param_borrow(param: &IrParam, uses: &UseSites, scope: &Scope) -> ParamBorrow 
     if param.is_mut {
         return ParamBorrow::RefMut;
     }
-    if uses.of(param.var).any(consumes) {
+    // A `String` param a `match` only compares, or an interpolation only
+    // formats (`format_args!` borrows its parts), is read by reference at
+    // those positions (#2231).
+    let is_string = matches!(param.ty, Ty::String);
+    let literal_subject = is_string && scrutinee_only_compares(body, param.var);
+    let read_by_ref = |u: &Use| (literal_subject && u.site == Site::Scrutinee)
+        || (is_string && u.site == Site::Construct(Ctor::Interp) && u.depth == 0);
+    // A consuming use that a LATER statement follows with another use of
+    // the param can never move it — `CloneInsertion` clones it because the
+    // var stays live — so it earns the param nothing by being owned; only a
+    // consuming use with no later-statement use can be the move ownership
+    // exists for (#2231: `show_list(xs)` consumed `xs` as a chain source and
+    // read `list.len(xs)` on the next line — owned, and cloned anyway).
+    // Refined further: a consuming use is CLONED ANYWAY — and so earns
+    // nothing by ownership — when a later occurrence can still run after it
+    // (same arm, an enclosing one, or a nested one — anything but a sibling
+    // branch: the var stays live, `CloneInsertion` clones; a guarded list
+    // pattern's fall-through re-reads the subject inside the arm), or when a
+    // direct `&v` argument of the same call keeps the var borrowed through
+    // it (`map.fold(&base, base.clone(), λ)`: the E0505 guard clones).
+    // A consuming use inside a loop body is cloned on every iteration (a
+    // param is never one of the loop's own fresh binders). `UseSites::keeps_live`,
+    // `Use::guard_forced` and `Use::in_loop` are the same facts the clone
+    // pass acts on.
+    let all: Vec<&Use> = uses.of(param.var).collect();
+    let cloned_anyway = |u: &Use| u.guard_forced || u.in_loop
+        || all.iter().any(|w| !std::ptr::eq(*w, u) && after(u, w) && uses.keeps_live(u, w));
+    if all.iter().any(|u| consumes(u) && !read_by_ref(u) && !cloned_anyway(u)) {
         return ParamBorrow::Own;
     }
     // Implicit mut for bundled bodies: when the body forwards this param into
@@ -275,7 +345,7 @@ fn intrinsic_borrow_mode(ty: &Ty, records: &HashSet<String>) -> ParamBorrow {
 /// layer loop gets `.clone()` inserted on every iteration (observed on
 /// bonsai-almide at 72% inclusive time, cf.
 /// memory/feedback_almide_bytes_clone.md).
-fn is_borrow_eligible(ty: &Ty, records: &HashSet<String>) -> bool {
+pub(crate) fn is_borrow_eligible(ty: &Ty, records: &HashSet<String>) -> bool {
     matches!(ty,
         Ty::String
         | Ty::Bytes
