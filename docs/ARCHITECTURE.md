@@ -175,7 +175,11 @@ walker sees only typed IR nodes — it never checks what target it renders for.
    property, not only by fixtures: `tests/native_borrow_oracle_test.rs`
    generates, per borrow-eligible type, every use a body can make of a
    param crossed with every call-site shape, and asserts the program
-   checks, builds natively and prints what the wasm leg prints.
+   checks, builds natively and prints what the wasm leg prints — and, under
+   `ALMIDE_ALLOC_COUNT=1` (a counting allocator the native build injects),
+   allocates exactly the (allocs, deallocs) pair pinned per program in
+   `tests/golden/native-borrow-oracle-alloc.txt`: a clone where a borrow
+   would do changes neither stdout nor the build, only that count (#2228).
 
 ## WASM Trust-Spine (almide-mir)
 
