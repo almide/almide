@@ -91,6 +91,8 @@ pub fn compile_to_binary_with(file: &str, no_check: bool, test_mode: bool, relea
         rs_code
     };
     t.lap("v1-native-render");
+    // ALMIDE_ALLOC_COUNT (#2228): the counting allocator, when armed.
+    let rs_code = super::build::arm_alloc_count(rs_code);
 
     // Load native deps from almide.toml (search in input file's directory, then CWD).
     // source_root is the directory containing almide.toml (where native/ lives).

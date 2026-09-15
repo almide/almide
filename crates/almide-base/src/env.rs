@@ -80,6 +80,7 @@ use Scope::{Ablation, Ci, Debug as Dbg, Gate, Harness, Route, Runtime, Tool, Tra
 /// order and the completeness.
 pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_ABI_PROBE", Flag, Dbg, "print the lifted-effect-fn ABI decision per function (v1 lowering)"),
+    sw("ALMIDE_ALLOC_COUNT", Flag, Harness, "build the native program with a counting allocator that prints `__ALMD_ALLOC allocs=N deallocs=N reallocs=N peak=N` on stderr when `__almide_main` returns (the native borrow oracle's allocation lane, tests/native_borrow_oracle_test.rs)"),
     sw("ALMIDE_BANG_RETURN", Flag, Ablation, "turn OFF the per-position `!` desugars of the v1 lowering so every `!` reaches the bind-position rule or walls loudly (the decline-matrix probe)"),
     sw("ALMIDE_BENCH_DIR", Value, Harness, "the fixture directory of the structural leg's perf probe (default `crates/almide-wasm/tests/perf`)"),
     sw("ALMIDE_BIN", Value, Harness, "path of the `almide` binary the test harnesses, scripts and workflows drive (default: `target/release/almide`, then PATH)"),
