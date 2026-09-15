@@ -42,6 +42,7 @@ mod pass_clone_places;
 mod pass_clone_projection;
 mod pass_clone_record_fields;
 pub mod pass_top_let_storage;
+pub mod pass_var_storage;
 pub mod pass_fan_lowering;
 pub mod pass_list_pattern;
 pub mod pass_match_subject;
