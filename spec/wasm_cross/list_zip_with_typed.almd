@@ -29,7 +29,9 @@ fn main() -> Unit = {
   println("i = ${zw_int([1, 2, 3])}")
   println("m = ${zw_mixed(["ab", "c"])}")
   let k = string.reverse("ΑΒΓ")
-  println("d = ${zw_cap_dropped(k)} ${k} ${list.unique(list.zip_with(["p", "q"], ["a", "b"], ((x, y) => k)))}")
+  let d = zw_cap_dropped(k)
+  let u = list.unique(list.zip_with(["p", "q"], ["a", "b"], ((x, y) => k)))
+  println("d = ${d} ${u} ${k}")
 }
 
 test "zip_with over each element repr" {
@@ -42,6 +44,6 @@ test "zip_with over each element repr" {
 test "a captured result survives the zip_with result's drop" {
   let k = string.reverse("ΑΒΓ")
   assert_eq(zw_cap_dropped(k), 2)
-  assert_eq(k, "ΓΒΑ")
   assert_eq(list.unique(list.zip_with(["p", "q"], ["a", "b"], ((x, y) => k))), ["ΓΒΑ"])
+  assert_eq(k, "ΓΒΑ")
 }
