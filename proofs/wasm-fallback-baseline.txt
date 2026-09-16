@@ -21,9 +21,6 @@
 # structural leg — the default build/run route — lowers both forms (C-332 /
 # C-333 pin them on every execution sweep). Retires with the #1584
 # render_wasm switchover.
-spec/lang/list_rest_pattern_test.almd :: COMPILER_FRONTIER :: incumbent brick has no list-rest pattern bind (structural leg lowers it; retires with #1584)
-spec/lang/as_pattern_test.almd :: COMPILER_FRONTIER :: incumbent brick has no as-pattern bind (structural leg lowers it; retires with #1584)
-spec/integration/modules/cross_module_repr_derive_test.almd :: COMPILER_FRONTIER :: incumbent brick walls the derived Repr of a module type and the module-record list repr (Pt.repr / __repr_list_rec_*; the structural leg lowers both — tests/module_type_repr_test.rs certifies them; retires with #1584)
 #
 # HOST_CAPABILITY (6):
 spec/lang/effect_intrinsic_tail_test.almd :: HOST_CAPABILITY :: http.serve is a TCP listener
@@ -31,7 +28,6 @@ spec/stdlib/net_test.almd :: HOST_CAPABILITY :: net is an OS socket API
 spec/stdlib/process_exec_status_test.almd :: HOST_CAPABILITY :: subprocess exec
 spec/stdlib/process_ext_test.almd :: HOST_CAPABILITY :: subprocess exec
 spec/stdlib/process_timeout_test.almd :: HOST_CAPABILITY :: subprocess exec
-spec/stdlib/zlib_test.almd :: HOST_CAPABILITY :: zlib is a native library binding
 #
 # HARNESS_LIMITATION (2):
 spec/stdlib/coverage_assert_throws_test.almd :: HARNESS_LIMITATION :: assert_throws needs panic catching; a wasm trap is uncatchable in-process
