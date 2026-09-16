@@ -245,7 +245,7 @@ impl Checker {
     /// will fire (auto_unwrap, target doesn't keep, t is Result), record the
     /// site so post-solve emits the deprecation warning with the `!` insert.
     fn effect_unwrap_rhs_warned(&mut self, t: Ty, value: &ast::Expr, what: &'static str, mechanical: bool, target_keeps_result: bool) -> Ty {
-        if self.env.auto_unwrap {
+        if self.implicit_prop_reportable() {
             // #2182: a branching RHS (`let x = match … { _ => f() }`, a block
             // whose tail is the call) reports at its Result-typed tail
             // leaves — the whole-RHS span could neither carry the `!`
@@ -260,14 +260,32 @@ impl Checker {
             } else if Self::is_branching(value) {
                 self.queue_implicit_prop_leaves(value, what, false);
             } else {
+                // Inside a lambda the `!` is not a one-place edit: it makes the
+                // lambda fallible and the call that takes it then needs its own
+                // `!` — so the insertion is shown, never offered as a position.
+                let mechanical = mechanical && self.env.lambda_depth == 0;
                 self.deferred_implicit_prop_checks.push((t.clone(), value.span, what, mechanical, false));
             }
         }
         self.effect_unwrap_rhs(t, target_keeps_result)
     }
 
+    /// Where an un-annotated `Result` binding is E041 (#2254): an effect fn
+    /// body (`auto_unwrap`, the legacy name of that context), and a lambda
+    /// body inside one. The lambda never auto-propagated (#489), but the
+    /// binding faces the same choice — `expr!` makes the lambda fallible
+    /// (ADR-0006), or the Result is consumed as a value — and leaving it
+    /// unreported let `let t = fs.read_text(p)` pass unremarked in a lambda
+    /// where the same line is an error one scope up. A pure fn or a pure
+    /// lambda holds a `Result` value legitimately and is not this context.
+    pub(crate) fn implicit_prop_reportable(&self) -> bool {
+        self.env.auto_unwrap || (self.env.lambda_depth > 0 && self.env.can_call_effect)
+    }
+
     fn effect_unwrap_rhs(&self, t: Ty, target_keeps_result: bool) -> Ty {
-        if self.env.auto_unwrap && !target_keeps_result {
+        // The binding takes the ok type wherever E041 was reported for it, so
+        // the error stands alone instead of cascading (E005 on every later use).
+        if self.implicit_prop_reportable() && !target_keeps_result {
             match t {
                 Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 =>
                     args.into_iter().next().unwrap_or(Ty::Unknown),
