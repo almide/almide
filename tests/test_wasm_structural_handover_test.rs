@@ -1,13 +1,14 @@
-//! `almide test --target wasm` hands a walled main file to the structural leg (#2121).
+//! `almide test --target wasm` renders a file the incumbent walls on the structural leg (#2121, #2179).
 //!
-//! `almide build --target wasm` already did: when the incumbent walls, the
+//! `almide build --target wasm` always did: when the incumbent walls, the
 //! build's reverse handover lets the structural leg render a `main`-carrying
 //! program, and the artifact runs. The test runner took only the incumbent's
 //! verdict, so the same entry reported SKIP — and a structural-leg defect in
-//! it could hide behind that SKIP. Now a test-free main file takes the same
-//! route; a file with test blocks reports a WALL (not a declared SKIP —
-//! #2180), since the structural leg has no test mode and running its main
-//! alone would report nothing.
+//! it could hide behind that SKIP. #2121 gave a test-free main file the
+//! build's route; a file with test blocks still reported a WALL, since the
+//! structural leg had no test mode. #2179 gave the lane the product's routing
+//! outright — structural first, with the shared `__test_runner` synthesis —
+//! so both shapes below run their tests on the structural leg.
 
 use std::path::Path;
 use std::process::Command;
@@ -59,14 +60,16 @@ fn a_test_free_main_the_incumbent_walls_runs_on_the_structural_leg() {
     assert!(text.contains("1 passed, 0 failed"), "{text}");
 }
 
+/// The file with a test block the incumbent walls: its test RUNS on the lane
+/// (#2179) — the structural leg renders the synthesized runner, the user
+/// `main` is dropped exactly as native's test mode drops it, and nothing is
+/// reported as a wall or a skip.
 #[test]
-fn a_file_with_test_blocks_reports_the_wall_and_says_why() {
+fn a_file_with_test_blocks_runs_its_tests_on_the_structural_leg() {
     let dir = tempfile::tempdir().expect("tempdir");
     package(dir.path(), MAIN_WITH_TEST);
-    let (_, text) = test_wasm(dir.path(), &[]);
-    // A renderer wall is its own verdict (WALL), never a declared `// wasm:skip`.
-    assert!(text.contains("WALL") && text.contains("tests did not run on wasm"), "tests cannot run on the structural leg:\n{text}");
-    assert!(!text.contains("no verified wasm rendering"), "the wall names the leg, not the product:\n{text}");
-    assert!(text.contains("route to native"), "the wall names the reason:\n{text}");
-    assert!(text.contains("no structural-leg test route"), "{text}");
+    let (ok, text) = test_wasm(dir.path(), &[]);
+    assert!(ok, "the test lane must take the build's route:\n{text}");
+    assert!(!text.contains("WALL") && !text.contains("SKIP"), "neither a wall nor a skip:\n{text}");
+    assert!(text.contains("1 tests passed"), "and the test itself ran:\n{text}");
 }
