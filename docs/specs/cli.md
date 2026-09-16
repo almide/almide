@@ -266,8 +266,21 @@ almide-timings {"lex_ns":1812250,"parse_ns":1644211,"check_ns":3851626,"total_ns
 `--timings` なしでは無出力）。ratchet 側は `scripts/check-edit-loop-scale.sh`。
 
 `--json` の 1 行は
-`{level, code, message, hint, here, try, try_replace, context, file, line, col, end_col, secondary}`。
-`try` は貼り付け可能な修正スニペット、`try_replace` はそれが置換するスパン。
+`{level, code, message, hint, here, try, try_replace, applicability, suggestions, context, file, line, col, end_col, secondary}`。
+`try` は貼り付け可能な修正スニペット、`try_replace` はそれが置換するスパン、
+`suggestions[]` は `{line, col, end_col, replacement, applicability}` の構造化された同じ修正。
+
+**位置の単位**(#2250): `line` は 1 始まりの行、`col` / `end_col` は **1 始まりの文字数**
+(Unicode スカラー値の個数)。バイトでも表示幅でもない — CJK を含む 66 文字(98 バイト)の行の
+末尾挿入は `col = 67`。`end_col` は排他的(その列の直前まで)で、`col == end_col` は
+ゼロ幅の挿入点。バイトで数えるハーネスは UTF-8 を壊す。
+
+**位置は必ずファイル上の実在する場所を指す**: heredoc の 3 行目にある `${…}` はその行・その列で
+報告される(かつては文字列の先頭行に、デコード済みテンプレート全体を数えた列で出ていた)。
+`)` が後続行にある呼び出しは `Span` が終端行を持たないため `(` のスパンだけを運ぶ —
+その場合 E041/E042 の `!` 修正は `try` にだけ出て、`try_replace` / `suggestions` は付かない
+(式の途中に `!` を挿す位置を渡すより、位置を出さない)。
+テスト: `tests/fixit_span_on_line_test.rs`、`tests/interpolation_span_parity_test.rs`。
 
 **構文エラーも JSON で出る**: トップレベル宣言が 1 つも成立しないファイルは
 `Parser::parse` が `Err` を返し、共有の `parse_file` は人間向けテキストを stderr に出して
