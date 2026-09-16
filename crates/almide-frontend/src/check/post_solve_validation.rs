@@ -518,11 +518,63 @@ impl Checker {
             // handles failure. The span is exact, so the fix-it is
             // offered and IDE/model-appliable — `almide fix` just won't
             // choose for the author.
-            if mechanical && s.end_col > s.col {
+            // And only when the span's text really ENDS the expression
+            // (#2250): a `Span` carries no end line, so a call whose `)` sits
+            // on a later line carries the span of its `(` alone, and a `!`
+            // inserted at that end column lands mid-call. A harness applying
+            // `suggestions[]` would corrupt the source, so a span whose text
+            // is not a closed call (or a bare name) — or that the source text
+            // cannot locate at all — gets the fix as display only, never as a
+            // position.
+            if mechanical
+                && s.end_col > s.col
+                && self.source_slice(s).is_some_and(|text| Self::fix_anchor_ends_expression(&text))
+            {
                 d = d.with_suggested_fix(s.line, s.end_col, s.end_col, "!");
             }
             self.diagnostics.push(d);
         }
+    }
+
+    /// #2250: whether inserting `!` right after `slice` (a span's text on its
+    /// own line) appends to a whole expression. True for a call closed on
+    /// this line — ends in `)` with its parentheses balanced outside string
+    /// literals — and for a bare (possibly dotted) name. False for the lone
+    /// `(` a multi-line call carries as its span, and for any span that stops
+    /// inside the expression it names.
+    pub(crate) fn fix_anchor_ends_expression(slice: &str) -> bool {
+        let s = slice.trim_end();
+        if s.is_empty() {
+            return false;
+        }
+        if s.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '.') {
+            return !s.ends_with('.');
+        }
+        if !s.ends_with(')') {
+            return false;
+        }
+        let (mut depth, mut in_str, mut prev) = (0i64, false, '\0');
+        for c in s.chars() {
+            if in_str {
+                if c == '"' && prev != '\\' {
+                    in_str = false;
+                }
+            } else {
+                match c {
+                    '"' => in_str = true,
+                    '(' => depth += 1,
+                    ')' => {
+                        depth -= 1;
+                        if depth < 0 {
+                            return false;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            prev = c;
+        }
+        depth == 0 && !in_str
     }
 
     fn validate_result_interpolations(&mut self) {
