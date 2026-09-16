@@ -61,6 +61,9 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | almide mcp
 
 `try` is a copy-pasteable fix snippet and `try_replace` is the span it
 replaces, so a fix can be applied mechanically rather than re-derived.
+`line` is 1-based; `col` / `end_col` are 1-based **character** counts (not
+bytes, not display width), `end_col` exclusive — a harness that counts bytes
+corrupts UTF-8 (#2250).
 
 ## Rules this surface follows
 
