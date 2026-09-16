@@ -346,7 +346,7 @@ fn fmt_expr_record(out: &mut String, expr: &Expr, depth: usize) {
     let mut one = String::from("{ ");
     comma_sep(&mut one, fields, |out, f| { w!(out, "{}: ", f.name); fmt_expr(out, &f.value, depth); });
     one.push_str(" }");
-    if stack_members(out, &members, &one) {
+    if stack_members(out, expr.span, &members, &one) {
         out.push('{');
         fmt_members_expanded(out, &members, '}', depth);
     } else {
@@ -387,11 +387,19 @@ fn current_col(out: &str) -> usize {
     out.rsplit('\n').next().map_or(0, |l| l.chars().count())
 }
 
-fn members_span_lines(members: &[(Option<&str>, &Expr)]) -> bool {
-    let mut lines = members.iter().filter_map(|(_, e)| e.span.map(|s| s.line));
-    match lines.next() {
-        Some(first) => lines.any(|l| l != first),
-        None => false,
+/// Did the author split the container? Its first member starts on a line
+/// below the opener — `f(\n  a,\n  b)`, the shape `fmt_members_expanded`
+/// prints. The earlier test compared the members' own start lines, and a
+/// multi-line member followed on its closing line by the next one
+/// (`f([\n  x,\n  y\n], 5)`) — a layout fmt itself prints — read as a
+/// split, so the second pass expanded what the first had hugged: the
+/// formatter was not idempotent on its own output (fuzz-nightly
+/// FmtInstability, seed 561137265089 index 136). Spans carry no end line,
+/// so the opener line is the one fact both passes agree on.
+fn members_span_lines(opener: Option<Span>, members: &[(Option<&str>, &Expr)]) -> bool {
+    match (opener, members.first().and_then(|(_, e)| e.span)) {
+        (Some(open), Some(first)) => first.line > open.line,
+        _ => false,
     }
 }
 
@@ -419,8 +427,8 @@ fn fmt_members_expanded(out: &mut String, members: &[(Option<&str>, &Expr)], clo
 /// text after the opener, closer included). Comments are only handled by the
 /// stacked path when present, so a commented container is left to its
 /// existing branch and never reaches here.
-fn stack_members(out: &str, members: &[(Option<&str>, &Expr)], one: &str) -> bool {
-    members.len() >= 2 && (members_span_lines(members) || current_col(out) + one.chars().count() > MAX_WIDTH)
+fn stack_members(out: &str, opener: Option<Span>, members: &[(Option<&str>, &Expr)], one: &str) -> bool {
+    members.len() >= 2 && (members_span_lines(opener, members) || current_col(out) + one.chars().count() > MAX_WIDTH)
 }
 
 fn fmt_expr_call(out: &mut String, expr: &Expr, depth: usize) {
@@ -444,7 +452,7 @@ fn fmt_expr_call(out: &mut String, expr: &Expr, depth: usize) {
         });
     }
     one.push(')');
-    if stack_members(out, &members, &one) {
+    if stack_members(out, callee.span, &members, &one) {
         fmt_members_expanded(out, &members, ')', depth);
     } else {
         out.push_str(&one);

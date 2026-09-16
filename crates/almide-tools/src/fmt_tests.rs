@@ -637,4 +637,20 @@ mod line_width_tests {
         let once = fmt_src(&wide);
         assert_eq!(fmt_src(&once), once, "width-driven layout must be a fixed point");
     }
+
+    /// fuzz-nightly FmtInstability (seed 561137265089 index 136): a call whose
+    /// FIRST argument is a list literal fmt lays out over several lines kept
+    /// the call hugged on the first pass (`get_or([\n  …\n], 5, acc)`), and
+    /// the second pass read the members' differing start lines as an
+    /// author's split and stacked every argument. Author-split means the
+    /// first member sits below the opener; a member that merely ends on a
+    /// later line than it started is not one.
+    #[test]
+    fn a_multi_line_first_argument_does_not_read_as_an_author_split() {
+        let src = "fn f(v0: List[Int]) -> Int = list.len(list.get_or([[1, 9223372036854775807, -2147483648, 1], v0], 5, []))\n";
+        let once = fmt_src(src);
+        assert!(once.contains("list.get_or([\n"), "the first argument stays hugged:\n{once}");
+        assert!(once.contains("], 5, [])"), "the trailing arguments stay on the closing line:\n{once}");
+        assert_eq!(fmt_src(&once), once, "the hugged layout must be a fixed point");
+    }
 }
