@@ -1,0 +1,38 @@
+// An in-place element write never reaches an alias taken before it (#2260):
+// `let ys = xs; xs[i] = v` leaves `ys` as it was, for scalar AND heap
+// elements, on both legs. The String case used to trap on the wasm test lane
+// (a copy-on-write guard composed with the functional rebind's drop-old into
+// an rc underflow) and fall back to native unnoticed.
+test "a String list alias keeps the old elements" {
+  var xs = ["a", "b", "c"]
+  let ys = xs
+  xs[1] = "B"
+  assert_eq(ys, ["a", "b", "c"])
+  assert_eq(xs, ["a", "B", "c"])
+}
+
+test "an Int list alias keeps the old elements" {
+  var xs = [1, 2, 3]
+  let ys = xs
+  xs[1] = 9
+  assert_eq(ys, [1, 2, 3])
+  assert_eq(xs, [1, 9, 3])
+}
+
+test "two writes through the same alias pair" {
+  var xs = ["p", "q"]
+  let ys = xs
+  xs[0] = "P"
+  xs[1] = "Q"
+  assert_eq(ys, ["p", "q"])
+  assert_eq(xs, ["P", "Q"])
+}
+
+test "the alias can be written too, independently" {
+  var xs = ["a", "b"]
+  var ys = xs
+  xs[0] = "x"
+  ys[1] = "y"
+  assert_eq(xs, ["x", "b"])
+  assert_eq(ys, ["a", "y"])
+}
