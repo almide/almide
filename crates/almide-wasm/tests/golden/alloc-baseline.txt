@@ -137,6 +137,7 @@
 66288	spec/wasm_cross/fallible_tuple_value_tail.almd
 66080	spec/wasm_cross/fan_any_allfail.almd
 67024	spec/wasm_cross/fan_any_early_winner.almd
+!	spec/wasm_cross/fan_arm_unwrap_or.almd
 66032	spec/wasm_cross/fan_block_err_list_order.almd
 68160	spec/wasm_cross/fan_deterministic.almd
 67136	spec/wasm_cross/fan_effect_mapper.almd
