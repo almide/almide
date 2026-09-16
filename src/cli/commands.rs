@@ -351,30 +351,61 @@ fn wasm_test_dep_paths() -> Vec<(project::PkgId, std::path::PathBuf)> {
     vec![]
 }
 
-/// #2121: the incumbent walled, but `almide build --target wasm` would have
-/// handed the same entry to the structural leg (build.rs's reverse
-/// handover) and shipped it. The test runner took only the incumbent's
-/// verdict, so a program that builds and runs on wasm reported SKIP here —
-/// and, the other way round, a structural-leg defect in that program could
-/// hide behind the SKIP. Mirror the build's route: a `main`-carrying,
-/// export-free entry gets one structural attempt, validated and audited
-/// against the p1 host surface wasmtime serves. Anything else stays the
-/// honest skip that routes the file to native.
-fn structural_handover(test_file: &str, source_text: &str, ir_program: &almide::ir::IrProgram, declared_tests: usize, explain: bool) -> Option<Vec<u8>> {
+/// The incumbent leg's rendering of a test file — the lane's fallback, as it
+/// is the product's. Its verdict is FINAL where it renders: a run failure
+/// routes to the authoritative native leg, never to a retry on unverified
+/// codegen (#782, #790). `wat` assembles without full stack-shape validation,
+/// so the bytes are validated here and an invalid module is an honest wall.
+fn incumbent_test_render(test_file: &str, source_text: &str, v1_self_modules: &[(String, almide_lang::ast::Program, bool)], run_filter: Option<&str>, explain: bool) -> Option<Vec<u8>> {
+    let wall = |stage: &str, detail: String| {
+        if explain { err(&format!("[wall] {}: {}: {}", test_file, stage, detail)); }
+    };
+    let wat_text = match almide_mir::pipeline::try_render_wasm_source_tests(source_text, v1_self_modules, explain, run_filter) {
+        Ok(t) => t,
+        Err(e) => { wall("render", format!("{e:?}")); return None; }
+    };
+    let bytes = match wat::parse_str(&wat_text) {
+        Ok(b) => b,
+        Err(e) => { wall("wat assemble", e.to_string()); return None; }
+    };
+    if let Err(e) = wasmparser::validate(&bytes) {
+        wall("validate", e.to_string());
+        return None;
+    }
+    Some(bytes)
+}
+
+/// The structural leg's rendering of a test file — the lane's FIRST attempt
+/// (#2179), as it is the product's. Before it, the test runner took only the
+/// incumbent's verdict: a program that built and ran on wasm reported SKIP
+/// here (#2121), and, the other way round, a structural-leg defect in that
+/// program could hide behind the SKIP (the first spec run on this route found
+/// one — `list_fuse`'s observation scan missed captured-var writes). A
+/// main-only file runs its `main`; a file that declares tests gets the shared
+/// `__test_runner` synthesis. Validated and audited against the p1 host
+/// surface wasmtime serves; an export-mode file, or a decline at any stage,
+/// hands the file to the incumbent.
+fn structural_test_render(test_file: &str, source_text: &str, ir_program: &almide::ir::IrProgram, declared_tests: usize, run_filter: Option<&str>, explain: bool) -> Option<Vec<u8>> {
     let has_main = ir_program.functions.iter().any(|f| f.name.as_str() == "main");
     let has_exports = ir_program.functions.iter().any(|f| !f.export_attrs.is_empty());
-    // The structural leg has no test mode: its `_start` runs `main` and
-    // nothing else. That IS the incumbent's protocol for a main file with
-    // no test blocks, so those hand over; a file that declares tests keeps
-    // the honest skip — running its main and ignoring its tests would
-    // report a pass over nothing (or a FAIL over a main that wanted stdin).
-    if !has_main || has_exports || declared_tests > 0 {
+    // A main-only file runs its `main` (the `__main_runner` protocol); a file
+    // that declares tests gets the leg-independent `__test_runner` synthesis
+    // (#2179) — the same one the incumbent applies — before the structural
+    // leg links and emits it. An export-mode file stays with the incumbent.
+    // `ALMIDE_WASM_INCUMBENT=1` forces the incumbent here exactly as it does
+    // in `render_wasm_module_routed`, so a lane run can be pinned to one leg.
+    if (!has_main && declared_tests == 0) || has_exports || almide_base::env::flag("ALMIDE_WASM_INCUMBENT") {
         return None;
     }
     let wall = |stage: &str, detail: String| {
         if explain { err(&format!("[wall] {}: structural {}: {}", test_file, stage, detail)); }
     };
-    let ir = match almide::wasm_leg::lower_to_ir_with_deps(test_file, source_text, &wasm_test_dep_paths()) {
+    let lowered = if declared_tests > 0 {
+        almide::wasm_leg::lower_to_ir_tests_with_deps(test_file, source_text, &wasm_test_dep_paths(), run_filter)
+    } else {
+        almide::wasm_leg::lower_to_ir_with_deps(test_file, source_text, &wasm_test_dep_paths())
+    };
+    let ir = match lowered {
         Ok(ir) => ir,
         Err(e) => { wall("lower", e); return None; }
     };
@@ -399,7 +430,7 @@ fn structural_handover(test_file: &str, source_text: &str, ir_program: &almide::
         Err(e) => { wall("to_wasi", e.to_string()); return None; }
     };
     if explain {
-        err(&format!("[handover] {}: incumbent walled — structural leg took the test ({} bytes)", test_file, bytes.len()));
+        err(&format!("[route] {}: structural leg rendered the test module ({} bytes)", test_file, bytes.len()));
     }
     Some(bytes)
 }
@@ -574,26 +605,13 @@ fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::PathBuf, run
     // re-deriving each one by hand through `render_program`.
     let explain = almide_base::env::flag("ALMIDE_WALL_REASON");
 
-    let v1_bytes: Option<Vec<u8>> =
-        match almide_mir::pipeline::try_render_wasm_source_tests(&source_text, &v1_self_modules, explain, run_filter) {
-            Err(e) => {
-                if explain { err(&format!("[wall] {}: render: {:?}", test_file, e)); }
-                None
-            }
-            Ok(wat_text) => match wat::parse_str(&wat_text) {
-                Err(e) => {
-                    if explain { err(&format!("[wall] {}: wat assemble: {}", test_file, e)); }
-                    None
-                }
-                Ok(bytes) => match wasmparser::validate(&bytes) {
-                    Err(e) => {
-                        if explain { err(&format!("[wall] {}: validate: {}", test_file, e)); }
-                        None
-                    }
-                    Ok(_) => Some(bytes),
-                },
-            },
-        };
+    // The SAME two-leg routing `almide build --target wasm` uses (#2179): the
+    // structural leg first, the incumbent where it declines. Before this the
+    // lane rendered through the incumbent alone, so the test lane and the
+    // product lane were two different compilers, and the lane walled files
+    // the product built.
+    let module_bytes = structural_test_render(test_file, &source_text, &ir_program, declared_tests, run_filter, explain)
+        .or_else(|| incumbent_test_render(test_file, &source_text, &v1_self_modules, run_filter, explain));
     // Write the module and run it under wasmtime. `-S inherit-env=y` mirrors
     // `cmd_run_wasm`: `env.get` in a test observes the same host variables native
     // does (the env cross-target contract).
@@ -657,20 +675,15 @@ fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::PathBuf, run
     // ok), so a GENUINELY failing test (v1 correctly aborting on `none!`) was
     // overwritten by a hollow v0 "pass". A v1 WALL is an honest skip that routes
     // the file to native — the shrinking #813 remainder.
-    match v1_bytes {
+    match module_bytes {
         Some(b) => run_module(&b),
-        None => match structural_handover(test_file, &source_text, &ir_program, declared_tests, explain) {
-            Some(b) => run_module(&b),
-            // Name the LEG. "no verified wasm rendering" was a claim about the
-            // PRODUCT, and the product's default wasm leg is the structural one —
-            // which this lane asks only for a test-free main file (#2121). Four
-            // of the five files this reported it for build `structural leg,
-            // verified` under `almide build --target wasm`.
-            None if declared_tests > 0 => skip(format!(
-                "the incumbent leg walled; this lane has no structural-leg test route ({declared_tests} test block(s) route to native, #2179)"
-            )),
-            None => skip("the incumbent leg walled; this lane has no structural-leg test route (#2179)".to_string()),
-        },
+        // Both legs declined — the same verdict `almide build --target wasm`
+        // gives this file (E082). Name both legs: the structural leg is the
+        // product's default, the incumbent its fallback.
+        None => skip(format!(
+            "both wasm legs walled: the structural leg (the default) declined and the incumbent walled{} — ALMIDE_WALL_REASON=1 names each stage",
+            if declared_tests > 0 { format!(" ({declared_tests} test block(s) route to native)") } else { String::new() }
+        )),
     }
 }
 
