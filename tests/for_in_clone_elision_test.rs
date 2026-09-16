@@ -178,9 +178,9 @@ fn binder_the_body_only_borrows_iterates_by_reference() {
           println(\"${{t}}\")\
         }}\n"), "borrowed-binder");
     assert!(body.contains("for u in us.iter() {"), "a binder only ever passed by `&` never needs an owned element:\n{body}");
-    assert!(body.contains("hitu(&u)"), "the borrowed call site is unchanged (`&&T` coerces):\n{body}");
+    assert!(body.contains("hitu(u)"), "the borrowed call site passes the `&T` binder as it is — `&u` was `&&T`, which a generic key slot cannot coerce (#2256):\n{body}");
     assert!(body.contains("for s in names.iter() {"), "a String binder read through `&*s` iterates by reference too:\n{body}");
-    assert!(body.contains("for v in data.iter() {") && body.contains("hit(&v)"), "a Value read by a borrowing callee (#1679) iterates by reference:\n{body}");
+    assert!(body.contains("for v in data.iter() {") && body.contains("hit(v)"), "a Value read by a borrowing callee (#1679) iterates by reference:\n{body}");
     assert!(!body.contains("iter().cloned()"), "no loop in this program consumes its element — every `.cloned()` here is a copy nobody reads:\n{body}");
 }
 
