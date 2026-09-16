@@ -567,6 +567,13 @@ impl Emitter<'_> {
             self.load_ty_slot(eb, 0);
             self.f.instructions().local_set(params[1]);
             self.lower(body, Some(out_ty))?;
+            // A pass-through body (`(a, b) => a`, a captured String) hands
+            // back a VIEW; the result spine is a holder and takes the share
+            // here, exactly as `list.map` does. Without it the pushed handle
+            // rode on the source's count, and dropping the zip_with result
+            // freed the captured string under its owner (fuzz-nightly
+            // OutputDivergence, seed 561137265092 index 934).
+            self.rc_share_guard(body, out_ty);
             out_ty
         } else {
             // build the (A, B) pair block
