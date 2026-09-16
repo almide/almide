@@ -78,6 +78,17 @@ fn is_ref_mut_param(params: &[IrParam], id: VarId) -> bool {
     matches!(param_mode(params, id), Some(ParamBorrow::RefMut))
 }
 
+/// A `Copy` scalar: a `mut` param of one of these is a `&mut T` whose every
+/// READ must spell `*p` — an integer method auto-derefs, but `x * k`, `!b`
+/// and a by-value argument slot do not (#2243).
+fn is_copy_scalar(ty: &Ty) -> bool {
+    matches!(ty,
+        Ty::Int | Ty::Float | Ty::Bool
+        | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
+        | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+        | Ty::Float32 | Ty::Float64)
+}
+
 fn var_id(e: &IrExpr) -> Option<VarId> {
     match &e.kind {
         IrExprKind::Var { id } => Some(*id),
@@ -217,6 +228,23 @@ impl Lower<'_> {
         }
     }
 
+    /// A read of a `mut` scalar param is `*p` (#2243): the param is a
+    /// `&mut i64` / `&mut f64` / `&mut bool`, and every value position — a
+    /// binary operand, `!b`, an interpolation part, a by-value argument —
+    /// needs the place, not the reference. A `&mut p` forwarding it to
+    /// another `mut` callee becomes `&mut *p`, the explicit reborrow; the
+    /// assignment target is a `VarId` the walker already spells `*p =`.
+    fn lower_scalar_ref_read(&self, expr: &mut IrExpr) {
+        let IrExprKind::Var { id } = &expr.kind else { return };
+        if !is_ref_mut_param(self.params, *id) || !is_copy_scalar(&expr.ty) {
+            return;
+        }
+        let var = std::mem::replace(expr, mk(IrExprKind::Unit, Ty::Unit, None));
+        let ty = var.ty.clone();
+        let span = var.span;
+        *expr = mk(IrExprKind::Deref { expr: Box::new(var) }, ty, span);
+    }
+
     /// `p.clone()` of a `&str` param yields a `&str`; the owned `String` the
     /// context expects is `.to_string()`.
     /// A `Clone` of a by-reference `String` / `List` param is its owned
@@ -310,6 +338,7 @@ impl IrMutVisitor for Lower<'_> {
     fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
         walk_expr_mut(self, expr);
         match &expr.kind {
+            IrExprKind::Var { .. } => self.lower_scalar_ref_read(expr),
             IrExprKind::Borrow { .. } => self.lower_borrow(expr),
             IrExprKind::Clone { .. } => self.lower_clone(expr),
             IrExprKind::SpreadRecord { .. } => self.lower_spread(expr),
