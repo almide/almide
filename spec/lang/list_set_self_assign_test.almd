@@ -1,0 +1,80 @@
+// `xs = list.set(xs, i, v)` writes the slot in place (#2244): the same value
+// semantics as the copying `list.set`, without the copy. What a program can
+// observe is pinned here — the write, an alias's independence, the tolerant
+// bounds, single evaluation of the index, a value read from the list itself,
+// the UFCS spelling, and every element kind.
+var calls = 0
+
+fn next_index() -> Int = {
+  calls = calls + 1
+  1
+}
+
+test "self-assigned set writes the slot" {
+  var xs = ["a", "b", "c"]
+  xs = list.set(xs, 1, "B")
+  assert_eq(xs, ["a", "B", "c"])
+}
+
+test "an alias taken before the set keeps the old value" {
+  var xs = ["a", "b", "c"]
+  let ys = xs
+  xs = list.set(xs, 1, "B")
+  assert_eq(ys, ["a", "b", "c"])
+  assert_eq(xs, ["a", "B", "c"])
+}
+
+test "out of range on either side is a no-op, as list.set is" {
+  var xs = [1, 2, 3]
+  xs = list.set(xs, -1, 9)
+  xs = list.set(xs, 3, 9)
+  assert_eq(xs, [1, 2, 3])
+  assert_eq(list.set([1, 2, 3], 3, 9), [1, 2, 3])
+}
+
+test "the index is evaluated once and the value may read the list" {
+  var xs = ["a", "b", "c"]
+  xs = list.set(xs, next_index(), xs[0] + xs[2])
+  assert_eq(xs, ["a", "ac", "c"])
+  assert_eq(calls, 1)
+}
+
+test "the UFCS spelling is the same statement" {
+  var xs = [1, 2, 3]
+  xs = xs.set(0, 7)
+  assert_eq(xs, [7, 2, 3])
+}
+
+test "a set assigned to another list still copies" {
+  var xs = [1, 2, 3]
+  let zs = list.set(xs, 2, 9)
+  assert_eq(xs, [1, 2, 3])
+  assert_eq(zs, [1, 2, 9])
+}
+
+test "nested lists and records as elements" {
+  var ns = [[1], [2]]
+  ns = list.set(ns, 1, [9, 9])
+  assert_eq(ns, [[1], [9, 9]])
+  var rs = [{ n: 1 }, { n: 2 }]
+  rs = list.set(rs, 0, { n: 5 })
+  assert_eq(rs[0].n, 5)
+  assert_eq(rs[1].n, 2)
+}
+
+test "a loop of self-assigned sets is linear" {
+  var xs: List[Int] = []
+  var i = 0
+  while i < 4000 {
+    list.push(xs, 0)
+    i = i + 1
+  }
+  var j = 0
+  while j < 4000 {
+    xs = list.set(xs, j, j)
+    j = j + 1
+  }
+  assert_eq(xs[0], 0)
+  assert_eq(xs[3999], 3999)
+  assert_eq(list.len(xs), 4000)
+}
