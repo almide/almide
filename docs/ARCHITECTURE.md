@@ -202,8 +202,13 @@ The wasm backend is the v1 MIR pipeline in `almide-mir`:
   `stdlib/*.almd` are registered in `almide-types/src/self_host_registry.rs`
   and compiled along with user code. An unlinked stdlib call is a wall (hard
   error).
-- `wasmparser::validate` guards the test harness; `almide test --target wasm`
-  falls back to native execution on a wall.
+- `wasmparser::validate` guards the test harness. `almide test --target wasm`
+  renders through the SAME two-leg route as `build`/`run --target wasm` (#2179):
+  the structural leg first (`almide-wasm`, with the shared `__test_runner`
+  synthesis and the structural in-test assert lowering from
+  `almide_driver::test_runner`), the incumbent where it declines; a file both
+  legs wall is reported as a WALL, and the default `almide test` lane then
+  runs it natively.
 
 ## Optimization pass roster per target
 
