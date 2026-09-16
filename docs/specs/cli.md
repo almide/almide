@@ -36,6 +36,13 @@ almide run app.almd -- arg1 arg2        # ファイル指定 + プログラム�
 
 テスト: `tests/run_target_flag_test.rs`
 
+**stdout のバッファリング**(#2245): native バイナリの `println` / `io.print` / `io.write` /
+`io.write_bytes` は 1 つの 64 KiB バッファを通る(順序はプログラム順)。stdout が端末なら書き込み
+ごとに flush、パイプやファイルならブロック単位。flush 点は終了時・panic 時・`main` が err を返した
+時・子プロセス起動前・stdin 読み取り前、そして常に flush する `io.print`(`io.print("")` が明示
+flush)。stderr(`eprintln`)は無バッファなので、端末以外では stdout との相対順序は保たれない。
+詳細は [docs/stdlib/io.md](../stdlib/io.md)。
+
 ### 実行可能なスクリプト
 
 ファイル先頭に shebang を書き、実行権限を付ければ直接実行できる。
