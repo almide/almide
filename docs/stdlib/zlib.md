@@ -7,9 +7,12 @@ Every function is an `effect fn` returning `Bytes`, so calls sit in an
 deterministic, but the calls are effectful because they go through the host
 zlib library rather than a self-hosted implementation.
 
-**Native only.** There is no wasm floor for zlib, so a program using it builds
-and runs natively but walls on `--target wasm`
-(`spec/stdlib/zlib_test.almd` is marked `// wasm:skip`).
+**Both targets.** The wasm legs carry a self-hosted zlib (#1700, C-331 —
+`stdlib/zlib_inflate.almd` and `stdlib/zlib_deflate.almd`): every entry point
+round-trips byte-identically on native and wasm, and the checksums agree. The
+one difference is the compressed size — the wasm legs encode stored blocks
+(valid DEFLATE that does not shrink), so the ratio is not a promise; the round
+trip is. `spec/stdlib/zlib_test.almd` runs on the wasm test lane (#2179).
 
 Three container formats share one DEFLATE core, and they are NOT interchangeable
 — decompress with the matching function:
