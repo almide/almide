@@ -1,4 +1,4 @@
-# oracle: almide 0.62.0 at 4ce8305ef — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.62.0 at c4a97e414 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -956,7 +956,7 @@ abb91dd7e2bcf5f353a0e74348298864d8a08ad307c8934596d6240e7f66946b	spec/wasm_cross
 f42157354409618a27c1463e4ee724696d55d871ff4ec6eaf5cf6db6008d02fa	spec/wasm_cross/list_window_zero.almd
 851f99b0b2153c5b7f13d6dc17041e04fbd4143a749b6641dc5d1d579e97e697	spec/wasm_cross/list_windows_zero.almd
 4c456113e1d6c011661bd3601ad490aaa7dd6cc831d5d30afd585a1cd9b43462	spec/wasm_cross/list_with_capacity.almd
-b230a33fbd8d7509228ff9e749e3af1076767b97deb5587dbe25851837a871e3	spec/wasm_cross/list_zip_with_typed.almd
+c5a4d8c807c87b7a3e42981bb42da8ef2818c703a1e8be82f6bdb0c9516c6c8b	spec/wasm_cross/list_zip_with_typed.almd
 2dea51a466496f7ff9bb905bda1c99449510466bfbb690b465fe640a48881859	spec/wasm_cross/literal_int_forms.almd
 078950a1b86388219ad3026b89ca5271677f71fc44401937638c585b3e8b41ab	spec/wasm_cross/literal_unit.almd
 9b7cd4d5fe68fb562adf9acdc5ab6c785e08890aaa5f62158e422a01d6885f9b	spec/wasm_cross/loop_break_continue.almd
