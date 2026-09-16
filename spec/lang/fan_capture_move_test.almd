@@ -1,0 +1,51 @@
+// fan arms capture the values they name (#2239): an arm that holds a value's
+// last occurrence takes it by move, every other arm gets its own copy, and a
+// value the code uses after the fan is still whole. What a program can
+// observe is the same either way — these pin that.
+effect fn shout(s: String) -> Result[String, String] = ok(string.to_upper(s))
+
+effect fn size(xs: List[Int]) -> Result[Int, String] = ok(list.len(xs))
+
+test "two arms naming one value both see it" {
+  let reply = "hello"
+  let (a, b) = fan {
+    shout(reply)
+    shout(reply + "!")
+  }
+  assert_eq(a, "HELLO")
+  assert_eq(b, "HELLO!")
+}
+
+test "a value used after the fan is still whole" {
+  let xs = [1, 2, 3]
+  let (n, m) = fan {
+    size(xs)
+    size([9])
+  }
+  assert_eq(n, 3)
+  assert_eq(m, 1)
+  assert_eq(list.len(xs), 3)
+  assert_eq(xs, [1, 2, 3])
+}
+
+test "a value one arm alone names reaches that arm" {
+  let word = "solo"
+  let (w, z) = fan {
+    shout(word)
+    size([1])
+  }
+  assert_eq(w, "SOLO")
+  assert_eq(z, 1)
+}
+
+test "an arm's capture inside a loop body is fresh each iteration" {
+  var seen: List[String] = []
+  for w in ["a", "b"] {
+    let (u, _n) = fan {
+      shout(w)
+      size([1])
+    }
+    list.push(seen, u)
+  }
+  assert_eq(seen, ["A", "B"])
+}
