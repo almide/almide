@@ -1,4 +1,4 @@
-# oracle: almide 0.62.0 at e85edb8e3 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.62.0 at 57ad24cb4 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/churn/closure_env_churn.almd
 44c083433349ffafa9cefe935628110b83a3774af436938fa5001df6f63bd421	0	spec/churn/construct_from_temp_churn.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/churn/enumerate_rich_churn.almd
@@ -239,6 +239,7 @@ e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/lang/fal
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/lang/fallible_user_hof_test.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/lang/fan_any_wasm.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/lang/fan_arm_comma_test.almd
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/lang/fan_arm_unwrap_or_test.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/lang/fan_ext_test.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/lang/fan_map_int_wasm.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/lang/fan_map_test.almd
@@ -744,6 +745,7 @@ e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/wasm_cro
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/wasm_cross/fallible_tuple_value_tail.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/wasm_cross/fan_any_allfail.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/wasm_cross/fan_any_early_winner.almd
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/wasm_cross/fan_arm_unwrap_or.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/wasm_cross/fan_block_err_list_order.almd
 2e2dfffd0eed2d0505d25d3cf11e257af89e811687290f5e8b50f62504a3bd1f	0	spec/wasm_cross/fan_deterministic.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/wasm_cross/fan_effect_mapper.almd
