@@ -29,15 +29,25 @@ fn count_words(words: List[String]) -> Int = {
   repeats
 }
 
+fn total(m: Map[Int, Int], n: Int) -> Int = {
+  let r = 0..<n
+  var t = 0
+  for j in r { t = t + (map.get(m, j) ?? 0) }
+  for k in 0..<n { t = t + (map.get(m, k) ?? 0) }
+  for i in [0, 1, 2] { t = t + (map.get(m, i) ?? 0) }
+  t
+}
+
 effect fn main() -> Unit = {
   let counts = count_chars("hello")
   println(int.to_string(map.len(counts)))
   println(int.to_string(map.get(counts, "l") ?? 0))
   println(int.to_string(count_words(["a", "b", "a", "c", "a"])))
+  println(int.to_string(total([0: 5, 2: 7], 3)))
 }
 "#;
 
-const EXPECTED: &str = "4\n2\n2";
+const EXPECTED: &str = "4\n2\n2\n36";
 
 fn almide_bin() -> String {
     std::env::var("ALMIDE_BIN").unwrap_or_else(|_| format!("{}/target/release/almide", env!("CARGO_MANIFEST_DIR")))
@@ -66,6 +76,14 @@ fn borrowed_loop_binder_is_the_map_key_without_a_second_borrow() {
         assert!(!body.contains(&format!("&{binder},")) && !body.contains(&format!("&{binder})")), "{name} doubles the borrow: {body}");
     }
     assert!(fn_body(&rust, "count_words").contains("almide_rt_map_contains(&counts, w)"), "{}", fn_body(&rust, "count_words"));
+    // A range head — inline, or a let-bound range the walker keeps as a bare
+    // `Range<i64>` (#1857) — counts and binds an OWNED scalar even when the
+    // body only borrows it, so its key keeps the single `&`; a scalar list's
+    // binder is `&i64` off `.iter()` and passes as it is.
+    let total = fn_body(&rust, "total");
+    for spelling in ["for j in r.clone() {", "almide_rt_map_get_or(m, &j, 0i64)", "for k in 0i64..n {", "almide_rt_map_get_or(m, &k, 0i64)", ".iter() {", "almide_rt_map_get_or(m, i, 0i64)"] {
+        assert!(total.contains(spelling), "missing `{spelling}`:\n{total}");
+    }
 
     let runs: [(&str, &[&str], &[(&str, &str)]); 3] = [
         ("native", &[], &[]),
