@@ -73,12 +73,15 @@ fn main() -> Unit = {
   )}")
   // controls: the scalar path
   println("str=${list.unique_by(["ab", "ac", "abc", "bc", "b"], (s) => string.take(s, 1))}")
-  println("int=${list.unique_by([
-    1,
-    2,
-    3,
-    4,
-    5,
-    6
-  ], (x) => x % 3)}")
+  println("int=${list.unique_by(
+    [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    (x) => x % 3,
+  )}")
 }
