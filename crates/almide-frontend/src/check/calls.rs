@@ -564,8 +564,20 @@ impl Checker {
         }
         let ret = if final_bindings.is_empty() { sig.ret.clone() } else { crate::types::substitute(&sig.ret, &final_bindings) };
         // User-defined effect fn calls that return non-Result T are reported as Result[T, String] in two contexts: 1. test blocks — there's no enclosing effect fn to auto-`?` against, so the test sees the raw lifted Result. 2. lambda bodies — codegen's ResultPropagation lifts the callee's return type but doesn't recurse into lambdas (closures can't `?`-propagate to the enclosing fn). Letting the lambda body's type stay `T` here means a `(n) => worker(n)` passes type-checking against `list.map`'s `(A) -> B` slot, only to blow up at codegen with `expected Vec<i64>, found Vec<Result<i64, String>>`. Surfacing the Result at the call site instead steers the user toward `match worker(n) { ok(v) => v, err(_) => ... }` — a real type error, not an "Almide bug" diagnostic. Bundled stdlib effect fns are excluded — their `@inline_rust` / `@intrinsic` templates carry their own propagation and never get lifted by ResultPropagation, so their callers see raw `T`. User-defined effect fns are lifted to Result[T, String] by ResultPropagation. Make the checker's type match: callers always see Result[T, String]. auto_unwrap in let/var bindings and match arms transparently extracts T. Bundled stdlib effect fns (@intrinsic/@inline_rust) are NOT lifted — they carry their own Result/Option types already.
+        // A user module may share a stdlib module's name (`import self.net`
+        // beside the stdlib `net`, #2223): the call resolved to the USER fn,
+        // so it is judged as one — otherwise a cross-module effect fn's
+        // `String` stayed bare, the same-file `E002` never fired, and rustc
+        // met a `Result` where the emit expected a value. The file's import
+        // table knows which it brought in: an alias that is NOT a stdlib
+        // import is the user's module. (`env.user_modules` cannot tell — the
+        // self-hosted stdlib modules are registered there too.)
         let is_bundled_stdlib_call = name.split_once('.')
-            .map(|(m, _)| almide_lang::stdlib_info::is_bundled_module(m))
+            .map(|(m, _)| {
+                let table = &self.env.import_table;
+                let user_import = table.aliases.contains_key(&sym(m)) && !table.stdlib.contains(&sym(m));
+                almide_lang::stdlib_info::is_bundled_module(m) && !user_import
+            })
             .unwrap_or(false);
         // Single-condition decisions (MC/DC ledger): the && chain as its
         // short-circuit-order nested ifs, verbatim.
