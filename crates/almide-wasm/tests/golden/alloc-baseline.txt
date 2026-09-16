@@ -345,7 +345,7 @@
 66064	spec/wasm_cross/list_window_zero.almd
 65968	spec/wasm_cross/list_windows_zero.almd
 67136	spec/wasm_cross/list_with_capacity.almd
-67392	spec/wasm_cross/list_zip_with_typed.almd
+67312	spec/wasm_cross/list_zip_with_typed.almd
 65824	spec/wasm_cross/literal_int_forms.almd
 65776	spec/wasm_cross/literal_unit.almd
 65776	spec/wasm_cross/loop_break_continue.almd
