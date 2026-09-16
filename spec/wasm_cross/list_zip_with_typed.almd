@@ -17,11 +17,19 @@ fn zw_mixed(a: List[String]) -> List[Int] = list.zip_with(
   ((x, y) => string.len(x) + string.len(y)),
 )
 
+// A captured String the callback hands back is a VIEW the result spine must
+// share: dropping the zip_with result before the capture's last use freed the
+// string under its owner on the structural leg (fuzz-nightly OutputDivergence,
+// seed 561137265092 index 934 — `k` printed as heap-header bytes).
+fn zw_cap_dropped(k: String) -> Int = list.len(list.zip_with(["p", "q"], ["a", "b"], ((x, y) => k)))
+
 fn main() -> Unit = {
   println("s = ${zw_str(["a", "b"], ["c", "d", "e"])}")
   println("c = ${zw_cap(["a", "b"], "z")}")
   println("i = ${zw_int([1, 2, 3])}")
   println("m = ${zw_mixed(["ab", "c"])}")
+  let k = string.reverse("ΑΒΓ")
+  println("d = ${zw_cap_dropped(k)} ${k} ${list.unique(list.zip_with(["p", "q"], ["a", "b"], ((x, y) => k)))}")
 }
 
 test "zip_with over each element repr" {
@@ -29,4 +37,11 @@ test "zip_with over each element repr" {
   assert_eq(zw_cap(["a", "b"], "z"), ["z", "z"])
   assert_eq(zw_int([1, 2, 3]), [2, 4, 6])
   assert_eq(zw_mixed(["ab", "c"]), [4, 2])
+}
+
+test "a captured result survives the zip_with result's drop" {
+  let k = string.reverse("ΑΒΓ")
+  assert_eq(zw_cap_dropped(k), 2)
+  assert_eq(k, "ΓΒΑ")
+  assert_eq(list.unique(list.zip_with(["p", "q"], ["a", "b"], ((x, y) => k))), ["ΓΒΑ"])
 }
