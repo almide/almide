@@ -175,6 +175,20 @@ impl Lower<'_> {
             expr.kind = std::mem::replace(&mut inner.kind, IrExprKind::Unit);
             return;
         }
+        // `&c` of a loop binder bound `&String` off `xs.iter()` (#1673) is
+        // `&&String`. A concrete `&String` slot deref-coerces it, but the
+        // generic key slot of `map.get` / `map.contains` (`K: Borrow<Q>`)
+        // resolves `Q = &String` and rustc reports E0277 (#2256). The naked
+        // binder IS the reference; a param of this fn is never its binder
+        // (a `branch_lift` helper keeps the enclosing fn's ids, #2194).
+        if !as_str && !mutable
+            && let Some(id) = var_id(inner)
+            && self.ann.borrowed_loop_vars.contains(&id)
+            && param_mode(self.params, id).is_none()
+        {
+            expr.kind = std::mem::replace(&mut inner.kind, IrExprKind::Unit);
+            return;
+        }
         // `&*c` of a loop binder bound `&String` off `xs.iter()` (#1673)
         // re-derefs to `&String`, and an ordering against a `&str` literal
         // has no `PartialOrd<&str> for &String` (#2188). `String::as_str`
