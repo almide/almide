@@ -1,14 +1,17 @@
 //! #2121: `almide test --target wasm` must not report success for a file whose
 //! tests never ran there.
 //!
-//! The test lane renders every file through the INCUMBENT brick, while
-//! `build`/`run`/`check --target wasm` render through the two-leg router whose
-//! default is the STRUCTURAL leg (#2179). So the lane walls on programs the
-//! product compiles — and it reported those walls as benign SKIPs and exited 0.
+//! The test lane used to render every file through the INCUMBENT brick, while
+//! `build`/`run`/`check --target wasm` rendered through the two-leg router
+//! whose default is the STRUCTURAL leg. So the lane walled on programs the
+//! product compiled — and it reported those walls as benign SKIPs and exited 0.
 //! In this repository's own spec corpus that was five files: `almide test spec/
 //! --target wasm`, a CI gate, was green while five files' tests had not run on
 //! wasm, under a reason line ("no verified wasm rendering") that named a v1
-//! verdict as if it were the product's.
+//! verdict as if it were the product's. #2179 gave the lane the product's
+//! routing — structural first, the incumbent where it declines — and the
+//! register below emptied; it stays, held at empty, so a wall on either lane
+//! can never again be reported as a benign skip.
 //!
 //! The distinction this pins: a skip the AUTHOR declared and a skip a RENDERER
 //! decided are not the same verdict, and the lane must say which one it made.
@@ -29,7 +32,8 @@ use std::process::Command;
 /// A `pub fn` matching a variant produced INSIDE it and returning a String —
 /// the #2160 shape. The incumbent brick walls it ("heap-result `match` outside
 /// the executable subset"); `almide build --target wasm` renders the same file
-/// on the structural leg and reports it as such.
+/// on the structural leg and reports it as such — and since #2179 so does the
+/// test lane.
 const WALLS_THE_INCUMBENT: &str = r#"
 type T = | A(String) | B
 
@@ -73,10 +77,42 @@ fn test_on_wasm(dir: &std::path::Path, source: &str) -> (Option<i32>, String) {
     (out.status.code(), report)
 }
 
+/// The file the incumbent walls RUNS on the lane: the structural leg renders
+/// it (the same routing `almide build --target wasm` uses, #2179), its one
+/// test passes, and nothing is reported as a wall or a skip.
+#[test]
+fn the_file_the_incumbent_walls_runs_on_the_structural_leg() {
+    if !wasmtime_available() {
+        eprintln!("wasmtime unavailable — skipping");
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (code, report) = test_on_wasm(dir.path(), WALLS_THE_INCUMBENT);
+    assert_eq!(code, Some(0), "the lane must run this file:\n{report}");
+    assert!(report.contains("1 tests passed"), "and report its test:\n{report}");
+    assert!(
+        !report.contains("WALL ") && !report.contains("SKIP"),
+        "neither a wall nor a skip — the structural leg rendered it:\n{report}"
+    );
+}
+
+/// Pinned to the incumbent (`ALMIDE_WASM_INCUMBENT=1`, the same switch the
+/// product router honours), the lane still walls this file — and says so under
+/// the greppable verdict the register's gate reads, naming both legs rather
+/// than claiming the product has no wasm rendering.
 #[test]
 fn a_renderer_wall_is_reported_as_a_wall_not_as_a_plain_skip() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let (_code, report) = test_on_wasm(dir.path(), WALLS_THE_INCUMBENT);
+    let file = dir.path().join("t_test.almd");
+    std::fs::write(&file, WALLS_THE_INCUMBENT).expect("source");
+    let out = Command::new(almide_bin())
+        .args(["test", file.to_str().expect("path"), "--target", "wasm"])
+        .env("ALMIDE_WASM_INCUMBENT", "1")
+        .current_dir(dir.path())
+        .output()
+        .expect("run");
+    let report =
+        String::from_utf8_lossy(&out.stdout).to_string() + &String::from_utf8_lossy(&out.stderr);
     assert!(
         report.contains("WALL ") && report.contains("tests did not run on wasm"),
         "a renderer wall must be reported under its own greppable verdict — the register's \
@@ -85,13 +121,12 @@ fn a_renderer_wall_is_reported_as_a_wall_not_as_a_plain_skip() {
     );
     assert!(
         !report.contains("no verified wasm rendering"),
-        "the reason must name the LEG that declined, not claim the product has no wasm \
-         rendering — `almide build --target wasm` renders this same file on the structural \
-         leg and says so:\n{report}"
+        "the reason must name the LEGS that declined, not claim the product has no wasm \
+         rendering:\n{report}"
     );
     assert!(
-        report.contains("#2179"),
-        "and must name the issue that removes the wall:\n{report}"
+        report.contains("incumbent") && report.contains("structural"),
+        "and must name both legs:\n{report}"
     );
 }
 
@@ -105,28 +140,13 @@ fn a_renderer_wall_is_reported_as_a_wall_not_as_a_plain_skip() {
 /// the wall rather than parking it here"). A row here says a LEG has not
 /// lowered the shape yet, and names the issue that removes it.
 ///
-/// Every row below is ONE cause: the test lane renders through the incumbent
-/// brick alone, while `build`/`run`/`check --target wasm` render through the
-/// two-leg router whose default is the structural leg. `almide build --target
-/// wasm` reports `structural leg` for all four. #2179 gives the lane
-/// that route and empties this table.
-const TEST_LANE_WALLS: &[(&str, &str)] = &[
-    // The incumbent leaves `Pt.repr` / `__repr_list_rec_reprlib_Cfg` unlinked;
-    // a dangling call would be invalid wasm, so it refuses honestly.
-    ("spec/integration/modules/cross_module_repr_derive_test.almd", "#2179"),
-    // `pub fn area_note`: a heap-result `match` outside the incumbent's
-    // executable subset — the #2160 shape.
-    ("spec/lang/as_pattern_test.almd", "#2179"),
-    // `pub fn total`: a `match` over an untracked subject with a call- or
-    // assign-carrying arm.
-    ("spec/lang/list_rest_pattern_test.almd", "#2179"),
-    // `zli_gunzip_members` / `zli_inflate_stream` unlinked. NOTE: the skip
-    // ledger retired this file's row on 2026-09-01 saying it "runs the wasm leg
-    // for real" after #1700, and docs/stdlib/zlib.md still says the file is
-    // marked `// wasm:skip`. Neither was true, and the silent wall is why
-    // nobody noticed.
-    ("spec/stdlib/zlib_test.almd", "#2179"),
-];
+/// EMPTY since #2179: every row it held had one cause — the lane rendered
+/// through the incumbent brick alone while `build`/`run`/`check --target wasm`
+/// rendered through the two-leg router whose default is the structural leg
+/// (`cross_module_repr_derive_test`, `as_pattern_test`, `list_rest_pattern_test`,
+/// `zlib_test`). The lane now takes the product's route, so a row here means a
+/// file BOTH legs decline, and it names the issue that lowers the shape.
+const TEST_LANE_WALLS: &[(&str, &str)] = &[];
 
 /// The register, held equal to what the lane actually reports — BOTH
 /// directions. A new wall cannot join silently, and a row whose file now runs
