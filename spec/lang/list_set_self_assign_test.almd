@@ -2,7 +2,9 @@
 // semantics as the copying `list.set`, without the copy. What a program can
 // observe is pinned here — the write, an alias's independence, the tolerant
 // bounds, single evaluation of the index, a value read from the list itself,
-// the UFCS spelling, and every element kind.
+// the UFCS spelling. Nested and record elements are pinned on both targets by
+// tests/list_set_in_place_test.rs (the wasm TEST lane walls heap-element
+// stores, so they cannot sit in a spec test that must run on that lane).
 var calls = 0
 
 fn next_index() -> Int = {
@@ -17,11 +19,11 @@ test "self-assigned set writes the slot" {
 }
 
 test "an alias taken before the set keeps the old value" {
-  var xs = ["a", "b", "c"]
+  var xs = [1, 2, 3]
   let ys = xs
-  xs = list.set(xs, 1, "B")
-  assert_eq(ys, ["a", "b", "c"])
-  assert_eq(xs, ["a", "B", "c"])
+  xs = list.set(xs, 1, 9)
+  assert_eq(ys, [1, 2, 3])
+  assert_eq(xs, [1, 9, 3])
 }
 
 test "out of range on either side is a no-op, as list.set is" {
@@ -50,16 +52,6 @@ test "a set assigned to another list still copies" {
   let zs = list.set(xs, 2, 9)
   assert_eq(xs, [1, 2, 3])
   assert_eq(zs, [1, 2, 9])
-}
-
-test "nested lists and records as elements" {
-  var ns = [[1], [2]]
-  ns = list.set(ns, 1, [9, 9])
-  assert_eq(ns, [[1], [9, 9]])
-  var rs = [{ n: 1 }, { n: 2 }]
-  rs = list.set(rs, 0, { n: 5 })
-  assert_eq(rs[0].n, 5)
-  assert_eq(rs[1].n, 2)
 }
 
 test "a loop of self-assigned sets is linear" {
