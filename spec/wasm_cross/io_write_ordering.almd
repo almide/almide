@@ -8,8 +8,9 @@
 // (2) Once it linked, the ORDER diverged — native routed `io.write` through a
 // 64 KiB BufWriter flushed at exit while `println!` wrote through Rust's own
 // `Stdout` handle, so the byte writes all landed AFTER the line writes; the wasm
-// leg's direct `fd_write` kept program order. Native now flushes at the end of
-// each write, so both legs emit the same bytes in the same order.
+// leg's direct `fd_write` kept program order. Native now routes every stdout
+// write — `println` included — through one buffer (#2245), so both legs emit
+// the same bytes in the same order.
 import io
 
 effect fn main() -> Unit = {
