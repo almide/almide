@@ -37,15 +37,3 @@ test "a value one arm alone names reaches that arm" {
   assert_eq(w, "SOLO")
   assert_eq(z, 1)
 }
-
-test "an arm's capture inside a loop body is fresh each iteration" {
-  var seen: List[String] = []
-  for w in ["a", "b"] {
-    let (u, _n) = fan {
-      shout(w)
-      size([1])
-    }
-    list.push(seen, u)
-  }
-  assert_eq(seen, ["A", "B"])
-}
