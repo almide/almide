@@ -9,8 +9,8 @@
 //! internals never charge on either leg (the interp's pool-body rule),
 //! and callback-body charges are order-free sums within a region.
 
-use almide_ir::visit::{walk_expr, IrVisitor};
-use almide_ir::{CallTarget, IrExpr, IrExprKind};
+use almide_ir::visit::{walk_expr, walk_stmt, IrVisitor};
+use almide_ir::{CallTarget, IrExpr, IrExprKind, IrStmt, IrStmtKind};
 use wasm_encoder::BlockType;
 
 use crate::emitter::Emitter;
@@ -48,6 +48,24 @@ fn observation_free(e: &IrExpr) -> bool {
             }
             if self.ok {
                 walk_expr(self, e);
+            }
+        }
+        // A write to a captured var (`log = log + [..]`, an element or field
+        // store) is an observation too: the unfused oracle sees every map's
+        // write before the first fold step's, and fusing interleaved them —
+        // `["m1", "f2", "m2", …]` against native's `["m1", "m2", "f2", …]`
+        // (spec/lang/stream_fusion_test, the first file the structural test
+        // lane ran, #2179). Statements are where writes live, and the
+        // expression scan above never saw them.
+        fn visit_stmt(&mut self, s: &IrStmt) {
+            if matches!(
+                s.kind,
+                IrStmtKind::Assign { .. } | IrStmtKind::IndexAssign { .. } | IrStmtKind::FieldAssign { .. }
+            ) {
+                self.ok = false;
+            }
+            if self.ok {
+                walk_stmt(self, s);
             }
         }
     }
