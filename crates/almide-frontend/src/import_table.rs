@@ -362,7 +362,10 @@ fn register_import(
 /// Step 7 of [`build_import_table_process_import`]: stdlib detection.
 /// Verbatim text move.
 fn register_import_stdlib(used_name: &str, path: &[Sym], is_self: bool, table: &mut ImportTable) {
-    if crate::stdlib::is_any_stdlib(used_name) {
+    // `import self.net` brings the USER's `net` into scope, not the stdlib's
+    // (#2223): a self import never marks its leaf as a stdlib module, however
+    // the leaf is spelled.
+    if crate::stdlib::is_any_stdlib(used_name) && !is_self {
         table.stdlib.insert(sym(used_name));
     }
     // Also check canonical for multi-segment stdlib (unlikely but safe)
