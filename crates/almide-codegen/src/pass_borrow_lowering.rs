@@ -15,7 +15,7 @@
 //! table the walker reads where a param's mode still matters to a
 //! statement's spelling (`*p = v` through a `&mut` param).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use almide_base::intern::{sym, Sym};
 use almide_ir::*;
 use almide_ir::annotations::CodegenAnnotations;
@@ -51,7 +51,7 @@ impl NanoPass for BorrowLoweringPass {
             for p in &func.params {
                 param_borrows.insert(p.var, p.borrow);
             }
-            let mut lower = Lower { params: &func.params, ann: codegen_annotations };
+            let mut lower = Lower { params: &func.params, ann: codegen_annotations, counting_binders: HashSet::new() };
             lower.visit_expr_mut(&mut func.body);
         }
         codegen_annotations.param_borrows = param_borrows;
@@ -62,6 +62,10 @@ impl NanoPass for BorrowLoweringPass {
 struct Lower<'a> {
     params: &'a [IrParam],
     ann: &'a CodegenAnnotations,
+    /// Loop binders in `borrowed_loop_vars` whose head is a let-bound range
+    /// the walker keeps as a bare `Range<i64>` (`range_counting_vars`,
+    /// #1857): the head counts and binds an OWNED scalar, not `&T` (#2256).
+    counting_binders: HashSet<VarId>,
 }
 
 /// The mode a param is passed in, by var.
@@ -185,6 +189,7 @@ impl Lower<'_> {
             && let Some(id) = var_id(inner)
             && self.ann.borrowed_loop_vars.contains(&id)
             && param_mode(self.params, id).is_none()
+            && !self.counting_binders.contains(&id)
         {
             expr.kind = std::mem::replace(&mut inner.kind, IrExprKind::Unit);
             return;
@@ -350,6 +355,12 @@ impl Lower<'_> {
 
 impl IrMutVisitor for Lower<'_> {
     fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
+        if let IrExprKind::ForIn { var, iterable, .. } = &expr.kind
+            && let Some(head) = var_id(iterable)
+            && self.ann.range_counting_vars.contains(&head)
+        {
+            self.counting_binders.insert(*var);
+        }
         walk_expr_mut(self, expr);
         match &expr.kind {
             IrExprKind::Var { .. } => self.lower_scalar_ref_read(expr),
