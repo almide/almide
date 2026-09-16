@@ -225,19 +225,21 @@ fn after(earlier: &Use, later: &Use) -> bool {
 
 /// One param's mode from the body's occurrences of it.
 fn param_borrow(param: &IrParam, uses: &UseSites, scope: &Scope, body: &IrExpr) -> ParamBorrow {
-    if !scope.is_borrow_eligible(&param.ty) || almide_base::env::flag("ALMIDE_BORROW_OWN_ALL") {
-        return ParamBorrow::Own;
-    }
-    // Explicit `mut` heap param → passed by mutable reference, and it is
-    // authoritative: the checker (`validate_mut_args`) guarantees the caller
-    // hands over a `var` binding, so the param IS a `&mut T` by construction
-    // regardless of how the body uses it — it may mutate a *field* of it
-    // (`list.push(b.xs, v)` on `mut b`, #703) or forward it to another `mut`
-    // callee. Honor the keyword before the body policy (mirrors the
-    // @intrinsic mut path; a primitive `mut x: Int` is filtered by the heap
-    // guard above).
+    // An explicit `mut` param is passed by mutable reference, and the keyword
+    // is authoritative: the checker (`validate_mut_args`) guarantees the
+    // caller hands over a `var` binding, so the param IS a `&mut T` by
+    // construction regardless of how the body uses it — it may mutate a
+    // *field* (`list.push(b.xs, v)` on `mut b`, #703), forward it to another
+    // `mut` callee, or reassign it. Honored before the body policy AND before
+    // the heap guard (#2243): a `mut d: Int` used to fall through the guard
+    // as an owned `i64`, so `d = d + 1` was rustc E0384 on the one native path
+    // that does not inline the callee (the test leg) while the wasm leg and
+    // the inlined binary mutated the caller's `d` as the language means.
     if param.is_mut {
         return ParamBorrow::RefMut;
+    }
+    if !scope.is_borrow_eligible(&param.ty) || almide_base::env::flag("ALMIDE_BORROW_OWN_ALL") {
+        return ParamBorrow::Own;
     }
     // A `String` param a `match` only compares, or an interpolation only
     // formats (`format_args!` borrows its parts), is read by reference at
