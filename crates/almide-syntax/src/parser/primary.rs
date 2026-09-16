@@ -55,7 +55,7 @@ impl Parser {
             TokenType::String => ExprKind::String { value: tok.value.clone(), raw: tok.raw.clone() },
             TokenType::InterpolatedString => {
                 self.advance();
-                let parts = match self.parse_interpolation_parts(&tok.value, tok.line, tok.col) {
+                let parts = match self.parse_interpolation_parts(&tok.value, tok.line, tok.col, tok.raw.as_deref()) {
                     Ok(p) => p,
                     Err(e) => return Some(Err(e)),
                 };
@@ -459,13 +459,20 @@ impl Parser {
         }))
     }
 
-    fn parse_interpolation_parts(&mut self, template: &str, str_line: usize, str_col: usize) -> Result<Vec<StringPart>, String> {
+    fn parse_interpolation_parts(&mut self, template: &str, str_line: usize, str_col: usize, raw: Option<&str>) -> Result<Vec<StringPart>, String> {
         let mut parts = Vec::new();
         let mut lit = String::new();
         let chars: Vec<char> = template.chars().collect();
         let mut i = 0;
         // Track column offset: opening " is at str_col, content starts at str_col+1
         let mut col_offset = 0usize;
+        // #2250: the literal's VERBATIM source text (delimiters included), for
+        // locating each hole where it really sits. `template` is the decoded
+        // value — a heredoc has its blank first line skipped and its common
+        // indent stripped — so `col_offset` counts characters that are not
+        // on the string's first line at all.
+        let raw_chars: Option<Vec<char>> = raw.map(|r| r.chars().collect());
+        let mut origin = LiteralOrigin { line: str_line, col: str_col, raw: raw_chars.as_deref(), cursor: 0 };
 
         while i < chars.len() {
             // #1076: `\\` and `\$` reach this splitter as undecoded pairs
@@ -480,7 +487,7 @@ impl Parser {
                 if !lit.is_empty() {
                     parts.push(StringPart::Lit { value: std::mem::take(&mut lit) });
                 }
-                let part = self.parse_interpolation_expr_part(&chars, &mut i, &mut col_offset, str_line, str_col);
+                let part = self.parse_interpolation_expr_part(&chars, &mut i, &mut col_offset, &mut origin);
                 parts.push(part);
             } else {
                 col_offset += 1;
@@ -504,9 +511,10 @@ impl Parser {
         chars: &[char],
         i: &mut usize,
         col_offset: &mut usize,
-        str_line: usize,
-        str_col: usize,
+        origin: &mut LiteralOrigin<'_>,
     ) -> StringPart {
+        let (str_line, str_col) = (origin.line, origin.col);
+        let raw_chars = origin.raw;
         let expr_col_start = *col_offset + 2; // past ${
         *i += 2; // skip ${
         *col_offset += 2;
@@ -531,23 +539,58 @@ impl Parser {
         }
         *i += 1; // skip }
         *col_offset += 1;
+        // #2250: where the hole really sits. Counting `col_offset` from the
+        // opening quote is right only for a one-line string: in a heredoc the
+        // decoded template has lost its blank first line and its common indent,
+        // and the offset counts every character of the lines before the hole,
+        // so a call on the heredoc's third line was stamped with the string's
+        // line and a column past the end of it — and `check --json` handed that
+        // position to fix-it harnesses. The hole's own text is verbatim in the
+        // source, so find it there (from the previous hole on) and count lines.
+        let hole_text: Vec<char> = "${".chars().chain(expr_str.chars()).chain(std::iter::once('}')).collect();
+        let anchor = raw_chars.and_then(|raw| locate_hole(raw, origin.cursor, &hole_text, str_line, str_col));
+        if let Some((idx, _, _)) = anchor {
+            origin.cursor = idx + hole_text.len();
+        }
         // Sub-parse the expression with current id counter
         let mut tokens = crate::lexer::Lexer::tokenize(&expr_str);
         // Adjust spans: sub-lexer produces line=1,col=1-based; remap to parent source
+        // col: sub-lexer 1-based → 0-based offset + parent string position
+        // str_col is the opening quote col, +1 for quote char, + template offset
         let to_parent = |c: usize| str_col + 1 + expr_col_start + (c - 1);
         for t in &mut tokens {
-            t.line = str_line;
-            // col: sub-lexer 1-based → 0-based offset + parent string position
-            // str_col is the opening quote col, +1 for quote char, + template offset
-            t.col = to_parent(t.col);
-            // end_col rides the SAME shift (#2095). Remapping only the start left
-            // every token in an interpolation with a parent-space start next to a
-            // sub-string-space end — a number smaller than its own beginning —
-            // which downstream reads as "no end". The cost was not only the
-            // fix-it the issue names: a diagnostic with no measurable end draws a
-            // one-column caret, so `"${list.nope(x)}"` underlined a single column
-            // where the same call outside the string underlined all nine.
-            t.end_col = to_parent(t.end_col);
+            match anchor {
+                // The hole was located: its `$` is at (hole_line, hole_col), the
+                // expression starts two columns later, and a hole that itself
+                // spans lines puts its later tokens on the following source
+                // lines, shifted by the indent the heredoc decoder stripped.
+                Some((idx, hole_line, hole_col)) => {
+                    if t.line == 1 {
+                        t.line = hole_line;
+                        t.col = hole_col + 2 + (t.col - 1);
+                        t.end_col = hole_col + 2 + (t.end_col - 1);
+                    } else {
+                        let shift = continuation_shift(raw_chars.unwrap_or(&[]), idx, &expr_str, t.line);
+                        t.line = hole_line + t.line - 1;
+                        t.col += shift;
+                        t.end_col += shift;
+                    }
+                }
+                // No verbatim text to search (an AST fed back from JSON): the
+                // first-line arithmetic is all there is.
+                Option::None => {
+                    t.line = str_line;
+                    t.col = to_parent(t.col);
+                    // end_col rides the SAME shift (#2095). Remapping only the start left
+                    // every token in an interpolation with a parent-space start next to a
+                    // sub-string-space end — a number smaller than its own beginning —
+                    // which downstream reads as "no end". The cost was not only the
+                    // fix-it the issue names: a diagnostic with no measurable end draws a
+                    // one-column caret, so `"${list.nope(x)}"` underlined a single column
+                    // where the same call outside the string underlined all nine.
+                    t.end_col = to_parent(t.end_col);
+                }
+            }
         }
         let id_offset = self.expr_id_counter();
         let mut sub_parser = super::Parser::new_with_id_offset(tokens, id_offset);
@@ -578,11 +621,60 @@ impl Parser {
                     format!("${{{}}}", expr_str),
                 );
                 diag.file = self.file.clone();
-                diag.line = Some(str_line);
-                diag.col = Some(str_col + 1 + expr_col_start);
+                let (line, col) = match anchor {
+                    Some((_, hole_line, hole_col)) => (hole_line, hole_col + 2),
+                    Option::None => (str_line, str_col + 1 + expr_col_start),
+                };
+                diag.line = Some(line);
+                diag.col = Some(col);
                 self.errors.push(diag);
                 StringPart::Lit { value: format!("${{{}}}", expr_str) }
             }
         }
+    }
+}
+
+/// #2250: where an interpolated literal sits in the source: the line and
+/// column of its opening quote, its verbatim text (delimiters included) when
+/// the parser has one, and how far into that text the holes located so far
+/// reach, so a repeated spelling maps to its own occurrence.
+pub(crate) struct LiteralOrigin<'a> {
+    pub line: usize,
+    pub col: usize,
+    pub raw: Option<&'a [char]>,
+    pub cursor: usize,
+}
+
+/// #2250: find `hole` (a verbatim `${…}`) in the literal's source text `raw`
+/// (delimiters included, `raw[0]` being the opening quote at column
+/// `str_col` of line `str_line`), searching from char index `from`. Returns
+/// the hole's char index and the line and column of its `$`.
+fn locate_hole(raw: &[char], from: usize, hole: &[char], str_line: usize, str_col: usize) -> Option<(usize, usize, usize)> {
+    if hole.is_empty() || from >= raw.len() { return None; }
+    let idx = (from..raw.len().checked_sub(hole.len())? + 1)
+        .find(|&j| raw[j..j + hole.len()] == *hole)?;
+    let newlines = raw[..idx].iter().filter(|c| **c == '\n').count();
+    let col = match raw[..idx].iter().rposition(|c| *c == '\n') {
+        Option::None => str_col + idx,
+        Some(nl) => idx - nl,
+    };
+    Some((idx, str_line + newlines, col))
+}
+
+/// #2250: how far a token on line `sub_line` (≥ 2) of a multi-line hole moves
+/// right in the source: the heredoc decoder stripped the common indent from
+/// that continuation line, so the sub-lexer's column is short by exactly the
+/// whitespace the source line has and the decoded line has not.
+fn continuation_shift(raw: &[char], hole_idx: usize, expr_str: &str, sub_line: usize) -> usize {
+    let raw_line_no = raw[..hole_idx.min(raw.len())].iter().filter(|c| **c == '\n').count() + sub_line - 1;
+    let raw_line = raw.split(|c| *c == '\n').nth(raw_line_no);
+    let decoded_line = expr_str.split('\n').nth(sub_line - 1);
+    match (raw_line, decoded_line) {
+        (Some(r), Some(d)) => {
+            let raw_ws = r.iter().take_while(|c| c.is_whitespace()).count();
+            let decoded_ws = d.chars().take_while(|c| c.is_whitespace()).count();
+            raw_ws.saturating_sub(decoded_ws)
+        }
+        _ => 0,
     }
 }
