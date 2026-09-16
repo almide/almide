@@ -1,0 +1,20 @@
+effect fn plan(n: Int) -> Result[List[List[Int]], String] = {
+  var arms: List[List[Int]] = []
+  var k = 0
+  while k < n {
+    list.push(arms, [k])
+    k = k + 1
+  }
+  ok(arms)
+}
+
+fn total(xs: List[Int]) -> Int = list.sum(xs)
+
+effect fn run() -> Result[Int, String] = {
+  let arms = plan(2)!
+  let r = fan {
+    total(list.get(arms, 0) ?? [])
+    total(list.get(arms, 1) ?? [])
+  }
+  ok(r.0 + r.1)
+}
