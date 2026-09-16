@@ -384,4 +384,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-346 | A heap-payload ?? lowers on the incumbent leg as a call argument and as a match subject | 0.63.0 | active | fixture | 1 |
 | C-347 | Operator round trips over a known literal print that literal on both targets | 0.63.0 | active | fixture | 1 |
 | C-348 | Byte-indexed string slices validate UTF-8 boundaries | 0.63.0 | active | fixture | 1 |
+| C-349 | A `??` inside a fan arm keeps its default on both targets | 0.63.0 | active | fixture | 1 |
 

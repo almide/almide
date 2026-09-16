@@ -4276,3 +4276,15 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/string_byte_slice.almd", class = "fixture" },
 ]
+
+# ── FAN ARM KEEPS ITS `??` DEFAULT ─
+[[contract]]
+id        = "C-349"
+spec      = "ALS-R3"
+title     = "A `??` inside a fan arm keeps its default on both targets"
+statement = "An `a ?? d` inside a `fan { … }` arm — nested in a call argument or as the arm itself — yields `d` where `a` is `none`/`err` exactly as it does outside a fan, byte-identically native <-> wasm: `total(list.get(xs, i) ?? [])` hands the callee the default list, and an arm `maybe(i) ?? 7` yields 7 for the Err so the join sees no error to propagate. Only the arm's Result auto-unwrap belongs to the join; a user-written `??` is the arm's own value."
+since     = "0.63.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/fan_arm_unwrap_or.almd", class = "fixture" },
+]
