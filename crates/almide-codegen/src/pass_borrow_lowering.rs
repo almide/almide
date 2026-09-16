@@ -53,6 +53,7 @@ impl NanoPass for BorrowLoweringPass {
             }
             let mut lower = Lower { params: &func.params, ann: codegen_annotations, counting_binders: HashSet::new() };
             lower.visit_expr_mut(&mut func.body);
+            lower.own_consumed_ref_mut(body_tail(&mut func.body));
         }
         codegen_annotations.param_borrows = param_borrows;
         PassResult { program, changed: true }
@@ -98,6 +99,15 @@ fn var_id(e: &IrExpr) -> Option<VarId> {
         IrExprKind::Var { id } => Some(*id),
         _ => None,
     }
+}
+
+/// The expression a body's value is: the innermost block tail.
+fn body_tail(e: &mut IrExpr) -> &mut IrExpr {
+    if matches!(e.kind, IrExprKind::Block { expr: Some(_), .. }) {
+        let IrExprKind::Block { expr: Some(tail), .. } = &mut e.kind else { unreachable!() };
+        return body_tail(tail);
+    }
+    e
 }
 
 fn mk(kind: IrExprKind, ty: Ty, span: Option<almide_base::span::Span>) -> IrExpr {
@@ -344,12 +354,53 @@ impl Lower<'_> {
             IrExprKind::Clone { expr } => match var_id(expr) { Some(id) => id, None => return },
             _ => return,
         };
-        if !is_ref_param(self.params, id) {
+        if !is_ref_param(self.params, id) && !(is_ref_mut_param(self.params, id) && !is_copy_scalar(&value.ty)) {
             return;
         }
         let ty = value.ty.clone();
         let span = value.span;
         *value = owned_read(mk(IrExprKind::Var { id }, ty, span));
+    }
+
+    /// A `mut` param is `&mut T` for its whole body — the writes through it
+    /// are the point — so unlike a shared-borrow param it is both borrowed
+    /// and, wherever the body hands the value on, consumed: inference never
+    /// flips it to `Own`, and the clone pass's last-use move leaves the
+    /// consuming occurrence a bare `Var`. Rust refuses that with E0308
+    /// (`expected Table, found &mut Table`, #2266). Every by-value position
+    /// owns the read first: a bare argument in an owned call slot, a
+    /// constructor field or element, a concatenation operand, the body's
+    /// result. A `Copy` scalar's read is `*p` ([`Lower::lower_scalar_ref_read`]).
+    fn own_consumed_ref_mut(&self, e: &mut IrExpr) {
+        let Some(id) = var_id(e) else { return };
+        if !is_ref_mut_param(self.params, id) || is_copy_scalar(&e.ty) {
+            return;
+        }
+        let ty = e.ty.clone();
+        let span = e.span;
+        *e = owned_read(mk(IrExprKind::Var { id }, ty, span));
+    }
+
+    /// The by-value positions [`Lower::own_consumed_ref_mut`] applies to. A
+    /// borrowed slot is a `Borrow` node here (BorrowInsertion ran), so a
+    /// bare `Var` argument is an owned slot by construction.
+    fn lower_consumers(&self, expr: &mut IrExpr) {
+        match &mut expr.kind {
+            IrExprKind::Call { args, .. } | IrExprKind::TailCall { args, .. } => {
+                for a in args { self.own_consumed_ref_mut(a); }
+            }
+            IrExprKind::Record { fields, .. } => {
+                for (_, f) in fields { self.own_consumed_ref_mut(f); }
+            }
+            IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
+                for a in elements { self.own_consumed_ref_mut(a); }
+            }
+            IrExprKind::BinOp { op: BinOp::ConcatStr | BinOp::ConcatList, left, right } => {
+                self.own_consumed_ref_mut(left);
+                self.own_consumed_ref_mut(right);
+            }
+            _ => {}
+        }
     }
 }
 
@@ -361,6 +412,11 @@ impl IrMutVisitor for Lower<'_> {
         {
             self.counting_binders.insert(*var);
         }
+        // Before the walk: the rule reads the ORIGINAL bare `Var` operands,
+        // which the scalar-read lowering below would otherwise turn into
+        // `Deref` first (a scalar is exempt anyway; the order keeps the two
+        // rules independent).
+        self.lower_consumers(expr);
         walk_expr_mut(self, expr);
         match &expr.kind {
             IrExprKind::Var { .. } => self.lower_scalar_ref_read(expr),
