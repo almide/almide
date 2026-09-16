@@ -54,6 +54,14 @@ fn main() -> Unit = {
 [1, 99, 3]
 ```
 
+`list.set` copies the whole list — O(n) per call. Assigning the result back to
+the list it came from, `xs = list.set(xs, i, v)` (or `xs = xs.set(i, v)`) on a
+`var`, is compiled as an in-place write of that one slot (#2244): the same
+value semantics — an alias taken earlier keeps the old list, an index out of
+range changes nothing — without the copy, so a loop of them is linear. The
+statement form `xs[i] = v` is the same write, spelled directly; it aborts on an
+out-of-range index where `list.set` does nothing.
+
 ### `list.swap(xs: List[A], i: Int, j: Int) -> List[A]`
 
 Return a new list with elements at indices i and j swapped.

@@ -7,6 +7,68 @@ use crate::types::{Ty, TypeConstructorId, TypeEnv};
 use super::LowerCtx;
 use super::expressions::lower_expr;
 
+/// `xs = list.set(xs, i, v)` — the value assigned back to the very list it
+/// was built from — writes the slot IN PLACE (#2244). `list.set` returns a
+/// fresh copy, so the self-assignment in a loop was quadratic (16k sets over
+/// 16k elements: 14 s) and nothing at the call site said so. The rewrite is
+/// what the writer could have spelled by hand: the index and value are
+/// evaluated once, into temporaries, and the write is the language's own
+/// `xs[i] = v` statement guarded by the bounds `list.set` itself tolerates
+/// (out of range is a no-op, never an abort). Both targets already carry the
+/// in-place statement's value semantics — native through the ownership
+/// passes (an alias `let ys = xs` is its own copy), wasm through the rc-gated
+/// copy-on-write — so no alias analysis is needed here. `None` for every
+/// other assignment.
+fn lower_self_list_set(ctx: &mut LowerCtx, var: VarId, value: &IrExpr, span: Option<almide_base::Span>) -> Option<IrStmtKind> {
+    let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &value.kind else { return None };
+    if module.as_str() != "list" || func.as_str() != "set" || args.len() != 3 {
+        return None;
+    }
+    let IrExprKind::Var { id } = &args[0].kind else { return None };
+    if *id != var || ctx.var_table.get(var).ty.is_map() {
+        return None;
+    }
+    let list_ty = args[0].ty.clone();
+    let elem_ty = args[2].ty.clone();
+    let mk = |kind: IrExprKind, ty: Ty| IrExpr { kind, ty, span, def_id: None };
+    let idx_var = ctx.var_table.alloc(sym("__set_i"), Ty::Int, Mutability::Let, span);
+    let val_var = ctx.var_table.alloc(sym("__set_v"), elem_ty.clone(), Mutability::Let, span);
+    let idx = |mk: &dyn Fn(IrExprKind, Ty) -> IrExpr| mk(IrExprKind::Var { id: idx_var }, Ty::Int);
+    let len = mk(IrExprKind::Call {
+        target: CallTarget::Module { module: sym("list"), func: sym("len"), def_id: None },
+        args: vec![mk(IrExprKind::Var { id: var }, list_ty)],
+        type_args: vec![],
+    }, Ty::Int);
+    let in_range = mk(IrExprKind::BinOp {
+        op: BinOp::And,
+        left: Box::new(mk(IrExprKind::BinOp {
+            op: BinOp::Gte,
+            left: Box::new(idx(&mk)),
+            right: Box::new(mk(IrExprKind::LitInt { value: 0 }, Ty::Int)),
+        }, Ty::Bool)),
+        right: Box::new(mk(IrExprKind::BinOp { op: BinOp::Lt, left: Box::new(idx(&mk)), right: Box::new(len) }, Ty::Bool)),
+    }, Ty::Bool);
+    let write = IrStmt {
+        kind: IrStmtKind::IndexAssign {
+            target: var,
+            index: idx(&mk),
+            value: mk(IrExprKind::Var { id: val_var }, elem_ty.clone()),
+        },
+        span,
+    };
+    let guarded = mk(IrExprKind::If {
+        cond: Box::new(in_range),
+        then: Box::new(mk(IrExprKind::Block { stmts: vec![write], expr: None }, Ty::Unit)),
+        else_: Box::new(mk(IrExprKind::Unit, Ty::Unit)),
+    }, Ty::Unit);
+    let stmts = vec![
+        IrStmt { kind: IrStmtKind::Bind { var: idx_var, mutability: Mutability::Let, ty: Ty::Int, value: args[1].clone() }, span },
+        IrStmt { kind: IrStmtKind::Bind { var: val_var, mutability: Mutability::Let, ty: elem_ty, value: args[2].clone() }, span },
+        IrStmt { kind: IrStmtKind::Expr { expr: guarded }, span },
+    ];
+    Some(IrStmtKind::Expr { expr: mk(IrExprKind::Block { stmts, expr: None }, Ty::Unit) })
+}
+
 pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &ast::Stmt) -> IrStmt {
     let span = stmt_span(stmt);
     let kind = match stmt {
@@ -22,7 +84,10 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &ast::Stmt) -> IrStmt {
         ast::Stmt::Assign { name, value, .. } => {
             let ir_val = lower_expr(ctx, value);
             let var = ctx.lookup_var(name).unwrap_or(VarId(0));
-            IrStmtKind::Assign { var, value: ir_val }
+            match lower_self_list_set(ctx, var, &ir_val, span) {
+                Some(in_place) => in_place,
+                None => IrStmtKind::Assign { var, value: ir_val },
+            }
         }
         ast::Stmt::IndexAssign { target, index, value, .. } => {
             let var = ctx.lookup_var(target).unwrap_or(VarId(0));
