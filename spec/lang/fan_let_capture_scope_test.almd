@@ -1,0 +1,28 @@
+// #2242: the E008 fan capture check decides "mutable" by the binding in
+// scope, not by the identifier's spelling anywhere in the module. `plan`
+// builds its answer in a `var arms`; `run` binds a `let arms` from it and
+// fans over it — that `let` is capturable whatever the callee calls its local.
+effect fn plan(n: Int) -> Result[List[List[Int]], String] = {
+  var arms: List[List[Int]] = []
+  var k = 0
+  while k < n {
+    list.push(arms, [k])
+    k = k + 1
+  }
+  ok(arms)
+}
+
+fn total(xs: List[Int]) -> Int = list.sum(xs)
+
+effect fn run() -> Result[Int, String] = {
+  let arms = plan(2)!
+  let r = fan {
+    total(list.get(arms, 0) ?? [])
+    total(list.get(arms, 1) ?? [])
+  }
+  ok(r.0 + r.1)
+}
+
+test "a let bound from an effect call is captured by fan arms even when the callee has a var of the same name" {
+  assert_eq(run(), ok(1))
+}
