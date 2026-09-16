@@ -41,6 +41,7 @@ impl AlmideRepr for AlmideProcessStatus {
 }
 
 pub fn almide_rt_process_exec(cmd: &str, args: &[String]) -> Result<String, String> {
+    almide_stdout_flush();
     match std::process::Command::new(cmd).args(args).output() {
         Ok(out) => {
             if out.status.success() {
@@ -63,6 +64,7 @@ pub fn almide_rt_process_exec(cmd: &str, args: &[String]) -> Result<String, Stri
 }
 
 pub fn almide_rt_process_exit(code: i64) -> ! {
+    almide_stdout_flush();
     std::process::exit(code as i32);
 }
 
@@ -71,6 +73,7 @@ pub fn almide_rt_process_args() -> Vec<String> {
 }
 
 pub fn almide_rt_process_stdin_lines() -> Result<Vec<String>, String> {
+    almide_stdout_flush();
     use std::io::BufRead;
     std::io::stdin()
         .lock()
@@ -83,6 +86,7 @@ pub fn almide_rt_process_stdin_lines() -> Result<Vec<String>, String> {
 }
 
 pub fn almide_rt_process_exec_in(dir: &str, cmd: &str, args: &[String]) -> Result<String, String> {
+    almide_stdout_flush();
     match std::process::Command::new(cmd).args(args).current_dir(dir).output() {
         Ok(out) => {
             if out.status.success() {
@@ -101,6 +105,7 @@ pub fn almide_rt_process_exec_in(dir: &str, cmd: &str, args: &[String]) -> Resul
 }
 
 pub fn almide_rt_process_exec_with_stdin(cmd: &str, args: &[String], input: &str) -> Result<String, String> {
+    almide_stdout_flush();
     use std::io::Write;
     let mut child = std::process::Command::new(cmd)
         .args(args)
@@ -141,6 +146,7 @@ mod tests {
 }
 
 pub fn almide_rt_process_exec_status(cmd: &str, args: &[String]) -> Result<AlmideProcessStatus, String> {
+    almide_stdout_flush();
     match std::process::Command::new(cmd).args(args).output() {
         Ok(out) => {
             let code = out.status.code().unwrap_or(-1) as i64;
@@ -167,6 +173,7 @@ pub fn almide_rt_process_exec_status_timeout(
     args: &[String],
     timeout_ms: i64,
 ) -> Result<AlmideProcessStatus, String> {
+    almide_stdout_flush();
     use std::io::Read;
     use std::process::{Command, Stdio};
     let mut command = Command::new(cmd);
