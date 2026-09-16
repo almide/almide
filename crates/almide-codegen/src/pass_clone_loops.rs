@@ -49,9 +49,12 @@ pub(crate) fn insert_clones_for_in(var: VarId, var_tuple: Option<Vec<VarId>>, it
     // With the body's clones and moves placed, a binder every use of which
     // sits under a shared borrow / field read / clone never needs an owned
     // element at all: iterate `xs.iter()` and bind `&T` (#1673). A List head
-    // only — a Map loop consumes its pairs by value.
+    // only — a Map loop consumes its pairs by value. An inline `Range` head
+    // is typed as a list but renders as the bare `start..end` and binds an
+    // OWNED scalar (#2256): it is never a by-reference binder.
     let is_list = matches!(&new_iterable.ty, Ty::Applied(TypeConstructorId::List, _));
-    if is_list && var_tuple.is_none() && only_borrowed_uses(&new_body, var) {
+    let by_ref_head = is_list && !matches!(new_iterable.kind, IrExprKind::Range { .. });
+    if by_ref_head && var_tuple.is_none() && only_borrowed_uses(&new_body, var) {
         ctx.loops.borrowed.insert(var);
     } else if is_list && owns_field {
         ctx.loops.consumed.insert(var);
