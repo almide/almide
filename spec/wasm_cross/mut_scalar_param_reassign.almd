@@ -1,0 +1,43 @@
+// @contract: C-226
+// A `mut` parameter of SCALAR type (#2243) is the caller's variable, on both
+// targets and on every native path: a callee that REASSIGNS it (`d = d + 1`)
+// changes what the caller sees, whether the call is direct, forwarded through
+// another `mut` param, or repeated in a loop. The native codegen used to pass a
+// scalar `mut` param by value — the binary agreed with wasm only because the
+// optimizer inlined the callee, and the non-inlining test leg was rustc E0384.
+fn bump(mut d: Int) -> Unit = {
+  d = d + 1
+}
+
+fn scale(mut x: Float, k: Float) -> Unit = {
+  x = x * k
+}
+
+fn flip(mut b: Bool) -> Unit = {
+  b = not b
+}
+
+fn bump_twice(mut d: Int) -> Unit = {
+  bump(d)
+  bump(d)
+}
+
+effect fn main() -> Unit = {
+  var d = 0
+  bump(d)
+  println("d=${d}")
+  bump_twice(d)
+  println("d=${d}")
+  var i = 0
+  while i < 1000 {
+    bump(d)
+    i = i + 1
+  }
+  println("d=${d}")
+  var x = 1.5
+  scale(x, 4.0)
+  println("x=${x}")
+  var b = false
+  flip(b)
+  println("b=${b}")
+}

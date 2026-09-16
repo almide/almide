@@ -1,0 +1,28 @@
+// #2243: a `mut` parameter of scalar type reassigned in the callee changes the
+// caller's `var` — under the test runner too, on the native leg as on wasm.
+fn bump(mut d: Int) -> Unit = {
+  d = d + 1
+}
+
+fn bump_twice(mut d: Int) -> Unit = {
+  bump(d)
+  bump(d)
+}
+
+fn scale(mut x: Float, k: Float) -> Unit = {
+  x = x * k
+}
+
+test "a reassigned mut Int param mutates the caller's var" {
+  var d = 0
+  bump(d)
+  assert_eq(d, 1)
+  bump_twice(d)
+  assert_eq(d, 3)
+}
+
+test "a reassigned mut Float param mutates the caller's var" {
+  var x = 1.5
+  scale(x, 4.0)
+  assert_eq(x, 6.0)
+}
