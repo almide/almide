@@ -210,3 +210,152 @@ pub fn synthesize_test_runner_main(
     });
     Ok(())
 }
+
+/// The in-test assert lowering of the structural leg (#2179). The frontend
+/// leaves `assert` / `assert_eq` / `assert_ne` RAW inside `test` blocks —
+/// native's cargo harness wants the Rust macros there, per-test failure and
+/// all — so a wasm leg has to lower them itself. The structural leg had
+/// nothing (`Unsupported("call:assert_eq")`, the wall that kept the test lane
+/// on the incumbent). This rewrites every raw in-test assert into the abort
+/// form the frontend already gives a NON-test assert (`desugar_assert_abort`):
+/// bind the operands, `eprintln` the `Error: assertion failed … at: line N`
+/// block, `process.exit(1)` — the same bytes a failing non-test assert prints
+/// on every target, and a leg that needs to know nothing about asserts.
+///
+/// Leg-independent IR in, IR out, and it lives here for the same reason the
+/// runner synthesis does. It is NOT applied inside [`synthesize_test_runner_main`]
+/// yet: the incumbent brick cannot lower the `if` this produces over two
+/// Result- or Option-typed operands with a call-bearing else arm ("unresolvable
+/// condition … Var vs Var"), so it keeps its own `hoist_assert` +
+/// `assert_die_expr` trap form until it retires (#1584). The structural
+/// front (`wasm_leg::lower_to_ir_tests_with_deps`) runs this before the
+/// synthesis.
+pub fn desugar_test_asserts(ir: &mut IrProgram) {
+    use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
+    use almide_ir::{CallTarget, IrExpr, IrExprKind, VarTable};
+    struct Desugar<'a> {
+        vars: &'a mut VarTable,
+    }
+    impl IrMutVisitor for Desugar<'_> {
+        fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
+            walk_expr_mut(self, expr);
+            let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &expr.kind else {
+                return;
+            };
+            let n = name.as_str();
+            let is_assert = (matches!(n, "assert_eq" | "assert_ne") && args.len() == 2)
+                || (n == "assert" && !args.is_empty());
+            if !is_assert {
+                return;
+            }
+            let n = n.to_string();
+            let span = expr.span;
+            let IrExprKind::Call { args, .. } = std::mem::replace(&mut expr.kind, IrExprKind::Unit) else {
+                unreachable!()
+            };
+            *expr = assert_abort(self.vars, &n, args, span);
+        }
+    }
+    let IrProgram { functions, var_table, .. } = ir;
+    for f in functions.iter_mut().filter(|f| f.is_test) {
+        Desugar { vars: var_table }.visit_expr_mut(&mut f.body);
+    }
+}
+
+/// The abort form of one assert — the frontend's `desugar_assert_abort`, over
+/// IR that has already left the lowering context (fresh vars come from the
+/// program's own table).
+fn assert_abort(
+    vars: &mut almide_ir::VarTable,
+    name: &str,
+    args: Vec<almide_ir::IrExpr>,
+    span: Option<almide_ir::Span>,
+) -> almide_ir::IrExpr {
+    use almide_ir::{BinOp, CallTarget, IrExpr, IrExprKind, IrStmt, IrStmtKind, IrStringPart, Mutability};
+    use almide_lang::intern::sym;
+    use almide_lang::types::Ty;
+    let mk = |kind: IrExprKind, ty: Ty| IrExpr { kind, ty, span, def_id: None };
+    let mut stmts: Vec<IrStmt> = Vec::new();
+    let mut operands: Vec<IrExpr> = Vec::new();
+    for (i, a) in args.into_iter().enumerate() {
+        let ty = a.ty.clone();
+        let v = vars.alloc(sym(&format!("__assert_{i}")), ty.clone(), Mutability::Let, span);
+        stmts.push(IrStmt {
+            kind: IrStmtKind::Bind { var: v, mutability: Mutability::Let, ty: ty.clone(), value: a },
+            span: None,
+        });
+        operands.push(mk(IrExprKind::Var { id: v }, ty));
+    }
+    let cond = match name {
+        "assert_eq" | "assert_ne" => mk(
+            IrExprKind::BinOp {
+                op: if name == "assert_eq" { BinOp::Eq } else { BinOp::Neq },
+                left: Box::new(operands[0].clone()),
+                right: Box::new(operands[1].clone()),
+            },
+            Ty::Bool,
+        ),
+        _ => operands[0].clone(),
+    };
+    let at = span.map(|s| format!("\n  at: line {}", s.line)).unwrap_or_default();
+    let parts: Vec<IrStringPart> = match name {
+        "assert_eq" => vec![
+            IrStringPart::Lit { value: format!("Error: assertion failed{at}\n  expected: ") },
+            IrStringPart::Expr { expr: operands[1].clone() },
+            IrStringPart::Lit { value: "\n  found: ".into() },
+            IrStringPart::Expr { expr: operands[0].clone() },
+        ],
+        "assert_ne" => vec![
+            IrStringPart::Lit { value: format!("Error: assertion failed{at}\n  expected: != ") },
+            IrStringPart::Expr { expr: operands[0].clone() },
+            IrStringPart::Lit { value: "\n  found: ".into() },
+            IrStringPart::Expr { expr: operands[0].clone() },
+        ],
+        _ if operands.len() >= 2 => {
+            let mut p = vec![
+                IrStringPart::Lit { value: "Error: assertion failed: ".into() },
+                IrStringPart::Expr { expr: operands[1].clone() },
+            ];
+            if !at.is_empty() {
+                p.push(IrStringPart::Lit { value: at.clone() });
+            }
+            p
+        }
+        _ => vec![IrStringPart::Lit { value: format!("Error: assertion failed{at}") }],
+    };
+    let msg = mk(IrExprKind::StringInterp { parts }, Ty::String);
+    let eprint = mk(
+        IrExprKind::Call {
+            target: CallTarget::Named { name: sym("eprintln") },
+            args: vec![msg],
+            type_args: vec![],
+        },
+        Ty::Unit,
+    );
+    let one = mk(IrExprKind::LitInt { value: 1 }, Ty::Int);
+    let exit = mk(
+        IrExprKind::Call {
+            target: CallTarget::Module { module: sym("process"), func: sym("exit"), def_id: None },
+            args: vec![one],
+            type_args: vec![],
+        },
+        Ty::Unit,
+    );
+    let fail = mk(
+        IrExprKind::Block {
+            stmts: vec![
+                IrStmt { kind: IrStmtKind::Expr { expr: eprint }, span: None },
+                IrStmt { kind: IrStmtKind::Expr { expr: exit }, span: None },
+            ],
+            expr: None,
+        },
+        Ty::Unit,
+    );
+    let ok = mk(IrExprKind::Block { stmts: vec![], expr: None }, Ty::Unit);
+    let guard = mk(
+        IrExprKind::If { cond: Box::new(cond), then: Box::new(ok), else_: Box::new(fail) },
+        Ty::Unit,
+    );
+    stmts.push(IrStmt { kind: IrStmtKind::Expr { expr: guard }, span: None });
+    mk(IrExprKind::Block { stmts, expr: None }, Ty::Unit)
+}
