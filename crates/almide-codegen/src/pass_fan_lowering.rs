@@ -141,9 +141,12 @@ fn rewrite_expr(expr: IrExpr, inside_fan: bool) -> IrExpr {
         IrExprKind::ToOption { expr: inner } if inside_fan => {
             return rewrite_expr(*inner, true);
         }
-        IrExprKind::UnwrapOr { expr: inner, .. } if inside_fan => {
-            return rewrite_expr(*inner, true);
-        }
+        // `a ?? b` is NOT auto-try (#2246): it is the user's own fallback, and
+        // its value type is `T`, not the `Result`/`Option` the join unwraps.
+        // Stripping it — as the March 2026 operator sweep did mechanically —
+        // handed `total(list.get(xs, 0) ?? [])` an `Option<Vec<_>>` where the
+        // callee takes `&[_]` (native E0308 behind a green check; wasm kept
+        // the fallback). It rewrites like any other node, children included.
 
         // A `Call` is the one remaining node with a rule of its own: its target
         // may itself hold a fan lambda.
@@ -183,7 +186,9 @@ fn strip_try_top(expr: IrExpr) -> IrExpr {
         IrExprKind::Try { expr: inner }
         | IrExprKind::Unwrap { expr: inner }
         | IrExprKind::ToOption { expr: inner } => *inner,
-        IrExprKind::UnwrapOr { expr: inner, .. } => *inner,
+        // A top-level `?? d` stays too (#2246): stripped, an arm typed `T` by
+        // the checker would return the `Result` and the join would PROPAGATE
+        // the error the user asked to default.
         _ => expr,
     }
 }
