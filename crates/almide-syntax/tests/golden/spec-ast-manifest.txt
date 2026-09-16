@@ -1,4 +1,4 @@
-# oracle: almide 0.62.0 at 64dac132c — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.62.0 at 7a3572e9f — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -267,6 +267,7 @@ d244bc53f3f48b7c7456258a24f49dda84f742f23e6b282e01ea5b7558077d45	spec/lang/if_le
 242e56ab15e547f95025e1044461bdfa612e7974595e6998237664aa473b97ad	spec/lang/if_then_assign_test.almd
 2f55acf70f0b2de706c3c44ce0132c1bfb85a6dd2c410fe1d42d0b9c971cb009	spec/lang/import_test.almd
 45b0d18be303ff21ee2dd5f2c553da0b815a0b8218f802898085e95601049c34	spec/lang/index_access_test.almd
+34b04c208b2f450301ddc532512c08d82fd7b7c03170a5ae0ef6deaf36781e1a	spec/lang/index_assign_alias_test.almd
 b709754e198bac611dbef5cb6e234da1b12d05f667fa346f4f4c42cd5349a5dc	spec/lang/int_div_mod_total_test.almd
 fb16bc4516dc62b6f75c6ccba340f3b1735f97d3c99ca2f1cbbcf0de328192c7	spec/lang/interpolation_edge_test.almd
 7c6ea254c9f93a4f611394826ffff8b4d8f03c86e7903272eefa490f6f13a17b	spec/lang/intrinsic_readonly_borrow_test.almd
