@@ -346,6 +346,11 @@ impl Checker {
     fn check_fn_decl(&mut self, name: &str, decl: FnToCheck<'_>) {
         let FnToCheck { params, return_type, body, effect, generics } = decl;
         self.env.push_scope();
+        // `mutable_vars` is keyed by NAME, so a `var` in one body must not
+        // outlive it: the fan capture check (E008) refused a `let arms` in
+        // one fn because a callee had a `var arms` (#2242). Restore the set
+        // the fn entered with (top-level `var`s) on the way out.
+        let outer_mutable = self.env.mutable_vars.clone();
         let shadowed_generics = self.enter_generics(generics);
         // A bare `self` first param is sugar for `self: Self` (see
         // registration.rs's matching fix). `Self` only stays an unresolved
@@ -399,6 +404,7 @@ impl Checker {
         }
         self.env.current_ret = prev.0; self.env.can_call_effect = prev.1; self.env.auto_unwrap = prev.2; self.env.lambda_depth = prev.3;
         self.exit_generics(generics, shadowed_generics);
+        self.env.mutable_vars = outer_mutable;
         self.env.pop_scope();
     }
 
@@ -478,6 +484,7 @@ impl Checker {
     fn check_decl_test(&mut self, body: &mut ast::Expr, where_clauses: &Vec<ast::TestWhere>) {
         let wcs = where_clauses.clone();
         self.env.push_scope();
+        let outer_mutable = self.env.mutable_vars.clone();
         let prev_call = self.env.can_call_effect; self.env.can_call_effect = true;
         let prev_test = self.env.in_test_block; self.env.in_test_block = true;
         let mut seen_binds = std::collections::HashMap::new();
@@ -485,6 +492,7 @@ impl Checker {
         self.infer_expr(body);
         self.env.in_test_block = prev_test;
         self.env.can_call_effect = prev_call;
+        self.env.mutable_vars = outer_mutable;
         self.env.pop_scope();
     }
 
