@@ -359,7 +359,6 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_int_to_uint8" => &[false],
         "almide_rt_int_wrap_add" => &[false, false, false],
         "almide_rt_int_wrap_mul" => &[false, false, false],
-        "almide_rt_io_flush" => &[],
         "almide_rt_io_print" => &[false],
         "almide_rt_io_read_all" => &[],
         "almide_rt_io_read_byte" => &[],

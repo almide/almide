@@ -420,6 +420,13 @@ fn render_fn_safe_name(
 /// single-file and module layouts. A no-op off unix.
 const MAIN_SIGPIPE_PRELUDE: &str = "    #[cfg(unix)]\n    {\n        extern \"C\" {\n            fn signal(sig: i32, handler: usize) -> usize;\n        }\n        // SIGPIPE = 13, SIG_DFL = 0\n        unsafe {\n            signal(13, 0);\n        }\n    }\n";
 
+/// The stdout buffer's flush on a panic (#2245): stdout is block-buffered
+/// when it is not a terminal, and a panic unwinding out of `main` never runs
+/// the main thread's thread-local destructors, so the lines a program printed
+/// before an `assert` failed would be lost. The hook flushes, then hands the
+/// panic to the default hook — the message and exit code are unchanged.
+const MAIN_STDOUT_PRELUDE: &str = "    {\n        let __almide_hook = std::panic::take_hook();\n        std::panic::set_hook(std::boxed::Box::new(move |info| { almide_stdout_flush(); __almide_hook(info); }));\n    }\n";
+
 fn wrap_main_fn_code(fn_code: String, ctx: &RenderContext, is_rust_effect_main: bool, is_rust_plain_main_with_forces: bool) -> String {
     let force_lines: String = ctx.ann.global_init_order.iter()
         .filter_map(|v| ctx.ann.globals.get(v))
@@ -427,9 +434,9 @@ fn wrap_main_fn_code(fn_code: String, ctx: &RenderContext, is_rust_effect_main: 
         .map(|i| format!("    std::sync::LazyLock::force(&{});\n", i.static_name))
         .collect();
     if is_rust_effect_main {
-        format!("{}\n\nfn main() {{\n{}{}    if let Err(__almide_err) = __almide_main() {{\n        eprintln!(\"Error: {{}}\", __almide_err);\n        std::process::exit(1);\n    }}\n}}", fn_code, MAIN_SIGPIPE_PRELUDE, force_lines)
+        format!("{}\n\nfn main() {{\n{}{}{}    if let Err(__almide_err) = __almide_main() {{\n        almide_stdout_finish();\n        eprintln!(\"Error: {{}}\", __almide_err);\n        std::process::exit(1);\n    }}\n    almide_stdout_finish();\n}}", fn_code, MAIN_SIGPIPE_PRELUDE, MAIN_STDOUT_PRELUDE, force_lines)
     } else if is_rust_plain_main_with_forces {
-        format!("{}\n\nfn main() {{\n{}{}    __almide_main();\n}}", fn_code, MAIN_SIGPIPE_PRELUDE, force_lines)
+        format!("{}\n\nfn main() {{\n{}{}{}    __almide_main();\n    almide_stdout_finish();\n}}", fn_code, MAIN_SIGPIPE_PRELUDE, MAIN_STDOUT_PRELUDE, force_lines)
     } else {
         fn_code
     }

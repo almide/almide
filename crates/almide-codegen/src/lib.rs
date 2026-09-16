@@ -338,6 +338,35 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     s.push_str("impl AlmideConcat<String> for &str { type Output = String; #[inline(always)] fn concat(self, rhs: String) -> String { format!(\"{}{}\", self, rhs) } }\n");
     s.push_str("impl AlmideConcat<&str> for &str { type Output = String; #[inline(always)] fn concat(self, rhs: &str) -> String { format!(\"{}{}\", self, rhs) } }\n");
     s.push_str("impl<T: Clone> AlmideConcat<Vec<T>> for Vec<T> { type Output = Vec<T>; #[inline(always)] fn concat(self, rhs: Vec<T>) -> Vec<T> { let mut r = self; r.extend(rhs); r } }\n");
+    // ONE stdout buffer (#2245). `println` used to lower to Rust's `println!`,
+    // whose `Stdout` is line-buffered whatever it is attached to — one write
+    // syscall per line, 50k lines = 0.35 s — while `io.write` went through a
+    // separate 64 KiB BufWriter flushed per call to keep program order across
+    // the two handles. Every stdout write now goes through this buffer, so the
+    // order is the program's by construction, and the buffer flushes per line
+    // only when stdout is a terminal (the usual rule); to a pipe or a file it
+    // fills 64 KiB. Flush points: exit (the `fn main` wrapper), a panic (the
+    // hook the wrapper installs), `io.print` (interactive output — always),
+    // `process.exit`, before a child process runs (its output must follow
+    // ours), and before every stdin read (a prompt precedes the read).
+    // `eprintln` stays unbuffered on stderr, so the RELATIVE order of stdout
+    // and stderr is not preserved when stdout is not a terminal — the same as
+    // every C/Rust program; the bytes on each stream are unchanged.
+    s.push_str("thread_local! {\n");
+    s.push_str(&format!("    {vis}static ALMIDE_STDOUT_BUF: std::cell::RefCell<std::io::BufWriter<std::io::Stdout>> =\n"));
+    s.push_str("        std::cell::RefCell::new(std::io::BufWriter::with_capacity(65536, std::io::stdout()));\n}\n");
+    s.push_str(&format!("{vis}fn almide_stdout_is_terminal() -> bool {{ static TTY: std::sync::OnceLock<bool> = std::sync::OnceLock::new(); *TTY.get_or_init(|| std::io::IsTerminal::is_terminal(&std::io::stdout())) }}\n"));
+    s.push_str(&format!("{vis}fn almide_stdout_flush() {{ ALMIDE_STDOUT_BUF.with(|buf| {{ let _ = std::io::Write::flush(&mut *buf.borrow_mut()); }}); }}\n"));
+    // The exit-time counterpart: flush, then give back the two allocations the
+    // buffer and the panic hook hold — the 64 KiB buffer (swapped for a
+    // zero-capacity writer; the main thread's thread-locals are never
+    // destructed at process exit) and the hook's box (`take_hook` restores
+    // the default) — so the allocation ledger sees a process that frees what
+    // it allocated, not a leak by design.
+    s.push_str(&format!("{vis}fn almide_stdout_finish() {{ almide_stdout_flush(); ALMIDE_STDOUT_BUF.with(|buf| {{ let _ = std::mem::replace(&mut *buf.borrow_mut(), std::io::BufWriter::with_capacity(0, std::io::stdout())); }}); drop(std::panic::take_hook()); }}\n"));
+    s.push_str(&format!("{vis}fn almide_stdout_write_fmt(args: std::fmt::Arguments<'_>, newline: bool) {{ ALMIDE_STDOUT_BUF.with(|buf| {{ let mut w = buf.borrow_mut(); let _ = std::io::Write::write_fmt(&mut *w, args); if newline {{ let _ = std::io::Write::write_all(&mut *w, b\"\\n\"); }} if almide_stdout_is_terminal() {{ let _ = std::io::Write::flush(&mut *w); }} }}); }}\n"));
+    s.push_str(&format!("{vis}fn almide_stdout_write_bytes(bytes: &[u8]) {{ ALMIDE_STDOUT_BUF.with(|buf| {{ let mut w = buf.borrow_mut(); let _ = std::io::Write::write_all(&mut *w, bytes); if almide_stdout_is_terminal() {{ let _ = std::io::Write::flush(&mut *w); }} }}); }}\n"));
+    s.push_str(&format!("{macro_attr}macro_rules! almide_println {{ ($($arg:tt)*) => {{ $crate::almide_stdout_write_fmt(format_args!($($arg)*), true) }}; }}\n"));
     s.push_str(&format!("{macro_attr}macro_rules! almide_eq {{ ($a:expr, $b:expr) => {{ ($a) == ($b) }}; }}\n"));
     s.push_str(&format!("{macro_attr}macro_rules! almide_ne {{ ($a:expr, $b:expr) => {{ ($a) != ($b) }}; }}\n"));
     // almide_div!/almide_mod!: total integer `/` and `%`. `checked_div`/`checked_rem`
