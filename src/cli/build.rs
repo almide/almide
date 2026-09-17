@@ -609,7 +609,9 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
         err(&format!("Failed to write {}: {}", output, e));
         std::process::exit(1);
     }
-    let host_note = if js_host { write_js_host(output, file, &bytes, &surface, structural) } else { String::new() };
+    // The JS host is derived from the bytes that SHIP (#2276): after the
+    // optional `wasm-opt` rewrite below, never from the pre-opt module.
+    let host_from_shipped = |shipped: &[u8]| if js_host { write_js_host(output, file, shipped, &surface, structural) } else { String::new() };
 
     // The trust-spine ships the bytes ITS OWN rendering process produced —
     // reachability DCE and the name-section trim already ran inside that
@@ -641,6 +643,7 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
     // certificate covered — #2154's run-time trap shipped under it (#2184).
     let trust = if structural { "trusted, certificate pending" } else { "verified" };
     if !wasm_opt {
+        let host_note = host_from_shipped(&bytes);
         err(&format!(
             "Built {}{} ({} bytes, {}, {} — wasm-opt skipped; pass --wasm-opt for a smaller build rewritten outside the renderer)",
             output, host_note, pre_size, leg, trust
@@ -650,6 +653,8 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
 
     match run_wasm_opt(output) {
         Ok(post_size) => {
+            let shipped = std::fs::read(output).unwrap_or_else(|e| { err(&format!("Failed to read back {}: {}", output, e)); std::process::exit(1); });
+            let host_note = host_from_shipped(&shipped);
             let pct = if pre_size > 0 { 100.0 * (pre_size - post_size) as f64 / pre_size as f64 } else { 0.0 };
             err(&format!(
                 "Built {}{} ({} bytes → {} bytes, -{:.1}%, {}) — wasm-opt applied: these are NOT the renderer's own bytes",
@@ -657,9 +662,10 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
             ));
         }
         Err(why) => {
+            let host_note = host_from_shipped(&bytes);
             err(&format!(
-                "Built {} ({} bytes, {}, {}) — --wasm-opt requested but not applied: {}; shipped the renderer's own module unoptimized",
-                output, pre_size, leg, trust, why
+                "Built {}{} ({} bytes, {}, {}) — --wasm-opt requested but not applied: {}; shipped the renderer's own module unoptimized",
+                output, host_note, pre_size, leg, trust, why
             ));
         }
     }
@@ -1335,6 +1341,13 @@ pub(crate) fn compile_to_wasm_bytes_surfaced(file: &str, allow_unverified: bool,
     // the incumbent leg.
     let has_exports = ir_program.functions.iter().any(|f| !f.export_attrs.is_empty());
     let surface = crate::cli::js_host::HostSurface::of(&ir_program);
+    // #2276: the allocator/release exports ship only for a surface that
+    // marshals a String — decided here, before either leg renders.
+    if almide_wasm::host_exports::js_host() {
+        let string_abi = surface.needs_string_abi();
+        almide_wasm::host_exports::set_string_abi(string_abi);
+        almide_mir::host_exports::set_string_abi(string_abi);
+    }
     // #1921 CLOSED: the module-level host-variant import scan is GONE. Host
     // routing is decided from the EMITTED op set, not from import names:
     // the structural leg lowers the program, and `render_wasm_module_routed`
