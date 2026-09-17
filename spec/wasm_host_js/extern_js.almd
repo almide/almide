@@ -1,10 +1,11 @@
-// @leg: incumbent
+// @leg: structural
 // The `@extern(wasm, "js", ...)` shape (#2265): the host wires each import
 // through `init({ js: { name } })`, decoding String args from the block
 // header and encoding a String return as a fresh block the guest owns. The
-// structural leg has no extern-import lowering yet, so this routes to the
-// incumbent — the `@leg` line above is the ratchet: a route change here is a
-// visible diff, not a silent one.
+// structural leg lowers each declaration to a declared import (#2275), so
+// this builds on the default leg with the one ABI the JS host already speaks
+// for exports — the `@leg` line above is the ratchet: a route change here is
+// a visible diff, not a silent one.
 @extern(wasm, "js", "js_log")
 fn js_log(msg: String) -> Unit
 
