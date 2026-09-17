@@ -24,6 +24,7 @@ use super::pass_intrinsic_lowering::IntrinsicLoweringPass;
 use super::pass_normalize_runtime_calls::NormalizeRuntimeCallsPass;
 use super::pass_stdlib_lowering::StdlibLoweringPass;
 use super::pass_stream_fusion::StreamFusionPass;
+use super::pass_chain_source_borrow::ChainSourceBorrowPass;
 use super::pass_match_subject::MatchSubjectPass;
 use super::pass_pattern_literal_guard::PatternLiteralGuardPass;
 use super::pass_effect_inference::EffectInferencePass;
@@ -133,12 +134,21 @@ fn build_pipeline(target: Target) -> Pipeline {
                 // seeded from bundled `@intrinsic` declarations at
                 // `infer_borrow_signatures` entry.
                 .add(IntrinsicLoweringPass)
+                // StreamFusion: `RuntimeCall { almide_rt_list_* }` with a
+                // lambda literal → `IterChain`, BEFORE BorrowInsertion. A
+                // callback the chain inlines is a closure that will not
+                // exist; erased here, the borrow / capture-clone / clone
+                // passes see a chain step as the scope it renders as, and
+                // a `&T` param the step only reads stays `&T` (#2278).
+                .add(StreamFusionPass)
         .add(BorrowInsertionPass)
         // TCO: convert self-recursive tail calls to loops AFTER BorrowInsertion
         // (so that param types are already finalized — avoids String/&str mismatch)
         .add(TailCallOptPass)
         .add(CaptureClonePass)
         .add(CloneInsertionPass)
+        // The dead `Clone` on an enumerate-adapted chain source → a borrow.
+        .add(ChainSourceBorrowPass)
         // Match subject transforms: String → .as_str(), Option<String> → .as_deref()
         .add(MatchSubjectPass)
         // Analysis passes (before lowering, while Module calls still visible)
@@ -146,8 +156,6 @@ fn build_pipeline(target: Target) -> Pipeline {
         // Semantic lowering (order matters!)
         // 1. Stdlib first: Module calls → Named calls with arg decoration
         .add(StdlibLoweringPass)
-        // 1b. Fuse pure list chains before explicit fan routing in RustLowering.
-        .add(StreamFusionPass)
         // 2. ResultPropagation: insert Try (?) for effect fn calls
         .add(ResultPropagationPass)
         // 3. Builtin last: Named calls (assert_eq, println, etc.) → RustMacro

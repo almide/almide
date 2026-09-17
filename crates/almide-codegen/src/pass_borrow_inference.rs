@@ -272,7 +272,7 @@ fn seed_builtin_output_sigs(sigs: &mut HashMap<String, Vec<ParamBorrow>>) {
     }
 }
 
-fn seed_intrinsic_sigs(sigs: &mut HashMap<String, Vec<ParamBorrow>>) {
+pub(crate) fn seed_intrinsic_sigs(sigs: &mut HashMap<String, Vec<ParamBorrow>>) {
     use almide_lang::ast::Decl;
     for &mod_name in almide_lang::stdlib_info::BUNDLED_MODULES {
         let Some(source) = almide_lang::stdlib_info::bundled_source(mod_name) else { continue };

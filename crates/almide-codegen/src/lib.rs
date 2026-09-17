@@ -54,6 +54,7 @@ pub mod pass_intrinsic_lowering;
 pub mod pass_normalize_runtime_calls;
 pub mod pass_stdlib_lowering;
 pub mod pass_stream_fusion;
+pub mod pass_chain_source_borrow;
 mod pass_fan_local_state;
 pub mod pass_effect_inference;
 pub mod pass_tco;
