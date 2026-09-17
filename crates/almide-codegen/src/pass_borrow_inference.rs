@@ -484,6 +484,44 @@ pub fn infer_borrow_signatures(program: &mut IrProgram) -> HashMap<String, Vec<P
     sigs
 }
 
+/// Write each fused chain's source mode into its node (#2287): a chain whose
+/// receiving lambdas only READ the source element — the verdict every round's
+/// use walk gave `Iterable::consumed` through `chain_elements_consumed` —
+/// iterates from a borrow, so `consume` becomes `false` and every later pass
+/// (the clone pass, `ChainSourceBorrow`, the renderer) sees the same mode the
+/// param verdict was built on. Read with the FINAL signatures: the fixed
+/// point's last round saw exactly these, so the verdict cannot move.
+pub fn commit_chain_source_modes(program: &mut IrProgram, sigs: &HashMap<String, Vec<ParamBorrow>>) {
+    use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
+    struct Commit<'a> { scope: Scope<'a> }
+    impl IrMutVisitor for Commit<'_> {
+        fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
+            walk_expr_mut(self, expr);
+            if let IrExprKind::IterChain { source, consume, steps, collector } = &mut expr.kind
+                && *consume
+                && !crate::use_kind::chain_elements_consumed(&source.ty, steps, collector, &self.scope)
+            {
+                *consume = false;
+            }
+        }
+    }
+    let records = seed_record_names(program);
+    let variants = seed_variant_names(program);
+    let pending = HashSet::new();
+    let round = Round { snapshot: sigs, pending: &pending, records: &records, variants: &variants };
+    let commit_fn = |body: &mut IrExpr, module: Option<&str>, name: &str| {
+        let mut c = Commit { scope: Scope { round: &round, module, current_fn: name } };
+        c.visit_expr_mut(body);
+    };
+    for f in &mut program.functions { commit_fn(&mut f.body, None, &f.name.to_string()); }
+    for tl in &mut program.top_lets { commit_fn(&mut tl.value, None, ""); }
+    for m in &mut program.modules {
+        let module = m.name.to_string();
+        for f in &mut m.functions { commit_fn(&mut f.body, Some(&module), &f.name.to_string()); }
+        for tl in &mut m.top_lets { commit_fn(&mut tl.value, Some(&module), ""); }
+    }
+}
+
 /// The rank of a mode on the borrow lattice: a slot may only climb.
 fn borrow_rank(b: ParamBorrow) -> u8 {
     match b {

@@ -138,9 +138,12 @@ impl SlotOracle for Scope<'_> {
 
 /// The positions that need the value OWNED: the borrow policy over one
 /// occurrence. Every constructor operand, concat operand, match subject,
-/// loop iterable, fold seed, method receiver, consuming call slot and result
-/// position moves the value; so does any occurrence inside a closure (the
-/// `move` capture takes it). A heap-typed field read straight off the param
+/// fold seed, method receiver, consuming call slot and result position moves
+/// the value; so does any occurrence inside a closure (the `move` capture
+/// takes it), and an iteration — a `for` head or a fused chain's source —
+/// whose body needs the ELEMENTS owned (`element_reads_only`: the walk
+/// decides `Iterable::consumed` from what the body does with the element,
+/// never from the combinator's slot). A heap-typed field read straight off the param
 /// into a record literal counts too: `CloneInsertion` moves such fields out
 /// of an owned final-use record instead of cloning them
 /// (`pass_clone_record_fields`), and that rewrite exists for record literals
@@ -159,7 +162,7 @@ fn consumes(u: &Use) -> bool {
         ),
         Site::Arg(SlotMode::Borrow | SlotMode::Mut) | Site::Callee
         | Site::Iterable { consumed: false } | Site::Borrow { .. } | Site::Clone
-        | Site::TupleIndex | Site::Index | Site::MapKeyed | Site::Deref | Site::Operand
+        | Site::TupleIndex | Site::Index | Site::MapKeyed | Site::Deref | Site::Operand | Site::Compare
         | Site::Assigned | Site::Reassign | Site::InPlace => false,
     }
 }
