@@ -468,7 +468,7 @@ impl IrMutVisitor for Lower<'_> {
                     let span = subject.span;
                     let inner = std::mem::replace(subject.as_mut(), mk(IrExprKind::Unit, Ty::Unit, None));
                     let deref2 = mk(IrExprKind::Deref { expr: Box::new(inner) }, ty.clone(), span);
-                    *subject = Box::new(mk(IrExprKind::Borrow { expr: Box::new(deref2), as_str: false, mutable: false }, ty, span));
+                    **subject = mk(IrExprKind::Borrow { expr: Box::new(deref2), as_str: false, mutable: false }, ty, span);
                 }
                 let mut bound = Vec::new();
                 for arm in arms.iter() { pattern_binders(&arm.pattern, &mut bound); }
