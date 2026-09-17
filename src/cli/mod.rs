@@ -21,6 +21,7 @@ mod ide;
 mod fix;
 mod docs_gen;
 mod cargo_build;
+mod js_host;
 
 // `cargo_build_cdylib`/`cargo_build_generated`/`cargo_build_generated_with_native`/
 // `cargo_build_test_with_native` are called from sibling modules (`build.rs`,

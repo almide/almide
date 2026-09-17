@@ -22,6 +22,8 @@ pub struct BuildArgs<'a> {
     pub wasm_opt: bool,
     pub component: bool,
     pub heap_cap: Option<u32>,
+    /// `--host js` (#2265): write the JS host next to the wasm output.
+    pub host: Option<&'a str>,
 }
 
 /// The npm/JavaScript target was removed with the TS backend; reject it with
@@ -148,7 +150,7 @@ pub fn cmd_build(args: BuildArgs) {
     // (verbatim) — this is purely a call-site params bundling.
     let BuildArgs {
         file, output, target, release, fast, unchecked_index: _unchecked_index,
-        no_check, repr_c, cdylib, emit_unverified, verified, native_verified, wasm_opt, component, heap_cap,
+        no_check, repr_c, cdylib, emit_unverified, verified, native_verified, wasm_opt, component, heap_cap, host,
     } = args;
     reject_removed_target(target);
     let is_wasm = matches!(target, Some("wasm" | "wasm32" | "wasi"));
@@ -164,8 +166,12 @@ pub fn cmd_build(args: BuildArgs) {
         // #1729: the structural leg's twin — the cap becomes the emitted
         // memory's declared maximum (it silently ignored the knob before).
         let _cap_structural = heap_cap.map(almide_wasm::heap_cap::HeapCapGuard::set);
-        cmd_build_wasm_direct(file, output, no_check, emit_unverified, verified, wasm_opt, component);
+        cmd_build_wasm_direct(file, output, no_check, emit_unverified, verified, wasm_opt, component, host);
         return;
+    }
+    if host.is_some() {
+        err("error: --host is a wasm option: `almide build app.almd --target wasm --host js`");
+        std::process::exit(2);
     }
 
     let output = compute_output_path(file, output, is_wasm);
@@ -461,16 +467,65 @@ fn cmd_build_wasi_rustc(rs_code: &str, output: &str) {
 }
 
 /// Direct WASM emit: parse → check → lower → optimize → monomorphize → emit WASM binary.
-fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allow_unverified: bool, verified: bool, wasm_opt: bool, component: bool) {
+/// `--host js` (#2265): write `<mod>.js` + `<mod>.d.ts` next to the module
+/// (a refusal removes the module too, so a failed build leaves nothing) and
+/// return the note the `Built` line appends.
+fn write_js_host(output: &str, file: &str, bytes: &[u8], surface: &crate::cli::js_host::HostSurface, structural: bool) -> String {
+    let base = output.strip_suffix(".wasm").unwrap_or(output);
+    let (js_path, dts_path) = (format!("{base}.js"), format!("{base}.d.ts"));
+    let wasm_name = std::path::Path::new(output).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| output.to_string());
+    let owned = almide_wasm::host_exports::export_param_owned();
+    let (js, dts) = match crate::cli::js_host::generate(&wasm_name, file, bytes, surface, structural, &owned) {
+        Ok(g) => g,
+        Err(message) => {
+            let _ = std::fs::remove_file(output);
+            err(&message);
+            std::process::exit(1);
+        }
+    };
+    for (path, text) in [(&js_path, &js), (&dts_path, &dts)] {
+        if let Err(e) = std::fs::write(path, text) {
+            err(&format!("Failed to write {}: {}", path, e));
+            std::process::exit(1);
+        }
+    }
+    format!(" + {js_path} + {dts_path}")
+}
+
+/// The `--host` switch, validated: `js` or nothing; never with `--component`.
+fn js_host_requested(host: Option<&str>, component: bool) -> bool {
+    let js_host = match host {
+        None => false,
+        Some("js") => true,
+        Some(other) => {
+            err(&format!("error: `--host` accepts only `js` (got `{other}`)"));
+            std::process::exit(2);
+        }
+    };
+    if js_host && component {
+        err("error: --host js writes a core-module host; it does not apply to --component");
+        std::process::exit(2);
+    }
+    js_host
+}
+
+#[allow(clippy::too_many_arguments)]
+fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allow_unverified: bool, verified: bool, wasm_opt: bool, component: bool, host: Option<&str>) {
     let default_output = format!("{}.wasm", file.strip_suffix(".almd").unwrap_or("a.out"));
     let output = output.unwrap_or(&default_output);
+    // `--host js` (#2265): the compiler writes the JS host next to the
+    // module. Both legs export their allocator + release under the guard,
+    // and the structural leg notes which exported params the callee owns.
+    let js_host = js_host_requested(host, component);
+    let _js_structural = js_host.then(almide_wasm::host_exports::JsHostGuard::set);
+    let _js_incumbent = js_host.then(almide_mir::host_exports::JsHostGuard::set);
 
     // The whole parse→check→lower→emit pipeline lives in `compile_to_wasm_bytes`
     // so `almide run --target wasm` produces the byte-identical module this
     // command writes — the cross-target equivalence guarantee depends on both
     // entry points sharing one code path. Any compile diagnostic was already
     // printed there; we just propagate the exit.
-    let (bytes, structural, host_ops) = match compile_to_wasm_bytes(file, allow_unverified, verified, true, false) {
+    let (bytes, structural, host_ops, surface) = match compile_to_wasm_bytes_surfaced(file, allow_unverified, verified, true, false) {
         Ok(b) => b,
         Err(()) => std::process::exit(1),
     };
@@ -554,6 +609,7 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
         err(&format!("Failed to write {}: {}", output, e));
         std::process::exit(1);
     }
+    let host_note = if js_host { write_js_host(output, file, &bytes, &surface, structural) } else { String::new() };
 
     // The trust-spine ships the bytes ITS OWN rendering process produced —
     // reachability DCE and the name-section trim already ran inside that
@@ -586,8 +642,8 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
     let trust = if structural { "trusted, certificate pending" } else { "verified" };
     if !wasm_opt {
         err(&format!(
-            "Built {} ({} bytes, {}, {} — wasm-opt skipped; pass --wasm-opt for a smaller build rewritten outside the renderer)",
-            output, pre_size, leg, trust
+            "Built {}{} ({} bytes, {}, {} — wasm-opt skipped; pass --wasm-opt for a smaller build rewritten outside the renderer)",
+            output, host_note, pre_size, leg, trust
         ));
         return;
     }
@@ -596,8 +652,8 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
         Ok(post_size) => {
             let pct = if pre_size > 0 { 100.0 * (pre_size - post_size) as f64 / pre_size as f64 } else { 0.0 };
             err(&format!(
-                "Built {} ({} bytes → {} bytes, -{:.1}%, {}) — wasm-opt applied: these are NOT the renderer's own bytes",
-                output, pre_size, post_size, pct, leg
+                "Built {}{} ({} bytes → {} bytes, -{:.1}%, {}) — wasm-opt applied: these are NOT the renderer's own bytes",
+                output, host_note, pre_size, post_size, pct, leg
             ));
         }
         Err(why) => {
@@ -1248,6 +1304,13 @@ fn render_wasm_module(source_text: &str, v1_self_modules: &[(String, almide_lang
 }
 
 pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified: bool, library_ok: bool, embedded_leg: bool) -> Result<(Vec<u8>, bool, Vec<i32>), ()> {
+    compile_to_wasm_bytes_surfaced(file, allow_unverified, verified, library_ok, embedded_leg).map(|(b, s, o, _)| (b, s, o))
+}
+
+/// [`compile_to_wasm_bytes`] plus the program's host-visible surface (the
+/// `pub fn` exports, the `@extern(wasm, ..)` imports, whether `main` exists),
+/// read from the IR before routing — what `--host js` marshals (#2265).
+pub(crate) fn compile_to_wasm_bytes_surfaced(file: &str, allow_unverified: bool, verified: bool, library_ok: bool, embedded_leg: bool) -> Result<(Vec<u8>, bool, Vec<i32>, crate::cli::js_host::HostSurface), ()> {
     let (mut program, source_text, mut resolved, dep_paths) = parse_and_resolve_wasm(file)?;
 
     // v1 `--verified`: capture the FRESH (un-inferred) cross-module siblings now, before the loop
@@ -1271,6 +1334,7 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
     // export mode yet (#1598's sibling surface), so those modules stay on
     // the incumbent leg.
     let has_exports = ir_program.functions.iter().any(|f| !f.export_attrs.is_empty());
+    let surface = crate::cli::js_host::HostSurface::of(&ir_program);
     // #1921 CLOSED: the module-level host-variant import scan is GONE. Host
     // routing is decided from the EMITTED op set, not from import names:
     // the structural leg lowers the program, and `render_wasm_module_routed`
@@ -1309,6 +1373,7 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
         &dep_paths,
         has_exports,
     )
+    .map(|(b, s, o)| (b, s, o, surface))
 }
 
 /// Best-effort map of a validation-error byte offset to the function that
