@@ -68,7 +68,21 @@ effect fn main() -> Unit = {
 }
 ```
 
-回帰テスト: `spec/lang/explicit_propagation_test.almd`
+`-> Unit` の effect fn の**末尾**(fn 本体の末尾、`if` の両枝、`match` の各 arm、
+`guard` の else)に置かれた effect call も同じ E042 だが、意味が違う: 末尾の値は
+fn の値なので、その Result は fn 自身のエラーチャネルからそのまま出て行く(捨てられ
+ない — codegen は `Ok(call?)` を出す)。伝搬は起きているが綴られていないのが問題で、
+メッセージもそう言う(#2277)。`expr!` を書けば同じ挙動が見える形になる:
+
+```almide check-fail=E042
+effect fn say(s: String) -> Unit = println(s)
+
+effect fn run(cmd: String) -> Unit =
+  if cmd == "a" then say("x")   // E042: 末尾の Result が暗黙に伝搬 — `say("x")!` と綴る
+  else say("y")!
+```
+
+回帰テスト: `spec/lang/explicit_propagation_test.almd`、`tests/diagnostics/e042-tail-call-in-branches/`
 
 ## 4. `!` 演算子
 
