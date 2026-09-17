@@ -100,6 +100,7 @@ fn unsup<T>(what: &str) -> Result<T, EmitError> {
 }
 
 mod bytes;
+mod imports;
 mod param_borrow;
 mod bytes_rw;
 mod bytes_recv;
@@ -543,6 +544,10 @@ struct FnInfo {
     /// releases) or only borrow it (neither) — param_borrow.rs (#2028).
     /// Both sides of every call edge read this one vector.
     param_owned: Vec<bool>,
+    /// `@extern(wasm, module, name)` (#2275): the slot is a declared import
+    /// the host serves, not a body — its stub leaves the module in the
+    /// `imports::declare` post-pass.
+    import: Option<(String, String)>,
 }
 
 struct FnTable {
