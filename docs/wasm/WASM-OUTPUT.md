@@ -150,6 +150,54 @@ every program that compiles for both targets produces **byte-identical
 stdout/stderr/exit code** native ⇄ wasm, tracked contract-by-contract in
 [docs/contracts/](../contracts).
 
+## JS host (`--host js`, #2265)
+
+`almide build app.almd --target wasm --host js -o dist/app.wasm` writes
+`dist/app.js` and `dist/app.d.ts` next to the module — the host glue the
+compiler already has every fact to write, so the artifact runs in a page or
+under node without a hand-written WASI stub, import object or String
+marshalling. `app.js` is a dependency-free ES module:
+
+- `init(source?, hooks?)` compiles and instantiates. `source` may be omitted
+  (the `.wasm` next to the `.js` is loaded: `fs.readFile` under node, `fetch`
+  in a page), or be bytes, a `Response`, a promise of either, or a compiled
+  `WebAssembly.Module`. `hooks.stdout` / `hooks.stderr` receive raw
+  `Uint8Array` chunks (default: `process.stdout` under node, `console.log`
+  per line in a page).
+- Only the `wasi_snapshot_preview1` imports the module actually names are
+  shimmed (`fd_write`, `proc_exit` → a thrown `AlmideExit`, the clock /
+  random / read floor). Nothing else is linked, so nothing else is stubbed.
+- `@extern(wasm, "js", "name")` imports are wired through
+  `init(source, { js: { name } })`; a `String` argument is decoded from the
+  block header before the user function runs, a `String` return is encoded
+  into a fresh block the guest owns. The structural leg has no extern-import
+  lowering yet, so such a program renders on the incumbent leg — the
+  `// @leg: incumbent` line of `spec/wasm_host_js/extern_js.almd` is the
+  ratchet row that makes a route change visible.
+- Every `pub fn` gets a wrapper: `Int` ↔ `number` (a `RangeError` outside
+  ±2^53 rather than a silent truncation — pass a `BigInt`-aware hook to keep a
+  wider value exact), `Float`, `Bool`, `String`, `Unit`. Any other type on the
+  boundary is a build-time refusal naming the function and the type (lists,
+  records and variants are the next step, following the bindgen table).
+- `main` is `run()`; `_start` is not called by `init`.
+
+String marshalling reads the block layout both legs share (`almide-layout`:
+rc @0, len @4, cap @8, payload @12) and the module's own signatures for the
+valtype of each slot (`Bool` is `i32` on the structural leg and `i64` on the
+incumbent). A block the host builds goes through the module's exported
+allocator (`__alloc`) and a block the host takes out is released through its
+exported release (`__release`); both exports exist only under `--host js`,
+so every other build keeps its bytes. The structural leg also records which
+exported params the callee owns, so the host releases exactly the credits
+it still holds; the incumbent's callees borrow every param.
+
+Gate: `scripts/check-js-host.sh` builds every `spec/wasm_host_js/*.almd`
+with `--host js`, runs it under node, byte-compares stdout to
+`<fixture>.expected`, runs the fixture's `<fixture>.host.mjs` (the `js`
+hooks and an `after(module)` exercising the wrappers), and for a fixture
+without `@extern` also compares the native binary's stdout. CI runs it in
+the `checks` job.
+
 ## Reproducing the measurements
 
 ```bash
