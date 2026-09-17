@@ -38,9 +38,14 @@ fn host_js_writes_the_module_the_glue_and_the_typings() {
     assert!(js.contains("export function greet(n)") && js.contains("export function shout(s)"), "{js}");
     assert!(js.contains("jsImports.js_log = (a0) =>") && js.contains("readString(a0)"), "{js}");
     assert!(js.contains("wasiImports.fd_write = wasi.fd_write"), "{js}");
-    // A String parameter goes in through the module's allocator; the
-    // incumbent's callee borrows it, so the host releases after the call.
-    assert!(js.contains("const h0 = allocString(s);") && js.contains("instance.exports.__release(h0);"), "{js}");
+    // A String parameter goes in through the module's allocator. On the
+    // structural leg (#2275: the extern import no longer routes the program
+    // to the incumbent) ownership is per fn: `shout` hands `s` to
+    // `string.to_upper`, so the callee owns the block and the host does not
+    // release it after the call.
+    assert!(line.contains("structural leg"), "{line}");
+    assert!(js.contains("const h0 = allocString(s);"), "{js}");
+    assert!(js.contains("takeString(instance.exports.shout(h0))") && !js.contains("__release(h0)"), "{js}");
     assert!(dts.contains("export function greet(n: number): number;"), "{dts}");
     assert!(dts.contains("export function shout(s: string): string;"), "{dts}");
     assert!(dts.contains("js_log: (msg: string) => void;"), "{dts}");
@@ -102,6 +107,60 @@ fn a_boundary_type_the_host_cannot_marshal_is_refused_by_name() {
     // The same program builds without the switch: the refusal is the host's, not the module's.
     let (ok, stderr) = build(dir.path(), UNMARSHALLABLE, &["--target", "wasm", "-o", "app.wasm"]);
     assert!(ok, "{stderr}");
+}
+
+/// `@extern(wasm, module, name)` on the structural leg (#2275): the fn is a
+/// declared import of the module (no body, no stub), calls reach it by
+/// index, and the JS host serves it from `init({ js: { name } })`.
+#[test]
+fn a_wasm_extern_is_a_declared_import_of_the_structural_module() {
+    let dir = tempfile::tempdir().unwrap();
+    let (ok, stderr) = build(dir.path(), PROGRAM, &["--target", "wasm", "-o", "app.wasm"]);
+    assert!(ok, "{stderr}");
+    assert!(stderr.contains("structural leg"), "{stderr}");
+    let wasm = std::fs::read(dir.path().join("app.wasm")).unwrap();
+    let mut imports: Vec<(String, String)> = Vec::new();
+    let mut defined = 0usize;
+    for payload in wasmparser::Parser::new(0).parse_all(&wasm) {
+        match payload.unwrap() {
+            wasmparser::Payload::ImportSection(r) => {
+                for i in r.into_imports() {
+                    let i = i.unwrap();
+                    imports.push((i.module.to_string(), i.name.to_string()));
+                }
+            }
+            wasmparser::Payload::FunctionSection(r) => defined = r.count() as usize,
+            _ => {}
+        }
+    }
+    assert!(imports.contains(&("js".to_string(), "js_log".to_string())), "{imports:?}");
+    // The WASI imports come first; the program's own import follows them.
+    let pos = imports.iter().position(|(m, _)| m == "js").unwrap();
+    assert!(imports[..pos].iter().all(|(m, _)| m == "wasi_snapshot_preview1"), "{imports:?}");
+    assert!(defined > 0);
+    // `almide run --target wasm` has no host for it and says so, instead of
+    // wasmtime's "unknown import" at instantiation.
+    let out = Command::new(almide()).current_dir(dir.path()).args(["run", "main.almd", "--target", "wasm"]).output().unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success() && stderr.contains("imports `js.js_log`") && stderr.contains("--host js"), "{stderr}");
+}
+
+const NATIVE_EXTERN: &str = "@extern(rs, \"fast_lib\", \"reverse_it\")\nfn reverse_it(s: String) -> String\n\nfn main() -> Unit = println(reverse_it(\"abc\"))\n";
+
+/// A native (`rs`) extern has no wasm host: the wasm build refuses on both
+/// legs instead of emitting a hollow import.
+#[test]
+fn a_native_extern_is_refused_on_the_wasm_target() {
+    let dir = tempfile::tempdir().unwrap();
+    let (ok, stderr) = build(dir.path(), NATIVE_EXTERN, &["--target", "wasm", "-o", "app.wasm"]);
+    assert!(!ok, "a native extern must not build for wasm:\n{stderr}");
+    assert!(!dir.path().join("app.wasm").exists(), "a refused build writes nothing");
+    let (ok, stderr) = build(dir.path(), NATIVE_EXTERN, &["--target", "wasm", "-o", "app.wasm"]);
+    let _ = (ok, stderr);
+    // The structural leg names the wall: ALMIDE_WASM_STRUCTURAL turns the reroute into the reason.
+    let out = Command::new(almide()).current_dir(dir.path()).env("ALMIDE_WASM_STRUCTURAL", "1").args(["build", "main.almd", "--target", "wasm", "-o", "app.wasm"]).output().unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success() && stderr.contains("extern-native:reverse_it"), "{stderr}");
 }
 
 #[test]

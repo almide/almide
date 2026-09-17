@@ -1,0 +1,27 @@
+// @leg: structural
+// One import per host-ABI signature class (#2275): Float in and out (f64),
+// Bool in and out (i32), a Unit result, a String argument (borrowed: the host
+// reads it, releases nothing) and a String result (a fresh block the guest
+// owns and releases). Every value crosses the boundary in the scalar ABI the
+// structural leg uses for exports.
+@extern(wasm, "js", "js_half")
+fn js_half(x: Float) -> Float
+
+@extern(wasm, "js", "js_not")
+fn js_not(b: Bool) -> Bool
+
+@extern(wasm, "js", "js_note")
+fn js_note(tag: String, n: Int) -> Unit
+
+@extern(wasm, "js", "js_repeat")
+fn js_repeat(s: String, n: Int) -> String
+
+fn twice(s: String) -> String = js_repeat(s, 2)
+
+fn main() -> Unit = {
+  println(float.to_string(js_half(5.0)))
+  println(if js_not(false) then "flipped" else "kept")
+  js_note("count", 3)
+  println(twice("ab") + "|" + js_repeat("x", 4))
+  println(int.to_string(string.len(twice("héllo"))))
+}
