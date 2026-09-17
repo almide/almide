@@ -15,8 +15,11 @@
 //!
 //! The one way a borrow could still be wrong is a callback (or a fold seed)
 //! that MUTATES the same variable while the chain walks it, so that is
-//! exactly the condition checked — on the final chain, after any merge.
-//! Runs after `CloneInsertion`, where the `Clone` comes from.
+//! exactly the condition checked — on the final chain, after any merge. A
+//! shared cell (`var` captured and written, `shared_mut_vars`) is exempt:
+//! the chain reads it through the cell's snapshot (`.get()`), never a live
+//! borrow, so the write cannot reach the walk. Runs after `CloneInsertion`,
+//! where the `Clone` comes from.
 
 use std::collections::HashSet;
 
@@ -38,17 +41,18 @@ impl NanoPass for ChainSourceBorrowPass {
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         let mut changed = false;
         let none = HashSet::new();
+        let cells = program.codegen_annotations.shared_mut_vars.clone();
         for f in &mut program.functions {
             let slices = slice_params(&f.params);
-            changed |= borrow_sources(&mut f.body, &slices);
+            changed |= borrow_sources(&mut f.body, &slices, &cells);
         }
-        for tl in &mut program.top_lets { changed |= borrow_sources(&mut tl.value, &none); }
+        for tl in &mut program.top_lets { changed |= borrow_sources(&mut tl.value, &none, &cells); }
         for m in &mut program.modules {
             for f in &mut m.functions {
                 let slices = slice_params(&f.params);
-                changed |= borrow_sources(&mut f.body, &slices);
+                changed |= borrow_sources(&mut f.body, &slices, &cells);
             }
-            for tl in &mut m.top_lets { changed |= borrow_sources(&mut tl.value, &none); }
+            for tl in &mut m.top_lets { changed |= borrow_sources(&mut tl.value, &none, &cells); }
         }
         PassResult { program, changed }
     }
@@ -58,15 +62,15 @@ fn slice_params(params: &[IrParam]) -> HashSet<VarId> {
     params.iter().filter(|p| p.borrow == ParamBorrow::RefSlice).map(|p| p.var).collect()
 }
 
-fn borrow_sources(body: &mut IrExpr, slices: &HashSet<VarId>) -> bool {
-    struct V<'a> { slices: &'a HashSet<VarId>, changed: bool }
+fn borrow_sources(body: &mut IrExpr, slices: &HashSet<VarId>, cells: &HashSet<VarId>) -> bool {
+    struct V<'a> { slices: &'a HashSet<VarId>, cells: &'a HashSet<VarId>, changed: bool }
     impl IrMutVisitor for V<'_> {
         fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
             walk_expr_mut(self, expr);
-            self.changed |= borrow_source(expr, self.slices);
+            self.changed |= borrow_source(expr, self.slices, self.cells);
         }
     }
-    let mut v = V { slices, changed: false };
+    let mut v = V { slices, cells, changed: false };
     v.visit_expr_mut(body);
     v.changed
 }
@@ -81,7 +85,7 @@ fn root(e: &IrExpr) -> Option<VarId> {
     }
 }
 
-fn borrow_source(expr: &mut IrExpr, slices: &HashSet<VarId>) -> bool {
+fn borrow_source(expr: &mut IrExpr, slices: &HashSet<VarId>, cells: &HashSet<VarId>) -> bool {
     let IrExprKind::IterChain { source, consume, steps, collector } = &mut expr.kind else { return false };
     if !*consume {
         return false;
@@ -95,8 +99,9 @@ fn borrow_source(expr: &mut IrExpr, slices: &HashSet<VarId>) -> bool {
         IterCollector::Fold { init, .. } => Some(&**init),
         _ => None,
     };
-    let writes_source = steps.iter().filter_map(IterStep::lambda).chain(collector.lambda()).chain(init)
-        .any(|e| written_vars(e).contains(&id));
+    let writes_source = !cells.contains(&id)
+        && steps.iter().filter_map(IterStep::lambda).chain(collector.lambda()).chain(init)
+            .any(|e| written_vars(e).contains(&id));
     if writes_source {
         return false;
     }
