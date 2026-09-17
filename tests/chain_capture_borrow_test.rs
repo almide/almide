@@ -71,7 +71,7 @@ fn an_inlined_chain_callback_borrows_the_param_it_reads() {
         ("filtered", "pub fn filtered(t: &Table, k: i64)"),
         ("folded", "pub fn folded(t: &Table)"),
         ("any_long", "pub fn any_long(t: &Table, k: i64)"),
-        ("sliced", "pub fn sliced(xs: &[i64], ys: Vec<i64>)"),
+        ("sliced", "pub fn sliced(xs: &[i64], ys: &[i64])"),
         ("prefixed", "pub fn prefixed(p: &str, xs: Vec<String>)"),
     ] {
         let s = fn_sig_and_body(&rust, name);
@@ -83,11 +83,12 @@ fn an_inlined_chain_callback_borrows_the_param_it_reads() {
     // the param is owned or not, so the param stays borrowed.
     let s = fn_sig_and_body(&rust, "each");
     assert!(s.starts_with("pub fn each(t: &Table)") && s.contains("t.clone()"), "{s}");
-    // A single-use local consumed inside a chain step (the source of a
-    // nested chain) is cloned there: the step runs per element, and a move
-    // out of a captured variable is E0507 (tools/almide-gates hit it).
+    // A single-use local read inside a chain step (the source of a nested
+    // chain whose predicate only compares) is borrowed there — never moved:
+    // the step runs per element, and a move out of a captured variable is
+    // E0507 (tools/almide-gates hit it).
     let s = fn_sig_and_body(&rust, "counts");
-    assert!(s.contains("(all).iter().cloned()") || s.contains("all.clone()"), "the captured local must not move:\n{s}");
+    assert!(s.contains("(all).iter()") || s.contains("all.clone()"), "the captured local must not move:\n{s}");
     // A closure that outlives its call captures, and the capture owns.
     assert!(fn_sig_and_body(&rust, "saved").starts_with("pub fn saved(t: Table)"), "{}", fn_sig_and_body(&rust, "saved"));
     assert!(fn_sig_and_body(&rust, "applied").starts_with("pub fn applied(t: Table)"), "{}", fn_sig_and_body(&rust, "applied"));

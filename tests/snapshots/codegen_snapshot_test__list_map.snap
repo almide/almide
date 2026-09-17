@@ -377,6 +377,6 @@ pub fn almide_rt_list_binary_search(xs: &[i64], target: i64) -> Option<i64> {
 }
 
 //__ALMIDE_RT_BOUNDARY__
-pub fn doubles(xs: Vec<i64>) -> Vec<i64> {
-    (xs).into_iter().map(|x| (x).wrapping_mul(2i64)).collect::<Vec<_>>()
+pub fn doubles(xs: &[i64]) -> Vec<i64> {
+    (xs).iter().cloned().map(|x| (x).wrapping_mul(2i64)).collect::<Vec<_>>()
 }
