@@ -374,6 +374,20 @@ first draft) raised the count of all five pinned programs. A `mut` param is
 `&mut T` for its whole body and takes the same site-level clone at every
 by-value position (#2266).
 
+A **variant** param (`s: Shape`) follows the same policy, with one rule for its
+`match`: the subject position reads the param by reference when every binder
+the arms introduce is only READ — a `Copy` scalar, or a heap payload whose
+every occurrence is a non-consuming position (a borrowed argument, a member
+read, a comparison, an interpolation part, the subject of a further match).
+The arms then bind `&T` payloads (Rust's default binding modes: a scalar read
+derefs, a `&b` of a heap payload is the naked binder, a boxed payload matches
+again as `&**b`), and no caller clones the value to pass it. One payload
+returned, concatenated, built into a value, captured or handed to an owned slot
+keeps the param owned: matching by value moves that payload out for free where
+a borrowed match would clone it. The ownership certifier's C4 reads the same
+predicate, so an owned variant param whose matches only read is a named defect
+(`tests/variant_param_borrowed_test.rs`).
+
 A param that is owned costs every caller that still needs its value a clone; a
 borrowed param costs nothing at the call. Whether a fn ends up `&T` or `T` is
 visible in the emitted Rust (`almide app.almd --target rust`), and the
