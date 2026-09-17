@@ -135,6 +135,10 @@ pub(crate) struct Parsed<'a> {
     /// (the #1688 silent-corruption class — a verbatim roundtrip under a
     /// nonzero shift retargets every closure).
     pub(crate) elements: Vec<wasmparser::Element<'a>>,
+    /// Function imports past the five `almide.*` ones — the program's
+    /// `@extern(wasm, module, name)` declarations (#2275), carried through
+    /// verbatim behind the WASI imports: `(module, name, type index)`.
+    pub(crate) foreign_imports: Vec<(String, String, u32)>,
     pub(crate) data: DataSection,
     pub(crate) bodies: Vec<wasmparser::FunctionBody<'a>>,
 }
@@ -201,6 +205,7 @@ pub(crate) fn parse_module(bytes: &[u8]) -> anyhow::Result<Parsed<'_>> {
         exports: Vec::new(),
         main_index: None,
         elements: Vec::new(),
+        foreign_imports: Vec::new(),
         data: DataSection::new(),
         bodies: Vec::new(),
     };
@@ -215,6 +220,16 @@ pub(crate) fn parse_module(bytes: &[u8]) -> anyhow::Result<Parsed<'_>> {
                             .collect()
                     };
                     p.types.push((conv(ft.params()), conv(ft.results())));
+                }
+            }
+            Payload::ImportSection(r) => {
+                for i in r.into_imports() {
+                    let i = i?;
+                    if let wasmparser::TypeRef::Func(ti) = i.ty
+                        && i.module != "almide"
+                    {
+                        p.foreign_imports.push((i.module.to_string(), i.name.to_string(), ti));
+                    }
                 }
             }
             Payload::FunctionSection(r) => {
@@ -312,6 +327,7 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
         exports: export_rows,
         main_index,
         elements,
+        foreign_imports,
         mut data,
         bodies,
     } = parsed;
@@ -320,9 +336,11 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     // The base five WASI imports replace the five almide.* ones; the
     // environ/args pairs (#1716) are appended only for the services the
     // op set reaches (#1841), so every non-import index shifts by the
-    // number of pairs shipped (0, 2 or 4).
-    let imports_count: u32 = 5 + services.extra_imports();
-    let shift: u32 = imports_count - 5;
+    // number of pairs shipped (0, 2 or 4). The program's own imports
+    // (#2275) follow the WASI ones in their original order, so they move
+    // by the same delta as every defined function.
+    let shift: u32 = services.extra_imports();
+    let imports_count: u32 = 5 + shift + foreign_imports.len() as u32;
     let shim_base = imports_count + func_types.len() as u32;
     // The park CANNOT live past the current memory end — the bump heap
     // grows there. It takes over the ORIGINAL heap base instead, and
@@ -399,6 +417,10 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
         next_import += 2;
         (next_import - 2, next_import - 1)
     });
+    for (module, name, ti) in &foreign_imports {
+        imports.import(module, name, EntityType::Function(*ti));
+        next_import += 1;
+    }
     debug_assert_eq!(next_import, imports_count);
 
     let mut functions = FunctionSection::new();
