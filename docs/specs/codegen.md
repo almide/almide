@@ -112,10 +112,14 @@ pub trait NanoPass: std::fmt::Debug {
 Passes compose into a `Pipeline`. The pipeline runner:
 - Skips passes not relevant to the current target
 - Validates declared dependencies (panics if a dependency has not executed)
-- Verifies IR integrity and declared `Postcondition`s between passes on every
-  build — violations panic in debug and print as diagnostics in release. No
-  opt-in env var (`ALMIDE_CHECK_IR` / `ALMIDE_VERIFY_IR` removed in
-  v0.14.7-phase3.2); `expr.ty` is trustworthy by contract
+- Verifies IR integrity and every established `Postcondition` after EVERY
+  pass in EVERY profile — a violation is a compiler bug and fails the build,
+  release included. The per-pass walk used to be debug-only (`ALMIDE_VERIFY_IR`
+  opted a release build in) on a stale cost claim of ~1.2 s per file; measured
+  over the 218 files of spec/lang it is ~8 ms per file, so the profile that
+  ships now runs the same walk as `cargo test`. `ALMIDE_IR_FAULT=<pass>`
+  (harness switch) injects a violation after the named pass, the release
+  binary's negative control (`tests/ir_verify_every_profile_test.rs`)
 
 ### Rust Pipeline (in order)
 
@@ -341,6 +345,40 @@ fn main() =
 // Output includes list runtime functions (almide_rt_list_*)
 // but NOT string, map, json, etc.
 ```
+
+### Parameter passing on the native target
+
+**Source**: `pass_borrow_inference_ownership.rs` (`param_borrow`), `pass_borrow_lowering.rs`.
+
+A non-`mut` param of a borrow-eligible type (`String`, `List[T]`, a record) is
+passed **by reference** (`&str` / `&[T]` / `&T`) unless the body needs the value
+owned. The body needs it owned when it:
+
+- returns the param, concatenates it, builds it into a record / list / tuple
+  literal, matches on it, iterates it by value, or seeds a fold with it;
+- captures it in a closure (closures capture through `Rc<dyn Fn>`, which cannot
+  hold a borrow — the capture is a move, or a clone when the param is read again);
+- hands it to a **stdlib** slot that consumes (`list.map`'s list, `list.push`'s
+  element): those lower into chains and runtime calls that take the value.
+
+Handing the param bare to a callee's owned slot (`stored(t, 1)` where `stored`
+keeps `t` in a record) makes the param owned only when that site is the
+param's LAST use: ownership then buys a move, and a caller that still needs
+its value clones once. When the param is read again after the site (`{ let h
+= stored(t, 1); h.n + plain(t) }`), the site is cloned whether or not the
+param is owned — so the param stays `&T` and that one site owns its read
+(`stored(t.clone(), 1)`): one clone at the site, none at any caller. The
+allocation ledger (`tests/native_borrow_oracle_test.rs`) pins the
+alternative's cost: cloning at every such site regardless of liveness (#2278's
+first draft) raised the count of all five pinned programs. A `mut` param is
+`&mut T` for its whole body and takes the same site-level clone at every
+by-value position (#2266).
+
+A param that is owned costs every caller that still needs its value a clone; a
+borrowed param costs nothing at the call. Whether a fn ends up `&T` or `T` is
+visible in the emitted Rust (`almide app.almd --target rust`), and the
+ownership certifier (`ALMIDE_CERTIFY_OWNERSHIP=report`) names a param owned
+that no occurrence needs owned.
 
 ### Effect Functions
 

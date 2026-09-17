@@ -275,7 +275,7 @@ fn reconcile_binop_to_int(op: BinOp) -> Option<BinOp> {
 // Two consumers share one collector ([`collect_unresolved_sites`]):
 //
 //   1. The `ConcretizeTypes` postcondition ([`audit_remaining_unresolved`]),
-//      verified mid-pipeline in debug / `ALMIDE_VERIFY_IR` builds.
+//      verified mid-pipeline after every pass, in every profile.
 //   2. The HARD codegen-entry gate ([`assert_types_concretized`]), run
 //      unconditionally on EVERY build (debug AND release, Rust AND WASM)
 //      right before emit. A surviving `Ty::Unknown` (or a value-position
