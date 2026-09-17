@@ -94,6 +94,12 @@ fn emit_program_pass(
             Ok((p, r)) => (p, r, None),
             Err(reason) => (Vec::new(), None, Some(reason)),
         };
+        // #2275: a body-less `@extern` is a declared import on the wasm
+        // target, or a wall — never a hollow body.
+        let (import, refuse) = match extern_import(f, &params, ret) {
+            Ok(import) => (import, refuse),
+            Err(reason) => (None, refuse.or(Some(reason))),
+        };
         let key = qual.clone().unwrap_or_else(|| f.name.as_str().to_string());
         // impl_index carries ONLY registry implementation symbols — a
         // global simple-name index over ALL module fns collides across
@@ -103,7 +109,7 @@ fn emit_program_pass(
             table.impl_index.insert(f.name.as_str().to_string(), i);
         }
         table.by_name.insert(key, i);
-        table.infos.push(FnInfo { wasm_index: F_FN_BASE + i as u32, params, ret, refuse, param_owned: Vec::new() });
+        table.infos.push(FnInfo { wasm_index: F_FN_BASE + i as u32, params, ret, refuse, param_owned: Vec::new(), import });
     }
     // Which params each callee owns (#2028): computed once, over the whole
     // table, before any body lowers — the call sites and the exit plans
@@ -141,6 +147,13 @@ fn emit_program_pass(
     for (i, (f, qual, space)) in program_fns.iter().enumerate() {
         if let Some(r) = &table.infos[i].refuse {
             lowered.push(Err(r.clone()));
+            continue;
+        }
+        if table.infos[i].import.is_some() {
+            // A declared import's slot: the loud stub the post-pass removes.
+            let mut stub = Function::new([]);
+            stub.instructions().unreachable().end();
+            lowered.push(Ok((stub, HashSet::new())));
             continue;
         }
         let params: Vec<(VarId, SliceTy)> =
@@ -381,6 +394,43 @@ fn emit_program_pass(
         true_base,
         false_base,
     })?;
+    // #2275: the extern stubs become declared imports of the finished bytes.
+    let declared: Vec<imports::Declared> = table
+        .infos
+        .iter()
+        .filter_map(|info| {
+            let (module, name) = info.import.clone()?;
+            Some(imports::Declared { index: info.wasm_index, module, name })
+        })
+        .collect();
+    let bytes = imports::declare(&bytes, &declared).map_err(|e| EmitError::Unsupported(format!("extern-import:{e}")))?;
     let host_ops = work.host_ops.borrow().clone();
     Ok((bytes, visited, total, host_ops))
+}
+
+/// The `@extern(wasm, module, name)` import a body-less fn declares (#2275):
+/// `Ok(Some((module, name)))` when its signature has the scalar host ABI
+/// (`Int`/sized ints → i64, `Float` → f64, `Bool` → i32, `String` → i32
+/// block, `Unit` → no result); `Ok(None)` for a fn with a body; `Err` for a
+/// native (`rs`/`rust`) extern — there is no wasm host for it, so an import
+/// would be a hollow lie — and for a param or return outside the ABI.
+fn extern_import(f: &IrFunction, params: &[SliceTy], ret: Option<SliceTy>) -> Result<Option<(String, String)>, String> {
+    if f.extern_attrs.is_empty() {
+        return Ok(None);
+    }
+    let Some(a) = f.extern_attrs.iter().find(|a| a.target.as_str() == "wasm") else {
+        return Err(format!("extern-native:{}", f.name));
+    };
+    if !matches!(f.body.kind, IrExprKind::Hole) {
+        return Ok(None);
+    }
+    for (p, t) in f.params.iter().zip(params) {
+        if !matches!(t, SliceTy::Scalar(_)) {
+            return Err(format!("extern-ty:{}:{}", f.name, p.name));
+        }
+    }
+    if !matches!(ret, None | Some(SliceTy::Scalar(_))) {
+        return Err(format!("extern-ret:{}", f.name));
+    }
+    Ok(Some((a.module.as_str().to_string(), a.function.as_str().to_string())))
 }
