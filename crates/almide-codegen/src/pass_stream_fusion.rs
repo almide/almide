@@ -473,7 +473,7 @@ fn source_of(arg: IrExpr, symbol: &str, sigs: &std::collections::HashMap<String,
 /// Does the twin `symbol` take its list slot by value? An unknown symbol
 /// consumes (the runtime default).
 fn slot_consumes(symbol: &str, sigs: &std::collections::HashMap<String, Vec<ParamBorrow>>) -> bool {
-    sigs.get(symbol).map_or(true, |modes| modes.first().is_none_or(|m| *m == ParamBorrow::Own))
+    sigs.get(symbol).is_none_or(|modes| modes.first().is_none_or(|m| *m == ParamBorrow::Own))
 }
 
 fn chain(expr: &IrExpr, source: IrExpr, consume: bool, steps: Vec<IterStep>, collector: IterCollector) -> IrExpr {
