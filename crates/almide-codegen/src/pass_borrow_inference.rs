@@ -513,11 +513,11 @@ pub fn commit_chain_source_modes(program: &mut IrProgram, sigs: &HashMap<String,
         let mut c = Commit { scope: Scope { round: &round, module, current_fn: name } };
         c.visit_expr_mut(body);
     };
-    for f in &mut program.functions { commit_fn(&mut f.body, None, &f.name.to_string()); }
+    for f in &mut program.functions { commit_fn(&mut f.body, None, f.name.as_str()); }
     for tl in &mut program.top_lets { commit_fn(&mut tl.value, None, ""); }
     for m in &mut program.modules {
         let module = m.name.to_string();
-        for f in &mut m.functions { commit_fn(&mut f.body, Some(&module), &f.name.to_string()); }
+        for f in &mut m.functions { commit_fn(&mut f.body, Some(&module), f.name.as_str()); }
         for tl in &mut m.top_lets { commit_fn(&mut tl.value, Some(&module), ""); }
     }
 }
