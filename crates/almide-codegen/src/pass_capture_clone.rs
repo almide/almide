@@ -55,13 +55,10 @@ impl NanoPass for CaptureClonePass {
         // skips for `Copy` — `shared_mut` forces it, and `wrap_lambda_with_clones`
         // adds the `__cap` renames to the set so their reads/writes are cells too.
         let shared_mut = detect_shared_mut(&program);
-        let borrowed_folds = borrowed_fold_params(&program, &shared_mut);
-        lower_borrowed_folds(&mut program, &borrowed_folds);
-        program.codegen_annotations.borrowed_lambda_params.extend(borrowed_folds.iter().copied());
         for v in &shared_mut { program.codegen_annotations.shared_mut_vars.insert(*v); }
-        let mut facts = Facts { param_borrows: HashMap::new(), shared_mut, borrowed_folds, capture_uses: bindings::CaptureUses::default() };
+        let mut facts = Facts { param_borrows: HashMap::new(), shared_mut, capture_uses: bindings::CaptureUses::default() };
 
-        let mut changed = !program.codegen_annotations.borrowed_lambda_params.is_empty();
+        let mut changed = false;
         let IrProgram { functions, modules, var_table, codegen_annotations, .. } = &mut program;
         let module_fns = modules.iter_mut().flat_map(|m| m.functions.iter_mut());
         for func in functions.iter_mut().chain(module_fns) {
@@ -93,9 +90,6 @@ struct Facts {
     /// renames). Seeded by `detect_shared_mut`, extended by `capture_bindings`.
     /// (Closure v2, P3.)
     shared_mut: HashSet<VarId>,
-    /// First params of the fold closures whose captures stay borrowed
-    /// (`borrowed_fold_params`): those lambdas get no pre-clone wrap.
-    borrowed_folds: HashSet<VarId>,
     /// Per var of the current fn: every occurrence with the lambda and the
     /// statement it sits in, and whether the var is clean — what the
     /// capture-move rule reads (`bindings::capture_moves`, #2231: the Perceus
@@ -323,6 +317,10 @@ fn transform_string_parts(parts: &mut [IrStringPart], cx: &mut Cx, scope_vars: &
 // compile (E0382). Recurse into the source and every embedded lambda.
 // `replace_vars` already mirrors this shape, so a wrapped lambda's `__cap`
 // renames carry through correctly.
+/// A chain's step / collector lambdas are scopes, not closures (`Use::depth`):
+/// they render without `move` and borrow what they read for the chain's
+/// duration, so they get NO pre-clone wrap — only their bodies are walked,
+/// for the closures nested inside them.
 fn transform_expr_iter_chain(expr: &mut IrExpr, cx: &mut Cx, scope_vars: &HashSet<VarId>) -> bool {
     let IrExprKind::IterChain { source, steps, collector, .. } = &mut expr.kind else { unreachable!() };
     let mut changed = transform_expr(source, cx, scope_vars);
@@ -330,7 +328,7 @@ fn transform_expr_iter_chain(expr: &mut IrExpr, cx: &mut Cx, scope_vars: &HashSe
         match step {
             IterStep::Map { lambda } | IterStep::Filter { lambda }
             | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => {
-                changed |= transform_expr(lambda, cx, scope_vars);
+                changed |= transform_chain_lambda(lambda, cx, scope_vars);
             }
             IterStep::Take { n } => changed |= transform_expr(n, cx, scope_vars),
             IterStep::Enumerate => {}
@@ -340,14 +338,23 @@ fn transform_expr_iter_chain(expr: &mut IrExpr, cx: &mut Cx, scope_vars: &HashSe
         IterCollector::Collect | IterCollector::Sum { .. } | IterCollector::Len => {}
         IterCollector::Fold { init, lambda } => {
             changed |= transform_expr(init, cx, scope_vars);
-            changed |= transform_expr(lambda, cx, scope_vars);
+            changed |= transform_chain_lambda(lambda, cx, scope_vars);
         }
         IterCollector::Any { lambda } | IterCollector::All { lambda }
         | IterCollector::Find { lambda } | IterCollector::Count { lambda } => {
-            changed |= transform_expr(lambda, cx, scope_vars);
+            changed |= transform_chain_lambda(lambda, cx, scope_vars);
         }
     }
     changed
+}
+
+/// The body of a chain lambda, in the lambda's scope; a non-literal callback
+/// (a stored closure value) is an ordinary expression.
+fn transform_chain_lambda(lambda: &mut IrExpr, cx: &mut Cx, scope_vars: &HashSet<VarId>) -> bool {
+    match &mut lambda.kind {
+        IrExprKind::Lambda { .. } => transform_expr_scoped(lambda, cx, scope_vars),
+        _ => transform_expr(lambda, cx, scope_vars),
+    }
 }
 
 /// The [`transform_expr`] arms whose children are not a plain list of
@@ -453,9 +460,6 @@ fn transform_expr(expr: &mut IrExpr, cx: &mut Cx, scope_vars: &HashSet<VarId>) -
 
     // Now check: is this expr itself a Lambda with captured vars that need cloning?
     if let IrExprKind::Lambda { params, body, .. } = &expr.kind {
-        if params.first().is_some_and(|(id, _)| cx.facts.borrowed_folds.contains(id)) {
-            return changed;
-        }
         let param_set: HashSet<VarId> = params.iter().map(|(v, _)| *v).collect();
         // Capture set via the single shared analysis (`almide_ir::free_vars`) — the
         // same one WASM ClosureConversion uses. Returns a VarId-sorted Vec, so the
@@ -490,7 +494,6 @@ fn transform_expr(expr: &mut IrExpr, cx: &mut Cx, scope_vars: &HashSet<VarId>) -
     changed
 }
 
-include!("pass_capture_borrow.rs");
 
 fn transform_stmt(stmt: &mut IrStmt, cx: &mut Cx, scope_vars: &HashSet<VarId>) -> bool {
     match &mut stmt.kind {

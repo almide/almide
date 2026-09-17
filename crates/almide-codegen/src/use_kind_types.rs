@@ -114,7 +114,11 @@ pub struct Use {
     /// chain this occurrence roots.
     pub chain: Option<Chain>,
     /// Lambda nesting below the analysed root: `0` outside every closure,
-    /// so `depth > 0` means the occurrence is a capture.
+    /// so `depth > 0` means the occurrence is a capture. An iterator chain's
+    /// step / collector lambda is NOT a closure here: it renders inline,
+    /// runs synchronously inside the chain and never escapes it, so its body
+    /// is walked as a scope (depth unchanged) that runs once per element
+    /// (`in_loop`) — a variable it reads is borrowed, not captured.
     pub depth: u32,
     /// Inside an iterator chain node (its source included).
     pub in_chain: bool,

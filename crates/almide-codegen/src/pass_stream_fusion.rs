@@ -89,7 +89,7 @@ impl NanoPass for StreamFusionPass {
         let purity = Purity::of(&program);
         let mut sigs = std::collections::HashMap::new();
         seed_intrinsic_sigs(&mut sigs);
-        let mut v = Fuser { purity: &purity, sigs: &sigs, changed: false, in_fan: false };
+        let mut v = Fuser { purity: &purity, sigs: &sigs, chain_params: HashSet::new(), changed: false, in_fan: false };
         for f in &mut program.functions { v.visit_expr_mut(&mut f.body); }
         for tl in &mut program.top_lets { v.visit_expr_mut(&mut tl.value); }
         for m in &mut program.modules {
@@ -97,6 +97,7 @@ impl NanoPass for StreamFusionPass {
             for tl in &mut m.top_lets { v.visit_expr_mut(&mut tl.value); }
         }
         let changed = v.changed;
+        program.codegen_annotations.borrowed_lambda_params.extend(v.chain_params);
         PassResult { program, changed }
     }
 }
@@ -370,6 +371,9 @@ fn call_ok(e: &IrExpr, cx: &Cx) -> Option<bool> {
 
 struct Fuser<'a> {
     in_fan: bool,
+    /// First param of every chain lambda this run built: published as
+    /// `borrowed_lambda_params`, the walker renders those without `move`.
+    chain_params: HashSet<VarId>,
     purity: &'a Purity,
     /// The bundled `@intrinsic` signatures: whether a twin's list slot is
     /// `@consume`d (the chain takes the source) or borrowed (`&[A]`).
@@ -421,6 +425,15 @@ fn map_lambda(callback: IrExpr, f: &dyn Fn(IrExpr) -> IrExpr) -> IrExpr {
             ty: callback.ty, span: callback.span, def_id: callback.def_id,
         },
         _ => f(callback),
+    }
+}
+
+/// The lambda node's kind, through a capture-clone block.
+fn lambda_kind(callback: &IrExpr) -> Option<&IrExprKind> {
+    match &callback.kind {
+        k @ IrExprKind::Lambda { .. } => Some(k),
+        IrExprKind::Block { expr: Some(tail), .. } => lambda_kind(tail),
+        _ => None,
     }
 }
 
@@ -513,7 +526,7 @@ fn chain(expr: &IrExpr, source: IrExpr, consume: bool, steps: Vec<IterStep>, col
 }
 
 impl<'a> Fuser<'a> {
-    fn rewrite(&self, expr: &mut IrExpr) -> Option<IrExpr> {
+    fn rewrite(&mut self, expr: &mut IrExpr) -> Option<IrExpr> {
         let IrExprKind::RuntimeCall { symbol, args } = &expr.kind else { return None };
         let op = symbol.as_str().strip_prefix("almide_rt_list_")?;
         let single = match op {
@@ -530,9 +543,16 @@ impl<'a> Fuser<'a> {
 
     /// Rewrite 1: one runtime combinator call with a lambda literal → a
     /// one-step / one-collector chain. Order-preserving by construction.
-    fn single_stage(&self, expr: &IrExpr, op: &str) -> Option<IrExpr> {
+    fn single_stage(&mut self, expr: &IrExpr, op: &str) -> Option<IrExpr> {
         let IrExprKind::RuntimeCall { args, .. } = &expr.kind else { return None };
         let callback = take_lambda(args.last()?.clone())?;
+        // The chain lambda is a scope, not a closure (`Use::depth`): it
+        // borrows what it reads, so it renders without `move`.
+        if let Some(IrExprKind::Lambda { params, .. }) = lambda_kind(&callback)
+            && let Some((first, _)) = params.first()
+        {
+            self.chain_params.insert(*first);
+        }
         let IrExprKind::RuntimeCall { symbol, .. } = &expr.kind else { return None };
         let (source, consume, prefix) = source_of(args[0].clone(), symbol.as_str(), self.sigs);
         // Rust hands `filter` / `find` / the `count` filter a `&T`; every

@@ -325,6 +325,20 @@ impl<'a> Walk<'a> {
         out
     }
 
+    /// A chain step / collector lambda: a scope that runs once per element
+    /// (see `Use::depth`), its body an arm below the current one. Anything
+    /// that is not a lambda literal (a stored closure value) is a callback.
+    fn chain_lambda(&mut self, lambda: &IrExpr) {
+        match &lambda.kind {
+            IrExprKind::Lambda { body, .. } => {
+                self.loop_depth += 1;
+                self.arm_expr(body, Site::Result);
+                self.loop_depth -= 1;
+            }
+            _ => self.expr(lambda, Site::Callback),
+        }
+    }
+
     /// Visit `e`, which sits in `site` position.
     fn expr(&mut self, e: &IrExpr, site: Site) {
         match &e.kind {
@@ -502,7 +516,7 @@ impl<'a> Walk<'a> {
                     match step {
                         IterStep::Map { lambda } | IterStep::Filter { lambda }
                         | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => {
-                            self.expr(lambda, Site::Callback)
+                            self.chain_lambda(lambda)
                         }
                         IterStep::Take { n } => self.expr(n, Site::Operand),
                         IterStep::Enumerate => {}
@@ -512,11 +526,11 @@ impl<'a> Walk<'a> {
                     IterCollector::Collect | IterCollector::Sum { .. } | IterCollector::Len => {}
                     IterCollector::Fold { init, lambda } => {
                         self.expr(init, Site::FoldInit);
-                        self.expr(lambda, Site::Callback);
+                        self.chain_lambda(lambda);
                     }
                     IterCollector::Any { lambda } | IterCollector::All { lambda }
                     | IterCollector::Find { lambda } | IterCollector::Count { lambda } => {
-                        self.expr(lambda, Site::Callback)
+                        self.chain_lambda(lambda)
                     }
                 }
                 self.in_chain = outer;

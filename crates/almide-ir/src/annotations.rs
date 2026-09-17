@@ -40,8 +40,10 @@ pub struct CodegenAnnotations {
     /// `BorrowLoweringPass`; the walker's box-pattern rewrite reads it to
     /// spell a borrowed subject's guards and move-outs through the reference.
     pub ref_binders: HashSet<VarId>,
-    /// First parameter of a synchronous scalar fold closure whose captures
-    /// may be borrowed until the fold returns. Decided by CaptureClone.
+    /// First parameter of every iterator-chain step / collector lambda: the
+    /// closure runs synchronously inside the chain and never escapes it, so
+    /// it renders without `move` and borrows what it reads for the chain's
+    /// duration. Decided by StreamFusion, which builds the chains.
     pub borrowed_lambda_params: HashSet<VarId>,
     /// List-field loops whose owned root is dead after the head evaluation.
     /// The body needs owned elements, so move them with into_iter rather than clone.
