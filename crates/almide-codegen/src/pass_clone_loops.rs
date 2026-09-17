@@ -27,6 +27,10 @@ pub(crate) struct LoopMarks {
     /// Binders over a list field whose owned root is dead after the head:
     /// the walker iterates `into_iter()` and moves each element.
     pub consumed: HashSet<VarId>,
+    /// Every `for` binder seen so far: fresh per iteration like a body-level
+    /// `let`, but possibly bound `&T` (see `borrowed`), so a FIELD of one is
+    /// never moved out — a lambda's own params and lets may be.
+    pub binders: HashSet<VarId>,
 }
 
 fn owns_final_field_read(iterable: &IrExpr, body: &[IrStmt], ctx: &CloneCtx) -> bool {
@@ -44,6 +48,8 @@ pub(crate) fn insert_clones_for_in(var: VarId, var_tuple: Option<Vec<VarId>>, it
     let owns_field = owns_final_field_read(&iterable, &body, ctx);
     let new_iterable = strip_list_iterable_clone(insert_clones_live(iterable, ctx), &body);
     let fresh = loop_fresh_vars(Some(var), var_tuple.as_deref(), &body);
+    ctx.loops.binders.insert(var);
+    ctx.loops.binders.extend(var_tuple.iter().flatten().copied());
     let mut loop_ctx = CloneCtx { always: ctx.always, eligible: ctx.eligible, remaining: ctx.remaining, in_loop: true, memo: ctx.memo, fresh: &fresh, owned: ctx.owned, loops: ctx.loops, captured: ctx.captured };
     let new_body = insert_clone_stmts_live(body, &mut loop_ctx);
     // With the body's clones and moves placed, a binder every use of which

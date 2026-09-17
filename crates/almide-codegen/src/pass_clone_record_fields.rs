@@ -19,7 +19,8 @@ pub(super) fn rewrite(fields: Vec<(Sym, IrExpr)>, ctx: &mut CloneCtx) -> Vec<(Sy
         }
     }
     candidates.retain(|id, (seen, unique)| {
-        *unique && (!ctx.in_loop || ctx.fresh.contains(id)) && ctx.owned.contains(id) && !ctx.always.contains(id)
+        *unique && (!ctx.in_loop || (ctx.fresh.contains(id) && !ctx.loops.binders.contains(id)))
+            && ctx.owned.contains(id) && !ctx.always.contains(id)
             && ctx.remaining.get(id).copied().unwrap_or(1) <= seen.len() as u32
             && fields.iter().all(|(_, e)| projection(e).is_some_and(|(v, _)| v == *id)
                 || !almide_ir::free_vars::free_vars(e, &HashSet::new()).contains(id))
