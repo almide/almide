@@ -184,7 +184,10 @@ fn reference_passes_through(u: &Use) -> bool {
 
 /// A position that NEEDS the variable owned, or whose need this file cannot
 /// decide and therefore grants: any capture, any write, any `&mut` reach, a
-/// receiver, a scrutinee, a computed callee, an iterable, a `Mut` slot.
+/// receiver, a scrutinee, a computed callee, an iteration whose body
+/// consumes the elements, a `Mut` slot. An iteration whose body only READS
+/// its elements (`element_reads_only`, the walk's `Iterable::consumed`)
+/// justifies nothing: the source iterates from a borrow (#2287).
 fn justifies_ownership(u: &Use) -> bool {
     definitely_consumes(u)
         || u.depth > 0
@@ -192,7 +195,7 @@ fn justifies_ownership(u: &Use) -> bool {
         || u.is_write(true)
         || matches!(
             u.site,
-            Site::Scrutinee | Site::Receiver | Site::Callee | Site::Iterable { .. }
+            Site::Scrutinee | Site::Receiver | Site::Callee | Site::Iterable { consumed: true }
                 | Site::Arg(SlotMode::Mut) | Site::Borrow { mutable: true } | Site::Construct(Ctor::Interp)
         )
         // A heap field moved straight off the param into a record literal:
