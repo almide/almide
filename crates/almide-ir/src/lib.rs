@@ -534,6 +534,49 @@ impl IterCollector {
     }
 }
 
+/// The lambdas a chain's SOURCE element reaches, as `(binder, lambda)` in
+/// chain order: every step lambda up to and including the first one that
+/// produces a new element (`Map` / `FlatMap` / `FilterMap` — a `Filter`
+/// passes the element on, a `Take` never sees it), then the collector's
+/// lambda when the element still reaches it (a fold's second param, the
+/// predicate of `any` / `all` / `count`). `None` when the element leaves the
+/// chain as a value (`Collect`, `Find`), is re-shaped before any lambda sees
+/// it (`Enumerate`), or a callback is a stored closure value rather than a
+/// lambda literal: the source must then hand its elements over owned.
+///
+/// This is the one place that says which binder IS the source element, read
+/// by the ownership verdict (does the body consume it?), the clone pass
+/// (can it be bound `&T`?) and the renderer (`.iter()` vs `.iter().cloned()`).
+pub fn source_element_receivers<'a>(steps: &'a [IterStep], collector: &'a IterCollector) -> Option<Vec<(VarId, &'a IrExpr)>> {
+    fn param(lambda: &IrExpr, index: usize) -> Option<VarId> {
+        match &lambda.kind {
+            IrExprKind::Lambda { params, .. } => params.get(index).map(|(v, _)| *v),
+            _ => None,
+        }
+    }
+    let mut out = Vec::new();
+    for step in steps {
+        match step {
+            IterStep::Map { lambda } | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => {
+                out.push((param(lambda, 0)?, &**lambda));
+                return Some(out);
+            }
+            IterStep::Filter { lambda } => out.push((param(lambda, 0)?, &**lambda)),
+            IterStep::Take { .. } => {}
+            IterStep::Enumerate => return None,
+        }
+    }
+    match collector {
+        IterCollector::Fold { lambda, .. } => out.push((param(lambda, 1)?, &**lambda)),
+        IterCollector::Any { lambda } | IterCollector::All { lambda } | IterCollector::Count { lambda } => {
+            out.push((param(lambda, 0)?, &**lambda))
+        }
+        IterCollector::Collect | IterCollector::Find { .. } => return None,
+        IterCollector::Sum { .. } | IterCollector::Len => {}
+    }
+    Some(out)
+}
+
 // ── Structural recursion helpers ────────────────────────────────
 //
 // `map_children` applies `f` to every direct child `IrExpr`.
