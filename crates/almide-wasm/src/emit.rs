@@ -352,6 +352,7 @@ fn emit_program_pass(
         if clean {
             visited.extend(sub);
             export_fns.push((name.to_string(), table.infos[i].wasm_index));
+            crate::host_exports::note_export(name, table.infos[i].param_owned.clone());
         }
     }
 

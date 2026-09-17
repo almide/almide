@@ -892,6 +892,13 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
             )
         })
         .collect();
+    // #2265: the JS host's allocator + release exports, only under the
+    // `--host js` guard so every other rendering keeps its bytes.
+    let pub_exports = if crate::host_exports::js_host() {
+        format!("{pub_exports}{}", crate::host_exports::export_text())
+    } else {
+        pub_exports
+    };
     // The mutable-global slot TAKE accessor (emitted iff the program has slots): loads
     // the slot's block handle WITHOUT an rc change — the slot's own reference transfers
     // to the caller (the assign path drops it and stores a replacement), which is
