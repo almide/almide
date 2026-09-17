@@ -99,8 +99,9 @@ fn the_issue_program_builds_and_agrees_across_legs() {
     assert!(ok, "wasm run:\n{err}");
     assert_eq!(wasm_out, out, "the two legs must print the same line");
     let rust = emit(&file);
-    assert!(fn_body(&rust, "via_captured").contains("captured(t.clone())"), "{}", fn_body(&rust, "via_captured"));
-    // The shared-borrow callee keeps its reborrow: no clone where none is needed.
+    // Both callees borrow now (`captured` reads `t` only inside an inlined
+    // chain callback): the reborrow, no clone where none is needed.
+    assert!(fn_body(&rust, "via_captured").contains("captured(&t)"), "{}", fn_body(&rust, "via_captured"));
     assert!(fn_body(&rust, "via_plain").contains("plain(&t)"), "{}", fn_body(&rust, "via_plain"));
     let _ = std::fs::remove_dir_all(file.parent().unwrap());
 }
