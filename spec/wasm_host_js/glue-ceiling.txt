@@ -1,0 +1,6 @@
+# Byte ceiling of each fixture's generated `<stem>.js` (#2276), checked by
+# scripts/check-js-host.sh. A smaller glue passes silently; a larger one
+# fails until its row is raised in the same change. Rows: `<stem> <bytes>`.
+println_only 5130
+marshal_types 6249
+extern_js 5765
