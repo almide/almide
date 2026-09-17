@@ -15,7 +15,7 @@ use std::collections::HashSet;
 use almide_ir::*;
 use almide_lang::types::{Ty, TypeConstructorId};
 use super::pass_clone::{CloneCtx, insert_clones_live, insert_clone_stmts_live};
-use super::use_kind::{ExplicitBorrows, Site, Use, UseSites};
+use super::use_kind::{element_reads_only, ExplicitBorrows, Site, Use, UseSites};
 
 /// The loop binders the clone walk classified (#1673), drained into
 /// `CodegenAnnotations` by the pass's `run`.
@@ -27,10 +27,99 @@ pub(crate) struct LoopMarks {
     /// Binders over a list field whose owned root is dead after the head:
     /// the walker iterates `into_iter()` and moves each element.
     pub consumed: HashSet<VarId>,
-    /// Every `for` binder seen so far: fresh per iteration like a body-level
+    /// Every `for` binder seen so far, and every element binder of a chain
+    /// whose source is a borrow: fresh per iteration like a body-level
     /// `let`, but possibly bound `&T` (see `borrowed`), so a FIELD of one is
     /// never moved out — a lambda's own params and lets may be.
     pub binders: HashSet<VarId>,
+    /// Chain binders a filter-family adapter hands `&&T` (`.iter()` source,
+    /// `.filter(|x| ..)`): rebound `let x = *x` with an inferred annotation
+    /// (`infer_binding_tys`) so the body reads one `&T` like every other step.
+    pub infer: HashSet<VarId>,
+}
+
+/// Before a borrowed chain's lambdas are walked (#2287): its source element
+/// binders join `binders`, so no field is moved out of what may become a
+/// `&T` binding. A consumed source (`.into_iter()`) hands owned elements and
+/// keeps the lambda rule (params are fresh, fields may move).
+pub(crate) fn note_chain_element_binders(chain: &IrExpr, loops: &mut LoopMarks) {
+    let IrExprKind::IterChain { source, consume, steps, collector } = &chain.kind else { return };
+    if *consume || !borrowed_element_is_heap(&source.ty) {
+        return;
+    }
+    if let Some(receivers) = almide_ir::source_element_receivers(steps, collector) {
+        loops.binders.extend(receivers.iter().map(|(v, _)| *v));
+    }
+}
+
+/// After the walk: when EVERY lambda the source element reaches only borrows
+/// its binder (`element_reads_only` over the final bodies — the same rule the
+/// borrow verdict applied, now on the IR with every borrow spelled), the
+/// binders are bound `&T` off `xs.iter()` (`borrowed`) and no element is
+/// cloned. One consuming lambda keeps `.iter().cloned()` for all of them:
+/// the source iterates one way. A filter-family lambda (prepared with a
+/// `let x = x.clone()` rebinding for the `&T` Rust hands it) is rebound
+/// `let x = *x` instead: off `.iter()` it receives `&&T`, and one deref is
+/// the `&T` the rest of the body reads.
+pub(crate) fn mark_chain_element_binders(chain: &mut IrExpr, loops: &mut LoopMarks) {
+    let IrExprKind::IterChain { source, consume, steps, collector } = &mut chain.kind else { return };
+    if *consume {
+        return;
+    }
+    let Some(elem) = list_elem(&source.ty).cloned() else { return };
+    if !super::pass_clone::needs_clone(&elem) {
+        return;
+    }
+    let Some(receivers) = almide_ir::source_element_receivers(steps, collector) else { return };
+    let reads_only = receivers.iter().all(|(binder, lambda)| match &lambda.kind {
+        IrExprKind::Lambda { body, .. } => element_reads_only(&UseSites::of_expr(body, Site::Result, &ExplicitBorrows), *binder, &elem, true),
+        _ => false,
+    });
+    if !reads_only {
+        return;
+    }
+    let binders: HashSet<VarId> = receivers.iter().map(|(v, _)| *v).collect();
+    loops.borrowed.extend(binders.iter().copied());
+    // Only a filter-family lambda that receives the SOURCE element sits on
+    // `&&T`; one after a `map` receives that step's owned output as `&U`,
+    // and its `let x = x.clone()` stays.
+    for step in steps.iter_mut() {
+        if let IterStep::Filter { lambda } = step && let Some(v) = deref_rebinding(lambda, &binders) {
+            loops.infer.insert(v);
+        }
+    }
+    if let IterCollector::Count { lambda } = collector && let Some(v) = deref_rebinding(lambda, &binders) {
+        loops.infer.insert(v);
+    }
+}
+
+/// `let x = x.clone()` at the head of a filter-family lambda body whose
+/// param is one of `binders` → `let x = *x`.
+fn deref_rebinding(lambda: &mut IrExpr, binders: &HashSet<VarId>) -> Option<VarId> {
+    let IrExprKind::Lambda { params, body, .. } = &mut lambda.kind else { return None };
+    let (param, _) = params.first()?;
+    if !binders.contains(param) {
+        return None;
+    }
+    let IrExprKind::Block { stmts, .. } = &mut body.kind else { return None };
+    let IrStmtKind::Bind { var, value, .. } = &mut stmts.first_mut()?.kind else { return None };
+    if var != param || !matches!(&value.kind, IrExprKind::Clone { expr } if matches!(expr.kind, IrExprKind::Var { id } if id == *var)) {
+        return None;
+    }
+    let IrExprKind::Clone { expr } = std::mem::replace(&mut value.kind, IrExprKind::Unit) else { unreachable!("matched above") };
+    value.kind = IrExprKind::Deref { expr };
+    Some(*var)
+}
+
+fn list_elem(ty: &Ty) -> Option<&Ty> {
+    match ty {
+        Ty::Applied(TypeConstructorId::List, args) => args.first(),
+        _ => None,
+    }
+}
+
+fn borrowed_element_is_heap(ty: &Ty) -> bool {
+    list_elem(ty).is_some_and(super::pass_clone::needs_clone)
 }
 
 fn owns_final_field_read(iterable: &IrExpr, body: &[IrStmt], ctx: &CloneCtx) -> bool {

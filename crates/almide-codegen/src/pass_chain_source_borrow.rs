@@ -1,9 +1,10 @@
 //! ChainSourceBorrowPass: a consumed chain source that is really a borrow.
 //!
-//! Fusion builds a chain whose source is CONSUMED when the twin's slot was
-//! (`@consume(xs)`): `.into_iter()`. Two shapes then turn out to need no
-//! owned value at all, because what remains after fusion is an iteration
-//! and `.iter().cloned()` serves it from a borrow (#2098):
+//! A chain's source is CONSUMED (`.into_iter()`) when a lambda the element
+//! reaches needs it owned (`BorrowInsertion`'s element verdict, #2287). Two
+//! shapes then turn out to need no owned value at all, because what remains
+//! after fusion is an iteration and `.iter().cloned()` serves it from a
+//! borrow (#2098):
 //!
 //! - the `Clone` clone insertion put in front of the source so the consumer
 //!   could not take the caller's value (`(v.clone()).into_iter()` — dead by
@@ -87,12 +88,12 @@ fn root(e: &IrExpr) -> Option<VarId> {
 
 fn borrow_source(expr: &mut IrExpr, slices: &HashSet<VarId>, cells: &HashSet<VarId>) -> bool {
     let IrExprKind::IterChain { source, consume, steps, collector } = &mut expr.kind else { return false };
-    if !*consume {
-        return false;
-    }
+    // A source the borrow pass already left borrowed (#2287) needs only the
+    // clone the clone pass put in front of a live local stripped: the
+    // iteration borrows, the copy is read by no one.
     let (id, strip_clone) = match &source.kind {
         IrExprKind::Clone { expr: inner } => match root(inner) { Some(id) => (id, true), None => return false },
-        IrExprKind::Var { id } if slices.contains(id) => (*id, false),
+        IrExprKind::Var { id } if *consume && slices.contains(id) => (*id, false),
         _ => return false,
     };
     let init = match &*collector {
