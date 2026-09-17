@@ -6,10 +6,11 @@
 //! clone. When the owned slot is the param's LAST use the param is owned:
 //! the site moves, and only a caller that still needs its value clones (the
 //! allocation ledger pins that an unconditional site clone costs more). A
-//! closure capture still owns the param (closures capture through
-//! `Rc<dyn Fn>`, which cannot hold a borrow), and a stdlib slot that
-//! consumes (`list.map`'s list) still owns: it lowers into a chain that
-//! takes the value itself.
+//! list-combinator callback the fusion pass inlines is a scope, not a
+//! closure: a param it only reads stays borrowed and the chain step renders
+//! without `move` or a capture bind. A stdlib slot that consumes
+//! (`list.map`'s list) still owns: it lowers into a chain that takes the
+//! value itself.
 //!
 //! The rule is stated in docs/specs/codegen.md ("Parameter passing on the
 //! native target"); this pins the emitted shapes and that both legs agree.
@@ -73,8 +74,11 @@ fn a_param_kept_by_a_callee_stays_borrowed_and_clones_at_that_site() {
     assert!(s.contains("stored(t, n)"), "{s}");
     // The callee that keeps the value is owned by construction (a record field).
     assert!(fn_sig_and_body(&rust, "stored").starts_with("pub fn stored(t: Table, n: i64)"));
-    // A closure capture still owns the param; a consuming stdlib slot too.
-    assert!(fn_sig_and_body(&rust, "captured").starts_with("pub fn captured(t: Table)"));
+    // A read inside an inlined chain callback keeps the param borrowed, and
+    // the step is a plain borrowing closure; a consuming stdlib slot owns.
+    let s = fn_sig_and_body(&rust, "captured");
+    assert!(s.starts_with("pub fn captured(t: &Table)"), "{s}");
+    assert!(!s.contains("move |") && !s.contains("__cap_"), "the chain step borrows its capture:\n{s}");
     assert!(fn_sig_and_body(&rust, "mapped").starts_with("pub fn mapped(ns: Vec<i64>)"), "{}", fn_sig_and_body(&rust, "mapped"));
     // A monomorphised stdlib instance's slot (`list.map` with a fallible
     // callback) at the param's last use: owned. A derived codec fn's slot
