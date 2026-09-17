@@ -720,10 +720,11 @@ fn dispatch_check(file: Option<String>, deny_warnings: bool, json: bool, explain
         }
     };
     // #2165: the bare form inside a package judges EVERY entry under `src/`,
-    // not the first one `resolve_file` happens to find. `--json` and
-    // `--effects` are per-file reports with no multi-file shape, so they keep
-    // the single-entry resolution.
-    let package_entries = if file.is_none() && !json && !effects { package_check_entries() } else { None };
+    // not the first one `resolve_file` happens to find. `--json` walks the
+    // same entries in the same order (#2253): every row already names its
+    // `file`, so the report needs no other multi-file shape. `--effects` is a
+    // per-file report and keeps the single-entry resolution.
+    let package_entries = if file.is_none() && !effects { package_check_entries() } else { None };
     let file = match &package_entries {
         Some(entries) => entries[0].clone(),
         None => resolve_file(file),
@@ -739,7 +740,10 @@ fn dispatch_check(file: Option<String>, deny_warnings: bool, json: bool, explain
         }
         cli::cmd_check_effects(&file);
     } else if json {
-        cli::cmd_check_json(&file, critical.as_deref());
+        match &package_entries {
+            Some(entries) => cli::cmd_check_json_package(entries, critical.as_deref()),
+            None => cli::cmd_check_json(&file, critical.as_deref()),
+        }
     } else if let Some(entries) = package_entries {
         cli::cmd_check_package(&entries, deny_warnings, timings, stamp, critical.as_deref(), wasm_target);
     } else {

@@ -82,10 +82,50 @@ fn single_file_form_is_unchanged() {
 }
 
 #[test]
-fn json_keeps_the_single_entry_resolution() {
+fn json_on_a_clean_package_is_silent_and_green() {
     let dir = tempfile::tempdir().expect("tempdir");
     package(dir.path(), MAIN_OK);
     let (ok, text) = check_in(dir.path(), &["--json"]);
     assert!(ok, "--json on a clean package:\n{text}");
-    assert!(!text.contains(": ok"), "--json is a per-file report, no package walk:\n{text}");
+    assert!(!text.contains(": ok"), "--json is rows only, no per-entry verdict lines:\n{text}");
+    assert_eq!(text.trim(), "", "a clean package has no rows:\n{text}");
+}
+
+/// #2253: the bare `--json` form walks the package like the bare form does —
+/// one row per diagnostic across every entry, each naming its `file`, so a
+/// harness no longer checks the entries singly (re-inferring the siblings
+/// each time).
+#[test]
+fn json_judges_every_entry_and_each_row_names_its_file() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    package(dir.path(), MAIN_BROKEN);
+    // A second broken entry, later in the walk order, so the report is shown
+    // to continue past the first one.
+    std::fs::write(dir.path().join("src/inner/util.almd"), "fn one() -> Int = \"1\"\n").expect("write util");
+    let (ok, text) = check_in(dir.path(), &["--json"]);
+    // Both entries parse; the errors are type errors, so the exit code is the
+    // single-file form's `0` and `level` carries the verdict.
+    assert!(ok, "type errors keep the json exit code at 0:\n{text}");
+    let rows: Vec<serde_json::Value> = text
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| serde_json::from_str(l).unwrap_or_else(|e| panic!("row is not JSON ({e}): {l}")))
+        .collect();
+    let files: Vec<&str> = rows.iter().map(|r| r["file"].as_str().expect("row names its file")).collect();
+    assert!(files.contains(&"src/main.almd"), "the broken main entry is reported:\n{text}");
+    assert!(files.contains(&"src/inner/util.almd"), "the broken nested entry is reported too:\n{text}");
+    let main_at = files.iter().position(|f| *f == "src/main.almd").unwrap();
+    let util_at = files.iter().position(|f| *f == "src/inner/util.almd").unwrap();
+    assert!(main_at < util_at, "rows follow the bare form's entry order:\n{text}");
+    assert!(rows.iter().all(|r| r["level"] == "error"), "{text}");
+}
+
+#[test]
+fn json_exit_code_is_one_when_an_entry_does_not_parse() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    package(dir.path(), MAIN_OK);
+    std::fs::write(dir.path().join("src/inner/util.almd"), "fn one( -> Int = 1\n").expect("write util");
+    let (ok, text) = check_in(dir.path(), &["--json"]);
+    assert!(!ok, "an entry that did not parse keeps the single-file exit code 1:\n{text}");
+    assert!(text.contains("\"file\":\"src/inner/util.almd\"") || text.contains("src/inner/util.almd"), "{text}");
 }

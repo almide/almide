@@ -289,15 +289,37 @@ fn parse_for_json(file: &str) -> (Option<almide::ast::Program>, String, Vec<diag
 }
 
 pub fn cmd_check_json(file: &str, critical: Option<&[String]>) {
+    if !check_json_one(file, critical) {
+        // The exit code is deliberately unchanged (1 = this file did not
+        // parse). A harness that gates on it must not silently flip to
+        // success just because the diagnostics got a better shape.
+        std::process::exit(1);
+    }
+}
+
+/// `almide check --json` with no FILE inside a package (#2253): every entry
+/// the bare form judges, in the bare form's order, one JSON row per
+/// diagnostic — each row names its `file`. The exit code is the single-file
+/// form's, aggregated: `1` iff some entry did not parse; a type error is a
+/// row whose `level` says so, and the remaining entries are still judged.
+pub fn cmd_check_json_package(files: &[String], critical: Option<&[String]>) {
+    let mut parsed_all = true;
+    for file in files {
+        parsed_all &= check_json_one(file, critical);
+    }
+    if !parsed_all {
+        std::process::exit(1);
+    }
+}
+
+/// One file's JSON report. `false` iff the file did not parse.
+fn check_json_one(file: &str, critical: Option<&[String]>) -> bool {
     let (parsed, source_text, parse_errors) = parse_for_json(file);
     let Some(mut program) = parsed else {
         for d in &parse_errors {
             out(&format!("{}", crate::diagnostic_render::to_json(d)));
         }
-        // The exit code is deliberately unchanged (1 = this file did not
-        // parse). A harness that gates on it must not silently flip to
-        // success just because the diagnostics got a better shape.
-        std::process::exit(1);
+        return false;
     };
     let (diagnostics, checker) = resolve_and_typecheck_for_check(file, &mut program, &source_text, critical);
 
@@ -321,6 +343,7 @@ pub fn cmd_check_json(file: &str, critical: Option<&[String]>) {
             out(&format!("{}", crate::diagnostic_render::to_json(d)));
         }
     }
+    true
 }
 
 /// `cmd_check_effects`'s `[permissions].allow` enforcement block. Extracted
