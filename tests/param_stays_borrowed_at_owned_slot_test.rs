@@ -11,7 +11,9 @@
 //! native target"); this pins the emitted shapes and that both legs agree.
 use std::process::Command;
 
-const PROGRAM: &str = r#"type Table = { names: List[String], sizes: List[Int] }
+const PROGRAM: &str = r#"import json
+type Table = { names: List[String], sizes: List[Int] }
+type Pigment: Codec = { r: Int }
 type Holder = { t: Table, n: Int }
 
 fn plain(t: Table) -> Int = list.len(t.names) + list.len(t.sizes)
@@ -26,11 +28,16 @@ fn stored_last(t: Table) -> Int = { let n = plain(t); stored(t, n).n }
 
 fn mapped(ns: List[Int]) -> List[Int] = list.map(ns, (n) => n + 1)
 
+fn heads(xs: List[String]) -> List[Int] = list.map(xs, (x) => int.parse(x)!) ?? [0]
+
+fn shown(p: Pigment) -> String = json.stringify(Pigment.encode(p)) + int.to_string(p.r)
+
 fn main() -> Unit = {
   let t = Table { names: ["a", "b"], sizes: [1] }
   println(int.to_string(plain(t) + captured(t) + stored_then_read(t) + stored_last(t)))
   println(int.to_string(list.len(mapped([1, 2]))))
   println(int.to_string(list.len(t.names)))
+  println(int.to_string(list.len(heads(["1", "2"]))) + shown(Pigment { r: 4 }))
 }
 "#;
 
@@ -64,6 +71,15 @@ fn a_param_kept_by_a_callee_stays_borrowed_and_clones_at_that_site() {
     // A closure capture still owns the param; a consuming stdlib slot too.
     assert!(fn_sig_and_body(&rust, "captured").starts_with("pub fn captured(t: Table)"));
     assert!(fn_sig_and_body(&rust, "mapped").starts_with("pub fn mapped(ns: Vec<i64>)"), "{}", fn_sig_and_body(&rust, "mapped"));
+    // A slot of a fn called through its mangled runtime symbol — here a
+    // monomorphised stdlib instance (`list.map` with a fallible callback) —
+    // is not a Keep site: such a call is a `RuntimeCall` by the time the
+    // lowering runs, so the param is owned as before (the first CI run of
+    // PR #2281 read E0308 there). A derived codec fn of the ROOT program is
+    // a plain named fn and keeps the rule: the site clones.
+    assert!(fn_sig_and_body(&rust, "heads").starts_with("pub fn heads(xs: Vec<String>)"), "{}", fn_sig_and_body(&rust, "heads"));
+    let s = fn_sig_and_body(&rust, "shown");
+    assert!(s.starts_with("pub fn shown(p: &Pigment)") && s.contains("Pigment_encode(p.clone())"), "{s}");
     // Callers pass a borrow to the borrowed fns: no clone at the call site.
     let m = fn_sig_and_body(&rust, "__almide_main");
     assert!(m.contains("stored_then_read(&t)") && m.contains("stored_last(&t)"), "{m}");
@@ -71,6 +87,6 @@ fn a_param_kept_by_a_callee_stays_borrowed_and_clones_at_that_site() {
     for target in ["rust", "wasm"] {
         let run = Command::new(almide_bin()).args(["run", file.to_str().unwrap(), "--target", target]).output().unwrap();
         assert!(run.status.success(), "{target}: {}", String::from_utf8_lossy(&run.stderr));
-        assert_eq!(String::from_utf8_lossy(&run.stdout).trim(), "13\n2\n2", "{target}");
+        assert_eq!(String::from_utf8_lossy(&run.stdout).trim(), "13\n2\n2\n2{\"r\":4}4", "{target}");
     }
 }

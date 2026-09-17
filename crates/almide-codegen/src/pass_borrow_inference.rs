@@ -38,12 +38,7 @@ fn is_analysed_fn(func: &IrFunction) -> bool {
 /// miss in round 0 and `Ref` from the mirror in round 1 was the descent
 /// (#1713) the monotone ascent must never take.
 fn seed_pending_user_fns(program: &IrProgram) -> HashSet<String> {
-    let mut set = HashSet::new();
-    for func in &program.functions {
-        if is_analysed_fn(func) {
-            set.insert(func.name.to_string());
-        }
-    }
+    let mut set = seed_plain_fn_names(program);
     for module in &program.modules {
         let mod_name = module.name.to_string();
         for func in &module.functions {
@@ -54,6 +49,15 @@ fn seed_pending_user_fns(program: &IrProgram) -> HashSet<String> {
         }
     }
     set
+}
+
+/// The analysed ROOT-program fns by bare name (`Round::plain_fns`). A call
+/// to one of these stays a `Call { Named }` down to `BorrowLowering`; a
+/// module fn is called through its mangled `almide_rt_<mod>_<name>` symbol
+/// (a `RuntimeCall` by then, even from a sibling in the same module), so it
+/// is left out on purpose.
+fn seed_plain_fn_names(program: &IrProgram) -> HashSet<String> {
+    program.functions.iter().filter(|f| is_analysed_fn(f)).map(|f| f.name.to_string()).collect()
 }
 
 /// Pre-bake the owned-param signature a TCO-bound function will end up with.
@@ -448,11 +452,12 @@ pub fn infer_borrow_signatures(program: &mut IrProgram) -> HashMap<String, Vec<P
     seed_codec_helper_sigs(&mut sigs);
     alias_float_variant_sigs(&mut sigs);
     let pending = seed_pending_user_fns(program);
+    let plain_fns = seed_plain_fn_names(program);
 
     let mut iter = 0usize;
     loop {
         let snapshot = sigs.clone();
-        let round = Round { snapshot: &snapshot, pending: &pending, records: &records };
+        let round = Round { snapshot: &snapshot, pending: &pending, records: &records, plain_fns: &plain_fns };
         infer_program_fn_borrows(program, &mut sigs, &round);
         infer_program_module_borrows(program, &mut sigs, &mut mirror_owners, &round);
 
