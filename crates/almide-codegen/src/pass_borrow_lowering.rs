@@ -45,17 +45,20 @@ impl NanoPass for BorrowLoweringPass {
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         let mut param_borrows: HashMap<VarId, ParamBorrow> = HashMap::new();
+        let mut ref_binders: HashSet<VarId> = HashSet::new();
         let IrProgram { functions, modules, codegen_annotations, .. } = &mut program;
         let module_fns = modules.iter_mut().flat_map(|m| m.functions.iter_mut());
         for func in functions.iter_mut().chain(module_fns) {
             for p in &func.params {
                 param_borrows.insert(p.var, p.borrow);
             }
-            let mut lower = Lower { params: &func.params, ann: codegen_annotations, counting_binders: HashSet::new() };
+            let mut lower = Lower { params: &func.params, ann: codegen_annotations, counting_binders: HashSet::new(), ref_binders: HashSet::new() };
             lower.visit_expr_mut(&mut func.body);
             lower.own_consumed_ref_mut(body_tail(&mut func.body));
+            ref_binders.extend(lower.ref_binders);
         }
         codegen_annotations.param_borrows = param_borrows;
+        codegen_annotations.ref_binders = ref_binders;
         PassResult { program, changed: true }
     }
 }
@@ -67,6 +70,31 @@ struct Lower<'a> {
     /// the walker keeps as a bare `Range<i64>` (`range_counting_vars`,
     /// #1857): the head counts and binds an OWNED scalar, not `&T` (#2256).
     counting_binders: HashSet<VarId>,
+    /// Payload binders of a `match` whose subject is a by-reference param
+    /// (`s: &Shape`, the borrow pass's variant rule) or another such binder:
+    /// Rust's default binding modes bind them `&T`, so a `Copy` scalar read
+    /// derefs (`*n`) and a `&b` of a heap one is the naked binder, the same
+    /// spellings a `&mut` param and a borrowed loop binder get.
+    ref_binders: HashSet<VarId>,
+}
+
+/// Every variable a pattern binds (`Bind` and `As`, at any depth).
+fn pattern_binders(p: &IrPattern, out: &mut Vec<VarId>) {
+    match p {
+        IrPattern::Wildcard | IrPattern::Literal { .. } | IrPattern::None => {}
+        IrPattern::Bind { var, .. } => out.push(*var),
+        IrPattern::As { var, inner, .. } => { out.push(*var); pattern_binders(inner, out); }
+        IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => pattern_binders(inner, out),
+        IrPattern::Constructor { args, .. } => args.iter().for_each(|a| pattern_binders(a, out)),
+        IrPattern::Tuple { elements } => elements.iter().for_each(|e| pattern_binders(e, out)),
+        IrPattern::List { elements, rest } => {
+            elements.iter().for_each(|e| pattern_binders(e, out));
+            if let Some(r) = rest { pattern_binders(r, out); }
+        }
+        IrPattern::RecordPattern { fields, .. } => {
+            for f in fields { if let Some(p) = &f.pattern { pattern_binders(p, out); } }
+        }
+    }
 }
 
 /// The mode a param is passed in, by var.
@@ -197,9 +225,8 @@ impl Lower<'_> {
         // (a `branch_lift` helper keeps the enclosing fn's ids, #2194).
         if !as_str && !mutable
             && let Some(id) = var_id(inner)
-            && self.ann.borrowed_loop_vars.contains(&id)
-            && param_mode(self.params, id).is_none()
-            && !self.counting_binders.contains(&id)
+            && ((self.ann.borrowed_loop_vars.contains(&id) && param_mode(self.params, id).is_none() && !self.counting_binders.contains(&id))
+                || self.ref_binders.contains(&id))
         {
             expr.kind = std::mem::replace(&mut inner.kind, IrExprKind::Unit);
             return;
@@ -211,7 +238,7 @@ impl Lower<'_> {
         // alike; a `&str` param keeps `&*` (`str::as_str` is unstable).
         if as_str && !mutable
             && let Some(id) = var_id(inner)
-            && self.ann.borrowed_loop_vars.contains(&id)
+            && (self.ann.borrowed_loop_vars.contains(&id) || self.ref_binders.contains(&id))
         {
             let receiver = std::mem::replace(inner.as_mut(), mk(IrExprKind::Unit, Ty::Unit, None));
             *expr = method_call(receiver, "as_str", expr.ty.clone());
@@ -265,7 +292,7 @@ impl Lower<'_> {
     /// assignment target is a `VarId` the walker already spells `*p =`.
     fn lower_scalar_ref_read(&self, expr: &mut IrExpr) {
         let IrExprKind::Var { id } = &expr.kind else { return };
-        if !is_ref_mut_param(self.params, *id) || !is_copy_scalar(&expr.ty) {
+        if !(is_ref_mut_param(self.params, *id) || self.ref_binders.contains(id)) || !is_copy_scalar(&expr.ty) {
             return;
         }
         let var = std::mem::replace(expr, mk(IrExprKind::Unit, Ty::Unit, None));
@@ -418,6 +445,23 @@ impl IrMutVisitor for Lower<'_> {
         // `Deref` first (a scalar is exempt anyway; the order keeps the two
         // rules independent).
         self.lower_consumers(expr);
+        // A match on a by-reference param (or on a binder such a match
+        // bound) binds its payloads by reference: note them before the arms
+        // are walked, so their reads lower like a `&mut` param's.
+        if let IrExprKind::Match { subject, arms } = &expr.kind {
+            let root = match &subject.kind {
+                IrExprKind::Var { id } => Some(*id),
+                IrExprKind::Borrow { expr: inner, .. } | IrExprKind::Clone { expr: inner } => var_id(inner),
+                _ => None,
+            };
+            if let Some(id) = root
+                && (matches!(param_mode(self.params, id), Some(ParamBorrow::Ref)) || self.ref_binders.contains(&id))
+            {
+                let mut bound = Vec::new();
+                for arm in arms { pattern_binders(&arm.pattern, &mut bound); }
+                self.ref_binders.extend(bound);
+            }
+        }
         walk_expr_mut(self, expr);
         match &expr.kind {
             IrExprKind::Var { .. } => self.lower_scalar_ref_read(expr),
