@@ -34,6 +34,12 @@ pub struct CodegenAnnotations {
     /// placed the body's clones and moves. A bare (moving) use, a `&mut`, a
     /// closure capture, a match on `x`, or a tuple binder keeps `.cloned()`.
     pub borrowed_loop_vars: HashSet<VarId>,
+    /// Payload binders of a `match` whose subject is a by-reference param
+    /// (a variant param the borrow pass keeps `&T`) or another such binder:
+    /// Rust's default binding modes bind them `&T`. Decided by
+    /// `BorrowLoweringPass`; the walker's box-pattern rewrite reads it to
+    /// spell a borrowed subject's guards and move-outs through the reference.
+    pub ref_binders: HashSet<VarId>,
     /// First parameter of a synchronous scalar fold closure whose captures
     /// may be borrowed until the fold returns. Decided by CaptureClone.
     pub borrowed_lambda_params: HashSet<VarId>,
