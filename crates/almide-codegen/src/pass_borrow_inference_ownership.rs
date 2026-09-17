@@ -109,10 +109,17 @@ impl SlotOracle for Scope<'_> {
             CallTarget::Module { module, func, .. } => format!("{}::{}", module, func),
             CallTarget::Method { .. } | CallTarget::Computed { .. } => return SlotMode::Consume,
         };
+        let program_fn = matches!(target, CallTarget::Named { .. });
         match self.resolve(&name) {
             Callee::Known(borrows) => {
                 let mode = slot_of(borrows.get(index), SlotMode::Consume);
-                if mode != SlotMode::Consume && self.is_borrow_eligible(&arg.ty) { mode } else { SlotMode::Consume }
+                if mode != SlotMode::Consume && self.is_borrow_eligible(&arg.ty) {
+                    mode
+                } else if program_fn && matches!(borrows.get(index), Some(ParamBorrow::Own)) && self.is_borrow_eligible(&arg.ty) {
+                    SlotMode::Keep
+                } else {
+                    SlotMode::Consume
+                }
             }
             Callee::Pending => SlotMode::Borrow,
             Callee::Unknown => SlotMode::Consume,
@@ -147,6 +154,14 @@ fn consumes(u: &Use) -> bool {
         Site::Result | Site::Scrutinee | Site::Concat | Site::Construct(_) | Site::Receiver
         | Site::Callback | Site::FoldInit | Site::Arg(SlotMode::Consume)
         | Site::Iterable { consumed: true } => true,
+        // A param handed bare to a PROGRAM fn's owned slot (#2278): the
+        // callee keeps the value, but that is one clone at this site, not a
+        // reason to own the whole param — owned, every caller that still
+        // needs its value pays the clone instead, and the param's other
+        // reads (the `h.n + plain(t)` after `stored(t, 1)`) lose the borrow.
+        // The site stays a borrow; `BorrowLowering` owns the read there
+        // (`own_consumed_borrowed`), the same spelling a `mut` param gets.
+        Site::Arg(SlotMode::Keep) => false,
         Site::Member => matches!(
             u.chain,
             Some(Chain { top: Site::Construct(Ctor::Record), len: 1, heap: true })

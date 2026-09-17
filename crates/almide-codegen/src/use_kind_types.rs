@@ -15,6 +15,13 @@ pub enum SlotMode {
     Mut,
     /// The slot takes the value, or nothing is known about the callee.
     Consume,
+    /// A PROGRAM fn's owned slot (#2278): the callee keeps the value, but a
+    /// borrowed param handed here stays borrowed — the site clones once
+    /// (`BorrowLowering::own_consumed_borrowed`) instead of the whole param
+    /// turning owned and every caller cloning. A stdlib slot that consumes
+    /// stays `Consume`: it lowers into a chain or a runtime call that takes
+    /// the value itself.
+    Keep,
 }
 
 /// Which constructor an operand feeds.
