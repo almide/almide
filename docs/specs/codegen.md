@@ -355,11 +355,41 @@ passed **by reference** (`&str` / `&[T]` / `&T`) unless the body needs the value
 owned. The body needs it owned when it:
 
 - returns the param, concatenates it, builds it into a record / list / tuple
-  literal, matches on it, iterates it by value, or seeds a fold with it;
+  literal, matches on it, or seeds a fold with it;
 - captures it in a closure (closures capture through `Rc<dyn Fn>`, which cannot
   hold a borrow — the capture is a move, or a clone when the param is read again);
-- hands it to a **stdlib** slot that consumes (`list.map`'s list, `list.push`'s
-  element): those lower into chains and runtime calls that take the value.
+- hands it to a **stdlib** slot that consumes (`list.push`'s element): those
+  lower into runtime calls that take the value;
+- iterates it — a `for` loop, or a list combinator the fusion pass inlines —
+  with a body that needs the **elements** owned (below).
+
+**An iteration's source follows its elements, not the combinator's slot**
+(#2287). `list.map`, `fold`, `filter`, `any`, … declare their list slot
+`@consume(xs)`, but that describes the unfused runtime twin; the fused chain
+and the `for` loop decide the source's mode from what the body does with
+each element (`element_reads_only`, one rule read by the borrow verdict, the
+clone pass and the ownership certifier):
+
+- a `Copy` element (`List[Int]`) never needs the source owned: `mapped(ns:
+  List[Int]) = ns |> list.map((n) => n * 2)` is `mapped(ns: &[i64])` over
+  `ns.iter().cloned()`, and a caller that reads its list twice clones nothing;
+- a heap element every receiving lambda only READS — a borrowed call slot, a
+  field read, a clone, a `&str` comparison, an interpolation part, or a
+  consuming use the clone pass clones anyway because the binder is read again
+  in the same iteration — leaves the source borrowed and binds `&T` off
+  `xs.iter()`: `lens(ws: &[String]) = ws.iter().map(|w| len(w.as_str()))`,
+  no element cloned (a `filter`-family step, which Rust hands `&&T`, is
+  rebound `let w = *w` instead of `let w = w.clone()`);
+- an element that leaves the chain owned — returned as the mapped value,
+  concatenated, built into a value, handed to an owned slot, collected by a
+  `filter` / `find` — keeps the source consumed: `shouted(ws: Vec<String>)`
+  over `ws.into_iter()`, the caller's last use moves the list and each
+  element moves out for free where a borrowed source could only clone it.
+
+This is the per-element rule the reference-counted compilers apply (a list
+read borrows into the list; the element is retained only when an occurrence
+demands it), lifted to the source's mode because a borrowed source on the
+native leg can only clone.
 
 A list-combinator callback the stream-fusion pass inlines (`list.map(xs, (x) =>
 … t …)`, `filter`, `fold`, `any`, …) is **not a closure** for this policy: the
