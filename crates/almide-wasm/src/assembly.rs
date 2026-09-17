@@ -278,6 +278,14 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     for (name, idx) in export_fns {
         exports.export(name, ExportKind::Func, *idx);
     }
+    // #2265: the JS host allocates the `String` blocks it passes in and
+    // releases the ones it takes out through the module's own runtime —
+    // both helpers ship unconditionally (the proven core), so exporting
+    // them adds two export entries and nothing else.
+    if crate::host_exports::js_host() {
+        exports.export(crate::host_exports::ALLOC_EXPORT, ExportKind::Func, F_ALLOC);
+        exports.export(crate::host_exports::RELEASE_EXPORT, ExportKind::Func, F_DEC_FLAT);
+    }
 
     let mut code = CodeSection::new();
     // #1699: the 34 fixed-slot helpers used to ship in EVERY module, and in
@@ -344,6 +352,7 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
             })
             .chain(std::iter::once(main_fn))
             .chain(extra_fns.iter().map(|(_, f)| f)),
+        if crate::host_exports::js_host() { &[F_ALLOC, F_DEC_FLAT] } else { &[] },
     );
     for (idx, f) in &static_helpers {
         if used.contains(idx) {
@@ -587,6 +596,7 @@ fn helper_body_b(h: &Helper, work: &FnWork, helper_snapshot: &[Helper]) -> Funct
 fn used_static_helpers<'a>(
     helpers: &[(u32, Function)],
     roots: impl Iterator<Item = &'a Function>,
+    seeds: &[u32],
 ) -> std::collections::HashSet<u32> {
     use std::collections::HashSet;
     let mut used: HashSet<u32> = HashSet::new();
@@ -595,6 +605,11 @@ fn used_static_helpers<'a>(
         if (F_PRINTLN_BLOCK..F_FN_BASE).contains(&idx) && set.insert(idx) {
             pending.push(idx);
         }
+    }
+    // Helpers the HOST calls (#2265: the JS host's allocator and release)
+    // are roots no body reaches; they and their callees ship.
+    for &idx in seeds {
+        note(&mut used, &mut pending, idx);
     }
     for f in roots {
         for idx in called_function_indices(f) {

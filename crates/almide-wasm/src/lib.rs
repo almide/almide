@@ -105,6 +105,7 @@ mod bytes_rw;
 mod bytes_recv;
 mod bytes_split;
 pub mod heap_cap;
+pub mod host_exports;
 pub mod witness;
 mod witness_hooks;
 mod calls;
