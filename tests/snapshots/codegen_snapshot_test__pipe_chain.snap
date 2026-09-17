@@ -377,8 +377,8 @@ pub fn almide_rt_list_binary_search(xs: &[i64], target: i64) -> Option<i64> {
 }
 
 //__ALMIDE_RT_BOUNDARY__
-pub fn process(xs: Vec<i64>) -> i64 {
-    (xs).into_iter().filter(|x| {
+pub fn process(xs: &[i64]) -> i64 {
+    (xs).iter().cloned().filter(|x| {
         let x: i64 = (*x);
         (x > 0i64)
     }).map(|x| (x).wrapping_mul(2i64)).fold(0i64, |acc, x| (acc).wrapping_add(x))

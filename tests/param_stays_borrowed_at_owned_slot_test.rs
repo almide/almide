@@ -8,9 +8,10 @@
 //! allocation ledger pins that an unconditional site clone costs more). A
 //! list-combinator callback the fusion pass inlines is a scope, not a
 //! closure: a param it only reads stays borrowed and the chain step renders
-//! without `move` or a capture bind. A stdlib slot that consumes
-//! (`list.map`'s list) still owns: it lowers into a chain that takes the
-//! value itself.
+//! without `move` or a capture bind. A stdlib combinator's `@consume` list
+//! slot does NOT own the param by itself (#2287): it lowers into a chain
+//! whose source is borrowed unless a step needs the element owned, so a
+//! `List[Int]` mapped by a pure step stays `&[i64]`.
 //!
 //! The rule is stated in docs/specs/codegen.md ("Parameter passing on the
 //! native target"); this pins the emitted shapes and that both legs agree.
@@ -75,11 +76,12 @@ fn a_param_kept_by_a_callee_stays_borrowed_and_clones_at_that_site() {
     // The callee that keeps the value is owned by construction (a record field).
     assert!(fn_sig_and_body(&rust, "stored").starts_with("pub fn stored(t: Table, n: i64)"));
     // A read inside an inlined chain callback keeps the param borrowed, and
-    // the step is a plain borrowing closure; a consuming stdlib slot owns.
+    // the step is a plain borrowing closure; a chain over `Copy` elements
+    // borrows its source whatever the combinator's slot says (#2287).
     let s = fn_sig_and_body(&rust, "captured");
     assert!(s.starts_with("pub fn captured(t: &Table)"), "{s}");
     assert!(!s.contains("move |") && !s.contains("__cap_"), "the chain step borrows its capture:\n{s}");
-    assert!(fn_sig_and_body(&rust, "mapped").starts_with("pub fn mapped(ns: Vec<i64>)"), "{}", fn_sig_and_body(&rust, "mapped"));
+    assert!(fn_sig_and_body(&rust, "mapped").starts_with("pub fn mapped(ns: &[i64])"), "{}", fn_sig_and_body(&rust, "mapped"));
     // A monomorphised stdlib instance's slot (`list.map` with a fallible
     // callback) at the param's last use: owned. A derived codec fn's slot
     // followed by another read (`p.r`): borrowed, the site clones.
