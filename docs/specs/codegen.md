@@ -346,6 +346,34 @@ fn main() =
 // but NOT string, map, json, etc.
 ```
 
+### Parameter passing on the native target
+
+**Source**: `pass_borrow_inference_ownership.rs` (`param_borrow`), `pass_borrow_lowering.rs`.
+
+A non-`mut` param of a borrow-eligible type (`String`, `List[T]`, a record) is
+passed **by reference** (`&str` / `&[T]` / `&T`) unless the body needs the value
+owned. The body needs it owned when it:
+
+- returns the param, concatenates it, builds it into a record / list / tuple
+  literal, matches on it, iterates it by value, or seeds a fold with it;
+- captures it in a closure (closures capture through `Rc<dyn Fn>`, which cannot
+  hold a borrow — the capture is a move, or a clone when the param is read again);
+- hands it to a **stdlib** slot that consumes (`list.map`'s list, `list.push`'s
+  element): those lower into chains and runtime calls that take the value.
+
+Handing the param bare to a **program fn's** owned slot (`stored(t, 1)` where
+`stored` keeps `t` in a record) does **not** make the param owned (#2278): the
+param stays `&T`, and that one site owns its read (`stored(t.clone(), 1)`) — one
+clone at the site, none at any caller, and the param's other reads keep the
+borrow. A `mut` param is `&mut T` for its whole body and takes the same
+site-level clone at every by-value position (#2266).
+
+A param that is owned costs every caller that still needs its value a clone; a
+borrowed param costs nothing at the call. Whether a fn ends up `&T` or `T` is
+visible in the emitted Rust (`almide app.almd --target rust`), and the
+ownership certifier (`ALMIDE_CERTIFY_OWNERSHIP=report`) names a param owned
+that no occurrence needs owned.
+
 ### Effect Functions
 
 `effect fn` compiles to Rust functions returning `Result<T, String>`. The `ResultPropagationPass` inserts `?` on fallible calls automatically. The template for `effect_fn_decl` is identical to `fn_decl` because the return type in IR is already `Result<T, String>`.
