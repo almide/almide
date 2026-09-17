@@ -1,10 +1,19 @@
 fn render_iter_chain(ctx: &RenderContext, source: &IrExpr, consume: bool, steps: &[IterStep], collector: &IterCollector) -> String {
     let src = render_expr(ctx, source);
-    // A borrowed source still hands every step an OWNED element (`.cloned()`),
-    // mirroring the `&[A]` runtime twins that clone per element — so a step
-    // lambda is prepared the same way whichever form the source takes.
+    // A borrowed source hands every step a `&T` when the clone pass bound the
+    // element binders by reference (`borrowed_loop_vars`, the same mark a
+    // `for` binder carries, #2287) — no element is cloned; otherwise an OWNED
+    // element (`.cloned()`), mirroring the `&[A]` runtime twins that clone
+    // per element, so a step lambda is prepared the same way whichever form
+    // the source takes.
+    let by_ref = !consume
+        && almide_ir::source_element_receivers(steps, collector)
+            .and_then(|r| r.first().map(|(v, _)| *v))
+            .is_some_and(|v| ctx.ann.borrowed_loop_vars.contains(&v));
     let mut chain = if consume {
         format!("({}).into_iter()", src)
+    } else if by_ref {
+        format!("({}).iter()", src)
     } else {
         format!("({}).iter().cloned()", src)
     };

@@ -66,6 +66,9 @@ impl NanoPass for CloneInsertionPass {
         // `&T` off `xs.iter()`.
         program.codegen_annotations.borrowed_loop_vars = loops.borrowed;
         program.codegen_annotations.consumed_loop_vars = loops.consumed;
+        // A filter-family chain binder rebound `let x = *x` off a `&&T`
+        // (#2287): the binding's annotation is `_`, its IR type stays `T`.
+        program.codegen_annotations.infer_binding_tys.extend(loops.infer);
         PassResult { program, changed: true }
     }
 }
@@ -687,6 +690,20 @@ pub(crate) fn insert_clones_live(mut expr: IrExpr, ctx: &mut CloneCtx) -> IrExpr
             let owned = almide_ir::free_vars::bound_vars(&e);
             let mut lam_ctx = CloneCtx { always: ctx.always, eligible: ctx.eligible, remaining: ctx.remaining, in_loop: true, memo: ctx.memo, fresh: &fresh, owned: &owned, loops: ctx.loops, captured: &captured };
             return e.map_children(&mut |child| insert_clones_live(child, &mut lam_ctx));
+        }
+        // A fused chain whose source is a BORROW (`consume == false`, the
+        // borrow pass's element verdict, #2287): the lambdas its source
+        // element reaches are loop bodies whose binder may be bound `&T` off
+        // `xs.iter()`, exactly like a `for` binder — so a field of such a
+        // binder is never moved out (`LoopMarks::binders`, decided before the
+        // bodies are walked), and once the bodies' clones are placed the
+        // binders that only borrow are marked (`LoopMarks::borrowed`).
+        IrExprKind::IterChain { source, consume, steps, collector } => {
+            let chain = IrExpr { kind: IrExprKind::IterChain { source, consume, steps, collector }, ty: ty.clone(), span, def_id: None };
+            super::pass_clone_loops::note_chain_element_binders(&chain, ctx.loops);
+            let mut chain = chain.map_children(&mut |child| insert_clones_live(child, ctx));
+            super::pass_clone_loops::mark_chain_element_binders(&mut chain, ctx.loops);
+            return chain;
         }
         // Default: recurse into every child through the exhaustive `map_children`
         // chokepoint. Every node whose clone insertion is just "recurse into the
