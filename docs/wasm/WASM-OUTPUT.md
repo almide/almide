@@ -170,10 +170,19 @@ marshalling. `app.js` is a dependency-free ES module:
 - `@extern(wasm, "js", "name")` imports are wired through
   `init(source, { js: { name } })`; a `String` argument is decoded from the
   block header before the user function runs, a `String` return is encoded
-  into a fresh block the guest owns. The structural leg has no extern-import
-  lowering yet, so such a program renders on the incumbent leg — the
-  `// @leg: incumbent` line of `spec/wasm_host_js/extern_js.almd` is the
-  ratchet row that makes a route change visible.
+  into a fresh block the guest owns. The structural leg lowers each
+  declaration to a declared import (#2275): the fn's slot is emitted as a
+  loud stub, and a post-pass over the finished bytes (`imports.rs`) turns
+  every stub into `(import module name (func ...))` behind the five
+  `almide.*` imports, renumbering calls, exports and table entries through
+  one map. The ABI is the one exports use (`Int` → i64, `Float` → f64,
+  `Bool` → i32, `String` → i32 block, `Unit` → no result); a `String`
+  argument is borrowed across the call (the host releases nothing) and a
+  `String` result is a fresh block the guest owns. A `rs`/`rust` extern has
+  no wasm host and stays a wall on both legs. The `// @leg: structural` line
+  of `spec/wasm_host_js/extern_js.almd` is the ratchet row that makes a
+  route change visible; `almide run --target wasm` refuses such a program by
+  name (it has no host for the import) and points at `--host js`.
 - Every `pub fn` gets a wrapper: `Int` ↔ `number` (a `RangeError` outside
   ±2^53 rather than a silent truncation — pass a `BigInt`-aware hook to keep a
   wider value exact), `Float`, `Bool`, `String`, `Unit`. Any other type on the
