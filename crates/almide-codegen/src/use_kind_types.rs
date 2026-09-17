@@ -78,6 +78,12 @@ pub enum Site {
     MapKeyed,
     /// The operand of a `Deref` node.
     Deref,
+    /// A `String` operand of a comparison (`==`, `!=`, `<`, …) whose other
+    /// operand is a `String` place or literal: the clone pass compares the
+    /// two as `&str` views (`pass_clone_compare`), so the value is read
+    /// through a reference, never moved. Any other comparison operand is an
+    /// [`Site::Operand`].
+    Compare,
     /// Any other read that keeps the value where it is: a non-concat binary
     /// or unary operand, a range bound, an index or key, a condition, a
     /// guard, a macro or inline-template argument, a `take` count, the
