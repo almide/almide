@@ -156,13 +156,22 @@ fn rewrite_calls(expr: IrExpr, sigs: &HashMap<String, Vec<ParamBorrow>>, mod_sco
 
         // ── Opaque to this rewriter ──
         //
-        // A `TailCall` is already committed, an `RcWrap` is a closure-value
-        // box, and `InlineRust` args are rendered verbatim by the template —
-        // annotating inside any of them would change code the walker no longer
-        // owns.
+        // A `TailCall` is already committed and an `RcWrap` is a closure-value
+        // box — annotating inside either would change code the walker no
+        // longer owns.
         kind @ (IrExprKind::TailCall { .. }
-        | IrExprKind::RcWrap { .. }
-        | IrExprKind::InlineRust { .. }) => kind,
+        | IrExprKind::RcWrap { .. }) => kind,
+        // An `InlineRust` template splices each arg's TEXT verbatim, so the
+        // arg itself takes no slot decoration — but a call nested inside an
+        // arg is an ordinary call site the walker still renders, and its own
+        // arguments follow its callee's signature. The region window
+        // (`almide_region_window(|| __rgn_check(__rgn_make(d)))`, #1961) is
+        // one: `__rgn_check` borrows its tree once variants borrow, and the
+        // site must spell `&__rgn_make(d)`.
+        IrExprKind::InlineRust { template, args } => IrExprKind::InlineRust {
+            template,
+            args: args.into_iter().map(|(n, a)| (n, rewrite_calls(a, sigs, mod_scope))).collect(),
+        },
         // IterChain: only the source is a call site the walker still renders;
         // the steps and collector are already-lowered iterator adaptors.
         IrExprKind::IterChain { source, consume, steps, collector } => IrExprKind::IterChain {
