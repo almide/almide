@@ -119,7 +119,7 @@ fn iterable_root(expr: &IrExpr) -> Option<VarId> {
 /// nested loop or lambda belongs to THAT scope's freshness, and a `let`
 /// inside an `if`/`match` arm is left conservative (cloned) rather than
 /// reasoned about here.
-fn loop_fresh_vars(var: Option<VarId>, var_tuple: Option<&[VarId]>, body: &[IrStmt]) -> HashSet<VarId> {
+pub(crate) fn loop_fresh_vars(var: Option<VarId>, var_tuple: Option<&[VarId]>, body: &[IrStmt]) -> HashSet<VarId> {
     let mut fresh: HashSet<VarId> = var.into_iter().collect();
     fresh.extend(var_tuple.into_iter().flatten().copied());
     for s in body {
