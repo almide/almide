@@ -155,7 +155,7 @@ fn definitely_consumes(u: &Use) -> bool {
     // `String` part bare for the same reason).
     let moving = |s: &Site| matches!(
         s,
-        Site::Result | Site::Concat | Site::Arg(SlotMode::Consume | SlotMode::Keep)
+        Site::Result | Site::Concat | Site::Arg(SlotMode::Consume)
             | Site::Callback | Site::Iterable { consumed: true } | Site::FoldInit | Site::Assigned
     ) || matches!(s, Site::Construct(c) if *c != Ctor::Interp);
     match u.chain {
@@ -169,7 +169,7 @@ fn definitely_consumes(u: &Use) -> bool {
 /// argument, a bind, an iterable (the renderer iterates `&v.items`), and a
 /// projection chain ending in one of those.
 fn reference_passes_through(u: &Use) -> bool {
-    let through = |s: &Site| matches!(s, Site::Arg(SlotMode::Consume | SlotMode::Keep) | Site::Assigned | Site::Iterable { .. });
+    let through = |s: &Site| matches!(s, Site::Arg(SlotMode::Consume) | Site::Assigned | Site::Iterable { .. });
     match u.chain {
         Some(c) => through(&c.top),
         None => through(&u.site),
