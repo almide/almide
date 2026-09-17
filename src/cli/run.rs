@@ -477,6 +477,21 @@ pub(crate) fn wasmtime_fs_args(cmd: &mut Command) {
     }
 }
 
+/// The first function import of `bytes` outside the `almide.*` host contract
+/// (#2275): a program's own `@extern(wasm, ..)` declaration.
+fn foreign_import(bytes: &[u8]) -> Option<(String, String)> {
+    for payload in wasmparser::Parser::new(0).parse_all(bytes) {
+        if let Ok(wasmparser::Payload::ImportSection(r)) = payload {
+            for i in r.into_imports().flatten() {
+                if matches!(i.ty, wasmparser::TypeRef::Func(_)) && i.module != "almide" {
+                    return Some((i.module.to_string(), i.name.to_string()));
+                }
+            }
+        }
+    }
+    None
+}
+
 /// Build `file` to a wasm32-wasi module and execute it on the `wasmtime` CLI.
 ///
 /// Mirrors the test runner's wasm invocation (`wasmtime --dir=/ <module>`) so
@@ -500,6 +515,15 @@ fn cmd_run_wasm(file: &str, program_args: &[String], verified: bool, time_report
     // bytes without an external runtime. Program args stay unsupported on
     // this leg the honest way: a program that READS them walls at emit.
     if structural {
+        // #2275: a declared `@extern(wasm, ..)` import has no host here —
+        // say so, instead of wasmtime's "unknown import" at instantiation.
+        if let Some((module, name)) = foreign_import(&bytes) {
+            err(&format!(
+                "error: this program imports `{module}.{name}` (an `@extern(wasm, \"{module}\", \"{name}\")` declaration), and `almide run --target wasm` has no host for it\n  \
+                 hint: `almide build {file} --target wasm --host js` writes the module with a JS host next to it — run it under node or in a page, where `init({{ js: {{ {name} }} }})` serves the import"
+            ));
+            return 1;
+        }
         let started = std::time::Instant::now();
         return match almide_wasm_run::run_wasm_real_stdin_args(&bytes, program_args) {
             Ok(r) => {
