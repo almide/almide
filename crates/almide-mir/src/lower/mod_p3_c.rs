@@ -275,10 +275,23 @@ impl LowerCtx {
                 None => format!("[global-init] {var:?} has NO global_inits entry"),
             }
         });
+        // Name what the initializer IS (#2274): the wall is reported on the fn
+        // that reads the global, so the shape is the reader's pointer back to
+        // the `let` to rewrite.
+        let shape = match self.global_inits.get(&var) {
+            Some(i) if crate::lower::expr_contains_call(i) => "a computed initializer that calls a function",
+            Some(i) => match &i.kind {
+                IrExprKind::List { .. } => "a list literal with a non-literal element",
+                IrExprKind::BinOp { .. } => "a computed initializer over non-literal operands",
+                _ => "a computed initializer",
+            },
+            None => "no initializer visible to this brick",
+        };
         Err(LowerError::Unsupported(format!(
             "reference to a heap module-level global {var:?} cannot be faithfully \
-             materialized in this brick (no CONST initializer — a computed init would \
-             inject an uncounted call)"
+             materialized in this brick ({shape}; only a literal, another such \
+             global, or `xs + ys` over those folds — a computed init would inject \
+             an uncounted call)"
         )))
     }
 
@@ -301,6 +314,15 @@ impl LowerCtx {
         }
         if let Some(v) = self.materialize_literal_list_global(var, init) {
             return Ok(Some(v));
+        }
+        // A COMPUTED but call-free init over literal lists and other such
+        // globals (`let DERIVED = BASE + ["c"]`, #2274) folds to one literal
+        // list at lowering time — pure substitution and concatenation, zero
+        // calls injected — and materializes like the literal it folds to.
+        if let Some(folded) = self.fold_pure_list_init(init, 0) {
+            if let Some(v) = self.materialize_literal_list_global(var, &folded) {
+                return Ok(Some(v));
+            }
         }
         if let Some(v) = self.materialize_record_literal_global(var, ty, init) {
             return Ok(Some(v));
@@ -380,6 +402,40 @@ impl LowerCtx {
     /// Extracted from `value_or_global` (codopsy8 complexity sweep, arm 2 of 3): the
     /// pure-literal-list shape, verbatim (the gate and the builder call are unchanged, the
     /// nesting is now a guard clause).
+    /// Fold a call-free list initializer to ONE literal list: a literal list
+    /// stays, a reference to another global folds through that global's own
+    /// init (declaration order guarantees it is earlier), and `xs + ys` over
+    /// two foldable operands concatenates their elements. Anything else —
+    /// a call, a non-literal element, a mutable global, a deeper nest than
+    /// the bound allows — is `None` and keeps the honest wall. The folded
+    /// expression carries the original's type and span.
+    fn fold_pure_list_init(&self, init: &IrExpr, depth: u32) -> Option<IrExpr> {
+        if depth > 8 {
+            return None;
+        }
+        match &init.kind {
+            IrExprKind::List { .. } if crate::lower::is_pure_literal_list(init) => Some(init.clone()),
+            IrExprKind::Var { id } => {
+                if crate::lower::is_mutable_global(*id) {
+                    return None;
+                }
+                let src = self.global_inits.get(id)?.clone();
+                self.fold_pure_list_init(&src, depth + 1)
+            }
+            IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList, left, right } => {
+                let l = self.fold_pure_list_init(left, depth + 1)?;
+                let r = self.fold_pure_list_init(right, depth + 1)?;
+                let (IrExprKind::List { elements: le }, IrExprKind::List { elements: re }) = (&l.kind, &r.kind) else {
+                    return None;
+                };
+                let mut elements = le.clone();
+                elements.extend(re.iter().cloned());
+                Some(IrExpr { kind: IrExprKind::List { elements }, ty: init.ty.clone(), span: init.span, def_id: None })
+            }
+            _ => None,
+        }
+    }
+
     fn materialize_literal_list_global(
         &mut self,
         var: VarId,
