@@ -183,8 +183,9 @@ fn render_expr_match(ctx: &RenderContext, expr: &IrExpr) -> String {
     } else {
         subj
     };
+    let borrowed = super::statements::subject_is_borrowed(ctx, subject);
     let mut arms_raw = arms.iter()
-        .map(|arm| render_match_arm(ctx, arm, &expr.ty, &subject.ty))
+        .map(|arm| render_match_arm(ctx, arm, &expr.ty, &subject.ty, borrowed))
         .collect::<Vec<_>>()
         .join("\n");
     // #610 refinement backstop: guard-lowered box patterns don't count toward
