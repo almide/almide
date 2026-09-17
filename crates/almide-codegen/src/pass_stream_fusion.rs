@@ -47,9 +47,9 @@
 //!    reaches here (it lowers to the self-hosted `__fallible_*` twins).
 //!
 //! A chain's source is consumed or borrowed as the twin's own slot says
-//! (`@consume(xs)` → `.into_iter()`, a `&[A]` slot → `.iter().cloned()`); the
-//! dead `Clone` the clone pass may later put in front of an enumerate-adapted
-//! source is turned back into a borrow by `ChainSourceBorrowPass`.
+//! (`@consume(xs)` → `.into_iter()`, a `&[A]` slot → `.iter().cloned()`);
+//! `ChainSourceBorrowPass` later turns a source the clone pass had to clone,
+//! or a borrowed slice param, into a borrowed iteration.
 //!
 //! Ablation: `ALMIDE_STREAM_FUSION_OFF=1` skips the pass entirely.
 
@@ -61,7 +61,6 @@ use almide_ir::*;
 
 use super::pass::{NanoPass, PassResult, Target};
 use super::pass_borrow_inference::seed_intrinsic_sigs;
-use super::use_kind::written_vars;
 use super::pass_rust_lowering::rewrite_tail_list_to_array;
 use super::pass_stdlib_lowering::{prepare_lambda, prepare_lambda_borrowed};
 
@@ -475,45 +474,6 @@ fn source_of(arg: IrExpr, symbol: &str, sigs: &std::collections::HashMap<String,
 /// consumes (the runtime default).
 fn slot_consumes(symbol: &str, sigs: &std::collections::HashMap<String, Vec<ParamBorrow>>) -> bool {
     sigs.get(symbol).map_or(true, |modes| modes.first().is_none_or(|m| *m == ParamBorrow::Own))
-}
-
-/// The `Clone` in front of an adapted source is DEAD by construction (#2098):
-/// CloneInsertion put it there so the consuming runtime call could not take
-/// the caller's value, and fusing that call away removed the consumer. What
-/// remains is an iteration, which `.iter().cloned()` serves from a borrow —
-/// so `list.enumerate(v)` over a 1,200-element capture stops copying the
-/// whole vector once per closure call.
-///
-/// The one way a borrow could still be wrong is a callback that MUTATES the
-/// same variable while the chain walks it, so that is exactly the condition
-/// checked — and it is checked on the FINAL chain, after any merge, because a
-/// merge can only add callbacks and they belong in the same scan. Only a plain
-/// variable qualifies: a temporary would be correct too (Rust extends it to
-/// the end of the statement) but buys nothing.
-pub(crate) fn borrow_adapted_source(mut expr: IrExpr) -> IrExpr {
-    let IrExprKind::IterChain { source, consume, steps, collector } = &mut expr.kind else {
-        return expr;
-    };
-    if !*consume || !steps.iter().any(|s| matches!(s, IterStep::Enumerate)) {
-        return expr;
-    }
-    let IrExprKind::Clone { expr: inner } = &source.kind else { return expr };
-    let IrExprKind::Var { id } = &inner.kind else { return expr };
-    let id = *id;
-    let init = match &*collector {
-        IterCollector::Fold { init, .. } => Some(&**init),
-        _ => None,
-    };
-    let writes_source = steps.iter().filter_map(IterStep::lambda).chain(collector.lambda()).chain(init)
-        .any(|e| written_vars(e).contains(&id));
-    if writes_source {
-        return expr;
-    }
-    let taken = std::mem::replace(&mut source.kind, IrExprKind::Unit);
-    let IrExprKind::Clone { expr: inner } = taken else { unreachable!("checked above") };
-    *source = inner;
-    *consume = false;
-    expr
 }
 
 fn chain(expr: &IrExpr, source: IrExpr, consume: bool, steps: Vec<IterStep>, collector: IterCollector) -> IrExpr {
