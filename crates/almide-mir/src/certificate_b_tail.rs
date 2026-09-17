@@ -192,7 +192,13 @@ pub fn plus_one_events_backed(func: &MirFunction) -> bool {
         .filter(|o| match o {
             crate::Op::Call { dst: Some(_), result: Some(r), .. }
             | crate::Op::CallFn { dst: Some(_), result: Some(r), .. }
-            | crate::Op::CallIndirect { dst: Some(_), result: Some(r), .. } => r.is_heap(),
+            | crate::Op::CallIndirect { dst: Some(_), result: Some(r), .. }
+            // A heap-returning `@extern(wasm, ..)` import hands back a fresh
+            // owned handle (`try_lower_extern_wasm`): the same `i` the
+            // certificate emits for it (`heap_call_dst`) is backed by the
+            // host's allocation, so it counts here too (#2265 — before the
+            // import call's result was typed, no such fn ever validated).
+            | crate::Op::CallImport { dst: Some(_), result: Some(r), .. } => r.is_heap(),
             _ => false,
         })
         .count();
