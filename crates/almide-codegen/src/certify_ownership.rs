@@ -49,27 +49,33 @@ use crate::use_kind::{Ctor, ExplicitBorrows, Site, SlotMode, Use, UseSites};
 pub fn certify(program: &IrProgram) -> Vec<String> {
     let ann = &program.codegen_annotations;
     let records = crate::pass_borrow_inference::seed_record_names(program);
-    program.functions.iter().flat_map(|f| certify_fn(f, &program.var_table, ann, &records)).collect()
+    let variants = crate::pass_borrow_inference::seed_variant_names(program);
+    program.functions.iter().flat_map(|f| certify_fn(f, &program.var_table, ann, &records, &variants)).collect()
 }
 
 /// The violations in one function. `records` is the record-type set the
 /// borrow pass admits (`is_borrow_eligible`): C4 judges a verdict only over
 /// the types the pass can borrow at all — an enum, tuple or matrix param has
 /// no borrowed form yet, so its `Own` is the only mode, not a wrong one.
-pub fn certify_fn(f: &IrFunction, vars: &VarTable, ann: &CodegenAnnotations, records: &HashSet<String>) -> Vec<String> {
+pub fn certify_fn(f: &IrFunction, vars: &VarTable, ann: &CodegenAnnotations, records: &HashSet<String>, variants: &HashSet<String>) -> Vec<String> {
     let sites = UseSites::of_expr(&f.body, Site::Result, &ExplicitBorrows);
     let uses: Vec<&Use> = sites.iter().collect();
-    let mut out: Vec<String> = f.params.iter().filter_map(|p| certify_param(f, p, &uses, ann, records)).collect();
+    let mut out: Vec<String> = f.params.iter().filter_map(|p| certify_param(f, p, &uses, &sites, ann, records, variants)).collect();
     out.extend(certify_last_use_clones(f, vars, ann, &uses));
     out
 }
 
 /// C1 / C4 for one param: `None` when its verdict holds.
-fn certify_param(f: &IrFunction, p: &IrParam, uses: &[&Use], ann: &CodegenAnnotations, records: &HashSet<String>) -> Option<String> {
+fn certify_param(f: &IrFunction, p: &IrParam, uses: &[&Use], sites: &UseSites, ann: &CodegenAnnotations, records: &HashSet<String>, variants: &HashSet<String>) -> Option<String> {
     if !heap(&p.ty) || p.open_record.is_some() {
         return None;
     }
     let mine: Vec<&Use> = uses.iter().copied().filter(|u| u.var == p.var).collect();
+    // A variant param whose matches only read their payloads is matched by
+    // reference (the borrow pass's rule, `scrutinee_binders_borrow_only`):
+    // its subject position justifies nothing.
+    let subject_reads = crate::pass_borrow_inference::is_named_in(&p.ty, variants)
+        && crate::pass_borrow_inference::scrutinee_binders_borrow_only(&f.body, p.var, sites);
     match p.borrow {
         ParamBorrow::Ref | ParamBorrow::RefStr | ParamBorrow::RefSlice => {
             // A reference handed bare to a call slot, bound to a local, or
@@ -84,13 +90,13 @@ fn certify_param(f: &IrFunction, p: &IrParam, uses: &[&Use], ann: &CodegenAnnota
                 f.name, p.name, p.ty, p.borrow, u.site, u.chain
             ))
         }
-        ParamBorrow::Own if owned_verdict_is_checkable(f, p, ann) && crate::pass_borrow_inference::is_borrow_eligible(&p.ty, records) => {
+        ParamBorrow::Own if owned_verdict_is_checkable(f, p, ann) && (crate::pass_borrow_inference::is_borrow_eligible(&p.ty, records) || crate::pass_borrow_inference::is_named_in(&p.ty, variants)) => {
             // A param whose every occurrence is a `Clone` (a capture
             // materialised per closure) costs the same owned or borrowed —
             // each clone would be a `to_owned()` — so its ownership is not
             // a defect.
             let only_cloned = !mine.is_empty() && mine.iter().all(|u| u.site == Site::Clone && u.depth == 0);
-            if only_cloned || mine.iter().any(|u| justifies_ownership(u)) {
+            if only_cloned || mine.iter().any(|u| justifies_ownership(u) && !(subject_reads && u.site == Site::Scrutinee)) {
                 return None;
             }
             Some(format!(
