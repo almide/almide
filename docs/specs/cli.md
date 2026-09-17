@@ -234,7 +234,7 @@ test "render" {
 almide check                            # パッケージ内: src/ 配下の .almd を全部チェック (#2165)
 almide check app.almd                   # 指定ファイルをチェック
 almide check --deny-warnings            # 警告をエラーとして扱う
-almide check --json                     # 診断を JSON で出力
+almide check --json                     # 診断を JSON で出力(パッケージ内なら src/ 全部、#2253)
 almide check --explain E001             # エラーコードの説明
 almide check --effects                  # 各関数のエフェクト分析を表示
 almide check --timings                  # フロントエンドの phase 別内訳
@@ -297,6 +297,16 @@ almide-timings {"lex_ns":1812250,"parse_ns":1644211,"check_ns":3851626,"total_ns
 型エラーのみの場合は従来通り終了コード `0` で、判定は JSON の `level` を読む。
 
 テスト: `tests/mcp_test.rs`（`json_check_reports_a_total_parse_failure_as_json`）
+
+**パッケージ全体の JSON**(#2253): FILE を省いた `almide check --json` は、素の `almide check`
+と同じ `src/` 配下の全エントリを同じ順で判定し、全診断を 1 行 1 診断で出す。各行の `file`
+がどのエントリの診断かを言うので、それ以外の複数ファイル向けの形はない(エントリごとの
+`: ok` 行も出ない — 行は診断だけ)。終了コードは単一ファイル形の集約: パースできなかった
+エントリが 1 つでもあれば `1`(他のエントリの判定は続ける)、型エラーだけなら `0` で `level`
+を読む。`--effects` は関数ごとのレポートなので従来どおり単一エントリ解決のまま。
+
+テスト: `tests/check_package_entries_test.rs`（`json_judges_every_entry_and_each_row_names_its_file`、
+`json_exit_code_is_one_when_an_entry_does_not_parse`）
 
 エラーコード:
 

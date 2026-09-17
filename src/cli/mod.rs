@@ -33,7 +33,7 @@ pub use build::{cmd_build, BuildArgs};
 pub use bench::cmd_bench;
 pub use compile::cmd_compile;
 pub use emit::{cmd_emit, EmitArgs};
-pub use check::{cmd_check, cmd_check_package, cmd_check_json, cmd_check_effects};
+pub use check::{cmd_check, cmd_check_package, cmd_check_json, cmd_check_json_package, cmd_check_effects};
 pub use commands::{cmd_init, cmd_test, cmd_test_fast, cmd_test_json, cmd_test_update_snapshots, cmd_test_wasm, cmd_fmt, cmd_clean, FmtMode};
 pub use install::cmd_install;
 pub use selfupdate::cmd_self_update;
