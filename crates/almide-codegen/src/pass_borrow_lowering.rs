@@ -448,17 +448,30 @@ impl IrMutVisitor for Lower<'_> {
         // A match on a by-reference param (or on a binder such a match
         // bound) binds its payloads by reference: note them before the arms
         // are walked, so their reads lower like a `&mut` param's.
-        if let IrExprKind::Match { subject, arms } = &expr.kind {
+        if let IrExprKind::Match { subject, arms } = &mut expr.kind {
+            // A cloned subject (`xs.clone()`) is an owned value and binds by
+            // value; only the variable itself, its borrow, or the box-deref
+            // of a reference binder matches by reference.
             let root = match &subject.kind {
                 IrExprKind::Var { id } => Some(*id),
-                IrExprKind::Borrow { expr: inner, .. } | IrExprKind::Clone { expr: inner } => var_id(inner),
+                IrExprKind::Borrow { expr: inner, .. } | IrExprKind::Deref { expr: inner } => var_id(inner),
                 _ => None,
             };
             if let Some(id) = root
                 && (matches!(param_mode(self.params, id), Some(ParamBorrow::Ref)) || self.ref_binders.contains(&id))
             {
+                // `match *t` of a boxed payload bound `&Box<T>` reads the
+                // box's value through two references: `match &**t`, which
+                // binds the arms' payloads by reference again.
+                if matches!(subject.kind, IrExprKind::Deref { .. }) && self.ref_binders.contains(&id) {
+                    let ty = subject.ty.clone();
+                    let span = subject.span;
+                    let inner = std::mem::replace(subject.as_mut(), mk(IrExprKind::Unit, Ty::Unit, None));
+                    let deref2 = mk(IrExprKind::Deref { expr: Box::new(inner) }, ty.clone(), span);
+                    *subject = Box::new(mk(IrExprKind::Borrow { expr: Box::new(deref2), as_str: false, mutable: false }, ty, span));
+                }
                 let mut bound = Vec::new();
-                for arm in arms { pattern_binders(&arm.pattern, &mut bound); }
+                for arm in arms.iter() { pattern_binders(&arm.pattern, &mut bound); }
                 self.ref_binders.extend(bound);
             }
         }
