@@ -83,6 +83,7 @@ shebang は先頭（任意のUTF-8 BOMの直後を含む）だけで認識され
 almide build                            # src/main.almd → パッケージ名のバイナリ
 almide build app.almd -o myapp          # 出力ファイル名指定
 almide build app.almd --target wasm     # WASM バイナリ（直接 emit、rustc 不要）
+almide build app.almd --target wasm --host js -o dist/app.wasm  # + dist/app.js, dist/app.d.ts (JS ホスト、#2265)
 almide build --release                  # 最適化ビルド (opt-level=2)
 almide build --fast                     # 最大性能 (opt-level=3, LTO, native CPU)
 ```
@@ -91,6 +92,7 @@ almide build --fast                     # 最大性能 (opt-level=3, LTO, native
 |---|---|
 | `-o <name>` | 出力ファイル名 |
 | `--target wasm` | WASM バイナリを生成（直接 emit） |
+| `--host js` | `--target wasm` 専用: モジュールの隣に JS ホスト `<mod>.js`（依存なしの ES module）と `<mod>.d.ts` を書く（#2265）。`init(source?, hooks?)` がインスタンス化、`run()` が `main`、`pub fn` ごとに 1 つのラッパ。`@extern(wasm, "js", "name")` は `init({ js: { name } })` で結線。マーシャルは Int（`number`、±2^53 の範囲検査）/ Float / Bool / String / Unit — それ以外の型を境界に持つ `pub fn` はビルド時に型名を挙げて拒否。ゲート: `scripts/check-js-host.sh`（`spec/wasm_host_js/` を node で実行し、期待出力と native 出力に一致させる）。仕様: docs/wasm/WASM-OUTPUT.md「JS host」節 |
 | `--release` | 最適化ビルド |
 | `--fast` | 最大性能（`--release` を含む + LTO + native CPU） |
 | `--unchecked-index` | 配列の境界チェックを無効化（unsafe） |
