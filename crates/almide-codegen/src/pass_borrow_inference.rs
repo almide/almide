@@ -83,10 +83,21 @@ fn tco_owned_params(func: &IrFunction, mut borrows: Vec<ParamBorrow>) -> Vec<Par
 /// (`Ty::Named`) is borrow-inferred like a structural record instead of being
 /// deep-cloned at every read (#647).
 pub(crate) fn seed_record_names(program: &IrProgram) -> HashSet<String> {
+    seed_named_types(program, |k| matches!(k, IrTypeDeclKind::Record { .. }))
+}
+
+/// The names of every user-declared VARIANT type. A `s: Shape` param is
+/// borrow-eligible like a record; whether its `match` reads it by reference
+/// is decided per body by [`scrutinee_binders_borrow_only`].
+pub(crate) fn seed_variant_names(program: &IrProgram) -> HashSet<String> {
+    seed_named_types(program, |k| matches!(k, IrTypeDeclKind::Variant { .. }))
+}
+
+fn seed_named_types(program: &IrProgram, keep: impl Fn(&IrTypeDeclKind) -> bool) -> HashSet<String> {
     let mut set = HashSet::new();
     let mut collect = |decls: &[IrTypeDecl]| {
         for td in decls {
-            if matches!(td.kind, IrTypeDeclKind::Record { .. }) {
+            if keep(&td.kind) {
                 set.insert(td.name.to_string());
             }
         }
@@ -443,6 +454,7 @@ pub fn infer_borrow_signatures(program: &mut IrProgram) -> HashMap<String, Vec<P
     let mut mirror_owners: HashMap<String, String> = HashMap::new();
 
     let records = seed_record_names(program);
+    let variants = seed_variant_names(program);
     seed_intrinsic_sigs(&mut sigs);
     seed_builtin_output_sigs(&mut sigs);
     seed_codec_helper_sigs(&mut sigs);
@@ -452,7 +464,7 @@ pub fn infer_borrow_signatures(program: &mut IrProgram) -> HashMap<String, Vec<P
     let mut iter = 0usize;
     loop {
         let snapshot = sigs.clone();
-        let round = Round { snapshot: &snapshot, pending: &pending, records: &records };
+        let round = Round { snapshot: &snapshot, pending: &pending, records: &records, variants: &variants };
         infer_program_fn_borrows(program, &mut sigs, &round);
         infer_program_module_borrows(program, &mut sigs, &mut mirror_owners, &round);
 

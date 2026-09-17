@@ -23,9 +23,15 @@ pub(crate) struct Round<'a> {
     /// such a type is `Ty::Named("Tok")` (not a structural `Ty::Record`), so
     /// without this set `is_borrow_eligible` / `intrinsic_borrow_mode` treat
     /// it as Own and every reader deep-clones the whole record. Records get
-    /// borrow inference like structural records; user VARIANTs stay Own
-    /// (conservative — variant borrowing is not generalized here). #647
+    /// borrow inference like structural records. #647
     pub records: &'a HashSet<String>,
+    /// Names of user-declared VARIANT types. A variant param is
+    /// borrow-eligible too; its `match` subject position reads it by
+    /// reference when every binder the arms introduce is itself only read
+    /// ([`scrutinee_binders_borrow_only`]) — the match then lowers as the
+    /// borrowed-subject match the clone pass already emits for a live
+    /// subject, and every caller keeps its value without a clone.
+    pub variants: &'a HashSet<String>,
 }
 
 /// One function's view of a [`Round`]: the module it lives in (its callees
@@ -69,7 +75,7 @@ impl Scope<'_> {
     }
 
     fn is_borrow_eligible(&self, ty: &Ty) -> bool {
-        is_borrow_eligible(ty, self.round.records)
+        is_borrow_eligible(ty, self.round.records) || is_named_in(ty, self.round.variants)
     }
 }
 
@@ -217,6 +223,75 @@ fn scrutinee_only_compares(body: &IrExpr, var: VarId) -> bool {
     scan.ok
 }
 
+/// Is `ty` a `Ty::Named` whose name is in `names`?
+pub(crate) fn is_named_in(ty: &Ty, names: &HashSet<String>) -> bool {
+    matches!(ty, Ty::Named(n, _) if names.contains(n.as_str()))
+}
+
+/// Does every `match` in `body` whose subject is the bare variable `var`
+/// bind only payloads the arms READ — a `Copy` scalar, or a heap value whose
+/// every occurrence is a non-consuming position (a borrowed argument, a
+/// member read, a comparison, an interpolation part)? Then the subject can
+/// be matched by reference: the arms bind `&T` payloads and nothing needs
+/// the value moved out. One binder returned, concatenated, built into a
+/// record / list, captured or handed to an owned slot keeps the subject
+/// owned, where matching by value moves the payload out for free. Shared
+/// by the borrow verdict and the ownership certifier's C4, so the two read
+/// one rule.
+pub(crate) fn scrutinee_binders_borrow_only(body: &IrExpr, var: VarId, uses: &UseSites) -> bool {
+    use almide_ir::visit::{IrVisitor, walk_expr, walk_stmt};
+    struct Scan<'a> { var: VarId, uses: &'a UseSites, ok: bool, matched: bool }
+    fn binders(p: &IrPattern, out: &mut Vec<(VarId, Ty)>) {
+        match p {
+            IrPattern::Wildcard | IrPattern::Literal { .. } | IrPattern::None => {}
+            IrPattern::Bind { var, ty } => out.push((*var, ty.clone())),
+            IrPattern::As { var, ty, inner } => { out.push((*var, ty.clone())); binders(inner, out); }
+            IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => binders(inner, out),
+            IrPattern::Constructor { args, .. } => args.iter().for_each(|a| binders(a, out)),
+            IrPattern::Tuple { elements } => elements.iter().for_each(|e| binders(e, out)),
+            IrPattern::List { elements, rest } => {
+                elements.iter().for_each(|e| binders(e, out));
+                if let Some(r) = rest { binders(r, out); }
+            }
+            IrPattern::RecordPattern { fields, .. } => {
+                for f in fields { if let Some(p) = &f.pattern { binders(p, out); } }
+            }
+        }
+    }
+    impl IrVisitor for Scan<'_> {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            // The subject is the variable itself, or the clone / borrow of it
+            // a later pass wrapped it in: the certifier reads the FINAL IR,
+            // where the clone pass has already spelled a held subject as
+            // `xs.clone()`, and must see the same matches the verdict saw.
+            let subject_var = |s: &IrExpr| match &s.kind {
+                IrExprKind::Var { id } => Some(*id),
+                IrExprKind::Clone { expr } | IrExprKind::Borrow { expr, .. } => match &expr.kind {
+                    IrExprKind::Var { id } => Some(*id),
+                    _ => None,
+                },
+                _ => None,
+            };
+            if let IrExprKind::Match { subject, arms } = &e.kind
+                && subject_var(subject) == Some(self.var)
+            {
+                self.matched = true;
+                let mut bound = Vec::new();
+                for arm in arms { binders(&arm.pattern, &mut bound); }
+                for (b, ty) in bound {
+                    if almide_ir::top_let_storage::clone_free(&ty) { continue; }
+                    if self.uses.of(b).any(consumes) { self.ok = false; }
+                }
+            }
+            walk_expr(self, e);
+        }
+        fn visit_stmt(&mut self, s: &IrStmt) { walk_stmt(self, s); }
+    }
+    let mut scan = Scan { var, uses, ok: true, matched: false };
+    scan.visit_expr(body);
+    scan.matched && scan.ok
+}
+
 /// Is `later` after `earlier` in evaluation order? Occurrences are recorded
 /// in that order, so pointer position in the table decides.
 fn after(earlier: &Use, later: &Use) -> bool {
@@ -246,7 +321,17 @@ fn param_borrow(param: &IrParam, uses: &UseSites, scope: &Scope, body: &IrExpr) 
     // those positions (#2231).
     let is_string = matches!(param.ty, Ty::String);
     let literal_subject = is_string && scrutinee_only_compares(body, param.var);
-    let read_by_ref = |u: &Use| (literal_subject && u.site == Site::Scrutinee)
+    // A variant param whose every `match` only READS what it binds — scalar
+    // payloads, heap payloads at borrowed positions — is matched by
+    // reference: the arms bind `&T` payloads (Rust's default binding modes),
+    // the shape the clone pass already emits for a live subject, and no
+    // caller clones the value to pass it. A payload that is returned,
+    // built into a value or handed to an owned slot keeps the owned
+    // verdict: matching by value moves it out for free where a borrowed
+    // match would clone it.
+    let variant_subject = is_named_in(&param.ty, scope.round.variants)
+        && scrutinee_binders_borrow_only(body, param.var, uses);
+    let read_by_ref = |u: &Use| ((literal_subject || variant_subject) && u.site == Site::Scrutinee)
         || (is_string && u.site == Site::Construct(Ctor::Interp) && u.depth == 0);
     // A consuming use that a LATER statement follows with another use of
     // the param can never move it — `CloneInsertion` clones it because the
