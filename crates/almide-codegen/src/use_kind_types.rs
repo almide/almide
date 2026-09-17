@@ -134,6 +134,13 @@ pub struct Use {
     /// (or one block tail), so a borrow one of them holds can still be live
     /// when the other runs.
     pub stmt: u32,
+    /// The ordinal of the OUTERMOST statement enclosing this occurrence —
+    /// the one at the top level of the analysed body. A `Block` nested in an
+    /// expression (a capture-clone binding hoisted in front of its closure,
+    /// an inlined `let`) numbers its own statements, so `stmt` splits one
+    /// evaluation into several ordinals; a borrow the outer statement holds
+    /// (a `format_args!` part, a `&v` argument) is live across all of them.
+    pub top_stmt: u32,
     /// The innermost conditional ARM the occurrence sits in (an `if` branch,
     /// a `match` arm, a loop body, a lambda body), `0` for none. Arms form a
     /// tree ([`UseSites::keeps_live`]): an occurrence in an ancestor arm

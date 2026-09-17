@@ -118,12 +118,15 @@ fn certify_last_use_clones(f: &IrFunction, vars: &VarTable, ann: &CodegenAnnotat
         if !candidate || clone_is_special(v, ann) || is_closure_value(&vars.get(v).ty) {
             continue;
         }
-        // Another occurrence in the SAME statement that holds a borrow of
-        // the var while this clone's consumer runs — a `&v` argument, a
-        // place read (`v.f`, `v[i]`), a bare interpolation part `format_args!`
-        // borrows — makes the clone necessary (the E0505 the clone pass's
-        // guards exist for, #809 / #866 / #1829).
-        let borrowed_in_stmt = uses.iter().any(|w| w.var == v && w.stmt == u.stmt && !std::ptr::eq(*w, *u) && matches!(
+        // Another occurrence in the SAME outermost statement that holds a
+        // borrow of the var while this clone's consumer runs — a `&v`
+        // argument, a place read (`v.f`, `v[i]`), a bare interpolation part
+        // `format_args!` borrows — makes the clone necessary (the E0505 the
+        // clone pass's guards exist for, #809 / #866 / #1829). The OUTERMOST
+        // statement, not the innermost: a capture-clone binding sits in a
+        // block of its own in front of the closure, inside the interpolation
+        // that holds the borrow (`"${k} ${zip_with(.., (x, y) => k)}"`).
+        let borrowed_in_stmt = uses.iter().any(|w| w.var == v && w.top_stmt == u.top_stmt && !std::ptr::eq(*w, *u) && matches!(
             w.site,
             Site::Borrow { .. } | Site::Arg(SlotMode::Borrow | SlotMode::Mut) | Site::Member | Site::TupleIndex
                 | Site::Index | Site::MapKeyed | Site::Deref | Site::Receiver | Site::Construct(Ctor::Interp)
