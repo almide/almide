@@ -112,10 +112,14 @@ pub trait NanoPass: std::fmt::Debug {
 Passes compose into a `Pipeline`. The pipeline runner:
 - Skips passes not relevant to the current target
 - Validates declared dependencies (panics if a dependency has not executed)
-- Verifies IR integrity and declared `Postcondition`s between passes on every
-  build — violations panic in debug and print as diagnostics in release. No
-  opt-in env var (`ALMIDE_CHECK_IR` / `ALMIDE_VERIFY_IR` removed in
-  v0.14.7-phase3.2); `expr.ty` is trustworthy by contract
+- Verifies IR integrity and every established `Postcondition` after EVERY
+  pass in EVERY profile — a violation is a compiler bug and fails the build,
+  release included. The per-pass walk used to be debug-only (`ALMIDE_VERIFY_IR`
+  opted a release build in) on a stale cost claim of ~1.2 s per file; measured
+  over the 218 files of spec/lang it is ~8 ms per file, so the profile that
+  ships now runs the same walk as `cargo test`. `ALMIDE_IR_FAULT=<pass>`
+  (harness switch) injects a violation after the named pass, the release
+  binary's negative control (`tests/ir_verify_every_profile_test.rs`)
 
 ### Rust Pipeline (in order)
 
