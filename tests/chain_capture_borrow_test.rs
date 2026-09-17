@@ -30,6 +30,11 @@ fn twice(f: (Int) -> Int, x: Int) -> Int = f(f(x))
 
 fn applied(t: Table) -> Int = twice((i) => i + list.len(t.names), 1)
 
+fn counts(tables: List[String], classes: List[String]) -> List[Int] = {
+  let all = list.flat_map(tables, (t) => [t, t])
+  list.map(classes, (c) => list.len(list.filter(all, (x) => x == c)))
+}
+
 fn main() -> Unit = {
   let t = Table { names: ["a", "bb", "ccc"], sizes: [1, 2] }
   println(int.to_string(list.len(mapped(t)) + list.len(filtered(t, 1)) + folded(t)))
@@ -37,6 +42,7 @@ fn main() -> Unit = {
   println(int.to_string(list.len(sliced([1, 2, 3], [4])) + list.len(prefixed("p", ["x"]))))
   println(int.to_string(list.len(each(t)) + saved(t)(1) + applied(t)))
   println(int.to_string(list.len(t.names)))
+  println(int.to_string(list.sum(counts(["a", "b"], ["a", "c"]))))
 }
 "#;
 
@@ -77,6 +83,11 @@ fn an_inlined_chain_callback_borrows_the_param_it_reads() {
     // the param is owned or not, so the param stays borrowed.
     let s = fn_sig_and_body(&rust, "each");
     assert!(s.starts_with("pub fn each(t: &Table)") && s.contains("t.clone()"), "{s}");
+    // A single-use local consumed inside a chain step (the source of a
+    // nested chain) is cloned there: the step runs per element, and a move
+    // out of a captured variable is E0507 (tools/almide-gates hit it).
+    let s = fn_sig_and_body(&rust, "counts");
+    assert!(s.contains("(all).iter().cloned()") || s.contains("all.clone()"), "the captured local must not move:\n{s}");
     // A closure that outlives its call captures, and the capture owns.
     assert!(fn_sig_and_body(&rust, "saved").starts_with("pub fn saved(t: Table)"), "{}", fn_sig_and_body(&rust, "saved"));
     assert!(fn_sig_and_body(&rust, "applied").starts_with("pub fn applied(t: Table)"), "{}", fn_sig_and_body(&rust, "applied"));
@@ -84,6 +95,6 @@ fn an_inlined_chain_callback_borrows_the_param_it_reads() {
     for target in ["rust", "wasm"] {
         let run = Command::new(almide_bin()).args(["run", file.to_str().unwrap(), "--target", target]).output().unwrap();
         assert!(run.status.success(), "{target}: {}", String::from_utf8_lossy(&run.stderr));
-        assert_eq!(String::from_utf8_lossy(&run.stdout).trim(), "13\ntrue\n2\n13\n3", "{target}");
+        assert_eq!(String::from_utf8_lossy(&run.stdout).trim(), "13\ntrue\n2\n13\n3\n2", "{target}");
     }
 }
