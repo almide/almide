@@ -80,6 +80,7 @@ pub fn to_p2(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
         elements,
         mut data,
         bodies,
+        foreign_imports: _,
     } = parsed;
     let main_index = main_index.ok_or_else(|| anyhow::anyhow!("no main export"))?;
     let heap_global = heap_global.ok_or_else(|| anyhow::anyhow!("no __heap export"))?;
