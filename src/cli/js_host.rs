@@ -5,10 +5,11 @@
 //! WASI stub, import object or String marshalling.
 //!
 //! What the host does:
-//! - the `wasi_snapshot_preview1` imports the module actually names get a
+//! - the `wasi_snapshot_preview1` imports the SHIPPED module names get a
 //!   shim (`fd_write` → stdout/stderr, `proc_exit` → an [`AlmideExit`]
 //!   throw, the clock/random/read floor); nothing else is linked, so nothing
-//!   else is stubbed;
+//!   else is emitted (#2276) — the host is derived from the bytes after
+//!   `--wasm-opt`, never from the pre-opt module;
 //! - every `@extern(wasm, "js", "name")` import is wired to
 //!   `init(source, { js: { name } })`, with `String` args decoded from the
 //!   block header before the user function runs and its return encoded;
@@ -23,7 +24,10 @@
 //! (`almide-layout`: rc @0, len @4, cap @8, payload @12). `String` blocks the
 //! host builds go through the module's exported allocator, and blocks the
 //! host takes out are released through its exported release, so the
-//! guest's free lists see every block they own.
+//! guest's free lists see every block they own. Those two exports and the
+//! glue's string helpers ship only when some signature carries a `String`
+//! (#2276): a scalar-only surface leaves the `.wasm` byte-identical to a
+//! build without `--host js`.
 
 use std::collections::BTreeMap;
 use almide_ir::IrProgram;
@@ -54,6 +58,14 @@ pub(crate) struct HostSurface {
 }
 
 impl HostSurface {
+    /// Does any marshalled signature carry a `String` (#2276)? Only then does
+    /// the host build or take a block, so only then do the module's
+    /// allocator/release exports and the glue's string helpers ship.
+    pub(crate) fn needs_string_abi(&self) -> bool {
+        let sigs = self.exports.iter().chain(self.externs.iter().map(|e| &e.sig));
+        sigs.flat_map(|f| f.params.iter().map(|(_, t)| t).chain(std::iter::once(&f.ret))).any(|t| matches!(t, Ty::String))
+    }
+
     pub(crate) fn of(program: &IrProgram) -> Self {
         let mut s = HostSurface::default();
         for f in &program.functions {
@@ -259,12 +271,52 @@ fn from_wasm(m: Marshal, v: Val, expr: &str, what: &str, take: bool) -> String {
     }
 }
 
-/// Which WASI imports the shim serves.
-const WASI_SHIMS: &[&str] = &[
-    "fd_write", "proc_exit", "fd_read", "random_get", "clock_time_get", "args_sizes_get", "args_get",
-    "environ_sizes_get", "environ_get", "fd_close", "fd_fdstat_get", "fd_seek", "fd_prestat_get",
-    "fd_prestat_dir_name", "path_open", "fd_filestat_get", "path_filestat_get", "path_create_directory",
-    "path_remove_directory", "path_unlink_file", "fd_readdir", "sched_yield", "poll_oneoff",
+/// The WASI shims the host knows, by import name. Only the ones the shipped
+/// module names are emitted (#2276); an import outside this table is a
+/// build-time refusal rather than a `LinkError` in the page.
+const WASI_SHIMS: &[(&str, &str)] = &[
+    ("fd_write", r#"  fd_write(fd, iovs, iovsLen, nwritten) {
+    const v = view();
+    let total = 0;
+    const parts = [];
+    for (let i = 0; i < iovsLen; i++) {
+      const ptr = v.getUint32(iovs + 8 * i, true);
+      const len = v.getUint32(iovs + 8 * i + 4, true);
+      parts.push(bytes().slice(ptr, ptr + len));
+      total += len;
+    }
+    if (fd !== 1 && fd !== 2) return 8; // EBADF
+    const chunk = new Uint8Array(total);
+    let off = 0;
+    for (const p of parts) { chunk.set(p, off); off += p.length; }
+    emit(fd, chunk);
+    view().setUint32(nwritten, total, true);
+    return 0;
+  }"#),
+    ("proc_exit", r#"  proc_exit(code) { flush(); throw new AlmideExit(code); }"#),
+    ("fd_read", r#"  fd_read(fd, iovs, iovsLen, nread) { view().setUint32(nread, 0, true); return 0; }"#),
+    ("random_get", r#"  random_get(ptr, len) { globalThis.crypto.getRandomValues(bytes().subarray(ptr, ptr + len)); return 0; }"#),
+    ("clock_time_get", r#"  clock_time_get(id, precision, out) { view().setBigUint64(out, BigInt(Date.now()) * 1000000n, true); return 0; }"#),
+    ("args_sizes_get", r#"  args_sizes_get(argc, bufSize) { const v = view(); v.setUint32(argc, 0, true); v.setUint32(bufSize, 0, true); return 0; }"#),
+    ("args_get", r#"  args_get() { return 0; }"#),
+    ("environ_sizes_get", r#"  environ_sizes_get(count, bufSize) { const v = view(); v.setUint32(count, 0, true); v.setUint32(bufSize, 0, true); return 0; }"#),
+    ("environ_get", r#"  environ_get() { return 0; }"#),
+    ("fd_close", r#"  fd_close() { return 0; }"#),
+    ("fd_fdstat_get", r#"  fd_fdstat_get() { return 8; }"#),
+    ("fd_seek", r#"  fd_seek() { return 8; }"#),
+    ("fd_prestat_get", r#"  fd_prestat_get() { return 8; }"#),
+    ("fd_prestat_dir_name", r#"  fd_prestat_dir_name() { return 8; }"#),
+    ("fd_filestat_get", r#"  fd_filestat_get() { return 8; }"#),
+    ("fd_readdir", r#"  fd_readdir() { return 8; }"#),
+    ("path_open", r#"  // ENOENT: the host has no filesystem
+  path_open() { return 44; }"#),
+    ("path_filestat_get", r#"  path_filestat_get() { return 44; }"#),
+    ("path_create_directory", r#"  path_create_directory() { return 44; }"#),
+    ("path_remove_directory", r#"  path_remove_directory() { return 44; }"#),
+    ("path_unlink_file", r#"  path_unlink_file() { return 44; }"#),
+    ("sched_yield", r#"  sched_yield() { return 0; }"#),
+    ("poll_oneoff", r#"  // ENOSYS
+  poll_oneoff() { return 52; }"#),
 ];
 
 /// Every type on the boundary is marshallable, or the build refuses.
@@ -283,10 +335,24 @@ fn check_marshallable(surface: &HostSurface) -> Result<(), String> {
     Ok(())
 }
 
+/// The `wasi` object: one shim per `wasi_snapshot_preview1` import the
+/// shipped module names, in table order, and nothing for the rest (#2276).
+fn wasi_object_js(sigs: &WasmSigs) -> String {
+    let mut js = String::from("const wasi = {\n");
+    for (name, body) in WASI_SHIMS {
+        if sigs.imports.iter().any(|(m, n, _)| m == "wasi_snapshot_preview1" && n == name) {
+            js.push_str(body);
+            js.push_str(",\n");
+        }
+    }
+    js.push_str("};\n");
+    js
+}
+
 /// Every import the module names has a shim or a declared extern.
 fn check_imports_served(sigs: &WasmSigs, surface: &HostSurface) -> Result<(), String> {
     for (module, name, _) in &sigs.imports {
-        let known = (module == "wasi_snapshot_preview1" && WASI_SHIMS.contains(&name.as_str()))
+        let known = (module == "wasi_snapshot_preview1" && WASI_SHIMS.iter().any(|(n, _)| n == name))
             || surface.externs.iter().any(|e| &e.module == module && &e.import == name);
         if !known {
             return Err(format!("error: --host js has no shim for the import `{module}.{name}` the module names — declare it with @extern(wasm, \"{module}\", \"{name}\") or file an issue naming the program shape"));
@@ -406,7 +472,8 @@ pub(crate) fn generate(
 
     let mut js = banner.clone();
     js.push_str(&format!("const WASM_URL = new URL(\"./{wasm_name}\", import.meta.url);\n"));
-    js.push_str(&JS_RUNTIME.replace("{ALLOC_BODY}", alloc_body));
+    let string_helpers = if surface.needs_string_abi() { JS_STRING_HELPERS.replace("{ALLOC_BODY}", alloc_body) } else { String::new() };
+    js.push_str(&JS_RUNTIME.replace("{STRING_HELPERS}", &string_helpers).replace("{WASI_OBJECT}", &wasi_object_js(&sigs)));
     js.push_str(&import_object_js(&sigs, surface)?);
 
     let mut dts = format!("// Generated by `almide build {source_file} --target wasm --host js` (almide {version}).\n\n");
@@ -428,8 +495,7 @@ pub(crate) fn generate(
     Ok((js, dts))
 }
 
-const JS_RUNTIME: &str = r#"const PAYLOAD = 12;
-const INT_LIMIT = 9007199254740992n;
+const JS_RUNTIME: &str = r#"const INT_LIMIT = 9007199254740992n;
 
 /** Thrown by `proc_exit`: the program ended with `code`. */
 export class AlmideExit extends Error {
@@ -451,22 +517,7 @@ function bytes() { return new Uint8Array(memory.buffer); }
 function view() { return new DataView(memory.buffer); }
 function ready() { if (instance === null) throw new Error("almide: call init() before using the module"); }
 
-function readString(h) {
-  const len = view().getUint32(h + 4, true);
-  return decoder.decode(bytes().subarray(h + PAYLOAD, h + PAYLOAD + len));
-}
-function takeString(h) {
-  const s = readString(h);
-  instance.exports.__release(h);
-  return s;
-}
-function allocString(s) {
-  const b = encoder.encode(String(s));
-{ALLOC_BODY}
-  bytes().set(b, h + PAYLOAD);
-  return h;
-}
-function toI64(x, what) {
+{STRING_HELPERS}function toI64(x, what) {
   if (typeof x === "bigint") return x;
   if (!Number.isSafeInteger(x)) throw new RangeError(`almide: ${what} takes an Int (an integer within ±2^53), got ${x}`);
   return BigInt(x);
@@ -500,49 +551,7 @@ function flush() {
     if (lineBuf[fd] !== "") { (fd === 2 ? console.error : console.log)(lineBuf[fd]); lineBuf[fd] = ""; }
   }
 }
-const wasi = {
-  fd_write(fd, iovs, iovsLen, nwritten) {
-    const v = view();
-    let total = 0;
-    const parts = [];
-    for (let i = 0; i < iovsLen; i++) {
-      const ptr = v.getUint32(iovs + 8 * i, true);
-      const len = v.getUint32(iovs + 8 * i + 4, true);
-      parts.push(bytes().slice(ptr, ptr + len));
-      total += len;
-    }
-    if (fd !== 1 && fd !== 2) return 8; // EBADF
-    const chunk = new Uint8Array(total);
-    let off = 0;
-    for (const p of parts) { chunk.set(p, off); off += p.length; }
-    emit(fd, chunk);
-    view().setUint32(nwritten, total, true);
-    return 0;
-  },
-  proc_exit(code) { flush(); throw new AlmideExit(code); },
-  fd_read(fd, iovs, iovsLen, nread) { view().setUint32(nread, 0, true); return 0; },
-  random_get(ptr, len) { globalThis.crypto.getRandomValues(bytes().subarray(ptr, ptr + len)); return 0; },
-  clock_time_get(id, precision, out) { view().setBigUint64(out, BigInt(Date.now()) * 1000000n, true); return 0; },
-  args_sizes_get(argc, bufSize) { const v = view(); v.setUint32(argc, 0, true); v.setUint32(bufSize, 0, true); return 0; },
-  args_get() { return 0; },
-  environ_sizes_get(count, bufSize) { const v = view(); v.setUint32(count, 0, true); v.setUint32(bufSize, 0, true); return 0; },
-  environ_get() { return 0; },
-  fd_close() { return 0; },
-  fd_fdstat_get() { return 8; },
-  fd_seek() { return 8; },
-  fd_prestat_get() { return 8; },
-  fd_prestat_dir_name() { return 8; },
-  fd_filestat_get() { return 8; },
-  fd_readdir() { return 8; },
-  path_open() { return 44; }, // ENOENT: the host has no filesystem
-  path_filestat_get() { return 44; },
-  path_create_directory() { return 44; },
-  path_remove_directory() { return 44; },
-  path_unlink_file() { return 44; },
-  sched_yield() { return 0; },
-  poll_oneoff() { return 52; }, // ENOSYS
-};
-
+{WASI_OBJECT}
 /**
  * Compile and instantiate the module. `source` may be omitted (the .wasm
  * next to this file is loaded: `fs.readFile` under node, `fetch` in a page),
@@ -571,6 +580,26 @@ export async function init(source, h = {}) {
   }
   instance = await WebAssembly.instantiate(module, imports());
   memory = instance.exports.memory;
+}
+"#;
+
+/// The String marshalling helpers: shipped only for a surface that
+/// marshals a String (#2276).
+const JS_STRING_HELPERS: &str = r#"const PAYLOAD = 12;
+function readString(h) {
+  const len = view().getUint32(h + 4, true);
+  return decoder.decode(bytes().subarray(h + PAYLOAD, h + PAYLOAD + len));
+}
+function takeString(h) {
+  const s = readString(h);
+  instance.exports.__release(h);
+  return s;
+}
+function allocString(s) {
+  const b = encoder.encode(String(s));
+{ALLOC_BODY}
+  bytes().set(b, h + PAYLOAD);
+  return h;
 }
 "#;
 

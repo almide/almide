@@ -45,7 +45,8 @@ fn host_js_writes_the_module_the_glue_and_the_typings() {
     assert!(dts.contains("export function shout(s: string): string;"), "{dts}");
     assert!(dts.contains("js_log: (msg: string) => void;"), "{dts}");
     assert!(dts.contains("export function run(): void;"), "{dts}");
-    // The two host-called exports exist only under the switch.
+    // The two host-called exports exist only under the switch, and only for a
+    // surface that marshals a String (#2276): `shout` and `js_log` do.
     let has = |needle: &[u8]| wasm.windows(needle.len()).any(|w| w == needle);
     assert!(has(b"__alloc") && has(b"__release"), "the host's allocator/release exports are missing");
     let (ok, stderr) = build(dir.path(), PROGRAM, &["--target", "wasm", "-o", "dist/plain.wasm"]);
@@ -53,6 +54,41 @@ fn host_js_writes_the_module_the_glue_and_the_typings() {
     let plain = std::fs::read(dir.path().join("dist/plain.wasm")).unwrap();
     let has_plain = |needle: &[u8]| plain.windows(needle.len()).any(|w| w == needle);
     assert!(!has_plain(b"__alloc") && !has_plain(b"__release"), "a build without --host js must not carry the host exports");
+}
+
+const SCALAR_ONLY: &str = "pub fn fib(n: Int) -> Int = if n <= 1 then n else fib(n - 1) + fib(n - 2)\nfn main() -> Unit = println(int.to_string(fib(10)))\n";
+
+/// A scalar-only surface ships nothing for a String (#2276): the module is
+/// byte-identical to the build without `--host js`, the glue carries no
+/// string helpers, and the `wasi` object holds exactly the shims the shipped
+/// module imports.
+#[test]
+fn a_scalar_only_surface_keeps_the_module_bytes_and_ships_only_its_shims() {
+    let dir = tempfile::tempdir().unwrap();
+    let (ok, stderr) = build(dir.path(), SCALAR_ONLY, &["--target", "wasm", "--host", "js", "-o", "app.wasm"]);
+    assert!(ok, "{stderr}");
+    let (ok, stderr) = build(dir.path(), SCALAR_ONLY, &["--target", "wasm", "-o", "plain.wasm"]);
+    assert!(ok, "{stderr}");
+    assert_eq!(std::fs::read(dir.path().join("app.wasm")).unwrap(), std::fs::read(dir.path().join("plain.wasm")).unwrap(), "--host js must not change a scalar-only module");
+    let js = std::fs::read_to_string(dir.path().join("app.js")).unwrap();
+    assert!(!js.contains("function allocString(") && !js.contains("function takeString(") && !js.contains("__alloc"), "no String on the surface, no string helpers:\n{js}");
+    let start = js.find("const wasi = {\n").expect("the wasi object") + "const wasi = {\n".len();
+    let object = &js[start..start + js[start..].find("\n};\n").expect("the object's end")];
+    let shims: Vec<&str> = object
+        .lines()
+        .filter(|l| l.starts_with("  ") && !l.starts_with("   ") && l.as_bytes()[2].is_ascii_lowercase() && l.contains('('))
+        .map(|l| l.trim_start().split('(').next().unwrap())
+        .collect();
+    // The renderer's own module links the println floor: fd_write, proc_exit and the clock/random/read imports.
+    assert!(shims.contains(&"fd_write") && shims.contains(&"proc_exit"), "{shims:?}");
+    assert!(!shims.contains(&"path_open") && !shims.contains(&"poll_oneoff") && !shims.contains(&"fd_readdir"), "unlinked shims must not ship: {shims:?}");
+    for name in &shims {
+        assert!(js.contains(&format!("wasiImports.{name} = wasi.{name};")), "every emitted shim is wired: {name}\n{js}");
+    }
+    for line in js.lines().filter(|l| l.contains("wasiImports.")) {
+        let name = line.trim().trim_start_matches("wasiImports.").split(' ').next().unwrap();
+        assert!(shims.contains(&name), "every wired import has its shim: {name}");
+    }
 }
 
 #[test]
