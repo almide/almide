@@ -1,0 +1,10 @@
+// @leg: structural
+// The stub-only case (#2265): a program that reaches the host only through
+// stdout runs under the generated JS host with no hook at all, and prints
+// what the native binary prints.
+fn fib(n: Int) -> Int = if n <= 1 then n else fib(n - 1) + fib(n - 2)
+
+fn main() -> Unit = {
+  println("fib(20) = ${fib(20)}")
+  println("done")
+}

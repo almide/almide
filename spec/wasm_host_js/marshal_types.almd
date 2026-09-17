@@ -1,0 +1,25 @@
+// @leg: structural
+// One exported function per marshalled type (#2265): Int (i64 ↔ number with
+// the ±2^53 range check), Float, Bool, String (a block the host builds and a
+// block the host takes), Unit. `main` prints the native reference lines; the
+// host-side checks live in marshal_types.host.mjs.
+fn add(a: Int, b: Int) -> Int = a + b
+
+fn half(x: Float) -> Float = x / 2.0
+
+fn both(a: Bool, b: Bool) -> Bool = a and b
+
+fn shout(s: String) -> String = string.to_upper(s) + "!"
+
+fn width(s: String) -> Int = string.len(s)
+
+fn repeat_dash(n: Int) -> String = string.repeat("-", n)
+
+fn ping() -> Unit = println("ping")
+
+fn main() -> Unit = {
+  println(int.to_string(add(2, 3)))
+  println(float.to_string(half(5.0)))
+  println(shout("hey"))
+  println(int.to_string(width("héllo")))
+}

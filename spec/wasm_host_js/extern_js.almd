@@ -1,0 +1,26 @@
+// @leg: incumbent
+// The `@extern(wasm, "js", ...)` shape (#2265): the host wires each import
+// through `init({ js: { name } })`, decoding String args from the block
+// header and encoding a String return as a fresh block the guest owns. The
+// structural leg has no extern-import lowering yet, so this routes to the
+// incumbent — the `@leg` line above is the ratchet: a route change here is a
+// visible diff, not a silent one.
+@extern(wasm, "js", "js_log")
+fn js_log(msg: String) -> Unit
+
+@extern(wasm, "js", "js_add")
+fn js_add(a: Int, b: Int) -> Int
+
+@extern(wasm, "js", "js_upper")
+fn js_upper(s: String) -> String
+
+fn greet(n: Int) -> Int = fib(n)
+
+fn fib(n: Int) -> Int = if n <= 1 then n else fib(n - 1) + fib(n - 2)
+
+fn main() -> Unit = {
+  js_log("hi ${greet(10)}")
+  println("sum ${js_add(40, 2)}")
+  println(js_upper("shout"))
+  println(js_upper("wörld") + "!")
+}
