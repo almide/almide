@@ -482,18 +482,27 @@ impl Checker {
         for key in order {
             let Some((_, s, what, mechanical, must_use)) = by_span.remove(&key) else { continue };
             let mut d = if must_use {
-                let discarded = match what {
-                    "of this fn's tail value" => "the tail value of this `-> Unit` fn discards a Result — the error would be silently dropped",
-                    "of this guard's else value" => "this guard's else value discards a Result — the fn returns Unit, so the error would be silently dropped",
-                    _ => "this statement discards a Result — the error would be silently dropped",
+                // A TAIL position (the fn's tail, a guard's else) does not drop
+                // the value: the Result IS the fn's value, so its error leaves
+                // through the fn's own error channel — the propagation is real
+                // and merely unspelled (#2277: the old "silently dropped" text
+                // was false for a `-> Unit` effect callee, and read as "no
+                // Result is involved"). Only a statement position drops it.
+                let (discarded, hint) = match what {
+                    "of this fn's tail value" => (
+                        "the tail of this `-> Unit` effect fn is a Result (an effect call's error channel), and its error propagates implicitly — ADR-0008 spells every propagation",
+                        "Write `expr!` to propagate it explicitly (the fn still fails on the error; nothing changes at run time), or `let _ = expr` to discard the error on purpose. Matching on ok/err also consumes it.",
+                    ),
+                    "of this guard's else value" => (
+                        "this guard's else value is a Result (an effect call's error channel) leaving a `-> Unit` fn, and its error propagates implicitly — ADR-0008 spells every propagation",
+                        "Write `expr!` to propagate it explicitly (the fn still fails on the error; nothing changes at run time), or `let _ = expr` to discard the error on purpose. Matching on ok/err also consumes it.",
+                    ),
+                    _ => (
+                        "this statement discards a Result — the error would be silently dropped",
+                        "Propagate it with `expr!`, or discard it on purpose with `let _ = expr` (the explicit-discard spelling, ADR-0008 D2). Matching on ok/err also consumes it.",
+                    ),
                 };
-                Diagnostic::error(
-                    discarded.to_string(),
-                    "Propagate it with `expr!`, or discard it on purpose with `let _ = expr` \
-                     (the explicit-discard spelling, ADR-0008 D2). Matching on ok/err also \
-                     consumes it.",
-                    "unused Result",
-                ).with_code("E042")
+                Diagnostic::error(discarded.to_string(), hint, "unused Result").with_code("E042")
             } else {
                 Diagnostic::error(
                     format!("implicit propagation {} was removed — this value is a Result (ADR-0008)", what),
