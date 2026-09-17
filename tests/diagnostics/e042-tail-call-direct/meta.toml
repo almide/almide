@@ -1,3 +1,3 @@
 expects_code = "E042"
-expects_error = "discards a Result"
+expects_error = "propagates implicitly"
 hint_substring = "expr!"

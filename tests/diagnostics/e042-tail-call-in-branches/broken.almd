@@ -1,0 +1,12 @@
+// E042 at the branch tail of a `-> Unit` effect fn whose callee is a
+// `-> Unit` effect fn (#2277): the call is `Result[Unit, String]` (the effect
+// channel), the tail passes it out through the fn's own channel, and ADR-0008
+// wants that propagation spelled. The old text claimed the Result was
+// dropped, and read as "no Result is involved"; the fix-it `!` applies.
+effect fn say(lines: List[String]) -> Unit =
+  if list.is_empty(lines) then () else println(list.join(lines, "\n"))
+
+effect fn run(cmd: String) -> Unit =
+  if cmd == "version" then say(["1.0"]) else ()
+
+effect fn main() -> Unit = run("version")!
