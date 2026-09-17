@@ -580,6 +580,7 @@ impl NanoPass for BorrowInsertionPass {
         let sigs = super::pass_borrow_inference::infer_borrow_signatures(&mut program);
         let changed = !sigs.is_empty();
         if changed {
+            super::pass_borrow_inference::commit_chain_source_modes(&mut program, &sigs);
             super::pass_borrow_inference::insert_borrows_at_call_sites(&mut program, &sigs);
             super::pass_borrow_inference::hoist_conflicting_reads(&mut program);
         }
