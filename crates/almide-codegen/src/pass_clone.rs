@@ -533,7 +533,7 @@ fn insert_clones_if(cond: Box<IrExpr>, then: Box<IrExpr>, else_: Box<IrExpr>, ct
 /// sibling arm's uses deducted on entry (see [`deduct_sibling_uses`]).
 fn insert_clones_match(subject: IrExpr, arms: Vec<IrMatchArm>, ctx: &mut CloneCtx) -> IrExprKind {
     let owned_final = super::pass_clone_projection::root(&subject).is_some_and(|id|
-        ctx.owned.contains(&id) && !ctx.always.contains(&id) && !ctx.in_loop
+        ctx.owned.contains(&id) && !ctx.always.contains(&id) && (!ctx.in_loop || ctx.fresh.contains(&id))
             && ctx.remaining.get(&id).copied().unwrap_or(1) <= 1);
     let borrowed = if owned_final { None } else {
         super::pass_clone_projection::match_binders(&subject, &arms)
@@ -652,16 +652,26 @@ pub(crate) fn insert_clones_live(mut expr: IrExpr, ctx: &mut CloneCtx) -> IrExpr
             }
             IrExprKind::Borrow { expr: Box::new(inner), as_str, mutable }
         },
-        // A closure body may run any number of times per loop iteration, so
-        // nothing the enclosing loop rebinds is fresh inside it (#1673): walk
-        // the lambda with an empty `fresh` set, otherwise unchanged.
-        kind @ IrExprKind::Lambda { .. } => {
-            let no_fresh: HashSet<VarId> = HashSet::new();
-            let e = IrExpr { kind, ty: ty.clone(), span, def_id: None };
+        // A closure body is a LOOP BODY to this pass: it may run any number
+        // of times, so a variable bound outside it is never moved at its last
+        // occurrence inside (an iterator-chain step reads the enclosing fn's
+        // locals and params directly — `Use::depth` — and a move there is
+        // E0507, "cannot move out of a captured variable in an `FnMut`
+        // closure"). What IS fresh per invocation is the lambda's own params
+        // and the top-level `let`s of its body (#1673, the loop rule);
+        // nothing the enclosing loop rebinds is.
+        IrExprKind::Lambda { params, body, lambda_id } => {
+            let param_ids: Vec<VarId> = params.iter().map(|(v, _)| *v).collect();
+            let top: &[IrStmt] = match &body.kind {
+                IrExprKind::Block { stmts, .. } => stmts,
+                _ => &[],
+            };
+            let fresh = super::pass_clone_loops::loop_fresh_vars(None, Some(&param_ids), top);
+            let e = IrExpr { kind: IrExprKind::Lambda { params, body, lambda_id }, ty: ty.clone(), span, def_id: None };
             // Captured values belong to the reusable closure. Only values
             // introduced inside this invocation may have fields moved out.
             let owned = almide_ir::free_vars::bound_vars(&e);
-            let mut lam_ctx = CloneCtx { always: ctx.always, eligible: ctx.eligible, remaining: ctx.remaining, in_loop: ctx.in_loop, memo: ctx.memo, fresh: &no_fresh, owned: &owned, loops: ctx.loops };
+            let mut lam_ctx = CloneCtx { always: ctx.always, eligible: ctx.eligible, remaining: ctx.remaining, in_loop: true, memo: ctx.memo, fresh: &fresh, owned: &owned, loops: ctx.loops };
             return e.map_children(&mut |child| insert_clones_live(child, &mut lam_ctx));
         }
         // Default: recurse into every child through the exhaustive `map_children`
