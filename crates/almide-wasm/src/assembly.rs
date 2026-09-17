@@ -281,8 +281,10 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     // #2265: the JS host allocates the `String` blocks it passes in and
     // releases the ones it takes out through the module's own runtime —
     // both helpers ship unconditionally (the proven core), so exporting
-    // them adds two export entries and nothing else.
-    if crate::host_exports::js_host() {
+    // them adds two export entries and nothing else. Only when the host
+    // surface marshals a String at all (#2276): a scalar-only surface keeps
+    // the module byte-identical to a build without the switch.
+    if crate::host_exports::string_abi() {
         exports.export(crate::host_exports::ALLOC_EXPORT, ExportKind::Func, F_ALLOC);
         exports.export(crate::host_exports::RELEASE_EXPORT, ExportKind::Func, F_DEC_FLAT);
     }
@@ -352,7 +354,7 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
             })
             .chain(std::iter::once(main_fn))
             .chain(extra_fns.iter().map(|(_, f)| f)),
-        if crate::host_exports::js_host() { &[F_ALLOC, F_DEC_FLAT] } else { &[] },
+        if crate::host_exports::string_abi() { &[F_ALLOC, F_DEC_FLAT] } else { &[] },
     );
     for (idx, f) in &static_helpers {
         if used.contains(idx) {
