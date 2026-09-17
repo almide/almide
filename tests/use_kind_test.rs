@@ -193,7 +193,9 @@ fn iterator_chains_flag_every_occurrence_under_them() {
     let src = uses.of(xs).next().expect("source");
     assert_eq!(src.site, Site::Iterable { consumed: false });
     assert!(src.in_chain);
-    assert!(uses.of(acc).all(|u| u.in_chain && u.depth == 1));
+    // A chain lambda is a scope that runs per element, not a closure: its
+    // occurrences stay at depth 0 and are loop occurrences.
+    assert!(uses.of(acc).all(|u| u.in_chain && u.depth == 0 && u.in_loop));
 }
 
 // ── (b) counts and writes ──────────────────────────────────────────
