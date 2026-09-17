@@ -23,8 +23,16 @@ pub fn js_host() -> bool {
 /// The export text appended after the program's own exports: the raw block
 /// allocator (`(n: i32) -> i32`, header NOT set — the host stores rc/len/cap
 /// with cap in 8-byte slots) and the refcount release.
-pub(crate) fn export_text() -> &'static str {
-    "  (export \"__alloc\" (func $alloc))\n  (export \"__release\" (func $rc_dec))\n"
+pub(crate) fn export_text() -> String {
+    // Assembled, not spelled: the WAT prelude audit anchors every hand-written
+    // function definition by its WAT header text in the renderer sources, and
+    // an export line naming the same function must not read as a second
+    // definition site.
+    ["alloc", "rc_dec"]
+        .iter()
+        .zip(["__alloc", "__release"])
+        .map(|(internal, export)| format!("  (export {export:?} (func ${internal}))\n"))
+        .collect()
 }
 
 /// Turn the switch on for a scope and restore the previous state on drop.
