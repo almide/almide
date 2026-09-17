@@ -74,7 +74,8 @@ pub(super) fn insert_clones_map_access(object: IrExpr, key: IrExpr, ty: Ty, span
 /// needs cloning.
 pub(super) fn insert_clones_member(object: IrExpr, field: Sym, ty: Ty, span: Option<Span>, ctx: &mut CloneCtx) -> IrExpr {
     let can_move = matches!(object.kind, IrExprKind::Var { id }
-        if ctx.owned.contains(&id) && !ctx.always.contains(&id) && (!ctx.in_loop || ctx.fresh.contains(&id))
+        if ctx.owned.contains(&id) && !ctx.always.contains(&id)
+            && (!ctx.in_loop || (ctx.fresh.contains(&id) && !ctx.loops.binders.contains(&id)))
             && ctx.remaining.get(&id).copied().unwrap_or(1) <= 1);
     let object = if let IrExprKind::IndexAccess { object: base, index } = &object.kind
         && super::pass_clone_projection::root(base).is_some()
