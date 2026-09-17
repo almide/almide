@@ -164,9 +164,13 @@ marshalling. `app.js` is a dependency-free ES module:
   `WebAssembly.Module`. `hooks.stdout` / `hooks.stderr` receive raw
   `Uint8Array` chunks (default: `process.stdout` under node, `console.log`
   per line in a page).
-- Only the `wasi_snapshot_preview1` imports the module actually names are
+- Only the `wasi_snapshot_preview1` imports the SHIPPED module names are
   shimmed (`fd_write`, `proc_exit` → a thrown `AlmideExit`, the clock /
-  random / read floor). Nothing else is linked, so nothing else is stubbed.
+  random / read floor). Nothing else is linked, so nothing else is emitted
+  (#2276): the glue is derived from the bytes after the optional `--wasm-opt`
+  rewrite, so a `--host js --wasm-opt` build of a `println`-only program
+  carries exactly `fd_write` and `proc_exit`. An import outside the shim
+  table is a build-time refusal naming it, not a `LinkError` in the page.
 - `@extern(wasm, "js", "name")` imports are wired through
   `init(source, { js: { name } })`; a `String` argument is decoded from the
   block header before the user function runs, a `String` return is encoded
@@ -186,8 +190,11 @@ rc @0, len @4, cap @8, payload @12) and the module's own signatures for the
 valtype of each slot (`Bool` is `i32` on the structural leg and `i64` on the
 incumbent). A block the host builds goes through the module's exported
 allocator (`__alloc`) and a block the host takes out is released through its
-exported release (`__release`); both exports exist only under `--host js`,
-so every other build keeps its bytes. The structural leg also records which
+exported release (`__release`); both exports exist only under `--host js`
+and only when some marshalled signature carries a `String` (#2276), so every
+other build keeps its bytes — a scalar-only surface's module is
+byte-identical to the build without the switch, and the glue then carries no
+string helpers either. The structural leg also records which
 exported params the callee owns, so the host releases exactly the credits
 it still holds; the incumbent's callees borrow every param.
 
@@ -195,8 +202,14 @@ Gate: `scripts/check-js-host.sh` builds every `spec/wasm_host_js/*.almd`
 with `--host js`, runs it under node, byte-compares stdout to
 `<fixture>.expected`, runs the fixture's `<fixture>.host.mjs` (the `js`
 hooks and an `after(module)` exercising the wrappers), and for a fixture
-without `@extern` also compares the native binary's stdout. CI runs it in
-the `checks` job.
+without `@extern` also compares the native binary's stdout. It also asserts
+what ships (#2276): the module is byte-identical to the build without
+`--host js` unless the surface marshals a `String` (then it differs by
+exactly the two exports), the glue's `wasi.<name>` shim set equals the
+shipped module's `wasi_snapshot_preview1` imports (pre- and post-`wasm-opt`),
+and each glue's byte size is at or under its row in
+`spec/wasm_host_js/glue-ceiling.txt` (shrinking is silent, growing is a
+ledger edit). CI runs it in the `checks` job.
 
 ## Reproducing the measurements
 

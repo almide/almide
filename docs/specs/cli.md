@@ -92,7 +92,7 @@ almide build --fast                     # 最大性能 (opt-level=3, LTO, native
 |---|---|
 | `-o <name>` | 出力ファイル名 |
 | `--target wasm` | WASM バイナリを生成（直接 emit） |
-| `--host js` | `--target wasm` 専用: モジュールの隣に JS ホスト `<mod>.js`（依存なしの ES module）と `<mod>.d.ts` を書く（#2265）。`init(source?, hooks?)` がインスタンス化、`run()` が `main`、`pub fn` ごとに 1 つのラッパ。`@extern(wasm, "js", "name")` は `init({ js: { name } })` で結線。マーシャルは Int（`number`、±2^53 の範囲検査）/ Float / Bool / String / Unit — それ以外の型を境界に持つ `pub fn` はビルド時に型名を挙げて拒否。ゲート: `scripts/check-js-host.sh`（`spec/wasm_host_js/` を node で実行し、期待出力と native 出力に一致させる）。仕様: docs/wasm/WASM-OUTPUT.md「JS host」節 |
+| `--host js` | `--target wasm` 専用: モジュールの隣に JS ホスト `<mod>.js`（依存なしの ES module）と `<mod>.d.ts` を書く（#2265）。`init(source?, hooks?)` がインスタンス化、`run()` が `main`、`pub fn` ごとに 1 つのラッパ。`@extern(wasm, "js", "name")` は `init({ js: { name } })` で結線。マーシャルは Int（`number`、±2^53 の範囲検査）/ Float / Bool / String / Unit — それ以外の型を境界に持つ `pub fn` はビルド時に型名を挙げて拒否。出荷物はプログラムが使う分だけ（#2276）: `__alloc`/`__release` の export と glue の String ヘルパは境界に `String` がある時だけ、WASI shim は出荷モジュール（`--wasm-opt` 後）が import する名前だけ。ゲート: `scripts/check-js-host.sh`（`spec/wasm_host_js/` を node で実行し、期待出力と native 出力に一致させ、モジュールのバイト同一性・shim 集合・`glue-ceiling.txt` の上限を検査）。仕様: docs/wasm/WASM-OUTPUT.md「JS host」節 |
 | `--release` | 最適化ビルド |
 | `--fast` | 最大性能（`--release` を含む + LTO + native CPU） |
 | `--unchecked-index` | 配列の境界チェックを無効化（unsafe） |
