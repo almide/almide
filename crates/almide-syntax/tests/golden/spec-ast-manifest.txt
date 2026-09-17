@@ -1,4 +1,4 @@
-# oracle: almide 0.62.0 at ade5ef3ff — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.62.0 at 4fee00975 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -1325,3 +1325,6 @@ c4b35fc7223eb6eac083b2e91d63dbb953bce89b477c28b076389380f5378443	spec/wasm_fail/
 5e28aed5de02fec6ab0028d898a7821812cd5a61c8a8377fec54b8e4ee5c475a	spec/wasm_fail/int_parse_err_propagates.almd
 ff069d12ff01fdfd6079f57e7875c0f8185aec5f8a4d5f3b2d22506081f0fd52	spec/wasm_fail/matrix_index_oob_aborts.almd
 87317c92400b45ffe174ee037f271dd02971a11737a6c54b98159b7ba9b8bb28	spec/wasm_fail/rope_geometry_exceeds_aborts.almd
+4c3dc14ca90908fdc11559ff741d8ab6f3ea5490cd7f8ba7bf846cc87c48aa22	spec/wasm_host_js/extern_js.almd
+42b26a44fbb550e0e29526bab419e2ff9f491d9cb92adee9c51d1bc01cb2c883	spec/wasm_host_js/marshal_types.almd
+f2863edee3bc243d1d6d7936f7b97278849a8db13d2aa5a0c18749e454baf870	spec/wasm_host_js/println_only.almd
