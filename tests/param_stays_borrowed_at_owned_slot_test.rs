@@ -1,11 +1,15 @@
-//! A non-`mut` record param handed bare to a program fn's OWNED slot stays
-//! borrowed (#2278): the callee keeps the value, so that one site clones —
-//! `stored(t.clone(), 1)` — and the param's other reads keep the borrow,
-//! instead of the whole param turning owned (`t: Table`) and every caller
-//! that still needs its value paying the clone. A closure capture still owns
-//! the param (closures capture through `Rc<dyn Fn>`, which cannot hold a
-//! borrow), and a stdlib slot that consumes (`list.map`'s list) still owns:
-//! it lowers into a chain that takes the value itself.
+//! A non-`mut` record param handed bare to a callee's OWNED slot and READ
+//! AGAIN afterwards stays borrowed (#2278): the site is cloned either way, so
+//! that one site clones — `stored(t.clone(), 1)` — and the param's other
+//! reads keep the borrow, instead of the whole param turning owned
+//! (`t: Table`) and every caller that still needs its value paying the
+//! clone. When the owned slot is the param's LAST use the param is owned:
+//! the site moves, and only a caller that still needs its value clones (the
+//! allocation ledger pins that an unconditional site clone costs more). A
+//! closure capture still owns the param (closures capture through
+//! `Rc<dyn Fn>`, which cannot hold a borrow), and a stdlib slot that
+//! consumes (`list.map`'s list) still owns: it lowers into a chain that
+//! takes the value itself.
 //!
 //! The rule is stated in docs/specs/codegen.md ("Parameter passing on the
 //! native target"); this pins the emitted shapes and that both legs agree.
@@ -63,26 +67,24 @@ fn a_param_kept_by_a_callee_stays_borrowed_and_clones_at_that_site() {
     assert!(s.starts_with("pub fn stored_then_read(t: &Table)"), "the param stays borrowed:\n{s}");
     assert!(s.contains("stored(t.clone(), 1i64)"), "the kept site clones:\n{s}");
     assert!(s.contains("plain(t)"), "the other read keeps the borrow:\n{s}");
+    // The owned slot is the param's last use: owned, and the site moves.
     let s = fn_sig_and_body(&rust, "stored_last");
-    assert!(s.starts_with("pub fn stored_last(t: &Table)"), "{s}");
-    assert!(s.contains("stored(t.clone(), n)"), "{s}");
+    assert!(s.starts_with("pub fn stored_last(t: Table)"), "{s}");
+    assert!(s.contains("stored(t, n)"), "{s}");
     // The callee that keeps the value is owned by construction (a record field).
     assert!(fn_sig_and_body(&rust, "stored").starts_with("pub fn stored(t: Table, n: i64)"));
     // A closure capture still owns the param; a consuming stdlib slot too.
     assert!(fn_sig_and_body(&rust, "captured").starts_with("pub fn captured(t: Table)"));
     assert!(fn_sig_and_body(&rust, "mapped").starts_with("pub fn mapped(ns: Vec<i64>)"), "{}", fn_sig_and_body(&rust, "mapped"));
-    // A slot of a fn called through its mangled runtime symbol — here a
-    // monomorphised stdlib instance (`list.map` with a fallible callback) —
-    // is not a Keep site: such a call is a `RuntimeCall` by the time the
-    // lowering runs, so the param is owned as before (the first CI run of
-    // PR #2281 read E0308 there). A derived codec fn of the ROOT program is
-    // a plain named fn and keeps the rule: the site clones.
+    // A monomorphised stdlib instance's slot (`list.map` with a fallible
+    // callback) at the param's last use: owned. A derived codec fn's slot
+    // followed by another read (`p.r`): borrowed, the site clones.
     assert!(fn_sig_and_body(&rust, "heads").starts_with("pub fn heads(xs: Vec<String>)"), "{}", fn_sig_and_body(&rust, "heads"));
     let s = fn_sig_and_body(&rust, "shown");
     assert!(s.starts_with("pub fn shown(p: &Pigment)") && s.contains("Pigment_encode(p.clone())"), "{s}");
     // Callers pass a borrow to the borrowed fns: no clone at the call site.
     let m = fn_sig_and_body(&rust, "__almide_main");
-    assert!(m.contains("stored_then_read(&t)") && m.contains("stored_last(&t)"), "{m}");
+    assert!(m.contains("stored_then_read(&t)") && m.contains("stored_last(t.clone())"), "{m}");
 
     for target in ["rust", "wasm"] {
         let run = Command::new(almide_bin()).args(["run", file.to_str().unwrap(), "--target", target]).output().unwrap();

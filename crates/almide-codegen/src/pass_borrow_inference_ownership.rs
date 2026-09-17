@@ -26,12 +26,6 @@ pub(crate) struct Round<'a> {
     /// borrow inference like structural records; user VARIANTs stay Own
     /// (conservative — variant borrowing is not generalized here). #647
     pub records: &'a HashSet<String>,
-    /// The analysed ROOT-program fns by bare name — no module fns, no mirror
-    /// spellings. Only a call to one of these reaches `BorrowLowering` as a
-    /// `Call`; a module fn (even from a sibling) and every mangled
-    /// `almide_rt_<mod>_<name>` target become a `RuntimeCall` first. The Keep
-    /// rule (#2278) is scoped to this set.
-    pub plain_fns: &'a HashSet<String>,
 }
 
 /// One function's view of a [`Round`]: the module it lives in (its callees
@@ -115,25 +109,10 @@ impl SlotOracle for Scope<'_> {
             CallTarget::Module { module, func, .. } => format!("{}::{}", module, func),
             CallTarget::Method { .. } | CallTarget::Computed { .. } => return SlotMode::Consume,
         };
-        // The Keep rule (#2278) applies to a callee whose call stays a plain
-        // `Call` down to `BorrowLowering` (the site that owns the read): a
-        // root-program fn called by its bare name from the root program. A
-        // module fn and every mangled `almide_rt_<mod>_<name>` target — a
-        // monomorphised stdlib instance, a derived codec fn, a cross-module
-        // fn — become a `RuntimeCall` before lowering, and a template-bodied
-        // fn's `Own` is not an owned slot at all; all keep the Consume verdict.
-        let program_fn = self.module.is_none()
-            && matches!(target, CallTarget::Named { name } if self.round.plain_fns.contains(name.as_str()));
         match self.resolve(&name) {
             Callee::Known(borrows) => {
                 let mode = slot_of(borrows.get(index), SlotMode::Consume);
-                if mode != SlotMode::Consume && self.is_borrow_eligible(&arg.ty) {
-                    mode
-                } else if program_fn && matches!(borrows.get(index), Some(ParamBorrow::Own)) && self.is_borrow_eligible(&arg.ty) {
-                    SlotMode::Keep
-                } else {
-                    SlotMode::Consume
-                }
+                if mode != SlotMode::Consume && self.is_borrow_eligible(&arg.ty) { mode } else { SlotMode::Consume }
             }
             Callee::Pending => SlotMode::Borrow,
             Callee::Unknown => SlotMode::Consume,
@@ -168,14 +147,6 @@ fn consumes(u: &Use) -> bool {
         Site::Result | Site::Scrutinee | Site::Concat | Site::Construct(_) | Site::Receiver
         | Site::Callback | Site::FoldInit | Site::Arg(SlotMode::Consume)
         | Site::Iterable { consumed: true } => true,
-        // A param handed bare to a PROGRAM fn's owned slot (#2278): the
-        // callee keeps the value, but that is one clone at this site, not a
-        // reason to own the whole param — owned, every caller that still
-        // needs its value pays the clone instead, and the param's other
-        // reads (the `h.n + plain(t)` after `stored(t, 1)`) lose the borrow.
-        // The site stays a borrow; `BorrowLowering` owns the read there
-        // (`own_consumed_borrowed`), the same spelling a `mut` param gets.
-        Site::Arg(SlotMode::Keep) => false,
         Site::Member => matches!(
             u.chain,
             Some(Chain { top: Site::Construct(Ctor::Record), len: 1, heap: true })
