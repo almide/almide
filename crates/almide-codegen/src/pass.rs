@@ -105,9 +105,9 @@ pub trait NanoPass: std::fmt::Debug {
 
     /// Postconditions: structural invariants guaranteed after this pass runs
     /// — and from then on: they are MONOTONE, re-verified after every later
-    /// pass (debug / `ALMIDE_VERIFY_IR`) and once at the end of the pipeline
-    /// in every profile, so a later pass that undoes them is named. A
-    /// violation is a compiler bug and fails the build.
+    /// pass in every profile (release included — the per-pass walk costs
+    /// ~8 ms per file, measured over spec/lang), so a later pass that undoes
+    /// them is named. A violation is a compiler bug and fails the build.
     fn postconditions(&self) -> Vec<Postcondition> { vec![] }
 
     /// Run the pass. Takes ownership of the program, returns modified program
@@ -417,9 +417,9 @@ impl Pipeline {
         program
     }
 
-    /// Inter-pass IR verification (debug / opt-in only — see `verify_ir`
-    /// in `run`): the IR verifier, then the postconditions of the pass that
-    /// just ran (`idx`) AND of every pass that ran before it (`done`).
+    /// Inter-pass IR verification, after every pass in every profile: the IR
+    /// verifier, then the postconditions of the pass that just ran (`idx`)
+    /// AND of every pass that ran before it (`done`).
     fn verify_after_pass(passes: &[Box<dyn NanoPass>], idx: usize, done: &[usize], program: &IrProgram) {
         let pass_name = passes[idx].name();
         let errors = almide_ir::verify_program(program);
@@ -431,8 +431,6 @@ impl Pipeline {
             // No warn-mode: a DETECTED violation is fatal in every
             // profile (release-parity §10 — the v0.25.0 lesson:
             // a warning's audience cannot fix a compiler bug).
-            // Release cost is unchanged: the verifier itself stays
-            // debug/opt-in (the measured ~1.2s/file walk).
             panic!("IR verification failed after pass '{}'", pass_name);
         }
 
@@ -476,22 +474,19 @@ impl Pipeline {
             .filter(|s| *s != "all")
             .map(|s| s.split(',').map(str::trim).collect())
             .unwrap_or_default();
-        // Contract-level checks (IR verifier + pass postconditions) run on
-        // every build. Debug builds escalate violations to `panic!` so CI
-        // and local `cargo test` catch them; release builds print the same
-        // diagnostic and keep running so an end-user `almide build` does
-        // not crash on a compiler bug. `ALMIDE_CHECK_IR` /
-        // `ALMIDE_VERIFY_IR` used to gate this — removed in S2 flip
-        // (v0.14.7-phase3.2); `expr.ty` is now trustworthy by contract.
-        let hard_fail = cfg!(debug_assertions);
-        let _ = hard_fail; // escalation is unconditional now; the flag only gates whether verification RUNS
-        // The inter-pass IR verifier + postcondition checks walk the entire
-        // (merged) program after EVERY pass. That's a developer safety net —
-        // it catches compiler bugs but does nothing for a correct build. In
-        // release it can't even fail hard, yet it dominates codegen time
-        // (~1.2s/file: 20 passes × verify(user + all merged stdlib functions)).
-        // Run it only in debug (cargo test / CI) or when explicitly requested.
-        let verify_ir = hard_fail || almide_base::env::flag("ALMIDE_VERIFY_IR");
+        // Contract-level checks (the IR verifier + every established pass
+        // postcondition) run after EVERY pass in EVERY profile, and a
+        // detected violation is fatal (§10 release parity). Until now the
+        // per-pass walk was debug / `ALMIDE_VERIFY_IR` only, on a cost
+        // claim of ~1.2 s per file that no longer held: measured over the
+        // 218 files of spec/lang, `--target rust` emission takes 5.75 s
+        // without the walk and 7.54 s with it — ~8 ms per file, a rounding
+        // error next to rustc. A release binary that skipped the walk was
+        // the one profile whose IR nobody checked; that profile is the one
+        // that ships. `ALMIDE_IR_FAULT=<pass>` (harness) injects a
+        // violation after the named pass so the gate can be watched turning
+        // red in the release binary (tests/ir_verify_every_profile_test.rs).
+        let fault_after = almide_base::env::var("ALMIDE_IR_FAULT");
 
         // #912 pass-ordering lens: `ALMIDE_SKIP_PASS=Name[,Name…]` skips the
         // named passes. A hunt instrument, not a user feature: the spec suite
@@ -536,36 +531,34 @@ impl Pipeline {
 
             let pass_name = pass.name();
             program = Self::run_pass_with_dump(pass.as_ref(), program, target, dump_all, &dump_passes);
-
-            // Inter-pass IR verification (debug / opt-in only — see verify_ir).
-            if verify_ir {
-                Self::verify_after_pass(&self.passes, idx, &done, &program);
+            if fault_after.as_deref().is_some_and(|p| p.eq_ignore_ascii_case(pass_name)) {
+                Self::inject_ir_fault(&mut program);
             }
+
+            // Inter-pass IR verification, every pass, every profile.
+            Self::verify_after_pass(&self.passes, idx, &done, &program);
 
             executed.push(pass_name);
             done.push(idx);
         }
 
-        // §10 release promotion (#532): one FINAL verification runs in EVERY
-        // profile. The per-pass walk above stays debug/opt-in (it dominates
-        // release codegen time, ~1.2s/file across ~20 passes), but the
-        // END-of-pipeline IR must verify before emission — one walk, ~60 ms,
-        // the same trade wasmparser::validate makes on the wasm side. A
-        // violation is a compiler bug and fails the build in release too.
-        if !verify_ir {
-            let mut errors: Vec<String> = almide_ir::verify_program(&program).iter().map(|e| e.to_string()).collect();
-            // Every pass's postcondition must still hold at the end (the
-            // monotone reading above): six cheap walks, one line each.
-            errors.extend(Self::established_violations(&self.passes, &done, "the last pass", &program));
-            if !errors.is_empty() {
-                eprintln!("[IR CHECK] {} error(s) at end of pipeline:", errors.len());
-                for e in &errors {
-                    eprintln!("  {}", e);
-                }
-                panic!("final IR verification failed (release gate, #532)");
-            }
-        }
+        // The last pass's walk above IS the end-of-pipeline verification
+        // (#532): the IR the emitter reads verified, in every profile.
         program
+    }
+
+    /// The `ALMIDE_IR_FAULT` fault: bind one function's locals in a second
+    /// function, the `verify_binder_ownership` violation (#2186) — a
+    /// duplicate of the first function that has a param or a binder. The
+    /// program then fails the walk after the named pass, in the profile
+    /// that runs it: the release binary's evidence that the walk runs.
+    fn inject_ir_fault(program: &mut IrProgram) {
+        let Some(victim) = program.functions.iter().find(|f| !f.params.is_empty()).cloned() else {
+            panic!("ALMIDE_IR_FAULT: no function with a param to duplicate");
+        };
+        let mut twin = victim;
+        twin.name = almide_base::intern::sym("__ir_fault_twin");
+        program.functions.push(twin);
     }
 }
 

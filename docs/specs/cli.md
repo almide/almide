@@ -660,6 +660,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_HEAP_TRACE` | debug | print the interpreter's heap-block allocations and frees |
 | `ALMIDE_HTTP_TIMEOUT_SECS=value` | runtime | the http client's request timeout in seconds, read by the compiled program (default 30) |
 | `ALMIDE_INSTALL=value` | tool | the directory `almide install` installs binaries into (overrides the default `~/.local/bin`) |
+| `ALMIDE_IR_FAULT=value` | harness | inject an IR violation after the named optimiser pass, so the per-pass verifier can be watched turning red in the release binary |
 | `ALMIDE_KEEP_SCRATCH` | tool | keep the `almide test` scratch build directory instead of deleting it |
 | `ALMIDE_LOCAL_REUSE_THRESHOLD=value` | route | the distinct-local count above which the v1 wasm render reuses locals (default 8000); a test knob that forces the transform on across the corpus |
 | `ALMIDE_LSP_TRACE` | debug | print every LSP request and response the language server handles |
@@ -717,7 +718,6 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_UPDATE_WITNESS_FLOOR` | harness | regenerate the certificate witness floor |
 | `ALMIDE_VERBOSE` | debug | same as `almide -v`: surface the native wall-and-fallback notes that a quiet run hides |
 | `ALMIDE_VERIFIED_DEBUG` | debug | name the wasm leg that rendered, and why the other declined (the route oracle) |
-| `ALMIDE_VERIFY_IR` | debug | run the IR verifier after every optimiser pass in a release build too (it always runs in debug) |
 | `ALMIDE_WALL_REASON` | debug | make `almide test` say WHICH stage of the wasm leg declined a fallback file, not just `v1 wall` |
 | `ALMIDE_WASM_FREES` | ci | the frees-churn gate's switch; its compiler reader retired with the v0 emitter (#782), the gate that still sets it is #2207's |
 | `ALMIDE_WASM_INCUMBENT` | route | force the INCUMBENT wasm leg (the v1 MIR renderer) instead of the structural-first route |
