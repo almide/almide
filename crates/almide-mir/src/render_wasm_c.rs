@@ -246,6 +246,11 @@ fn op_birth_repr(op: &Op, m: &BTreeMap<ValueId, Repr>) -> Option<(ValueId, Repr)
         Op::CallFn { dst: Some(d), result, .. } => Some((*d, result.unwrap_or(SCALAR_REPR))),
         // An indirect (closure) call's result repr is likewise carried on the op.
         Op::CallIndirect { dst: Some(d), result, .. } => Some((*d, result.unwrap_or(SCALAR_REPR))),
+        // An import call's result repr is carried the same way: a String-
+        // returning `@extern(wasm, ..)` hands back a fresh owned handle, an
+        // i32 — typing its local i64 failed validation at the `local.set`
+        // (#2265: the JS host's `js_upper(s: String) -> String`).
+        Op::CallImport { dst: Some(d), result, .. } => Some((*d, result.unwrap_or(SCALAR_REPR))),
         _ => None,
     }
 }
