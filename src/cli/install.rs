@@ -122,6 +122,7 @@ pub fn cmd_install(
         wasm_opt: false,
         component: false,
         heap_cap: None,
+        host: None,
     });
 
     let _ = std::env::set_current_dir(&prev_cwd);

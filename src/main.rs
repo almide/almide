@@ -171,6 +171,14 @@ enum Commands {
         /// without the flag.
         #[arg(long = "heap-cap")]
         heap_cap: Option<u32>,
+        /// Write a JS host next to the wasm output (#2265): `--host js`
+        /// emits `<mod>.js` (a dependency-free ES module with `init()`,
+        /// `run()` and one wrapper per `pub fn`) and `<mod>.d.ts`. The
+        /// `@extern(wasm, "js", ...)` imports are wired through
+        /// `init({ js: { name } })`; Int/Float/Bool/String/Unit are
+        /// marshalled, anything else is refused at build time.
+        #[arg(long = "host")]
+        host: Option<String>,
     },
     /// Run tests
     Test {
@@ -1024,7 +1032,7 @@ fn dispatch(cli: Cli) {
             let file = resolve_file(file);
             cli::cmd_bench(&file, runs, target.as_deref());
         }
-        Commands::Build { file, o, target, release, fast, unchecked_index, no_check, repr_c, cdylib, emit_unverified, verified: _, no_verified, wasm_opt, component, heap_cap } => {
+        Commands::Build { file, o, target, release, fast, unchecked_index, no_check, repr_c, cdylib, emit_unverified, verified: _, no_verified, wasm_opt, component, heap_cap, host } => {
             let file = resolve_file(file);
             warn_no_verified_deprecated(no_verified);
             cli::cmd_build(cli::BuildArgs {
@@ -1043,6 +1051,7 @@ fn dispatch(cli: Cli) {
                 wasm_opt,
                 component,
                 heap_cap,
+                host: host.as_deref(),
             });
         }
         Commands::Test { file, run, no_check, json, target, update_snapshots, ci, allow_no_tests } => {
