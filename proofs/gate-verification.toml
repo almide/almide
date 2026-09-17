@@ -112,6 +112,15 @@ measures = "exit status of `almide check` per ```almd check fence and byte equal
 varies = "#1490 landing (2026-08-28): the list.md run-fence pinned output 3 -> 4 by hand read as a diff, then equal again when restored"
 
 [[gate]]
+path = "scripts/check-js-host.sh"
+reads = "scalar"
+wired_by = ".github/workflows/ci.yml"
+class = "NEGATIVE_TESTED"
+evidence = "#2265 landing (2026-09-17): the expected line of println_only hand-flipped 6765 -> 6766 turned the gate red naming the fixture and printing the diff, restored green (3/3 fixtures); on the same PR the extern_js fixture read red under the incumbent's own validation (a String-returning import typed i64) before the repr fix and green after it"
+measures = "per-fixture build success on the `// @leg:` leg, byte equality of the generated host's stdout under node with <fixture>.expected, the fixture's host.mjs assertions, and byte equality with the native binary's stdout for extern-free fixtures, read from spec/wasm_host_js/"
+varies = "#2265 landing (2026-09-17): extern_js.almd read `build` FAIL (wasm validation: expected i64, found i32) on one commit and ok on the next; the forged 6766 line read as a one-line diff, equal when restored"
+
+[[gate]]
 path = "proofs/check-structural-bytes.sh"
 reads = "UNCLASSIFIED"
 wired_by = "proofs/check.sh"
