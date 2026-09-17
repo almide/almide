@@ -1,12 +1,20 @@
 //! StreamFusionPass: `|>` chains of list combinators → one Rust iterator
 //! expression (`IrExprKind::IterChain`), Rust target only (#2045).
 //!
-//! Runs right after `StdlibLowering`, on the `RuntimeCall { almide_rt_list_* }`
-//! shape `IntrinsicLowering` produced. (The intercept that used to sit inside
-//! `StdlibLowering` matched `Module { list, .. }`, which no longer exists by
-//! then — the pass was dead, every stage materialised its `Vec`, and the egg
-//! list rules that DID fire composed lambdas by substitution, duplicating a
-//! callback's side effects. Both are gone.)
+//! Runs right after `IntrinsicLowering`, on the `RuntimeCall { almide_rt_list_* }`
+//! shape it produced, and BEFORE `BorrowInsertion`: a callback this pass
+//! inlines is a closure that will not exist, so it must not exist when
+//! ownership is decided — the borrow pass, the capture-clone pass and the
+//! clone pass then see a chain step as the scope it renders as (`Use::depth`
+//! stays 0 inside it), and a `&T` param the step only reads stays `&T`. This
+//! is the order Koka keeps (specialise and simplify the higher-order call
+//! away, then run Perceus); Lean, Koka and Roc all own every capture a
+//! closure that DOES exist holds, and so does Almide's `Rc<dyn Fn>` form.
+//! (The intercept that used to sit inside `StdlibLowering` matched
+//! `Module { list, .. }`, which no longer exists by then — the pass was dead,
+//! every stage materialised its `Vec`, and the egg list rules that DID fire
+//! composed lambdas by substitution, duplicating a callback's side effects.
+//! Both are gone.)
 //!
 //! Two rewrites, bottom-up:
 //!
@@ -38,6 +46,11 @@
 //!    `Vec` per stage, exactly the spec order. The fallible `!` form never
 //!    reaches here (it lowers to the self-hosted `__fallible_*` twins).
 //!
+//! A chain's source is consumed or borrowed as the twin's own slot says
+//! (`@consume(xs)` → `.into_iter()`, a `&[A]` slot → `.iter().cloned()`); the
+//! dead `Clone` the clone pass may later put in front of an enumerate-adapted
+//! source is turned back into a borrow by `ChainSourceBorrowPass`.
+//!
 //! Ablation: `ALMIDE_STREAM_FUSION_OFF=1` skips the pass entirely.
 
 use std::collections::HashSet;
@@ -47,6 +60,7 @@ use almide_base::intern::{sym, Sym};
 use almide_ir::*;
 
 use super::pass::{NanoPass, PassResult, Target};
+use super::pass_borrow_inference::seed_intrinsic_sigs;
 use super::use_kind::written_vars;
 use super::pass_rust_lowering::rewrite_tail_list_to_array;
 use super::pass_stdlib_lowering::{prepare_lambda, prepare_lambda_borrowed};
@@ -61,18 +75,21 @@ impl NanoPass for StreamFusionPass {
     fn name(&self) -> &str { "StreamFusion" }
     fn targets(&self) -> Option<Vec<Target>> { Some(vec![Target::Rust]) }
 
-    /// Fuses the lowered chains; reads the `Clone` nodes clone insertion placed
-    /// on a chain's source, and runs before the `Try` insertion that would
-    /// otherwise sit inside a chain it fuses.
-    fn depends_on(&self) -> Vec<&'static str> { vec!["StdlibLowering", "CloneInsertion"] }
-    fn run_before(&self) -> Vec<&'static str> { vec!["RustLowering", "ResultPropagation"] }
+    /// Fuses the runtime-call shape `IntrinsicLowering` produced, before the
+    /// borrow pass decides ownership over the closures that remain, and
+    /// before the `Try` insertion that would otherwise sit inside a chain it
+    /// fuses.
+    fn depends_on(&self) -> Vec<&'static str> { vec!["IntrinsicLowering"] }
+    fn run_before(&self) -> Vec<&'static str> { vec!["BorrowInsertion", "RustLowering", "ResultPropagation"] }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         if std::env::var_os(ABLATION_ENV).is_some() {
             return PassResult { program, changed: false };
         }
         let purity = Purity::of(&program);
-        let mut v = Fuser { purity: &purity, changed: false, in_fan: false };
+        let mut sigs = std::collections::HashMap::new();
+        seed_intrinsic_sigs(&mut sigs);
+        let mut v = Fuser { purity: &purity, sigs: &sigs, changed: false, in_fan: false };
         for f in &mut program.functions { v.visit_expr_mut(&mut f.body); }
         for tl in &mut program.top_lets { v.visit_expr_mut(&mut tl.value); }
         for m in &mut program.modules {
@@ -354,6 +371,9 @@ fn call_ok(e: &IrExpr, cx: &Cx) -> Option<bool> {
 struct Fuser<'a> {
     in_fan: bool,
     purity: &'a Purity,
+    /// The bundled `@intrinsic` signatures: whether a twin's list slot is
+    /// `@consume`d (the chain takes the source) or borrowed (`&[A]`).
+    sigs: &'a std::collections::HashMap<String, Vec<ParamBorrow>>,
     changed: bool,
 }
 
@@ -413,25 +433,35 @@ fn lambda_body_mut(callback: &mut IrExpr) -> Option<&mut IrExpr> {
     }
 }
 
-/// `(source, consume, prefix)`: a borrowed source (`&xs`, the `&[A]` runtime
-/// twins' arg shape) iterates as `.iter().cloned()`, anything else is
-/// consumed. `list.enumerate` in source position is not a source at all but an
+/// `(source, consume, prefix)`: the source iterates as `.into_iter()` when
+/// the twin `symbol` consumes its list slot (`@consume(xs)`), as
+/// `.iter().cloned()` when the slot is a borrow (`&[A]`) — the same verdict
+/// the borrow pass would have given the runtime call. An already-explicit
+/// `Borrow` (a chain built after `BorrowInsertion`, e.g. by a test) is a
+/// borrow. `list.enumerate` in source position is not a source at all but an
 /// ADAPTER over one (#2098): its pairs become an `Enumerate` step, so the
 /// `Vec<(i64, T)>` the next stage would immediately walk is never built.
-fn source_of(arg: IrExpr) -> (IrExpr, bool, Vec<IterStep>) {
-    if let IrExprKind::RuntimeCall { symbol, args } = &arg.kind
-        && symbol.as_str() == "almide_rt_list_enumerate"
+fn source_of(arg: IrExpr, symbol: &str, sigs: &std::collections::HashMap<String, Vec<ParamBorrow>>) -> (IrExpr, bool, Vec<IterStep>) {
+    if let IrExprKind::RuntimeCall { symbol: inner_symbol, args } = &arg.kind
+        && inner_symbol.as_str() == "almide_rt_list_enumerate"
         && args.len() == 1
     {
         let mut args = args.clone();
-        let (inner, consume, mut prefix) = source_of(args.remove(0));
+        let inner_symbol = inner_symbol.to_string();
+        let (inner, consume, mut prefix) = source_of(args.remove(0), &inner_symbol, sigs);
         prefix.push(IterStep::Enumerate);
         return (inner, consume, prefix);
     }
     match arg.kind {
         IrExprKind::Borrow { expr, .. } => (*expr, false, vec![]),
-        _ => (arg, true, vec![]),
+        _ => (arg, slot_consumes(symbol, sigs), vec![]),
     }
+}
+
+/// Does the twin `symbol` take its list slot by value? An unknown symbol
+/// consumes (the runtime default).
+fn slot_consumes(symbol: &str, sigs: &std::collections::HashMap<String, Vec<ParamBorrow>>) -> bool {
+    sigs.get(symbol).map_or(true, |modes| modes.first().is_none_or(|m| *m == ParamBorrow::Own))
 }
 
 /// The `Clone` in front of an adapted source is DEAD by construction (#2098):
@@ -447,7 +477,7 @@ fn source_of(arg: IrExpr) -> (IrExpr, bool, Vec<IterStep>) {
 /// merge can only add callbacks and they belong in the same scan. Only a plain
 /// variable qualifies: a temporary would be correct too (Rust extends it to
 /// the end of the statement) but buys nothing.
-fn borrow_adapted_source(mut expr: IrExpr) -> IrExpr {
+pub(crate) fn borrow_adapted_source(mut expr: IrExpr) -> IrExpr {
     let IrExprKind::IterChain { source, consume, steps, collector } = &mut expr.kind else {
         return expr;
     };
@@ -495,7 +525,7 @@ impl<'a> Fuser<'a> {
             "sum" | "sum_float" | "len" if args.len() == 1 => return self.reducer(expr, op),
             _ => return None,
         };
-        Some(borrow_adapted_source(self.merge(single)))
+        Some(self.merge(single))
     }
 
     /// Rewrite 1: one runtime combinator call with a lambda literal → a
@@ -503,7 +533,8 @@ impl<'a> Fuser<'a> {
     fn single_stage(&self, expr: &IrExpr, op: &str) -> Option<IrExpr> {
         let IrExprKind::RuntimeCall { args, .. } = &expr.kind else { return None };
         let callback = take_lambda(args.last()?.clone())?;
-        let (source, consume, prefix) = source_of(args[0].clone());
+        let IrExprKind::RuntimeCall { symbol, .. } = &expr.kind else { return None };
+        let (source, consume, prefix) = source_of(args[0].clone(), symbol.as_str(), self.sigs);
         // Rust hands `filter` / `find` / the `count` filter a `&T`; every
         // other adapter (and the `.iter().cloned()` borrowed source) an owned `T`.
         let borrowed = matches!(op, "filter" | "find" | "count");
@@ -537,8 +568,8 @@ impl<'a> Fuser<'a> {
     /// `list.take(chain, n)` → a `Take` step on the chain — a short-circuit
     /// point, so it needs the merge's totality rule.
     fn take(&self, expr: &IrExpr) -> Option<IrExpr> {
-        let IrExprKind::RuntimeCall { args, .. } = &expr.kind else { return None };
-        let (source, consume, mut steps) = source_of(args[0].clone());
+        let IrExprKind::RuntimeCall { symbol, args } = &expr.kind else { return None };
+        let (source, consume, mut steps) = source_of(args[0].clone(), symbol.as_str(), self.sigs);
         let n = args[1].clone();
         steps.push(IterStep::Take { n: Box::new(n) });
         let outer = chain(expr, source, consume, steps, IterCollector::Collect);
@@ -554,13 +585,13 @@ impl<'a> Fuser<'a> {
     /// `Len` collector. Same elements, same order, one fewer `Vec` — no
     /// purity condition.
     fn reducer(&self, expr: &IrExpr, op: &str) -> Option<IrExpr> {
-        let IrExprKind::RuntimeCall { args, .. } = &expr.kind else { return None };
+        let IrExprKind::RuntimeCall { symbol, args } = &expr.kind else { return None };
         // A source adapter over the inner chain runs AFTER its steps, so it is
         // appended rather than dropped: `list.len` happens to be invariant
         // under `enumerate` and `sum` is not typeable over its pairs, but a
         // step silently discarded here would be a defect waiting for the next
         // adapter that is neither.
-        let (inner, _, prefix) = source_of(args[0].clone());
+        let (inner, _, prefix) = source_of(args[0].clone(), symbol.as_str(), self.sigs);
         let IrExprKind::IterChain { source, consume, mut steps, collector: IterCollector::Collect } = inner.kind else { return None };
         steps.extend(prefix);
         let collector = match op {

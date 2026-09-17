@@ -172,13 +172,14 @@ fn rewrite_calls(expr: IrExpr, sigs: &HashMap<String, Vec<ParamBorrow>>, mod_sco
             template,
             args: args.into_iter().map(|(n, a)| (n, rewrite_calls(a, sigs, mod_scope))).collect(),
         },
-        // IterChain: only the source is a call site the walker still renders;
-        // the steps and collector are already-lowered iterator adaptors.
+        // IterChain: the source, every step / collector lambda body, a fold's
+        // seed and a take's count are all call sites the walker renders
+        // (the pass runs before this one now).
         IrExprKind::IterChain { source, consume, steps, collector } => IrExprKind::IterChain {
             source: Box::new(rewrite_calls(*source, sigs, mod_scope)),
             consume,
-            steps,
-            collector,
+            steps: steps.into_iter().map(|s| map_step(s, &mut |e| rewrite_calls(e, sigs, mod_scope))).collect(),
+            collector: map_collector(collector, &mut |e| rewrite_calls(e, sigs, mod_scope)),
         },
 
         // ── Statement-bearing nodes: bodies go through `rewrite_calls_stmt` ──
@@ -383,11 +384,43 @@ fn hoist_expr(expr: IrExpr, vt: &mut VarTable) -> IrExpr {
             | IrExprKind::RustMacro { .. } | IrExprKind::ToVec { .. }
             | IrExprKind::RenderedCall { .. } | IrExprKind::InlineRust { .. }
             | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. }
-            | IrExprKind::IterChain { .. } | IrExprKind::Hole
+            | IrExprKind::Hole
             | IrExprKind::Todo { .. }) => kind,
+        IrExprKind::IterChain { source, consume, steps, collector } => IrExprKind::IterChain {
+            source: Box::new(hoist_expr(*source, vt)),
+            consume,
+            steps: steps.into_iter().map(|s| map_step(s, &mut |e| hoist_expr(e, vt))).collect(),
+            collector: map_collector(collector, &mut |e| hoist_expr(e, vt)),
+        },
     };
 
     IrExpr { kind, ty, span, def_id: None }
+}
+
+/// Apply `f` to a chain step's expression child (its lambda or count).
+fn map_step(step: IterStep, f: &mut dyn FnMut(IrExpr) -> IrExpr) -> IterStep {
+    match step {
+        IterStep::Map { lambda } => IterStep::Map { lambda: Box::new(f(*lambda)) },
+        IterStep::Filter { lambda } => IterStep::Filter { lambda: Box::new(f(*lambda)) },
+        IterStep::FlatMap { lambda } => IterStep::FlatMap { lambda: Box::new(f(*lambda)) },
+        IterStep::FilterMap { lambda } => IterStep::FilterMap { lambda: Box::new(f(*lambda)) },
+        IterStep::Take { n } => IterStep::Take { n: Box::new(f(*n)) },
+        IterStep::Enumerate => IterStep::Enumerate,
+    }
+}
+
+/// Apply `f` to a collector's expression children (its lambda and seed).
+fn map_collector(collector: IterCollector, f: &mut dyn FnMut(IrExpr) -> IrExpr) -> IterCollector {
+    match collector {
+        IterCollector::Fold { init, lambda } => IterCollector::Fold { init: Box::new(f(*init)), lambda: Box::new(f(*lambda)) },
+        IterCollector::Any { lambda } => IterCollector::Any { lambda: Box::new(f(*lambda)) },
+        IterCollector::All { lambda } => IterCollector::All { lambda: Box::new(f(*lambda)) },
+        IterCollector::Find { lambda } => IterCollector::Find { lambda: Box::new(f(*lambda)) },
+        IterCollector::Count { lambda } => IterCollector::Count { lambda: Box::new(f(*lambda)) },
+        IterCollector::Collect => IterCollector::Collect,
+        IterCollector::Sum { float } => IterCollector::Sum { float },
+        IterCollector::Len => IterCollector::Len,
+    }
 }
 
 /// A `Call` site: hoist its args and its Method/Computed target first, then let
