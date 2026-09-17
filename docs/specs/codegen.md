@@ -361,6 +361,20 @@ owned. The body needs it owned when it:
 - hands it to a **stdlib** slot that consumes (`list.map`'s list, `list.push`'s
   element): those lower into chains and runtime calls that take the value.
 
+A list-combinator callback the stream-fusion pass inlines (`list.map(xs, (x) =>
+… t …)`, `filter`, `fold`, `any`, …) is **not a closure** for this policy: the
+pass runs before the borrow pass, and a chain step is a scope that runs once
+per element inside the chain and never escapes it. A param it only reads stays
+`&T` — `(x) => x + list.len(t.names)` keeps `t: &Table` — and the step renders
+without `move` and without a capture bind, borrowing what it reads for the
+chain's duration. A read that consumes inside the step (returning `t` per
+element) is cloned there whether or not the param is owned, so it earns the
+param nothing. Only a closure that outlives its call — returned, stored, handed
+to a user fn's `(T) -> U` slot, or a fallible `!` form's `Rc<dyn Fn>` twin —
+captures, and captures own (Lean, Koka and Roc make the same distinction: a
+closure that exists owns what it holds; the win comes from erasing the closure
+before ownership is decided).
+
 Handing the param bare to a callee's owned slot (`stored(t, 1)` where `stored`
 keeps `t` in a record) makes the param owned only when that site is the
 param's LAST use: ownership then buys a move, and a caller that still needs
