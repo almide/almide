@@ -195,6 +195,7 @@ fn rewrite_body(expr: IrExpr, body: &Body, mut owned: HashSet<VarId>, loops: &mu
     let memo = BranchCounts::compute(&expr, &scope.eligible);
     // Nothing is fresh at function top level — see `CloneCtx::fresh`.
     let no_fresh: HashSet<VarId> = HashSet::new();
+    let no_captured: HashSet<VarId> = HashSet::new();
     insert_clones_live(expr, &mut CloneCtx {
         always: &scope.always,
         eligible: &scope.eligible,
@@ -204,6 +205,7 @@ fn rewrite_body(expr: IrExpr, body: &Body, mut owned: HashSet<VarId>, loops: &mu
         fresh: &no_fresh,
         owned: &owned,
         loops,
+        captured: &no_captured,
     })
 }
 
@@ -439,6 +441,11 @@ pub(crate) struct CloneCtx<'a> {
     /// the next iteration binds a fresh value. Empty outside loops and
     /// inside lambda bodies (a closure may run many times per iteration).
     pub(crate) fresh: &'a HashSet<VarId>,
+    /// Vars bound OUTSIDE the innermost enclosing lambda (its free vars):
+    /// a consuming read of one inside the closure body clones, whatever the
+    /// var's class — the body runs per call and a move out of a captured
+    /// variable is E0507. Empty outside every lambda.
+    pub(crate) captured: &'a HashSet<VarId>,
     /// The loop binders this walk has classified so far (#1673) — handed to
     /// the walker as `borrowed_loop_vars` / `consumed_loop_vars`.
     pub(crate) loops: &'a mut LoopMarks,
@@ -480,6 +487,11 @@ fn insert_clones_var(id: VarId, ty: Ty, span: Option<Span>, ctx: &mut CloneCtx) 
                 return IrExpr { kind: IrExprKind::Var { id }, ty, span, def_id: None };
             }
         }
+        return make_clone(id, ty, span);
+    }
+    // A single-use var moves by default — except inside a closure that
+    // captured it from the enclosing scope, where the read repeats per call.
+    if ctx.captured.contains(&id) && needs_clone(&ty) {
         return make_clone(id, ty, span);
     }
     IrExpr { kind: IrExprKind::Var { id }, ty, span, def_id: None }
@@ -577,7 +589,7 @@ fn insert_clones_match(subject: IrExpr, arms: Vec<IrMatchArm>, ctx: &mut CloneCt
         let owned: HashSet<_> = ctx.owned.iter().copied()
             .filter(|v| !borrowed.as_ref().is_some_and(|vars| vars.contains(v))).collect();
         let mut arm_ctx = CloneCtx { owned: &owned, always: ctx.always, eligible: ctx.eligible,
-            remaining: ctx.remaining, in_loop: ctx.in_loop, memo: ctx.memo, fresh: ctx.fresh, loops: ctx.loops };
+            remaining: ctx.remaining, in_loop: ctx.in_loop, memo: ctx.memo, fresh: ctx.fresh, loops: ctx.loops, captured: ctx.captured };
         let new_guard = arm.guard.map(|g| insert_clones_live(g, &mut arm_ctx));
         let new_body = insert_clones_live(arm.body, &mut arm_ctx);
         new_arms.push(IrMatchArm { pattern: arm.pattern, guard: new_guard, body: new_body });
@@ -667,11 +679,13 @@ pub(crate) fn insert_clones_live(mut expr: IrExpr, ctx: &mut CloneCtx) -> IrExpr
                 _ => &[],
             };
             let fresh = super::pass_clone_loops::loop_fresh_vars(None, Some(&param_ids), top);
+            let param_set: HashSet<VarId> = param_ids.iter().copied().collect();
+            let captured: HashSet<VarId> = almide_ir::free_vars::free_vars(&body, &param_set).into_iter().collect();
             let e = IrExpr { kind: IrExprKind::Lambda { params, body, lambda_id }, ty: ty.clone(), span, def_id: None };
             // Captured values belong to the reusable closure. Only values
             // introduced inside this invocation may have fields moved out.
             let owned = almide_ir::free_vars::bound_vars(&e);
-            let mut lam_ctx = CloneCtx { always: ctx.always, eligible: ctx.eligible, remaining: ctx.remaining, in_loop: true, memo: ctx.memo, fresh: &fresh, owned: &owned, loops: ctx.loops };
+            let mut lam_ctx = CloneCtx { always: ctx.always, eligible: ctx.eligible, remaining: ctx.remaining, in_loop: true, memo: ctx.memo, fresh: &fresh, owned: &owned, loops: ctx.loops, captured: &captured };
             return e.map_children(&mut |child| insert_clones_live(child, &mut lam_ctx));
         }
         // Default: recurse into every child through the exhaustive `map_children`
