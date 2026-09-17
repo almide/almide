@@ -34,16 +34,20 @@ struct TypeSpec {
     mutate: Option<&'static str>,
     /// A `for x in p` body summing into an Int, when the type iterates.
     loop_body: Option<&'static str>,
+    /// An Int-valued read of one element `x`, when the type iterates: the
+    /// step of the fused chains (#2287) that only READ the element.
+    elem: Option<&'static str>,
     record: bool,
 }
 
 const TYPES: &[TypeSpec] = &[
-    TypeSpec { tag: "str", ty: "String", lit: "\"ab\"", lit2: "\"cde\"", read: |p| format!("int.to_string(string.len({p}))"), concat: true, mutate: None, loop_body: None, record: false },
-    TypeSpec { tag: "list", ty: "List[Int]", lit: "[1, 2]", lit2: "[3, 4, 5]", read: |p| format!("int.to_string(list.len({p}))"), concat: true, mutate: Some("list.push(p, 9)"), loop_body: Some("acc = acc + x"), record: false },
-    TypeSpec { tag: "map", ty: "Map[String, Int]", lit: "[\"a\": 1]", lit2: "[\"b\": 2, \"c\": 3]", read: |p| format!("int.to_string(map.len({p}))"), concat: false, mutate: Some("map.insert(p, \"z\", 9)"), loop_body: None, record: false },
-    TypeSpec { tag: "set", ty: "Set[Int]", lit: "set.from_list([1])", lit2: "set.from_list([2, 3])", read: |p| format!("int.to_string(set.len({p}))"), concat: false, mutate: None, loop_body: None, record: false },
-    TypeSpec { tag: "bytes", ty: "Bytes", lit: "bytes.from_list([1])", lit2: "bytes.from_list([2, 3])", read: |p| format!("int.to_string(bytes.len({p}))"), concat: false, mutate: Some("bytes.push(p, 9)"), loop_body: None, record: false },
-    TypeSpec { tag: "rec", ty: "Tok", lit: "{ text: \"ab\", n: 1 }", lit2: "{ text: \"cde\", n: 2 }", read: |p| format!("int.to_string(string.len({p}.text) + {p}.n)"), concat: false, mutate: None, loop_body: None, record: true },
+    TypeSpec { tag: "str", ty: "String", lit: "\"ab\"", lit2: "\"cde\"", read: |p| format!("int.to_string(string.len({p}))"), concat: true, mutate: None, loop_body: None, elem: None, record: false },
+    TypeSpec { tag: "list", ty: "List[Int]", lit: "[1, 2]", lit2: "[3, 4, 5]", read: |p| format!("int.to_string(list.len({p}))"), concat: true, mutate: Some("list.push(p, 9)"), loop_body: Some("acc = acc + x"), elem: Some("x"), record: false },
+    TypeSpec { tag: "strs", ty: "List[String]", lit: "[\"ab\", \"c\"]", lit2: "[\"de\"]", read: |p| format!("int.to_string(list.len({p}))"), concat: true, mutate: Some("list.push(p, \"z\")"), loop_body: Some("acc = acc + string.len(x)"), elem: Some("string.len(x)"), record: false },
+    TypeSpec { tag: "map", ty: "Map[String, Int]", lit: "[\"a\": 1]", lit2: "[\"b\": 2, \"c\": 3]", read: |p| format!("int.to_string(map.len({p}))"), concat: false, mutate: Some("map.insert(p, \"z\", 9)"), loop_body: None, elem: None, record: false },
+    TypeSpec { tag: "set", ty: "Set[Int]", lit: "set.from_list([1])", lit2: "set.from_list([2, 3])", read: |p| format!("int.to_string(set.len({p}))"), concat: false, mutate: None, loop_body: None, elem: None, record: false },
+    TypeSpec { tag: "bytes", ty: "Bytes", lit: "bytes.from_list([1])", lit2: "bytes.from_list([2, 3])", read: |p| format!("int.to_string(bytes.len({p}))"), concat: false, mutate: Some("bytes.push(p, 9)"), loop_body: None, elem: None, record: false },
+    TypeSpec { tag: "rec", ty: "Tok", lit: "{ text: \"ab\", n: 1 }", lit2: "{ text: \"cde\", n: 2 }", read: |p| format!("int.to_string(string.len({p}.text) + {p}.n)"), concat: false, mutate: None, loop_body: None, elem: None, record: true },
 ];
 
 /// One use of the param inside a body: the fn source and how the call's
@@ -88,6 +92,12 @@ fn shapes(t: &TypeSpec) -> Vec<Shape> {
     }
     if let Some(body) = t.loop_body {
         out.push(Shape { name: "loop".into(), def: format!("fn u_loop_{tag}(p: {ty}) -> String = {{\n  var acc = 0\n  for x in p {{\n    {body}\n  }}\n  int.to_string(acc)\n}}"), extra: "", show: ident_show, needs_var: false });
+    }
+    if let Some(e) = t.elem {
+        // Fused chains whose step only reads the element: the source is
+        // borrowed and no element is cloned (#2287).
+        out.push(Shape { name: "fold".into(), def: format!("fn u_fold_{tag}(p: {ty}) -> String = int.to_string(list.fold(p, 0, (acc, x) => acc + {e}))"), extra: "", show: ident_show, needs_var: false });
+        out.push(Shape { name: "mapped".into(), def: format!("fn u_mapped_{tag}(p: {ty}) -> String = int.to_string(list.sum(list.map(p, (x) => {e})))"), extra: "", show: ident_show, needs_var: false });
     }
     if let Some(m) = t.mutate {
         out.push(Shape { name: "mut".into(), def: format!("fn u_mut_{tag}(mut p: {ty}) -> Unit = {m}"), extra: "", show: unit_show, needs_var: true });
