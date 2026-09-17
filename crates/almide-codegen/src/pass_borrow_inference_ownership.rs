@@ -26,6 +26,12 @@ pub(crate) struct Round<'a> {
     /// borrow inference like structural records; user VARIANTs stay Own
     /// (conservative — variant borrowing is not generalized here). #647
     pub records: &'a HashSet<String>,
+    /// The analysed ROOT-program fns by bare name — no module fns, no mirror
+    /// spellings. Only a call to one of these reaches `BorrowLowering` as a
+    /// `Call`; a module fn (even from a sibling) and every mangled
+    /// `almide_rt_<mod>_<name>` target become a `RuntimeCall` first. The Keep
+    /// rule (#2278) is scoped to this set.
+    pub plain_fns: &'a HashSet<String>,
 }
 
 /// One function's view of a [`Round`]: the module it lives in (its callees
@@ -109,7 +115,15 @@ impl SlotOracle for Scope<'_> {
             CallTarget::Module { module, func, .. } => format!("{}::{}", module, func),
             CallTarget::Method { .. } | CallTarget::Computed { .. } => return SlotMode::Consume,
         };
-        let program_fn = matches!(target, CallTarget::Named { .. });
+        // The Keep rule (#2278) applies to a callee whose call stays a plain
+        // `Call` down to `BorrowLowering` (the site that owns the read): a
+        // root-program fn called by its bare name from the root program. A
+        // module fn and every mangled `almide_rt_<mod>_<name>` target — a
+        // monomorphised stdlib instance, a derived codec fn, a cross-module
+        // fn — become a `RuntimeCall` before lowering, and a template-bodied
+        // fn's `Own` is not an owned slot at all; all keep the Consume verdict.
+        let program_fn = self.module.is_none()
+            && matches!(target, CallTarget::Named { name } if self.round.plain_fns.contains(name.as_str()));
         match self.resolve(&name) {
             Callee::Known(borrows) => {
                 let mode = slot_of(borrows.get(index), SlotMode::Consume);

@@ -361,8 +361,12 @@ Handing the param bare to a **program fn's** owned slot (`stored(t, 1)` where
 `stored` keeps `t` in a record) does **not** make the param owned (#2278): the
 param stays `&T`, and that one site owns its read (`stored(t.clone(), 1)`) — one
 clone at the site, none at any caller, and the param's other reads keep the
-borrow. A `mut` param is `&mut T` for its whole body and takes the same
-site-level clone at every by-value position (#2266).
+borrow. The rule covers a root-program fn called by name from the root program;
+a module fn, a monomorphised stdlib instance, a derived codec fn and a
+cross-module fn are called through their mangled runtime symbol, and a param
+handed bare to such a slot is owned as before. A `mut` param is `&mut T` for
+its whole body and takes the same site-level clone at every by-value position
+(#2266).
 
 A param that is owned costs every caller that still needs its value a clone; a
 borrowed param costs nothing at the call. Whether a fn ends up `&T` or `T` is
