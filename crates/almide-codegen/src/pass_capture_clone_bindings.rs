@@ -154,19 +154,21 @@ pub(super) fn capture_bindings(
 
 /// One occurrence of a var as the capture-move rule sees it: its index in
 /// evaluation order, the outermost lambda holding it, whether a node
-/// enclosing that closure holds a borrow across its construction, and the
-/// outermost fan arm holding it (#2239).
+/// enclosing that closure holds a borrow across its construction, whether
+/// it runs inside a loop (a `for` / `while` body or an iterator-chain step,
+/// which repeats per element), and the outermost fan arm holding it (#2239).
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Occurrence {
     pub(super) index: usize,
     pub(super) lambda: Option<u32>,
     pub(super) held: bool,
+    pub(super) in_loop: bool,
     pub(super) fan_arm: Option<(almide_base::span::Span, u32)>,
 }
 
 /// Per var of a fn body, the facts the capture-move rule reads: every
 /// [`Occurrence`], and whether the var is CLEAN — no write, no reach
-/// through `&mut`, no occurrence inside a loop. See [`capture_moves`].
+/// through `&mut`. See [`capture_moves`].
 #[derive(Default)]
 pub(super) struct CaptureUses {
     pub(super) uses: HashMap<VarId, Vec<Occurrence>>,
@@ -184,9 +186,9 @@ pub(super) fn capture_uses(body: &IrExpr) -> CaptureUses {
     let mut unclean: HashSet<VarId> = HashSet::new();
     for (i, u) in sites.iter().enumerate() {
         out.uses.entry(u.var).or_default().push(Occurrence {
-            index: i, lambda: u.outer_lambda, held: u.held_across, fan_arm: u.fan_arm,
+            index: i, lambda: u.outer_lambda, held: u.held_across, in_loop: u.in_loop, fan_arm: u.fan_arm,
         });
-        if u.in_loop || u.in_mut || u.is_write(true) || matches!(u.site, Site::Borrow { mutable: true }) {
+        if u.in_mut || u.is_write(true) || matches!(u.site, Site::Borrow { mutable: true }) {
             unclean.insert(u.var);
         }
     }
@@ -220,7 +222,10 @@ pub(super) fn fan_capture_moves(table: &CaptureUses, var: VarId, arm: (almide_ba
 }
 
 /// Does the closure selected by `inside` hold the LAST occurrence of a clean
-/// `var`, with none of its occurrences held across by an enclosing borrow?
+/// `var`, with none of its occurrences held across by an enclosing borrow or
+/// running inside a loop (a closure built per iteration — or per element of
+/// a chain step — would move the var a second time)? An earlier occurrence
+/// in a loop the closure sits after does not block the move.
 fn holds_last_occurrence(table: &CaptureUses, var: VarId, inside: impl Fn(&Occurrence) -> bool) -> bool {
     if !table.clean.contains(&var) {
         return false;
@@ -232,5 +237,5 @@ fn holds_last_occurrence(table: &CaptureUses, var: VarId, inside: impl Fn(&Occur
     }
     let last_inside = inside.iter().map(|o| o.index).max().unwrap_or(0);
     let last_any = uses.iter().map(|o| o.index).max().unwrap_or(0);
-    last_any == last_inside && !inside.iter().any(|o| o.held)
+    last_any == last_inside && !inside.iter().any(|o| o.held || o.in_loop)
 }

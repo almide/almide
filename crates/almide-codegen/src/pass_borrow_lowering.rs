@@ -217,6 +217,18 @@ impl Lower<'_> {
             expr.kind = std::mem::replace(&mut inner.kind, IrExprKind::Unit);
             return;
         }
+        // `&p` of a `&mut T` param handed to a `&T` slot (a callee whose
+        // param is borrowed, `captured(&t)` with `t: &mut Table`) is the
+        // explicit reborrow `&*p`; the bare `&p` would be a `&&mut T`.
+        if let Some(id) = var_id(inner)
+            && !as_str && !mutable && is_ref_mut_param(self.params, id)
+        {
+            let var = std::mem::replace(inner.as_mut(), mk(IrExprKind::Unit, Ty::Unit, None));
+            let ty = var.ty.clone();
+            let span = var.span;
+            *inner = Box::new(mk(IrExprKind::Deref { expr: Box::new(var) }, ty, span));
+            return;
+        }
         // `&c` of a loop binder bound `&String` off `xs.iter()` (#1673) is
         // `&&String`. A concrete `&String` slot deref-coerces it, but the
         // generic key slot of `map.get` / `map.contains` (`K: Borrow<Q>`)
