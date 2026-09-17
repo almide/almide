@@ -382,13 +382,31 @@ impl Lower<'_> {
         *e = owned_read(mk(IrExprKind::Var { id }, ty, span));
     }
 
+    /// A shared-borrow param handed bare to a callee's OWNED slot (#2278):
+    /// borrow inference keeps the param borrowed at such a site (the callee
+    /// keeps the value; the whole param need not be owned for it), so the
+    /// argument owns its read here — one clone at the site, none at any
+    /// caller. A `Copy` scalar needs nothing.
+    fn own_consumed_borrowed(&self, e: &mut IrExpr) {
+        let Some(id) = var_id(e) else { return };
+        if !is_ref_param(self.params, id) || is_copy_scalar(&e.ty) {
+            return;
+        }
+        let ty = e.ty.clone();
+        let span = e.span;
+        *e = owned_read(mk(IrExprKind::Var { id }, ty, span));
+    }
+
     /// The by-value positions [`Lower::own_consumed_ref_mut`] applies to. A
     /// borrowed slot is a `Borrow` node here (BorrowInsertion ran), so a
     /// bare `Var` argument is an owned slot by construction.
     fn lower_consumers(&self, expr: &mut IrExpr) {
         match &mut expr.kind {
             IrExprKind::Call { args, .. } | IrExprKind::TailCall { args, .. } => {
-                for a in args { self.own_consumed_ref_mut(a); }
+                for a in args {
+                    self.own_consumed_ref_mut(a);
+                    self.own_consumed_borrowed(a);
+                }
             }
             IrExprKind::Record { fields, .. } => {
                 for (_, f) in fields { self.own_consumed_ref_mut(f); }
