@@ -354,7 +354,8 @@ impl Lower<'_> {
             IrExprKind::Clone { expr } => match var_id(expr) { Some(id) => id, None => return },
             _ => return,
         };
-        if !is_ref_param(self.params, id) && !(is_ref_mut_param(self.params, id) && !is_copy_scalar(&value.ty)) {
+        let owns_first = is_ref_param(self.params, id) || (is_ref_mut_param(self.params, id) && !is_copy_scalar(&value.ty));
+        if !owns_first {
             return;
         }
         let ty = value.ty.clone();
