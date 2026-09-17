@@ -240,7 +240,11 @@ pub(crate) fn is_named_in(ty: &Ty, names: &HashSet<String>) -> bool {
 /// one rule.
 pub(crate) fn scrutinee_binders_borrow_only(body: &IrExpr, var: VarId, uses: &UseSites) -> bool {
     use almide_ir::visit::{IrVisitor, walk_expr, walk_stmt};
-    struct Scan<'a> { var: VarId, uses: &'a UseSites, ok: bool, matched: bool }
+    use std::collections::HashMap;
+    /// Every match in the body whose subject is a variable (bare, or under
+    /// the clone / borrow / box-deref a pass wrapped it in), by that variable:
+    /// the binders its arms introduce.
+    struct Scan { matches: HashMap<VarId, Vec<(VarId, Ty)>> }
     fn binders(p: &IrPattern, out: &mut Vec<(VarId, Ty)>) {
         match p {
             IrPattern::Wildcard | IrPattern::Literal { .. } | IrPattern::None => {}
@@ -258,38 +262,67 @@ pub(crate) fn scrutinee_binders_borrow_only(body: &IrExpr, var: VarId, uses: &Us
             }
         }
     }
-    impl IrVisitor for Scan<'_> {
+    impl IrVisitor for Scan {
         fn visit_expr(&mut self, e: &IrExpr) {
-            // The subject is the variable itself, or the clone / borrow of it
-            // a later pass wrapped it in: the certifier reads the FINAL IR,
-            // where the clone pass has already spelled a held subject as
-            // `xs.clone()`, and must see the same matches the verdict saw.
-            let subject_var = |s: &IrExpr| match &s.kind {
-                IrExprKind::Var { id } => Some(*id),
-                IrExprKind::Clone { expr } | IrExprKind::Borrow { expr, .. } => match &expr.kind {
-                    IrExprKind::Var { id } => Some(*id),
-                    _ => None,
-                },
-                _ => None,
-            };
+            // The subject is the variable itself, or the clone / borrow /
+            // box-deref of it a pass wrapped it in: the certifier reads the
+            // FINAL IR, where the clone pass has already spelled a held
+            // subject as `xs.clone()` and BoxDeref a boxed payload as `*t`,
+            // and must see the same matches the verdict saw.
             if let IrExprKind::Match { subject, arms } = &e.kind
-                && subject_var(subject) == Some(self.var)
+                && let Some(id) = subject_root(subject)
             {
-                self.matched = true;
-                let mut bound = Vec::new();
-                for arm in arms { binders(&arm.pattern, &mut bound); }
-                for (b, ty) in bound {
-                    if almide_ir::top_let_storage::clone_free(&ty) { continue; }
-                    if self.uses.of(b).any(consumes) { self.ok = false; }
-                }
+                let entry = self.matches.entry(id).or_default();
+                for arm in arms { binders(&arm.pattern, entry); }
             }
             walk_expr(self, e);
         }
         fn visit_stmt(&mut self, s: &IrStmt) { walk_stmt(self, s); }
     }
-    let mut scan = Scan { var, uses, ok: true, matched: false };
+    let mut scan = Scan { matches: HashMap::new() };
     scan.visit_expr(body);
-    scan.matched && scan.ok
+    if !scan.matches.contains_key(&var) {
+        return false;
+    }
+    // A binder is READ when none of its occurrences consumes it — directly,
+    // or through a projection chain (`*t` of a boxed payload into a
+    // constructor, `kids` iterated by value: the use-kind walk records those
+    // as a `Deref` / `Member` root with the consuming site on top). A binder
+    // that is only the subject of a further match (a nested `match *t`)
+    // reads through that match, so its binders join the check.
+    let consumed = |u: &Use| consumes(u)
+        || matches!(u.chain, Some(c) if c.heap && c.top != Site::Scrutinee && consumes(&Use { site: c.top, chain: None, ..*u }));
+    let nested_subject = |u: &Use| u.site == Site::Scrutinee
+        || matches!((u.site, u.chain), (Site::Deref, Some(c)) if c.top == Site::Scrutinee && c.len == 1);
+    let mut todo = vec![var];
+    let mut seen: std::collections::HashSet<VarId> = std::collections::HashSet::new();
+    while let Some(root) = todo.pop() {
+        if !seen.insert(root) { continue; }
+        let Some(bound) = scan.matches.get(&root) else { continue };
+        for (b, ty) in bound {
+            if almide_ir::top_let_storage::clone_free(ty) { continue; }
+            for u in uses.of(*b) {
+                if nested_subject(u) {
+                    if !scan.matches.contains_key(b) { return false; }
+                    todo.push(*b);
+                } else if consumed(u) {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
+
+/// The variable a match subject reads, through the wrappers passes add:
+/// `Clone` (the clone pass, a held subject), `Borrow` (the clone pass, a
+/// live subject) and `Deref` (BoxDeref, a boxed payload binder).
+pub(crate) fn subject_root(s: &IrExpr) -> Option<VarId> {
+    match &s.kind {
+        IrExprKind::Var { id } => Some(*id),
+        IrExprKind::Clone { expr } | IrExprKind::Borrow { expr, .. } | IrExprKind::Deref { expr } => subject_root(expr),
+        _ => None,
+    }
 }
 
 /// Is `later` after `earlier` in evaluation order? Occurrences are recorded
