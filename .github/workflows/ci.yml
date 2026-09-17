@@ -1153,6 +1153,12 @@ jobs:
       - name: Doc fences execute (#1490 — marked stdlib examples check/run byte-exactly)
         run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-doc-fences.sh
 
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+      - name: JS host (#2265 — `--host js` glue runs the wasm_host_js fixtures under node, stdout byte-equal to expected and native)
+        run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-js-host.sh
+
       # #2205: the ALMIDE_* switches are one registry. The grep half refuses an
       # unregistered name anywhere in the tree and a direct std::env read in
       # the compiler proper; the Almide half refuses drift between the registry
