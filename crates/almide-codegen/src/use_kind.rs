@@ -392,6 +392,18 @@ impl<'a> Walk<'a> {
                 self.expr(left, Site::Concat);
                 self.expr(right, Site::Concat);
             }
+            // A comparison of two `String` places / literals is compared as
+            // `&str` views by the clone pass (`pass_clone_compare::can_borrow`
+            // — the same shape test): each operand is a read through a
+            // reference. Every other comparison operand is an `Operand`.
+            IrExprKind::BinOp { op, left: a, right: b }
+                if matches!(op, BinOp::Eq | BinOp::Neq | BinOp::Lt | BinOp::Lte | BinOp::Gt | BinOp::Gte)
+                    && a.ty == Ty::String && b.ty == Ty::String
+                    && stable_string_operand(a) && stable_string_operand(b) =>
+            {
+                self.expr(a, Site::Compare);
+                self.expr(b, Site::Compare);
+            }
             IrExprKind::BinOp { left: a, right: b, .. } | IrExprKind::Range { start: a, end: b, .. } => {
                 self.expr(a, Site::Operand);
                 self.expr(b, Site::Operand);
@@ -439,9 +451,10 @@ impl<'a> Walk<'a> {
                     self.nest -= 1;
                 }
             }
-            IrExprKind::ForIn { iterable, body, .. } => {
+            IrExprKind::ForIn { var, var_tuple, iterable, body } => {
                 self.held.push(borrow_root(iterable).into_iter().collect());
-                self.expr(iterable, Site::Iterable { consumed: true });
+                let consumed = loop_elements_consumed(*var, var_tuple.as_deref(), &iterable.ty, body, self.oracle);
+                self.expr(iterable, Site::Iterable { consumed });
                 self.loop_depth += 1;
                 self.arm_stmts(body);
                 self.loop_depth -= 1;
@@ -511,7 +524,8 @@ impl<'a> Walk<'a> {
             }
             IrExprKind::IterChain { source, consume, steps, collector } => {
                 let outer = std::mem::replace(&mut self.in_chain, true);
-                self.expr(source, Site::Iterable { consumed: *consume });
+                let consumed = *consume && chain_elements_consumed(&source.ty, steps, collector, self.oracle);
+                self.expr(source, Site::Iterable { consumed });
                 for step in steps {
                     match step {
                         IterStep::Map { lambda } | IterStep::Filter { lambda }
@@ -657,6 +671,118 @@ pub fn written_vars(expr: &IrExpr) -> HashSet<VarId> {
 /// classifier every clone decision derives from (#531).
 fn heap(ty: &Ty) -> bool {
     !almide_ir::top_let_storage::clone_free(ty)
+}
+
+/// A `String` place or literal a comparison can read as a `&str` view —
+/// `pass_clone_compare::stable`, restated here so the walk classifies the
+/// operand the way the clone pass will spell it.
+fn stable_string_operand(e: &IrExpr) -> bool {
+    match &e.kind {
+        IrExprKind::Var { .. } | IrExprKind::LitStr { .. } => true,
+        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => stable_string_operand(object),
+        _ => false,
+    }
+}
+
+/// The element type of a `List[T]` iterable, `None` for anything else.
+fn list_element_ty(ty: &Ty) -> Option<&Ty> {
+    match ty {
+        Ty::Applied(almide_lang::types::TypeConstructorId::List, args) => args.first(),
+        _ => None,
+    }
+}
+
+/// Does the body of an iteration only READ the element it binds — so the
+/// iteration can walk a borrow of its source (`.iter()`) and the source is
+/// never needed owned? A `Copy` element is read whatever the body does with
+/// it (the iteration copies it out). A heap element is read when every
+/// occurrence, at closure depth 0 and outside any `&mut`, is a borrowed call
+/// slot, a shared borrow, a clone, a field read whose value is not itself
+/// moved on, a nested borrowed iteration, or — for a `String` — an
+/// interpolation part or a `&str` comparison. Anything else (returned,
+/// concatenated, built into a value, handed to an owned slot, bound to a
+/// local, matched, captured, mutated) demands the element owned, and the
+/// borrow verdict owns the SOURCE for it: an owned source moves the element
+/// out for free where a borrowed one would clone it per element.
+///
+/// This is the rule the reference-counted compilers apply per element (a
+/// list read borrows into the list and the element is retained only when an
+/// occurrence demands it); here the demand is lifted to the source's mode,
+/// because on the native leg a borrowed source can only clone. Shared by the
+/// borrow verdict (pre-`BorrowInsertion`, through the signature oracle), the
+/// clone pass (post, `ExplicitBorrows`) and the ownership certifier, so the
+/// three read one rule.
+///
+/// `fields_move` says whether a heap field of the binder CAN be moved out
+/// when the source is owned: a chain lambda's param is fresh per element
+/// and its fields move (so a field moved on demands the element); a `for`
+/// binder's fields are never moved out (`LoopMarks::binders` — the binder
+/// may be `&T`), so a field read is a read whatever position it feeds.
+pub fn element_reads_only(uses: &UseSites, var: VarId, ty: &Ty, fields_move: bool) -> bool {
+    if !heap(ty) {
+        return true;
+    }
+    let is_string = matches!(ty, Ty::String);
+    let all: Vec<&Use> = uses.of(var).collect();
+    // A consuming occurrence that a later occurrence of the binder can still
+    // follow in the same iteration is CLONED there by the clone pass (the
+    // binder stays live), as is one the E0505 call guard forces: ownership
+    // of the element buys it nothing, and a `&T` binder clones the same once
+    // (`param_borrow`'s `cloned_anyway`, applied per element).
+    let cloned_anyway = |u: &Use| u.guard_forced
+        || all.iter().any(|w| !std::ptr::eq(*w, u) && (*w as *const Use) > (u as *const Use) && uses.keeps_live(u, w));
+    all.iter().all(|u| {
+        if u.depth > 0 || u.in_mut || u.is_write(true) {
+            return false;
+        }
+        let reads = match u.site {
+            Site::Arg(SlotMode::Borrow) | Site::Borrow { mutable: false } | Site::Clone
+            | Site::Iterable { consumed: false } => true,
+            // A field read: the field's own position decides. A heap field
+            // moved on (returned, concatenated, built into a value) would
+            // move out of a `&T` binder — E0507 — so it demands the element.
+            Site::Member => match u.chain {
+                Some(c) => !(fields_move && c.heap && element_top_consumes(c.top)),
+                None => true,
+            },
+            Site::Construct(Ctor::Interp) | Site::Compare => is_string,
+            _ => false,
+        };
+        reads || (u.site != Site::Arg(SlotMode::Mut) && cloned_anyway(u))
+    })
+}
+
+/// Does a projection chain's top position move the projected value?
+fn element_top_consumes(top: Site) -> bool {
+    matches!(
+        top,
+        Site::Result | Site::Scrutinee | Site::Concat | Site::Construct(_) | Site::Receiver
+            | Site::Callback | Site::FoldInit | Site::Arg(SlotMode::Consume | SlotMode::Mut)
+            | Site::Iterable { consumed: true } | Site::Assigned | Site::Borrow { mutable: true }
+    )
+}
+
+/// Does a fused chain need its source's elements OWNED — is some lambda the
+/// source element reaches not a pure read of it, or does the element leave
+/// the chain as a value (`source_element_receivers`)?
+pub fn chain_elements_consumed(source_ty: &Ty, steps: &[IterStep], collector: &IterCollector, oracle: &dyn SlotOracle) -> bool {
+    let Some(elem) = list_element_ty(source_ty) else { return true };
+    let Some(receivers) = almide_ir::source_element_receivers(steps, collector) else { return true };
+    receivers.iter().any(|(binder, lambda)| {
+        let IrExprKind::Lambda { body, .. } = &lambda.kind else { return true };
+        !element_reads_only(&UseSites::of_expr(body, Site::Result, oracle), *binder, elem, true)
+    })
+}
+
+/// Does a `for` loop need its iterable's elements OWNED? A destructuring
+/// binder (a `Map` loop's pairs, a tuple list) and a non-`List` iterable
+/// always do; a plain `List` binder only when its body is not a pure read.
+pub fn loop_elements_consumed(var: VarId, var_tuple: Option<&[VarId]>, iterable_ty: &Ty, body: &[IrStmt], oracle: &dyn SlotOracle) -> bool {
+    let Some(elem) = list_element_ty(iterable_ty) else { return true };
+    if var_tuple.is_some() {
+        return true;
+    }
+    !element_reads_only(&UseSites::of_stmts(body, oracle), var, elem, false)
 }
 
 /// The variable a place expression reads — through fields, tuple indices,
