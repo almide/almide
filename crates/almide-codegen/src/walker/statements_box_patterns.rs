@@ -313,15 +313,14 @@ pub fn match_needs_unreachable_backstop(
     !has_irrefutable
 }
 
-/// Is a match on `subject` a match by REFERENCE — a by-reference param, a
-/// binder such a match bound (`ref_binders`), or an explicit borrow? Its
+/// Is a match on `subject` a match by REFERENCE — a variable `BorrowLowering`
+/// recorded as a reference binding (`ref_binders`: a by-reference param it
+/// matched on, or a binder such a match bound), or an explicit borrow? Its
 /// payloads then bind `&T`, and a boxed-nested pattern's guards and move-outs
 /// read through the reference.
 pub fn subject_is_borrowed(ctx: &RenderContext, subject: &IrExpr) -> bool {
     match &subject.kind {
-        IrExprKind::Var { id } => {
-            matches!(ctx.ann.param_borrows.get(id), Some(almide_ir::ParamBorrow::Ref)) || ctx.ann.ref_binders.contains(id)
-        }
+        IrExprKind::Var { id } => ctx.ann.ref_binders.contains(id),
         IrExprKind::Borrow { mutable: false, .. } => true,
         _ => false,
     }

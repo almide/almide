@@ -470,6 +470,11 @@ impl IrMutVisitor for Lower<'_> {
                     let deref2 = mk(IrExprKind::Deref { expr: Box::new(inner) }, ty.clone(), span);
                     **subject = mk(IrExprKind::Borrow { expr: Box::new(deref2), as_str: false, mutable: false }, ty, span);
                 }
+                // The by-reference param the subject reads is itself a
+                // reference binding: recorded with the binders, so the
+                // walker learns "this subject is borrowed" from the one
+                // annotation and never reads a param's borrow mode.
+                self.ref_binders.insert(id);
                 let mut bound = Vec::new();
                 for arm in arms.iter() { pattern_binders(&arm.pattern, &mut bound); }
                 self.ref_binders.extend(bound);
