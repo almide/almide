@@ -3,4 +3,5 @@
 # fails until its row is raised in the same change. Rows: `<stem> <bytes>`.
 println_only 5130
 marshal_types 6249
-extern_js 5765
+extern_js 6020
+extern_scalars 6089
