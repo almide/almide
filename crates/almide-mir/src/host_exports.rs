@@ -13,11 +13,24 @@
 
 thread_local! {
     static JS_HOST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static STRING_ABI: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Is a JS host being built for the module under rendering?
 pub fn js_host() -> bool {
     JS_HOST.with(|c| c.get())
+}
+
+/// Does the host surface marshal a `String` (#2276)? Only then are the
+/// allocator and release exported; a scalar-only surface keeps the module's
+/// bytes.
+pub fn string_abi() -> bool {
+    js_host() && STRING_ABI.with(|c| c.get())
+}
+
+/// Set by the CLI once the program's host surface is known (before rendering).
+pub fn set_string_abi(on: bool) {
+    STRING_ABI.with(|c| c.set(on));
 }
 
 /// The export text appended after the program's own exports: the raw block
@@ -43,6 +56,7 @@ impl JsHostGuard {
     pub fn set() -> Self {
         let prev = js_host();
         JS_HOST.with(|c| c.set(true));
+        STRING_ABI.with(|c| c.set(false));
         Self(prev)
     }
 }
@@ -50,5 +64,6 @@ impl JsHostGuard {
 impl Drop for JsHostGuard {
     fn drop(&mut self) {
         JS_HOST.with(|c| c.set(self.0));
+        STRING_ABI.with(|c| c.set(false));
     }
 }

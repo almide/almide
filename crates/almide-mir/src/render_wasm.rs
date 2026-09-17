@@ -894,7 +894,7 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
         .collect();
     // #2265: the JS host's allocator + release exports, only under the
     // `--host js` guard so every other rendering keeps its bytes.
-    let pub_exports = if crate::host_exports::js_host() {
+    let pub_exports = if crate::host_exports::string_abi() {
         format!("{pub_exports}{}", crate::host_exports::export_text())
     } else {
         pub_exports
