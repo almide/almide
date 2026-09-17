@@ -144,6 +144,12 @@ struct Walk<'a> {
     loop_depth: u32,
     outer_lambda: Option<u32>,
     stmt: u32,
+    /// See [`Use::top_stmt`]: set by [`Walk::stmt`] while `nest <= 1` — the
+    /// root block's own statements (or a bare statement list) — and
+    /// inherited by every statement below them.
+    top_stmt: u32,
+    /// How many statement lists enclose the current position.
+    nest: u32,
     arm: u32,
     next_arm: u32,
     arm_parent: HashMap<u32, u32>,
@@ -169,7 +175,7 @@ impl<'a> Walk<'a> {
     fn new(oracle: &'a dyn SlotOracle) -> Self {
         Walk {
             oracle, uses: Vec::new(), depth: 0, in_chain: false, mut_depth: 0, loop_depth: 0,
-            outer_lambda: None, stmt: 0, arm: 0, next_arm: 0, arm_parent: HashMap::new(), guarded: Vec::new(),
+            outer_lambda: None, stmt: 0, top_stmt: 0, nest: 0, arm: 0, next_arm: 0, arm_parent: HashMap::new(), guarded: Vec::new(),
             held: Vec::new(), held_outside: 0, fan_arm: None, held_fan_outside: 0,
         }
     }
@@ -185,7 +191,7 @@ impl<'a> Walk<'a> {
         };
         self.uses.push(Use {
             var, site, chain, depth: self.depth, in_chain: self.in_chain, in_mut: self.mut_depth > 0,
-            in_loop: self.loop_depth > 0, outer_lambda: self.outer_lambda, stmt: self.stmt,
+            in_loop: self.loop_depth > 0, outer_lambda: self.outer_lambda, stmt: self.stmt, top_stmt: self.top_stmt,
             arm: self.arm, guard_forced, held_across, fan_arm: self.fan_arm,
         });
     }
@@ -206,8 +212,24 @@ impl<'a> Walk<'a> {
         self.next_arm += 1;
         self.arm = self.next_arm;
         self.arm_parent.insert(self.arm, parent);
-        for s in stmts { self.stmt(s); }
+        self.stmts(stmts);
         self.arm = parent;
+    }
+
+    /// Walk a statement list one nesting level down.
+    fn stmts(&mut self, stmts: &[IrStmt]) {
+        self.nest += 1;
+        for s in stmts { self.stmt(s); }
+        self.nest -= 1;
+    }
+
+    /// Advance the statement ordinal; a root-level statement also opens a
+    /// new outermost statement (see [`Use::top_stmt`]).
+    fn next_stmt(&mut self) {
+        self.stmt += 1;
+        if self.nest <= 1 {
+            self.top_stmt = self.stmt;
+        }
     }
 
     /// Walk a call's arguments in the order they EVALUATE once
@@ -395,10 +417,12 @@ impl<'a> Walk<'a> {
                 self.held.pop();
             }
             IrExprKind::Block { stmts, expr } => {
-                for s in stmts { self.stmt(s); }
+                self.stmts(stmts);
                 if let Some(tail) = expr {
-                    self.stmt += 1;
+                    self.nest += 1;
+                    self.next_stmt();
                     self.expr(tail, Site::Result);
+                    self.nest -= 1;
                 }
             }
             IrExprKind::ForIn { iterable, body, .. } => {
@@ -416,7 +440,7 @@ impl<'a> Walk<'a> {
                 self.arm = self.next_arm;
                 self.arm_parent.insert(self.arm, parent);
                 self.expr(cond, Site::Operand);
-                for s in body { self.stmt(s); }
+                self.stmts(body);
                 self.arm = parent;
                 self.loop_depth -= 1;
             }
@@ -556,7 +580,7 @@ impl<'a> Walk<'a> {
     }
 
     fn stmt(&mut self, s: &IrStmt) {
-        self.stmt += 1;
+        self.next_stmt();
         match &s.kind {
             IrStmtKind::Bind { value, .. } => self.expr(value, Site::Assigned),
             IrStmtKind::BindDestructure { pattern, value } => {

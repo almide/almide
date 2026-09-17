@@ -79,6 +79,21 @@ fn a_body_whose_verdicts_are_right_certifies() {
     assert!(!err.contains("[CERTIFY OWNERSHIP]"), "{err}");
 }
 
+#[test]
+fn a_capture_cloned_inside_an_interpolation_that_also_prints_it_certifies() {
+    // `k` is a bare part of the interpolation (`format_args!` borrows it for
+    // the whole `format!`) and captured by the closure built INSIDE the same
+    // interpolation: the capture must clone (moving `k` there is E0505), and
+    // the clone pass's `holds_last_occurrence` says so. The certifier used
+    // to call it a C3 violation because the capture-clone binding sits in a
+    // block of its own, one statement ordinal away from the part that holds
+    // the borrow — the rule now reads the OUTERMOST statement.
+    let src = "fn main() -> Unit = {\n  let k = string.reverse(\"abc\")\n  println(\"${k} ${list.zip_with([1, 2], [3, 4], ((x, y) => k))}\")\n}\n";
+    let (ok, err) = certify("c3-interp-held", src);
+    assert!(ok, "a capture clone the interpolation forces must certify:\n{err}");
+    assert!(!err.contains("[CERTIFY OWNERSHIP]"), "{err}");
+}
+
 /// Unset, the switch means `fail` in a debug build and `off` in a release
 /// build — the certifier is the debug build's own gate now that the corpus
 /// ledger is empty. `off` opts out of either.
