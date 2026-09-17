@@ -1156,7 +1156,9 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 20
-      - name: JS host (#2265 — `--host js` glue runs the wasm_host_js fixtures under node, stdout byte-equal to expected and native)
+      - name: Install wasm-opt (binaryen) for the JS host gate's post-opt shim-set assertion (#2276)
+        run: sudo apt-get update && sudo apt-get install -y binaryen && wasm-opt --version
+      - name: JS host (#2265/#2276 — `--host js` glue runs the wasm_host_js fixtures under node, stdout byte-equal to expected and native; the module and glue ship only the program's surface)
         run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-js-host.sh
 
       # #2205: the ALMIDE_* switches are one registry. The grep half refuses an
