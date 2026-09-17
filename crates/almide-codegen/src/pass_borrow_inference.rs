@@ -497,12 +497,27 @@ pub fn commit_chain_source_modes(program: &mut IrProgram, sigs: &HashMap<String,
     impl IrMutVisitor for Commit<'_> {
         fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
             walk_expr_mut(self, expr);
+            // Only a PLACE — a variable or a projection of one — has an owner
+            // a borrow can spare: a temporary (`list.range(0, n)`, a call's
+            // result, a literal) is consumed as it always was; borrowing it
+            // would iterate a `&Vec` that dies at the same point and, at the
+            // default opt-level, cost the inner loop of spectralnorm's indexed
+            // spelling 2x (the spelling-ratio gate, #2098).
             if let IrExprKind::IterChain { source, consume, steps, collector } = &mut expr.kind
                 && *consume
+                && is_place(source)
                 && !crate::use_kind::chain_elements_consumed(&source.ty, steps, collector, &self.scope)
             {
                 *consume = false;
             }
+        }
+    }
+    fn is_place(e: &IrExpr) -> bool {
+        match &e.kind {
+            IrExprKind::Var { .. } => true,
+            IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => is_place(object),
+            IrExprKind::Deref { expr } | IrExprKind::Borrow { expr, .. } | IrExprKind::Clone { expr } => is_place(expr),
+            _ => false,
         }
     }
     let records = seed_record_names(program);
