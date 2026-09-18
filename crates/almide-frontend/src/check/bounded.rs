@@ -938,6 +938,11 @@ impl BoundedCx<'_, '_> {
                     }
                 }
             }
+            // ALS-B7 (#2297): a variant constructor application builds a
+            // value, as a record literal or a tuple does. It is not a call,
+            // and B4 does not list it; the caller walks its payload under
+            // every rule.
+            ast::ExprKind::TypeName { .. } => {}
             _ => {
                 self.err(
                     "an indirect call is not admissible in a @bounded function",
