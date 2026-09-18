@@ -360,12 +360,12 @@ impl LowerCtx {
         // a user-Result statement match LINEARIZES (runs BOTH arms) = a silent miscompile.
         // A `match <never-err lifted-effect call> {…}` that `rewrite_never_err_effect_match`
         // could NOT turn into a `let`-block (an `ok(_)`/structured/guarded Ok arm): its
-        // subject's `.ty` is the lifted `Result[T, String]` but the callee returns RAW `T`,
-        // so reading it as a Result handle TRAPs (the `$rc_dec` sentinel over raw bytes).
-        // WALL it cleanly — never a trap. (The common `ok(x)` shape is already rewritten away
-        // and never reaches here.)
+        // subject's `.ty` is the lifted `Result[T, String]` but the callee returns RAW `T` (a
+        // declared-Option callee too, #2308), so a Result read TRAPs (`$rc_dec` over raw
+        // bytes). WALL it cleanly. (The common `ok(x)` shape is rewritten away before here.)
         if let IrExprKind::Call { target: CallTarget::Named { name }, .. } = &subject.kind {
-            if crate::lower::NEVER_ERR_LIFTED_FNS.with(|s| s.borrow().contains(name.as_str()))
+            if (crate::lower::NEVER_ERR_LIFTED_FNS.with(|s| s.borrow().contains(name.as_str()))
+                || crate::lower::is_unstripped_declared_option_call(subject))
                 && !crate::lower::AUTO_WRAP_ABI_FNS.with(|s| s.borrow().contains(name.as_str()))
             {
                 return Err(LowerError::Unsupported(
