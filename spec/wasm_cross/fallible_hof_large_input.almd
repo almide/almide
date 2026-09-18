@@ -1,0 +1,62 @@
+// @contract: C-284
+// The fallible list-HOF family at an input size a real program reaches (#2306).
+// The carriers behind `xs |> list.map((x) => f(x)!)!` recursed over
+// `list.drop(xs, 1)`, and map / filter / flat_map / filter_map not even in
+// tail position, so the documented idiom overflowed the stack at about 10,000
+// elements on wasm and 50,000 natively, and copied the rest of the list at
+// every element. Six carriers run here over 200,000 elements, five with a USER
+// effect fn callback. `map` is pinned at the same size in
+// spec/lang/fallible_hof_test.almd instead: the interpreter leg abstains on it
+// past 16 elements (#2311), and it would take this whole fixture out of the
+// three-way oracle. The err cells put the first err at element 150,000; the
+// `each` cell's callback prints for any later element, so the first-err
+// short-circuit is observable at this size too.
+effect fn even(x: Int) -> Bool = x % 2 == 0
+
+effect fn twice(x: Int) -> List[Int] = [x, x]
+
+// A plain fn, not an effect fn, for filter_map: an effect fn answering `Int?`
+// through filter_map double-frees on the incumbent wasm leg at any size (#2308),
+// and this fixture is about size.
+fn every_third(x: Int) -> Int? = if x % 3 == 0 then some(x) else none
+
+fn third(x: Int) -> Result[Int?, String] = ok(every_third(x))
+
+effect fn add(acc: Int, x: Int) -> Int = acc + x
+
+effect fn is_last(x: Int) -> Bool = x == 199999
+
+effect fn visit(x: Int) -> Unit = if x < 0 then err("negative")!
+else ()
+
+// Errs at 150,000. A call for any later element prints, which the first-err
+// short-circuit forbids.
+effect fn stop_at(x: Int) -> Unit = if x == 150000 then err("stopped at 150000")!
+else if x > 150000 then println("ran past the first err: " + int.to_string(x)) else ()
+
+effect fn stop_value(x: Int) -> Int = if x == 150000 then err("stopped at 150000")!
+else x
+
+effect fn main() -> Unit = {
+  let xs = list.range(0, 200000)
+  let f = (xs |> list.filter((x) => even(x)!))!
+  println("filter=" + int.to_string(list.len(f)))
+  let fm = (xs |> list.flat_map((x) => twice(x)!))!
+  println("flat_map=" + int.to_string(list.len(fm)))
+  let fl = (xs |> list.filter_map((x) => third(x)!))!
+  println("filter_map=" + int.to_string(list.len(fl)))
+  let total = (xs |> list.fold(0, (acc, x) => add(acc, x)!))!
+  println("fold=" + int.to_string(total))
+  let found = (xs |> list.find((x) => is_last(x)!))!
+  println("find=" + int.to_string(found ?? -1))
+  (xs |> list.each((x) => visit(x)!))!
+  println("each=done")
+  match xs |> list.each((x) => stop_at(x)!) {
+    ok(_) => println("each_err_cell=ok"),
+    err(e) => println("each_err_cell=" + e),
+  }
+  match xs |> list.fold(0, (acc, x) => acc + stop_value(x)!) {
+    ok(t) => println("fold_err_cell=ok " + int.to_string(t)),
+    err(e) => println("fold_err_cell=" + e),
+  }
+}

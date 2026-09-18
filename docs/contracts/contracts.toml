@@ -317,6 +317,7 @@ since     = "0.24.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/string_empty_pattern.almd", class = "fixture" },
+  { path = "spec/wasm_cross/string_position_large_offset.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-018"
@@ -953,6 +954,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/string_codepoint_index.almd", class = "fixture" },
   { path = "spec/wasm_cross/string_lines.almd", class = "fixture" },
+  { path = "spec/wasm_cross/string_position_large_offset.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-067"
@@ -3431,6 +3433,7 @@ since     = "0.57.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fallible_hof_effect_callback_family.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fallible_hof_large_input.almd", class = "fixture" },
   { path = "spec/wasm_cross/fallible_hof_option_effect_callback.almd", class = "fixture" },
 ]
 [[contract]]
