@@ -6,8 +6,10 @@
 //! record, captured by a closure that outlives the call, or handed to a
 //! runtime twin's owned slot keeps the `Rc<dyn Fn>` handle. A closure VALUE
 //! at a borrowed slot is lent through its handle (`&*g`); a tail-recursive fn
-//! carries the borrowed callable through its loop. Both legs print the same
-//! thing.
+//! carries the borrowed callable through its loop — unless a self-call REBINDS
+//! the slot to a new callable (a CPS accumulator): that closure is built inside
+//! one loop iteration and cannot outlive it, so the slot keeps the handle. Both
+//! legs print the same thing.
 use std::process::Command;
 
 const PROGRAM: &str = r#"type Box = { f: (Int) -> Int }
@@ -41,11 +43,13 @@ fn unfused(xs: List[Int], f: (Int) -> Int) -> List[Int] = list.map(xs, f)
 
 fn keep(f: (Int) -> Int) -> (Int) -> Int = f
 
+fn cps(f: (Int) -> Int, n: Int) -> Int = if n <= 0 then f(0) else cps((x) => f(x + n), n - 1)
+
 fn main() -> Unit = {
   let xs = [1, 2, 3]
   println("${scaled(xs, 10) |> list.sum} ${via_value(xs, 10) |> list.sum} ${forward(xs, dbl) |> list.sum} ${walk(dbl, 3)} ${twice_call(dbl, 3)}")
   println(list.join(suffixed(["a", "b"], "!"), ","))
-  println("${(stored(dbl)).f(4)} ${captured(dbl)(5)} ${unfused(xs, dbl) |> list.sum} ${keep(dbl)(6)}")
+  println("${(stored(dbl)).f(4)} ${captured(dbl)(5)} ${unfused(xs, dbl) |> list.sum} ${keep(dbl)(6)} ${cps(dbl, 3)}")
 }
 "#;
 
@@ -97,6 +101,7 @@ fn a_fn_typed_param_is_borrowed_unless_its_callable_escapes() {
         ("captured", "pub fn captured(f: std::rc::Rc<dyn Fn(i64) -> i64>)"),
         ("unfused", "pub fn unfused(xs: Vec<i64>, f: std::rc::Rc<dyn Fn(i64) -> i64>)"),
         ("keep", "pub fn keep(f: std::rc::Rc<dyn Fn(i64) -> i64>)"),
+        ("cps", "pub fn cps(mut f: std::rc::Rc<dyn Fn(i64) -> i64>, mut n: i64)"),
     ] {
         let s = fn_sig_and_body(&rust, name);
         assert!(s.starts_with(sig), "{name}:\n{s}");
@@ -105,6 +110,6 @@ fn a_fn_typed_param_is_borrowed_unless_its_callable_escapes() {
     for target in ["rust", "wasm"] {
         let run = Command::new(almide_bin()).args(["run", file.to_str().unwrap(), "--target", target]).output().unwrap();
         assert!(run.status.success(), "{target}: {}", String::from_utf8_lossy(&run.stderr));
-        assert_eq!(String::from_utf8_lossy(&run.stdout).trim(), "60 36 12 0 12\na!,b!\n8 11 12 12", "{target}");
+        assert_eq!(String::from_utf8_lossy(&run.stdout).trim(), "60 36 12 0 12\na!,b!\n8 11 12 12 12", "{target}");
     }
 }

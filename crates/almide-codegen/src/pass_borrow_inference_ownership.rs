@@ -188,7 +188,7 @@ fn infer_function_borrows(func: &IrFunction, scope: &Scope) -> Vec<ParamBorrow> 
         return func.params.iter().map(|p| intrinsic_borrow_mode(&p.ty, scope.round.records)).collect();
     }
     let uses = UseSites::of_fn(func, scope);
-    func.params.iter().map(|param| param_borrow(param, &uses, scope, &func.body)).collect()
+    func.params.iter().enumerate().map(|(slot, param)| param_borrow(slot, param, &uses, scope, &func.body)).collect()
 }
 
 /// Does every `match` in `body` whose subject is the bare variable `var`
@@ -337,7 +337,7 @@ fn after(earlier: &Use, later: &Use) -> bool {
 }
 
 /// One param's mode from the body's occurrences of it.
-fn param_borrow(param: &IrParam, uses: &UseSites, scope: &Scope, body: &IrExpr) -> ParamBorrow {
+fn param_borrow(slot: usize, param: &IrParam, uses: &UseSites, scope: &Scope, body: &IrExpr) -> ParamBorrow {
     // An explicit `mut` param is passed by mutable reference, and the keyword
     // is authoritative: the checker (`validate_mut_args`) guarantees the
     // caller hands over a `var` binding, so the param IS a `&mut T` by
@@ -352,7 +352,7 @@ fn param_borrow(param: &IrParam, uses: &UseSites, scope: &Scope, body: &IrExpr) 
         return ParamBorrow::RefMut;
     }
     if matches!(param.ty, Ty::Fn { .. }) {
-        return fn_param_borrow(param, uses);
+        return fn_param_borrow(slot, param, uses, scope, body);
     }
     if !scope.is_borrow_eligible(&param.ty) || almide_base::env::flag("ALMIDE_BORROW_OWN_ALL") {
         return ParamBorrow::Own;
@@ -417,11 +417,44 @@ fn param_borrow(param: &IrParam, uses: &UseSites, scope: &Scope, body: &IrExpr) 
 /// point's `Borrow` mode, optimistic for a pending or self-recursive callee)
 /// and borrowing it do not escape. The ablation `ALMIDE_FN_ESCAPE_OFF=1`
 /// borrows every fn param regardless — the certifier's C5 negative control.
-fn fn_param_borrow(param: &IrParam, uses: &UseSites) -> ParamBorrow {
+fn fn_param_borrow(slot: usize, param: &IrParam, uses: &UseSites, scope: &Scope, body: &IrExpr) -> ParamBorrow {
     if almide_base::env::flag("ALMIDE_FN_ESCAPE_OFF") {
         return ParamBorrow::Ref;
     }
-    if uses.of(param.var).any(fn_param_escapes) { ParamBorrow::Own } else { ParamBorrow::Ref }
+    if uses.of(param.var).any(fn_param_escapes) || self_call_rebinds(body, scope.current_fn, slot, param.var) {
+        ParamBorrow::Own
+    } else {
+        ParamBorrow::Ref
+    }
+}
+
+/// Does a self-recursive call hand this param's slot anything but the param
+/// itself? A CPS accumulator (`ascending(b, (ys) => acc(ICons(a, ys)), rest)`)
+/// does: the new callable captures the old one. Plain recursion could borrow
+/// it — each frame's closure lives in that frame — but the tail-call loop
+/// rewrite reassigns the slot (`acc = &closure`) across iterations, and a
+/// closure built inside one iteration does not outlive it. The slot stays the
+/// `Rc<dyn Fn>` handle; passing the param through unchanged (`walk(f, n - 1)`)
+/// stays borrowed.
+fn self_call_rebinds(body: &IrExpr, fn_name: &str, slot: usize, var: VarId) -> bool {
+    use almide_ir::visit::{IrVisitor, walk_expr, walk_stmt};
+    struct Scan<'a> { fn_name: &'a str, var: VarId, slot: usize, hit: bool }
+    impl IrVisitor for Scan<'_> {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &e.kind
+                && name.as_str() == self.fn_name
+                && let Some(arg) = args.get(self.slot)
+                && !matches!(arg.kind, IrExprKind::Var { id } if id == self.var)
+            {
+                self.hit = true;
+            }
+            walk_expr(self, e);
+        }
+        fn visit_stmt(&mut self, s: &IrStmt) { walk_stmt(self, s); }
+    }
+    let mut scan = Scan { fn_name, var, slot, hit: false };
+    scan.visit_expr(body);
+    scan.hit
 }
 
 /// Does this occurrence let a fn-typed param's callable outlive the call?
