@@ -40,12 +40,13 @@ pub struct CodegenAnnotations {
     /// `BorrowLoweringPass`; the walker's box-pattern rewrite reads it to
     /// spell a borrowed subject's guards and move-outs through the reference.
     pub ref_binders: HashSet<VarId>,
-    /// First params of the lambda literals that are SCOPES, not closures —
-    /// each runs synchronously inside the call it is handed to, never
-    /// escapes it, and borrows what it reads for the call's duration:
-    /// a fused chain step (decided by `StreamFusion`) or a lambda at a
-    /// callee's non-escaping fn slot (spelled `&(lambda)` by
-    /// `BorrowInsertion`, #2288): the walker renders them without `move`.
+    /// First parameter of every iterator-chain step / collector lambda: the
+    /// closure runs synchronously inside the chain and never escapes it, so
+    /// it renders without `move` and borrows what it reads for the chain's
+    /// duration. Decided by StreamFusion, which builds the chains. (A lambda
+    /// at a callee's `&dyn Fn` slot, #2288, is the same kind of scope; the
+    /// walker reads that one off the `Borrow` node `BorrowInsertion` spells
+    /// around it, so a zero-param lambda needs no entry here.)
     pub borrowed_lambda_params: HashSet<VarId>,
     /// List-field loops whose owned root is dead after the head evaluation.
     /// The body needs owned elements, so move them with into_iter rather than clone.
