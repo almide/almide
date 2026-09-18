@@ -249,7 +249,7 @@ fn the_vm_runs_every_shipped_artifact_as_the_stock_runtime_does() {
     let tracked: Vec<&String> = verdicts.iter().filter_map(|(_, v)| if let Verdict::Tracked(t) = v { Some(t) } else { None }).collect();
     let wrong: Vec<&String> = verdicts.iter().filter_map(|(_, v)| if let Verdict::Wrong(w) = v { Some(w) } else { None }).collect();
     eprintln!(
-        "wasm VM parity: {equal} equal ({critical} Critical-clean, also equal to native), {} tracked native divergence(s), {declined} declined by a named trap, {refused} refused at load, {} wrong",
+        "wasm VM parity: {equal} equal ({critical} Critical-clean, also equal to native), {} tracked difference(s), {declined} declined by a named trap, {refused} refused at load, {} wrong",
         tracked.len(),
         wrong.len()
     );
