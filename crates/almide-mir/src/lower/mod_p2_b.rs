@@ -291,7 +291,7 @@ pub fn inline_mutual_tail_recursion(
             strip_never_err_unwraps(&mut nf.body, &can_err, &lifted_effect_fns, f.name.as_str());
             unwrap_never_err_call_types(&mut nf.body, &can_err, &lifted_effect_fns);
             rewrap_never_err_into_result_targets(
-                &mut nf.body,
+                &mut nf,
                 &can_err,
                 &lifted_effect_fns,
                 record_layouts,
