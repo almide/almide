@@ -155,17 +155,17 @@ fn local_calls(body: &Expr, names: &BTreeSet<&'static str>) -> Vec<(&'static str
     let mut out = Vec::new();
     visit_expr(body, &mut |e| match &e.kind {
         ExprKind::Call { callee, .. } => {
-            if let ExprKind::Ident { name } = &callee.kind {
-                if names.contains(name.as_str()) {
-                    out.push((name.as_str(), e as *const Expr));
-                }
+            if let ExprKind::Ident { name } = &callee.kind
+                && names.contains(name.as_str())
+            {
+                out.push((name.as_str(), e as *const Expr));
             }
         }
         ExprKind::Pipe { right, .. } => {
-            if let ExprKind::Ident { name } = &right.kind {
-                if names.contains(name.as_str()) {
-                    out.push((name.as_str(), &**right as *const Expr));
-                }
+            if let ExprKind::Ident { name } = &right.kind
+                && names.contains(name.as_str())
+            {
+                out.push((name.as_str(), &**right as *const Expr));
             }
         }
         _ => {}
