@@ -462,15 +462,7 @@ impl BoundedCx<'_, '_> {
                 );
             }
             ast::ExprKind::Unwrap { expr } => {
-                // ALS-B11 / E078: `!` inside a counted loop body
-                if self.loop_depth > 0 {
-                    self.err(
-                        "`!` propagation inside a counted loop is not admissible in a @bounded function",
-                        "propagate outside the loop; inside it, default with `??` instead",
-                        "E078",
-                        e.span,
-                    );
-                }
+                self.unwrap_rule(e.span);
                 self.walk_expr(expr);
             }
             ast::ExprKind::Lambda { body, .. } => {
@@ -521,7 +513,7 @@ impl BoundedCx<'_, '_> {
                     self.walk_expr(v);
                 }
             }
-            ast::ExprKind::InterpolatedString { .. } => {
+            ast::ExprKind::InterpolatedString { parts, .. } => {
                 if self.loop_depth > 0 {
                     self.err(
                         "building a string inside a counted loop is not admissible in a @bounded function",
@@ -530,7 +522,24 @@ impl BoundedCx<'_, '_> {
                         e.span,
                     );
                 }
-                self.walk_children(e);
+                for part in parts {
+                    if let ast::StringPart::Expr { expr } = part {
+                        self.walk_expr(expr);
+                    }
+                }
+            }
+            ast::ExprKind::Pipe { left, right } => self.walk_pipe(e, left, right),
+            // ALS-B7 / E074: `f >> g` builds a function value from two
+            // function references — an indirect callee
+            ast::ExprKind::Compose { left, right } => {
+                self.err(
+                    "composing functions is not admissible in a @bounded function",
+                    "call @bounded functions or first-order pure stdlib members directly (@bounded callee)",
+                    "E074",
+                    e.span,
+                );
+                self.walk_expr(left);
+                self.walk_expr(right);
             }
             ast::ExprKind::Binary { op, left, right } => {
                 let o = op.as_str();
@@ -611,12 +620,81 @@ impl BoundedCx<'_, '_> {
         }
     }
 
-    /// manual recursion for the container arms with no bounded-specific rule
-    /// (ast::visit_expr recurses whole subtrees, which would double-count)
+    /// ALS-B11 / E078: `!` inside a counted loop body.
+    fn unwrap_rule(&mut self, span: Option<BSpan>) {
+        if self.loop_depth > 0 {
+            self.err(
+                "`!` propagation inside a counted loop is not admissible in a @bounded function",
+                "propagate outside the loop; inside it, default with `??` instead",
+                "E078",
+                span,
+            );
+        }
+    }
+
+    /// `left |> right`, judged as the call it lowers to (`lower_pipe`):
+    /// `a |> f(b)` is `f(a, b)` and `a |> f` is `f(a)`, so ALS-B7 checks the
+    /// call the pipe spells with the piped value in the first slot. A trailing
+    /// `??` / `!` / `?` on the stage is transparent — the pipe feeds the stage
+    /// under it and the operator applies to the result (ADR-0005). Any other
+    /// stage, a lambda included, is an indirect callee, as its direct-call
+    /// spelling (an immediately-applied lambda) already is.
+    fn walk_pipe(&mut self, pipe: &ast::Expr, left: &ast::Expr, right: &ast::Expr) {
+        match &right.kind {
+            ast::ExprKind::UnwrapOr { expr: stage, fallback } => {
+                self.walk_pipe(pipe, left, stage);
+                self.walk_expr(fallback);
+            }
+            ast::ExprKind::Unwrap { expr: stage } => {
+                self.unwrap_rule(right.span);
+                self.walk_pipe(pipe, left, stage);
+            }
+            ast::ExprKind::Try { expr: stage } => self.walk_pipe(pipe, left, stage),
+            ast::ExprKind::Call { callee, args, .. } => {
+                let spelled: Vec<ast::Expr> =
+                    std::iter::once(left.clone()).chain(args.iter().cloned()).collect();
+                self.check_call(right, callee, &spelled);
+                self.walk_expr(left);
+                for a in args {
+                    self.walk_expr(a);
+                }
+                if !matches!(
+                    &callee.kind,
+                    ast::ExprKind::Ident { .. } | ast::ExprKind::Member { .. }
+                ) {
+                    self.walk_expr(callee);
+                }
+            }
+            ast::ExprKind::Ident { .. } | ast::ExprKind::Member { .. } => {
+                self.check_call(pipe, right, std::slice::from_ref(left));
+                self.walk_expr(left);
+            }
+            _ => {
+                self.check_call(pipe, right, std::slice::from_ref(left));
+                self.walk_expr(left);
+                self.walk_expr(right);
+            }
+        }
+    }
+
+    /// Manual recursion for the container kinds with no bounded-specific rule
+    /// (ast::visit_expr recurses whole subtrees, which would double-count).
+    ///
+    /// EXHAUSTIVE, with no wildcard: a kind this walk does not descend into
+    /// is a place a violation can hide. A wildcard here once let a `while`
+    /// loop through inside a pipe stage, an `ok(..)` / `some(..)` payload, a
+    /// tuple index, an interpolation hole and six other kinds; a new
+    /// `ExprKind` variant now fails to compile until someone decides how the
+    /// profile walks it.
     fn walk_children(&mut self, e: &ast::Expr) {
         match &e.kind {
             ast::ExprKind::If { cond, then, else_ } => {
                 self.walk_expr(cond);
+                self.walk_expr(then);
+                self.walk_expr(else_);
+            }
+            ast::ExprKind::IfLet { scrutinee, then, else_, .. } => {
+                self.walk_expr(scrutinee);
                 self.walk_expr(then);
                 self.walk_expr(else_);
             }
@@ -629,14 +707,21 @@ impl BoundedCx<'_, '_> {
                     self.walk_expr(&arm.body);
                 }
             }
-            ast::ExprKind::Member { object, .. } => self.walk_expr(object),
+            ast::ExprKind::Member { object, .. } | ast::ExprKind::TupleIndex { object, .. } => {
+                self.walk_expr(object)
+            }
             ast::ExprKind::IndexAccess { object, index } => {
                 self.walk_expr(object);
                 self.walk_expr(index);
             }
             ast::ExprKind::Try { expr }
             | ast::ExprKind::ToOption { expr }
-            | ast::ExprKind::Paren { expr } => self.walk_expr(expr),
+            | ast::ExprKind::Paren { expr }
+            | ast::ExprKind::OptionalChain { expr, .. }
+            | ast::ExprKind::Some { expr }
+            | ast::ExprKind::Ok { expr }
+            | ast::ExprKind::Err { expr }
+            | ast::ExprKind::TypeAscription { expr, .. } => self.walk_expr(expr),
             ast::ExprKind::UnwrapOr { expr, fallback } => {
                 self.walk_expr(expr);
                 self.walk_expr(fallback);
@@ -655,7 +740,49 @@ impl BoundedCx<'_, '_> {
                     self.walk_expr(&f.value);
                 }
             }
-            _ => {}
+            ast::ExprKind::SpreadRecord { base, fields } => {
+                self.walk_expr(base);
+                for f in fields {
+                    self.walk_expr(&f.value);
+                }
+            }
+            // leaves: nothing below them to walk
+            ast::ExprKind::Int { .. }
+            | ast::ExprKind::Float { .. }
+            | ast::ExprKind::String { .. }
+            | ast::ExprKind::Bool { .. }
+            | ast::ExprKind::Ident { .. }
+            | ast::ExprKind::TypeName { .. }
+            | ast::ExprKind::EmptyMap
+            | ast::ExprKind::Hole
+            | ast::ExprKind::Todo { .. }
+            | ast::ExprKind::Placeholder
+            | ast::ExprKind::Unit
+            | ast::ExprKind::None
+            | ast::ExprKind::Error => {}
+            // `walk_expr` owns these kinds (each has a profile rule) and never
+            // hands them here; listed so the match stays exhaustive
+            ast::ExprKind::InterpolatedString { .. }
+            | ast::ExprKind::List { .. }
+            | ast::ExprKind::MapLiteral { .. }
+            | ast::ExprKind::Call { .. }
+            | ast::ExprKind::Pipe { .. }
+            | ast::ExprKind::Compose { .. }
+            | ast::ExprKind::Block { .. }
+            | ast::ExprKind::Fan { .. }
+            | ast::ExprKind::FanBounded { .. }
+            | ast::ExprKind::FanRace { .. }
+            | ast::ExprKind::FanRaceMap { .. }
+            | ast::ExprKind::FanTimeout { .. }
+            | ast::ExprKind::FanSettle { .. }
+            | ast::ExprKind::ForIn { .. }
+            | ast::ExprKind::While { .. }
+            | ast::ExprKind::Lambda { .. }
+            | ast::ExprKind::Unwrap { .. }
+            | ast::ExprKind::Binary { .. }
+            | ast::ExprKind::Unary { .. }
+            | ast::ExprKind::Break
+            | ast::ExprKind::Continue => {}
         }
     }
 
