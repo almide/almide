@@ -92,6 +92,13 @@ pub struct Module {
 pub const PAGE: usize = 65536;
 /// A memory declaring more than this is refused (4 GiB is the 32-bit ceiling).
 pub const MAX_PAGES: u32 = 65536;
+/// A function type with more params than this is refused — the limit other
+/// validators apply too. With it, and with local runs (`validate`), the memory
+/// a module takes to load stays proportional to its bytes.
+pub const MAX_PARAMS: usize = 1000;
+/// A table larger than this is refused: the emitter's table holds one entry
+/// per address-taken function, and a forged size must not allocate.
+pub const MAX_TABLE: u32 = 1 << 20;
 
 type R<T> = Result<T, LoadError>;
 
@@ -104,6 +111,8 @@ struct Draft {
     memory: Option<(u32, Option<u32>)>,
     globals: Vec<Global>,
     entry: Option<u32>,
+    memory_exported: bool,
+    export_names: std::collections::HashSet<String>,
     elements: Vec<Segment<Vec<u32>>>,
     data: Vec<Segment<Vec<u8>>>,
     data_count: Option<u32>,
@@ -193,6 +202,9 @@ impl Draft {
                 return s.fail("a type is not a function type");
             }
             let params = value_types(s)?;
+            if params.len() > MAX_PARAMS {
+                return s.fail(format!("a function type has more than {MAX_PARAMS} params"));
+            }
             let results = value_types(s)?;
             if results.len() > 1 {
                 return s.fail("a function type returns more than one value (multi-value is not accepted)");
@@ -244,6 +256,9 @@ impl Draft {
         if max.is_some_and(|m| m < min) {
             return s.fail("the table's maximum is below its minimum");
         }
+        if min > MAX_TABLE {
+            return s.fail(format!("a table of more than {MAX_TABLE} entries is not accepted"));
+        }
         self.table = Some(min);
         Ok(())
     }
@@ -279,15 +294,25 @@ impl Draft {
         for _ in 0..s.vec_len()? {
             let name = s.name()?;
             let kind = s.byte()?;
-            let index = s.u32()?;
-            if kind > 3 {
-                return s.fail("an export's kind is invalid");
+            let index = s.u32()? as usize;
+            let count = match kind {
+                0 => self.func_types.len(),
+                1 => usize::from(self.table.is_some()),
+                2 => usize::from(self.memory.is_some()),
+                3 => self.globals.len(),
+                _ => return s.fail("an export's kind is invalid"),
+            };
+            if index >= count {
+                return s.fail(format!("export `{name}` names an index that does not exist"));
             }
-            if name == "_start" {
-                if kind != 0 {
-                    return s.fail("`_start` is not a function");
-                }
-                self.entry = Some(index);
+            if !self.export_names.insert(name.to_string()) {
+                return s.fail(format!("export `{name}` appears twice"));
+            }
+            match (name, kind) {
+                ("_start", 0) => self.entry = Some(index as u32),
+                ("_start", _) => return s.fail("`_start` is not a function"),
+                ("memory", 2) => self.memory_exported = true,
+                _ => {}
             }
         }
         Ok(())
@@ -343,11 +368,7 @@ impl Draft {
     }
 
     fn data_section(&mut self, s: &mut Reader) -> R<()> {
-        let count = s.vec_len()?;
-        if self.data_count.is_some_and(|c| c as usize != count) {
-            return s.fail("the data section's count differs from the data count section");
-        }
-        for _ in 0..count {
+        for _ in 0..s.vec_len()? {
             match s.u32()? {
                 0 => {}
                 2 if s.u32()? == 0 => {}
@@ -368,9 +389,18 @@ impl Draft {
             return fail("functions are declared but the code section is missing");
         }
         let Some(entry) = self.entry else { return fail("the module exports no `_start`") };
+        if self.data_count.is_some_and(|c| c as usize != self.data.len()) {
+            return fail("the data count section differs from the number of data segments");
+        }
+        if !self.elements.is_empty() && self.table.is_none() {
+            return fail("an element segment needs a table");
+        }
         match self.func_types.get(entry as usize).map(|&t| &self.types[t as usize]) {
             Some(t) if t.params.is_empty() && t.results.is_empty() => {}
             _ => return fail("`_start` must be a function taking and returning nothing"),
+        }
+        if self.memory.is_none() || !self.memory_exported {
+            return fail("a WASI command defines one memory and exports it as `memory`");
         }
         let table = self.table.unwrap_or(0) as u64;
         for seg in &self.elements {

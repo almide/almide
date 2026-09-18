@@ -5,9 +5,12 @@
 //! operand height) before it enters, so no instruction inside a body can
 //! overflow; every instruction spends one unit of fuel.
 
+use std::collections::HashMap;
+
 use crate::error::{LoadError, Trap};
 use crate::ir::{widen, Call, Instr, LOADS, STORES};
 use crate::module::{Module, MAX_PAGES, PAGE};
+use crate::types::FuncType;
 use crate::wasi::{self, Io, Stop};
 
 /// The fixed bounds of one run.
@@ -94,15 +97,14 @@ impl<'m> Instance<'m> {
             .map(|(f, &t)| {
                 let ty = &module.types[t as usize];
                 let (locals, max_height) = match f.checked_sub(nimp) {
-                    Some(d) => (module.bodies[d].locals.len() as u32, module.bodies[d].max_height),
+                    Some(d) => (module.bodies[d].locals, module.bodies[d].max_height),
                     None => (ty.params.len() as u32, 0),
                 };
                 Shape { params: ty.params.len() as u32, locals, result: !ty.results.is_empty(), max_height }
             })
             .collect();
-        let canon = (0..module.types.len())
-            .map(|i| module.types.iter().position(|t| *t == module.types[i]).unwrap_or(i) as u32)
-            .collect();
+        let mut first: HashMap<&FuncType, u32> = HashMap::new();
+        let canon = module.types.iter().enumerate().map(|(i, t)| *first.entry(t).or_insert(i as u32)).collect();
         let (min, declared_max) = module.memory.unwrap_or((0, Some(0)));
         let max_pages = declared_max.unwrap_or(MAX_PAGES).min(limits.memory_pages);
         if min > max_pages {

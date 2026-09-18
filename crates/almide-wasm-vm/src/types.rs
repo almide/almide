@@ -3,7 +3,7 @@
 //! does); every DECLARED type — a param, a result, a local, a global — is
 //! i32, i64 or f64, and a function returns at most one value (REQ-VM-2).
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ValType {
     I32,
     I64,
@@ -23,7 +23,7 @@ impl ValType {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct FuncType {
     pub params: Vec<ValType>,
     /// Zero or one value.

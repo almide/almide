@@ -122,11 +122,6 @@ impl<'a> Reader<'a> {
         self.sleb(64)
     }
 
-    /// A signed 33-bit block type immediate (non-negative = a type index).
-    pub fn s33(&mut self) -> R<i64> {
-        self.sleb(33)
-    }
-
     pub fn f64_bits(&mut self) -> R<u64> {
         let b = self.bytes(8)?;
         let mut a = [0u8; 8];
