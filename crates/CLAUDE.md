@@ -41,6 +41,10 @@ almide-wasm           Commissioned structural wasm emitter: typed IR → wasm
                       `--target wasm` leg (routing: src/cli/build.rs)
 almide-wasm-run       The embedded almide.* host (wasmtime) + the `to_wasi`
                       transform that makes build artifacts stock-runtime
+almide-wasm-vm        The qualification-scoped wasm interpreter (#865): runs a
+                      shipped `to_wasi` artifact with an instruction set pinned
+                      to the emitter's, fixed buffers and fuel; std only.
+                      Requirements: almide-wasm-vm/REQUIREMENTS.md
 almide-spine          Salsa-cached front queries + the parity gates; its s5
                       driver re-exports `almide::wasm_leg` (root lib), so the
                       product leg and the gates judge ONE implementation
