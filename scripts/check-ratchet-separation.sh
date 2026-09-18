@@ -95,31 +95,34 @@ git cat-file -e "$head^{commit}" 2>/dev/null || { echo "::error::ratchet-separat
 #
 #   * a commit ALREADY ON THE PROTECTED LINE ($RATCHET_PROTECTED; CI passes
 #     origin/develop, or the develop tip before a push) was accepted under the
-#     law at its parent, and is judged by that law alone: a rule never binds a
-#     change made before it existed.
+#     law at its parent (at each parent, for a merge), and is judged by that
+#     law alone: a rule never binds a change made before it existed.
 #   * a commit of the CHANGE SET (not yet on the protected line) must satisfy
 #     the law at the protected tip AND the law at its own parent. The tip's law
 #     is the accepted one — a change set that edits the gate cannot loosen it
 #     for its own commits (gut the gate, commit the mix, restore the gate), and
 #     a branch forked before a rule landed is judged by that rule; the parent's
 #     law makes a tightening bind the rest of its own change set at once.
-#     Without $RATCHET_PROTECTED the range base stands in for the tip and every
-#     commit counts as the change set's.
+#     Without $RATCHET_PROTECTED the range base stands in for the tip (the
+#     head, when the base predates the gate) and every commit counts as the
+#     change set's.
 #
 # A law is replayed, not reimplemented: that version of this file runs in its
 # pre-commit mode with every `git diff --cached` it issues pinned to the commit
 # (`<c>^ <c>`; for a merge, `git show --remerge-diff` — the edits the merge
-# made itself, beyond resolving its parents). Every version of this file has
-# served the lefthook pre-commit interface, which is what makes an old version
-# replayable without a checkout. No floor commit, no exemption list.
+# made itself, beyond resolving its parents; an octopus merge has none and is
+# refused). Every version of this file has served the lefthook pre-commit
+# interface, which is what makes an old version replayable without a checkout.
+# No floor commit, no exemption list.
 #
 # A commit on the protected line that broke the law it was judged by can no
 # longer be split; it is closed the way a problem report is, by a DISPOSITION
 # in proofs/ratchet-dispositions.txt: one record per commit, naming exactly the
-# files the law flagged, an author and a different reviewer (no placeholders),
-# and the evidence. Only commits on the protected line can be closed, so a
-# change set can never close its own; the ledger is a verification artifact
-# above, so a record cannot ride inside an implementation commit either.
+# files the law flagged, an author and a different reviewer (each one token,
+# no placeholder or template word), and the evidence. Only commits on the
+# protected line can be closed, so a change set can never close its own; the
+# ledger is a verification artifact above, so a record cannot ride inside an
+# implementation commit either.
 GATE="scripts/check-ratchet-separation.sh"
 DISPOSITIONS="$(git rev-parse --show-toplevel)/proofs/ratchet-dispositions.txt"
 PROTECTED="${RATCHET_PROTECTED:-}"
@@ -128,6 +131,12 @@ if [ -n "$PROTECTED" ] && ! git cat-file -e "$PROTECTED^{commit}" 2>/dev/null; t
     exit 2
 fi
 TRUSTED="${PROTECTED:-$base}"
+# A local run with no protected line and a base older than the gate would
+# leave the change set with no trusted law at all; the head's law stands in.
+# (CI always passes the protected line.)
+if [ -z "$PROTECTED" ] && [ -z "$(git rev-parse -q --verify "$base:$GATE")" ]; then
+    TRUSTED="$head"
+fi
 
 # `git diff --cached <opts> [-- <paths>]` → the commit's own change; every other
 # git call as is. Empty arrays are expanded with the ${a[@]+…} form so the
@@ -152,15 +161,31 @@ REPLAY_SHIM='git() {
 '
 
 # judge_under <law rev> <commit>: 0 kept apart, 1 mixed (the law's message
-# printed), 3 no gate existed at <law rev>.
+# printed), 3 no gate existed at <law rev>. An octopus merge has no
+# remerge-diff (git skips it with a warning, which would read as an empty
+# change), so it cannot be judged by its own edits and is refused outright.
 judge_under() {
-    local law merge=""
+    local law merge="" parents
     law="$(git show "$1:$GATE" 2>/dev/null)" || return 3
-    [ "$(git rev-list --parents -n1 "$2" | wc -w)" -gt 2 ] && merge=1
+    parents=$(( $(git rev-list --parents -n1 "$2" | wc -w) - 1 ))
+    if [ "$parents" -gt 2 ]; then
+        echo "::error::ratchet-separation: an octopus merge ($parents parents) cannot be judged by its own edits — merge one branch at a time"
+        return 1
+    fi
+    [ "$parents" -eq 2 ] && merge=1
     RATCHET_REPLAY="$2" RATCHET_MERGE="$merge" bash -c "$REPLAY_SHIM$law"
 }
 
-placeholder() { case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in ''|-|'?'|author|reviewer|tbd|todo|pending|none|unknown) return 0 ;; esac; return 1; }
+# identity <name>: a disposition's author and reviewer are real identities —
+# one token of [A-Za-z0-9._-], not a placeholder word, and not a template
+# token that merely contains one (`@REVIEWER@` once passed as a reviewer).
+identity() {
+    local lower
+    lower="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+    printf '%s' "$1" | grep -qE '^[A-Za-z0-9._-]+$' || return 1
+    case "$lower" in *author*|*reviewer*|tbd|todo|pending|none|unknown|nobody|-|.|_) return 1 ;; esac
+    return 0
+}
 
 # dispositioned <commit> <law output>: 0 when the ledger closes this commit's
 # offence (the rules above), printing the record's evidence.
@@ -180,7 +205,7 @@ dispositioned() {
     if [ "$hits" -gt 1 ]; then echo "::error::ratchet-separation: $hits disposition records name $full — one record per commit"; return 1; fi
     [ "$hits" -eq 1 ] || return 1
     IFS='|' read -r files author reviewer evidence <<< "$found"
-    if placeholder "$author" || placeholder "$reviewer" || [ -z "$evidence" ] \
+    if ! identity "$author" || ! identity "$reviewer" || [ -z "$evidence" ] \
         || [ "$(printf '%s' "$author" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s' "$reviewer" | tr '[:upper:]' '[:lower:]')" ]; then
         echo "::error::ratchet-separation: the disposition for $full needs a real author, a different real reviewer and evidence"
         return 1
@@ -199,8 +224,19 @@ for c in $(git rev-list --reverse "$base..$head"); do
     n=$((n + 1))
     on_line=""
     [ -n "$PROTECTED" ] && git merge-base --is-ancestor "$c" "$PROTECTED" 2>/dev/null && on_line=1
-    laws="$c^"
-    [ -z "$on_line" ] && [ "$(git rev-parse -q --verify "$TRUSTED:$GATE")" != "$(git rev-parse -q --verify "$c^:$GATE")" ] && laws="$laws $TRUSTED"
+    # the law at EVERY parent (a merge whose first parent predates a rule is
+    # still bound by the rule its other parent carries), plus the protected
+    # tip's for a change-set commit; one run per distinct law
+    laws=""
+    blobs=" "
+    candidates="$(git rev-list --parents -n1 "$c" | cut -d' ' -f2-)"
+    [ -z "$on_line" ] && candidates="$candidates $TRUSTED"
+    for law in $candidates; do
+        blob="$(git rev-parse -q --verify "$law:$GATE" || echo "none-$law")"
+        case "$blobs" in *" $blob "*) continue ;; esac
+        blobs="$blobs$blob "
+        laws="$laws $law"
+    done
     bound="" offence="" by=""
     for law in $laws; do
         out="$(judge_under "$law" "$c")"
