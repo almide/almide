@@ -57,7 +57,7 @@ struct Shape {
     /// The fn definition, taking `p` and possibly `c: Bool`.
     def: String,
     /// Extra params after `p` at the call site.
-    extra: &'static str,
+    extra: String,
     /// `show(expr)`: the String witness of the fn's result.
     show: fn(&TypeSpec, &str) -> String,
     /// The call site must pass a `var` (a `mut` param).
@@ -72,39 +72,44 @@ fn shapes(t: &TypeSpec) -> Vec<Shape> {
     let box_result: fn(&TypeSpec, &str) -> String = |t, e| (t.read)(&format!("{e}.v"));
     let list_result: fn(&TypeSpec, &str) -> String = |_, e| format!("int.to_string(list.len({e}))");
     let mut out = vec![
-        Shape { name: "read".into(), def: format!("fn u_read_{tag}(p: {ty}) -> String = {}", r("p")), extra: "", show: ident_show, needs_var: false },
-        Shape { name: "ret".into(), def: format!("fn u_ret_{tag}(p: {ty}) -> {ty} = p"), extra: "", show: read_result, needs_var: false },
-        Shape { name: "list".into(), def: format!("fn u_list_{tag}(p: {ty}) -> List[{ty}] = [p]"), extra: "", show: list_result, needs_var: false },
-        Shape { name: "rec".into(), def: format!("fn u_rec_{tag}(p: {ty}) -> Box_{tag} = {{ v: p }}"), extra: "", show: box_result, needs_var: false },
-        Shape { name: "via".into(), def: format!("fn u_via_{tag}(p: {ty}) -> String = u_read_{tag}(p)"), extra: "", show: ident_show, needs_var: false },
-        Shape { name: "viac".into(), def: format!("fn u_viac_{tag}(p: {ty}) -> String = int.to_string(list.len(u_list_{tag}(p)))"), extra: "", show: ident_show, needs_var: false },
-        Shape { name: "cap".into(), def: format!("fn u_cap_{tag}(p: {ty}) -> String = list.join(list.map([1, 2], (i) => {}), \",\")", r("p")), extra: "", show: ident_show, needs_var: false },
-        Shape { name: "eq".into(), def: format!("fn u_eq_{tag}(p: {ty}) -> String = if {} == p then \"eq\" else \"ne\"", t.lit2), extra: "", show: ident_show, needs_var: false },
-        Shape { name: "eq2".into(), def: format!("fn u_eq2_{tag}(p: {ty}) -> String = if p == {} then \"eq\" else \"ne\"", t.lit), extra: "", show: ident_show, needs_var: false },
-        Shape { name: "let".into(), def: format!("fn u_let_{tag}(p: {ty}) -> String = {{\n  let q = p\n  {} + {}\n}}", r("q"), r("q")), extra: "", show: ident_show, needs_var: false },
-        Shape { name: "if".into(), def: format!("fn u_if_{tag}(p: {ty}, c: Bool) -> {ty} = if c then p else {}", t.lit2), extra: ", true", show: read_result, needs_var: false },
-        Shape { name: "opt".into(), def: format!("fn u_opt_{tag}(p: {ty}, c: Bool) -> String = {{\n  let o: Option[{ty}] = if c then some(p) else none\n  match o {{\n    some(v) => {},\n    none => \"-\",\n  }}\n}}", r("v")), extra: ", true", show: ident_show, needs_var: false },
-        Shape { name: "twice".into(), def: format!("fn u_twice_{tag}(p: {ty}) -> String = {} + u_read_{tag}(p)", r("p")), extra: "", show: ident_show, needs_var: false },
-        Shape { name: "pair".into(), def: format!("fn u_pair_{tag}(p: {ty}, q: {ty}) -> String = {} + {}", r("p"), r("q")), extra: "", show: ident_show, needs_var: false },
+        Shape { name: "read".into(), def: format!("fn u_read_{tag}(p: {ty}) -> String = {}", r("p")), extra: String::new(), show: ident_show, needs_var: false },
+        Shape { name: "ret".into(), def: format!("fn u_ret_{tag}(p: {ty}) -> {ty} = p"), extra: String::new(), show: read_result, needs_var: false },
+        Shape { name: "list".into(), def: format!("fn u_list_{tag}(p: {ty}) -> List[{ty}] = [p]"), extra: String::new(), show: list_result, needs_var: false },
+        Shape { name: "rec".into(), def: format!("fn u_rec_{tag}(p: {ty}) -> Box_{tag} = {{ v: p }}"), extra: String::new(), show: box_result, needs_var: false },
+        Shape { name: "via".into(), def: format!("fn u_via_{tag}(p: {ty}) -> String = u_read_{tag}(p)"), extra: String::new(), show: ident_show, needs_var: false },
+        Shape { name: "viac".into(), def: format!("fn u_viac_{tag}(p: {ty}) -> String = int.to_string(list.len(u_list_{tag}(p)))"), extra: String::new(), show: ident_show, needs_var: false },
+        Shape { name: "cap".into(), def: format!("fn u_cap_{tag}(p: {ty}) -> String = list.join(list.map([1, 2], (i) => {}), \",\")", r("p")), extra: String::new(), show: ident_show, needs_var: false },
+        Shape { name: "eq".into(), def: format!("fn u_eq_{tag}(p: {ty}) -> String = if {} == p then \"eq\" else \"ne\"", t.lit2), extra: String::new(), show: ident_show, needs_var: false },
+        Shape { name: "eq2".into(), def: format!("fn u_eq2_{tag}(p: {ty}) -> String = if p == {} then \"eq\" else \"ne\"", t.lit), extra: String::new(), show: ident_show, needs_var: false },
+        Shape { name: "let".into(), def: format!("fn u_let_{tag}(p: {ty}) -> String = {{\n  let q = p\n  {} + {}\n}}", r("q"), r("q")), extra: String::new(), show: ident_show, needs_var: false },
+        Shape { name: "if".into(), def: format!("fn u_if_{tag}(p: {ty}, c: Bool) -> {ty} = if c then p else {}", t.lit2), extra: ", true".into(), show: read_result, needs_var: false },
+        Shape { name: "opt".into(), def: format!("fn u_opt_{tag}(p: {ty}, c: Bool) -> String = {{\n  let o: Option[{ty}] = if c then some(p) else none\n  match o {{\n    some(v) => {},\n    none => \"-\",\n  }}\n}}", r("v")), extra: ", true".into(), show: ident_show, needs_var: false },
+        Shape { name: "twice".into(), def: format!("fn u_twice_{tag}(p: {ty}) -> String = {} + u_read_{tag}(p)", r("p")), extra: String::new(), show: ident_show, needs_var: false },
+        Shape { name: "pair".into(), def: format!("fn u_pair_{tag}(p: {ty}, q: {ty}) -> String = {} + {}", r("p"), r("q")), extra: String::new(), show: ident_show, needs_var: false },
     ];
     if t.concat {
-        out.push(Shape { name: "cat".into(), def: format!("fn u_cat_{tag}(p: {ty}) -> {ty} = p + p"), extra: "", show: read_result, needs_var: false });
+        out.push(Shape { name: "cat".into(), def: format!("fn u_cat_{tag}(p: {ty}) -> {ty} = p + p"), extra: String::new(), show: read_result, needs_var: false });
     }
     if let Some(body) = t.loop_body {
-        out.push(Shape { name: "loop".into(), def: format!("fn u_loop_{tag}(p: {ty}) -> String = {{\n  var acc = 0\n  for x in p {{\n    {body}\n  }}\n  int.to_string(acc)\n}}"), extra: "", show: ident_show, needs_var: false });
+        out.push(Shape { name: "loop".into(), def: format!("fn u_loop_{tag}(p: {ty}) -> String = {{\n  var acc = 0\n  for x in p {{\n    {body}\n  }}\n  int.to_string(acc)\n}}"), extra: String::new(), show: ident_show, needs_var: false });
     }
     if let Some(e) = t.elem {
         // Fused chains whose step only reads the element: the source is
         // borrowed and no element is cloned (#2287).
-        out.push(Shape { name: "fold".into(), def: format!("fn u_fold_{tag}(p: {ty}) -> String = int.to_string(list.fold(p, 0, (acc, x) => acc + {e}))"), extra: "", show: ident_show, needs_var: false });
-        out.push(Shape { name: "mapped".into(), def: format!("fn u_mapped_{tag}(p: {ty}) -> String = int.to_string(list.sum(list.map(p, (x) => {e})))"), extra: "", show: ident_show, needs_var: false });
+        out.push(Shape { name: "fold".into(), def: format!("fn u_fold_{tag}(p: {ty}) -> String = int.to_string(list.fold(p, 0, (acc, x) => acc + {e}))"), extra: String::new(), show: ident_show, needs_var: false });
+        out.push(Shape { name: "mapped".into(), def: format!("fn u_mapped_{tag}(p: {ty}) -> String = int.to_string(list.sum(list.map(p, (x) => {e})))"), extra: String::new(), show: ident_show, needs_var: false });
     }
+    // A user higher-order fn that only CALLS its callback (#2288): the
+    // callback slot is `&dyn Fn` and the literal at the call site is a
+    // borrowed scope — no `Rc` allocation per call, and the param it reads
+    // stays borrowed.
+    out.push(Shape { name: "hof".into(), def: format!("fn u_hof_{tag}(p: {ty}, f: ({ty}) -> String) -> String = f(p)"), extra: format!(", (q) => {}", r("q")), show: ident_show, needs_var: false });
     if let Some(m) = t.mutate {
-        out.push(Shape { name: "mut".into(), def: format!("fn u_mut_{tag}(mut p: {ty}) -> Unit = {m}"), extra: "", show: unit_show, needs_var: true });
+        out.push(Shape { name: "mut".into(), def: format!("fn u_mut_{tag}(mut p: {ty}) -> Unit = {m}"), extra: String::new(), show: unit_show, needs_var: true });
     }
     if t.record {
-        out.push(Shape { name: "field".into(), def: format!("fn u_field_{tag}(p: {ty}) -> {ty} = {{ text: p.text, n: p.n + 1 }}"), extra: "", show: read_result, needs_var: false });
-        out.push(Shape { name: "spread".into(), def: format!("fn u_spread_{tag}(p: {ty}) -> {ty} = {{ ...p, n: 9 }}"), extra: "", show: read_result, needs_var: false });
+        out.push(Shape { name: "field".into(), def: format!("fn u_field_{tag}(p: {ty}) -> {ty} = {{ text: p.text, n: p.n + 1 }}"), extra: String::new(), show: read_result, needs_var: false });
+        out.push(Shape { name: "spread".into(), def: format!("fn u_spread_{tag}(p: {ty}) -> {ty} = {{ ...p, n: 9 }}"), extra: String::new(), show: read_result, needs_var: false });
     }
     // The `pair` shape takes two params: its call sites pass `p` twice.
     out
@@ -117,7 +122,7 @@ fn unit_show(_: &TypeSpec, e: &str) -> String { format!("{{\n    {e}\n    \"unit
 /// String named `line`.
 fn call_sites(t: &TypeSpec, s: &Shape) -> Vec<(String, String)> {
     let f = |arg: &str| {
-        let extra = if s.name == "pair" { format!(", {arg}") } else { s.extra.to_string() };
+        let extra = if s.name == "pair" { format!(", {arg}") } else { s.extra.clone() };
         format!("u_{}_{}({arg}{extra})", s.name, t.tag)
     };
     let show = |arg: &str| (s.show)(t, &f(arg));
@@ -149,7 +154,7 @@ fn program(t: &TypeSpec) -> String {
     }
     // The forwarding callers: a borrowed param handed to the use twice.
     for s in shapes.iter().filter(|s| !s.needs_var) {
-        let extra = if s.name == "pair" { ", q".to_string() } else { s.extra.to_string() };
+        let extra = if s.name == "pair" { ", q".to_string() } else { s.extra.clone() };
         let call = format!("u_{}_{}(q{extra})", s.name, t.tag);
         let shown = (s.show)(t, &call);
         src.push_str(&format!("fn c_{}_{}(q: {}) -> String = {} + {}\n", s.name, t.tag, t.ty, shown, shown));
