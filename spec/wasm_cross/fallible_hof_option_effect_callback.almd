@@ -1,0 +1,106 @@
+// @contract: C-284, C-064, C-345
+// The fallible list HOFs driven by a user `effect fn` callback that answers an
+// OPTION (almide#2308): `xs |> list.filter_map((x) => f(x)!)!` with
+// `effect fn f(x: Int) -> Int?`.
+//
+// A never-err effect fn declared `-> T?` returns the raw Option on the v1 legs,
+// while its call is typed as the lifted `Result[Option[T], String]`; the carrier
+// is stripped where a `!`, `?` or `??` names it. The fallible-HOF lambda has no
+// such node (the checker drops the `!` so the lambda returns the carrier), and
+// the pass that puts `ok(..)` back around a raw call in a Result position only
+// knew the lifted fns that do not declare an Option. The incumbent leg
+// (ALMIDE_WASM_INCUMBENT=1) then read the Option block with the Result layout:
+// filter_map over `Int?` trapped in rc_dec, over `String?` printed empty strings
+// with exit 0, over a record printed garbage, and map over `Int?` never
+// returned. Native and the structural leg were right throughout.
+//
+// The same raw call reaches a Result position outside a lambda too: a bind
+// annotated `Result` (C-064), a `Result` parameter (C-345), a match on ok/err,
+// and the tail of a fn declared `-> Result[..]`. Each read the Option as a
+// Result; the scalar twin of the last one (`bump_carrier`) failed wasm
+// validation on the incumbent leg.
+type Point = { x: Int, tag: String }
+
+effect fn third(x: Int) -> Int? = if x % 3 == 0 then some(x) else none
+
+effect fn name_at(i: Int) -> String? = list.get(["n0", "n1", "n2", "n3"], i)
+
+effect fn even_point(x: Int) -> Point? = if x % 2 == 0 then some({
+  x: x,
+  tag: "p" + int.to_string(x),
+})
+else none
+
+effect fn pair_of(x: Int) -> List[Int]? = if x % 2 == 0 then some([x, x + 1])
+else none
+
+// A callee that CAN err rides the real Result carrier; the first err still
+// stops the walk (ADR-0006).
+effect fn capped(x: Int) -> Int? = if x > 4 then err("too big ${x}")!
+else if x % 3 == 0 then some(x) else none
+
+effect fn bump(x: Int) -> Int = x + 1
+
+effect fn third_carrier(x: Int) -> Result[Int?, String] = third(x)
+
+effect fn bump_carrier(x: Int) -> Result[Int, String] = bump(x)
+
+fn show(tag: String, r: Result[Int?, String]) -> String = match r {
+  ok(v) => "${tag}=ok ${v}",
+  err(e) => "${tag}=err ${e}",
+}
+
+effect fn main() -> Unit = {
+  let fm_int = ([0, 1, 3, 4, 6] |> list.filter_map((x) => third(x)!))!
+  println("filter_map_int=${fm_int}")
+  let fm_str = ([0, 2, 5, 3, 9] |> list.filter_map((i) => name_at(i)!))!
+  println("filter_map_str=${fm_str}")
+  let fm_rec = ([0, 1, 2, 3, 4] |> list.filter_map((x) => even_point(x)!))!
+  println("filter_map_rec=${fm_rec |> list.map((p) => p.tag)}")
+  let fm_list = ([0, 1, 2, 3] |> list.filter_map((x) => pair_of(x)!))!
+  println("filter_map_list=${fm_list}")
+  let m_int = ([0, 1, 2, 3] |> list.map((x) => third(x)!))!
+  println("map_int=${m_int}")
+  let m_str = ([0, 5, 2] |> list.map((i) => name_at(i)!))!
+  println("map_str=${m_str |> list.map((o) => o ?? "-")}")
+  let m_list = ([0, 1, 2] |> list.map((x) => pair_of(x)!))!
+  println("map_list=${m_list |> list.map((o) => list.len(o ?? []))}")
+  match [0, 1, 2, 3] |> list.filter_map((x) => capped(x)!) {
+    ok(v) => println("capped_ok=${v}"),
+    err(e) => println("capped_ok UNEXPECTED err: ${e}"),
+  }
+  match [3, 9, 6] |> list.filter_map((x) => capped(x)!) {
+    ok(v) => println("capped_err UNEXPECTED ok=${v}"),
+    err(e) => println("capped_err=${e}"),
+  }
+  // An Option call INSIDE the callback, not its answer: the `!` names the
+  // carrier, so these were stripped before and stay as they were.
+  let kept = ([0, 1, 2, 3] |> list.filter((x) => option.is_some(third(x)!)))!
+  println("filter_inner=${kept}")
+  let total = ([0, 1, 3, 4, 6] |> list.fold(0, (acc, x) => acc + (third(x)! ?? 0)))!
+  println("fold_inner=${total}")
+  // The bare call in a Result position outside a lambda.
+  let bound: Result[Int?, String] = third(3)
+  match bound {
+    ok(v) => println("bind=ok ${v}"),
+    err(e) => println("bind=err ${e}"),
+  }
+  println(show("arg", third(6)))
+  println(show("arg_none", third(4)))
+  match third(9) {
+    ok(v) => println("match=ok ${v}"),
+    err(e) => println("match=err ${e}"),
+  }
+  match third_carrier(3) {
+    ok(v) => println("tail=ok ${v}"),
+    err(e) => println("tail=err ${e}"),
+  }
+  match third_carrier(5) {
+    ok(v) => println("tail_none=ok ${v}"),
+    err(e) => println("tail_none=err ${e}"),
+  }
+  match bump_carrier(41) {
+    ok(v) => println("tail_scalar=ok ${v}"),
+    err(e) => println("tail_scalar=err ${e}"),
+  }
+}

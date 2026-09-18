@@ -937,6 +937,7 @@ since     = "0.26.20"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/effect_assign_unwrap.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fallible_hof_option_effect_callback.almd", class = "fixture" },
 ]
 
 # ── STRING POSITION API SPEAKS ONE UNIT: CODEPOINTS ──────────────────
@@ -3428,6 +3429,7 @@ since     = "0.57.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fallible_hof_effect_callback_family.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fallible_hof_option_effect_callback.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-285"
@@ -4243,6 +4245,7 @@ since     = "0.63.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/result_param_not_first.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fallible_hof_option_effect_callback.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-346"

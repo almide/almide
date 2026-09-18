@@ -99,7 +99,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-061 | A mut Map parameter mutated in place builds on both targets and the mutation persists, byte-identical | 0.26.9 | active | fixture | 1 |
 | C-062 | The RawPtr / linear-memory bridge moves bytes byte-identically on both targets | 0.26.15 | active | fixture | 1 |
 | C-063 | Parsing a heterogeneous-nested glTF/JSON document and walking its arrays by element is byte-identical on both targets | 0.26.19 | active | fixture | 1 |
-| C-064 | The effect-fn Result auto-unwrap rule is identical across binding positions and type-directed, byte-identical on both targets | 0.26.20 | active | fixture | 1 |
+| C-064 | The effect-fn Result auto-unwrap rule is identical across binding positions and type-directed, byte-identical on both targets | 0.26.20 | active | fixture | 2 |
 | C-065 | The string position API is codepoint-indexed end-to-end on both targets | 0.26.20 | active | fixture | 2 |
 | C-066 | WASM heap is reclaimed by default (true Perceus) | 0.27.0 | active | fixture | 6 |
 | C-067 | The xs[i] index syntax aborts on out-of-bounds (read and write) | 0.27.4 | active | fixture | 4 |
@@ -319,7 +319,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-281 | Bare Result constructors and parameter-passthrough effect tails run identically per the kernel semantics | 0.57.1 | active | fixture | 2 |
 | C-282 | A matrix index out of range aborts identically on both targets; the row reductions answer their identity instead | 0.57.1 | active | fixture | 1 |
 | C-283 | A call through a Fn-typed local resolves that local, never a same-named top-level fn | 0.57.1 | active | fixture | 1 |
-| C-284 | A fallible list HOF driven by a user effect fn callback runs identically on both targets | 0.57.1 | active | fixture | 1 |
+| C-284 | A fallible list HOF driven by a user effect fn callback runs identically on both targets | 0.57.1 | active | fixture | 2 |
 | C-285 | regex.captures answers the whole match at index 0, and `none` means only that nothing matched | 0.57.1 | active | fixture | 1 |
 | C-286 | `??` reads its source; the Option survives the elimination and stays readable | 0.57.1 | active | fixture | 1 |
 | C-287 | A tail-position heap-result if/match with a none arm executes the taken arm for record and list payloads | 0.57.1 | active | fixture | 1 |
@@ -380,7 +380,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-342 | bytes.copy_from with a negative length or offset copies nothing on both targets | 0.62.0 | active | fixture | 1 |
 | C-343 | A tail `!` over a declared-Result plain callee yields the payload in a lifted effect fn | 0.63.0 | active | fixture | 1 |
 | C-344 | guard-else-err inside a call-argument block after a Result bind runs on every leg | 0.63.0 | active | fixture | 1 |
-| C-345 | An effect call passed as a Result/Option parameter keeps its Result at every parameter index | 0.63.0 | active | fixture | 1 |
+| C-345 | An effect call passed as a Result/Option parameter keeps its Result at every parameter index | 0.63.0 | active | fixture | 2 |
 | C-346 | A heap-payload ?? lowers on the incumbent leg as a call argument and as a match subject | 0.63.0 | active | fixture | 1 |
 | C-347 | Operator round trips over a known literal print that literal on both targets | 0.63.0 | active | fixture | 1 |
 | C-348 | Byte-indexed string slices validate UTF-8 boundaries | 0.63.0 | active | fixture | 1 |
