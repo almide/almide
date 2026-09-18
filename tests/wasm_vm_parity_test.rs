@@ -8,7 +8,12 @@
 //!     stdout, stderr and exit code, byte for byte — or stop on the VM's
 //!     named trap for a call it does not serve (the clock or entropy: the
 //!     Time/Rand capabilities a Critical program is never granted), after
-//!     output that is a prefix of the stock runtime's;
+//!     output that is a prefix of the stock runtime's. One difference is the
+//!     stock runtime's own and tracked, not failed: it refuses a `proc_exit`
+//!     status of 126 or more, which the VM, native and the embedded host all
+//!     exit with (#2303). A trap is compared by its reason and the program's
+//!     stderr: the VM exits 1 with one trap line where the stock CLI exits
+//!     with its own trap status and error block;
 //!   - any other artifact (fs, env, args) MUST be refused at load.
 //!
 //! So the VM never gives a silent wrong answer on anything the product ships:
@@ -31,10 +36,9 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use almide_wasm_vm::{run_program, Limits};
+use almide_wasm_vm::{run_program, Limits, Trap};
 
 const SERVED: &[&str] = &["fd_write", "proc_exit", "random_get", "clock_time_get", "fd_read"];
-const DECLINE: &str = "Error: wasm trap: host call `";
 
 fn almide_bin() -> String {
     std::env::var("ALMIDE_BIN").unwrap_or_else(|_| env!("CARGO_BIN_EXE_almide").to_string())
@@ -59,8 +63,9 @@ enum Verdict {
     Equal,
     Declined,
     Refused,
-    /// A Critical-clean fixture whose VM run equals the stock runtime's and
-    /// differs from native under a tracked `@xt-allow`.
+    /// A known difference with its own issue: a Critical-clean fixture whose
+    /// VM run equals the stock runtime's and differs from native under an
+    /// `@xt-allow`, or an exit status the stock runtime refuses (#2303).
     Tracked(String),
     Wrong(String),
 }
@@ -81,38 +86,49 @@ fn judge(name: &str, wasm: &Path) -> (Verdict, Option<Observed>) {
     let in_scope = imports_in_scope(&bytes);
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let vm = run_program(&bytes, Limits::default(), &mut std::io::empty(), &mut out, &mut err);
-    let exit = match (in_scope, vm) {
+    let report = match (in_scope, vm) {
         (false, Err(_)) => return (Verdict::Refused, None),
         (false, Ok(_)) => return (Verdict::Wrong(format!("{name}: imports outside the five, but the VM ran it")), None),
         (true, Err(e)) => return (Verdict::Wrong(format!("{name}: in scope, but refused: {e}")), None),
-        (true, Ok(code)) => code,
+        (true, Ok(report)) => report,
     };
     let stock = Command::new("wasmtime").arg(wasm).stdin(Stdio::null()).output().expect("wasmtime runs");
     let (vout, verr) = (String::from_utf8_lossy(&out), String::from_utf8_lossy(&err));
     let (sout, serr) = (String::from_utf8_lossy(&stock.stdout), String::from_utf8_lossy(&stock.stderr));
-    if exit == 1 && verr.lines().last().is_some_and(|l| l.starts_with(DECLINE)) {
-        return if sout.starts_with(&*vout) {
-            (Verdict::Declined, None)
-        } else {
-            (Verdict::Wrong(format!("{name}: output before the declined call is not the stock runtime's")), None)
-        };
-    }
-    let trapped = exit == 1 && verr.lines().last().is_some_and(|l| l.starts_with("Error: wasm trap: "));
-    let equal = if trapped {
-        // the stock CLI reports a trap as its own error block after the
-        // program's stderr; the program's part and the reason must agree
-        let reason = verr.lines().last().unwrap_or("").trim_start_matches("Error: ");
-        let program = serr.split("Error: failed to run main module").next().unwrap_or("");
-        stock.status.code() != Some(0) && serr.contains(reason) && verr.strip_suffix(&format!("Error: {reason}\n")) == Some(program)
-    } else {
-        stock.status.code() == Some(exit) && serr == verr
+    let (exit, code) = (report.exit, stock.status.code());
+    // the stock CLI reports a failed run as its own error block after the
+    // program's stderr
+    let program = serr.split("Error: failed to run main module").next().unwrap_or("");
+    let equal = match &report.trap {
+        Some(Trap::HostCallNotServed(_)) => {
+            return if sout.starts_with(&*vout) {
+                (Verdict::Declined, None)
+            } else {
+                (Verdict::Wrong(format!("{name}: output before the declined call is not the stock runtime's")), None)
+            };
+        }
+        Some(trap) => {
+            // the VM's one trap line (absent under the die convention) stands
+            // for the stock runtime's block, which must name the same reason
+            let line = format!("Error: wasm trap: {trap}\n");
+            let own = verr.strip_suffix(line.as_str()).unwrap_or(&verr);
+            code != Some(0) && serr.contains(&trap.to_string()) && own == program
+        }
+        None if exit as u32 >= 126 && code == Some(1) && serr.contains("invalid exit status") => {
+            return if sout == vout && program == verr {
+                (Verdict::Tracked(format!("{name}: the stock runtime refuses exit status {exit} (#2303)")), None)
+            } else {
+                (Verdict::Wrong(format!("{name}: diverges before its refused exit status")), None)
+            };
+        }
+        None => code == Some(exit) && serr == verr,
     };
     if equal && sout == vout {
         (Verdict::Equal, Some((exit, vout.into_owned(), verr.into_owned())))
     } else {
         let msg = format!(
-            "{name}: diverges\n  stock: exit={:?} stdout={sout:?} stderr={serr:?}\n  vm:    exit={exit} stdout={vout:?} stderr={verr:?}",
-            stock.status.code()
+            "{name}: diverges\n  stock: exit={code:?} stdout={sout:?} stderr={serr:?}\n  vm:    exit={exit} trap={:?} stdout={vout:?} stderr={verr:?}",
+            report.trap
         );
         (Verdict::Wrong(msg), None)
     }

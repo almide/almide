@@ -54,10 +54,12 @@ fn main() -> ExitCode {
     let mut err = std::io::stderr().lock();
     let mut input = std::io::stdin().lock();
     match run_program(&bytes, limits, &mut input, &mut out, &mut err) {
-        Ok(code) => {
+        Ok(report) => {
             let _ = out.flush();
             drop(out);
-            std::process::exit(code)
+            // the code as given, as native and the embedded host exit: the
+            // operating system keeps what it keeps (its low 8 bits on Unix)
+            std::process::exit(report.exit)
         }
         Err(e) => {
             let _ = writeln!(err, "Error: {e}");

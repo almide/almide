@@ -12,7 +12,7 @@ struct Ran {
 fn run_with(wat: &str, limits: Limits, input: &[u8]) -> Ran {
     let bytes = wat::parse_str(wat).expect("test module assembles");
     let (mut input, mut out, mut err) = (input, Vec::new(), Vec::new());
-    let exit = run_program(&bytes, limits, &mut input, &mut out, &mut err).expect("module loads");
+    let exit = run_program(&bytes, limits, &mut input, &mut out, &mut err).expect("module loads").exit;
     let text = |b: Vec<u8>| String::from_utf8(b).expect("the test programs write UTF-8");
     Ran { exit, out: text(out), err: text(err) }
 }
