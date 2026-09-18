@@ -1,6 +1,6 @@
 # ALS §B — The Bounded Profile (normative)
 
-> Last updated: 2026-08-21
+> Last updated: 2026-09-18
 
 > **Status**: normative（ADR-0017、2026-08-21 裁定）。本章は**有界プロファイル**
 > — 言語の**サブセット**であって方言ではない — を定める。`@bounded` を付けた関数は、
@@ -214,6 +214,28 @@ fn main() -> Unit = println("${fact(5)}")
 関数値を渡す呼び出し）、関数参照、`any P` による動的ディスパッチ。（一階のみの
 理由: 間接呼び出し先は静的な呼び出しグラフ・capability・上限の全てを失う。）
 
+バリアントのコンストラクタ適用（`Circle(r)`）は呼び出しではない。レコードリテラル
+（`P { x: 1 }`）やタプルと同じく値を構築する式であり、B7 の対象ではなく、B4 が列挙する
+ループ内確保にも含まれない。ペイロードの各式はすべての規則で判定される。
+
+```almide
+type Shape = | Circle(Int) | Dot
+
+@bounded
+fn classify(n: Int) -> Shape = if n > 0 then Circle(n) else Dot
+
+@bounded
+fn radius(s: Shape) -> Int = match s {
+  Circle(r) => r,
+  Dot => -1,
+}
+
+test "a @bounded function builds variant values" {
+  assert_eq(radius(classify(2)), 2)
+  assert_eq(radius(classify(0)), -1)
+}
+```
+
 ```almide
 @bounded
 fn double(x: Int) -> Int = x * 2
@@ -237,7 +259,8 @@ fn main() -> Unit = println("${uses_plain(1)}")
 ```
 
 テスト: `tests/diagnostics/e074-bounded-unbounded-callee/`、
-`tests/diagnostics/e074-bounded-higher-order/`。Contracts: C-314。
+`tests/diagnostics/e074-bounded-higher-order/`、`spec/stdlib/bounded_profile_test.almd`
+（コンストラクタ）。Contracts: C-314。
 
 ## ALS-B8 実行時長のヒープ構築の禁止
 
