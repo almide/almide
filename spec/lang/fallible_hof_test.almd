@@ -176,3 +176,30 @@ test "the marker, not the type, carries the callback bit" {
   assert_eq(bang_err, empty)
   assert_eq(bang_ok, [1, 2])
 }
+
+// #2306: the carriers recursed once per element, so the fallible map
+// overflowed the stack at about 10,000 elements on wasm and 50,000 natively.
+// Every carrier now loops. `map` is pinned at size here rather than in the
+// cross-target fixture spec/wasm_cross/fallible_hof_large_input.almd (which
+// carries the other six) because the interpreter leg abstains on it past 16
+// elements (#2311).
+fn plus_one_checked(n: Int) -> Int! = if n < 0 then err("negative") else ok(n + 1)
+
+fn stop_far(n: Int) -> Int! = if n == 150000 then err("stopped at 150000") else ok(n)
+
+fn map_many() -> List[Int] = list.map(list.range(0, 200000), (x) => plus_one_checked(x)!) ?? []
+
+fn map_far_err() -> String = match list.map(list.range(0, 200000), (x) => stop_far(x)!) {
+  ok(_) => "unexpected",
+  err(e) => e,
+}
+
+test "map: 200,000 elements through the fallible form" {
+  let ys = map_many()
+  assert_eq(list.len(ys), 200000)
+  assert_eq(list.last(ys), some(200000))
+}
+
+test "map: the first err far into a long list" {
+  assert_eq(map_far_err(), "stopped at 150000")
+}
