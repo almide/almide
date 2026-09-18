@@ -47,6 +47,7 @@ dependencies = [
  "almide-types",
  "almide-wasm",
  "almide-wasm-run",
+ "almide-wasm-vm",
  "clap",
  "crossbeam-channel",
  "fs2",
