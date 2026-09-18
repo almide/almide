@@ -12,3 +12,7 @@ workspace = true
 # No dependencies, by design: a qualification-grade executor keeps its trusted
 # base to the Rust standard library.
 [dependencies]
+
+[[bin]]
+name = "almide-wasm-vm"
+path = "src/main.rs"
