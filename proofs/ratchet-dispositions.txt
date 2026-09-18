@@ -1,0 +1,16 @@
+# RATCHET-SEPARATION DISPOSITIONS (scripts/check-ratchet-separation.sh)
+#
+# A commit on the protected line that broke the ratchet-separation law it was
+# judged by (the gate at its parent) can no longer be split. It is closed here
+# the way a problem report is: one record per commit, naming exactly the files
+# the law flagged, the author of the record, a DIFFERENT reviewer who re-derived
+# the evidence, and the evidence itself. The gate honours a record only for a
+# commit reachable from the protected line (CI: origin/develop, or the develop
+# tip before a push), so a change set can never close its own commits. This
+# file is itself a verification artifact: a record cannot ride inside an
+# implementation commit. A record closes ONLY the files it names; anything else
+# the same commit changed is outside it.
+#
+# <full sha> <flagged files, comma-separated> <author> <reviewer> <evidence…>
+2062dd0cf2de1fc5244b1c3564428a25835ff9ee scripts/perf-ratio-baseline.txt claude-opus-5 claude-fable-5-1 #2076, judged by the July law (gate blob 688a2d37b): numstat +12 -0 on the file; no existing row changed or removed; two NEW rows added, `fannkuchredux 0.600` and `ablation/fannkuchredux 3.000`, plus ten comment lines. The 0.600 is a self-declared ESTIMATE for the fan routing the same commit ships (the commit also moved fannkuchredux from REPORTED to VICTORY in scripts/check-perf-ratio.sh, outside the ratchet set) and has never been replaced by a runner measurement (#2300). No existing bar moved; a new, unmeasured bar was set.
+6612c7c9ec1d1518c9ec130147996083a62d6b70 tests/process_error_matrix_test.rs,tests/runtime_registry_io_test.rs,tests/wasm_library_route_test.rs claude-opus-5 claude-fable-5-1 #2115, judged by the July law (gate blob 688a2d37b): each flagged file matched only on ADDED calls to Rust's `Result::expect_err` (tests/process_error_matrix_test.rs:233, tests/runtime_registry_io_test.rs:13 and :28, tests/wasm_library_route_test.rs:96, file lines at 6612c7c9e), each inside a newly added test; two of the files are new (+31 -0, +101 -0); no removed line matches the law's pattern, so no expect_err/KnownBroken expectation was flipped. In process_error_matrix_test.rs an existing test was also rewritten (the exception-count assertion replaced by a no-anonymous-failure assertion), a tightening. This record closes only these three files: the six goldens and proofs/gate-verification.toml the same commit re-recorded were lawful under that law and are not examined here.
