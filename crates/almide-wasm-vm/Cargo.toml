@@ -1,0 +1,14 @@
+[package]
+name = "almide-wasm-vm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "A minimal wasm interpreter for exactly the instruction set Almide's structural emitter produces: the execution environment a qualification can cover (#865)"
+
+[lints]
+workspace = true
+
+# No dependencies, by design: a qualification-grade executor keeps its trusted
+# base to the Rust standard library.
+[dependencies]
