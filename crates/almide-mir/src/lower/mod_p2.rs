@@ -633,6 +633,15 @@ pub(crate) fn is_raw_never_err_callee(
             || DECLARED_OPTION_EFFECT_FNS.with(|s| s.borrow().contains(name)))
 }
 
+/// A call to a never-err DECLARED-Option effect fn still typed as its lifted `Result`: the
+/// `match` residue [`rewrite_never_err_effect_match`] leaves, which the match lowering walls.
+/// Keyed on the type as well, because a stripped `f()!` subject is the Option itself.
+pub(crate) fn is_unstripped_declared_option_call(e: &IrExpr) -> bool {
+    is_result_ty(&e.ty)
+        && matches!(&e.kind, IrExprKind::Call { target: CallTarget::Named { name }, .. }
+            if DECLARED_OPTION_EFFECT_FNS.with(|s| s.borrow().contains(name.as_str())))
+}
+
 /// Rewrite a NEVER-ERR user `effect fn` `Named` CALL's result type from the lifted-ABI
 /// `Result[T, String]` (what the frontend reports so consumers `auto_unwrap`) back to the RAW `T`
 /// the v1 function body actually returns. A never-err effect fn's body returns the bare value (no
