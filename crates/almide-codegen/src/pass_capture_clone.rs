@@ -413,6 +413,13 @@ fn transform_expr(expr: &mut IrExpr, cx: &mut Cx, scope_vars: &HashSet<VarId>) -
         // pre-clone wrap and a later use of the var failed to compile (E0382).
         // `replace_vars` already descends these, so the walk and the rename
         // now agree.
+        // `&(lambda)`: a lambda literal at a callee's non-escaping fn slot
+        // (#2288) is a scope, not a closure — its body is walked in the
+        // lambda's scope and the lambda itself is never wrapped in a
+        // `__cap` block (exactly the chain-step rule, `transform_chain_lambda`).
+        IrExprKind::Borrow { expr: e, mutable: false, .. } if matches!(e.kind, IrExprKind::Lambda { .. }) => {
+            transform_expr_scoped(e, cx, scope_vars)
+        }
         IrExprKind::UnOp { operand: e, .. }
         | IrExprKind::Member { object: e, .. } | IrExprKind::TupleIndex { object: e, .. }
         | IrExprKind::OptionalChain { expr: e, .. }

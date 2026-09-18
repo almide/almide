@@ -437,6 +437,18 @@ fn box_fan_thunk(slot: &mut IrExpr, to: FnBox) -> bool {
 /// uniform boxing as any other lambda, and a nested combinator's closure is a
 /// typed `Rc<dyn Fn(T) -> U>` exactly as it is outside a fan.
 fn box_closures_expr(expr: IrExpr, box_here: bool, changed: &mut bool) -> IrExpr {
+    // `&(lambda)` — a lambda literal at a callee's non-escaping fn slot
+    // (#2288, spelled by `BorrowInsertion`) — is passed as `&dyn Fn`, a
+    // borrow of the bare closure: the lambda itself stays raw, and only the
+    // closures INSIDE its body get the default boxing.
+    if let IrExprKind::Borrow { expr: inner, mutable: false, .. } = &expr.kind
+        && matches!(inner.kind, IrExprKind::Lambda { .. })
+    {
+        let IrExpr { kind, ty, span, def_id } = expr;
+        let IrExprKind::Borrow { expr: inner, as_str, mutable } = kind else { unreachable!("matched above") };
+        let lambda = inner.map_children(&mut |c| box_closures_expr(c, box_here, changed));
+        return IrExpr { kind: IrExprKind::Borrow { expr: Box::new(lambda), as_str, mutable }, ty, span, def_id };
+    }
     let mut e = expr.map_children(&mut |c| box_closures_expr(c, box_here, changed));
     if box_here && box_node(&mut e) { *changed = true; }
     e
