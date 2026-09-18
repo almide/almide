@@ -14,10 +14,13 @@
 //! be filed where the outer program could take it), the two calls run,
 //! `RegionRestore` copies the heads back, rewinds the bump pointer and
 //! frees the save block. Blocks freed INSIDE the window vanish with it
-//! (they were window blocks), the outer free lists are exactly what they
-//! were, and nothing has to be cloned — the structural leg never frees
-//! variant payloads through a region, so the incumbent's `__rgn_` copies
-//! have no counterpart here.
+//! (they were window blocks), and the outer free lists are exactly what
+//! they were. The site does not release the producer's result at all
+//! (`forget_window_temps`, #2318): the restore reclaims every block it
+//! reaches, so its drop walk would be pure cost. A block the consumer's
+//! own body frees (an owned param, a local it builds) is still freed one
+//! by one — the incumbent's `__rgn_` twins, which skip that too, have no
+//! counterpart here yet.
 //!
 //! Soundness rests on nothing crossing the window edge:
 //! * `consume` returns Int/Float/Bool/Unit — no window block escapes by
@@ -301,6 +304,26 @@ impl<'a> Emitter<'a> {
             i.i32_const(class_slot(k)).i32_const(0).i32_store(abs(0));
         }
         Ok(blk)
+    }
+
+    /// The window site's half of the borrow pool: the producer's result,
+    /// parked for the consumer's BORROWED param, is not released (#2318
+    /// direction 1). The producer is region-pure over scalar arguments,
+    /// so every block that result reaches was allocated after this
+    /// window's `RegionSave` (or is a pool static the rc ops no-op on) —
+    /// `RegionRestore` reclaims all of it. The drop walk would free each
+    /// node into a class list the restore then overwrites: pure cost, the
+    /// whole tree once #2317 let the nodes reach rc 0. Only the heap
+    /// argument can be parked here — every other argument is a scalar.
+    pub(crate) fn forget_window_temps(&mut self, depth: usize) {
+        debug_assert!(self.borrowed_temps.len() <= depth + 1, "a window parks at most its heap argument");
+        if self.borrowed_temps.len() > depth {
+            // The witness records a parked temporary as released by the
+            // site (`id`); this site releases nothing, so the frame's
+            // certificate is withdrawn rather than over-claimed.
+            self.witness_decline("region-window-elided-release");
+        }
+        self.borrowed_temps.truncate(depth);
     }
 
     /// `RegionRestore`: heads back, bump pointer back, the save block
