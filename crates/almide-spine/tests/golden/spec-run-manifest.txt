@@ -1,4 +1,4 @@
-# oracle: almide 0.62.0 at ade5ef3ff — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.63.0 at 3964caa58 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 f0709d9573472655341ac75bd847b3f30d2bddc3a201554bfd5cc22c21446902	0	spec/wasm_cross/adr0005_operator_equivalence.almd
 c0f26e63e32a038c59081b238912f0b3ecfd01d8d5ce45534b83fbbce13128a7	0	spec/wasm_cross/alias_combinator_rc.almd
 997e25dd01ce19a5253bd290b2f5f4b8eab74ea88f256b5fd9e09ca77d42af3b	0	spec/wasm_cross/alias_cow.almd
@@ -135,6 +135,7 @@ e6e64665f7049a46aa2f4e8f14eb8634317b8e4fde6423c5c11c868f19eaaf79	0	spec/wasm_cro
 f0949a1235517f9eddf2ee04d3fdef0fc5cdc378bd6770692ac2fde2e62a1b79	0	spec/wasm_cross/error_operators.almd
 dbea9325179efe46ea2add94f7b6b745ca983fabb208dc6d34aa064623d7ee23	0	spec/wasm_cross/expr_stmt_comment.almd
 4fffaae29d00288dd8ccee2924ed3a16da9ee74723c4f1c6b247bfa0b1bece12	0	spec/wasm_cross/fallible_hof_effect_callback_family.almd
+170e8f4490be1dc7f6850f4fa1577414e2fd11572a4f7c1ee3afd89ae37edc5c	0	spec/wasm_cross/fallible_hof_option_effect_callback.almd
 138c190bb143f01bc5cf915be20d45a1b701a7786f81e24cb483c14b3fb88e9c	0	spec/wasm_cross/fallible_tuple_value_tail.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	1	spec/wasm_cross/fan_any_allfail.almd
 850d86684b44033e07057051b4c94f7d96c43c58b638e0a56a44b6d8e35d13de	0	spec/wasm_cross/fan_any_early_winner.almd
