@@ -486,36 +486,6 @@ pub fn infer_borrow_signatures(program: &mut IrProgram) -> HashMap<String, Vec<P
     sigs
 }
 
-/// Every lambda literal `BorrowInsertion` wrapped in a `Borrow` — an argument
-/// at a callee's non-escaping fn slot (#2288) — renders as a plain borrowing
-/// closure (`&|x| …`, no `move`): its first param joins
-/// `borrowed_lambda_params`, the mark the walker already reads for chain
-/// steps. The lambda is a scope for the ownership passes (`Use::depth`), so
-/// nothing it reads is captured or cloned into it.
-pub fn note_borrowed_lambda_params(program: &mut IrProgram) {
-    use almide_ir::visit::{walk_expr, IrVisitor};
-    struct Note(HashSet<VarId>);
-    impl IrVisitor for Note {
-        fn visit_expr(&mut self, e: &IrExpr) {
-            if let IrExprKind::Borrow { expr, mutable: false, .. } = &e.kind
-                && let IrExprKind::Lambda { params, .. } = &expr.kind
-                && let Some((first, _)) = params.first()
-            {
-                self.0.insert(*first);
-            }
-            walk_expr(self, e);
-        }
-    }
-    let mut n = Note(HashSet::new());
-    for f in &program.functions { n.visit_expr(&f.body); }
-    for tl in &program.top_lets { n.visit_expr(&tl.value); }
-    for m in &program.modules {
-        for f in &m.functions { n.visit_expr(&f.body); }
-        for tl in &m.top_lets { n.visit_expr(&tl.value); }
-    }
-    program.codegen_annotations.borrowed_lambda_params.extend(n.0);
-}
-
 /// Write each fused chain's source mode into its node (#2287): a chain whose
 /// receiving lambdas only READ the source element — the verdict every round's
 /// use walk gave `Iterable::consumed` through `chain_elements_consumed` —

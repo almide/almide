@@ -582,7 +582,6 @@ impl NanoPass for BorrowInsertionPass {
         if changed {
             super::pass_borrow_inference::commit_chain_source_modes(&mut program, &sigs);
             super::pass_borrow_inference::insert_borrows_at_call_sites(&mut program, &sigs);
-            super::pass_borrow_inference::note_borrowed_lambda_params(&mut program);
             super::pass_borrow_inference::hoist_conflicting_reads(&mut program);
         }
         PassResult { program, changed }

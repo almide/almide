@@ -81,6 +81,15 @@ pub(crate) fn render_expr_owned(ctx: &RenderContext, expr: &IrExpr) -> String {
 /// `annotate = false` — a fused iterator adapter infers `&T` and an explicit `T`
 /// would mismatch.
 fn render_lambda(ctx: &RenderContext, params: &[(VarId, Ty)], body: &IrExpr, annotate: bool) -> String {
+    let borrowed = params.first().is_some_and(|(id, _)| ctx.ann.borrowed_lambda_params.contains(id));
+    render_lambda_with(ctx, params, body, annotate, borrowed)
+}
+
+/// [`render_lambda`] with the closure form decided by the caller: `borrowed`
+/// renders the plain `|params| body` (a scope that borrows what it reads —
+/// a chain step, or the lambda under a `Borrow` at a callee's `&dyn Fn` slot,
+/// #2288), otherwise the `move` closure that owns its captures.
+pub(super) fn render_lambda_with(ctx: &RenderContext, params: &[(VarId, Ty)], body: &IrExpr, annotate: bool, borrowed: bool) -> String {
     let params_str = params.iter()
         .map(|(id, ty)| {
             let name = ctx.var_name(*id).to_string();
@@ -106,9 +115,7 @@ fn render_lambda(ctx: &RenderContext, params: &[(VarId, Ty)], body: &IrExpr, ann
         let cast = super::helpers::render_type_rc_fn(ctx, &body.ty);
         body_str = format!("{} as {}", wrapped, cast);
     }
-    let template = if params.first().is_some_and(|(id, _)| ctx.ann.borrowed_lambda_params.contains(id)) {
-        "lambda_borrowed"
-    } else { "lambda_single" };
+    let template = if borrowed { "lambda_borrowed" } else { "lambda_single" };
     ctx.templates.render_with(template, None, &[], &[("params", params_str.as_str()), ("body", body_str.as_str())])
         .unwrap_or_else(|| "|_| { }".to_string())
 }

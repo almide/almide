@@ -609,6 +609,13 @@ fn source_var_name(ctx: &RenderContext, id: VarId) -> String {
 
 fn render_expr_borrow(ctx: &RenderContext, expr: &IrExpr) -> String {
     let IrExprKind::Borrow { expr: inner, as_str, mutable } = &expr.kind else { unreachable!() };
+    // `&(lambda)` — a lambda literal at a callee's `&dyn Fn` slot (#2288,
+    // spelled by `BorrowInsertion`): a scope that borrows what it reads,
+    // rendered as the plain closure `&|params| body` — never `move`, which
+    // would move a captured value out of the enclosing closure on every call.
+    if !*mutable && let IrExprKind::Lambda { params, body, .. } = &inner.kind {
+        return format!("&{}", super::expressions::render_lambda_with(ctx, params, body, false, true));
+    }
     if !*mutable && matches!(inner.kind, IrExprKind::IndexAccess { .. }) {
         // Keep a following field projection outside the borrow: (&value).field.
         return format!("(&{})", render_expr(ctx, inner));
