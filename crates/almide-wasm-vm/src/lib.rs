@@ -7,8 +7,10 @@
 //! against are REQUIREMENTS.md, one `REQ-VM-N` per clause.
 
 pub mod error;
+pub mod ir;
 pub mod numeric;
 pub mod reader;
 pub mod types;
+pub mod validate;
 
 pub use error::{LoadError, Trap};
