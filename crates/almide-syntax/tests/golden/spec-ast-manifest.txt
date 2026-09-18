@@ -1,4 +1,4 @@
-# oracle: almide 0.62.0 at 714474d65 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.63.0 at e11eb0bf2 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -437,7 +437,7 @@ e74545f989ab639692b3eabd52bacd9d9e31cbc0a1365c0c34b866ac649d466d	spec/programs/v
 4176dd005668ae6301dc356e5c9993521c1cb55bc33c317d1aaa4e1b2a5dea1a	spec/stdlib/args_semantics_manifest_test.almd
 256caef7f2577c5b54bca0194f535e036a06eeea0d58aeb18561b47730917885	spec/stdlib/base64_semantics_manifest_test.almd
 256caef7f2577c5b54bca0194f535e036a06eeea0d58aeb18561b47730917885	spec/stdlib/bool_semantics_manifest_test.almd
-ea1e8d006128ab6540b176ada25df5d0f041df6ddad606dcd01e8643a0a37533	spec/stdlib/bounded_profile_test.almd
+c4aec0ad6c598c39ca851fe97ea0c7aa057187e251e8b2895bab1cf536b91436	spec/stdlib/bounded_profile_test.almd
 54dd04ba7c5b670993d7797d9bd77abe12cd06ea38cb3f217fed75ab076285e3	spec/stdlib/bundled_module_docs_test.almd
 f644d77e504659a5f0d837d69f629f09b1eb9486fa9ca9048b45a5f0ee6193c2	spec/stdlib/bytes_advanced_test.almd
 e9cce64016a2be0b9a7efc2a09d51e6cd12125a260b6ab789e92df106239b01d	spec/stdlib/bytes_append_test.almd
