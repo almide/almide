@@ -54,6 +54,11 @@ pub enum Trap {
     OutOfFuel,
     /// A host import this VM declares but does not serve was called.
     HostCallNotServed(&'static str),
+    /// A host call was handed a pointer or buffer outside memory.
+    HostPointerOutOfBounds,
+    /// A host call was handed a pointer to a 4-byte value that is not
+    /// 4-byte aligned.
+    HostPointerMisaligned,
 }
 
 impl fmt::Display for Trap {
@@ -68,6 +73,8 @@ impl fmt::Display for Trap {
             Trap::IndirectCallTypeMismatch => "indirect call type mismatch",
             Trap::CallStackExhausted => "call stack exhausted",
             Trap::OutOfFuel => "all fuel consumed by WebAssembly",
+            Trap::HostPointerOutOfBounds => "Pointer out of bounds",
+            Trap::HostPointerMisaligned => "Pointer not aligned to 4",
             Trap::HostCallNotServed(name) => return write!(f, "host call `{name}` is not served by this VM"),
         };
         f.write_str(text)
