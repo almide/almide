@@ -7,6 +7,7 @@
 //! against are REQUIREMENTS.md, one `REQ-VM-N` per clause.
 
 pub mod error;
+pub mod exec;
 pub mod ir;
 pub mod module;
 pub mod numeric;
@@ -15,5 +16,41 @@ pub mod types;
 pub mod validate;
 pub mod wasi;
 
+use std::io::{Read, Write};
+
 pub use error::{LoadError, Trap};
+pub use exec::{Instance, Limits, Outcome};
 pub use module::{decode, Module};
+
+/// Load, run and report one program, the way the runner does (REQ-VM-8):
+/// the exit code is 0 when `_start` returns, the code `proc_exit` was given,
+/// or 1 after a trap — which writes ONE stderr line, `Error: wasm trap:
+/// <reason>`, unless the program's own last stderr line already names the
+/// abort (`Error: <msg>` followed by `unreachable`, the die convention).
+/// This is the embedded host's cross-target contract, so the three
+/// observables compare byte-for-byte with it and with native.
+pub fn run_program(
+    bytes: &[u8],
+    limits: Limits,
+    input: &mut dyn Read,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> Result<i32, LoadError> {
+    let module = decode(bytes)?;
+    let mut instance = Instance::new(&module, limits)?;
+    let mut io = wasi::Io::new(input, out, err);
+    let outcome = instance.run(&mut io);
+    let _ = io.out.flush();
+    Ok(match outcome {
+        Outcome::Finished => 0,
+        Outcome::Exit(code) => code,
+        Outcome::Trapped(trap) => {
+            let named_die = trap == Trap::Unreachable && io.err_tail.last_line_is_error();
+            if !named_die {
+                let _ = writeln!(io.err, "Error: wasm trap: {trap}");
+            }
+            let _ = io.err.flush();
+            1
+        }
+    })
+}
