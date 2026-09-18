@@ -2,12 +2,12 @@
 source: tests/codegen_snapshot_test.rs
 expression: code
 ---
-pub fn apply(f: std::rc::Rc<dyn Fn(i64) -> i64>, x: i64) -> i64 {
-    (f.clone())(x)
+pub fn apply(f: &dyn Fn(i64) -> i64, x: i64) -> i64 {
+    (f)(x)
 }
 
 pub fn __almide_main() -> () {
-    almide_println!("{}", &format!("{}", apply((std::rc::Rc::new(move |x: i64| (x).wrapping_add(1i64)) as std::rc::Rc<dyn Fn(i64) -> i64>), 41i64)))
+    almide_println!("{}", &format!("{}", apply(&|x| (x).wrapping_add(1i64), 41i64)))
 }
 
 fn main() {
