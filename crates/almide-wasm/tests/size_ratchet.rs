@@ -1,13 +1,18 @@
 //! Module-size RATCHET (#1585) — the corpus-wide size story (2026-08-25
 //! A/B: smaller on 450/599, median ratio 0.675, aggregate 4.11 MB) was
 //! a one-shot snapshot; this gate makes it non-regressable. Every
-//! manifest fixture's emitted byte size is pinned in
-//! golden/size-baseline.txt; a regression is red, an improvement passes
-//! and is CLAIMED by regenerating:
+//! manifest fixture's emitted byte size is pinned EXACTLY in
+//! golden/size-baseline.txt, like the allocation ledger pins its
+//! watermarks: any move, up or down, is red until the change that makes
+//! it CLAIMS it by regenerating:
 //!
 //!   ALMIDE_UPDATE_SIZES=1 cargo test --release -p almide-wasm --test size_ratchet
 //!
 //! The regenerated diff makes a change's size impact visible in review.
+//! Growth past the per-fixture allowance is named a REGRESSION (fix it
+//! first). The pin is exact because a tolerance let rows go stale (#2309):
+//! 26 shipped rows had drifted inside their caps, merged unclaimed, and
+//! the next change that regenerated inherited them as its own diff.
 //! Two roc-style broken-measurement guards keep the gate honest: a
 //! module under 100 bytes, or a total collapsing under half the
 //! baseline, reads as INSTRUMENTATION FAILURE, never as a win.
@@ -36,13 +41,11 @@ use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Per-fixture regression allowance: a fixture may grow this factor
-/// plus slack before the gate trips (helper dedupe shifts are real;
-/// silent 2x growth is not).
+/// Per-fixture regression allowance: growth past this factor plus slack
+/// is named a regression rather than a move to claim (helper dedupe
+/// shifts are real; silent 2x growth is not).
 const PER_FIXTURE_FACTOR: f64 = 1.25;
 const PER_FIXTURE_SLACK: u64 = 512;
-/// Aggregate regression allowance.
-const TOTAL_FACTOR: f64 = 1.05;
 
 /// The switch that turns this binary into the isolation check's child: the
 /// ONE fixture a fresh process measures. Set by the ratchet itself.
@@ -125,8 +128,9 @@ fn measured_alone(exe: &Path, rel: &str) -> Result<String, String> {
         Some(print) if out.status.success() => Ok(print.to_string()),
         _ => {
             let stderr = String::from_utf8_lossy(&out.stderr);
-            let tail: Vec<&str> = stderr.lines().rev().take(6).collect();
-            Err(format!("child exited {} without a result: {}", out.status, tail.into_iter().rev().collect::<Vec<_>>().join(" | ")))
+            let lines: Vec<&str> = stderr.lines().collect();
+            let tail = lines[lines.len().saturating_sub(6)..].join(" | ");
+            Err(format!("child exited {} without a result: {tail}", out.status))
         }
     }
 }
@@ -191,81 +195,93 @@ fn corpus_sizes_hold_the_baseline() {
     });
     hold_isolation(&corpus, &alone);
 
-    let mut emitted_rows = String::new();
-    let mut shipped_rows = String::new();
-    let (mut emitted, mut shipped) = (Vec::new(), Vec::new());
-    for f in &corpus {
-        match f.sizes {
-            None => {
-                emitted_rows.push_str(&format!("!\t{}\n", f.rel));
-                shipped_rows.push_str(&format!("!\t{}\n", f.rel));
-            }
-            Some((n, w)) => {
-                emitted_rows.push_str(&format!("{n}\t{}\n", f.rel));
-                shipped_rows.push_str(&format!("{w}\t{}\n", f.rel));
-                emitted.push((f.rel.clone(), n));
-                shipped.push((f.rel.clone(), w));
-            }
-        }
-    }
-    hold_the_baseline("size-baseline.txt", "emitted", &emitted_rows, &emitted);
-    hold_the_baseline("size-baseline-wasi.txt", "shipped (to_wasi)", &shipped_rows, &shipped);
+    let emitted: Vec<(&str, Option<u64>)> = corpus.iter().map(|f| (f.rel.as_str(), f.sizes.map(|(n, _)| n))).collect();
+    let shipped: Vec<(&str, Option<u64>)> = corpus.iter().map(|f| (f.rel.as_str(), f.sizes.map(|(_, w)| w))).collect();
+    // Both ledgers are judged before either fails, so one run names every moved row.
+    let verdicts: Vec<String> = [
+        hold_the_baseline("size-baseline.txt", "emitted", &emitted),
+        hold_the_baseline("size-baseline-wasi.txt", "shipped (to_wasi)", &shipped),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    assert!(verdicts.is_empty(), "{}", verdicts.join("\n\n"));
 }
 
-fn hold_the_baseline(name: &str, form: &str, rows: &str, sizes: &[(String, u64)]) {
-    let bp = baseline_path(name);
-    if std::env::var("ALMIDE_UPDATE_SIZES").is_ok() {
-        std::fs::write(&bp, rows).expect("write baseline");
-    }
-    let baseline = std::fs::read_to_string(&bp)
-        .unwrap_or_else(|_| panic!("golden/{name} — generate with ALMIDE_UPDATE_SIZES=1"));
-    let mut base: std::collections::BTreeMap<&str, u64> = std::collections::BTreeMap::new();
-    for l in baseline.lines() {
-        let (n, rel) = l.split_once('\t').expect("baseline row");
-        if n == "!" {
-            continue; // structural-refused row — nothing to compare
-        }
-        base.insert(rel, n.parse().expect("baseline size"));
-    }
+/// A ledger's rows: `rel -> Some(size)`, or `None` for a `!` row (the
+/// structural leg refuses the fixture; the CLI reroutes it).
+fn parse_ledger(text: &str) -> std::collections::BTreeMap<&str, Option<u64>> {
+    text.lines()
+        .map(|l| {
+            let (n, rel) = l.split_once('\t').expect("baseline row");
+            (rel, if n == "!" { None } else { Some(n.parse().expect("baseline size")) })
+        })
+        .collect()
+}
 
-    let mut offences = Vec::new();
-    let mut total: u64 = 0;
-    let mut base_total: u64 = 0;
-    for (rel, n) in sizes {
-        total += n;
-        let Some(&b) = base.get(rel.as_str()) else {
-            offences.push(format!("{rel}: NEW fixture ({n} B) not in the baseline — regenerate to ratify"));
-            continue;
-        };
-        base_total += b;
-        let cap = (b as f64 * PER_FIXTURE_FACTOR) as u64 + PER_FIXTURE_SLACK;
-        if *n > cap {
-            offences.push(format!("{rel}: {n} B > cap {cap} B (baseline {b} B)"));
+fn render_ledger(rows: &[(&str, Option<u64>)]) -> String {
+    rows.iter()
+        .map(|(rel, n)| match n {
+            Some(n) => format!("{n}\t{rel}\n"),
+            None => format!("!\t{rel}\n"),
+        })
+        .collect()
+}
+
+/// One fixture's measurement against its pinned row, as the offence it
+/// raises (if any). `pinned` is `None` when the ledger has no row for it.
+fn row_offence(rel: &str, pinned: Option<Option<u64>>, got: Option<u64>) -> Option<String> {
+    match (pinned, got) {
+        (Some(None), None) => None,
+        (Some(Some(b)), Some(n)) if b == n => None,
+        (None, Some(n)) => Some(format!("{rel}: NEW fixture ({n} B) not in the ledger")),
+        (None, None) => Some(format!("{rel}: NEW fixture (structural-refused) not in the ledger")),
+        (Some(None), Some(n)) => Some(format!("{rel}: pinned `!` (structural-refused) but now emits {n} B")),
+        (Some(Some(b)), None) => Some(format!("{rel}: pinned {b} B but the structural leg now refuses it")),
+        (Some(Some(b)), Some(n)) => {
+            let cap = (b as f64 * PER_FIXTURE_FACTOR) as u64 + PER_FIXTURE_SLACK;
+            let delta = n as i64 - b as i64;
+            Some(if n > cap {
+                format!("{rel}: {n} B > cap {cap} B (pinned {b} B, {delta:+} B) — a REGRESSION: fix it, do not claim it")
+            } else {
+                format!("{rel}: {n} B, pinned {b} B ({delta:+} B)")
+            })
         }
     }
-    if base.len() != sizes.len() {
-        offences.push(format!(
-            "baseline has {} rows, corpus has {} — regenerate to ratify the partition",
-            base.len(),
-            sizes.len()
+}
+
+/// One ledger's verdict: `None` when every row is as pinned (or the ledger
+/// was just regenerated), else the failure to report.
+fn hold_the_baseline(name: &str, form: &str, rows: &[(&str, Option<u64>)]) -> Option<String> {
+    let bp = baseline_path(name);
+    let total: u64 = rows.iter().filter_map(|(_, n)| *n).sum();
+    if std::env::var("ALMIDE_UPDATE_SIZES").is_ok() {
+        std::fs::write(&bp, render_ledger(rows)).expect("write baseline");
+        println!("RATCHET sizes [{form}]: {} rows, {total} B — ledger regenerated", rows.len());
+        return None;
+    }
+    let text = std::fs::read_to_string(&bp)
+        .unwrap_or_else(|_| panic!("golden/{name} — generate with ALMIDE_UPDATE_SIZES=1"));
+    let mut pinned = parse_ledger(&text);
+    let pinned_total: u64 = pinned.values().flatten().sum();
+    if total * 2 < pinned_total {
+        return Some(format!(
+            "aggregate [{form}] {total} B is under HALF the ledger's {pinned_total} B — a collapse this size is a \
+             broken measurement (stub emission?), not a win; re-ratify deliberately if it is real"
         ));
     }
-    assert!(
-        offences.is_empty(),
-        "size ratchet [{form}] ({} offence(s)) — a regression needs a fix or a deliberate \
-         ALMIDE_UPDATE_SIZES=1 re-ratification:\n{}",
+    let mut offences: Vec<String> =
+        rows.iter().filter_map(|(rel, n)| row_offence(rel, pinned.remove(rel), *n)).collect();
+    offences.extend(pinned.keys().map(|rel| format!("{rel}: in the ledger but not in the corpus")));
+    if offences.is_empty() {
+        println!("RATCHET sizes [{form}]: {} rows, {total} B, every row as pinned", rows.len());
+        return None;
+    }
+    Some(format!(
+        "size ratchet [{form}] ({} row(s) moved, total {total} B against {pinned_total} B pinned) — every row \
+         is pinned exactly: claim a move in the change that makes it with ALMIDE_UPDATE_SIZES=1, and fix a \
+         regression first:\n{}",
         offences.len(),
         offences.join("\n")
-    );
-    let total_cap = (base_total as f64 * TOTAL_FACTOR) as u64;
-    assert!(
-        total <= total_cap,
-        "aggregate [{form}] {total} B > cap {total_cap} B (baseline {base_total} B) — corpus-wide size regression"
-    );
-    assert!(
-        total * 2 >= base_total,
-        "aggregate [{form}] {total} B is under HALF the baseline {base_total} B — a collapse this size is a \
-         broken measurement (stub emission?), not a win; re-ratify deliberately if it is real"
-    );
-    println!("RATCHET sizes [{form}]: {} fixtures, {total} B (baseline {base_total} B)", sizes.len());
+    ))
 }
