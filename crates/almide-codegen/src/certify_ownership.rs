@@ -115,9 +115,12 @@ fn certify_param(f: &IrFunction, p: &IrParam, uses: &[&Use], sites: &UseSites, a
     // C5, the body half (#2288): a fn-typed param rendered `&dyn Fn` whose
     // callable nevertheless escapes the call — the same predicate the
     // verdict applied (`fn_param_escapes`), re-read on the final IR. Judged
-    // before the heap guard: a callable is not a heap value to C1/C4.
+    // before the heap guard: a callable is not a heap value to C1/C4. A bare
+    // argument is the reference passing through (`BorrowLowering` strips the
+    // `&` of a param that already is one; an `Rc` slot would be rustc's
+    // type error), exactly as C1 reads it.
     if p.borrow == ParamBorrow::Ref && matches!(p.ty, Ty::Fn { .. }) {
-        let u = mine.iter().find(|u| crate::pass_borrow_inference::fn_param_escapes(u))?;
+        let u = mine.iter().find(|u| crate::pass_borrow_inference::fn_param_escapes(u) && !reference_passes_through(u))?;
         return Some(format!(
             "[C5 closure-escape] {}: param `{}` is rendered `&dyn Fn` but its callable escapes at a {:?} position (depth {}) — the verdict is wrong for this body",
             f.name, p.name, u.site, u.depth
