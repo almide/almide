@@ -459,7 +459,7 @@ fn inline_and_classify_cross_module_fns(
             );
             crate::lower::unwrap_never_err_call_types(&mut f.body, &wide_can_err, &wide_lifted);
             crate::lower::rewrap_never_err_into_result_targets(
-                &mut f.body,
+                f,
                 &wide_can_err,
                 &wide_lifted,
                 record_layouts,
