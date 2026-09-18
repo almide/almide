@@ -164,14 +164,26 @@ fn call_slots_come_from_the_oracle_and_closures_raise_the_depth() {
     let mut vt = VarTable::new();
     let xs = vt.alloc(sym("xs"), list_ty(), Mutability::Let, None);
     let i = vt.alloc(sym("i"), Ty::Int, Mutability::Let, None);
-    let lambda = e(IrExprKind::Lambda { params: vec![(i, Ty::Int)], body: Box::new(call("g", vec![var(xs, list_ty())], Ty::Int)), lambda_id: None }, Ty::Int);
-    let body = block(vec![], call("f", vec![var(xs, list_ty()), lambda], Ty::Int));
+    let lambda = || e(IrExprKind::Lambda { params: vec![(i, Ty::Int)], body: Box::new(call("g", vec![var(xs, list_ty())], Ty::Int)), lambda_id: None }, Ty::Int);
+    // `h(xs, (i) => g(xs))` with `h` consuming every slot: the lambda is a
+    // closure the callee may keep, so the occurrence inside it is a capture.
+    let body = block(vec![], call("h", vec![var(xs, list_ty()), lambda()], Ty::Int));
+    let uses = UseSites::of_expr(&body, Site::Result, &Borrows("f"));
+    let all: Vec<_> = uses.of(xs).collect();
+    assert_eq!(all[0].site, Site::Arg(SlotMode::Consume));
+    assert_eq!(all[0].depth, 0);
+    assert_eq!(all[1].site, Site::Arg(SlotMode::Consume));
+    assert_eq!(all[1].depth, 1);
+    // `f(xs, (i) => g(xs))` with `f` borrowing every slot: the lambda sits at
+    // a NON-ESCAPING fn slot (#2288) and is a scope — depth stays 0 and the
+    // body is a loop body (`in_loop`), exactly like a fused chain step.
+    let body = block(vec![], call("f", vec![var(xs, list_ty()), lambda()], Ty::Int));
     let uses = UseSites::of_expr(&body, Site::Result, &Borrows("f"));
     let all: Vec<_> = uses.of(xs).collect();
     assert_eq!(all[0].site, Site::Arg(SlotMode::Borrow));
     assert_eq!(all[0].depth, 0);
     assert_eq!(all[1].site, Site::Arg(SlotMode::Consume));
-    assert_eq!(all[1].depth, 1);
+    assert!(all[1].depth == 0 && all[1].in_loop, "{:?}", all[1]);
     let explicit = UseSites::of_expr(&body, Site::Result, &ExplicitBorrows);
     assert!(explicit.of(xs).all(|u| u.site == Site::Arg(SlotMode::Consume)));
 }

@@ -110,3 +110,23 @@ fn a_debug_build_certifies_by_default_and_off_opts_out() {
     assert!(ok, "`off` must build the violating program:\n{err}");
     assert!(!err.contains("[CERTIFY OWNERSHIP]"), "{err}");
 }
+
+const KEEPER: &str = "fn keep(f: (Int) -> Int) -> (Int) -> Int = f\nfn apply(f: (Int) -> Int, x: Int) -> Int = f(x)\nfn main() -> Unit = println(int.to_string(keep((x) => x + 1)(1) + apply((x) => x * 2, 3)))\n";
+
+#[test]
+fn a_borrowed_callable_that_escapes_is_a_c5_violation() {
+    // With escape inference ablated every fn-typed param is `&dyn Fn`: `keep`
+    // returns its callable, which a borrow cannot do. The certifier names
+    // the body before rustc names the lifetime (#2288).
+    let (ok, err) = certify_with("c5", KEEPER, &[("ALMIDE_FN_ESCAPE_OFF", "1")]);
+    assert!(!ok, "the build must fail under ALMIDE_CERTIFY_OWNERSHIP=fail:\n{err}");
+    assert!(err.contains("[C5 closure-escape] keep: param `f`"), "{err}");
+}
+
+#[test]
+fn a_callable_the_callee_only_calls_certifies_borrowed() {
+    // The same program with the inference on: `keep` owns its callable
+    // (it escapes), `apply` borrows it, and the call site passes `&|x| …`.
+    let (ok, err) = certify("c5-fixed", KEEPER);
+    assert!(ok, "the program must certify once escape is inferred:\n{err}");
+}

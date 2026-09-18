@@ -89,9 +89,14 @@ fn an_inlined_chain_callback_borrows_the_param_it_reads() {
     // E0507 (tools/almide-gates hit it).
     let s = fn_sig_and_body(&rust, "counts");
     assert!(s.contains("(all).iter()") || s.contains("all.clone()"), "the captured local must not move:\n{s}");
-    // A closure that outlives its call captures, and the capture owns.
+    // A closure that outlives its call captures, and the capture owns. A
+    // lambda handed to a user fn's fn-typed slot the callee only CALLS is a
+    // scope too (#2288): `twice(f: &dyn Fn)` borrows it, so `t` stays `&Table`
+    // and the lambda is passed as `&|i| …` — no `Rc::new`, no `move`.
     assert!(fn_sig_and_body(&rust, "saved").starts_with("pub fn saved(t: Table)"), "{}", fn_sig_and_body(&rust, "saved"));
-    assert!(fn_sig_and_body(&rust, "applied").starts_with("pub fn applied(t: Table)"), "{}", fn_sig_and_body(&rust, "applied"));
+    let s = fn_sig_and_body(&rust, "applied");
+    assert!(s.starts_with("pub fn applied(t: &Table)") && s.contains("twice(&|i|") && !s.contains("Rc::new"), "{s}");
+    assert!(fn_sig_and_body(&rust, "twice").starts_with("pub fn twice(f: &dyn Fn(i64) -> i64, x: i64)"), "{}", fn_sig_and_body(&rust, "twice"));
 
     for target in ["rust", "wasm"] {
         let run = Command::new(almide_bin()).args(["run", file.to_str().unwrap(), "--target", target]).output().unwrap();
