@@ -86,6 +86,8 @@ fs2 = "0.4"
 proptest = "1"
 insta = "1"
 tempfile = "3"
+# The qualification-scoped VM (#865), run in-process by its corpus parity gate.
+almide-wasm-vm = { path = "crates/almide-wasm-vm" }
 
 # The root build.rs (docs/diagnostics) and almide-types (stdlib/) re-embed repo
 # content on any mtime bump — git pull/checkout triggers a full opt-3 recompile
