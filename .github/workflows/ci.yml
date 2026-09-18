@@ -1564,10 +1564,11 @@ jobs:
       #     letting the wasm suites skip-as-pass (#983's lesson, kept).
       #   - the wasm_runtime_* binaries (macOS, armed): the byte-compare
       #     harness on the other tool-bearing platform — cross-target
-      #     equivalence is checked on a second OS, not just Linux. Under
-      #     `cargo test` each corpus-gate binary builds its own fixture table
-      #     (see tests/wasm_runtime_test_parts/corpus.rs), the same cost the
-      #     Linux shards already pay per test process under nextest.
+      #     equivalence is checked on a second OS, not just Linux. The three
+      #     CORPUS gates run in `corpus-cross` below, one runner each: every
+      #     corpus-gate binary builds its own fixture table (see
+      #     tests/wasm_runtime_test_parts/corpus.rs), and three of those in a
+      #     row outgrew this job's budget.
       #   - lsp_test + fix_test + diagnostic_harness_test: the path- and
       #     process-sensitive root suites (tmp dirs, binary spawning, path
       #     separators) — the classes behind #1008 and the os-error-3 catch.
@@ -1581,7 +1582,7 @@ jobs:
         run: |
           cargo test --test tool_arming_tripwire_test --test lsp_test --test fix_test --test diagnostic_harness_test
           if [ "${{ runner.os }}" != "Windows" ]; then
-            cargo test --test wasm_runtime_inline --test wasm_runtime_cross_target --test wasm_runtime_opt_parity --test wasm_runtime_interp_oracle --test wasm_runtime_interp_ledger --test wasm_runtime_fail_corpus
+            cargo test --test wasm_runtime_inline --test wasm_runtime_interp_ledger --test wasm_runtime_fail_corpus
           fi
 
       - uses: actions/upload-artifact@v7
@@ -1589,6 +1590,63 @@ jobs:
           name: ${{ matrix.artifact }}
           path: target/release/almide${{ matrix.os == 'windows-latest' && '.exe' || '' }}
           retention-days: 1
+
+  # The three corpus gates on macOS, one runner each — the placement the
+  # corpus harness was split for (tests/wasm_runtime_test_parts/corpus.rs:
+  # each gate binary builds its own fixture table so the Linux shard packer
+  # can put each on its own runner). Run in a row inside build-cross they
+  # needed ~100 minutes against its 60: the v0.63.0-rc1 release PR's macOS
+  # leg was cancelled at the timeout twice (2026-09-18) with every finished
+  # test passing — cross_target alone took 1,404 s, interp_ledger 582 s, and
+  # interp_oracle and opt_parity never started. The leg had grown from 25
+  # minutes (2026-09-01) through 50 (2026-09-07) as the corpus grew to 710
+  # fixtures. Each job here is a release build, a test build and ONE corpus
+  # table, inside the same 60-minute hang budget.
+  corpus-cross:
+    name: Corpus gate (macos-latest, ${{ matrix.gate }})
+    if: github.server_url == 'https://github.com' && github.event_name == 'pull_request' && github.base_ref == 'main'
+    strategy:
+      fail-fast: false
+      matrix:
+        gate: [wasm_runtime_cross_target, wasm_runtime_opt_parity, wasm_runtime_interp_oracle]
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci-cross-platform-macos-latest-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+
+      - run: cargo build --release
+
+      - name: Install wasmtime
+        run: |
+          # The same pinned, verified install as build-cross (#1036).
+          VERSION=v47.0.3
+          TARBALL="wasmtime-${VERSION}-aarch64-macos.tar.xz"
+          for i in 1 2 3 4 5; do
+            curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
+            echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
+          done
+          tar -xf "$TARBALL"
+          sudo mv wasmtime-*/wasmtime /usr/local/bin/
+          wasmtime --version
+
+      - name: Install wasm-opt (binaryen)
+        run: brew install binaryen && wasm-opt --version
+
+      # The tripwire rides along so a broken tool install fails THIS job
+      # instead of letting its corpus gate skip as a pass (#983).
+      - name: Cargo test (${{ matrix.gate }})
+        env:
+          ALMIDE_EXPECT_TOOLS: "1"
+        run: cargo test --test tool_arming_tripwire_test --test ${{ matrix.gate }}
 
   test-rust-cross:
     name: Test Rust (${{ matrix.os }})
