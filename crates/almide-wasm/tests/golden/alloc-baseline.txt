@@ -134,6 +134,7 @@
 65936	spec/wasm_cross/error_operators.almd
 65792	spec/wasm_cross/expr_stmt_comment.almd
 67760	spec/wasm_cross/fallible_hof_effect_callback_family.almd
+71648	spec/wasm_cross/fallible_hof_option_effect_callback.almd
 66288	spec/wasm_cross/fallible_tuple_value_tail.almd
 66080	spec/wasm_cross/fan_any_allfail.almd
 67024	spec/wasm_cross/fan_any_early_winner.almd

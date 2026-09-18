@@ -299,8 +299,17 @@ call:json.root
 call:json.set_path
 call:json.stringify
 call:json.stringify_pretty
+call:list.__fallible_filter__Int_String
+call:list.__fallible_filter_map__Int_Int_String
+call:list.__fallible_filter_map__Int_List_Int_String
+call:list.__fallible_filter_map__Int_Point_String
+call:list.__fallible_filter_map__Int_String_String
 call:list.__fallible_flat_map__Int_String_String
+call:list.__fallible_fold__Int_Int_String
 call:list.__fallible_map__Int_Int_String
+call:list.__fallible_map__Int_Option_Int_String
+call:list.__fallible_map__Int_Option_List_Int_String
+call:list.__fallible_map__Int_Option_String_String
 call:list.__fallible_map__Int_String_String
 call:list.__fallible_map__String_Int_String
 call:list.all
