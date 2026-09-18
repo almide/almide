@@ -285,6 +285,9 @@ dependencies = [
 [[package]]
 name = "almide-wasm-vm"
 version = "0.12.2"
+dependencies = [
+ "wat",
+]
 
 [[package]]
 name = "anstream"

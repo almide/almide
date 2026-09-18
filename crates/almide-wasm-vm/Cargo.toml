@@ -16,3 +16,8 @@ workspace = true
 [[bin]]
 name = "almide-wasm-vm"
 path = "src/main.rs"
+
+# Test-only: modules in the tests are written as text. Not part of the
+# executor's trusted base.
+[dev-dependencies]
+wat = "1"
