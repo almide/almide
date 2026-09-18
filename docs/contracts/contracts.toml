@@ -639,6 +639,8 @@ evidence  = [
   { path = "spec/wasm_cross/loop_outer_inplace_mutate_rc.almd", class = "fixture" },
   { path = "spec/wasm_cross/map_entries_reclaim.almd", class = "fixture" },
   { path = "spec/wasm_cross/set_entries_reclaim.almd", class = "fixture" },
+  { path = "spec/wasm_cross/variant_result_one_credit_churn.almd", class = "fixture" },
+  { path = "spec/wasm_cross/variant_result_credit_shapes.almd", class = "fixture" },
   { path = "spec/churn/string_accumulator_churn.almd", class = "by-construction" },
   { path = "spec/churn/construct_from_temp_churn.almd", class = "by-construction" },
   { path = "spec/churn/record_churn.almd", class = "by-construction" },

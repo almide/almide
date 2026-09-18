@@ -1,0 +1,43 @@
+// @contract: C-066
+// #2317: a fn that returns a freshly built variant from `if` / `match` hands
+// its caller exactly ONE credit, so the tree its last reader drops is freed
+// node by node and a loop that rebuilds it runs in one tree's memory. Before
+// the fix a constructor result counted as borrowed and took a second credit
+// on the way out: every node of every round leaked, and wasm exited `Error:
+// out of memory` (exit 1) while native printed the checksum. Six Int fields
+// put each node in the 128-byte class, so that leak crosses 4 GiB before the
+// loop ends; with one credit the rounds reuse the same blocks.
+type Tree = | Leaf | Node(Tree, Tree, Int, Int, Int, Int, Int, Int)
+
+fn make(depth: Int) -> Tree = if depth == 0 then Leaf
+else Node(
+  make(depth - 1),
+  make(depth - 1),
+  depth,
+  depth + 1,
+  depth + 2,
+  depth + 3,
+  depth + 4,
+  depth + 5,
+)
+
+fn grow(depth: Int) -> Tree = match depth {
+  0 => Leaf,
+  _ => Node(grow(depth - 1), make(depth - 1), depth, 0, 0, 0, 0, depth),
+}
+
+fn weigh(t: Tree) -> Int = match t {
+  Leaf => 1,
+  Node(l, r, a, _, _, _, _, f) => weigh(l) + weigh(r) + a + f,
+}
+
+fn main() -> Unit = {
+  var total = 0
+  var round = 0
+  while round < 8400 {
+    let t = if round % 2 == 0 then make(12) else grow(12)
+    total = total + weigh(t)
+    round = round + 1
+  }
+  println("${total}")
+}
