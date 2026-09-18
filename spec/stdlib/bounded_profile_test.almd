@@ -3,6 +3,8 @@
 // tests/diagnostics/e07x-bounded-*/.
 type State = { pos: Int, vel: Int }
 
+type Shape = | Circle(Int) | Dot
+
 @bounded
 fn scale(x: Int) -> Int = x * 3
 
@@ -62,6 +64,25 @@ fn simulate(accel: Int) -> State = {
   s
 }
 
+@bounded
+fn classify(n: Int) -> Shape = if n > 0 then Circle(n) else Dot
+
+@bounded
+fn radius(s: Shape) -> Int = match s {
+  Circle(r) => r,
+  Dot => -1,
+}
+
+@bounded
+fn count_circles() -> Int = {
+  var circles = 0
+  for i in 0..<6 {
+    let s = if i % 2 == 0 then Circle(i) else Dot
+    circles = circles + (if radius(s) >= 0 then 1 else 0)
+  }
+  circles
+}
+
 test "B1: a @bounded function is an ordinary function" {
   assert_eq(scale(4), 12)
 }
@@ -88,4 +109,10 @@ test "B11: defaulting inside the loop is admissible; records flow through" {
   let s = simulate(2)
   assert_eq(s.pos, 90)
   assert_eq(s.vel, 20)
+}
+
+test "B7: a variant constructor is a value, not a call, inside and outside a counted loop" {
+  assert_eq(radius(classify(2)), 2)
+  assert_eq(radius(classify(0)), -1)
+  assert_eq(count_circles(), 3)
 }
