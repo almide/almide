@@ -12,7 +12,7 @@
 # A commit staging BOTH is rejected.
 #
 #   check-ratchet-separation.sh               # the staged change (lefthook pre-commit)
-#   check-ratchet-separation.sh <base> <head> # every commit in base..head, each judged by the gate at its parent (CI)
+#   check-ratchet-separation.sh <base> <head> # every commit in base..head, merges included, each judged by the law that binds it (CI; see below)
 #
 # The range form is what makes the rule hold (#2183): as a pre-commit hook
 # alone it could not see the commits that re-recorded the parity goldens
@@ -85,103 +85,144 @@ fi
 [ $# -eq 2 ] || { echo "usage: $0 [<base> <head>]" >&2; exit 2; }
 base="$1"; head="$2"
 git cat-file -e "$base^{commit}" 2>/dev/null || { echo "::error::ratchet-separation: base $base is not a commit here (fetch-depth?)"; exit 2; }
+git cat-file -e "$head^{commit}" 2>/dev/null || { echo "::error::ratchet-separation: head $head is not a commit here"; exit 2; }
 
-# EACH COMMIT IS JUDGED BY THE LAW IN FORCE AT ITS PARENT. The range form used
-# to judge every commit by THIS file, so a rule added later was applied to
-# commits made before it existed: the v0.63.0-rc1 release range (#2299) failed
-# on a #2191 commit that re-recorded an AST golden four hours before #2199 made
-# the goldens verification artifacts. A rule cannot bind a change that
-# predates it, and a commit that edits this gate must not be judged by its own
-# edit — so each commit is judged by the gate as it stood at the commit's
-# parent: that version's pre-commit mode runs with every `git diff --cached` it
-# issues pinned to the commit's own change (`<commit>^ <commit>`). Every
-# version of this file has served the lefthook pre-commit interface, which is
-# what makes an old version replayable without a checkout. There is no floor
-# commit and no exemption list.
+# WHICH LAW JUDGES A COMMIT. The range form used to judge every commit by THIS
+# file, so a rule added later bound commits made before it existed: the
+# v0.63.0-rc1 release range (#2299) failed on a #2191 commit that re-recorded
+# an AST golden four hours before #2199 made the goldens verification
+# artifacts. Two kinds of commit, two answers:
 #
-# A commit that broke the law in force and is ALREADY on the protected line
-# cannot be split any more; it is closed the way a problem report is, by a
-# DISPOSITION in proofs/ratchet-dispositions.txt. A record excuses exactly one
-# commit, only when it names exactly the files the law flagged, only when it
-# names an author and a different reviewer and states its evidence, and only
-# for a commit reachable from $RATCHET_PROTECTED (CI passes origin/develop):
-# a change set can never excuse its own commits, and without the variable no
-# record is honoured at all. The ledger is itself a verification artifact
+#   * a commit ALREADY ON THE PROTECTED LINE ($RATCHET_PROTECTED; CI passes
+#     origin/develop, or the develop tip before a push) was accepted under the
+#     law at its parent, and is judged by that law alone: a rule never binds a
+#     change made before it existed.
+#   * a commit of the CHANGE SET (not yet on the protected line) must satisfy
+#     the law at the protected tip AND the law at its own parent. The tip's law
+#     is the accepted one — a change set that edits the gate cannot loosen it
+#     for its own commits (gut the gate, commit the mix, restore the gate), and
+#     a branch forked before a rule landed is judged by that rule; the parent's
+#     law makes a tightening bind the rest of its own change set at once.
+#     Without $RATCHET_PROTECTED the range base stands in for the tip and every
+#     commit counts as the change set's.
+#
+# A law is replayed, not reimplemented: that version of this file runs in its
+# pre-commit mode with every `git diff --cached` it issues pinned to the commit
+# (`<c>^ <c>`; for a merge, `git show --remerge-diff` — the edits the merge
+# made itself, beyond resolving its parents). Every version of this file has
+# served the lefthook pre-commit interface, which is what makes an old version
+# replayable without a checkout. No floor commit, no exemption list.
+#
+# A commit on the protected line that broke the law it was judged by can no
+# longer be split; it is closed the way a problem report is, by a DISPOSITION
+# in proofs/ratchet-dispositions.txt: one record per commit, naming exactly the
+# files the law flagged, an author and a different reviewer (no placeholders),
+# and the evidence. Only commits on the protected line can be closed, so a
+# change set can never close its own; the ledger is a verification artifact
 # above, so a record cannot ride inside an implementation commit either.
 GATE="scripts/check-ratchet-separation.sh"
-DISPOSITIONS="proofs/ratchet-dispositions.txt"
+DISPOSITIONS="$(git rev-parse --show-toplevel)/proofs/ratchet-dispositions.txt"
 PROTECTED="${RATCHET_PROTECTED:-}"
-# `git diff … --cached …` → `git diff … <c>^ <c> …`; every other git call as is.
+if [ -n "$PROTECTED" ] && ! git cat-file -e "$PROTECTED^{commit}" 2>/dev/null; then
+    echo "::error::ratchet-separation: RATCHET_PROTECTED=$PROTECTED is not a commit here"
+    exit 2
+fi
+TRUSTED="${PROTECTED:-$base}"
+
+# `git diff --cached <opts> [-- <paths>]` → the commit's own change; every other
+# git call as is. Empty arrays are expanded with the ${a[@]+…} form so the
+# shim holds under `set -u` on bash 3.2 as well as 5.
 REPLAY_SHIM='git() {
-    if [ "${1:-}" = diff ]; then
-        local a argv=()
-        for a in "$@"; do
-            if [ "$a" = --cached ]; then argv+=("$RATCHET_REPLAY^" "$RATCHET_REPLAY"); else argv+=("$a"); fi
-        done
-        command git "${argv[@]}"
+    local a cached=0 seen=0 opts=() paths=()
+    if [ "${1:-}" != diff ]; then command git "$@"; return; fi
+    shift
+    for a in "$@"; do
+        if [ "$seen" = 1 ]; then paths+=("$a")
+        elif [ "$a" = -- ]; then seen=1
+        elif [ "$a" = --cached ]; then cached=1
+        else opts+=("$a"); fi
+    done
+    if [ "$cached" = 0 ]; then command git diff "$@"; return; fi
+    if [ -n "$RATCHET_MERGE" ]; then
+        command git show --remerge-diff --format= ${opts[@]+"${opts[@]}"} "$RATCHET_REPLAY" -- ${paths[@]+"${paths[@]}"}
     else
-        command git "$@"
+        command git diff ${opts[@]+"${opts[@]}"} "$RATCHET_REPLAY^" "$RATCHET_REPLAY" -- ${paths[@]+"${paths[@]}"}
     fi
 }
 '
 
-# judge <commit>: 0 kept apart, 1 mixed (the law's own message printed),
-# 3 no gate existed at the parent (no law was in force).
-judge() {
-    local law
-    law="$(git show "$1^:$GATE" 2>/dev/null)" || return 3
-    RATCHET_REPLAY="$1" bash -c "$REPLAY_SHIM$law"
+# judge_under <law rev> <commit>: 0 kept apart, 1 mixed (the law's message
+# printed), 3 no gate existed at <law rev>.
+judge_under() {
+    local law merge=""
+    law="$(git show "$1:$GATE" 2>/dev/null)" || return 3
+    [ "$(git rev-list --parents -n1 "$2" | wc -w)" -gt 2 ] && merge=1
+    RATCHET_REPLAY="$2" RATCHET_MERGE="$merge" bash -c "$REPLAY_SHIM$law"
 }
+
+placeholder() { case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in ''|-|'?'|author|reviewer|tbd|todo|pending|none|unknown) return 0 ;; esac; return 1; }
 
 # dispositioned <commit> <law output>: 0 when the ledger closes this commit's
 # offence (the rules above), printing the record's evidence.
 dispositioned() {
-    local c="$1" out="$2" full flagged sha files author reviewer evidence
+    local c="$1" out="$2" full flagged sha files author reviewer evidence hits=0 found=""
     [ -n "$PROTECTED" ] && [ -f "$DISPOSITIONS" ] || return 1
     git merge-base --is-ancestor "$c" "$PROTECTED" 2>/dev/null || return 1
     full="$(git rev-parse "$c")"
-    # every version of the law prints the offending artifacts on one
-    # `ratchet:` line
     flagged="$(printf '%s\n' "$out" | sed -n 's/^ *ratchet://p' | tr ' ' '\n' | grep . | sort -u | tr '\n' ' ')"
     [ -n "$flagged" ] || return 1
-    while read -r sha files author reviewer evidence; do
+    while read -r sha files author reviewer evidence || [ -n "$sha" ]; do
         case "$sha" in ''|'#'*) continue ;; esac
         [ "$sha" = "$full" ] || continue
-        [ -n "$author" ] && [ -n "$reviewer" ] && [ "$author" != "$reviewer" ] && [ -n "$evidence" ] || return 1
-        [ "$(printf '%s\n' "$files" | tr ',' '\n' | grep . | sort -u | tr '\n' ' ')" = "$flagged" ] || return 1
-        echo "  dispositioned: $(git log -1 --format='%h %s' "$c")"
-        echo "    ratchet: $flagged(author $author, reviewer $reviewer) — $evidence"
-        return 0
-    done < "$DISPOSITIONS"
-    return 1
+        hits=$((hits + 1))
+        found="$files|$author|$reviewer|$evidence"
+    done < <(tr -d '\r' < "$DISPOSITIONS")
+    if [ "$hits" -gt 1 ]; then echo "::error::ratchet-separation: $hits disposition records name $full — one record per commit"; return 1; fi
+    [ "$hits" -eq 1 ] || return 1
+    IFS='|' read -r files author reviewer evidence <<< "$found"
+    if placeholder "$author" || placeholder "$reviewer" || [ -z "$evidence" ] \
+        || [ "$(printf '%s' "$author" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s' "$reviewer" | tr '[:upper:]' '[:lower:]')" ]; then
+        echo "::error::ratchet-separation: the disposition for $full needs a real author, a different real reviewer and evidence"
+        return 1
+    fi
+    [ "$(printf '%s\n' "$files" | tr ',' '\n' | grep . | sort -u | tr '\n' ' ')" = "$flagged" ] || return 1
+    echo "  dispositioned: $(git log -1 --format='%h %s' "$c")"
+    echo "    ratchet: $flagged(author $author, reviewer $reviewer) — $evidence"
+    return 0
 }
 
 rc=0
 n=0
 unbound=0
 closed=0
-laws=""
-# Merge commits carry no change of their own (their parents were each
-# checked); first-parent-only would hide a squashed side branch, so every
-# non-merge commit in the range is judged against its first parent.
-for c in $(git rev-list --no-merges --reverse "$base..$head"); do
+for c in $(git rev-list --reverse "$base..$head"); do
     n=$((n + 1))
-    out="$(judge "$c")"
-    case $? in
-        0) laws="$laws $(git rev-parse --short "$c^:$GATE")" ;;
-        3) unbound=$((unbound + 1)) ;;
-        *)
-            if dispositioned "$c" "$out"; then
-                closed=$((closed + 1))
-                laws="$laws $(git rev-parse --short "$c^:$GATE")"
-            else
-                echo "$out"
-                echo "  in commit $(git log -1 --format='%h %s' "$c") (judged by the gate at its parent, $(git rev-parse --short "$c^:$GATE"))"
-                rc=1
-            fi
-            ;;
-    esac
+    on_line=""
+    [ -n "$PROTECTED" ] && git merge-base --is-ancestor "$c" "$PROTECTED" 2>/dev/null && on_line=1
+    laws="$c^"
+    [ -z "$on_line" ] && [ "$(git rev-parse -q --verify "$TRUSTED:$GATE")" != "$(git rev-parse -q --verify "$c^:$GATE")" ] && laws="$laws $TRUSTED"
+    bound="" offence="" by=""
+    for law in $laws; do
+        out="$(judge_under "$law" "$c")"
+        case $? in
+            0) bound=1 ;;
+            3) ;;
+            *) bound=1; offence="$offence$out"$'\n'; by="$by $(git rev-parse --short "$law:$GATE")" ;;
+        esac
+    done
+    [ -n "$bound" ] || { unbound=$((unbound + 1)); continue; }
+    [ -n "$offence" ] || continue
+    if [ -n "$on_line" ] && dispositioned "$c" "$offence"; then
+        closed=$((closed + 1))
+        continue
+    fi
+    printf '%s' "$offence"
+    echo "  in commit $(git log -1 --format='%h %s' "$c") ($([ -n "$on_line" ] && echo "on the protected line" || echo "in the change set"); judged by gate$by)"
+    rc=1
 done
-versions="$(echo $laws | tr ' ' '\n' | sort -u | grep -c . || true)"
-[ "$rc" -eq 0 ] && echo "ratchet-separation OK: $n commit(s) in $base..$head each keep implementation and verification artifacts apart, each judged by the gate at its parent ($versions gate version(s); $closed closed by a disposition; $unbound predate the gate)"
+if [ "$n" -eq 0 ]; then
+    echo "::error::ratchet-separation: $base..$head holds no commit — nothing was judged, which is not a pass"
+    exit 2
+fi
+[ "$rc" -eq 0 ] && echo "ratchet-separation OK: $n commit(s) in $base..$head each keep implementation and verification artifacts apart ($closed closed by a disposition; $unbound predate the gate)"
 exit "$rc"
