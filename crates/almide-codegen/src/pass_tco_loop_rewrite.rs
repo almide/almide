@@ -34,7 +34,9 @@ fn rewrite_to_loop(
     let mut reverted_to_own: HashSet<usize> = HashSet::new();
     for (i, param) in func.params.iter_mut().enumerate() {
         var_table.entries[param.var.0 as usize].mutability = Mutability::Var;
-        let keep_borrow = matches!(param.ty, Ty::Bytes)
+        // A borrowed callable (`f: &dyn Fn`, #2288) is a `Copy` reference the
+        // loop can carry across iterations exactly like the `&Vec<u8>`.
+        let keep_borrow = matches!(param.ty, Ty::Bytes | Ty::Fn { .. })
             && !matches!(param.borrow, almide_ir::ParamBorrow::Own);
         if keep_borrow {
             bytes_borrowed_params.insert(i);
