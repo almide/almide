@@ -248,7 +248,7 @@ impl Emitter<'_> {
                 self.calls.insert(i);
                 if let Some(blk) = save {
                     self.f.instructions().call(index);
-                    self.release_borrowed_temps(depth);
+                    self.forget_window_temps(depth);
                     self.emit_region_restore(blk);
                     return Ok(ret);
                 }
