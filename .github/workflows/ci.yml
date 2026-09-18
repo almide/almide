@@ -161,7 +161,14 @@ jobs:
             echo "ratchet-separation: no comparable base for this ${{ github.event_name }} — checking HEAD alone"
             BASE="$(git rev-parse HEAD~1)"
           fi
-          bash scripts/check-ratchet-separation.sh "$BASE" HEAD
+          # A disposition (proofs/ratchet-dispositions.txt) may close only a
+          # commit already on develop, never one of the change set's own.
+          git fetch -q origin develop
+          RATCHET_PROTECTED=origin/develop bash scripts/check-ratchet-separation.sh "$BASE" HEAD
+      - name: The gate judges each commit by the law at its parent (negative controls)
+        # Needs the full history this job checks out: the old law it replays
+        # is the gate's real July version.
+        run: bash scripts/check-ratchet-separation-negative.sh
 
   # ═══════════════════════════════════════════════
   # Build — shared by all jobs
