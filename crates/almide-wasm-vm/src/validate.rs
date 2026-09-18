@@ -12,8 +12,8 @@ use crate::types::{FuncType, ValType};
 
 /// A function body as loaded.
 pub struct Body {
-    /// Params first, then the declared locals.
-    pub locals: Vec<ValType>,
+    /// How many locals the frame holds: params first, then the declared ones.
+    pub locals: u32,
     pub params: u32,
     pub code: Vec<Instr>,
     /// The highest operand-stack height any point of the body reaches.
@@ -60,17 +60,8 @@ struct Ctrl {
 type R<T> = Result<T, LoadError>;
 
 pub fn translate(ctx: &Context, ty: &FuncType, body: &mut Reader) -> R<Body> {
-    let mut locals = ty.params.clone();
-    let groups = body.vec_len()?;
-    for _ in 0..groups {
-        let count = body.u32()? as usize;
-        let at = body.offset();
-        let t = ValType::declared(body.byte()?).ok_or_else(|| LoadError::new(at, "a local's type is outside i32/i64/f64"))?;
-        if locals.len() + count > MAX_LOCALS {
-            return body.fail(format!("a body declares more than {MAX_LOCALS} locals"));
-        }
-        locals.extend(std::iter::repeat_n(t, count));
-    }
+    let locals = Locals::read(ty, body)?;
+    let count = locals.count();
     let mut tr = Tr {
         ctx,
         locals,
@@ -88,7 +79,45 @@ pub fn translate(ctx: &Context, ty: &FuncType, body: &mut Reader) -> R<Body> {
     if !body.at_end() {
         return body.fail("bytes follow the function's final `end`");
     }
-    Ok(Body { params: ty.params.len() as u32, locals: tr.locals, code: tr.code, max_height: tr.max as u32 })
+    Ok(Body { params: ty.params.len() as u32, locals: count, code: tr.code, max_height: tr.max as u32 })
+}
+
+/// A body's local types as runs — `(end, type)`, `end` exclusive — so a
+/// declared count costs one entry however large it is, and the memory a
+/// module takes to load stays proportional to its bytes.
+struct Locals(Vec<(u32, ValType)>);
+
+impl Locals {
+    fn read(ty: &FuncType, body: &mut Reader) -> R<Locals> {
+        let mut runs: Vec<(u32, ValType)> = Vec::new();
+        let mut end = 0u32;
+        for &p in &ty.params {
+            end += 1;
+            runs.push((end, p));
+        }
+        for _ in 0..body.vec_len()? {
+            let count = body.u32()?;
+            let at = body.offset();
+            let t = ValType::declared(body.byte()?).ok_or_else(|| LoadError::new(at, "a local's type is outside i32/i64/f64"))?;
+            end = match end.checked_add(count) {
+                Some(e) if e as usize <= MAX_LOCALS => e,
+                _ => return body.fail(format!("a body declares more than {MAX_LOCALS} locals")),
+            };
+            if count > 0 {
+                runs.push((end, t));
+            }
+        }
+        Ok(Locals(runs))
+    }
+
+    fn count(&self) -> u32 {
+        self.0.last().map_or(0, |&(end, _)| end)
+    }
+
+    fn get(&self, index: u32) -> Option<ValType> {
+        let i = self.0.partition_point(|&(end, _)| end <= index);
+        self.0.get(i).map(|&(_, t)| t)
+    }
 }
 
 impl Ctrl {
@@ -104,7 +133,7 @@ impl Ctrl {
 
 struct Tr<'c, 'm> {
     ctx: &'c Context<'m>,
-    locals: Vec<ValType>,
+    locals: Locals,
     result: Option<ValType>,
     /// `None` is a value of unknown type (after an unconditional branch).
     stack: Vec<Option<ValType>>,
@@ -185,13 +214,15 @@ impl Tr<'_, '_> {
         Ok(())
     }
 
+    /// A block type: `0x40` (empty) or one value-type byte. A type-index
+    /// block type (multi-value) and the f32 byte are outside the set.
     fn block_type(&mut self, r: &mut Reader) -> R<Option<ValType>> {
-        match r.s33()? {
-            -64 => Ok(None),
-            -1 => Ok(Some(ValType::I32)),
-            -2 => Ok(Some(ValType::I64)),
-            -4 => Ok(Some(ValType::F64)),
-            _ => r.fail("a block type outside empty/i32/i64/f64 (multi-value or f32) is not accepted"),
+        let at = r.offset();
+        match r.byte()? {
+            0x40 => Ok(None),
+            b => ValType::declared(b).map(Some).ok_or_else(|| {
+                LoadError::new(at, "a block type outside empty/i32/i64/f64 (multi-value or f32) is not accepted")
+            }),
         }
     }
 
@@ -297,7 +328,7 @@ impl Tr<'_, '_> {
     }
 
     fn memory_size_or_grow(&mut self, op: u8, r: &mut Reader) -> R<()> {
-        self.zero_byte(r)?;
+        self.zero_index(r)?;
         self.need_memory(r)?;
         if op == 0x40 {
             self.pop_expect(ValType::I32, r)?;
@@ -389,7 +420,7 @@ impl Tr<'_, '_> {
         let tail = op == 0x12 || op == 0x13;
         let index = r.u32()?;
         let ty = if indirect {
-            self.zero_byte(r)?; // table index 0
+            self.zero_index(r)?; // table index 0
             if !self.ctx.has_table {
                 return r.fail("call_indirect in a module without a table");
             }
@@ -420,9 +451,8 @@ impl Tr<'_, '_> {
     fn variable(&mut self, op: u8, r: &mut Reader) -> R<()> {
         let index = r.u32()?;
         if op <= 0x22 {
-            let t = match self.locals.get(index as usize) {
-                Some(&t) => t,
-                None => return r.fail("a local index is out of range"),
+            let Some(t) = self.locals.get(index) else {
+                return r.fail("a local index is out of range");
             };
             match op {
                 0x20 => self.push(Some(t)),
@@ -497,9 +527,9 @@ impl Tr<'_, '_> {
         let sub = r.u32()?;
         match sub {
             10 | 11 => {
-                self.zero_byte(r)?;
+                self.zero_index(r)?;
                 if sub == 10 {
-                    self.zero_byte(r)?;
+                    self.zero_index(r)?;
                 }
                 self.need_memory(r)?;
                 for _ in 0..3 {
@@ -527,7 +557,9 @@ impl Tr<'_, '_> {
         if self.ctx.has_memory { Ok(()) } else { r.fail("a memory instruction in a module without a memory") }
     }
 
-    fn zero_byte(&mut self, r: &mut Reader) -> R<()> {
-        if r.byte()? != 0 { r.fail("a reserved index byte is not zero") } else { Ok(()) }
+    /// A memory or table index that must be 0 (one memory, one table),
+    /// in any valid LEB128 spelling of 0.
+    fn zero_index(&mut self, r: &mut Reader) -> R<()> {
+        if r.u32()? != 0 { r.fail("a memory or table index is not 0") } else { Ok(()) }
     }
 }

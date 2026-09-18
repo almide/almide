@@ -33,7 +33,7 @@ fn program(data: &str, extra: &str, start: &str) -> String {
   (import "wasi_snapshot_preview1" "random_get" (func $random_get (param i32 i32) (result i32)))
   (import "wasi_snapshot_preview1" "clock_time_get" (func $clock (param i32 i64 i32) (result i32)))
   (import "wasi_snapshot_preview1" "fd_read" (func $fd_read (type $fd_rw)))
-  (memory 1)
+  (memory (export "memory") 1)
   (data (i32.const 16) "{data}")
   (func $print (param $ptr i32) (param $len i32) (param $fd i32)
     (i32.store (i32.const 0) (local.get $ptr))
@@ -220,4 +220,28 @@ fn f32_exists_only_between_a_demote_and_a_reinterpret() {
         (then (unreachable)))"#;
     let r = run(&program("", "", start));
     assert_eq!((r.exit, r.err.as_str()), (0, ""));
+}
+
+#[test]
+fn locals_declared_in_runs_keep_their_types() {
+    let extra = r#"
+      (func $mix (result f64) (local i32 i32) (local i64) (local f64 f64)
+        (local.set 1 (i32.const 7))
+        (local.set 2 (i64.const 5))
+        (local.set 4 (f64.const 0.5))
+        (f64.add (local.get 4)
+          (f64.convert_i64_s (i64.add (local.get 2) (i64.extend_i32_u (local.get 1))))))"#;
+    let start = "(if (f64.ne (call $mix) (f64.const 12.5)) (then (unreachable)))";
+    let r = run(&program("", extra, start));
+    assert_eq!((r.exit, r.err.as_str()), (0, ""));
+}
+
+#[test]
+fn a_bad_pointer_handed_to_the_host_traps() {
+    let start = "(drop (call $fd_write (i32.const 1) (i32.const 2) (i32.const 1) (i32.const 8)))";
+    let r = run(&program("", "", start));
+    assert_eq!(r.err, format!("{TRAP}Pointer not aligned to 4\n"));
+    let start = "(drop (call $fd_write (i32.const 1) (i32.const 65532) (i32.const 1) (i32.const 8)))";
+    let r = run(&program("", "", start));
+    assert_eq!(r.err, format!("{TRAP}Pointer out of bounds\n"));
 }
