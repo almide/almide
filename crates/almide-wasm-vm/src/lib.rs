@@ -8,9 +8,11 @@
 
 pub mod error;
 pub mod ir;
+pub mod module;
 pub mod numeric;
 pub mod reader;
 pub mod types;
 pub mod validate;
 
 pub use error::{LoadError, Trap};
+pub use module::{decode, Module};
