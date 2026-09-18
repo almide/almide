@@ -1,0 +1,76 @@
+// @contract: C-066
+// #2317: every shape that produces a fresh value hands its consumer exactly
+// one credit: a constructor with a payload, a nullary constructor (a pool
+// static), a generic constructor, a record / tuple / list literal holding
+// constructor results, a nested build, and an `if` / `match` whose arms mix a
+// fresh value with a borrowed one (a param, a pattern view). Each round
+// builds every shape and drops it with its last reader, so the structural
+// heap stays at one round's worth (the alloc ledger pins the watermark) and
+// the checksum is byte-identical to native. The Slot and the tuple are bound
+// before they are read: a match on a temporary subject and a `let (x, y)`
+// destructure do not release their block yet, a separate consumer-side gap.
+type Tree = | Leaf | Node(Tree, Tree)
+
+type Slot[T] = | Empty | Full(T)
+
+type Pair = { left: Tree, right: Tree }
+
+fn make(depth: Int) -> Tree = if depth == 0 then Leaf else Node(make(depth - 1), make(depth - 1))
+
+fn spine(depth: Int) -> Tree = match depth {
+  0 => Leaf,
+  _ => Node(spine(depth - 1), Leaf),
+}
+
+fn graft(base: Tree, depth: Int) -> Tree = if depth == 0 then base else Node(
+  graft(base, depth - 1),
+  make(1),
+)
+
+fn pick(t: Tree, n: Int) -> Tree = if n % 3 == 0 then t
+else if n % 3 == 1 then Node(t, Leaf)
+else match t {
+  Leaf => Node(Leaf, Leaf),
+  Node(l, _) => l,
+}
+
+fn slot(depth: Int) -> Slot[Tree] = if depth == 0 then Empty else Full(make(depth))
+
+fn pair(depth: Int) -> Pair = Pair { left: make(depth), right: spine(depth) }
+
+fn trio(depth: Int) -> (Tree, Tree) = (make(depth), Leaf)
+
+fn forest(depth: Int) -> List[Tree] = [make(depth), spine(depth), Leaf]
+
+fn size(t: Tree) -> Int = match t {
+  Leaf => 1,
+  Node(l, r) => size(l) + size(r) + 1,
+}
+
+fn round(i: Int) -> Int = {
+  let keep = make(3)
+  let a = make(5)
+  let b = spine(6)
+  let c = graft(keep, 4)
+  let d = pick(keep, i)
+  let s = slot(i % 4)
+  let e = match s {
+    Empty => 0,
+    Full(t) => size(t),
+  }
+  let p = pair(3)
+  let q = trio(3)
+  let f = forest(2)
+  let g = Node(Node(Leaf, make(2)), Leaf)
+  size(a) + size(b) + size(c) + size(d) + e + size(p.left) + size(p.right) + size(q.0) + size(q.1) + list.len(f) + size(g)
+}
+
+fn main() -> Unit = {
+  var total = 0
+  var i = 0
+  while i < 300 {
+    total = total + round(i)
+    i = i + 1
+  }
+  println("${total}")
+}
