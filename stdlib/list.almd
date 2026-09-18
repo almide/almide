@@ -251,125 +251,204 @@ fn bundled_probe(n: Int) -> Int = n + 1
 // Demonstrates bundled-Almide calling existing stdlib fns.
 fn split_at[T](xs: List[T], n: Int) -> (List[T], List[T]) = (list.take(xs, n), list.drop(xs, n))
 
-// Build [seed, f(seed), f(f(seed)), ...] of length `n`.
-// Pure-Almide recursion using the bundled-dispatch path end-to-end.
-fn iterate[T](seed: T, f: (T) -> T, n: Int) -> List[T] = if n <= 0 then []
-else [seed] + iterate(f(seed), f, n - 1)
-
-// ── the try_* family (#1041): effectful pipelines keep the combinator shape ──
+// Build [seed, f(seed), f(f(seed)), ...] of length `n`. `f` runs exactly `n`
+// times: the last result is computed and dropped, as the recursive form did.
 //
-// Each try_<core> takes the SAME callback as its core, lifted to
-// `-> Result[_, E]`, and short-circuits on the FIRST err — so a body that
-// calls effect fns yields `Result[List[B], E]` instead of `List[Result[B, E]]`
-// and the writer never falls back to `var + for`. Pure-Almide SELF-recursion
-// over `list.get`/`list.drop` (the `iterate` bundled-dispatch precedent — a
-// sibling `__` helper would not monomorphize from a bundled body today);
-// elements after the first err are NEVER evaluated (the short-circuit is
-// observable). Cost is the bundled-recursion norm (`iterate`'s O(n²) copy
-// shape) — fine at tool scale, self-host later if a hot path appears.
+// A loop, not recursion (#2306): `[seed] + iterate(f(seed), f, n - 1)` was one
+// frame per element on both targets (a stack overflow at about 10,000 elements
+// on wasm and 50,000 natively) and copied the tail at every level. The result
+// grows with `list.push`, the one append that is in place for every element
+// type on every leg: `acc + [x]` copies the whole list per step for a heap
+// element on the structural wasm leg.
+fn iterate[T](seed: T, f: (T) -> T, n: Int) -> List[T] = {
+  var out: List[T] = []
+  var x = seed
+  for _ in 0..<n {
+    list.push(out, x)
+    x = f(x)
+  }
+  out
+}
+
+// ── the fallible carriers (ADR-0006 D3) ──
 //
-// INTERNAL CARRIERS (ADR-0006 D3, v0.56.0): the public try_ family is
-// REMOVED — the core HOF is fallibility-polymorphic and the checker routes a
-// fallible callback to these __-prefixed bodies (`list.map(xs, (x) => f(x)!)`
-// runs `__fallible_map(xs, stripped-callback)`). Deliberate omissions unchanged:
-// `any` / `all` / `count` (an erring predicate query is the find-form's
-// domain) and `sort_by` (an erring key extractor has no partial order).
-// The gate tests/list_try_family_gate_test.rs asserts the surface is EMPTY
-// and the seven carriers exist.
-fn __fallible_map[A, B, E](xs: List[A], f: (A) -> Result[B, E]) -> Result[List[B], E] = match list.get(
-  xs,
-  0,
-) {
-  none => ok([]),
-  some(x) => match f(x) {
-    ok(b) => match __fallible_map(list.drop(xs, 1), f) {
-      ok(rest) => ok([b] + rest),
-      err(e) => err(e),
-    },
-    err(e) => err(e),
-  },
+// INTERNAL CARRIERS (v0.56.0): the public try_ family (#1041) is REMOVED —
+// the core HOF is fallibility-polymorphic and the checker routes a fallible
+// callback to these __-prefixed bodies (`list.map(xs, (x) => f(x)!)` runs
+// `__fallible_map(xs, stripped-callback)`). Each short-circuits on the FIRST
+// err: no element after it reaches the callback (the short-circuit is
+// observable). Deliberate omissions: `any` / `all` / `count` (an erring
+// predicate query is the find-form's domain) and `sort_by` (an erring key
+// extractor has no partial order). The gate tests/list_try_family_gate_test.rs
+// asserts the public surface is EMPTY and the seven carriers exist.
+//
+// SHAPE (#2291 sweep): one loop per carrier — constant stack, linear time, on
+// every leg. The earlier bodies recursed over `list.drop(xs, 1)`: one frame per
+// element (the four list-building carriers were not even tail calls, so
+// `list.map(xs, (x) => f(x)!)` overflowed at about 10,000 elements on wasm and
+// 50,000 natively) plus an O(n) copy per element. The loop carries a `stop`
+// flag instead of `break`, which the structural wasm leg does not lower yet;
+// after the first err the remaining iterations only test the flag. Results
+// grow with `list.push` (see `iterate` for why not `acc + [x]`).
+fn __fallible_map[A, B, E](xs: List[A], f: (A) -> Result[B, E]) -> Result[List[B], E] = {
+  var out: List[B] = []
+  var failed: E? = none
+  var stop = false
+  for x in xs {
+    if stop then ()
+    else match f(x) {
+      ok(b) => list.push(out, b),
+      err(e) => {
+        failed = some(e)
+        stop = true
+      },
+    }
+  }
+  match failed {
+    some(e) => err(e),
+    none => ok(out),
+  }
 }
 
-fn __fallible_filter[A, E](xs: List[A], f: (A) -> Result[Bool, E]) -> Result[List[A], E] = match list.get(
-  xs,
-  0,
-) {
-  none => ok([]),
-  some(x) => match f(x) {
-    ok(keep) => match __fallible_filter(list.drop(xs, 1), f) {
-      ok(rest) => ok(if keep then [x] + rest
-      else rest),
-      err(e) => err(e),
-    },
-    err(e) => err(e),
-  },
+fn __fallible_filter[A, E](xs: List[A], f: (A) -> Result[Bool, E]) -> Result[List[A], E] = {
+  var out: List[A] = []
+  var failed: E? = none
+  var stop = false
+  for x in xs {
+    if stop then ()
+    else match f(x) {
+      ok(keep) => if keep then list.push(out, x) else (),
+      err(e) => {
+        failed = some(e)
+        stop = true
+      },
+    }
+  }
+  match failed {
+    some(e) => err(e),
+    none => ok(out),
+  }
 }
 
-fn __fallible_flat_map[A, B, E](xs: List[A], f: (A) -> Result[List[B], E]) -> Result[List[B], E] = match list.get(
-  xs,
-  0,
-) {
-  none => ok([]),
-  some(x) => match f(x) {
-    ok(bs) => match __fallible_flat_map(list.drop(xs, 1), f) {
-      ok(rest) => ok(bs + rest),
-      err(e) => err(e),
-    },
-    err(e) => err(e),
-  },
+fn __fallible_flat_map[A, B, E](xs: List[A], f: (A) -> Result[List[B], E]) -> Result[List[B], E] = {
+  var out: List[B] = []
+  var failed: E? = none
+  var stop = false
+  for x in xs {
+    if stop then ()
+    else match f(x) {
+      ok(bs) => for b in bs {
+        list.push(out, b)
+      },
+      err(e) => {
+        failed = some(e)
+        stop = true
+      },
+    }
+  }
+  match failed {
+    some(e) => err(e),
+    none => ok(out),
+  }
 }
 
-fn __fallible_filter_map[A, B, E](xs: List[A], f: (A) -> Result[B?, E]) -> Result[List[B], E] = match list.get(
-  xs,
-  0,
-) {
-  none => ok([]),
-  some(x) => match f(x) {
-    ok(kept) => match __fallible_filter_map(list.drop(xs, 1), f) {
-      ok(rest) => ok(match kept {
-        some(b) => [b] + rest,
-        none => rest,
-      }),
-      err(e) => err(e),
-    },
-    err(e) => err(e),
-  },
+fn __fallible_filter_map[A, B, E](xs: List[A], f: (A) -> Result[B?, E]) -> Result[List[B], E] = {
+  var out: List[B] = []
+  var failed: E? = none
+  var stop = false
+  for x in xs {
+    if stop then ()
+    else match f(x) {
+      ok(kept) => match kept {
+        some(b) => list.push(out, b),
+        none => (),
+      },
+      err(e) => {
+        failed = some(e)
+        stop = true
+      },
+    }
+  }
+  match failed {
+    some(e) => err(e),
+    none => ok(out),
+  }
 }
 
-fn __fallible_fold[A, B, E](xs: List[A], init: B, f: (B, A) -> Result[B, E]) -> Result[B, E] = match list.get(
-  xs,
-  0,
-) {
-  none => ok(init),
-  some(x) => match f(init, x) {
-    ok(b) => __fallible_fold(list.drop(xs, 1), b, f),
-    err(e) => err(e),
-  },
+fn __fallible_fold[A, B, E](xs: List[A], init: B, f: (B, A) -> Result[B, E]) -> Result[B, E] = {
+  var acc = init
+  var failed: E? = none
+  var stop = false
+  for x in xs {
+    if stop then ()
+    else match f(acc, x) {
+      ok(b) => {
+        acc = b
+      },
+      err(e) => {
+        failed = some(e)
+        stop = true
+      },
+    }
+  }
+  match failed {
+    some(e) => err(e),
+    none => ok(acc),
+  }
 }
 
 // The first element the (erring) predicate ACCEPTS, `none` when no element
 // matches — or the first err. `__fallible_find(xs, p)` also answers the any/all/
 // count shapes, which is why those have no try_ twins.
-fn __fallible_find[A, E](xs: List[A], f: (A) -> Result[Bool, E]) -> Result[A?, E] = match list.get(
-  xs,
-  0,
-) {
-  none => ok(none),
-  some(x) => match f(x) {
-    ok(true) => ok(some(x)),
-    ok(false) => __fallible_find(list.drop(xs, 1), f),
-    err(e) => err(e),
-  },
+//
+// The hit is kept as an INDEX and read back with `list.get` (`none` for the
+// one-past-the-end start value when nothing matched), and the result is rebuilt as
+// `ok(some(v))` / `ok(none)`. The incumbent wasm leg walls on the shorter spellings:
+// storing the loop variable into an `A?` var, and `ok(read)` over a deferred Option.
+fn __fallible_find[A, E](xs: List[A], f: (A) -> Result[Bool, E]) -> Result[A?, E] = {
+  var hit_at = list.len(xs)
+  var i = 0
+  var failed: E? = none
+  var stop = false
+  for x in xs {
+    if stop then ()
+    else match f(x) {
+      ok(hit) => if hit then {
+        hit_at = i
+        stop = true
+      } else (),
+      err(e) => {
+        failed = some(e)
+        stop = true
+      },
+    }
+    i = i + 1
+  }
+  match failed {
+    some(e) => err(e),
+    none => match list.get(xs, hit_at) {
+      some(v) => ok(some(v)),
+      none => ok(none),
+    },
+  }
 }
 
 // Run an effectful step per element for its effect, stopping at the first err.
-fn __fallible_each[A, E](xs: List[A], f: (A) -> Result[Unit, E]) -> Result[Unit, E] = match list.get(
-  xs,
-  0,
-) {
-  none => ok(()),
-  some(x) => match f(x) {
-    ok(_) => __fallible_each(list.drop(xs, 1), f),
-    err(e) => err(e),
-  },
+fn __fallible_each[A, E](xs: List[A], f: (A) -> Result[Unit, E]) -> Result[Unit, E] = {
+  var failed: E? = none
+  var stop = false
+  for x in xs {
+    if stop then ()
+    else match f(x) {
+      ok(_) => (),
+      err(e) => {
+        failed = some(e)
+        stop = true
+      },
+    }
+  }
+  match failed {
+    some(e) => err(e),
+    none => ok(()),
+  }
 }

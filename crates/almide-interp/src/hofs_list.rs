@@ -407,8 +407,8 @@ impl<'a> Interpreter<'a> {
 /// one block makes the shared shape checkable by eye: unwrap the callback's
 /// `Result`, return its `err` verbatim on the first failure (so the error the
 /// caller sees is the callback's own, NOT a wrapper), and `ok`-wrap on a full
-/// pass. `stdlib/list.almd` is the specification; the recursion there and the
-/// loop here agree because both stop at the first `err`.
+/// pass. `stdlib/list.almd` is the specification; its loops and the loops here
+/// agree because both stop calling the callback at the first `err`.
 impl<'a> Interpreter<'a> {
     /// Apply `clo` and split the callback's `Result`: `Ok(payload)` continues,
     /// `Err(e)` becomes the whole call's `err` (returned through the outer
