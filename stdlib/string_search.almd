@@ -51,14 +51,16 @@ fn string_contains(s: String, needle: String) -> Bool = {
 }
 
 // Count codepoints (UTF-8 start bytes, i.e. bytes whose top bits are NOT 10xxxxxx) in the
-// first `n` bytes from `base` — the same decode `string.len` uses.
-fn __cp_count(base: Int, n: Int) -> Int = if n <= 0 then 0
+// first `n` bytes from `base`, added to `acc` — the same decode `string.len` uses. The
+// running count rides the call so the self-call is a tail call: constant stack at any
+// offset. The `step + rest` form it replaced took one frame per byte of the prefix and
+// trapped `call stack exhausted` on wasm past ~16 KB (#2291).
+fn __cp_count(base: Int, n: Int, acc: Int) -> Int = if n <= 0 then acc
 else {
   let b = prim.load8(base)
   let step = if b / 64 == 2 then 0 else 1
   // 64..=127 region 2 == continuation byte
-  let rest = __cp_count(base + 1, n - 1)
-  step + rest
+  __cp_count(base + 1, n - 1, acc + step)
 }
 
 // Count NON-OVERLAPPING needle matches from `pos`, skipping past each match (v0 semantics:
@@ -76,7 +78,7 @@ fn string_count(s: String, needle: String) -> Int = {
   let slen = prim.load32(hs + 4)
   let nlen = prim.load32(hn + 4)
   if nlen <= 0 then {
-    let c = __cp_count(hs + 12, slen)
+    let c = __cp_count(hs + 12, slen, 0)
     // empty needle matches at each char boundary
     c + 1
   } else __count_scan(hs + 12, slen, hn + 12, nlen, 0, 0)
@@ -97,7 +99,7 @@ else {
 fn __io_none() -> Int? = none
 
 fn __io_at(base: Int, bpos: Int) -> Int? = {
-  let cp = __cp_count(base, bpos)
+  let cp = __cp_count(base, bpos, 0)
   some(cp)
 }
 
