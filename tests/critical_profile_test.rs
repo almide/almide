@@ -112,3 +112,47 @@ fn attribute_mode_unchanged_by_the_profile_machinery() {
         .join("crates/almide-frontend/src/check/bounded.rs")
         .exists());
 }
+
+/// The profile walk reaches every expression kind (#2296). Its container
+/// recursion once ended in a wildcard, so a violation nested in any kind it
+/// did not list was never seen: a `while` loop inside a pipe stage, an
+/// `ok(..)` / `some(..)` / `err(..)` payload, a tuple index, an `if let`, a
+/// spread record, an optional chain or a type-ascribed call argument, a Float
+/// operation inside an interpolation hole, and a function composition all
+/// passed `--profile critical` clean. Each program here is valid under the
+/// normal check (the subset witness) and must be rejected with its code.
+#[test]
+fn a_violation_is_seen_through_every_expression_kind() {
+    const LOOP: &str = "{\n    var i = 0\n    while i < n { i = i + 1 }\n    i\n  }";
+    let cases: Vec<(&str, String, &str)> = vec![
+        ("pipe stage", format!("fn f(n: Int) -> Int = n |> ((m) => m + {LOOP})\n\nfn main() -> Unit = println(int.to_string(f(3)))\n"), "E070"),
+        ("function composition", "fn double(x: Int) -> Int = x * 2\n\nfn f(n: Int) -> Int = {\n  let g = double >> double\n  n\n}\n\nfn main() -> Unit = println(int.to_string(f(3)))\n".to_string(), "E074"),
+        ("spread record", format!("type P = {{ x: Int, y: Int }}\n\nfn f(p: P, n: Int) -> P = {{ ...p, x: {LOOP} }}\n\nfn main() -> Unit = println(int.to_string(f({{ x: 1, y: 2 }}, 3).x))\n"), "E070"),
+        ("tuple index", "fn f(n: Int) -> Int = ({\n    var i = 0\n    while i < n { i = i + 1 }\n    (i, 0)\n  }).0\n\nfn main() -> Unit = println(int.to_string(f(3)))\n".to_string(), "E070"),
+        ("if let", format!("fn f(o: Int?, n: Int) -> Int = if let v = o {{ v + {LOOP} }} else {{ 0 }}\n\nfn main() -> Unit = println(int.to_string(f(some(1), 3)))\n"), "E070"),
+        ("optional chain", format!("type P = {{ x: Int, y: Int }}\n\nfn f(n: Int) -> Int? = (some({{ x: {LOOP}, y: 0 }}))?.x\n\nfn main() -> Unit = println(int.to_string(f(3) ?? 0))\n"), "E070"),
+        ("some payload", format!("fn f(n: Int) -> Int? = some({LOOP})\n\nfn main() -> Unit = println(int.to_string(f(3) ?? 0))\n"), "E070"),
+        ("ok payload", format!("fn f(n: Int) -> Result[Int, String] = ok({LOOP})\n\nfn main() -> Unit = println(int.to_string(f(3) ?? 0))\n"), "E070"),
+        ("err payload", format!("fn f(n: Int) -> Result[Int, Int] = err({LOOP})\n\nfn main() -> Unit = println(int.to_string(f(3) ?? 0))\n"), "E070"),
+        ("type-ascribed argument", format!("fn f(n: Int) -> String = int.to_string({LOOP}: Int)\n\nfn main() -> Unit = println(f(3))\n"), "E070"),
+        ("interpolation hole", "fn f(x: Float) -> String = \"${x * 2.0}\"\n\nfn main() -> Unit = println(f(1.5))\n".to_string(), "E077"),
+    ];
+    for (i, (kind, src, code)) in cases.iter().enumerate() {
+        let name = format!("kind{i}.almd");
+        let (normal, err) = check(src, &name, &[]);
+        assert!(normal, "{kind}: the normal check must accept the program (subset witness):\n{err}");
+        let (crit, err) = check(src, &name, &["--profile", "critical"]);
+        assert!(!crit, "{kind}: --profile critical accepted a violation nested in it");
+        assert!(err.contains(code), "{kind}: expected {code}, got:\n{err}");
+    }
+}
+
+/// A pipe is judged as the call it lowers to, including through a trailing
+/// `??` on the stage (ADR-0005): a first-order pure stdlib stage stays
+/// admissible, and so does the rest of the chain.
+#[test]
+fn a_pipe_into_a_first_order_stdlib_member_stays_admissible() {
+    let src = "fn head(xs: List[String]) -> String = xs |> list.first ?? \"none\"\n\nfn main() -> Unit = println(head([\"a\"]))\n";
+    let (crit, err) = check(src, "pipe_first.almd", &["--profile", "critical"]);
+    assert!(crit, "critical rejected a first-order pipe stage:\n{err}");
+}
