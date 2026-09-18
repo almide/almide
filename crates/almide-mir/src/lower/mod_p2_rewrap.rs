@@ -57,7 +57,7 @@ pub fn rewrap_never_err_into_result_targets(
         fn is_raw_never_err_call(&self, e: &IrExpr) -> bool {
             !matches!(&e.ty, Ty::Applied(TypeConstructorId::Result, _))
                 && matches!(&e.kind, IrExprKind::Call { target: CallTarget::Named { name }, .. }
-                    if self.lifted.contains(name.as_str()) && !self.can_err.contains(name.as_str()))
+                    if is_raw_never_err_callee(name.as_str(), self.can_err, self.lifted))
         }
         fn wrap(&self, e: &mut IrExpr, result_ty: Ty) {
             let inner = std::mem::replace(
