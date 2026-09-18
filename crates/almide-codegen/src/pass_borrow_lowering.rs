@@ -217,6 +217,22 @@ impl Lower<'_> {
             expr.kind = std::mem::replace(&mut inner.kind, IrExprKind::Unit);
             return;
         }
+        // `&g` of a closure VALUE (an `Rc<dyn Fn>` handle: a local, a field, a
+        // stored callable) at a borrowed fn slot (#2288) is `&Rc<dyn Fn>`,
+        // which does not coerce to `&dyn Fn`: `&*g` reaches the callable
+        // through the handle. A lambda literal and a fn item borrow as they
+        // are (`&|x| …`, `&dbl` — both coerce to `&dyn Fn`), and a
+        // by-reference fn param already IS the reference (handled above).
+        if !as_str && !mutable
+            && matches!(inner.ty, Ty::Fn { .. })
+            && !matches!(inner.kind, IrExprKind::Lambda { .. } | IrExprKind::FnRef { .. } | IrExprKind::Deref { .. } | IrExprKind::Block { .. })
+        {
+            let value = std::mem::replace(inner.as_mut(), mk(IrExprKind::Unit, Ty::Unit, None));
+            let ty = value.ty.clone();
+            let span = value.span;
+            *inner.as_mut() = mk(IrExprKind::Deref { expr: Box::new(value) }, ty, span);
+            return;
+        }
         // `&c` of a loop binder bound `&String` off `xs.iter()` (#1673) is
         // `&&String`. A concrete `&String` slot deref-coerces it, but the
         // generic key slot of `map.get` / `map.contains` (`K: Borrow<Q>`)
@@ -316,6 +332,17 @@ impl Lower<'_> {
         {
             let receiver = std::mem::replace(inner.as_mut(), mk(IrExprKind::Unit, Ty::Unit, None));
             *expr = owned_read(receiver);
+            return;
+        }
+        // A borrowed callable (`f: &dyn Fn`, #2288) is cloned by the clone
+        // pass's always-clone rule for `Ty::Fn` (an `Rc` handle's refcount
+        // bump); the reference itself is what every call reads — no clone.
+        if let Some(id) = var_id(inner)
+            && is_ref_param(self.params, id)
+            && matches!(inner.ty, Ty::Fn { .. })
+        {
+            let value = std::mem::replace(inner.as_mut(), mk(IrExprKind::Unit, Ty::Unit, None));
+            *expr = value;
         }
     }
 

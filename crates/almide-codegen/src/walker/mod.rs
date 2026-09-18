@@ -219,6 +219,11 @@ fn render_fn_params_str(fn_ctx: &RenderContext, func: &IrFunction) -> String {
             }
             let type_s = match p.borrow {
                 ParamBorrow::Own => render_type_fn(fn_ctx, &p.ty),
+                // A fn-typed param the body only calls is a borrowed callable
+                // (#2288): `&dyn Fn(A) -> B`, no handle, no refcount.
+                ParamBorrow::Ref if matches!(p.ty, almide_lang::types::Ty::Fn { .. }) => {
+                    format!("&{}", helpers::render_type_dyn_fn(fn_ctx, &p.ty))
+                }
                 ParamBorrow::Ref => format!("&{}", render_type_fn(fn_ctx, &p.ty)),
                 ParamBorrow::RefMut => format!("&mut {}", render_type_fn(fn_ctx, &p.ty)),
                 ParamBorrow::RefStr => "&str".to_string(),
