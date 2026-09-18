@@ -399,11 +399,30 @@ per element inside the chain and never escapes it. A param it only reads stays
 without `move` and without a capture bind, borrowing what it reads for the
 chain's duration. A read that consumes inside the step (returning `t` per
 element) is cloned there whether or not the param is owned, so it earns the
-param nothing. Only a closure that outlives its call — returned, stored, handed
-to a user fn's `(T) -> U` slot, or a fallible `!` form's `Rc<dyn Fn>` twin —
+param nothing. Only a closure that outlives its call — returned, stored,
+captured by another closure, or handed to a slot whose callee keeps it —
 captures, and captures own (Lean, Koka and Roc make the same distinction: a
 closure that exists owns what it holds; the win comes from erasing the closure
 before ownership is decided).
+
+**A fn-typed param is borrowed unless its callable escapes** (#2288). A user
+higher-order fn's `f: (A) -> B` param is `&dyn Fn(A) -> B` when every
+occurrence only CALLS it, borrows it, or hands it to another fn's borrowed fn
+slot (the same fixed point that decides `&T`, optimistic for a pending or
+self-recursive callee); it is the `Rc<dyn Fn>` handle when an occurrence lets
+the callable outlive the call — returned, bound to a local, built into a
+record / list, captured by a closure, handed to an owned slot (a runtime twin
+such as `list.map`'s unfused form, a stored chain callback). A lambda literal
+at a borrowed slot is then a scope like a chain step: `apply(xs, &|x| x * k)`
+— no `Rc::new`, no `move`, no capture bind, and a param it reads stays
+borrowed; a closure VALUE at that slot is lent through its handle (`&*g`); a
+tail-recursive fn carries the borrowed callable through its loop like a
+`&Vec<u8>`. This is the borrowed capture record the closure-free reference
+passes as an ordinary argument, without lambda sets: the fn-typed param IS the
+ABI, and the escape verdict decides which of its two forms a body needs. The
+ownership certifier's C5 re-reads the verdict on the final IR (a `&dyn Fn`
+param that escapes; a boxed closure at a borrowed slot), and
+`ALMIDE_FN_ESCAPE_OFF=1` is its negative control.
 
 Handing the param bare to a callee's owned slot (`stored(t, 1)` where `stored`
 keeps `t` in a record) makes the param owned only when that site is the
