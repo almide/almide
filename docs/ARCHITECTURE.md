@@ -63,7 +63,11 @@ and serves as the cross-target oracle / executable spec.
     on the full wasm_cross corpus. `almide run` executes on the embedded
     `almide-wasm-run` host (fs/env/stdin included); `almide build` ships the
     `to_wasi` form, which runs on STOCK runtimes (`wasmtime run mod.wasm` —
-    the 578-fixture stock-runtime gate is the witness).
+    the 578-fixture stock-runtime gate is the witness). The same artifact
+    runs on `almide-wasm-vm`, the qualification-scoped interpreter (#865)
+    whose instruction set is pinned to this emitter's;
+    `tests/wasm_vm_parity_test.rs` holds it equal to the stock runtime on
+    every fixture and to native on every Critical-profile one.
   - the **incumbent WAT trust-spine**: `almide-mir` renders WAT, the CLI
     assembles it with `wat` and strips local names. Routed for main-less
     library modules (#881), dependency-package and `import self` projects
