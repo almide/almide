@@ -60,7 +60,9 @@ pub(crate) struct Emitter<'a> {
     /// here as they complete; `rc_owned_result` looks the bound / passed
     /// / returned expression's tail call up by that identity — exact
     /// through any `{ let t = …; op(t) }` wrapping (arg_temps.rs) and any
-    /// nesting, where a completion-order stamp was not.
+    /// nesting, where a completion-order stamp was not. A value-position
+    /// `if` whose arms `lower_if_arms` normalized to one credit each is
+    /// marked here too, by its own `IrExpr` node (#2317).
     pub(crate) owned_call_marks: std::collections::HashSet<usize>,
     /// Temporaries the arms of the module call being lowered BORROWED
     /// (`lower_arg`, arm.rs): released by the enclosing `arm_scope`. Each
@@ -669,24 +671,15 @@ impl Emitter<'_> {
             // Value-position `if`: the arm type comes from the hint or is
             // inferred WITHOUT emitting (wasm wants the block type up
             // front), then both arms are lowered against it.
-            IrExprKind::If { cond, then, else_ } => {
+            // Both arms are lowered against it by `lower_if_arms`, which
+            // also gives each arm the same credit count (#2317).
+            IrExprKind::If { cond, .. } => {
                 self.lower(cond, Some(BOOL))?;
                 let ty = match want {
                     Some(w) => w,
                     None => self.infer(e)?,
                 };
-                self.f.instructions().if_(BlockType::Result(ty.val_type()));
-                self.branch_depth += 1;
-                let arms = (|| {
-                    self.in_tail = tail;
-                    self.lower(then, Some(ty))?;
-                    self.f.instructions().else_();
-                    self.in_tail = tail;
-                    self.lower(else_, Some(ty))
-                })();
-                self.branch_depth -= 1;
-                arms?;
-                self.f.instructions().end();
+                self.lower_if_arms(e, ty, tail)?;
                 ty
             }
             IrExprKind::Match { subject, arms } => {

@@ -426,9 +426,10 @@ impl Emitter<'_> {
     /// any other droppable tail takes the ret-inc), so the caller's bind,
     /// assign and return routes must NOT add another — the +1 they took
     /// for a "borrowed" rhs left every returned List/Str/Bytes at rc 1
-    /// forever (64 B per call, measured N=1000 vs N=8000). Ctors and
-    /// module helpers keep the conservative +1 (a leak is never a
-    /// dangle); helper-by-helper conventions are the follow-up.
+    /// forever (64 B per call, measured N=1000 vs N=8000). A variant
+    /// constructor is owned too (#2317); a module helper keeps the
+    /// conservative +1 unless its arm declares an owned result (a leak is
+    /// never a dangle).
     /// The frame's droppable PARAM this expression is, when it is a plain
     /// read of one (`b` in `__arr(b, …)`): its local index.
     pub(crate) fn frame_param_var(&self, e: &almide_ir::IrExpr) -> Option<u32> {
@@ -448,11 +449,14 @@ impl Emitter<'_> {
         }
         // A conditional is owned when EVERY arm's value is: the return
         // route then takes no +1 (an `if i >= 0 then int.to_string(i)
-        // else "neg"` tail leaked its result on every call, #2005). One
-        // borrowed arm makes the whole value borrowed — the per-arm
-        // identity is #1996.
+        // else "neg"` tail leaked its result on every call, #2005). Arms
+        // that disagree are normalized by `lower_if_arms` — the borrowed
+        // arm takes its +1 inside, so each arm hands the join one credit —
+        // and the lowering marks the node (#2317). An unmarked `if` with a
+        // borrowed arm stays borrowed.
         if let almide_ir::IrExprKind::If { then, else_, .. } = &e.kind {
-            return self.rc_owned_result(then) && self.rc_owned_result(else_);
+            return (self.rc_owned_result(then) && self.rc_owned_result(else_))
+                || self.owned_call_marks.contains(&(e as *const almide_ir::IrExpr as usize));
         }
         if let almide_ir::IrExprKind::Match { arms, .. } = &e.kind {
             // lower_arm_body normalizes every value arm to one credit.
@@ -481,8 +485,13 @@ impl Emitter<'_> {
             }
             _ => return false,
         };
-        if self.types.ctors.contains_key(name) {
-            return false;
+        // A variant constructor is OWNED (#2317): a case with a payload is
+        // a fresh block at rc 1 (`lower_variant_ctor`), a nullary case is a
+        // pool static the rc ops no-op on. Classed borrowed, it took the
+        // conservative +1 on every route — `if d == 0 then Leaf else
+        // Node(…)` returned two credits and no tree node was ever freed.
+        if self.is_variant_ctor(name, e) {
+            return true;
         }
         self.cur_module
             .and_then(|m| self.table.by_name.get(&format!("{m}.{name}")))
@@ -490,6 +499,76 @@ impl Emitter<'_> {
             .is_some()
             || self.resolve_qualified(name).is_some()
             || self.resolve_method_suffix(name).is_some()
+    }
+
+    /// Does the Named call `name` build a variant case? The same two routes
+    /// `lower_call_at` takes: the concrete ctor map, then a generic
+    /// instance's case looked up in the call's own annotated type.
+    fn is_variant_ctor(&self, name: &str, e: &almide_ir::IrExpr) -> bool {
+        self.types.ctors.contains_key(name)
+            || matches!(slice_ty_of(&e.ty, self.types), Some(SliceTy::Named(ti))
+                if matches!(self.types.def(ti), crate::types_table::NamedDef::Variant(v)
+                    if v.cases.iter().any(|c| c.name == name)))
+    }
+
+    /// `rc_owned_result` as a value-position `if` can know it BEFORE the
+    /// arm is lowered: a nested `if` by its own normalization rule (either
+    /// arm owned), a block by its tail. A module call is owned only once
+    /// its lowering marks it, so it predicts borrowed — never owned where
+    /// the lowering will not agree.
+    fn rc_predict_owned(&self, e: &almide_ir::IrExpr) -> bool {
+        match &e.kind {
+            IrExprKind::If { then, else_, .. } => self.rc_predict_owned(then) || self.rc_predict_owned(else_),
+            IrExprKind::Block { expr: Some(t), .. } => self.rc_predict_owned(t),
+            _ => self.rc_owned_result(e),
+        }
+    }
+
+    /// The arms of a value-position `if` of type `ty` (#2317). When the
+    /// value is droppable and an arm is owned — a fresh construction, an
+    /// owned call result — every arm hands the join exactly ONE credit: a
+    /// borrowed arm (a Var, a field read) takes its +1 inside, and the node
+    /// is marked owned so no route adds another. Before, `if d == 0 then
+    /// Leaf else x` was borrowed as a whole and the consumer's +1 gave the
+    /// fresh arm two credits — the `match` arms have had this rule since
+    /// #2046. Two borrowed arms stay borrowed and pay nothing.
+    ///
+    /// The `then` arm decides from a PREDICTION of `else_` (it is lowered
+    /// first); the `else_` arm from what `then` actually was. The one shape
+    /// left over — a borrowed `then` beside an `else_` owned only by a
+    /// module call's mark — stays borrowed: a leak, never a dangle.
+    pub(crate) fn lower_if_arms(
+        &mut self,
+        e: &almide_ir::IrExpr,
+        ty: SliceTy,
+        tail: bool,
+    ) -> Result<(), EmitError> {
+        let IrExprKind::If { then, else_, .. } = &e.kind else { return unsup("if-arms") };
+        let normalize = self.rc_droppable(ty) && (self.rc_predict_owned(then) || self.rc_predict_owned(else_));
+        self.f.instructions().if_(wasm_encoder::BlockType::Result(ty.val_type()));
+        self.branch_depth += 1;
+        let arms = (|| {
+            self.in_tail = tail;
+            self.lower(then, Some(ty))?;
+            let then_owned = self.rc_owned_result(then);
+            if normalize && !then_owned {
+                self.rc_inc_top();
+            }
+            self.f.instructions().else_();
+            self.in_tail = tail;
+            self.lower(else_, Some(ty))?;
+            let join = normalize || (then_owned && self.rc_droppable(ty));
+            if join && !self.rc_owned_result(else_) {
+                self.rc_inc_top();
+            }
+            Ok(join)
+        })();
+        self.branch_depth -= 1;
+        if arms? {
+            self.owned_call_marks.insert(e as *const almide_ir::IrExpr as usize);
+        }
+        self.f.instructions().end();
+        Ok(())
     }
 
     pub(crate) fn rc_arg_guard(&mut self, e: &almide_ir::IrExpr, ty: SliceTy) {
