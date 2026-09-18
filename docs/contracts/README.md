@@ -52,7 +52,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-014 | Set is insertion-ordered and deterministic | 0.24.0 | active | fixture | 3 |
 | C-015 | Structural deep equality for compound elements and heap values | 0.24.0 | active | fixture | 7 |
 | C-016 | UTF-8 codepoint-aware string ops are byte-identical | 0.24.0 | active | fixture | 2 |
-| C-017 | Empty-pattern count / last_index_of follow native codepoint/byte semantics | 0.24.0 | active | fixture | 1 |
+| C-017 | Empty-pattern count / last_index_of follow native codepoint/byte semantics | 0.24.0 | active | fixture | 2 |
 | C-018 | Unicode string predicates match Rust char methods over the full domain | 0.24.0 | active | fixture | 1 |
 | C-019 | rt_string_extra ops (replace_first, strip_*, predicates, cmp) match native | 0.24.0 | active | fixture | 2 |
 | C-020 | Unicode case transforms (to_upper/to_lower/capitalize) are full-Unicode | 0.24.0 | active | fixture | 1 |
@@ -100,7 +100,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-062 | The RawPtr / linear-memory bridge moves bytes byte-identically on both targets | 0.26.15 | active | fixture | 1 |
 | C-063 | Parsing a heterogeneous-nested glTF/JSON document and walking its arrays by element is byte-identical on both targets | 0.26.19 | active | fixture | 1 |
 | C-064 | The effect-fn Result auto-unwrap rule is identical across binding positions and type-directed, byte-identical on both targets | 0.26.20 | active | fixture | 2 |
-| C-065 | The string position API is codepoint-indexed end-to-end on both targets | 0.26.20 | active | fixture | 2 |
+| C-065 | The string position API is codepoint-indexed end-to-end on both targets | 0.26.20 | active | fixture | 3 |
 | C-066 | WASM heap is reclaimed by default (true Perceus) | 0.27.0 | active | fixture | 8 |
 | C-067 | The xs[i] index syntax aborts on out-of-bounds (read and write) | 0.27.4 | active | fixture | 4 |
 | C-068 | Auto-? is target-directed in construction positions | 0.27.4 | active | fixture | 2 |
@@ -319,7 +319,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-281 | Bare Result constructors and parameter-passthrough effect tails run identically per the kernel semantics | 0.57.1 | active | fixture | 2 |
 | C-282 | A matrix index out of range aborts identically on both targets; the row reductions answer their identity instead | 0.57.1 | active | fixture | 1 |
 | C-283 | A call through a Fn-typed local resolves that local, never a same-named top-level fn | 0.57.1 | active | fixture | 1 |
-| C-284 | A fallible list HOF driven by a user effect fn callback runs identically on both targets | 0.57.1 | active | fixture | 2 |
+| C-284 | A fallible list HOF driven by a user effect fn callback runs identically on both targets | 0.57.1 | active | fixture | 3 |
 | C-285 | regex.captures answers the whole match at index 0, and `none` means only that nothing matched | 0.57.1 | active | fixture | 1 |
 | C-286 | `??` reads its source; the Option survives the elimination and stays readable | 0.57.1 | active | fixture | 1 |
 | C-287 | A tail-position heap-result if/match with a none arm executes the taken arm for record and list payloads | 0.57.1 | active | fixture | 1 |
