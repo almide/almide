@@ -41,11 +41,12 @@ spectralnorm 1.001
 # there — and the rule for these rows is not the ±band: ratio < 1.0 (the
 # claim), ceiling = min(1.0, baseline + budget), no floor, and the
 # ablation delta below must stay above the script's VICTORY_ABLATION_FLOOR.
-# treealloc's runner number is set equal to binarytrees' (same shape, same
-# window, same allocator story) until the first runner measurement
-# replaces it.
+# treealloc's row is the runner's own (#2300): the median of the five green
+# develop perf-ratchet runs 35244029431, 35307792592, 35316137451,
+# 35326679898 and 35337468496 (2026-09-17/18) read 0.315 / 0.328 / 0.343 /
+# 0.356 / 0.359. It had been set equal to binarytrees' as an estimate.
 binarytrees 0.610
-treealloc 0.610
+treealloc 0.343
 # `decode` (#1679) is reported and not anchored, like strchurn: N derived
 # `User.decode`s of one 8-field document against the same-shape hand-written
 # decode (`rust:decode`, borrowed field scan + owned `String` record fields).
@@ -62,11 +63,12 @@ treealloc 0.610
 # `fannkuchredux` (#2044): the parallel `fan { list.map }` against the ordinary
 # one-thread Rust. M4 Pro (14 cores), 2026-09-08: 0.21 (n=10) / 0.12 (n=11),
 # 1.07 / 1.06 with ALMIDE_FAN_SEQUENTIAL=1. The ratio is the reciprocal of
-# the core count the runner grants (ubuntu-latest: 4 vCPU, so ~0.35-0.45 at
-# the quick n=10, 10 chunks over 4 workers); 0.600 is an ESTIMATE that
-# leaves the +40% ceiling at 0.84 until the first runner measurement
-# replaces it — same rule treealloc's number followed.
-fannkuchredux 0.600
+# the core count the runner grants (ubuntu-latest: 4 vCPU). The row is the
+# runner's own (#2300): the median of the same five green develop runs as
+# treealloc's, which read 0.314 / 0.325 / 0.326 / 0.327 / 0.372. It replaces
+# the 0.600 estimate it was added with, whose +40% ceiling (0.84) sat far
+# above anything the runner reads.
+fannkuchredux 0.326
 # Ablation deltas (#1466, retired #2234): the four `ablation/<bench>` rows for
 # the anchored benches (ALMIDE_DISABLE_OPT=1 skips fold/DCE/propagate) were
 # anchored at "~1.00, SUBSUMED by LLVM". On 2026-09-15 the ablated native
@@ -82,6 +84,7 @@ fannkuchredux 0.600
 ablation/binarytrees 3.600
 ablation/treealloc 3.700
 # fannkuchredux (#2044): ALMIDE_FAN_SEQUENTIAL=1 native / parallel native,
-# same binary. M4 Pro: 5.1 (n=10) / 8.9 (n=11); on a 4-vCPU runner the
-# delta is ~2.5-3 (10 chunks over 4 workers). Floor 1.30 gates it.
-ablation/fannkuchredux 3.000
+# same binary. M4 Pro: 5.1 (n=10) / 8.9 (n=11). The row is the runner's
+# median over the five runs above (#2300): 2.675 / 3.065 / 3.069 / 3.075 /
+# 3.112, replacing the 3.000 estimate. Floor 1.30 gates it.
+ablation/fannkuchredux 3.069
