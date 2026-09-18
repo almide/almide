@@ -7,6 +7,7 @@
 //! against are REQUIREMENTS.md, one `REQ-VM-N` per clause.
 
 pub mod error;
+pub mod numeric;
 pub mod reader;
 pub mod types;
 
