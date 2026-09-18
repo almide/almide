@@ -5,7 +5,10 @@
 // substitute across arms. Closure accumulation in the ascending path.
 type IList = | INil | ICons(Int, IList)
 
-fn show(xs: List[List[Int]]) -> String = list.join(list.map(xs, (r) => "[${list.join(list.map(r, (v) => int.to_string(v)), ",")}]"), "")
+fn show(xs: List[List[Int]]) -> String = list.join(
+  list.map(xs, (r) => "[${list.join(list.map(r, (v) => int.to_string(v)), ",")}]"),
+  "",
+)
 
 fn to_ilist(xs: List[Int], i: Int) -> IList = if i >= list.len(xs) then INil
 else ICons(list.get(xs, i) ?? 0, to_ilist(xs, i + 1))

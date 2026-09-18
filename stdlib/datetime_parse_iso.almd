@@ -31,6 +31,13 @@ fn datetime_parse_iso(s: String) -> Result[Int, String] = {
     let time = __dpi_nums(string.split(list.get(tparts, 1) ?? "", ":"), 0, [])
     if list.len(date) != 3 then err("invalid datetime format")
     else if list.len(time) != 3 then err("invalid datetime format")
-    else ok(datetime.from_parts(list.get(date, 0) ?? 0, list.get(date, 1) ?? 0, list.get(date, 2) ?? 0, list.get(time, 0) ?? 0, list.get(time, 1) ?? 0, list.get(time, 2) ?? 0))
+    else ok(datetime.from_parts(
+      list.get(date, 0) ?? 0,
+      list.get(date, 1) ?? 0,
+      list.get(date, 2) ?? 0,
+      list.get(time, 0) ?? 0,
+      list.get(time, 1) ?? 0,
+      list.get(time, 2) ?? 0,
+    ))
   }
 }

@@ -284,7 +284,7 @@ pub fn render_wasm_fn(
     render_op_range(&ctx, &mut st, 0, func.ops.len(), None, &mut body);
     st.fuser.flush_all(&mut body);
     let tail = func.ret.map(|r| format!("    (local.get {})\n", local(r))).unwrap_or_default();
-    if std::env::var("ALMIDE_DBG_WAT").is_ok_and(|p| func.name.contains(&p)) {
+    if almide_base::env::var("ALMIDE_DBG_WAT").is_some_and(|p| func.name.contains(&p)) {
         eprintln!("  (func ${} {params}{result} {locals_decl}\n{body}{tail}  )", func.name);
     }
     format!("  (func ${} {params}{result} {locals_decl}\n{body}{tail}  )\n", func.name)

@@ -385,10 +385,10 @@ pub(crate) fn build_display_helpers(
 ) -> Result<std::collections::HashSet<usize>, EmitError> {
     let mut all_calls = std::collections::HashSet::new();
     loop {
-        let (todo, todo_eq): (Vec<u32>, Vec<u32>) = {
+        let (todo, todo_named): (Vec<u32>, Vec<(crate::work::NamedOp, u32)>) = {
             let hs = work.helpers.borrow();
             let bodies = work.display_bodies.borrow();
-            let eq_bodies = work.eq_bodies.borrow();
+            let named_bodies = work.named_bodies.borrow();
             let d = hs
                 .iter()
                 .filter_map(|h| match h {
@@ -396,14 +396,16 @@ pub(crate) fn build_display_helpers(
                     _ => None,
                 })
                 .collect();
-            let e = hs
+            let n = hs
                 .iter()
                 .filter_map(|h| match h {
-                    Helper::NamedEq { ti } if !eq_bodies.contains_key(ti) => Some(*ti),
+                    Helper::NamedOp { op, ti } if !named_bodies.contains_key(&(*op, *ti)) => {
+                        Some((*op, *ti))
+                    }
                     _ => None,
                 })
                 .collect();
-            (d, e)
+            (d, n)
         };
         let todo_scan: Vec<crate::ETy> = {
             let hs = work.helpers.borrow();
@@ -415,7 +417,7 @@ pub(crate) fn build_display_helpers(
                 })
                 .collect()
         };
-        if todo.is_empty() && todo_eq.is_empty() && todo_scan.is_empty() {
+        if todo.is_empty() && todo_named.is_empty() && todo_scan.is_empty() {
             return Ok(all_calls);
         }
         for ti in todo {
@@ -432,14 +434,18 @@ pub(crate) fn build_display_helpers(
                 }
             }
         }
-        for ti in todo_eq {
-            match build_one_eq_helper(table, types, work, pool, ti) {
+        for (op, ti) in todo_named {
+            match build_one_named_helper(table, types, work, pool, op, ti) {
                 Ok((f, calls)) => {
                     all_calls.extend(calls.iter().copied());
-                    work.eq_bodies.borrow_mut().insert(ti, crate::work::DisplayBuild::Built(f));
+                    work.named_bodies
+                        .borrow_mut()
+                        .insert((op, ti), crate::work::DisplayBuild::Built(f));
                 }
                 Err(e) => {
-                    work.eq_bodies.borrow_mut().insert(ti, crate::work::DisplayBuild::Failed);
+                    work.named_bodies
+                        .borrow_mut()
+                        .insert((op, ti), crate::work::DisplayBuild::Failed);
                     return Err(e);
                 }
             }
@@ -459,28 +465,60 @@ pub(crate) fn build_display_helpers(
     }
 }
 
-/// One `(block, stride, off, needle) -> address|0` DEEP scan body: walk
-/// the entries comparing the key slot by the type-directed `==`.
-fn build_one_scan_helper(
+/// The local layout an Emitter-built helper body runs on: `params` raw
+/// params, then `i32s` i32 locals, then one i64, one f64, then the three
+/// hold pools. The bodies below differ ONLY in the width of that param +
+/// i32 block, so everything after it is DERIVED here rather than restated
+/// per body — the one time a body computed those bases by hand, the
+/// 4-param shift put `hold_i32_base` on an f64 slot and only the
+/// validator noticed.
+#[derive(Clone, Copy)]
+struct Shell {
+    params: u32,
+    i32s: u32,
+    cursor: u32,
+    tmp_i32: u32,
+    scr_i32: u32,
+}
+
+impl Shell {
+    /// Two raw params, and the three i32 locals after them ARE the
+    /// Emitter's cursor / tmp / scratch: `(a, b) -> i32` (the named-op
+    /// bodies) and `(block, cursor) -> cursor` (display).
+    const PAIR: Shell = Shell { params: 2, i32s: 3, cursor: 2, tmp_i32: 3, scr_i32: 4 };
+    /// `(block, stride, off, needle) -> address|0`: four params, and two
+    /// of the five i32 locals (4 = p, 5 = end) are the scan's own walk, so
+    /// the Emitter's cursor takes the spare slot 8.
+    const SCAN: Shell = Shell { params: 4, i32s: 5, cursor: 8, tmp_i32: 6, scr_i32: 7 };
+}
+
+/// Build one helper body on `shell`'s local layout: `body` emits into a
+/// fresh Emitter, and the closed function comes back with the call set it
+/// accumulated. ONE scaffold for every Emitter-built helper in this
+/// module.
+fn build_helper_body(
     table: &FnTable,
     types: &TypeTable,
     work: &FnWork,
     pool: &mut Pool,
-    key: crate::ETy,
+    shell: Shell,
+    body: impl FnOnce(&mut Emitter<'_>) -> Result<(), EmitError>,
 ) -> Result<(wasm_encoder::Function, std::collections::HashSet<usize>), EmitError> {
     use crate::emitter::{HOLD_F64_POOL, HOLD_I32_POOL, HOLD_I64_POOL};
-    use wasm_encoder::{BlockType, ValType};
-    // params 0-3, then FIVE i32s (4=p, 5=end, 6=tmp, 7=scr_i32, 8=spare),
-    // one i64 (9 = scr_i64), one f64 (10 = scr_f64), pools from 11 — the
-    // 4-param shift once left hold_i32_base on an f64 slot (validator).
+    use wasm_encoder::ValType;
     let local_decls = [
-        (5, ValType::I32),
+        (shell.i32s, ValType::I32),
         (1, ValType::I64),
         (1, ValType::F64),
         (HOLD_I32_POOL, ValType::I32),
         (HOLD_I64_POOL, ValType::I64),
         (HOLD_F64_POOL, ValType::F64),
     ];
+    // Immediately after the param + i32 block: the i64, then the f64,
+    // then the three hold pools in declaration order.
+    let scr_i64 = shell.params + shell.i32s;
+    let scr_f64 = scr_i64 + 1;
+    let holds = scr_f64 + 1;
     let mut f = wasm_encoder::Function::new(local_decls);
     let mut calls = std::collections::HashSet::new();
     let empty_locals = std::collections::HashMap::new();
@@ -495,6 +533,7 @@ fn build_one_scan_helper(
             rc_param_ceiling: 0,
             tail_release_allowed: false,
             rc_frame_params: Vec::new(),
+            tail_consumed: Default::default(),
             self_index: None,
             rc_owned: std::collections::BTreeSet::new(),
             owned_ty: std::collections::HashMap::new(),
@@ -506,10 +545,10 @@ fn build_one_scan_helper(
             types,
             calls: &mut calls,
             fn_ret: None,
-            cursor_local: 8,
-            tmp_i32_local: 6,
-            scr_i32_local: 7,
-            scr_i64_local: 9,
+            cursor_local: shell.cursor,
+            tmp_i32_local: shell.tmp_i32,
+            scr_i32_local: shell.scr_i32,
+            scr_i64_local: scr_i64,
             in_main: false,
             work,
             globals: &empty_globals,
@@ -523,15 +562,32 @@ fn build_one_scan_helper(
             branch_depth: 0,
             witness: None,
             cur_module: None,
-            hold_i32_base: 11,
+            hold_i32_base: holds,
             hold_i32_depth: 0,
-            hold_i64_base: 11 + HOLD_I32_POOL,
+            hold_i64_base: holds + HOLD_I32_POOL,
             hold_i64_depth: 0,
-            hold_f64_base: 11 + HOLD_I32_POOL + HOLD_I64_POOL,
+            hold_f64_base: holds + HOLD_I32_POOL + HOLD_I64_POOL,
             hold_f64_depth: 0,
-            scr_f64_local: 10,
+            scr_f64_local: scr_f64,
             f: &mut f,
         };
+        body(&mut em)?;
+    }
+    f.instructions().end();
+    Ok((f, calls))
+}
+
+/// One `(block, stride, off, needle) -> address|0` DEEP scan body: walk
+/// the entries comparing the key slot by the type-directed `==`.
+fn build_one_scan_helper(
+    table: &FnTable,
+    types: &TypeTable,
+    work: &FnWork,
+    pool: &mut Pool,
+    key: crate::ETy,
+) -> Result<(wasm_encoder::Function, std::collections::HashSet<usize>), EmitError> {
+    use wasm_encoder::BlockType;
+    build_helper_body(table, types, work, pool, Shell::SCAN, |em| {
         // params: 0=block, 1=stride, 2=off, 3=needle; locals 4=p, 5=end
         let (blk, stride, off, needle, p_, end_) = (0u32, 1u32, 2u32, 3u32, 4u32, 5u32);
         let kt = em.types.el(key);
@@ -560,92 +616,39 @@ fn build_one_scan_helper(
             i.br(0).end().end();
             i.i32_const(almide_layout::NULL_ADDR as i32);
         }
-    }
-    f.instructions().end();
-    Ok((f, calls))
+        Ok(())
+    })
 }
 
-/// One `(a, b) -> i32` deep-equality body for a RECURSIVE Named type —
-/// the same scaffold as the display helper; `path` starts with `ti`, so
-/// the self-referencing fields call THIS helper's promised index.
-fn build_one_eq_helper(
+/// One `(a, b) -> i32` body for a RECURSIVE Named type: deep equality for
+/// `NamedOp::Eq`, the total-order verdict for `NamedOp::Cmp`.
+///
+/// ONE builder, because the two bodies differ by one call (#2172). Both
+/// exist for the same reason the display helper does: the emitter inlines
+/// a type's shape, so a type that contains itself must become a CALL
+/// somewhere. `path` starts with `ti`, so the self-referencing fields see
+/// a cycle and call THIS helper's promised index instead of inlining.
+fn build_one_named_helper(
     table: &FnTable,
     types: &TypeTable,
     work: &FnWork,
     pool: &mut Pool,
+    op: crate::work::NamedOp,
     ti: u32,
 ) -> Result<(wasm_encoder::Function, std::collections::HashSet<usize>), EmitError> {
-    use crate::emitter::{HOLD_F64_POOL, HOLD_I32_POOL, HOLD_I64_POOL};
-    use wasm_encoder::ValType;
-    let local_decls = [
-        (3, ValType::I32),
-        (1, ValType::I64),
-        (1, ValType::F64),
-        (HOLD_I32_POOL, ValType::I32),
-        (HOLD_I64_POOL, ValType::I64),
-        (HOLD_F64_POOL, ValType::F64),
-    ];
-    let mut f = wasm_encoder::Function::new(local_decls);
-    let mut calls = std::collections::HashSet::new();
-    let empty_locals = std::collections::HashMap::new();
-    let empty_globals = std::collections::HashMap::new();
-    let empty_ranges = std::collections::HashMap::new();
-    let empty_cells = std::collections::HashSet::new();
-    {
-        let mut em = Emitter {
-            var_space: 0,
-            pool,
-            locals: &empty_locals,
-            rc_param_ceiling: 0,
-            tail_release_allowed: false,
-            rc_frame_params: Vec::new(),
-            self_index: None,
-            rc_owned: std::collections::BTreeSet::new(),
-            owned_ty: std::collections::HashMap::new(),
-            owned_call_marks: Default::default(),
-            borrowed_temps: Vec::new(),
-            exit_ledger: Vec::new(),
-            borrow_base: 0, // helper bodies lower no arm argument
-            table,
-            types,
-            calls: &mut calls,
-            fn_ret: None,
-            cursor_local: 2,
-            tmp_i32_local: 3,
-            scr_i32_local: 4,
-            scr_i64_local: 5,
-            in_main: false,
-            work,
-            globals: &empty_globals,
-            deferred_ranges: &empty_ranges,
-            metered: false,
-            cells: &empty_cells,
-            region_repair: None,
-            loop_ctl: None,
-            in_tail: false,
-            try_see_through: false,
-            branch_depth: 0,
-            witness: None,
-            cur_module: None,
-            hold_i32_base: 7,
-            hold_i32_depth: 0,
-            hold_i64_base: 7 + HOLD_I32_POOL,
-            hold_i64_depth: 0,
-            hold_f64_base: 7 + HOLD_I32_POOL + HOLD_I64_POOL,
-            hold_f64_depth: 0,
-            scr_f64_local: 6,
-            f: &mut f,
-        };
+    build_helper_body(table, types, work, pool, Shell::PAIR, |em| {
         em.f.instructions().local_get(0).local_get(1);
-        let mut path = vec![ti];
-        em.emit_named_eq(ti, &mut path)?;
-    }
-    f.instructions().end();
-    Ok((f, calls))
+        match op {
+            // `path` starts with `ti`, so a self-referencing field sees the
+            // cycle and calls THIS helper's promised index.
+            crate::work::NamedOp::Eq => em.emit_named_eq(ti, &mut vec![ti]),
+            // The cmp walk needs no path: every `Named` is a call already.
+            crate::work::NamedOp::Cmp => em.emit_named_cmp(ti),
+        }
+    })
 }
 
-/// One `(block, cursor) -> cursor` display body, Emitter-built with the
-/// standard scratch/hold local layout after the two raw params.
+/// One `(block, cursor) -> cursor` display body.
 fn build_one_display_helper(
     table: &FnTable,
     types: &TypeTable,
@@ -653,75 +656,14 @@ fn build_one_display_helper(
     pool: &mut Pool,
     ti: u32,
 ) -> Result<(wasm_encoder::Function, std::collections::HashSet<usize>), EmitError> {
-    use crate::emitter::{HOLD_F64_POOL, HOLD_I32_POOL, HOLD_I64_POOL};
-    use wasm_encoder::ValType;
-    let local_decls = [
-        (3, ValType::I32),
-        (1, ValType::I64),
-        (1, ValType::F64),
-        (HOLD_I32_POOL, ValType::I32),
-        (HOLD_I64_POOL, ValType::I64),
-        (HOLD_F64_POOL, ValType::F64),
-    ];
-    let mut f = wasm_encoder::Function::new(local_decls);
-    let mut calls = std::collections::HashSet::new();
-    let empty_locals = std::collections::HashMap::new();
-    let empty_globals = std::collections::HashMap::new();
-    let empty_ranges = std::collections::HashMap::new();
-    let empty_cells = std::collections::HashSet::new();
-    {
-        let mut em = Emitter {
-            var_space: 0,
-            pool,
-            locals: &empty_locals,
-            rc_param_ceiling: 0,
-            tail_release_allowed: false,
-            rc_frame_params: Vec::new(),
-            self_index: None,
-            rc_owned: std::collections::BTreeSet::new(),
-            owned_ty: std::collections::HashMap::new(),
-            owned_call_marks: Default::default(),
-            borrowed_temps: Vec::new(),
-            exit_ledger: Vec::new(),
-            borrow_base: 0, // helper bodies lower no arm argument
-            table,
-            types,
-            calls: &mut calls,
-            fn_ret: None,
-            cursor_local: 2,
-            tmp_i32_local: 3,
-            scr_i32_local: 4,
-            scr_i64_local: 5,
-            in_main: false,
-            work,
-            globals: &empty_globals,
-            deferred_ranges: &empty_ranges,
-            metered: false,
-            cells: &empty_cells,
-            region_repair: None,
-            loop_ctl: None,
-            in_tail: false,
-            try_see_through: false,
-            branch_depth: 0,
-            witness: None,
-            cur_module: None,
-            hold_i32_base: 7,
-            hold_i32_depth: 0,
-            hold_i64_base: 7 + HOLD_I32_POOL,
-            hold_i64_depth: 0,
-            hold_f64_base: 7 + HOLD_I32_POOL + HOLD_I64_POOL,
-            hold_f64_depth: 0,
-            scr_f64_local: 6,
-            f: &mut f,
-        };
+    build_helper_body(table, types, work, pool, Shell::PAIR, |em| {
         em.f.instructions().local_get(1).local_set(2);
         em.f.instructions().local_get(0);
         let mut path = vec![ti];
         em.emit_display_named(ti, &mut path)?;
         em.f.instructions().local_get(2);
-    }
-    f.instructions().end();
-    Ok((f, calls))
+        Ok(())
+    })
 }
 
 impl Emitter<'_> {

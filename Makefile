@@ -1,8 +1,13 @@
-VERSION := $(shell grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
+# The BINARY's version, i.e. Cargo.toml's [package] section — not the first
+# `version =` in the file. A [workspace.package] block sits above [package] and
+# carries a different number, so `grep ^version | head -1` read 0.12.2 while the
+# compiler reported 0.62.0 (#2083). scripts/release-seal.sh hit the same trap and
+# was fixed in f84bb6aae; this is its extraction, verbatim.
+VERSION := $(shell awk '/^\[/{f=($$0=="[package]")} f && /^version = "/{sub(/^version = "/,""); sub(/".*$$/,""); print; exit}' Cargo.toml)
 INSTALL_DIR := $(HOME)/.local/almide
 BIN := target/release/almide
 
-.PHONY: build install test test-wasm check clean fmt release cross-target verify-trust receipt stdlib-docs
+.PHONY: build install test test-wasm check clean fmt cross-target verify-trust receipt stdlib-docs
 
 ## Build
 
@@ -23,7 +28,16 @@ install: build
 	@cp -r stdlib $(INSTALL_DIR)/stdlib
 	@chmod -R a-w $(INSTALL_DIR)/stdlib
 	@echo "Installed almide $(VERSION) to $(INSTALL_DIR)/almide and ~/.local/bin/almide"
-	@almide --version
+	@## Assert rather than print. The line above and the binary disagreed for
+	@## fifteen days and nothing noticed, because the mismatch was only ever
+	@## shown, never checked. Now a section added above [package] breaks the
+	@## build here instead of surfacing in a release artifact.
+	@reported=$$($(HOME)/.local/bin/almide --version | awk '{print $$2}'); \
+	if [ "$$reported" != "$(VERSION)" ]; then \
+		echo "Makefile VERSION is $(VERSION) but the installed binary reports $$reported — see the comment on Makefile:1"; \
+		exit 1; \
+	fi
+	@$(HOME)/.local/bin/almide --version
 
 ## Test
 
@@ -89,23 +103,15 @@ clean:
 	cargo clean
 	$(BIN) clean 2>/dev/null || true
 
-## Release (bump version, build, install, commit, push, create PR)
-
-release: test-all
-	@echo "All tests passed. Creating release v$(VERSION)..."
-	git add Cargo.toml Cargo.lock README.md
-	git commit -m "Bump version to $(VERSION)"
-	git push origin develop
-	@echo "Pushed. Create PR with: make pr"
-
-pr:
-	@MAIN_SHA=$$(git rev-parse origin/main) && \
-	BODY=$$(git log --oneline $$MAIN_SHA..HEAD | sed 's/^/- /') && \
-	gh pr create \
-		--base main \
-		--head develop \
-		--title "v$(VERSION)" \
-		--body "$$BODY"
+## Release
+##
+## There is no `make release` here. The procedure lives in CLAUDE.md and is
+## owned by .github/workflows/release.yml (tag-triggered): an RC channel, the
+## release-blocker gate, the interface diff, stamped ledger counts and the
+## evidence seal are steps a Makefile target cannot encode, and the two targets
+## that used to sit here encoded an older, shorter flow — one that also stamped
+## the wrong version into the commit message and the PR title (#2083). A broken
+## target is safer than a plausible one that skips the gates.
 
 ## Info
 
@@ -122,6 +128,4 @@ help:
 	@echo "make check      - cargo check"
 	@echo "make cross-target - Compare spec test output across native and WASM"
 	@echo "make clean      - Clean build artifacts"
-	@echo "make release    - Test + commit + push version bump"
-	@echo "make pr         - Create PR from develop to main"
-	@echo "make version    - Print current version"
+	@echo "make version    - Print current version ([package], not [workspace.package])"

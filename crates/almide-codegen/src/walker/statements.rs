@@ -3,41 +3,11 @@
 
 use almide_ir::*;
 use almide_ir::annotations::VarStorage;
-use almide_lang::types::{Ty, TypeConstructorId};
+use almide_lang::types::Ty;
 use super::RenderContext;
 use super::types::render_type;
 use super::expressions::render_expr;
 use super::helpers::{template_or, terminate_stmt, ty_has_named_typevar, erase_named_typevars, erase_fn_types};
-
-/// When a binding's initializer reads a fn param that is emitted as a Rust
-/// reference (`&str`, `&[T]`, `&AlmideMap<..>`, `&T`), the binding's declared
-/// type is the OWNED form (`String`, `Vec<T>`, `AlmideMap<..>`, `T`), so the
-/// borrow must be converted to an owned value. The right method depends on the
-/// value type: a `&str` owns via `.to_string()`, a `&[T]` slice via `.to_vec()`
-/// (`.clone()` on a slice yields another `&[T]`, not `Vec<T>`), and every other
-/// borrowed type (`&AlmideMap`, `&T`) owns via `.clone()`. Returns the bare
-/// owning expression (e.g. `l.to_vec()`) when the value reads a borrowed param,
-/// or `None` when no conversion is needed. A `Clone{Var}` initializer is
-/// rendered from the bare var so we never stack `l.clone().to_vec()`. #624
-fn borrowed_param_owning_value(ctx: &RenderContext, value: &IrExpr) -> Option<String> {
-    let (var_id, val_ty) = match &value.kind {
-        IrExprKind::Var { id } => (*id, &value.ty),
-        IrExprKind::Clone { expr: inner } => match &inner.kind {
-            IrExprKind::Var { id } => (*id, &inner.ty),
-            _ => return None,
-        },
-        _ => return None,
-    };
-    if !ctx.ref_params.contains(&var_id) {
-        return None;
-    }
-    let conv = match val_ty {
-        Ty::String => "to_string",
-        Ty::Applied(TypeConstructorId::List, _) => "to_vec",
-        _ => "clone",
-    };
-    Some(format!("{}.{}()", ctx.var_name(var_id), conv))
-}
 
 /// Check if an expression references a specific variable (any depth).
 pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
@@ -311,24 +281,12 @@ fn render_bind_value_str(ctx: &RenderContext, ty: &Ty, value: &IrExpr) -> String
 /// Val-wrap: var of non-Copy type → AlmideRcCow<T> with AlmideRcCow::new(value) for
 /// COW. Extracted from `render_stmt_bind`: `Some` mirrors the original's
 /// early `return`, `None` means "not AlmideRcCow, fall through".
-fn try_render_bind_rc_cow(ctx: &RenderContext, var: &VarId, name_s: &str, type_s: &str, value: &IrExpr, value_s: &str) -> Option<String> {
+fn try_render_bind_rc_cow(ctx: &RenderContext, var: &VarId, name_s: &str, type_s: &str, value_s: &str) -> Option<String> {
     if !ctx.ann.is_rc_cow(var) { return None; }
     let val_type = format!("AlmideRcCow<{}>", type_s);
-    // If the value is a fn param passed by reference (&Vec<u8>, &[T]),
-    // clone it to get an owned value for AlmideRcCow::new().
-    let needs_clone = match &value.kind {
-        IrExprKind::Var { id } => ctx.ref_params.contains(id),
-        IrExprKind::Clone { expr: inner } => match &inner.kind {
-            IrExprKind::Var { id } => ctx.ref_params.contains(id),
-            _ => false,
-        },
-        _ => false,
-    };
-    let val_value = if needs_clone {
-        format!("AlmideRcCow::new({}.clone())", value_s)
-    } else {
-        format!("AlmideRcCow::new({})", value_s)
-    };
+    // A by-reference param's value already arrives owned: `BorrowLowering`
+    // spelled the `.clone()` / `.to_vec()` / `.to_string()` in the IR.
+    let val_value = format!("AlmideRcCow::new({})", value_s);
     Some(ctx.templates.render_with("var_binding", None, &[], &[("name", name_s), ("type", val_type.as_str()), ("value", val_value.as_str())])
         .unwrap_or_else(|| if name_s == "_" { format!("let {}: {} = {};", name_s, val_type, val_value) } else { format!("let mut {}: {} = {};", name_s, val_type, val_value) }))
 }
@@ -396,17 +354,9 @@ fn render_stmt_bind(ctx: &RenderContext, stmt: &IrStmt) -> String {
             // exactly like the raw spellings above.
             || ty_str.starts_with("AlmideRcCow<")
     };
-    if let Some(rendered) = try_render_bind_rc_cow(ctx, var, &name_s, &type_s, value, &value_s) {
+    if let Some(rendered) = try_render_bind_rc_cow(ctx, var, &name_s, &type_s, &value_s) {
         return rendered;
     }
-    // Non-AlmideRcCow binding whose initializer reads a borrowed param: the
-    // binding's type is the OWNED form, so convert the borrow to an
-    // owned value (slice→`.to_vec()`, `&str`→`.to_string()`, else
-    // `.clone()`). Applies to both `let` and `var` — a slice cloned as
-    // `.clone()` would stay a `&[T]` and mismatch `Vec<T>` (#624).
-    let value_s = if !ctx.ann.is_rc_cow(var) {
-        borrowed_param_owning_value(ctx, value).unwrap_or(value_s)
-    } else { value_s };
     let is_wildcard = name_s == "_";
     let construct = match mutability {
         _ if is_wildcard => "let_binding",
@@ -438,12 +388,12 @@ fn try_render_bind_counting_range(ctx: &RenderContext, var: &VarId, value: &IrEx
 fn render_stmt_assign(ctx: &RenderContext, stmt: &IrStmt) -> String {
     let IrStmtKind::Assign { var, value } = &stmt.kind else { unreachable!() };
     let target_s = ctx.var_name(*var).to_string();
+    let value_s = render_expr(ctx, value);
     // Shared-mut local (`Rc<Cell<T>>`): write through the cell. Cell's
     // interior mutability means the binding need not be `mut`. (Closure v2, P3.)
     if ctx.ann.is_shared_mut(var) {
-        return format!("{}.set({});", target_s, render_expr(ctx, value));
+        return format!("{}.set({});", target_s, value_s);
     }
-    let value_s = render_expr(ctx, value);
     // §4 Stage 2: module globals dispatch on the alias-resolved
     // attribute (one lookup owns storage AND the emitted name) —
     // replaces the name-keyed get_var_storage probe whose prefixing
@@ -474,7 +424,7 @@ fn render_stmt_assign(ctx: &RenderContext, stmt: &IrStmt) -> String {
     // (the mut_param_call_chain cross-target red this arm's first
     // spelling shipped). The rotation carries the same reference, so
     // the legacy bare form is the correct one there.
-    if ctx.ref_mut_params.contains(var) {
+    if ctx.ann.param_borrows.get(var) == Some(&almide_ir::ParamBorrow::RefMut) {
         let is_tco_rotation = matches!(&value.kind, IrExprKind::Var { id }
             if ctx.var_name(*id).starts_with("__tco_tmp_"));
         if !is_tco_rotation {
@@ -556,10 +506,7 @@ fn render_stmt_index_assign(ctx: &RenderContext, stmt: &IrStmt) -> String {
     let IrStmtKind::IndexAssign { target, index, value } = &stmt.kind else { unreachable!() };
     let target_str = ctx.var_name(*target).to_string();
     let idx_str = render_expr(ctx, index);
-    // Same #624 owning coercion as the field-assign arm above (#1560): a
-    // borrowed-param element value must own into the slot.
-    let val_str = borrowed_param_owning_value(ctx, value)
-        .unwrap_or_else(|| render_expr(ctx, value));
+    let val_str = render_expr(ctx, value);
     let var_ty = &ctx.var_table.get(*target).ty;
     let is_bytes = matches!(var_ty, Ty::Bytes);
     let cast_val = if is_bytes { format!("{} as u8", val_str) } else { val_str };
@@ -592,14 +539,28 @@ fn render_stmt_index_assign(ctx: &RenderContext, stmt: &IrStmt) -> String {
 
 fn render_stmt_map_insert(ctx: &RenderContext, stmt: &IrStmt) -> String {
     let IrStmtKind::MapInsert { target, key, value } = &stmt.kind else { unreachable!() };
-    let target_str = ctx.var_name(*target).to_string();
     let key_str = render_expr(ctx, key);
     let val_str = render_expr(ctx, value);
+    // A plain-var key: the clone pass counted the value's uses FIRST (so the
+    // key is the var's last use and moves), and rustc evaluates call
+    // arguments key-then-value — bind the value to a temporary ahead of the
+    // insert so the borrow inside it ends before the key moves.
+    if crate::pass_clone_places::map_insert_value_first(key, value) {
+        let insert = render_map_insert_form(ctx, *target, &key_str, "__almide_mv");
+        return format!("{{ let __almide_mv = {val_str}; {insert} }}");
+    }
+    render_map_insert_form(ctx, *target, &key_str, &val_str)
+}
+
+/// The insert statement for `target`'s storage form, with the key and value
+/// already rendered.
+fn render_map_insert_form(ctx: &RenderContext, target: VarId, key_str: &str, val_str: &str) -> String {
+    let target_str = ctx.var_name(target).to_string();
     // Shared-mut non-Copy var (`AlmideSharedMut`, P6): insert through the cell.
-    if ctx.ann.is_shared_mut(target) {
+    if ctx.ann.is_shared_mut(&target) {
         return format!("{}.borrow_mut().insert({}, {});", target_str, key_str, val_str);
     }
-    if let Some(info) = ctx.ann.global(*target) {
+    if let Some(info) = ctx.ann.global(target) {
         use almide_ir::top_let_storage::TopLetStorage as Tls;
         return match info.storage {
             Tls::RcRefCell => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut()).insert({}, {}));", info.static_name, key_str, val_str),
@@ -609,9 +570,9 @@ fn render_stmt_map_insert(ctx: &RenderContext, stmt: &IrStmt) -> String {
             ),
         };
     }
-    match ctx.ann.get_var_storage(target) {
+    match ctx.ann.get_var_storage(&target) {
         VarStorage::RcCow => format!("{}.make_mut().insert({}, {});", target_str, key_str, val_str),
-        _ => ctx.templates.render_with("map_insert", None, &[], &[("target", target_str.as_str()), ("key", key_str.as_str()), ("value", val_str.as_str())])
+        _ => ctx.templates.render_with("map_insert", None, &[], &[("target", target_str.as_str()), ("key", key_str), ("value", val_str)])
             .unwrap_or_else(|| "map_set(...)".into()),
     }
 }
@@ -619,12 +580,7 @@ fn render_stmt_map_insert(ctx: &RenderContext, stmt: &IrStmt) -> String {
 fn render_stmt_field_assign(ctx: &RenderContext, stmt: &IrStmt) -> String {
     let IrStmtKind::FieldAssign { target, field, value } = &stmt.kind else { unreachable!() };
     let target_str = ctx.var_name(*target).to_string();
-    // A borrowed-param RHS (`t.name = s` where `s: String` renders as `&str`)
-    // must own into the field exactly as a Bind's initializer does (#624's
-    // helper; the field-assign arm simply never called it — check green,
-    // rustc E0308, #1560).
-    let val_str = borrowed_param_owning_value(ctx, value)
-        .unwrap_or_else(|| render_expr(ctx, value));
+    let val_str = render_expr(ctx, value);
     // Shared-mut non-Copy var (`AlmideSharedMut`, P6): assign the field through the cell.
     if ctx.ann.is_shared_mut(target) {
         return format!("{}.borrow_mut().{} = {};", target_str, field, val_str);

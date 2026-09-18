@@ -1,3 +1,4 @@
+<!-- description: Tiered list making Almide defensibly usable in mission-critical domains -->
 # Mission-critical attack list
 
 Written 2026-08-18, at the close of the deep-wash campaign (7 compiler-bug

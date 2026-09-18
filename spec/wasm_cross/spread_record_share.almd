@@ -10,7 +10,11 @@ type Element = { tag: String, attrs: Map[String, String], children: List[Element
 
 fn el(tag: String) -> Element = Element { tag: tag, attrs: [:], children: [], content: "" }
 
-fn attr(element: Element, key: String, value: String) -> Element = { ...element, attrs: map.set(element.attrs, key, value) }
+fn attr(element: Element, key: String, value: String) -> Element = { ...element, attrs: map.set(
+  element.attrs,
+  key,
+  value,
+) }
 
 fn render(e: Element) -> String = {
   let attrs = map.entries(e.attrs) |> list.map((p) => {

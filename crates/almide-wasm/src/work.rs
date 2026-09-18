@@ -9,6 +9,16 @@ use wasm_encoder::ValType;
 
 use crate::*;
 
+/// Which type-directed body a [`Helper::NamedOp`] carries. The two walk
+/// the same fields in the same order and differ only in what the i32 they
+/// leave MEANS — a 0/1 verdict for `Eq`, a signed three-way verdict for
+/// `Cmp` — which is why one builder emits both (#2172).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub(crate) enum NamedOp {
+    Eq,
+    Cmp,
+}
+
 /// A per-program emitted helper (assembled right after `main`, BEFORE the
 /// table-entry extras — call sites need these indices DURING lowering).
 #[derive(Clone, PartialEq)]
@@ -43,9 +53,13 @@ pub(crate) enum Helper {
     Utf8Lossy,
     /// `$fast_exp(f64) -> f64` — the canonical unfused fast-exp (#1197).
     FastExp,
-    /// `$named_eq_<ti>(a, b) -> i32` — runtime-recursive deep equality
-    /// of a RECURSIVE Named type (the DisplayNamed doctrine for `==`).
-    NamedEq { ti: u32 },
+    /// `$named_<op>_<ti>(a, b) -> i32` — the runtime-recursive body of a
+    /// type-directed walk over a RECURSIVE Named type (the DisplayNamed
+    /// doctrine for `==` and for the total order). Both ops have the same
+    /// `(a, b) -> i32` signature and the same reason to exist: the emitter
+    /// inlines the type's shape, so a type that contains itself has to
+    /// become a CALL somewhere or the emitter recurses forever.
+    NamedOp { op: NamedOp, ti: u32 },
     /// `$jp_set(j, path, k, nv) -> Value` — json.set_path's recursive
     /// core over THIS backend's Value layout.
     JsonPathSet,
@@ -123,12 +137,27 @@ pub(crate) enum Helper {
     /// Result / tuple / record / variant block — the credits a whole-block
     /// COPY of it must hold (`CopyElems { inc_elems }` calls it).
     IncShape { ty: SliceTy },
-    /// `$drop_map(block)` — a Map's SPINE drop (#2010, Map stage a): the
-    /// block's credit down; at zero its index side-table entry is cleared
-    /// (`side_clear` = `$mapidx_side_set`, so a reused address inherits no
-    /// stale index) and the entries array freed. Keys and values keep the
-    /// credits they hold today (stage b: the per-entry walk).
+    /// `$drop_map(block)` — the drop of a Map / Set whose entries hold NO
+    /// heap handle (flat keys and values): the block's credit down; at
+    /// zero its index side-table entry is cleared (`side_clear` =
+    /// `$mapidx_side_set`, so a reused address inherits no stale index)
+    /// and the entries array freed. Handle entries take `DropEntries`.
     DropMapSpine { side_clear: u32 },
+    /// `$drop_entries(block)` — the typed drop of a Map / Set whose
+    /// entries hold heap HANDLES (#2010, Map stage b): the block's credit
+    /// down; at zero every entry's handle slots (`slots` = up to two
+    /// `(offset, dec fn)` pairs — a Map's key and value, a Set's member)
+    /// released, the index side-table entry cleared, the entries array
+    /// freed. One helper per entry layout.
+    DropEntries { stride: u32, slots: [Option<(u32, u32)>; 2], side_clear: u32 },
+    /// `$inc_entries(block, nbytes)`: +1 on every handle slot of the
+    /// entries in the first `nbytes` payload bytes — the credits a copied
+    /// entries array must hold (`nbytes` is explicit so an append copy
+    /// can walk the copied prefix and leave its fresh tail entry alone).
+    IncEntries { stride: u32, slots: [Option<u32>; 2] },
+    /// `$copy_entries(block) -> block`: `$block_copy` plus the entry
+    /// credits of the whole copy.
+    CopyEntries { inc_entries: u32 },
 }
 
 /// The pretty printer's extra pooled fragments.
@@ -188,7 +217,10 @@ pub(crate) struct FnWork {
     /// callers see Failed and refuse themselves, and assembly stubs the
     /// promised index with `unreachable`).
     pub(crate) display_bodies: std::cell::RefCell<HashMap<u32, DisplayBuild>>,
-    pub(crate) eq_bodies: std::cell::RefCell<HashMap<u32, DisplayBuild>>,
+    /// `Helper::NamedOp` bodies, keyed by `(op, ti)` — ONE map for both
+    /// ops, so neither the build loop nor assembly can learn about one and
+    /// forget the other (#2172).
+    pub(crate) named_bodies: std::cell::RefCell<HashMap<(NamedOp, u32), DisplayBuild>>,
     pub(crate) scan_bodies: std::cell::RefCell<HashMap<crate::ETy, DisplayBuild>>,
     /// `Helper::DropShape` bodies, built by `dec_fn_of` when the helper
     /// is first registered (assembly takes them by type).

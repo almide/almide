@@ -14,7 +14,7 @@ effect fn main() -> Unit = {
   let model = env.get("MODEL") |> option.unwrap_or("anthropic/claude-sonnet-4-6")
   println("almai chat (model: " + model + ")")
   println("Type a message. Empty line to quit.\n")
-  chat_loop(model, conv.empty() |> conv.add_system("You are a helpful assistant. Be concise."))
+  chat_loop(model, conv.empty() |> conv.add_system("You are a helpful assistant. Be concise."))!
 }
 
 effect fn chat_loop(model: String, conversation: conv.Conversation) -> Unit = {
@@ -26,11 +26,11 @@ effect fn chat_loop(model: String, conversation: conv.Conversation) -> Unit = {
     match almai.call(model, conv.messages(updated)) {
       err(e) => {
         println("Error: " + e)
-        chat_loop(model, updated)
+        chat_loop(model, updated)!
       },
       ok(r) => {
         println("\n" + r.content + "\n")
-        chat_loop(model, updated |> conv.add_assistant(r.content))
+        chat_loop(model, updated |> conv.add_assistant(r.content))!
       },
     }
   }

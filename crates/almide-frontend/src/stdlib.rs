@@ -10,11 +10,39 @@ pub use almide_lang::stdlib_info::{
     resolve_ufcs_module, resolve_ufcs_candidates,
 };
 
-/// Modules that can safely be suggested via "Add `import X`" in error hints.
-/// Excludes auto-imported modules and names that are common as variable names
-/// (e.g. `value`, `error`, `string`, `list`, `map`, `set`, `option`, `result`).
+/// Modules the compiler does not intend a user to import: they exist to give
+/// the pipeline a spelling, not to be written. `prim` is the v1 primitive
+/// floor. The test below pins this against `docs/stdlib/` — a module with a
+/// user-facing doc page is user-facing.
+const NOT_USER_IMPORTABLE: &[&str] = &["prim"];
+
+/// Whether "Add `import X`" is the right hint for an unresolved `X`.
+///
+/// This used to be a hand-written list of twelve names, and it had drifted
+/// both ways: `bytes` / `matrix` / `datetime` are auto-imported and could
+/// never need the hint, while `hash`, `hex`, `url`, `base64`, `zlib`, `net`,
+/// `path`, `args`, `html` and `mem` — all real modules that DO need an
+/// `import` — were missing, so `hash.sha256(b)` reported "undefined variable
+/// 'hash'" and told the reader to check the variable name. That is worse than
+/// silence: it sends them looking for a typo'd binding when the fix is a line
+/// at the top of the file.
+///
+/// So derive it. A module is suggestable exactly when it is a real stdlib
+/// module, is NOT already reachable without an import, and is meant to be
+/// written by a user. A module added to the registry tomorrow is covered the
+/// day it lands, which a `matches!` arm never was.
 pub fn is_import_suggestable(name: &str) -> bool {
-    matches!(name, "json" | "http" | "fs" | "process" | "regex" | "datetime" | "io" | "random" | "testing" | "bytes" | "matrix" | "env")
+    if NOT_USER_IMPORTABLE.contains(&name) { return false; }
+    if !is_any_stdlib(name) && !is_bundled_module(name) { return false; }
+    !is_auto_imported(name)
+}
+
+/// The whole auto-import surface: the resolver's Tier-1 set plus the bundled
+/// modules it loads eagerly. Kept as one predicate so callers cannot consult
+/// half of it.
+fn is_auto_imported(name: &str) -> bool {
+    crate::import_table::TIER1_ALWAYS_ACCESSIBLE.contains(&name)
+        || AUTO_IMPORT_BUNDLED.contains(&name)
 }
 
 /// One-line description of each stdlib module, for error hints.
@@ -179,9 +207,8 @@ const ALIASES: &[(&str, &str, &str)] = &[
     ("string", "index", "string.index_of"),
     ("string", "all", "string.chars + list.all"),
     // Common LLM hallucinations from MSR testing
-    ("string", "get_char", "string.char_at"),
-    ("string", "charAt", "string.char_at"),
-    ("string", "get", "string.char_at"),
+    ("string", "get_char", "string.get"),
+    ("string", "charAt", "string.get"),
     ("string", "from_char", "string.from_codepoint"),
     ("string", "from_char_code", "string.from_codepoint"),
     ("string", "chr", "string.from_codepoint"),
@@ -347,6 +374,30 @@ mod tests {
         }
     }
 
+    /// A bare `module.fn` suggestion must resolve through the same registry
+    /// the checker consults, or the hint sends the reader from one E002 to
+    /// another. Three rows pointed at `string.char_at` — a function that never
+    /// existed (the char-at-index member is `string.get`) — and one of them
+    /// keyed on `string.get` itself, so the real function was "corrected" into
+    /// the phantom. Prose suggestions (a space or a paren) are not looked up.
+    #[test]
+    fn alias_targets_resolve_in_the_registry() {
+        let mut bad = Vec::new();
+        for (module, func, fix) in ALIASES {
+            if fix.contains(' ') || fix.contains('(') {
+                continue;
+            }
+            let Some((m, f)) = fix.split_once('.') else {
+                bad.push(format!("{module}.{func} -> {fix}: not module.fn"));
+                continue;
+            };
+            if !module_functions_all(m).contains(&f) {
+                bad.push(format!("{module}.{func} -> {fix}: no such function"));
+            }
+        }
+        assert!(bad.is_empty(), "alias rows pointing at nothing:\n{}", bad.join("\n"));
+    }
+
     /// A module with no description falls back to "standard library module",
     /// which tells the reader nothing. Adding a bundled module must therefore
     /// mean adding its description in the same change.
@@ -370,5 +421,54 @@ mod tests {
             .filter(|m| !BUNDLED_MODULES.contains(m) && !STDLIB_MODULES.contains(m))
             .collect();
         assert!(stale.is_empty(), "descriptions for unknown modules: {stale:?}");
+    }
+
+    /// Every module that needs an `import` gets the hint that says so, and no
+    /// module that is already reachable wastes one. The predicate is derived,
+    /// so this asserts the derivation rather than a list — a module added to
+    /// the registry is covered without touching this file.
+    ///
+    /// The hand-written list this replaced had drifted in both directions at
+    /// once: `hash`, `hex`, `url`, `base64`, `zlib`, `net`, `path`, `args`,
+    /// `html` and `mem` needed the hint and never got it, while `bytes`,
+    /// `matrix` and `datetime` were listed and can never need it.
+    #[test]
+    fn every_module_needing_an_import_is_suggestable() {
+        for m in BUNDLED_MODULES.iter().chain(STDLIB_MODULES.iter()).copied() {
+            if NOT_USER_IMPORTABLE.contains(&m) {
+                assert!(!is_import_suggestable(m), "{m} is internal but suggestable");
+                continue;
+            }
+            assert_eq!(
+                is_import_suggestable(m), !is_auto_imported(m),
+                "{m}: suggestable={} but auto-imported={}",
+                is_import_suggestable(m), is_auto_imported(m)
+            );
+        }
+        // The misses that prompted this, pinned by name so a future
+        // "simplification" back to a literal list fails here first.
+        for m in ["hash", "hex", "url", "base64", "zlib", "net", "path", "args", "html", "mem"] {
+            assert!(is_import_suggestable(m), "{m} still gets no import hint");
+        }
+        for m in ["bytes", "matrix", "datetime", "string", "list"] {
+            assert!(!is_import_suggestable(m), "{m} is auto-imported and needs no hint");
+        }
+    }
+
+    /// `NOT_USER_IMPORTABLE` is the one judgement call in the derivation, so
+    /// it is pinned to an external fact rather than to itself: a module with a
+    /// page under `docs/stdlib/` is documented FOR a user, and a documented
+    /// module the compiler refuses to suggest is a contradiction.
+    #[test]
+    fn internal_modules_have_no_user_facing_doc_page() {
+        let docs = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../docs/stdlib");
+        for m in NOT_USER_IMPORTABLE {
+            let page = docs.join(format!("{m}.md"));
+            assert!(
+                !page.exists(),
+                "{m} is marked internal but docs/stdlib/{m}.md exists — it is user-facing"
+            );
+        }
     }
 }

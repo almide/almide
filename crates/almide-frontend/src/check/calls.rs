@@ -156,6 +156,13 @@ impl Checker {
             }
             _ => {
                 let ct = self.infer_expr(callee);
+                // A VALUE in callee position is not a call (#2134). Left to
+                // the constraint below it surfaced as `expected Option[?0]
+                // but got fn() -> Option[Int]` — the two sides of a
+                // unification, which names neither the mistake nor the fix.
+                if let Some(ty) = self.report_uncallable_callee(callee, &ct) {
+                    return ty;
+                }
                 let ret = self.fresh_var();
                 self.constrain(ct, Ty::Fn { is_effect: false, params: arg_tys.to_vec(), ret: Box::new(ret.clone()) }, "function call");
                 ret
@@ -557,8 +564,20 @@ impl Checker {
         }
         let ret = if final_bindings.is_empty() { sig.ret.clone() } else { crate::types::substitute(&sig.ret, &final_bindings) };
         // User-defined effect fn calls that return non-Result T are reported as Result[T, String] in two contexts: 1. test blocks — there's no enclosing effect fn to auto-`?` against, so the test sees the raw lifted Result. 2. lambda bodies — codegen's ResultPropagation lifts the callee's return type but doesn't recurse into lambdas (closures can't `?`-propagate to the enclosing fn). Letting the lambda body's type stay `T` here means a `(n) => worker(n)` passes type-checking against `list.map`'s `(A) -> B` slot, only to blow up at codegen with `expected Vec<i64>, found Vec<Result<i64, String>>`. Surfacing the Result at the call site instead steers the user toward `match worker(n) { ok(v) => v, err(_) => ... }` — a real type error, not an "Almide bug" diagnostic. Bundled stdlib effect fns are excluded — their `@inline_rust` / `@intrinsic` templates carry their own propagation and never get lifted by ResultPropagation, so their callers see raw `T`. User-defined effect fns are lifted to Result[T, String] by ResultPropagation. Make the checker's type match: callers always see Result[T, String]. auto_unwrap in let/var bindings and match arms transparently extracts T. Bundled stdlib effect fns (@intrinsic/@inline_rust) are NOT lifted — they carry their own Result/Option types already.
+        // A user module may share a stdlib module's name (`import self.net`
+        // beside the stdlib `net`, #2223): the call resolved to the USER fn,
+        // so it is judged as one — otherwise a cross-module effect fn's
+        // `String` stayed bare, the same-file `E002` never fired, and rustc
+        // met a `Result` where the emit expected a value. The file's import
+        // table knows which it brought in: an alias that is NOT a stdlib
+        // import is the user's module. (`env.user_modules` cannot tell — the
+        // self-hosted stdlib modules are registered there too.)
         let is_bundled_stdlib_call = name.split_once('.')
-            .map(|(m, _)| almide_lang::stdlib_info::is_bundled_module(m))
+            .map(|(m, _)| {
+                let table = &self.env.import_table;
+                let user_import = table.aliases.contains_key(&sym(m)) && !table.stdlib.contains(&sym(m));
+                almide_lang::stdlib_info::is_bundled_module(m) && !user_import
+            })
             .unwrap_or(false);
         // Single-condition decisions (MC/DC ledger): the && chain as its
         // short-circuit-order nested ifs, verbatim.
@@ -643,7 +662,54 @@ impl Checker {
     }
 
     // Try resolving `name(...)` as a variant constructor or a callable
-     /// Type a call THROUGH a Fn-typed local binding (a `let`, or a function
+     /// `Some(Unknown)` when the callee is a VALUE — reported as E002, the same
+    /// diagnostic `let f = none; f()` already gets through the named path, so
+    /// the two spellings of one mistake read the same way (#2134).
+    ///
+    /// `none()` is the spelling a writer reaches for by symmetry with
+    /// `some(v)`, so it earns its own fix line: `none` IS the value, and the
+    /// parentheses are the whole error. Every other uncallable callee gets the
+    /// shared wording.
+    ///
+    /// `None` when the callee's type is still open (an inference var may yet
+    /// resolve to a function) or already a function — those keep the ordinary
+    /// constraint.
+    fn report_uncallable_callee(&mut self, callee: &ast::Expr, ct: &Ty) -> Option<Ty> {
+        let rty = resolve_ty(ct, &self.uf);
+        if matches!(rty, Ty::Unknown | Ty::TypeVar(_) | Ty::Fn { .. }) {
+            return None;
+        }
+        let (subject, hint, fix) = match &callee.kind {
+            ExprKind::None => (
+                "`none`".to_string(),
+                "`none` is the empty Option itself, not a function that builds one — \
+                 drop the parentheses. (`some` takes an argument, which is why the \
+                 symmetric spelling looks right and is not.)"
+                    .to_string(),
+                Some("none".to_string()),
+            ),
+            _ => (
+                "this expression".to_string(),
+                "Only functions and closures can be called; this is a value. \
+                 Remove the call, or call something that names a function."
+                    .to_string(),
+                None,
+            ),
+        };
+        let mut diag = super::err(
+            format!("{subject} is not a function — it has type {}", rty.display()),
+            hint,
+            "function call".to_string(),
+        )
+        .with_code("E002");
+        if let Some(fix) = fix {
+            diag = diag.with_try(fix);
+        }
+        self.emit(diag);
+        Some(Ty::Unknown)
+    }
+
+    /// Type a call THROUGH a Fn-typed local binding (a `let`, or a function
     /// PARAMETER). `None` when the name's local is not a function.
     fn call_fn_typed_local(&mut self, name: &str, ty: &Ty, arg_tys: &[Ty]) -> Option<Ty> {
         let Ty::Fn { is_effect, params, ret } = ty else { return None };
@@ -786,6 +852,23 @@ impl Checker {
             return Ty::Unknown;
         }
         let mut diag = super::err(format!("undefined function '{}'", name), hint, format!("call to {}()", name)).with_code("E002");
+        // #2088: the caret must cover the CALLEE. `emit` fills an unset span from
+        // `current_span`, which by this point is the last argument the checker
+        // walked — so `list.nope(xs)` underlined `xs` (and a call inside a `${}`
+        // interpolation underlined 22 columns of unrelated text) while the
+        // zero-argument `list.nope()` happened to be right, because there was no
+        // argument to move the cursor. The message names the function and the
+        // caret has to point at it, or the reader edits the argument instead.
+        if let Some(span) = self.callee_span_hint {
+            if let Some(file) = &self.source_file {
+                diag.file = Some(file.clone());
+            }
+            diag.line = Some(span.line);
+            diag.col = Some(span.col);
+            if span.end_col > span.col {
+                diag.end_col = Some(span.end_col);
+            }
+        }
         // `try_replace` (Phase 3): when the hint is a clean rename and the callee's source span is available, emit both a concise `try` and the exact replacement range so `Diagnostic::apply_try_to` can rewrite the source. Rich multi-line snippets (conversion wrappers, operator suggestions) stay display-only via `with_try`.
         if let Some(rich) = rich_snippet {
             diag = diag.with_try(rich.to_string());

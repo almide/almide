@@ -34,7 +34,11 @@
 // Temp-dir paths carry entropy suffixes and are never printed.
 import fs
 
-fn short_name(i: Int, namelen: Int) -> String = string.pad_end("f" + string.pad_start(int.to_string(i), 6, "0"), namelen, "x")
+fn short_name(i: Int, namelen: Int) -> String = string.pad_end(
+  "f" + string.pad_start(int.to_string(i), 6, "0"),
+  namelen,
+  "x",
+)
 
 effect fn probe(label: String, n: Int, namelen: Int, extralen: Int) -> Unit = {
   let d = fs.create_temp_dir("ld")!
@@ -47,7 +51,10 @@ effect fn probe(label: String, n: Int, namelen: Int, extralen: Int) -> Unit = {
   let names = fs.list_dir(d)!
   let got = list.len(names)
   let joined = names |> list.join(",")
-  println("${label} n=${int.to_string(got)} bytes=${int.to_string(string.len(joined))} first=${list.get(names, 0) ?? "-"} last=${list.get(names, got - 1) ?? "-"}")
+  println("${label} n=${int.to_string(got)} bytes=${int.to_string(string.len(joined))} first=${list.get(
+    names,
+    0,
+  ) ?? "-"} last=${list.get(names, got - 1) ?? "-"}")
   fs.remove_all(d)!
 }
 

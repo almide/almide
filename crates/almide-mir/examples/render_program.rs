@@ -91,7 +91,7 @@ fn main() {
         .unwrap_or_else(|e| die(format!("parse error: {e:?}")));
     let self_modules = discover_self_modules(&path, &probe_prog);
     let rendered = if test_mode {
-        almide_mir::pipeline::try_render_wasm_source_tests(&source, &self_modules, true)
+        almide_mir::pipeline::try_render_wasm_source_tests(&source, &self_modules, true, None)
     } else {
         almide_mir::pipeline::try_render_wasm_source(&source, &self_modules, true)
     };

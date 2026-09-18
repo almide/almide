@@ -2,4 +2,4 @@
 @bounded
 effect fn report() -> Unit = println("bounded")
 
-effect fn main() -> Unit = report()
+effect fn main() -> Unit = report()!

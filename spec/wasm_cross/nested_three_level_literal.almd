@@ -18,6 +18,10 @@ fn main() -> Unit = {
       [4]
     ]
   ]
-  let flat = list.fold(tower, 0, (a, mid) => a + list.fold(mid, 0, (b, leaf) => b + list.fold(leaf, 0, (c, x) => c + x)))
+  let flat = list.fold(
+    tower,
+    0,
+    (a, mid) => a + list.fold(mid, 0, (b, leaf) => b + list.fold(leaf, 0, (c, x) => c + x)),
+  )
   println(int.to_string(flat))
 }

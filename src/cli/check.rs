@@ -138,6 +138,30 @@ fn report_timings(r: &almide_base::profile::PhaseReport, total_secs: f64) {
 }
 
 pub fn cmd_check(file: &str, deny_warnings: bool, timings: bool, stamp: bool, critical: Option<&[String]>, wasm_target: bool) {
+    check_one(file, deny_warnings, timings, stamp, critical, wasm_target);
+    err(&format!("No errors found"));
+}
+
+/// `almide check` with no file inside a package (#2165): every `.almd` under
+/// `src/` is an entry the package owns, so every one is judged. Before this,
+/// the bare form checked `src/mod.almd` alone and still printed
+/// `No errors found` while `src/main.almd` in the same package did not
+/// type-check — a green that meant nothing. Each file names itself on its
+/// own line so the verdict says what it covered; the summary keeps the
+/// `No errors found` wording so existing readers of that line still match.
+///
+/// A failure in any file exits through the same path a single-file check
+/// does, after printing its diagnostics — the files before it have already
+/// reported `ok`, so the reader sees how far the check got.
+pub fn cmd_check_package(files: &[String], deny_warnings: bool, timings: bool, stamp: bool, critical: Option<&[String]>, wasm_target: bool) {
+    for file in files {
+        check_one(file, deny_warnings, timings, stamp, critical, wasm_target);
+        err(&format!("{file}: ok"));
+    }
+    err(&format!("Checked {} files — No errors found", files.len()));
+}
+
+fn check_one(file: &str, deny_warnings: bool, timings: bool, stamp: bool, critical: Option<&[String]>, wasm_target: bool) {
     // Arm the accounting BEFORE the first source is read; a phase counter that
     // starts mid-pipeline reports a front end with no lexer.
     if timings {
@@ -157,10 +181,17 @@ pub fn cmd_check(file: &str, deny_warnings: bool, timings: bool, stamp: bool, cr
         Vec::new()
     };
 
+    // #2159: a shebang that only runs on macOS. Text-only, so it sits with
+    // the other file-level warnings rather than in the checker.
+    let shebang_warning = almide::lint_shebang::split_string_warning(file, &source_text);
+
     let mut warnings: Vec<&diagnostic::Diagnostic> = diagnostics.iter()
         .filter(|d| d.level == diagnostic::Level::Warning)
         .collect();
     for d in &unused_warnings {
+        warnings.push(d);
+    }
+    if let Some(d) = &shebang_warning {
         warnings.push(d);
     }
     for d in &warnings {
@@ -204,8 +235,6 @@ pub fn cmd_check(file: &str, deny_warnings: bool, timings: bool, stamp: bool, cr
     if stamp {
         write_dialect_stamp(file, &source_text);
     }
-
-    err(&format!("No errors found"));
 }
 
 /// `--stamp`: advance the file's dialect stamp after a clean check.
@@ -260,15 +289,37 @@ fn parse_for_json(file: &str) -> (Option<almide::ast::Program>, String, Vec<diag
 }
 
 pub fn cmd_check_json(file: &str, critical: Option<&[String]>) {
+    if !check_json_one(file, critical) {
+        // The exit code is deliberately unchanged (1 = this file did not
+        // parse). A harness that gates on it must not silently flip to
+        // success just because the diagnostics got a better shape.
+        std::process::exit(1);
+    }
+}
+
+/// `almide check --json` with no FILE inside a package (#2253): every entry
+/// the bare form judges, in the bare form's order, one JSON row per
+/// diagnostic — each row names its `file`. The exit code is the single-file
+/// form's, aggregated: `1` iff some entry did not parse; a type error is a
+/// row whose `level` says so, and the remaining entries are still judged.
+pub fn cmd_check_json_package(files: &[String], critical: Option<&[String]>) {
+    let mut parsed_all = true;
+    for file in files {
+        parsed_all &= check_json_one(file, critical);
+    }
+    if !parsed_all {
+        std::process::exit(1);
+    }
+}
+
+/// One file's JSON report. `false` iff the file did not parse.
+fn check_json_one(file: &str, critical: Option<&[String]>) -> bool {
     let (parsed, source_text, parse_errors) = parse_for_json(file);
     let Some(mut program) = parsed else {
         for d in &parse_errors {
             out(&format!("{}", crate::diagnostic_render::to_json(d)));
         }
-        // The exit code is deliberately unchanged (1 = this file did not
-        // parse). A harness that gates on it must not silently flip to
-        // success just because the diagnostics got a better shape.
-        std::process::exit(1);
+        return false;
     };
     let (diagnostics, checker) = resolve_and_typecheck_for_check(file, &mut program, &source_text, critical);
 
@@ -278,6 +329,9 @@ pub fn cmd_check_json(file: &str, critical: Option<&[String]>) {
     }
     for d in &diagnostics {
         out(&format!("{}", crate::diagnostic_render::to_json(d)));
+    }
+    if let Some(d) = almide::lint_shebang::split_string_warning(file, &source_text) {
+        out(&format!("{}", crate::diagnostic_render::to_json(&d)));
     }
 
     // Lower to IR for unused variable warnings (skip if type errors)
@@ -289,6 +343,7 @@ pub fn cmd_check_json(file: &str, critical: Option<&[String]>) {
             out(&format!("{}", crate::diagnostic_render::to_json(d)));
         }
     }
+    true
 }
 
 /// `cmd_check_effects`'s `[permissions].allow` enforcement block. Extracted

@@ -62,7 +62,11 @@ fn map_get_srec(m: Map[String, String], k: Value) -> String? = map.get(m, __srec
 // the all-scalar record __srec_key walks, so the SAME normalizer + _str family
 // serve it. set/contains complete the fn set the fixture exercises; len routes
 // straight to map.len_str (the backing map IS the str flavor).
-fn map_set_srec(m: Map[String, String], k: Value, v: String) -> Map[String, String] = map.set(m, __srec_key(k), v)
+fn map_set_srec(m: Map[String, String], k: Value, v: String) -> Map[String, String] = map.set(
+  m,
+  __srec_key(k),
+  v,
+)
 
 fn map_contains_srec(m: Map[String, String], k: Value) -> Bool = map.contains(m, __srec_key(k))
 

@@ -1,0 +1,21 @@
+// @contract: C-103
+// #2112: borrowed List parameters and owned literals construct the same Value.
+import json
+
+local fn wrap(items: List[Value]) -> String = json.stringify(value.array(items))
+
+local fn object(pairs: List[(String, Value)]) -> String = json.stringify(value.object(pairs))
+
+effect fn main() -> Unit = {
+  println(wrap([value.int(1), value.str("x")]))
+  println(wrap([]))
+  println(object([
+    ("key", value.array([value.bool(true)]))
+  ]))
+  println(object([]))
+  var items = [value.str("before")]
+  let snapshot = value.array(items)
+  items[0] = value.str("after")
+  println(json.stringify(snapshot))
+  println(wrap(items))
+}

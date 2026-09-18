@@ -21,6 +21,9 @@
 use std::path::{Path, PathBuf};
 use crate::{err, out};
 
+#[path = "docs_gen_counts.rs"]
+mod counts;
+
 const LLMS_TXT: &str = "llms.txt";
 const DIAGNOSTICS_DIR: &str = "docs/diagnostics";
 
@@ -255,8 +258,9 @@ mod tests {
 /// was hand-written in five places and its old derivation (`stdlib/defs/*.toml`)
 /// died with the self-hosting migration. This computes the truth the same way
 /// `almide compile <module> --json` does — one interface extraction per module
-/// documented under docs/stdlib/ — and asserts every claim site quotes exactly
-/// that pair. Runs in-process, so the CI job that runs `docs-gen --check`
+/// documented under docs/stdlib/. Live claims must quote that pair; dated
+/// count blocks must match the release ledger instead. Runs in-process, so
+/// the CI job that runs `docs-gen --check`
 /// enforces it wherever the binary exists.
 fn check_stdlib_fn_count() -> Vec<String> {
     let mut drifts = Vec::new();
@@ -288,33 +292,17 @@ fn check_stdlib_fn_count() -> Vec<String> {
         total += iface.functions.iter().filter(|f| !f.name.starts_with("__")).count();
     }
     let want = format!("{} functions across {} modules", total, modules.len());
+    let stamp = match counts::load_stamp() {
+        Ok(stamp) => stamp,
+        Err(error) => return vec![error],
+    };
     for doc in ["README.md", "docs/SPEC.md", "docs/wasm/WASM-OUTPUT.md"] {
         let Ok(text) = std::fs::read_to_string(doc) else {
             drifts.push(format!("cannot read {doc}"));
             continue;
         };
-        for line in text.lines() {
-            if let Some(idx) = line.find(" functions across ") {
-                // Reconstruct the claimed "<n> functions across <m> modules" span.
-                let head = &line[..idx];
-                let n_start = head.rfind(|c: char| !c.is_ascii_digit()).map_or(0, |i| i + 1);
-                let tail = &line[idx + " functions across ".len()..];
-                let m_end = tail.find(|c: char| !c.is_ascii_digit()).unwrap_or(tail.len());
-                if !tail[..m_end].is_empty() && !tail[m_end..].trim_start().starts_with("modules") {
-                    continue; // "functions across targets" or similar — not this claim
-                }
-                let claimed = format!(
-                    "{} functions across {} modules",
-                    &head[n_start..],
-                    &tail[..m_end]
-                );
-                if claimed != want {
-                    drifts.push(format!(
-                        "{doc} claims `{claimed}` but the module interfaces total `{want}`"
-                    ));
-                }
-            }
-        }
+        drifts.extend(counts::check_claims(&text, &want, &stamp)
+            .into_iter().map(|error| format!("{doc}: {error}")));
     }
     drifts
 }

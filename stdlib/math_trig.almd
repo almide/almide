@@ -383,7 +383,14 @@ else {
 // inner: fw += PIO2[k]*q[i+k], k = 0 while k<=jp && k<=jz-i.
 fn __ph_recmul(qh: Int, i: Int, jp: Int, jz: Int, k: Int, fw: Float) -> Float = {
   let cont = if k <= jp then (k <= jz - i) else false
-  if cont then __ph_recmul(qh, i, jp, jz, k + 1, fw + __pio2(k) * prim.ffrombits(prim.load64(qh + 12 + (i + k) * 8)))
+  if cont then __ph_recmul(
+    qh,
+    i,
+    jp,
+    jz,
+    k + 1,
+    fw + __pio2(k) * prim.ffrombits(prim.load64(qh + 12 + (i + k) * 8)),
+  )
   else fw
 }
 

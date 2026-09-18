@@ -2,7 +2,10 @@
 // List[List[Int]] exhaustively: literal, grown, jagged, empty inners,
 // indexing both levels, map/fold over inner lists, equality, and the
 // aliasing question (does pushing into a copy mutate the source?).
-fn show(xss: List[List[Int]]) -> String = list.join(list.map(xss, (xs) => "[${list.join(list.map(xs, (x) => int.to_string(x)), ",")}]"), " ")
+fn show(xss: List[List[Int]]) -> String = list.join(
+  list.map(xss, (xs) => "[${list.join(list.map(xs, (x) => int.to_string(x)), ",")}]"),
+  " ",
+)
 
 fn main() -> Unit = {
   let lit: List[List[Int]] = [

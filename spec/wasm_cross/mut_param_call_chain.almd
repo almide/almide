@@ -19,7 +19,7 @@ effect fn g(mut a: Int) -> Unit = {
 effect fn walk(mut buf: Bytes, n: Int) -> Unit = if n == 0 then ()
 else {
   bytes.set_at(buf, n % 64, int.band(n, 255))
-  walk(buf, n - 1)
+  walk(buf, n - 1)!
 }
 
 effect fn poke(mut buf: Bytes, v: Int) -> Unit = bytes.set_at(buf, 0, v)

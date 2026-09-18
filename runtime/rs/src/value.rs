@@ -63,8 +63,8 @@ pub fn almide_rt_value_str(s: &str) -> AlmideValue { AlmideValue::Str(s.to_strin
 pub fn almide_rt_value_int(n: i64) -> AlmideValue { AlmideValue::Int(n) }
 pub fn almide_rt_value_float(f: f64) -> AlmideValue { AlmideValue::Float(f) }
 pub fn almide_rt_value_bool(b: bool) -> AlmideValue { AlmideValue::Bool(b) }
-pub fn almide_rt_value_array(items: &Vec<AlmideValue>) -> AlmideValue { AlmideValue::Array(items.clone()) }
-pub fn almide_rt_value_object(pairs: &Vec<(String, AlmideValue)>) -> AlmideValue { AlmideValue::Object(pairs.iter().map(|(k, v)| (almide_rt_intern_key(k), v.clone())).collect()) }
+pub fn almide_rt_value_array(items: &[AlmideValue]) -> AlmideValue { AlmideValue::Array(items.to_vec()) }
+pub fn almide_rt_value_object(pairs: &[(String, AlmideValue)]) -> AlmideValue { AlmideValue::Object(pairs.iter().map(|(k, v)| (almide_rt_intern_key(k), v.clone())).collect()) }
 pub fn almide_rt_value_null() -> AlmideValue { AlmideValue::Null }
 // Structural equality (`value.eq`). The wasm leg had this in its self-host
 // registry all along; native only ever reached AlmideValue equality through user
@@ -203,6 +203,31 @@ pub fn almide_rt_value_field_ref<'a>(v: &'a AlmideValue, key: &str) -> Result<&'
         Err(format!("expected Object, received {}", almide_rt_value_kind(v)))
     }
 }
+/// `almide_rt_value_field_ref` with a slot hint (#1679, slot-indexed lookup). A
+/// derived `T.decode` knows the declaration index of every field, and a
+/// document written by `T.encode` (or by hand in declaration order — the
+/// common case) carries its keys in that order, so the field is usually
+/// sitting at `pairs[hint]`: one bounds check and one key compare, no scan.
+/// The compare is length-then-pointer-then-bytes: the key literal the derive
+/// passes and the interned `Cow::Borrowed` key are distinct allocations, so
+/// the pointer test is only the cheap identity short-cut (a key the program
+/// itself interned), and a same-length key falls through to one short byte
+/// compare. A miss at the
+/// hint (a reordered, sparse, or hand-built document) falls back to the plain
+/// scan, so the result and the two error strings (C-084) are exactly
+/// `almide_rt_value_field_ref`'s for every document.
+#[inline]
+pub fn almide_rt_value_field_ref_at<'a>(v: &'a AlmideValue, key: &str, hint: usize) -> Result<&'a AlmideValue, String> {
+    if let AlmideValue::Object(pairs) = v {
+        if let Some((k, val)) = pairs.get(hint) {
+            let k: &str = k.as_ref();
+            if k.len() == key.len() && (std::ptr::eq(k.as_ptr(), key.as_ptr()) || k == key) {
+                return Ok(val);
+            }
+        }
+    }
+    almide_rt_value_field_ref(v, key)
+}
 pub fn almide_rt_value_decode_with_default<T: Clone, F: Fn(AlmideValue) -> Result<T, String>>(v: &AlmideValue, key: &str, default: T, f: F) -> Result<T, String> {
     match almide_rt_value_field(v, key) {
         Ok(AlmideValue::Null) => Ok(default),
@@ -231,22 +256,28 @@ pub fn almide_rt___encode_option_string(v: Option<String>) -> AlmideValue { almi
 pub fn almide_rt___encode_option_int(v: Option<i64>) -> AlmideValue { almide_rt_value_option_encode(v, almide_rt_value_int) }
 pub fn almide_rt___encode_option_float(v: Option<f64>) -> AlmideValue { almide_rt_value_option_encode(v, almide_rt_value_float) }
 pub fn almide_rt___encode_option_bool(v: Option<bool>) -> AlmideValue { almide_rt_value_option_encode(v, almide_rt_value_bool) }
-pub fn almide_rt___decode_option_string(v: AlmideValue, key: String) -> Result<Option<String>, String> { almide_rt_value_decode_option(&v, &key, |x| almide_rt_value_as_string(&x)) }
-pub fn almide_rt___decode_option_int(v: AlmideValue, key: String) -> Result<Option<i64>, String> { almide_rt_value_decode_option(&v, &key, |x| almide_rt_value_as_int(&x)) }
-pub fn almide_rt___decode_option_float(v: AlmideValue, key: String) -> Result<Option<f64>, String> { almide_rt_value_decode_option(&v, &key, |x| almide_rt_value_as_float(&x)) }
-pub fn almide_rt___decode_option_bool(v: AlmideValue, key: String) -> Result<Option<bool>, String> { almide_rt_value_decode_option(&v, &key, |x| almide_rt_value_as_bool(&x)) }
-pub fn almide_rt___decode_default_string(v: AlmideValue, key: String, default: String) -> Result<String, String> { almide_rt_value_decode_with_default(&v, &key, default, |x| almide_rt_value_as_string(&x)) }
-pub fn almide_rt___decode_default_int(v: AlmideValue, key: String, default: i64) -> Result<i64, String> { almide_rt_value_decode_with_default(&v, &key, default, |x| almide_rt_value_as_int(&x)) }
-pub fn almide_rt___decode_default_float(v: AlmideValue, key: String, default: f64) -> Result<f64, String> { almide_rt_value_decode_with_default(&v, &key, default, |x| almide_rt_value_as_float(&x)) }
-pub fn almide_rt___decode_default_bool(v: AlmideValue, key: String, default: bool) -> Result<bool, String> { almide_rt_value_decode_with_default(&v, &key, default, |x| almide_rt_value_as_bool(&x)) }
+// The primitive option and default decoders borrow the document too (#2052):
+// they were the last decode helpers taking it BY VALUE, so a derived decode
+// that used one had to own its input — moving or cloning the whole document
+// per field — and an outer decode that borrowed (`alt: Addr?`) handed a
+// `&Value` to the by-value option driver (rustc E0308). BorrowInsertion seeds
+// these signatures (`seed_codec_helper_sigs`) so every derived decode borrows.
+pub fn almide_rt___decode_option_string(v: &AlmideValue, key: String) -> Result<Option<String>, String> { almide_rt_value_decode_option(v, &key, |x| almide_rt_value_as_string(&x)) }
+pub fn almide_rt___decode_option_int(v: &AlmideValue, key: String) -> Result<Option<i64>, String> { almide_rt_value_decode_option(v, &key, |x| almide_rt_value_as_int(&x)) }
+pub fn almide_rt___decode_option_float(v: &AlmideValue, key: String) -> Result<Option<f64>, String> { almide_rt_value_decode_option(v, &key, |x| almide_rt_value_as_float(&x)) }
+pub fn almide_rt___decode_option_bool(v: &AlmideValue, key: String) -> Result<Option<bool>, String> { almide_rt_value_decode_option(v, &key, |x| almide_rt_value_as_bool(&x)) }
+pub fn almide_rt___decode_default_string(v: &AlmideValue, key: String, default: String) -> Result<String, String> { almide_rt_value_decode_with_default(v, &key, default, |x| almide_rt_value_as_string(&x)) }
+pub fn almide_rt___decode_default_int(v: &AlmideValue, key: String, default: i64) -> Result<i64, String> { almide_rt_value_decode_with_default(v, &key, default, |x| almide_rt_value_as_int(&x)) }
+pub fn almide_rt___decode_default_float(v: &AlmideValue, key: String, default: f64) -> Result<f64, String> { almide_rt_value_decode_with_default(v, &key, default, |x| almide_rt_value_as_float(&x)) }
+pub fn almide_rt___decode_default_bool(v: &AlmideValue, key: String, default: bool) -> Result<bool, String> { almide_rt_value_decode_with_default(v, &key, default, |x| almide_rt_value_as_bool(&x)) }
 // List[scalar] defaults (#1520): a missing/null key yields the default list;
 // a present key decodes through the same per-element path the required-field
 // form uses. Without these the derive emitted `__decode_default_value`, a
 // name no runtime provides — check green, rustc E0425.
-pub fn almide_rt___decode_default_list_string(v: AlmideValue, key: String, default: Vec<String>) -> Result<Vec<String>, String> { almide_rt_value_decode_with_default(&v, &key, default, |x| almide_rt_value_decode_list(x, |e| almide_rt_value_as_string(&e))) }
-pub fn almide_rt___decode_default_list_int(v: AlmideValue, key: String, default: Vec<i64>) -> Result<Vec<i64>, String> { almide_rt_value_decode_with_default(&v, &key, default, |x| almide_rt_value_decode_list(x, |e| almide_rt_value_as_int(&e))) }
-pub fn almide_rt___decode_default_list_float(v: AlmideValue, key: String, default: Vec<f64>) -> Result<Vec<f64>, String> { almide_rt_value_decode_with_default(&v, &key, default, |x| almide_rt_value_decode_list(x, |e| almide_rt_value_as_float(&e))) }
-pub fn almide_rt___decode_default_list_bool(v: AlmideValue, key: String, default: Vec<bool>) -> Result<Vec<bool>, String> { almide_rt_value_decode_with_default(&v, &key, default, |x| almide_rt_value_decode_list(x, |e| almide_rt_value_as_bool(&e))) }
+pub fn almide_rt___decode_default_list_string(v: &AlmideValue, key: String, default: Vec<String>) -> Result<Vec<String>, String> { almide_rt_value_decode_with_default(v, &key, default, |x| almide_rt_value_decode_list(x, |e| almide_rt_value_as_string(&e))) }
+pub fn almide_rt___decode_default_list_int(v: &AlmideValue, key: String, default: Vec<i64>) -> Result<Vec<i64>, String> { almide_rt_value_decode_with_default(v, &key, default, |x| almide_rt_value_decode_list(x, |e| almide_rt_value_as_int(&e))) }
+pub fn almide_rt___decode_default_list_float(v: &AlmideValue, key: String, default: Vec<f64>) -> Result<Vec<f64>, String> { almide_rt_value_decode_with_default(v, &key, default, |x| almide_rt_value_decode_list(x, |e| almide_rt_value_as_float(&e))) }
+pub fn almide_rt___decode_default_list_bool(v: &AlmideValue, key: String, default: Vec<bool>) -> Result<Vec<bool>, String> { almide_rt_value_decode_with_default(v, &key, default, |x| almide_rt_value_decode_list(x, |e| almide_rt_value_as_bool(&e))) }
 
 // ── AlmideValue utilities ──
 

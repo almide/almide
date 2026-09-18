@@ -25,9 +25,18 @@ test "zlib gzip/gunzip roundtrip" {
 
 test "zlib compress_level round trips at both ends of the dial" {
   let data = bytes.from_string("test data for the level dial")
-  assert(bytes.to_list(zlib.decompress(zlib.compress_level(data, 0)!)!) == bytes.to_list(data), "level 0")
-  assert(bytes.to_list(zlib.decompress(zlib.compress_level(data, 9)!)!) == bytes.to_list(data), "level 9")
-  assert(bytes.to_list(zlib.inflate(zlib.deflate_level(data, 1)!)!) == bytes.to_list(data), "deflate level 1")
+  assert(
+    bytes.to_list(zlib.decompress(zlib.compress_level(data, 0)!)!) == bytes.to_list(data),
+    "level 0",
+  )
+  assert(
+    bytes.to_list(zlib.decompress(zlib.compress_level(data, 9)!)!) == bytes.to_list(data),
+    "level 9",
+  )
+  assert(
+    bytes.to_list(zlib.inflate(zlib.deflate_level(data, 1)!)!) == bytes.to_list(data),
+    "deflate level 1",
+  )
 }
 
 test "round trips at the empty and one-byte sizes" {

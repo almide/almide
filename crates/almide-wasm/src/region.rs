@@ -109,7 +109,7 @@ pub(crate) fn region_pure_fns(
             expr_pure(&f.body, &cx)
         });
         if pure.len() == before {
-            if std::env::var_os("ALMIDE_REGION_DEBUG").is_some() {
+            if almide_base::env::flag("ALMIDE_REGION_DEBUG") {
                 let mut names: Vec<&str> = pure.iter().map(|&i| program_fns[i].0.name.as_str()).collect();
                 names.sort_unstable();
                 eprintln!("[region] pure fns: {}", names.join(" "));
@@ -241,7 +241,7 @@ impl<'a> Emitter<'a> {
         params: &[SliceTy],
     ) -> bool {
         let pure = self.work.region_pure.borrow();
-        if std::env::var_os("ALMIDE_REGION_OFF").is_some() || pure.is_empty() || !pure.contains(&g) || !scalar_slot(ret) {
+        if almide_base::env::flag("ALMIDE_REGION_OFF") || pure.is_empty() || !pure.contains(&g) || !scalar_slot(ret) {
             return false;
         }
         let cx = PureCx {
@@ -275,7 +275,7 @@ impl<'a> Emitter<'a> {
                 return false;
             }
         }
-        if heap_args == 1 && std::env::var_os("ALMIDE_REGION_DEBUG").is_some() {
+        if heap_args == 1 && almide_base::env::flag("ALMIDE_REGION_DEBUG") {
             eprintln!("[region] window at call #{g}");
         }
         heap_args == 1

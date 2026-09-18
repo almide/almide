@@ -26,7 +26,18 @@ let FINISHED = 3
 // ── Tween ──
 type Tween = { from: Float, to: Float, duration: Float, delay: Float, easing: Int, direction: Int, loop_count: Int, elapsed: Float, state: Int, current_loop: Int }
 
-fn create(from: Float, to: Float, duration: Float) -> Tween = { from: from, to: to, duration: duration, delay: 0.0, easing: ease.OUT_CUBIC, direction: NORMAL, loop_count: 0, elapsed: 0.0, state: RUNNING, current_loop: 0 }
+fn create(from: Float, to: Float, duration: Float) -> Tween = {
+  from: from,
+  to: to,
+  duration: duration,
+  delay: 0.0,
+  easing: ease.OUT_CUBIC,
+  direction: NORMAL,
+  loop_count: 0,
+  elapsed: 0.0,
+  state: RUNNING,
+  current_loop: 0,
+}
 
 // ── Builders ──
 fn with_easing(tw: Tween, e: Int) -> Tween = { ...tw, easing: e }
@@ -71,9 +82,31 @@ fn tick(tw: Tween, dt_ms: Float) -> Tween = {
       if tw.loop_count == 0 - 1 or tw.current_loop < tw.loop_count then {
         // Next loop
         let overflow = active_time - tw.duration
-        Tween { from: tw.from, to: tw.to, duration: tw.duration, delay: tw.delay, easing: tw.easing, direction: tw.direction, loop_count: tw.loop_count, elapsed: tw.delay + overflow, state: tw.state, current_loop: tw.current_loop + 1 }
+        Tween {
+          from: tw.from,
+          to: tw.to,
+          duration: tw.duration,
+          delay: tw.delay,
+          easing: tw.easing,
+          direction: tw.direction,
+          loop_count: tw.loop_count,
+          elapsed: tw.delay + overflow,
+          state: tw.state,
+          current_loop: tw.current_loop + 1,
+        }
       } else {
-        Tween { from: tw.from, to: tw.to, duration: tw.duration, delay: tw.delay, easing: tw.easing, direction: tw.direction, loop_count: tw.loop_count, elapsed: new_elapsed, state: FINISHED, current_loop: tw.current_loop }
+        Tween {
+          from: tw.from,
+          to: tw.to,
+          duration: tw.duration,
+          delay: tw.delay,
+          easing: tw.easing,
+          direction: tw.direction,
+          loop_count: tw.loop_count,
+          elapsed: new_elapsed,
+          state: FINISHED,
+          current_loop: tw.current_loop,
+        }
       }
     } else {
       { ...tw, elapsed: new_elapsed }

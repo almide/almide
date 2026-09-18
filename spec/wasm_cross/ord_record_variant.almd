@@ -1,0 +1,104 @@
+// @contract: C-053
+// A record or variant that DERIVES Ord orders on both targets.
+//
+// C-053 has claimed "every totally-ordered element type … and variants (tag
+// order)" since 0.24.0, and nothing executed the claim. A record or variant
+// declaring `: Ord` sorted on native — a record lexicographically in FIELD
+// DECLARATION order, a variant by CASE order then payload, native's derive —
+// and BOTH wasm legs refused to build it (`list-sort-elem:Named(0)` on the
+// structural leg, `list.sort_x` on the incumbent): native answered, wasm would
+// not build (#2167).
+//
+// The structural leg's `sort` and `min`/`max` arms each kept their own copy of
+// the orderable-element list, which had drifted from what `emit_val_cmp` could
+// actually order — the same two-copies-of-one-truth that produced #2154 one
+// function over. Both copies are gone; `emit_val_cmp` decides, and it learned
+// the two shapes. Records/variants WITHOUT the derive stay rejected at check
+// time on both targets (E030, #1521): structural orderability of the fields is
+// deliberately not enough, because native's monomorph needs `T: Ord`.
+type Inner: Ord = { n: Int, s: String }
+
+type Outer: Ord = { tag: String, inner: Inner }
+
+type Level: Ord = | Low | Mid | High
+
+type Shape: Ord = | Dot | Line { len: Int } | Box { w: Int, h: Int }
+
+type Pair: Ord = | Zero | One(Int) | Two(Int, String)
+
+effect fn main() -> Unit = {
+  // ── record: FIELD DECLARATION order, first field decides, second breaks ties
+  let inners = [
+    Inner { n: 2, s: "x" },
+    Inner { n: 1, s: "y" },
+    Inner { n: 1, s: "a" }
+  ]
+  for i in inners |> list.sort {
+    println("rec ${i.n} ${i.s}")
+  }
+  // ── nested record: the chain recurses into a record field
+  let outers = [
+    Outer { tag: "b", inner: Inner { n: 1, s: "z" } },
+    Outer { tag: "a", inner: Inner { n: 9, s: "a" } },
+    Outer { tag: "b", inner: Inner { n: 1, s: "a" } }
+  ]
+  for o in outers |> list.sort {
+    println("nest ${o.tag} ${o.inner.n} ${o.inner.s}")
+  }
+  // ── unit variant: TAG order is declaration order
+  for l in [High, Low, Mid, Low] |> list.sort {
+    println("unit ${l}")
+  }
+  // ── record-shaped variant cases: tag first, then the case's fields
+  let shapes = [
+    Box { w: 1, h: 9 },
+    Line { len: 5 },
+    Dot,
+    Box { w: 1, h: 2 },
+    Line { len: 1 }
+  ]
+  for s in shapes |> list.sort {
+    println("shape ${s}")
+  }
+  // ── tuple-shaped variant cases, incl. a fieldless case among payloaded ones
+  let pairs = [Two(1, "z"), One(9), Zero, Two(1, "a"), One(2)]
+  for p in pairs |> list.sort {
+    println("pair ${p}")
+  }
+  // ── min / max walk the same comparator
+  println("min_rec=${list.min(inners)}")
+  println("max_rec=${list.max(inners)}")
+  println("min_shape=${list.min(shapes)}")
+  println("max_shape=${list.max(shapes)}")
+  println("min_pair=${list.min(pairs)}")
+  println("max_pair=${list.max(pairs)}")
+  println("min_unit=${list.min([High, Low, Mid])}")
+  // ── a record and a variant as a sort_by KEY (#2154's route, these shapes)
+  let words = [("x", 2), ("y", 1), ("z", 2)]
+  for (w, c) in words |> list.sort_by(((w, c)) => Inner { n: 0 - c, s: w }) {
+    println("rkey ${w} ${c}")
+  }
+  for (w, c) in words |> list.sort_by(((w, c)) => (if c > 1 then Line { len: 0 - c } else Dot)) {
+    println("vkey ${w} ${c}")
+  }
+  // ── i64 extremes in a record field: the slot must not narrow
+  let wide = [
+    Inner { n: 9223372036854775807, s: "hi" },
+    Inner { n: -9223372036854775808, s: "lo" },
+    Inner { n: 0, s: "z" }
+  ]
+  for i in wide |> list.sort {
+    println("wide ${i.n} ${i.s}")
+  }
+  // ── STABILITY is only observable through a KEY: a record compares all of
+  //    its fields, so two elements equal under `sort` are indistinguishable.
+  //    Every key below is equal, so the input order must survive on both legs.
+  for (w, c) in words |> list.sort_by(((w, c)) => Inner { n: 0, s: "same" }) {
+    println("stable ${w}")
+  }
+  // ── degenerate: empty and single
+  let none_of_them: List[Inner] = []
+  println("empty=${list.len(none_of_them |> list.sort)}")
+  println("empty_min=${list.min(none_of_them)}")
+  println("one=${list.len([Dot] |> list.sort)}")
+}

@@ -1,0 +1,26 @@
+import io
+
+// A running total driven by one command per stdin line.
+//   add <n>   adds n to the total
+//   show      prints the total
+// Any other line is reported as an error and skipped.
+effect fn main() -> Unit = {
+  let lines = io.read_all() |> string.split("\n")
+  var total = 0
+  for raw in lines {
+    let line = string.trim(raw)
+    if line != "" then {
+      let parts = string.split(line, " ")
+      let cmd = list.get(parts, 0) ?? ""
+      let arg = list.get(parts, 1) ?? ""
+      match cmd {
+        "add" => match int.parse(arg) {
+          ok(n) => { total = total + n },
+          err(_) => println("error: bad amount ${arg}"),
+        },
+        "show" => println(int.to_string(total)),
+        _ => println("error: unknown command ${cmd}"),
+      }
+    }
+  }
+}

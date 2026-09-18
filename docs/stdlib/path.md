@@ -23,7 +23,7 @@ import fs
 
 effect fn read_validated(user_input: String) -> String =
   match path.from_string(user_input) {
-    ok(p) => fs.read_text(path.to_string(p)),
+    ok(p) => fs.read_text(path.to_string(p))!,
     err(e) => err("rejected: " + e),
   }
 

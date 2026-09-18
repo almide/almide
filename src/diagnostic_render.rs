@@ -279,14 +279,26 @@ fn render_span_source_line(out: &mut String, line_num: usize, trimmed: &str, wid
     }
 }
 
-/// `render_primary_span`'s caret-underline row. Extracted verbatim.
-fn render_span_carets(out: &mut String, d: &Diagnostic, col: usize, width: usize, color: bool) {
+/// `render_primary_span`'s caret-underline row.
+///
+/// The caret measures SOURCE, so its width may only ever come from a span or
+/// from the line. The no-`end_col` arm used to fall back to
+/// `d.context.len()` — the length of a human-readable string — which drew as
+/// many carets as the message happened to have characters: 19 under
+/// `list.nope([1])}")` for "call to list.nope()", and 42 running past the end
+/// of a 37-column line for "this expression with an unconstrained type". A
+/// span the checker could not measure is a span of unknown width, and the
+/// honest rendering of unknown width is to point at where it starts.
+fn render_span_carets(out: &mut String, d: &Diagnostic, col: usize, width: usize, line_len: usize, color: bool) {
     let gutter_pad = " ".repeat(width);
     let col0 = col.saturating_sub(1);
     let caret_len = match d.end_col {
         Some(end_col) => { let end0 = end_col.saturating_sub(1); if end0 > col0 { end0 - col0 } else { 1 } }
-        None => if !d.context.is_empty() { d.context.len().max(1) } else { 1 },
+        None => 1,
     };
+    // Never underline past the end of the line: an end_col from a re-based
+    // sub-parse (string interpolation) can overshoot the text it names.
+    let caret_len = caret_len.min(line_len.saturating_sub(col0)).max(1);
     let pad = " ".repeat(col0);
     let carets = "^".repeat(caret_len);
     let (caret_color, caret_reset) = if color {
@@ -319,7 +331,7 @@ fn render_primary_span(out: &mut String, d: &Diagnostic, source_lines: &[&str], 
 
     // Caret underline
     let Some(col) = d.col else { return; };
-    render_span_carets(out, d, col, width, color);
+    render_span_carets(out, d, col, width, trimmed.chars().count(), color);
 }
 
 pub fn display_with_source(d: &Diagnostic, source: &str) -> String {
@@ -340,4 +352,58 @@ pub fn display_with_source(d: &Diagnostic, source: &str) -> String {
     // Render primary span
     render_primary_span(&mut out, d, &source_lines, color);
     out
+}
+
+#[cfg(test)]
+mod caret_tests {
+    use super::display_with_source;
+    use almide_base::diagnostic::Diagnostic;
+
+    /// (1-based column the caret run starts at, its length) — everything the
+    /// caret row asserts, with the gutter and padding read rather than
+    /// trimmed away.
+    fn caret(rendered: &str) -> (usize, usize) {
+        let row = rendered.lines().rev().find(|l| l.contains('^')).expect("a caret row");
+        let body = row.split_once("| ").expect("a gutter").1;
+        let start = body.find('^').expect("a caret");
+        (start + 1, body[start..].chars().take_while(|c| *c == '^').count())
+    }
+
+    /// The caret measures source. A span the checker could not measure has
+    /// unknown width, and the width of the message is not a substitute: the
+    /// fallback used to be `context.len()`, which drew 19 carets for "call to
+    /// list.nope()" and 42 for "this expression with an unconstrained type",
+    /// covering text the diagnostic was never about.
+    #[test]
+    fn an_unmeasured_span_points_rather_than_guessing_a_width() {
+        let src = "  println(\"${list.nope([1])}\")";
+        let mut d = Diagnostic::error("undefined function 'list.nope'", "h", "call to list.nope()");
+        d.line = Some(1);
+        d.col = Some(14);
+        d.end_col = None;
+        assert_eq!(caret(&display_with_source(&d, src)), (14, 1));
+    }
+
+    /// A span from a re-based sub-parse can overshoot the line it names, and a
+    /// caret row longer than the source line is nonsense on its face.
+    #[test]
+    fn a_caret_never_runs_past_the_end_of_the_line() {
+        let src = "let x = 1";
+        let mut d = Diagnostic::error("m", "h", "c");
+        d.line = Some(1);
+        d.col = Some(9);
+        d.end_col = Some(400);
+        assert_eq!(caret(&display_with_source(&d, src)), (9, 1));
+    }
+
+    /// A measured span still underlines exactly what it measured.
+    #[test]
+    fn a_measured_span_underlines_its_own_width() {
+        let src = "  let a = list.nope([1])";
+        let mut d = Diagnostic::error("m", "h", "call to list.nope()");
+        d.line = Some(1);
+        d.col = Some(11);
+        d.end_col = Some(20);
+        assert_eq!(caret(&display_with_source(&d, src)), (11, 9));
+    }
 }

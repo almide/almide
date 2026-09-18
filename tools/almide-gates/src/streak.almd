@@ -19,10 +19,27 @@ else if step == "success" then "FINDINGS" else "TRUNCATED"
 
 // Fold newest-first, which is the order the API returns. `green_done` / `full_done` latch:
 // once a streak is broken it cannot resume further down the list.
-fn fold(verdicts: List[String], i: Int, green: Int, full: Int, green_done: Bool, full_done: Bool) -> Streaks = if i >= list.len(verdicts) then Streaks { green: green, full: full } else {
+fn fold(verdicts: List[String], i: Int, green: Int, full: Int, green_done: Bool, full_done: Bool) -> Streaks = if i >= list.len(verdicts) then Streaks {
+  green: green,
+  full: full,
+} else {
   let v = list.get_or(verdicts, i, "TRUNCATED")
-  if v == "GREEN" then fold(verdicts, i + 1, if green_done then green else green + 1, if full_done then full else full + 1, green_done, full_done)
-  else if v == "FINDINGS" then fold(verdicts, i + 1, green, if full_done then full else full + 1, true, full_done)
+  if v == "GREEN" then fold(
+    verdicts,
+    i + 1,
+    if green_done then green else green + 1,
+    if full_done then full else full + 1,
+    green_done,
+    full_done,
+  )
+  else if v == "FINDINGS" then fold(
+    verdicts,
+    i + 1,
+    green,
+    if full_done then full else full + 1,
+    true,
+    full_done,
+  )
   else fold(verdicts, i + 1, green, full, true, true)
 }
 

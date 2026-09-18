@@ -6,5 +6,5 @@ import fs
 effect fn store(l: String) -> Unit = println(l)
 
 effect fn main() -> Unit = {
-  fs.__fallible_for_each_line("data.txt", (l) => store(l))
+  fs.__fallible_for_each_line("data.txt", (l) => store(l))!
 }

@@ -17,11 +17,13 @@
 //!   hits the bridge's honest `None` and the call abstains with that prim named —
 //!   a skip, never a guess. The scalar prim floor in `bridge.rs` is the whole
 //!   vocabulary a body may consume.
-//! - **The interp-native surfaces still win.** Containers are modeled as
-//!   `Value::List`/`Value::Map`, not linear memory, so `hofs.rs` remains the
-//!   faithful implementation for them; the pool is a FALLBACK tier consulted only
-//!   after the existing dispatch misses. Flipping specific bridge arms over to
-//!   their pool bodies is follow-up work, judged arm by arm by the 3-way gate.
+//! - **The interp-native container surfaces still win.** Containers are
+//!   modeled as `Value::List`/`Value::Map`, not linear memory, so `hofs.rs`
+//!   remains the faithful implementation for them. Below that tier the pool
+//!   body is consulted FIRST (#2185): the scalar/string bridge that used to
+//!   shadow it answers only where a body abstains, and every such answer is
+//!   recorded (`RunOutcome::bridge_fallbacks`) and ledgered
+//!   (`interp-bridge-fallback-ledger.txt`) — the corpus reaches two.
 //!
 //! Lowering stops at `lower_program` — no optimize/mono/ir_link. The pool is a
 //! declaration harvest with no `main`, so DCE would empty it; the registry impl

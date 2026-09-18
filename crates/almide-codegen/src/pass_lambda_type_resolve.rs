@@ -35,6 +35,10 @@ impl NanoPass for LambdaTypeResolvePass {
         Some(vec![Target::Rust, Target::Wgsl])
     }
 
+    /// Needs the `CallTarget::Module { list, fold }` spelling both rewrites
+    /// below replace (#559).
+    fn run_before(&self) -> Vec<&'static str> { vec!["ResolveCalls", "IntrinsicLowering"] }
+
     fn postconditions(&self) -> Vec<Postcondition> {
         vec![Postcondition::Custom(check_lambda_params_resolved)]
     }

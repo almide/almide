@@ -254,6 +254,8 @@ fn fmt_expr_compound(out: &mut String, expr: &Expr, depth: usize) -> bool {
         },
         ExprKind::Tuple { elements, .. } => {
             out.push('(');
+            let members: Vec<_> = elements.iter().map(|e| (None, e)).collect();
+            if fmt_commented_members(out, &members, ')', depth) { return true; }
             comma_sep(out, elements, |out, e| fmt_expr(out, e, depth));
             // A 1-tuple's trailing comma is load-bearing: `(e,)` is a tuple,
             // `(e)` is grouping — dropping it changes the program (#1265).
@@ -334,15 +336,99 @@ fn push_escaped_char(out: &mut String, chars: &[char], i: usize, quote: char, us
 fn fmt_expr_record(out: &mut String, expr: &Expr, depth: usize) {
     let ExprKind::Record { name, fields, .. } = &expr.kind else { unreachable!() };
     if let Some(n) = name { w!(out, "{n} "); }
-    if fields.is_empty() { out.push_str("{}"); }
-    else { out.push_str("{ "); comma_sep(out, fields, |out, f| { w!(out, "{}: ", f.name); fmt_expr(out, &f.value, depth); }); out.push_str(" }"); }
+    let members: Vec<_> = fields.iter().map(|f| (Some(f.name.as_str()), &f.value)).collect();
+    if members.iter().any(|(_, e)| has_own_line_leading_comments(e.id) || has_continuation_comments(e.id)) {
+        out.push('{');
+        fmt_commented_members(out, &members, '}', depth);
+        return;
+    }
+    if fields.is_empty() { out.push_str("{}"); return; }
+    let mut one = String::from("{ ");
+    comma_sep(&mut one, fields, |out, f| { w!(out, "{}: ", f.name); fmt_expr(out, &f.value, depth); });
+    one.push_str(" }");
+    if stack_members(out, expr.span, &members, &one) {
+        out.push('{');
+        fmt_members_expanded(out, &members, '}', depth);
+    } else {
+        out.push_str(&one);
+    }
 }
 
 fn fmt_expr_spread_record(out: &mut String, expr: &Expr, depth: usize) {
     let ExprKind::SpreadRecord { base, fields, .. } = &expr.kind else { unreachable!() };
+    let members: Vec<_> = std::iter::once((Some("..."), base.as_ref()))
+        .chain(fields.iter().map(|f| (Some(f.name.as_str()), &f.value))).collect();
+    if members.iter().any(|(_, e)| has_own_line_leading_comments(e.id) || has_continuation_comments(e.id)) {
+        out.push('{');
+        fmt_commented_members(out, &members, '}', depth);
+        return;
+    }
     out.push_str("{ ..."); fmt_expr(out, base, depth);
     for f in fields { w!(out, ", {}: ", f.name); fmt_expr(out, &f.value, depth); }
     out.push_str(" }");
+}
+
+/// #2161: line width. `almide fmt` had no limit — argument lists and record
+/// literals the author had split across lines were folded back onto one
+/// line regardless of length (394 characters in a real file). Two rules,
+/// either of which lays a container out one member per line:
+///
+/// - the author already split it — its members sit on different source
+///   lines — so the split is kept (idempotent: the expanded form is itself
+///   split, and stays that way);
+/// - the one-line form would run past `MAX_WIDTH` from where it starts.
+///
+/// Single-member containers never expand (there is nothing to stack), and a
+/// container carrying comments keeps the comment layout that already knows
+/// how to place them.
+pub const MAX_WIDTH: usize = 100;
+
+fn current_col(out: &str) -> usize {
+    out.rsplit('\n').next().map_or(0, |l| l.chars().count())
+}
+
+/// Did the author split the container? Its first member starts on a line
+/// below the opener — `f(\n  a,\n  b)`, the shape `fmt_members_expanded`
+/// prints. The earlier test compared the members' own start lines, and a
+/// multi-line member followed on its closing line by the next one
+/// (`f([\n  x,\n  y\n], 5)`) — a layout fmt itself prints — read as a
+/// split, so the second pass expanded what the first had hugged: the
+/// formatter was not idempotent on its own output (fuzz-nightly
+/// FmtInstability, seed 561137265089 index 136). Spans carry no end line,
+/// so the opener line is the one fact both passes agree on.
+fn members_span_lines(opener: Option<Span>, members: &[(Option<&str>, &Expr)]) -> bool {
+    match (opener, members.first().and_then(|(_, e)| e.span)) {
+        (Some(open), Some(first)) => first.line > open.line,
+        _ => false,
+    }
+}
+
+/// One member per line, trailing comma on each, the closer back at `depth`
+/// — the shape `fmt_commented_members` already produces, minus its gate.
+fn fmt_members_expanded(out: &mut String, members: &[(Option<&str>, &Expr)], close: char, depth: usize) {
+    out.push('\n');
+    for (name, expr) in members {
+        emit_leading_comment_lines(out, expr.id, depth + 1);
+        out.push_str(&ind(depth + 1));
+        match name {
+            Some("...") => out.push_str("..."),
+            Some(name) => w!(out, "{name}: "),
+            None => {}
+        }
+        fmt_expr_sans_leading(out, expr, depth + 1);
+        out.push(',');
+        out.push('\n');
+    }
+    out.push_str(&ind(depth));
+    out.push(close);
+}
+
+/// Decide the layout for `members`, given the one-line rendering `one` (the
+/// text after the opener, closer included). Comments are only handled by the
+/// stacked path when present, so a commented container is left to its
+/// existing branch and never reaches here.
+fn stack_members(out: &str, opener: Option<Span>, members: &[(Option<&str>, &Expr)], one: &str) -> bool {
+    members.len() >= 2 && (members_span_lines(opener, members) || current_col(out) + one.chars().count() > MAX_WIDTH)
 }
 
 fn fmt_expr_call(out: &mut String, expr: &Expr, depth: usize) {
@@ -353,15 +439,24 @@ fn fmt_expr_call(out: &mut String, expr: &Expr, depth: usize) {
     fmt_expr(out, callee, depth);
     if let Some(ta) = type_args { out.push('['); comma_sep(out, ta, |out, t| fmt_type(out, t, depth)); out.push(']'); }
     out.push('(');
-    comma_sep(out, args, |out, a| fmt_expr(out, a, depth));
+    let members: Vec<_> = args.iter().map(|e| (None, e))
+        .chain(named_args.iter().map(|(n, e)| (Some(n.as_str()), e))).collect();
+    if fmt_commented_members(out, &members, ')', depth) { return; }
+    let mut one = String::new();
+    comma_sep(&mut one, args, |out, a| fmt_expr(out, a, depth));
     if !named_args.is_empty() {
-        if !args.is_empty() { out.push_str(", "); }
-        comma_sep(out, named_args, |out, (name, expr)| {
+        if !args.is_empty() { one.push_str(", "); }
+        comma_sep(&mut one, named_args, |out, (name, expr)| {
             w!(out, "{name}: ");
             fmt_expr(out, expr, depth);
         });
     }
-    out.push(')');
+    one.push(')');
+    if stack_members(out, callee.span, &members, &one) {
+        fmt_members_expanded(out, &members, ')', depth);
+    } else {
+        out.push_str(&one);
+    }
 }
 
 /// Wave 1 block forms: the parser synthesizes `fan.__any_block([() => …])`
@@ -581,12 +676,20 @@ fn fmt_block(out: &mut String, stmts: &[Stmt], expr: &Option<Box<Expr>>, depth: 
     w!(out, "{}}}", ind(depth));
 }
 
-/// Does `id` carry LEADING comments (the #1714 own-line element-introducer
-/// shape)? Decides multi-line forcing for list/map literals: an own-line `//`
-/// comment has nowhere to go on one line — the record-type precedent
-/// (`fmt_record_type`).
-fn has_leading_comments(id: ExprId) -> bool {
-    comments_for(id).is_some_and(|a| !a.leading.is_empty())
+/// Can this comment share a line with the node it leads? A `//` consumes the
+/// rest of its physical line and a block comment carrying a newline already
+/// spans several, so both need a line of their own; an inline `/* */` does
+/// not, and #1404 keeps it where its author wrote it.
+fn needs_own_line(comment: &str) -> bool {
+    comment.starts_with("//") || comment.contains('\n')
+}
+
+/// Does `id` lead with a comment that CANNOT stay inline? That — not the mere
+/// presence of a leading comment (#1714's own-line element-introducer shape,
+/// the `fmt_record_type` precedent) — is what forces a container onto physical
+/// lines: `f(/* why */ 3, 4)` stays one line, `f(\n  // why\n  3,\n)` cannot.
+fn has_own_line_leading_comments(id: ExprId) -> bool {
+    comments_for(id).is_some_and(|a| a.leading.iter().any(|c| needs_own_line(c)))
 }
 
 /// Emit `id`'s leading comments on their own lines at `depth` — the element
@@ -595,7 +698,7 @@ fn has_leading_comments(id: ExprId) -> bool {
 /// [`fmt_expr`] does not print them a second time.
 fn emit_leading_comment_lines(out: &mut String, id: ExprId, depth: usize) {
     if let Some(a) = comments_for(id) {
-        for c in &a.leading {
+        for c in a.leading.iter().filter(|c| needs_own_line(c)) {
             out.push_str(&ind(depth));
             out.push_str(c);
             out.push('\n');
@@ -606,6 +709,12 @@ fn emit_leading_comment_lines(out: &mut String, id: ExprId, depth: usize) {
 /// Render `expr` with its LEADING comments already emitted own-line by the
 /// caller; trailing stays inline exactly as [`fmt_expr`] prints it.
 fn fmt_expr_sans_leading(out: &mut String, expr: &Expr, depth: usize) {
+    if let Some(a) = comments_for(expr.id) {
+        for c in a.leading.iter().filter(|c| !needs_own_line(c)) {
+            out.push_str(c);
+            out.push(' ');
+        }
+    }
     fmt_expr_inner(out, expr, depth);
     if let Some(a) = comments_for(expr.id) {
         for c in &a.trailing {
@@ -617,7 +726,7 @@ fn fmt_expr_sans_leading(out: &mut String, expr: &Expr, depth: usize) {
 
 fn fmt_list(out: &mut String, elements: &[Expr], depth: usize) {
     if elements.is_empty() { out.push_str("[]"); return; }
-    let any_leading = elements.iter().any(|e| has_leading_comments(e.id));
+    let any_leading = elements.iter().any(|e| has_own_line_leading_comments(e.id));
     if !any_leading && elements.len() <= 5 && elements.iter().all(is_short) {
         out.push('['); comma_sep(out, elements, |out, e| fmt_expr(out, e, depth)); out.push(']');
     } else {
@@ -632,7 +741,7 @@ fn fmt_list(out: &mut String, elements: &[Expr], depth: usize) {
 }
 
 fn fmt_map(out: &mut String, entries: &[(Expr, Expr)], depth: usize) {
-    let any_leading = entries.iter().any(|(k, _)| has_leading_comments(k.id));
+    let any_leading = entries.iter().any(|(k, _)| has_own_line_leading_comments(k.id));
     let short = !any_leading && entries.len() <= 3 && entries.iter().all(|(k, v)| is_short(k) && is_short(v));
     let (open, close, d) = if short { ("[", "]", depth) } else { ("[\n", "]", depth + 1) };
     out.push_str(open);

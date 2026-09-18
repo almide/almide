@@ -101,3 +101,46 @@ ruby runner_multi.rb --lang gleam --trials 20      # one language
 ruby aggregate_multi.rb                            # summary table
 python3 plot_snapshot.py                           # regenerate the chart
 ```
+
+`runner_multi.rb` also knows `go` (`go version`) and `zig` (`zig version`) so
+the MiniGit lane can be extended to the current comparison set; neither has a
+committed 20-trial snapshot yet.
+
+## Modification-survival lane
+
+MiniGit saturates (every language 20/20 on v1 and v2 — [#1963](https://github.com/almide/almide/issues/1963)):
+the spec and the scoring script are both handed to the model, so it iterates
+against the oracle in-session, and there is no cross-file invariant to break.
+It measures conciseness and cost, not modification survival.
+
+The discriminating lane is a separate task set — a seed program per language
+plus an ORDERED sequence of edits, each scored against a hidden oracle the model
+never sees, with prefix survival (an edit that fails fails every later horizon).
+The tasks live in Dojo (`tasks/xlang/` in
+[almide/almide-dojo](https://github.com/almide/almide-dojo) — all MSR task
+material belongs there, see the repo-boundary rule in the top-level `CLAUDE.md`);
+the cross-language driver lives here in lang-bench because Dojo's harness is
+Almide-only by rule. The design, the scoring conjunction, the ledger format and
+the run cost are laid out on #1963.
+
+| Path | Purpose |
+|---|---|
+| `lib/bench_common.rb` | `run_cmd` / `run_claude` / `run_tests` / `count_loc` / `parse_claude_json`, shared by both runners |
+| `runner_edits.rb` | task-dir driven driver: seed + ordered edits, accumulating tree, hidden oracle, prefix survival; `--dry-run` is the bank gate |
+| `aggregate_edits.rb` | ledger: MSR-seq with Wilson 95 % CI, MSR-edit, first failure mode, $/sequence; prints `INCONCLUSIVE_BANK_SATURATED` at the ceiling |
+| `tasks-example/xlang/` | a two-language smoke fixture so the gate can be exercised locally |
+| `test/aggregate_edits_test.rb` | `ruby -Itest test/aggregate_edits_test.rb` |
+
+```bash
+ruby runner_edits.rb --tasks tasks-example/xlang --dry-run        # gate, no model call
+ruby runner_edits.rb --tasks ../../../../almide-dojo/tasks/xlang --lang rust --trials 5   # measure (spends money)
+ruby aggregate_edits.rb --tasks ../../../../almide-dojo/tasks/xlang                        # ledger
+```
+
+Per edit `k`: `survive_k = compile ∧ visible ∧ hidden ∧ scope_clean`, where
+`scope_clean` means every file the model changed (git diff against the
+pre-edit snapshot, new files included) matches a glob in `scope.txt`. The tree
+contract is language-agnostic: `bash build.sh` leaves an executable at `./app`;
+`visible.sh` / `hidden.sh` run with the tree as cwd, drive `./app` over stdin
+and report `PASSED:`/`FAILED:`. For interpreted languages `build.sh` type-checks
+and writes a `./app` wrapper script.

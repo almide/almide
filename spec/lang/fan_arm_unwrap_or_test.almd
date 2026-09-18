@@ -1,0 +1,34 @@
+// #2246: a `??` inside a fan arm is the arm's own fallback, not the join's
+// auto-try — nested in an argument or as the arm itself, on the native leg too.
+fn total(xs: List[Int]) -> Int = list.sum(xs)
+
+effect fn maybe(i: Int) -> Result[Int, String] = if i > 0 then ok(i) else err("neg")
+
+effect fn sums() -> Result[Int, String] = {
+  let made: List[List[Int]] = [
+    [1, 2],
+    [3]
+  ]
+  let r = fan {
+    total(list.get(made, 0) ?? [])
+    total(list.get(made, 1) ?? [])
+    total(list.get(made, 9) ?? [40])
+  }
+  ok(r.0 + r.1 + r.2)
+}
+
+effect fn defaults() -> Result[Int, String] = {
+  let d = fan {
+    maybe(-1) ?? 7
+    maybe(2) ?? 7
+  }
+  ok(d.0 * 10 + d.1)
+}
+
+test "a ?? nested in a fan arm's argument keeps its default" {
+  assert_eq(sums(), ok(46))
+}
+
+test "a ?? that is the whole fan arm keeps its default and the join sees no error" {
+  assert_eq(defaults(), ok(72))
+}

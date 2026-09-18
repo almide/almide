@@ -41,6 +41,11 @@ fn main() -> Unit = {
 a-b-c
 ```
 
+`len`, `get`, `slice`, and search-result positions count Unicode codepoints,
+not UTF-8 bytes or grapheme clusters. `to_bytes` returns UTF-8 byte values as
+`List[Int]`; prefer `bytes.from_string` for a compact buffer. Byte offsets from
+a lexer belong to `byte_slice`, not `slice`.
+
 ### `string.len(s: String) -> Int`
 
 Return the number of characters in a string.
@@ -92,6 +97,13 @@ fn main() -> Unit = {
 ```output
 true
 ```
+
+### `string.byte_slice(s: String, start: Int, end: Int) -> Option[String]`
+
+Extract a half-open UTF-8 byte range. Returns `none` for negative, reversed,
+out-of-bounds, or non-codepoint-boundary endpoints. Valid empty ranges return
+`some("")`. Only the requested bytes are copied; the rest of the string is not
+scanned. `string.byte_slice("aé🦀z", 1, 3)` returns `some("é")`.
 
 ### `string.slice(s: String, start: Int, end: Int) -> String`
 
@@ -632,7 +644,7 @@ hel
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (49 functions)
+## Signature index (50 functions)
 
 ```
 string.trim(s: String) -> String
@@ -645,6 +657,7 @@ string.contains(s: String, sub: String) -> Bool
 string.starts_with(s: String, prefix: String) -> Bool
 string.ends_with(s: String, suffix: String) -> Bool
 string.slice(s: String, start: Int, end: Int) -> String
+string.byte_slice(s: String, start: Int, end: Int) -> Option[String]
 string.pad_start(s: String, n: Int, ch: String) -> String
 string.to_bytes(s: String) -> List[Int]
 string.capitalize(s: String) -> String

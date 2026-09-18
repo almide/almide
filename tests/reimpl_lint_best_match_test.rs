@@ -1,22 +1,6 @@
-//! E015 (reimpl lint) must name the *closest* stdlib fn, and must name
-//! the same one on every run.
-//!
-//! The lint's candidate scan walks `module_fn_names`, which projects a
-//! `HashMap`'s keys. Taking the first candidate that cleared the
-//! name-distance and signature gates therefore made the suggestion a
-//! function of hash iteration order: `fn atan(x: Float) -> Float` was
-//! reported against `math.atan` on some runs and `math.tan` on others,
-//! and `fn decompress(...)` was told to delegate to `zlib.compress` —
-//! advice that silently inverts the operation if followed.
-//!
-//! Two invariants, both checked here because they fail independently:
-//!
-//! 1. **Best match.** When several stdlib names clear the gates, the
-//!    smallest edit distance wins, so an exact name match always beats a
-//!    near-miss.
-//! 2. **Stability.** Repeated runs over the same source name the same
-//!    fn. A diagnostic that changes between runs is unusable as a
-//!    modification target — the metric this compiler optimises for.
+//! E015 candidates must have an exact name and compatible signature, exclude
+//! host/effect surfaces, and remain deterministic. Even a candidate with the
+//! same name is advisory: the body has not been proven equivalent (#2113).
 
 use std::process::Command;
 
@@ -51,20 +35,12 @@ fn suggested_fn(output: &str) -> Option<String> {
     Some(rest[..end].to_string())
 }
 
-/// Each case is a user fn whose name is an exact stdlib name but which
-/// also sits within edit distance 2 of a *different* stdlib name, so the
-/// first-match scan could pick either. The expectation is the exact one.
+/// Exact matches remain visible; neighboring names cannot redirect the hint.
 const CASES: &[(&str, &str)] = &[
     // `atan` is distance 1 from `tan`.
     (
         "fn atan(x: Float) -> Float = x\neffect fn main() -> Unit = {\n  println(float.to_string(atan(1.0)))\n}",
         "math.atan",
-    ),
-    // `decompress` is distance 2 from `compress` — and delegating to
-    // `compress` would be actively wrong.
-    (
-        "fn decompress(data: Bytes) -> Result[Bytes, String] = ok(data)\neffect fn main() -> Unit = {\n  println(\"ok\")\n}",
-        "zlib.decompress",
     ),
     // `window` is distance 1 from `windows`, which returns the same
     // shape, so only the distance ranking separates them.
@@ -108,4 +84,36 @@ fn e015_suggestion_is_stable_across_runs() {
             );
         }
     }
+}
+
+#[test]
+fn e015_does_not_recommend_host_calls_or_near_names() {
+    let dir = tempfile::tempdir().unwrap();
+    for source in [
+        "fn optional(s: String) -> Option[String] = if s == \"\" then none else some(s)",
+        "fn option(s: String) -> Option[String] = if s == \"\" then none else some(s)",
+        "fn get(s: String) -> Option[String] = some(s)",
+        "fn trims(s: String) -> String = s",
+        "fn decompress(data: Bytes) -> Result[Bytes, String] = ok(data)",
+    ] {
+        let output = check(dir.path(), source);
+        assert!(!output.contains("E015"), "{source}\n{output}");
+    }
+}
+
+#[test]
+fn e015_states_its_evidence_without_a_replacement_edit() {
+    let dir = tempfile::tempdir().unwrap();
+    let output = check(dir.path(), CASES[0].0);
+    assert!(output.contains("equivalent behaviour is not established"), "{output}");
+    assert!(!output.contains("try:"), "{output}");
+}
+
+#[test]
+fn ide_outline_recognizes_bundled_args_module() {
+    let output = Command::new(almide()).args(["ide", "outline", "@stdlib/args", "--json"])
+        .output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let outline: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(outline["functions"].as_array().unwrap().iter().any(|f| f["name"] == "option"));
 }

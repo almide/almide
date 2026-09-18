@@ -36,6 +36,14 @@ pub(crate) struct Emitter<'a> {
     /// them until #2001. Args are +1'd by rc_arg_guard BEFORE a tail
     /// release, so a pass-through param survives its own dec.
     pub(crate) rc_frame_params: Vec<u32>,
+    /// #2117: frame params whose credit the ARGUMENTS of the tail call being
+    /// lowered have already spent — `build(acc + s, …)` routed through
+    /// `$str_append`, which consumes `acc` and answers the new block. The
+    /// loop-back rebinds the param either way; releasing it at the exit as
+    /// well would be the double free the exit plan exists to prevent, so the
+    /// plan is told rather than the release quietly skipped. Set for one
+    /// exit and cleared by it.
+    pub(crate) tail_consumed: std::collections::BTreeSet<u32>,
     /// This fn's own wasm index (see FnPlan::self_index).
     pub(crate) self_index: Option<u32>,
     /// Locals the Bind/Assign routes made OWNERS of a droppable block

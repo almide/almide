@@ -46,17 +46,28 @@ SUITE = [
     ("fasta",        "fasta/fasta.almd",                 ["fasta.rs"],                      "25000000", "1000", "bytes", None),
     ("fft",          "fft/fft.almd",                     ["fft.rs"],                        "22",       "10",   "line1", ["native", "rust"]),
     ("fft-wasm",     "fft/fft.almd",                     ["fft.rs"],                        "18",       "10",   "line1", ["native", "wasm", "rust"]),
-    ("fannkuchredux","fannkuchredux/fannkuchredux.almd", [],                                "11",       "7",    "bytes", None),
+    # fannkuchredux / mandelbrot (#1330): the `fan` kernels against ORDINARY
+    # sequential Rust (`rust-ref/fannkuchredux.rs`, `rust-ref/mandelbrot.rs`
+    # — one thread, no `unsafe`, no SIMD). Since #2044 the native leg runs
+    # fannkuchredux's `fan { list.map }` on a thread per core (a VICTORY row
+    # in check-perf-ratio.sh, ablated with ALMIDE_FAN_SEQUENTIAL=1);
+    # mandelbrot's `fan.map` returns `Bytes` (an `Rc` natively), outside the
+    # Send-safe subset, so it still reads ~1.0 and stays REPORTED.
+    ("fannkuchredux","fannkuchredux/fannkuchredux.almd", ["fannkuchredux.rs"],              "11",       "7",    "bytes", None),
     # onebrc writes/reads a measurements file; the wasm leg has no preopened
     # dir under `wasmtime run` so the row is native/rust only.
     ("onebrc",       "onebrc/onebrc.almd",               ["onebrc.rs"],                     "10000000", "50000", "bytes", ["native", "rust"]),
-    # binarytrees (#1991): `binarytrees.rs` is the same-shape `Box` program a
-    # Rust programmer writes, sequential (Almide's `fan.map` is sequential on
-    # the native leg). The native leg beats it — `check(make(d))` runs in a
-    # region window — so the ratio sits below 1; reported, not anchored
-    # (allocator-dependent across machines, like listbuild).
+    # binarytrees (#1991) and treealloc (#2028): the references are the
+    # same-shape `Box` programs a Rust programmer writes, sequential (Almide's
+    # `fan.map` is sequential on the native leg). The native leg beats both —
+    # `check(make(d))` runs in a region window — so the ratio sits below 1.
+    # They are the VICTORY rows of check-perf-ratio.sh (#1330): gated on the
+    # claim (< 1.0) and on the `ALMIDE_REGION_OFF=1` ablation, because the
+    # absolute ratio is allocator-dependent across machines (0.32 on an M4
+    # Pro, 0.61 on the ubuntu runner) and no one ±band holds both.
     ("binarytrees",  "binarytrees/binarytrees.almd",     ["binarytrees.rs"],                "18",       "10",   "bytes", None),
-    ("mandelbrot",   "mandelbrot/mandelbrot.almd",       [],                                "4000",     "200",  "bytes", None),
+    ("treealloc",    "treealloc/treealloc.almd",         ["treealloc.rs"],                  "21",       "10",   "bytes", None),
+    ("mandelbrot",   "mandelbrot/mandelbrot.almd",       ["mandelbrot.rs"],                 "4000",     "200",  "bytes", None),
     # listbuild (#1337): the SAME materializing workload written three ways.
     # The rows differ only in the build loop — same arithmetic, same checksum
     # consumer — so the spread between them is the cost of the SHAPE, and the
@@ -79,6 +90,32 @@ SUITE = [
     # (see the REPORTED comment there). string-gap-1004.md has the attribution.
     ("strchurn",     "strchurn/strchurn.almd", ["strchurn.rs", "strchurn_idiomatic.rs"],
      "4000000", "1000", "bytes", ["native", "rust"]),
+    # decode (#1679, #1673): N derived `User.decode`s of one fixed 8-field
+    # document (nested `Address`, 3-element `List[String]`), parsed once
+    # outside the loop. `decode.rs` is the ordinary hand-written decode against
+    # the SAME `AlmideValue` shape — a borrowed linear field scan and owned
+    # `String` record fields (the issue's 168 ns row), not the borrowed-`&str`
+    # record the language cannot express. REPORTED, not anchored: the row is
+    # eight short-string allocations per op, an allocator comparison first,
+    # like strchurn. Native/rust only for now: the wasm leg retains the decoded
+    # record on every call (#2046 — ~800 B per decode; 1M decodes peak at
+    # 786 MB and the 5M timing arg is out of memory), so the row would measure
+    # the leak. The wasm leg prints the same bytes at small N (checked by hand
+    # at 1000 and 1M); re-add "wasm" to the legs when #2046 closes.
+    ("decode",       "decode/decode.almd",               ["decode.rs"],                     "5000000",  "1000", "bytes", ["native", "rust"]),
+    # wordfreq (#2150, #2157): the keyed-aggregation row — N draws from a
+    # 5 000-word vocabulary counted in a `Map[String, Int]`, top 10. TWO
+    # spellings of one workload against ONE reference, like listbuild:
+    # `wordfreq` is the imperative `var` Map + `m[w] = map.get_or(m, w, 0) + 1`
+    # loop (the shape #2157's probe attributed the native Map's cost to),
+    # `wordfreq-group` the CHEATSHEET's `list.group_by` + `map.map`. The
+    # reference (`wordfreq.rs`) is same-shape/same-semantics: `HashMap<String,
+    # i64>`, an OWNED key cloned out of the vocabulary per draw, one `entry`
+    # per draw. REPORTED, not anchored — a hash-map row compares allocators and
+    # hashers before it compares codegen; the relation between the two rows is
+    # the T5 reading. Native/rust: the wasm leg's `group_by` is #2156's 110×.
+    ("wordfreq",       "wordfreq/wordfreq.almd",       ["wordfreq.rs"], "2000000", "20000", "bytes", ["native", "rust"]),
+    ("wordfreq-group", "wordfreq/wordfreq_group.almd", ["wordfreq.rs"], "2000000", "20000", "bytes", ["native", "rust"]),
 ]
 
 QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
@@ -89,18 +126,31 @@ QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
     "fasta": "2500000",
     "fft": "22",
     "fft-wasm": "16",
-    "fannkuchredux": "9",
+    # Parallel native n=10 reached 79.5 ms on CI, below the 80 ms floor.
+    # n=11 keeps the measured work above process-spawn noise.
+    "fannkuchredux": "11",
     "onebrc": "1000000",
     # 17, not 14: the region window (#1991) took the native row to ~18 ms at
     # 14, under the spawn-noise floor; 17 reads ~145 ms native / ~435 ms ref.
     "binarytrees": "17",
-    "mandelbrot": "1000",
+    # 20, not the #2028 default 19: with the window the native row reads
+    # ~60 ms at 19, under the spawn-noise floor; 20 reads ~120 ms / ~400 ms ref.
+    "treealloc": "20",
+    # 2000, not 1000: 1000 reads ~45 ms, under the spawn-noise floor.
+    "mandelbrot": "2000",
     "listbuild": "23",
     "listbuild-append": "23",
     "listbuild-comb": "23",
     # ~0.12s / ~210 MB RSS for the native leg — over the 0.08s spawn-noise
     # floor with room, and small enough to stay polite on a CI runner.
     "strchurn": "2000000",
+    # ~0.2s native / ~0.16s reference at 1M decodes on an M4 Pro — over the
+    # 0.08s spawn-noise floor on both sides; the docs quote ns/op at this N.
+    "decode": "1000000",
+    # ~0.09s native / ~0.05s reference at 1M draws on an M4 Pro (2026-09-14);
+    # 2M is the docs' number, 1M keeps the two rows polite on a runner.
+    "wordfreq": "1000000",
+    "wordfreq-group": "1000000",
 }
 
 RUSTC_FLAGS = ["-C", "opt-level=3", "-C", "lto=yes", "-C", "codegen-units=1",
@@ -133,6 +183,11 @@ def main():
     ap.add_argument("--quick", action="store_true", help="small workloads (CI ratchet)")
     ap.add_argument("--bench", default=None, help="comma-separated subset of bench names")
     ap.add_argument("--out", default=None, help="results JSON path (default: results/<date>-<label>.json)")
+    ap.add_argument("--ablate", default=None, metavar="KNOB",
+                    help="also build each native row with KNOB=1 in the compiler's environment and time it "
+                         "INTERLEAVED with the optimized binary as `<bench>/native:ablated` — the ablated/optimized "
+                         "delta then comes from one run, not from two invocations minutes apart")
+    ap.add_argument("--ablate-bench", default=None, help="comma-separated subset of benches to ablate (default: all)")
     args = ap.parse_args()
     legs = args.legs.split(",")
 
@@ -147,6 +202,8 @@ def main():
         keep = set(args.bench.split(","))
         suite = [b for b in SUITE if b[0] in keep]
 
+    ablate_benches = set(args.ablate_bench.split(",")) if args.ablate_bench else None
+    ablated_identical = {}  # bench -> the ablated native binary is byte-identical to the optimized one
     work = tempfile.mkdtemp(prefix="almide-perf-")
     variants = {}  # bench -> [(variant_name, argv_prefix)]
 
@@ -159,6 +216,16 @@ def main():
             out = os.path.join(work, f"{name}_native")
             run([almide, "build", src, "--release", "-o", out])
             vs.append((f"{name}/native", [out]))
+            if args.ablate and (ablate_benches is None or name in ablate_benches):
+                abl = os.path.join(work, f"{name}_native_ablated")
+                run([almide, "build", src, "--release", "-o", abl], env={**os.environ, args.ablate: "1"})
+                vs.append((f"{name}/native:ablated", [abl]))
+                # A knob that changes nothing in the emitted program yields the
+                # SAME binary (rustc is deterministic): record that, so the
+                # consumer can report the delta as 1.0 by construction instead
+                # of timing two copies of one file against each other.
+                with open(out, "rb") as f1, open(abl, "rb") as f2:
+                    ablated_identical[name] = f1.read() == f2.read()
         if "wasm" in row:
             out = os.path.join(work, f"{name}.wasm")
             run([almide, "build", src, "--target", "wasm", "-o", out])
@@ -170,7 +237,8 @@ def main():
                 run([rustc, *RUSTC_FLAGS, os.path.join(HERE, "rust-ref", ref), "-o", out])
                 vs.append((f"{name}/rust:{stem}", [out]))
         variants[name] = vs
-        print(f"  {name}: {len(vs)} variant(s)")
+        note = " (ablated binary identical to optimized)" if ablated_identical.get(name) else ""
+        print(f"  {name}: {len(vs)} variant(s){note}")
 
     print("== verify (small workload, output equivalence across variants)")
     for name, _, _, _, verify_arg, mode, _ in suite:
@@ -206,6 +274,7 @@ def main():
                 times[vname].append(dt)
         results[name] = {
             "arg": arg,
+            **({"ablated_identical": ablated_identical[name]} if name in ablated_identical else {}),
             "variants": {
                 vname: {
                     "min": round(min(ts), 4),

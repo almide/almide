@@ -270,6 +270,21 @@ impl Checker {
             hint,
             format!("method call .{}()", field)
         ).with_code("E002");
+        // #2088, method-UFCS arm: the whole `x.field()` expression is what the
+        // message is about and what the rewrite below replaces, so it is what
+        // the caret must cover. `emit` would otherwise fill the span from
+        // `current_span` — the OBJECT — and underline one column of `s` under
+        // a message about `to_uppercase`.
+        if let Some(span) = self.call_span_hint {
+            if let Some(file) = &self.source_file {
+                diag.file = Some(file.clone());
+            }
+            diag.line = Some(span.line);
+            diag.col = Some(span.col);
+            if span.end_col > span.col {
+                diag.end_col = Some(span.end_col);
+            }
+        }
         if let Some(close) = suggestion {
             // Mechanical rewrite path: if we have the object's source text AND the full call span, substitute `x.field()` → `module.close(x)` in place. Falls back to the comment-headed display form when the source isn't reachable (IDE / playground).
             let rewrite = object.span

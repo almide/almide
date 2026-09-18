@@ -30,17 +30,58 @@ fft 1.176
 # same-shape reference and 1.94x against the idiomatic one.
 nbody 0.997
 spectralnorm 1.001
-# `binarytrees` (#1991) is reported and not anchored, like the listbuild rows:
-# against the same-shape `Box` reference the region-window native leg reads
-# 0.31 on an M4 Pro and 0.61 on the ubuntu-latest runner (2026-09-08, same
-# commit) — the reference's allocator is what differs between the machines.
-# Ablation deltas (#1466): ablated-native / optimized-native median per
-# anchored bench (ALMIDE_DISABLE_OPT=1 skips fold/DCE/propagate). Anchored at
-# the measured ~1.00: on the rustc-backed native leg these passes are
-# SUBSUMED by LLVM, which runs the same folds downstream — the recorded
-# finding, published in docs/project/BENCHMARKS.md. Floor 0.90 (the optimizer
-# must never COST), ceiling +budget (a new earning re-anchors on purpose).
-ablation/fasta 1.000
-ablation/fft 1.000
-ablation/nbody 1.000
-ablation/spectralnorm 1.000
+# VICTORY rows (#1330): `binarytrees` (#1991) and `treealloc` (#2028) against
+# their same-shape `Box` references — the ordinary Rust for the program. The
+# native leg runs `check(make(depth))` in a region window and reads BELOW 1:
+# 2026-09-08, M4 Pro, median of 9, interleaved — binarytrees 0.35 (d17) /
+# 0.32 (d19), treealloc 0.30 (d20) / 0.30 (d21); with ALMIDE_REGION_OFF=1 the
+# same sources read 1.26 / 1.25 and 1.11 / 1.10. The ubuntu-latest runner
+# reads 0.61 on binarytrees (glibc frees a `Box` far cheaper than macOS's
+# allocator), so the number here is the RUNNER-CLASS one — the gate runs
+# there — and the rule for these rows is not the ±band: ratio < 1.0 (the
+# claim), ceiling = min(1.0, baseline + budget), no floor, and the
+# ablation delta below must stay above the script's VICTORY_ABLATION_FLOOR.
+# treealloc's runner number is set equal to binarytrees' (same shape, same
+# window, same allocator story) until the first runner measurement
+# replaces it.
+binarytrees 0.610
+treealloc 0.610
+# `decode` (#1679) is reported and not anchored, like strchurn: N derived
+# `User.decode`s of one 8-field document against the same-shape hand-written
+# decode (`rust:decode`, borrowed field scan + owned `String` record fields).
+# Each op is eight short-string allocations on both sides, so the ratio is an
+# allocator reading first. M4 Pro, 2026-09-08, 2M decodes: 412 ns/op native
+# (422 before the slot hint) vs 205 ns/op reference — 2.0x, and the whole
+# 2x is the derived decode's `___erratw_*` frames (#1675) cloning the Ok
+# payload and allocating the path segment on the SUCCESS path: collapsing the
+# eleven frames in the emitted Rust reads 205 ns/op, level with the reference
+# (see BENCHMARKS.md). That is the row's next move, not the lookup. This
+# script's own reading of the row the day it landed was 2.46 (whole-process
+# wall clock at 1M, a loaded box); native/rust only until the wasm leg's
+# per-decode retention (#2046) is fixed.
+# `fannkuchredux` (#2044): the parallel `fan { list.map }` against the ordinary
+# one-thread Rust. M4 Pro (14 cores), 2026-09-08: 0.21 (n=10) / 0.12 (n=11),
+# 1.07 / 1.06 with ALMIDE_FAN_SEQUENTIAL=1. The ratio is the reciprocal of
+# the core count the runner grants (ubuntu-latest: 4 vCPU, so ~0.35-0.45 at
+# the quick n=10, 10 chunks over 4 workers); 0.600 is an ESTIMATE that
+# leaves the +40% ceiling at 0.84 until the first runner measurement
+# replaces it — same rule treealloc's number followed.
+fannkuchredux 0.600
+# Ablation deltas (#1466, retired #2234): the four `ablation/<bench>` rows for
+# the anchored benches (ALMIDE_DISABLE_OPT=1 skips fold/DCE/propagate) were
+# anchored at "~1.00, SUBSUMED by LLVM". On 2026-09-15 the ablated native
+# binary proved BYTE-IDENTICAL to the optimized one for all 15 suite benches:
+# the delta was 1.0 by construction and every reading away from it was runner
+# noise. The rows are gone; the script now WAKES UP (fails, asking for a row)
+# the first time the knob reaches a bench's native binary.
+# Victory ablations (#1330): ALMIDE_REGION_OFF=1 native / optimized native,
+# same source, same machine. M4 Pro: binarytrees 3.6, treealloc 3.7. The
+# delta is machine-dependent in size (the ablated leg pays the machine's
+# allocator, the optimized leg does not) but not in direction; the script
+# gates a floor of 1.30 and prints the number — these rows are the record.
+ablation/binarytrees 3.600
+ablation/treealloc 3.700
+# fannkuchredux (#2044): ALMIDE_FAN_SEQUENTIAL=1 native / parallel native,
+# same binary. M4 Pro: 5.1 (n=10) / 8.9 (n=11); on a 4-vCPU runner the
+# delta is ~2.5-3 (10 chunks over 4 workers). Floor 1.30 gates it.
+ablation/fannkuchredux 3.000

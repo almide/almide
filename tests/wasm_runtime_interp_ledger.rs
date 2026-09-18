@@ -175,3 +175,145 @@ fn interp_abstain_ledger() {
         panic!("{failures}");
     }
 }
+
+// ── The bridge-fallback ledger gate (#2185) ──
+//
+// The lowered self-hosted body is the third vote at the pool boundary; the
+// hand-mirrored bridge answers there only when that body ABSTAINS (a
+// heap/effect prim outside the scalar floor, the eager `mut`-param gate, an
+// arity it cannot take) or has no body at all, and INSIDE the pool tier it is
+// the floor a body consumes (tagged `floor:` in the ledger). This gate holds
+// the set of `module.func` names the bridge answers for, over the
+// cross-target corpus, equal to the committed
+// `crates/almide-interp/interp-bridge-fallback-ledger.txt` in both directions:
+// a name outside the ledger is a NEW dependence on a Rust copy (widen the
+// floor so the body evaluates, or record it in the same PR); a ledgered name
+// the corpus no longer reaches through the bridge is a shadowed arm — delete
+// it from bridge.rs and the entry, the ledger only shrinks. Backend-free like
+// the abstain gate above.
+
+/// The committed inventory of bridge arms the corpus still reaches as fallbacks.
+fn fallback_ledger_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("crates/almide-interp/interp-bridge-fallback-ledger.txt")
+}
+
+#[test]
+fn interp_bridge_fallback_ledger() {
+    let dir = spec_dir();
+    if !dir.exists() {
+        eprintln!("interp_bridge_fallback_ledger: {} missing — skipping", dir.display());
+        return;
+    }
+    let mut entries: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().map(|x| x == "almd").unwrap_or(false))
+        .collect();
+    entries.sort_by_key(|e| e.path());
+    if entries.is_empty() {
+        eprintln!("interp_bridge_fallback_ledger: corpus empty — skipping");
+        return;
+    }
+
+    // name → (first fixture that reached it, the body's reason), corpus order
+    let mut observed: std::collections::BTreeMap<String, (String, String)> = std::collections::BTreeMap::new();
+    let mut calls = 0usize;
+    for entry in &entries {
+        let path = entry.path();
+        let stem = path.file_stem().unwrap().to_str().unwrap().to_string();
+        let source = std::fs::read_to_string(&path).unwrap();
+        let (_, fallbacks) = run_interp_capture_with_fallbacks(&source);
+        calls += fallbacks.len();
+        for (name, why) in fallbacks {
+            observed.entry(name).or_insert((stem.clone(), why.replace('\n', " ")));
+        }
+    }
+
+    if std::env::var("ALMIDE_UPDATE_INTERP_LEDGER").is_ok() {
+        let mut out = String::from(
+            "# interp-bridge-fallback-ledger — the `module.func` names the hand-mirrored\n\
+             # bridge (crates/almide-interp/src/bridge.rs) answers over the spec/wasm_cross\n\
+             # corpus (#2185): `floor:` rows are consumed INSIDE a self-hosted body (the\n\
+             # bridge is that tier's floor, like prim.*); the others are boundary\n\
+             # fallbacks where the body abstained or has no body. The body is the third\n\
+             # vote; this is the bridge's measured residue. An arm absent here is dead.\n\
+             #\n\
+             # Format: <module.func>  <first fixture>  <floor: … | why the body abstained>\n\
+             # Gate:   wasm_runtime_interp_ledger.rs::interp_bridge_fallback_ledger —\n\
+             #         fails on a name missing here AND on a ledgered name the corpus no\n\
+             #         longer reaches through the bridge (a shadowed arm: delete it).\n\
+             # Regenerate (then review the diff!):\n\
+             #   ALMIDE_UPDATE_INTERP_LEDGER=1 cargo test --test wasm_runtime_interp_ledger interp_bridge_fallback_ledger\n\n",
+        );
+        for (name, (stem, why)) in &observed {
+            out.push_str(&format!("{name}  {stem}  {why}\n"));
+        }
+        std::fs::write(fallback_ledger_path(), out).unwrap();
+        eprintln!(
+            "interp_bridge_fallback_ledger: regenerated with {} name(s) ({} calls) — review the diff",
+            observed.len(),
+            calls
+        );
+        return;
+    }
+
+    let ledger_text = std::fs::read_to_string(fallback_ledger_path()).unwrap_or_else(|_| {
+        panic!(
+            "interp-bridge-fallback-ledger.txt missing at {} — seed it with \
+             ALMIDE_UPDATE_INTERP_LEDGER=1 cargo test --test wasm_runtime_interp_ledger interp_bridge_fallback_ledger",
+            fallback_ledger_path().display()
+        )
+    });
+    let ledger: std::collections::BTreeSet<String> = ledger_text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .filter_map(|l| l.split_whitespace().next().map(str::to_string))
+        .collect();
+
+    let unledgered: Vec<(&String, &(String, String))> =
+        observed.iter().filter(|(n, _)| !ledger.contains(*n)).collect();
+    let stale: Vec<&String> = ledger.iter().filter(|n| !observed.contains_key(*n)).collect();
+
+    eprintln!(
+        "\ninterp_bridge_fallback_ledger: {} bridge name(s) still answer as the body's fallback ({} calls over {} fixtures)",
+        observed.len(),
+        calls,
+        entries.len()
+    );
+
+    let mut failures = String::new();
+    if !unledgered.is_empty() {
+        failures.push_str(&format!(
+            "\nUNLEDGERED BRIDGE FALLBACK(S) — {} name(s) the bridge answered for that \
+             interp-bridge-fallback-ledger.txt does not record:\n",
+            unledgered.len()
+        ));
+        for (n, (stem, why)) in &unledgered {
+            failures.push_str(&format!("    - {n} (first in {stem}): {why}\n"));
+        }
+        failures.push_str(
+            "  Preferred fix: widen the prim floor so the self-hosted body evaluates \
+             (dispatch_module.rs / heap.rs — see crates/almide-interp/CLAUDE.md).\n  \
+             Otherwise: record the fallback IN THIS SAME PR (ALMIDE_UPDATE_INTERP_LEDGER=1 \
+             regenerates) — a third vote taken from a Rust copy is a reviewed decision.\n",
+        );
+    }
+    if !stale.is_empty() {
+        failures.push_str(&format!(
+            "\nSTALE LEDGER ENTRY(IES) — {} ledgered name(s) the corpus no longer reaches \
+             through the bridge (the body evaluates now, or the fixture is gone):\n",
+            stale.len()
+        ));
+        for n in &stale {
+            failures.push_str(&format!("    - {n}\n"));
+        }
+        failures.push_str(
+            "  Delete the shadowed arm from bridge*.rs and the entry \
+             (ALMIDE_UPDATE_INTERP_LEDGER=1 regenerates) — the ledger may only shrink.\n",
+        );
+    }
+    if !failures.is_empty() {
+        panic!("{failures}");
+    }
+}

@@ -36,7 +36,9 @@
 #   (h) docs/contracts/README.md — the generated index — is stale relative to
 #       the ledger (the same diff CI's "Emit & Format" job runs);
 #   (j) a source path cited in a contract statement or a fixture header lives
-#       under a directory that no longer exists (a retired subsystem — #941).
+#       under a directory that no longer exists (a retired subsystem — #941);
+#   (l) the ledger does not load as TOML (the awk scanner never validates a
+#       string, so a stray `"` or an undefined escape only a real reader sees).
 set -uo pipefail
 
 # Byte-order collation, pinned: `sort`'s last-resort comparison follows the ambient
@@ -67,6 +69,25 @@ class_rank() { printf '%s\n' "$CLASSES" | grep -nxF "$1" | cut -d: -f1 | awk '{p
 
 fail=0
 err() { fail=1; echo "::error::$*"; }
+
+# ── (l) WELL-FORMED TOML ─────────────────────────────────────────────────────
+# The awk parser below reads the ledger line by line and never validates a
+# string, so an unescaped `"` inside a statement (C-032 carried one for months)
+# or a `\'` escape TOML does not define (C-219, C-283) passed every check here
+# while any real TOML reader refused the file. Silent on success — the Almide
+# twin (tools/almide-gates) is compared line-for-line against this output.
+if ! python3 - "$LEDGER" <<'PY'
+import sys, tomllib
+try:
+    with open(sys.argv[1], "rb") as f:
+        tomllib.load(f)
+except tomllib.TOMLDecodeError as e:
+    print(f"::error::{sys.argv[1]} is not valid TOML: {e}")
+    sys.exit(1)
+PY
+then
+  err "$LEDGER must load with a real TOML reader (python3 tomllib) — the line-scanner below cannot see a malformed string"
+fi
 
 # ── PARSER ──────────────────────────────────────────────────────────────────
 # Walk [[contract]] blocks. For each block emit one TAB-separated record per
@@ -589,6 +610,7 @@ echo "  fixtures: $n_with_header/$n_fixtures carry a // @contract: header; bidir
 #       declaration heading not found (the intended invalidation, #1998).
 #  (15) blank the C-217 column of the dojo:fallible-producer row in
 #       scripts/lib/dojo-families.txt                        -> (k) challenge not named back.
+#  (16) drop the backslash before any `\"` inside C-032's statement -> (l) not valid TOML.
 # (13)-(15) verified 2026-09-07 against C-217: each flips the gate red alone.
 # (10) and (11) were verified by hand against C-067 and spec/wasm_cross/
 # float_parse.almd: each flips the gate red alone and green again on restore.

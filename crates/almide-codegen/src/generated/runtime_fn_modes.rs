@@ -4,9 +4,14 @@
 /// element fn (value codec combinators) — extracted from the signatures.
 pub fn takes_raw_fn_last_arg(name: &str) -> bool {
     matches!(name,
+        "almide_rt_fan_map_par" |
         "almide_rt_fs_fold_lines_chunked" |
         "almide_rt_fs_fold_lines_range" |
         "almide_rt_list_flat_map_arr" |
+        "almide_rt_list_par_all" |
+        "almide_rt_list_par_any" |
+        "almide_rt_list_par_filter" |
+        "almide_rt_list_par_map" |
         "almide_rt_value_decode_list" |
         "almide_rt_value_decode_list_ref" |
         "almide_rt_value_decode_option" |
@@ -220,6 +225,7 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_fan_any" => &[false],
         "almide_rt_fan_any_map" => &[false, false],
         "almide_rt_fan_map" => &[false, false],
+        "almide_rt_fan_map_par" => &[false, false],
         "almide_rt_fan_race" => &[false],
         "almide_rt_fan_settle" => &[false],
         "almide_rt_float_abs" => &[false],
@@ -353,7 +359,6 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_int_to_uint8" => &[false],
         "almide_rt_int_wrap_add" => &[false, false, false],
         "almide_rt_int_wrap_mul" => &[false, false, false],
-        "almide_rt_io_flush" => &[],
         "almide_rt_io_print" => &[false],
         "almide_rt_io_read_all" => &[],
         "almide_rt_io_read_byte" => &[],
@@ -421,6 +426,8 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_list_par_any" => &[false, false],
         "almide_rt_list_par_filter" => &[false, false],
         "almide_rt_list_par_map" => &[false, false],
+        "almide_rt_list_par_sequential" => &[],
+        "almide_rt_list_par_workers" => &[false],
         "almide_rt_list_partition" => &[false, false],
         "almide_rt_list_pop" => &[true],
         "almide_rt_list_product" => &[false],
@@ -468,13 +475,16 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_map_from_list" => &[false, false],
         "almide_rt_map_get" => &[false, false],
         "almide_rt_map_get_or" => &[false, false, false],
+        "almide_rt_map_hash_bytes" => &[false],
+        "almide_rt_map_hash_pair" => &[false, false],
         "almide_rt_map_insert" => &[true, false, false],
         "almide_rt_map_is_empty" => &[false],
-        "almide_rt_map_key_fingerprint" => &[false],
+        "almide_rt_map_key_hash" => &[false],
         "almide_rt_map_keys" => &[false],
         "almide_rt_map_len" => &[false],
         "almide_rt_map_map_values" => &[false, false],
         "almide_rt_map_merge" => &[false, false],
+        "almide_rt_map_mix64" => &[false],
         "almide_rt_map_new" => &[],
         "almide_rt_map_remove" => &[false, false],
         "almide_rt_map_set" => &[false, false, false],
@@ -666,6 +676,7 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_set_union" => &[false, false],
         "almide_rt_sse_anthropic_messages" => &[false, false, false],
         "almide_rt_sse_openai_chat" => &[false, false, false, false],
+        "almide_rt_string_byte_slice" => &[false, false, false],
         "almide_rt_string_capitalize" => &[false],
         "almide_rt_string_char_at" => &[false, false],
         "almide_rt_string_char_count" => &[false],
@@ -744,6 +755,7 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_value_eq" => &[false, false],
         "almide_rt_value_field" => &[false, false],
         "almide_rt_value_field_ref" => &[false, false],
+        "almide_rt_value_field_ref_at" => &[false, false, false],
         "almide_rt_value_float" => &[false],
         "almide_rt_value_int" => &[false],
         "almide_rt_value_keys" => &[false],

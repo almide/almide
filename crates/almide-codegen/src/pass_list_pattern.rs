@@ -28,6 +28,9 @@ pub struct ListPatternLoweringPass;
 impl NanoPass for ListPatternLoweringPass {
     fn name(&self) -> &str { "ListPatternLowering" }
     fn targets(&self) -> Option<Vec<Target>> { None }
+
+    /// Desugared before any pass reads a pattern: type resolution sees the if/else shape.
+    fn run_before(&self) -> Vec<&'static str> { vec!["LambdaTypeResolve", "ConcretizeTypes"] }
     fn postconditions(&self) -> Vec<super::pass::Postcondition> {
         vec![super::pass::Postcondition::NoPatternKind("List")]
     }

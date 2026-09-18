@@ -1,0 +1,118 @@
+{
+  "source_sha256": "fd9bb20543045745f38417ac47439685c3b35bf71af65858ce8392f9eb2c5dc8",
+  "samples": {
+    "baseline": [
+      {
+        "seconds": 0.52,
+        "rss_bytes": 129368064
+      },
+      {
+        "seconds": 0.51,
+        "rss_bytes": 129236992
+      },
+      {
+        "seconds": 0.51,
+        "rss_bytes": 127418368
+      },
+      {
+        "seconds": 0.54,
+        "rss_bytes": 129335296
+      },
+      {
+        "seconds": 0.51,
+        "rss_bytes": 129204224
+      },
+      {
+        "seconds": 0.51,
+        "rss_bytes": 144998400
+      },
+      {
+        "seconds": 0.51,
+        "rss_bytes": 143212544
+      }
+    ],
+    "spans": [
+      {
+        "seconds": 0.51,
+        "rss_bytes": 108265472
+      },
+      {
+        "seconds": 0.51,
+        "rss_bytes": 108150784
+      },
+      {
+        "seconds": 0.51,
+        "rss_bytes": 119128064
+      },
+      {
+        "seconds": 0.5,
+        "rss_bytes": 108265472
+      },
+      {
+        "seconds": 0.54,
+        "rss_bytes": 105136128
+      },
+      {
+        "seconds": 0.51,
+        "rss_bytes": 113344512
+      },
+      {
+        "seconds": 0.5,
+        "rss_bytes": 120995840
+      }
+    ],
+    "cached": [
+      {
+        "seconds": 0.26,
+        "rss_bytes": 108167168
+      },
+      {
+        "seconds": 0.25,
+        "rss_bytes": 112918528
+      },
+      {
+        "seconds": 0.25,
+        "rss_bytes": 103546880
+      },
+      {
+        "seconds": 0.25,
+        "rss_bytes": 103579648
+      },
+      {
+        "seconds": 0.25,
+        "rss_bytes": 105152512
+      },
+      {
+        "seconds": 0.25,
+        "rss_bytes": 108281856
+      },
+      {
+        "seconds": 0.25,
+        "rss_bytes": 110690304
+      }
+    ]
+  },
+  "tokens": {
+    "baseline": "57a99908ef20b139b7941fcb242e7b69b3fadb24e7a9009c9e72fe0b21bac56b",
+    "spans": "57a99908ef20b139b7941fcb242e7b69b3fadb24e7a9009c9e72fe0b21bac56b",
+    "cached": "57a99908ef20b139b7941fcb242e7b69b3fadb24e7a9009c9e72fe0b21bac56b"
+  },
+  "median": {
+    "baseline": {
+      "seconds": 0.51,
+      "rss_bytes": 129335296
+    },
+    "spans": {
+      "seconds": 0.51,
+      "rss_bytes": 108265472
+    },
+    "cached": {
+      "seconds": 0.25,
+      "rss_bytes": 108167168
+    }
+  },
+  "cached_allocation_probe": {
+    "stdout": "1142484379396\n",
+    "counters": "allocations=2612801 requested_bytes=117801931 small_allocations=2153655\n"
+  }
+}

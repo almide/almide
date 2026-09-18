@@ -37,10 +37,16 @@ fn probe_with_capacity() -> String = {
 }
 
 fn probe_map_set() -> String = {
-  let m = map.contains(if true then map.new()
-  else ["a": 1], "a")
-  let s = set.contains(if true then set.new()
-  else set.from_list([1, 2]), 1)
+  let m = map.contains(
+    if true then map.new()
+    else ["a": 1],
+    "a",
+  )
+  let s = set.contains(
+    if true then set.new()
+    else set.from_list([1, 2]),
+    1,
+  )
   "map=${m} set=${s}"
 }
 

@@ -9,9 +9,18 @@ import testing
 
 effect fn tmp() -> String = fs.create_temp_dir("chunked")!
 
-fn count_step(acc: Map[String, Int], line: String) -> Map[String, Int] = map.upsert(acc, line, 1, (n) => n + 1)
+fn count_step(acc: Map[String, Int], line: String) -> Map[String, Int] = map.upsert(
+  acc,
+  line,
+  1,
+  (n) => n + 1,
+)
 
-effect fn seq_counts(path: String) -> Map[String, Int] = fs.fold_lines(path, map.new(), (acc, line) => count_step(acc, line))!
+effect fn seq_counts(path: String) -> Map[String, Int] = fs.fold_lines(
+  path,
+  map.new(),
+  (acc, line) => count_step(acc, line),
+)!
 
 effect fn par_counts(path: String, workers: Int) -> Map[String, Int] = {
   let partials = fs.fold_lines_chunked(path, workers, map.new(), count_step)!
@@ -19,10 +28,13 @@ effect fn par_counts(path: String, workers: Int) -> Map[String, Int] = {
 }
 
 // NOT map.merge: counts must ADD on key collision, merge overwrites.
-fn combine(a: Map[String, Int], b: Map[String, Int]) -> Map[String, Int] = map.entries(b) |> list.fold(a, (acc, e) => {
-  let (k, v) = e
-  map.upsert(acc, k, v, (n) => n + v)
-})
+fn combine(a: Map[String, Int], b: Map[String, Int]) -> Map[String, Int] = map.entries(b) |> list.fold(
+  a,
+  (acc, e) => {
+    let (k, v) = e
+    map.upsert(acc, k, v, (n) => n + v)
+  },
+)
 
 test "every worker count folds every line exactly once" {
   let d = tmp()!

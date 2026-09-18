@@ -1,0 +1,9 @@
+// E042: a fallible call as an operator operand in STATEMENT position (#2196).
+// The operator's value is discarded, so the operand's Result is dropped —
+// the same must-use rule as a bare call statement, reported at the call.
+effect fn parse_one() -> Int = int.parse("1")!
+
+effect fn main() -> Unit = {
+  parse_one()! + 1
+  println("x")
+}

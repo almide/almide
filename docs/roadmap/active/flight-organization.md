@@ -1,3 +1,4 @@
+<!-- description: Flight-grade sections B and C: legal entity, engagement, funding, customer -->
 # Flight-grade: the organization and track-record rungs
 
 The [flight-grade program](https://github.com/almide/almide/issues/586) has three

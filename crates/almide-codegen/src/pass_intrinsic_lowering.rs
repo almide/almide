@@ -44,6 +44,10 @@ impl NanoPass for IntrinsicLoweringPass {
         None
     }
 
+    /// `RuntimeCall` must exist before borrow inference looks the mangled symbol
+    /// up, and before the stdlib lowering would emit a template for the same call.
+    fn run_before(&self) -> Vec<&'static str> { vec!["BorrowInsertion", "StdlibLowering"] }
+
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         let (map, defaults) = collect_intrinsics(&program);
         if map.is_empty() {

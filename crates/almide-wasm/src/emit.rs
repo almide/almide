@@ -27,6 +27,18 @@ pub fn emit_program(ir: &IrProgram) -> Result<Vec<u8>, EmitError> {
 pub fn emit_program_with_ops(
     ir: &IrProgram,
 ) -> Result<(Vec<u8>, std::collections::BTreeSet<i32>), EmitError> {
+    emit_with_ops(ir, false)
+}
+
+/// Library ABI: `_start` initializes globals; every public function must
+/// export successfully. Ordinary program emission still requires `main`.
+pub fn emit_library_with_ops(
+    ir: &IrProgram,
+) -> Result<(Vec<u8>, std::collections::BTreeSet<i32>), EmitError> {
+    emit_with_ops(ir, true)
+}
+
+fn emit_with_ops(ir: &IrProgram, library: bool) -> Result<(Vec<u8>, std::collections::BTreeSet<i32>), EmitError> {
     // Transparent newtypes erase FIRST, so both passes read one tree
     // (#1423 stage 4: the html/path SafeHtml/SafePath rows).
     let erased = crate::newtype::erase_transparent_aliases(ir);
@@ -35,11 +47,11 @@ pub fn emit_program_with_ops(
     // owner — bound first, released by the frame's exit plan.
     let bound = crate::arg_temps::bind_native_temporaries(ir);
     let ir = bound.as_ref().unwrap_or(ir);
-    let (bytes, visited, total, ops) = emit_program_pass(ir, None)?;
+    let (bytes, visited, total, ops) = emit_program_pass(ir, None, library)?;
     if visited.len() >= total {
         return Ok((bytes, ops));
     }
-    let (bytes, _, _, ops) = emit_program_pass(ir, Some(&visited))?;
+    let (bytes, _, _, ops) = emit_program_pass(ir, Some(&visited), library)?;
     Ok((bytes, ops))
 }
 
@@ -47,10 +59,14 @@ pub fn emit_program_with_ops(
 fn emit_program_pass(
     ir: &IrProgram,
     keep: Option<&HashSet<usize>>,
+    library: bool,
 ) -> Result<(Vec<u8>, HashSet<usize>, usize, std::collections::BTreeSet<i32>), EmitError> {
-    let Some(main) = ir.functions.iter().find(|f| f.name.as_str() == "main") else {
+    let main = ir.functions.iter().find(|f| f.name.as_str() == "main");
+    if main.is_none() && !library {
         return unsup("no main function");
-    };
+    }
+    let empty_main = almide_ir::IrExpr::default();
+    let main_body = main.map_or(&empty_main, |f| &f.body);
     // Program functions PLUS every linked module's functions — module fns
     // register under their QUALIFIED name ("url.encode_component"), which
     // is exactly the `CallTarget::Module` lookup key. A module carrying
@@ -78,6 +94,12 @@ fn emit_program_pass(
             Ok((p, r)) => (p, r, None),
             Err(reason) => (Vec::new(), None, Some(reason)),
         };
+        // #2275: a body-less `@extern` is a declared import on the wasm
+        // target, or a wall — never a hollow body.
+        let (import, refuse) = match extern_import(f, &params, ret) {
+            Ok(import) => (import, refuse),
+            Err(reason) => (None, refuse.or(Some(reason))),
+        };
         let key = qual.clone().unwrap_or_else(|| f.name.as_str().to_string());
         // impl_index carries ONLY registry implementation symbols — a
         // global simple-name index over ALL module fns collides across
@@ -87,7 +109,7 @@ fn emit_program_pass(
             table.impl_index.insert(f.name.as_str().to_string(), i);
         }
         table.by_name.insert(key, i);
-        table.infos.push(FnInfo { wasm_index: F_FN_BASE + i as u32, params, ret, refuse, param_owned: Vec::new() });
+        table.infos.push(FnInfo { wasm_index: F_FN_BASE + i as u32, params, ret, refuse, param_owned: Vec::new(), import });
     }
     // Which params each callee owns (#2028): computed once, over the whole
     // table, before any body lowers — the call sites and the exit plans
@@ -125,6 +147,13 @@ fn emit_program_pass(
     for (i, (f, qual, space)) in program_fns.iter().enumerate() {
         if let Some(r) = &table.infos[i].refuse {
             lowered.push(Err(r.clone()));
+            continue;
+        }
+        if table.infos[i].import.is_some() {
+            // A declared import's slot: the loud stub the post-pass removes.
+            let mut stub = Function::new([]);
+            stub.instructions().unreachable().end();
+            lowered.push(Ok((stub, HashSet::new())));
             continue;
         }
         let params: Vec<(VarId, SliceTy)> =
@@ -217,7 +246,7 @@ fn emit_program_pass(
         param_owned: None,
     };
     let (main_fn, main_calls) =
-        lower_fn(&[], main_plan, &main.body, &init_lets, &ctx, &mut pool)?;
+        lower_fn(&[], main_plan, main_body, &init_lets, &ctx, &mut pool)?;
     display_helper_calls.extend(display::build_display_helpers(&table, &types, &work, &mut pool)?);
 
     // Lift lambdas to extra functions (they may register further lambdas
@@ -323,7 +352,10 @@ fn emit_program_pass(
                 continue;
             }
             match &lowered[j] {
-                Err(_) => {
+                Err(reason) => {
+                    if library {
+                        return unsup(&format!("exported function `{name}` cannot be lowered: {reason}"));
+                    }
                     clean = false;
                     break;
                 }
@@ -333,6 +365,7 @@ fn emit_program_pass(
         if clean {
             visited.extend(sub);
             export_fns.push((name.to_string(), table.infos[i].wasm_index));
+            crate::host_exports::note_export(name, table.infos[i].param_owned.clone());
         }
     }
 
@@ -361,6 +394,43 @@ fn emit_program_pass(
         true_base,
         false_base,
     })?;
+    // #2275: the extern stubs become declared imports of the finished bytes.
+    let declared: Vec<imports::Declared> = table
+        .infos
+        .iter()
+        .filter_map(|info| {
+            let (module, name) = info.import.clone()?;
+            Some(imports::Declared { index: info.wasm_index, module, name })
+        })
+        .collect();
+    let bytes = imports::declare(&bytes, &declared).map_err(|e| EmitError::Unsupported(format!("extern-import:{e}")))?;
     let host_ops = work.host_ops.borrow().clone();
     Ok((bytes, visited, total, host_ops))
+}
+
+/// The `@extern(wasm, module, name)` import a body-less fn declares (#2275):
+/// `Ok(Some((module, name)))` when its signature has the scalar host ABI
+/// (`Int`/sized ints → i64, `Float` → f64, `Bool` → i32, `String` → i32
+/// block, `Unit` → no result); `Ok(None)` for a fn with a body; `Err` for a
+/// native (`rs`/`rust`) extern — there is no wasm host for it, so an import
+/// would be a hollow lie — and for a param or return outside the ABI.
+fn extern_import(f: &IrFunction, params: &[SliceTy], ret: Option<SliceTy>) -> Result<Option<(String, String)>, String> {
+    if f.extern_attrs.is_empty() {
+        return Ok(None);
+    }
+    let Some(a) = f.extern_attrs.iter().find(|a| a.target.as_str() == "wasm") else {
+        return Err(format!("extern-native:{}", f.name));
+    };
+    if !matches!(f.body.kind, IrExprKind::Hole) {
+        return Ok(None);
+    }
+    for (p, t) in f.params.iter().zip(params) {
+        if !matches!(t, SliceTy::Scalar(_)) {
+            return Err(format!("extern-ty:{}:{}", f.name, p.name));
+        }
+    }
+    if !matches!(ret, None | Some(SliceTy::Scalar(_))) {
+        return Err(format!("extern-ret:{}", f.name));
+    }
+    Ok(Some((a.module.as_str().to_string(), a.function.as_str().to_string())))
 }

@@ -20,7 +20,10 @@ fn build(i: Int) -> Int = {
 }
 
 effect fn main() -> Unit = {
-  let n = option.unwrap_or(int.parse(option.unwrap_or(list.get(env.args(), 0), "1000")) |> result.to_option, 1000)
+  let n = option.unwrap_or(
+    int.parse(option.unwrap_or(list.get(env.args(), 0), "1000")) |> result.to_option,
+    1000,
+  )
   var acc = 0
   var i = 0
   while i < n {

@@ -20,20 +20,11 @@
 //! This eliminates stack growth for self-recursive tail calls, critical for
 //! WASM where the stack is limited and there is no native tail call support.
 
-use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use almide_ir::*;
 use almide_lang::types::Ty;
 use almide_lang::types::constructor::TypeConstructorId;
 use super::pass::{NanoPass, PassResult, Target};
-
-// Param indices for the currently-being-rewritten TCO function whose borrow
-// should be preserved across loop iterations (currently: Bytes params).
-// Filled in `rewrite_to_loop`, read by `emit_tail_call_replacement` to decide
-// whether to strip a `Borrow` wrapper from that arg position.
-thread_local! {
-    static TCO_BORROWED_PARAMS: RefCell<HashSet<usize>> = RefCell::new(HashSet::new());
-}
 
 #[derive(Debug)]
 pub struct TailCallOptPass;
@@ -45,6 +36,12 @@ impl NanoPass for TailCallOptPass {
         None // All targets benefit from TCO
     }
 
+    /// Runs on finalized param types (a String/&str mismatch otherwise); the
+    /// loop params it forces owned and `tco_owned_params` are read by the two
+    /// passes after it.
+    fn depends_on(&self) -> Vec<&'static str> { vec!["BorrowInsertion"] }
+    fn run_before(&self) -> Vec<&'static str> { vec!["CaptureClone", "CloneInsertion"] }
+
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         // Collect: TCO'd function name → param positions whose borrow annotation
         // was forced back to Own by the loop rewrite (i.e. NOT in the
@@ -53,12 +50,11 @@ impl NanoPass for TailCallOptPass {
         // signature — otherwise a &str arg is passed where String is expected.
         let mut reverted: HashMap<almide_base::intern::Sym, HashSet<usize>> = HashMap::new();
         let IrProgram { functions, modules, var_table, codegen_annotations, .. } = &mut program;
-        let almide_ir::annotations::CodegenAnnotations { infer_binding_tys, tco_owned_params, tco_rewritten_fns, always_clone_vars, .. } = codegen_annotations;
+        let almide_ir::annotations::CodegenAnnotations { infer_binding_tys, tco_owned_params, always_clone_vars, .. } = codegen_annotations;
         let mut run = TcoRun {
             reverted: &mut reverted,
             infer_bindings: infer_binding_tys,
             tco_owned_params,
-            tco_rewritten_fns,
             always_clone_vars,
         };
         run_tco(functions, var_table, &mut run);
@@ -73,13 +69,12 @@ impl NanoPass for TailCallOptPass {
 }
 
 /// The state one TCO sweep accumulates across every function it rewrites: the
-/// reverted-borrow map the caller uses to fix external call sites, the three
+/// reverted-borrow map the caller uses to fix external call sites, the two
 /// codegen-annotation sets the rewrite feeds, and the read-only always-clone set.
 struct TcoRun<'a> {
     reverted: &'a mut HashMap<almide_base::intern::Sym, HashSet<usize>>,
     infer_bindings: &'a mut std::collections::BTreeSet<VarId>,
     tco_owned_params: &'a mut HashSet<VarId>,
-    tco_rewritten_fns: &'a mut HashSet<almide_base::intern::Sym>,
     always_clone_vars: &'a HashSet<VarId>,
 }
 
@@ -92,7 +87,6 @@ fn run_tco(functions: &mut [IrFunction], var_table: &mut VarTable, run: &mut Tco
                 var_table,
                 run.infer_bindings,
                 run.tco_owned_params,
-                run.tco_rewritten_fns,
                 run.always_clone_vars,
             );
             if !reverted_here.is_empty() {

@@ -62,6 +62,30 @@ fn main_print(body: &str) -> String {
     format!("fn main() -> Unit = {{\n{}\n}}", body)
 }
 
+#[test]
+fn heap_branch_outlining_preserves_enclosing_writes() {
+    expect_out(
+        &main_print(r#"
+            var total = 0
+            for n in 1..<3 {
+                let label = match some(n) {
+                    some(v) => { total = total + v; "some" },
+                    none => "none",
+                }
+                println(label)
+            }
+            println(int.to_string(total))
+            let label = match some(7) {
+                some(v) => { total = v; "written" },
+                none => "none",
+            }
+            println(label)
+            println(int.to_string(total))
+        "#),
+        "some\nsome\n3\nwritten\n7\n",
+    );
+}
+
 // ── Literals ────────────────────────────────────────────────────
 
 #[test]
@@ -647,6 +671,36 @@ fn main() -> Unit = {
     eprintln!("exit={} stdout=<{}> stderr=<{}>", exit, stdout, stderr);
     assert_eq!(exit, 0, "top-let not visible from fn: stderr=<{}>", stderr);
     assert_eq!(stdout, "105\n");
+}
+
+// ── Module call vs a program fn of the same bare name (#2058) ───
+
+/// `json.parse(s) ?? value.null()` inside a program fn NAMED `parse` spun to
+/// fuel exhaustion: the module-call resolver's flattened-helper tier answered
+/// `module.func` with the program's own `func`, so the body called itself.
+/// A `module.func` call never names a program-root fn. Pinned json-free
+/// (the eval_test recipe loads no `json` module): the same shapes over
+/// `int.parse` and `value.stringify`, expression-bodied and block-bodied.
+#[test]
+fn module_call_never_resolves_to_the_program_fn_of_the_same_name() {
+    expect_out(
+        r#"
+fn parse(s: String) -> Int = int.parse(s) ?? 0
+
+fn parse_block(s: String) -> Int = {
+  let n = int.parse(s) ?? -1
+  n
+}
+
+fn stringify(v: Value) -> String = value.stringify(v)
+
+fn main() -> Unit = {
+  println("${parse("12")} ${parse("x")}")
+  println("${parse_block("7")} ${parse_block("")}")
+  println(stringify(value.int(3)))
+}"#,
+        "12 0\n7 -1\n3\n",
+    );
 }
 
 include!("eval_test_parts/sort_and_mut.rs");

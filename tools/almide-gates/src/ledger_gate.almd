@@ -58,7 +58,13 @@ effect fn evidence_pass(classes: List[String], tables: List[toml.Table]) -> List
         let cls = toml.inline_get(item, "class")
         let name = toml.inline_get(item, "name")
         let n = toml.inline_num(item, "n")
-        out = out + ledger_schema.evidence_shape_errors(classes, id, path, cls, if n == "" then "-" else n)
+        out = out + ledger_schema.evidence_shape_errors(
+          classes,
+          id,
+          path,
+          cls,
+          if n == "" then "-" else n,
+        )
         if not fs.exists(path) then {
           out = out + [id + " evidence path does not exist: " + path]
         } else if name == "" and ledger_schema.needs_name(path, cls) then {
@@ -85,7 +91,12 @@ fn floor_pass(classes: List[String], tables: List[toml.Table], fixture_rank: Int
   tables |> list.filter((t) => toml.table_get(t, "id") != "") |> list.flat_map((t) => {
     let ranks = t.array_items |> list.map((it) => ledger_schema.rank_of(classes, toml.inline_get(it, "class")))
     let best = ranks |> list.fold(-1, (a, b) => if b > a then b else a)
-    ledger_schema.active_floor_error(toml.table_get(t, "id"), toml.table_get(t, "status"), best, fixture_rank)
+    ledger_schema.active_floor_error(
+      toml.table_get(t, "id"),
+      toml.table_get(t, "status"),
+      best,
+      fixture_rank,
+    )
   })
 }
 
@@ -178,18 +189,30 @@ fn summary(n_contracts: Int, n_active: Int, n_flagged: Int, ceiling: Int, with_h
 // and running it with the output redirected to /dev/null is exactly how the drift this check
 // exists to catch happened in the first place.
 effect fn stale(cmd: String, cmd_args: List[String], committed: String) -> Bool = {
-  let st = process.exec_status(cmd, cmd_args) ?? process.ProcessStatus { code: 1, stdout: "", stderr: "" }
+  let st = process.exec_status(cmd, cmd_args) ?? process.ProcessStatus {
+    code: 1,
+    stdout: "",
+    stderr: "",
+  }
   if st.code != 0 then true
   else st.stdout != (fs.read_text(committed) ?? "")
 }
 
 effect fn freshness_pass() -> List[String] = {
-  let claims = process.exec_status("bash", ["scripts/gen-claims.sh", "--check"]) ?? process.ProcessStatus { code: 1, stdout: "", stderr: "" }
+  let claims = process.exec_status("bash", ["scripts/gen-claims.sh", "--check"]) ?? process.ProcessStatus {
+    code: 1,
+    stdout: "",
+    stderr: "",
+  }
   let claims_err = if claims.code == 0 then []
   else [
     "README.md claims block is stale — run: bash scripts/gen-claims.sh"
   ]
-  let conf = if stale("bash", ["docs/contracts/generate-conformance.sh"], "docs/contracts/conformance.md")! then ledger_speckey.conformance_stale_error()
+  let conf = if stale(
+    "bash",
+    ["docs/contracts/generate-conformance.sh"],
+    "docs/contracts/conformance.md",
+  )! then ledger_speckey.conformance_stale_error()
   else []
   let idx = if stale("bash", ["docs/contracts/generate-readme.sh"], "docs/contracts/README.md")! then ledger_speckey.index_stale_error()
   else []
@@ -229,7 +252,10 @@ effect fn run(root: String) -> Gate = {
     "cited-paths: every source path named in a statement or fixture header resolves to a live directory."
   ]
   // (f) contiguity, then the ratchet
-  let f_errs = ledger_coverage.coverage_gaps(ids, ledger_coverage.max_id_num(ids)) + ledger_coverage.ratchet_error(ledger_coverage.count_flagged(real), 0)
+  let f_errs = ledger_coverage.coverage_gaps(ids, ledger_coverage.max_id_num(ids)) + ledger_coverage.ratchet_error(
+    ledger_coverage.count_flagged(real),
+    0,
+  )
   // spec-keying, both directions
   let spec = speckey_pass(real)!
   let fresh = freshness_pass()!
@@ -241,7 +267,13 @@ effect fn run(root: String) -> Gate = {
   else summary(list.len(ids), list.len(ids) - n_flagged, n_flagged, 0, sym.1, list.len(fixtures))
   // The bash's order exactly: each check echoes where it runs, so the informational lines sit
   // BETWEEN the error groups rather than after all of them.
-  Gate { lines: errs(d_errs) + errs(e_errs) + errs(a_errs) + errs(b_errs) + errs(sym.0) + errs(cited) + cited_ok + errs(f_errs) + ["----", "evidence by class:"] + histogram(classes, real) + errs(spec.0) + spec.1 + errs(fresh) + tail, ok: n_err == 0 }
+  Gate {
+    lines: errs(d_errs) + errs(e_errs) + errs(a_errs) + errs(b_errs) + errs(sym.0) + errs(cited) + cited_ok + errs(f_errs) + ["----", "evidence by class:"] + histogram(
+      classes,
+      real,
+    ) + errs(spec.0) + spec.1 + errs(fresh) + tail,
+    ok: n_err == 0,
+  }
 }
 
 // (j) over the ledger and every fixture, de-duplicated and byte-sorted as `sort -u` does.
@@ -279,67 +311,101 @@ effect fn speckey_pass(real: List[toml.Table]) -> (List[String], List[String]) =
 
 test "a fixture with a MALFORMED header is a different finding from one with none" {
   // A header someone wrote and got wrong would otherwise be silently treated as absent.
-  assert_eq(header_errors("x.almd", "// @contract C-001", []), [
-    "x.almd has a malformed // @contract: header (must match: // @contract: C-NNN[, C-MMM])"
-  ])
-  assert_eq(header_errors("x.almd", "fn main() -> Unit = ()", []), [
-    "x.almd has no // @contract: header (every cross-target fixture must name the contract(s) it certifies)"
-  ])
+  assert_eq(
+    header_errors("x.almd", "// @contract C-001", []),
+    [
+      "x.almd has a malformed // @contract: header (must match: // @contract: C-NNN[, C-MMM])"
+    ],
+  )
+  assert_eq(
+    header_errors("x.almd", "fn main() -> Unit = ()", []),
+    [
+      "x.almd has no // @contract: header (every cross-target fixture must name the contract(s) it certifies)"
+    ],
+  )
   assert_eq(header_errors("x.almd", "// @contract: C-001", ["C-001"]), [])
 }
 
 test "the two asymmetries carry different messages, naming the side that is lying" {
-  assert_eq(only_forward_error("C-001\tf.almd"), "C-001 lists f.almd as evidence but f.almd does not declare C-001 in its // @contract: header (link must be symmetric)")
-  assert_eq(only_reverse_error("C-001\tf.almd"), "f.almd declares C-001 but C-001 does not list f.almd as evidence (link must be symmetric)")
+  assert_eq(
+    only_forward_error("C-001\tf.almd"),
+    "C-001 lists f.almd as evidence but f.almd does not declare C-001 in its // @contract: header (link must be symmetric)",
+  )
+  assert_eq(
+    only_reverse_error("C-001\tf.almd"),
+    "f.almd declares C-001 but C-001 does not list f.almd as evidence (link must be symmetric)",
+  )
 }
 
 test "only wasm_cross fixture evidence makes a forward edge" {
   // A contract may cite a `tests/*.rs` unit; that is evidence, not a fixture link, and
   // counting it would demand a `// @contract:` header in a Rust file.
-  let t = toml.Table { scalars: [
-    toml.Pair { key: "id", value: "C-001" }
-  ], array_key: "evidence", array_items: [
-    "{ path = \"spec/wasm_cross/a.almd\", class = \"fixture\" }",
-    "{ path = \"tests/b.rs\", class = \"fixture\", name = \"t\" }"
-  ] }
+  let t = toml.Table {
+    scalars: [
+      toml.Pair { key: "id", value: "C-001" }
+    ],
+    array_key: "evidence",
+    array_items: [
+      "{ path = \"spec/wasm_cross/a.almd\", class = \"fixture\" }",
+      "{ path = \"tests/b.rs\", class = \"fixture\", name = \"t\" }"
+    ],
+  }
   assert_eq(forward_edges("spec/wasm_cross", [t]), ["C-001\ta.almd"])
   assert_eq(basename_of("spec/wasm_cross/a.almd"), "a.almd")
 }
 
 test "the summary block is the bash's exact two lines" {
-  assert_eq(summary(201, 201, 0, 0, 330, 330), [
-    "contract-ledger: OK — 201 contracts (active=201, flagged=0 / ceiling 0).",
-    "  fixtures: 330/330 carry a // @contract: header; bidirectional links symmetric."
-  ])
+  assert_eq(
+    summary(201, 201, 0, 0, 330, 330),
+    [
+      "contract-ledger: OK — 201 contracts (active=201, flagged=0 / ceiling 0).",
+      "  fixtures: 330/330 carry a // @contract: header; bidirectional links symmetric."
+    ],
+  )
 }
 
 test "the histogram walks the class file's order, including classes with zero evidence" {
   // A class with no evidence still prints its row — dropping it would make the histogram a
   // list of what happens to exist rather than a report against the vocabulary.
   let classes = ["doc-only", "fixture", "lean"]
-  let t = toml.Table { scalars: [
-    toml.Pair { key: "id", value: "C-001" }
-  ], array_key: "evidence", array_items: ["{ path = \"a\", class = \"fixture\" }", "{ path = \"b\", class = \"fixture\" }"] }
-  assert_eq(histogram(classes, [t]), ["  doc-only         0", "  fixture          2", "  lean             0"])
+  let t = toml.Table {
+    scalars: [
+      toml.Pair { key: "id", value: "C-001" }
+    ],
+    array_key: "evidence",
+    array_items: ["{ path = \"a\", class = \"fixture\" }", "{ path = \"b\", class = \"fixture\" }"],
+  }
+  assert_eq(
+    histogram(classes, [t]),
+    ["  doc-only         0", "  fixture          2", "  lean             0"],
+  )
 }
 
 test "the active floor reads the MAX rank across a contract's evidence, not the first" {
   let classes = ["doc-only", "by-construction", "fixture", "fuzz"]
-  let weak = toml.Table { scalars: [
-    toml.Pair { key: "id", value: "C-001" },
-    toml.Pair { key: "status", value: "active" }
-  ], array_key: "evidence", array_items: [
-    "{ path = \"a\", class = \"by-construction\" }"
-  ] }
+  let weak = toml.Table {
+    scalars: [
+      toml.Pair { key: "id", value: "C-001" },
+      toml.Pair { key: "status", value: "active" }
+    ],
+    array_key: "evidence",
+    array_items: [
+      "{ path = \"a\", class = \"by-construction\" }"
+    ],
+  }
   // A contract whose FIRST evidence is weak but which also carries a fixture is fine — taking
   // the first would fail contracts that are properly certified.
-  let mixed = toml.Table { scalars: [
-    toml.Pair { key: "id", value: "C-002" },
-    toml.Pair { key: "status", value: "active" }
-  ], array_key: "evidence", array_items: [
-    "{ path = \"a\", class = \"by-construction\" }",
-    "{ path = \"b\", class = \"fixture\" }"
-  ] }
+  let mixed = toml.Table {
+    scalars: [
+      toml.Pair { key: "id", value: "C-002" },
+      toml.Pair { key: "status", value: "active" }
+    ],
+    array_key: "evidence",
+    array_items: [
+      "{ path = \"a\", class = \"by-construction\" }",
+      "{ path = \"b\", class = \"fixture\" }"
+    ],
+  }
   assert_eq(list.len(floor_pass(classes, [weak], 2)), 1)
   assert_eq(list.len(floor_pass(classes, [mixed], 2)), 0)
 }

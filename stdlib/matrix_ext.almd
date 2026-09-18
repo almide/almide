@@ -165,7 +165,20 @@ fn matrix_conv1d(input: List[List[Float]], weight: List[List[Float]], bias: List
     else {
       let t_out = (t_padded - kernel) / stride + 1
       let out: List[List[Float]] = prim.alloc_list_str(t_out)
-      let _x = __cv_rows(prim.handle(out), hin, hw, prim.handle(bias), t_in, in_ch, out_ch, kernel, stride, padding, t_out, 0)
+      let _x = __cv_rows(
+        prim.handle(out),
+        hin,
+        hw,
+        prim.handle(bias),
+        t_in,
+        in_ch,
+        out_ch,
+        kernel,
+        stride,
+        padding,
+        t_out,
+        0,
+      )
       out
     }
   }

@@ -251,6 +251,7 @@ pub const PURE_MODULES: &[&str] = &[
     "set_to_string",
     "set_to_string_s",
     "string",
+    "string_byte_slice",
     "string_capitalize",
     "string_chars",
     "string_class",

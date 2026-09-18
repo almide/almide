@@ -18,6 +18,7 @@ fn insert[A](s: Set[A], value: A) -> Set[A] = _
 fn remove[A](s: Set[A], value: A) -> Set[A] = _
 
 @intrinsic("almide_rt_set_contains")
+@borrow_ref(value)
 fn contains[A](s: Set[A], value: A) -> Bool = _
 
 @intrinsic("almide_rt_set_len")

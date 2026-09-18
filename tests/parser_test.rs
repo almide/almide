@@ -137,7 +137,7 @@ fn parse_variant_type() {
     let prog = parse("type Color =\n  | Red\n  | Green\n  | Blue\n  | Custom(Int, Int, Int)");
     if let Decl::Type { name, ty, .. } = &prog.decls[0] {
         assert_eq!(name, "Color");
-        if let TypeExpr::Variant { cases } = ty {
+        if let TypeExpr::Variant { cases, .. } = ty {
             assert_eq!(cases.len(), 4);
             assert!(matches!(&cases[0], VariantCase::Unit { name } if name == "Red"));
             assert!(matches!(&cases[3], VariantCase::Tuple { name, fields } if name == "Custom" && fields.len() == 3));
@@ -155,7 +155,7 @@ fn parse_multiline_inline_variant() {
     let prog = parse("type Provider\n  = Stripe(String)\n  | PayPal(String, String)\n  | Square(String)");
     if let Decl::Type { name, ty, .. } = &prog.decls[0] {
         assert_eq!(name, "Provider");
-        if let TypeExpr::Variant { cases } = ty {
+        if let TypeExpr::Variant { cases, .. } = ty {
             assert_eq!(cases.len(), 3);
             assert!(matches!(&cases[0], VariantCase::Tuple { name, fields } if name == "Stripe" && fields.len() == 1));
             assert!(matches!(&cases[1], VariantCase::Tuple { name, fields } if name == "PayPal" && fields.len() == 2));
@@ -175,7 +175,7 @@ fn parse_multiline_newline_before_eq() {
     if let Decl::Type { name, ty, .. } = &prog.decls[0] {
         assert_eq!(name, "Color");
         // Red | Green | Blue with all-uppercase names → Union rewritten to Variant
-        assert!(matches!(ty, TypeExpr::Variant { cases } if cases.len() == 3));
+        assert!(matches!(ty, TypeExpr::Variant { cases, .. } if cases.len() == 3));
     } else {
         panic!("expected type decl");
     }
@@ -421,7 +421,7 @@ fn parse_record_type() {
 #[test]
 fn parse_variant_record_case() {
     let prog = parse("type Msg =\n  | Click { x: Int, y: Int }\n  | Key(String)");
-    if let Decl::Type { ty: TypeExpr::Variant { cases }, .. } = &prog.decls[0] {
+    if let Decl::Type { ty: TypeExpr::Variant { cases, .. }, .. } = &prog.decls[0] {
         assert_eq!(cases.len(), 2);
         assert!(matches!(&cases[0], VariantCase::Record { name, fields } if name == "Click" && fields.len() == 2));
         assert!(matches!(&cases[1], VariantCase::Tuple { name, fields } if name == "Key" && fields.len() == 1));

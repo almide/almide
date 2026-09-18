@@ -91,7 +91,10 @@ fn __sha_k() -> List[Int] = [
   3329325298
 ]
 
-fn __ror32(x: Int, n: Int) -> Int = prim.band(prim.bor(prim.bshr_u(x, n), prim.bshl(x, 32 - n)), 4294967295)
+fn __ror32(x: Int, n: Int) -> Int = prim.band(
+  prim.bor(prim.bshr_u(x, n), prim.bshl(x, 32 - n)),
+  4294967295,
+)
 
 fn __sha_copy(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
 else {
@@ -117,7 +120,10 @@ else {
 fn __sha_w16(wp: Int, bp: Int, t: Int) -> Int = if t >= 16 then 0
 else {
   let o = bp + t * 4
-  let v = prim.bor(prim.bor(prim.bshl(prim.load8(o), 24), prim.bshl(prim.load8(o + 1), 16)), prim.bor(prim.bshl(prim.load8(o + 2), 8), prim.load8(o + 3)))
+  let v = prim.bor(
+    prim.bor(prim.bshl(prim.load8(o), 24), prim.bshl(prim.load8(o + 1), 16)),
+    prim.bor(prim.bshl(prim.load8(o + 2), 8), prim.load8(o + 3)),
+  )
   prim.store64(wp + t * 8, v)
   __sha_w16(wp, bp, t + 1)
 }
@@ -130,7 +136,10 @@ else {
   let w2 = prim.load64(wp + (t - 2) * 8)
   let s0 = prim.bxor(prim.bxor(__ror32(w15, 7), __ror32(w15, 18)), prim.bshr_u(w15, 3))
   let s1 = prim.bxor(prim.bxor(__ror32(w2, 17), __ror32(w2, 19)), prim.bshr_u(w2, 10))
-  let v = prim.band(prim.load64(wp + (t - 16) * 8) + s0 + prim.load64(wp + (t - 7) * 8) + s1, 4294967295)
+  let v = prim.band(
+    prim.load64(wp + (t - 16) * 8) + s0 + prim.load64(wp + (t - 7) * 8) + s1,
+    4294967295,
+  )
   prim.store64(wp + t * 8, v)
   __sha_wext(wp, t + 1)
 }
@@ -152,7 +161,20 @@ fn __sha_rounds(sp: Int, kp: Int, wp: Int, t: Int, a: Int, b: Int, c: Int, d: In
   let s0 = prim.bxor(prim.bxor(__ror32(a, 2), __ror32(a, 13)), __ror32(a, 22))
   let maj = prim.bxor(prim.bxor(prim.band(a, b), prim.band(a, c)), prim.band(b, c))
   let t2 = prim.band(s0 + maj, 4294967295)
-  __sha_rounds(sp, kp, wp, t + 1, prim.band(t1 + t2, 4294967295), a, b, c, prim.band(d + t1, 4294967295), e, f, g)
+  __sha_rounds(
+    sp,
+    kp,
+    wp,
+    t + 1,
+    prim.band(t1 + t2, 4294967295),
+    a,
+    b,
+    c,
+    prim.band(d + t1, 4294967295),
+    e,
+    f,
+    g,
+  )
 }
 
 // The state words, big-endian, into the 32-byte digest.
@@ -160,7 +182,20 @@ fn __sha_blocks(sp: Int, kp: Int, wp: Int, mp: Int, nblocks: Int, i: Int) -> Int
 else {
   let _w = __sha_w16(wp, mp + i * 64, 0)
   let _x = __sha_wext(wp, 16)
-  let _r = __sha_rounds(sp, kp, wp, 0, prim.load64(sp), prim.load64(sp + 8), prim.load64(sp + 16), prim.load64(sp + 24), prim.load64(sp + 32), prim.load64(sp + 40), prim.load64(sp + 48), prim.load64(sp + 56))
+  let _r = __sha_rounds(
+    sp,
+    kp,
+    wp,
+    0,
+    prim.load64(sp),
+    prim.load64(sp + 8),
+    prim.load64(sp + 16),
+    prim.load64(sp + 24),
+    prim.load64(sp + 32),
+    prim.load64(sp + 40),
+    prim.load64(sp + 48),
+    prim.load64(sp + 56),
+  )
   __sha_blocks(sp, kp, wp, mp, nblocks, i + 1)
 }
 

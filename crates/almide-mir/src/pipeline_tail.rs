@@ -9,6 +9,7 @@ fn build_ir_with_drops(
     source: &str,
     self_modules: &[(String, almide_lang::ast::Program, bool)],
     test_mode: bool,
+    run_filter: Option<&str>,
 ) -> Result<almide_ir::IrProgram, LowerError> {
     // STRICT VALUE MODE is owned by the caller, not by this phase. Nothing between here
     // and the return reads `strict_values()`: this builds the linked IR, and the mode
@@ -203,7 +204,15 @@ fn build_ir_with_drops(
     // foldable const reference leaves the init untouched (walls as before).
     fold_const_str_toplets(&mut ir);
     if test_mode {
-        synthesize_test_runner_main(&mut ir)?;
+        // The leg's OWN refusal first, then the shared, leg-independent
+        // `__test_runner` synthesis (#2121). Only a program that declares
+        // tests reached the wall when the two were one function, and only
+        // such a program reaches it now.
+        if almide_driver::test_runner::has_tests(&ir) {
+            incumbent_test_mode_wall(&ir)?;
+        }
+        almide_driver::test_runner::synthesize_test_runner_main(&mut ir, run_filter)
+            .map_err(|e| LowerError::Unsupported(e.0))?;
     }
     Ok(ir)
 }

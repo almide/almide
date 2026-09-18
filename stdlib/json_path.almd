@@ -80,7 +80,12 @@ else {
   else __jp_has(j, key, i + 1, n)
 }
 
-fn json_path_set(j: Value, path: List[String], nv: Value) -> Result[Value, String] = ok(json_path_set_go(j, path, 0, nv))
+fn json_path_set(j: Value, path: List[String], nv: Value) -> Result[Value, String] = ok(json_path_set_go(
+  j,
+  path,
+  0,
+  nv,
+))
 
 fn json_path_set_go(j: Value, path: List[String], k: Int, nv: Value) -> Value = if k >= list.len(path) then nv
 else {

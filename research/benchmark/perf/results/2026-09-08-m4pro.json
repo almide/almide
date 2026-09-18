@@ -1,0 +1,44 @@
+{
+  "meta": {
+    "date": "2026-09-08",
+    "label": "m4pro",
+    "host": "macOS-26.3-arm64-arm-64bit-Mach-O",
+    "cpu": "Apple M4 Pro",
+    "rustc": "rustc 1.96.1 (31fca3adb 2026-06-26)",
+    "almide": "almide 0.62.0",
+    "wasmtime": "wasmtime 47.0.2 (90fed3c6a 2026-07-21)",
+    "runs": 5,
+    "quick": false
+  },
+  "results": {
+    "decode": {
+      "arg": "5000000",
+      "variants": {
+        "decode/native": {
+          "min": 4.2261,
+          "median": 4.3539,
+          "mean": 5.3482,
+          "runs": [
+            4.4963,
+            4.3539,
+            4.2261,
+            4.2992,
+            9.3652
+          ]
+        },
+        "decode/rust:decode": {
+          "min": 1.758,
+          "median": 1.8469,
+          "mean": 2.2095,
+          "runs": [
+            1.7643,
+            1.8469,
+            1.758,
+            2.1101,
+            3.5681
+          ]
+        }
+      }
+    }
+  }
+}

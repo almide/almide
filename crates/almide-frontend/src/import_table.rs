@@ -37,11 +37,19 @@ pub struct ImportTable {
     pub direct: HashMap<Sym, Sym>,
 }
 
+/// Tier-1 modules every file can reach without writing an `import`, held as a
+/// named const rather than a literal inside `ImportTable::new` so the
+/// diagnostics side can ask the same question the resolver answers. Together
+/// with `AUTO_IMPORT_BUNDLED` this is the whole auto-import surface, and
+/// `stdlib::is_import_suggestable` derives its complement from the two. The
+/// list itself lives in `stdlib_info` so `almide fmt` reads the same one.
+pub use almide_lang::stdlib_info::TIER1_ALWAYS_ACCESSIBLE;
+
 impl ImportTable {
     /// Create with Tier 1 auto-imported stdlib modules.
     pub fn new() -> Self {
         let mut stdlib = HashSet::new();
-        for m in &["string", "int", "float", "list", "bytes", "matrix", "map", "set", "option", "result", "value", "prim"] {
+        for m in TIER1_ALWAYS_ACCESSIBLE {
             stdlib.insert(sym(m));
         }
         ImportTable {
@@ -354,7 +362,10 @@ fn register_import(
 /// Step 7 of [`build_import_table_process_import`]: stdlib detection.
 /// Verbatim text move.
 fn register_import_stdlib(used_name: &str, path: &[Sym], is_self: bool, table: &mut ImportTable) {
-    if crate::stdlib::is_any_stdlib(used_name) {
+    // `import self.net` brings the USER's `net` into scope, not the stdlib's
+    // (#2223): a self import never marks its leaf as a stdlib module, however
+    // the leaf is spelled.
+    if crate::stdlib::is_any_stdlib(used_name) && !is_self {
         table.stdlib.insert(sym(used_name));
     }
     // Also check canonical for multi-segment stdlib (unlikely but safe)

@@ -89,7 +89,15 @@ fn string_to_upper(s: String) -> String = {
   let h = prim.handle(s)
   let blen = prim.load32(h + 4)
   let buf = prim.alloc_str(blen * 3 + 8)
-  let outn = __to_upper_walk(h + 12, h + 12 + blen, prim.handle(tbl) + 12, 1580, prim.handle(sp) + 12, prim.handle(buf) + 12, 0)
+  let outn = __to_upper_walk(
+    h + 12,
+    h + 12 + blen,
+    prim.handle(tbl) + 12,
+    1580,
+    prim.handle(sp) + 12,
+    prim.handle(buf) + 12,
+    0,
+  )
   prim.store32(prim.handle(buf) + 4, outn)
   buf
 }

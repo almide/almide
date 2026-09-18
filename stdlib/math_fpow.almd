@@ -215,7 +215,10 @@ fn __fpow_log2(s: Float, y: Float, ax: Float, ix: Int, kk: Int, n: Int, hy: Int)
   let ss = u0 * v0
   let s_h = __fpow_wsl(ss, 0)
   // t_h high word: ((ix>>1)|0x20000000) + 0x00080000 + (kk<<18)
-  let thw = prim.band(prim.bor(prim.bshr(prim.band(ix, 4294967295), 1), 536870912), 4294967295) + 524288 + prim.bshl(kk, 18)
+  let thw = prim.band(prim.bor(prim.bshr(prim.band(ix, 4294967295), 1), 536870912), 4294967295) + 524288 + prim.bshl(
+    kk,
+    18,
+  )
   let t_h0 = __fpow_wsh(0.0, thw)
   let t_l0 = axn - (t_h0 - bp)
   let s_l = v0 * ((u0 - s_h * t_h0) - s_h * t_l0)

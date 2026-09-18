@@ -15,13 +15,19 @@ type Item = { id: String }
 
 type Port = { load: (String) -> Item?, check: (String) -> Result[St, String] }
 
-fn mk(db: List[Item], sdb: List[St]) -> Port = { load: (id) => list.find(db, (o) => o.id == id), check: (id) => match list.find(sdb, (s) => match s {
-  Draft(i) => i == id,
-  Done(i) => i == id,
-}) {
-  some(s) => ok(s),
-  none => err("not found: ${id}"),
-} }
+fn mk(db: List[Item], sdb: List[St]) -> Port = {
+  load: (id) => list.find(db, (o) => o.id == id),
+  check: (id) => match list.find(
+    sdb,
+    (s) => match s {
+      Draft(i) => i == id,
+      Done(i) => i == id,
+    },
+  ) {
+    some(s) => ok(s),
+    none => err("not found: ${id}"),
+  },
+}
 
 fn show(s: St) -> String = match s {
   Draft(i) => "draft:" + i,

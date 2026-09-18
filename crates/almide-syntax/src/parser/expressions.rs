@@ -649,14 +649,20 @@ impl Parser {
     pub(crate) fn parse_call_args(&mut self) -> Result<(Vec<Expr>, Vec<(Sym, Expr)>), String> {
         let mut args = Vec::new();
         let mut named_args = Vec::new();
-        self.skip_newlines();
+        let pending = self.skip_newlines_collecting();
         if self.check(TokenType::RParen) { return Ok((args, named_args)); }
         self.parse_one_call_arg(&mut args, &mut named_args)?;
+        if let Some(last) = named_args.last().map(|(_, e)| e).or_else(|| args.last()) {
+            self.attach_leading_comments(last.id, pending);
+        }
         while self.check(TokenType::Comma) {
             self.advance();
-            self.skip_newlines();
+            let pending = self.skip_newlines_collecting();
             if self.check(TokenType::RParen) { break; }
             self.parse_one_call_arg(&mut args, &mut named_args)?;
+            if let Some(last) = named_args.last().map(|(_, e)| e).or_else(|| args.last()) {
+                self.attach_leading_comments(last.id, pending);
+            }
         }
         self.skip_newlines();
         if !self.check(TokenType::RParen) && !self.check(TokenType::EOF) {

@@ -42,7 +42,7 @@ fn corpus_burn_up() {
     let mut front_skipped = 0usize;
     let mut total = 0usize;
 
-    for line in manifest.lines() {
+    for line in almide_corpus::manifest_rows(&manifest) {
         let mut it = line.splitn(3, '\t');
         let want_hash = it.next().expect("test harness invariant");
         let want_exit: i32 = it.next().expect("test harness invariant").parse().expect("test harness invariant");

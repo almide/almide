@@ -52,6 +52,16 @@ use almide_ir::{IrExpr, IrExprKind, IrFunction, IrPattern, IrProgram, IrStmtKind
 use almide_types::types::{Ty, TypeConstructorId};
 use wasm_encoder::{Function, MemArg, ValType};
 
+/// The staging room a host op's result must fit, in bytes (#2118/#2120).
+///
+/// The `to_wasi` transform parks op results in a fixed span between its data
+/// base and the env.set overlay page; this is that span, declared HERE because
+/// the emitter is what decides whether a call can be lowered at all, and
+/// `crates/almide-wasm-run/src/wasi.rs` asserts at compile time that its own
+/// layout still denotes the same number. One limit, two readers, no comment
+/// asking anyone to keep them in sync.
+pub const WASI_STAGING_ROOM: i64 = 4 * 65536 - 1024;
+
 #[derive(Debug)]
 pub enum EmitError {
     /// This IR shape is outside the current slice. The reason string feeds
@@ -90,12 +100,15 @@ fn unsup<T>(what: &str) -> Result<T, EmitError> {
 }
 
 mod bytes;
+mod imports;
 mod param_borrow;
 mod bytes_rw;
 mod bytes_recv;
 mod bytes_split;
 pub mod heap_cap;
+pub mod host_exports;
 pub mod witness;
+mod witness_hooks;
 mod calls;
 mod calls_modules;
 mod cells;
@@ -107,7 +120,7 @@ mod collections_set;
 mod map_inplace;
 mod map_index;
 mod emit;
-pub use emit::{emit_program, emit_program_with_ops};
+pub use emit::{emit_library_with_ops, emit_program, emit_program_with_ops};
 mod emitter;
 mod emitter_values;
 mod emitter_vars;
@@ -132,6 +145,7 @@ mod list_comb;
 mod list_edit;
 mod list_search;
 mod list_fuse;
+mod list_enumerate_fold;
 mod list_mut;
 mod list_order;
 mod list_sort;
@@ -139,6 +153,7 @@ mod string_scan;
 mod stmts;
 mod stmts_index;
 mod stmts_append;
+mod tail_append;
 mod string_ext;
 pub(crate) mod work;
 pub(crate) use work::*;
@@ -153,6 +168,8 @@ mod fan;
 mod fs;
 mod fs_meta;
 mod host_env;
+mod host_read_all;
+mod host_read_line;
 mod json_path_helpers;
 mod newtype;
 mod arg_temps;
@@ -527,6 +544,10 @@ struct FnInfo {
     /// releases) or only borrow it (neither) — param_borrow.rs (#2028).
     /// Both sides of every call edge read this one vector.
     param_owned: Vec<bool>,
+    /// `@extern(wasm, module, name)` (#2275): the slot is a declared import
+    /// the host serves, not a body — its stub leaves the module in the
+    /// `imports::declare` post-pass.
+    import: Option<(String, String)>,
 }
 
 struct FnTable {
@@ -740,4 +761,3 @@ fn collect_program_fns(ir: &IrProgram) -> Vec<(&IrFunction, Option<String>, u32)
     // Signature table first: call sites need indices and types up front.
     program_fns
 }
-

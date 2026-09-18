@@ -53,11 +53,14 @@ impl Emitter<'_> {
         self.f.instructions().local_set(params[1]);
         self.lower(body, Some(BOOL))?;
         self.f.instructions().if_(BlockType::Empty);
-        // some((k, v)): the pair block, then the option cell
+        // some((k, v)): the pair block, then the option cell — the pair
+        // co-owns the handles it copied out of the entry
         self.f.instructions().i32_const(psize as i32).call(F_ALLOC).local_set(hr);
         self.f.instructions().local_get(hr).local_get(params[0]);
+        self.share_handle_top(k);
         self.store_ty_slot(k, pk);
         self.f.instructions().local_get(hr).local_get(params[1]);
+        self.share_handle_top(v);
         self.store_ty_slot(v, pv);
         self.f.instructions().i32_const(4).call(F_ALLOC).local_tee(hend).local_get(hr);
         self.f.instructions().i32_store(slot_memarg(almide_layout::OPTION_FIELD));
@@ -119,12 +122,15 @@ impl Emitter<'_> {
             i.local_get(ho);
             i.local_get(hw).local_get(ho).i32_const(almide_layout::PAYLOAD as i32).i32_add().i32_sub();
             i.i32_store(len_memarg());
-            i.local_get(ho);
         }
+        // the kept entries are copies: the out map takes their credits
+        let mt = SliceTy::Map(self.types.intern(k), self.types.intern(v));
+        self.emit_inc_entries(ho, mt, None);
+        self.f.instructions().local_get(ho);
         for _ in 0..5 {
             self.release_i32();
         }
-        Ok(Some(Lowered::owned(SliceTy::Map(self.types.intern(k), self.types.intern(v)))))
+        Ok(Some(Lowered::owned(mt)))
     }
 
     /// #1423 stage 4 — the map predicate family: all / any (early-exit
@@ -244,13 +250,17 @@ impl Emitter<'_> {
         }
         self.load_ty_slot_at(v);
         self.f.instructions().local_set(params[0]);
-        // key copies through
+        // key copies through (a handle key is co-owned by the out map)
         self.f.instructions().local_get(hw).i32_const(okoff as i32).i32_add();
         self.f.instructions().local_get(hcur).i32_const(koff as i32).i32_add();
         self.load_ty_slot_at(k);
+        self.share_handle_top(k);
         self.store_ty_slot_at(k);
         self.f.instructions().local_get(hw).i32_const(ovoff as i32).i32_add();
         let got = self.lower(body, Some(b_ty))?;
+        // a borrowed callback result (`(v) => v`) takes its +1; an owned
+        // one moves into the slot
+        self.rc_share_guard(body, got);
         self.store_ty_slot_at(got);
         {
             let mut i = self.f.instructions();
@@ -366,13 +376,17 @@ impl Emitter<'_> {
             i.end();
             i.local_get(hcur).i32_const(esz as i32).i32_add().local_set(hcur);
             i.br(0).end().end();
-            i.local_get(ho);
         }
+        // every out entry is a copy (a's, or b's value / entry): the out
+        // map takes their credits once the walk has settled them
+        let mt = SliceTy::Map(self.types.intern(k), self.types.intern(v));
+        self.emit_inc_entries(ho, mt, None);
+        self.f.instructions().local_get(ho);
         self.release_for(k);
         for _ in 0..7 {
             self.release_i32();
         }
-        Ok(Some(Lowered::owned(SliceTy::Map(self.types.intern(k), self.types.intern(v)))))
+        Ok(Some(Lowered::owned(mt)))
     }
 
     /// Copy; a present key's value passes through the callback ONCE
@@ -401,6 +415,12 @@ impl Emitter<'_> {
             i.local_get(mh).i32_const(almide_layout::PAYLOAD as i32).i32_add();
             i.local_get(mh).i32_load(len_memarg());
             i.memory_copy(0, 0);
+        }
+        // the copy holds its own entry credits
+        let mt = SliceTy::Map(self.types.intern(k), self.types.intern(v));
+        self.emit_inc_entries(ho, mt, None);
+        {
+            let mut i = self.f.instructions();
             i.local_get(mh)
                 .i32_const(esz as i32)
                 .i32_const(entry_layout(k, v).0 as i32)
@@ -418,24 +438,47 @@ impl Emitter<'_> {
         }
         self.load_ty_slot_at(v);
         self.f.instructions().local_set(params[0]);
-        self.f
-            .instructions()
-            .local_get(ho)
-            .i32_const(almide_layout::PAYLOAD as i32)
-            .i32_add()
-            .local_get(he)
-            .i32_add()
-            .i32_const(voff as i32)
-            .i32_add();
-        self.lower(body, Some(v))?;
-        self.store_ty_slot_at(v);
+        self.emit_replace_out_value(ho, he, voff, body, v)?;
         self.f.instructions().end();
         self.f.instructions().local_get(ho);
         self.release_i32();
         self.release_i32();
         self.release_for(k);
         self.release_i32();
-        Ok(Some(Lowered::owned(SliceTy::Map(self.types.intern(k), self.types.intern(v)))))
+        Ok(Some(Lowered::owned(mt)))
+    }
+
+    /// The callback's value replaces the entry value at offset `he` of
+    /// the out copy `ho`: a borrowed result takes +1, the replaced
+    /// value's credit (the copy's own) is released, then the store.
+    fn emit_replace_out_value(
+        &mut self,
+        ho: u32,
+        he: u32,
+        voff: u32,
+        body: &IrExpr,
+        v: SliceTy,
+    ) -> Result<(), EmitError> {
+        let hnew = self.hold_for(v)?;
+        self.lower(body, Some(v))?;
+        self.rc_share_guard(body, v);
+        self.f.instructions().local_set(hnew);
+        for _ in 0..2 {
+            self.f
+                .instructions()
+                .local_get(ho)
+                .i32_const(almide_layout::PAYLOAD as i32)
+                .i32_add()
+                .local_get(he)
+                .i32_add()
+                .i32_const(voff as i32)
+                .i32_add();
+        }
+        self.emit_release_slot_at(v);
+        self.f.instructions().local_get(hnew);
+        self.store_ty_slot_at(v);
+        self.release_for(v);
+        Ok(())
     }
 
     /// Upsert (native): a present key keeps its POSITION and its value
@@ -474,6 +517,16 @@ impl Emitter<'_> {
             i.local_get(mh).i32_const(almide_layout::PAYLOAD as i32).i32_add();
             i.local_get(mh).i32_load(len_memarg());
             i.memory_copy(0, 0);
+        }
+        // the copied prefix holds its own entry credits (the over-allocated
+        // tail entry is not walked)
+        let mt = SliceTy::Map(self.types.intern(k), self.types.intern(v));
+        let hn = self.hold_i32()?;
+        self.f.instructions().local_get(mh).i32_load(len_memarg()).local_set(hn);
+        self.emit_inc_entries(ho, mt, Some(hn));
+        self.release_i32();
+        {
+            let mut i = self.f.instructions();
             i.local_get(mh).i32_const(esz as i32).i32_const(koff as i32).local_get(hkey);
             i.call(scan).local_tee(he).if_(BlockType::Empty);
             i.local_get(ho).local_get(mh).i32_load(len_memarg()).i32_store(len_memarg());
@@ -489,17 +542,10 @@ impl Emitter<'_> {
         }
         self.load_ty_slot_at(v);
         self.f.instructions().local_set(params[0]);
-        self.f
-            .instructions()
-            .local_get(ho)
-            .i32_const(almide_layout::PAYLOAD as i32)
-            .i32_add()
-            .local_get(he)
-            .i32_add()
-            .i32_const(voff as i32)
-            .i32_add();
-        self.lower(body, Some(v))?;
-        self.store_ty_slot_at(v);
+        self.emit_replace_out_value(ho, he, voff, body, v)?;
+        // present: the Retain credits of the unstored key and init go back
+        self.emit_release_hold(hkey, k);
+        self.emit_release_hold(hinit, v);
         {
             let mut i = self.f.instructions();
             i.else_();
@@ -526,7 +572,7 @@ impl Emitter<'_> {
         self.release_for(v);
         self.release_for(k);
         self.release_i32();
-        Ok(Some(Lowered::owned(SliceTy::Map(self.types.intern(k), self.types.intern(v)))))
+        Ok(Some(Lowered::owned(mt)))
     }
 
     /// `list.group_by(xs, f) -> Map[B, List[A]]` — first-seen key order,
@@ -562,16 +608,28 @@ impl Emitter<'_> {
         }
         self.hof_elem_into(elem, bh, ch, ih, params[0]);
         self.lower(body, Some(kt))?;
+        // The key the callback produced: stored on the absent path (a
+        // borrowed one takes +1 there), dropped on the present path (an
+        // owned one is released there).
+        let key_owned = self.rc_owned_result(body);
         {
             let mut i = self.f.instructions();
             i.local_set(hkey);
             i.local_get(hm).i32_const(esz as i32).i32_const(koff as i32).local_get(hkey);
             i.call(scan).local_tee(he).if_(BlockType::Empty);
+        }
+        if key_owned {
+            self.emit_release_hold(hkey, kt);
+        }
+        {
+            let mut i = self.f.instructions();
             // present: push into the entry's list, patch the slot back
             i.local_get(he);
             i.local_get(he).i32_load(MemArg { offset: u64::from(voff), align: 2, memory_index: 0 });
             i.local_get(params[0]);
         }
+        // the group list co-owns the element it copied out of xs
+        self.share_handle_top(elem);
         if elem.val_type() == wasm_encoder::ValType::F64 {
             self.f.instructions().i64_reinterpret_f64();
         }
@@ -580,7 +638,8 @@ impl Emitter<'_> {
             i.call(push);
             i.i32_store(MemArg { offset: u64::from(voff), align: 2, memory_index: 0 });
             i.else_();
-            // absent: grow-append the (key, [x]) entry
+            // absent: grow-append the (key, [x]) entry; the outgrown
+            // accumulator (uniquely ours) is freed once its entries moved
             i.local_get(hm).i32_load(len_memarg()).i32_const(esz as i32).i32_add();
             i.call(F_ALLOC).local_set(he);
             i.local_get(he).i32_const(almide_layout::PAYLOAD as i32).i32_add();
@@ -592,6 +651,9 @@ impl Emitter<'_> {
             i.local_get(he).i32_const(koff as i32).i32_add();
             i.local_get(hkey);
         }
+        if !key_owned {
+            self.share_handle_top(kt);
+        }
         self.store_ty_slot_at(kt);
         {
             let mut i = self.f.instructions();
@@ -599,6 +661,7 @@ impl Emitter<'_> {
             i.i32_const(0).call(F_ALLOC);
             i.local_get(params[0]);
         }
+        self.share_handle_top(elem);
         if elem.val_type() == wasm_encoder::ValType::F64 {
             self.f.instructions().i64_reinterpret_f64();
         }
@@ -606,11 +669,14 @@ impl Emitter<'_> {
             let mut i = self.f.instructions();
             i.call(push);
             i.i32_store(MemArg { offset: u64::from(voff), align: 2, memory_index: 0 });
-            // the grown block replaces the old handle
+            // the grown block replaces the old handle, and the outgrown
+            // one (uniquely ours, its entries moved) is freed
+            i.local_get(hm);
             i.local_get(he);
             i.local_get(hm).i32_load(len_memarg()).i32_sub();
             i.i32_const(almide_layout::PAYLOAD as i32).i32_sub();
             i.local_set(hm);
+            i.call(F_FREE);
             i.end();
         }
         self.hof_step(ih);

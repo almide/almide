@@ -63,13 +63,24 @@ and serves as the cross-target oracle / executable spec.
     on the full wasm_cross corpus. `almide run` executes on the embedded
     `almide-wasm-run` host (fs/env/stdin included); `almide build` ships the
     `to_wasi` form, which runs on STOCK runtimes (`wasmtime run mod.wasm` —
-    the 578-fixture stock-runtime gate is the witness).
+    the 578-fixture stock-runtime gate is the witness). The same artifact
+    runs on `almide-wasm-vm`, the qualification-scoped interpreter (#865)
+    whose instruction set is pinned to this emitter's;
+    `tests/wasm_vm_parity_test.rs` holds it equal to the stock runtime on
+    every fixture and to native on every Critical-profile one.
   - the **incumbent WAT trust-spine**: `almide-mir` renders WAT, the CLI
     assembles it with `wat` and strips local names. Routed for main-less
     library modules (#881), dependency-package and `import self` projects
     (#1596), host-variant BUILD artifacts, and `ALMIDE_FUEL_PROBE`
     instrumentation; `ALMIDE_WASM_INCUMBENT=1` forces it (the reversible
     switch, kept for one release).
+  Every `ALMIDE_*` switch the tree reads — the forced routes here, the gate
+  bypasses, the ablations, the trace channels — is one registry,
+  `almide_base::env::SWITCHES` (`almide switches` lists it; `docs/specs/cli.md`
+  embeds its table; #2205). The compiler proper reads only through
+  `almide_base::env::{flag, var}`: one boolean semantics, and a forced route
+  or a bypassed gate inherited from the environment is announced once on
+  stderr, so a verdict produced under it says so.
   A structural WALL reroutes to the incumbent renderer (both legs are
   VERIFIED — this is not #782's sin, which was falling into unverified v0
   codegen; `ALMIDE_VERIFIED_DEBUG=1` names the wall that rerouted). A shape
@@ -147,11 +158,41 @@ walker sees only typed IR nodes — it never checks what target it renders for.
 
 1. **Nanopass pipeline** — each `pass_*.rs` receives `&mut IrProgram` and does
    one semantic rewrite (StdlibLowering, ResultPropagation, CloneInsertion,
-   BuiltinLowering, FanLowering, ...).
+   BuiltinLowering, FanLowering, ...). The order is DECLARED, not merely
+   spelled: every pass names the passes it needs before it (`depends_on`) and
+   the ones it must precede (`run_before`), three representation boundaries
+   are barriers, and `scripts/check-pass-shuffle.sh` proves the declarations
+   are the whole truth by running seeded random orders they permit and
+   byte-diffing the emitted Rust (#2186).
 2. **Template renderer** — TOML files define syntax patterns; the walker calls
    `templates.render_with("if_expr", ...)`. All string rendering happens here.
 3. **Walker** — target-agnostic IR tree renderer; zero `if target == Rust`
-   checks.
+   checks, and no ownership decisions of its own (#2186): whether a value is
+   moved, cloned, borrowed or owned at a site is a pass's verdict, carried to
+   the walker as an IR node (`Borrow`, `Clone`, `Deref`, an owning method
+   call) or a `CodegenAnnotations` entry (`var_storage`, `shared_mut_vars`,
+   `borrowed_loop_vars`, `param_borrows`, …). The walker picks a SPELLING per
+   storage class and renders every node by its kind alone. It runs no
+   analysis walk, keeps no per-function ownership set, and never decides on
+   the text it just rendered — `scripts/check-walker-reads-annotations.sh`
+   holds that line. The ownership verdicts themselves are held by a
+   property, not only by fixtures: `tests/native_borrow_oracle_test.rs`
+   generates, per borrow-eligible type, every use a body can make of a
+   param crossed with every call-site shape, and asserts the program
+   checks, builds natively and prints what the wasm leg prints — and, under
+   `ALMIDE_ALLOC_COUNT=1` (a counting allocator the native build injects),
+   allocates exactly the (allocs, deallocs) pair pinned per program in
+   `tests/golden/native-borrow-oracle-alloc.txt`: a clone where a borrow
+   would do changes neither stdout nor the build, only that count (#2228).
+   The verdicts themselves are certified on every DEBUG native build, and on
+   a release build that asks (`ALMIDE_CERTIFY_OWNERSHIP=report|fail|off`,
+   `crates/almide-codegen/src/certify_ownership.rs`, #2231): the final IR is
+   re-walked and each param's borrow mode and each `Clone` is checked against
+   what the occurrences actually do — a borrowed param consumed, an owned
+   value cloned at its last use, an owned param nothing needs owned. The
+   corpus ledger (`proofs/ownership-certifier-baseline.txt`,
+   `scripts/check-ownership-certifier.sh`) is shrink-only and EMPTY: a
+   violation is a defect, and the debug build refuses to emit it.
 
 ## WASM Trust-Spine (almide-mir)
 
@@ -165,8 +206,13 @@ The wasm backend is the v1 MIR pipeline in `almide-mir`:
   `stdlib/*.almd` are registered in `almide-types/src/self_host_registry.rs`
   and compiled along with user code. An unlinked stdlib call is a wall (hard
   error).
-- `wasmparser::validate` guards the test harness; `almide test --target wasm`
-  falls back to native execution on a wall.
+- `wasmparser::validate` guards the test harness. `almide test --target wasm`
+  renders through the SAME two-leg route as `build`/`run --target wasm` (#2179):
+  the structural leg first (`almide-wasm`, with the shared `__test_runner`
+  synthesis and the structural in-test assert lowering from
+  `almide_driver::test_runner`), the incumbent where it declines; a file both
+  legs wall is reported as a WALL, and the default `almide test` lane then
+  runs it natively.
 
 ## Optimization pass roster per target
 
@@ -196,7 +242,7 @@ The ONE stage order every leg and the interp oracle consume (`tests/one_driver_t
 fails on a second spelling). `optimize_half` = rows 1–7; `link_half` = rows 8–9.
 `ALMIDE_DISABLE_OPT=1` skips the three perf rows (the ablation leg of the perf
 ratchet); `ALMIDE_ONLY_PASS=fold|dce|propagate` runs exactly one of them
-(`scripts/check-pass-isolated.sh`, `spec/pass_isolated/`).
+(`scripts/check-pass-isolated.sh` over `spec/pass_isolated/`, run by the CI `checks` job).
 
 | # | Pass | Module | Kind | Does |
 |---|---|---|---|---|
@@ -236,28 +282,45 @@ The Wgsl arm is the four rows marked W. Class:
 | 7 | `RegionWindow` | `pass_region_window.rs`, `pass_region_window_clone.rs` | Rust | optimizer | `consume(produce(scalars))` sites run over `__rgn_` twin fns and `Copy` twin enums in the prelude's thread-local bump arena (#1991); v1 admits root-module fns and root variant enums with scalar / region-enum tuple payloads | equivalent: `region.rs` (`RegionSave`/`RegionRestore` over the allocator, #1961) |
 | 8 | `BoxDeref` | `pass_box_deref.rs` | Rust | Rust by design | `*deref` for pattern vars bound from `Box`'d fields | n/a |
 | 9 | `LICM` | `pass_licm.rs`, `pass_licm_hoist.rs`, `pass_licm_purity.rs` | all | optimizer | hoist loop-invariant pure expressions to `let`s before the loop | **no equivalent** — see E |
-| 10 | `EggSaturation` | `pass_egg_saturation.rs` | all | optimizer | equality-saturation fusion of matrix and list combinator chains (`almide-egg-lab`, rules from stdlib `@rewrite`) | list half: `list_fuse.rs` (map/filter → fold); matrix half: **no equivalent** — see E |
+| 10 | `EggSaturation` | `pass_egg_saturation.rs` | all | optimizer | equality-saturation fusion of matrix chains (`almide-egg-lab`, rules from stdlib `@rewrite`); the list arm is off since #2045 (its lambda substitution duplicated callback side effects) | **no equivalent** — see E |
 | 11 | `MatrixShapeSpec` | `pass_matrix_shape_spec.rs` | Rust | Rust by design | small-shape matmul → fully unrolled `InlineRust` | n/a (hand-written kernels, `matrix_kernels.rs`) |
 | 12 | `ConstFold` | `pass_const_fold.rs` | all | optimizer | fold literal arithmetic left by rows 10–11 | superseded by A.1 (`fold`) — see E |
 | 13 | `IntrinsicLowering` | `pass_intrinsic_lowering.rs` | all | enabler | `@intrinsic` stdlib calls → `RuntimeCall { symbol }` | self-host registry link (`src/wasm_leg.rs`); intrinsics are walls |
-| 14 | `BorrowInsertion` | `pass_borrow_inference.rs`, `pass_borrow_inference_call_sites.rs`, `pass_borrow_inference_ownership.rs` (wrapper in `pass.rs`) | Rust | Rust by design | Roc-style borrow-by-default signatures, `Borrow` nodes at call sites | RC-3 borrow/fresh classifier (`rc_ownership.rs`) |
+| 13b | `StreamFusion` | `pass_stream_fusion.rs` | Rust | optimizer | `RuntimeCall { almide_rt_list_* }` with a lambda literal → `IterChain`, BEFORE `BorrowInsertion` — a chain lambda is a scope the borrow / capture-clone / clone passes never see as a closure, so it borrows what it reads and renders without `move`; the source starts consumed and `BorrowInsertion` decides its mode from what the steps do with each element, not from the twin's `@consume` slot (#2287: `element_reads_only` — a `Copy` element or a heap element every receiving lambda only reads leaves the source `&[T]`, bound `&T` off `.iter()` by the clone pass); a `\|>` chain flattens into one iterator expression only when every callback is pure and the interleaving is unobservable (#2045); `ALMIDE_STREAM_FUSION_OFF` ablates | **no equivalent** — the spec order is stage-by-stage; see E |
+| 14 | `BorrowInsertion` | `pass_borrow_inference.rs`, `pass_borrow_inference_call_sites.rs`, `pass_borrow_inference_ownership.rs` (wrapper in `pass.rs`) | Rust | Rust by design | Roc-style borrow-by-default signatures, `Borrow` nodes at call sites; an iteration's source follows what its body does with the element (#2287); a fn-typed param is `&dyn Fn` unless its callable escapes, and a lambda literal at such a slot is a scope spelled `&(lambda)` (#2288) | RC-3 borrow/fresh classifier (`rc_ownership.rs`) |
 | 15 | `TailCallOpt` | `pass_tco.rs`, `pass_tco_loop_rewrite.rs`, `pass_tco_owned_reads.rs` | all | optimizer | self-recursive tail calls → loop | equivalent: `tco.rs` (`loop_convert` over the encoded body; `return_call` otherwise) |
-| 16 | `CaptureClone` | `pass_capture_clone.rs` | Rust | Rust by design | pre-clone variables captured by `move` closures | n/a |
-| 17 | `CloneInsertion` | `pass_clone.rs`, `pass_clone_interp.rs`, `pass_clone_loops.rs` | Rust | Rust by design | `Clone` nodes for heap-typed reuse (loops, interpolation, E0505 guards) | RC inc/share guards (`rc_ownership.rs`) |
+| 16 | `CaptureClone` | `pass_capture_clone.rs`, `pass_capture_clone_bindings.rs` | Rust | Rust by design | pre-clone variables captured by `move` closures | n/a |
+| 17 | `CloneInsertion` | `pass_clone.rs`, `pass_clone_calls.rs`, `pass_clone_interp.rs`, `pass_clone_compare.rs`, `pass_clone_places.rs`, `pass_clone_projection.rs`, `pass_clone_record_fields.rs`, `pass_clone_loops.rs` | Rust | Rust by design | `Clone` nodes for heap-typed reuse and proven projection borrows/moves | RC inc/share guards (`rc_ownership.rs`) |
+| 17b | `ChainSourceBorrow` | `pass_chain_source_borrow.rs` | Rust | optimizer | a chain source the clone pass had to clone (`(v.clone()).into_iter()`, `t.sizes` off a `&Table`, a live local under a borrowed source), or a `&[T]` param used bare as a consumed one, iterates from a borrow (`.iter().cloned()`) unless a callback writes the variable (#2098) | n/a |
 | 18 | `MatchSubject` | `pass_match_subject.rs` | Rust | Rust by design | `.as_str()` / `.as_deref()` on match subjects | n/a |
 | 19 | `EffectInference` | `pass_effect_inference.rs` | all | analysis | infer capability categories from transitive stdlib use | shared by another route: `cli::check_permissions` runs this pass standalone on the pre-mono IR for every leg |
 | 20 | `StdlibLowering` | `pass_stdlib_lowering.rs`, `pass_stdlib_lowering_ufcs.rs` | Rust | Rust by design | `Module` calls → `Named` runtime calls with arg decoration | self-hosted stdlib bodies are emitted as wasm fns |
-| 21 | `AutoParallel` | `pass_auto_parallel.rs` | Rust | Rust by design | pure `list.map/filter/any/all` → `std::thread::scope` variants | n/a (single-threaded wasm) |
-| 22 | `ResultPropagation` | `pass_result_propagation.rs` | all | Rust by design | effect fn `T → Result[T, String]`, `Try` at call sites | own effect lowering (`effect_raw`, `emit.rs`) |
-| 23 | `BuiltinLowering` | `pass_builtin_lowering.rs` | Rust | Rust by design | `assert_eq`/`println`/… → `RustMacro` | n/a |
+| 21 | `ResultPropagation` | `pass_result_propagation.rs` | all | Rust by design | effect fn `T → Result[T, String]`, `Try` at call sites | own effect lowering (`effect_raw`, `emit.rs`) |
+| 22 | `BuiltinLowering` | `pass_builtin_lowering.rs` | Rust | Rust by design | `assert_eq`/`println`/… → `RustMacro` | n/a |
+| 23 | `DecodeSlotHint` | `pass_decode_slot_hint.rs` | Rust | Rust by design | a derived `T.decode`'s borrowed field lookups carry their declaration index (`@codec_slots`), rendered as `almide_rt_value_field_ref_at` (#1679); the runtime tries `pairs[i]` before the scan, errors unchanged (C-084) | n/a (the wasm leg reads neither the attribute nor the `_at` symbol) |
+| 23b | `DecodeErrFrame` | `pass_decode_err_frame.rs` | Rust | Rust by design | a derived `T.decode`'s per-field error frame (`T___erratw_*`, #1675) becomes `.map_err(..)` on the field's own result, so the success path is a plain `?` with no payload clone and no key allocation (#2050) | n/a (the wasm leg lowers the worker itself) |
 | 24 | `Peephole` | `pass_peephole.rs` | all | optimizer | idiomatic list loops → `ListSwap`/`ListReverse`/`ListRotateLeft`/`ListCopySlice` nodes | **no lowering for those nodes** — see E |
-| 25 | `RustLowering` | `pass_rust_lowering.rs` | Rust | Rust by design | push optimization, borrow index lift | n/a |
+| 25 | `RustLowering` | `pass_rust_lowering.rs`, `pass_rust_lowering_stmts.rs`, `pass_rust_lowering_fan.rs`, `pass_fan_local_state.rs` | Rust | Rust by design | push optimization, borrow index lift; routes `fan.map` and list ops under `fan { }` with a pure lambda over Send-safe scalars to the thread-per-core runtime twins (`almide_rt_fan_map_par`, `almide_rt_list_par_*`; `ALMIDE_FAN_SEQUENTIAL=1` ablates, #2044) | n/a |
 | 26 | `FanLowering` | `pass_fan_lowering.rs` (wrapper in `pass.rs`) | all, W | enabler | strip auto-try from fan spawn closures | own fan lowering (`fan.rs`) |
 | 27 | `NormalizeRuntimeCalls` | `pass_normalize_runtime_calls.rs` | Rust | Rust by design | legacy `Named { almide_rt_* }` → `RuntimeCall` | n/a |
 | 28 | `IrLinkFlatten` | `pass_ir_link_flatten.rs` | Rust | Rust by design | flatten modules into the root for the walker | keeps modules, qualified names |
 | 29 | `SharedCellBorrow` | `pass_shared_cell_borrow.rs` | Rust | Rust by design | borrow a captured cell in place for statement-proven-safe reads (#1143) | n/a |
-| 30 | `RangeCountingVars` | `pass_range_counting.rs` | Rust | optimizer | a `let`-bound range read ONLY as `for-in` heads stays a bare `Range<i64>` instead of a materialized `Vec<i64>` (#1857); mirrors MIR's #1400 `range_counting_vars` admission rule and runs last so the set names the final IR | `ranges.rs` counting loop (#1400) — already has it |
-| 31 | `TopLetStorage` | `pass_top_let_storage.rs` | all | analysis | the unified top-let storage attribute for the walker (§4 Stage 1) | own globals plan (`build_globals`) |
+| 30 | `VarStorage` | `pass_var_storage.rs` | Rust | Rust by design | which non-Copy `var` locals a closure captures and so live in an `AlmideRcCow` (`var_storage`); was the walker's own program-setup scan (#2186) | RC-3 borrow/fresh classifier (`rc_ownership.rs`) |
+| 31 | `RangeCountingVars` | `pass_range_counting.rs` | Rust | optimizer | a `let`-bound range read ONLY as `for-in` heads stays a bare `Range<i64>` instead of a materialized `Vec<i64>` (#1857); mirrors MIR's #1400 `range_counting_vars` admission rule and runs last so the set names the final IR | `ranges.rs` counting loop (#1400) — already has it |
+| 32 | `TopLetStorage` | `pass_top_let_storage.rs` | all | analysis | the unified top-let storage attribute for the walker (§4 Stage 1) | own globals plan (`build_globals`) |
+| 33 | `BorrowLowering` | `pass_borrow_lowering.rs` | Rust | Rust by design | the last word on every `Borrow` / `Clone` / stored read of a by-reference param — drop the `&` a `&T` param already has, `.to_string()` / `.to_vec()` / `.clone()` an owned read, `.clone()` a spread base, borrow INTO a list (`almide_index_ref!`), the `_ref` field-lookup twin, `.as_str()` a `&String` loop binder, deref a `&T` param in an equality — and publishes `param_borrows`; the walker renders what it sees (#2186) | n/a (the wasm leg has no references) |
+
+Rows 14, 16 and 17 read their ownership facts from ONE walk, `use_kind.rs`
+(#2186): every occurrence of every local, tagged with the position its parent
+puts it in (`Site`) and whether a closure, a fused chain or a `&mut` encloses
+it. `BorrowInsertion`'s "does this param need owning / `&mut`" is a predicate
+over those sites with a `SlotOracle` supplying the callee slot modes from the
+fixed-point snapshot; `CaptureClone`'s "which captures does the closure
+write" and `CloneInsertion`'s use counts and loop-binder verdicts are
+predicates over the same walk with the explicit-borrow oracle. The fixed
+point is a monotone ascent (`Ref` → `RefMut` → `Own`, every key the rounds
+will publish seeded optimistic) with no round cap: a slot moving down or a
+run past the lattice height is an ICE.
 
 ### C. Structural wasm leg — `crates/almide-wasm` (default `--target wasm`)
 

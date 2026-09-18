@@ -37,6 +37,10 @@ type Shape: Codec = | Circle(Float) | Point | Label { text: String, hint: String
 
 type Deep: Codec = { lo: List[Int?], ll: List[List[Int]], dp: List[String?]?, lc: List[Inner?] }
 
+type Defaulted: Codec = { city: String, zip: String = "0" }
+
+type OptCells: Codec = { d: Defaulted?, p: Inner?, l: List[Int]?, s: String?, tag: String = "t" }
+
 fn enc_scalars(x: Scalars) -> String = json.stringify(Scalars.encode(x))
 
 fn enc_opts(x: Opts) -> String = json.stringify(Opts.encode(x))
@@ -83,10 +87,14 @@ test "Option: decode folds missing and explicit null to none" {
 }
 
 test "nested Codec: direct field, list elements, Option none omission" {
-  let x = Nested { one: Inner { n: 1 }, many: [
-    Inner { n: 2 },
-    Inner { n: 3 }
-  ], maybe: none }
+  let x = Nested {
+    one: Inner { n: 1 },
+    many: [
+      Inner { n: 2 },
+      Inner { n: 3 }
+    ],
+    maybe: none,
+  }
   assert_eq(json.stringify(Nested.encode(x)), '{"one":{"n":1},"many":[{"n":2},{"n":3}]}')
   assert_eq(Nested.decode(Nested.encode(x)), ok(x))
   let y = Nested { one: Inner { n: 1 }, many: [], maybe: some(Inner { n: 9 }) }
@@ -157,14 +165,22 @@ test "variant wire shapes: externally tagged; unit → null; tuple → array" {
 }
 
 test "nested containers: List[Option], List[List], deep Option[List[Option]]" {
-  let x = Deep { lo: [some(1), none, some(3)], ll: [
-    [1],
-    [2, 3]
-  ], dp: some([some("a"), none]), lc: [
-    some(Inner { n: 9 }),
-    none
-  ] }
-  assert_eq(json.stringify(Deep.encode(x)), '{"lo":[1,null,3],"ll":[[1],[2,3]],"dp":["a",null],"lc":[{"n":9},null]}')
+  let x = Deep {
+    lo: [some(1), none, some(3)],
+    ll: [
+      [1],
+      [2, 3]
+    ],
+    dp: some([some("a"), none]),
+    lc: [
+      some(Inner { n: 9 }),
+      none
+    ],
+  }
+  assert_eq(
+    json.stringify(Deep.encode(x)),
+    '{"lo":[1,null,3],"ll":[[1],[2,3]],"dp":["a",null],"lc":[{"n":9},null]}',
+  )
   assert_eq(Deep.decode(Deep.encode(x)), ok(x))
   // dp omitted when none; element null decodes to none; element type errors propagate
   let y = Deep { lo: [], ll: [], dp: none, lc: [] }
@@ -178,8 +194,45 @@ test "nested containers: List[Option], List[List], deep Option[List[Option]]" {
 
 test "variant record case: Option field omits none, folds missing/null to none" {
   assert_eq(json.stringify(Shape.encode(Label { text: "a", hint: none })), '{"Label":{"text":"a"}}')
-  assert_eq(json.stringify(Shape.encode(Label { text: "b", hint: some("h") })), '{"Label":{"text":"b","hint":"h"}}')
+  assert_eq(
+    json.stringify(Shape.encode(Label { text: "b", hint: some("h") })),
+    '{"Label":{"text":"b","hint":"h"}}',
+  )
   assert_eq(Shape.decode(parse('{"Label":{"text":"a"}}')), ok(Label { text: "a", hint: none }))
-  assert_eq(Shape.decode(parse('{"Label":{"text":"a","hint":null}}')), ok(Label { text: "a", hint: none }))
-  assert_eq(Shape.decode(Shape.encode(Label { text: "c", hint: some("h") })), ok(Label { text: "c", hint: some("h") }))
+  assert_eq(
+    Shape.decode(parse('{"Label":{"text":"a","hint":null}}')),
+    ok(Label { text: "a", hint: none }),
+  )
+  assert_eq(
+    Shape.decode(Shape.encode(Label { text: "c", hint: some("h") })),
+    ok(Label { text: "c", hint: some("h") }),
+  )
+}
+
+// #2052: Option × {record with a default field, record without, list,
+// primitive} on one record that itself carries a default. The
+// record-with-default cell failed to BUILD on native (its inner decode owned
+// the document while the outer borrowed it); the cells must agree on both legs.
+test "Option × {record with default, record without, list, primitive}: present decodes, missing/null fold to none, defaults fill" {
+  match OptCells.decode(parse('{"d":{"city":"x"},"p":{"n":1},"l":[1],"s":"s"}')) {
+    ok(c) => {
+      assert_eq(c.d, some(Defaulted { city: "x", zip: "0" }))
+      assert_eq(c.p, some(Inner { n: 1 }))
+      assert_eq(c.l, some([1]))
+      assert_eq(c.s, some("s"))
+      assert_eq(c.tag, "t")
+    },
+    err(_) => assert(false),
+  }
+  let empty = OptCells { d: none, p: none, l: none, s: none, tag: "t" }
+  assert_eq(OptCells.decode(parse('{"d":null,"tag":null}')), ok(empty))
+  assert_eq(OptCells.decode(parse('{}')), ok(empty))
+  let full = OptCells {
+    d: some(Defaulted { city: "y", zip: "9" }),
+    p: some(Inner { n: 2 }),
+    l: some([3]),
+    s: some("z"),
+    tag: "u",
+  }
+  assert_eq(OptCells.decode(OptCells.encode(full)), ok(full))
 }

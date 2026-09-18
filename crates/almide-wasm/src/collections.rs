@@ -176,6 +176,9 @@ impl Emitter<'_> {
                     .local_tee(vh);
                 self.f.instructions().local_get(eh).i32_const(lay.1 as i32).i32_add();
                 self.load_ty_slot_at(v); // eh is ABSOLUTE (inside payload)
+                // the some-block co-owns the value it copied out (its
+                // typed drop releases it; the map keeps its own credit)
+                self.share_handle_top(v);
                 self.store_ty_slot(v, almide_layout::OPTION_FIELD);
                 self.f.instructions().local_get(vh);
                 self.release_i32(); // vh
@@ -296,8 +299,12 @@ impl Emitter<'_> {
                     .i32_sub();
                 i.memory_copy(0, 0);
                 i.end();
-                i.local_get(ho);
                 let _ = i;
+                // the copy holds its own entry credits (the removed
+                // entry's stay with the input)
+                let mt = SliceTy::Map(self.types.intern(k), self.types.intern(v));
+                self.emit_inc_entries(ho, mt, None);
+                self.f.instructions().local_get(ho);
                 self.release_i32(); // hp
                 self.release_i32(); // ho
                 self.release_i32(); // eh
@@ -399,8 +406,8 @@ impl Emitter<'_> {
                         .i32_mul()
                         .i32_add();
                     self.load_ty_slot(t, src_off);
-                    // A handle copied into the pair block takes +1
-                    // (leak-not-dangle until the pair's typed drop, 2c).
+                    // A handle copied into the pair block takes +1: the
+                    // pair's typed drop releases it, the map keeps its own.
                     self.share_handle_top(t);
                     self.store_ty_slot(t, dst_off);
                 }
@@ -542,7 +549,10 @@ impl Emitter<'_> {
                     .call(scan)
                     .local_set(eh);
                 self.f.instructions().local_get(eh).i32_const(0).i32_ne().if_(BlockType::Empty);
-                // overwrite value in place (uniquely owned)
+                // overwrite value in place (uniquely owned): the replaced
+                // value's credit goes with it
+                self.f.instructions().local_get(eh).i32_const(lay.1 as i32).i32_add();
+                self.emit_release_slot_at(v);
                 self.f.instructions().local_get(eh).i32_const(lay.1 as i32).i32_add();
                 self.f
                     .instructions()
@@ -551,8 +561,8 @@ impl Emitter<'_> {
                     .i32_add();
                 self.load_ty_slot_at(v);
                 // Handles copied out of the pairs into the map take +1:
-                // the map is a holder with no typed drop yet (the pairs
-                // list releases its own credits, #2010 stage 2c).
+                // the map releases them through its typed drop, the pairs
+                // list through its own (#2010 Map stage b).
                 self.share_handle_top(v);
                 self.store_ty_slot_raw(v);
                 self.f.instructions().else_();
@@ -586,6 +596,8 @@ impl Emitter<'_> {
                 self.load_ty_slot_at(v);
                 self.share_handle_top(v);
                 self.store_ty_slot_raw(v);
+                // the outgrown block is ours alone and its entries moved
+                self.f.instructions().local_get(rh).call(F_FREE);
                 self.f.instructions().local_get(nh).local_set(rh);
                 self.release_i32();
                 self.release_i32();

@@ -94,11 +94,20 @@ pub trait NanoPass: std::fmt::Debug {
     /// declare the reverse dependency. Default: none.
     fn run_before(&self) -> Vec<&'static str> { vec![] }
 
-    /// Postconditions: structural invariants guaranteed after this pass runs.
-    /// Verified on every build. Debug builds panic on violation; release
-    /// builds print a `[POSTCONDITION VIOLATION]` diagnostic and keep
-    /// running. Violations are compiler bugs — downstream passes may rely
-    /// on the invariants unconditionally.
+    /// A REPRESENTATION BOUNDARY: every pass declared before this one stays
+    /// before it and every pass declared after stays after, without each of
+    /// them naming it. `UnifyVarTables` (per-module var tables → one table)
+    /// and `IrLinkFlatten` (modules → root) change what a VarId or a fn name
+    /// MEANS, so an edge to each of them would be on every pass; a barrier
+    /// says it once. The shuffle (`ALMIDE_SHUFFLE_PASSES`) never crosses one.
+    /// Default: not a barrier.
+    fn barrier(&self) -> bool { false }
+
+    /// Postconditions: structural invariants guaranteed after this pass runs
+    /// — and from then on: they are MONOTONE, re-verified after every later
+    /// pass in every profile (release included — the per-pass walk costs
+    /// ~8 ms per file, measured over spec/lang), so a later pass that undoes
+    /// them is named. A violation is a compiler bug and fails the build.
     fn postconditions(&self) -> Vec<Postcondition> { vec![] }
 
     /// Run the pass. Takes ownership of the program, returns modified program
@@ -223,6 +232,20 @@ pub struct Pipeline {
     passes: Vec<Box<dyn NanoPass>>,
 }
 
+/// splitmix64 — the shuffle's seeded generator: deterministic per seed and
+/// dependency-free, so `ALMIDE_SHUFFLE_PASSES=<seed>` names one order.
+struct SplitMix64(u64);
+
+impl SplitMix64 {
+    fn next(&mut self) -> u64 {
+        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = self.0;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    }
+}
+
 impl Pipeline {
     pub fn new() -> Self {
         Self { passes: Vec::new() }
@@ -231,6 +254,78 @@ impl Pipeline {
     pub fn add<P: NanoPass + 'static>(mut self, pass: P) -> Self {
         self.passes.push(Box::new(pass));
         self
+    }
+
+    /// The pass names in the order `target` would run them under `seed`
+    /// (the declared order when `seed` is `None`) — what the shuffle gate
+    /// prints, and what the shuffle's own tests read.
+    pub fn order_names(&self, target: Target, seed: Option<&str>) -> Vec<&str> {
+        self.order(target, seed).into_iter().map(|i| self.passes[i].name()).collect()
+    }
+
+    /// The indices of the passes that run for `target`, in the DECLARED order
+    /// — or, under a shuffle seed, in a random order consistent with every
+    /// declared `depends_on` / `run_before` edge and every barrier. Kahn's
+    /// algorithm over those edges, the ready set drawn by a seeded
+    /// generator; a seed that does not parse runs the declared order.
+    pub(crate) fn order(&self, target: Target, seed: Option<&str>) -> Vec<usize> {
+        let live: Vec<usize> = (0..self.passes.len())
+            .filter(|&i| self.passes[i].targets().map_or(true, |ts| ts.contains(&target)))
+            .collect();
+        let Some(seed) = seed.and_then(|s| s.trim().parse::<u64>().ok()) else { return live; };
+        let after = self.declared_edges(&live);
+        let n = live.len();
+        let mut indegree = vec![0usize; n];
+        for succs in &after {
+            for &b in succs { indegree[b] += 1; }
+        }
+        let mut rng = SplitMix64(seed ^ 0x9E37_79B9_7F4A_7C15);
+        let mut ready: Vec<usize> = (0..n).filter(|&i| indegree[i] == 0).collect();
+        let mut out = Vec::with_capacity(n);
+        while !ready.is_empty() {
+            let pick = (rng.next() % ready.len() as u64) as usize;
+            let a = ready.swap_remove(pick);
+            out.push(live[a]);
+            for &b in &after[a] {
+                indegree[b] -= 1;
+                if indegree[b] == 0 { ready.push(b); }
+            }
+        }
+        assert!(out.len() == n, "[ICE] the declared pass edges form a cycle");
+        out
+    }
+
+    /// The edges the shuffle must respect, over positions in `live`:
+    /// `after[a]` holds every live `b` that must run AFTER `a` — from each
+    /// pass's `depends_on` / `run_before`, from every barrier (everything
+    /// declared before it precedes it, everything after follows it), and
+    /// from `ALMIDE_PASS_EDGES=A<B,C<D`, the extra edges the bisection
+    /// instrument (`scripts/pass-shuffle-bisect.py`) forces to find the
+    /// pair a divergence needs declared.
+    fn declared_edges(&self, live: &[usize]) -> Vec<Vec<usize>> {
+        let position = |name: &str| live.iter().position(|&i| self.passes[i].name() == name);
+        let n = live.len();
+        let mut after: Vec<Vec<usize>> = vec![Vec::new(); n];
+        let mut edge = |a: usize, b: usize| if a != b && !after[a].contains(&b) { after[a].push(b); };
+        for (bi, &b) in live.iter().enumerate() {
+            for dep in self.passes[b].depends_on() {
+                if let Some(ai) = position(dep) { edge(ai, bi); }
+            }
+            for succ in self.passes[b].run_before() {
+                if let Some(ci) = position(succ) { edge(bi, ci); }
+            }
+            if self.passes[b].barrier() {
+                for ai in 0..bi { edge(ai, bi); }
+                for ci in bi + 1..n { edge(bi, ci); }
+            }
+        }
+        let extra = almide_base::env::var("ALMIDE_PASS_EDGES").unwrap_or_default();
+        for (a, b) in extra.split(',').filter_map(|pair| pair.split_once('<')) {
+            if let (Some(ai), Some(bi)) = (position(a.trim()), position(b.trim())) {
+                edge(ai, bi);
+            }
+        }
+        after
     }
 
     // ── `Pipeline::run` main-loop-body extraction (cog>100 decomposition,
@@ -291,13 +386,13 @@ impl Pipeline {
         // Debug aid: name each pass BEFORE it runs, so a pass that never
         // returns (infinite recursion → stack overflow) is identifiable —
         // the ALMIDE_PROFILE line only prints on completion.
-        if std::env::var_os("ALMIDE_TRACE_PASSES").is_some() {
+        if almide_base::env::flag("ALMIDE_TRACE_PASSES") {
             eprintln!("[pass:start] {}", pass_name);
         }
         // Time only through the wasm-safe shim (raw std::time is forbidden in
         // this crate — it panics on the wasm32-unknown-unknown playground).
         let _pass_t = almide_base::profile::ProfileTimer::start(
-            std::env::var_os("ALMIDE_PROFILE").is_some(),
+            almide_base::env::flag("ALMIDE_PROFILE"),
         );
         let result = pass.run(program, target);
         if let Some(t) = &_pass_t {
@@ -322,10 +417,11 @@ impl Pipeline {
         program
     }
 
-    /// Inter-pass IR verification (debug / opt-in only — see `verify_ir`
-    /// in `run`).
-    fn verify_after_pass(pass: &dyn NanoPass, program: &IrProgram) {
-        let pass_name = pass.name();
+    /// Inter-pass IR verification, after every pass in every profile: the IR
+    /// verifier, then the postconditions of the pass that just ran (`idx`)
+    /// AND of every pass that ran before it (`done`).
+    fn verify_after_pass(passes: &[Box<dyn NanoPass>], idx: usize, done: &[usize], program: &IrProgram) {
+        let pass_name = passes[idx].name();
         let errors = almide_ir::verify_program(program);
         if !errors.is_empty() {
             eprintln!("[IR CHECK] {} error(s) after pass '{}':", errors.len(), pass_name);
@@ -335,51 +431,62 @@ impl Pipeline {
             // No warn-mode: a DETECTED violation is fatal in every
             // profile (release-parity §10 — the v0.25.0 lesson:
             // a warning's audience cannot fix a compiler bug).
-            // Release cost is unchanged: the verifier itself stays
-            // debug/opt-in (the measured ~1.2s/file walk).
             panic!("IR verification failed after pass '{}'", pass_name);
         }
 
-        // Postcondition verification.
-        let postconds = pass.postconditions();
-        if !postconds.is_empty() {
-            let violations = verify_postconditions(pass_name, program, &postconds);
-            for v in &violations {
-                eprintln!("[POSTCONDITION VIOLATION] {}", v);
-            }
-            if !violations.is_empty() {
-                panic!("Postcondition violation after pass '{}'", pass_name);
-            }
+        // Postcondition verification: the pass's own, then every one
+        // established earlier that must still hold.
+        let mut violations = verify_postconditions(pass_name, program, &passes[idx].postconditions());
+        violations.extend(Self::established_violations(passes, done, pass_name, program));
+        for v in &violations {
+            eprintln!("[POSTCONDITION VIOLATION] {}", v);
         }
+        if !violations.is_empty() {
+            panic!("Postcondition violation after pass '{}'", pass_name);
+        }
+    }
+
+    /// A postcondition is MONOTONE: it holds from the pass that establishes
+    /// it to the end of the pipeline (rustc's `validate_body` is indexed by
+    /// `MirPhase`, Swift's SIL verifier by `SILStage`, for the same reason).
+    /// A later pass that reintroduces a shape an earlier pass lowered breaks
+    /// the invariant downstream passes rely on; this names both passes.
+    fn established_violations(passes: &[Box<dyn NanoPass>], done: &[usize], after: &str, program: &IrProgram) -> Vec<String> {
+        done.iter()
+            .flat_map(|&i| {
+                let by = passes[i].name();
+                verify_postconditions(by, program, &passes[i].postconditions())
+                    .into_iter()
+                    .map(move |v| format!("{v} — established by '{by}', no longer holds after '{after}'"))
+            })
+            .collect()
     }
 
     pub fn run(&self, program: IrProgram, target: Target) -> IrProgram {
         let mut program = program;
         let mut executed: Vec<&str> = Vec::new();
+        let mut done: Vec<usize> = Vec::new();
 
         // ALMIDE_DUMP_IR: dump IR after specified passes (comma-separated, or "all")
-        let dump_filter = std::env::var("ALMIDE_DUMP_IR").ok();
+        let dump_filter = almide_base::env::var("ALMIDE_DUMP_IR");
         let dump_all = dump_filter.as_deref() == Some("all");
         let dump_passes: Vec<&str> = dump_filter.as_deref()
             .filter(|s| *s != "all")
             .map(|s| s.split(',').map(str::trim).collect())
             .unwrap_or_default();
-        // Contract-level checks (IR verifier + pass postconditions) run on
-        // every build. Debug builds escalate violations to `panic!` so CI
-        // and local `cargo test` catch them; release builds print the same
-        // diagnostic and keep running so an end-user `almide build` does
-        // not crash on a compiler bug. `ALMIDE_CHECK_IR` /
-        // `ALMIDE_VERIFY_IR` used to gate this — removed in S2 flip
-        // (v0.14.7-phase3.2); `expr.ty` is now trustworthy by contract.
-        let hard_fail = cfg!(debug_assertions);
-        let _ = hard_fail; // escalation is unconditional now; the flag only gates whether verification RUNS
-        // The inter-pass IR verifier + postcondition checks walk the entire
-        // (merged) program after EVERY pass. That's a developer safety net —
-        // it catches compiler bugs but does nothing for a correct build. In
-        // release it can't even fail hard, yet it dominates codegen time
-        // (~1.2s/file: 20 passes × verify(user + all merged stdlib functions)).
-        // Run it only in debug (cargo test / CI) or when explicitly requested.
-        let verify_ir = hard_fail || std::env::var_os("ALMIDE_VERIFY_IR").is_some();
+        // Contract-level checks (the IR verifier + every established pass
+        // postcondition) run after EVERY pass in EVERY profile, and a
+        // detected violation is fatal (§10 release parity). Until now the
+        // per-pass walk was debug / `ALMIDE_VERIFY_IR` only, on a cost
+        // claim of ~1.2 s per file that no longer held: measured over the
+        // 218 files of spec/lang, `--target rust` emission takes 5.75 s
+        // without the walk and 7.54 s with it — ~8 ms per file, a rounding
+        // error next to rustc. A release binary that skipped the walk was
+        // the one profile whose IR nobody checked; that profile is the one
+        // that ships. `ALMIDE_IR_FAULT=<pass>` (harness) injects a
+        // violation after the named pass so the gate can be watched turning
+        // red in the release binary (tests/ir_verify_every_profile_test.rs).
+        let fault_after = almide_base::env::var("ALMIDE_IR_FAULT");
 
         // #912 pass-ordering lens: `ALMIDE_SKIP_PASS=Name[,Name…]` skips the
         // named passes. A hunt instrument, not a user feature: the spec suite
@@ -387,8 +494,7 @@ impl Pipeline {
         // a silent value diff is a pass-dependency hole, while a dep-edge
         // panic or compile error is the system refusing loudly. Zero-cost
         // when unset (parsed once, out of the loop).
-        let skip_passes: Vec<String> = std::env::var("ALMIDE_SKIP_PASS")
-            .ok()
+        let skip_passes: Vec<String> = almide_base::env::var("ALMIDE_SKIP_PASS")
             .map(|s| s.split(',').map(|x| x.trim().to_string()).collect())
             .unwrap_or_default();
 
@@ -400,13 +506,20 @@ impl Pipeline {
             .filter(|p| p.targets().map_or(true, |ts| ts.contains(&target)))
             .map(|p| p.name())
             .collect();
-        for pass in &self.passes {
-            // Skip passes not relevant to this target
-            if let Some(targets) = pass.targets() {
-                if !targets.contains(&target) {
-                    continue;
-                }
-            }
+        // #2186 step 4: `ALMIDE_SHUFFLE_PASSES=<seed>` runs the passes in a
+        // random order that respects every DECLARED edge and barrier — and
+        // nothing else. The declared order is one such order; if another
+        // one emits different Rust, a dependency is missing its declaration.
+        // `scripts/check-pass-shuffle.sh` byte-diffs the corpus under it.
+        let shuffle_seed = almide_base::env::var("ALMIDE_SHUFFLE_PASSES");
+        let order = self.order(target, shuffle_seed.as_deref());
+        if let Some(seed) = &shuffle_seed {
+            // The order under this seed, so a byte-diff names its witness.
+            let names: Vec<&str> = order.iter().map(|&i| self.passes[i].name()).collect();
+            eprintln!("[almide] ALMIDE_SHUFFLE_PASSES={seed} order: {}", names.join(" "));
+        }
+        for &idx in &order {
+            let pass = &self.passes[idx];
             // #912 lens skip: the skipped pass stays OUT of `executed`, so a
             // later pass that declared a dep edge on it panics loudly in
             // `validate_pass_deps` — an undeclared dependency is exactly what
@@ -418,32 +531,34 @@ impl Pipeline {
 
             let pass_name = pass.name();
             program = Self::run_pass_with_dump(pass.as_ref(), program, target, dump_all, &dump_passes);
-
-            // Inter-pass IR verification (debug / opt-in only — see verify_ir).
-            if verify_ir {
-                Self::verify_after_pass(pass.as_ref(), &program);
+            if fault_after.as_deref().is_some_and(|p| p.eq_ignore_ascii_case(pass_name)) {
+                Self::inject_ir_fault(&mut program);
             }
+
+            // Inter-pass IR verification, every pass, every profile.
+            Self::verify_after_pass(&self.passes, idx, &done, &program);
 
             executed.push(pass_name);
+            done.push(idx);
         }
 
-        // §10 release promotion (#532): one FINAL verification runs in EVERY
-        // profile. The per-pass walk above stays debug/opt-in (it dominates
-        // release codegen time, ~1.2s/file across ~20 passes), but the
-        // END-of-pipeline IR must verify before emission — one walk, ~60 ms,
-        // the same trade wasmparser::validate makes on the wasm side. A
-        // violation is a compiler bug and fails the build in release too.
-        if !verify_ir {
-            let errors = almide_ir::verify_program(&program);
-            if !errors.is_empty() {
-                eprintln!("[IR CHECK] {} error(s) at end of pipeline:", errors.len());
-                for e in &errors {
-                    eprintln!("  {}", e);
-                }
-                panic!("final IR verification failed (release gate, #532)");
-            }
-        }
+        // The last pass's walk above IS the end-of-pipeline verification
+        // (#532): the IR the emitter reads verified, in every profile.
         program
+    }
+
+    /// The `ALMIDE_IR_FAULT` fault: bind one function's locals in a second
+    /// function, the `verify_binder_ownership` violation (#2186) — a
+    /// duplicate of the first function that has a param or a binder. The
+    /// program then fails the walk after the named pass, in the profile
+    /// that runs it: the release binary's evidence that the walk runs.
+    fn inject_ir_fault(program: &mut IrProgram) {
+        let Some(victim) = program.functions.iter().find(|f| !f.params.is_empty()).cloned() else {
+            panic!("ALMIDE_IR_FAULT: no function with a param to duplicate");
+        };
+        let mut twin = victim;
+        twin.name = almide_base::intern::sym("__ir_fault_twin");
+        program.functions.push(twin);
     }
 }
 
@@ -465,6 +580,7 @@ impl NanoPass for BorrowInsertionPass {
         let sigs = super::pass_borrow_inference::infer_borrow_signatures(&mut program);
         let changed = !sigs.is_empty();
         if changed {
+            super::pass_borrow_inference::commit_chain_source_modes(&mut program, &sigs);
             super::pass_borrow_inference::insert_borrows_at_call_sites(&mut program, &sigs);
             super::pass_borrow_inference::hoist_conflicting_reads(&mut program);
         }
@@ -480,8 +596,88 @@ impl NanoPass for FanLoweringPass {
     fn targets(&self) -> Option<Vec<Target>> {
         None // All targets need this
     }
+
+    /// Strips the auto-`Try` inside fan arms, so the `Try` has to be there.
+    fn depends_on(&self) -> Vec<&'static str> { vec!["ResultPropagation"] }
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         super::pass_fan_lowering::strip_fan_auto_try(&mut program);
         PassResult { program, changed: true }
+    }
+}
+
+#[cfg(test)]
+mod shuffle_tests {
+    //! The seeded order respects every declared edge and barrier, is
+    //! deterministic per seed, actually varies across seeds, and refuses a
+    //! cycle — the properties `ALMIDE_SHUFFLE_PASSES` rests on (#2186).
+    use super::*;
+
+    #[derive(Debug)]
+    struct P { name: &'static str, after: Vec<&'static str>, before: Vec<&'static str>, barrier: bool, rust_only: bool }
+    impl NanoPass for P {
+        fn name(&self) -> &str { self.name }
+        fn targets(&self) -> Option<Vec<Target>> { if self.rust_only { Some(vec![Target::Rust]) } else { None } }
+        fn depends_on(&self) -> Vec<&'static str> { self.after.clone() }
+        fn run_before(&self) -> Vec<&'static str> { self.before.clone() }
+        fn barrier(&self) -> bool { self.barrier }
+        fn run(&self, program: IrProgram, _: Target) -> PassResult { PassResult { program, changed: false } }
+    }
+    fn p(name: &'static str) -> P { P { name, after: vec![], before: vec![], barrier: false, rust_only: false } }
+
+    fn pipeline() -> Pipeline {
+        Pipeline::new()
+            .add(p("Unify"))
+            .add(P { name: "Barrier", after: vec![], before: vec![], barrier: true, rust_only: false })
+            .add(p("A"))
+            .add(P { name: "B", after: vec!["A"], before: vec![], barrier: false, rust_only: false })
+            .add(P { name: "C", after: vec![], before: vec!["D"], barrier: false, rust_only: false })
+            .add(p("D"))
+            .add(p("E"))
+    }
+
+    fn pos(order: &[&str], name: &str) -> usize { order.iter().position(|n| *n == name).unwrap_or_else(|| panic!("{name} missing from {order:?}")) }
+
+    #[test]
+    fn the_declared_order_is_the_order_without_a_seed() {
+        assert_eq!(pipeline().order_names(Target::Rust, None), vec!["Unify", "Barrier", "A", "B", "C", "D", "E"]);
+        // An unparsable seed is no seed.
+        assert_eq!(pipeline().order_names(Target::Rust, Some("x")), vec!["Unify", "Barrier", "A", "B", "C", "D", "E"]);
+    }
+
+    #[test]
+    fn every_seed_respects_the_edges_and_the_barrier_and_some_seed_moves_something() {
+        let pl = pipeline();
+        let mut moved = false;
+        for seed in 0..64u64 {
+            let o = pl.order_names(Target::Rust, Some(&seed.to_string()));
+            assert_eq!(o.len(), 7, "every pass runs once: {o:?}");
+            assert_eq!(o[0], "Unify", "everything declared before the barrier stays before it: {o:?}");
+            assert_eq!(o[1], "Barrier", "{o:?}");
+            assert!(pos(&o, "A") < pos(&o, "B"), "depends_on: {o:?}");
+            assert!(pos(&o, "C") < pos(&o, "D"), "run_before: {o:?}");
+            moved |= o != vec!["Unify", "Barrier", "A", "B", "C", "D", "E"];
+            assert_eq!(o, pl.order_names(Target::Rust, Some(&seed.to_string())), "deterministic per seed");
+        }
+        assert!(moved, "the free passes never moved — the shuffle would be decorative");
+    }
+
+    #[test]
+    fn a_pass_absent_from_the_target_is_neither_run_nor_an_edge() {
+        // A Rust-only pass that must precede `X`: the Wgsl arm runs `X`
+        // alone, and the edge to the absent pass is vacuous, not a panic.
+        let pl = Pipeline::new()
+            .add(P { name: "R", after: vec![], before: vec!["X"], barrier: false, rust_only: true })
+            .add(p("X"));
+        assert_eq!(pl.order_names(Target::Wgsl, Some("1")), vec!["X"]);
+        assert_eq!(pl.order_names(Target::Rust, Some("1")), vec!["R", "X"]);
+    }
+
+    #[test]
+    #[should_panic(expected = "form a cycle")]
+    fn a_cycle_in_the_declared_edges_is_an_ice() {
+        let pl = Pipeline::new()
+            .add(P { name: "A", after: vec!["B"], before: vec![], barrier: false, rust_only: false })
+            .add(P { name: "B", after: vec!["A"], before: vec![], barrier: false, rust_only: false });
+        let _ = pl.order_names(Target::Rust, Some("1"));
     }
 }

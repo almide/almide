@@ -181,7 +181,11 @@ test "UFCS protocol method in complex expression" {
   ]
   let total = list.fold(ropes, 0, (acc, r) => acc + Rope.measure(r))
   assert_eq(total, 60)
-  let longest = list.fold(ropes, 0, (max, r) => if Rope.measure(r) > max then Rope.measure(r) else max)
+  let longest = list.fold(
+    ropes,
+    0,
+    (max, r) => if Rope.measure(r) > max then Rope.measure(r) else max,
+  )
   assert_eq(longest, 30)
 }
 
@@ -239,7 +243,10 @@ fn Book.current_page(b: Book) -> Int = b.current
 
 fn Book.has_next(b: Book) -> Bool = b.current < b.total
 
-fn Book.next_page(b: Book) -> Book = if Book.has_next(b) then Book { total: b.total, current: b.current + 1 } else b
+fn Book.next_page(b: Book) -> Book = if Book.has_next(b) then Book {
+  total: b.total,
+  current: b.current + 1,
+} else b
 
 test "protocol methods calling each other" {
   let b = Book { total: 5, current: 1 }

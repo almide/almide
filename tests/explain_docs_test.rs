@@ -56,7 +56,6 @@ fn every_documented_code_explains_from_the_binary_alone() {
         let out = Command::new(almide())
             .args(["explain", &code])
             .current_dir(tmp.path())
-            .env_remove("ALMIDE_DIAGNOSTICS_DIR")
             .output()
             .expect("run almide explain");
         assert!(

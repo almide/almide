@@ -1,3 +1,4 @@
+<!-- description: Turn bounded edit blast radius from design instinct into a proven theorem -->
 # edit-locality theory — the theorem Almide exists to prove
 
 **Status**: active (constitution written 2026-08-15; Stage 1 landed as

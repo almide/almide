@@ -1,0 +1,3 @@
+#!/usr/bin/env -S almide run --target wasm
+
+fn main() -> Unit = println("ok")

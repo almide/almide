@@ -112,10 +112,14 @@ pub trait NanoPass: std::fmt::Debug {
 Passes compose into a `Pipeline`. The pipeline runner:
 - Skips passes not relevant to the current target
 - Validates declared dependencies (panics if a dependency has not executed)
-- Verifies IR integrity and declared `Postcondition`s between passes on every
-  build — violations panic in debug and print as diagnostics in release. No
-  opt-in env var (`ALMIDE_CHECK_IR` / `ALMIDE_VERIFY_IR` removed in
-  v0.14.7-phase3.2); `expr.ty` is trustworthy by contract
+- Verifies IR integrity and every established `Postcondition` after EVERY
+  pass in EVERY profile — a violation is a compiler bug and fails the build,
+  release included. The per-pass walk used to be debug-only (`ALMIDE_VERIFY_IR`
+  opted a release build in) on a stale cost claim of ~1.2 s per file; measured
+  over the 218 files of spec/lang it is ~8 ms per file, so the profile that
+  ships now runs the same walk as `cargo test`. `ALMIDE_IR_FAULT=<pass>`
+  (harness switch) injects a violation after the named pass, the release
+  binary's negative control (`tests/ir_verify_every_profile_test.rs`)
 
 ### Rust Pipeline (in order)
 
@@ -341,6 +345,117 @@ fn main() =
 // Output includes list runtime functions (almide_rt_list_*)
 // but NOT string, map, json, etc.
 ```
+
+### Parameter passing on the native target
+
+**Source**: `pass_borrow_inference_ownership.rs` (`param_borrow`), `pass_borrow_lowering.rs`.
+
+A non-`mut` param of a borrow-eligible type (`String`, `List[T]`, a record) is
+passed **by reference** (`&str` / `&[T]` / `&T`) unless the body needs the value
+owned. The body needs it owned when it:
+
+- returns the param, concatenates it, builds it into a record / list / tuple
+  literal, matches on it, or seeds a fold with it;
+- captures it in a closure (closures capture through `Rc<dyn Fn>`, which cannot
+  hold a borrow — the capture is a move, or a clone when the param is read again);
+- hands it to a **stdlib** slot that consumes (`list.push`'s element): those
+  lower into runtime calls that take the value;
+- iterates it — a `for` loop, or a list combinator the fusion pass inlines —
+  with a body that needs the **elements** owned (below).
+
+**An iteration's source follows its elements, not the combinator's slot**
+(#2287). `list.map`, `fold`, `filter`, `any`, … declare their list slot
+`@consume(xs)`, but that describes the unfused runtime twin; the fused chain
+and the `for` loop decide the source's mode from what the body does with
+each element (`element_reads_only`, one rule read by the borrow verdict, the
+clone pass and the ownership certifier):
+
+- a `Copy` element (`List[Int]`) never needs the source owned: `mapped(ns:
+  List[Int]) = ns |> list.map((n) => n * 2)` is `mapped(ns: &[i64])` over
+  `ns.iter().cloned()`, and a caller that reads its list twice clones nothing;
+- a heap element every receiving lambda only READS — a borrowed call slot, a
+  field read, a clone, a `&str` comparison, an interpolation part, or a
+  consuming use the clone pass clones anyway because the binder is read again
+  in the same iteration — leaves the source borrowed and binds `&T` off
+  `xs.iter()`: `lens(ws: &[String]) = ws.iter().map(|w| len(w.as_str()))`,
+  no element cloned (a `filter`-family step, which Rust hands `&&T`, is
+  rebound `let w = *w` instead of `let w = w.clone()`);
+- an element that leaves the chain owned — returned as the mapped value,
+  concatenated, built into a value, handed to an owned slot, collected by a
+  `filter` / `find` — keeps the source consumed: `shouted(ws: Vec<String>)`
+  over `ws.into_iter()`, the caller's last use moves the list and each
+  element moves out for free where a borrowed source could only clone it.
+
+This is the per-element rule the reference-counted compilers apply (a list
+read borrows into the list; the element is retained only when an occurrence
+demands it), lifted to the source's mode because a borrowed source on the
+native leg can only clone.
+
+A list-combinator callback the stream-fusion pass inlines (`list.map(xs, (x) =>
+… t …)`, `filter`, `fold`, `any`, …) is **not a closure** for this policy: the
+pass runs before the borrow pass, and a chain step is a scope that runs once
+per element inside the chain and never escapes it. A param it only reads stays
+`&T` — `(x) => x + list.len(t.names)` keeps `t: &Table` — and the step renders
+without `move` and without a capture bind, borrowing what it reads for the
+chain's duration. A read that consumes inside the step (returning `t` per
+element) is cloned there whether or not the param is owned, so it earns the
+param nothing. Only a closure that outlives its call — returned, stored,
+captured by another closure, or handed to a slot whose callee keeps it —
+captures, and captures own (Lean, Koka and Roc make the same distinction: a
+closure that exists owns what it holds; the win comes from erasing the closure
+before ownership is decided).
+
+**A fn-typed param is borrowed unless its callable escapes** (#2288). A user
+higher-order fn's `f: (A) -> B` param is `&dyn Fn(A) -> B` when every
+occurrence only CALLS it, borrows it, or hands it to another fn's borrowed fn
+slot (the same fixed point that decides `&T`, optimistic for a pending or
+self-recursive callee); it is the `Rc<dyn Fn>` handle when an occurrence lets
+the callable outlive the call — returned, bound to a local, built into a
+record / list, captured by a closure, handed to an owned slot (a runtime twin
+such as `list.map`'s unfused form, a stored chain callback). A lambda literal
+at a borrowed slot is then a scope like a chain step: `apply(xs, &|x| x * k)`
+— no `Rc::new`, no `move`, no capture bind, and a param it reads stays
+borrowed; a closure VALUE at that slot is lent through its handle (`&*g`); a
+tail-recursive fn carries the borrowed callable through its loop like a
+`&Vec<u8>`. This is the borrowed capture record the closure-free reference
+passes as an ordinary argument, without lambda sets: the fn-typed param IS the
+ABI, and the escape verdict decides which of its two forms a body needs. The
+ownership certifier's C5 re-reads the verdict on the final IR (a `&dyn Fn`
+param that escapes; a boxed closure at a borrowed slot), and
+`ALMIDE_FN_ESCAPE_OFF=1` is its negative control.
+
+Handing the param bare to a callee's owned slot (`stored(t, 1)` where `stored`
+keeps `t` in a record) makes the param owned only when that site is the
+param's LAST use: ownership then buys a move, and a caller that still needs
+its value clones once. When the param is read again after the site (`{ let h
+= stored(t, 1); h.n + plain(t) }`), the site is cloned whether or not the
+param is owned — so the param stays `&T` and that one site owns its read
+(`stored(t.clone(), 1)`): one clone at the site, none at any caller. The
+allocation ledger (`tests/native_borrow_oracle_test.rs`) pins the
+alternative's cost: cloning at every such site regardless of liveness (#2278's
+first draft) raised the count of all five pinned programs. A `mut` param is
+`&mut T` for its whole body and takes the same site-level clone at every
+by-value position (#2266).
+
+A **variant** param (`s: Shape`) follows the same policy, with one rule for its
+`match`: the subject position reads the param by reference when every binder
+the arms introduce is only READ — a `Copy` scalar, or a heap payload whose
+every occurrence is a non-consuming position (a borrowed argument, a member
+read, a comparison, an interpolation part, the subject of a further match).
+The arms then bind `&T` payloads (Rust's default binding modes: a scalar read
+derefs, a `&b` of a heap payload is the naked binder, a boxed payload matches
+again as `&**b`), and no caller clones the value to pass it. One payload
+returned, concatenated, built into a value, captured or handed to an owned slot
+keeps the param owned: matching by value moves that payload out for free where
+a borrowed match would clone it. The ownership certifier's C4 reads the same
+predicate, so an owned variant param whose matches only read is a named defect
+(`tests/variant_param_borrowed_test.rs`).
+
+A param that is owned costs every caller that still needs its value a clone; a
+borrowed param costs nothing at the call. Whether a fn ends up `&T` or `T` is
+visible in the emitted Rust (`almide app.almd --target rust`), and the
+ownership certifier (`ALMIDE_CERTIFY_OWNERSHIP=report`) names a param owned
+that no occurrence needs owned.
 
 ### Effect Functions
 

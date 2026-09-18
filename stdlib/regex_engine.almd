@@ -45,11 +45,24 @@ fn __rx_cp(a: Int) -> Int = {
 // End of the group starting AFTER '(' — the address just past the MATCHING ')'
 // (nested groups tracked by depth; an unterminated group ends at `pe`, v0's
 // tolerance).
-fn __rx_class_end(p: Int, pe: Int) -> Int = if p >= pe then pe
+// A `]` in the FIRST position (after an optional negating `^`) is a literal
+// MEMBER, not the terminator — POSIX, and PCRE, Python, Rust, Go and JS all
+// follow it. Read as a terminator, `[]]` became the empty class plus a stray
+// `]` and silently never matched (#2129); the twin in runtime/rs/src/regex.rs
+// carries the same rule.
+fn __rx_class_end(p: Int, pe: Int) -> Int = {
+  let q = if p < pe and prim.load8(p) == 94 then p + 1 else p
+  __rx_class_scan(if q < pe and prim.load8(q) == 93 then q + 1 else q, pe)
+}
+
+fn __rx_class_scan(p: Int, pe: Int) -> Int = if p >= pe then pe
 else {
   let b = prim.load8(p)
   if b == 93 then p + 1
-  else if b == 92 and p + 1 < pe then __rx_class_end(p + 1 + __rx_w(p + 1), pe) else __rx_class_end(p + __rx_w(p), pe)
+  else if b == 92 and p + 1 < pe then __rx_class_scan(p + 1 + __rx_w(p + 1), pe) else __rx_class_scan(
+    p + __rx_w(p),
+    pe,
+  )
 }
 
 // End of the ATOM starting at `p` (a class, a group, an escape+char, or one char).
@@ -89,7 +102,10 @@ fn __rx_brace_end(p: Int, pe: Int) -> Int = {
 }
 
 // Decimal value of the digit run [p, e).
-fn __rx_digits_end(p: Int, pe: Int) -> Int = if p < pe and prim.load8(p) >= 48 and prim.load8(p) <= 57 then __rx_digits_end(p + 1, pe) else p
+fn __rx_digits_end(p: Int, pe: Int) -> Int = if p < pe and prim.load8(p) >= 48 and prim.load8(p) <= 57 then __rx_digits_end(
+  p + 1,
+  pe,
+) else p
 
 // min of the brace quantifier whose '{' is at `p` (well-formed by construction).
 fn __rx_digits_val(p: Int, e: Int, acc: Int) -> Int = if p >= e then acc
@@ -239,7 +255,16 @@ fn __rx_eol(t: Int, te: Int, pat0: Int) -> Bool = t == te or (__rx_flags(pat0) =
 fn __rx_run(k: Int, t: Int, ts: Int, te: Int, caps: Int, pat0: Int) -> Int = if k == 0 then t
 else {
   let kind = prim.load64(k)
-  if kind == 1 then __rx_seq(prim.load64(k + 8), prim.load64(k + 16), t, ts, te, caps, pat0, prim.load64(k + 24))
+  if kind == 1 then __rx_seq(
+    prim.load64(k + 8),
+    prim.load64(k + 16),
+    t,
+    ts,
+    te,
+    caps,
+    pat0,
+    prim.load64(k + 24),
+  )
   else if kind == 2 then __rx_run_group_end(k, t, ts, te, caps, pat0)
   else if kind == 3 then __rx_run_rep(k, t, ts, te, caps, pat0)
   else {
@@ -272,7 +297,22 @@ fn __rx_run_rep(k: Int, t: Int, ts: Int, te: Int, caps: Int, pat0: Int) -> Int =
   let count = prim.load64(k + 40) + 1
   let tprev = prim.load64(k + 72)
   if t == tprev then __rx_rep_rest(k, count, t, ts, te, caps, pat0)
-  else __rx_rep_group(prim.load64(k + 8), prim.load64(k + 16), prim.load64(k + 24), prim.load64(k + 32), t, ts, te, caps, pat0, count, prim.load64(k + 48), prim.load64(k + 56), prim.load64(k + 80), prim.load64(k + 64))
+  else __rx_rep_group(
+    prim.load64(k + 8),
+    prim.load64(k + 16),
+    prim.load64(k + 24),
+    prim.load64(k + 32),
+    t,
+    ts,
+    te,
+    caps,
+    pat0,
+    count,
+    prim.load64(k + 48),
+    prim.load64(k + 56),
+    prim.load64(k + 80),
+    prim.load64(k + 64),
+  )
 }
 
 fn __rx_rep_rest(k: Int, count: Int, t: Int, ts: Int, te: Int, caps: Int, pat0: Int) -> Int = if count < prim.load64(k + 48) then 0 - 1
@@ -334,7 +374,14 @@ fn __rx_alts(p: Int, pend: Int, t: Int, ts: Int, te: Int, caps: Int, pat0: Int, 
 // sits at pnext-1 with a quantifier char right before it.
 fn __rx_lazy(ae: Int, pnext: Int) -> Int = if pnext >= ae + 2 and prim.load8(pnext - 1) == 63 and (prim.load8(pnext - 2) == 42 or prim.load8(pnext - 2) == 43 or prim.load8(pnext - 2) == 63 or prim.load8(pnext - 2) == 125) then 1 else 0
 
-fn __rx_seq(p: Int, pend: Int, t: Int, ts: Int, te: Int, caps: Int, pat0: Int, k: Int) -> Int = if p >= pend then __rx_run(k, t, ts, te, caps, pat0)
+fn __rx_seq(p: Int, pend: Int, t: Int, ts: Int, te: Int, caps: Int, pat0: Int, k: Int) -> Int = if p >= pend then __rx_run(
+  k,
+  t,
+  ts,
+  te,
+  caps,
+  pat0,
+)
 else {
   let b = prim.load8(p)
   let pnext = __rx_piece_end(p, pend)
@@ -348,7 +395,16 @@ else {
     let want = prim.load8(p + 1) == 98
     if __rx_at_boundary(t, ts, te) == want then __rx_seq(pnext, pend, t, ts, te, caps, pat0, k)
     else 0 - 1
-  } else if b == 40 and p == pat0 and __rx_flags(pat0) == 1 then __rx_seq(pnext, pend, t, ts, te, caps, pat0, k)
+  } else if b == 40 and p == pat0 and __rx_flags(pat0) == 1 then __rx_seq(
+    pnext,
+    pend,
+    t,
+    ts,
+    te,
+    caps,
+    pat0,
+    k,
+  )
   else {
     let ae = __rx_atom_end(p, pend)
     let q = if ae < pnext then prim.load8(ae) else 0
@@ -362,7 +418,16 @@ else {
         let _3 = prim.store64(fr + 24, k)
         __rx_group(p, ae, t, ts, te, caps, pat0, fr)
       } else {
-        if __rx_char_match(p, ae, t, te) then __rx_seq(pnext, pend, t + __rx_w(t), ts, te, caps, pat0, k)
+        if __rx_char_match(p, ae, t, te) then __rx_seq(
+          pnext,
+          pend,
+          t + __rx_w(t),
+          ts,
+          te,
+          caps,
+          pat0,
+          k,
+        )
         else 0 - 1
       }
     } else {
@@ -385,9 +450,37 @@ fn __rx_rep_lazy(p: Int, ae: Int, pnext: Int, pend: Int, t: Int, ts: Int, te: In
   if count >= mn then {
     let r = __rx_seq(pnext, pend, t, ts, te, caps, pat0, k)
     if r >= 0 then r
-    else if under_max and __rx_char_match(p, ae, t, te) then __rx_rep_lazy(p, ae, pnext, pend, t + __rx_w(t), ts, te, caps, pat0, count + 1, mn, mx, k)
+    else if under_max and __rx_char_match(p, ae, t, te) then __rx_rep_lazy(
+      p,
+      ae,
+      pnext,
+      pend,
+      t + __rx_w(t),
+      ts,
+      te,
+      caps,
+      pat0,
+      count + 1,
+      mn,
+      mx,
+      k,
+    )
     else 0 - 1
-  } else if __rx_char_match(p, ae, t, te) then __rx_rep_lazy(p, ae, pnext, pend, t + __rx_w(t), ts, te, caps, pat0, count + 1, mn, mx, k)
+  } else if __rx_char_match(p, ae, t, te) then __rx_rep_lazy(
+    p,
+    ae,
+    pnext,
+    pend,
+    t + __rx_w(t),
+    ts,
+    te,
+    caps,
+    pat0,
+    count + 1,
+    mn,
+    mx,
+    k,
+  )
   else 0 - 1
 }
 
@@ -396,7 +489,21 @@ fn __rx_rep_lazy(p: Int, ae: Int, pnext: Int, pend: Int, t: Int, ts: Int, te: In
 // walks the renderer turns into loops.
 fn __rx_repi_fwd(p: Int, ae: Int, pnext: Int, pend: Int, t: Int, ts: Int, te: Int, caps: Int, pat0: Int, count: Int, mn: Int, mx: Int, k: Int) -> Int = {
   let under_max = if mx < 0 then true else count < mx
-  if under_max and __rx_char_match(p, ae, t, te) then __rx_repi_fwd(p, ae, pnext, pend, t + __rx_w(t), ts, te, caps, pat0, count + 1, mn, mx, k)
+  if under_max and __rx_char_match(p, ae, t, te) then __rx_repi_fwd(
+    p,
+    ae,
+    pnext,
+    pend,
+    t + __rx_w(t),
+    ts,
+    te,
+    caps,
+    pat0,
+    count + 1,
+    mn,
+    mx,
+    k,
+  )
   else __rx_repi_try(pnext, pend, t, ts, te, caps, pat0, count, mn, k)
 }
 
@@ -411,7 +518,16 @@ fn __rx_repi_try(pnext: Int, pend: Int, t: Int, ts: Int, te: Int, caps: Int, pat
 }
 
 // The Stage-1 entry (no captures, empty continuation).
-fn __rx_match_at(p: Int, pe: Int, t: Int, ts: Int, te: Int) -> Int = __rx_alts(p, pe, t, ts, te, 0, p, 0)
+fn __rx_match_at(p: Int, pe: Int, t: Int, ts: Int, te: Int) -> Int = __rx_alts(
+  p,
+  pe,
+  t,
+  ts,
+  te,
+  0,
+  p,
+  0,
+)
 
 // ── public API (Stage 1) ──
 fn __rx_find_from(p: Int, pe: Int, t: Int, ts: Int, te: Int) -> Int = {
@@ -521,7 +637,15 @@ else {
     let acc2 = acc + __rx_sub(pos, st) + rep
     if en > st then __rx_replace_go(p, pe, en, ts, te, rep, acc2)
     else {
-      if en < te then __rx_replace_go(p, pe, en + __rx_w(en), ts, te, rep, acc2 + __rx_sub(en, en + __rx_w(en)))
+      if en < te then __rx_replace_go(
+        p,
+        pe,
+        en + __rx_w(en),
+        ts,
+        te,
+        rep,
+        acc2 + __rx_sub(en, en + __rx_w(en)),
+      )
       else acc2
     }
   }
@@ -553,16 +677,24 @@ fn regex_replace_first(pat: String, s: String, rep: String) -> String = {
   else __rx_sub(t0, st) + rep + __rx_sub(__rx_match_at(p0, pe, st, t0, te), te)
 }
 
-fn __rx_split_go(p: Int, pe: Int, pos: Int, ts: Int, te: Int, acc: List[String]) -> List[String] = if pos > te then acc
+// A field is the text BETWEEN two matches, so the split point (`last`) and the
+// scan position are two different things. Conflating them made a zero-width
+// match EAT a character — `split("^", "abc")` answered `["a", "bc"]` — where
+// Python, Rust and Go all answer `["", "abc"]` (#2129). The walk is `find_all`'s
+// (an empty match advances one character so it terminates) and the trailing
+// field is always emitted, which is how `split("$", "a")` is `["a", ""]`.
+fn __rx_split_go(p: Int, pe: Int, last: Int, scan: Int, ts: Int, te: Int, acc: List[String]) -> List[String] = if scan > te then acc + [__rx_sub(
+  last,
+  te,
+)]
 else {
-  let st = __rx_find_start(p, pe, pos, ts, te)
-  if st < 0 then acc + [__rx_sub(pos, te)]
+  let st = __rx_find_start(p, pe, scan, ts, te)
+  if st < 0 then acc + [__rx_sub(last, te)]
   else {
     let en = __rx_match_at(p, pe, st, ts, te)
-    if en == st and st == pos then {
-      if pos < te then __rx_split_go(p, pe, pos + __rx_w(pos), ts, te, acc + [__rx_sub(pos, pos + __rx_w(pos))])
-      else acc
-    } else __rx_split_go(p, pe, en, ts, te, acc + [__rx_sub(pos, st)])
+    let nxt = if en > st then en
+    else if en >= te then te + 1 else en + __rx_w(en)
+    __rx_split_go(p, pe, en, nxt, ts, te, acc + [__rx_sub(last, st)])
   }
 }
 
@@ -583,7 +715,7 @@ fn regex_split(pat: String, s: String) -> List[String] = {
   let t0 = sh + 12
   let te = t0 + prim.load32(sh + 4)
   let acc: List[String] = []
-  __rx_split_go(p0, pe, t0, t0, te, acc)
+  __rx_split_go(p0, pe, t0, t0, t0, te, acc)
 }
 
 // Copy `n` i64 slots from list-data address `src` to `dst`.
@@ -593,7 +725,10 @@ else {
   if b == 92 and p + 1 < q then __rx_ngroups(p + 1 + __rx_w(p + 1), q)
   else if b == 91 then __rx_ngroups(__rx_class_end(p + 1, q), q)
   else if b == 40 then {
-    if p + 1 < q and prim.load8(p + 1) == 63 then __rx_ngroups(p + 1, q) else 1 + __rx_ngroups(p + 1, q)
+    if p + 1 < q and prim.load8(p + 1) == 63 then __rx_ngroups(p + 1, q) else 1 + __rx_ngroups(
+      p + 1,
+      q,
+    )
   } else __rx_ngroups(p + __rx_w(p), q)
 }
 

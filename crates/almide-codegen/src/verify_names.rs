@@ -544,7 +544,7 @@ fn augment_map_for_scope(
 pub fn repair_bare_type_names(program: &mut IrProgram) {
     let decls = index_decls(program);
     let map = build_repair_map(&decls);
-    if std::env::var_os("ALMIDE_NAMES_DEBUG").is_some() {
+    if almide_base::env::flag("ALMIDE_NAMES_DEBUG") {
         eprintln!("[names-debug] repair: bare decls = {:?}", decls.bare.iter().map(|s| s.as_str()).collect::<Vec<_>>());
         eprintln!("[names-debug] repair: qualified = {:?}", decls.qualified);
         eprintln!("[names-debug] repair: map = {:?}", map.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect::<Vec<_>>());
@@ -557,7 +557,7 @@ pub fn repair_bare_type_names(program: &mut IrProgram) {
         // Per-scope widening (#1501): the module's own package namespace can
         // disambiguate a base the GLOBAL view cannot.
         let scoped = augment_map_for_scope(&map, &decls, m.name.as_str());
-        if std::env::var_os("ALMIDE_NAMES_DEBUG").is_some() && scoped.len() > map.len() {
+        if almide_base::env::flag("ALMIDE_NAMES_DEBUG") && scoped.len() > map.len() {
             eprintln!(
                 "[names-debug] repair: module `{}` scoped additions = {:?}",
                 m.name,
@@ -574,7 +574,7 @@ pub fn repair_bare_type_names(program: &mut IrProgram) {
 /// into a structured compiler-bug report. Controlled error, not an ICE.
 pub fn assert_names_resolvable(program: &IrProgram) {
     let offenders = collect_unresolvable_names(program);
-    if std::env::var_os("ALMIDE_NAMES_DEBUG").is_some() {
+    if almide_base::env::flag("ALMIDE_NAMES_DEBUG") {
         let decls = index_decls(program);
         eprintln!("[names-debug] gate: bare decls = {:?}", decls.bare.iter().map(|s| s.as_str()).collect::<Vec<_>>());
         eprintln!("[names-debug] gate: qualified = {:?}", decls.qualified);

@@ -2,7 +2,10 @@
 // List[List[String]] — heap elements inside heap elements: every slot is an
 // owned handle, so drops route through the nested class. Build, reshape,
 // join, shadow-drop, and rebuild from split strings.
-fn show(xss: List[List[String]]) -> String = list.join(list.map(xss, (xs) => "<${list.join(xs, "+")}>"), " ")
+fn show(xss: List[List[String]]) -> String = list.join(
+  list.map(xss, (xs) => "<${list.join(xs, "+")}>"),
+  " ",
+)
 
 fn main() -> Unit = {
   var grid: List[List[String]] = []

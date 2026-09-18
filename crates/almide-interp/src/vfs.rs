@@ -12,9 +12,9 @@
 //! (`std::fs::` appears here only in read forms).
 //!
 //! Error strings mirror the native runtime's `io_err` (= `Display` of
-//! `std::io::Error`, `runtime/rs/src/fs.rs`); overlay-synthesized errors use
-//! the exact `(os error N)` spellings, which are identical on the linux and
-//! macos hosts the suite runs on.
+//! `std::io::Error`, `runtime/rs/src/fs.rs`); overlay-synthesized errors read
+//! `almide_base::fs_errno` (#2206), the one table every leg spells from,
+//! pinned against the host's `Display` by its own test.
 
 use std::collections::HashMap;
 
@@ -55,7 +55,7 @@ pub(crate) fn normalize(path: &str) -> String {
     }
 }
 
-const ENOENT: &str = "No such file or directory (os error 2)";
+const ENOENT: &str = almide_base::fs_errno::ENOENT.text;
 
 /// `prim.read_text_file` — overlay first, then a READ-ONLY real-fs fallback.
 pub(crate) fn read_text(vfs: &Vfs, path: &str) -> Result<String, String> {
@@ -64,8 +64,8 @@ pub(crate) fn read_text(vfs: &Vfs, path: &str) -> Result<String, String> {
         // The exact `std::fs::read_to_string` InvalidData Display the native
         // runtime's `io_err` forwards (and the wasm text floor spells, #1506).
         Some(VfsEntry::File(content)) => String::from_utf8(content.clone())
-            .map_err(|_| "stream did not contain valid UTF-8".to_string()),
-        Some(VfsEntry::Dir) => Err("Is a directory (os error 21)".to_string()),
+            .map_err(|_| almide_base::fs_errno::INVALID_UTF8_TEXT.to_string()),
+        Some(VfsEntry::Dir) => Err(EISDIR.to_string()),
         None => std::fs::read_to_string(path).map_err(|e| format!("{e}")),
     }
 }
@@ -116,7 +116,7 @@ fn ancestor_is_file(vfs: &Vfs, path: &str) -> bool {
 pub(crate) fn make_dir(vfs: &mut Vfs, path: &str) -> Result<(), String> {
     let path = &normalize(path);
     if matches!(vfs.get(path.as_str()), Some(VfsEntry::File(_))) {
-        return Err("File exists (os error 17)".to_string());
+        return Err(almide_base::fs_errno::EEXIST.text.to_string());
     }
     if ancestor_is_file(vfs, path) {
         return Err(ENOTDIR.to_string());
@@ -169,8 +169,8 @@ pub(crate) fn remove_all(vfs: &mut Vfs, path: &str) -> RemoveOutcome {
     RemoveOutcome::Removed
 }
 
-const ENOTDIR: &str = "Not a directory (os error 20)";
-const EISDIR: &str = "Is a directory (os error 21)";
+const ENOTDIR: &str = almide_base::fs_errno::ENOTDIR.text;
+const EISDIR: &str = almide_base::fs_errno::EISDIR.text;
 
 /// `prim.read_bytes_file` — the bytes floor: the overlay's bytes as they
 /// were written, else a read-only real-fs `std::fs::read`.

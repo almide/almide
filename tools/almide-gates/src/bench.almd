@@ -56,7 +56,11 @@ fn regressed(got_x10: Int, base_x10: Int, tol_pct: Int) -> Bool = got_x10 * 100 
 
 fn regression_line(key: String, got_x10: Int, base_x10: Int, tol_pct: Int) -> String = "::error::build-speed REGRESSION: " + key + " is " + fmt_ms(got_x10) + "ms against a " + fmt_ms(base_x10) + "ms baseline (> " + int.to_string(tol_pct / 100) + "." + int.to_string((tol_pct / 10) % 10) + "x)"
 
-fn ok_line(key: String, got_x10: Int, base_x10: Int) -> String = "  " + string.pad_end(key, 9, " ") + " " + string.pad_start(fmt_ms(got_x10), 8, " ") + "ms  (baseline " + fmt_ms(base_x10) + "ms)"
+fn ok_line(key: String, got_x10: Int, base_x10: Int) -> String = "  " + string.pad_end(key, 9, " ") + " " + string.pad_start(
+  fmt_ms(got_x10),
+  8,
+  " ",
+) + "ms  (baseline " + fmt_ms(base_x10) + "ms)"
 
 // `key = VALUE   n=N` — the baseline file's one line shape, read back for the ratchet.
 fn baseline_of(lines: List[String], key: String) -> Int = {
@@ -107,14 +111,20 @@ effect fn measure(alm: String, target: String) -> List[Row] = {
     bench("check_ms", 20, [], alm, ["check", target])!,
     bench("cold_ms", 3, clear, alm, ["build", target, "-o", "/tmp/almide-bs-native"])!,
     bench("warm_ms", 5, [], alm, ["build", target, "-o", "/tmp/almide-bs-native"])!,
-    bench("wasm_ms", 3, clear, alm, [
-      "build",
-      target,
-      "--target",
-      "wasm",
-      "-o",
-      "/tmp/almide-bs.wasm"
-    ])!
+    bench(
+      "wasm_ms",
+      3,
+      clear,
+      alm,
+      [
+        "build",
+        target,
+        "--target",
+        "wasm",
+        "-o",
+        "/tmp/almide-bs.wasm"
+      ],
+    )!
   ]
 }
 
@@ -136,7 +146,10 @@ effect fn baseline_text(alm: String, target: String, rows: List[Row], tol_pct: I
     # dependency cache before every repetition — clearing only the latter produces a warm
     # build wearing a cold label.
     """
-  header + "\n" + "version   = " + ver + "\n" + "binary    = sha256:" + sha + "\n" + "machine   = " + sh("uname", ["-m"])! + " " + sh("uname", ["-s"])! + "\n" + "date      = " + sh("date", ["+%Y-%m-%d"])! + "\n" + "target    = " + target + "\n" + "lines     = " + int.to_string(list.len(string.split(src, "\n")) - 1) + "\n" + "tolerance = " + int.to_string(tol_pct) + "\n" + (rows |> list.map(row_line) |> list.join("\n")) + "\n"
+  header + "\n" + "version   = " + ver + "\n" + "binary    = sha256:" + sha + "\n" + "machine   = " + sh(
+    "uname",
+    ["-m"],
+  )! + " " + sh("uname", ["-s"])! + "\n" + "date      = " + sh("date", ["+%Y-%m-%d"])! + "\n" + "target    = " + target + "\n" + "lines     = " + int.to_string(list.len(string.split(src, "\n")) - 1) + "\n" + "tolerance = " + int.to_string(tol_pct) + "\n" + (rows |> list.map(row_line) |> list.join("\n")) + "\n"
 }
 
 effect fn check_against(path: String, rows: List[Row], tol_pct: Int) -> (List[String], Bool) = {

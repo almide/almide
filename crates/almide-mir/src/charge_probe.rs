@@ -28,7 +28,7 @@ fn site_id(fn_name: &str, idx: u32) -> u32 {
 
 /// True when the probe is requested for this process.
 pub fn probe_enabled() -> bool {
-    std::env::var("ALMIDE_FUEL_PROBE").is_ok_and(|v| v == "1")
+    almide_base::env::flag("ALMIDE_FUEL_PROBE")
 }
 
 /// Insert deterministic charges. Two modes:
@@ -244,7 +244,7 @@ mod cert_tests {
     fn insertion_is_noop_without_env() {
         // Deliberately does NOT set the env var: the default path must not
         // insert charges (normal builds are byte-identical to pre-probe).
-        if std::env::var("ALMIDE_FUEL_PROBE").is_ok() {
+        if almide_base::env::flag("ALMIDE_FUEL_PROBE") {
             return; // an outer harness set it; this test's claim is vacuous there
         }
         let mut fns: Vec<crate::MirFunction> = Vec::new();
@@ -299,8 +299,7 @@ pub fn timeout_used() -> bool {
 /// the artifact cuts at the n-th wall check without reading the clock).
 /// `-1` = live mode (read the clock).
 pub fn omega_replay() -> i64 {
-    std::env::var("ALMIDE_OMEGA")
-        .ok()
+    almide_base::env::var("ALMIDE_OMEGA")
         .and_then(|v| v.parse().ok())
         .unwrap_or(-1)
 }
@@ -309,7 +308,7 @@ pub fn omega_replay() -> i64 {
 /// prints `__ALMD_OMEGA <ord>` on stderr at each region exit whose deadline
 /// fired (record on native, replay anywhere — ADR-0001 S8's claim shape).
 pub fn omega_record() -> bool {
-    std::env::var("ALMIDE_OMEGA_RECORD").is_ok_and(|v| v == "1")
+    almide_base::env::flag("ALMIDE_OMEGA_RECORD")
 }
 
 /// The counters start at i64::MAX and count DOWN; consumed = MAX - remaining.

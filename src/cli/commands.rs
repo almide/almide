@@ -50,12 +50,37 @@ pub fn cmd_init() {
     err(&format!("  CLAUDE.md"));
 }
 
+/// Print what the run actually executed, then decide the "nothing ran" verdict.
+///
+/// One rule covers every shape of zero (#2084): no test file discovered, a named
+/// file with no `test` block, a directory of files that have none.
+///
+/// Two zeroes are NOT that verdict, and both would otherwise be caught here:
+///
+/// - a `--run` pattern that excluded everything — the caller's own narrowing,
+///   which is why the check reads `filtered_out` and not just `ran`;
+/// - a file this leg DECLINED (`// wasm:skip`, or a wall routing it to native).
+///   A skip means "these tests exist and this leg cannot run them", the opposite
+///   of "there were none", and `wasm_skip_marker_stays_a_green_skip` pins that a
+///   genuine skip stays green.
+fn finish_test_run(counts: TestCounts, files: usize, declined: usize, allow_no_tests: bool) {
+    err(&counts.summary(files));
+    if counts.found_nothing() && declined == 0 && !allow_no_tests {
+        err("no tests to run — pass --allow-no-tests if a run with no tests is expected");
+        std::process::exit(NO_TESTS_EXIT);
+    }
+}
+
 /// Shared "resolve `almide test [file]`'s target file list" logic — used by
-/// `cmd_test`/`cmd_test_fast` (search `spec/` and `exercises/`, `.`
-/// fallback) and `cmd_test_wasm` (search `.` directly, i.e. an empty
-/// `fallback_dirs`). Extracted verbatim from `cmd_test`'s identical block —
-/// exits the process on an empty result, exactly as all three call sites
-/// already did.
+/// `cmd_test`/`cmd_test_fast` (search `spec/` and `exercises/`, `.` fallback)
+/// and `cmd_test_wasm` (search `.` directly, i.e. an empty `fallback_dirs`).
+///
+/// An empty result is reported but no longer exits here (#2084): "nothing to
+/// run" is one verdict decided by [`finish_test_run`], so a discovery that
+/// found no file and a named file that turned out to hold no `test` block get
+/// the same exit code instead of 1 and 0 respectively. The "no almide.toml"
+/// refusal below is a different thing — a misaimed command, not an empty one —
+/// and keeps exiting 1.
 fn discover_test_files(file: &str, fallback_dirs: &[&str]) -> Vec<String> {
     if !file.is_empty() {
         let path = std::path::Path::new(file);
@@ -64,7 +89,6 @@ fn discover_test_files(file: &str, fallback_dirs: &[&str]) -> Vec<String> {
             files.sort();
             if files.is_empty() {
                 err(&format!("No .almd files with test blocks found in {}", file));
-                std::process::exit(1);
             }
             files
         } else {
@@ -97,7 +121,6 @@ fn discover_test_files(file: &str, fallback_dirs: &[&str]) -> Vec<String> {
         files.sort();
         if files.is_empty() {
             err(&format!("No .almd files with test blocks found."));
-            std::process::exit(1);
         }
         files
     }
@@ -138,7 +161,9 @@ fn compile_test_files_parallel(test_files: &[String], no_check: bool, scratch: &
     results
 }
 
-use super::test_report::{report_test_failure, test_harness_args, TestRun};
+use super::test_report::{
+    libtest_counts, report_test_failure, test_harness_args, TestCounts, TestRun, NO_TESTS_EXIT,
+};
 
 /// `cmd_test`'s Phase 2: execute every compiled test binary in parallel
 /// (bounded by CPU count). Output is CAPTURED, not inherited: it feeds
@@ -174,7 +199,7 @@ fn run_test_binaries_parallel(compiled: Vec<(String, Result<std::path::PathBuf, 
     results
 }
 
-pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>) {
+pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>, allow_no_tests: bool) {
     let test_files: Vec<String> = discover_test_files(file, &["spec", "exercises"]);
 
     let program_args = test_harness_args(run_filter);
@@ -187,23 +212,28 @@ pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>) {
     let results = run_test_binaries_parallel(compiled, &program_args);
 
     let mut failed = 0;
+    let mut counts = TestCounts::default();
     for (file, code, output) in &results {
+        counts.add(libtest_counts(output).unwrap_or_default());
         if *code != 0 {
             report_test_failure(file, output);
             failed += 1;
         }
     }
+    err("");
     if failed > 0 {
-        err(&format!("\n{}/{} test file(s) failed", failed, test_files.len()));
+        err(&counts.summary(test_files.len()));
+        err(&format!("{}/{} test file(s) failed", failed, test_files.len()));
         scratch.finish();
         std::process::exit(1);
     }
-    err(&format!("\nAll {} test file(s) passed", test_files.len()));
+    err(&format!("All {} test file(s) passed", test_files.len()));
     scratch.finish();
+    finish_test_run(counts, test_files.len(), 0, allow_no_tests);
 }
 
 enum WasmTestOutcome {
-    Pass { file: String, count: usize, bytes: usize },
+    Pass { file: String, count: usize, filtered_out: usize, bytes: usize },
     /// `raw` is the run's whole stdout+stderr (the same concatenation the
     /// native capture makes) — the accept step reads the snapshot block out
     /// of it (#1314); `detail` is the two-line summary the harness prints.
@@ -216,7 +246,35 @@ enum WasmTestOutcome {
     /// authoritatively); the standalone `--target wasm` harness counts them
     /// FAILED, matching the default harness's verdict on the same file.
     CompileError { file: String, detail: String },
-    Skip { file: String, reason: String },
+    Skip { file: String, reason: String, kind: SkipKind },
+    /// No `main` and no `test` block: nothing for ANY leg to run. Not a wall
+    /// (no renderer declined it) and not a skip (nothing was declined), so it
+    /// contributes zero to the counts and lets `finish_test_run` reach the same
+    /// exit-5 verdict native does on the same file (#2204).
+    Empty { file: String },
+}
+
+/// WHY a file's tests did not run on wasm. The distinction is the whole point
+/// of #2121: a skip the author DECLARED and a skip a RENDERER decided are not
+/// the same verdict, and reporting both as "skipped" let `almide test --target
+/// wasm` exit 0 having run nothing on the target the caller asked for.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SkipKind {
+    /// `// wasm:skip` in the first three lines — the author said so, with a
+    /// reason a reader can audit. Benign.
+    Declared,
+    /// The host cannot run the lane at all (no wasmtime, an unwritable scratch
+    /// path). Not a statement about the program. Benign.
+    Environment,
+    /// A RENDERER declined this program. The caller asked for wasm and this
+    /// file's tests did not run there — so the summary says exactly that,
+    /// separately from the skips the author declared. `// wasm:skip` is NOT
+    /// the place to park one: that marker means "wasm cannot do this", and a
+    /// wall means "this leg has not lowered this shape yet"
+    /// (tests/wasm_skip_ledger_test.rs, #812). This repository's own walls are
+    /// registered in proofs/wasm-test-walls.txt and gated shrink-only by
+    /// scripts/check-wasm-test-walls.sh.
+    Wall,
 }
 
 /// Compile one `.almd` file to WASM and run it under wasmtime. Pure per-file
@@ -235,7 +293,11 @@ fn wasm_test_preflight_outcome(
     parse_errors: &[crate::diagnostic::Diagnostic],
 ) -> Option<WasmTestOutcome> {
     if source_text.lines().take(3).any(|line| line.contains("// wasm:skip")) {
-        return Some(WasmTestOutcome::Skip { file: test_file.to_string(), reason: "wasm:skip".to_string() });
+        return Some(WasmTestOutcome::Skip {
+            file: test_file.to_string(),
+            reason: "wasm:skip".to_string(),
+            kind: SkipKind::Declared,
+        });
     }
     if parse_errors.iter().any(|d| d.level == crate::diagnostic::Level::Error) {
         let mut detail = String::new();
@@ -271,18 +333,106 @@ fn print_wasm_test_profile(test_file: &str, marks: &[(&'static str, std::time::I
 /// `compile_and_run_wasm_test`'s dependency-fetch + import-resolution
 /// phase. Extracted verbatim.
 fn resolve_wasm_test_deps(test_file: &str, program: &almide_lang::ast::Program) -> Result<resolve::ResolvedModules, String> {
-    let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> =
-        if std::path::Path::new("almide.toml").exists() {
-            if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
-                project_fetch::fetch_all_deps(&proj)
-                    .unwrap_or_else(|_| vec![])
-                    .into_iter()
-                    .map(|fd| (fd.pkg_id, fd.source_dir))
-                    .collect()
-            } else { vec![] }
-        } else { vec![] };
+    resolve::resolve_imports_with_deps(test_file, program, &wasm_test_dep_paths())
+}
 
-    resolve::resolve_imports_with_deps(test_file, program, &dep_paths)
+/// The dependency table the test runner resolves against — the cwd
+/// package's fetched deps, or nothing outside a package.
+fn wasm_test_dep_paths() -> Vec<(project::PkgId, std::path::PathBuf)> {
+    if std::path::Path::new("almide.toml").exists() {
+        if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
+            return project_fetch::fetch_all_deps(&proj)
+                .unwrap_or_else(|_| vec![])
+                .into_iter()
+                .map(|fd| (fd.pkg_id, fd.source_dir))
+                .collect();
+        }
+    }
+    vec![]
+}
+
+/// The incumbent leg's rendering of a test file — the lane's fallback, as it
+/// is the product's. Its verdict is FINAL where it renders: a run failure
+/// routes to the authoritative native leg, never to a retry on unverified
+/// codegen (#782, #790). `wat` assembles without full stack-shape validation,
+/// so the bytes are validated here and an invalid module is an honest wall.
+fn incumbent_test_render(test_file: &str, source_text: &str, v1_self_modules: &[(String, almide_lang::ast::Program, bool)], run_filter: Option<&str>, explain: bool) -> Option<Vec<u8>> {
+    let wall = |stage: &str, detail: String| {
+        if explain { err(&format!("[wall] {}: {}: {}", test_file, stage, detail)); }
+    };
+    let wat_text = match almide_mir::pipeline::try_render_wasm_source_tests(source_text, v1_self_modules, explain, run_filter) {
+        Ok(t) => t,
+        Err(e) => { wall("render", format!("{e:?}")); return None; }
+    };
+    let bytes = match wat::parse_str(&wat_text) {
+        Ok(b) => b,
+        Err(e) => { wall("wat assemble", e.to_string()); return None; }
+    };
+    if let Err(e) = wasmparser::validate(&bytes) {
+        wall("validate", e.to_string());
+        return None;
+    }
+    Some(bytes)
+}
+
+/// The structural leg's rendering of a test file — the lane's FIRST attempt
+/// (#2179), as it is the product's. Before it, the test runner took only the
+/// incumbent's verdict: a program that built and ran on wasm reported SKIP
+/// here (#2121), and, the other way round, a structural-leg defect in that
+/// program could hide behind the SKIP (the first spec run on this route found
+/// one — `list_fuse`'s observation scan missed captured-var writes). A
+/// main-only file runs its `main`; a file that declares tests gets the shared
+/// `__test_runner` synthesis. Validated and audited against the p1 host
+/// surface wasmtime serves; an export-mode file, or a decline at any stage,
+/// hands the file to the incumbent.
+fn structural_test_render(test_file: &str, source_text: &str, ir_program: &almide::ir::IrProgram, declared_tests: usize, run_filter: Option<&str>, explain: bool) -> Option<Vec<u8>> {
+    let has_main = ir_program.functions.iter().any(|f| f.name.as_str() == "main");
+    let has_exports = ir_program.functions.iter().any(|f| !f.export_attrs.is_empty());
+    // A main-only file runs its `main` (the `__main_runner` protocol); a file
+    // that declares tests gets the leg-independent `__test_runner` synthesis
+    // (#2179) — the same one the incumbent applies — before the structural
+    // leg links and emits it. An export-mode file stays with the incumbent.
+    // `ALMIDE_WASM_INCUMBENT=1` forces the incumbent here exactly as it does
+    // in `render_wasm_module_routed`, so a lane run can be pinned to one leg.
+    if (!has_main && declared_tests == 0) || has_exports || almide_base::env::flag("ALMIDE_WASM_INCUMBENT") {
+        return None;
+    }
+    let wall = |stage: &str, detail: String| {
+        if explain { err(&format!("[wall] {}: structural {}: {}", test_file, stage, detail)); }
+    };
+    let lowered = if declared_tests > 0 {
+        almide::wasm_leg::lower_to_ir_tests_with_deps(test_file, source_text, &wasm_test_dep_paths(), run_filter)
+    } else {
+        almide::wasm_leg::lower_to_ir_with_deps(test_file, source_text, &wasm_test_dep_paths())
+    };
+    let ir = match lowered {
+        Ok(ir) => ir,
+        Err(e) => { wall("lower", e); return None; }
+    };
+    let (bytes, host_ops) = match almide_wasm::emit_program_with_ops(&ir) {
+        Ok(x) => x,
+        Err(e) => { wall("emit", format!("{e:?}")); return None; }
+    };
+    if let Err(e) = wasmparser::validate(&bytes) {
+        wall("validate", e.to_string());
+        return None;
+    }
+    if let Some(op) = host_ops.iter().find(|op| !almide_wasm_run::wasi::P1_SERVED_OPS.contains(op)) {
+        wall("host audit", format!("op {op} is not served by the p1 shim"));
+        return None;
+    }
+    // The structural module imports `almide.*` (the embedded host's surface);
+    // wasmtime is a stock runtime, so the same `to_wasi` rewrite the build
+    // ships applies here.
+    let ops: Vec<i32> = host_ops.iter().copied().collect();
+    let bytes = match almide_wasm_run::wasi::to_wasi(&bytes, &ops) {
+        Ok(w) => w,
+        Err(e) => { wall("to_wasi", e.to_string()); return None; }
+    };
+    if explain {
+        err(&format!("[route] {}: structural leg rendered the test module ({} bytes)", test_file, bytes.len()));
+    }
+    Some(bytes)
 }
 
 /// `compile_and_run_wasm_test`'s type-check phase. Unlike `almide
@@ -362,13 +512,28 @@ fn lower_wasm_test_modules(program: &almide_lang::ast::Program, checker: &mut ch
     Ok(ir_program)
 }
 
-fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::PathBuf) -> WasmTestOutcome {
-    let skip = |reason: String| WasmTestOutcome::Skip { file: test_file.to_string(), reason };
+fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::PathBuf, run_filter: Option<&str>) -> WasmTestOutcome {
+    let skip = |reason: String| WasmTestOutcome::Skip {
+        file: test_file.to_string(),
+        reason,
+        kind: SkipKind::Wall,
+    };
+    let skip_env = |reason: String| WasmTestOutcome::Skip {
+        file: test_file.to_string(),
+        reason,
+        kind: SkipKind::Environment,
+    };
     let compile_error = |detail: String| WasmTestOutcome::CompileError { file: test_file.to_string(), detail };
-    let prof = std::env::var_os("ALMIDE_PROFILE").is_some();
+    let prof = almide_base::env::flag("ALMIDE_PROFILE");
     let mut marks: Vec<(&'static str, std::time::Instant)> = vec![("start", std::time::Instant::now())];
 
     let (mut program, source_text, parse_errors) = parse_file(test_file);
+    // Counted before any filtering so the summary can say what `--run` excluded.
+    let declared_tests = program
+        .decls
+        .iter()
+        .filter(|d| matches!(d, almide_lang::ast::Decl::Test { .. }))
+        .count();
     mark(prof, &mut marks, "parse");
     // `// wasm:skip` marker / parse errors (a real Fail, not a benign skip —
     // see `wasm_test_preflight_outcome`'s doc comment) / the main+test
@@ -403,6 +568,14 @@ fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::PathBuf) -> 
         Err(detail) => return compile_error(detail),
     };
     mark(prof, &mut marks, "lower_modules");
+    // Nothing to run on any leg — the v1 renderer would refuse this program
+    // ("no `main` and no test blocks") and the refusal read as a WALL, i.e. a
+    // decline, which the zero-test verdict rightly exempts; so the same file
+    // exited 5 on native and 0 here (#2204). Decided after the checks above so
+    // a file that does not compile still fails as one on both targets.
+    if declared_tests == 0 && !ir_program.functions.iter().any(|f| f.name.as_str() == "main") {
+        return WasmTestOutcome::Empty { file: test_file.to_string() };
+    }
     // The ONE driver — see the note in src/cli/build.rs. This is the site whose order the
     // migration FLIPPED (ir_link first → last), so its acceptance check is byte-identity of
     // spec/wasm_cross against the pre-migration capture, not merely a green suite.
@@ -430,34 +603,21 @@ fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::PathBuf) -> 
     // `ALMIDE_WALL_REASON=1` prints WHICH of the three stages declined. Without it a
     // fallback file reports only "v1 wall", and diagnosing the #813 remainder meant
     // re-deriving each one by hand through `render_program`.
-    let explain = std::env::var_os("ALMIDE_WALL_REASON").is_some();
+    let explain = almide_base::env::flag("ALMIDE_WALL_REASON");
 
-    let v1_bytes: Option<Vec<u8>> =
-        match almide_mir::pipeline::try_render_wasm_source_tests(&source_text, &v1_self_modules, explain) {
-            Err(e) => {
-                if explain { err(&format!("[wall] {}: render: {:?}", test_file, e)); }
-                None
-            }
-            Ok(wat_text) => match wat::parse_str(&wat_text) {
-                Err(e) => {
-                    if explain { err(&format!("[wall] {}: wat assemble: {}", test_file, e)); }
-                    None
-                }
-                Ok(bytes) => match wasmparser::validate(&bytes) {
-                    Err(e) => {
-                        if explain { err(&format!("[wall] {}: validate: {}", test_file, e)); }
-                        None
-                    }
-                    Ok(_) => Some(bytes),
-                },
-            },
-        };
+    // The SAME two-leg routing `almide build --target wasm` uses (#2179): the
+    // structural leg first, the incumbent where it declines. Before this the
+    // lane rendered through the incumbent alone, so the test lane and the
+    // product lane were two different compilers, and the lane walled files
+    // the product built.
+    let module_bytes = structural_test_render(test_file, &source_text, &ir_program, declared_tests, run_filter, explain)
+        .or_else(|| incumbent_test_render(test_file, &source_text, &v1_self_modules, run_filter, explain));
     // Write the module and run it under wasmtime. `-S inherit-env=y` mirrors
     // `cmd_run_wasm`: `env.get` in a test observes the same host variables native
     // does (the env cross-target contract).
     let run_module = |bytes: &[u8]| -> WasmTestOutcome {
         if let Err(e) = std::fs::write(&wasm_path, bytes) {
-            return skip(format!("write: {}", e));
+            return skip_env(format!("write: {}", e));
         }
         let mut cmd = std::process::Command::new("wasmtime");
         super::run::wasmtime_fs_args(&mut cmd);
@@ -478,10 +638,16 @@ fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::PathBuf) -> 
                 let stdout = String::from_utf8_lossy(&result.stdout);
                 let stderr = String::from_utf8_lossy(&result.stderr);
                 if result.status.success() {
-                    WasmTestOutcome::Pass {
-                        file: test_file.to_string(),
-                        count: stdout.matches("ok\n").count(),
-                        bytes: bytes.len(),
+                    {
+                        let ran = stdout.matches("ok\n").count();
+                        WasmTestOutcome::Pass {
+                            file: test_file.to_string(),
+                            count: ran,
+                            // The runner is synthesized over the SELECTED tests, so
+                            // what `--run` excluded is only knowable from the source.
+                            filtered_out: declared_tests.saturating_sub(ran),
+                            bytes: bytes.len(),
+                        }
                     }
                 } else {
                     let mut last_test = String::new();
@@ -494,7 +660,7 @@ fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::PathBuf) -> 
                     WasmTestOutcome::Fail { file: test_file.to_string(), detail, raw: format!("{stdout}{stderr}") }
                 }
             }
-            Err(e) => skip(format!("wasmtime: {}", e)),
+            Err(e) => skip_env(format!("wasmtime: {}", e)),
         }
     };
     if prof {
@@ -509,14 +675,22 @@ fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::PathBuf) -> 
     // ok), so a GENUINELY failing test (v1 correctly aborting on `none!`) was
     // overwritten by a hollow v0 "pass". A v1 WALL is an honest skip that routes
     // the file to native — the shrinking #813 remainder.
-    match v1_bytes {
+    match module_bytes {
         Some(b) => run_module(&b),
-        None => skip("v1 wall — no verified wasm rendering".to_string()),
+        // Both legs declined — the same verdict `almide build --target wasm`
+        // gives this file (E082). Name both legs: the structural leg is the
+        // product's default, the incumbent its fallback.
+        None => skip(format!(
+            "both wasm legs walled: the structural leg (the default) declined and the incumbent walled{} — ALMIDE_WALL_REASON=1 names each stage",
+            if declared_tests > 0 { format!(" ({declared_tests} test block(s) route to native)") } else { String::new() }
+        )),
     }
 }
 
-pub fn cmd_test_wasm(file: &str, _run_filter: Option<&str>) {
+pub fn cmd_test_wasm(file: &str, run_filter: Option<&str>, allow_no_tests: bool) {
     let test_files: Vec<String> = discover_test_files(file, &[]);
+    // Owned so each worker thread can carry it (#2085 — this leg used to drop it).
+    let run_filter: Option<String> = run_filter.map(str::to_string);
 
     let scratch = std::sync::Arc::new(TestScratch::new());
 
@@ -534,9 +708,10 @@ pub fn cmd_test_wasm(file: &str, _run_filter: Option<&str>) {
         let scratch = scratch.clone();
         let sem_rx = sem_rx.clone();
         let sem_tx = sem_tx.clone();
+        let run_filter = run_filter.clone();
         handles.push(std::thread::spawn(move || {
             let _ = sem_rx.lock().unwrap().recv();
-            let outcome = compile_and_run_wasm_test(&test_file, scratch.wasm_module_path(&test_file));
+            let outcome = compile_and_run_wasm_test(&test_file, scratch.wasm_module_path(&test_file), run_filter.as_deref());
             let _ = sem_tx.send(());
             let _ = tx.send(outcome);
         }));
@@ -548,17 +723,21 @@ pub fn cmd_test_wasm(file: &str, _run_filter: Option<&str>) {
         WasmTestOutcome::Pass { file, .. }
         | WasmTestOutcome::Fail { file, .. }
         | WasmTestOutcome::CompileError { file, .. }
-        | WasmTestOutcome::Skip { file, .. } => file.clone(),
+        | WasmTestOutcome::Skip { file, .. }
+        | WasmTestOutcome::Empty { file } => file.clone(),
     };
     outcomes.sort_by(|a, b| file_of(a).cmp(&file_of(b)));
 
     let mut failed = 0;
     let mut passed = 0;
     let mut skipped = 0;
+    let mut walled: Vec<String> = Vec::new();
+    let mut counts = TestCounts::default();
     for o in &outcomes {
         match o {
-            WasmTestOutcome::Pass { file, count, bytes } => {
+            WasmTestOutcome::Pass { file, count, filtered_out, bytes } => {
                 err(&format!("{}: {} tests passed ({} bytes)", file, count, bytes));
+                counts.add(TestCounts { ran: *count, filtered_out: *filtered_out });
                 passed += 1;
             }
             WasmTestOutcome::Fail { file, detail, .. } => {
@@ -573,9 +752,26 @@ pub fn cmd_test_wasm(file: &str, _run_filter: Option<&str>) {
                 err_no_nl(&format!("{}", detail));
                 failed += 1;
             }
-            WasmTestOutcome::Skip { file, reason } => {
+            // A DECLARED or ENVIRONMENT skip is a skip. A WALL is not: the
+            // caller asked for wasm, this file's tests did not run there, and
+            // nothing in the file says that was expected (#2121).
+            WasmTestOutcome::Skip { file, reason, kind: SkipKind::Wall } => {
+                // A stable, greppable prefix: the wall register's gate reads
+                // these lines, and a wall that looked like every other skip is
+                // how five of them went unnoticed (#2121).
+                err(&format!("WALL {} (tests did not run on wasm: {})", file, reason));
+                walled.push(file.clone());
+                skipped += 1;
+            }
+            WasmTestOutcome::Skip { file, reason, .. } => {
                 err(&format!("SKIP {} ({})", file, reason));
                 skipped += 1;
+            }
+            // Counted with the passes, as native counts a file whose binary
+            // ran zero tests; the zero-test verdict below is what fails it.
+            WasmTestOutcome::Empty { file } => {
+                err(&format!("{}: no test blocks (nothing to run)", file));
+                passed += 1;
             }
         }
     }
@@ -588,15 +784,31 @@ pub fn cmd_test_wasm(file: &str, _run_filter: Option<&str>) {
         err(&format!("{} passed, {} failed (of {} files)",
             passed, failed, test_files.len()));
     }
+    if !walled.is_empty() {
+        err("");
+        err(&format!(
+            "{} file(s) did not run on wasm: a renderer declined them. This is not the same \
+             verdict as a declared `// wasm:skip`, which says wasm CANNOT run the file —",
+            walled.len()
+        ));
+        for f in &walled {
+            err(&format!("  {}", f));
+        }
+        err("it says a leg has not lowered the shape yet. Fix the wall rather than marking");
+        err("the file: a `// wasm:skip` for subset debt is refused by the skip ledger (#812).");
+    }
     scratch.finish();
     if failed > 0 {
         std::process::exit(1);
     }
+    // `skipped` files are declines, not absences — see finish_test_run.
+    finish_test_run(counts, test_files.len(), skipped, allow_no_tests);
 }
 
 /// `cmd_test_fast`'s Phase 1: run every file on the fast rustc-free WASM
 /// path, in parallel (bounded by `cpus`). Extracted verbatim.
-fn run_wasm_test_phase(test_files: &[String], scratch: &std::sync::Arc<TestScratch>, cpus: usize) -> Vec<WasmTestOutcome> {
+fn run_wasm_test_phase(test_files: &[String], scratch: &std::sync::Arc<TestScratch>, cpus: usize, run_filter: Option<&str>) -> Vec<WasmTestOutcome> {
+    let run_filter: Option<String> = run_filter.map(str::to_string);
     let (tx, rx) = std::sync::mpsc::channel();
     let (sem_tx, sem_rx) = std::sync::mpsc::sync_channel::<()>(cpus);
     for _ in 0..cpus { let _ = sem_tx.send(()); }
@@ -608,9 +820,10 @@ fn run_wasm_test_phase(test_files: &[String], scratch: &std::sync::Arc<TestScrat
         let scratch = scratch.clone();
         let sr = sem_rx.clone();
         let st = sem_tx.clone();
+        let run_filter = run_filter.clone();
         handles.push(std::thread::spawn(move || {
             let _ = sr.lock().unwrap().recv();
-            let o = compile_and_run_wasm_test(&tf, scratch.wasm_module_path(&tf));
+            let o = compile_and_run_wasm_test(&tf, scratch.wasm_module_path(&tf), run_filter.as_deref());
             let _ = st.send(());
             let _ = tx.send(o);
         }));
@@ -659,21 +872,31 @@ fn run_native_fallback_phase(fallback: &[String], program_args: &std::sync::Arc<
 /// any file the WASM path can't pass (emitter gap, wasm:skip, or a trap), fall
 /// back to the native rustc path, which is authoritative. The common case (most
 /// tests pass on WASM) is ~9x faster; the native fallback preserves correctness.
-pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>) {
+pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>, allow_no_tests: bool) {
     let test_files: Vec<String> = discover_test_files(file, &["spec", "exercises"]);
 
     let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
     let scratch = std::sync::Arc::new(TestScratch::new());
 
     // Phase 1: WASM (fast, rustc-free), parallel.
-    let wasm_outcomes = run_wasm_test_phase(&test_files, &scratch, cpus);
+    let wasm_outcomes = run_wasm_test_phase(&test_files, &scratch, cpus, run_filter);
 
     let mut wasm_pass = 0usize;
     let mut fallback: Vec<String> = Vec::new();
     let mut trapped: Vec<(String, String)> = Vec::new();
+    // Counted per LEG, because a file that walls on wasm is re-run natively and
+    // would otherwise be counted twice.
+    let mut counts = TestCounts::default();
     for o in wasm_outcomes {
         match o {
-            WasmTestOutcome::Pass { .. } => wasm_pass += 1,
+            WasmTestOutcome::Pass { count, filtered_out, .. } => {
+                counts.add(TestCounts { ran: count, filtered_out });
+                wasm_pass += 1
+            }
+            // Nothing to run on any leg: no native re-run would find a test
+            // either, so it is claimed here with zero counts and the zero-test
+            // verdict at the end fails the run as it does on every lane (#2204).
+            WasmTestOutcome::Empty { .. } => wasm_pass += 1,
             // A `Fail` is DIFFERENT IN KIND from the benign fallback classes
             // (#1166): the wasm leg COMPILED the file, claimed it, and produced
             // a runtime failure. Whether that is a plain failing test or a
@@ -704,6 +927,7 @@ pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>) {
 
     let mut failed = 0;
     for (file, code, output) in &native_results {
+        counts.add(libtest_counts(output).unwrap_or_default());
         if *code != 0 { report_test_failure(file, output); failed += 1; }
     }
     // The #1166 divergence class: the wasm leg compiled the file and failed at
@@ -719,14 +943,14 @@ pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>) {
         .filter(|(f, _)| native_code.get(f).copied() == Some(0))
         .collect();
     for (file, detail) in &diverged {
-        err(&format!("WASM TRAP {} (compiled for wasm, failed at runtime; native re-run PASSED — CI's Test WASM will fail this)", file));
+        err(&format!("WASM TRAP {} (compiled for wasm, failed at runtime; native re-run PASSED — a wasm-only miscompile)", file));
         err_no_nl(detail);
     }
     // The wasm COVERAGE ratchet's data feed (mission-critical arc): every
     // file the wasm leg did not pass, one per line, so
     // proofs/check-wasm-fallback.sh can diff the set against its shrink-only
     // baseline. Names only under the flag — the summary line stays stable.
-    if std::env::var_os("ALMIDE_FALLBACK_NAMES").is_some() {
+    if almide_base::env::flag("ALMIDE_FALLBACK_NAMES") {
         let mut sorted = fallback.clone();
         sorted.sort();
         for f in &sorted {
@@ -744,17 +968,30 @@ pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>) {
     if failed > 0 {
         std::process::exit(1);
     }
-    // Pre-push strict mode: a diverged trap fails the run even though the
-    // native re-run passed — CI's Test WASM verdict, surfaced locally instead
-    // of on the PR (#1166).
-    if !diverged.is_empty() && std::env::var_os("ALMIDE_TEST_STRICT_WASM").is_some() {
-        err(&format!(
-            "STRICT WASM: {} file(s) trapped on the wasm leg (native re-run passed; CI's Test WASM will fail)",
-            diverged.len()
-        ));
-        std::process::exit(1);
+    // A diverged trap FAILS the run even though the native re-run passed: it is
+    // a wasm-only miscompile signal, and the run was asked for the wasm target.
+    // Before #2205 this needed ALMIDE_TEST_STRICT_WASM, which nothing in CI or
+    // the scripts set — so this lane (the default `almide test`: wasm first,
+    // native fallback) passed over a diverged leg everywhere. ALMIDE_TEST_LAX_WASM
+    // is the documented opt-out (a gate bypass: announced on stderr when on).
+    if !diverged.is_empty() {
+        if almide_base::env::flag("ALMIDE_TEST_LAX_WASM") {
+            err(&format!(
+                "LAX WASM: {} file(s) trapped on the wasm leg (native re-run passed) — passing only because ALMIDE_TEST_LAX_WASM is set",
+                diverged.len()
+            ));
+        } else {
+            err(&format!(
+                "{} file(s) trapped on the wasm leg (native re-run passed) — a wasm-only miscompile fails a --target wasm run; ALMIDE_TEST_LAX_WASM=1 to pass over it",
+                diverged.len()
+            ));
+            std::process::exit(1);
+        }
     }
     err(&format!("All {} test file(s) passed", test_files.len()));
+    // Nothing is declined on this lane: a wasm wall routes the file to the
+    // native leg, so every discovered file was actually run somewhere.
+    finish_test_run(counts, test_files.len(), 0, allow_no_tests);
 }
 
 /// `almide test --update-snapshots` (#1314): the accept step. Each file runs
@@ -854,8 +1091,8 @@ fn run_test_file_once(
     // The scratch layout (#1877) hands the wasm module path to the runner;
     // the accept loop keeps its own per-invocation dir and mirrors the name.
     let wasm_path = tmp_dir.join(file.replace(['/', '.'], "_") + ".wasm");
-    match compile_and_run_wasm_test(file, wasm_path) {
-        WasmTestOutcome::Pass { .. } => return Ok((0, String::new())),
+    match compile_and_run_wasm_test(file, wasm_path, super::test_report::harness_filter(program_args)) {
+        WasmTestOutcome::Pass { .. } | WasmTestOutcome::Empty { .. } => return Ok((0, String::new())),
         WasmTestOutcome::Fail { raw, .. } => return Ok((1, raw)),
         WasmTestOutcome::CompileError { detail, .. } => {
             return Err(format!("Compile error for {file}:\n{detail}"));
@@ -875,7 +1112,7 @@ fn run_test_file_once(
     }
 }
 
-pub fn cmd_test_json(file: &str, run_filter: Option<&str>) {
+pub fn cmd_test_json(file: &str, run_filter: Option<&str>, allow_no_tests: bool) {
     let test_files: Vec<String> = if !file.is_empty() {
         let path = std::path::Path::new(file);
         if path.is_dir() {
@@ -892,6 +1129,7 @@ pub fn cmd_test_json(file: &str, run_filter: Option<&str>) {
     };
 
     let program_args = test_harness_args(run_filter);
+    let mut counts = TestCounts::default();
 
     // JSONL, one line per file, in sorted file order — a run is diffable
     // against the next one. Each failing file also emits its per-assertion
@@ -905,14 +1143,23 @@ pub fn cmd_test_json(file: &str, run_filter: Option<&str>) {
         };
         let source = std::fs::read_to_string(test_file).unwrap_or_default();
         let failures = super::test_report::parse(test_file, &source, &output);
+        let file_counts = libtest_counts(&output).unwrap_or_default();
+        counts.add(file_counts);
         let status = if code == 0 { "pass" } else { "fail" };
         out(&format!(
-            r#"{{"file":{},"status":"{}","exit_code":{},"failures":[{}]}}"#,
+            r#"{{"file":{},"status":"{}","exit_code":{},"tests":{},"filtered_out":{},"failures":[{}]}}"#,
             serde_json::Value::from(test_file.as_str()),
             status,
             code,
+            file_counts.ran,
+            file_counts.filtered_out,
             failures.iter().map(|f| f.to_json()).collect::<Vec<_>>().join(","),
         ));
+    }
+    // No summary line on this lane — the records ARE the output — but the
+    // verdict still applies, so a `--json` consumer sees the same exit code.
+    if counts.found_nothing() && !allow_no_tests {
+        std::process::exit(NO_TESTS_EXIT);
     }
 }
 

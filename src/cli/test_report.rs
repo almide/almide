@@ -50,6 +50,94 @@ pub fn test_harness_args(run_filter: Option<&str>) -> std::sync::Arc<Vec<String>
     std::sync::Arc::new(args)
 }
 
+/// Exit code for "there were no tests to run" (#2084).
+///
+/// Distinct from 1 so a caller can tell it from "tests failed" without parsing
+/// prose. `.github/workflows/almide-pkg-ci.yml` used to grep the harness's
+/// message to make exactly this distinction, with a comment recording that the
+/// `|| echo` before it had swallowed real failures (#993). pytest's 5 is the
+/// precedent; jest fails the same case with an opt-out flag, which is
+/// `--allow-no-tests` here.
+pub const NO_TESTS_EXIT: i32 = 5;
+
+/// How many tests an invocation actually ran, and how many `--run` excluded.
+///
+/// The summary used to report `test_files.len()` and nothing else, so a run of
+/// zero tests rendered byte-identical to a run where everything passed (#2084).
+/// `filtered_out` is what separates the two zeroes: nothing ran because the
+/// pattern excluded everything (fine, exit 0) versus nothing ran because there
+/// was nothing to run (a mistake worth failing on).
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+pub struct TestCounts {
+    pub ran: usize,
+    pub filtered_out: usize,
+}
+
+impl TestCounts {
+    pub fn add(&mut self, other: TestCounts) {
+        self.ran += other.ran;
+        self.filtered_out += other.filtered_out;
+    }
+
+    /// The invocation had nothing to run at all — as opposed to a filter that
+    /// selected nothing, which is the caller's own narrowing and stays green.
+    pub fn found_nothing(&self) -> bool {
+        self.ran == 0 && self.filtered_out == 0
+    }
+
+    /// `2 tests in 1 file`, plus ` (3 filtered out)` when a pattern excluded
+    /// any. Rendered for every run, including failing ones.
+    pub fn summary(&self, files: usize) -> String {
+        let mut s = format!(
+            "{} test{} in {} file{}",
+            self.ran,
+            if self.ran == 1 { "" } else { "s" },
+            files,
+            if files == 1 { "" } else { "s" },
+        );
+        if self.filtered_out > 0 {
+            s.push_str(&format!(" ({} filtered out)", self.filtered_out));
+        }
+        s
+    }
+}
+
+/// Read libtest's own tally out of a captured native run.
+///
+/// The line is `test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 3
+/// filtered out; finished in 0.00s`. Absent (a binary that died before the
+/// summary, or a shape libtest changes under us) the caller keeps a zero count
+/// rather than inventing one.
+pub fn libtest_counts(output: &str) -> Option<TestCounts> {
+    let line = output.lines().rev().find(|l| l.starts_with("test result:"))?;
+    let field = |name: &str| -> usize {
+        line.split(';')
+            .find_map(|part| {
+                let part = part.trim().strip_suffix(name)?.trim();
+                part.rsplit(' ').next()?.parse().ok()
+            })
+            .unwrap_or(0)
+    };
+    // `N passed` sits after the `ok.` / `FAILED.` verdict in the first field.
+    let passed = line
+        .split(';')
+        .next()
+        .and_then(|f| f.trim().strip_suffix(" passed"))
+        .and_then(|f| f.rsplit(' ').next()?.parse().ok())
+        .unwrap_or(0);
+    Some(TestCounts { ran: passed + field(" failed"), filtered_out: field(" filtered out") })
+}
+
+/// The inverse of [`test_harness_args`]: recover `--run <pattern>` from an argv
+/// that was already built for the native harness.
+///
+/// The wasm leg does not take argv — it selects at synthesis (#2085) — so the
+/// paths that carry only the built argv (the snapshot-accept loop) need the
+/// pattern back. Kept adjacent to its producer so the two cannot drift.
+pub fn harness_filter(program_args: &[String]) -> Option<&str> {
+    program_args.iter().find(|a| *a != "--nocapture").map(String::as_str)
+}
+
 /// Report one failing test file as a STRUCTURED record: the assertion's `.almd`
 /// site, expected/found, and a real diff for multi-line strings, lists and
 /// records. Falls back to the raw captured output when nothing parses — a
@@ -379,10 +467,13 @@ fn strip_libtest_progress(l: &str) -> &str {
     if !l.starts_with("test ") {
         return l;
     }
-    match l.find(" ... Error: ") {
-        Some(pos) => &l[pos + " ... ".len()..],
-        None => l,
-    }
+    // Three interleavings reach here: `... Error:` (the fragment flushed
+    // before the abort), `... okError:` (the PREVIOUS test's verdict flushed
+    // without its newline — one queue run, PR #2038), and the plain line.
+    let Some(pos) = l.find(" ... ") else { return l };
+    let tail = &l[pos + " ... ".len()..];
+    let tail = tail.strip_prefix("ok").filter(|t| t.starts_with("Error: ")).unwrap_or(tail);
+    if tail.starts_with("Error: ") { tail } else { l }
 }
 
 /// The `  key: value` tail of a T18 block. `expected` ends where `  found: `
@@ -629,6 +720,52 @@ fn lcs_diff(a: &[String], b: &[String]) -> Vec<(char, String)> {
 }
 
 #[cfg(test)]
+mod counts_tests {
+    use super::{libtest_counts, TestCounts};
+
+    #[test]
+    fn a_plain_pass_reports_what_ran() {
+        let out = "running 2 tests\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n";
+        assert_eq!(libtest_counts(out), Some(TestCounts { ran: 2, filtered_out: 0 }));
+    }
+
+    /// The distinction the whole issue turns on: zero ran, but a pattern is why.
+    #[test]
+    fn a_filtered_run_reports_what_it_excluded() {
+        let out = "running 0 tests\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s\n";
+        let counts = libtest_counts(out).unwrap();
+        assert_eq!(counts, TestCounts { ran: 0, filtered_out: 2 });
+        assert!(!counts.found_nothing(), "a filter excluding everything is not an empty run");
+    }
+
+    #[test]
+    fn a_failing_run_still_counts_the_tests_that_ran() {
+        let out = "running 2 tests\ntest result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n";
+        assert_eq!(libtest_counts(out), Some(TestCounts { ran: 2, filtered_out: 0 }));
+    }
+
+    /// A binary that dies before libtest prints its tally leaves no count to
+    /// read; inventing one would be worse than reporting zero.
+    #[test]
+    fn a_run_without_a_summary_line_has_no_counts() {
+        assert_eq!(libtest_counts("running 1 test\nthread panicked\n"), None);
+    }
+
+    #[test]
+    fn nothing_found_is_distinct_from_nothing_selected() {
+        assert!(TestCounts { ran: 0, filtered_out: 0 }.found_nothing());
+        assert!(!TestCounts { ran: 1, filtered_out: 0 }.found_nothing());
+    }
+
+    #[test]
+    fn the_summary_pluralizes_and_mentions_the_filter_only_when_it_bit() {
+        assert_eq!(TestCounts { ran: 1, filtered_out: 0 }.summary(1), "1 test in 1 file");
+        assert_eq!(TestCounts { ran: 4, filtered_out: 0 }.summary(2), "4 tests in 2 files");
+        assert_eq!(TestCounts { ran: 0, filtered_out: 3 }.summary(1), "0 tests in 1 file (3 filtered out)");
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -699,6 +836,15 @@ mod tests {
         assert!(r.contains("accept: snapshot drift — run `almide test --update-snapshots plain_test.almd`"), "{r}");
         // A program line that merely mentions the words is not a header.
         assert!(parse("f.almd", "", "note: Error: snapshot mismatch is what it prints\n").is_empty());
+        // The previous test's `ok` verdict flushed without its newline and the
+        // header followed it directly (one queue run, PR #2038).
+        let glued = "running 3 tests\ntest tests::__test_a ... okError: snapshot mismatch\n  at: line 10\n  expected: item 1\nitem 2\n  found: item 1\nitem 2\nitem 3\n";
+        let fs = parse("plain_test.almd", "", glued);
+        assert_eq!(fs.len(), 1, "{fs:?}");
+        assert_eq!(fs[0].line, Some(10));
+        assert!(fs[0].render().contains("accept: snapshot drift"), "{}", fs[0].render());
+        // `test x ... ok` alone is a verdict line, not a header.
+        assert!(parse("f.almd", "", "test tests::__test_a ... ok\n").is_empty());
     }
 
     #[test]

@@ -34,6 +34,7 @@ pub mod charge_probe;
 pub mod concat_to_append;
 pub mod coown_names;
 pub mod heap_cap;
+pub mod host_exports;
 pub mod lower;
 pub(crate) mod mir_wellformed;
 pub mod native_result_rewrite;

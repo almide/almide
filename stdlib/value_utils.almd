@@ -55,10 +55,18 @@ fn __vu_sel(v: Value, keys: List[String], want: Bool) -> Value = {
   dst
 }
 
-fn value_pick(v: Value, keys: List[String]) -> Value = if prim.load32(prim.handle(v) + 4) == 6 then __vu_sel(v, keys, true)
+fn value_pick(v: Value, keys: List[String]) -> Value = if prim.load32(prim.handle(v) + 4) == 6 then __vu_sel(
+  v,
+  keys,
+  true,
+)
 else v
 
-fn value_omit(v: Value, keys: List[String]) -> Value = if prim.load32(prim.handle(v) + 4) == 6 then __vu_sel(v, keys, false)
+fn value_omit(v: Value, keys: List[String]) -> Value = if prim.load32(prim.handle(v) + 4) == 6 then __vu_sel(
+  v,
+  keys,
+  false,
+)
 else v
 
 // snake_case → camelCase: '_' drops and capitalizes the NEXT ASCII lowercase

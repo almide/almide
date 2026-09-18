@@ -61,12 +61,15 @@ pub struct MatrixShapeSpecPass;
 impl NanoPass for MatrixShapeSpecPass {
     fn name(&self) -> &str { "MatrixShapeSpec" }
     fn targets(&self) -> Option<Vec<Target>> { Some(vec![Target::Rust]) }
+
+    /// Unrolls small-shape matmuls while they are still structural calls.
+    fn depends_on(&self) -> Vec<&'static str> { vec!["EggSaturation"] }
+    fn run_before(&self) -> Vec<&'static str> { vec!["IntrinsicLowering", "StdlibLowering"] }
     // The small-shape unrolls type-expect the fused matrix forms
     // EggSaturation produces — without it, 4 matrix fusion spec files fail
     // rustc (E0308, AlmideRcCow vs AlmideMatrix). Found by the #912 pass-ordering
     // lens round 1: the dep was real but undeclared; declaring it turns the
     // late rustc refusal into an immediate pipeline panic.
-    fn depends_on(&self) -> Vec<&'static str> { vec!["EggSaturation"] }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         let mut changed = false;

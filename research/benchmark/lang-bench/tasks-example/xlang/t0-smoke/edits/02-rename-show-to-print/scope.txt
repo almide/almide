@@ -1,0 +1,2 @@
+# files this edit may touch (glob per line; File.fnmatch with FNM_PATHNAME)
+main.*

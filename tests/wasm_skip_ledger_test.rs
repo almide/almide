@@ -14,6 +14,14 @@
 //! Adding a genuinely native-only test: put its file in [`GENUINE_SKIPS`] with
 //! the category. Adding one because the wasm leg walls: don't — fix the wall,
 //! or the ledger will fail and say so.
+//!
+//! This ledger is blind to the OTHER way a file fails to reach the wasm leg,
+//! and by construction: a renderer WALL carries no marker, so it appears in no
+//! row here. Four such files were running nowhere on wasm with nothing red
+//! (#2121). Those are registered in `tests/wasm_test_lane_wall_test.rs`
+//! (`TEST_LANE_WALLS`), shrink-only in both directions, and the two registers
+//! must stay disjoint — a file is either something wasm cannot do, or subset
+//! debt, never both.
 
 use std::path::{Path, PathBuf};
 
@@ -47,6 +55,12 @@ const GENUINE_SKIPS: &[(&str, SkipReason)] = &[
     ("spec/stdlib/net_test.almd", SkipReason::NativeOnlyApi),
     ("spec/stdlib/process_ext_test.almd", SkipReason::NativeOnlyApi),
     ("spec/stdlib/process_exec_status_test.almd", SkipReason::NativeOnlyApi),
+    // #2121: this one had NO marker and no row — its tests simply walled and
+    // the lane reported a benign skip. `process.exec` has no wasm surface at
+    // all (#1423, proofs/target-availability.toml) and `almide build --target
+    // wasm` refuses the same program, so it is a platform limit like its two
+    // siblings above, not the subset debt in proofs/wasm-test-walls.txt.
+    ("spec/stdlib/process_timeout_test.almd", SkipReason::NativeOnlyApi),
     // The status twins run on the embedded lane (#1710 increment 3,
     // spec/embedded_cross pins them) but the TEST harness's wasm lane is
     // the incumbent brick, which has no http capability — retires with

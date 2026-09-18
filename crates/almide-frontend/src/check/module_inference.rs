@@ -241,8 +241,29 @@ impl Checker {
 
     /// Constrain an effect fn body against its return type signature.
     /// Effect fns accept: Unit body (control-flow returns), unwrapped T, or full Result[T, E].
-    fn constrain_effect_body(&mut self, name: &str, ret_ty: &Ty, body_ty: Ty) {
+    fn constrain_effect_body(&mut self, name: &str, ret_ty: &Ty, body_ty: Ty, body: &ast::Expr) {
         let body_resolved = resolve_ty(&body_ty, &self.uf);
+        // ADR-0008 / #2182: a Result-typed tail leaf of a fn declared `-> T`
+        // is implicit propagation — the auto-unwrap below is RECOVERY (so one
+        // error does not cascade), never acceptance. Queued before the Unit
+        // early-return: a block whose tail `if` carries the Result on its
+        // `else` types as Unit (the `if` takes its `then` arm's type) and
+        // slipped through here. `-> T` with T = Unit discards the value
+        // (E042); any other T uses it (E041). The `-> T!` marker fn keeps its
+        // lifted tail (ADR-0002 Phase 1b) — `auto_unwrap` is effect-only.
+        if self.env.auto_unwrap {
+            if ret_ty.is_result() {
+                // A Result-typed tail leaf of a fn declared `-> Result[..]` IS
+                // the return value, not a propagation — withdraw what the arm
+                // join / `if` comparison queued for it. Before the Unit
+                // early-return: the join of a stripped arm and a block-bodied
+                // `ok(())` arm resolves to Unit and would skip the withdrawal.
+                self.unqueue_implicit_prop_leaves(body);
+            } else {
+                let must_use = resolve_ty(ret_ty, &self.uf) == Ty::Unit;
+                self.queue_implicit_prop_leaves(body, "of this fn's tail value", must_use);
+            }
+        }
         if body_resolved == Ty::Unit { return; } // while loops, guard patterns return via control flow
         if let Ty::Applied(crate::types::TypeConstructorId::Result, args) = ret_ty {
             // ret_ty is Result[T, E]: body can be Result[T, E] or unwrapped T
@@ -325,6 +346,11 @@ impl Checker {
     fn check_fn_decl(&mut self, name: &str, decl: FnToCheck<'_>) {
         let FnToCheck { params, return_type, body, effect, generics } = decl;
         self.env.push_scope();
+        // `mutable_vars` is keyed by NAME, so a `var` in one body must not
+        // outlive it: the fan capture check (E008) refused a `let arms` in
+        // one fn because a callee had a `var arms` (#2242). Restore the set
+        // the fn entered with (top-level `var`s) on the way out.
+        let outer_mutable = self.env.mutable_vars.clone();
         let shadowed_generics = self.enter_generics(generics);
         // A bare `self` first param is sugar for `self: Self` (see
         // registration.rs's matching fix). `Self` only stays an unresolved
@@ -369,7 +395,7 @@ impl Checker {
         // lowering wraps the T-typed exits in ok(...).
         let fallible_marker = matches!(return_type, ast::TypeExpr::Generic { name: g, .. } if g.as_str() == "!");
         if effect.unwrap_or(false) || fallible_marker {
-            self.constrain_effect_body(name, &ret_ty, body_ity);
+            self.constrain_effect_body(name, &ret_ty, body_ity, body);
         } else {
             // Capture the trailing `let` binding name (if any) to specialize
             // the Unit-leak E001 try: snippet downstream.
@@ -378,6 +404,7 @@ impl Checker {
         }
         self.env.current_ret = prev.0; self.env.can_call_effect = prev.1; self.env.auto_unwrap = prev.2; self.env.lambda_depth = prev.3;
         self.exit_generics(generics, shadowed_generics);
+        self.env.mutable_vars = outer_mutable;
         self.env.pop_scope();
     }
 
@@ -457,6 +484,7 @@ impl Checker {
     fn check_decl_test(&mut self, body: &mut ast::Expr, where_clauses: &Vec<ast::TestWhere>) {
         let wcs = where_clauses.clone();
         self.env.push_scope();
+        let outer_mutable = self.env.mutable_vars.clone();
         let prev_call = self.env.can_call_effect; self.env.can_call_effect = true;
         let prev_test = self.env.in_test_block; self.env.in_test_block = true;
         let mut seen_binds = std::collections::HashMap::new();
@@ -464,6 +492,7 @@ impl Checker {
         self.infer_expr(body);
         self.env.in_test_block = prev_test;
         self.env.can_call_effect = prev_call;
+        self.env.mutable_vars = outer_mutable;
         self.env.pop_scope();
     }
 
@@ -490,7 +519,7 @@ impl Checker {
         // reads the prefixed key and gets `Ty::Unknown`.
         let prefixed_key = self.current_module_prefix.as_ref()
             .map(|p| sym(&format!("{}.{}", p, name)));
-        debug_trace("TOPLET", || format!(
+        debug_trace("ALMIDE_TOPLET_DEBUG", || format!(
             "refresh: name={} prefix={:?} resolved={:?} existing_prefixed={:?}",
             name, self.current_module_prefix, resolved,
             prefixed_key.as_ref().map(|k| self.env.top_lets.get(k))));

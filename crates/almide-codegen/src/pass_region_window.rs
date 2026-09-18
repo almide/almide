@@ -72,7 +72,7 @@ impl NanoPass for RegionWindowPass {
     }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
-        if std::env::var_os("ALMIDE_REGION_OFF").is_some() {
+        if almide_base::env::flag("ALMIDE_REGION_OFF") {
             return PassResult { program, changed: false };
         }
         let changed = rewrite_windows(&mut program);
@@ -130,7 +130,7 @@ fn region_pure_fns(program: &IrProgram, cx: &mut Cx) {
             break;
         }
     }
-    if std::env::var_os("ALMIDE_REGION_DEBUG").is_some() {
+    if almide_base::env::flag("ALMIDE_REGION_DEBUG") {
         let mut names: Vec<&str> = pure.iter().map(|n| n.as_str()).collect();
         names.sort_unstable();
         eprintln!("[region:native] pure fns: {}", names.join(" "));
@@ -380,7 +380,7 @@ fn plan_twins(program: &IrProgram, cx: &Cx, sites: Vec<Site>) -> Option<TwinPlan
     if !closure_typable(program, cx, &fns, &enums) {
         return None;
     }
-    if std::env::var_os("ALMIDE_REGION_DEBUG").is_some() {
+    if almide_base::env::flag("ALMIDE_REGION_DEBUG") {
         for s in &admitted {
             eprintln!("[region:native] window {}({}(..)) over {}", s.consume, s.produce, s.heap_ty);
         }

@@ -76,6 +76,15 @@ impl LowerCtx {
                         return self.lower_mutable_global_index_assign(target, index, value, g);
                     }
                 }
+                // A HEAP String/Value element (`xs[0] = "Z"`, the C-136 case-5 shape) takes
+                // the functional REBIND `xs = list.set(xs, i, v)` BEFORE any COW guard (#2260):
+                // the rc-correct `_str`/`_value` twin copies and the Assign path swaps the
+                // local. NO MakeUnique first — as for the heap FIELD write below, the guard
+                // composed with the Assign's drop-old into an rc-underflow trap on an alias
+                // (`let ys = xs; xs[1] = "B"` trapped on the wasm test lane, `List[Int]` passed).
+                if matches!(&value.ty, Ty::String) || crate::lower::is_value_ty(&value.ty) {
+                    return self.lower_heap_elem_index_rebind(target, index, value);
+                }
                 // COW-guard the buffer (rebinds the local to a unique copy if shared), then ACTUALLY
                 // STORE: `xs[i] = v` → `i64.store($elem_addr(handle(xs), i), v)`. WITHOUT the store the
                 // assignment lowered to ONLY the MakeUnique guard (a silent no-op — `xs[1] = 99` never
@@ -107,14 +116,6 @@ impl LowerCtx {
                 if !stored {
                     self.ops.truncate(ops_mark);
                     self.live_heap_handles.truncate(lhh_mark);
-                    // A HEAP String/Value element (`xs[0] = "Z"` — the C-136 case-5
-                    // shape): desugar to the FUNCTIONAL rebind `xs = list.set(xs, i, v)`
-                    // — the router picks the registered rc-correct `_str`/`_value` twin
-                    // (rc_dec the replaced element + own the new), and the ordinary
-                    // Assign machinery swaps the local (the map-insert discipline).
-                    if matches!(&value.ty, Ty::String) || crate::lower::is_value_ty(&value.ty) {
-                        return self.lower_heap_elem_index_rebind(target, index, value);
-                    }
                     // STRICT value mode: an elided element write is an EXECUTABLE silent
                     // no-op (`xs[0] = "Z"` left the list unchanged on the verified default
                     // while native stored). REFUSE — the fn walls, v0 emits correct bytes.
@@ -475,7 +476,7 @@ impl LowerCtx {
                 // a Unit effect call, a nested branch, or a deferred value whose calls
                 // we capture (its value is discarded in statement position).
                 IrExprKind::Block { stmts, expr: tail } => {
-                    if std::env::var_os("ALMIDE_DBG_WHILE").is_some() {
+                    if almide_base::env::flag("ALMIDE_DBG_WHILE") {
                         eprintln!("STMT-BLOCK lowering ({} stmts, tail={})", stmts.len(), tail.is_some());
                     }
                     for s in stmts {

@@ -47,6 +47,9 @@ impl NanoPass for EffectInferencePass {
     fn name(&self) -> &str { "EffectInference" }
     fn targets(&self) -> Option<Vec<Target>> { None } // All targets
 
+    /// An analysis over Module calls, taken before the lowerings replace them.
+    fn run_before(&self) -> Vec<&'static str> { vec!["StdlibLowering", "ResultPropagation"] }
+
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         let mut effect_map = EffectMap::default();
 
@@ -60,7 +63,7 @@ impl NanoPass for EffectInferencePass {
         close_effects_transitively(&call_graph, &mut effect_map);
 
         // Debug output
-        if std::env::var("ALMIDE_DEBUG_EFFECTS").is_ok() {
+        if almide_base::env::flag("ALMIDE_DEBUG_EFFECTS") {
             debug_print_effects(&effect_map);
         }
 

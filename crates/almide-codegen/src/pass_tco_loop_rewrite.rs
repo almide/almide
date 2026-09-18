@@ -4,7 +4,6 @@ fn rewrite_to_loop(
     var_table: &mut VarTable,
     infer_bindings: &mut std::collections::BTreeSet<VarId>,
     tco_owned_params: &mut HashSet<VarId>,
-    tco_rewritten_fns: &mut HashSet<almide_base::intern::Sym>,
     always_clone_vars: &HashSet<VarId>,
 ) -> HashSet<usize> {
     let fn_name = func.name.clone();
@@ -35,7 +34,9 @@ fn rewrite_to_loop(
     let mut reverted_to_own: HashSet<usize> = HashSet::new();
     for (i, param) in func.params.iter_mut().enumerate() {
         var_table.entries[param.var.0 as usize].mutability = Mutability::Var;
-        let keep_borrow = matches!(param.ty, Ty::Bytes)
+        // A borrowed callable (`f: &dyn Fn`, #2288) is a `Copy` reference the
+        // loop can carry across iterations exactly like the `&Vec<u8>`.
+        let keep_borrow = matches!(param.ty, Ty::Bytes | Ty::Fn { .. })
             && !matches!(param.borrow, almide_ir::ParamBorrow::Own);
         if keep_borrow {
             bytes_borrowed_params.insert(i);
@@ -49,7 +50,6 @@ fn rewrite_to_loop(
             param.borrow = almide_ir::ParamBorrow::Own;
         }
     }
-    TCO_BORROWED_PARAMS.with(|s| *s.borrow_mut() = bytes_borrowed_params.clone());
 
     // Allocate a result variable
     let result_var = var_table.alloc(
@@ -104,7 +104,7 @@ fn rewrite_to_loop(
     // those keep the pre-existing (bounded-per-call) leak rather than risk a
     // double-free now that frees are live.
     let dec_params: Vec<VarId> = tco_managed_params(&func.body, &params, fn_name.as_str());
-    if std::env::var("ALMIDE_TCO_DEBUG").is_ok() {
+    if almide_base::env::flag("ALMIDE_TCO_DEBUG") {
         let names = |vs: &[VarId]| vs.iter().map(|v| var_table.get(*v).name.as_str().to_string()).collect::<Vec<_>>();
         eprintln!("[tco] {} dec_params={:?}", fn_name.as_str(), names(&dec_params));
     }
@@ -136,11 +136,10 @@ fn rewrite_to_loop(
             is_effect,
             dec_params: &dec_params,
             owned_params: &owned_params,
+            borrowed_params: &bytes_borrowed_params,
         },
     );
     tco_owned_params.extend(owned_params.iter().copied());
-    // #1130: the exemption is a promise about THIS body — record its scope.
-    tco_rewritten_fns.insert(func.name);
 
     // Build the default value for the result variable
     let default_val = default_for_type(&ret_ty);
@@ -325,6 +324,10 @@ struct TailFrame<'a> {
     is_effect: bool,
     dec_params: &'a [VarId],
     owned_params: &'a HashSet<VarId>,
+    /// Param positions whose borrow is preserved across loop iterations
+    /// (currently: `Bytes` params) — a tail-call arg there keeps its
+    /// `Borrow` wrapper instead of being stripped to the owned form.
+    borrowed_params: &'a HashSet<usize>,
 }
 
 /// Rewrite an expression in tail position:
@@ -333,7 +336,7 @@ struct TailFrame<'a> {
 /// - Block: recurse into trailing expr
 /// - Anything else (base case): assign to result var, break
 fn rewrite_tail_expr(expr: IrExpr, f: &TailFrame<'_>) -> IrExpr {
-    let TailFrame { fn_name, params: _, temps: _, result_var, is_effect, dec_params, owned_params } = *f;
+    let TailFrame { fn_name, result_var, is_effect, dec_params, owned_params, .. } = *f;
     match expr.kind {
         // Self-recursive call in tail position -> reassign params and continue
         IrExprKind::Call { target: CallTarget::Named { name }, args, .. } if name == fn_name => {
@@ -533,7 +536,7 @@ fn movable_accumulators(
 }
 
 fn emit_tail_call_replacement(args: Vec<IrExpr>, f: &TailFrame<'_>) -> IrExpr {
-    let TailFrame { params, temps, dec_params, owned_params, .. } = *f;
+    let TailFrame { params, temps, dec_params, owned_params, borrowed_params, .. } = *f;
     let mut stmts: Vec<IrStmt> = Vec::new();
 
     // F5 (#527): an IDENTITY CARRY — argument i is the bare Var of param i —
@@ -550,8 +553,7 @@ fn emit_tail_call_replacement(args: Vec<IrExpr>, f: &TailFrame<'_>) -> IrExpr {
     // (e.g. Bytes borrow preserved across iterations).
     let args: Vec<Option<IrExpr>> = args.into_iter().enumerate().map(|(i, arg)| {
         if identity_carry[i] { return None; }
-        let keep = TCO_BORROWED_PARAMS.with(|s| s.borrow().contains(&i));
-        Some(if keep { arg } else { strip_borrow(arg) })
+        Some(if borrowed_params.contains(&i) { arg } else { strip_borrow(arg) })
     }).collect();
 
     let moved = movable_accumulators(&args, params, &identity_carry, owned_params);

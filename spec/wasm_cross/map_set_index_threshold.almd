@@ -6,9 +6,16 @@
 // answers across growth doublings and relocations, an alias bound before a
 // write, functional copies, order-insensitive equality, set algebra — must
 // print the same bytes on native, the structural leg and the incumbent.
-fn checksum(m: Map[Int, Int]) -> Int = map.fold(m, 0, (acc, k, v) => (acc * 31 + k * 7 + v) % 1000000007)
+fn checksum(m: Map[Int, Int]) -> Int = map.fold(
+  m,
+  0,
+  (acc, k, v) => (acc * 31 + k * 7 + v) % 1000000007,
+)
 
-fn render_keys(m: Map[Int, Int]) -> String = list.join(list.map(map.keys(m), (k) => int.to_string(k)), ",")
+fn render_keys(m: Map[Int, Int]) -> String = list.join(
+  list.map(map.keys(m), (k) => int.to_string(k)),
+  ",",
+)
 
 fn main() -> Unit = {
   // A. Int keys through five capacity doublings, overwrites interleaved;
@@ -30,7 +37,10 @@ fn main() -> Unit = {
     }
   }
   println("A.len=" + int.to_string(map.len(m)) + " hits=" + int.to_string(hits) + " misses=" + int.to_string(misses) + " sum=" + int.to_string(checksum(m)))
-  println("A.k0=" + int.to_string(map.get_or(m, 0, 0 - 1)) + " k400=" + int.to_string(map.get_or(m, 400, 0 - 1)) + " k401=" + int.to_string(map.get_or(m, 401, 0 - 1)) + " first5=" + list.join(list.map(list.take(map.keys(m), 5), (k) => int.to_string(k)), ","))
+  println("A.k0=" + int.to_string(map.get_or(m, 0, 0 - 1)) + " k400=" + int.to_string(map.get_or(m, 400, 0 - 1)) + " k401=" + int.to_string(map.get_or(m, 401, 0 - 1)) + " first5=" + list.join(
+    list.map(list.take(map.keys(m), 5), (k) => int.to_string(k)),
+    ",",
+  ))
   // B. an alias bound mid-build keeps its entries; the build continues on
   // the functional copy and both stay answerable
   var b: Map[Int, Int] = map.new()
@@ -41,7 +51,13 @@ fn main() -> Unit = {
   for i in 40..<120 {
     b[i] = i * i
   }
-  println("B.snap=" + int.to_string(map.len(snap)) + " b=" + int.to_string(map.len(b)) + " snap.has39=" + (if map.contains(snap, 39) then "y" else "n") + " snap.has40=" + (if map.contains(snap, 40) then "y" else "n") + " b.has119=" + (if map.contains(b, 119) then "y" else "n") + " b.119=" + int.to_string(map.get_or(b, 119, 0 - 1)))
+  println("B.snap=" + int.to_string(map.len(snap)) + " b=" + int.to_string(map.len(b)) + " snap.has39=" + (if map.contains(
+    snap,
+    39,
+  ) then "y" else "n") + " snap.has40=" + (if map.contains(snap, 40) then "y" else "n") + " b.has119=" + (if map.contains(
+    b,
+    119,
+  ) then "y" else "n") + " b.119=" + int.to_string(map.get_or(b, 119, 0 - 1)))
   // C. functional remove past the threshold, then lookups on both blocks
   let c = map.remove(b, 50)
   println("C.b=" + int.to_string(map.len(b)) + " c=" + int.to_string(map.len(c)) + " b.50=" + int.to_string(map.get_or(b, 50, 0 - 1)) + " c.50=" + int.to_string(map.get_or(c, 50, 0 - 1)) + " c.51=" + int.to_string(map.get_or(c, 51, 0 - 1)) + " c.sum=" + int.to_string(checksum(c)))
@@ -69,7 +85,10 @@ fn main() -> Unit = {
       shits = shits
     }
   }
-  println("E.len=" + int.to_string(map.len(s)) + " hits=" + int.to_string(shits) + " key0=" + int.to_string(map.get_or(s, "key0", 0 - 1)) + " key149=" + int.to_string(map.get_or(s, "key149", 0 - 1)) + " key150=" + int.to_string(map.get_or(s, "key150", 0 - 1)) + " kex=" + int.to_string(map.get_or(s, "kex0", 0 - 1)) + " first3=" + list.join(list.take(map.keys(s), 3), ","))
+  println("E.len=" + int.to_string(map.len(s)) + " hits=" + int.to_string(shits) + " key0=" + int.to_string(map.get_or(s, "key0", 0 - 1)) + " key149=" + int.to_string(map.get_or(s, "key149", 0 - 1)) + " key150=" + int.to_string(map.get_or(s, "key150", 0 - 1)) + " kex=" + int.to_string(map.get_or(s, "kex0", 0 - 1)) + " first3=" + list.join(
+    list.take(map.keys(s), 3),
+    ",",
+  ))
   // F. the counter idiom (the value reads the map being written) at scale
   var f: Map[String, Int] = map.new()
   for i in 0..<500 {
@@ -98,13 +117,19 @@ fn main() -> Unit = {
   let gs = set.symmetric_difference(g1, g2)
   println("G.g1=" + int.to_string(set.len(g1)) + " hits=" + int.to_string(ghits) + " u=" + int.to_string(set.len(gu)) + " i=" + int.to_string(set.len(gi)) + " d=" + int.to_string(set.len(gd)) + " s=" + int.to_string(set.len(gs)) + " sub=" + (if set.len(set.intersection(gi, g1)) == set.len(gi) then "y" else "n") + " disj=" + (if set.len(set.intersection(gd, g2)) == 0 then "y" else "n"))
   let g1r = set.from_list(list.reverse(set.to_list(g1)))
-  println("G.eq=" + (if g1 == g1r then "y" else "n") + " first5=" + list.join(list.map(list.take(set.to_list(gu), 5), (x) => int.to_string(x)), ","))
+  println("G.eq=" + (if g1 == g1r then "y" else "n") + " first5=" + list.join(
+    list.map(list.take(set.to_list(gu), 5), (x) => int.to_string(x)),
+    ",",
+  ))
   // H. a String set built by functional insert (a fresh block per step)
   var h: Set[String] = set.new()
   for i in 0..<40 {
     h = set.insert(h, "s" + int.to_string(i % 25))
   }
-  println("H.len=" + int.to_string(set.len(h)) + " s24=" + (if set.contains(h, "s24") then "y" else "n") + " s25=" + (if set.contains(h, "s25") then "y" else "n") + " first3=" + list.join(list.take(set.to_list(h), 3), ","))
+  println("H.len=" + int.to_string(set.len(h)) + " s24=" + (if set.contains(h, "s24") then "y" else "n") + " s25=" + (if set.contains(
+    h,
+    "s25",
+  ) then "y" else "n") + " first3=" + list.join(list.take(set.to_list(h), 3), ","))
   // I. upsert / update / merge on a large receiver
   var u: Map[Int, Int] = map.from_list(list.map(list.range(0, 100), (i) => (i, i)))
   u = map.upsert(u, 250, 1, (v) => v + 1)

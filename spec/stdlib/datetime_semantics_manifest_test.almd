@@ -66,14 +66,20 @@ test "datetime.month unit=civil-field" {
 }
 
 test "datetime.now unit=second" {
-  assert_eq("${if datetime.now() > 1700000000 and datetime.now() < 100000000000 then "second" else "other"}", "second")
+  assert_eq(
+    "${if datetime.now() > 1700000000 and datetime.now() < 100000000000 then "second" else "other"}",
+    "second",
+  )
 }
 
 test "datetime.parse_iso unit=second" {
-  assert_eq("${match datetime.parse_iso("2024-01-15T12:34:56Z") {
-    ok(v) => v,
-    err(_) => -1,
-  }}", "1705322096")
+  assert_eq(
+    "${match datetime.parse_iso("2024-01-15T12:34:56Z") {
+      ok(v) => v,
+      err(_) => -1,
+    }}",
+    "1705322096",
+  )
 }
 
 test "datetime.second unit=civil-field" {

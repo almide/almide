@@ -1,4 +1,37 @@
 
+/// The `prim.*` fs floors that take a #2206 CALL HEAD: every spelling, with the
+/// floor it reaches. `prim.<floor>` names the floor's own call (`fs.read_text`,
+/// `fs.write`, `fs.list_dir`, `fs.mkdir_p`, `fs.remove_all`); `prim.<floor>_as(…,
+/// call)` names the composite it serves (`fs.read_lines`, `fs.walk`, `fs.remove`,
+/// …); and, for the two FILE floors only, `prim.<floor>_as_pair(…, call, first,
+/// second)` names both paths of a two-path call (`fs.copy(src, dst)`) in message
+/// order. Every spelling is a literal here — `scripts/check-intrinsic-boundary.sh`
+/// proves each `@intrinsic("almide_rt_prim_<name>")` in stdlib/prim.almd has a
+/// lowering by finding its name in this crate.
+pub(crate) const FS_FLOOR_PRIMS: &[(&str, &str)] = &[
+    ("read_text_file", "read_text_file"),
+    ("read_text_file_as", "read_text_file"),
+    ("read_text_file_as_pair", "read_text_file"),
+    ("read_bytes_file", "read_bytes_file"),
+    ("read_bytes_file_as", "read_bytes_file"),
+    ("write_text_file", "write_text_file"),
+    ("write_text_file_as", "write_text_file"),
+    ("write_text_file_as_pair", "write_text_file"),
+    ("read_dir", "read_dir"),
+    ("read_dir_as", "read_dir"),
+    ("make_dir", "make_dir"),
+    ("make_dir_as", "make_dir"),
+    ("remove_all", "remove_all"),
+    ("remove_all_as", "remove_all"),
+];
+
+/// The floor a `prim.*` name reaches — `None` for a name that is not an fs floor
+/// spelling. ONE decoder: the lowering router, the floor lowering and the
+/// can-err analysis all read it, so a twin is known everywhere at once.
+pub(crate) fn fs_floor_base(func: &str) -> Option<&'static str> {
+    FS_FLOOR_PRIMS.iter().find(|(name, _)| *name == func).map(|(_, floor)| *floor)
+}
+
 /// The closed set of primitive-floor operations (the trusted, wasm-spec-faithful
 /// surface the self-hosted runtime is written over).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -180,6 +213,11 @@ pub enum PrimKind {
     /// `str::from_utf8` table, the one `bytes.is_valid_utf8` replicates) and builds
     /// `Err("stream did not contain valid UTF-8")` on failure, byte-matching native
     /// `std::fs::read_to_string`; a String never carries invalid UTF-8 out of this floor.
+    /// #2206 — `args` is `[path]`, `[path, call]` or `[path, call, first, second]`: the
+    /// call-head twins (`prim.read_text_file_as` / `_as_pair`) hand the floor the name of
+    /// the fs call it serves (a BORROWED `String`) and, for a two-path call, both operands
+    /// in message order, so the `fs.<call>("<operand>"): ` head is composed by the floor.
+    /// A plain `[path]` names `fs.read_text` / `fs.read_bytes` from the static prefix rows.
     ReadTextFile,
     /// [`ReadTextFile`]'s raw-bytes twin (`prim.read_bytes_file`, reached by the self-hosted
     /// `fs.read_bytes_raw` / `fs.read_bytes` / `_if_exists` kin): the SAME WASI floor, Result
@@ -205,6 +243,8 @@ pub enum PrimKind {
     /// FsRead — never accept-but-unsafe. Its dst is a heap Ptr (like [`ReadTextFile`]), so the
     /// ownership certificate emits an `i` (alloc) for it, balanced by the caller's scope-end
     /// recursive drop (or a heap-return move-out).
+    /// #2206 — `args` is `[path]` or `[path, call]` (`prim.read_dir_as`: the head of the
+    /// call served — `fs.walk`, `fs.glob`, `fs.remove`; see [`ReadTextFile`]).
     ReadDir,
     /// The WASI `path_open(O_CREAT|O_TRUNC)` + `fd_write` file-WRITE sequence, packaged as ONE
     /// high-level HEAP-RESULT prim — `args = [path, content]` (both BORROWED `String` handles,
@@ -224,6 +264,8 @@ pub enum PrimKind {
     /// declares FsWrite; never accept-but-unsafe. Its dst is a heap Ptr (like [`ReadTextFile`]),
     /// so the ownership certificate emits an `i` (alloc) for it, balanced by the caller's scope-end
     /// flat `DropListStr` (sound for BOTH arms given the `len@4 = 0` Ok convention above).
+    /// #2206 — `args` is `[path, content]`, `[path, content, call]` or
+    /// `[path, content, call, first, second]` (the call-head twins; see [`ReadTextFile`]).
     WriteTextFile,
     /// The WASI `path_create_directory` recursive-mkdir sequence, packaged as ONE high-level
     /// HEAP-RESULT prim — `args = [path]` (a BORROWED `String` handle, the caller still owns
@@ -238,6 +280,7 @@ pub enum PrimKind {
     /// false distinction); counted in cap_witness exactly like [`WriteTextFile`]. Its dst is
     /// a heap Ptr, so the ownership certificate emits an `i` (alloc), balanced by the
     /// caller's scope-end flat `DropListStr` (sound for BOTH arms given the `len@4 = 0` Ok).
+    /// #2206 — `args` is `[path]` or `[path, call]` (`prim.make_dir_as`: `fs.create_temp_dir`).
     MakeDir,
     /// The WASI `path_remove_directory` / `path_unlink_file` RECURSIVE-remove sequence, packaged
     /// as ONE high-level HEAP-RESULT prim — `args = [path]` (a BORROWED `String` handle, the
@@ -254,6 +297,7 @@ pub enum PrimKind {
     /// in cap_witness exactly like [`WriteTextFile`]. Its dst is a heap Ptr, so the ownership
     /// certificate emits an `i` (alloc), balanced by the caller's scope-end flat `DropListStr`
     /// (sound for BOTH arms given the `len@4 = 0` Ok).
+    /// #2206 — `args` is `[path]` or `[path, call]` (`prim.remove_all_as`: `fs.remove`).
     RemoveAll,
     /// The WASI `path_filestat_get` existence query, packaged as ONE high-level SCALAR prim —
     /// `args = [path]` (a BORROWED `String` handle, the caller still owns it), dst = a SCALAR

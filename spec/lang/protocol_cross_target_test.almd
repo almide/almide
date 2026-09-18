@@ -160,7 +160,11 @@ test "protocol in fold accumulation" {
   ]
   let total = list.fold(players, 0, (acc, p) => acc + Player.score(p))
   assert_eq(total, 50)
-  let max_score = list.fold(players, 0, (best, p) => if Player.score(p) > best then Player.score(p) else best)
+  let max_score = list.fold(
+    players,
+    0,
+    (best, p) => if Player.score(p) > best then Player.score(p) else best,
+  )
   assert_eq(max_score, 25)
 }
 

@@ -821,7 +821,7 @@ fn register_type_decl_finalize(env: &mut TypeEnv, name: &str, ty: &ast::TypeExpr
         }
     }
     // Record-payload variant cases carry field defaults too (`| Rect { color: String = "" }`) — harvest them from the AST, since the resolved `VariantPayload::Record` keeps only (name, ty).
-    if let ast::TypeExpr::Variant { cases } = ty {
+    if let ast::TypeExpr::Variant { cases, .. } = ty {
         for c in cases {
             if let ast::VariantCase::Record { name: cname, fields } = c {
                 let defs: Vec<Sym> = fields.iter().filter(|f| f.default.is_some()).map(|f| f.name).collect();

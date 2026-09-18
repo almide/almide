@@ -7,12 +7,27 @@ use wasm_encoder::{BlockType, ValType};
 use crate::emitter::Emitter;
 use crate::*;
 
+/// The two orderable shapes a `SliceTy::Named` can be, read off the
+/// TypeTable once so [`emit_named_cmp`](Emitter::emit_named_cmp) branches on a
+/// value rather than holding a borrow of the table across emission.
+enum NamedCmpShape {
+    Record(Vec<(SliceTy, u32)>),
+    Variant(Vec<(u32, Vec<(SliceTy, u32)>)>),
+}
+
 impl Emitter<'_> {
     /// Type-directed total-order compare: consumes (a, b) of `t`'s wasm
     /// type, leaves an i32 whose SIGN is the verdict (only <0 / 0 / >0
     /// is promised). Tuples chain fields, lists are lexicographic with
     /// the shorter-first prefix tiebreak, none < some; floats order by
     /// the sign-flipped bit key (the total order the scalar path uses).
+    ///
+    /// Structural shapes INLINE (they are a finite DAG), and a user `Named`
+    /// type is always a CALL to its one out-of-line `$named_cmp_<ti>` (#2172).
+    /// Calling rather than inlining is what makes a RECURSIVE orderable type
+    /// emit at all — `type Tree: Ord = { v: Int, kids: List[Tree] }` and the
+    /// mutually recursive pair alike — and it is also why a record sorted in
+    /// three places emits its field chain once instead of three times.
     pub(crate) fn emit_val_cmp(&mut self, t: SliceTy) -> Result<(), EmitError> {
         match t {
             INT | FLOAT => {
@@ -183,8 +198,131 @@ impl Emitter<'_> {
                 self.release_i32();
                 self.release_i32();
             }
+            // A user RECORD or VARIANT that declares `: Ord` (#2167). Native
+            // derives the order, so this must match the derive exactly: a
+            // record is lexicographic in FIELD DECLARATION ORDER (the same
+            // chain the Tuple arm above emits — `pack_fields` assigns offsets
+            // in input order, so the def's field list IS declaration order),
+            // and a variant compares its TAG first and the payload of the
+            // matching case second (the general form of the Option arm's
+            // none < some). C-053 has claimed both since 0.24.0; nothing
+            // executed the claim, and both legs walled it.
+            SliceTy::Named(ti) => {
+                // ALWAYS out-of-line, never inlined at the use site. That is
+                // what lets a type that contains itself emit: the cycle
+                // becomes a call, not an infinite unfolding of the emitter.
+                // It also bounds the hold-pool depth — a mutually recursive
+                // pair (`Node` holding `List[Leaf]` holding `List[Node]`)
+                // exhausted the i32 pool when the first level was inlined.
+                if matches!(
+                    self.work.named_bodies.borrow().get(&(crate::work::NamedOp::Cmp, ti)),
+                    Some(crate::work::DisplayBuild::Failed)
+                ) {
+                    return unsup("cmp-helper-failed");
+                }
+                let idx = self.work.helper(Helper::NamedOp { op: crate::work::NamedOp::Cmp, ti });
+                self.f.instructions().call(idx);
+            }
             other => return unsup(&format!("list-cmp-elem:{other:?}")),
         }
+        Ok(())
+    }
+
+    /// The `SliceTy::Named` body of [`emit_val_cmp`]: consumes (a, b) as
+    /// i32 block addresses, leaves the i32 verdict. Split out for the
+    /// complexity budget.
+    pub(crate) fn emit_named_cmp(&mut self, ti: u32) -> Result<(), EmitError> {
+        let def = match &self.types.def(ti) {
+            crate::types_table::NamedDef::Record(r) => {
+                NamedCmpShape::Record(r.fields.iter().map(|f| (f.ty, f.offset)).collect())
+            }
+            crate::types_table::NamedDef::Variant(v) => NamedCmpShape::Variant(
+                v.cases.iter().map(|c| (c.tag, c.fields.iter().map(|f| (f.ty, f.offset)).collect())).collect(),
+            ),
+            crate::types_table::NamedDef::Excluded => return unsup("cmp-named-excluded"),
+        };
+        match def {
+            NamedCmpShape::Record(fields) => self.emit_field_chain_cmp(&fields),
+            NamedCmpShape::Variant(cases) => self.emit_variant_cmp(&cases),
+        }
+    }
+
+    /// Lexicographic compare of a field list already loaded from two block
+    /// addresses: compare field k, and a non-zero verdict short-circuits.
+    /// Shared by the record shape and each variant case's payload.
+    fn emit_field_chain_cmp(&mut self, fields: &[(SliceTy, u32)]) -> Result<(), EmitError> {
+        let hb = self.hold_i32()?;
+        let ha = self.hold_i32()?;
+        let hc = self.hold_i32()?;
+        self.f.instructions().local_set(hb).local_set(ha);
+        for (n, (fty, off)) in fields.iter().enumerate() {
+            self.f.instructions().local_get(ha);
+            self.load_ty_slot(*fty, *off);
+            self.f.instructions().local_get(hb);
+            self.load_ty_slot(*fty, *off);
+            self.emit_val_cmp(*fty)?;
+            let mut i = self.f.instructions();
+            i.local_tee(hc);
+            if n + 1 < fields.len() {
+                i.i32_eqz().if_(BlockType::Result(ValType::I32));
+            }
+        }
+        let mut i = self.f.instructions();
+        for _ in 0..fields.len().saturating_sub(1) {
+            i.else_();
+            i.local_get(hc);
+            i.end();
+        }
+        // A fieldless record (and a unit variant case) compares equal: there
+        // is nothing left to distinguish once the tag has.
+        if fields.is_empty() {
+            i.i32_const(0);
+        }
+        let _ = i;
+        self.release_i32();
+        self.release_i32();
+        self.release_i32();
+        Ok(())
+    }
+
+    /// Variant order = TAG first, payload second — native's derive compares
+    /// the discriminant and only then the case's fields. Tags are assigned in
+    /// declaration order, so this is `Low < Mid < High` for a unit variant and
+    /// the payload chain for the case both sides landed in.
+    fn emit_variant_cmp(&mut self, cases: &[(u32, Vec<(SliceTy, u32)>)]) -> Result<(), EmitError> {
+        let m = slot_memarg(almide_layout::SUM_TAG);
+        let hb = self.hold_i32()?;
+        let ha = self.hold_i32()?;
+        {
+            let mut i = self.f.instructions();
+            i.local_set(hb).local_set(ha);
+            i.local_get(ha).i32_load(m).local_get(hb).i32_load(m).i32_ne();
+            i.if_(BlockType::Result(ValType::I32));
+            // tags differ: the tag IS the verdict (-1 / 1, unsigned).
+            i.i32_const(-1);
+            i.i32_const(1);
+            i.local_get(ha).i32_load(m).local_get(hb).i32_load(m).i32_lt_u();
+            i.select();
+            i.else_();
+        }
+        // Same tag: dispatch to that case's payload chain. A case with no
+        // fields needs no arm — the trailing 0 covers it.
+        let payload: Vec<&(u32, Vec<(SliceTy, u32)>)> = cases.iter().filter(|(_, fs)| !fs.is_empty()).collect();
+        let arms = payload.len();
+        for (tag, fields) in &payload {
+            self.f.instructions().local_get(ha).i32_load(m).i32_const(*tag as i32).i32_eq();
+            self.f.instructions().if_(BlockType::Result(ValType::I32));
+            self.f.instructions().local_get(ha).local_get(hb);
+            self.emit_field_chain_cmp(fields)?;
+            self.f.instructions().else_();
+        }
+        self.f.instructions().i32_const(0);
+        for _ in 0..arms {
+            self.f.instructions().end();
+        }
+        self.f.instructions().end();
+        self.release_i32();
+        self.release_i32();
         Ok(())
     }
 
@@ -314,6 +452,17 @@ impl Emitter<'_> {
         hn: u32,
     ) -> Result<(), EmitError> {
         let (kstride, vstride) = (k.slot_size() as i32, elem.slot_size() as i32);
+        // A COMPOUND key (#2154) is a freshly built HANDLE per element, and
+        // the key buffers are raw blocks: freeing the winner flat would leak
+        // every key. The winner takes the typed `$drop_list` for the key type
+        // (rc_dec each slot, then free); the loser holds only STALE duplicates
+        // of the same handles, so it keeps the flat free. A scalar key has no
+        // credit to release and both stay flat.
+        let key_release = if self.elem_is_handle(k) {
+            self.dec_fn_of(SliceTy::List(self.types.intern(k)))
+        } else {
+            F_FREE
+        };
         let hkb = self.hold_i32()?;
         let hvb = self.hold_i32()?;
         let hw = self.hold_i32()?;
@@ -414,7 +563,7 @@ impl Emitter<'_> {
             i.end();
             // Keys (both buffers) and the loser vals buffer are
             // sort-private and dead past this point (RC-2).
-            i.local_get(hka).call(F_FREE);
+            i.local_get(hka).call(key_release);
             i.local_get(hkb).call(F_FREE);
             i.local_get(hvb).call(F_FREE);
             i.local_get(hva);

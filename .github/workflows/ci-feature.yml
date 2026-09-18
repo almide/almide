@@ -52,6 +52,26 @@ jobs:
       - name: Build
         run: cargo build --release
 
+      - name: Cache wasmtime tarball
+        uses: actions/cache@v6
+        with:
+          path: wasmtime-v47.0.3-x86_64-linux.tar.xz
+          key: wasmtime-v47.0.3-x86_64-linux
+
+      - name: Install runtime required by cargo tests
+        run: |
+          set -euo pipefail
+          VERSION=v47.0.3
+          TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
+          if ! tar -tf "$TARBALL" >/dev/null 2>&1; then
+            curl --fail --location --retry 5 --retry-all-errors \
+              "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" \
+              --output "$TARBALL"
+          fi
+          tar -xf "$TARBALL"
+          sudo install -m 755 "wasmtime-${VERSION}-x86_64-linux/wasmtime" /usr/local/bin/wasmtime
+          wasmtime --version
+
       - name: Cargo tests
         # Parallel-safe on Unix: the shared build scratch dir is serialized
         # across processes by an advisory flock (src/cli/run.rs BuildDirLock).

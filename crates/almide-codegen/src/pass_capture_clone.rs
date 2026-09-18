@@ -15,11 +15,16 @@
 //! CloneInsertionPass (which runs after) adds .clone() to the Var references.
 //! The net effect: each lambda captures its own clone, original stays alive.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use almide_ir::*;
 use almide_lang::types::Ty;
 use almide_base::intern::Sym;
 use super::pass::{NanoPass, PassResult, Target};
+use super::use_kind::{written_vars, ExplicitBorrows, Site, UseSites};
+
+#[path = "pass_capture_clone_bindings.rs"]
+mod bindings;
+use bindings::{capture_bindings, wrap_fan_with_clones};
 
 #[derive(Debug)]
 pub struct CaptureClonePass;
@@ -30,6 +35,11 @@ impl NanoPass for CaptureClonePass {
     fn targets(&self) -> Option<Vec<Target>> {
         Some(vec![Target::Rust])
     }
+
+    /// Reads the final param borrow modes; CloneInsertion clones the `__cap_*`
+    /// binds it adds.
+    fn depends_on(&self) -> Vec<&'static str> { vec!["BorrowInsertion", "TailCallOpt"] }
+    fn run_before(&self) -> Vec<&'static str> { vec!["CloneInsertion"] }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         // Every VarId this pass allocates is a `__cap_*` clone binding (one
@@ -42,41 +52,27 @@ impl NanoPass for CaptureClonePass {
         // the set once here (before the wrap decision below), and publish it via
         // `codegen_annotations` so the Rust walker emits cell ops. As non-`Copy`
         // values these captures now also need the clone-wrap that `needs_clone_type`
-        // skips for `Copy` — `SHARED_MUT` forces it, and `wrap_lambda_with_clones`
+        // skips for `Copy` — `shared_mut` forces it, and `wrap_lambda_with_clones`
         // adds the `__cap` renames to the set so their reads/writes are cells too.
-        let shared = detect_shared_mut(&program);
-        for v in &shared { program.codegen_annotations.shared_mut_vars.insert(*v); }
-        SHARED_MUT.with(|m| *m.borrow_mut() = shared);
+        let shared_mut = detect_shared_mut(&program);
+        for v in &shared_mut { program.codegen_annotations.shared_mut_vars.insert(*v); }
+        let mut facts = Facts { param_borrows: HashMap::new(), shared_mut, capture_uses: bindings::CaptureUses::default() };
 
         let mut changed = false;
         let IrProgram { functions, modules, var_table, codegen_annotations, .. } = &mut program;
-        for func in functions.iter_mut() {
+        let module_fns = modules.iter_mut().flat_map(|m| m.functions.iter_mut());
+        for func in functions.iter_mut().chain(module_fns) {
             let param_vars: HashSet<VarId> = func.params.iter().map(|p| p.var).collect();
-            PARAM_BORROWS.with(|m| {
-                *m.borrow_mut() = func.params.iter().map(|p| (p.var, p.borrow)).collect();
-            });
-            if transform_expr(&mut func.body, var_table, &param_vars) {
+            facts.param_borrows = func.params.iter().map(|p| (p.var, p.borrow)).collect();
+            facts.capture_uses = bindings::capture_uses(&func.body);
+            let mut cx = Cx { vt: var_table, facts: &mut facts };
+            if transform_expr(&mut func.body, &mut cx, &param_vars) {
                 changed = true;
             }
         }
-        for module in modules.iter_mut() {
-            for func in module.functions.iter_mut() {
-                let param_vars: HashSet<VarId> = func.params.iter().map(|p| p.var).collect();
-                PARAM_BORROWS.with(|m| {
-                    *m.borrow_mut() = func.params.iter().map(|p| (p.var, p.borrow)).collect();
-                });
-                if transform_expr(&mut func.body, var_table, &param_vars) {
-                    changed = true;
-                }
-            }
-        }
         // `wrap_lambda_with_clones` added the `__cap_*` renames of shared-mut
-        // captures to SHARED_MUT; persist them so their reads/writes are cells too.
-        SHARED_MUT.with(|m| {
-            for v in m.borrow().iter() { codegen_annotations.shared_mut_vars.insert(*v); }
-            m.borrow_mut().clear();
-        });
-        PARAM_BORROWS.with(|m| m.borrow_mut().clear());
+        // captures to the set; persist them so their reads/writes are cells too.
+        codegen_annotations.shared_mut_vars.extend(facts.shared_mut);
         for i in vt_start..program.var_table.len() {
             program.codegen_annotations.always_clone_vars.insert(VarId(i as u32));
         }
@@ -84,15 +80,28 @@ impl NanoPass for CaptureClonePass {
     }
 }
 
-use std::cell::RefCell;
-thread_local! {
-    static PARAM_BORROWS: RefCell<std::collections::HashMap<VarId, ParamBorrow>> =
-        RefCell::new(std::collections::HashMap::new());
+/// The per-run facts every wrap decision reads.
+struct Facts {
+    /// The current fn's params with their borrow modes: a captured
+    /// `&[T]` / `&str` / `&T` param materialises an owned copy in its bind.
+    param_borrows: HashMap<VarId, ParamBorrow>,
     /// Vars that must be lowered to a shared `Rc<Cell<T>>` on the Rust target
-    /// (Copy-type `var` locals captured by a closure, plus their `__cap` renames).
-    /// Populated per-run by `detect_shared_mut` + `wrap_lambda_with_clones`.
+    /// (Copy-type `var` locals captured by a closure, plus their `__cap`
+    /// renames). Seeded by `detect_shared_mut`, extended by `capture_bindings`.
     /// (Closure v2, P3.)
-    static SHARED_MUT: RefCell<HashSet<VarId>> = RefCell::new(HashSet::new());
+    shared_mut: HashSet<VarId>,
+    /// Per var of the current fn: every occurrence with the lambda and the
+    /// statement it sits in, and whether the var is clean — what the
+    /// capture-move rule reads (`bindings::capture_moves`, #2231: the Perceus
+    /// rule, a lambda dups its free variables only while they stay live).
+    capture_uses: bindings::CaptureUses,
+}
+
+/// What the walk threads through every node: the table it allocates the
+/// `__cap_*` binds in, and the facts.
+struct Cx<'a> {
+    vt: &'a mut VarTable,
+    facts: &'a mut Facts,
 }
 
 /// Find every Copy-type (`Int`/`Float`/`Bool`) `Mutability::Var` local captured by
@@ -132,8 +141,7 @@ fn detect_shared_mut(program: &IrProgram) -> HashSet<VarId> {
                 // like `list.push`). A non-Copy `var` mutated ONLY through a method
                 // is recorded with `Mutability::Let` (it is never reassigned), so the
                 // mutability flag alone misses it — hence the explicit mutation scan.
-                let mut mutated = HashSet::new();
-                collect_mutated_vars(body, &mut mutated);
+                let mutated = written_vars(body);
                 for v in almide_ir::free_vars::free_vars(body, &param_set) {
                     if self.globals.contains(&v) { continue; }
                     let info = self.vt.get(v);
@@ -163,32 +171,6 @@ fn detect_shared_mut(program: &IrProgram) -> HashSet<VarId> {
     for f in &program.functions { w.visit_expr(&f.body); }
     for m in &program.modules { for f in &m.functions { w.visit_expr(&f.body); } }
     w.out
-}
-
-/// Collect VarIds an expression mutates: assignment targets and `&mut`-borrowed
-/// vars (the form `list.push(v, …)` etc. take after `BorrowInsertionPass`).
-fn collect_mutated_vars(expr: &IrExpr, out: &mut HashSet<VarId>) {
-    struct M<'a> { out: &'a mut HashSet<VarId> }
-    impl almide_ir::visit::IrVisitor for M<'_> {
-        fn visit_expr(&mut self, e: &IrExpr) {
-            if let IrExprKind::Borrow { expr: inner, mutable: true, .. } = &e.kind {
-                if let IrExprKind::Var { id } = &inner.kind { self.out.insert(*id); }
-            }
-            almide_ir::visit::walk_expr(self, e);
-        }
-        fn visit_stmt(&mut self, s: &IrStmt) {
-            match &s.kind {
-                IrStmtKind::Assign { var, .. } => { self.out.insert(*var); }
-                IrStmtKind::IndexAssign { target, .. }
-                | IrStmtKind::MapInsert { target, .. }
-                | IrStmtKind::FieldAssign { target, .. } => { self.out.insert(*target); }
-                _ => {}
-            }
-            almide_ir::visit::walk_stmt(self, s);
-        }
-    }
-    use almide_ir::visit::IrVisitor;
-    M { out }.visit_expr(expr);
 }
 
 /// Collect all variables bound by a statement (Bind + BindDestructure).
@@ -225,41 +207,41 @@ fn collect_pattern_bindings_into(pattern: &IrPattern, out: &mut HashSet<VarId>) 
 /// Transform every child of a list of independent expressions (args, list
 /// elements, ...). Uses `|=` (non-short-circuiting) so every element is
 /// always visited regardless of earlier results.
-fn transform_expr_list(exprs: &mut [IrExpr], vt: &mut VarTable, scope_vars: &HashSet<VarId>) -> bool {
+fn transform_expr_list(exprs: &mut [IrExpr], cx: &mut Cx, scope_vars: &HashSet<VarId>) -> bool {
     let mut changed = false;
-    for e in exprs { changed |= transform_expr(e, vt, scope_vars); }
+    for e in exprs { changed |= transform_expr(e, cx, scope_vars); }
     changed
 }
 
 /// Transform the `IrExpr` half of a `(Sym, IrExpr)` pair list (Record
 /// fields, InlineRust args).
-fn transform_expr_pairs(pairs: &mut [(Sym, IrExpr)], vt: &mut VarTable, scope_vars: &HashSet<VarId>) -> bool {
+fn transform_expr_pairs(pairs: &mut [(Sym, IrExpr)], cx: &mut Cx, scope_vars: &HashSet<VarId>) -> bool {
     let mut changed = false;
-    for (_, e) in pairs { changed |= transform_expr(e, vt, scope_vars); }
+    for (_, e) in pairs { changed |= transform_expr(e, cx, scope_vars); }
     changed
 }
 
 /// Transform both sides of a `(IrExpr, IrExpr)` pair list (MapLiteral entries).
-fn transform_expr_kv_pairs(entries: &mut [(IrExpr, IrExpr)], vt: &mut VarTable, scope_vars: &HashSet<VarId>) -> bool {
+fn transform_expr_kv_pairs(entries: &mut [(IrExpr, IrExpr)], cx: &mut Cx, scope_vars: &HashSet<VarId>) -> bool {
     let mut changed = false;
     for (k, v) in entries {
-        changed |= transform_expr(k, vt, scope_vars);
-        changed |= transform_expr(v, vt, scope_vars);
+        changed |= transform_expr(k, cx, scope_vars);
+        changed |= transform_expr(v, cx, scope_vars);
     }
     changed
 }
 
 /// Shared by `Call` and `TailCall`: only `Method`/`Computed` targets carry a
 /// child `IrExpr` to descend into.
-fn transform_call_target(target: &mut CallTarget, vt: &mut VarTable, scope_vars: &HashSet<VarId>) -> bool {
+fn transform_call_target(target: &mut CallTarget, cx: &mut Cx, scope_vars: &HashSet<VarId>) -> bool {
     match target {
-        CallTarget::Method { object, .. } => transform_expr(object, vt, scope_vars),
-        CallTarget::Computed { callee } => transform_expr(callee, vt, scope_vars),
+        CallTarget::Method { object, .. } => transform_expr(object, cx, scope_vars),
+        CallTarget::Computed { callee } => transform_expr(callee, cx, scope_vars),
         CallTarget::Named { .. } | CallTarget::Module { .. } => false,
     }
 }
 
-fn transform_expr_block(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashSet<VarId>) -> bool {
+fn transform_expr_block(expr: &mut IrExpr, cx: &mut Cx, scope_vars: &HashSet<VarId>) -> bool {
     let IrExprKind::Block { stmts, expr: tail } = &mut expr.kind else { unreachable!() };
     // Collect vars defined in this block to extend scope
     let mut local_scope = scope_vars.clone();
@@ -268,17 +250,17 @@ fn transform_expr_block(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashS
     }
     let mut changed = false;
     for stmt in stmts.iter_mut() {
-        changed |= transform_stmt(stmt, vt, &local_scope);
+        changed |= transform_stmt(stmt, cx, &local_scope);
     }
     if let Some(e) = tail {
-        changed |= transform_expr(e, vt, &local_scope);
+        changed |= transform_expr(e, cx, &local_scope);
     }
     changed
 }
 
-fn transform_expr_match(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashSet<VarId>) -> bool {
+fn transform_expr_match(expr: &mut IrExpr, cx: &mut Cx, scope_vars: &HashSet<VarId>) -> bool {
     let IrExprKind::Match { subject, arms } = &mut expr.kind else { unreachable!() };
-    let mut changed = transform_expr(subject, vt, scope_vars);
+    let mut changed = transform_expr(subject, cx, scope_vars);
     for arm in arms {
         // The arm's pattern bindings are in scope for the guard and the
         // body (#1925): a `some(key)` binding captured by a `move` closure
@@ -288,40 +270,40 @@ fn transform_expr_match(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashS
         let mut arm_scope = scope_vars.clone();
         collect_pattern_bindings_into(&arm.pattern, &mut arm_scope);
         if let Some(g) = &mut arm.guard {
-            changed |= transform_expr(g, vt, &arm_scope);
+            changed |= transform_expr(g, cx, &arm_scope);
         }
-        changed |= transform_expr(&mut arm.body, vt, &arm_scope);
+        changed |= transform_expr(&mut arm.body, cx, &arm_scope);
     }
     changed
 }
 
-fn transform_expr_for_in(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashSet<VarId>) -> bool {
+fn transform_expr_for_in(expr: &mut IrExpr, cx: &mut Cx, scope_vars: &HashSet<VarId>) -> bool {
     let IrExprKind::ForIn { iterable, body, var, var_tuple, .. } = &mut expr.kind else { unreachable!() };
-    let mut changed = transform_expr(iterable, vt, scope_vars);
+    let mut changed = transform_expr(iterable, cx, scope_vars);
     let mut loop_scope = scope_vars.clone();
     loop_scope.insert(*var);
     if let Some(vt_) = var_tuple { for v in vt_.iter() { loop_scope.insert(*v); } }
     // Collect vars defined in loop body so lambdas can see sibling bindings
     for s in body.iter() { collect_stmt_bindings(s, &mut loop_scope); }
-    for s in body.iter_mut() { changed |= transform_stmt(s, vt, &loop_scope); }
+    for s in body.iter_mut() { changed |= transform_stmt(s, cx, &loop_scope); }
     changed
 }
 
-fn transform_expr_while(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashSet<VarId>) -> bool {
+fn transform_expr_while(expr: &mut IrExpr, cx: &mut Cx, scope_vars: &HashSet<VarId>) -> bool {
     let IrExprKind::While { cond, body } = &mut expr.kind else { unreachable!() };
-    let mut changed = transform_expr(cond, vt, scope_vars);
+    let mut changed = transform_expr(cond, cx, scope_vars);
     let mut loop_scope = scope_vars.clone();
     // Collect vars defined in loop body so lambdas can see sibling bindings
     for s in body.iter() { collect_stmt_bindings(s, &mut loop_scope); }
-    for s in body.iter_mut() { changed |= transform_stmt(s, vt, &loop_scope); }
+    for s in body.iter_mut() { changed |= transform_stmt(s, cx, &loop_scope); }
     changed
 }
 
-fn transform_string_parts(parts: &mut [IrStringPart], vt: &mut VarTable, scope_vars: &HashSet<VarId>) -> bool {
+fn transform_string_parts(parts: &mut [IrStringPart], cx: &mut Cx, scope_vars: &HashSet<VarId>) -> bool {
     let mut changed = false;
     for p in parts {
         if let IrStringPart::Expr { expr: e } = p {
-            changed |= transform_expr(e, vt, scope_vars);
+            changed |= transform_expr(e, cx, scope_vars);
         }
     }
     changed
@@ -335,51 +317,66 @@ fn transform_string_parts(parts: &mut [IrStringPart], vt: &mut VarTable, scope_v
 // compile (E0382). Recurse into the source and every embedded lambda.
 // `replace_vars` already mirrors this shape, so a wrapped lambda's `__cap`
 // renames carry through correctly.
-fn transform_expr_iter_chain(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashSet<VarId>) -> bool {
+/// A chain's step / collector lambdas are scopes, not closures (`Use::depth`):
+/// they render without `move` and borrow what they read for the chain's
+/// duration, so they get NO pre-clone wrap — only their bodies are walked,
+/// for the closures nested inside them.
+fn transform_expr_iter_chain(expr: &mut IrExpr, cx: &mut Cx, scope_vars: &HashSet<VarId>) -> bool {
     let IrExprKind::IterChain { source, steps, collector, .. } = &mut expr.kind else { unreachable!() };
-    let mut changed = transform_expr(source, vt, scope_vars);
+    let mut changed = transform_expr(source, cx, scope_vars);
     for step in steps.iter_mut() {
         match step {
             IterStep::Map { lambda } | IterStep::Filter { lambda }
             | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => {
-                changed |= transform_expr(lambda, vt, scope_vars);
+                changed |= transform_chain_lambda(lambda, cx, scope_vars);
             }
+            IterStep::Take { n } => changed |= transform_expr(n, cx, scope_vars),
+            IterStep::Enumerate => {}
         }
     }
     match collector {
-        IterCollector::Collect => {}
+        IterCollector::Collect | IterCollector::Sum { .. } | IterCollector::Len => {}
         IterCollector::Fold { init, lambda } => {
-            changed |= transform_expr(init, vt, scope_vars);
-            changed |= transform_expr(lambda, vt, scope_vars);
+            changed |= transform_expr(init, cx, scope_vars);
+            changed |= transform_chain_lambda(lambda, cx, scope_vars);
         }
         IterCollector::Any { lambda } | IterCollector::All { lambda }
         | IterCollector::Find { lambda } | IterCollector::Count { lambda } => {
-            changed |= transform_expr(lambda, vt, scope_vars);
+            changed |= transform_chain_lambda(lambda, cx, scope_vars);
         }
     }
     changed
 }
 
+/// The body of a chain lambda, in the lambda's scope; a non-literal callback
+/// (a stored closure value) is an ordinary expression.
+fn transform_chain_lambda(lambda: &mut IrExpr, cx: &mut Cx, scope_vars: &HashSet<VarId>) -> bool {
+    match &mut lambda.kind {
+        IrExprKind::Lambda { .. } => transform_expr_scoped(lambda, cx, scope_vars),
+        _ => transform_expr(lambda, cx, scope_vars),
+    }
+}
+
 /// The [`transform_expr`] arms whose children are not a plain list of
 /// sub-expressions: a lambda extends the scope, and the calls, keyed containers
 /// and statement-bearing nodes each have their own order.
-fn transform_expr_scoped(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashSet<VarId>) -> bool {
+fn transform_expr_scoped(expr: &mut IrExpr, cx: &mut Cx, scope_vars: &HashSet<VarId>) -> bool {
     match &mut expr.kind {
         IrExprKind::Lambda { body, params, .. } => {
             let mut inner_scope = scope_vars.clone();
             for (v, _) in params.iter() { inner_scope.insert(*v); }
-            transform_expr(body, vt, &inner_scope)
+            transform_expr(body, cx, &inner_scope)
         }
         IrExprKind::Call { target, args, .. } | IrExprKind::TailCall { target, args } => {
-            transform_call_target(target, vt, scope_vars) | transform_expr_list(args, vt, scope_vars)
+            transform_call_target(target, cx, scope_vars) | transform_expr_list(args, cx, scope_vars)
         }
-        IrExprKind::MapLiteral { entries } => transform_expr_kv_pairs(entries, vt, scope_vars),
-        IrExprKind::StringInterp { parts } => transform_string_parts(parts, vt, scope_vars),
-        IrExprKind::Block { .. } => transform_expr_block(expr, vt, scope_vars),
-        IrExprKind::Match { .. } => transform_expr_match(expr, vt, scope_vars),
-        IrExprKind::ForIn { .. } => transform_expr_for_in(expr, vt, scope_vars),
-        IrExprKind::While { .. } => transform_expr_while(expr, vt, scope_vars),
-        IrExprKind::IterChain { .. } => transform_expr_iter_chain(expr, vt, scope_vars),
+        IrExprKind::MapLiteral { entries } => transform_expr_kv_pairs(entries, cx, scope_vars),
+        IrExprKind::StringInterp { parts } => transform_string_parts(parts, cx, scope_vars),
+        IrExprKind::Block { .. } => transform_expr_block(expr, cx, scope_vars),
+        IrExprKind::Match { .. } => transform_expr_match(expr, cx, scope_vars),
+        IrExprKind::ForIn { .. } => transform_expr_for_in(expr, cx, scope_vars),
+        IrExprKind::While { .. } => transform_expr_while(expr, cx, scope_vars),
+        IrExprKind::IterChain { .. } => transform_expr_iter_chain(expr, cx, scope_vars),
         // Every other kind is handled by `transform_expr`'s shape arms.
         _ => false,
     }
@@ -387,7 +384,7 @@ fn transform_expr_scoped(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &Hash
 
 /// Walk the IR tree. When we find a Lambda that captures clone-worthy outer
 /// variables, wrap it in a block with pre-clone bindings.
-fn transform_expr(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashSet<VarId>) -> bool {
+fn transform_expr(expr: &mut IrExpr, cx: &mut Cx, scope_vars: &HashSet<VarId>) -> bool {
     // First, recurse into children (bottom-up so inner lambdas are processed first).
     // Every arm uses `|` (non-short-circuiting bool-or), never `||` — all
     // children must always be visited so their captures get pre-cloned,
@@ -416,6 +413,13 @@ fn transform_expr(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashSet<Var
         // pre-clone wrap and a later use of the var failed to compile (E0382).
         // `replace_vars` already descends these, so the walk and the rename
         // now agree.
+        // `&(lambda)`: a lambda literal at a callee's non-escaping fn slot
+        // (#2288) is a scope, not a closure — its body is walked in the
+        // lambda's scope and the lambda itself is never wrapped in a
+        // `__cap` block (exactly the chain-step rule, `transform_chain_lambda`).
+        IrExprKind::Borrow { expr: e, mutable: false, .. } if matches!(e.kind, IrExprKind::Lambda { .. }) => {
+            transform_expr_scoped(e, cx, scope_vars)
+        }
         IrExprKind::UnOp { operand: e, .. }
         | IrExprKind::Member { object: e, .. } | IrExprKind::TupleIndex { object: e, .. }
         | IrExprKind::OptionalChain { expr: e, .. }
@@ -425,7 +429,7 @@ fn transform_expr(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashSet<Var
         | IrExprKind::Clone { expr: e } | IrExprKind::Deref { expr: e }
         | IrExprKind::Borrow { expr: e, .. } | IrExprKind::BoxNew { expr: e }
         | IrExprKind::RcWrap { expr: e, .. } | IrExprKind::ToVec { expr: e } => {
-            transform_expr(e, vt, scope_vars)
+            transform_expr(e, cx, scope_vars)
         }
 
         // ── Two children ──
@@ -434,31 +438,31 @@ fn transform_expr(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashSet<Var
         | IrExprKind::IndexAccess { object: a, index: b }
         | IrExprKind::MapAccess { object: a, key: b }
         | IrExprKind::Range { start: a, end: b, .. } => {
-            transform_expr(a, vt, scope_vars) | transform_expr(b, vt, scope_vars)
+            transform_expr(a, cx, scope_vars) | transform_expr(b, cx, scope_vars)
         }
 
         // ── Three children ──
         IrExprKind::If { cond, then, else_ } => {
-            transform_expr(cond, vt, scope_vars)
-                | transform_expr(then, vt, scope_vars)
-                | transform_expr(else_, vt, scope_vars)
+            transform_expr(cond, cx, scope_vars)
+                | transform_expr(then, cx, scope_vars)
+                | transform_expr(else_, cx, scope_vars)
         }
 
         // ── A flat sequence of children ──
         IrExprKind::List { elements: xs } | IrExprKind::Tuple { elements: xs }
         | IrExprKind::Fan { exprs: xs } | IrExprKind::RuntimeCall { args: xs, .. }
-        | IrExprKind::RustMacro { args: xs, .. } => transform_expr_list(xs, vt, scope_vars),
+        | IrExprKind::RustMacro { args: xs, .. } => transform_expr_list(xs, cx, scope_vars),
 
         // ── Name-tagged children ──
         IrExprKind::Record { fields, .. } | IrExprKind::InlineRust { args: fields, .. } => {
-            transform_expr_pairs(fields, vt, scope_vars)
+            transform_expr_pairs(fields, cx, scope_vars)
         }
         IrExprKind::SpreadRecord { base, fields } => {
-            transform_expr(base, vt, scope_vars) | transform_expr_pairs(fields, vt, scope_vars)
+            transform_expr(base, cx, scope_vars) | transform_expr_pairs(fields, cx, scope_vars)
         }
 
         // ── Shapes with their own scope or traversal order ──
-        _ => transform_expr_scoped(expr, vt, scope_vars),
+        _ => transform_expr_scoped(expr, cx, scope_vars),
     };
 
     // Now check: is this expr itself a Lambda with captured vars that need cloning?
@@ -473,7 +477,7 @@ fn transform_expr(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashSet<Var
             // `needs_clone_type` skips for `Copy` types. (Closure v2, P3.)
             .filter(|v| {
                 if !scope_vars.contains(v) { return false; }
-                needs_clone_type(&vt.get(*v).ty) || SHARED_MUT.with(|m| m.borrow().contains(v))
+                needs_clone_type(&cx.vt.get(*v).ty) || cx.facts.shared_mut.contains(v)
             })
             .collect();
 
@@ -482,44 +486,47 @@ fn transform_expr(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashSet<Var
             // method like `list.push`) keep the BARE `Var` bind — the
             // shared-cell wiring pattern-matches it; a Clone would sever the
             // sharing. Read-only captures clone explicitly (#809).
-            let mut lam_mutated = HashSet::new();
-            if let IrExprKind::Lambda { body, .. } = &expr.kind {
-                collect_mutated_vars(body, &mut lam_mutated);
-            }
+            let lam_mutated = match &expr.kind {
+                IrExprKind::Lambda { body, .. } => written_vars(body),
+                _ => HashSet::new(),
+            };
             // Wrap this lambda in a block: { let __cap = var; lambda_with_cap }
-            wrap_lambda_with_clones(expr, &captures, vt, &lam_mutated);
+            wrap_lambda_with_clones(expr, &captures, cx, &lam_mutated);
             changed = true;
         }
     }
 
+    changed |= wrap_fan_with_clones(expr, cx, scope_vars);
+
     changed
 }
 
-fn transform_stmt(stmt: &mut IrStmt, vt: &mut VarTable, scope_vars: &HashSet<VarId>) -> bool {
+
+fn transform_stmt(stmt: &mut IrStmt, cx: &mut Cx, scope_vars: &HashSet<VarId>) -> bool {
     match &mut stmt.kind {
         IrStmtKind::Bind { value, .. } | IrStmtKind::BindDestructure { value, .. }
         | IrStmtKind::Assign { value, .. } | IrStmtKind::FieldAssign { value, .. } => {
-            transform_expr(value, vt, scope_vars)
+            transform_expr(value, cx, scope_vars)
         }
         IrStmtKind::IndexAssign { index, value, .. } => {
-            transform_expr(index, vt, scope_vars) | transform_expr(value, vt, scope_vars)
+            transform_expr(index, cx, scope_vars) | transform_expr(value, cx, scope_vars)
         }
         IrStmtKind::MapInsert { key, value, .. } => {
-            transform_expr(key, vt, scope_vars) | transform_expr(value, vt, scope_vars)
+            transform_expr(key, cx, scope_vars) | transform_expr(value, cx, scope_vars)
         }
         IrStmtKind::ListSwap { a, b, .. } => {
-            transform_expr(a, vt, scope_vars) | transform_expr(b, vt, scope_vars)
+            transform_expr(a, cx, scope_vars) | transform_expr(b, cx, scope_vars)
         }
         IrStmtKind::ListReverse { end, .. } | IrStmtKind::ListRotateLeft { end, .. } => {
-            transform_expr(end, vt, scope_vars)
+            transform_expr(end, cx, scope_vars)
         }
         IrStmtKind::ListCopySlice { len, .. } => {
-            transform_expr(len, vt, scope_vars)
+            transform_expr(len, cx, scope_vars)
         }
         IrStmtKind::Guard { cond, else_ } => {
-            transform_expr(cond, vt, scope_vars) | transform_expr(else_, vt, scope_vars)
+            transform_expr(cond, cx, scope_vars) | transform_expr(else_, cx, scope_vars)
         }
-        IrStmtKind::Expr { expr } => transform_expr(expr, vt, scope_vars),
+        IrStmtKind::Expr { expr } => transform_expr(expr, cx, scope_vars),
         IrStmtKind::Comment { .. } | IrStmtKind::RcInc { .. } | IrStmtKind::RcDec { .. } => false,
     }
 }
@@ -533,101 +540,20 @@ fn transform_stmt(stmt: &mut IrStmt, vt: &mut VarTable, scope_vars: &HashSet<Var
 fn wrap_lambda_with_clones(
     expr: &mut IrExpr,
     captures: &[VarId],
-    vt: &mut VarTable,
+    cx: &mut Cx,
     lam_mutated: &HashSet<VarId>,
 ) {
-    let mut stmts = Vec::new();
-    let mut renames = std::collections::HashMap::new();
-
-    for &var_id in captures {
-        let ty = vt.get(var_id).ty.clone();
-        let cap_name = format!("__cap_{}", var_id.0);
-        let cap_var = vt.alloc(
-            almide_base::intern::sym(&cap_name),
-            ty.clone(),
-            Mutability::Let,
-            None,
-        );
-        renames.insert(var_id, cap_var);
-
-        // The clone of a shared-mut capture is itself a shared cell (`Rc<Cell>`),
-        // so reads/writes of `__cap` inside the closure go through `.get()`/`.set()`
-        // too. (Closure v2, P3.)
-        if SHARED_MUT.with(|m| m.borrow().contains(&var_id)) {
-            SHARED_MUT.with(|m| { m.borrow_mut().insert(cap_var); });
-        }
-
-        // If the captured var is a fn param with a borrowed runtime
-        // representation (`&[T]` / `&str` / `&T`), the bare `Var` IR
-        // renders as the borrow — but `__cap_N: Vec<T>` / `String` / `T`
-        // (the Almide-level owned type) expects an owned value. Materialise
-        // the owned form explicitly so the `move |..|` closure can take it.
-        let borrow = PARAM_BORROWS.with(|m| m.borrow().get(&var_id).copied());
-        let bind_value = match borrow {
-            Some(ParamBorrow::RefSlice) => IrExpr {
-                kind: IrExprKind::ToVec {
-                    expr: Box::new(IrExpr { kind: IrExprKind::Var { id: var_id }, ty: ty.clone(), span: None, def_id: None }),
-                },
-                ty: ty.clone(), span: None, def_id: None,
-            },
-            Some(ParamBorrow::RefStr) => IrExpr {
-                kind: IrExprKind::Call {
-                    target: CallTarget::Method {
-                        object: Box::new(IrExpr { kind: IrExprKind::Var { id: var_id }, ty: ty.clone(), span: None, def_id: None }),
-                        // Use `to_owned` instead of `to_string` to avoid
-                        // StdlibLowering converting this into a module call
-                        // (e.g. `int.to_string()`) when the Almide-level type
-                        // differs from the Rust-level &str representation.
-                        method: almide_base::intern::sym("to_owned"),
-                    },
-                    args: vec![],
-                    type_args: vec![],
-                },
-                ty: ty.clone(), span: None, def_id: None,
-            },
-            // The default capture bind CLONES explicitly (#809): CloneInsertion's
-            // last-use analysis would MOVE the var here when this is its last
-            // syntactic use — but a runtime-template borrow (`&{m}` — e.g.
-            // `map.fold`'s first arg) in the SAME statement is invisible at the
-            // IR level and stays live until the call, so the move was an E0505.
-            // READ-ONLY captures only: a capture THIS lambda mutates keeps the
-            // bare `Var` bind — the shared-cell wiring (Closure v2 P3/P6)
-            // pattern-matches it, and a `Clone` wrapper severed the sharing
-            // (each closure mutated its own copy — the wasm_runtime
-            // closure-capture cross-target mismatches). NOTE the mutability
-            // FLAG cannot gate this: a non-Copy `var` mutated only through a
-            // method (`list.push`) is recorded `Mutability::Let`.
-            _ if !lam_mutated.contains(&var_id) => IrExpr {
-                kind: IrExprKind::Clone {
-                    expr: Box::new(IrExpr {
-                        kind: IrExprKind::Var { id: var_id },
-                        ty: ty.clone(),
-                        span: None,
-                        def_id: None,
-                    }),
-                },
-                ty: ty.clone(),
-                span: None,
-                def_id: None,
-            },
-            _ => IrExpr {
-                kind: IrExprKind::Var { id: var_id },
-                ty: ty.clone(),
-                span: None,
-                def_id: None,
-            },
-        };
-
-        stmts.push(IrStmt {
-            kind: IrStmtKind::Bind {
-                var: cap_var,
-                mutability: Mutability::Let,
-                ty: ty.clone(),
-                value: bind_value,
-            },
-            span: None,
-        });
-    }
+    // A capture whose LAST occurrence this lambda holds moves instead of
+    // cloning (`bindings::capture_moves`): the var is clean (no write, no
+    // loop, no `&mut` reach), nothing outside the lambda shares its
+    // statement, and it is not a shared cell nor a capture this lambda
+    // mutates (the cell wiring pattern-matches those binds).
+    let lambda_id = match &expr.kind { IrExprKind::Lambda { lambda_id, .. } => *lambda_id, _ => None };
+    let move_now: HashSet<VarId> = captures.iter().copied()
+        .filter(|v| !lam_mutated.contains(v) && !cx.facts.shared_mut.contains(v))
+        .filter(|v| bindings::capture_moves(&cx.facts.capture_uses, *v, lambda_id))
+        .collect();
+    let (stmts, renames) = capture_bindings(captures, cx, lam_mutated, None, &move_now);
 
     // Rename captured vars inside the lambda body
     if let IrExprKind::Lambda { body, .. } = &mut expr.kind {
@@ -720,10 +646,12 @@ fn replace_vars_iter_chain(expr: &mut IrExpr, renames: &Renames) {
             | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => {
                 replace_vars(lambda, renames);
             }
+            IterStep::Take { n } => replace_vars(n, renames),
+            IterStep::Enumerate => {}
         }
     }
     match collector {
-        IterCollector::Collect => {}
+        IterCollector::Collect | IterCollector::Sum { .. } | IterCollector::Len => {}
         IterCollector::Fold { init, lambda } => {
             replace_vars(init, renames);
             replace_vars(lambda, renames);

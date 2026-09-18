@@ -462,7 +462,7 @@ impl Checker {
             // Cross-module top-level `let` access: `utils.CATEGORY_ORDER`.
             // Spec Visibility section applies to fn, type, AND let.
             if let Some(let_ty) = self.env.top_lets.get(&sym(&key)).cloned() {
-                super::debug_trace("TOPLET", || format!("reader: key={} -> {:?}", key, let_ty));
+                super::debug_trace("ALMIDE_TOPLET_DEBUG", || format!("reader: key={} -> {:?}", key, let_ty));
                 self.type_map.insert(object.id, Ty::Unit);
                 self.env.import_table.mark_used(mod_name);
                 return Some(let_ty);
@@ -818,6 +818,7 @@ impl Checker {
 include!("infer_control_ops.rs");
 include!("infer_calls_closures.rs");
 include!("infer_statements.rs");
+include!("infer_implicit_tail.rs");
 include!("infer_ident_collection.rs");
 include!("infer_loops_records.rs");
 

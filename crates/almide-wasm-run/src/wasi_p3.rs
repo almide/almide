@@ -16,9 +16,9 @@
 //! (`wasmtime run --dir=.`).
 //! Canonical-ABI facts (variant discriminants, payload offsets) are
 //! DERIVED from the vendored WIT at emit time (`FsAbi`), never
-//! hand-counted. fs writes, env and process keep the DEFINED refusal;
-//! the fs-program route flip to this leg waits on the write surface
-//! (until then it is exercised via ALMIDE_WASM_STRUCTURAL=1). The
+//! hand-counted. Requested p3 filesystem programs route here without an
+//! ALMIDE_WASM_STRUCTURAL override. Env and process operations outside
+//! this world's imports retain the defined refusal. The
 //! transform is a post-pass — the emitter's verified envelope is
 //! untouched.
 //!
@@ -57,9 +57,10 @@ use wasm_encoder::{
     Module, TypeSection, ValType,
 };
 
+use crate::component_alloc::{shim_cabi_realloc, shim_realloc_checked, shim_reserve};
 use crate::wasi::{
-    mem, mem8, parse_module, reencode_body, type_index, Parsed, Remap, DATA, MSG, PARK_SPAN,
-    UNSUPPORTED_MSG,
+    mem, mem8, parse_module, reencode_body, type_index, Parsed, Remap, DATA, MSG, OOM_MSG,
+    PARK_SPAN, UNSUPPORTED_MSG,
 };
 
 // Import indices (18 imports replace the 5 almide.* ones).
@@ -167,15 +168,21 @@ const STATRET: u64 = 128;
 const SENDRET: u64 = STATRET;
 // Static fs error messages (canonical-ABI error-code -> the SAME strings
 // the native runtime's io::Error Display produces, so the common error
-// legs stay byte-identical). Offsets within the park span.
+// legs stay byte-identical). The bytes are `almide_base::fs_errno`'s rows
+// (#2206) — the table every leg spells from, pinned against the host's
+// `Display` by its own test. Offsets within the park span.
 const MSG_NOENT: u64 = 256;
-const MSG_ACCES: u64 = 320;
-const MSG_ISDIR: u64 = 384;
+const MSG_ACCES: u64 = 296;
+const MSG_ISDIR: u64 = 328;
+const MSG_NOTDIR: u64 = 360;
+const MSG_EXIST: u64 = 392;
 const MSG_GEN: u64 = 448;
 const MSG_NOPRE: u64 = 512;
-const E_NOENT: &[u8] = b"No such file or directory (os error 2)";
-const E_ACCES: &[u8] = b"Permission denied (os error 13)";
-const E_ISDIR: &[u8] = b"Is a directory (os error 21)";
+const E_NOENT: &[u8] = almide_base::fs_errno::ENOENT.text.as_bytes();
+const E_ACCES: &[u8] = almide_base::fs_errno::EACCES.text.as_bytes();
+const E_ISDIR: &[u8] = almide_base::fs_errno::EISDIR.text.as_bytes();
+const E_NOTDIR: &[u8] = almide_base::fs_errno::ENOTDIR.text.as_bytes();
+const E_EXIST: &[u8] = almide_base::fs_errno::EEXIST.text.as_bytes();
 const E_GEN: &[u8] = b"filesystem operation failed";
 const E_NOPRE: &[u8] = b"no filesystem preopen (run with --dir)";
 // The p3 http transport-error static (#1710 PR B): transport-error TEXT is
@@ -193,6 +200,8 @@ const E_HTTP: &[u8] = b"http request failed (p3 transport)";
 const MSG_CLEN: u64 = 640;
 const E_CLEN: &[u8] = b"content-length";
 const CLEN_BUF: u64 = 704;
+// C-197's line, written by `$reserve` when a grow is refused (#2119).
+const MSG_OOM: u64 = 768;
 
 // Park layout, checked at COMPILE time: retptr spans and the message
 // statics must not collide with each other or the stdin/entropy DATA
@@ -203,12 +212,15 @@ const _: () = {
     assert!(MSG + UNSUPPORTED_MSG.len() as u64 <= STATRET);
     assert!(MSG_NOENT + E_NOENT.len() as u64 <= MSG_ACCES);
     assert!(MSG_ACCES + E_ACCES.len() as u64 <= MSG_ISDIR);
-    assert!(MSG_ISDIR + E_ISDIR.len() as u64 <= MSG_GEN);
+    assert!(MSG_ISDIR + E_ISDIR.len() as u64 <= MSG_NOTDIR);
+    assert!(MSG_NOTDIR + E_NOTDIR.len() as u64 <= MSG_EXIST);
+    assert!(MSG_EXIST + E_EXIST.len() as u64 <= MSG_GEN);
     assert!(MSG_GEN + E_GEN.len() as u64 <= MSG_NOPRE);
     assert!(MSG_NOPRE + E_NOPRE.len() as u64 <= MSG_HTTP);
     assert!(MSG_HTTP + E_HTTP.len() as u64 <= MSG_CLEN);
     assert!(MSG_CLEN + E_CLEN.len() as u64 <= CLEN_BUF);
-    assert!(CLEN_BUF + 20 <= DATA);
+    assert!(CLEN_BUF + 20 <= MSG_OOM);
+    assert!(MSG_OOM + OOM_MSG.len() as u64 <= DATA);
 };
 
 // The fan prefetch slot table: SLOT_CAP slots of SLOT_STRIDE bytes on
@@ -220,6 +232,12 @@ const _: () = {
 //   open result @24..44, state @48 (0 empty / 1 pending / 2 done),
 //   subtask @52. Arms past SLOT_CAP simply stay sequential (the await
 //   falls back to the sync op-1 path).
+/// The declared ceiling reserved before `get-directories` lowers the
+/// preopen table (#2119): 64 KiB of descriptors and path bytes, which no
+/// real host approaches. See `component_alloc`'s header for what the
+/// reservation buys and what remains outside it.
+const PREOPEN_RESERVE: i32 = 65536;
+
 const SLOT_CAP: i32 = 1024;
 const SLOT_STRIDE: i32 = 64;
 
@@ -232,6 +250,7 @@ struct FsAbi {
     ec_access: i32,
     ec_not_permitted: i32,
     ec_is_directory: i32,
+    ec_not_directory: i32,
     ec_exist: i32,
     dt_directory: i32,     // descriptor-type case index
     dt_regular_file: i32,
@@ -291,6 +310,7 @@ fn fs_abi(resolve: &wit_parser::Resolve) -> anyhow::Result<FsAbi> {
         ec_access: case(ec, "access")?,
         ec_not_permitted: case(ec, "not-permitted")?,
         ec_is_directory: case(ec, "is-directory")?,
+        ec_not_directory: case(ec, "not-directory")?,
         ec_exist: case(ec, "exist")?,
         dt_directory: case(dt, "directory")?,
         dt_regular_file: case(dt, "regular-file")?,
@@ -309,7 +329,9 @@ fn fs_abi(resolve: &wit_parser::Resolve) -> anyhow::Result<FsAbi> {
 #[derive(Clone, Copy)]
 struct P3Globals {
     park: u64,
-    f_realloc: u32,
+    /// The shims' own allocator (`$reserve` + the bump), NOT the ABI-facing
+    /// `cabi_realloc`: guest-side allocation must report C-197 (#2119).
+    f_alloc: u32,
     g_plen: u32,
     g_ppos: u32,
     g_in_rx: u32,
@@ -322,6 +344,7 @@ struct P3Globals {
     g_wset: u32,
     g_slots: u32,
     g_slotn: u32,
+    f_reserve: u32,
 }
 
 /// One output port for `shim_print`: the stream/future globals and the
@@ -491,45 +514,6 @@ fn shim_host_read(g_plen: u32, g_ppos: u32) -> Function {
     i.global_get(g_ppos);
     i.global_get(g_plen);
     i.memory_copy(0, 0);
-    i.end();
-    f
-}
-
-/// `cabi_realloc(old_ptr, old_size, align, new_size) -> ptr`: bump the
-/// module's own `__heap` frontier (8-aligned raw bytes, never freed),
-/// growing memory on demand; a grow failure exits err.
-fn shim_cabi_realloc(heap_global: u32) -> Function {
-    let (old_ptr, old_size, _align, new_size) = (0u32, 1u32, 2u32, 3u32);
-    let result = 4u32;
-    let mut f = Function::new([(1, ValType::I32)]);
-    let mut i = f.instructions();
-    i.global_get(heap_global).i32_const(7).i32_add().i32_const(-8).i32_and();
-    i.local_set(result);
-    i.local_get(result).local_get(new_size).i32_add();
-    i.memory_size(0).i32_const(16).i32_shl();
-    i.i32_gt_u();
-    i.if_(BlockType::Empty);
-    i.local_get(new_size).i32_const(0xFFFF).i32_add().i32_const(16).i32_shr_u();
-    i.memory_grow(0);
-    i.i32_const(-1).i32_eq();
-    i.if_(BlockType::Empty);
-    i.i32_const(1).call(I_EXIT).unreachable();
-    i.end();
-    i.end();
-    i.local_get(result).local_get(new_size).i32_add().global_set(heap_global);
-    i.local_get(old_ptr).i32_eqz().i32_eqz();
-    i.if_(BlockType::Empty);
-    i.local_get(result);
-    i.local_get(old_ptr);
-    i.local_get(old_size).local_get(new_size).i32_lt_u();
-    i.if_(BlockType::Result(ValType::I32));
-    i.local_get(old_size);
-    i.else_();
-    i.local_get(new_size);
-    i.end();
-    i.memory_copy(0, 0);
-    i.end();
-    i.local_get(result);
     i.end();
     f
 }

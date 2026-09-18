@@ -102,10 +102,11 @@ impl<'a> Interpreter<'a> {
 
         // 3. A user / stdlib free function lowered into the program. A stdlib
         //    IMPL name (`string_slice` — how a lowered MODULE body spells
-        //    `string.slice`) first tries the SAME native bridge a
-        //    module-spelled call takes, so both spellings share one resolution
-        //    order; the lowered body stays the fallback. Mut-param impls skip
-        //    the shortcut (the bridge has no write-back path, #1022).
+        //    `string.slice`) takes the SAME resolution order a module-spelled
+        //    call takes: the interp-native container op, then the lowered
+        //    body, then the bridge only where the body abstains (#2185).
+        //    Mut-param impls skip the shortcut (the bridge has no write-back
+        //    path, #1022).
         if let Some(func) = self.fns.get(&name).copied() {
             if let Some((m, f)) = crate::stdlib_pool::module_of_impl(name) {
                 // The in-interp HOFs take closure ARGUMENTS and must see the
@@ -118,25 +119,7 @@ impl<'a> Interpreter<'a> {
                     for a in args {
                         evaled.push(val!(self.eval_expr(a, scope)));
                     }
-                    if let Some(result) = self.eval_container_op(m.as_str(), f.as_str(), &evaled)
-                    {
-                        return result;
-                    }
-                    if let Some(result) = crate::bridge::dispatch(m.as_str(), f.as_str(), &evaled)
-                    {
-                        return result;
-                    }
-                    let root = self.root_scope();
-                    let flow = self.call_pool_tier(func, evaled, &root);
-                    // #1226 return sync at the NAMED spelling too — the same
-                    // body reachable both ways must read back the same way.
-                    // Pool bodies only: a program fn that happens to share an
-                    // impl name keeps the fixture tier's raw address model.
-                    return if self.pool_fns.contains(&func.name) {
-                        self.sync_at_pool_boundary(func, flow)
-                    } else {
-                        flow
-                    };
+                    return self.eval_named_stdlib_impl(func, m, f, evaled);
                 }
             }
             return self.eval_lowered_fn_call(func, args, scope);
@@ -526,6 +509,8 @@ impl<'a> Interpreter<'a> {
 include!("dispatch_module.rs");
 include!("dispatch_sync.rs");
 include!("dispatch_heap.rs");
+include!("dispatch_body.rs");
+include!("dispatch_vfs.rs");
 
 // ── Constructor registry ────────────────────────────────────────
 

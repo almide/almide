@@ -37,7 +37,7 @@ pub fn desugar_guard(body: &IrExpr) -> Option<IrExpr> {
 /// the under-desugared count never sees (the `option.unwrap_or((tuple)); f(r.0)` mir>ir breach).
 /// This is the single "desugar-before-both" source of truth; callers use it instead of
 /// hand-picking a subset of the desugars.
-/// COMPACT IR pretty-printer for desugar debugging (env-gated via `DBG_DESUGAR_FN`). Shows the
+/// COMPACT IR pretty-printer for desugar debugging (env-gated via `ALMIDE_DBG_DESUGAR_FN`). Shows the
 /// tree structure — `Block`, `Match`/`If` with per-arm patterns, `Call` targets, `Try`/`Unwrap`,
 /// ctors, `Var`/`Lit` — concise enough to `diff` two desugared bodies (e.g. a derived-Codec
 /// `decode` vs the proven separate-bind form) and pinpoint where they diverge. NOT used at
@@ -151,7 +151,7 @@ pub fn dump_ir(e: &IrExpr) -> String {
     s
 }
 
-/// Env-gated desugar dump: when `DBG_DESUGAR_FN == fn_name`, print the fully-desugared body so the
+/// Env-gated desugar dump: when `ALMIDE_DBG_DESUGAR_FN == fn_name`, print the fully-desugared body so the
 /// derived-Codec `decode` chain can be diffed against the proven separate-bind form. No-op otherwise.
 pub fn dump_desugared_ir(
     fn_name: &str,
@@ -159,17 +159,17 @@ pub fn dump_desugared_ir(
     layouts: &crate::lower::VariantLayouts,
     record_layouts: &crate::lower::RecordLayouts,
 ) {
-    if !crate::trace::enabled_for("DBG_DESUGAR_FN", fn_name) {
+    if !crate::trace::enabled_for("ALMIDE_DBG_DESUGAR_FN", fn_name) {
         return;
     }
     let desugared = desugar_all(body, fn_name == "main", layouts, record_layouts, &[]);
     // `RAW` is the `{:#?}` of the desugared tree; the default is the readable
     // `dump_ir` form. Both describe the SAME value, so it is computed once —
     // the previous form called `desugar_all` in each branch.
-    if crate::trace::enabled("DBG_DESUGAR_RAW") {
-        crate::trace::trace("DBG_DESUGAR_FN", || format!("=== RAW {fn_name} ===\n{desugared:#?}"));
+    if crate::trace::enabled("ALMIDE_DBG_DESUGAR_RAW") {
+        crate::trace::trace("ALMIDE_DBG_DESUGAR_FN", || format!("=== RAW {fn_name} ===\n{desugared:#?}"));
     } else {
-        crate::trace::trace("DBG_DESUGAR_FN", || format!(
+        crate::trace::trace("ALMIDE_DBG_DESUGAR_FN", || format!(
             "=== DESUGARED {fn_name} ===\n{}", dump_ir(&desugared)));
     }
 }

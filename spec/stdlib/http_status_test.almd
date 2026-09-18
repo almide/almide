@@ -62,7 +62,12 @@ effect fn answer_once(port: Int, reply: String) -> Result[Unit, String] = {
   ok(())
 }
 
-effect fn fetch_retry(method: String, url: String, headers: Map[String, String], left: Int) -> Result[HttpResponse, String] = match http.request_response(method, url, "", headers) {
+effect fn fetch_retry(method: String, url: String, headers: Map[String, String], left: Int) -> Result[HttpResponse, String] = match http.request_response(
+  method,
+  url,
+  "",
+  headers,
+) {
   ok(resp) => ok(resp),
   err(e) => if left == 0 then err(e)
   else {

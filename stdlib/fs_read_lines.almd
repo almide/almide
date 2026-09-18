@@ -1,5 +1,6 @@
 // fs_read_lines — SELF-HOSTED `fs.read_lines(path)` for the wasm leg: the WASI file-read
-// floor (prim.read_text_file) composed with the self-hosted `string.lines` splitter. The
+// floor (prim.read_text_file_as, named `fs.read_lines` — #2206) composed with the
+// self-hosted `string.lines` splitter. The
 // native oracle (runtime/rs/src/fs.rs) is `read_to_string(path).map(|s| s.lines()...)` —
 // exactly this composition, so line semantics byte-match by construction (string_lines.almd
 // implements `str::lines()`: split on '\n', strip one trailing '\r' per line, no phantom
@@ -15,7 +16,7 @@
 // Reaching prim.read_text_file, the transitive cap_witness carries Capability::FsRead — a
 // caller is caps-verified only if it declares FsRead (an `effect fn`).
 effect fn fs_read_lines(path: String) -> Result[List[String], String] = {
-  let r: Result[String, String] = prim.read_text_file(path)
+  let r: Result[String, String] = prim.read_text_file_as(path, "fs.read_lines")
   let rh = prim.handle(r)
   if prim.load32(rh + 16) != 0 then {
     let m: String = prim.load_handle(rh + 12)

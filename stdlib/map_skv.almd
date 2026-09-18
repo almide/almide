@@ -314,7 +314,13 @@ else {
   let k = prim.load_str(ah + 12 + i * 8)
   let j = __skv_find(bh, bn, k, 0)
   if j < 0 then false
-  else if prim.load64(ah + 12 + (an + i) * 8) == prim.load64(bh + 12 + (bn + j) * 8) then __skv_eqm_at(ah, an, bh, bn, i + 1)
+  else if prim.load64(ah + 12 + (an + i) * 8) == prim.load64(bh + 12 + (bn + j) * 8) then __skv_eqm_at(
+    ah,
+    an,
+    bh,
+    bn,
+    i + 1,
+  )
   else false
 }
 

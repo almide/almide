@@ -1,0 +1,42 @@
+// @contract: C-004
+// #2059: a list combinator NESTED inside a fan callback. On the native leg the
+// fan callback's whole subtree used to be exempt from closure boxing (so the
+// thread thunks stayed raw), which also left the NESTED combinator's closure
+// raw — `almide_rt_list_map` takes `Rc<dyn Fn>`, so rustc had no type for the
+// inner parameter (E0282) while the wasm leg ran the program. The matrix:
+// {map, filter, fold, flat_map} nested inside {fan.map, fan { … } block}, plus
+// a `fan.map` routed to the PARALLEL twin (scalar result, whose mapper is
+// un-boxed back to a raw `impl Fn`) and a `fan.any { … }` arm carrying a
+// combinator. Every row is byte-identical on both legs.
+effect fn first_ok(n: Int) -> Result[Int, String] = if n > 0 then ok(n) else err("zero")
+
+effect fn main() -> Unit = {
+  let rows = [1, 2, 3]
+  // fan.map × map (the issue's program; List result → the sequential twin).
+  let mapped = fan.map(rows, (r) => ok([r, r + 1] |> list.map((x) => x * 2)))!
+  println("map=" + int.to_string(list.len(mapped)) + " " + int.to_string(list.sum(mapped[2])))
+  // fan.map × filter
+  let filtered = fan.map(rows, (r) => ok([r, r + 1, r + 2] |> list.filter((x) => x % 2 == 0)))!
+  println("filter=" + int.to_string(list.len(filtered[0])) + "," + int.to_string(list.len(filtered[1])))
+  // fan.map × fold (Int result, pure scalar callback → the PARALLEL twin,
+  // whose mapper is un-boxed back to a raw `impl Fn`).
+  let folded = fan.map(rows, (r) => ok([r, r + 1, r + 2] |> list.fold(0, (acc, x) => acc + x * r)))!
+  println("fold=" + int.to_string(folded[0]) + "," + int.to_string(folded[2]))
+  // fan.map × flat_map
+  let flat = fan.map(rows, (r) => ok([r, r + 1] |> list.flat_map((x) => [x, x * 10])))!
+  println("flat_map=" + int.to_string(list.len(flat[1])) + " " + int.to_string(list.sum(flat[1])))
+  // fan { } block × each combinator, as sibling arms.
+  let (b_map, b_filter, b_fold, b_flat) = fan {
+    [1, 2, 3] |> list.map((x) => x + 100)
+    [1, 2, 3] |> list.filter((x) => x > 1)
+    [1, 2, 3] |> list.fold(1, (acc, x) => acc * (x + 1))
+    [1, 2, 3] |> list.flat_map((x) => [x, -x])
+  }
+  println("block=" + int.to_string(list.sum(b_map)) + "," + int.to_string(list.len(b_filter)) + "," + int.to_string(b_fold) + "," + int.to_string(list.len(b_flat)))
+  // fan.any block × map: a combinator in a first-Ok arm.
+  let anyd = fan.any {
+    first_ok([1, 2, 3] |> list.map((x) => x * 3) |> list.sum())
+    first_ok(0)
+  }!
+  println("any=" + int.to_string(anyd))
+}

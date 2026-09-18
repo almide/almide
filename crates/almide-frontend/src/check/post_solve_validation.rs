@@ -33,7 +33,7 @@ fn fill_example_ty(ty: &Ty) -> Ty {
 /// Infer types for default value expressions in type declarations.
 /// Prevents ICE "missing type for expr" during lowering.
 fn infer_default_exprs(checker: &mut Checker, ty: &mut ast::TypeExpr) {
-    if let ast::TypeExpr::Variant { cases } = ty {
+    if let ast::TypeExpr::Variant { cases, .. } = ty {
         for case in cases {
             if let ast::VariantCase::Record { fields, .. } = case {
                 for field in fields {
@@ -295,8 +295,20 @@ impl Checker {
             }
             let mut diag = err(
                 format!("type '{}' has no ordering — cannot be used with {}", ty_name, fn_name),
-                "Ordering needs Int, Bool, String, Float, or lists/tuples/records of those.                  Map, Set, and function values have no order; Float inside a compound                  element has none either (compare via an explicit key instead)."
-                    .to_string(),
+                // Adjacent literals, not one line with the source indentation baked
+                // into it (#2167): the hint used to render with 18-space runs where
+                // its line breaks had been. It must also name the DERIVE — a record
+                // or variant orders, but only when it declares `: Ord` (#1521), and a
+                // reader whose record was rejected for exactly that reason was being
+                // told records are fine.
+                concat!(
+                    "Ordering needs Int, Bool, String or Float, or a tuple/list/Option of those. ",
+                    "A record or variant orders too \u{2014} by field declaration order, by case ",
+                    "order \u{2014} but only when it DECLARES the derive: `type T: Ord = { ... }`. ",
+                    "Map, Set and function values have no order, and a Float INSIDE a compound has ",
+                    "none either (native's derive cannot order f64) \u{2014} compare via an explicit key instead.",
+                )
+                .to_string(),
                 format!("call to {}", fn_name),
             ).with_code("E030");
             if let Some(s) = span {
@@ -440,24 +452,57 @@ impl Checker {
     /// mechanical apply (`almide check --json` + span apply).
     fn validate_implicit_propagation(&mut self) {
         let checks = std::mem::take(&mut self.deferred_implicit_prop_checks);
-        let mut reported: std::collections::HashSet<(usize, usize)> = std::collections::HashSet::new();
+        // One report per span. A leaf several sites reach (#2182: a `match`
+        // arm's value queued by the arm join AND by the statement or `-> Unit`
+        // tail that discards it) keeps its first entry, upgraded to must-use
+        // when any later entry says the value is discarded — E042 outranks
+        // E041, and the discarding position names itself.
+        let mut order: Vec<(usize, usize)> = Vec::new();
+        let mut by_span: std::collections::HashMap<(usize, usize), (Ty, ast::Span, &'static str, bool, bool)> =
+            std::collections::HashMap::new();
         for (ty, span, what, mechanical, must_use) in checks {
             let resolved = resolve_ty(&ty, &self.uf);
             if !resolved.is_result() {
                 continue;
             }
             let Some(s) = span else { continue };
-            if !reported.insert((s.line, s.col)) {
-                continue;
+            match by_span.entry((s.line, s.col)) {
+                std::collections::hash_map::Entry::Vacant(e) => {
+                    order.push((s.line, s.col));
+                    e.insert((ty, s, what, mechanical, must_use));
+                }
+                std::collections::hash_map::Entry::Occupied(mut e) => {
+                    if must_use && !e.get().4 {
+                        e.get_mut().2 = what;
+                        e.get_mut().4 = true;
+                    }
+                }
             }
+        }
+        for key in order {
+            let Some((_, s, what, mechanical, must_use)) = by_span.remove(&key) else { continue };
             let mut d = if must_use {
-                Diagnostic::error(
-                    "this statement discards a Result — the error would be silently dropped".to_string(),
-                    "Propagate it with `expr!`, or discard it on purpose with `let _ = expr` \
-                     (the explicit-discard spelling, ADR-0008 D2). Matching on ok/err also \
-                     consumes it.",
-                    "unused Result",
-                ).with_code("E042")
+                // A TAIL position (the fn's tail, a guard's else) does not drop
+                // the value: the Result IS the fn's value, so its error leaves
+                // through the fn's own error channel — the propagation is real
+                // and merely unspelled (#2277: the old "silently dropped" text
+                // was false for a `-> Unit` effect callee, and read as "no
+                // Result is involved"). Only a statement position drops it.
+                let (discarded, hint) = match what {
+                    "of this fn's tail value" => (
+                        "the tail of this `-> Unit` effect fn is a Result (an effect call's error channel), and its error propagates implicitly — ADR-0008 spells every propagation",
+                        "Write `expr!` to propagate it explicitly (the fn still fails on the error; nothing changes at run time), or `let _ = expr` to discard the error on purpose. Matching on ok/err also consumes it.",
+                    ),
+                    "of this guard's else value" => (
+                        "this guard's else value is a Result (an effect call's error channel) leaving a `-> Unit` fn, and its error propagates implicitly — ADR-0008 spells every propagation",
+                        "Write `expr!` to propagate it explicitly (the fn still fails on the error; nothing changes at run time), or `let _ = expr` to discard the error on purpose. Matching on ok/err also consumes it.",
+                    ),
+                    _ => (
+                        "this statement discards a Result — the error would be silently dropped",
+                        "Propagate it with `expr!`, or discard it on purpose with `let _ = expr` (the explicit-discard spelling, ADR-0008 D2). Matching on ok/err also consumes it.",
+                    ),
+                };
+                Diagnostic::error(discarded.to_string(), hint, "unused Result").with_code("E042")
             } else {
                 Diagnostic::error(
                     format!("implicit propagation {} was removed — this value is a Result (ADR-0008)", what),
@@ -482,11 +527,63 @@ impl Checker {
             // handles failure. The span is exact, so the fix-it is
             // offered and IDE/model-appliable — `almide fix` just won't
             // choose for the author.
-            if mechanical && s.end_col > s.col {
+            // And only when the span's text really ENDS the expression
+            // (#2250): a `Span` carries no end line, so a call whose `)` sits
+            // on a later line carries the span of its `(` alone, and a `!`
+            // inserted at that end column lands mid-call. A harness applying
+            // `suggestions[]` would corrupt the source, so a span whose text
+            // is not a closed call (or a bare name) — or that the source text
+            // cannot locate at all — gets the fix as display only, never as a
+            // position.
+            if mechanical
+                && s.end_col > s.col
+                && self.source_slice(s).is_some_and(|text| Self::fix_anchor_ends_expression(&text))
+            {
                 d = d.with_suggested_fix(s.line, s.end_col, s.end_col, "!");
             }
             self.diagnostics.push(d);
         }
+    }
+
+    /// #2250: whether inserting `!` right after `slice` (a span's text on its
+    /// own line) appends to a whole expression. True for a call closed on
+    /// this line — ends in `)` with its parentheses balanced outside string
+    /// literals — and for a bare (possibly dotted) name. False for the lone
+    /// `(` a multi-line call carries as its span, and for any span that stops
+    /// inside the expression it names.
+    pub(crate) fn fix_anchor_ends_expression(slice: &str) -> bool {
+        let s = slice.trim_end();
+        if s.is_empty() {
+            return false;
+        }
+        if s.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '.') {
+            return !s.ends_with('.');
+        }
+        if !s.ends_with(')') {
+            return false;
+        }
+        let (mut depth, mut in_str, mut prev) = (0i64, false, '\0');
+        for c in s.chars() {
+            if in_str {
+                if c == '"' && prev != '\\' {
+                    in_str = false;
+                }
+            } else {
+                match c {
+                    '"' => in_str = true,
+                    '(' => depth += 1,
+                    ')' => {
+                        depth -= 1;
+                        if depth < 0 {
+                            return false;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            prev = c;
+        }
+        depth == 0 && !in_str
     }
 
     fn validate_result_interpolations(&mut self) {

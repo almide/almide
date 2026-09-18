@@ -453,12 +453,15 @@ pub enum IrExprKind {
         index: u32,
     },
 
-    // ── Iterator chain (inserted by StdlibLoweringPass, Rust target) ──
+    // ── Iterator chain (inserted by StreamFusionPass, Rust target) ──
     /// Replaces runtime function calls for list operations with Rust iterator chains.
     /// `source.into_iter().step1().step2()...collector()`
     IterChain {
         source: Box<IrExpr>,
-        /// true = into_iter() (consumes Vec), false = iter() (borrows Vec)
+        /// true = `into_iter()` (consumes the Vec), false = `iter().cloned()`
+        /// (the source is a borrow; every step still sees an OWNED element,
+        /// exactly like the `almide_rt_list_*` runtime twins that clone per
+        /// element out of a `&[A]`).
         consume: bool,
         steps: Vec<IterStep>,
         collector: IterCollector,
@@ -476,6 +479,26 @@ pub enum IterStep {
     Filter { lambda: Box<IrExpr> },
     FlatMap { lambda: Box<IrExpr> },
     FilterMap { lambda: Box<IrExpr> },
+    /// `.take(n as usize)` — `list.take` fused into a pure chain (a
+    /// negative `n` wraps to a huge count and takes everything, the
+    /// runtime twin's `n as usize` behaviour).
+    Take { n: Box<IrExpr> },
+    /// `.enumerate()` re-indexed to Almide's `Int` (#2098): `list.enumerate`
+    /// as a chain SOURCE, so the pairs stream instead of materializing a
+    /// `Vec<(i64, T)>` the next stage immediately walks. Carries nothing —
+    /// the position comes from the iterator, not from the program.
+    Enumerate,
+}
+
+impl IterStep {
+    /// The step's callback, when it has one (`Take` carries a count, not a lambda).
+    pub fn lambda(&self) -> Option<&IrExpr> {
+        match self {
+            IterStep::Map { lambda } | IterStep::Filter { lambda }
+            | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => Some(lambda),
+            IterStep::Take { .. } | IterStep::Enumerate => None,
+        }
+    }
 }
 
 /// The terminal operation of an iterator chain.
@@ -493,6 +516,65 @@ pub enum IterCollector {
     Find { lambda: Box<IrExpr> },
     /// `.filter(|x| body).count() as i64`
     Count { lambda: Box<IrExpr> },
+    /// `list.sum` over the chain: `wrapping_add` fold for Int (C-056), `.sum()` for Float.
+    Sum { float: bool },
+    /// `list.len` over the chain: `.count() as i64`
+    Len,
+}
+
+impl IterCollector {
+    /// The collector's callback, when it has one.
+    pub fn lambda(&self) -> Option<&IrExpr> {
+        match self {
+            IterCollector::Fold { lambda, .. } | IterCollector::Any { lambda }
+            | IterCollector::All { lambda } | IterCollector::Find { lambda }
+            | IterCollector::Count { lambda } => Some(lambda),
+            IterCollector::Collect | IterCollector::Sum { .. } | IterCollector::Len => None,
+        }
+    }
+}
+
+/// The lambdas a chain's SOURCE element reaches, as `(binder, lambda)` in
+/// chain order: every step lambda up to and including the first one that
+/// produces a new element (`Map` / `FlatMap` / `FilterMap` — a `Filter`
+/// passes the element on, a `Take` never sees it), then the collector's
+/// lambda when the element still reaches it (a fold's second param, the
+/// predicate of `any` / `all` / `count`). `None` when the element leaves the
+/// chain as a value (`Collect`, `Find`), is re-shaped before any lambda sees
+/// it (`Enumerate`), or a callback is a stored closure value rather than a
+/// lambda literal: the source must then hand its elements over owned.
+///
+/// This is the one place that says which binder IS the source element, read
+/// by the ownership verdict (does the body consume it?), the clone pass
+/// (can it be bound `&T`?) and the renderer (`.iter()` vs `.iter().cloned()`).
+pub fn source_element_receivers<'a>(steps: &'a [IterStep], collector: &'a IterCollector) -> Option<Vec<(VarId, &'a IrExpr)>> {
+    fn param(lambda: &IrExpr, index: usize) -> Option<VarId> {
+        match &lambda.kind {
+            IrExprKind::Lambda { params, .. } => params.get(index).map(|(v, _)| *v),
+            _ => None,
+        }
+    }
+    let mut out = Vec::new();
+    for step in steps {
+        match step {
+            IterStep::Map { lambda } | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => {
+                out.push((param(lambda, 0)?, &**lambda));
+                return Some(out);
+            }
+            IterStep::Filter { lambda } => out.push((param(lambda, 0)?, &**lambda)),
+            IterStep::Take { .. } => {}
+            IterStep::Enumerate => return None,
+        }
+    }
+    match collector {
+        IterCollector::Fold { lambda, .. } => out.push((param(lambda, 1)?, &**lambda)),
+        IterCollector::Any { lambda } | IterCollector::All { lambda } | IterCollector::Count { lambda } => {
+            out.push((param(lambda, 0)?, &**lambda))
+        }
+        IterCollector::Collect | IterCollector::Find { .. } => return None,
+        IterCollector::Sum { .. } | IterCollector::Len => {}
+    }
+    Some(out)
 }
 
 // ── Structural recursion helpers ────────────────────────────────
@@ -690,6 +772,8 @@ impl IterStep {
             IterStep::Filter { lambda } => IterStep::Filter { lambda: Box::new(f(*lambda)) },
             IterStep::FlatMap { lambda } => IterStep::FlatMap { lambda: Box::new(f(*lambda)) },
             IterStep::FilterMap { lambda } => IterStep::FilterMap { lambda: Box::new(f(*lambda)) },
+            IterStep::Take { n } => IterStep::Take { n: Box::new(f(*n)) },
+            IterStep::Enumerate => IterStep::Enumerate,
         }
     }
 }
@@ -703,6 +787,8 @@ impl IterCollector {
             IterCollector::All { lambda } => IterCollector::All { lambda: Box::new(f(*lambda)) },
             IterCollector::Find { lambda } => IterCollector::Find { lambda: Box::new(f(*lambda)) },
             IterCollector::Count { lambda } => IterCollector::Count { lambda: Box::new(f(*lambda)) },
+            IterCollector::Sum { float } => IterCollector::Sum { float },
+            IterCollector::Len => IterCollector::Len,
         }
     }
 }

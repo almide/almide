@@ -53,7 +53,11 @@ fn raw_value(line: String) -> String = {
   else string.trim(list.slice(parts, 1, list.len(parts)) |> list.join("="))
 }
 
-fn unquote(v: String) -> String = if string.starts_with(v, '"') and string.ends_with(v, '"') and string.len(v) >= 2 then string.slice(v, 1, string.len(v) - 1)
+fn unquote(v: String) -> String = if string.starts_with(v, '"') and string.ends_with(v, '"') and string.len(v) >= 2 then string.slice(
+  v,
+  1,
+  string.len(v) - 1,
+)
 else v
 
 // The value after the FIRST `=`, with surrounding quotes stripped.
@@ -120,7 +124,15 @@ type Scan = { cur: Table, open: Bool, in_array: Bool, multi: String, multi_lines
 
 fn empty_table() -> Table = Table { scalars: [], array_key: "", array_items: [] }
 
-fn empty_scan() -> Scan = Scan { cur: empty_table(), open: false, in_array: false, multi: "", multi_lines: [], out: [], problems: [] }
+fn empty_scan() -> Scan = Scan {
+  cur: empty_table(),
+  open: false,
+  in_array: false,
+  multi: "",
+  multi_lines: [],
+  out: [],
+  problems: [],
+}
 
 fn is_table_header(l: String) -> Bool = {
   let t = string.trim(l)
@@ -141,11 +153,19 @@ fn array_item(line: String) -> String = {
   else t
 }
 
-fn with_scalar(t: Table, k: String, v: String) -> Table = Table { scalars: t.scalars + [
-  Pair { key: k, value: v }
-], array_key: t.array_key, array_items: t.array_items }
+fn with_scalar(t: Table, k: String, v: String) -> Table = Table {
+  scalars: t.scalars + [
+    Pair { key: k, value: v }
+  ],
+  array_key: t.array_key,
+  array_items: t.array_items,
+}
 
-fn with_item(t: Table, item: String) -> Table = Table { scalars: t.scalars, array_key: t.array_key, array_items: t.array_items + [item] }
+fn with_item(t: Table, item: String) -> Table = Table {
+  scalars: t.scalars,
+  array_key: t.array_key,
+  array_items: t.array_items + [item],
+}
 
 fn has_key(t: Table, k: String) -> Bool = t.scalars |> list.any((p) => p.key == k)
 
@@ -176,7 +196,10 @@ fn step_multi(s: Scan, line: String) -> Scan = if not string.contains(line, "'''
 // a header — means the array never closed. That is precisely the #1843 shape (C-274's array
 // ran on into C-275's header, and the old scanner swallowed the whole next contract as
 // elements): report it, close the array here, and read the line for what it is.
-fn step_array(s: Scan, n: Int, line: String) -> Scan = if closes_array(line) then { ...s, in_array: false } else if string.starts_with(string.trim(line), "{") then { ...s, cur: with_item(s.cur, array_item(line)) } else {
+fn step_array(s: Scan, n: Int, line: String) -> Scan = if closes_array(line) then { ...s, in_array: false } else if string.starts_with(
+  string.trim(line),
+  "{",
+) then { ...s, cur: with_item(s.cur, array_item(line)) } else {
   let msg = "`" + string.trim(line) + "` inside `" + s.cur.array_key + " = [` is not an inline-table element — the array is missing its `]`"
   step(problem({ ...s, in_array: false }, n, msg), n, line)
 }
@@ -187,15 +210,30 @@ fn step_array(s: Scan, n: Int, line: String) -> Scan = if closes_array(line) the
 fn step_scalar(s: Scan, n: Int, line: String) -> Scan = {
   let k = scalar_key(line)
   let v = raw_value(line)
-  if k == "" then problem(s, n, "`" + string.trim(line) + "` is not a key, a table header, or a comment")
+  if k == "" then problem(
+    s,
+    n,
+    "`" + string.trim(line) + "` is not a key, a table header, or a comment",
+  )
   else if not s.open then problem(s, n, "`" + k + " = …` before any `[[…]]` header is dropped")
-  else if opens_array(line) then { ...s, cur: { ...s.cur, array_key: k }, in_array: true } else if string.starts_with(v, "'''") then {
+  else if opens_array(line) then { ...s, cur: { ...s.cur, array_key: k }, in_array: true } else if string.starts_with(
+    v,
+    "'''",
+  ) then {
     let after = string.slice(v, 3, string.len(v))
     // TOML drops the newline right after the opener, so an empty `after` starts no line.
     let first: List[String] = if after == "" then []
     else [after]
-    if string.contains(after, "'''") then { ...s, cur: with_scalar(s.cur, k, list.get_or(string.split(after, "'''"), 0, "")) } else { ...s, multi: k, multi_lines: first }
-  } else if has_key(s.cur, k) then problem(s, n, "duplicate key `" + k + "` in " + block_name(s.cur) + " — the first value stands")
+    if string.contains(after, "'''") then { ...s, cur: with_scalar(
+      s.cur,
+      k,
+      list.get_or(string.split(after, "'''"), 0, ""),
+    ) } else { ...s, multi: k, multi_lines: first }
+  } else if has_key(s.cur, k) then problem(
+    s,
+    n,
+    "duplicate key `" + k + "` in " + block_name(s.cur) + " — the first value stands",
+  )
   else { ...s, cur: with_scalar(s.cur, k, unquote(v)) }
 }
 
@@ -209,9 +247,17 @@ else step_scalar(s, n, line)
 
 // End of input: an unfinished array or string is a problem, and the block being filled is filed.
 fn finish(s: Scan, n: Int) -> Scan = {
-  let s1 = if s.in_array then problem(s, n, "end of file inside `" + s.cur.array_key + " = [` — missing its `]`")
+  let s1 = if s.in_array then problem(
+    s,
+    n,
+    "end of file inside `" + s.cur.array_key + " = [` — missing its `]`",
+  )
   else s
-  let s2 = if s1.multi != "" then problem(s1, n, "end of file inside the `'''` string of `" + s1.multi + "`")
+  let s2 = if s1.multi != "" then problem(
+    s1,
+    n,
+    "end of file inside the `'''` string of `" + s1.multi + "`",
+  )
   else s1
   { ...s2, out: if s2.open then s2.out + [
     s2.cur
@@ -241,7 +287,10 @@ test "a multi-line evidence array, comments and blank lines read as one block" {
   assert_eq(list.len(d.tables), 1)
   let t = list.get_or(d.tables, 0, empty_table())
   assert_eq(table_get(t, "spec"), "ALS-T1")
-  assert_eq(t.array_items |> list.map((it) => inline_get(it, "path")), ["spec/wasm_cross/a.almd", "x.rs"])
+  assert_eq(
+    t.array_items |> list.map((it) => inline_get(it, "path")),
+    ["spec/wasm_cross/a.almd", "x.rs"],
+  )
   assert_eq(inline_num(list.get_or(t.array_items, 1, ""), "n"), "1000")
 }
 
@@ -252,9 +301,12 @@ test "an unclosed evidence array is reported, and the next [[contract]] still op
   let d = parse_doc(src)
   assert_eq(d.tables |> list.map((t) => table_get(t, "id")), ["C-274", "C-275"])
   assert_eq(d.tables |> list.map((t) => list.len(t.array_items)), [1, 1])
-  assert_eq(d.problems, [
-    "line 6: `[[contract]]` inside `evidence = [` is not an inline-table element — the array is missing its `]`"
-  ])
+  assert_eq(
+    d.problems,
+    [
+      "line 6: `[[contract]]` inside `evidence = [` is not an inline-table element — the array is missing its `]`"
+    ],
+  )
 }
 
 test "a header-less block inside an array is reported, and the first value stands" {
@@ -264,10 +316,13 @@ test "a header-less block inside an array is reported, and the first value stand
   let src = "[[contract]]\nid = \"C-275\"\nspec = \"ALS-R7\"\nevidence = [\n  { path = \"a.almd\", class = \"fixture\" },\n\nspec = \"ALS-I3\"\nevidence = [\n  { path = \"b.almd\", class = \"fixture\" },\n]\n"
   let d = parse_doc(src)
   assert_eq(d.tables |> list.map((t) => table_get(t, "spec")), ["ALS-R7"])
-  assert_eq(d.problems, [
-    "line 7: `spec = \"ALS-I3\"` inside `evidence = [` is not an inline-table element — the array is missing its `]`",
-    "line 7: duplicate key `spec` in C-275 — the first value stands"
-  ])
+  assert_eq(
+    d.problems,
+    [
+      "line 7: `spec = \"ALS-I3\"` inside `evidence = [` is not an inline-table element — the array is missing its `]`",
+      "line 7: duplicate key `spec` in C-275 — the first value stands"
+    ],
+  )
 }
 
 test "a ''' statement spanning lines is one value, and the key after it is read" {
@@ -282,10 +337,16 @@ test "a ''' statement spanning lines is one value, and the key after it is read"
 }
 
 test "an array or a ''' string left open at end of file is reported" {
-  assert_eq(parse_doc("[[contract]]\nid = \"C-001\"\nevidence = [\n").problems, [
-    "line 4: end of file inside `evidence = [` — missing its `]`"
-  ])
-  assert_eq(parse_doc("[[contract]]\nstatement = '''\nnever closed\n").problems, [
-    "line 4: end of file inside the `'''` string of `statement`"
-  ])
+  assert_eq(
+    parse_doc("[[contract]]\nid = \"C-001\"\nevidence = [\n").problems,
+    [
+      "line 4: end of file inside `evidence = [` — missing its `]`"
+    ],
+  )
+  assert_eq(
+    parse_doc("[[contract]]\nstatement = '''\nnever closed\n").problems,
+    [
+      "line 4: end of file inside the `'''` string of `statement`"
+    ],
+  )
 }

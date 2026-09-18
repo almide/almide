@@ -278,162 +278,10 @@ fn try_inline_intrinsic_exp_log(module: &str, func: &str, args: &[IrExpr], ty: &
     }
 }
 
-/// Try to lower a list.* call into an IterChain IR node.
-/// Returns None if the operation isn't iterator-eligible.
-fn try_lower_to_iter_chain(func: &str, args: Vec<IrExpr>, ty: &Ty, span: Option<almide_base::Span>) -> Option<IrExpr> {
-    match func {
-        "map" | "filter" | "flat_map" | "filter_map" =>
-            try_lower_to_iter_chain_transform(func, args, ty, span),
-        "fold" | "find" | "any" | "all" | "count" =>
-            try_lower_to_iter_chain_collector(func, args, ty, span),
-        _ => None,
-    }
-}
-
-/// `map`/`filter`/`flat_map`/`filter_map` group of `try_lower_to_iter_chain`
-/// (all "consuming operations (into_iter) → produce Vec"), extracted
-/// (cog>30 decomposition, pattern 1 — independent name-router arms,
-/// mirrors the `list_call_name` recipe). `args` is taken by value and
-/// consumed entirely within whichever single arm matches — no state
-/// shared across arms/groups.
-fn try_lower_to_iter_chain_transform(func: &str, mut args: Vec<IrExpr>, ty: &Ty, span: Option<almide_base::Span>) -> Option<IrExpr> {
-    match func {
-        // ── Consuming operations (into_iter) → produce Vec ──
-        "map" if args.len() >= 2 => {
-            let lambda = prepare_lambda(args.remove(1));
-            let source = args.remove(0);
-            Some(IrExpr {
-                kind: IrExprKind::IterChain {
-                    source: Box::new(source),
-                    consume: true,
-                    steps: vec![IterStep::Map { lambda: Box::new(lambda) }],
-                    collector: IterCollector::Collect,
-                },
-                ty: ty.clone(), span, def_id: None,
-            })
-        }
-        "filter" if args.len() >= 2 && matches!(args[1].kind, IrExprKind::Lambda { .. }) => {
-            let lambda = prepare_lambda_borrowed(args.remove(1));
-            let source = args.remove(0);
-            Some(IrExpr {
-                kind: IrExprKind::IterChain {
-                    source: Box::new(source),
-                    consume: true,
-                    steps: vec![IterStep::Filter { lambda: Box::new(lambda) }],
-                    collector: IterCollector::Collect,
-                },
-                ty: ty.clone(), span, def_id: None,
-            })
-        }
-        "flat_map" if args.len() >= 2 => {
-            let lambda = prepare_lambda(args.remove(1));
-            let source = args.remove(0);
-            Some(IrExpr {
-                kind: IrExprKind::IterChain {
-                    source: Box::new(source),
-                    consume: true,
-                    steps: vec![IterStep::FlatMap { lambda: Box::new(lambda) }],
-                    collector: IterCollector::Collect,
-                },
-                ty: ty.clone(), span, def_id: None,
-            })
-        }
-        "filter_map" if args.len() >= 2 => {
-            let lambda = prepare_lambda(args.remove(1));
-            let source = args.remove(0);
-            Some(IrExpr {
-                kind: IrExprKind::IterChain {
-                    source: Box::new(source),
-                    consume: true,
-                    steps: vec![IterStep::FilterMap { lambda: Box::new(lambda) }],
-                    collector: IterCollector::Collect,
-                },
-                ty: ty.clone(), span, def_id: None,
-            })
-        }
-        _ => None,
-    }
-}
-
-/// `fold`/`find`/`any`/`all`/`count` group of `try_lower_to_iter_chain`
-/// (all producing a scalar, via `IterCollector` rather than `steps`),
-/// extracted (cog>30 decomposition).
-fn try_lower_to_iter_chain_collector(func: &str, mut args: Vec<IrExpr>, ty: &Ty, span: Option<almide_base::Span>) -> Option<IrExpr> {
-    match func {
-        "fold" if args.len() >= 3 => {
-            let lambda = prepare_lambda(args.remove(2));
-            let init = args.remove(1);
-            let source = args.remove(0);
-            Some(IrExpr {
-                kind: IrExprKind::IterChain {
-                    source: Box::new(source),
-                    consume: true,
-                    steps: vec![],
-                    collector: IterCollector::Fold { init: Box::new(init), lambda: Box::new(lambda) },
-                },
-                ty: ty.clone(), span, def_id: None,
-            })
-        }
-        "find" if args.len() >= 2 && matches!(args[1].kind, IrExprKind::Lambda { .. }) => {
-            let lambda = prepare_lambda_borrowed(args.remove(1));
-            let source = args.remove(0);
-            Some(IrExpr {
-                kind: IrExprKind::IterChain {
-                    source: Box::new(source),
-                    consume: true,
-                    steps: vec![],
-                    collector: IterCollector::Find { lambda: Box::new(lambda) },
-                },
-                ty: ty.clone(), span, def_id: None,
-            })
-        }
-        // ── Borrowing operations (iter) → produce scalar ──
-        "any" if args.len() >= 2 => {
-            let lambda = prepare_lambda(args.remove(1));
-            let source = args.remove(0);
-            Some(IrExpr {
-                kind: IrExprKind::IterChain {
-                    source: Box::new(source),
-                    consume: true,
-                    steps: vec![],
-                    collector: IterCollector::Any { lambda: Box::new(lambda) },
-                },
-                ty: ty.clone(), span, def_id: None,
-            })
-        }
-        "all" if args.len() >= 2 => {
-            let lambda = prepare_lambda(args.remove(1));
-            let source = args.remove(0);
-            Some(IrExpr {
-                kind: IrExprKind::IterChain {
-                    source: Box::new(source),
-                    consume: true,
-                    steps: vec![],
-                    collector: IterCollector::All { lambda: Box::new(lambda) },
-                },
-                ty: ty.clone(), span, def_id: None,
-            })
-        }
-        "count" if args.len() >= 2 && matches!(args[1].kind, IrExprKind::Lambda { .. }) => {
-            let lambda = prepare_lambda_borrowed(args.remove(1));
-            let source = args.remove(0);
-            Some(IrExpr {
-                kind: IrExprKind::IterChain {
-                    source: Box::new(source),
-                    consume: true,
-                    steps: vec![],
-                    collector: IterCollector::Count { lambda: Box::new(lambda) },
-                },
-                ty: ty.clone(), span, def_id: None,
-            })
-        }
-        _ => None,
-    }
-}
-
 /// Prepare a lambda for consuming iterator ops (map, fold, flat_map, filter_map).
 /// Callback gets `T` (owned) — apply LambdaClone with smart single-use skip.
-fn prepare_lambda(arg: IrExpr) -> IrExpr {
+/// Shared with `StreamFusionPass`, which builds the `IterChain` nodes.
+pub(crate) fn prepare_lambda(arg: IrExpr) -> IrExpr {
     let ty = arg.ty.clone();
     let span = arg.span;
     match arg.kind {
@@ -458,9 +306,11 @@ fn prepare_lambda(arg: IrExpr) -> IrExpr {
     }
 }
 
-/// Prepare a lambda for borrowing iterator ops (filter, find, any, all, count).
-/// Callback gets `&T` — need deref/clone bindings to convert to owned `T`.
-fn prepare_lambda_borrowed(arg: IrExpr) -> IrExpr {
+/// Prepare a lambda for the iterator ops whose Rust adapter hands the
+/// callback `&T` (`filter`, `find`, the `count` filter) — deref/clone
+/// bindings convert it to the owned `T` the body was typed against.
+/// Shared with `StreamFusionPass`.
+pub(crate) fn prepare_lambda_borrowed(arg: IrExpr) -> IrExpr {
     let ty = arg.ty.clone();
     let span = arg.span;
     match arg.kind {

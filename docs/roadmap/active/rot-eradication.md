@@ -1,3 +1,4 @@
+<!-- description: The decay map of compiler rot and its reference-backed cures -->
 # rot-eradication — the decay map and its reference-backed cures
 
 **Status**: active (constitution written 2026-08-15, after the result-family

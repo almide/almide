@@ -21,6 +21,9 @@ impl NanoPass for ResultPropagationPass {
         None // Run for all targets
     }
 
+    /// Inserts `Try` on effect calls once the stdlib calls have their final targets.
+    fn depends_on(&self) -> Vec<&'static str> { vec!["StdlibLowering", "EffectInference"] }
+
     fn run(&self, mut program: IrProgram, target: Target) -> PassResult {
         // Result wrapping is Rust/WASM-only. (The TS target and its ResultErasurePass were removed.)
         let wrap_non_result = matches!(target, Target::Rust);

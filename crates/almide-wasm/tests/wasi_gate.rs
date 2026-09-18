@@ -51,7 +51,7 @@ fn corpus_reproduces_on_stock_wasmtime() {
     let mut swept = 0usize;
     let mut skipped = 0usize;
     let mut failures: Vec<String> = Vec::new();
-    for line in manifest.lines() {
+    for line in almide_corpus::manifest_rows(&manifest) {
         let mut it = line.splitn(3, '\t');
         let want_hash = it.next().expect("manifest row");
         let want_exit: i32 = it.next().expect("manifest row").parse().expect("exit");

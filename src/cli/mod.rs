@@ -21,6 +21,7 @@ mod ide;
 mod fix;
 mod docs_gen;
 mod cargo_build;
+mod js_host;
 
 // `cargo_build_cdylib`/`cargo_build_generated`/`cargo_build_generated_with_native`/
 // `cargo_build_test_with_native` are called from sibling modules (`build.rs`,
@@ -33,7 +34,7 @@ pub use build::{cmd_build, BuildArgs};
 pub use bench::cmd_bench;
 pub use compile::cmd_compile;
 pub use emit::{cmd_emit, EmitArgs};
-pub use check::{cmd_check, cmd_check_json, cmd_check_effects};
+pub use check::{cmd_check, cmd_check_package, cmd_check_json, cmd_check_json_package, cmd_check_effects};
 pub use commands::{cmd_init, cmd_test, cmd_test_fast, cmd_test_json, cmd_test_update_snapshots, cmd_test_wasm, cmd_fmt, cmd_clean, FmtMode};
 pub use install::cmd_install;
 pub use selfupdate::cmd_self_update;
@@ -108,7 +109,7 @@ pub(crate) fn render_v1_native_or_fallback(file: &str, rs_code: String) -> Strin
     let source_text = std::fs::read_to_string(file).unwrap_or_default();
     match almide_mir::pipeline::try_render_rust_source(&source_text) {
         Ok(v1_code) => {
-            if std::env::var("ALMIDE_VERIFIED_DEBUG").is_ok() {
+            if almide_base::env::flag("ALMIDE_VERIFIED_DEBUG") {
                 err(&format!("native: v1 trust-spine render"));
             }
             v1_code
@@ -144,7 +145,7 @@ pub(crate) fn render_v1_native_or_fallback(file: &str, rs_code: String) -> Strin
             // false warning. `-v` / ALMIDE_VERBOSE=1 (or the deeper
             // ALMIDE_VERIFIED_DEBUG) surfaces it for native-rung-coverage
             // debugging. The wasm leg is untouched: there a wall IS an error.
-            if std::env::var("ALMIDE_VERBOSE").is_ok() || std::env::var("ALMIDE_VERIFIED_DEBUG").is_ok() {
+            if almide_base::env::flag("ALMIDE_VERBOSE") || almide_base::env::flag("ALMIDE_VERIFIED_DEBUG") {
                 err(&format!("note: verified native render walled — building via the standard codegen\n  reason: {e}"));
             }
             rs_code

@@ -1,0 +1,15 @@
+import self.lex
+import self.lang_go
+import env
+import fs
+
+effect fn main() -> Unit = {
+  let path = env.args()[0]
+  let source = fs.read_text(path)!
+  let tokens = lex.tokenize(source, lang_go.spec())!
+  var total = 0
+  for token in tokens {
+    total = total + string.len(token.kind) + string.len(token.text) + token.start + token.end
+  }
+  println(int.to_string(total))
+}

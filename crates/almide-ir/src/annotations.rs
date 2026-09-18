@@ -1,5 +1,5 @@
 use std::collections::{HashSet, HashMap, BTreeSet};
-use crate::{VarId, IrExpr};
+use crate::{VarId, IrExpr, ParamBorrow};
 
 /// How a variable is stored at the Rust codegen level.
 ///
@@ -34,6 +34,23 @@ pub struct CodegenAnnotations {
     /// placed the body's clones and moves. A bare (moving) use, a `&mut`, a
     /// closure capture, a match on `x`, or a tuple binder keeps `.cloned()`.
     pub borrowed_loop_vars: HashSet<VarId>,
+    /// Payload binders of a `match` whose subject is a by-reference param
+    /// (a variant param the borrow pass keeps `&T`) or another such binder:
+    /// Rust's default binding modes bind them `&T`. Decided by
+    /// `BorrowLoweringPass`; the walker's box-pattern rewrite reads it to
+    /// spell a borrowed subject's guards and move-outs through the reference.
+    pub ref_binders: HashSet<VarId>,
+    /// First parameter of every iterator-chain step / collector lambda: the
+    /// closure runs synchronously inside the chain and never escapes it, so
+    /// it renders without `move` and borrows what it reads for the chain's
+    /// duration. Decided by StreamFusion, which builds the chains. (A lambda
+    /// at a callee's `&dyn Fn` slot, #2288, is the same kind of scope; the
+    /// walker reads that one off the `Borrow` node `BorrowInsertion` spells
+    /// around it, so a zero-param lambda needs no entry here.)
+    pub borrowed_lambda_params: HashSet<VarId>,
+    /// List-field loops whose owned root is dead after the head evaluation.
+    /// The body needs owned elements, so move them with into_iter rather than clone.
+    pub consumed_loop_vars: HashSet<VarId>,
     /// `let r = <lit>..<e` binders whose EVERY read is a single-variable
     /// `for-in` head (#1857, the native twin of the wasm leg's #1400
     /// `range_counting_vars`). The walker binds them as a bare
@@ -151,15 +168,12 @@ pub struct CodegenAnnotations {
     /// bare move: a wrong decision here is a LOUD E0382/E0505 codegen bug,
     /// never a silent wrong value.
     pub tco_owned_params: HashSet<VarId>,
-    /// The functions TailCallOpt actually rewrote into loops — the SCOPE of
-    /// `tco_owned_params`. The exemption is a promise about the rewritten
-    /// body ("every consuming read there is Clone-wrapped or a deliberate
-    /// per-path-final move"), and a VarId can appear in ANOTHER function:
-    /// `branch_lift` lifts an in-loop branch into a helper whose params are
-    /// the enclosing fn's free vars, so the helper inherited the exemption
-    /// without the compensating plan and its bare moves became a rustc
-    /// E0382 (#1130). Consulted per function by CloneInsertion.
-    pub tco_rewritten_fns: HashSet<almide_base::intern::Sym>,
+    /// Every fn param's final borrow mode, by var (#2186): the ONE table the
+    /// walker consults where a param's mode still decides a statement's
+    /// spelling — a reassignment THROUGH a `&mut` param is `*p = v`. Published
+    /// by `BorrowLoweringPass` after TCO has forced its loop params owned, so
+    /// the modes are the ones the signatures render with.
+    pub param_borrows: HashMap<VarId, ParamBorrow>,
 }
 
 impl CodegenAnnotations {

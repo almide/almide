@@ -231,7 +231,7 @@ fn every_diagnostic_doc_declares_a_fix_it_verdict() {
 fn machine_fix_codes() -> std::collections::BTreeSet<&'static str> {
     // Kept as a literal so the backlog report needs no source scan; update
     // when converting a code (the conversion PR flips its entry here).
-    ["E013", "E031", "E049", "E052"].into_iter().collect()
+    ["E013", "E031", "E049", "E052", "E062"].into_iter().collect()
 }
 
 #[test]

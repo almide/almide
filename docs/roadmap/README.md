@@ -7,15 +7,17 @@
 
 ## Active
 
-82 items
+92 items
 
 | Item | Description |
 |------|-------------|
 | [AlmidePerceusBelt](active/almide-perceus-belt.md) | AlmidePerceusBelt — formal memory safety guarantee for Almide |
+| [全軸制覇への突破点 — アリーナと近隣比較から導いた設計指針](active/arena-breakthroughs.md) | 全軸制覇への突破点台帳 — 近隣アリーナの実測と 18 近隣コンパイラの機構読みから、どの軸で負けていて何を突破すれば世界一かを、勝利条件・ゲート・順序つきで固定する |
 | [Async Inception — logical time as the language's time base](active/async-inception.md) | The async inception: thesis, grammar, semantics, proofs, claim and plan in one charter |
 | [The 2026 Async Claim — audit and the runaway plan](active/async-world-claim.md) | Audit of the best-async-of-2026 claim: the axis, the rivals, the five runaway moves |
 | [Behavioral Contract — 機械生成コードの「機能正しさ」を、王者の土俵を避けて取る層](active/behavioral-contract.md) | 機能正しさを王者(Dafny/F*/SPARK/Lean)の土俵を避けて取る層。C-FAITHFUL の上に C-PRESERVED(差分保存)と C-ASSERTED(批准性質)を積む。仕様の出所を機械生成レジームへずらす戦略。 |
 | [Build Speed: Runtime rlib + Hot-Fn Inlining](active/build-speed-runtime-rlib.md) | Native build-speed — precompiled almide_rt runtime rlib, and recovering the shipping-build inlining gap with #[inline] |
+| [Camp-4, generalised: make heap-result `match` total instead of recognised](active/camp4-general-heap-match.md) | Make heap-result match total rather than recognised, in lowering only |
 | [Certificate Format v1 — design](active/certificate-format-v1.md) | The per-function ownership-certificate format — the i/a/d/m alphabet, call/branch/closure extensions, and which bricks have shipped |
 | [Certification-Grade Hardening — 認証級への硬化](active/certification-grade.md) | Certification-grade hardening — adopt the mechanisms of DO-178C / ISO 26262 / IEC 61508 (spec, traceability, coverage, tool qualification, dossier) for the machine-written-software trust layer |
 | [CI Warnings Cleanup](active/ci-warnings-cleanup.md) | Standing ledger of compiler warnings CI tolerates, and the plan to drive each class to zero |
@@ -28,13 +30,14 @@
 | [Cross-Target Completeness (the Lid)](active/cross-target-completeness.md) | Cross-target completeness lid — the staged path from "all known divergences fixed + byte-diff gate" to structural equivalence (drain → interpreter+fuzz → selfhost → kernel proofs), with the live drain queue |
 | [The Determinism / Purity Belt](active/determinism-belt.md) | Determinism/Purity Belt — a Perceus-analog that makes the compiler deterministic & target-portable by construction |
 | [Deterministic Bounds — legalising a bound on computation under byte-identity](active/deterministic-bounds.md) | Legalising fan.timeout under byte-identity — fuel, deterministic allocation, winner order, effect isolation |
+| [edit-locality theory — the theorem Almide exists to prove](active/edit-locality-theory.md) | Turn bounded edit blast radius from design instinct into a proven theorem |
 | [Capability-Based Effect System](active/effect-system-capability.md) | Capability-based effect system for sandboxed AI agent containers |
 | [Blueprint — making the ~27 effectful / raw-pointer stdlib fns FUNCTIONAL in v1](active/effectful-27-blueprint.md) | Blueprint for making the ~27 effectful / raw-pointer stdlib fns functional on the v1 leg, split by real cause |
 | [Execution Inception — as-if 規則を、並行と target の向こうまで完成させる](active/execution-inception.md) | The execution inception: the as-if rule completed across concurrency and targets |
 | [Fan v2 — reference examples](active/fan-v2-examples.md) | Reference examples for the fan v2 surface: every head, edge semantics, diagnostics |
 | [Fan v2 — one execution-policy grammar](active/fan-v2.md) | Fan v2: the execution-policy grammar — heads x forms, thunk-free, typed budgets |
 | [Flight Evidence Gaps — 実地監査所見台帳](active/flight-evidence-gaps.md) | Hands-on internal audit findings (2026-07-03) — the measured distance between DAL-A philosophy and DAL-A evidence, as 7 findings with corrective work items and acceptance criteria |
-| [Flight-grade: the organization and track-record rungs](active/flight-organization.md) |  |
+| [Flight-grade: the organization and track-record rungs](active/flight-organization.md) | Flight-grade sections B and C: legal entity, engagement, funding, customer |
 | [Flight Profile — 航空品質への接地分析と2つのキーストーン](active/flight-profile.md) | DO-178C flight-grade gap analysis: 6 pillars status + 2 engineering keystones |
 | [Flight Qualification — DO-178C/DO-330/DO-333 マッピング + 資格化キット(G-F5 + G-F6)](active/flight-qualification.md) | Flight gates G-F5 + G-F6 — how the PCC certificate/receipt maps to DO-178C Table A objectives, the DO-330 "prove-the-checker" tool-qualification argument (compiler→TQL-5 output-verified, checker→qualified-by-proof), the DO-333 formal-methods credit per proven property, and the G-F6 qualification kit as a product (AbsInt/SCADE-KCG model): what's in the kit, the boundary (kit provides vs customer's domain process), and the customer integration story. |
 | [Flight Reference App — PID 制御則カーネル + make verify + receipt(G-F4)](active/flight-reference-app.md) | Flight gate G-F4 — the reference application (a fixed-point Q16.16 PID control-law kernel over a counted sim loop) that passes `make verify` end-to-end, the 7-stage verify pipeline (exist vs gated on keystones), the receipt it emits (C-SAFE/C-PROVEN green, C-WCET/C-FAITHFUL pending), and the de-risking order (Slice 0 scalar-no-print green now → Slice 1 print=G-F0 frontier → Slice 2 keystone-あ unlocks C-WCET → Slice 3 keystone-い unlocks Ferrocene). |
@@ -45,12 +48,14 @@
 | [Integer literal domain — cross-language survey and Almide's target](active/integer-literal-domain.md) | How other languages range-check integer literals, and where Almide should land |
 | [StringInterp is NOT special syntax — desugar it to `concat + to_string(part)`](active/interp-is-desugar-to-tostring.md) | Retiring StringInterp as special syntax by desugaring it to concat + to_string(part) |
 | [Issue Ledger Burn-down — 完全性キャンペーンの残量計](active/issue-ledger-burndown.md) | The issue-ledger burn-down gauge: keeping the open-issue count an honest measure of remaining work |
+| [#1437: the lifted carrier's ABI — declaration-driven, one readable layout](active/lifted-carrier-abi.md) | #1437: one declaration-driven carrier layout instead of producer drift |
 | [LLM-first Language](active/llm-first-language.md) | Plan to make Almide the language LLMs write most accurately, measured by dojo MSR |
 | [Logical-Time Async — the async grammar design](active/logical-time-async.md) | The async grammar: fuel as the logical clock, deterministic race, oracle tier |
 | [Logical-Time Async — the implementation blueprint](active/logical-time-implementation.md) | Implementation blueprint: Op::Charge, fuel ABI, metered clones, race lowering, gates |
 | [Logical-Time Async — the proof ledger](active/logical-time-proofs.md) | Proof ledger for the logical-time async semantics: theorems, Lean core, model gate |
 | [Map / Set data-structure roadmap](active/map-data-structure-roadmap.md) | Map / Set data-structure roadmap, including the rejected seq-in-entry design and why it was wrong |
 | [Reviving the monkey regression suite: what `spec/` actually is](active/mir-caps-call-count-breach.md) | spec/ is the trust spine's v0 corpus, not a test directory — the revived monkey suite grows two shrink-only ratchets and breaches the caps-soundness backstop |
+| [Mission-critical attack list](active/mission-critical-attack-list.md) | Tiered list making Almide defensibly usable in mission-critical domains |
 | [native: nested ctor/literal pattern at a Box'd (recursive-variant) field](active/native-boxed-pattern-lowering.md) | Native lowering for a nested ctor/literal pattern at a Box'd recursive-variant field |
 | [Native Trust Spine — Perceus as the single memory model (#764)](active/native-trust-spine.md) | Routing almide build --target rust through the same v1 Perceus MIR as wasm, so one memory model serves both legs |
 | [Outside-Review Audit 2026-07 — 証拠層の負債バーンダウン](active/outside-review-audit-2026-07.md) | The 2026-07-27 five-lens outside-reviewer audit — the evidence layer lagged the v0→v1 transition and the honesty gradient inverted (internal docs honest, outward claims false); the layered burn-down to "zero false claims, every gate real" with issue links #913-#932 |
@@ -59,7 +64,12 @@
 | [Protocols: declared conformance + opt-in `any P`](active/protocol-any-existentials.md) | Declared conformance + opt-in `any P` existentials — take Go's interface-value ergonomics without its implicit-satisfaction and nil-interface traps; the one Swift idea worth stealing, none of the rest |
 | [Receipt Logic — 受領書の論理](active/receipt-logic.md) | Formal foundation for the trust layer — receipt logic: claim types, threat model, trust bases, falsification procedures, completeness relative to use-case |
 | [reconciliation follow-up — v0.28.0 で見送った develop 側の残件](active/reconciliation-followup.md) | v0.28.0 reconciliation follow-up: deferred develop commits for 0.28.1 |
+| [result-family-from-type — layout is a function of the type, names only choose code](active/result-family-from-type.md) | Derive call-result layout from the type, not from module/func name tables |
+| [Return-op eradication: one desugar for `!`, position zoo deleted](active/return-op-eradication.md) | One desugar for the ! operator, deleting the per-position return-op zoo |
+| [rot-eradication — the decay map and its reference-backed cures](active/rot-eradication.md) | The decay map of compiler rot and its reference-backed cures |
 | [Self-host linking v2 — link the mono instances, retire the twin matrix](active/selfhost-link-v2.md) | Self-host linking v2 — retire the shim registry's per-type twins by linking the monomorphized generic bodies the renderer already produces |
+| [Shell scripting stance: structured pipelines, no interactive shell](active/shell-scripting-surface.md) | Take Nushell's data model for scripts; do not build an interactive shell |
+| [Test-surface 25× — the road to reference-compiler scale](active/test-surface-25x.md) | Grow the committed test surface 25x toward reference-compiler scale |
 | [Ticks interface audit — is the demanded API shape different?](active/ticks-interface-audit.md) | Audit of ticks against timeout-shaped APIs: the unwritable-number problem, three fixes |
 | [Trust Layer — 機械が書くソフトウェアの信頼層](active/trust-layer.md) | Category strategy — winning "the trust layer for machine-written software": MWS Trust Levels, receipts, critical path |
 | [Type Where Constraints](active/type-where-constraints.md) | where clauses on type/fn definitions for type constraints |
@@ -92,11 +102,11 @@
 | [WASM Reference-Count Frees: the Ownership-Discipline Drain](active/wasm-frees-ownership-discipline.md) | Draining the reference-count frees backlog by making the ownership discipline mechanical |
 | [WASM 所有権 emit 層の機械化 (Perceus drift の構造的封じ込め)](active/wasm-ownership-emit-mechanization.md) | Mechanizing the WASM ownership emit layer to contain Perceus drift structurally |
 | [WASM Platform Frontier — beyond core Wasm 3.0](active/wasm-platform-frontier.md) | Post-Wasm-3.0 platform tracking — WASI 0.3 / Component Model, stack switching, shared-everything-threads |
-| [Zero Committed Shell](active/zero-committed-shell.md) | Drive committed shell to zero; the two primitives that block it |
+| [The gate language boundary](active/zero-committed-shell.md) | Which gates belong in Almide and which stay bash, and how the line is held |
 
 ## On Hold
 
-30 items
+31 items
 
 | Item | Description |
 |------|-------------|
@@ -119,6 +129,7 @@
 | [Package Version Resolution](on-hold/package-version-resolution.md) | MVS version resolution with semver constraints for almide.toml |
 | [Performance Research: Path to World #1](on-hold/performance-research.md) | Research plan to surpass hand-written Rust via semantic-aware optimization |
 | [Porta Embedded — Sub-10KB Almide IoT Agents on WASI Hosts](on-hold/porta-embedded.md) | Porta-style WASI agent runtime for IoT: <10KB Almide guests on tiny hosts |
+| [Process composition: a pipeline is a value, running it is a separate step](on-hold/process-composition.md) | Build a command pipeline as a value and make running it one explicit step; parked until a real need appears |
 | [Rainbow Bridge — Wrap External Code as Almide Packages](on-hold/rainbow-bridge.md) | Wrap external Rust/TS/Python code as native Almide packages via @extern |
 | [Region-based Memory Management](on-hold/region-inference.md) | Region-based memory management — Phase 1+2 shipped, Phase 3 (full inference) on hold for server workloads |
 | [Research: Modification Survival Rate Paper](on-hold/research-modification-survival-rate-paper.md) | Academic paper measuring LLM code modification survival across languages |
@@ -128,7 +139,7 @@
 | [Snapshot Testing](on-hold/snapshot-testing.md) | Built-in snapshot testing for output regression detection |
 | [Supervision & Actors](on-hold/supervision-and-actors.md) | Erlang-style actors, supervisors, and typed channels as stdlib modules |
 | [WASM Exception Handling](on-hold/wasm-exception-handling.md) | WASM native exception handling (try_table/throw) for zero-cost effect fn error propagation |
-| [WASM HTTP Client](on-hold/wasm-http-client.md) | HTTP client support for the WASM target via WASI or host imports |
+| [WASM HTTP Client](on-hold/wasm-http-client.md) | Current wasm HTTP lanes and their target-availability authority |
 | [Web Framework](on-hold/web-framework.md) | First-party Hono-like web framework with template and Codec integration |
 
 ## Done

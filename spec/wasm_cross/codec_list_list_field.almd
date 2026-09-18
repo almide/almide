@@ -6,11 +6,14 @@ import json
 type G: Codec = { grid: List[List[String]], rows: Int }
 
 effect fn main() -> Unit = {
-  let g = G { grid: [
-    ["a", "b"],
-    [],
-    ["c"]
-  ], rows: 3 }
+  let g = G {
+    grid: [
+      ["a", "b"],
+      [],
+      ["c"]
+    ],
+    rows: 3,
+  }
   let enc = json.stringify(G.encode(g))
   println(enc)
   let d = G.decode(json.parse(enc)!)!

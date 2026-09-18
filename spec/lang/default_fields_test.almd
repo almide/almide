@@ -34,10 +34,13 @@ test "default fields - empty list default" {
 }
 
 test "default fields - list with items" {
-  let g = Group { label: "shapes", items: [
-    Circle { radius: 1.0 },
-    Circle { radius: 2.0 }
-  ] }
+  let g = Group {
+    label: "shapes",
+    items: [
+      Circle { radius: 1.0 },
+      Circle { radius: 2.0 }
+    ],
+  }
   assert_eq(describe(g), "shapes (2 items)")
 }
 

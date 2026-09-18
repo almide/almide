@@ -57,7 +57,7 @@ fn wrap_call_args_for_target(args: Vec<IrExpr>, target: &CallTarget, sigs: &Hash
     let Some(name) = callee_name else { return args; };
     // ALMIDE_DBG_BORROW=<substr>: name the two keys this call site consults
     // and what each resolved to (companion of the per-iteration sig dump).
-    if let Ok(filter) = std::env::var("ALMIDE_DBG_BORROW")
+    if let Some(filter) = almide_base::env::var("ALMIDE_DBG_BORROW")
         && name.contains(&filter)
     {
         let direct = sigs.get(&name).cloned();
@@ -156,20 +156,30 @@ fn rewrite_calls(expr: IrExpr, sigs: &HashMap<String, Vec<ParamBorrow>>, mod_sco
 
         // ── Opaque to this rewriter ──
         //
-        // A `TailCall` is already committed, an `RcWrap` is a closure-value
-        // box, and `InlineRust` args are rendered verbatim by the template —
-        // annotating inside any of them would change code the walker no longer
-        // owns.
+        // A `TailCall` is already committed and an `RcWrap` is a closure-value
+        // box — annotating inside either would change code the walker no
+        // longer owns.
         kind @ (IrExprKind::TailCall { .. }
-        | IrExprKind::RcWrap { .. }
-        | IrExprKind::InlineRust { .. }) => kind,
-        // IterChain: only the source is a call site the walker still renders;
-        // the steps and collector are already-lowered iterator adaptors.
+        | IrExprKind::RcWrap { .. }) => kind,
+        // An `InlineRust` template splices each arg's TEXT verbatim, so the
+        // arg itself takes no slot decoration — but a call nested inside an
+        // arg is an ordinary call site the walker still renders, and its own
+        // arguments follow its callee's signature. The region window
+        // (`almide_region_window(|| __rgn_check(__rgn_make(d)))`, #1961) is
+        // one: `__rgn_check` borrows its tree once variants borrow, and the
+        // site must spell `&__rgn_make(d)`.
+        IrExprKind::InlineRust { template, args } => IrExprKind::InlineRust {
+            template,
+            args: args.into_iter().map(|(n, a)| (n, rewrite_calls(a, sigs, mod_scope))).collect(),
+        },
+        // IterChain: the source, every step / collector lambda body, a fold's
+        // seed and a take's count are all call sites the walker renders
+        // (the pass runs before this one now).
         IrExprKind::IterChain { source, consume, steps, collector } => IrExprKind::IterChain {
             source: Box::new(rewrite_calls(*source, sigs, mod_scope)),
             consume,
-            steps,
-            collector,
+            steps: steps.into_iter().map(|s| map_step(s, &mut |e| rewrite_calls(e, sigs, mod_scope))).collect(),
+            collector: map_collector(collector, &mut |e| rewrite_calls(e, sigs, mod_scope)),
         },
 
         // ── Statement-bearing nodes: bodies go through `rewrite_calls_stmt` ──
@@ -247,6 +257,12 @@ pub fn hoist_conflicting_reads(program: &mut IrProgram) {
             func.body = hoist_expr(std::mem::take(&mut func.body), &mut program.var_table);
         }
     }
+}
+
+/// Does `arg` read `var` anywhere (closure bodies included)? A sibling of a
+/// `&mut var` argument that does is the conflicting read the hoist moves out.
+fn reads_var(arg: &IrExpr, var: VarId) -> bool {
+    UseSites::of_expr(arg, Site::Operand, &super::use_kind::ExplicitBorrows).occurs(var)
 }
 
 /// Find VarId of a `&mut Var(x)` argument.
@@ -368,11 +384,43 @@ fn hoist_expr(expr: IrExpr, vt: &mut VarTable) -> IrExpr {
             | IrExprKind::RustMacro { .. } | IrExprKind::ToVec { .. }
             | IrExprKind::RenderedCall { .. } | IrExprKind::InlineRust { .. }
             | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. }
-            | IrExprKind::IterChain { .. } | IrExprKind::Hole
+            | IrExprKind::Hole
             | IrExprKind::Todo { .. }) => kind,
+        IrExprKind::IterChain { source, consume, steps, collector } => IrExprKind::IterChain {
+            source: Box::new(hoist_expr(*source, vt)),
+            consume,
+            steps: steps.into_iter().map(|s| map_step(s, &mut |e| hoist_expr(e, vt))).collect(),
+            collector: map_collector(collector, &mut |e| hoist_expr(e, vt)),
+        },
     };
 
     IrExpr { kind, ty, span, def_id: None }
+}
+
+/// Apply `f` to a chain step's expression child (its lambda or count).
+fn map_step(step: IterStep, f: &mut dyn FnMut(IrExpr) -> IrExpr) -> IterStep {
+    match step {
+        IterStep::Map { lambda } => IterStep::Map { lambda: Box::new(f(*lambda)) },
+        IterStep::Filter { lambda } => IterStep::Filter { lambda: Box::new(f(*lambda)) },
+        IterStep::FlatMap { lambda } => IterStep::FlatMap { lambda: Box::new(f(*lambda)) },
+        IterStep::FilterMap { lambda } => IterStep::FilterMap { lambda: Box::new(f(*lambda)) },
+        IterStep::Take { n } => IterStep::Take { n: Box::new(f(*n)) },
+        IterStep::Enumerate => IterStep::Enumerate,
+    }
+}
+
+/// Apply `f` to a collector's expression children (its lambda and seed).
+fn map_collector(collector: IterCollector, f: &mut dyn FnMut(IrExpr) -> IrExpr) -> IterCollector {
+    match collector {
+        IterCollector::Fold { init, lambda } => IterCollector::Fold { init: Box::new(f(*init)), lambda: Box::new(f(*lambda)) },
+        IterCollector::Any { lambda } => IterCollector::Any { lambda: Box::new(f(*lambda)) },
+        IterCollector::All { lambda } => IterCollector::All { lambda: Box::new(f(*lambda)) },
+        IterCollector::Find { lambda } => IterCollector::Find { lambda: Box::new(f(*lambda)) },
+        IterCollector::Count { lambda } => IterCollector::Count { lambda: Box::new(f(*lambda)) },
+        IterCollector::Collect => IterCollector::Collect,
+        IterCollector::Sum { float } => IterCollector::Sum { float },
+        IterCollector::Len => IterCollector::Len,
+    }
 }
 
 /// A `Call` site: hoist its args and its Method/Computed target first, then let
@@ -418,7 +466,7 @@ fn hoist_runtime_call(
         .map(|arg| {
             if find_mut_borrow_var(&arg).is_some() {
                 arg // keep the &mut arg as-is
-            } else if uses_var(&arg, mut_id) {
+            } else if reads_var(&arg, mut_id) {
                 hoist_one_arg(arg, &mut hoisted_stmts, vt)
             } else {
                 arg
@@ -451,7 +499,7 @@ fn hoist_call_if_needed(target: CallTarget, args: Vec<IrExpr>, type_args: Vec<al
         let new_args: Vec<IrExpr> = args.into_iter().map(|arg| {
             if find_mut_borrow_var(&arg).is_some() {
                 arg
-            } else if uses_var(&arg, mut_id) {
+            } else if reads_var(&arg, mut_id) {
                 hoist_one_arg(arg, &mut hoisted_stmts, vt)
             } else {
                 arg

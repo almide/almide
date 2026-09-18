@@ -1,0 +1,10 @@
+effect fn burn(seed: Int) -> Int = {
+  var acc = seed
+  var i = 0
+  while i < 20_000_000 { acc = (acc * 31 + i) % 1000003; i = i + 1 }
+  acc
+}
+effect fn main() -> Unit = {
+  let r = fan { burn(1), burn(2), burn(3), burn(4), burn(5), burn(6), burn(7), burn(8) }
+  println("fanblock " + int.to_string(r.0 + r.1 + r.2 + r.3 + r.4 + r.5 + r.6 + r.7))
+}

@@ -110,6 +110,15 @@ fn result_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String
         "filter" if !matches!(arg_tys.get(2), Some(Ty::String)) => {
             Some("result.filter_x".to_string())
         }
+        // `map_err` is the other combinator whose E instantiation is pinned by
+        // its argument — the closure's RETURN is the new E. Every registered
+        // twin declares `f: (String) -> String`, so a closure handing back a
+        // SCALAR error (`result.map_err(r, (_) => 404)`) is a `call_indirect`
+        // type mismatch at run time (the #2154 class; found by the #2184
+        // router gate). No scalar-E twin exists: refuse, never fall through.
+        "map_err" if matches!(arg_tys.get(1), Some(Ty::Fn { ret, .. }) if !is_heap_ty(ret)) => {
+            Some("result.map_err_x".to_string())
+        }
         // zip reads BOTH results' tags, and the scalar shim is len-as-tag on
         // EACH side — so a heap-Ok SECOND argument misreads exactly like a
         // heap-Ok first: `zip(ok(1.0), ok("abc"))` linked the shim through the

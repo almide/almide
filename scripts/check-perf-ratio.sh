@@ -13,7 +13,10 @@
 # the gated pairs are the same-shape references (nbody_unrolled, not the
 # array-based nbody ref — that one Almide legitimately beats, and a gate on
 # a "we're faster" number would fire on the runner's vector unit, not on a
-# compiler regression).
+# compiler regression). The VICTORY rows below are the exception on purpose
+# (#1330): rows where Almide IS faster than the ordinary Rust, gated on the
+# claim itself plus a same-source ablation that proves which optimization
+# earns it.
 #
 # Budget: PERF_RATIO_BUDGET_PCT (default 40) percent above the committed
 # baseline in scripts/perf-ratio-baseline.txt. Wide on purpose — runner noise
@@ -78,16 +81,65 @@ PAIRS="nbody=rust:nbody_unrolled spectralnorm=rust:spectralnorm fasta=rust:fasta
 # that unlike `listbuild` both sides here allocate identically, so it may well
 # turn out to be anchorable. See research/benchmark/perf/string-gap-1004.md.
 #
-# `binarytrees` (#1991) is the same class, measured the same day the row was
-# added: against the same-shape `Box` reference the native leg (which runs
-# `check(make(d))` inside a region window — twin fns over a bump arena, one
-# rewind per tree instead of one free per node) reads 0.31 on an M4 Pro and
-# 0.61 on the ubuntu-latest runner, both sides of the +40%/-50% band of
-# either number. What differs is the allocator the REFERENCE pays for (glibc
-# malloc frees a Box far cheaper than macOS's), not the window, so the row
-# is reported here and the window's own A/B (ALMIDE_REGION_OFF=1, same
-# binary, same machine) is the measurement that says whether it fires.
-REPORTED="listbuild=rust:listbuild listbuild-append=rust:listbuild listbuild-comb=rust:listbuild strchurn=rust:strchurn binarytrees=rust:binarytrees"
+# `mandelbrot` (#1330) is a `fan.map` kernel against ORDINARY sequential
+# Rust and still reads ~1.0 (0.97-1.02 on an M4 Pro, two sizes): its callback
+# returns `Bytes`, whose native repr is an `Rc` (`AlmideRcCow<Vec<u8>>`), so
+# #2044's Send-safe-scalar fan routing (RustLowering) declines it and the map
+# runs sequentially. It needs the thread-shared flip ADR-0018 specifies, not
+# a routing change. Reported so the day it reaches parallel execution the win
+# is a visible number; a single-thread reference is the honest comparison
+# until then. (`fannkuchredux`, the other `fan` kernel, moved to VICTORY.)
+#
+# `decode` (#1679) is the Codec decode row: N derived `User.decode`s of one
+# fixed 8-field document, against `rust:decode` — the ordinary hand-written
+# decode over the SAME `AlmideValue` shape (borrowed field scan, owned `String`
+# record fields). Reported like strchurn: each op is eight short-string
+# allocations, so the ratio compares allocators before it compares codegen.
+#
+# `wordfreq` / `wordfreq-group` (#2150, #2157) are the keyed-aggregation row in
+# its imperative and its CHEATSHEET (`list.group_by`) spelling, both against
+# `rust:wordfreq` — a `HashMap<String, i64>` with an owned key per draw, the
+# ordinary Rust for the program. Reported like strchurn: the row compares the
+# native `AlmideMap` (compact-ordered-dict, insertion order kept) against
+# std's hashbrown + SipHash, an allocator-and-hasher reading first. The
+# relation between the two spellings is the T5 reading (recommended = fastest).
+REPORTED="listbuild=rust:listbuild listbuild-append=rust:listbuild listbuild-comb=rust:listbuild strchurn=rust:strchurn mandelbrot=rust:mandelbrot decode=rust:decode wordfreq=rust:wordfreq wordfreq-group=rust:wordfreq"
+# VICTORY rows (#1330): the workloads where Almide native is FASTER than the
+# ordinary Rust for the program, and the gate is the claim itself. Each entry
+# is `bench=rust-ref-variant:ABLATION_ENV` — the env knob that turns off the
+# one optimization the win is attributed to, so the ablation leg is the SAME
+# source and the same pipeline minus that rewrite.
+#
+# Both rows are the region window (#1991): `check(make(depth))` builds a
+# tree whose whole lifetime is one expression, the reference (a `Box` per
+# node, a free per node — what a Rust programmer writes; no arena, no
+# `unsafe`) pays malloc/free per node, and the native leg rewinds a bump
+# arena once per tree. Measured 2026-09-08 (M4 Pro, median of 9,
+# interleaved): binarytrees 0.35 at d17 / 0.32 at d19, treealloc at two
+# depths likewise, and with `ALMIDE_REGION_OFF=1` the same sources read
+# 1.25-1.26 — the whole win is the window. The ubuntu-latest runner reads
+# 0.61 on binarytrees (glibc frees a `Box` far cheaper than macOS's
+# allocator), which is why these rows could not sit in PAIRS: no single
+# +40%/-50% band holds 0.32 and 0.61. What IS machine-stable is the
+# direction, so the gate here is (a) ratio < 1.0 — the published claim —
+# (b) a regression ceiling of +budget over the committed (runner-class)
+# baseline, capped at 1.0, with no floor (a bigger win is not a failure;
+# bench.py's output check and MIN_SECONDS still catch a broken bench), and
+# (c) the ablation delta ablated/optimized must stay above
+# VICTORY_ABLATION_FLOOR — the optimization named in the declaration must
+# still be what earns the row, or the declaration is stale.
+#
+# `fannkuchredux` (#2044) is the data-parallelism row: `fan { list.map(chunks,
+# (c) => process_chunk(..)) }` over Int captures with an `(Int, Int)` result
+# is exactly the Send-safe-scalar subset AutoParallel now routes to
+# `almide_rt_list_par_map` (a thread per core, joined in list order), and the
+# reference is the ordinary ONE-THREAD Rust for the program. Measured
+# 2026-09-08 (M4 Pro, 14 cores): 0.21 at n=10 / 0.12 at n=11, and with
+# `ALMIDE_FAN_SEQUENTIAL=1` (the same binary's sequential path) 1.07 / 1.06 —
+# the whole win is the parallel map. The ratio scales with the runner's core
+# count, which is why it is a VICTORY row and not a PAIRS anchor.
+VICTORY="binarytrees=rust:binarytrees:ALMIDE_REGION_OFF treealloc=rust:treealloc:ALMIDE_REGION_OFF fannkuchredux=rust:fannkuchredux:ALMIDE_FAN_SEQUENTIAL"
+VICTORY_ABLATION_FLOOR=1.30
 # IDIOM GATE (#1337). The three listbuild rows build the SAME result three
 # ways, so beyond each row's own ratio there is a relation between them that
 # the mission depends on: CLAUDE.md and docs/CHEATSHEET.md tell authors (and
@@ -117,38 +169,61 @@ MIN_SECONDS=0.08
 out=$(mktemp -t perf-ratio.XXXXXX.json)
 trap 'rm -f "$out"' EXIT
 
+# The four anchored rows are ALSO built with the IR optimizer's perf passes
+# off (`--ablate ALMIDE_DISABLE_OPT`: fold/DCE/propagate skipped, the lowering
+# enablers and the #872 correctness re-fold stay) and timed in the SAME
+# interleaved loop as their optimized twin — see ABLATION below.
 python3 research/benchmark/perf/bench.py \
   --quick --runs "$RUNS" --legs native,rust \
-  --bench nbody,spectralnorm,fasta,fft,binarytrees,listbuild,listbuild-append,listbuild-comb,strchurn \
+  --bench nbody,spectralnorm,fasta,fft,binarytrees,treealloc,listbuild,listbuild-append,listbuild-comb,strchurn,fannkuchredux,mandelbrot,decode,wordfreq,wordfreq-group \
+  --ablate ALMIDE_DISABLE_OPT --ablate-bench nbody,spectralnorm,fasta,fft \
   --label ratchet --out "$out"
 
-# ABLATION LEG (#1466): the same anchored benchmarks with the IR optimizer's
-# perf passes disabled (ALMIDE_DISABLE_OPT skips fold/DCE/propagate; the
-# lowering enablers and the #872 correctness re-fold stay). The gated number
-# is the DELTA ablated/optimized per bench — a same-machine, same-run ratio,
-# so it anchors where absolute times cannot. MEASURED FINDING at introduction
-# (M4 Pro + CI runner agree): the deltas sit at ~1.00 on every anchored
-# bench — on the rustc-backed native leg these passes are SUBSUMED by LLVM,
-# which runs the same folds downstream. The gate therefore holds the honest
-# band: ablation must never SLOW the build's output past noise (floor —
-# the optimizer must not COST), and a delta leaving the band upward is a new
-# real earning that gets re-anchored on purpose, exactly like the main rows.
-abl_out=$(mktemp -t perf-ratio-abl.XXXXXX.json)
-trap 'rm -f "$out" "$abl_out"' EXIT
-ALMIDE_DISABLE_OPT=1 python3 research/benchmark/perf/bench.py \
-  --quick --runs "$RUNS" --legs native \
-  --bench nbody,spectralnorm,fasta,fft \
-  --label ratchet-ablated --out "$abl_out"
+# VICTORY ABLATION LEG (#1330): each victory row rebuilt from the same source
+# with its named optimization's env knob set, native leg only. One bench.py
+# run per knob (the rows sharing a knob share the run).
+vic_dir=$(mktemp -d -t perf-ratio-vic.XXXXXX)
+trap 'rm -f "$out"; rm -rf "$vic_dir"' EXIT
+for knob in $(for v in $VICTORY; do echo "${v##*:}"; done | sort -u); do
+  # `|| true`: under `set -e` + pipefail the subshell's status is the LAST
+  # test's, so a knob whose final VICTORY entry belongs to another knob
+  # would abort the script here (latent while every row shared one knob).
+  benches=$(for v in $VICTORY; do [ "${v##*:}" = "$knob" ] && echo "${v%%=*}" || true; done | paste -sd, -)
+  env "$knob=1" python3 research/benchmark/perf/bench.py \
+    --quick --runs "$RUNS" --legs native \
+    --bench "$benches" \
+    --label "ratchet-$knob" --out "$vic_dir/$knob.json"
+done
 
-python3 - "$out" "$BASELINE_FILE" "$BUDGET_PCT" "$PAIRS" "$MIN_SECONDS" "$IDIOM_CEILING" "$REPORTED" "$abl_out" <<'PY'
-import json, sys
+# ABLATION (#1466 → #2234): the optimizer-ablated native binary is built
+# alongside every anchored bench (`--ablate ALMIDE_DISABLE_OPT` above). On
+# 2026-09-15 every one of the 15 suite benches came out BYTE-IDENTICAL with
+# and without the knob — the IR optimizer's perf passes change the emitted
+# Rust on some programs (nbody: 53 lines) and rustc/LLVM compiles both
+# spellings to one machine code — so the four `ablation/<bench>` ratio rows
+# this script gated since #1466 had measured the runner timing one file
+# against itself, and were retired. What remains is the WAKE-UP rule below:
+# a bench whose ablated binary DIFFERS is a program the optimizer now reaches
+# on native, and the ratio must be anchored on purpose before the gate is
+# green again — the gate has a measurand exactly when one exists.
 
-out_path, baseline_path, budget_pct, pairs_arg, min_s, idiom_ceiling, reported_arg, abl_path = sys.argv[1:9]
+python3 - "$out" "$BASELINE_FILE" "$BUDGET_PCT" "$PAIRS" "$MIN_SECONDS" "$IDIOM_CEILING" "$REPORTED" "$VICTORY" "$VICTORY_ABLATION_FLOOR" "$vic_dir" <<'PY'
+import json, os, sys
+
+(out_path, baseline_path, budget_pct, pairs_arg, min_s, idiom_ceiling, reported_arg,
+ victory_arg, victory_floor, vic_dir) = sys.argv[1:11]
 budget = float(budget_pct)
 min_s = float(min_s)
 idiom_ceiling = float(idiom_ceiling)
+victory_floor = float(victory_floor)
 pairs = dict(p.split("=", 1) for p in pairs_arg.split())
 reported = dict(p.split("=", 1) for p in reported_arg.split())
+# bench -> (rust-ref variant, ablation env knob)
+victory = {}
+for v in victory_arg.split():
+    bench, rest = v.split("=", 1)
+    ref, knob = rest.rsplit(":", 1)
+    victory[bench] = (ref, knob)
 
 data = json.load(open(out_path))["results"]
 ratios = {}
@@ -179,7 +254,7 @@ except FileNotFoundError:
     print(f"perf-ratio: no baseline; wrote {baseline_path}")
     sys.exit(0)
 
-missing = set(pairs) - set(baseline)
+missing = (set(pairs) | set(victory)) - set(baseline)
 if missing:
     sys.exit(f"::error::perf-ratio: baseline has no entry for {sorted(missing)} — "
              "a gated benchmark was added without anchoring it; add the line on purpose.")
@@ -204,6 +279,44 @@ for bench, ref_name in sorted(reported.items()):
     ref = v[f"{bench}/{ref_name}"]["median"]
     print(f"perf-ratio: {bench:16s} {nat / ref:.3f} (reported, not anchored — machine-dependent)")
 
+# VICTORY rows (#1330): the claim (ratio < 1.0), a +budget regression ceiling
+# over the committed baseline capped at the claim, no floor, and the ablation
+# delta (same source, optimization knob set) above VICTORY_ABLATION_FLOOR.
+for bench, (ref_name, knob) in sorted(victory.items()):
+    v = data[bench]["variants"]
+    nat = v[f"{bench}/native"]["median"]
+    ref = v[f"{bench}/{ref_name}"]["median"]
+    for name, sec in ((f"{bench}/native", nat), (f"{bench}/{ref_name}", ref)):
+        if sec < min_s:
+            sys.exit(f"::error::perf-ratio: {name} median {sec}s is under the {min_s}s floor — "
+                     "grow the QUICK_ARGS entry instead of gating on spawn noise.")
+    ratio = nat / ref
+    base = baseline[bench]
+    ceiling = min(1.0, base * (1 + budget / 100))
+    verdict = "ok"
+    if ratio >= 1.0:
+        verdict = "NOT FASTER — the #1330 claim for this row is gone; fix the optimization or retire the row from VICTORY"
+        failed = True
+    elif ratio > ceiling:
+        verdict = f"OVER ceiling {ceiling:.3f} — still faster than Rust, but the win shrank past budget"
+        failed = True
+    elif ratio < base * 0.5:
+        verdict = "(under half the runner-class baseline — expected off the runner; re-anchor only from a runner measurement)"
+    print(f"perf-ratio: {bench:16s} {ratio:.3f} (victory: baseline {base:.3f}, ceiling {ceiling:.3f}) {verdict}")
+    abl = json.load(open(os.path.join(vic_dir, f"{knob}.json")))["results"][bench]["variants"][f"{bench}/native"]["median"]
+    delta = abl / nat
+    key = f"ablation/{bench}"
+    if key not in baseline:
+        sys.exit(f"::error::perf-ratio: baseline has no `{key}` row — the victory row was added "
+                 "without its ablation; add the line on purpose.")
+    verdict = "ok"
+    if delta < victory_floor:
+        verdict = (f"UNDER floor {victory_floor:.2f} — {knob}=1 no longer costs the row much, so the "
+                   "optimization the declaration names is not what wins; re-attribute or retire the row")
+        failed = True
+    print(f"perf-ratio: {key:16s} {delta:.3f} ({knob}=1 / optimized; ablated ratio vs Rust {abl / ref:.3f}, "
+          f"baseline {baseline[key]:.3f}, floor {victory_floor:.2f}) {verdict}")
+
 # The listbuild idiom relation on WALL TIME — reported for the record only.
 # Enforcement moved to callgrind Ir in the shell step below (see the
 # IDIOM_CEILING comment for the bimodality evidence that forced the move).
@@ -219,16 +332,22 @@ print(f"perf-ratio: {'listbuild-idiom':16s} {penalty:.3f}x the append loop "
 # baseline rows keyed `ablation/<bench>`. Floor 0.90 is the honest direction
 # the measurement supports — the optimizer must never COST more than noise;
 # the +budget ceiling flags a NEW earning so it gets re-anchored on purpose.
-abl = json.load(open(abl_path))["results"]
 for bench in sorted(pairs):
-    o = data[bench]["variants"][f"{bench}/native"]["median"]
-    a = abl[bench]["variants"][f"{bench}/native"]["median"]
-    delta = a / o
+    identical = data[bench].get("ablated_identical")
     key = f"ablation/{bench}"
     base = baseline.get(key)
+    o = data[bench]["variants"][f"{bench}/native"]["median"]
+    a = data[bench]["variants"][f"{bench}/native:ablated"]["median"]
+    delta = a / o
+    if identical and base is None:
+        print(f"perf-ratio: {key:16s} optimizer no-op — the ablated native binary is byte-identical to the optimized one (timed {delta:.3f}, not gated)")
+        continue
+    if identical and base is not None:
+        sys.exit(f"::error::perf-ratio: `{key}` has a baseline row but the ablated binary is byte-identical "
+                 "to the optimized one — the row gates nothing; remove it (#2234).")
     if base is None:
-        sys.exit(f"::error::perf-ratio: baseline has no `{key}` row — the ablation leg was "
-                 "added without anchoring it; add the line on purpose.")
+        sys.exit(f"::error::perf-ratio: the optimizer now REACHES {bench}'s native binary (ablated != optimized, "
+                 f"delta {delta:.3f}) and `{key}` has no baseline row — anchor it on purpose in this change (#2234).")
     ceiling = base * (1 + budget / 100)
     floor = 0.90
     verdict = "ok"
@@ -257,7 +376,7 @@ PY
 if command -v valgrind >/dev/null 2>&1; then
   ALMIDE="${ALMIDE_BIN:-almide}"
   idiom_dir=$(mktemp -d -t perf-idiom.XXXXXX)
-  trap 'rm -f "$out" "$abl_out"; rm -rf "$idiom_dir"' EXIT
+  trap 'rm -f "$out"; rm -rf "$idiom_dir" "$vic_dir"' EXIT
   "$ALMIDE" build research/benchmark/perf/listbuild/listbuild_combinator.almd -o "$idiom_dir/comb" >/dev/null
   "$ALMIDE" build research/benchmark/perf/listbuild/listbuild_append.almd -o "$idiom_dir/append" >/dev/null
   ir_of() {
@@ -276,7 +395,8 @@ if penalty > ceiling:
           "CLAUDE.md and docs/CHEATSHEET.md tell authors to write `list.range |> list.flat_map` "
           "instead of `var` + `for`; that guidance is only honest while this holds. The usual "
           "cause is the flat_map lambda losing its array return "
-          "(RustLoweringPass::lower_flat_map_arrays) and going back to a heap Vec per element. "
+          "(StreamFusionPass's fused `flat_map` step, or RustLoweringPass::lower_flat_map_arrays "
+          "under ALMIDE_STREAM_FUSION_OFF) and going back to a heap Vec per element. "
           "Either restore the lowering or change the guidance — not the ceiling.")
     sys.exit(1)
 print(f"perf-ratio: {'listbuild-idiom':16s} {penalty:.4f}x the append loop "

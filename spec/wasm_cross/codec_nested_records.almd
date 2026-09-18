@@ -10,10 +10,14 @@ type Inner: Codec = { n: Int, s: String }
 type Outer: Codec = { name: String, inner: Inner, kids: List[Inner] }
 
 effect fn main() -> Unit = {
-  let o = Outer { name: "o", inner: Inner { n: 1, s: "a" }, kids: [
-    Inner { n: 2, s: "b" },
-    Inner { n: 3, s: "c" }
-  ] }
+  let o = Outer {
+    name: "o",
+    inner: Inner { n: 1, s: "a" },
+    kids: [
+      Inner { n: 2, s: "b" },
+      Inner { n: 3, s: "c" }
+    ],
+  }
   let enc = json.stringify(Outer.encode(o))
   println(enc)
   let d = Outer.decode(json.parse(enc)!)!

@@ -81,6 +81,15 @@ pub(crate) fn render_expr_owned(ctx: &RenderContext, expr: &IrExpr) -> String {
 /// `annotate = false` — a fused iterator adapter infers `&T` and an explicit `T`
 /// would mismatch.
 fn render_lambda(ctx: &RenderContext, params: &[(VarId, Ty)], body: &IrExpr, annotate: bool) -> String {
+    let borrowed = params.first().is_some_and(|(id, _)| ctx.ann.borrowed_lambda_params.contains(id));
+    render_lambda_with(ctx, params, body, annotate, borrowed)
+}
+
+/// [`render_lambda`] with the closure form decided by the caller: `borrowed`
+/// renders the plain `|params| body` (a scope that borrows what it reads —
+/// a chain step, or the lambda under a `Borrow` at a callee's `&dyn Fn` slot,
+/// #2288), otherwise the `move` closure that owns its captures.
+pub(super) fn render_lambda_with(ctx: &RenderContext, params: &[(VarId, Ty)], body: &IrExpr, annotate: bool, borrowed: bool) -> String {
     let params_str = params.iter()
         .map(|(id, ty)| {
             let name = ctx.var_name(*id).to_string();
@@ -106,7 +115,8 @@ fn render_lambda(ctx: &RenderContext, params: &[(VarId, Ty)], body: &IrExpr, ann
         let cast = super::helpers::render_type_rc_fn(ctx, &body.ty);
         body_str = format!("{} as {}", wrapped, cast);
     }
-    ctx.templates.render_with("lambda_single", None, &[], &[("params", params_str.as_str()), ("body", body_str.as_str())])
+    let template = if borrowed { "lambda_borrowed" } else { "lambda_single" };
+    ctx.templates.render_with(template, None, &[], &[("params", params_str.as_str()), ("body", body_str.as_str())])
         .unwrap_or_else(|| "|_| { }".to_string())
 }
 
@@ -180,8 +190,9 @@ fn render_expr_match(ctx: &RenderContext, expr: &IrExpr) -> String {
     } else {
         subj
     };
+    let borrowed = super::statements::subject_is_borrowed(ctx, subject);
     let mut arms_raw = arms.iter()
-        .map(|arm| render_match_arm(ctx, arm, &expr.ty, &subject.ty))
+        .map(|arm| render_match_arm(ctx, arm, &expr.ty, &subject.ty, borrowed))
         .collect::<Vec<_>>()
         .join("\n");
     // #610 refinement backstop: guard-lowered box patterns don't count toward
@@ -371,16 +382,10 @@ fn render_expr_index_access(ctx: &RenderContext, object: &IrExpr, index: &IrExpr
 /// `MapAccess { object, key }` case of `render_expr`.
 fn render_expr_map_access(ctx: &RenderContext, object: &IrExpr, key: &IrExpr) -> String {
     let obj_str = render_expr(ctx, object);
-    let mut key_str = render_expr(ctx, key);
     // The `map_get` template borrows the key itself (`.get(&{key})`), so the
-    // key must render as an OWNED `K`. A borrow-inferred String param is
-    // already `&str`, and `&&str` is not `&String` (rustc E0308, #1874) —
-    // materialize the owned key, the same `.to_string()` pass_clone gives a
-    // non-last use of that param. Every other key shape (a literal, a `let`
-    // String, a record field, a loop or lambda binder) renders owned already.
-    if is_borrowed_string_param(ctx, key) {
-        key_str = format!("{}.to_string()", key_str);
-    }
+    // key renders as an OWNED `K` — a `&str` param arrives as the
+    // `.to_string()` `BorrowLowering` spelled for it (#1874).
+    let key_str = render_expr(ctx, key);
     ctx.templates.render_with("map_get", None, &[], &[("object", obj_str.as_str()), ("key", key_str.as_str())])
         .unwrap_or_else(|| "map_get(...)".into())
 }

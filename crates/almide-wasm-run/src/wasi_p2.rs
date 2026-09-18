@@ -37,9 +37,10 @@ use wasm_encoder::{
     Module, TypeSection, ValType,
 };
 
+use crate::component_alloc::{shim_cabi_realloc, shim_reserve};
 use crate::wasi::{
-    mem, mem8, parse_module, reencode_body, type_index, Parsed, Remap, DATA, MSG, PARK_SPAN,
-    UNSUPPORTED_MSG,
+    mem, mem8, parse_module, reencode_body, type_index, Parsed, Remap, MSG, MSG3, OOM_MSG,
+    PARK_SPAN, UNSUPPORTED_MSG,
 };
 
 // Import indices (8 imports replace the 5 almide.* ones; original
@@ -79,6 +80,7 @@ pub fn to_p2(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
         elements,
         mut data,
         bodies,
+        foreign_imports: _,
     } = parsed;
     let main_index = main_index.ok_or_else(|| anyhow::anyhow!("no main export"))?;
     let heap_global = heap_global.ok_or_else(|| anyhow::anyhow!("no __heap export"))?;
@@ -88,6 +90,10 @@ pub fn to_p2(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     // exit, fs_call, host_read), then cabi_realloc and the run wrapper.
     let f_realloc = shim_base + 5;
     let f_run = shim_base + 6;
+    // #2119: the reservation helper is appended LAST so the export'd
+    // realloc and run keep their indices.
+    let f_reserve = shim_base + 7;
+    let f_eprintln = shim_base + 1;
 
     let heap_init = parsed_globals[heap_global as usize]
         .1
@@ -162,7 +168,9 @@ pub fn to_p2(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     for ti in &func_types {
         functions.function(*ti);
     }
-    for ti in [t_print, t_print, t_exit, t_fs, t_hread, t_realloc, t_run] {
+    // `$reserve` shares `exit`'s `(i32) -> ()` shape, so it adds no
+    // type-section entry.
+    for ti in [t_print, t_print, t_exit, t_fs, t_hread, t_realloc, t_run, t_exit] {
         functions.function(ti);
     }
 
@@ -197,10 +205,17 @@ pub fn to_p2(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     code.function(&shim_print(g_stdout, I_GET_STDOUT, park, true));
     code.function(&shim_print(g_stderr, I_GET_STDERR, park, true));
     code.function(&shim_exit());
-    code.function(&shim_fs_call(park, g_plen, g_ppos, g_stdin, g_stdout, g_stderr));
+    code.function(&shim_fs_call(park, g_plen, g_ppos, g_stdin, g_stdout, g_stderr, f_reserve));
     code.function(&shim_host_read(g_plen, g_ppos));
     code.function(&shim_cabi_realloc(heap_global));
     code.function(&shim_run(main_index + SHIFT));
+    code.function(&shim_reserve(
+        heap_global,
+        f_eprintln,
+        I_EXIT,
+        (park + MSG3) as u32,
+        OOM_MSG.len() - 1,
+    ));
 
     // Elements re-encode through the Remap (#1716): the +3 import shift
     // must move funcref table entries too, or every closure retargets
@@ -215,6 +230,7 @@ pub fn to_p2(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     }
 
     data.active(0, &ConstExpr::i32_const((park + MSG) as i32), UNSUPPORTED_MSG.iter().copied());
+    data.active(0, &ConstExpr::i32_const((park + MSG3) as i32), OOM_MSG.iter().copied());
 
     let mut m = Module::new();
     m.section(&type_sec)
@@ -332,9 +348,9 @@ fn shim_fs_call(
     g_stdin: u32,
     g_stdout: u32,
     g_stderr: u32,
+    f_reserve: u32,
 ) -> Function {
     let (op, _a_ptr, a_len, b_ptr, b_len) = (0u32, 1u32, 2u32, 3u32, 4u32);
-    let total = 5u32;
     let n = 6u32;
     let mut f = Function::new([(2, ValType::I32)]);
     let mut i = f.instructions();
@@ -362,8 +378,12 @@ fn shim_fs_call(
     i.end();
 
     // op 35: stdin take up to a_len bytes — ONE blocking-read; the list
-    // lands via cabi_realloc; EOF (err) answers 0 bytes.
+    // lands via cabi_realloc; EOF (err) answers 0 bytes. The host answers
+    // with AT MOST a_len bytes, so reserving a_len first (#2119) makes
+    // that landing's grow impossible — and a shortage aborts here, where
+    // C-197's line can still be written.
     i.local_get(op).i32_const(35).i32_eq().if_(BlockType::Empty);
+    i.local_get(a_len).call(f_reserve);
     load_handle(&mut i, g_stdin, I_GET_STDIN);
     i.local_get(a_len).i64_extend_i32_u();
     i.i32_const((park + RET) as i32);
@@ -379,37 +399,10 @@ fn shim_fs_call(
     i.global_get(g_plen).i64_extend_i32_u().return_();
     i.end();
 
-    // op 31: stdin read-to-end — loop take-4096 into the park data span
-    // (contiguous, host_read's contract); overflow takes the refusal.
-    i.local_get(op).i32_const(31).i32_eq().if_(BlockType::Empty);
-    i.i32_const(0).local_set(total);
-    i.block(BlockType::Empty).loop_(BlockType::Empty);
-    load_handle(&mut i, g_stdin, I_GET_STDIN);
-    i.i64_const(4096);
-    i.i32_const((park + RET) as i32);
-    i.call(I_BLOCKING_READ);
-    i.i32_const((park + RET) as i32).i32_load(mem(0)).i32_eqz().i32_eqz().br_if(1); // err -> EOF
-    i.i32_const((park + RET) as i32).i32_load(mem(8)).local_set(n);
-    i.local_get(n).i32_eqz().br_if(1);
-    // room check: DATA span is the park's tail.
-    i.local_get(total).local_get(n).i32_add();
-    i.i32_const((PARK_SPAN - DATA) as i32).i32_gt_u();
-    i.if_(BlockType::Empty);
-    i.i32_const(1).call(I_EXIT).unreachable();
-    i.end();
-    i.i32_const((park + DATA) as i32).local_get(total).i32_add();
-    i.i32_const((park + RET) as i32).i32_load(mem(4));
-    i.local_get(n);
-    i.memory_copy(0, 0);
-    i.local_get(total).local_get(n).i32_add().local_set(total);
-    i.br(0).end().end();
-    i.i32_const((park + DATA) as i32).global_set(g_ppos);
-    i.local_get(total).global_set(g_plen);
-    i.local_get(total).i64_extend_i32_u().return_();
-    i.end();
-
-    // op 32: entropy — n rides b_len; the list lands via cabi_realloc.
+    // op 32: entropy — n rides b_len; the list lands via cabi_realloc,
+    // reserved first for exactly the length asked for (#2119).
     i.local_get(op).i32_const(32).i32_eq().if_(BlockType::Empty);
+    i.local_get(b_len).call(f_reserve);
     i.local_get(b_len).i64_extend_i32_u();
     i.i32_const((park + RET) as i32);
     i.call(I_RANDOM);
@@ -448,49 +441,6 @@ fn shim_host_read(g_plen: u32, g_ppos: u32) -> Function {
     i.global_get(g_ppos);
     i.global_get(g_plen);
     i.memory_copy(0, 0);
-    i.end();
-    f
-}
-
-/// `cabi_realloc(old_ptr, old_size, align, new_size) -> ptr`: bump the
-/// module's own `__heap` frontier (8-aligned raw bytes, never freed —
-/// the block allocator's free lists are undisturbed), growing memory on
-/// demand; a grow failure exits err (the OOM discipline).
-fn shim_cabi_realloc(heap_global: u32) -> Function {
-    let (old_ptr, old_size, _align, new_size) = (0u32, 1u32, 2u32, 3u32);
-    let result = 4u32;
-    let mut f = Function::new([(1, ValType::I32)]);
-    let mut i = f.instructions();
-    // result = (heap + 7) & !7
-    i.global_get(heap_global).i32_const(7).i32_add().i32_const(-8).i32_and();
-    i.local_set(result);
-    // grow if result + new_size overruns memory
-    i.local_get(result).local_get(new_size).i32_add();
-    i.memory_size(0).i32_const(16).i32_shl();
-    i.i32_gt_u();
-    i.if_(BlockType::Empty);
-    i.local_get(new_size).i32_const(0xFFFF).i32_add().i32_const(16).i32_shr_u();
-    i.memory_grow(0);
-    i.i32_const(-1).i32_eq();
-    i.if_(BlockType::Empty);
-    i.i32_const(1).call(I_EXIT).unreachable();
-    i.end();
-    i.end();
-    i.local_get(result).local_get(new_size).i32_add().global_set(heap_global);
-    // realloc semantics: copy min(old_size, new_size) from old_ptr.
-    i.local_get(old_ptr).i32_eqz().i32_eqz();
-    i.if_(BlockType::Empty);
-    i.local_get(result);
-    i.local_get(old_ptr);
-    i.local_get(old_size).local_get(new_size).i32_lt_u();
-    i.if_(BlockType::Result(ValType::I32));
-    i.local_get(old_size);
-    i.else_();
-    i.local_get(new_size);
-    i.end();
-    i.memory_copy(0, 0);
-    i.end();
-    i.local_get(result);
     i.end();
     f
 }

@@ -250,7 +250,7 @@ pub(crate) fn reset_desugar_var_band() {
 /// deletion (R3) fires when it is empty.
 pub(crate) fn bang_return_probe() -> bool {
     static PROBE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *PROBE.get_or_init(|| std::env::var_os("ALMIDE_BANG_RETURN").is_some())
+    *PROBE.get_or_init(|| almide_base::env::flag("ALMIDE_BANG_RETURN"))
 }
 
 /// Reserve a fresh 4096-id chunk in the synthetic band and return its first id.

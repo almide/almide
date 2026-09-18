@@ -41,14 +41,25 @@ nothing is published that `bench.py` did not produce.
   overhead; `nbody.rs` is the canonical array-of-bodies shape people actually
   write. Almide currently beats the latter (bounds checks) — that comparison
   is reported, not gated.
-- `fannkuchredux` and `mandelbrot` use `fan` parallelism, so a scalar Rust
-  reference would be a lie — they run Almide-native vs Almide-wasm only.
-  `binarytrees` has a reference since #1991: its `fan.map` is sequential on the
-  native leg, so `rust-ref/binarytrees.rs` (the same-shape `Box` program, one
-  thread) is the honest comparison; the row is REPORTED by
-  `check-perf-ratio.sh` rather than anchored (0.31 on an M4 Pro, 0.61 on the
-  CI runner — allocator-dependent like listbuild), below 1 because
-  `check(make(d))` runs inside a region window natively.
+- `fannkuchredux` and `mandelbrot` are written with `fan`, and since #1330
+  they have ORDINARY sequential Rust references (`rust-ref/fannkuchredux.rs`,
+  `rust-ref/mandelbrot.rs`: one thread, no `unsafe`, no SIMD). That is not a
+  lie on the native leg, because the native leg gives `fan` no parallelism
+  today — `fan.map` runs sequentially over an `Rc<dyn Fn>` thunk, a `fan { }`
+  block spawns one thread for the whole block, and `AutoParallelPass` never
+  fires (it matches `Call { Named }` and `StdlibLowering` emits
+  `RuntimeCall`). The rows read ~1.0 (0.96–1.06 and 1.01–1.12, M4 Pro, two
+  sizes) and are REPORTED by `check-perf-ratio.sh`, so a data-parallel win,
+  when it lands, is a number and not a claim.
+  `binarytrees` (#1991) and `treealloc` (#2028) have same-shape `Box`
+  references (`rust-ref/binarytrees.rs`, `rust-ref/treealloc.rs`: one thread,
+  a `Box` per node, a free per node — no arena, no `unsafe`). Both sit BELOW
+  1 because `check(make(d))` runs inside a region window natively; they are
+  the VICTORY rows of `check-perf-ratio.sh` (#1330), gated on the claim
+  itself and on the `ALMIDE_REGION_OFF=1` ablation rather than on a ±band
+  around a number that is allocator-dependent (0.32 on an M4 Pro, 0.61 on
+  the CI runner — like listbuild). The declaration, with the ablation and
+  both sizes, is in `docs/project/BENCHMARKS.md`.
 - `onebrc` is a scaled One Billion Row Challenge (`station;temp` lines →
   sorted per-station min/mean/max): the one row whose hot loop is file I/O,
   `string.split`, and map updates rather than arithmetic. Temperatures are
@@ -153,6 +164,27 @@ nothing is published that `bench.py` did not produce.
   issue title blamed not present on the path at all — in
   [string-gap-1004.md](./string-gap-1004.md); `strchurn/ladder.py` rebuilds it
   from scratch.
+- **`wordfreq` is the Map row** (#2150, #2157): N draws from a 5 000-word
+  vocabulary counted in a `Map[String, Int]`, top 10 by count desc / word asc
+  — the keyed-aggregation shape every word-count, group-by and histogram
+  program has. Two spellings of one workload, like listbuild: `wordfreq` is
+  the imperative `var` Map + `m[w] = map.get_or(m, w, 0) + 1` loop, and
+  `wordfreq-group` the CHEATSHEET's `list.group_by` + `map.map`; identical
+  vocabulary, draws, sort and output, so the spread between them is what the
+  recommended idiom costs. The reference (`rust-ref/wordfreq.rs`) is
+  same-shape and same-semantics: a `HashMap<String, i64>` (hashbrown +
+  SipHash), an OWNED key cloned out of the vocabulary per draw (Almide's
+  `let w = vocab[i]` owns), one `entry` per draw. Native/rust only: the wasm
+  leg's `group_by` is #2156's 110× and would measure that. Reported, not
+  anchored, like strchurn — the row compares an allocator and a hasher
+  before it compares codegen. What the native `AlmideMap` is since #2150: a
+  compact-ordered-dict (insertion-ordered entry vector + an open-addressing
+  slot table of positions with the full hash cached per entry, one
+  multiply-fold hash per operation), with the read side (`map.get` /
+  `get_or` / `contains`, `set.contains`) borrowing its key and the
+  plain-variable-key write `m[w] = …` moving it — the 2M-draw loop's Map
+  cost fell from ~93 ms to ~55 ms on an M4 Pro, under the structural wasm
+  leg's ~73 ms for the same program.
 
 ## Run
 
@@ -173,13 +205,13 @@ almide-native / handwritten-Rust ratio per benchmark against
 `scripts/perf-ratio-baseline.txt` on the `--quick` workloads. Ratios, not
 absolute times — the ratio cancels the runner. Regressing or improving
 durably = move the baseline in the same change. See the script header for the
-full policy.
+full policy. Three row classes: PAIRS (anchored in a ±band), REPORTED
+(printed, allocator-dependent), and VICTORY (#1330: rows where Almide is
+faster than the ordinary Rust, gated on `ratio < 1.0` and on the same-source
+ablation of the optimization the row is attributed to).
 
 ## Not yet covered
 
-- The MAP-churn micro-benchmark #917 asks for. The string half of that ask is
-  covered by `strchurn` as of #1004; `AlmideMap`'s linear scan is still
-  measured only incidentally, inside `onebrc`.
 - **List-combinator laziness.** `IterChain`, the fused-iterator IR node, never
   fires on the Rust target: `list.map`/`filter`/`fold` all emit
   `almide_rt_list_*(Vec, Rc<dyn Fn>)` over a materialized `Vec`, in a pipe, in

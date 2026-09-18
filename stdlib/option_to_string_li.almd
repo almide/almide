@@ -2,12 +2,21 @@
 // `some([1, 2, 3])` / `none`. The inner `List[Int]` renders exactly like `${list}` (signed decimals,
 // `, ` joined, `[` … `]`), wrapped in `some(` … `)`. The `some(v)` arm borrows the payload list
 // (read-only slot reads); `none` is the bare word. The int/list helpers mirror `list_to_string`.
-fn __otsli_digits(n: Int, acc: Int) -> Int = if n < 10 then acc + 1 else __otsli_digits(n / 10, acc + 1)
+fn __otsli_digits(n: Int, acc: Int) -> Int = if n < 10 then acc + 1 else __otsli_digits(
+  n / 10,
+  acc + 1,
+)
 
 // Negative path WITHOUT negating (i64::MIN safe, #660): count digits of n <= 0 directly.
-fn __otsli_count_neg(n: Int, acc: Int) -> Int = if n > 0 - 10 then acc + 1 else __otsli_count_neg(n / 10, acc + 1)
+fn __otsli_count_neg(n: Int, acc: Int) -> Int = if n > 0 - 10 then acc + 1 else __otsli_count_neg(
+  n / 10,
+  acc + 1,
+)
 
-fn __otsli_int_width(v: Int) -> Int = if v < 0 then __otsli_count_neg(v, 0) + 1 else __otsli_digits(v, 0)
+fn __otsli_int_width(v: Int) -> Int = if v < 0 then __otsli_count_neg(v, 0) + 1 else __otsli_digits(
+  v,
+  0,
+)
 
 fn __otsli_fill_digits(n: Int, pos: Int) -> Int = if n < 10 then {
   prim.store8(pos, 48 + n)

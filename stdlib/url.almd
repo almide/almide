@@ -18,7 +18,10 @@
 type Url = { scheme: String, host: String, port: Int?, path: String, query: String, fragment: String }
 
 // Split at the FIRST occurrence of `sep`: (before, after, found).
-fn __url_split_once(s: String, sep: String) -> (String, String, Bool) = match string.index_of(s, sep) {
+fn __url_split_once(s: String, sep: String) -> (String, String, Bool) = match string.index_of(
+  s,
+  sep,
+) {
   some(i) => (string.slice(s, 0, i), string.slice(s, i + string.len(sep), string.len(s)), true),
   none => (s, "", false),
 }
@@ -74,7 +77,10 @@ else match __url_hex2(list.get(cs, i + 1) ?? "", list.get(cs, i + 2) ?? "") {
 }
 
 // Byte value of the %XX escape whose '%' sits at char index p, or -1.
-fn __url_pbyte(cs: List[String], p: Int) -> Int = match __url_hex2(list.get(cs, p + 1) ?? "", list.get(cs, p + 2) ?? "") {
+fn __url_pbyte(cs: List[String], p: Int) -> Int = match __url_hex2(
+  list.get(cs, p + 1) ?? "",
+  list.get(cs, p + 2) ?? "",
+) {
   some(b) => b,
   none => 0 - 1,
 }
@@ -92,14 +98,24 @@ else {
   if b0 >= 0 and b0 < 128 then __url_utf8_go(cs, p + 3, end, acc + string.from_codepoint(b0))
   else if b0 >= 194 and b0 <= 223 then {
     let b1 = __url_pbyte(cs, p + 3)
-    if p + 6 <= end and __url_cont(b1) then __url_utf8_go(cs, p + 6, end, acc + string.from_codepoint((b0 - 192) * 64 + (b1 - 128)))
+    if p + 6 <= end and __url_cont(b1) then __url_utf8_go(
+      cs,
+      p + 6,
+      end,
+      acc + string.from_codepoint((b0 - 192) * 64 + (b1 - 128)),
+    )
     else err("url.decode_component: invalid UTF-8 in percent data")
   } else if b0 >= 224 and b0 <= 239 then {
     let b1 = __url_pbyte(cs, p + 3)
     let b2 = __url_pbyte(cs, p + 6)
     let lo1 = if b0 == 224 then 160 else 128
     let hi1 = if b0 == 237 then 159 else 191
-    if p + 9 <= end and b1 >= lo1 and b1 <= hi1 and __url_cont(b2) then __url_utf8_go(cs, p + 9, end, acc + string.from_codepoint((b0 - 224) * 4096 + (b1 - 128) * 64 + (b2 - 128)))
+    if p + 9 <= end and b1 >= lo1 and b1 <= hi1 and __url_cont(b2) then __url_utf8_go(
+      cs,
+      p + 9,
+      end,
+      acc + string.from_codepoint((b0 - 224) * 4096 + (b1 - 128) * 64 + (b2 - 128)),
+    )
     else err("url.decode_component: invalid UTF-8 in percent data")
   } else if b0 >= 240 and b0 <= 244 then {
     let b1 = __url_pbyte(cs, p + 3)
@@ -107,7 +123,12 @@ else {
     let b3 = __url_pbyte(cs, p + 9)
     let lo1 = if b0 == 240 then 144 else 128
     let hi1 = if b0 == 244 then 143 else 191
-    if p + 12 <= end and b1 >= lo1 and b1 <= hi1 and __url_cont(b2) and __url_cont(b3) then __url_utf8_go(cs, p + 12, end, acc + string.from_codepoint((b0 - 240) * 262144 + (b1 - 128) * 4096 + (b2 - 128) * 64 + (b3 - 128)))
+    if p + 12 <= end and b1 >= lo1 and b1 <= hi1 and __url_cont(b2) and __url_cont(b3) then __url_utf8_go(
+      cs,
+      p + 12,
+      end,
+      acc + string.from_codepoint((b0 - 240) * 262144 + (b1 - 128) * 4096 + (b2 - 128) * 64 + (b3 - 128)),
+    )
     else err("url.decode_component: invalid UTF-8 in percent data")
   } else err("url.decode_component: invalid UTF-8 in percent data")
 }
@@ -166,11 +187,25 @@ fn parse(s: String) -> Result[Url, String] = match string.index_of(s, "://") {
         let hp = __url_split_once(authority, ":")
         if hp.2 then {
           match int.parse(hp.1) {
-            ok(p) => if p >= 0 and p <= 65535 then ok(Url { scheme: scheme, host: hp.0, port: some(p), path: path, query: qs.1, fragment: hf.1 })
+            ok(p) => if p >= 0 and p <= 65535 then ok(Url {
+              scheme: scheme,
+              host: hp.0,
+              port: some(p),
+              path: path,
+              query: qs.1,
+              fragment: hf.1,
+            })
             else err("url.parse: port out of range: " + hp.1),
             err(_) => err("url.parse: invalid port: " + hp.1),
           }
-        } else ok(Url { scheme: scheme, host: authority, port: none, path: path, query: qs.1, fragment: hf.1 })
+        } else ok(Url {
+          scheme: scheme,
+          host: authority,
+          port: none,
+          path: path,
+          query: qs.1,
+          fragment: hf.1,
+        })
       }
     }
   },
@@ -225,7 +260,12 @@ fn __url_t_utf8(s: String) -> String = match __url_utf8_go(string.chars(s), 0, s
 
 fn __url_t_fcp(b: Int) -> String = string.from_codepoint(b)
 
-fn __url_t_dec_nopct(s: String) -> String = match __url_dec_go(string.chars(s), 0, string.len(s), "") {
+fn __url_t_dec_nopct(s: String) -> String = match __url_dec_go(
+  string.chars(s),
+  0,
+  string.len(s),
+  "",
+) {
   ok(v) => v,
   err(e) => "E:" + e,
 }

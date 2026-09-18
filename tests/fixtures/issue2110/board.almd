@@ -1,0 +1,94 @@
+import json
+
+type Item: Codec = {
+  id: String,
+  title: String,
+  status: String,
+  url: String,
+  slug: String,
+  kind: String,
+}
+
+type BoardPage = {
+  title: String,
+  url: String,
+  items: List[Item],
+  next_cursor: Option[String],
+}
+
+type FetchOutcome =
+  | Page(BoardPage)
+  | RateLimited
+  | BoardNotFound
+  | FetchError(String)
+
+
+local fn jget(v: Value, key: String) -> Value =
+  result.to_option(value.field(v, key)) ?? value.null()
+
+local fn jstr(v: Value, key: String) -> Option[String] =
+  result.to_option(value.as_string(jget(v, key)))
+
+local fn jint(v: Value, key: String) -> Option[Int] =
+  result.to_option(value.as_int(jget(v, key)))
+
+local fn jbool(v: Value, key: String) -> Bool =
+  result.to_option(value.as_bool(jget(v, key))) ?? false
+
+local fn jarr(v: Value, key: String) -> List[Value] =
+  value.as_array(jget(v, key)) ?? []
+
+
+fn parse_board(body: String) -> FetchOutcome =
+  match json.parse(body) {
+    err(e) => FetchError("invalid json: ${e}"),
+    ok(v)  => {
+      let errors = jarr(v, "errors")
+      if not list.is_empty(errors) then classify_errors(errors)
+      else {
+        let project = jget(jget(jget(v, "data"), "organization"), "projectV2")
+        if project == value.null() then BoardNotFound
+        else {
+          let items = jget(project, "items")
+          let page_info = jget(items, "pageInfo")
+          Page(BoardPage {
+            title: jstr(project, "title") ?? "Project board",
+            url: jstr(project, "url") ?? "",
+            items: list.filter_map(jarr(items, "nodes"), to_item),
+            next_cursor: if jbool(page_info, "hasNextPage")
+                         then jstr(page_info, "endCursor")
+                         else none,
+          })
+        }
+      }
+    },
+  }
+
+local fn classify_errors(errors: List[Value]) -> FetchOutcome = {
+  let kinds = list.filter_map(errors, (e) => jstr(e, "type"))
+  if list.contains(kinds, "RATE_LIMITED") then RateLimited
+  else if list.contains(kinds, "NOT_FOUND") or list.contains(kinds, "FORBIDDEN") then BoardNotFound
+  else {
+    let messages = list.filter_map(errors, (e) => jstr(e, "message"))
+    FetchError(if list.is_empty(messages) then "graphql error" else string.join(messages, "; "))
+  }
+}
+
+local fn to_item(node: Value) -> Option[Item] = {
+  let id = jstr(node, "id") ?? ""
+  guard id != "" else none
+  let content = jget(node, "content")
+  let repo = jstr(jget(content, "repository"), "nameWithOwner") ?? ""
+  some(Item {
+    id: id,
+    title: jstr(content, "title") ?? "(無題)",
+    status: jstr(jget(node, "fieldValueByName"), "name") ?? "",
+    url: jstr(content, "url") ?? "",
+    slug: if repo == "" then ""
+          else match jint(content, "number") {
+            some(n) => "${repo}#${int.to_string(n)}",
+            none    => repo,
+          },
+    kind: jstr(node, "type") ?? "ISSUE",
+  })
+}

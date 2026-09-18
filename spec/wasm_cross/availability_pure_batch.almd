@@ -37,7 +37,10 @@ fn main() -> Unit = {
   println("[${html.to_string(html.escape(""))}]")
   println(html.to_string(html.raw("<br>")))
   println("[${html.to_string(html.empty())}]")
-  let frag = ["<b>", "x&y"] |> list.map((i) => html.escape(i)) |> list.fold(html.empty(), (acc, f) => html.concat(acc, f))
+  let frag = ["<b>", "x&y"] |> list.map((i) => html.escape(i)) |> list.fold(
+    html.empty(),
+    (acc, f) => html.concat(acc, f),
+  )
   println(html.to_string(html.concat(frag, html.raw("<hr>"))))
   // path.from_string: a `..` segment anywhere rejects, `..x` does not
   println(show_path("a/b"))

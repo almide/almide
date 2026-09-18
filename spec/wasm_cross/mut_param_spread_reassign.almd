@@ -1,0 +1,29 @@
+// @contract: C-226
+// #2037: a `mut` record parameter reassigned with a spread of itself
+// (`st = { ...st, pos: st.pos + 1 }`) passed the checker and failed the
+// NATIVE build — the generated struct-update spread the `&mut State`
+// binding (`..st`, E0308). The caller's record must carry the update on
+// both legs, and a plain (shared-borrow) record parameter must spread into
+// a fresh record the same way.
+type State = { pos: Int, far: Int }
+
+fn bump(mut st: State) -> Unit = {
+  st = { ...st, pos: st.pos + 1 }
+}
+
+fn bump_twice(mut st: State) -> Unit = {
+  st = { ...st, pos: st.pos + 1 }
+  st = { ...st, far: st.far + st.pos }
+}
+
+fn shifted(st: State, by: Int) -> State = { ...st, pos: st.pos + by }
+
+fn main() -> Unit = {
+  var st = State { pos: 0, far: 10 }
+  bump(st)
+  println("${st.pos} ${st.far}")
+  bump_twice(st)
+  println("${st.pos} ${st.far}")
+  let s2 = shifted(st, 5)
+  println("${s2.pos} ${s2.far} ${st.pos}")
+}

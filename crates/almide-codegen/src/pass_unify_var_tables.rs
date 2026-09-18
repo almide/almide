@@ -89,6 +89,10 @@ impl NanoPass for UnifyVarTablesPass {
     fn name(&self) -> &str { "UnifyVarTables" }
     fn targets(&self) -> Option<Vec<Target>> { None } // all targets
 
+    /// The per-module var tables → one program table: a representation
+    /// boundary every later pass assumes (see `NanoPass::barrier`).
+    fn barrier(&self) -> bool { true }
+
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         let mut any_merged = false;
         for module in program.modules.iter_mut() {

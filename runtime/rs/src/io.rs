@@ -1,32 +1,30 @@
 // io extern — Rust native implementations
 
 use std::io::Write;
-use std::cell::RefCell;
 
-thread_local! {
-    static ALMIDE_STDOUT_BUF: RefCell<std::io::BufWriter<std::io::Stdout>> =
-        RefCell::new(std::io::BufWriter::with_capacity(65536, std::io::stdout()));
-}
+// The stdout buffer, `almide_stdout_flush`, `almide_stdout_write_fmt` and
+// `almide_stdout_write_bytes` live in the runtime PRELUDE (#2245: every
+// stdout write — `println` included — goes through the one buffer, so it
+// must exist in a program that never imports `io`). This module only adds
+// the `io.*` surface over it.
 
-/// Flush the buffered stdout writer. Called at program exit.
-pub fn almide_rt_io_flush() {
-    ALMIDE_STDOUT_BUF.with(|buf| { let _ = buf.borrow_mut().flush(); });
-}
-
-// print is for interactive output (prompts, streaming tokens) — flush so
-// the text appears immediately even when stdout is block-buffered (#648).
+// print is for interactive output (prompts, streaming tokens) — it always
+// flushes, so the text appears immediately even when stdout is block-
+// buffered (#648). It is also the explicit flush: `io.print("")`.
 pub fn almide_rt_io_print(s: &str) {
-    print!("{}", s);
-    let _ = std::io::stdout().flush();
+    almide_stdout_write_bytes(s.as_bytes());
+    almide_stdout_flush();
 }
 
 pub fn almide_rt_io_read_line() -> String {
+    almide_stdout_flush();
     let mut buf = String::new();
     std::io::stdin().read_line(&mut buf).unwrap_or(0);
     buf.trim_end_matches('\n').trim_end_matches('\r').to_string()
 }
 
 pub fn almide_rt_io_read_all() -> String {
+    almide_stdout_flush();
     use std::io::Read;
     let mut buf = String::new();
     std::io::stdin().read_to_string(&mut buf).unwrap_or(0);
@@ -34,6 +32,7 @@ pub fn almide_rt_io_read_all() -> String {
 }
 
 pub fn almide_rt_io_read_byte() -> i64 {
+    almide_stdout_flush();
     use std::io::Read;
     let mut buf = [0u8; 1];
     match std::io::stdin().read(&mut buf) {
@@ -72,34 +71,21 @@ pub const ALMIDE_IO_READ_CHUNK_BYTES: i64 = 1 << 26;
 // by looping over 2^26 chunks instead of asking the floor for the whole span at once.
 pub fn almide_rt_io_read_n_bytes(n: i64) -> Vec<i64> {
     use std::io::Read;
+    almide_stdout_flush();
     if n <= 0 { return Vec::new(); }
     let mut buf: Vec<u8> = Vec::new();
     let _ = std::io::stdin().take(n as u64).read_to_end(&mut buf);
     buf.into_iter().map(|b| b as i64).collect()
 }
 
-// `println!`/`print!` write through Rust's own `Stdout` handle, NOT through
-// ALMIDE_STDOUT_BUF — two independent buffers over one fd. Without a flush here, a
-// program interleaving `println` and `io.write` emitted them in BUFFER order
-// (every io.write deferred to the exit flush) instead of PROGRAM order, while
-// the wasm leg's direct `fd_write` kept program order: a cross-target stdout
-// divergence, and wrong output even native-only. Flushing at the end of each
-// write hands the bytes to the shared `Stdout` in program order; the buffer
-// still batches WITHIN one call, which is where the byte-streaming benches
-// spend their time.
+// Byte writes share the buffer with `println` (#2245), so they interleave in
+// PROGRAM order without a flush per call (the C-162 fixture pins the order on
+// both legs); a terminal still sees each write as it happens.
 pub fn almide_rt_io_write_bytes(data: &Vec<i64>) {
-    ALMIDE_STDOUT_BUF.with(|buf| {
-        let mut w = buf.borrow_mut();
-        let bytes: Vec<u8> = data.iter().map(|&b| b as u8).collect();
-        w.write_all(&bytes).unwrap();
-        let _ = w.flush();
-    });
+    let bytes: Vec<u8> = data.iter().map(|&b| b as u8).collect();
+    almide_stdout_write_bytes(&bytes);
 }
 
 pub fn almide_rt_io_write(data: &Vec<u8>) {
-    ALMIDE_STDOUT_BUF.with(|buf| {
-        let mut w = buf.borrow_mut();
-        w.write_all(data).unwrap();
-        let _ = w.flush();
-    });
+    almide_stdout_write_bytes(data);
 }

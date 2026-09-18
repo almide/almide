@@ -488,6 +488,7 @@ call:set.remove
 call:set.symmetric_difference
 call:set.to_list
 call:set.union
+call:string.byte_slice
 call:string.capitalize
 call:string.chars
 call:string.codepoint

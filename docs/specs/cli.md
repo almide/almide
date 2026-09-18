@@ -1,6 +1,6 @@
 # CLI Specification
 
-> Last updated: 2026-09-03
+> Last updated: 2026-09-10
 
 ## Overview
 
@@ -36,6 +36,43 @@ almide run app.almd -- arg1 arg2        # ファイル指定 + プログラム�
 
 テスト: `tests/run_target_flag_test.rs`
 
+**stdout のバッファリング**(#2245): native バイナリの `println` / `io.print` / `io.write` /
+`io.write_bytes` は 1 つの 64 KiB バッファを通る(順序はプログラム順)。stdout が端末なら書き込み
+ごとに flush、パイプやファイルならブロック単位。flush 点は終了時・panic 時・`main` が err を返した
+時・子プロセス起動前・stdin 読み取り前、そして常に flush する `io.print`(`io.print("")` が明示
+flush)。stderr(`eprintln`)は無バッファなので、端末以外では stdout との相対順序は保たれない。
+詳細は [docs/stdlib/io.md](../stdlib/io.md)。
+
+### 実行可能なスクリプト
+
+ファイル先頭に shebang を書き、実行権限を付ければ直接実行できる。
+`/usr/bin/env -S` に対応した環境で、`almide` が PATH に必要。
+
+`-S` は飾りではない。Linux のカーネルは shebang の残りを**一つの引数**として
+`env` に渡すので、`-S` 無しの `#!/usr/bin/env almide run` は `almide run` という
+名前のプログラムを探して死ぬ。macOS は空白で分割するので通ってしまう。
+`almide check` は `-S` の無い二語以上の `env` shebang を E062 として警告する。
+
+```almd
+#!/usr/bin/env -S almide run
+
+fn main() -> Unit = {
+  println("shebang ok")
+}
+```
+
+```bash
+chmod +x script.almd
+./script.almd
+```
+
+shebang は先頭（任意のUTF-8 BOMの直後を含む）だけで認識される。
+行番号を保ち、`fmt` は shebang を imports や dialect stamp より前に保持する。
+ほかの位置の `#` は従来どおりエラー。
+
+テスト: `spec/cli/shebang.almd`, `tests/hot_native_regressions_test.rs`
+
+
 ---
 
 ### `almide build`
@@ -46,6 +83,7 @@ almide run app.almd -- arg1 arg2        # ファイル指定 + プログラム�
 almide build                            # src/main.almd → パッケージ名のバイナリ
 almide build app.almd -o myapp          # 出力ファイル名指定
 almide build app.almd --target wasm     # WASM バイナリ（直接 emit、rustc 不要）
+almide build app.almd --target wasm --host js -o dist/app.wasm  # + dist/app.js, dist/app.d.ts (JS ホスト、#2265)
 almide build --release                  # 最適化ビルド (opt-level=2)
 almide build --fast                     # 最大性能 (opt-level=3, LTO, native CPU)
 ```
@@ -54,6 +92,7 @@ almide build --fast                     # 最大性能 (opt-level=3, LTO, native
 |---|---|
 | `-o <name>` | 出力ファイル名 |
 | `--target wasm` | WASM バイナリを生成（直接 emit） |
+| `--host js` | `--target wasm` 専用: モジュールの隣に JS ホスト `<mod>.js`（依存なしの ES module）と `<mod>.d.ts` を書く（#2265）。`init(source?, hooks?)` がインスタンス化、`run()` が `main`、`pub fn` ごとに 1 つのラッパ。`@extern(wasm, "js", "name")` は `init({ js: { name } })` で結線。マーシャルは Int（`number`、±2^53 の範囲検査）/ Float / Bool / String / Unit — それ以外の型を境界に持つ `pub fn` はビルド時に型名を挙げて拒否。出荷物はプログラムが使う分だけ（#2276）: `__alloc`/`__release` の export と glue の String ヘルパは境界に `String` がある時だけ、WASI shim は出荷モジュール（`--wasm-opt` 後）が import する名前だけ。ゲート: `scripts/check-js-host.sh`（`spec/wasm_host_js/` を node で実行し、期待出力と native 出力に一致させ、モジュールのバイト同一性・shim 集合・`glue-ceiling.txt` の上限を検査）。仕様: docs/wasm/WASM-OUTPUT.md「JS host」節 |
 | `--release` | 最適化ビルド |
 | `--fast` | 最大性能（`--release` を含む + LTO + native CPU） |
 | `--unchecked-index` | 配列の境界チェックを無効化（unsafe） |
@@ -82,12 +121,47 @@ almide test --update-snapshots x_test.almd  # スナップショットの受理(
 
 | オプション | 説明 |
 |---|---|
-| `-r, --run <pattern>` | テスト名のパターンフィルタ |
+| `-r, --run <pattern>` | テスト名のパターンフィルタ(下記) |
 | `--no-check` | 型チェックをスキップ |
 | `--json` | JSON 形式で結果出力 |
 | `--target wasm` | wasmtime で実行 |
 | `--update-snapshots` | `testing.assert_snapshot` の不一致を受理し、呼び出し側の期待値リテラルをソース内で書き換える(`ALMIDE_UPDATE_SNAPSHOTS=1` でも同じ) |
 | `--ci` | CI モード: スナップショットを一切書かない(`CI=true` でも同じ)。新規・乖離はどちらも失敗 |
+| `--allow-no-tests` | 実行すべきテストが 0 件でも 0 で終了する(既定は 5) |
+
+実行のたびに **実行テスト数**を報告する: `2 tests in 1 file`。`--run` が何かを除外した
+ときは `0 tests in 1 file (2 filtered out)` のように除外数も付く。`--json` は各行に
+`"tests"` と `"filtered_out"` を持つ。
+
+**ゼロの扱いは二種類ある**(#2084):
+
+| 状況 | 終了コード | 理由 |
+|---|---|---|
+| `--run` が 1 件も一致しなかった | 0 | 絞り込んだのは呼び出し側。件数表示で自明になる |
+| 実行すべきテストが 1 件も無かった | **5** | 事故。`--allow-no-tests` で opt-out |
+
+「テストが無かった」は**テストファイルが見つからなかった場合と、名指ししたファイルに
+`test` ブロックが無かった場合の両方**に適用される。5 は 1(テスト失敗)と区別するための
+専用コードで、呼び出し側が出力を読まずに判別できる。
+
+この表は**ターゲットを問わない**: 同じファイル・同じ引数なら `--target wasm` も同じ終了
+コードと同じ件数行(`0 tests in 1 file`)を返す。`main` も `test` ブロックも無いファイルは
+レンダラの壁(WALL、そのレグが辞退した)ではなく「走らせるものが無かった」であり、両レグで
+5 になる(#2204)。
+
+テスト: `tests/test_zero_outcomes_test.rs`、両ターゲット一致は `tests/test_zero_exit_parity_test.rs`
+
+`--run <pattern>` は **生成された関数名に対する大文字小文字を区別する部分文字列一致**で、
+`test "…"` のラベルそのものではない。ラベルは `__test_almd_` を前置し、空白・記号を `_` に
+畳んだ綴りになる（`crates/almide-base/src/names.rs`）。したがって `test "beta fails"` は
+`--run beta` と `--run beta_fails` では選ばれるが、`--run "beta fails"`（空白のまま）では
+選ばれない。`--run __test_almd_` は全件を選ぶ。
+
+この規則は **native レグと wasm レグで同一**である（#2085）。native はパターンを Rust の
+テストハーネスに渡し、wasm はランナー合成の時点で同じ述語で絞る。どちらのレグでも、
+1件も一致しないパターンは 0 件を実行して成功終了する。
+
+テスト: `tests/wasm_test_filter_parity_test.rs`
 
 スクラッチ成果物（wasm レグが wasmtime に渡す `.wasm` モジュール）は実行ごとに固有の
 `$TMPDIR/almide-test-<pid>-<nonce>/` 配下に、ファイルの**絶対パス**のハッシュで命名して
@@ -159,10 +233,10 @@ test "render" {
 型チェックのみ実行。バイナリ生成なし。CI やエディタ統合用。
 
 ```bash
-almide check                            # src/main.almd をチェック
+almide check                            # パッケージ内: src/ 配下の .almd を全部チェック (#2165)
 almide check app.almd                   # 指定ファイルをチェック
 almide check --deny-warnings            # 警告をエラーとして扱う
-almide check --json                     # 診断を JSON で出力
+almide check --json                     # 診断を JSON で出力(パッケージ内なら src/ 全部、#2253)
 almide check --explain E001             # エラーコードの説明
 almide check --effects                  # 各関数のエフェクト分析を表示
 almide check --timings                  # フロントエンドの phase 別内訳
@@ -201,8 +275,21 @@ almide-timings {"lex_ns":1812250,"parse_ns":1644211,"check_ns":3851626,"total_ns
 `--timings` なしでは無出力）。ratchet 側は `scripts/check-edit-loop-scale.sh`。
 
 `--json` の 1 行は
-`{level, code, message, hint, here, try, try_replace, context, file, line, col, end_col, secondary}`。
-`try` は貼り付け可能な修正スニペット、`try_replace` はそれが置換するスパン。
+`{level, code, message, hint, here, try, try_replace, applicability, suggestions, context, file, line, col, end_col, secondary}`。
+`try` は貼り付け可能な修正スニペット、`try_replace` はそれが置換するスパン、
+`suggestions[]` は `{line, col, end_col, replacement, applicability}` の構造化された同じ修正。
+
+**位置の単位**(#2250): `line` は 1 始まりの行、`col` / `end_col` は **1 始まりの文字数**
+(Unicode スカラー値の個数)。バイトでも表示幅でもない — CJK を含む 66 文字(98 バイト)の行の
+末尾挿入は `col = 67`。`end_col` は排他的(その列の直前まで)で、`col == end_col` は
+ゼロ幅の挿入点。バイトで数えるハーネスは UTF-8 を壊す。
+
+**位置は必ずファイル上の実在する場所を指す**: heredoc の 3 行目にある `${…}` はその行・その列で
+報告される(かつては文字列の先頭行に、デコード済みテンプレート全体を数えた列で出ていた)。
+`)` が後続行にある呼び出しは `Span` が終端行を持たないため `(` のスパンだけを運ぶ —
+その場合 E041/E042 の `!` 修正は `try` にだけ出て、`try_replace` / `suggestions` は付かない
+(式の途中に `!` を挿す位置を渡すより、位置を出さない)。
+テスト: `tests/fixit_span_on_line_test.rs`、`tests/interpolation_span_parity_test.rs`。
 
 **構文エラーも JSON で出る**: トップレベル宣言が 1 つも成立しないファイルは
 `Parser::parse` が `Err` を返し、共有の `parse_file` は人間向けテキストを stderr に出して
@@ -212,6 +299,16 @@ almide-timings {"lex_ns":1812250,"parse_ns":1644211,"check_ns":3851626,"total_ns
 型エラーのみの場合は従来通り終了コード `0` で、判定は JSON の `level` を読む。
 
 テスト: `tests/mcp_test.rs`（`json_check_reports_a_total_parse_failure_as_json`）
+
+**パッケージ全体の JSON**(#2253): FILE を省いた `almide check --json` は、素の `almide check`
+と同じ `src/` 配下の全エントリを同じ順で判定し、全診断を 1 行 1 診断で出す。各行の `file`
+がどのエントリの診断かを言うので、それ以外の複数ファイル向けの形はない(エントリごとの
+`: ok` 行も出ない — 行は診断だけ)。終了コードは単一ファイル形の集約: パースできなかった
+エントリが 1 つでもあれば `1`(他のエントリの判定は続ける)、型エラーだけなら `0` で `level`
+を読む。`--effects` は関数ごとのレポートなので従来どおり単一エントリ解決のまま。
+
+テスト: `tests/check_package_entries_test.rs`（`json_judges_every_entry_and_each_row_names_its_file`、
+`json_exit_code_is_one_when_an_entry_does_not_parse`）
 
 エラーコード:
 
@@ -235,6 +332,16 @@ E001〜E030 + E420 の全コード解説は [../diagnostics/](../diagnostics/) �
 ### `almide fmt`
 
 ソースファイルのフォーマット。
+
+行長の上限は **100 字** (#2161)。呼び出しの引数リストと record リテラルは、
+次のどちらかなら 1 メンバー 1 行 (末尾カンマ付き、閉じ括弧は元のインデント) に
+並べる:
+
+- 書き手が既に行を分けている (メンバーがソース上で別々の行にある)
+- 1 行にした形が、その開始位置から 100 字を越える
+
+どちらでもなければ 1 行のまま。メンバーが 1 つの容器は積まない。どちらの
+配置も不動点 (整形結果をもう一度整形しても変わらない)。
 
 ```bash
 almide fmt                              # src/**/*.almd を整形
@@ -482,8 +589,147 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 
 ## 環境変数
 
+`ALMIDE_*` の環境変数は `almide_base::env::SWITCHES`（`crates/almide-base/src/env.rs`）が
+唯一の台帳で、`almide switches` で列挙できる（#2205）。下表は `almide switches --md` の出力
+そのもので、`scripts/check-env-switches.sh`（CI `checks`）が台帳に無い名前・コンパイラ側の直接の
+`std::env::var("ALMIDE_…")` 読みを、`tools/almide-gates env-switches-doc` がこの表と台帳の差分を拒否する。
+
+- 真偽値の意味は一つ: 未設定・空・`0`・`false`・`off`・`no` が OFF、それ以外は ON。
+- 種別 `route`（実行するレッグを強制する）と `gate`（既定の検査を迂回する）のスイッチが ON のときは、
+  そのプロセスで最初に読まれた時点で stderr に 1 行（`[almide] ALMIDE_X is set: …`）が出る。
+  強制されたルートで出た verdict は、そう名乗る。
+- `harness` はテストハーネス（`tests/`, `crates/*/tests`, `tools/`）が読むフック、`ci` はワークフローと
+  `scripts/` だけが使うもの、`runtime` はコンパイルされたプログラム自身が実行時に読むもの。
+
+<!-- almide switches --md: begin -->
+| 変数 | 種別 | 説明 |
+|---|---|---|
+| `ALMIDE_ABI_PROBE` | debug | print the lifted-effect-fn ABI decision per function (v1 lowering) |
+| `ALMIDE_ALLOC_COUNT` | harness | build the native program with a counting allocator that prints `__ALMD_ALLOC allocs=N deallocs=N reallocs=N peak=N` on stderr when `__almide_main` returns (the native borrow oracle's allocation lane, tests/native_borrow_oracle_test.rs) |
+| `ALMIDE_BANG_RETURN` | ablation | turn OFF the per-position `!` desugars of the v1 lowering so every `!` reaches the bind-position rule or walls loudly (the decline-matrix probe) |
+| `ALMIDE_BENCH_DIR=value` | harness | the fixture directory of the structural leg's perf probe (default `crates/almide-wasm/tests/perf`) |
+| `ALMIDE_BIN=value` | harness | path of the `almide` binary the test harnesses, scripts and workflows drive (default: `target/release/almide`, then PATH) |
+| `ALMIDE_BORROW_OWN_ALL` | ablation | make BorrowInsertion own every borrow-eligible param, as before inference existed — the ablation the ownership certifier's C4 sensitivity test drives, and the borrow-inference perf knob |
+| `ALMIDE_BOUNDED_DEBUG` | debug | print why a bounded-loop bind declined (v1 lowering) |
+| `ALMIDE_CAPTURE_MOVE_OFF` | ablation | make CaptureClone clone every capture again, as before #2231, instead of moving a value whose sole user is the closure — the ablation the ownership certifier's sensitivity test drives |
+| `ALMIDE_CERTIFY_OWNERSHIP=value` | debug | run the native ownership certifier after the pass pipeline (#2231): `report` prints every violation, `fail` aborts the build on one, `off` skips it; unset = `fail` in a debug build, `off` in a release build |
+| `ALMIDE_COMPILER_STACK=value` | tool | stack size in bytes of the compiler driver thread (default 256 MiB); a deep input that overflows it is the regression test's subject |
+| `ALMIDE_COMPONENT_ADAPTER` | route | route `--component` through the preview1 adapter instead of the direct component emission |
+| `ALMIDE_COMPONENT_P3` | route | emit a WASI 0.3 component (stdio over component-model streams, the async canonical ABI) under `--component`; needs a p3-capable wasmtime |
+| `ALMIDE_CORPUS_FILTER=value` | harness | substring filter over the fixture paths the 3-way oracle test evaluates |
+| `ALMIDE_COVERAGE_CONDITION=value` | ci | the coverage ratchet's condition tag (which baseline row a push is judged against) |
+| `ALMIDE_CWD=value` | runtime | the writer's working directory, set by `almide run` for the wasm host so relative fs paths resolve as on native (C-137); never set by hand |
+| `ALMIDE_DBG_ANF` | debug | print why a lambda lift or statement inline declined (v1 lowering) |
+| `ALMIDE_DBG_BANG` | debug | print the `!` unwrap decisions of the v1 bind lowering |
+| `ALMIDE_DBG_BORROW=value` | debug | dump every native borrow-inference signature key containing the value, per fixed-point iteration, and the keys each call site consults |
+| `ALMIDE_DBG_CELLS` | debug | print the captured / mutated / celled variable sets (v1 lowering) |
+| `ALMIDE_DBG_CONTLIFT` | debug | print why a poison-oracle continuation lift rolled back (v1 lowering) |
+| `ALMIDE_DBG_DESUGAR_FN=value` | debug | print the fully desugared body of the fn named by the value (v1 lowering; was `DBG_DESUGAR_FN` before #2205) |
+| `ALMIDE_DBG_DESUGAR_RAW` | debug | with `ALMIDE_DBG_DESUGAR_FN`, print the raw pre-desugar body too (was `DBG_DESUGAR_RAW`) |
+| `ALMIDE_DBG_ELEM` | debug | print why a list-literal Block element declined (v1 lowering) |
+| `ALMIDE_DBG_FAN` | debug | print the fan lowering's prefetch and pattern decisions (structural leg) |
+| `ALMIDE_DBG_LINK` | debug | dump the wasm link demand set and what each key resolves to |
+| `ALMIDE_DBG_LOWER_FN=value` | debug | print the fully desugared body the v1 lowering actually lowers, for the fn named by the value (was `DBG_LOWER_FN`) |
+| `ALMIDE_DBG_NEMATCH` | debug | print the never-err match analysis per function (v1 lowering) |
+| `ALMIDE_DBG_NESTED_MATCH` | debug | print why a nested-match chain was refused (v1 lowering) |
+| `ALMIDE_DBG_QQ` | debug | print which path lowered each `??` (match-first vs route fallback, v1 lowering) |
+| `ALMIDE_DBG_ROUTER` | debug | print a stdlib call name refused for its registered signature, with the mismatch and the argument types (v1 lowering) |
+| `ALMIDE_DBG_SWITCH` | debug | print the `br_table` switch rendering decisions (v1 wasm render) |
+| `ALMIDE_DBG_TCO` | debug | print the tail-call-to-loop admission decisions (v1 lowering) |
+| `ALMIDE_DBG_TRAP` | debug | print the wasm trap's backtrace and host state when the embedded host catches one |
+| `ALMIDE_DBG_UNLINKED` | debug | print wasm references with no resolvable definition |
+| `ALMIDE_DBG_WAT=value` | debug | print the rendered WAT of every function whose name contains the value (v1 wasm render) |
+| `ALMIDE_DBG_WHILE` | debug | print the while-loop lowering decisions (v1 lowering) |
+| `ALMIDE_DEBUG_CALL_OPS` | harness | print the call ops of every lowered fn (the classify_corpus example) |
+| `ALMIDE_DEBUG_EFFECTS` | debug | print the effect inference pass's per-function results (native codegen) |
+| `ALMIDE_DEBUG_MIR_OPS` | harness | print every MIR op with its index (the classify_corpus example — the certificate-bisection instrument) |
+| `ALMIDE_DEFAULTS_DEBUG` | debug | print the record-default resolution when no default keys were found (native codegen) |
+| `ALMIDE_DISABLE_OPT` | ablation | run the optimiser pipeline with every optional pass off (ablation; the always-on enabler passes still run) |
+| `ALMIDE_DUMP_DROPS` | debug | print the computed drop set (v1 lowering) |
+| `ALMIDE_DUMP_IR=value` | debug | dump the IR after the named passes (comma-separated, or `all`) on the native pipeline, and the post-chain body of every fn whose name contains the value on the v1 pipeline |
+| `ALMIDE_DUMP_MIR` | debug | print every lowered fn's op stream before the native render runs |
+| `ALMIDE_DUMP_VERIFY` | debug | print the native render's verification transcript |
+| `ALMIDE_DUMP_WMIR=value` | debug | print the lowered wasm-leg op stream of every fn whose name contains the value |
+| `ALMIDE_EXPECT_TOOLS` | harness | make a harness test FAIL instead of skipping when an external tool (wasmtime, wasm-tools) is missing; CI sets it |
+| `ALMIDE_FALLBACK_NAMES` | tool | make `almide test` print one `FALLBACK <file>` line per file the wasm leg did not pass — the wasm coverage ratchet's data feed |
+| `ALMIDE_FAN_SEQUENTIAL` | runtime | run `fan.*` sequentially in the native runtime (a determinism lever for measurement; the observable result is the same by contract) |
+| `ALMIDE_FN_ESCAPE_OFF` | ablation | make BorrowInsertion borrow EVERY fn-typed param as `&dyn Fn`, escaping or not (#2288) — the ablation the ownership certifier's C5 sensitivity test drives |
+| `ALMIDE_FUEL_PROBE` | route | insert fuel charges and force the INCUMBENT wasm leg (the charge probe); `almide run --time-report` sets it internally |
+| `ALMIDE_FUZZ_BASE=value` | harness | the first seed of the differential fuzz's fixed seed range (default 0) |
+| `ALMIDE_FUZZ_HOST_ORACLE` | harness | run the differential fuzz in host-oracle mode (arm selection is deterministic per seed and mode) |
+| `ALMIDE_FUZZ_ITERS=value` | harness | how many seeds the differential fuzz's fixed range covers (default 200) |
+| `ALMIDE_HEAP_TRACE` | debug | print the interpreter's heap-block allocations and frees |
+| `ALMIDE_HTTP_TIMEOUT_SECS=value` | runtime | the http client's request timeout in seconds, read by the compiled program (default 30) |
+| `ALMIDE_INSTALL=value` | tool | the directory `almide install` installs binaries into (overrides the default `~/.local/bin`) |
+| `ALMIDE_IR_FAULT=value` | harness | inject an IR violation after the named optimiser pass, so the per-pass verifier can be watched turning red in the release binary |
+| `ALMIDE_KEEP_SCRATCH` | tool | keep the `almide test` scratch build directory instead of deleting it |
+| `ALMIDE_LOCAL_REUSE_THRESHOLD=value` | route | the distinct-local count above which the v1 wasm render reuses locals (default 8000); a test knob that forces the transform on across the corpus |
+| `ALMIDE_LSP_TRACE` | debug | print every LSP request and response the language server handles |
+| `ALMIDE_MG_DEBUG` | debug | print the mutable-global slot assignment and cross-module name-bridge decisions (v1 lowering) |
+| `ALMIDE_MONO_DEBUG` | debug | print the monomorphisation discovery and instantiation decisions |
+| `ALMIDE_MP_PROBE` | debug | print the mut-param analysis decisions (IR) |
+| `ALMIDE_MUTATION_BASE=value` | ci | the base ref the mutation gate diffs against |
+| `ALMIDE_MUTATION_SCOPE=value` | ci | which mutation set the mutation gate runs |
+| `ALMIDE_MUTATION_SHARD=value` | ci | this job's shard index of the mutation gate |
+| `ALMIDE_MUTATION_SHARDS=value` | ci | how many shards the mutation gate is split into |
+| `ALMIDE_NAMES_DEBUG` | debug | print the native name-verification map and its scoped shadowing decisions |
+| `ALMIDE_NO_AVAIL_CHECK` | gate | bypass the E081 stdlib availability check (the measurement escape the availability probe builds through) |
+| `ALMIDE_NO_BR_TABLE` | route | render every switch as an if-chain instead of `br_table` (v1 wasm render) |
+| `ALMIDE_NO_RTLIB` | route | build the native runtime inline instead of linking the prebuilt runtime crate (the self-contained cargo path; `almide test` sets it for the harness build) |
+| `ALMIDE_NO_VERIFIED_OK` | gate | re-enable the retired `--no-verified` legs (the v0 fallback) instead of refusing the flag |
+| `ALMIDE_OMEGA=value` | route | the baked ω ordinal for deterministic wall-deadline replay: the artifact cuts at the n-th wall check without reading the clock (`-1` / unset = live) |
+| `ALMIDE_OMEGA_RECORD` | route | make the native artifact print `__ALMD_OMEGA <ord>` at each region exit whose deadline fired (record on native, replay anywhere) |
+| `ALMIDE_ONLY_PASS=value` | ablation | run the optimiser with ONLY the named optional pass (plus the always-on enablers); an unknown name is a hard error |
+| `ALMIDE_ORACLE_KEEP` | harness | keep the programs the native borrow-mode oracle generates (tests/native_borrow_oracle_test.rs) instead of deleting them after the run |
+| `ALMIDE_ORG_DIR=value` | ci | the checkout directory of the org repos the cross-repo verification scripts walk |
+| `ALMIDE_P3_HTTP_STOP=value` | ablation | make the p3 http shim answer its static error right after stage N of the request build (1..=5), to localise a hang |
+| `ALMIDE_PASS_EDGES=value` | harness | extra `A<B` pass-order edges (comma-separated) the shuffle honours — the bisection instrument that names the pair a shuffle divergence needs declared |
+| `ALMIDE_PROBE_DUMP=value` | harness | the path the heap probe writes its emitted wasm to |
+| `ALMIDE_PROBE_IR=value` | harness | the path the heap probe writes its lowered IR to |
+| `ALMIDE_PROBE_SRC=value` | harness | the source file the heap probe compiles (unset = the probe is skipped) |
+| `ALMIDE_PROFILE` | debug | print per-pass and per-phase timings of the native pipeline |
+| `ALMIDE_RC_TRAP_DOUBLE_FREE` | trap | arm the structural leg's double-free trap: releasing a block already at rc 0 traps instead of wrapping |
+| `ALMIDE_REGION_DEBUG` | debug | print the region-window pass's decisions (native and structural leg) |
+| `ALMIDE_REGION_OFF` | ablation | turn the region-window allocation pass off (native and structural leg) |
+| `ALMIDE_REGION_TRAP_STALE` | trap | arm the native region prelude's stale-reference trap (#2200) |
+| `ALMIDE_RENDER=value` | ci | the render_program example binary the prelude audit re-renders fixtures with |
+| `ALMIDE_REPO=value` | ci | the repository slug a release script targets |
+| `ALMIDE_RUN_PROJECT_DIR=value` | tool | the project root `almide run` resolves dependencies from, when the file is run from outside it |
+| `ALMIDE_SEMLAW_CASES=value` | harness | how many cases the semantic-laws property test draws |
+| `ALMIDE_SHUFFLE_PASSES=value` | gate | run the native passes in the seeded random order the declared dependency edges permit — a pass-dependency probe: the emitted Rust must not change (#2186) |
+| `ALMIDE_SKIP_PASS=value` | ablation | skip the named optional passes (comma-separated) — a pass-dependency probe: output must not change |
+| `ALMIDE_SKIP_VERSION_CHECK` | gate | skip the project's `almide` version requirement check |
+| `ALMIDE_STREAM_FUSION_OFF` | ablation | turn the stream-fusion pass off |
+| `ALMIDE_TCO_DEBUG` | debug | print the native tail-call loop rewrite decisions |
+| `ALMIDE_TEST_LAX_WASM` | gate | let the default `almide test` lane (wasm first, native fallback) PASS a file whose wasm leg diverged — trapped where the native re-run passed; without it a diverged leg fails the run |
+| `ALMIDE_TEST_VERBOSE` | tool | show the full cargo / rustc output of the `almide test` harness build |
+| `ALMIDE_TIME_PHASES` | debug | print the wall-clock time of each `almide run` phase |
+| `ALMIDE_TMPDBG` | debug | print the temporary-drop decisions of the v1 lowering |
+| `ALMIDE_TOPLET_DEBUG` | debug | print the cross-module top-let type writes and reads of the checker |
+| `ALMIDE_TRACE_PASSES` | debug | name each optimiser pass BEFORE it runs, so a pass that never returns is identifiable |
+| `ALMIDE_UPDATE_ALLOC` | harness | regenerate the structural leg's allocation baseline |
+| `ALMIDE_UPDATE_DUMPS` | harness | regenerate the structural leg's section-dump goldens |
+| `ALMIDE_UPDATE_GAUNTLET` | harness | regenerate the gauntlet manifest |
+| `ALMIDE_UPDATE_INTERP_LEDGER` | harness | regenerate the interpreter abstain and bridge-fallback ledgers |
+| `ALMIDE_UPDATE_NATIVE_OWN` | harness | regenerate the native result-ownership ledger |
+| `ALMIDE_UPDATE_RC_SNAPSHOTS` | harness | regenerate the rc-placement snapshots |
+| `ALMIDE_UPDATE_SIZES` | harness | regenerate the structural leg's size baselines |
+| `ALMIDE_UPDATE_SNAPSHOTS` | tool | same as `almide test --update-snapshots` |
+| `ALMIDE_UPDATE_SURFACE` | harness | regenerate the exercised-surface golden |
+| `ALMIDE_UPDATE_WITNESS_FLOOR` | harness | regenerate the certificate witness floor |
+| `ALMIDE_VERBOSE` | debug | same as `almide -v`: surface the native wall-and-fallback notes that a quiet run hides |
+| `ALMIDE_VERIFIED_DEBUG` | debug | name the wasm leg that rendered, and why the other declined (the route oracle) |
+| `ALMIDE_WALL_REASON` | debug | make `almide test` say WHICH stage of the wasm leg declined a fallback file, not just `v1 wall` |
+| `ALMIDE_WASM_FREES` | ci | the frees-churn gate's switch; its compiler reader retired with the v0 emitter (#782), the gate that still sets it is #2207's |
+| `ALMIDE_WASM_INCUMBENT` | route | force the INCUMBENT wasm leg (the v1 MIR renderer) instead of the structural-first route |
+| `ALMIDE_WASM_STRUCTURAL` | route | force the STRUCTURAL wasm leg for a shape the router would send to the incumbent (the route-flip probe) |
+| `ALMIDE_WAT_PRELUDE_REACH` | ci | make the prelude audit re-render every named fixture to measure reachability (CI sets it) |
+| `ALMIDE_WITNESS_DUMP` | harness | print every fixture's certificate witness in the witness-floor test |
+| `ALMIDE_WRITE_FUZZ_CORPUS` | harness | write the generated fuzz programs to disk |
+<!-- almide switches --md: end -->
+
+`ALMIDE_*` 以外:
+
 | 変数 | 説明 |
 |---|---|
-| `ALMIDE_DEBUG_TYPEVARS` | `1` にすると未解決 TypeVar の詳細を出力 |
-| `ALMIDE_UPDATE_SNAPSHOTS` | `1` で `almide test --update-snapshots` と同じ |
 | `CI` | `true` で `almide test --ci` と同じ(スナップショットを書かない) |

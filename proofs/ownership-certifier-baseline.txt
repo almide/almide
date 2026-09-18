@@ -1,0 +1,3 @@
+# ownership certifier ledger (#2231): every violation ALMIDE_CERTIFY_OWNERSHIP=report raises over
+# spec/lang + spec/wasm_cross at the last anchoring, sorted. Shrink-only: a new line is a defect,
+# a vanished line re-anchors with `scripts/check-ownership-certifier.sh --update` in the same change.

@@ -10,7 +10,11 @@
 fn frec(s: String, pos: Int, acc: List[String]) -> List[String] = if pos >= string.len(s) then acc
 else fstep(s, pos, acc, string.get(s, pos) ?? "")
 
-fn fstep(s: String, pos: Int, acc: List[String], c: String) -> List[String] = if c == "," then frec(s, pos + 1, acc + [","])
+fn fstep(s: String, pos: Int, acc: List[String], c: String) -> List[String] = if c == "," then frec(
+  s,
+  pos + 1,
+  acc + [","],
+)
 else frec(s, pos + 1, acc)
 
 fn main() -> Unit = {

@@ -5,8 +5,9 @@
 // O_APPEND in place; the byte-level observable (final file content) is identical
 // — the single-threaded WASI runtime has no interleaving writer to distinguish
 // the two. A read error on an EXISTING file yields the empty seed (the write
-// then surfaces any real fs problem on its own err channel); a missing file is
-// the empty seed, exactly `.create(true)`. The helper owns its result (`t ++ ""`
+// then surfaces any real fs problem on its own err channel — named `fs.append`,
+// the write floor's #2206 call-head twin); a missing file is the empty seed,
+// exactly `.create(true)`. The helper owns its result (`t ++ ""`
 // severs the borrow of the read Result's payload); the concat and the empty
 // literal are LET-BOUND before reaching the prim (a prim argument must be a
 // scalar/handle, not an unmaterialized concat). Reaching both floors carries
@@ -26,7 +27,7 @@ fn __app_old(path: String) -> String = if prim.path_exists(path) then __app_read
 effect fn fs_append(path: String, content: String) -> Result[Unit, String] = {
   let old = __app_old(path)
   let joined = old + content
-  let w: Result[Unit, String] = prim.write_text_file(path, joined)
+  let w: Result[Unit, String] = prim.write_text_file_as(path, joined, "fs.append")
   let wh = prim.handle(w)
   if prim.load32(wh + 16) != 0 then {
     let m: String = prim.load_handle(wh + 12)

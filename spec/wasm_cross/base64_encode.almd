@@ -15,7 +15,10 @@ local fn encode_chunks(input: List[Int], pos: Int, alpha: String, pad: Bool, acc
     let b2 = list.get_or(input, pos + 2, 0)
     let c0 = string.get(alpha, int.bshr(b0, 2)) ?? ""
     let c1 = string.get(alpha, int.bor(int.bshl(int.band(b0, 3), 4), int.bshr(b1, 4))) ?? ""
-    let c2 = if remaining > 1 then string.get(alpha, int.bor(int.bshl(int.band(b1, 15), 2), int.bshr(b2, 6))) ?? ""
+    let c2 = if remaining > 1 then string.get(
+      alpha,
+      int.bor(int.bshl(int.band(b1, 15), 2), int.bshr(b2, 6)),
+    ) ?? ""
     else if pad then "=" else ""
     let c3 = if remaining > 2 then string.get(alpha, int.band(b2, 63)) ?? ""
     else if pad then "=" else ""

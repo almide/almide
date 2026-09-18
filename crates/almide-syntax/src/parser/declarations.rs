@@ -452,6 +452,7 @@ impl Parser {
         };
         self.skip_newlines();
         self.expect(TokenType::Eq)?;
+        let type_start = self.pos;
         self.skip_newlines();
         let ty = self.parse_type_expr()?;
         // In type declarations, Union of all-uppercase Simple names is a Variant (enum)
@@ -459,6 +460,7 @@ impl Parser {
         let ty = match ty {
             TypeExpr::Union { ref members } if members.iter().all(|m| matches!(m, TypeExpr::Simple { name } if name.starts_with(char::is_uppercase))) => {
                 TypeExpr::Variant {
+                    comments: Vec::new(),
                     cases: members.iter().map(|m| {
                         if let TypeExpr::Simple { name } = m { VariantCase::Unit { name: name.clone() } } else { unreachable!() }
                     }).collect(),
@@ -466,6 +468,10 @@ impl Parser {
             }
             other => other,
         };
+        let mut ty = ty;
+        if let TypeExpr::Variant { comments, .. } = &mut ty {
+            *comments = super::variant_comments::collect(&self.tokens[type_start..self.pos]);
+        }
         Ok(Decl::Type { name, ty, deriving, visibility, generics, span: Some(span) })
     }
 

@@ -26,16 +26,25 @@ pub mod annotations;
 pub mod generated;
 pub mod pass;
 pub mod verify_names;
-pub mod pass_auto_parallel;
+pub mod use_kind;
+pub mod certify_ownership;
 pub mod pass_borrow_inference;
 pub mod pass_box_deref;
 pub mod pass_builtin_lowering;
+pub mod pass_decode_slot_hint;
+pub mod pass_decode_err_frame;
 pub mod pass_capture_clone;
 pub mod pass_shared_cell_borrow;
 pub mod pass_clone;
 pub mod pass_clone_loops;
 pub mod pass_clone_interp;
+mod pass_clone_compare;
+mod pass_clone_places;
+mod pass_clone_projection;
+mod pass_clone_record_fields;
 pub mod pass_top_let_storage;
+pub mod pass_var_storage;
+pub mod pass_borrow_lowering;
 pub mod pass_fan_lowering;
 pub mod pass_list_pattern;
 pub mod pass_match_subject;
@@ -44,6 +53,9 @@ pub mod pass_result_propagation;
 pub mod pass_intrinsic_lowering;
 pub mod pass_normalize_runtime_calls;
 pub mod pass_stdlib_lowering;
+pub mod pass_stream_fusion;
+pub mod pass_chain_source_borrow;
+mod pass_fan_local_state;
 pub mod pass_effect_inference;
 pub mod pass_tco;
 pub mod pass_licm;
@@ -51,11 +63,15 @@ pub mod pass_peephole;
 pub mod pass_range_counting;
 pub mod pass_region_window;
 pub mod pass_region_window_clone;
+mod prelude_region;
+pub use prelude_region::region_arena_prelude_source;
 pub mod perceus_verified;
 pub mod pass_egg_saturation;
 pub mod pass_matrix_shape_spec;
 pub mod pass_const_fold;
 pub mod pass_rust_lowering;
+mod pass_rust_lowering_stmts;
+pub mod pass_rust_lowering_fan;
 pub mod pass_lambda_type_resolve;
 pub mod pass_concretize_types;
 pub mod pass_resolve_calls;
@@ -237,7 +253,7 @@ pub fn program_uses_native_only_matrix_on_wasm(program: &IrProgram) -> Option<&'
 
 pub fn codegen_with(program: &mut IrProgram, target: Target, options: &CodegenOptions) -> CodegenOutput {
     let config = target::configure(target);
-    let prof = std::env::var_os("ALMIDE_PROFILE").is_some();
+    let prof = almide_base::env::flag("ALMIDE_PROFILE");
     // Time only through the sanctioned, wasm-safe shim. Raw std::time is
     // forbidden in this crate (it panics on wasm32-unknown-unknown, the browser
     // playground target) — see almide_base::profile and the forbidden-impurities
@@ -272,6 +288,26 @@ pub fn codegen_with(program: &mut IrProgram, target: Target, options: &CodegenOp
     // the correctness completeness roadmap.
     pass_concretize_types::assert_types_concretized(program);
 
+    // Ownership certifier (#2231): re-derive each occurrence's use from the
+    // final IR and check the passes' verdicts. `ALMIDE_CERTIFY_OWNERSHIP` =
+    // `report` prints, `fail` aborts, `off` skips. Unset, a DEBUG build
+    // certifies and fails — the corpus ledger is empty, so every violation
+    // is a defect the build that made it should refuse (rustc's debug-only
+    // MIR validation, Swift's SIL verifier); a release build skips it.
+    if target == Target::Rust {
+        let mode = almide_base::env::var("ALMIDE_CERTIFY_OWNERSHIP")
+            .unwrap_or_else(|| if cfg!(debug_assertions) { "fail".to_string() } else { "off".to_string() });
+        if mode == "report" || mode == "fail" {
+            let violations = certify_ownership::certify(program);
+            for v in &violations {
+                eprintln!("[CERTIFY OWNERSHIP] {v}");
+            }
+            if mode == "fail" && !violations.is_empty() {
+                panic!("ownership certifier: {} violation(s) (#2231)", violations.len());
+            }
+        }
+    }
+
     let _et = almide_base::profile::ProfileTimer::start(prof);
 
     // Layer 3: Target-specific emit
@@ -303,6 +339,35 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     s.push_str("impl AlmideConcat<String> for &str { type Output = String; #[inline(always)] fn concat(self, rhs: String) -> String { format!(\"{}{}\", self, rhs) } }\n");
     s.push_str("impl AlmideConcat<&str> for &str { type Output = String; #[inline(always)] fn concat(self, rhs: &str) -> String { format!(\"{}{}\", self, rhs) } }\n");
     s.push_str("impl<T: Clone> AlmideConcat<Vec<T>> for Vec<T> { type Output = Vec<T>; #[inline(always)] fn concat(self, rhs: Vec<T>) -> Vec<T> { let mut r = self; r.extend(rhs); r } }\n");
+    // ONE stdout buffer (#2245). `println` used to lower to Rust's `println!`,
+    // whose `Stdout` is line-buffered whatever it is attached to — one write
+    // syscall per line, 50k lines = 0.35 s — while `io.write` went through a
+    // separate 64 KiB BufWriter flushed per call to keep program order across
+    // the two handles. Every stdout write now goes through this buffer, so the
+    // order is the program's by construction, and the buffer flushes per line
+    // only when stdout is a terminal (the usual rule); to a pipe or a file it
+    // fills 64 KiB. Flush points: exit (the `fn main` wrapper), a panic (the
+    // hook the wrapper installs), `io.print` (interactive output — always),
+    // `process.exit`, before a child process runs (its output must follow
+    // ours), and before every stdin read (a prompt precedes the read).
+    // `eprintln` stays unbuffered on stderr, so the RELATIVE order of stdout
+    // and stderr is not preserved when stdout is not a terminal — the same as
+    // every C/Rust program; the bytes on each stream are unchanged.
+    s.push_str("thread_local! {\n");
+    s.push_str(&format!("    {vis}static ALMIDE_STDOUT_BUF: std::cell::RefCell<std::io::BufWriter<std::io::Stdout>> =\n"));
+    s.push_str("        std::cell::RefCell::new(std::io::BufWriter::with_capacity(65536, std::io::stdout()));\n}\n");
+    s.push_str(&format!("{vis}fn almide_stdout_is_terminal() -> bool {{ static TTY: std::sync::OnceLock<bool> = std::sync::OnceLock::new(); *TTY.get_or_init(|| std::io::IsTerminal::is_terminal(&std::io::stdout())) }}\n"));
+    s.push_str(&format!("{vis}fn almide_stdout_flush() {{ ALMIDE_STDOUT_BUF.with(|buf| {{ let _ = std::io::Write::flush(&mut *buf.borrow_mut()); }}); }}\n"));
+    // The exit-time counterpart: flush, then give back the two allocations the
+    // buffer and the panic hook hold — the 64 KiB buffer (swapped for a
+    // zero-capacity writer; the main thread's thread-locals are never
+    // destructed at process exit) and the hook's box (`take_hook` restores
+    // the default) — so the allocation ledger sees a process that frees what
+    // it allocated, not a leak by design.
+    s.push_str(&format!("{vis}fn almide_stdout_finish() {{ almide_stdout_flush(); ALMIDE_STDOUT_BUF.with(|buf| {{ let _ = std::mem::replace(&mut *buf.borrow_mut(), std::io::BufWriter::with_capacity(0, std::io::stdout())); }}); drop(std::panic::take_hook()); }}\n"));
+    s.push_str(&format!("{vis}fn almide_stdout_write_fmt(args: std::fmt::Arguments<'_>, newline: bool) {{ ALMIDE_STDOUT_BUF.with(|buf| {{ let mut w = buf.borrow_mut(); let _ = std::io::Write::write_fmt(&mut *w, args); if newline {{ let _ = std::io::Write::write_all(&mut *w, b\"\\n\"); }} if almide_stdout_is_terminal() {{ let _ = std::io::Write::flush(&mut *w); }} }}); }}\n"));
+    s.push_str(&format!("{vis}fn almide_stdout_write_bytes(bytes: &[u8]) {{ ALMIDE_STDOUT_BUF.with(|buf| {{ let mut w = buf.borrow_mut(); let _ = std::io::Write::write_all(&mut *w, bytes); if almide_stdout_is_terminal() {{ let _ = std::io::Write::flush(&mut *w); }} }}); }}\n"));
+    s.push_str(&format!("{macro_attr}macro_rules! almide_println {{ ($($arg:tt)*) => {{ $crate::almide_stdout_write_fmt(format_args!($($arg)*), true) }}; }}\n"));
     s.push_str(&format!("{macro_attr}macro_rules! almide_eq {{ ($a:expr, $b:expr) => {{ ($a) == ($b) }}; }}\n"));
     s.push_str(&format!("{macro_attr}macro_rules! almide_ne {{ ($a:expr, $b:expr) => {{ ($a) != ($b) }}; }}\n"));
     // almide_div!/almide_mod!: total integer `/` and `%`. `checked_div`/`checked_rem`
@@ -337,7 +402,9 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     // native OOB index matches the wasm trap and the div/mod abort contract
     // (#554/C-072) instead of a raw Rust panic (exit 101). i64 index is range-
     // checked against len as usize; negative or >= len aborts.
+    s.push_str(&format!("{macro_attr}macro_rules! almide_index_ref {{ ($xs:expr, $i:expr) => {{{{ let (__xs, __i) = (&$xs, $i as i64); if __i < 0 || (__i as u64) >= __xs.len() as u64 {{ eprintln!(\"Error: index out of bounds\"); std::process::exit(1); }} &__xs[__i as usize] }}}}; }}\n"));
     s.push_str(&format!("{macro_attr}macro_rules! almide_index {{ ($xs:expr, $i:expr) => {{{{ let (__xs, __i) = (&$xs, $i as i64); if __i < 0 || (__i as u64) >= __xs.len() as u64 {{ eprintln!(\"Error: index out of bounds\"); std::process::exit(1); }} __xs[__i as usize].clone() }}}}; }}\n"));
+    s.push_str(&format!("{macro_attr}macro_rules! almide_list_get_ref {{ ($xs:expr, $i:expr) => {{ ($xs).get(($i) as usize) }}; }}\n"));
     s.push_str(&format!("{macro_attr}macro_rules! almide_index_set {{ ($xs:expr, $i:expr, $v:expr) => {{{{ let __i = $i as i64; if __i < 0 || (__i as u64) >= $xs.len() as u64 {{ eprintln!(\"Error: index out of bounds\"); std::process::exit(1); }} $xs[__i as usize] = $v; }}}}; }}\n"));
     // AlmideRcCow<T>: COW value type. Clone = Rc::clone (O(1)), mutation = Rc::make_mut (COW).
     // Inspired by Swift's value type semantics.
@@ -366,69 +433,14 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     s.push_str("impl<T: std::fmt::Debug> std::fmt::Debug for AlmideSharedMut<T> { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { self.0.borrow().fmt(f) } }\n");
     s.push_str("impl<T: PartialEq> PartialEq for AlmideSharedMut<T> { fn eq(&self, other: &Self) -> bool { *self.0.borrow() == *other.0.borrow() } }\n");
     s.push_str(&format!("impl<T> AlmideSharedMut<T> {{ {vis}fn new(v: T) -> Self {{ AlmideSharedMut(std::rc::Rc::new(std::cell::RefCell::new(v))) }} {vis}fn get(&self) -> T where T: Clone {{ self.0.borrow().clone() }} {vis}fn set(&self, v: T) {{ *self.0.borrow_mut() = v; }} {vis}fn borrow(&self) -> std::cell::Ref<'_, T> {{ self.0.borrow() }} {vis}fn borrow_mut(&self) -> std::cell::RefMut<'_, T> {{ self.0.borrow_mut() }} }}\n"));
+    // #2186: the in-place read `SharedCellBorrowPass` proves safe (#1143) goes
+    // through `borrow_proven`, so a wrong statement-proof is a panic that
+    // names the pass and the Almide variable instead of a bare
+    // `already mutably borrowed: BorrowError` from inside `RefCell`.
+    s.push_str(&format!("impl<T> AlmideSharedMut<T> {{ #[inline(always)] {vis}fn borrow_proven(&self, var: &'static str) -> std::cell::Ref<'_, T> {{ match self.0.try_borrow() {{ Ok(r) => r, Err(_) => almide_shared_cell_misproof(var) }} }} }}\n"));
+    s.push_str(&format!("#[cold] #[inline(never)] {vis}fn almide_shared_cell_misproof(var: &str) -> ! {{ panic!(\"almide: shared cell `{{var}}` is mutably borrowed at a read pass_shared_cell_borrow proved safe (#1143); the pass's statement-proof was wrong — report it\") }}\n"));
     s.push_str(&almide_repr_prelude(vis));
-    s.push_str(&region_arena_prelude(vis));
-    s
-}
-
-/// The region-window arena (#1991): `AlmideRgn<T>`, the `Copy` handle a
-/// `__rgn_` twin enum's recursive fields hold instead of `Box<T>`, and the
-/// thread-local bump arena behind it. `almide_region_window(|| body)` saves
-/// the arena mark, runs the pair, rewinds — every block allocated inside is
-/// released at once, no per-node free. Nothing is dropped on rewind: every
-/// region type is `Copy` by construction (`RegionWindowPass` admits only
-/// scalar / region-enum payloads), so a rewound block owns nothing. Chunks
-/// are kept for the next window (64 KiB, doubling to a 64 MiB cap). The
-/// handle holds a raw pointer, so it is `!Send` / `!Sync` by construction
-/// and a window never spans threads (`fan.*` bodies are outside the pure
-/// vocabulary). Lives in the prelude, not the user code, so the rlib split
-/// (`slim_main_with_external_runtime`) keeps it.
-fn region_arena_prelude(vis: &str) -> String {
-    let mut s = String::new();
-    s.push_str(&format!("{vis}struct AlmideRgn<T>({vis}*const T);\n"));
-    s.push_str("impl<T> Clone for AlmideRgn<T> { #[inline(always)] fn clone(&self) -> Self { *self } }\n");
-    s.push_str("impl<T> Copy for AlmideRgn<T> {}\n");
-    s.push_str("impl<T> std::ops::Deref for AlmideRgn<T> { type Target = T; #[inline(always)] fn deref(&self) -> &T { unsafe { &*self.0 } } }\n");
-    s.push_str("impl<T: std::fmt::Debug> std::fmt::Debug for AlmideRgn<T> { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { (**self).fmt(f) } }\n");
-    s.push_str("impl<T: PartialEq> PartialEq for AlmideRgn<T> { fn eq(&self, other: &Self) -> bool { **self == **other } }\n");
-    // By-value forwarding of every derive a twin enum may carry from its
-    // original (`has_ord` / `has_hash` templates).
-    s.push_str("impl<T: Eq> Eq for AlmideRgn<T> {}\n");
-    s.push_str("impl<T: PartialOrd> PartialOrd for AlmideRgn<T> { fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> { (**self).partial_cmp(&**other) } }\n");
-    s.push_str("impl<T: Ord> Ord for AlmideRgn<T> { fn cmp(&self, other: &Self) -> std::cmp::Ordering { (**self).cmp(&**other) } }\n");
-    s.push_str("impl<T: std::hash::Hash> std::hash::Hash for AlmideRgn<T> { fn hash<H: std::hash::Hasher>(&self, state: &mut H) { (**self).hash(state) } }\n");
-    // `std::boxed::Box`, never bare `Box`: the prelude shares the user
-    // program's module, and a user `type Box = { .. }` shadows the std name
-    // (tests/dep_qualified_type_collision_test.rs).
-    s.push_str(&format!("{vis}struct AlmideArena {{ chunks: std::vec::Vec<std::boxed::Box<[std::mem::MaybeUninit<u8>]>>, cur: usize, off: usize }}\n"));
-    s.push_str("impl AlmideArena {\n");
-    s.push_str("    #[inline(always)] fn alloc(&mut self, size: usize, align: usize) -> *mut u8 {\n");
-    s.push_str("        if self.cur < self.chunks.len() {\n");
-    s.push_str("            let chunk = &mut self.chunks[self.cur];\n");
-    s.push_str("            let base = chunk.as_mut_ptr() as usize;\n");
-    s.push_str("            let start = (base + self.off + align - 1) & !(align - 1);\n");
-    s.push_str("            if start + size <= base + chunk.len() { self.off = start + size - base; return start as *mut u8; }\n");
-    s.push_str("        }\n");
-    s.push_str("        self.alloc_slow(size, align)\n");
-    s.push_str("    }\n");
-    s.push_str("    #[inline(never)] fn alloc_slow(&mut self, size: usize, align: usize) -> *mut u8 {\n");
-    s.push_str("        let mut next = if self.chunks.is_empty() { 0 } else { self.cur + 1 };\n");
-    s.push_str("        while next < self.chunks.len() && self.chunks[next].len() < size + align { next += 1; }\n");
-    s.push_str("        if next == self.chunks.len() {\n");
-    s.push_str("            let want = ((64usize << 10) << self.chunks.len().min(10)).max(size + align);\n");
-    s.push_str("            self.chunks.push(vec![std::mem::MaybeUninit::uninit(); want].into_boxed_slice());\n");
-    s.push_str("        }\n");
-    s.push_str("        self.cur = next; self.off = 0;\n");
-    s.push_str("        self.alloc(size, align)\n");
-    s.push_str("    }\n");
-    s.push_str("}\n");
-    s.push_str("thread_local! { static ALMIDE_ARENA: std::cell::UnsafeCell<AlmideArena> = const { std::cell::UnsafeCell::new(AlmideArena { chunks: std::vec::Vec::new(), cur: 0, off: 0 }) }; }\n");
-    // SAFETY (all three): the cell is thread-local and the `&mut` never
-    // leaves the closure; `alloc` calls no user code, so no re-entry.
-    s.push_str(&format!("#[inline(always)] {vis}fn almide_rgn_alloc<T: Copy>(v: T) -> AlmideRgn<T> {{ ALMIDE_ARENA.with(|a| {{ let a = unsafe {{ &mut *a.get() }}; let p = a.alloc(std::mem::size_of::<T>(), std::mem::align_of::<T>()) as *mut T; unsafe {{ p.write(v) }}; AlmideRgn(p) }}) }}\n"));
-    s.push_str(&format!("#[inline(always)] {vis}fn almide_region_save() -> (usize, usize) {{ ALMIDE_ARENA.with(|a| {{ let a = unsafe {{ &*a.get() }}; (a.cur, a.off) }}) }}\n"));
-    s.push_str(&format!("#[inline(always)] {vis}fn almide_region_restore(mark: (usize, usize)) {{ ALMIDE_ARENA.with(|a| {{ let a = unsafe {{ &mut *a.get() }}; a.cur = mark.0; a.off = mark.1; }}) }}\n"));
-    s.push_str(&format!("#[inline(always)] {vis}fn almide_region_window<R>(body: impl FnOnce() -> R) -> R {{ let mark = almide_region_save(); let r = body(); almide_region_restore(mark); r }}\n"));
+    s.push_str(&prelude_region::region_arena_prelude(vis, prelude_region::region_trap_armed()));
     s
 }
 

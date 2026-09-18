@@ -1,3 +1,7 @@
+// wasm:skip — `process.exec` has no wasm surface at all: this one is a real
+// target-availability refusal (#1423, proofs/target-availability.toml), not a
+// leg gap, and it does not retire with #2179. `almide build --target wasm`
+// refuses the same program for the same reason.
 // #1040 / C-214 — `process.exec_status_timeout`: the one admissible timeout.
 // Spawning a process is already outside the byte-identity contract, so
 // bounding it adds no nondeterminism the spawn did not. The contract's two
@@ -44,6 +48,13 @@ test "a chatty child cannot deadlock the drain" {
 test "a missing binary is the exec error, not a timeout" {
   match process.exec_status_timeout("almide-no-such-binary-1040", [], 1000) {
     ok(_) => assert(false),
-    err(e) => assert(string.starts_with(e, "exec failed:")),
+    err(e) => assert(string.starts_with(e, 'process.exec_status_timeout("almide-no-such-binary-1040", 1000): ')),
+  }
+}
+
+test "the non-timeout twin names the missing command" {
+  match process.exec_status("almide-no-such-binary-1040", []) {
+    ok(_) => assert(false),
+    err(e) => assert(string.starts_with(e, 'process.exec_status("almide-no-such-binary-1040"): ')),
   }
 }

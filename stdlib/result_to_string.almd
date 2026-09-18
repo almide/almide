@@ -92,7 +92,10 @@ fn __rts_ok_s(v: String) -> String = {
 fn __rts_digits(n: Int, acc: Int) -> Int = if n < 10 then acc + 1 else __rts_digits(n / 10, acc + 1)
 
 // Negative path WITHOUT negating (i64::MIN safe, #660): count digits of n <= 0 directly.
-fn __rts_count_neg(n: Int, acc: Int) -> Int = if n > 0 - 10 then acc + 1 else __rts_count_neg(n / 10, acc + 1)
+fn __rts_count_neg(n: Int, acc: Int) -> Int = if n > 0 - 10 then acc + 1 else __rts_count_neg(
+  n / 10,
+  acc + 1,
+)
 
 fn __rts_int_width(v: Int) -> Int = if v < 0 then __rts_count_neg(v, 0) + 1 else __rts_digits(v, 0)
 

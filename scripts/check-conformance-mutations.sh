@@ -32,11 +32,22 @@
 # same tree measured a compiler that doubled its wasm prints (three phantom
 # regressions). target/mutations is read by nothing else, so a mutant binary
 # left there is inert by construction, and target/release is never touched.
+#
+# The dir is passed as `--target-dir`, NEVER exported as CARGO_TARGET_DIR
+# (#2207): the runner shells out to `almide run`, which builds each corpus
+# program with cargo in its own scratch project and looks for the binary at
+# <scratch>/target/debug/almide-out. An exported CARGO_TARGET_DIR is
+# inherited by that cargo too, which then writes the binary under
+# <scratch>/target/mutations/ instead — "expected binary not found", 48/48
+# programs, on every cold-cache run (CI, eleven nights from 2026-09-03; a
+# laptop with a warm IR-keyed build cache never invokes cargo and so never
+# saw it). `--target-dir` reaches only the cargo that builds the runner.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}/mutations"
-RUNNER=(cargo test --release --test kernel_conformance_test)
+MUTATIONS_TARGET_DIR="${CARGO_TARGET_DIR:-target}/mutations"
+unset CARGO_TARGET_DIR
+RUNNER=(cargo test --release --target-dir "$MUTATIONS_TARGET_DIR" --test kernel_conformance_test)
 PATCH_DIR=proofs/conformance-mutations
 
 # m5 diverges only on the wasm leg: without a wasm runtime the runner
@@ -59,11 +70,43 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "== positive control: unmutated tree must pass the corpus runner (CARGO_TARGET_DIR=$CARGO_TARGET_DIR) =="
-if ! "${RUNNER[@]}" >/dev/null 2>&1; then
+# Every runner invocation is logged in full (the positive control to the
+# console as well): a gate that swallows the runner's output can only say
+# "did not pass", and that verdict stood unexplained for eleven nights
+# (2026-09-03 → 09-13) because nobody could see WHICH program diverged.
+# On a positive-control failure the log's tail also lands in the job
+# summary when the gate runs under GitHub Actions.
+RUNNER_LOG="$MUTATIONS_TARGET_DIR/conformance-mutations.log"
+mkdir -p "$MUTATIONS_TARGET_DIR"
+run_runner() {
+  # $1 = log file, rest = extra runner args; stdout+stderr go to the log.
+  local log="$1"
+  shift
+  "${RUNNER[@]}" "$@" >"$log" 2>&1
+}
+report_failure() {
+  # $1 = log file, $2 = headline for the job summary.
+  local log="$1" title="$2"
+  echo "---- runner output (last 80 lines of $log) ----" >&2
+  tail -n 80 "$log" >&2
+  if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+    {
+      echo "## conformance mutation gate: $title"
+      echo
+      echo '```'
+      tail -n 80 "$log"
+      echo '```'
+    } >>"$GITHUB_STEP_SUMMARY"
+  fi
+}
+
+echo "== positive control: unmutated tree must pass the corpus runner (target dir $MUTATIONS_TARGET_DIR) =="
+if ! run_runner "$RUNNER_LOG"; then
   echo "FAIL: the unmutated tree does not pass the corpus runner — fix that before judging mutants" >&2
+  report_failure "$RUNNER_LOG" "positive control failed (unmutated tree)"
   exit 1
 fi
+grep -E "^kernel_conformance:|^test result:" "$RUNNER_LOG" || true
 
 survived=()
 unbuilt=()
@@ -77,10 +120,12 @@ for patch in "$PATCH_DIR"/m*.patch; do
     exit 1
   fi
   applied="$patch"
-  if ! "${RUNNER[@]}" --no-run >/dev/null 2>&1; then
+  mutant_log="$MUTATIONS_TARGET_DIR/conformance-mutations-${name%.patch}.log"
+  if ! run_runner "$mutant_log" --no-run; then
     unbuilt+=("$name")
     echo "   DID NOT BUILD (rustc rejected the mutant — that is not a corpus kill)"
-  elif "${RUNNER[@]}" >/dev/null 2>&1; then
+    report_failure "$mutant_log" "$name did not build"
+  elif run_runner "$mutant_log"; then
     survived+=("$name")
     echo "   SURVIVED (runner stayed green under the seeded bug)"
   else
@@ -107,4 +152,4 @@ if [ "${#survived[@]}" -gt 0 ]; then
   exit 1
 fi
 
-echo "conformance mutation gate: $total/$total mutants killed (built under $CARGO_TARGET_DIR)"
+echo "conformance mutation gate: $total/$total mutants killed (built under $MUTATIONS_TARGET_DIR)"

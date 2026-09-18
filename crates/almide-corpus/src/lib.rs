@@ -83,6 +83,33 @@ pub fn walk_spec(root: &Path) -> Vec<(String, PathBuf)> {
     out
 }
 
+/// The data rows of a parity manifest (`spec-{ast,check,run}-manifest.txt`):
+/// every line except the `# oracle: …` header the generators write (which
+/// names the `almide --version` and git HEAD the rows were recorded from —
+/// informational, never compared, since a rebase changes the SHA) and blanks.
+///
+/// Every reader of a manifest goes through here, whether it compares against
+/// the recorded hash (run-parity, backend-parity, the WASI gate) or only uses
+/// the manifest as the corpus list (exercised surface, allocation, size,
+/// witness floor) — so the header cannot be mistaken for a row by any of them.
+pub fn manifest_rows(text: &str) -> impl Iterator<Item = &str> {
+    text.lines().filter(|l| !l.trim_start().starts_with('#') && !l.trim().is_empty())
+}
+
+/// A shrink-only ceiling recorded under `proofs/` as `name<TAB>value` rows
+/// (comment lines start with `#`). The test that enforces the ceiling reads
+/// it here instead of carrying a `const`, so the number lives in a ratchet
+/// artifact `scripts/check-ratchet-separation.sh` sees, in its own commit.
+pub fn ratchet_ceiling(root: &Path, file: &str, name: &str) -> usize {
+    let path = root.join(file);
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    manifest_rows(&text)
+        .find_map(|l| {
+            let (k, v) = l.split_once('\t').expect("name<TAB>value");
+            (k == name).then(|| v.trim().parse::<usize>().unwrap_or_else(|e| panic!("{file}: {name}: {e}")))
+        })
+        .unwrap_or_else(|| panic!("{}: no `{name}` row", path.display()))
+}
 fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
     for entry in std::fs::read_dir(dir).expect("readable directory") {
         let p = entry.expect("directory entry").path();

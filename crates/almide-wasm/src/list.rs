@@ -363,6 +363,9 @@ impl Emitter<'_> {
 
 
     fn lower_list_fold_arm(&mut self, xs: &IrExpr, init: &IrExpr, cb: &IrExpr) -> ArmResult {
+        if let Some(out) = self.lower_enumerate_fold(xs, init, cb)? {
+            return Ok(out);
+        }
         if let Some(out) = self.lower_list_fold_fused(xs, init, cb)? {
             return Ok(out);
         }

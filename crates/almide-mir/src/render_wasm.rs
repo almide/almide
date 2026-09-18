@@ -69,17 +69,11 @@ const MAIN_ERR_NL_ADDR: u32 = DIVZERO_MSG_ADDR + 23; // the div-zero line's "\n"
 const OVERFLOW_MSG_ADDR: u32 = 176; // "Error: integer overflow\n" — 176..200 (__div_trap)
 const BOUNDS_MSG_ADDR: u32 = 208; // "Error: index out of bounds\n" — 208..235 (__div_trap)
 const OOM_MSG_ADDR: u32 = 376; // "Error: out of memory\n" — 376..397 ($oom, C-197)
-                               // fs errno → native std::io Display strings (240..376, FIXED): path_open errors
-                               // map to the EXACT message native std::fs emits, so `err(e)` observes byte-identical
-                               // text (C-042 kin).
-const FS_ERR_NOENT_ADDR: u32 = 240; // "No such file or directory (os error 2)" — WASI NOENT(44)
-const FS_ERR_NOENT_LEN: u32 = 38;
-const FS_ERR_ACCES_ADDR: u32 = 280; // "Permission denied (os error 13)" — WASI ACCES(2)
-const FS_ERR_ACCES_LEN: u32 = 31;
-const FS_ERR_NOTDIR_ADDR: u32 = 312; // "Not a directory (os error 20)" — WASI NOTDIR(54)
-const FS_ERR_NOTDIR_LEN: u32 = 29;
-const FS_ERR_ISDIR_ADDR: u32 = 344; // "Is a directory (os error 21)" — WASI ISDIR(31)
-const FS_ERR_ISDIR_LEN: u32 = 28;
+                               // fs errno → native std::io Display strings: the rows of
+                               // `almide_base::fs_errno::FS_ERRNOS`, laid out by `fs_errno_regions`
+                               // ABOVE the #2090 message pieces (240..376 used to hold four of them
+                               // by hand — #2206 made the table the source, so `err(e)` observes
+                               // byte-identical text on every leg by construction).
 // native `write_all`'s ErrorKind::WriteZero Display — NOT an OS string (Rust's own
 // const message), so it is platform-independent like the four above. Reached when
 // fd_write accepts 0 bytes with no errno (#1385's latent short-write arm).
@@ -89,6 +83,208 @@ const FS_ERR_WRITEZERO_LEN: u32 = 28;
 // independent). The text floor's UTF-8 refusal (#1506) copies it into the Err String.
 const FS_ERR_UTF8_ADDR: u32 = 432; // "stream did not contain valid UTF-8" — 432..466
 const FS_ERR_UTF8_LEN: u32 = 34;
+
+// #2090 — the message pieces that name the failing call and its operand, so a
+// wasm-leg `fs` failure reads `fs.read_text("/nope/x"): No such file or
+// directory (os error 2)` like the native one instead of errno alone.
+//
+// Every address ABOVE was hand-assigned, and the ranges in those comments are
+// hand-maintained: nothing checks them, and an overlap corrupts a string
+// silently rather than failing. These are DERIVED instead — [`fs_msg_regions`]
+// walks the table from one base — and `static_data_regions_do_not_overlap`
+// (tests/wasm_static_data_layout_test.rs) gates the whole map, the hand-assigned
+// entries included. Adding a call here cannot land on a neighbour's bytes.
+const FS_MSG_BASE: u32 = 512; // first free address above FS_ERR_UTF8 (432..466)
+/// The byte the SELF-HOSTED print floors (`stdlib/print_str.almd`,
+/// `stdlib/eprintln.almd`) store `"\n"` into before their second `fd_write`.
+/// The stdlib spells the literal — Almide source cannot read this constant —
+/// so the two spellings are pinned against each other by
+/// `tests/wasm_static_data_layout_test.rs`, and the region is REGISTERED here so
+/// every derived row (`fs_errno_regions`) is laid out above it. Before #2206 it
+/// was a comment in the stdlib ("do NOT write below 768"), which the errno rows
+/// grew into unnoticed: the second `println` of an EEXIST message carried a
+/// `\n` where its `e` was.
+pub const PRINT_NL_SCRATCH_ADDR: u32 = 768;
+/// Opens the operand list after the call name: `("`.
+const FS_MSG_OPEN: &str = "(\"";
+/// Closes the operand list and separates it from the platform text: `"): `.
+const FS_MSG_CLOSE: &str = "\"): ";
+/// Between two operands of a two-path call: `fs.rename("a", "b")`.
+const FS_MSG_SEP: &str = "\", \"";
+/// `fs.<call>` — the call names the floors spell from STATIC data: one per fs
+/// floor that is reached without a call head. A floor reached through a #2206
+/// `_as` twin (`prim.read_text_file_as(path, "fs.read_lines")`) takes its head
+/// from the twin at run time and needs no row here, so the composites' names
+/// live in the stdlib that owns them, not in a second table. The ORDER is the
+/// address order; append, never insert, and the gate proves it.
+const FS_MSG_CALLS: &[&str] = &[
+    "fs.read_text",
+    "fs.read_bytes",
+    "fs.write",
+    "fs.mkdir_p",
+    "fs.remove_all",
+    "fs.list_dir",
+    "fs.rename",
+];
+// Index into FS_MSG_CALLS — named, so a site cannot cite the wrong row.
+pub(crate) const FS_MSG_READ_TEXT: usize = 0;
+pub(crate) const FS_MSG_READ_BYTES: usize = 1;
+pub(crate) const FS_MSG_WRITE: usize = 2;
+pub(crate) const FS_MSG_MKDIR: usize = 3;
+pub(crate) const FS_MSG_REMOVE: usize = 4;
+pub(crate) const FS_MSG_LIST_DIR: usize = 5;
+pub(crate) const FS_MSG_RENAME: usize = 6;
+
+/// `(text, addr, len)` for every #2090 message piece, in address order: the
+/// [`FS_MSG_CALLS`] rows, then [`FS_MSG_OPEN`], [`FS_MSG_CLOSE`], [`FS_MSG_SEP`].
+///
+/// Each piece starts 4-byte aligned, so a mis-stated length rounds into its own
+/// padding instead of the next string's first bytes.
+pub(crate) fn fs_msg_regions() -> Vec<(&'static str, u32, u32)> {
+    let mut out = Vec::new();
+    let mut addr = FS_MSG_BASE;
+    for text in FS_MSG_CALLS
+        .iter()
+        .chain([&FS_MSG_OPEN, &FS_MSG_CLOSE, &FS_MSG_SEP])
+    {
+        let len = text.len() as u32;
+        out.push((*text, addr, len));
+        addr += (len + 3) & !3;
+    }
+    out
+}
+
+/// `(row, addr, len)` for every fs errno the incumbent spells, in table order,
+/// packed 4-byte aligned ABOVE every fixed region (#2206) — the first address no
+/// hand-placed byte, message piece or self-host scratch reaches, so a new fixed
+/// row moves the table instead of colliding with it. The dispatch
+/// (`fs_errno_msg_wat`), the data segments (`preamble_with_bump_base`) and the
+/// layout gate all read this one walk.
+pub(crate) fn fs_errno_regions() -> Vec<(&'static almide_base::fs_errno::FsErrno, u32, u32)> {
+    let ceiling = fixed_static_regions()
+        .iter()
+        .map(|(_, a, l)| a + l)
+        .max()
+        .unwrap_or(FS_MSG_BASE);
+    let mut addr = (ceiling + 3) & !3;
+    let mut out = Vec::new();
+    for row in almide_base::fs_errno::FS_ERRNOS {
+        let len = row.text.len() as u32;
+        out.push((row, addr, len));
+        addr += (len + 3) & !3;
+    }
+    out
+}
+
+/// `(addr, len)` of [`FS_MSG_CALLS`]`[i]` — a static call head. The renderer hands
+/// these to a floor's `$ha`/`$hl` when the call is the floor's own.
+pub(crate) fn fs_msg_call(i: usize) -> (u32, u32) {
+    let r = fs_msg_regions();
+    (r[i].1, r[i].2)
+}
+
+/// `(addr, len)` of [`FS_MSG_OPEN`] — the first row after the call names.
+fn fs_msg_open() -> (u32, u32) {
+    let r = fs_msg_regions();
+    let row = r[FS_MSG_CALLS.len()];
+    (row.1, row.2)
+}
+
+/// `(addr, len)` of [`FS_MSG_CLOSE`] — the row after [`FS_MSG_OPEN`].
+fn fs_msg_close() -> (u32, u32) {
+    let r = fs_msg_regions();
+    let row = r[FS_MSG_CALLS.len() + 1];
+    (row.1, row.2)
+}
+
+/// A WAT data-segment literal for `text`, escaping `"` and `\` as `\HH` HEX
+/// rather than as `\"` / `\\`.
+///
+/// Not cosmetic: `render_wasm_dce`'s `match_paren` skips string literals by
+/// toggling on every `"` and its header states the invariant it relies on —
+/// *"this codebase's WAT output has no backslash-escaped quotes"*. The #2090
+/// pieces are the first preamble strings that CONTAIN a quote (`("`, `"): `),
+/// so a `{:?}` rendering desynced the preamble scan and silently dropped every
+/// data segment after it — the message then copied zeroed memory and printed as
+/// BLANKS where the call name should be. A `\22` byte keeps the invariant true
+/// and still assembles to exactly one byte, so the derived lengths stay right.
+fn wat_data_literal(text: &str) -> String {
+    let mut out = String::from("\"");
+    for b in text.bytes() {
+        match b {
+            b'"' => out.push_str("\\22"),
+            b'\\' => out.push_str("\\5c"),
+            _ => out.push(b as char),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// `(addr, len)` of [`FS_MSG_SEP`] — the last row.
+fn fs_msg_sep() -> (u32, u32) {
+    let r = fs_msg_regions();
+    let row = r[FS_MSG_CALLS.len() + 2];
+    (row.1, row.2)
+}
+
+/// Every FIXED byte run in the emitted module, as `(name, addr, len)`: the
+/// hand-assigned constants above, the derived [`fs_msg_regions`] (anchored at
+/// [`FS_MSG_BASE`]), and the self-host's print scratch. [`fs_errno_regions`]
+/// is laid out above the highest of these.
+fn fixed_static_regions() -> Vec<(String, u32, u32)> {
+    let mut out: Vec<(String, u32, u32)> = vec![
+        ("NWRITTEN".into(), NWRITTEN_ADDR, I32_SIZE),
+        ("IOVEC".into(), IOVEC_ADDR, I32_SIZE * 2),
+        ("RTF_NOTFOUND".into(), RTF_NOTFOUND_ADDR, RTF_NOTFOUND_LEN),
+        ("RDIR_ERR".into(), RDIR_ERR_ADDR, RDIR_ERR_LEN),
+        ("WRITE_ERR".into(), WRITE_ERR_ADDR, WRITE_ERR_LEN),
+        ("MKDIR_ERR".into(), MKDIR_ERR_ADDR, MKDIR_ERR_LEN),
+        ("REMOVE_ERR".into(), REMOVE_ERR_ADDR, REMOVE_ERR_LEN),
+        // "Error: division by zero\n" — 24 bytes; $__main_err reuses its first 7
+        // and its byte 23, so the region covers the whole line.
+        ("DIVZERO_MSG".into(), DIVZERO_MSG_ADDR, 24),
+        ("OVERFLOW_MSG".into(), OVERFLOW_MSG_ADDR, 24),
+        ("BOUNDS_MSG".into(), BOUNDS_MSG_ADDR, 27),
+        ("OOM_MSG".into(), OOM_MSG_ADDR, 21),
+        (
+            "FS_ERR_WRITEZERO".into(),
+            FS_ERR_WRITEZERO_ADDR,
+            FS_ERR_WRITEZERO_LEN,
+        ),
+        ("FS_ERR_UTF8".into(), FS_ERR_UTF8_ADDR, FS_ERR_UTF8_LEN),
+        ("PRINT_NL_SCRATCH".into(), PRINT_NL_SCRATCH_ADDR, 1),
+    ];
+    for (text, addr, len) in fs_msg_regions() {
+        out.push((format!("FS_MSG {text:?}"), addr, len));
+    }
+    out
+}
+
+/// Every statically placed byte run in the emitted module, as
+/// `(name, addr, len)` — [`fixed_static_regions`] AND the derived
+/// [`fs_errno_regions`]. The overlap gate reads this; it is the only place the
+/// map exists as data rather than as prose in a comment.
+pub fn static_data_regions() -> Vec<(String, u32, u32)> {
+    let mut out = fixed_static_regions();
+    for (row, addr, len) in fs_errno_regions() {
+        out.push((format!("FS_ERR_{}", row.name), addr, len));
+    }
+    out
+}
+
+/// The address the statically placed data must stay below: the mutable-global
+/// slot region / bump-allocator base.
+pub fn static_data_ceiling() -> u32 {
+    HEAP_BASE
+}
+
+/// The fixed preamble as emitted, for the layout gates to read. The preamble
+/// itself stays `pub(crate)`; this exposes only the rendered text so
+/// `wasm_static_data_layout_test` can assert over the bytes that actually ship.
+pub fn preamble_text_for_gates() -> String {
+    preamble()
+}
 // The bump allocator's DEFAULT start — also the mutable-global slot region's base
 // (`crate::MG_SLOT_BASE`, one authoritative value): a program with N mutable
 // module-level `var`s shifts its allocator base to `HEAP_BASE + 8*N` so the slots
@@ -696,6 +892,13 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
             )
         })
         .collect();
+    // #2265: the JS host's allocator + release exports, only under the
+    // `--host js` guard so every other rendering keeps its bytes.
+    let pub_exports = if crate::host_exports::string_abi() {
+        format!("{pub_exports}{}", crate::host_exports::export_text())
+    } else {
+        pub_exports
+    };
     // The mutable-global slot TAKE accessor (emitted iff the program has slots): loads
     // the slot's block handle WITHOUT an rc change — the slot's own reference transfers
     // to the caller (the assign path drops it and stores a replacement), which is

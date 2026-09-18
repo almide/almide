@@ -135,18 +135,25 @@ fn guard_shape(ctx: &RenderContext, pat: &IrPattern, counter: &mut usize, subs: 
 /// Emit `let <flat pat> = <move_expr> else { unreachable!() };` to move the value
 /// out of its box and bind the inner names by value, recursing for deeper boxes.
 /// The guard has already verified the structure, so `else` is dead.
-fn box_extract(ctx: &RenderContext, pat: &IrPattern, move_expr: &str, binds: &mut Vec<String>, counter: &mut usize) {
+fn box_extract(ctx: &RenderContext, pat: &IrPattern, move_expr: &str, binds: &mut Vec<String>, counter: &mut usize, borrowed: bool) {
     match pat {
-        IrPattern::Constructor { name, args } => box_extract_constructor(ctx, name, args, move_expr, binds, counter),
-        IrPattern::RecordPattern { name, fields, .. } => box_extract_record(ctx, name, fields, move_expr, binds, counter),
+        IrPattern::Constructor { name, args } => box_extract_constructor(ctx, name, args, move_expr, binds, counter, borrowed),
+        IrPattern::RecordPattern { name, fields, .. } => box_extract_record(ctx, name, fields, move_expr, binds, counter, borrowed),
         _ => {}
     }
+}
+
+/// The expression a deeper box var is read through: a move out of the box
+/// (`*b`) for an owned subject, a reborrow through it (`&**b`) for a
+/// borrowed one (the var is then `&Box<T>`).
+fn deeper_box(e: &str, borrowed: bool) -> String {
+    if borrowed { format!("&**{e}") } else { format!("*{e}") }
 }
 
 /// `IrPattern::Constructor` case of `box_extract`, extracted verbatim
 /// (cog>30 decomposition, pattern 1 — `binds`/`counter` are write-only
 /// accumulators, same safety class as `check_needs_ownership`'s `needs`).
-fn box_extract_constructor(ctx: &RenderContext, name: &str, args: &[IrPattern], move_expr: &str, binds: &mut Vec<String>, counter: &mut usize) {
+fn box_extract_constructor(ctx: &RenderContext, name: &str, args: &[IrPattern], move_expr: &str, binds: &mut Vec<String>, counter: &mut usize, borrowed: bool) {
     let qualified = qualify_ctor(ctx, name, None);
     let mut flat = Vec::with_capacity(args.len());
     let mut deeper: Vec<(String, &IrPattern)> = Vec::new();
@@ -162,13 +169,13 @@ fn box_extract_constructor(ctx: &RenderContext, name: &str, args: &[IrPattern], 
     let flat_pat = if args.is_empty() { qualified } else { format!("{}({})", qualified, flat.join(", ")) };
     binds.push(format!("let {} = {} else {{ unreachable!() }};", flat_pat, move_expr));
     for (e, sub) in deeper {
-        box_extract(ctx, sub, &format!("*{}", e), binds, counter);
+        box_extract(ctx, sub, &deeper_box(&e, borrowed), binds, counter, borrowed);
     }
 }
 
 /// `IrPattern::RecordPattern` case of `box_extract`, extracted verbatim
 /// (cog>30 decomposition).
-fn box_extract_record(ctx: &RenderContext, name: &str, fields: &[IrFieldPattern], move_expr: &str, binds: &mut Vec<String>, counter: &mut usize) {
+fn box_extract_record(ctx: &RenderContext, name: &str, fields: &[IrFieldPattern], move_expr: &str, binds: &mut Vec<String>, counter: &mut usize, borrowed: bool) {
     let qualified = qualify_ctor(ctx, name, None);
     let mut flat = Vec::with_capacity(fields.len());
     let mut deeper: Vec<(String, &IrPattern)> = Vec::new();
@@ -187,7 +194,7 @@ fn box_extract_record(ctx: &RenderContext, name: &str, fields: &[IrFieldPattern]
     }
     binds.push(format!("let {} {{ {}, .. }} = {} else {{ unreachable!() }};", qualified, flat.join(", "), move_expr));
     for (e, sub) in deeper {
-        box_extract(ctx, sub, &format!("*{}", e), binds, counter);
+        box_extract(ctx, sub, &deeper_box(&e, borrowed), binds, counter, borrowed);
     }
 }
 
@@ -202,6 +209,19 @@ struct UnboxState {
     counter: usize,
     guards: Vec<String>,
     binds: Vec<String>,
+    /// The subject is matched by reference (a `&T` param or binder): a box
+    /// var is `&Box<T>`, so the shape guard looks through two derefs and
+    /// the move-out binds by reference (`&**b`) instead of moving (`*b`).
+    borrowed: bool,
+}
+
+impl UnboxState {
+    fn through_box(&self, v: &str) -> String {
+        if self.borrowed { format!("&**{v}") } else { format!("&*{v}") }
+    }
+    fn out_of_box(&self, v: &str) -> String {
+        if self.borrowed { format!("&**{v}") } else { format!("*{v}") }
+    }
 }
 
 /// `Constructor { name, args }` arm of [`unbox_arm_pattern`].
@@ -211,8 +231,8 @@ fn unbox_constructor_pattern(ctx: &RenderContext, name: &str, args: &[IrPattern]
     for (i, arg) in args.iter().enumerate() {
         if is_boxed_tuple_field(ctx, name, i) && pattern_is_complex(arg) {
             let v = fresh_box_var(&mut st.counter);
-            st.guards.push(box_shape_guard(ctx, arg, &format!("&*{}", v), &mut st.counter));
-            box_extract(ctx, arg, &format!("*{}", v), &mut st.binds, &mut st.counter);
+            st.guards.push(box_shape_guard(ctx, arg, &st.through_box(&v), &mut st.counter));
+            box_extract(ctx, arg, &st.out_of_box(&v), &mut st.binds, &mut st.counter, st.borrowed);
             flat.push(v);
         } else {
             flat.push(render_pattern_hinted(ctx, arg, None));
@@ -231,8 +251,8 @@ fn unbox_record_pattern(ctx: &RenderContext, name: &str, fields: &[IrFieldPatter
                 && pattern_is_complex(p) =>
             {
                 let v = fresh_box_var(&mut st.counter);
-                st.guards.push(box_shape_guard(ctx, p, &format!("&*{}", v), &mut st.counter));
-                box_extract(ctx, p, &format!("*{}", v), &mut st.binds, &mut st.counter);
+                st.guards.push(box_shape_guard(ctx, p, &st.through_box(&v), &mut st.counter));
+                box_extract(ctx, p, &st.out_of_box(&v), &mut st.binds, &mut st.counter, st.borrowed);
                 flat.push(format!("{}: {}", fp.name, v));
             }
             Some(p) => flat.push(format!("{}: {}", fp.name, render_pattern_hinted(ctx, p, None))),
@@ -242,10 +262,10 @@ fn unbox_record_pattern(ctx: &RenderContext, name: &str, fields: &[IrFieldPatter
     format!("{} {{ {} }}", qualified, flat.join(", "))
 }
 
-fn unbox_arm_pattern(ctx: &RenderContext, pat: &IrPattern, enum_hint: Option<&str>)
+fn unbox_arm_pattern(ctx: &RenderContext, pat: &IrPattern, enum_hint: Option<&str>, borrowed: bool)
     -> Option<(String, Vec<String>, Vec<String>)>
 {
-    let mut st = UnboxState::default();
+    let mut st = UnboxState { borrowed, ..UnboxState::default() };
     let flat = match pat {
         IrPattern::Constructor { name, args } => unbox_constructor_pattern(ctx, name, args, enum_hint, &mut st),
         IrPattern::RecordPattern { name, fields, .. } => unbox_record_pattern(ctx, name, fields, enum_hint, &mut st),
@@ -283,7 +303,7 @@ pub fn match_needs_unreachable_backstop(
     subject_ty: &almide_lang::types::Ty,
 ) -> bool {
     let enum_hint = subject_enum_hint(ctx, subject_ty);
-    if !arms.iter().any(|a| unbox_arm_pattern(ctx, &a.pattern, enum_hint).is_some()) {
+    if !arms.iter().any(|a| unbox_arm_pattern(ctx, &a.pattern, enum_hint, false).is_some()) {
         return false;
     }
     let has_irrefutable = arms.iter().any(|a| {
@@ -293,12 +313,25 @@ pub fn match_needs_unreachable_backstop(
     !has_irrefutable
 }
 
-pub fn render_match_arm(ctx: &RenderContext, arm: &IrMatchArm, match_ty: &almide_lang::types::Ty, subject_ty: &almide_lang::types::Ty) -> String {
+/// Is a match on `subject` a match by REFERENCE — a variable `BorrowLowering`
+/// recorded as a reference binding (`ref_binders`: a by-reference param it
+/// matched on, or a binder such a match bound), or an explicit borrow? Its
+/// payloads then bind `&T`, and a boxed-nested pattern's guards and move-outs
+/// read through the reference.
+pub fn subject_is_borrowed(ctx: &RenderContext, subject: &IrExpr) -> bool {
+    match &subject.kind {
+        IrExprKind::Var { id } => ctx.ann.ref_binders.contains(id),
+        IrExprKind::Borrow { mutable: false, .. } => true,
+        _ => false,
+    }
+}
+
+pub fn render_match_arm(ctx: &RenderContext, arm: &IrMatchArm, match_ty: &almide_lang::types::Ty, subject_ty: &almide_lang::types::Ty, borrowed: bool) -> String {
     let enum_hint = subject_enum_hint(ctx, subject_ty);
     // #610: a boxed-nested constructor pattern is rewritten to a flat pattern + a
     // `matches!` shape-guard + `let-else` box move-outs in the body. None when the
     // arm has no boxed-nested position (the common case → identical to before).
-    let (pattern, shape_guards, box_binds) = match unbox_arm_pattern(ctx, &arm.pattern, enum_hint) {
+    let (pattern, shape_guards, box_binds) = match unbox_arm_pattern(ctx, &arm.pattern, enum_hint, borrowed) {
         Some((flat, guards, binds)) => (flat, guards, binds),
         None => (render_pattern_hinted(ctx, &arm.pattern, enum_hint), Vec::new(), Vec::new()),
     };

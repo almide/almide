@@ -271,6 +271,27 @@ effect fn main() -> Unit = {
 }
 "#;
 
+// #2206: the p3 shim's message pack is rendered from `almide_base::fs_errno`
+// at emit time — the same table native's `Display` is pinned to — so every
+// errno the shim can classify (no-entry / not-directory / exist / is-directory)
+// answers the table's text. The `fs.<call>("<operand>"): ` head is not carried
+// on this lane (the issue's noted, separate gap), so the lines are the bare
+// texts. The EEXIST line prints twice: a scratch overlap only shows on a
+// row's second print.
+const FS_ERRNO_TABLE: &str = r#"import fs
+
+effect fn main() -> Unit = {
+  println(match fs.read_text("f.txt/x") { ok(v) => "ok(${v})", err(m) => m })
+  println(match fs.write("f.txt/y", "z") { ok(_) => "ok", err(m) => m })
+  println(match fs.mkdir_p("f.txt") { ok(_) => "ok", err(m) => m })
+  println(match fs.mkdir_p("f.txt") { ok(_) => "ok", err(m) => m })
+  println(match fs.mkdir_p("adir") { ok(_) => "ok", err(m) => m })
+  println(match fs.mkdir_p("f.txt/sub") { ok(_) => "ok", err(m) => m })
+  println(match fs.read_text("nope.txt") { ok(v) => "ok(${v})", err(m) => m })
+  println(match fs.write("adir", "z") { ok(_) => "ok", err(m) => m })
+}
+"#;
+
 fn build_p3_structural(src: &Path, out: &Path) -> String {
     let o = Command::new(almide_bin())
         .args([
@@ -958,4 +979,39 @@ effect fn main() -> Unit = {{
         "first:200:hello from p3\ndead err\nafter:200:len:2048;probe:again;framing:cl\ndead2 err\nlast:hello from p3\n",
         "p3 http err-path probe stdout; stderr:\n{stderr}"
     );
+}
+
+#[test]
+fn p3_component_spells_the_fs_errno_table() {
+    use almide_base::fs_errno::{EEXIST, EISDIR, ENOENT, ENOTDIR};
+    if Command::new(almide_bin()).arg("--version").output().is_err() {
+        return;
+    }
+    let d = dir().join("fserrno");
+    std::fs::create_dir_all(d.join("adir")).expect("mkdir");
+    std::fs::write(d.join("f.txt"), "hi\n").expect("write");
+    let src = d.join("errno.almd");
+    std::fs::write(&src, FS_ERRNO_TABLE).expect("write");
+    let p3 = d.join("errno_p3.wasm");
+    build_p3_structural(&src, &p3);
+    if !wasmtime_available() {
+        return;
+    }
+    let Some((out, err, code)) = run_p3_dir(&p3, &d) else {
+        return;
+    };
+    let expected = [
+        ENOTDIR.text,
+        ENOTDIR.text,
+        EEXIST.text,
+        EEXIST.text,
+        "ok",
+        ENOTDIR.text,
+        ENOENT.text,
+        EISDIR.text,
+    ]
+    .join("\n")
+        + "\n";
+    assert_eq!(out, expected, "the p3 lane's errno texts are the table's (stderr: {err})");
+    assert_eq!(code, 0);
 }

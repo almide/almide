@@ -228,6 +228,24 @@ fn read_text_file(path: String) -> Result[String, String] = _
 @intrinsic("almide_rt_prim_read_bytes_file")
 fn read_bytes_file(path: String) -> Result[Bytes, String] = _
 
+// #2206 — the CALL-HEAD twins. Every fs message reads `fs.<call>("<operand>"): <errno>`
+// (C-215), and the read floor above is reached by a dozen self-hosted composites
+// (fs.read_lines, fs.fold_lines_chunked, fs.copy, …) whose native message names
+// THEM. These forms take the call name the composite owns, so the floor composes
+// the message once — instead of every composite rewriting `fs.read_text(` after
+// the fact by string surgery (3d3c97b13, retired). The operand is `path`, quoted;
+// `_as_pair` names TWO operands in the order given, for the two-path calls
+// (`fs.copy(src, dst)`) whose failing floor sees only one of them. Same floor, same
+// Result block, same capability as the plain form.
+@intrinsic("almide_rt_prim_read_text_file_as")
+fn read_text_file_as(path: String, call: String) -> Result[String, String] = _
+
+@intrinsic("almide_rt_prim_read_bytes_file_as")
+fn read_bytes_file_as(path: String, call: String) -> Result[Bytes, String] = _
+
+@intrinsic("almide_rt_prim_read_text_file_as_pair")
+fn read_text_file_as_pair(path: String, call: String, first: String, second: String) -> Result[String, String] = _
+
 // The `read_dir` WASI directory-listing floor — the FIFTH sandbox exit (reaches
 // Capability::FsRead, like read_text_file). Opens the directory at `path` (preopen-relative,
 // same resolution as read_text_file) via path_open(O_DIRECTORY), reads entries via an
@@ -240,6 +258,11 @@ fn read_bytes_file(path: String) -> Result[Bytes, String] = _
 @intrinsic("almide_rt_prim_read_dir")
 fn read_dir(path: String) -> Result[List[String], String] = _
 
+// The call-head twin (#2206): `fs.walk`, `fs.glob` and `fs.remove` list through this
+// floor and native names each of them. See `read_text_file_as`.
+@intrinsic("almide_rt_prim_read_dir_as")
+fn read_dir_as(path: String, call: String) -> Result[List[String], String] = _
+
 // The path_open(O_CREAT|O_TRUNC) + fd_write WASI host calls, packaged as ONE high-level
 // HEAP-RESULT prim — the FS-WRITE sandbox exit (reaches Capability::FsWrite, a DISTINCT
 // capability from FsRead: a write is strictly greater authority). Opens (creating +
@@ -251,6 +274,15 @@ fn read_dir(path: String) -> Result[List[String], String] = _
 // the native target uses fs.write's own @intrinsic.
 @intrinsic("almide_rt_prim_write_text_file")
 fn write_text_file(path: String, content: String) -> Result[Unit, String] = _
+
+// The write floor's call-head twins (#2206): `fs.append`, `fs.write_bytes`,
+// `fs.create_temp_file` and fs.copy's write half all reach `write_text_file`, and
+// native names each of them. See `read_text_file_as`.
+@intrinsic("almide_rt_prim_write_text_file_as")
+fn write_text_file_as(path: String, content: String, call: String) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_prim_write_text_file_as_pair")
+fn write_text_file_as_pair(path: String, content: String, call: String, first: String, second: String) -> Result[Unit, String] = _
 
 // The path_create_directory WASI host call, packaged as ONE high-level HEAP-RESULT prim — a
 // FS-WRITE sandbox exit (reaches Capability::FsWrite — a mkdir IS a filesystem write, the SAME
@@ -265,6 +297,11 @@ fn write_text_file(path: String, content: String) -> Result[Unit, String] = _
 @intrinsic("almide_rt_prim_make_dir")
 fn make_dir(path: String) -> Result[Unit, String] = _
 
+// The call-head twin (#2206): `fs.create_temp_dir` creates through this floor and
+// native names it. See `read_text_file_as`.
+@intrinsic("almide_rt_prim_make_dir_as")
+fn make_dir_as(path: String, call: String) -> Result[Unit, String] = _
+
 // The path_remove_directory / path_unlink_file WASI host calls, packaged as ONE high-level
 // HEAP-RESULT prim — a FS-WRITE sandbox exit (reaches Capability::FsWrite — a recursive remove
 // IS a filesystem write, the SAME capability as write_text_file, NOT a new one). Removes the
@@ -277,6 +314,11 @@ fn make_dir(path: String) -> Result[Unit, String] = _
 // runtime impl — the native target uses fs.remove_all's own @intrinsic.
 @intrinsic("almide_rt_prim_remove_all")
 fn remove_all(path: String) -> Result[Unit, String] = _
+
+// The call-head twin (#2206): `fs.remove` removes through this floor and native
+// names it. See `read_text_file_as`.
+@intrinsic("almide_rt_prim_remove_all_as")
+fn remove_all_as(path: String, call: String) -> Result[Unit, String] = _
 
 // The path_filestat_get WASI EXISTENCE query, packaged as ONE high-level SCALAR prim — a
 // FS-READ sandbox exit (reaches Capability::FsRead — a stat IS a filesystem read, the SAME

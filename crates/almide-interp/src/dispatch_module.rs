@@ -4,8 +4,9 @@
 // discipline, #1856; the `val!`/`val_opt!` macros and the imports are
 // dispatch.rs's own). This part holds the `(module, func)` tier:
 // `eval_module_call` → HOF / in-place mutation / fan / budget prims →
-// `dispatch_module_resolved` (container ops → the prim floors → bridge →
-// almide-bodied pool fn) and the pool-tier boundary sync entry points.
+// `dispatch_module_resolved` (container ops → the prim floors → the lowered
+// self-hosted body, with the bridge around it in part 5, `dispatch_body.rs`)
+// and the pool-tier boundary sync entry points.
 
 impl<'a> Interpreter<'a> {
     // ── Module calls ────────────────────────────────────────────
@@ -248,7 +249,7 @@ impl<'a> Interpreter<'a> {
             "almide_rt_prim_timeout_exit" => {
                 let hit = self.t_hit.get();
                 self.t_verdict.set(hit as i64);
-                if hit && std::env::var("ALMIDE_OMEGA_RECORD").is_ok_and(|v| v == "1") {
+                if hit && almide_base::env::flag("ALMIDE_OMEGA_RECORD") {
                     self.stderr.push_str(&format!("__ALMD_OMEGA {}\n", self.t_ord.get()));
                 }
                 self.t_hit.set(false);
@@ -261,8 +262,9 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    /// interp-native container ops → scalar/string bridge → almide-bodied
-    /// stdlib fn → unsupported.
+    /// interp-native container ops → the prim floors that hold interpreter
+    /// state → the lowered (self-hosted) body → the bridge only where that
+    /// body abstains or does not exist (#2185) → unsupported.
     pub(crate) fn dispatch_module_resolved(
         &mut self,
         module: Sym,
@@ -293,28 +295,63 @@ impl<'a> Interpreter<'a> {
         if let Some(flow) = self.prim_floor(module.as_str(), func.as_str(), &args) {
             return flow;
         }
-        // Scalar / string / math native bridge (intrinsic-symbol surface).
-        if let Some(result) = crate::bridge::dispatch(module.as_str(), func.as_str(), &args) {
-            return result;
+        // #2185: the self-hosted body — the SAME source the wasm leg links for
+        // this call name, and the definition the native leg compiles — is
+        // consulted FIRST, so the third vote is the linked body's, not a
+        // hand-mirrored Rust copy of it. The bridge is the FALLBACK, in two
+        // cases only: a name with no lowered body (a true `@intrinsic` stub),
+        // and a body that abstains from inside (a heap/effect prim outside
+        // the scalar floor, or the `mut`-parameter gate below). There the
+        // bridge's Rust-std answer is still an implementation independent of
+        // both backends' codegen, and without it every string fixture would
+        // leave the executable spec — the abstain ledger only shrinks.
+        // `bridge_fallbacks` records each such fallback by name, so the arms
+        // a body now shadows are measurable (and deletable) rather than
+        // assumed.
+        // INSIDE the pool tier (a self-hosted body evaluating), the bridge is
+        // part of the FLOOR the bodies consume, exactly like `prim.*`: a
+        // body's helper calls (`string.len` from the json decoder) are
+        // answered over `Value`s here, where nesting another body over the
+        // block heap is what the tier cannot yet do faithfully (the 11
+        // wrong votes of the first body-first measurement: json paths, glob,
+        // header lookup, codec error paths, two unbound-VarId crashes).
+        let floor_first = self.pool_depth > 0;
+        if floor_first {
+            if let Some(result) = crate::bridge::dispatch(module.as_str(), func.as_str(), &args) {
+                self.record_bridge_floor(module, func);
+                return result;
+            }
         }
-
-        let Some((func_def, gate_mut)) = self.resolve_lowered_body(module, func) else {
-            return Flow::Unsupported(format!("{}.{}", module, func));
+        // The total fold_lines family is registered as TYPED twins only (`_msi` /
+        // `_ls` / `_i` / `_s`): the wasm leg picks one from the accumulator's
+        // static type, the interp from the init VALUE's shape — same four cells.
+        let func = if self.pool_depth == 0 && module.as_str() == "fs" {
+            Self::fold_lines_family_twin(func, &args).unwrap_or(func)
+        } else {
+            func
+        };
+        // The body for THIS arity (an overload routes to its suffixed twin,
+        // `string.slice2` — see `resolve_body_for_arity`); no body, no twin →
+        // the body cannot take this call, and the reason says so.
+        let (func, func_def, gate_mut) = match self.resolve_body_for_arity(module, func, args.len()) {
+            Ok(found) => found,
+            Err(why) => return self.abstain_or_bridge(floor_first, module, func, &args, why),
         };
         // These sites receive EAGERLY-evaluated args, so a `mut` parameter's
         // caller lvalue is already gone — the Named path's copy-out (#1022)
         // cannot run here. A mut-param callee must abstain rather than
         // silently drop the write-back (a wrong third vote).
         if gate_mut && func_def.params.iter().any(|p| p.is_mut) {
-            return Flow::Unsupported(format!(
+            let why = format!(
                 "module call `{}.{}` with a `mut` parameter through the \
                  eager dispatch path (no caller lvalue to copy out — #1022)",
                 module.as_str(),
                 func.as_str()
-            ));
+            );
+            return self.abstain_or_bridge(floor_first, module, func, &args, why);
         }
         let root = self.root_scope();
-        let flow = self.call_pool_tier(func_def, args, &root);
+        let flow = self.call_pool_tier(func_def, args.clone(), &root);
         // #1226 RETURN SYNC. A self-hosted body that allocated a block returns
         // the block's ADDRESS (`prim.alloc_str` is an Int), so the value has to
         // be read back out of the arena before it leaves the pool tier —
@@ -329,7 +366,11 @@ impl<'a> Interpreter<'a> {
         // (`pool_depth == 0` at the call): inside the tier a heap value IS its
         // address, and an eager rebuild there snapshots blocks the caller is
         // still writing through (see `pool_fns`).
-        self.sync_at_pool_boundary(func_def, flow)
+        let flow = self.sync_at_pool_boundary(func_def, flow);
+        match flow {
+            Flow::Unsupported(why) => self.abstain_or_bridge(floor_first, module, func, &args, why),
+            other => other,
+        }
     }
 
     /// The `prim` floors that read or MUTATE per-run interpreter state, which
@@ -416,208 +457,6 @@ impl<'a> Interpreter<'a> {
         Flow::Abort(reason.to_string())
     }
 
-    /// The sandboxed fs floor (#1218, vfs.rs): writes land in the
-    /// per-interpreter overlay, reads fall back to the real fs
-    /// read-only. Same tier as the argv/env floors — these prims
-    /// read INTERPRETER state, which the stateless bridge cannot.
-    /// A path argument: a `Str`, or a Str-block ADDRESS a body built with
-    /// `alloc_str` (coerced through the arena). Anything else is an honest
-    /// abstain named by shape — a body reaching a vfs prim with a value the
-    /// interp cannot spell must not vote.
-    fn vfs_path_arg(&mut self, func: &str, arg: Option<&Value>) -> Result<String, Flow> {
-        let Some(v) = arg else {
-            return Err(Flow::Unsupported(format!("prim.{func} with no path argument")));
-        };
-        match self.coerce_block_str(v.clone()) {
-            Value::Str(s) => Ok(s.to_string()),
-            other => Err(Flow::Unsupported(format!(
-                "prim.{func} with a {} path (no faithful String)",
-                other.type_name()
-            ))),
-        }
-    }
-
-    /// A content argument as raw bytes: a `Str`'s UTF-8, or the payload of a
-    /// Str / Bytes block at the given ADDRESS (the byte-filled `alloc_str`
-    /// form need not be UTF-8, so it is read as bytes, never as a String).
-    fn vfs_bytes_arg(&mut self, func: &str, arg: Option<&Value>) -> Result<Vec<u8>, Flow> {
-        use crate::heap::BlockKind;
-        match arg {
-            Some(Value::Str(s)) => Ok(s.as_bytes().to_vec()),
-            Some(Value::Int(i)) => {
-                let block = u32::try_from(*i).ok().and_then(|a| self.heap.block_bytes(a));
-                match block {
-                    Some((bytes, BlockKind::Str | BlockKind::Bytes)) => Ok(bytes),
-                    _ => Err(Flow::Unsupported(format!(
-                        "prim.{func} with a non-block Int content (no faithful bytes)"
-                    ))),
-                }
-            }
-            Some(other) => Err(Flow::Unsupported(format!(
-                "prim.{func} with a {} content (no faithful bytes)",
-                other.type_name()
-            ))),
-            None => Err(Flow::Unsupported(format!("prim.{func} with no content argument"))),
-        }
-    }
-
-    fn vfs_prim(&mut self, func: &str, args: &[Value]) -> Option<Flow> {
-        match func {
-            "read_text_file" => {
-                let path = match self.vfs_path_arg(func, args.first()) {
-                    Ok(p) => p,
-                    Err(f) => return Some(f),
-                };
-                Some(Flow::val(match crate::vfs::read_text(&self.vfs, &path) {
-                    Ok(s) => Value::Result(Ok(Box::new(Value::str(s)))),
-                    Err(e) => Value::Result(Err(Box::new(Value::str(e)))),
-                }))
-            }
-            "write_text_file" => {
-                let path = match self.vfs_path_arg(func, args.first()) {
-                    Ok(p) => p,
-                    Err(f) => return Some(f),
-                };
-                // The content is BYTES: a stdlib body that writes bytes fills
-                // an `alloc_str` block byte by byte and hands its ADDRESS here
-                // (`fs.write_bytes`), and those bytes need not be UTF-8.
-                let content = match self.vfs_bytes_arg(func, args.get(1)) {
-                    Ok(b) => b,
-                    Err(f) => return Some(f),
-                };
-                Some(Flow::val(match crate::vfs::write_bytes(&mut self.vfs, &path, &content) {
-                    Ok(()) => Value::Result(Ok(Box::new(Value::Unit))),
-                    Err(e) => Value::Result(Err(Box::new(Value::str(e)))),
-                }))
-            }
-            "read_bytes_file" => {
-                let path = match self.vfs_path_arg(func, args.first()) {
-                    Ok(p) => p,
-                    Err(f) => return Some(f),
-                };
-                Some(Flow::val(match crate::vfs::read_bytes(&self.vfs, &path) {
-                    Ok(b) => Value::Result(Ok(Box::new(Value::List(std::rc::Rc::new(
-                        b.into_iter().map(|x| Value::Int(x as i64)).collect(),
-                    ))))),
-                    Err(e) => Value::Result(Err(Box::new(Value::str(e)))),
-                }))
-            }
-            // `prim.path_filestat(buf, path)`: the WASI filestat lands in the
-            // caller's 64-byte scratch — filetype@16, size@32, mtim@48 are the
-            // fields the stdlib bodies read — and the errno is the return
-            // (0 = ok; the bodies only test it against 0, so a missing path
-            // answers WASI's ENOENT 44).
-            "path_filestat" | "path_filestat_nofollow" => {
-                let Some(Value::Int(buf)) = args.first() else {
-                    return Some(Flow::Unsupported(
-                        "prim.path_filestat with a non-address buffer".into(),
-                    ));
-                };
-                let path = match self.vfs_path_arg(func, args.get(1)) {
-                    Ok(p) => p,
-                    Err(f) => return Some(f),
-                };
-                let Ok(base) = u32::try_from(*buf) else {
-                    return Some(Flow::Unsupported("prim.path_filestat with a negative buffer".into()));
-                };
-                let statted = if func == "path_filestat" {
-                    crate::vfs::stat(&self.vfs, &path)
-                } else {
-                    crate::vfs::stat_nofollow(&self.vfs, &path)
-                };
-                let Some((ftype, size, mtime_ns)) = statted else {
-                    return Some(Flow::val(Value::Int(44)));
-                };
-                let stores = [
-                    (16u32, 1u32, ftype as i64),
-                    (32, 8, size as i64),
-                    (48, 8, mtime_ns),
-                ];
-                for (off, w, val) in stores {
-                    if self.heap.store(base + off, w, val).is_none() {
-                        return Some(Flow::Unsupported(
-                            "prim.path_filestat outside this heap's arena".into(),
-                        ));
-                    }
-                }
-                Some(Flow::val(Value::Int(0)))
-            }
-            "read_dir" => {
-                let path = match self.vfs_path_arg(func, args.first()) {
-                    Ok(p) => p,
-                    Err(f) => return Some(f),
-                };
-                Some(Flow::val(match crate::vfs::read_dir(&self.vfs, &path) {
-                    Ok(names) => Value::Result(Ok(Box::new(Value::List(std::rc::Rc::new(
-                        names.into_iter().map(Value::str).collect(),
-                    ))))),
-                    Err(e) => Value::Result(Err(Box::new(Value::str(e)))),
-                }))
-            }
-            "rename" => {
-                let src = match self.vfs_path_arg(func, args.first()) {
-                    Ok(p) => p,
-                    Err(f) => return Some(f),
-                };
-                let dst = match self.vfs_path_arg(func, args.get(1)) {
-                    Ok(p) => p,
-                    Err(f) => return Some(f),
-                };
-                Some(match crate::vfs::rename(&mut self.vfs, &src, &dst) {
-                    crate::vfs::RenameOutcome::Renamed => {
-                        Flow::val(Value::Result(Ok(Box::new(Value::Unit))))
-                    }
-                    crate::vfs::RenameOutcome::Failed(e) => {
-                        Flow::val(Value::Result(Err(Box::new(Value::str(e)))))
-                    }
-                    crate::vfs::RenameOutcome::HostOnly => Flow::Unsupported(
-                        "prim.rename of a host-only path (the overlay is read-only toward the host)"
-                            .into(),
-                    ),
-                })
-            }
-            "make_dir" => {
-                let Some(Value::Str(path)) = args.first() else {
-                    return Some(Flow::Abort("internal: prim.make_dir expects a String".into()));
-                };
-                let path = path.to_string();
-                Some(Flow::val(match crate::vfs::make_dir(&mut self.vfs, &path) {
-                    Ok(()) => Value::Result(Ok(Box::new(Value::Unit))),
-                    Err(e) => Value::Result(Err(Box::new(Value::str(e)))),
-                }))
-            }
-            "path_exists" => {
-                let Some(Value::Str(path)) = args.first() else {
-                    return Some(Flow::Abort("internal: prim.path_exists expects a String".into()));
-                };
-                Some(Flow::val(Value::Bool(crate::vfs::exists(&self.vfs, path))))
-            }
-            "remove_all" => {
-                let Some(Value::Str(path)) = args.first() else {
-                    return Some(Flow::Abort("internal: prim.remove_all expects a String".into()));
-                };
-                let path = path.to_string();
-                Some(match crate::vfs::remove_all(&mut self.vfs, &path) {
-                    crate::vfs::RemoveOutcome::Removed => {
-                        Flow::val(Value::Result(Ok(Box::new(Value::Unit))))
-                    }
-                // A host path the overlay never wrote: refusing to
-                // delete real files is the sandbox's point, and
-                // pretending to would be a wrong vote — abstain.
-                    crate::vfs::RemoveOutcome::HostOnly => Flow::Unsupported(
-                        "prim.remove_all on a host path (the overlay is read-only toward the real fs)".into(),
-                    ),
-                    crate::vfs::RemoveOutcome::Missing => {
-                        Flow::val(Value::Result(Err(Box::new(Value::str(
-                            "No such file or directory (os error 2)".to_string(),
-                        )))))
-                    }
-                })
-            }
-            _ => None,
-        }
-    }
-
     /// Run a resolved body, tracking the pool-tier boundary: while a POOL
     /// body (see `pool_fns`) is on the stack, heap values stay addresses and
     /// no return sync fires.
@@ -672,34 +511,5 @@ impl<'a> Interpreter<'a> {
             Ok(None) => flow,
             Err(why) => Flow::Unsupported(why),
         }
-    }
-
-    /// The lowered Almide body `module.func` resolves to, paired with whether
-    /// the eager-dispatch `mut`-parameter gate applies to it.
-    ///
-    /// Three sources in order: the module's own fn table; a top-level fn named
-    /// exactly `func` (some stdlib helpers flatten); and LAST the self-hosted
-    /// stdlib body from the shared registry (stdlib_pool) — the SAME source the
-    /// wasm leg links for this call name, lowered once and layered into
-    /// `self.fns` at construction. Consulted last so the interp-native surfaces
-    /// above keep their vote provenance; what a pool body itself cannot
-    /// evaluate (a heap/effect prim outside the scalar floor) abstains from
-    /// inside with that prim named — a skip, never a guess — so the mut gate
-    /// does not apply to it.
-    ///
-    /// A `Hole` body is an intrinsic stub, not an interpretable definition:
-    /// each source skips it and falls through to the next.
-    fn resolve_lowered_body(&self, module: Sym, func: Sym) -> Option<(&'a almide_ir::IrFunction, bool)> {
-        fn bodied(d: &&almide_ir::IrFunction) -> bool {
-            !matches!(d.body.kind, almide_ir::IrExprKind::Hole)
-        }
-        if let Some(d) = self.module_fns.get(&(module, func)).copied().filter(bodied) {
-            return Some((d, true));
-        }
-        if let Some(d) = self.fns.get(&func).copied().filter(bodied) {
-            return Some((d, true));
-        }
-        let impl_name = crate::stdlib_pool::impl_fn(module, func)?;
-        self.fns.get(&impl_name).copied().filter(bodied).map(|d| (d, false))
     }
 }

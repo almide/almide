@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/almide-base", "crates/almide-syntax", "crates/almide-types", "crates/almide-lang", "crates/almide-ir", "crates/almide-mir", "crates/almide-dialect", "crates/almide-codegen", "crates/almide-optimize", "crates/almide-frontend", "crates/almide-driver", "crates/almide-interp", "crates/almide-tools", "crates/almide-egg-lab", "crates/almide-layout", "crates/almide-corpus", "crates/almide-rt-core", "crates/almide-wasm", "crates/almide-wasm-run", "crates/almide-spine"]
+members = [".", "crates/almide-base", "crates/almide-syntax", "crates/almide-types", "crates/almide-lang", "crates/almide-ir", "crates/almide-mir", "crates/almide-dialect", "crates/almide-codegen", "crates/almide-optimize", "crates/almide-frontend", "crates/almide-driver", "crates/almide-interp", "crates/almide-tools", "crates/almide-egg-lab", "crates/almide-layout", "crates/almide-corpus", "crates/almide-rt-core", "crates/almide-wasm", "crates/almide-wasm-run", "crates/almide-wasm-vm", "crates/almide-spine"]
 resolver = "3"
 exclude = ["crates/almide-kernel", "research/benchmark/stdlib/rust_wasm_compare", "tools/wasmgen-harness", "tools/wasmgen-harness-uu", "tools/xtarget-fuzz"]
 
@@ -17,7 +17,7 @@ unsafe_code = "forbid"
 
 [package]
 name = "almide"
-version = "0.62.0"
+version = "0.63.0"
 edition = "2024"
 # Runner-class MSRV: the binary embeds the wasmtime 47 host (the commissioned
 # wasm leg). Compiler crates keep their own 1.89 claim via workspace.package.
@@ -86,6 +86,8 @@ fs2 = "0.4"
 proptest = "1"
 insta = "1"
 tempfile = "3"
+# The qualification-scoped VM (#865), run in-process by its corpus parity gate.
+almide-wasm-vm = { path = "crates/almide-wasm-vm" }
 
 # The root build.rs (docs/diagnostics) and almide-types (stdlib/) re-embed repo
 # content on any mtime bump — git pull/checkout triggers a full opt-3 recompile

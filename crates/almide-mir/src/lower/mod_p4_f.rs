@@ -570,6 +570,18 @@ fn list_call_name_sort_by(arg_tys: &[Ty]) -> Option<String> {
             "list.sort_by_str_key".to_string()
         });
     }
+    // A HEAP KEY (tuple, nested list, Option — #2154) has no route on this
+    // leg. The cached-key twins below declare `f: (Int) -> Int` and compare the
+    // cached key as a raw i64: the key closure hands back an i32 HANDLE, so the
+    // call through the sort's table is an `indirect call type mismatch` TRAP —
+    // and had the signatures lined up, the comparison would have ordered by the
+    // key's ADDRESS. The artifact carrying that trap was reported `verified`.
+    // The structural leg orders these keys with the type-directed comparator
+    // (`emit_val_cmp`); this leg REFUSES them (`_x` → unlinked render wall), the
+    // same refusal `unique_by` already makes for a non-scalar key (C-147).
+    if is_heap_ty(ret) {
+        return Some("list.sort_by_x".to_string());
+    }
     if heap_elem {
         return Some("list.sort_by_rc".to_string());
     }

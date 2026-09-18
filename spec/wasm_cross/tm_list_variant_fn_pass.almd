@@ -9,8 +9,11 @@ fn roundtrip(v: List[V]) -> List[V] = v
 fn main() -> Unit = {
   let v: List[V] = [A(1), B("t"), A(2)]
   let w = roundtrip(v)
-  println(list.join(list.map(w, (e) => match e {
-    A(n) => int.to_string(n),
-    B(s) => s,
-  }), "/"))
+  println(list.join(
+    list.map(w, (e) => match e {
+      A(n) => int.to_string(n),
+      B(s) => s,
+    }),
+    "/",
+  ))
 }

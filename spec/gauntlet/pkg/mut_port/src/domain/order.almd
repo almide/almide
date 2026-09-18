@@ -6,9 +6,17 @@ type OrderLine: Eq, Repr = { sku: String, qty: Int, unit_price: money.Money }
 
 type Order: Eq, Repr = { id: String, customer: String, lines: List[OrderLine], status: OrderStatus }
 
-fn new_order(id: String, customer: String) -> Order = Order { id: id, customer: customer, lines: [], status: Draft }
+fn new_order(id: String, customer: String) -> Order = Order {
+  id: id,
+  customer: customer,
+  lines: [],
+  status: Draft,
+}
 
-fn Order.total(self) -> money.Money! = self.lines |> list.map((l) => money.times(l.unit_price, l.qty)!)! |> list.fold(money.zero(), (acc, m) => money.add(acc, m))
+fn Order.total(self) -> money.Money! = self.lines |> list.map((l) => money.times(l.unit_price, l.qty)!)! |> list.fold(
+  money.zero(),
+  (acc, m) => money.add(acc, m),
+)
 
 fn Order.add_line(self, line: OrderLine) -> Order! = {
   guard self.status == Draft else err("cannot modify an order in status ${self.status}")

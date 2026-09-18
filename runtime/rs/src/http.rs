@@ -307,6 +307,18 @@ pub fn almide_http_request_stream(
     url: &str,
     body: &str,
     headers: &AlmideMap<String, String>,
+    on_chunk: std::rc::Rc<dyn Fn(String)>,
+) -> Result<(), String> {
+    // Almide function values use Rc<dyn Fn>; Rc itself does not implement
+    // FnMut. Adapt at the boundary while native SSE callers retain FnMut.
+    almide_http_request_stream_impl(method, url, body, headers, |chunk| on_chunk(chunk))
+}
+
+pub fn almide_http_request_stream_impl(
+    method: &str,
+    url: &str,
+    body: &str,
+    headers: &AlmideMap<String, String>,
     mut on_chunk: impl FnMut(String),
 ) -> Result<(), String> {
     let (is_https, host, port, path) = parse_url(url)?;
@@ -583,4 +595,3 @@ fn write_response(stream: &mut TcpStream, resp: &AlmideHttpResponse) -> Result<(
     out.push_str(&resp.body);
     stream.write_all(out.as_bytes()).map_err(|e| e.to_string())
 }
-

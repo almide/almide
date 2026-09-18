@@ -29,22 +29,52 @@ fn blend(verts: Bytes, vert_count: Int, stride: Int, jm: Bytes, data: Bytes, off
     var snz = 0.0
     if w0 > 0.0 then {
       let mo = j0 * 64
-      sx = sx + w0 * (read_val(jm, mo) * px + read_val(jm, mo + 16) * py + read_val(jm, mo + 32) * pz + read_val(jm, mo + 48))
-      sy = sy + w0 * (read_val(jm, mo + 4) * px + read_val(jm, mo + 20) * py + read_val(jm, mo + 36) * pz + read_val(jm, mo + 52))
-      sz = sz + w0 * (read_val(jm, mo + 8) * px + read_val(jm, mo + 24) * py + read_val(jm, mo + 40) * pz + read_val(jm, mo + 56))
+      sx = sx + w0 * (read_val(jm, mo) * px + read_val(jm, mo + 16) * py + read_val(jm, mo + 32) * pz + read_val(
+        jm,
+        mo + 48,
+      ))
+      sy = sy + w0 * (read_val(jm, mo + 4) * px + read_val(jm, mo + 20) * py + read_val(jm, mo + 36) * pz + read_val(
+        jm,
+        mo + 52,
+      ))
+      sz = sz + w0 * (read_val(jm, mo + 8) * px + read_val(jm, mo + 24) * py + read_val(jm, mo + 40) * pz + read_val(
+        jm,
+        mo + 56,
+      ))
       snx = snx + w0 * (read_val(jm, mo) * nx + read_val(jm, mo + 16) * ny + read_val(jm, mo + 32) * nz)
-      sny = sny + w0 * (read_val(jm, mo + 4) * nx + read_val(jm, mo + 20) * ny + read_val(jm, mo + 36) * nz)
-      snz = snz + w0 * (read_val(jm, mo + 8) * nx + read_val(jm, mo + 24) * ny + read_val(jm, mo + 40) * nz)
+      sny = sny + w0 * (read_val(jm, mo + 4) * nx + read_val(jm, mo + 20) * ny + read_val(
+        jm,
+        mo + 36,
+      ) * nz)
+      snz = snz + w0 * (read_val(jm, mo + 8) * nx + read_val(jm, mo + 24) * ny + read_val(
+        jm,
+        mo + 40,
+      ) * nz)
     } else {
     }
     if w1 > 0.0 then {
       let mo = j1 * 64
-      sx = sx + w1 * (read_val(jm, mo) * px + read_val(jm, mo + 16) * py + read_val(jm, mo + 32) * pz + read_val(jm, mo + 48))
-      sy = sy + w1 * (read_val(jm, mo + 4) * px + read_val(jm, mo + 20) * py + read_val(jm, mo + 36) * pz + read_val(jm, mo + 52))
-      sz = sz + w1 * (read_val(jm, mo + 8) * px + read_val(jm, mo + 24) * py + read_val(jm, mo + 40) * pz + read_val(jm, mo + 56))
+      sx = sx + w1 * (read_val(jm, mo) * px + read_val(jm, mo + 16) * py + read_val(jm, mo + 32) * pz + read_val(
+        jm,
+        mo + 48,
+      ))
+      sy = sy + w1 * (read_val(jm, mo + 4) * px + read_val(jm, mo + 20) * py + read_val(jm, mo + 36) * pz + read_val(
+        jm,
+        mo + 52,
+      ))
+      sz = sz + w1 * (read_val(jm, mo + 8) * px + read_val(jm, mo + 24) * py + read_val(jm, mo + 40) * pz + read_val(
+        jm,
+        mo + 56,
+      ))
       snx = snx + w1 * (read_val(jm, mo) * nx + read_val(jm, mo + 16) * ny + read_val(jm, mo + 32) * nz)
-      sny = sny + w1 * (read_val(jm, mo + 4) * nx + read_val(jm, mo + 20) * ny + read_val(jm, mo + 36) * nz)
-      snz = snz + w1 * (read_val(jm, mo + 8) * nx + read_val(jm, mo + 24) * ny + read_val(jm, mo + 40) * nz)
+      sny = sny + w1 * (read_val(jm, mo + 4) * nx + read_val(jm, mo + 20) * ny + read_val(
+        jm,
+        mo + 36,
+      ) * nz)
+      snz = snz + w1 * (read_val(jm, mo + 8) * nx + read_val(jm, mo + 24) * ny + read_val(
+        jm,
+        mo + 40,
+      ) * nz)
     } else {
     }
     bytes.set_f32_le(verts, dst, sx)

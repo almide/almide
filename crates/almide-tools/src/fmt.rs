@@ -208,11 +208,12 @@ pub fn auto_imports(program: &mut Program, source: &str, dep_names: &[String], d
     }
     let token_refs = token_module_refs(source);
 
-    // Also check auto-imported stdlib (Tier 1) — these don't need explicit import
+    // Also check auto-imported stdlib (Tier 1) — these don't need explicit import.
+    // Both lists come from the registry: the resolver seeds `ImportTable::new`
+    // from the same `TIER1_ALWAYS_ACCESSIBLE`, so fmt cannot add an import the
+    // checker would report as redundant.
     let auto_imported: HashSet<&str> = almide_lang::stdlib_info::AUTO_IMPORT_BUNDLED.iter().copied().collect();
-    // Tier 1 hardcoded stdlib modules that don't need import (matches types/env.rs)
-    let tier1: HashSet<&str> = ["string", "list", "int", "float", "bytes", "matrix", "map", "set",
-        "value", "option", "result"].iter().copied().collect();
+    let tier1: HashSet<&str> = almide_lang::stdlib_info::TIER1_ALWAYS_ACCESSIBLE.iter().copied().collect();
 
     let dep_set: HashSet<&str> = dep_names.iter().map(|s| s.as_str()).collect();
 
@@ -306,7 +307,7 @@ fn collect_module_refs_type(te: &TypeExpr, used: &mut std::collections::HashSet<
         TypeExpr::Tuple { elements } | TypeExpr::Union { members: elements } => {
             collect_module_refs_types(elements, used)
         }
-        TypeExpr::Variant { cases } => {
+        TypeExpr::Variant { cases, .. } => {
             for c in cases {
                 collect_module_refs_variant_case(c, used);
             }
@@ -479,10 +480,15 @@ pub fn format_program(program: &Program) -> String {
 fn format_program_inner(program: &Program) -> String {
     let mut out = String::new();
     let cm = &program.comment_map;
+    // Auto-imports can move comment slots; the executable header must precede
+    // imports and even the dialect stamp, wherever its slot currently lives.
+    if let Some(shebang) = cm.iter().flatten().find(|c| c.starts_with("#!")) {
+        wln!(out, "{shebang}");
+    }
     let mut ci = 0;
     let emit_comments = |out: &mut String, idx: &mut usize| {
         if let Some(comments) = cm.get(*idx) {
-            for c in comments { wln!(out, "{c}"); }
+            for c in comments.iter().filter(|c| !c.starts_with("#!")) { wln!(out, "{c}"); }
         }
         *idx += 1;
     };
@@ -533,7 +539,7 @@ fn format_program_inner(program: &Program) -> String {
     if let Some(comments) = cm.get(ci) {
         if !comments.is_empty() {
             out.push('\n');
-            for c in comments { wln!(out, "{c}"); }
+            for c in comments.iter().filter(|c| !c.starts_with("#!")) { wln!(out, "{c}"); }
         }
     }
     out
@@ -1011,7 +1017,22 @@ fn fmt_union_members(out: &mut String, members: &[TypeExpr], depth: usize) {
 
 /// A variant type's cases, with a LEADING `|` on the first case too — the
 /// declaration style `type T =\n  | A\n  | B` round-trips only if it is emitted.
-fn fmt_variant_cases(out: &mut String, cases: &[VariantCase], depth: usize) {
+fn fmt_variant_cases(out: &mut String, cases: &[VariantCase], comments: &[ExprComments], depth: usize) {
+    let multiline = comments.iter().any(|c| !c.leading.is_empty() || !c.line_trailing.is_empty());
+    if multiline {
+        for (index, case) in cases.iter().enumerate() {
+            out.push('\n');
+            if let Some(c) = comments.get(index) {
+                for line in &c.leading { wln!(out, "{}{}", ind(depth + 1), line); }
+            }
+            w!(out, "{}| ", ind(depth + 1));
+            fmt_variant_case(out, case, depth + 1);
+            if let Some(c) = comments.get(index) {
+                for line in &c.line_trailing { w!(out, " {line}"); }
+            }
+        }
+        return;
+    }
     for (i, case) in cases.iter().enumerate() {
         out.push_str(if i > 0 { " | " } else { "| " });
         fmt_variant_case(out, case, depth);
@@ -1115,7 +1136,7 @@ fn fmt_type(out: &mut String, ty: &TypeExpr, depth: usize) {
         TypeExpr::ConstLit { value } => {
             out.push_str(&value.to_string());
         }
-        TypeExpr::Variant { cases } => fmt_variant_cases(out, cases, depth),
+        TypeExpr::Variant { cases, comments } => fmt_variant_cases(out, cases, comments, depth),
     }
 }
 
@@ -1176,4 +1197,5 @@ fn fmt_field_type(out: &mut String, f: &FieldType, depth: usize) {
 }
 
 include!("fmt_expr.rs");
+include!("fmt_delimited.rs");
 include!("fmt_tests.rs");

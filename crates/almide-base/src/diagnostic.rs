@@ -33,11 +33,33 @@ pub fn suggest<'a>(name: &str, candidates: impl Iterator<Item = &'a str>) -> Opt
     for c in candidates {
         let dist = levenshtein(name, c);
         let closer = best.is_none_or(|(_, d)| dist < d);
-        if dist > 0 && dist < threshold && closer {
+        if dist > 0 && (dist < threshold || contained(name, c)) && closer {
             best = Some((c, dist));
         }
     }
     best.map(|(s, _)| s.to_string())
+}
+
+/// A written name that is a substring of a real one (or the reverse) is a
+/// *remembered-concept* miss rather than a typo, and edit distance charges it
+/// the whole length gap: `get_str` → `get_string` is 3 and `array` →
+/// `get_array` is 4, both at or past a threshold of 3, so neither got a
+/// candidate while the one-character `get_strin` did (#2089). Those are the
+/// misses that actually happen — the writer knew what the function does and
+/// not how it is spelled.
+///
+/// Containment admits them without widening the threshold for unrelated
+/// names. The length gap is capped by the SHORTER of the two so a fragment
+/// cannot glom onto anything that merely contains it: `get` does not suggest
+/// `get_string`, and a long name does not suggest a short substring of itself.
+fn contained(name: &str, candidate: &str) -> bool {
+    if name.len() < 3 || candidate.len() < 3 {
+        return false;
+    }
+    if candidate.len().abs_diff(name.len()) > name.len().min(candidate.len()) {
+        return false;
+    }
+    candidate.contains(name) || name.contains(candidate)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -521,5 +543,37 @@ mod apply_try_tests {
         let suggested = Diagnostic::error("e", "h", "c").with_suggested_fix(1, 4, 5, "not ");
         assert!(suggested.display().contains("\n  try:\n"), "{}", suggested.display());
         assert!(!suggested.display().contains("machine-applicable"));
+    }
+}
+
+#[cfg(test)]
+mod suggest_tests {
+    use super::suggest;
+
+    /// #2089. The suggester used to be pure edit distance under a threshold
+    /// of `max(3, len/2)`, which fires on a typo and goes silent on the miss
+    /// that actually happens: a name recalled by meaning rather than by
+    /// spelling. `get_str` sits 3 edits from `get_string` and `array` sits 4
+    /// from `get_array` — both at or past the threshold — while the
+    /// one-character `get_strin` was inside it. Containment closes that.
+    #[test]
+    fn a_name_contained_in_a_real_one_is_suggested() {
+        let json = || ["parse", "stringify", "get_string", "get_int", "get_array", "to_map"].into_iter();
+        assert_eq!(suggest("get_str", json()).as_deref(), Some("get_string"));
+        assert_eq!(suggest("array", json()).as_deref(), Some("get_array"));
+        // The typo the old threshold already caught stays caught.
+        assert_eq!(suggest("get_strin", json()).as_deref(), Some("get_string"));
+    }
+
+    /// The guard rails on containment: a fragment must not glom onto every
+    /// name that happens to contain it. The length gap is capped by the
+    /// SHORTER of the two names, so `get` — ambiguous between five
+    /// candidates — stays silent rather than picking one, and a name with no
+    /// relative at all still returns nothing.
+    #[test]
+    fn containment_stays_silent_on_a_fragment_and_on_a_stranger() {
+        let json = || ["parse", "stringify", "get_string", "get_int", "get_array", "to_map"].into_iter();
+        assert_eq!(suggest("get", json()), None);
+        assert_eq!(suggest("to_string", ["fold", "map", "filter", "len"].into_iter()), None);
     }
 }

@@ -1,0 +1,35 @@
+// @contract: C-349
+// A `??` inside a fan arm keeps its meaning on both targets (#2246): an arm
+// is an ordinary expression whose value is what it denotes, and only the
+// arm's Result auto-unwrap belongs to the join. `total(list.get(xs, i) ?? [])`
+// passes the DEFAULT list when the index is out of range, and an arm that is
+// itself `maybe(i) ?? 7` yields 7 for the Err — the join sees no error. The
+// native emitter used to strip every `??` inside a fan arm as if it were the
+// auto-try: the argument reached the callee as an `Option`, and a top-level
+// default would have propagated the Err the program asked to swallow.
+fn total(xs: List[Int]) -> Int = list.sum(xs)
+
+effect fn maybe(i: Int) -> Result[Int, String] = if i > 0 then ok(i) else err("neg")
+
+effect fn main() -> Unit = {
+  let made: List[List[Int]] = [
+    [1, 2],
+    [3]
+  ]
+  let r = fan {
+    total(list.get(made, 0) ?? [])
+    total(list.get(made, 1) ?? [])
+    total(list.get(made, 9) ?? [40])
+  }
+  println("sums=${r.0},${r.1},${r.2}")
+  let d = fan {
+    maybe(-1) ?? 7
+    maybe(2) ?? 7
+  }
+  println("defaults=${d.0},${d.1}")
+  let n = fan {
+    list.len(list.get(made, 5) ?? [])
+    string.len(list.get(["ab"], 3) ?? "")
+  }
+  println("lens=${n.0},${n.1}")
+}

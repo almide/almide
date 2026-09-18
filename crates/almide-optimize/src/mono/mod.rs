@@ -399,7 +399,7 @@ impl Discover<'_> {
         let bindings = collect_mono_bindings(&g.bounds, args, &self.param_types[gi]);
         let all_concrete = bindings_all_concrete(&bindings);
         if let Some((m, f)) = debug_call {
-            if std::env::var_os("ALMIDE_MONO_DEBUG").is_some() {
+            if almide_base::env::flag("ALMIDE_MONO_DEBUG") {
                 let atys: Vec<_> = args.iter().map(|a| &a.ty).collect();
                 let ptys = &self.param_types[gi];
                 eprintln!(
@@ -792,7 +792,7 @@ fn find_structurally_bounded_fns(functions: &[IrFunction], type_decls: &[IrTypeD
     let mut result = HashMap::new();
     for func in functions {
         let bounded = find_bounded_params_for_fn(func, type_decls);
-        if std::env::var_os("ALMIDE_MONO_DEBUG").is_some()
+        if almide_base::env::flag("ALMIDE_MONO_DEBUG")
             && func.generics.as_ref().is_some_and(|g| !g.is_empty())
         {
             eprintln!(

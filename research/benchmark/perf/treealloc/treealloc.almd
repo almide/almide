@@ -6,7 +6,13 @@
 // stayed green: binarytrees runs its arms on the host thread pool and the
 // other rows never pass a variant through a call. This one does nothing
 // else.
-// Usage: almide run treealloc.almd
+//
+// The depth is an optional argument (default 19, the #2028 workload) so the
+// native/Rust ratchet can measure the row at two sizes (#1330): against the
+// same-shape `Box` program in rust-ref/treealloc.rs the native leg sits
+// below 1 because every `check(make(depth))` runs inside a region window.
+// Usage: almide run treealloc.almd [-- depth]
+import env
 
 type Tree = Leaf | Node(Tree, Tree)
 
@@ -18,11 +24,16 @@ fn check(t: Tree) -> Int = match t {
   Node(l, r) => check(l) + check(r) + 1,
 }
 
-fn main() -> Unit = {
+effect fn main() -> Unit = {
+  let args = env.args()
+  let depth = match list.get(args, 0) {
+    some(s) => int.parse(s) ?? 19,
+    none => 19,
+  }
   var total = 0
   var i = 0
   while i < 12 {
-    total = total + check(make(19))
+    total = total + check(make(depth))
     i = i + 1
   }
   println("${total}")

@@ -1,0 +1,9 @@
+// E041: an un-annotated binding of a match whose arm value is a fallible
+// call (#2182) — the arm join used to strip the Result before the binding
+// rule could see it, and the lowering wrapped the bind in an auto-?.
+effect fn first() -> Int = {
+  let x = match 1 { _ => int.parse("1")! }
+  x
+}
+
+effect fn main() -> Unit = println(int.to_string(first()!))

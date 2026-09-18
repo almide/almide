@@ -292,7 +292,7 @@ pub fn resolve_type_expr_in(te: &ast::TypeExpr, known_types: Option<&HashMap<Sym
             members.iter().map(|m| resolve_type_expr_in(m, known_types, cur_mod)).collect(),
         ),
         ast::TypeExpr::ConstLit { value } => Ty::ConstValue { ty: Box::new(Ty::Int), value: *value },
-        ast::TypeExpr::Variant { cases } => resolve_variant_type_expr(cases, known_types, cur_mod),
+        ast::TypeExpr::Variant { cases, .. } => resolve_variant_type_expr(cases, known_types, cur_mod),
     }
 }
 
@@ -428,7 +428,7 @@ fn resolve_generic_type_expr(name: &Sym, ra: Vec<Ty>, known_types: Option<&HashM
     }
 }
 
-// `TypeExpr::Variant { cases }` resolution: lower each AST variant case form
+// `TypeExpr::Variant { cases, .. }` resolution: lower each AST variant case form
 // (Unit/Tuple/Record) to its `VariantCase` counterpart.
 fn resolve_variant_type_expr(cases: &[ast::VariantCase], known_types: Option<&HashMap<Sym, Ty>>, cur_mod: Option<&str>) -> Ty {
     let cs = cases.iter().map(|c| match c {

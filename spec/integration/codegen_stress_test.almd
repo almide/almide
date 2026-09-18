@@ -139,7 +139,10 @@ test "while" {
 }
 
 test "pipe chain" {
-  let r = [1, 2, 3, 4, 5] |> list.filter((x) => x > 2) |> list.map((x) => x * 10) |> list.fold(0, (a, x) => a + x)
+  let r = [1, 2, 3, 4, 5] |> list.filter((x) => x > 2) |> list.map((x) => x * 10) |> list.fold(
+    0,
+    (a, x) => a + x,
+  )
   assert_eq(r, 120)
 }
 

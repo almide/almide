@@ -61,6 +61,83 @@ codegen overhead (≤1%). The `perf-ratchet` CI job
 ([scripts/check-perf-ratio.sh](../../scripts/check-perf-ratio.sh)) gates these
 ratios against a committed baseline so they can only move on purpose.
 
+### Faster than ordinary Rust (#1330)
+
+The declaration axis B2 asked for: named workloads where the almide-native /
+handwritten-Rust ratio is **below 1.0**, CI-ratcheted, with the honesty
+constraints stated up front.
+
+**Methodology.** The Rust side is the *ordinary* program a competent person
+writes for the workload — `rust-ref/binarytrees.rs` and `rust-ref/treealloc.rs`
+are a `Box`-linked recursive enum with `make` / `check` by value, one thread,
+no arena, no custom allocator, no `unsafe`, no SIMD — compiled with the same
+`rustc` flags as Almide's emitted Rust (opt-level=3, LTO, 1 CGU). Both sides
+print byte-identical stdout (verified before timing), every number is the
+median of 9 interleaved runs after a warmup, and each row is measured at two
+input sizes so a win that exists at one size only would show. The ablation
+column is the *same Almide source* rebuilt with the one optimization turned
+off (`ALMIDE_REGION_OFF=1`), so the gap between the two Almide columns is
+that optimization and nothing else. arm64 Apple M4 Pro, almide 0.62.0,
+2026-09-08; raw rows in
+[results/2026-09-08-m4pro-victory-1330.json](../../research/benchmark/perf/results/2026-09-08-m4pro-victory-1330.json).
+
+| Workload | size | Almide native | ordinary Rust | **ratio** | Almide, window off | ratio, window off |
+|---|---:|---:|---:|---:|---:|---:|
+| binarytrees | d17 | **134 ms** | 382 ms | **0.35×** | 482 ms | 1.26× |
+| binarytrees | d19 | **581 ms** | 1826 ms | **0.32×** | 2290 ms | 1.25× |
+| treealloc | d20 | **112 ms** | 375 ms | **0.30×** | 416 ms | 1.11× |
+| treealloc | d21 | **221 ms** | 748 ms | **0.30×** | 825 ms | 1.10× |
+
+**Which optimization did it: the region window (#1991), and only that.** Both
+programs spend their time in `check(make(depth))` — a tree whose whole
+lifetime is one expression. The effect system proves the pair region-pure
+(no effect, no global, no `mut` param, a scalar result), so the native leg
+runs it over `__rgn_` twin fns in a thread-local bump arena and rewinds once
+per tree; the ordinary Rust pays a `malloc` per node in and a `free` per node
+out, and cannot know it is allowed not to. With the window off, the same
+Almide source is 1.1–1.26× *slower* than the reference — the emitted `Box`
+code is what the reference already is, plus the drop glue — so the whole win
+is the information Rust does not have. The win holds at both sizes of both
+rows; the ratio is flat in size because both sides are linear in node count.
+
+**What the numbers are not.** The absolute ratio is allocator-dependent: the
+same binarytrees commit reads 0.61× on the ubuntu-latest CI runner, because
+glibc frees a `Box` far cheaper than macOS's allocator — the *reference* gets
+faster, the window does not change. The direction is machine-stable, which
+is what the ratchet gates: the VICTORY rows of
+[scripts/check-perf-ratio.sh](../../scripts/check-perf-ratio.sh) fail the
+build if either row reaches 1.0, if it regresses past +40% of the committed
+runner-class baseline, or if the `ALMIDE_REGION_OFF=1` ablation stops costing
+the row at least 1.3× (the declaration would then be attributing the win to
+the wrong thing). Two workloads, one mechanism: this is stated rather than
+dressed up — the second row exists to show the window is a property of the
+shape `consume(produce(scalars))`, not of one benchmark.
+
+**The candidates the issue named, measured and not claimed.** Both were
+measured the same day with ordinary sequential Rust references added for the
+purpose (`rust-ref/fannkuchredux.rs`, `rust-ref/mandelbrot.rs`, byte-identical
+output):
+
+| Workload | size | Almide native | ordinary Rust (one thread) | ratio |
+|---|---:|---:|---:|---:|
+| fannkuchredux (`fan { list.map }`) | 9 / 11 | 19 ms / 2147 ms | 20 ms / 2028 ms | 0.96× / 1.06× |
+| mandelbrot (`fan.map`) | 1000 / 4000 | 50 ms / 609 ms | 44 ms / 601 ms | 1.12× / 1.01× |
+
+- *Deterministic data parallelism (`fan`)* gives the native leg nothing
+  today: `fan.map` runs sequentially over an `Rc<dyn Fn>` thunk (the uniform
+  closure representation is not `Send`), a `fan { … }` block spawns one
+  thread for the whole block, and `AutoParallelPass` — the pass that would
+  turn a pure `list.map` into a threaded one — never fires, because it
+  matches a `Call { Named }` that `StdlibLowering` stopped emitting (it emits
+  `RuntimeCall`). A single-thread reference is therefore the honest one, and
+  the rows sit at parity. They are REPORTED by the ratchet so that a real
+  parallel win becomes a number the day it lands.
+- *Stream fusion of `|>` chains* does not fire on the Rust target
+  (`IterChain` never lowers there; see the perf suite's "Not yet covered"),
+  and ordinary Rust iterator chains are already fused by LLVM, so there is no
+  fusion win to claim; the listbuild rows read 1.47–1.69× here and 0.91× on
+  the runner for the allocator reason above.
+
 ### Allocation: the region window on the native leg (2026-09-08, #1991)
 
 `binarytrees` is the allocation row: `check(make(depth))` builds a tree whose
@@ -81,13 +158,14 @@ issue's workload; arg 18 in brackets):
 | Rust, same-shape `Box` (`rust-ref/binarytrees.rs`) | 222 ms | 222 ms | Almide now 0.33× |
 | Zig 0.16 arena (issue #1991, same shape) | 88 ms | 88 ms | Almide 0.82× — inside the 1.3× acceptance |
 
-The row joins the ratchet's REPORTED rows (`binarytrees=rust:binarytrees`,
-quick arg 17), not the anchored ones: the same commit reads 0.31 on the M4 Pro
-and 0.61 on the ubuntu-latest runner, because what differs between the two
-machines is how cheaply the *reference* frees a `Box` (glibc malloc vs macOS),
-not the window — the same allocator-dependence that keeps the listbuild rows
-reported. The window's own A/B is `ALMIDE_REGION_OFF=1` on the same binary and
-machine (3.5× here). What fires: every
+The row is a VICTORY row of the ratchet (`binarytrees=rust:binarytrees`,
+quick arg 17; see "Faster than ordinary Rust" above), not a ±band-anchored
+one: the same commit reads 0.31 on the M4 Pro and 0.61 on the ubuntu-latest
+runner, because what differs between the two machines is how cheaply the
+*reference* frees a `Box` (glibc malloc vs macOS), not the window — the same
+allocator-dependence that keeps the listbuild rows reported. The window's own
+A/B is `ALMIDE_REGION_OFF=1` on the same source and machine (3.5× here), and
+that A/B is what the ratchet gates. What fires: every
 `consume(produce(scalars))` site whose pair is region-pure and whose produced
 type is a root variant enum with scalar / region-enum payloads. What does not:
 a held tree (`let t = make(d)` read twice keeps its `Box`), a consumer that
@@ -177,12 +255,111 @@ rlib-boundary hypothesis, and the resulting work list:
 Like the listbuild rows, this one is reported rather than anchored — an
 allocation-dominated ratio is an allocator comparison first.
 
+### Codec decode: what the derived `T.decode` costs (2026-09-08, #1679)
+
+`decode` is the #1673/#1679 workload: one fixed 8-field `User` document (a
+nested `Address`, a 3-element `List[String]`), parsed once, then N derived
+`User.decode`s whose records feed an accumulator. The reference
+(`rust-ref/decode.rs`) is the ordinary hand-written decode against the SAME
+`AlmideValue` shape — a borrowed linear field scan into owned `String` record
+fields, the issue's 168 ns row — not the borrowed-`&str` record (53 ns) the
+language cannot express. Same box, same session, interleaved, median of 7,
+2M decodes, arm64; process floor subtracted:
+
+| decode (per op) | ns/op | |
+|---|---:|---|
+| Almide native, field scan (before the slot hint) | 422 | — |
+| Almide native, slot-indexed lookup (`_field_ref_at`, this change) | **412** | 2.0× the reference |
+| Almide native, the same emit with the `___erratw_*` frames collapsed | 205 | level with the reference |
+| Rust, same shape (`rust-ref/decode.rs`) | 205 | — |
+| zod 4.5.2 `safeParse` / `z.compile`, same schema (issue #1679, same box) | 78 / 17 | context, not the same data model |
+
+The slot hint is the issue's "shape specialization" step: a derived decode
+knows each field's declaration index — the slot `T.encode` writes it to — and
+`almide_rt_value_field_ref_at` tries that slot before falling back to the scan
+(`spec/wasm_cross/codec_decode_field_order.almd` drives the reordered, shifted,
+sparse and missing-key fallbacks on both legs). It buys 10 ns on an 8-field
+record because the scan was never the cost: the row's whole 2× is the #1675
+error-path frames (`T___erratw_<field>`) that clone the `Ok` payload and
+allocate the path segment `"name".to_string()` on the SUCCESS path — eleven
+of them per decode, ~200 ns. Collapsing them in the emitted Rust is the third
+row, and it reads exactly the reference. That frame is the row's next move;
+the representation half (owned `String` fields vs a shared string) stays the
+ADR-level decision #1679 records. The row joins the ratchet's REPORTED rows
+(`decode=rust:decode`, quick arg 1M): eight short-string allocations per op on
+both sides make it an allocator reading first, like strchurn. The ratchet's own
+reading of the same build the day the row landed was 2.46 (whole-process wall
+clock, no floor subtracted, alongside other work on the box); the rlib-linked
+release build and the monolithic one measure the same, so the spread to the
+2.0 above is load, not linking. The wasm leg is off the row until #2046
+closes: a derived decode in a loop retains ~800 B per call there (786 MB
+peak at 1M, out of memory at the 5M timing arg), so the leg would time the
+leak. Its output is byte-identical at small N.
+
 The wasm leg is measured in the same dated results file: within 1.1–1.2× of
 native on the compute kernels (n-body 1.278s, spectral-norm 0.764s,
 fannkuch-redux 1.892s) and *faster* than native on binary-trees (0.239s vs
 0.835s), but it craters on hot list index writes (FFT: ~3,500× at 2^18) and on
 mandelbrot (~130×) — those two cliffs are the current wasm perf arc, tracked in
 #917's follow-up.
+
+### Map: what the native keyed lookup costs (2026-09-14, #2150, #2157)
+
+`wordfreq` is the keyed-aggregation row: 2M draws from a 5 000-word vocabulary
+counted in a `Map[String, Int]`, top 10 by count desc / word asc — the shape
+of every word-count, group-by and histogram program. #2157 found the native
+leg 1.5–2.3× SLOWER than the same program under wasmtime, and its probe put
+the whole native gap on the Map: the same loop with the Map removed ran in
+87 ms, with it in 180 ms (`almide bench`, median of 5–7, M4 Pro, a loaded
+box). Three changes, one row (`research/benchmark/perf/wordfreq/`, both
+spellings, against `rust-ref/wordfreq.rs` — a `HashMap<String, i64>` with an
+owned key per draw):
+
+| wordfreq, imperative (2M) | before | after | |
+|---|---:|---:|---|
+| Almide native | 180 ms | **142 ms** | |
+| … of which the Map (loop minus the Map-free probe) | 93 ms | **55 ms** | 46 ns → 27 ns per `get_or` + `m[w] = …` pair |
+| Almide wasm (structural leg) | 127 ms | 130 ms | its Map: ~73 ms over its 57 ms probe |
+| Rust, same shape (`rust-ref/wordfreq.rs`) | 80 ms | 80 ms | |
+
+1. **The index is a compact-ordered-dict** (CPython 3.6+, Roc's `Dict`):
+   the insertion-ordered entry vector stays the source of truth for order,
+   equality and repr, and beside it sits an open-addressing slot table of
+   entry POSITIONS with the full 64-bit hash cached per entry, one
+   multiply-fold hash per operation. The previous sidecar SipHashed the key
+   through `dyn Any`, then SipHashed the fingerprint again inside a
+   `HashMap<u64, u32>` — four SipHash passes per `get_or` + insert pair.
+   Threshold (16 entries), insertion order, order-independent equality, the
+   Float/NaN linear path: all unchanged and pinned by the 77 Map/Set fixtures
+   in `spec/wasm_cross`, byte-identical native == wasm.
+2. **The read side borrows its key.** `map.get` / `get_or` / `contains` and
+   `set.contains` are `@borrow_ref(key)`; the runtime takes `&Q` with
+   `K: Borrow<Q>`, so a `&str` parameter probes a `Map[String, _]` without
+   materializing a `String` and `map.get_or(counts, w, 0)` no longer
+   consumes `w`.
+3. **The write moves the key.** `m[w] = f(&w)` with a plain-variable key
+   evaluates the value FIRST (a var read has no effect, so the order is
+   unobservable and stays byte-identical with the wasm leg's key-first
+   ANF), which makes the key position the var's last use: the clone pass
+   moves `w` into the insert instead of cloning it. `tests/map_key_move_test.rs`
+   pins both the borrow and the move in the emitted Rust.
+
+Measured in isolation on the emitted Rust (bare `rustc`, same source): the
+old shape 152 ms, the borrowed lookup alone 128 ms, a single-lookup
+get-or-insert 110 ms — the key clone and the second lookup each cost more
+than the hashing did. The native Map is now cheaper than the structural wasm
+leg's (55 vs ~73 ms for the same 2M operations); what keeps the native row
+above the wasm row is the Map-FREE loop (87 vs 57 ms: the `let w = vocab[i]`
+read clones twice, `list.range` is a real 16 MB `Vec`), which is codegen and
+is #2157's open probe, not the Map. The recommended spelling
+(`wordfreq-group`: `list.group_by` + `map.map`) reads 229 ms natively: its
+cost is the per-element key clone `group_by`'s `Rc<dyn Fn(A) -> B>` callback
+forces plus the intermediate `List[String]`, not the lookups — the T5
+relation this row now watches. `mapbuild` (20k Int + 20k String keys, build
+then read back) reads 5.6 ms from 6.6. Both wordfreq rows join the ratchet's
+REPORTED rows (`wordfreq=rust:wordfreq wordfreq-group=rust:wordfreq`, quick
+arg 1M): a hash-map row compares an allocator and a hasher before it
+compares codegen, like strchurn.
 
 ### Ablation: what the IR optimizer buys (2026-08-18)
 

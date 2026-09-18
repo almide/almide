@@ -31,7 +31,10 @@ fn class_rank(classes: List[String], c: String) -> Int = {
   }
 }
 
-fn is_wasm_cross_fixture(path: String) -> Bool = string.starts_with(path, "spec/wasm_cross/") and string.ends_with(path, ".almd")
+fn is_wasm_cross_fixture(path: String) -> Bool = string.starts_with(path, "spec/wasm_cross/") and string.ends_with(
+  path,
+  ".almd",
+)
 
 fn fixture_count(items: List[String]) -> Int = items |> list.filter((it) => is_wasm_cross_fixture(toml.inline_get(it, "path"))) |> list.len
 
@@ -44,7 +47,10 @@ fn strongest(classes: List[String], items: List[String]) -> String = {
     let best = ranked |> list.sort_by((c) => class_rank(classes, c)) |> list.last
     let b = best ?? "-"
     if b == "fuzz" then {
-      let hit = list.find(items, (it) => toml.inline_get(it, "class") == "fuzz" and toml.inline_num(it, "n") != "")
+      let hit = list.find(
+        items,
+        (it) => toml.inline_get(it, "class") == "fuzz" and toml.inline_num(it, "n") != "",
+      )
       match hit {
         some(it) => "fuzz(" + toml.inline_num(it, "n") + ")",
         none => "fuzz",
@@ -58,7 +64,10 @@ fn row(classes: List[String], t: toml.Table) -> String = {
   let title = toml.table_get(t, "title")
   let doc = toml.table_get(t, "doc")
   let name = if doc == "" then title else "[" + title + "](" + doc + ")"
-  "| " + id + " | " + name + " | " + toml.table_get(t, "since") + " | " + toml.table_get(t, "status") + " | " + strongest(classes, t.array_items) + " | " + int.to_string(fixture_count(t.array_items)) + " |"
+  "| " + id + " | " + name + " | " + toml.table_get(t, "since") + " | " + toml.table_get(
+    t,
+    "status",
+  ) + " | " + strongest(classes, t.array_items) + " | " + int.to_string(fixture_count(t.array_items)) + " |"
 }
 
 fn rows(classes: List[String], tables: List[toml.Table]) -> List[String] = tables |> list.filter((t) => toml.table_get(t, "id") != "") |> list.map((t) => row(classes, t)) |> list.sort

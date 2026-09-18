@@ -56,6 +56,9 @@ impl NanoPass for SharedCellBorrowPass {
         Some(vec![Target::Rust])
     }
 
+    /// Reads the final call and borrow forms of every fn in the root.
+    fn depends_on(&self) -> Vec<&'static str> { vec!["IrLinkFlatten", "CloneInsertion", "CaptureClone"] }
+
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         let cells: HashSet<VarId> = program
             .codegen_annotations
@@ -76,18 +79,17 @@ impl NanoPass for SharedCellBorrowPass {
         }
         let mut changed = false;
         let mut fns = std::mem::take(&mut program.functions);
+        // A cell is a local of exactly one function (`verify_ir` holds that
+        // line; the branch-lift helpers that used to share their captured
+        // vars' ids are gone, #2186) — so the program-wide set is the truth
+        // in every body, and a body that mentions none of them is skipped
+        // by the summaries below.
+        let fn_cells: Vec<VarId> = {
+            let mut v: Vec<VarId> = cells.iter().copied().collect();
+            v.sort_by_key(|v| v.0);
+            v
+        };
         for f in fns.iter_mut() {
-            // Fn-local truth: `optimize/branch_lift.rs` helpers KEEP the
-            // captured free vars' ids as their params, where the binding is
-            // a plain snapshot, not a cell — never mark those.
-            let fn_cells: Vec<VarId> = cells
-                .iter()
-                .filter(|v| !f.params.iter().any(|p| p.var == **v))
-                .copied()
-                .collect();
-            if fn_cells.is_empty() {
-                continue;
-            }
             let body = std::mem::take(&mut f.body);
             f.body = hoist_match_subjects(body, &fn_cells, &mut program.var_table, &mut changed);
             let qualifying = StmtSummaries::of(&f.body, &fn_cells);

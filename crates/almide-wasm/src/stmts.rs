@@ -31,9 +31,9 @@ impl Emitter<'_> {
             }
             IrExprKind::Call { target, args, .. } => {
                 // Unit-position call: a value-returning callee's result is
-                // dropped (a bare non-Unit call statement is legal IR).
-                if self.lower_call(target, args)?.is_some() {
-                    self.f.instructions().drop();
+                // discarded (a bare non-Unit call statement is legal IR).
+                if let Some(ty) = self.lower_call(target, args)? {
+                    self.discard_result(e, ty);
                 }
                 Ok(())
             }
@@ -82,6 +82,21 @@ impl Emitter<'_> {
                 }
                 Ok(())
             }
+        }
+    }
+
+    /// A value-returning call's result in statement position. An OWNED
+    /// droppable result arrived with its one credit (the callee-owned
+    /// convention, #1986; a native arm's declared `Owned`, #2004) — the
+    /// route releases it here, never leaks it (the witness records the
+    /// pair, `id`). A View or a scalar carries no credit: plain drop.
+    fn discard_result(&mut self, e: &IrExpr, ty: SliceTy) {
+        if self.rc_droppable(ty) && self.rc_owned_result(e) {
+            let dec = self.dec_fn_of(ty);
+            self.f.instructions().call(dec);
+            self.witness_discard();
+        } else {
+            self.f.instructions().drop();
         }
     }
 
@@ -236,18 +251,16 @@ impl Emitter<'_> {
         // RC-5: Lists and Bytes SHARE at bind — the COW judge at every
         // in-place mutation entry moved the value-semantics copy from
         // bind time to mutation time (rc counts the holders it judges
-        // by, so a borrowed rhs takes +1 — cells included). Maps and
-        // Sets keep the bind copy: their mutations are functional
-        // rebinds that never pass a COW gate.
+        // by, so a borrowed rhs takes +1 — cells included).
         // Every DROPPABLE shape shares on a borrowed rhs — the flat
         // Option / Result / tuple blocks included (`let n1: Int? = n ?? none`
         // read the nested option's payload as a view and, owning it
-        // without the +1, double-freed it beside `n2`). A Map / Set bind
-        // COPIES instead (their mutations are functional rebinds), and the
-        // copy is the local's own credit.
-        if matches!(declared, SliceTy::Map(..) | SliceTy::Set(_)) {
-            self.f.instructions().call(F_BLOCK_COPY);
-        } else if self.rc_droppable(declared) && !self.rc_owned_result(value) {
+        // without the +1, double-freed it beside `n2`). Maps and Sets
+        // included (#2010 Map stage b): their rc is a live count, the
+        // in-place `map.set` window judges `rc == 1` exactly, and every
+        // other mutation is a functional rebind — the bind-time copy
+        // (which left a fresh rhs at rc 1 forever) is gone.
+        if self.rc_droppable(declared) && !self.rc_owned_result(value) {
             self.rc_inc_top();
         }
         if self.cells.contains(var) {
@@ -441,11 +454,13 @@ impl Emitter<'_> {
                         // #1219: the cursor below holds the block across
                         // the body — a `map.insert(m, …)` there must not
                         // grow it in place under us, so the subject
-                        // witnesses a second holder (the monotone Map rc;
-                        // the window then takes the functional copy).
-                        if !crate::rc_ownership::rc_certainly_fresh(&iterable.kind) {
+                        // witnesses a second holder (a borrowed subject
+                        // takes +1; an owned one is the cursor's own), and
+                        // the cursor releases its credit after the loop.
+                        if !self.rc_owned_result(iterable) {
                             self.rc_inc_top();
                         }
+                        let drop_map = self.dec_fn_of(SliceTy::Map(kh, vh));
                         let bh = self.hold_i32()?;
                         let cur = self.hold_i32()?;
                         let end = self.hold_i32()?;
@@ -482,6 +497,7 @@ impl Emitter<'_> {
                             .br(0)
                             .end()
                             .end();
+                        self.f.instructions().local_get(bh).call(drop_map);
                         self.release_i32();
                         self.release_i32();
                         self.release_i32();
@@ -590,9 +606,7 @@ impl Emitter<'_> {
                 // retired (stage 2c-ii: records made the mut_port cell hit it).
                 self.lower(value, Some(declared))?;
                 // RC-5: same share discipline as Bind.
-                if matches!(declared, SliceTy::Map(..) | SliceTy::Set(_)) {
-                    self.f.instructions().call(F_BLOCK_COPY);
-                } else if self.rc_droppable(declared) && !self.rc_owned_result(value) {
+                if self.rc_droppable(declared) && !self.rc_owned_result(value) {
                     self.rc_inc_top();
                 }
                 // RC-3: same ownership settlement as Bind — locals only

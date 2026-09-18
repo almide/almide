@@ -131,7 +131,7 @@ fn verify_ownership_or_wall(func: &MirFunction) -> Result<(), LowerError> {
     let Err(violations) = crate::verify_ownership(func) else {
         return Ok(());
     };
-    if std::env::var_os("ALMIDE_DUMP_VERIFY").is_some() {
+    if almide_base::env::flag("ALMIDE_DUMP_VERIFY") {
         eprintln!("== verify-stage fn {} ==", func.name);
         for (i, op) in func.ops.iter().enumerate() {
             eprintln!("  [{i}] {op:?}");

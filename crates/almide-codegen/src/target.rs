@@ -12,16 +12,19 @@
 use super::pass::{
     BorrowInsertionPass, FanLoweringPass, Pipeline, Target,
 };
-use super::pass_auto_parallel::AutoParallelPass;
 use super::pass_box_deref::BoxDerefPass;
 use super::pass_capture_clone::CaptureClonePass;
 use super::pass_shared_cell_borrow::SharedCellBorrowPass;
 use super::pass_clone::CloneInsertionPass;
 use super::pass_builtin_lowering::BuiltinLoweringPass;
+use super::pass_decode_slot_hint::DecodeSlotHintPass;
+use super::pass_decode_err_frame::DecodeErrFramePass;
 use super::pass_result_propagation::ResultPropagationPass;
 use super::pass_intrinsic_lowering::IntrinsicLoweringPass;
 use super::pass_normalize_runtime_calls::NormalizeRuntimeCallsPass;
 use super::pass_stdlib_lowering::StdlibLoweringPass;
+use super::pass_stream_fusion::StreamFusionPass;
+use super::pass_chain_source_borrow::ChainSourceBorrowPass;
 use super::pass_match_subject::MatchSubjectPass;
 use super::pass_pattern_literal_guard::PatternLiteralGuardPass;
 use super::pass_effect_inference::EffectInferencePass;
@@ -40,6 +43,8 @@ use super::pass_region_window::RegionWindowPass;
 use super::pass_list_pattern::ListPatternLoweringPass;
 use super::pass_unify_var_tables::UnifyVarTablesPass;
 use super::pass_top_let_storage::TopLetStoragePass;
+use super::pass_var_storage::VarStoragePass;
+use super::pass_borrow_lowering::BorrowLoweringPass;
 use super::pass_ir_link_flatten::IrLinkFlattenPass;
 use super::template::TemplateSet;
 
@@ -62,10 +67,12 @@ pub fn configure(target: Target) -> TargetConfig {
 }
 
 fn build_pipeline(target: Target) -> Pipeline {
-    // Stage 1 egg flip landed: `EggSaturationPass` is the sole
-    // fusion driver for both matrix and list combinator chains.
-    // The imperative `MatrixFusionPass` and `StreamFusionPass`
-    // have been retired. The `fma / fma3` legacy optimisations
+    // Stage 1 egg flip landed: `EggSaturationPass` is the fusion driver
+    // for matrix chains. The imperative `MatrixFusionPass` was retired
+    // with it; list-combinator fusion is `StreamFusionPass` (#2045,
+    // after StdlibLowering — the egg list rules composed lambdas by
+    // substitution and duplicated callback side effects, so the list
+    // arm of the saturation target is off). The `fma / fma3` legacy optimisations
     // the imperative matrix pass also handled are not yet ported
     // to egg; they were performance-only (no spec depends on
     // them) and are earmarked for Stage 4's profile-guided cost
@@ -127,12 +134,21 @@ fn build_pipeline(target: Target) -> Pipeline {
                 // seeded from bundled `@intrinsic` declarations at
                 // `infer_borrow_signatures` entry.
                 .add(IntrinsicLoweringPass)
+                // StreamFusion: `RuntimeCall { almide_rt_list_* }` with a
+                // lambda literal → `IterChain`, BEFORE BorrowInsertion. A
+                // callback the chain inlines is a closure that will not
+                // exist; erased here, the borrow / capture-clone / clone
+                // passes see a chain step as the scope it renders as, and
+                // a `&T` param the step only reads stays `&T` (#2278).
+                .add(StreamFusionPass)
         .add(BorrowInsertionPass)
         // TCO: convert self-recursive tail calls to loops AFTER BorrowInsertion
         // (so that param types are already finalized — avoids String/&str mismatch)
         .add(TailCallOptPass)
         .add(CaptureClonePass)
         .add(CloneInsertionPass)
+        // The dead `Clone` on an enumerate-adapted chain source → a borrow.
+        .add(ChainSourceBorrowPass)
         // Match subject transforms: String → .as_str(), Option<String> → .as_deref()
         .add(MatchSubjectPass)
         // Analysis passes (before lowering, while Module calls still visible)
@@ -140,12 +156,20 @@ fn build_pipeline(target: Target) -> Pipeline {
         // Semantic lowering (order matters!)
         // 1. Stdlib first: Module calls → Named calls with arg decoration
         .add(StdlibLoweringPass)
-        // 2. AutoParallel: rewrite pure list ops to parallel variants
-        .add(AutoParallelPass)
-        // 3. ResultPropagation: insert Try (?) for effect fn calls
+        // 2. ResultPropagation: insert Try (?) for effect fn calls
         .add(ResultPropagationPass)
         // 3. Builtin last: Named calls (assert_eq, println, etc.) → RustMacro
         .add(BuiltinLoweringPass)
+        // DecodeSlotHint (#1679): a derived `T.decode`'s borrowed field
+        // lookups carry their declaration index. After BuiltinLowering
+        // (the codec reroutes are final), before NormalizeRuntimeCalls.
+        .add(DecodeSlotHintPass)
+        // DecodeErrFrame (#2050): a derived decode's per-field error frame
+        // becomes `.map_err(..)` on the field's own result — the success
+        // path is a plain `?`. After BuiltinLowering (so after
+        // BorrowInsertion: the lookups inside the frame keep their
+        // borrow decoration), before NormalizeRuntimeCalls.
+        .add(DecodeErrFramePass)
         // Peephole: swap/reverse/rotate/copy → specialized IR nodes
                 .add(PeepholePass)
                 // Rust-specific: push optimization, borrow index lift
@@ -163,6 +187,11 @@ fn build_pipeline(target: Target) -> Pipeline {
                 // after every Borrow-shaping pass, so it sees final call
                 // and borrow forms.
                 .add(SharedCellBorrowPass)
+                // VarStorage (#2186): which non-Copy `var` locals a closure
+                // captures and so live in an `AlmideRcCow`. After every pass
+                // that adds or renames a capture (CaptureClone's `__cap_*`
+                // binds, the flatten) — the walker only reads the verdict.
+                .add(VarStoragePass)
                 // #1857: `let`-bound ranges read ONLY as for-in heads stay a
                 // bare `Range<i64>` (the wasm leg's #1400 counting loop, for
                 // the v3 fallback). Last, so the set names the final IR.
@@ -171,6 +200,13 @@ fn build_pipeline(target: Target) -> Pipeline {
                 // at pipeline end (VarIds final, modules flattened); the
                 // walker asserts every legacy predicate agrees with it.
                 .add(TopLetStoragePass)
+                // BorrowLowering (#2186): every borrow / clone / owning read
+                // of a by-reference param takes its final IR spelling, and
+                // `param_borrows` is published. Last of all — after every
+                // pass that shapes or reads a `Borrow`, and after the top-let
+                // storage attribute it consults; the walker renders what it
+                // sees.
+                .add(BorrowLoweringPass)
         }
 
         Target::Wgsl => Pipeline::new()

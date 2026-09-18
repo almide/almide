@@ -1,6 +1,9 @@
 //! Diagnostics-parity gate (unit 4): the ported checker behind
 //! `check_file_json` must reproduce, byte for byte, the stdout of the ORACLE
-//! `almide check <file> --json` (clean a877d2138 build) over the spec corpus.
+//! `almide check <file> --json` over the spec corpus. The oracle is the CLI
+//! built from THIS tree: `scripts/check-parity-goldens.sh` (CI) regenerates
+//! the manifest from the same commit's release binary and fails on any
+//! diff, so a golden row can only change by the CLI's output changing.
 //!
 //! Coverage discipline (no silent gaps): every spec/**/*.almd is in exactly
 //! one of the oracle manifest / oracle exclusions. Within the manifest, files
@@ -26,10 +29,8 @@ fn spec_corpus_check_matches_oracle_hashes() {
     let golden = root.join("crates/almide-spine/tests/golden");
     // manifest rows: sha256 \t exit \t path  → path -> sha256
     let mut manifest: BTreeMap<String, String> = BTreeMap::new();
-    for l in std::fs::read_to_string(golden.join("spec-check-manifest.txt"))
-        .expect("run scripts/gen-check-manifest.sh")
-        .lines()
-    {
+    let text = std::fs::read_to_string(golden.join("spec-check-manifest.txt")).expect("run scripts/gen-check-manifest.sh");
+    for l in almide_corpus::manifest_rows(&text) {
         let mut it = l.splitn(3, '\t');
         let h = it.next().expect("test harness invariant").to_string();
         let _rc = it.next().expect("test harness invariant");
@@ -37,7 +38,8 @@ fn spec_corpus_check_matches_oracle_hashes() {
         assert!(manifest.insert(p, h).is_none(), "duplicate path in manifest");
     }
     let mut exclusions: BTreeMap<String, String> = BTreeMap::new();
-    for l in std::fs::read_to_string(golden.join("spec-check-exclusions.txt")).expect("test harness invariant").lines() {
+    let excl = std::fs::read_to_string(golden.join("spec-check-exclusions.txt")).expect("test harness invariant");
+    for l in almide_corpus::manifest_rows(&excl) {
         let (p, r) = l.split_once('\t').expect("test harness invariant");
         exclusions.insert(p.to_string(), r.to_string());
     }
@@ -102,7 +104,8 @@ fn stage2_variant_matches_oracle_hashes() {
     let root = workspace_root();
     let golden = root.join("crates/almide-spine/tests/golden");
     let mut manifest: BTreeMap<String, String> = BTreeMap::new();
-    for l in std::fs::read_to_string(golden.join("spec-check-manifest.txt")).expect("test harness invariant").lines() {
+    let text = std::fs::read_to_string(golden.join("spec-check-manifest.txt")).expect("test harness invariant");
+    for l in almide_corpus::manifest_rows(&text) {
         let mut it = l.splitn(3, '\t');
         let h = it.next().expect("test harness invariant").to_string();
         let _rc = it.next().expect("test harness invariant");
@@ -137,7 +140,8 @@ fn stage2_v3_template_matches_oracle_hashes() {
     let root = workspace_root();
     let golden = root.join("crates/almide-spine/tests/golden");
     let mut manifest: BTreeMap<String, String> = BTreeMap::new();
-    for l in std::fs::read_to_string(golden.join("spec-check-manifest.txt")).expect("test harness invariant").lines() {
+    let text = std::fs::read_to_string(golden.join("spec-check-manifest.txt")).expect("test harness invariant");
+    for l in almide_corpus::manifest_rows(&text) {
         let mut it = l.splitn(3, '\t');
         let h = it.next().expect("test harness invariant").to_string();
         let _rc = it.next().expect("test harness invariant");

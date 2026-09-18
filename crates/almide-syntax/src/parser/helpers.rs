@@ -116,7 +116,7 @@ impl Parser {
         self.peek_at(i).map(|t| &t.token_type) == Some(&TokenType::LBrace)
             && {
                 let mut j = i + 1;
-                while self.peek_at(j).map(|t| &t.token_type) == Some(&TokenType::Newline) { j += 1; }
+                while self.peek_at(j).is_some_and(|t| matches!(t.token_type, TokenType::Newline | TokenType::Comment)) { j += 1; }
                 // { name: ... } or { ...spread } or { } (empty record with all defaults)
                 (self.peek_at(j).map_or(false, |t| Self::is_name_token(&t.token_type))
                     && self.peek_at(j + 1).map(|t| &t.token_type) == Some(&TokenType::Colon))
@@ -463,6 +463,17 @@ impl Parser {
     pub(crate) fn attach_leading_comments(&mut self, id: crate::ast::ExprId, comments: Vec<String>) {
         if comments.is_empty() { return; }
         self.expr_comments.entry(id).or_default().leading.extend(comments);
+    }
+
+    /// After a comma, a same-line comment still belongs to the preceding
+    /// member; own-line comments introduce the following member (#2106).
+    pub(crate) fn comments_after_separator(&mut self, previous: crate::ast::ExprId) -> Vec<String> {
+        let mut leading = Vec::new();
+        for comment in self.walk_newline_run() {
+            if comment.own_line { leading.push(comment.text); }
+            else { self.expr_comments.entry(previous).or_default().line_trailing.push(comment.text); }
+        }
+        leading
     }
 
     /// Like `skip_newlines`, but COLLECT the comment tokens skipped over: the

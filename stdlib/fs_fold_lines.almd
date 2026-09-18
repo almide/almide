@@ -45,7 +45,7 @@ else {
 }
 
 effect fn fs_fold_lines_msi(path: String, init: Map[String, Int], f: (Map[String, Int], String) -> Map[String, Int]) -> Result[Map[String, Int], String] = {
-  let r: Result[String, String] = prim.read_text_file(path)
+  let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines")
   let rh = prim.handle(r)
   if prim.load32(rh + 16) != 0 then {
     let m: String = prim.load_handle(rh + 12)
@@ -79,7 +79,7 @@ else {
 }
 
 effect fn fs_fallible_fold_lines_msi(path: String, init: Map[String, Int], f: (Map[String, Int], String) -> Result[Map[String, Int], String]) -> Result[Map[String, Int], String] = {
-  let r: Result[String, String] = prim.read_text_file(path)
+  let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines")
   let rh = prim.handle(r)
   if prim.load32(rh + 16) != 0 then {
     let m: String = prim.load_handle(rh + 12)
@@ -130,7 +130,7 @@ else {
 }
 
 effect fn fs_fold_lines_chunked_msi(path: String, workers: Int, init: Map[String, Int], f: (Map[String, Int], String) -> Map[String, Int]) -> Result[List[Map[String, Int]], String] = {
-  let r: Result[String, String] = prim.read_text_file(path)
+  let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines_chunked")
   let rh = prim.handle(r)
   if prim.load32(rh + 16) != 0 then {
     let m: String = prim.load_handle(rh + 12)
@@ -173,7 +173,7 @@ else {
 }
 
 effect fn fs_fold_lines_chunked_i(path: String, workers: Int, init: Int, f: (Int, String) -> Int) -> Result[List[Int], String] = {
-  let r: Result[String, String] = prim.read_text_file(path)
+  let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines_chunked")
   let rh = prim.handle(r)
   if prim.load32(rh + 16) != 0 then {
     let m: String = prim.load_handle(rh + 12)
@@ -221,7 +221,7 @@ else {
 }
 
 effect fn fs_fold_lines_chunked_ls(path: String, workers: Int, init: List[String], f: (List[String], String) -> List[String]) -> Result[List[List[String]], String] = {
-  let r: Result[String, String] = prim.read_text_file(path)
+  let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines_chunked")
   let rh = prim.handle(r)
   if prim.load32(rh + 16) != 0 then {
     let m: String = prim.load_handle(rh + 12)
@@ -241,7 +241,7 @@ effect fn fs_fold_lines_chunked_ls(path: String, workers: Int, init: List[String
 }
 
 effect fn fs_fold_lines_range_ls(path: String, start: Int, endp: Int, init: List[String], f: (List[String], String) -> List[String]) -> Result[List[String], String] = {
-  let r: Result[String, String] = prim.read_text_file(path)
+  let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines_range")
   let rh = prim.handle(r)
   if prim.load32(rh + 16) != 0 then {
     let m: String = prim.load_handle(rh + 12)
@@ -268,7 +268,7 @@ else {
 }
 
 effect fn fs_fold_lines_s(path: String, init: String, f: (String, String) -> String) -> Result[String, String] = {
-  let r: Result[String, String] = prim.read_text_file(path)
+  let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines")
   let rh = prim.handle(r)
   if prim.load32(rh + 16) != 0 then {
     let m: String = prim.load_handle(rh + 12)
@@ -292,7 +292,7 @@ else {
 }
 
 effect fn fs_fold_lines_i(path: String, init: Int, f: (Int, String) -> Int) -> Result[Int, String] = {
-  let r: Result[String, String] = prim.read_text_file(path)
+  let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines")
   let rh = prim.handle(r)
   if prim.load32(rh + 16) != 0 then {
     let m: String = prim.load_handle(rh + 12)
@@ -316,7 +316,7 @@ else {
 }
 
 effect fn fs_fold_lines_ls(path: String, init: List[String], f: (List[String], String) -> List[String]) -> Result[List[String], String] = {
-  let r: Result[String, String] = prim.read_text_file(path)
+  let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines")
   let rh = prim.handle(r)
   if prim.load32(rh + 16) != 0 then {
     let m: String = prim.load_handle(rh + 12)
@@ -342,7 +342,7 @@ else {
 }
 
 effect fn fs_for_each_line(path: String, f: (String) -> Unit) -> Result[Unit, String] = {
-  let r: Result[String, String] = prim.read_text_file(path)
+  let r: Result[String, String] = prim.read_text_file_as(path, "fs.for_each_line")
   let rh = prim.handle(r)
   if prim.load32(rh + 16) != 0 then {
     let m: String = prim.load_handle(rh + 12)
@@ -370,7 +370,7 @@ else {
 }
 
 effect fn fs_fallible_fold_lines_i(path: String, init: Int, f: (Int, String) -> Result[Int, String]) -> Result[Int, String] = {
-  let r: Result[String, String] = prim.read_text_file(path)
+  let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines")
   let rh = prim.handle(r)
   if prim.load32(rh + 16) != 0 then {
     let m: String = prim.load_handle(rh + 12)
@@ -393,7 +393,7 @@ else {
 }
 
 effect fn fs_fallible_for_each_line(path: String, f: (String) -> Result[Unit, String]) -> Result[Unit, String] = {
-  let r: Result[String, String] = prim.read_text_file(path)
+  let r: Result[String, String] = prim.read_text_file_as(path, "fs.for_each_line")
   let rh = prim.handle(r)
   if prim.load32(rh + 16) != 0 then {
     let m: String = prim.load_handle(rh + 12)
@@ -410,7 +410,7 @@ effect fn fs_fallible_for_each_line(path: String, f: (String) -> Result[Unit, St
 // range walker the chunked `_i` twin already owns. Completes the range
 // column of the C-220 family matrix (#1423 bucket A).
 effect fn fs_fold_lines_range_i(path: String, start: Int, endp: Int, init: Int, f: (Int, String) -> Int) -> Result[Int, String] = {
-  let r: Result[String, String] = prim.read_text_file(path)
+  let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines_range")
   let rh = prim.handle(r)
   if prim.load32(rh + 16) != 0 then {
     let m: String = prim.load_handle(rh + 12)
@@ -435,7 +435,7 @@ else {
 }
 
 effect fn fs_fold_lines_range_s(path: String, start: Int, endp: Int, init: String, f: (String, String) -> String) -> Result[String, String] = {
-  let r: Result[String, String] = prim.read_text_file(path)
+  let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines_range")
   let rh = prim.handle(r)
   if prim.load32(rh + 16) != 0 then {
     let m: String = prim.load_handle(rh + 12)
@@ -452,7 +452,7 @@ effect fn fs_fold_lines_range_s(path: String, start: Int, endp: Int, init: Strin
 // `fs.fold_lines_range` Map[String, Int]-accumulator twin (`_msi`): the
 // surface over the range walker the chunked msi twin already owns.
 effect fn fs_fold_lines_range_msi(path: String, start: Int, endp: Int, init: Map[String, Int], f: (Map[String, Int], String) -> Map[String, Int]) -> Result[Map[String, Int], String] = {
-  let r: Result[String, String] = prim.read_text_file(path)
+  let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines_range")
   let rh = prim.handle(r)
   if prim.load32(rh + 16) != 0 then {
     let m: String = prim.load_handle(rh + 12)
@@ -482,7 +482,7 @@ else {
 }
 
 effect fn fs_fold_lines_chunked_s(path: String, workers: Int, init: String, f: (String, String) -> String) -> Result[List[String], String] = {
-  let r: Result[String, String] = prim.read_text_file(path)
+  let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines_chunked")
   let rh = prim.handle(r)
   if prim.load32(rh + 16) != 0 then {
     let m: String = prim.load_handle(rh + 12)

@@ -11,8 +11,12 @@ fn line_at(lines: List[String], pos: Int) -> String = list.get(lines, pos) ?? ""
 fn collect_block(lines: List[String], pos: Int, acc: List[String]) -> (List[String], Int) = if pos >= list.len(lines) then (acc, pos)
 else block_line(lines, pos, acc, line_at(lines, pos))
 
-fn block_line(lines: List[String], pos: Int, acc: List[String], line: String) -> (List[String], Int) = if string.is_empty(line) then collect_block(lines, pos + 1, if list.is_empty(acc) then acc
-else acc + [""])
+fn block_line(lines: List[String], pos: Int, acc: List[String], line: String) -> (List[String], Int) = if string.is_empty(line) then collect_block(
+  lines,
+  pos + 1,
+  if list.is_empty(acc) then acc
+  else acc + [""],
+)
 else collect_block(lines, pos + 1, acc + [string.drop(line, 0)])
 
 fn main() -> Unit = {

@@ -1,0 +1,8 @@
+// E042: a match in statement position whose arm VALUE is a fallible call
+// (#2182). The `if` twin already fired; the arm join stripped this one.
+import fs
+
+effect fn main() -> Unit = {
+  match 1 { _ => fs.remove("b")! }
+  println("done")
+}

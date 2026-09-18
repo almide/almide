@@ -219,11 +219,24 @@ struct DiagJson {
     /// #1312: the applicability tag that decides whether an unattended
     /// fixer may apply this. "unspecified" means nothing applies it.
     applicability: Option<String>,
+    /// #2088: the PRIMARY span — the region the caret underlines. Emitted
+    /// at the top level of the payload, after the nested `try_replace` and
+    /// `suggestions` objects that carry the same field names, so it is read
+    /// from the LAST occurrence of each key.
+    span: Option<(usize, usize, usize)>,
 }
 
 impl DiagJson {
     fn parse(line: &str) -> Option<Self> {
         if !line.trim_start().starts_with('{') { return None; }
+        let span = match (
+            json_uint_last(line, "\"line\":"),
+            json_uint_last(line, "\"col\":"),
+            json_uint_last(line, "\"end_col\":"),
+        ) {
+            (Some(l), Some(c), Some(e)) => Some((l, c, e)),
+            _ => None,
+        };
         Some(DiagJson {
             code: json_string(line, "\"code\":"),
             hint: json_string(line, "\"hint\":"),
@@ -231,6 +244,7 @@ impl DiagJson {
             try_replace: json_obj_uints(line, "\"try_replace\":", &["line", "col", "end_col"])
                 .map(|v| (v[0], v[1], v[2])),
             applicability: json_string(line, "\"applicability\":"),
+            span,
         })
     }
 }
@@ -260,6 +274,16 @@ fn json_string(blob: &str, key: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// Read a top-level unsigned field. `rfind`, not `find`: `line` / `col` /
+/// `end_col` also name fields inside the `try_replace` object and every entry
+/// of `suggestions`, and the top-level pair is emitted last.
+fn json_uint_last(blob: &str, key: &str) -> Option<usize> {
+    let i = blob.rfind(key)?;
+    let tail = &blob[i + key.len()..];
+    let digits: String = tail.chars().take_while(|c| c.is_ascii_digit()).collect();
+    digits.parse().ok()
 }
 
 fn json_obj_uints(blob: &str, key: &str, fields: &[&str]) -> Option<Vec<usize>> {
@@ -377,6 +401,35 @@ fn try_snippets_with_replace_span_apply_cleanly() {
             }
         }
     }
+}
+
+/// #2088. For `E002` the caret and the replacement range name the same
+/// region — the callee — because the message is `undefined function 'X'` and
+/// `X` is what the `try` rewrites. The primary span used to be filled from
+/// whatever the checker had walked last, which for a call WITH arguments was
+/// an argument: `list.nope(xs)` underlined `xs` while offering to rewrite
+/// `list.nope`, and inside a `${}` interpolation the caret ran clear off the
+/// name. A reader who follows the caret edits the argument.
+///
+/// The zero-argument form was always right, which is exactly why this went
+/// unnoticed — the hand-checked examples had no argument to move the cursor.
+#[test]
+fn e002_underlines_the_span_it_offers_to_replace() {
+    let mut checked = 0usize;
+    for case in &collect_cases() {
+        let broken = case.join("broken.almd");
+        for d in run_check_json(&broken) {
+            if d.code.as_deref() != Some("E002") { continue; }
+            let (Some(replace), Some(span)) = (d.try_replace, d.span) else { continue };
+            assert_eq!(
+                span, replace,
+                "E002 in {} underlines {:?} but offers to replace {:?}",
+                case.display(), span, replace
+            );
+            checked += 1;
+        }
+    }
+    assert!(checked > 0, "no E002 fixture carried a replacement span — this test went vacuous");
 }
 
 /// #1312 ratchet. `almide fix` applies `machine-applicable` fix-its and

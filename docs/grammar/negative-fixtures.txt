@@ -131,3 +131,11 @@ fn f(a: Int) -> Int = a +
 
 ### param-without-type
 fn add(a, b) -> Int = a + b
+
+### shebang-after-declaration
+fn main() -> Unit = {}
+#!/usr/bin/env almide
+
+### shebang-after-leading-space
+ #!/usr/bin/env almide
+fn main() -> Unit = {}

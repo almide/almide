@@ -94,7 +94,7 @@ fn find_decl_definition(program: &crate::ast::Program, word: &str, uri: &Uri, li
             return span_to_location(span, uri, lines);
         }
         // Variant constructors
-        if let crate::ast::Decl::Type { ty: crate::ast::TypeExpr::Variant { cases }, span, .. } = decl {
+        if let crate::ast::Decl::Type { ty: crate::ast::TypeExpr::Variant { cases, .. }, span, .. } = decl {
             for case in cases {
                 let case_name = match case {
                     crate::ast::VariantCase::Unit { name } => name.as_str(),

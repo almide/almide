@@ -5,6 +5,12 @@ Binary data manipulation. `import bytes`.
 `Bytes` is a contiguous, mutable-in-place byte buffer with a length prefix.
 Most operations are O(1) or O(n).
 
+For source scanners, convert once with `bytes.from_string(source)` and use
+`bytes.get_or(buffer, offset, -1)` while scanning. This uses compact `u8`
+storage on native; `string.to_bytes` instead returns `List[Int]` (`i64`
+elements). Neither conversion is a zero-copy borrowed view. To extract a
+UTF-8 token by its byte offsets, use `string.byte_slice(source, start, end)`.
+
 ## Naming convention
 
 - `read_<dtype>_le|be(b, pos)` — read one value at a byte offset (no advance).
@@ -21,7 +27,7 @@ Most operations are O(1) or O(n).
 |---|---|
 | `bytes.new(len: Int) -> Bytes` | Allocate `len` zeroed bytes |
 | `bytes.from_list(xs: List[Int]) -> Bytes` | From a list of byte values |
-| `bytes.from_string(s: String) -> Bytes` | UTF-8 view of a string (zero-copy) |
+| `bytes.from_string(s: String) -> Bytes` | Copy UTF-8 into a compact byte buffer (one byte per element) |
 | `bytes.to_list(b) -> List[Int]` | Materialise as a list |
 | `bytes.len(b) -> Int` | Length |
 | `bytes.is_empty(b) -> Bool` | Length == 0 |

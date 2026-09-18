@@ -26,6 +26,30 @@ pub fn lower_to_ir_with_deps(
     source_text: &str,
     dep_paths: &[(crate::project::PkgId, std::path::PathBuf)],
 ) -> Result<crate::ir::IrProgram, String> {
+    lower_to_ir_impl(path, source_text, dep_paths, None)
+}
+
+/// The TEST-MODE form (#2179): the same front, with the leg-independent
+/// `__test_runner` synthesis (`almide_driver::test_runner`) applied where the
+/// incumbent applies it — after module lowering, BEFORE `link_ir`, so the
+/// runner `main` is what keeps the promoted test fns alive through DCE. This
+/// is what lets `almide test --target wasm` render through the structural leg
+/// with the same routing `almide build --target wasm` uses.
+pub fn lower_to_ir_tests_with_deps(
+    path: &str,
+    source_text: &str,
+    dep_paths: &[(crate::project::PkgId, std::path::PathBuf)],
+    run_filter: Option<&str>,
+) -> Result<crate::ir::IrProgram, String> {
+    lower_to_ir_impl(path, source_text, dep_paths, Some(run_filter))
+}
+
+fn lower_to_ir_impl(
+    path: &str,
+    source_text: &str,
+    dep_paths: &[(crate::project::PkgId, std::path::PathBuf)],
+    tests: Option<Option<&str>>,
+) -> Result<crate::ir::IrProgram, String> {
     let tokens = crate::lexer::Lexer::tokenize(source_text);
     let mut parser = crate::parser::Parser::new(tokens).with_file(path);
     let mut program = parser.parse().map_err(|e| format!("parse: {e}"))?;
@@ -99,6 +123,13 @@ pub fn lower_to_ir_with_deps(
         checker.env.import_table = saved_table;
         checker.env.self_module_name = saved_self;
         ir.modules.push(mod_ir_module);
+    }
+    if let Some(run_filter) = tests {
+        // The structural leg's in-test assert lowering (the frontend's
+        // non-test abort form), then the shared runner synthesis.
+        almide_driver::test_runner::desugar_test_asserts(&mut ir);
+        almide_driver::test_runner::synthesize_test_runner_main(&mut ir, run_filter)
+            .map_err(|e| format!("tests: {e}"))?;
     }
     link_self_host(&mut ir, &mut checker, &sources);
     almide_driver::link_ir(&mut ir);
@@ -237,7 +268,7 @@ fn link_self_host(
         needed.sort();
         // ALMIDE_DBG_LINK=1: dump the demand set and what each key resolves
         // to — the probe that caught #1675's missed __err_at demand.
-        if std::env::var_os("ALMIDE_DBG_LINK").is_some() {
+        if almide_base::env::flag("ALMIDE_DBG_LINK") {
             for n in &needed {
                 eprintln!("[link] demand {} -> {}", n, registry.get(n).map(|_| "registered").unwrap_or("UNREGISTERED"));
             }

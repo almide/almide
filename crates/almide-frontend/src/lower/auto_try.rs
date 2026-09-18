@@ -8,6 +8,26 @@
 //
 // Moved from codegen (pass_result_propagation.rs Phase 3) to lowering
 // because this is desugaring, not code generation.
+//
+// ADR-0008 / #2182 / #2196: the checker now reports every position it strips
+// (E041 / E042 — let/var/assign, statement, fn tail, match arm, if branch,
+// guard else, condition, interpolation segment, binary and unary operand),
+// so on an accepted program the Try this pass inserts at those positions is
+// the one the writer spelled as `!`. What remains real work here:
+//
+// - the Result-typed tail the language accepts as the declared return: a
+//   `-> Result[..]` fn whose tail match mixes a Result-valued arm with a
+//   plain-value arm (`"greet" => greet(name), _ => ()`), and the `-> T!`
+//   marker fn's lifted tail — the wrap and the ok-sugar strip below
+//   normalise those to the fn's ABI shape;
+// - positions the checker never constrains against a target, so an effect
+//   call there passes check and this pass propagates it with no `!` in the
+//   source (measured on 0.62.0 + #2196, probe programs in the #2196 PR):
+//   `r.f = eff()`, `xs[i] = eff()`, `xs[eff()]`, `eff()[0]` and
+//   `{ ...r, f: eff() }`.
+//
+// Deleting the pass waits on the first group getting its own lowering and on
+// the second group getting its report, not on anything else in the checker.
 
 use std::collections::{HashMap, HashSet};
 use almide_ir::*;
@@ -134,6 +154,65 @@ impl almide_ir::visit::IrVisitor for ResultConsumerScan {
 }
 
 fn insert_try_body(expr: IrExpr, fn_returns_result: bool, ret_ty: &Ty, ctx: &mut TryCtx) -> IrExpr {
+    let body = insert_try_body_inner(expr, fn_returns_result, ret_ty, ctx);
+    hoist_root_unwrap_operands(body, ctx)
+}
+
+/// A body whose ROOT is an operator tree with an explicit-`!` operand —
+/// `effect fn parse_sum(s: String) -> Int = int.parse(s)! + 1` (the spelling
+/// the #2196 report asks for) or `(int.parse(s)! * 2) - 4` — reaches the MIR
+/// as `{ let t = int.parse(s)!; t + 1 }`: every operand that is not a literal
+/// or a var is hoisted into a bind, in evaluation order, so a call left of
+/// the `!` still runs first. The same operator as a block tail, an `if`
+/// branch or a `let` RHS lowers already through the MIR's own lift; a BARE
+/// root did not — the incumbent leg walled it as a heap-result match, and
+/// the two #1050 spec files fell off the wasm leg (the coverage ratchet).
+/// Root only: a nested position (`ok(h(p)! + h(p+1)!)`) lowers already, and
+/// hoisting there walls it. The auto-inserted `Try` operand takes the same
+/// hoist per `BinOp` in `insert_try_control`.
+fn hoist_root_unwrap_operands(body: IrExpr, ctx: &mut TryCtx) -> IrExpr {
+    fn has_unwrap(e: &IrExpr) -> bool {
+        match &e.kind {
+            IrExprKind::Unwrap { .. } | IrExprKind::Try { .. } => true,
+            IrExprKind::BinOp { left, right, .. } => has_unwrap(left) || has_unwrap(right),
+            IrExprKind::UnOp { operand, .. } => has_unwrap(operand),
+            _ => false,
+        }
+    }
+    fn hoist(e: IrExpr, stmts: &mut Vec<IrStmt>, ctx: &mut TryCtx) -> IrExpr {
+        let (ty, span, def_id) = (e.ty.clone(), e.span, e.def_id);
+        match e.kind {
+            IrExprKind::BinOp { op, left, right } => {
+                let left = Box::new(hoist(*left, stmts, ctx));
+                let right = Box::new(hoist(*right, stmts, ctx));
+                IrExpr { kind: IrExprKind::BinOp { op, left, right }, ty, span, def_id }
+            }
+            IrExprKind::UnOp { op, operand } => {
+                let operand = Box::new(hoist(*operand, stmts, ctx));
+                IrExpr { kind: IrExprKind::UnOp { op, operand }, ty, span, def_id }
+            }
+            IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitStr { .. }
+            | IrExprKind::LitBool { .. } | IrExprKind::Unit | IrExprKind::Var { .. } => e,
+            _ => {
+                let var = ctx.var_table.alloc(sym("__opnd"), ty.clone(), Mutability::Let, span);
+                stmts.push(IrStmt {
+                    kind: IrStmtKind::Bind { var, mutability: Mutability::Let, ty: ty.clone(), value: e },
+                    span,
+                });
+                IrExpr { kind: IrExprKind::Var { id: var }, ty, span, def_id: None }
+            }
+        }
+    }
+    if !matches!(body.kind, IrExprKind::BinOp { .. } | IrExprKind::UnOp { .. }) || !has_unwrap(&body) {
+        return body;
+    }
+    let (ty, span, def_id) = (body.ty.clone(), body.span, body.def_id);
+    let mut stmts = Vec::new();
+    let tail = hoist(body, &mut stmts, ctx);
+    IrExpr { kind: IrExprKind::Block { stmts, expr: Some(Box::new(tail)) }, ty, span, def_id }
+}
+
+fn insert_try_body_inner(expr: IrExpr, fn_returns_result: bool, ret_ty: &Ty, ctx: &mut TryCtx) -> IrExpr {
     if fn_returns_result {
         match expr.kind {
             IrExprKind::Block { stmts, expr: Some(tail) } => {

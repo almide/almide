@@ -1,9 +1,21 @@
 fn render_iter_chain(ctx: &RenderContext, source: &IrExpr, consume: bool, steps: &[IterStep], collector: &IterCollector) -> String {
     let src = render_expr(ctx, source);
+    // A borrowed source hands every step a `&T` when the clone pass bound the
+    // element binders by reference (`borrowed_loop_vars`, the same mark a
+    // `for` binder carries, #2287) — no element is cloned; otherwise an OWNED
+    // element (`.cloned()`), mirroring the `&[A]` runtime twins that clone
+    // per element, so a step lambda is prepared the same way whichever form
+    // the source takes.
+    let by_ref = !consume
+        && almide_ir::source_element_receivers(steps, collector)
+            .and_then(|r| r.first().map(|(v, _)| *v))
+            .is_some_and(|v| ctx.ann.borrowed_loop_vars.contains(&v));
     let mut chain = if consume {
         format!("({}).into_iter()", src)
-    } else {
+    } else if by_ref {
         format!("({}).iter()", src)
+    } else {
+        format!("({}).iter().cloned()", src)
     };
 
     for step in steps {
@@ -12,6 +24,11 @@ fn render_iter_chain(ctx: &RenderContext, source: &IrExpr, consume: bool, steps:
             IterStep::Filter { lambda } => chain = format!("{}.filter({})", chain, render_expr(ctx, lambda)),
             IterStep::FlatMap { lambda } => chain = format!("{}.flat_map({})", chain, render_expr(ctx, lambda)),
             IterStep::FilterMap { lambda } => chain = format!("{}.filter_map({})", chain, render_expr(ctx, lambda)),
+            IterStep::Take { n } => chain = format!("{}.take(({}) as usize)", chain, render_expr(ctx, n)),
+            // `(usize, T)` re-indexed to Almide's `Int`, which is what the
+            // `almide_rt_list_enumerate` twin returns — same pairs, same
+            // order, no `Vec<(i64, T)>` in between (#2098).
+            IterStep::Enumerate => chain = format!("{}.enumerate().map(|(__ei, __ex)| (__ei as i64, __ex))", chain),
         }
     }
 
@@ -22,6 +39,11 @@ fn render_iter_chain(ctx: &RenderContext, source: &IrExpr, consume: bool, steps:
         IterCollector::All { lambda } => format!("{}.all({})", chain, render_expr(ctx, lambda)),
         IterCollector::Find { lambda } => format!("{}.find({})", chain, render_expr(ctx, lambda)),
         IterCollector::Count { lambda } => format!("{}.filter({}).count() as i64", chain, render_expr(ctx, lambda)),
+        // Same law as `almide_rt_list_sum` (C-056): two's-complement wrapping,
+        // never the profile-dependent `Iterator::sum` overflow check.
+        IterCollector::Sum { float: false } => format!("{}.fold(0i64, |a: i64, b: i64| a.wrapping_add(b))", chain),
+        IterCollector::Sum { float: true } => format!("{}.sum::<f64>()", chain),
+        IterCollector::Len => format!("{}.count() as i64", chain),
     }
 }
 
@@ -785,6 +807,23 @@ fn render_runtime_call(ctx: &RenderContext, symbol: &almide_base::intern::Sym, a
     }
     if let Some(rendered) = try_render_mutating_runtime_call(ctx, symbol, args) {
         return rendered;
+    }
+    // A prelude MACRO (`almide_index_ref!`, `almide_list_get_ref!`) takes
+    // its operands as PLACES: they render as written, never owned out of
+    // an `AlmideRcCow` binding.
+    if symbol.as_str().ends_with('!') {
+        let args_str = args.iter().map(|a| render_expr(ctx, a)).collect::<Vec<_>>().join(", ");
+        return format!("{}({})", symbol.as_str(), args_str);
+    }
+    // The slot-hinted field lookup's hint is a `usize` in the runtime's
+    // signature (#1679); the IR carries it as an `Int`, whose `i64` suffix
+    // would not type. The literal renders bare.
+    if symbol.as_str() == "almide_rt_value_field_ref_at" {
+        let rendered: Vec<String> = args.iter().enumerate().map(|(i, a)| match &a.kind {
+            IrExprKind::LitInt { value } if i == 2 => value.to_string(),
+            _ => render_expr_owned(ctx, a),
+        }).collect();
+        return format!("{}({})", symbol.as_str(), rendered.join(", "));
     }
     let args_str = render_runtime_call_args_owned(ctx, symbol, args);
     format!("{}({})", symbol.as_str(), args_str)

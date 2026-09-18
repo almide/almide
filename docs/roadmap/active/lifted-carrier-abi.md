@@ -1,3 +1,4 @@
+<!-- description: #1437: one declaration-driven carrier layout instead of producer drift -->
 # #1437: the lifted carrier's ABI — declaration-driven, one readable layout
 
 Status: DESIGN (scouted 2026-08-24; direction per the issue's recorded candidate —

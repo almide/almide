@@ -189,14 +189,14 @@ phase 単位で goal 設定するのが回しやすい。例：
 ### 精密診断（ここが肝）
 デバッグ用の **desugared-IR ダンプを実装済み**（commit 済み、env ゲート）:
 ```
-DBG_DESUGAR_FN=<fn名> [DBG_DESUGAR_RAW=1] almide/render_program <file>   # eprintln に desugared IR
+ALMIDE_DBG_DESUGAR_FN=<fn名> [ALMIDE_DBG_DESUGAR_RAW=1] almide/render_program <file>   # eprintln に desugared IR
 ```
 `crates/almide-mir/src/lower/desugar.rs::dump_ir` / `dump_desugared_ir`、呼び出しは
 `lower_function_all_impl`（mod.rs）。
 
 **発見**: man6（`type Basic: Codec` + 手書き effect-fn `dec` の両方を含む単一ファイル）で
 `dec`（valid）と `Basic.decode`（invalid）の **desugared IR は VarId 番号を除いて完全一致**
-（`DBG_DESUGAR_RAW` の diff で確認）。にもかかわらず **MIR は異なる**（`Basic.decode` は local が
+（`ALMIDE_DBG_DESUGAR_RAW` の diff で確認）。にもかかわらず **MIR は異なる**（`Basic.decode` は local が
 2 個多く、v91 付近で i32/i64 が入れ替わる — wat の local 宣言で確認可能）。
 
 → **同一 desugared IR が別の MIR に lower される**。差は fn レベル:

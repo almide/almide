@@ -205,7 +205,7 @@ pub fn cmd_ide_doc(symbol: &str, file: &str) {
 // ── collection ──
 
 fn collect_stdlib_outline(module: &str) -> Result<Outline, String> {
-    if !almide::stdlib::is_stdlib_module(module) {
+    if !almide::stdlib::is_any_stdlib(module) {
         return Err(format!(
             "error: '{}' is not a stdlib module\n  hint: known modules include 'string', 'list', 'int', 'option', 'result', 'map', 'set'",
             module

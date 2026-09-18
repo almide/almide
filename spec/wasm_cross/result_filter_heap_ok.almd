@@ -7,11 +7,23 @@
 // and err(e) propagates shared. Covers a nested-heap Ok (Option[Float]), the
 // String Ok, both pred verdicts, err propagation, and a churn loop (the
 // share/build paths must be leak-exact).
-fn keep_all(r: Result[Float?, String]) -> Result[Float?, String] = result.filter(r, ((x) => true), "dropped")
+fn keep_all(r: Result[Float?, String]) -> Result[Float?, String] = result.filter(
+  r,
+  ((x) => true),
+  "dropped",
+)
 
-fn keep_none(r: Result[Float?, String]) -> Result[Float?, String] = result.filter(r, ((x) => false), "dropped")
+fn keep_none(r: Result[Float?, String]) -> Result[Float?, String] = result.filter(
+  r,
+  ((x) => false),
+  "dropped",
+)
 
-fn keep_long(r: Result[String, String]) -> Result[String, String] = result.filter(r, ((x) => string.len(x) > 3), "short")
+fn keep_long(r: Result[String, String]) -> Result[String, String] = result.filter(
+  r,
+  ((x) => string.len(x) > 3),
+  "short",
+)
 
 fn main() -> Unit = {
   let a: Result[Float?, String] = ok(some(1.5))

@@ -120,12 +120,13 @@ impl Emitter<'_> {
             SliceTy::Named(ti) => {
                 if path.contains(&ti) {
                     if matches!(
-                        self.work.eq_bodies.borrow().get(&ti),
+                        self.work.named_bodies.borrow().get(&(crate::work::NamedOp::Eq, ti)),
                         Some(crate::work::DisplayBuild::Failed)
                     ) {
                         return unsup("eq-helper-failed");
                     }
-                    let idx = self.work.helper(Helper::NamedEq { ti });
+                    let idx =
+                        self.work.helper(Helper::NamedOp { op: crate::work::NamedOp::Eq, ti });
                     self.f.instructions().call(idx);
                 } else {
                     path.push(ti);

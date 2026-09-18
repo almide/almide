@@ -84,24 +84,28 @@ fn normalize(p: String) -> String = {
   // Filter out empty segments (from //) and "." segments
   let cleaned = list.filter(segments, (s) => string.len(s) > 0 and s != ".")
   // Fold left, building a reversed list of resolved segments
-  let resolved = list.fold(cleaned, [], (acc, seg) => {
-    if seg == ".." then {
-      let acc_len = list.len(acc)
-      if acc_len == 0 then {
-        // Nothing to pop — keep ".." only if relative
-        if absolute then acc
-        else [".."] + acc
-      } else {
-        let top = match list.first(acc) {
-          some(v) => v,
-          none => "",
+  let resolved = list.fold(
+    cleaned,
+    [],
+    (acc, seg) => {
+      if seg == ".." then {
+        let acc_len = list.len(acc)
+        if acc_len == 0 then {
+          // Nothing to pop — keep ".." only if relative
+          if absolute then acc
+          else [".."] + acc
+        } else {
+          let top = match list.first(acc) {
+            some(v) => v,
+            none => "",
+          }
+          // Can't pop past ".."
+          if top == ".." then [".."] + acc
+          else list.drop(acc, 1)
         }
-        // Can't pop past ".."
-        if top == ".." then [".."] + acc
-        else list.drop(acc, 1)
-      }
-    } else [seg] + acc
-  })
+      } else [seg] + acc
+    },
+  )
   let ordered = list.reverse(resolved)
   let joined = string.join(ordered, "/")
   if absolute then "/" + joined

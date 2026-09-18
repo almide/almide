@@ -46,20 +46,33 @@ use wasmparser::{Parser, Payload};
 /// path audits an artifact's emitted op set against this before shipping
 /// (an unserved op = a runtime refusal on a runtime the developer never
 /// ran — the env.set lesson): extend the shim and this list TOGETHER.
-pub const P1_SERVED_OPS: &[i32] = &[26, 29, 30, 31, 32, 34, 35, 36, 37];
+pub const P1_SERVED_OPS: &[i32] = &[26, 29, 30, 32, 34, 35, 36, 37];
 
 pub(crate) const UNSUPPORTED_MSG: &[u8] = b"Error: host op unsupported in the WASI build\n";
+/// The env.set overlay log's own refusal. It used to borrow the line above,
+/// which names an operation the build supports and had just performed — the
+/// #2103 defect (an error that does not say what failed) in the shim.
+pub(crate) const ENV_FULL_MSG: &[u8] = b"Error: env.set log full (64 KiB of names and values)\n";
+/// C-197's line, for the shim-side stagings that ask the machine for pages
+/// (#2120). The guest allocator prints the same words from its own path.
+pub(crate) const OOM_MSG: &[u8] = b"Error: out of memory\n";
 // Park-page layout (offsets from park base).
 pub(crate) const IOV: u64 = 0; // two iovec entries (16 bytes)
 pub(crate) const NREAD: u64 = 16;
 pub(crate) const NL: u64 = 24;
 pub(crate) const MSG: u64 = 64;
+/// The second message slot, clear of MSG's text and below DATA.
+pub(crate) const MSG2: u64 = 256;
+/// The third: the shim-side out-of-memory line.
+pub(crate) const MSG3: u64 = 384;
 pub(crate) const DATA: u64 = 1024; // stdin/entropy bytes + op result staging
 /// The env.set overlay log (#1716): [klen u32][vlen u32][key][val] entries,
-/// append-only, scanned last-write-wins by op 26. Its page sits ABOVE the
-/// stdin ceiling (g_pcap inits to park+OVL), so read-to-end can never run
-/// into it.
+/// append-only, scanned last-write-wins by op 26. Its page sits above the
+/// staging span the other ops use.
 pub(crate) const OVL: u64 = 4 * 65536;
+/// The staging room the emitter refuses to overrun (#2118) and this layout
+/// provides: one number, checked here rather than trusted.
+const _: () = assert!((OVL - DATA) as i64 == almide_wasm::WASI_STAGING_ROOM);
 /// The park span: five pages carved out at the original heap base — four
 /// for iovecs/messages/stdin, one for the env overlay log.
 pub(crate) const PARK_SPAN: u64 = 5 * 65536;
@@ -122,6 +135,10 @@ pub(crate) struct Parsed<'a> {
     /// (the #1688 silent-corruption class — a verbatim roundtrip under a
     /// nonzero shift retargets every closure).
     pub(crate) elements: Vec<wasmparser::Element<'a>>,
+    /// Function imports past the five `almide.*` ones — the program's
+    /// `@extern(wasm, module, name)` declarations (#2275), carried through
+    /// verbatim behind the WASI imports: `(module, name, type index)`.
+    pub(crate) foreign_imports: Vec<(String, String, u32)>,
     pub(crate) data: DataSection,
     pub(crate) bodies: Vec<wasmparser::FunctionBody<'a>>,
 }
@@ -188,6 +205,7 @@ pub(crate) fn parse_module(bytes: &[u8]) -> anyhow::Result<Parsed<'_>> {
         exports: Vec::new(),
         main_index: None,
         elements: Vec::new(),
+        foreign_imports: Vec::new(),
         data: DataSection::new(),
         bodies: Vec::new(),
     };
@@ -202,6 +220,16 @@ pub(crate) fn parse_module(bytes: &[u8]) -> anyhow::Result<Parsed<'_>> {
                             .collect()
                     };
                     p.types.push((conv(ft.params()), conv(ft.results())));
+                }
+            }
+            Payload::ImportSection(r) => {
+                for i in r.into_imports() {
+                    let i = i?;
+                    if let wasmparser::TypeRef::Func(ti) = i.ty
+                        && i.module != "almide"
+                    {
+                        p.foreign_imports.push((i.module.to_string(), i.name.to_string(), ti));
+                    }
                 }
             }
             Payload::FunctionSection(r) => {
@@ -299,6 +327,7 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
         exports: export_rows,
         main_index,
         elements,
+        foreign_imports,
         mut data,
         bodies,
     } = parsed;
@@ -307,9 +336,11 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     // The base five WASI imports replace the five almide.* ones; the
     // environ/args pairs (#1716) are appended only for the services the
     // op set reaches (#1841), so every non-import index shifts by the
-    // number of pairs shipped (0, 2 or 4).
-    let imports_count: u32 = 5 + services.extra_imports();
-    let shift: u32 = imports_count - 5;
+    // number of pairs shipped (0, 2 or 4). The program's own imports
+    // (#2275) follow the WASI ones in their original order, so they move
+    // by the same delta as every defined function.
+    let shift: u32 = services.extra_imports();
+    let imports_count: u32 = 5 + shift + foreign_imports.len() as u32;
     let shim_base = imports_count + func_types.len() as u32;
     // The park CANNOT live past the current memory end — the bump heap
     // grows there. It takes over the ORIGINAL heap base instead, and
@@ -320,10 +351,14 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
         .1
         .ok_or_else(|| anyhow::anyhow!("__heap init not i32"))? as u32 as u64;
     let park: u64 = heap_init;
-    let (g_plen, g_pcap) = (global_count, global_count + 1);
+    let g_plen = global_count;
+    // g_ppos exists only for the services that can stage outside the park
+    // (#2120); a module without them keeps the fixed source and its bytes.
+    let g_ppos = (services.env_get || services.args).then_some(global_count + 1);
     // g_ovl (the overlay log length) exists only when an env service
     // ships — nothing else reads or writes the log.
-    let g_ovl = (services.env_get || services.env_set).then_some(global_count + 2);
+    let g_ovl = (services.env_get || services.env_set)
+        .then_some(global_count + 1 + u32::from(g_ppos.is_some()));
     let mut globals = GlobalSection::new();
     for (idx, (gt, i32v, i64v, f64v)) in parsed_globals.iter().enumerate() {
         let init = if idx as u32 == heap_global {
@@ -382,6 +417,10 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
         next_import += 2;
         (next_import - 2, next_import - 1)
     });
+    for (module, name, ti) in &foreign_imports {
+        imports.import(module, name, EntityType::Function(*ti));
+        next_import += 1;
+    }
     debug_assert_eq!(next_import, imports_count);
 
     let mut functions = FunctionSection::new();
@@ -421,12 +460,15 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
         GlobalType { val_type: ValType::I32, mutable: true, shared: false },
         &ConstExpr::i32_const(0),
     );
-    // g_pcap: the stdin read-to-end ceiling — the overlay page above it
-    // is the env log's, never stdin's.
-    globals.global(
-        GlobalType { val_type: ValType::I32, mutable: true, shared: false },
-        &ConstExpr::i32_const((park + OVL) as i32),
-    );
+    // g_ppos: where host_read copies FROM (#2120). The staging page is the
+    // default; a service whose result outgrows it stages above the heap and
+    // points this at those bytes instead of answering a wrong value.
+    if g_ppos.is_some() {
+        globals.global(
+            GlobalType { val_type: ValType::I32, mutable: true, shared: false },
+            &ConstExpr::i32_const((park + DATA) as i32),
+        );
+    }
     // g_ovl: bytes appended to the env overlay log so far.
     if g_ovl.is_some() {
         globals.global(
@@ -464,19 +506,19 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
         code.function(&stub);
         code.function(&stub);
     } else {
-        code.function(&shim_fs_call(park, g_plen, g_pcap, f_env_get, f_env_set, f_args));
-        code.function(&shim_host_read(park, g_plen));
+        code.function(&shim_fs_call(park, g_plen, g_ppos, f_env_get, f_env_set, f_args));
+        code.function(&shim_host_read(park, g_plen, g_ppos));
     }
     if f_env_get.is_some() {
         let (i_sizes, i_get) = environ_imports.expect("env_get service imports its pair");
-        code.function(&shim_env_get(park, g_plen, g_ovl.expect("env service global"), i_sizes, i_get));
+        code.function(&shim_env_get(park, g_plen, g_ppos.expect("env.get stages"), g_ovl.expect("env service global"), i_sizes, i_get));
     }
     if f_env_set.is_some() {
         code.function(&shim_env_set(park, g_ovl.expect("env service global")));
     }
     if f_args.is_some() {
         let (i_sizes, i_get) = args_imports.expect("args service imports its pair");
-        code.function(&shim_args(park, g_plen, i_sizes, i_get));
+        code.function(&shim_args(park, g_plen, g_ppos.expect("args stages"), i_sizes, i_get));
     }
 
     let mut element_sec = ElementSection::new();
@@ -491,6 +533,13 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
         &ConstExpr::i32_const((park + MSG) as i32),
         UNSUPPORTED_MSG.iter().copied(),
     );
+    if f_env_set.is_some() {
+        data.active(0, &ConstExpr::i32_const((park + MSG2) as i32), ENV_FULL_MSG.iter().copied());
+    }
+    // The high-staging services are the only shim-side callers of memory.grow.
+    if f_env_get.is_some() || f_args.is_some() {
+        data.active(0, &ConstExpr::i32_const((park + MSG3) as i32), OOM_MSG.iter().copied());
+    }
 
     let mut m = Module::new();
     m.section(&type_sec)

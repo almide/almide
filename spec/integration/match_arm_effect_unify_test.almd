@@ -8,7 +8,7 @@ effect fn user_effect() -> Unit = {
 effect fn use_match() -> Unit = {
   let cond: Result[Int, String] = ok(1)
   match cond {
-    ok(_) => user_effect(),
+    ok(_) => user_effect()!,
     // returns lifted Result<(), String>
     err(_) => println("nope"),
   }

@@ -123,7 +123,39 @@ fi
 # `let (r, b) = call!` destructure-unwrap honestly (`unwrap `!` in a
 # call-argument position`) where the structural leg, the default route,
 # lowers every cell byte-identical to native. Prunes with #1696 4-5.
-MAX_WALLED=27
+# 28 as of 2026-09-09: record_option_none_cells.almd (C-255/#2057) is
+# a NEW structural fixture, covering absent and present Option record cells.
+# Host CI run 34321896641 confirms it walls on BOTH incumbent hosts; every
+# emitted fixture still compares identical. Native and the structural leg
+# execute the complete field matrix (none/some), with size and allocation
+# ledgers pinning its current emission. This adds one unsupported incumbent
+# input, not a loss of coverage for a previously emitted fixture.
+# 29 as of 2026-09-13: sort_by_compound_key.almd (C-053/#2154) is a NEW
+# structural fixture, and its wall here is the FIX rather than a gap. The
+# incumbent rendered a compound sort key by comparing the cached key as a raw
+# i64 while the key closure returned an i32 handle — `indirect call type
+# mismatch` at run time, out of an artifact it reported `verified`. It now
+# REFUSES the shape (`list.sort_by_x`, an unlinked render wall), the same
+# refusal it already makes for a non-scalar `unique_by` key (C-147). There was
+# never a correct incumbent emission of this fixture to lose; the ceiling rises
+# by the one input the incumbent stopped mis-rendering. The structural leg, the
+# default route, orders it byte-identical to native across the whole key
+# lattice, and tests/sort_by_compound_key_test.rs pins the refusal itself.
+# 30 as of 2026-09-13: ord_record_variant.almd (C-053/#2167) — same shape of
+# bump as the row above, one type lattice further in. A record or variant that
+# derives Ord sorted on native and BOTH wasm legs refused it; the structural
+# leg now orders it (field declaration order / case order then payload, native's
+# derive) and the incumbent keeps its standing refusal of every non-scalar
+# element (C-147). Nothing that emitted before stopped emitting.
+# 31 as of 2026-09-14: ord_recursive.almd (C-053/#2172) — the third bump in
+# this family and the same shape as the two above. A RECURSIVE type that
+# derives Ord built natively and neither wasm leg could emit it; the structural
+# leg now does, because a `Named` comparator is emitted once out of line and
+# CALLED instead of inlined at the use site, and the incumbent keeps its
+# standing refusal of every non-scalar element (C-147). Measured directly on
+# this tree: 676 emitted, 31 walled, 707 total — the emitted count is unchanged,
+# so this is one more input the incumbent never rendered, not coverage lost.
+MAX_WALLED=31
 corpus=$(ls "$FIXTURE_DIR"/*.almd 2>/dev/null | wc -l | tr -d ' ')
 if [ "$corpus" -eq 0 ] || [ $((n + walled)) -ne "$corpus" ]; then
   echo "::error::host-determinism: compared $n + walled $walled != corpus $corpus in $FIXTURE_DIR — the scan went blind (#985)"

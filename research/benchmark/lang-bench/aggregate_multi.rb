@@ -15,6 +15,7 @@ RAW_DIR    = File.join(SCRIPT_DIR, 'raw')
 LANG_DISPLAY = {
   'almide' => 'Almide', 'gleam' => 'Gleam', 'moonbit' => 'MoonBit',
   'rust' => 'Rust', 'typescript' => 'TypeScript',
+  'go' => 'Go', 'zig' => 'Zig',
 }.freeze
 
 emit_json = ARGV.include?('--json')

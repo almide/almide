@@ -11,18 +11,25 @@ import json
 
 fn push_obj(root: Value, key: String) -> Value = {
   let arr = value.as_array(value.field(root, key) ?? value.object([])) ?? []
-  value.merge(root, value.object([
-    (key, value.array(arr + [
-      value.object([])
-    ]))
-  ]))
+  value.merge(
+    root,
+    value.object([
+      (key, value.array(arr + [
+        value.object([])
+      ]))
+    ]),
+  )
 }
 
 fn set_last(root: Value, key: String, item_key: String, v: Value) -> Value = {
   let items = value.as_array(value.field(root, key) ?? value.object([])) ?? []
   let idx = list.len(items) - 1
   if idx >= 0 then {
-    let updated = list.set(items, idx, value.merge(list.get(items, idx) ?? value.object([]), value.object([(item_key, v)])))
+    let updated = list.set(
+      items,
+      idx,
+      value.merge(list.get(items, idx) ?? value.object([]), value.object([(item_key, v)])),
+    )
     value.merge(root, value.object([(key, value.array(updated))]))
   } else root
 }

@@ -76,6 +76,7 @@
 
 use std::collections::HashSet;
 use almide_ir::free_vars::free_vars;
+use almide_ir::substitute::substitute_var_in_expr;
 use almide_ir::visit_mut::{walk_expr_mut, walk_stmt_mut, IrMutVisitor};
 use almide_ir::*;
 use almide_base::intern::sym;
@@ -305,6 +306,22 @@ impl<'a> BranchLifter<'a> {
     /// Replace the heap-branch `value` in place with a call to a freshly
     /// synthesized tail helper `fn __branch_lift_N(p…) -> ty = <original branch>`.
     fn lift_bind_value(&mut self, ty: Ty, value: &mut IrExpr) {
+        // #2062: helper parameters are values, not the enclosing storage places.
+        // Outlining a write would update a snapshot and silently lose the write.
+        // Local bindings may still mutate, and globals keep their own storage.
+        // Include write-only targets and specialized collection mutations too.
+        let mut assigned = HashSet::new();
+        almide_ir::collect_assigned_vars(value, &mut assigned);
+        if !assigned.is_empty() {
+            let locals = almide_ir::free_vars::bound_vars(value);
+            if assigned.iter().any(|id| {
+                let var = VarId(*id);
+                !locals.contains(&var) && !self.globals.contains(&var)
+            }) {
+                return;
+            }
+        }
+
         // 1. The branch is evaluated in the enclosing scope BEFORE the bind takes
         //    effect, so its free variables are exactly the enclosing locals it
         //    references (params, prior `let`s, loop binders). The bound var itself
@@ -330,16 +347,27 @@ impl<'a> BranchLifter<'a> {
         let body = std::mem::replace(value, IrExpr::default());
         let body_span = body.span;
 
-        // 3. Build the helper's parameters from the captured free vars, KEEPING
-        //    their VarIds so the body resolves against the shared var_table. Types
-        //    come from the enclosing function's var_table (the checker's truth).
+        // 3. Build the helper's parameters from the captured free vars, each a
+        //    FRESH VarId with the captured var's name and type, and rename the
+        //    body onto them. The helper used to keep the enclosing fn's ids as
+        //    its params, so one VarId was bound in two functions — and every
+        //    VarId-keyed ownership annotation (`borrowed_loop_vars`,
+        //    `shared_mut_vars`, `tco_owned_params`, the clone pass's last-use
+        //    counts) then had to be second-guessed with "fn-local truth" gates
+        //    wherever the helper was rendered (#1130, #1143, #1232, #2194).
+        //    A VarId is bound in exactly one function (`verify_ir` checks it),
+        //    so an annotation about it means the same thing everywhere.
+        let mut body = body;
         let func_params: Vec<IrParam> = params
             .iter()
             .map(|&vid| {
-                let info = self.vt.get(vid);
+                let info = self.vt.get(vid).clone();
+                let fresh = self.vt.alloc(info.name, info.ty.clone(), Mutability::Let, info.span);
+                let read = IrExpr { kind: IrExprKind::Var { id: fresh }, ty: info.ty.clone(), span: info.span, def_id: None };
+                body = substitute_var_in_expr(&body, vid, &read);
                 IrParam {
-                    var: vid,
-                    ty: info.ty.clone(),
+                    var: fresh,
+                    ty: info.ty,
                     name: info.name,
                     borrow: ParamBorrow::Own,
                     is_mut: false,
@@ -540,8 +568,14 @@ mod tests {
         assert_eq!(helper.visibility, IrVisibility::Private);
         assert_eq!(helper.ret_ty, Ty::String);
         assert_eq!(helper.params.len(), 1);
-        assert_eq!(helper.params[0].var, VarId(1));
-        assert!(matches!(helper.body.kind, IrExprKind::If { .. }), "helper body is the verbatim branch");
+        // The param is a FRESH id (the table had 3 vars), named and typed like
+        // the captured `v1`, and the body reads it — the enclosing fn's `v1`
+        // is bound in one function only.
+        let fresh = helper.params[0].var;
+        assert_eq!(fresh, VarId(3));
+        assert_eq!(prog.var_table.get(fresh).ty, Ty::Bool);
+        let IrExprKind::If { cond, .. } = &helper.body.kind else { panic!("helper body is the branch") };
+        assert!(matches!(cond.kind, IrExprKind::Var { id } if id == fresh), "the body reads the fresh param");
     }
 
     #[test]

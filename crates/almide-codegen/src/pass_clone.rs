@@ -8,10 +8,16 @@
 use std::collections::{HashSet, HashMap};
 use std::rc::Rc;
 use almide_ir::*;
-use almide_base::{Span, Sym};
+use almide_base::Span;
 use almide_lang::types::Ty;
 use super::pass::{NanoPass, PassResult, Target};
-use super::pass_clone_loops::{insert_clones_for_in, insert_clones_while, take_borrowed_loop_vars};
+use super::pass_clone_places::{insert_clones_index_access, insert_clones_map_access, insert_clones_member, map_insert_value_first};
+use super::pass_clone_loops::{insert_clones_for_in, insert_clones_while, LoopMarks};
+use super::use_kind::{ExplicitBorrows, Site, UseSites};
+
+#[path = "pass_clone_calls.rs"]
+mod calls;
+use calls::{insert_clones_call, insert_clones_runtime_call};
 
 #[derive(Debug)]
 pub struct CloneInsertionPass;
@@ -23,9 +29,18 @@ impl NanoPass for CloneInsertionPass {
         Some(vec![Target::Rust])
     }
 
-    fn depends_on(&self) -> Vec<&'static str> { vec!["BorrowInsertion"] }
+    /// The last ownership pass over the pre-lowering IR: it counts the binds
+    /// every earlier pass adds and places the `Clone` / move every later pass
+    /// reads — the match-subject rewrite and the stdlib lowering both look at
+    /// what it left.
+    fn depends_on(&self) -> Vec<&'static str> { vec!["BorrowInsertion", "CaptureClone", "TailCallOpt", "BoxDeref", "LICM"] }
+    fn run_before(&self) -> Vec<&'static str> { vec!["MatchSubject", "StdlibLowering"] }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
+        for f in &mut program.functions { super::pass_clone_projection::fold_bindings(&mut f.body); }
+        for m in &mut program.modules {
+            for f in &mut m.functions { super::pass_clone_projection::fold_bindings(&mut f.body); }
+        }
         compute_use_counts(&mut program);
         let top_let_vars: HashSet<VarId> = program.top_lets.iter().map(|tl| tl.var).collect();
 
@@ -35,21 +50,25 @@ impl NanoPass for CloneInsertionPass {
         let marks = CloneMarks {
             always: program.codegen_annotations.always_clone_vars.clone(),
             tco_owned: program.codegen_annotations.tco_owned_params.clone(),
-            tco_fns: program.codegen_annotations.tco_rewritten_fns.clone(),
         };
         let sets = ClassSets::split(&program.var_table, &top_let_vars, &syntactic.total, &marks);
-        rewrite_bodies(&mut program.functions, &mut program.top_lets, &syntactic, &sets, &marks.tco_fns);
+        let mut loops = LoopMarks::default();
+        rewrite_bodies(&mut program.functions, &mut program.top_lets, &syntactic, &sets, &marks, &mut loops);
 
         let IrProgram { modules, var_table, .. } = &mut program;
         for module in modules.iter_mut() {
             let module_top_lets: HashSet<VarId> = module.top_lets.iter().map(|tl| tl.var).collect();
             let module_syntactic = SyntacticCounts::of(&module.functions, &module.top_lets);
             let m_sets = ClassSets::split(var_table, &module_top_lets, &module_syntactic.total, &marks);
-            rewrite_bodies(&mut module.functions, &mut module.top_lets, &module_syntactic, &m_sets, &marks.tco_fns);
+            rewrite_bodies(&mut module.functions, &mut module.top_lets, &module_syntactic, &m_sets, &marks, &mut loops);
         }
         // Loop binders the bodies only borrowed (#1673): the walker binds them
         // `&T` off `xs.iter()`.
-        program.codegen_annotations.borrowed_loop_vars = take_borrowed_loop_vars();
+        program.codegen_annotations.borrowed_loop_vars = loops.borrowed;
+        program.codegen_annotations.consumed_loop_vars = loops.consumed;
+        // A filter-family chain binder rebound `let x = *x` off a `&&T`
+        // (#2287): the binding's annotation is `_`, its IR type stays `T`.
+        program.codegen_annotations.infer_binding_tys.extend(loops.infer);
         PassResult { program, changed: true }
     }
 }
@@ -78,8 +97,7 @@ impl SyntacticCounts {
     fn of(functions: &[IrFunction], top_lets: &[IrTopLet]) -> SyntacticCounts {
         let mut total = HashMap::new();
         let count = |body: &IrExpr, total: &mut HashMap<VarId, u32>| {
-            let mut counts = HashMap::new();
-            count_syntactic(body, &mut counts);
+            let counts = count_syntactic(body);
             for (id, n) in &counts {
                 *total.entry(*id).or_insert(0) += n;
             }
@@ -95,37 +113,23 @@ impl SyntacticCounts {
 struct CloneMarks {
     always: HashSet<VarId>,
     tco_owned: HashSet<VarId>,
-    tco_fns: HashSet<Sym>,
 }
 
-/// The `always` / `eligible` classification of one function group, in both
-/// flavours: with the TCO-owned exemption (for the bodies TailCallOpt
-/// rewrote, and every top-let) and without it.
+/// The `always` / `eligible` classification of one function group. The
+/// TCO-owned exemption applies wherever its ids occur: a local is bound in
+/// exactly one function (`verify_ir`, #2186), so a TCO loop param can only
+/// be read inside the body TailCallOpt rewrote — the one place its clone
+/// plan holds. (#1130 was the branch-lift helper that used to share the
+/// enclosing fn's ids and inherited the exemption without the plan.)
 struct ClassSets {
     always: HashSet<VarId>,
     eligible: HashSet<VarId>,
-    always_plain: HashSet<VarId>,
-    eligible_plain: HashSet<VarId>,
 }
 
 impl ClassSets {
     fn split(vt: &VarTable, top_let_vars: &HashSet<VarId>, syntactic: &HashMap<VarId, u32>, marks: &CloneMarks) -> ClassSets {
         let (always, eligible) = split_clone_ids(vt, top_let_vars, syntactic, &marks.always, &marks.tco_owned);
-        // #1130: the TCO exemption holds ONLY inside the body TailCallOpt
-        // rewrote. A VarId can live in another function too — `branch_lift`
-        // lifts an in-loop branch into a helper whose params ARE the
-        // enclosing fn's vars — and there the compensating clone plan does
-        // not exist, so its bare moves were a rustc E0382. Everything else
-        // gets the ordinary last-use analysis.
-        let no_exempt: HashSet<VarId> = HashSet::new();
-        let (always_plain, eligible_plain) = split_clone_ids(vt, top_let_vars, syntactic, &marks.always, &no_exempt);
-        ClassSets { always, eligible, always_plain, eligible_plain }
-    }
-
-    /// The pair a function body walks under: the exempting flavour inside a
-    /// TCO-rewritten body, the plain one everywhere else.
-    fn for_fn(&self, tco_here: bool) -> (&HashSet<VarId>, &HashSet<VarId>) {
-        if tco_here { (&self.always, &self.eligible) } else { (&self.always_plain, &self.eligible_plain) }
+        ClassSets { always, eligible }
     }
 }
 
@@ -162,73 +166,64 @@ impl BodyScope {
 }
 
 /// Rewrite every body of one function group under its own [`BodyScope`].
-fn rewrite_bodies(functions: &mut [IrFunction], top_lets: &mut [IrTopLet], syntactic: &SyntacticCounts, sets: &ClassSets, tco_fns: &HashSet<Sym>) {
+fn rewrite_bodies(functions: &mut [IrFunction], top_lets: &mut [IrTopLet], syntactic: &SyntacticCounts, sets: &ClassSets, marks: &CloneMarks, loops: &mut LoopMarks) {
     for (func, mentioned) in functions.iter_mut().zip(&syntactic.fn_bodies) {
-        let (always, eligible) = sets.for_fn(tco_fns.contains(&func.name));
-        func.body = rewrite_body(std::mem::take(&mut func.body), mentioned, always, eligible, &syntactic.total);
+        let owned = func.params.iter().filter(|p| p.borrow == ParamBorrow::Own).map(|p| p.var).collect();
+        let body = Body { mentioned, always: &sets.always, eligible: &sets.eligible, total: &syntactic.total, tco_owned: &marks.tco_owned };
+        func.body = rewrite_body(std::mem::take(&mut func.body), &body, owned, loops);
     }
     for (tl, mentioned) in top_lets.iter_mut().zip(&syntactic.top_let_bodies) {
-        tl.value = rewrite_body(std::mem::take(&mut tl.value), mentioned, &sets.always, &sets.eligible, &syntactic.total);
+        let body = Body { mentioned, always: &sets.always, eligible: &sets.eligible, total: &syntactic.total, tco_owned: &marks.tco_owned };
+        tl.value = rewrite_body(std::mem::take(&mut tl.value), &body, HashSet::new(), loops);
     }
 }
 
-fn rewrite_body(body: IrExpr, mentioned: &HashMap<VarId, u32>, always: &HashSet<VarId>, eligible: &HashSet<VarId>, total: &HashMap<VarId, u32>) -> IrExpr {
-    let mut scope = BodyScope::narrow(mentioned, always, eligible, total);
+/// The classification one body is rewritten under.
+struct Body<'a> {
+    mentioned: &'a HashMap<VarId, u32>,
+    always: &'a HashSet<VarId>,
+    eligible: &'a HashSet<VarId>,
+    total: &'a HashMap<VarId, u32>,
+    tco_owned: &'a HashSet<VarId>,
+}
+
+fn rewrite_body(expr: IrExpr, body: &Body, mut owned: HashSet<VarId>, loops: &mut LoopMarks) -> IrExpr {
+    owned.extend(almide_ir::free_vars::bound_vars(&expr));
+    // TCO manages these moves itself and exempts them from our use counts.
+    owned.retain(|v| !body.tco_owned.contains(v));
+    let mut scope = BodyScope::narrow(body.mentioned, body.always, body.eligible, body.total);
     // #1230: any id the branch walk can deduct lives in `remaining`, whose
     // key set is exactly `scope.eligible` — so the branch-count memo only
     // needs to track that set. Counts for other ids are deduct no-ops.
-    let memo = BranchCounts::compute(&body, &scope.eligible);
+    let memo = BranchCounts::compute(&expr, &scope.eligible);
     // Nothing is fresh at function top level — see `CloneCtx::fresh`.
     let no_fresh: HashSet<VarId> = HashSet::new();
-    insert_clones_live(body, &mut CloneCtx {
+    let no_captured: HashSet<VarId> = HashSet::new();
+    insert_clones_live(expr, &mut CloneCtx {
         always: &scope.always,
         eligible: &scope.eligible,
         remaining: &mut scope.remaining,
         in_loop: false,
         memo: &memo,
         fresh: &no_fresh,
+        owned: &owned,
+        loops,
+        captured: &no_captured,
     })
 }
 
-/// Counts every syntactic `Var` use by riding the exhaustive `IrVisitor` walk —
-/// so no node kind (incl. `IterChain`/`RcWrap`/`TailCall`, present here because
-/// StreamFusion/TCO run before this pass) can silently drop a subtree and
-/// under-count a var, which would desync the `remaining` last-use tracking.
-struct SyntacticCounter<'a> {
-    counts: &'a mut HashMap<VarId, u32>,
-}
-
-impl IrVisitor for SyntacticCounter<'_> {
-    fn visit_expr(&mut self, expr: &IrExpr) {
-        if let IrExprKind::Var { id } = &expr.kind {
-            *self.counts.entry(*id).or_insert(0) += 1;
-        }
-        walk_expr(self, expr); // exhaustive recursion into all children
-    }
-
-    fn visit_stmt(&mut self, stmt: &IrStmt) {
-        // An in-place mutation `a[i]=v` / `a.f=v` / `a[k]=v` reads-and-writes `a`,
-        // but the target is a bare `VarId` field — NOT a `Var` expr node — so the
-        // expr walk above never sees it. Count it explicitly: this makes the
-        // mutation a *use* of `a`, so when an alias `var b = a` precedes it, the
-        // bind is no longer `a`'s last use → the eligible-move path clones at the
-        // bind instead of moving, and the later in-place write operates on owned
-        // `a` (not a moved value → no E0382). Without this, shapes B/C/I above
-        // emit `let mut b = a;`/`a.clone(); f(a);` then mutate the moved `a`.
-        match &stmt.kind {
-            IrStmtKind::IndexAssign { target, .. }
-            | IrStmtKind::MapInsert { target, .. }
-            | IrStmtKind::FieldAssign { target, .. } => {
-                *self.counts.entry(*target).or_insert(0) += 1;
-            }
-            _ => {}
-        }
-        walk_stmt(self, stmt); // exhaustive recursion into the stmt's expr children
-    }
-}
-
-fn count_syntactic(expr: &IrExpr, counts: &mut HashMap<VarId, u32>) {
-    SyntacticCounter { counts }.visit_expr(expr);
+/// Every syntactic `Var` use, plus every in-place mutation target — the
+/// shared use-kind walk's count (`UseSites::counts`), so no node kind (incl.
+/// `IterChain`/`RcWrap`/`TailCall`, present here because StreamFusion/TCO run
+/// before this pass) can silently drop a subtree and under-count a var, which
+/// would desync the `remaining` last-use tracking. An in-place mutation
+/// `a[i]=v` / `a.f=v` / `a[k]=v` reads-and-writes `a` through a bare `VarId`
+/// target, not a `Var` node; counting it makes the mutation a *use* of `a`,
+/// so when an alias `var b = a` precedes it the bind is no longer `a`'s last
+/// use → the eligible-move path clones at the bind instead of moving, and
+/// the later in-place write operates on owned `a` (no E0382).
+fn count_syntactic(expr: &IrExpr) -> HashMap<VarId, u32> {
+    UseSites::of_expr(expr, Site::Result, &ExplicitBorrows).counts()
 }
 
 // ── Branch-count memo (#1230) ──────────────────────────────────────
@@ -271,9 +266,7 @@ impl BranchCounts {
         if let Some(c) = self.map.get(&std::ptr::from_ref(node)) {
             return Rc::clone(c);
         }
-        let mut c = HashMap::new();
-        count_syntactic(node, &mut c);
-        Rc::new(c)
+        Rc::new(count_syntactic(node))
     }
 
     /// Combined guard+body counts for one match arm (keyed by the body node),
@@ -282,11 +275,12 @@ impl BranchCounts {
         if let Some(c) = self.map.get(&std::ptr::from_ref(&arm.body)) {
             return Rc::clone(c);
         }
-        let mut c = HashMap::new();
+        let mut c = count_syntactic(&arm.body);
         if let Some(g) = &arm.guard {
-            count_syntactic(g, &mut c);
+            for (id, n) in count_syntactic(g) {
+                *c.entry(id).or_insert(0) += n;
+            }
         }
-        count_syntactic(&arm.body, &mut c);
         Rc::new(c)
     }
 }
@@ -370,7 +364,7 @@ impl IrVisitor for BranchPrecounter<'_> {
 
 // ── Clone ID classification ────────────────────────────────────────
 
-fn needs_clone(ty: &Ty) -> bool {
+pub(super) fn needs_clone(ty: &Ty) -> bool {
     // §4 stage 2c (#531): derived from THE copy-ness classifier — see the
     // projection table in almide_ir::top_let_storage.
     !almide_ir::top_let_storage::clone_free(ty)
@@ -436,6 +430,8 @@ fn split_clone_ids(
 /// flips to `true` for a nested loop body/cond — built as a fresh `CloneCtx`
 /// reborrowing `remaining` (same shape as `HoistCtx` in pass_licm_hoist.rs).
 pub(crate) struct CloneCtx<'a> {
+    /// Value bindings and explicitly owned parameters; excludes borrowed parameters.
+    pub(crate) owned: &'a HashSet<VarId>,
     pub(crate) always: &'a HashSet<VarId>,
     pub(crate) eligible: &'a HashSet<VarId>,
     pub(crate) remaining: &'a mut HashMap<VarId, u32>,
@@ -448,6 +444,14 @@ pub(crate) struct CloneCtx<'a> {
     /// the next iteration binds a fresh value. Empty outside loops and
     /// inside lambda bodies (a closure may run many times per iteration).
     pub(crate) fresh: &'a HashSet<VarId>,
+    /// Vars bound OUTSIDE the innermost enclosing lambda (its free vars):
+    /// a consuming read of one inside the closure body clones, whatever the
+    /// var's class — the body runs per call and a move out of a captured
+    /// variable is E0507. Empty outside every lambda.
+    pub(crate) captured: &'a HashSet<VarId>,
+    /// The loop binders this walk has classified so far (#1673) — handed to
+    /// the walker as `borrowed_loop_vars` / `consumed_loop_vars`.
+    pub(crate) loops: &'a mut LoopMarks,
 }
 
 fn make_clone(id: VarId, ty: Ty, span: Option<Span>) -> IrExpr {
@@ -486,6 +490,11 @@ fn insert_clones_var(id: VarId, ty: Ty, span: Option<Span>, ctx: &mut CloneCtx) 
                 return IrExpr { kind: IrExprKind::Var { id }, ty, span, def_id: None };
             }
         }
+        return make_clone(id, ty, span);
+    }
+    // A single-use var moves by default — except inside a closure that
+    // captured it from the enclosing scope, where the read repeats per call.
+    if ctx.captured.contains(&id) && needs_clone(&ty) {
         return make_clone(id, ty, span);
     }
     IrExpr { kind: IrExprKind::Var { id }, ty, span, def_id: None }
@@ -538,6 +547,22 @@ fn insert_clones_if(cond: Box<IrExpr>, then: Box<IrExpr>, else_: Box<IrExpr>, ct
 /// strategy as [`insert_clones_if`], generalized to N arms, with every
 /// sibling arm's uses deducted on entry (see [`deduct_sibling_uses`]).
 fn insert_clones_match(subject: IrExpr, arms: Vec<IrMatchArm>, ctx: &mut CloneCtx) -> IrExprKind {
+    let owned_final = super::pass_clone_projection::root(&subject).is_some_and(|id|
+        ctx.owned.contains(&id) && !ctx.always.contains(&id) && (!ctx.in_loop || ctx.fresh.contains(&id))
+            && ctx.remaining.get(&id).copied().unwrap_or(1) <= 1);
+    let borrowed = if owned_final { None } else {
+        super::pass_clone_projection::match_binders(&subject, &arms)
+    };
+    let subject = if borrowed.is_some() {
+        let mut subject = subject;
+        if let IrExprKind::RuntimeCall { symbol, .. } = &mut subject.kind {
+            *symbol = almide_base::intern::sym("almide_list_get_ref!");
+            subject
+        } else {
+            IrExpr { ty: subject.ty.clone(), span: subject.span, def_id: None,
+                kind: IrExprKind::Borrow { expr: Box::new(subject), as_str: false, mutable: false } }
+        }
+    } else { subject };
     let new_subject = insert_clones_live(subject, ctx);
     // Memo lookups must happen before `arms.into_iter()` moves the arms out of
     // the Vec buffer — the body's buffer address is the memo key (#1230).
@@ -564,8 +589,12 @@ fn insert_clones_match(subject: IrExpr, arms: Vec<IrMatchArm>, ctx: &mut CloneCt
                 *r = r.saturating_sub(total - own);
             }
         }
-        let new_guard = arm.guard.map(|g| insert_clones_live(g, ctx));
-        let new_body = insert_clones_live(arm.body, ctx);
+        let owned: HashSet<_> = ctx.owned.iter().copied()
+            .filter(|v| !borrowed.as_ref().is_some_and(|vars| vars.contains(v))).collect();
+        let mut arm_ctx = CloneCtx { owned: &owned, always: ctx.always, eligible: ctx.eligible,
+            remaining: ctx.remaining, in_loop: ctx.in_loop, memo: ctx.memo, fresh: ctx.fresh, loops: ctx.loops, captured: ctx.captured };
+        let new_guard = arm.guard.map(|g| insert_clones_live(g, &mut arm_ctx));
+        let new_body = insert_clones_live(arm.body, &mut arm_ctx);
         new_arms.push(IrMatchArm { pattern: arm.pattern, guard: new_guard, body: new_body });
 
         if i == 0 {
@@ -582,165 +611,8 @@ fn insert_clones_match(subject: IrExpr, arms: Vec<IrMatchArm>, ctx: &mut CloneCt
     IrExprKind::Match { subject: Box::new(new_subject), arms: new_arms }
 }
 
-/// The E0505 guard's borrow scan (#809/#866): the vars passed BY BORROW at
-/// the top level of a call's arguments (or its method receiver). Such a var
-/// stays borrowed until the call itself executes, so a MOVE of it anywhere in
-/// a SIBLING argument conflicts — rustc's borrow live-range, not the flat
-/// last-use count, is the authority INSIDE one call.
-fn call_borrowed_vars(args: &[IrExpr], target: Option<&CallTarget>) -> HashSet<VarId> {
-    let mut borrowed: HashSet<VarId> = HashSet::new();
-    for a in args {
-        if let IrExprKind::Borrow { expr, .. } = &a.kind {
-            if let IrExprKind::Var { id } = &expr.kind {
-                borrowed.insert(*id);
-            }
-        }
-    }
-    if let Some(CallTarget::Method { object, .. }) = target {
-        if let IrExprKind::Borrow { expr, .. } = &object.kind {
-            if let IrExprKind::Var { id } = &expr.kind {
-                borrowed.insert(*id);
-            }
-        }
-    }
-    borrowed
-}
-
-/// `RuntimeCall { symbol, args }` arm of [`insert_clones_live`]: the same
-/// E0505 guard as [`insert_clones_call`]. An intrinsic-lowered stdlib call
-/// (`map.fold` → `almide_rt_map_fold`) reaches this pass as a `RuntimeCall`,
-/// and its borrowed subject conflicts with a sibling-arg move exactly the
-/// same way — `map.fold(acc, (if … else acc), λ)` moved `acc` in the seed
-/// while `&acc` from the subject argument was still live (#866).
-fn insert_clones_runtime_call(args: Vec<IrExpr>, ctx: &mut CloneCtx) -> Vec<IrExpr> {
-    let borrowed = call_borrowed_vars(&args, None);
-    if borrowed.is_empty() {
-        return args.into_iter().map(|a| insert_clones_live(a, ctx)).collect();
-    }
-    let merged: HashSet<VarId> = ctx.always.union(&borrowed).copied().collect();
-    let mut call_ctx = CloneCtx {
-        always: &merged,
-        eligible: ctx.eligible,
-        remaining: ctx.remaining,
-        in_loop: ctx.in_loop,
-        memo: ctx.memo,
-        fresh: ctx.fresh,
-    };
-    args.into_iter().map(|a| insert_clones_live(a, &mut call_ctx)).collect()
-}
-
-/// `Call { target, args, type_args }` arm of [`insert_clones_live`].
-fn insert_clones_call(target: CallTarget, args: Vec<IrExpr>, type_args: Vec<Ty>, ctx: &mut CloneCtx) -> IrExprKind {
-    // E0505 guard (#809): see `call_borrowed_vars`. Force-clone every var
-    // borrowed at the top level of an argument (or the method receiver) for
-    // the duration of this call's transform (`map.fold(acc, acc, (…) => acc)`
-    // moved `acc` into the closure's capture bind while `&acc` from the first
-    // argument was still live). The Borrow arm strips any clone inserted
-    // directly under it, so the borrowed occurrence itself stays a plain `&x`.
-    let borrowed = call_borrowed_vars(&args, Some(&target));
-    if !borrowed.is_empty() {
-        let merged: HashSet<VarId> = ctx.always.union(&borrowed).copied().collect();
-        let mut call_ctx = CloneCtx {
-            always: &merged,
-            eligible: ctx.eligible,
-            remaining: ctx.remaining,
-            in_loop: ctx.in_loop,
-            memo: ctx.memo,
-            fresh: ctx.fresh,
-        };
-        let args = args.into_iter().map(|a| insert_clones_live(a, &mut call_ctx)).collect();
-        let target = match target {
-            CallTarget::Method { object, method } => CallTarget::Method {
-                object: Box::new(insert_clones_live(*object, &mut call_ctx)),
-                method,
-            },
-            CallTarget::Computed { callee } => CallTarget::Computed {
-                callee: Box::new(insert_clones_live(*callee, &mut call_ctx)),
-            },
-            other => other,
-        };
-        return IrExprKind::Call { target, args, type_args };
-    }
-    let args = args.into_iter().map(|a| insert_clones_live(a, ctx)).collect();
-    let target = match target {
-        CallTarget::Method { object, method } => CallTarget::Method {
-            object: Box::new(insert_clones_live(*object, ctx)), method,
-        },
-        CallTarget::Computed { callee } => CallTarget::Computed {
-            callee: Box::new(insert_clones_live(*callee, ctx)),
-        },
-        other => other,
-    };
-    IrExprKind::Call { target, args, type_args }
-}
-
-/// `IndexAccess { object, index }` arm of [`insert_clones_live`]: borrow the
-/// container, clone the element.
-fn insert_clones_index_access(object: IrExpr, index: IrExpr, ty: Ty, span: Option<Span>, ctx: &mut CloneCtx) -> IrExpr {
-    let mut processed_object = insert_clones_live(object, ctx);
-    // Strip top-level Clone from container (indexing borrows)
-    if let IrExprKind::Clone { expr } = processed_object.kind {
-        processed_object = *expr;
-    }
-    let processed_index = insert_clones_live(index, ctx);
-    let access = IrExpr {
-        kind: IrExprKind::IndexAccess {
-            object: Box::new(processed_object),
-            index: Box::new(processed_index),
-        },
-        ty: ty.clone(), span, def_id: None,
-    };
-    if needs_clone(&ty) {
-        return IrExpr { kind: IrExprKind::Clone { expr: Box::new(access) }, ty, span, def_id: None };
-    }
-    access
-}
-
-/// `MapAccess { object, key }` arm of [`insert_clones_live`]: borrow the
-/// container, clone the element.
-fn insert_clones_map_access(object: IrExpr, key: IrExpr, ty: Ty, span: Option<Span>, ctx: &mut CloneCtx) -> IrExpr {
-    let mut processed_object = insert_clones_live(object, ctx);
-    if let IrExprKind::Clone { expr } = processed_object.kind {
-        processed_object = *expr;
-    }
-    let processed_key = insert_clones_live(key, ctx);
-    let access = IrExpr {
-        kind: IrExprKind::MapAccess {
-            object: Box::new(processed_object),
-            key: Box::new(processed_key),
-        },
-        ty: ty.clone(), span, def_id: None,
-    };
-    if needs_clone(&ty) {
-        return IrExpr { kind: IrExprKind::Clone { expr: Box::new(access) }, ty, span, def_id: None };
-    }
-    access
-}
-
-/// `Member { object, field }` arm of [`insert_clones_live`]. Mirrors
-/// IndexAccess/MapAccess: the container is borrowed (Record may be a `&T`
-/// after BorrowInference), and a heap-typed field can't be moved out
-/// through the reference. Wrap the access in Clone when the field itself
-/// needs cloning.
-fn insert_clones_member(object: IrExpr, field: Sym, ty: Ty, span: Option<Span>, ctx: &mut CloneCtx) -> IrExpr {
-    let mut processed_object = insert_clones_live(object, ctx);
-    if let IrExprKind::Clone { expr } = processed_object.kind {
-        processed_object = *expr;
-    }
-    let access = IrExpr {
-        kind: IrExprKind::Member {
-            object: Box::new(processed_object),
-            field,
-        },
-        ty: ty.clone(), span, def_id: None,
-    };
-    if needs_clone(&ty) {
-        return IrExpr { kind: IrExprKind::Clone { expr: Box::new(access) }, ty, span, def_id: None };
-    }
-    access
-}
-
-pub(crate) fn insert_clones_live(expr: IrExpr, ctx: &mut CloneCtx) -> IrExpr {
+pub(crate) fn insert_clones_live(mut expr: IrExpr, ctx: &mut CloneCtx) -> IrExpr {
+    if super::pass_clone_compare::rewrite(&mut expr, ctx) { return expr; }
     let ty = expr.ty.clone();
     let span = expr.span;
 
@@ -769,11 +641,23 @@ pub(crate) fn insert_clones_live(expr: IrExpr, ctx: &mut CloneCtx) -> IrExpr {
         IrExprKind::MapAccess { object, key } => return insert_clones_map_access(*object, *key, ty, span, ctx),
 
         IrExprKind::Member { object, field } => return insert_clones_member(*object, field, ty, span, ctx),
+        IrExprKind::Record { name, fields } => IrExprKind::Record {
+            name, fields: super::pass_clone_record_fields::rewrite(fields, ctx),
+        },
         IrExprKind::SpreadRecord { base, fields } => {
             // Fields are evaluated before the spread base in Rust struct literals
             let new_fields: Vec<_> = fields.into_iter().map(|(k, v)| (k, insert_clones_live(v, ctx))).collect();
             let new_base = insert_clones_live(*base, ctx);
             IrExprKind::SpreadRecord { base: Box::new(new_base), fields: new_fields }
+        },
+        IrExprKind::Clone { expr } => {
+            let mut inner = insert_clones_live(*expr, ctx);
+            // An existing clone already preserves ownership. The liveness
+            // walk still consumes the use, but must not add a second clone.
+            if let IrExprKind::Clone { expr: unwrapped } = inner.kind {
+                inner = *unwrapped;
+            }
+            IrExprKind::Clone { expr: Box::new(inner) }
         },
         IrExprKind::Borrow { expr, as_str, mutable } => {
             let mut inner = insert_clones_live(*expr, ctx);
@@ -783,14 +667,43 @@ pub(crate) fn insert_clones_live(expr: IrExpr, ctx: &mut CloneCtx) -> IrExpr {
             }
             IrExprKind::Borrow { expr: Box::new(inner), as_str, mutable }
         },
-        // A closure body may run any number of times per loop iteration, so
-        // nothing the enclosing loop rebinds is fresh inside it (#1673): walk
-        // the lambda with an empty `fresh` set, otherwise unchanged.
-        kind @ IrExprKind::Lambda { .. } => {
-            let no_fresh: HashSet<VarId> = HashSet::new();
-            let mut lam_ctx = CloneCtx { always: ctx.always, eligible: ctx.eligible, remaining: ctx.remaining, in_loop: ctx.in_loop, memo: ctx.memo, fresh: &no_fresh };
-            let e = IrExpr { kind, ty: ty.clone(), span, def_id: None };
+        // A closure body is a LOOP BODY to this pass: it may run any number
+        // of times, so a variable bound outside it is never moved at its last
+        // occurrence inside (an iterator-chain step reads the enclosing fn's
+        // locals and params directly — `Use::depth` — and a move there is
+        // E0507, "cannot move out of a captured variable in an `FnMut`
+        // closure"). What IS fresh per invocation is the lambda's own params
+        // and the top-level `let`s of its body (#1673, the loop rule);
+        // nothing the enclosing loop rebinds is.
+        IrExprKind::Lambda { params, body, lambda_id } => {
+            let param_ids: Vec<VarId> = params.iter().map(|(v, _)| *v).collect();
+            let top: &[IrStmt] = match &body.kind {
+                IrExprKind::Block { stmts, .. } => stmts,
+                _ => &[],
+            };
+            let fresh = super::pass_clone_loops::loop_fresh_vars(None, Some(&param_ids), top);
+            let param_set: HashSet<VarId> = param_ids.iter().copied().collect();
+            let captured: HashSet<VarId> = almide_ir::free_vars::free_vars(&body, &param_set).into_iter().collect();
+            let e = IrExpr { kind: IrExprKind::Lambda { params, body, lambda_id }, ty: ty.clone(), span, def_id: None };
+            // Captured values belong to the reusable closure. Only values
+            // introduced inside this invocation may have fields moved out.
+            let owned = almide_ir::free_vars::bound_vars(&e);
+            let mut lam_ctx = CloneCtx { always: ctx.always, eligible: ctx.eligible, remaining: ctx.remaining, in_loop: true, memo: ctx.memo, fresh: &fresh, owned: &owned, loops: ctx.loops, captured: &captured };
             return e.map_children(&mut |child| insert_clones_live(child, &mut lam_ctx));
+        }
+        // A fused chain whose source is a BORROW (`consume == false`, the
+        // borrow pass's element verdict, #2287): the lambdas its source
+        // element reaches are loop bodies whose binder may be bound `&T` off
+        // `xs.iter()`, exactly like a `for` binder — so a field of such a
+        // binder is never moved out (`LoopMarks::binders`, decided before the
+        // bodies are walked), and once the bodies' clones are placed the
+        // binders that only borrow are marked (`LoopMarks::borrowed`).
+        IrExprKind::IterChain { source, consume, steps, collector } => {
+            let chain = IrExpr { kind: IrExprKind::IterChain { source, consume, steps, collector }, ty: ty.clone(), span, def_id: None };
+            super::pass_clone_loops::note_chain_element_binders(&chain, ctx.loops);
+            let mut chain = chain.map_children(&mut |child| insert_clones_live(child, ctx));
+            super::pass_clone_loops::mark_chain_element_binders(&mut chain, ctx.loops);
+            return chain;
         }
         // Default: recurse into every child through the exhaustive `map_children`
         // chokepoint. Every node whose clone insertion is just "recurse into the
@@ -853,6 +766,15 @@ pub(crate) fn insert_clone_stmts_live(stmts: Vec<IrStmt>, ctx: &mut CloneCtx) ->
                 let value = insert_clones_live(value, ctx);
                 count_target_use(target, ctx.eligible, ctx.remaining);
                 IrStmtKind::FieldAssign { target, field, value }
+            }
+            // Value before key when the key is a plain var (see
+            // `map_insert_value_first`): the key position becomes the var's
+            // last use, so `m[w] = f(&w)` moves `w` instead of cloning it.
+            IrStmtKind::MapInsert { target, key, value } if map_insert_value_first(&key, &value) => {
+                let value = insert_clones_live(value, ctx);
+                let key = insert_clones_live(key, ctx);
+                count_target_use(target, ctx.eligible, ctx.remaining);
+                IrStmtKind::MapInsert { target, key, value }
             }
             IrStmtKind::MapInsert { target, key, value } => {
                 let key = insert_clones_live(key, ctx);

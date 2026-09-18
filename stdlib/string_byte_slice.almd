@@ -1,0 +1,23 @@
+// Byte offsets are checked in O(1); only the requested UTF-8 span is copied.
+fn __byte_slice_boundary(base: Int, len: Int, pos: Int) -> Bool = if pos == len then true else prim.load8(base + pos) / 64 != 2
+
+fn __byte_slice_copy(src: Int, dst: Int, count: Int) -> Unit = {
+  var i = 0
+  while i < count {
+    prim.store8(dst + i, prim.load8(src + i))
+    i = i + 1
+  }
+}
+
+fn string_byte_slice(s: String, start: Int, end: Int) -> String? = {
+  let h = prim.handle(s)
+  let len = prim.load32(h + 4)
+  let base = h + 12
+  if start < 0 or end < start or end > len then none
+  else if not __byte_slice_boundary(base, len, start) or not __byte_slice_boundary(base, len, end) then none
+  else {
+    let out = prim.alloc_str(end - start)
+    __byte_slice_copy(base + start, prim.handle(out) + 12, end - start)
+    some(out)
+  }
+}

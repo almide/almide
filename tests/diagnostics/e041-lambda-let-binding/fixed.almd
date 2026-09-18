@@ -1,0 +1,12 @@
+// E041, lambda variant (#2254): an un-annotated `let` of a fallible call inside
+// a lambda body is the same un-answered question as one in the enclosing
+// effect fn — the lambda never auto-propagated, so the value is a Result.
+import fs
+
+effect fn main() -> Unit = {
+  let sizes = ["a.txt", "b.txt"] |> list.map((p) => {
+    let text = fs.read_text(p)!
+    string.len(text)
+  })!
+  println("${sizes}")
+}

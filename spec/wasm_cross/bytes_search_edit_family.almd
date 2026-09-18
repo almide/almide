@@ -43,13 +43,25 @@ fn main() -> Unit = {
   // cmp: lexicographic, a prefix is the smaller, -1/0/1
   println("cmp ${bytes.cmp(abcde, abcde)} ${bytes.cmp(b("abc"), abcde)} ${bytes.cmp(abcde, b("abc"))}")
   println("cmp ${bytes.cmp(b("abd"), abcde)} ${bytes.cmp(b(""), b(""))} ${bytes.cmp(b(""), b("a"))}")
-  println("cmp ${bytes.cmp(bytes.from_list([255]), bytes.from_list([1]))} ${bytes.cmp(bytes.from_list([0]), bytes.from_list([]))}")
+  println("cmp ${bytes.cmp(bytes.from_list([255]), bytes.from_list([1]))} ${bytes.cmp(
+    bytes.from_list([0]),
+    bytes.from_list([]),
+  )}")
   // contains / index_of: empty pattern hits at 0, longer-than-haystack misses
-  println("contains ${bytes.contains(abcde, b("bcd"))} ${bytes.contains(abcde, b(""))} ${bytes.contains(abcde, b("abcdef"))} ${bytes.contains(abcde, b("ce"))} ${bytes.contains(b(""), b(""))}")
+  println("contains ${bytes.contains(abcde, b("bcd"))} ${bytes.contains(abcde, b(""))} ${bytes.contains(
+    abcde,
+    b("abcdef"),
+  )} ${bytes.contains(abcde, b("ce"))} ${bytes.contains(b(""), b(""))}")
   println("index_of ${opt(bytes.index_of(abcde, b("cd")))} ${opt(bytes.index_of(abcde, b("")))} ${opt(bytes.index_of(abcde, b("abcdef")))} ${opt(bytes.index_of(abcde, b("x")))} ${opt(bytes.index_of(b("aaa"), b("aa")))}")
   // starts_with / ends_with: the empty affix always holds
-  println("starts ${bytes.starts_with(abcde, b("ab"))} ${bytes.starts_with(abcde, b(""))} ${bytes.starts_with(abcde, b("abcdef"))} ${bytes.starts_with(abcde, b("b"))} ${bytes.starts_with(b(""), b(""))}")
-  println("ends ${bytes.ends_with(abcde, b("de"))} ${bytes.ends_with(abcde, b(""))} ${bytes.ends_with(abcde, b("abcdef"))} ${bytes.ends_with(abcde, b("d"))} ${bytes.ends_with(b(""), b("a"))}")
+  println("starts ${bytes.starts_with(abcde, b("ab"))} ${bytes.starts_with(abcde, b(""))} ${bytes.starts_with(
+    abcde,
+    b("abcdef"),
+  )} ${bytes.starts_with(abcde, b("b"))} ${bytes.starts_with(b(""), b(""))}")
+  println("ends ${bytes.ends_with(abcde, b("de"))} ${bytes.ends_with(abcde, b(""))} ${bytes.ends_with(
+    abcde,
+    b("abcdef"),
+  )} ${bytes.ends_with(abcde, b("d"))} ${bytes.ends_with(b(""), b("a"))}")
   // is_empty / is_valid_utf8: overlong, surrogate, truncated, > U+10FFFF
   println("is_empty ${bytes.is_empty(b(""))} ${bytes.is_empty(abcde)} ${bytes.is_empty(bytes.new(0))} ${bytes.is_empty(bytes.new(1))}")
   println("utf8 ${bytes.is_valid_utf8(b(""))} ${bytes.is_valid_utf8(b("héllo"))} ${bytes.is_valid_utf8(bytes.from_list([255]))} ${bytes.is_valid_utf8(bytes.from_list([192, 128]))} ${bytes.is_valid_utf8(bytes.from_list([237, 160, 128]))}")

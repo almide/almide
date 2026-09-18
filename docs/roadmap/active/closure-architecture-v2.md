@@ -261,6 +261,12 @@ remaining walker codegen + the `CaptureClonePass` reorder complete it.
 - **The escape allowlist (`@fn_arg_consumed`) is hand-curated and verified once
   against each runtime impl** — a maintenance obligation, not an inferred property.
   A wrong annotation can inline an escaping closure; treat it as a trusted base.
+  *Superseded for USER higher-order fns by #2288*: a fn-typed param's escape is
+  inferred from its occurrences in the same fixed point that decides `&T`
+  (`fn_param_borrow`, docs/specs/codegen.md "A fn-typed param is borrowed
+  unless its callable escapes"), a non-escaping slot is `&dyn Fn`, and the
+  certifier's C5 checks the verdict; the allowlist now describes only the
+  runtime twins' own slots (#2289 retires those to ablation).
 - **GC migration is localized but not free**: `Ty::EnvPtr` and the Closure layout
   are target-parametrized, so a `gc` backend swaps `emit_wasm` + `ty_to_valtype`
   only — but `call_ref`/typed-funcref bring their own type-identity model to design.

@@ -6,7 +6,7 @@
 // Capability::FsRead.
 effect fn fs_read_lines_if_exists(path: String) -> Result[List[String]?, String] = {
   if prim.path_exists(path) then {
-    let r: Result[String, String] = prim.read_text_file(path)
+    let r: Result[String, String] = prim.read_text_file_as(path, "fs.read_lines_if_exists")
     let rh = prim.handle(r)
     if prim.load32(rh + 16) != 0 then {
       let m: String = prim.load_handle(rh + 12)

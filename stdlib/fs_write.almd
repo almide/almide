@@ -10,4 +10,7 @@
 // Capability::FsWrite — a DISTINCT capability from FsRead (a write is strictly greater
 // authority) — so a caller is caps-verified ONLY if it declares FsWrite (an `effect fn`); a
 // pure `fn` reaching it is a frontend error AND would REJECT at the gate.
-effect fn fs_write(path: String, content: String) -> Result[Unit, String] = prim.write_text_file(path, content)
+effect fn fs_write(path: String, content: String) -> Result[Unit, String] = prim.write_text_file(
+  path,
+  content,
+)

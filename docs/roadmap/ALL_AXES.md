@@ -5,6 +5,10 @@
 > [ROAD_TO_1_0.md](ROAD_TO_1_0.md) が**時間軸**（0.41→0.99 のバージョンラダー）なら、この文書は**評価軸**。
 > 同じ作業を別の断面で見たもので、台帳と競合しない — 台帳の行はここでは「その軸の証拠」として引用される。
 > 新しい軸の作業を始めるときは、**この文書で勝利条件を定義してから台帳の decade に割り付ける**。
+>
+> **2026-09-13 の後継デルタ**: [active/arena-breakthroughs.md](active/arena-breakthroughs.md) — 全 field アリーナ（15 ツールチェイン）と
+> 近隣 8 言語の機構読みから、軸ごとの**実測順位・敗北・未計測**と突破点 T1–T9 を固定した。本書の勝利条件はそのまま、
+> 現在値の更新と「降りる軸」の再入条件はそちらが持つ。
 
 ## 前提: 2026 年に単一の「最強」は存在しない
 
@@ -131,6 +135,18 @@ HKT stream fusion（Phase 1–3 出荷済）**。手書き Rust が `for` ルー
 `fan` による決定的データ並列。手書き Rust 側は「同じ最適化を人間が手で書いていない、普通に書かれた Rust」
 であることを明記する（`unsafe` チューニング済み Rust に勝つ主張はしない）。
 
+**2026-09-08 宣言済**（`docs/project/BENCHMARKS.md` "Faster than ordinary Rust"、README の
+native-victory ブロック、`check-perf-ratio.sh` の VICTORY 行）: **binarytrees 0.35× / 0.32×、
+treealloc 0.31× / 0.30×**（M4 Pro、2 サイズずつ、中央値 9 回インターリーブ）、同ソースで
+`ALMIDE_REGION_OFF=1` にすると 1.25× / 1.11× — 勝ち分は全部 **region window**（#1991、
+`check(make(d))` を bump arena で 1 回巻き戻す）。CI runner では 0.61×（glibc が `Box` を安く
+解放する）。ゲートは ±バンドではなく「主張そのもの」（ratio < 1.0）と ablation の下限。
+**当初の候補 2 つは今日勝てない**と実測で判明: `fan` は native では逐次
+（`fan.map` は `Rc<dyn Fn>` 逐次、`fan { }` はブロック全体で 1 スレッド、AutoParallel は
+`RuntimeCall` を見ないので死んでいる）で fannkuchredux 0.96–1.06× / mandelbrot 1.01–1.12×、
+`|>` チェーンの stream fusion は Rust ターゲットで発火しない（perf README「Not yet covered」の 6.6×）。
+2 本とも同じ 1 機構であることは宣言に明記。次の勝ち筋は `fan` の実並列化と IterChain の点火。
+
 ### B3（別階級）: fan → GPU で桁を変える ← [#1331](https://github.com/almide/almide/issues/1331)
 
 `--target wgsl` は既に存在する。`fan` が決定的データ並列の構文である以上、同じソースが GPU に落ちる
@@ -232,14 +248,14 @@ definition / signatureHelp / codeAction）。playground、VS Code 拡張、tree-
 > と書いたが、これは外部調査側が `src/cli/lsp.rs` を知らなかったための誤りである。LSP は内蔵済み。
 
 **残っている行（agent 向け surface）**:
-- #1312 applicability タグ付き fix-it → `almide fix` の診断駆動化
-- #1313 `almide test` 失敗出力の構造化（expected/found diff + `--json`）
+- ~~#1312 applicability タグ付き fix-it → `almide fix` の診断駆動化~~ — **着地済み**（2026-09-13 確認: `Applicability` は存在するが機械適用は 4 code のみ。残りは [arena-breakthroughs.md T3](active/arena-breakthroughs.md) / #2149）
+- ~~#1313 `almide test` 失敗出力の構造化（expected/found diff + `--json`）~~ — **着地済み**（`test_report.rs`、`--json` 1 失敗 1 オブジェクト）
 - ~~[#1333](https://github.com/almide/almide/issues/1333) **MCP サーバ / Claude Code plugin 定義**~~
   — **着地済み**: `almide mcp`（stdio MCP、ツール 5 本）と `tools/claude-plugin/`（MCP + LSP）、
   `.claude-plugin/marketplace.json`。各ツールは CLI の既存 JSON 出力をサブプロセス経由で
   読むだけで、MCP 専用の出力経路は作らない（[docs/mcp.md](../mcp.md)）。
   未構造化のまま残るのは #1313 のテスト失敗詳細と #1312 の applicability タグ
-- #1314 snapshot テスト内蔵（主流言語に内蔵例がない差別化空白）
+- ~~#1314 snapshot テスト内蔵~~ — **着地済み**（`testing.assert_snapshot`、`--update-snapshots`、`--ci`）
 
 ---
 

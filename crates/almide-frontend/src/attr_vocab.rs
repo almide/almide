@@ -40,6 +40,9 @@ pub const KNOWN_ATTRS: &[&str] = &[
     "location",
     // Compiler-internal marks
     "derived",
+    // The derived `T.decode`'s key order (#1679) — read by the native
+    // DecodeSlotHintPass; stamped next to `derived` by the codec derive.
+    "codec_slots",
     "main",
     // The stability surface
     "deprecated",

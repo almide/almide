@@ -20,6 +20,11 @@ impl NanoPass for IrLinkFlattenPass {
     // #559: requires VarIds already unified by UnifyVarTables.
     fn depends_on(&self) -> Vec<&'static str> { vec!["UnifyVarTables"] }
 
+    /// Modules → the root: what a fn name and a type name MEAN changes here,
+    /// so every pass declared before stays before and every pass after stays
+    /// after (see `NanoPass::barrier`).
+    fn barrier(&self) -> bool { true }
+
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         if program.modules.is_empty() {
             return PassResult { program, changed: false };

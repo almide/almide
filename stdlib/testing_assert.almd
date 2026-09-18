@@ -17,7 +17,10 @@ fn testing_assert_lt(a: Int, b: Int) -> Unit = if a < b then () else prim.die(pr
 
 fn testing_assert_approx(a: Float, b: Float, epsilon: Float) -> Unit = if float.abs(a - b) < epsilon then () else prim.die(prim.handle("assert_approx failed\n"))
 
-fn testing_assert_contains(haystack: String, needle: String) -> Unit = if string.contains(haystack, needle) then () else prim.die(prim.handle("assert_contains failed\n"))
+fn testing_assert_contains(haystack: String, needle: String) -> Unit = if string.contains(
+  haystack,
+  needle,
+) then () else prim.die(prim.handle("assert_contains failed\n"))
 
 // The snapshot twin (#1314) is the family's wasm fallback for a FIRST-CLASS use
 // of `testing.assert_snapshot`; a direct call never reaches it — the frontend

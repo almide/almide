@@ -5,7 +5,7 @@
 // only has to hand off a `(text_delta) -> Unit` callback for live
 // rendering and consume the final LLMResponse-shaped JSON.
 //
-// `AlmideValue` and `almide_http_request_stream` resolve via flat inlining
+// `AlmideValue` and `almide_http_request_stream_impl` resolve via flat inlining
 // into the user program (the runtime crate isn't a workspace member —
 // every module's source is concatenated into a single file at compile
 // time). No `use crate::...` imports here.
@@ -49,7 +49,7 @@ pub fn almide_rt_sse_openai_chat(
     let mut model_id = String::new();
     let mut done = false;
 
-    almide_http_request_stream("POST", &url, body_json, &headers, |chunk: String| {
+    almide_http_request_stream_impl("POST", &url, body_json, &headers, |chunk: String| {
         if done {
             return;
         }
@@ -281,7 +281,7 @@ pub fn almide_rt_sse_anthropic_messages(
     let mut finish_reason = String::new();
     let mut model_id = String::new();
 
-    almide_http_request_stream("POST", &url, body_json, &headers, |chunk: String| {
+    almide_http_request_stream_impl("POST", &url, body_json, &headers, |chunk: String| {
         sse_buffer.push_str(&chunk);
         while let Some(idx) = sse_buffer.find("\n\n") {
             let event_block: String = sse_buffer.drain(..idx + 2).collect();
@@ -436,4 +436,3 @@ fn handle_anthropic_event(
         _ => {}
     }
 }
-

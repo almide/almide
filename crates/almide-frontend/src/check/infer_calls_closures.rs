@@ -118,9 +118,11 @@ impl Checker {
     /// order. `None` means "not my group" — the router tries the groups in that
     /// order, so the dispatch is unchanged.
     pub(super) fn infer_expr_g3_grouping(&mut self, expr: &mut ast::Expr) -> Option<Ty> {
+        let outer_span = expr.span;
         Some(match &mut expr.kind {
-            ExprKind::Try { expr, .. } => {
-                let ty = self.infer_expr(expr);
+            ExprKind::Try { expr: operand, .. } => {
+                self.record_postfix_inner(outer_span, operand.span);
+                let ty = self.infer_expr(operand);
                 match &ty {
                     Ty::Applied(TypeConstructorId::Result, args) if args.len() >= 1 => args[0].clone(),
                     _ => ty,
@@ -755,13 +757,29 @@ impl Checker {
     /// `expr!` — unwrap with propagation (Option[T] → T, Result[T,E] → T).
     /// `ExprKind::Unwrap` arm of [`Self::infer_expr_inner_g3`]. Verbatim text move.
     fn infer_expr_g3_unwrap(&mut self, expr: &mut ast::Expr) -> Ty {
+        let outer_span = expr.span;
         let ExprKind::Unwrap { expr: inner, .. } = &mut expr.kind else { unreachable!() };
+        self.record_postfix_inner(outer_span, inner.span);
         let t = self.infer_expr(inner);
         let resolved = resolve_ty(&t, &self.uf);
         self.check_unwrap_propagation_context(&resolved);
         if let Some(inner_ty) = resolved.option_inner().or_else(|| resolved.result_ok_ty()) {
             inner_ty
-        } else if matches!(&resolved, Ty::Unknown | Ty::TypeVar(_)) {
+        } else if matches!(&resolved, Ty::Unknown) {
+            // Recovery residue in, recovery residue out (#2096). `Unknown` here
+            // means a PRIOR error already reported this expression — an E002 on
+            // the callee, say — and minting a fresh var instead would hand the
+            // post-solve validator an unbound `?N` it cannot distinguish from a
+            // genuinely undecidable slot. It then reported E025 on top of the
+            // E002, with a hint telling the reader to annotate a binding that
+            // only exists because recovery put it there. `validate_unresolved_
+            // binding_types` already skips a wholly-`Unknown` site for exactly
+            // this reason; propagating the marker is what lets that guard see it.
+            Ty::Unknown
+        } else if matches!(&resolved, Ty::TypeVar(_)) {
+            // A bare inference var is NOT recovery: the operand may still be
+            // pinned by context, so the unwrap keeps its own fresh slot and E025
+            // stays available for the genuinely undecidable case.
             self.fresh_var()
         } else if self.is_effect_call_expr(inner) {
             // #1049: `!` on a NEVER-ERR effect call is a silent no-op. The
@@ -1334,4 +1352,14 @@ fn both_result_arity_two(ra: &[Ty], oa: &[Ty]) -> bool {
         return false;
     }
     oa.len() == 2
+}
+
+impl Checker {
+    /// #2097: remember which expression a postfix `!` / `?` wraps, keyed by
+    /// the operator's own (operator-only) span.
+    pub(crate) fn record_postfix_inner(&mut self, outer: Option<ast::Span>, inner: Option<ast::Span>) {
+        if let (Some(o), Some(i)) = (outer, inner) {
+            self.postfix_inner_spans.insert((o.line, o.col, o.end_col), i);
+        }
+    }
 }

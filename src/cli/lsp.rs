@@ -190,7 +190,7 @@ fn find_stdlib_call_on_func(line_text: &str, word: &str, start: usize) -> Option
 /// Step 4a of `find_node`: variant constructor lookup. Extracted verbatim.
 fn find_variant_constructor(doc: &AnalyzedDoc, word: &str) -> Option<Located> {
     for decl in &doc.program.decls {
-        if let crate::ast::Decl::Type { name: type_name, ty: crate::ast::TypeExpr::Variant { cases }, .. } = decl {
+        if let crate::ast::Decl::Type { name: type_name, ty: crate::ast::TypeExpr::Variant { cases, .. }, .. } = decl {
             for case in cases {
                 let (case_name, fields) = match case {
                     crate::ast::VariantCase::Unit { name } => (name.as_str(), vec![]),
@@ -217,7 +217,7 @@ fn find_type_decl(doc: &AnalyzedDoc, word: &str) -> Option<Located> {
         if let crate::ast::Decl::Type { name, ty, .. } = decl {
             if name.as_str() == word {
                 let detail = match ty {
-                    crate::ast::TypeExpr::Variant { cases } => {
+                    crate::ast::TypeExpr::Variant { cases, .. } => {
                         let case_strs: Vec<String> = cases.iter().map(|c| match c {
                             crate::ast::VariantCase::Unit { name } => format!("| {}", name.as_str()),
                             crate::ast::VariantCase::Tuple { name, fields } => format!("| {}({})", name.as_str(), fields.iter().map(|f| format_type_expr(f)).collect::<Vec<_>>().join(", ")),
@@ -500,7 +500,7 @@ fn handle_notification(notif: Notification, connection: &Connection, documents: 
             }
         }
         "textDocument/didChange" => {
-            let trace = std::env::var("ALMIDE_LSP_TRACE").is_ok();
+            let trace = almide_base::env::flag("ALMIDE_LSP_TRACE");
             match serde_json::from_value::<DidChangeTextDocumentParams>(notif.params) {
                 Ok(params) => {
                     let uri = params.text_document.uri.clone();
@@ -576,7 +576,7 @@ pub fn run_lsp() {
         match msg {
             Message::Request(req) => {
                 if connection.handle_shutdown(&req).unwrap_or(false) { return; }
-                if std::env::var("ALMIDE_LSP_TRACE").is_ok() {
+                if almide_base::env::flag("ALMIDE_LSP_TRACE") {
                     eprintln!("[lsp-trace] request  {} id={:?}", req.method, req.id);
                 }
                 flush_dirty(&connection, &documents, &mut analyzed, &mut dep_cache, &mut dirty);
@@ -598,7 +598,7 @@ pub fn run_lsp() {
                 connection.sender.send(Message::Response(r)).ok();
             }
             Message::Notification(notif) => {
-                if std::env::var("ALMIDE_LSP_TRACE").is_ok() {
+                if almide_base::env::flag("ALMIDE_LSP_TRACE") {
                     eprintln!("[lsp-trace] notification {}", notif.method);
                 }
                 handle_notification(notif, &connection, &mut documents, &mut analyzed, &mut dep_cache, &mut dirty)

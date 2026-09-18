@@ -95,21 +95,6 @@ pub struct RenderContext<'a> {
     pub repr_c: bool,
     /// #572: emit `// almd:` anchor comments on every rendered fn.
     pub trace: bool,
-    /// VarIds of current fn params emitted as Rust references (`&T`,
-    /// `&[T]`, `&str`). Used by the Borrow walker to avoid
-    /// double-borrowing an already-reference binding.
-    pub ref_params: std::collections::HashSet<VarId>,
-    /// VarIds of current fn params emitted as `&mut T`. Used by the
-    /// Borrow walker to skip the outer `&mut` wrap when forwarding a
-    /// `RefMut` param into another `RefMut` callee slot (Rust
-    /// auto-reborrows).
-    pub ref_mut_params: std::collections::HashSet<VarId>,
-    /// ALL param VarIds of the current fn. Fn-local truth that beats the
-    /// VarId-keyed `shared_mut_vars` annotation: `optimize/branch_lift.rs`
-    /// synthesizes helpers whose params KEEP the captured free vars' ids,
-    /// so a closure-cell var can reappear as a plain snapshot param — a
-    /// cell read (`.get()`/`.borrow()`) on it is a miscompile (#1143).
-    pub param_vars: std::collections::HashSet<VarId>,
     /// Names of user-defined record/variant types that have a generated
     /// `AlmideRepr` impl (see `render_repr_impl`). A `Ty::Named` in a compound
     /// interpolation part routes through `almide_repr` only when it is in this
@@ -133,7 +118,7 @@ pub struct RenderContext<'a> {
 
 impl<'a> RenderContext<'a> {
     pub fn new(templates: &'a TemplateSet, var_table: &'a VarTable) -> Self {
-        Self { templates, var_table, indent: 0, target: Target::Rust, auto_unwrap: false, is_test: false, trace: false, ann: std::rc::Rc::new(CodegenAnnotations::default()), type_aliases: std::rc::Rc::new(std::collections::HashMap::new()), generic_types: std::rc::Rc::new(std::collections::HashSet::new()), minimal_generic_bounds: false, repr_c: false, ref_params: std::collections::HashSet::new(), ref_mut_params: std::collections::HashSet::new(), param_vars: std::collections::HashSet::new(), repr_named_types: std::rc::Rc::new(std::collections::HashSet::new()), newtype_ctors: std::rc::Rc::new(std::collections::HashSet::new()), fn_err_ty: None }
+        Self { templates, var_table, indent: 0, target: Target::Rust, auto_unwrap: false, is_test: false, trace: false, ann: std::rc::Rc::new(CodegenAnnotations::default()), type_aliases: std::rc::Rc::new(std::collections::HashMap::new()), generic_types: std::rc::Rc::new(std::collections::HashSet::new()), minimal_generic_bounds: false, repr_c: false, repr_named_types: std::rc::Rc::new(std::collections::HashSet::new()), newtype_ctors: std::rc::Rc::new(std::collections::HashSet::new()), fn_err_ty: None }
     }
 
     pub fn with_target(mut self, target: Target) -> Self {
@@ -234,6 +219,11 @@ fn render_fn_params_str(fn_ctx: &RenderContext, func: &IrFunction) -> String {
             }
             let type_s = match p.borrow {
                 ParamBorrow::Own => render_type_fn(fn_ctx, &p.ty),
+                // A fn-typed param the body only calls is a borrowed callable
+                // (#2288): `&dyn Fn(A) -> B`, no handle, no refcount.
+                ParamBorrow::Ref if matches!(p.ty, almide_lang::types::Ty::Fn { .. }) => {
+                    format!("&{}", helpers::render_type_dyn_fn(fn_ctx, &p.ty))
+                }
                 ParamBorrow::Ref => format!("&{}", render_type_fn(fn_ctx, &p.ty)),
                 ParamBorrow::RefMut => format!("&mut {}", render_type_fn(fn_ctx, &p.ty)),
                 ParamBorrow::RefStr => "&str".to_string(),
@@ -340,25 +330,12 @@ fn render_fn_generics_str(ctx: &RenderContext, fn_ctx: &RenderContext, func: &Ir
 /// non-ASCII character, an 8-hex FNV-1a of its UTF-8 bytes is appended so
 /// the mapping is injective per distinct original. ASCII-only names keep
 /// their exact historical spelling (zero churn for the existing corpus).
-pub fn rust_safe_fn_name(raw: &str) -> String {
-    let s = raw
-        .replace([' ', '-', '.', ',', ':', '[', ']'], "_")
-        .replace(['(', ')'], "")
-        .replace('+', "_plus_").replace('/', "_div_").replace('*', "_mul_")
-        .replace('=', "_eq_").replace('!', "_bang_").replace('?', "_q_")
-        .replace('<', "_lt_").replace('>', "_gt_")
-        .replace('|', "_pipe_").replace('&', "_amp_").replace('%', "_mod_");
-    let mut safe: String = s.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).collect();
-    if raw.chars().any(|c| !c.is_ascii()) {
-        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-        for b in raw.as_bytes() {
-            h ^= *b as u64;
-            h = h.wrapping_mul(0x0000_0100_0000_01b3);
-        }
-        safe.push_str(&format!("_{:08x}", (h >> 32) as u32 ^ h as u32));
-    }
-    safe
-}
+///
+/// The body now lives in `almide_base::names` (#2085): the wasm test-runner
+/// synthesis in almide-mir has to select the SAME tests `--run` selects here,
+/// and almide-mir cannot see this crate. Re-exported so every caller — the
+/// walker below and the test-report name recovery — keeps its spelling.
+pub use almide_base::names::rust_safe_fn_name;
 
 #[cfg(test)]
 mod rust_safe_fn_name_tests {
@@ -434,30 +411,6 @@ fn render_fn_safe_name(
     format!("{}{}", safe_name, fn_generics)
 }
 
-/// Collect VarIds of fn params that will be emitted as references (`&T` /
-/// `&[T]` / `&str`, and separately `&mut T`). The Borrow walker uses this
-/// to skip an outer `&` wrap on already-borrowed bindings. Extracted from
-/// `render_function` (cog>25 decomposition).
-fn collect_ref_params(func: &IrFunction) -> (std::collections::HashSet<VarId>, std::collections::HashSet<VarId>) {
-    let mut ref_params: std::collections::HashSet<VarId> =
-        std::collections::HashSet::new();
-    let mut ref_mut_params: std::collections::HashSet<VarId> =
-        std::collections::HashSet::new();
-    for p in &func.params {
-        use almide_ir::ParamBorrow;
-        match p.borrow {
-            ParamBorrow::Ref | ParamBorrow::RefSlice | ParamBorrow::RefStr => {
-                ref_params.insert(p.var);
-            }
-            ParamBorrow::RefMut => {
-                ref_mut_params.insert(p.var);
-            }
-            _ => {}
-        }
-    }
-    (ref_params, ref_mut_params)
-}
-
 /// Wrap `effect fn main`: report an unhandled error via Display + exit 1.
 /// Both wrapper shapes first FORCE the abortable lazy top-lets in
 /// declaration order, so an aborting initializer (integer `/`/`%`) fires at
@@ -472,6 +425,13 @@ fn collect_ref_params(func: &IrFunction) -> (std::collections::HashSet<VarId>, s
 /// single-file and module layouts. A no-op off unix.
 const MAIN_SIGPIPE_PRELUDE: &str = "    #[cfg(unix)]\n    {\n        extern \"C\" {\n            fn signal(sig: i32, handler: usize) -> usize;\n        }\n        // SIGPIPE = 13, SIG_DFL = 0\n        unsafe {\n            signal(13, 0);\n        }\n    }\n";
 
+/// The stdout buffer's flush on a panic (#2245): stdout is block-buffered
+/// when it is not a terminal, and a panic unwinding out of `main` never runs
+/// the main thread's thread-local destructors, so the lines a program printed
+/// before an `assert` failed would be lost. The hook flushes, then hands the
+/// panic to the default hook — the message and exit code are unchanged.
+const MAIN_STDOUT_PRELUDE: &str = "    {\n        let __almide_hook = std::panic::take_hook();\n        std::panic::set_hook(std::boxed::Box::new(move |info| { almide_stdout_flush(); __almide_hook(info); }));\n    }\n";
+
 fn wrap_main_fn_code(fn_code: String, ctx: &RenderContext, is_rust_effect_main: bool, is_rust_plain_main_with_forces: bool) -> String {
     let force_lines: String = ctx.ann.global_init_order.iter()
         .filter_map(|v| ctx.ann.globals.get(v))
@@ -479,9 +439,9 @@ fn wrap_main_fn_code(fn_code: String, ctx: &RenderContext, is_rust_effect_main: 
         .map(|i| format!("    std::sync::LazyLock::force(&{});\n", i.static_name))
         .collect();
     if is_rust_effect_main {
-        format!("{}\n\nfn main() {{\n{}{}    if let Err(__almide_err) = __almide_main() {{\n        eprintln!(\"Error: {{}}\", __almide_err);\n        std::process::exit(1);\n    }}\n}}", fn_code, MAIN_SIGPIPE_PRELUDE, force_lines)
+        format!("{}\n\nfn main() {{\n{}{}{}    if let Err(__almide_err) = __almide_main() {{\n        almide_stdout_finish();\n        eprintln!(\"Error: {{}}\", __almide_err);\n        std::process::exit(1);\n    }}\n    almide_stdout_finish();\n}}", fn_code, MAIN_SIGPIPE_PRELUDE, MAIN_STDOUT_PRELUDE, force_lines)
     } else if is_rust_plain_main_with_forces {
-        format!("{}\n\nfn main() {{\n{}{}    __almide_main();\n}}", fn_code, MAIN_SIGPIPE_PRELUDE, force_lines)
+        format!("{}\n\nfn main() {{\n{}{}{}    __almide_main();\n    almide_stdout_finish();\n}}", fn_code, MAIN_SIGPIPE_PRELUDE, MAIN_STDOUT_PRELUDE, force_lines)
     } else {
         fn_code
     }
@@ -501,12 +461,7 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
 }
 
 fn render_function_inner(ctx: &RenderContext, func: &IrFunction) -> String {
-    // Collect VarIds of fn params that will be emitted as references
-    // (`&T` / `&[T]` / `&str`). The Borrow walker uses this to skip
-    // outer `&` wrap on already-borrowed bindings.
-    let (ref_params, ref_mut_params) = collect_ref_params(func);
-
-    let fn_ctx = fn_render_context(ctx, func, ref_params, ref_mut_params);
+    let fn_ctx = fn_render_context(ctx, func);
 
     if let Some(rendered) = render_fn_by_attrs(ctx, func) {
         return rendered;
@@ -546,12 +501,7 @@ fn render_function_inner(ctx: &RenderContext, func: &IrFunction) -> String {
 /// into `String`. A plain fn with no Result return propagates into nothing. The
 /// Unwrap renderer uses this to skip the Debug `map_err` coercion when the
 /// source error type already matches.
-fn fn_render_context<'a>(
-    ctx: &RenderContext<'a>,
-    func: &IrFunction,
-    ref_params: std::collections::HashSet<VarId>,
-    ref_mut_params: std::collections::HashSet<VarId>,
-) -> RenderContext<'a> {
+fn fn_render_context<'a>(ctx: &RenderContext<'a>, func: &IrFunction) -> RenderContext<'a> {
     let fn_err_ty = match func.ret_ty.inner2() {
         Some((_, err_ty)) => Some(err_ty.clone()),
         None if func.is_effect && !func.is_test => Some(almide_lang::types::Ty::String),
@@ -570,9 +520,6 @@ fn fn_render_context<'a>(
         minimal_generic_bounds: ctx.minimal_generic_bounds,
         repr_c: ctx.repr_c,
         trace: ctx.trace,
-        ref_params,
-        ref_mut_params,
-        param_vars: func.params.iter().map(|p| p.var).collect(),
         repr_named_types: ctx.repr_named_types.clone(),
         newtype_ctors: ctx.newtype_ctors.clone(),
         fn_err_ty,

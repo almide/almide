@@ -94,6 +94,89 @@ fn main() -> Unit = {
     expect_out(src, "[]\n");
 }
 
+// ── a record / variant that derives `Ord` orders here too (#2167) ──
+//
+// `TotalOrder` is the interp's whole ordering domain, and it has to be the
+// SAME domain both backends order — native's derive and the wasm legs'
+// `emit_val_cmp`. These pin the two nominal shapes the derive admits, in both
+// the ELEMENT and the KEY position: a record by FIELD DECLARATION order, a
+// variant by CASE order and then that case's payload. The 3-way gate caught
+// the gap (`ord_record_variant` dissented with "list.sort on non-comparable
+// elements" against a native==wasm consensus); these keep it caught in a
+// backend-free test that runs in milliseconds.
+
+#[test]
+fn sort_orders_a_record_by_field_declaration_order() {
+    // `n` decides, `s` breaks the tie — the lexicographic field chain native's
+    // `#[derive(Ord)]` compares and `pack_fields` lays out for wasm.
+    let src = r#"
+type Inner: Ord = { n: Int, s: String }
+fn main() -> Unit = {
+  let xs = [Inner { n: 2, s: "x" }, Inner { n: 1, s: "y" }, Inner { n: 1, s: "a" }]
+  println("${list.sort(xs)}")
+}"#;
+    expect_out(
+        src,
+        "[Inner { n: 1, s: \"a\" }, Inner { n: 1, s: \"y\" }, Inner { n: 2, s: \"x\" }]\n",
+    );
+}
+
+#[test]
+fn sort_orders_a_record_written_in_permuted_field_order_identically() {
+    // The literal writes `s` first; the value is still rebuilt in declaration
+    // order (`fill_record_defaults`), so the comparator's positional walk IS
+    // declaration order. A permuted literal that sorted differently would be a
+    // wrong third vote against both backends, which normalize at lowering.
+    let src = r#"
+type Inner: Ord = { n: Int, s: String }
+fn main() -> Unit = {
+  let xs = [Inner { s: "a", n: 2 }, Inner { s: "z", n: 1 }]
+  println("${list.sort(xs)}")
+}"#;
+    expect_out(src, "[Inner { n: 1, s: \"z\" }, Inner { n: 2, s: \"a\" }]\n");
+}
+
+#[test]
+fn sort_orders_a_variant_by_case_order_then_payload() {
+    // Declaration order of the CASES first (`Dot < Line < Box`), then the
+    // case's own fields — never the case name's spelling, which would put
+    // `Box` first.
+    let src = r#"
+type Shape: Ord = | Dot | Line{ len: Int } | Box{ w: Int, h: Int }
+fn main() -> Unit = {
+  let xs = [Box { w: 1, h: 9 }, Line { len: 5 }, Dot, Box { w: 1, h: 2 }]
+  println("${list.sort(xs)}")
+}"#;
+    expect_out(
+        src,
+        "[Dot, Line { len: 5 }, Box { w: 1, h: 2 }, Box { w: 1, h: 9 }]\n",
+    );
+}
+
+#[test]
+fn min_and_max_walk_the_same_nominal_order() {
+    let src = r#"
+type Level: Ord = | Low | Mid | High
+fn main() -> Unit = {
+  println("${list.min([High, Low, Mid])}")
+  println("${list.max([High, Low, Mid])}")
+}"#;
+    expect_out(src, "some(Low)\nsome(High)\n");
+}
+
+#[test]
+fn sort_by_takes_a_record_key() {
+    // The KEY position of the same domain — the half #2154 proved must equal
+    // the element position, restated in neither place.
+    let src = r#"
+type K: Ord = { n: Int, s: String }
+fn main() -> Unit = {
+  let xs = [("x", 2), ("y", 1), ("z", 2)]
+  println("${list.sort_by(xs, ((w, c)) => K { n: 0 - c, s: w })}")
+}"#;
+    expect_out(src, "[(\"x\", 2), (\"z\", 2), (\"y\", 1)]\n");
+}
+
 // ── fan block materializes a TUPLE (both backends), not a list ───
 //
 // `fan { a; b; c }` (the block form) lowers to `IrExprKind::Fan` and BOTH

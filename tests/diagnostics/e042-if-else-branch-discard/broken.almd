@@ -1,0 +1,8 @@
+// E042: the discard hides in the ELSE arm of a statement if (#2182). The if
+// types as its then arm, so only a then-side Result was ever reported.
+import fs
+
+effect fn main() -> Unit = {
+  if 1 > 0 then () else fs.remove("b")
+  println("done")
+}

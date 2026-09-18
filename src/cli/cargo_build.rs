@@ -315,6 +315,10 @@ codegen-units = 1
     let mut cmd = std::process::Command::new("cargo");
     inject_almide_par_if_rayon(&mut cmd, project_dir);
     cmd.arg("build").current_dir(project_dir).arg("--quiet");
+    // The library is located under `project_dir/target` below; an inherited
+    // `CARGO_TARGET_DIR` would send it elsewhere and turn the build into
+    // "expected library not found" (the bin path's twin of #2230's fix).
+    cmd.arg("--target-dir").arg(project_dir.join("target"));
     if release { cmd.arg("--release"); }
     let output = cmd.output().map_err(|e| format!("failed to run cargo: {}", e))?;
     if !output.status.success() {
@@ -450,6 +454,11 @@ fn run_cargo_build_and_locate_binary(project_dir: &std::path::Path, release: boo
     let mut cmd = std::process::Command::new("cargo");
     inject_almide_par_if_rayon(&mut cmd, project_dir);
     cmd.arg("build").current_dir(project_dir);
+    // The binary is located under `project_dir/target` below; an inherited
+    // `CARGO_TARGET_DIR` (a common user setting, and what `cargo test` hands
+    // the harness's own child processes) would send it elsewhere and turn the
+    // build into "expected binary not found" (#2228 hit it first-hand).
+    cmd.arg("--target-dir").arg(project_dir.join("target"));
     if release {
         cmd.arg("--release");
     }
@@ -482,7 +491,7 @@ pub(super) fn cargo_build_generated_with_native(
     let uses_http = rs_code.contains("almide_rt_http_") || rs_code.contains("use rustls");
     let uses_zlib = rs_code.contains("almide_rt_zlib_") || rs_code.contains("use flate2");
 
-    if std::env::var_os("ALMIDE_NO_RTLIB").is_none()
+    if !almide_base::env::flag("ALMIDE_NO_RTLIB")
         && !uses_matrix && !uses_http && !uses_zlib
         && native_deps.is_empty() && source_root.is_none()
     {
@@ -606,7 +615,7 @@ fn cargo_build_test_fast_path(rs_code: &str, project_dir: &std::path::Path) -> R
     // vs. user type collision that only manifests cross-crate) falls through
     // to the inline path below, so this never regresses correctness — at
     // worst a file pays one extra rustc. Opt out with ALMIDE_NO_RTLIB=1.
-    if std::env::var_os("ALMIDE_NO_RTLIB").is_none() {
+    if !almide_base::env::flag("ALMIDE_NO_RTLIB") {
         if let (Ok(rlib), Some(mut slim)) = (
             ensure_runtime_rlib("1"),
             crate::codegen::slim_main_with_external_runtime(rs_code),
@@ -714,9 +723,7 @@ fn run_cargo_test_no_run_and_locate_binary(project_dir: &std::path::Path) -> Res
         // come through stdout as JSON (--message-format=json). Extract the
         // "rendered" field from each compiler-message so the user sees the
         // real error spans, not just "1 previous error; N warnings emitted".
-        let verbose = std::env::var("ALMIDE_TEST_VERBOSE")
-            .map(|v| v == "1" || v == "true")
-            .unwrap_or(false);
+        let verbose = almide_base::env::flag("ALMIDE_TEST_VERBOSE");
         let combined = render_cargo_json_errors(
             &String::from_utf8_lossy(&output.stdout),
             &String::from_utf8_lossy(&output.stderr),

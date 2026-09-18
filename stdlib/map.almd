@@ -14,9 +14,11 @@
 fn new[K, V]() -> Map[K, V] = _
 
 @intrinsic("almide_rt_map_get")
+@borrow_ref(key)
 fn get[K, V](m: Map[K, V], key: K) -> V? = _
 
 @intrinsic("almide_rt_map_get_or")
+@borrow_ref(key)
 fn get_or[K, V](m: Map[K, V], key: K, default: V) -> V = _
 
 @intrinsic("almide_rt_map_set")
@@ -24,6 +26,7 @@ fn get_or[K, V](m: Map[K, V], key: K, default: V) -> V = _
 fn set[K, V](m: Map[K, V], key: K, value: V) -> Map[K, V] = _
 
 @intrinsic("almide_rt_map_contains")
+@borrow_ref(key)
 fn contains[K, V](m: Map[K, V], key: K) -> Bool = _
 
 @intrinsic("almide_rt_map_remove")

@@ -17,9 +17,9 @@ ListPatternLowering → LambdaTypeResolve → ConcretizeTypes →
 PatternLiteralGuard → ResolveCalls → RegionWindow → BoxDeref → LICM → EggSaturation →
 MatrixShapeSpec → ConstFold → IntrinsicLowering → BorrowInsertion →
 TailCallOpt → CaptureClone → CloneInsertion → MatchSubject → EffectInference →
-StdlibLowering → AutoParallel → ResultPropagation → BuiltinLowering →
-Peephole → RustLowering → FanLowering → NormalizeRuntimeCalls →
-IrLinkFlatten → RangeCountingVars → TopLetStorage
+StdlibLowering → StreamFusion → ResultPropagation → BuiltinLowering →
+DecodeSlotHint → DecodeErrFrame → Peephole → RustLowering → FanLowering → NormalizeRuntimeCalls →
+IrLinkFlatten → SharedCellBorrow → VarStorage → RangeCountingVars → TopLetStorage → BorrowLowering
 
 - Each pass: `impl NanoPass { fn run(&self, program, target) -> PassResult }`
 
@@ -36,7 +36,7 @@ decisions made in passes + templates.
 ## Rules
 
 - **Walker must stay target-agnostic.** If you need target-specific behavior, add a nanopass or a template guard.
-- **Nanopass passes are independent.** Each pass reads and rewrites the IrProgram. Passes must not assume ordering except through declared `Postcondition`s.
+- **Nanopass passes are independent.** Each pass reads and rewrites the IrProgram. A pass assumes ordering ONLY through what it declares — `depends_on` / `run_before` edges, or `barrier()` for a representation boundary (`UnifyVarTables`, `ConcretizeTypes`, `IrLinkFlatten`) — and `Postcondition`s — which are MONOTONE: once a pass establishes one it is re-verified after every later pass in every profile (release included; the walk costs ~8 ms per file), so a pass that undoes an earlier pass's invariant is named alongside it. `ALMIDE_IR_FAULT=<pass>` injects a violation after the named pass — the release binary's negative control. The declared edges are checked to be the whole truth: `scripts/check-pass-shuffle.sh` runs the pipeline under seeded random orders the edges permit (`ALMIDE_SHUFFLE_PASSES=<seed>`) and byte-diffs the emitted Rust; a divergence is a missing declaration, and `scripts/pass-shuffle-bisect.py` names the pair. A new pass declares its edges in the same change that adds it.
 - **There is no `Target::Wasm` here.** The variant, its 26-pass pipeline, the
   wasm-only passes (a full second Perceus among them) and the
   `Verified`/`Canonical` certificate chain were deleted in #930 — the tombstone

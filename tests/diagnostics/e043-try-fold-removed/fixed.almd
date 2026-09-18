@@ -1,4 +1,4 @@
-// E043 variant: list.fold.
+// E043 variant: the removed try_ spelling of list.fold.
 fn main() -> Unit = {
   let r = list.fold(["a", "bb"], 0, (acc, s) => acc + string.len(s))
   println(int.to_string(r))

@@ -54,9 +54,10 @@ effect fn main() -> Unit = {
 fn closure_map_read_borrows_the_cell_in_place() {
     let out = user_code(&compile_to_rust(COUNTER_LOOP));
     // The read statement (`let cur = ...`) holds only shared borrows, so it
-    // borrows instead of snapshotting the whole Map per call.
+    // borrows instead of snapshotting the whole Map per call — through the
+    // named wrapper (#2186), so a wrong proof panics naming `stats`.
     assert!(
-        out.contains(".borrow(),") || out.contains(".borrow()"),
+        out.contains(".borrow_proven(\"stats\")"),
         "expected an in-place cell borrow in the closure read:\n{out}"
     );
     // The closure body must not deep-clone the cell per read any more.
@@ -94,7 +95,7 @@ fn match_subject_read_is_hoisted_before_the_arms() {
         "expected the hoisted match subject bind:\n{out}"
     );
     assert!(
-        out.contains(".borrow(),") || out.contains(".borrow()"),
+        out.contains(".borrow_proven(\"stats\")"),
         "expected the hoisted subject to borrow, not snapshot:\n{out}"
     );
 }

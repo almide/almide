@@ -572,9 +572,12 @@ impl Emitter<'_> {
                 i.local_get(hv).i32_const(1).i32_eq().if_(BlockType::Empty);
                 i.local_get(hr).i32_const(1).i32_store(m_tag);
                 i.local_get(hr);
-                i.i32_const(miss_pre as i32).local_get(hk).call(F_CONCAT);
+                // The key is no longer needed. Park the intermediate
+                // prefix so the second concatenation can release it.
+                i.i32_const(miss_pre as i32).local_get(hk).call(F_CONCAT).local_tee(hk);
                 i.i32_const(miss_post as i32).call(F_CONCAT);
                 i.i32_store(m_pay);
+                i.local_get(hk).call(F_DEC_FLAT);
                 i.else_();
                 i.local_get(hr).i32_const(0).i32_store(m_tag);
                 i.local_get(hr).local_get(hv).i32_store(m_pay);
@@ -659,6 +662,12 @@ impl Emitter<'_> {
             // key
             i.local_get(hw).i32_const(koff as i32).i32_add();
             i.local_get(hpair).i32_load(slot_memarg(key_off));
+        }
+        // the map co-owns the key string it copied out of the pair (its
+        // typed drop releases it; the Value keeps its own credit)
+        self.rc_inc_top();
+        {
+            let mut i = self.f.instructions();
             i.i32_store(raw_mem());
             // value: Str payload verbatim, else the canonical stringify.
             i.local_get(hw).i32_const(voff as i32).i32_add();
@@ -669,6 +678,11 @@ impl Emitter<'_> {
                 .i32_eq()
                 .if_(BlockType::Result(wasm_encoder::ValType::I32));
             i.local_get(hpair).i32_load(slot_memarg(almide_layout::SUM_FIELD));
+        }
+        // a Str payload is shared with the Value: the map takes +1
+        self.rc_inc_top();
+        {
+            let mut i = self.f.instructions();
             i.else_();
             i.local_get(hpair);
         }

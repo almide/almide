@@ -26,6 +26,22 @@ pub(crate) fn preamble() -> String {
 /// evidence could reach. The divisor-0 / MIN÷-1 abort bytes (C-001/C-035) are
 /// carried by the inline expansion and its fixtures, not by these two.
 pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
+    // One `(data)` per derived region, in address order. Emitting these is what
+    // makes the copies in `fs_err_msg_wat` read real bytes instead of the zeroed
+    // memory a missing segment leaves behind — which renders as BLANKS in the
+    // message, not as an error.
+    // #2206: one `(data)` per errno the table spells, so the WAT carries the
+    // bytes `almide_base::fs_errno` pins against the host's `Display`.
+    let fs_errno_data = fs_errno_regions()
+        .into_iter()
+        .map(|(row, addr, _)| format!("  (data (i32.const {addr}) {})", wat_data_literal(row.text)))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let fs_msg_data = fs_msg_regions()
+        .into_iter()
+        .map(|(text, addr, _)| format!("  (data (i32.const {addr}) {})", wat_data_literal(text)))
+        .collect::<Vec<_>>()
+        .join("\n");
     // Stage 2 fuel core: present when the program uses fan.bounded OR the
     // probe is on. Counters count DOWN from i64::MAX (consumed = MAX - fuel).
     let fuel_core = if crate::charge_probe::probe_enabled() || crate::charge_probe::budget_used() || crate::charge_probe::timeout_used() {
@@ -124,10 +140,7 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
   (data (i32.const {BOUNDS_MSG_ADDR}) "Error: index out of bounds\n")
   ;; the fs.read_text path_open error message — a CONST byte run the Err arm copies.
   (data (i32.const {RTF_NOTFOUND_ADDR}) "file not found")
-  (data (i32.const {FS_ERR_NOENT_ADDR}) "No such file or directory (os error 2)")
-  (data (i32.const {FS_ERR_ACCES_ADDR}) "Permission denied (os error 13)")
-  (data (i32.const {FS_ERR_NOTDIR_ADDR}) "Not a directory (os error 20)")
-  (data (i32.const {FS_ERR_ISDIR_ADDR}) "Is a directory (os error 21)")
+{fs_errno_data}
   (data (i32.const {FS_ERR_WRITEZERO_ADDR}) "failed to write whole buffer")
   (data (i32.const {FS_ERR_UTF8_ADDR}) "stream did not contain valid UTF-8")
   ;; the fs.list_dir path_open(O_DIRECTORY) error message — a CONST byte run the Err arm copies.
@@ -138,6 +151,9 @@ pub(crate) fn preamble_with_bump_base(bump_base: u32) -> String {
   (data (i32.const {MKDIR_ERR_ADDR}) "mkdir failed")
   ;; the fs.remove_all path_remove_directory/path_unlink_file error message — a CONST byte run.
   (data (i32.const {REMOVE_ERR_ADDR}) "remove failed")
+  ;; #2090 — the call-naming message pieces. Addresses are DERIVED (fs_msg_regions),
+  ;; not hand-assigned, and gated for overlap by wasm_static_data_layout_test.
+{fs_msg_data}
   (global $bump (mut i32) (i32.const {bump_base}))
 {fuel_core}{timeout_support}{probe_globals}
   ;; env.get's ONE-TIME environ snapshot (the environment is immutable for the

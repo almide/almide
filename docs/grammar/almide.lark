@@ -659,7 +659,10 @@ _NL.1: /(?:[ \t\r]*(?:\/\/[^\n]*|\/\*[\s\S]*?\*\/)*\n)+/
 WS_INLINE: /[ \t\r]+/
 LINE_COMMENT: /\/\/[^\n]*/
 BLOCK_COMMENT: /\/\*[\s\S]*?\*\//
+// A shebang is trivia only at the logical start, after an optional BOM.
+SHEBANG: /\A(?:\ufeff)?#![^\n]*/
 
 %ignore WS_INLINE
 %ignore LINE_COMMENT
 %ignore BLOCK_COMMENT
+%ignore SHEBANG

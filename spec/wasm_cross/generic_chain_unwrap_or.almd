@@ -8,7 +8,10 @@
 // authoritative (`unwrap_or(o: Option[T], d: T)`).
 type V = | ValInt(Int) | ValStr(String)
 
-fn get_alignment(metadata: List[(String, V)]) -> Int = list.find(metadata, (entry) => entry.0 == "general.alignment") |> option.map((entry) => match entry.1 {
+fn get_alignment(metadata: List[(String, V)]) -> Int = list.find(
+  metadata,
+  (entry) => entry.0 == "general.alignment",
+) |> option.map((entry) => match entry.1 {
   ValInt(n) => n,
   _ => 32,
 }) ?? 32

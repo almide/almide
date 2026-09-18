@@ -3,4 +3,7 @@
 // prim.read_text_file; fd_read copies the file's bytes verbatim, no UTF-8 claim).
 // Returns `Ok(bytes)` / `Err(message)` in the cap-as-tag Result block, matching
 // native `fs.read_bytes_raw` (std::fs::read). Capability::FsRead via the prim.
-effect fn fs_read_bytes_raw(path: String) -> Result[Bytes, String] = prim.read_bytes_file(path)
+effect fn fs_read_bytes_raw(path: String) -> Result[Bytes, String] = prim.read_bytes_file_as(
+  path,
+  "fs.read_bytes_raw",
+)

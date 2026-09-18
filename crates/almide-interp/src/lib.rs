@@ -49,6 +49,9 @@ pub struct RunOutcome {
     pub status: RunStatus,
     pub stdout: String,
     pub stderr: String,
+    /// #2185: the module calls the bridge answered as the lowered body's
+    /// fallback (`(module.func, why the body abstained)`), in call order.
+    pub bridge_fallbacks: Vec<(String, String)>,
 }
 
 impl RunOutcome {
@@ -160,6 +163,11 @@ pub struct Interpreter<'a> {
     /// before the fn-table lookup. First declaration wins on a shared case
     /// name, exactly like the scan it replaces.
     pub(crate) variant_ctors: HashMap<Sym, (Sym, dispatch::CtorKind)>,
+    /// Declaration index of every variant case, from the SAME walk as
+    /// `variant_ctors` — the tag `TotalOrder` compares a variant by, so
+    /// `list.sort` / `min` / `max` / `sort_by` order a variant by case order
+    /// then payload, exactly as native's derived `Ord` and both wasm legs do.
+    pub(crate) variant_tags: crate::value::VariantTags,
     /// The opaque NEWTYPE decls (`mod type SafeHtml = String`, `local type
     /// JsonPath = Int`) under the identity their ctor call and ctor pattern
     /// carry into the IR — bare for a bundled module's own or the entry
@@ -202,6 +210,9 @@ pub struct Interpreter<'a> {
     pub(crate) stderr: String,
     /// Decremented per eval step; 0 → `FuelExhausted`.
     pub(crate) fuel: Cell<u64>,
+    /// The pool tier's own step budget (`POOL_FUEL`), charged while a
+    /// self-hosted stdlib body is on the stack (`pool_depth > 0`).
+    pub(crate) pool_fuel: Cell<u64>,
     /// Current call-stack depth, bounded to avoid a native stack overflow on
     /// adversarial deep recursion.
     pub(crate) depth: Cell<u32>,
@@ -242,6 +253,11 @@ pub struct Interpreter<'a> {
     /// both backends admitted `{ work() }` (zero surviving charges) while this
     /// meter voted exhaust (xtarget-fuzz seed=20260817 index=578).
     det_exempt: std::cell::RefCell<Option<HashSet<Sym>>>,
+    /// #2185: every module call the hand-mirrored bridge answered because the
+    /// lowered body ABSTAINED (`(module.func, the body's reason)`, in call
+    /// order). The body is consulted first; this is the measured residue the
+    /// bridge still serves, audited by `interp_bridge_fallback_ledger`.
+    pub(crate) bridge_fallbacks: std::cell::RefCell<Vec<(String, String)>>,
     /// T5-1 wall-deadline mirror (fan.timeout): absolute deadline (ns since
     /// interp start; i64::MAX = none), hit flag, persisted verdict, and the
     /// wall-check ordinal (the ω of T5-2). Replay/record ride the same env
@@ -256,6 +272,15 @@ pub struct Interpreter<'a> {
 /// Default fuel budget — high enough for any real corpus program, low enough to
 /// bound an adversarial loop. Roughly 100M eval steps.
 pub const DEFAULT_FUEL: u64 = 100_000_000;
+/// The self-hosted stdlib bodies' OWN budget (#2185). A pool body is the
+/// executable spec itself — the definition both backends run — so its cost
+/// is the spec's cost, not the fixture's: `float.parse` is an exact bignum
+/// parser and a 1 000 000-char `string.pad_end` walks every char, and both
+/// were charged to the program's budget once the body replaced the bridge's
+/// one-line Rust copy (two fixtures left the executable spec). Metered
+/// separately so a fixture's budget still bounds the fixture's own loops,
+/// and a stuck body is still bounded — at ten programs' worth.
+pub const POOL_FUEL: u64 = 10 * DEFAULT_FUEL;
 /// Recursion-depth ceiling (interp call frames, not Rust frames per se). This is
 /// a *semantic* fuel-like bound on call nesting: a clean `FuelExhausted` once a
 /// program nests calls this deep, never a native stack overflow. The native
@@ -357,21 +382,28 @@ fn index_named_records(program: &IrProgram) -> HashMap<Vec<Sym>, (Sym, Vec<Sym>)
 /// Mirrors the linear scan `variant_ctor` used to run per Named call:
 /// `program.type_decls` only (module decls were never scanned), in decl
 /// order, first declaration of a shared case name wins (`or_insert`).
-fn index_variant_ctors(program: &IrProgram) -> HashMap<Sym, (Sym, dispatch::CtorKind)> {
+fn index_variant_ctors(
+    program: &IrProgram,
+) -> (HashMap<Sym, (Sym, dispatch::CtorKind)>, crate::value::VariantTags) {
     use almide_ir::{IrTypeDeclKind, IrVariantKind};
     let mut out: HashMap<Sym, (Sym, dispatch::CtorKind)> = HashMap::new();
+    let mut tags = crate::value::VariantTags::new();
     for td in &program.type_decls {
         let IrTypeDeclKind::Variant { cases, .. } = &td.kind else { continue };
-        for case in cases {
+        for (i, case) in cases.iter().enumerate() {
             let kind = match case.kind {
                 IrVariantKind::Unit => dispatch::CtorKind::Unit,
                 IrVariantKind::Tuple { .. } => dispatch::CtorKind::Tuple,
                 IrVariantKind::Record { .. } => dispatch::CtorKind::Record,
             };
             out.entry(case.name).or_insert((td.name, kind));
+            // The ORDER of the same cases, from the same walk: the registry
+            // that decides a case's identity is the one that decides where it
+            // sorts, so the two cannot drift (`TotalOrder`).
+            tags.entry((td.name, case.name)).or_insert(i as u32);
         }
     }
-    out
+    (out, tags)
 }
 
 /// The opaque-newtype decl names (program + modules) — a non-public `Alias`
@@ -452,11 +484,24 @@ impl<'a> Interpreter<'a> {
             fns.insert(f.name, f);
         }
         // The deterministic meter's user-fn set: program fns + user-module fns,
-        // captured before the pool layers in (pool bodies are unmetered).
-        let mut user_fn_names: HashSet<Sym> = fns.keys().copied().collect();
+        // captured before the pool layers in (pool bodies are unmetered). A
+        // self-hosted fn the driver LINKED into the program (`string_len` and
+        // its `__strlen_count` helper under the wasm leg's lowering — the
+        // spine's run_parity recipe) is a stdlib body all the same, not user
+        // code: both backends meter user functions only, and metering it
+        // charged `string.len` an entry unit per recursion hop the moment the
+        // body answered instead of the bridge (#2185 — the C-204
+        // fuel_dyn_charge verdict flipped a row early). Membership is by the
+        // pool's own fn table, which holds every fn a registry source defines,
+        // helpers included.
+        let is_stdlib_impl = |name: &Sym| stdlib_pool::pool().fns.contains_key(name);
+        let mut user_fn_names: HashSet<Sym> =
+            fns.keys().copied().filter(|n| !is_stdlib_impl(n)).collect();
         for m in &program.modules {
             for f in &m.functions {
-                user_fn_names.insert(f.name);
+                if !is_stdlib_impl(&f.name) {
+                    user_fn_names.insert(f.name);
+                }
             }
         }
         // Layer in the self-hosted stdlib bodies (lowered once, process-wide) so
@@ -486,7 +531,7 @@ impl<'a> Interpreter<'a> {
         }
         index_private_module_helpers(program, &mut fns);
         let named_records = index_named_records(program);
-        let variant_ctors = index_variant_ctors(program);
+        let (variant_ctors, variant_tags) = index_variant_ctors(program);
         let newtype_ctors = index_newtype_ctors(program);
         let record_decls = index_record_decls(program);
 
@@ -503,6 +548,7 @@ impl<'a> Interpreter<'a> {
             record_decls,
             named_records,
             variant_ctors,
+            variant_tags,
             newtype_ctors,
             globals: env::Scope::root(),
             module_globals: program.modules.iter().map(|_| env::Scope::root()).collect(),
@@ -512,6 +558,7 @@ impl<'a> Interpreter<'a> {
             stdout: String::new(),
             stderr: String::new(),
             fuel: Cell::new(DEFAULT_FUEL),
+            pool_fuel: Cell::new(POOL_FUEL),
             depth: Cell::new(0),
             det_fuel: Cell::new(i64::MAX),
             det_entry: Cell::new(-1),
@@ -522,6 +569,7 @@ impl<'a> Interpreter<'a> {
             det_saved: Cell::new(0),
             user_fn_names,
             det_exempt: std::cell::RefCell::new(None),
+            bridge_fallbacks: std::cell::RefCell::new(Vec::new()),
             t_deadline: Cell::new(i64::MAX),
             t_hit: Cell::new(false),
             t_verdict: Cell::new(0),
@@ -538,7 +586,7 @@ impl<'a> Interpreter<'a> {
 
     /// T5-2: the replay ordinal (env, same contract as the compile-time bake).
     pub(crate) fn omega_replay() -> i64 {
-        std::env::var("ALMIDE_OMEGA").ok().and_then(|v| v.parse().ok()).unwrap_or(-1)
+        almide_base::env::var("ALMIDE_OMEGA").and_then(|v| v.parse().ok()).unwrap_or(-1)
     }
 
     /// T5-1: the wall-deadline check at a charge site — ordinal + replay or

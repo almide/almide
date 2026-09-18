@@ -17,14 +17,32 @@ fn decode_response(v: Value) -> WeatherResponse = match WeatherResponse.decode(v
   ok(r) => r,
   err(e) => {
     println(e)
-    WeatherResponse { coord: Coord { lon: 0.0, lat: 0.0 }, weather: [], name: "", visibility: 0, wind: Wind { speed: 0.0, deg: 0 }, dt: 0, sys: Sys { type_: 0, country: "", sunrise: 0, sunset: 0 }, cod: 0 }
+    WeatherResponse {
+      coord: Coord { lon: 0.0, lat: 0.0 },
+      weather: [],
+      name: "",
+      visibility: 0,
+      wind: Wind { speed: 0.0, deg: 0 },
+      dt: 0,
+      sys: Sys { type_: 0, country: "", sunrise: 0, sunset: 0 },
+      cod: 0,
+    }
   },
 }
 
 test "weather response roundtrip" {
-  let r = WeatherResponse { coord: Coord { lon: 139.69, lat: 35.69 }, weather: [
-    Weather { id: 800, main: "Clear", description: "clear sky", icon: "01d" }
-  ], name: "Tokyo", visibility: 10000, wind: Wind { speed: 3.6, deg: 350 }, dt: 1710000000, sys: Sys { type_: 2, country: "JP", sunrise: 1709900000, sunset: 1709940000 }, cod: 200 }
+  let r = WeatherResponse {
+    coord: Coord { lon: 139.69, lat: 35.69 },
+    weather: [
+      Weather { id: 800, main: "Clear", description: "clear sky", icon: "01d" }
+    ],
+    name: "Tokyo",
+    visibility: 10000,
+    wind: Wind { speed: 3.6, deg: 350 },
+    dt: 1710000000,
+    sys: Sys { type_: 2, country: "JP", sunrise: 1709900000, sunset: 1709940000 },
+    cod: 200,
+  }
   let text = json.stringify(r.encode())
   println(text)
   match json.parse(text) {
