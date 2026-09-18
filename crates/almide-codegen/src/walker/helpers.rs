@@ -154,6 +154,21 @@ pub fn render_type_rc_fn(ctx: &RenderContext, ty: &Ty) -> String {
     render_type_field_fn(ctx, ty)
 }
 
+/// Render a Fn type as the bare trait object `dyn Fn(...) -> T` — the type
+/// behind a borrowed callable param (`f: &dyn Fn(i64) -> i64`, #2288). Fn
+/// types NESTED in its params / return stay `Rc<dyn Fn>` (values that flow
+/// through the call).
+pub fn render_type_dyn_fn(ctx: &RenderContext, ty: &Ty) -> String {
+    match ty {
+        Ty::Fn { is_effect: _, params, ret } => {
+            let params_str = params.iter().map(|p| render_type_field_fn(ctx, p)).collect::<Vec<_>>().join(", ");
+            let ret_str = render_type_field_fn(ctx, ret);
+            format!("dyn Fn({}) -> {}", params_str, ret_str)
+        }
+        _ => super::types::render_type(ctx, ty),
+    }
+}
+
 /// Render a `fan.*` thread-thunk's boxed trait-object type:
 /// `Box<dyn Fn(params) -> ret + {bounds}>` (`bounds` = `"Send + Sync"`).
 ///
