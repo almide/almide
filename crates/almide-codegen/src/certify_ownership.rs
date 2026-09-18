@@ -30,6 +30,10 @@
 //!   occurrence that needs ownership — nothing moves it, mutates it, captures
 //!   it, or hands it on — so every caller pays a clone the body never uses.
 //!   rustc is blind to it.
+//! - **C5 closure-escape** (#2288): a fn-typed param rendered `&dyn Fn` whose
+//!   callable escapes the call (returned, stored, captured, handed to an
+//!   owned slot), or a closure literal boxed as `Rc<dyn Fn>` at a slot the
+//!   callee borrows — the allocation the borrowed slot exists to remove.
 //!
 //! Each check errs towards silence: an occurrence whose meaning depends on
 //! the callee (a method receiver, a match scrutinee, a computed callee, a
@@ -39,9 +43,10 @@
 //! pattern binders). A violation is therefore a real defect or a rule the
 //! pass holds and this file does not yet state — never noise.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use almide_ir::*;
 use almide_ir::annotations::CodegenAnnotations;
+use almide_lang::types::Ty;
 use crate::use_kind::{Ctor, ExplicitBorrows, Site, SlotMode, Use, UseSites};
 
 /// Every violation in `program`, one line each: the function, the variable,
@@ -50,7 +55,46 @@ pub fn certify(program: &IrProgram) -> Vec<String> {
     let ann = &program.codegen_annotations;
     let records = crate::pass_borrow_inference::seed_record_names(program);
     let variants = crate::pass_borrow_inference::seed_variant_names(program);
-    program.functions.iter().flat_map(|f| certify_fn(f, &program.var_table, ann, &records, &variants)).collect()
+    let mut out: Vec<String> = program.functions.iter().flat_map(|f| certify_fn(f, &program.var_table, ann, &records, &variants)).collect();
+    out.extend(certify_closure_sites(program));
+    out
+}
+
+/// **C5 closure-escape, the call-site half** (#2288): a closure literal
+/// boxed as an `Rc<dyn Fn>` (`RcWrap`) handed to a slot the callee borrows
+/// (`&dyn Fn`) — the allocation the borrowed slot exists to remove. The
+/// body half (a borrowed fn param that escapes) is [`certify_param`]'s.
+fn certify_closure_sites(program: &IrProgram) -> Vec<String> {
+    use almide_ir::visit::{walk_expr, IrVisitor};
+    let sigs: HashMap<String, Vec<(ParamBorrow, bool)>> = program.functions.iter()
+        .map(|f| (f.name.to_string(), f.params.iter().map(|p| (p.borrow, matches!(p.ty, Ty::Fn { .. }))).collect()))
+        .collect();
+    struct Sites<'a> { sigs: &'a HashMap<String, Vec<(ParamBorrow, bool)>>, current: String, out: Vec<String> }
+    impl IrVisitor for Sites<'_> {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &e.kind
+                && let Some(params) = self.sigs.get(name.as_str())
+            {
+                for (i, a) in args.iter().enumerate() {
+                    if let Some((ParamBorrow::Ref, true)) = params.get(i)
+                        && matches!(a.kind, IrExprKind::RcWrap { .. })
+                    {
+                        self.out.push(format!(
+                            "[C5 closure-escape] {}: argument {} of `{}` is a boxed closure at a slot the callee borrows (`&dyn Fn`) — the box is an allocation the borrowed slot exists to remove",
+                            self.current, i, name
+                        ));
+                    }
+                }
+            }
+            walk_expr(self, e);
+        }
+    }
+    let mut s = Sites { sigs: &sigs, current: String::new(), out: Vec::new() };
+    for f in &program.functions {
+        s.current = f.name.to_string();
+        s.visit_expr(&f.body);
+    }
+    s.out
 }
 
 /// The violations in one function. `records` is the record-type set the
@@ -67,10 +111,21 @@ pub fn certify_fn(f: &IrFunction, vars: &VarTable, ann: &CodegenAnnotations, rec
 
 /// C1 / C4 for one param: `None` when its verdict holds.
 fn certify_param(f: &IrFunction, p: &IrParam, uses: &[&Use], sites: &UseSites, ann: &CodegenAnnotations, records: &HashSet<String>, variants: &HashSet<String>) -> Option<String> {
+    let mine: Vec<&Use> = uses.iter().copied().filter(|u| u.var == p.var).collect();
+    // C5, the body half (#2288): a fn-typed param rendered `&dyn Fn` whose
+    // callable nevertheless escapes the call — the same predicate the
+    // verdict applied (`fn_param_escapes`), re-read on the final IR. Judged
+    // before the heap guard: a callable is not a heap value to C1/C4.
+    if p.borrow == ParamBorrow::Ref && matches!(p.ty, Ty::Fn { .. }) {
+        let u = mine.iter().find(|u| crate::pass_borrow_inference::fn_param_escapes(u))?;
+        return Some(format!(
+            "[C5 closure-escape] {}: param `{}` is rendered `&dyn Fn` but its callable escapes at a {:?} position (depth {}) — the verdict is wrong for this body",
+            f.name, p.name, u.site, u.depth
+        ));
+    }
     if !heap(&p.ty) || p.open_record.is_some() {
         return None;
     }
-    let mine: Vec<&Use> = uses.iter().copied().filter(|u| u.var == p.var).collect();
     // A variant param whose matches only read their payloads is matched by
     // reference (the borrow pass's rule, `scrutinee_binders_borrow_only`):
     // its subject position justifies nothing.
