@@ -197,8 +197,9 @@ float_parse / total_order / case_unicode の 3 ratchet は全て分離コミッ�
    変更集合は自分のコミットを閉じられない。初回は #2076 / #2115 の 2 件。
 
 **独立性について正直に**: 設計と実装は Claude Opus 5、レビューは別モデル（Claude
-Fable 5.1）の別エージェントが白紙の文脈で行い、初稿の阻止級の穴 1 件と小穴 9 件を
-見つけ、全件が負例コントロールになった（`scripts/check-ratchet-separation-negative.sh`、
+Fable 5.1）の別エージェントが白紙の文脈で 3 巡行い、初稿で阻止級 1 件と小穴 6 件、
+修正後の再レビューでさらに 4 件（うち 1 件は処分台帳にとって阻止級）を見つけ、全件が
+負例コントロールになった（`scripts/check-ratchet-separation-negative.sh`、
 正例 5 + 負例 22）。これは**エージェント間の独立**であって、DO-178C が求める人間の
 独立検証（flight-organization B4）の代わりにはならない。処分記録の reviewer 欄は、
 誰が証拠を再導出したかを記録するためのもので、資格ある人間の承認を名乗るものではない。
