@@ -118,7 +118,9 @@ impl SlotOracle for Scope<'_> {
         match self.resolve(&name) {
             Callee::Known(borrows) => {
                 let mode = slot_of(borrows.get(index), SlotMode::Consume);
-                if mode != SlotMode::Consume && self.is_borrow_eligible(&arg.ty) { mode } else { SlotMode::Consume }
+                // A fn-typed argument rides a callee's NON-ESCAPING slot as a
+                // borrow too (#2288): the callee only calls it.
+                if mode != SlotMode::Consume && (self.is_borrow_eligible(&arg.ty) || matches!(arg.ty, Ty::Fn { .. })) { mode } else { SlotMode::Consume }
             }
             Callee::Pending => SlotMode::Borrow,
             Callee::Unknown => SlotMode::Consume,
@@ -349,6 +351,9 @@ fn param_borrow(param: &IrParam, uses: &UseSites, scope: &Scope, body: &IrExpr) 
     if param.is_mut {
         return ParamBorrow::RefMut;
     }
+    if matches!(param.ty, Ty::Fn { .. }) {
+        return fn_param_borrow(param, uses);
+    }
     if !scope.is_borrow_eligible(&param.ty) || almide_base::env::flag("ALMIDE_BORROW_OWN_ALL") {
         return ParamBorrow::Own;
     }
@@ -404,6 +409,32 @@ fn param_borrow(param: &IrParam, uses: &UseSites, scope: &Scope, body: &IrExpr) 
         Ty::Applied(TypeConstructorId::List, _) => ParamBorrow::RefSlice,
         _ => ParamBorrow::Ref,
     }
+}
+
+/// A fn-typed param (#2288): `&dyn Fn(A) -> B` unless an occurrence lets the
+/// callable ESCAPE the call — then the `Rc<dyn Fn>` handle it always was.
+/// Calling it, handing it to another fn's non-escaping slot (the fixed
+/// point's `Borrow` mode, optimistic for a pending or self-recursive callee)
+/// and borrowing it do not escape. The ablation `ALMIDE_FN_ESCAPE_OFF=1`
+/// borrows every fn param regardless — the certifier's C5 negative control.
+fn fn_param_borrow(param: &IrParam, uses: &UseSites) -> ParamBorrow {
+    if almide_base::env::flag("ALMIDE_FN_ESCAPE_OFF") {
+        return ParamBorrow::Ref;
+    }
+    if uses.of(param.var).any(fn_param_escapes) { ParamBorrow::Own } else { ParamBorrow::Ref }
+}
+
+/// Does this occurrence let a fn-typed param's callable outlive the call?
+/// Returned, stored (bound, built into a value, assigned), handed to an owned
+/// slot or as a stored chain callback, captured by a closure, or anything
+/// this file cannot name: escapes. Called, borrowed, cloned, handed to a
+/// borrowed slot: does not. Shared with the ownership certifier's C5, so the
+/// verdict and its check read one rule.
+pub(crate) fn fn_param_escapes(u: &Use) -> bool {
+    if u.depth > 0 {
+        return true;
+    }
+    !matches!(u.site, Site::Callee | Site::Arg(SlotMode::Borrow) | Site::Borrow { mutable: false } | Site::Clone)
 }
 
 /// Borrow mode derived from an `@intrinsic` fn's Almide param type.
