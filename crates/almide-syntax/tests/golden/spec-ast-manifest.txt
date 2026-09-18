@@ -1,4 +1,4 @@
-# oracle: almide 0.63.0 at 3964caa58 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.63.0 at f9d752cc1 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -1313,6 +1313,8 @@ d2fd814540b2b5d30daf81372b691c5ad692ed2600926d455ab0d590387ed866	spec/wasm_cross
 f372edbdb18fb91ac94c8d5a798106d46e742bbfe9f6e71a4afd2c1e8a176158	spec/wasm_cross/value_repr.almd
 5075f9d42c86780ae067fcd4bb1d71843fee1b78be946e67e0d102f1e1150e88	spec/wasm_cross/variant_pair_result_return.almd
 f55da93e21937924acd469f75db0eef44958737a34d2d8f802391078689a3082	spec/wasm_cross/variant_record_literal_equality.almd
+4ce5cb5d6dad8fdf7a9fe6987052c5704310dd7e48d2d6ab38417ee28d6cb00a	spec/wasm_cross/variant_result_credit_shapes.almd
+fa8a7e122ae10ea7adbf5bff02658c3114926defc19f7fdd6cb21faabeaadaa4	spec/wasm_cross/variant_result_one_credit_churn.almd
 54c0173366d59c9e0212a2567cb34fab22c1707a94da5efed2c910e61aba253e	spec/wasm_cross/while_loops.almd
 7b41e51fa876053c9fadf44acd654deb87d0eb00a7198439a553af0fbf0c9e35	spec/wasm_cross/whilep_str.almd
 bce295e13528fa6eaa5b4b0fdbafca87f6af87214e3d721d2736a47388004efb	spec/wasm_cross/wide_function_body.almd
