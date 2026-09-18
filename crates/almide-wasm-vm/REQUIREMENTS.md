@@ -21,7 +21,7 @@ executable evidence is not claimed.
 | REQ-VM-6 | **Fuel.** Every executed instruction costs one unit of fuel, and running out traps. | `tests/run.rs` covers `fuel_bounds_every_run`. |
 | REQ-VM-7 | **Traps are the spec's.** Integer division by zero and overflow, out-of-bounds memory, and bad indirect calls all trap as the WebAssembly specification defines. The bad-call cases are a null entry, an index outside the table and a signature mismatch. After a trap, no further instruction executes and no host call is made. | `tests/run.rs` covers the numeric, memory and indirect-call cases. `src/numeric.rs` unit tests cover the edge cases. |
 | REQ-VM-8 | **The runner's contract.** A run that returns exits 0. `proc_exit` exits with its code. A trap exits 1 and writes one stderr line, `Error: wasm trap: <reason>`, spelled as the embedded host spells it. The line is omitted when the program's last stderr line already starts with `Error: `. That is the die convention the embedded host follows. A refused module exits 2. | `tests/run.rs` covers the exit-code and trap-line tests. `src/wasi.rs` covers `the_last_line_is_judged_as_str_lines_would`. |
-| REQ-VM-9 | **Equivalence with the stock runtime and native.** Every shipped artifact meets one of three outcomes. If its imports are all among the five, it loads and runs to the stock runtime's stdout, stderr and exit code. Alternatively, it stops on a named trap for a clock or entropy call, after output that is a prefix of the stock runtime's. Every other artifact is refused at load. Every fixture that passes `almide check --profile critical --allow IO` runs equal, and it also equals the native binary's run. | `tests/wasm_vm_parity_test.rs`, which is release-only and runs in the commissioned wasm gates job in CI. |
+| REQ-VM-9 | **Equivalence with the stock runtime and native.** Every shipped artifact meets one of three outcomes. If its imports are all among the five, it loads and runs to the stock runtime's stdout, stderr and exit code. Alternatively, it stops on a named trap for a clock or entropy call, after output that is a prefix of the stock runtime's. Every other artifact is refused at load. Every fixture that passes `almide check --profile critical`, the profile's deny-all default, runs equal, and it also equals the native binary's run. | `tests/wasm_vm_parity_test.rs`, which is release-only and runs in the commissioned wasm gates job in CI. |
 | REQ-VM-10 | **Trusted base.** There are no dependencies beyond the Rust standard library, and `unsafe_code` is forbidden through the workspace lints. Test-only crates, the text assembler for test modules, are not part of the base. | `Cargo.toml` has an empty `[dependencies]` and `[lints] workspace = true`. |
 
 ## Scope, and what it leaves out
@@ -29,10 +29,13 @@ executable evidence is not claimed.
 - **One artifact family.** The VM runs the preview-1 artifacts that the
   structural emitter produces. A component (`--component`) is a different
   format and is out of scope.
-- **The capabilities a Critical program can hold.** That means console output,
-  exit codes and stdin. File system, environment and argument access import
-  calls beyond the five, so those artifacts are refused at load. Clock and
-  entropy trap by name. None of these can be a silent wrong answer.
+- **The Critical profile's default surface.** That means console output,
+  exit codes and stdin. An `--allow IO` grant also reaches the file system,
+  and file system, environment and argument access all import calls beyond
+  the five, so those artifacts are refused at load. Clock and entropy trap by
+  name. None of these can be a silent wrong answer. Serving the file system
+  would multiply the trusted host surface, which is the opposite of what this
+  crate is for.
 - **Limits are parameters, not constants.** The defaults are the 32-bit memory
   ceiling, a 4 Mi-cell value stack, 256 Ki frames and unlimited fuel. They are
   set so that every corpus program runs as it does on the stock runtime. A
