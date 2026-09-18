@@ -258,10 +258,29 @@ impl<'a> Walk<'a> {
     /// borrow bare and clones the OTHER occurrences of `v` in the argument
     /// list — so its variable leaves the top set for the duration.
     fn guarded_operand(&mut self, e: &IrExpr, mode: SlotMode, site: Site) {
+        // A lambda literal handed to a callee's NON-ESCAPING fn slot (#2288)
+        // is a scope like a chain step: the callee only calls it, so what it
+        // reads is borrowed for the call, not captured. Before
+        // `BorrowInsertion` the slot mode says so; afterwards the `Borrow`
+        // node around the lambda does (see the `Borrow` arm of `expr`).
+        if mode == SlotMode::Borrow && matches!(e.kind, IrExprKind::Lambda { .. }) {
+            return self.scope_lambda(e);
+        }
         let own = Self::direct_borrow_of(e, mode).filter(|v| self.guarded.last().is_some_and(|g| g.contains(v)));
         if let Some(v) = own { self.guarded.last_mut().map(|g| g.remove(&v)); }
         self.expr(e, site);
         if let Some(v) = own { self.guarded.last_mut().map(|g| g.insert(v)); }
+    }
+
+    /// A lambda literal that is a SCOPE, not a closure: its body runs inside
+    /// the call it is handed to (once per element for a chain step, as often
+    /// as the callee calls it for a borrowed fn slot) and never outlives it,
+    /// so `depth` stays 0 and `in_loop` holds.
+    fn scope_lambda(&mut self, lambda: &IrExpr) {
+        let IrExprKind::Lambda { body, .. } = &lambda.kind else { return self.expr(lambda, Site::Callback) };
+        self.loop_depth += 1;
+        self.arm_expr(body, Site::Result);
+        self.loop_depth -= 1;
     }
 
     /// The variable `e` borrows directly as a call operand: a `Borrow { Var }`,
@@ -364,6 +383,11 @@ impl<'a> Walk<'a> {
             }
 
             // ── One child, fixed position ──
+            // `&(lambda)`: a lambda literal at a borrowed fn slot, spelled by
+            // `BorrowInsertion` — a scope, not a closure (#2288).
+            IrExprKind::Borrow { expr, mutable: false, .. } if matches!(expr.kind, IrExprKind::Lambda { .. }) => {
+                self.scope_lambda(expr)
+            }
             IrExprKind::Borrow { expr, mutable, .. } => {
                 self.mut_depth += u32::from(*mutable);
                 self.expr(expr, Site::Borrow { mutable: *mutable });
