@@ -13,6 +13,7 @@ pub mod numeric;
 pub mod reader;
 pub mod types;
 pub mod validate;
+pub mod wasi;
 
 pub use error::{LoadError, Trap};
 pub use module::{decode, Module};
