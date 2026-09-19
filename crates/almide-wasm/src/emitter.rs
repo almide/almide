@@ -130,6 +130,13 @@ pub(crate) struct Emitter<'a> {
     /// Suspended (None) under structures whose labels the walker does
     /// not track (match arms) — a Continue there walls honestly.
     pub(crate) loop_ctl: Option<(u32, u32)>,
+    /// #2319: VarId → the i64 local holding that list's ELEMENT COUNT,
+    /// loaded once before a loop the scan proved never rebinds it
+    /// (len_hoist.rs). A bounds check inside the loop reads the local
+    /// instead of re-loading and dividing the length per access. Only the
+    /// count is cached — the block ADDRESS is re-read every time, so a COW
+    /// copy under an element store stays correct.
+    pub(crate) hoisted_counts: HashMap<VarId, u32>,
     /// One-shot tail-position marker: set by `lower_tail`, TAKEN at
     /// `lower`'s entry so it never leaks into operand lowering. A direct
     /// call in tail position with a matching return type emits
@@ -225,6 +232,11 @@ impl Emitter<'_> {
         object: &IrExpr,
         index: &IrExpr,
     ) -> Result<SliceTy, EmitError> {
+        // #2319: an enclosing loop may have loaded this list's count already.
+        let hoisted = match &object.kind {
+            almide_ir::IrExprKind::Var { id } => self.hoisted_count_of(*id),
+            _ => None,
+        };
         let elem = match self.lower(object, None)? {
             SliceTy::List(h) => self.types.el(h),
             other => return Err(EmitError::Unsupported(format!("index-of:{other:?}"))),
@@ -236,14 +248,25 @@ impl Emitter<'_> {
         let idx = self.hold_i64()?;
         self.f.instructions().local_tee(idx);
         let msg = self.pool.intern("index out of bounds");
-        // idx < 0 || idx >= count → the message abort
+        // ONE UNSIGNED compare (#2319): `idx >=u count` is exactly
+        // `idx < 0 || idx >= count` — a negative i64 index reads as a value
+        // above every possible count — and the count is unsigned anyway. The
+        // two-signed-compares-and-or form cost 7 % of spectralnorm's inner
+        // loop, where this check runs once per element read.
         {
             let mut i = self.f.instructions();
-            i.i64_const(0).i64_lt_s();
-            i.local_get(idx);
-            i.local_get(hold).i32_load(len_memarg()).i32_const(stride as i32).i32_div_u();
-            i.i64_extend_i32_u().i64_ge_s();
-            i.i32_or().if_(BlockType::Empty);
+            match hoisted {
+                // The count came from the local a loop loaded it into.
+                Some(count) => {
+                    i.local_get(count);
+                }
+                None => {
+                    i.local_get(hold).i32_load(len_memarg()).i32_const(stride as i32).i32_div_u();
+                    i.i64_extend_i32_u();
+                }
+            }
+            i.i64_ge_u();
+            i.if_(BlockType::Empty);
             i.i32_const(msg as i32);
         }
         self.emit_error_frame_abort();
