@@ -1,0 +1,33 @@
+// @contract: C-067
+// #2319 rewrote the guard twice: it is ONE unsigned compare (`idx >=u count`
+// covers the negative index the signed pair used to test separately), and a
+// loop the scan proves cannot change a list's length loads the element COUNT
+// once BEFORE the loop instead of per access. C-067 must read the same after
+// both: an in-loop read of a hoisted-count list stays exact in bounds, a list
+// REBOUND inside its loop is never guarded against a stale count (the rebind
+// refuses the hoist), and the negative index still aborts with the unified
+// message + exit 1 — from inside the loop, where the count is the hoisted one.
+fn main() -> Unit = {
+  var xs = [10, 20, 30, 40]
+  var i = 0
+  var sum = 0
+  while i < 4 {
+    sum = sum + xs[i]
+    i = i + 1
+  }
+  println("${sum}")
+  var ys = [1, 2, 3]
+  var k = 0
+  var last = 0
+  while k < 2 {
+    ys = [7, 8]
+    last = ys[1]
+    k = k + 1
+  }
+  println("${last}")
+  var j = 0
+  while j < 3 {
+    println("${xs[j - 1]}")
+    j = j + 1
+  }
+}
