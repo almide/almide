@@ -260,6 +260,35 @@ impl LowerCtx {
         false
     }
 
+    /// The MATCH half of [`Self::try_lower_unit_if`], for a Unit `match` sitting
+    /// in an ARM TAIL (`if c then { match k { 1 => f(), _ => g() } } else …`).
+    /// Over literal patterns it desugars to the equivalent `if` chain and
+    /// EXECUTES it, so only the matched arm's effects run — the same transform
+    /// the statement-position twin (`lower_unit_match_stmt`) has always used.
+    /// Declines (rolled back by `try_lower_unit_if`) for a non-Unit tail, a
+    /// non-desugarable shape, or an arm the real branch cannot lower; the caller
+    /// then falls back to `lower_branch` exactly as before.
+    pub(crate) fn try_lower_unit_match_arm_tail(
+        &mut self,
+        tail: &IrExpr,
+        subject: &IrExpr,
+        arms: &[IrMatchArm],
+    ) -> bool {
+        if !matches!(tail.ty, Ty::Unit) {
+            return false;
+        }
+        // `desugar_match_to_if` may wrap its output in a `Block` (the hoisted
+        // binder `let` of a catch-all `x => …`); only the bare chain takes this
+        // route, as the statement twin does.
+        let Some(if_expr) = self.desugar_match_to_if(subject, arms, &Ty::Unit) else {
+            return false;
+        };
+        let IrExprKind::If { cond, then, else_ } = &if_expr.kind else {
+            return false;
+        };
+        self.try_lower_unit_if(cond, then, else_)
+    }
+
     /// Recursively wrap each LEAF arm of `if_branch` so the arm `value` becomes `{ let s = value;
     /// <rest> }` typed `result_ty`. A nested `if` arm (an else-if chain from a desugared match)
     /// recurses; a leaf value-arm gets the continuation block.
