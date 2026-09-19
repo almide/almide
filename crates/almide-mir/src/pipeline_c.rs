@@ -170,7 +170,13 @@ fn try_render_wasm_source_impl_rest(
     // is what introduces the `__list_append1` calls it needs to link.
     crate::concat_to_append::rewrite_self_append(&mut functions);
 
-    synthesize_and_link_runtime_fns(&mut functions, &mutable_tls, &layouts, verbose)?;
+    synthesize_and_link_runtime_fns(
+        &mut functions,
+        &mutable_tls,
+        &layouts,
+        verbose,
+        &mut fn_walls,
+    )?;
 
     synthesize_global_init(ir, &layouts, &mut functions);
     // If `main` itself was WALLED, there is no `$main` — yet the renderer emits
@@ -307,7 +313,10 @@ fn try_render_wasm_source_impl_rest(
 /// is the actual diagnosis — without it the message names a mangled symbol
 /// (`almide_rt_lib_write_many`) and says to "add the callee to the self-host
 /// registry", which is advice for a stdlib gap and actively misleading for a
-/// user module that is sitting right there in the package (#943).
+/// user module that is sitting right there in the package (#943). The same
+/// holds for a SELF-HOSTED stdlib body: the linker records its lowering
+/// failure under the call name too, so the advice is never given to someone
+/// whose callee is already registered (#2325).
 fn attribute_unlinked_calls(
     e: LowerError,
     fn_walls: &std::collections::HashMap<String, crate::lower::LowerError>,
@@ -326,8 +335,8 @@ fn attribute_unlinked_calls(
         return e;
     }
     LowerError::Unsupported(format!(
-        "unlinked call(s) with no wasm definition — the callee is present in the package but \
-         did not survive lowering: {}",
+        "unlinked call(s) with no wasm definition — the callee is defined (in the package or \
+         the self-hosted stdlib) but did not survive lowering: {}",
         attributed.join("; ")
     ))
 }
@@ -335,6 +344,51 @@ fn attribute_unlinked_calls(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The unlinked-call gate's message is PARSED to recover the names, so the
+    /// two halves — the prefix the renderer writes and the prefix this reader
+    /// strips — are one contract. When they drift the attribution silently
+    /// stops happening and the wall goes back to naming a bare symbol with
+    /// advice that does not apply (#943, and again for a self-hosted callee in
+    /// #2325). Pin both the parse and the sentence it produces.
+    #[test]
+    fn a_walled_callee_is_named_with_its_own_reason_not_the_registry_advice() {
+        let mut walls = std::collections::HashMap::new();
+        walls.insert(
+            "__mutual_tco_0_bump".to_string(),
+            crate::lower::LowerError::Unsupported("match over an UNTRACKED subject".into()),
+        );
+        let raw = LowerError::Unsupported(
+            "unlinked stdlib/runtime call(s) with no wasm definition: __mutual_tco_0_bump — \
+             rendering them would emit a dangling `(call $…)` (invalid wasm). Add the callee \
+             to the self-host registry or wall the using function."
+                .into(),
+        );
+        let attributed = attribute_unlinked_calls(raw, &walls).to_string();
+        assert!(
+            attributed.contains("`__mutual_tco_0_bump` walled while lowering: match over an \
+                                 UNTRACKED subject"),
+            "the callee's own reason must reach the reader: {attributed}"
+        );
+        assert!(
+            !attributed.contains("self-host registry"),
+            "a callee that IS defined must not be told to register it: {attributed}"
+        );
+    }
+
+    /// A name with no recorded wall keeps the original message — the gate still
+    /// reports a genuinely missing definition the way it always has.
+    #[test]
+    fn an_unattributable_unlinked_call_keeps_the_gates_own_message() {
+        let walls = std::collections::HashMap::new();
+        let raw = LowerError::Unsupported(
+            "unlinked stdlib/runtime call(s) with no wasm definition: almide_rt_lib_write_many"
+                .into(),
+        );
+        assert!(attribute_unlinked_calls(raw, &walls)
+            .to_string()
+            .contains("almide_rt_lib_write_many"));
+    }
 
     // `Parser::parse()` is a recovery parser: an unparseable top-level bare
     // statement (never valid Almide grammar — only fn/effect fn/type/let/
