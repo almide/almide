@@ -45,13 +45,14 @@ const VALUE_NESTING: &str = "one frame per level of array/object nesting in the 
 const PATH_SEGMENTS: &str = "one frame per segment of the JSON path, not per element of the document";
 /// A directory tree / glob: one frame per path segment.
 const DIR_DEPTH: &str = "one frame per directory level / path segment, not per directory entry";
-/// The regex engine's backtracking points. Bounded by the pattern's size for
-/// every shape but a repeated group, which stacks one choice point per
-/// repetition — the open input-length recursion #2307. When #2307 replaces
-/// these with an explicit backtrack stack the entries go stale and this gate
-/// makes the fix delete them.
-const REGEX_BACKTRACK: &str =
-    "a regex backtracking point: bounded by the pattern's size, EXCEPT under a repeated group (one per repetition — #2307, open)";
+/// The regex engine's backtracking. It used to stack a native frame per choice
+/// point — one per repetition under a repeated group, the input-length
+/// recursion #2307 — and this list carried a `REGEX_BACKTRACK` entry for each
+/// of those calls. #2307 moved the choice points into an explicit arena, the
+/// entries went stale, and the gate made the fix delete them. What is left of
+/// the engine's own nesting is the arena's growth:
+const ARENA_DOUBLING: &str =
+    "one frame per doubling of the backtracking arena: log2 of its final size, not the input's length";
 
 const BOUNDED: &[(&str, &str, &str, &str)] = &[
     // (file, function, non-tail callee, why its depth does not follow the input's length)
@@ -89,12 +90,7 @@ const BOUNDED: &[(&str, &str, &str, &str)] = &[
     ("option_to_string_nested.almd", "__onest_fill_neg", "__onest_fill_neg", DIGITS),
     ("regex_engine.almd", "__rx_ngroups", "__rx_ngroups",
         "one frame per capture group written in the pattern text, not per input character"),
-    ("regex_engine.almd", "__rx_alts", "__rx_seq", REGEX_BACKTRACK),
-    ("regex_engine.almd", "__rx_rep_group", "__rx_seq", REGEX_BACKTRACK),
-    ("regex_engine.almd", "__rx_rep_group", "__rx_group", REGEX_BACKTRACK),
-    ("regex_engine.almd", "__rx_rep_lazy", "__rx_seq", REGEX_BACKTRACK),
-    ("regex_engine.almd", "__rx_repi_try", "__rx_seq", REGEX_BACKTRACK),
-    ("regex_engine.almd", "__rx_run_group_end", "__rx_run", REGEX_BACKTRACK),
+    ("regex_engine.almd", "__rx_grow", "__rx_drive", ARENA_DOUBLING),
     ("result_to_string.almd", "__rts_fill_digits", "__rts_fill_digits", DIGITS),
     ("result_to_string.almd", "__rts_fill_neg", "__rts_fill_neg", DIGITS),
     ("set_to_string.almd", "__sts_fill_digits", "__sts_fill_digits", DIGITS),
