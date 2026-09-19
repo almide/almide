@@ -1,6 +1,6 @@
 # ALS — 実行時規範（Runtime）
 
-> Last updated: 2026-08-20
+> Last updated: 2026-09-19
 
 プログラム実行の観測規範（エラー終了・文字列補間の表示形・並行コンビネータ）。
 参照方法は [strings.md](strings.md) 冒頭と同じ。
@@ -71,7 +71,17 @@ wasm レグは WASI サンドボックス（`wasi` / `/tmp`）を返す。両タ
 temp_dir は非空かつ posix ホストでは絶対パス）が証明対象となる。除外は現在
 3 関数(env.os・env.temp_dir・fs.temp_dir — C-189)。第四の関数を
 除外に加えるには C-189 の statement とその fixture の改訂を要する。
-Contracts: C-096, C-112, C-118, C-133, C-189。
+
+`process.exec_status` と `process.exec_status_timeout` の起動失敗は、
+操作名とコマンド名を含む err とする。接頭辞はそれぞれ
+`process.exec_status(<quoted cmd>): ` と
+`process.exec_status_timeout(<quoted cmd>, <timeout_ms>): ` とし、
+続けてホストのエラー説明を付ける。コマンド名は二重引用符で囲み、内部の
+引用符・バックスラッシュ・制御文字をエスケープする。引数列は含めない。
+存在しない実行ファイルは起動失敗であり、タイムアウトと報告してはならない。
+期限が発火した場合の err は従来どおり `exec timed out after <ms>ms` とする。
+テスト: `spec/stdlib/process_timeout_test.almd`
+Contracts: C-096, C-112, C-118, C-133, C-189, C-214。
 
 ## ALS-R6 ファイルシステムのパス解決
 
@@ -144,3 +154,32 @@ Contracts: C-274。
 テスト: `spec/wasm_cross/http_response_headers.almd`,
 `spec/stdlib/http_response_test.almd`。
 Contracts: C-275。
+
+## ALS-R9 プロセス終了コードの値域
+
+`process.exit(code)` が受理する code は **0..=125** である。この範囲の値は
+native・埋め込みホスト・stock WASI ランタイムのいずれでも**その値で**終了する。
+範囲外の code は定義済みの領域エラーであり、stderr に
+`Error: exit code must be in 0..=125` を1行出力して **exit 1** で終了する
+（全ターゲットで同一バイト）。
+
+上限は恣意的な切り方ではなく、**出荷される成果物が届けられる値の共通部分**である:
+
+| 層 | 運べる値 | 範囲外に何が起きるか |
+|---|---|---|
+| POSIX `exit(status)` | 下位 8 bit のみ | 親プロセスは `256` を `0` として観測する（黙った切り詰め） |
+| シェルの規約 | 0..125 | 126（実行不可）・127（未検出）・128+n（シグナル n）は**シェル自身が生成する**値 |
+| WASI preview-1 `proc_exit` | `[0, 126)` | stock ランタイムはホスト trap にする。exit 要求としての情報は残らず、実行時の本物の障害と区別できない |
+| component model `wasi:cli/exit#exit-with-code(u8)` | 0..255 | trap しない |
+
+`almide build --target wasm` が出力するのは preview-1 の成果物であり、126 以上は
+その成果物では届けられない。したがって 0..=125 は**言語が保証できる範囲**であって、
+実装の都合ではない。
+
+この上限は**床であって永続的な切り詰めではない**。既定の成果物が `proc_exit` を
+経由しなくなれば 0..=255 が届けられるようになり、範囲は広げられる（拡大は
+後方互換であり、逆向きは破壊的である）。
+
+テスト: `spec/wasm_cross/exit_code_out_of_range.almd`,
+`spec/wasm_cross/exit_code_upper_bound.almd`。
+Contracts: C-350。

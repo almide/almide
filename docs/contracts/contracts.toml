@@ -2718,7 +2718,7 @@ evidence  = [
 id        = "C-219"
 spec      = "ALS-T6"
 title     = "a Never-typed call in a branch arm runs on both targets and sets the exit code"
-statement = "A call whose return type is `Never` — `process.exit(code)`, the stdlib's only one — EXECUTES when it is the tail of a branch arm, and the process exits with that code on BOTH targets. The arm-tail dispatch in `lower_branch_arm` ran a `Call` only when its type was `Ty::Unit`; a `Never` call fell through to the deferred-value path, which records the call as a capability marker and emits NO call. The arm lowered to zero ops and returned Ok, so `guard n > 99 else process.exit(3)` built clean and exited 0 (#1124) — a silently wrong exit code with no wall and no diagnostic, reached through a TYPE the match forgot to name rather than through an unsupported shape, which is why strict-value mode never fired. NOT a wasm-only defect, though #1124 reported it as one: with a runtime condition the exit is lost on the NATIVE leg too; the issue's repro read `process.args()`, whose list length the native path resolved differently, which is what made it look cross-target. `Never` now rides with `Unit` in that dispatch — both produce no value by construction, the property the arm needs. The CONSTANT-condition form (`guard false else process.exit(3)`) is folded earlier (#1117) into a scalar tail outside the value subset, and STRICT value mode walls it honestly rather than deferring it to Const 0 — a wall, not a wrong answer, tracked separately."
+statement = "A call whose return type is `Never` — `process.exit(code)`, the stdlib's only one — EXECUTES when it is the tail of a branch arm, and the process exits with that code on BOTH targets. The arm-tail dispatch in `lower_branch_arm` ran a `Call` only when its type was `Ty::Unit`; a `Never` call fell through to the deferred-value path, which records the call as a capability marker and emits NO call. The arm lowered to zero ops and returned Ok, so `guard n > 99 else process.exit(3)` built clean and exited 0 (#1124) — a silently wrong exit code with no wall and no diagnostic, reached through a TYPE the match forgot to name rather than through an unsupported shape, which is why strict-value mode never fired. NOT a wasm-only defect, though #1124 reported it as one: with a runtime condition the exit is lost on the NATIVE leg too; the issue's repro read `process.args()`, whose list length the native path resolved differently, which is what made it look cross-target. `Never` now rides with `Unit` in that dispatch — both produce no value by construction, the property the arm needs. The CONSTANT-condition form (`guard false else process.exit(3)`) is folded earlier (#1117) into a scalar tail outside the value subset, and STRICT value mode walls it honestly rather than deferring it to Const 0 — a wall, not a wrong answer, tracked separately. The exit code the arm sets is one the artifact can deliver: C-350 narrows `process.exit` to 0..=125 on every target and makes any other code a defined abort, so \"exits with that code\" here reads within that range."
 since     = "0.56.0"
 status    = "active"
 evidence  = [
@@ -4293,4 +4293,17 @@ since     = "0.63.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fan_arm_unwrap_or.almd", class = "fixture" },
+]
+
+# ── THE EXIT CODE IS 0..=125 ON EVERY TARGET ──
+[[contract]]
+id        = "C-350"
+spec      = "ALS-R9"
+title     = "process.exit accepts 0..=125 on every target, and any other code is a defined abort"
+statement = "`process.exit(code)` terminates with `code` when `0 <= code <= 125`, identically on native, on the embedded host and on a stock WASI runtime. Any other code is a domain error in the ALS-R1 form: one stderr line `Error: exit code must be in 0..=125` and exit 1, byte-identical on every target. The bound is the intersection of what the SHIPPED artifact can deliver, not an implementation limit. POSIX carries only the low 8 bits of a status to the parent, so `process.exit(256)` answered 0 natively — a silent truncation this rule removes. A shell generates 126 (found, not executable), 127 (not found) and 128+n (killed by signal n) itself, so a program exiting in that band misreports itself to its own caller. WASI preview-1's `proc_exit` is specified over `[0, 126)` and a stock runtime turns anything else into a host trap that carries no exit request at all — indistinguishable from a real fault, and undiagnosable by the host, which is the outcome this rule replaces with one sentence on stderr. `almide build --target wasm` ships the preview-1 artifact, so 126 and above cannot be delivered by it and no leg change could make them. Before this rule, `process.exit(200)` exited 200 natively and on the embedded host and 1 with a runtime error on a stock runtime (#2303). The bound is a FLOOR that widens with the shipped ABI, never a permanent cut: the component model's `wasi:cli/exit#exit-with-code(u8)` carries 0..255 without trapping, so a default artifact that stops going through `proc_exit` may widen the range — widening is additive, and the reverse would be breaking."
+since     = "0.63.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/exit_code_out_of_range.almd", class = "fixture" },
+  { path = "spec/wasm_cross/exit_code_upper_bound.almd", class = "fixture" },
 ]
