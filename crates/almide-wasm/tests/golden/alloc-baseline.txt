@@ -255,6 +255,7 @@
 66112	spec/wasm_cross/if_let_guard_let.almd
 66160	spec/wasm_cross/index_bounds.almd
 66112	spec/wasm_cross/index_bounds_i64.almd
+66112	spec/wasm_cross/index_bounds_loop_invariant.almd
 66128	spec/wasm_cross/index_bounds_write_heap.almd
 66064	spec/wasm_cross/index_bounds_write_only_var.almd
 66192	spec/wasm_cross/inplace_mutator_statement.almd
