@@ -1,0 +1,40 @@
+// @contract: C-032
+// #2307: a repetition's depth is the input's length, not the call stack's.
+// Both engines used to recurse once per matched repetition, and they ran out
+// at different sizes: native aborted at about 30,000 characters of `a*`, and
+// a repeated GROUP exhausted the wasm stack at about 5,000 repetitions while
+// native still answered. Between those thresholds the two targets disagreed
+// on output and exit code. Every row below is a flat input long enough that
+// the old engines could not answer it on at least one leg.
+import regex
+
+fn line(label: String, answer: Bool) -> String = "${label}=${answer}"
+
+fn main() -> Unit = {
+  let a200k = string.repeat("a", 200000)
+  let x200k = string.repeat("x", 200000)
+  let ab100k = string.repeat("ab", 100000)
+
+  // single atom, greedy: native aborted from ~30,000 on
+  println(line("a*b", regex.is_match("^a*b$", a200k + "b")))
+  println(line("a*b_miss", regex.is_match("^a*b$", a200k + "c")))
+  // a class atom takes the same route
+  println(line("class+", regex.is_match("^[a-z]+$", x200k)))
+  println(line("class+_miss", regex.is_match("^[a-z]+$", x200k + "0")))
+  // lazy: the shortest-first order, over the same length
+  println(line("lazy", regex.is_match("^a*?b$", a200k + "b")))
+  // a counted quantifier with an open upper bound
+  println(line("counted", regex.is_match("^a{2,}b$", a200k + "b")))
+  // a repeated GROUP: the shape that exhausted the wasm stack at ~5,000
+  println(line("group*", regex.is_match("^(ab)*$", ab100k)))
+  println(line("group*_miss", regex.is_match("^(ab)*$", ab100k + "a")))
+  // a group repetition that must give repetitions back to let the tail match
+  println(line("group_backtrack", regex.is_match("^(ab)*ab$", ab100k)))
+  // the capture a long group repetition leaves is its LAST instance
+  println(line("group_capture", regex.captures("^(ab)*$", ab100k) != none))
+
+  // the answers are the same at a length the old engines could reach, so the
+  // rows above are the same rule applied to more input, not a new rule
+  println(line("short_a*b", regex.is_match("^a*b$", "aaab")))
+  println(line("short_group*", regex.is_match("^(ab)*$", "ababab")))
+}
