@@ -8,12 +8,9 @@
 //!     stdout, stderr and exit code, byte for byte — or stop on the VM's
 //!     named trap for a call it does not serve (the clock or entropy: the
 //!     Time/Rand capabilities a Critical program is never granted), after
-//!     output that is a prefix of the stock runtime's. One difference is the
-//!     stock runtime's own and tracked, not failed: it refuses a `proc_exit`
-//!     status of 126 or more, which the VM, native and the embedded host all
-//!     exit with (#2303). A trap is compared by its reason and the program's
-//!     stderr: the VM exits 1 with one trap line where the stock CLI exits
-//!     with its own trap status and error block;
+//!     output that is a prefix of the stock runtime's. A trap is compared by
+//!     its reason and the program's stderr: the VM exits 1 with one trap line
+//!     where the stock CLI exits with its own trap status and error block;
 //!   - any other artifact (fs, env, args) MUST be refused at load.
 //!
 //! So the VM never gives a silent wrong answer on anything the product ships:
@@ -65,7 +62,7 @@ enum Verdict {
     Refused,
     /// A known difference with its own issue: a Critical-clean fixture whose
     /// VM run equals the stock runtime's and differs from native under an
-    /// `@xt-allow`, or an exit status the stock runtime refuses (#2303).
+    /// `@xt-allow`.
     Tracked(String),
     Wrong(String),
 }
@@ -113,13 +110,6 @@ fn judge(name: &str, wasm: &Path) -> (Verdict, Option<Observed>) {
             let line = format!("Error: wasm trap: {trap}\n");
             let own = verr.strip_suffix(line.as_str()).unwrap_or(&verr);
             code != Some(0) && serr.contains(&trap.to_string()) && own == program
-        }
-        None if exit as u32 >= 126 && code == Some(1) && serr.contains("invalid exit status") => {
-            return if sout == vout && program == verr {
-                (Verdict::Tracked(format!("{name}: the stock runtime refuses exit status {exit} (#2303)")), None)
-            } else {
-                (Verdict::Wrong(format!("{name}: diverges before its refused exit status")), None)
-            };
         }
         None => code == Some(exit) && serr == verr,
     };
