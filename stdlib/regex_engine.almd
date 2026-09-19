@@ -440,8 +440,7 @@ fn __rx_fail(m: Int) -> Int = {
       prim.store64(m + 16, if keep then b + 64 else b)
       prim.store64(m + 24, if keep then b else prim.load64(at + 8))
       __rx_seq(prim.load64(at + 16), prim.load64(at + 24), t, prim.load64(at + 56), m)
-    }
-    else {
+    } else {
       prim.store64(m + 16, b)
       prim.store64(m + 24, prim.load64(at + 8))
       __rx_resume(kind, at + 16, m)
