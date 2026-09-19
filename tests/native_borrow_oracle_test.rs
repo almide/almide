@@ -37,17 +37,26 @@ struct TypeSpec {
     /// An Int-valued read of one element `x`, when the type iterates: the
     /// step of the fused chains (#2287) that only READ the element.
     elem: Option<&'static str>,
+    /// How a chain step REBUILDS one element `x` by spreading it, when the
+    /// element is a record. The cell the `elem` chains and the `spread` use
+    /// each cover one half of and neither covers together: a step that reads
+    /// the element leaves the source borrowed, a param spread consumes what
+    /// it spreads, and a step that SPREADS the element has to consume the
+    /// source. #2315 fell exactly through that hole — `..x` was emitted on a
+    /// `&Tok` and rustc refused a program `almide check` accepted.
+    elem_spread: Option<&'static str>,
     record: bool,
 }
 
 const TYPES: &[TypeSpec] = &[
-    TypeSpec { tag: "str", ty: "String", lit: "\"ab\"", lit2: "\"cde\"", read: |p| format!("int.to_string(string.len({p}))"), concat: true, mutate: None, loop_body: None, elem: None, record: false },
-    TypeSpec { tag: "list", ty: "List[Int]", lit: "[1, 2]", lit2: "[3, 4, 5]", read: |p| format!("int.to_string(list.len({p}))"), concat: true, mutate: Some("list.push(p, 9)"), loop_body: Some("acc = acc + x"), elem: Some("x"), record: false },
-    TypeSpec { tag: "strs", ty: "List[String]", lit: "[\"ab\", \"c\"]", lit2: "[\"de\"]", read: |p| format!("int.to_string(list.len({p}))"), concat: true, mutate: Some("list.push(p, \"z\")"), loop_body: Some("acc = acc + string.len(x)"), elem: Some("string.len(x)"), record: false },
-    TypeSpec { tag: "map", ty: "Map[String, Int]", lit: "[\"a\": 1]", lit2: "[\"b\": 2, \"c\": 3]", read: |p| format!("int.to_string(map.len({p}))"), concat: false, mutate: Some("map.insert(p, \"z\", 9)"), loop_body: None, elem: None, record: false },
-    TypeSpec { tag: "set", ty: "Set[Int]", lit: "set.from_list([1])", lit2: "set.from_list([2, 3])", read: |p| format!("int.to_string(set.len({p}))"), concat: false, mutate: None, loop_body: None, elem: None, record: false },
-    TypeSpec { tag: "bytes", ty: "Bytes", lit: "bytes.from_list([1])", lit2: "bytes.from_list([2, 3])", read: |p| format!("int.to_string(bytes.len({p}))"), concat: false, mutate: Some("bytes.push(p, 9)"), loop_body: None, elem: None, record: false },
-    TypeSpec { tag: "rec", ty: "Tok", lit: "{ text: \"ab\", n: 1 }", lit2: "{ text: \"cde\", n: 2 }", read: |p| format!("int.to_string(string.len({p}.text) + {p}.n)"), concat: false, mutate: None, loop_body: None, elem: None, record: true },
+    TypeSpec { tag: "str", ty: "String", lit: "\"ab\"", lit2: "\"cde\"", read: |p| format!("int.to_string(string.len({p}))"), concat: true, mutate: None, loop_body: None, elem: None, elem_spread: None, record: false },
+    TypeSpec { tag: "list", ty: "List[Int]", lit: "[1, 2]", lit2: "[3, 4, 5]", read: |p| format!("int.to_string(list.len({p}))"), concat: true, mutate: Some("list.push(p, 9)"), loop_body: Some("acc = acc + x"), elem: Some("x"), elem_spread: None, record: false },
+    TypeSpec { tag: "strs", ty: "List[String]", lit: "[\"ab\", \"c\"]", lit2: "[\"de\"]", read: |p| format!("int.to_string(list.len({p}))"), concat: true, mutate: Some("list.push(p, \"z\")"), loop_body: Some("acc = acc + string.len(x)"), elem: Some("string.len(x)"), elem_spread: None, record: false },
+    TypeSpec { tag: "map", ty: "Map[String, Int]", lit: "[\"a\": 1]", lit2: "[\"b\": 2, \"c\": 3]", read: |p| format!("int.to_string(map.len({p}))"), concat: false, mutate: Some("map.insert(p, \"z\", 9)"), loop_body: None, elem: None, elem_spread: None, record: false },
+    TypeSpec { tag: "set", ty: "Set[Int]", lit: "set.from_list([1])", lit2: "set.from_list([2, 3])", read: |p| format!("int.to_string(set.len({p}))"), concat: false, mutate: None, loop_body: None, elem: None, elem_spread: None, record: false },
+    TypeSpec { tag: "bytes", ty: "Bytes", lit: "bytes.from_list([1])", lit2: "bytes.from_list([2, 3])", read: |p| format!("int.to_string(bytes.len({p}))"), concat: false, mutate: Some("bytes.push(p, 9)"), loop_body: None, elem: None, elem_spread: None, record: false },
+    TypeSpec { tag: "rec", ty: "Tok", lit: "{ text: \"ab\", n: 1 }", lit2: "{ text: \"cde\", n: 2 }", read: |p| format!("int.to_string(string.len({p}.text) + {p}.n)"), concat: false, mutate: None, loop_body: None, elem: None, elem_spread: None, record: true },
+    TypeSpec { tag: "recs", ty: "List[Tok]", lit: "[Tok { text: \"ab\", n: 1 }]", lit2: "[Tok { text: \"cde\", n: 2 }, Tok { text: \"f\", n: 3 }]", read: |p| format!("int.to_string(list.len({p}))"), concat: true, mutate: Some("list.push(p, Tok { text: \"z\", n: 0 })"), loop_body: Some("acc = acc + x.n"), elem: Some("x.n"), elem_spread: Some("Tok { ...x, n: x.n + 1 }"), record: false },
 ];
 
 /// One use of the param inside a body: the fn source and how the call's
@@ -92,6 +101,16 @@ fn shapes(t: &TypeSpec) -> Vec<Shape> {
     }
     if let Some(body) = t.loop_body {
         out.push(Shape { name: "loop".into(), def: format!("fn u_loop_{tag}(p: {ty}) -> String = {{\n  var acc = 0\n  for x in p {{\n    {body}\n  }}\n  int.to_string(acc)\n}}"), extra: String::new(), show: ident_show, needs_var: false });
+    }
+    if let Some(sp) = t.elem_spread {
+        // A fused chain whose step REBUILDS the element by spreading it: the
+        // spread base moves the element's remaining fields, so the source
+        // must be consumed (`.into_iter()`) and the base emitted on an owned
+        // binder. A borrowed source renders `..x` on a `&Tok`, which checks
+        // and then fails to build (#2315). The filtered twin is the same
+        // shape one stage deeper, which is how the defect was first reported.
+        out.push(Shape { name: "mapspread".into(), def: format!("fn u_mapspread_{tag}(p: {ty}) -> {ty} = list.map(p, (x) => {sp})"), extra: String::new(), show: read_result, needs_var: false });
+        out.push(Shape { name: "filtspread".into(), def: format!("fn u_filtspread_{tag}(p: {ty}) -> {ty} = list.map(list.filter(p, (x) => x.n >= 0), (x) => {sp})"), extra: String::new(), show: read_result, needs_var: false });
     }
     if let Some(e) = t.elem {
         // Fused chains whose step only reads the element: the source is
@@ -143,7 +162,7 @@ fn call_sites(t: &TypeSpec, s: &Shape) -> Vec<(String, String)> {
 fn program(t: &TypeSpec) -> String {
     let mut src = String::new();
     src.push_str("// generated by tests/native_borrow_oracle_test.rs — every use × every call site of one param type\n");
-    if t.record {
+    if t.record || t.elem_spread.is_some() {
         src.push_str("type Tok = { text: String, n: Int }\n");
     }
     src.push_str(&format!("type Box_{} = {{ v: {} }}\n", t.tag, t.ty));
