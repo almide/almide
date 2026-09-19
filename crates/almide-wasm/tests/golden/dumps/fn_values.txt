@@ -558,10 +558,12 @@ code locals=[1xI64,1xI32,1xI64,1xI64,3xI32,1xI64,1xF64,24xI32,16xI64,8xF64,8xI32
   End
 code locals=[3xI32,1xI64,1xF64,24xI32,16xI64,8xF64,8xI32]
   LocalGet { local_index: 1 }
-  ReturnCall { function_index: 42 }
+  I64Const { value: 1 }
+  I64Add
   End
 code locals=[3xI32,1xI64,1xF64,24xI32,16xI64,8xF64,8xI32]
   LocalGet { local_index: 1 }
-  ReturnCall { function_index: 43 }
+  I64Const { value: 2 }
+  I64Add
   End
 data len=251 head=000000000000000000000000000000000000000000000000
