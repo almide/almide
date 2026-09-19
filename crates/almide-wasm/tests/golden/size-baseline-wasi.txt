@@ -703,7 +703,7 @@
 6470	spec/wasm_cross/variant_pair_result_return.almd
 2450	spec/wasm_cross/variant_record_literal_equality.almd
 3560	spec/wasm_cross/variant_result_credit_shapes.almd
-2797	spec/wasm_cross/variant_result_one_credit_churn.almd
+2569	spec/wasm_cross/variant_result_one_credit_churn.almd
 2047	spec/wasm_cross/while_loops.almd
 3019	spec/wasm_cross/whilep_str.almd
 8014	spec/wasm_cross/wide_function_body.almd
