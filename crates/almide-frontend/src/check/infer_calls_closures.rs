@@ -1223,6 +1223,15 @@ impl Checker {
             self.reject_arg_placeholders(&**callee, args.as_slice(), None);
         }
         let left_ty = self.infer_expr(left);
+        match &right.kind {
+            ExprKind::Call { callee, args, .. } if args.is_empty() => {
+                self.reject_exit_literal(callee, left);
+            }
+            ExprKind::Ident { .. } | ExprKind::Member { .. } => {
+                self.reject_exit_literal(right, left);
+            }
+            _ => {}
+        }
         // Resolve TypeVars eagerly via UnionFind — earlier pipes in the chain
         // have already been unified (constrain() calls unify_infer immediately),
         // so the concrete type is available now. Without this, chained UFCS like
