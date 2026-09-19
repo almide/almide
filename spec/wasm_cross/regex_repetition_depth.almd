@@ -14,7 +14,6 @@ fn main() -> Unit = {
   let a200k = string.repeat("a", 200000)
   let x200k = string.repeat("x", 200000)
   let ab100k = string.repeat("ab", 100000)
-
   // single atom, greedy: native aborted from ~30,000 on
   println(line("a*b", regex.is_match("^a*b$", a200k + "b")))
   println(line("a*b_miss", regex.is_match("^a*b$", a200k + "c")))
@@ -32,7 +31,6 @@ fn main() -> Unit = {
   println(line("group_backtrack", regex.is_match("^(ab)*ab$", ab100k)))
   // the capture a long group repetition leaves is its LAST instance
   println(line("group_capture", regex.captures("^(ab)*$", ab100k) != none))
-
   // the answers are the same at a length the old engines could reach, so the
   // rows above are the same rule applied to more input, not a new rule
   println(line("short_a*b", regex.is_match("^a*b$", "aaab")))
