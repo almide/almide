@@ -7,9 +7,16 @@
 // carries no exit request at all. `almide build --target wasm` ships that
 // preview-1 artifact, so 126 and above were never deliverable by it (#2303).
 //
-// The code must be RUNTIME-valued, as C-219's fixture is: a constant folds,
-// and then the fixture would pass with the rule absent. Reading it through an
-// `effect fn` keeps it opaque to the folder.
+// TWO THINGS THIS FIXTURE HAS TO GET RIGHT:
+//
+//   1. The code must be RUNTIME-valued, as C-219's fixture is: a constant
+//      folds, and then the fixture would pass with the rule absent. Reading it
+//      through an `effect fn` keeps it opaque to the folder.
+//   2. The call sits in a `guard … else` arm rather than the function's tail.
+//      Both are ordinary Almide; the tail form is one the incumbent leg walls
+//      for a non-literal code (#2327), and writing it that way would cost the
+//      host-determinism gate a ceiling bump for no coverage. This shape runs
+//      on every leg, so the fixture pins the rule on all of them.
 import process
 
 effect fn chosen(k: Int) -> Int = k * 100
@@ -17,5 +24,6 @@ effect fn chosen(k: Int) -> Int = k * 100
 effect fn main() -> Unit = {
   println("before-exit")
   let code = chosen(2)!
-  process.exit(code)
+  guard code < 0 else process.exit(code)
+  println("unreachable")
 }
