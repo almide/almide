@@ -1,0 +1,2 @@
+import process as p
+effect fn main() -> Unit = 0x7d |> p.exit

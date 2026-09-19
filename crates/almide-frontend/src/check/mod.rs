@@ -28,6 +28,7 @@ mod static_dispatch;
 mod solving;
 mod diagnostics;
 mod deprecation_warn;
+mod exit_literal;
 mod exhaustiveness;
 
 use almide_lang::ast;

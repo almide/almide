@@ -105,6 +105,9 @@ impl Checker {
         // call site, before any argument inference can bury it under a
         // cascade of type errors.
         self.warn_if_deprecated(callee);
+        if let [argument] = args {
+            self.reject_exit_literal(callee, argument);
+        }
         let call_sig = self.lookup_call_sig(callee);
         let arg_tys = self.infer_call_arg_tys(callee, args, &call_sig);
         let callee_span_snapshot = callee.span;

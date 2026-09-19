@@ -1,0 +1,2 @@
+import process
+effect fn main() -> Unit = process.exit(-(1))
