@@ -1,6 +1,7 @@
 # Dependabot keeps dependencies current by opening PRs automatically.
 # Updates are intentionally ungrouped: one PR per dependency, so each lands
 # as its own reviewable change. See kpi/README.md for the velocity rationale.
+# The ONE exception is the wasm-tools family below — see the group's comment.
 version: 2
 updates:
   # Rust crates across the Cargo workspace
@@ -15,6 +16,24 @@ updates:
     labels:
       - "dependencies"
       - "rust"
+    groups:
+      # The wasm-tools family cannot move one crate at a time. `wasm-encoder`
+      # is declared with its `wasmparser` feature, so it re-exports the
+      # `wasmparser` it was built against: raise ours while it stays behind
+      # and two copies of the crate reach our code, which fails to compile
+      # with `expected ValType, found wasmparser::ValType`. Each per-crate PR
+      # is then red through no fault of its own and has to be superseded by
+      # hand — #1759 for 0.258, #2336 for 0.259. This group is the four
+      # crates proofs/wasi-pin-policy.toml names as the lockstep family, so
+      # the next train arrives as ONE proposal. (`wat` is not in it: it takes
+      # the family only as a private dependency and we exchange bytes with
+      # it, not types.)
+      wasm-tools:
+        patterns:
+          - "wasmparser"
+          - "wasm-encoder"
+          - "wit-parser"
+          - "wit-component"
 
   # GitHub Actions used by the CI / release workflows
   - package-ecosystem: "github-actions"

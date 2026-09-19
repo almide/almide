@@ -39,11 +39,14 @@ ci = "v47.0.3"
 flags = "-W component-model-async=y,component-model-more-async-builtins=y -S p3=y -S http=y"
 
 [wasm-tools]
-# The lockstep family version (workspace Cargo pins). 0.258 is the
+# The lockstep family version (workspace Cargo pins). 0.259 is the
 # 0.3.1-era toolchain (WIT `map<K,V>` / `implements` support) — the
 # coordinated bump #1759 landed the family as ONE change after the
-# per-crate dependabot PRs each failed on split-family version skew.
-family = "0.258"
+# per-crate dependabot PRs each failed on split-family version skew,
+# and #2336 repeated it for 0.259 after the same four PRs failed the
+# same way. The per-crate PRs are now grouped in .github/dependabot.yml
+# so the family arrives as one proposal.
+family = "0.259"
 
 [sources]
 # Dated upstream evidence for the rows above.
@@ -52,4 +55,5 @@ evidence = [
   "wasmtime 46 release notes: wasi:cli@0.3.0 default-on (p3)",
   "wasmtime v47.0.2 vendored crates/wasi/src/p3/wit — the WIT shapes the almide p3 leg transcribed (2026-08-27/28 survey, ../almide-references/RESEARCH-component-model.md)",
   "wasm-tools 0.258.0 release (wasmparser/wasm-encoder/wit-parser/wit-component lockstep, 2026-08; the 0.3.1 WIT-language train)",
+  "wasm-tools 0.259.0 release 2026-09-10 (crates.io publish time of wasmparser 0.259.0); `SizeAlign::fill` became fallible, the only API change this tree touches",
 ]
