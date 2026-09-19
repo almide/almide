@@ -8,7 +8,8 @@
 # Format: <module.func>  <first fixture>  <floor: … | why the body abstained>
 # Gate:   wasm_runtime_interp_ledger.rs::interp_bridge_fallback_ledger —
 #         fails on a name missing here AND on a ledgered name the corpus no
-#         longer reaches through the bridge (a shadowed arm: delete it).
+#         longer reaches through the bridge (a shadowed arm: delete it), AND
+#         on a recorded reason that differs from the observed reason.
 # Regenerate (then review the diff!):
 #   ALMIDE_UPDATE_INTERP_LEDGER=1 cargo test --test wasm_runtime_interp_ledger interp_bridge_fallback_ledger
 
@@ -22,7 +23,7 @@ float.sqrt  matrix_head_count_domain  floor: consumed inside a self-hosted body
 float.to_float32  bytes_writer_family  floor: consumed inside a self-hosted body
 float.to_float64  uint64_upper_half  floor: consumed inside a self-hosted body
 float.to_string  availability_pure_batch  floor: consumed inside a self-hosted body
-float32.to_string  float32_literal_excess_precision  no lowered body for float32.to_string
+float32.to_string  float32_literal_excess_precision  float32.to_string: no lowered body
 int.band  fan_effect_mapper_capability  floor: consumed inside a self-hosted body
 int.bor  zlib_selfhost  floor: consumed inside a self-hosted body
 int.bshl  matrix_domain_edges  floor: consumed inside a self-hosted body
