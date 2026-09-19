@@ -317,6 +317,7 @@ since     = "0.24.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/string_empty_pattern.almd", class = "fixture" },
+  { path = "spec/wasm_cross/string_position_large_offset.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-018"
@@ -482,14 +483,14 @@ evidence  = [
 id        = "C-032"
 spec      = "ALS-D4"
 title     = "Regex engine is byte-identical to the native engine over a fuzzed grammar"
-statement = "The regex engine produces byte-identical results native == wasm for alternation, escape atoms, class escapes, captures (incl. optional-miss), multibyte `.`/class on CJK, anchors, quantifiers (incl. {n}/{n,}/{n,m} braces; malformed braces stay literal), replace, split edges, full_match, find_all, empty alternation arms, end-of-string empty-match replace, and the backtracking set (#1927): backtracking into groups and alternations, `\\b`/`\\B`, the `(?m)` flag, `(?:` non-capturing groups, and lazy quantifiers. Native runtime/rs/src/regex.rs is the oracle; a deterministic differential fuzz over the regex grammar certifies the input space beyond the headline corpus. WHAT THAT ORACLE CANNOT SEE, and what #2129 added beside it: an oracle that is OUR OWN engine certifies the two legs AGREE, never that either is right — a rule both legs read the same way and both read wrong passes every check here. Two did. `[]]` — a `]` in the FIRST position of a class is a literal member (POSIX, and PCRE / Python / Rust / Go / JS all follow it) — was read as the terminator, so the pattern became an empty class plus a stray `]` and SILENTLY never matched: no error, no match, nothing visible from outside. And `split` over a pattern that can match empty conflated the split point with the scan position, so a zero-width match ATE a character: `split(\"^\", \"abc\")` answered `[\"a\", \"bc\"]` where Python, Rust and Go all answer `[\"\", \"abc\"]`, and the trailing empty field (`split(\"$\", \"a\")` = `[\"a\", \"\"]`) was dropped. Both are fixed in BOTH engines — the native one and the self-hosted twin in stdlib/regex_engine.almd — and `scripts/check-regex-reference.sh` now asks both legs 6,624 questions an engine outside this project has already answered, over a subset chosen so the reference engines agree with EACH OTHER (proofs/regex/README.md states what is deliberately out: an empty alternation arm, where Python 3.7+ retries a non-empty match at an empty match's position and Rust and Go do not — Almide matches Rust and Go, verified against ripgrep). That is the gate the module's own authors were missing when they wrote a hand-rolled scanner rather than call it."
+statement = "The regex engine produces byte-identical results native == wasm for alternation, escape atoms, class escapes, captures (incl. optional-miss), multibyte `.`/class on CJK, anchors, quantifiers (incl. {n}/{n,}/{n,m} braces; malformed braces stay literal), replace, split edges, full_match, find_all, empty alternation arms, end-of-string empty-match replace, and the backtracking set (#1927): backtracking into groups and alternations, `\\b`/`\\B`, the `(?m)` flag, `(?:` non-capturing groups, and lazy quantifiers. Native runtime/rs/src/regex.rs is the oracle; a deterministic differential fuzz over the regex grammar certifies the input space beyond the headline corpus. A repetition's depth is the INPUT's length, never the call stack's: both engines walk their backtracking state on the heap, so 200,000 characters of `a*` and 100,000 group repetitions answer identically on both targets. They used to recurse once per matched repetition and ran out at different sizes — native aborted from about 30,000 characters on, and a repeated GROUP exhausted the wasm stack at about 5,000 repetitions while native still answered, so between those thresholds the two targets disagreed on output AND exit code (#2307)."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/regex_engine.almd", class = "fixture" },
   { path = "spec/wasm_cross/regex_fuzz_batch.almd", class = "fixture" },
+  { path = "spec/wasm_cross/regex_repetition_depth.almd", class = "fixture" },
   { path = "tests/regex_fuzz_test.rs", name = "regex_differential_fuzz", class = "fuzz", n = 220 },
-  { path = "tests/regex_reference_test.rs", class = "fixture", name = "both_legs_answer_what_an_outside_engine_answers" },
 ]
 
 # ── KNOWN DIVERGENCE: COPY-ON-WRITE FOR ALIASED MUTABLES ────────────
@@ -639,6 +640,8 @@ evidence  = [
   { path = "spec/wasm_cross/loop_outer_inplace_mutate_rc.almd", class = "fixture" },
   { path = "spec/wasm_cross/map_entries_reclaim.almd", class = "fixture" },
   { path = "spec/wasm_cross/set_entries_reclaim.almd", class = "fixture" },
+  { path = "spec/wasm_cross/variant_result_one_credit_churn.almd", class = "fixture" },
+  { path = "spec/wasm_cross/variant_result_credit_shapes.almd", class = "fixture" },
   { path = "spec/churn/string_accumulator_churn.almd", class = "by-construction" },
   { path = "spec/churn/construct_from_temp_churn.almd", class = "by-construction" },
   { path = "spec/churn/record_churn.almd", class = "by-construction" },
@@ -937,6 +940,7 @@ since     = "0.26.20"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/effect_assign_unwrap.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fallible_hof_option_effect_callback.almd", class = "fixture" },
 ]
 
 # ── STRING POSITION API SPEAKS ONE UNIT: CODEPOINTS ──────────────────
@@ -950,6 +954,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/string_codepoint_index.almd", class = "fixture" },
   { path = "spec/wasm_cross/string_lines.almd", class = "fixture" },
+  { path = "spec/wasm_cross/string_position_large_offset.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-067"
@@ -2715,10 +2720,11 @@ evidence  = [
 id        = "C-219"
 spec      = "ALS-T6"
 title     = "a Never-typed call in a branch arm runs on both targets and sets the exit code"
-statement = "A call whose return type is `Never` — `process.exit(code)`, the stdlib's only one — EXECUTES when it is the tail of a branch arm, and the process exits with that code on BOTH targets. The arm-tail dispatch in `lower_branch_arm` ran a `Call` only when its type was `Ty::Unit`; a `Never` call fell through to the deferred-value path, which records the call as a capability marker and emits NO call. The arm lowered to zero ops and returned Ok, so `guard n > 99 else process.exit(3)` built clean and exited 0 (#1124) — a silently wrong exit code with no wall and no diagnostic, reached through a TYPE the match forgot to name rather than through an unsupported shape, which is why strict-value mode never fired. NOT a wasm-only defect, though #1124 reported it as one: with a runtime condition the exit is lost on the NATIVE leg too; the issue's repro read `process.args()`, whose list length the native path resolved differently, which is what made it look cross-target. `Never` now rides with `Unit` in that dispatch — both produce no value by construction, the property the arm needs. The CONSTANT-condition form (`guard false else process.exit(3)`) is folded earlier (#1117) into a scalar tail outside the value subset, and STRICT value mode walls it honestly rather than deferring it to Const 0 — a wall, not a wrong answer, tracked separately."
+statement = "A call whose return type is `Never` — `process.exit(code)`, the stdlib's only one — EXECUTES when it is the tail of a branch arm, and the process exits with that code on BOTH targets. The arm-tail dispatch in `lower_branch_arm` ran a `Call` only when its type was `Ty::Unit`; a `Never` call fell through to the deferred-value path, which records the call as a capability marker and emits NO call. The arm lowered to zero ops and returned Ok, so `guard n > 99 else process.exit(3)` built clean and exited 0 (#1124) — a silently wrong exit code with no wall and no diagnostic, reached through a TYPE the match forgot to name rather than through an unsupported shape, which is why strict-value mode never fired. NOT a wasm-only defect, though #1124 reported it as one: with a runtime condition the exit is lost on the NATIVE leg too; the issue's repro read `process.args()`, whose list length the native path resolved differently, which is what made it look cross-target. `Never` now rides with `Unit` in that dispatch — both produce no value by construction, the property the arm needs. A Never-typed expression also executes in a function tail, including nested blocks, if/match tails and a constant-false guard. A computed exit-code argument is evaluated exactly once before the range check; changing the expression position does not change stdout, stderr or the exit code (#2327). The exit code the arm sets is one the artifact can deliver: C-350 narrows `process.exit` to 0..=125 on every target and makes any other code a defined abort, so \"exits with that code\" here reads within that range."
 since     = "0.56.0"
 status    = "active"
 evidence  = [
+  { path = "tests/incumbent_exit_tail_test.rs", name = "dynamic_exit_codes_execute_in_every_tail_position", class = "fixture" },
   { path = "spec/wasm_cross/guard_else_exit_code.almd", class = "fixture" },
 ]
 
@@ -3428,6 +3434,8 @@ since     = "0.57.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fallible_hof_effect_callback_family.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fallible_hof_large_input.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fallible_hof_option_effect_callback.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-285"
@@ -3914,7 +3922,7 @@ evidence  = [
 id        = "C-314"
 spec      = "ALS-B7"
 title     = "A @bounded function calls only @bounded functions and first-order pure stdlib members (E074)"
-statement = "Calls from a `@bounded` function to a non-`@bounded` user function, creation or call of a closure/lambda, a higher-order stdlib call (a function value passed), a function reference, or `any P` dispatch are rejected with E074 (hint `@bounded callee`). Calls to `@bounded` functions and to first-order members of pure stdlib modules are admissible. Requirements-first (ADR-0017): specified here before any checker enforces it; the 0.58.0 release warns E053 (unknown attribute) and has no such rejection, so this evidence is red against it by design."
+statement = "Calls from a `@bounded` function to a non-`@bounded` user function, creation or call of a closure/lambda, a higher-order stdlib call (a function value passed), a function reference, or `any P` dispatch are rejected with E074 (hint `@bounded callee`). Calls to `@bounded` functions and to first-order members of pure stdlib modules are admissible. A variant constructor application is not a call: like a record literal or a tuple it builds a value, so it is admissible inside and outside a counted loop, and its payload is judged by every rule. Requirements-first (ADR-0017): specified here before any checker enforces it; the 0.58.0 release warns E053 (unknown attribute) and has no such rejection, so this evidence is red against it by design."
 since     = "0.60.0"
 status    = "active"
 evidence  = [
@@ -4243,6 +4251,7 @@ since     = "0.63.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/result_param_not_first.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fallible_hof_option_effect_callback.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-346"
@@ -4288,4 +4297,18 @@ since     = "0.63.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fan_arm_unwrap_or.almd", class = "fixture" },
+]
+
+# ── THE EXIT CODE IS 0..=125 ON EVERY TARGET ──
+[[contract]]
+id        = "C-350"
+spec      = "ALS-R9"
+title     = "process.exit accepts 0..=125 on every target, and any other code is a defined abort"
+statement = "`process.exit(code)` terminates with `code` when `0 <= code <= 125`, identically on native, on the embedded host and on a stock WASI runtime. Any other code is a domain error in the ALS-R1 form: one stderr line `Error: exit code must be in 0..=125` and exit 1, byte-identical on every target. The bound is the intersection of what the SHIPPED artifact can deliver, not an implementation limit. POSIX carries only the low 8 bits of a status to the parent, so `process.exit(256)` answered 0 natively — a silent truncation this rule removes. A shell generates 126 (found, not executable), 127 (not found) and 128+n (killed by signal n) itself, so a program exiting in that band misreports itself to its own caller. WASI preview-1's `proc_exit` is specified over `[0, 126)` and a stock runtime turns anything else into a host trap that carries no exit request at all — indistinguishable from a real fault, and undiagnosable by the host, which is the outcome this rule replaces with one sentence on stderr. `almide build --target wasm` ships the preview-1 artifact, so 126 and above cannot be delivered by it and no leg change could make them. Before this rule, `process.exit(200)` exited 200 natively and on the embedded host and 1 with a runtime error on a stock runtime (#2303). The bound is a FLOOR that widens with the shipped ABI, never a permanent cut: the component model's `wasi:cli/exit#exit-with-code(u8)` carries 0..255 without trapping, so a default artifact that stops going through `proc_exit` may widen the range — widening is additive, and the reverse would be breaking."
+since     = "0.63.0"
+status    = "active"
+evidence  = [
+  { path = "tests/incumbent_exit_tail_test.rs", name = "dynamic_exit_codes_execute_in_every_tail_position", class = "fixture" },
+  { path = "spec/wasm_cross/exit_code_out_of_range.almd", class = "fixture" },
+  { path = "spec/wasm_cross/exit_code_upper_bound.almd", class = "fixture" },
 ]

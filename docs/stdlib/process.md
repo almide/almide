@@ -17,7 +17,13 @@ effect fn main() -> Unit = {
 
 ### `process.exit(code: Int) -> Unit`
 
-Exit the process with the given status code
+Exit the process with the given status code. The code is **0 to 125** on every
+target; any other code is a domain error — one stderr line
+`Error: exit code must be in 0..=125` and exit 1, identically everywhere
+(C-350). 126, 127 and 128+n are values a shell generates itself, POSIX carries
+only the low 8 bits of a status to its parent, and the shipped wasm artifact's
+`proc_exit` is specified over the same range — so 0..=125 is what a build can
+actually deliver.
 
 ```almd check
 import process

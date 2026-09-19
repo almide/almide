@@ -18,8 +18,13 @@
 /// still hold a Result block (autotry_construction: v0 already keeps the Result via C-068;
 /// this pre-pass silently undid it for v1, since the original bind/assign-only re-wrap never
 /// covered construction positions). Since the callee never errs, `ok(call)` is exact.
+///
+/// The fn's OWN return position is the last such target (#2308): `effect fn h(x) ->
+/// Result[Int?, String] = f(x)` returned the raw value as its Result block — a wrong answer
+/// for a declared-Option `f`, invalid wasm (i64 where i32) for a scalar lifted one. A
+/// `Result[Unit, _]` return is left to `wrap_unit_body_in_ok`, which already owns it.
 pub fn rewrap_never_err_into_result_targets(
-    body: &mut IrExpr,
+    func: &mut IrFunction,
     can_err: &std::collections::HashSet<String>,
     lifted_effect_fns: &std::collections::HashSet<String>,
     record_layouts: &RecordLayouts,
@@ -27,6 +32,7 @@ pub fn rewrap_never_err_into_result_targets(
 ) {
     use almide_ir::{walk_expr_mut, IrMutVisitor};
     use almide_lang::types::constructor::TypeConstructorId;
+    let body = &mut func.body;
     // Pass 1: vars DECLARED with a Result type (Bind.ty).
     fn collect_result_vars(e: &IrExpr, out: &mut std::collections::HashSet<u32>) {
         use almide_ir::visit::IrVisitor;
@@ -57,7 +63,7 @@ pub fn rewrap_never_err_into_result_targets(
         fn is_raw_never_err_call(&self, e: &IrExpr) -> bool {
             !matches!(&e.ty, Ty::Applied(TypeConstructorId::Result, _))
                 && matches!(&e.kind, IrExprKind::Call { target: CallTarget::Named { name }, .. }
-                    if self.lifted.contains(name.as_str()) && !self.can_err.contains(name.as_str()))
+                    if is_raw_never_err_callee(name.as_str(), self.can_err, self.lifted))
         }
         fn wrap(&self, e: &mut IrExpr, result_ty: Ty) {
             let inner = std::mem::replace(
@@ -94,7 +100,7 @@ pub fn rewrap_never_err_into_result_targets(
             self.rewrap_lambda_return_positions(body, ret.as_ref());
         }
 
-        /// Wrap every RETURN position of a lambda body holding a raw never-err call,
+        /// Wrap every RETURN position of a lambda (or fn) body holding a raw never-err call,
         /// retyping the spine ONLY along paths where something was wrapped — a body with
         /// nothing to wrap must come out byte-identical, since `lift_lambda`'s callee
         /// reads shape decisions off `body.ty`.
@@ -293,6 +299,11 @@ pub fn rewrap_never_err_into_result_targets(
             }
         }
     }
-    S { can_err, lifted: lifted_effect_fns, result_vars, record_layouts, param_sigs }
-        .visit_expr_mut(body);
+    let mut s = S { can_err, lifted: lifted_effect_fns, result_vars, record_layouts, param_sigs };
+    s.visit_expr_mut(body);
+    if matches!(&func.ret_ty, Ty::Applied(TypeConstructorId::Result, a)
+        if a.len() == 2 && !matches!(a[0], Ty::Unit))
+    {
+        s.rewrap_lambda_return_positions(&mut func.body, &func.ret_ty);
+    }
 }

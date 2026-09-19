@@ -54,8 +54,8 @@ effect fn main() -> Unit = {{
     )
 }
 
-fn heap_after(n: u32, body: &str) -> (u64, String) {
-    let ir = almide_spine::s5::lower_to_ir("credit.almd", &program(n, body)).expect("front");
+fn heap_of(src: &str) -> (u64, String) {
+    let ir = almide_spine::s5::lower_to_ir("credit.almd", src).expect("front");
     let bytes = almide_wasm::emit_program(&ir).expect("the structural leg lowers the probe");
     let out = run_wasm(&bytes).expect("run");
     assert_eq!(out.exit, 0, "{}", out.stderr);
@@ -63,8 +63,12 @@ fn heap_after(n: u32, body: &str) -> (u64, String) {
 }
 
 fn flat(name: &str, body: &str, expect_1000: &str, expect_8000: &str) {
-    let (h1, o1) = heap_after(1000, body);
-    let (h8, o8) = heap_after(8000, body);
+    flat_in(program, name, body, expect_1000, expect_8000);
+}
+
+fn flat_in(program: fn(u32, &str) -> String, name: &str, body: &str, expect_1000: &str, expect_8000: &str) {
+    let (h1, o1) = heap_of(&program(1000, body));
+    let (h8, o8) = heap_of(&program(8000, body));
     assert_eq!(o1, expect_1000, "{name}: output at N=1000");
     assert_eq!(o8, expect_8000, "{name}: output at N=8000");
     assert_eq!(h1, h8, "{name}: the high-water mark must not grow with N (N=1000 {h1} B, N=8000 {h8} B — {} B per call leaked)", (h8 - h1) / 7000);
@@ -437,5 +441,97 @@ fn a_list_of_strings_spine_is_released() {
         "    let w = words(i)\n    total = total + list.len(w)",
         "2000",
         "16000",
+    );
+}
+
+/// #2317: a user fn's VARIANT result hands back one credit too. A
+/// constructor call was classed borrowed, so every route took a second
+/// credit: `make`'s `if d == 0 then Leaf else Node(…)` returned each node
+/// at rc 2 and no tree was ever freed (2.1 MB per `make(16)` round).
+const TREES: &str = r#"type Tree = Leaf | Node(Tree, Tree)
+
+type Slot[T] = Empty | Full(T)
+
+fn make(d: Int) -> Tree = if d == 0 then Leaf else Node(make(d - 1), make(d - 1))
+
+fn spine(d: Int) -> Tree = match d {
+  0 => Leaf,
+  _ => Node(spine(d - 1), Leaf),
+}
+
+fn leafy(d: Int) -> Tree = Node(Leaf, Leaf)
+
+fn graft(base: Tree, d: Int) -> Tree = if d == 0 then base else Node(graft(base, d - 1), Leaf)
+
+fn slot(d: Int) -> Slot[Tree] = if d == 0 then Empty else Full(make(d))
+
+fn size(t: Tree) -> Int = match t {
+  Leaf => 1,
+  Node(l, r) => size(l) + size(r) + 1,
+}
+"#;
+
+fn tree_program(n: u32, body: &str) -> String {
+    format!("{TREES}\neffect fn main() -> Unit = {{\n  var total = 0\n  for i in 0..<{n} {{\n{body}\n  }}\n  println(\"${{total}}\")\n}}\n")
+}
+
+#[test]
+fn a_constructor_tail_hands_back_one_credit() {
+    flat_in(tree_program, "leafy(i)", "    let t = leafy(i)\n    total = total + size(t)", "3000", "24000");
+}
+
+#[test]
+fn an_if_over_constructors_hands_back_one_credit() {
+    flat_in(
+        tree_program,
+        "make(3), read twice",
+        "    let t = make(3)\n    total = total + size(t) + size(t)",
+        "30000",
+        "240000",
+    );
+}
+
+#[test]
+fn a_match_over_constructors_hands_back_one_credit() {
+    flat_in(tree_program, "spine(4)", "    let t = spine(4)\n    total = total + size(t)", "9000", "72000");
+}
+
+/// `graft`'s `then` arm returns its borrowed param, its `else` arm a fresh
+/// node: each arm hands the join one credit (the borrowed one takes its +1
+/// inside), so neither path is returned with two.
+#[test]
+fn an_if_mixing_a_borrowed_param_and_a_fresh_arm_hands_back_one_credit() {
+    flat_in(
+        tree_program,
+        "graft(keep, 3)",
+        "    let keep = make(2)\n    let t = graft(keep, 3)\n    total = total + size(t) + size(keep)",
+        "20000",
+        "160000",
+    );
+}
+
+/// A constructor nested in a constructor moves into its slot, and one
+/// passed straight to a borrowed param is released after the call.
+#[test]
+fn a_nested_build_hands_back_one_credit() {
+    flat_in(
+        tree_program,
+        "Node(Node(Leaf, make(2)), spine(1))",
+        "    let t = Node(Node(Leaf, make(2)), spine(1))\n    total = total + size(t) + size(Node(make(1), Leaf))",
+        "18000",
+        "144000",
+    );
+}
+
+/// A generic case (`Full(T)` of `Slot[T]`) resolves through the call's own
+/// type, exactly as its lowering does.
+#[test]
+fn a_generic_constructor_hands_back_one_credit() {
+    flat_in(
+        tree_program,
+        "slot(i % 3)",
+        "    let s = slot(i % 3)\n    total = total + match s {\n      Empty => 0,\n      Full(t) => size(t),\n    }",
+        "3330",
+        "26663",
     );
 }

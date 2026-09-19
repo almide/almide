@@ -613,6 +613,35 @@ pub(crate) fn wall_fan_map_propagating_callbacks(body: &IrExpr) -> Result<(), Lo
     }
 }
 
+/// A NEVER-ERR effect callee whose v1 value is RAW while the frontend types its CALL as the lifted
+/// `Result[T, String]` — the name test the three type passes below share (#2308). The frontend lifts
+/// every effect fn that does not declare `Result`, `-> Option[..]` included, but
+/// [`lifted_effect_fn_names`] leaves the declared-Option ones out: their `!`/`?`/`??` is stripped by
+/// [`strip_declared_option_trys`] instead, which needs a node to strip. A BARE call has none — the
+/// fallible-HOF lambda tail (`list.filter_map((x) => f(x)!)`: the checker drops the `!` so the lambda
+/// returns the carrier), `match f(x) { ok(v) => .. }`, a `Result`-annotated bind or argument — so it
+/// kept the lifted type over the raw Option block, which was then read with the Result layout: a
+/// `rc_dec` trap, a hang or a wrong list on the incumbent leg. [`DECLARED_OPTION_EFFECT_FNS`] is
+/// never-err by construction; the `can_err` test keeps the lifted half as it was.
+pub(crate) fn is_raw_never_err_callee(
+    name: &str,
+    can_err: &std::collections::HashSet<String>,
+    lifted_effect_fns: &std::collections::HashSet<String>,
+) -> bool {
+    !can_err.contains(name)
+        && (lifted_effect_fns.contains(name)
+            || DECLARED_OPTION_EFFECT_FNS.with(|s| s.borrow().contains(name)))
+}
+
+/// A call to a never-err DECLARED-Option effect fn still typed as its lifted `Result`: the
+/// `match` residue [`rewrite_never_err_effect_match`] leaves, which the match lowering walls.
+/// Keyed on the type as well, because a stripped `f()!` subject is the Option itself.
+pub(crate) fn is_unstripped_declared_option_call(e: &IrExpr) -> bool {
+    is_result_ty(&e.ty)
+        && matches!(&e.kind, IrExprKind::Call { target: CallTarget::Named { name }, .. }
+            if DECLARED_OPTION_EFFECT_FNS.with(|s| s.borrow().contains(name.as_str())))
+}
+
 /// Rewrite a NEVER-ERR user `effect fn` `Named` CALL's result type from the lifted-ABI
 /// `Result[T, String]` (what the frontend reports so consumers `auto_unwrap`) back to the RAW `T`
 /// the v1 function body actually returns. A never-err effect fn's body returns the bare value (no
@@ -651,7 +680,7 @@ pub fn unwrap_never_err_call_types(
                 if let IrExprKind::Match { subject, arms } = &mut expr.kind {
                     let skip_subject = matches!(&subject.kind,
                         IrExprKind::Call { target: CallTarget::Named { name }, .. }
-                            if self.1.contains(name.as_str()) && !self.0.contains(name.as_str()));
+                            if is_raw_never_err_callee(name.as_str(), self.0, self.1));
                     if skip_subject {
                         for arm in arms.iter_mut() {
                             self.visit_expr_mut(&mut arm.body);
@@ -664,8 +693,7 @@ pub fn unwrap_never_err_call_types(
             if let IrExprKind::Call { target: CallTarget::Named { name }, .. } = &expr.kind {
                 // Unwrap ONLY a call to a LIFTED user effect fn that is also NEVER-err. (Pure Result
                 // fns are excluded — not in `lifted_effect_fns` — the list_iter_tco regression fix.)
-                if self.1.contains(name.as_str())
-                    && !self.0.contains(name.as_str())
+                if is_raw_never_err_callee(name.as_str(), self.0, self.1)
                     && !crate::lower::AUTO_WRAP_ABI_FNS.with(|s| s.borrow().contains(name.as_str()))
                 {
                     if let Ty::Applied(TypeConstructorId::Result, a) = &expr.ty {

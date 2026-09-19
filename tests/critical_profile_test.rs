@@ -136,6 +136,7 @@ fn a_violation_is_seen_through_every_expression_kind() {
         ("err payload", format!("fn f(n: Int) -> Result[Int, Int] = err({LOOP})\n\nfn main() -> Unit = println(int.to_string(f(3) ?? 0))\n"), "E070"),
         ("type-ascribed argument", format!("fn f(n: Int) -> String = int.to_string({LOOP}: Int)\n\nfn main() -> Unit = println(f(3))\n"), "E070"),
         ("interpolation hole", "fn f(x: Float) -> String = \"${x * 2.0}\"\n\nfn main() -> Unit = println(f(1.5))\n".to_string(), "E077"),
+        ("variant payload", format!("type B = | Holds(Int) | Empty\n\nfn f(n: Int) -> B = Holds({LOOP})\n\nfn main() -> Unit = println(match f(3) {{ Holds(v) => int.to_string(v), Empty => \"-\" }})\n"), "E070"),
     ];
     for (i, (kind, src, code)) in cases.iter().enumerate() {
         let name = format!("kind{i}.almd");
@@ -155,4 +156,22 @@ fn a_pipe_into_a_first_order_stdlib_member_stays_admissible() {
     let src = "fn head(xs: List[String]) -> String = xs |> list.first ?? \"none\"\n\nfn main() -> Unit = println(head([\"a\"]))\n";
     let (crit, err) = check(src, "pipe_first.almd", &["--profile", "critical"]);
     assert!(crit, "critical rejected a first-order pipe stage:\n{err}");
+}
+
+/// A variant constructor application builds a value, as a record literal or a
+/// tuple does (ALS-B7, #2297). The profile once classified its `TypeName`
+/// callee as an indirect call, so every Critical program that built a variant
+/// value was rejected with E074. It is admissible in a function body and
+/// inside a counted loop, and its payload stays judged (the "variant payload"
+/// row of `a_violation_is_seen_through_every_expression_kind`).
+#[test]
+fn a_variant_constructor_is_a_value_not_a_call() {
+    let src = "type Shape = | Circle(Int) | Dot\n\nfn mk(n: Int) -> Shape = if n > 0 then Circle(n) else Dot\n\nfn count() -> Int = {\n  var c = 0\n  for i in 0..<6 {\n    let s = if i % 2 == 0 then Circle(i) else Dot\n    c = c + (match s { Circle(_) => 1, Dot => 0 })\n  }\n  c\n}\n\nfn main() -> Unit = println(match mk(2) { Circle(r) => int.to_string(r + count()), Dot => \"dot\" })\n";
+    let (crit, err) = check(src, "variant_ctor.almd", &["--profile", "critical"]);
+    assert!(crit, "critical rejected a variant constructor:\n{err}");
+    let (normal, err) = check(src, "variant_ctor.almd", &[]);
+    assert!(normal, "normal check rejected the program:\n{err}");
+    let payload = "type Box = | Holds(Int) | Empty\n\nfn f(xs: List[Int]) -> Box = Holds(list.fold(xs, 0, (a, x) => a + x))\n\nfn main() -> Unit = println(match f([1]) { Holds(v) => int.to_string(v), Empty => \"-\" })\n";
+    let (crit, err) = check(payload, "variant_payload_hof.almd", &["--profile", "critical"]);
+    assert!(!crit && err.contains("E074"), "a higher-order call inside a constructor payload must stay E074:\n{err}");
 }

@@ -27,6 +27,7 @@ fn lower_and_link_one_runtime_fn(
     entries: &[(&str, &str)],
     verbose: bool,
     functions: &mut Vec<crate::MirFunction>,
+    fn_walls: &mut std::collections::HashMap<String, crate::lower::LowerError>,
 ) {
     // The program's record/variant layouts ride along (#1839): a registry
     // body may take a stdlib-DECLARED variant (`bytes_typed`'s `e: Endian`,
@@ -48,6 +49,21 @@ fn lower_and_link_one_runtime_fn(
         {
             eprintln!("[self-host] {} failed to lower: {:?}", f.name.as_str(), e);
         }
+        // Record the reason under the name a CALLER will look it up by, so the
+        // unlinked-call gate can attribute it (#2325). A registry body that
+        // fails to lower was dropped in silence here, and the only report left
+        // was the gate naming a symbol with no definition — whose advice ("add
+        // the callee to the self-host registry") is exactly wrong for a body
+        // that IS registered and did lower-attempt. Diagnosing one cost a day;
+        // the #906/#943 rule — name the CAUSE, not the absence — had simply
+        // never been applied to this linker. `or_insert`: a user fn's own wall,
+        // recorded before the linker runs, always wins the name.
+        let call_name = entries
+            .iter()
+            .find(|(impl_fn, _)| f.name.as_str() == *impl_fn)
+            .map(|(_, call)| (*call).to_string())
+            .unwrap_or_else(|| f.name.as_str().to_string());
+        fn_walls.entry(call_name).or_insert_with(|| e.clone());
     }
     if let Ok(mut mir) = lowered {
         if let Some((_, call)) = entries.iter().find(|(impl_fn, _)| &mir.name == impl_fn) {
@@ -63,11 +79,12 @@ fn synthesize_and_link_runtime_fns(
     mutable_tls: &[almide_ir::IrTopLet],
     layouts: &PipelineLayouts,
     verbose: bool,
+    fn_walls: &mut std::collections::HashMap<String, crate::lower::LowerError>,
 ) -> Result<(), LowerError> {
     if !mutable_tls.is_empty() {
         synthesize_mutable_global_init(functions, mutable_tls, layouts)?;
     }
-    link_self_host_runtime_to_fixpoint(functions, layouts, verbose)?;
+    link_self_host_runtime_to_fixpoint(functions, layouts, verbose, fn_walls)?;
     rewrite_impl_names_to_call_names(functions);
     link_print_str_runtime(functions, layouts)?;
     Ok(())
@@ -244,6 +261,7 @@ fn link_self_host_runtime_to_fixpoint(
     functions: &mut Vec<crate::MirFunction>,
     layouts: &PipelineLayouts,
     verbose: bool,
+    fn_walls: &mut std::collections::HashMap<String, crate::lower::LowerError>,
 ) -> Result<(), LowerError> {
     loop {
         let before = functions.len();
@@ -255,7 +273,9 @@ fn link_self_host_runtime_to_fixpoint(
                 let rt = source_to_ir(rt_source).map_err(|e| LowerError::Unsupported(format!("in registry source (first entry {:?}): {e:?}", entries.first())))?;
                 let linked_from = functions.len();
                 for f in &rt.functions {
-                    lower_and_link_one_runtime_fn(f, layouts, entries, verbose, functions);
+                    lower_and_link_one_runtime_fn(
+                        f, layouts, entries, verbose, functions, fn_walls,
+                    );
                 }
                 // The self-append rewrite runs on USER functions before this
                 // linker (it has to — the fixpoint scan below is what links the

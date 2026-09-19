@@ -1,7 +1,7 @@
 //! The interp abstain-ledger GATE (CG-1 gap audit): the set of
 //! `spec/wasm_cross/*.almd` fixtures the reference interpreter cannot evaluate
 //! must equal the committed `crates/almide-interp/interp-abstain-ledger.txt`,
-//! in both directions — a new abstain and a stale entry both fail.
+//! in both directions — a new abstain, stale entry, or changed reason fails.
 //!
 //! Backend-free by design: only the interp leg runs, so this binary needs no
 //! `almide` binary and no wasmtime, and it NEVER self-skips on CI. It includes
@@ -44,9 +44,10 @@ fn ledger_path() -> PathBuf {
 ///     a silent drift (the documented weakness this gate exists to close);
 ///   - a ledger entry whose fixture now evaluates (or was renamed/removed)
 ///     FAILS — stale entries hide progress; the ledger may only shrink.
+///   - a recorded reason differing from the observed reason FAILS.
 ///
 /// The ledger never decides WHAT is skipped (skips stay interp-self-reported);
-/// it only audits the set. Regenerate after a deliberate change with
+/// it audits the set and its reasons. Regenerate after a deliberate change with
 /// `ALMIDE_UPDATE_INTERP_LEDGER=1` and review the diff.
 #[test]
 fn interp_abstain_ledger() {
@@ -87,9 +88,12 @@ fn interp_abstain_ledger() {
              # interpreter cannot evaluate (its self-reported coverage gaps), i.e. the\n\
              # current boundary of the executable spec. CG-1 gap audit; shrink to zero.\n\
              #\n\
-             # Format: <fixture-stem>  <reason as last observed>  (first token is the key)\n\
+             # Format: <fixture-stem>  <reason>  (two spaces separate them)\n\
              # Gate:   wasm_runtime_interp_ledger.rs::interp_abstain_ledger — fails on a\n\
-             #         new abstain missing here AND on a stale entry that now evaluates.\n\
+             #         new abstain missing here, on a stale entry that now evaluates, AND\n\
+             #         on a recorded reason the interpreter no longer reports (#2333: the\n\
+             #         reason is what check-abstain-classes.sh classifies, so it is held\n\
+             #         equal, not merely carried).\n\
              # Regenerate (then review the diff!):\n\
              #   ALMIDE_UPDATE_INTERP_LEDGER=1 cargo test --test wasm_runtime_interp_ledger interp_abstain_ledger\n\
              # Preferred alternative to adding an entry: widen the interp glue\n\
@@ -114,12 +118,14 @@ fn interp_abstain_ledger() {
             ledger_path().display()
         )
     });
-    let ledger: std::collections::BTreeSet<String> = ledger_text
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty() && !l.starts_with('#'))
-        .filter_map(|l| l.split_whitespace().next().map(str::to_string))
-        .collect();
+    // stem → recorded reason. The reason is held EQUAL to the observed one, not
+    // merely carried: a ledger that records "the reason as last observed" and is
+    // never checked against observation drifts silently, and then the very
+    // regeneration the failure message prescribes rewrites rows nobody touched —
+    // unclassing them in check-abstain-classes.sh, which reads the reason text
+    // (#2333).
+    let recorded = parse_reason_ledger(&ledger_text, false);
+    let ledger: std::collections::BTreeSet<String> = recorded.keys().cloned().collect();
     let observed_set: std::collections::BTreeSet<String> =
         observed.iter().map(|(n, _)| n.clone()).collect();
 
@@ -171,6 +177,33 @@ fn interp_abstain_ledger() {
              the ledger may only shrink toward zero.\n",
         );
     }
+    let drifted: Vec<(&String, &String, &String)> = observed
+        .iter()
+        .filter_map(|(n, r)| {
+            recorded
+                .get(n)
+                .filter(|rec| *rec != r)
+                .map(|rec| (n, rec, r))
+        })
+        .collect();
+    if !drifted.is_empty() {
+        failures.push_str(&format!(
+            "\nDRIFTED REASON(S) — {} ledgered fixture(s) still abstain, but for a \
+             reason the ledger does not record:\n",
+            drifted.len()
+        ));
+        for (n, rec, obs) in &drifted {
+            failures.push_str(&format!(
+                "    - {n}\n        recorded: {rec}\n        observed: {obs}\n"
+            ));
+        }
+        failures.push_str(
+            "  The reason is the auditable half of this ledger — check-abstain-classes.sh \
+             classifies each abstain by its TEXT, so a reason that moves without the ledger \
+             moving unclasses the row the next time anyone regenerates. Re-record in this \
+             same PR (ALMIDE_UPDATE_INTERP_LEDGER=1) and keep the class patterns matching.\n",
+        );
+    }
     if !failures.is_empty() {
         panic!("{failures}");
     }
@@ -194,14 +227,18 @@ fn interp_abstain_ledger() {
 
 /// The committed inventory of bridge arms the corpus still reaches as fallbacks.
 fn fallback_ledger_path() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("crates/almide-interp/interp-bridge-fallback-ledger.txt")
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("crates/almide-interp/interp-bridge-fallback-ledger.txt")
 }
 
 #[test]
 fn interp_bridge_fallback_ledger() {
     let dir = spec_dir();
     if !dir.exists() {
-        eprintln!("interp_bridge_fallback_ledger: {} missing — skipping", dir.display());
+        eprintln!(
+            "interp_bridge_fallback_ledger: {} missing — skipping",
+            dir.display()
+        );
         return;
     }
     let mut entries: Vec<_> = std::fs::read_dir(&dir)
@@ -216,7 +253,8 @@ fn interp_bridge_fallback_ledger() {
     }
 
     // name → (first fixture that reached it, the body's reason), corpus order
-    let mut observed: std::collections::BTreeMap<String, (String, String)> = std::collections::BTreeMap::new();
+    let mut observed: std::collections::BTreeMap<String, (String, String)> =
+        std::collections::BTreeMap::new();
     let mut calls = 0usize;
     for entry in &entries {
         let path = entry.path();
@@ -225,7 +263,9 @@ fn interp_bridge_fallback_ledger() {
         let (_, fallbacks) = run_interp_capture_with_fallbacks(&source);
         calls += fallbacks.len();
         for (name, why) in fallbacks {
-            observed.entry(name).or_insert((stem.clone(), why.replace('\n', " ")));
+            observed
+                .entry(name)
+                .or_insert((stem.clone(), why.replace('\n', " ")));
         }
     }
 
@@ -241,7 +281,8 @@ fn interp_bridge_fallback_ledger() {
              # Format: <module.func>  <first fixture>  <floor: … | why the body abstained>\n\
              # Gate:   wasm_runtime_interp_ledger.rs::interp_bridge_fallback_ledger —\n\
              #         fails on a name missing here AND on a ledgered name the corpus no\n\
-             #         longer reaches through the bridge (a shadowed arm: delete it).\n\
+             #         longer reaches through the bridge (a shadowed arm: delete it), AND\n\
+             #         on a recorded reason that differs from the observed reason.\n\
              # Regenerate (then review the diff!):\n\
              #   ALMIDE_UPDATE_INTERP_LEDGER=1 cargo test --test wasm_runtime_interp_ledger interp_bridge_fallback_ledger\n\n",
         );
@@ -264,16 +305,19 @@ fn interp_bridge_fallback_ledger() {
             fallback_ledger_path().display()
         )
     });
-    let ledger: std::collections::BTreeSet<String> = ledger_text
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty() && !l.starts_with('#'))
-        .filter_map(|l| l.split_whitespace().next().map(str::to_string))
-        .collect();
+    // name → recorded reason, held equal to the observed one for the same
+    // reason the abstain ledger above holds its own (#2333).
+    let recorded = parse_reason_ledger(&ledger_text, true);
+    let ledger: std::collections::BTreeSet<String> = recorded.keys().cloned().collect();
 
-    let unledgered: Vec<(&String, &(String, String))> =
-        observed.iter().filter(|(n, _)| !ledger.contains(*n)).collect();
-    let stale: Vec<&String> = ledger.iter().filter(|n| !observed.contains_key(*n)).collect();
+    let unledgered: Vec<(&String, &(String, String))> = observed
+        .iter()
+        .filter(|(n, _)| !ledger.contains(*n))
+        .collect();
+    let stale: Vec<&String> = ledger
+        .iter()
+        .filter(|n| !observed.contains_key(*n))
+        .collect();
 
     eprintln!(
         "\ninterp_bridge_fallback_ledger: {} bridge name(s) still answer as the body's fallback ({} calls over {} fixtures)",
@@ -313,7 +357,96 @@ fn interp_bridge_fallback_ledger() {
              (ALMIDE_UPDATE_INTERP_LEDGER=1 regenerates) — the ledger may only shrink.\n",
         );
     }
+    let drifted: Vec<(&String, &String, &String)> = observed
+        .iter()
+        .filter_map(|(n, (_, why))| {
+            recorded
+                .get(n)
+                .filter(|rec| *rec != why)
+                .map(|rec| (n, rec, why))
+        })
+        .collect();
+    if !drifted.is_empty() {
+        failures.push_str(&format!(
+            "\nDRIFTED REASON(S) — {} ledgered name(s) the bridge still answers for, but \
+             for a reason the ledger does not record:\n",
+            drifted.len()
+        ));
+        for (n, rec, obs) in &drifted {
+            failures.push_str(&format!(
+                "    - {n}\n        recorded: {rec}\n        observed: {obs}\n"
+            ));
+        }
+        failures.push_str(
+            "  The reason says WHY the body did not vote — the whole point of the row. \
+             Re-record it in this same PR (ALMIDE_UPDATE_INTERP_LEDGER=1).\n",
+        );
+    }
     if !failures.is_empty() {
         panic!("{failures}");
+    }
+}
+
+/// Malformed or duplicate rows must not disappear from the reason comparison.
+fn parse_reason_ledger(
+    text: &str,
+    has_fixture: bool,
+) -> std::collections::BTreeMap<String, String> {
+    let mut recorded = std::collections::BTreeMap::new();
+    for line in text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+    {
+        let (name, rest) = line
+            .split_once("  ")
+            .expect("ledger row needs a name and reason");
+        let reason = if has_fixture {
+            let (fixture, reason) = rest
+                .trim()
+                .split_once("  ")
+                .expect("bridge ledger row needs a witness fixture and reason");
+            assert!(
+                !fixture.trim().is_empty(),
+                "bridge witness must not be empty"
+            );
+            reason.trim()
+        } else {
+            rest.trim()
+        };
+        assert!(!reason.is_empty(), "ledger reason must not be empty");
+        assert!(
+            recorded
+                .insert(name.to_string(), reason.to_string())
+                .is_none(),
+            "duplicate ledger name: {name}"
+        );
+    }
+    recorded
+}
+
+#[test]
+fn malformed_reason_records_fail_closed() {
+    for (text, has_fixture) in [
+        ("name", false),
+        ("name  ", false),
+        ("name  reason\nname  different reason", false),
+        ("module.fn  witness", true),
+        ("module.fn  witness  ", true),
+        ("module.fn  witness  reason\nmodule.fn  other  reason", true),
+    ] {
+        assert!(
+            std::panic::catch_unwind(|| parse_reason_ledger(text, has_fixture)).is_err(),
+            "malformed row was accepted: {text:?}"
+        );
+    }
+    for (text, has_fixture) in [
+        ("# comment\nname  observed reason\n", false),
+        ("name  witness  observed reason\n", true),
+    ] {
+        assert_eq!(
+            parse_reason_ledger(text, has_fixture)["name"],
+            "observed reason"
+        );
     }
 }

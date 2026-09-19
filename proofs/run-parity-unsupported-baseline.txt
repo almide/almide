@@ -18,6 +18,19 @@
 # diverge. The `const MAX_UNSUPPORTED = 121` it replaces had not moved since
 # 2026-08-26 while the interpreter caught up: 101 rows of slack.
 #
+# 2026-09-19 (#2307): fuel_exhausted 2 -> 3 for
+# spec/wasm_cross/regex_repetition_depth.almd. Its rows are 200,000 characters
+# of `a*` and 100,000 group repetitions BECAUSE that is what the old engines
+# could not answer — native aborted from about 30,000 characters on and a
+# repeated group exhausted the wasm stack at about 5,000 repetitions, so a
+# shorter input passes with the defect present and pins nothing. Measured on
+# this tree at 40,000 / 20,000 as well: still fuel-exhausted, so there is no
+# length that both exceeds the thresholds and fits the tree-walker's budget.
+# This is the third counter's own meaning ("the one huge-range fixture"), a
+# second huge-INPUT fixture rather than a bridge gap: native, the structural
+# leg and the incumbent all vote on it, and the size/alloc ledgers pin its
+# emission. Solo run: 694 identical, 20 unsupported, 3 fuel-exhausted, 0 diverge.
+#
 # name<TAB>value
 unsupported	20
-fuel_exhausted	2
+fuel_exhausted	3

@@ -1,0 +1,25 @@
+// @contract: C-065, C-017
+// The string position API at offsets a real file reaches (#2291). On wasm,
+// `index_of` / `last_index_of` / `count(s, "")` turn a byte offset into a
+// codepoint index by counting the prefix, and the counter recursed once per
+// byte in non-tail position: `call stack exhausted` past about 16 KB on
+// wasmtime while native answered. (A 143 KB source file with the needle on
+// line 2598 took down 8 of 16 subcommands of a real tool.) The prefixes here
+// are 1,000,000 ASCII bytes and 1,600,000 mixed-width bytes (2-, 3- and 4-byte
+// codepoints), so the answers also pin the byte-to-codepoint conversion at
+// that scale. `pad_start` / `pad_end` count the subject's codepoints the same
+// way on the incumbent leg.
+effect fn main() -> Unit = {
+  let ascii = string.repeat("x", 1000000) + "NEEDLE" + string.repeat("y", 3)
+  println("ascii_index_of=" + int.to_string(string.index_of(ascii, "NEEDLE") ?? -1))
+  println("ascii_last_index_of=" + int.to_string(string.last_index_of(ascii, "NEEDLE") ?? -1))
+  println("ascii_count_empty=" + int.to_string(string.count(ascii, "")))
+  let mixed = string.repeat("é", 300000) + string.repeat("あ", 200000) + string.repeat("😀", 100000) + "NEEDLE"
+  println("mixed_len=" + int.to_string(string.len(mixed)))
+  println("mixed_index_of=" + int.to_string(string.index_of(mixed, "NEEDLE") ?? -1))
+  println("mixed_index_of_emoji=" + int.to_string(string.index_of(mixed, "😀") ?? -1))
+  println("mixed_last_index_of_empty=" + int.to_string(string.last_index_of(mixed, "") ?? -1))
+  println("mixed_count_empty=" + int.to_string(string.count(mixed, "")))
+  println("pad_start_len=" + int.to_string(string.len(string.pad_start(mixed, 600010, "-"))))
+  println("pad_end_len=" + int.to_string(string.len(string.pad_end(ascii, 1000019, "é"))))
+}

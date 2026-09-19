@@ -30,8 +30,8 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-<!-- counts:generated:start (as of 2026-09-16) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
-349 contracts
+<!-- counts:generated:start (as of 2026-09-19) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
+350 contracts
 <!-- counts:generated:end -->
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
@@ -52,7 +52,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-014 | Set is insertion-ordered and deterministic | 0.24.0 | active | fixture | 3 |
 | C-015 | Structural deep equality for compound elements and heap values | 0.24.0 | active | fixture | 7 |
 | C-016 | UTF-8 codepoint-aware string ops are byte-identical | 0.24.0 | active | fixture | 2 |
-| C-017 | Empty-pattern count / last_index_of follow native codepoint/byte semantics | 0.24.0 | active | fixture | 1 |
+| C-017 | Empty-pattern count / last_index_of follow native codepoint/byte semantics | 0.24.0 | active | fixture | 2 |
 | C-018 | Unicode string predicates match Rust char methods over the full domain | 0.24.0 | active | fixture | 1 |
 | C-019 | rt_string_extra ops (replace_first, strip_*, predicates, cmp) match native | 0.24.0 | active | fixture | 2 |
 | C-020 | Unicode case transforms (to_upper/to_lower/capitalize) are full-Unicode | 0.24.0 | active | fixture | 1 |
@@ -67,7 +67,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-029 | int.parse error modes byte-match native ParseIntError | 0.24.0 | active | fixture | 1 |
 | C-030 | hex.encode / hex.decode are byte-identical incl. positional error detail | 0.24.0 | active | fixture | 2 |
 | C-031 | json get/set/remove_path edge cases match the infallible native oracle | 0.24.0 | active | fixture | 2 |
-| C-032 | Regex engine is byte-identical to the native engine over a fuzzed grammar | 0.24.0 | active | fuzz(220) | 2 |
+| C-032 | Regex engine is byte-identical to the native engine over a fuzzed grammar | 0.24.0 | active | fuzz(220) | 3 |
 | C-033 | [Value semantics for aliased mutables (copy-on-write)](C-033-cow-truth-table.md) | 0.24.0 | active | fixture | 4 |
 | C-034 | Out-of-range list ops clamp / no-op gracefully (no OOB heap access) | 0.24.0 | active | fixture | 8 |
 | C-035 | Effect-main errors terminate uniformly: Error: <msg> + exit 1 | 0.24.0 | active | fixture | 6 |
@@ -99,9 +99,9 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-061 | A mut Map parameter mutated in place builds on both targets and the mutation persists, byte-identical | 0.26.9 | active | fixture | 1 |
 | C-062 | The RawPtr / linear-memory bridge moves bytes byte-identically on both targets | 0.26.15 | active | fixture | 1 |
 | C-063 | Parsing a heterogeneous-nested glTF/JSON document and walking its arrays by element is byte-identical on both targets | 0.26.19 | active | fixture | 1 |
-| C-064 | The effect-fn Result auto-unwrap rule is identical across binding positions and type-directed, byte-identical on both targets | 0.26.20 | active | fixture | 1 |
-| C-065 | The string position API is codepoint-indexed end-to-end on both targets | 0.26.20 | active | fixture | 2 |
-| C-066 | WASM heap is reclaimed by default (true Perceus) | 0.27.0 | active | fixture | 6 |
+| C-064 | The effect-fn Result auto-unwrap rule is identical across binding positions and type-directed, byte-identical on both targets | 0.26.20 | active | fixture | 2 |
+| C-065 | The string position API is codepoint-indexed end-to-end on both targets | 0.26.20 | active | fixture | 3 |
+| C-066 | WASM heap is reclaimed by default (true Perceus) | 0.27.0 | active | fixture | 8 |
 | C-067 | The xs[i] index syntax aborts on out-of-bounds (read and write) | 0.27.4 | active | fixture | 4 |
 | C-068 | Auto-? is target-directed in construction positions | 0.27.4 | active | fixture | 2 |
 | C-069 | Effect-fn tail self-recursion loop-converts to O(1) stack on both targets | 0.27.4 | active | fixture | 3 |
@@ -319,7 +319,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-281 | Bare Result constructors and parameter-passthrough effect tails run identically per the kernel semantics | 0.57.1 | active | fixture | 2 |
 | C-282 | A matrix index out of range aborts identically on both targets; the row reductions answer their identity instead | 0.57.1 | active | fixture | 1 |
 | C-283 | A call through a Fn-typed local resolves that local, never a same-named top-level fn | 0.57.1 | active | fixture | 1 |
-| C-284 | A fallible list HOF driven by a user effect fn callback runs identically on both targets | 0.57.1 | active | fixture | 1 |
+| C-284 | A fallible list HOF driven by a user effect fn callback runs identically on both targets | 0.57.1 | active | fixture | 3 |
 | C-285 | regex.captures answers the whole match at index 0, and `none` means only that nothing matched | 0.57.1 | active | fixture | 1 |
 | C-286 | `??` reads its source; the Option survives the elimination and stays readable | 0.57.1 | active | fixture | 1 |
 | C-287 | A tail-position heap-result if/match with a none arm executes the taken arm for record and list payloads | 0.57.1 | active | fixture | 1 |
@@ -380,9 +380,10 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-342 | bytes.copy_from with a negative length or offset copies nothing on both targets | 0.62.0 | active | fixture | 1 |
 | C-343 | A tail `!` over a declared-Result plain callee yields the payload in a lifted effect fn | 0.63.0 | active | fixture | 1 |
 | C-344 | guard-else-err inside a call-argument block after a Result bind runs on every leg | 0.63.0 | active | fixture | 1 |
-| C-345 | An effect call passed as a Result/Option parameter keeps its Result at every parameter index | 0.63.0 | active | fixture | 1 |
+| C-345 | An effect call passed as a Result/Option parameter keeps its Result at every parameter index | 0.63.0 | active | fixture | 2 |
 | C-346 | A heap-payload ?? lowers on the incumbent leg as a call argument and as a match subject | 0.63.0 | active | fixture | 1 |
 | C-347 | Operator round trips over a known literal print that literal on both targets | 0.63.0 | active | fixture | 1 |
 | C-348 | Byte-indexed string slices validate UTF-8 boundaries | 0.63.0 | active | fixture | 1 |
 | C-349 | A `??` inside a fan arm keeps its default on both targets | 0.63.0 | active | fixture | 1 |
+| C-350 | process.exit accepts 0..=125 on every target, and any other code is a defined abort | 0.63.0 | active | fixture | 2 |
 

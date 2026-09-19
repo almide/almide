@@ -697,6 +697,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_RUN_PROJECT_DIR=value` | tool | the project root `almide run` resolves dependencies from, when the file is run from outside it |
 | `ALMIDE_SEMLAW_CASES=value` | harness | how many cases the semantic-laws property test draws |
 | `ALMIDE_SHUFFLE_PASSES=value` | gate | run the native passes in the seeded random order the declared dependency edges permit — a pass-dependency probe: the emitted Rust must not change (#2186) |
+| `ALMIDE_SIZE_ALONE=value` | harness | the one fixture a child process of the size ratchet measures alone, for its isolation check (#2309); the ratchet sets it on the processes it spawns |
 | `ALMIDE_SKIP_PASS=value` | ablation | skip the named optional passes (comma-separated) — a pass-dependency probe: output must not change |
 | `ALMIDE_SKIP_VERSION_CHECK` | gate | skip the project's `almide` version requirement check |
 | `ALMIDE_STREAM_FUSION_OFF` | ablation | turn the stream-fusion pass off |

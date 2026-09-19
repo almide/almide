@@ -360,12 +360,12 @@ impl LowerCtx {
         // a user-Result statement match LINEARIZES (runs BOTH arms) = a silent miscompile.
         // A `match <never-err lifted-effect call> {…}` that `rewrite_never_err_effect_match`
         // could NOT turn into a `let`-block (an `ok(_)`/structured/guarded Ok arm): its
-        // subject's `.ty` is the lifted `Result[T, String]` but the callee returns RAW `T`,
-        // so reading it as a Result handle TRAPs (the `$rc_dec` sentinel over raw bytes).
-        // WALL it cleanly — never a trap. (The common `ok(x)` shape is already rewritten away
-        // and never reaches here.)
+        // subject's `.ty` is the lifted `Result[T, String]` but the callee returns RAW `T` (a
+        // declared-Option callee too, #2308), so a Result read TRAPs (`$rc_dec` over raw
+        // bytes). WALL it cleanly. (The common `ok(x)` shape is rewritten away before here.)
         if let IrExprKind::Call { target: CallTarget::Named { name }, .. } = &subject.kind {
-            if crate::lower::NEVER_ERR_LIFTED_FNS.with(|s| s.borrow().contains(name.as_str()))
+            if (crate::lower::NEVER_ERR_LIFTED_FNS.with(|s| s.borrow().contains(name.as_str()))
+                || crate::lower::is_unstripped_declared_option_call(subject))
                 && !crate::lower::AUTO_WRAP_ABI_FNS.with(|s| s.borrow().contains(name.as_str()))
             {
                 return Err(LowerError::Unsupported(
@@ -537,6 +537,18 @@ impl LowerCtx {
                 // else it falls back to linearization.
                 IrExprKind::If { cond, then, else_ }
                     if self.try_lower_unit_if(cond, then, else_) => {}
+                // A nested Unit `match` arm-tail gets the SAME real-branch
+                // attempt its `if` sibling gets one line up. Without it every
+                // Match here went straight to `lower_branch`, whose
+                // linearization WALLS the moment an arm bears a call or an
+                // assignment — so a dispatch table nested inside a branch was
+                // unrenderable however ordinary it is (#2325: the mutual-TCO
+                // dispatcher's member arm is `match kind { 11 => …, 12 => … }`,
+                // and every regex program walled on it). The statement-position
+                // twin `lower_unit_match_stmt` has run this desugar since the
+                // fizzbuzz shape; the arm-tail seam simply never called it.
+                IrExprKind::Match { subject, arms }
+                    if self.try_lower_unit_match_arm_tail(tail, subject, arms) => {}
                 IrExprKind::If { .. } | IrExprKind::Match { .. } => self.lower_branch(tail)?,
                 // A LOOP tail (`ArrV(rows) => { for row in rows { … } }` — the gguf ValArray
                 // consumer arm; a `while` sibling): a loop is a Unit EFFECT, so it must RUN,

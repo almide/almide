@@ -192,8 +192,7 @@ else {
 }
 
 // ── the backtracking matcher ──
-// Returns the text END address of a match, or -1.
-// Alternation over [p, pend): FIRST alternative whose sequence matches wins.
+// Match ONE text char at `t` against the non-group atom at [p, ae).
 fn __rx_char_match(p: Int, ae: Int, t: Int, te: Int) -> Bool = if t >= te then false
 else {
   let c = __rx_cp(t)
@@ -212,29 +211,44 @@ else {
   } else c == __rx_cp(p)
 }
 
-// ── the matcher: backtracking by CONTINUATION (#1927) ──
-// Every position in a sequence carries the rest of the match as `k`, a
-// continuation FRAME on the heap (8-byte slots: kind first). Finishing a
-// sequence RUNS the frame instead of returning an end, so a group boundary
-// is no longer a commit point: `(.+) (stdout|stderr)` backs the `.+` off
-// until the group after it matches, and `(a|ab)c` on "abc" tries the second
-// alternative. Frames: 1 = SEQ [pnext, pend, next]; 2 = GROUP_END [ci,
-// tstart, next, saved_start, saved_end] (records the capture, restores it
-// when the continuation fails); 3 = REP [p, ae, pnext, pend, count, mn, mx,
-// next, tprev, lazy] (one more instance of a repeated group, or the rest);
-// 4 = END_AT [te] (full_match: the match must end exactly there). `k = 0`
-// is the empty continuation: return the current text position.
-// `caps = 0` means no capture writes (is_match / find / replace / split).
-// Flags: a leading `(?m)` makes `^`/`$` line anchors; `(?:…)` groups do
-// not capture; `\b`/`\B` are word-boundary assertions; a quantifier
-// followed by `?` is LAZY. A zero-width repetition never loops.
+// ── the matcher: a backtracking walk whose state lives in an arena (#2307) ──
+// The walk is the native engine's (runtime/rs/src/regex.rs), in the same
+// order: leftmost alternative first, greedy quantifiers longest-first, lazy
+// ones shortest-first, an empty repetition instance ends its loop, and a
+// group's capture is written when the group ends and restored when the walk
+// backtracks past it. Every call between the matcher's own functions is a
+// TAIL call, so the wasm stack stays flat whatever the input's length (a
+// repeated group used to take stack per repetition and trapped past about
+// 5,000 of them). The state recursion used to hold lives in an ARENA of
+// 8-byte slots, addressed by byte OFFSET so the arena can move when it grows:
+//  - continuation FRAMES, what runs when a sequence ends. `k` is a frame
+//    offset, or -1 once the whole pattern has matched. 1 = SEQ [pnext, pend,
+//    next]; 2 = GROUP_END [ci, tstart, next] (writes the capture); 3 = REP
+//    [p, ae, pnext, pend, count, mn, mx, next, tprev, lazy] (one more
+//    instance of a repeated group, or the rest).
+//  - CHOICES, the untried alternatives, linked newest-first from `bt`, each
+//    [kind, prev, fields]: 11 = ALTS [p, pend, t, k]; 12 = SEQ [p, pend, t,
+//    k]; 13 = GROUP [p, ae, t, k] (one more lazy instance); 14 = BACK [pnext,
+//    pend, t, count, mn, k] (a greedy atom gives back one char); 15 = LAZY
+//    [p, ae, pnext, pend, t, count, mn, mx, k] (a lazy atom takes one more);
+//    16 = UNDO [slot, start, end] (a capture write to take back).
+// A failure resumes the newest choice and cuts the arena back to it, which
+// frees everything made after it; a frame that runs with nothing made after
+// it is freed as it runs. The machine block `m` (__rx_vm) holds, in 8-byte
+// slots: 0 arena base, 1 arena capacity in bytes, 2 top (offset), 3 bt
+// (newest choice, -1 = none), 4 ts, 5 te, 6 caps (the capture buffer, 0 = no
+// capture writes), 7 pat0, 8 end_at (-1 = a match may end anywhere;
+// full_match passes te), 9 the end of the last match found, 10 the capture
+// buffer's slot count, 11-14 a suspended step (p, pend, t, k). The first
+// arena follows at slot 16.
+// Flags: a leading `(?m)` makes `^`/`$` line anchors; `(?:…)` groups do not
+// capture; `\b`/`\B` are word-boundary assertions; a quantifier followed by
+// `?` is LAZY.
 fn __rx_back(t: Int, ts: Int) -> Int = {
   let t1 = t - 1
   if t1 <= ts then ts
   else if prim.band(prim.load8(t1), 192) == 128 then __rx_back(t1, ts) else t1
 }
-
-fn __rx_frame(n: Int) -> Int = prim.handle(prim.alloc_list(n)) + 12
 
 fn __rx_flags(pat0: Int) -> Int = if prim.load8(pat0) == 40 and prim.load8(pat0 + 1) == 63 and prim.load8(pat0 + 2) == 109 and prim.load8(pat0 + 3) == 41 then 1 else 0
 
@@ -251,290 +265,430 @@ fn __rx_bol(t: Int, ts: Int, pat0: Int) -> Bool = t == ts or (__rx_flags(pat0) =
 
 fn __rx_eol(t: Int, te: Int, pat0: Int) -> Bool = t == te or (__rx_flags(pat0) == 1 and prim.load8(t) == 10)
 
-// Run continuation `k` at text position `t`.
-fn __rx_run(k: Int, t: Int, ts: Int, te: Int, caps: Int, pat0: Int) -> Int = if k == 0 then t
-else {
-  let kind = prim.load64(k)
-  if kind == 1 then __rx_seq(
-    prim.load64(k + 8),
-    prim.load64(k + 16),
-    t,
-    ts,
-    te,
-    caps,
-    pat0,
-    prim.load64(k + 24),
-  )
-  else if kind == 2 then __rx_run_group_end(k, t, ts, te, caps, pat0)
-  else if kind == 3 then __rx_run_rep(k, t, ts, te, caps, pat0)
-  else {
-    if t == prim.load64(k + 8) then t else 0 - 1
-  }
+// The machine block for one public call (layout above), with the first arena
+// inside it. Owned by the caller and dropped with it.
+fn __rx_vm(pat0: Int, ts: Int, te: Int, caps: Int, nslots: Int, end_at: Int) -> List[Int] = {
+  let vm = prim.alloc_list(272)
+  let m = prim.handle(vm) + 12
+  prim.store64(m, m + 128)
+  prim.store64(m + 8, 2048)
+  prim.store64(m + 32, ts)
+  prim.store64(m + 40, te)
+  prim.store64(m + 48, caps)
+  prim.store64(m + 56, pat0)
+  prim.store64(m + 64, end_at)
+  prim.store64(m + 80, nslots)
+  vm
 }
 
-fn __rx_run_group_end(k: Int, t: Int, ts: Int, te: Int, caps: Int, pat0: Int) -> Int = {
-  let ci = prim.load64(k + 8)
-  let knext = prim.load64(k + 24)
-  if caps == 0 or ci < 0 then __rx_run(knext, t, ts, te, caps, pat0)
+// One match attempt of the alternatives [p, pend) at `t`: the end of the
+// first match the walk reaches, or -1.
+fn __rx_exec(p: Int, pend: Int, t: Int, m: Int) -> Int = {
+  prim.store64(m + 16, 0)
+  prim.store64(m + 24, 0 - 1)
+  let caps = prim.load64(m + 48)
+  let _0 = if caps == 0 then 0 else __rx_fill_neg(caps, prim.load64(m + 80))
+  __rx_drive(__rx_alts(p, pend, t, 0 - 1, m), m)
+}
+
+// -2 = the walk stopped to grow its arena; anything else is its answer.
+fn __rx_drive(r: Int, m: Int) -> Int = if r == 0 - 2 then __rx_grow(m) else r
+
+// Move the arena into one twice its size and resume the stopped step there.
+// The new arena is this call's own list, so it has to outlive the rest of the
+// walk: the resume is not a tail call, and nests once per doubling. The old
+// arena is put back afterwards for the next attempt.
+fn __rx_grow(m: Int) -> Int = {
+  let base = prim.load64(m)
+  let cap = prim.load64(m + 8)
+  let arena = prim.alloc_list(cap / 4)
+  let nb = prim.handle(arena) + 12
+  let _0 = __rx_copy64(base, nb, prim.load64(m + 16) / 8)
+  prim.store64(m, nb)
+  prim.store64(m + 8, cap * 2)
+  let p = prim.load64(m + 88)
+  let pend = prim.load64(m + 96)
+  let t = prim.load64(m + 104)
+  let k = prim.load64(m + 112)
+  let r = __rx_drive(__rx_seq(p, pend, t, k, m), m)
+  prim.store64(m, base)
+  prim.store64(m + 8, cap)
+  r
+}
+
+// Stop the walk at the step (p, pend, t, k) so the arena can grow: -2.
+fn __rx_suspend(p: Int, pend: Int, t: Int, k: Int, m: Int) -> Int = {
+  prim.store64(m + 88, p)
+  prim.store64(m + 96, pend)
+  prim.store64(m + 104, t)
+  prim.store64(m + 112, k)
+  0 - 2
+}
+
+// Take `n` slots at the arena top: their offset. __rx_seq keeps 512 bytes
+// free, and no step between two of its calls takes more than 32 slots.
+fn __rx_take(m: Int, n: Int) -> Int = {
+  let off = prim.load64(m + 16)
+  prim.store64(m + 16, off + n * 8)
+  off
+}
+
+// A SEQ or GROUP_END frame [kind, a, b, c]: its offset.
+fn __rx_frame3(m: Int, kind: Int, a: Int, b: Int, c: Int) -> Int = {
+  let off = __rx_take(m, 4)
+  let at = prim.load64(m) + off
+  prim.store64(at, kind)
+  prim.store64(at + 8, a)
+  prim.store64(at + 16, b)
+  prim.store64(at + 24, c)
+  off
+}
+
+// A REP frame: the instance after `count` of the repeated group at [p, ae)
+// starts at `t`. Its offset.
+fn __rx_rep_frame(p: Int, ae: Int, pnext: Int, pend: Int, t: Int, count: Int, mn: Int, mx: Int, lazy: Int, k: Int, m: Int) -> Int = {
+  let off = __rx_take(m, 11)
+  let at = prim.load64(m) + off
+  prim.store64(at, 3)
+  prim.store64(at + 8, p)
+  prim.store64(at + 16, ae)
+  prim.store64(at + 24, pnext)
+  prim.store64(at + 32, pend)
+  prim.store64(at + 40, count)
+  prim.store64(at + 48, mn)
+  prim.store64(at + 56, mx)
+  prim.store64(at + 64, k)
+  prim.store64(at + 72, t)
+  prim.store64(at + 80, lazy)
+  off
+}
+
+// Link `n` slots at the arena top as the newest choice of `kind`: the
+// address of its first field.
+fn __rx_choice(m: Int, kind: Int, n: Int) -> Int = {
+  let off = __rx_take(m, n)
+  let at = prim.load64(m) + off
+  prim.store64(at, kind)
+  prim.store64(at + 8, prim.load64(m + 24))
+  prim.store64(m + 24, off)
+  at + 16
+}
+
+// An ALTS, SEQ or GROUP choice.
+fn __rx_choice4(m: Int, kind: Int, a: Int, b: Int, c: Int, d: Int) -> Int = {
+  let f = __rx_choice(m, kind, 6)
+  prim.store64(f, a)
+  prim.store64(f + 8, b)
+  prim.store64(f + 16, c)
+  prim.store64(f + 24, d)
+  0
+}
+
+// BACK: next, continue after `count` chars of the greedy atom, ending at `t`.
+fn __rx_back_choice(pnext: Int, pend: Int, t: Int, count: Int, mn: Int, k: Int, m: Int) -> Int = {
+  let f = __rx_choice(m, 14, 8)
+  prim.store64(f, pnext)
+  prim.store64(f + 8, pend)
+  prim.store64(f + 16, t)
+  prim.store64(f + 24, count)
+  prim.store64(f + 32, mn)
+  prim.store64(f + 40, k)
+  0
+}
+
+// LAZY: next, the lazy atom goes on from `count` chars ending at `t`.
+fn __rx_lazy_choice(p: Int, ae: Int, pnext: Int, pend: Int, t: Int, count: Int, mn: Int, mx: Int, k: Int, m: Int) -> Int = {
+  let f = __rx_choice(m, 15, 11)
+  prim.store64(f, p)
+  prim.store64(f + 8, ae)
+  prim.store64(f + 16, pnext)
+  prim.store64(f + 24, pend)
+  prim.store64(f + 32, t)
+  prim.store64(f + 40, count)
+  prim.store64(f + 48, mn)
+  prim.store64(f + 56, mx)
+  prim.store64(f + 64, k)
+  0
+}
+
+// UNDO: the capture `slot` is about to be overwritten; keep what it held.
+fn __rx_undo(slot: Int, m: Int) -> Int = {
+  let f = __rx_choice(m, 16, 5)
+  prim.store64(f, slot)
+  prim.store64(f + 8, prim.load64(slot))
+  prim.store64(f + 16, prim.load64(slot + 8))
+  0
+}
+
+// A failure resumes the newest choice and cuts the arena back to it; -1 once
+// none is left (no match at this start).
+fn __rx_fail(m: Int) -> Int = {
+  let b = prim.load64(m + 24)
+  if b < 0 then 0 - 1
   else {
-    let slot = caps + ci * 16
-    let _s = prim.store64(k + 32, prim.load64(slot))
-    let _e = prim.store64(k + 40, prim.load64(slot + 8))
-    let _w1 = prim.store64(slot, prim.load64(k + 16))
-    let _w2 = prim.store64(slot + 8, t)
-    let r = __rx_run(knext, t, ts, te, caps, pat0)
-    if r >= 0 then r
-    else {
-      let _r1 = prim.store64(slot, prim.load64(k + 32))
-      let _r2 = prim.store64(slot + 8, prim.load64(k + 40))
-      0 - 1
+    let at = prim.load64(m) + b
+    let kind = prim.load64(at)
+    if kind == 14 then {
+      // the group-repetition frame's resume, inlined (#2307): as its only
+      // caller, keeping it a separate fn made this a mutual-recursion group
+      // the incumbent leg cannot render
+      let t = prim.load64(at + 32)
+      let count = prim.load64(at + 40)
+      let keep = count > prim.load64(at + 48)
+      prim.store64(at + 32, __rx_back(t, prim.load64(m + 32)))
+      prim.store64(at + 40, count - 1)
+      prim.store64(m + 16, if keep then b + 64 else b)
+      prim.store64(m + 24, if keep then b else prim.load64(at + 8))
+      __rx_seq(prim.load64(at + 16), prim.load64(at + 24), t, prim.load64(at + 56), m)
+    } else {
+      prim.store64(m + 16, b)
+      prim.store64(m + 24, prim.load64(at + 8))
+      __rx_resume(kind, at + 16, m)
     }
   }
 }
 
-// A repeated group's instance just ended at `t`: one more instance, or the rest.
-fn __rx_run_rep(k: Int, t: Int, ts: Int, te: Int, caps: Int, pat0: Int) -> Int = {
-  let count = prim.load64(k + 40) + 1
-  let tprev = prim.load64(k + 72)
-  if t == tprev then __rx_rep_rest(k, count, t, ts, te, caps, pat0)
-  else __rx_rep_group(
-    prim.load64(k + 8),
-    prim.load64(k + 16),
-    prim.load64(k + 24),
-    prim.load64(k + 32),
-    t,
-    ts,
-    te,
-    caps,
-    pat0,
-    count,
-    prim.load64(k + 48),
-    prim.load64(k + 56),
-    prim.load64(k + 80),
-    prim.load64(k + 64),
-  )
+// Run the choice just popped, its fields at `f`. Its slots are free again, so
+// every field is read before the step it resumes allocates anything.
+fn __rx_resume(kind: Int, f: Int, m: Int) -> Int = match kind {
+  11 => __rx_alts(prim.load64(f), prim.load64(f + 8), prim.load64(f + 16), prim.load64(f + 24), m),
+  12 => __rx_seq(prim.load64(f), prim.load64(f + 8), prim.load64(f + 16), prim.load64(f + 24), m),
+  13 => __rx_group(prim.load64(f), prim.load64(f + 8), prim.load64(f + 16), prim.load64(f + 24), m),
+  15 => __rx_rep_lazy(
+    prim.load64(f),
+    prim.load64(f + 8),
+    prim.load64(f + 16),
+    prim.load64(f + 24),
+    prim.load64(f + 32),
+    prim.load64(f + 40),
+    prim.load64(f + 48),
+    prim.load64(f + 56),
+    prim.load64(f + 64),
+    m,
+  ),
+  _ => __rx_restore(f, m),
 }
 
-fn __rx_rep_rest(k: Int, count: Int, t: Int, ts: Int, te: Int, caps: Int, pat0: Int) -> Int = if count < prim.load64(k + 48) then 0 - 1
-else __rx_seq(prim.load64(k + 24), prim.load64(k + 32), t, ts, te, caps, pat0, prim.load64(k + 64))
+// UNDO: put the capture slot back, then keep failing.
+fn __rx_restore(f: Int, m: Int) -> Int = {
+  let slot = prim.load64(f)
+  prim.store64(slot, prim.load64(f + 8))
+  prim.store64(slot + 8, prim.load64(f + 16))
+  __rx_fail(m)
+}
 
-// Repeated GROUP at [p, ae) with `count` instances matched so far.
-fn __rx_rep_group(p: Int, ae: Int, pnext: Int, pend: Int, t: Int, ts: Int, te: Int, caps: Int, pat0: Int, count: Int, mn: Int, mx: Int, lazy: Int, k: Int) -> Int = {
-  let under_max = if mx < 0 then true else count < mx
-  let fr = __rx_frame(11)
-  let _0 = prim.store64(fr, 3)
-  let _1 = prim.store64(fr + 8, p)
-  let _2 = prim.store64(fr + 16, ae)
-  let _3 = prim.store64(fr + 24, pnext)
-  let _4 = prim.store64(fr + 32, pend)
-  let _5 = prim.store64(fr + 40, count)
-  let _6 = prim.store64(fr + 48, mn)
-  let _7 = prim.store64(fr + 56, mx)
-  let _8 = prim.store64(fr + 64, k)
-  let _9 = prim.store64(fr + 72, t)
-  let _a = prim.store64(fr + 80, lazy)
-  if lazy == 1 and count >= mn then {
-    let r = __rx_seq(pnext, pend, t, ts, te, caps, pat0, k)
-    if r >= 0 then r
-    else if under_max then __rx_group(p, ae, t, ts, te, caps, pat0, fr)
-    else 0 - 1
-  } else if under_max then {
-    let r = __rx_group(p, ae, t, ts, te, caps, pat0, fr)
-    if r >= 0 then r
-    else if count >= mn then __rx_seq(pnext, pend, t, ts, te, caps, pat0, k)
-    else 0 - 1
-  } else if count >= mn then __rx_seq(pnext, pend, t, ts, te, caps, pat0, k)
-  else 0 - 1
+// Run continuation `k` at text position `t`.
+fn __rx_run(k: Int, t: Int, m: Int) -> Int = if k < 0 then {
+  let e = prim.load64(m + 64)
+  if e < 0 or t == e then t else __rx_fail(m)
+} else {
+  let at = prim.load64(m) + k
+  let kind = prim.load64(at)
+  if kind == 3 then __rx_run_rep(at, k, t, m)
+  else {
+    let a = prim.load64(at + 8)
+    let c = prim.load64(at + 16)
+    let next = prim.load64(at + 24)
+    let _0 = __rx_free_top(k, 32, m)
+    if kind == 1 then __rx_seq(a, c, t, next, m)
+    else __rx_close_group(a, c, next, t, m)
+  }
+}
+
+// A frame that runs with nothing made after it has no other reader: free it.
+fn __rx_free_top(k: Int, size: Int, m: Int) -> Int = {
+  let top = prim.load64(m + 16)
+  prim.store64(m + 16, if k + size == top then k else top)
+  0
+}
+
+// A group instance ended at `t`: write its capture (ci < 0 = non-capturing),
+// keeping the old value on the chain while a choice could still need it.
+fn __rx_close_group(ci: Int, tstart: Int, next: Int, t: Int, m: Int) -> Int = {
+  let caps = prim.load64(m + 48)
+  if caps == 0 or ci < 0 then __rx_run(next, t, m)
+  else {
+    let slot = caps + ci * 16
+    let _0 = if prim.load64(m + 24) < 0 then 0 else __rx_undo(slot, m)
+    prim.store64(slot, tstart)
+    prim.store64(slot + 8, t)
+    __rx_run(next, t, m)
+  }
+}
+
+// A repeated group's instance just ended at `t`: one more instance, or the
+// rest. An empty instance counts, but never loops.
+fn __rx_run_rep(at: Int, k: Int, t: Int, m: Int) -> Int = {
+  let p = prim.load64(at + 8)
+  let ae = prim.load64(at + 16)
+  let pnext = prim.load64(at + 24)
+  let pend = prim.load64(at + 32)
+  let count = prim.load64(at + 40) + 1
+  let mn = prim.load64(at + 48)
+  let mx = prim.load64(at + 56)
+  let next = prim.load64(at + 64)
+  let tprev = prim.load64(at + 72)
+  let lazy = prim.load64(at + 80)
+  let _0 = __rx_free_top(k, 88, m)
+  if t != tprev then __rx_rep_group(p, ae, pnext, pend, t, count, mn, mx, lazy, next, m)
+  else if count < mn then __rx_fail(m)
+  else __rx_seq(pnext, pend, t, next, m)
+}
+
+// The repeated GROUP at [p, ae) has `count` instances ending at `t`: greedy
+// tries one more instance before the rest, lazy the rest first.
+fn __rx_rep_group(p: Int, ae: Int, pnext: Int, pend: Int, t: Int, count: Int, mn: Int, mx: Int, lazy: Int, k: Int, m: Int) -> Int = {
+  let more = mx < 0 or count < mx
+  let rest = count >= mn
+  if more and rest then {
+    if lazy == 1 then {
+      let fr = __rx_rep_frame(p, ae, pnext, pend, t, count, mn, mx, lazy, k, m)
+      let _0 = __rx_choice4(m, 13, p, ae, t, fr)
+      __rx_seq(pnext, pend, t, k, m)
+    } else {
+      let _0 = __rx_choice4(m, 12, pnext, pend, t, k)
+      let fr = __rx_rep_frame(p, ae, pnext, pend, t, count, mn, mx, lazy, k, m)
+      __rx_group(p, ae, t, fr, m)
+    }
+  } else if more then {
+    let fr = __rx_rep_frame(p, ae, pnext, pend, t, count, mn, mx, lazy, k, m)
+    __rx_group(p, ae, t, fr, m)
+  } else if rest then __rx_seq(pnext, pend, t, k, m)
+  else __rx_fail(m)
 }
 
 // One instance of the group at [p, ae): its alternatives, each continuing
-// into a GROUP_END frame that records the capture (ci < 0 = non-capturing).
-fn __rx_group(p: Int, ae: Int, t: Int, ts: Int, te: Int, caps: Int, pat0: Int, k: Int) -> Int = {
+// into a GROUP_END frame that writes the capture.
+fn __rx_group(p: Int, ae: Int, t: Int, k: Int, m: Int) -> Int = {
   let ce = if ae > p + 1 and prim.load8(ae - 1) == 41 then ae - 1 else ae
   let noncap = prim.load8(p + 1) == 63
   let body = if noncap then p + 3 else p + 1
-  let ci = if noncap then 0 - 1 else __rx_ngroups(pat0, p)
-  let fr = __rx_frame(6)
-  let _0 = prim.store64(fr, 2)
-  let _1 = prim.store64(fr + 8, ci)
-  let _2 = prim.store64(fr + 16, t)
-  let _3 = prim.store64(fr + 24, k)
-  __rx_alts(body, ce, t, ts, te, caps, pat0, fr)
+  let caps = prim.load64(m + 48)
+  let ci = if noncap or caps == 0 then 0 - 1 else __rx_ngroups(prim.load64(m + 56), p)
+  __rx_alts(body, ce, t, __rx_frame3(m, 2, ci, t, k), m)
 }
 
-fn __rx_alts(p: Int, pend: Int, t: Int, ts: Int, te: Int, caps: Int, pat0: Int, k: Int) -> Int = {
+// Alternation over [p, pend): the first alternative now, the next one left as
+// a choice.
+fn __rx_alts(p: Int, pend: Int, t: Int, k: Int, m: Int) -> Int = {
   let aend = __rx_alt_end(p, pend)
-  let r = __rx_seq(p, aend, t, ts, te, caps, pat0, k)
-  if r >= 0 then r
-  else if aend < pend then __rx_alts(aend + 1, pend, t, ts, te, caps, pat0, k)
-  else 0 - 1
+  let _0 = if aend < pend then __rx_choice4(m, 11, aend + 1, pend, t, k)
+  else 0
+  __rx_seq(p, aend, t, k, m)
 }
 
 // Is the piece ending at `pnext` lazy (`*?` `+?` `??` `{n,m}?`)? The lazy `?`
 // sits at pnext-1 with a quantifier char right before it.
 fn __rx_lazy(ae: Int, pnext: Int) -> Int = if pnext >= ae + 2 and prim.load8(pnext - 1) == 63 and (prim.load8(pnext - 2) == 42 or prim.load8(pnext - 2) == 43 or prim.load8(pnext - 2) == 63 or prim.load8(pnext - 2) == 125) then 1 else 0
 
-fn __rx_seq(p: Int, pend: Int, t: Int, ts: Int, te: Int, caps: Int, pat0: Int, k: Int) -> Int = if p >= pend then __rx_run(
-  k,
-  t,
-  ts,
-  te,
-  caps,
-  pat0,
-)
-else {
+// Match the sequence [p, pend) at `t`, then `k`. Every step passes here, so
+// this is where the arena is kept from filling up.
+fn __rx_seq(p: Int, pend: Int, t: Int, k: Int, m: Int) -> Int = {
+  let room = prim.load64(m + 8) - prim.load64(m + 16)
+  if room < 512 then __rx_suspend(p, pend, t, k, m)
+  else if p >= pend then __rx_run(k, t, m)
+  else __rx_piece(p, pend, t, k, m)
+}
+
+fn __rx_piece(p: Int, pend: Int, t: Int, k: Int, m: Int) -> Int = {
   let b = prim.load8(p)
   let pnext = __rx_piece_end(p, pend)
+  let ts = prim.load64(m + 32)
+  let te = prim.load64(m + 40)
+  let pat0 = prim.load64(m + 56)
   if b == 94 then {
-    if __rx_bol(t, ts, pat0) then __rx_seq(pnext, pend, t, ts, te, caps, pat0, k)
-    else 0 - 1
+    if __rx_bol(t, ts, pat0) then __rx_seq(pnext, pend, t, k, m)
+    else __rx_fail(m)
   } else if b == 36 then {
-    if __rx_eol(t, te, pat0) then __rx_seq(pnext, pend, t, ts, te, caps, pat0, k)
-    else 0 - 1
+    if __rx_eol(t, te, pat0) then __rx_seq(pnext, pend, t, k, m)
+    else __rx_fail(m)
   } else if b == 92 and p + 1 < pend and (prim.load8(p + 1) == 98 or prim.load8(p + 1) == 66) then {
     let want = prim.load8(p + 1) == 98
-    if __rx_at_boundary(t, ts, te) == want then __rx_seq(pnext, pend, t, ts, te, caps, pat0, k)
-    else 0 - 1
-  } else if b == 40 and p == pat0 and __rx_flags(pat0) == 1 then __rx_seq(
-    pnext,
-    pend,
-    t,
-    ts,
-    te,
-    caps,
-    pat0,
-    k,
-  )
+    if __rx_at_boundary(t, ts, te) == want then __rx_seq(pnext, pend, t, k, m)
+    else __rx_fail(m)
+  } else if b == 40 and p == pat0 and __rx_flags(pat0) == 1 then __rx_seq(pnext, pend, t, k, m)
   else {
     let ae = __rx_atom_end(p, pend)
-    let q = if ae < pnext then prim.load8(ae) else 0
-    let lazy = __rx_lazy(ae, pnext)
-    if q == 0 then {
-      if b == 40 then {
-        let fr = __rx_frame(4)
-        let _0 = prim.store64(fr, 1)
-        let _1 = prim.store64(fr + 8, pnext)
-        let _2 = prim.store64(fr + 16, pend)
-        let _3 = prim.store64(fr + 24, k)
-        __rx_group(p, ae, t, ts, te, caps, pat0, fr)
-      } else {
-        if __rx_char_match(p, ae, t, te) then __rx_seq(
-          pnext,
-          pend,
-          t + __rx_w(t),
-          ts,
-          te,
-          caps,
-          pat0,
-          k,
-        )
-        else 0 - 1
-      }
-    } else {
-      let mn = if q == 42 then 0
-      else if q == 43 then 1
-      else if q == 63 then 0 else __rx_brace_min(ae, pnext)
-      let mx = if q == 42 then 0 - 1
-      else if q == 43 then 0 - 1
-      else if q == 63 then 1 else __rx_brace_max(ae, pnext)
-      if b == 40 then __rx_rep_group(p, ae, pnext, pend, t, ts, te, caps, pat0, 0, mn, mx, lazy, k)
-      else if lazy == 1 then __rx_rep_lazy(p, ae, pnext, pend, t, ts, te, caps, pat0, 0, mn, mx, k)
-      else __rx_repi_fwd(p, ae, pnext, pend, t, ts, te, caps, pat0, 0, mn, mx, k)
-    }
+    if ae < pnext then __rx_quant(p, ae, pnext, pend, t, k, m)
+    else if b == 40 then __rx_group(p, ae, t, __rx_frame3(m, 1, pnext, pend, k), m)
+    else if __rx_char_match(p, ae, t, te) then __rx_seq(pnext, pend, t + __rx_w(t), k, m)
+    else __rx_fail(m)
   }
 }
 
-// Non-group atom, LAZY: the rest first, then one more char.
-fn __rx_rep_lazy(p: Int, ae: Int, pnext: Int, pend: Int, t: Int, ts: Int, te: Int, caps: Int, pat0: Int, count: Int, mn: Int, mx: Int, k: Int) -> Int = {
-  let under_max = if mx < 0 then true else count < mx
+// A quantified piece: the atom at [p, ae), its quantifier at [ae, pnext).
+fn __rx_quant(p: Int, ae: Int, pnext: Int, pend: Int, t: Int, k: Int, m: Int) -> Int = {
+  let q = prim.load8(ae)
+  let lazy = __rx_lazy(ae, pnext)
+  let mn = if q == 42 then 0
+  else if q == 43 then 1
+  else if q == 63 then 0 else __rx_brace_min(ae, pnext)
+  let mx = if q == 42 then 0 - 1
+  else if q == 43 then 0 - 1
+  else if q == 63 then 1 else __rx_brace_max(ae, pnext)
+  if prim.load8(p) == 40 then __rx_rep_group(p, ae, pnext, pend, t, 0, mn, mx, lazy, k, m)
+  else if lazy == 1 then __rx_rep_lazy(p, ae, pnext, pend, t, 0, mn, mx, k, m)
+  else __rx_repi_fwd(p, ae, pnext, pend, t, 0, mn, mx, k, m)
+}
+
+// Non-group atom, LAZY: the rest first, leaving a choice that takes one more
+// char.
+fn __rx_rep_lazy(p: Int, ae: Int, pnext: Int, pend: Int, t: Int, count: Int, mn: Int, mx: Int, k: Int, m: Int) -> Int = {
+  let more = (mx < 0 or count < mx) and __rx_char_match(p, ae, t, prim.load64(m + 40))
+  let t1 = if more then t + __rx_w(t) else t
   if count >= mn then {
-    let r = __rx_seq(pnext, pend, t, ts, te, caps, pat0, k)
-    if r >= 0 then r
-    else if under_max and __rx_char_match(p, ae, t, te) then __rx_rep_lazy(
-      p,
-      ae,
-      pnext,
-      pend,
-      t + __rx_w(t),
-      ts,
-      te,
-      caps,
-      pat0,
-      count + 1,
-      mn,
-      mx,
-      k,
-    )
-    else 0 - 1
-  } else if __rx_char_match(p, ae, t, te) then __rx_rep_lazy(
-    p,
-    ae,
-    pnext,
-    pend,
-    t + __rx_w(t),
-    ts,
-    te,
-    caps,
-    pat0,
-    count + 1,
-    mn,
-    mx,
-    k,
-  )
-  else 0 - 1
+    let _0 = if more then __rx_lazy_choice(p, ae, pnext, pend, t1, count + 1, mn, mx, k, m)
+    else 0
+    __rx_seq(pnext, pend, t, k, m)
+  } else if more then __rx_rep_lazy(p, ae, pnext, pend, t1, count + 1, mn, mx, k, m)
+  else __rx_fail(m)
 }
 
-// Non-group atom, GREEDY (#1524): walk forward to the deepest count, then
-// try the continuation at each position DESCENDING — two tail-recursive
-// walks the renderer turns into loops.
-fn __rx_repi_fwd(p: Int, ae: Int, pnext: Int, pend: Int, t: Int, ts: Int, te: Int, caps: Int, pat0: Int, count: Int, mn: Int, mx: Int, k: Int) -> Int = {
+// Non-group atom, GREEDY (#1524): walk forward to the deepest count, then try
+// the rest there, leaving a choice that gives back one char at a time.
+fn __rx_repi_fwd(p: Int, ae: Int, pnext: Int, pend: Int, t: Int, count: Int, mn: Int, mx: Int, k: Int, m: Int) -> Int = {
   let under_max = if mx < 0 then true else count < mx
-  if under_max and __rx_char_match(p, ae, t, te) then __rx_repi_fwd(
+  if under_max and __rx_char_match(p, ae, t, prim.load64(m + 40)) then __rx_repi_fwd(
     p,
     ae,
     pnext,
     pend,
     t + __rx_w(t),
-    ts,
-    te,
-    caps,
-    pat0,
     count + 1,
     mn,
     mx,
     k,
+    m,
   )
-  else __rx_repi_try(pnext, pend, t, ts, te, caps, pat0, count, mn, k)
+  else __rx_repi_try(pnext, pend, t, count, mn, k, m)
 }
 
-fn __rx_repi_try(pnext: Int, pend: Int, t: Int, ts: Int, te: Int, caps: Int, pat0: Int, i: Int, mn: Int, k: Int) -> Int = {
-  if i < mn then 0 - 1
-  else {
-    let r = __rx_seq(pnext, pend, t, ts, te, caps, pat0, k)
-    if r >= 0 then r
-    else if i == 0 then 0 - 1
-    else __rx_repi_try(pnext, pend, __rx_back(t, ts), ts, te, caps, pat0, i - 1, mn, k)
-  }
+fn __rx_repi_try(pnext: Int, pend: Int, t: Int, i: Int, mn: Int, k: Int, m: Int) -> Int = if i < mn then __rx_fail(m)
+else {
+  let ts = prim.load64(m + 32)
+  let _0 = if i > mn then __rx_back_choice(pnext, pend, __rx_back(t, ts), i - 1, mn, k, m)
+  else 0
+  __rx_seq(pnext, pend, t, k, m)
 }
 
-// The Stage-1 entry (no captures, empty continuation).
-fn __rx_match_at(p: Int, pe: Int, t: Int, ts: Int, te: Int) -> Int = __rx_alts(
-  p,
-  pe,
-  t,
-  ts,
-  te,
-  0,
-  p,
-  0,
-)
+// ── public API ──
+// The text end, and the end of the last match found. The loops that grow an
+// accumulator read the machine block through these rather than a `prim` op
+// in their own body: an accumulator loop with a prim op in it keeps every old
+// accumulator alive, which made find_all quadratic in memory.
+fn __rx_te(m: Int) -> Int = prim.load64(m + 40)
 
-// ── public API (Stage 1) ──
-fn __rx_find_from(p: Int, pe: Int, t: Int, ts: Int, te: Int) -> Int = {
-  let r = __rx_match_at(p, pe, t, ts, te)
-  if r >= 0 then r
-  else if t >= te then 0 - 1
-  else __rx_find_from(p, pe, t + __rx_w(t), ts, te)
+fn __rx_end(m: Int) -> Int = prim.load64(m + 72)
+
+// Leftmost match START at or after `t`, or -1; the match's end is left in
+// the machine block (slot 9).
+fn __rx_find_start(p: Int, pe: Int, t: Int, m: Int) -> Int = {
+  let r = __rx_exec(p, pe, t, m)
+  if r >= 0 then {
+    prim.store64(m + 72, r)
+    t
+  } else if t >= prim.load64(m + 40) then 0 - 1
+  else __rx_find_start(p, pe, t + __rx_w(t), m)
 }
 
 fn regex_is_match(pat: String, s: String) -> Bool = {
@@ -544,11 +698,11 @@ fn regex_is_match(pat: String, s: String) -> Bool = {
   let pe = p0 + prim.load32(ph + 4)
   let t0 = sh + 12
   let te = t0 + prim.load32(sh + 4)
-  __rx_find_from(p0, pe, t0, t0, te) >= 0
+  let vm = __rx_vm(p0, t0, te, 0, 0, 0 - 1)
+  __rx_find_start(p0, pe, t0, prim.handle(vm) + 12) >= 0
 }
 
 // ── Stage 2: find / find_all / replace / replace_first / split ──
-// Copy `n` bytes from `src` to `dst`.
 fn regex_full_match(pat: String, s: String) -> Bool = {
   let ph = prim.handle(pat)
   let sh = prim.handle(s)
@@ -556,34 +710,24 @@ fn regex_full_match(pat: String, s: String) -> Bool = {
   let pe = p0 + prim.load32(ph + 4)
   let t0 = sh + 12
   let te = t0 + prim.load32(sh + 4)
-  let fr = __rx_frame(2)
-  let _0 = prim.store64(fr, 4)
-  let _1 = prim.store64(fr + 8, te)
-  __rx_alts(p0, pe, t0, t0, te, 0, p0, fr) == te
+  let vm = __rx_vm(p0, t0, te, 0, 0, te)
+  __rx_exec(p0, pe, t0, prim.handle(vm) + 12) == te
 }
 
-// The text substring [a, b) as a fresh owned String.
+// Copy `n` bytes from `src` to `dst`.
 fn __rx_copy(src: Int, dst: Int, n: Int) -> Int = if n <= 0 then 0
 else {
   prim.store8(dst, prim.load8(src))
   __rx_copy(src + 1, dst + 1, n - 1)
 }
 
-// Leftmost match START from `t` (or -1) — the companion of __rx_find_from.
+// The text substring [a, b) as a fresh owned String.
 fn __rx_sub(a: Int, b: Int) -> String = {
   let out = prim.alloc_str(b - a)
   let _ = __rx_copy(a, prim.handle(out) + 12, b - a)
   out
 }
 
-fn __rx_find_start(p: Int, pe: Int, t: Int, ts: Int, te: Int) -> Int = {
-  let r = __rx_match_at(p, pe, t, ts, te)
-  if r >= 0 then t
-  else if t >= te then 0 - 1
-  else __rx_find_start(p, pe, t + __rx_w(t), ts, te)
-}
-
-// v0 find_all: repeat leftmost; a zero-width match advances one char past `end`.
 fn regex_find(pat: String, s: String) -> String? = {
   let ph = prim.handle(pat)
   let sh = prim.handle(s)
@@ -591,32 +735,32 @@ fn regex_find(pat: String, s: String) -> String? = {
   let pe = p0 + prim.load32(ph + 4)
   let t0 = sh + 12
   let te = t0 + prim.load32(sh + 4)
-  let st = __rx_find_start(p0, pe, t0, t0, te)
+  let vm = __rx_vm(p0, t0, te, 0, 0, 0 - 1)
+  let m = prim.handle(vm) + 12
+  let st = __rx_find_start(p0, pe, t0, m)
   if st < 0 then none
   else {
-    let m = __rx_sub(st, __rx_match_at(p0, pe, st, t0, te))
-    some(m)
+    let hit = __rx_sub(st, __rx_end(m))
+    some(hit)
   }
 }
 
-fn __rx_find_all_go(p: Int, pe: Int, pos: Int, ts: Int, te: Int, acc: List[String]) -> List[String] = if pos > te then acc
+// v0 find_all: repeat leftmost; a zero-width match advances one char past `end`.
+fn __rx_find_all_go(p: Int, pe: Int, pos: Int, m: Int, acc: List[String]) -> List[String] = if pos > __rx_te(m) then acc
 else {
-  let st = __rx_find_start(p, pe, pos, ts, te)
+  let st = __rx_find_start(p, pe, pos, m)
   if st < 0 then acc
   else {
-    let en = __rx_match_at(p, pe, st, ts, te)
-    let m = __rx_sub(st, en)
-    if en > st then __rx_find_all_go(p, pe, en, ts, te, acc + [m])
+    let en = __rx_end(m)
+    let hit = __rx_sub(st, en)
+    if en > st then __rx_find_all_go(p, pe, en, m, acc + [hit])
     else {
-      if en < te then __rx_find_all_go(p, pe, en + __rx_w(en), ts, te, acc + [m])
-      else acc + [m]
+      if en < __rx_te(m) then __rx_find_all_go(p, pe, en + __rx_w(en), m, acc + [hit])
+      else acc + [hit]
     }
   }
 }
 
-// v0 replace: scan; at each match emit the gap + the LITERAL replacement (no $n);
-// a zero-width match ALSO emits the char at `end` and advances past it (at
-// end-of-string it just terminates).
 fn regex_find_all(pat: String, s: String) -> List[String] = {
   let ph = prim.handle(pat)
   let sh = prim.handle(s)
@@ -624,29 +768,35 @@ fn regex_find_all(pat: String, s: String) -> List[String] = {
   let pe = p0 + prim.load32(ph + 4)
   let t0 = sh + 12
   let te = t0 + prim.load32(sh + 4)
+  let vm = __rx_vm(p0, t0, te, 0, 0, 0 - 1)
   let acc: List[String] = []
-  __rx_find_all_go(p0, pe, t0, t0, te, acc)
+  __rx_find_all_go(p0, pe, t0, prim.handle(vm) + 12, acc)
 }
 
-fn __rx_replace_go(p: Int, pe: Int, pos: Int, ts: Int, te: Int, rep: String, acc: String) -> String = if pos > te then acc
-else {
-  let st = __rx_find_start(p, pe, pos, ts, te)
-  if st < 0 then acc + __rx_sub(pos, te)
+// v0 replace: scan; at each match emit the gap + the LITERAL replacement (no $n);
+// a zero-width match ALSO emits the char at `end` and advances past it (at
+// end-of-string it just terminates).
+fn __rx_replace_go(p: Int, pe: Int, pos: Int, m: Int, rep: String, acc: String) -> String = {
+  let te = __rx_te(m)
+  if pos > te then acc
   else {
-    let en = __rx_match_at(p, pe, st, ts, te)
-    let acc2 = acc + __rx_sub(pos, st) + rep
-    if en > st then __rx_replace_go(p, pe, en, ts, te, rep, acc2)
+    let st = __rx_find_start(p, pe, pos, m)
+    if st < 0 then acc + __rx_sub(pos, te)
     else {
-      if en < te then __rx_replace_go(
-        p,
-        pe,
-        en + __rx_w(en),
-        ts,
-        te,
-        rep,
-        acc2 + __rx_sub(en, en + __rx_w(en)),
-      )
-      else acc2
+      let en = __rx_end(m)
+      let acc2 = acc + __rx_sub(pos, st) + rep
+      if en > st then __rx_replace_go(p, pe, en, m, rep, acc2)
+      else {
+        if en < te then __rx_replace_go(
+          p,
+          pe,
+          en + __rx_w(en),
+          m,
+          rep,
+          acc2 + __rx_sub(en, en + __rx_w(en)),
+        )
+        else acc2
+      }
     }
   }
 }
@@ -658,13 +808,11 @@ fn regex_replace(pat: String, s: String, rep: String) -> String = {
   let pe = p0 + prim.load32(ph + 4)
   let t0 = sh + 12
   let te = t0 + prim.load32(sh + 4)
+  let vm = __rx_vm(p0, t0, te, 0, 0, 0 - 1)
   let acc = ""
-  __rx_replace_go(p0, pe, t0, t0, te, rep, acc)
+  __rx_replace_go(p0, pe, t0, prim.handle(vm) + 12, rep, acc)
 }
 
-// v0 split: a zero-width match AT the current position takes ONE char as a
-// field; otherwise the gap [pos, start) is a field and the scan resumes at
-// `end`; the unmatched tail is the last field.
 fn regex_replace_first(pat: String, s: String, rep: String) -> String = {
   let ph = prim.handle(pat)
   let sh = prim.handle(s)
@@ -672,9 +820,10 @@ fn regex_replace_first(pat: String, s: String, rep: String) -> String = {
   let pe = p0 + prim.load32(ph + 4)
   let t0 = sh + 12
   let te = t0 + prim.load32(sh + 4)
-  let st = __rx_find_start(p0, pe, t0, t0, te)
-  if st < 0 then s
-  else __rx_sub(t0, st) + rep + __rx_sub(__rx_match_at(p0, pe, st, t0, te), te)
+  let vm = __rx_vm(p0, t0, te, 0, 0, 0 - 1)
+  let m = prim.handle(vm) + 12
+  let st = __rx_find_start(p0, pe, t0, m)
+  if st < 0 then s else __rx_sub(t0, st) + rep + __rx_sub(__rx_end(m), te)
 }
 
 // A field is the text BETWEEN two matches, so the split point (`last`) and the
@@ -683,30 +832,21 @@ fn regex_replace_first(pat: String, s: String, rep: String) -> String = {
 // Python, Rust and Go all answer `["", "abc"]` (#2129). The walk is `find_all`'s
 // (an empty match advances one character so it terminates) and the trailing
 // field is always emitted, which is how `split("$", "a")` is `["a", ""]`.
-fn __rx_split_go(p: Int, pe: Int, last: Int, scan: Int, ts: Int, te: Int, acc: List[String]) -> List[String] = if scan > te then acc + [__rx_sub(
-  last,
-  te,
-)]
-else {
-  let st = __rx_find_start(p, pe, scan, ts, te)
-  if st < 0 then acc + [__rx_sub(last, te)]
+fn __rx_split_go(p: Int, pe: Int, last: Int, scan: Int, m: Int, acc: List[String]) -> List[String] = {
+  let te = __rx_te(m)
+  if scan > te then acc + [__rx_sub(last, te)]
   else {
-    let en = __rx_match_at(p, pe, st, ts, te)
-    let nxt = if en > st then en
-    else if en >= te then te + 1 else en + __rx_w(en)
-    __rx_split_go(p, pe, en, nxt, ts, te, acc + [__rx_sub(last, st)])
+    let st = __rx_find_start(p, pe, scan, m)
+    if st < 0 then acc + [__rx_sub(last, te)]
+    else {
+      let en = __rx_end(m)
+      let nxt = if en > st then en
+      else if en >= te then te + 1 else en + __rx_w(en)
+      __rx_split_go(p, pe, en, nxt, m, acc + [__rx_sub(last, st)])
+    }
   }
 }
 
-// ── Stage 3: captures ──
-// v0 semantics: caps[k] is written at GROUP COMPLETION (k = the group's
-// pre-order '(' ordinal); the caller SAVES the caps before every alternative
-// try and every greedy extension try, restoring on failure — so only the
-// successful derivation's writes survive. The caps live in a caller-owned
-// List[Int] buffer (2 slots per group: start, end; -1 = unmatched), passed as
-// a raw handle so the matcher stays prim-only.
-// Count the REAL group-opens '(' in [p, q) (escapes and classes are opaque) —
-// the group at `q` has capture ordinal = this count.
 fn regex_split(pat: String, s: String) -> List[String] = {
   let ph = prim.handle(pat)
   let sh = prim.handle(s)
@@ -714,11 +854,19 @@ fn regex_split(pat: String, s: String) -> List[String] = {
   let pe = p0 + prim.load32(ph + 4)
   let t0 = sh + 12
   let te = t0 + prim.load32(sh + 4)
+  let vm = __rx_vm(p0, t0, te, 0, 0, 0 - 1)
   let acc: List[String] = []
-  __rx_split_go(p0, pe, t0, t0, t0, te, acc)
+  __rx_split_go(p0, pe, t0, t0, prim.handle(vm) + 12, acc)
 }
 
-// Copy `n` i64 slots from list-data address `src` to `dst`.
+// ── Stage 3: captures ──
+// caps[k] is written at GROUP COMPLETION (k = the group's pre-order '('
+// ordinal) and taken back when the walk backtracks past the write, so only the
+// winning derivation's writes survive. The caps live in a caller-owned
+// List[Int] buffer (2 slots per group: start, end; -1 = unmatched), passed as
+// a raw address so the matcher stays prim-only.
+// Count the REAL group-opens '(' in [p, q) (escapes and classes are opaque) —
+// the group at `q` has capture ordinal = this count.
 fn __rx_ngroups(p: Int, q: Int) -> Int = if p >= q then 0
 else {
   let b = prim.load8(p)
@@ -732,16 +880,14 @@ else {
   } else __rx_ngroups(p + __rx_w(p), q)
 }
 
-// Fill `n` i64 slots at `dst` with -1 (unmatched).
+// Copy `n` i64 slots from `src` to `dst`.
 fn __rx_copy64(src: Int, dst: Int, n: Int) -> Int = if n <= 0 then 0
 else {
   prim.store64(dst, prim.load64(src))
   __rx_copy64(src + 8, dst + 8, n - 1)
 }
 
-// ── the capture-threading matcher (the `_c` family — v0's clone/restore) ──
-// `caps` = the buffer's DATA address (handle + 12); `nslots` = 2 * ncap;
-// `pat0` = the pattern's data start (for group ordinal computation).
+// Fill `n` i64 slots at `dst` with -1 (unmatched).
 fn __rx_fill_neg(dst: Int, n: Int) -> Int = if n <= 0 then 0
 else {
   prim.store64(dst, 0 - 1)
@@ -753,8 +899,8 @@ else {
   let st = prim.load64(caps + i * 16)
   if st < 0 then __rx_caps_out(caps, i + 1, ncap, acc + [""])
   else {
-    let m = __rx_sub(st, prim.load64(caps + i * 16 + 8))
-    __rx_caps_out(caps, i + 1, ncap, acc + [m])
+    let hit = __rx_sub(st, prim.load64(caps + i * 16 + 8))
+    __rx_caps_out(caps, i + 1, ncap, acc + [hit])
   }
 }
 
@@ -767,15 +913,9 @@ else {
 // also came back for a pattern with NO groups, conflating "matched nothing to
 // capture" with "did not match" — with a full match at index 0 that case has a
 // real answer. The buffer is still sized for at least one slot pair so a
-// group-less pattern has somewhere to scan.
-fn __rx_caps_scan(p: Int, pe: Int, t: Int, ts: Int, te: Int, caps: Int, nslots: Int) -> Int = {
-  let _ = __rx_fill_neg(caps, nslots)
-  let r = __rx_alts(p, pe, t, ts, te, caps, p, 0)
-  if r >= 0 then t
-  else if t >= te then 0 - 1
-  else __rx_caps_scan(p, pe, t + __rx_w(t), ts, te, caps, nslots)
-}
-
+// group-less pattern has somewhere to scan. The buffer holds the winning
+// attempt's groups when the scan returns: the walk resets it at each start and
+// takes back every write it backtracks past.
 fn regex_captures(pat: String, s: String) -> List[String]? = {
   let ph = prim.handle(pat)
   let sh = prim.handle(s)
@@ -787,12 +927,12 @@ fn regex_captures(pat: String, s: String) -> List[String]? = {
   let nslots = if ncap == 0 then 2 else ncap * 2
   let buf = prim.alloc_list(nslots)
   let bd = prim.handle(buf) + 12
-  let ms = __rx_caps_scan(p0, pe, t0, t0, te, bd, nslots)
+  let vm = __rx_vm(p0, t0, te, bd, nslots, 0 - 1)
+  let m = prim.handle(vm) + 12
+  let ms = __rx_find_start(p0, pe, t0, m)
   if ms < 0 then none
   else {
-    let _ = __rx_fill_neg(bd, nslots)
-    let me = __rx_alts(p0, pe, ms, t0, te, bd, p0, 0)
-    let whole = __rx_sub(ms, me)
+    let whole = __rx_sub(ms, __rx_end(m))
     let acc: List[String] = [whole]
     some(__rx_caps_out(bd, 0, ncap, acc))
   }

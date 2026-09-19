@@ -22,7 +22,7 @@ pub fn rewrite_never_err_effect_match(
             let is_target = matches!(&expr.kind, IrExprKind::Match { subject, .. }
                 if matches!(&subject.kind,
                     IrExprKind::Call { target: CallTarget::Named { name }, .. }
-                        if self.1.contains(name.as_str()) && !self.0.contains(name.as_str())));
+                        if is_raw_never_err_callee(name.as_str(), self.0, self.1)));
             if !is_target {
                 return;
             }
@@ -47,11 +47,20 @@ pub fn rewrite_never_err_effect_match(
             // call to the raw ok type here; the call site then read a carrier
             // the (wasm-leg) def never produced, and a match-on-effect-call
             // inside a while body ran its arms ZERO times, silently (#1571).
-            let raw_call = IrExpr {
-                kind: IrExprKind::Unwrap { expr: Box::new((**subject).clone()) },
-                ty: ok_ty.clone(),
-                span: subject.span.clone(),
-                def_id: None,
+            // A DECLARED-Option callee (#2308) is the exception: its strip ran before this pass,
+            // so the value is the call retyped to the raw Option — what that strip makes of `!`.
+            let raw_call = if DECLARED_OPTION_EFFECT_FNS.with(|s| {
+                matches!(&subject.kind, IrExprKind::Call { target: CallTarget::Named { name }, .. }
+                    if s.borrow().contains(name.as_str()))
+            }) {
+                IrExpr { ty: ok_ty.clone(), ..(**subject).clone() }
+            } else {
+                IrExpr {
+                    kind: IrExprKind::Unwrap { expr: Box::new((**subject).clone()) },
+                    ty: ok_ty.clone(),
+                    span: subject.span.clone(),
+                    def_id: None,
+                }
             };
             // Only the `ok(x)` BIND pattern is rewritten — the bound `var` gives the raw call result a
             // named owner with a sound scope-end drop. An `ok(_)` WILDCARD is LEFT as a `match` (it then
@@ -282,7 +291,7 @@ pub fn inline_mutual_tail_recursion(
             strip_never_err_unwraps(&mut nf.body, &can_err, &lifted_effect_fns, f.name.as_str());
             unwrap_never_err_call_types(&mut nf.body, &can_err, &lifted_effect_fns);
             rewrap_never_err_into_result_targets(
-                &mut nf.body,
+                &mut nf,
                 &can_err,
                 &lifted_effect_fns,
                 record_layouts,
