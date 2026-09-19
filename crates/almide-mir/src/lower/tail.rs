@@ -406,7 +406,10 @@ impl LowerCtx {
         // Decomposed (#781, cog 232): the UNIT / HEAP / SCALAR tails are verbatim
         // text moves into lower_tail_unit / lower_tail_heap / lower_tail_scalar —
         // behavior proven by the classify wall-list + cert byte-identity ladder.
-        if matches!(tail.ty, Ty::Unit) {
+        // A diverging tail has no return value either. In particular, the
+        // exit-code guard is a Never-typed branch whose arms must run for
+        // effect, just like the same branch in statement position (#2327).
+        if matches!(tail.ty, Ty::Unit | Ty::Never) {
             return self.lower_tail_unit(tail);
         }
         // A tail of type `Result[Unit, _]` is the return of an `effect fn … -> Unit`

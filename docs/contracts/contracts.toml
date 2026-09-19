@@ -2720,10 +2720,11 @@ evidence  = [
 id        = "C-219"
 spec      = "ALS-T6"
 title     = "a Never-typed call in a branch arm runs on both targets and sets the exit code"
-statement = "A call whose return type is `Never` — `process.exit(code)`, the stdlib's only one — EXECUTES when it is the tail of a branch arm, and the process exits with that code on BOTH targets. The arm-tail dispatch in `lower_branch_arm` ran a `Call` only when its type was `Ty::Unit`; a `Never` call fell through to the deferred-value path, which records the call as a capability marker and emits NO call. The arm lowered to zero ops and returned Ok, so `guard n > 99 else process.exit(3)` built clean and exited 0 (#1124) — a silently wrong exit code with no wall and no diagnostic, reached through a TYPE the match forgot to name rather than through an unsupported shape, which is why strict-value mode never fired. NOT a wasm-only defect, though #1124 reported it as one: with a runtime condition the exit is lost on the NATIVE leg too; the issue's repro read `process.args()`, whose list length the native path resolved differently, which is what made it look cross-target. `Never` now rides with `Unit` in that dispatch — both produce no value by construction, the property the arm needs. The CONSTANT-condition form (`guard false else process.exit(3)`) is folded earlier (#1117) into a scalar tail outside the value subset, and STRICT value mode walls it honestly rather than deferring it to Const 0 — a wall, not a wrong answer, tracked separately. The exit code the arm sets is one the artifact can deliver: C-350 narrows `process.exit` to 0..=125 on every target and makes any other code a defined abort, so \"exits with that code\" here reads within that range."
+statement = "A call whose return type is `Never` — `process.exit(code)`, the stdlib's only one — EXECUTES when it is the tail of a branch arm, and the process exits with that code on BOTH targets. The arm-tail dispatch in `lower_branch_arm` ran a `Call` only when its type was `Ty::Unit`; a `Never` call fell through to the deferred-value path, which records the call as a capability marker and emits NO call. The arm lowered to zero ops and returned Ok, so `guard n > 99 else process.exit(3)` built clean and exited 0 (#1124) — a silently wrong exit code with no wall and no diagnostic, reached through a TYPE the match forgot to name rather than through an unsupported shape, which is why strict-value mode never fired. NOT a wasm-only defect, though #1124 reported it as one: with a runtime condition the exit is lost on the NATIVE leg too; the issue's repro read `process.args()`, whose list length the native path resolved differently, which is what made it look cross-target. `Never` now rides with `Unit` in that dispatch — both produce no value by construction, the property the arm needs. A Never-typed expression also executes in a function tail, including nested blocks, if/match tails and a constant-false guard. A computed exit-code argument is evaluated exactly once before the range check; changing the expression position does not change stdout, stderr or the exit code (#2327). The exit code the arm sets is one the artifact can deliver: C-350 narrows `process.exit` to 0..=125 on every target and makes any other code a defined abort, so \"exits with that code\" here reads within that range."
 since     = "0.56.0"
 status    = "active"
 evidence  = [
+  { path = "tests/incumbent_exit_tail_test.rs", name = "dynamic_exit_codes_execute_in_every_tail_position", class = "fixture" },
   { path = "spec/wasm_cross/guard_else_exit_code.almd", class = "fixture" },
 ]
 
@@ -4307,6 +4308,7 @@ statement = "`process.exit(code)` terminates with `code` when `0 <= code <= 125`
 since     = "0.63.0"
 status    = "active"
 evidence  = [
+  { path = "tests/incumbent_exit_tail_test.rs", name = "dynamic_exit_codes_execute_in_every_tail_position", class = "fixture" },
   { path = "spec/wasm_cross/exit_code_out_of_range.almd", class = "fixture" },
   { path = "spec/wasm_cross/exit_code_upper_bound.almd", class = "fixture" },
 ]
