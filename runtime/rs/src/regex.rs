@@ -221,18 +221,99 @@ fn rx_node_matches(node: &AlmideRxNode, c: char) -> bool {
     }
 }
 
-// ---- Matching (continuation-passing backtracker) ----
+// ---- Matching (a backtracking walk whose state lives on the heap, #2307) ----
 //
-// Every matcher takes a continuation `k` that receives the end position (and
-// the capture table) once the piece it is responsible for has matched; `k`
-// returns Some(final_end) when the rest of the pattern matches from there and
-// None to demand backtracking. The twin self-host engine in
-// stdlib/regex_engine.almd keeps the same continuation frames on the heap, so
-// the two legs agree on every backtracking order: leftmost alternative first,
-// greedy quantifiers longest-first, lazy quantifiers shortest-first, and an
-// empty repetition instance ends the loop.
+// The search order is the one this engine always had: leftmost alternative
+// first, greedy quantifiers longest-first, lazy quantifiers shortest-first, an
+// empty repetition instance ends its loop, and a group's capture is recorded
+// when the group ends and restored when the walk backtracks past that point.
+// What #2307 changed is where the walk keeps its state. It used to be
+// continuation-passing Rust calls, one frame chain per matched repetition, so
+// `^a*b$` on 30,000 `a`s overflowed the main thread's stack. Now the state is
+// three vectors, and the call stack stays flat whatever the input's length:
+//
+// - `choices`: the untried alternatives, newest last. A failure resumes the
+//   newest one. Each records how long the other two vectors were when it was
+//   pushed, so resuming it also discards everything done after that point.
+// - `frames`: what to do when a group instance ends (record the capture, then
+//   loop or stop). A frame names its successor by index, so the continuation
+//   is a linked list that choices share.
+// - `trail`: the capture slots a group end overwrote, restored on backtrack.
+//
+// A single-atom repetition (`a*`, `[a-z]+`, `\d{2,}`) needs no frame: greedy
+// takes as many as it can in a loop and leaves ONE choice that gives them back
+// one at a time; lazy leaves one choice that takes one more. The self-hosted
+// twin in stdlib/regex_engine.almd walks the same tree in the same order, so
+// the two legs agree on every match, capture and failure.
 
-type AlmideRxK<'a> = &'a mut dyn FnMut(usize, &mut AlmideRxCaps) -> Option<usize>;
+type AlmideRxSeq = Vec<AlmideRxPiece>;
+
+/// The continuation that ends the walk: the whole pattern has matched.
+const ALMIDE_RX_DONE: usize = usize::MAX;
+
+/// A position in the pattern: piece `si` of the sequence `seq`.
+#[derive(Clone, Copy)]
+struct AlmideRxPc<'a> {
+    seq: &'a AlmideRxSeq,
+    si: usize,
+}
+
+impl<'a> AlmideRxPc<'a> {
+    fn piece(self) -> &'a AlmideRxPiece {
+        &self.seq[self.si]
+    }
+
+    fn next(self) -> Self {
+        AlmideRxPc { seq: self.seq, si: self.si + 1 }
+    }
+}
+
+/// One step of the walk. `k` is the continuation: a frame index, or DONE.
+#[derive(Clone, Copy)]
+enum AlmideRxGoal<'a> {
+    /// Match the sequence from `pc` at `p`, then run `k`.
+    Seq { pc: AlmideRxPc<'a>, p: usize, k: usize },
+    /// Try the alternatives `alts[ai..]` at `p`, each followed by `k`.
+    Alts { alts: &'a Vec<AlmideRxSeq>, ai: usize, p: usize, k: usize },
+    /// Start one more instance of the repeated group at `pc` (`count` so far).
+    Inst { pc: AlmideRxPc<'a>, p: usize, count: usize, k: usize },
+    /// The lazy single atom at `pc` has matched `count` chars ending at `p`.
+    Lazy { pc: AlmideRxPc<'a>, p: usize, count: usize, k: usize },
+    /// (choices only) The greedy single atom at `pc` matched from `start`:
+    /// continue after `count` of its chars, then offer one fewer.
+    Back { pc: AlmideRxPc<'a>, start: usize, count: usize, k: usize },
+    /// Run continuation `k` at `p`.
+    Run { k: usize, p: usize },
+    Fail,
+}
+
+/// The continuation after instance `count` of the repeated group at `pc`,
+/// which began at `start`.
+#[derive(Clone, Copy)]
+struct AlmideRxFrame<'a> {
+    pc: AlmideRxPc<'a>,
+    start: usize,
+    count: usize,
+    next: usize,
+}
+
+struct AlmideRxChoice<'a> {
+    goal: AlmideRxGoal<'a>,
+    frames: usize,
+    trail: usize,
+}
+
+struct AlmideRxVm<'a> {
+    cx: AlmideRxCx<'a>,
+    /// full_match: a match must end exactly here.
+    end_at: Option<usize>,
+    /// Only `captures` reads the slots, so only it pays for writing them.
+    track: bool,
+    caps: AlmideRxCaps,
+    frames: Vec<AlmideRxFrame<'a>>,
+    choices: Vec<AlmideRxChoice<'a>>,
+    trail: Vec<(usize, Option<(usize, usize)>)>,
+}
 
 struct AlmideRxCx<'a> {
     s: &'a [char],
@@ -258,145 +339,230 @@ fn rx_zero_width(cx: &AlmideRxCx, node: &AlmideRxNode, p: usize) -> Option<bool>
     }
 }
 
-fn rx_alts(cx: &AlmideRxCx, alts: &[Vec<AlmideRxPiece>], p: usize, caps: &mut AlmideRxCaps, k: AlmideRxK) -> Option<usize> {
-    for alt in alts {
-        if let Some(e) = rx_seq(cx, alt, 0, p, caps, k) {
-            return Some(e);
+impl<'a> AlmideRxVm<'a> {
+    fn new(rx: &AlmideRxPat, s: &'a [char], end_at: Option<usize>, track: bool) -> Self {
+        AlmideRxVm {
+            cx: AlmideRxCx { s, multiline: rx.multiline },
+            end_at,
+            track,
+            caps: vec![None; rx.ncap],
+            frames: Vec::new(),
+            choices: Vec::new(),
+            trail: Vec::new(),
         }
     }
-    None
-}
 
-fn rx_seq(cx: &AlmideRxCx, seq: &[AlmideRxPiece], si: usize, p: usize, caps: &mut AlmideRxCaps, k: AlmideRxK) -> Option<usize> {
-    if si >= seq.len() {
-        return k(p, caps);
-    }
-    match rx_zero_width(cx, &seq[si].node, p) {
-        Some(true) => rx_seq(cx, seq, si + 1, p, caps, k),
-        Some(false) => None,
-        None => rx_rep(cx, seq, si, p, caps, 0, k),
-    }
-}
-
-// The rest of the sequence after `count` instances of piece `si`.
-fn rx_rep_rest(cx: &AlmideRxCx, seq: &[AlmideRxPiece], si: usize, p: usize, caps: &mut AlmideRxCaps, count: usize, k: AlmideRxK) -> Option<usize> {
-    if count < seq[si].min {
-        None
-    } else {
-        rx_seq(cx, seq, si + 1, p, caps, k)
-    }
-}
-
-// One more instance of piece `si` (then loop), or hand over to the rest.
-fn rx_rep_more(cx: &AlmideRxCx, seq: &[AlmideRxPiece], si: usize, p: usize, caps: &mut AlmideRxCaps, count: usize, k: AlmideRxK) -> Option<usize> {
-    let piece = &seq[si];
-    let under_max = piece.max.map_or(true, |m| count < m);
-    if !under_max {
-        return None;
-    }
-    rx_one(cx, &piece.node, p, caps, &mut |e: usize, caps: &mut AlmideRxCaps| {
-        if e == p {
-            // An empty instance: count it, but never loop on it.
-            rx_rep_rest(cx, seq, si, e, caps, count + 1, k)
-        } else {
-            rx_rep(cx, seq, si, e, caps, count + 1, k)
-        }
-    })
-}
-
-fn rx_rep(cx: &AlmideRxCx, seq: &[AlmideRxPiece], si: usize, p: usize, caps: &mut AlmideRxCaps, count: usize, k: AlmideRxK) -> Option<usize> {
-    if seq[si].lazy {
-        if let Some(e) = rx_rep_rest(cx, seq, si, p, caps, count, k) {
-            return Some(e);
-        }
-        rx_rep_more(cx, seq, si, p, caps, count, k)
-    } else {
-        if let Some(e) = rx_rep_more(cx, seq, si, p, caps, count, k) {
-            return Some(e);
-        }
-        rx_rep_rest(cx, seq, si, p, caps, count, k)
-    }
-}
-
-// One instance of an atom at `p`; a group's capture is recorded before the
-// continuation runs and restored when the continuation backtracks.
-fn rx_one(cx: &AlmideRxCx, node: &AlmideRxNode, p: usize, caps: &mut AlmideRxCaps, k: AlmideRxK) -> Option<usize> {
-    match node {
-        AlmideRxNode::Group(alts, ci) => {
-            let ci = *ci;
-            rx_alts(cx, alts, p, caps, &mut |e: usize, caps: &mut AlmideRxCaps| {
-                if ci == 0 {
-                    return k(e, caps);
-                }
-                let saved = caps[ci - 1];
-                caps[ci - 1] = Some((p, e));
-                let r = k(e, caps);
-                if r.is_none() {
-                    caps[ci - 1] = saved;
-                }
-                r
-            })
-        }
-        _ => match rx_zero_width(cx, node, p) {
-            Some(true) => k(p, caps),
-            Some(false) => None,
-            None => {
-                if p < cx.s.len() && rx_node_matches(node, cx.s[p]) {
-                    k(p + 1, caps)
-                } else {
-                    None
-                }
+    /// The end of the first match the walk reaches from `p`, if any; `caps`
+    /// then holds that match's groups.
+    fn exec(&mut self, alts: &'a Vec<AlmideRxSeq>, p: usize) -> Option<usize> {
+        self.frames.clear();
+        self.choices.clear();
+        self.trail.clear();
+        self.caps.iter_mut().for_each(|c| *c = None);
+        let mut goal = self.alts(alts, 0, p, ALMIDE_RX_DONE);
+        loop {
+            goal = match goal {
+                AlmideRxGoal::Seq { pc, p, k } => self.seq(pc, p, k),
+                AlmideRxGoal::Alts { alts, ai, p, k } => self.alts(alts, ai, p, k),
+                AlmideRxGoal::Inst { pc, p, count, k } => self.inst(pc, p, count, k),
+                AlmideRxGoal::Lazy { pc, p, count, k } => self.lazy(pc, p, count, k),
+                AlmideRxGoal::Run { k: ALMIDE_RX_DONE, p } if self.end_at.map_or(true, |e| e == p) => return Some(p),
+                AlmideRxGoal::Run { k, p } if k != ALMIDE_RX_DONE => self.resume(k, p),
+                _ => self.backtrack()?,
             }
-        },
-    }
-}
-
-fn rx_match_from(rx: &AlmideRxPat, s: &[char], p: usize, caps: &mut AlmideRxCaps, k: AlmideRxK) -> Option<usize> {
-    let cx = AlmideRxCx { s, multiline: rx.multiline };
-    rx_alts(&cx, &rx.alts, p, caps, k)
-}
-
-// Leftmost match at or after `start`: (start, end, captures).
-fn rx_find_at(rx: &AlmideRxPat, s: &[char], start: usize) -> Option<(usize, usize, AlmideRxCaps)> {
-    for i in start..=s.len() {
-        let mut caps: AlmideRxCaps = vec![None; rx.ncap];
-        if let Some(end) = rx_match_from(rx, s, i, &mut caps, &mut |e: usize, _caps: &mut AlmideRxCaps| Some(e)) {
-            return Some((i, end, caps));
         }
     }
-    None
+
+    fn push(&mut self, goal: AlmideRxGoal<'a>) {
+        self.choices.push(AlmideRxChoice { goal, frames: self.frames.len(), trail: self.trail.len() });
+    }
+
+    /// Resume the newest untried alternative, first undoing every capture
+    /// write and dropping every frame made since it was left. None = no
+    /// alternative is left: the match fails at this start position.
+    fn backtrack(&mut self) -> Option<AlmideRxGoal<'a>> {
+        let top = self.choices.len().checked_sub(1)?;
+        let AlmideRxChoice { goal, frames, trail } = self.choices[top];
+        for (slot, saved) in self.trail.drain(trail..).rev() {
+            self.caps[slot] = saved;
+        }
+        self.frames.truncate(frames);
+        if let AlmideRxGoal::Back { pc, start, count, k } = goal {
+            // Give back one more char next time, down to the minimum.
+            if count > pc.piece().min {
+                self.choices[top].goal = AlmideRxGoal::Back { pc, start, count: count - 1, k };
+            } else {
+                self.choices.pop();
+            }
+            return Some(AlmideRxGoal::Seq { pc: pc.next(), p: start + count, k });
+        }
+        self.choices.pop();
+        Some(goal)
+    }
+
+    fn alts(&mut self, alts: &'a Vec<AlmideRxSeq>, ai: usize, p: usize, k: usize) -> AlmideRxGoal<'a> {
+        let Some(seq) = alts.get(ai) else { return AlmideRxGoal::Fail };
+        if ai + 1 < alts.len() {
+            self.push(AlmideRxGoal::Alts { alts, ai: ai + 1, p, k });
+        }
+        AlmideRxGoal::Seq { pc: AlmideRxPc { seq, si: 0 }, p, k }
+    }
+
+    fn seq(&mut self, mut pc: AlmideRxPc<'a>, p: usize, k: usize) -> AlmideRxGoal<'a> {
+        while let Some(piece) = pc.seq.get(pc.si) {
+            match rx_zero_width(&self.cx, &piece.node, p) {
+                Some(true) => pc.si += 1,
+                Some(false) => return AlmideRxGoal::Fail,
+                None if matches!(piece.node, AlmideRxNode::Group(..)) => return self.rep(pc, p, 0, k),
+                None if piece.lazy => return self.lazy(pc, p, 0, k),
+                None => return self.greedy(pc, p, k),
+            }
+        }
+        AlmideRxGoal::Run { k, p }
+    }
+
+    fn atom_at(&self, pc: AlmideRxPc<'a>, p: usize) -> bool {
+        self.cx.s.get(p).is_some_and(|&c| rx_node_matches(&pc.piece().node, c))
+    }
+
+    /// A greedy single atom takes as many chars as it can, hands over to the
+    /// rest of the sequence, and leaves one choice that gives them back.
+    fn greedy(&mut self, pc: AlmideRxPc<'a>, p: usize, k: usize) -> AlmideRxGoal<'a> {
+        let piece = pc.piece();
+        let max = piece.max.unwrap_or(usize::MAX);
+        let mut n = 0;
+        while n < max && self.atom_at(pc, p + n) {
+            n += 1;
+        }
+        if n < piece.min {
+            return AlmideRxGoal::Fail;
+        }
+        if n > piece.min {
+            self.push(AlmideRxGoal::Back { pc, start: p, count: n - 1, k });
+        }
+        AlmideRxGoal::Seq { pc: pc.next(), p: p + n, k }
+    }
+
+    /// A lazy single atom hands over to the rest as soon as it has its
+    /// minimum, leaving one choice that takes one more char.
+    fn lazy(&mut self, pc: AlmideRxPc<'a>, mut p: usize, mut count: usize, k: usize) -> AlmideRxGoal<'a> {
+        let piece = pc.piece();
+        let max = piece.max.unwrap_or(usize::MAX);
+        loop {
+            let more = count < max && self.atom_at(pc, p);
+            if count >= piece.min {
+                if more {
+                    self.push(AlmideRxGoal::Lazy { pc, p: p + 1, count: count + 1, k });
+                }
+                return AlmideRxGoal::Seq { pc: pc.next(), p, k };
+            }
+            if !more {
+                return AlmideRxGoal::Fail;
+            }
+            p += 1;
+            count += 1;
+        }
+    }
+
+    /// The repeated group at `pc` has matched `count` instances ending at `p`:
+    /// greedy tries one more instance before the rest, lazy the rest first.
+    fn rep(&mut self, pc: AlmideRxPc<'a>, p: usize, count: usize, k: usize) -> AlmideRxGoal<'a> {
+        let piece = pc.piece();
+        let more = piece.max.map_or(true, |m| count < m);
+        let stop = AlmideRxGoal::Seq { pc: pc.next(), p, k };
+        match (count >= piece.min, more, piece.lazy) {
+            (false, false, _) => AlmideRxGoal::Fail,
+            (true, false, _) => stop,
+            (false, true, _) => self.inst(pc, p, count, k),
+            (true, true, true) => {
+                self.push(AlmideRxGoal::Inst { pc, p, count, k });
+                stop
+            }
+            (true, true, false) => {
+                self.push(stop);
+                self.inst(pc, p, count, k)
+            }
+        }
+    }
+
+    /// One instance of the group at `pc`: its alternatives, each continuing
+    /// into a frame that records the capture and loops.
+    fn inst(&mut self, pc: AlmideRxPc<'a>, p: usize, count: usize, k: usize) -> AlmideRxGoal<'a> {
+        let AlmideRxNode::Group(alts, _) = &pc.piece().node else { return AlmideRxGoal::Fail };
+        let frame = self.frames.len();
+        self.frames.push(AlmideRxFrame { pc, start: p, count: count + 1, next: k });
+        self.alts(alts, 0, p, frame)
+    }
+
+    /// A group instance ended at `p`: record its capture, then loop or stop.
+    fn resume(&mut self, k: usize, p: usize) -> AlmideRxGoal<'a> {
+        let f = self.frames[k];
+        // The newest frame with no choice above it has no other reader left.
+        if k + 1 == self.frames.len() && k >= self.choices.last().map_or(0, |c| c.frames) {
+            self.frames.pop();
+        }
+        let piece = f.pc.piece();
+        if let AlmideRxNode::Group(_, ci) = piece.node {
+            if ci > 0 && self.track {
+                self.capture(ci - 1, f.start, p);
+            }
+        }
+        if p != f.start {
+            return self.rep(f.pc, p, f.count, f.next);
+        }
+        // An empty instance counts, but never loops.
+        if f.count < piece.min {
+            AlmideRxGoal::Fail
+        } else {
+            AlmideRxGoal::Seq { pc: f.pc.next(), p, k: f.next }
+        }
+    }
+
+    /// With no choice left a failure ends the attempt and the slots are
+    /// reset before the next one, so there is nothing to restore.
+    fn capture(&mut self, slot: usize, start: usize, end: usize) {
+        if !self.choices.is_empty() {
+            self.trail.push((slot, self.caps[slot]));
+        }
+        self.caps[slot] = Some((start, end));
+    }
 }
 
+// Leftmost match at or after `start`: (start, end); `vm.caps` holds its groups.
+fn rx_find_at<'a>(vm: &mut AlmideRxVm<'a>, rx: &'a AlmideRxPat, start: usize) -> Option<(usize, usize)> {
+    (start..=vm.cx.s.len()).find_map(|i| vm.exec(&rx.alts, i).map(|end| (i, end)))
+}
 
 // ---- Public API ----
 
 pub fn almide_regex_is_match(pat: &str, s: &str) -> bool {
     let rx = rx_compile(pat);
     let chars: Vec<char> = s.chars().collect();
-    rx_find_at(&rx, &chars, 0).is_some()
+    let mut vm = AlmideRxVm::new(&rx, &chars, None, false);
+    rx_find_at(&mut vm, &rx, 0).is_some()
 }
 
 pub fn almide_regex_full_match(pat: &str, s: &str) -> bool {
     let rx = rx_compile(pat);
     let chars: Vec<char> = s.chars().collect();
-    let mut caps: AlmideRxCaps = vec![None; rx.ncap];
-    let len = chars.len();
-    rx_match_from(&rx, &chars, 0, &mut caps, &mut |e: usize, _caps: &mut AlmideRxCaps| if e == len { Some(e) } else { None }).is_some()
+    AlmideRxVm::new(&rx, &chars, Some(chars.len()), false).exec(&rx.alts, 0).is_some()
 }
 
 pub fn almide_regex_find(pat: &str, s: &str) -> Option<String> {
     let rx = rx_compile(pat);
     let chars: Vec<char> = s.chars().collect();
-    rx_find_at(&rx, &chars, 0).map(|(start, end, _)| chars[start..end].iter().collect())
+    let mut vm = AlmideRxVm::new(&rx, &chars, None, false);
+    rx_find_at(&mut vm, &rx, 0).map(|(start, end)| chars[start..end].iter().collect())
 }
 
 pub fn almide_regex_find_all(pat: &str, s: &str) -> Vec<String> {
     let rx = rx_compile(pat);
     let chars: Vec<char> = s.chars().collect();
+    let mut vm = AlmideRxVm::new(&rx, &chars, None, false);
     let mut results: Vec<String> = vec![];
     let mut pos = 0;
     while pos <= chars.len() {
-        if let Some((start, end, _)) = rx_find_at(&rx, &chars, pos) {
+        if let Some((start, end)) = rx_find_at(&mut vm, &rx, pos) {
             results.push(chars[start..end].iter().collect());
             pos = if end > start { end } else { end + 1 };
         } else {
@@ -409,10 +575,11 @@ pub fn almide_regex_find_all(pat: &str, s: &str) -> Vec<String> {
 pub fn almide_regex_replace(pat: &str, s: &str, rep: &str) -> String {
     let rx = rx_compile(pat);
     let chars: Vec<char> = s.chars().collect();
+    let mut vm = AlmideRxVm::new(&rx, &chars, None, false);
     let mut result = String::new();
     let mut pos = 0;
     while pos <= chars.len() {
-        if let Some((start, end, _)) = rx_find_at(&rx, &chars, pos) {
+        if let Some((start, end)) = rx_find_at(&mut vm, &rx, pos) {
             result.extend(&chars[pos..start]);
             result.push_str(rep);
             pos = if end > start {
@@ -438,7 +605,8 @@ pub fn almide_regex_replace(pat: &str, s: &str, rep: &str) -> String {
 pub fn almide_regex_replace_first(pat: &str, s: &str, rep: &str) -> String {
     let rx = rx_compile(pat);
     let chars: Vec<char> = s.chars().collect();
-    if let Some((start, end, _)) = rx_find_at(&rx, &chars, 0) {
+    let mut vm = AlmideRxVm::new(&rx, &chars, None, false);
+    if let Some((start, end)) = rx_find_at(&mut vm, &rx, 0) {
         let mut result = String::new();
         result.extend(&chars[..start]);
         result.push_str(rep);
@@ -467,10 +635,11 @@ pub fn almide_regex_replace_first(pat: &str, s: &str, rep: &str) -> String {
 pub fn almide_regex_split(pat: &str, s: &str) -> Vec<String> {
     let rx = rx_compile(pat);
     let chars: Vec<char> = s.chars().collect();
+    let mut vm = AlmideRxVm::new(&rx, &chars, None, false);
     let mut results: Vec<String> = vec![];
     let (mut last, mut scan) = (0usize, 0usize);
     while scan <= chars.len() {
-        let Some((start, end, _)) = rx_find_at(&rx, &chars, scan) else { break };
+        let Some((start, end)) = rx_find_at(&mut vm, &rx, scan) else { break };
         results.push(chars[last..start].iter().collect());
         last = end;
         scan = if end > start { end } else { end + 1 };
@@ -492,9 +661,10 @@ pub fn almide_regex_split(pat: &str, s: &str) -> Vec<String> {
 pub fn almide_regex_captures(pat: &str, s: &str) -> Option<Vec<String>> {
     let rx = rx_compile(pat);
     let chars: Vec<char> = s.chars().collect();
-    let (mstart, mend, caps) = rx_find_at(&rx, &chars, 0)?;
+    let mut vm = AlmideRxVm::new(&rx, &chars, None, true);
+    let (mstart, mend) = rx_find_at(&mut vm, &rx, 0)?;
     let mut result = vec![chars[mstart..mend].iter().collect::<String>()];
-    result.extend(caps.iter().map(|c| match c {
+    result.extend(vm.caps.iter().map(|c| match c {
         Some((start, end)) => chars[*start..*end].iter().collect(),
         None => String::new(),
     }));
