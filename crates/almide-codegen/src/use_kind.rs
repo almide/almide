@@ -531,9 +531,20 @@ impl<'a> Walk<'a> {
             IrExprKind::RustMacro { args, .. } => self.each(args, Site::Operand),
             IrExprKind::Record { fields, .. } => self.fields(fields, Site::Construct(Ctor::Record)),
             IrExprKind::InlineRust { args, .. } => self.fields(args, Site::Operand),
+            // FIELDS BEFORE THE BASE — the order the emitted Rust runs them
+            // (`T { f: e, ..base }` evaluates each written field, then the
+            // base), and this walk's order is what `cloned_anyway` reads as
+            // "a later occurrence still follows this one". Walking the base
+            // first made `Token { ...t, start: t.start - lead }` look like a
+            // move that a later read has to clone around, so the chain's
+            // source was left a borrow and the base rendered `..t` on a `&T`
+            // that rustc rejects (#2315). The base is the LAST thing the
+            // record literal touches; nothing follows it, and the element is
+            // simply consumed — which is also the cheaper answer, since an
+            // owned source moves the remaining fields out with no clone at all.
             IrExprKind::SpreadRecord { base, fields } => {
-                self.expr(base, Site::Construct(Ctor::SpreadBase));
                 self.fields(fields, Site::Construct(Ctor::SpreadField));
+                self.expr(base, Site::Construct(Ctor::SpreadBase));
             }
             IrExprKind::MapLiteral { entries } => {
                 for (k, v) in entries {
