@@ -132,7 +132,7 @@
 2530	spec/wasm_cross/env_set_overlay.almd
 1381	spec/wasm_cross/env_sleep_pause.almd
 2093	spec/wasm_cross/error_operators.almd
-1711	spec/wasm_cross/exit_code_out_of_range.almd
+1754	spec/wasm_cross/exit_code_out_of_range.almd
 850	spec/wasm_cross/expr_stmt_comment.almd
 8309	spec/wasm_cross/fallible_hof_effect_callback_family.almd
 15761	spec/wasm_cross/fallible_hof_option_effect_callback.almd
