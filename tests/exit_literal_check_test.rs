@@ -150,3 +150,45 @@ fn the_diagnostic_points_to_the_argument_without_choosing_a_replacement() {
     assert_eq!(diagnostic["end_col"], line.find("200").unwrap() + 4);
     assert!(diagnostic["try_replace"].is_null());
 }
+
+/// A local binding of the module's own name is not judged by E084.
+///
+/// Without the import the record call below checks clean, which is what makes
+/// the shape legitimate rather than nonsense. With the import, the checker's
+/// member resolution still reaches past the local and reports E006 (#2345);
+/// E084 declines the shape instead of stacking a second, wrong error on top.
+/// Declining costs a literal its check-time judgement and leaves C-350's
+/// runtime check; firing would reject a program that is fine.
+#[test]
+fn a_local_binding_shadowing_the_module_is_not_judged() {
+    let bin =
+        std::env::var("ALMIDE_BIN").unwrap_or_else(|_| env!("CARGO_BIN_EXE_almide").to_string());
+    let directory = tempfile::tempdir().unwrap();
+    let body = "fn main() -> Unit = { let process = { exit: (code: Int) => code }\n let _ = process.exit(200) }\n";
+
+    let clean = directory.path().join("shadow_no_import.almd");
+    std::fs::write(&clean, body).unwrap();
+    let output = Command::new(&bin).arg("check").arg(&clean).output().unwrap();
+    assert!(
+        output.status.success(),
+        "the record shape itself must check clean without the import:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let shadowed = directory.path().join("shadow.almd");
+    std::fs::write(&shadowed, format!("import process\n{body}")).unwrap();
+    let output = Command::new(&bin)
+        .args(["check", "--json"])
+        .arg(&shadowed)
+        .output()
+        .unwrap();
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !text.contains("E084"),
+        "a local binding of the module's name must not be judged by E084:\n{text}"
+    );
+}

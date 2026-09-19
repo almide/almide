@@ -47,9 +47,15 @@ impl Checker {
                 self.env.lookup_var(name).is_none()
                     && table.resolve_direct(name).as_deref() == Some("process.exit")
             }
+            // A local binding of the module's own name wins, as it does for a
+            // bare `exit` above. The checker's member resolution still reaches
+            // past it (#2345), so this guard is deliberately ahead of it: a
+            // literal we decline to judge falls back to C-350's runtime check,
+            // whereas a wrong E084 would reject a program that is fine.
             ExprKind::Member { object, field, .. } if field.as_str() == "exit" => {
                 matches!(&object.kind, ExprKind::Ident { name, .. }
-                    if table.resolve(name).is_some_and(|module| module.as_str() == "process"))
+                    if self.env.lookup_var(name).is_none()
+                        && table.resolve(name).is_some_and(|module| module.as_str() == "process"))
             }
             _ => false,
         }
