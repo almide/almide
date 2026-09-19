@@ -537,6 +537,18 @@ impl LowerCtx {
                 // else it falls back to linearization.
                 IrExprKind::If { cond, then, else_ }
                     if self.try_lower_unit_if(cond, then, else_) => {}
+                // A nested Unit `match` arm-tail gets the SAME real-branch
+                // attempt its `if` sibling gets one line up. Without it every
+                // Match here went straight to `lower_branch`, whose
+                // linearization WALLS the moment an arm bears a call or an
+                // assignment — so a dispatch table nested inside a branch was
+                // unrenderable however ordinary it is (#2325: the mutual-TCO
+                // dispatcher's member arm is `match kind { 11 => …, 12 => … }`,
+                // and every regex program walled on it). The statement-position
+                // twin `lower_unit_match_stmt` has run this desugar since the
+                // fizzbuzz shape; the arm-tail seam simply never called it.
+                IrExprKind::Match { subject, arms }
+                    if self.try_lower_unit_match_arm_tail(tail, subject, arms) => {}
                 IrExprKind::If { .. } | IrExprKind::Match { .. } => self.lower_branch(tail)?,
                 // A LOOP tail (`ArrV(rows) => { for row in rows { … } }` — the gguf ValArray
                 // consumer arm; a `while` sibling): a loop is a Unit EFFECT, so it must RUN,
