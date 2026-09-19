@@ -1,1 +1,2 @@
+spec/wasm_cross/exit_code_upper_bound.almd	oracle exit 125
 spec/wasm_cross/guard_else_exit_code.almd	oracle exit 3
