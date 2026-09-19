@@ -3,10 +3,12 @@
 // its caller exactly ONE credit, so the tree its last reader drops is freed
 // node by node and a loop that rebuilds it runs in one tree's memory. Before
 // the fix a constructor result counted as borrowed and took a second credit
-// on the way out: every node of every round leaked, and wasm exited `Error:
-// out of memory` (exit 1) while native printed the checksum. Six Int fields
-// put each node in the 128-byte class, so that leak crosses 4 GiB before the
-// loop ends; with one credit the rounds reuse the same blocks.
+// on the way out, so every node of every round leaked. Six Int fields put
+// each node in the 128-byte class, so the rounds below leak about 200 MB
+// where one credit holds one tree: the allocation ledger's watermark for this
+// fixture is what a reintroduced leak moves, and it moves by the whole
+// difference. The round count stays inside the interpreter's fuel budget so
+// this fixture keeps its third vote (proofs/run-parity-unsupported-baseline.txt).
 type Tree = | Leaf | Node(Tree, Tree, Int, Int, Int, Int, Int, Int)
 
 fn make(depth: Int) -> Tree = if depth == 0 then Leaf
@@ -34,7 +36,7 @@ fn weigh(t: Tree) -> Int = match t {
 fn main() -> Unit = {
   var total = 0
   var round = 0
-  while round < 8400 {
+  while round < 400 {
     let t = if round % 2 == 0 then make(12) else grow(12)
     total = total + weigh(t)
     round = round + 1
