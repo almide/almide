@@ -11,7 +11,7 @@
 /// The dialect this compiler speaks. Bump ONLY together with a new
 /// `[[epoch]]` entry in `proofs/dialect-epochs.toml`; the gate fails if the
 /// two disagree.
-pub const CURRENT_DIALECT: u32 = 3;
+pub const CURRENT_DIALECT: u32 = 4;
 
 /// What a stamp means relative to this compiler.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
