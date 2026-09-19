@@ -296,7 +296,11 @@ fn fs_abi(resolve: &wit_parser::Resolve) -> anyhow::Result<FsAbi> {
     let dt = find("descriptor-type")?;
     let stat = find("descriptor-stat")?;
     let mut sa = wit_parser::SizeAlign::default();
-    sa.fill(resolve);
+    // 0.259 made `fill` fallible: a type whose size it cannot compute leaves the
+    // map short, and every `sa.size`/`sa.align` below would then read a stale
+    // entry. The offsets are what we lay the host's records out on, so the
+    // failure has to travel, not be dropped.
+    sa.fill(resolve)?;
     // result<T, error-code> payload offset = discriminant (1 byte for
     // <=255 cases) aligned up to max(align(T), align(error-code)).
     let ec_align = sa.align(&Type::Id(ec)).align_wasm32() as u64;
@@ -430,7 +434,7 @@ fn http_abi(resolve: &wit_parser::Resolve) -> anyhow::Result<HttpAbi> {
     let scheme = find("scheme")?;
     let ec = find("error-code")?;
     let mut sa = wit_parser::SizeAlign::default();
-    sa.fill(resolve);
+    sa.fill(resolve)?;
     let ec_align = sa.align(&Type::Id(ec)).align_wasm32() as u64;
     Ok(HttpAbi {
         m_get: case(method, "get")?,
