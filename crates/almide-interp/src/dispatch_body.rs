@@ -65,7 +65,11 @@ impl<'a> Interpreter<'a> {
         arity: usize,
     ) -> Result<(Sym, &'a almide_ir::IrFunction, bool), String> {
         let Some((func_def, gate_mut)) = self.resolve_lowered_body(module, func) else {
-            return Err(format!("no lowered body for {}.{}", module, func));
+            // Capability FIRST, qualification after — the shape every other
+            // `Flow::Unsupported` reason in this crate uses, and the one the
+            // abstain ledger's class patterns key on. Leading with prose put
+            // the name where no pattern could see it (#2333).
+            return Err(format!("{}.{}: no lowered body", module, func));
         };
         if func_def.params.len() == arity {
             return Ok((func, func_def, gate_mut));
