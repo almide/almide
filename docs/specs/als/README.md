@@ -107,18 +107,19 @@
 | [ALS-I2](./implementation.md#als-i2-コンパイラの決定性と資源) | コンパイラの決定性と資源 | C-040, C-059 |
 | [ALS-I3](./implementation.md#als-i3-v1-lowering-エッジの等価証拠) | v1 lowering エッジの等価証拠 | C-075, C-107, C-109, C-116, C-120, C-138, C-152, C-143, C-144, C-139, C-156, C-157, C-158, C-212, C-336 |
 
-## runtime.md — 8 section(s)
+## runtime.md — 9 section(s)
 
 | ID | Section | Contracts |
 |----|---------|-----------|
 | [ALS-R1](./runtime.md#als-r1-effect-main-のエラー終了形) | effect-main のエラー終了形 | C-035 |
 | [ALS-R2](./runtime.md#als-r2-補間の表示形) | 補間の表示形 | C-008, C-009, C-010, C-011, C-222 |
-| [ALS-R3](./runtime.md#als-r3-fan-並行コンビネータの決定性) | fan 並行コンビネータの決定性 | C-004, C-005, C-006, C-199, C-321 |
+| [ALS-R3](./runtime.md#als-r3-fan-並行コンビネータの決定性) | fan 並行コンビネータの決定性 | C-004, C-005, C-006, C-199, C-321, C-349 |
 | [ALS-R4](./runtime.md#als-r4-非有限浮動小数の定数表示) | 非有限浮動小数の定数表示 | C-012 |
 | [ALS-R5](./runtime.md#als-r5-プロセス環境) | プロセス環境 | C-096, C-112, C-118, C-133, C-189, C-214, C-215, C-290, C-327, C-330, C-328, C-329, C-331 |
 | [ALS-R6](./runtime.md#als-r6-ファイルシステムのパス解決) | ファイルシステムのパス解決 | C-042, C-137, C-220, C-225, C-227, C-228, C-229, C-230, C-270, C-272, C-273, C-278, C-282, C-283, C-284 |
 | [ALS-R7](./runtime.md#als-r7-ストリーミング行走査の可謬コールバック) | ストリーミング行走査の可謬コールバック | C-274, C-335 |
 | [ALS-R8](./runtime.md#als-r8-http-レスポンスヘッダの規範) | HTTP レスポンスヘッダの規範 | C-275 |
+| [ALS-R9](./runtime.md#als-r9-プロセス終了コードの値域) | プロセス終了コードの値域 | C-350 |
 
 ## semantics.md — 15 section(s)
 
@@ -147,7 +148,7 @@
 | [ALS-S1](./strings.md#als-s1-コードポイント意味論) | コードポイント意味論 | C-016, C-065 |
 | [ALS-S2](./strings.md#als-s2-空パターンの検索規則) | 空パターンの検索規則 | C-017 |
 | [ALS-S3](./strings.md#als-s3-文字種述語) | 文字種述語 | C-018, C-019 |
-| [ALS-S4](./strings.md#als-s4-バイト列との相互変換) | バイト列との相互変換 | C-022 |
+| [ALS-S4](./strings.md#als-s4-バイト列との相互変換) | バイト列との相互変換 | C-022, C-348 |
 | [ALS-S5](./strings.md#als-s5-split-の区切り規範) | split の区切り規範 | C-050 |
 | [ALS-S6](./strings.md#als-s6-規模不変性) | 規模不変性 | C-074 |
 
@@ -181,4 +182,4 @@
 | [ALS-T24](./text-and-numbers.md#als-t24-float-→-int-変換) | Float → Int 変換 | C-307, C-338, C-341 |
 | [ALS-T25](./text-and-numbers.md#als-t25-正準-fast-exp) | 正準 fast-exp | C-223 |
 
-128 sections across 11 chapters.
+129 sections across 11 chapters.
