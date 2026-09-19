@@ -29,6 +29,7 @@ pub mod substitute;
 pub mod effect;
 pub mod annotations;
 pub mod mut_param;
+pub mod exit_code;
 pub mod top_let_storage;
 
 mod wasm_repr;

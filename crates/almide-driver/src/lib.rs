@@ -66,6 +66,12 @@ pub fn link_ir(ir: &mut IrProgram) {
 /// reorder what it cannot spell) while making the gate insertion point explicit
 /// rather than implicit in a hand-copied sequence.
 pub fn optimize_half(ir: &mut IrProgram) {
+    // The exit-code range rule, BEFORE the optimizer so the guard it inserts is
+    // folded and DCE'd like any other branch (a literal out-of-range code
+    // collapses to the abort arm). Here rather than in a consumer because every
+    // leg must see the SAME rule: four hand-written checks would be four rules
+    // that agree today. See `almide_ir::exit_code` for why 0..=125 (#2303).
+    almide_ir::exit_code::guard_exit_codes(ir);
     almide_optimize::optimize::optimize_program(ir);
     almide_ir::reclassify_top_lets(ir);
 }
