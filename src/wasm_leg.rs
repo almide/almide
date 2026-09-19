@@ -133,6 +133,13 @@ fn lower_to_ir_impl(
     }
     link_self_host(&mut ir, &mut checker, &sources);
     almide_driver::link_ir(&mut ir);
+    // #806 step 2, on this leg too (#2319): small pure-scalar fns inline as
+    // reduced expressions at their call sites. The incumbent pipeline has run
+    // this since #806 (almide-mir/pipeline.rs, post-link and pre-mut-param —
+    // the same position it takes here); the structural leg never did, so an
+    // inner-loop `eval_a(i, j)` stayed a call wasmtime does not inline across
+    // (it inlines only under `-C inlining`, which no user passes).
+    almide_mir::lower::inline_small_scalar_fns(&mut ir);
     // C-132 move-mode write-back: `mut` param fns return their mutated
     // buffer and call sites assign it back — the SAME shared-IR rewrite
     // the incumbent pipeline runs post-link (almide-mir/pipeline.rs).
