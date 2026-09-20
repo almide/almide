@@ -256,10 +256,15 @@ fn split_at[T](xs: List[T], n: Int) -> (List[T], List[T]) = (list.take(xs, n), l
 //
 // A loop, not recursion (#2306): `[seed] + iterate(f(seed), f, n - 1)` was one
 // frame per element on both targets (a stack overflow at about 10,000 elements
-// on wasm and 50,000 natively) and copied the tail at every level. The result
-// grows with `list.push`, the one append that is in place for every element
-// type on every leg: `acc + [x]` copies the whole list per step for a heap
-// element on the structural wasm leg.
+// on wasm and 50,000 natively) and copied the tail at every level.
+//
+// The result grows with `list.push` for the LOOP SHAPE, not to dodge a slow
+// append. When this was written `acc + [x]` copied the whole list per step for
+// a heap element on the structural wasm leg; #2310 fixed that window, and the
+// two spellings now measure the same inside a carrier like this one — 0.997x
+// native and 1.002x wasm over 4M appends (#2353). So `list.push` stays because
+// it is the spelling this body already holds its constant stack with, and
+// swapping it would move the allocation ledger to buy nothing.
 fn iterate[T](seed: T, f: (T) -> T, n: Int) -> List[T] = {
   var out: List[T] = []
   var x = seed
@@ -289,7 +294,8 @@ fn iterate[T](seed: T, f: (T) -> T, n: Int) -> List[T] = {
 // 50,000 natively) plus an O(n) copy per element. The loop carries a `stop`
 // flag instead of `break`, which the structural wasm leg does not lower yet;
 // after the first err the remaining iterations only test the flag. Results
-// grow with `list.push` (see `iterate` for why not `acc + [x]`).
+// grow with `list.push` for that loop shape — `acc + [x]` is no longer the
+// slower spelling here (#2310 / #2353); see `iterate` for the measurement.
 fn __fallible_map[A, B, E](xs: List[A], f: (A) -> Result[B, E]) -> Result[List[B], E] = {
   var out: List[B] = []
   var failed: E? = none
