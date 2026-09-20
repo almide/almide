@@ -1409,6 +1409,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/append_accumulator.almd", class = "fixture" },
   { path = "spec/wasm_cross/append_accumulator_heap.almd", class = "fixture" },
+  { path = "spec/wasm_cross/append_accumulator_heap_million.almd", class = "fixture" },
   { path = "spec/wasm_cross/cross_dep_accumulator.almd", class = "fixture" },
   { path = "spec/wasm_cross/mutual_append.almd", class = "fixture" },
   { path = "spec/wasm_cross/block_line_collect.almd", class = "fixture" },

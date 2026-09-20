@@ -74,22 +74,24 @@ impl Emitter<'_> {
             return Ok(false);
         };
         let el = self.types.el(h);
-        // SCALAR 8-byte elements only: a 4-byte HANDLE slot (record/str/
-        // list element) needs the literal builder's Dup discipline — the
-        // container owns the element, the load is a borrow, and pushing
-        // the borrowed handle un-Dup'd double-owns it (the C-186 fixture
-        // caught exactly that). Heap-element appends keep the concat
-        // path, whose outgrown generations the assign dec now frees.
-        if el != INT && el != FLOAT {
-            return Ok(false);
-        }
         let cow = self.cow_fn_of(SliceTy::List(h));
         self.f.instructions().local_get(idx).call(cow);
         self.lower(elem, Some(el))?;
         if el.val_type() == ValType::F64 {
             self.f.instructions().i64_reinterpret_f64();
         }
-        self.f.instructions().call(F_LIST_PUSH_8).local_set(idx);
+        // A 4-byte HANDLE element (#2310) takes the literal builder's Dup
+        // discipline, which is what admits it here: the spine becomes a
+        // holder, so a BORROWED handle takes its +1 and an OWNED one moves
+        // in with its credit (`rc_share_guard`, the same call the list
+        // literal and the index store make). Without it the push
+        // double-owns the element — the C-186 trap. The copy side already
+        // knew how: `cow_fn_of` picks `CowElems` for a handle element, and
+        // `$list_push`'s grow path frees the outgrown SPINE untyped, so the
+        // elements it memcpy'd keep exactly one credit each.
+        self.rc_share_guard(elem, el);
+        let push = if el.slot_size() == 8 { F_LIST_PUSH_8 } else { F_LIST_PUSH_4 };
+        self.f.instructions().call(push).local_set(idx);
         self.rc_own(idx, SliceTy::List(h));
         Ok(true)
     }

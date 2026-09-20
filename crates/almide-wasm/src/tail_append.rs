@@ -62,9 +62,10 @@ impl Emitter<'_> {
     /// for the parameter it rebinds. `$cow` + `$list_push_8` grows amortized
     /// in place where the generic path took `$concat`'s full copy and then
     /// released the outgrown block — at a size class the free list abandons,
-    /// which is how a 200,000-element accumulator reached C-197. Scalar
-    /// 8-byte elements only, the same bound the assign window carries: a
-    /// 4-byte handle slot needs the literal builder's Dup discipline.
+    /// which is how a 200,000-element accumulator reached C-197. Any element
+    /// the layout gives a slot (#2310): 8-byte scalars push through
+    /// `$list_push_8`, 4-byte handles through `$list_push_4` with the
+    /// literal builder's Dup discipline on the element.
     pub(crate) fn tail_list_append_arg(
         &mut self,
         k: usize,
@@ -91,16 +92,17 @@ impl Emitter<'_> {
         let IrExprKind::List { elements } = &right.kind else { return Ok(false) };
         let [elem] = &elements[..] else { return Ok(false) };
         let el = self.types.el(h);
-        if el != INT && el != FLOAT {
-            return Ok(false);
-        }
         let cow = self.cow_fn_of(SliceTy::List(h));
         self.f.instructions().local_get(idx).call(cow);
         self.lower(elem, Some(el))?;
         if el.val_type() == ValType::F64 {
             self.f.instructions().i64_reinterpret_f64();
         }
-        self.f.instructions().call(F_LIST_PUSH_8);
+        // The assign window's discipline, verbatim (#2310): a handle element
+        // borrowed into the spine takes its +1, an owned one moves in.
+        self.rc_share_guard(elem, el);
+        let push = if el.slot_size() == 8 { F_LIST_PUSH_8 } else { F_LIST_PUSH_4 };
+        self.f.instructions().call(push);
         self.witness_arg(left, want);
         self.tail_consumed.insert(idx);
         Ok(true)
