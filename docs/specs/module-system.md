@@ -246,6 +246,39 @@ effect fn main() -> Unit = {
 テスト: `spec/wasm_cross/stdlib_type_shadow.almd`,
 `tests/diagnostics/e013-stdlib-type-shadowed-*/`
 
+### 4.3 モジュール名と同名のローカル束縛 (#2345)
+
+**ローカル束縛はモジュールに勝つ。メンバアクセスでも勝つ。** `list` / `string` /
+`map` / `set` のような名前をローカルに束縛すると、そのスコープでは `x.f(..)` の
+`x` はモジュールではなく**その束縛**を指す。裸の識別子では以前からそうだったが、
+メンバ位置だけがモジュールを先に見ていた。
+
+```almide
+fn main() -> Unit = {
+  let list = [3, 1, 2]
+  println(int.to_string(list.len(list)))   // ✗ E004
+}
+```
+
+`list.len(list)` は「ローカル `list` の `len` メソッドを、引数 1 個で呼ぶ」と読まれる
+— レシーバが第一引数なので、書いた引数は第二引数になる。E004 の hint がそれを言い、
+束縛位置を secondary span で指す。修正は引数を落とすか、束縛の名前を変えるか。
+
+以前はこの形が **check を通って codegen に届き、無効な Rust を生んでいた**
+(`0.62.0` は `No errors found` と答える)。
+
+束縛の形は問わない: `let` / `var` / タプル分解 / `for` / 関数パラメータ /
+ラムダパラメータ / `match` バインダのいずれでも同じ。
+
+| 形 | 結果 |
+|---|---|
+| 明示 `import` したモジュールを覆う | ローカルが勝ち、import は死んで **E060** が出る |
+| auto-import モジュール(`list`/`string`/`map`/`set` 等)を覆う | ローカルが勝つ。**import 文が無いので何も警告しない** — 沈黙するこちらが普通の形 |
+| ローカルの型がそのメンバを持たない | **E002**(未定義メソッド) |
+| 覆っていないモジュール呼び出し | 影響なし |
+
+テスト: `tests/module_shadow_member_test.rs`(8 セル)
+
 ---
 
 ## 5. ダイヤモンド依存
