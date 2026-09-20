@@ -1048,18 +1048,7 @@ impl Checker {
         self.resolve_deferred_tuple_indices();
         self.flush_pending_toplet_tys();
         resolve_type_map(&mut self.type_map, &self.uf);
-        self.validate_map_key_types();
-        self.validate_result_interpolations();
-        self.validate_ord_elem_types();
-        self.validate_unknown_named_types();
-        self.validate_empty_collection_elements();
-        self.validate_int_overflow_literals();
-        self.validate_float_overflow_literals();
-        self.validate_numeric_narrowing();
-        self.validate_unresolved_binding_types();
-        self.validate_implicit_propagation();
-        self.lint_error_surface(program);
-        self.check_bounded_profile(program);
+        self.validate_after_solve(program);
         // Unused import warnings. Usage is judged SYNTACTICALLY first
         // (#1783): every `alias.x` spelling in the file — call targets,
         // record/variant constructors, type annotations, patterns — marks

@@ -5,6 +5,33 @@
 // are spliced directly into check/mod.rs's module, not separate submodules).
 
 impl Checker {
+    /// Every post-solve validation, in ONE list (#2373).
+    ///
+    /// The entry path and the module path each carried their own copy, and
+    /// the module's copy was missing six — among them
+    /// `validate_implicit_propagation`, so ADR-0008's rule applied to a
+    /// function in the entry file and not to the same function one `import`
+    /// away. `almide check` reaches every file as an entry and rejected it;
+    /// `almide build` reached it as a module and shipped the artifact.
+    /// Whether a rule applied depended on which file the author happened to
+    /// put the function in, which is invisible from the source.
+    ///
+    /// A shared list cannot drift: adding a validation here adds it to both.
+    fn validate_after_solve(&mut self, program: &ast::Program) {
+        self.validate_map_key_types();
+        self.validate_result_interpolations();
+        self.validate_ord_elem_types();
+        self.validate_unknown_named_types();
+        self.validate_empty_collection_elements();
+        self.validate_int_overflow_literals();
+        self.validate_float_overflow_literals();
+        self.validate_numeric_narrowing();
+        self.validate_unresolved_binding_types();
+        self.validate_implicit_propagation();
+        self.lint_error_surface(program);
+        self.check_bounded_profile(program);
+    }
+
     /// Type-check a module's declarations. Populates type_map for all expressions.
     /// Temporarily registers unprefixed declarations for intra-module resolution,
     /// then cleans them up.
@@ -51,12 +78,7 @@ impl Checker {
         self.resolve_deferred_tuple_indices();
         self.flush_pending_toplet_tys();
         resolve_type_map(&mut self.type_map, &self.uf);
-        self.validate_map_key_types();
-        self.validate_empty_collection_elements();
-        self.validate_int_overflow_literals();
-        self.validate_float_overflow_literals();
-        self.validate_numeric_narrowing();
-        self.validate_unresolved_binding_types();
+        self.validate_after_solve(prog);
         self.current_module_prefix = saved_prefix;
 
         // Restore
