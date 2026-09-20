@@ -1,6 +1,6 @@
 # Module System Specification
 
-> Last updated: 2026-09-02. Verified by `spec/integration/modules/` (25 tests + 4 error tests) and `spec/wasm_cross/stdlib_type_shadow.almd`.
+> Last updated: 2026-09-20. Verified by `spec/integration/modules/` (25 tests + 4 error tests), `spec/wasm_cross/stdlib_type_shadow.almd` and `tests/module_shadow_member_test.rs`.
 
 ---
 
