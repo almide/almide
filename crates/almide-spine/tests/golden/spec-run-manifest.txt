@@ -1,4 +1,4 @@
-# oracle: almide 0.63.0 at 2322e999e — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.63.0 at e39133dc5 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 f0709d9573472655341ac75bd847b3f30d2bddc3a201554bfd5cc22c21446902	0	spec/wasm_cross/adr0005_operator_equivalence.almd
 c0f26e63e32a038c59081b238912f0b3ecfd01d8d5ce45534b83fbbce13128a7	0	spec/wasm_cross/alias_combinator_rc.almd
 997e25dd01ce19a5253bd290b2f5f4b8eab74ea88f256b5fd9e09ca77d42af3b	0	spec/wasm_cross/alias_cow.almd
@@ -575,6 +575,7 @@ b111fa936e3eab96b6862625f110fc392b754fcdf290e6c3a6ee213e86448487	0	spec/wasm_cro
 39a7b3c956f314136067ad3205258e149d439ac9583caebc6fc5118103201cae	0	spec/wasm_cross/string_lines.almd
 a4b77b07030f12b3423a2846211970b42b8fefdf2bc73326edfaa486ab85466a	0	spec/wasm_cross/string_ops.almd
 bb401a5d5af4a6ba169a3717672b54689669677b34aa228756564837c62962e2	0	spec/wasm_cross/string_ops_drain.almd
+27bf71f3239c797e13e3c6cd9441c78b4c116509f2419dcca4d60c34a43b5f15	1	spec/wasm_cross/string_pad_ceiling_oom.almd
 e21fb2cd3ff70326086249f40a72df99d43a8443a21952a912235b8c45a00abc	0	spec/wasm_cross/string_passthrough_share.almd
 2780ce70200b7b3f2a168b5746c7014dcd6620cb4be9eab8741e216798f06420	0	spec/wasm_cross/string_position_large_offset.almd
 1320c4629d102f78337909818bb7abcb7ed607829d77fd4894d8a76437e0d618	0	spec/wasm_cross/string_predicates.almd
