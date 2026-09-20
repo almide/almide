@@ -9,8 +9,7 @@ fn f(s: String) -> Result[Int, String] = if string.len(s) > 0 then ok(string.len
 
 fn g(s: String) -> Int! = f(s)!
 
-fn halve(n: Int) -> Int! = if n % 2 == 0 then ok(n / 2)
-else err("odd:${n}")
+fn halve(n: Int) -> Int! = if n % 2 == 0 then ok(n / 2) else err("odd:${n}")
 
 fn apply1(cb: (String) -> Int, s: String) -> Int = cb(s)
 

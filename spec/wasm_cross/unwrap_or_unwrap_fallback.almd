@@ -30,8 +30,7 @@ else err("no bytes")
 fn take_list(n: Int) -> Result[List[Int], String] = if n > 0 then ok([n, n + 1])
 else err("no list")
 
-fn take_word(n: Int) -> Result[String, String] = if n > 0 then ok("word${n}")
-else err("no word")
+fn take_word(n: Int) -> Result[String, String] = if n > 0 then ok("word${n}") else err("no word")
 
 // The reported shape: the fallback arm runs and must yield the PARSED handle.
 fn miss_json(text: String) -> Result[String, String] = {

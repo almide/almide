@@ -55,9 +55,7 @@ test "for loop with tuple destructure from zip" {
   let scores = [90, 85, 95]
   var results: List[String] = []
   for (name, score) in list.zip(names, scores) {
-    results = results + [
-      "${name}:${int.to_string(score)}"
-    ]
+    results = results + ["${name}:${int.to_string(score)}"]
   }
   assert_eq(results, ["alice:90", "bob:85", "carol:95"])
 }
@@ -66,9 +64,7 @@ test "for loop with enumerate tuple destructure" {
   let items = ["a", "b", "c"]
   var indexed: List[String] = []
   for (i, item) in list.enumerate(items) {
-    indexed = indexed + [
-      "${int.to_string(i)}=${item}"
-    ]
+    indexed = indexed + ["${int.to_string(i)}=${item}"]
   }
   assert_eq(indexed, ["0=a", "1=b", "2=c"])
 }
