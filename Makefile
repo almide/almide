@@ -11,8 +11,14 @@ BIN := target/release/almide
 
 ## Build
 
+# The sha is passed in rather than read inside build.rs, which would put a
+# `rerun-if-changed` on .git/HEAD and rebuild the root crate after every commit
+# (#2384). `|| true` because a build from a tarball has no git and must still
+# work — it then reports `(dev)` with no sha, which is still the true half.
+BUILD_SHA := $(shell git rev-parse --short=9 HEAD 2>/dev/null || true)
+
 build:
-	cargo build --release
+	ALMIDE_BUILD_SHA=$(BUILD_SHA) cargo build --release
 
 ## Install
 
