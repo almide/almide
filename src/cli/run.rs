@@ -98,7 +98,9 @@ pub fn compile_to_binary_with(file: &str, no_check: bool, test_mode: bool, relea
     // source_root is the directory containing almide.toml (where native/ lives).
     let (native_deps, source_root) = super::load_native_build_config(file);
 
-    let use_test_harness = test_mode || (!rs_code.contains("\nfn almide_main(") && !rs_code.contains("\nfn main(") && !rs_code.contains("\npub fn main("));
+    // #2370: one predicate, shared with the auto-`main` guards. This site was
+    // already anchored; the guards were not, and they drifted apart.
+    let use_test_harness = test_mode || !super::cargo_build::defines_entry_point(&rs_code);
     let out = build_native_cached(&rs_code, use_test_harness, release, project_dir_override, &native_deps, source_root.as_deref());
     t.lap("cargo");
     out
