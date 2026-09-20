@@ -861,7 +861,7 @@ fn types, Result) — wrap those in a named Codec type or convert at the boundar
 - `fan.bounded(100) {...}` / `fan.race(5000) {...}` → **WRONG**. A bare Int is not a time. Write `compute.ms(100)`
 - `compute.msec(5)` / `compute.sec(5)` / `compute.m(5)` → **WRONG**. The unit set is closed: `ns / us / ms / s / min / h`
 - `100ms` / `5s` as a literal → **WRONG**. There are no time literals. Write `compute.ms(100)` / `duration.s(5)`
-- `let list = [1, 2]` then `list.len(list)` → **WRONG**. A local binding shadows the module of the same name in member position too, so this reads as the LOCAL's `len` method with the receiver as its first argument, and the one you wrote as a second (E004). Do not name a binding after a module you still need — `list`, `string`, `map`, `set` are the ones that get written by accident. Rename the binding: `let xs = [1, 2]`, then `list.len(xs)`. The auto-imported modules shadow SILENTLY: there is no import statement to report as unused, so nothing warns you
+- `let list = [1, 2]` then `list.len(list)` → **WRONG**. A local binding shadows the module of the same name in member position too, so this reads as the LOCAL's `len` method with the receiver as its first argument, and the one you wrote as a second (E004). Do not name a binding after a module you still need — `list`, `string`, `map`, `set` are the ones that get written by accident. Two fixes, both accepted: rename the binding (`let xs = [1, 2]`, then `list.len(xs)`), or drop the argument and call the method on the local — `list.len()` prints `2`, because the shadowed name IS the local. The auto-imported modules shadow SILENTLY: there is no import statement to report as unused, so nothing warns you
 
 ## Complete example
 ```almide check
