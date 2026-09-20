@@ -45,9 +45,7 @@ test "for over map" {
 test "for building a list" {
   var items: List[String] = []
   for i in 0..<3 {
-    items = items + [
-      "item ${i}"
-    ]
+    items = items + ["item ${i}"]
   }
   assert_eq(items.len(), 3)
 }

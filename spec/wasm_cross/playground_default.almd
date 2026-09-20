@@ -13,8 +13,7 @@ else if string.is_empty(string.trim(line)) then Blank else Para(line)
 
 fn bold(s: String) -> String = string.split(s, "**") |> list.enumerate |> list.map((e) => {
   let (i, chunk) = e
-  if i % 2 == 1 then "<strong>${chunk}</strong>"
-  else chunk
+  if i % 2 == 1 then "<strong>${chunk}</strong>" else chunk
 }) |> list.join("")
 
 fn render(block: Block) -> String = match block {
