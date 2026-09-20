@@ -88,7 +88,15 @@ ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 # renamed copy of them fails to check on its own. Excluded by name (not by
 # "whatever fails today") so that a NEW failure is a gate failure rather than a
 # silently shrinking corpus.
-SKIP = {"args.almd", "html.almd", "path.almd"}
+#
+# http.almd and json.almd joined the set in #2373, and they belong to the same
+# class rather than being new breakage: they name `HttpRequest`, `HttpResponse`
+# and `JsonPath`, which resolve only for the bundled `http`/`json` module, so a
+# copy renamed to `m086` cannot see them. Checked as an ENTRY they are rejected
+# with the identical E029s by the release before that change too — the module
+# path was simply running 6 of the entry path's 12 post-solve validations, and
+# the ladder was relying on the laxer half. Same corpus, one rule.
+SKIP = {"args.almd", "html.almd", "json.almd", "http.almd", "path.almd"}
 
 # Cumulative source-line targets for the rungs. 0 is the floor (entry only);
 # 10000 is the roadmap's headline size; the last rung is the whole corpus.
