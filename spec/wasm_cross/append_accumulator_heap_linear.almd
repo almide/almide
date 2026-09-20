@@ -1,0 +1,56 @@
+// @contract: C-105
+// #2310's gate: the accumulator `acc + [x]` over a HEAP element grows in place,
+// in both spellings. Before the fix the in-place append window refused a 4-byte
+// handle slot and the concat path copied the whole list per step — 100,000
+// String appends took 10.5 s against 11 ms for `Int`, and a 200,000-element
+// accumulator reached C-197 (#2291 had to write `list.iterate` with `list.push`
+// because of it).
+//
+// What this fixture pins is the CREDIT discipline, not the speed: every element
+// is pushed EXACTLY once into the spine, so the join reads each string once and
+// the length is exact. A missing +1 frees a live element (the reads below would
+// read freed bytes); a doubled one leaks. The un-Dup'd-push spelling is C-186's
+// fixture; this one is the growth chain.
+//
+// WHY 20,000 AND NOT A MILLION. Size is not this file's evidence, and a big
+// number here is not free: spec/wasm_cross fixtures are also run by the
+// INTERPRETER (the third oracle, tests/wasm_runtime_test_parts/interp_leg.rs),
+// whose `acc + [x]` is a real copy — measured quadratic, ~1 s at 20,000 and
+// ~40 min per million-element build. A million here does not make the gate
+// stronger, it makes every corpus binary hang. The quadratic tripwire is the
+// ALLOCATION LEDGER instead, and it is exact rather than timed: this row costs
+// ~330 KB linear, where a per-step copy of the spine would bill ~4 · n²/2 ≈
+// 800 MB. crates/almide-wasm/tests/golden/alloc-baseline.txt catches that at
+// this size as loudly as a million would, and the wall-clock relation lives in
+// scripts/check-perf-ratio.sh's strbuild rows (#2310), which time the two
+// spellings against each other on the wasm leg.
+fn build(n: Int, acc: List[String]) -> List[String] = {
+  if n <= 0 then acc
+  else build(n - 1, acc + ["ab"])
+}
+
+fn grow(n: Int) -> List[String] = {
+  var out: List[String] = []
+  var i = 0
+  while i < n {
+    out = out + ["ab"]
+    i = i + 1
+  }
+  out
+}
+
+fn main() -> Unit = {
+  let tail = build(20000, [])
+  println("${list.len(tail)}")
+  let loop_form = grow(20000)
+  println("${list.len(loop_form)}")
+  // The elements survive the growth chain: read one from each end of both.
+  println("${tail[0]}${tail[19999]}${loop_form[0]}${loop_form[19999]}")
+  // A borrowed element pushed from a var takes its own credit, and the source
+  // stays readable afterwards — the shape the Dup discipline exists for.
+  let s = "cd"
+  var pair: List[String] = []
+  pair = pair + [s]
+  pair = pair + [s]
+  println("${s}:${list.join(pair, ",")}")
+}
