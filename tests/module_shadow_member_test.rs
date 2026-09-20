@@ -146,6 +146,51 @@ fn a_shadowing_binding_of_the_wrong_type_is_still_rejected() {
     assert!(text.contains("E004"), "expected the arity error:\n{text}");
 }
 
+/// The two shapes real downstream packages are actually built from, neither of
+/// which occurs anywhere in this repo — an EXPLICITLY IMPORTED stdlib module
+/// (`path` is stdlib but not auto-imported) and a USER module. Found by the
+/// downstream session scanning 4,172 `.almd` files of real code; both answer
+/// `No errors found` on 0.62.0 and then emit invalid Rust, the second as
+/// `label(store, store.clone())` with the qualifier dropped entirely.
+#[test]
+fn an_imported_stdlib_module_and_a_user_module_are_both_covered() {
+    let (accepted, text) = check(
+        "import path\n\nfn main() -> Unit = {\n  let path = \"a/b/c.txt\"\n  println(path.basename(path))\n}\n",
+    );
+    assert!(!accepted, "an imported stdlib module must lose to the local:\n{text}");
+    assert!(text.contains("E002"), "expected undefined method:\n{text}");
+
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("almide.toml"),
+        "[package]\nname = \"pkg\"\nversion = \"0.1.0\"\nedition = \"2026\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src/store.almd"),
+        "fn label(a: String, b: String) -> String = a + \":\" + b\n",
+    )
+    .unwrap();
+    let main = root.join("src/main.almd");
+    std::fs::write(
+        &main,
+        "import self.store\n\nfn main() -> Unit = {\n  let store = \"x\"\n  println(store.label(store))\n}\n",
+    )
+    .unwrap();
+    let out = Command::new(bin()).arg("check").arg(&main).output().unwrap();
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        !out.status.success(),
+        "a user module must lose to a local of its name:\n{text}"
+    );
+}
+
 /// The control the whole change rests on: an UNSHADOWED module call is
 /// untouched. If this ever fails, the guard is firing on module calls rather
 /// than on shadowed ones.
