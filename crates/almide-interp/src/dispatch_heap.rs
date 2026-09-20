@@ -455,6 +455,20 @@ impl<'a> Interpreter<'a> {
             return Some(Flow::Unsupported(format!("prim.{func} with a non-Int size")));
         };
         let bytes_wanted = if slot_family { n.checked_mul(8) } else { Some(*n) };
+        // A size NO machine can serve is not an abstain — it is C-197's defined
+        // abort, and this arena can cast that vote without allocating a byte.
+        // Both backends answer `Error: out of memory` and exit 1 there, so
+        // abstaining threw away a vote the interp could have got right, and the
+        // three fixtures that pin the over-bound cell of the pad/alloc families
+        // sat in the unsupported ceiling because of it (#2385). The threshold is
+        // deliberately far above any real machine: BETWEEN the arena ceiling and
+        // it, a backend may well succeed where this arena cannot — native serves
+        // 2 GiB that the wasm leg refuses, which is the contracted divergence
+        // itself — and abstaining there is still the only honest vote.
+        const BEYOND_ANY_MACHINE: i64 = 1 << 48; // 256 TiB
+        if bytes_wanted.is_none_or(|b| b >= BEYOND_ANY_MACHINE) {
+            return Some(Flow::Abort("out of memory".to_string()));
+        }
         if bytes_wanted.is_none_or(|b| b > 1 << 30) {
             return Some(Flow::Unsupported(format!(
                 "prim.{func}({n}) beyond the interp arena ceiling"
