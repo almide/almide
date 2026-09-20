@@ -116,6 +116,31 @@ fn the_same_holds_for_a_scan_in_the_seed() {
     assert_eq!(out, "r = none", "the program's answer changed");
 }
 
+/// The simplest form of the whole class: the seed IS the source. Generated
+/// independently by a later campaign (seed 630017, index 610) against a binary
+/// that already carried the fix for the two above, and it built — which is the
+/// evidence that the guard is keyed on the class and not on the shape that
+/// happened to be reduced first.
+#[test]
+fn the_seed_may_be_the_source_variable_itself() {
+    if !tools_available() {
+        eprintln!("skip: almide binary unavailable");
+        return;
+    }
+    let (ok, log, out) = build_and_run(
+        "seed-is-source",
+        concat!(
+            "fn main() -> Unit = {\n",
+            "  let v: List[Int] = []\n",
+            "  let r: List[Int] = list.unique_by(list.fold(v, v, ((acc, y) => [2])), ((n) => false))\n",
+            "  println(\"r = ${r}\")\n",
+            "}\n",
+        ),
+    );
+    assert!(ok, "a fold whose seed is its own source did not build:\n{log}");
+    assert_eq!(out, "r = []", "the program's answer changed");
+}
+
 /// The guard must not cost the optimisation it guards. A seed that does not
 /// mention the list still iterates from a borrow — no `.clone()` in front of
 /// the source. Asserted on the emitted Rust, because a build that merely
