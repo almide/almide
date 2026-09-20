@@ -4320,7 +4320,7 @@ id        = "C-351"
 spec      = "ALS-R9"
 title     = "literal process exit codes are checked against the portable domain"
 statement = "A direct call to the standard-library process.exit with an integer literal outside 0..=125 is rejected at check time with E084 pointing to the argument. Parentheses, unary-minus parity, radix prefixes, module aliases, selective imports and pipe calls preserve this rule. Negative zero is accepted. Computed arguments retain the runtime check in C-350; function-valued aliases are not traced for this literal diagnostic. User functions and local function values with the same name are not subject to E084."
-since     = "0.64.0"
+since     = "0.63.0"
 status    = "active"
 evidence  = [
   { path = "tests/diagnostics/e084-exit-code-domain/broken.almd", class = "fixture" },
