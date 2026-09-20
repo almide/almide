@@ -474,10 +474,41 @@ impl Checker {
                 name = name, n = sig.params.len(), got = arg_tys.len(),
                 placeholder = placeholder,
             );
-            self.emit(super::err(
+            // #2349: when the receiver is a local shadowing a module (#2345),
+            // the call went through UFCS and the receiver is counted as the
+            // first argument — so the author's count was right and "check the
+            // number of arguments" sends them to recount a line that is not
+            // wrong. Name the binding instead; the mistake is usually above.
+            let mut diagnostic = super::err(
                 format!("{}() expects {} argument(s) but got {}", name, sig.params.len(), arg_tys.len()),
                 "Check the number of arguments", format!("call to {}()", name)
-            ).with_code("E004").with_try(snippet));
+            ).with_code("E004").with_try(snippet);
+            if let Some(receiver) = self.shadowed_receiver {
+                diagnostic.hint = format!(
+                    "`{r}` here is your local binding, so this is the method call \
+                     `{r}.{method}(..)` on it — the receiver is the first argument and \
+                     the one you wrote is the second. Drop the argument, or rename the \
+                     binding so it does not shadow the `{r}` module",
+                    r = receiver.as_str(),
+                    method = name.split_once('.').map_or(name, |(_, f)| f),
+                );
+                // The placeholder `try` would tell them to pass the argument
+                // they already passed, producing this same error again.
+                diagnostic.try_snippet = None;
+                // Anchor at column 1 like E006's "declared as effect fn here":
+                // a secondary with no end column is underlined to the LABEL's
+                // width, so pointing at the value span runs the underline past
+                // the end of the line. `let_origin` is the value's span, not
+                // the name's, so the line is the honest thing to point at.
+                if let Some(span) = self.env.let_origin(receiver.as_str()) {
+                    diagnostic = diagnostic.with_secondary(
+                        span.line,
+                        Some(1),
+                        format!("`{}` bound here", receiver.as_str()),
+                    );
+                }
+            }
+            self.emit(diagnostic);
         }
     }
     /// Seed generic `bindings` from explicit type args, resolve `arg_tys` to concrete types, and realign named-call args. Returns `(bindings, concrete_args, aligned_raw)` for the caller's unify and back-propagation passes. Verbatim text move out of [`Self::check_named_call_with_type_args`].
