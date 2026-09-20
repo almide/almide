@@ -18,9 +18,9 @@
 // whose `acc + [x]` is a real copy — measured quadratic, ~1 s at 20,000 and
 // ~40 min per million-element build. A million here does not make the gate
 // stronger, it makes every corpus binary hang. The quadratic tripwire is the
-// ALLOCATION LEDGER instead, and it is exact rather than timed: this row costs
-// ~330 KB linear, where a per-step copy of the spine would bill ~4 · n²/2 ≈
-// 800 MB. crates/almide-wasm/tests/golden/alloc-baseline.txt catches that at
+// ALLOCATION LEDGER instead, and it is exact rather than timed: the recorded
+// row is 459,328 B, where a per-step copy of the spine would bill 4 · n²/2 =
+// ~800 MB. crates/almide-wasm/tests/golden/alloc-baseline.txt catches that at
 // this size as loudly as a million would, and the wall-clock relation lives in
 // scripts/check-perf-ratio.sh's strbuild rows (#2310), which time the two
 // spellings against each other on the wasm leg.
