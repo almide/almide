@@ -14,7 +14,7 @@
 #   ALMIDE_UPDATE_INTERP_LEDGER=1 cargo test --test wasm_runtime_interp_ledger interp_bridge_fallback_ledger
 
 bytes.len  bytes_string_window_domain  floor: consumed inside a self-hosted body
-bytes.new  bytes_new_exhaustion  prim.alloc_bytes(9223372036854775807) beyond the interp arena ceiling
+bytes.new  zlib_selfhost  floor: consumed inside a self-hosted body
 bytes.to_list  fs_composition_family  floor: consumed inside a self-hosted body
 float.from_int  fan_map_parallel_scalar  floor: consumed inside a self-hosted body
 float.is_infinite  checked_conversion_value_match  floor: consumed inside a self-hosted body
