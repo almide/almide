@@ -256,6 +256,35 @@ mod attr_tests {
         assert_eq!(out, roundtrip(&out), "not idempotent");
     }
 
+    /// #2363: an interpolation gets the same width budget as a plain string.
+    /// `is_short` had no arm for it, so it answered false and ANY list literal
+    /// holding one exploded — at any width, with nothing the author had split
+    /// to preserve. The shape is the one the cheatsheet teaches and a model
+    /// writes: `acc + ["item ${i}"]`.
+    #[test]
+    fn an_interpolation_does_not_force_a_short_list_multiline() {
+        for src in [
+            "fn f(acc: List[String], n: Int) -> List[String] = acc + [\"e${n}\"]\n",
+            // More than one element, only one of them interpolated.
+            "fn f(acc: List[String], n: Int) -> List[String] = acc + [\"e${n}\", \"x\"]\n",
+        ] {
+            let out = roundtrip(src);
+            assert!(!out.contains("[\n"), "a short list must stay on one line:\n{out}");
+            assert_eq!(out, roundtrip(&out), "not idempotent");
+        }
+    }
+
+    /// The budget is still a budget: past it an interpolation breaks like a
+    /// plain string does, so this is not "interpolations never wrap".
+    #[test]
+    fn a_long_interpolation_still_breaks_the_list() {
+        let src = "fn f(xs: List[String], n: Int) -> List[String] = \
+                   xs + [\"a very long interpolated line indeed ${n} padding padding\"]\n";
+        let out = roundtrip(src);
+        assert!(out.contains("[\n"), "past the budget the list must break:\n{out}");
+        assert_eq!(out, roundtrip(&out), "not idempotent");
+    }
+
     /// #1714, the map arm: entry-introducing comments bind to the entry's KEY
     /// and survive in place.
     #[test]
