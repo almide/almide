@@ -20,7 +20,21 @@ crates/almide-codegen/src/pass_effect_inference.rs 7632
 # count while its tested surface grew. Local and CI measured the same 64.28%,
 # so the new floor takes no extra margin. The floor still bites: it is the
 # measured value, not a round-down.
-crates/almide-frontend/src/check/calls.rs 6428
+# LOWERED 6428 -> 6326 (2026-09-20, #2349), the same class as the #2134 entry
+# above and for the same reason. #2349 attaches the shadowed-receiver
+# explanation to the E004 arity error: when a local binding shadows a module,
+# the call went through UFCS and the receiver is an argument the author never
+# wrote, so "check the number of arguments" sends them to recount a line that
+# is not wrong. Those lines run only for a program that binds a module's name
+# and then calls through it — and a scan of 1903 `.almd` files across stdlib,
+# spec, tools, examples and research finds ZERO (two independently written
+# detectors, each first proven to fire on the shape). The measured workloads
+# are `render_program` over spec and `almide test spec/`, so the corpus that
+# counts provably cannot reach the new lines, while the tested surface grew:
+# tests/module_shadow_member_test.rs covers eight cells including both
+# miscompiling shapes, an imported stdlib module, a user module and a
+# parameter. Floor is the CI-measured 63.26%, not a round-down.
+crates/almide-frontend/src/check/calls.rs 6326
 crates/almide-frontend/src/check/infer_calls_closures.rs 6827
 crates/almide-mir/src/certificate.rs 7229
 crates/almide-mir/src/certificate_b.rs 7510

@@ -191,6 +191,28 @@ fn an_imported_stdlib_module_and_a_user_module_are_both_covered() {
     );
 }
 
+/// A PARAMETER named after a module is a local binding too, and it is the
+/// shape with no `let` to point at — the secondary span is omitted rather
+/// than guessed. The downstream scan covers six binding forms (`let`/`var`,
+/// tuple destructuring, `for`, fn param, lambda param, match binder); this is
+/// the one the earlier matrix missed.
+#[test]
+fn a_parameter_named_after_a_module_is_a_local_too() {
+    let (accepted, text) = check(
+        "fn count(list: List[Int]) -> Int = list.len(list)\nfn main() -> Unit = println(int.to_string(count([1, 2, 3])))\n",
+    );
+    assert!(!accepted, "a param shadows the module too:\n{text}");
+    assert!(text.contains("E004"), "expected the arity error:\n{text}");
+    assert!(
+        text.contains("local binding"),
+        "the hint must still explain the receiver:\n{text}"
+    );
+    assert!(
+        text.contains("\"secondary\":[]"),
+        "a param has no `let` to point at, so no secondary span is emitted:\n{text}"
+    );
+}
+
 /// The control the whole change rests on: an UNSHADOWED module call is
 /// untouched. If this ever fails, the guard is firing on module calls rather
 /// than on shadowed ones.
