@@ -52,6 +52,33 @@ fn is_short(expr: &Expr) -> bool {
         | ExprKind::Unit | ExprKind::None | ExprKind::Hole | ExprKind::Placeholder
         | ExprKind::Ident { .. } | ExprKind::TypeName { .. } => true,
         ExprKind::String { value, .. } => value.len() < 40,
+        // #2363: an interpolation gets the SAME budget as a plain String,
+        // measured on what will actually be printed. Falling through to
+        // `_ => false` made every list literal holding one explode onto
+        // separate lines at any width — not the 100-column wrap, and nothing
+        // the author had split to preserve, just a missing arm. `raw` is the
+        // verbatim source when the literal was not rewritten, so it is the
+        // exact printed width; without it the holes are bounded by the
+        // recursive `is_short` instead of being measured.
+        ExprKind::InterpolatedString { parts, raw } => {
+            let holes_short = parts.iter().all(|p| match p {
+                StringPart::Lit { .. } => true,
+                StringPart::Expr { expr } => is_short(expr),
+            });
+            let width = raw.as_ref().map_or_else(
+                || {
+                    parts
+                        .iter()
+                        .map(|p| match p {
+                            StringPart::Lit { value } => value.len(),
+                            StringPart::Expr { .. } => 0,
+                        })
+                        .sum()
+                },
+                String::len,
+            );
+            holes_short && width < 40
+        }
         ExprKind::Some { expr, .. } | ExprKind::Ok { expr, .. } | ExprKind::Err { expr, .. }
         | ExprKind::Paren { expr, .. } => is_short(expr),
         ExprKind::Tuple { elements, .. } => elements.len() <= 4 && elements.iter().all(is_short),
