@@ -46,6 +46,11 @@ spectralnorm 1.001
 # 35326679898 and 35337468496 (2026-09-17/18) read 0.315 / 0.328 / 0.343 /
 # 0.356 / 0.359. It had been set equal to binarytrees' as an estimate.
 binarytrees 0.610
+# The wasm-leg idiom relation (#2310): `out = out + [s]` against
+# `list.push(out, s)` for a List[String], measured 0.817 on an M4 Pro with the
+# in-place append window admitting handle elements. Recorded for the record —
+# the gate fails on the 3x ceiling in check-perf-ratio.sh, not on this number.
+strbuild-wasm-idiom 0.817
 treealloc 0.343
 # `decode` (#1679) is reported and not anchored, like strchurn: N derived
 # `User.decode`s of one 8-field document against the same-shape hand-written
