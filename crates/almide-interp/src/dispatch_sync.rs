@@ -81,8 +81,36 @@ impl<'a> Interpreter<'a> {
             };
         }
         use almide_lang::types::constructor::TypeConstructorId as C;
-        if matches!(ty, Ty::Applied(C::List | C::Set | C::Map | C::Option | C::Result, _))
-        {
+        // A lifted carrier (`Result[T, E]`, `T?`) whose PAYLOAD is what the
+        // i64 carries: on the ok path the pool tier hands back the raw payload,
+        // not a carrier block, so the declared carrier says nothing about this
+        // integer. Judge it under the payload type instead of the carrier
+        // (#2311). Without this, an `Int` payload whose VALUE happens to equal
+        // a live block address was read as a block and abstained — the ladder
+        // `x + 1` over `list.range(0, 12)` abstained while `x + 100` did not,
+        // because 12 was an allocated address and 112 was not. The abstain
+        // moved with the value, never with the list's length.
+        //
+        // Narrow ON PURPOSE: only a SCALAR payload passes through. That is the
+        // shape measured against the backends here — the values, not just the
+        // lengths, and the first-err short-circuit with them. Whether a
+        // heap-modeled payload arrives raw under its carrier is NOT established,
+        // so that case keeps the abstain below rather than becoming a vote on an
+        // unproven convention. An honest skip outranks a guess (crates/almide-interp/CLAUDE.md).
+        let payload = match ty {
+            Ty::Applied(C::Result, ts) if ts.len() == 2 => Some(&ts[0]),
+            Ty::Applied(C::Option, ts) if ts.len() == 1 => Some(&ts[0]),
+            _ => None,
+        };
+        if matches!(payload, Some(Ty::Int | Ty::Float | Ty::Bool)) {
+            // The raw payload IS the value: `addr` is a coincidence of
+            // arithmetic, not a block this carrier points at.
+            return Ok(None);
+        }
+        if matches!(
+            ty,
+            Ty::Applied(C::List | C::Set | C::Map | C::Option | C::Result, _)
+        ) {
             // A container-typed return we cannot spell (a generic
             // element erased to a type variable, an unmodeled Option
             // block): the fixture expects a container, so the raw
