@@ -12,9 +12,19 @@ use crate::types_table::TypeTable;
 use crate::*;
 
 /// String literals placed in linear memory as REAL layout blocks.
+///
+/// TWO MAPS, NOT ONE (#2369). Strings and block payloads are different
+/// namespaces and are keyed separately. They used to share one
+/// `HashMap<String, _>` with block payloads under a `"\0blk:"` prefix — a
+/// prefix a source literal can spell, so `"\u{0}blk:[1, 0, 0, 0]"` and the
+/// funcref block for slot 1 aliased each other. Whichever was interned first
+/// won: the string read as the block's 4 payload bytes, or the closure read
+/// the string's text as a table index and trapped. A byte-keyed second map
+/// has no spelling, so the collision cannot be constructed.
 pub(crate) struct Pool {
     pub(crate) data: Vec<u8>,
     pub(crate) interned: HashMap<String, u32>,
+    pub(crate) blocks: HashMap<Vec<u8>, u32>,
 }
 
 impl Pool {
@@ -22,7 +32,11 @@ impl Pool {
         // Reserve the null guard + itoa scratch: the layout's NULL_ADDR (0)
         // must never name a live block, and the scratch must not overlap
         // pool blocks.
-        Pool { data: vec![0; POOL_START as usize], interned: HashMap::new() }
+        Pool {
+            data: vec![0; POOL_START as usize],
+            interned: HashMap::new(),
+            blocks: HashMap::new(),
+        }
     }
 
     /// Intern `s` as a block; returns the block BASE address (deduped).
@@ -71,8 +85,7 @@ impl Pool {
     /// A static BLOCK with the given payload bytes (dedup by content) —
     /// capture-free closure blocks live in the pool, zero runtime alloc.
     pub(crate) fn intern_block(&mut self, payload: &[u8]) -> u32 {
-        let key = format!("\u{0}blk:{payload:?}");
-        if let Some(&base) = self.interned.get(&key) {
+        if let Some(&base) = self.blocks.get(payload) {
             return base;
         }
         let base = self.data.len() as u32;
@@ -83,7 +96,7 @@ impl Pool {
         header[almide_layout::CAP.offset as usize..][..4].copy_from_slice(&len.to_le_bytes());
         self.data.extend_from_slice(&header);
         self.data.extend_from_slice(payload);
-        self.interned.insert(key, base);
+        self.blocks.insert(payload.to_vec(), base);
         base
     }
 }
