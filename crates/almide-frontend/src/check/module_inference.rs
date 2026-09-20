@@ -57,7 +57,7 @@ impl Checker {
         // `alias_owner_module` marks them as belonging to THIS module, so the
         // constructor-candidate table treats them as the canonical prefixed
         // entries rather than as a second, competing declaration.
-        let snapshot = self.env.snapshot_keys();
+        let snapshot = self.env.snapshot_keys(&prog.decls);
         // This module's alias spellings of dependency types (#1955); dropped
         // with the snapshot, since another module may bind the same alias
         // to a different module.
@@ -85,7 +85,7 @@ impl Checker {
         self.constraints = saved_constraints;
         self.uf = saved_uf;
         self.env.import_table = saved_import_table;
-        self.env.restore_keys(&snapshot);
+        self.env.restore_keys(snapshot);
     }
 
     /// #785: re-infer ONLY this module's top-level `let`s so `env.top_lets`
@@ -135,7 +135,7 @@ impl Checker {
         let (mod_table, _diags) = build_import_table(prog, Some(import_table_name), &self.env.user_modules);
         self.env.import_table = mod_table;
 
-        let snapshot = self.env.snapshot_keys();
+        let snapshot = self.env.snapshot_keys(&prog.decls);
         // This module's alias spellings of dependency types (#1955); dropped
         // with the snapshot, since another module may bind the same alias
         // to a different module.
@@ -163,7 +163,7 @@ impl Checker {
         self.uf = saved_uf;
         self.type_map = saved_type_map;
         self.env.import_table = saved_import_table;
-        self.env.restore_keys(&snapshot);
+        self.env.restore_keys(snapshot);
         self.diagnostics.truncate(saved_diag_len);
         self.deferred_tuple_indices.truncate(saved_deferred_lens.0);
         self.deferred_field_accesses.truncate(saved_deferred_lens.1);

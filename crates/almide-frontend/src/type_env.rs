@@ -14,6 +14,74 @@ pub struct EnvKeySnapshot {
     /// inferred, where the old infer_module leak was ordered after).
     constructors: std::collections::HashMap<Sym, usize>,
     top_lets: std::collections::HashSet<Sym>,
+    /// A key set records PRESENCE, never CONTENT — so it can restore a
+    /// binding the temporary unprefixed registration ADDED, and cannot
+    /// restore one it OVERWROTE. The overwritten binding survived the
+    /// bracket wearing the shadowing module's signature: an entry file's own
+    /// `fn field(family)` answered with a dependency's `parser.field(name, x)`
+    /// two arguments later, so `almide check` rejected a call that `build`
+    /// and `test` accepted (#2375). The `constructors` field above already
+    /// states this reasoning for its own map; it was never carried to the
+    /// value maps beside it.
+    ///
+    /// So save the VALUE of every binding a bare registration of these decls
+    /// can write, and put it back verbatim — present or absent.
+    shadowed: ShadowedBindings,
+}
+
+/// The bindings a temporary unprefixed registration of one module's decls can
+/// overwrite or add, saved by value. Keyed positionally: `keys[i]` owns index
+/// `i` of every vector.
+#[derive(Default)]
+struct ShadowedBindings {
+    keys: Vec<Sym>,
+    functions: Vec<Option<almide_lang::types::FnSig>>,
+    types: Vec<Option<Ty>>,
+    top_lets: Vec<Option<Ty>>,
+    fn_min_params: Vec<Option<usize>>,
+    fn_defaults: Vec<Option<Vec<Option<almide_lang::ast::Expr>>>>,
+    fn_visibility: Vec<Option<almide_lang::ast::Visibility>>,
+    fn_decl_spans: Vec<Option<(usize, usize)>>,
+    deprecations: Vec<Option<crate::deprecation::Deprecation>>,
+    def_map: Vec<Option<almide_ir::DefId>>,
+}
+
+/// The keys a `register_decls(.., prefix = None)` over these decls can write.
+/// A decl kind missing here keeps the pre-#2375 behaviour for that kind
+/// rather than restoring something wrong, so the failure mode of an omission
+/// is the old bug and never a new one.
+fn bare_keys_written_by(decls: &[almide_lang::ast::Decl]) -> Vec<Sym> {
+    use almide_lang::ast::Decl;
+    let mut keys = Vec::new();
+    for decl in decls {
+        match decl {
+            Decl::Fn { name, .. }
+            | Decl::Type { name, .. }
+            | Decl::TopLet { name, .. }
+            | Decl::Protocol { name, .. } => keys.push(*name),
+            _ => {}
+        }
+    }
+    keys.sort_unstable();
+    keys.dedup();
+    keys
+}
+
+fn save_values<V: Clone>(map: &std::collections::HashMap<Sym, V>, keys: &[Sym]) -> Vec<Option<V>> {
+    keys.iter().map(|k| map.get(k).cloned()).collect()
+}
+
+fn put_values_back<V>(
+    map: &mut std::collections::HashMap<Sym, V>,
+    keys: &[Sym],
+    saved: Vec<Option<V>>,
+) {
+    for (k, v) in keys.iter().zip(saved) {
+        match v {
+            Some(v) => { map.insert(*k, v); }
+            None => { map.remove(k); }
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -291,19 +359,37 @@ impl TypeEnv {
     /// Snapshot the current keys in functions/types/constructors/top_lets.
     /// Used by module body checking to temporarily register unprefixed declarations
     /// and clean them up afterwards.
-    pub fn snapshot_keys(&self) -> EnvKeySnapshot {
+    /// Snapshot the env before `decls` are registered UNPREFIXED, so
+    /// [`Self::restore_keys`] can undo the whole bracket: the keys that
+    /// registration adds are dropped, and the bindings it shadows are put
+    /// back with the values they had (#2375).
+    pub fn snapshot_keys(&self, shadowed_by: &[almide_lang::ast::Decl]) -> EnvKeySnapshot {
+        let keys = bare_keys_written_by(shadowed_by);
+        let shadowed = ShadowedBindings {
+            functions: save_values(&self.functions, &keys),
+            types: save_values(&self.types, &keys),
+            top_lets: save_values(&self.top_lets, &keys),
+            fn_min_params: save_values(&self.fn_min_params, &keys),
+            fn_defaults: save_values(&self.fn_defaults, &keys),
+            fn_visibility: save_values(&self.fn_visibility, &keys),
+            fn_decl_spans: save_values(&self.fn_decl_spans, &keys),
+            deprecations: save_values(&self.deprecations, &keys),
+            def_map: save_values(&self.def_map, &keys),
+            keys,
+        };
         EnvKeySnapshot {
             functions: self.functions.keys().cloned().collect(),
             types: self.types.keys().cloned().collect(),
             constructors: self.constructors.iter().map(|(k, v)| (*k, v.len())).collect(),
             top_lets: self.top_lets.keys().cloned().collect(),
+            shadowed,
         }
     }
 
     /// Remove any keys — and any constructor CANDIDATES — added since the
     /// snapshot was taken. Registration pushes candidates in order, so
     /// truncating to the snapshot count drops exactly the temp additions.
-    pub fn restore_keys(&mut self, snapshot: &EnvKeySnapshot) {
+    pub fn restore_keys(&mut self, snapshot: EnvKeySnapshot) {
         self.functions.retain(|k, _| snapshot.functions.contains(k));
         self.types.retain(|k, _| snapshot.types.contains(k));
         self.constructors.retain(|k, _| snapshot.constructors.contains_key(k));
@@ -313,6 +399,19 @@ impl TypeEnv {
             }
         }
         self.top_lets.retain(|k, _| snapshot.top_lets.contains(k));
+        // The retains above restore PRESENCE; these restore CONTENT for the
+        // keys the bare registration could write, and remove the ones it
+        // added to the side tables no retain covers (#2375).
+        let s = snapshot.shadowed;
+        put_values_back(&mut self.functions, &s.keys, s.functions);
+        put_values_back(&mut self.types, &s.keys, s.types);
+        put_values_back(&mut self.top_lets, &s.keys, s.top_lets);
+        put_values_back(&mut self.fn_min_params, &s.keys, s.fn_min_params);
+        put_values_back(&mut self.fn_defaults, &s.keys, s.fn_defaults);
+        put_values_back(&mut self.fn_visibility, &s.keys, s.fn_visibility);
+        put_values_back(&mut self.fn_decl_spans, &s.keys, s.fn_decl_spans);
+        put_values_back(&mut self.deprecations, &s.keys, s.deprecations);
+        put_values_back(&mut self.def_map, &s.keys, s.def_map);
     }
 
     pub fn is_eq(&self, ty: &Ty) -> bool {

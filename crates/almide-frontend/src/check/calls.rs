@@ -336,6 +336,27 @@ impl Checker {
         } else {
             None
         };
+        // A SELECTIVE import beats a bare binding that belongs to some other
+        // file (#2375). `env.functions`' bare keys are one namespace shared by
+        // the whole run: the entry program's decls register there, and each
+        // module's registers there in turn while that module is inferred. So
+        // `import gramide.parser.{ opt }` inside a dependency module was
+        // answered by the ENTRY program's own `opt(args, name)` — a binding
+        // that module cannot see and did not ask for. The module's OWN decls
+        // still win: they are registered under `{prefix}.{name}` as well, and
+        // that is what `declares_it_itself` asks about. For the entry program
+        // (no prefix) the bare key IS its own, so nothing changes there.
+        let declares_it_itself = match (&self.current_module_prefix, name.contains('.')) {
+            (Some(p), false) => self.env.functions.contains_key(&sym(&format!("{}.{}", p, name))),
+            _ => true,
+        };
+        if !declares_it_itself {
+            if let Some(q) = qualified_via_direct.as_ref() {
+                if let Some(sig) = self.env.functions.get(&sym(q)).cloned() {
+                    return (Some(sig), qualified_via_direct);
+                }
+            }
+        }
         // DefId-based resolution: try def_map first for canonical lookup
         let sig = self.env.def_map.get(&sym(name))
             .and_then(|_did| self.env.functions.get(&sym(name)).cloned())
