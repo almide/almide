@@ -386,5 +386,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-348 | Byte-indexed string slices validate UTF-8 boundaries | 0.63.0 | active | fixture | 1 |
 | C-349 | A `??` inside a fan arm keeps its default on both targets | 0.63.0 | active | fixture | 1 |
 | C-350 | process.exit accepts 0..=125 on every target, and any other code is a defined abort | 0.63.0 | active | fixture | 2 |
-| C-351 | literal process exit codes are checked against the portable domain | 0.64.0 | active | fixture | 0 |
+| C-351 | literal process exit codes are checked against the portable domain | 0.63.0 | active | fixture | 0 |
 
