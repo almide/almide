@@ -15,7 +15,7 @@
 > PR regenerates the rows and leaves it alone.
 
 <!-- counts:generated:start (as of 2026-09-20) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
-129 normative sections; 784 distinct executable fixtures.
+129 normative sections; 786 distinct executable fixtures.
 <!-- counts:generated:end -->
 
 | Section | Contracts | Fixtures (how CI runs each) |
