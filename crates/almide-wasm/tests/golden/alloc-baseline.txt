@@ -5,7 +5,8 @@
 66016	spec/wasm_cross/anon_record_variant_payloads.almd
 66016	spec/wasm_cross/anon_records_and_fusion.almd
 65872	spec/wasm_cross/append_accumulator.almd
-65936	spec/wasm_cross/append_accumulator_heap.almd
+65904	spec/wasm_cross/append_accumulator_heap.almd
+15794488	spec/wasm_cross/append_accumulator_heap_million.almd
 ~	spec/wasm_cross/args_surface.almd
 66080	spec/wasm_cross/as_pattern.almd
 65888	spec/wasm_cross/assert_abort_eq.almd
@@ -438,7 +439,7 @@
 66080	spec/wasm_cross/nested_map_list_values.almd
 66192	spec/wasm_cross/nested_match_heap_arm.almd
 65856	spec/wasm_cross/nested_payload_guard.almd
-66192	spec/wasm_cross/nested_scalar_record_append.almd
+66176	spec/wasm_cross/nested_scalar_record_append.almd
 65952	spec/wasm_cross/nested_three_level_literal.almd
 65984	spec/wasm_cross/nested_three_level_loop_build.almd
 66080	spec/wasm_cross/nested_tuple_destructure.almd

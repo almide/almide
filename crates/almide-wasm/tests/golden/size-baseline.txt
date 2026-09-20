@@ -438,7 +438,7 @@
 4135	spec/wasm_cross/nested_map_list_values.almd
 5415	spec/wasm_cross/nested_match_heap_arm.almd
 1710	spec/wasm_cross/nested_payload_guard.almd
-2415	spec/wasm_cross/nested_scalar_record_append.almd
+2391	spec/wasm_cross/nested_scalar_record_append.almd
 1905	spec/wasm_cross/nested_three_level_literal.almd
 2185	spec/wasm_cross/nested_three_level_loop_build.almd
 2223	spec/wasm_cross/nested_tuple_destructure.almd
