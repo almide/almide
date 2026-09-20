@@ -1,4 +1,4 @@
-# oracle: almide 0.63.0 at d75e1d9d2 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.63.0 at 2598f9cb1 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/churn/closure_env_churn.almd
 44c083433349ffafa9cefe935628110b83a3774af436938fa5001df6f63bd421	0	spec/churn/construct_from_temp_churn.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/churn/enumerate_rich_churn.almd
@@ -204,7 +204,7 @@ e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/lang/cod
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/lang/codec_weather_test.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/lang/compose_test.almd
 a3a684d4d1b793bbb310d45e6d5c5a317a3a028dcb8c83cd5a05b2aa731a53b8	0	spec/lang/compound_repr_interp_test.almd
-d230231908afa2caba90d73e4ae274fb118ef39cc1d8962bd3204caedeae1604	0	spec/lang/control_flow_test.almd
+a96a86eae77e766cd39088f917f09f1e22833ad0bab239d1e7e5534130a4947f	0	spec/lang/control_flow_test.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/lang/ctor_fn_value_test.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/lang/data_types_test.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/lang/default_args_test.almd
