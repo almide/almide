@@ -141,3 +141,69 @@ fn cow_still_returns_a_static_uncopied() {
         "emit_cow no longer tests the static boundary up front:\n{head}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// #2369: the pool's KEY SPACE, executed rather than read.
+//
+// Strings and block payloads used to share one `HashMap<String, _>`, with
+// payloads under a `"\0blk:"` prefix — a prefix a source literal can spell.
+// `"\u{0}blk:[1, 0, 0, 0]"` and the funcref block for table slot 1 therefore
+// aliased, and whichever was interned first won: the string read as the
+// block's four payload bytes (`string.len` = 4, native says 17), or the
+// closure read the string's text as a table index and trapped. Both are legal
+// programs answering differently on the two legs.
+//
+// These run the emitter rather than grep the source, because the collision is
+// a property of the map's contents at emit time and a reader would have to
+// simulate both intern orders to see it.
+
+mod harness;
+
+fn wasm_stdout(src: &str) -> (String, i32) {
+    let ir = almide_spine::s5::lower_to_ir("pool_key_space.almd", src).expect("front end accepts");
+    let bytes = almide_wasm::emit_program(&ir).expect("structural leg emits");
+    let r = harness::run_wasm(&bytes).expect("engine runs the module");
+    (r.stdout, r.exit)
+}
+
+/// Block interned FIRST: the literal must still be its own 17 bytes.
+#[test]
+fn a_literal_that_spells_a_block_key_is_not_the_block() {
+    let (out, exit) = wasm_stdout(
+        r#"fn helper(x: Int) -> Int = x + 1
+fn apply(f: (Int) -> Int, v: Int) -> Int = f(v)
+fn main() -> Unit = {
+  let g: (Int) -> Int = helper
+  println("apply=${apply(g, 1)}")
+  println("len=${string.len("\u{0}blk:[1, 0, 0, 0]")}")
+}
+"#,
+    );
+    assert_eq!(exit, 0, "the program runs: {out}");
+    assert!(
+        out.contains("len=17"),
+        "a string literal took a closure block's address — it reported its length as the \
+         block's payload size instead of its own. stdout:\n{out}"
+    );
+}
+
+/// Literal interned FIRST: the closure must still reach its own function.
+#[test]
+fn a_block_does_not_take_the_address_of_a_literal_that_spells_its_key() {
+    let (out, exit) = wasm_stdout(
+        r#"fn helper(x: Int) -> Int = x + 1
+fn apply(f: (Int) -> Int, v: Int) -> Int = f(v)
+fn main() -> Unit = {
+  println("len=${string.len("\u{0}blk:[1, 0, 0, 0]")}")
+  let g: (Int) -> Int = helper
+  println("apply=${apply(g, 1)}")
+}
+"#,
+    );
+    assert_eq!(
+        exit, 0,
+        "a closure block took a string literal's address, so the call read ASCII text as a \
+         table index. stdout:\n{out}"
+    );
+    assert!(out.contains("apply=2"), "stdout:\n{out}");
+}
