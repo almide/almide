@@ -364,8 +364,9 @@ codegen-units = 1
 /// mechanism. The mechanism is the IR — `build.rs` asks
 /// `ir_program.functions.iter().any(|f| f.name.as_str() == "main")` — and moving
 /// this to that would mean threading the fact from codegen down to the two
-/// consumers here. Both ways the old spellings were wrong are gated in this
-/// file's `mod tests`, and both fail against the unanchored predicate.
+/// consumers here — tracked as #2372, so the narrowing has an owner rather than
+/// living only in this comment. Both ways the old spellings were wrong are gated
+/// in this file's `mod tests`, and both fail against the unanchored predicate.
 pub(super) fn defines_entry_point(code: &str) -> bool {
     code.lines().any(|l| {
         l.starts_with("fn main(")
