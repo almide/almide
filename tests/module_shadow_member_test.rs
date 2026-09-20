@@ -227,3 +227,55 @@ fn an_unshadowed_module_call_is_unaffected() {
         assert!(ok, "an unshadowed module call must stay clean:\n{program}\n{text}");
     }
 }
+
+/// #2366: when the shadow lands on E002 instead of E004, the explanation must
+/// come too. Which of the two fires turns on whether the local's type happens
+/// to carry a method of that name — invisible from the source — so without
+/// this the same mistake is explained or not by accident.
+///
+/// The old hint was worse than silence: `Almide doesn't use method-call
+/// syntax. Write `string.<fn>(x)`` instructed the author to write the shape
+/// they had already written, on a module that is not the one they meant.
+#[test]
+fn an_e002_under_a_shadow_names_the_shadow_and_not_the_receiver_type() {
+    let (accepted, text) = check(
+        "import path\n\nfn main() -> Unit = {\n  let path = \"a/b/c.txt\"\n  println(path.basename(path))\n}\n",
+    );
+    assert!(!accepted, "must be rejected:\n{text}");
+    assert!(text.contains("E002"), "still the undefined-method code:\n{text}");
+    assert!(
+        text.contains("your local binding"),
+        "the hint must name the shadow rather than the receiver's type:\n{text}"
+    );
+    assert!(
+        !text.contains("Almide doesn't use method-call syntax"),
+        "the generic hint tells the author to write what they already wrote:\n{text}"
+    );
+    assert!(
+        text.contains("\"secondary\":[{\"line\":4,"),
+        "a secondary span must point at the binding on line 4:\n{text}"
+    );
+}
+
+/// The control the fix rests on: an unshadowed receiver keeps the generic
+/// method-syntax hint AND its rewrite. Over-correcting into "never suggest
+/// `module.fn(x)`" would break the common case to fix the rare one.
+#[test]
+fn an_unshadowed_typo_keeps_the_method_syntax_hint_and_its_rewrite() {
+    let (accepted, text) = check(
+        "fn main() -> Unit = {\n  let s = \"hi\"\n  println(s.to_uppercase())\n}\n",
+    );
+    assert!(!accepted, "must be rejected:\n{text}");
+    assert!(
+        text.contains("Almide doesn't use method-call syntax"),
+        "an unshadowed typo keeps the generic hint:\n{text}"
+    );
+    assert!(
+        text.contains("string.to_upper"),
+        "and keeps the near-match rewrite:\n{text}"
+    );
+    assert!(
+        !text.contains("your local binding"),
+        "nothing is shadowed here, so the shadow note must not appear:\n{text}"
+    );
+}
