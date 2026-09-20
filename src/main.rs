@@ -32,8 +32,16 @@ fn warnings_suppressed() -> bool {
 }
 use clap::{Parser, Subcommand};
 
+/// What `almide --version` prints: the version number AND which kind of build
+/// produced it (#2384). `version` alone prints `CARGO_PKG_VERSION`, which
+/// answers what Cargo.toml says rather than which compiler this is — see
+/// `build.rs`'s `emit_version_line` for why those are different questions and
+/// what it cost to learn. The second whitespace-separated field is still the
+/// bare version, which `Makefile`'s install assertion reads.
+const VERSION_LINE: &str = env!("ALMIDE_VERSION_LINE");
+
 #[derive(Parser)]
-#[command(name = "almide", version)]
+#[command(name = "almide", version = VERSION_LINE)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,

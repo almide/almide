@@ -67,7 +67,16 @@ jobs:
           mkdir -p .cargo
           printf '[target.aarch64-unknown-linux-gnu]\nlinker = "aarch64-linux-gnu-gcc"\n' >> .cargo/config.toml
 
+      # This workflow runs only on a `v*` tag push, so it is the ONE place that
+      # builds from a release tag — which is why it is the only place allowed
+      # to say `release`. Every other build reports `dev` by default, so a
+      # binary that claims to be a release had to be built by this step
+      # (#2384). Nothing checks the claim after the fact; the point is that
+      # nothing else can make it.
       - name: Build
+        env:
+          ALMIDE_BUILD_PROVENANCE: release
+          ALMIDE_BUILD_SHA: ${{ github.sha }}
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Package (Unix)
