@@ -203,7 +203,21 @@ def main():
     args = ap.parse_args()
     legs = args.legs.split(",")
 
+    # WHICH BINARY, said out loud. A harness that resolves `almide` from PATH
+    # when ALMIDE_BIN is unset measures whatever is installed — typically a
+    # release behind this tree — and then reports THAT binary's behaviour as
+    # this tree's. It cost a "RUN FAILED: strbuild-append/wasm 200000" that read
+    # exactly like a regression and was the 0.62.0 binary hitting C-197 on a
+    # program the current tree runs in 0.089 s. The version is in the JSON
+    # metadata either way; what was missing was seeing it before believing a
+    # number.
     almide = os.environ.get("ALMIDE_BIN") or find_tool("almide") or sys.exit("almide not on PATH")
+    almide_version = subprocess.run([almide, "--version"], capture_output=True, text=True).stdout.strip()
+    if os.environ.get("ALMIDE_BIN"):
+        print(f"almide: {almide} ({almide_version}) [ALMIDE_BIN]")
+    else:
+        print(f"almide: {almide} ({almide_version}) [PATH — NOT this tree's build; "
+              f"set ALMIDE_BIN=<tree>/target/release/almide to measure your changes]")
     rustc = find_tool("rustc") or sys.exit("rustc not on PATH")
     wasmtime = find_tool("wasmtime")
     if "wasm" in legs and not wasmtime:
@@ -282,7 +296,10 @@ def main():
                 r = subprocess.run(argv + [arg], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 dt = time.perf_counter() - t0
                 if r.returncode != 0:
-                    sys.exit(f"RUN FAILED: {vname} {arg}")
+                    # Name the binary: a failure here is as likely to be the
+                    # wrong `almide` as a real one (see the resolution note).
+                    sys.exit(f"RUN FAILED: {vname} {arg} (exit {r.returncode}; "
+                             f"built with {almide} — {almide_version})")
                 times[vname].append(dt)
         results[name] = {
             "arg": arg,
