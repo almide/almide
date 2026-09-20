@@ -1,4 +1,4 @@
-# oracle: almide 0.63.0 at f0d819b2e — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.63.0 at 92bee106b — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 f0709d9573472655341ac75bd847b3f30d2bddc3a201554bfd5cc22c21446902	0	spec/wasm_cross/adr0005_operator_equivalence.almd
 c0f26e63e32a038c59081b238912f0b3ecfd01d8d5ce45534b83fbbce13128a7	0	spec/wasm_cross/alias_combinator_rc.almd
 997e25dd01ce19a5253bd290b2f5f4b8eab74ea88f256b5fd9e09ca77d42af3b	0	spec/wasm_cross/alias_cow.almd
@@ -7,7 +7,7 @@ c0f26e63e32a038c59081b238912f0b3ecfd01d8d5ce45534b83fbbce13128a7	0	spec/wasm_cro
 e6c21e8d260fe71882debdb339d2402a2ca7648529bc2303f48649bce0380017	0	spec/wasm_cross/anon_records_and_fusion.almd
 714abcfa48d46f8895d35da78c58f1ea96c0825f14487b0fd71712993bc9128f	0	spec/wasm_cross/append_accumulator.almd
 7f794c8e8d5ecc5dcb8a284743e6a182f29b2b6ef6b5517d8c461800629c5a52	0	spec/wasm_cross/append_accumulator_heap.almd
-fbf8eb2b6c42b9a11dae3dc11b03485864f217762e87119b71144517ccb0fce1	0	spec/wasm_cross/append_accumulator_heap_linear.almd
+7ed46bf644c7a4dac42980dc14277bbe16ff7a49724665b9a0ec76141164e33a	0	spec/wasm_cross/append_accumulator_heap_linear.almd
 a98ee241254910669cd3814b6154448b180b09de5e16fb27498e8521e684629a	0	spec/wasm_cross/args_surface.almd
 8ec55808a1bbd04a6d4a5eefba0a07b1f9276448fe99b14fe32ca51dd0317ca4	0	spec/wasm_cross/as_pattern.almd
 9160d4be34c8695bd172a76c7c7966587ea5a4d991ad22c87b2b91af54aa9ebb	1	spec/wasm_cross/assert_abort_eq.almd
