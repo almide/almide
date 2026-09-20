@@ -290,9 +290,10 @@ fn parse_for_json(file: &str) -> (Option<almide::ast::Program>, String, Vec<diag
 
 pub fn cmd_check_json(file: &str, critical: Option<&[String]>) {
     if !check_json_one(file, critical) {
-        // The exit code is deliberately unchanged (1 = this file did not
-        // parse). A harness that gates on it must not silently flip to
-        // success just because the diagnostics got a better shape.
+        // 1 = this file did not check clean, which is what `almide check`
+        // without `--json` exits on for the same program. A harness that gates
+        // on the status must not get a different answer for asking that the
+        // diagnostics be machine-readable.
         std::process::exit(1);
     }
 }
@@ -300,19 +301,30 @@ pub fn cmd_check_json(file: &str, critical: Option<&[String]>) {
 /// `almide check --json` with no FILE inside a package (#2253): every entry
 /// the bare form judges, in the bare form's order, one JSON row per
 /// diagnostic — each row names its `file`. The exit code is the single-file
-/// form's, aggregated: `1` iff some entry did not parse; a type error is a
-/// row whose `level` says so, and the remaining entries are still judged.
+/// form's, aggregated: `1` iff some entry did not check clean, and every
+/// remaining entry is still judged so one bad file does not hide the rest.
 pub fn cmd_check_json_package(files: &[String], critical: Option<&[String]>) {
-    let mut parsed_all = true;
+    let mut all_clean = true;
     for file in files {
-        parsed_all &= check_json_one(file, critical);
+        // NOT `&&`: short-circuiting would stop judging at the first bad entry
+        // and the package report would lose every diagnostic after it.
+        all_clean &= check_json_one(file, critical);
     }
-    if !parsed_all {
+    if !all_clean {
         std::process::exit(1);
     }
 }
 
-/// One file's JSON report. `false` iff the file did not parse.
+/// One file's JSON report. `false` iff the file did not check clean — the same
+/// verdict the plain path exits on in `report_check_errors_or_exit`: any parse
+/// error, or any diagnostic at `Level::Error`. Warnings alone are clean, on
+/// both paths.
+///
+/// This used to be `false` iff the file did not PARSE, so a type error was
+/// reported in the payload and then thrown away in the status (#2350). The
+/// consumer this mode exists for — an editor, a CI step, a model's harness —
+/// does the normal thing and gates on the status, so every rejected program
+/// read as accepted while the reason sat unread on stdout.
 fn check_json_one(file: &str, critical: Option<&[String]>) -> bool {
     let (parsed, source_text, parse_errors) = parse_for_json(file);
     let Some(mut program) = parsed else {
@@ -336,14 +348,17 @@ fn check_json_one(file: &str, critical: Option<&[String]>) -> bool {
 
     // Lower to IR for unused variable warnings (skip if type errors)
     let has_type_errors = diagnostics.iter().any(|d| d.level == diagnostic::Level::Error);
-    if parse_errors.is_empty() && !has_type_errors {
+    let clean = parse_errors.is_empty() && !has_type_errors;
+    if clean {
         let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
         let unused = almide::ir::collect_unused_var_warnings(&ir, file);
         for d in &unused {
             out(&format!("{}", crate::diagnostic_render::to_json(d)));
         }
     }
-    true
+    // The same predicate that gates the unused-variable pass IS the verdict:
+    // one expression, so the status cannot drift from what was emitted.
+    clean
 }
 
 /// `cmd_check_effects`'s `[permissions].allow` enforcement block. Extracted
