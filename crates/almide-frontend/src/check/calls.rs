@@ -350,12 +350,11 @@ impl Checker {
             (Some(p), false) => self.env.functions.contains_key(&sym(&format!("{}.{}", p, name))),
             _ => true,
         };
-        if !declares_it_itself {
-            if let Some(q) = qualified_via_direct.as_ref() {
-                if let Some(sig) = self.env.functions.get(&sym(q)).cloned() {
-                    return (Some(sig), qualified_via_direct);
-                }
-            }
+        if !declares_it_itself
+            && let Some(q) = qualified_via_direct.as_ref()
+            && let Some(sig) = self.env.functions.get(&sym(q)).cloned()
+        {
+            return (Some(sig), qualified_via_direct);
         }
         // DefId-based resolution: try def_map first for canonical lookup
         let sig = self.env.def_map.get(&sym(name))
