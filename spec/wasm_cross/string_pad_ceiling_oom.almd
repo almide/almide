@@ -1,0 +1,35 @@
+// @contract: C-054, C-197
+// The OVER-BOUND cell of the string pad pair, and the twin of
+// bytes_pad_ceiling_oom.almd — the same defect, in the same shape, in the
+// other family. `bytes.pad_right` wrapped an i64 target to i32 before the
+// allocator saw it and died as a raw trap; that was fixed in #1978 and pinned
+// there. `string.pad_start`/`pad_end` were never swept with it, and did
+// something worse than trapping: they ANSWERED with the width taken mod 2^32,
+// so `pad_start("ab", 2^32+5, "x")` returned "xxxab" while native returned a
+// string of 2^32+5 characters (#2385).
+//
+// C-054 states that every list/string op taking an Int count clamps on the
+// FULL i64 BEFORE the wasm narrowing. The pad pair did not. C-054's own string
+// fixture (string_count_truncation.almd) exercises `pad_start` and `pad_end`
+// but stops at width 5, with a comment asserting in prose that the huge widths
+// "now both-FAIL ... instead of wasm silently wrapping". They did not. The
+// reason given for not asserting it — the size boundary is multi-GB and
+// machine-dependent — is true of WHERE native runs out and false of the wrap
+// itself, and the unassertable neighbour was taken as the reason to skip the
+// assertable case.
+//
+// What is machine-independent, and therefore what this fixture asserts: a
+// width no machine can satisfy takes C-197's single abort form, "Error: out of
+// memory" and exit 1, on every leg. A width that merely EXCEEDS the wasm leg's
+// i32 bound (2^32+5) cannot be asserted here, because native answers it with a
+// four-gigabyte string on a machine that has the room and aborts on one that
+// does not — that cell is pinned instead by the wasm-only unit test
+// `string_pad_width_past_the_i32_bound_aborts` and by proofs/domain-edges.toml.
+//
+// The first line pins that an ordinary width is untouched. "after" never
+// prints.
+fn main() -> Unit = {
+  println("in_range=[" + string.pad_start("ab", 5, "x") + "]")
+  println("pad_max=" + int.to_string(string.len(string.pad_start("ab", 9223372036854775807, "x"))))
+  println("after")
+}

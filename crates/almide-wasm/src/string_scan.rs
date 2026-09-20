@@ -53,6 +53,9 @@ impl Emitter<'_> {
         let hsc = self.hold_i32()?;
         let hn = self.hold_i32()?;
         let hb = self.hold_i32()?;
+        // C-197's defined abort, interned here because the two bound checks
+        // below are the only places in this arm that can reach it (#2385).
+        let oom = self.pool.intern("Error: out of memory");
         let mut i = self.f.instructions();
         i.local_set(hp);
         i.local_get(hs).i32_load(len_memarg()).local_set(hl);
@@ -77,6 +80,20 @@ impl Emitter<'_> {
         i.memory_copy(0, 0);
         i.local_get(hb);
         i.else_();
+        // A width past this leg's structural bound is an allocation the leg
+        // cannot satisfy, and C-197 makes that the DEFINED abort — never a
+        // narrowing and never a raw trap. `i32_wrap_i64` alone took the width
+        // MOD 2^32 and answered with the remainder: `pad_start("ab", 2^32+5,
+        // "x")` returned `"xxxab"` where native returned a string of 2^32+5
+        // chars, and at 2^32 exactly the wrap sized the block at zero while
+        // the tail still copied the source into it (#2385). The `if` above
+        // compares the FULL i64 width and is correct; this is the branch where
+        // that width was being thrown away one instruction later.
+        i.local_get(hw).i64_const(i32::MAX as i64).i64_gt_s();
+        i.if_(BlockType::Empty);
+        i.i32_const(oom as i32).call(F_EPRINTLN_BLOCK);
+        i.i32_const(1).call(F_EXIT_IMPORT).unreachable();
+        i.end();
         i.local_get(hw).i32_wrap_i64().local_get(hsc).i32_sub().local_set(hn);
         // pclen into hk: empty pad → 1 (a space)
         i.local_get(hp).i32_load(len_memarg()).i32_eqz();
@@ -90,6 +107,24 @@ impl Emitter<'_> {
         i.local_get(hk).i32_const(0xF0).i32_ge_u().i32_add();
         i.end();
         i.local_set(hk);
+        // The same bound, on the BYTE count rather than the char count: a
+        // 3-byte pad char times a width under `i32::MAX` still overruns an
+        // i32, and the `i32_mul` below wrapped it — the shortened allocation
+        // then took the write loop past the end of memory as a raw trap,
+        // which `emit_alloc`'s own comment says is not the C-197 abort
+        // (#1908). Computed in i64, which cannot itself overflow here: the
+        // width is at most `i32::MAX` by the check above and a pad char is at
+        // most 4 bytes, so the product is at most 2^33.
+        i.local_get(hn).i64_extend_i32_s();
+        i.local_get(hk).i64_extend_i32_s();
+        i.i64_mul();
+        i.local_get(hl).i64_extend_i32_s();
+        i.i64_add();
+        i.i64_const(i32::MAX as i64).i64_gt_s();
+        i.if_(BlockType::Empty);
+        i.i32_const(oom as i32).call(F_EPRINTLN_BLOCK);
+        i.i32_const(1).call(F_EXIT_IMPORT).unreachable();
+        i.end();
         i.local_get(hn).local_get(hk).i32_mul().local_get(hl).i32_add();
         i.call(F_ALLOC).local_set(hb);
         // s goes after the pads (start) or first (end); hsc
