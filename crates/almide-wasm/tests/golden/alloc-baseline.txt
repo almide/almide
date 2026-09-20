@@ -135,7 +135,7 @@
 ~	spec/wasm_cross/exit_code_out_of_range.almd
 65792	spec/wasm_cross/expr_stmt_comment.almd
 67568	spec/wasm_cross/fallible_hof_effect_callback_family.almd
-68685728	spec/wasm_cross/fallible_hof_large_input.almd
+86177312	spec/wasm_cross/fallible_hof_large_input.almd
 70336	spec/wasm_cross/fallible_hof_option_effect_callback.almd
 66224	spec/wasm_cross/fallible_tuple_value_tail.almd
 66080	spec/wasm_cross/fan_any_allfail.almd
