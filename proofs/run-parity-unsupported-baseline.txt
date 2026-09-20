@@ -31,6 +31,20 @@
 # leg and the incumbent all vote on it, and the size/alloc ledgers pin its
 # emission. Solo run: 694 identical, 20 unsupported, 3 fuel-exhausted, 0 diverge.
 #
+# 2026-09-21 (#2385): unsupported 20 -> 18, by EXTENDING THE BRIDGE as this file
+# requires rather than by raising a number. A size no machine can serve is not
+# an abstain — both backends answer `Error: out of memory` and exit 1 there, and
+# the arena can cast that vote without allocating a byte, so
+# `heap_prim_alloc` now returns C-197's abort above 2^48 bytes instead of
+# declining. That carries the three over-bound cells of the pad/alloc families
+# that had been abstaining (`prim.alloc_str(i64::MAX)` — the fixture this
+# release's pad fix needed — plus `alloc_bytes` and `alloc_list_f64` at the same
+# size), and it deliberately does NOT carry `prim.alloc_list(268435456)`: 2 GiB
+# is a size native serves and the wasm leg refuses, which is the contracted
+# divergence itself, so abstaining there is still the only honest vote.
+# Solo run on this tree: 702 identical, 18 unsupported, 3 fuel-exhausted,
+# 0 diverge.
+#
 # name<TAB>value
-unsupported	20
+unsupported	18
 fuel_exhausted	3
