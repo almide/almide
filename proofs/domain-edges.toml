@@ -9,7 +9,7 @@
 # datetime, io, math), quiet machine, solo-retry instrument:
 #   AGREE 4823   DIVERGE 64   WALL 627   BOMB 2
 #
-# Every one of the 64 divergent rows below is the CONTRACTED divergence (C-197,
+# Every one of the divergent rows below is the CONTRACTED divergence (C-197,
 # ratified A): a cell between the two legs' structural allocation bounds, where
 # the narrower leg (wasm32) takes the defined out-of-memory abort and the wider
 # one answers. These are DECLARED, not defects — the count is not a defect
@@ -18,8 +18,48 @@
 # ZERO of those. datetime/io/math measured 0 divergent — their former rows were
 # fixed (#1455) and are deleted as stale. BOMB 2 are declared timeout outcomes
 # (native filling tens of GB), not findings.
+#
+# 2026-09-21, #2385 — the first `domain-edges.yml` run (the gate had been
+# committed but never executed) failed on string, and the reason above was the
+# finding rather than the frame. `string.pad_start`/`pad_end` did NOT take the
+# defined abort past the wasm leg's bound: the width was narrowed with a bare
+# `i32_wrap_i64`, so the leg ANSWERED with the width mod 2^32 —
+# `pad_start("ab", 2^32+5, "x")` returned `"xxxab"`. Four rows sat inside this
+# file's "every row is the contracted divergence" claim while being something
+# worse, because a ledger of WHICH cells diverge cannot see HOW. The narrowing
+# now aborts on the defined line, which makes the two surviving pad rows true
+# and removes four cells outright (`i64_max`, `i64_max_m1` on both fns: both
+# legs now print `Error: out of memory` and exit 1, byte-identical). Those four
+# are deterministic on any machine — `i64::MAX` is a size nothing can satisfy,
+# so no amount of free memory changes the answer.
+#
+# The two `i32_max` rows go for a DIFFERENT reason from the other four, and the
+# difference is the whole reason this note is long. `i32_max` asks both legs for
+# 2 GiB, and the wasm leg's ceiling on this path is `StoreLimits::default()`
+# (`crates/almide-wasm-run/src/host.rs:663`) — HOST AVAILABILITY, not a
+# structural bound. So the verdict for an `i32_max` cell tracks how much memory
+# was free when it ran. `tools/domain_edge_matrix.py:306-322` documents this in
+# its own words and names these exact two rows as the measured phantom: a sweep
+# run concurrently with another heavy job called them divergent; on a quiet
+# machine both legs agree. They are deleted because a phantom that landed once
+# was being declared forever, NOT because anything about them was fixed.
+#
+# The same run reported three UNDECLARED bytes cells — `bytes.new:len:i32_max`
+# and the `i32_max` cell of both `bytes.pad_*`. They are the same phantom in the
+# other direction: CI measures under six parallel jobs, which is exactly the
+# pressure the tool's solo-retry was built for and exactly the pressure it
+# cannot escape there. They are NOT declared here. Declaring them would write
+# one machine's free memory into a ledger that claims to measure the compiler,
+# which is how the two rows above got in. The gate stays red on bytes until the
+# wasm leg's cap is PINNED (#2387) — `run_wasm_capped` already exists at
+# `host.rs:626` and is unused on this path — at which point the boundary
+# becomes structural and the verdict reproducible, and whatever is then true
+# can be recorded. #2387 also makes the point that capping only the wasm leg
+# MOVES the phantom rather than killing it: the same 2 GiB race then runs in
+# the other direction, so native needs the same cap.
+#     string: DIVERGE 8 -> 4;  count 64 -> 62;  UNTRIAGED stays 0.
 
-count = 64
+count = 62
 
 [[divergence]]
 cell   = "bytes.new:len:two_pow_32"
@@ -254,19 +294,11 @@ cell   = "list.range:start:i32_min"
 reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
 
 [[divergence]]
-cell   = "string.pad_end:n:i32_max"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
 cell   = "string.pad_end:n:two_pow_32"
 reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
 
 [[divergence]]
 cell   = "string.pad_end:n:u32_max"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "string.pad_start:n:i32_max"
 reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
 
 [[divergence]]
