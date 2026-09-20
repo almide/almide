@@ -574,6 +574,7 @@
 66000	spec/wasm_cross/string_lines.almd
 66448	spec/wasm_cross/string_ops.almd
 66848	spec/wasm_cross/string_ops_drain.almd
+65952	spec/wasm_cross/string_pad_ceiling_oom.almd
 86976	spec/wasm_cross/string_passthrough_share.almd
 11791232	spec/wasm_cross/string_position_large_offset.almd
 100336	spec/wasm_cross/string_predicates.almd
