@@ -4,7 +4,7 @@
 // `list.drop(xs, 1)`, and map / filter / flat_map / filter_map not even in
 // tail position, so the documented idiom overflowed the stack at about 10,000
 // elements on wasm and 50,000 natively, and copied the rest of the list at
-// every element. Six carriers run here over 200,000 elements, five with a USER
+// every element. Six carriers run here over 200,000 elements, each with a USER
 // effect fn callback. `map` is pinned at the same size in
 // spec/lang/fallible_hof_test.almd instead: the interpreter leg abstains on it
 // past 16 elements (#2311), and it would take this whole fixture out of the
@@ -15,12 +15,11 @@ effect fn even(x: Int) -> Bool = x % 2 == 0
 
 effect fn twice(x: Int) -> List[Int] = [x, x]
 
-// A plain fn, not an effect fn, for filter_map: an effect fn answering `Int?`
-// through filter_map double-frees on the incumbent wasm leg at any size (#2308),
-// and this fixture is about size.
-fn every_third(x: Int) -> Int? = if x % 3 == 0 then some(x) else none
-
-fn third(x: Int) -> Result[Int?, String] = ok(every_third(x))
+// An effect fn answering an OPTION, which is the shape that read the Option
+// block with the Result layout on the incumbent leg (#2308). That is fixed and
+// pinned at four and five elements in fallible_hof_option_effect_callback.almd;
+// this cell is the same shape at a length that used to exhaust the stack.
+effect fn third(x: Int) -> Int? = if x % 3 == 0 then some(x) else none
 
 effect fn add(acc: Int, x: Int) -> Int = acc + x
 
