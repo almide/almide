@@ -5,9 +5,11 @@
 //!    the loop's duration — so a `Clone` under it only ever produced a
 //!    throwaway copy of the whole list. It is stripped unless the body writes
 //!    the list, where the temporary copy is what keeps the body's `&mut` legal.
-//! 2. The loop's own binders and its body's top-level `let`s are rebound on
-//!    every iteration, so their last use in the body is a move even inside
-//!    the loop (`CloneCtx::fresh`).
+//! 2. The loop's own binders and every `let` in its body — at any depth, not
+//!    just the top level (#2316) — are rebound on every iteration that reaches
+//!    them, so their last use in the body is a move even inside the loop
+//!    (`CloneCtx::fresh`). A `let` under an `if` or a `match` arm cannot
+//!    outlive the iteration either: its scope ends with that block.
 //!
 //! Split out of `pass_clone.rs` to keep that file under the `max-lines` limit.
 
@@ -217,10 +219,45 @@ fn iterable_root(expr: &IrExpr) -> Option<VarId> {
 pub(crate) fn loop_fresh_vars(var: Option<VarId>, var_tuple: Option<&[VarId]>, body: &[IrStmt]) -> HashSet<VarId> {
     let mut fresh: HashSet<VarId> = var.into_iter().collect();
     fresh.extend(var_tuple.into_iter().flatten().copied());
+    let mut w = FreshBinds { fresh: &mut fresh };
     for s in body {
-        if let IrStmtKind::Bind { var, .. } = &s.kind { fresh.insert(*var); }
+        // `visit_stmt`, not `walk_stmt`: the walk recurses into a statement's
+        // CHILDREN, so calling it directly skips the top-level statement and
+        // drops exactly the binds the old code collected.
+        almide_ir::visit::IrVisitor::visit_stmt(&mut w, s);
     }
     fresh
+}
+
+/// Every `Bind` reachable in the loop body, not just the ones at its top
+/// level (#2316). A `let` inside an `if` or a `match` arm is rebound on every
+/// iteration that reaches it, exactly like a top-level one, and its scope ends
+/// with that block — so it can never survive into the next iteration and its
+/// last use in the body is a move. Collecting only the top level made the same
+/// statements clone under a branch and move without one, which is the whole of
+/// #2316.
+///
+/// Lambda bodies are NOT descended into: a closure's binds belong to its own
+/// invocation and `insert_clones_live` builds them a separate `fresh` set when
+/// it walks the lambda. Folding them in here would mark a binding fresh in the
+/// wrong frame.
+struct FreshBinds<'a> {
+    fresh: &'a mut HashSet<VarId>,
+}
+
+impl almide_ir::visit::IrVisitor for FreshBinds<'_> {
+    fn visit_expr(&mut self, expr: &IrExpr) {
+        if matches!(expr.kind, IrExprKind::Lambda { .. }) {
+            return;
+        }
+        almide_ir::visit::walk_expr(self, expr);
+    }
+    fn visit_stmt(&mut self, stmt: &IrStmt) {
+        if let IrStmtKind::Bind { var, .. } = &stmt.kind {
+            self.fresh.insert(*var);
+        }
+        almide_ir::visit::walk_stmt(self, stmt);
+    }
 }
 
 /// Does any statement of `body` (at any depth, lambdas included) write `v`:
