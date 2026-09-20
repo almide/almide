@@ -294,11 +294,47 @@ impl Checker {
                 m = module, field = field
             )
         };
+        // #2366: the receiver's name is a local that shadows a module in scope.
+        // `module` above is the module of the receiver's TYPE, so the message is
+        // about `string` while the author was thinking about `path` — and the
+        // generic hint then tells them to write `string.<fn>(x)`, which is the
+        // shape they already wrote. Which of E002 and E004 fires turns on
+        // whether the local's type happens to carry a method of that name, so
+        // without this the same mistake is explained or not by accident.
+        let shadow = self.shadowed_receiver.filter(|r| *r != almide_base::intern::sym(module));
+        let hint = match shadow {
+            None => hint,
+            Some(receiver) => {
+                let r = receiver.as_str();
+                let module_has_it = crate::stdlib::module_functions_all(r)
+                    .iter()
+                    .any(|f| *f == field.as_str());
+                let meant = if module_has_it {
+                    format!(" You probably meant the module's `{r}.{field}`, which exists.")
+                } else {
+                    String::new()
+                };
+                format!(
+                    "`{r}` here is your local binding, not the `{r}` module — a local wins over a \
+                     module of the same name in member position too. So this asks for a method \
+                     `{field}` on the local's type ({module}), and there is none.{meant} Rename the \
+                     binding, then call `{r}.{field}(..)` on it"
+                )
+            }
+        };
         let mut diag = super::err(
             format!("undefined method '{}' on {}", field, module),
             hint,
             format!("method call .{}()", field)
         ).with_code("E002");
+        if let Some(receiver) = shadow {
+            // The mistake is at the binding, which is usually lines above the
+            // call the caret is on — the same secondary E004 carries (#2349).
+            if let Some(span) = self.env.let_origin(receiver.as_str()) {
+                diag = diag.with_secondary(span.line, Some(1),
+                    format!("`{}` bound here", receiver.as_str()));
+            }
+        }
         // #2088, method-UFCS arm: the whole `x.field()` expression is what the
         // message is about and what the rewrite below replaces, so it is what
         // the caret must cover. `emit` would otherwise fill the span from
@@ -314,7 +350,10 @@ impl Checker {
                 diag.end_col = Some(span.end_col);
             }
         }
-        if let Some(close) = suggestion {
+        // A rewrite to `{module}.{close}(x)` is the WRONG advice under a shadow:
+        // `module` is the RECEIVER TYPE's module, so it would propose a
+        // near-match on `string` to an author who meant `path` (#2366).
+        if let Some(close) = suggestion.filter(|_| shadow.is_none()) {
             // Mechanical rewrite path: if we have the object's source text AND the full call span, substitute `x.field()` → `module.close(x)` in place. Falls back to the comment-headed display form when the source isn't reachable (IDE / playground).
             let rewrite = object.span
                 .and_then(|s| self.source_slice(s))
