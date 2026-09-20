@@ -13,8 +13,10 @@
 // the length is exact. A missing +1 frees a live element (the join would read
 // freed bytes); a doubled one leaks (the allocation ledger sees it). The
 // specific un-Dup'd-push spelling is C-186's fixture; this one is the volume.
-fn build(n: Int, acc: List[String]) -> List[String] =
-  if n <= 0 then acc else build(n - 1, acc + ["ab"])
+fn build(n: Int, acc: List[String]) -> List[String] = {
+  if n <= 0 then acc
+  else build(n - 1, acc + ["ab"])
+}
 
 fn grow(n: Int) -> List[String] = {
   var out: List[String] = []
