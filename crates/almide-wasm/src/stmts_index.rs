@@ -71,16 +71,28 @@ impl Emitter<'_> {
                 };
                 // OOB → the exact native frame + exit 1.
                 let msg = self.pool.intern("index out of bounds");
-                get_target(self.f, self.locals, self.globals);
+                // ONE UNSIGNED compare (#2319), the store twin of the read
+                // check in emitter.rs: `idx >=u count` covers the negative
+                // index too, and a loop that cannot change this list's length
+                // already has the count in a local.
+                let hoisted = self.hoisted_count_of(*target);
+                self.f.instructions().local_get(hi);
+                match hoisted {
+                    Some(count) => {
+                        self.f.instructions().local_get(count);
+                    }
+                    None => {
+                        get_target(self.f, self.locals, self.globals);
+                        let mut i = self.f.instructions();
+                        i.i32_load(len_memarg())
+                            .i64_extend_i32_u()
+                            .i64_const(stride)
+                            .i64_div_u();
+                    }
+                }
                 {
                     let mut i = self.f.instructions();
-                    i.i32_load(len_memarg())
-                        .i64_extend_i32_u()
-                        .i64_const(stride)
-                        .i64_div_s();
-                    i.local_get(hi).i64_le_s();
-                    i.local_get(hi).i64_const(0).i64_lt_s();
-                    i.i32_or().if_(BlockType::Empty);
+                    i.i64_ge_u().if_(BlockType::Empty);
                     i.i32_const(msg as i32);
                 }
                 self.emit_error_frame_abort();

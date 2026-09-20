@@ -91,24 +91,36 @@ pub const OUT_OF_RANGE_MSG: &str = "Error: exit code must be in 0..=125";
 
 /// Rewrite every `process.exit(code)` whose code is not a literal already in
 /// range into the guarded form above. Returns the number of sites rewritten.
+/// Every module owns its own [`VarTable`], so the slot has to be allocated in
+/// the table that owns the body being rewritten — not in the program's
+/// (#2374). Minting the entry program's next id and planting it in a module's
+/// body produced a `VarId` with no row: `VarId(262)` against a 92-row table,
+/// which the IR verifier reports and `use_count` reaches first as an
+/// unchecked index panic. When the borrowed id happens to be IN range for the
+/// module's table it does not panic — it binds over whatever row already lives
+/// at that index, which is the quiet half of the same defect.
 pub fn guard_exit_codes(program: &mut IrProgram) -> usize {
     let IrProgram { functions, modules, top_lets, var_table, .. } = program;
+    let mut rewritten = 0;
     let mut g = Guard { var_table, rewritten: 0 };
     for f in functions.iter_mut() {
         g.visit_expr_mut(&mut f.body);
     }
+    for tl in top_lets.iter_mut() {
+        g.visit_expr_mut(&mut tl.value);
+    }
+    rewritten += g.rewritten;
     for m in modules.iter_mut() {
+        let mut g = Guard { var_table: &mut m.var_table, rewritten: 0 };
         for f in m.functions.iter_mut() {
             g.visit_expr_mut(&mut f.body);
         }
         for tl in m.top_lets.iter_mut() {
             g.visit_expr_mut(&mut tl.value);
         }
+        rewritten += g.rewritten;
     }
-    for tl in top_lets.iter_mut() {
-        g.visit_expr_mut(&mut tl.value);
-    }
-    g.rewritten
+    rewritten
 }
 
 struct Guard<'a> {

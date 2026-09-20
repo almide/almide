@@ -103,9 +103,14 @@ fn json_judges_every_entry_and_each_row_names_its_file() {
     // to continue past the first one.
     std::fs::write(dir.path().join("src/inner/util.almd"), "fn one() -> Int = \"1\"\n").expect("write util");
     let (ok, text) = check_in(dir.path(), &["--json"]);
-    // Both entries parse; the errors are type errors, so the exit code is the
-    // single-file form's `0` and `level` carries the verdict.
-    assert!(ok, "type errors keep the json exit code at 0:\n{text}");
+    // Both entries parse, but a type error is still a rejection, so the exit
+    // code is the single-file form's `1` — the same answer the plain form
+    // gives for this package. This assertion used to read `ok` with the note
+    // "type errors keep the json exit code at 0": the test pinned #2350 as if
+    // it were the rule. What the case is actually about is one row per
+    // diagnostic across every entry, in walk order, each naming its file, and
+    // all of that is asserted below unchanged.
+    assert!(!ok, "a type error must turn the json check red too:\n{text}");
     let rows: Vec<serde_json::Value> = text
         .lines()
         .filter(|l| !l.trim().is_empty())

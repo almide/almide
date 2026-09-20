@@ -11,8 +11,7 @@ import testing
 
 fn parse1(s: String) -> Result[Int, String] = int.parse(s)
 
-fn halve(n: Int) -> Result[Int, String] = if n % 2 == 0 then ok(n / 2)
-else err("odd:${n}")
+fn halve(n: Int) -> Result[Int, String] = if n % 2 == 0 then ok(n / 2) else err("odd:${n}")
 
 // L1: bind, call, consume — first-class in a pure fn body.
 fn use_first_class() -> (Int, Int) = {

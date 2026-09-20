@@ -158,14 +158,10 @@ test "map then take visits the whole list, take then map only the prefix" {
 effect fn logged_len(xs: List[Int]) -> List[String] = {
   var log: List[String] = []
   let ys = xs |> list.map((x) => {
-    log = log + [
-      "m${int.to_string(x)}"
-    ]
+    log = log + ["m${int.to_string(x)}"]
     x * 10
   }) |> list.filter((x) => {
-    log = log + [
-      "f${int.to_string(x)}"
-    ]
+    log = log + ["f${int.to_string(x)}"]
     x > 10
   })
   log + [int.to_string(list.len(ys))]
@@ -174,16 +170,12 @@ effect fn logged_len(xs: List[Int]) -> List[String] = {
 effect fn logged_fold(xs: List[Int]) -> List[String] = {
   var log: List[String] = []
   let total = xs |> list.map((x) => {
-    log = log + [
-      "m${int.to_string(x)}"
-    ]
+    log = log + ["m${int.to_string(x)}"]
     x + 1
   }) |> list.fold(
     0,
     (acc, x) => {
-      log = log + [
-        "f${int.to_string(x)}"
-      ]
+      log = log + ["f${int.to_string(x)}"]
       acc + x
     },
   )
@@ -193,9 +185,7 @@ effect fn logged_fold(xs: List[Int]) -> List[String] = {
 effect fn logged_take(xs: List[Int]) -> List[String] = {
   var log: List[String] = []
   let ys = xs |> list.map((x) => {
-    log = log + [
-      "v${int.to_string(x)}"
-    ]
+    log = log + ["v${int.to_string(x)}"]
     x * 2
   }) |> list.take(2)
   log + [int.to_string(list.len(ys))]
@@ -204,9 +194,7 @@ effect fn logged_take(xs: List[Int]) -> List[String] = {
 effect fn logged_any(xs: List[Int]) -> List[String] = {
   var log: List[String] = []
   let hit = xs |> list.map((x) => {
-    log = log + [
-      "m${int.to_string(x)}"
-    ]
+    log = log + ["m${int.to_string(x)}"]
     x * 2
   }) |> list.any((x) => x > 2)
   log + [

@@ -294,8 +294,9 @@ impl<'a> Interpreter<'a> {
                     Ok(*i)
                 } else {
                     Err(format!(
-                        "prim.handle of a container holding a non-block Int \
-                         under the declared element type {}",
+                        "prim.handle of a container holding a non-block Int, where the impl the \
+                         interp RESOLVED declares element type {} — the address is not a live \
+                         block whose kind can spell that type",
                         ty_short(ty)
                     ))
                 }
@@ -309,9 +310,20 @@ impl<'a> Interpreter<'a> {
             {
                 self.heap_materialize_hinted(e, Some(ty))
             }
+            // Say WHOSE declaration this is. The hint is the parameter type of
+            // the body the interp RESOLVED, which for a public container fn is
+            // the scalar core (`set.len` -> `set_len(s: Set[Int])`), because the
+            // pass that would have picked the `_str`/`_skv`/`_hval` variant is a
+            // MIR lowering the interp never runs. Saying only "the declared
+            // element type" reads as a claim about the PROGRAM's type, and two
+            // readers took it that way and went looking for a miscompiled
+            // fixture (#2359). The mismatch is the interp's own resolution.
             other => Err(format!(
-                "prim.handle of a container holding a {} element under the \
-                 declared element type {} (no faithful slot repr)",
+                "prim.handle of a container holding a {} element, where the impl the interp RESOLVED \
+                 declares element type {} — a public container fn resolves to its scalar core by name \
+                 (the _str/_skv/_hval choice is a MIR pass the interp does not run), so this is that \
+                 resolution and not the program's type; materializing anyway would compare heap values \
+                 as raw i64 slots",
                 other.type_name(),
                 ty_short(ty)
             )),
@@ -777,24 +789,152 @@ fn heap_slot_is_child(ty: &Ty) -> bool {
 
 /// A compact spelling of a type for an abstain reason — the ledger keys on
 /// these strings, so they must be stable and short, not `Debug`-shaped.
-fn ty_short(ty: &Ty) -> String {
+/// A constructor's written name. `UserDefined` carries the source spelling;
+/// every built-in's `Debug` form IS its name, so `Debug` is the name for them.
+pub(crate) fn ctor_name(c: &almide_lang::types::constructor::TypeConstructorId) -> String {
     use almide_lang::types::constructor::TypeConstructorId as C;
+    match c {
+        C::UserDefined(n) => n.clone(),
+        other => format!("{other:?}"),
+    }
+}
+
+/// A type as a reader can act on it.
+///
+/// #2359: the old fallback was `format!("{other:?}").split('(').next()`, which
+/// truncated at the first `(` — so EVERY applied type printed as the bare word
+/// `Applied`, telling the reader that a type existed and nothing about which
+/// one. That is what `(Applied)` in the #2311 abstain message was.
+///
+/// One path per shape, deliberately. `List`, `Set` and `Map` used to have arms
+/// of their own that produced exactly what the generic arm below produces, and
+/// they are DELETED rather than kept as shortcuts: two renderings that must
+/// agree are two renderings that can stop agreeing, and the ledger keys on
+/// these strings. A missed arm can no longer degrade to a different spelling,
+/// because there is no arm to miss. An arm added later (a `Result` arm is
+/// coming with #2311) is then a readability shortcut that the test
+/// `every_applied_type_renders_as_ctor_brackets` holds to the same output.
+pub(crate) fn ty_short(ty: &Ty) -> String {
+    use almide_lang::types::constructor::TypeConstructorId as C;
+    let args = |ts: &[Ty]| ts.iter().map(ty_short).collect::<Vec<_>>().join(", ");
     match ty {
         Ty::String => "String".into(),
         Ty::Bytes => "Bytes".into(),
-        Ty::Applied(C::List, ts) if ts.len() == 1 => format!("List[{}]", ty_short(&ts[0])),
-        Ty::Applied(C::Set, ts) if ts.len() == 1 => format!("Set[{}]", ty_short(&ts[0])),
-        Ty::Applied(C::Map, ts) if ts.len() == 2 => {
-            format!("Map[{}, {}]", ty_short(&ts[0]), ty_short(&ts[1]))
-        }
-        Ty::Applied(C::Option, ts) if ts.len() == 1 => format!("{}?", ty_short(&ts[0])),
-        Ty::Tuple(ts) => format!(
-            "({})",
-            ts.iter().map(ty_short).collect::<Vec<_>>().join(", ")
-        ),
         Ty::Int => "Int".into(),
         Ty::Float => "Float".into(),
         Ty::Bool => "Bool".into(),
-        other => format!("{other:?}").split('(').next().unwrap_or("?").to_string(),
+        Ty::Tuple(ts) => format!("({})", args(ts)),
+        // The ONE shorthand that is not `Ctor[args]`, because `T?` is how the
+        // language writes it. Pinned as the only one by the test above's
+        // companion, so a second dialect cannot appear unnoticed.
+        Ty::Applied(C::Option, ts) if ts.len() == 1 => format!("{}?", ty_short(&ts[0])),
+        Ty::Applied(c, ts) if ts.is_empty() => ctor_name(c),
+        Ty::Applied(c, ts) => format!("{}[{}]", ctor_name(c), args(ts)),
+        Ty::Named(n, ts) if ts.is_empty() => n.as_str().to_string(),
+        Ty::Named(n, ts) => format!("{}[{}]", n.as_str(), args(ts)),
+        // Full debug, not the first token: a name with no arguments is still
+        // more than no name at all.
+        other => format!("{other:?}"),
+    }
+}
+
+#[cfg(test)]
+mod ty_short_tests {
+    use super::ty_short;
+    use almide_lang::types::constructor::TypeConstructorId as C;
+    use almide_lang::types::Ty;
+
+    /// The rendering is ONE convention: `Ctor[a, b, …]`, with `ty_short` on
+    /// every argument. `List`, `Set` and `Map` had arms producing exactly this
+    /// and the arms are gone; a `Result` arm arrives with #2311 and must land
+    /// on the same string, which is what this asserts. If an added arm ever
+    /// spells a type differently from the generic path, the same type gets two
+    /// renderings depending on which path it took, and the abstain ledger keys
+    /// on these strings.
+    #[test]
+    fn every_applied_type_renders_as_ctor_brackets() {
+        for (ty, want) in [
+            (Ty::Applied(C::List, vec![Ty::Int]), "List[Int]"),
+            (Ty::Applied(C::Set, vec![Ty::String]), "Set[String]"),
+            (
+                Ty::Applied(C::Map, vec![Ty::String, Ty::Int]),
+                "Map[String, Int]",
+            ),
+            (
+                Ty::Applied(C::Result, vec![Ty::Int, Ty::String]),
+                "Result[Int, String]",
+            ),
+            // Nesting goes through the same path at every level.
+            (
+                Ty::Applied(C::List, vec![Ty::Applied(C::Set, vec![Ty::String])]),
+                "List[Set[String]]",
+            ),
+            // A user type keeps its SOURCE spelling, not `UserDefined("Foo")`.
+            (
+                Ty::Applied(C::UserDefined("Foo".into()), vec![Ty::Int]),
+                "Foo[Int]",
+            ),
+            // The shapes a fallback tends to spell its own way: three
+            // arguments, and none at all.
+            (
+                Ty::Applied(C::UserDefined("Trio".into()), vec![Ty::Int, Ty::Bool, Ty::Float]),
+                "Trio[Int, Bool, Float]",
+            ),
+            (Ty::Applied(C::UserDefined("Nil".into()), vec![]), "Nil"),
+        ] {
+            assert_eq!(ty_short(&ty), want, "rendering drifted for {ty:?}");
+        }
+    }
+
+    /// `T?` is the one rendering that is not `Ctor[args]`, because that is how
+    /// the language writes it. Declared, so a second shorthand cannot be added
+    /// without this failing and someone deciding it on purpose.
+    #[test]
+    fn option_is_the_only_shorthand() {
+        assert_eq!(ty_short(&Ty::Applied(C::Option, vec![Ty::Int])), "Int?");
+        let shorthand: Vec<&str> = [
+            C::List,
+            C::Set,
+            C::Result,
+            C::Map,
+            C::Bytes,
+            C::Matrix,
+            C::Unit,
+            C::Int,
+            C::Float,
+            C::String,
+            C::Bool,
+        ]
+        .iter()
+        .filter(|c| {
+            let rendered = ty_short(&Ty::Applied((*c).clone(), vec![Ty::Int]));
+            !rendered.ends_with("[Int]")
+        })
+        .map(|_| "deviating constructor")
+        .collect();
+        assert!(
+            shorthand.is_empty(),
+            "a constructor other than Option renders as something that is not Ctor[args]: {shorthand:?}"
+        );
+    }
+
+    /// The #2359 regression itself. The old fallback truncated at the first
+    /// `(`, so every applied type printed as the bare word `Applied` — the
+    /// reader was told a type existed and nothing about which one, and that
+    /// is the `(Applied)` in #2311's abstain message.
+    #[test]
+    fn an_applied_type_is_never_rendered_as_the_bare_word_applied() {
+        for ty in [
+            Ty::Applied(C::Result, vec![Ty::Int, Ty::String]),
+            Ty::Applied(C::UserDefined("Payload".into()), vec![Ty::Bytes]),
+            Ty::Applied(C::Matrix, vec![Ty::Float]),
+        ] {
+            let rendered = ty_short(&ty);
+            assert_ne!(rendered, "Applied", "{ty:?} lost its constructor");
+            assert!(
+                !rendered.starts_with("Applied"),
+                "{ty:?} rendered as {rendered}, which names the enum rather than the type"
+            );
+        }
     }
 }

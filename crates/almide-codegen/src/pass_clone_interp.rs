@@ -42,7 +42,11 @@ fn place_root(expr: &IrExpr) -> Option<VarId> {
 /// is not the object of a field/index access nor the operand of a borrow or
 /// deref? Such an occurrence renders as a move when it is the variable's
 /// last use — the conflicting half of the E0505.
-fn moves_var(expr: &IrExpr, var: VarId) -> bool {
+///
+/// Shared with `ChainSourceBorrowPass` (#2377), which needs the same question
+/// about a chain's fold seed: a second copy of this rule is how the two passes
+/// would come to disagree about what a move is.
+pub(crate) fn moves_var(expr: &IrExpr, var: VarId) -> bool {
     UseSites::of_expr(expr, Site::Operand, &ExplicitBorrows).of(var).any(|u| {
         u.is_node() && !matches!(
             u.site,

@@ -1,11 +1,20 @@
 //! Allocation ledger (#1586, the roc lesson made corpus-wide): stdout
 //! equality cannot see an allocation regression — the bump heap makes
 //! the TOTAL observable for free (the `__heap` watermark is monotonic),
-//! so every corpus fixture's allocation total is pinned EXACTLY in
+//! so every corpus fixture's row is pinned EXACTLY in
 //! golden/alloc-baseline.txt. A route that starts double-allocating
 //! drifts its row; ratify deliberately:
 //!
 //!   ALMIDE_UPDATE_ALLOC=1 cargo test --release -p almide-wasm --test alloc_ledger
+//!
+//! WHAT THE NUMBER IS (#2344). The row is the FINAL `__heap` offset, not
+//! the bytes a run allocated. The static string pool occupies the bottom
+//! of linear memory and the bump heap starts above it, so the row is
+//! `pool size + allocation` and moves with EITHER. A change that touches
+//! the pool moves every row while allocating nothing differently — #2344's
+//! dedupe moved 467 of them, all down, by the pool's own shrinkage. Read a
+//! drifted row as "the end of memory moved", then ask which half moved:
+//! the emitted data segment says the pool, the difference says allocation.
 //!
 //! Fixtures whose watermark is run-dependent (entropy-fed string widths
 //! and kin) are SELF-CALIBRATED out at generation time — the update run

@@ -403,12 +403,21 @@ jobs:
           </details>
           EOF
           )
-          EXISTING=$(gh issue list --label fuzz --state open --json number --jq '.[0].number' || echo "")
+          # Route by a label only a FINDINGS issue wears. `fuzz` is worn by
+          # long-lived instrument issues too — #924 is the full-budget ratchet
+          # — so `--label fuzz` picked whichever the API listed first and
+          # posted correctness findings there as comments. 54 of them went to
+          # #924, the last on the morning of the 0.63.0 cut: a real E0505
+          # regression sat as comment 71 on a budget tracker and reached the
+          # release only because the soak was run by hand before the tag.
+          # The perf step below has always had its own `fuzz-perf` label and
+          # was never affected; this is that shape, applied here.
+          EXISTING=$(gh issue list --label fuzz-findings --state open --json number --jq '.[0].number' || echo "")
           if [ -n "$EXISTING" ]; then
             gh issue comment "$EXISTING" --body "$BODY"
           else
-            gh label create fuzz --color B60205 --description "Found by the nightly differential fuzzer" 2>/dev/null || true
-            gh issue create --title "$TITLE" --body "$BODY" --label fuzz
+            gh label create fuzz-findings --color B60205 --description "Correctness findings from the nightly differential fuzzer" 2>/dev/null || true
+            gh issue create --title "$TITLE" --body "$BODY" --label fuzz-findings
           fi
 
       # Perf-class Slow findings route to their OWN issue under their own

@@ -156,9 +156,7 @@ test "for with enumerate" {
 test "for with zip" {
   var result: List[String] = []
   for (a, b) in list.zip(["x", "y"], [1, 2]) {
-    result = result + [
-      "${a}${int.to_string(b)}"
-    ]
+    result = result + ["${a}${int.to_string(b)}"]
   }
   assert_eq(result, ["x1", "y2"])
 }
@@ -507,9 +505,7 @@ test "if else with block bodies" {
 test "for in with list.enumerate" {
   var result: List[String] = []
   for (i, v) in list.enumerate(["a", "b", "c"]) {
-    result = result + [
-      "${int.to_string(i)}:${v}"
-    ]
+    result = result + ["${int.to_string(i)}:${v}"]
   }
   assert_eq(result, ["0:a", "1:b", "2:c"])
 }

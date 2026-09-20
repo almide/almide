@@ -1,0 +1,45 @@
+// strbuild — build a List[String] of n elements, then walk it 40 times (#2310).
+//
+// SHAPE: `var` + `while` + `list.push(out, s)` — the form that was always linear, so it is the reference the accumulator must stay near.
+//
+// The two strbuild rows differ ONLY in the build loop; the element values and
+// the consumer are byte-identical, so the row delta IS the shape cost. They
+// exist because the shape below was QUADRATIC on the wasm leg while the same
+// loop over `Int` was linear: the in-place append window refused a 4-byte
+// handle slot, so every step copied the whole list (100,000 String appends:
+// 10.5 s against 11 ms for Int). The consumer is 40 passes so the row clears
+// the gate's noise floor on the fast path without needing a size the
+// quadratic form could not finish: 200 passes over 200,000 elements, so the
+// fast path measures ~0.13 s and a regressed build measures ~42 s.
+
+import env
+import int
+
+effect fn main() -> Unit = {
+  let args = env.args()
+  let n = if list.len(args) > 0 then {
+    match list.get(args, 0) {
+      some(s) => match int.parse(s) { ok(v) => v, err(_) => 200000 },
+      none => 200000,
+    }
+  } else 200000
+
+  var out: List[String] = []
+  var i = 0
+  while i < n {
+    list.push(out, int.to_string(i % 1000))
+    i = i + 1
+  }
+
+  var total = 0
+  var pass = 0
+  while pass < 200 {
+    var k = 0
+    while k < n {
+      total = total + string.len(out[k])
+      k = k + 1
+    }
+    pass = pass + 1
+  }
+  println("len: ${int.to_string(list.len(out))} bytes: ${int.to_string(total)} last: ${out[n - 1]}")
+}

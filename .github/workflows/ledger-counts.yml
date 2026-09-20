@@ -17,6 +17,16 @@ name: Ledger counts (nightly)
 # The PR is opened with the workflow token, so CI does not start on it by
 # itself (GitHub never triggers workflows from GITHUB_TOKEN pushes); the body
 # says so and the reviewer's close-and-reopen, or an empty push, starts it.
+#
+# WHEN THE PR CANNOT BE OPENED (#2335): the repository setting "Allow GitHub
+# Actions to create and approve pull requests" is off, so `gh pr create` is
+# refused. The refresh is still computed and PUSHED — `contents: write` covers
+# the branch and only the PR call is blocked — so the consumer degrades to a
+# one-click compare link in the job summary, and the job fails saying that.
+# The distinction matters: a red reading "a GraphQL call was refused" trains
+# people to ignore the gate, while a red reading "the refresh is on this
+# branch, open it here" is still a consumer. Turning the setting on restores
+# the PR path with no change to this file.
 
 on:
   schedule:
@@ -87,11 +97,51 @@ jobs:
           if [ -n "$existing" ]; then
             gh pr edit "$existing" --body-file /tmp/pr-body.md
             echo "::notice::updated PR #$existing on $REFRESH_BRANCH"
-          else
-            url=$(gh pr create --base develop --head "$REFRESH_BRANCH" \
-              --title "Refresh the stamped ledger counts" --body-file /tmp/pr-body.md)
-            echo "::notice::opened $url"
+            exit 0
           fi
+          # `gh pr create` is REFUSED when the repository has "Allow GitHub
+          # Actions to create and approve pull requests" off, which is a
+          # reasonable setting to keep off — a workflow cannot grant itself
+          # that permission and no change in this file can work around it
+          # (#2335). The refresh above is still done and PUSHED: `contents:
+          # write` covers the branch, and only the PR call is blocked. So the
+          # consumer survives as a one-click compare link, and the job goes
+          # red saying THAT, instead of surfacing a GraphQL error that reads
+          # like the gate itself broke.
+          set +e
+          create_out=$(gh pr create --base develop --head "$REFRESH_BRANCH" \
+            --title "Refresh the stamped ledger counts" --body-file /tmp/pr-body.md 2>&1)
+          create_rc=$?
+          set -e
+          if [ "$create_rc" -eq 0 ]; then
+            echo "::notice::opened $create_out"
+            exit 0
+          fi
+          compare="${{ github.server_url }}/${{ github.repository }}/compare/develop...${REFRESH_BRANCH}?expand=1"
+          {
+            echo "## Ledger counts drifted — the refresh is pushed, the PR is not opened"
+            echo
+            echo "\`$REFRESH_BRANCH\` carries the restamped ledger and the four docs that render it."
+            echo
+            echo "**Open it:** $compare"
+            echo
+            echo "Or do it locally: \`bash scripts/gen-ledger-counts.sh\`, then commit \`proofs/ledger-counts.toml\` with the four docs."
+            echo
+            echo '```'
+            grep -E '^  [a-z_]+: recorded' /tmp/ledger-counts.txt || true
+            echo '```'
+            echo
+            echo "<details><summary>why the PR step could not run</summary>"
+            echo
+            echo '```'
+            echo "$create_out"
+            echo '```'
+            echo
+            echo "Settings -> Actions -> General -> Workflow permissions -> \"Allow GitHub Actions to create and approve pull requests\". Only an admin can turn it on; leaving it off is fine, and this is what the job does instead."
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::error::ledger counts drifted; the refresh is pushed to $REFRESH_BRANCH but the PR could not be opened — open it at $compare (see the job summary)"
+          exit 1
 
       - name: Nothing drifted
         if: steps.measure.outputs.drift == 'false'

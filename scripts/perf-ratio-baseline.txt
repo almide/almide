@@ -46,6 +46,25 @@ spectralnorm 1.001
 # 35326679898 and 35337468496 (2026-09-17/18) read 0.315 / 0.328 / 0.343 /
 # 0.356 / 0.359. It had been set equal to binarytrees' as an estimate.
 binarytrees 0.610
+# The wasm-leg idiom relation (#2310). WHAT IT MEASURES, because this number has
+# already been misapplied once: the ratio of `out = out + [s]` to
+# `list.push(out, s)` in ONE shape — a non-generic 200,000-element
+# `List[String]` accumulator with a 200-pass consumer, timed as whole-process
+# wall time under `wasmtime run`. It is NOT a general statement that the two
+# spellings cost the same: inside the generic `__fallible_*` carriers the same
+# comparison reads 0.997 native / 1.002 wasm (#2353), and applying this row's
+# value to that shape produced a wrong conclusion that only re-measurement in
+# the target's own shape caught.
+#
+# Three independent readings cluster at ~1.0: the ubuntu CI runner 0.999
+# (2026-09-20, run 35484928409), this tree on an M4 Pro 0.987, and an earlier
+# M4 Pro reading of 0.817 on a machine loaded at 9-10 of 14 cores. The 0.817 was
+# recorded first and is the outlier, so a later 1.0 would have read as a 22%
+# regression against it. Re-recorded at the cluster.
+#
+# The gate fails on the 3x ceiling in check-perf-ratio.sh, never on this value —
+# verified: `baseline[key]` appears only inside its report strings.
+strbuild-wasm-idiom 0.99
 treealloc 0.343
 # `decode` (#1679) is reported and not anchored, like strchurn: N derived
 # `User.decode`s of one 8-field document against the same-shape hand-written

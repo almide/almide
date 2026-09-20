@@ -105,6 +105,9 @@ impl Checker {
         // call site, before any argument inference can bury it under a
         // cascade of type errors.
         self.warn_if_deprecated(callee);
+        if let [argument] = args {
+            self.reject_exit_literal(callee, argument);
+        }
         let call_sig = self.lookup_call_sig(callee);
         let arg_tys = self.infer_call_arg_tys(callee, args, &call_sig);
         let callee_span_snapshot = callee.span;
@@ -333,6 +336,26 @@ impl Checker {
         } else {
             None
         };
+        // A SELECTIVE import beats a bare binding that belongs to some other
+        // file (#2375). `env.functions`' bare keys are one namespace shared by
+        // the whole run: the entry program's decls register there, and each
+        // module's registers there in turn while that module is inferred. So
+        // `import gramide.parser.{ opt }` inside a dependency module was
+        // answered by the ENTRY program's own `opt(args, name)` — a binding
+        // that module cannot see and did not ask for. The module's OWN decls
+        // still win: they are registered under `{prefix}.{name}` as well, and
+        // that is what `declares_it_itself` asks about. For the entry program
+        // (no prefix) the bare key IS its own, so nothing changes there.
+        let declares_it_itself = match (&self.current_module_prefix, name.contains('.')) {
+            (Some(p), false) => self.env.functions.contains_key(&sym(&format!("{}.{}", p, name))),
+            _ => true,
+        };
+        if !declares_it_itself
+            && let Some(q) = qualified_via_direct.as_ref()
+            && let Some(sig) = self.env.functions.get(&sym(q)).cloned()
+        {
+            return (Some(sig), qualified_via_direct);
+        }
         // DefId-based resolution: try def_map first for canonical lookup
         let sig = self.env.def_map.get(&sym(name))
             .and_then(|_did| self.env.functions.get(&sym(name)).cloned())
@@ -474,10 +497,41 @@ impl Checker {
                 name = name, n = sig.params.len(), got = arg_tys.len(),
                 placeholder = placeholder,
             );
-            self.emit(super::err(
+            // #2349: when the receiver is a local shadowing a module (#2345),
+            // the call went through UFCS and the receiver is counted as the
+            // first argument — so the author's count was right and "check the
+            // number of arguments" sends them to recount a line that is not
+            // wrong. Name the binding instead; the mistake is usually above.
+            let mut diagnostic = super::err(
                 format!("{}() expects {} argument(s) but got {}", name, sig.params.len(), arg_tys.len()),
                 "Check the number of arguments", format!("call to {}()", name)
-            ).with_code("E004").with_try(snippet));
+            ).with_code("E004").with_try(snippet);
+            if let Some(receiver) = self.shadowed_receiver {
+                diagnostic.hint = format!(
+                    "`{r}` here is your local binding, so this is the method call \
+                     `{r}.{method}(..)` on it — the receiver is the first argument and \
+                     the one you wrote is the second. Drop the argument, or rename the \
+                     binding so it does not shadow the `{r}` module",
+                    r = receiver.as_str(),
+                    method = name.split_once('.').map_or(name, |(_, f)| f),
+                );
+                // The placeholder `try` would tell them to pass the argument
+                // they already passed, producing this same error again.
+                diagnostic.try_snippet = None;
+                // Anchor at column 1 like E006's "declared as effect fn here":
+                // a secondary with no end column is underlined to the LABEL's
+                // width, so pointing at the value span runs the underline past
+                // the end of the line. `let_origin` is the value's span, not
+                // the name's, so the line is the honest thing to point at.
+                if let Some(span) = self.env.let_origin(receiver.as_str()) {
+                    diagnostic = diagnostic.with_secondary(
+                        span.line,
+                        Some(1),
+                        format!("`{}` bound here", receiver.as_str()),
+                    );
+                }
+            }
+            self.emit(diagnostic);
         }
     }
     /// Seed generic `bindings` from explicit type args, resolve `arg_tys` to concrete types, and realign named-call args. Returns `(bindings, concrete_args, aligned_raw)` for the caller's unify and back-propagation passes. Verbatim text move out of [`Self::check_named_call_with_type_args`].

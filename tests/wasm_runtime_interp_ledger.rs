@@ -97,7 +97,21 @@ fn interp_abstain_ledger() {
              # Regenerate (then review the diff!):\n\
              #   ALMIDE_UPDATE_INTERP_LEDGER=1 cargo test --test wasm_runtime_interp_ledger interp_abstain_ledger\n\
              # Preferred alternative to adding an entry: widen the interp glue\n\
-             # (bridge.rs / hofs.rs / dispatch.rs — see crates/almide-interp/CLAUDE.md).\n\n",
+             # (bridge.rs / hofs.rs / dispatch.rs — see crates/almide-interp/CLAUDE.md).\n\
+             #\n\
+             # READING A ROW THAT NAMES A DECLARED TYPE (#2359). When a reason says the\n\
+             # impl the interp RESOLVED declares some element type, that type is the\n\
+             # parameter of the body the interp picked — NOT the program's type, and not a\n\
+             # sign the fixture is miscompiled. The interp resolves a public container fn\n\
+             # to its SCALAR core by name (`set.len` -> `set_len(s: Set[Int])` in\n\
+             # stdlib/set_core.almd), because the pass that picks the _str/_skv/_hval\n\
+             # variant is a MIR lowering it never runs. So a Set[String] fixture can\n\
+             # legitimately meet a Set[Int] declaration here. Materializing anyway is what\n\
+             # the guard refuses: a body comparing slots as raw i64s would run over heap\n\
+             # values and same-content strings in different blocks would miss — a WRONG\n\
+             # VOTE, which is worse than an abstain. Two readers took the older wording\n\
+             # (\"under the declared element type Int\") as a claim about the program and\n\
+             # went looking for a miscompile; the rows now say whose declaration it is.\n\n",
         );
         for (n, r) in &observed {
             out.push_str(&format!("{n}  {r}\n"));
@@ -449,4 +463,49 @@ fn malformed_reason_records_fail_closed() {
             "observed reason"
         );
     }
+}
+
+/// #2359: a reason that names a declared type must name WHOSE declaration it
+/// is. `Set[Int]` in one of these rows is the parameter of the impl the interp
+/// resolved — a public container fn resolves to its scalar core by name — not
+/// the program's type. The older wording said only "under the declared element
+/// type Int", and two readers independently took it as a claim about the
+/// fixture and went looking for a miscompile. A diagnostic that names a type
+/// without naming what the type belongs to lets the reader supply the owner
+/// from whatever they were already thinking about, so it does not merely fail
+/// to help: it steers.
+///
+/// The ledger is an audited list whose purpose is that an honest limit can be
+/// told apart from a hidden defect by reading it. This keeps that readable.
+#[test]
+fn a_reason_naming_a_declared_type_says_whose_declaration_it_is() {
+    let text = std::fs::read_to_string(ledger_path()).expect("read abstain ledger");
+    let mut offenders = Vec::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((stem, reason)) = line.split_once("  ") else {
+            continue;
+        };
+        if !reason.contains("declare") {
+            continue;
+        }
+        // The owner must be named in the same row. "RESOLVED" is the marker the
+        // reasons use; "no declared element type" is the un-hinted path, which
+        // asserts the ABSENCE of a declaration and so has no owner to name.
+        let names_owner = reason.contains("interp RESOLVED") || reason.contains("no declared");
+        if !names_owner {
+            offenders.push(format!("{stem}: {reason}"));
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "abstain reason(s) name a declared type without saying whose declaration it is:\n  {}\n\n\
+         Say which body the declaration belongs to. A bare \"the declared element type Int\" on a \
+         Set[String] fixture reads as a miscompiled program; it is the scalar core impl the interp \
+         resolved by name, because the _str/_skv/_hval variant choice is a MIR pass it does not run.",
+        offenders.join("\n  ")
+    );
 }

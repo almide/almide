@@ -13,8 +13,6 @@
 fn main() -> Unit = {
   var m: Map[String, List[Int]] = map.new()
   map.set(m, "a", [1, 2])
-  let lines = map.fold(m, [], (acc, k, v) => acc + [
-    "${k}:${int.to_string(list.len(v))}"
-  ])
+  let lines = map.fold(m, [], (acc, k, v) => acc + ["${k}:${int.to_string(list.len(v))}"])
   println(list.join(lines, " "))
 }

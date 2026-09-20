@@ -107,6 +107,9 @@ impl Emitter<'_> {
         // Counted-shape fast lane (unroll.rs): on `true` the rolled loop
         // below drains the remainder iterations.
         let _ = self.try_unroll_while(cond, body)?;
+        // #2319: element counts this loop cannot change are loaded once,
+        // before the loop — the bounds checks inside read the local.
+        let hoisted = self.hoist_invariant_counts(Some(cond), body)?;
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         // Deterministic meter: one loop-head charge per condition
         // CHECK (n iterations = n+1 checks), ALS-DT2.
@@ -115,6 +118,7 @@ impl Emitter<'_> {
         self.f.instructions().i32_eqz().br_if(1);
         self.lower_loop_body(body, false)?;
         self.f.instructions().br(0).end().end();
+        self.drop_hoisted_counts(hoisted);
         Ok(())
     }
 

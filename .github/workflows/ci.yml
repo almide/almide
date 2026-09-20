@@ -1442,6 +1442,23 @@ jobs:
       - name: valgrind (for the Ir idiom gate)
         run: sudo apt-get update -q && sudo apt-get install -y -q valgrind
 
+      # wasmtime runs the WASM leg of two gates in this job: the spelling ratio
+      # (#2098) and the strbuild idiom relation (#2310) inside the perf ratio
+      # below — so it installs BEFORE the first of them, not between them.
+      # Without it the strbuild step dies on `wasmtime not found`, which is how
+      # the relation first went red on a PR that had nothing wrong with it.
+      - name: Install wasmtime (the wasm-leg gates)
+        run: |
+          VERSION=v47.0.3
+          TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
+          for i in 1 2 3 4 5; do
+            curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
+            echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
+          done
+          tar -xf "$TARBALL"
+          sudo mv wasmtime-*/wasmtime /usr/local/bin/
+          wasmtime --version
+
       - name: Native runtime ratio vs handwritten Rust
         run: ALMIDE_BIN=/tmp/almide-bin/almide scripts/check-perf-ratio.sh
 
@@ -1454,18 +1471,7 @@ jobs:
       # #2098: the cost of the spelling the DOCS recommend, against the
       # spelling they tell writers to avoid — one program, one leg, one
       # round-robin run, so the ratio cancels this runner the way the
-      # native/Rust ratio above does. wasmtime is what runs the wasm leg.
-      - name: Install wasmtime (the spelling gate's wasm leg)
-        run: |
-          VERSION=v47.0.3
-          TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
-          for i in 1 2 3 4 5; do
-            curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
-            echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
-          done
-          tar -xf "$TARBALL"
-          sudo mv wasmtime-*/wasmtime /usr/local/bin/
-          wasmtime --version
+      # native/Rust ratio above does. Its wasmtime is installed above.
       - name: The documented spelling's tax stays bounded (#2098)
         run: ALMIDE_BIN=/tmp/almide-bin/almide scripts/check-spelling-ratio.sh
 

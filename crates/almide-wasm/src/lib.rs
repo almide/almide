@@ -150,6 +150,7 @@ mod list_mut;
 mod list_order;
 mod list_sort;
 mod string_scan;
+mod len_hoist;
 mod stmts;
 mod stmts_index;
 mod stmts_append;

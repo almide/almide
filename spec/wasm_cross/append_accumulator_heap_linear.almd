@@ -1,0 +1,98 @@
+// @contract: C-105
+// #2310's gate: the accumulator `acc + [x]` over a HEAP element grows in place,
+// in both spellings. Before the fix the in-place append window refused a 4-byte
+// handle slot and the concat path copied the whole list per step — 100,000
+// String appends took 10.5 s against 11 ms for `Int`, and a 200,000-element
+// accumulator reached C-197 (#2291 had to write `list.iterate` with `list.push`
+// because of it).
+//
+// TWO THINGS ARE PINNED HERE, and both were checked by breaking them.
+//
+// 1. The growth is in place. Measured A/B against develop without #2310 (same
+//    fixture, same machine): allocation watermark 721,440 B before against
+//    459,328 B after, wall time 0.78 s before against under 10 ms after —
+//    while stdout is IDENTICAL on both, so the prints below cannot see it. The
+//    catching gate is the allocation ledger, which is an EQUALITY pin, so the
+//    1.6x drift fails as loudly as 1000x would
+//    (crates/almide-wasm/tests/golden/alloc-baseline.txt). Note the memory
+//    number's shape: a per-step spine copy at n = 20,000 COPIES 4 · n²/2 ≈
+//    800 MB but does not ALLOCATE it — outgrown spines are recycled through the
+//    free-list size classes (exact allocations only start above the 512 KB
+//    class, #1701) — so the watermark moves 1.6x and max RSS barely moves
+//    (9.2 MB against 9.0 MB). An earlier draft of this comment claimed ~800 MB
+//    of allocation; measuring it is what corrected that.
+//
+// 2. The observable equivalence of both spellings at volume, over a heap
+//    element: every element is a COMPUTED string (not a static-pool literal),
+//    every element is READ BACK through `total_len`, and both ends of both
+//    lists are printed, so a spine that loses or duplicates an element shows up
+//    as a wrong length, a wrong total, or wrong bytes on one leg only.
+//
+// WHAT THIS FIXTURE DOES NOT CATCH, established by mutation rather than
+// assumed: deleting `rc_share_guard` from
+// `stmts_append.rs::try_list_append_assign` and rebuilding leaves this
+// fixture's stdout and watermark IDENTICAL on both legs. That mutant is killed
+// by `list_index_element_append.almd`'s allocation row instead. Two reasons,
+// both structural: the loop elements are born here, so they are OWNED and move
+// into the spine with no +1 to lose — the guard only matters for a BORROWED
+// element; and the borrowed case below (`pair + [s]`, `s` still live) drops its
+// holder at the end of `main`, after every read, so a double free has nothing
+// left to corrupt. Adding churn after the pushes does not change that. A
+// fixture that observes the borrowed-element double free needs the holder to
+// die BEFORE later allocations reuse the block, which is a different program
+// shape than this one. An earlier draft of this comment claimed the reads below
+// would catch a missing +1; they do not.
+//
+// WHY 20,000 AND NOT A MILLION. Size is not this file's evidence, and a big
+// number here is not free: spec/wasm_cross fixtures are also run by the
+// INTERPRETER (the third oracle, tests/wasm_runtime_test_parts/interp_leg.rs),
+// whose `acc + [x]` is a real copy — measured quadratic, ~1 s at 20,000 and
+// ~40 min per million-element build. A million here does not make the gate
+// stronger, it makes every corpus binary hang. Wall-clock cost lives in
+// scripts/check-perf-ratio.sh's strbuild rows instead.
+fn build(n: Int, acc: List[String]) -> List[String] = {
+  if n <= 0 then acc
+  else build(n - 1, acc + [int.to_string(n)])
+}
+
+fn grow(n: Int) -> List[String] = {
+  var out: List[String] = []
+  var i = 0
+  while i < n {
+    out = out + [int.to_string(i)]
+    i = i + 1
+  }
+  out
+}
+
+// Read EVERY element back. A credit lost on the way in shows up here as freed
+// or reused bytes rather than as a number nobody looks at.
+fn total_len(xs: List[String]) -> Int = {
+  var sum = 0
+  var i = 0
+  let n = list.len(xs)
+  while i < n {
+    sum = sum + string.len(xs[i])
+    i = i + 1
+  }
+  sum
+}
+
+fn main() -> Unit = {
+  let tail = build(20000, [])
+  let loop_form = grow(20000)
+  println("${list.len(tail)} ${list.len(loop_form)}")
+  println("${total_len(tail)} ${total_len(loop_form)}")
+  println("${tail[0]} ${tail[19999]} ${loop_form[0]} ${loop_form[19999]}")
+  // A borrowed element pushed from a var, twice: `s` owns a COMPUTED string (a
+  // literal would live in the static pool, where a lost credit costs nothing)
+  // and is still live after both pushes. The churn AFTER the pushes is what
+  // makes a too-early free observable: a reused block would come back through
+  // these reads as different bytes.
+  let s = "c${list.len(tail)}"
+  var pair: List[String] = []
+  pair = pair + [s]
+  pair = pair + [s]
+  let churn = build(500, [])
+  println("${s} ${list.join(pair, ",")} ${list.len(churn)} ${total_len(churn)}")
+}

@@ -76,6 +76,13 @@ SUITE = [
     # just a perf bug, so all three are gated against one Rust reference.
     # Native/rust only: the wasm leg hits the same `data[i] = x` cliff the
     # fft row documents, at a workload that would not finish.
+    # strbuild (#2310): the SAME List[String] materialized two ways, on the
+    # WASM leg — where the accumulator form was quadratic (a handle element
+    # refused the in-place append window, so each step copied the spine) while
+    # `list.push` was linear. The relation between the two rows is the gate;
+    # neither row's own almide/rust ratio is (they carry no rust ref).
+    ("strbuild-append", "strbuild/strbuild_append.almd",       [],               "200000", "1000", "bytes", ["native", "wasm"]),
+    ("strbuild-push",   "strbuild/strbuild_push.almd",         [],               "200000", "1000", "bytes", ["native", "wasm"]),
     ("listbuild",       "listbuild/listbuild_prealloc.almd",   ["listbuild.rs"], "23", "10", "bytes", ["native", "rust"]),
     ("listbuild-append","listbuild/listbuild_append.almd",     ["listbuild.rs"], "23", "10", "bytes", ["native", "rust"]),
     ("listbuild-comb",  "listbuild/listbuild_combinator.almd", ["listbuild.rs"], "23", "10", "bytes", ["native", "rust"]),
@@ -130,6 +137,11 @@ QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
     # n=11 keeps the measured work above process-spawn noise.
     "fannkuchredux": "11",
     "onebrc": "1000000",
+    # strbuild (#2310): 200,000 elements with a 40-pass consumer. Big enough
+    # that the push row clears the 0.08s floor on wasm, small enough that a
+    # regressed (quadratic) accumulator row finishes in ~45s instead of hanging.
+    "strbuild-append": "200000",
+    "strbuild-push": "200000",
     # 17, not 14: the region window (#1991) took the native row to ~18 ms at
     # 14, under the spawn-noise floor; 17 reads ~145 ms native / ~435 ms ref.
     "binarytrees": "17",
@@ -191,7 +203,21 @@ def main():
     args = ap.parse_args()
     legs = args.legs.split(",")
 
+    # WHICH BINARY, said out loud. A harness that resolves `almide` from PATH
+    # when ALMIDE_BIN is unset measures whatever is installed — typically a
+    # release behind this tree — and then reports THAT binary's behaviour as
+    # this tree's. It cost a "RUN FAILED: strbuild-append/wasm 200000" that read
+    # exactly like a regression and was the 0.62.0 binary hitting C-197 on a
+    # program the current tree runs in 0.089 s. The version is in the JSON
+    # metadata either way; what was missing was seeing it before believing a
+    # number.
     almide = os.environ.get("ALMIDE_BIN") or find_tool("almide") or sys.exit("almide not on PATH")
+    almide_version = subprocess.run([almide, "--version"], capture_output=True, text=True).stdout.strip()
+    if os.environ.get("ALMIDE_BIN"):
+        print(f"almide: {almide} ({almide_version}) [ALMIDE_BIN]")
+    else:
+        print(f"almide: {almide} ({almide_version}) [PATH — NOT this tree's build; "
+              f"set ALMIDE_BIN=<tree>/target/release/almide to measure your changes]")
     rustc = find_tool("rustc") or sys.exit("rustc not on PATH")
     wasmtime = find_tool("wasmtime")
     if "wasm" in legs and not wasmtime:
@@ -270,7 +296,10 @@ def main():
                 r = subprocess.run(argv + [arg], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 dt = time.perf_counter() - t0
                 if r.returncode != 0:
-                    sys.exit(f"RUN FAILED: {vname} {arg}")
+                    # Name the binary: a failure here is as likely to be the
+                    # wrong `almide` as a real one (see the resolution note).
+                    sys.exit(f"RUN FAILED: {vname} {arg} (exit {r.returncode}; "
+                             f"built with {almide} — {almide_version})")
                 times[vname].append(dt)
         results[name] = {
             "arg": arg,

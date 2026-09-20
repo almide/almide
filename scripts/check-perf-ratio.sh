@@ -405,3 +405,68 @@ PY
 else
   echo "perf-ratio: listbuild-idiom SKIPPED — valgrind unavailable on this box; CI enforces the Ir relation"
 fi
+
+# WASM IDIOM RELATION (#2310). The listbuild relation above is native Ir; this
+# one is the wasm leg, because the defect it watches lived only there: the
+# in-place append window refused a 4-byte HANDLE element, so `out = out + [s]`
+# copied the whole spine per step while the same loop over `Int` was linear
+# (100,000 String appends: 10.5 s against 11 ms). Both strbuild rows build the
+# same List[String] and run the same 40-pass consumer, so their ratio is the
+# shape cost and nothing else.
+#
+# WALL TIME is honest HERE where it was not for listbuild: the defect is three
+# orders of magnitude (the relation read ~280x at this size before the fix) and
+# the ceiling sits at 3x — far outside the 1.2-1.5x bimodality that forced
+# listbuild onto Ir, and callgrind cannot see inside wasmtime anyway. The
+# baseline row records the measured value; the ceiling is what fails. A
+# regressed run costs ~45 s rather than hanging, which is why the size is
+# 200,000 with the passes in the consumer.
+STRBUILD_CEILING=3.0
+sb_out=$(mktemp -t perf-ratio-strbuild.XXXXXX.json)
+trap 'rm -f "$out" "$sb_out"; rm -rf "$idiom_dir" "$vic_dir"' EXIT
+python3 research/benchmark/perf/bench.py \
+  --quick --runs "$RUNS" --legs native,wasm \
+  --bench strbuild-append,strbuild-push \
+  --label ratchet-strbuild --out "$sb_out"
+python3 - "$sb_out" "$BASELINE_FILE" "$STRBUILD_CEILING" "$MIN_SECONDS" <<'PYSB'
+import json, sys
+
+out_path, baseline_path, ceiling, min_s = sys.argv[1:5]
+ceiling, min_s = float(ceiling), float(min_s)
+data = json.load(open(out_path))["results"]
+baseline = {}
+for line in open(baseline_path):
+    line = line.split("#", 1)[0].strip()
+    if line:
+        k, v = line.split()
+        baseline[k] = float(v)
+
+key = "strbuild-wasm-idiom"
+if key not in baseline:
+    sys.exit(f"::error::perf-ratio: baseline has no `{key}` row — the wasm idiom relation was "
+             "added without its recorded value; add the line on purpose.")
+
+
+def wasm_min(bench):
+    return data[bench]["variants"][f"{bench}/wasm"]["min"]
+
+
+append, push = wasm_min("strbuild-append"), wasm_min("strbuild-push")
+penalty = append / push
+if push < min_s:
+    print(f"perf-ratio: {key:16s} SKIPPED — the push row measured {push:.3f}s, under the "
+          f"{min_s:.2f}s noise floor; raise strbuild's size rather than trusting the ratio")
+    sys.exit(0)
+if penalty > ceiling:
+    print(f"::error::perf-ratio: the accumulator idiom costs {penalty:.3f}x the `list.push` loop "
+          f"on the WASM leg (ceiling {ceiling:.2f}x, {append:.3f}s vs {push:.3f}s, recorded "
+          f"{baseline[key]:.3f}x). `acc + [x]` is what every accumulator in the stdlib writes and "
+          "what the combinator guidance compiles into; when it goes quadratic the cost lands on "
+          "String-element programs only, which is how #2310 shipped unnoticed. The usual cause is "
+          "the in-place append window declining the element: stmts_append.rs's "
+          "try_list_append_assign or tail_append.rs's tail_list_append_arg falling back to the "
+          "concat path. Restore the window, do not raise the ceiling.")
+    sys.exit(1)
+print(f"perf-ratio: {key:16s} {penalty:.3f}x the push loop on wasm "
+      f"(ceiling {ceiling:.2f}x, recorded {baseline[key]:.3f}x) ok")
+PYSB

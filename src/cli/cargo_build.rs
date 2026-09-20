@@ -341,6 +341,41 @@ codegen-units = 1
     Ok(dest)
 }
 
+/// Does the generated crate DEFINE an entry point?
+///
+/// THE ONE PLACE THIS QUESTION IS ANSWERED (#2370). It used to be asked three
+/// times in three spellings: twice here as `code.contains("fn main(")` (the
+/// auto-`main` guards) and once in `run.rs` as `code.contains("\nfn main(")`
+/// plus a `"\npub fn main("` arm the copies here did not have. Three answers to
+/// one question is how they drift, and they had: the unanchored pair counted a
+/// `fn main(` inside a STRING LITERAL. A library package embedding Almide source
+/// as test data — a tool that processes source is the natural case — matched its
+/// own fixture text, so no `fn main() {}` was appended and rustc's `E0601: main
+/// function not found` reached the author under "codegen produced invalid Rust —
+/// this is an Almide bug".
+///
+/// Anchoring is what separates a definition from a mention: a crate-root item
+/// begins its line, and inside a literal the newlines are `\n` escapes, so the
+/// fixture is one physical line starting with something else. The `pub` arms are
+/// load-bearing once anchored — `contains` matched them by accident, as a
+/// substring of `pub fn main(`.
+///
+/// What this still is NOT: a parse. It is a narrowed convention, not the
+/// mechanism. The mechanism is the IR — `build.rs` asks
+/// `ir_program.functions.iter().any(|f| f.name.as_str() == "main")` — and moving
+/// this to that would mean threading the fact from codegen down to the two
+/// consumers here — tracked as #2372, so the narrowing has an owner rather than
+/// living only in this comment. Both ways the old spellings were wrong are gated
+/// in this file's `mod tests`, and both fail against the unanchored predicate.
+pub(super) fn defines_entry_point(code: &str) -> bool {
+    code.lines().any(|l| {
+        l.starts_with("fn main(")
+            || l.starts_with("pub fn main(")
+            || l.starts_with("fn almide_main(")
+            || l.starts_with("pub fn almide_main(")
+    })
+}
+
 /// Build generated Rust code using cargo.
 /// Returns the path to the built binary on success.
 pub(super) fn cargo_build_generated(rs_code: &str, project_dir: &std::path::Path, release: bool) -> Result<std::path::PathBuf, String> {
@@ -375,7 +410,7 @@ fn try_rlib_fast_build(rs_code: &str, project_dir: &std::path::Path, release: bo
     let opt_level = if release { "3" } else { "1" };
     let rlib = ensure_runtime_rlib(opt_level).ok()?;
     let mut slim = crate::codegen::slim_main_with_external_runtime(rs_code)?;
-    if !slim.contains("fn main(") && !slim.contains("fn almide_main(") {
+    if !defines_entry_point(&slim) {
         slim.push_str("\nfn main() {}\n");
     }
     let rlib_dir = rlib.parent().unwrap_or_else(|| std::path::Path::new("."));
@@ -438,7 +473,7 @@ fn write_generated_cargo_project(
     inject_dep_natives(&mut final_code, source_root, &src_dir, project_dir)?;
 
     // Library modules may not define main — auto-generate an empty one
-    if !final_code.contains("fn main(") && !final_code.contains("fn almide_main(") {
+    if !defines_entry_point(&final_code) {
         final_code.push_str("\nfn main() {}\n");
     }
 
@@ -801,7 +836,7 @@ fn contains_rustc_error_code(text: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::contains_rustc_error_code;
+    use super::{contains_rustc_error_code, defines_entry_point};
 
     #[test]
     fn detects_4_digit_rustc_code() {
@@ -819,5 +854,54 @@ mod tests {
     fn ignores_no_brackets() {
         assert!(!contains_rustc_error_code("error: something went wrong"));
         assert!(!contains_rustc_error_code(""));
+    }
+
+    // #2370: the question "does this crate define an entry point" is answered
+    // once, by `defines_entry_point`. These pin the two ways the old spellings
+    // were wrong, so the narrowing cannot be quietly widened back.
+
+    /// The defect: a library crate whose only `fn main(` is inside a STRING
+    /// LITERAL. `contains("fn main(")` said yes, no empty main was appended,
+    /// and rustc's E0601 was reported to the author as a compiler bug.
+    #[test]
+    fn a_main_inside_a_string_literal_is_not_a_definition() {
+        let crate_src = concat!(
+            "pub fn kinds(s: &str) -> Vec<String> { vec![s.to_string()] }\n",
+            "#[test]\n",
+            "fn t() {\n",
+            "    assert_eq!(kinds(\"type P = {}\\nfn add(a: Int) -> Int = a\\n",
+            "effect fn main() -> Unit = println(\\\"hi\\\")\\n\"), vec![\"x\".to_string()]);\n",
+            "}\n",
+        );
+        assert!(crate_src.contains("fn main("), "the fixture must still contain the text, or it is not this bug");
+        assert!(
+            !defines_entry_point(crate_src),
+            "a `fn main(` inside a literal counted as a definition — the crate gets no \
+             entry point and rustc's E0601 surfaces as an Almide bug (#2370)"
+        );
+    }
+
+    /// The other direction: anchoring must not LOSE a real entry point, or an
+    /// empty `main` is appended next to the real one and the crate stops
+    /// compiling. `pub` is load-bearing here — unanchored `contains` matched it
+    /// only as a substring.
+    #[test]
+    fn every_spelling_of_a_real_entry_point_still_counts() {
+        for src in [
+            "fn main() {\n    println!(\"x\");\n}\n",
+            "pub fn main() {}\n",
+            "fn almide_main() -> i32 { 0 }\n",
+            "pub fn almide_main() -> i32 { 0 }\n",
+            "use std::io;\n\nfn main() {}\n",
+        ] {
+            assert!(defines_entry_point(src), "lost a real entry point in:\n{src}");
+        }
+    }
+
+    /// An indented `fn main(` is not a crate-root item — it is inside a module
+    /// or a block, and it is not the entry point rustc looks for.
+    #[test]
+    fn an_indented_main_is_not_the_crate_entry_point() {
+        assert!(!defines_entry_point("mod inner {\n    pub fn main() {}\n}\n"));
     }
 }

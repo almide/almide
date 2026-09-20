@@ -56,3 +56,12 @@ breaks = [
   "a local fn whose name collides with a selectively-imported fn is E050 — rename one, or drop the selective import",
   "two cases with the same name in one module are E019 at registration — previously the later registration silently won",
 ]
+
+[[epoch]]
+n = 4
+since = "0.63.0"
+name = "literal-exit-domain"
+summary = "Literal process exit codes must fit the portable exit-code domain."
+breaks = [
+  "a direct call to stdlib process.exit with an integer literal outside 0..=125 is E084, including signed/parenthesized literals and pipe calls — choose an exit code within that range; computed arguments retain the runtime domain check",
+]

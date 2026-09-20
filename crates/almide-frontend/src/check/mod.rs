@@ -28,6 +28,7 @@ mod static_dispatch;
 mod solving;
 mod diagnostics;
 mod deprecation_warn;
+mod exit_literal;
 mod exhaustiveness;
 
 use almide_lang::ast;
@@ -115,6 +116,15 @@ pub struct Checker {
     /// Argument spans for the current call. Set before `check_named_call_*`
     /// so E005 can point at the exact argument expression.
     pub(crate) arg_spans: Vec<Option<crate::ast::Span>>,
+    /// #2349: the receiver identifier of the call being checked, when it is a
+    /// LOCAL binding that shadows a module of the same name (#2345). The call
+    /// then desugars through UFCS, so the receiver becomes an argument the
+    /// author never wrote and every arity and method error is off by one
+    /// against what they read. Set by `check_call_target_member`, cleared
+    /// after that call's checking, and consumed by the diagnostics to say
+    /// WHICH argument is not theirs — the fact is free here because the
+    /// shadowing test had to be made anyway to route the call.
+    pub(crate) shadowed_receiver: Option<almide_base::intern::Sym>,
     /// #558: named-arg reordering metadata for the current call —
     /// `(named_start, names)` where `named_start` is the index in the
     /// flattened positional args at which named args begin (their values were
@@ -519,6 +529,7 @@ impl Checker {
             call_span_hint: None,
             last_mut_params: Vec::new(),
             arg_spans: Vec::new(),
+            shadowed_receiver: None,
             named_arg_meta: None,
             lambda_arg_hint: None,
             lambda_slot_effect: false,
@@ -1037,18 +1048,7 @@ impl Checker {
         self.resolve_deferred_tuple_indices();
         self.flush_pending_toplet_tys();
         resolve_type_map(&mut self.type_map, &self.uf);
-        self.validate_map_key_types();
-        self.validate_result_interpolations();
-        self.validate_ord_elem_types();
-        self.validate_unknown_named_types();
-        self.validate_empty_collection_elements();
-        self.validate_int_overflow_literals();
-        self.validate_float_overflow_literals();
-        self.validate_numeric_narrowing();
-        self.validate_unresolved_binding_types();
-        self.validate_implicit_propagation();
-        self.lint_error_surface(program);
-        self.check_bounded_profile(program);
+        self.validate_after_solve(program);
         // Unused import warnings. Usage is judged SYNTACTICALLY first
         // (#1783): every `alias.x` spelling in the file — call targets,
         // record/variant constructors, type annotations, patterns — marks
