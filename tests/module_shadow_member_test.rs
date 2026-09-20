@@ -61,6 +61,31 @@ fn a_shadowed_module_call_is_rejected_at_check_time() {
     }
 }
 
+/// The receiver is the local, so the count the author reads is off by one.
+/// Without this note the message asks them to recount arguments they counted
+/// correctly (#2349) — the mistake is at the binding, usually lines above.
+#[test]
+fn the_arity_error_explains_the_receiver_and_points_at_the_binding() {
+    let (_, text) = check(
+        "fn main() -> Unit = {\n  let list = [3, 1, 2]\n  println(int.to_string(list.len(list)))\n}\n",
+    );
+    // The format has no `note` field — the explanation rides in `hint`, and
+    // the binding site is a `secondary` span (the shape E006 uses for
+    // "declared as effect fn here").
+    assert!(
+        text.contains("local binding"),
+        "the hint must say the receiver is the local:\n{text}"
+    );
+    assert!(
+        text.contains("shadow"),
+        "the hint or the secondary label must name the shadowed module:\n{text}"
+    );
+    assert!(
+        text.contains("\"secondary\":[{\"line\":2,"),
+        "a secondary span must point at the binding on line 2:\n{text}"
+    );
+}
+
 /// An explicitly imported module loses to a local of the same name, and the
 /// import is then genuinely dead — E060 says so. E006 must NOT fire: the call
 /// is the local's field, not the stdlib effect fn (#2345).
