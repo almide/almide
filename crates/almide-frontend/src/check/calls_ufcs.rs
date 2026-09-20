@@ -16,15 +16,44 @@ impl Checker {
         callee_span_snapshot: Option<ast::Span>,
     ) -> Ty {
         self.arg_spans = args.iter().map(|a| a.span).collect();
+        // SHADOWING FIRST (#2345) — the rule the `Ident` arm of
+        // `check_call_with_type_args` already applies, stated there at length
+        // for almide#1441. A local binding of the OBJECT's name is called
+        // THROUGH that binding, so static module resolution must not run ahead
+        // of it: `import process` plus a local `process` record made the record
+        // unreachable through `process.field(..)`, the opposite of how a bare
+        // identifier shadows an import. Every language surveyed agrees — Python,
+        // Go, Swift and JS give the local the name, Rust keeps the module on
+        // `::` while `.` takes the local, and Ruby cannot collide because
+        // constants are capitalised. None lets a module silently beat a binding.
+        let shadowed_by_local = matches!(&object.kind,
+            ExprKind::Ident { name, .. } if self.env.lookup_var(name).is_some());
+        // #2349: every error from here on counts the receiver as an argument
+        // the author did not write, so the diagnostics need to know WHICH
+        // identifier is theirs. Cleared first so a previous call cannot leak
+        // its receiver into this one.
+        self.shadowed_receiver = None;
+        if shadowed_by_local
+            && let ExprKind::Ident { name, .. } = &object.kind
+            && self.env.import_table.resolve(name.as_str()).is_some()
+        {
+            self.shadowed_receiver = Some(*name);
+        }
         // ADR-0006 D3 (#1108): user-spelled try_* is deprecated (the
         // fallibility-polymorphic core covers it) — same site as E039.
         if let ExprKind::Ident { name: mod_name, .. } = &object.kind {
-            self.reject_dead_try_spelling(mod_name, field, object.id, object.span, Some(args));
+            if !shadowed_by_local {
+                self.reject_dead_try_spelling(mod_name, field, object.id, object.span, Some(args));
+            }
         }
         // Try static resolution: module.func, alias.func, TypeName.method, codec.encode Thread the callee's span so `E002` can emit a mechanically-applicable `try_replace` when the stdlib alias map supplies a clean rename target.
         let prev = self.callee_span_hint.take();
         self.callee_span_hint = callee_span_snapshot;
-        let resolved = self.resolve_static_member(object, field, arg_tys);
+        let resolved = if shadowed_by_local {
+            None
+        } else {
+            self.resolve_static_member(object, field, arg_tys)
+        };
         self.callee_span_hint = prev;
         if let Some(result) = resolved {
             let arg_refs: Vec<&ast::Expr> = args.iter().collect();
