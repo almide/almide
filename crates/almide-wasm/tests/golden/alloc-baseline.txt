@@ -6,7 +6,7 @@
 66016	spec/wasm_cross/anon_records_and_fusion.almd
 65872	spec/wasm_cross/append_accumulator.almd
 65904	spec/wasm_cross/append_accumulator_heap.almd
-15794488	spec/wasm_cross/append_accumulator_heap_million.almd
+459328	spec/wasm_cross/append_accumulator_heap_linear.almd
 ~	spec/wasm_cross/args_surface.almd
 66080	spec/wasm_cross/as_pattern.almd
 65888	spec/wasm_cross/assert_abort_eq.almd
