@@ -26,6 +26,31 @@ impl Pool {
     }
 
     /// Intern `s` as a block; returns the block BASE address (deduped).
+    ///
+    /// DEDUP INVARIANT (#2344). Two sites that name the same literal get the
+    /// same address, so a pool block is SHARED rather than private to one
+    /// site. That is only safe because of what the pool contains and where it
+    /// is written:
+    ///
+    /// 1. The pool holds string literals (here) and capture-free closure
+    ///    blocks (`intern_block`) — never a list, never anything with
+    ///    element slots a program can assign into.
+    /// 2. `$cow` does NOT protect a shared block: `emit_cow` returns a static
+    ///    UNCOPIED (`block < G_LINE_END` returns as is). The protection lives
+    ///    at each writer, which tests the static boundary itself —
+    ///    `emit_str_append` (`addr >= G_LINE_END`) and `try_map_set_in_place`
+    ///    (`addr >= G_LINE_END && rc == 1`).
+    /// 3. The RC ops refuse statics outright (`emit_inc`, `emit_dec_flat`
+    ///    early-return below the line), so `$free` is unreachable for a pool
+    ///    address through the dec path — which matters because `emit_free`
+    ///    has no boundary test of its own.
+    /// 4. `cow_fn_of` has exactly four call sites; three of them are list
+    ///    paths that cannot see a pooled block, and the fourth reads a `mut`
+    ///    var, where only a Str is reachable.
+    ///
+    /// Clause 4 is the one that expires silently if someone adds a fifth
+    /// cow-then-write site, so it is gated:
+    /// `crates/almide-wasm/tests/pool_dedup_invariant.rs`.
     pub(crate) fn intern(&mut self, s: &str) -> u32 {
         if let Some(&base) = self.interned.get(s) {
             return base;
@@ -39,6 +64,7 @@ impl Pool {
         header[almide_layout::CAP.offset as usize..][..4].copy_from_slice(&len.to_le_bytes());
         self.data.extend_from_slice(&header);
         self.data.extend_from_slice(bytes);
+        self.interned.insert(s.to_string(), base);
         base
     }
 
