@@ -59,7 +59,7 @@ breaks = [
 
 [[epoch]]
 n = 4
-since = "0.64.0"
+since = "0.63.0"
 name = "literal-exit-domain"
 summary = "Literal process exit codes must fit the portable exit-code domain."
 breaks = [
