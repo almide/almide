@@ -4,13 +4,21 @@
 // `list.drop(xs, 1)`, and map / filter / flat_map / filter_map not even in
 // tail position, so the documented idiom overflowed the stack at about 10,000
 // elements on wasm and 50,000 natively, and copied the rest of the list at
-// every element. Six carriers run here over 200,000 elements, each with a USER
-// effect fn callback. `map` is pinned at the same size in
-// spec/lang/fallible_hof_test.almd instead: the interpreter leg abstains on it
-// past 16 elements (#2311), and it would take this whole fixture out of the
-// three-way oracle. The err cells put the first err at element 150,000; the
+// every element. Seven carriers run here over 200,000 elements, each with a
+// USER effect fn callback. `map` was held out of this fixture until #2311: the
+// interpreter read a callback's Int result as a heap address whenever the value
+// collided with a live block, so it abstained and took the whole fixture out of
+// the three-way oracle. It judges the payload type now, so `map` joins its
+// siblings here. The `Int!` spelling at the same size stays in
+// spec/lang/fallible_hof_test.almd — a different declaration form under a test
+// block, not a duplicate of these cells. The err cells put the first err at
+// element 150,000; the
 // `each` cell's callback prints for any later element, so the first-err
 // short-circuit is observable at this size too.
+// A scalar Int payload: every result here lands in the range the interpreter
+// used to mistake for a live block address (#2311).
+effect fn plus_one(x: Int) -> Int = x + 1
+
 effect fn even(x: Int) -> Bool = x % 2 == 0
 
 effect fn twice(x: Int) -> List[Int] = [x, x]
@@ -38,6 +46,8 @@ else x
 
 effect fn main() -> Unit = {
   let xs = list.range(0, 200000)
+  let m = (xs |> list.map((x) => plus_one(x)!))!
+  println("map=" + int.to_string(list.len(m)))
   let f = (xs |> list.filter((x) => even(x)!))!
   println("filter=" + int.to_string(list.len(f)))
   let fm = (xs |> list.flat_map((x) => twice(x)!))!
@@ -50,6 +60,10 @@ effect fn main() -> Unit = {
   println("find=" + int.to_string(found ?? -1))
   (xs |> list.each((x) => visit(x)!))!
   println("each=done")
+  match xs |> list.map((x) => stop_value(x)!) {
+    ok(_) => println("map_err_cell=ok"),
+    err(e) => println("map_err_cell=" + e),
+  }
   match xs |> list.each((x) => stop_at(x)!) {
     ok(_) => println("each_err_cell=ok"),
     err(e) => println("each_err_cell=" + e),
