@@ -100,10 +100,21 @@ fn borrow_source(expr: &mut IrExpr, slices: &HashSet<VarId>, cells: &HashSet<Var
         IterCollector::Fold { init, .. } => Some(&**init),
         _ => None,
     };
-    let writes_source = !cells.contains(&id)
+    // A borrow is wrong when something evaluated INSIDE the chain expression
+    // still reaches the same variable — and there are two ways to reach it,
+    // not one. Writing it was checked here from the start; MOVING it was not
+    // (#2377), so `list.fold(xs, list.is_empty(list.sort_by(xs, f)), g)`
+    // borrowed `xs` for the walk and handed the same `xs` to `sort_by` by
+    // value, which is `error[E0505]` under a "this is an Almide bug" banner
+    // on a program 0.62.0 compiled. The seed is evaluated while the
+    // receiver's borrow is live, so a move in it conflicts exactly as a write
+    // does. `moves_var` is the clone pass's own predicate, shared rather than
+    // restated. A shared cell stays exempt for the same reason as before: the
+    // chain reads it through the cell's snapshot, so neither reach is live.
+    let reaches_source = !cells.contains(&id)
         && steps.iter().filter_map(IterStep::lambda).chain(collector.lambda()).chain(init)
-            .any(|e| written_vars(e).contains(&id));
-    if writes_source {
+            .any(|e| written_vars(e).contains(&id) || super::pass_clone_interp::moves_var(e, id));
+    if reaches_source {
         return false;
     }
     if strip_clone {
