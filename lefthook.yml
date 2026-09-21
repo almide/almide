@@ -60,6 +60,14 @@ pre-commit:
       # in the check script is the one place the module list lives.
       glob: "{docs/stdlib/semantics-manifest.toml,stdlib/*.almd,spec/stdlib/*_semantics_manifest_test.almd,scripts/check-semantics-manifest.sh}"
       run: scripts/check-semantics-manifest.sh
+    fold-seed-source:
+      # #2380: the census of `list.fold(xs, <seed that reads xs>, f)` sites
+      # (the #2377 shape) over stdlib/ spec/ examples/ tools/, held as a
+      # shrink-only floor. Fires on the corpus, the scanner and the floor;
+      # runs the PATH `almide` — the gate needs only stdlib, no compiler
+      # feature newer than the last release.
+      glob: "{stdlib/*.almd,spec/**/*.almd,examples/**/*.almd,tools/almide-gates/src/fold_seed_source.almd,proofs/fold-seed-source-baseline.txt}"
+      run: almide run tools/almide-gates/src/main.almd -- fold-seed-source .
     layout-discipline:
       # Globbed over ALL compiler/CLI Rust, not over the ledger: #1316 exists
       # because the discipline has to bite at the moment a NEW long-lived

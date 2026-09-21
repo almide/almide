@@ -575,6 +575,17 @@ jobs:
           ALMIDE=/tmp/almide-bin/almide
           $ALMIDE test tools/almide-gates/
 
+      # The fold-seed-consumes-its-source census (#2380): the shape #2377 broke on,
+      # found from SOURCE alone (no compiler in the loop, so the emitter under test
+      # cannot blind it) and held as a shrink-only floor over the spec corpus —
+      # proofs/fold-seed-source-baseline.txt. A fixture that exercises the shape
+      # cannot quietly disappear; stdlib/ sites are reported so the "nobody writes
+      # this shape" measurement stays visible.
+      - name: fold-seed-source census floor (#2380)
+        run: |
+          ALMIDE=/tmp/almide-bin/almide
+          $ALMIDE run tools/almide-gates/src/main.almd -- fold-seed-source .
+
       # The published build-speed table is DERIVED from docs/benchmarks/build-speed.txt, the
       # same discipline as the contract index and the claims block: a hand-edited number in the
       # README is a defect this catches rather than a change a reader is trusted not to make.
