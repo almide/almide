@@ -228,7 +228,7 @@ jobs:
       # and `--extract-to` recreates target/ci-test/*.
       - name: Install cargo-nextest
         run: |
-          curl -LsSf https://get.nexte.st/latest/linux -o /tmp/nextest.tar.gz
+          curl -LsSf --retry 5 --retry-all-errors --retry-delay 15 https://get.nexte.st/latest/linux -o /tmp/nextest.tar.gz
           tar xzf /tmp/nextest.tar.gz -C /usr/local/bin
           cargo nextest --version
       - name: Archive the workspace test binaries
@@ -296,7 +296,7 @@ jobs:
       # job's old enumerate compiled the workspace.
       - name: Install cargo-nextest
         run: |
-          curl -LsSf https://get.nexte.st/latest/linux -o /tmp/nextest.tar.gz
+          curl -LsSf --retry 5 --retry-all-errors --retry-delay 15 https://get.nexte.st/latest/linux -o /tmp/nextest.tar.gz
           sudo tar xzf /tmp/nextest.tar.gz -C /usr/local/bin
           cargo nextest --version
       - uses: actions/download-artifact@v8
@@ -424,7 +424,7 @@ jobs:
       - name: Install cargo-nextest
         if: env.DOCS_ONLY != 'true'
         run: |
-          curl -LsSf https://get.nexte.st/latest/linux -o /tmp/nextest.tar.gz
+          curl -LsSf --retry 5 --retry-all-errors --retry-delay 15 https://get.nexte.st/latest/linux -o /tmp/nextest.tar.gz
           tar xzf /tmp/nextest.tar.gz -C /usr/local/bin
           cargo nextest --version
       - uses: actions/download-artifact@v8
@@ -549,7 +549,7 @@ jobs:
       - name: Install cargo-nextest
         if: env.DOCS_ONLY != 'true'
         run: |
-          curl -LsSf https://get.nexte.st/latest/linux -o /tmp/nextest.tar.gz
+          curl -LsSf --retry 5 --retry-all-errors --retry-delay 15 https://get.nexte.st/latest/linux -o /tmp/nextest.tar.gz
           tar xzf /tmp/nextest.tar.gz -C /usr/local/bin
           cargo nextest --version
       - uses: actions/download-artifact@v8
@@ -639,7 +639,7 @@ jobs:
       - name: Install wasmtime
         run: |
           if [ ! -f /tmp/wasmtime.tar.xz ]; then
-            curl -sSL -o /tmp/wasmtime.tar.xz \
+            curl -sSfL --retry 5 --retry-all-errors --retry-delay 15 -o /tmp/wasmtime.tar.xz \
               https://github.com/bytecodealliance/wasmtime/releases/download/v27.0.0/wasmtime-v27.0.0-x86_64-linux.tar.xz
           fi
           tar -xf /tmp/wasmtime.tar.xz -C /tmp
@@ -1168,7 +1168,7 @@ jobs:
         run: |
           if [ ! -x "$HOME/.elan/bin/elan" ]; then
             for i in 1 2 3 4 5; do
-              curl -sSfL https://github.com/leanprover/elan/releases/latest/download/elan-x86_64-unknown-linux-gnu.tar.gz -o /tmp/elan.tar.gz && break
+              curl -sSfL --retry 5 --retry-all-errors --retry-delay 15 https://github.com/leanprover/elan/releases/latest/download/elan-x86_64-unknown-linux-gnu.tar.gz -o /tmp/elan.tar.gz && break
               echo "elan download failed (504/rate-limit?), retry ${i}/5"; sleep 20; rm -f /tmp/elan.tar.gz
             done
             tar xzf /tmp/elan.tar.gz -C /tmp
