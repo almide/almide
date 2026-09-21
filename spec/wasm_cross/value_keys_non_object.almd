@@ -86,9 +86,17 @@ fn main() -> Unit = {
     ("object", value.object([("a", value.int(1))]))
   ]
   for (name, v) in tags {
-    println("${name} keys=${list.len(value.keys(v))}" + " field=${match value.field(v, "a") {
+    // ONE interpolated string, no `+`: a string concat in a call-argument
+    // position is outside the incumbent leg's MIR-lowering subset, and a
+    // fixture it walls costs a shrink-only ceiling in the two determinism
+    // gates rather than buying coverage.
+    let f = match value.field(v, "a") {
       ok(_) => "ok",
       err(_) => "err",
-    }}" + " merge=${value.stringify(value.merge(v, value.object([])))}" + " pick=${value.stringify(value.pick(v, ["a"]))}" + " omit=${value.stringify(value.omit(v, ["a"]))}" + " strfy=${value.stringify(v)}")
+    }
+    let m = value.stringify(value.merge(v, value.object([])))
+    let p = value.stringify(value.pick(v, ["a"]))
+    let o = value.stringify(value.omit(v, ["a"]))
+    println("${name} keys=${list.len(value.keys(v))} field=${f} merge=${m} pick=${p} omit=${o} strfy=${value.stringify(v)}")
   }
 }
