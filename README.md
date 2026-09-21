@@ -70,6 +70,13 @@ curl -fsSL https://raw.githubusercontent.com/almide/almide/main/tools/install.sh
 irm https://raw.githubusercontent.com/almide/almide/main/tools/install.ps1 | iex        # Windows (PowerShell)
 ```
 
+The installer checks the archive against the release's `almide-checksums.sha256` before unpacking. To verify a downloaded asset yourself — every release asset, the checksums file included, is Sigstore-attested by the release workflow (see [SECURITY.md](./SECURITY.md)):
+
+```bash
+gh attestation verify almide-macos-aarch64.tar.gz -R almide/almide   # provenance: built by almide/almide's release workflow
+sha256sum -c --ignore-missing almide-checksums.sha256                # digest matches the published checksums file
+```
+
 From source, with [Rust](https://rustup.rs/) 1.94+ (the binary embeds the wasmtime host): `cargo build --release && cp target/release/almide ~/.local/bin/`.
 
 ```almd
