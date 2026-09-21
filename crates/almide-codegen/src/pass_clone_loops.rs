@@ -268,43 +268,92 @@ fn body_writes_var(body: &[IrStmt], v: VarId) -> bool {
     UseSites::of_stmts(body, &ExplicitBorrows).of(v).any(|u| Use::is_write(u, true))
 }
 
-/// The union of every loop's FRESH binder set over one function body.
+/// Binders that are fresh for **every loop they occur in** (#2410).
 ///
-/// [`loop_fresh_vars`] answers "which binders are fresh for THIS loop"; this
-/// answers "which binders in this function are fresh for the loop they sit in".
-/// VarIds are unique after lowering (no shadowing), so the union cannot
-/// conflate two bindings, and a var in it is bound inside some loop body.
+/// [`loop_fresh_vars`] answers "which binders are fresh for THIS loop". The
+/// naive union of those sets over a function is WRONG, and the gate tools
+/// caught it: in
 ///
-/// Two consumers, deliberately one copy (#2410): the capture-move rule
+/// ```text
+/// for f in fixtures {
+///   let base = basename_of(f)          // fresh for the OUTER loop
+///   for cid in hdr {
+///     rev = rev + [edge(cid, base)]    // but occurs inside the INNER loop
+///   }
+/// }
+/// ```
+///
+/// `base` is fresh for the outer loop and NOT fresh for the inner one, where
+/// its last occurrence actually sits — the inner loop repeats, so that
+/// occurrence is not the dynamically last one and the clone is load-bearing.
+/// `outer_loop_variable_used_in_an_inner_loop_still_clones` states the same
+/// rule for the clone pass.
+///
+/// So a binder qualifies only if no loop contains an occurrence of it without
+/// also binding it: union the per-loop fresh sets, then subtract every var
+/// that occurs in some loop body it is not fresh for. VarIds are unique after
+/// lowering, so neither step can conflate two bindings.
+///
+/// Two consumers, deliberately one copy: the capture-move rule
 /// (`pass_capture_clone_bindings::holds_last_occurrence`) and the ownership
-/// certifier's C3. Both previously tested a bare `in_loop`, which abstains from
-/// a binding that is rebound every iteration and therefore CAN be moved — the
-/// #2316 shape. Note the trade: the certifier is otherwise independent of the
-/// passes, and sharing this notion means a wrong `loop_fresh_vars` would be
-/// invisible to both. It is shared because the alternative — two copies of one
-/// rule — is the failure this repo keeps finding.
+/// certifier's C3. Both previously tested a bare `in_loop`, which abstains
+/// from a binding rebound every iteration — the #2316 shape. Note the trade:
+/// the certifier is otherwise independent of the passes, and sharing this
+/// notion means a wrong answer here is invisible to both; that is paid for by
+/// a test that reads the EMITTED RUST rather than asking the certifier
+/// (`a_loop_fresh_capture_binds_by_move_in_the_emitted_rust`).
 pub(crate) fn loop_fresh_union(body: &IrExpr) -> HashSet<VarId> {
-    struct Union {
+    struct Scan {
         fresh: HashSet<VarId>,
+        /// Occurs inside a loop body that does not bind it.
+        tainted: HashSet<VarId>,
     }
-    impl almide_ir::visit::IrVisitor for Union {
+    impl almide_ir::visit::IrVisitor for Scan {
         fn visit_expr(&mut self, expr: &IrExpr) {
-            match &expr.kind {
-                // A closure's binds belong to its own invocation frame, exactly
-                // as in `FreshBinds`.
+            let loop_body: Option<(HashSet<VarId>, &Vec<IrStmt>)> = match &expr.kind {
+                // A closure's binds belong to its own invocation frame, as in
+                // `FreshBinds`.
                 IrExprKind::Lambda { .. } => return,
                 IrExprKind::ForIn { var, var_tuple, body, .. } => {
-                    self.fresh.extend(loop_fresh_vars(Some(*var), var_tuple.as_deref(), body));
+                    Some((loop_fresh_vars(Some(*var), var_tuple.as_deref(), body), body))
                 }
-                IrExprKind::While { body, .. } => {
-                    self.fresh.extend(loop_fresh_vars(None, None, body));
+                IrExprKind::While { body, .. } => Some((loop_fresh_vars(None, None, body), body)),
+                _ => None,
+            };
+            if let Some((f, body)) = loop_body {
+                for v in vars_occurring(body) {
+                    if !f.contains(&v) {
+                        self.tainted.insert(v);
+                    }
                 }
-                _ => {}
+                self.fresh.extend(f);
             }
             almide_ir::visit::walk_expr(self, expr);
         }
     }
-    let mut v = Union { fresh: HashSet::new() };
+    let mut v = Scan { fresh: HashSet::new(), tainted: HashSet::new() };
     almide_ir::visit::IrVisitor::visit_expr(&mut v, body);
+    v.fresh.retain(|id| !v.tainted.contains(id));
     v.fresh
+}
+
+/// Every `VarId` read or written anywhere in `body`, lambdas included: a use
+/// inside a closure built in the loop still runs per iteration.
+fn vars_occurring(body: &[IrStmt]) -> HashSet<VarId> {
+    struct V {
+        seen: HashSet<VarId>,
+    }
+    impl almide_ir::visit::IrVisitor for V {
+        fn visit_expr(&mut self, expr: &IrExpr) {
+            if let IrExprKind::Var { id } = &expr.kind {
+                self.seen.insert(*id);
+            }
+            almide_ir::visit::walk_expr(self, expr);
+        }
+    }
+    let mut v = V { seen: HashSet::new() };
+    for s in body {
+        almide_ir::visit::IrVisitor::visit_stmt(&mut v, s);
+    }
+    v.seen
 }

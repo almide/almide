@@ -201,3 +201,34 @@ fn a_live_loop_fresh_capture_certifies_clean() {
     let (ok, err) = certify("lf-clean", LOOP_FRESH_CAPTURE);
     assert!(ok, "a moved loop-fresh capture must certify clean:\n{err}");
 }
+
+/// The nesting case that a naive union gets wrong (#2410, caught by the gate
+/// tools in CI after a spec-only sweep reported clean). `base` is bound in the
+/// OUTER loop body — fresh for that loop — but its last occurrence sits inside
+/// an INNER loop, which repeats, so that occurrence is NOT the dynamically last
+/// one and the clone is load-bearing. A binder therefore qualifies only if no
+/// loop contains an occurrence of it without also binding it.
+///
+/// `outer_loop_variable_used_in_an_inner_loop_still_clones` states the same
+/// rule for the clone pass and passed throughout, because it reads the emitted
+/// code rather than asking the certifier — which is exactly why it did not
+/// catch the certifier disagreeing with it.
+const OUTER_BOUND_USED_IN_INNER_LOOP: &str = r#"fn main() -> Unit = {
+  var out: List[String] = []
+  let names: List[String] = ["a", "b"]
+  let tags: List[String] = ["x", "y"]
+  for n in names {
+    let base = n + "!"
+    for t in tags {
+      out = out + [base + t]
+    }
+  }
+  println(int.to_string(list.len(out)))
+}
+"#;
+
+#[test]
+fn a_binder_used_inside_a_nested_loop_is_not_judged_fresh() {
+    let (ok, err) = certify("nested-fresh", OUTER_BOUND_USED_IN_INNER_LOOP);
+    assert!(ok, "an outer-loop binder used in an inner loop must NOT be reported: its clone is load-bearing\n{err}");
+}
