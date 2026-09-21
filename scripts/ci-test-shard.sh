@@ -83,7 +83,26 @@ shard, total = int(shard), int(total)
 rows.sort(key=lambda r: (-weights.get(r[2], default), r[2]))
 load = [0] * total
 bins = [[] for _ in range(total)]
-for r in rows:
+# The shared-fixture family first, spread one per shard (#2381). The
+# `wasm_runtime_*` corpus gates run ONE AT A TIME on a shard (.config/
+# nextest.toml, test-group shared-fixture-serial), so two of them on one
+# shard cost their SUM in wall clock while everything else on the shard
+# overlaps. Summed seconds — the only thing the weights measure — cannot
+# see that: on develop run 35569545602 the packer put interp_oracle
+# (1223 s) and opt_parity (1075 s) together and that shard ran 2391 s
+# for a 2771 s sum, the second-longest job in CI. So the family is placed
+# before the gravel, each member on the shard with the fewest family
+# members (then the least load); the interp ledger is not in the family
+# (its tests are backend-free and run in parallel — see nextest.toml).
+def serial_family(name):
+    return name.startswith("wasm_runtime_") and name != "wasm_runtime_interp_ledger"
+family_count = [0] * total
+for r in [r for r in rows if serial_family(r[2])]:
+    i = min(range(total), key=lambda j: (family_count[j], load[j], j))
+    bins[i].append(r)
+    load[i] += weights.get(r[2], default)
+    family_count[i] += 1
+for r in [r for r in rows if not serial_family(r[2])]:
     i = load.index(min(load))
     bins[i].append(r)
     load[i] += weights.get(r[2], default)
