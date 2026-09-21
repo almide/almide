@@ -749,6 +749,11 @@ jobs:
           ALMIDE=/tmp/almide-bin/almide
           $ALMIDE run tools/almide-gates/src/main.almd -- fold-seed-source .
 
+      - name: Implementation count per stdlib hole (one operation, N copies — #2397)
+        run: |
+          ALMIDE=/tmp/almide-bin/almide
+          $ALMIDE run tools/almide-gates/src/main.almd -- impl-count .
+
       # The published build-speed table is DERIVED from docs/benchmarks/build-speed.txt, the
       # same discipline as the contract index and the claims block: a hand-edited number in the
       # README is a defect this catches rather than a change a reader is trusted not to make.
@@ -1627,9 +1632,6 @@ jobs:
 
       - name: Layout discipline for new long-lived structures (#1387 / #1316)
         run: bash scripts/check-layout-discipline.sh
-
-      - name: Implementation count per stdlib hole (one operation, N copies — #2397)
-        run: bash scripts/check-impl-count.sh
 
   perf-ratchet:
     name: Perf ratchet (native/Rust ratio, #917)
