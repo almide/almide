@@ -37,7 +37,7 @@ runs:
     - name: Install cargo-nextest
       shell: bash
       run: |
-        curl -LsSf "https://get.nexte.st/${{ inputs.nextest-version }}/linux" -o /tmp/nextest.tar.gz
+        curl -LsSf --retry 5 --retry-all-errors --retry-delay 15 "https://get.nexte.st/${{ inputs.nextest-version }}/linux" -o /tmp/nextest.tar.gz
         tar xzf /tmp/nextest.tar.gz -C /usr/local/bin
         cargo nextest --version
     - uses: actions/download-artifact@v8
