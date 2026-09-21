@@ -1475,8 +1475,8 @@ jobs:
       - name: Stdlib semantics manifest (coverage + regen-diff, #521)
         run: ALMIDE_BIN=/tmp/almide-bin/almide scripts/check-semantics-manifest.sh
 
-      - name: Stdlib doc signature indexes up to date (regenerate and diff)
-        run: ALMIDE_BIN=/tmp/almide-bin/almide python3 tools/gen-stdlib-doc-index.py --check
+      - name: Stdlib doc indexes up to date (#1469 — every docs/stdlib page under the generator, regenerate and diff)
+        run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-stdlib-docs.sh
 
       - name: README counts derived, Hello, world bytes match the stamped baseline, no undated hand-written count
         run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/gen-readme-stats.sh --check && bash scripts/check-readme-numbers.sh
