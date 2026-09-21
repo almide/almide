@@ -335,6 +335,7 @@
 3849	spec/wasm_cross/list_of_maps_loop_build.almd
 2198	spec/wasm_cross/list_of_tuples_equality.almd
 2872	spec/wasm_cross/list_product_overflow.almd
+9445	spec/wasm_cross/list_push_on_record_field.almd
 2427	spec/wasm_cross/list_remove_at_oob.almd
 2641	spec/wasm_cross/list_repeat_size_ceiling.almd
 3636	spec/wasm_cross/list_rest_pattern.almd
