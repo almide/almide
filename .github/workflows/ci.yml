@@ -1075,7 +1075,14 @@ jobs:
     # inviting baseline conflicts. This runs the SAME gate at push/PR time —
     # ~14 min measured — but only when something it measures changed.
     name: Coverage ratchet at push time (#566)
-    needs: changes
+    # `build` too (#2381): the plain release binary this job used to compile
+    # for itself (366 s on run 35554511975) is only the stamp's identity —
+    # proofs/coverage.sh compiles its own INSTRUMENTED binaries into a
+    # separate target dir — and the build job already ships that exact
+    # binary as the `almide-linux` artifact. Waiting for `build` costs ~5
+    # minutes of start delay against the 6 the compile cost, so the job
+    # still finishes earlier, and a whole workspace build leaves the bill.
+    needs: [changes, build]
     if: github.server_url == 'https://github.com' && needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -1123,11 +1130,20 @@ jobs:
       - name: Install llvm-tools
         if: steps.rel.outputs.skip != 'true'
         run: rustup component add llvm-tools-preview
-      - name: Build almide (stamp expects an installed binary)
+      - uses: actions/download-artifact@v8
         if: steps.rel.outputs.skip != 'true'
+        with:
+          name: almide-linux
+          path: /tmp/almide-bin
+      - name: Install the built compiler (the stamp expects PATH almide == target/release/almide)
+        if: steps.rel.outputs.skip != 'true'
+        # proofs/lib/stamp.sh FAILS when the PATH binary's hash differs from
+        # the workspace build's, so the one artifact is placed at both paths.
         run: |
-          cargo build --release
-          mkdir -p ~/.local/bin && cp target/release/almide ~/.local/bin/
+          chmod +x /tmp/almide-bin/almide
+          mkdir -p ~/.local/bin target/release
+          cp /tmp/almide-bin/almide ~/.local/bin/almide
+          cp /tmp/almide-bin/almide target/release/almide
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Measure coverage and enforce the ratchet + safety floors
         if: steps.rel.outputs.skip != 'true'
@@ -1447,14 +1463,24 @@ jobs:
       # below — so it installs BEFORE the first of them, not between them.
       # Without it the strbuild step dies on `wasmtime not found`, which is how
       # the relation first went red on a PR that had nothing wrong with it.
+      - name: Cache wasmtime tarball
+        # The same cached, pinned tarball the test shards use (#2381): this
+        # was the one job still downloading it uncached on every run, i.e.
+        # the one job still exposed to the per-IP release rate limit.
+        uses: actions/cache@v6
+        with:
+          path: wasmtime-v47.0.3-x86_64-linux.tar.xz
+          key: wasmtime-v47.0.3-x86_64-linux
       - name: Install wasmtime (the wasm-leg gates)
         run: |
           VERSION=v47.0.3
           TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
-          for i in 1 2 3 4 5; do
-            curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
-            echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
-          done
+          if [ ! -s "$TARBALL" ]; then
+            for i in 1 2 3 4 5; do
+              curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
+              echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
+            done
+          fi
           tar -xf "$TARBALL"
           sudo mv wasmtime-*/wasmtime /usr/local/bin/
           wasmtime --version
@@ -1720,13 +1746,27 @@ jobs:
   # these suites (cfg_attr debug ignore), so this job is their ONLY runner.
   commissioned-wasm-gates:
     name: Commissioned wasm gates (structural leg, release)
-    needs: changes
+    # `build` too (#2381): the two probe steps at the end drive the almide
+    # CLI, which this job used to build for itself a second time (`cargo
+    # build --release --locked --bin almide`, 426–432 s on every develop run)
+    # — the `build` job already ships that binary as `almide-linux`, and
+    # every other CLI-driven gate (Almide gates, Emit & Format, Perf ratchet)
+    # consumes it. The ~5-minute wait for `build` is paid back by the 7 it
+    # saves, and the runner bill drops by a whole release build. The release
+    # test builds stay: those are the gates' own shape, not the CLI's.
+    needs: [changes, build]
     if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - uses: actions/download-artifact@v8
+        with:
+          name: almide-linux
+          path: /tmp/almide-bin
+      - name: Setup the built compiler
+        run: chmod +x /tmp/almide-bin/almide
       - name: Cache stock WASI runtime
         uses: actions/cache@v6
         with:
@@ -1762,14 +1802,14 @@ jobs:
       - name: Double-free trap sweep (corpus burn-up + gauntlet)
         run: ALMIDE_RC_TRAP_DOUBLE_FREE=1 cargo test --release --locked -p almide-wasm --test backend_parity --test gauntlet
       - name: Target-availability matrix (#1423 — declared == measured, both directions)
-        run: cargo build --release --locked --bin almide && bash scripts/check-target-availability.sh
+        run: ALMIDE=/tmp/almide-bin/almide bash scripts/check-target-availability.sh
       # #1701: the wasm runtime RATIO ratchet. The ratio wasm/native cancels
       # the machine (same discipline as the native perf-ratio gate), so CI's
       # own hardware gates it; the non-measured ledger rows are re-measured
       # too — a cell that starts benching fails with the good news until its
       # row is promoted to `measured`.
       - name: Wasm runtime ratio ratchet (#1701)
-        run: bash scripts/check-wasm-runtime-ratio.sh
+        run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-wasm-runtime-ratio.sh
 
   # Aviation discipline as CI (adopted from the greenfield burn, where
   # codopsy slipped to B twice and only a human check-in caught it):
@@ -1783,12 +1823,35 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: Swatinem/rust-cache@v2
+      # #2381: the analyzer was cloned and built from source on every run
+      # (400–437 s, the whole job) although its input — codopsy's HEAD —
+      # moves rarely. The built binary is cached under that HEAD's sha, so a
+      # run pays the build only when the analyzer itself changed; a stale
+      # binary cannot be served because the key IS the source revision.
+      - name: Resolve the analyzer revision
+        id: codopsy-rev
+        run: |
+          set -euo pipefail
+          sha="$(git ls-remote https://github.com/O6lvl4/codopsy HEAD | cut -f1)"
+          [ -n "$sha" ] || { echo "::error::could not resolve codopsy HEAD"; exit 1; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+      - name: Cache the built analyzer
+        id: codopsy-cache
+        uses: actions/cache@v6
+        with:
+          path: /tmp/codopsy-bin/codopsy
+          key: codopsy-bin-${{ runner.os }}-${{ steps.codopsy-rev.outputs.sha }}
       - name: build codopsy
-        run: git clone --depth 1 https://github.com/O6lvl4/codopsy /tmp/codopsy && cargo build --release --manifest-path /tmp/codopsy/Cargo.toml
+        if: steps.codopsy-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 https://github.com/O6lvl4/codopsy /tmp/codopsy
+          cargo build --release --manifest-path /tmp/codopsy/Cargo.toml
+          mkdir -p /tmp/codopsy-bin && cp /tmp/codopsy/target/release/codopsy /tmp/codopsy-bin/codopsy
       - name: score must be A (>= 90)
         run: |
+          chmod +x /tmp/codopsy-bin/codopsy
           cp .codopsyrc.json crates/almide-wasm/ 2>/dev/null || true
-          /tmp/codopsy/target/release/codopsy analyze crates/almide-wasm 2>&1 | tee /tmp/codopsy.out
+          /tmp/codopsy-bin/codopsy analyze crates/almide-wasm 2>&1 | tee /tmp/codopsy.out
           sed 's/\x1b\[[0-9;]*m//g' /tmp/codopsy.out | grep -E "Quality Score:" | grep -qE "\((9[0-9]|100)/100\)" || { echo "::error::codopsy below A"; exit 1; }
       - name: file discipline (800-line cap over the commissioned backend)
         run: bash scripts/check-file-discipline.sh
@@ -1817,7 +1880,20 @@ jobs:
         with:
           # The incremental scope diffs against the PR base ref.
           fetch-depth: 0
+      # #2381: this job runs on pull_request only, so the default per-job
+      # rust-cache key was written by no develop run and every PR started
+      # cold ("No cache found" on the v0.63.0-rc3 PR: 7m08s to the first
+      # verdict against ~80 s per mutant after it). The build job's
+      # dependency cache is the same lockfile under the same pinned
+      # toolchain, so read that one — dependency artifacts only, never the
+      # workspace's — and write nothing back.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
       - name: in-scope mutants must be caught (full sweep lives in mutation-sweep.yml)
         run: |
           git fetch -q origin "${{ github.base_ref }}"
