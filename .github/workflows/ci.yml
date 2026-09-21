@@ -1345,6 +1345,9 @@ jobs:
       - name: Contract ledger traceability (every contract evidenced, every fixture contracted)
         run: scripts/check-contracts.sh
 
+      - name: Contract citations — every C-NNN spelled in source, docs, stdlib or proofs names a ledger contract (#2406)
+        run: bash scripts/check-contract-citations.sh
+
       # #2122: a release-only test the shards skip and no release job names
       # runs in no job at all — and reads green forever.
       - name: Release-only tests are named by a release job (#2122)

@@ -184,6 +184,15 @@ measures = "count of contracts without evidence of class >= fixture, fixtures na
 varies = "2026-09-14 ba461e34d: the ledger's unescaped quotes made the parse count differ from the row count; C-322..C-347 (2026-08-25..09-06) each moved the contract count and the evidence classes as they landed"
 
 [[gate]]
+path = "scripts/check-contract-citations.sh"
+reads = "scalar"
+wired_by = ".github/workflows/ci.yml, lefthook.yml, tests/contract_citation_gate_test.rs"
+class = "NEGATIVE_TESTED"
+evidence = "#2406 landing (2026-09-21): first run on the unfixed tree named the four sites of the one dangling citation (a fuzz-finding index wearing the C- prefix in stdlib/result_map.almd, crates/almide-mir/src/lower/mod_p4_c.rs x2, docs/roadmap/active/selfhost-link-v2.md) and nothing else — 0 malformed, the two self-test vector files silent. tests/contract_citation_gate_test.rs forges a scan root with a well-formed dangling id, a four-digit id and a one-digit id and asserts exit 1 naming each, then a clean root and RFC-7386 prose read exit 0."
+measures = "count of C-NNN tokens (token-boundary guarded) across the tree's text files whose id is not three digits or is absent from the id rows of docs/contracts/contracts.toml, minus the fixture header lines check-contracts.sh owns and the two allowlisted self-test files"
+varies = "#2406 landing (2026-09-21): dangling 4 -> 0 on the same tree when the four sites were rewritten to name C-139 and the fuzz index without the prefix; malformed stayed 0 throughout."
+
+[[gate]]
 path = "scripts/check-scalar-read-audit.sh"
 reads = "UNCLASSIFIED"
 wired_by = ".github/workflows/ci.yml, lefthook.yml"

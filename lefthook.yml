@@ -12,6 +12,12 @@ pre-commit:
     contracts:
       glob: "{docs/contracts/contracts.toml,docs/contracts/*.md,spec/wasm_cross/*.almd,scripts/check-contracts.sh,scripts/lib/contract-classes.txt,scripts/lib/dojo-families.txt,tests/diagnostics/*/meta.toml,docs/specs/als/*.md,scripts/gen-claims.sh,scripts/lib/ledger-counts.sh,proofs/ledger-counts.toml,README.md}"
       run: bash scripts/gen-claims.sh && git add README.md && scripts/check-contracts.sh && bash docs/contracts/generate-readme.sh > docs/contracts/README.md && git add docs/contracts/README.md
+    contract-citations:
+      # Every `C-NNN` spelled outside the ledger and the fixture headers must
+      # name a ledger contract (#2406). Cheap (one python walk, ~1s), so the
+      # glob is the whole citation surface rather than a guess at it.
+      glob: "{docs/contracts/contracts.toml,scripts/check-contract-citations.sh,stdlib/**/*.almd,crates/**/*.rs,src/**/*.rs,runtime/**/*.rs,docs/**/*.md,proofs/**/*.toml,spec/**/*.almd,llms.txt,README.md,CHANGELOG.md}"
+      run: bash scripts/check-contract-citations.sh
     readme-stats:
       # The README's derived-count blocks and the no-undated-count rule. The
       # Hello, world baseline (docs/benchmarks/wasm-size.txt) is re-stamped by
