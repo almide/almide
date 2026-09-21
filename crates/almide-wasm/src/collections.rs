@@ -495,6 +495,20 @@ impl Emitter<'_> {
                 self.load_ty_slot_at(v);
                 self.f.instructions().local_set(v_p);
                 self.lower(body, Some(b))?;
+                // The accumulator OWNS one credit on every step, as in the staged
+                // `list.fold` (`list.rs:647`): a borrowed body result takes its
+                // share, and the PREVIOUS accumulator is released before the
+                // rebind. `init` arrived `ArgMode::Retain` above, so without the
+                // dec that first credit and every intermediate one were abandoned
+                // — and declaring `View` for a block this arm ends up owning is
+                // precisely the "growing row" `arm.rs` warns about. The guard and
+                // the `owned` return are ONE change: the guard alone leaks (View
+                // for an allocated block), the return alone hands the caller a
+                // release for a block it does not own (#2408).
+                self.rc_share_guard(body, b);
+                if let Some(dec) = self.elem_is_handle(b).then(|| self.dec_fn_of(b)) {
+                    self.f.instructions().local_get(acc_p).call(dec);
+                }
                 self.f.instructions().local_set(acc_p);
                 {
                     let mut i = self.f.instructions();
@@ -507,7 +521,7 @@ impl Emitter<'_> {
                 self.release_i32();
                 self.release_i32();
                 self.release_i32();
-                Ok(Some(Lowered::view(b)))
+                Ok(Some(Lowered::owned(b)))
             }
             ("from_list", [pairs]) => {
                 // Insertion-ordered upsert over (K, V) pairs. The result
