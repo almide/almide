@@ -7,7 +7,7 @@
 
 ## Active
 
-92 items
+93 items
 
 | Item | Description |
 |------|-------------|
@@ -47,6 +47,7 @@
 | [Fuzz Findings Triage: Re-green the Nightly Differential Gate](active/fuzz-findings-triage.md) | Fuzz (nightly) is red — triage the differential findings to zero and re-green the workflow |
 | [Integer literal domain — cross-language survey and Almide's target](active/integer-literal-domain.md) | How other languages range-check integer literals, and where Almide should land |
 | [StringInterp is NOT special syntax — desugar it to `concat + to_string(part)`](active/interp-is-desugar-to-tostring.md) | Retiring StringInterp as special syntax by desugaring it to concat + to_string(part) |
+| [Open-issue inventory, 2026-09-21 — 78 issues under one header](active/issue-inventory-2026-09-21.md) |  |
 | [Issue Ledger Burn-down — 完全性キャンペーンの残量計](active/issue-ledger-burndown.md) | The issue-ledger burn-down gauge: keeping the open-issue count an honest measure of remaining work |
 | [#1437: the lifted carrier's ABI — declaration-driven, one readable layout](active/lifted-carrier-abi.md) | #1437: one declaration-driven carrier layout instead of producer drift |
 | [LLM-first Language](active/llm-first-language.md) | Plan to make Almide the language LLMs write most accurately, measured by dojo MSR |
