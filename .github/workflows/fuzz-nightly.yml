@@ -353,7 +353,12 @@ jobs:
             exit 1
           fi
 
+      # The verdict also writes the qualifying fields (reporting, missing,
+      # minutes delivered, budget) to $GITHUB_OUTPUT: the issue steps below
+      # carry them into the issue, so the count that travels is conditional in
+      # the heading and not only in this step's log (#2390).
       - name: Campaign verdict
+        id: verdict
         run: |
           bash scripts/fuzz-night-verdict.sh shards \
             "${{ github.event.inputs.minutes || env.FUZZ_MINUTES }}" \
@@ -381,28 +386,16 @@ jobs:
         run: |
           COUNT="${{ steps.agg.outputs.correctness }}"
           TITLE="Nightly fuzz: $COUNT cross-target finding(s)"
-          SUMMARY=$(find night-findings -mindepth 1 -maxdepth 1 -type d ! -name 'Slow__*' \
-            -exec cat {}/meta.txt \; \
-            | grep -E '^(kind|summary|reproduce)' | head -60 || true)
-          BODY=$(cat <<EOF
-          The nightly generative differential fuzzer recorded **$COUNT** unique finding(s)
-          across ${{ env.FUZZ_SHARDS }} shard(s).
-
-          Artifacts (minimized repros + both-target outputs) are attached to
-          [run #${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}).
-
-          Each finding's \`meta.txt\` includes a deterministic replay command:
-          \`xtarget-fuzz replay --seed <S> --index <I>\`.
-
-          <details><summary>Finding summaries</summary>
-
-          \`\`\`
-          $SUMMARY
-          \`\`\`
-
-          </details>
-          EOF
-          )
+          # The body says from how many shards the count was collected, names
+          # the shards that did not return, and caps the listing by FINDINGS
+          # with a "showing k of N" when it bites (#2390: the inline 60-line
+          # head was a silent cap of exactly 20 findings, and "across 8
+          # shard(s)" was printed whether 8 uploaded or 1).
+          BODY=$(bash scripts/fuzz-night-issue-body.sh night-findings correctness \
+            "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            "${{ steps.verdict.outputs.reporting || '?' }}" \
+            "${{ steps.verdict.outputs.shards_planned || env.FUZZ_SHARDS }}" \
+            "${{ steps.verdict.outputs.missing || 'unknown' }}")
           # Route by a label only a FINDINGS issue wears. `fuzz` is worn by
           # long-lived instrument issues too — #924 is the full-budget ratchet
           # — so `--label fuzz` picked whichever the API listed first and
@@ -432,27 +425,14 @@ jobs:
         run: |
           COUNT="${{ steps.agg.outputs.slow }}"
           TITLE="Nightly fuzz: $COUNT slow finding(s) (perf-class)"
-          SUMMARY=$(find night-findings -mindepth 1 -maxdepth 1 -type d -name 'Slow__*' \
-            -exec cat {}/meta.txt \; \
-            | grep -E '^(kind|summary|reproduce)' | head -60 || true)
-          BODY=$(cat <<EOF
-          The nightly fuzzer recorded **$COUNT** perf-class Slow finding(s): a leg
-          outran the per-program budget but completed byte-identical at the 10x
-          confirm re-run. Not correctness — the night stays green — but each is a
-          real order-of-magnitude perf gap (the #1229 class).
-
-          Artifacts are attached to
-          [run #${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}).
-
-          <details><summary>Finding summaries</summary>
-
-          \`\`\`
-          $SUMMARY
-          \`\`\`
-
-          </details>
-          EOF
-          )
+          # Same renderer as the correctness path, same cap-by-findings and
+          # same shard qualification (#2390: the perf path carried the identical
+          # silent 60-line head; #2302 is subject to it).
+          BODY=$(bash scripts/fuzz-night-issue-body.sh night-findings slow \
+            "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            "${{ steps.verdict.outputs.reporting || '?' }}" \
+            "${{ steps.verdict.outputs.shards_planned || env.FUZZ_SHARDS }}" \
+            "${{ steps.verdict.outputs.missing || 'unknown' }}")
           EXISTING=$(gh issue list --label fuzz-perf --state open --json number --jq '.[0].number' || echo "")
           if [ -n "$EXISTING" ]; then
             gh issue comment "$EXISTING" --body "$BODY"
