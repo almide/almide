@@ -79,7 +79,7 @@
 30744	spec/wasm_cross/codec_option_record_default.almd
 25237	spec/wasm_cross/codec_string_escapes.almd
 28760	spec/wasm_cross/codec_triple_list.almd
-30309	spec/wasm_cross/codec_variant_roundtrip.almd
+30325	spec/wasm_cross/codec_variant_roundtrip.almd
 27125	spec/wasm_cross/codec_whitespace_tolerance.almd
 5233	spec/wasm_cross/collection_literals.almd
 3447	spec/wasm_cross/composition_fuzz_batch.almd
@@ -280,7 +280,7 @@
 3108	spec/wasm_cross/interp_effect_unwrap_arg.almd
 2582	spec/wasm_cross/io_write_ordering.almd
 26552	spec/wasm_cross/json_gltf_walk.almd
-25104	spec/wasm_cross/json_many_keys.almd
+25120	spec/wasm_cross/json_many_keys.almd
 23760	spec/wasm_cross/json_number_unicode.almd
 22143	spec/wasm_cross/json_parse_lenient_edges.almd
 29904	spec/wasm_cross/json_path_edges.almd
@@ -704,9 +704,10 @@
 20436	spec/wasm_cross/value_deep_eq.almd
 6043	spec/wasm_cross/value_domain_arith.almd
 3278	spec/wasm_cross/value_eq.almd
+27105	spec/wasm_cross/value_keys_non_object.almd
 7180	spec/wasm_cross/value_merge.almd
 4011	spec/wasm_cross/value_object_leak_loop.almd
-11196	spec/wasm_cross/value_object_ops_share.almd
+11212	spec/wasm_cross/value_object_ops_share.almd
 8132	spec/wasm_cross/value_repr.almd
 5966	spec/wasm_cross/variant_pair_result_return.almd
 2366	spec/wasm_cross/variant_record_literal_equality.almd
