@@ -210,22 +210,23 @@ fn recorded_gh_path() -> String {
 
 /// The nightly track record, scored over eight recorded nights. The window was
 /// chosen so that every row shape the bash can print is in it: an in-flight run
-/// (printed, not scored), a sharded GREEN with 5/8 shards, sharded FINDINGS, a
-/// verdict job that never concluded (which ends BOTH streaks), and a legacy
-/// night scored from its campaign step. The assertions on the original's text
-/// are what keep this honest: a shim serving nothing would make both sides
-/// print an empty table and agree.
+/// (printed, not scored), a sharded night at 89% of its planned fuzz-minutes
+/// (a streak night with findings), one at 64% (PARTIAL: a green verdict that is
+/// not a streak night), a verdict job that never concluded (NO VERDICT, which
+/// ends BOTH streaks), and a legacy night scored from its campaign step. The
+/// assertions on the original's text are what keep this honest: a shim serving
+/// nothing would make both sides print an empty table and agree.
 #[test]
-#[ignore = "the bash was rewritten by #2429 (a night scores from the verdict job's `fuzz-night:` log line at >= 75% of planned fuzz-minutes; jobs are fetched with ?per_page=100) and the twin plus its recorded-gh fixtures still mirror the previous script — #2452 re-ports the twin and re-records the eight nights; until then this comparison would only prove the two differ"]
 fn the_fuzz_track_record_twin_answers_what_the_shell_gate_answers() {
     let env = [("PATH", recorded_gh_path())];
     let original = run_env("bash", &["scripts/fuzz-track-record.sh", "8"], &env);
     for needle in [
         "IN PROGRESS (not scored)",
-        "5/8       GREEN",
-        "NO VERDICT (verdict job: cancelled)",
-        "1/1       FINDINGS (full budget, red on findings)",
-        "verdict streak:     5/14",
+        "7/8 89%       FINDINGS (verdict delivered, red on findings)",
+        "5/8 64%       PARTIAL 64% of planned fuzz-minutes — GREEN; below the 75% line, not a streak night",
+        "?             NO VERDICT (verdict job: cancelled)",
+        "1/1           FINDINGS (full budget, red on findings)",
+        "verdict streak:     1/14  (#924 closes at 14: nights at >= 75% of planned fuzz-minutes)",
         "green streak:       0/2",
     ] {
         assert!(
@@ -240,10 +241,11 @@ fn the_fuzz_track_record_twin_answers_what_the_shell_gate_answers() {
         twin_env(&["fuzz-track-record", ".", "8"], &env),
     );
     // `per_page=N` is honoured by the recording, so a shorter window is a
-    // different table with a different streak — not the same answer truncated.
+    // different table — three rows, none of them the 2026-09-18 night — and
+    // not the same answer truncated.
     let short = run_env("bash", &["scripts/fuzz-track-record.sh", "3"], &env);
     assert!(
-        short.text.contains("verdict streak:     2/14"),
+        short.text.contains("verdict streak:     1/14") && !short.text.contains("35320397098"),
         "{}",
         short.text
     );
