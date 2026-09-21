@@ -1,7 +1,7 @@
 {
  "jobs": [
   {
-   "name": "Condition-level coverage \u2014 the MC/DC ledger's measured backstop (#566)",
+   "name": "Condition-level coverage — the MC/DC ledger's measured backstop (#566)",
    "conclusion": "success",
    "steps": [
     {
@@ -21,7 +21,7 @@
      "conclusion": "success"
     },
     {
-     "name": "Probe \u2014 this pin accepts -Z coverage-options=condition",
+     "name": "Probe — this pin accepts -Z coverage-options=condition",
      "conclusion": "success"
     },
     {
@@ -29,7 +29,7 @@
      "conclusion": "success"
     },
     {
-     "name": "Measure with per-condition records \u2014 same floors, same ratchet",
+     "name": "Measure with per-condition records — same floors, same ratchet",
      "conclusion": "success"
     },
     {
@@ -617,7 +617,7 @@
    ]
   },
   {
-   "name": "MC/DC vectors are real \u2014 operator-swap mutants must die (#566)",
+   "name": "MC/DC vectors are real — operator-swap mutants must die (#566)",
    "conclusion": "success",
    "steps": [
     {
@@ -656,6 +656,7 @@
   },
   {
    "name": "Night verdict",
+   "id": 106049630808,
    "conclusion": "failure",
    "steps": [
     {
