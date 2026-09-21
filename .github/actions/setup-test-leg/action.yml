@@ -1,0 +1,81 @@
+name: "Setup a test leg"
+description: >-
+  The tool set every archive-replaying test leg needs (#2381 item 7): the
+  pinned toolchain, a PINNED cargo-nextest, the build job's nextest archive,
+  the cached wasmtime tarball and binaryen. Factored out of the four shard
+  jobs and the six solo jobs, which carried this block twice, byte for byte —
+  a version bump that reached one copy and not the other was the drift this
+  file exists to make impossible. The steps are the same steps in the same
+  order with the same paths; only the nextest URL changed, from `latest` to a
+  fixed version (an unpinned installer means a nextest release can change what
+  a green run means without a commit).
+
+inputs:
+  toolchain:
+    description: "The rustup toolchain to install (the workflow's RUST_TOOLCHAIN)"
+    required: true
+  nextest-version:
+    description: "The cargo-nextest version to install (the version CI resolved from `latest` on 2026-09-21)"
+    required: false
+    default: "0.9.145"
+  wasmtime-version:
+    description: "The stock wasmtime CLI pin (bump this and nothing else — the cache key derives from it)"
+    required: false
+    default: "v47.0.3"
+
+runs:
+  using: "composite"
+  steps:
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: ${{ inputs.toolchain }}
+
+    # #1732: no compile here anymore — the build job ships the
+    # ci-test-profile test binaries (dev minus debuginfo) as a nextest
+    # archive, and the leg replays it. The big registry/target cache went
+    # with the compile; only the tool tarball caches below remain.
+    - name: Install cargo-nextest
+      shell: bash
+      run: |
+        curl -LsSf "https://get.nexte.st/${{ inputs.nextest-version }}/linux" -o /tmp/nextest.tar.gz
+        tar xzf /tmp/nextest.tar.gz -C /usr/local/bin
+        cargo nextest --version
+    - uses: actions/download-artifact@v8
+      with:
+        name: almide-tests-archive
+        path: /tmp/almide-archive
+
+    - name: Cache wasmtime tarball
+      uses: actions/cache@v6
+      with:
+        path: wasmtime-${{ inputs.wasmtime-version }}-x86_64-linux.tar.xz
+        key: wasmtime-${{ inputs.wasmtime-version }}-x86_64-linux
+    - name: Install wasmtime
+      # Required by the cross-target gate (wasm_cross_target_spec) and the
+      # wasm_runtime_* capture tests — without it they skip, so the
+      # cross-target ratchet would not actually enforce here.
+      shell: bash
+      run: |
+        # Pinned + cached + retried. On a cache hit the tarball is already here,
+        # so the per-IP-rate-limited release download runs at most once per key
+        # (the uncached variant burned all 5 retries on a 429 storm, 2026-07-11).
+        # `-f` turns a 403 rate-limit body into a retry instead of a 92-byte
+        # "not a tar archive". The cache key above derives from the same input.
+        VERSION="${{ inputs.wasmtime-version }}"
+        TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
+        if [ ! -s "$TARBALL" ]; then
+          for i in 1 2 3 4 5; do
+            curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
+            echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
+          done
+        fi
+        tar -xf "$TARBALL"
+        sudo mv wasmtime-*/wasmtime /usr/local/bin/
+        wasmtime --version
+
+    - name: Install wasm-opt (binaryen)
+      # Required by the wasm-opt parity gate (wasm_runtime_opt_parity::wasm_opt_parity_spec) — without
+      # it the test silently early-returns as a pass, so `--wasm-opt`'s
+      # differential-equivalence claim would never actually be checked here.
+      shell: bash
+      run: sudo apt-get update && sudo apt-get install -y binaryen && wasm-opt --version
