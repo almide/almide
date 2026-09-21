@@ -663,8 +663,9 @@ impl Emitter<'_> {
 impl Emitter<'_> {
     /// `p.field = v` on a record var: copy-on-write write-back — fresh
     /// block, one slot replaced, rebound. Split from `lower_stmt` for the
-    /// complexity budget.
-    fn lower_field_assign(
+    /// complexity budget. Also the path `list.push` / `list.clear` on a
+    /// record field desugar into (`list_mut.rs`, #2411).
+    pub(crate) fn lower_field_assign(
         &mut self,
         target: &almide_ir::VarId,
         field: &almide_base::intern::Sym,

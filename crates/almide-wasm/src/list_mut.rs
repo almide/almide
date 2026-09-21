@@ -8,6 +8,20 @@ use wasm_encoder::{BlockType, ValType};
 use crate::emitter::Emitter;
 use crate::*;
 
+/// `h.f` where `h` is a plain var: the receiver shape the mut forms
+/// (`push`, `clear`) route through the copy-on-write field write (#2411).
+/// A deeper path (`h.a.b`, `xs[i].f`) is still refused by the var-only
+/// arms below, honestly.
+fn record_field_receiver(xs: &IrExpr) -> Option<(almide_ir::VarId, almide_base::intern::Sym)> {
+    let IrExprKind::Member { object, field } = &xs.kind else {
+        return None;
+    };
+    let IrExprKind::Var { id } = &object.kind else {
+        return None;
+    };
+    Some((*id, *field))
+}
+
 impl Emitter<'_> {
 
     /// mut pop: some(last) + shrunken-copy write-back.
@@ -85,6 +99,18 @@ impl Emitter<'_> {
             ("pop", [xs]) => self.lower_list_pop(xs),
             // mut form (native xs.clear()): rebind to the empty list.
             ("clear", [xs]) => {
+                // A record var's field: `h.f = []` through the field-write
+                // path (see the `push` arm, #2411).
+                if let Some((id, field)) = record_field_receiver(xs) {
+                    let empty = IrExpr {
+                        kind: IrExprKind::List { elements: vec![] },
+                        ty: xs.ty.clone(),
+                        span: None,
+                        def_id: None,
+                    };
+                    self.lower_field_assign(&id, &field, &empty)?;
+                    return Ok(Some(None));
+                }
                 let IrExprKind::Var { id } = &xs.kind else {
                     return unsup("list-clear-nonvar");
                 };
@@ -102,6 +128,36 @@ impl Emitter<'_> {
             // (the growth fixture pushes as bare statements). Lowered as a
             // write-back: var = $push(var, v). Requires a plain var arg.
             ("push", [xs, v]) => {
+                // `list.push(h.f, v)` on a record var's FIELD: the builder
+                // idiom (`mut h: Holder` accumulating into `h.kids` in a
+                // loop, #2316's shape) had no wasm route at all (#2411).
+                // It takes the same copy-on-write rebind a field write
+                // takes — `h.f = h.f + [v]` — so every credit rides the
+                // path `lower_field_assign` already owns (copy the record,
+                // release the replaced slot, share-guard the new value,
+                // rebind) instead of a second receiver mode in this arm.
+                if let Some((id, field)) = record_field_receiver(xs) {
+                    let one = IrExpr {
+                        kind: IrExprKind::List { elements: vec![v.clone()] },
+                        ty: xs.ty.clone(),
+                        span: None,
+                        def_id: None,
+                    };
+                    let grown = IrExpr {
+                        kind: IrExprKind::BinOp {
+                            op: almide_ir::BinOp::ConcatList,
+                            left: Box::new(xs.clone()),
+                            right: Box::new(one),
+                        },
+                        ty: xs.ty.clone(),
+                        span: None,
+                        def_id: None,
+                    };
+                    self.lower_field_assign(&id, &field, &grown)?;
+                    // Handled, no value: an early return bypasses the
+                    // `.map(Some)` on the match below, so say so here.
+                    return Ok(Some(None));
+                }
                 let IrExprKind::Var { id } = &xs.kind else {
                     return unsup("list-push-nonvar");
                 };
