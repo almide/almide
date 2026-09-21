@@ -180,6 +180,19 @@ impl Emitter<'_> {
         // fold update: acc = f(acc, cur)
         self.f.instructions().local_set(fold_params[1]);
         self.lower(fold_body, Some(acc_ty))?;
+        // The accumulator OWNS one credit on every step, exactly as the
+        // staged `lower_list_fold` has since 10fed0494: a borrowed body
+        // result — the element itself (`(n, y) => y`), a captured var —
+        // takes its share, and the previous accumulator is released
+        // before the rebind. This fused copy was written before that
+        // rule and never received it, so `fold(filter(xs), …)` returned
+        // an element the list's own release then freed: a wrong byte on
+        // wasm, no trap, only through a chain that fuses (#2397). A
+        // fresh body result already carries its credit and takes no +1.
+        self.rc_share_guard(fold_body, acc_ty);
+        if let Some(dec) = self.elem_is_handle(acc_ty).then(|| self.dec_fn_of(acc_ty)) {
+            self.f.instructions().local_get(fold_params[0]).call(dec);
+        }
         self.f.instructions().local_set(fold_params[0]);
         self.f.instructions().end(); // skip-block
         self.hof_step(ih);
