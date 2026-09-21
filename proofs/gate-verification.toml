@@ -502,6 +502,15 @@ measures = "count of Int-bearing stdlib fns without a manifest entry, plus the b
 varies = "#1244 burn-down: a landed bogus unit read green (a real hole) until the unit vocabularies were pinned, then red; 2026-09-06 59f5b7f6d and 2026-09-10 bd6e74dd9 each added entries"
 
 [[gate]]
+path = "scripts/check-stdlib-docs.sh"
+reads = "scalar"
+wired_by = ".github/workflows/ci.yml, lefthook.yml"
+class = "NEGATIVE_TESTED"
+evidence = "#1469 landing (2026-09-21): the wrapper around tools/gen-stdlib-doc-index.py --check, added so the generator's regenerate-and-diff is an enumerable gate (the ledger enumerates scripts/check-*.sh, not tools/*.py; the CI step had run the .py directly since #918). Positive control: the freshly regenerated tree, 45/45 pages with a block (was 43/45 — compute and duration were skipped by name; now derived from crates/almide-types/src/time_units.rs). Negative controls, each restored through the generator and re-passed: (1) `list.len(...) -> Int` hand-edited to `-> Bool` in docs/stdlib/list.md => FAIL 'stale ... for: list'; (2) the new type index deleted from docs/stdlib/url.md => FAIL for url (a type is a public name the block must carry); (3) the whole block stripped from docs/stdlib/compute.md => FAIL for compute (a page without a block is stale, not exempt — the generator appends one, so the diff is non-empty)"
+measures = "byte diff between each docs/stdlib/*.md page's generated block and the block rebuilt from `almide compile <module> --json` (types included) or, for the two clock pages, from the TIME_UNITS x TIME_MODULES table; read from docs/stdlib/*.md"
+varies = "#1832 (tuple members rendered as `()` until the JSON spelling was read) and #1735 (deprecated steer appended) each changed the block; 2026-09-21 #1469 added the type index to bytes/fs/net/process/url and the clock blocks to compute/duration — seven pages moved in one regeneration"
+
+[[gate]]
 path = "scripts/check-gate-verification.sh"
 reads = "UNCLASSIFIED"
 wired_by = ".github/workflows/ci.yml, lefthook.yml"
