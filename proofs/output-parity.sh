@@ -35,7 +35,12 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 source "$ROOT/proofs/lib/stamp.sh"
 stamp_toolchain "$ROOT" || exit 1
 
-BASELINE="$ROOT/proofs/output-parity-baseline.txt"
+# The corpus and the baseline are overridable for ONE consumer: the twin parity
+# test (tests/almide_gate_twin_parity_test.rs, #2163) runs this script and its
+# Almide twin over the same small purpose-built corpus with the same forged
+# baseline and demands identical bytes. The defaults are the gate.
+SPEC="${OUTPUT_PARITY_SPEC:-spec}"
+BASELINE="${OUTPUT_PARITY_BASELINE:-$ROOT/proofs/output-parity-baseline.txt}"
 TMP="${TMPDIR:-/tmp}/almide-output-parity.$$"
 mkdir -p "$TMP"
 to() { perl -e 'alarm shift @ARGV; exec @ARGV' "$@"; }   # macOS has no `timeout`
@@ -171,7 +176,7 @@ while IFS= read -r f <&3; do
     # render as wall), not just as runerr. Only the quiet re-run classifies.
     *)     suspects+=("$f:$VERDICT") ;;
   esac
-done 3< <(find spec -name '*.almd' | sort)
+done 3< <(find "$SPEC" -name '*.almd' | sort)
 # Solo retry pass — the machine is quiet now (the sweep is over). This loop
 # iterates an ARRAY, so it cannot be truncated the way the sweep was; the
 # redirect is here because a stdin-reading fixture would otherwise block on the
@@ -201,7 +206,7 @@ echo "output-parity: match=$match wall=$wall MISMATCH=$mismatch RUNERR=$runerr X
 # MISMATCH=0 — 2026-08-16). The stdin isolation in run_one fixes THAT cause; this
 # catches the next one, whatever it is.
 seen=$((match + wall + mismatch + runerr + xfail + v0fail + skip))
-corpus=$(find spec -name '*.almd' | wc -l | tr -d ' ')
+corpus=$(find "$SPEC" -name '*.almd' | wc -l | tr -d ' ')
 if [ "$seen" -ne "$corpus" ]; then
   echo "::error::output-parity: classified $seen of $corpus files — the sweep did not finish."
   echo "  Every count above is PARTIAL, and the baseline diff would report the"

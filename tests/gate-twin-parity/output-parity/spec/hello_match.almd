@@ -1,0 +1,5 @@
+// The plain MATCH row: prints, exits 0, both legs agree byte-for-byte.
+fn main() -> Unit = {
+  println("hello from both legs")
+  println(int.to_string(list.len([1, 2, 3])))
+}
