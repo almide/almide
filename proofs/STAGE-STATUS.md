@@ -13,12 +13,12 @@ by `scripts/gen-ledger-counts.sh` (a release step, or the answer to the nightly
 re-measured 2026-08-12) and `proofs/TOR.md` (the operational contract).
 
 <!-- stages:generated:start — derived from the proofs/ ledgers by scripts/gen-claims.sh; DO NOT EDIT between the markers -->
-<!-- counts:generated:start (as of 2026-09-20) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
+<!-- counts:generated:start (as of 2026-09-21) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
 > **Stage 1 (accept-and-wrong extinction): audits COMPLETE and gated** —
 > scalar-read 63 arms / 0 UNGUARDED; WAT prelude 63 fns classified;
 > platform-libm 5 sites classified. New entries cannot land unclassified.
 >
-> **Stage 2 (translation validation): 700/721 fixtures cast a real 3-way vote (97%)** —
+> **Stage 2 (translation validation): 701/722 fixtures cast a real 3-way vote (97%)** —
 > the abstain remainder is classified and shrink-only (the interp-heap arc, #1226).
 >
 > **Stage 3 (semantics freeze): 351/351 contracts spec-keyed; syntax-element coverage
