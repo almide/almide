@@ -1368,6 +1368,9 @@ jobs:
       - name: Allocation ceilings (one 2 GiB limit, every spelling agrees)
         run: bash scripts/check-alloc-ceilings.sh
 
+      - name: Domain-edges ledger admission (an availability-dependent reading never reaches the ledger, #2387)
+        run: bash scripts/check-domain-edges.sh --selftest
+
       - name: L1 verdict ledger (edit-locality prediction loop — schema and vocabularies)
         run: bash scripts/check-l1-verdicts.sh
 
