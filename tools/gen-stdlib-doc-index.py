@@ -5,6 +5,26 @@ The prose sections of those files are hand-curated; the block between the
 BEGIN/END markers is generated from the compiler's own module interface
 (`almide compile <module> --json`, served from the bundled self-hosted
 stdlib sources) so the documented surface can never drift from reality.
+The block carries every public name a caller can spell: the function
+signatures and, where a module exports any, its type declarations. The two
+clock-constructor pages (compute, duration) are checker surface with no
+module interface; their block is derived from the unit table in
+crates/almide-types/src/time_units.rs instead (see clock_table). Every
+docs/stdlib/*.md page is under the generator — a page without a block is
+stale, not exempt.
+
+What the block does NOT carry, because the input does not exist yet (#1469,
+measured 2026-09-21): a per-function doc comment and a `@since` epoch. The
+interface JSON has a `doc` slot (the `//` run above a declaration, see
+crates/almide-tools/src/interface.rs), but the stdlib sources carry no `///`
+line at all (0 of 986 public fns), and the by-name route this generator uses
+serves the EMBEDDED source, which crates/almide-types/build.rs blanks of
+every comment line — so `doc` is null for every stdlib fn whatever the
+source says. The file route (`compile stdlib/<m>.almd`) keeps comments but
+is not signature-equivalent (3 modules fail to compile standalone, 7 differ
+in JSON), so it is not a drop-in input. Per-function prose is the
+hand-written section above the block until a compiler change serves
+comments on the by-name route.
 
 Usage:
     python3 tools/gen-stdlib-doc-index.py            # rewrite blocks in place
@@ -95,14 +115,85 @@ def module_block(module: str) -> str:
     lines = [BEGIN, "", f"## Signature index ({len(fns)} functions)", "", "```"]
     for f in fns:
         lines.append(signature(module, f))
+    lines += ["```"]
+    # Exported types are public names too (#1469): a module's record /
+    # variant / alias declarations are part of the surface a caller can
+    # spell, so they are derived here rather than hand-written in the prose.
+    # Modules without types keep the block byte-identical to before.
+    types = iface.get("types", [])
+    if types:
+        lines += ["", f"## Type index ({len(types)} types)", "", "```"]
+        for t in types:
+            lines.append(type_decl(module, t))
+        lines += ["```"]
+    lines += ["", END]
+    return "\n".join(lines)
+
+
+def type_decl(module: str, t: dict) -> str:
+    kind = t.get("kind", {})
+    k = kind.get("kind", "?")
+    name = f"{module}.{t.get('name', '?')}"
+    if k == "record":
+        fields = ", ".join(f"{f['name']}: {render_ty(f['type'])}" for f in kind.get("fields", []))
+        return f"type {name} = {{ {fields} }}"
+    if k == "variant":
+        cases = " | ".join(case_decl(c) for c in kind.get("cases", []))
+        return f"type {name} = {cases}"
+    if k == "alias":
+        return f"type {name} = {render_ty(kind['target'])}"
+    return f"type {name}   ({k})"
+
+
+def case_decl(c: dict) -> str:
+    # CasePayload (crates/almide-tools/src/interface.rs): a tuple payload
+    # lists TypeRefs under `fields`; a record payload lists named fields.
+    p = c.get("payload")
+    if not p:
+        return c["name"]
+    if p.get("kind") == "record":
+        inner = ", ".join(f"{f['name']}: {render_ty(f['type'])}" for f in p.get("fields", []))
+        return f"{c['name']}({{ {inner} }})"
+    return f"{c['name']}({', '.join(render_ty(t) for t in p.get('fields', []))})"
+
+
+# The two clock-constructor pages (compute, duration) document CHECKER
+# surface, not a bundled module: `almide compile compute --json` has nothing
+# to serve. Their surface is the closed unit set × the two nominal clocks,
+# owned by crates/almide-types/src/time_units.rs (TIME_UNITS, TIME_MODULES;
+# the Rust-side counter in src/cli/docs_gen.rs reads the same table
+# in-process). Deriving the block from that table keeps all 45 pages under
+# one generator; a table the regex below cannot read is a loud failure, never
+# a silent empty index.
+TIME_UNITS_RS = os.path.join(REPO, "crates", "almide-types", "src", "time_units.rs")
+
+
+def clock_table() -> tuple[list[str], dict[str, str]]:
+    import re
+    with open(TIME_UNITS_RS, encoding="utf-8") as fh:
+        src = fh.read()
+    units_m = re.search(r"pub const TIME_UNITS: &\[\(&str, i64\)\] = &\[(.*?)\];", src, re.S)
+    mods_m = re.search(r"pub const TIME_MODULES: &\[\(&str, &str\)\] = &\[(.*?)\];", src, re.S)
+    if not units_m or not mods_m:
+        raise SystemExit(f"error: TIME_UNITS / TIME_MODULES not found in {TIME_UNITS_RS}")
+    units = re.findall(r'\("(\w+)",\s*[\d_]+\)', units_m.group(1))
+    mods = dict(re.findall(r'\("(\w+)",\s*"(\w+)"\)', mods_m.group(1)))
+    if not units or not mods:
+        raise SystemExit(f"error: TIME_UNITS / TIME_MODULES parsed empty from {TIME_UNITS_RS}")
+    return units, mods
+
+
+def clock_block(module: str, units: list[str], clock_type: str) -> str:
+    lines = [BEGIN, "", f"## Signature index ({len(units)} functions)", "", "```"]
+    for u in units:
+        lines.append(f"{module}.{u}(n: Int) -> {clock_type}")
     lines += ["```", "", END]
     return "\n".join(lines)
 
 
-def apply(path: str, module: str, check: bool) -> bool:
+def apply(path: str, module: str, check: bool, block: str) -> bool:
     with open(path, encoding="utf-8") as fh:
         src = fh.read()
-    block = module_block(module)
     if BEGIN in src and END in src:
         head, rest = src.split(BEGIN, 1)
         _, tail = rest.split(END, 1)
@@ -121,17 +212,17 @@ def apply(path: str, module: str, check: bool) -> bool:
 def main() -> int:
     check = "--check" in sys.argv
     stale = []
+    units, clocks = clock_table()
     for name in sorted(os.listdir(DOCS)):
         if not name.endswith(".md"):
             continue
         module = name[:-3]
-        # Clock-constructor pages document checker surface, not a module
-        # interface (authority: almide_types::time_units::TIME_MODULES; the
-        # Rust-side counter in src/cli/docs_gen.rs reads that table directly).
-        if module in ("compute", "duration"):
-            continue
         path = os.path.join(DOCS, name)
-        if apply(path, module, check):
+        if module in clocks:
+            block = clock_block(module, units, clocks[module])
+        else:
+            block = module_block(module)
+        if apply(path, module, check, block):
             stale.append(module)
     if check and stale:
         print(f"::error::stale stdlib doc signature index for: {', '.join(stale)} "

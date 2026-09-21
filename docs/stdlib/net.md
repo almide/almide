@@ -106,4 +106,11 @@ effect net.tcp_accept(listener: Int) -> Int
 effect net.tcp_close_listener(listener: Int) -> Unit
 ```
 
+## Type index (2 types)
+
+```
+type net.TcpStream = Int
+type net.TcpListener = Int
+```
+
 <!-- END GENERATED SIGNATURE INDEX -->

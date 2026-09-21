@@ -101,4 +101,10 @@ url.query_pairs(query: String) -> List[(String, String)]
 url.build_query(pairs: List[(String, String)]) -> String
 ```
 
+## Type index (1 types)
+
+```
+type url.Url = { scheme: String, host: String, port: Option[Int], path: String, query: String, fragment: String }
+```
+
 <!-- END GENERATED SIGNATURE INDEX -->
