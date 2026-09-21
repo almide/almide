@@ -56,34 +56,55 @@
 # are deterministic on any machine — `i64::MAX` is a size nothing can satisfy,
 # so no amount of free memory changes the answer.
 #
-# The two `i32_max` rows go for a DIFFERENT reason from the other four, and the
-# difference is the whole reason this note is long. `i32_max` asks both legs for
-# 2 GiB, and the wasm leg's ceiling on this path is `StoreLimits::default()`
+# The two `i32_max` rows went for a DIFFERENT reason from the other four.
+# `i32_max` asks both legs for 2 GiB, and the wasm leg's ceiling on the
+# `almide run --target wasm` path is `StoreLimits::default()`
 # (`crates/almide-wasm-run/src/host.rs:663`) — HOST AVAILABILITY, not a
-# structural bound. So the verdict for an `i32_max` cell tracks how much memory
-# was free when it ran. `tools/domain_edge_matrix.py:306-322` documents this in
-# its own words and names these exact two rows as the measured phantom: a sweep
-# run concurrently with another heavy job called them divergent; on a quiet
-# machine both legs agree. They are deleted because a phantom that landed once
-# was being declared forever, NOT because anything about them was fixed.
-#
-# The same run reported three UNDECLARED bytes cells — `bytes.new:len:i32_max`
-# and the `i32_max` cell of both `bytes.pad_*`. They are the same phantom in the
-# other direction: CI measures under six parallel jobs, which is exactly the
-# pressure the tool's solo-retry was built for and exactly the pressure it
-# cannot escape there. They are NOT declared here. Declaring them would write
-# one machine's free memory into a ledger that claims to measure the compiler,
-# which is how the two rows above got in. The gate stays red on bytes until the
-# wasm leg's cap is PINNED (#2387) — `run_wasm_capped` already exists at
-# `host.rs:626` and is unused on this path — at which point the boundary
-# becomes structural and the verdict reproducible, and whatever is then true
-# can be recorded. #2387 also makes the point that capping only the wasm leg
-# MOVES the phantom rather than killing it: the same 2 GiB race then runs in
-# the other direction, so native needs the same cap.
+# structural bound. So the verdict for an `i32_max` cell tracked how much memory
+# was free when it ran: a sweep run concurrently with another heavy job called
+# them divergent; on a quiet machine both legs agreed. They were deleted because
+# a phantom that landed once was being declared forever, NOT because anything
+# about them was fixed — and the same run reported the three bytes cells
+# (`bytes.new:len`, `bytes.pad_left`/`pad_right:target_len`) the other way.
 #     string: DIVERGE 8 -> 4;  count 64 -> 62;  UNTRIAGED stays 0.
+#
+# 2026-09-21, #2387 — THE BUDGET PIN. `wasm_budget_bytes` below is the
+# linear-memory budget every wasm reading in this file was taken under:
+# tools/domain_edge_matrix.py builds the module and runs it on the wasmtime CLI
+# with `-W max-memory-size=<budget>`, so a request past the budget takes the
+# defined C-197 abort on EVERY machine, and the `i32_max` cells that read
+# AGREE and DIVERGE from one binary minutes apart now read one thing. The
+# native leg is uncapped: RLIMIT_AS is unenforced on Darwin (setrlimit ->
+# EINVAL), so a native cap would split the local and CI verdicts, and its 2 GiB
+# request at `i32_max` is the same availability claim this file already makes
+# at 4 GiB for every `u32_max` row (#2387 item 2, open). The verdict that moved
+# in every recorded reading was the wasm leg's, and that one is pinned.
+#
+# What the pin changed, measured 2026-09-21 on `almide 0.63.0 (dev)`, three runs
+# plus one under a 6 GiB memory hog, identical on all four: the five 1-byte-
+# element `i32_max` cells (`bytes.new:len`, `bytes.pad_left`/`pad_right:
+# target_len`, `string.pad_start`/`pad_end:n`) are now DIVERGE at the declared
+# budget — the wasm leg aborts structurally, native answers — and are declared
+# below with the C-197 reason, which is what they were whenever the machine
+# happened to have 2 GiB free. The 17 `i32_max` rows already here (array
+# readers, `bytes.repeat`, `list.range`) request >= 4 GiB on wasm32 and were
+# structural before the pin; they do not move. The count is a ceiling on the
+# UNTRIAGED population, which stays 0; these five are the instrument's fixed
+# boundary made visible, not new defects.
+#     bytes: DIVERGE +3; string: DIVERGE +2;  count 62 -> 67.
+#
+# tools/domain_edge_ledger.py REFUSES a measurement that is not pinned to this
+# budget (absent, different, or a cell marked unpinned) before diffing it, so an
+# availability reading can neither fail the gate nor be written here.
+# `scripts/check-domain-edges.sh --selftest` proves that with forged cells.
 
-count = 62
+wasm_budget_bytes = 1073741824
+count = 67
 skip_count = 186
+
+[[divergence]]
+cell   = "bytes.new:len:i32_max"
+reason = "contracted divergence (C-197) at the declared wasm budget (#2387): a 2 GiB request (1-byte element at i32_max) exceeds wasm_budget_bytes, so the wasm leg takes the defined abort structurally while native answers; unpinned, this cell read AGREE and DIVERGE from one binary minutes apart"
 
 [[divergence]]
 cell   = "bytes.new:len:two_pow_32"
@@ -94,12 +115,20 @@ cell   = "bytes.new:len:u32_max"
 reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
 
 [[divergence]]
+cell   = "bytes.pad_left:target_len:i32_max"
+reason = "contracted divergence (C-197) at the declared wasm budget (#2387): a 2 GiB request (1-byte element at i32_max) exceeds wasm_budget_bytes, so the wasm leg takes the defined abort structurally while native answers; unpinned, this cell read AGREE and DIVERGE from one binary minutes apart"
+
+[[divergence]]
 cell   = "bytes.pad_left:target_len:two_pow_32"
 reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
 
 [[divergence]]
 cell   = "bytes.pad_left:target_len:u32_max"
 reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.pad_right:target_len:i32_max"
+reason = "contracted divergence (C-197) at the declared wasm budget (#2387): a 2 GiB request (1-byte element at i32_max) exceeds wasm_budget_bytes, so the wasm leg takes the defined abort structurally while native answers; unpinned, this cell read AGREE and DIVERGE from one binary minutes apart"
 
 [[divergence]]
 cell   = "bytes.pad_right:target_len:two_pow_32"
@@ -318,12 +347,20 @@ cell   = "list.range:start:i32_min"
 reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
 
 [[divergence]]
+cell   = "string.pad_end:n:i32_max"
+reason = "contracted divergence (C-197) at the declared wasm budget (#2387): a 2 GiB request (1-byte element at i32_max) exceeds wasm_budget_bytes, so the wasm leg takes the defined abort structurally while native answers; unpinned, this was the measured phantom (declared 2026-08-17, deleted 2026-09-21, now reproducible)"
+
+[[divergence]]
 cell   = "string.pad_end:n:two_pow_32"
 reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
 
 [[divergence]]
 cell   = "string.pad_end:n:u32_max"
 reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "string.pad_start:n:i32_max"
+reason = "contracted divergence (C-197) at the declared wasm budget (#2387): a 2 GiB request (1-byte element at i32_max) exceeds wasm_budget_bytes, so the wasm leg takes the defined abort structurally while native answers; unpinned, this was the measured phantom (declared 2026-08-17, deleted 2026-09-21, now reproducible)"
 
 [[divergence]]
 cell   = "string.pad_start:n:two_pow_32"
