@@ -41,6 +41,11 @@ fn load_tsv_by_path(path: &Path, path_col_second: bool) -> BTreeMap<String, Stri
 fn spec_corpus_ast_matches_oracle_hashes() {
     let root = workspace_root();
     let golden = root.join("crates/almide-syntax/tests/golden");
+    // #2405: the `# oracle:` header is read, not skipped — the rows must have
+    // been recorded by the CLI built from this tree (version + `dev`).
+    let text = std::fs::read_to_string(golden.join("spec-ast-manifest.txt")).expect("run scripts/gen-ast-manifest.sh");
+    almide_corpus::verify_oracle_header(&root, &text)
+        .unwrap_or_else(|e| panic!("spec-ast-manifest.txt: {e}"));
     let manifest = load_tsv_by_path(&golden.join("spec-ast-manifest.txt"), true);
     let exclusions = load_tsv_by_path(&golden.join("spec-ast-exclusions.txt"), false);
 

@@ -40,6 +40,10 @@ fn wasm_cross_fixtures_run_identically_on_the_interpreter() {
     let golden = root.join("crates/almide-spine/tests/golden");
     let mut manifest: BTreeMap<String, (String, i32)> = BTreeMap::new();
     let text = std::fs::read_to_string(golden.join("spec-run-manifest.txt")).expect("run scripts/gen-run-manifest.sh");
+    // #2405: the `# oracle:` header is read, not skipped — the rows must have
+    // been recorded by the CLI built from this tree (version + `dev`).
+    almide_corpus::verify_oracle_header(&root, &text)
+        .unwrap_or_else(|e| panic!("spec-run-manifest.txt: {e}"));
     for l in almide_corpus::manifest_rows(&text) {
         let mut it = l.splitn(3, '\t');
         let h = it.next().expect("test harness invariant").to_string();
