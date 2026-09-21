@@ -122,6 +122,7 @@ jobs:
     # stats, the build-speed block, `almide docs-gen --check`), Lean proofs.
     name: Change class (docs-only skips the test matrix)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     outputs:
       docs_only: ${{ steps.classify.outputs.docs_only }}
     steps:
@@ -173,6 +174,7 @@ jobs:
     # silently green.
     name: Ratchet-commit separation (each commit keeps verification artifacts apart from implementation)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
         with:
@@ -219,6 +221,7 @@ jobs:
     if: github.server_url == 'https://github.com'
     name: Build (Linux)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
@@ -315,6 +318,7 @@ jobs:
     needs: [changes, build, test-rust-solo]
     if: ${{ !cancelled() && needs.build.result == 'success' && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Every solo leg passed (they carry five corpus gates the shards no longer run)
         if: needs.test-rust-solo.result != 'success'
@@ -424,6 +428,7 @@ jobs:
     # docs-only change the four shards expand, run nothing, and report
     # success under their real names in seconds.
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     env:
       DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
     strategy:
@@ -497,6 +502,7 @@ jobs:
     name: Test Rust (solo ${{ matrix.leg }})
     needs: [changes, build]
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     env:
       DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
     strategy:
@@ -563,6 +569,7 @@ jobs:
     needs: [changes, build]
     if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
@@ -703,6 +710,7 @@ jobs:
     # [workspace], so it is driven via --manifest-path (a root `-p almide-kernel`
     # cannot see an excluded package). No `needs: build` — it tests only the kernel.
     runs-on: macos-14
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
@@ -733,6 +741,7 @@ jobs:
     needs: [changes, build]
     if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
@@ -880,6 +889,7 @@ jobs:
     needs: changes
     if: github.server_url == 'https://github.com' && needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
@@ -973,6 +983,7 @@ jobs:
     needs: changes
     if: github.server_url == 'https://github.com' && needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
@@ -1059,6 +1070,7 @@ jobs:
     if: github.server_url == 'https://github.com'
     name: Lean Proofs (0 sorry)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
@@ -1258,6 +1270,7 @@ jobs:
     name: Emit & Format
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
@@ -1534,6 +1547,7 @@ jobs:
     needs: [changes, build]
     if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
@@ -1799,6 +1813,7 @@ jobs:
             artifact: almide-windows
             binary: almide-bin/almide.exe
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
 
@@ -1832,6 +1847,7 @@ jobs:
     needs: [test-rust, test-rust-solo, checks, wasm-host-determinism]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Dispatch playground deploy
         # --fail-with-body: without it an expired PLAYGROUND_DISPATCH_TOKEN
@@ -2021,6 +2037,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - uses: Swatinem/rust-cache@v2
@@ -2076,6 +2093,7 @@ jobs:
     needs: changes
     if: github.event_name == 'pull_request' && needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
         with:
