@@ -32,7 +32,9 @@ Rules of use:
 
 - Measured by [`scripts/count-release-blockers.sh`](../../scripts/count-release-blockers.sh);
   the release workflow runs it with `--gate` before creating a final release,
-  so the rule is enforced, not remembered.
+  so the rule is enforced, not remembered. The number it prints is the count
+  of **distinct** open issues: one issue carrying two classes is one blocker,
+  not two (#2400). The per-label breakdown above the total shows the overlap.
 - An `-rc` prerelease tag is exempt (an RC exists precisely to soak a tree —
   see the RC procedure in `CLAUDE.md`); the count is still printed.
 - The escape hatch is **demotion, not waiver**: if a blocker is judged
