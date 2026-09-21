@@ -1,0 +1,53 @@
+{
+ "total_count": 8,
+ "workflow_runs": [
+  {
+   "id": 35576825632,
+   "conclusion": null,
+   "status": "in_progress",
+   "created_at": "2026-09-21T08:14:04Z"
+  },
+  {
+   "id": 35498209567,
+   "conclusion": "failure",
+   "status": "completed",
+   "created_at": "2026-09-20T07:56:35Z"
+  },
+  {
+   "id": 35429665137,
+   "conclusion": "success",
+   "status": "completed",
+   "created_at": "2026-09-19T07:33:50Z"
+  },
+  {
+   "id": 35320397098,
+   "conclusion": "failure",
+   "status": "completed",
+   "created_at": "2026-09-18T07:38:29Z"
+  },
+  {
+   "id": 35197378809,
+   "conclusion": "failure",
+   "status": "completed",
+   "created_at": "2026-09-17T08:00:25Z"
+  },
+  {
+   "id": 35071079068,
+   "conclusion": "failure",
+   "status": "completed",
+   "created_at": "2026-09-16T07:56:10Z"
+  },
+  {
+   "id": 35000000001,
+   "conclusion": "failure",
+   "status": "completed",
+   "created_at": "2026-09-15T07:55:00Z"
+  },
+  {
+   "id": 35000000000,
+   "conclusion": "failure",
+   "status": "completed",
+   "created_at": "2026-09-14T07:52:00Z"
+  }
+ ]
+}

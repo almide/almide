@@ -3,8 +3,8 @@
 //
 // The tool answers two closure conditions with one command:
 //
-//   #924 — 14 consecutive FULL-BUDGET nights (the campaign step completed, findings or not)
-//   #796 —  2 consecutive GREEN nights       (the campaign completed and found nothing)
+//   #924 — 14 consecutive nights WITH A VERDICT (the aggregation ran, findings or not)
+//   #796 —  2 consecutive GREEN nights       (a verdict was delivered and it found nothing)
 //
 // The bash reads both from the GitHub API through `gh api --jq`, which means jq does the
 // extraction and the shell only formats. This port parses the API's JSON in Almide instead.
@@ -14,12 +14,34 @@
 // quote, a `sed` that mistook a terminator for an empty line). Parsing here puts the shape of
 // the response in front of the compiler.
 //
-// Reporting tool, NOT a CI gate — it needs `gh` auth and network.
+// SHARDED NIGHTS. Since 2026-08-08 the campaign runs as N parallel shard jobs aggregated by a
+// `Night verdict` job that runs `if: always()`, so a reclaimed shard costs 1/N of the night's
+// coverage and nothing else. A night is scored from the VERDICT job — GREEN / FINDINGS / NO
+// VERDICT — and its `shards` column reports how many shard jobs completed (k/N). Nights
+// before the sharding change have no verdict job and are scored the old way, from the single
+// campaign job's step, with coverage `1/1`.
+//
+// This twin DRIFTED from the bash on exactly that axis and the #2163 diff found it on its
+// first run: the port still printed the four-column, pre-sharding table (no `shards` column,
+// no verdict job, `full-budget streak:` where the bash says `verdict streak:`). It would have
+// scored every sharded night as TRUNCATED. Reproduced here as the bash writes it.
+//
+// Reporting tool, NOT a CI gate — it needs `gh` auth and network. The twin parity test feeds
+// both sides recorded responses through a `gh` shim on PATH (tests/gate-twin-parity/).
 import process
 import json
+import env
 import streak
 
-type Night = { date: String, id: String, conclusion: String, verdict: String, scored: Bool }
+type Night = { date: String, id: String, conclusion: String, coverage: String, verdict: String, scored: Bool }
+
+let verdict_job_name = "Night verdict"
+
+// Pre-2026-08-08 nights ran a single unsharded campaign job; keep reading them so the
+// history above the sharding change stays scoreable.
+let legacy_job_name = "Generative differential fuzz"
+
+let legacy_step_name = "Run fuzz campaign"
 
 effect fn gh_api(path: String) -> String = {
   let st = process.exec_status("gh", ["api", path]) ?? process.ProcessStatus {
@@ -46,85 +68,133 @@ fn date_of(run: json.Value) -> String = list.get_or(
   "",
 )
 
-// The campaign STEP's conclusion, which is what separates a night that ran out of budget from
-// one whose runner was reclaimed. The step's script only reaches its exit after the campaign
-// returns, so a reclaimed runner cannot leave it `success` — that is the whole reason the
-// verdict reads the step and not just the run.
-fn campaign_step(jobs_json: json.Value, job_name: String, step_name: String) -> String = {
-  let jobs = json.get_array(jobs_json, "jobs") ?? []
-  let job = jobs |> list.find((j) => (json.get_string(j, "name") ?? "") == job_name)
-  match job {
-    some(j) => {
-      let steps = json.get_array(j, "steps") ?? []
-      let st = steps |> list.find((s) => (json.get_string(s, "name") ?? "") == step_name)
-      match st {
-        some(s) => json.get_string(s, "conclusion") ?? "absent",
-        none => "absent",
-      }
-    },
-    none => "absent",
-  }
+fn jobs_of(jobs_json: json.Value) -> List[json.Value] = json.get_array(jobs_json, "jobs") ?? []
+
+fn job_named(jobs_json: json.Value, name: String) -> json.Value? = jobs_of(jobs_json) |> list.find((j) => (json.get_string(j, "name") ?? "") == name)
+
+// `[.jobs[] | select(.name == "Night verdict") | .conclusion][0] // "absent"` — a night with
+// no verdict job at all is a LEGACY night, and so is one whose verdict job has no conclusion
+// yet (jq's `//` treats `null` the same as a missing element).
+fn verdict_job(jobs_json: json.Value) -> String = match job_named(jobs_json, verdict_job_name) {
+  some(j) => json.get_string(j, "conclusion") ?? "absent",
+  none => "absent",
 }
 
-// `printf '%-12s %-13s %-11s %s\n'` — left-justified, space-padded, and the LAST column is not
-// padded at all. Padding it would add trailing spaces to every row.
-fn row(date: String, id: String, conclusion: String, verdict: String) -> String = string.pad_end(
+// The campaign STEP's conclusion, which is what separates a legacy night that ran out of
+// budget from one whose runner was reclaimed. The step's script only reaches its exit after
+// the campaign returns, so a reclaimed runner cannot leave it `success` — that is the whole
+// reason the legacy verdict reads the step and not just the run.
+fn campaign_step(jobs_json: json.Value, job_name: String, step_name: String) -> String = match job_named(
+  jobs_json,
+  job_name,
+) {
+  some(j) => {
+    let steps = json.get_array(j, "steps") ?? []
+    let st = steps |> list.find((s) => (json.get_string(s, "name") ?? "") == step_name)
+    match st {
+      some(s) => json.get_string(s, "conclusion") ?? "absent",
+      none => "absent",
+    }
+  },
+  none => "absent",
+}
+
+// `shards=k/N`: of the jobs whose name starts with the campaign name, how many concluded
+// `success`, over how many there are. A shard with no conclusion counts in N and not in k.
+fn coverage_of(jobs_json: json.Value) -> String = {
+  let shards = jobs_of(jobs_json) |> list.filter((j) => string.starts_with(json.get_string(j, "name") ?? "", legacy_job_name))
+  let done = shards |> list.filter((j) => (json.get_string(j, "conclusion") ?? "") == "success") |> list.len
+  int.to_string(done) + "/" + int.to_string(list.len(shards))
+}
+
+// `printf '%-12s %-13s %-11s %-9s %s\n'` — left-justified, space-padded, and the LAST column
+// is not padded at all. Padding it would add trailing spaces to every row.
+fn row(date: String, id: String, conclusion: String, shards: String, verdict: String) -> String = string.pad_end(
   date,
   12,
   " ",
-) + " " + string.pad_end(id, 13, " ") + " " + string.pad_end(conclusion, 11, " ") + " " + verdict
+) + " " + string.pad_end(id, 13, " ") + " " + string.pad_end(conclusion, 11, " ") + " " + string.pad_end(
+  shards,
+  9,
+  " ",
+) + " " + verdict
 
 // A run still in flight is PRINTED but not SCORED. Dropping it would silently shift the streak
 // window by one night; scoring it would count a night that has not happened yet.
 fn in_flight(state: String) -> Bool = state == "in_progress" or state == "queued"
 
-fn verdict_text(conclusion: String, step: String) -> String = {
-  let v = streak.verdict(conclusion, step)
-  match v {
-    "GREEN" => "GREEN",
-    "FINDINGS" => "FINDINGS (full budget, red on findings)",
-    _ => "TRUNCATED (campaign step: " + step + ")",
-  }
+// A legacy (unsharded) night, scored from the campaign step.
+fn legacy_verdict(conclusion: String, step: String) -> String = match streak.verdict(
+  conclusion,
+  step,
+) {
+  "GREEN" => "GREEN",
+  "FINDINGS" => "FINDINGS (full budget, red on findings)",
+  _ => "TRUNCATED (campaign step: " + step + ")",
 }
 
-effect fn night_of(repo: String, run: json.Value, job_name: String, step_name: String) -> Night = {
+// A sharded night, scored from the verdict job alone: the aggregation either ran and found
+// nothing, ran and found something, or never concluded.
+fn sharded_verdict(vjob: String) -> String = match vjob {
+  "success" => "GREEN",
+  "failure" => "FINDINGS (verdict delivered, red on findings)",
+  _ => "NO VERDICT (verdict job: " + vjob + ")",
+}
+
+effect fn night_of(repo: String, run: json.Value) -> Night = {
   let state = run_state(run)
   let id = int.to_string(json.get_int(run, "id") ?? 0)
   if in_flight(state) then Night {
     date: date_of(run),
     id: id,
     conclusion: state,
+    coverage: "-",
     verdict: "IN PROGRESS (not scored)",
     scored: false,
   } else {
     let jobs = json.parse(gh_api("repos/" + repo + "/actions/runs/" + id + "/jobs")!) ?? value.null()
-    let step = campaign_step(jobs, job_name, step_name)
+    let vjob = verdict_job(jobs)
+    let legacy = vjob == "absent"
+    let coverage = if legacy then "1/1" else coverage_of(jobs)
+    let verdict = if legacy then legacy_verdict(
+      state,
+      campaign_step(jobs, legacy_job_name, legacy_step_name),
+    )
+    else sharded_verdict(vjob)
     Night {
       date: date_of(run),
       id: id,
       conclusion: state,
-      verdict: verdict_text(state, step),
+      coverage: coverage,
+      verdict: verdict,
       scored: true,
     }
   }
 }
 
-effect fn report(repo: String, n: Int, job_name: String, step_name: String) -> List[String] = {
+// `REPO="${FUZZ_REPO:-almide/almide}"` — the same override the bash honours.
+effect fn repo_of() -> String = {
+  let r = env.get("FUZZ_REPO") ?? ""
+  if r == "" then "almide/almide" else r
+}
+
+effect fn report(n: Int) -> List[String] = {
+  let repo = repo_of()!
   let url = "repos/" + repo + "/actions/workflows/fuzz-nightly.yml/runs?event=schedule&per_page=" + int.to_string(n)
   let runs = json.get_array(json.parse(gh_api(url)!) ?? value.null(), "workflow_runs") ?? []
   var nights: List[Night] = []
   for r in runs {
     nights = nights + [
-      night_of(repo, r, job_name, step_name)!
+      night_of(repo, r)!
     ]
   }
-  let header = row("date", "run", "conclusion", "verdict")
-  let rows = nights |> list.map((x) => row(x.date, x.id, x.conclusion, x.verdict))
+  let header = row("date", "run", "conclusion", "shards", "verdict")
+  let rows = nights |> list.map((x) => row(x.date, x.id, x.conclusion, x.coverage, x.verdict))
   // Only SCORED nights reach the fold — an in-flight run is not a night.
   let s = streak.streaks(nights |> list.filter((x) => x.scored) |> list.map((x) => streak.verdict_key(x.verdict)))
   [header] + rows + [
     "",
-    "full-budget streak: " + int.to_string(s.full) + "/14  (#924 closes at 14)",
+    "verdict streak:     " + int.to_string(s.full) + "/14  (#924 closes at 14)",
     "green streak:       " + int.to_string(s.green) + "/2   (#796 needs 2 consecutive)"
   ]
 }
@@ -133,20 +203,20 @@ test "the row format is the printf widths, and the last column is not padded" {
   // A padded final column adds trailing spaces to every line — invisible on screen, and a
   // byte difference against the original on every row.
   assert_eq(
-    row("2026-08-01", "123", "success", "GREEN"),
-    "2026-08-01   123           success     GREEN",
+    row("2026-08-01", "123", "success", "8/8", "GREEN"),
+    "2026-08-01   123           success     8/8       GREEN",
   )
   assert_eq(
-    row("date", "run", "conclusion", "verdict"),
-    "date         run           conclusion  verdict",
+    row("date", "run", "conclusion", "shards", "verdict"),
+    "date         run           conclusion  shards    verdict",
   )
 }
 
 test "an over-wide field is not truncated, only under-wide ones are padded" {
   // `printf`'s `%-12s` is a MINIMUM width. Truncating instead would corrupt a long run id.
   assert_eq(
-    row("2026-08-01", "99999999999999999", "x", "y"),
-    "2026-08-01   99999999999999999 x           y",
+    row("2026-08-01", "99999999999999999", "x", "1/1", "y"),
+    "2026-08-01   99999999999999999 x           1/1       y",
   )
 }
 
@@ -157,9 +227,32 @@ test "a run still in flight is printed but not scored" {
   assert_eq(in_flight("failure"), false)
 }
 
-test "the verdict text carries the step name only when the night was truncated" {
-  assert_eq(verdict_text("success", "success"), "GREEN")
-  assert_eq(verdict_text("failure", "success"), "FINDINGS (full budget, red on findings)")
-  assert_eq(verdict_text("failure", "absent"), "TRUNCATED (campaign step: absent)")
-  assert_eq(verdict_text("cancelled", "cancelled"), "TRUNCATED (campaign step: cancelled)")
+test "a legacy night carries the step name only when it was truncated" {
+  assert_eq(legacy_verdict("success", "success"), "GREEN")
+  assert_eq(legacy_verdict("failure", "success"), "FINDINGS (full budget, red on findings)")
+  assert_eq(legacy_verdict("failure", "absent"), "TRUNCATED (campaign step: absent)")
+  assert_eq(legacy_verdict("cancelled", "cancelled"), "TRUNCATED (campaign step: cancelled)")
+}
+
+test "a sharded night is scored from the verdict job alone" {
+  assert_eq(sharded_verdict("success"), "GREEN")
+  assert_eq(sharded_verdict("failure"), "FINDINGS (verdict delivered, red on findings)")
+  assert_eq(sharded_verdict("cancelled"), "NO VERDICT (verdict job: cancelled)")
+}
+
+test "coverage counts completed shards over all shards, and a null conclusion is not completed" {
+  let jobs = json.parse("{\"jobs\":[{\"name\":\"Build compiler + fuzzer (x86_64)\",\"conclusion\":\"success\",\"steps\":[]},{\"name\":\"Generative differential fuzz (shard 1, x86_64)\",\"conclusion\":\"success\",\"steps\":[]},{\"name\":\"Generative differential fuzz (shard 2, x86_64)\",\"conclusion\":\"cancelled\",\"steps\":[]},{\"name\":\"Generative differential fuzz (shard 3, x86_64)\",\"conclusion\":null,\"steps\":[]},{\"name\":\"Night verdict\",\"conclusion\":\"failure\",\"steps\":[]}]}") ?? value.null()
+  assert_eq(coverage_of(jobs), "1/3")
+  assert_eq(verdict_job(jobs), "failure")
+}
+
+test "a night with no verdict job, or one without a conclusion, reads as legacy" {
+  let none_at_all = json.parse("{\"jobs\":[{\"name\":\"Generative differential fuzz\",\"conclusion\":\"failure\",\"steps\":[{\"name\":\"Run fuzz campaign\",\"conclusion\":\"success\"}]}]}") ?? value.null()
+  assert_eq(verdict_job(none_at_all), "absent")
+  assert_eq(
+    campaign_step(none_at_all, "Generative differential fuzz", "Run fuzz campaign"),
+    "success",
+  )
+  let unconcluded = json.parse("{\"jobs\":[{\"name\":\"Night verdict\",\"conclusion\":null,\"steps\":[]}]}") ?? value.null()
+  assert_eq(verdict_job(unconcluded), "absent")
 }
