@@ -283,7 +283,8 @@
 25104	spec/wasm_cross/json_many_keys.almd
 23760	spec/wasm_cross/json_number_unicode.almd
 22143	spec/wasm_cross/json_parse_lenient_edges.almd
-29796	spec/wasm_cross/json_path_edges.almd
+29904	spec/wasm_cross/json_path_edges.almd
+28476	spec/wasm_cross/json_path_index_domain.almd
 22180	spec/wasm_cross/json_string_span.almd
 7614	spec/wasm_cross/json_stringify_pretty.almd
 25086	spec/wasm_cross/json_value.almd
