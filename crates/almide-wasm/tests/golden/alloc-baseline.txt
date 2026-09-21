@@ -369,8 +369,8 @@
 67264	spec/wasm_cross/map_entries_reclaim.almd
 66144	spec/wasm_cross/map_filter.almd
 66688	spec/wasm_cross/map_fold.almd
-66528	spec/wasm_cross/map_fold_heap_acc.almd
-66560	spec/wasm_cross/map_fold_heap_acc_skv.almd
+66496	spec/wasm_cross/map_fold_heap_acc.almd
+66416	spec/wasm_cross/map_fold_heap_acc_skv.almd
 65920	spec/wasm_cross/map_fold_heap_accumulator.almd
 108976	spec/wasm_cross/map_index_order.almd
 66864	spec/wasm_cross/map_index_string_key_shapes.almd
