@@ -66,25 +66,24 @@
 # A RATCHET (the check detects one from the gate's own text: a committed
 # `*-baseline.txt`, an in-source `MAX_*=` ceiling, a `*_ceiling`) must carry
 # `varies` — that is exactly the row class the ablation rows were. Any other
-# row may leave it empty under the shrink-only ceiling below; the 2 as of
-# #2234 are the two Almide twins (`output-parity`, `fuzz-track-record`) that
-# are UNVERIFIED for the same reason (#2130): nothing has run them against
-# their originals, so nothing has seen their quantity move.
+# row may leave it empty under the shrink-only ceiling below. The two that
+# sat there as of #2234 — the Almide twins `output-parity` and
+# `fuzz-track-record`, UNVERIFIED because nothing had run them against their
+# originals — joined the twin parity test in #2163 and both ceilings are 0.
 #
-# unverified_ceiling = "2"
+# unverified_ceiling = "0"
 # unclassified_reads_ceiling = "81"
-# unwired_ceiling = "6"
-# unvaried_ceiling = "2"
+# unwired_ceiling = "2"
+# unvaried_ceiling = "0"
 #
-# The ceiling moved 0 -> 2 for the first time since it reached 0, and the reason
-# is the opposite of a regression: enumerating the Almide gates (#2128) brought
-# `output-parity` and `fuzz-track-record` INTO the ledger's field of view. Their
-# debt is not new — nothing has ever compared either twin to its `.sh` original,
-# which is exactly what #2130 is open about; what is new is that the ledger can
-# see it. A gate the ledger cannot see is worse than one it records as
-# unverified. The burn-down is #2130 step 1 for those two twins (`output-parity`
-# sweeps the whole corpus and `fuzz-track-record` queries the GitHub API, so
-# each needs a fixture design of its own), and this ceiling returns to 0 there.
+# History of the unverified ceiling: it moved 0 -> 2 when enumerating the
+# Almide gates (#2128) brought `output-parity` and `fuzz-track-record` INTO the
+# ledger's field of view — debt that was not new, only newly visible — and
+# back to 0 at #2163, where each got the input design its comparison needed
+# (a recorded `gh` for the one that queries the API, a purpose-built corpus
+# with forged baselines for the one that sweeps spec/) and the comparison
+# found drift in both on its first run. The unwired ceiling went 6 -> 2 in
+# the same change: the four twins the parity test runs are wired by it.
 
 [[gate]]
 path = "scripts/check-regex-reference.sh"
@@ -933,7 +932,7 @@ varies = "#2205 landing (2026-09-14): one cell hand-flipped (`debug` -> `route` 
 [[gate]]
 path = "tools/almide-gates:check-contracts"
 reads = "structured"
-wired_by = "UNWIRED"
+wired_by = "tests/almide_gate_twin_parity_test.rs"
 class = "NEGATIVE_TESTED"
 evidence = "#2130 step 1 (2026-09-13): tests/almide_gate_twin_parity_test.rs compares this twin against scripts/check-contracts.sh — exit code and output, byte for byte — and the comparator itself was demonstrated to name the first differing line. The twin was already identical on its first run; the same harness caught real drift in the `stamp` twin, which is what makes the green here evidence rather than assumption."
 measures = "the same counts as scripts/check-contracts.sh (unevidenced contracts, unlinked fixtures, flagged rows), read from docs/contracts/contracts.toml"
@@ -942,7 +941,7 @@ varies = "#2130 step 1 (2026-09-13): tests/almide_gate_twin_parity_test.rs reads
 [[gate]]
 path = "tools/almide-gates:stamp"
 reads = "scalar"
-wired_by = "UNWIRED"
+wired_by = "tests/almide_gate_twin_parity_test.rs"
 class = "NEGATIVE_TESTED"
 evidence = "#2130 step 1 (2026-09-13): the twin parity test found this one DRIFTED from proofs/lib/stamp.sh on its first run — the bash had learned to name the cause of a hash mismatch (a `cargo test` relinking target/release after the last `make install`) and to RETURN there, while the port carried the original one-liner and went on printing the toolchain lines. Fixed to byte-identity on both paths; a forged message line was demonstrated to fail the comparison naming `line 8`."
 measures = "the toolchain stamp (rustc / cargo / binary hashes) and its equality with the workspace build"
@@ -951,10 +950,11 @@ varies = "#2130 step 1 (2026-09-13): the twin parity test read this twin DRIFTED
 [[gate]]
 path = "tools/almide-gates:output-parity"
 reads = "structured"
-wired_by = "UNWIRED"
-class = "UNVERIFIED"
+wired_by = "tests/almide_gate_twin_parity_test.rs"
+class = "NEGATIVE_TESTED"
+evidence = "#2163 (2026-09-21): `the_output_parity_twin_answers_what_the_shell_gate_answers` in tests/almide_gate_twin_parity_test.rs runs proofs/output-parity.sh and the twin over tests/gate-twin-parity/output-parity/spec/ (nine fixtures, one per verdict row producible without a miscompile) and demands identical exit code and bytes. Negative input: a FORGED baseline naming a part-file that can never match and omitting two that do — the original reports the phantom as a REGRESSION, the pair as NEW matches, the unbracketed-warning fixture under XFAIL and exits 1, and the twin must say the same, offender for offender; then `--update` into a scratch baseline, compared as the bytes written. The first run found the twin lacked the --update ratchet, the no-baseline path, the tool checks and the #1123 warning-block stripping (a trap fixture printing an unused-import warning read XFAIL where the bash reads match), and that the stamp's coqc line printed empty where every pipefail caller prints n/a"
 measures = "per-program byte diff of stdout between the native run and the render_program -> wasmtime path over spec/, against proofs/output-parity-baseline.txt (the Almide twin of proofs/output-parity.sh)"
-varies = ""
+varies = "#2163 (2026-09-21): the twin parity test read this twin DIVERGED from proofs/output-parity.sh on its first run (trap_with_bracket_warning: bash match, twin xfail; no --update; no n/a in the stamp), then identical after the port was corrected; the forged baseline flips the verdict OK -> REGRESSION with the offender named"
 
 [[gate]]
 path = "tools/almide-gates:bench"
@@ -986,7 +986,8 @@ varies = "#1843: the index changed with every contract that landed since, and th
 [[gate]]
 path = "tools/almide-gates:fuzz-track-record"
 reads = "structured"
-wired_by = "UNWIRED"
-class = "UNVERIFIED"
+wired_by = "tests/almide_gate_twin_parity_test.rs"
+class = "NEGATIVE_TESTED"
+evidence = "#2163 (2026-09-21): `the_fuzz_track_record_twin_answers_what_the_shell_gate_answers` in tests/almide_gate_twin_parity_test.rs runs scripts/fuzz-track-record.sh and the twin with a recorded `gh` first on PATH (tests/gate-twin-parity/fuzz-track-record/: six real nights 2026-09-16..21 plus a synthetic NO VERDICT night and a synthetic pre-sharding night) and demands identical bytes at N=8 and N=3. The window is chosen so every row shape prints: an in-flight run, a 5/8-shard GREEN, sharded FINDINGS, a verdict job that never concluded (ends both streaks), a legacy night scored from its campaign step. The first run found the twin still printing the four-column pre-sharding table with no `shards` column, no `Night verdict` job and `full-budget streak:` for `verdict streak:` — it would have scored every sharded night as TRUNCATED"
 measures = "the nightly fuzz verdict streak over the last N nights, read from the GitHub Actions API"
-varies = ""
+varies = "#2163 (2026-09-21): the twin parity test read this twin DIVERGED from scripts/fuzz-track-record.sh on its first run (four columns, no sharded scoring), identical after the port was corrected; N=8 and N=3 windows give different streaks (5/14 vs 2/14) on both sides"
