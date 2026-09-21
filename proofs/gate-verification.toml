@@ -940,6 +940,15 @@ measures = "byte equality of the switch table embedded in docs/specs/cli.md with
 varies = "#2205 landing (2026-09-14): one cell hand-flipped (`debug` -> `route` on ALMIDE_ABI_PROBE) read a diff at row 3; #2231 wave 4 (2026-09-16) changed the ALMIDE_CERTIFY_OWNERSHIP description and the table followed"
 
 [[gate]]
+path = "tools/almide-gates:fold-seed-source"
+wired_by = ".github/workflows/ci.yml, lefthook.yml"
+reads = "structured"
+class = "NEGATIVE_TESTED"
+evidence = "#2380 landing (2026-09-21): a forged corpus root carrying the fixture with its last test cut (3 sites under a floor of 4) went red naming the file, its count and the floor (exit 1); the same root with the fixture deleted went red at 0 sites (exit 1); the real corpus (1,749 files, 4 sites, stdlib/ 0) went green. The scanner's own tests pin that both #2377 shapes fire (the sort_by seed and `list.fold(v, v, f)`), plus the fuzzer's multi-line scan seed, the pipe form and every callee in the family, and that the floor verdict fails on a census one site short — `almide test tools/almide-gates/`"
+measures = "the number of `list.fold`/`foldf`/`fold_float`/`reduce`/`scan` call sites whose first argument (or piped receiver) is a bare identifier reappearing in the seed, per file, read from the `.almd` text under stdlib/ spec/ examples/ tools/ with comments and string literals blanked, against the per-file floors in proofs/fold-seed-source-baseline.txt"
+varies = "#2380 landing (2026-09-21): the real corpus read 4 sites in spec/lang/fold_seed_source_test.almd; the forged roots read 3 and 0 against the same floor"
+
+[[gate]]
 path = "tools/almide-gates:check-contracts"
 reads = "structured"
 wired_by = "UNWIRED"
