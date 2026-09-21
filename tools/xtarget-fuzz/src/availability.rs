@@ -3,7 +3,7 @@
 //! on a fn the matrix declares AVAILABLE on the stock-p1 leg — as a WARNING
 //! histogram, not a finding. The promotion to a finding class waits for
 //! stage 4's pending-self-host rows to reach zero (the ledger's
-//! `pending_self_host_ceiling`, 34 at schema 3 — 25 matrix rows and
+//! `pending_self_host_ceiling`, 56 at schema 3 — 25 matrix rows and
 //! list.partition are one list-layout blocker, #1423 2026-09-08); until then every such
 //! line is a frontier row the declaration cannot see (the probe measures a
 //! minimal call per public fn, the fuzzer hits the typed twins).
