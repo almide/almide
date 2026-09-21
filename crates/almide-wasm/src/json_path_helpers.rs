@@ -24,7 +24,16 @@ const VT_ARRAY: i32 = 5;
 
 /// Shared per-segment prologue: seg = path[k]; rest = fresh block of
 /// seg[1..]; idx = atoi(rest) with '-' (any non-digit → 0, the
-/// `int.parse(rest) ?? 0` mirror). Locals are caller-chosen.
+/// `int.parse(rest) ?? 0` mirror). Locals are caller-chosen; `acc` is an
+/// i64.
+///
+/// The accumulator is i64 because the segment's digits are an `Int`'s
+/// (#2396). `json.index(path, i)` renders the whole i64 into the segment
+/// text, so an i32 accumulator wrapped mod 2^32 and an index no array
+/// could have turned into one it could: `json.index(root, -9223372036854775807)`
+/// accumulated to -1, negated to 1, and DELETED element 1 of a
+/// three-element array that native left alone. Silent and destructive —
+/// no trap, no diagnostic, both legs exit 0 with different documents.
 #[allow(clippy::too_many_arguments)]
 fn seg_prologue(
     i: &mut wasm_encoder::InstructionSink,
@@ -35,6 +44,7 @@ fn seg_prologue(
     idx: u32,
     scr: u32,
     scr2: u32,
+    acc: u32,
 ) {
     // seg = path[k]
     i.local_get(path).local_get(k).i32_const(4).i32_mul().i32_add();
@@ -52,6 +62,7 @@ fn seg_prologue(
     i.i32_const(0).local_set(idx);
     i.i32_const(0).local_set(scr);
     i.i32_const(0).local_set(scr2);
+    i.i64_const(0).local_set(acc);
     i.local_get(rest).i32_load(len_memarg()).i32_eqz().i32_eqz().if_(BlockType::Empty);
     i.local_get(rest)
         .i32_const(almide_layout::PAYLOAD as i32)
@@ -77,15 +88,35 @@ fn seg_prologue(
     i.local_get(seg).i32_const(0).i32_lt_s();
     i.local_get(seg).i32_const(9).i32_gt_s();
     i.i32_or().if_(BlockType::Empty);
-    i.i32_const(0).local_set(idx);
+    i.i64_const(0).local_set(acc);
+    i.i32_const(0).local_set(scr2);
     i.br(2);
     i.end();
-    i.local_get(idx).i32_const(10).i32_mul().local_get(seg).i32_add().local_set(idx);
+    i.local_get(acc).i64_const(10).i64_mul();
+    i.local_get(seg).i64_extend_i32_s().i64_add().local_set(acc);
     i.local_get(scr).i32_const(1).i32_add().local_set(scr);
     i.br(0).end().end();
     i.local_get(scr2).if_(BlockType::Empty);
-    i.i32_const(0).local_get(idx).i32_sub().local_set(idx);
+    i.i64_const(0).local_get(acc).i64_sub().local_set(acc);
     i.end();
+    // Saturate into the i32 index slot instead of wrapping. Both
+    // saturation points are out of range for EVERY array — a list block
+    // stores 4 bytes per element in a 32-bit address space, so no array
+    // reaches i32::MAX elements — which is the answer native's 64-bit
+    // range check gives them too. Saturating rather than wrapping is what
+    // makes the out-of-range index a no-op on both legs.
+    i.local_get(acc).i64_const(i32::MAX as i64).i64_gt_s();
+    i.if_(BlockType::Result(ValType::I32));
+    i.i32_const(i32::MAX);
+    i.else_();
+    i.local_get(acc).i64_const(i32::MIN as i64).i64_lt_s();
+    i.if_(BlockType::Result(ValType::I32));
+    i.i32_const(i32::MIN);
+    i.else_();
+    i.local_get(acc).i32_wrap_i64();
+    i.end();
+    i.end();
+    i.local_set(idx);
     i.end();
 }
 
@@ -117,9 +148,12 @@ pub(crate) fn emit_json_path_set_helper(helper_base: u32, helpers: &[Helper]) ->
     let (j, path, k, nv) = (0u32, 1u32, 2u32, 3u32);
     let (seg, rest, idx, scr, scr2, pairs, n, cur, out, w, keyl, has, tmp) =
         (4u32, 5u32, 6u32, 7u32, 8u32, 9u32, 10u32, 11u32, 12u32, 13u32, 14u32, 15u32, 16u32);
+    // The atoi accumulator (#2396): an i64, because the segment's digits
+    // are an `Int`'s and an i32 wrapped them mod 2^32.
+    let acc = 17u32;
     let m_tag = slot_memarg(almide_layout::SUM_TAG);
     let m_pay = slot_memarg(almide_layout::SUM_FIELD);
-    let mut f = Function::new([(13, ValType::I32)]);
+    let mut f = Function::new([(13, ValType::I32), (1, ValType::I64)]);
     let mut i = f.instructions();
     // k >= path count → nv
     i.local_get(k);
@@ -127,7 +161,7 @@ pub(crate) fn emit_json_path_set_helper(helper_base: u32, helpers: &[Helper]) ->
     i.i32_ge_u().if_(BlockType::Empty);
     i.local_get(nv).return_();
     i.end();
-    seg_prologue(&mut i, path, k, seg, rest, idx, scr, scr2);
+    seg_prologue(&mut i, path, k, seg, rest, idx, scr, scr2, acc);
     // field step?
     i.local_get(path)
         .local_get(k)
@@ -263,9 +297,11 @@ pub(crate) fn emit_json_path_remove_helper(helper_base: u32, helpers: &[Helper])
     let (j, path, k) = (0u32, 1u32, 2u32);
     let (seg, rest, idx, scr, scr2, pairs, n, cur, out, w, keyl, last, tmp) =
         (3u32, 4u32, 5u32, 6u32, 7u32, 8u32, 9u32, 10u32, 11u32, 12u32, 13u32, 14u32, 15u32);
+    // The atoi accumulator (#2396) — see `seg_prologue`.
+    let acc = 16u32;
     let m_tag = slot_memarg(almide_layout::SUM_TAG);
     let m_pay = slot_memarg(almide_layout::SUM_FIELD);
-    let mut f = Function::new([(13, ValType::I32)]);
+    let mut f = Function::new([(13, ValType::I32), (1, ValType::I64)]);
     let mut i = f.instructions();
     // k >= count → value.null()
     i.local_get(k);
@@ -277,7 +313,7 @@ pub(crate) fn emit_json_path_remove_helper(helper_base: u32, helpers: &[Helper])
     i.local_get(k).i32_const(1).i32_add();
     i.local_get(path).i32_load(len_memarg()).i32_const(2).i32_shr_u();
     i.i32_ge_u().local_set(last);
-    seg_prologue(&mut i, path, k, seg, rest, idx, scr, scr2);
+    seg_prologue(&mut i, path, k, seg, rest, idx, scr, scr2, acc);
     // field step?
     i.local_get(path)
         .local_get(k)

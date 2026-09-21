@@ -1,0 +1,92 @@
+// @contract: C-031
+// A JSON path index is an `Int`, and the whole `Int` decides the step.
+//
+// A path segment is the STRING `"i<int>"`, and the wasm emitter recovers the
+// number with an atoi it writes inline (json_path_helpers.rs `seg_prologue`).
+// That accumulator was an i32, so `acc = acc * 10 + digit` wrapped mod 2^32
+// and an index no array could have became one it could: `json.index(root, i)`
+// with `i = -9223372036854775807` accumulated to -1, negated to 1, and hit
+// element 1 of a three-element array that native left alone (#2396).
+//
+// Both faces are silent and destructive — no trap, no diagnostic, exit 0 on
+// both legs with different documents:
+//
+//   remove_path  native [10,20,30]   wasm [10,30]       an element deleted
+//   set_path     native [10,20,30]   wasm [10,99,30]    an element overwritten
+//
+// `get_path` was never affected: it routes through the whitelisted
+// `json_path_get` stdlib impl, which parses with `int.parse` into an i64. The
+// family splits by IMPLEMENTATION, not by operation — the two ops the emitter
+// reimplements were wrong, the one it links was right — so the rows below run
+// all three over one domain rather than only the two that broke.
+import json
+
+fn arr() -> Value = json.parse("[10, 20, 30]") ?? value.null()
+
+fn show(label: String, i: Int) -> Unit = {
+  let p = json.index(json.root(), i)
+  let g = json.get_path(arr(), p) ?? value.str("none")
+  let s = json.set_path(arr(), p, value.int(99)) ?? value.null()
+  let r = json.remove_path(arr(), p)
+  println("${label} get=${json.stringify(g)} set=${json.stringify(s)} rm=${json.stringify(r)}")
+}
+
+fn main() -> Unit = {
+  // In range, from both ends — negative indexing is a working feature and
+  // must stay one; it is not what broke.
+  show("0", 0)
+  show("1", 1)
+  show("2", 2)
+  show("-1", -1)
+  show("-2", -2)
+  show("-3", -3)
+  // Just outside, both ends: the no-op answer the whole domain below must
+  // also produce.
+  show("3", 3)
+  show("-4", -4)
+  // The wrap points. Each row's `i32.wrap` value is an index the array HAS,
+  // which is exactly why the defect was destructive rather than a trap.
+  show("2^32", 4294967296)
+  // wraps to 0
+  show("2^32+1", 4294967297)
+  // wraps to 1
+  show("2^32+2", 4294967298)
+  // wraps to 2
+  show("i64-max", 9223372036854775807)
+  // wraps to -1
+  show("-i64-max", -9223372036854775807)
+  // wraps to 1
+  show("i64-min", -9223372036854775808)
+  // wraps to 0
+  // The two rows that AGREED before the fix, kept because they are the tell:
+  // 2^31 wraps to a negative that is still out of range, so the wasm leg was
+  // accidentally right. A gate that only held the diverging rows would call
+  // a wrap-to-out-of-range implementation correct.
+  show("2^31", 2147483648)
+  show("-2^31", -2147483648)
+  // The i32 saturation points themselves, as literal indexes.
+  show("i32-max", 2147483647)
+  show("i32-min", -2147483647)
+  // A non-empty path AFTER the index step still recurses, and an index step
+  // under a field step still resolves — the fix is in the shared segment
+  // prologue, so both spellings exercise it.
+  let doc = json.parse("{\"xs\": [1, 2, 3], \"n\": 7}") ?? value.null()
+  let deep = json.index(json.field(json.root(), "xs"), -9223372036854775807)
+  println("deep-get: ${json.stringify(json.get_path(doc, deep) ?? value.str("none"))}")
+  println("deep-set: ${json.stringify(json.set_path(doc, deep, value.int(99)) ?? value.null())}")
+  println("deep-rm: ${json.stringify(json.remove_path(doc, deep))}")
+  let inr = json.index(json.field(json.root(), "xs"), 1)
+  println("deep-ok-get: ${json.stringify(json.get_path(doc, inr) ?? value.str("none"))}")
+  println("deep-ok-set: ${json.stringify(json.set_path(doc, inr, value.int(99)) ?? value.null())}")
+  println("deep-ok-rm: ${json.stringify(json.remove_path(doc, inr))}")
+  // An index step over a NON-array passes the node through on every leg; the
+  // out-of-range index must not change that either.
+  let obj = json.parse("{\"a\": 1}") ?? value.null()
+  let onobj = json.index(json.root(), -9223372036854775807)
+  println("obj-rm: ${json.stringify(json.remove_path(obj, onobj))}")
+  println("obj-set: ${json.stringify(json.set_path(obj, onobj, value.int(99)) ?? value.null())}")
+  // The empty array: every index is out of range, including the wrap points.
+  let empty = json.parse("[]") ?? value.null()
+  println("empty-rm: ${json.stringify(json.remove_path(empty, onobj))}")
+  println("empty-rm0: ${json.stringify(json.remove_path(empty, json.index(json.root(), 0)))}")
+}
