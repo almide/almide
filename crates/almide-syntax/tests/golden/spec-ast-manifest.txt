@@ -1,4 +1,4 @@
-# oracle: almide 0.63.0 (dev) at 93913ac02 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.63.0 (dev) at 3b3a14c24 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -1014,6 +1014,7 @@ deeba9a4a972be2831bfdfd506f18a1cc95259d8886f037a0446a72f1d3d542e	spec/wasm_cross
 8b879584c8086d228b6d93dc0ddfa970f48b8f571ea3b464ce8c85fb723bbcb9	spec/wasm_cross/matrix_head_count_domain.almd
 00325e149ecbbb13d715ce63a6ce7fe7135e9630429d2d04c555cd43fcd57f2b	spec/wasm_cross/matrix_index_domain_family.almd
 49c5d58e9b38da0ee56b72ac2a833f551d73585e48181c281ef6d0f9781c5e7e	spec/wasm_cross/matrix_pow_libm.almd
+66de69001ae4f1773bbf1d59f5164c1cdb5e8f68657f4be0cbe5cabeab0dedd4	spec/wasm_cross/matrix_q1_full_loader_cols_beyond_buffer.almd
 15b0c90b611e8fd00ea59c034ffae15624d2d0ed31ffdb90398a20d67928cfac	spec/wasm_cross/matrix_q_dims_guard.almd
 fd7910219c2815ae729804410f1a6448d7a9925a684b6bfdff6d4b06ad3bdea2	spec/wasm_cross/matrix_q_fp16_scale_domain.almd
 73638d4d2b90d79d12e24fc3e945fa35aadd42c7a07e58b2a47ab8b2773807d3	spec/wasm_cross/matrix_select_rows.almd
