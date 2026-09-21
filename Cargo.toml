@@ -88,6 +88,9 @@ insta = "1"
 tempfile = "3"
 # The qualification-scoped VM (#865), run in-process by its corpus parity gate.
 almide-wasm-vm = { path = "crates/almide-wasm-vm" }
+# The corpus gates' fixture-range sharding (#2381): the switch is parsed in
+# one place, shared with almide-spine's run_parity.
+almide-corpus = { path = "crates/almide-corpus" }
 
 # The root build.rs (docs/diagnostics) and almide-types (stdlib/) re-embed repo
 # content on any mtime bump — git pull/checkout triggers a full opt-3 recompile

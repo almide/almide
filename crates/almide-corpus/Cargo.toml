@@ -8,3 +8,6 @@ description = "Where the judge lives: resolves corpus-relative fixture paths acr
 
 [lints]
 workspace = true
+
+[dependencies]
+almide-base = { path = "../almide-base" }
