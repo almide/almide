@@ -176,9 +176,23 @@ fn certify_param(f: &IrFunction, p: &IrParam, uses: &[&Use], sites: &UseSites, a
 fn certify_last_use_clones(f: &IrFunction, vars: &VarTable, ann: &CodegenAnnotations, uses: &[&Use]) -> Vec<String> {
     let owned_params: HashSet<VarId> = f.params.iter().filter(|p| p.borrow == ParamBorrow::Own && !p.is_mut).map(|p| p.var).collect();
     let let_bound = let_bound_by_value(&f.body);
+    // #2410: `in_loop` no longer abstains unconditionally. A FRESH binder is
+    // bound inside the loop body and rebound on every iteration, its scope
+    // ending with that iteration, so it cannot survive into the next one and
+    // its last occurrence in the body IS its dynamically last one — judgeable
+    // exactly as a non-loop clone is. The clone pass already decides this case
+    // the same way (`pass_clone.rs:551`:
+    // `… && (!ctx.in_loop || ctx.fresh.contains(&id))`), so abstaining here
+    // meant the certifier could not see the very case the pass was deciding —
+    // which is why #2316 (a local bound in a branch inside a loop, cloned at
+    // its last use) was invisible to the ledger before AND after its fix.
+    // A NON-fresh in-loop clone keeps abstaining: that variable outlives the
+    // iteration, so its lexically last occurrence is not its dynamically last.
+    let loop_fresh = loop_fresh_union(&f.body);
     let mut out = Vec::new();
     for (i, u) in uses.iter().enumerate() {
-        if u.site != Site::Clone || u.depth > 0 || u.in_loop || u.in_chain || u.chain.is_some() {
+        let loop_abstains = u.in_loop && !loop_fresh.contains(&u.var);
+        if u.site != Site::Clone || u.depth > 0 || loop_abstains || u.in_chain || u.chain.is_some() {
             continue;
         }
         let v = u.var;
@@ -331,4 +345,49 @@ fn is_closure_value(ty: &almide_lang::types::Ty) -> bool {
 
 fn heap(ty: &almide_lang::types::Ty) -> bool {
     !almide_ir::top_let_storage::clone_free(ty) && !matches!(ty, almide_lang::types::Ty::Fn { .. })
+}
+
+// ── #2410 census: how much does C3's `in_loop` exclusion actually abstain from ──
+
+use crate::pass_clone_loops::loop_fresh_union;
+
+/// One function's contribution to the census.
+#[derive(Default, Debug, Clone, Copy)]
+pub struct CloneCensus {
+    /// `Site::Clone` occurrences seen at all.
+    pub clones: usize,
+    /// …skipped by the `u.in_loop` arm of `certify_last_use_clones`.
+    pub skipped_in_loop: usize,
+    /// …of those, whose variable is a loop-FRESH binder: rebound every
+    /// iteration, scope ending with it, so its last occurrence in the body
+    /// is judgeable exactly as a non-loop clone is. This is the blind spot.
+    pub skipped_in_loop_fresh: usize,
+    /// …of those, NOT fresh: bound outside the loop, so the lexically last
+    /// occurrence is not the dynamically last one. Abstention is correct here
+    /// and stays.
+    pub skipped_in_loop_nonfresh: usize,
+}
+
+/// Measure the `in_loop` exclusion over a whole program (#2410).
+pub fn census(program: &IrProgram) -> CloneCensus {
+    let mut out = CloneCensus::default();
+    for f in &program.functions {
+        let fresh = loop_fresh_union(&f.body);
+        for u in UseSites::of_fn(f, &ExplicitBorrows).iter() {
+            if u.site != Site::Clone {
+                continue;
+            }
+            out.clones += 1;
+            if !u.in_loop {
+                continue;
+            }
+            out.skipped_in_loop += 1;
+            if fresh.contains(&u.var) {
+                out.skipped_in_loop_fresh += 1;
+            } else {
+                out.skipped_in_loop_nonfresh += 1;
+            }
+        }
+    }
+    out
 }
