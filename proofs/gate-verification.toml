@@ -636,6 +636,15 @@ measures = "symmetric difference between long-lived pipeline types found by scri
 varies = "#1316 landing: nine forged inputs (an unregistered type in a [scope] file among them) each read as a finding; 2026-08-16 314a44290 recorded the dialect stamp in the frozen AST serde count"
 
 [[gate]]
+path = "tools/almide-gates:impl-count"
+reads = "structured"
+wired_by = ".github/workflows/ci.yml, lefthook.yml"
+class = "NEGATIVE_TESTED"
+evidence = "#2413 (landing PR, 2026-09-21), run through the Almide gate `main.almd -- impl-count .`: four forged inputs, each run and each demonstrated to FAIL, tree restored and green after each — (1) a new emitter arm `fn lower_list_fold_extra()` appended to crates/almide-wasm/src/list_fuse.rs => 'list.fold: total 11 (1/3/7) -> 12 (1/4/7) GREW' with the fold-it-or-add-the-row remedy; (2) a new hole `fn zzz_probe[A](xs: List[A]) -> Int = _` appended to stdlib/list.almd => 'NEW hole list.zzz_probe (total 0) is not in the ledger'; (3) the ledger's list.fold row edited ABOVE reality (selfhost 7->8, total 12) => 'ledger says 12 (1/3/8), tree has 11 (1/3/7) — run --update', so the ledger cannot sit above the tree in the flattering direction; (4) blind-enumerator guard — the LOWER_FN pattern typo'd to `lowerX_` => the enumerator still prints 702 rows with every emitter column 0, so every pinned row disagrees and the gate reports 99 drifts rather than a clean tree (and an enumerator printing fewer than 100 rows is refused outright before any comparison). Baseline after restore: 702 holes, 1698 implementations (worst list.sort=16, list.take=14, map.get=14)"
+measures = "per stdlib hole (`fn f(...) = _`), the triple (native @intrinsic, `fn lower_<mod>_<fn>[_suffix]` definitions in crates/almide-wasm/src, `<mod>.<fn>[_shape]` rows in self_host_registry.rs) re-derived by scripts/lib/impl-count-enumerate.py against proofs/impl-count-ledger.toml: any total that grew, any triple that differs, any hole added or gone"
+varies = "#2413 landing: four forged inputs each read as a finding (a grown total, a new hole, a ledger above reality, a blinded enumerator)"
+
+[[gate]]
 path = "scripts/check-downstream-grammar.sh"
 reads = "UNCLASSIFIED"
 wired_by = ".github/workflows/downstream-sync.yml"
