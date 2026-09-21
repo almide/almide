@@ -22,6 +22,7 @@
 #   --wait   poll every 60 s until the required set is green (or one fails),
 #            then enqueue; without it, report and enqueue only if green now.
 set -euo pipefail
+export LC_ALL=C # sort order must not depend on the machine (#1031)
 PR="${1:?pr number}"
 WAIT="${2:-}"
 REPO="${GH_REPO:-almide/almide}"
