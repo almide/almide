@@ -209,4 +209,10 @@ process.sleep(ms: Int) -> Unit
 process.is_alive(pid: Int) -> Bool
 ```
 
+## Type index (1 types)
+
+```
+type process.ProcessStatus = { code: Int, stdout: String, stderr: String }
+```
+
 <!-- END GENERATED SIGNATURE INDEX -->

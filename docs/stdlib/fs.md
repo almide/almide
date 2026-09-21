@@ -680,4 +680,10 @@ effect fs.modified_at(path: String) -> Int
 effect fs.read_bytes_raw(path: String) -> Bytes
 ```
 
+## Type index (1 types)
+
+```
+type fs.FileStat = { size: Int, is_dir: Bool, is_file: Bool, modified: Int }
+```
+
 <!-- END GENERATED SIGNATURE INDEX -->
