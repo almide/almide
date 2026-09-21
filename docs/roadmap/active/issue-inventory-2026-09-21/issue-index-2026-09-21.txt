@@ -1,0 +1,189 @@
+open issues: 78   with header: 78   without: 0
+
+## checks
+  header but no A-* label: 0
+  two A-* labels: 7 — [2387, 2289, 2143, 2141, 1480, 1479, 1423]
+  状態 outside the closed set: 0
+  BLOCKER 状態 vs I-*/regression label disagreement: 0
+
+## by 状態
+
+### BLOCKER  (4)
+  #2395  A-wasm                 value.keys reads the Value payload slot without checking the tag o
+         └ PR #2399 在飛行（merge queue position 1、AWAITING_CHECKS）
+  #2397  A-wasm                 string.chars through list.filter into list.fold returns freed memo
+         └ PR #2409 在飛行（2026-09-21 時点 draft、#2404 の着地待ちで意図的に merge queue 外）
+  #2398  A-wasm                 A let-bound String captured by a list-pipeline closure reads back 
+         └ PR #2404 在飛行（queue position 2、#2399 との台帳衝突で UNMERGEABLE、#2399 着地後に rebase して再投入）
+  #2419  A-wasm                 matrix.from_q1_0_bytes with a cols beyond the buffer answers all z
+         └ 担当者あり・修正済みで judge 待ち（almide/als#87 が OPEN、almide 側の PR は als#87 merge 後。2026-09-21 時点で almide 側 
+
+### 実装  (32)
+  #1003  A-driver               Per-module compilation cache (module rlibs + typed-IR cache) — mak
+         └ 着手可
+  #1005  A-ir                   Endgame: direct native emit from the MIR trust-spine (cranelift), 
+         └ 前提待ち: #1003
+  #1107  A-stdlib               Implement ADR-0005: operator desugar definitions, unwrap_or remova
+         └ 判断待ち
+  #1315  A-wasm                 Emit DWARF line tables from the WAT renderer (wasm offsets → .almd
+         └ 着手可
+  #1331  A-codegen              fan → WGSL: one source, CPU and GPU legs, identical output — the o
+         └ 着手可
+  #1388  A-frontend             fan {} becomes a parallel record literal: named fields, per-field 
+         └ 着手可
+  #1456  A-frontend             Identifiers are ASCII-only: allowing Japanese needs the case-based
+         └ 着手可
+  #1584  A-wasm                 Commission the greenfield wasm backend: swap --target wasm onto th
+         └ 前提待ち: #1696
+  #1589  A-frontend             protocol cannot express a DDD port: generic protocols unusable, no
+         └ 着手可
+  #1696  A-wasm P-high          Structural leg all the way: fix the two regressions, land the impe
+         └ 判断待ち
+  #1710  A-wasm                 wasi:http@0.3 client leg: the http family rides the p3 async plumb
+         └ 着手可
+  #1997  A-wasm                 scoped: a declarable, refusable reclamation boundary in two positi
+         └ 着手可
+  #2010  A-wasm                 Drop glue for every heap shape: tuples, sums, lists of blocks, Map
+         └ 判断待ち
+  #2044  A-codegen P-high       fan gives the native leg no parallelism: fan.map is sequential, fa
+         └ 着手可
+  #2045  A-codegen              Stream fusion of |> chains never fires on the Rust target: IterCha
+         └ 着手可
+  #2092  A-driver P-high        The native lane has no size story: hello is 468 KB, and it has nev
+         └ 着手可
+  #2147  A-driver               almide survive: the survival delta of a proposed edit (check, test
+         └ 前提待ち: #2149
+  #2148  A-driver               almide query: hover, definition, references and inlay hints as CLI
+         └ 着手可
+  #2149  A-frontend             Repair as a schema field, a two-way repair ratchet with silent cas
+         └ 着手可
+  #2151  A-driver               Consume the .almdi interface artifact: the four-part freshness pre
+         └ 着手可
+  #2152  A-ci                   Portable trust: an independently versioned verifier binary, attest
+         └ 着手可
+  #2153  A-driver               almide agent-connect: the language guide shipped inside the binary
+         └ 着手可
+  #2157  A-perf P-high          The native Map and Value paths are slower than their wasm twins: t
+         └ 着手可
+  #2289  A-codegen A-stdlib     Make fusion the specialization of self-hosted higher-order bodies 
+         └ 着手可
+  #2293  A-codegen              A mut parameter of a self tail-recursive function loses its mutati
+         └ 着手可
+  #2312  A-wasm                 Most of a small wasm program is not the program: a bounded interpo
+         └ 着手可
+  #2318  A-wasm                 binarytrees on the structural wasm leg pays a generic allocation a
+         └ 着手可
+  #2332  A-modules              No package written outside this repository has a route to publicat
+         └ 着手可
+  #2372  A-driver               Decide the crate's entry point from the IR instead of from where t
+         └ 着手可
+  #2393  A-codegen              Accumulating into a Map in a loop is quadratic on native and linea
+         └ 着手可
+  #2408  A-wasm P-low           set.fold and map.fold rebind the accumulator with no ownership gua
+         └ 着手可
+  #2411  A-wasm                 wasm refuses list.push onto a field of a mut record parameter (lis
+         └ 着手可
+
+### 計測器・ゲート  (25)
+  #924   A-ci                   fuzz-nightly full-budget ratchet: 14 consecutive completed nights 
+         └ 判断待ち
+  #1423  A-stdlib A-ci          Target-availability matrix: declare the single-leg surface, gate i
+         └ 着手可
+  #1469  A-ci                   Documentation is 8x thinner than the cohort and hand-written: ship
+         └ 着手可
+  #1508  A-ci                   Reference-suite test mining: ported corpus and the patterns Almide
+         └ 着手可
+  #1617  A-ci                   README MSR scorecard is a 2026-04-12 measurement (Sonnet 4.6, 30 t
+         └ 着手可
+  #1963  A-perf P-critical      The thesis has no current measurement: MSR is 147 days stale and M
+         └ 判断待ち
+  #2009  A-ci                   L2 and L3 above edit locality: declared-frame preservation, and ch
+         └ 前提待ち: #1997
+  #2141  A-wasm A-ci            Emitted wasm size is measured by five programs that all link almos
+         └ 着手可
+  #2142  A-perf                 The runtime ratchet watches 7 of the 13 perf programs, and Map, JS
+         └ 着手可
+  #2146  A-ci                   Public MSR harness: same-condition runs across five languages, thi
+         └ 着手可
+  #2163  A-ci                   The last two almide-gates twins have no diff against their .sh ori
+         └ 着手可
+  #2331  A-perf                 The recommended spelling is not the fastest spelling: the combinat
+         └ 着手可
+  #2380  A-ci                   Gate the fold-seed-consumes-its-own-source shape from source, with
+         └ 着手可
+  #2381  A-ci                   CI's critical path is 55 minutes and five test targets are 64% of 
+         └ 着手可
+  #2382  A-ci                   The fuzz ladder reports a resource-limit divergence as a semantic 
+         └ 判断待ち
+  #2387  A-wasm A-ci            The domain-edges gate decides its i32_max rows on free memory, not
+         └ 着手可
+  #2390  A-ci                   The nightly fuzz report under-counts silently: a preempted shard's
+         └ 着手可
+  #2391  A-ci                   ledger-counts has been red five nights with its own fix pushed and
+         └ 着手可
+  #2400  A-ci P-low             count-release-blockers.sh sums per-label counts, so an issue with 
+         └ 着手可
+  #2402  A-ci                   domain-edge matrix skipped 12 of 22 json signatures, including the
+         └ 着手可
+  #2403  A-ci                   check-als-pin compares contract ids but not statements, so seven c
+         └ 着手可
+  #2405  A-ci P-low             The parity manifest generators write happily from a stale tree, an
+         └ 着手可
+  #2406  A-ci P-low             Contract-id citations are never validated, and one well-formed cit
+         └ 着手可
+  #2407  A-wasm                 The wasm leg has a watermark but no allocation counter, so allocat
+         └ 着手可
+  #2410  A-codegen              The clone-at-last-use certificate abstains from every in-loop clon
+         └ 着手可
+
+### 設計判断  (7)
+  #1460  A-stdlib               The stdlib never uses protocol: 119 _str twin functions are the bi
+         └ 判断待ち
+  #1479  A-frontend A-ir        Make the ownership guarantee something source can declare and the 
+         └ 判断待ち
+  #1480  A-ir A-codegen         Two independent producers of native Rust: consolidate codegen and 
+         └ 判断待ち
+  #1490  A-driver               Dev-UX gaps the field ships and we do not: fuzzing, coverage, benc
+         └ 判断待ち
+  #1679  A-runtime P-high       `Value`'s representation is the ceiling: owned `String` keys and p
+         └ 判断待ち
+  #2143  A-wasm A-ci            The wasm runtime ratchet does not judge in CI: RATIO_VERDICT=0 und
+         └ 判断待ち
+  #2162  A-codegen              Every binary the compiler emits pays ~0.166 ms before main: the Ru
+         └ 判断待ち
+
+### 追跡  (5)
+  #586   A-ci                   Flight-grade program: tracking issue
+         └ 着手可
+  #1514  A-ci                   Mission-critical attack list: the road from release-quality to def
+         └ 着手可
+  #1628  A-wasm                 Component Model targeting: the structural leg emits p2/p3 componen
+         └ 着手可
+  #1998  A-ci P-high            Contract-relative survival: declared contract, checked realization
+         └ 前提待ち: #1997
+  #2302  A-perf                 Nightly fuzz: 1 slow finding(s) (perf-class)
+         └ 着手可
+
+### 調査  (5)
+  #2078  A-stdlib               A lexer spends 84% of its time in malloc/free: string.to_bytes is 
+         └ 着手可
+  #2099  A-wasm                 Printing one Float costs 3.5 KB of wasm: the float formatter is th
+         └ 着手可
+  #2150  A-wasm                 The native Map is a linear scan, two wasm perf cliffs have no issu
+         └ 着手可
+  #2156  A-wasm P-high          list.group_by on the structural wasm leg costs ~11 µs per element:
+         └ 着手可
+  #2415  A-perf P-low           Incremental re-read in a downstream binary is 4-5% slower on the 0
+         └ 着手可
+
+## by crate
+  A-frontend     5   #1388 #1456 #1479 #1589 #2149
+  A-ir           3   #1005 #1479 #1480
+  A-codegen      9   #1331 #1480 #2044 #2045 #2162 #2289 #2293 #2393 #2410
+  A-wasm        22   #1315 #1584 #1628 #1696 #1710 #1997 #2010 #2099 #2141 #2143 #2150 #2156 #2312 #2318 #2387 #2395 #2397 #2398 #2407 #2408 #2411 #2419
+  A-runtime      1   #1679
+  A-stdlib       5   #1107 #1423 #1460 #2078 #2289
+  A-driver       8   #1003 #1490 #2092 #2147 #2148 #2151 #2153 #2372
+  A-perf         6   #1963 #2142 #2157 #2302 #2331 #2415
+  A-ci          25   #586 #924 #1423 #1469 #1508 #1514 #1617 #1998 #2009 #2141 #2143 #2146 #2152 #2163 #2380 #2381 #2382 #2387 #2390 #2391 #2400 #2402 #2403 #2405 #2406
+  A-modules      1   #2332
