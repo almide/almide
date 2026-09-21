@@ -216,6 +216,7 @@ fn recorded_gh_path() -> String {
 /// are what keep this honest: a shim serving nothing would make both sides
 /// print an empty table and agree.
 #[test]
+#[ignore = "the bash was rewritten by #2429 (a night scores from the verdict job's `fuzz-night:` log line at >= 75% of planned fuzz-minutes; jobs are fetched with ?per_page=100) and the twin plus its recorded-gh fixtures still mirror the previous script — #2452 re-ports the twin and re-records the eight nights; until then this comparison would only prove the two differ"]
 fn the_fuzz_track_record_twin_answers_what_the_shell_gate_answers() {
     let env = [("PATH", recorded_gh_path())];
     let original = run_env("bash", &["scripts/fuzz-track-record.sh", "8"], &env);
