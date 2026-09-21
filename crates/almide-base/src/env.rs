@@ -138,6 +138,7 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_HEAP_TRACE", Flag, Dbg, "print the interpreter's heap-block allocations and frees"),
     sw("ALMIDE_HTTP_TIMEOUT_SECS", Value, Runtime, "the http client's request timeout in seconds, read by the compiled program (default 30)"),
     sw("ALMIDE_INSTALL", Value, Tool, "the directory `almide install` installs binaries into (overrides the default `~/.local/bin`)"),
+    sw("ALMIDE_INTERP_SWEEP_THREADS", Value, Harness, "interp sweep thread count; 1 = serial (#2381)"),
     sw("ALMIDE_IR_FAULT", Value, Harness, "inject an IR violation after the named optimiser pass, so the per-pass verifier can be watched turning red in the release binary"),
     sw("ALMIDE_KEEP_SCRATCH", Flag, Tool, "keep the `almide test` scratch build directory instead of deleting it"),
     sw("ALMIDE_LOCAL_REUSE_THRESHOLD", Value, Route, "the distinct-local count above which the v1 wasm render reuses locals (default 8000); a test knob that forces the transform on across the corpus"),

@@ -673,6 +673,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_HEAP_TRACE` | debug | print the interpreter's heap-block allocations and frees |
 | `ALMIDE_HTTP_TIMEOUT_SECS=value` | runtime | the http client's request timeout in seconds, read by the compiled program (default 30) |
 | `ALMIDE_INSTALL=value` | tool | the directory `almide install` installs binaries into (overrides the default `~/.local/bin`) |
+| `ALMIDE_INTERP_SWEEP_THREADS=value` | harness | interp sweep thread count; 1 = serial (#2381) |
 | `ALMIDE_IR_FAULT=value` | harness | inject an IR violation after the named optimiser pass, so the per-pass verifier can be watched turning red in the release binary |
 | `ALMIDE_KEEP_SCRATCH` | tool | keep the `almide test` scratch build directory instead of deleting it |
 | `ALMIDE_LOCAL_REUSE_THRESHOLD=value` | route | the distinct-local count above which the v1 wasm render reuses locals (default 8000); a test knob that forces the transform on across the corpus |
