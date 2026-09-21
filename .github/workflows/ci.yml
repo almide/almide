@@ -274,10 +274,21 @@ jobs:
     # twice. Cheap (no tests run, just enumeration) and it gates the same commit
     # the shards run on.
     name: Test shards cover every target
-    needs: [changes, build]
-    if: needs.changes.outputs.docs_only != 'true'
+    # `test-rust-solo` too (#2381): the six solo legs are NOT in
+    # develop's required-check list (only this job and the four shard
+    # names are), so this job — which is required — waits for them and
+    # refuses to go green unless every solo leg passed. Adding the leg
+    # names to branch protection retires that step; until then a red
+    # giant blocks the merge through this name.
+    needs: [changes, build, test-rust-solo]
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ubuntu-latest
     steps:
+      - name: Every solo leg passed (they carry five corpus gates the shards no longer run)
+        if: needs.test-rust-solo.result != 'success'
+        run: |
+          echo "::error::Test Rust (solo …) result is '${{ needs.test-rust-solo.result }}' — a solo corpus gate failed or did not run; this gate refuses to certify coverage over it"
+          exit 1
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
@@ -292,14 +303,26 @@ jobs:
         with:
           name: almide-tests-archive
           path: /tmp/almide-archive
-      - name: Union of shards == full target set
+      - name: Union of shards + solo legs == full target set
+        # #2381: the five solo targets run in `Test Rust (solo …)` jobs, one
+        # per giant, so the union is the four shards PLUS the solo rows, each
+        # target in exactly one of them. Both lists come from the SAME
+        # archive enumeration, so a solo target that stops existing is a
+        # diff here, not a silently empty job.
         run: |
           set -euo pipefail
-          bash scripts/ci-test-shard.sh --list-all-archive /tmp/almide-archive/almide-tests.tar.zst | sort > /tmp/all.txt
+          A=/tmp/almide-archive/almide-tests.tar.zst
+          bash scripts/ci-test-shard.sh --list-all-archive "$A" | sort > /tmp/all.txt
           : > /tmp/union.txt
           for i in 0 1 2 3; do
-            bash scripts/ci-test-shard.sh --list-archive "$i" 4 /tmp/almide-archive/almide-tests.tar.zst >> /tmp/union.txt
+            bash scripts/ci-test-shard.sh --list-archive "$i" 4 "$A" >> /tmp/union.txt
           done
+          bash scripts/ci-test-shard.sh --list-solo-archive "$A" | tee /tmp/solo.txt >> /tmp/union.txt
+          solo_n=$(wc -l < /tmp/solo.txt | tr -d ' ')
+          if [ "$solo_n" -ne 5 ]; then
+            echo "SHARD GATE FAIL: expected 5 solo targets in the archive, found $solo_n — a solo target was renamed or dropped and its job would run nothing" >&2
+            exit 1
+          fi
           sort /tmp/union.txt > /tmp/union_sorted.txt
           dupes=$(sort /tmp/union.txt | uniq -d | wc -l | tr -d ' ')
           if [ "$dupes" -ne 0 ]; then
@@ -313,7 +336,30 @@ jobs:
             echo "that tests less), one with '+' is run twice." >&2
             exit 1
           fi
-          echo "shard coverage OK: $(wc -l < /tmp/all.txt | tr -d ' ') target(s), each in exactly one shard"
+          echo "shard coverage OK: $(wc -l < /tmp/all.txt | tr -d ' ') target(s), each in exactly one shard or solo job"
+      - name: The two interp-ledger legs partition their binary (no test lost between them)
+        # The ledger binary is split by TEST between two solo jobs; the
+        # filtersets must be complementary over the binary's test list.
+        run: |
+          set -euo pipefail
+          A=/tmp/almide-archive/almide-tests.tar.zst
+          bash scripts/ci-test-shard.sh --list-solo-tests-archive interp_abstain_ledger "$A" > /tmp/leg_a.txt
+          bash scripts/ci-test-shard.sh --list-solo-tests-archive interp_ledger_rest "$A" > /tmp/leg_b.txt
+          cargo nextest list --archive-file "$A" --workspace-remap . --message-format json -E 'binary_id(=almide::wasm_runtime_interp_ledger)' \
+            | python3 -c '
+          import json, sys
+          d = json.load(sys.stdin)
+          for bid, v in sorted(d["rust-suites"].items()):
+              for t, tc in sorted(v["testcases"].items()):
+                  if tc.get("filter-match", {}).get("status") == "matches":
+                      print("%s\t%s" % (bid, t))
+          ' > /tmp/leg_all.txt
+          [ -s /tmp/leg_a.txt ] && [ -s /tmp/leg_b.txt ] || { echo "LEDGER GATE FAIL: an interp-ledger leg selects no test" >&2; exit 1; }
+          if ! diff -u <(sort /tmp/leg_all.txt) <(sort /tmp/leg_a.txt /tmp/leg_b.txt); then
+            echo "LEDGER GATE FAIL: the two interp-ledger legs do not partition the binary's tests" >&2
+            exit 1
+          fi
+          echo "ledger legs OK: $(wc -l < /tmp/leg_a.txt | tr -d ' ') + $(wc -l < /tmp/leg_b.txt | tr -d ' ') tests = $(wc -l < /tmp/leg_all.txt | tr -d ' ')"
       - name: Balance report (informational — imbalance costs time, not coverage)
         run: |
           for i in 0 1 2 3; do
@@ -332,9 +378,12 @@ jobs:
     # 4, not more: the load is extremely skewed (the top 4 targets are half the
     # total), so past 4 shards the longest single target IS the floor and extra
     # jobs buy nothing. The former giant, `wasm_runtime_test` (1552 s on run
-    # 33695667642), is split into per-gate `wasm_runtime_*` binaries (largest
-    # ~520 s) so the packer can spread it; the floor is `diagnostic_harness_test`
-    # now.
+    # 33695667642), is split into per-gate `wasm_runtime_*` binaries so the
+    # packer can spread it. #2381: the five corpus sweeps that are each ONE
+    # 18–35-minute test (`wasm_runtime_{cross_target,interp_oracle,opt_parity,
+    # interp_ledger}`, `almide-spine::run_parity`) are no longer partitioned
+    # at all — `test-rust-solo` below gives each its own runner — so these
+    # four shards carry the ~6.5 ks of everything else, ~1.6 ks each.
     name: Test Rust (shard ${{ matrix.shard }}/4)
     needs: [changes, build]
     # No job-level docs-only guard here — see the `changes` job: a skipped
@@ -442,6 +491,104 @@ jobs:
         # shards' union is the whole set, so a partition bug reads as a RED
         # build rather than a fast green one.
         run: bash scripts/ci-test-shard.sh --run-archive ${{ matrix.shard }} 4 /tmp/almide-archive/almide-tests.tar.zst
+
+  test-rust-solo:
+    # The corpus giants, one runner each (#2381). Five test targets are each
+    # ONE test walking spec/wasm_cross serially for 18–35 minutes, and their
+    # cost is contention-sensitive: on PR #2440's run (35581361256), sharing
+    # a 4-vCPU runner with three other suites made every giant 40–95 %
+    # slower than it runs alone (opt_parity 1075 s → 2110 s, interp_oracle
+    # 1223 → 2040, cross_target 1377 → 1981, run_parity 1310 → 1907), and
+    # the shards sat at 32–44 min for 4.2–5.0 ks sums. The runner was the
+    # floor, so each giant gets its own. Same archive, same tools, same
+    # ALMIDE_BIN as the shards; the interp ledger's two gates (backend-free,
+    # ~27 min each) are split by TEST into two legs. The coverage gate
+    # (`Test shards cover every target`) asserts shards ∪ solos == every
+    # target and that the two ledger legs partition their binary.
+    #
+    # NOT in develop's required-check list yet (the four shard names and
+    # the coverage gate are). The coverage gate `needs` this job and fails
+    # unless every leg passed, so a red giant still blocks the merge through
+    # a required name; adding `Test Rust (solo <leg>)` × 6 to branch
+    # protection makes that direct and retires the proxy step.
+    name: Test Rust (solo ${{ matrix.leg }})
+    needs: [changes, build]
+    runs-on: ubuntu-latest
+    env:
+      DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Keep in step with SOLO_LEGS in scripts/ci-test-shard.sh.
+        leg:
+          - wasm_runtime_cross_target
+          - wasm_runtime_interp_oracle
+          - wasm_runtime_opt_parity
+          - run_parity
+          - interp_abstain_ledger
+          - interp_ledger_rest
+    steps:
+      - uses: actions/checkout@v7
+        if: env.DOCS_ONLY != 'true'
+
+      - uses: actions/download-artifact@v8
+        if: env.DOCS_ONLY != 'true'
+        with:
+          name: almide-linux
+          path: /tmp/almide-bin
+
+      - name: Setup
+        if: env.DOCS_ONLY != 'true'
+        run: chmod +x /tmp/almide-bin/almide
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: env.DOCS_ONLY != 'true'
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - name: Install cargo-nextest
+        if: env.DOCS_ONLY != 'true'
+        run: |
+          curl -LsSf https://get.nexte.st/latest/linux -o /tmp/nextest.tar.gz
+          tar xzf /tmp/nextest.tar.gz -C /usr/local/bin
+          cargo nextest --version
+      - uses: actions/download-artifact@v8
+        if: env.DOCS_ONLY != 'true'
+        with:
+          name: almide-tests-archive
+          path: /tmp/almide-archive
+
+      - name: Cache wasmtime tarball
+        if: env.DOCS_ONLY != 'true'
+        uses: actions/cache@v6
+        with:
+          path: wasmtime-v47.0.3-x86_64-linux.tar.xz
+          key: wasmtime-v47.0.3-x86_64-linux
+      - name: Install wasmtime
+        if: env.DOCS_ONLY != 'true'
+        run: |
+          VERSION=v47.0.3
+          TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
+          if [ ! -s "$TARBALL" ]; then
+            for i in 1 2 3 4 5; do
+              curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
+              echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
+            done
+          fi
+          tar -xf "$TARBALL"
+          sudo mv wasmtime-*/wasmtime /usr/local/bin/
+          wasmtime --version
+
+      - name: Install wasm-opt (binaryen)
+        if: env.DOCS_ONLY != 'true'
+        run: sudo apt-get update && sudo apt-get install -y binaryen && wasm-opt --version
+
+      - name: Cargo test (solo ${{ matrix.leg }})
+        if: env.DOCS_ONLY != 'true'
+        env:
+          ALMIDE_BIN: /tmp/almide-bin/almide
+          ALMIDE_EXPECT_TOOLS: "1"
+        run: bash scripts/ci-test-shard.sh --run-solo-archive ${{ matrix.leg }} /tmp/almide-archive/almide-tests.tar.zst
 
   almide-gates:
     # BRANCH PROTECTION: this job's name is a REQUIRED CHECK on develop. Renaming
@@ -1724,7 +1871,7 @@ jobs:
     name: Trigger Playground Deploy
     # Gate the deploy on host-arch determinism: the playground runs the compiler
     # as wasm32, so a 32/64-bit codegen divergence must block deploy, not ship.
-    needs: [test-rust, checks, wasm-host-determinism]
+    needs: [test-rust, test-rust-solo, checks, wasm-host-determinism]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
