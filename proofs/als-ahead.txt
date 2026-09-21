@@ -10,3 +10,10 @@
 # lacks), and refuses an entry whose id no longer drifts — so every entry is
 # removed by the PR that brings the wording here, and the list cannot grow
 # into a blanket pass.
+#
+# Measured at pin ef52372 (2026-09-21): four statements the judge is ahead on,
+# each with the almide PR that mirrors the text and must delete its line.
+C-122  almide/almide#2399
+C-226  almide/almide#2414
+C-229  almide/almide#2420
+C-334  almide/almide#2404
