@@ -27,12 +27,17 @@ fn run(args: &[&str], listing: &str) -> Output {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn bash");
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(listing.as_bytes())
-        .unwrap();
+    // A script that refuses its arguments exits before reading stdin; the
+    // write then sees EPIPE, which is not a defect of the gate (it went
+    // red on a CI shard for exactly that race, 2026-09-21). Any other error
+    // is still one.
+    if let Err(e) = child.stdin.take().unwrap().write_all(listing.as_bytes()) {
+        assert_eq!(
+            e.kind(),
+            std::io::ErrorKind::BrokenPipe,
+            "writing the listing to the script: {e}"
+        );
+    }
     child.wait_with_output().expect("wait for the script")
 }
 
