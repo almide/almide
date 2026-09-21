@@ -136,6 +136,6 @@ S2 / S3 as of 2026-09-21 (see above).
 
 ## Open follow-ups from the inventory pass
 
-- #2398's age is not recorded on the issue: the "reproduces on 0.62.0" claim was made in a session, not measured into a comment. Measure on the 0.62.0 binary and comment the A/B before the final.
+- #2398's age: measured on published assets the same night — it does NOT reproduce on v0.62.0; `git bisect run` over v0.62.0..v0.63.0-rc1 (431 commits, 10 release builds) names 092c40d05 (PR #2048, Map/Set entries on typed drop glue, 2026-09-08) as the first bad commit, so it carries the `regression` label. The step script, reproducer, both run logs and the verdict table are in `issue-inventory-2026-09-21/bisect-2398/`; the verdict table is a reconstruction from the run logs, not git's own bisect log (that does not survive `git bisect reset`). The caveat stands: the trigger depends on surrounding allocations, so the claim is "this program does not expose it on 0.62.0", not "0.62.0 is correct".
 - #2417 (the header format and the label axis) and #2386 (shard weights) were open at snapshot time.
 - `research/benchmark/perf/README.md:95` linear-scan rot — separate docs PR.

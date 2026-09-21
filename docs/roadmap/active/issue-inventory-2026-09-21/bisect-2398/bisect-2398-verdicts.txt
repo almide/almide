@@ -1,0 +1,34 @@
+# #2398 bisect verdicts — reconstructed from the two run logs in this directory.
+#
+# NOT `git bisect log`: that log does not survive `git bisect reset`, which had
+# already run when these files were collected. Every line below is copied from
+# bisect-2398-run1.log / run2.log, which are the step script's own output.
+#
+# Question per commit: does the r5 line of bisect-2398-repro.almd agree between
+# `almide run` and `almide run --target wasm`?  agree = good, differ = bad.
+# Build failure or a missing r5 line exits 125 (skip) and answers nothing.
+#
+# window: v0.62.0..v0.63.0-rc1 (431 commits). Narrowed for free first: the
+# published rc1, rc2 and rc3 assets all diverge, so rc1 is the `bad` end.
+#
+verdict  commit      date (UTC)         subject
+good     v0.62.0     2026-09-08 03:28   published asset, sha256 verified
+good     8b086836e   2026-09-14         arena prelude spells std::boxed::Box …
+good     7ba1e3f61   2026-09-11         record parameter emitted as a reference …
+good     166b98021   2026-09-08 06:29   test report reads the snapshot header …   <= PARENT
+bad      092c40d05   2026-09-08 10:54   Release Map and Set entries through typed entry drop glue …   <= FIRST BAD (PR #2048)
+bad      95a9e9962   2026-09-08         Regenerate the run, ast, check, alloc and size ledgers …
+bad      458437bb5   2026-09-09         Add the decode benchmark corpus …
+bad      43fc91a29   2026-09-10         Primitive option and default codec decoders borrow …
+bad      7c9e809ac   2026-09-12         Package CI drops its message grep …
+bad      07e1b3e2f   2026-09-13         Format the new cross-target fixture …
+bad      d4f4341f4   2026-09-15         Move the ALMIDE_ORACLE_KEEP row …
+bad      v0.63.0-rc1 2026-09-18         published asset, sha256 verified
+bad      v0.63.0-rc2 2026-09-19         published asset, sha256 verified
+bad      v0.63.0-rc3 2026-09-20         published asset, sha256 verified
+#
+# bytes of the r5 line at the boundary (od -An -tx1):
+#   166b98021  native 72 35 20 3d 20 32 0a   wasm 72 35 20 3d 20 32 0a          "r5 = 2\n" both
+#   092c40d05  native 72 35 20 3d 20 32 0a   wasm 72 35 20 3d 20 ef bf bd 0a    "r5 = �\n"
+#   v0.63.0-rc3 wasm prints 0x10 instead of ef bf bd — same defect, different
+#   garbage, because a released block reads back whatever was written there since.
