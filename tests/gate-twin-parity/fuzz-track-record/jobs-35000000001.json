@@ -1,0 +1,99 @@
+{
+ "jobs": [
+  {
+   "name": "Build compiler + fuzzer (x86_64)",
+   "conclusion": "success",
+   "steps": []
+  },
+  {
+   "name": "Generative differential fuzz (shard 1, x86_64)",
+   "conclusion": "success",
+   "steps": [
+    {
+     "name": "Run fuzz campaign",
+     "conclusion": "success"
+    }
+   ]
+  },
+  {
+   "name": "Generative differential fuzz (shard 2, x86_64)",
+   "conclusion": "cancelled",
+   "steps": [
+    {
+     "name": "Run fuzz campaign",
+     "conclusion": "cancelled"
+    }
+   ]
+  },
+  {
+   "name": "Generative differential fuzz (shard 3, x86_64)",
+   "conclusion": "success",
+   "steps": [
+    {
+     "name": "Run fuzz campaign",
+     "conclusion": "success"
+    }
+   ]
+  },
+  {
+   "name": "Generative differential fuzz (shard 4, x86_64)",
+   "conclusion": "success",
+   "steps": [
+    {
+     "name": "Run fuzz campaign",
+     "conclusion": "success"
+    }
+   ]
+  },
+  {
+   "name": "Generative differential fuzz (shard 5, aarch64)",
+   "conclusion": "success",
+   "steps": [
+    {
+     "name": "Run fuzz campaign",
+     "conclusion": "success"
+    }
+   ]
+  },
+  {
+   "name": "Generative differential fuzz (shard 6, aarch64)",
+   "conclusion": "success",
+   "steps": [
+    {
+     "name": "Run fuzz campaign",
+     "conclusion": "success"
+    }
+   ]
+  },
+  {
+   "name": "Generative differential fuzz (shard 7, aarch64)",
+   "conclusion": "cancelled",
+   "steps": [
+    {
+     "name": "Run fuzz campaign",
+     "conclusion": "cancelled"
+    }
+   ]
+  },
+  {
+   "name": "Generative differential fuzz (shard 8, aarch64)",
+   "conclusion": "success",
+   "steps": [
+    {
+     "name": "Run fuzz campaign",
+     "conclusion": "success"
+    }
+   ]
+  },
+  {
+   "name": "Night verdict",
+   "conclusion": "cancelled",
+   "steps": [
+    {
+     "name": "Score the night",
+     "conclusion": "cancelled"
+    }
+   ]
+  }
+ ]
+}

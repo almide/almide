@@ -134,10 +134,7 @@ effect fn main() -> Unit = {
     // implementation rather than a shell copy and an Almide copy.
     "fuzz-track-record" => {
       let n = int.parse(list.get_or(args, 2, "20")) ?? 20
-      list.join(
-        track_record.report("almide/almide", n, "Generative differential fuzz", "Run fuzz campaign")!,
-        "\n",
-      ) + "\n"
+      list.join(track_record.report(n)!, "\n") + "\n"
     },
     // The contract-ledger gate. Like `output-parity` it reports through its EXIT CODE — the
     // `::error::` prefix is how GitHub Actions annotates a line, and the non-zero exit is what
