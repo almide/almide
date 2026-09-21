@@ -126,9 +126,22 @@ expect "stale allowance" 1 "lists $other as als-ahead but its statement and titl
 run "$tmp/judge-without-id.toml" "$pristine" "$tmp/no-allowance.txt"
 expect "id unknown to the judge" 1 "::error::$id is in" "not in the judge ledger" "id(s) unknown to the judge"
 
+# Phantom ids (item 4): a four-digit `C-NNNN` is a line number cited as a
+# contract. Forged on the judge's side and on ours, each names file:line; the
+# committed ledger's own `RFC-7386` citation must not be what fires (the
+# positive control above already passed with that line present).
+grep -q 'RFC-7386' "$pristine" \
+  || { echo "FAIL: the committed ledger no longer cites RFC-7386 — the boundary-guard control has no false positive to hold" >&2; exit 1; }
+awk -v n="$stmt_line" 'NR == n { sub(/"$/, ""); $0 = $0 " (see C-1063)\"" } { print }' "$pristine" >"$tmp/phantom.toml"
+run "$tmp/phantom.toml" "$pristine" "$tmp/no-allowance.txt"
+expect "phantom C-1063 in the judge" 1 "::error::judge@" ":$stmt_line: four-digit contract id C-1063" "phantom C-NNNN reference(s)"
+refute "phantom C-1063 in the judge" "RFC-7386" "$id.statement differs"
+run "$pristine" "$tmp/phantom.toml" "$tmp/no-allowance.txt"
+expect "phantom C-1063 in our ledger" 1 "::error::$tmp/phantom.toml:$stmt_line: four-digit contract id C-1063" "1 phantom"
+
 # A malformed allowance entry is an environment error, not a verdict.
 printf 'not-an-id  garbage\n' >"$tmp/allow-bad.txt"
 run "$pristine" "$pristine" "$tmp/allow-bad.txt"
 expect "malformed allowance entry" 2 "entry that is not a contract id"
 
-echo "als-pin negative controls: 1 positive + 9 forged inputs all behaved (subject $id, stale-control $other)"
+echo "als-pin negative controls: 1 positive + 11 forged inputs all behaved (subject $id, stale-control $other)"
