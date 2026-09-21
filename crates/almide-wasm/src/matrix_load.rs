@@ -366,16 +366,30 @@ impl Emitter<'_> {
         } else {
             i.local_get(hi).i64_extend_i32_u().local_set(hrow);
         }
-        // in bounds? off + rid*row_bytes + row_bytes <= len
-        i.local_get(hoff)
-            .local_get(hrow)
-            .local_get(hrb)
-            .i64_mul()
-            .i64_add()
-            .local_get(hrb)
-            .i64_add();
-        i.local_get(hd).i32_load(len_memarg()).i64_extend_i32_u();
-        i.i64_le_s().if_(BlockType::Empty);
+        if select {
+            // Selector: a selected row is `cols / 128` whole blocks on native's
+            // ROW schedule (#1787); a row whose blocks leave the buffer stays
+            // all-zero — in bounds? off + rid*row_bytes + row_bytes <= len.
+            i.local_get(hoff)
+                .local_get(hrow)
+                .local_get(hrb)
+                .i64_mul()
+                .i64_add()
+                .local_get(hrb)
+                .i64_add();
+            i.local_get(hd).i32_load(len_memarg()).i64_extend_i32_u();
+            i.i64_le_s();
+        } else {
+            // Full loader: NO row-level bound — native has none. Its rule is
+            // per ELEMENT on the global-k schedule (`$q10_val`, #1532): a k
+            // whose 18-byte block lies inside the buffer decodes, any other is
+            // 0.0. Applying the selector's row test here skipped whole rows
+            // whenever `cols/128*18` exceeded the buffer, so a `cols` beyond
+            // the buffer answered all zeros where native decoded the blocks
+            // that were present (#2419, fuzz seed 990100/151 on 0.62.0 too).
+            i.i32_const(1);
+        }
+        i.if_(BlockType::Empty);
         i.i32_const(0).local_set(hj);
         i.block(BlockType::Empty).loop_(BlockType::Empty);
         i.local_get(hj).local_get(hc).i32_wrap_i64().i32_ge_u().br_if(1);
