@@ -41,7 +41,7 @@ Sizes: S (≤1 day) / M (≤1 week) / L (≤1 month) / XL (a quarter+).
   DONE 2026-08-19 (#1226 closed): abstains 135→27 rows = 4.6% of the corpus,
   real 3-way votes 566/589 (96.1%), zero dissent held across every increment;
   the 23 residual abstains are classified in interp-abstain-classes.toml.
-- [ ] **A1-2 (XL, #1527) Wall burn-down, fuzz-frequency order.** The subset walls
+- [x] **A1-2 (XL, #1527) Wall burn-down, fuzz-frequency order.** The subset walls
   sit on everyday code. Burn down by observed frequency (per 30-min fuzz run):
   List-argument materialization (~98×), unresolvable-`if` with call-bearing
   arms (~59×), registry gaps `result.flatten/to_list/filter`, `list.zip_with`
@@ -50,6 +50,9 @@ Sizes: S (≤1 day) / M (≤1 week) / L (≤1 month) / XL (a quarter+).
   Exit: walls < 100 per 30-min fuzz run AND every graduation lands its
   specimen as a voting fixture under contract in the same PR (the shrink-only
   rule already in place).
+  CLOSED 2026-09-06 (#1527): **64 walls per 30 min** on the 2026-09-06 nightly
+  (84 walls / 11,129 programs over 8 × 295 s), findings 0; the walled-real
+  ratchet sits at its permanent 0 and every graduation lands under contract.
 - [x] **A1-3 (L, #1528) Negative-test 10× (test-surface-25x tier 1).** 99 diagnostic
   pairs vs rust's ~15k is the widest maturity gap. Exit: every E-code has a
   fixture family covering each hint variant and each fix-it verdict; ≥1,000
@@ -94,6 +97,11 @@ Sizes: S (≤1 day) / M (≤1 week) / L (≤1 month) / XL (a quarter+).
   this week). Then: nightly runs with rotating seeds, findings auto-filed,
   streak meter. Exit: 90 consecutive green nights with zero new
   correctness findings.
+  PROGRESS: the wedges closed 2026-08-18 (#1532). The meter is #924, whose
+  counted condition was ratified 2026-09-21 — a night counts when it
+  delivered ≥ 75% of the planned fuzz-minutes (`shards=k/N`); #2390 must
+  land before the streak value is trustworthy. Findings no longer land on
+  #924 (#2379 routes them to the `fuzz-findings` label).
 - [x] **A2-2 (M, #1533) Real-code acceptance tier.** Compile-and-test the real
   downstream projects (dfa, parsegen, and the other consumers) in CI as an
   acceptance ring — the E0004 and #1501 classes were both found by real code,
@@ -115,12 +123,17 @@ Sizes: S (≤1 day) / M (≤1 week) / L (≤1 month) / XL (a quarter+).
 
 ## Tier 3 — Outside the compiler (no issue-fixing moves these)
 
-- [ ] **A3-1 (#1534) (S) Security posture floor.** SECURITY.md with a disclosure
+- [x] **A3-1 (#1534) (S) Security posture floor.** SECURITY.md with a disclosure
   channel, dependency lock audit in CI (the MVS+lock work is the seed), and
   a release-signing story. Exit: documented, linked from README.
-- [ ] **A3-2 (#1535) (M) Support contract.** LTS policy (which versions get fixes,
+  CLOSED 2026-08-31 (#1534): `SECURITY.md` merged (#1636), the dependency
+  audit went red on a known-vulnerable pin in a drill (RUSTSEC-2020-0071),
+  and every release asset is Sigstore-attested (`release.yml`).
+- [x] **A3-2 (#1535) (M) Support contract.** LTS policy (which versions get fixes,
   for how long), versioning guarantees, and a bus-factor statement honest
   about the maintainer surface. Exit: SUPPORT.md ratified.
+  CLOSED 2026-08-27 (#1535): `SUPPORT.md` — every guarantee names the
+  machinery that enforces it.
 - [ ] **A3-3 (XL) Qualification data pack (only if a certified industry is
   targeted).** Map the existing evidence — three-way differential oracle,
   295-contract ledger, gate-verification enumeration, wall honesty — onto a
