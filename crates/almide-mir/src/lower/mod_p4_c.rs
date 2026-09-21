@@ -8,8 +8,8 @@
 /// Extracted from `result_call_name` (codopsy7 complexity sweep, pattern-2 uniform-arm
 /// split): the VALUE combinators over a HEAP-Ok Result — same cap-as-tag misread as
 /// is_ok/is_err, but the scalar impls also REBUILT the wrong layout: every `ok(x)` took the
-/// Err path and the result printed as a swapped/zeroed value (the fuzz C-904 silent `ok("")`
-/// class; unwrap_or_else even emitted invalid wasm — an i64-result CallFn bound to an i32
+/// Err path and the result printed as a swapped/zeroed value (the silent `ok("")` class:
+/// differential-fuzz index 904, contract C-139; unwrap_or_else even emitted invalid wasm — an i64-result CallFn bound to an i32
 /// String local). The exact `Result[String, String]` instantiation routes to the `_h` twins
 /// (result_map.almd); any other heap-Ok instantiation routes to the UNLINKED `_x` — a
 /// deterministic render wall, never a wrong-typed link. `unwrap_or` needs no arm
@@ -166,8 +166,9 @@ fn result_call_name(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String
         // The VALUE combinators over a HEAP-Ok Result — same cap-as-tag misread as
         // is_ok/is_err, but the scalar impls also REBUILT the wrong layout: every
         // `ok(x)` took the Err path and the result printed as a swapped/zeroed value
-        // (the fuzz C-904 silent `ok("")` class; unwrap_or_else even emitted invalid
-        // wasm — an i64-result CallFn bound to an i32 String local). The exact
+        // (the silent `ok("")` class: differential-fuzz index 904, contract C-139;
+        // unwrap_or_else even emitted invalid wasm — an i64-result CallFn bound to
+        // an i32 String local). The exact
         // `Result[String, String]` instantiation routes to the `_h` twins
         // (result_map.almd); any other heap-Ok instantiation routes to the UNLINKED
         // `_x` — a deterministic render wall, never a wrong-typed link. `unwrap_or`
