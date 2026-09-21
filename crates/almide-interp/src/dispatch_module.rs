@@ -163,6 +163,36 @@ impl<'a> Interpreter<'a> {
         let Some(recv) = args.first() else {
             return Flow::Abort(format!("internal: `{m}.{f}` with no receiver"));
         };
+        // `h.f` where `h` is a binding of THIS frame: the backends write
+        // through the field (a copy-on-write field write, C-033 — #2411 gave
+        // the wasm leg that route), and so does this frame — the mutation runs
+        // on the field's slot inside the binding's own record storage, through
+        // `Rc::make_mut` on the field vector, so an alias of the record taken
+        // before the push keeps the old list. A deeper path (`h.a.b`,
+        // `xs[i].f`) still abstains below, by name.
+        if let IrExprKind::Member { object, field } = &recv.kind {
+            if let IrExprKind::Var { id } = &object.kind {
+                let mut rest = Vec::with_capacity(args.len().saturating_sub(1));
+                for a in &args[1..] {
+                    rest.push(val!(self.eval_expr(a, scope)));
+                }
+                let field = *field;
+                return match scope.with_slot(*id, |slot| match slot {
+                    Value::Record { fields, .. } => {
+                        let fields = std::rc::Rc::make_mut(fields);
+                        let target = fields.iter_mut().find(|(k, _)| *k == field)?;
+                        crate::inplace::apply(m, f, &mut target.1, rest)
+                    }
+                    _ => None,
+                }) {
+                    Some(Some(out)) => Flow::val(out),
+                    Some(None) => Flow::Abort(format!(
+                        "internal: `{m}.{f}` through a record field the binding does not hold"
+                    )),
+                    None => Flow::Abort(format!("internal: `{m}.{f}` on an unbound record receiver")),
+                };
+            }
+        }
         let shape = match &recv.kind {
             IrExprKind::Call { .. } => None,
             IrExprKind::Member { .. } => Some("a record field"),
