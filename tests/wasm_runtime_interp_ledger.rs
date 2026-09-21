@@ -69,6 +69,24 @@ fn interp_abstain_ledger() {
         eprintln!("interp_abstain_ledger: corpus empty — skipping");
         return;
     }
+    // ALMIDE_CORPUS_SHARD=k/N (#2381), after the sort. This ledger is keyed
+    // by FIXTURE in both directions, so a slice is judged whole here once
+    // `stale` is taken against the ledger ∩ this shard's fixtures (below):
+    // a ledgered fixture another shard walks is not "no longer abstaining".
+    // No merge form; the coverage step unions the walked lists.
+    let shard = almide_corpus::corpus_shard();
+    if let Some(s) = shard {
+        s.require_slice("interp_abstain_ledger");
+        entries = s.apply(entries);
+    }
+    let walked: std::collections::BTreeSet<String> = entries
+        .iter()
+        .map(|e| e.path().file_stem().unwrap().to_str().unwrap().to_string())
+        .collect();
+    if let Some(s) = shard {
+        let list: Vec<String> = walked.iter().cloned().collect();
+        almide_corpus::write_partial(s, "interp_abstain_ledger", "fixtures", &list);
+    }
 
     let total = entries.len();
     // fixture stem → first-line reason, in corpus order
@@ -83,6 +101,10 @@ fn interp_abstain_ledger() {
     }
 
     if std::env::var("ALMIDE_UPDATE_INTERP_LEDGER").is_ok() {
+        assert!(
+            shard.is_none(),
+            "ALMIDE_UPDATE_INTERP_LEDGER over a corpus slice would write a ledger of one shard — unset ALMIDE_CORPUS_SHARD to regenerate"
+        );
         let mut out = String::from(
             "# interp-abstain-ledger — fixtures of spec/wasm_cross/ the reference\n\
              # interpreter cannot evaluate (its self-reported coverage gaps), i.e. the\n\
@@ -138,7 +160,12 @@ fn interp_abstain_ledger() {
     // regeneration the failure message prescribes rewrites rows nobody touched —
     // unclassing them in check-abstain-classes.sh, which reads the reason text
     // (#2333).
-    let recorded = parse_reason_ledger(&ledger_text, false);
+    let mut recorded = parse_reason_ledger(&ledger_text, false);
+    if shard.is_some() {
+        // The ledger ∩ this shard: `stale` below then asks only about the
+        // fixtures this shard actually walked.
+        recorded.retain(|n, _| walked.contains(n));
+    }
     let ledger: std::collections::BTreeSet<String> = recorded.keys().cloned().collect();
     let observed_set: std::collections::BTreeSet<String> =
         observed.iter().map(|(n, _)| n.clone()).collect();
@@ -265,25 +292,84 @@ fn interp_bridge_fallback_ledger() {
         eprintln!("interp_bridge_fallback_ledger: corpus empty — skipping");
         return;
     }
+    const GATE: &str = "interp_bridge_fallback_ledger";
+    let all_stems: Vec<String> = entries
+        .iter()
+        .map(|e| e.path().file_stem().unwrap().to_str().unwrap().to_string())
+        .collect();
+
+    // ALMIDE_CORPUS_SHARD (#2381). This ledger is keyed by NAME, not fixture:
+    // a name reached only by fixtures outside this shard would read as stale,
+    // and a shard cannot tell. So a slice (`k/N`) judges only what IS sound
+    // on a subset — a name the ledger lacks — and leaves its observed names
+    // as a partial; `merge/N` unions the N partials (first fixture in corpus
+    // order wins, as in one sweep) and runs the whole judge below unchanged.
+    let shard = almide_corpus::corpus_shard();
+    let slice = match shard {
+        Some(s @ almide_corpus::CorpusShard::Slice { .. }) => {
+            entries = s.apply(entries);
+            let walked: Vec<String> = entries
+                .iter()
+                .map(|e| e.path().file_stem().unwrap().to_str().unwrap().to_string())
+                .collect();
+            almide_corpus::write_partial(s, GATE, "fixtures", &walked);
+            Some(s)
+        }
+        _ => None,
+    };
 
     // name → (first fixture that reached it, the body's reason), corpus order
     let mut observed: std::collections::BTreeMap<String, (String, String)> =
         std::collections::BTreeMap::new();
     let mut calls = 0usize;
-    for entry in &entries {
-        let path = entry.path();
-        let stem = path.file_stem().unwrap().to_str().unwrap().to_string();
-        let source = std::fs::read_to_string(&path).unwrap();
-        let (_, fallbacks) = run_interp_capture_with_fallbacks(&source);
-        calls += fallbacks.len();
-        for (name, why) in fallbacks {
-            observed
-                .entry(name)
-                .or_insert((stem.clone(), why.replace('\n', " ")));
+    let walked_n;
+    if let Some(almide_corpus::CorpusShard::Merge { n }) = shard {
+        almide_corpus::assert_partials_cover(n, GATE, &all_stems);
+        for lines in almide_corpus::read_partials(n, GATE, "bridge") {
+            for l in lines {
+                let mut it = l.splitn(3, '\t');
+                let name = it.next().expect("bridge partial row: name").to_string();
+                let stem = it.next().expect("bridge partial row: fixture").to_string();
+                let why = it.next().expect("bridge partial row: reason").to_string();
+                // Stems sort as the corpus does (one directory, one
+                // extension), so the smallest stem is the first fixture of
+                // the unsharded sweep.
+                let e = observed.entry(name).or_insert((stem.clone(), why.clone()));
+                if stem < e.0 {
+                    *e = (stem, why);
+                }
+            }
+        }
+        walked_n = all_stems.len();
+        eprintln!("{GATE}: merged {n} shard partial(s) — {} name(s)", observed.len());
+    } else {
+        for entry in &entries {
+            let path = entry.path();
+            let stem = path.file_stem().unwrap().to_str().unwrap().to_string();
+            let source = std::fs::read_to_string(&path).unwrap();
+            let (_, fallbacks) = run_interp_capture_with_fallbacks(&source);
+            calls += fallbacks.len();
+            for (name, why) in fallbacks {
+                observed
+                    .entry(name)
+                    .or_insert((stem.clone(), why.replace('\n', " ")));
+            }
+        }
+        walked_n = entries.len();
+        if let Some(s) = slice {
+            let rows: Vec<String> = observed
+                .iter()
+                .map(|(n, (stem, why))| format!("{n}\t{stem}\t{why}"))
+                .collect();
+            almide_corpus::write_partial(s, GATE, "bridge", &rows);
         }
     }
 
     if std::env::var("ALMIDE_UPDATE_INTERP_LEDGER").is_ok() {
+        assert!(
+            shard.is_none(),
+            "ALMIDE_UPDATE_INTERP_LEDGER over a corpus slice or merge would not be one sweep — unset ALMIDE_CORPUS_SHARD to regenerate"
+        );
         let mut out = String::from(
             "# interp-bridge-fallback-ledger — the `module.func` names the hand-mirrored\n\
              # bridge (crates/almide-interp/src/bridge.rs) answers over the spec/wasm_cross\n\
@@ -328,16 +414,23 @@ fn interp_bridge_fallback_ledger() {
         .iter()
         .filter(|(n, _)| !ledger.contains(*n))
         .collect();
-    let stale: Vec<&String> = ledger
-        .iter()
-        .filter(|n| !observed.contains_key(*n))
-        .collect();
+    // A slice cannot judge `stale` or a reason drift: the name's first
+    // fixture may be in another shard. Both are judged by `merge/N`.
+    let stale: Vec<&String> = if slice.is_some() {
+        Vec::new()
+    } else {
+        ledger.iter().filter(|n| !observed.contains_key(*n)).collect()
+    };
 
     eprintln!(
-        "\ninterp_bridge_fallback_ledger: {} bridge name(s) still answer as the body's fallback ({} calls over {} fixtures)",
+        "\ninterp_bridge_fallback_ledger: {} bridge name(s) still answer as the body's fallback ({} calls over {} fixtures){}",
         observed.len(),
         calls,
-        entries.len()
+        walked_n,
+        match slice {
+            Some(almide_corpus::CorpusShard::Slice { k, n }) => format!(" — shard {k}/{n}: new names judged here, stale/drift in the merge"),
+            _ => String::new(),
+        }
     );
 
     let mut failures = String::new();
@@ -373,6 +466,7 @@ fn interp_bridge_fallback_ledger() {
     }
     let drifted: Vec<(&String, &String, &String)> = observed
         .iter()
+        .filter(|_| slice.is_none())
         .filter_map(|(n, (_, why))| {
             recorded
                 .get(n)

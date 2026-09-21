@@ -71,6 +71,22 @@ fn build_corpus() -> Option<Vec<FixtureLegs>> {
         .filter(|e| e.path().extension().map(|x| x == "almd").unwrap_or(false))
         .collect();
     entries.sort_by_key(|e| e.path());
+    // ALMIDE_CORPUS_SHARD=k/N (#2381): the k-th modulo slice of the SORTED
+    // list, taken here and nowhere else. The three gates over this table
+    // assert per fixture, so a slice is judged whole in its shard; the
+    // walked list goes to ALMIDE_CORPUS_SHARD_DIR for the coverage step
+    // (∪ shards == ls spec/wasm_cross) — the only thing that makes a
+    // partition safe. `merge/N` is refused: nothing here needs aggregating.
+    if let Some(shard) = almide_corpus::corpus_shard() {
+        let gate = env!("CARGO_CRATE_NAME");
+        shard.require_slice(gate);
+        entries = shard.apply(entries);
+        let walked: Vec<String> = entries
+            .iter()
+            .map(|e| e.path().file_stem().unwrap().to_str().unwrap().to_string())
+            .collect();
+        almide_corpus::write_partial(shard, gate, "fixtures", &walked);
+    }
     // ALMIDE_CORPUS_FILTER=<substring>: a developer's single-fixture loop for
     // the 3-way harnesses (seconds instead of the ~6 min full corpus). Never
     // set in CI — the ledger gate over a filtered corpus would read every
