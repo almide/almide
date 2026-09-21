@@ -173,6 +173,10 @@ pub(super) struct Occurrence {
 pub(super) struct CaptureUses {
     pub(super) uses: HashMap<VarId, Vec<Occurrence>>,
     pub(super) clean: HashSet<VarId>,
+    /// Binders bound INSIDE a loop body and rebound every iteration (#2410).
+    /// The `in_loop` veto in [`holds_last_occurrence`] does not apply to these:
+    /// see its doc comment.
+    pub(super) loop_fresh: HashSet<VarId>,
 }
 
 /// The use table [`capture_moves`] decides from. `ALMIDE_CAPTURE_MOVE_OFF=1`
@@ -193,6 +197,7 @@ pub(super) fn capture_uses(body: &IrExpr) -> CaptureUses {
         }
     }
     out.clean = out.uses.keys().copied().filter(|v| !unclean.contains(v)).collect();
+    out.loop_fresh = crate::pass_clone_loops::loop_fresh_union(body);
     out
 }
 
@@ -227,6 +232,13 @@ pub(super) fn fan_capture_moves(table: &CaptureUses, var: VarId, arm: (almide_ba
 /// a chain step — would move the var a second time)? An earlier occurrence
 /// in a loop the closure sits after does not block the move.
 fn holds_last_occurrence(table: &CaptureUses, var: VarId, inside: impl Fn(&Occurrence) -> bool) -> bool {
+    // A binder bound INSIDE the loop body is rebound on every iteration, so the
+    // per-iteration closure moves a DIFFERENT value each time — there is no
+    // second move of one value, and the veto below does not apply (#2410). The
+    // clone pass's own last-use rule already draws this line
+    // (`pass_clone.rs`: `!ctx.in_loop || ctx.fresh.contains(&id)`); this copy
+    // tested a bare `in_loop` and so cloned exactly the shape #2316 is about.
+    let loop_fresh = table.loop_fresh.contains(&var);
     if !table.clean.contains(&var) {
         return false;
     }
@@ -237,5 +249,5 @@ fn holds_last_occurrence(table: &CaptureUses, var: VarId, inside: impl Fn(&Occur
     }
     let last_inside = inside.iter().map(|o| o.index).max().unwrap_or(0);
     let last_any = uses.iter().map(|o| o.index).max().unwrap_or(0);
-    last_any == last_inside && !inside.iter().any(|o| o.held || o.in_loop)
+    last_any == last_inside && !inside.iter().any(|o| o.held || (o.in_loop && !loop_fresh))
 }

@@ -267,3 +267,44 @@ impl almide_ir::visit::IrVisitor for FreshBinds<'_> {
 fn body_writes_var(body: &[IrStmt], v: VarId) -> bool {
     UseSites::of_stmts(body, &ExplicitBorrows).of(v).any(|u| Use::is_write(u, true))
 }
+
+/// The union of every loop's FRESH binder set over one function body.
+///
+/// [`loop_fresh_vars`] answers "which binders are fresh for THIS loop"; this
+/// answers "which binders in this function are fresh for the loop they sit in".
+/// VarIds are unique after lowering (no shadowing), so the union cannot
+/// conflate two bindings, and a var in it is bound inside some loop body.
+///
+/// Two consumers, deliberately one copy (#2410): the capture-move rule
+/// (`pass_capture_clone_bindings::holds_last_occurrence`) and the ownership
+/// certifier's C3. Both previously tested a bare `in_loop`, which abstains from
+/// a binding that is rebound every iteration and therefore CAN be moved — the
+/// #2316 shape. Note the trade: the certifier is otherwise independent of the
+/// passes, and sharing this notion means a wrong `loop_fresh_vars` would be
+/// invisible to both. It is shared because the alternative — two copies of one
+/// rule — is the failure this repo keeps finding.
+pub(crate) fn loop_fresh_union(body: &IrExpr) -> HashSet<VarId> {
+    struct Union {
+        fresh: HashSet<VarId>,
+    }
+    impl almide_ir::visit::IrVisitor for Union {
+        fn visit_expr(&mut self, expr: &IrExpr) {
+            match &expr.kind {
+                // A closure's binds belong to its own invocation frame, exactly
+                // as in `FreshBinds`.
+                IrExprKind::Lambda { .. } => return,
+                IrExprKind::ForIn { var, var_tuple, body, .. } => {
+                    self.fresh.extend(loop_fresh_vars(Some(*var), var_tuple.as_deref(), body));
+                }
+                IrExprKind::While { body, .. } => {
+                    self.fresh.extend(loop_fresh_vars(None, None, body));
+                }
+                _ => {}
+            }
+            almide_ir::visit::walk_expr(self, expr);
+        }
+    }
+    let mut v = Union { fresh: HashSet::new() };
+    almide_ir::visit::IrVisitor::visit_expr(&mut v, body);
+    v.fresh
+}
