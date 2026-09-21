@@ -588,12 +588,18 @@ else {
 // the form ALS-T6 forbids) while wasm read whatever linear memory held and
 // answered — `from_q1_0_bytes(bytes.new(18), 0, 4, 128)` was exit 101 against a
 // four-row answer (differential fuzz, a matrix_select_rows_oob mutation).
+// #2419: NO row-level bound here. The full loader's rule is per ELEMENT —
+// `__q10_val` answers 0.0 for any k whose 18-byte block lies past `limit`
+// (#1532) — so a `cols` far beyond the buffer still decodes the blocks that
+// ARE present, as native does. The row test (`base + r*row_bytes + row_bytes
+// > limit`) belongs to the SELECTOR (`__q10_sel_rows`, C-229 #1787); applied
+// here it skipped every row whole once `cols/128*18` exceeded the buffer and
+// answered all zeros where native decoded block 0 (the third copy of the
+// same mistake, after the structural leg's `lower_matrix_q1_0`).
 fn __q10_rows(ho: Int, base: Int, limit: Int, rows: Int, cols: Int, r: Int) -> Int = if r >= rows then 0
 else {
-  let row_bytes = cols / 128 * 18
   let row = prim.alloc_list_f64(cols)
-  let _c = if base + r * row_bytes + row_bytes > limit then __q8_zfill(prim.handle(row), cols, 0)
-  else __q10_row(prim.handle(row), base, limit, r * cols, cols, 0)
+  let _c = __q10_row(prim.handle(row), base, limit, r * cols, cols, 0)
   prim.store_str(ho + 12 + r * 8, row)
   __q10_rows(ho, base, limit, rows, cols, r + 1)
 }
