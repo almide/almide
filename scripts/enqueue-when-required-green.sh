@@ -22,7 +22,6 @@
 #   --wait   poll every 60 s until the required set is green (or one fails),
 #            then enqueue; without it, report and enqueue only if green now.
 set -euo pipefail
-export LC_ALL=C # sort order must not depend on the machine (#1031)
 PR="${1:?pr number}"
 WAIT="${2:-}"
 REPO="${GH_REPO:-almide/almide}"
@@ -37,10 +36,14 @@ verdict() {
     | REQUIRED="$required" python3 -c '
 import os, sys
 want = set(l for l in os.environ["REQUIRED"].split("\n") if l)
-seen, bad, pend = set(), [], 0
+seen, bad, pend, bad_any = set(), [], 0, []
 for line in sys.stdin:
     name, _, state = line.rstrip("\n").partition("\t")
     if name not in want:
+        # a NON-required gate that FAILED still turns develop red after the
+        # queue merges it (Coq/PCC, mutation): refuse those too, not only the 17
+        if state.upper() in ("FAILURE", "TIMED_OUT"):
+            bad_any.append(name)
         continue
     seen.add(name); s = state.upper()
     if s in ("SUCCESS", "SKIPPED", "NEUTRAL"):
@@ -50,7 +53,7 @@ for line in sys.stdin:
     else:
         pend += 1
 miss = sorted(want - seen)
-print("pending=%d" % pend); print("failed=%s" % ", ".join(bad)); print("missing=%s" % ", ".join(miss))'
+print("pending=%d" % pend); print("failed=%s" % ", ".join(bad + ["%s (not required)" % n for n in bad_any])); print("missing=%s" % ", ".join(miss))'
 }
 
 enqueue() {
@@ -69,7 +72,7 @@ while :; do
   pend="$(echo "$v" | sed -n 's/^pending=//p')"
   failed="$(echo "$v" | sed -n 's/^failed=//p')"
   missing="$(echo "$v" | sed -n 's/^missing=//p')"
-  if [ -n "$failed" ]; then echo "::error::#$PR has a FAILED required check: $failed — not enqueuing"; exit 1; fi
+  if [ -n "$failed" ]; then echo "::error::#$PR has a FAILED check: $failed — not enqueuing"; exit 1; fi
   if [ "$pend" = "0" ] && [ -z "$missing" ]; then enqueue; exit 0; fi
   echo "#$PR: required pending=$pend missing=[$missing] ($(date -u +%H:%M:%SZ))"
   [ "$WAIT" = "--wait" ] || exit 3
