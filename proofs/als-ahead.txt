@@ -1,0 +1,12 @@
+# Contract ids whose `statement` / `title` the JUDGE (almide/als, at the commit
+# in proofs/als-pin.txt) is ahead of this tree on — the in-flight window
+# between an als merge and the implementation PR (#2403). One id per line,
+# followed by the als PR that carries the text:
+#
+#   C-NNN  almide/als#NN
+#
+# scripts/check-als-pin.sh tolerates a drift ONLY for a listed id, ONLY when
+# the judge's text is this tree's text plus more (never text here the judge
+# lacks), and refuses an entry whose id no longer drifts — so every entry is
+# removed by the PR that brings the wording here, and the list cannot grow
+# into a blanket pass.
