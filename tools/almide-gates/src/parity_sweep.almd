@@ -176,7 +176,10 @@ fn missing_from(want: List[String], have: List[String]) -> List[String] = want |
 // present and the sweep may start.
 effect fn tool_check(alm: String) -> Sweep = {
   let ci = (env.get("CI") ?? "") == "true"
-  let have_wasmtime = (process.exec_status("command", ["-v", "wasmtime"]) ?? process.ProcessStatus {
+  // `command` is a shell BUILTIN: macOS ships a /usr/bin/command shim, Linux does not, so a
+  // direct spawn "found" wasmtime on every developer machine and never on a CI runner
+  // (#2438's shard 3 went red on exactly this). Ask a shell, as the bash original does.
+  let have_wasmtime = (process.exec_status("sh", ["-c", "command -v \"$1\"", "_", "wasmtime"]) ?? process.ProcessStatus {
     code: 1,
     stdout: "",
     stderr: "",
