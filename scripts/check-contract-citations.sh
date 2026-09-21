@@ -77,6 +77,10 @@ PRUNE_PATHS = {".claude", "grammar", "research/benchmark/lang-bench/upstream"}
 ALLOWLIST = {
     "tools/almide-gates/src/contract_audit.almd",
     "tools/almide-gates/src/ledger_schema.almd",
+    # #2403: the als-pin gate refuses a four-or-more-digit id and its negative
+    # controls forge such ids (and a three-digit one that names no contract) on purpose.
+    "scripts/check-als-pin.sh",
+    "scripts/check-als-pin-negative.sh",
 }
 # The fixture header line belongs to check-contracts.sh (one defect, one gate).
 FIXTURE_DIR = "spec/wasm_cross/"
