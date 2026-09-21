@@ -396,6 +396,23 @@ jobs:
             exit 1
           fi
           echo "ledger leg OK: $(wc -l < /tmp/leg_a.txt | tr -d ' ') tests = $(wc -l < /tmp/leg_all.txt | tr -d ' ')"
+      # ── The fixture-range shards (#2381, N=2) ──
+      # Each `Test Rust (solo <leg> k/2)` job uploaded the fixture list its
+      # gate ACTUALLY WALKED plus, for the two whole-corpus gates, a partial.
+      # Two steps close the partition: the lists' union must be the corpus
+      # (a shard that silently walks fewer fixtures is the one failure this
+      # sharding can add, and it is green by construction without this),
+      # and `merge/2` judges the summed ceilings and the unioned bridge
+      # names with the gates' own code from the same archive.
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: corpus-shard-*
+          merge-multiple: true
+          path: /tmp/corpus-shard
+      - name: Corpus shards cover every fixture (∪ walked lists == ls spec/wasm_cross, no duplicates)
+        run: bash scripts/ci-corpus-shards.sh --coverage /tmp/corpus-shard 2
+      - name: Merge the shard partials — run_parity ceilings summed, bridge-fallback names unioned — and judge the whole
+        run: bash scripts/ci-corpus-shards.sh --merge /tmp/corpus-shard 2 /tmp/almide-archive/almide-tests.tar.zst
       - name: Balance report (informational — imbalance costs time, not coverage)
         run: |
           for i in 0 1 2 3; do
@@ -498,9 +515,21 @@ jobs:
     # NOT in develop's required-check list yet (the four shard names and
     # the coverage gate are). The coverage gate `needs` this job and fails
     # unless every leg passed, so a red giant still blocks the merge through
-    # a required name; adding `Test Rust (solo <leg>)` × 5 to branch
+    # a required name; adding `Test Rust (solo <leg> k/N)` × 10 to branch
     # protection makes that direct and retires the proxy step.
-    name: Test Rust (solo ${{ matrix.leg }})
+    #
+    # FIXTURE-RANGE SHARDED, N=2 (#2381, second step). Each leg is one test
+    # walking the SORTED corpus; `ALMIDE_CORPUS_SHARD=k/2` keeps every second
+    # fixture from k, so a leg's 18–28 min becomes ~9–14 per job. What
+    # keeps that honest lives in the coverage job below: every shard uploads
+    # the fixture list it actually walked, and the union must equal
+    # `ls spec/wasm_cross` (and the run manifest) with no duplicates. Two
+    # gates hold a WHOLE-corpus count or name set (run_parity's shrink-only
+    # ceilings, the bridge-fallback half of the interp ledger); a shard never
+    # judges its partial against the whole — it leaves the partial, and the
+    # coverage job's `merge/2` sums / unions and judges with the gate's own
+    # code (crates/almide-corpus/src/lib.rs, `CorpusShard`).
+    name: Test Rust (solo ${{ matrix.leg }} ${{ matrix.shard }}/2)
     needs: [changes, build]
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -509,13 +538,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Keep in step with SOLO_LEGS in scripts/ci-test-shard.sh.
+        # Keep in step with SOLO_LEGS in scripts/ci-test-shard.sh, and the
+        # gate list in scripts/ci-corpus-shards.sh (the interp_ledger leg is
+        # the one-sweep ledger test plus two pure unit tests).
         leg:
           - wasm_runtime_cross_target
           - wasm_runtime_interp_oracle
           - wasm_runtime_opt_parity
           - run_parity
           - interp_ledger
+        # N=2 — the `/2` in the job name, ALMIDE_CORPUS_SHARD and the two
+        # coverage-job steps must all say the same N.
+        shard: [1, 2]
     steps:
       - uses: actions/checkout@v7
         if: env.DOCS_ONLY != 'true'
@@ -538,12 +572,26 @@ jobs:
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
-      - name: Cargo test (solo ${{ matrix.leg }})
+      - name: Cargo test (solo ${{ matrix.leg }}, corpus shard ${{ matrix.shard }}/2)
         if: env.DOCS_ONLY != 'true'
         env:
           ALMIDE_BIN: /tmp/almide-bin/almide
           ALMIDE_EXPECT_TOOLS: "1"
+          ALMIDE_CORPUS_SHARD: ${{ matrix.shard }}/2
+          ALMIDE_CORPUS_SHARD_DIR: /tmp/corpus-shard
         run: bash scripts/ci-test-shard.sh --run-solo-archive ${{ matrix.leg }} /tmp/almide-archive/almide-tests.tar.zst
+
+      # The walked-fixture list and the partial counts / names, for the
+      # coverage job. Uploaded on failure too, so a red shard's partial
+      # says which half it walked; the coverage job refuses to certify
+      # over a red leg regardless.
+      - uses: actions/upload-artifact@v7
+        if: env.DOCS_ONLY != 'true' && !cancelled()
+        with:
+          name: corpus-shard-${{ matrix.leg }}-${{ matrix.shard }}
+          path: /tmp/corpus-shard
+          retention-days: 1
+          if-no-files-found: error
 
   almide-gates:
     # BRANCH PROTECTION: this job's name is a REQUIRED CHECK on develop. Renaming
