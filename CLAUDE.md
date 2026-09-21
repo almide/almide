@@ -15,6 +15,18 @@
 - **main** — protected. Never commit directly. Only accepts PRs from `develop`
 - **develop** — the working branch. All commits go here
 - Always confirm `git branch` before committing
+- **Enqueue when the REQUIRED checks are green, not when everything is.** The
+  merge queue asks for the branch protection's required contexts only; the
+  commissioned mutation gate is not one of them (it runs on pull_request only,
+  and `mutation-sweep.yml` judges every develop push after landing). Waiting
+  for it waits for the one job the queue never asks about — 56 min against
+  27 min for the slowest required shard, measured 2026-09-21. Use
+  `scripts/enqueue-when-required-green.sh <pr> [--wait]`: it reads the
+  required set from the API, compares the PR's rollup against exactly that,
+  and enqueues through the GraphQL mutation (an auto-merge armed with
+  `gh pr merge --auto` is not a queue entry — the queue is REBASE and the arm
+  normalises to MERGE). A mutation-gate red on a PR is still read, after the
+  fact, as a develop sweep finding.
 
 ## Git Commit Rules
 
