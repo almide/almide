@@ -193,6 +193,7 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_UPDATE_NATIVE_OWN", Flag, Harness, "regenerate the native result-ownership ledger"),
     sw("ALMIDE_UPDATE_RC_SNAPSHOTS", Flag, Harness, "regenerate the rc-placement snapshots"),
     sw("ALMIDE_UPDATE_SIZES", Flag, Harness, "regenerate the structural leg's size baselines"),
+    sw("ALMIDE_UPDATE_SIZE_LADDER", Flag, Harness, "regenerate the stdlib-linking size ladder ledger (#2141)"),
     sw("ALMIDE_UPDATE_SNAPSHOTS", Flag, Tool, "same as `almide test --update-snapshots`"),
     sw("ALMIDE_UPDATE_SURFACE", Flag, Harness, "regenerate the exercised-surface golden"),
     sw("ALMIDE_UPDATE_WITNESS_FLOOR", Flag, Harness, "regenerate the certificate witness floor"),
