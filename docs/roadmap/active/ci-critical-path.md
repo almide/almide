@@ -355,3 +355,17 @@ queued / 44 running), and a GitHub 504 on an unretried `curl` in a required job
 at the head of the queue restarts every entry behind it. #2449 cancels the
 superseded runs from inside the workflow and retries the nextest / wasmtime /
 elan downloads; the day's drain was one batch PR judged once.
+
+### 5.1 After #2454 (develop run 35645124173 on 6d38f0164, 2026-09-21 19:29→19:54Z)
+
+| | this run |
+|---|---|
+| wall, push → last required job green | **25.1 min** |
+| critical path | build 4.5 → `Test Rust (solo run_parity 2/2)` 16 → coverage gate 2 |
+| giants, per half (1/2 · 2/2) | run_parity 6 · 16; interp_oracle 4 · 12; interp_ledger 3 · 11; cross_target 3 · 3; opt_parity <2 · 2 |
+| next floor | `Almide gates` 15, browser-ABI determinism 14, structural leg 13 |
+
+Three layouts, three numbers, one day: 66 → 43.4 → 25.1. The split halved each
+giant's cost but not its wall, because the residue-class slice is uneven
+(run_parity 6 vs 16) — #2457 carries that with the per-half table. #2381 is
+closed on this measurement.
