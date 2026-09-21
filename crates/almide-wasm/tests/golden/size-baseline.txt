@@ -347,7 +347,8 @@
 17874	spec/wasm_cross/list_total_order.almd
 7999	spec/wasm_cross/list_unique_by_nonscalar_key.almd
 3272	spec/wasm_cross/list_unique_by_str_key.almd
-7943	spec/wasm_cross/list_update_heap.almd
+8199	spec/wasm_cross/list_update_callback_result_ownership.almd
+7951	spec/wasm_cross/list_update_heap.almd
 2001	spec/wasm_cross/list_window_zero.almd
 2022	spec/wasm_cross/list_windows_zero.almd
 3674	spec/wasm_cross/list_with_capacity.almd
