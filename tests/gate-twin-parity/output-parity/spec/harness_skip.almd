@@ -1,0 +1,2 @@
+// wasm:skip — a harness-incompatible fixture: SKIPPED on the first-line marker alone.
+fn main() -> Unit = println("never compared")

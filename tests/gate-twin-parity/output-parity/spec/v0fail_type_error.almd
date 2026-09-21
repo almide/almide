@@ -1,0 +1,5 @@
+// The V0FAIL row: the fixture itself is broken — the oracle fails AND the render fails.
+fn main() -> Unit = {
+  let n: Int = "not an int"
+  println(n)
+}

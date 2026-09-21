@@ -15,6 +15,7 @@ import contracts
 import conformance
 import counts
 import stamp
+import parity
 import parity_sweep
 import track_record
 import ledger_gate
@@ -210,9 +211,44 @@ effect fn main() -> Unit = {
       let st = stamp.toolchain(root)!
       println(list.join(st.lines, "\n"))
       if st.ok then () else process.exit(1)
-      let alm = list.get_or(args, 2, root + "/target/release/almide")
-      let rp = list.get_or(args, 3, root + "/target/debug/examples/render_program")
-      let sw = parity_sweep.sweep(root, alm, rp, root + "/proofs/output-parity-baseline.txt")!
+      // Args after the root: the oracle, the render_program binary, and `--update` anywhere.
+      // The oracle resolves like the bash does — `ALMIDE_BIN`, else the workspace release
+      // build — never a PATH `almide` (#978).
+      let update = list.contains(args, "--update")
+      let pos = args |> list.filter((a) => a != "--update")
+      let alm_env = env.get("ALMIDE_BIN") ?? ""
+      let alm = list.get_or(
+        pos,
+        2,
+        if alm_env != "" then alm_env else root + "/target/release/almide",
+      )
+      let tools = parity_sweep.tool_check(alm)!
+      if list.len(tools.lines) > 0 then {
+        println(list.join(tools.lines, "\n"))
+        if tools.ok then process.exit(0) else process.exit(1)
+      } else ()
+      // The render binary is BUILT when the caller did not name one, as the bash does; a
+      // caller that passes it (the twin parity test) has built it already.
+      let rp = list.get_or(pos, 3, root + "/target/debug/examples/render_program")
+      if list.len(pos) < 4 then {
+        let built = parity.exit_ok(
+          "cargo",
+          [
+            "build",
+            "-q",
+            "-p",
+            "almide-mir",
+            "--example",
+            "render_program"
+          ],
+        )!
+        if built then ()
+        else {
+          println("output-parity: render_program build failed")
+          process.exit(1)
+        }
+      } else ()
+      let sw = parity_sweep.sweep(root, alm, rp, parity_sweep.baseline_path_of(root)!, update)!
       println(list.join(sw.lines, "\n"))
       if sw.ok then process.exit(0) else process.exit(1)
     },
