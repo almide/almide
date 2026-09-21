@@ -1364,8 +1364,11 @@ jobs:
       - name: Release-only tests are named by a release job (#2122)
         run: bash scripts/check-release-only-tests.sh
 
-      - name: ALS pin — every contract id is known to the judge at proofs/als-pin.txt (als #60)
+      - name: ALS pin — every contract id is known to the judge at proofs/als-pin.txt, every shared statement/title byte-identical (als #60, #2403)
         run: bash scripts/check-als-pin.sh
+
+      - name: ALS pin gate fires on forged statements, titles and allowances (negative controls)
+        run: bash scripts/check-als-pin-negative.sh
 
       - name: Exit sites — every frame exit of the structural emitter goes through the ExitPlan renderer (#1995)
         run: bash scripts/check-exit-sites.sh
