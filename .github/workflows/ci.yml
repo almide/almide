@@ -1950,13 +1950,29 @@ jobs:
         run: ALMIDE_RC_TRAP_DOUBLE_FREE=1 cargo test --release --locked -p almide-wasm --test backend_parity --test gauntlet
       - name: Target-availability matrix (#1423 — declared == measured, both directions)
         run: ALMIDE=/tmp/almide-bin/almide bash scripts/check-target-availability.sh
-      # #1701: the wasm runtime RATIO ratchet. The ratio wasm/native cancels
-      # the machine (same discipline as the native perf-ratio gate), so CI's
-      # own hardware gates it; the non-measured ledger rows are re-measured
+      # #1701: the wasm runtime ratchet. The stamped wasm/native ratio does
+      # NOT cancel this runner (cross-engine — see the script header), so it
+      # prints for information; the verdict CI acts on is the same-runner
+      # A/B (#2143): this tree's wasm leg against the latest release's, both
+      # binaries benched here, interleaved twice, min-of-runs, band from the
+      # ledger's `ab_band`. The non-measured ledger rows are re-measured
       # too — a cell that starts benching fails with the good news until its
-      # row is promoted to `measured`.
-      - name: Wasm runtime ratio ratchet (#1701)
-        run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-wasm-runtime-ratio.sh
+      # row is promoted to `measured`. A failed baseline download fails the
+      # step: a gate that quietly degrades to informational is the hole
+      # #2143 closed, so the script refuses to run on CI without a baseline.
+      - name: Fetch the latest release binary (the wasm A/B baseline, #2143)
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/almide-baseline
+          for i in 1 2 3 4 5; do
+            curl -fsSL "https://github.com/almide/almide/releases/latest/download/almide-linux-x86_64.tar.gz" -o /tmp/almide-baseline/almide.tar.gz && break
+            echo "baseline download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f /tmp/almide-baseline/almide.tar.gz
+          done
+          tar xzf /tmp/almide-baseline/almide.tar.gz -C /tmp/almide-baseline --strip-components=1
+          chmod +x /tmp/almide-baseline/almide
+          /tmp/almide-baseline/almide --version
+      - name: Wasm runtime ratchet (#1701) — same-runner A/B verdict (#2143)
+        run: ALMIDE_BIN=/tmp/almide-bin/almide WASM_RUNTIME_BASELINE_BIN=/tmp/almide-baseline/almide bash scripts/check-wasm-runtime-ratio.sh
 
   # Aviation discipline as CI (adopted from the greenfield burn, where
   # codopsy slipped to B twice and only a human check-in caught it):
