@@ -107,7 +107,7 @@
 3706	spec/wasm_cross/edge_closure_matrix.almd
 16712	spec/wasm_cross/edge_float_formatting.almd
 7107	spec/wasm_cross/edge_int_boundaries.almd
-5555	spec/wasm_cross/edge_map_order.almd
+5551	spec/wasm_cross/edge_map_order.almd
 57448	spec/wasm_cross/edge_string_unicode.almd
 3229	spec/wasm_cross/effect_assign_unwrap.almd
 6127	spec/wasm_cross/effect_fn_value.almd
@@ -362,10 +362,10 @@
 5579	spec/wasm_cross/map_core_trio.almd
 9413	spec/wasm_cross/map_entries_reclaim.almd
 5114	spec/wasm_cross/map_filter.almd
-9284	spec/wasm_cross/map_fold.almd
+9280	spec/wasm_cross/map_fold.almd
 7608	spec/wasm_cross/map_fold_heap_acc.almd
-4559	spec/wasm_cross/map_fold_heap_acc_skv.almd
-4273	spec/wasm_cross/map_fold_heap_accumulator.almd
+4571	spec/wasm_cross/map_fold_heap_acc_skv.almd
+4269	spec/wasm_cross/map_fold_heap_accumulator.almd
 7754	spec/wasm_cross/map_index_order.almd
 7429	spec/wasm_cross/map_index_string_key_shapes.almd
 14126	spec/wasm_cross/map_insertion_order.almd
