@@ -1932,19 +1932,39 @@ jobs:
   # The structural emitter and its greenfield gate fleet, in release shape
   # (V-1: assertions live in the shipped-shape build). Debug shards skip
   # these suites (cfg_attr debug ignore), so this job is their ONLY runner.
+  # ═══════════════════════════════════════════════
+  # Commissioned wasm gates — three jobs, not one (#2381 item 3)
+  # ═══════════════════════════════════════════════
+  #
+  # One job used to run five steps strictly in sequence, 27.8 min on every
+  # develop run (35569545602): release compile + carried gates 679 s →
+  # release-only root tests 436 s → double-free sweep 76 s →
+  # target-availability matrix 426 s → runtime ratio 25 s. The steps share
+  # nothing but the release target dir, so they fan out as A+C / B / D+E with
+  # every command byte-for-byte: wall = max(A+C ≈ 13.5, B ≈ 8.5, D+E ≈ 8.5)
+  # ≈ 13.5 min, for ~8 more runner minutes per run (B pays its own root-crate
+  # release compile, which used to ride A's). The step names and verdict text
+  # are unchanged on purpose: scripts/check-release-only-tests.sh greps this
+  # file for `--test <target>` and `cargo test --release --locked -p
+  # almide-wasm`, and proofs/gate-verification.toml `wired_by` rows name this
+  # file. The setup block is the same in all three (stock wasmtime v27 pin —
+  # the WASI gate's third-party runtime, see scripts/check-wasi-pins.sh; the
+  # v47 pin elsewhere is the embedded host's, and the two are not the same
+  # instrument, so they are not unified here).
   commissioned-wasm-gates:
     name: Commissioned wasm gates (structural leg, release)
-    # `build` too (#2381): the two probe steps at the end drive the almide
-    # CLI, which this job used to build for itself a second time (`cargo
-    # build --release --locked --bin almide`, 426–432 s on every develop run)
-    # — the `build` job already ships that binary as `almide-linux`, and
-    # every other CLI-driven gate (Almide gates, Emit & Format, Perf ratchet)
-    # consumes it. The ~5-minute wait for `build` is paid back by the 7 it
-    # saves, and the runner bill drops by a whole release build. The release
-    # test builds stay: those are the gates' own shape, not the CLI's.
+    # `build` too (#2381): the probe jobs below drive the almide CLI, which
+    # this job used to build for itself a second time (`cargo build
+    # --release --locked --bin almide`, 426–432 s on every develop run) — the
+    # `build` job already ships that binary as `almide-linux`, and every
+    # other CLI-driven gate (Almide gates, Emit & Format, Perf ratchet)
+    # consumes it. The release test builds stay: those are the gates' own
+    # shape, not the CLI's.
     needs: [changes, build]
     if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
+    # 679 + 76 s measured plus setup; 1.4–1.9× under runner contention.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -1975,20 +1995,96 @@ jobs:
           wasmtime --version
       - name: Carried gates in release shape
         run: cargo test --release --locked -p almide-wasm -p almide-wasm-run -p almide-spine -p almide-syntax -p almide-corpus -p almide-layout
+      # #2010 stage 2b: under the double-free trap a second release of a
+      # freed block traps instead of wrapping to 0xFFFF_FFFF — the corpus
+      # and the gauntlet must hold under it (five fixtures only showed
+      # their dangling reads with it armed, 2026-09-08). Rides the compile
+      # above (76 s), so it stays in this job.
+      - name: Double-free trap sweep (corpus burn-up + gauntlet)
+        run: ALMIDE_RC_TRAP_DOUBLE_FREE=1 cargo test --release --locked -p almide-wasm --test backend_parity --test gauntlet
+
+  commissioned-wasm-gates-root:
+    name: Commissioned wasm gates (release-only root tests)
+    needs: [changes, build]
+    if: needs.changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    # 436 s measured when it rode the carried-gates compile; it now pays the
+    # root crate's release compile itself (rust-cache restores the deps).
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/download-artifact@v8
+        with:
+          name: almide-linux
+          path: /tmp/almide-bin
+      - name: Setup the built compiler
+        run: chmod +x /tmp/almide-bin/almide
+      - name: Cache stock WASI runtime
+        uses: actions/cache@v6
+        with:
+          path: /tmp/wasmtime.tar.xz
+          key: wasmtime-v27.0.0-x86_64-linux
+      - name: Install wasmtime (stock CLI — the WASI gate's third-party runtime)
+        run: |
+          set -euo pipefail
+          VERSION=v27.0.0
+          TARBALL=/tmp/wasmtime.tar.xz
+          if ! tar -tf "$TARBALL" >/dev/null 2>&1; then
+            curl --fail --location --retry 5 --retry-all-errors \
+              "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/wasmtime-${VERSION}-x86_64-linux.tar.xz" \
+              --output "$TARBALL"
+          fi
+          tar -xf "$TARBALL" -C /tmp
+          sudo install -m 755 "/tmp/wasmtime-${VERSION}-x86_64-linux/wasmtime" /usr/local/bin/wasmtime
+          wasmtime --version
       # #2122: the ROOT package's release-only tests. A test marked
       # `cfg_attr(debug_assertions, ignore)` is skipped by every shard (the
       # ci-test profile inherits dev), so without this step it runs in NO
       # job — which is how the native⇄embedded cross net sat broken and
       # unreported. scripts/check-release-only-tests.sh keeps this list
-      # honest; the wasm crate's six ride the step above.
+      # honest; the wasm crate's six ride the carried-gates job above.
       - name: Release-only root tests (the shards skip these by profile)
         run: cargo test --release --locked --test embedded_cross_test --test module_type_repr_test --test wasm_vm_parity_test
-      # #2010 stage 2b: under the double-free trap a second release of a
-      # freed block traps instead of wrapping to 0xFFFF_FFFF — the corpus
-      # and the gauntlet must hold under it (five fixtures only showed
-      # their dangling reads with it armed, 2026-09-08).
-      - name: Double-free trap sweep (corpus burn-up + gauntlet)
-        run: ALMIDE_RC_TRAP_DOUBLE_FREE=1 cargo test --release --locked -p almide-wasm --test backend_parity --test gauntlet
+
+  commissioned-wasm-gates-probes:
+    name: Commissioned wasm gates (target availability + runtime ratio)
+    needs: [changes, build]
+    if: needs.changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    # 426 + 25 s measured; the two probes drive the downloaded binary and
+    # never compile the workspace (the toolchain is for `almide run`'s
+    # native target, which invokes rustc).
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/download-artifact@v8
+        with:
+          name: almide-linux
+          path: /tmp/almide-bin
+      - name: Setup the built compiler
+        run: chmod +x /tmp/almide-bin/almide
+      - name: Cache stock WASI runtime
+        uses: actions/cache@v6
+        with:
+          path: /tmp/wasmtime.tar.xz
+          key: wasmtime-v27.0.0-x86_64-linux
+      - name: Install wasmtime (stock CLI — the WASI gate's third-party runtime)
+        run: |
+          set -euo pipefail
+          VERSION=v27.0.0
+          TARBALL=/tmp/wasmtime.tar.xz
+          if ! tar -tf "$TARBALL" >/dev/null 2>&1; then
+            curl --fail --location --retry 5 --retry-all-errors \
+              "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/wasmtime-${VERSION}-x86_64-linux.tar.xz" \
+              --output "$TARBALL"
+          fi
+          tar -xf "$TARBALL" -C /tmp
+          sudo install -m 755 "/tmp/wasmtime-${VERSION}-x86_64-linux/wasmtime" /usr/local/bin/wasmtime
+          wasmtime --version
       - name: Target-availability matrix (#1423 — declared == measured, both directions)
         run: ALMIDE=/tmp/almide-bin/almide bash scripts/check-target-availability.sh
       # #1701: the wasm runtime RATIO ratchet. The ratio wasm/native cancels
