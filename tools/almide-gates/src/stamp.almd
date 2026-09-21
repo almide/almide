@@ -20,7 +20,9 @@ effect fn sha16(path: String) -> String = {
   else string.slice(out, 0, 16)
 }
 
-effect fn which(cmd: String) -> String = run("command", ["-v", cmd])!
+// `command` is a shell builtin (macOS has a /usr/bin/command shim, Linux does not), so it
+// is asked through a shell — the bash original's `command -v` resolves the same way.
+effect fn which(cmd: String) -> String = run("sh", ["-c", "command -v \"$1\"", "_", cmd])!
 
 // `stat -f '%Sm'` (BSD) with the GNU `stat -c '%y'` fallback, as the bash does.
 effect fn mtime(path: String) -> String = {
