@@ -19,6 +19,7 @@ import parity_sweep
 import track_record
 import ledger_gate
 import env_switches_doc
+import impl_count
 import bench
 import env
 
@@ -118,6 +119,7 @@ effect fn main() -> Unit = {
     match cmd {
       "output-parity" => ".",
       "env-switches-doc" => ".",
+      "impl-count" => ".",
       "check-contracts" => "docs/contracts",
       "bench" => "docs/benchmarks",
       _ => "docs/roadmap",
@@ -194,6 +196,14 @@ effect fn main() -> Unit = {
     "env-switches-doc" => {
       let alm = list.get_or(args, 2, root + "/target/release/almide")
       let v = env_switches_doc.run(root, alm)!
+      println(list.join(v.lines, "\n"))
+      if v.ok then process.exit(0) else process.exit(1)
+    },
+    // #2397 / #2413: one stdlib operation, N implementations. The enumerator script counts;
+    // this gate compares against proofs/impl-count-ledger.toml and is the ledger's only
+    // writer (`--update`). Args: root, then optionally `--update`.
+    "impl-count" => {
+      let v = impl_count.run(root, list.get_or(args, 2, "") == "--update")!
       println(list.join(v.lines, "\n"))
       if v.ok then process.exit(0) else process.exit(1)
     },

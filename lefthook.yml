@@ -70,8 +70,8 @@ pre-commit:
       # One stdlib operation, N implementations (#2397): a new `fn lower_<mod>_<fn>`
       # arm, a new registry row or a new `= _` hole must change the ledger in
       # the same commit, so the copy is a diff line and not a blocker later.
-      glob: "{stdlib/*.almd,crates/almide-wasm/src/*.rs,crates/almide-types/src/self_host_registry.rs,proofs/impl-count-ledger.toml,scripts/check-impl-count.sh,scripts/lib/impl-count-enumerate.py}"
-      run: bash scripts/check-impl-count.sh
+      glob: "{stdlib/*.almd,crates/almide-wasm/src/*.rs,crates/almide-types/src/self_host_registry.rs,proofs/impl-count-ledger.toml,tools/almide-gates/src/impl_count.almd,scripts/lib/impl-count-enumerate.py}"
+      run: almide run tools/almide-gates/src/main.almd -- impl-count .
 
 commit-msg:
   scripts:
