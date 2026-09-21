@@ -53,6 +53,38 @@ env:
   GCM_INTERACTIVE: "never"
 
 jobs:
+  cancel-superseded-queue-runs:
+    # A merge-queue REBUILD (the entry ahead was removed, or its build changed)
+    # gives this PR a new gh-readonly-queue/develop/pr-N-<sha> ref, and the
+    # concurrency group above is per ref — so the run for the OLD ref keeps
+    # going on a tree that can never merge. On 2026-09-21 that left 18 dead
+    # merge-group runs holding runners while the live entries sat queued
+    # (105 jobs waiting, 44 running). This job cancels every OLDER in-flight
+    # merge-group run of the same PR. Only older ones: two rebuilds racing
+    # each cancel only what they supersede, never each other.
+    name: Cancel this PR's superseded merge-group runs
+    if: github.event_name == 'merge_group'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ github.ref_name }}
+          THIS_RUN: ${{ github.run_id }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          pr=$(printf '%s' "$REF" | sed -E 's#.*/pr-([0-9]+)-.*#\1#')
+          case "$pr" in ''|*[!0-9]*) echo "not a queue ref: $REF"; exit 0;; esac
+          mine=$(gh api "repos/$REPO/actions/runs/$THIS_RUN" --jq .created_at)
+          gh api "repos/$REPO/actions/runs?event=merge_group&per_page=100" --paginate \
+            --jq ".workflow_runs[] | select(.status != \"completed\") | select(.head_branch | test(\"/pr-${pr}-\")) | select(.head_branch != \"$REF\") | select(.created_at < \"$mine\") | \"\(.id) \(.name) \(.head_branch)\"" \
+          | while read -r id name br; do
+              gh api -X POST "repos/$REPO/actions/runs/$id/cancel" >/dev/null && echo "cancelled superseded run $id ($name on $br)"
+            done
+          echo "done: this PR is #$pr on $REF"
+
   # ═══════════════════════════════════════════════
   # Change class — a docs-only change skips the test matrix
   # ═══════════════════════════════════════════════
