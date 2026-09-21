@@ -304,4 +304,10 @@ bytes.set_int32(b: Bytes, offset: Int, value: Int32, endian: Endian) -> Unit
 bytes.set_float32(b: Bytes, offset: Int, value: Float32, endian: Endian) -> Unit
 ```
 
+## Type index (1 types)
+
+```
+type bytes.Endian = LittleEndian | BigEndian
+```
+
 <!-- END GENERATED SIGNATURE INDEX -->
