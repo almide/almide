@@ -1,4 +1,4 @@
-# oracle: almide 0.63.0 (dev) at df1e8dc92 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.63.0 (dev) at 1cee275ee — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 f0709d9573472655341ac75bd847b3f30d2bddc3a201554bfd5cc22c21446902	0	spec/wasm_cross/adr0005_operator_equivalence.almd
 c0f26e63e32a038c59081b238912f0b3ecfd01d8d5ce45534b83fbbce13128a7	0	spec/wasm_cross/alias_combinator_rc.almd
 997e25dd01ce19a5253bd290b2f5f4b8eab74ea88f256b5fd9e09ca77d42af3b	0	spec/wasm_cross/alias_cow.almd
@@ -336,7 +336,7 @@ e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	1	spec/wasm_cro
 9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa	0	spec/wasm_cross/list_of_maps_loop_build.almd
 82aa8092c662e78bc25d210d42e914f975c6a2c3202db6fa3e5b96855b1c000f	0	spec/wasm_cross/list_of_tuples_equality.almd
 f1fed6636a312858e5de993c1f845b6cd738c510c19abc1fade7c16e19dfbb8f	0	spec/wasm_cross/list_product_overflow.almd
-863002122683517dfaa9cbceeb74bd1348356164c6050c4a2a1d811d18689972	0	spec/wasm_cross/list_push_on_record_field.almd
+63fce1dfd71cd7541492e3292801ccc144ac1b7a0ef3d02117d07173273b0bdb	0	spec/wasm_cross/list_push_on_record_field.almd
 7a8988e95e356e2b5b8fecf5e31f7c2e7e8fb44a5cd9d89ebb0d1e60b1f5c689	0	spec/wasm_cross/list_remove_at_oob.almd
 98838e0e48ea5e9d86fb46c414f7f94252f715e02df9438852655ee34aa8799a	0	spec/wasm_cross/list_repeat_size_ceiling.almd
 bb0cba287c734c4ce07584ea35ed54e4c5433842429242d0e48aa664ac8920e6	0	spec/wasm_cross/list_rest_pattern.almd
