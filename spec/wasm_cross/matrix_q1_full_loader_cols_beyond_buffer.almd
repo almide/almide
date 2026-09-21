@@ -1,0 +1,46 @@
+// @contract: C-229
+// The Q1_0 FULL loader has no row-level bound: element (r, c) is k = r*cols + c
+// on the global-k schedule, a k whose 18-byte block lies wholly inside the
+// buffer decodes, and any other element is 0.0 — per ELEMENT (#1532). So a
+// `cols` far beyond the buffer still decodes the blocks that ARE present.
+//
+// The structural wasm lowering applied the SELECTOR's row test (#1787:
+// `off + rid*row_bytes + row_bytes <= len`, row_bytes = cols/128*18) to the
+// full loader too, so once `cols/128*18` exceeded the buffer every row was
+// skipped whole and the matrix answered all zeros where native decoded block
+// 0 — `r0=-0.5,-0.5` native vs `0.0,0.0` wasm, exit 0 on both, no trap
+// (#2419; the local release-gate fuzz on 2026-09-21, seed 990100/151, a
+// mutation of matrix_select_rows_q1_partial_block; reproduced on the
+// published 0.62.0 asset). The selector keeps its row test — that is its
+// contract — and the full loader now has none, as native.
+//
+// Rows: one block in an 18-byte buffer, then the full loader at cols that
+// are (a) exactly the block, (b) one past it, (c) far beyond it with two
+// rows (row 0 holds the block, row 1 starts past the buffer), (d) the
+// selector at the same far cols, which stays all-zero by ITS rule. The zeros
+// are spelled through float.to_string so a sign bug shows.
+import matrix
+import bytes
+
+fn sgn(x: Float) -> String = float.to_string(x)
+
+fn head3(m: Matrix, r: Int) -> String = {
+  let rows = matrix.to_lists(m)
+  let row = list.get(rows, r) ?? []
+  "${sgn(list.get(row, 0) ?? 9.9)},${sgn(list.get(row, 1) ?? 9.9)},${sgn(list.get(row, 127) ?? 9.9)}"
+}
+
+effect fn main() -> Unit = {
+  // one block: scale fp16 0x3800 = 0.5, bit 0 of the first weight set
+  var q1 = bytes.new(18)
+  bytes.set_at(q1, 1, 56)
+  bytes.set_at(q1, 2, 1)
+  let exact = matrix.from_q1_0_bytes(q1, 0, 1, 128)
+  println("cols=128   r0=${head3(exact, 0)}")
+  let plus1 = matrix.from_q1_0_bytes(q1, 0, 1, 129)
+  println("cols=129   r0=${head3(plus1, 0)} tail=${sgn(list.get(list.get(matrix.to_lists(plus1), 0) ?? [], 128) ?? 9.9)}")
+  let far = matrix.from_q1_0_bytes(q1, 0, 2, 1000000)
+  println("cols=1e6   r0=${head3(far, 0)} r1=${head3(far, 1)} rows=${matrix.rows(far)}")
+  let sel = matrix.select_rows_q1_0(q1, 0, 1000000, [0, 1])
+  println("select 1e6 r0=${head3(sel, 0)} r1=${head3(sel, 1)}")
+}
