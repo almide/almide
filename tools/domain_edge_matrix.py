@@ -98,10 +98,19 @@ def derived_edges(recv_len):
 
 # ── Value table: how to build a non-target argument of each type ─────────────
 #
-# Deliberately small and concrete. A type that is not here makes the whole cell
-# SKIPPED and counted — an honest hole, in the ledger, rather than a silent
-# absence.
+# Deliberately small and concrete. A type that is not here makes the whole slot
+# SKIPPED and NAMED — an honest hole, in the ledger, rather than a silent
+# absence. The naming is the part that was missing (#2402): the skip count was
+# printed and never read back, and for `json` it hid 12 of 13 Int slots,
+# including `json.index(path: JsonPath, i: Int)` — the signature that carried
+# #2396, a wasm-only i32 truncation of the path index. The skipped population
+# is now printed by name, written to the ledger, and a skip that APPEARS fails
+# the gate exactly as a divergence that appears does.
 RECV_LEN = 5
+
+# The known document every JSON cell is measured against. Three elements, so
+# an index edge at `len`, `len_p1`, or 2^32+1 has something to be wrong about.
+JSON_DOC = 'json.parse("[10, 20, 30]") ?? value.null()'
 
 VALUES = {
     "Int": "3",
@@ -113,6 +122,12 @@ VALUES = {
     "List[String]": '["a", "b", "c", "d", "e"]',
     "List[Float]": "[1.0, 2.0, 3.0, 4.0, 5.0]",
     "List[Bool]": "[true, false, true, false, true]",
+    "List[List[String]]": '[["a"], ["b"], ["c"], ["d"], ["e"]]',
+    # A JsonPath is opaque: the only value a program can hold is one built
+    # from `json.root()` by the path constructors, so the receiver is the root.
+    "JsonPath": "json.root()",
+    "Value": JSON_DOC,
+    "List[Value]": "[value.int(1), value.int(2), value.int(3), value.int(4), value.int(5)]",
 }
 
 # Length of the collection each receiver type carries, for the derived edges.
@@ -123,11 +138,17 @@ RECV_LENS = {
     "List[String]": RECV_LEN,
     "List[Float]": RECV_LEN,
     "List[Bool]": RECV_LEN,
+    "List[List[String]]": RECV_LEN,
+    "List[Value]": RECV_LEN,
+    "Value": 3,       # JSON_DOC has three elements
+    "JsonPath": 3,    # a path is applied to JSON_DOC, so its far edge is the same
 }
 
 # How to render a result of each return type as a printable digest. A return
-# type absent here also makes the cell SKIPPED — the matrix reports what it
-# could not measure rather than pretending.
+# type absent here also makes the slot SKIPPED and named — the matrix reports
+# what it could not measure rather than pretending. `T?` and `Result[T, E]`
+# are rendered structurally by `render_for` (a `match` that prints which arm
+# was taken and the digest of the payload), so only the base types live here.
 RENDER = {
     "Int": 'int.to_string({e})',
     "Float": 'float.to_string({e})',
@@ -141,12 +162,65 @@ RENDER = {
     "List[Bytes]": 'int.to_string(list.len({e}))',
     "List[List[Int]]": 'int.to_string(list.len({e}))',
     "List[List[String]]": 'int.to_string(list.len({e}))',
+    "List[Value]": 'int.to_string(list.len({e}))',
+    "Value": 'json.stringify({e})',
+    # A JsonPath is opaque, so it is rendered by APPLYING it to the known
+    # document — removing at the path and printing what is left is the only
+    # way an out-of-range step is observable at all. #2396 was exactly a step
+    # that landed on a real element after wrapping; `[10,30]` where `[10,20,30]`
+    # was owed is the digest that catches it.
+    "JsonPath": f'json.stringify(json.remove_path({JSON_DOC}, {{e}}))',
     "Unit": None,  # call for effect only
 }
 
+
+def value_for(ty):
+    """The argument expression for a non-target parameter, or None (unbuildable)."""
+    if ty in VALUES:
+        return VALUES[ty]
+    if ty.endswith("?") and ty[:-1] in VALUES:
+        return f"some({VALUES[ty[:-1]]})"
+    return None
+
+
+def split_top(s):
+    """Split on commas at bracket depth zero: `Map[String, Int], n: Int` is two."""
+    out, depth, cur = [], 0, ""
+    for ch in s:
+        if ch in "[(":
+            depth += 1
+        elif ch in "])":
+            depth -= 1
+        if ch == "," and depth == 0:
+            out.append(cur)
+            cur = ""
+        else:
+            cur += ch
+    if cur.strip():
+        out.append(cur)
+    return out
+
+
+def render_for(ty, e):
+    """The printable digest of `e : ty`, "" for Unit, or None (unrenderable)."""
+    if ty in RENDER:
+        return "" if RENDER[ty] is None else RENDER[ty].format(e=e)
+    if ty.endswith("?"):
+        inner = render_for(ty[:-1], "x")
+        if inner:
+            return f'(match {e} {{ some(x) => "some:" + {inner}, none => "none" }})'
+        return None
+    if ty.startswith("Result[") and ty.endswith("]"):
+        parts = [p.strip() for p in split_top(ty[len("Result["):-1])]
+        if len(parts) == 2:
+            ok, err = render_for(parts[0], "x"), render_for(parts[1], "m")
+            if ok and err:
+                return f'(match {e} {{ ok(x) => "ok:" + {ok}, err(m) => "err:" + {err} }})'
+    return None
+
 # Modules that need an explicit import in the generated program.
 NEEDS_IMPORT = {"bytes", "json", "fs", "http", "env", "io", "random", "regex",
-                "process", "testing", "matrix"}
+                "process", "testing", "matrix", "net", "zlib", "args", "mem"}
 
 # The `COUNT_LIKE_PARAM_NAMES` list the fuzzer uses to shrink a parameter to
 # {0..5}. Kept in sync by the gate below, not by hand: a name added there and
@@ -156,68 +230,163 @@ FUZZER_COUNT_LIKE = {
     "index", "start", "end", "lo", "hi",
 }
 
-SIG_RE = re.compile(
-    r'^(?:@intrinsic\([^)]*\)\s*\n)?(?:effect\s+)?fn\s+(\w+)\(([^)]*)\)\s*->\s*([^=\n]+?)\s*=',
+# `fn name[A, B](` — the generic list is captured so the type variables can be
+# instantiated (at Int) rather than the whole signature being invisible: the
+# old `fn\s+(\w+)\(` form could not see `list.get[A](xs: List[A], i: Int)` at
+# all, and 25 generic fns with an Int parameter were outside the family with
+# nothing counting them.
+SIG_HEAD_RE = re.compile(
+    r'^(?:@intrinsic\([^)]*\)\s*\n)?(effect\s+)?fn\s+(\w+)(?:\[([^\]]*)\])?\(',
     re.M,
 )
 
 
 def parse_type(t):
-    return t.strip().rstrip("?").strip()
+    # `?` is KEPT: an `Int?` return rendered as a bare `Int` is a program that
+    # does not type-check, and a probe that fails to compile on both legs used
+    # to be counted as AGREE (both exit 1, both print nothing). See `probe`.
+    return re.sub(r"\s+", " ", t.strip())
 
 
-def parse_stdlib(only=None):
-    """Walk the implementation and discover the family (tidy's rule 1)."""
+def instantiate(ty, generics):
+    for g in generics:
+        ty = re.sub(rf"\b{re.escape(g)}\b", "Int", ty)
+    return ty
+
+
+def parse_signature(src, m):
+    """Read `(params) -> ret =` from a signature head, bracket-depth aware.
+
+    Returns (params, ret) or None when the head is not a signature we can read
+    (a callback parameter's `->` inside the parens, an `=` before the arrow).
+    """
+    i, depth = m.end(), 1
+    while i < len(src) and depth:
+        depth += {"(": 1, "[": 1, ")": -1, "]": -1}.get(src[i], 0)
+        i += 1
+    if depth:
+        return None
+    raw_params = src[m.end():i - 1]
+    tail = re.match(r"\s*->\s*([^=\n]+?)\s*=", src[i:])
+    if not tail:
+        return None
+    return raw_params, parse_type(tail.group(1))
+
+
+def parse_stdlib(only=None, stdlib_dir=None):
+    """Walk the implementation and discover the family (tidy's rule 1).
+
+    A signature the walker can SEE but cannot READ (a parameter without a
+    `:`, a callback type) is returned with `unreadable` set, so it lands in
+    the skipped population by name instead of vanishing.
+    """
     out = []
-    for path in sorted((REPO / "stdlib").glob("*.almd")):
+    for path in sorted((stdlib_dir or REPO / "stdlib").glob("*.almd")):
         module = path.stem.split("_")[0]
         if only and module != only:
             continue
         src = path.read_text()
-        for m in SIG_RE.finditer(src):
-            fn, raw_params, ret = m.group(1), m.group(2), parse_type(m.group(3))
+        for m in SIG_HEAD_RE.finditer(src):
+            fn = m.group(2)
             if fn.startswith("__") or fn.startswith("impl_"):
                 continue
-            params = []
-            ok = True
-            for p in [x for x in raw_params.split(",") if x.strip()]:
+            generics = [g.split(":")[0].strip() for g in (m.group(3) or "").split(",") if g.strip()]
+            parsed = parse_signature(src, m)
+            if parsed is None:
+                continue
+            raw_params, ret = parsed
+            params, unreadable = [], None
+            for p in split_top(raw_params):
                 if ":" not in p:
-                    ok = False
+                    unreadable = f"parameter without a type annotation: `{p.strip()}`"
                     break
                 name, ty = p.split(":", 1)
-                params.append((name.strip(), parse_type(ty)))
-            if not ok or not params:
+                params.append((name.strip(), instantiate(parse_type(ty), generics)))
+            if not params or not any(ty == "Int" for _, ty in params):
                 continue
-            if not any(ty == "Int" for _, ty in params):
-                continue
-            out.append({"module": module, "fn": fn, "params": params, "ret": ret})
+            out.append({"module": module, "fn": fn, "params": params,
+                        "ret": instantiate(ret, generics), "generics": generics,
+                        "effect": bool(m.group(1)), "unreadable": unreadable})
     return out
 
 
+def slot_name(sig, pname):
+    return f'{sig["module"]}.{sig["fn"]}({pname})'
+
+
 def build_program(sig, target_idx, value):
-    """Emit the smallest program that puts `value` in one Int slot."""
-    args, recv_len = [], None
-    for i, (_, ty) in enumerate(sig["params"]):
+    """Emit the smallest program that puts `value` in one Int slot.
+
+    Returns (source, recv_len) or (None, reason) — the reason is the NAME of
+    the hole, so a skip is attributed the moment it is decided.
+    """
+    if sig["unreadable"]:
+        return None, sig["unreadable"]
+    args, recv_len, lets = [], None, []
+    for i, (pname, ty) in enumerate(sig["params"]):
         if i == target_idx:
             args.append(str(value))
             continue
-        if ty not in VALUES:
-            return None, None
-        args.append(VALUES[ty])
+        arg = value_for(ty)
+        if arg is None:
+            return None, f"unbuildable: no VALUES entry for parameter type `{ty}`"
+        # A `mut` parameter cannot take a temporary (E032): bind it first.
+        if pname.startswith("mut "):
+            lets.append(f"  var v{i} = {arg}")
+            arg = f"v{i}"
+        args.append(arg)
         if recv_len is None:
             recv_len = RECV_LENS.get(ty)
 
-    call = f'{sig["module"]}.{sig["fn"]}({", ".join(args)})'
-    tmpl = RENDER.get(sig["ret"], "MISSING")
-    if tmpl == "MISSING":
-        return None, None
+    # An effect fn is called with `!` from an effect main (ADR-0008).
+    call = f'{sig["module"]}.{sig["fn"]}({", ".join(args)}){"!" if sig["effect"] else ""}'
+    rendered = render_for(sig["ret"], call)
+    if rendered is None:
+        return None, f"unrenderable: no RENDER entry for return type `{sig['ret']}`"
 
-    imports = f"import {sig['module']}\n" if sig["module"] in NEEDS_IMPORT else ""
-    if tmpl is None:
+    if rendered == "":
         body = f"  let _ = {call}\n  println(\"unit\")"
     else:
-        body = f'  println({tmpl.format(e=call)})'
-    return f"{imports}fn main() -> Unit = {{\n{body}\n}}\n", recv_len
+        body = f'  println({rendered})'
+    body = "\n".join(lets + [body])
+    # Every module the program MENTIONS is imported, not just the one under
+    # test: a `value` cell renders through `json.stringify`.
+    imports = "".join(f"import {mod}\n" for mod in sorted(NEEDS_IMPORT) if f"{mod}." in body)
+    head = "effect fn main" if sig["effect"] else "fn main"
+    return f"{imports}{head}() -> Unit = {{\n{body}\n}}\n", recv_len
+
+
+# The family is "every PUBLIC stdlib fn". The walk over stdlib/*.almd also sees
+# the self-host implementation helpers (`json_path_rm_index`, `list_swap_value`,
+# …) that live beside the public fns and are spliced in by name — a program
+# cannot call them, so a probe against one is E002 on both legs and was
+# counted as AGREE. The public surface is what `almide compile <module> --json`
+# lists; helpers are NAMED in the summary but are not slots. If the interface
+# cannot be read the walk is trusted whole and any helper surfaces as an E002
+# skip, which is the louder failure.
+def public_surface(almide, module):
+    env = dict(os.environ, PATH="/opt/homebrew/bin:" + os.environ.get("PATH", ""))
+    try:
+        p = subprocess.run([almide, "compile", module, "--json"], capture_output=True,
+                           text=True, errors="replace", timeout=60, env=env)
+        return {f["name"] for f in json.loads(p.stdout)["functions"]} if p.returncode == 0 else None
+    except (subprocess.TimeoutExpired, ValueError, KeyError, OSError):
+        return None
+
+
+# A probe that does not TYPE-CHECK is not a measurement. Both legs exit 1 and
+# print nothing, so `classify` reads AGREE — the first run of this matrix
+# counted `list.get(xs, i)` (returns `Int?`, rendered as `Int`) as 14 agreeing
+# cells that were 14 compile errors. The check is one `almide check` per slot
+# at value 0 (~20 ms), and a failure is a NAMED skip carrying the diagnostic.
+def probe(almide, src_path):
+    env = dict(os.environ, PATH="/opt/homebrew/bin:" + os.environ.get("PATH", ""))
+    p = subprocess.run([almide, "check", str(src_path)], capture_output=True,
+                       text=True, errors="replace", timeout=60, env=env)
+    if p.returncode == 0:
+        return None
+    first = next((ln for ln in (p.stderr + p.stdout).splitlines() if ln.startswith("error[")), "")
+    return f"probe does not type-check: {first or 'exit ' + str(p.returncode)}"
 
 
 def run_leg(almide, src_path, wasm):
@@ -280,19 +449,42 @@ def main():
     ap.add_argument("--json")
     ap.add_argument("--only")
     ap.add_argument("--almide", default=str(REPO / "target/release/almide"))
+    # The population and its skips WITHOUT running any edge: the type-check
+    # probe still runs, so a slot that stopped compiling is still seen. This is
+    # what the gate's skip ledger is regenerated from, and what the negative
+    # test forges a signature into.
+    ap.add_argument("--skips-only", action="store_true")
+    ap.add_argument("--stdlib", help="walk this directory instead of stdlib/ (tests)")
     args = ap.parse_args()
 
-    sigs = parse_stdlib(args.only)
-    cells, skipped, retried_away = [], [], []
+    sigs = parse_stdlib(args.only, Path(args.stdlib) if args.stdlib else None)
+    cells, skipped, retried_away, exercised, helpers = [], [], [], [], []
     tmp = Path(tempfile.mkdtemp(prefix="domain-edges-"))
+    surface = {}
 
     for sig in sigs:
+        mod = sig["module"]
+        if mod not in surface:
+            surface[mod] = public_surface(args.almide, mod)
+        if surface[mod] is not None and sig["fn"] not in surface[mod]:
+            helpers.append(f'{mod}.{sig["fn"]}')
+            continue
         for idx, (pname, ty) in enumerate(sig["params"]):
             if ty != "Int":
                 continue
-            probe, recv_len = build_program(sig, idx, 0)
-            if probe is None:
-                skipped.append(f'{sig["module"]}.{sig["fn"]}({pname}) — unbuildable arg/ret')
+            slot = slot_name(sig, pname)
+            src, recv_len = build_program(sig, idx, 0)
+            if src is None:
+                skipped.append({"slot": slot, "reason": recv_len})
+                continue
+            f = tmp / "probe.almd"
+            f.write_text(src)
+            reason = probe(args.almide, f)
+            if reason is not None:
+                skipped.append({"slot": slot, "reason": reason})
+                continue
+            exercised.append(slot)
+            if args.skips_only:
                 continue
             edges = FIXED_EDGES + derived_edges(recv_len)
             for ename, value in edges:
@@ -353,15 +545,25 @@ def main():
         tally[c["verdict"]] = tally.get(c["verdict"], 0) + 1
     blind = sum(1 for c in cells if not c["fuzzer_reachable"])
 
-    print(f"\ndomain-edge matrix: {len(cells)} cells over {len(sigs)} signatures")
+    # A "signature" here is one Int-parameter SLOT, `module.fn(param)` — the
+    # unit the matrix iterates and the unit a skip is attributed to. The line
+    # names every skipped slot so that a silent skip cannot recur (#2402): the
+    # count alone was printed for a month and never read back.
+    total = len(exercised) + len(skipped)
+    print(f"\ndomain-edge matrix: {len(cells)} cells over {len(exercised)} signatures"
+          f"{' (skips-only: no edge was run)' if args.skips_only else ''}")
     for k in sorted(tally):
         print(f"  {k:8} {tally[k]}")
     print(f"  cells the fuzzer can never synthesize: {blind}")
-    print(f"  skipped signatures (unbuildable): {len(skipped)}")
+    print(f"  coverage: {len(exercised)} of {total} signatures exercised, skipped: ["
+          + ", ".join(f'{s["slot"]}: {s["reason"]}' for s in skipped) + "]")
+    print(f"  outside the public surface (self-host helpers, reached only through their "
+          f"public callers; not slots): {len(helpers)} [" + ", ".join(helpers) + "]")
 
     if args.json:
         Path(args.json).write_text(json.dumps(
-            {"cells": cells, "skipped": skipped, "tally": tally}, indent=2))
+            {"cells": cells, "skipped": skipped, "exercised": exercised, "helpers": helpers,
+             "skips_only": bool(args.skips_only), "tally": tally}, indent=2))
     return 1 if tally.get("DIVERGE") else 0
 
 
