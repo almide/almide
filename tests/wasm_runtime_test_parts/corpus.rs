@@ -87,19 +87,55 @@ fn build_corpus() -> Option<Vec<FixtureLegs>> {
         return None;
     }
 
+    let sources: Vec<String> = entries
+        .iter()
+        .map(|entry| std::fs::read_to_string(entry.path()).unwrap())
+        .collect();
+
+    // The interp leg needs no build, so it runs over the whole corpus on a
+    // scoped pool (interp_leg.rs::interp_sweep_parallel, #2381) while THIS
+    // thread walks the native/wasm builds fixture by fixture as before; the
+    // rows come back in corpus order and are zipped onto the built legs
+    // below, so nothing about the table depends on which finished first.
+    let (built, interps) = std::thread::scope(|scope| {
+        let sweep = scope.spawn(|| interp_sweep_parallel(&sources));
+        let built = build_backend_legs(&entries, &sources, have_wasm_opt);
+        (built, sweep.join().expect("interp sweep panicked"))
+    });
+    let legs = built
+        .into_iter()
+        .zip(interps)
+        .map(|((name, allow, native, wasm, wasm_opt), (interp, _fallbacks))| FixtureLegs {
+            name,
+            allow,
+            native,
+            wasm,
+            wasm_opt,
+            interp,
+        })
+        .collect();
+    Some(legs)
+}
+
+/// The built legs of every fixture — native, wasm and (when the optimizer is
+/// present) wasm-opt — in corpus order, exactly as `build_corpus` walked them
+/// before the interp leg moved onto its pool; each is a subprocess build so
+/// the walk stays serial on the caller's thread.
+type BackendLegs = (String, Option<String>, (i32, String, String), (i32, String, String), Option<(i32, String, String)>);
+
+fn build_backend_legs(entries: &[std::fs::DirEntry], sources: &[String], have_wasm_opt: bool) -> Vec<BackendLegs> {
     let mut legs = Vec::with_capacity(entries.len());
-    for entry in &entries {
+    for (entry, source) in entries.iter().zip(sources) {
         let path = entry.path();
         let name = path.file_stem().unwrap().to_str().unwrap().to_string();
-        let source = std::fs::read_to_string(&path).unwrap();
         let allow = source
             .lines()
             .find_map(|l| l.trim().strip_prefix("// @xt-allow:").map(|r| r.trim().to_string()));
 
-        let native = run_native_capture(&source);
+        let native = run_native_capture(source);
         // A build/run panic is a BACKEND bug, not a corpus problem: record it as
         // a divergent leg so the owning gate reports it with its own wording.
-        let wasm = match std::panic::catch_unwind(|| run_wasm_capture(&source)) {
+        let wasm = match std::panic::catch_unwind(|| run_wasm_capture(source)) {
             Ok(Some(w)) => w,
             // A mid-run wasmtime spawn failure (it WAS probed at entry) is a
             // sentinel leg like a panic — NEVER a whole-corpus None, which
@@ -109,7 +145,7 @@ fn build_corpus() -> Option<Vec<FixtureLegs>> {
             Err(_) => (i32::MIN, "<panicked>".to_string(), "<panicked>".to_string()),
         };
         let wasm_opt = if have_wasm_opt {
-            match std::panic::catch_unwind(|| run_wasm_opt_capture(&source)) {
+            match std::panic::catch_unwind(|| run_wasm_opt_capture(source)) {
                 Ok(Some(o)) => Some(o),
                 Ok(None) => Some((i32::MIN, "<wasmtime-spawn-failed>".to_string(), "<wasmtime-spawn-failed>".to_string())),
                 Err(_) => Some((i32::MIN, "<panicked>".to_string(), "<panicked>".to_string())),
@@ -117,11 +153,9 @@ fn build_corpus() -> Option<Vec<FixtureLegs>> {
         } else {
             None
         };
-        let interp = run_interp_capture(&source);
-
-        legs.push(FixtureLegs { name, allow, native, wasm, wasm_opt, interp });
+        legs.push((name, allow, native, wasm, wasm_opt));
     }
-    Some(legs)
+    legs
 }
 
 /// `--wasm-opt` twin of `run_wasm_capture`: same build, same wasmtime
