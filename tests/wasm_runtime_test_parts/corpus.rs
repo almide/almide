@@ -75,35 +75,32 @@ struct FixtureLegs {
 
 impl FixtureLegs {
     fn native(&self) -> &(i32, String, String) {
-        assert!(
-            NEEDED_LEGS.native,
-            "{}: the native leg was not built — this binary's NEEDED_LEGS = {:?} does not declare it",
-            self.name, NEEDED_LEGS
-        );
         self.native
             .as_ref()
-            .expect("native leg declared but not built")
+            .unwrap_or_else(|| self.undeclared("native"))
     }
 
     /// `None` = the `wasm-opt` binary is absent (the gate self-skips).
     fn wasm_opt(&self) -> Option<&(i32, String, String)> {
-        assert!(
-            NEEDED_LEGS.wasm_opt,
-            "{}: the wasm-opt leg was not built — this binary's NEEDED_LEGS = {:?} does not declare it",
-            self.name, NEEDED_LEGS
-        );
+        if !NEEDED_LEGS.wasm_opt {
+            self.undeclared("wasm-opt");
+        }
         self.wasm_opt.as_ref()
     }
 
     fn interp(&self) -> &InterpLeg {
-        assert!(
-            NEEDED_LEGS.interp,
-            "{}: the interp leg was not built — this binary's NEEDED_LEGS = {:?} does not declare it",
-            self.name, NEEDED_LEGS
-        );
         self.interp
             .as_ref()
-            .expect("interp leg declared but not built")
+            .unwrap_or_else(|| self.undeclared("interp"))
+    }
+
+    /// A gate body reached for a leg this binary never built: loud, named,
+    /// on the first fixture — never a value a byte-compare could judge.
+    fn undeclared(&self, leg: &str) -> ! {
+        panic!(
+            "{}: the {leg} leg was not built — this binary's NEEDED_LEGS = {:?} does not declare it",
+            self.name, NEEDED_LEGS
+        )
     }
 }
 
