@@ -94,6 +94,9 @@ dependencies = [
 [[package]]
 name = "almide-corpus"
 version = "0.12.2"
+dependencies = [
+ "tempfile",
+]
 
 [[package]]
 name = "almide-dialect"
