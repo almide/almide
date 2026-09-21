@@ -1747,12 +1747,21 @@ jobs:
           wasmtime --version
       - name: Carried gates in release shape
         run: cargo test --release --locked -p almide-wasm -p almide-wasm-run -p almide-spine -p almide-syntax -p almide-corpus -p almide-layout
+      # #2141: the stdlib-LINKING size ladder (crates/almide-wasm/tests/
+      # size_ladder.rs, golden/size-ladder.txt) already ran inside the step
+      # above; this run prints its table — rung / program / shipped / pinned
+      # / delta — into the log on every push, so a reader sees which rung
+      # grew without a diff. The manifest-wide size_ratchet pins 700 programs
+      # that link almost nothing; the ladder pins the Map / String / JSON /
+      # regex programs where the size story is actually decided.
+      - name: Stdlib-linking wasm size ladder (#2141 — a shrink-only ceiling per rung, the table in the log)
+        run: cargo test --release --locked -p almide-wasm --test size_ladder -- --nocapture
       # #2122: the ROOT package's release-only tests. A test marked
       # `cfg_attr(debug_assertions, ignore)` is skipped by every shard (the
       # ci-test profile inherits dev), so without this step it runs in NO
       # job — which is how the native⇄embedded cross net sat broken and
       # unreported. scripts/check-release-only-tests.sh keeps this list
-      # honest; the wasm crate's six ride the step above.
+      # honest; the wasm crate's seven ride the carried-gates step above.
       - name: Release-only root tests (the shards skip these by profile)
         run: cargo test --release --locked --test embedded_cross_test --test module_type_repr_test --test wasm_vm_parity_test
       # #2010 stage 2b: under the double-free trap a second release of a
