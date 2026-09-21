@@ -25,8 +25,8 @@
 //! A child that starts and exits non-zero retains its own stderr/status.
 //! C-214 now includes both status twins after almide/als#65 merged.
 //!
-//! `process` has no wasm host binding (E081: no wasm host binding for the
-//! module), so this is the only leg that renders these strings — there is no
+//! `process` has no wasm host binding (E081, the availability matrix's row
+//! names the reason), so this is the only leg that renders these strings — there is no
 //! cross-target equality to maintain here, which is exactly why this half of
 //! #2090 could land while the `fs` half waits on the structural leg's WAT.
 
@@ -189,7 +189,7 @@ fn the_process_surface_has_no_second_leg_to_keep_equal() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        text.contains("error[E081]") && text.contains("no wasm host binding"),
+        text.contains("error[E081]") && text.contains("is not available on --target wasm"),
         "process grew a wasm leg — these messages now have a second renderer, so \
          the #2090 form has to be reproduced there and C-215 applies:\n{text}"
     );
