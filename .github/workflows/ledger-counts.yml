@@ -27,6 +27,15 @@ name: Ledger counts (nightly)
 # people to ignore the gate, while a red reading "the refresh is on this
 # branch, open it here" is still a consumer. Turning the setting on restores
 # the PR path with no change to this file.
+#
+# AND THE RED MUST REACH SOMEONE (#2391): with the setting off, the compare
+# link lived only in the job summary of a scheduled red — the channel a
+# five-night-old red proves nobody reads — while the refresh sat pushed and
+# verified on the branch. So the degraded path also opens ONE issue labeled
+# `A-ci` (or comments on the open one) carrying the drift lines, the branch
+# and sha, and the exact commands; the green night closes it. The same
+# routing fuzz-nightly uses for findings (#2379): a gate is finished when its
+# result reaches a place with a daily reader, not when the result is correct.
 
 on:
   schedule:
@@ -38,9 +47,13 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  issues: write
 
 env:
   REFRESH_BRANCH: bot/ledger-counts-refresh
+  # The one open issue the drift is delivered to when the PR cannot be opened
+  # (#2391); matched by exact title, so keep it stable.
+  DRIFT_ISSUE_TITLE: "Stamped ledger counts drifted: the nightly refresh is pushed and waiting for a PR"
 
 jobs:
   drift:
@@ -118,18 +131,42 @@ jobs:
             exit 0
           fi
           compare="${{ github.server_url }}/${{ github.repository }}/compare/develop...${REFRESH_BRANCH}?expand=1"
+          refresh_sha=$(git rev-parse --short HEAD)
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          # Every remote branch that looks like a ledger-counts remediation:
+          # someone may already have run the refresh by hand and pushed it
+          # without opening a PR (that is exactly how #2391 sat five nights).
+          other_branches=$(git ls-remote --heads origin '*ledger-counts*' | awk '{print $2}' | sed 's#^refs/heads/##' | grep -v "^${REFRESH_BRANCH}\$" || true)
           {
-            echo "## Ledger counts drifted — the refresh is pushed, the PR is not opened"
-            echo
-            echo "\`$REFRESH_BRANCH\` carries the restamped ledger and the four docs that render it."
-            echo
-            echo "**Open it:** $compare"
-            echo
-            echo "Or do it locally: \`bash scripts/gen-ledger-counts.sh\`, then commit \`proofs/ledger-counts.toml\` with the four docs."
+            echo "The nightly ledger-counts run measured drift between \`proofs/ledger-counts.toml\` and the tree, ran \`bash scripts/gen-ledger-counts.sh\`, re-measured clean, and pushed the refresh — but could not open the PR ([run]($run_url))."
             echo
             echo '```'
             grep -E '^  [a-z_]+: recorded' /tmp/ledger-counts.txt || true
             echo '```'
+            echo
+            echo "**The refresh is on \`$REFRESH_BRANCH\` at \`$refresh_sha\`** (1 commit: the restamped ledger and the four docs that render it)."
+            echo
+            echo "**Open it:** $compare"
+            echo
+            echo "Or from a checkout:"
+            echo
+            echo '```'
+            echo "gh pr create -R ${{ github.repository }} --base develop --head $REFRESH_BRANCH --title \"Refresh the stamped ledger counts\""
+            echo '```'
+            echo
+            echo "Or redo it locally on develop and commit \`proofs/ledger-counts.toml\` with the four docs in one commit:"
+            echo
+            echo '```'
+            echo "bash scripts/gen-ledger-counts.sh && bash scripts/check-ledger-counts.sh"
+            echo '```'
+            echo
+            echo "The branch is force-pushed on every drifting night, so it always carries the counts of the latest \`develop\`; a fixture landing after this run makes it stale until the next night re-pushes it."
+            if [ -n "$other_branches" ]; then
+              echo
+              echo "Other remote branches named like a ledger-counts remediation (check whether one already carries this refresh before opening a second PR):"
+              echo
+              echo "$other_branches" | sed 's/^/- `/; s/$/`/'
+            fi
             echo
             echo "<details><summary>why the PR step could not run</summary>"
             echo
@@ -139,11 +176,45 @@ jobs:
             echo
             echo "Settings -> Actions -> General -> Workflow permissions -> \"Allow GitHub Actions to create and approve pull requests\". Only an admin can turn it on; leaving it off is fine, and this is what the job does instead."
             echo "</details>"
+          } > /tmp/drift-body.md
+          {
+            echo "## Ledger counts drifted — the refresh is pushed, the PR is not opened"
+            echo
+            cat /tmp/drift-body.md
           } >> "$GITHUB_STEP_SUMMARY"
-          echo "::error::ledger counts drifted; the refresh is pushed to $REFRESH_BRANCH but the PR could not be opened — open it at $compare (see the job summary)"
+          # The job summary and the red are read by nobody on a schedule
+          # (#2391: five nights red with the refresh pushed and verified, the
+          # only announcement being this red). Route the hand-off to ONE open
+          # issue under `A-ci`, the label the gate-and-ledger issues wear, the
+          # way fuzz-nightly routes findings to `fuzz-findings` (#2379): open
+          # it on the first drifting night, comment on it on every following
+          # one, and the green step below closes it when the stamp matches
+          # again. `issues: write` covers this; the workflow token may open
+          # issues regardless of the PR setting.
+          existing_issue=$(gh issue list --label A-ci --state open --search "\"$DRIFT_ISSUE_TITLE\" in:title" --json number,title \
+            --jq "map(select(.title == \"$DRIFT_ISSUE_TITLE\")) | .[0].number // empty" || echo "")
+          if [ -n "$existing_issue" ]; then
+            gh issue comment "$existing_issue" --body-file /tmp/drift-body.md
+            echo "::notice::commented the drift and the refresh branch on issue #$existing_issue"
+          else
+            gh label create A-ci --color C2E0C6 --description ".github/workflows, scripts/*.sh gates, ledgers and ratchets" 2>/dev/null || true
+            issue_url=$(gh issue create --title "$DRIFT_ISSUE_TITLE" --body-file /tmp/drift-body.md --label A-ci)
+            echo "::notice::opened $issue_url for the drift and the refresh branch"
+          fi
+          echo "::error::ledger counts drifted; the refresh is pushed to $REFRESH_BRANCH but the PR could not be opened — open it at $compare (see the job summary and the A-ci issue)"
           exit 1
 
       - name: Nothing drifted
         if: steps.measure.outputs.drift == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           echo "ledger-counts: the stamp matches the tree; no PR needed."
+          # The drift issue is the consumer of the red; a green night is what
+          # closes it, so an open one never outlives the drift it announced.
+          existing_issue=$(gh issue list --label A-ci --state open --search "\"$DRIFT_ISSUE_TITLE\" in:title" --json number,title \
+            --jq "map(select(.title == \"$DRIFT_ISSUE_TITLE\")) | .[0].number // empty" || echo "")
+          if [ -n "$existing_issue" ]; then
+            gh issue close "$existing_issue" --comment "The nightly ledger-counts run measured the stamp matching the tree at \`$(git rev-parse --short HEAD)\`; the drift this issue announced is landed."
+            echo "::notice::closed issue #$existing_issue — the stamp matches the tree again"
+          fi
