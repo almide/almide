@@ -171,8 +171,8 @@ fn result_flatten(r: Result[Result[Int, String], String]) -> Result[Int, String]
 // ── HEAP-Ok Result twins (`Result[String, String]`) ─────────────────────────
 // A heap-Ok Result is the CAP-AS-TAG block (payload handle @12, tag @16; len@4
 // always 1) — the len-as-tag impls above read len@4 and took every `ok("s")` for
-// an Err, then rebuilt the WRONG layout (the fuzz C-904 silent `ok("")` /
-// payload-swap class). Each twin reads tag@16, borrows the payload via
+// an Err, then rebuilt the WRONG layout (the silent `ok("")` / payload-swap
+// class — differential-fuzz index 904, contract C-139). Each twin reads tag@16, borrows the payload via
 // load_handle, and rebuilds through the typed ok()/err()/some() ctors (which
 // materialize the cap-as-tag / 0-or-1-Option layouts the consumers read). A
 // borrowed payload SHARES into the rebuilt ctor (Dup — the option-twin

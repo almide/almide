@@ -43,8 +43,8 @@ shims intercepting the registered — is the whole case.
    which one applies.
 2. **The hand-routed twin matrix.** `result_call_name` (`mod_p4_c.rs`) and
    its siblings map combinator × payload-kind × twin (`_h` / `_x` / `_s2h`)
-   by hand. Its comment block is a bug ledger: the C-904 silent `ok("")`
-   class, the seed-20260718 map misroute (C-151), and #1154's zip — each a
+   by hand. Its comment block is a bug ledger: the silent `ok("")` class
+   (fuzz index 904, C-139), the seed-20260718 map misroute (C-151), and #1154's zip — each a
    missed or too-narrow arm in the same matrix. String-suffix twins are
    monomorphization done manually, and manual monomorphization drifts.
 3. **The unlinkable class.** 74 call sites across 29 dotted callees wall as
