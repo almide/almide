@@ -1,0 +1,122 @@
+// @contract: C-334
+// The RETURN half of the RC-3 callee-owned convention, at fold's rebind:
+// a callback's BORROWED result that becomes the accumulator takes the
+// co-owning +1, and the previous accumulator is released before the rebind.
+//
+// `list.fold` has two lowerings on the structural wasm leg. The staged one
+// (`lower_list_fold`) has owned its accumulator's credit since 10fed0494:
+// `rc_share_guard` on the body, dec of the previous accumulator. The FUSED
+// one (`lower_list_fold_fused`) is the copy that runs when the source is a
+// `list.map` / `list.filter` chain — and it was written before that rule and
+// never received it. So `fold(filter(chars(s)), init, (n, y) => y)` returned
+// the last element by a handle the list's own release then freed: a wrong byte
+// on wasm, no trap, exit 0 (#2397). Bind the chain to a `let` and the staged
+// copy runs and it is right; that is why the issue's table needed all three
+// combinators. It is not a `string.chars` property: `[[1], [2]]` printed
+// `[65888]` for `[2]`, and `fold(map(chars(s), (c) => c), …)` — no filter —
+// diverged too, a cell the issue's table did not have.
+//
+// COMPLETENESS RULE, the same two axes as the `list.update` twin:
+//
+//   axis 1, the element's RUNTIME shape (String, List[Int], Result — the
+//   variant carries a block; Int carries none and is the scalar control).
+//
+//   axis 2, the callback's TAIL FORM. `(n, y) => y` and `(n, y) => n` are
+//   BORROWED (the element, the accumulator). `y + ""`, `y + [9]`, `c + "!"`
+//   are in `rc_certainly_fresh` and take no +1 — they were right before the
+//   guard and must be byte-identical after it, or the guard is an
+//   unconditional inc, which is the leak `rc_certainly_fresh`'s own doc warns
+//   about ("over-inc on a fresh value is a leak, never a dangle").
+//
+// Both fused shapes appear — a filter stage and a map stage — because they
+// are one code path and a fixture with only `filter` would not say so.
+// The `let`-bound row is the staged twin and pins that it stays right.
+//
+// The `err("boom")` row is the #2395 lesson in one cell. As a standalone
+// three-line program it printed correctly on 0.62.0 — nothing had reused the
+// freed block before the print. Inside THIS program, after the four rows
+// above it, the same cell TRAPPED on 0.62.0 (`unreachable` executed): the
+// freed variant block had been reallocated and its tag read as no variant at
+// all. Whether a freed read is visible depends on the heap, not on the
+// program; a control that passes has to say why it passed. It is a row and
+// a trap-shape witness, not the pin.
+//
+// A/B, recorded so the fixture's green is known to mean something: on
+// 0.62.0 the legs differ from the first row; on the fixed tree every row is
+// byte-identical, and the fresh, scalar and staged rows are identical on
+// BOTH binaries.
+fn main() -> Unit = {
+  // ---- the regression pin: fused, borrowed tail; each printed freed memory on 0.62.0 ----
+  let r_str: String = list.fold(list.filter(string.chars("AB"), ((a) => true)), "X", ((n, y) => y))
+  println("borrow str  filter = ${r_str}")
+  let r_li: List[Int] = list.fold(
+    list.filter([
+      [1],
+      [2]
+    ], ((a) => true)),
+    [0],
+    ((n, y) => y),
+  )
+  println("borrow li   filter = ${r_li}")
+  let r_map: String = list.fold(list.map(string.chars("AB"), ((c) => c)), "X", ((n, y) => y))
+  println("borrow str  map    = ${r_map}")
+  let r_mf: String = list.fold(
+    list.filter(list.map(string.chars("AB"), ((c) => c)), ((a) => true)),
+    "X",
+    ((n, y) => y),
+  )
+  println("borrow str  map+f  = ${r_mf}")
+  // ---- borrowed, but green before the fix by heap luck: rows, not the pin ----
+  let r_res: Result[Int, String] = list.fold(
+    list.filter([ok(1), err("boom")], ((a) => true)),
+    ok(0),
+    ((n, y) => y),
+  )
+  let r_res_s: String = match r_res {
+    ok(v) => "ok ${v}",
+    err(e) => "err ${e}",
+  }
+  println("borrow res  filter = ${r_res_s}")
+  let z: String = int.to_string(7)
+  let r_cap: String = list.fold(list.filter(string.chars("AB"), ((a) => true)), "X", ((n, y) => z))
+  println("borrow cap  filter = ${r_cap} / ${z}")
+  let r_acc: String = list.fold(list.filter(string.chars("AB"), ((a) => true)), z, ((n, y) => n))
+  println("borrow acc  filter = ${r_acc} / ${z}")
+  // ---- negative control: FRESH tail, identical on both sides of the fix ----
+  let f_str: String = list.fold(
+    list.filter(string.chars("AB"), ((a) => true)),
+    "X",
+    ((n, y) => y + ""),
+  )
+  println("fresh  str  filter = ${f_str}")
+  let f_li: List[Int] = list.fold(
+    list.filter([
+      [1],
+      [2]
+    ], ((a) => true)),
+    [0],
+    ((n, y) => y + [9]),
+  )
+  println("fresh  li   filter = ${f_li}")
+  let f_map: String = list.fold(list.map(string.chars("AB"), ((c) => c + "!")), "X", ((n, y) => y))
+  println("fresh  elem map    = ${f_map}")
+  // ---- scalar control: no block, no guard, the integer untouched ----
+  let s: Int = list.fold(list.filter([1, 2, 3, 4], ((a) => a > 1)), 100, ((n, y) => n + y))
+  println("scalar      filter = ${s}")
+  // ---- the staged twin (a let breaks the chain): already guarded, stays right ----
+  let xs: List[String] = list.filter(string.chars("AB"), ((a) => true))
+  let r_staged: String = list.fold(xs, "X", ((n, y) => y))
+  println("staged      let    = ${r_staged}")
+  // ---- many elements through the fused path: a leak hides, a double-free does not ----
+  let long: String = string.repeat("abcdefgh", 512)
+  let r_long: String = list.fold(
+    list.filter(string.chars(long), ((a) => a != "c")),
+    "",
+    ((n, y) => n + y),
+  )
+  println("long        filter = ${string.len(r_long)} ${string.slice(
+    r_long,
+    string.len(r_long) - 1,
+    string.len(r_long),
+  )}")
+}
