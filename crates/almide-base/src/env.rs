@@ -94,6 +94,8 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_COMPONENT_ADAPTER", Flag, Route, "route `--component` through the preview1 adapter instead of the direct component emission"),
     sw("ALMIDE_COMPONENT_P3", Flag, Route, "emit a WASI 0.3 component (stdio over component-model streams, the async canonical ABI) under `--component`; needs a p3-capable wasmtime"),
     sw("ALMIDE_CORPUS_FILTER", Value, Harness, "substring filter over the fixture paths the 3-way oracle test evaluates"),
+    sw("ALMIDE_CORPUS_SHARD", Value, Harness, "`k/N` (1-based) walks the k-th modulo slice of the SORTED spec/wasm_cross corpus in the six corpus giants (#2381), read after the sort; `merge/N` reads the N shards' partials from `ALMIDE_CORPUS_SHARD_DIR` and judges the whole-corpus ceilings and the name-keyed bridge ledger; unset = the unsharded gate"),
+    sw("ALMIDE_CORPUS_SHARD_DIR", Value, Harness, "directory where a sharded corpus gate writes its walked-fixture list and its partial counts / bridge names, and where `merge/N` reads them; unset = a local slice that writes nothing"),
     sw("ALMIDE_COVERAGE_CONDITION", Value, Ci, "the coverage ratchet's condition tag (which baseline row a push is judged against)"),
     sw("ALMIDE_CWD", Value, Runtime, "the writer's working directory, set by `almide run` for the wasm host so relative fs paths resolve as on native (C-137); never set by hand"),
     sw("ALMIDE_DBG_ANF", Flag, Dbg, "print why a lambda lift or statement inline declined (v1 lowering)"),
