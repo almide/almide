@@ -96,6 +96,22 @@ original text, so that a reader who opens it alone knows what to do:
 > **触る場所** — the 2-4 paths a fix would edit
 ```
 
+`状態` takes one of six values, and each admits something specific — the point
+is that a reader scanning the tracker can tell what KIND of work an issue is
+before reading it:
+
+| 状態 | admits exactly |
+|---|---|
+| `BLOCKER` | carries `I-unsound` / `I-miscompile` / `I-divergence` / `regression`: a final release tag is refused while it is open. Agrees with the labels in both directions — a `BLOCKER` without one of those labels, or one of those labels without `BLOCKER`, means one of the two is stale |
+| `実装` | a change to compiler, stdlib or runtime code whose target shape is known |
+| `計測器・ゲート` | the work IS a gate, a ratchet, a manifest or a measurement harness — including fixing one that lies |
+| `設計判断` | needs a ruling before any code can be written (usually also labeled `mob`) |
+| `追跡` | an umbrella whose items are other issues, or a ledger a bot maintains |
+| `調査` | the subject is not pinned down yet; step 1 is a measurement, not an edit |
+
+The second half of the line is the gate on starting: `着手可`, `前提待ち: #NNNN`
+(only a true prerequisite — being *related* is not one), or `判断待ち`.
+
 - `根拠` is the load-bearing field: it says whether the issue rests on a
   measurement or on a plausible sentence. `未測定` is a legitimate value and is
   more useful than a confident guess — it tells the next reader that step 1 is
