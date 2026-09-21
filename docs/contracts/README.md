@@ -157,7 +157,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-119 | effect-`!` inside a `for` loop body propagates Err and byte-matches native | 0.27.6 | active | fixture | 1 |
 | C-120 | capturing filter_map with a conditional keep/skip arm body byte-matches native | 0.27.6 | active | fixture | 1 |
 | C-121 | String pass-through fast paths hand back an owned (+1) reference | 0.27.6 | active | fixture | 2 |
-| C-122 | Value object ops allocate full list layout and share pairs with +1 | 0.27.6 | active | fixture | 1 |
+| C-122 | Value object ops allocate full list layout and share pairs with +1 | 0.27.6 | active | fixture | 2 |
 | C-123 | Record spread shares copied heap fields and alias overrides with +1 | 0.27.6 | active | fixture | 1 |
 | C-124 | Value equality is deep structural, mirroring the native PartialEq | 0.27.6 | active | fixture | 1 |
 | C-125 | bytes.set has value semantics — never observable through the input | 0.27.6 | active | fixture | 1 |

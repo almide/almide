@@ -300,11 +300,27 @@ pub(crate) fn emit_value_field_helper() -> Function {
 
 /// `$vkeys(v) -> i32`: the keys as a List[String] (fresh block; key
 /// addresses shared — strings are immutable).
+///
+/// The payload slot is a pairs-list handle ONLY under tag Object, so the
+/// walk is guarded by the tag (#2395). Every other tag answers `[]`, the
+/// oracle's answer: `value_core`'s `value_keys` reads the pair count out
+/// of the slot-count word, which is 0 for every non-object. Unguarded,
+/// this helper read the slot whatever the tag said — an Int's payload as
+/// a block address, a Str's payload as a pairs list, and, worst, Null's
+/// slot, which `emit_value_box(_, None)` never writes at all, so it held
+/// whatever the reused block last contained.
 pub(crate) fn emit_value_keys_helper() -> Function {
     let (v, p, end, dst, cur) = (0u32, 1u32, 2u32, 3u32, 4u32);
     let m_pay = slot_memarg(almide_layout::SUM_FIELD);
     let mut f = Function::new([(4, ValType::I32)]);
     let mut i = f.instructions();
+    i.local_get(v)
+        .i32_load(slot_memarg(almide_layout::SUM_TAG))
+        .i32_const(VT_OBJECT)
+        .i32_ne()
+        .if_(BlockType::Empty);
+    i.i32_const(0).call(F_ALLOC).return_();
+    i.end();
     i.local_get(v).i32_load(m_pay).local_set(v); // pairs list
     i.local_get(v).i32_load(len_memarg()).call(F_ALLOC).local_set(dst);
     i.local_get(v).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_set(p);

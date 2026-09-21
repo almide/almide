@@ -1,0 +1,94 @@
+// @contract: C-122
+// `value.keys` answers `[]` for every NON-object Value, on both legs.
+//
+// A wasm Value is a fixed 16-byte block `[rc][len][cap][tag][pad][payload:8B]`
+// and the payload slot is a pairs-list handle ONLY under tag Object. The wasm
+// `$vkeys` helper read that slot whatever the tag said and walked it as a
+// block: an Int's payload as an address, a Str's payload as a pairs list, and
+// — worst — Null's slot, which `emit_value_box(tag, None)` never writes at
+// all, so it held whatever the reused block last contained. Native answers
+// `[]` for every non-object (value_core's `value_keys` reads the pair count
+// out of the slot-count word, which is 0 for all of them), so the wasm leg
+// either trapped `out of bounds memory access` or returned a wrong list,
+// depending on what was in memory (#2395).
+//
+// Whether a given tag traps or lies quietly is a property of the HEAP, not of
+// the program, so the cells below are reached two ways: standalone, where a
+// large Int payload and a long Str payload are addresses far outside linear
+// memory, and through a failing `Result[Value, String]` match, which leaves a
+// dead error string where the next 16-byte block is handed out.
+import json
+
+fn dirty(mk: () -> Value) -> Value = {
+  let failed: Result[Value, String] = err("expected null")
+  match failed {
+    ok(x) => x,
+    err(_) => mk(),
+  }
+}
+
+fn show(label: String, v: Value) -> Unit = println("${label}: ${list.len(value.keys(v))}")
+
+fn main() -> Unit = {
+  // Standalone: the payload slot holds a real but non-address value.
+  show("null", value.null())
+  show("bool", value.bool(true))
+  show("int", value.int(7))
+  show("int-wide", value.int(4000000000))
+  show("int-min", value.int(-9223372036854775807))
+  show("float", value.float(1.5))
+  show("str", value.str("hi"))
+  show("str-long", value.str("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+  show("array", value.array([value.int(1), value.int(2)]))
+  // Through a dirty heap: Null's unwritten slot now aliases a dead string.
+  show("dirty-null", dirty(() => value.null()))
+  show("dirty-int", dirty(() => value.int(4000000000)))
+  show("dirty-str", dirty(() => value.str("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")))
+  // A failed parse taken by `??` is the shape the fuzzer found.
+  show("parse-failed", json.parse("nope") ?? value.null())
+  // The object path is unchanged: keys in insertion order, the source still
+  // live after the keys are bound.
+  let obj = value.object([("a", value.int(1)), ("b", value.str("two")), ("c", value.null())])
+  let ks = value.keys(obj)
+  println("object: ${ks |> list.join(",")}")
+  println("object-len: ${list.len(ks)}")
+  println("source: ${json.stringify(obj)}")
+  // An empty object is an object, not a non-object.
+  show("empty-object", value.object([]))
+  // A nested object reached through a field read keeps its own keys.
+  let outer = value.object([("inner", obj), ("flat", value.int(9))])
+  println("outer: ${value.keys(outer) |> list.join(",")}")
+  println("inner: ${value.keys(value.field(outer, "inner") ?? value.null()) |> list.join(",")}")
+  println("flat: ${list.len(value.keys(value.field(outer, "flat") ?? value.null()))}")
+  // The FAMILY gate: every `value.*` reader that can reach the payload slot,
+  // over every tag. `keys` was the one unguarded cell; the rule this pins is
+  // that a reader is TOTAL over the tag space — it answers the empty/identity
+  // answer for a tag it cannot walk, and never reads the slot to find out.
+  // A reader added to `lower_value_call` belongs in this matrix.
+  //
+  // COMPLETENESS RULE: the matrix must hold every `value.*` op that walks an
+  // object's pairs. Six of the eight are below. `value.to_camel_case` and
+  // `value.to_snake_case` are DELIBERATELY absent and are the only intended
+  // omission: the als reference evaluator has no arm for either, so reaching
+  // them from the corpus raises its abstain ceiling, and writing them into the
+  // NORMATIVE judge in a hurry is a worse risk than not covering them here.
+  // Both are safe by the same construction the others now use — value_utils
+  // guards on the tag (`if prim.load32(prim.handle(v) + 4) == 6`) before
+  // renaming — so what is missing is third-oracle coverage, not a guard.
+  // Restore the two columns with the evaluator arms (almide/als#77).
+  let tags = [
+    ("null", value.null()),
+    ("bool", value.bool(true)),
+    ("int", value.int(4000000000)),
+    ("float", value.float(1.5)),
+    ("str", value.str("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
+    ("array", value.array([value.int(1)])),
+    ("object", value.object([("a", value.int(1))]))
+  ]
+  for (name, v) in tags {
+    println("${name} keys=${list.len(value.keys(v))}" + " field=${match value.field(v, "a") {
+      ok(_) => "ok",
+      err(_) => "err",
+    }}" + " merge=${value.stringify(value.merge(v, value.object([])))}" + " pick=${value.stringify(value.pick(v, ["a"]))}" + " omit=${value.stringify(value.omit(v, ["a"]))}" + " strfy=${value.stringify(v)}")
+  }
+}
