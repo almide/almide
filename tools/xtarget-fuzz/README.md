@@ -201,6 +201,17 @@ it is the only rung that can convict two legs at once — but **after** the
 resource-limit skips (C-196 stack, C-197 wasm32 memory), so a wasm OOM is
 still a skip rather than a bogus miscompile.
 
+The resource-limit skip (`resource_class` in `ladder.rs`) reads each leg's
+own abort signature — `call stack exhausted` / `Error: out of memory` on the
+wasm leg, `stack overflow` / `memory allocation of … bytes failed` on native
+— and discards the run only when everything the limited leg printed before
+dying is a prefix of its sibling's stdout. The sibling's fate is not part of
+the question (#2382): "wasm OOMed at the first allocation while native ran on
+to a deliberate panic" is a resource skip, "wasm printed a line native did
+not and then OOMed" is a finding the limit cut short, and an abort with no
+resource signature is always a semantic verdict (`RunFailureDivergence` or
+`OutputDivergence`).
+
 ## Minimizer
 
 `src/minimize.rs` — delta-debugging: statement removal then expression

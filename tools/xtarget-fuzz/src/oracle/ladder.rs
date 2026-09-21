@@ -425,57 +425,22 @@ fn compare_runs(
     let nat_ev = RunEvidence::from(native);
     let wasm_ev = RunEvidence::from(wasm);
 
-    // BOTH legs died of CALL-STACK exhaustion (a mutation-synthesized unbounded
-    // recursion): native hits Rust's guard page ("fatal runtime error: stack
-    // overflow"), wasm traps at its own depth limit — different codes, same
-    // non-semantic cause. Stack DEPTH is a resource limit, not an observable
-    // the ALS specifies (normalizing it to a T6 abort is the depth-guard
-    // follow-up), so there is no divergence oracle here — skip, like the
-    // double-hang rule above.
-    if !native.success()
-        && !wasm.success()
-        && String::from_utf8_lossy(&native.stderr).contains("stack overflow")
-    {
-        return Outcome::Skipped {
-            reason: "both legs exhausted the call stack (unbounded recursion by \
-                     construction) — depth limits are resource-bound, no semantic oracle"
-                .into(),
-        };
-    }
-    // ONE leg exhausted its call stack while the other terminated (C-196): the
-    // terminating leg's optimizer legally transformed the unbounded recursion into
-    // iteration (LLVM's accumulator TRE on native — Wave 4 finding 57), or vice
-    // versa. Stack depth is a RESOURCE limit, not an observable the ALS specifies,
-    // so the contracted divergence is a skip — mirroring the both-legs rule above.
-    if one_sided_stack_exhaustion(
-        native.success(),
-        wasm.success(),
-        String::from_utf8_lossy(&native.stderr).contains("stack overflow"),
-        String::from_utf8_lossy(&wasm.stderr).contains("call stack exhausted"),
-    ) {
-        return Outcome::Skipped {
-            reason: "one leg exhausted its call stack while the other's optimizer \
-                     transformed the recursion to termination — the C-196 \
-                     resource-limit divergence, not a semantic oracle"
-                .into(),
-        };
-    }
-    // C-197, the memory sibling: wasm32 exhausted its linear memory (the DEFINED
-    // "Error: out of memory" abort — the $oom primitive, never an OOB fault) while
-    // native's 64-bit address space satisfied the same program. A resource limit,
-    // not a semantic oracle — mirroring the stack rule above.
-    if one_sided_memory_exhaustion(
-        native.success(),
-        wasm.success(),
-        String::from_utf8_lossy(&wasm.stderr).contains("out of memory"),
-    ) {
-        return Outcome::Skipped {
-            reason: "wasm32 exhausted its linear memory (the defined out-of-memory \
-                     abort) while native's larger address space satisfied the \
-                     program — the C-197 resource-limit divergence, not a \
-                     semantic oracle"
-                .into(),
-        };
+    // ── The RESOURCE-LIMIT family (C-196 stack, C-197 memory) ──
+    //
+    // A leg that died at a resource limit (its stderr carries the leg's
+    // defined signature, see [`resource_limit`]) stopped at a point the ALS
+    // does not specify: stack DEPTH and address-space SIZE are limits of the
+    // host, not observables of the program. Such a leg's output is evidence
+    // only UP TO the abort — so the run is a skip iff every byte the aborted
+    // leg did print agrees with its sibling, and a real finding when the legs
+    // had already diverged before the limit was hit (#2382). The sibling's
+    // own fate is irrelevant to whether the comparison means anything:
+    // "wasm OOMed at the first allocation, native ran on and aborted at a
+    // deliberate `clamp` panic" is the same C-197 shape as "wasm OOMed,
+    // native completed" (the #2382 reproducer, filed as an OutputDivergence
+    // because the old predicate demanded `native.success()`).
+    if let Some(reason) = resource_class(native, wasm) {
+        return Outcome::Skipped { reason };
     }
     // A leg the harness (or the OS) KILLED without an exit code, having
     // printed nothing, carries NO semantic verdict — it neither terminated
@@ -712,75 +677,340 @@ mod first_line_diff_tests {
     }
 }
 
-/// C-196's decision, extracted pure so it is unit-testable like
-/// [`native_hang_is_finding`]: true iff exactly one leg succeeded AND the failing
-/// leg's stderr carries its stack-exhaustion signature (`call stack exhausted` on
-/// wasmtime, `stack overflow` on the native guard page).
-fn one_sided_stack_exhaustion(
-    native_ok: bool,
-    wasm_ok: bool,
-    native_stack_overflow: bool,
-    wasm_stack_exhausted: bool,
-) -> bool {
-    (native_ok && !wasm_ok && wasm_stack_exhausted)
-        || (wasm_ok && !native_ok && native_stack_overflow)
+/// Which leg a [`ProcResult`](super::runner::ProcResult) came from — the
+/// resource-limit signatures are per host, so the classifier must know
+/// whose stderr it is reading.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Leg {
+    Native,
+    Wasm,
 }
 
-/// C-197's decision, pure like its stack sibling: true iff wasm failed with the
-/// defined out-of-memory abort while native succeeded. (The reverse direction —
-/// native OOM while wasm succeeds — has no single stable native signature and
-/// stays a finding until one exists; wasm32 being the SMALLER space, the forward
-/// direction is the one the resource asymmetry actually produces.)
-fn one_sided_memory_exhaustion(native_ok: bool, wasm_ok: bool, wasm_oom: bool) -> bool {
-    native_ok && !wasm_ok && wasm_oom
+/// A resource limit a leg died at. Neither is an observable the ALS
+/// specifies (C-196 for depth, C-197 for size), so a leg that stopped here
+/// carries evidence only up to the abort.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ResourceLimit {
+    /// Call-stack depth.
+    Stack,
+    /// Address space / linear memory.
+    Memory,
+}
+
+impl ResourceLimit {
+    fn describe(self, leg: Leg) -> &'static str {
+        match (leg, self) {
+            (Leg::Native, ResourceLimit::Stack) => "native overflowed its stack (guard page)",
+            (Leg::Wasm, ResourceLimit::Stack) => "wasm exhausted its call stack (wasmtime trap)",
+            (Leg::Native, ResourceLimit::Memory) => {
+                "native failed a memory allocation (std alloc-error abort)"
+            }
+            (Leg::Wasm, ResourceLimit::Memory) => {
+                "wasm32 exhausted its linear memory (the defined out-of-memory abort)"
+            }
+        }
+    }
+}
+
+/// The exact resource-limit signals, per leg. A leg that SUCCEEDED never
+/// classifies (a warning-shaped line on a clean run is not an abort); a
+/// leg that timed out or could not be spawned is the hang / skip family
+/// handled before `compare_runs` and never reaches here.
+///
+/// | leg | limit | stderr marker | exit |
+/// |---|---|---|---|
+/// | native | stack | `stack overflow` (Rust guard page: "thread 'main' has overflowed its stack" / "fatal runtime error: stack overflow") | SIGABRT → `None` |
+/// | native | memory | `memory allocation of ` … ` bytes failed` (std's alloc-error handler) | SIGABRT → `None` |
+/// | wasm | stack | `call stack exhausted` (the wasmtime trap) | 134 |
+/// | wasm | memory | `Error: out of memory` (the `$oom` primitive, C-197 — never a raw OOB trap) | 1 |
+///
+/// The exit code is NOT part of the decision: it differs by host and by
+/// whether the abort was a signal, so the marker is the signal and the
+/// code column above is documentation of what the host actually emits.
+/// A native `capacity overflow` panic (exit 101) is deliberately NOT a
+/// memory signal — it is a length computation overflowing `usize`, which
+/// is a program-level observable, not the host running out.
+fn resource_limit(leg: Leg, r: &super::runner::ProcResult) -> Option<ResourceLimit> {
+    if r.success() || r.timed_out || r.spawn_failed {
+        return None;
+    }
+    let stderr = String::from_utf8_lossy(&r.stderr);
+    match leg {
+        Leg::Native => {
+            if stderr.contains("stack overflow") {
+                Some(ResourceLimit::Stack)
+            } else if stderr.contains("memory allocation of") && stderr.contains("bytes failed") {
+                Some(ResourceLimit::Memory)
+            } else {
+                None
+            }
+        }
+        Leg::Wasm => {
+            if stderr.contains("call stack exhausted") {
+                Some(ResourceLimit::Stack)
+            } else if stderr.contains("Error: out of memory") {
+                Some(ResourceLimit::Memory)
+            } else {
+                None
+            }
+        }
+    }
+}
+
+/// The evidence rule for discarding a run (#2382): a leg that died at a
+/// resource limit is comparable only up to the abort, so its stdout must
+/// be a PREFIX of the sibling's for the pair to carry no semantic verdict.
+/// An empty stdout is trivially a prefix (the leg died before printing);
+/// a leg that printed something its sibling did not print is a divergence
+/// the limit merely cut short — that stays a finding.
+fn outputs_agree_up_to_abort(aborted: &[u8], sibling: &[u8]) -> bool {
+    sibling.starts_with(aborted)
+}
+
+/// The resource-limit decision, pure over the two legs: `Some(reason)` when
+/// the pair is the C-196/C-197 family and carries no semantic oracle, `None`
+/// when the differential comparison must proceed. The matrix:
+///
+/// | native | wasm | verdict |
+/// |---|---|---|
+/// | answers | answers | not this rule — the stdout/exit compare decides |
+/// | answers | aborts, no signature | not this rule — `RunFailureDivergence` |
+/// | answers | resource-limit, stdout ⊑ native's | skip (C-196/C-197) |
+/// | answers | resource-limit, stdout diverged first | not this rule — a finding |
+/// | aborts, non-resource | resource-limit, stdout ⊑ native's | skip — native's fate is not the question (#2382) |
+/// | resource-limit | resource-limit (same or different limit) | skip when the outputs agree up to the shorter abort |
+/// | aborts, no signature | aborts, no signature | not this rule — same code+stdout is Clean, otherwise `OutputDivergence` |
+///
+/// (and symmetrically with the legs swapped). "stdout ⊑" is
+/// [`outputs_agree_up_to_abort`].
+fn resource_class(
+    native: &super::runner::ProcResult,
+    wasm: &super::runner::ProcResult,
+) -> Option<String> {
+    let nat = resource_limit(Leg::Native, native);
+    let was = resource_limit(Leg::Wasm, wasm);
+    match (nat, was) {
+        (None, None) => None,
+        (Some(limit), None) => outputs_agree_up_to_abort(&native.stdout, &wasm.stdout).then(|| {
+            format!(
+                "{} while wasm {} — the {} resource-limit divergence, not a semantic oracle",
+                limit.describe(Leg::Native),
+                sibling_fate(wasm),
+                contract_of(limit),
+            )
+        }),
+        (None, Some(limit)) => outputs_agree_up_to_abort(&wasm.stdout, &native.stdout).then(|| {
+            format!(
+                "{} while native {} — the {} resource-limit divergence, not a semantic oracle",
+                limit.describe(Leg::Wasm),
+                sibling_fate(native),
+                contract_of(limit),
+            )
+        }),
+        (Some(nl), Some(wl)) => {
+            // Both died at a limit: comparable only up to the shorter output.
+            let (short, long) = if native.stdout.len() <= wasm.stdout.len() {
+                (&native.stdout, &wasm.stdout)
+            } else {
+                (&wasm.stdout, &native.stdout)
+            };
+            outputs_agree_up_to_abort(short, long).then(|| {
+                let same = if nl == wl { "the same" } else { "a different" };
+                format!(
+                    "both legs died at a resource limit ({}; {}) — {} limit on each side, \
+                     resource-bound by construction, no semantic oracle",
+                    nl.describe(Leg::Native),
+                    wl.describe(Leg::Wasm),
+                    same,
+                )
+            })
+        }
+    }
+}
+
+fn contract_of(limit: ResourceLimit) -> &'static str {
+    match limit {
+        ResourceLimit::Stack => "C-196",
+        ResourceLimit::Memory => "C-197",
+    }
+}
+
+/// How the non-resource sibling ended, for the skip reason.
+fn sibling_fate(r: &super::runner::ProcResult) -> String {
+    if r.success() {
+        "completed".into()
+    } else {
+        format!(
+            "aborted for a non-resource reason (exit {:?}, {}B of stdout)",
+            r.exit_code,
+            r.stdout.len()
+        )
+    }
 }
 
 #[cfg(test)]
-mod memory_exhaustion_classification_tests {
-    use super::one_sided_memory_exhaustion;
+mod resource_class_tests {
+    //! The #2382 matrix, cell by cell, over FORGED leg outputs. Every
+    //! signature string here is the exact marker the host emits (see the
+    //! table on [`resource_limit`]).
+    use super::super::runner::ProcResult;
+    use super::{resource_class, resource_limit, Leg, ResourceLimit};
+
+    fn leg(stdout: &str, stderr: &str, exit: Option<i32>) -> ProcResult {
+        ProcResult {
+            stdout: stdout.as_bytes().to_vec(),
+            stderr: stderr.as_bytes().to_vec(),
+            exit_code: exit,
+            timed_out: false,
+            spawn_failed: false,
+            duration: std::time::Duration::from_millis(5),
+        }
+    }
+
+    const WASM_OOM: &str = "Error: out of memory\n";
+    const WASM_STACK: &str = "Error: failed to run main module\n\nCaused by:\n    0: wasm trap: call stack exhausted\n";
+    const NATIVE_STACK: &str =
+        "\nthread 'main' has overflowed its stack\nfatal runtime error: stack overflow\n";
+    const NATIVE_OOM: &str = "memory allocation of 2147483647 bytes failed\n";
+    const NATIVE_CLAMP: &str = "thread 'main' panicked at src/main.rs:9:5:\nclamp requires min <= max\n";
+
+    // ── the signals ──
 
     #[test]
-    fn wasm_oom_native_completed_is_contracted() {
-        // Wave 4 L5: ~34 GB of pushes — native's 64-bit space completed,
-        // wasm32 aborted with the defined line. C-197 — a skip, not a finding.
-        assert!(one_sided_memory_exhaustion(true, false, true));
+    fn signals_are_per_leg_and_exact() {
+        assert_eq!(resource_limit(Leg::Wasm, &leg("", WASM_OOM, Some(1))), Some(ResourceLimit::Memory));
+        assert_eq!(resource_limit(Leg::Wasm, &leg("", WASM_STACK, Some(134))), Some(ResourceLimit::Stack));
+        assert_eq!(resource_limit(Leg::Native, &leg("", NATIVE_STACK, None)), Some(ResourceLimit::Stack));
+        assert_eq!(resource_limit(Leg::Native, &leg("", NATIVE_OOM, None)), Some(ResourceLimit::Memory));
+        // A deliberate panic is a program observable, not a limit.
+        assert_eq!(resource_limit(Leg::Native, &leg("", NATIVE_CLAMP, Some(1))), None);
+        assert_eq!(resource_limit(Leg::Wasm, &leg("", "Error: clamp requires min <= max\n", Some(1))), None);
+        // `capacity overflow` is a usize computation, not the host running out.
+        assert_eq!(
+            resource_limit(Leg::Native, &leg("", "thread 'main' panicked: capacity overflow\n", Some(101))),
+            None
+        );
     }
 
     #[test]
-    fn wasm_failure_without_the_oom_line_is_still_a_finding() {
-        assert!(!one_sided_memory_exhaustion(true, false, false));
+    fn a_marker_on_a_successful_leg_is_not_an_abort() {
+        assert_eq!(resource_limit(Leg::Wasm, &leg("Error: out of memory\n", WASM_OOM, Some(0))), None);
+        assert_eq!(resource_limit(Leg::Native, &leg("", NATIVE_STACK, Some(0))), None);
     }
 
     #[test]
-    fn both_ok_is_not_this_rule() {
-        assert!(!one_sided_memory_exhaustion(true, true, false));
+    fn the_wasm_marker_does_not_classify_native_and_vice_versa() {
+        assert_eq!(resource_limit(Leg::Native, &leg("", WASM_OOM, Some(1))), None);
+        assert_eq!(resource_limit(Leg::Native, &leg("", WASM_STACK, Some(134))), None);
+        assert_eq!(resource_limit(Leg::Wasm, &leg("", NATIVE_STACK, None)), None);
+        assert_eq!(resource_limit(Leg::Wasm, &leg("", NATIVE_OOM, None)), None);
     }
-}
 
-#[cfg(test)]
-mod stack_exhaustion_classification_tests {
-    use super::one_sided_stack_exhaustion;
+    // ── the matrix ──
 
     #[test]
-    fn wasm_exhausted_native_terminated_is_contracted() {
-        // Wave 4 finding 57: LLVM's accumulator TRE terminated native; wasm
-        // recursed faithfully and trapped. C-196 — a skip, not a finding.
-        assert!(one_sided_stack_exhaustion(true, false, false, true));
+    fn both_answer_equal_is_not_this_rule() {
+        assert!(resource_class(&leg("a\n", "", Some(0)), &leg("a\n", "", Some(0))).is_none());
     }
 
     #[test]
-    fn native_exhausted_wasm_terminated_is_contracted() {
-        assert!(one_sided_stack_exhaustion(false, true, true, false));
+    fn both_answer_different_is_not_this_rule() {
+        assert!(resource_class(&leg("a\n", "", Some(0)), &leg("b\n", "", Some(0))).is_none());
     }
 
     #[test]
-    fn wasm_failure_without_the_signature_is_still_a_finding() {
-        assert!(!one_sided_stack_exhaustion(true, false, false, false));
+    fn one_aborts_without_a_signature_is_not_this_rule() {
+        // The #1532 / #2419 shape: one leg answers, the other aborts for a
+        // reason that is NOT a resource limit — a real RunFailureDivergence.
+        assert!(resource_class(&leg("a\n", "", Some(0)), &leg("", "Error: index out of bounds\n", Some(1))).is_none());
+        assert!(resource_class(&leg("", NATIVE_CLAMP, Some(1)), &leg("a\n", "", Some(0))).is_none());
     }
 
     #[test]
-    fn both_ok_is_not_this_rule() {
-        assert!(!one_sided_stack_exhaustion(true, true, false, false));
+    fn one_aborts_at_a_limit_before_printing_is_a_skip() {
+        // Wave 4 L5 / the C-197 forward direction: wasm OOMed, native completed.
+        let r = resource_class(&leg("a\n", "", Some(0)), &leg("", WASM_OOM, Some(1)));
+        assert!(r.as_deref().is_some_and(|s| s.contains("C-197")), "{r:?}");
+        // Wave 4 finding 57 / C-196 both directions.
+        assert!(resource_class(&leg("a\n", "", Some(0)), &leg("", WASM_STACK, Some(134))).is_some());
+        assert!(resource_class(&leg("", NATIVE_STACK, None), &leg("a\n", "", Some(0))).is_some());
+        // The reverse memory direction, now that native's std signature is named.
+        assert!(resource_class(&leg("", NATIVE_OOM, None), &leg("a\n", "", Some(0))).is_some());
+    }
+
+    #[test]
+    fn one_aborts_at_a_limit_after_agreeing_output_is_a_skip() {
+        // wasm printed a PREFIX of native's output and then hit the ceiling:
+        // nothing it printed contradicts native.
+        assert!(resource_class(&leg("a\nb\nc\n", "", Some(0)), &leg("a\nb\n", WASM_OOM, Some(1))).is_some());
+    }
+
+    #[test]
+    fn one_aborts_at_a_limit_after_diverging_output_is_a_finding() {
+        // The over-skip #2382 warns about: wasm DIVERGED and then OOMed. The
+        // limit merely cut a real divergence short — this must stay a finding.
+        assert!(resource_class(&leg("a\nb\n", "", Some(0)), &leg("a\nX\n", WASM_OOM, Some(1))).is_none());
+        // The wasm leg printed MORE than native's (completed) output — also not a prefix.
+        assert!(resource_class(&leg("a\n", "", Some(0)), &leg("a\nb\n", WASM_OOM, Some(1))).is_none());
+        // Same for stack, and for native as the aborting leg.
+        assert!(resource_class(&leg("a\n", "", Some(0)), &leg("z\n", WASM_STACK, Some(134))).is_none());
+        assert!(resource_class(&leg("z\n", NATIVE_STACK, None), &leg("a\n", "", Some(0))).is_none());
+    }
+
+    #[test]
+    fn the_2382_reproducer_is_a_skip() {
+        // seed 563158060951 index 1451 on develop 5d8568272: native allocated
+        // 2 GB, ran on, aborted at the fixture's own `clamp` panic (exit 1,
+        // 91 B of stdout); wasm died at `bytes.new(2147483647)` with the
+        // defined OOM line (exit 1, 0 B). Both abort, for DIFFERENT reasons,
+        // and wasm's empty stdout contradicts nothing — a resource skip.
+        let native_stdout = "x".repeat(91);
+        let r = resource_class(&leg(&native_stdout, NATIVE_CLAMP, Some(1)), &leg("", WASM_OOM, Some(1)));
+        assert!(r.as_deref().is_some_and(|s| s.contains("C-197") && s.contains("non-resource")), "{r:?}");
+    }
+
+    #[test]
+    fn a_non_resource_abort_on_the_sibling_does_not_rescue_a_diverged_leg() {
+        // native aborted at clamp AFTER printing "a"; wasm printed "b" and
+        // then OOMed — the outputs contradict, the limit is not the story.
+        assert!(resource_class(&leg("a\n", NATIVE_CLAMP, Some(1)), &leg("b\n", WASM_OOM, Some(1))).is_none());
+    }
+
+    #[test]
+    fn both_abort_same_non_resource_reason_is_not_this_rule() {
+        // Both legs hit the fixture's deliberate panic: same stdout, same
+        // exit — the compare below says Clean, and this rule stays out of it.
+        assert!(resource_class(
+            &leg("a\n", NATIVE_CLAMP, Some(1)),
+            &leg("a\n", "Error: clamp requires min <= max\n", Some(1))
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn both_abort_at_the_same_limit_is_a_skip() {
+        // Unbounded recursion by construction: guard page on native, depth
+        // trap on wasm — different codes, same limit.
+        let r = resource_class(&leg("", NATIVE_STACK, None), &leg("", WASM_STACK, Some(134)));
+        assert!(r.as_deref().is_some_and(|s| s.contains("the same limit")), "{r:?}");
+        let r = resource_class(&leg("", NATIVE_OOM, None), &leg("", WASM_OOM, Some(1)));
+        assert!(r.as_deref().is_some_and(|s| s.contains("the same limit")), "{r:?}");
+    }
+
+    #[test]
+    fn both_abort_at_different_limits_is_a_skip() {
+        // Native's 64-bit space held the allocation and the program then
+        // recursed off the stack; wasm32 could not hold it at all.
+        let r = resource_class(&leg("", NATIVE_STACK, None), &leg("", WASM_OOM, Some(1)));
+        assert!(r.as_deref().is_some_and(|s| s.contains("a different limit")), "{r:?}");
+        // Both printed an agreeing prefix first, unequal lengths.
+        assert!(resource_class(&leg("a\nb\n", NATIVE_STACK, None), &leg("a\n", WASM_OOM, Some(1))).is_some());
+        assert!(resource_class(&leg("a\n", NATIVE_OOM, None), &leg("a\nb\n", WASM_STACK, Some(134))).is_some());
+    }
+
+    #[test]
+    fn both_abort_at_limits_after_diverging_output_is_a_finding() {
+        assert!(resource_class(&leg("a\n", NATIVE_STACK, None), &leg("b\n", WASM_OOM, Some(1))).is_none());
     }
 }
 
@@ -887,6 +1117,90 @@ mod compare_runs_tests {
             Some("a0=41\n"),
         );
         assert!(matches!(out, Outcome::Skipped { .. }));
+    }
+
+    // ── #2382: the resource matrix as the ladder actually reports it ──
+
+    #[test]
+    fn wasm_oom_while_native_aborts_elsewhere_is_a_skip() {
+        // The #2382 reproducer: native ran on to the fixture's own `clamp`
+        // panic (exit 1, 91 B); wasm OOMed at the first allocation (0 B).
+        // Was reported as `OutputDivergence: stdout length differs`.
+        let out = compare_runs(
+            "",
+            &run(&"x".repeat(91), "clamp requires min <= max", 1),
+            &run("", "Error: out of memory", 1),
+            None,
+            None,
+        );
+        assert!(matches!(out, Outcome::Skipped { .. }), "{out:?}");
+    }
+
+    #[test]
+    fn wasm_that_diverged_before_the_oom_is_still_an_output_divergence() {
+        let out = compare_runs(
+            "",
+            &run("a\nb\n", "", 0),
+            &run("a\nX\n", "Error: out of memory", 1),
+            None,
+            None,
+        );
+        assert!(
+            matches!(out, Outcome::Finding(ref f) if f.kind == FindingKind::RunFailureDivergence),
+            "{out:?}"
+        );
+        let out = compare_runs(
+            "",
+            &run("a\nb\n", "clamp requires min <= max", 1),
+            &run("a\nX\n", "Error: out of memory", 1),
+            None,
+            None,
+        );
+        assert!(
+            matches!(out, Outcome::Finding(ref f) if f.kind == FindingKind::OutputDivergence),
+            "{out:?}"
+        );
+    }
+
+    #[test]
+    fn one_leg_answering_while_the_other_aborts_without_a_signature_is_a_finding() {
+        // The #1532 / #2419 shape survives: an abort with no resource
+        // signature is a semantic verdict.
+        let out = compare_runs(
+            "",
+            &run("a\n", "", 0),
+            &run("", "Error: index out of bounds", 1),
+            None,
+            None,
+        );
+        assert!(
+            matches!(out, Outcome::Finding(ref f) if f.kind == FindingKind::RunFailureDivergence),
+            "{out:?}"
+        );
+    }
+
+    #[test]
+    fn both_aborting_the_same_way_is_clean() {
+        let out = compare_runs(
+            "",
+            &run("a\n", "clamp requires min <= max", 1),
+            &run("a\n", "Error: clamp requires min <= max", 1),
+            None,
+            None,
+        );
+        assert!(matches!(out, Outcome::Clean { .. }), "{out:?}");
+    }
+
+    #[test]
+    fn both_aborting_at_different_limits_is_a_skip() {
+        let out = compare_runs(
+            "",
+            &run("", "fatal runtime error: stack overflow", 134),
+            &run("", "Error: out of memory", 1),
+            None,
+            None,
+        );
+        assert!(matches!(out, Outcome::Skipped { .. }), "{out:?}");
     }
 }
 
