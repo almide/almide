@@ -176,3 +176,66 @@ fn run_interp_capture_with_fallbacks(source: &str) -> (InterpLeg, Vec<(String, S
     };
     (leg, fallbacks)
 }
+
+/// One fixture's interp outcome plus the bridge fallbacks it reached — what
+/// [`run_interp_capture_with_fallbacks`] returns, computed once per fixture.
+type InterpSweepRow = (InterpLeg, Vec<(String, String)>);
+
+/// Evaluate every source through the interp leg on a scoped thread pool and
+/// return the rows in INPUT order (#2381). The sweep is the whole cost of the
+/// ledger gates (~1650 s serial on CI) and a quarter of the oracle's; the leg
+/// is backend-free — no `almide` spawn, no wasmtime, no build scratch — and the
+/// interpreter is thread-confined by construction (`run_main` already moves
+/// each evaluation onto its own big-stack thread, so the worker's stack is
+/// never the recursion bound; the only process statics are the `OnceLock`/
+/// `RwLock` caches in stdlib_pool.rs, bundled_sigs.rs and parse_cache.rs and
+/// the `ThreadedRodeo` interner), so N fixtures at a time is the same
+/// computation as one at a time.
+///
+/// Rows are collected BY INDEX, never by completion order: a worker takes the
+/// next unclaimed index from a shared counter (fixtures are uneven, so a
+/// static split would idle threads), returns `(index, row)` pairs, and the
+/// caller places them — every report and ledger line stays in sorted corpus
+/// order, byte-identical to the serial sweep. A worker panic (there is none
+/// today: both the lowering and the evaluation are under `catch_unwind`)
+/// propagates through `join` rather than leaving a hole.
+///
+/// `ALMIDE_INTERP_SWEEP_THREADS=<n>` overrides the pool width (`1` reproduces
+/// the serial sweep exactly — the A/B lever); the default is
+/// `available_parallelism`, capped at the fixture count.
+fn interp_sweep_parallel(sources: &[String]) -> Vec<InterpSweepRow> {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let width = std::env::var("ALMIDE_INTERP_SWEEP_THREADS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|n| *n >= 1)
+        .unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |n| n.get()))
+        .min(sources.len().max(1));
+    let next = AtomicUsize::new(0);
+    let mut rows: Vec<Option<InterpSweepRow>> = (0..sources.len()).map(|_| None).collect();
+    std::thread::scope(|scope| {
+        let workers: Vec<_> = (0..width)
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut mine: Vec<(usize, InterpSweepRow)> = Vec::new();
+                    loop {
+                        let i = next.fetch_add(1, Ordering::Relaxed);
+                        if i >= sources.len() {
+                            break;
+                        }
+                        mine.push((i, run_interp_capture_with_fallbacks(&sources[i])));
+                    }
+                    mine
+                })
+            })
+            .collect();
+        for worker in workers {
+            for (i, row) in worker.join().expect("interp sweep worker panicked") {
+                rows[i] = Some(row);
+            }
+        }
+    });
+    rows.into_iter()
+        .map(|row| row.expect("every fixture is claimed exactly once by the counter"))
+        .collect()
+}

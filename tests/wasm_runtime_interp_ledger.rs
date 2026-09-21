@@ -49,15 +49,42 @@ fn ledger_path() -> PathBuf {
 /// The ledger never decides WHAT is skipped (skips stay interp-self-reported);
 /// it audits the set and its reasons. Regenerate after a deliberate change with
 /// `ALMIDE_UPDATE_INTERP_LEDGER=1` and review the diff.
+///
+/// ONE sweep feeds BOTH ledgers (#2381). The abstain audit and the
+/// bridge-fallback audit below read the same per-fixture interp outcome
+/// (`run_interp_capture_with_fallbacks` returns the leg AND the fallbacks), so
+/// the corpus is evaluated once — on a scoped thread pool, rows in corpus
+/// order (interp_leg.rs::interp_sweep_parallel) — and each audit reads its
+/// half. Before, the two gates were two `#[test]`s that each swept the corpus
+/// serially: 1666 s + 1586 s on CI for what is the same computation twice.
+/// The test's name contains both former names, so the regeneration commands
+/// the ledger headers print (`… interp_abstain_ledger` /
+/// `… interp_bridge_fallback_ledger`) still select it; under
+/// `ALMIDE_UPDATE_INTERP_LEDGER` both ledgers are rewritten. Both audits
+/// always run; their failure texts are joined so neither hides the other.
 #[test]
-fn interp_abstain_ledger() {
+fn interp_abstain_ledger_and_interp_bridge_fallback_ledger() {
+    let Some(sweep) = sweep_corpus() else {
+        return;
+    };
+    let mut failures = audit_abstain_ledger(&sweep);
+    failures.push_str(&audit_bridge_fallback_ledger(&sweep));
+    if !failures.is_empty() {
+        panic!("{failures}");
+    }
+}
+
+/// One fixture's row of the sweep: its stem, the interp leg and the bridge
+/// fallbacks it reached, in sorted corpus order.
+type SweepRow = (String, InterpLeg, Vec<(String, String)>);
+
+/// The interp sweep over spec/wasm_cross — sorted by path, evaluated once on
+/// the pool. `None` when the corpus directory is missing or empty (skip).
+fn sweep_corpus() -> Option<Vec<SweepRow>> {
     let dir = spec_dir();
     if !dir.exists() {
-        eprintln!(
-            "interp_abstain_ledger: {} missing — skipping",
-            dir.display()
-        );
-        return;
+        eprintln!("interp ledgers: {} missing — skipping", dir.display());
+        return None;
     }
     let mut entries: Vec<_> = std::fs::read_dir(&dir)
         .unwrap()
@@ -66,21 +93,40 @@ fn interp_abstain_ledger() {
         .collect();
     entries.sort_by_key(|e| e.path());
     if entries.is_empty() {
-        eprintln!("interp_abstain_ledger: corpus empty — skipping");
-        return;
+        eprintln!("interp ledgers: corpus empty — skipping");
+        return None;
     }
+    let stems: Vec<String> = entries
+        .iter()
+        .map(|e| e.path().file_stem().unwrap().to_str().unwrap().to_string())
+        .collect();
+    let sources: Vec<String> = entries
+        .iter()
+        .map(|e| std::fs::read_to_string(e.path()).unwrap())
+        .collect();
+    let rows = interp_sweep_parallel(&sources);
+    Some(
+        stems
+            .into_iter()
+            .zip(rows)
+            .map(|(stem, (leg, fallbacks))| (stem, leg, fallbacks))
+            .collect(),
+    )
+}
 
-    let total = entries.len();
+/// The abstain audit over a finished sweep: returns the failure text ("" when
+/// the observed abstain set and reasons equal the ledger), or regenerates the
+/// ledger under `ALMIDE_UPDATE_INTERP_LEDGER` and returns "".
+fn audit_abstain_ledger(sweep: &[SweepRow]) -> String {
+    let total = sweep.len();
     // fixture stem → first-line reason, in corpus order
-    let mut observed: Vec<(String, String)> = Vec::new();
-    for entry in &entries {
-        let path = entry.path();
-        let name = path.file_stem().unwrap().to_str().unwrap().to_string();
-        let source = std::fs::read_to_string(&path).unwrap();
-        if let InterpLeg::Skip(reason) = run_interp_capture(&source) {
-            observed.push((name, reason.replace('\n', " ")));
-        }
-    }
+    let observed: Vec<(String, String)> = sweep
+        .iter()
+        .filter_map(|(name, leg, _)| match leg {
+            InterpLeg::Skip(reason) => Some((name.clone(), reason.replace('\n', " "))),
+            InterpLeg::Ran(..) => None,
+        })
+        .collect();
 
     if std::env::var("ALMIDE_UPDATE_INTERP_LEDGER").is_ok() {
         let mut out = String::from(
@@ -122,7 +168,7 @@ fn interp_abstain_ledger() {
             observed.len(),
             total
         );
-        return;
+        return String::new();
     }
 
     let ledger_text = std::fs::read_to_string(ledger_path()).unwrap_or_else(|_| {
@@ -218,9 +264,7 @@ fn interp_abstain_ledger() {
              same PR (ALMIDE_UPDATE_INTERP_LEDGER=1) and keep the class patterns matching.\n",
         );
     }
-    if !failures.is_empty() {
-        panic!("{failures}");
-    }
+    failures
 }
 
 // ── The bridge-fallback ledger gate (#2185) ──
@@ -237,7 +281,8 @@ fn interp_abstain_ledger() {
 // floor so the body evaluates, or record it in the same PR); a ledgered name
 // the corpus no longer reaches through the bridge is a shadowed arm — delete
 // it from bridge.rs and the entry, the ledger only shrinks. Backend-free like
-// the abstain gate above.
+// the abstain gate above, and fed by the SAME sweep (#2381): the audit below
+// reads the fallbacks half of each row the abstain audit read the leg of.
 
 /// The committed inventory of bridge arms the corpus still reaches as fallbacks.
 fn fallback_ledger_path() -> PathBuf {
@@ -245,40 +290,18 @@ fn fallback_ledger_path() -> PathBuf {
         .join("crates/almide-interp/interp-bridge-fallback-ledger.txt")
 }
 
-#[test]
-fn interp_bridge_fallback_ledger() {
-    let dir = spec_dir();
-    if !dir.exists() {
-        eprintln!(
-            "interp_bridge_fallback_ledger: {} missing — skipping",
-            dir.display()
-        );
-        return;
-    }
-    let mut entries: Vec<_> = std::fs::read_dir(&dir)
-        .unwrap()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map(|x| x == "almd").unwrap_or(false))
-        .collect();
-    entries.sort_by_key(|e| e.path());
-    if entries.is_empty() {
-        eprintln!("interp_bridge_fallback_ledger: corpus empty — skipping");
-        return;
-    }
-
+/// The bridge-fallback audit over a finished sweep: the failure text ("" on
+/// equality), or a regeneration under `ALMIDE_UPDATE_INTERP_LEDGER` and "".
+fn audit_bridge_fallback_ledger(sweep: &[SweepRow]) -> String {
     // name → (first fixture that reached it, the body's reason), corpus order
     let mut observed: std::collections::BTreeMap<String, (String, String)> =
         std::collections::BTreeMap::new();
     let mut calls = 0usize;
-    for entry in &entries {
-        let path = entry.path();
-        let stem = path.file_stem().unwrap().to_str().unwrap().to_string();
-        let source = std::fs::read_to_string(&path).unwrap();
-        let (_, fallbacks) = run_interp_capture_with_fallbacks(&source);
+    for (stem, _, fallbacks) in sweep {
         calls += fallbacks.len();
         for (name, why) in fallbacks {
             observed
-                .entry(name)
+                .entry(name.clone())
                 .or_insert((stem.clone(), why.replace('\n', " ")));
         }
     }
@@ -309,7 +332,7 @@ fn interp_bridge_fallback_ledger() {
             observed.len(),
             calls
         );
-        return;
+        return String::new();
     }
 
     let ledger_text = std::fs::read_to_string(fallback_ledger_path()).unwrap_or_else(|_| {
@@ -337,7 +360,7 @@ fn interp_bridge_fallback_ledger() {
         "\ninterp_bridge_fallback_ledger: {} bridge name(s) still answer as the body's fallback ({} calls over {} fixtures)",
         observed.len(),
         calls,
-        entries.len()
+        sweep.len()
     );
 
     let mut failures = String::new();
@@ -396,9 +419,7 @@ fn interp_bridge_fallback_ledger() {
              Re-record it in this same PR (ALMIDE_UPDATE_INTERP_LEDGER=1).\n",
         );
     }
-    if !failures.is_empty() {
-        panic!("{failures}");
-    }
+    failures
 }
 
 /// Malformed or duplicate rows must not disappear from the reason comparison.
