@@ -75,8 +75,14 @@ After cloning, fetch the submodules and install the git hooks:
 git submodule update --init --recursive
 brew install lefthook  # or: https://github.com/evilmartians/lefthook
 lefthook install
-rustup toolchain install 1.94.0 --component clippy   # the pinned toolchain: makes the pre-push clippy ratchet a verdict, not a count
 ```
+
+The pre-push clippy ratchet gives a VERDICT only under CI's pinned toolchain
+(1.94.0); off-pin it prints `NO VERDICT` and skips, because the count is not
+comparable across clippy releases. `rustup toolchain install 1.94.0 --component
+clippy` makes it a verdict where rustup manages the toolchain; on a qusp-managed
+machine (no rustup) it stays CI's alone — a green push is never a clippy verdict
+there. run_parity in the same hook verdicts everywhere.
 
 Without `lefthook install` no pre-commit or pre-push gate runs at all, and every
 gate failure that a hook would have caught in seconds costs a CI round (30–56 min)
