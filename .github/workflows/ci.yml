@@ -1157,10 +1157,14 @@ jobs:
           key: elan-${{ runner.os }}-${{ hashFiles('crates/almide-perceus-belt/lean-toolchain', 'crates/almide-race-belt/lean-toolchain', 'crates/almide-edit-belt/lean-toolchain') }}
 
       - name: Install elan (retry-resilient)
-        # lean-action's internal elan-init has no retry, so a transient GitHub 504
-        # (or 403 rate-limit) on the elan tarball download fails the whole job.
-        # Pre-install elan here with a retry loop — and cache ~/.elan above — so
-        # lean-action finds elan already in PATH and skips its own fragile download.
+        # A transient GitHub 504 (or 403 rate-limit) on the elan tarball
+        # download used to fail the whole job — and this job is REQUIRED, so
+        # a red here at the head of the merge queue restarts every entry
+        # behind it (2026-09-21, run 35614130413: cache hit, elan present,
+        # and leanprover/lean-action's own install step still re-ran
+        # elan-init.sh with no retry and died on a 504). elan is installed
+        # here with a retry loop, ~/.elan is cached above, and the builds
+        # below call `lake` directly so nothing downloads elan again.
         run: |
           if [ ! -x "$HOME/.elan/bin/elan" ]; then
             for i in 1 2 3 4 5; do
@@ -1172,32 +1176,37 @@ jobs:
           fi
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
 
+      # The three belts are kernel-checked with `lake build` straight from the
+      # cached elan (elan installs each belt's `lean-toolchain` on first use;
+      # the toolchain lives in the ~/.elan cache keyed on those files). The
+      # GITHUB_TOKEN authenticates elan's release-tag lookups so they use the
+      # 5000/hr authenticated limit, not the 60/hr per-IP one that 403s.
       - name: Kernel-check proofs (lake build)
-        uses: leanprover/lean-action@v1
-        # Authenticate the elan/toolchain release-tag API calls so they use the
-        # 5000/hr authenticated limit instead of the 60/hr per-IP one that
-        # intermittently 403s with "failed to parse latest release tag".
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          lake-package-directory: crates/almide-perceus-belt
+        run: |
+          cd crates/almide-perceus-belt
+          lean --version && lake --version
+          lake build
 
       - name: Kernel-check race-belt proofs (lake build)
-        uses: leanprover/lean-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          lake-package-directory: crates/almide-race-belt
+        run: |
+          cd crates/almide-race-belt
+          lean --version && lake --version
+          lake build
 
       - name: Kernel-check edit-belt proofs (lake build)
-        uses: leanprover/lean-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          lake-package-directory: crates/almide-edit-belt
+        run: |
+          cd crates/almide-edit-belt
+          lean --version && lake --version
+          lake build
 
       - name: Kernel-conformance corpus is in sync with its generator
         # The committed corpus (proofs/kernel-conformance) is a pure function
