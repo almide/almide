@@ -127,7 +127,7 @@ fn outer_loop_variable_used_in_an_inner_loop_still_clones() {
 }
 
 #[test]
-fn loop_variable_captured_by_a_closure_still_clones() {
+fn loop_variable_captured_by_a_closure_moves_into_the_capture_bind() {
     if !tool_available() { eprintln!("skipping: almide binary not available"); return; }
     let body = emitted_main(&format!("{PRELUDE}\
         fn main() -> Unit = {{\n\
@@ -144,7 +144,18 @@ fn loop_variable_captured_by_a_closure_still_clones() {
     // consumed once, by the capture bind. Before #1673 that bind read
     // `v.clone().clone()`: the capture pass's copy, cloned again by the
     // in-loop always-clone rule.
-    assert!(body.contains("= v.clone();"), "the capture bind copies the loop variable exactly once:\n{body}");
+    //
+    // EXPECTATION FLIPPED (#2410): the bind now MOVES. `v` is the for-in
+    // binder, so it is loop-FRESH — a different value every iteration — and
+    // the capture-move rule's `in_loop` veto existed only for a variable bound
+    // OUTSIDE the loop, where a per-iteration closure would move one value
+    // twice. This test previously pinned that veto's over-reach as if it were
+    // the rule. The move is safe in the direction that cannot be silent: an
+    // over-aggressive capture move is a use-after-move, which rustc refuses at
+    // compile time — and the emitted program still builds and prints `4` on
+    // both legs. The clone it removes ran once per iteration.
+    assert!(body.contains("= v;"), "the capture bind MOVES the loop variable (it is loop-fresh):\n{body}");
+    assert!(!body.contains("= v.clone();"), "the loop-fresh capture must not clone:\n{body}");
     assert!(!body.contains("v.clone().clone()"), "the double clone on the capture bind is back:\n{body}");
     assert!(body.contains("keep(__cap_"), "the closure body must read its own capture, never the loop variable:\n{body}");
 }
