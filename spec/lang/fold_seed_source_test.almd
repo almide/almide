@@ -13,15 +13,17 @@ test "the seed sorts the source before the fold reads it" {
   assert_eq(r, false)
 }
 
+// The fuzzer's original closure captured a `String?` binding, which the incumbent
+// wasm brick does not lift (walled-real ratchet); the shape under test is the
+// seed's `list.scan(xs, …)` reading the source, so the closure is capture-free.
 test "the seed scans the source — the shape the fuzzer produced" {
-  let xs: List[Bool] = []
-  let v: String? = none
-  let r: String? = list.fold(
+  let xs: List[Int] = [1, 2, 3]
+  let r: Int = list.fold(
     xs,
-    (if list.is_empty(list.scan(xs, 1, ((y, s) => 1))) then v else some("")),
-    ((x, a) => v),
+    (if list.is_empty(list.scan(xs, 0, ((s, y) => s + y))) then 100 else 10),
+    ((a, b) => a + b),
   )
-  assert_eq(r, none)
+  assert_eq(r, 16)
 }
 
 test "the seed is the source variable itself" {
