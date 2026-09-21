@@ -40,11 +40,11 @@
 #
 # Closure class (schema 3, #1423 stage 4's follow-up): every row carries
 # `class`, the honest ENDGAME of the row, one of the closed vocabulary —
-#   pending-self-host    the fn has a native body and no self-host body
-#                        the leg can link (or the structural leg has no
-#                        arm for the body's layout); closes by a body +
-#                        cross fixture in one PR. Shrink-only ratchet:
-#                        pending_self_host_ceiling.
+#   pending-self-host    closes by work IN THIS REPO: a self-host body
+#                        the leg can link, a structural-leg arm for the
+#                        body's layout, an emitter representation the
+#                        leg lacks — landed with a cross fixture in one
+#                        PR. Shrink-only ratchet: pending_self_host_ceiling.
 #   pending-port         the leg lacks a HOST surface the fn needs (a
 #                        wasi:http@0.3 station, a structural-leg host
 #                        import, a p3 world); closes when the port lands.
@@ -97,8 +97,17 @@ schema = 3
 # exec_status_timeout/exec_with_stdin/spawn/is_alive/kill/pid);
 # process.env and process.stdin_lines stay pending-port (environ and
 # stdin exist in WASI; the split the ruling asked for).
-pending_self_host_ceiling = 34
-pending_port_ceiling = 78
+# 2026-09-21 (schema 3): 34 -> 56 is the CLASS basis, not a regression.
+# The count now spans every row that closes by work in this repo — a
+# self-host body, a structural-leg arm, an emitter representation — not
+# only the rows tagged `pending-self-host` on the structural leg: the
+# fused matrix kernels and append_rows/fma/fma3 (native intrinsics with
+# no wasm body on any leg, 12), the structural-leg-gap rows (Matrix
+# [Float32] representation, fold_lines_range arm, string.clear's Hole;
+# 8) and mem.save/restore (the allocator-mark scalar; 2) join. Burn-down
+# to 0 is still the stage-4 finish line; only the denominator is honest now.
+pending_self_host_ceiling = 56
+pending_port_ceiling = 56
 
 # The unprobed class (#1827), per leg. Today: the five HttpRequest
 # accessors (http.query_params / req_body / req_header / req_method /
@@ -156,7 +165,7 @@ issue = "#1423"
 [[unavailable]]
 fn = "fs.fold_lines_range"
 legs = ["structural"]
-class = "pending-port"
+class = "pending-self-host"
 reason = "structural-leg-gap: the incumbent links the four self-host twins (#1423 bucket A) and the default route BUILDS; the structural leg has no fold_lines_range arm yet and declines under ALMIDE_WASM_STRUCTURAL=1"
 issue = "#1423"
 
@@ -414,7 +423,7 @@ issue = "#1827"
 [[unavailable]]
 fn = "matrix.append_rows"
 legs = ["structural", "stock-p1", "embedded"]
-class = "pending-port"
+class = "pending-self-host"
 reason = "native intrinsic (almide_rt_matrix_append_rows) with no wasm definition on any leg — the incumbent refuses the unlinked call and the structural leg has no arm"
 alt = "matrix.from_lists(matrix.to_lists(base) + matrix.to_lists(extra))"
 issue = "#1827"
@@ -471,7 +480,7 @@ issue = "#1827"
 [[unavailable]]
 fn = "matrix.fma"
 legs = ["structural", "stock-p1", "embedded"]
-class = "pending-port"
+class = "pending-self-host"
 reason = "fused-kernel-perf: a native intrinsic (almide_rt_matrix_fma) with no wasm definition on any leg — the incumbent refuses the unlinked call and the structural leg has no arm"
 alt = "matrix.add(matrix.scale(a, ka), matrix.scale(b, kb))"
 issue = "#1827"
@@ -479,7 +488,7 @@ issue = "#1827"
 [[unavailable]]
 fn = "matrix.fma3"
 legs = ["structural", "stock-p1", "embedded"]
-class = "pending-port"
+class = "pending-self-host"
 reason = "fused-kernel-perf: a native intrinsic (almide_rt_matrix_fma3) with no wasm definition on any leg — the incumbent refuses the unlinked call and the structural leg has no arm"
 alt = "matrix.add(matrix.add(matrix.scale(a, ka), matrix.scale(b, kb)), matrix.scale(c, kc))"
 issue = "#1827"
@@ -494,7 +503,7 @@ issue = "#1827"
 [[unavailable]]
 fn = "matrix.fused_gemm_bias_scale_gelu"
 legs = ["structural", "stock-p1", "embedded"]
-class = "pending-port"
+class = "pending-self-host"
 reason = "fused-kernel-perf: a native intrinsic (almide_rt_matrix_fused_gemm_bias_scale_gelu) with no wasm definition on any leg — the incumbent refuses the unlinked call and the structural leg has no arm"
 issue = "#1827"
 
@@ -515,21 +524,21 @@ issue = "#1827"
 [[unavailable]]
 fn = "matrix.linear_f32_row_no_bias"
 legs = ["structural", "stock-p1", "embedded"]
-class = "pending-port"
+class = "pending-self-host"
 reason = "fused-kernel-perf: a native intrinsic (almide_rt_matrix_linear_f32_row_no_bias) with no wasm definition on any leg — the incumbent refuses the unlinked call and the structural leg has no arm; the weights are consumed packed from the source buffer, so the portable spelling is the primitive matrix ops over an unpacked Matrix"
 issue = "#1827"
 
 [[unavailable]]
 fn = "matrix.linear_q1_0_row_no_bias"
 legs = ["structural", "stock-p1", "embedded"]
-class = "pending-port"
+class = "pending-self-host"
 reason = "fused-kernel-perf: a native intrinsic (almide_rt_matrix_linear_q1_0_row_no_bias) with no wasm definition on any leg — the incumbent refuses the unlinked call and the structural leg has no arm; the weights are consumed packed from the source buffer, so the portable spelling is the primitive matrix ops over an unpacked Matrix"
 issue = "#1827"
 
 [[unavailable]]
 fn = "matrix.linear_q8_0_row_no_bias"
 legs = ["structural", "stock-p1", "embedded"]
-class = "pending-port"
+class = "pending-self-host"
 reason = "fused-kernel-perf: a native intrinsic (almide_rt_matrix_linear_q8_0_row_no_bias) with no wasm definition on any leg — the incumbent refuses the unlinked call and the structural leg has no arm; the weights are consumed packed from the source buffer, so the portable spelling is the primitive matrix ops over an unpacked Matrix"
 issue = "#1827"
 
@@ -543,7 +552,7 @@ issue = "#1827"
 [[unavailable]]
 fn = "matrix.linear_row_gelu"
 legs = ["structural", "stock-p1", "embedded"]
-class = "pending-port"
+class = "pending-self-host"
 reason = "fused-kernel-perf: a native intrinsic (almide_rt_matrix_linear_row_gelu) with no wasm definition on any leg — the incumbent refuses the unlinked call and the structural leg has no arm"
 alt = "matrix.gelu(matrix.linear_row(x, weight, bias))"
 issue = "#1827"
@@ -572,28 +581,28 @@ issue = "#1827"
 [[unavailable]]
 fn = "matrix.mul_f32"
 legs = ["structural"]
-class = "pending-port"
+class = "pending-self-host"
 reason = "structural-leg-gap: the structural leg has no representation for the Matrix[Float32] value (bind-ty:Applied); the incumbent serves it"
 issue = "#1827"
 
 [[unavailable]]
 fn = "matrix.mul_f32_scaled"
 legs = ["structural"]
-class = "pending-port"
+class = "pending-self-host"
 reason = "structural-leg-gap: the structural leg has no representation for the Matrix[Float32] value (bind-ty:Applied); the incumbent serves it"
 issue = "#1827"
 
 [[unavailable]]
 fn = "matrix.mul_f32_t"
 legs = ["structural"]
-class = "pending-port"
+class = "pending-self-host"
 reason = "structural-leg-gap: the structural leg has no representation for the Matrix[Float32] value (bind-ty:Applied); the incumbent serves it"
 issue = "#1827"
 
 [[unavailable]]
 fn = "matrix.mul_f32_t_scaled"
 legs = ["structural"]
-class = "pending-port"
+class = "pending-self-host"
 reason = "structural-leg-gap: the structural leg has no representation for the Matrix[Float32] value (bind-ty:Applied); the incumbent serves it"
 issue = "#1827"
 
@@ -614,14 +623,14 @@ issue = "#1827"
 [[unavailable]]
 fn = "matrix.ones_f32"
 legs = ["structural"]
-class = "pending-port"
+class = "pending-self-host"
 reason = "structural-leg-gap: the structural leg has no representation for the Matrix[Float32] value (bind-ty:Applied); the incumbent serves it"
 issue = "#1827"
 
 [[unavailable]]
 fn = "matrix.pre_norm_linear"
 legs = ["structural", "stock-p1", "embedded"]
-class = "pending-port"
+class = "pending-self-host"
 reason = "fused-kernel-perf: a native intrinsic (almide_rt_matrix_pre_norm_linear) with no wasm definition on any leg — the incumbent refuses the unlinked call and the structural leg has no arm"
 alt = "matrix.linear_row(matrix.layer_norm_rows(x, gamma, beta, eps), weight, bias)"
 issue = "#1827"
@@ -629,21 +638,21 @@ issue = "#1827"
 [[unavailable]]
 fn = "matrix.qwen3_block_f32_kv"
 legs = ["structural", "stock-p1", "embedded"]
-class = "pending-port"
+class = "pending-self-host"
 reason = "fused-kernel-perf: a native intrinsic (almide_rt_matrix_qwen3_block_f32_kv) with no wasm definition on any leg — the incumbent refuses the unlinked call and the structural leg has no arm; the weights are consumed packed from the source buffer, so the portable spelling is the primitive matrix ops over an unpacked Matrix"
 issue = "#1827"
 
 [[unavailable]]
 fn = "matrix.qwen3_block_q1_0_kv"
 legs = ["structural", "stock-p1", "embedded"]
-class = "pending-port"
+class = "pending-self-host"
 reason = "fused-kernel-perf: a native intrinsic (almide_rt_matrix_qwen3_block_q1_0_kv) with no wasm definition on any leg — the incumbent refuses the unlinked call and the structural leg has no arm; the weights are consumed packed from the source buffer, so the portable spelling is the primitive matrix ops over an unpacked Matrix"
 issue = "#1827"
 
 [[unavailable]]
 fn = "matrix.qwen3_block_q8_0_kv"
 legs = ["structural", "stock-p1", "embedded"]
-class = "pending-port"
+class = "pending-self-host"
 reason = "fused-kernel-perf: a native intrinsic (almide_rt_matrix_qwen3_block_q8_0_kv) with no wasm definition on any leg — the incumbent refuses the unlinked call and the structural leg has no arm; the weights are consumed packed from the source buffer, so the portable spelling is the primitive matrix ops over an unpacked Matrix"
 issue = "#1827"
 
@@ -713,21 +722,21 @@ issue = "#1827"
 [[unavailable]]
 fn = "matrix.zeros_f32"
 legs = ["structural"]
-class = "pending-port"
+class = "pending-self-host"
 reason = "structural-leg-gap: the structural leg has no representation for the Matrix[Float32] value (bind-ty:Applied); the incumbent serves it"
 issue = "#1827"
 
 [[unavailable]]
 fn = "mem.restore"
 legs = ["structural", "stock-p1", "embedded"]
-class = "pending-port"
+class = "pending-self-host"
 reason = "the wasm MIR lowering refuses the allocator-mark scalar (`scalar binding outside the value subset`) and mem.restore is not an admitted effectful call, so the module's stated wasm-leg purpose is unreachable from a wasm build today (the structural leg has no arm either); on the native leg both are no-ops"
 issue = "#1827"
 
 [[unavailable]]
 fn = "mem.save"
 legs = ["structural", "stock-p1", "embedded"]
-class = "pending-port"
+class = "pending-self-host"
 reason = "the wasm MIR lowering refuses the allocator-mark scalar (`scalar binding outside the value subset`) and mem.restore is not an admitted effectful call, so the module's stated wasm-leg purpose is unreachable from a wasm build today (the structural leg has no arm either); on the native leg both are no-ops"
 issue = "#1827"
 
@@ -981,7 +990,7 @@ issue = "#1423"
 [[unavailable]]
 fn = "string.clear"
 legs = ["structural"]
-class = "pending-port"
+class = "pending-self-host"
 reason = "structural-leg-gap: the structural leg declines the self-host body's hole expression (expr:Hole); the incumbent serves it"
 issue = "#1827"
 
