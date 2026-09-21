@@ -326,3 +326,32 @@ work is 13 ks of genuine execution. aver's `--partition slice:` transfers only t
 multi-test binaries (the ledger binary has 2 tests, the rest 1). rust's bors/auto
 tiering and lean4's label tiers are the only peer precedent for a PR/queue split,
 and both accept later detection — the trade this repo has so far refused.
+
+## 5. Measured after the wave landed (2026-09-21, develop run 35633436273 on 83f922680)
+
+The first uncancelled develop push run on the new layout (#2440, #2444, #2445,
+#2446, #2449 all in, via the batch #2451). One run, one number set, no prediction:
+
+| | old develop (35569545602) | this run |
+|---|---|---|
+| wall, push → last required job green | 66 min | **43.4 min** (17:39:49 → 18:23:11) |
+| critical path | shard 0 (59 min: the two ledger tests serialised) | build 4.5 → `Test Rust (solo run_parity)` 35 → coverage gate 3 |
+| widest other jobs | shard 1–3 ≈ 44 / 41 / 35 | coverage ratchet 21, browser-ABI determinism 15, solo opt_parity / cross_target / interp_ledger 14 each, shard 0 13 |
+| shards (gravel only) | 44 / 41 / 35 / 33 | **13 / 11 / 7 / 9** |
+| Commissioned wasm gates | 27.8 (one job) | 13 / 12 / 8 (three jobs, #2445) |
+| interp ledger | 1666 s + 1586 s serial | one solo leg, 14 min (one sweep on a pool, #2446) |
+
+The same tree's PR run (35625736101) took 45.5 min with the non-required
+mutation gate as its tail (44 min); required-green at 38 min. So the number to
+quote for "how long until a PR can enqueue" is **≈38–43 min**, and the tail is
+now a single test: `run_parity` alone on its runner. #2454 (fixture-range shards,
+N=2, over the one-sweep interp leg) halves that leg (303 / 799 s measured locally
+against 1107 s unsharded), which puts the arithmetic at ≈ 4.5 + 18 + 3 ≈ **26 min**
+with the coverage ratchet (21) and browser-ABI determinism (15) as the next floor.
+
+What the day also measured, because it cost more than any job: a merge-queue
+REBUILD leaves the superseded ref's run alive (18 of them at 15:25Z, 105 jobs
+queued / 44 running), and a GitHub 504 on an unretried `curl` in a required job
+at the head of the queue restarts every entry behind it. #2449 cancels the
+superseded runs from inside the workflow and retries the nextest / wasmtime /
+elan downloads; the day's drain was one batch PR judged once.
