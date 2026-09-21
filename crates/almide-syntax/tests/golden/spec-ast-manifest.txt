@@ -1,4 +1,4 @@
-# oracle: almide 0.63.0 (dev) at 93913ac02 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.63.0 (dev) at 2ddcb3532 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -249,6 +249,7 @@ f25c1bb422ed14df5aeef689b69795b2626d9a107e10ab5e1d76d0c308c232b9	spec/lang/fan_v
 2fa0726e32c64ef3382a47ee26a59eb0ddfff7c0d6763420f23e66a9fbe21437	spec/lang/fn_ref_hof_test.almd
 cff670ba3c598622a8cafa1d9eb98a74effa40d86492982ca49fb42f7c08b931	spec/lang/fn_type_test.almd
 37cedd207a5227315b325e9ea6bad8802d897e60d4310a9acaed73df892787a1	spec/lang/fold_lambda_param_inference_test.almd
+866bcc5b8cc80924d6f5b6323ae05fd576023fbbf0c7402834f6a311c7d8f32c	spec/lang/fold_seed_source_test.almd
 32dfee664416246a4164c80ad397ffb352a628f223088444545b4d7b6223f965	spec/lang/for_in_head_unwrap_test.almd
 504757e8438264b79f8a72a795ec2ab4c1c84aa195d971866efd13b73ccb6484	spec/lang/for_test.almd
 3dca3c614a272e90ff042189dd8f057931ab84ceaacdaff79f3f5fd789430ce3	spec/lang/for_tuple_test.almd
