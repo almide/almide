@@ -1,0 +1,6 @@
+// The WALL row: the oracle runs it and the render path declines it (the incumbent structural
+// leg refuses Eq over two heap call results — the shape spec/wasm_cross/bytes_equality_call_operands
+// pins). A lifted wall turns this into a match on both sides; the comparison does not care which.
+fn b(xs: List[Int]) -> Bytes = bytes.from_list(xs)
+
+fn main() -> Unit = println(if b([1, 2]) == b([1, 2]) then "eq" else "ne")

@@ -1,0 +1,7 @@
+// The TRAP row (C-001): the oracle FAILS, so stdout agreement is not enough — exit code and
+// normalised stderr must agree too before this reads as a match.
+fn main() -> Unit = {
+  let zero = list.len([1]) - 1
+  println("before")
+  println(int.to_string(10 / zero))
+}

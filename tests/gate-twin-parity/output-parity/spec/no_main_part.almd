@@ -1,0 +1,3 @@
+// A part-file with no entry point: SKIPPED, and counted as skipped rather than dropped.
+// (The gate greps for the entry-point spelling, so this comment must not contain it.)
+fn helper(x: Int) -> Int = x + 1

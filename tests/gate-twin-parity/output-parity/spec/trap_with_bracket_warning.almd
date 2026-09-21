@@ -1,0 +1,11 @@
+// The #1123 row: a trap fixture whose oracle run also prints a `warning[...]` block. The
+// block is compiler infrastructure, not program stderr — the render leg never prints it — so
+// the gate strips it before the trap comparison and this reads as a MATCH. A twin that
+// forgot the stripping reads it as XFAIL: the first negative input of the #2163 diff.
+import json
+
+fn main() -> Unit = {
+  let zero = list.len([1]) - 1
+  println("before the trap")
+  println(int.to_string(10 / zero))
+}
