@@ -1,0 +1,10 @@
+# fold-seed-source FLOOR (#2380) — read by `almide run tools/almide-gates/src/main.almd -- fold-seed-source .`
+#
+# `<path> <count>`: the file must keep at least <count> sites of the shape
+# `list.fold(xs, <seed that reads xs>, f)` (also foldf / fold_float / reduce /
+# scan, and the pipe spelling). The shape is what #2377 broke on; the floor
+# keeps it exercised by `almide test` so an emitter regression is caught by a
+# fixture instead of a downstream rustc E0505. Shrink-only: lower a count only
+# when the fixture is deliberately replaced, and say so in the PR. Files with
+# sites and no row are reported as unpinned by the gate — add them here.
+spec/lang/fold_seed_source_test.almd 4
