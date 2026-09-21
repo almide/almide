@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A `gh` that answers from RECORDED responses (#2163).
+"""A `gh` that answers from RECORDED responses (#2163, re-recorded for #2452).
 
 `scripts/fuzz-track-record.sh` and its Almide twin both reach the GitHub
 Actions API through `gh api`. A comparison that went to the network would be
@@ -7,12 +7,16 @@ red whenever the network is, green whenever it is not, and different on every
 run as nights are added — so the twin parity test puts this directory first on
 PATH and both sides read the same recorded JSON instead.
 
-Only the two request shapes the tool makes are served:
+Only the three request shapes the tool makes are served:
 
   gh api repos/<repo>/actions/workflows/fuzz-nightly.yml/runs?event=schedule&per_page=N [--jq EXPR]
       -> runs.json, truncated to the first N runs (newest first, as the API orders them)
-  gh api repos/<repo>/actions/runs/<id>/jobs
-      -> jobs-<id>.json
+  gh api repos/<repo>/actions/runs/<id>/jobs[?per_page=100]
+      -> jobs-<id>.json   (the un-suffixed form is kept for the pre-#2429 readers)
+  gh api repos/<repo>/actions/jobs/<jobid>/logs
+      -> logs-<jobid>.txt, the verdict job's log; a job with no recording is refused
+         the way the API refuses a log that has expired (non-zero, nothing on stdout),
+         which is the shape both readers score as NO RECORD
 
 `--jq` is handed to the real `jq`, exactly as `gh` does, so the bash side's
 embedded jq program is exercised rather than re-implemented here. Anything
@@ -20,11 +24,24 @@ else is refused with a non-zero exit, so a tool that grew a new request would
 fail the comparison loudly instead of reading an empty answer.
 
 The recorded files are trimmed to the fields the tool reads (run id /
-conclusion / status / created_at; job name / conclusion; step name /
+conclusion / status / created_at; job name / id / conclusion; step name /
 conclusion). Six nights are the 2026-09-16..21 window as the API returned it;
-the two oldest (ids 350000000xx) are synthetic, covering shapes that window
-did not contain: a verdict job that never concluded (NO VERDICT) and a
-pre-sharding night scored from its campaign step.
+their `logs-<jobid>.txt` are the REAL per-job logs of their `Night verdict`
+jobs (fetched 2026-09-22 with `gh api repos/almide/almide/actions/jobs/<jobid>/logs`),
+cut down to the `fuzz-night:` record line the readers score plus four lines of
+context before it and one after — the rest of a 250-400 line log is runner
+provisioning and cleanup the tool never reads. All six lines are pre-#2390
+(no `missing=` / `delivered_pct=` / `budget=` fields), so the readers' derive-
+from-minutes path is what this window exercises; 2026-09-19 delivered 25.7 of
+40 minutes (64%, below the 75% line) and 2026-09-20 35.9 (89%, above it).
+
+The two oldest nights (ids 350000000xx) are synthetic, covering shapes that
+window did not contain: 35000000001 is a verdict job that never concluded
+(NO VERDICT) — its log (`logs-100000000001.txt`) is a forged excerpt of a
+cancelled job that was reclaimed before `Score the night` wrote its record
+line, so the coverage column reads `?`; 35000000000 is a pre-sharding night
+with no verdict job at all, scored from its campaign step and never asking
+for a log.
 """
 import json
 import os
@@ -58,12 +75,18 @@ def main(argv):
         doc["workflow_runs"] = doc["workflow_runs"][:n]
         text = json.dumps(doc)
     else:
-        m = re.fullmatch(r"repos/[^/]+/[^/]+/actions/runs/(\d+)/jobs", path)
-        if not m:
+        m = re.fullmatch(r"repos/[^/]+/[^/]+/actions/runs/(\d+)/jobs(\?per_page=100)?", path)
+        lm = re.fullmatch(r"repos/[^/]+/[^/]+/actions/jobs/(\d+)/logs", path)
+        if m:
+            fp = os.path.join(HERE, f"jobs-{m.group(1)}.json")
+            if not os.path.isfile(fp):
+                refuse(f"no recording for run {m.group(1)}")
+        elif lm:
+            fp = os.path.join(HERE, f"logs-{lm.group(1)}.txt")
+            if not os.path.isfile(fp):
+                refuse(f"no log recording for job {lm.group(1)}")
+        else:
             refuse(f"no recording for {path!r}")
-        fp = os.path.join(HERE, f"jobs-{m.group(1)}.json")
-        if not os.path.isfile(fp):
-            refuse(f"no recording for run {m.group(1)}")
         text = open(fp, encoding="utf-8").read()
 
     if jq_expr is None:

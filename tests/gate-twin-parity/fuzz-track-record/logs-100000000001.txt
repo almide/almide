@@ -1,0 +1,6 @@
+2026-09-15T08:10:02.1000000Z ##[group]Run bash scripts/fuzz-night-verdict.sh shards
+2026-09-15T08:10:02.1000100Z bash scripts/fuzz-night-verdict.sh shards
+2026-09-15T08:10:02.1000200Z shell: /usr/bin/bash -e {0}
+2026-09-15T08:10:02.1000300Z ##[endgroup]
+2026-09-15T08:10:02.4000000Z ##[error]The operation was canceled.
+2026-09-15T08:10:02.4100000Z Post job cleanup.
