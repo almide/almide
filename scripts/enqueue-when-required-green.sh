@@ -12,9 +12,11 @@
 # This script asks for the required set, compares the PR's rollup against
 # exactly that set, and enqueues through the GraphQL mutation when every
 # required context is SUCCESS (or SKIPPED, which the queue counts as passing).
-# An auto-merge armed with `gh pr merge --auto` is NOT a queue entry — the
-# queue is REBASE and the arm normalises to MERGE — so this is the reliable
-# spelling.
+# An auto-merge armed with `gh pr merge --auto` also enters the queue by
+# itself once the LAST check goes green (its method reads MERGE against a
+# REBASE queue — GitHub normalises the field, and that is harmless; measured
+# on #2404, 2026-09-21). What the arm waits for is every check, this waits
+# for the required ones; "already in the queue" is therefore a success here.
 #
 # Usage: scripts/enqueue-when-required-green.sh <pr-number> [--wait]
 #   --wait   poll every 60 s until the required set is green (or one fails),
@@ -51,9 +53,14 @@ print("pending=%d" % pend); print("failed=%s" % ", ".join(bad)); print("missing=
 }
 
 enqueue() {
-  local id; id="$(gh pr view "$PR" --repo "$REPO" --json id --jq .id)"
-  gh api graphql -f query="mutation{enqueuePullRequest(input:{pullRequestId:\"$id\"}){clientMutationId}}" >/dev/null
-  echo "enqueued #$PR — required set green ($(echo "$required" | wc -l | tr -d ' ') contexts); the mutation sweep judges develop after landing"
+  local id out; id="$(gh pr view "$PR" --repo "$REPO" --json id --jq .id)"
+  if out="$(gh api graphql -f query="mutation{enqueuePullRequest(input:{pullRequestId:\"$id\"}){clientMutationId}}" 2>&1)"; then
+    echo "enqueued #$PR — required set green ($(echo "$required" | wc -l | tr -d ' ') contexts); the mutation sweep judges develop after landing"
+  elif echo "$out" | grep -qi "already in the queue"; then
+    echo "#$PR is already in the queue (an armed auto-merge entered it) — nothing to do"
+  else
+    echo "::error::enqueue of #$PR failed: $out"; return 1
+  fi
 }
 
 while :; do

@@ -23,10 +23,12 @@
   27 min for the slowest required shard, measured 2026-09-21. Use
   `scripts/enqueue-when-required-green.sh <pr> [--wait]`: it reads the
   required set from the API, compares the PR's rollup against exactly that,
-  and enqueues through the GraphQL mutation (an auto-merge armed with
-  `gh pr merge --auto` is not a queue entry — the queue is REBASE and the arm
-  normalises to MERGE). A mutation-gate red on a PR is still read, after the
-  fact, as a develop sweep finding.
+  and enqueues through the GraphQL mutation. An auto-merge armed with
+  `gh pr merge --auto` also enters the queue by itself, but only once EVERY
+  check is green (its method reads MERGE against the REBASE queue; GitHub
+  normalises that field and it is harmless) — the script is the earlier
+  moment. A mutation-gate red on a PR is still read, after the fact, as a
+  develop sweep finding.
 
 ## Git Commit Rules
 
