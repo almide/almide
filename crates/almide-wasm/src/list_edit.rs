@@ -407,6 +407,17 @@ impl Emitter<'_> {
         self.load_ty_slot(et, 0);
         self.f.instructions().local_set(params[0]);
         self.lower(body, Some(et))?;
+        // The result goes into this arm's COPY, so a BORROWED one (a body that
+        // just reads a captured binding, `(t) => s`) needs its own credit: the
+        // slot and the binding would otherwise both believe they own it, and
+        // whichever released first freed it under the other — a `filter` that
+        // drops the element read the binding back as freed memory (#2398).
+        // A fresh body already carries its credit; over-inc would be a leak,
+        // never a dangle. The sibling callback-then-store lowerings take the
+        // same guard (`list_flat.rs`, `collections_set.rs`, `collections_hof.rs`).
+        if self.rc_droppable(et) && !self.rc_owned_result(body) {
+            self.rc_inc_top();
+        }
         let hv = self.hold_val(et)?;
         self.f.instructions().local_set(hv);
         self.f.instructions().local_get(ha).local_get(hv);
