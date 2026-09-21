@@ -28,7 +28,11 @@ cp "$LEDGER" "$pristine"
 
 # The subject: the first contract in the ledger, its statement line and its
 # title line (the first of each after the id, inside the same [[contract]]).
-id=$(grep -oE '^\s*id\s*=\s*"C-[0-9]+"' "$pristine" | head -1 | grep -oE 'C-[0-9]+')
+# `sed -n 1p`, not `head -1`: head closes the pipe after one line and the
+# upstream grep then dies of EPIPE ("write error: Broken pipe", exit 2), which
+# `pipefail` turns into a failure — on GitHub's runners, where SIGPIPE is
+# ignored, that is a red job, not a silent 141 (2026-09-21, #2424).
+id=$(grep -oE '^\s*id\s*=\s*"C-[0-9]+"' "$pristine" | grep -oE 'C-[0-9]+' | sed -n '1p')
 [ -n "$id" ] || { echo "FAIL: no contract id in $LEDGER — the controls have no subject" >&2; exit 1; }
 line_of() { # key -> line number of the first `key =` after the subject's id line
   awk -v id="$id" -v key="$1" '
@@ -58,7 +62,7 @@ awk -v id="$id" '
 grep -qE "^\s*id\s*=\s*\"$id\"" "$tmp/judge-without-id.toml" \
   && { echo "FAIL: the id-removal forge did not remove $id" >&2; exit 1; }
 printf '%s  forged in-flight allowance (negative control)\n' "$id" >"$tmp/allow-subject.txt"
-other=$(grep -oE '^\s*id\s*=\s*"C-[0-9]+"' "$pristine" | grep -oE 'C-[0-9]+' | grep -vxF "$id" | head -1)
+other=$(grep -oE '^\s*id\s*=\s*"C-[0-9]+"' "$pristine" | grep -oE 'C-[0-9]+' | grep -vxF "$id" | sed -n '1p')
 printf '%s  forged stale allowance (negative control)\n' "$other" >"$tmp/allow-other.txt"
 
 run() { # judge ours allowance -> stdout+stderr, exit code in $rc
