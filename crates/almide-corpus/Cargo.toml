@@ -11,3 +11,6 @@ tempfile = "3"
 
 [lints]
 workspace = true
+
+[dependencies]
+almide-base = { path = "../almide-base" }
