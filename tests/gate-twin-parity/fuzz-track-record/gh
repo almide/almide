@@ -1,0 +1,79 @@
+#!/usr/bin/env python3
+"""A `gh` that answers from RECORDED responses (#2163).
+
+`scripts/fuzz-track-record.sh` and its Almide twin both reach the GitHub
+Actions API through `gh api`. A comparison that went to the network would be
+red whenever the network is, green whenever it is not, and different on every
+run as nights are added — so the twin parity test puts this directory first on
+PATH and both sides read the same recorded JSON instead.
+
+Only the two request shapes the tool makes are served:
+
+  gh api repos/<repo>/actions/workflows/fuzz-nightly.yml/runs?event=schedule&per_page=N [--jq EXPR]
+      -> runs.json, truncated to the first N runs (newest first, as the API orders them)
+  gh api repos/<repo>/actions/runs/<id>/jobs
+      -> jobs-<id>.json
+
+`--jq` is handed to the real `jq`, exactly as `gh` does, so the bash side's
+embedded jq program is exercised rather than re-implemented here. Anything
+else is refused with a non-zero exit, so a tool that grew a new request would
+fail the comparison loudly instead of reading an empty answer.
+
+The recorded files are trimmed to the fields the tool reads (run id /
+conclusion / status / created_at; job name / conclusion; step name /
+conclusion). Six nights are the 2026-09-16..21 window as the API returned it;
+the two oldest (ids 350000000xx) are synthetic, covering shapes that window
+did not contain: a verdict job that never concluded (NO VERDICT) and a
+pre-sharding night scored from its campaign step.
+"""
+import json
+import os
+import re
+import subprocess
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def refuse(msg):
+    print(f"gh (recorded): {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+def main(argv):
+    if len(argv) < 2 or argv[0] != "api":
+        refuse(f"unsupported invocation {argv!r}")
+    path = argv[1]
+    jq_expr = None
+    rest = argv[2:]
+    if rest[:1] == ["--jq"] and len(rest) == 2:
+        jq_expr = rest[1]
+    elif rest:
+        refuse(f"unsupported arguments {rest!r}")
+
+    m = re.fullmatch(r"repos/[^/]+/[^/]+/actions/workflows/fuzz-nightly\.yml/runs\?event=schedule&per_page=(\d+)", path)
+    if m:
+        n = int(m.group(1))
+        doc = json.load(open(os.path.join(HERE, "runs.json"), encoding="utf-8"))
+        doc["workflow_runs"] = doc["workflow_runs"][:n]
+        text = json.dumps(doc)
+    else:
+        m = re.fullmatch(r"repos/[^/]+/[^/]+/actions/runs/(\d+)/jobs", path)
+        if not m:
+            refuse(f"no recording for {path!r}")
+        fp = os.path.join(HERE, f"jobs-{m.group(1)}.json")
+        if not os.path.isfile(fp):
+            refuse(f"no recording for run {m.group(1)}")
+        text = open(fp, encoding="utf-8").read()
+
+    if jq_expr is None:
+        sys.stdout.write(text)
+        return
+    r = subprocess.run(["jq", "-r", jq_expr], input=text, capture_output=True, text=True)
+    sys.stdout.write(r.stdout)
+    sys.stderr.write(r.stderr)
+    sys.exit(r.returncode)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])
