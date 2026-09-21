@@ -7,7 +7,7 @@
 
 ## Active
 
-93 items
+94 items
 
 | Item | Description |
 |------|-------------|
@@ -20,6 +20,7 @@
 | [Camp-4, generalised: make heap-result `match` total instead of recognised](active/camp4-general-heap-match.md) | Make heap-result match total rather than recognised, in lowering only |
 | [Certificate Format v1 — design](active/certificate-format-v1.md) | The per-function ownership-certificate format — the i/a/d/m alphabet, call/branch/closure extensions, and which bricks have shipped |
 | [Certification-Grade Hardening — 認証級への硬化](active/certification-grade.md) | Certification-grade hardening — adopt the mechanisms of DO-178C / ISO 26262 / IEC 61508 (spec, traceability, coverage, tool qualification, dossier) for the machine-written-software trust layer |
+| [CI critical path: measured baseline, peer survey and the ranked plan (2026-09-21)](active/ci-critical-path.md) |  |
 | [CI Warnings Cleanup](active/ci-warnings-cleanup.md) | Standing ledger of compiler warnings CI tolerates, and the plan to drive each class to zero |
 | [Closure Architecture v2](active/closure-architecture-v2.md) | Closure Architecture v2 — one identity, one capture-set, lifting is lowering; separates closure REPRESENTATION from the inlining OPTIMIZATION |
 | [Closure cross-target completeness](active/closure-cross-target-completeness.md) | Closing the closure feature gap between the native and wasm legs, sweep by sweep |
