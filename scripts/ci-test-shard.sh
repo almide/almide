@@ -44,27 +44,27 @@ WEIGHTS="scripts/ci-test-weights.txt"
 # its own runner costs what it costs alone; the remaining ~6.5 ks of gravel
 # packs across the four shards at ~1.6 ks each. `--list-solo-archive` prints
 # these rows so the coverage gate can prove shards ∪ solos == everything.
-# Rows are `pkg<TAB>name`; the ledger legs below are the per-test split.
+# Rows are `pkg<TAB>name`; each is one solo leg (the ledger binary's two
+# gates share one sweep in one test since #2446, so it is one leg too).
 SOLO_TARGETS="almide	wasm_runtime_cross_target
 almide	wasm_runtime_interp_oracle
 almide	wasm_runtime_opt_parity
 almide	wasm_runtime_interp_ledger
 almide-spine	run_parity"
 
-# leg name -> nextest filterset. The two ledger legs partition ONE binary by
-# test name; the coverage gate asserts their union is the binary's test list.
+# leg name -> nextest filterset. The coverage gate asserts the ledger leg's
+# filterset selects the binary's whole test list.
 solo_filter() {
   case "$1" in
     wasm_runtime_cross_target) echo 'binary_id(=almide::wasm_runtime_cross_target)' ;;
     wasm_runtime_interp_oracle) echo 'binary_id(=almide::wasm_runtime_interp_oracle)' ;;
     wasm_runtime_opt_parity)   echo 'binary_id(=almide::wasm_runtime_opt_parity)' ;;
     run_parity)                echo 'binary_id(=almide-spine::run_parity)' ;;
-    interp_abstain_ledger)     echo 'binary_id(=almide::wasm_runtime_interp_ledger) & test(=interp_abstain_ledger)' ;;
-    interp_ledger_rest)        echo 'binary_id(=almide::wasm_runtime_interp_ledger) & !test(=interp_abstain_ledger)' ;;
+    interp_ledger)             echo 'binary_id(=almide::wasm_runtime_interp_ledger)' ;;
     *) echo "unknown solo leg: $1" >&2; return 2 ;;
   esac
 }
-SOLO_LEGS="wasm_runtime_cross_target wasm_runtime_interp_oracle wasm_runtime_opt_parity run_parity interp_abstain_ledger interp_ledger_rest"
+SOLO_LEGS="wasm_runtime_cross_target wasm_runtime_interp_oracle wasm_runtime_opt_parity run_parity interp_ledger"
 export SOLO_TARGETS
 
 enumerate() {

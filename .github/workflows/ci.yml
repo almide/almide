@@ -274,7 +274,7 @@ jobs:
     # twice. Cheap (no tests run, just enumeration) and it gates the same commit
     # the shards run on.
     name: Test shards cover every target
-    # `test-rust-solo` too (#2381): the six solo legs are NOT in
+    # `test-rust-solo` too (#2381): the five solo legs are NOT in
     # develop's required-check list (only this job and the four shard
     # names are), so this job — which is required — waits for them and
     # refuses to go green unless every solo leg passed. Adding the leg
@@ -337,14 +337,14 @@ jobs:
             exit 1
           fi
           echo "shard coverage OK: $(wc -l < /tmp/all.txt | tr -d ' ') target(s), each in exactly one shard or solo job"
-      - name: The two interp-ledger legs partition their binary (no test lost between them)
-        # The ledger binary is split by TEST between two solo jobs; the
-        # filtersets must be complementary over the binary's test list.
+      - name: The interp-ledger leg selects its whole binary (no test lost)
+        # One leg since #2446 (the two ledger gates share one sweep in one
+        # test); the filterset must still equal the binary's test list, so a
+        # test added to the binary cannot fall outside the leg.
         run: |
           set -euo pipefail
           A=/tmp/almide-archive/almide-tests.tar.zst
-          bash scripts/ci-test-shard.sh --list-solo-tests-archive interp_abstain_ledger "$A" > /tmp/leg_a.txt
-          bash scripts/ci-test-shard.sh --list-solo-tests-archive interp_ledger_rest "$A" > /tmp/leg_b.txt
+          bash scripts/ci-test-shard.sh --list-solo-tests-archive interp_ledger "$A" > /tmp/leg_a.txt
           cargo nextest list --archive-file "$A" --workspace-remap . --message-format json -E 'binary_id(=almide::wasm_runtime_interp_ledger)' \
             | python3 -c '
           import json, sys
@@ -354,12 +354,12 @@ jobs:
                   if tc.get("filter-match", {}).get("status") == "matches":
                       print("%s\t%s" % (bid, t))
           ' > /tmp/leg_all.txt
-          [ -s /tmp/leg_a.txt ] && [ -s /tmp/leg_b.txt ] || { echo "LEDGER GATE FAIL: an interp-ledger leg selects no test" >&2; exit 1; }
-          if ! diff -u <(sort /tmp/leg_all.txt) <(sort /tmp/leg_a.txt /tmp/leg_b.txt); then
-            echo "LEDGER GATE FAIL: the two interp-ledger legs do not partition the binary's tests" >&2
+          [ -s /tmp/leg_a.txt ] || { echo "LEDGER GATE FAIL: the interp-ledger leg selects no test" >&2; exit 1; }
+          if ! diff -u <(sort /tmp/leg_all.txt) <(sort /tmp/leg_a.txt); then
+            echo "LEDGER GATE FAIL: the interp-ledger leg does not select the binary's whole test list" >&2
             exit 1
           fi
-          echo "ledger legs OK: $(wc -l < /tmp/leg_a.txt | tr -d ' ') + $(wc -l < /tmp/leg_b.txt | tr -d ' ') tests = $(wc -l < /tmp/leg_all.txt | tr -d ' ')"
+          echo "ledger leg OK: $(wc -l < /tmp/leg_a.txt | tr -d ' ') tests = $(wc -l < /tmp/leg_all.txt | tr -d ' ')"
       - name: Balance report (informational — imbalance costs time, not coverage)
         run: |
           for i in 0 1 2 3; do
@@ -501,15 +501,16 @@ jobs:
     # 1223 → 2040, cross_target 1377 → 1981, run_parity 1310 → 1907), and
     # the shards sat at 32–44 min for 4.2–5.0 ks sums. The runner was the
     # floor, so each giant gets its own. Same archive, same tools, same
-    # ALMIDE_BIN as the shards; the interp ledger's two gates (backend-free,
-    # ~27 min each) are split by TEST into two legs. The coverage gate
-    # (`Test shards cover every target`) asserts shards ∪ solos == every
-    # target and that the two ledger legs partition their binary.
+    # ALMIDE_BIN as the shards; the interp ledger's two gates share ONE
+    # corpus sweep since #2446 (one test, ~1 min on a thread pool), so the
+    # ledger binary is one leg. The coverage gate (`Test shards cover every
+    # target`) asserts shards ∪ solos == every target and that the ledger
+    # leg selects the whole binary.
     #
     # NOT in develop's required-check list yet (the four shard names and
     # the coverage gate are). The coverage gate `needs` this job and fails
     # unless every leg passed, so a red giant still blocks the merge through
-    # a required name; adding `Test Rust (solo <leg>)` × 6 to branch
+    # a required name; adding `Test Rust (solo <leg>)` × 5 to branch
     # protection makes that direct and retires the proxy step.
     name: Test Rust (solo ${{ matrix.leg }})
     needs: [changes, build]
@@ -525,8 +526,7 @@ jobs:
           - wasm_runtime_interp_oracle
           - wasm_runtime_opt_parity
           - run_parity
-          - interp_abstain_ledger
-          - interp_ledger_rest
+          - interp_ledger
     steps:
       - uses: actions/checkout@v7
         if: env.DOCS_ONLY != 'true'
