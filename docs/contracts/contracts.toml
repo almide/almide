@@ -2851,6 +2851,7 @@ evidence  = [
   { path = "spec/wasm_cross/matrix_select_rows_q1_partial_block.almd", class = "fixture" },
   { path = "spec/wasm_cross/bytes_negative_offset_family.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_domain_edges.almd", class = "fixture" },
+  { path = "spec/wasm_cross/matrix_q1_full_loader_cols_beyond_buffer.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-230"
