@@ -1,0 +1,37 @@
+// fold_seed_source_test — the fold seed reads the list being folded (#2377).
+//
+// `list.fold(xs, <seed that consumes xs>, f)` borrowed the source for the
+// iteration and MOVED it inside the seed, a native E0505 under the "this is an
+// Almide bug" banner. PR #2376 fixed the chain-source borrow; these are the
+// same shapes as its Rust regression tests, kept in the spec corpus so the
+// source-level census gate (`almide-gates fold-seed-source`, #2380) has sites
+// to hold its floor on. Removing a test here lowers the census below the
+// floor in proofs/fold-seed-source-baseline.txt and fails that gate.
+test "the seed sorts the source before the fold reads it" {
+  let xs: List[Bool] = [true]
+  let r: Bool = list.fold(xs, list.is_empty(list.sort_by(xs, ((y) => 1))), ((a, b) => a))
+  assert_eq(r, false)
+}
+
+test "the seed scans the source — the shape the fuzzer produced" {
+  let xs: List[Bool] = []
+  let v: String? = none
+  let r: String? = list.fold(
+    xs,
+    (if list.is_empty(list.scan(xs, 1, ((y, s) => 1))) then v else some("")),
+    ((x, a) => v),
+  )
+  assert_eq(r, none)
+}
+
+test "the seed is the source variable itself" {
+  let v: List[Int] = [1, 2]
+  let r: List[Int] = list.fold(v, v, ((acc, y) => acc + [y]))
+  assert_eq(r, [1, 2, 1, 2])
+}
+
+test "the pipe form: the receiver reappears in the seed" {
+  let ys: List[Int] = [3, 1, 2]
+  let r: Int = ys |> list.fold(list.len(ys), ((acc, y) => acc + y))
+  assert_eq(r, 9)
+}
