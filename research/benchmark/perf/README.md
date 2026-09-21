@@ -90,9 +90,13 @@ nothing is published that `bench.py` did not produce.
   binarytrees play repeated on native. Scaling is real (1w 8.5 s → 2w
   4.6 s → 12w 0.95 s) and RSS holds at 2 MB. Honest caveats: the reference
   is deliberately single-threaded (a hand-parallelized Rust would win
-  again); the per-core gap (~3.3×) is per-line allocation vocabulary
-  (split_once ×2 + strip_prefix + a per-line upsert closure) plus the
-  linear-scan `AlmideMap`; and a Map captured by a closure
+  again); the per-core gap (~3.3×) was attributed to per-line allocation
+  vocabulary (split_once ×2 + strip_prefix + a per-line upsert closure) plus
+  `AlmideMap` lookup, **which was a linear scan when this was measured and is
+  not one now** — since #2150 a map past `ALMIDE_MAP_INDEX_THRESHOLD` = 16 with
+  a hashable key carries a slot-table index (`runtime/rs/src/map.rs:12`-`31`),
+  and this row has NOT been re-measured since, so the lookup half of that
+  attribution is unverified; and a Map captured by a closure
   (`for_each_line` + `var stats`) still clones on every READ through the
   `SharedMut` cell — aggregation belongs on `fold_lines`, which is what the
   CHEATSHEET teaches. Wall-clock ratios here are reported, not gated, while
