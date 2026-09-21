@@ -36,6 +36,25 @@ if ! git diff --quiet -- $GOLDENS; then
   exit 2
 fi
 
+# #2405: the committed header is read before anything is regenerated. The SHA
+# in it stays informational (a rebase changes it), but the version and build
+# kind must name the CLI built from this tree — a manifest recorded by a
+# released binary or from another version's tree is refused here, exactly as
+# every parity test refuses it (almide_corpus::verify_oracle_header).
+. scripts/lib/oracle-header.sh
+for m in crates/almide-syntax/tests/golden/spec-ast-manifest.txt \
+         crates/almide-spine/tests/golden/spec-check-manifest.txt \
+         crates/almide-spine/tests/golden/spec-run-manifest.txt; do
+  verify_committed_header "$m" || exit 1
+done
+
+# The generators' own stale-tree refusal runs in `gate` mode here: this gate
+# vouches for the binary (CI's artifact is built from this very commit, and
+# its checkout is detached, so "behind upstream" has no meaning); the
+# untracked-fixture check stays on. A developer wanting the full check runs
+# the generators directly, or sets ALMIDE_MANIFEST_TREE_CHECK=strict.
+export ALMIDE_MANIFEST_TREE_CHECK="${ALMIDE_MANIFEST_TREE_CHECK:-gate}"
+
 rc=0
 for gen in gen-ast-manifest gen-check-manifest gen-run-manifest; do
   if ! bash "scripts/$gen.sh"; then
