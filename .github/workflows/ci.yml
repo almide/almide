@@ -228,7 +228,7 @@ jobs:
       # and `--extract-to` recreates target/ci-test/*.
       - name: Install cargo-nextest
         run: |
-          curl -LsSf https://get.nexte.st/latest/linux -o /tmp/nextest.tar.gz
+          curl -LsSf https://get.nexte.st/0.9.145/linux -o /tmp/nextest.tar.gz
           tar xzf /tmp/nextest.tar.gz -C /usr/local/bin
           cargo nextest --version
       - name: Archive the workspace test binaries
@@ -296,7 +296,7 @@ jobs:
       # job's old enumerate compiled the workspace.
       - name: Install cargo-nextest
         run: |
-          curl -LsSf https://get.nexte.st/latest/linux -o /tmp/nextest.tar.gz
+          curl -LsSf https://get.nexte.st/0.9.145/linux -o /tmp/nextest.tar.gz
           sudo tar xzf /tmp/nextest.tar.gz -C /usr/local/bin
           cargo nextest --version
       - uses: actions/download-artifact@v8
@@ -412,62 +412,13 @@ jobs:
         if: env.DOCS_ONLY != 'true'
         run: chmod +x /tmp/almide-bin/almide
 
-      - uses: dtolnay/rust-toolchain@stable
+      # #2381 item 7: the toolchain, pinned nextest, archive download,
+      # wasmtime and binaryen come from one composite — the shard and solo
+      # jobs carried the same block twice.
+      - uses: ./.github/actions/setup-test-leg
         if: env.DOCS_ONLY != 'true'
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
-
-      # #1732: no compile here anymore — the build job ships the
-      # ci-test-profile test binaries (dev minus debuginfo) as a nextest
-      # archive, and this job replays it. The big registry/target cache went with the compile;
-      # only the tool tarball caches below remain.
-      - name: Install cargo-nextest
-        if: env.DOCS_ONLY != 'true'
-        run: |
-          curl -LsSf https://get.nexte.st/latest/linux -o /tmp/nextest.tar.gz
-          tar xzf /tmp/nextest.tar.gz -C /usr/local/bin
-          cargo nextest --version
-      - uses: actions/download-artifact@v8
-        if: env.DOCS_ONLY != 'true'
-        with:
-          name: almide-tests-archive
-          path: /tmp/almide-archive
-
-      - name: Cache wasmtime tarball
-        if: env.DOCS_ONLY != 'true'
-        uses: actions/cache@v6
-        with:
-          path: wasmtime-v47.0.3-x86_64-linux.tar.xz
-          key: wasmtime-v47.0.3-x86_64-linux
-      - name: Install wasmtime
-        if: env.DOCS_ONLY != 'true'
-        # Required by the cross-target gate (wasm_cross_target_spec) and the
-        # wasm_runtime_* capture tests — without it they skip, so the
-        # cross-target ratchet would not actually enforce here.
-        run: |
-          # Pinned + cached + retried. On a cache hit the tarball is already here,
-          # so the per-IP-rate-limited release download runs at most once per key
-          # (the uncached variant burned all 5 retries on a 429 storm, 2026-07-11).
-          # `-f` turns a 403 rate-limit body into a retry instead of a 92-byte
-          # "not a tar archive". Bump VERSION and the cache key together.
-          VERSION=v47.0.3
-          TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
-          if [ ! -s "$TARBALL" ]; then
-            for i in 1 2 3 4 5; do
-              curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
-              echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
-            done
-          fi
-          tar -xf "$TARBALL"
-          sudo mv wasmtime-*/wasmtime /usr/local/bin/
-          wasmtime --version
-
-      - name: Install wasm-opt (binaryen)
-        if: env.DOCS_ONLY != 'true'
-        # Required by the wasm-opt parity gate (wasm_runtime_opt_parity::wasm_opt_parity_spec) — without
-        # it the test silently early-returns as a pass, so `--wasm-opt`'s
-        # differential-equivalence claim would never actually be checked here.
-        run: sudo apt-get update && sudo apt-get install -y binaryen && wasm-opt --version
 
       - name: Cargo tests
         if: env.DOCS_ONLY != 'true'
@@ -541,47 +492,13 @@ jobs:
         if: env.DOCS_ONLY != 'true'
         run: chmod +x /tmp/almide-bin/almide
 
-      - uses: dtolnay/rust-toolchain@stable
+      # #2381 item 7: the toolchain, pinned nextest, archive download,
+      # wasmtime and binaryen come from one composite — the shard and solo
+      # jobs carried the same block twice.
+      - uses: ./.github/actions/setup-test-leg
         if: env.DOCS_ONLY != 'true'
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
-
-      - name: Install cargo-nextest
-        if: env.DOCS_ONLY != 'true'
-        run: |
-          curl -LsSf https://get.nexte.st/latest/linux -o /tmp/nextest.tar.gz
-          tar xzf /tmp/nextest.tar.gz -C /usr/local/bin
-          cargo nextest --version
-      - uses: actions/download-artifact@v8
-        if: env.DOCS_ONLY != 'true'
-        with:
-          name: almide-tests-archive
-          path: /tmp/almide-archive
-
-      - name: Cache wasmtime tarball
-        if: env.DOCS_ONLY != 'true'
-        uses: actions/cache@v6
-        with:
-          path: wasmtime-v47.0.3-x86_64-linux.tar.xz
-          key: wasmtime-v47.0.3-x86_64-linux
-      - name: Install wasmtime
-        if: env.DOCS_ONLY != 'true'
-        run: |
-          VERSION=v47.0.3
-          TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
-          if [ ! -s "$TARBALL" ]; then
-            for i in 1 2 3 4 5; do
-              curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
-              echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
-            done
-          fi
-          tar -xf "$TARBALL"
-          sudo mv wasmtime-*/wasmtime /usr/local/bin/
-          wasmtime --version
-
-      - name: Install wasm-opt (binaryen)
-        if: env.DOCS_ONLY != 'true'
-        run: sudo apt-get update && sudo apt-get install -y binaryen && wasm-opt --version
 
       - name: Cargo test (solo ${{ matrix.leg }})
         if: env.DOCS_ONLY != 'true'
