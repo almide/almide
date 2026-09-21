@@ -47,6 +47,12 @@ Usage:
     python3 tools/domain_edge_matrix.py                 # measure, print the matrix
     python3 tools/domain_edge_matrix.py --json out.json # machine-readable
     python3 tools/domain_edge_matrix.py --only bytes    # one module
+    python3 tools/domain_edge_matrix.py --only bytes --edge i32_max  # one edge (local loop)
+
+The wasm leg runs under a DECLARED linear-memory budget (WASM_BUDGET_BYTES below,
+#2387) on the wasmtime CLI, never on the embedded host whose ceiling is the
+machine's free memory. The budget is recorded in the JSON and checked by
+tools/domain_edge_ledger.py before any reading can reach the ledger.
 """
 
 import argparse
@@ -389,18 +395,85 @@ def probe(almide, src_path):
     return f"probe does not type-check: {first or 'exit ' + str(p.returncode)}"
 
 
-def run_leg(almide, src_path, wasm):
-    cmd = [almide, "run", str(src_path)] + (["--target", "wasm"] if wasm else [])
-    env = dict(os.environ, PATH="/opt/homebrew/bin:" + os.environ.get("PATH", ""))
+# ── The wasm leg's DECLARED linear-memory budget (#2387) ─────────────────────
+#
+# `almide run --target wasm` executes on the embedded host with
+# `StoreLimits::default()` (crates/almide-wasm-run/src/host.rs:663): its ceiling
+# is whatever the machine has free at that instant. Plain allocations carry NO
+# chosen cap by ratification (scripts/check-alloc-ceilings.sh, A 2026-08-17), so
+# for a cell that asks the wasm leg for 2 GiB — every 1-byte-per-element fn at
+# `i32_max` — the SAME binary answered on a quiet machine and took the C-197
+# abort under load, and the classifier read those as AGREE and DIVERGE of one
+# cell minutes apart. A verdict that tracks free memory is not a measurement of
+# the compiler, and a shrink-only ledger freezes whichever reading landed first.
+#
+# So the wasm leg is run under a FIXED budget, structurally: the module is built
+# once and executed on the wasmtime CLI with `-W max-memory-size=<budget>`.
+# Growth past the budget fails, which the emitted allocator turns into the
+# DEFINED "Error: out of memory" + exit 1 (C-197) — the same line the leg takes
+# past the 4 GiB wasm32 bound, now at a boundary that does not depend on RAM.
+# Any request >= the budget aborts on every machine; the budget is recorded in
+# the measurement (`wasm_budget_bytes`, run-level and per cell as `pinned`) and
+# declared in the ledger header, and tools/domain_edge_ledger.py refuses a
+# measurement that is not pinned to the ledger's declared budget. A row then
+# means "diverges at the declared budget", not "diverged on whatever machine
+# last ran this".
+#
+# 1 GiB: far above anything a 5-element receiver needs, below every edge that
+# sizes an allocation (`i32_max` = 2 GiB for a 1-byte element). The native leg
+# is NOT capped: RLIMIT_AS is unenforced on Darwin (setrlimit -> EINVAL, measured
+# 2026-09-21), so a native cap would split the local and CI verdicts; its bound
+# stays host availability at 2 GiB exactly as it already is at 4 GiB for every
+# declared `u32_max` row (#2387 item 2, open). The direction that flipped in
+# every recorded reading was the wasm leg, and that one is now pinned.
+WASM_BUDGET_BYTES = 1 << 30
+
+# The C-197 line, byte-exact: the ONLY abort a budget-pinned leg may take past
+# the budget. Anything else past it is a finding.
+OOM_LINE = "Error: out of memory"
+
+
+def _tool_env():
+    return dict(os.environ, PATH="/opt/homebrew/bin:" + os.environ.get("PATH", ""))
+
+
+def _run(cmd, timeout=45):
     try:
         # `errors="replace"`: a byte-level stdlib fn can print raw non-UTF-8 bytes,
         # and a decode crash in the harness would be indistinguishable from "no
         # divergence here" — the instrument must never lose a cell to its own I/O.
         p = subprocess.run(cmd, capture_output=True, text=True, errors="replace",
-                           timeout=45, env=env)
+                           timeout=timeout, env=_tool_env())
         return p.returncode, p.stdout, p.stderr
     except subprocess.TimeoutExpired:
         return "timeout", "", ""
+
+
+def run_leg(almide, src_path, wasm, wasm_budget=WASM_BUDGET_BYTES):
+    """One leg's (returncode, stdout, stderr).
+
+    Native: `almide run`. Wasm: `almide build --target wasm` (a wall — the
+    renderer's honest refusal — surfaces here with its mark on stderr and a
+    non-zero code, exactly as `almide run --target wasm` reported it), then the
+    module on the wasmtime CLI under the declared budget.
+    """
+    src_path = Path(src_path)
+    if not wasm:
+        return _run([almide, "run", str(src_path)])
+    module = src_path.with_suffix(".wasm")
+    rc, out, err = _run([almide, "build", str(src_path), "--target", "wasm", "-o", str(module)])
+    if rc != 0:
+        return rc, out, err
+    return _run(["wasmtime", "run", "-W", f"max-memory-size={wasm_budget}", str(module)])
+
+
+def wasmtime_available():
+    """The pinned leg needs the wasmtime CLI; without it the instrument must
+    refuse to measure rather than fall back to an unpinned leg."""
+    try:
+        return _run(["wasmtime", "--version"], timeout=10)[0] == 0
+    except (OSError, FileNotFoundError):
+        return False
 
 
 # The v1 renderer DECLINES a shape outside its subset with this line, on purpose.
@@ -455,7 +528,24 @@ def main():
     # test forges a signature into.
     ap.add_argument("--skips-only", action="store_true")
     ap.add_argument("--stdlib", help="walk this directory instead of stdlib/ (tests)")
+    ap.add_argument("--edge", action="append", default=None, metavar="NAME",
+                    help="restrict to these edge names (repeatable) — a fast local loop; "
+                         "the ledger gate never scopes by edge")
     args = ap.parse_args()
+
+    # An edge run measures the wasm leg on the wasmtime CLI under the declared
+    # budget; without the CLI the only alternative is an unpinned leg that
+    # answers with the machine's free memory (#2387), so refuse instead. A
+    # skips-only run executes nothing and needs no host.
+    if not args.skips_only and not wasmtime_available():
+        print("domain-edges: the wasmtime CLI is not on PATH (/opt/homebrew/bin is "
+              "prepended) — the wasm leg is measured under a declared budget on it, "
+              "and an unpinned leg would answer with the machine's free memory (#2387). "
+              "Refusing to measure.", file=sys.stderr)
+        return 2
+    if not args.skips_only:
+        print(f"domain-edges: wasm leg pinned at wasm_budget_bytes={WASM_BUDGET_BYTES} "
+              f"(wasmtime CLI, -W max-memory-size); native leg uncapped", flush=True)
 
     sigs = parse_stdlib(args.only, Path(args.stdlib) if args.stdlib else None)
     cells, skipped, retried_away, exercised, helpers = [], [], [], [], []
@@ -487,6 +577,8 @@ def main():
             if args.skips_only:
                 continue
             edges = FIXED_EDGES + derived_edges(recv_len)
+            if args.edge:
+                edges = [e for e in edges if e[0] in args.edge]
             for ename, value in edges:
                 src, _ = build_program(sig, idx, value)
                 f = tmp / "probe.almd"
@@ -528,6 +620,9 @@ def main():
                     "module": sig["module"], "fn": sig["fn"], "param": pname,
                     "edge": ename, "value": value, "verdict": verdict,
                     "fuzzer_reachable": pname not in FUZZER_COUNT_LIKE,
+                    # The wasm reading was taken under WASM_BUDGET_BYTES. The
+                    # ledger tool refuses a DIVERGE whose cell says otherwise.
+                    "pinned": True,
                 })
                 if verdict == "DIVERGE":
                     print(f'  DIVERGE  {sig["module"]}.{sig["fn"]}  {pname}={ename}'
@@ -563,7 +658,14 @@ def main():
     if args.json:
         Path(args.json).write_text(json.dumps(
             {"cells": cells, "skipped": skipped, "exercised": exercised, "helpers": helpers,
-             "skips_only": bool(args.skips_only), "tally": tally}, indent=2))
+             "skips_only": bool(args.skips_only), "tally": tally,
+             # The budget every wasm reading above was taken under. The ledger
+             # tool compares it with the ledger's declared one and refuses a
+             # mismatch or an absence — an unpinned reading is an availability
+             # reading (#2387), and it must not reach the ledger as a verdict.
+             "wasm_budget_bytes": WASM_BUDGET_BYTES,
+             "native_budget": "uncapped",
+             "edges": sorted(args.edge) if args.edge else "all"}, indent=2))
     return 1 if tally.get("DIVERGE") else 0
 
 
