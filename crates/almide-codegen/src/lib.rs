@@ -297,6 +297,16 @@ pub fn codegen_with(program: &mut IrProgram, target: Target, options: &CodegenOp
     if target == Target::Rust {
         let mode = almide_base::env::var("ALMIDE_CERTIFY_OWNERSHIP")
             .unwrap_or_else(|| if cfg!(debug_assertions) { "fail".to_string() } else { "off".to_string() });
+        // `census` (#2410) measures what C3's `in_loop` exclusion abstains
+        // from, rather than judging: one line per compiled program, aggregated
+        // over the corpus by the caller. It emits no verdict and fails nothing.
+        if mode == "census" {
+            let c = certify_ownership::census(program);
+            eprintln!(
+                "[CLONE CENSUS] clones={} in_loop={} fresh={} nonfresh={}",
+                c.clones, c.skipped_in_loop, c.skipped_in_loop_fresh, c.skipped_in_loop_nonfresh
+            );
+        }
         if mode == "report" || mode == "fail" {
             let violations = certify_ownership::certify(program);
             for v in &violations {

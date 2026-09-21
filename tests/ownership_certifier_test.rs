@@ -130,3 +130,74 @@ fn a_callable_the_callee_only_calls_certifies_borrowed() {
     let (ok, err) = certify("c5-fixed", KEEPER);
     assert!(ok, "the program must certify once escape is inferred:\n{err}");
 }
+
+// ── #2410: the in-loop FRESH binder, and a guard on the shared `fresh` notion ──
+
+/// A capture whose variable is bound INSIDE the loop body — rebound every
+/// iteration, scope ending with it — so the per-iteration closure moves a
+/// DIFFERENT value each time and there is no second move of one value. Both
+/// the capture-move rule and the certifier's C3 previously tested a bare
+/// `in_loop` and so cloned (and could not report) exactly this shape: #2316.
+const LOOP_FRESH_CAPTURE: &str = r#"fn main() -> Unit = {
+  var sink = 0
+  var i = 0
+  while i < 3 {
+    let s = "cap" + int.to_string(i)
+    let f = (x) => string.len(s) + x
+    sink = sink + f(1)
+    i = i + 1
+  }
+  println(int.to_string(sink))
+}
+"#;
+
+fn emit_rust(tag: &str, src: &str, env: &[(&str, &str)]) -> String {
+    let dir = std::env::temp_dir().join(format!("almide-emit-{}-{tag}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("prog.almd");
+    std::fs::write(&file, src).unwrap();
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_almide"));
+    cmd.arg(&file).arg("--target").arg("rust");
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    let out = cmd.output().expect("almide");
+    assert!(out.status.success(), "emit failed: {}", String::from_utf8_lossy(&out.stderr));
+    let _ = std::fs::remove_dir_all(Path::new(&dir));
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+/// THE INDEPENDENCE GUARD (#2410). `loop_fresh_union` is deliberately ONE
+/// definition consulted by both the capture-move rule and the certifier, so a
+/// wrong `loop_fresh_vars` would be agreed upon by both and reported by
+/// neither. This test does not ask the certifier anything: it reads the
+/// EMITTED RUST and requires the capture bind to be a move. If the fresh set
+/// ever comes back empty, the bind reverts to `s.clone()` and this fails —
+/// which is the one check the shared notion cannot talk its way out of.
+#[test]
+fn a_loop_fresh_capture_binds_by_move_in_the_emitted_rust() {
+    let on = emit_rust("lf-on", LOOP_FRESH_CAPTURE, &[]);
+    let moved = on.contains("let __cap_2: String = s;");
+    let cloned = on.contains("let __cap_2: String = s.clone();");
+    assert!(moved && !cloned, "the loop-fresh capture must bind by MOVE (moved={moved} cloned={cloned})");
+}
+
+/// The sensitivity half: with the capture-move rule ablated the pass emits the
+/// clone, and the widened C3 must SEE it. Before #2410 the certifier abstained
+/// from every in-loop clone, so this violation was unreportable — the ledger
+/// could not have caught #2316 before its fix or a recurrence after it.
+#[test]
+fn an_ablated_loop_fresh_capture_is_a_c3_violation() {
+    let (ok, err) = certify_with("lf-c3", LOOP_FRESH_CAPTURE, &[("ALMIDE_CAPTURE_MOVE_OFF", "1")]);
+    assert!(!ok, "the build must fail under ALMIDE_CERTIFY_OWNERSHIP=fail:\n{err}");
+    assert!(err.contains("[C3 clone-at-last-use] main: `s: String`"), "{err}");
+}
+
+/// …and with the rule live, the same program is clean: the pass moves and the
+/// certifier agrees. Paired with the ablation above, the two directions show
+/// the check is conditional rather than always-on.
+#[test]
+fn a_live_loop_fresh_capture_certifies_clean() {
+    let (ok, err) = certify("lf-clean", LOOP_FRESH_CAPTURE);
+    assert!(ok, "a moved loop-fresh capture must certify clean:\n{err}");
+}
