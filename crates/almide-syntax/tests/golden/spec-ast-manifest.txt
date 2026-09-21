@@ -1,4 +1,4 @@
-# oracle: almide 0.63.0 at e39133dc5 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.63.0 (dev) at e8c95e285 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -896,6 +896,7 @@ ac2f74d777b81689b454846f089d727d799030c6053d3461156a41832d6026c9	spec/wasm_cross
 d8f517cb57180626c847b24fdfb23e01eff764cd593eb3c8f11503497dbd560c	spec/wasm_cross/json_number_unicode.almd
 8fa10ef996b8fe5e4a585ff38911c411546a63f623463c5e7d07f15ed3ac2dd0	spec/wasm_cross/json_parse_lenient_edges.almd
 b1648cb3997f8ee389dbbcbf3748beb71fa09048a6a99f8077b590f8c1c0334b	spec/wasm_cross/json_path_edges.almd
+f276c19bc38c4785d352134f181a28b3f10e20f0ed249cc78286c445256b7007	spec/wasm_cross/json_path_index_domain.almd
 e4dbce1d4f199e835a8887e1b6038806b2c47ddc3f6a119243093348fbb03f4c	spec/wasm_cross/json_string_span.almd
 8ebbc8f67e8b0b8d0493831069f8b0db28353108bfff40d687cd83b5408d0e95	spec/wasm_cross/json_stringify_pretty.almd
 cde38a75d9b3ef3b35cad859af378de3a2cdb7e1ac088d8126622f0cb55eb9cb	spec/wasm_cross/json_value.almd
