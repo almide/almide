@@ -74,6 +74,13 @@ pre-commit:
       # feature newer than the last release.
       glob: "{stdlib/*.almd,spec/**/*.almd,examples/**/*.almd,tools/almide-gates/src/fold_seed_source.almd,proofs/fold-seed-source-baseline.txt}"
       run: almide run tools/almide-gates/src/main.almd -- fold-seed-source .
+    stdlib-docs:
+      # A stdlib surface change (any stdlib/*.almd), a doc page edit, the
+      # clock table, or the generator itself re-arms the regenerate-and-diff
+      # (#1469). The block is derived from the PATH binary here; CI reads
+      # the freshly built one.
+      glob: "{docs/stdlib/*.md,stdlib/*.almd,crates/almide-types/src/time_units.rs,tools/gen-stdlib-doc-index.py,scripts/check-stdlib-docs.sh}"
+      run: bash scripts/check-stdlib-docs.sh
     layout-discipline:
       # Globbed over ALL compiler/CLI Rust, not over the ledger: #1316 exists
       # because the discipline has to bite at the moment a NEW long-lived
