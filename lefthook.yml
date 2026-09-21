@@ -73,14 +73,30 @@ pre-commit:
 # interpreter could not vote on was 19 > 18). Both read the whole tree, so
 # there is no glob — every push pays them, and a push that would have failed
 # CI fails here in minutes instead of in an hour. `LEFTHOOK=0 git push` skips.
-# The clippy count is toolchain-coupled: the script gives a VERDICT only on the
-# pinned 1.94.0 (`rustup toolchain install 1.94.0 --component clippy`) and a
-# count for information on any other; run_parity verdicts everywhere (~90 s).
+# CONDITIONAL, stated where the claim is: run_parity verdicts everywhere
+# (~90 s) and is the half that would have caught #2414. The clippy count is
+# toolchain-coupled, so it verdicts ONLY on the pinned 1.94.0; on any other
+# toolchain the stanza below prints NO VERDICT and skips — the push is still
+# green, and that green is not a clippy verdict. On this machine the toolchain
+# is qusp-managed (no rustup, no ~/.rustup), so the pin cannot be installed by
+# the usual route and the clippy half is CI's alone (measured 2026-09-21).
 pre-push:
   parallel: true
   commands:
     clippy-ratchet:
-      run: bash scripts/check-clippy-warnings.sh
+      # A VERDICT only on the pinned toolchain. Off-pin the count is not
+      # comparable to the baseline (clippy grows lints every release), so
+      # the hook says so LOUDLY and skips instead of spending minutes on a
+      # number that cannot fail: a green push is never a clippy verdict here.
+      # This machine's toolchain is qusp-managed (no rustup), so the pin is
+      # not installable by the usual route — CI's pinned run is the judge.
+      run: |
+        if rustup toolchain list 2>/dev/null | grep -q '^1\.94\.0'; then
+          bash scripts/check-clippy-warnings.sh
+        else
+          echo "clippy-ratchet: NO VERDICT — pinned 1.94.0 not installed (local: $(rustc --version 2>/dev/null || echo unknown)); CI judges the ratchet. Set CLIPPY_REQUIRE_PIN=1 to fail instead."
+          [ "${CLIPPY_REQUIRE_PIN:-}" != "1" ]
+        fi
     run-parity:
       run: cargo test --release -p almide-spine --test run_parity
 
