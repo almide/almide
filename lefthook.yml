@@ -66,6 +66,12 @@ pre-commit:
       # structure is written, without anyone remembering to ask. 0.2s scan.
       glob: "{crates/**/*.rs,crates/*/src/*.rs,src/**/*.rs,src/*.rs,proofs/layout-ledger.toml,scripts/check-layout-discipline.sh,scripts/lib/layout-enumerate.py}"
       run: bash scripts/check-layout-discipline.sh
+    impl-count:
+      # One stdlib operation, N implementations (#2397): a new `fn lower_<mod>_<fn>`
+      # arm, a new registry row or a new `= _` hole must change the ledger in
+      # the same commit, so the copy is a diff line and not a blocker later.
+      glob: "{stdlib/*.almd,crates/almide-wasm/src/*.rs,crates/almide-types/src/self_host_registry.rs,proofs/impl-count-ledger.toml,scripts/check-impl-count.sh,scripts/lib/impl-count-enumerate.py}"
+      run: bash scripts/check-impl-count.sh
 
 commit-msg:
   scripts:
