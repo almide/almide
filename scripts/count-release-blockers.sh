@@ -24,6 +24,9 @@
 #   count-release-blockers.sh --from-stdin   # take the listing from stdin
 #                                            # instead of `gh` (test seam)
 #
+# Exit 2 in either mode when `gh` is missing or its listing fails: no
+# measurement, no verdict — never a printed 0.
+#
 # The stdin listing is one line per (label, issue) membership, tab-separated:
 #   <label>\t<number>\t<title>
 # — the exact shape `gh` is asked for, so the counting core runs the same code
@@ -50,12 +53,21 @@ for arg in "$@"; do
 done
 
 # One line per (label, issue) membership: label \t number \t title.
+#
+# A `gh` failure (token, network, rate limit) is NOT an empty tracker: a
+# measurement that never ran must not print as zero, because `release-blockers: 0`
+# is what lets a final tag through. Fail loudly, in report mode too.
 fetch_listing() {
-  local label
+  local label out rc
   for label in "${BLOCKING_LABELS[@]}"; do
-    gh issue list --repo "$REPO" --state open --label "$label" \
+    out=$(gh issue list --repo "$REPO" --state open --label "$label" \
       --json number,title \
-      --jq ".[] | [\"$label\", (.number|tostring), .title] | @tsv" 2>/dev/null || true
+      --jq ".[] | [\"$label\", (.number|tostring), .title] | @tsv") && rc=0 || rc=$?
+    if [ "$rc" -ne 0 ]; then
+      echo "::error::count-release-blockers: gh listing failed (exit $rc) — no verdict" >&2
+      return 2
+    fi
+    printf '%s\n' "$out"
   done
 }
 
@@ -63,10 +75,10 @@ if [ "$from_stdin" -eq 1 ]; then
   listing=$(cat)
 else
   if ! command -v gh >/dev/null; then
-    echo "count-release-blockers: gh not found — cannot measure; refusing to answer 0" >&2
+    echo "::error::count-release-blockers: gh not found — cannot measure; refusing to answer 0" >&2
     exit 2
   fi
-  listing=$(fetch_listing)
+  listing=$(fetch_listing) || exit 2
 fi
 
 # Per-label breakdown: every membership, grouped under its label.

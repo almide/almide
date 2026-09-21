@@ -136,6 +136,64 @@ fn gate_exit_code_follows_the_distinct_count() {
     assert_eq!(out.status.code(), Some(0));
 }
 
+/// Run the script WITHOUT the stdin seam, with a `gh` on PATH that fails the way a
+/// bad token or a dead network does.
+fn run_with_failing_gh(args: &[&str]) -> Output {
+    let shim = tempfile::tempdir().expect("tempdir");
+    let gh = shim.path().join("gh");
+    std::fs::write(
+        &gh,
+        "#!/bin/sh\necho 'gh: HTTP 401 bad credentials' >&2\nexit 1\n",
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let path = format!(
+        "{}:{}",
+        shim.path().display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let script =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/count-release-blockers.sh");
+    Command::new("bash")
+        .arg(&script)
+        .args(args)
+        .env("PATH", path)
+        .stdin(Stdio::null())
+        .output()
+        .expect("run the script")
+}
+
+#[test]
+fn a_gh_failure_is_no_verdict_not_zero() {
+    // A measurement that never ran must not print as zero: `release-blockers: 0`
+    // on a token or network failure is exactly what lets a final tag through.
+    for args in [&[][..], &["--gate"][..]] {
+        let out = run_with_failing_gh(args);
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(
+            out.status.code(),
+            Some(2),
+            "{args:?}: stdout={}\nstderr={err}",
+            stdout(&out)
+        );
+        assert!(
+            err.contains(
+                "::error::count-release-blockers: gh listing failed (exit 1) — no verdict"
+            ),
+            "{args:?}: {err}"
+        );
+        assert!(
+            !stdout(&out).contains("release-blockers:"),
+            "{args:?}: a failed listing printed a count:\n{}",
+            stdout(&out)
+        );
+    }
+}
+
 #[test]
 fn an_unknown_argument_is_refused_not_ignored() {
     // A typo in the workflow (`--gates`) must not silently run as report mode
