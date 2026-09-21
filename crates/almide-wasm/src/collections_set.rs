@@ -575,6 +575,17 @@ impl Emitter<'_> {
                 self.load_ty_slot_at(e);
                 self.f.instructions().local_set(x_p);
                 self.lower(body, Some(b))?;
+                // Same three-part change as `map.fold` (`collections.rs`) and the
+                // staged `list.fold` (`list.rs:647`): share the borrowed body
+                // result, release the PREVIOUS accumulator before the rebind, and
+                // return `owned` rather than `view`. `init` arrived
+                // `ArgMode::Retain`, so the missing dec abandoned that credit and
+                // every intermediate one; `View` on a block the arm owns is the
+                // "growing row" case in `arm.rs` (#2408).
+                self.rc_share_guard(body, b);
+                if let Some(dec) = self.elem_is_handle(b).then(|| self.dec_fn_of(b)) {
+                    self.f.instructions().local_get(acc_p).call(dec);
+                }
                 self.f.instructions().local_set(acc_p);
                 {
                     let mut i = self.f.instructions();
@@ -587,7 +598,7 @@ impl Emitter<'_> {
                 self.release_i32();
                 self.release_i32();
                 self.release_i32();
-                Ok(Some(Lowered::view(b)))
+                Ok(Some(Lowered::owned(b)))
             }
             ("from_list", [xs]) => {
                 // the members are shared one by one below; the list itself
