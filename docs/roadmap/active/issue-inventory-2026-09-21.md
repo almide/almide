@@ -134,6 +134,42 @@ One real design hazard, now closed: #1998 and #2009 proposed "L2 / L3" names
 already used with other meanings in `docs/specs/edit-locality.md`; they are
 S2 / S3 as of 2026-09-21 (see above).
 
+## CI: what the first improvement measured
+
+Three CI changes landed the same night: #2386 (re-measured shard weights),
+#2418 (a pre-push hook holding the clippy ratchet and run_parity) and #2416
+(enqueue when the required set is green; the mutation gate judges develop
+after landing). The first was measured before and after from the API's job
+timings, `Test Rust (shard N/4)` wall minutes, and the result is negative:
+
+| run | head | shard 0 | 1 | 2 | 3 | max |
+|---|---|---|---|---|---|---|
+| push (old weights) | e39133dc5 | 57.6 | 24.8 | 44.1 | 36.9 | 57.6 |
+| push (old) | 636a9f771 | 57.0 | 41.4 | 46.2 | 36.5 | 57.0 |
+| push (old) | e8c95e285 | 59.0 | 24.1 | 45.8 | 31.6 | 59.0 |
+| push (old) | 824ba091f | 58.3 | 42.4 | 33.0 | 36.6 | 58.3 |
+| merge_group carrying #2386 | 281f23135 | 60.0 | 42.0 | 57.4 | 41.1 | 60.0 |
+| push, new weights | 281f23135 | 60.0 | 25.6 | 41.1 | 27.9 | 60.0 |
+
+Shard 0 is 57–59 minutes before and 60.0 twice after; the weights' effect is
+inside the run-to-run noise. The mechanism: shard 0's hour is ONE step
+(`Cargo tests` 58.9 min, download 0.6), and weights can only move whole test
+targets between shards, so no assignment shortens a single 59-minute step.
+The lever is splitting targets or cutting what the slowest ones do (#2381),
+and any change to the target list or shard count must regenerate
+`scripts/ci-test-weights.txt` in the same PR. Two measurement traps recorded:
+a docs-only push makes the shard jobs no-op in 3–4 s, so a before/after row
+must be checked to have run the tests; and the per-job log API truncated at
+the setup steps for the hour-long job, so the per-target breakdown inside the
+step is still unmeasured.
+
+The pre-push hook's cost, measured on the first pushes through it: the clippy
+half prints `NO VERDICT` off the pinned toolchain in 0.09 s (this machine has
+no rustup; CI judges the ratchet), and run_parity takes 103–159 s per push.
+That is a bargain against a 30–56 min CI round, and it is the gate that would
+have caught two of the night's three wasted rounds; the shape to watch is
+habit-skipping with `LEFTHOOK=0` on an iterative push loop.
+
 ## Open follow-ups from the inventory pass
 
 - #2398's age: measured on published assets the same night — it does NOT reproduce on v0.62.0; `git bisect run` over v0.62.0..v0.63.0-rc1 (431 commits, 10 release builds) names 092c40d05 (PR #2048, Map/Set entries on typed drop glue, 2026-09-08) as the first bad commit, so it carries the `regression` label for the REPORTED PROGRAM. The defect is older: a second fixture with literal lists prints freed memory on the published 0.62.0 asset (measured the same night, four heap-preserving routes without `list.update` stay clean with the guard disabled, so the map is heap shaping, not a second carrier) — 092c40d05 changed which programs expose the missing retain, not when it arrived. The step script, reproducer, both run logs and the verdict table are in `issue-inventory-2026-09-21/bisect-2398/`; the verdict table is a reconstruction from the run logs, not git's own bisect log (that does not survive `git bisect reset`). The caveat stands: the trigger depends on surrounding allocations, so the claim is "this program does not expose it on 0.62.0", not "0.62.0 is correct".
