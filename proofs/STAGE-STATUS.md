@@ -18,7 +18,7 @@ re-measured 2026-08-12) and `proofs/TOR.md` (the operational contract).
 > scalar-read 63 arms / 0 UNGUARDED; WAT prelude 63 fns classified;
 > platform-libm 5 sites classified. New entries cannot land unclassified.
 >
-> **Stage 2 (translation validation): 701/722 fixtures cast a real 3-way vote (97%)** —
+> **Stage 2 (translation validation): 706/727 fixtures cast a real 3-way vote (97%)** —
 > the abstain remainder is classified and shrink-only (the interp-heap arc, #1226).
 >
 > **Stage 3 (semantics freeze): 351/351 contracts spec-keyed; syntax-element coverage
@@ -27,8 +27,8 @@ re-measured 2026-08-12) and `proofs/TOR.md` (the operational contract).
 > **Stage 4 (durability): fuzz true-green streak = 0 day(s)** (dated meter;
 > the correctness-only night verdict shipped 2026-08-12 — 90 days is the milestone).
 >
-> **Stage 5 (auditability): 11 release seal(s); 99 verification gates classified
-> (2 UNVERIFIED under a shrink-only ceiling); TOR with 9 enforced rows;
+> **Stage 5 (auditability): 11 release seal(s); 102 verification gates classified
+> (0 UNVERIFIED under a shrink-only ceiling); TOR with 9 enforced rows;
 > gap analysis consolidated in proofs/DO330-GAP.md (reference-gated).**
 <!-- counts:generated:end -->
 <!-- stages:generated:end -->
