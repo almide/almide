@@ -84,6 +84,26 @@ if [ -n "$missing" ]; then
 fi
 
 # ---------------------------------------------------------------------------
+# Phantom ids (#2403, item 4). Real ids are three digits (C-001..), so a
+# four-or-more-digit `C-NNNN` anywhere in either ledger is a LINE NUMBER
+# wearing a contract's clothes — the `C-1063` that started this issue was the
+# line of C-076's title. The token must start at a boundary: `RFC-7386` (JSON
+# Merge Patch) contains `C-7386` and is a citation, not a defect.
+# ---------------------------------------------------------------------------
+phantoms() { # label file -> "label:line<TAB>text" per hit
+  grep -nE '(^|[^A-Za-z0-9_-])C-[0-9]{4,}' "$2" | sed -E "s|^([0-9]+):|$1:\1	|" || true
+}
+phantom_hits="$(phantoms "$LEDGER" "$LEDGER"; phantoms "judge@${pin:0:7}" "$tmp")"
+if [ -n "$phantom_hits" ]; then
+  while IFS= read -r hit; do
+    loc="${hit%%	*}"; text="${hit#*	}"
+    echo "::error::$loc: four-digit contract id $(echo "$text" | grep -oE 'C-[0-9]{4,}' | head -1) — a line number cited as a contract (real ids are C-001..C-999): ${text:0:160}"
+  done <<<"$phantom_hits"
+  echo "als-pin FAILED: $(echo "$phantom_hits" | grep -c .) phantom C-NNNN reference(s) (ids ours $n_ours, judge $n_judge at ${pin:0:7})"
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------
 # Statement / title parity (#2403). The ledger schema is flat TOML, one scalar
 # per line (see its header), so `<id>|<key>\t<raw value>` is the whole record:
 # the value is the line's text after `key =`, untouched — a changed quote, a
