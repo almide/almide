@@ -1,13 +1,13 @@
 // @contract: C-226, C-033
 // `list.push(h.f, v)` and `list.clear(h.f)` where `h` is a record var or a
-// `mut` record parameter: the builder idiom — accumulate into a list field
-// inside a loop — builds and runs on the wasm leg, and the caller's data is
-// mutated through the `mut` parameter exactly as on native (C-226).
+// `mut` record parameter: the builder idiom — accumulate into a list field —
+// builds and runs on the wasm leg, and the caller's data is mutated through
+// the `mut` parameter exactly as on native (C-226).
 //
 // Before #2411 the structural leg's `push` arm accepted only a plain var
 // receiver and refused a field (`list-push-nonvar`); the incumbent brick
-// refused the loop for its own reason, so this shape — the one #2316 was
-// found in, gramide's document builder — had NO wasm route at all. It now
+// refused the enclosing loop for its own reason, so this shape — the one #2316
+// was found in, gramide's document builder — had NO wasm route at all. It now
 // routes through the copy-on-write field write the leg already owns:
 // `h.f = h.f + [v]`, so the record is copied, the replaced slot's credit is
 // released, the fresh list takes its own credit, and the var is rebound.
@@ -15,45 +15,37 @@
 // pins under C-033.
 //
 // Rows, and what each is for:
-//   builder     the #2316 shape verbatim: mut param, for loop, if branch,
-//               two pushes per iteration into two fields
 //   str/float/rec  the element's runtime shape — a heap element (String,
 //               a record) must take its credit in the concat, a scalar must
 //               not; Float crosses the push helper as a bit pattern
+//   mut param   a `mut` record parameter's field pushed from a callee — the
+//               caller's record carries the grown list (C-226)
 //   alias       C-033: an alias taken BEFORE the push keeps the old list —
 //               in-place mutation stays unobservable, the record was copied
-//   clear       `h.f = []` through the same path, then a push after it
-//   1000        a loop of pushes: the COW rebind is O(n) per push by the
-//               same doctrine as every field write on this leg, and a leak
-//               would grow the alloc ledger row, not this output
 //
-// DECLARED OMISSION: a nested path (`h.i.xs`, `xs[i].f`) is still refused
-// (`list-push-nonvar`) — the field-write path takes one var and one field.
-// It is a wall, not a wrong value, and it is out of this fixture on purpose.
-type Box = { size: Int, kids: List[Int] }
-
-type Holder = { sizes: List[Int], kids: List[Box] }
-
+// DECLARED OMISSIONS, three rows carried by tests/list_push_on_record_field_test.rs
+// (it builds and runs both legs directly): the #2316 builder verbatim (a
+// `mut` param, a `for` loop, an `if` branch, two pushes per iteration), a
+// 1000-push `for` loop, and `list.clear(h.f)` followed by a push. The
+// incumbent brick refuses a scalar `for`-in loop variable in an exported fn
+// ("outside the MIR-lowering subset") and has NO definition of `list.clear`
+// at all (an unlinked call is a wall), so any of those rows here would cost
+// the two determinism wall ceilings and the walled-real baseline — three
+// shrink-only ratchets — for coverage the test provides; the same trade
+// C-076's `EXTENDED (#2133)` and C-334's `EXTENDED (#2398)` clauses record.
+// The record row reads its element through a `let` because the incumbent
+// also refuses a `??`-bearing interpolation in call-argument position. A
+// nested receiver path (`h.i.xs`) is still refused (`list-push-nonvar`) and
+// is pinned as a wall by the same test.
 type Names = { names: List[String], n: Int }
 
 type Floats = { xs: List[Float] }
 
 type Ints = { xs: List[Int] }
 
-type Sum = { xs: List[Int], sum: Int }
+type B = { k: Int }
 
-fn make(n: Int) -> Box = Box { size: n, kids: [n, n, n] }
-
-fn in_loop_branch(xs: List[Int], mut h: Holder) -> Unit = {
-  for x in xs {
-    if x >= 0 then {
-      let kid = make(x)
-      list.push(h.sizes, kid.size)
-      list.push(h.kids, kid)
-    } else ()
-  }
-  ()
-}
+type Boxes = { bs: List[B] }
 
 fn add_name(mut h: Names, s: String) -> Unit = {
   list.push(h.names, s)
@@ -61,9 +53,6 @@ fn add_name(mut h: Names, s: String) -> Unit = {
 }
 
 fn main() -> Unit = {
-  var h = Holder { sizes: [], kids: [] }
-  in_loop_branch([1, -1, 2], h)
-  println("builder ${list.len(h.kids)} ${h.sizes} ${(list.get(h.kids, 1) ?? make(0)).kids}")
   var nm = Names { names: [], n: 0 }
   add_name(nm, "a")
   add_name(nm, "bb")
@@ -72,18 +61,13 @@ fn main() -> Unit = {
   list.push(fl.xs, 1.5)
   list.push(fl.xs, 2.5)
   println("float   ${fl.xs}")
+  var bx = Boxes { bs: [] }
+  list.push(bx.bs, B { k: 7 })
+  list.push(bx.bs, B { k: 8 })
+  let second = list.get(bx.bs, 1) ?? B { k: 0 }
+  println("rec     ${list.len(bx.bs)} ${second.k}")
   var al = Ints { xs: [1] }
   let before = al
   list.push(al.xs, 2)
   println("alias   ${before.xs} ${al.xs}")
-  var cl = Ints { xs: [1, 2] }
-  list.clear(cl.xs)
-  list.push(cl.xs, 9)
-  println("clear   ${cl.xs}")
-  var acc = Sum { xs: [], sum: 0 }
-  for i in 0..<1000 {
-    list.push(acc.xs, i)
-    acc.sum = acc.sum + i
-  }
-  println("1000    ${list.len(acc.xs)} ${acc.sum} ${list.get(acc.xs, 999) ?? -1}")
 }

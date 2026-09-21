@@ -52,6 +52,59 @@ fn main() -> Unit = {
 }
 "#;
 
+/// #2316's builder verbatim — a `mut` record parameter, a `for` loop over a
+/// list, an `if` branch, two pushes per iteration (one scalar field, one
+/// record field). The fixture DECLARES this row as an omission: the incumbent
+/// brick refuses a scalar `for`-in loop variable in an exported fn, so a loop
+/// row there would cost three shrink-only ratchets; both legs run here instead.
+const BUILDER_VERBATIM: &str = r#"
+type Box = { size: Int, kids: List[Int] }
+type Holder = { sizes: List[Int], kids: List[Box] }
+fn make(n: Int) -> Box = Box { size: n, kids: [n, n, n] }
+fn in_loop_branch(xs: List[Int], mut h: Holder) -> Unit = {
+  for x in xs {
+    if x >= 0 then {
+      let kid = make(x)
+      list.push(h.sizes, kid.size)
+      list.push(h.kids, kid)
+    } else ()
+  }
+  ()
+}
+fn main() -> Unit = {
+  var h = Holder { sizes: [], kids: [] }
+  in_loop_branch([1, -1, 2], h)
+  println("builder ${list.len(h.kids)} ${h.sizes} ${(list.get(h.kids, 1) ?? make(0)).kids}")
+}
+"#;
+
+/// A 1000-push `for` loop through the field path: the copy-on-write write
+/// rebinds the var each iteration, so a credit leak or a freed-under-read
+/// shows here as a wrong length, a wrong sum, or a trap — not in a 2-push row.
+/// `list.clear(h.f)` through the same field-write path, then a push after it.
+/// The fixture cannot carry it: the incumbent brick has no `list.clear` at all.
+const CLEAR_THEN_PUSH: &str = r#"
+type Ints = { xs: List[Int] }
+fn main() -> Unit = {
+  var cl = Ints { xs: [1, 2] }
+  list.clear(cl.xs)
+  list.push(cl.xs, 9)
+  println("clear ${cl.xs}")
+}
+"#;
+
+const THOUSAND_PUSHES: &str = r#"
+type Sum = { xs: List[Int], sum: Int }
+fn main() -> Unit = {
+  var acc = Sum { xs: [], sum: 0 }
+  for i in 0..<1000 {
+    list.push(acc.xs, i)
+    acc.sum = acc.sum + i
+  }
+  println("1000 ${list.len(acc.xs)} ${acc.sum} ${list.get(acc.xs, 999) ?? -1}")
+}
+"#;
+
 fn almide_bin() -> &'static str {
     env!("CARGO_BIN_EXE_almide")
 }
@@ -124,4 +177,28 @@ fn a_nested_path_receiver_is_still_refused_honestly() {
         stderr.contains("list-push-nonvar"),
         "the refusal must name the receiver shape (list-push-nonvar), got:\n{stderr}"
     );
+}
+
+#[test]
+fn the_2316_builder_verbatim_agrees_on_both_legs() {
+    if !wasmtime_available() {
+        return;
+    }
+    assert_eq!(agree(BUILDER_VERBATIM, "builder verbatim").trim(), "builder 2 [1, 2] [2, 2, 2]");
+}
+
+#[test]
+fn a_thousand_pushes_through_the_field_path_agree() {
+    if !wasmtime_available() {
+        return;
+    }
+    assert_eq!(agree(THOUSAND_PUSHES, "1000 pushes").trim(), "1000 1000 499500 999");
+}
+
+#[test]
+fn a_clear_on_the_field_then_a_push_agrees() {
+    if !wasmtime_available() {
+        return;
+    }
+    assert_eq!(agree(CLEAR_THEN_PUSH, "clear then push").trim(), "clear [9]");
 }
