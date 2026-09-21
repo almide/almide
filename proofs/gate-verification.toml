@@ -863,6 +863,15 @@ measures = "count of bare numeric claims in README.md that sit neither in a gene
 varies = "README resync (2026-08-27, PR #1605): the first run read the undated `164-contract ledger`, `310 test files` and the 703 B Hello, world; 0 after dating or deriving each"
 
 [[gate]]
+path = "scripts/check-readme-freshness.sh"
+reads = "scalar"
+wired_by = ".github/workflows/readme-freshness.yml"
+class = "NEGATIVE_TESTED"
+evidence = "#2146 item 4 landing (2026-09-21): on the tree of that day the gate read the `### LLM writability` section's 2026-04-12 date as 162 days old and went red naming the section, the date, the age and the 90-day line; `MAX_DAYS=200` turned the same reading green, so both verdicts were seen on one tree. Delivered nightly as a comment on #1617 (one per day, green only as the close of a red), not as a PR gate — a calendar red in a diff gate gets the date edited."
+measures = "the age in days of the first YYYY-MM-DD in each listed README section against MAX_DAYS (90)"
+varies = "#2146 item 4 (2026-09-21): 162 days (red) at the default line, green at MAX_DAYS=200 on the same tree; the number moves every day by construction and drops to 0 when #1617's re-measurement lands"
+
+[[gate]]
 path = "scripts/check-docs-only.sh"
 reads = "UNCLASSIFIED"
 wired_by = ".github/workflows/ci.yml"

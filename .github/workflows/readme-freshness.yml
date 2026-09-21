@@ -1,0 +1,75 @@
+name: README freshness (nightly)
+
+# The README's measured claims carry their date (check-readme-numbers.sh);
+# this run does the arithmetic on that date. A measured number older than 90
+# days is red — but red on a calendar, not in a diff, so it is NOT a PR gate
+# (#2146 item 4): failing every PR for it would get the date edited, not the
+# measurement re-run. The consumer is the issue that owns the re-measurement:
+# a stale section is delivered as ONE comment per day on #1617 (the Dojo run
+# that refreshes the writability scorecard), and a green night says so there
+# too, once. A gate is finished when its result reaches a place with a daily
+# reader (#2391); a nightly red nobody is told about is a job summary.
+
+on:
+  schedule:
+    # 03:50 UTC daily — after ledger-counts (03:40), clear of the fuzz night.
+    - cron: "50 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  # The issue that owns the re-measurement of the section the gate watches.
+  OWNER_ISSUE: "1617"
+  MARKER: "<!-- readme-freshness -->"
+
+jobs:
+  freshness:
+    name: Measured README claims within 90 days
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: develop
+
+      - name: Age every measured section
+        id: age
+        run: |
+          set +e
+          bash scripts/check-readme-freshness.sh | tee /tmp/freshness.txt
+          rc=${PIPESTATUS[0]}
+          set -e
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+
+      - name: Deliver the reading to the owning issue (one comment per day)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          today=$(date -u +%Y-%m-%d)
+          last=$(gh issue view "$OWNER_ISSUE" --json comments --jq '[.comments[].body | select(startswith("'"$MARKER"'"))] | last // ""')
+          # Once per day, and a green reading is delivered only as the close of a red one.
+          case "$last" in "$MARKER $today"*) echo "already delivered today"; exit 0;; esac
+          if [ "${{ steps.age.outputs.rc }}" = "0" ]; then
+            case "$last" in *"is RED"*) ;; *) echo "green, and nothing red to close"; exit 0;; esac
+            body="$MARKER $today — readme-freshness: every measured README section is within 90 days again (run $GITHUB_RUN_ID)."
+          else
+            {
+              echo "$MARKER $today — readme-freshness is RED on develop (run $GITHUB_RUN_ID):"
+              echo
+              echo '```'
+              grep -E '::error::' /tmp/freshness.txt | sed 's/^::error:://' || true
+              echo '```'
+              echo
+              echo "The number is not wrong, it is old. The fix is the measurement this issue describes, not the date."
+            } > /tmp/comment.md
+            body=$(cat /tmp/comment.md)
+          fi
+          gh issue comment "$OWNER_ISSUE" --body "$body"
+
+      - name: Fail the run when a section is stale (the red is on record above)
+        if: steps.age.outputs.rc != '0'
+        run: exit 1

@@ -95,7 +95,7 @@ wasm leg を native と同格に。最適化品質の乖離（#929）は v0 退�
 | 0.56 | 文字列ワークロード phase 2 — 残る 75% は「借用文字列型を持たない」という言語設計そのもの。次の判断は表現変更ではなく **`IterChain` 復活 / `list.range` の遅延化**（安価な lambda body・30M 要素で実測 6.6x、本 repo で未取得の最大の勝ち筋）。cranelift（0.6x）が対象コードを生成し始める前に完了 | [#1004](https://github.com/almide/almide/issues/1004) |
 | 0.57 | 10k 行 dogfood プロジェクト完成・公開 — 0.46 着工分の完了、スケール数字（LOC・モジュール数・ビルド時間）を README に | [#1001](https://github.com/almide/almide/issues/1001) |
 | 0.58 | hole-hunt findings 焼却完了 — 0.52 のレンズ群が出した findings を 0 に | [#912](https://github.com/almide/almide/issues/912) |
-| 0.59 | MSR の第三者再現性 — dojo ブリッジ CI（タスクサブセットを本 repo の PR ゲートで実行）+ 他言語でも同条件で走らせられる公開ハーネス。指標が土俵になる条件 | — |
+| 0.59 | MSR の第三者再現性 — dojo ブリッジ CI（タスクサブセットを本 repo の PR ゲートで実行）+ 他言語でも同条件で走らせられる公開ハーネス。指標が土俵になる条件 | [#2146](https://github.com/almide/almide/issues/2146) |
 | 0.60 | ゲートリリース — クロスターゲット対等性監査を固定 | — |
 
 **Gate 0.60**: 両ターゲットの最適化品質が同格 / hole-hunt findings 0 / 対 Rust perf ギャップが計測・ラチェット管理下。
