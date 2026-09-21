@@ -16,7 +16,7 @@
 65888	spec/wasm_cross/assign_alias_rc.almd
 66144	spec/wasm_cross/autotry_construction.almd
 65872	spec/wasm_cross/autotry_result_first_arg.almd
-70672	spec/wasm_cross/availability_pure_batch.almd
+70640	spec/wasm_cross/availability_pure_batch.almd
 66496	spec/wasm_cross/bang_in_record_literal_field.almd
 67872	spec/wasm_cross/base64_encode.almd
 66384	spec/wasm_cross/binary_operators.almd
@@ -325,6 +325,7 @@
 66400	spec/wasm_cross/list_flatten_borrow.almd
 66320	spec/wasm_cross/list_float_equality_family.almd
 67488	spec/wasm_cross/list_float_total_order.almd
+214176	spec/wasm_cross/list_fold_fused_callback_result_ownership.almd
 68192	spec/wasm_cross/list_heapelem_rc.almd
 67648	spec/wasm_cross/list_index_element_append.almd
 65904	spec/wasm_cross/list_index_element_append_oob.almd
