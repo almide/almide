@@ -15,6 +15,12 @@
 // only the plain-wasm and wasm-opt legs.
 #![allow(dead_code)]
 
+// The legs this binary reads: corpus.rs builds exactly these (plain wasm is
+// always built), and its `corpus_legs_declared_match_reads` holds this line
+// to the gate body below. Native and interp are never compared here.
+const NEEDED_LEGS: Legs = Legs { native: false, wasm_opt: true, interp: false };
+const GATE_SOURCE: &str = include_str!("wasm_runtime_opt_parity.rs");
+
 include!("wasm_runtime_test_parts/common.rs");
 include!("wasm_runtime_test_parts/interp_leg.rs");
 include!("wasm_runtime_test_parts/corpus.rs");
@@ -34,7 +40,7 @@ fn wasm_opt_parity_spec() {
     // baseline instead of rebuilding it.
     let Some(legs) = corpus() else { return };
     // wasm-opt absent → nothing to compare; the other gates still ran.
-    if legs.iter().all(|l| l.wasm_opt.is_none()) {
+    if legs.iter().all(|l| l.wasm_opt().is_none()) {
         eprintln!("wasm_opt_parity_spec: wasm-opt unavailable — skipping");
         return;
     }
@@ -42,7 +48,7 @@ fn wasm_opt_parity_spec() {
     let mut passed = 0;
     let mut failed: Vec<String> = Vec::new();
     for l in legs {
-        let Some(opt) = &l.wasm_opt else { continue };
+        let Some(opt) = l.wasm_opt() else { continue };
         if &l.wasm == opt {
             passed += 1;
         } else {

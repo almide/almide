@@ -17,6 +17,12 @@
 // only the native and wasm legs.
 #![allow(dead_code)]
 
+// The legs this binary reads: corpus.rs builds exactly these (plain wasm is
+// always built), and its `corpus_legs_declared_match_reads` holds this line
+// to the gate body below. Wasm-opt and interp are never compared here.
+const NEEDED_LEGS: Legs = Legs { native: true, wasm_opt: false, interp: false };
+const GATE_SOURCE: &str = include_str!("wasm_runtime_cross_target.rs");
+
 include!("wasm_runtime_test_parts/common.rs");
 include!("wasm_runtime_test_parts/interp_leg.rs");
 include!("wasm_runtime_test_parts/corpus.rs");
@@ -44,7 +50,8 @@ fn wasm_cross_target_spec() {
 
     for l in legs {
         let name = &l.name;
-        let (rc, rout, rerr) = (l.native.0, &l.native.1, &l.native.2);
+        let native = l.native();
+        let (rc, rout, rerr) = (native.0, &native.1, &native.2);
         // The corpus records a wasm build/run panic — or a mid-run wasmtime
         // spawn failure — as a sentinel leg so each gate reports it in its own
         // words. Never a whole-gate return: that discarded the rest of the
