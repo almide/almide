@@ -1628,6 +1628,9 @@ jobs:
       - name: Layout discipline for new long-lived structures (#1387 / #1316)
         run: bash scripts/check-layout-discipline.sh
 
+      - name: Implementation count per stdlib hole (one operation, N copies — #2397)
+        run: bash scripts/check-impl-count.sh
+
   perf-ratchet:
     name: Perf ratchet (native/Rust ratio, #917)
     needs: [changes, build]
