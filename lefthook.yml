@@ -67,6 +67,23 @@ pre-commit:
       glob: "{crates/**/*.rs,crates/*/src/*.rs,src/**/*.rs,src/*.rs,proofs/layout-ledger.toml,scripts/check-layout-discipline.sh,scripts/lib/layout-enumerate.py}"
       run: bash scripts/check-layout-discipline.sh
 
+# The two gates that cost a CI round each on 2026-09-21 and are cheap enough
+# to hold a PUSH (not a commit): the clippy ratchet (a collapsible `if` was
+# 1457 > 1456) and run_parity's shrink-only abstention ceiling (a fixture the
+# interpreter could not vote on was 19 > 18). Both read the whole tree, so
+# there is no glob — every push pays them, and a push that would have failed
+# CI fails here in minutes instead of in an hour. `LEFTHOOK=0 git push` skips.
+# The clippy count is toolchain-coupled: the script gives a VERDICT only on the
+# pinned 1.94.0 (`rustup toolchain install 1.94.0 --component clippy`) and a
+# count for information on any other; run_parity verdicts everywhere (~90 s).
+pre-push:
+  parallel: true
+  commands:
+    clippy-ratchet:
+      run: bash scripts/check-clippy-warnings.sh
+    run-parity:
+      run: cargo test --release -p almide-spine --test run_parity
+
 commit-msg:
   scripts:
     "english-only":

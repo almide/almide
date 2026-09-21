@@ -75,7 +75,13 @@ After cloning, fetch the submodules and install the git hooks:
 git submodule update --init --recursive
 brew install lefthook  # or: https://github.com/evilmartians/lefthook
 lefthook install
+rustup toolchain install 1.94.0 --component clippy   # the pinned toolchain: makes the pre-push clippy ratchet a verdict, not a count
 ```
+
+Without `lefthook install` no pre-commit or pre-push gate runs at all, and every
+gate failure that a hook would have caught in seconds costs a CI round (30–56 min)
+instead — measured 2026-09-21, three rounds in one night. `which lefthook` before
+the first push of a session.
 
 Submodules (`actions/checkout` does NOT fetch them, so CI never sees these — they are
 local-only conveniences and nothing in the build depends on them):
