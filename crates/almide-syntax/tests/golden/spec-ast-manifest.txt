@@ -1,4 +1,4 @@
-# oracle: almide 0.63.0 (dev) at 1cee275ee — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.63.0 (dev) at 8f5613f09 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -1317,6 +1317,7 @@ b82277d7b41a887be13532b28048295e7094665a1bda70f9e2543e6fb892205f	spec/wasm_cross
 1922258c5a4ec11963d48ad778c1b683f72c7cdea35a6e59a2e8893d1f0170e7	spec/wasm_cross/value_deep_eq.almd
 b5473bceb58b4a9498177db22721c623c1dd4fded8d71bfc99bca86a3fa0c2b1	spec/wasm_cross/value_domain_arith.almd
 0f2102b12b6c6aa94a3737d4082a335769aba60b7efcfd526a5fa7c1d4820bab	spec/wasm_cross/value_eq.almd
+9270101871c62614afbf6498e364a5b7c1401a8341a2451e734e499d947daf04	spec/wasm_cross/value_keys_non_object.almd
 e191a7c1592082cee5ac40e114484677f09533d34e0791410717060291063ef9	spec/wasm_cross/value_merge.almd
 cba4bdd0a651ca18cdf1b51348351f537eb3f3c64e33774e62e61e1900ea2f95	spec/wasm_cross/value_object_leak_loop.almd
 d2fd814540b2b5d30daf81372b691c5ad692ed2600926d455ab0d590387ed866	spec/wasm_cross/value_object_ops_share.almd
