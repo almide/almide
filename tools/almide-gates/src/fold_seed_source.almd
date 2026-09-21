@@ -1,0 +1,411 @@
+// `fold-seed-source` — the census of the shape #2377 broke on, taken from SOURCE
+// alone (#2380).
+//
+// `list.fold(xs, <seed that reads xs>, f)` borrowed the source for the
+// iteration and moved it inside the seed: a native E0505 under the "this is an
+// Almide bug" banner. PR #2376 fixed the emitter and pinned four shapes in Rust
+// tests. This gate is the cheaper instrument: it splits the argument list of
+// every `list.fold` / `foldf` / `fold_float` / `reduce` / `scan` call in the
+// corpus at top level and reports each call whose first argument is a BARE
+// IDENTIFIER that reappears inside the second argument (the seed; for `reduce`,
+// the combining closure). The pipe spelling `xs |> list.fold(seed, f)` is the
+// same shape after desugaring and is reported with `form=pipe`.
+//
+// The verdict is a shrink-only FLOOR, not a ban: the shape is legal, and the
+// point is that fixtures exercising it stay in the corpus so an emitter
+// regression is caught by `almide test` — proofs/fold-seed-source-baseline.txt
+// names each file that carries sites and how many it must keep. Files with
+// sites and no row are reported as unpinned so a human can raise the floor.
+// stdlib/ sites are counted separately: the issue's measurement was that no
+// hand-written program uses the shape (0 sites, 4,172 files downstream), and
+// the census keeps that fact visible.
+//
+// No compiler: the scanner reads text, so it cannot be blinded by the emitter
+// it is meant to catch. Written in Almide because it reads a ledger and a
+// corpus and renders a report (#2128); the ten-line Python prototype this
+// follows is on the `o6lvl4-ab` session's scratchpad.
+import fs
+
+type Site = { path: String, line: Int, callee: String, source: String, form: String }
+
+// `unsplit` names the candidates whose argument list never closed — a blind spot
+// in the scan, reported as an error rather than silently skipped.
+type Census = { files: Int, stdlib_sites: Int, sites: List[Site], unsplit: List[String] }
+
+type Row = { path: String, floor: Int }
+
+type Verdict = { lines: List[String], ok: Bool }
+
+fn callees() -> List[String] = ["fold", "foldf", "fold_float", "reduce", "scan"]
+
+fn corpus_dirs() -> List[String] = ["stdlib", "spec", "examples", "tools"]
+
+fn baseline_path() -> String = "proofs/fold-seed-source-baseline.txt"
+
+fn is_ident_char(c: String) -> Bool = c != "" and (string.is_alphanumeric(c) or c == "_")
+
+fn is_bare_ident(s: String) -> Bool = s != "" and not string.is_digit(string.take(s, 1)) and (string.chars(s) |> list.all((c) => is_ident_char(c)))
+
+// Every codepoint offset at which `needle` starts in `text`, ascending.
+fn offsets_of(text: String, needle: String, from: Int, acc: List[Int]) -> List[Int] = match string.index_of(
+  string.drop(text, from),
+  needle,
+) {
+  none => acc,
+  some(rel) => offsets_of(text, needle, from + rel + string.len(needle), acc + [from + rel]),
+}
+
+// ── code only ──
+// The scan runs over CODE: string-literal contents are blanked to spaces and a
+// `//` comment tail is dropped, line by line, with the string state carried
+// across lines so a multi-line literal stays blank. Newlines are kept, so line
+// numbers in the report are the file's. Without this the scanner's own header
+// comment and its test strings are sites, and a comment with an unbalanced
+// `list.fold(` is a blind spot.
+type Strip = { out: String, in_str: Bool }
+
+fn strip_line(cs: List[String], i: Int, st: Strip) -> Strip = if i >= list.len(cs) then st
+else {
+  let c = list.get_or(cs, i, "")
+  let next = list.get_or(cs, i + 1, "")
+  if st.in_str then (if c == "\\" then strip_line(
+    cs,
+    i + 2,
+    Strip { out: st.out + "  ", in_str: true },
+  )
+  else if c == "\"" then strip_line(cs, i + 1, Strip { out: st.out + c, in_str: false })
+  else strip_line(cs, i + 1, Strip { out: st.out + " ", in_str: true }))
+  else if c == "\"" then strip_line(cs, i + 1, Strip { out: st.out + c, in_str: true })
+  else if c == "/" and next == "/" then st
+  else strip_line(cs, i + 1, Strip { out: st.out + c, in_str: false })
+}
+
+fn code_only(text: String) -> String = {
+  let folded = string.lines(text) |> list.fold(
+    ([], false),
+    ((acc, line) => {
+      let st = strip_line(string.chars(line), 0, Strip { out: "", in_str: acc.1 })
+      (acc.0 + [
+        st.out
+      ], st.in_str)
+    }),
+  )
+  string.join(folded.0, "\n")
+}
+
+// ── top-level argument splitting ──
+// State of the walk over the characters after the call's `(`: `mode` is
+// "code", "str" (inside a string literal) or "comment" (a `//` line comment,
+// whose brackets are not brackets).
+type Split = { i: Int, depth: Int, mode: String, cur: String, args: List[String] }
+
+fn is_open(c: String) -> Bool = c == "(" or c == "[" or c == "{"
+
+fn is_close(c: String) -> Bool = c == ")" or c == "]" or c == "}"
+
+// The arguments between the call's `(` and its matching `)`, split at
+// top-level commas, or none when the list never closes.
+fn split_args(cs: List[String], st: Split) -> List[String]? = if st.i >= list.len(cs) then none
+else {
+  let c = list.get_or(cs, st.i, "")
+  let next = list.get_or(cs, st.i + 1, "")
+  match st.mode {
+    "str" => if c == "\\" then split_args(cs, { ...st, i: st.i + 2, cur: st.cur + c + next })
+    else if c == "\"" then split_args(cs, { ...st, i: st.i + 1, mode: "code", cur: st.cur + c })
+    else split_args(cs, { ...st, i: st.i + 1, cur: st.cur + c }),
+    "comment" => if c == "\n" then split_args(
+      cs,
+      { ...st, i: st.i + 1, mode: "code", cur: st.cur + c },
+    )
+    else split_args(cs, { ...st, i: st.i + 1, cur: st.cur + c }),
+    _ => if c == "\"" then split_args(cs, { ...st, i: st.i + 1, mode: "str", cur: st.cur + c })
+    else if c == "/" and next == "/" then split_args(
+      cs,
+      { ...st, i: st.i + 2, mode: "comment", cur: st.cur + c + next },
+    )
+    else if is_open(c) then split_args(
+      cs,
+      { ...st, i: st.i + 1, depth: st.depth + 1, cur: st.cur + c },
+    )
+    else if is_close(c) then (if st.depth == 0 then some(st.args + [
+      st.cur
+    ])
+    else split_args(cs, { ...st, i: st.i + 1, depth: st.depth - 1, cur: st.cur + c }))
+    else if c == "," and st.depth == 0 then split_args(
+      cs,
+      { ...st, i: st.i + 1, cur: "", args: st.args + [
+        st.cur
+      ] },
+    )
+    else split_args(cs, { ...st, i: st.i + 1, cur: st.cur + c }),
+  }
+}
+
+fn top_level_args(after_paren: String) -> List[String]? = split_args(
+  string.chars(after_paren),
+  Split { i: 0, depth: 0, mode: "code", cur: "", args: [] },
+)
+
+// Does `name` occur in `s` as a whole identifier — not as a suffix of a longer
+// name, not as a prefix (`xs2`), and not as a field or member after `.`?
+fn mentions(s: String, name: String, i: Int) -> Bool = {
+  let n = string.len(name)
+  if i + n > string.len(s) then false
+  else if string.slice(s, i, i + n) == name and not is_ident_char(string.get(s, i - 1) ?? "") and (string.get(
+    s,
+    i - 1,
+  ) ?? "") != "." and not is_ident_char(string.get(s, i + n) ?? "") then true
+  else mentions(s, name, i + 1)
+}
+
+// The trailing identifier of `s`, or "" — the longest run of identifier
+// characters at its end, refused when a `.` precedes it (`a.b` is a field read,
+// not a bare receiver).
+fn trailing_ident(s: String) -> String = {
+  let cs = string.chars(s)
+  let n = list.len(cs)
+  let run = trailing_run(cs, n, 0)
+  let before = list.get_or(cs, n - run - 1, "")
+  let name = string.take_end(s, run)
+  if run > 0 and before != "." and is_bare_ident(name) then name else ""
+}
+
+fn trailing_run(cs: List[String], n: Int, k: Int) -> Int = if k < n and is_ident_char(list.get_or(cs, n - k - 1, "")) then trailing_run(
+  cs,
+  n,
+  k + 1,
+)
+else k
+
+// The receiver of `xs |> list.fold(` — the bare identifier piped in — or "".
+fn pipe_receiver(prefix: String) -> String = {
+  let t = string.trim_end(prefix)
+  match string.strip_suffix(t, "|>") {
+    none => "",
+    some(u) => trailing_ident(string.trim_end(u)),
+  }
+}
+
+// The site at one candidate offset (`list.<callee>(` starting at `p`), if it has
+// the shape. `unsplit` flags a candidate whose argument list never closed.
+type Probe = { site: Site?, unsplit: Bool }
+
+fn probe(path: String, text: String, callee: String, p: Int) -> Probe = {
+  let needle = "list." + callee + "("
+  let before = string.get(text, p - 1) ?? ""
+  if is_ident_char(before) or before == "." then Probe { site: none, unsplit: false } else {
+    let start = p + string.len(needle)
+    let line = string.count(string.take(text, p), "\n") + 1
+    match top_level_args(string.drop(text, start)) {
+      none => Probe { site: none, unsplit: true },
+      some(args) => {
+        let receiver = pipe_receiver(string.take(text, p))
+        let first = string.trim(list.get_or(args, 0, ""))
+        // Pipe form: the receiver is the source and the first argument is the
+        // seed. Call form: the first argument must be a bare identifier and the
+        // second is the seed.
+        let (source, seed, form) = if receiver != "" then (receiver, list.get_or(args, 0, ""), "pipe")
+        else if is_bare_ident(first) then (first, list.get_or(args, 1, ""), "call")
+        else ("", "", "")
+        if source != "" and mentions(seed, source, 0) then Probe {
+          site: some(Site { path: path, line: line, callee: callee, source: source, form: form }),
+          unsplit: false,
+        } else Probe { site: none, unsplit: false }
+      },
+    }
+  }
+}
+
+type FileScan = { sites: List[Site], unsplit: List[String] }
+
+// Every site in one file's text.
+fn scan_text(path: String, raw: String) -> FileScan = {
+  let text = code_only(raw)
+  let probes = callees() |> list.flat_map((callee) => offsets_of(text, "list." + callee + "(", 0, []) |> list.map((p) => (p, probe(path, text, callee, p))))
+  FileScan {
+    sites: probes |> list.filter_map(((p, pr)) => pr.site) |> list.sort_by((s) => s.line),
+    unsplit: probes |> list.filter_map(((p, pr)) => if pr.unsplit then some(path + ":" + int.to_string(string.count(string.take(text, p), "\n") + 1)) else none),
+  }
+}
+
+// The `.almd` files under the corpus directories, repository-relative with no
+// leading `./` so they match the baseline's spelling.
+fn under(root: String, rel: String) -> String = if root == "." then rel else root + "/" + rel
+
+effect fn corpus_files(root: String) -> List[String] = corpus_dirs() |> list.flat_map((d) => (fs.walk(under(root, d)) ?? []) |> list.filter((p) => string.ends_with(p, ".almd")) |> list.map((p) => string.strip_prefix(p, root + "/") ?? p)) |> list.sort
+
+effect fn census(root: String) -> Census = {
+  let files = corpus_files(root)!
+  let scans = files |> list.map((f) => scan_text(f, fs.read_text(under(root, f)) ?? ""))
+  let sites = scans |> list.flat_map((s) => s.sites)
+  Census {
+    files: list.len(files),
+    stdlib_sites: sites |> list.count((s) => string.starts_with(s.path, "stdlib/")),
+    sites: sites,
+    unsplit: scans |> list.flat_map((s) => s.unsplit),
+  }
+}
+
+// ── the floor ──
+// `<path> <count>` per line; `#` comments and blank lines are ignored.
+fn parse_baseline(text: String) -> List[Row] = string.lines(text) |> list.filter_map((l) => {
+  let t = string.trim(l)
+  if t == "" or string.starts_with(t, "#") then none
+  else match string.split(t, " ") {
+    [p, n] => match int.parse(n) {
+      ok(k) => some(Row { path: p, floor: k }),
+      err(_) => none,
+    },
+    _ => none,
+  }
+})
+
+fn sites_in(c: Census, path: String) -> Int = c.sites |> list.count((s) => s.path == path)
+
+fn site_line(s: Site) -> String = "  " + s.path + ":" + int.to_string(s.line) + "  list." + s.callee + "  source=" + s.source + "  form=" + s.form
+
+fn verdict(c: Census, rows: List[Row]) -> Verdict = {
+  let pinned = rows |> list.map((r) => r.path)
+  let files_with_sites = c.sites |> list.map((s) => s.path) |> list.unique
+  let header = "fold-seed-source: " + int.to_string(c.files) + " file(s) scanned, " + int.to_string(list.len(c.sites)) + " site(s) in " + int.to_string(list.len(files_with_sites)) + " file(s); stdlib/ carries " + int.to_string(c.stdlib_sites)
+  let listing = c.sites |> list.map((s) => site_line(s))
+  let short = rows |> list.filter((r) => sites_in(c, r.path) < r.floor) |> list.map((r) => "::error::" + r.path + " has " + int.to_string(sites_in(c, r.path)) + " site(s) of the fold-seed-consumes-its-source shape, floor is " + int.to_string(r.floor) + " (" + baseline_path() + ") — the shape from #2377 must stay exercised by the corpus; restore the fixture or lower the floor deliberately")
+  let blind = c.unsplit |> list.map((u) => "::error::" + u + ": argument list never closed — the scan cannot see this call; balance it or fix the splitter")
+  let unpinned = files_with_sites |> list.filter((p) => not list.contains(pinned, p)) |> list.map((p) => "  unpinned: " + p + " (" + int.to_string(sites_in(c, p)) + ") — add `" + p + " " + int.to_string(sites_in(c, p)) + "` to " + baseline_path() + " to raise the floor")
+  let passed = list.len(short) == 0 and list.len(blind) == 0
+  let tail = if passed then ["fold-seed-source OK: every floor in " + baseline_path() + " is met (" + int.to_string(list.len(rows)) + " row(s))"]
+  else []
+  Verdict { lines: [header] + listing + unpinned + short + blind + tail, ok: passed }
+}
+
+effect fn run(root: String) -> Verdict = {
+  let base = if root == "." then baseline_path() else root + "/" + baseline_path()
+  let rows = parse_baseline(fs.read_text(base)!)
+  verdict(census(root)!, rows)
+}
+
+// ── tests: the known shapes fire before an empty census is believed ──
+fn sites_of(text: String) -> List[String] = scan_text("t.almd", text).sites |> list.map((s) => int.to_string(s.line) + ":" + s.callee + ":" + s.source + ":" + s.form)
+
+test "the #2377 shape fires: the seed sorts the source" {
+  assert_eq(
+    sites_of("fn main() -> Unit = {\n  let r = list.fold(xs, list.is_empty(list.sort_by(xs, ((y) => 1))), ((a, b) => a))\n}\n"),
+    ["2:fold:xs:call"],
+  )
+}
+
+test "the seed may be the source variable itself" {
+  assert_eq(sites_of("let r = list.fold(v, v, ((a, b) => a))\n"), ["1:fold:v:call"])
+}
+
+test "the fuzzer's shape fires across lines, with a scan in the seed" {
+  let src = "let r: String? = list.fold(\n  xs,\n  (if list.is_empty(list.scan(xs, 1, ((y, s) => 1))) then v else some(\"\")),\n  ((x, a) => v),\n)\n"
+  assert_eq(sites_of(src), ["1:fold:xs:call"])
+}
+
+test "the pipe form fires, naming the receiver" {
+  assert_eq(
+    sites_of("let r = ys\n  |> list.fold(list.len(ys), ((acc, y) => acc + y))\n"),
+    ["2:fold:ys:pipe"],
+  )
+}
+
+test "every callee in the family is scanned" {
+  assert_eq(sites_of("list.reduce(xs, ((a, b) => list.len(xs)))\n"), ["1:reduce:xs:call"])
+  assert_eq(sites_of("list.scan(xs, list.len(xs), ((a, b) => a))\n"), ["1:scan:xs:call"])
+  assert_eq(sites_of("list.foldf(xs, list.len(xs), ((a, b) => a))\n"), ["1:foldf:xs:call"])
+  assert_eq(
+    sites_of("list.fold_float(xs, list.len(xs), ((a, b) => a))\n"),
+    ["1:fold_float:xs:call"],
+  )
+}
+
+test "a seed that does not read the source is silent, and so are the look-alikes" {
+  assert_eq(sites_of("let r = list.fold(xs, 0, ((a, b) => a + 1))\n"), [])
+  // The source is not a bare identifier.
+  assert_eq(sites_of("let r = list.fold(f(xs), xs, ((a, b) => a))\n"), [])
+  // `xs` only as a prefix, a suffix, or a field of something else.
+  assert_eq(sites_of("let r = list.fold(xs, xs2 + axs + r.xs, ((a, b) => a))\n"), [])
+  // Not `list.`.
+  assert_eq(sites_of("let r = mylist.fold(xs, xs, ((a, b) => a))\n"), [])
+  // The piped receiver is a field read, not a bare identifier.
+  assert_eq(sites_of("let r = a.xs |> list.fold(list.len(xs), ((acc, y) => acc + y))\n"), [])
+  // The name reappears only in the closure, not the seed.
+  assert_eq(sites_of("let r = list.fold(xs, 0, ((a, b) => a + list.len(xs)))\n"), [])
+}
+
+test "commas and brackets inside string literals and line comments do not split the arguments" {
+  assert_eq(sites_of("list.fold(xs, \"a,)b\" + list.len(xs), ((a, b) => a))\n"), ["1:fold:xs:call"])
+  assert_eq(
+    sites_of("list.fold(\n  xs, // (a, b\n  list.len(xs),\n  ((a, b) => a),\n)\n"),
+    ["1:fold:xs:call"],
+  )
+}
+
+test "the shape inside a comment or a string literal is not a site" {
+  assert_eq(
+    sites_of("// list.fold(xs, list.len(xs), f)\nlet s = \"list.fold(xs, list.len(xs), f)\"\n"),
+    [],
+  )
+  // A multi-line literal stays blank across its lines; the code after it is scanned.
+  assert_eq(
+    sites_of("let s = \"a\n list.fold(xs, xs, f)\n b\"\nlist.fold(v, v, ((a, b) => a))\n"),
+    ["4:fold:v:call"],
+  )
+  // An unbalanced comment is not a blind spot either.
+  assert_eq(scan_text("t.almd", "// list.fold(xs, (\n").unsplit, [])
+}
+
+test "an argument list that never closes is a blind spot, not a silent skip" {
+  let s = scan_text("t.almd", "list.fold(xs, list.len(xs), ((a, b) => a\n")
+  assert_eq(s.sites, [])
+  assert_eq(s.unsplit, ["t.almd:1"])
+}
+
+fn fake(path: String, n: Int) -> List[Site] = list.range(0, n) |> list.map((i) => Site { path: path, line: i + 1, callee: "fold", source: "xs", form: "call" })
+
+test "the floor holds: a corpus that lost its sites fails, one that keeps them passes" {
+  let rows = parse_baseline("# floor\n\nspec/lang/fold_seed_source_test.almd 4\n")
+  assert_eq(rows, [
+    Row { path: "spec/lang/fold_seed_source_test.almd", floor: 4 }
+  ])
+  let kept = Census {
+    files: 10,
+    stdlib_sites: 0,
+    sites: fake("spec/lang/fold_seed_source_test.almd", 4),
+    unsplit: [],
+  }
+  assert_eq(verdict(kept, rows).ok, true)
+  // Forged corpus: one site removed.
+  let forged = Census {
+    files: 10,
+    stdlib_sites: 0,
+    sites: fake("spec/lang/fold_seed_source_test.almd", 3),
+    unsplit: [],
+  }
+  let v = verdict(forged, rows)
+  assert_eq(v.ok, false)
+  assert_eq(
+    v.lines |> list.any((l) => string.starts_with(l, "::error::spec/lang/fold_seed_source_test.almd has 3 site(s)")),
+    true,
+  )
+  // Forged corpus: the fixture file gone entirely.
+  assert_eq(verdict(Census { files: 10, stdlib_sites: 0, sites: [], unsplit: [] }, rows).ok, false)
+  // A blind spot fails on its own.
+  assert_eq(verdict({ ...kept, unsplit: ["x.almd:3"] }, rows).ok, false)
+}
+
+test "sites in a file without a row are reported as unpinned, and do not fail" {
+  let c = Census {
+    files: 1,
+    stdlib_sites: 0,
+    sites: fake("spec/lang/other_test.almd", 2),
+    unsplit: [],
+  }
+  let v = verdict(c, [])
+  assert_eq(v.ok, true)
+  assert_eq(
+    v.lines |> list.any((l) => string.starts_with(l, "  unpinned: spec/lang/other_test.almd (2)")),
+    true,
+  )
+}
