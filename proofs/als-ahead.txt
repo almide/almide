@@ -13,7 +13,3 @@
 #
 # Measured at pin ef52372 (2026-09-21): four statements the judge is ahead on,
 # each with the almide PR that mirrors the text and must delete its line.
-C-122  almide/almide#2399
-C-226  almide/almide#2414
-C-229  almide/almide#2420
-C-334  almide/almide#2404
