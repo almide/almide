@@ -1425,6 +1425,38 @@ pub fn cmd_clean() {
         err(&format!("Cleaned {} ({} test worker dir(s))", workers.display(), emptied));
         cleaned = true;
     }
+    // The prebuilt-runtime rlib dirs (#2504): one per runtime source × rustc
+    // version × opt level, siblings in the temp dir, each already carrying a
+    // build lock of its own. A dir a running build resolved earlier falls
+    // back to the self-contained cargo path — slower, never wrong.
+    let temp = std::env::temp_dir();
+    let mut rtlibs = 0usize;
+    if let Ok(entries) = std::fs::read_dir(&temp) {
+        for entry in entries.flatten() {
+            if !entry.file_name().to_string_lossy().starts_with(super::run::RTLIB_DIR_PREFIX)
+                || !entry.file_type().map(|t| t.is_dir()).unwrap_or(false)
+            {
+                continue;
+            }
+            match super::run::clear_build_dir(&entry.path()) {
+                Ok(true) => rtlibs += 1,
+                Ok(false) => {}
+                Err(e) => {
+                    err(&format!("Failed to clean runtime rlib cache: {}", e));
+                    std::process::exit(1);
+                }
+            }
+        }
+    }
+    if rtlibs > 0 {
+        err(&format!(
+            "Cleaned {}/{}* ({} runtime rlib dir(s))",
+            temp.display(),
+            super::run::RTLIB_DIR_PREFIX,
+            rtlibs
+        ));
+        cleaned = true;
+    }
     if !cleaned {
         err(&format!("No cache to clean"));
     }
