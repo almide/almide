@@ -255,7 +255,9 @@ fn main() -> Unit = {
 
 ### `math.choose(n: Int, k: Int) -> Int`
 
-Return the binomial coefficient C(n, k) = n! / (k! * (n-k)!).
+Return the binomial coefficient C(n, k) = n! / (k! * (n-k)!), exactly whenever it fits in an
+Int (`choose(62, 31)` = 465428353255261088); a larger result wraps modulo 2^64 like every Int
+product. `k < 0` or `k > n` gives 0.
 
 ```almd run
 fn main() -> Unit = {
