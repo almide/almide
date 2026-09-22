@@ -112,6 +112,7 @@ fn collect_in_expr_operators(expr: &ast::Expr, out: &mut std::collections::HashS
         | ExprKind::Try { expr: inner, .. } | ExprKind::Unwrap { expr: inner, .. }
         | ExprKind::ToOption { expr: inner, .. }
         | ExprKind::TypeAscription { expr: inner, .. }
+        | ExprKind::Scoped { body: inner, .. }
         | ExprKind::OptionalChain { expr: inner, .. } => { collect_in_expr(inner, out); true }
         ExprKind::UnwrapOr { expr: inner, fallback, .. } => {
             collect_in_expr(inner, out);

@@ -721,6 +721,7 @@ impl BoundedCx<'_, '_> {
             | ast::ExprKind::Some { expr }
             | ast::ExprKind::Ok { expr }
             | ast::ExprKind::Err { expr }
+            | ast::ExprKind::Scoped { body: expr, .. }
             | ast::ExprKind::TypeAscription { expr, .. } => self.walk_expr(expr),
             ast::ExprKind::UnwrapOr { expr, fallback } => {
                 self.walk_expr(expr);

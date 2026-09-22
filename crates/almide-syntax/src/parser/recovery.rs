@@ -40,6 +40,11 @@ impl Parser {
     pub(crate) fn skip_to_next_decl(&mut self) {
         loop {
             let tt = &self.current().token_type;
+            // A `scoped fn` head is a declaration boundary too: stopping on
+            // its `fn` instead would re-parse the decl without its qualifier.
+            if self.at_scoped_fn_head() {
+                break;
+            }
             match tt {
                 TokenType::EOF => break,
                 TokenType::Fn | TokenType::Effect
@@ -56,7 +61,7 @@ impl Parser {
                         | TokenType::Type | TokenType::Protocol
                         | TokenType::Test | TokenType::At
                         | TokenType::EOF
-                    ) {
+                    ) || self.at_scoped_fn_head() {
                         break;
                     }
                 }

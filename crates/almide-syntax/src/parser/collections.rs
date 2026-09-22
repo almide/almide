@@ -39,6 +39,53 @@ impl Parser {
         self.parse_block_body(initial_comments, span, open)
     }
 
+    /// Is the current token the contextual `scoped` of a `scoped { … }` block
+    /// (#1997)? The identifier `scoped` with `{` directly after it on the same
+    /// line, outside a `match` / `while` / `for` head (where that `{` opens the
+    /// construct's own body — `match scoped { … }` matches on a variable).
+    pub(crate) fn at_scoped_block_head(&self) -> bool {
+        self.check_ident("scoped")
+            && self.peek_at(1).map(|t| t.token_type) == Some(TokenType::LBrace)
+            && self.block_head_depth != Some(self.delim_depth)
+    }
+
+    /// `scoped { stmts; tail }` — always a BLOCK body (never a record literal:
+    /// `scoped { x: 1 }` is a block whose first statement is malformed, so the
+    /// error names the block, not a record).
+    pub(crate) fn parse_scoped_block(&mut self) -> Result<Expr, String> {
+        let span = Some(self.current_span());
+        self.advance(); // skip `scoped`
+        let body_span = Some(self.current_span());
+        let open = self.current().clone();
+        self.expect(TokenType::LBrace)?;
+        let mut initial_comments = Vec::new();
+        self.skip_newlines_into_stmts(&mut initial_comments);
+        let body = if self.check(TokenType::RBrace) {
+            self.advance();
+            Expr::new(self.next_id(), body_span, ExprKind::Block { stmts: initial_comments, expr: None })
+        } else {
+            self.parse_block_body(initial_comments, body_span, open)?
+        };
+        // The closing brace just consumed: where the scope ends (E086).
+        let end = self.pos.checked_sub(1).map(|i| {
+            let t = &self.tokens[i];
+            Span { line: t.line, col: t.col, end_col: t.end_col }
+        });
+        Ok(Expr::new(self.next_id(), span, ExprKind::Scoped { body: Box::new(body), end }))
+    }
+
+    /// Parse the head of `match` / `while` / `for … in` with the scoped-block
+    /// reading suspended at this delimiter depth (see `block_head_depth`).
+    pub(crate) fn parse_block_head(
+        &mut self,
+        parse: impl FnOnce(&mut Self) -> Result<Expr, String>,
+    ) -> Result<Expr, String> {
+        let saved = self.block_head_depth.replace(self.delim_depth);
+        let head = parse(self);
+        self.block_head_depth = saved;
+        head
+    }
+
     pub(crate) fn parse_spread_record(&mut self, span: Option<Span>, open: crate::lexer::Token, pending: Vec<String>) -> Result<Expr, String> {
         self.advance(); // skip ...
         let base = self.parse_expr()?;
@@ -103,6 +150,7 @@ impl Parser {
             if self.check(TokenType::Fn)
                 || (self.check(TokenType::Effect)
                     && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Fn))
+                || self.at_scoped_fn_head()
             {
                 let err_span = Some(self.current_span());
                 self.nested_fn_decl_error();
@@ -199,7 +247,7 @@ impl Parser {
             | TokenType::Type | TokenType::Protocol
             | TokenType::Test | TokenType::At
             | TokenType::RBrace
-        )
+        ) || self.at_scoped_fn_head()
     }
 
     pub(crate) fn parse_list_expr(&mut self) -> Result<Expr, String> {

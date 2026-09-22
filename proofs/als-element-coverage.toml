@@ -301,3 +301,7 @@ section = "ALS-DL1"
 [[element]]
 name = "Decl::TestWhereDef"
 section = "ALS-DL1"
+
+[[element]]
+name = "ExprKind::Scoped"
+section = "ALS-E31"

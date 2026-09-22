@@ -205,6 +205,12 @@ pub enum ExprKind {
     IfLet { name: Sym, scrutinee: Box<Expr>, then: Box<Expr>, else_: Box<Expr> },
     Match { subject: Box<Expr>, arms: Vec<MatchArm> },
     Block { stmts: Vec<Stmt>, expr: Option<Box<Expr>> },
+    /// `scoped { body }` (#1997): a reclamation boundary. `body` is always a
+    /// `Block`. Everything the block allocates belongs to its region; the
+    /// checker refuses any shape whose value or reference could outlive it
+    /// (docs/specs/scoped.md). `end` is the closing brace — the "scope ends
+    /// at" line of E086 — and, like every span, is not part of the JSON.
+    Scoped { body: Box<Expr>, #[serde(skip)] end: Option<Span> },
     Fan { exprs: Vec<Expr> },
     /// `fan.bounded(budget) { body }` — deterministic computation budget
     /// (Stage 2 v1: body is a single call expression; budget is a `Compute`).
@@ -403,6 +409,10 @@ pub enum Decl {
     Fn {
         name: Sym,
         #[serde(default)] effect: Option<bool>,
+        /// `scoped fn` (#1997): the fn is eligible to run inside a `scoped`
+        /// region — a checked part of its signature, not a discovery. Omitted
+        /// from the JSON when false, so every pre-`scoped` AST is unchanged.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")] scoped: bool,
         #[serde(default)] visibility: Visibility,
         #[serde(default)] extern_attrs: Vec<ExternAttr>,
         #[serde(default)] export_attrs: Vec<ExportAttr>,
@@ -688,6 +698,7 @@ pub fn visit_expr_mut(expr: &mut Expr, f: &mut impl FnMut(&mut Expr)) {
         | ExprKind::ToOption { expr: e } | ExprKind::Paren { expr: e }
         | ExprKind::Some { expr: e } | ExprKind::Ok { expr: e } | ExprKind::Err { expr: e }
         | ExprKind::OptionalChain { expr: e, .. }
+        | ExprKind::Scoped { body: e, .. }
         | ExprKind::TypeAscription { expr: e, .. } => visit_expr_mut(e, f),
 
         // ── Two children, left to right ──
@@ -884,6 +895,7 @@ pub fn visit_expr(expr: &Expr, f: &mut impl FnMut(&Expr)) {
         | ExprKind::ToOption { expr: e } | ExprKind::Paren { expr: e }
         | ExprKind::Some { expr: e } | ExprKind::Ok { expr: e } | ExprKind::Err { expr: e }
         | ExprKind::OptionalChain { expr: e, .. }
+        | ExprKind::Scoped { body: e, .. }
         | ExprKind::TypeAscription { expr: e, .. } => visit_expr(e, f),
 
         // ── Two children, left to right ──

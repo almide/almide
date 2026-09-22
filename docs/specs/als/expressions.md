@@ -732,3 +732,65 @@ interp の `Flow::Abort` が模す R1 中断は `Error: <msg>` + exit 1 — **�
 テスト: `tests/diagnostics/e046-call-arg-placeholder/`(E046、契約 C-268)、
 `spec/lang/typed_hole_test.almd` と `tests/typed_hole_diag_test.rs`
 (native の中断形と行番号、`todo` のメッセージ保存)。
+
+## ALS-E31 スコープ付き領域(`ExprKind::Scoped` / `scoped fn`)
+
+**受理形**:
+
+```ebnf
+scoped_block := "scoped" block
+fn_decl      := [visibility] ["scoped"] ["effect"] "fn" name …
+```
+
+`scoped` は**文脈キーワード**である。`scoped` の直後に同じ行の `{` が来た式
+位置でのみブロック修飾子として読まれ、宣言位置では直後が `fn` / `effect` の
+ときだけ修飾子として読まれる。`match` / `while` / `for … in` の**ヘッド**は
+例外で、そこでは直後の `{` が構文自身の本体を開くため `scoped` は識別子の
+ままである(`match scoped { … }` は #1997 以前と同じ意味を保つ)。したがって
+`scoped` という名前の識別子を含む既存プログラムの意味は変わらない — 方言
+エポックは上がらない。
+
+**値の規範**: `scoped { body }` の値は `body` の値であり、`scoped` の有無は
+**観測(stdout・stderr・終了コード)を変えない**。`scoped fn` は領域の外で
+呼ばれれば通常の関数であり、その結果は領域の中で呼んだときと同一である。
+つまりこの修飾子が宣言するのは**記憶の回収境界**であって値の意味ではない
+(契約 C-362、C-363)。
+
+**回収の規範**: ブロックのために確保された記憶は境界で回収される。その実現は
+レグごとに異なってよい — 構造 wasm レグはブロックの入口でアロケータ状態を
+退避し、出口で巻き戻す(`crates/almide-wasm/src/region.rs`);native レグは
+領域クローン(`__rgn_` 双子)をアリーナで走らせ、双子化できない閉包では
+所有権の解放が同じ閉じ点で起こる。**回収そのものは観測不能**であり、この節が
+両ターゲットに課すのは上の値の規範と下の受理判定だけである。ピーク記憶量の
+上界も、停止性も、境界までの確保量の上界も主張しない。
+
+**受理の規範(stage 1 の断片)**: 認められるのは**スカラ**(`Int` / `Float` /
+`Bool` / `Unit`)と**管理された代数データ** — 同一ファイルに宣言された非
+ジェネリックなバリアント型で、各ケースが unit か位置フィールドのみ、その
+フィールドがスカラか同じ条件のバリアント型であるもの、およびスカラ場だけの
+レコード、それらのタプルと `Option` — と、**通常のワーカ**および**直接末尾
+再帰のワーカ**である。呼べるのは他の `scoped fn` と `int` / `float` / `math` /
+`bool` のスカラ stdlib 呼び出し、そしてコンストラクタだけである。
+
+**拒否の規範**: 断片の外の形は**検査時に**拒否される。ターゲット選択の前に
+走る検査なので、判定は native と wasm で同一である(契約 C-364):
+
+- **E086** — 領域の値が境界を越える形。`{name} would outlive its scoped
+  allocation` に `= allocated at <file:line:col>` と `= scope ends at
+  <file:line:col>` の二行、そして `help:` が付く。
+- **E087** — 領域の中で認められない操作: `scoped` でない関数の呼び出し、
+  グローバル、ホスト資源(出力・`effect fn`)、未知の間接呼び出し、外側の
+  ヒープ値の捕捉、断片外の型。`<構文> is not permitted in a scoped
+  {function,block}` に、何を保持しうるかの行と、要求元の宣言を名乗る行が付く。
+- **E088** — 継続を保持する再帰形。`recursive call retains the current scoped
+  activation` に、呼び出しの後に何が残るかの行が付く。単一の非末尾自己再帰と
+  相互再帰がこれに当たる。木を辿る形(一つのアームに二つ以上の自己呼び出し)は
+  蓄積器に書き換えられないため通常のワーカとして受理される。
+
+`scoped effect fn` は文法上受理されるが stage 1 では E087 で拒否される — 効果は
+ホスト資源であり、境界で走る終了処理をこの断片は持たない。
+
+テスト: `spec/wasm_cross/scoped_region_value.almd`(契約 C-362)、
+`spec/wasm_cross/scoped_worker_in_and_out.almd`(契約 C-363)、
+`tests/diagnostics/e086-scope-escape-tail/` ほか E086 / E087 / E088 の
+negative fixture 群(契約 C-364)。
