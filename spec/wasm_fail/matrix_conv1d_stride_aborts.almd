@@ -1,0 +1,21 @@
+// @expect-fail: Error: stride must be positive
+// @contract: C-359
+// `conv1d`'s stride is a STEP, so a stride below 1 is out of domain — the
+// head-count class (C-198), not the negative-dimension clamp class that
+// kernel and padding take. A stride of 0 divided the output length by zero:
+// a raw `attempt to divide by zero` panic natively (exit 101) against the
+// language's own `Error: division by zero` on the wasm legs, two different
+// abort forms for one program; a NEGATIVE stride was worse — it wrapped
+// through `as usize` natively into one output row while the wasm legs
+// divided by it and answered none (exit 0 on both, different values).
+fn main() -> Unit = {
+  let x = matrix.from_lists([
+    [1.0, 2.0],
+    [3.0, 4.0]
+  ])
+  let w = matrix.from_lists([
+    [1.0, 1.0, 1.0, 1.0]
+  ])
+  let y = matrix.conv1d(x, w, [0.0], 2, 0, 0)
+  println("UNREACHABLE ${matrix.rows(y)}x${matrix.cols(y)}")
+}

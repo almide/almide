@@ -253,6 +253,14 @@ fn matrix_transpose(m: List[List[Float]]) -> List[List[Float]] = {
 // Both bounds read as native's `as usize`: a negative end is past every row
 // (the slice runs to the last row), a negative start is past every row (the
 // empty slice) — the signed reading read rows at negative offsets (#1423).
+// That is `list.slice`'s index doctrine (C-034) and exactly what native's
+// `almide_rt_matrix_slice_rows` answers. The negative-start half was also an
+// out-of-bounds READ (#2475): this body clamped only `end`, so `start = -1`
+// reached `__mx_slice_fill`, whose first load `hm + 12 + (-1) * 8 = hm + 4` is
+// the outer block's own LENGTH word — dereferenced as a row pointer, for a
+// length and that many elements. The guard sits BEFORE any address is formed,
+// so no load below it can start outside the row-handle array:
+// `0 <= start < e <= len` bounds every `start + i`.
 fn matrix_slice_rows(m: List[List[Float]], start: Int, end: Int) -> List[List[Float]] = {
   let hm = prim.handle(m)
   let len = prim.load32(hm + 4)

@@ -117,6 +117,39 @@ else {
   __cv_rows(ho, hin, hw, hbias, t_in, in_ch, out_ch, k, s, p, t_out, t + 1)
 }
 
+// The count domain of conv1d, in the native order: stride is a STEP (below 1
+// aborts, C-198's class — 0 was the language's `division by zero` here and a
+// raw panic natively, a negative one answered no rows here and one row
+// natively), kernel and padding are widths (a negative one clamps to 0 like
+// every C-034/C-161 dimension), and the padding is bounded by the shared
+// ceiling BEFORE `t_in + 2 * p` is formed so a huge padding cannot wrap here
+// into "no rows" while native computed a length.
+fn __mxe_stride(stride: Int) -> Int = {
+  if stride < 1 then prim.die(prim.handle("Error: stride must be positive\n")) else ()
+  stride
+}
+
+fn __mxe_shape_eq(a: Int, b: Int) -> Int = {
+  if a != b then prim.die(prim.handle("Error: matrix shape mismatch\n")) else ()
+  0
+}
+
+// matrix_core's `__mx_dims_guard`, restated (the ext part cannot call core's
+// private helpers); the literal is the shared ceiling scripts/check-alloc-ceilings.sh rosters.
+fn __mxe_dims_guard(rows: Int, cols: Int) -> Int = {
+  if rows > 268435456 then prim.die(prim.handle("Error: matrix dimensions too large\n")) else ()
+  if rows > 0 and cols > 268435456 / rows then prim.die(prim.handle("Error: matrix dimensions too large\n")) else ()
+  0
+}
+
+// `in_ch * kernel` without wrapping: past i64 it can match no real width, so
+// the saturated value is one the shape guard rejects like native's
+// `checked_mul(..).unwrap_or(usize::MAX)`.
+fn __mxe_taps(in_ch: Int, k: Int) -> Int = if in_ch == 0 then 0
+else {
+  if k > 9223372036854775807 / in_ch then 9223372036854775807 else in_ch * k
+}
+
 fn matrix_conv1d(input: List[List[Float]], weight: List[List[Float]], bias: List[Float], kernel: Int, stride: Int, padding: Int) -> List[List[Float]] = {
   let hin = prim.handle(input)
   let hw = prim.handle(weight)
@@ -126,10 +159,20 @@ fn matrix_conv1d(input: List[List[Float]], weight: List[List[Float]], bias: List
   else {
     let irow0 = prim.load64(hin + 12)
     let in_ch = prim.load32(irow0 + 4)
-    let t_padded = t_in + 2 * padding
-    if t_padded < kernel then __mxe_zeros(0, 0)
+    let s = __mxe_stride(stride)
+    let k = if kernel < 0 then 0 else kernel
+    let p = if padding < 0 then 0 else padding
+    if p > 268435456 then prim.die(prim.handle("Error: matrix dimensions too large\n")) else ()
+    // The weight row is `in_ch * kernel` taps wide and the bias has one entry
+    // per output channel: a short weight row or bias read past its block here
+    // and panicked natively.
+    let _w = __mxe_shape_eq(prim.load32(prim.load64(hw + 12) + 4), __mxe_taps(in_ch, k))
+    let _b = __mxe_shape_eq(prim.load32(prim.handle(bias) + 4), out_ch)
+    let t_padded = t_in + 2 * p
+    if t_padded < k then __mxe_zeros(0, 0)
     else {
-      let t_out = (t_padded - kernel) / stride + 1
+      let t_out = (t_padded - k) / s + 1
+      let _d = __mxe_dims_guard(t_out, out_ch)
       let out: List[List[Float]] = prim.alloc_list_str(t_out)
       let _x = __cv_rows(
         prim.handle(out),
@@ -139,9 +182,9 @@ fn matrix_conv1d(input: List[List[Float]], weight: List[List[Float]], bias: List
         t_in,
         in_ch,
         out_ch,
-        kernel,
-        stride,
-        padding,
+        k,
+        s,
+        p,
         t_out,
         0,
       )
