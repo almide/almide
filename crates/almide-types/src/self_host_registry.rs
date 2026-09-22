@@ -629,6 +629,12 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
             crate::embedded::SRC_STRING_MUTATE,
             &[("string_clear", "string.clear")],
         ),
+        // The C-041 arena-checkpoint pair (#1423 stage 4): trivial on v1
+        // exactly as bytes.heap_save/heap_restore are (bytes_core.almd).
+        (
+            crate::embedded::SRC_MEM_CHECKPOINT,
+            &[("mem_save", "mem.save"), ("mem_restore", "mem.restore")],
+        ),
         (
             crate::embedded::SRC_FLOAT_SATURATING,
             &[

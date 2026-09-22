@@ -188,6 +188,19 @@ impl Emitter<'_> {
         Ok(None)
     }
 
+    /// clear (native `Vec::clear`: length 0, #1423 stage 4): the mutator
+    /// family's shape — a fresh EMPTY block, written back through a var
+    /// receiver or released for a temporary (bytes_recv.rs). The receiver
+    /// is still evaluated (a temporary's construction is observable), and
+    /// an alias bound before the clear keeps its bytes (value semantics).
+    fn lower_bytes_clear(&mut self, b: &IrExpr) -> ArmResult {
+        let recv = self.bytes_recv("clear", b)?;
+        self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
+        self.f.instructions().drop().i32_const(0).call(F_ALLOC);
+        self.emit_bytes_writeback(&recv)?;
+        Ok(None)
+    }
+
     fn lower_bytes_concat(&mut self, a: &IrExpr, b: &IrExpr) -> ArmResult {
         self.lower_arg(a, Some(BYTES), ArgMode::Borrow)?;
         self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
@@ -428,6 +441,7 @@ impl Emitter<'_> {
                 self.lower_bytes_lenprefix(b, p, c)
             }
             ("fill", [b, v]) => self.lower_bytes_fill(b, v),
+            ("clear", [b]) => self.lower_bytes_clear(b),
             // some(byte) / none (native b.get — usize-wrap: negative i
             // is huge and misses). Its default is NONE, not 0, so it
             // takes its own guard instead of the bits path.
