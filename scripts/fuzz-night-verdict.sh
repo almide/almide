@@ -6,9 +6,10 @@
 # $GITHUB_STEP_SUMMARY on stdout and (b) the greppable per-night record line
 # on stderr, so it lands in the job log even with stdout redirected:
 #
-#   fuzz-night: shards=4/4 reporting=4 missing=none minutes_planned=20
-#               minutes_delivered=20.0 delivered_pct=100 budget=full
-#               generated=4210 throughput=210.5prog/min findings=0 correctness=0 slow=0
+#   fuzz-night: shards=4/4 reporting=4 recovered=none missing=none
+#               minutes_planned=20 minutes_delivered=20.0 delivered_pct=100
+#               budget=full generated=4210 throughput=210.5prog/min findings=0
+#               findings_recovered=0 correctness=0 slow=0
 #
 # The field vocabulary is documented once, in scripts/lib/fuzz-night-line.sh,
 # which is also the reader the streak scripts use.
@@ -31,6 +32,31 @@
 # A shard that was killed simply has no output file: `upload-artifact` never
 # ran. That absence is the signal, and it is reported as `shards=k/N` rather
 # than being confused with a finding.
+#
+# BUT THE ABSENCE IS NOT THE DATA (#2513). "A reclaimed runner uploads nothing"
+# is true and says nothing about whether its run was recorded: the job LOG is
+# not an upload, it survives the kill, and its last progress line
+# (`[ 295s] generated=1108 ... findings=0`) carries the seconds fuzzed, the
+# programs generated and the findings up to the kill. Run 35702279584 lost four
+# shards at 100s/180s/275s/295s and the verdict scored all four as zero minutes:
+# 4/8 = 50% instead of the 85% those shards actually delivered, dropping a night
+# that WAS over #924's 75% line below it. So every shard with no artifact now
+# has its job log read (`repos/<repo>/actions/jobs/<id>/logs`) and, when that
+# log holds a progress line, its minutes, programs and findings are folded in
+# under `recovered=`. `missing=` narrows to the shards that yielded nothing
+# EITHER WAY — a log fetch that fails (network, retention, a job that never
+# started) scores as UNKNOWN, never as zero minutes and never as a clean shard,
+# and says "could not read shard N's log" so the reason is in the verdict text.
+# A recovered `findings=F` is F UP TO that second, never F for the whole budget,
+# and the fuzzer's counter does not split correctness from perf-class Slow, so
+# `findings_recovered` > 0 makes the night unclassified rather than green.
+#
+# The log source is a seam: with $FUZZ_SHARD_LOG_DIR set, shard N's log is read
+# from `$FUZZ_SHARD_LOG_DIR/shard-N.log` instead of the API, which is how the
+# tests forge killed shards without a network (tests/fuzz_night_report_test.rs).
+# Without it, recovery needs $GITHUB_REPOSITORY and $GITHUB_RUN_ID (the workflow
+# sets both) and a `gh` that can read sibling jobs — the verdict job therefore
+# carries `permissions: actions: read`.
 #
 # THE COUNT IS CONDITIONAL ON WHO CAME BACK (#2390). `findings=F` is the number
 # of findings COLLECTED from the shards that uploaded, not the number the night
@@ -95,6 +121,7 @@ MINUTES_PLANNED=$((MINUTES * PLANNED))
 
 emit_outputs() {
   # $1 reporting $2 missing $3 minutes_delivered $4 delivered_pct $5 budget
+  # $6 recovered $7 findings_recovered
   [ -n "${GITHUB_OUTPUT:-}" ] || return 0
   {
     echo "reporting=$1"
@@ -104,7 +131,23 @@ emit_outputs() {
     echo "minutes_delivered=$3"
     echo "delivered_pct=$4"
     echo "budget=$5"
+    echo "recovered=${6:-none}"
+    echo "findings_recovered=${7:-0}"
   } >> "$GITHUB_OUTPUT"
+}
+
+# This run's job list, fetched once: `fuzz_shard_log` (scripts/lib) turns a
+# shard NUMBER into a job id through it. Per-job logs are readable while the run
+# is still going, which is what makes this usable from the verdict job of the
+# same run. Failing to fetch it is not an error here — every shard then reads as
+# unreadable and is NAMED as such, which is the honest outcome.
+JOBS_JSON=""
+shard_job_log() {
+  local repo="${GITHUB_REPOSITORY:-}" run="${GITHUB_RUN_ID:-}"
+  if [ -z "${FUZZ_SHARD_LOG_DIR:-}" ] && [ -z "$JOBS_JSON" ] && [ -n "$repo" ] && [ -n "$run" ]; then
+    JOBS_JSON=$(gh api "repos/$repo/actions/runs/$run/jobs?per_page=100" 2>/dev/null || true)
+  fi
+  fuzz_shard_log "$repo" "$JOBS_JSON" "$1"
 }
 
 # One shard = one fuzz-output.txt anywhere under DIR. A killed shard uploaded
@@ -132,10 +175,17 @@ else
   [ -n "$MISSING" ] || MISSING="none"
 fi
 
+# No shard uploaded ANYTHING. Recovery is not attempted here on purpose: the
+# workflow's own "Fail the night when no shard reported" step has already failed
+# the night as INFRA by then (the #976 vacuous-pass rule), and a log-recovered
+# percentage must not be printed next to a `budget=` the streak readers would
+# score against a failed verdict job. The shards' logs still hold their lines;
+# what is missing is a ruling on whether a night nobody uploaded can be scored
+# at all, and that is not this script's to make.
 if [ "$REPORTING" -eq 0 ]; then
-  LINE="fuzz-night: shards=0/$PLANNED reporting=0 missing=$MISSING minutes_planned=$MINUTES_PLANNED minutes_delivered=0 delivered_pct=0 budget=partial generated=0 findings=$FINDINGS correctness=$CORRECTNESS slow=$SLOW"
+  LINE="fuzz-night: shards=0/$PLANNED reporting=0 recovered=none missing=$MISSING minutes_planned=$MINUTES_PLANNED minutes_delivered=0 delivered_pct=0 budget=partial generated=0 findings=$FINDINGS findings_recovered=0 correctness=$CORRECTNESS slow=$SLOW"
   echo "$LINE" >&2
-  emit_outputs 0 "$MISSING" 0 0 partial
+  emit_outputs 0 "$MISSING" 0 0 partial none 0
   echo "## Nightly fuzz verdict — findings=$FINDINGS of 0/$PLANNED shards"
   echo ""
   echo '```'; echo "$LINE"; echo '```'
@@ -177,36 +227,119 @@ for out in "${OUTS[@]}"; do
   SEEDS="${SEEDS}${seed:-?} "
 done
 
+# ── RECOVERY (#2513) ──────────────────────────────────────────────────────
+# Every shard with no artifact, read back out of its job log. What the log
+# yields is folded into the night's totals exactly as a truncated artifact is;
+# what it does not yield stays in `missing=` and is said out loud.
+RECOVERED=""
+RECOVERED_FINDINGS=0
+RECOVERED_SECONDS=0
+UNREADABLE=""
+if [ "$MISSING" != "none" ] && [ "$MISSING" != "unknown" ]; then
+  for n in ${MISSING//,/ }; do
+    log=$(shard_job_log "$n" || true)
+    read -r secs gen finds <<<"$(printf '%s\n' "$log" | fuzz_last_progress)" || true
+    if [ -z "${secs:-}" ]; then
+      UNREADABLE="${UNREADABLE:+$UNREADABLE,}$n"
+      echo "could not read shard $n's log — its minutes and findings stay UNKNOWN, not zero" >&2
+      continue
+    fi
+    seed=$(printf '%s\n' "$log" | grep -oE "seed += +[0-9]+" | tr -s ' ' | cut -d' ' -f3 | head -1 || true)
+    RECOVERED="${RECOVERED:+$RECOVERED,}$n@${secs}s"
+    RECOVERED_SECONDS=$((RECOVERED_SECONDS + secs))
+    RECOVERED_FINDINGS=$((RECOVERED_FINDINGS + finds))
+    GENERATED=$((GENERATED + gen))
+    ELAPSED=$(awk -v a="$ELAPSED" -v b="$secs" 'BEGIN{printf "%.1f", a+b}')
+    ROWS="${ROWS}| $n | ${seed:-?} | recovered | ${gen} | ${secs}s |"$'\n'
+    SEEDS="${SEEDS}${seed:-?} "
+  done
+fi
+[ -n "$RECOVERED" ] || RECOVERED="none"
+# `missing=` is now only what nothing could be read for, either way.
+case "$MISSING" in
+  unknown) ;;
+  *) MISSING="${UNREADABLE:-none}" ;;
+esac
+# The night's findings are the uploaded ones PLUS what the recovered logs had
+# counted by the second they were killed at. Recovered findings can overlap a
+# name the aggregate already deduplicated, so the total is an upper bound —
+# which is the safe direction: it can only make a night look less clean.
+FINDINGS_TOTAL=$((FINDINGS + RECOVERED_FINDINGS))
+
 DELIVERED=$(awk -v e="$ELAPSED" 'BEGIN{printf "%.1f", e/60}')
 THROUGHPUT=$(awk -v g="$GENERATED" -v e="$ELAPSED" 'BEGIN{printf "%.1f", (e>0)? g*60/e : 0}')
 PCT=$(awk -v p="$MINUTES_PLANNED" -v d="$DELIVERED" 'BEGIN{printf "%d", (p>0)? (100*d)/p : 0}')
 if [ "$PCT" -ge "$FUZZ_NIGHT_BUDGET_PCT" ]; then BUDGET=full; else BUDGET=partial; fi
-LINE="fuzz-night: shards=$COMPLETED/$PLANNED reporting=$REPORTING missing=$MISSING minutes_planned=$MINUTES_PLANNED minutes_delivered=$DELIVERED delivered_pct=$PCT budget=$BUDGET generated=$GENERATED throughput=${THROUGHPUT}prog/min findings=$FINDINGS correctness=$CORRECTNESS slow=$SLOW"
+LINE="fuzz-night: shards=$COMPLETED/$PLANNED reporting=$REPORTING recovered=$RECOVERED missing=$MISSING minutes_planned=$MINUTES_PLANNED minutes_delivered=$DELIVERED delivered_pct=$PCT budget=$BUDGET generated=$GENERATED throughput=${THROUGHPUT}prog/min findings=$FINDINGS_TOTAL findings_recovered=$RECOVERED_FINDINGS correctness=$CORRECTNESS slow=$SLOW"
 
 echo "$LINE" >&2
-emit_outputs "$REPORTING" "$MISSING" "$DELIVERED" "$PCT" "$BUDGET"
+emit_outputs "$REPORTING" "$MISSING" "$DELIVERED" "$PCT" "$BUDGET" "$RECOVERED" "$RECOVERED_FINDINGS"
 
 # The heading carries the condition: a count is only as good as the shards it
 # was collected from, and a reader who sees the number sees its denominator.
-echo "## Nightly fuzz verdict — findings=$FINDINGS of $REPORTING/$PLANNED shards"
+# A recovered shard is counted apart from the ones that uploaded: its numbers
+# are real, and they stop where the runner stopped it.
+RECOVERED_N=0
+case "$RECOVERED" in none) ;; *) RECOVERED_N=$(printf '%s' "$RECOVERED" | tr ',' '\n' | grep -c .) ;; esac
+if [ "$RECOVERED_N" -gt 0 ]; then
+  echo "## Nightly fuzz verdict — findings=$FINDINGS_TOTAL of $REPORTING/$PLANNED shards (+$RECOVERED_N recovered from job logs)"
+else
+  echo "## Nightly fuzz verdict — findings=$FINDINGS_TOTAL of $REPORTING/$PLANNED shards"
+fi
 echo ""
 echo '```'
 echo "$LINE"
 echo '```'
 echo ""
-if [ "$REPORTING" -lt "$PLANNED" ]; then
-  UNRETURNED=$((PLANNED - REPORTING))
-  case "$MISSING" in
-    unknown) WHICH="" ;;
-    *)       WHICH=" (shards ${MISSING//,/, })" ;;
-  esac
-  echo "**$FINDINGS** finding(s) collected from **$REPORTING of $PLANNED** shards —"
-  echo "**$UNRETURNED** shard(s)${WHICH} did not report, and their findings, if any, are"
-  echo "NOT in this count. Their campaign logs still hold every \`** FINDING\` line,"
-  echo "and the seed is derived (\`run_id * 16 + shard\`), so the missing evidence is"
-  echo "replayable from the run alone."
+if [ "$RECOVERED_N" -gt 0 ]; then
+  echo "**$RECOVERED_N** shard(s) uploaded nothing and were RECOVERED FROM THEIR JOB LOGS"
+  echo "(${RECOVERED//,/, }): a reclaimed runner uploads nothing, but its log is not an"
+  echo "upload — it outlives the job and still carries the campaign's last progress"
+  echo "line. Their seconds, programs and findings are in the numbers above."
   echo ""
-  echo "::warning::$UNRETURNED of $PLANNED fuzz shard(s) did not report${WHICH}; findings=$FINDINGS counts only the $REPORTING that did" >&2
+  echo "Each recovered count is **only up to the second it is tagged with**, never for"
+  echo "that shard's whole budget: the shard fuzzed no further, so nothing after that"
+  echo "second was examined at all."
+  if [ "$RECOVERED_FINDINGS" -gt 0 ]; then
+    echo ""
+    echo "**$RECOVERED_FINDINGS finding(s) came back with them** (\`findings_recovered\`), and the"
+    echo "fuzzer's progress counter does not say which class they are — so they are"
+    echo "unclassified until someone reads those logs, and this night is NOT green."
+    echo "The repro is the derived seed: \`xtarget-fuzz replay --seed <run_id * 16 + shard>\`."
+  else
+    echo "No finding had been recorded in any of those logs by the second it stops at;"
+    echo "what happened afterwards was not run, so it is not a claim about it."
+  fi
+  echo ""
+  echo "::notice::$RECOVERED_N of $PLANNED fuzz shard(s) uploaded nothing and were recovered from their job logs ($RECOVERED); findings_recovered=$RECOVERED_FINDINGS, counted only to the second named" >&2
+fi
+MISSING_N=0
+case "$MISSING" in
+  none) ;;
+  unknown) MISSING_N=$((PLANNED - REPORTING)) ;;
+  *) MISSING_N=$(printf '%s' "$MISSING" | tr ',' '\n' | grep -c .) ;;
+esac
+if [ "$MISSING_N" -gt 0 ]; then
+  echo "**$FINDINGS_TOTAL** finding(s) collected from **$REPORTING of $PLANNED** shards plus"
+  case "$MISSING" in
+    unknown)
+      WHICH=""
+      echo "**$RECOVERED_N** recovered log(s) — **$MISSING_N** shard(s) returned nothing, and this"
+      echo "shard layout carries no shard numbers, so no job log could be looked up for"
+      echo "them. Their findings, if any, are NOT in this count and their minutes are"
+      echo "UNKNOWN, not zero."
+      ;;
+    *)
+      WHICH=" (shards ${MISSING//,/, })"
+      echo "**$RECOVERED_N** recovered log(s) — **$MISSING_N** shard(s)${WHICH} returned nothing AND"
+      echo "their job log could not be read either, so their findings, if any, are NOT in"
+      echo "this count and their minutes are UNKNOWN, not zero. Those logs, if they come"
+      echo "back, still hold every \`** FINDING\` line, and the seed is derived"
+      echo "(\`run_id * 16 + shard\`), so the missing evidence is replayable from the run alone."
+      ;;
+  esac
+  echo ""
+  echo "::warning::$MISSING_N of $PLANNED fuzz shard(s) yielded nothing at all${WHICH} — neither an artifact nor a readable job log; findings=$FINDINGS_TOTAL does not include them" >&2
 fi
 echo "Delivered **$DELIVERED** of **$MINUTES_PLANNED** planned fuzz-minutes (**$PCT%**, budget=$BUDGET"
 echo "at the ${FUZZ_NIGHT_BUDGET_PCT}% line #924 counts a streak night by)."
