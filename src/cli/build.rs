@@ -726,8 +726,10 @@ pub(super) fn lower_one_wasm_module(
 /// `compile_to_wasm_bytes`'s parse + dependency-fetch + import-resolution
 /// phase. Extracted verbatim — prints diagnostics and returns `Err(())` on
 /// any parse/fetch/resolve failure, mirroring the original early returns.
+/// Also `almide verify`'s front half (#2152): the certificate producer lowers
+/// the same resolved module set the wasm leg renders.
 #[allow(clippy::type_complexity)]
-fn parse_and_resolve_wasm(file: &str) -> Result<(almide::ast::Program, String, resolve::ResolvedModules, Vec<(project::PkgId, std::path::PathBuf)>), ()> {
+pub(crate) fn parse_and_resolve_wasm(file: &str) -> Result<(almide::ast::Program, String, resolve::ResolvedModules, Vec<(project::PkgId, std::path::PathBuf)>), ()> {
     let (program, source_text, parse_errors) = parse_file(file);
 
     if !parse_errors.is_empty() {

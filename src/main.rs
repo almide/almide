@@ -359,6 +359,16 @@ enum Commands {
         /// Target version (e.g., v0.13.0); defaults to latest
         version: Option<String>,
     },
+    /// Re-check a program's flight-grade certificates with the independent
+    /// `almide-verify` binary (found next to almide, else on PATH; there is no
+    /// built-in fallback). `almide verify app.almd [--emit out.bundle]`
+    /// produces the certificate bundle and hands it over; any other arguments
+    /// go to almide-verify verbatim (e.g. `almide verify ownership w.cert`).
+    Verify {
+        /// `<file.almd> [--emit <bundle>]`, or arguments for almide-verify
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
     /// Agent/LLM semantic queries (outline, doc, stdlib-snapshot)
     Ide {
         #[command(subcommand)]
@@ -1008,6 +1018,7 @@ fn dispatch_rest(command: Commands) {
         Commands::SelfUpdate { version } => {
             cli::cmd_self_update(version.as_deref());
         }
+        Commands::Verify { args } => std::process::exit(cli::cmd_verify(&args)),
         Commands::Emit { file, target, emit_ast, emit_ir, emit_dialect, no_check, repr_c, trace_map } => {
             cli::cmd_emit(cli::EmitArgs { file: &file, target: &target, emit_ast, emit_ir, emit_dialect, no_check, repr_c, trace_map });
         }
