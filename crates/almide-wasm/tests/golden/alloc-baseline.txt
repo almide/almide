@@ -583,6 +583,8 @@
 68016	spec/wasm_cross/rope_geometry_family.almd
 65840	spec/wasm_cross/scalar_if_arm_effects.almd
 66288	spec/wasm_cross/scan_heap_acc.almd
+98400	spec/wasm_cross/scoped_region_value.almd
+66320	spec/wasm_cross/scoped_worker_in_and_out.almd
 66688	spec/wasm_cross/set_entries_reclaim.almd
 105776	spec/wasm_cross/set_index_order.almd
 66736	spec/wasm_cross/set_insertion_order.almd
