@@ -243,7 +243,8 @@ fn main() -> Unit = {
 
 ### `int.rotate_right(a: Int, n: Int, bits: Int) -> Int`
 
-Rotate bits right within a given bit width.
+Rotate bits right within a given bit width. The count `n` is taken modulo `bits`
+(Euclidean), so a negative count rotates left: `rotate_right(1, -1, 8) = 2`.
 
 ```almd run
 fn main() -> Unit = {
@@ -256,7 +257,8 @@ fn main() -> Unit = {
 
 ### `int.rotate_left(a: Int, n: Int, bits: Int) -> Int`
 
-Rotate bits left within a given bit width.
+Rotate bits left within a given bit width. The count `n` is taken modulo `bits`
+(Euclidean), so a negative count rotates right: `rotate_left(1, -1, 8) = 128`.
 
 ```almd run
 fn main() -> Unit = {
