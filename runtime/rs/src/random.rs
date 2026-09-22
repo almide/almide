@@ -56,28 +56,9 @@ pub fn almide_rt_random_shuffle<T: Clone>(mut xs: Vec<T>) -> Vec<T> {
     xs
 }
 
-// NOTE: runtime/rs is not a workspace member, so this module is compiled only
-// when the generated crate builds — `cargo test` at the root never runs it
-// (the same is true of the older tests in env.rs). The EXECUTED evidence for
-// the range is spec/stdlib/random_test.almd: a sampled floor over 2000 draws
-// plus the construction's top value, (2^53-1)/2^53, asserted deterministically
-// on every leg.
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn float_construction_never_reaches_one() {
-        // The top of the u64 range is where the old quotient rounded to 1.0.
-        for r in [u64::MAX, u64::MAX - 1, u64::MAX - 1023, u64::MAX - 1024, 1u64 << 63] {
-            let f = almide_float_from_u64(r);
-            assert!((0.0..1.0).contains(&f), "{r} -> {f}");
-        }
-        assert_eq!(almide_float_from_u64(0), 0.0);
-        assert_eq!(almide_float_from_u64(u64::MAX), 1.0 - f64::EPSILON / 2.0);
-        for _ in 0..100_000 {
-            let f = almide_rt_random_float();
-            assert!((0.0..1.0).contains(&f), "{f}");
-        }
-    }
-}
+// The 53-bit construction's boundary cells are EXECUTED, but not from here:
+// tests/runtime_random_float_construction_test.rs `include!`s this file and
+// asserts them under `cargo test --workspace`. That works because this module
+// is self-contained (std::cell::Cell and nothing else); most of runtime/rs is
+// not, which is why the general rule stays "the oracle is spec/" — see
+// runtime/rs/README.md.

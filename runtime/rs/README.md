@@ -102,3 +102,25 @@ here runs nowhere: no cargo build compiles this directory, and
 So: **do not add `#[cfg(test)]` under `runtime/rs`.** Write the test in
 `spec/stdlib/` (or `spec/wasm_cross/` when the change is a cross-target
 promise). `scripts/check-runtime-test-placement.sh` enforces this in CI.
+
+### The one narrow exception: a self-contained module, included by a root test
+
+When the cell under test is **private** and its only public door is
+non-deterministic, `spec/` cannot reach it. `random.rs`'s 53-bit construction
+(`almide_float_from_u64`) is the case: `random.float()` draws a u64 nobody
+chooses, so `spec/stdlib/random_test.almd` can assert the sampled floor and the
+construction's top value but not the individual u64 inputs where the old
+quotient rounded to 1.0 (#2495).
+
+For that, `tests/runtime_random_float_construction_test.rs` `include!`s
+`runtime/rs/src/random.rs` into a module of its own and tests the **shipped
+source text** under `cargo test --workspace`. The test file, not the runtime
+source, holds the accessor for the private item, so nothing about what ships
+changes.
+
+This works only because `random.rs` depends on `std::cell::Cell` and nothing
+else. Every other module here resolves only under the embedder's flat
+concatenation plus the synthesised prelude (the 220 errors above), so the same
+include would not compile. Treat this as one measured exception, not a pattern:
+if a second module ever qualifies, say in the test file why it is
+self-contained.
