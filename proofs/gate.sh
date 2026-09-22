@@ -39,9 +39,12 @@ echo "== build almide-verify (the portable checker, held to the extracted one's 
 (cd "$ROOT" && cargo build -q -p almide-verify)
 VERIFY="${CARGO_TARGET_DIR:-$ROOT/target}/debug/almide-verify"
 [ -x "$VERIFY" ] || { echo "FAIL: almide-verify was not built at $VERIFY"; exit 1; }
+# (No `set +e`/`set -e` toggling inside: re-enabling errexit in here would make
+# the final test abort the whole gate when a caller probes for a MISMATCH, as
+# the tamper(iii) drill does.)
 portable_agrees() { # checker-mode witness-file expected_exit(0=accept|1=reject)
-  local rc
-  set +e; "$VERIFY" "$1" "$2" >/dev/null 2>&1; rc=$?; set -e
+  local rc=0
+  "$VERIFY" "$1" "$2" >/dev/null 2>&1 || rc=$?
   [ "$rc" -eq "$3" ]
 }
 
