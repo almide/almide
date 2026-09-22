@@ -96,13 +96,15 @@ fn __mx_shape_eq(a: Int, b: Int) -> Int = {
 // value and read on, since a v1 Matrix is a list of rows with no invariant.
 fn __mx_uniform_from(h: Int, w: Int, n: Int, i: Int) -> Int = if i >= n then 0
 else {
-  if prim.load32(prim.load64(h + 12 + i * 8) + 4) != w then prim.die(prim.handle("Error: matrix rows must have equal length\n")) else ()
+  if prim.load32(prim.load64(h + 12 + i * 8) + 4) != w then prim.die(prim.handle("Error: matrix rows must have equal length\n"))
+  else ()
   __mx_uniform_from(h, w, n, i + 1)
 }
 
 fn __mx_rows_uniform(h: Int) -> Int = {
   let n = prim.load32(h + 4)
-  if n == 0 then 0 else __mx_uniform_from(h, prim.load32(prim.load64(h + 12) + 4), n, 1)
+  if n == 0 then 0
+  else __mx_uniform_from(h, prim.load32(prim.load64(h + 12) + 4), n, 1)
 }
 
 fn __mx_const(rows: Int, cols: Int, x: Float) -> List[List[Float]] = {
@@ -446,8 +448,10 @@ else {
 // the bias has one entry per output, checked after the empty short-circuit —
 // `__mx_lin_row` read a short bias's missing entries from past the list block
 // (0.0 off the fresh pages) where native panicked on the index.
-fn __mx_lin_guard(hx: Int, hw: Int, r: Int, wr: Int) -> Int = if r == 0 or wr == 0 then 0
-else __mx_shape_eq(prim.load32(prim.load64(hw + 12) + 4), prim.load32(prim.load64(hx + 12) + 4))
+fn __mx_lin_guard(hx: Int, hw: Int, r: Int, wr: Int) -> Int = if r == 0 or wr == 0 then 0 else __mx_shape_eq(
+  prim.load32(prim.load64(hw + 12) + 4),
+  prim.load32(prim.load64(hx + 12) + 4),
+)
 
 fn matrix_linear_row(x: List[List[Float]], weight: List[List[Float]], bias: List[Float]) -> List[List[Float]] = {
   let hx = prim.handle(x)
@@ -801,7 +805,8 @@ fn matrix_concat_cols(matrices: List[List[List[Float]]]) -> List[List[Float]] = 
   let k = prim.load32(hs + 4)
   let rows0 = if k == 0 then 0 else prim.load32(prim.load64(hs + 12) + 4)
   let empty_case = k > 0 and rows0 == 0
-  let _g = if rows0 == 0 then 0 else __mx_cc_guard(hs, k, rows0, 1)
+  let _g = if rows0 == 0 then 0
+  else __mx_cc_guard(hs, k, rows0, 1)
   let out_rows = if k == 0 then 0
   else {
     if rows0 == 0 then 1 else rows0

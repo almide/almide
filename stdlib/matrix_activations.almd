@@ -226,7 +226,8 @@ fn matrix_swiglu_gate(x: List[List[Float]], w_gate: List[List[Float]], w_up: Lis
   // k < d_in and j < d_out, so a narrower weight or a shorter `w_up` read
   // past a row block here (native: a raw index panic). Same order as
   // native: gate width, up width, up rows.
-  let _g = if rows == 0 then 0 else __mxa_shape_guard(w_gate, w_up, d_in, d_out)
+  let _g = if rows == 0 then 0
+  else __mxa_shape_guard(w_gate, w_up, d_in, d_out)
   let out: List[List[Float]] = prim.alloc_list_str(rows)
   let _x = __sg_rows(prim.handle(out), x, w_gate, w_up, rows, d_out, d_in, 0)
   out
@@ -572,7 +573,8 @@ fn __mha_impl(q: List[List[Float]], k: List[List[Float]], v: List[List[Float]], 
   let sk = prim.load32(prim.handle(k) + 4)
   let dm = if sq == 0 then 0 else prim.load32(prim.load64(hq + 12) + 4)
   let nh = __mx_head_count(n_heads)
-  let _g = if sq == 0 then 0 else __mha_shape_guard(prim.handle(k), prim.handle(v), sk, dm)
+  let _g = if sq == 0 then 0
+  else __mha_shape_guard(prim.handle(k), prim.handle(v), sk, dm)
   let _c = if sq == 0 or not causal then 0 else __mxa_shape_le(sq, sk)
   let dh = dm / nh
   let scale = 1.0 / float.sqrt(int.to_float(dh))
