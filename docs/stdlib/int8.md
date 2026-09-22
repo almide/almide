@@ -65,63 +65,83 @@ machine-enforced by the numeric-matrix gate in `almide docs-gen --check` (#956).
 
 ```
 // Sign-extending widen; always exact.
+// @since 0.15.0 or earlier
 int8.to_int16(x: Int8) -> Int16
 
 // Sign-extending widen; always exact.
+// @since 0.15.0 or earlier
 int8.to_int32(x: Int8) -> Int32
 
 // Sign-extending widen; always exact.
+// @since 0.15.0 or earlier
 int8.to_int64(x: Int8) -> Int64
 
 // Wraps to 8 bits; -1 becomes 255.
+// @since 0.15.0 or earlier
 int8.to_uint8(x: Int8) -> UInt8
 
 // Wraps to 16 bits; -1 becomes 65535.
+// @since 0.15.0 or earlier
 int8.to_uint16(x: Int8) -> UInt16
 
 // Wraps to 32 bits; -1 becomes 2^32-1.
+// @since 0.15.0 or earlier
 int8.to_uint32(x: Int8) -> UInt32
 
 // Wraps to 64 bits; -1 becomes 2^64-1.
+// @since 0.15.0 or earlier
 int8.to_uint64(x: Int8) -> UInt64
 
 // Same value as Float32; always exact.
+// @since 0.15.0 or earlier
 int8.to_float32(x: Int8) -> Float32
 
 // Same value as Float64; always exact.
+// @since 0.15.0 or earlier
 int8.to_float64(x: Int8) -> Float64
 
 // Decimal digits, with - when negative.
+// @since 0.15.0 or earlier
 int8.to_string(x: Int8) -> String
 
 // some(x), or none if x is negative.
+// @since 0.38.0
 int8.to_uint8_checked(x: Int8) -> Option[UInt8]
 
 // Negative x clamps to 0.
+// @since 0.38.0
 int8.to_uint8_saturating(x: Int8) -> UInt8
 
 // some(x), or none if x is negative.
+// @since 0.38.0
 int8.to_uint16_checked(x: Int8) -> Option[UInt16]
 
 // Negative x clamps to 0.
+// @since 0.38.0
 int8.to_uint16_saturating(x: Int8) -> UInt16
 
 // some(x), or none if x is negative.
+// @since 0.38.0
 int8.to_uint32_checked(x: Int8) -> Option[UInt32]
 
 // Negative x clamps to 0.
+// @since 0.38.0
 int8.to_uint32_saturating(x: Int8) -> UInt32
 
 // some(x), or none if x is negative.
+// @since 0.38.0
 int8.to_uint64_checked(x: Int8) -> Option[UInt64]
 
 // Negative x clamps to 0.
+// @since 0.38.0
 int8.to_uint64_saturating(x: Int8) -> UInt64
 
 // Smallest Int8: -128.
+// @since 0.38.0
 int8.min_value() -> Int8
 
 // Largest Int8: 127.
+// @since 0.38.0
 int8.max_value() -> Int8
 ```
 

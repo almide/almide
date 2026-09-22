@@ -88,15 +88,19 @@ trips both `encode_url` and the unpadded JWT form.
 
 ```
 // Standard base64 with + / and = padding.
+// @since 0.13.4 or earlier
 base64.encode(b: Bytes) -> String
 
 // Bytes from base64; padding optional; err if bad.
+// @since 0.13.4 or earlier
 base64.decode(s: String) -> Result[Bytes, String]
 
 // URL-safe base64 (- _), still = padded.
+// @since 0.13.4 or earlier
 base64.encode_url(b: Bytes) -> String
 
 // Same as decode; accepts either alphabet.
+// @since 0.13.4 or earlier
 base64.decode_url(s: String) -> Result[Bytes, String]
 ```
 

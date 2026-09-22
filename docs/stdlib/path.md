@@ -177,33 +177,43 @@ fn main() -> Unit = {
 
 ```
 // SafePath of s; err if any segment is "..".
+// @since 0.18.1 or earlier
 path.from_string(s: String) -> Result[SafePath, String]
 
 // SafePath of s with no traversal check.
+// @since 0.18.1 or earlier
 path.trusted(s: String) -> SafePath
 
 // Path text inside p, unchanged.
+// @since 0.18.1 or earlier
 path.to_string(p: SafePath) -> String
 
 // base/child; an absolute child replaces base.
+// @since 0.2.0 or earlier
 path.join(base: String, child: String) -> String
 
 // p minus last segment; "" if no slash.
+// @since 0.2.0 or earlier
 path.dirname(p: String) -> String
 
 // Last non-empty segment; "" for / or empty p.
+// @since 0.2.0 or earlier
 path.basename(p: String) -> String
 
 // After basename's last dot; none if no dot or dotfile.
+// @since 0.2.0 or earlier
 path.extension(p: String) -> Option[String]
 
 // True when p starts with /.
+// @since 0.2.0 or earlier
 path.is_absolute(p: String) -> Bool
 
 // Basename minus last extension; dotfiles as-is.
+// @since 0.3.0 or earlier
 path.stem(p: String) -> String
 
 // Resolves . and .. lexically; "" becomes ".".
+// @since 0.3.0 or earlier
 path.normalize(p: String) -> String
 ```
 

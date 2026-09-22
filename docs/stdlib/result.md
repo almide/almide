@@ -186,48 +186,63 @@ fn main() -> Unit = {
 
 ```
 // ok(f(v)) for ok(v); err passes through.
+// @since 0.5.13 or earlier
 result.map(r: Result[A, E], f: (A) -> B) -> Result[B, E]
 
 // err(f(e)) for err(e); ok passes through.
+// @since 0.5.13 or earlier
 result.map_err(r: Result[A, E], f: (E) -> F) -> Result[A, F]
 
 // f(v) for ok(v); err passes through.
+// @since 0.6.1 or earlier
 result.flat_map(r: Result[A, E], f: (A) -> Result[B, E]) -> Result[B, E]
 
 // v for ok(v), else default (always evaluated).
+// @since 0.5.13 or earlier
 result.unwrap_or(r: Result[A, E], default: A) -> A   (deprecated — use ??)
 
 // v for ok(v), else f(e); f runs only on err.
+// @since 0.5.13 or earlier
 result.unwrap_or_else(r: Result[A, E], f: (E) -> A) -> A
 
 // true for ok(_), false for err(_).
+// @since 0.6.0 or earlier
 result.is_ok(r: Result[A, E]) -> Bool
 
 // true for err(_), false for ok(_).
+// @since 0.6.0 or earlier
 result.is_err(r: Result[A, E]) -> Bool
 
 // some(v) for ok(v); none for err, e dropped.
+// @since 0.5.13 or earlier
 result.to_option(r: Result[A, E]) -> Option[A]
 
 // some(e) for err(e); none for ok.
+// @since 0.5.13 or earlier
 result.to_err_option(r: Result[A, E]) -> Option[E]
 
 // (ok values, err values), each in list order.
+// @since 0.9.1 or earlier
 result.partition(rs: List[Result[T, E]]) -> (List[T], List[E])
 
 // Inner result of ok(inner); outer err kept.
+// @since 0.15.0 or earlier
 result.flatten(r: Result[Result[A, E], E]) -> Result[A, E]
 
 // [v] for ok(v), [] for err.
+// @since 0.15.0 or earlier
 result.to_list(r: Result[A, E]) -> List[A]
 
 // ok((x, y)) if both ok, else the first err.
+// @since 0.15.0 or earlier
 result.zip(a: Result[A, E], b: Result[B, E]) -> Result[(A, B), E]
 
 // r when ok, else f(e); f runs only on err.
+// @since 0.15.0 or earlier
 result.or_else(r: Result[A, E], f: (E) -> Result[A, F]) -> Result[A, F]
 
 // err(err_val) if pred fails on ok; err kept.
+// @since 0.15.0 or earlier
 result.filter(r: Result[A, E], pred: (A) -> Bool, err_val: E) -> Result[A, E]
 ```
 

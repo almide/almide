@@ -76,15 +76,19 @@ native leg.
 
 ```
 // Random Int in [min, max]; min if max <= min.
+// @since 0.5.0 or earlier
 effect random.int(min: Int, max: Int) -> Int
 
 // Random Float in [0, 1]; not crypto-grade.
+// @since 0.5.0 or earlier
 effect random.float() -> Float
 
 // Random element of xs; none when empty.
+// @since 0.5.0 or earlier
 effect random.choice(xs: List[T]) -> Option[T]
 
 // Random permutation of xs as a new list.
+// @since 0.5.0 or earlier
 effect random.shuffle(xs: List[T]) -> List[T]
 ```
 

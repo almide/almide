@@ -65,75 +65,99 @@ machine-enforced by the numeric-matrix gate in `almide docs-gen --check` (#956).
 
 ```
 // Wraps to 8 bits; 128 becomes -128.
+// @since 0.15.0 or earlier
 int32.to_int8(x: Int32) -> Int8
 
 // Wraps to 16 bits; 32768 becomes -32768.
+// @since 0.15.0 or earlier
 int32.to_int16(x: Int32) -> Int16
 
 // Sign-extending widen; always exact.
+// @since 0.15.0 or earlier
 int32.to_int64(x: Int32) -> Int64
 
 // Wraps to 8 bits; -1 becomes 255.
+// @since 0.15.0 or earlier
 int32.to_uint8(x: Int32) -> UInt8
 
 // Wraps to 16 bits; -1 becomes 65535.
+// @since 0.15.0 or earlier
 int32.to_uint16(x: Int32) -> UInt16
 
 // Wraps to 32 bits; -1 becomes 2^32-1.
+// @since 0.15.0 or earlier
 int32.to_uint32(x: Int32) -> UInt32
 
 // Wraps to 64 bits; -1 becomes 2^64-1.
+// @since 0.15.0 or earlier
 int32.to_uint64(x: Int32) -> UInt64
 
 // Float32 value; may round when abs(x) > 2^24.
+// @since 0.15.0 or earlier
 int32.to_float32(x: Int32) -> Float32
 
 // Same value as Float64; always exact.
+// @since 0.15.0 or earlier
 int32.to_float64(x: Int32) -> Float64
 
 // Decimal digits, with - when negative.
+// @since 0.15.0 or earlier
 int32.to_string(x: Int32) -> String
 
 // some(x), or none if outside -128..127.
+// @since 0.38.0
 int32.to_int8_checked(x: Int32) -> Option[Int8]
 
 // Clamps x to -128..127.
+// @since 0.38.0
 int32.to_int8_saturating(x: Int32) -> Int8
 
 // some(x), or none if outside -32768..32767.
+// @since 0.38.0
 int32.to_int16_checked(x: Int32) -> Option[Int16]
 
 // Clamps x to -32768..32767.
+// @since 0.38.0
 int32.to_int16_saturating(x: Int32) -> Int16
 
 // some(x), or none if outside 0..255.
+// @since 0.38.0
 int32.to_uint8_checked(x: Int32) -> Option[UInt8]
 
 // Clamps x to 0..255.
+// @since 0.38.0
 int32.to_uint8_saturating(x: Int32) -> UInt8
 
 // some(x), or none if outside 0..65535.
+// @since 0.38.0
 int32.to_uint16_checked(x: Int32) -> Option[UInt16]
 
 // Clamps x to 0..65535.
+// @since 0.38.0
 int32.to_uint16_saturating(x: Int32) -> UInt16
 
 // some(x), or none if x is negative.
+// @since 0.38.0
 int32.to_uint32_checked(x: Int32) -> Option[UInt32]
 
 // Negative x clamps to 0.
+// @since 0.38.0
 int32.to_uint32_saturating(x: Int32) -> UInt32
 
 // some(x), or none if x is negative.
+// @since 0.38.0
 int32.to_uint64_checked(x: Int32) -> Option[UInt64]
 
 // Negative x clamps to 0.
+// @since 0.38.0
 int32.to_uint64_saturating(x: Int32) -> UInt64
 
 // Smallest Int32: -2147483648.
+// @since 0.38.0
 int32.min_value() -> Int32
 
 // Largest Int32: 2147483647.
+// @since 0.38.0
 int32.max_value() -> Int32
 ```
 

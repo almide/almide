@@ -94,27 +94,35 @@ q=a%20b&lang=ja
 
 ```
 // All but A-Za-z0-9-._~ as UTF-8 %XX escapes.
+// @since 0.60.0 or earlier
 url.encode_component(s: String) -> String
 
 // Percent-decoded s; err on bad escape/UTF-8; + kept.
+// @since 0.60.0 or earlier
 url.decode_component(s: String) -> Result[String, String]
 
 // Url from s; err without :// or on bad port.
+// @since 0.6.0 or earlier
 url.parse(s: String) -> Result[Url, String]
 
 // URL text of u; empty query/fragment omitted.
+// @since 0.6.0 or earlier
 url.to_string(u: Url) -> String
 
 // Undecoded (k, v) pairs; bare key gets "".
+// @since 0.60.0 or earlier
 url.query_pairs(query: String) -> List[(String, String)]
 
 // k=v joined by &, both sides percent-encoded.
+// @since 0.60.0 or earlier
 url.build_query(pairs: List[(String, String)]) -> String
 ```
 
 ## Type index (1 types)
 
 ```
+// Parsed URL; port none, other parts "" when absent.
+// @since 0.6.0 or earlier
 type url.Url = { scheme: String, host: String, port: Option[Int], path: String, query: String, fragment: String }
 ```
 
