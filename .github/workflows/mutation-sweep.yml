@@ -42,7 +42,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3]
+        # 1-based for the job name; the gate's ALMIDE_MUTATION_SHARD stays 0-based.
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v7
       - uses: Swatinem/rust-cache@v2
@@ -50,7 +51,7 @@ jobs:
         run: |
           set -o pipefail
           ALMIDE_MUTATION_SHARDS=4 \
-          ALMIDE_MUTATION_SHARD=${{ matrix.shard }} \
+          ALMIDE_MUTATION_SHARD=$(( ${{ matrix.shard }} - 1 )) \
             bash scripts/check-mutation-gate.sh | tee mutation-shard-${{ matrix.shard }}.log
       # The per-mutant verdict lines are the measurement the score job reads.
       - uses: actions/upload-artifact@v7
