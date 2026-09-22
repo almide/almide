@@ -255,6 +255,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "almide-verify"
+version = "0.1.0"
+
+[[package]]
 name = "almide-wasm"
 version = "0.12.2"
 dependencies = [
