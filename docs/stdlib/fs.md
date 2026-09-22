@@ -644,39 +644,106 @@ true
 ## Signature index (34 functions)
 
 ```
+// Whole file as UTF-8; err if missing or not UTF-8.
 effect fs.read_text(path: String) -> String
+
+// Bytes as Ints 0..255; err if missing.
 effect fs.read_bytes(path: String) -> List[Int]
+
+// Overwrites or creates; err if no parent dir.
 effect fs.write(path: String, content: String) -> Unit
+
+// Writes low byte of each Int (-1 -> 255).
 effect fs.write_bytes(path: String, bytes: List[Int]) -> Unit
+
+// Writes data verbatim, replacing the file.
 effect fs.write_bytes_raw(path: String, data: Bytes) -> Unit
+
+// Appends content; creates the file if missing.
 effect fs.append(path: String, content: String) -> Unit
+
+// Creates dir and parents; ok if it exists.
 effect fs.mkdir_p(path: String) -> Unit
+
+// False if missing or a dangling symlink.
 effect fs.exists(path: String) -> Bool
+
+// CRLF-aware lines; a final newline adds no line.
 effect fs.read_lines(path: String) -> List[String]
+
+// Streamed fold over lines; err if missing.
 effect fs.fold_lines(path: String, init: A, f: (A, String) -> A) -> A
+
+// Calls f per line, streamed; may err mid-file.
 effect fs.for_each_line(path: String, f: (String) -> Unit) -> Unit
+
+// Folds lines starting in bytes [start, end).
 effect fs.fold_lines_range(path: String, start: Int, end: Int, init: A, f: (A, String) -> A) -> A
+
+// Parallel chunk partials, in order; [] if empty.
 effect fs.fold_lines_chunked(path: String, workers: Int, init: A, f: (A, String) -> A) -> List[A]
+
+// Text, or none if missing; err if not UTF-8.
 effect fs.read_text_if_exists(path: String) -> Option[String]
+
+// Bytes as Ints, or none if missing.
 effect fs.read_bytes_if_exists(path: String) -> Option[List[Int]]
+
+// read_lines result, or none if missing.
 effect fs.read_lines_if_exists(path: String) -> Option[List[String]]
+
+// File Bytes, or none if missing.
 effect fs.read_bytes_raw_if_exists(path: String) -> Option[Bytes]
+
+// Deletes a file or empty dir; err if missing.
 effect fs.remove(path: String) -> Unit
+
+// Sorted names (not paths); err if not a dir.
 effect fs.list_dir(path: String) -> List[String]
+
+// True for a dir; follows symlinks.
 effect fs.is_dir(path: String) -> Bool
+
+// True for a regular file; follows symlinks.
 effect fs.is_file(path: String) -> Bool
+
+// Copies src to dst; overwrites dst.
 effect fs.copy(src: String, dst: String) -> Unit
+
+// Moves src to dst; replaces an existing dst.
 effect fs.rename(src: String, dst: String) -> Unit
+
+// Sorted paths below dir, recursive; dirs too.
 effect fs.walk(dir: String) -> List[String]
+
+// Deletes a tree or file; err if missing.
 effect fs.remove_all(path: String) -> Unit
+
+// Size in bytes; err if missing.
 effect fs.file_size(path: String) -> Int
+
+// Host temp dir; may end with /.
 effect fs.temp_dir() -> String
+
+// Size, kind and mtime; err if missing.
 effect fs.stat(path: String) -> FileStat
+
+// Sorted * and ** matches; [] if base is absent.
 effect fs.glob(pattern: String) -> List[String]
+
+// New empty file temp_dir/prefix+nanos; its path.
 effect fs.create_temp_file(prefix: String) -> String
+
+// New dir temp_dir/prefix+nanos; its path.
 effect fs.create_temp_dir(prefix: String) -> String
+
+// True for a symlink, even a dangling one.
 effect fs.is_symlink(path: String) -> Bool
+
+// Mtime in Unix seconds; err if missing.
 effect fs.modified_at(path: String) -> Int
+
+// Whole file as Bytes; err if missing.
 effect fs.read_bytes_raw(path: String) -> Bytes
 ```
 

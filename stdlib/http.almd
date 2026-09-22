@@ -23,10 +23,12 @@
 // A handler `Err` becomes the loop's 500 response; a pure handler is
 // Ok-wrapped by the checker's carrier typing, so both spellings arrive
 // uniform.
+/// Serves 0.0.0.0:port forever; handler err is a 500.
 @intrinsic("almide_rt_http_serve")
 effect fn serve(port: Int, f: effect (HttpRequest) -> HttpResponse) -> Unit = _
 
 // ── Response builders ──
+/// Reply with Content-Type text/plain.
 @intrinsic("almide_rt_http_response")
 fn response(status: Int, body: String) -> HttpResponse = _
 
@@ -35,29 +37,36 @@ fn response(status: Int, body: String) -> HttpResponse = _
 // Note: http is a bundled stdlib module and cannot import html directly.
 // Users call: http.response(status, html.to_string(body))
 // A convenience wrapper will be added when cross-bundled-module calls are supported.
+/// Reply with Content-Type application/json.
 @intrinsic("almide_rt_http_json")
 fn json(status: Int, body: String) -> HttpResponse = _
 
+/// Reply with headers as-is; no default Content-Type.
 @intrinsic("almide_rt_http_with_headers")
 @borrow_ref(headers)
 fn with_headers(status: Int, body: String, headers: Map[String, String]) -> HttpResponse = _
 
+/// 302 with Location url and empty body.
 @intrinsic("almide_rt_http_redirect")
 fn redirect(url: String) -> HttpResponse = _
 
 // ── Response accessors/mutators ──
+/// resp with code set; not range-checked.
 @intrinsic("almide_http_set_status")
 @consume(resp)
 fn status(resp: HttpResponse, code: Int) -> HttpResponse = _
 
+/// Payload text; lossy UTF-8 when fetched.
 @intrinsic("almide_http_get_body")
 @borrow_ref(resp)
 fn body(resp: HttpResponse) -> String = _
 
+/// Case-insensitive upsert of header key.
 @intrinsic("almide_http_set_header")
 @consume(resp)
 fn set_header(resp: HttpResponse, key: String, value: String) -> HttpResponse = _
 
+/// First value for key, any case; none if absent.
 @intrinsic("almide_http_get_header")
 @borrow_ref(resp)
 fn get_header(resp: HttpResponse, key: String) -> String? = _
@@ -68,60 +77,75 @@ fn get_header(resp: HttpResponse, key: String) -> String? = _
 // `headers` is the lowercased-name map, first value wins — the one rule
 // `get_header` / `req_header` already apply — so a repeated field is read
 // through `header_values`, never through the map.
+/// HTTP status; 0 if the status line was bad.
 @intrinsic("almide_http_status_code")
 @borrow_ref(resp)
 fn status_code(resp: HttpResponse) -> Int = _
 
+/// Map by lowercased name; first value wins.
 @intrinsic("almide_http_headers")
 @borrow_ref(resp)
 fn headers(resp: HttpResponse) -> Map[String, String] = _
 
+/// Every value for key, wire order; [] if absent.
 @intrinsic("almide_http_header_values")
 @borrow_ref(resp)
 fn header_values(resp: HttpResponse, key: String) -> List[String] = _
 
 // ── Request accessors (pure) ──
+/// Request method as sent, e.g. GET.
 @intrinsic("almide_http_req_method")
 @borrow_ref(req)
 fn req_method(req: HttpRequest) -> String = _
 
+/// Request target, query string included.
 @intrinsic("almide_http_req_path")
 @borrow_ref(req)
 fn req_path(req: HttpRequest) -> String = _
 
+/// Body text; empty without a Content-Length.
 @intrinsic("almide_http_req_body")
 @borrow_ref(req)
 fn req_body(req: HttpRequest) -> String = _
 
+/// First value for key, any case; none if absent.
 @intrinsic("almide_http_req_header")
 @borrow_ref(req)
 fn req_header(req: HttpRequest, key: String) -> String? = _
 
+/// Decoded query map; last duplicate wins.
 @intrinsic("almide_http_query_params")
 @borrow_ref(req)
 fn query_params(req: HttpRequest) -> Map[String, String] = _
 
 // Percent-decode a URL component (`+` → space, `%XX` → byte). `query_params`
 // already decodes its values; use this for manually-extracted query/form text.
+/// + to space, %XX to byte; bad escapes kept.
 @intrinsic("almide_http_url_decode")
 fn url_decode(s: String) -> String = _
 
 // ── HTTP client (effect) ──
+/// Body even for a 404; err only on transport.
 @intrinsic("almide_http_get")
 effect fn get(url: String) -> Result[String, String] = _
 
+/// Reply body of a POST; JSON type by default.
 @intrinsic("almide_http_post")
 effect fn post(url: String, body: String) -> Result[String, String] = _
 
+/// Reply body of a PUT; JSON type by default.
 @intrinsic("almide_http_put")
 effect fn put(url: String, body: String) -> Result[String, String] = _
 
+/// Reply body of a PATCH; JSON type by default.
 @intrinsic("almide_http_patch")
 effect fn patch(url: String, body: String) -> Result[String, String] = _
 
+/// Reply body of a DELETE; any status is ok.
 @intrinsic("almide_http_delete")
 effect fn delete(url: String) -> Result[String, String] = _
 
+/// Reply body for any method; any status is ok.
 @intrinsic("almide_http_request")
 @borrow_ref(headers)
 effect fn request(method: String, url: String, body: String, headers: Map[String, String]) -> Result[String, String] = _
@@ -130,9 +154,11 @@ effect fn request(method: String, url: String, body: String, headers: Map[String
 // response — a 404 is `Ok((404, body))`, not an `Err`. `Err` is only a
 // transport failure (connection / TLS / timeout). Use these when you need to
 // branch on the numeric status; `get` / `request` collapse it into the body.
+/// (status, body); a 404 is ok, not err.
 @intrinsic("almide_http_get_status")
 effect fn get_status(url: String) -> Result[(Int, String), String] = _
 
+/// (status, body) for any method; 3xx not followed.
 @intrinsic("almide_http_request_status")
 @borrow_ref(headers)
 effect fn request_status(method: String, url: String, body: String, headers: Map[String, String]) -> Result[(Int, String), String] = _
@@ -154,21 +180,27 @@ effect fn request_status(method: String, url: String, body: String, headers: Map
 // the caller passed. Header names keep their wire spelling and a repeated
 // field keeps every occurrence — read them with `get_header` (first),
 // `header_values` (all) or `headers` (lowercased map, first wins).
+/// Whole reply, 404 included; redirects not followed.
 @intrinsic("almide_http_get_response")
 effect fn get_response(url: String) -> Result[HttpResponse, String] = _
 
+/// Whole reply to a POST; any status is ok.
 @intrinsic("almide_http_post_response")
 effect fn post_response(url: String, body: String) -> Result[HttpResponse, String] = _
 
+/// Whole reply to a PUT; any status is ok.
 @intrinsic("almide_http_put_response")
 effect fn put_response(url: String, body: String) -> Result[HttpResponse, String] = _
 
+/// Whole reply to a PATCH; any status is ok.
 @intrinsic("almide_http_patch_response")
 effect fn patch_response(url: String, body: String) -> Result[HttpResponse, String] = _
 
+/// Whole reply to a DELETE; any status is ok.
 @intrinsic("almide_http_delete_response")
 effect fn delete_response(url: String) -> Result[HttpResponse, String] = _
 
+/// Whole reply for any method; 3xx not followed.
 @intrinsic("almide_http_request_response")
 @borrow_ref(headers)
 effect fn request_response(method: String, url: String, body: String, headers: Map[String, String]) -> Result[HttpResponse, String] = _
@@ -176,9 +208,11 @@ effect fn request_response(method: String, url: String, body: String, headers: M
 // Binary client: returns the raw response body as `Bytes` with no UTF-8
 // conversion, so binary payloads (images, audio — e.g. TTS mp3/wav) survive
 // byte-identical. The String client above corrupts non-UTF-8 bodies.
+/// Raw body bytes, not UTF-8 decoded.
 @intrinsic("almide_http_get_bytes")
 effect fn get_bytes(url: String) -> Result[Bytes, String] = _
 
+/// Raw body bytes for any method and headers.
 @intrinsic("almide_http_request_bytes")
 @borrow_ref(headers)
 effect fn request_bytes(method: String, url: String, body: String, headers: Map[String, String]) -> Result[Bytes, String] = _
@@ -187,6 +221,7 @@ effect fn request_bytes(method: String, url: String, body: String, headers: Map[
 // raw body chunk as it arrives on the wire. Supports `Transfer-Encoding:
 // chunked` (Server-Sent Events shape) and plain bodies. The callback is
 // the caller's job to do SSE line splitting / event parsing.
+/// Body chunks to on_chunk; err on a non-2xx.
 @intrinsic("almide_http_request_stream")
 @borrow_ref(headers)
 effect fn request_stream(method: String, url: String, body: String, headers: Map[String, String], on_chunk: (String) -> Unit) -> Result[Unit, String] = _
@@ -202,6 +237,7 @@ effect fn request_stream(method: String, url: String, body: String, headers: Map
 //
 // `body_json` must already include `"stream": true`. The almai layer
 // (or any caller) is expected to `json.parse` the result.
+/// Streams base_url/chat/completions; LLM-response JSON.
 @intrinsic("almide_rt_sse_openai_chat")
 effect fn openai_streaming_call(base_url: String, api_key: String, body_json: String, on_text_delta: (String) -> Unit) -> Result[String, String] = _
 
@@ -210,5 +246,6 @@ effect fn openai_streaming_call(base_url: String, api_key: String, body_json: St
 // SSE event format (`event: content_block_delta` etc.) into the same
 // LLMResponse-shaped JSON ({content, model, usage, finish_reason,
 // tool_calls}).
+/// Streams Anthropic Messages; LLM-response JSON.
 @intrinsic("almide_rt_sse_anthropic_messages")
 effect fn anthropic_streaming_call(api_key: String, body_json: String, on_text_delta: (String) -> Unit) -> Result[String, String] = _

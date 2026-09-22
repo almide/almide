@@ -102,11 +102,22 @@ fn main() -> Unit = {
 ## Signature index (6 functions)
 
 ```
+// Same as env.args; argv[0] excluded.
 args.raw() -> List[String]
+
+// True on --name or -<first letter of name>.
 args.flag(name: String) -> Bool
+
+// Value of --name=v or --name v; none if absent.
 args.option(name: String) -> Option[String]
+
+// option(name), or fallback when absent.
 args.option_or(name: String, fallback: String) -> String
+
+// Args not starting with -; option values too.
 args.positional() -> List[String]
+
+// i-th positional arg; none if out of range.
 args.positional_at(i: Int) -> Option[String]
 ```
 

@@ -645,42 +645,115 @@ effect fn main() -> Unit = {
 ## Signature index (37 functions)
 
 ```
+// Serves 0.0.0.0:port forever; handler err is a 500.
 effect http.serve(port: Int, f: (HttpRequest) -> Result[HttpResponse, String]) -> Unit
+
+// Reply with Content-Type text/plain.
 http.response(status: Int, body: String) -> HttpResponse
+
+// Reply with Content-Type application/json.
 http.json(status: Int, body: String) -> HttpResponse
+
+// Reply with headers as-is; no default Content-Type.
 http.with_headers(status: Int, body: String, headers: Map[String, String]) -> HttpResponse
+
+// 302 with Location url and empty body.
 http.redirect(url: String) -> HttpResponse
+
+// resp with code set; not range-checked.
 http.status(resp: HttpResponse, code: Int) -> HttpResponse
+
+// Payload text; lossy UTF-8 when fetched.
 http.body(resp: HttpResponse) -> String
+
+// Case-insensitive upsert of header key.
 http.set_header(resp: HttpResponse, key: String, value: String) -> HttpResponse
+
+// First value for key, any case; none if absent.
 http.get_header(resp: HttpResponse, key: String) -> Option[String]
+
+// HTTP status; 0 if the status line was bad.
 http.status_code(resp: HttpResponse) -> Int
+
+// Map by lowercased name; first value wins.
 http.headers(resp: HttpResponse) -> Map[String, String]
+
+// Every value for key, wire order; [] if absent.
 http.header_values(resp: HttpResponse, key: String) -> List[String]
+
+// Request method as sent, e.g. GET.
 http.req_method(req: HttpRequest) -> String
+
+// Request target, query string included.
 http.req_path(req: HttpRequest) -> String
+
+// Body text; empty without a Content-Length.
 http.req_body(req: HttpRequest) -> String
+
+// First value for key, any case; none if absent.
 http.req_header(req: HttpRequest, key: String) -> Option[String]
+
+// Decoded query map; last duplicate wins.
 http.query_params(req: HttpRequest) -> Map[String, String]
+
+// + to space, %XX to byte; bad escapes kept.
 http.url_decode(s: String) -> String
+
+// Body even for a 404; err only on transport.
 effect http.get(url: String) -> String
+
+// Reply body of a POST; JSON type by default.
 effect http.post(url: String, body: String) -> String
+
+// Reply body of a PUT; JSON type by default.
 effect http.put(url: String, body: String) -> String
+
+// Reply body of a PATCH; JSON type by default.
 effect http.patch(url: String, body: String) -> String
+
+// Reply body of a DELETE; any status is ok.
 effect http.delete(url: String) -> String
+
+// Reply body for any method; any status is ok.
 effect http.request(method: String, url: String, body: String, headers: Map[String, String]) -> String
+
+// (status, body); a 404 is ok, not err.
 effect http.get_status(url: String) -> (Int, String)
+
+// (status, body) for any method; 3xx not followed.
 effect http.request_status(method: String, url: String, body: String, headers: Map[String, String]) -> (Int, String)
+
+// Whole reply, 404 included; redirects not followed.
 effect http.get_response(url: String) -> HttpResponse
+
+// Whole reply to a POST; any status is ok.
 effect http.post_response(url: String, body: String) -> HttpResponse
+
+// Whole reply to a PUT; any status is ok.
 effect http.put_response(url: String, body: String) -> HttpResponse
+
+// Whole reply to a PATCH; any status is ok.
 effect http.patch_response(url: String, body: String) -> HttpResponse
+
+// Whole reply to a DELETE; any status is ok.
 effect http.delete_response(url: String) -> HttpResponse
+
+// Whole reply for any method; 3xx not followed.
 effect http.request_response(method: String, url: String, body: String, headers: Map[String, String]) -> HttpResponse
+
+// Raw body bytes, not UTF-8 decoded.
 effect http.get_bytes(url: String) -> Bytes
+
+// Raw body bytes for any method and headers.
 effect http.request_bytes(method: String, url: String, body: String, headers: Map[String, String]) -> Bytes
+
+// Body chunks to on_chunk; err on a non-2xx.
 effect http.request_stream(method: String, url: String, body: String, headers: Map[String, String], on_chunk: (String) -> Unit) -> Unit
+
+// Streams base_url/chat/completions; LLM-response JSON.
 effect http.openai_streaming_call(base_url: String, api_key: String, body_json: String, on_text_delta: (String) -> Unit) -> String
+
+// Streams Anthropic Messages; LLM-response JSON.
 effect http.anthropic_streaming_call(api_key: String, body_json: String, on_text_delta: (String) -> Unit) -> String
 ```
 
