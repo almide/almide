@@ -417,17 +417,17 @@ impl Checker {
 
         // #2496: a generic USER fn's instantiation is judged post-solve
         // against what its body interpolates (`interp_string_form.rs`).
-        if !sig.generics.is_empty() {
-            if let Some(callee) = self.generic_call_key(name, qualified_via_direct.as_deref()) {
-                self.deferred_generic_calls.push(super::DeferredGenericCall {
-                    callee,
-                    bindings: bindings.clone(),
-                    span: self.current_span,
-                    caller: self.current_fn.as_ref()
-                        .filter(|(_, gs)| !gs.is_empty())
-                        .map(|(k, _)| *k),
-                });
-            }
+        if !sig.generics.is_empty()
+            && let Some(callee) = self.generic_call_key(name, qualified_via_direct.as_deref())
+        {
+            self.deferred_generic_calls.push(super::DeferredGenericCall {
+                callee,
+                bindings: bindings.clone(),
+                span: self.current_span,
+                caller: self.current_fn.as_ref()
+                    .filter(|(_, gs)| !gs.is_empty())
+                    .map(|(k, _)| *k),
+            });
         }
 
         self.check_protocol_bounds(name, &sig, &bindings);
