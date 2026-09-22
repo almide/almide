@@ -270,7 +270,8 @@ fn main() -> Unit = {
 
 ### `math.log_gamma(x: Float) -> Float`
 
-Return the natural logarithm of the gamma function at x.
+Return `ln|Γ(x)|`, the natural logarithm of the absolute gamma function, on the whole real
+line (negative non-integers included). The non-positive integers are poles and give `inf`.
 
 ```almd run
 fn main() -> Unit = {

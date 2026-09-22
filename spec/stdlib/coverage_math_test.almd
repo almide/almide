@@ -13,3 +13,26 @@ test "math.log_gamma of 5" {
   assert(r > 3.17)
   assert(r < 3.19)
 }
+
+// #2493 — ln|Γ(x)| below 0.5 goes through the reflection formula; the series
+// alone gave NaN at -0.5 and +inf at -6.5. Reference: C `lgamma`.
+fn near(a: Float, b: Float) -> Bool = float.abs(a - b) < 0.000000000001
+
+test "math.log_gamma at negative non-integers" {
+  assert(near(math.log_gamma(-0.5), 1.2655121234846454))
+  assert(near(math.log_gamma(-1.5), 0.8600470153764812))
+  assert(near(math.log_gamma(-3.7), -1.379739904965825))
+  assert(near(math.log_gamma(-6.5), -6.389634350909332))
+  assert(near(math.log_gamma(-100.5), -364.90096830942736))
+  assert(near(math.log_gamma(0.000001), 13.81550998074943))
+}
+
+test "math.log_gamma poles and non-finite input" {
+  let inf = 1.0 / 0.0
+  assert(math.log_gamma(0.0) == inf)
+  assert(math.log_gamma(-1.0) == inf)
+  assert(math.log_gamma(-2.0) == inf)
+  assert(math.log_gamma(inf) == inf)
+  assert(math.log_gamma(0.0 - inf) == inf)
+  assert(float.is_nan(math.log_gamma(0.0 / 0.0)))
+}
