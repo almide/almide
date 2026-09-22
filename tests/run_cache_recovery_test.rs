@@ -1,13 +1,15 @@
-//! The native build scratch dir's housekeeping (#2500): a rustc ICE on a
-//! stale incremental session recovers in one retry, `almide clean` empties
-//! the dir, and week-old binaries are evicted while a cache hit keeps its
-//! binary alive.
+//! The native build scratch dirs' housekeeping: a rustc ICE on a stale
+//! incremental session recovers in one retry, `almide clean` empties the
+//! dirs, and week-old artifacts are evicted while a cache hit keeps its
+//! binary alive — for `almide run`'s shared dir (#2500) and for `almide
+//! test`'s per-test-file worker dirs (#2504).
 //!
 //! Every test points `ALMIDE_RUN_PROJECT_DIR` at its own tempdir. The real
 //! shared `<temp>/almide-run` is in use by other processes on a developer
-//! machine and is never touched from here; the `clean` test additionally
-//! redirects `HOME` and the temp-dir variables so nothing outside its
-//! tempdir is on `clean`'s list.
+//! machine and is never touched from here; the tests that reach the temp-dir
+//! caches (`clean`, and every #2504 test) additionally redirect `HOME` and
+//! the temp-dir variables, so the machine's own `<temp>/almide-test/native`
+//! is out of reach.
 //!
 //! `ALMIDE_NO_RTLIB=1` forces the cargo-based build (the bare-rustc fast path
 //! has no incremental session to corrupt); the generated crate has no
@@ -282,4 +284,204 @@ fn week_old_binaries_are_evicted_and_a_cache_hit_keeps_its_binary() {
         cached_binaries(&run_dir).contains(&a_bin[0]),
         "a sweep within the stamp interval must not run"
     );
+}
+
+// ── #2504: `almide test`'s per-test-file native worker dirs ────────────────
+//
+// One dir per test-file ABSOLUTE path under `<temp>/almide-test/native/`,
+// each with its own `target/`; nothing ever removed one (4,510 dirs / 39 GB
+// measured 2026-09-22). These tests fabricate that tree inside their own
+// tempdir and redirect every temp-dir variable, so the machine's real cache
+// is never read or written.
+
+/// A fabricated worker dir: the lockfile, the harness scratch, and one
+/// content-keyed binary — aged as a whole, with the binary's own age
+/// separately settable (that is what a lock-free cache HIT refreshes).
+fn fake_worker(native: &Path, name: &str, age: Duration, binary_age: Duration) {
+    let dir = native.join(name);
+    std::fs::create_dir_all(dir.join("target/debug")).unwrap();
+    std::fs::write(dir.join(".almide-build.lock"), b"").unwrap();
+    std::fs::write(dir.join("almide_test_bin"), vec![0u8; 1024]).unwrap();
+    std::fs::write(dir.join("almide_test_main.rs"), "fn main() {}\n").unwrap();
+    let binary = dir.join("target/debug/almide-0123456789abcdef");
+    std::fs::write(&binary, vec![0u8; 2048]).unwrap();
+    // Files only, which is what the used-signal reads (a directory's mtime is
+    // filesystem-dependent and deliberately not part of the rule).
+    let then = SystemTime::now() - age;
+    for p in [
+        dir.join(".almide-build.lock"),
+        dir.join("almide_test_bin"),
+        dir.join("almide_test_main.rs"),
+    ] {
+        set_mtime(&p, then);
+    }
+    set_mtime(&binary, SystemTime::now() - binary_age);
+}
+
+/// What is left in a worker dir, sorted.
+fn worker_entries(native: &Path, name: &str) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(native.join(name))
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+}
+
+/// A tempdir with `<tmp>/almide-test/native` fabricated, plus a trivial
+/// passing test file; returns (tempdir, native cache path, test file path).
+fn worker_tree() -> (tempfile::TempDir, PathBuf, PathBuf) {
+    let td = tempfile::tempdir().unwrap();
+    let native = td.path().join("tmp/almide-test/native");
+    std::fs::create_dir_all(&native).unwrap();
+    std::fs::create_dir_all(td.path().join("home")).unwrap();
+    let test_file = td.path().join("a_test.almd");
+    std::fs::write(&test_file, "test \"adds\" {\n  assert_eq(1 + 1, 2)\n}\n").unwrap();
+    (td, native, test_file)
+}
+
+/// `almide test <file>` with every temp-dir variable pointed at `<td>/tmp`.
+fn almide_test(td: &Path, test_file: &Path) -> std::process::Output {
+    let tmp = td.join("tmp");
+    Command::new(almide())
+        .arg("test")
+        .arg(test_file)
+        .current_dir(td)
+        .env("HOME", td.join("home"))
+        .env("TMPDIR", &tmp)
+        .env("TMP", &tmp)
+        .env("TEMP", &tmp)
+        .env("ALMIDE_RUN_PROJECT_DIR", td.join("run"))
+        .output()
+        .expect("spawn almide test")
+}
+
+/// The 完了条件: a worker dir untouched for 7 days is emptied by the next
+/// `almide test`, a dir used today survives — including one whose only
+/// recent event is a cache hit touching its binary.
+#[test]
+fn almide_test_evicts_week_old_worker_dirs_and_keeps_used_ones() {
+    let (td, native, test_file) = worker_tree();
+    let month = Duration::from_secs(30 * 24 * 60 * 60);
+    fake_worker(&native, "stale", month, month);
+    fake_worker(&native, "hit-today", month, Duration::from_secs(60));
+    fake_worker(&native, "fresh", Duration::from_secs(60 * 60), Duration::from_secs(60 * 60));
+
+    let out = almide_test(td.path(), &test_file);
+    assert!(
+        out.status.success(),
+        "the run itself must still pass:\n{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    assert_eq!(
+        worker_entries(&native, "stale"),
+        vec![".almide-build.lock".to_string()],
+        "a worker dir nothing used for a month must be emptied, lockfile kept"
+    );
+    assert_eq!(
+        worker_entries(&native, "hit-today").len(),
+        4,
+        "a dir whose binary a cache hit touched today is in use and must survive"
+    );
+    assert_eq!(worker_entries(&native, "fresh").len(), 4, "a dir used an hour ago must survive");
+    assert!(native.join(".almide-evict-stamp").is_file(), "the sweep stamps the cache root");
+
+    // Rate limit: a second run the same day does not sweep again.
+    let stale_again = native.join("fresh");
+    for p in [
+        stale_again.join("almide_test_bin"),
+        stale_again.join("almide_test_main.rs"),
+        stale_again.join(".almide-build.lock"),
+        stale_again.join("target/debug/almide-0123456789abcdef"),
+    ] {
+        set_mtime(&p, SystemTime::now() - month);
+    }
+    let out = almide_test(td.path(), &test_file);
+    assert!(out.status.success());
+    assert_eq!(
+        worker_entries(&native, "fresh").len(),
+        4,
+        "a sweep within the stamp interval must not run"
+    );
+}
+
+/// A worker dir another process is building in holds its lock; the sweep
+/// takes each dir's lock WITHOUT waiting and leaves that one alone.
+#[test]
+fn a_locked_worker_dir_is_skipped_by_the_sweep() {
+    let (td, native, test_file) = worker_tree();
+    let month = Duration::from_secs(30 * 24 * 60 * 60);
+    fake_worker(&native, "busy", month, month);
+    fake_worker(&native, "idle", month, month);
+
+    // Hold "busy"'s lock for the duration of the run, as a builder would.
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(native.join("busy/.almide-build.lock"))
+        .unwrap();
+    fs2::FileExt::lock_exclusive(&lock).unwrap();
+
+    let out = almide_test(td.path(), &test_file);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+
+    assert_eq!(
+        worker_entries(&native, "busy").len(),
+        4,
+        "the sweep must not empty a dir another process holds the lock on"
+    );
+    assert_eq!(
+        worker_entries(&native, "idle"),
+        vec![".almide-build.lock".to_string()],
+        "an idle stale dir is still emptied in the same sweep"
+    );
+    fs2::FileExt::unlock(&lock).unwrap();
+}
+
+/// `almide clean` empties every worker dir, whatever its age, and reports
+/// the tree — the manual lever for the 39 GB.
+#[test]
+fn clean_empties_every_worker_dir_and_reports_the_tree() {
+    let (td, native, _) = worker_tree();
+    fake_worker(&native, "old", Duration::from_secs(30 * 24 * 60 * 60), Duration::from_secs(30 * 24 * 60 * 60));
+    fake_worker(&native, "today", Duration::from_secs(60), Duration::from_secs(60));
+
+    let tmp = td.path().join("tmp");
+    let clean = || {
+        Command::new(almide())
+            .arg("clean")
+            .current_dir(td.path())
+            .env("HOME", td.path().join("home"))
+            .env("TMPDIR", &tmp)
+            .env("TMP", &tmp)
+            .env("TEMP", &tmp)
+            .env("ALMIDE_RUN_PROJECT_DIR", td.path().join("run"))
+            .output()
+            .expect("spawn almide clean")
+    };
+    let out = clean();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{stderr}");
+    assert!(
+        stderr.contains(&format!("Cleaned {} (2 test worker dir(s))", native.display())),
+        "clean must name the worker tree and how many dirs it emptied:\n{stderr}"
+    );
+    for name in ["old", "today"] {
+        assert_eq!(
+            worker_entries(&native, name),
+            vec![".almide-build.lock".to_string()],
+            "{name} must be emptied to its lockfile"
+        );
+    }
+
+    // Idempotent: nothing left to empty.
+    let out = clean();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{stderr}");
+    assert!(!stderr.contains("test worker dir(s)"), "nothing to report the second time:\n{stderr}");
+    assert!(stderr.contains("No cache to clean"), "{stderr}");
 }
