@@ -1,0 +1,8 @@
+// The fix: the helper declares the parameter `mut`, and the caller passes a `var`.
+fn zero(mut b: Bytes) -> Unit = bytes.set_u8(b, 0, 0)
+
+fn main() -> Unit = {
+  var b = bytes.from_list([1, 2])
+  zero(b)
+  println(int.to_string(bytes.get_or(b, 0, 9)))
+}

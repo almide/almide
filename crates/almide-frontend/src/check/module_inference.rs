@@ -373,6 +373,10 @@ impl Checker {
         // one fn because a callee had a `var arms` (#2242). Restore the set
         // the fn entered with (top-level `var`s) on the way out.
         let outer_mutable = self.env.mutable_vars.clone();
+        // `param_vars` is keyed by name the same way: a parameter of one fn
+        // must not make a `let` of the same name in the next fn read as a
+        // parameter (the E009/E032 hints tell the two apart).
+        let outer_params = std::mem::take(&mut self.env.param_vars);
         let shadowed_generics = self.enter_generics(generics);
         // A bare `self` first param is sugar for `self: Self` (see
         // registration.rs's matching fix). `Self` only stays an unresolved
@@ -427,6 +431,7 @@ impl Checker {
         self.env.current_ret = prev.0; self.env.can_call_effect = prev.1; self.env.auto_unwrap = prev.2; self.env.lambda_depth = prev.3;
         self.exit_generics(generics, shadowed_generics);
         self.env.mutable_vars = outer_mutable;
+        self.env.param_vars = outer_params;
         self.env.pop_scope();
     }
 

@@ -617,6 +617,9 @@ impl TypeEnv {
         if let Some(origins) = self.let_origins.last_mut() {
             origins.remove(&sym(name));
         }
+        // A new binding also shadows a parameter of the same name; the fn
+        // decl re-inserts its own parameters right after defining them.
+        self.param_vars.remove(&sym(name));
     }
 
     /// #2097: remember the value expression a `let` bound in the CURRENT

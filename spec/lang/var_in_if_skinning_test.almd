@@ -3,7 +3,7 @@ import bytes
 fn read_val(b: Bytes, off: Int) -> Float = bytes.read_f32_le(b, off)
 
 // Simulate skin.apply_skinning: function with many params and vars
-fn blend(verts: Bytes, vert_count: Int, stride: Int, jm: Bytes, data: Bytes, offset: Int) -> Unit = {
+fn blend(mut verts: Bytes, vert_count: Int, stride: Int, jm: Bytes, data: Bytes, offset: Int) -> Unit = {
   var i = 0
   while i < vert_count {
     let dst = i * stride
@@ -89,7 +89,7 @@ fn blend(verts: Bytes, vert_count: Int, stride: Int, jm: Bytes, data: Bytes, off
 
 effect fn main() -> Unit = {
   // Identity matrix
-  let jm = bytes.new(128)
+  var jm = bytes.new(128)
   bytes.set_f32_le(jm, 0, 1.0)
   bytes.set_f32_le(jm, 20, 1.0)
   bytes.set_f32_le(jm, 40, 1.0)
@@ -99,7 +99,7 @@ effect fn main() -> Unit = {
   bytes.set_f32_le(jm, 104, 1.0)
   bytes.set_f32_le(jm, 124, 1.0)
   // Vertex: pos=(3,4,5), norm=(0,1,0)
-  let verts = bytes.new(44)
+  var verts = bytes.new(44)
   bytes.set_f32_le(verts, 0, 3.0)
   bytes.set_f32_le(verts, 4, 4.0)
   bytes.set_f32_le(verts, 8, 5.0)
@@ -107,7 +107,7 @@ effect fn main() -> Unit = {
   bytes.set_f32_le(verts, 16, 1.0)
   bytes.set_f32_le(verts, 20, 0.0)
   // Skin data: joints=[0,0], weights=[0.6,0.4,0,0]
-  let data = bytes.new(200)
+  var data = bytes.new(200)
   bytes.set_u8(data, 0, 0)
   // j0
   bytes.set_u8(data, 1, 0)

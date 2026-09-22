@@ -1,0 +1,38 @@
+// @contract: C-132
+// The `mut`-parameter path of `bytes.clear` (#2466), the sibling of
+// inplace_clear_family.almd: that fixture pins every in-place clear on `var`
+// receivers in `main` and held the bytes row back pending the ruling. Since
+// #2466 the bytes writers declare their receiver `mut`, so a helper that
+// clears (or refills) its caller's buffer takes `mut b: Bytes` and the caller
+// passes a `var`. The clear persists to the caller and the buffer grows again
+// from empty. The Unit helper and the value-returning helper take C-132's two
+// write-back shapes (the buffer alone, and the value paired with the buffer).
+fn wipe(mut b: Bytes) -> Unit = bytes.clear(b)
+
+fn wipe_and_count(mut b: Bytes) -> Int = {
+  let before = bytes.len(b)
+  bytes.clear(b)
+  bytes.push(b, 5)
+  before
+}
+
+fn refill(mut b: Bytes, v: Int) -> Unit = {
+  bytes.clear(b)
+  bytes.append_u8(b, v)
+  bytes.append_u16_le(b, 258)
+}
+
+fn main() -> Unit = {
+  var b = bytes.from_list([1, 2, 3, 4])
+  wipe(b)
+  println("A.len=" + int.to_string(bytes.len(b)))
+  bytes.push(b, 9)
+  println("A.b=" + "${bytes.to_list(b)}")
+  let n = wipe_and_count(b)
+  println("B.n=" + int.to_string(n) + " b=" + "${bytes.to_list(b)}")
+  refill(b, 7)
+  println("C.b=" + "${bytes.to_list(b)}")
+  wipe(b)
+  wipe(b)
+  println("D.len=" + int.to_string(bytes.len(b)))
+}
