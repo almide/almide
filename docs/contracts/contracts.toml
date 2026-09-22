@@ -4394,3 +4394,14 @@ evidence  = [
   { path = "spec/wasm_cross/datetime_parse_iso_strict.almd", class = "fixture" },
   { path = "spec/stdlib/datetime_test.almd", class = "fixture" },
 ]
+[[contract]]
+id        = "C-366"
+spec      = "ALS-T8"
+title     = "url.parse validates the host after the host:port split, and refuses the out-of-scope authorities by name"
+statement = "`url.parse` checks the HOST, not the authority (#2490): `http://:8` is `err(\"url.parse: empty host\")` — it used to be ok with `host = \"\"` because the empty-host test ran on the authority `:8`, which is non-empty — and so are `http://:`, `http://`, `http:///path` and `http://?q`. A port must be ASCII digits in 0..=65535: `+80`, `-0` and ` 80` are `url.parse: invalid port: <text>` (int.parse had accepted all three), `65536` is `url.parse: port out of range: 65536`, and leading zeros are digits (`:08` is port 8). Userinfo and an IPv6 literal — both documented out of scope — are refused by name instead of being read as a host: `http://user@host/p` is `url.parse: userinfo is not supported: user@host`, `http://[::1]:8080/` is `url.parse: IPv6 hosts are not supported: [::1]:8080`; a host outside RFC 3986's reg-name characters (unreserved, sub-delims, `%`) is `url.parse: invalid host: <host>` (`a b`), while `ex-am.ple_~!$&'()*+,;=%41` parses. Every accepted URL still round-trips through `to_string`. Byte-identical on every leg; spec/wasm_cross/url_authority_edges.almd pins the matrix, spec/stdlib/url_test.almd carries it as assertions on the three-way oracle."
+since     = "0.63.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/url_authority_edges.almd", class = "fixture" },
+  { path = "spec/stdlib/url_test.almd", class = "fixture" },
+]
