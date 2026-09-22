@@ -95,9 +95,22 @@ impl Emitter<'_> {
                 i.local_get(hb).local_get(hr).i32_wrap_i64().i32_store(slot_memarg(0));
                 i.local_get(hb).local_get(hc).i32_wrap_i64().i32_store(slot_memarg(4));
             }
+            if !ones {
+                // zeros FILLS: `$alloc` hands back freed blocks unzeroed
+                // (#2004 / #2010 made the frees real), so "fresh bump pages
+                // are zero" held only while nothing was freed — a zeros
+                // after a released matrix printed the dead block's cells
+                // (#1423 stage 4, found the day the structural leg took the
+                // matrix ops that free their temporaries). The mat_alloc_out64
+                // / bytes.new lesson, met a third time.
+                let mut i = self.f.instructions();
+                i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32 + 8).i32_add();
+                i.i32_const(0);
+                i.local_get(hr).local_get(hc).i64_mul().i64_const(8).i64_mul().i32_wrap_i64();
+                i.memory_fill(0);
+            }
             if ones {
-                // fill r*c f64 ones (fresh bump pages are zero, so
-                // zeros needs no loop; ones walks the payload).
+                // fill r*c f64 ones (ones walks the payload).
                 let cur = self.hold_i32()?;
                 let end = self.hold_i32()?;
                 let mut i = self.f.instructions();
@@ -555,7 +568,7 @@ impl Emitter<'_> {
                 return self.lower_matrix_select_rows(m, ids).map(Some)
             }
             (
-                "from_bytes_f32_le" | "from_bytes_f16_le" | "select_rows_f32"
+                "from_bytes_f32_le" | "from_bytes_f16_le" | "from_bytes_f64_le" | "select_rows_f32"
                 | "from_q1_0_bytes" | "select_rows_q1_0" | "select_rows_q8_0_dq",
                 [a, b, c, d],
             ) => return self.lower_matrix_loader(func, a, b, c, d).map(Some),
@@ -570,7 +583,7 @@ impl Emitter<'_> {
                 let causal = func == "masked_multi_head_attention";
                 return self.lower_matrix_mha(causal, q, k, v, nh).map(Some)
             }
-            _ => return Ok(None),
+            _ => return self.lower_matrix_call_b(func, args),
         };
         Ok(Some(out))
     }
