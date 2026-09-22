@@ -50,9 +50,11 @@ defined, so any program calling them emitted invalid Rust — both are pinned no
 
 ```
 // Opaque checkpoint for restore.
+// @since 0.23.5 or earlier
 mem.save() -> Int
 
 // Rewinds to mark; a no-op under RC today.
+// @since 0.23.5 or earlier
 mem.restore(mark: Int) -> Unit
 ```
 

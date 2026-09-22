@@ -65,69 +65,91 @@ machine-enforced by the numeric-matrix gate in `almide docs-gen --check` (#956).
 
 ```
 // Wraps to 8 bits; 128 becomes -128.
+// @since 0.15.0 or earlier
 int16.to_int8(x: Int16) -> Int8
 
 // Sign-extending widen; always exact.
+// @since 0.15.0 or earlier
 int16.to_int32(x: Int16) -> Int32
 
 // Sign-extending widen; always exact.
+// @since 0.15.0 or earlier
 int16.to_int64(x: Int16) -> Int64
 
 // Wraps to 8 bits; -1 becomes 255.
+// @since 0.15.0 or earlier
 int16.to_uint8(x: Int16) -> UInt8
 
 // Wraps to 16 bits; -1 becomes 65535.
+// @since 0.15.0 or earlier
 int16.to_uint16(x: Int16) -> UInt16
 
 // Wraps to 32 bits; -1 becomes 2^32-1.
+// @since 0.15.0 or earlier
 int16.to_uint32(x: Int16) -> UInt32
 
 // Wraps to 64 bits; -1 becomes 2^64-1.
+// @since 0.15.0 or earlier
 int16.to_uint64(x: Int16) -> UInt64
 
 // Same value as Float32; always exact.
+// @since 0.15.0 or earlier
 int16.to_float32(x: Int16) -> Float32
 
 // Same value as Float64; always exact.
+// @since 0.15.0 or earlier
 int16.to_float64(x: Int16) -> Float64
 
 // Decimal digits, with - when negative.
+// @since 0.15.0 or earlier
 int16.to_string(x: Int16) -> String
 
 // some(x), or none if outside -128..127.
+// @since 0.38.0
 int16.to_int8_checked(x: Int16) -> Option[Int8]
 
 // Clamps x to -128..127.
+// @since 0.38.0
 int16.to_int8_saturating(x: Int16) -> Int8
 
 // some(x), or none if outside 0..255.
+// @since 0.38.0
 int16.to_uint8_checked(x: Int16) -> Option[UInt8]
 
 // Clamps x to 0..255.
+// @since 0.38.0
 int16.to_uint8_saturating(x: Int16) -> UInt8
 
 // some(x), or none if x is negative.
+// @since 0.38.0
 int16.to_uint16_checked(x: Int16) -> Option[UInt16]
 
 // Negative x clamps to 0.
+// @since 0.38.0
 int16.to_uint16_saturating(x: Int16) -> UInt16
 
 // some(x), or none if x is negative.
+// @since 0.38.0
 int16.to_uint32_checked(x: Int16) -> Option[UInt32]
 
 // Negative x clamps to 0.
+// @since 0.38.0
 int16.to_uint32_saturating(x: Int16) -> UInt32
 
 // some(x), or none if x is negative.
+// @since 0.38.0
 int16.to_uint64_checked(x: Int16) -> Option[UInt64]
 
 // Negative x clamps to 0.
+// @since 0.38.0
 int16.to_uint64_saturating(x: Int16) -> UInt64
 
 // Smallest Int16: -32768.
+// @since 0.38.0
 int16.min_value() -> Int16
 
 // Largest Int16: 32767.
+// @since 0.38.0
 int16.max_value() -> Int16
 ```
 

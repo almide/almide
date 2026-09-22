@@ -236,141 +236,187 @@ fn main() -> Unit = {
 
 ```
 // Shortest round-trip digits, no exponent; 2.0 keeps .0.
+// @since 0.5.0 or earlier
 float.to_string(n: Float) -> String
 
 // Truncates toward 0, saturating; NaN gives 0.
+// @since 0.5.0 or earlier
 float.to_int(n: Float) -> Int
 
 // Nearest Float; may round when |n| > 2^53.
+// @since 0.5.0 or earlier
 float.from_int(n: Int) -> Float
 
 // Float from trimmed s; takes 1e3, inf, NaN; err on junk.
+// @since 0.5.0 or earlier
 float.parse(s: String) -> Result[Float, String]
 
 // Fixed-point, ties to even; decimals outside 0..4096 abort.
+// @since 0.5.0 or earlier
 float.to_fixed(n: Float, decimals: Int) -> String
 
 // IEEE-754 bits as Int; any NaN gives the canonical NaN.
+// @since 0.12.1 or earlier
 float.to_bits(f: Float) -> Int
 
 // Square root; NaN below 0, -0.0 stays -0.0.
+// @since 0.5.0 or earlier
 float.sqrt(n: Float) -> Float
 
 // Magnitude; -0.0 gives 0.0, NaN stays NaN.
+// @since 0.5.0 or earlier
 float.abs(n: Float) -> Float
 
 // Round toward -inf; -0.5 gives -1.0.
+// @since 0.5.0 or earlier
 float.floor(n: Float) -> Float
 
 // Round toward +inf; -0.5 gives -0.0.
+// @since 0.5.0 or earlier
 float.ceil(n: Float) -> Float
 
 // Nearest whole value; halves round away from zero.
+// @since 0.5.0 or earlier
 float.round(n: Float) -> Float
 
 // Lesser; a NaN operand is ignored; -0.0 < 0.0.
+// @since 0.5.0 or earlier
 float.min(a: Float, b: Float) -> Float
 
 // Greater; a NaN operand is ignored; 0.0 > -0.0.
+// @since 0.5.0 or earlier
 float.max(a: Float, b: Float) -> Float
 
 // n limited to lo..hi; lo > hi or a NaN bound aborts.
+// @since 0.5.0 or earlier
 float.clamp(n: Float, lo: Float, hi: Float) -> Float
 
 // 1.0 or -1.0 by sign bit (0.0 gives 1.0); NaN for NaN.
+// @since 0.5.13 or earlier
 float.sign(n: Float) -> Float
 
 // True only for NaN (unequal to itself).
+// @since 0.6.0 or earlier
 float.is_nan(n: Float) -> Bool
 
 // True for inf and -inf; false for NaN.
+// @since 0.6.0 or earlier
 float.is_infinite(n: Float) -> Bool
 
 // Truncates toward 0, saturating; NaN gives 0.
+// @since 0.15.0 or earlier
 float.to_int8(n: Float) -> Int8
 
 // Truncates toward 0, saturating; NaN gives 0.
+// @since 0.15.0 or earlier
 float.to_int16(n: Float) -> Int16
 
 // Truncates toward 0, saturating; NaN gives 0.
+// @since 0.15.0 or earlier
 float.to_int32(n: Float) -> Int32
 
 // Truncates toward 0, saturating; NaN gives 0.
+// @since 0.15.0 or earlier
 float.to_uint8(n: Float) -> UInt8
 
 // Truncates toward 0, saturating; NaN gives 0.
+// @since 0.15.0 or earlier
 float.to_uint16(n: Float) -> UInt16
 
 // Truncates toward 0, saturating; NaN gives 0.
+// @since 0.15.0 or earlier
 float.to_uint32(n: Float) -> UInt32
 
 // Truncates toward 0, saturating; NaN gives 0.
+// @since 0.15.0 or earlier
 float.to_uint64(n: Float) -> UInt64
 
 // Nearest Float32; overflow gives inf.
+// @since 0.15.0 or earlier
 float.to_float32(n: Float) -> Float32
 
 // Truncates toward 0, saturating; NaN gives 0.
+// @since 0.15.0 or earlier
 float.to_int64(n: Float) -> Int64
 
 // Same f64 value; always exact.
+// @since 0.15.0 or earlier
 float.to_float64(n: Float) -> Float64
 
 // Exact widening; never rounds.
+// @since 0.15.0 or earlier
 float.from_float32(n: Float32) -> Float
 
 // Same f64 value; always exact.
+// @since 0.15.0 or earlier
 float.from_float64(n: Float64) -> Float
 
 // some iff n is an integer in -128..127.
+// @since 0.15.0 or earlier
 float.to_int8_checked(n: Float) -> Option[Int8]
 
 // some iff n is an integer in -32768..32767.
+// @since 0.15.0 or earlier
 float.to_int16_checked(n: Float) -> Option[Int16]
 
 // some iff n is an integer in -2^31..2^31-1.
+// @since 0.15.0 or earlier
 float.to_int32_checked(n: Float) -> Option[Int32]
 
 // some iff n is an integer in -2^63..2^63-1.
+// @since 0.15.0 or earlier
 float.to_int64_checked(n: Float) -> Option[Int64]
 
 // some iff n is an integer in 0..255.
+// @since 0.15.0 or earlier
 float.to_uint8_checked(n: Float) -> Option[UInt8]
 
 // some iff n is an integer in 0..65535.
+// @since 0.15.0 or earlier
 float.to_uint16_checked(n: Float) -> Option[UInt16]
 
 // some iff n is an integer in 0..2^32-1.
+// @since 0.15.0 or earlier
 float.to_uint32_checked(n: Float) -> Option[UInt32]
 
 // some iff n is an integer in 0..2^63-1.
+// @since 0.15.0 or earlier
 float.to_uint64_checked(n: Float) -> Option[UInt64]
 
 // some if n is exact in Float32; NaN gives none.
+// @since 0.15.0 or earlier
 float.to_float32_checked(n: Float) -> Option[Float32]
 
 // Truncates, clamps to -128..127; NaN gives 0.
+// @since 0.15.0 or earlier
 float.to_int8_saturating(n: Float) -> Int8
 
 // Truncates, clamps to -32768..32767; NaN gives 0.
+// @since 0.15.0 or earlier
 float.to_int16_saturating(n: Float) -> Int16
 
 // Truncates, clamps to Int32 range; NaN gives 0.
+// @since 0.15.0 or earlier
 float.to_int32_saturating(n: Float) -> Int32
 
 // Truncates, clamps to Int64 range; NaN gives 0.
+// @since 0.15.0 or earlier
 float.to_int64_saturating(n: Float) -> Int64
 
 // Truncates, clamps to 0..255; NaN gives 0.
+// @since 0.15.0 or earlier
 float.to_uint8_saturating(n: Float) -> UInt8
 
 // Truncates, clamps to 0..65535; NaN gives 0.
+// @since 0.15.0 or earlier
 float.to_uint16_saturating(n: Float) -> UInt16
 
 // Truncates, clamps to 0..2^32-1; NaN gives 0.
+// @since 0.15.0 or earlier
 float.to_uint32_saturating(n: Float) -> UInt32
 
 // Truncates, clamps to 0..2^64-1; NaN gives 0.
+// @since 0.15.0 or earlier
 float.to_uint64_saturating(n: Float) -> UInt64
 ```
 

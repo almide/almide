@@ -70,12 +70,15 @@ fn main() -> Unit = {
 
 ```
 // Lowercase hex, two chars per byte.
+// @since 0.13.4 or earlier
 hex.encode(b: Bytes) -> String
 
 // Uppercase hex, two chars per byte.
+// @since 0.13.4 or earlier
 hex.encode_upper(b: Bytes) -> String
 
 // Bytes from hex (any case); err if odd or bad char.
+// @since 0.13.4 or earlier
 hex.decode(s: String) -> Result[Bytes, String]
 ```
 
