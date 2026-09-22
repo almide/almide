@@ -117,7 +117,13 @@ fail=0; n=0
 # standing refusal of every non-scalar element (C-147). Measured directly on
 # this tree: 676 emitted, 31 walled, 707 total — the emitted count is unchanged,
 # so this is one more input the incumbent never rendered, not coverage lost.
-MAX_WALLED=31
+# 33 as of 2026-09-22: ref_grain_or_pattern_alias_match.almd and
+# ref_rust_or_pattern_heap_subject.almd (C-323, #2435) — heap-valued subjects
+# (String, `some(String)`, `List[String]`) matched by literal and wildcard
+# alternatives. The structural leg emits both; the incumbent refuses the
+# non-scalar subject (C-147). The same two, for the same reason, as the
+# host-arch twin of this gate (scripts/check-host-determinism.sh).
+MAX_WALLED=33
 walled=0
 for fix in "$FIXTURE_DIR"/*.almd; do
   [ -e "$fix" ] || continue
