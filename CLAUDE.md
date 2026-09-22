@@ -153,7 +153,7 @@ almide check app.almd --profile critical --allow IO  # Critical profile (#567): 
 almide fmt app.almd               # Format source
 almide fmt --check spec/          # Formatting gate (non-zero on drift)
 almide fmt --no-import-edit stdlib/  # Format WITHOUT touching imports (splice-context sources)
-almide clean                     # Clear dependency cache
+almide clean                     # Clear dependency cache + native build scratch (#2500)
 almide add almide/pkg@v0.1.0    # Add dependency (github.com/almide/ default)
 almide update [dep]              # Advance a locked git dep to its ref's remote head (tags never move)
 almide deps                      # List dependencies

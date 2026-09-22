@@ -34,7 +34,7 @@ impl BuildDirLock {
         #[cfg(any(unix, windows))]
         {
             use fs2::FileExt;
-            let lock_path = project_dir.join(".almide-build.lock");
+            let lock_path = project_dir.join(BUILD_LOCK_FILE);
             let file = std::fs::OpenOptions::new()
                 .create(true)
                 .write(true)
@@ -174,6 +174,51 @@ fn native_sources_key(root: &std::path::Path) -> String {
     acc
 }
 
+/// The shared native build scratch dir of `almide run` / `almide build`:
+/// `ALMIDE_RUN_PROJECT_DIR` when set, else `<temp>/almide-run`. One
+/// resolution, shared by the builder and by `almide clean` (#2500), so the
+/// dir `clean` empties is the dir the builds fill.
+pub(crate) fn shared_run_project_dir() -> std::path::PathBuf {
+    almide_base::env::var("ALMIDE_RUN_PROJECT_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::env::temp_dir().join("almide-run"))
+}
+
+/// The lockfile name every build scratch dir is serialized on.
+pub(crate) const BUILD_LOCK_FILE: &str = ".almide-build.lock";
+
+/// Empty a build scratch dir under its own lock (#2500): waits for a build
+/// in flight there to finish, then removes every entry EXCEPT the lockfile.
+/// Returns whether anything was removed.
+///
+/// The lockfile stays on purpose. Removing it would unlink the inode this
+/// process (and any builder already blocked on it) holds the flock on, while
+/// the next builder creates a fresh lockfile — two builders, two inodes, no
+/// mutual exclusion, and the shared `src/main.rs` race the lock exists to
+/// prevent is back for exactly one build. An empty lockfile costs nothing.
+///
+/// What this cannot cover: a lock-free cache HIT (`build_native_cached`
+/// returns the `almide-<hash>` path without locking) that execs after the
+/// removal. `clean` is the user's own request to drop the cache, so that
+/// one run reports "Failed to execute" and the next rebuilds.
+pub(crate) fn clear_build_dir(dir: &std::path::Path) -> Result<bool, String> {
+    let _lock = BuildDirLock::acquire(dir)?;
+    let entries = std::fs::read_dir(dir).map_err(|e| format!("Failed to read {}: {}", dir.display(), e))?;
+    let mut removed = false;
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("Failed to read {}: {}", dir.display(), e))?;
+        if entry.file_name() == BUILD_LOCK_FILE {
+            continue;
+        }
+        let path = entry.path();
+        let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        let result = if is_dir { std::fs::remove_dir_all(&path) } else { std::fs::remove_file(&path) };
+        result.map_err(|e| format!("Failed to remove {}: {}", path.display(), e))?;
+        removed = true;
+    }
+    Ok(removed)
+}
+
 /// How long a cached `almide-<hash>` binary may go unused before a later
 /// build in the same dir evicts it (#2500). Every cache hit refreshes the
 /// binary's mtime (`touch_used`), so "unused" is measured from the last
@@ -279,8 +324,7 @@ pub(crate) fn build_native_cached(
     // run truly in parallel instead of serializing on the shared dir's
     // `BUILD_LOCK`. Otherwise: `ALMIDE_RUN_PROJECT_DIR`, else a shared default.
     let project_dir = project_dir_override.map(std::path::PathBuf::from)
-        .or_else(|| almide_base::env::var("ALMIDE_RUN_PROJECT_DIR").map(std::path::PathBuf::from))
-        .unwrap_or_else(|| std::env::temp_dir().join("almide-run"));
+        .unwrap_or_else(shared_run_project_dir);
     std::fs::create_dir_all(&project_dir)
         .map_err(|e| format!("Failed to create temp directory: {}", e))?;
 

@@ -1378,6 +1378,27 @@ pub fn cmd_clean() {
         err(&format!("Cleaned {}", compile_cache.display()));
         cleaned = true;
     }
+    // The native build scratch dirs (#2500): `almide run` / `almide build`'s
+    // shared dir (22 GB on the machine that filed it, and the home of the
+    // stale rustc incremental session that failed one program shape forever)
+    // and `almide build --target cdylib`'s. Each is emptied under its own
+    // build lock, so a build in flight there finishes before its dir goes.
+    for dir in [super::run::shared_run_project_dir(), std::env::temp_dir().join("almide-build-cdylib")] {
+        if !dir.is_dir() {
+            continue;
+        }
+        match super::run::clear_build_dir(&dir) {
+            Ok(true) => {
+                err(&format!("Cleaned {}", dir.display()));
+                cleaned = true;
+            }
+            Ok(false) => {}
+            Err(e) => {
+                err(&format!("Failed to clean build cache: {}", e));
+                std::process::exit(1);
+            }
+        }
+    }
     if !cleaned {
         err(&format!("No cache to clean"));
     }
