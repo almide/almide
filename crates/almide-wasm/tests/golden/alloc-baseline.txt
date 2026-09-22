@@ -522,6 +522,7 @@
 87648	spec/wasm_cross/ref_roc_shared_cow.almd
 82240	spec/wasm_cross/ref_roc_trmc_control.almd
 66112	spec/wasm_cross/ref_rust_or_pattern_guard_count.almd
+66000	spec/wasm_cross/ref_rust_or_pattern_guard_retry.almd
 66256	spec/wasm_cross/ref_rust_or_pattern_heap_subject.almd
 75136	spec/wasm_cross/regex_engine.almd
 94256	spec/wasm_cross/regex_fuzz_batch.almd
