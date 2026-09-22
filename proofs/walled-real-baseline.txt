@@ -191,7 +191,10 @@ spec/wasm_cross/generic_record_fn_field.almd :: call_q
 # operand stack, and the `let _ =` Unit binding is outside its value subset.
 # The STRUCTURAL leg (the default) releases the mutated block after the
 # call and runs byte-identical to native. Prunes with #1696 4-5.
-spec/wasm_cross/bytes_temp_receiver.almd :: main
+# PRUNED 2026-09-22 (#2466, dialect epoch 5): the row above is gone because the
+# fixture no longer uses a call-result receiver. The bytes writers take `mut`
+# receivers now, so the fixture drives them through a `var` and the incumbent
+# renders it — the determinism ceilings fell 34 -> 33 in the same change.
 # 2026-09-03 (#1791, the http response family): the loopback round-trip test's
 # three fns (a retrying dial through `net` + `fan`, and the transport-err test
 # block) are network-effect shapes the incumbent MIR lowering walls; the native
