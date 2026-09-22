@@ -331,9 +331,22 @@ fn fetch_one_dep_recursive(
         err(&format!("  Both versions will coexist. Types from v{} and v{} are incompatible.", existing.pkg_id.major, pkg_id.major));
     }
 
-    // Use locked commit if available
+    // Use the locked commit only when the lock entry describes the SAME
+    // source at the SAME ref the manifest asks for. Matching on the name
+    // alone reused the old commit after a tag bump, and `update_lock_file`
+    // then stamped the manifest's NEW ref beside it: an entry asserting a
+    // (git, ref, commit) triple that was never true together, while the build
+    // quietly compiled the old tag (#2522). A manifest that no longer matches
+    // its pin is a request to resolve the ref again — and the lock is
+    // rewritten from what was actually fetched, so it stays a true record.
+    //
+    // An entry whose `ref` is absent (only a hand-written lock: the writer
+    // has always emitted one) is a mismatch too. Reusing its commit would
+    // relabel it with the manifest's ref on the way out — the same false
+    // record by another route.
+    let want_ref = dep_ref_name(dep);
     let locked_commit = locked.iter()
-        .find(|l| l.name == dep.name)
+        .find(|l| l.name == dep.name && l.git == dep.git && l.ref_name == want_ref)
         .map(|l| l.commit.as_str());
     let path = fetch_dep_with_lock(dep, locked_commit)?;
 
