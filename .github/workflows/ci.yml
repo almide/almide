@@ -519,8 +519,11 @@ jobs:
     # protection makes that direct and retires the proxy step.
     #
     # FIXTURE-RANGE SHARDED, N=2 (#2381, second step). Each leg is one test
-    # walking the SORTED corpus; `ALMIDE_CORPUS_SHARD=k/2` keeps every second
-    # fixture from k, so a leg's 18–28 min becomes ~9–14 per job. What
+    # walking the SORTED corpus; `ALMIDE_CORPUS_SHARD=k/2` keeps a slice of
+    # it — since #2457 the LPT partition over the measured per-fixture walls
+    # in proofs/corpus-weights.txt (the modulo slice put the heavy tail on one
+    # residue class: run_parity 6 vs 16 min), so the halves are balanced by
+    # cost, not by count. What
     # keeps that honest lives in the coverage job below: every shard uploads
     # the fixture list it actually walked, and the union must equal
     # `ls spec/wasm_cross` (and the run manifest) with no duplicates. Two
@@ -579,6 +582,11 @@ jobs:
           ALMIDE_EXPECT_TOOLS: "1"
           ALMIDE_CORPUS_SHARD: ${{ matrix.shard }}/2
           ALMIDE_CORPUS_SHARD_DIR: /tmp/corpus-shard
+          # #2457: the per-fixture walls this shard measured ride in the same
+          # artifact, so proofs/corpus-weights.txt (the table the slices
+          # balance on) is rendered from THIS runner's ratios —
+          # scripts/gen-corpus-weights.sh --render over the downloaded set.
+          ALMIDE_CORPUS_WEIGHTS_DIR: /tmp/corpus-shard
         run: bash scripts/ci-test-shard.sh --run-solo-archive ${{ matrix.leg }} /tmp/almide-archive/almide-tests.tar.zst
 
       # The walked-fixture list and the partial counts / names, for the
