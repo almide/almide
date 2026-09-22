@@ -1,0 +1,57 @@
+// @contract: C-362
+// ALS-E31 (docs/specs/als/expressions.md): a `scoped { … }` block's value IS
+// its body's value, and the qualifier changes no observable — the two halves
+// of each pair below are the same computation with and without the boundary,
+// and every line must match its twin on both targets. The region is declared,
+// not discovered: `depth_sum` opens one over a direct tail-recursive worker
+// pair, `tree_count` over an ordinary (tree-walking) one, and `nested` puts a
+// block inside a block.
+type Chain = | Nil | Cons(Int, Chain)
+
+type Tree = | Leaf | Node(Tree, Tree)
+
+scoped fn build(n: Int, acc: Chain) -> Chain = if n == 0 then acc else build(n - 1, Cons(n, acc))
+
+scoped fn total(c: Chain, acc: Int) -> Int = match c {
+  Nil => acc,
+  Cons(h, t) => total(t, acc + h),
+}
+
+scoped fn make(depth: Int) -> Tree = if depth == 0 then Leaf else Node(
+  make(depth - 1),
+  make(depth - 1),
+)
+
+scoped fn count(t: Tree) -> Int = match t {
+  Leaf => 1,
+  Node(l, r) => 1 + count(l) + count(r),
+}
+
+fn depth_sum(n: Int) -> Int = scoped {
+  total(build(n, Nil), 0)
+}
+
+fn depth_sum_unscoped(n: Int) -> Int = total(build(n, Nil), 0)
+
+fn tree_count(depth: Int) -> Int = scoped {
+  count(make(depth))
+}
+
+fn tree_count_unscoped(depth: Int) -> Int = count(make(depth))
+
+fn nested(n: Int) -> Int = scoped {
+  let inner = scoped { total(build(n, Nil), 0) }
+  inner + count(make(2))
+}
+
+effect fn main() -> Unit = {
+  println(int.to_string(depth_sum(10)))
+  println(int.to_string(depth_sum_unscoped(10)))
+  println(int.to_string(depth_sum(1000)))
+  println(int.to_string(depth_sum_unscoped(1000)))
+  println(int.to_string(tree_count(4)))
+  println(int.to_string(tree_count_unscoped(4)))
+  println(int.to_string(nested(10)))
+  println(int.to_string(scoped { 1 + 2 }))
+  println(int.to_string(scoped { total(build(0, Nil), 7) }))
+}

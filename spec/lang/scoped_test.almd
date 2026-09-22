@@ -1,0 +1,77 @@
+// `scoped` (#1997): the block's value is its body's value, a `scoped fn`
+// answers the same inside and outside a region, and the two forms nest.
+// The refusal side (E086 / E087 / E088) lives in tests/diagnostics/e08*-scope-*.
+type Chain = | Nil | Cons(Int, Chain)
+
+type Tree = | Leaf | Node(Tree, Tree)
+
+type Point = { x: Int, y: Int }
+
+scoped fn build(n: Int, acc: Chain) -> Chain = if n == 0 then acc else build(n - 1, Cons(n, acc))
+
+scoped fn total(c: Chain, acc: Int) -> Int = match c {
+  Nil => acc,
+  Cons(h, t) => total(t, acc + h),
+}
+
+scoped fn make(depth: Int) -> Tree = if depth == 0 then Leaf else Node(
+  make(depth - 1),
+  make(depth - 1),
+)
+
+scoped fn count(t: Tree) -> Int = match t {
+  Leaf => 1,
+  Node(l, r) => 1 + count(l) + count(r),
+}
+
+scoped fn spread(p: Point) -> Int = p.x + p.y
+
+scoped fn scale(n: Int) -> Int = int.abs(0 - n) * 2
+
+fn sum_to(n: Int) -> Int = scoped {
+  total(build(n, Nil), 0)
+}
+
+fn tree_nodes(depth: Int) -> Int = scoped {
+  count(make(depth))
+}
+
+fn nested(n: Int) -> Int = scoped {
+  let inner = scoped { total(build(n, Nil), 0) }
+  inner + count(make(2))
+}
+
+test "a scoped block has its body's value" {
+  assert_eq(scoped { 1 + 2 }, 3)
+  assert_eq(scoped { total(build(4, Nil), 0) }, 10)
+}
+
+test "a tail-recursive worker agrees inside and outside a region" {
+  assert_eq(sum_to(100), total(build(100, Nil), 0))
+  assert_eq(sum_to(2000), 2001000)
+}
+
+test "an ordinary worker over managed algebraic data" {
+  assert_eq(tree_nodes(4), count(make(4)))
+  assert_eq(tree_nodes(3), 15)
+}
+
+test "regions nest" {
+  assert_eq(nested(4), 10 + 7)
+}
+
+test "records of scalars and scalar stdlib calls are admitted" {
+  assert_eq(scoped {
+    spread({ x: 3, y: 4 })
+  }, 7)
+  assert_eq(scoped { scale(0 - 21) }, 42)
+}
+
+test "scoped is a contextual keyword, not a reserved word" {
+  let scoped = 41
+  let bumped = match scoped {
+    41 => scoped + 1,
+    _ => 0,
+  }
+  assert_eq(bumped, 42)
+}

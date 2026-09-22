@@ -397,4 +397,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-359 | Pre-epoch timestamps floor to the day they belong to, and %Y renders any year | 0.63.0 | active | fixture | 1 |
 | C-360 | datetime.parse_iso applies the UTC offset and refuses an out-of-range field by name | 0.63.0 | active | fixture | 1 |
 | C-361 | url.parse validates the host after the host:port split, and refuses the out-of-scope authorities by name | 0.63.0 | active | fixture | 1 |
+| C-362 | A `scoped` block's observables are its body's — the region is not observable | 0.64.0 | active | fixture | 1 |
+| C-363 | A `scoped fn` computes the same answer inside and outside a region | 0.64.0 | active | fixture | 1 |
+| C-364 | A shape outside the scoped fragment is refused at check time, identically on both targets | 0.64.0 | active | fixture | 0 |
 
