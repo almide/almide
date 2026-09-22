@@ -169,6 +169,26 @@ fn types_that_do_render_are_still_accepted() {
     assert_accepted("fn showl[T](xs: List[T]) -> String = \"v=${xs}\"\n\neffect fn main() -> Unit = {\n  println(showl([bytes.from_list([1])]))\n}\n");
 }
 
+/// An opaque newtype's string form is its TARGET's, at every position: the
+/// emitted struct renders the wrapped value, so a newtype over a printable
+/// type prints (bare AND inside a container — the container route had no
+/// `AlmideRepr` impl at all, rustc E0277 on native while the wasm leg, which
+/// erases the newtype, printed the value), and a newtype over one of the
+/// gaps is the same gap.
+#[test]
+fn an_opaque_newtype_inherits_its_targets_string_form() {
+    assert_e089(
+        "mod type Blob = Bytes\n\neffect fn main() -> Unit = {\n  let b = Blob(bytes.from_list([1, 2]))\n  println(\"b=${b}\")\n}\n",
+        "`Blob` wraps Bytes",
+    );
+    assert_e089(
+        "mod type Nil = Unit\n\neffect fn main() -> Unit = {\n  let n = Nil(())\n  println(\"n=${n}\")\n}\n",
+        "`Nil` wraps Unit",
+    );
+    assert_accepted("mod type Id = Int\n\neffect fn main() -> Unit = {\n  let i = Id(7)\n  println(\"i=${i}\")\n  println(\"xs=${[Id(7)]}\")\n}\n");
+    assert_accepted("local type Name = String\n\neffect fn main() -> Unit = {\n  println(\"n=${some(Name(\"a\"))}\")\n}\n");
+}
+
 /// A segment whose type never resolved is E025's business — E089 must not
 /// stack a second error under it.
 #[test]

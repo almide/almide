@@ -1,0 +1,10 @@
+mod type Blob = Bytes
+
+fn octets(b: Blob) -> List[Int] = match b {
+  Blob(raw) => bytes.to_list(raw),
+}
+
+effect fn main() -> Unit = {
+  let b = Blob(bytes.from_list([1, 2]))
+  println("b=${octets(b)}")
+}

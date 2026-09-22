@@ -38,10 +38,25 @@ fn render_type_decl_alias(ctx: &RenderContext, td: &IrTypeDecl, target: &Ty) -> 
     // Opaque (mod/local) aliases → newtype struct
     if matches!(td.visibility, IrVisibility::Mod | IrVisibility::Private) {
         let type_s = render_type(ctx, target);
-        return Some(format!(
+        let decl = format!(
             "#[derive(Clone, Debug, PartialEq)]\npub struct {}({});",
             td.name, type_s
-        ));
+        );
+        // #2496: a newtype's string form is its TARGET's, at every position.
+        // Bare `${id}` already printed the inner value, but a CONTAINER of
+        // the newtype (`${[Id(7)]}`) routes through `AlmideRepr`, which the
+        // struct did not have — rustc E0277 on native while the wasm leg,
+        // which erases the newtype, printed `[7]`. Delegate to the wrapped
+        // value, unless it is a function or a raw pointer (neither has a
+        // repr, so the impl would not compile and the interpolation is
+        // E089 at check time anyway).
+        if !ty_has_fn_with(target, &ctx.ann.fn_blocked_types) && !ty_has_raw_ptr(target) {
+            return Some(format!(
+                "{decl}\nimpl AlmideRepr for {} {{ fn almide_repr(&self) -> String {{ self.0.almide_repr() }} }}",
+                td.name
+            ));
+        }
+        return Some(decl);
     }
     // Transparent aliases to primitives are expanded at use sites
     // by render_type via type_aliases. Don't emit a Rust `type`
@@ -626,6 +641,12 @@ pub(super) fn ty_has_fn_with(ty: &Ty, fn_blocked: &HashSet<String>) -> bool {
         }
         _ => false,
     }
+}
+
+/// True if `ty` mentions a raw pointer anywhere — `*mut u8` has no `AlmideRepr`
+/// and no `Display`, so a newtype over one gets neither impl (#2496).
+pub(super) fn ty_has_raw_ptr(ty: &Ty) -> bool {
+    ty.any_child_recursive(&|t| matches!(t, Ty::RawPtr))
 }
 
 /// Precompute the user-defined type names that transitively contain a function
