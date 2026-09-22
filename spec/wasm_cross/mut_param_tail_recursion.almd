@@ -1,0 +1,45 @@
+// @contract: C-226
+// The SELF-TAIL-RECURSIVE column of the mut-parameter promise, for a parameter
+// that is not `Bytes`. `mut_param_call_chain.almd` already threads a `mut Bytes`
+// buffer through a tail-recursive `if` — and `Bytes` was exactly the type the
+// native loop rewrite exempted from its reset-every-borrow-to-owned rule, so the
+// contract's tail-recursion clause was evidenced only on the one type that could
+// not fail (#2293). A `mut List` or `mut Map` threaded the same way was handed to
+// the loop BY VALUE on native: the caller kept its own copy and every push or
+// insert the loop made was lost, silently, while the wasm legs (which reach the
+// shape through the C-132 write-back rewrite, not a loop) answered correctly.
+// A scalar `mut` parameter reassigned inside the loop is the same cell.
+effect fn push_down(mut seen: List[Int], n: Int) -> Unit = if n == 0 then ()
+else {
+  list.push(seen, n)
+  push_down(seen, n - 1)!
+}
+
+effect fn fill_down(mut m: Map[Int, Int], n: Int) -> Unit = if n == 0 then ()
+else {
+  map.insert(m, n, n * 10)
+  fill_down(m, n - 1)!
+}
+
+effect fn bump_down(mut d: Int, n: Int) -> Unit = if n == 0 then ()
+else {
+  d = d + 1
+  bump_down(d, n - 1)!
+}
+
+effect fn main() -> Unit = {
+  var seen: List[Int] = []
+  push_down(seen, 4)!
+  println("list len=${list.len(seen)} head=${seen[0]} tail=${seen[3]}")
+  var m: Map[Int, Int] = [:]
+  fill_down(m, 4)!
+  println("map len=${map.len(m)} at2=${map.get(m, 2) ?? 0} at4=${map.get(m, 4) ?? 0}")
+  var d = 0
+  bump_down(d, 4)!
+  println("scalar d=${d}")
+  // Repetition: an ownership imbalance in the kept borrow surfaces as a trap or
+  // a leak only under a loop, and the length has to stay linear in the pushes.
+  var big: List[Int] = []
+  push_down(big, 500)!
+  println("repeat len=${list.len(big)} last=${big[499]}")
+}
