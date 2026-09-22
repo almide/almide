@@ -163,15 +163,33 @@ fn decode_component(s: String) -> Result[String, String] = {
   __url_dec_go(cs, 0, list.len(cs), "")
 }
 
+// RFC 3986 reg-name characters: unreserved / pct-encoded / sub-delims. The
+// '%' of a pct-encoded triple is admitted as a character (the escape itself
+// is not validated here — decode_component does that on request).
+fn __url_host_char(cp: Int) -> Bool = __url_is_unreserved(cp) or cp == 37 or cp == 33 or cp == 36 or cp == 38 or cp == 39 or cp == 40 or cp == 41 or cp == 42 or cp == 43 or cp == 44 or cp == 59 or cp == 61
+
+fn __url_host_ok(host: String) -> Bool = host |> string.chars |> list.all((c) => match string.codepoint(c) {
+  some(cp) => __url_host_char(cp),
+  none => false,
+})
+
 // Parse `scheme://host[:port][/path][?query][#fragment]`. Fails with a
-// reason on a missing scheme separator, empty scheme or host, or a port
-// that is not an integer in 0..=65535. The port is validated here so no
-// later consumer needs to re-check it.
+// reason on a missing scheme separator, empty scheme or host, a host
+// outside RFC 3986's reg-name characters, userinfo (`user@host`) or an IPv6
+// literal (`[::1]`) — both documented out of scope, refused rather than read
+// as a host — or a port that is not all digits in 0..=65535. The empty-host
+// check looks at the HOST, not the authority: `http://:8` used to parse with
+// `host = ""` because `:8` is non-empty (#2490). The port is validated here
+// so no later consumer needs to re-check it.
 // See also: url.to_string (the inverse), url.query_pairs.
 // Example: match url.parse("https://example.com:8080/a/b?x=1&y=2#top") { ok(u) => u.scheme == "https" and u.host == "example.com" and u.port == some(8080) and u.path == "/a/b" and u.query == "x=1&y=2" and u.fragment == "top", err(_) => false }
 // Example: match url.parse("http://x") { ok(u) => u.host == "x" and u.path == "" and u.port == none, err(_) => false }
 // Example: match url.parse("not a url") { ok(_) => false, err(_) => true }
 // Example: match url.parse("http://h:99999") { ok(_) => false, err(_) => true }
+// Example: match url.parse("http://:8") { ok(_) => false, err(e) => e == "url.parse: empty host" }
+// Example: match url.parse("http://h:+80") { ok(_) => false, err(e) => e == "url.parse: invalid port: +80" }
+// Example: match url.parse("http://u@h") { ok(_) => false, err(e) => e == "url.parse: userinfo is not supported: u@h" }
+// Example: match url.parse("http://a b") { ok(_) => false, err(e) => e == "url.parse: invalid host: a b" }
 /// Url from s; err without :// or on bad port.
 fn parse(s: String) -> Result[Url, String] = match string.index_of(s, "://") {
   none => err("url.parse: missing '://' scheme separator"),
@@ -186,14 +204,19 @@ fn parse(s: String) -> Result[Url, String] = match string.index_of(s, "://") {
       let authority = ps.0
       let path = if ps.2 then "/" + ps.1
       else ""
-      if string.len(authority) == 0 then err("url.parse: empty host")
+      if string.contains(authority, "@") then err("url.parse: userinfo is not supported: " + authority)
+      else if string.starts_with(authority, "[") then err("url.parse: IPv6 hosts are not supported: " + authority)
       else {
         let hp = __url_split_once(authority, ":")
-        if hp.2 then {
-          match int.parse(hp.1) {
-            ok(p) => if p >= 0 and p <= 65535 then ok(Url {
+        let host = hp.0
+        if string.len(host) == 0 then err("url.parse: empty host")
+        else if not __url_host_ok(host) then err("url.parse: invalid host: " + host)
+        else if hp.2 then {
+          if not string.is_digit(hp.1) then err("url.parse: invalid port: " + hp.1)
+          else match int.parse(hp.1) {
+            ok(p) => if p <= 65535 then ok(Url {
               scheme: scheme,
-              host: hp.0,
+              host: host,
               port: some(p),
               path: path,
               query: qs.1,
@@ -204,7 +227,7 @@ fn parse(s: String) -> Result[Url, String] = match string.index_of(s, "://") {
           }
         } else ok(Url {
           scheme: scheme,
-          host: authority,
+          host: host,
           port: none,
           path: path,
           query: qs.1,

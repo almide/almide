@@ -18,8 +18,12 @@ separator-free form.
 Parses `scheme://host[:port][/path][?query][#fragment]` into the `Url`
 record. `port` is `none` when absent; `path` is `""` when the authority is
 not followed by `/`; `query`/`fragment` are `""` when their separators are
-absent. Rejects inputs without a `scheme://` authority and ports outside
-`0..=65535`, with the reason in the `err`.
+absent. Rejects, with the reason in the `err`: inputs without a `scheme://`
+authority; an empty host (`http://`, `http://:8`); a host outside RFC 3986's
+reg-name characters (unreserved, sub-delims, `%`); userinfo (`user@host`)
+and IPv6 literals (`[::1]`), which are out of scope and refused by name rather
+than read as a host; and a port that is not all ASCII digits or is outside
+`0..=65535`.
 
 ```almd run
 import url
