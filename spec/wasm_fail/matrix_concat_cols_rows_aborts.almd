@@ -1,5 +1,5 @@
 // @expect-fail: Error: matrix shape mismatch
-// @contract: C-358
+// @contract: C-353
 // #2482: `matrix.concat_cols` glues matrices side by side, so every
 // non-empty member must have the same row count. A member with FEWER rows
 // left the result ragged — native's flat store asserted (a raw panic, exit

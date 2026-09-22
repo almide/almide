@@ -254,7 +254,7 @@ fn the_self_hosted_index_guard_matches_the_native_message() {
     );
 }
 
-/// #2481 / #2482 / #2483 (C-358): the SHAPE domain — the fourth rule of this
+/// #2481 / #2482 / #2483 (C-353): the SHAPE domain — the fourth rule of this
 /// family, and the one whose violations were a raw Rust panic natively
 /// against a silently truncated product, a missing bias read as 0.0, or an
 /// out-of-block read on the wasm legs. One shared guard per leg, one message,

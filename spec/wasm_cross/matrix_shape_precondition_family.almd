@@ -1,4 +1,4 @@
-// @contract: C-358
+// @contract: C-353
 // The DEFINED side of the matrix shape preconditions (the abort is pinned by
 // spec/wasm_fail/matrix_shape_mismatch_aborts.almd — one fixture cannot
 // assert both an abort and a clean exit, the C-198 split).

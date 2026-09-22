@@ -1,5 +1,5 @@
-// @contract: C-358
-// The activation half of the shape-precondition family (C-358), split from
+// @contract: C-353
+// The activation half of the shape-precondition family (C-353), split from
 // spec/wasm_cross/matrix_shape_precondition_family.almd because these four
 // entries route through the canonical fast-exp / sqrt kernels that the
 // judge's reference evaluator does not implement, and one abstaining cell

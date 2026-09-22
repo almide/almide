@@ -1,5 +1,5 @@
 // @expect-fail: Error: matrix shape mismatch
-// @contract: C-358
+// @contract: C-353
 // #2481: `matrix.mul(2x3, 2x2)` violates `cols(a) == rows(b)`. Native
 // indexed `b` as if it had `cols(a)` rows and died with a raw Rust slice
 // panic (`range end index 6 out of range for slice of length 4`, exit 101 —

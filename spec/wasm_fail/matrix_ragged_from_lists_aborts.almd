@@ -1,5 +1,5 @@
 // @expect-fail: Error: matrix rows must have equal length
-// @contract: C-358
+// @contract: C-353
 // #2482: a ragged `from_lists` is not a matrix. Native stores a flat
 // `rows * cols` buffer and its constructor asserted `data.len() == rows *
 // cols` — a raw `assertion left == right failed` panic (exit 101) — while

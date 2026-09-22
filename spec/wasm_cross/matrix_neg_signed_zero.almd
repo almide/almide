@@ -1,4 +1,4 @@
-// @contract: C-360
+// @contract: C-355
 // `matrix.neg` is IEEE-754 NEGATION — a sign flip — so `neg(+0.0)` is -0.0
 // and `neg(-0.0)` is +0.0, identically on both targets. The self-hosted body
 // spelled it `0.0 - x`, and IEEE `0.0 - 0.0` is +0.0: a matrix of zeros came

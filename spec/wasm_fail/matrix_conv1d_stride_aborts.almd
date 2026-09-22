@@ -1,5 +1,5 @@
 // @expect-fail: Error: stride must be positive
-// @contract: C-359
+// @contract: C-354
 // `conv1d`'s stride is a STEP, so a stride below 1 is out of domain — the
 // head-count class (C-198), not the negative-dimension clamp class that
 // kernel and padding take. A stride of 0 divided the output length by zero:
