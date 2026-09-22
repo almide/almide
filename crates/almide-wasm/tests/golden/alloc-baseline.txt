@@ -468,6 +468,7 @@
 66416	spec/wasm_cross/option_unwrap_or_else_heap.almd
 65856	spec/wasm_cross/optional_chain_scalar.almd
 66032	spec/wasm_cross/or_pattern.almd
+65904	spec/wasm_cross/or_pattern_guarded_nullary.almd
 68512	spec/wasm_cross/ord_record_variant.almd
 69440	spec/wasm_cross/ord_recursive.almd
 66480	spec/wasm_cross/path_extension_hidden.almd

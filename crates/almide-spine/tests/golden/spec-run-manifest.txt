@@ -1,4 +1,4 @@
-# oracle: almide 0.63.0 (dev) at 3d7c5ff33 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.63.0 (dev) at 01c5f9602 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 f0709d9573472655341ac75bd847b3f30d2bddc3a201554bfd5cc22c21446902	0	spec/wasm_cross/adr0005_operator_equivalence.almd
 c0f26e63e32a038c59081b238912f0b3ecfd01d8d5ce45534b83fbbce13128a7	0	spec/wasm_cross/alias_combinator_rc.almd
 997e25dd01ce19a5253bd290b2f5f4b8eab74ea88f256b5fd9e09ca77d42af3b	0	spec/wasm_cross/alias_cow.almd
@@ -469,6 +469,7 @@ d75fe272e621968d62f2c28a1ff1bb38a25197756cfcd53e86883c99e998e006	0	spec/wasm_cro
 1f6604e35f3671143f56477a9bc4c30b23d421d41df8cf6e901e00c165905a67	0	spec/wasm_cross/option_unwrap_or_else_heap.almd
 f7095762beb08f5d110677deb81d4eb93334e42b3f781dc9356a739ce2194a42	0	spec/wasm_cross/optional_chain_scalar.almd
 e1a418384094c97c8189fe61bbf32185e07b436cbc924c767b4aa7bfaf5c691c	0	spec/wasm_cross/or_pattern.almd
+9568bbdd698b64a05ec2a340956f488d38050c53fbc8bcac1dddb85b57e6f379	0	spec/wasm_cross/or_pattern_guarded_nullary.almd
 f81227b0e3029b909ec927fb45ab3ea900eb2ac7268a733a8d91dbdb1f3ea22b	0	spec/wasm_cross/ord_record_variant.almd
 2a828ff7903510b811f731e4be877227fbdc9c4734d194aaa687f744f12d2670	0	spec/wasm_cross/ord_recursive.almd
 ea663de252039a96f0ed6faad3aae201f51d3d84b8ab889ddd6bb069a0c06df5	0	spec/wasm_cross/path_extension_hidden.almd
