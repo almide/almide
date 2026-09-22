@@ -1,6 +1,6 @@
 # CLI Specification
 
-> Last updated: 2026-09-10
+> Last updated: 2026-09-22
 
 ## Overview
 
@@ -35,6 +35,25 @@ almide run app.almd -- arg1 arg2        # ファイル指定 + プログラム�
 `almide` 自身のフラグ（`--target` / `--no-check` / `--release`）は `--` の前で解釈され、`--` 以降はそのままプログラムに渡る（`cargo run` と同じ規約）。プログラム内で `env.args()` を呼ぶと `--` 以降の引数が `List[String]` で返る。
 
 テスト: `tests/run_target_flag_test.rs`
+
+**native のビルドキャッシュ**(#2500): native ターゲットは生成 Rust を共有スクラッチ dir
+（`ALMIDE_RUN_PROJECT_DIR`、既定 `<temp>/almide-run`）でビルドし、生成コードの内容ハッシュを名前にした
+`target/<profile>/almide-<hash>` にバイナリを置く。同じ生成コードは `almide run` / `almide build`
+のどちらから来てもこの 1 本を再利用し、cargo を呼ばない。dir 内の書き込み（ビルド・退避・掃除）は
+すべて `.almide-build.lock` の下で直列化され、キャッシュヒットだけがロック無しで走る。
+
+- **退避**: ヒットのたびにバイナリの mtime を更新し、7 日間使われなかった `almide-<hash>`
+  （と `deps/` に残る同じ世代の `almide_out-*` オブジェクト）を、次のミス時にロックの下で削除する。
+  この掃引は 1 日 1 回（`.almide-evict-stamp`）。incremental セッションには触れない。
+- **rustc ICE からの復旧**: 中断されたビルド（ENOSPC、kill）が rustc の incremental セッションを
+  壊すと、以後その形のビルドは `the compiler unexpectedly panicked` で毎回落ちる。失敗した
+  ビルドの出力にこの banner があれば、同じロックの下で `target/*/incremental` を消して 1 回だけ
+  再ビルドし、成功したら stderr に
+  `note: rustc crashed on a stale incremental session; cleared … and rebuilt successfully` を
+  1 行出す。再ビルドも失敗したら元のエラーをそのまま報告する（ループしない）。
+- **`almide clean`** がこの dir を空にする（下記）。
+
+テスト: `tests/run_cache_recovery_test.rs`
 
 **stdout のバッファリング**(#2245): native バイナリの `println` / `io.print` / `io.write` /
 `io.write_bytes` は 1 つの 64 KiB バッファを通る(順序はプログラム順)。stdout が端末なら書き込み
@@ -558,11 +577,25 @@ almide dep-path bindgen
 
 ### `almide clean`
 
-依存キャッシュ (`~/.almide/cache/`) をクリア。
+キャッシュをクリアする。対象は 4 つ:
+
+| 対象 | 場所 |
+|---|---|
+| 依存キャッシュ | `~/.almide/cache/` |
+| インクリメンタルキャッシュ | `./.almide/cache/` |
+| コンパイルキャッシュ | `./target/compile/` |
+| native ビルドスクラッチ(#2500) | `ALMIDE_RUN_PROJECT_DIR`（既定 `<temp>/almide-run`）と `<temp>/almide-build-cdylib` |
+
+ビルドスクラッチは各 dir の `.almide-build.lock` を取ってから空にする（進行中のビルドは
+完了してから消える）。lockfile 自体は残す — 消すと、待っている builder と次の builder が別 inode を
+ロックして排他が破れる。空にした dir ごとに `Cleaned <path>` を stderr に 1 行出し、何も無ければ
+`No cache to clean`。
 
 ```bash
 almide clean
 ```
+
+テスト: `tests/run_cache_recovery_test.rs`
 
 ---
 
@@ -711,7 +744,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_REGION_TRAP_STALE` | trap | arm the native region prelude's stale-reference trap (#2200) |
 | `ALMIDE_RENDER=value` | ci | the render_program example binary the prelude audit re-renders fixtures with |
 | `ALMIDE_REPO=value` | ci | the repository slug a release script targets |
-| `ALMIDE_RUN_PROJECT_DIR=value` | tool | the project root `almide run` resolves dependencies from, when the file is run from outside it |
+| `ALMIDE_RUN_PROJECT_DIR=value` | tool | the scratch dir `almide run` / `almide build` compile native binaries in, instead of `<temp>/almide-run` (the content-keyed binary cache, its cargo target, its rustc incremental sessions); `almide clean` empties it |
 | `ALMIDE_SEMLAW_CASES=value` | harness | how many cases the semantic-laws property test draws |
 | `ALMIDE_SHUFFLE_PASSES=value` | gate | run the native passes in the seeded random order the declared dependency edges permit — a pass-dependency probe: the emitted Rust must not change (#2186) |
 | `ALMIDE_SIZE_ALONE=value` | harness | the one fixture a child process of the size ratchet measures alone, for its isolation check (#2309); the ratchet sets it on the processes it spawns |
