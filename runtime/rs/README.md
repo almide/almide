@@ -22,6 +22,22 @@ hands that to rustc:
 Both paths call `strip_test_blocks`, which deletes every `#[cfg(test)]` block
 before rustc sees it.
 
+`strip_test_blocks` counts braces per line, so a test body whose STRING
+literals hold unbalanced braces makes it over-run. `regex.rs` had two
+(`r"a\{x"`, `r"a{2"`, +4 depth), and the stripper consequently ran to
+end-of-file and also ate the trailing `// ---- End Regex Runtime ----`
+comment. That was harmless only because the test module was the last item in
+the file; real code after such a block would have been deleted from every
+emitted crate, silently. The kernel's copy of the stripper has the same shape;
+all ten `crates/almide-kernel/src/*.rs` test modules are last in their file
+today, so nothing is at risk there either — but neither fact is checked.
+
+Deleting the seven test modules (#2507) therefore changed the EMITTED text by
+exactly eight lines, all blank or comment, verified by running
+`strip_test_blocks` over the before and after sources: six files lost one blank
+line, and `regex.rs` regained the comment the over-run had been eating. No code
+line moved.
+
 Because a `runtime/rs/src` edit changes the embedded text, CI regenerates
 `rust_runtime.rs` / `runtime_fn_modes.rs` and fails on any diff (ci.yml,
 "Generated runtime registry matches committed sources"). Rebuild
