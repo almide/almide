@@ -122,8 +122,11 @@ schema = 3
 # receiver for all four, so the forced incumbent and the shapes the router
 # still sends there agree with native; the shared-block `string_clear` /
 # `bytes_clear` bodies stay as rows but are not reached from a var or field
-# receiver. Evidence: spec/wasm_cross/inplace_clear_alias.almd +
-# tests/incumbent_clear_alias_test.rs (native == structural == incumbent).
+# receiver. Evidence: spec/wasm_cross/inplace_clear_alias.almd (var and
+# mut-param shapes, every leg) + inplace_clear_alias_field.almd (the field
+# shapes; the structural leg still refuses `string-clear-nonvar`, so the
+# default route serves it from the incumbent) + tests/incumbent_clear_alias_test.rs
+# (native == default route == forced incumbent).
 # Same day: 50 -> 48. fs.stat and fs.glob cross the embedded host on the
 # structural leg (ops 38 / 39 — the four FileStat fields as i64s, the
 # C-228 segment-wise glob transcribed into the host), the fs.walk shape.
