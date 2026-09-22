@@ -1424,8 +1424,8 @@ jobs:
       - name: Arm arguments — every module-op arm declares Borrow / Retain per argument (#2004)
         run: bash scripts/check-arm-args.sh
 
-      - name: WASI/Component-Model pin policy (#1628 stage 4)
-        run: bash scripts/check-wasi-pins.sh
+      - name: WASI/Component-Model pin policy (#1628 stage 4) + capability DCE — an IO-only artifact imports no denied-family host fn (#2152)
+        run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-wasi-pins.sh
 
       - name: Allocation ceilings (one 2 GiB limit, every spelling agrees)
         run: bash scripts/check-alloc-ceilings.sh
