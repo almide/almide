@@ -46,6 +46,7 @@ dependencies = [
  "almide-optimize",
  "almide-tools",
  "almide-types",
+ "almide-verify",
  "almide-wasm",
  "almide-wasm-run",
  "almide-wasm-vm",
