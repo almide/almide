@@ -2833,6 +2833,7 @@ evidence  = [
   { path = "spec/wasm_cross/mut_param_spread_reassign.almd", class = "fixture" },
   { path = "spec/wasm_cross/list_push_on_record_field.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_scalar_param_reassign.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mut_param_tail_recursion.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-227"
