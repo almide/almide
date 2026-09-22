@@ -186,14 +186,28 @@ let add10 = (x) => add(x, 10)   // ✓ name the missing value with a lambda
 ```
 
 ### Mutable parameters
-```
+```almide check
 fn incr(mut x: Int) -> Unit = { x = x + 1 }
-var n = 5
-incr(n)          // n is now 6 -- mutated in place, not returned
+
+fn stamp(mut b: Bytes, v: Int) -> Unit = bytes.set_u8(b, 0, v)  // a helper that fills its caller's buffer
+
+fn main() -> Unit = {
+  var n = 5
+  incr(n)          // n is now 6 -- mutated in place, not returned
+  var buf = bytes.new(4)   // `var`, not `let`: the writers take `mut b`
+  bytes.append_u8(buf, 7)
+  stamp(buf, 9)
+  println("${n} ${bytes.to_list(buf)}")
+}
 ```
-Caller must pass a `var` binding (`let` or a temporary is E007). `mut` can be
-on any parameter, any position. This is how in-place stdlib ops work
-(`list.push`, `list.pop`, `list.clear`, …).
+Caller must pass a `var` binding (`let`, a non-`mut` parameter or a temporary
+is E032). `mut` can be on any parameter, any position. This is how every
+in-place stdlib op works (`list.push`, `list.pop`, `list.clear`, `map.insert`,
+`string.push`, and the whole `bytes` writer family — `push`, `append_*`,
+`set_*`, `write_*`, `fill`, `clear`, `copy_from`): the receiver is a `mut`
+parameter, so a local buffer is a `var` and a helper that writes its caller's
+buffer declares `mut b: Bytes`. Value semantics otherwise: `let c = a` copies,
+and a callee cannot reach its caller's binding through a plain parameter.
 
 ## Built-in Protocols
 Eq and Hash are automatic (compiler-derived from type structure). No annotation needed.

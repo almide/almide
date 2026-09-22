@@ -21,6 +21,21 @@ UTF-8 token by its byte offsets, use `string.byte_slice(source, start, end)`.
 
 `<dtype>` is one of `u8 | u16 | u32 | i32 | i64 | f16 | f32 | f64` (or `bool`/`string` for the BE family). Almide `Int` is i64 and `Float` is f64; smaller widths are sign- or zero-extended on read and truncated on write.
 
+The writers — `set_*`, `append_*`, `write_*`, `push`, `set_at`, `fill`,
+`clear`, `copy_from`, `copy_within` — change their receiver in place, and the
+receiver is a `mut` parameter: pass a `var` (or a `mut` parameter of your own).
+A `let` binding, a plain parameter or a temporary is E032.
+
+```almd check
+fn stamp(mut b: Bytes, v: Int) -> Unit = bytes.set_u8(b, 0, v)  // a helper that fills its caller's buffer
+
+fn main() -> Unit = {
+  var buf = bytes.new(4)   // `var`, not `let`
+  bytes.append_u8(buf, 7)
+  stamp(buf, 9)
+}
+```
+
 ## Construction & inspection
 
 | Signature | Purpose |

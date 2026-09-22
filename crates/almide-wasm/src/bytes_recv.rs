@@ -1,20 +1,21 @@
-//! The RECEIVER of an in-place `bytes` mutator — the non-`mut`
-//! Unit-returning intrinsics (`append_*`, `write_*`, `fill`, `copy_from`)
-//! and the push convention `append_u8` shares — split from bytes.rs for
-//! the file budget.
+//! The RECEIVER of an in-place `bytes` mutator — the Unit-returning
+//! intrinsics (`append_*`, `write_*`, `fill`, `copy_from`) and the push
+//! convention `append_u8` shares — split from bytes.rs for the file budget.
 //!
-//! Native mutates THROUGH the receiver: a var — `let` or `var`, a cell, a
-//! module-level `var` — sees the write, and a TEMPORARY (a call result, a
-//! fresh value) is mutated and dropped. The checker admits the temporary
-//! because the receiver is not `mut` (`push`'s `mut b` makes it E032), so
-//! the statement is legal and observes nothing but its own argument
-//! evaluation. This leg lowers every mutator functionally — a fresh block,
-//! or the push helper's in-place window — and the receiver decides what
-//! happens to that block: a var takes it back through its slot; a
-//! temporary has no slot, so the block is RELEASED. Before #1849 the
-//! temporary walled here and the reroute to the incumbent left the linked
-//! twin's result on the operand stack — invalid wasm for a program native
-//! runs.
+//! Native mutates THROUGH the receiver: a var — a `var`, a cell, a
+//! module-level `var` — sees the write. Since #2466 every writer declares
+//! its receiver `mut`, so the checker rejects a `let`, a plain parameter and
+//! a TEMPORARY (a call result, a fresh value) with E032, exactly as for
+//! `push`; before #2466 the temporary was admitted (native mutated it and
+//! dropped it), and the `Temp` arm below is what lowered it — kept so a
+//! checked program that reaches this leg by another route (a fixture fed
+//! straight to the emitter) still has a defined lowering. This leg lowers
+//! every mutator functionally — a fresh block, or the push helper's
+//! in-place window — and the receiver decides what happens to that block: a
+//! var takes it back through its slot; a temporary has no slot, so the
+//! block is RELEASED. Before #1849 the temporary walled here and the
+//! reroute to the incumbent left the linked twin's result on the operand
+//! stack — invalid wasm for a program native runs.
 //!
 //! Any other receiver — a field, an element, a control funnel — keeps its
 //! honest wall: a write-back there needs an owner this leg does not model,
