@@ -94,6 +94,9 @@ pub(crate) struct Emitter<'a> {
     /// Match/unwrap subject scratch. Shared across nesting levels — safe
     /// because a subject is only read during its own tests, which finish
     /// before any nested match/unwrap in a SELECTED arm's body runs.
+    /// A GUARDED chain is the exception (a guard lowers between two
+    /// tests of one subject), so `lower_match_at` parks that subject in
+    /// a hold instead (#2464).
     pub(crate) scr_i32_local: u32,
     pub(crate) scr_i64_local: u32,
     /// Lowering `main`: a propagated `!` error ABORTS (the interp's

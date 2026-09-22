@@ -31,13 +31,31 @@ impl Emitter<'_> {
             return unsup("match:no-arms");
         }
         let subj_ty = self.lower(subject, None)?;
-        let scr = match subj_ty.val_type() {
-            ValType::I64 => self.scr_i64_local,
-            ValType::F64 => self.scr_f64_local,
-            _ => self.scr_i32_local,
+        // The shared scratch is sound only while nothing else lowers
+        // between two arms' tests of the same subject. A GUARD runs
+        // exactly there, and its operand can be anything — `g()!`
+        // (lower_try_unwrap tees scr_i32), a nested match, `??` — so a
+        // false guard on a guarded chain would hand the next arm a
+        // clobbered subject and it would fall through to `_` (#2464:
+        // C-352's per-alternative retry, on every pointer-typed
+        // subject). A guarded chain parks the subject in a hold, which
+        // is stack-disciplined against whatever the guard acquires.
+        let guarded = arms.iter().any(|a| a.guard.is_some());
+        let scr = if guarded {
+            self.hold_val(subj_ty)?
+        } else {
+            match subj_ty.val_type() {
+                ValType::I64 => self.scr_i64_local,
+                ValType::F64 => self.scr_f64_local,
+                _ => self.scr_i32_local,
+            }
         };
         self.f.instructions().local_set(scr);
-        self.lower_arm_chain(arms, subj_ty, scr, result, tail)
+        let r = self.lower_arm_chain(arms, subj_ty, scr, result, tail);
+        if guarded {
+            self.release_val(subj_ty);
+        }
+        r
     }
 
     pub(crate) fn lower_arm_chain(
