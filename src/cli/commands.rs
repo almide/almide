@@ -1177,14 +1177,19 @@ fn load_dep_info_for_fmt() -> (Vec<String>, std::collections::HashMap<String, St
 
     // Discover submodules for each dependency by scanning cached source directories
     let mut submodules = std::collections::HashMap::new();
-    let cache = crate::project::cache_dir();
     for dep in &project.dependencies {
-        // Check cache dir: ~/.almide/cache/{name}/{tag_or_latest}/
-        let dep_cache = cache.join(&dep.name);
+        // Check cache dir: ~/.almide/cache/{name}/.src-{source}/{tag_or_commit}/.
+        // Rooted at THIS dependency's source (#2523) — the scan used to start at
+        // `{name}/` and take whatever was cached there first, so a same-named
+        // package from another URL could name this one's submodules.
+        let dep_cache = crate::project_fetch::dep_cache_root(dep);
         if dep_cache.is_dir() {
-            // Use the first subdirectory (version) found
+            // Use the first checkout found. Directories starting with a dot are
+            // layout, not checkouts (and a `.tmp-` one is a clone in progress).
             if let Ok(entries) = std::fs::read_dir(&dep_cache) {
-                if let Some(version_dir) = entries.flatten().find(|e| e.path().is_dir()) {
+                if let Some(version_dir) = entries.flatten().find(|e| {
+                    e.path().is_dir() && !e.file_name().to_string_lossy().starts_with('.')
+                }) {
                     scan_submodules(&version_dir.path(), &dep.name, &mut submodules);
                 }
             }

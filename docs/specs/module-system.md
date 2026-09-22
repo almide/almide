@@ -118,7 +118,7 @@ error[E003]: undefined variable 'yaml'
 - Tier 1 は対象外（既にスコープにあるため追加しない）
 
 **サブモジュール発見:**
-依存パッケージのキャッシュディレクトリ (`~/.almide/cache/{name}/{version}/src/`) を再帰スキャンし、`.almd` ファイルの末尾セグメントと使用中の識別子を照合する。ローカルディレクトリ（`{name}/`）も検索対象。
+依存パッケージのキャッシュディレクトリ (`~/.almide/cache/{name}/.src-{source}/{version}/src/`、`{source}` はその依存自身の取得元) を再帰スキャンし、`.almd` ファイルの末尾セグメントと使用中の識別子を照合する。ローカルディレクトリ（`{name}/`）も検索対象。
 
 ```bash
 $ almide fmt app.almd
@@ -448,7 +448,12 @@ almide dep-path bindgen                   # キャッシュディレクトリを
 
 ### キャッシュ
 
-`~/.almide/cache/{name}/{tag_or_commit}/` にクローンされる。`almide clean` でクリア。
+`~/.almide/cache/{name}/.src-{source}/{tag_or_commit}/` にクローンされる。`almide clean` でクリア。
+
+`.src-{source}` は取得元 URL の 64bit ダイジェスト。キャッシュキーに**取得元が入る**のは、同名・同タグのパッケージが別リポジトリに存在しうるため —
+以前の `{name}/{tag}` 配置では先に取得した方が後続の別 URL にも応答し、`almide.lock` が「その URL には存在しないコミット」を記録して他マシンで解決不能になった (#2523)。
+URL は逐語でハッシュする（`…/p` と `…/p.git` は別エントリ）: 綴りの差はクローンの重複で済むが、別ソースの取り違えはビルドの誤りになる。
+ダイジェスト成分が `.` で始まるのは git のref名が `.` で始まれないため — 旧配置のディレクトリが新しいキーと衝突しえない。旧エントリは再利用されず（再取得になる）、`almide clean` まで容量だけ占める。
 
 ### バージョン解決
 
@@ -516,7 +521,7 @@ fn my_max(a: Int, b: Int) -> Int   // body なし: 全ターゲットに @extern
 2. `{base_dir}/pkg/mod.almd`
 3. `{base_dir}/pkg/src/mod.almd`
 4. `{base_dir}/pkg/src/lib.almd` (非推奨)
-5. `almide.toml` の `[dependencies]` → `~/.almide/cache/{name}/...`
+5. `almide.toml` の `[dependencies]` → `~/.almide/cache/{name}/.src-{source}/...`
 
 依存パッケージの `src/mod.almd` が見つかった場合、同ディレクトリのサブモジュールとサブディレクトリを再帰スキャン。
 
