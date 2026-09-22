@@ -1,0 +1,31 @@
+// @expect-fail: Error: matrix shape mismatch
+// @contract: C-358
+// #2481: `matrix.mul(2x3, 2x2)` violates `cols(a) == rows(b)`. Native
+// indexed `b` as if it had `cols(a)` rows and died with a raw Rust slice
+// panic (`range end index 6 out of range for slice of length 4`, exit 101 —
+// the form ALS-T6 forbids) while both wasm legs clamped the inner sum to
+// `min(cols(a), rows(b))` and printed a 2x2 product of the overlapping part
+// (exit 0): the crash-class half and the silent-wrong half of one missing
+// precondition. Both legs now take the unified abort, the same family as the
+// head-count (C-198), head-geometry (C-278) and index (C-282) domains.
+//
+// The rest of the family aborts with this same line: `linear_row`'s bias is
+// pinned by spec/wasm_fail/matrix_linear_row_bias_aborts.almd and
+// `concat_cols` by spec/wasm_fail/matrix_concat_cols_rows_aborts.almd (one
+// fixture cannot assert an abort and a normal exit, so the DEFINED side of
+// the whole family lives in
+// spec/wasm_cross/matrix_shape_precondition_family.almd, and
+// tests/matrix_head_count_domain_test.rs is the structural gate that keeps
+// every entry routed through the shared guard).
+fn main() -> Unit = {
+  let a = matrix.from_lists([
+    [1.0, 2.0, 3.0],
+    [4.0, 5.0, 6.0]
+  ])
+  let b = matrix.from_lists([
+    [7.0, 8.0],
+    [9.0, 10.0]
+  ])
+  let c = matrix.mul(a, b)
+  println("UNREACHABLE ${matrix.rows(c)}x${matrix.cols(c)}")
+}

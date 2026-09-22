@@ -1,0 +1,32 @@
+// @contract: C-358
+// The activation half of the shape-precondition family (C-358), split from
+// spec/wasm_cross/matrix_shape_precondition_family.almd because these four
+// entries route through the canonical fast-exp / sqrt kernels that the
+// judge's reference evaluator does not implement, and one abstaining cell
+// abstains the whole program.
+//
+// `swiglu_gate` in domain (both weights (d_out, d_in) against cols(x)) and
+// the elementwise/row-norm ZIP cells that stay OUT of the abort rule:
+// `silu_mul` truncates rows and cols to the shorter operand, and the row
+// norms truncate the output to the shorter gamma/beta. They are pinned so
+// the guard work can never silently convert them into aborts.
+fn show(m: Matrix) -> String = "r=${matrix.rows(m)} c=${matrix.cols(m)} ${matrix.to_lists(m)}"
+
+fn main() -> Unit = {
+  let a = matrix.from_lists([
+    [1.0, 2.0, 3.0],
+    [4.0, 5.0, 6.0]
+  ])
+  let b = matrix.from_lists([
+    [1.0, 0.0],
+    [0.0, 1.0],
+    [1.0, 1.0]
+  ])
+  println("swiglu=${show(matrix.swiglu_gate(a, a, a))}")
+  println("swiglu_empty=${show(matrix.swiglu_gate(matrix.zeros(0, 0), a, a))}")
+  println("silu_zip=${show(matrix.silu_mul(b, a))}")
+  println("silu_zip_rev=${show(matrix.silu_mul(a, b))}")
+  println("rms_short=${show(matrix.rms_norm_rows(a, [1.0], 0.00001))}")
+  println("rms_long=${show(matrix.rms_norm_rows(a, [1.0, 1.0, 1.0, 1.0], 0.00001))}")
+  println("ln_short=${show(matrix.layer_norm_rows(a, [1.0], [0.0, 0.0, 0.0], 0.00001))}")
+}

@@ -1,0 +1,18 @@
+// @expect-fail: Error: matrix rows must have equal length
+// @contract: C-358
+// #2482: a ragged `from_lists` is not a matrix. Native stores a flat
+// `rows * cols` buffer and its constructor asserted `data.len() == rows *
+// cols` — a raw `assertion left == right failed` panic (exit 101) — while
+// the wasm legs, whose Matrix is a list of rows with no shape invariant,
+// built the ragged value and read on: the structural leg zero-filled the
+// short row (`[[1, 2], [3, 0]]`) and the incumbent kept it short
+// (`[[1, 2], [3]]`), so the two wasm legs did not even agree with each
+// other. C-282 already stated that no public constructor builds a ragged
+// matrix; this is the guard that makes the statement true.
+fn main() -> Unit = {
+  let m = matrix.from_lists([
+    [1.0, 2.0],
+    [3.0]
+  ])
+  println("UNREACHABLE ${matrix.rows(m)}x${matrix.cols(m)}")
+}

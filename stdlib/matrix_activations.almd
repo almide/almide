@@ -222,9 +222,30 @@ fn matrix_swiglu_gate(x: List[List[Float]], w_gate: List[List[Float]], w_up: Lis
   // clamped-away weight matrix (C-161) gave 4x0 here and 0x0 natively
   // (differential-fuzz, seed 1784965680755102000).
   let rows = if r == 0 or d_out == 0 or up_rows == 0 then 0 else r
+  // Both weights are (d_out, d_in) — the gate/up dots read `w[j][k]` for
+  // k < d_in and j < d_out, so a narrower weight or a shorter `w_up` read
+  // past a row block here (native: a raw index panic). Same order as
+  // native: gate width, up width, up rows.
+  let _g = if rows == 0 then 0 else __mxa_shape_guard(w_gate, w_up, d_in, d_out)
   let out: List[List[Float]] = prim.alloc_list_str(rows)
   let _x = __sg_rows(prim.handle(out), x, w_gate, w_up, rows, d_out, d_in, 0)
   out
+}
+
+// The shape precondition (#2481 family), byte-identical to the native
+// `almide_rt_matrix_shape_eq`: two extents a kernel indexes against each
+// other must be EQUAL, or the call aborts in the unified T6 form.
+fn __mxa_shape_eq(a: Int, b: Int) -> Int = {
+  if a != b then prim.die(prim.handle("Error: matrix shape mismatch\n")) else ()
+  0
+}
+
+fn __mxa_shape_guard(w_gate: List[List[Float]], w_up: List[List[Float]], d_in: Int, d_out: Int) -> Int = {
+  let hg = prim.handle(w_gate)
+  let hu = prim.handle(w_up)
+  let _a = __mxa_shape_eq(prim.load32(prim.load64(hg + 12) + 4), d_in)
+  let _b = __mxa_shape_eq(prim.load32(prim.load64(hu + 12) + 4), d_in)
+  __mxa_shape_eq(prim.load32(hu + 4), d_out)
 }
 
 fn __rope_copy(dh: Int, sh: Int, cols: Int, j: Int) -> Int = if j >= cols then 0
@@ -525,12 +546,34 @@ else {
   __mha_rows(ho, qmat, kmat, vmat, nh, dh, dm, sk, sq, scale, causal, i + 1)
 }
 
+// `k` and `v` are read at `[j][col0 + kk]` for j < sk: a narrower `k`/`v`
+// read past its row block here (the two wasm legs even disagreed on the
+// garbage) where native panicked; a `v` with fewer rows than `k` read past
+// the row-handle array. An EMPTY `k` reads nothing. Same order as native:
+// k width, v rows, v width.
+fn __mha_shape_guard(hk: Int, hv: Int, sk: Int, dm: Int) -> Int = if sk == 0 then 0
+else {
+  let _a = __mxa_shape_eq(prim.load32(prim.load64(hk + 12) + 4), dm)
+  let _b = __mxa_shape_eq(prim.load32(hv + 4), sk)
+  __mxa_shape_eq(prim.load32(prim.load64(hv + 12) + 4), dm)
+}
+
+// The ORDERED half: the causal offset `sk - sq` needs rows(q) <= rows(k).
+// Past it this body masked from a negative offset while native's usize
+// offset underflowed and masked nothing — two exit-0 answers that differed.
+fn __mxa_shape_le(a: Int, b: Int) -> Int = {
+  if a > b then prim.die(prim.handle("Error: matrix shape mismatch\n")) else ()
+  0
+}
+
 fn __mha_impl(q: List[List[Float]], k: List[List[Float]], v: List[List[Float]], n_heads: Int, causal: Bool) -> List[List[Float]] = {
   let hq = prim.handle(q)
   let sq = prim.load32(hq + 4)
   let sk = prim.load32(prim.handle(k) + 4)
   let dm = if sq == 0 then 0 else prim.load32(prim.load64(hq + 12) + 4)
   let nh = __mx_head_count(n_heads)
+  let _g = if sq == 0 then 0 else __mha_shape_guard(prim.handle(k), prim.handle(v), sk, dm)
+  let _c = if sq == 0 or not causal then 0 else __mxa_shape_le(sq, sk)
   let dh = dm / nh
   let scale = 1.0 / float.sqrt(int.to_float(dh))
   let out: List[List[Float]] = prim.alloc_list_str(sq)

@@ -253,3 +253,112 @@ fn the_self_hosted_index_guard_matches_the_native_message() {
         "the self-hosted matrix_get must guard BOTH indices, mirroring the native twin: {get}"
     );
 }
+
+/// #2481 / #2482 / #2483 (C-358): the SHAPE domain — the fourth rule of this
+/// family, and the one whose violations were a raw Rust panic natively
+/// against a silently truncated product, a missing bias read as 0.0, or an
+/// out-of-block read on the wasm legs. One shared guard per leg, one message,
+/// and every two-operand entry routed through it.
+#[test]
+fn the_native_shape_guard_aborts_and_every_two_operand_entry_routes_through_it() {
+    let src = read("runtime/rs/src/matrix.rs");
+    let start = src
+        .find("pub fn almide_rt_matrix_shape_eq")
+        .expect("almide_rt_matrix_shape_eq is missing — the two-operand family has no shared shape rule");
+    let body = &src[start..start + 400.min(src.len() - start)];
+    assert!(
+        body.contains("Error: matrix shape mismatch") && body.contains("exit(1)"),
+        "the shape guard must raise the unified `Error: <msg>` + exit 1 both targets print: {body}"
+    );
+
+    // Every native kernel that indexes one operand's extent against another's
+    // must ask the shared guard, not its own `if` or the slice's panic.
+    let p2 = read("runtime/rs/src/matrix_p2.rs");
+    for (file, src, entry) in [
+        ("matrix.rs", &src, "pub fn almide_rt_matrix_mul"),
+        ("matrix.rs", &src, "pub fn almide_rt_matrix_linear_row("),
+        ("matrix.rs", &src, "pub fn almide_rt_matrix_linear_row_no_bias"),
+        ("matrix.rs", &src, "pub fn almide_rt_matrix_swiglu_gate"),
+        ("matrix.rs", &src, "pub fn almide_rt_matrix_mha_core"),
+        ("matrix.rs", &src, "pub fn almide_rt_matrix_conv1d"),
+        ("matrix.rs", &src, "pub fn almide_rt_matrix_concat_cols_many"),
+        ("matrix_p2.rs", &p2, "pub fn almide_rt_matrix_append_rows"),
+        ("matrix_p2.rs", &p2, "pub fn almide_rt_matrix_linear_f32_row_no_bias"),
+        ("matrix_p2.rs", &p2, "pub fn almide_rt_matrix_linear_q8_0_row_no_bias"),
+        ("matrix_p2.rs", &p2, "pub fn almide_rt_matrix_linear_q1_0_row_no_bias"),
+    ] {
+        let s = src
+            .find(entry)
+            .unwrap_or_else(|| panic!("{entry} is missing from {file}"));
+        let window = &src[s..(s + 2400).min(src.len())];
+        assert!(
+            window.contains("almide_rt_matrix_shape_eq("),
+            "{entry} ({file}) does not route through almide_rt_matrix_shape_eq — a two-operand \
+             kernel that checks its own shapes (or none) is how this family produced a raw \
+             panic on one leg and a truncated answer on the other (#2481)"
+        );
+    }
+
+    // `from_lists` is the constructor half: C-282 states that no public
+    // constructor builds a ragged matrix, which is true only while this holds.
+    let fl = src
+        .find("pub fn almide_rt_matrix_from_lists")
+        .expect("almide_rt_matrix_from_lists is missing");
+    assert!(
+        src[fl..(fl + 300).min(src.len())].contains("almide_rt_matrix_rows_uniform("),
+        "from_lists must reject ragged rows — the flat store's own assertion is a raw panic \
+         (exit 101) and the wasm legs have no shape invariant at all (#2482)"
+    );
+}
+
+/// The self-hosted (wasm) side carries the same shape rule, spelled with the
+/// same message in every file that needs it — a different message would be a
+/// cross-target divergence in the abort itself.
+#[test]
+fn the_self_hosted_shape_guards_match_the_native_message() {
+    for (path, guard) in [
+        ("stdlib/matrix_core.almd", "fn __mx_shape_eq"),
+        ("stdlib/matrix_activations.almd", "fn __mxa_shape_eq"),
+        ("stdlib/matrix_ext.almd", "fn __mxe_shape_eq"),
+    ] {
+        let src = read(path);
+        assert!(
+            src.contains(guard),
+            "{path} has no `{guard}` — its kernels would read past the shorter operand's \
+             block where native aborts"
+        );
+        assert!(
+            src.contains("Error: matrix shape mismatch"),
+            "{path}'s shape guard must print the SAME line as the native helper, or the \
+             abort itself diverges across targets"
+        );
+    }
+    // The ragged-constructor guard and the conv1d stride domain, same rule.
+    let core = read("stdlib/matrix_core.almd");
+    assert!(
+        core.contains("Error: matrix rows must have equal length")
+            && core.contains("__mx_rows_uniform("),
+        "stdlib/matrix_core.almd must reject a ragged `from_lists` with the native line (#2482)"
+    );
+    let ext = read("stdlib/matrix_ext.almd");
+    assert!(
+        ext.contains("Error: stride must be positive") && ext.contains("__mxe_stride("),
+        "stdlib/matrix_ext.almd must take conv1d's stride through the positive-step domain \
+         (a stride of 0 was a native divide-by-zero panic against the wasm `Error: division \
+         by zero`)"
+    );
+    // The STRUCTURAL leg spells the same two messages in its own emitter
+    // (from_lists and the attention shapes are lowered there, not linked).
+    let wasm_ctor = read("crates/almide-wasm/src/matrix.rs");
+    assert!(
+        wasm_ctor.contains("matrix rows must have equal length"),
+        "the structural from_lists must reject ragged rows with the shared line — it used to \
+         zero-fill the short row and answer a shape (#2482)"
+    );
+    let wasm_mha = read("crates/almide-wasm/src/matrix_rope.rs");
+    assert!(
+        wasm_mha.contains("matrix shape mismatch"),
+        "the structural attention lowering must carry the shape guard — a narrower k/v read \
+         past its row block and the two wasm legs disagreed on the garbage"
+    );
+}

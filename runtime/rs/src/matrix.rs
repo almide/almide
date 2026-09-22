@@ -292,6 +292,7 @@ pub fn almide_rt_matrix_transpose(m: &AlmideMatrix) -> AlmideMatrix {
 }
 
 pub fn almide_rt_matrix_from_lists(rows: &[Vec<f64>]) -> AlmideMatrix {
+    almide_rt_matrix_rows_uniform(rows);
     rows.to_vec().into()
 }
 
@@ -416,6 +417,10 @@ pub fn almide_rt_matrix_mul(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix 
     if m == 0 || k == 0 || n == 0 {
         return mk(m, n, vec![0.0f64; m * n]);
     }
+    // #2481: the inner dimension is a precondition, not a clamp — `b` was
+    // indexed as if it had `k` rows (a raw slice panic past its data) while
+    // the wasm body summed over `min(k, rows(b))` and printed a product.
+    almide_rt_matrix_shape_eq(k, b.rows);
     let mut out = vec![0.0f64; m * n];
     #[cfg(have_blas)]
     {
@@ -551,6 +556,12 @@ pub fn almide_rt_matrix_swiglu_gate(
     let r = x.len();
     let d_in = x[0].len();
     let d_out = w_gate.len();
+    // Both weights are (d_out, d_in): the gate/up dots read `w[j][k]` for
+    // k < d_in and j < d_out, so a narrower weight or a shorter `w_up` was a
+    // raw index panic here and an out-of-block read on the wasm leg.
+    almide_rt_matrix_shape_eq(w_gate.cols, d_in);
+    almide_rt_matrix_shape_eq(w_up.cols, d_in);
+    almide_rt_matrix_shape_eq(w_up.rows, d_out);
     let mut out = vec![vec![0.0f64; d_out]; r];
     for i in 0..r {
         let xi = &x[i];
@@ -611,11 +622,21 @@ pub fn almide_rt_matrix_concat_cols_many(matrices: &[AlmideMatrix]) -> AlmideMat
     if matrices.is_empty() { return vec![].into(); }
     let rows = matrices[0].len();
     if rows == 0 { return vec![vec![]].into(); }
+    // #2482: every NON-EMPTY member must have the first member's row count —
+    // a member with fewer rows left the output ragged (the flat store's
+    // assertion panic) while the wasm leg built the ragged value; a member
+    // with more rows silently lost its tail on both. An EMPTY member
+    // contributes no columns and no shape (C-278's empty-operand rule).
+    for m in matrices {
+        if !m.is_empty() {
+            almide_rt_matrix_shape_eq(m.len(), rows);
+        }
+    }
     let total_cols: usize = matrices.iter().map(|m| if m.is_empty() { 0 } else { m[0].len() }).sum();
     (0..rows).map(|r| {
         let mut row = Vec::with_capacity(total_cols);
         for m in matrices {
-            if r < m.len() {
+            if !m.is_empty() {
                 row.extend_from_slice(&m[r]);
             }
         }
@@ -645,6 +666,19 @@ pub fn almide_rt_matrix_mha_core(q: &AlmideMatrix, k: &AlmideMatrix, v: &AlmideM
     let sq = q.len();
     let sk = k.len();
     let d = q[0].len();
+    // `k` and `v` are read at `[j][col0 + kk]` for j < sk: a narrower `k` or
+    // `v` was a raw index panic natively and an out-of-block read on the wasm
+    // leg (the two wasm legs even disagreed with each other on the garbage);
+    // a `v` with fewer rows than `k` panicked past its data. An EMPTY `k`
+    // reads nothing and needs no shape.
+    if sk > 0 {
+        almide_rt_matrix_shape_eq(k.cols, d);
+        almide_rt_matrix_shape_eq(v.rows, sk);
+        almide_rt_matrix_shape_eq(v.cols, d);
+    }
+    if causal {
+        almide_rt_matrix_shape_le(sq, sk);
+    }
     let dh = d / n_heads;
     let scale = (dh as f64).sqrt().recip();
 
@@ -705,6 +739,11 @@ pub fn almide_rt_matrix_linear_row(x: &AlmideMatrix, weight: &AlmideMatrix, bias
     let r = x.len();
     let n_in = x[0].len();
     let n_out = weight.len();
+    // #2483: the weight is (n_out, n_in) and the bias has one entry per
+    // output — `bias[j]` for j < n_out was a raw index panic on a short bias
+    // while the wasm body read 0.0 past the list and printed a value.
+    almide_rt_matrix_shape_eq(weight.cols, n_in);
+    almide_rt_matrix_shape_eq(bias.len(), n_out);
     let mut out = vec![vec![0.0f64; n_out]; r];
     for i in 0..r {
         let xi = &x[i];
@@ -747,6 +786,7 @@ pub fn almide_rt_matrix_linear_row_no_bias(x: &AlmideMatrix, weight: &AlmideMatr
     let r = x.len();
     let n_in = x[0].len();
     let n_out = weight.len();
+    almide_rt_matrix_shape_eq(weight.cols, n_in);
     let mut out = vec![vec![0.0f64; n_out]; r];
     for i in 0..r {
         let xi = &x[i];
