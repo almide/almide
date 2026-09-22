@@ -179,15 +179,24 @@ pub fn to_json(d: &Diagnostic) -> String {
         ),
         _ => "[]".to_string(),
     };
-    let notes_items: Vec<String> = d
-        .notes
-        .iter()
-        .map(|n| format!("\"{}\"", n.replace('\\', r"\\").replace('"', r#"\""#).replace('\n', "\\n")))
-        .collect();
-    let notes = format!("[{}]", notes_items.join(","));
+    // #1997: `notes` is emitted ONLY when the diagnostic carries one, so a
+    // diagnostic without notes keeps the exact bytes it had before the field
+    // existed — the check-parity manifest and the greenfield
+    // `check_file_json` query compare this stdout byte-for-byte, and an
+    // always-present empty array would have rewritten every row.
+    let notes = if d.notes.is_empty() {
+        String::new()
+    } else {
+        let items: Vec<String> = d
+            .notes
+            .iter()
+            .map(|n| format!("\"{}\"", n.replace('\\', r"\\").replace('"', r#"\""#).replace('\n', "\\n")))
+            .collect();
+        format!(r#""notes":[{}],"#, items.join(","))
+    };
     // Manual JSON to avoid serde dependency in this module
     format!(
-        r#"{{"level":"{}","code":"{}","message":"{}","hint":"{}","notes":{},"here":{},"try":{},"try_replace":{},"applicability":"{}","suggestions":{},"context":"{}","file":"{}","line":{},"col":{},"end_col":{},"secondary":{}}}"#,
+        r#"{{"level":"{}","code":"{}","message":"{}","hint":"{}",{}"here":{},"try":{},"try_replace":{},"applicability":"{}","suggestions":{},"context":"{}","file":"{}","line":{},"col":{},"end_col":{},"secondary":{}}}"#,
         level, code,
         d.message.replace('"', r#"\""#).replace('\n', "\\n"),
         d.hint.replace('"', r#"\""#).replace('\n', "\\n"),
