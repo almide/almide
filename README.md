@@ -77,7 +77,9 @@ gh attestation verify almide-macos-aarch64.tar.gz -R almide/almide   # provenanc
 sha256sum -c --ignore-missing almide-checksums.sha256                # digest matches the published checksums file
 ```
 
-From source, with [Rust](https://rustup.rs/) 1.94+ (the binary embeds the wasmtime host): `cargo build --release && cp target/release/almide ~/.local/bin/`.
+Each archive also carries `almide-verify`, the independently versioned certificate checker: `almide verify app.almd` emits the program's ownership / name / capability / call-mode witnesses and hands them to it (it must sit next to `almide` or on `PATH` — there is no built-in fallback).
+
+From source, with [Rust](https://rustup.rs/) 1.94+ (the binary embeds the wasmtime host): `cargo build --release && cp target/release/almide target/release/almide-verify ~/.local/bin/` (or `make install`).
 
 ```almd
 fn main() -> Unit = {
