@@ -180,7 +180,9 @@ fn main() -> Unit = {
 
 ### `float.sign(n: Float) -> Float`
 
-Return the sign of a float: -1.0, 0.0, or 1.0.
+Return the sign of a float as 1.0 or -1.0, decided by the sign BIT (f64
+`signum`): `sign(0.0)` is 1.0 and `sign(-0.0)` is -1.0. A NaN input returns
+NaN. It never returns 0.0.
 
 ```almd run
 fn main() -> Unit = {

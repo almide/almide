@@ -14,10 +14,11 @@ let text = x.to_string()
 
 ## Conversion semantics
 
-The bodies are pure Almide, routed through canonical `Int` (i64) as a dimensional
-pivot: `int.from_float32(x)` widens, then `int.to_<dst>(...)` narrows or re-widens.
-Both hops collapse — Rust folds the double cast, and the wasm renderer resolves
-them inline — so this costs nothing at runtime and both targets agree by
+The bodies are pure Almide, routed through canonical `Float` (f64) as a
+dimensional pivot: `float.from_float32(x)` widens, then `float.to_<dst>(...)`
+narrows to the integer width or re-renders (`stdlib/float32.almd`). Both hops
+collapse — Rust folds the double cast, and the wasm renderer resolves them
+inline — so this costs nothing at runtime and both targets agree by
 construction.
 
 The rules match Rust's `as`:
