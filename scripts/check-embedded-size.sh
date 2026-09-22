@@ -55,9 +55,13 @@ sources() {
 }
 
 # Count what SHIPS, not what the repo holds: the embed blanks whole-line
-# comments (#878), so a comment costs zero embedded bytes even though it stays
-# in the file. Measuring the repo bytes instead would make the gate fire on
-# documentation, which is exactly the growth we want to keep encouraging.
+# `//` comments (#878), so a design note costs zero embedded bytes even though
+# it stays in the file. Measuring the repo bytes instead would make the gate
+# fire on notes, which is exactly the growth we want to keep encouraging.
+# A whole-line `///` DOC comment is the exception (#2436): it ships, because
+# it is the input of the interface JSON's `doc` field on the by-name route
+# and the docs/stdlib pages render it — so a doc line IS a reviewed byte here.
+# This awk must stay the mirror of build.rs's blank_comment_lines.
 total=0
 count=0
 while read -r f; do
@@ -67,7 +71,7 @@ while read -r f; do
     echo "reference (or restore the file); the gate does not skip what it cannot see."
     exit 1
   fi
-  n=$(awk '{ if ($0 ~ /^[[:space:]]*\/\//) print ""; else print }' "$f" | wc -c | tr -d ' ')
+  n=$(awk '{ if ($0 ~ /^[[:space:]]*\/\// && $0 !~ /^[[:space:]]*\/\/\//) print ""; else print }' "$f" | wc -c | tr -d ' ')
   total=$((total + n))
   count=$((count + 1))
 done < <(sources)
