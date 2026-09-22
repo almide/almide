@@ -88,11 +88,15 @@ case "${1:-}" in
     # The ledger binary's one test carries both audits; under `merge/N` its
     # abstain half judges nothing (fixture-keyed, settled in the shards) and
     # its bridge half unions the `bridge` partials.
-    # `--extract-to .`/`--workspace-remap .` as the shards (ci-test-shard.sh).
+    # `--extract-to .`/`--workspace-remap .` as the shards (ci-test-shard.sh),
+    # plus `--extract-overwrite`: the coverage job has already extracted the
+    # same archive into ./target for the leg listings, and nextest refuses a
+    # destination that exists (exit 96, "destination target already exists" —
+    # PR #2459's first run). The shards start on a clean runner; this does not.
     expr='(binary_id(=almide::wasm_runtime_interp_ledger) & test(=interp_abstain_ledger_and_interp_bridge_fallback_ledger)) | binary_id(=almide-spine::run_parity)'
     echo "== merge/$n over $dir: $expr =="
     ALMIDE_CORPUS_SHARD="merge/$n" ALMIDE_CORPUS_SHARD_DIR="$dir" \
-      exec cargo nextest run --archive-file "$archive" --extract-to . --workspace-remap . --no-fail-fast --no-capture -E "$expr"
+      exec cargo nextest run --archive-file "$archive" --extract-to . --extract-overwrite --workspace-remap . --no-fail-fast --no-capture -E "$expr"
     ;;
   *)
     echo "usage: $0 --coverage <dir> <N> | --merge <dir> <N> <archive> | --gates" >&2
