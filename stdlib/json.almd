@@ -26,7 +26,10 @@ fn stringify_pretty(j: Value) -> String = _
 @intrinsic("almide_json_get_string")
 fn get_string(j: Value, key: String) -> String? = _
 
-/// Int at key; none if absent or non-numeric.
+/// Int at key; none if absent or not an Int (a Float is never truncated).
+// Int-only: a Float field is `none` even when integral (`3.0`), never
+// truncated — the `value.as_int` rule (#2476, C-362). The widening runs one
+// way: `get_float` accepts an Int (C-085).
 @intrinsic("almide_json_get_int")
 fn get_int(j: Value, key: String) -> Int? = _
 

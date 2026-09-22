@@ -101,6 +101,8 @@ Get an integer value by key. Returns none if key doesn't exist or value is not a
 
 ```almd run
 import json
+A Float value is `none` even when it is integral (`3.0`) — it is never truncated, the same
+rule as `value.as_int`. The widening runs one way only: `json.get_float` accepts an Int.
 
 fn main() -> Unit = {
   let j = json.parse("{\"name\": \"Alice\", \"age\": 30, \"price\": 9.5, \"active\": true, \"items\": [1, 2, 3]}") ?? value.null()
@@ -125,6 +127,7 @@ Get a float value by key. Returns none if key doesn't exist or value is not a nu
 
 ```almd run
 import json
+An Int value is widened to Float (`30` reads as `30.0`).
 
 fn main() -> Unit = {
   let j = json.parse("{\"name\": \"Alice\", \"age\": 30, \"price\": 9.5, \"active\": true, \"items\": [1, 2, 3]}") ?? value.null()
