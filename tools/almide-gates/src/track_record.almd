@@ -31,6 +31,20 @@
 // change have no verdict job and are scored the old way, from the single campaign job's step,
 // with coverage `1/1`.
 //
+// A shard that uploaded nothing may still have been RECOVERED from its own job log (#2513), and
+// `recovered=` names those with the second each one's campaign reached. Their minutes are already
+// in the line's totals; their findings are, too, and `findings_recovered=` says how many — a
+// count with no class, so a night with one is not green however the verdict job concluded.
+// [score] below mirrors that rule.
+//
+// What this twin does NOT mirror is the RETROSPECTIVE half of #2513: the bash also fetches each
+// `missing=` shard's job log and amends the night's line before scoring it, so a night written
+// before the recovery existed is still measured on what it ran. Its fold rounds the delivered
+// minutes to one decimal after EVERY shard, and matching that needs Almide's float formatting to
+// agree with printf's on the half-way cases — not a promise either side makes today. The parity
+// test therefore runs the bash with `FUZZ_NIGHT_RECOVER=0`, which is where this difference is
+// declared; porting it means porting the rounding first.
+//
 // This twin DRIFTED from the bash twice, and the #2163 diff found it both times: first it still
 // printed the four-column, pre-sharding table; then (#2452) it still scored a night from its
 // shard jobs' conclusions after the bash had moved to the record line. Reproduced here as the
@@ -209,23 +223,43 @@ fn budget_of(line: String, bar: Int) -> Budget = if line == "" then Budget {
 
 // `fuzz_night_score`: one sharded night scored from the verdict job's conclusion and its record
 // line. The verdict streak (#924) needs a verdict AND >= `bar`% of planned minutes; the green
-// streak (#796) needs that night's verdict to be `success`. `bar` is FUZZ_NIGHT_BUDGET_PCT.
+// streak (#796) needs that night's verdict to be `success` AND `findings_recovered=0` (#2513: a
+// count read off a truncated log has no class, so it cannot make a night clean).
+// `bar` is FUZZ_NIGHT_BUDGET_PCT.
 fn score(vjob: String, line: String, bar: Int) -> Score = {
   let b = budget_of(line, bar)
   let coverage = if b.budget == "unknown" then "?"
   else b.reported + " " + b.pct + "%"
-  let qual = match b.missing {
+  let missing_qual = match b.missing {
     "none" => "",
     "unknown" => "",
     "" => "",
     _ => " (shard(s) " + string.replace(b.missing, ",", ", ") + " did not report: findings unknown, not zero)",
   }
-  let text = match vjob {
+  // #2513: shards that uploaded nothing and were read back out of their job logs instead. Their
+  // minutes and findings are already in the line's totals; what the text carries is that each
+  // recovered count stops at the second it is tagged with.
+  let recovered = field(line, "recovered")
+  let rec_findings = field(line, "findings_recovered")
+  let rec_dirty = rec_findings != "" and rec_findings != "0"
+  let rec_qual = match recovered {
+    "none" => "",
+    "unknown" => "",
+    "" => "",
+    _ => " (shard(s) " + string.replace(recovered, ",", ", ") + " recovered from their job logs: counted only up to the second named)",
+  }
+  let concluded = match vjob {
     "success" => "GREEN",
     "failure" => "FINDINGS (verdict delivered, red on findings)",
     _ => "",
   }
-  if text == "" then Score {
+  // The verdict job only ever sees the shards that UPLOADED, so it can conclude success over a
+  // night whose reclaimed shards had already recorded findings. GREEN does not survive that.
+  let text = if rec_dirty and vjob == "success" then "NOT GREEN (the shards that uploaded were clean, but " + rec_findings + " finding(s) came back in a reclaimed shard's log, class unknown, counted only to the second named)"
+  else concluded
+  let qual = if rec_dirty and vjob != "success" then missing_qual + rec_qual + " [" + rec_findings + " of them recovered from a reclaimed shard's log, class unknown]"
+  else missing_qual + rec_qual
+  if concluded == "" then Score {
     full: false,
     green: false,
     coverage: coverage,
@@ -233,7 +267,7 @@ fn score(vjob: String, line: String, bar: Int) -> Score = {
   } else match b.budget {
     "full" => Score {
       full: true,
-      green: vjob == "success",
+      green: vjob == "success" and not rec_dirty,
       coverage: coverage,
       verdict: text + qual,
     },
@@ -475,6 +509,37 @@ test "a post-#2390 line at the bar counts, and names the shard that did not repo
   assert_eq(
     two.verdict,
     "FINDINGS (verdict delivered, red on findings) (shard(s) 3, 8 did not report: findings unknown, not zero)",
+  )
+}
+
+test "a night whose reclaimed shards were recovered counts, and says where their counts stop" {
+  // Run 35702279584 as #2513 recovers it: four shards killed at 295s/180s/275s/100s, read back
+  // out of their job logs, 34.2 of 40 minutes — over the line the unrecovered night missed.
+  let s = score(
+    "success",
+    "fuzz-night: shards=4/8 reporting=4 recovered=1@295s,2@180s,4@275s,6@100s missing=none minutes_planned=40 minutes_delivered=34.2 delivered_pct=85 budget=full generated=7021 findings=0 findings_recovered=0 correctness=0 slow=0",
+    75,
+  )
+  assert_eq(s.full, true)
+  assert_eq(s.green, true)
+  assert_eq(s.coverage, "4/8 85%")
+  assert_eq(
+    s.verdict,
+    "GREEN (shard(s) 1@295s, 2@180s, 4@275s, 6@100s recovered from their job logs: counted only up to the second named)",
+  )
+}
+
+test "a finding recovered from a reclaimed shard's log is not a green night" {
+  let s = score(
+    "success",
+    "fuzz-night: shards=7/8 reporting=7 recovered=8@200s missing=none minutes_planned=40 minutes_delivered=38.3 delivered_pct=95 budget=full findings=2 findings_recovered=2",
+    75,
+  )
+  assert_eq(s.full, true)
+  assert_eq(s.green, false)
+  assert_eq(
+    s.verdict,
+    "NOT GREEN (the shards that uploaded were clean, but 2 finding(s) came back in a reclaimed shard's log, class unknown, counted only to the second named) (shard(s) 8@200s recovered from their job logs: counted only up to the second named)",
   )
 }
 
