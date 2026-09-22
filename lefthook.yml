@@ -22,8 +22,8 @@ pre-commit:
       # The README's derived-count blocks and the no-undated-count rule. The
       # Hello, world baseline (docs/benchmarks/wasm-size.txt) is re-stamped by
       # `--measure`, never by hand — CI rebuilds it and demands the same bytes.
-      glob: "{README.md,docs/stdlib/*.md,docs/benchmarks/wasm-size.txt,docs/contracts/contracts.toml,spec/**/*.almd,scripts/gen-readme-stats.sh,scripts/check-readme-numbers.sh,scripts/lib/ledger-counts.sh,proofs/ledger-counts.toml,docs/wasm/README.md,docs/project/BENCHMARKS.md}"
-      run: bash scripts/gen-readme-stats.sh && git add README.md && bash scripts/check-readme-numbers.sh
+      glob: "{README.md,docs/stdlib/*.md,docs/benchmarks/wasm-size.txt,docs/contracts/contracts.toml,spec/**/*.almd,scripts/gen-readme-stats.sh,scripts/gen-mutation-score.sh,proofs/mutation-score.toml,scripts/check-readme-numbers.sh,scripts/lib/ledger-counts.sh,proofs/ledger-counts.toml,docs/wasm/README.md,docs/project/BENCHMARKS.md}"
+      run: bash scripts/gen-readme-stats.sh && bash scripts/gen-mutation-score.sh --render && git add README.md && bash scripts/check-readme-numbers.sh
     release-seals:
       glob: "{proofs/releases/*.toml,scripts/release-seal.sh}"
       run: bash scripts/release-seal.sh check
