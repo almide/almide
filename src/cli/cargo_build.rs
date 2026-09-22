@@ -590,6 +590,17 @@ fn ensure_runtime_rlib(opt_level: &str) -> Result<std::path::PathBuf, String> {
         }
     }
     let result = build_runtime_rlib(opt_level);
+    if let Ok(rlib) = &result {
+        // This rlib is in use NOW: refresh its mtime (nothing else does — a
+        // warm cache is a bare `exists()`), then let the daily sweep empty
+        // the rlib dirs of runtimes and toolchains nobody has linked for a
+        // week (#2504). The touch comes first, so the sweep can never evict
+        // the dir this process is about to link against.
+        super::run::touch_used(rlib);
+        if let Some(dir) = rlib.parent() {
+            super::run::sweep_rtlib_cache(dir);
+        }
+    }
     cache.lock().unwrap().insert(opt_level.to_string(), result.clone());
     result
 }

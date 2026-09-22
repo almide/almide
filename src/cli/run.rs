@@ -298,6 +298,52 @@ pub(crate) fn stamp_sweep(root: &std::path::Path) {
     let _ = std::fs::File::create(root.join(EVICT_STAMP_FILE));
 }
 
+/// The prefix of the prebuilt-runtime rlib dirs, directly in the temp dir.
+pub(crate) const RTLIB_DIR_PREFIX: &str = "almide-rtlib-";
+
+/// Empty the prebuilt-runtime rlib dirs nothing has linked for
+/// [`CACHE_MAX_AGE`], skipping `in_use` (#2504).
+///
+/// `<temp>/almide-rtlib-<key>` is keyed on the runtime SOURCE + the rustc
+/// version + the opt level, so a new one appears on every compiler build
+/// that touches the runtime and on every toolchain upgrade, and the old
+/// ones are never linked again: 31 dirs / 102 MB on the machine that filed
+/// the tree issues, growing ~3 MB per compiler build. They already carry
+/// the same `.almide-build.lock` every build scratch dir has (the rlib
+/// build takes it), so this is the same protocol as the other two caches:
+/// non-blocking lock, staleness re-asked under it, lockfile kept.
+///
+/// The rate-limit stamp for this sweep lives in the temp dir itself
+/// (`<temp>/.almide-evict-stamp`), because these dirs are siblings there
+/// rather than children of one cache root.
+///
+/// Emptying a dir a CONCURRENT process resolved earlier (it caches the path
+/// in-process) makes that process's `--extern almide_rt=<path>` fail, and
+/// the fast path falls through to the self-contained cargo build — slower,
+/// never wrong. A dir being built in right now holds its lock and is
+/// skipped.
+pub(crate) fn sweep_rtlib_cache(in_use: &std::path::Path) {
+    let temp = std::env::temp_dir();
+    if !sweep_due(&temp) {
+        return;
+    }
+    let Some(cutoff) = std::time::SystemTime::now().checked_sub(CACHE_MAX_AGE) else { return };
+    let Ok(entries) = std::fs::read_dir(&temp) else { return };
+    for entry in entries.flatten() {
+        if !entry.file_name().to_string_lossy().starts_with(RTLIB_DIR_PREFIX)
+            || !entry.file_type().map(|t| t.is_dir()).unwrap_or(false)
+        {
+            continue;
+        }
+        let dir = entry.path();
+        if dir == in_use || used_since(&dir, cutoff) {
+            continue;
+        }
+        clear_build_dir_if_idle(&dir, || !used_since(&dir, cutoff));
+    }
+    stamp_sweep(&temp);
+}
+
 /// Was any FILE in `dir` — its own, or a cached binary under
 /// `target/<profile>/` — modified since `cutoff`? A cache HIT touches the
 /// binary it execs, so this answers "did anyone use this dir", not "did
@@ -330,7 +376,7 @@ pub(crate) fn used_since(dir: &std::path::Path, cutoff: std::time::SystemTime) -
 /// ownership, which the process that cached the file has; on Windows the
 /// handle asks for `FILE_WRITE_ATTRIBUTES` alongside `GENERIC_READ`, which
 /// `SetFileTime` needs and which does not conflict with an exec.
-fn touch_used(path: &std::path::Path) {
+pub(crate) fn touch_used(path: &std::path::Path) {
     let mut opts = std::fs::OpenOptions::new();
     opts.read(true);
     #[cfg(windows)]
