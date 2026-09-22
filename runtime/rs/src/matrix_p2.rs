@@ -401,6 +401,13 @@ pub fn almide_rt_matrix_linear_q1_0_row_no_bias(
     // `x` was silently mis-strided, a narrower one a raw slice panic.
     almide_rt_matrix_shape_eq(x.cols, n_in);
     let (x_rows, out_cols) = almide_rt_matrix_dims(x_rows as i64, out_cols as i64);
+    // Out-of-buffer weights are the all-zero output, as in the f32 twin
+    // (18 bytes per 128-weight block, `out_cols` rows of them).
+    let off = w_offset.max(0) as usize;
+    let need = out_cols.saturating_mul(n_in / 128).saturating_mul(18);
+    if off > w_bytes.len() || need > w_bytes.len() - off {
+        return mk(x_rows, out_cols, vec![0.0f64; x_rows * out_cols]);
+    }
     let mut out = vec![0.0f64; x_rows * out_cols];
     almide_kernel::q1_0_packed::linear_q1_0_packed(
         &x.data,
@@ -690,6 +697,16 @@ pub fn almide_rt_matrix_linear_f32_row_no_bias(
         return mk(x_rows, out_cols, vec![0.0f64; x_rows * out_cols]);
     }
     almide_rt_matrix_shape_eq(x.cols, n_in);
+    // The weight window must be IN the buffer. Out of it, the answer is the
+    // all-zero output — the same edge the unfused composition takes, because
+    // `from_bytes_f32_le` over a window past the end is the all-zero matrix
+    // (C-341) and a zero weight makes a zero product. Without the test the
+    // slice below was a raw `range end index N out of range` panic (exit 101,
+    // the form ALS-T6 forbids) on a buffer one element short.
+    let need = out_cols.saturating_mul(n_in).saturating_mul(4);
+    if off > w_bytes.len() || need > w_bytes.len() - off {
+        return mk(x_rows, out_cols, vec![0.0f64; x_rows * out_cols]);
+    }
     let mut out = vec![0.0f64; x_rows * out_cols];
     // Fast path: reinterpret the (4-byte-aligned, little-endian) weight bytes
     // as &[f32] so the inner dot auto-vectorizes (cvtps2pd + fma), and split
@@ -988,6 +1005,11 @@ pub fn almide_rt_matrix_linear_q8_0_row_no_bias(
     }
     almide_rt_matrix_shape_eq(x.cols, n_in);
     let row_bytes = n_in / ALMIDE_Q8_BLOCK * ALMIDE_Q8_BLOCK_BYTES;
+    // Out-of-buffer weights are the all-zero output, as in the f32 twin.
+    let need = out_cols.saturating_mul(row_bytes);
+    if off > w_bytes.len() || need > w_bytes.len() - off {
+        return mk(x_rows, out_cols, vec![0.0f64; x_rows * out_cols]);
+    }
     let w_all = &w_bytes[off..off + out_cols * row_bytes];
     let mut out = vec![0.0f64; x_rows * out_cols];
     for i in 0..x_rows {
