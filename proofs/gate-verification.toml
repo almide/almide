@@ -434,7 +434,7 @@ reads = "UNCLASSIFIED"
 wired_by = ".github/workflows/ci.yml"
 class = "NEGATIVE_TESTED"
 evidence = "#1244 round 2: baseline forged DOWN (measured > ceiling) demonstrated to fail with the raise-in-same-change instruction; restored green"
-measures = "byte size of the embedded stdlib payload (every SRC_<STEM> and include_str! of stdlib/*.almd) against scripts/embedded-size-baseline.txt"
+measures = "byte size of the embedded stdlib payload (every SRC_<STEM> and include_str! of stdlib/*.almd, whole-line `//` blanked and whole-line `///` doc lines counted as shipped, #2436) against scripts/embedded-size-baseline.txt"
 varies = "2026-08-30 5eed63240: 904266 bytes anchored when the four streaming twins landed on purpose; 88fa77e47 the same day moved it again; #1244 round 2 a baseline forged below the measurement read red"
 
 [[gate]]
