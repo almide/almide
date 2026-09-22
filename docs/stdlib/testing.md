@@ -126,15 +126,34 @@ every target (contract C-336).
 ## Signature index (10 functions)
 
 ```
+// Fails unless f panics, message containing expected.
 testing.assert_throws(f: () -> Unit, expected: String) -> Unit
+
+// Fails unless needle is in haystack; "" passes.
 testing.assert_contains(haystack: String, needle: String) -> Unit
+
+// Fails unless abs(a - b) < tolerance (strict).
 testing.assert_approx(a: Float, b: Float, tolerance: Float) -> Unit
+
+// Fails unless a > b; equal fails.
 testing.assert_gt(a: Int, b: Int) -> Unit
+
+// Fails unless a < b; equal fails.
 testing.assert_lt(a: Int, b: Int) -> Unit
+
+// Fails when opt is none.
 testing.assert_some(opt: Option[A]) -> Unit
+
+// Fails when result is an err.
 testing.assert_ok(result: Result[A, B]) -> Unit
+
+// Fails when opt is some.
 testing.assert_none(opt: Option[A]) -> Unit
+
+// Fails when result is ok.
 testing.assert_err(result: Result[A, B]) -> Unit
+
+// Fails unless actual == expected; --update-snapshots rewrites.
 testing.assert_snapshot(actual: String, expected: String) -> Unit
 ```
 
