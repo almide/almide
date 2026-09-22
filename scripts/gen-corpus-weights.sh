@@ -65,8 +65,24 @@ gh_escape_flag() {
   fi
 }
 
+# The newest green develop run that HAS the ten solo jobs. Not simply the
+# newest: `gh run list --limit 1` has handed back a months-old run id once
+# here (an eventually-consistent read), and a docs-only run carries the jobs
+# with every step skipped. Either would turn the weekly ratchet red for
+# something nobody can act on, so the candidate is chosen by what it contains.
+# $VIEW_ESC must be set by the caller.
 latest_green_develop() {
-  gh run list --workflow ci.yml --branch develop --status success --limit 1 --json databaseId --jq '.[0].databaseId'
+  local id
+  for id in $(gh run list --workflow ci.yml --branch develop --status success --limit 6 --json databaseId --jq '.[].databaseId'); do
+    # shellcheck disable=SC2086
+    if gh run view $VIEW_ESC "$id" --json jobs --jq '.jobs[].name' 2>/dev/null | grep -q 'Test Rust (solo '; then
+      echo "$id"
+      return 0
+    fi
+    echo "skipping run $id: no 'Test Rust (solo …)' jobs" >&2
+  done
+  echo "::error::none of the last 6 green develop ci.yml runs has the solo corpus jobs" >&2
+  return 1
 }
 
 # render <dir> [measured-on]
@@ -147,12 +163,12 @@ case "${1:-}" in
     # the table from them. The artifacts are kept for a few days only
     # (retention-days on the upload step in ci.yml), so this runs against a
     # RECENT run; --check names the one it judged.
+    VIEW_ESC=$(gh_escape_flag "run view")
     RUN_ID="${2:-}"
     if [ -z "$RUN_ID" ]; then
       RUN_ID="$(latest_green_develop)" || exit 2
-      echo "using the latest green develop ci.yml run: $RUN_ID"
+      echo "using the latest green develop ci.yml run with solo jobs: $RUN_ID"
     fi
-    VIEW_ESC=$(gh_escape_flag "run view")
     # shellcheck disable=SC2086
     meta="$(gh run view $VIEW_ESC "$RUN_ID" --json headSha,headBranch,createdAt --jq '[.headSha[0:9], .headBranch, (.createdAt|split("T")[0])] | @tsv')" || exit 2
     IFS=$'\t' read -r sha branch created <<<"$meta"
@@ -171,13 +187,13 @@ case "${1:-}" in
     # .github/workflows/shard-balance.yml. It measures the `Test Rust (solo
     # <leg> k/2)` jobs of a run from their OWN logs — the artifacts are long
     # gone by Monday, the logs are not.
+    API_ESC=$(gh_escape_flag api)
+    VIEW_ESC=$(gh_escape_flag "run view")
     RUN_ID="${2:-}"
     if [ -z "$RUN_ID" ]; then
       RUN_ID="$(latest_green_develop)" || exit 2
-      echo "using the latest green develop ci.yml run: $RUN_ID"
+      echo "using the latest green develop ci.yml run with solo jobs: $RUN_ID"
     fi
-    API_ESC=$(gh_escape_flag api)
-    VIEW_ESC=$(gh_escape_flag "run view")
     TMP="$(mktemp -d)"
     trap 'rm -rf "$TMP"' EXIT
     # shellcheck disable=SC2086
