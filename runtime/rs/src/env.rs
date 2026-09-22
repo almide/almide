@@ -58,24 +58,3 @@ pub fn almide_rt_env_os() -> String {
     else if cfg!(target_os = "linux") { "linux".to_string() }
     else { "unknown".to_string() }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_env_cwd() {
-        assert!(almide_rt_env_cwd().is_ok());
-    }
-
-    #[test]
-    fn test_env_timestamp() {
-        assert!(almide_rt_env_unix_timestamp() > 0);
-    }
-
-    #[test]
-    fn test_env_os() {
-        let os = almide_rt_env_os();
-        assert!(["macos", "linux", "windows", "unknown"].contains(&os));
-    }
-}

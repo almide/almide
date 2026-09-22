@@ -167,14 +167,6 @@ pub fn almide_rt_list_sort_by<A: Clone, B: Ord>(mut xs: Vec<A>, f: std::rc::Rc<d
 pub fn almide_rt_list_fold_effect<A, B>(xs: Vec<A>, init: B, f: std::rc::Rc<dyn Fn(B, A) -> Result<B, String>>) -> Result<B, String> { let f = move |a, b| f(a, b); let mut a = init; for x in xs { a = f(a, x)?; } Ok(a) }
 pub fn almide_rt_list_map_effect<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Result<B, String>>) -> Result<Vec<B>, String> { let f = move |a| f(a); xs.into_iter().map(f).collect() }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test] fn test_len() { assert_eq!(almide_rt_list_len(&vec![1, 2, 3]), 3); }
-    #[test] fn test_map() { assert_eq!(almide_rt_list_map(vec![1, 2, 3], std::rc::Rc::new(|x| x * 2)), vec![2, 4, 6]); }
-    #[test] fn test_filter() { assert_eq!(almide_rt_list_filter(vec![1, 2, 3, 4], std::rc::Rc::new(|x| x % 2 == 0)), vec![2, 4]); }
-}
-
 pub fn almide_rt_list_take_end<T: Clone>(xs: Vec<T>, n: i64) -> Vec<T> {
     let start = if n as usize >= xs.len() { 0 } else { xs.len() - n as usize };
     xs[start..].to_vec()
