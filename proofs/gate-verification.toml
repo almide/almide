@@ -290,7 +290,7 @@ reads = "UNCLASSIFIED"
 wired_by = ".github/workflows/ci.yml, .github/workflows/mutation-sweep.yml"
 class = "KERNEL_PROVEN"
 evidence = "verdict core = extracted checker (qualified-by-proof); toolchain stamp FATAL demonstrated live 2026-08-12 (PATH != workspace build)"
-measures = "the extracted checker's accept / reject verdict per flight-grade property over the per-build witness, and the toolchain stamp's equality with the workspace build"
+measures = "the extracted checker's accept / reject verdict per flight-grade property over the per-build witness, almide-verify's agreement with that verdict on every row and on 1,000 seeded random witnesses (#2152), and the toolchain stamp's equality with the workspace build"
 varies = "2026-08-12: the stamp read PATH != workspace build and the gate went FATAL; the checker's reject direction is the F8 via_if catch (proofs/corpus-wall.sh)"
 
 [[gate]]
@@ -299,7 +299,7 @@ reads = "UNCLASSIFIED"
 wired_by = "Makefile"
 class = "KERNEL_PROVEN"
 evidence = "checker-phase ACCEPTs are kernel-proven; flight-evidence-gaps.md F8: a live REJECT exposed the via_if miscompile (the fail direction caught a real bug)"
-measures = "per-function lowering outcome over the v0 spec corpus (Ok / explicit Unsupported / panic) and the checker's accept count, diffed against proofs/walled-real-baseline.txt"
+measures = "per-function lowering outcome over the v0 spec corpus (Ok / explicit Unsupported / panic) and the checker's accept count, diffed against proofs/walled-real-baseline.txt; almide-verify's bundle verdict over the same corpus witness set (#2152)"
 varies = "flight-evidence-gaps.md F8: a live REJECT exposed the via_if miscompile; 2026-09-04 f1a511468 and 95cf925c8 each added walled rows the incumbent refuses"
 
 [[gate]]

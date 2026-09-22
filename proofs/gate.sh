@@ -29,6 +29,22 @@ stamp_toolchain "$ROOT" || exit 1
 echo "== build the kernel-proven checker from the Coq proof =="
 "$ROOT/proofs/build-checker.sh" >/dev/null
 
+# THE PORTABLE CHECKER (#2152): `almide-verify` is what a BINARY distribution
+# runs — an independently versioned Rust transcription of the same Coq
+# definitions, needing no Rocq toolchain. It carries no soundness theorem of
+# its own, so its agreement with the extracted checker is GATED here, on every
+# row below (accept and reject alike) and on a seeded random differential at
+# the end — never assumed.
+echo "== build almide-verify (the portable checker, held to the extracted one's verdicts) =="
+(cd "$ROOT" && cargo build -q -p almide-verify)
+VERIFY="${CARGO_TARGET_DIR:-$ROOT/target}/debug/almide-verify"
+[ -x "$VERIFY" ] || { echo "FAIL: almide-verify was not built at $VERIFY"; exit 1; }
+portable_agrees() { # checker-mode witness-file expected_exit(0=accept|1=reject)
+  local rc
+  set +e; "$VERIFY" "$1" "$2" >/dev/null 2>&1; rc=$?; set -e
+  [ "$rc" -eq "$3" ]
+}
+
 COQC="${COQC:-$(command -v coqc)}"
 
 # THE KERNEL ORACLE (brick 6b): re-verify a witness verdict with the Rocq KERNEL
@@ -84,7 +100,9 @@ run_mode() { # scenario emit-property checker-mode expected_exit
   fi
   kernel_verify "$3" /tmp/compiler.witness "$4" \
     || { echo "FAIL [$2] $1: KERNEL oracle disagrees with the binary verdict"; exit 1; }
-  echo "ok   [$2] $1: witness '$(cat /tmp/compiler.witness | tr '\n' '|')' -> $(cat /tmp/gate.out) (kernel agrees)"
+  portable_agrees "$3" /tmp/compiler.witness "$4" \
+    || { echo "FAIL [$2] $1: almide-verify disagrees with the proven checker"; exit 1; }
+  echo "ok   [$2] $1: witness '$(cat /tmp/compiler.witness | tr '\n' '|')' -> $(cat /tmp/gate.out) (kernel + almide-verify agree)"
 }
 
 # REAL .almd → frontend → MIR → witness, then the proven checker re-verifies it.
@@ -108,7 +126,9 @@ run_src_mode() { # fixture function emit-property checker-mode expected_exit
   fi
   kernel_verify "$4" /tmp/real.witness "$5" \
     || { echo "FAIL [$3] $1::$2: KERNEL oracle disagrees with the binary verdict"; exit 1; }
-  echo "ok   [$3] $1::$2 (real source): witness '$(cat /tmp/real.witness | tr '\n' '|')' -> $(cat /tmp/gate.out) (kernel agrees)"
+  portable_agrees "$4" /tmp/real.witness "$5" \
+    || { echo "FAIL [$3] $1::$2: almide-verify disagrees with the proven checker"; exit 1; }
+  echo "ok   [$3] $1::$2 (real source): witness '$(cat /tmp/real.witness | tr '\n' '|')' -> $(cat /tmp/gate.out) (kernel + almide-verify agree)"
 }
 
 echo "== compiler output  ⊳  proven checker =="
@@ -198,7 +218,9 @@ run_src_manifest() { # fixture function property manifest expected_exit
   fi
   kernel_verify "$3" /tmp/real.witness "$5" \
     || { echo "FAIL [$3 ⊳ $4] $1::$2: KERNEL oracle disagrees with the binary verdict"; exit 1; }
-  echo "ok   [$3 ⊳ $4] $1::$2 (real source): witness '$(cat /tmp/real.witness | tr '\n' '|')' -> $(cat /tmp/gate.out) (kernel agrees)"
+  portable_agrees "$3" /tmp/real.witness "$5" \
+    || { echo "FAIL [$3 ⊳ $4] $1::$2: almide-verify disagrees with the proven checker"; exit 1; }
+  echo "ok   [$3 ⊳ $4] $1::$2 (real source): witness '$(cat /tmp/real.witness | tr '\n' '|')' -> $(cat /tmp/gate.out) (kernel + almide-verify agree)"
 }
 run_src_manifest manifest_print.almd main caps manifest_io.toml   0
 run_src_manifest manifest_print.almd main caps manifest_rand.toml 1
@@ -241,7 +263,9 @@ set +e; "$ROOT/proofs/checker" ownership /tmp/tamper.witness >/dev/null 2>&1; tr
 if [ "$trc" -ne 1 ]; then echo "FAIL tamper(i): the binary accepted a corrupted witness"; exit 1; fi
 kernel_verify ownership /tmp/tamper.witness 1 \
   || { echo "FAIL tamper(i): the kernel accepted a corrupted witness"; exit 1; }
-echo "ok   tamper(i): a corrupted witness is rejected by the binary AND the kernel"
+portable_agrees ownership /tmp/tamper.witness 1 \
+  || { echo "FAIL tamper(i): almide-verify accepted a corrupted witness"; exit 1; }
+echo "ok   tamper(i): a corrupted witness is rejected by the binary, the kernel AND almide-verify"
 # (ii) a SIMULATED DIVERGENT VERDICT: hand the kernel the reject witness but claim
 # the binary said ACCEPT — the kernel twin must FAIL. This proves the oracle has
 # teeth: a generator that vacuously passed everything would slip through here.
@@ -272,7 +296,9 @@ run_structural() { # fixture-rel fn-name expected_exit
     echo "FAIL [structural] $1::$2: got exit $rc want $3 ($(cat /tmp/gate.out))"; exit 1
   fi
   kernel_verify ownership /tmp/structural.witness "$3"     || { echo "FAIL [structural] $1::$2: KERNEL oracle disagrees"; exit 1; }
-  echo "ok   [structural] $1::$2: witness '$(cat /tmp/structural.witness | tr '\n' '|')' accepted (kernel agrees)"
+  portable_agrees ownership /tmp/structural.witness "$3" \
+    || { echo "FAIL [structural] $1::$2: almide-verify disagrees with the proven checker"; exit 1; }
+  echo "ok   [structural] $1::$2: witness '$(cat /tmp/structural.witness | tr '\n' '|')' accepted (kernel + almide-verify agree)"
 }
 run_structural spec/wasm_cross/witness_straightline.almd shed 0
 run_structural spec/wasm_cross/witness_straightline.almd tag 0
@@ -282,6 +308,7 @@ emit_structural spec/wasm_cross/witness_straightline.almd shed | sed 's/dd$/d/' 
 set +e; "$ROOT/proofs/checker" ownership /tmp/structural.tamper >/dev/null 2>&1; src_rc=$?; set -e
 if [ "$src_rc" -ne 1 ]; then echo "FAIL structural-tamper: a leaked structural witness was accepted"; exit 1; fi
 kernel_verify ownership /tmp/structural.tamper 1   || { echo "FAIL structural-tamper: the kernel accepted the leak"; exit 1; }
+portable_agrees ownership /tmp/structural.tamper 1 || { echo "FAIL structural-tamper: almide-verify accepted the leak"; exit 1; }
 echo "ok   structural-tamper: a leaked structural witness is rejected by the binary AND the kernel"
 
 # ── #1696 phase B1: the CALL BOUNDARY through the same checker. A droppable
@@ -300,6 +327,7 @@ emit_structural spec/wasm_cross/witness_straightline.almd pass | sed 's/^iamd$/i
 set +e; "$ROOT/proofs/checker" ownership /tmp/structural.tamper >/dev/null 2>&1; src_rc=$?; set -e
 if [ "$src_rc" -ne 1 ]; then echo "FAIL structural-tamper(B1): a return_call that skips its param release was accepted"; exit 1; fi
 kernel_verify ownership /tmp/structural.tamper 1   || { echo "FAIL structural-tamper(B1): the kernel accepted the unreleased param"; exit 1; }
+portable_agrees ownership /tmp/structural.tamper 1 || { echo "FAIL structural-tamper(B1): almide-verify accepted the unreleased param"; exit 1; }
 echo "ok   structural-tamper(B1): an unreleased tail-site param is rejected by the binary AND the kernel"
 
 # ── #1696 step 4: STATEMENT CALLS and MODULE CALLS through the same checker.
@@ -321,7 +349,89 @@ emit_structural spec/wasm_cross/witness_straightline.almd discard | sed '2s/^id$
 set +e; "$ROOT/proofs/checker" ownership /tmp/structural.tamper >/dev/null 2>&1; src_rc=$?; set -e
 if [ "$src_rc" -ne 1 ]; then echo "FAIL structural-tamper(step4): a discarded result that was never released was accepted"; exit 1; fi
 kernel_verify ownership /tmp/structural.tamper 1   || { echo "FAIL structural-tamper(step4): the kernel accepted the unreleased discard"; exit 1; }
+portable_agrees ownership /tmp/structural.tamper 1 || { echo "FAIL structural-tamper(step4): almide-verify accepted the unreleased discard"; exit 1; }
 echo "ok   structural-tamper(step4): an unreleased statement-call result is rejected by the binary AND the kernel"
+
+# ── #2152: almide-verify against the extracted checker on witnesses NO
+# producer wrote. The rows above only reach the shapes the emitters produce;
+# the transcription must agree on the whole input space, malformed bytes
+# included (a dangling `(`, a stray `x`, a huge id, an out-of-range callee).
+# Seeded, so a disagreement reproduces; every witness goes through the
+# extracted checker one file at a time and through almide-verify as ONE
+# certificate bundle — which also exercises the bundle reader on every shape.
+echo
+echo "== almide-verify  ⊳  extracted checker: seeded random differential (#2152) =="
+set +e; portable_agrees ownership /tmp/tamper.witness 0; prc=$?; set -e
+if [ "$prc" -eq 0 ]; then echo "FAIL tamper(iii): the almide-verify leg certified a WRONG verdict (drill broken)"; exit 1; fi
+echo "ok   tamper(iii): a simulated almide-verify divergence is CAUGHT by the agreement leg"
+python3 - "$ROOT/proofs/checker" "$VERIFY" <<'PYEOF'
+import os, random, re, subprocess, sys, tempfile
+checker, verifier = sys.argv[1], sys.argv[2]
+rng = random.Random(2152)
+PER_MODE = 200
+
+def nums(k, hi):
+    out = []
+    for _ in range(k):
+        r = rng.random()
+        if r < 0.05:
+            out.append("0" * rng.randint(1, 3) + str(rng.randint(0, hi)))   # leading zeros
+        elif r < 0.08:
+            out.append(str(rng.randint(10**19, 10**21)))                    # beyond u64
+        else:
+            out.append(str(rng.randint(0, hi)))
+    return rng.choice([" ", "  ", ","]).join(out)
+
+def ownership():
+    return "".join(rng.choice("iiiidddaambrIDxX(){}[]||\n ") for _ in range(rng.randint(0, 28)))
+
+def subset():
+    s = nums(rng.randint(0, 5), 6) + "|" + nums(rng.randint(0, 4), 6)
+    if rng.random() < 0.1:
+        s += rng.choice(["|3", ";1", "x", "\n2"])
+    return s.replace("|", "") if rng.random() < 0.05 else s
+
+def graph():
+    k = rng.randint(1, 5)
+    s = ";".join(nums(rng.randint(0, 3), 3) + "|" + nums(rng.randint(0, 2), 3) + "|" + nums(rng.randint(0, 3), k + 1)
+                 for _ in range(k))
+    return s + ";" if rng.random() < 0.1 else s
+
+def modes():
+    k = rng.randint(0, 4)
+    sigs = ";".join(" ".join(str(rng.choice([0, 0, 1, 1, 2])) for _ in range(rng.randint(0, 3))) for _ in range(k))
+    sites = ";".join(str(rng.randint(0, k + 1)) + "".join(" " + str(rng.choice([0, 1])) for _ in range(rng.randint(0, 3)))
+                     for _ in range(rng.randint(0, 4)))
+    return sigs + "|" + sites
+
+GENS = [("ownership", ownership), ("names", subset), ("caps", subset), ("caps-transitive", graph), ("call-modes", modes)]
+cases = [(mode, gen()) for mode, gen in GENS for _ in range(PER_MODE)]
+want = []
+with tempfile.TemporaryDirectory() as d:
+    one = os.path.join(d, "w")
+    bundle = bytearray(b"almide-certificate-bundle 1\nproducer proofs/gate.sh random differential\n")
+    for i, (mode, w) in enumerate(cases):
+        with open(one, "w") as f:
+            f.write(w)
+        want.append(subprocess.run([checker, mode, one], capture_output=True).returncode == 0)
+        bundle += b"witness %s %d w%d\n" % (mode.encode(), len(w.encode()), i) + w.encode() + b"\n"
+    path = os.path.join(d, "all.bundle")
+    with open(path, "wb") as f:
+        f.write(bundle)
+    out = subprocess.run([verifier, "bundle", path], capture_output=True, text=True).stdout
+got = {int(m.group(3)): m.group(1) == "ACCEPT"
+       for m in re.finditer(r"^(ACCEPT|REJECT)\s+(\S+)\s+w(\d+)$", out, re.M)}
+bad = [i for i in range(len(cases)) if got.get(i) != want[i]]
+for i in bad[:10]:
+    print(f"FAIL differential [{cases[i][0]}] {cases[i][1]!r}: extracted checker "
+          f"{'ACCEPT' if want[i] else 'REJECT'}, almide-verify {got.get(i, 'no verdict')}")
+if bad or len(got) != len(cases):
+    print(f"FAIL almide-verify disagreed with the proven checker on {len(bad)}/{len(cases)} random witnesses")
+    sys.exit(1)
+for mode, _ in GENS:
+    rows = [want[i] for i, c in enumerate(cases) if c[0] == mode]
+    print(f"ok   [{mode}] {len(rows)} random witnesses ({sum(rows)} accept / {len(rows) - sum(rows)} reject): almide-verify agrees")
+PYEOF
 
 echo
 echo "GATE OK: the kernel-proven checker re-verified per-build witnesses on THREE"
@@ -332,3 +442,5 @@ echo "(vm_compute on the witness bytes; binary/kernel divergence fails the build
 echo "so the extraction pipeline is a fast path, not a trust root). Each accept ⟹"
 echo "the property holds of the witnessed MIR, by the Coq theorems. (Whole-program"
 echo "WASM-byte safety beyond the rc primitives is still the §3 renderer contract.)"
+echo "almide-verify — the portable checker binary distributions run — gave the"
+echo "extracted checker's verdict on every row and on the seeded random differential."
