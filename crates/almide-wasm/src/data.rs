@@ -93,8 +93,17 @@ impl Emitter<'_> {
             // `?` — Result→Option (identity on Option, the interp's
             // eval order): Ok(x) → a fresh some cell, Err → none (null).
             IrExprKind::ToOption { expr } => match self.lower(expr, None)? {
-                SliceTy::Result(o, _) => {
+                SliceTy::Result(o, er) => {
                     let et = self.types.el(o);
+                    // #2509, the `?` sibling: the carrier this reads is
+                    // discarded here on BOTH paths, so an OWNED one has to
+                    // be released — the some-cell keeps the ok payload's
+                    // credit ($dec_flat: the spine only, the payload moved
+                    // into the cell), and the none path releases the
+                    // carrier WITH its err payload (the typed drop, whose
+                    // tag-1 arm is the one that runs).
+                    let owned_carrier = self.rc_owned_result(expr);
+                    let err_dec = owned_carrier.then(|| self.dec_fn_of(SliceTy::Result(o, er)));
                     let hr = self.hold_i32()?;
                     let hc = self.hold_i32()?;
                     self.f
@@ -104,7 +113,12 @@ impl Emitter<'_> {
                         .i32_load(slot_memarg(almide_layout::SUM_TAG))
                         .i32_const(0)
                         .i32_ne()
-                        .if_(BlockType::Result(ValType::I32))
+                        .if_(BlockType::Result(ValType::I32));
+                    if let Some(dec) = err_dec {
+                        self.f.instructions().local_get(hr).call(dec);
+                    }
+                    self.f
+                        .instructions()
                         .i32_const(0)
                         .else_()
                         .i32_const(et.slot_size() as i32)
@@ -113,6 +127,9 @@ impl Emitter<'_> {
                         .local_get(hr);
                     self.load_ty_slot(et, almide_layout::SUM_FIELD);
                     self.store_ty_slot(et, almide_layout::OPTION_FIELD);
+                    if owned_carrier {
+                        self.f.instructions().local_get(hr).call(F_DEC_FLAT);
+                    }
                     self.f.instructions().local_get(hc).end();
                     self.release_i32();
                     self.release_i32();
@@ -280,6 +297,44 @@ impl Emitter<'_> {
             //                 fn's `!` is #1410-propagating — refused).
             // `?` (Try) and `!` (Unwrap) are ONE marker in the oracle:
             // eval.rs dispatches Try | Unwrap to the same eval_try_unwrap.
+    /// #2509 — the OK path of `expr!` releases the carrier it read the
+    /// payload out of, when that carrier is an OWNED anonymous temporary.
+    ///
+    /// The err path already moves an owned carrier out (no `$inc` above);
+    /// the ok path kept neither half of the pair, so every extraction from
+    /// an unowned-by-anyone carrier leaked the 16 B block AND the credit it
+    /// held on the payload. The usual `f(x)!` never showed it: arg_temps
+    /// parks a Result/Option-TYPED operand in a local, and that local's dec
+    /// releases both. A MOVE-MODE effect call (mut_param.rs) is typed with
+    /// the RAW payload, so the park never fires and the carrier the wasm ABI
+    /// built had no owner at all — `poke(buf, v)!` grew `buf`'s count by one
+    /// per call, the latent leak #2503's rc-gated copy turned into an OOM.
+    ///
+    /// WHICH RULE, and why it is not a free-too-early. `$dec_flat` releases
+    /// the carrier SPINE ONLY: the payload handle was loaded before it and
+    /// is a value on the stack, not a pointer into the block, and the flat
+    /// dec never recurses into the payload slot. So the carrier's ONE credit
+    /// on the payload transfers to the extracted value — the same move the
+    /// err path makes with the whole block — and the node is marked owned so
+    /// no consumer takes the borrowed-source `+1` on top of it. The two
+    /// cases the brief separates coincide under this rule: an argument
+    /// FOLDED INTO the result (the move-mode buffer) arrives holding the
+    /// carrier's credit and the write-back's `rc_share_guard` pays for the
+    /// caller's own second holder, while an argument still LIVE after the
+    /// call keeps the credit its own binding has held all along — neither
+    /// one loses a holder here, because nothing but the carrier is released.
+    /// A borrowed carrier (`rc_owned_result` false: a parked local, a var)
+    /// is left exactly as before, so no route can free a block twice.
+    fn release_ok_carrier(&mut self, e: &IrExpr, owned_carrier: bool) {
+        if !owned_carrier {
+            return;
+        }
+        self.f.instructions().local_get(self.scr_i32_local).call(F_DEC_FLAT);
+        // The extraction now hands its consumer one credit: the bind,
+        // assign, store and argument routes must not add another.
+        self.owned_call_marks.insert(e as *const IrExpr as usize);
+    }
+
     pub(crate) fn lower_try_unwrap(
         &mut self,
         e: &IrExpr,
@@ -307,6 +362,7 @@ impl Emitter<'_> {
                     match self.lower(expr, None)? {
                         SliceTy::Option(h) => {
                             let et = self.types.el(h);
+                            let owned_carrier = self.rc_owned_result(expr);
                             self.f
                                 .instructions()
                                 .local_tee(self.scr_i32_local)
@@ -321,6 +377,7 @@ impl Emitter<'_> {
                                 .end()
                                 .local_get(self.scr_i32_local);
                             self.load_ty_slot(et, almide_layout::OPTION_FIELD);
+                            self.release_ok_carrier(e, owned_carrier);
                             return Ok(et);
                         }
                         _ => return unsup("unwrap-propagating"),
@@ -335,6 +392,7 @@ impl Emitter<'_> {
                     }
                     SliceTy::Option(h) => {
                         let et = self.types.el(h);
+                        let owned_carrier = self.rc_owned_result(expr);
                         self.f
                             .instructions()
                             .local_tee(self.scr_i32_local)
@@ -369,11 +427,18 @@ impl Emitter<'_> {
                         }
                         self.f.instructions().end().local_get(self.scr_i32_local);
                         self.load_ty_slot(et, almide_layout::OPTION_FIELD);
+                        self.release_ok_carrier(e, owned_carrier);
                         et
                     }
                     SliceTy::Result(o, er) => {
                         let et = self.types.el(o);
                         let ert = self.types.el(er);
+                        // Who owns the CARRIER block this extraction reads?
+                        // An owned operand is an anonymous temporary this
+                        // frame holds the only credit of; a borrowed one is
+                        // a local (arg_temps parks the usual `f(x)!` carrier
+                        // in one) that some other route releases.
+                        let owned_carrier = self.rc_owned_result(expr);
                         self.f
                             .instructions()
                             .local_tee(self.scr_i32_local)
@@ -388,7 +453,7 @@ impl Emitter<'_> {
                             // The propagated block is the operand's: a BORROWED
                             // operand (a local the exit below releases) hands the
                             // caller a share; an owned temporary moves out.
-                            if !self.rc_owned_result(expr) {
+                            if !owned_carrier {
                                 self.f.instructions().local_get(self.scr_i32_local).call(F_INC);
                             }
                             let plan = self.exit_plan(crate::exit_plan::Continuation::ReturnError);
@@ -403,6 +468,7 @@ impl Emitter<'_> {
                         }
                         self.f.instructions().end().local_get(self.scr_i32_local);
                         self.load_ty_slot(et, almide_layout::SUM_FIELD);
+                        self.release_ok_carrier(e, owned_carrier);
                         et
                     }
                     other => return unsup(&format!("unwrap-of:{other:?}")),

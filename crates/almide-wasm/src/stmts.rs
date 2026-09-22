@@ -68,10 +68,14 @@ impl Emitter<'_> {
             }
             IrExprKind::Unit => Ok(()),
             // Statement-position `f()!` / `f()?`: the marker machinery
-            // runs (propagation/abort), the ok payload is discarded.
+            // runs (propagation/abort), the ok payload is discarded — and
+            // RELEASED when the extraction handed this frame its credit
+            // (#2509: an owned carrier's payload moves out, so a bare
+            // `drop` here would leak exactly what the carrier stopped
+            // holding). A borrowed extraction drops as before.
             IrExprKind::Try { .. } | IrExprKind::Unwrap { .. } => {
-                self.lower(e, None)?;
-                self.f.instructions().drop();
+                let ty = self.lower(e, None)?;
+                self.discard_result(e, ty);
                 Ok(())
             }
             // Any other value expression in statement position: evaluate

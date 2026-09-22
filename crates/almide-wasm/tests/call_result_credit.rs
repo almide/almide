@@ -302,6 +302,64 @@ fn an_error_exit_releases_the_frame_like_the_ok_exit() {
     );
 }
 
+/// #2509 — the OK path of `f(x)!` releases the carrier the effect ABI built
+/// for the call. The usual shape never showed the gap: arg_temps parks a
+/// Result-TYPED operand in a local, whose dec releases the carrier AND the
+/// credit it holds on the payload. A MOVE-MODE effect call (the C-132 `mut`
+/// parameter rewrite) is typed with the RAW payload, so the park never fired
+/// and the carrier had no owner at all — the argument's count grew by one per
+/// call and the buffer was never freed. Latent while nothing read the count;
+/// #2503's rc-gated copy read it and a 64 KiB buffer through a 20,000-call
+/// effect loop went out of memory. Pinned flat across N, with the buffer FRESH
+/// per call so the leak is a watermark and not only a count.
+#[test]
+fn an_effect_call_releases_its_heap_argument_credit() {
+    fn mut_param(n: u32, body: &str) -> String {
+        format!(
+            r#"effect fn poke(mut b: Bytes, v: Int) -> Unit = bytes.set_at(b, 0, v)
+
+effect fn width(b: Bytes) -> Int = ok(bytes.len(b))
+
+effect fn main() -> Unit = {{
+  var total = 0
+  var held = bytes.new(64)
+  var i = 0
+  while i < {n} {{
+{body}
+    i = i + 1
+  }}
+  println("${{total}}")
+}}
+"#
+        )
+    }
+    // A fresh buffer per call: a leaked argument credit keeps every one alive.
+    flat_in(
+        mut_param,
+        "poke(fresh buffer)!",
+        "    var b = bytes.new(64)\n    poke(b, 7)!\n    total = total + bytes.get_or(b, 0, 0)",
+        "7000",
+        "56000",
+    );
+    // One long-lived buffer: the carrier block itself, 32 B per call.
+    flat_in(
+        mut_param,
+        "poke(held buffer)!",
+        "    poke(held, 7)!\n    total = total + bytes.get_or(held, 0, 0)",
+        "7000",
+        "56000",
+    );
+    // The plain (non-mut) heap argument through the same `!`: the carrier is
+    // typed Result and parked in a temporary — the shape that always balanced.
+    flat_in(
+        mut_param,
+        "width(fresh buffer)!",
+        "    let t = bytes.new(64)\n    total = total + width(t)!",
+        "64000",
+        "512000",
+    );
+}
+
 /// The registry-table tail call (`lower_linked_call`'s `return_call`) is
 /// the third tail site — found by scripts/check-exit-sites.sh the day it
 /// went in (#1995): a user fn whose tail is `string.to_upper(s)` replaced its
