@@ -1,3 +1,10 @@
+# NOT A BUILD UNIT. This manifest is the record of what the runtime SOURCE
+# needs (the crates.io deps a generated project declares, and build.rs's
+# `have_blas` cfg that matrix.rs reads) — nothing builds it. `runtime/rs` is
+# deliberately outside the workspace and does not compile as a crate: its files
+# are concatenated into one flat module with a compiler-synthesised prelude at
+# emit time. `cargo check -p almide_rt` reports 220 errors. See README.md
+# (#2507) before adding it to the root `members` list.
 [package]
 name = "almide_rt"
 version = "0.1.0"
