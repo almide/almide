@@ -33,7 +33,9 @@ effect fn inflate(data: Bytes) -> Result[Bytes, String] = _
 @intrinsic("almide_rt_zlib_gzip")
 effect fn gzip(data: Bytes) -> Result[Bytes, String] = _
 
-/// Gzip member decoded; err on bad header or CRC.
+/// Gzip member decoded; err on bad header, CRC or empty input.
+// Empty input is `err("zlib.gunzip: unexpected end of file")` on every leg
+// (#2478): a gzip file has at least one member.
 @intrinsic("almide_rt_zlib_gunzip")
 effect fn gunzip(data: Bytes) -> Result[Bytes, String] = _
 

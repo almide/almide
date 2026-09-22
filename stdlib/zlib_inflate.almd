@@ -491,11 +491,14 @@ fn zli_header_end(inp: Bytes, pos: Int) -> Int = {
 }
 
 // gzip members back to back; returns 0 on success, else 1=not gzip,
-// 2=corrupt deflate, 3=crc mismatch, 4=size mismatch.
+// 2=corrupt deflate, 3=crc mismatch, 4=size mismatch, 5=empty input. A gzip
+// file has at least one member, so zero bytes is an error (#2478): the loop
+// below never runs on empty input and used to leave `code` at 0 — ok(empty) —
+// where native's decoder reports "unexpected end of file".
 fn zli_gunzip_members(inp: Bytes, mut out: Bytes) -> Int = {
   let t = zli_crc_table()
   var pos = 0
-  var code = 0
+  var code = if bytes.len(inp) == 0 then 5 else 0
   while pos < bytes.len(inp) and code == 0 {
     let start = zli_header_end(inp, pos)
     let member_start = bytes.len(out)
@@ -513,7 +516,8 @@ fn zli_gunzip_members(inp: Bytes, mut out: Bytes) -> Int = {
 
 fn zli_gunzip_error(code: Int) -> String = if code == 1 then "not gzip"
 else if code == 2 then "corrupt deflate stream"
-else if code == 3 then "crc mismatch" else "size mismatch"
+else if code == 3 then "crc mismatch"
+else if code == 5 then "unexpected end of file" else "size mismatch"
 
 // ── The stdlib entry points ──
 effect fn zlib_gunzip(data: Bytes) -> Result[Bytes, String] = {

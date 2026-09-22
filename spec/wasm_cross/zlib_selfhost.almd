@@ -8,7 +8,10 @@
 // pinned by ROUND TRIP on whichever leg runs, never by encoded bytes.
 // crc32/adler32 live in spec/stdlib/zlib_test.almd — the interp leg has no
 // arm for them yet, and a mid-fixture abstention would cost the decode half
-// its third vote.
+// its third vote. EMPTY input is an error with one text on every leg
+// (#2478): a gzip file has at least one member, and the self-hosted member
+// loop used to run zero times and answer `ok` with 0 bytes where native's
+// decoder reports `unexpected end of file`.
 import zlib
 
 effect fn main() -> Unit = {
@@ -264,4 +267,8 @@ effect fn main() -> Unit = {
   println(if bytes.to_list(rt3) == bytes.to_list(data) then "gzip-rt-ok" else "gzip-rt-BAD")
   println(if bytes.to_list(rt4) == bytes.to_list(data) then "compress-level-rt-ok" else "compress-level-rt-BAD")
   println(if bytes.to_list(rt5) == bytes.to_list(data) then "deflate-level-rt-ok" else "deflate-level-rt-BAD")
+  match zlib.gunzip(bytes.new(0)) {
+    ok(b) => println("gunzip-empty-ok len=${bytes.len(b)}"),
+    err(e) => println("gunzip-empty-err " + e),
+  }
 }
