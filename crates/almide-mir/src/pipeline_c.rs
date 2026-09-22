@@ -557,8 +557,10 @@ fn main() -> Unit = {
         // dropped sibling is not fatal — the only thing the user saw was the caller's
         // "unlinked call ... no wasm definition". ONE unrelated `let` in the consumer
         // was the whole trigger; without it the same program built.
+        // The parameter is `mut` since #2466: a bytes writer's receiver must be, and
+        // the subject here is the VarId collision, not the receiver's declaration.
         let lib = r#"
-pub fn write_many(m: Bytes, o: Int, v: Float) -> Unit = {
+pub fn write_many(mut m: Bytes, o: Int, v: Float) -> Unit = {
   var i = 0
   while i < 16 {
     bytes.set_f32_le(m, o + i * 4, v + int.to_float(i))
@@ -588,11 +590,19 @@ fn u(v: Float) -> Unit = lib.write_many(g, 0, v)
     }
 
     #[test]
-    fn a_real_immutable_top_let_receiver_still_walls() {
-        // The other side of the precedence fix: resolving locally first must not
-        // disarm the #906 diagnostic. A genuine module-level `let` buffer written in
-        // place has no storage slot, so the write would vanish — it must still decline,
-        // and still name the fix.
+    fn a_real_immutable_top_let_receiver_is_still_refused() {
+        // The other side of the precedence fix: a genuine module-level `let` buffer
+        // written in place has no storage slot, so the write would vanish — the
+        // program must never compile silently.
+        //
+        // Since #2466 (dialect epoch 5) the refusal comes EARLIER: every bytes writer
+        // declares its receiver `mut`, so the CHECKER answers E032 naming the binding
+        // before the lowering is reached. `cow_inplace_receiver`'s "IMMUTABLE
+        // module-level" decline stays below it as defence for a caller that bypasses
+        // the checker, and the source-level rule is pinned by
+        // tests/diagnostics/e032-bytes-writer-let. What this test keeps is the one
+        // thing the precedence fix could have broken and the pipeline still owes:
+        // the shape does not lower, and the reason names the binding.
         let source = r#"
 let g = bytes.new(64)
 
@@ -601,10 +611,10 @@ fn u(v: Float) -> Unit = bytes.set_f32_le(g, 0, v)
 "#;
         match try_render_wasm_source_library(source, &[], false) {
             Err(LowerError::Unsupported(r)) => assert!(
-                r.contains("IMMUTABLE module-level") && r.contains("Declare the buffer `var`"),
-                "the immutable-top-let decline must survive and keep naming the fix, got: {r}"
+                r.contains("type errors") && r.contains("'g'") && r.contains("`mut` parameter"),
+                "the immutable-top-let receiver must stay refused and name the binding, got: {r}"
             ),
-            other => panic!("expected the immutable-top-let wall, got {other:?}"),
+            other => panic!("expected the immutable-top-let refusal, got {other:?}"),
         }
     }
 
