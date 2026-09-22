@@ -1399,6 +1399,32 @@ pub fn cmd_clean() {
             }
         }
     }
+    // `almide test`'s per-test-file worker dirs (#2504): one dir per test-file
+    // absolute path, 4,510 of them and 39 GB on the machine that filed it.
+    // Same rule as above, applied to every worker dir: emptied under its own
+    // lock, lockfile kept. The dirs themselves stay (empty), so a builder
+    // already blocked on one keeps locking the same file.
+    let workers = super::test_scratch::native_worker_cache();
+    let mut emptied = 0usize;
+    if let Ok(entries) = std::fs::read_dir(&workers) {
+        for entry in entries.flatten() {
+            if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                continue;
+            }
+            match super::run::clear_build_dir(&entry.path()) {
+                Ok(true) => emptied += 1,
+                Ok(false) => {}
+                Err(e) => {
+                    err(&format!("Failed to clean test worker cache: {}", e));
+                    std::process::exit(1);
+                }
+            }
+        }
+    }
+    if emptied > 0 {
+        err(&format!("Cleaned {} ({} test worker dir(s))", workers.display(), emptied));
+        cleaned = true;
+    }
     if !cleaned {
         err(&format!("No cache to clean"));
     }
