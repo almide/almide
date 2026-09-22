@@ -54,6 +54,14 @@ pub(crate) const OP_HTTP_DELETE: i32 = 47;
 pub(crate) const OP_HTTP_FRAMED_TEXT: i32 = 48;
 pub(crate) const OP_HTTP_FRAMED_STATUS: i32 = 49;
 pub(crate) const OP_HTTP_FRAMED_BYTES: i32 = 50;
+/// fs.stat / fs.glob (#1423 stage 4): the two metadata surfaces the
+/// structural leg had no arm for. 38 answers the four FileStat fields as
+/// a 32-byte LE buffer (size, is_dir, is_file, modified — each an i64);
+/// 39 answers the sorted match list as frames, the walk/list_dir shape.
+/// The embedded host runs the native runtime's own algorithm for both
+/// (runtime/rs/src/fs.rs stat / segment-wise glob, C-137 / C-228).
+pub(crate) const OP_STAT: i32 = 38;
+pub(crate) const OP_GLOB: i32 = 39;
 const OP_READ_BYTES: i32 = 14;
 
 impl Emitter<'_> {
@@ -86,6 +94,14 @@ impl Emitter<'_> {
             ("walk", [p]) => {
                 self.fs_call_1(p, OP_WALK)?;
                 self.fs_result_string_list()?
+            }
+            ("glob", [p]) => {
+                self.fs_call_1(p, OP_GLOB)?;
+                self.fs_result_string_list()?
+            }
+            ("stat", [p]) => {
+                self.fs_call_1(p, OP_STAT)?;
+                self.fs_result_file_stat()?
             }
             ("temp_dir", []) => {
                 self.fs_call_0(OP_TEMP_DIR)?;
@@ -177,6 +193,86 @@ impl Emitter<'_> {
         let _ = i;
         self.release_i32();
         Ok(())
+    }
+
+    /// ret on stack → Result[FileStat, String]: ok rides a 32-byte LE
+    /// buffer (size, is_dir, is_file, modified as i64s) copied into the
+    /// stdlib record's own slots — the declared `fs.FileStat` layout, so
+    /// the call site's member reads land where they do for every other
+    /// producer of the type.
+    fn fs_result_file_stat(&mut self) -> Result<SliceTy, EmitError> {
+        let ti = self
+            .types
+            .by_name
+            .get("fs.FileStat")
+            .or_else(|| self.types.by_name.get("FileStat"))
+            .copied()
+            .or_else(|| {
+                let mut hits = self.types.by_name.iter().filter(|(k, _)| k.ends_with(".FileStat"));
+                let first = hits.next()?;
+                hits.next().is_none().then_some(*first.1)
+            });
+        let Some(ti) = ti else {
+            return unsup("fs-stat-type:FileStat");
+        };
+        let crate::types_table::NamedDef::Record(def) = self.types.def(ti) else {
+            return unsup("fs-stat-type:not-a-record");
+        };
+        let slot = |name: &str| def.fields.iter().find(|f| f.name == name).map(|f| (f.ty, f.offset));
+        let (Some(f_size), Some(f_dir), Some(f_file), Some(f_mod)) =
+            (slot("size"), slot("is_dir"), slot("is_file"), slot("modified"))
+        else {
+            return unsup("fs-stat-type:fields");
+        };
+        let hret = self.hold_i64()?;
+        let hb = self.hold_i32()?;
+        let hr = self.hold_i32()?;
+        {
+            let mut i = self.f.instructions();
+            i.local_set(hret);
+            i.local_get(hret).i64_const(32).i64_shr_s().i32_wrap_i64().i32_const(1).i32_eq();
+            i.if_(BlockType::Result(ValType::I32));
+            // err: the message block is the payload
+            i.local_get(hret)
+                .i64_const(0xFFFF_FFFF)
+                .i64_and()
+                .i32_wrap_i64()
+                .call(F_ALLOC)
+                .local_set(hb);
+            i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32).i32_add().call(F_HOST_READ);
+            i.i32_const(16).call(F_ALLOC).local_set(hr);
+            i.local_get(hr).i32_const(1).i32_store(slot_memarg(almide_layout::SUM_TAG));
+            i.local_get(hr).local_get(hb).i32_store(slot_memarg(almide_layout::SUM_FIELD));
+            i.local_get(hr);
+            i.else_();
+            // ok: pull the 32 LE bytes into scratch, build the record
+            i.i32_const(32).call(F_ALLOC).local_set(hb);
+            i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32).i32_add().call(F_HOST_READ);
+            i.i32_const(def.size as i32).call(F_ALLOC).local_set(hr);
+        }
+        for (k, (fty, off)) in [f_size, f_dir, f_file, f_mod].into_iter().enumerate() {
+            self.f.instructions().local_get(hr).local_get(hb).i64_load(slot_memarg(k as u32 * 8));
+            match fty {
+                INT => {}
+                BOOL => {
+                    self.f.instructions().i32_wrap_i64();
+                }
+                other => return unsup(&format!("fs-stat-field:{other:?}")),
+            }
+            self.store_ty_slot(fty, off);
+        }
+        {
+            let mut i = self.f.instructions();
+            i.i32_const(16).call(F_ALLOC).local_set(hb);
+            i.local_get(hb).i32_const(0).i32_store(slot_memarg(almide_layout::SUM_TAG));
+            i.local_get(hb).local_get(hr).i32_store(slot_memarg(almide_layout::SUM_FIELD));
+            i.local_get(hb);
+            i.end();
+        }
+        self.release_i32();
+        self.release_i32();
+        self.release_i64();
+        Ok(SliceTy::Result(self.types.intern(SliceTy::Named(ti)), self.types.intern(STR)))
     }
 
     /// ret on stack → Result[Int, String]: ok rides an 8-byte LE buffer.

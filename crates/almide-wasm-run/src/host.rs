@@ -124,6 +124,8 @@ fn fs_op_name(op: i32) -> &'static str {
         23 => "fs.walk",
         24 => "fs.read_lines_if_exists",
         25 => "fs.read_bytes_if_exists",
+        38 => "fs.stat",
+        39 => "fs.glob",
         51 => "fs.fold_lines",
         52 => "fs.for_each_line",
         _ => "fs",
@@ -325,6 +327,26 @@ fn fs_dispatch_meta(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
         21 => fs_temp_file(a),
         22 => (pack(0, usize::from(Path::new(a).is_symlink())), Vec::new()),
         23 => fs_walk_sorted(a),
+        // fs.stat (#1423 stage 4): the four FileStat fields as i64 LE —
+        // native's almide_rt_fs_stat field for field (modified = Unix
+        // seconds, 0 when the host cannot say).
+        38 => match std::fs::metadata(a) {
+            Ok(m) => {
+                let modified = m
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs() as i64)
+                    .unwrap_or(0);
+                let mut buf = Vec::with_capacity(32);
+                for v in [m.len() as i64, i64::from(m.is_dir()), i64::from(m.is_file()), modified] {
+                    buf.extend_from_slice(&v.to_le_bytes());
+                }
+                (pack(0, buf.len()), buf)
+            }
+            Err(e) => err_s(io_err(fs_op_name(op), &q(a), e)),
+        },
+        39 => fs_glob(a),
         24 => fs_read_lines(a),
         25 => match std::fs::read(a) {
             Ok(bytes) => (pack(0, bytes.len()), bytes),
@@ -374,6 +396,96 @@ fn fs_temp_file(prefix: &str) -> (i64, Vec<u8>) {
 }
 
 /// op 23: recursive directory listing, sorted, framed.
+/// fs.glob (#1423 stage 4): the SEGMENT-WISE matcher of C-228, transcribed
+/// from runtime/rs/src/fs.rs (almide_rt_fs_glob / glob_walk /
+/// glob_segs_match / glob_star_match) so the embedded host answers the
+/// same list, in the same order, with the same walk errors as native.
+fn fs_glob(pattern: &str) -> (i64, Vec<u8>) {
+    use std::path::Path;
+    fn walk(dir: &Path, rel_prefix: &str, depth: Option<usize>, out: &mut Vec<String>) -> Result<(), String> {
+        for entry in
+            std::fs::read_dir(dir).map_err(|e| io_err("fs.glob", &q(&dir.to_string_lossy()), e))?
+        {
+            let entry = entry.map_err(|e| io_err("fs.glob", &q(&dir.to_string_lossy()), e))?;
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let rel = if rel_prefix.is_empty() { name } else { format!("{rel_prefix}/{name}") };
+            let path = entry.path();
+            let descend = depth != Some(1) && path.is_dir();
+            out.push(rel.clone());
+            if descend {
+                walk(&path, &rel, depth.map(|d| d - 1), out)?;
+            }
+        }
+        Ok(())
+    }
+    fn segs_match(pats: &[&str], segs: &[&str]) -> bool {
+        match pats.first() {
+            None => segs.is_empty(),
+            Some(&"**") => (0..=segs.len()).any(|i| segs_match(&pats[1..], &segs[i..])),
+            Some(pat) => {
+                !segs.is_empty() && star_match(pat, segs[0]) && segs_match(&pats[1..], &segs[1..])
+            }
+        }
+    }
+    fn star_match(pat: &str, seg: &str) -> bool {
+        let parts: Vec<&str> = pat.split('*').collect();
+        if parts.len() == 1 {
+            return pat == seg;
+        }
+        let (first, last) = (parts[0], parts[parts.len() - 1]);
+        if seg.len() < first.len() + last.len() || !seg.starts_with(first) || !seg.ends_with(last) {
+            return false;
+        }
+        let region = &seg[first.len()..seg.len() - last.len()];
+        let mut pos = 0;
+        for part in &parts[1..parts.len() - 1] {
+            if part.is_empty() {
+                continue;
+            }
+            match region[pos..].find(part) {
+                Some(i) => pos += i + part.len(),
+                None => return false,
+            }
+        }
+        true
+    }
+    let ok_list = |results: Vec<String>| {
+        let buf = frames(&results);
+        (pack(0, buf.len()), buf)
+    };
+    let absolute = pattern.starts_with('/');
+    let segs: Vec<&str> = pattern.split('/').filter(|s| !s.is_empty()).collect();
+    let k = segs.iter().take_while(|s| !s.contains('*')).count();
+    let pats = &segs[k..];
+    let base = format!("{}{}", if absolute { "/" } else { "" }, segs[..k].join("/"));
+    if pats.is_empty() {
+        let hit = !base.is_empty() && Path::new(&base).exists();
+        return ok_list(if hit { vec![base] } else { Vec::new() });
+    }
+    if !base.is_empty() && !Path::new(&base).is_dir() {
+        return ok_list(Vec::new());
+    }
+    let root = if base.is_empty() { "." } else { base.as_str() };
+    let prefix = if base.is_empty() || base == "/" { base.clone() } else { format!("{base}/") };
+    let depth = if pats.contains(&"**") { None } else { Some(pats.len()) };
+    let mut results = Vec::new();
+    if !base.is_empty() && segs_match(pats, &[]) {
+        results.push(base.clone());
+    }
+    let mut rels = Vec::new();
+    if let Err(m) = walk(Path::new(root), "", depth, &mut rels) {
+        return (pack(1, m.len()), m.into_bytes());
+    }
+    for rel in rels {
+        let rsegs: Vec<&str> = rel.split('/').collect();
+        if segs_match(pats, &rsegs) {
+            results.push(format!("{prefix}{rel}"));
+        }
+    }
+    results.sort();
+    ok_list(results)
+}
+
 fn fs_walk_sorted(root: &str) -> (i64, Vec<u8>) {
     use std::path::Path;
     fn walk(dir: &Path, out: &mut Vec<String>) -> Result<(), String> {

@@ -1,0 +1,48 @@
+// @contract: C-137, C-228
+// `fs.stat` and `fs.glob` on the STRUCTURAL wasm leg (#1423 stage 4): both
+// were structural walls (the incumbent served them through its self-host
+// twins). They now cross the embedded host like every other fs surface —
+// stat answers the four FileStat fields (size / is_dir / is_file /
+// modified), glob the C-228 segment-wise matcher (`*` within one segment,
+// `**` spanning whole segments, a literal pattern answering itself iff it
+// exists, a non-directory base answering `[]`, results sorted) — with
+// native's own algorithm and messages. An fs program routes to the incumbent
+// on the BUILD path, so this lives in the embedded lane, where `run --target
+// wasm` takes the structural leg. The temp dir is redacted; `modified` is
+// printed as a predicate (a clock value is not a cross-target observable).
+import fs
+
+fn redact(s: String, dir: String) -> String = string.replace(s, dir, "<tmp>")
+
+fn show_stat(dir: String, r: Result[fs.FileStat, String]) -> String = match r {
+  ok(st) => "ok size=${if st.is_file then st.size else 0 - 1} dir=${st.is_dir} file=${st.is_file} recent=${st.modified > 1000000000}",
+  err(e) => "err " + redact(e, dir),
+}
+
+fn show_glob(dir: String, r: Result[List[String], String]) -> String = match r {
+  ok(xs) => "[" + list.join(xs |> list.map((p) => redact(p, dir)), ", ") + "]",
+  err(e) => "err " + redact(e, dir),
+}
+
+effect fn main() -> Unit = {
+  let dir = fs.create_temp_dir("almide-stat-glob")!
+  fs.write(dir + "/a.txt", "alpha")!
+  fs.write(dir + "/b.txt", "beta!!")!
+  fs.mkdir_p(dir + "/sub/deep")!
+  fs.write(dir + "/sub/c.txt", "c")!
+  fs.write(dir + "/sub/deep/d.md", "# d")!
+  println("stat.file " + show_stat(dir, fs.stat(dir + "/b.txt")))
+  println("stat.dir " + show_stat(dir, fs.stat(dir + "/sub")))
+  println("stat.missing " + show_stat(dir, fs.stat(dir + "/nope.txt")))
+  println("glob.top " + show_glob(dir, fs.glob(dir + "/*.txt")))
+  println("glob.sub " + show_glob(dir, fs.glob(dir + "/sub/*.txt")))
+  println("glob.dstar " + show_glob(dir, fs.glob(dir + "/**/*.md")))
+  println("glob.all " + show_glob(dir, fs.glob(dir + "/**")))
+  println("glob.literal " + show_glob(dir, fs.glob(dir + "/a.txt")))
+  println("glob.literal_missing " + show_glob(dir, fs.glob(dir + "/zz.txt")))
+  println("glob.nondir_base " + show_glob(dir, fs.glob(dir + "/a.txt/*")))
+  println("glob.missing_base " + show_glob(dir, fs.glob(dir + "/nope/*.txt")))
+  println("glob.star_mid " + show_glob(dir, fs.glob(dir + "/sub/*/d.md")))
+  fs.remove_all(dir)!
+  println("stat.gone " + show_stat(dir, fs.stat(dir)))
+}
