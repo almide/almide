@@ -56,6 +56,12 @@ pub fn almide_rt_random_shuffle<T: Clone>(mut xs: Vec<T>) -> Vec<T> {
     xs
 }
 
+// NOTE: runtime/rs is not a workspace member, so this module is compiled only
+// when the generated crate builds — `cargo test` at the root never runs it
+// (the same is true of the older tests in env.rs). The EXECUTED evidence for
+// the range is spec/stdlib/random_test.almd: a sampled floor over 2000 draws
+// plus the construction's top value, (2^53-1)/2^53, asserted deterministically
+// on every leg.
 #[cfg(test)]
 mod tests {
     use super::*;
