@@ -296,7 +296,13 @@ impl Emitter<'_> {
         self.loop_end(hj);
         {
             let mut i = self.f.instructions();
-            i.local_get(hacc).local_get(hc).f64_convert_i32_u().f64_div().local_set(hmean);
+            // `_s`, not `_u`: a column count is a non-negative i32 bounded by
+            // the allocation ceiling (r·c cells of 8 bytes under 2 GiB, so
+            // c < 2^28), where the two conversions are the same f64 — and `_s`
+            // is what the kernel arms spell for this very quantity
+            // (matrix_kernels.rs). The closed set the VM accepts holds one of
+            // them (#865, crates/almide-wasm-vm/src/numeric.rs).
+            i.local_get(hacc).local_get(hc).f64_convert_i32_s().f64_div().local_set(hmean);
             i.f64_const(0.0f64.into()).local_set(hacc);
         }
         // var = (0.0 + d0·d0 + d1·d1 + …) / c with d = x − mean; then
@@ -313,7 +319,7 @@ impl Emitter<'_> {
         {
             let mut i = self.f.instructions();
             i.f64_const(1.0f64.into());
-            i.local_get(hacc).local_get(hc).f64_convert_i32_u().f64_div();
+            i.local_get(hacc).local_get(hc).f64_convert_i32_s().f64_div();
             i.local_get(heps).f64_add().f64_sqrt().f64_div().local_set(hacc);
         }
         // out[j] = (x − mean)·inv·g[j] + b[j], left association exactly

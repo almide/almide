@@ -296,7 +296,14 @@ impl Emitter<'_> {
                 let mut i = self.f.instructions();
                 i.local_get(hb).local_get(hk).i32_const(2).i32_shl().i32_add();
                 i.local_get(hm).local_get(hk).i32_const(3).i32_shl().i32_add();
-                i.f64_load(mat_elem()).f32_demote_f64().f32_store(raw_f32());
+                // An f32 crosses memory as BITS everywhere in this emitter —
+                // `i32.reinterpret_f32` + an integer store out, `i32.load` +
+                // `f32.reinterpret_i32` back in, which is how this buffer's own
+                // reader spells it (matrix_load.rs's from_bytes_f32_le, and
+                // bytes_rw.rs's set_f32_le / read_f32_le). Same four
+                // little-endian bytes as `f32.store`, one convention, and the
+                // VM's closed set stays what it was (#865).
+                i.f64_load(mat_elem()).f32_demote_f64().i32_reinterpret_f32().i32_store(raw_f32());
             }
             self.loop_end(hk);
             self.release_i32();
