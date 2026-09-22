@@ -83,9 +83,12 @@ fn matrix_pre_norm_linear(x: Matrix, gamma: List[Float], beta: List[Float], eps:
 // append_rows: native — an operand with no rows yields (a copy of) the
 // other; else base's rows then extra's, the width read off base's first row
 // (from_lists' own rule).
-fn matrix_append_rows(base: Matrix, extra: Matrix) -> Matrix = if matrix.rows(base) == 0 then extra
-else if matrix.rows(extra) == 0 then base
-else matrix.from_lists(matrix.to_lists(base) + matrix.to_lists(extra))
+fn matrix_append_rows(base: Matrix, extra: Matrix) -> Matrix = {
+  let rb = matrix.rows(base)
+  let re = matrix.rows(extra)
+  if rb == 0 then extra
+  else if re == 0 then base else matrix.from_lists(matrix.to_lists(base) + matrix.to_lists(extra))
+}
 
 // linear_f32_row_no_bias: native (matrix_p2.rs) reads W's f32 rows straight
 // out of the byte buffer and runs the sequential widen-mul-add dot — exactly
@@ -93,9 +96,12 @@ else matrix.from_lists(matrix.to_lists(base) + matrix.to_lists(extra))
 // exact; both sums run k-ascending from 0.0, mul then add). Native's edges,
 // spelled here: an empty x or a zero out/in extent is the all-zero
 // rows(x) × w_rows matrix, and a negative offset reads from 0 (`max(0)`).
-fn matrix_linear_f32_row_no_bias(x: Matrix, w_bytes: Bytes, w_offset: Int, w_rows: Int, w_cols: Int) -> Matrix = if matrix.rows(x) == 0 or w_rows <= 0 or w_cols <= 0 then matrix.zeros(matrix.rows(x), w_rows)
-else {
-  let off = if w_offset < 0 then 0 else w_offset
-  let w = matrix.from_bytes_f32_le(w_bytes, off, w_rows, w_cols)
-  matrix.linear_row_no_bias(x, w)
+fn matrix_linear_f32_row_no_bias(x: Matrix, w_bytes: Bytes, w_offset: Int, w_rows: Int, w_cols: Int) -> Matrix = {
+  let rows = matrix.rows(x)
+  if rows == 0 or w_rows <= 0 or w_cols <= 0 then matrix.zeros(rows, w_rows)
+  else {
+    let off = if w_offset < 0 then 0 else w_offset
+    let w = matrix.from_bytes_f32_le(w_bytes, off, w_rows, w_cols)
+    matrix.linear_row_no_bias(x, w)
+  }
 }
