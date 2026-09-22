@@ -119,7 +119,16 @@ fn emit_program_pass(
         // The alias rule therefore still diverges for an effect callee
         // (#2503 keeps that half), and closing it starts with that credit.
         let param_mut: Vec<bool> = f.params.iter().map(|p| p.is_mut && !f.is_effect).collect();
-        table.infos.push(FnInfo { wasm_index: F_FN_BASE + i as u32, params, ret, refuse, param_owned: Vec::new(), param_mut, import });
+        table.infos.push(FnInfo {
+            wasm_index: F_FN_BASE + i as u32,
+            params,
+            ret,
+            refuse,
+            param_owned: Vec::new(),
+            param_mut,
+            import,
+            scoped_entry: f.is_scoped_block_entry(),
+        });
     }
     // Which params each callee owns (#2028): computed once, over the whole
     // table, before any body lowers — the call sites and the exit plans

@@ -1033,6 +1033,7 @@ fn check_no_native_only_matrix(ir_program: &almide::ir::IrProgram) -> Result<(),
 /// The second tuple field is true when the STRUCTURAL leg produced the
 /// bytes (they import `almide.*` and run on the embedded host; the build
 /// path converts them with `to_wasi` for stock runtimes).
+#[allow(clippy::too_many_arguments)]
 fn render_wasm_module_routed(
     file: &str,
     source_text: &str,
@@ -1041,6 +1042,7 @@ fn render_wasm_module_routed(
     has_main: bool,
     dep_paths: &[(project::PkgId, std::path::PathBuf)],
     uses_incumbent_features: bool,
+    declared_region: bool,
 ) -> Result<(Vec<u8>, bool, Vec<i32>), ()> {
     //   - `ALMIDE_FUEL_PROBE` set         → incumbent (the charge-trace
     //     probe line is that leg's Σ-probe instrumentation — contract
@@ -1059,7 +1061,22 @@ fn render_wasm_module_routed(
             || almide_base::env::flag("ALMIDE_FUEL_PROBE")
             || (!has_main && !library_ok)
             || uses_incumbent_features);
+    // #1997: a `scoped` region is an OBLIGATION the structural leg honours
+    // (crates/almide-wasm/src/region.rs); the incumbent renderer has no
+    // declared-region lowering, so a route that lands there would drop the
+    // boundary silently. Refuse the route instead — on every path that
+    // would hand the program to the incumbent, forced or rerouted.
+    let region_cannot_reroute = |why: &str| {
+        err(&format!(
+            "error: this program declares a `scoped` region, which only the structural wasm leg honours — {why}"
+        ));
+        err("  note: the incumbent renderer has no declared-region lowering, so the build is refused rather than shipped without the boundary");
+        Err(())
+    };
     if incumbent {
+        if declared_region {
+            return region_cannot_reroute("the program was routed to the incumbent renderer (a forced route, a main-less non-library module, or an @export surface)");
+        }
         let r = render_wasm_module(source_text, v1_self_modules, library_ok).map(|(b, _)| (b, false, Vec::new()));
         // REVERSE handover (#1423 bucket A, the env.sleep_ms build shape):
         // a SHAPE-routed host-variant program the incumbent walls gets one
@@ -1102,6 +1119,9 @@ fn render_wasm_module_routed(
         if force_structural {
             err(&format!("error: structural leg walled under ALMIDE_WASM_STRUCTURAL ({why})"));
             return Err(());
+        }
+        if declared_region {
+            return region_cannot_reroute(&format!("the structural leg declined it ({why})"));
         }
         if almide_base::env::flag("ALMIDE_VERIFIED_DEBUG") {
             err(&format!("[almide] structural leg declined ({why}) — incumbent renderer"));
@@ -1383,6 +1403,9 @@ pub(crate) fn compile_to_wasm_bytes_surfaced(file: &str, allow_unverified: bool,
     // misalignment; the full crossmod matrix passes on the forced
     // structural leg, and a shape it still cannot lower (a module
     // initializer with inner binds) walls honestly and reroutes.
+    // #1997: a `scoped { … }` block was outlined into a marked entry fn; its
+    // region is an obligation only the structural leg honours.
+    let declared_region = ir_program.functions.iter().any(|f| f.is_scoped_block_entry());
     let _ = (&mut ir_program, allow_unverified, verified);
     render_wasm_module_routed(
         file,
@@ -1392,6 +1415,7 @@ pub(crate) fn compile_to_wasm_bytes_surfaced(file: &str, allow_unverified: bool,
         has_main,
         &dep_paths,
         has_exports,
+        declared_region,
     )
     .map(|(b, s, o)| (b, s, o, surface))
 }

@@ -292,7 +292,31 @@ pub struct IrFunction {
 /// All downstream passes see a pre-normalized, unique `func.name`.
 pub const TEST_NAME_PREFIX: &str = "__test_almd_";
 
+/// #1997: the `IrFunction.attrs` marker lowering writes on a `scoped fn`.
+/// A `:` is not an identifier character, so no source attribute can forge it.
+pub const SCOPED_FN_ATTR: &str = "scoped:fn";
+/// #1997: the marker on the fn a `scoped { … }` block was outlined into (its
+/// ENTRY). Every call to an entry is a region boundary both legs must honour:
+/// the structural wasm leg rewinds its allocator around it, the native leg
+/// runs it in the arena window.
+pub const SCOPED_BLOCK_ATTR: &str = "scoped:block";
+
 impl IrFunction {
+    /// Declared `scoped fn` (the qualifier, not the block).
+    pub fn is_scoped_fn(&self) -> bool {
+        self.attrs.iter().any(|a| a.name.as_str() == SCOPED_FN_ATTR)
+    }
+
+    /// The outlined body of a `scoped { … }` block.
+    pub fn is_scoped_block_entry(&self) -> bool {
+        self.attrs.iter().any(|a| a.name.as_str() == SCOPED_BLOCK_ATTR)
+    }
+
+    /// The marker attribute, for the lowering that writes it.
+    pub fn scoped_marker(name: &str) -> almide_lang::ast::Attribute {
+        almide_lang::ast::Attribute { name: almide_base::intern::sym(name), args: Vec::new(), span: None }
+    }
+
     /// Source-visible name. For test blocks this strips the
     /// `TEST_NAME_PREFIX` so reporters (test runner output, diagnostics)
     /// show the user's original `test "name"` string.

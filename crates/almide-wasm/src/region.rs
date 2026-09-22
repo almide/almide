@@ -288,6 +288,30 @@ impl<'a> Emitter<'a> {
         self.globals.keys().map(|g| g.1).collect()
     }
 
+    /// The DECLARED window (#1997): a call to the entry of a `scoped { … }`
+    /// block. The checker admitted the block against the same vocabulary
+    /// `region_pure_fns` reads (docs/specs/scoped.md), so the entry is in
+    /// the pure set and returns a scalar; if either fails here the two
+    /// disagree, which is a compiler defect reported through the
+    /// E-OWN-LOWERING channel (E083) — the build must not reroute a valid
+    /// program around it, and it must never pass silently.
+    pub(crate) fn scoped_entry_window(&self, g: usize, name: &str, ret: Option<SliceTy>) -> Result<(), EmitError> {
+        let pure = self.work.region_pure.borrow().contains(&g);
+        if pure && scalar_slot(ret) {
+            if almide_base::env::flag("ALMIDE_REGION_DEBUG") {
+                eprintln!("[region] declared window at call #{g} ({name})");
+            }
+            return Ok(());
+        }
+        Err(EmitError::OwnershipLowering(OwnDefect {
+            headline: "a `scoped` block the checker admitted is outside the emitter's region vocabulary".to_string(),
+            function: name.to_string(),
+            value: if pure { format!("return slot {ret:?}") } else { "the entry's body".to_string() },
+            expected: "a region-pure entry returning a scalar (the checker's admitted fragment)".to_string(),
+            emitted: if pure { "a heap-typed return".to_string() } else { "a body the region-pure fixpoint dropped".to_string() },
+        }))
+    }
+
     /// `RegionSave`: allocate the save block, file the bump pointer and
     /// the class heads into it, zero the heads. Returns the local holding
     /// the block (released by `emit_region_restore`).

@@ -430,11 +430,16 @@ fn lower_decls(
         let blank_lines = prog.blank_lines_map.get(decl_idx).copied().unwrap_or(0);
 
         match decl {
-            ast::Decl::Fn { name, params, body: Some(body), effect, span, generics, extern_attrs, export_attrs, attrs, visibility, return_type, .. } => {
+            ast::Decl::Fn { name, params, body: Some(body), effect, scoped, span, generics, extern_attrs, export_attrs, attrs, visibility, return_type, .. } => {
                 let mut f = lower_fn(ctx, &FnToLower {
                     name, params, body: body, effect, span, generics,
                     extern_attrs, export_attrs, attrs, visibility, module_prefix,
                 });
+                // #1997: the qualifier rides into the IR as a marker the
+                // legs and the module interface read (never re-derived).
+                if *scoped {
+                    f.attrs.push(IrFunction::scoped_marker(almide_ir::SCOPED_FN_ATTR));
+                }
                 // ADR-0002 Phase 1b (#1103): a `-> T!` fn's VALUE tail lifts
                 // into ok(...) — the same ergonomics an effect fn's lifted
                 // body has. Done HERE, before the IR splits to the three

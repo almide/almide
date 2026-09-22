@@ -562,6 +562,11 @@ struct FnInfo {
     /// the host serves, not a body — its stub leaves the module in the
     /// `imports::declare` post-pass.
     import: Option<(String, String)>,
+    /// The outlined body of a `scoped { … }` block (#1997): every call to
+    /// it is a DECLARED region boundary — `region.rs` opens the window
+    /// there unconditionally, tail position and `ALMIDE_REGION_OFF`
+    /// notwithstanding, or reports a compiler defect.
+    scoped_entry: bool,
 }
 
 struct FnTable {
