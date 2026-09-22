@@ -2045,6 +2045,8 @@ evidence  = [
   { path = "spec/wasm_cross/matrix_dims_guard_product.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_from_bytes_count_domain.almd", class = "fixture" },
   { path = "spec/wasm_cross/string_repeat_empty.almd", class = "fixture" },
+  { path = "spec/wasm_cross/matrix_elementwise_family.almd", class = "fixture" },
+  { path = "spec/wasm_cross/matrix_composition_family.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-162"
@@ -2786,6 +2788,9 @@ evidence  = [
   { path = "spec/wasm_cross/matrix_pow_libm.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_softmax_fastexp.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_domain_edges.almd", class = "fixture" },
+  { path = "spec/wasm_cross/matrix_elementwise_family.almd", class = "fixture" },
+  { path = "spec/wasm_cross/matrix_product_family.almd", class = "fixture" },
+  { path = "spec/wasm_cross/matrix_composition_family.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-224"
@@ -2842,6 +2847,7 @@ evidence  = [
   { path = "spec/wasm_cross/fs_composition_family.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_select_rows.almd", class = "fixture" },
   { path = "spec/wasm_cross/fs_glob_segments.almd", class = "fixture" },
+  { path = "spec/wasm_cross/matrix_shape_family.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-229"
@@ -2857,6 +2863,7 @@ evidence  = [
   { path = "spec/wasm_cross/bytes_negative_offset_family.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_domain_edges.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_q1_full_loader_cols_beyond_buffer.almd", class = "fixture" },
+  { path = "spec/wasm_cross/matrix_shape_family.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-230"

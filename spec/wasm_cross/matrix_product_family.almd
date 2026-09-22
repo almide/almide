@@ -1,0 +1,120 @@
+// @contract: C-223
+// The matrix products run byte-identically on every leg, the structural one
+// included (#1423 stage 4). Every dot product is native's scalar loop —
+// accumulate from 0.0, k ascending, mul then add, no fused step:
+// - mul is a.rows × b.cols over min(a.cols, b.rows) terms; an operand with no
+//   rows or cols gives the all-zero / empty product;
+// - linear_row / linear_row_no_bias dot each x row with each weight row, bias
+//   added last; either operand empty is the empty matrix;
+// - swiglu_gate computes g·σ(g)·u with σ(g) = 1 / (1 + exp(−g)) through the
+//   vendored libm exp (C-223 — the incumbent's clamped fast-exp answered
+//   differently);
+// - conv1d zero-pads the input, starts each sum at the bias and is the empty
+//   matrix when the input is empty or shorter than the kernel.
+// The operands are small integers and halves so every summation order agrees
+// (native's matmul may run through the platform BLAS); the swiglu operands are
+// arbitrary because its sums are the scalar loop on every leg.
+fn show(tag: String, m: Matrix) -> Unit = {
+  let l = matrix.to_lists(m)
+  let s = matrix.shape(m)
+  println("${tag}: ${s} ${l}")
+}
+
+fn main() -> Unit = {
+  let a = matrix.from_lists([
+    [1.0, 2.0, 3.0],
+    [4.0, 5.0, 6.0]
+  ])
+  let b = matrix.from_lists([
+    [0.5, -1.0],
+    [2.0, 8.0],
+    [3.0, 0.25]
+  ])
+  let c = matrix.from_lists([
+    [10.0, 20.0, 30.0],
+    [40.0, 50.0, 60.0],
+    [70.0, 80.0, 90.0]
+  ])
+  let e = matrix.zeros(0, 0)
+  show("mul", matrix.mul(a, b))
+  show("mul_k0", matrix.mul(matrix.zeros(3, 0), matrix.from_lists([
+    [1.0, 2.0]
+  ])))
+  show("mul_b0", matrix.mul(a, e))
+  show("mul_a0", matrix.mul(e, a))
+  show("lin", matrix.linear_row(a, c, [1.0, 2.0, 3.0]))
+  show("lin_nb", matrix.linear_row_no_bias(a, c))
+  show("lin_x0", matrix.linear_row(e, c, [1.0]))
+  show("lin_w0", matrix.linear_row(a, e, []))
+  let x = matrix.from_lists([
+    [0.3, -1.7, 2.9],
+    [4.1, -0.05, 0.77]
+  ])
+  let wg = matrix.from_lists([
+    [0.1, 0.2, 0.3],
+    [-0.4, 0.5, -0.6]
+  ])
+  let wu = matrix.from_lists([
+    [1.5, -0.5, 0.25],
+    [0.7, 0.8, -0.9]
+  ])
+  show("swiglu", matrix.swiglu_gate(x, wg, wu))
+  show("swiglu_empty", matrix.swiglu_gate(x, e, wu))
+  show(
+    "conv",
+    matrix.conv1d(
+      a,
+      matrix.from_lists([
+        [
+          1.0,
+          0.0,
+          -1.0,
+          2.0,
+          0.5,
+          1.0
+        ]
+      ]),
+      [0.5],
+      2,
+      1,
+      1,
+    ),
+  )
+  show(
+    "conv_s2",
+    matrix.conv1d(
+      c,
+      matrix.from_lists([
+        [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.5,
+          0.0,
+          0.0,
+          0.5,
+          1.0,
+          -1.0
+        ]
+      ]),
+      [0.0, 1.0],
+      2,
+      2,
+      0,
+    ),
+  )
+  show("conv_k0", matrix.conv1d(a, matrix.from_lists([
+    [1.0]
+  ]), [2.5], 0, 1, 0))
+  show("conv_short", matrix.conv1d(a, matrix.from_lists([
+    [1.0, 1.0, 1.0]
+  ]), [0.0], 9, 1, 1))
+  show("conv_empty", matrix.conv1d(e, matrix.from_lists([
+    [1.0]
+  ]), [0.0], 1, 1, 0))
+}
