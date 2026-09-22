@@ -647,58 +647,154 @@ hel
 ## Signature index (50 functions)
 
 ```
+// s without leading/trailing whitespace.
 string.trim(s: String) -> String
+
+// Pieces around sep; empty pieces kept.
 string.split(s: String, sep: String) -> List[String]
 
 // Split at the FIRST occurrence of `sep`: `(before, after)`, none ⇔ `sep` absent.
 string.split_once(s: String, sep: String) -> Option[(String, String)]
 
+// Items with sep between; "" for [].
 string.join(list: List[String], sep: String) -> String
+
+// Codepoint count (not bytes).
 string.len(s: String) -> Int
+
+// Alias of string.len.
 string.length(s: String) -> Int   (deprecated — use string.len)
+
+// sub occurs in s; true for empty sub.
 string.contains(s: String, sub: String) -> Bool
+
+// s begins with prefix; "" always matches.
 string.starts_with(s: String, prefix: String) -> Bool
+
+// s ends with suffix; "" always matches.
 string.ends_with(s: String, suffix: String) -> Bool
+
+// Codepoints [start, end), clamped to s.
 string.slice(s: String, start: Int, end: Int) -> String
+
+// Byte range [start, end); none if bad or mid-char.
 string.byte_slice(s: String, start: Int, end: Int) -> Option[String]
+
+// Left-padded to n chars with ch; never truncates.
 string.pad_start(s: String, n: Int, ch: String) -> String
+
+// UTF-8 bytes of s as Ints 0..255.
 string.to_bytes(s: String) -> List[Int]
+
+// First char uppercased, rest untouched.
 string.capitalize(s: String) -> String
+
+// Unicode uppercase; may lengthen s.
 string.to_upper(s: String) -> String
+
+// Unicode lowercase, not just ASCII.
 string.to_lower(s: String) -> String
+
+// Every from replaced by to.
 string.replace(s: String, from: String, to: String) -> String
+
+// Codepoint at i, or none if out of range.
 string.get(s: String, i: Int) -> Option[String]
+
+// Split on \n or \r\n; endings dropped.
 string.lines(s: String) -> List[String]
+
+// Each codepoint as a one-char string.
 string.chars(s: String) -> List[String]
+
+// Codepoint index of first needle, or none.
 string.index_of(s: String, needle: String) -> Option[Int]
+
+// s repeated n times; empty for n <= 0.
 string.repeat(s: String, n: Int) -> String
+
+// Lossy UTF-8 decode; bad sequences become U+FFFD.
 string.from_bytes(bytes: List[Int]) -> String
+
+// All ASCII 0-9; false for empty s.
 string.is_digit(s: String) -> Bool
+
+// All Unicode letters; false for empty s.
 string.is_alpha(s: String) -> Bool
+
+// All letters/digits; false for empty s.
 string.is_alphanumeric(s: String) -> Bool
+
+// All whitespace; true for empty s.
 string.is_whitespace(s: String) -> Bool
+
+// Has letters, all uppercase; others ignored.
 string.is_upper(s: String) -> Bool
+
+// Has letters, all lowercase; others ignored.
 string.is_lower(s: String) -> Bool
+
+// Scalar value of first char; none if s empty.
 string.codepoint(s: String) -> Option[Int]
+
+// One-char string; "" if n is not a scalar.
 string.from_codepoint(n: Int) -> String
+
+// Right-padded to n chars with ch; never truncates.
 string.pad_end(s: String, n: Int, ch: String) -> String
+
+// s without leading whitespace.
 string.trim_start(s: String) -> String
+
+// s without trailing whitespace.
 string.trim_end(s: String) -> String
+
+// Non-overlapping sub count; len+1 if sub empty.
 string.count(s: String, sub: String) -> Int
+
+// True only for ""; " " is not empty.
 string.is_empty(s: String) -> Bool
+
+// Codepoints reversed; not grapheme-aware.
 string.reverse(s: String) -> String
+
+// s without prefix, or none if s lacks it.
 string.strip_prefix(s: String, prefix: String) -> Option[String]
+
+// s without suffix, or none if s lacks it.
 string.strip_suffix(s: String, suffix: String) -> Option[String]
+
+// First from replaced by to, if any.
 string.replace_first(s: String, from: String, to: String) -> String
+
+// Codepoint index of last needle, or none.
 string.last_index_of(s: String, needle: String) -> Option[Int]
+
+// Leading codepoint, or none if empty.
 string.first(s: String) -> Option[String]
+
+// Final codepoint, or none if empty.
 string.last(s: String) -> Option[String]
+
+// First n codepoints; all of s if n < 0.
 string.take(s: String, n: Int) -> String
+
+// Last n codepoints; all of s if n < 0.
 string.take_end(s: String, n: Int) -> String
+
+// s minus first n codepoints; "" if n < 0.
 string.drop(s: String, n: Int) -> String
+
+// s minus last n codepoints; "" if n < 0.
 string.drop_end(s: String, n: Int) -> String
+
+// (char, count) per run of equal codepoints.
 string.run_length_encode(s: String) -> List[(String, Int)]
+
+// Appends suffix to s in place.
 string.push(s: String, suffix: String) -> Unit
+
+// Empties s in place.
 string.clear(s: String) -> Unit
 ```
 

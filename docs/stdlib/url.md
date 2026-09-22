@@ -93,11 +93,22 @@ q=a%20b&lang=ja
 ## Signature index (6 functions)
 
 ```
+// All but A-Za-z0-9-._~ as UTF-8 %XX escapes.
 url.encode_component(s: String) -> String
+
+// Percent-decoded s; err on bad escape/UTF-8; + kept.
 url.decode_component(s: String) -> Result[String, String]
+
+// Url from s; err without :// or on bad port.
 url.parse(s: String) -> Result[Url, String]
+
+// URL text of u; empty query/fragment omitted.
 url.to_string(u: Url) -> String
+
+// Undecoded (k, v) pairs; bare key gets "".
 url.query_pairs(query: String) -> List[(String, String)]
+
+// k=v joined by &, both sides percent-encoded.
 url.build_query(pairs: List[(String, String)]) -> String
 ```
 

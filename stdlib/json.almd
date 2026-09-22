@@ -9,53 +9,68 @@
 // Runtime ABI — `j: &Value`, `key: &str`, `path: &AlmideJsonPath`, etc.
 // `set_path` returns `Result[Value, String]`, so callers propagate via
 // `!` / `?` / match.
+/// Value or err; lenient, trailing text ignored.
 @intrinsic("almide_rt_json_parse")
 fn parse(text: String) -> Result[Value, String] = _
 
+/// Compact JSON; a Float 1.0 prints as 1.
 @intrinsic("almide_rt_json_stringify")
 fn stringify(v: Value) -> String = _
 
+/// JSON with 2-space indent; [] and {} stay inline.
 @intrinsic("almide_json_stringify_pretty")
 fn stringify_pretty(j: Value) -> String = _
 
 // ── key-based typed extraction ──
+/// String at key; none if absent or non-string.
 @intrinsic("almide_json_get_string")
 fn get_string(j: Value, key: String) -> String? = _
 
+/// Int at key; none if absent or non-numeric.
 @intrinsic("almide_json_get_int")
 fn get_int(j: Value, key: String) -> Int? = _
 
+/// Float at key (Int widens); none if absent.
 @intrinsic("almide_json_get_float")
 fn get_float(j: Value, key: String) -> Float? = _
 
+/// Bool at key; none if absent or non-Bool.
 @intrinsic("almide_json_get_bool")
 fn get_bool(j: Value, key: String) -> Bool? = _
 
+/// Array at key; none if absent or non-array.
 @intrinsic("almide_json_get_array")
 fn get_array(j: Value, key: String) -> List[Value]? = _
 
 // ── path API ──
+/// Empty path: the whole value.
 @intrinsic("almide_rt_json_root")
 fn root() -> JsonPath = _
 
+/// path extended by object key name.
 @intrinsic("almide_rt_json_field")
 fn field(path: JsonPath, name: String) -> JsonPath = _
 
+/// path plus index i; negative i counts from end.
 @intrinsic("almide_rt_json_index")
 fn index(path: JsonPath, i: Int) -> JsonPath = _
 
+/// Value at path, or none if a step misses.
 @intrinsic("almide_json_get_path")
 @borrow_ref(path)
 fn get_path(j: Value, path: JsonPath) -> Value? = _
 
+/// j with value at path; missing keys created.
 @intrinsic("almide_json_set_path")
 @borrow_ref(path)
 @consume(value)
 fn set_path(j: Value, path: JsonPath, value: Value) -> Result[Value, String] = _
 
+/// j minus the entry at path; unchanged if absent.
 @intrinsic("almide_json_remove_path")
 @borrow_ref(path)
 fn remove_path(j: Value, path: JsonPath) -> Value = _
 
+/// Object as key->string map (non-strings as JSON).
 @intrinsic("almide_json_to_map")
 fn to_map(j: Value) -> Map[String, String]? = _

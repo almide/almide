@@ -176,15 +176,34 @@ fn main() -> Unit = {
 ## Signature index (10 functions)
 
 ```
+// SafePath of s; err if any segment is "..".
 path.from_string(s: String) -> Result[SafePath, String]
+
+// SafePath of s with no traversal check.
 path.trusted(s: String) -> SafePath
+
+// Path text inside p, unchanged.
 path.to_string(p: SafePath) -> String
+
+// base/child; an absolute child replaces base.
 path.join(base: String, child: String) -> String
+
+// p minus last segment; "" if no slash.
 path.dirname(p: String) -> String
+
+// Last non-empty segment; "" for / or empty p.
 path.basename(p: String) -> String
+
+// After basename's last dot; none if no dot or dotfile.
 path.extension(p: String) -> Option[String]
+
+// True when p starts with /.
 path.is_absolute(p: String) -> Bool
+
+// Basename minus last extension; dotfiles as-is.
 path.stem(p: String) -> String
+
+// Resolves . and .. lexically; "" becomes ".".
 path.normalize(p: String) -> String
 ```
 

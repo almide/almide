@@ -69,8 +69,13 @@ fn main() -> Unit = {
 ## Signature index (3 functions)
 
 ```
+// Lowercase hex, two chars per byte.
 hex.encode(b: Bytes) -> String
+
+// Uppercase hex, two chars per byte.
 hex.encode_upper(b: Bytes) -> String
+
+// Bytes from hex (any case); err if odd or bad char.
 hex.decode(s: String) -> Result[Bytes, String]
 ```
 

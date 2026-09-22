@@ -187,13 +187,28 @@ flags other than `(?m)`.
 ## Signature index (8 functions)
 
 ```
+// pat matches somewhere in s (unanchored).
 regex.is_match(pat: String, s: String) -> Bool
+
+// pat matches the whole of s.
 regex.full_match(pat: String, s: String) -> Bool
+
+// Leftmost match of pat in s, or none.
 regex.find(pat: String, s: String) -> Option[String]
+
+// All non-overlapping matches, in order.
 regex.find_all(pat: String, s: String) -> List[String]
+
+// All matches replaced by literal rep (no $1).
 regex.replace(pat: String, s: String, rep: String) -> String
+
+// First match replaced by literal rep.
 regex.replace_first(pat: String, s: String, rep: String) -> String
+
+// Text between matches; [s] if no match.
 regex.split(pat: String, s: String) -> List[String]
+
+// [whole, group1, ...] of first match, or none.
 regex.captures(pat: String, s: String) -> Option[List[String]]
 ```
 
