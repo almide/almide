@@ -449,6 +449,8 @@ fn clean_empties_every_worker_dir_and_reports_the_tree() {
     let (td, native, _) = worker_tree();
     fake_worker(&native, "old", Duration::from_secs(30 * 24 * 60 * 60), Duration::from_secs(30 * 24 * 60 * 60));
     fake_worker(&native, "today", Duration::from_secs(60), Duration::from_secs(60));
+    // ...and a runtime rlib dir, which `clean` empties by the same rule.
+    let rtlib = fake_rtlib(&td.path().join("tmp"), "0123456789abcdef", Duration::from_secs(60));
 
     let tmp = td.path().join("tmp");
     let clean = || {
@@ -477,6 +479,12 @@ fn clean_empties_every_worker_dir_and_reports_the_tree() {
             "{name} must be emptied to its lockfile"
         );
     }
+    assert!(
+        stderr.contains("(1 runtime rlib dir(s))"),
+        "clean must report the runtime rlib dirs too:\n{stderr}"
+    );
+    assert!(!rtlib.join("libalmide_rt.rlib").exists(), "the rlib dir must be emptied");
+    assert!(rtlib.join(".almide-build.lock").is_file(), "its lockfile stays");
 
     // Idempotent: nothing left to empty.
     let out = clean();
@@ -484,4 +492,132 @@ fn clean_empties_every_worker_dir_and_reports_the_tree() {
     assert!(out.status.success(), "{stderr}");
     assert!(!stderr.contains("test worker dir(s)"), "nothing to report the second time:\n{stderr}");
     assert!(stderr.contains("No cache to clean"), "{stderr}");
+}
+
+// ── #2504: the prebuilt-runtime rlib dirs ─────────────────────────────────
+//
+// `<temp>/almide-rtlib-<key>`, keyed on the runtime source × rustc version ×
+// opt level: a new one per compiler build and per toolchain upgrade, the old
+// ones never linked again (31 dirs / 102 MB measured 2026-09-22). These
+// tests drive the REAL rlib fast path (no `ALMIDE_NO_RTLIB`) with every
+// temp-dir variable redirected.
+
+/// `almide run` through the rlib fast path, with the temp dir redirected.
+fn almide_run_rtlib(td: &Path, program: &Path) -> std::process::Output {
+    let tmp = td.join("tmp");
+    Command::new(almide())
+        .arg("run")
+        .arg(program)
+        .current_dir(td)
+        .env("HOME", td.join("home"))
+        .env("TMPDIR", &tmp)
+        .env("TMP", &tmp)
+        .env("TEMP", &tmp)
+        .env("ALMIDE_RUN_PROJECT_DIR", td.join("run"))
+        .env_remove("ALMIDE_NO_RTLIB")
+        .output()
+        .expect("spawn almide run")
+}
+
+fn rtlib_dirs(tmp: &Path) -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = std::fs::read_dir(tmp)
+        .map(|rd| {
+            rd.flatten()
+                .map(|e| e.path())
+                .filter(|p| {
+                    p.is_dir()
+                        && p.file_name()
+                            .map(|n| n.to_string_lossy().starts_with("almide-rtlib-"))
+                            .unwrap_or(false)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    dirs.sort();
+    dirs
+}
+
+/// Fabricate an rlib dir nobody has linked for a month.
+fn fake_rtlib(tmp: &Path, key: &str, age: Duration) -> PathBuf {
+    let dir = tmp.join(format!("almide-rtlib-{key}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(".almide-build.lock"), b"").unwrap();
+    std::fs::write(dir.join("almide_rt.rs"), "// runtime\n").unwrap();
+    std::fs::write(dir.join("libalmide_rt.rlib"), vec![0u8; 4096]).unwrap();
+    let then = SystemTime::now() - age;
+    for name in [".almide-build.lock", "almide_rt.rs", "libalmide_rt.rlib"] {
+        set_mtime(&dir.join(name), then);
+    }
+    dir
+}
+
+/// A runtime rlib nobody has linked for a week is evicted; the one this
+/// build links is touched FIRST, so a dir in daily use is never the victim
+/// of its own sweep even when its last BUILD was a month ago.
+#[test]
+fn week_old_runtime_rlib_dirs_are_evicted_and_the_one_in_use_is_touched() {
+    let td = tempfile::tempdir().unwrap();
+    let tmp = td.path().join("tmp");
+    std::fs::create_dir_all(&tmp).unwrap();
+    std::fs::create_dir_all(td.path().join("home")).unwrap();
+    let a = write_program(td.path(), "a.almd", "one");
+    let b = write_program(td.path(), "b.almd", "two");
+
+    let out = almide_run_rtlib(td.path(), &a);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "one\n");
+    let mine = rtlib_dirs(&tmp);
+    assert_eq!(mine.len(), 1, "the rlib fast path must have built exactly one rlib dir: {mine:?}");
+    let mine = mine.into_iter().next().unwrap();
+
+    // The dir this build will link, aged a month; plus a dead sibling.
+    let month = Duration::from_secs(30 * 24 * 60 * 60);
+    let then = SystemTime::now() - month;
+    for name in [".almide-build.lock", "almide_rt.rs", "libalmide_rt.rlib"] {
+        set_mtime(&mine.join(name), then);
+    }
+    let _ = std::fs::remove_file(tmp.join(".almide-evict-stamp"));
+    let dead = fake_rtlib(&tmp, "deadbeefdeadbeef", month);
+
+    // A DIFFERENT program: a content-cache miss, so the build really reaches
+    // the rlib path. (Re-running the same program is a lock-free binary hit
+    // that never consults the rlib cache at all.)
+    let out = almide_run_rtlib(td.path(), &b);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "two\n");
+
+    assert!(
+        age_of(&mine.join("libalmide_rt.rlib")) < Duration::from_secs(60 * 60),
+        "linking the rlib must refresh its mtime — nothing else does, a warm cache is a bare exists()"
+    );
+    assert!(mine.join("libalmide_rt.rlib").is_file(), "the rlib in use must survive its own sweep");
+    let left: Vec<String> = std::fs::read_dir(&dead)
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(
+        left,
+        vec![".almide-build.lock".to_string()],
+        "the month-old rlib dir must be emptied to its lockfile, found {left:?}"
+    );
+    assert!(tmp.join(".almide-evict-stamp").is_file(), "the rlib sweep stamps the temp dir");
+
+    // Rate limit: a sibling that goes stale within the day is not swept
+    // again. A THIRD program, because re-running `a` is a lock-free binary
+    // hit that never consults the rlib cache — it would pass without the
+    // rate limit doing anything.
+    let dead2 = fake_rtlib(&tmp, "beefbeefbeefbeef", month);
+    let c = write_program(td.path(), "c.almd", "three");
+    // Backdate the in-use rlib again, so its refresh is evidence that THIS
+    // build consulted the rlib cache rather than the previous one's touch.
+    set_mtime(&mine.join("libalmide_rt.rlib"), SystemTime::now() - month);
+    let out = almide_run_rtlib(td.path(), &c);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "three\n");
+    assert!(
+        age_of(&mine.join("libalmide_rt.rlib")) < Duration::from_secs(60),
+        "this build must really have gone through the rlib cache (else the next assert proves nothing)"
+    );
+    assert!(dead2.join("libalmide_rt.rlib").is_file(), "a sweep within the stamp interval must not run");
 }
