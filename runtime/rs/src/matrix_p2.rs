@@ -278,6 +278,9 @@ pub fn almide_rt_matrix_rope_rotate_at(
 pub fn almide_rt_matrix_append_rows(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix {
     if a.is_empty() { return b.clone(); }
     if b.is_empty() { return a.clone(); }
+    // Row-wise concat needs one width: a different one left the flat store
+    // ragged (its assertion panic, exit 101).
+    almide_rt_matrix_shape_eq(b.cols, a.cols);
     let mut out = Vec::<Vec<f64>>::with_capacity(a.len() + b.len());
     out.extend(a.iter().map(|r| r.to_vec()));
     out.extend(b.iter().map(|r| r.to_vec()));
@@ -394,6 +397,9 @@ pub fn almide_rt_matrix_linear_q1_0_row_no_bias(
     if x_rows == 0 || out_cols == 0 || n_in == 0 {
         return mk(x_rows, out_cols, vec![0.0f64; x_rows * out_cols]);
     }
+    // The activation row is read `n_in` wide out of the flat store: a wider
+    // `x` was silently mis-strided, a narrower one a raw slice panic.
+    almide_rt_matrix_shape_eq(x.cols, n_in);
     let (x_rows, out_cols) = almide_rt_matrix_dims(x_rows as i64, out_cols as i64);
     let mut out = vec![0.0f64; x_rows * out_cols];
     almide_kernel::q1_0_packed::linear_q1_0_packed(
@@ -424,8 +430,12 @@ pub fn almide_rt_matrix_silu_mul(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMa
         almide_kernel::silu::silu_mul(&a.data, &b.data, &mut out);
         return mk(a.rows, a.cols, out);
     }
-    // shape mismatch fallback (ragged): keep the elementwise definition
-    let rows = a.len();
+    // Shape-mismatch fallback: the elementwise definition with the ZIP
+    // truncation every elementwise pair (`add`/`sub`/`div`/`fma`) takes on
+    // both legs — rows to the shorter operand, cols per row to the shorter
+    // row. `a.len()` alone indexed `b[i]` past a shorter `b` (a raw slice
+    // panic) where the self-hosted body already truncated.
+    let rows = a.len().min(b.len());
     let mut out = Vec::<Vec<f64>>::with_capacity(rows);
     for i in 0..rows {
         let ai = &a[i];
@@ -679,6 +689,7 @@ pub fn almide_rt_matrix_linear_f32_row_no_bias(
     if x_rows == 0 || out_cols == 0 || n_in == 0 {
         return mk(x_rows, out_cols, vec![0.0f64; x_rows * out_cols]);
     }
+    almide_rt_matrix_shape_eq(x.cols, n_in);
     let mut out = vec![0.0f64; x_rows * out_cols];
     // Fast path: reinterpret the (4-byte-aligned, little-endian) weight bytes
     // as &[f32] so the inner dot auto-vectorizes (cvtps2pd + fma), and split
@@ -975,6 +986,7 @@ pub fn almide_rt_matrix_linear_q8_0_row_no_bias(
     if x_rows == 0 || out_cols == 0 || n_in == 0 || n_in % ALMIDE_Q8_BLOCK != 0 {
         return mk(x_rows, out_cols, vec![0.0f64; x_rows * out_cols]);
     }
+    almide_rt_matrix_shape_eq(x.cols, n_in);
     let row_bytes = n_in / ALMIDE_Q8_BLOCK * ALMIDE_Q8_BLOCK_BYTES;
     let w_all = &w_bytes[off..off + out_cols * row_bytes];
     let mut out = vec![0.0f64; x_rows * out_cols];

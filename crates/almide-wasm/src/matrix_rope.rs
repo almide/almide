@@ -210,7 +210,7 @@ impl Emitter<'_> {
         let fe = self.work.helper(Helper::FastExp);
         let (hq, hsq, hdm) = self.mat_open(q)?;
         let (hk, hsk, hkc) = self.mat_open(k)?;
-        let (hv, _hvr, hvc) = self.mat_open(v)?;
+        let (hv, hvr, hvc) = self.mat_open(v)?;
         self.lower_arg(n_heads, Some(INT), ArgMode::Borrow)?;
         let hnh = self.hold_i64()?;
         self.f.instructions().local_set(hnh);
@@ -222,6 +222,34 @@ impl Emitter<'_> {
         }
         self.emit_error_frame_abort();
         self.f.instructions().end();
+        // The shape precondition (#2481 family), in native's order — k
+        // width, v rows, v width against q — checked only when q and k are
+        // both non-empty (an empty q answers the empty matrix, an empty k
+        // reads nothing). A narrower k/v read past its row block here.
+        let shape_msg = self.pool.intern("matrix shape mismatch");
+        for (a, b) in [(hkc, hdm), (hvr, hsk), (hvc, hdm)] {
+            {
+                let mut i = self.f.instructions();
+                i.local_get(hsq).i32_const(0).i32_ne();
+                i.local_get(hsk).i32_const(0).i32_ne();
+                i.i32_and();
+                i.local_get(a).local_get(b).i32_ne();
+                i.i32_and().if_(BlockType::Empty);
+                i.i32_const(shape_msg as i32);
+            }
+            self.emit_error_frame_abort();
+            self.f.instructions().end();
+        }
+        // The ordered half: the causal offset `sk - sq` needs sq <= sk.
+        if causal {
+            {
+                let mut i = self.f.instructions();
+                i.local_get(hsq).local_get(hsk).i32_gt_u().if_(BlockType::Empty);
+                i.i32_const(shape_msg as i32);
+            }
+            self.emit_error_frame_abort();
+            self.f.instructions().end();
+        }
         let hdh = self.hold_i64()?; // head dim
         let hscale = self.hold_f64()?;
         let hsc = self.hold_i32()?; // scores scratch base
