@@ -133,6 +133,7 @@ pub fn cmd_self_update(version: Option<&str>) {
     });
 
     replace_binary(&extracted_binary, &current_exe);
+    update_verifier(&format!("{}/{}", extract_dir, stem), &current_exe);
 
     // Cleanup
     let _ = std::fs::remove_dir_all(&tmp);
@@ -265,6 +266,25 @@ fn shasum_fallback(path: &str) -> String {
                 .to_string()
         })
         .unwrap_or_default()
+}
+
+/// #2152: the archive's independent verifier goes next to the updated almide —
+/// `almide verify` execs it from there and has no linked fallback. Archives
+/// older than the verifier do not carry it; that is a note, not a failure.
+fn update_verifier(extracted_dir: &str, current_exe: &std::path::Path) {
+    let name = format!("almide-verify{}", std::env::consts::EXE_SUFFIX);
+    let new = std::path::Path::new(extracted_dir).join(&name);
+    let Some(dir) = current_exe.parent() else { return };
+    if !new.exists() {
+        err("note: this release predates almide-verify; `almide verify` will report it missing");
+        return;
+    }
+    let dest = dir.join(&name);
+    if dest.exists() {
+        replace_binary(&new.to_string_lossy(), &dest);
+    } else if let Err(e) = std::fs::copy(&new, &dest) {
+        err(&format!("warning: could not install {}: {}", dest.display(), e));
+    }
 }
 
 fn replace_binary(new_path: &str, current_exe: &std::path::Path) {

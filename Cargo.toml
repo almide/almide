@@ -96,6 +96,10 @@ almide-wasm-vm = { path = "crates/almide-wasm-vm" }
 # The corpus gates' fixture-range sharding (#2381): the switch is parsed in
 # one place, shared with almide-spine's run_parity.
 almide-corpus = { path = "crates/almide-corpus" }
+# DEV-ONLY (#2152): the shim test reads the certificate bundle `almide verify
+# --emit` writes with the verifier's own parser. The almide binary never links
+# it — `almide verify` execs the separate almide-verify binary, no fallback.
+almide-verify = { path = "crates/almide-verify" }
 
 # The root build.rs (docs/diagnostics) and almide-types (stdlib/) re-embed repo
 # content on any mtime bump — git pull/checkout triggers a full opt-3 recompile
