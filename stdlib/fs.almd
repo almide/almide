@@ -104,8 +104,9 @@ effect fn fold_lines_chunked[A](path: String, workers: Int, init: A, f: (A, Stri
 // does not exist (parents included); err = permission / directory / IO. The
 // family covers exactly the content readers — metadata (stat/file_size/
 // modified_at) and directory ops (list_dir/walk/glob) keep their exists/
-// is_dir predicates, writes create, and remove has rm -f semantics of its
-// own; those omissions are intentional (tests/fs_if_exists_family_gate).
+// is_dir predicates, writes create, and remove/remove_all err on a missing
+// path on every leg (there is no rm -f form); those omissions are
+// intentional (tests/fs_if_exists_family_gate).
 /// Text, or none if missing; err if not UTF-8.
 @intrinsic("almide_rt_fs_read_text_if_exists")
 effect fn read_text_if_exists(path: String) -> Result[String?, String] = _
