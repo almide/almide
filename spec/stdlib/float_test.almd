@@ -44,6 +44,20 @@ test "float.round negative" {
   assert_eq(float.round(-1.5), -2.0)
 }
 
+// #2477 — exact half-away-from-zero on the TRUE value: `floor(x + 0.5)` rounded
+// the sum first, so the largest double below 0.5 became 1.0 and an odd integer
+// at or above 2^52 moved to its even neighbour.
+test "float.round is exact where x + 0.5 is not" {
+  assert_eq(float.round(0.49999999999999994), 0.0)
+  assert_eq(float.round(-0.49999999999999994), -0.0)
+  assert_eq(float.round(4503599627370497.0), 4503599627370497.0)
+  assert_eq(float.round(-4503599627370497.0), -4503599627370497.0)
+  assert_eq(float.round(4503599627370495.5), 4503599627370496.0)
+  assert_eq(float.round(0.5), 1.0)
+  assert_eq(float.round(2.5), 3.0)
+  assert_eq(float.round(9007199254740993.0), 9007199254740992.0)
+}
+
 // ── floor ──
 test "float.floor positive" {
   assert_eq(float.floor(3.9), 3.0)

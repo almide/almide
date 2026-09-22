@@ -30,7 +30,9 @@ fn main() -> Unit = {
 
 ### `float.round(n: Float) -> Float`
 
-Round a float to the nearest integer value (as Float).
+Round a float to the nearest integer value (as Float), halves away from zero
+(`round(2.5) = 3.0`, `round(-2.5) = -3.0`), exactly on the true value: `round(0.49999999999999994)`
+is `0.0` and an odd integer above 2^52 is unchanged. `-0.0` and values in `(-0.5, 0)` round to `-0.0`.
 
 ```almd run
 fn main() -> Unit = {

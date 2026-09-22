@@ -1,0 +1,49 @@
+// @contract: C-363, C-140
+// `float.round` is native `f64::round` exactly — round half AWAY from zero on
+// the true value — on every leg (#2477). The self-hosted body was
+// `floor(x + 0.5)`, and that sum is itself rounded: the largest double below
+// 0.5 (0.49999999999999994) summed to exactly 1.0 and rounded UP, and an odd
+// integer at or above 2^52 summed to its even neighbour and moved by one.
+// The fraction is now measured (`x - trunc(x)`, exact) instead of added.
+fn main() -> Unit = {
+  let inf = 1.0 / 0.0
+  let xs = [
+    0.49999999999999994,
+    -0.49999999999999994,
+    0.5,
+    -0.5,
+    1.5,
+    -1.5,
+    2.5,
+    -2.5,
+    0.4,
+    -0.4,
+    0.0,
+    -0.0,
+    4503599627370497.0,
+    4503599627370496.0,
+    -4503599627370497.0,
+    4503599627370495.5,
+    -4503599627370495.5,
+    2251799813685247.5,
+    -2251799813685247.5,
+    9007199254740991.0,
+    9007199254740993.0,
+    0.5000000000000001,
+    -0.5000000000000001,
+    1.4999999999999998,
+    2.4999999999999996,
+    0.9999999999999999,
+    123456.5,
+    -123456.5,
+    5e-324,
+    1e300,
+    -1e300,
+    inf,
+    0.0 - inf,
+    0.0 / 0.0
+  ]
+  for x in xs {
+    println(float.to_string(x) + " -> " + float.to_string(float.round(x)))
+  }
+}

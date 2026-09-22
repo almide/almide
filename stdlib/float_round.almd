@@ -1,22 +1,30 @@
 // float_round — SELF-HOSTED `float.round` over the Float prim floor. v0 = `f64::round` =
 // round to nearest, HALF AWAY FROM ZERO (round(2.5)=3, round(-2.5)=-3) — NOT wasm's
-// `f64.nearest` (half to even). Replicated as floor(x+0.5) for x>=0, ceil(x-0.5) for x<0.
-// Pure scalar — cert untouched. The cond is bound first (a Float compare is a scalar call).
-fn __round_pos(x: Float) -> Float = {
-  let xp = prim.fadd(x, 0.5)
-  prim.ffloor(xp)
-}
-
-fn __round_neg(x: Float) -> Float = {
-  let xm = prim.fsub(x, 0.5)
-  prim.fceil(xm)
+// `f64.nearest` (half to even). Pure scalar — cert untouched. The cond is bound first (a
+// Float compare is a scalar call).
+//
+// EXACT, not `floor(x + 0.5)` (#2477): that sum is itself rounded, so the largest double
+// below 0.5 (0.49999999999999994) summed to exactly 1.0 and rounded UP, and an odd integer
+// at or above 2^52 summed to its even neighbour and moved by one. Here the fraction is
+// measured instead of added: `t = trunc(x)`, and `x - t` is exact (both lie in the same
+// binade, or `x` is already integral and the difference is 0), so the half test
+// `|x - t| >= 0.5` decides on the true fraction. `t + copysign(1, x)` is exact too: a
+// nonzero fraction means `|x| < 2^52`. ±inf and NaN fall through unchanged (`inf - inf`
+// is NaN and a NaN compare is false).
+fn __round_trunc(x: Float) -> Float = {
+  let nonneg = prim.fge(x, 0.0)
+  if nonneg then prim.ffloor(x) else prim.fceil(x)
 }
 
 fn float_round(x: Float) -> Float = {
-  let nonneg = prim.fge(x, 0.0)
-  let m = if nonneg then __round_pos(x) else __round_neg(x)
-  // copysign carries x's sign onto a zero magnitude: `-0.0 >= 0.0` is TRUE (IEEE),
-  // so round(-0.0) took the positive branch and returned +0.0 while native
-  // f64::round keeps -0.0 (fuzz A-67). Nonzero magnitudes already share x's sign.
+  let t = __round_trunc(x)
+  let diff = prim.fsub(x, t)
+  let frac = prim.fabs(diff)
+  let up = prim.fge(frac, 0.5)
+  let one = prim.fcopysign(1.0, x)
+  let m = if up then prim.fadd(t, one) else t
+  // copysign carries x's sign onto a zero magnitude: round(-0.0) and round(-0.4) are
+  // -0.0 like native f64::round (fuzz A-67, C-140). Nonzero magnitudes already share
+  // x's sign.
   prim.fcopysign(m, x)
 }
