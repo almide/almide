@@ -61,7 +61,7 @@ fn str(s: String) -> Value = _
 /// Compact JSON; NaN/inf print as null.
 // The Value's JSON text (C-060): a Float prints in its shortest form without
 // a trailing `.0`, and a NON-FINITE Float (NaN, ±inf) is `null` — JSON has no
-// spelling for it, and the text always parses back (#2499, C-361).
+// spelling for it, and the text always parses back (#2499, C-356).
 @intrinsic("almide_rt_value_stringify")
 fn stringify(v: Value) -> String = _
 

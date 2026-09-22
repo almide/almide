@@ -1,4 +1,4 @@
-// @contract: C-363, C-140
+// @contract: C-358, C-140
 // `float.round` is native `f64::round` exactly — round half AWAY from zero on
 // the true value — on every leg (#2477). The self-hosted body was
 // `floor(x + 0.5)`, and that sum is itself rounded: the largest double below

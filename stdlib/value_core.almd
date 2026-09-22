@@ -987,7 +987,7 @@ else {
 // ".0"-suffixed form. float.to_string IS `{}` plus a ".0" appended to
 // integral finite values, and `{}` itself never ends in ".0" (it prints the
 // shorter "X"), so stripping that suffix reproduces `{}` exactly. A
-// NON-FINITE float (NaN, ±inf) is the JSON `null` (#2499, C-361) — see the
+// NON-FINITE float (NaN, ±inf) is the JSON `null` (#2499, C-356) — see the
 // native `almide_rt_value_float_json` for the ruling.
 fn value_stringify(v: Value) -> String = {
   let h = prim.handle(v)

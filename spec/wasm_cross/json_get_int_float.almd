@@ -1,4 +1,4 @@
-// @contract: C-362
+// @contract: C-357
 // `json.get_int` is Int-only (#2476): a Float field is `none`, even an
 // integral one (`3.0`), never truncated — the same answer `value.as_int`
 // gives (err) and Codec Int decode gives. The

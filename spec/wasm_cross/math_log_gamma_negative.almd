@@ -1,4 +1,4 @@
-// @contract: C-363, C-051
+// @contract: C-358, C-051
 // `math.log_gamma` is `ln|Γ(x)|` on the whole real line, bit-identical on
 // every leg (#2493): below 0.5 the reflection formula
 // `ln|Γ(x)| = ln(π / |sin(πx)|) - ln Γ(1 - x)` carries the work to `1 - x`,
