@@ -9,7 +9,7 @@ impl<'a> Interpreter<'a> {
     /// The typed read-back behind `sync_block_return`, recursive through the
     /// carrier shells a body may have already built (`Option` / `Result` /
     /// tuples). `Ok(None)` = leave the value untouched.
-    fn sync_value(&self, v: &Value, ty: &Ty) -> Result<Option<Value>, String> {
+    pub(crate) fn sync_value(&self, v: &Value, ty: &Ty) -> Result<Option<Value>, String> {
         use almide_lang::types::constructor::TypeConstructorId as C;
         match (v, ty) {
             (Value::Option(Some(x)), Ty::Applied(C::Option, ts)) if ts.len() == 1 => Ok(self
