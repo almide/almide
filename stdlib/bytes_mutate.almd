@@ -220,8 +220,14 @@ fn bytes_set_f32_le(b: Bytes, pos: Int, val: Float) -> Unit = {
 }
 
 // bytes.copy_within — in-place overlap-safe byte move (memmove), borrow + store, no size change.
-// v0 `b.copy_within(s..e, d)` with usize-cast gating: s/d negative → huge → gate fails (no-op);
-// src_end clamped to len. Forward copy when dst<=s, backward when dst>s (so overlap is safe).
+// C-213: src_end clamps to len; the move happens only when the source range is non-empty AND the
+// destination window fits, so a negative src_start / dst is a no-op. The fit test SUBTRACTS
+// (`dst <= n - cnt`, the bytes_room rule of this file's set_* family): `dst + cnt <= n` wrapped
+// for a dst near i64::MAX and passed, and the wrapped address stored one byte before the payload
+// (#2474 — `copy_within(b, 0, 2, i64::MAX)` printed `[2, 2, 3, 4, 5, 6]` on this leg while native
+// and the structural leg left the buffer alone). cnt is in [1, n] once src_start >= 0 and
+// src_start < e <= n, so `n - cnt` cannot overflow. Forward copy when dst<=s, backward when dst>s
+// (so overlap is safe).
 fn __cw_fwd(base: Int, s: Int, d: Int, i: Int, n: Int) -> Int = if i >= n then 0
 else {
   prim.store8(base + d + i, prim.load8(base + s + i))
@@ -243,7 +249,7 @@ fn bytes_copy_within(b: Bytes, src_start: Int, src_end: Int, dst: Int) -> Unit =
   let e = if src_end >= 0 then (if src_end < n then src_end else n)
   else n
   let cnt = e - src_start
-  let _ = if src_start >= 0 then (if src_start < e then (if dst >= 0 then (if dst + cnt <= n then __cw_move(
+  let _ = if src_start >= 0 then (if src_start < e then (if dst >= 0 then (if dst <= n - cnt then __cw_move(
     base,
     src_start,
     dst,
@@ -256,8 +262,11 @@ fn bytes_copy_within(b: Bytes, src_start: Int, src_end: Int, dst: Int) -> Unit =
 }
 
 // bytes.copy_from — copy src[src_off..][..len] into dst[dst_off..], borrow both + store (fixed size).
-// v0 gates dst_off/src_off >= len → no-op (usize cast: negatives become huge → out of range), and
-// clamps len to the available space in BOTH buffers (a negative len → huge → clamps to that space).
+// C-342: a NEGATIVE (or zero) len, dst_off or src_off copies nothing — the family's negative = miss
+// rule — and an in-range call copies min(len, dst_tail, src_tail). The v0 transcription read a
+// negative len as "huge, clamp to the available space" and copied the whole run, which is exactly
+// what #1910 removed from native; this leg was never measured against that fixture's incumbent
+// route (found while closing #2474 in this file).
 //
 // SNAPSHOT SEMANTICS on a self-copy (#963): when dst and src are the SAME block
 // (dh == sh — the only way two Bytes can overlap; every block is its own
@@ -280,15 +289,15 @@ fn bytes_copy_from(dst: Bytes, src: Bytes, dst_off: Int, src_off: Int, len: Int)
   let sn = prim.load32(prim.handle(src) + 4)
   let dh = prim.handle(dst)
   let sh = prim.handle(src)
-  let _ = if dst_off >= 0 then (if dst_off < dn then (if src_off >= 0 then (if src_off < sn then {
+  let _ = if len > 0 then (if dst_off >= 0 then (if dst_off < dn then (if src_off >= 0 then (if src_off < sn then {
     let avail_d = dn - dst_off
     let avail_s = sn - src_off
     let avail = if avail_d < avail_s then avail_d else avail_s
-    let n = if len >= 0 then (if len < avail then len else avail)
-    else avail
+    let n = if len < avail then len else avail
     if dh == sh then __cw_move(dh + 12, src_off, dst_off, n)
     else __cf_copy(dh, sh, dst_off, src_off, 0, n)
   } else 0)
+  else 0)
   else 0)
   else 0)
   else 0
