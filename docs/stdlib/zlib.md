@@ -93,7 +93,7 @@ effect zlib.inflate(data: Bytes) -> Bytes
 // @since 0.20.0 or earlier
 effect zlib.gzip(data: Bytes) -> Bytes
 
-// Gzip member decoded; err on bad header or CRC.
+// Gzip member decoded; err on bad header, CRC or empty input.
 // @since 0.20.0 or earlier
 effect zlib.gunzip(data: Bytes) -> Bytes
 

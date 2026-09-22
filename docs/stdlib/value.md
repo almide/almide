@@ -157,7 +157,7 @@ value.pick(v: Value, keys: List[String]) -> Value
 // @since 0.6.0 or earlier
 value.str(s: String) -> Value
 
-// Compact JSON; NaN/inf print bare (invalid JSON).
+// Compact JSON; NaN/inf print as null.
 // @since 0.6.0 or earlier
 value.stringify(v: Value) -> String
 

@@ -383,11 +383,11 @@ float.to_uint16_checked(n: Float) -> Option[UInt16]
 // @since 0.15.0 or earlier
 float.to_uint32_checked(n: Float) -> Option[UInt32]
 
-// some iff n is an integer in 0..2^63-1.
+// some iff n is an integer in 0..2^64-1.
 // @since 0.15.0 or earlier
 float.to_uint64_checked(n: Float) -> Option[UInt64]
 
-// some if n is exact in Float32; NaN gives none.
+// some if n is exact in Float32; NaN and ±inf give none.
 // @since 0.15.0 or earlier
 float.to_float32_checked(n: Float) -> Option[Float32]
 

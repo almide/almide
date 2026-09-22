@@ -371,11 +371,11 @@ Alice
 // @since 0.5.0 or earlier
 json.parse(text: String) -> Result[Value, String]
 
-// Compact JSON; a Float 1.0 prints as 1.
+// Compact JSON; a Float 1.0 prints as 1, NaN/inf as null.
 // @since 0.5.0 or earlier
 json.stringify(v: Value) -> String
 
-// JSON with 2-space indent; [] and {} stay inline.
+// JSON with 2-space indent; [] and {} inline, NaN/inf null.
 // @since 0.5.0 or earlier
 json.stringify_pretty(j: Value) -> String
 
@@ -383,7 +383,7 @@ json.stringify_pretty(j: Value) -> String
 // @since 0.5.0 or earlier
 json.get_string(j: Value, key: String) -> Option[String]
 
-// Int at key; none if absent or non-numeric.
+// Int at key; none if absent or not an Int (a Float is never truncated).
 // @since 0.5.0 or earlier
 json.get_int(j: Value, key: String) -> Option[Int]
 
