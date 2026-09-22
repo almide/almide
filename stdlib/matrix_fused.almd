@@ -1,8 +1,10 @@
 // matrix_fused — SELF-HOSTED fused/aliased matrix kernels for v1, written at the
 // stdlib `Matrix` signature (pure compositions of the registered matrix.* self-
-// hosts — no prim floor here). Native-side these ARE delegations (matrix_p2.rs:
-// mul_scaled = scale(mul), the f32 family aliases the f64 ops), so composition is
-// the oracle. Each intermediate binds owned and drops at scope end.
+// hosts; the only prim floor is the shared abort a precondition takes).
+// Native-side these ARE delegations (matrix_p2.rs: mul_scaled = scale(mul), the
+// f32 family aliases the f64 ops), so composition is the oracle. Each
+// intermediate binds owned and drops at scope end.
+import prim
 fn matrix_mul_scaled(a: Matrix, s: Float, b: Matrix) -> Matrix = {
   let p = matrix.mul(a, b)
   matrix.scale(p, s)
@@ -83,11 +85,19 @@ fn matrix_pre_norm_linear(x: Matrix, gamma: List[Float], beta: List[Float], eps:
 // append_rows: native — an operand with no rows yields (a copy of) the
 // other; else base's rows then extra's, the width read off base's first row
 // (from_lists' own rule).
+// C-353: two non-empty operands must be the same WIDTH, and the abort is the
+// family's own line — the composition below would otherwise surface it as
+// `from_lists`' ragged-row abort, a different line from the one native prints
+// for the same call.
 fn matrix_append_rows(base: Matrix, extra: Matrix) -> Matrix = {
   let rb = matrix.rows(base)
   let re = matrix.rows(extra)
   if rb == 0 then extra
-  else if re == 0 then base else matrix.from_lists(matrix.to_lists(base) + matrix.to_lists(extra))
+  else if re == 0 then base
+  else {
+    if matrix.cols(base) != matrix.cols(extra) then prim.die(prim.handle("Error: matrix shape mismatch\n")) else ()
+    matrix.from_lists(matrix.to_lists(base) + matrix.to_lists(extra))
+  }
 }
 
 // linear_f32_row_no_bias: native (matrix_p2.rs) reads W's f32 rows straight
