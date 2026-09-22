@@ -188,7 +188,17 @@ almide test --update-snapshots x_test.almd  # スナップショットの受理(
 同名ファイルの並列実行や別ディレクトリの同名ファイルがパスを共有することはない（#1877）。
 ネイティブ fallback のビルドキャッシュは `$TMPDIR/almide-test/native/` に永続（同じく絶対パス鍵）。
 
-テスト: `tests/test_scratch_race_test.rs`
+この worker dir は**テストファイルの絶対パス 1 本につき 1 つ**で、それぞれが自分の `target/` を持つ。
+放置すると消えるものが無い（名前を変えたテスト、消した worktree、消えたブランチの分が残り続ける:
+2026-09-22 に 4,510 dir / 39 GB を実測）ので、`almide test` の開始時に**7 日間誰も使っていない
+worker dir を空にする**(#2504)。判定は「その dir 直下と `target/<profile>/` のファイルの mtime」
+— キャッシュヒットが実行するバイナリの mtime を更新する(#2500)ので、ビルドしていなくても
+「使った」dir は残る。掃引は 1 日 1 回（`native/.almide-evict-stamp`）、各 dir の
+`.almide-build.lock` を**待たずに**取り、取れなければ（他プロセスがビルド中）その dir は飛ばす。
+lockfile は残すので、dir は空ディレクトリとして残る（消えるのは中身＝容量）。
+`ALMIDE_KEEP_SCRATCH=1` のときは掃引しない。`almide clean` は年齢に関係なく全 worker dir を空にする。
+
+テスト: `tests/test_scratch_race_test.rs`, `tests/run_cache_recovery_test.rs`
 
 失敗の報告は**構造化ブロック**（`FAILED: <file>` に続けて `test:` / `at:` /
 `hint:` / `diff:` または `expected:` `found:`）。複数行文字列・リスト・レコードは
@@ -585,11 +595,12 @@ almide dep-path bindgen
 | インクリメンタルキャッシュ | `./.almide/cache/` |
 | コンパイルキャッシュ | `./target/compile/` |
 | native ビルドスクラッチ(#2500) | `ALMIDE_RUN_PROJECT_DIR`（既定 `<temp>/almide-run`）と `<temp>/almide-build-cdylib` |
+| `almide test` の worker dir(#2504) | `<temp>/almide-test/native/<key>/` を 1 つずつ |
 
 ビルドスクラッチは各 dir の `.almide-build.lock` を取ってから空にする（進行中のビルドは
 完了してから消える）。lockfile 自体は残す — 消すと、待っている builder と次の builder が別 inode を
-ロックして排他が破れる。空にした dir ごとに `Cleaned <path>` を stderr に 1 行出し、何も無ければ
-`No cache to clean`。
+ロックして排他が破れる。空にした dir ごとに `Cleaned <path>` を stderr に 1 行出し（worker dir は
+`Cleaned <native> (N test worker dir(s))` と 1 行にまとめる）、何も無ければ `No cache to clean`。
 
 ```bash
 almide clean
