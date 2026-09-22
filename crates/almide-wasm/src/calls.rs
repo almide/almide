@@ -463,20 +463,14 @@ impl Emitter<'_> {
                 // level slicing and int parsing, Result via ok()/err().
                 "datetime_parse_iso",
             ];
-            if !VERIFIED.contains(&impl_fn)
-                && !VERIFIED_SUM_BUILDERS.contains(&impl_fn)
-                && !crate::whitelist::SIZED_CONVERT_VERIFIED.contains(&impl_fn)
-                && !crate::whitelist::SIZED_CONVERT_SUM_BUILDERS.contains(&impl_fn)
-                && !crate::whitelist::SCALAR_TEXT_VERIFIED.contains(&impl_fn)
-                && !crate::whitelist::SCALAR_TEXT_SUM_BUILDERS.contains(&impl_fn)
-                && !crate::whitelist::MATH_VERIFIED.contains(&impl_fn)
-                && !crate::whitelist::CODEC_ENCODE_VERIFIED.contains(&impl_fn)
-                && !crate::whitelist::BYTES_FAMILY_VERIFIED.contains(&impl_fn)
-                && !crate::whitelist::BYTES_FAMILY_SUM.contains(&impl_fn)
-                && !crate::whitelist::HTTP_CLIENT_SUM.contains(&impl_fn)
-            {
-                return None;
-            }
+            // The local tiers first, then the audited families (whitelist.rs).
+            let exempt = if VERIFIED.contains(&impl_fn) {
+                false
+            } else if VERIFIED_SUM_BUILDERS.contains(&impl_fn) {
+                true
+            } else {
+                crate::whitelist::tier_of(impl_fn)?
+            };
             let i = self.table.impl_index.get(impl_fn).copied()?;
             // LAYOUT BOUNDARY: self-host impls encode the INCUMBENT's
             // block layout. Scalars, strings and List[scalar] match our
@@ -503,13 +497,7 @@ impl Emitter<'_> {
                     _ => false,
                 }
             };
-            if !VERIFIED_SUM_BUILDERS.contains(&impl_fn)
-                && !crate::whitelist::SIZED_CONVERT_SUM_BUILDERS.contains(&impl_fn)
-                && !crate::whitelist::SCALAR_TEXT_SUM_BUILDERS.contains(&impl_fn)
-                && !crate::whitelist::CODEC_ENCODE_VERIFIED.contains(&impl_fn)
-                && !crate::whitelist::BYTES_FAMILY_SUM.contains(&impl_fn)
-                && !crate::whitelist::HTTP_CLIENT_SUM.contains(&impl_fn)
-                && (info.params.iter().any(coupled) || info.ret.as_ref().is_some_and(coupled))
+            if !exempt && (info.params.iter().any(coupled) || info.ret.as_ref().is_some_and(coupled))
             {
                 return None;
             }

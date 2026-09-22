@@ -176,6 +176,11 @@ fn applied_builtin_of(
             }
             Some(SliceTy::Set(types.intern(e)))
         }
+        // `Matrix[Float32]` (the f32 preview family) and a spelled-out
+        // `Matrix[Float]`: native stores every dtype in the one f64
+        // AlmideMatrix (matrix_p2.rs's f32 fns delegate to the f64 ops),
+        // so the value IS this backend's flat f64 Matrix block.
+        (TypeConstructorId::Matrix, [Ty::Float | Ty::Float32 | Ty::Float64]) => Some(SliceTy::Matrix),
         _ => None,
     }
 }

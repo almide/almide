@@ -292,3 +292,46 @@ pub(crate) const SIZED_CONVERT_SUM_BUILDERS: &[&str] = &[
     "uint64_to_int64_checked", "uint64_to_int8_checked", "uint64_to_uint16_checked",
     "uint64_to_uint32_checked", "uint64_to_uint8_checked", "uint8_to_int8_checked",
 ];
+
+/// The matrix compositions (#1423 stage 4): stdlib/matrix_fused.almd is
+/// PRIM-FREE — every body is written at the stdlib `Matrix` signature and
+/// composes public `matrix.*` calls, each of which THIS emitter lowers as
+/// a native arm on its own flat layout (matrix.rs / matrix_elem.rs /
+/// matrix_prod.rs / matrix_shape.rs). No block is read or written by the
+/// body itself, so no incumbent layout can leak in. Native spells each of
+/// these as the same composition (matrix.rs: fused_gemm_bias_scale_gelu =
+/// gelu∘scale∘add∘mul, attention_weights = softmax∘scale∘mul, the f32
+/// family delegating to the f64 ops) or as its op-for-op equal (fma's
+/// `x*ka + y*kb` IS add(scale, scale): two rounded products, one rounded
+/// sum). Parity evidence: spec/wasm_cross/matrix_composition_family.almd.
+pub(crate) const MATRIX_COMPOSITIONS: &[&str] = &[
+    "matrix_mul_scaled", "matrix_attention_weights", "matrix_scaled_dot_product_attention",
+    "matrix_mul_f32", "matrix_mul_f32_scaled", "matrix_mul_f32_t", "matrix_mul_f32_t_scaled",
+    "matrix_zeros_f32", "matrix_ones_f32", "matrix_fma", "matrix_fma3",
+    "matrix_fused_gemm_bias_scale_gelu", "matrix_linear_row_gelu", "matrix_pre_norm_linear",
+    "matrix_append_rows", "matrix_linear_f32_row_no_bias",
+];
+
+/// Every admitted tier: its members and whether its bodies are exempt
+/// from the coupled-type proxy (the SUM tiers build their sums through
+/// language-level constructors this emitter lowers with its own layout).
+const TIERS: &[(&[&str], bool)] = &[
+    (SIZED_CONVERT_VERIFIED, false),
+    (SIZED_CONVERT_SUM_BUILDERS, true),
+    (SCALAR_TEXT_VERIFIED, false),
+    (SCALAR_TEXT_SUM_BUILDERS, true),
+    (MATH_VERIFIED, false),
+    (CODEC_ENCODE_VERIFIED, true),
+    (BYTES_FAMILY_VERIFIED, false),
+    (BYTES_FAMILY_SUM, true),
+    (HTTP_CLIENT_SUM, true),
+    (MATRIX_COMPOSITIONS, false),
+];
+
+/// The admission of a registry impl through the tiers above: `None` when
+/// no tier lists it, else `Some(exempt)` — exempt when ANY listing tier is.
+pub(crate) fn tier_of(impl_fn: &str) -> Option<bool> {
+    let mut hits = TIERS.iter().filter(|(members, _)| members.contains(&impl_fn)).peekable();
+    hits.peek()?;
+    Some(hits.any(|(_, exempt)| *exempt))
+}
