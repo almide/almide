@@ -1,17 +1,13 @@
 // env extern — Rust native implementations
 
+// argv[1..], verbatim. A `--` among the program's arguments is the PROGRAM's:
+// `almide run app.almd -- a` has already consumed its own separator (clap) by
+// the time the binary is exec'd, so this used to strip a second one — a built
+// binary run as `./p a -- b` answered ["b"] where both wasm legs answered
+// ["a", "--", "b"] (#2485). The wasm legs build the same list from WASI
+// args_get with argv[0] skipped (stdlib/env_args.almd).
 pub fn almide_rt_env_args() -> Vec<String> {
-    let args: Vec<String> = std::env::args().collect();
-    if args.len() > 1 {
-        // Skip binary name and everything before "--"
-        if let Some(pos) = args.iter().position(|a| a == "--") {
-            args[pos + 1..].to_vec()
-        } else {
-            args[1..].to_vec()
-        }
-    } else {
-        vec![]
-    }
+    std::env::args().skip(1).collect()
 }
 
 pub fn almide_rt_env_get(name: &str) -> Option<String> {
