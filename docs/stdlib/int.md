@@ -350,77 +350,220 @@ numeric-matrix gate in `almide docs-gen --check`.
 ## Signature index (72 functions)
 
 ```
+// Decimal digits, with - when negative.
 int.to_string(n: Int) -> String
+
+// Lowercase hex, no 0x; -1 gives 16 f digits.
 int.to_hex(n: Int) -> String
+
+// Decimal Int from trimmed s; err on junk or overflow.
 int.parse(s: String) -> Result[Int, String]
+
+// Hex, any case, 0x optional; err on junk or > 2^63-1.
 int.from_hex(s: String) -> Result[Int, String]
+
+// Nearest Float; may round when |n| > 2^53.
 int.to_float(n: Int) -> Float
+
+// Float whose IEEE-754 binary64 bits are bits.
 int.bits_to_float(bits: Int) -> Float
+
+// Low 32 bits read as binary32, widened to Float.
 int.bits_to_f32(bits: Int) -> Float
+
+// Magnitude of n; min_value wraps to itself.
 int.abs(n: Int) -> Int
+
+// Lesser of a and b.
 int.min(a: Int, b: Int) -> Int
+
+// Greater of a and b.
 int.max(a: Int, b: Int) -> Int
+
+// n limited to lo..hi; aborts when lo > hi.
 int.clamp(n: Int, lo: Int, hi: Int) -> Int
+
+// True when n % 2 == 0; exact for negatives.
 int.is_even(n: Int) -> Bool
+
+// True when n % 2 != 0; -3 counts as odd.
 int.is_odd(n: Int) -> Bool
+
+// Bitwise AND over all 64 bits.
 int.band(a: Int, b: Int) -> Int
+
+// Bitwise OR over all 64 bits.
 int.bor(a: Int, b: Int) -> Int
+
+// Bitwise XOR over all 64 bits.
 int.bxor(a: Int, b: Int) -> Int
+
+// Bitwise complement; equals -a - 1.
 int.bnot(a: Int) -> Int
+
+// a shifted left by n bits; n is taken mod 64.
 int.bshl(a: Int, n: Int) -> Int
+
+// Arithmetic (sign-filling) right shift; n mod 64.
 int.bshr(a: Int, n: Int) -> Int
+
+// Leading zero bits of the 64-bit word; 64 for 0.
 int.count_leading_zeros(n: Int) -> Int
+
+// Trailing zero bits; 64 for 0.
 int.count_trailing_zeros(n: Int) -> Int
+
+// Number of set bits; 64 for -1.
 int.pop_count(n: Int) -> Int
+
+// The 64 bits in reverse order; 1 gives min_value.
 int.bit_reverse(n: Int) -> Int
+
+// The 8 bytes in reverse order (endian flip).
 int.byte_swap(n: Int) -> Int
+
+// Bits needed to hold n; 0 for 0, 64 if negative.
 int.bit_width(n: Int) -> Int
+
+// Floor of log2(n); -1 when n <= 0.
 int.log2_floor(n: Int) -> Int
+
+// Ceiling of log2(n); 0 when n <= 1.
 int.log2_ceil(n: Int) -> Int
+
+// Least power of 2 >= n; 1 if n <= 1; min_value past 2^62.
 int.next_power_of_two(n: Int) -> Int
+
+// Greatest power of 2 <= n; 0 when n <= 0.
 int.prev_power_of_two(n: Int) -> Int
+
+// (a + b) mod 2^bits, non-negative when bits < 64.
 int.wrap_add(a: Int, b: Int, bits: Int) -> Int
+
+// (a * b) mod 2^bits, non-negative when bits < 64.
 int.wrap_mul(a: Int, b: Int, bits: Int) -> Int
+
+// Low bits of a rotated right by n; bits <= 0 aborts.
 int.rotate_right(a: Int, n: Int, bits: Int) -> Int
+
+// Low bits of a rotated left by n; bits <= 0 aborts.
 int.rotate_left(a: Int, n: Int, bits: Int) -> Int
+
+// Low 32 bits as unsigned; -1 becomes 4294967295.
 int.to_u32(a: Int) -> Int
+
+// Low 8 bits as unsigned; 300 becomes 44.
 int.to_u8(a: Int) -> Int
+
+// Wraps to 8 bits; 200 becomes -56.
 int.to_int8(n: Int) -> Int8
+
+// Wraps to 16 bits; 40000 becomes -25536.
 int.to_int16(n: Int) -> Int16
+
+// Wraps to 32 bits; 2^31 becomes -2^31.
 int.to_int32(n: Int) -> Int32
+
+// Wraps to 8 bits; -1 becomes 255.
 int.to_uint8(n: Int) -> UInt8
+
+// Wraps to 16 bits; -1 becomes 65535.
 int.to_uint16(n: Int) -> UInt16
+
+// Wraps to 32 bits; -1 becomes 2^32-1.
 int.to_uint32(n: Int) -> UInt32
+
+// Wraps to 64 bits; -1 becomes 2^64-1.
 int.to_uint64(n: Int) -> UInt64
+
+// Float32 value; may round when |n| > 2^24.
 int.to_float32(n: Int) -> Float32
+
+// Float64 value; may round when |n| > 2^53.
 int.to_float64(n: Int) -> Float64
+
+// Same value as Int64; always exact.
 int.to_int64(n: Int) -> Int64
+
+// Sign-extending widen; always exact.
 int.from_int8(n: Int8) -> Int
+
+// Sign-extending widen; always exact.
 int.from_int16(n: Int16) -> Int
+
+// Sign-extending widen; always exact.
 int.from_int32(n: Int32) -> Int
+
+// Same value as Int; always exact.
 int.from_int64(n: Int64) -> Int
+
+// Zero-extending widen; always exact.
 int.from_uint8(n: UInt8) -> Int
+
+// Zero-extending widen; always exact.
 int.from_uint16(n: UInt16) -> Int
+
+// Zero-extending widen; always exact.
 int.from_uint32(n: UInt32) -> Int
+
+// Reinterprets bits; values >= 2^63 go negative.
 int.from_uint64(n: UInt64) -> Int
+
+// some(n), or none outside -128..127.
 int.to_int8_checked(n: Int) -> Option[Int8]
+
+// some(n), or none outside -32768..32767.
 int.to_int16_checked(n: Int) -> Option[Int16]
+
+// some(n), or none outside -2^31..2^31-1.
 int.to_int32_checked(n: Int) -> Option[Int32]
+
+// some(n), or none outside 0..255.
 int.to_uint8_checked(n: Int) -> Option[UInt8]
+
+// some(n), or none outside 0..65535.
 int.to_uint16_checked(n: Int) -> Option[UInt16]
+
+// some(n), or none outside 0..2^32-1.
 int.to_uint32_checked(n: Int) -> Option[UInt32]
+
+// some(n), or none if n is negative.
 int.to_uint64_checked(n: Int) -> Option[UInt64]
+
+// some(f), or none if n fails the f32 round trip.
 int.to_float32_checked(n: Int) -> Option[Float32]
+
+// Clamps n to -128..127.
 int.to_int8_saturating(n: Int) -> Int8
+
+// Clamps n to -32768..32767.
 int.to_int16_saturating(n: Int) -> Int16
+
+// Clamps n to -2^31..2^31-1.
 int.to_int32_saturating(n: Int) -> Int32
+
+// Clamps n to 0..255.
 int.to_uint8_saturating(n: Int) -> UInt8
+
+// Clamps n to 0..65535.
 int.to_uint16_saturating(n: Int) -> UInt16
+
+// Clamps n to 0..2^32-1.
 int.to_uint32_saturating(n: Int) -> UInt32
+
+// Negative n clamps to 0.
 int.to_uint64_saturating(n: Int) -> UInt64
+
+// some(n), or none if n exceeds 2^63-1.
 int.from_uint64_checked(n: UInt64) -> Option[Int]
+
+// Clamps n to at most 2^63-1.
 int.from_uint64_saturating(n: UInt64) -> Int
+
+// Smallest Int: -2^63.
 int.min_value() -> Int
+
+// Largest Int: 2^63-1.
 int.max_value() -> Int
 ```
 
