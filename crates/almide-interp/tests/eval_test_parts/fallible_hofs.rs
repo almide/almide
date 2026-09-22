@@ -281,12 +281,20 @@ fn opaque_newtype_ctor_is_identity_on_its_payload() {
     assert_eq!((exit, out.as_str()), (0, "x true false 2 b\n3\n"), "stderr: {err}");
 }
 
-/// A Unit-returning in-place writer over a TEMPORARY receiver (#1849): the
-/// arguments evaluate in order, the temporary is mutated and dropped, and a
-/// temporary that aliases a live binding's `Rc` is mutated as a COW copy —
-/// the binding is untouched. A variable receiver keeps its write-back.
+/// A Unit-returning in-place writer over a `var` receiver (#1849, narrowed by
+/// #2466): the arguments evaluate in order, the receiver keeps its write-back,
+/// and a receiver bound from a call that aliases a live binding's `Rc` is
+/// mutated as a COW copy — the binding is untouched.
+///
+/// Until dialect epoch 5 the same shapes were written with a TEMPORARY receiver
+/// (`bytes.append_u8(bytes.new(2), 511)`, `bytes.fill(same(x), 9)`), which the
+/// checker admitted because the writers took a plain receiver. #2466 declared
+/// every writer's receiver `mut`, so a temporary — like a `let` — is E032 and
+/// cannot reach this interpreter at all (the rejection itself is pinned by
+/// tests/diagnostics/e032-bytes-writer-temporary). Each property the temporary
+/// form carried is kept here on the `var` form it must now be written in.
 #[test]
-fn inplace_writer_on_a_temporary_receiver_mutates_and_drops_it() {
+fn inplace_writer_on_a_var_receiver_writes_back_and_cows_an_alias() {
     let (exit, out, err) = run(
         "fn same(b: Bytes) -> Bytes = b\n\
          fn traced(v: Int) -> Int = {\n\
@@ -294,11 +302,13 @@ fn inplace_writer_on_a_temporary_receiver_mutates_and_drops_it() {
          \x20 v\n\
          }\n\
          fn main() -> Unit = {\n\
-         \x20 bytes.append_u8(bytes.new(2), 511)\n\
-         \x20 bytes.append_i16_be(bytes.from_list([traced(1)]), traced(2))\n\
+         \x20 var t = bytes.from_list([traced(1)])\n\
+         \x20 bytes.append_i16_be(t, traced(2))\n\
          \x20 let x = bytes.from_list([1, 2])\n\
-         \x20 bytes.append_u8(same(x), 7)\n\
-         \x20 bytes.fill(same(x), 9)\n\
+         \x20 var borrowed = same(x)\n\
+         \x20 bytes.append_u8(borrowed, 7)\n\
+         \x20 var borrowed2 = same(x)\n\
+         \x20 bytes.fill(borrowed2, 9)\n\
          \x20 println(\"${bytes.to_list(x)}\")\n\
          \x20 var v = bytes.new(0)\n\
          \x20 bytes.append_u8(v, 511)\n\
