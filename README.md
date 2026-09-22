@@ -191,18 +191,20 @@ build. Regenerate with `almide run tools/almide-gates/src/main.almd -- bench`; t
 <!-- wasm-runtime:generated:start — rendered from docs/benchmarks/wasm-runtime.txt by scripts/gen-readme-stats.sh; DO NOT EDIT between the markers -->
 | Benchmark (`almide bench`, verify-then-time, median of 5) | wasm/native ratio |
 |---|---:|
-| nbody | **2.69×** |
-| spectralnorm | **2.65×** |
-| binarytrees | **0.93×** |
-| treealloc | **0.41×** |
-| fft | **4.02×** |
-| strchurn | **1.15×** |
-| listbuild_append | **3.33×** |
-| listbuild_combinator | **3.79×** |
-| listbuild_prealloc | **3.54×** |
-| mapbuild | **1.16×** |
+| nbody | **2.27×** |
+| spectralnorm | **1.80×** |
+| binarytrees | **1.84×** |
+| treealloc | **1.48×** |
+| fasta | **1.74×** |
+| mandelbrot | **2.01×** |
+| fft | **4.61×** |
+| strchurn | **1.12×** |
+| listbuild_append | **3.69×** |
+| listbuild_combinator | **3.89×** |
+| listbuild_prealloc | **3.53×** |
+| mapbuild | **1.05×** |
 
-Embedded wasm host (Perceus RC in linear memory) against the native binary, same machine, same run. Cross-engine ratios do NOT cancel hardware (a 2-core CI runner measures nbody ~10x worse), so the stamped ratio verdict runs on the stamping machine class; CI gates the STATUS taxonomy below and judges the wasm leg by a same-runner A/B against the latest release binary (interleaved, min-of-runs, `ab_band` in the ledger — #2143) (`scripts/check-wasm-runtime-ratio.sh`). binarytrees runs its fan arms on the embedded host's thread pool, which is why wasm WINS there. The unmeasured corpus cells stay honest instead of estimated: 3 route to the incumbent artifact, 1 wall on the wasm build path, 0 exhaust the embedded heap (#1729) — each re-measured every gate run, so a cell that starts benching fails the gate until its row is promoted. Ledger: `docs/benchmarks/wasm-runtime.txt` (almide 0.62.0, 2026-09-08).
+Embedded wasm host (Perceus RC in linear memory) against the native binary, same machine, same run. Cross-engine ratios do NOT cancel hardware (a 2-core CI runner measures nbody ~10x worse), so the stamped ratio verdict runs on the stamping machine class; CI gates the STATUS taxonomy below and judges the wasm leg by a same-runner A/B against the latest release binary (interleaved, min-of-runs, `ab_band` in the ledger — #2143) (`scripts/check-wasm-runtime-ratio.sh`). binarytrees runs its fan arms on the embedded host's thread pool, which is why wasm WINS there. The unmeasured corpus cells stay honest instead of estimated: 1 route to the incumbent artifact, 1 wall on the wasm build path, 0 exhaust the embedded heap (#1729) — each re-measured every gate run, so a cell that starts benching fails the gate until its row is promoted. Ledger: `docs/benchmarks/wasm-runtime.txt` (almide 0.63.0 (dev), 2026-09-22).
 <!-- wasm-runtime:generated:end -->
 
 ## How It Works

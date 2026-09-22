@@ -22,22 +22,22 @@
 # same change); a measured row that stops benching fails as a regression.
 # ab_band is the A/B tolerance in percent (a policy line, not a measurement);
 # a fan row overrides it with `ab_band=NN` at the end of its row.
-version = almide 0.62.0
-date    = 2026-09-08
+version = almide 0.63.0 (dev)
+date    = 2026-09-22
 machine = arm64 Darwin (local stamp; ratios are the gated quantity)
 ab_band = 30
 
-nbody                 | measured         | 2.74  | 7.37 | 2.69
-spectralnorm          | measured         | 3.59  | 9.53 | 2.65
-binarytrees           | measured         | 6.98  | 6.48 | 0.93 ab_band=100
-treealloc             | measured         | 221.28 | 90.01 | 0.41
-fasta                 | routed-incumbent | 3.14  | -    | -
-fannkuchredux         | routed-incumbent | 3.38  | -    | -
-mandelbrot            | routed-incumbent | 6.47  | -    | -
-onebrc                | walled           | 4.35  | -    | -
-fft                   | measured         | 57.53 | 231.22 | 4.02
-strchurn              | measured         | 67.52 | 77.75 | 1.15
-listbuild_append      | measured         | 29.03 | 96.55 | 3.33
-listbuild_combinator  | measured         | 29.18 | 110.69 | 3.79
-listbuild_prealloc    | measured         | 29.15 | 103.20 | 3.54
-mapbuild              | measured         | 12.63 | 14.69 | 1.16
+nbody                 | measured         | 1.23  | 2.79 | 2.27
+spectralnorm          | measured         | 1.53  | 2.75 | 1.80
+binarytrees           | measured         | 1.60  | 2.94 | 1.84 ab_band=100
+treealloc             | measured         | 40.30 | 59.64 | 1.48
+fasta                 | measured         | 1.39  | 2.42 | 1.74
+fannkuchredux         | routed-incumbent | 1.40  | -    | -
+mandelbrot            | measured         | 2.43  | 4.89 | 2.01 ab_band=100
+onebrc                | walled           | 1.84  | -    | -
+fft                   | measured         | 40.15 | 185.14 | 4.61
+strchurn              | measured         | 53.14 | 59.71 | 1.12
+listbuild_append      | measured         | 21.21 | 78.30 | 3.69
+listbuild_combinator  | measured         | 20.97 | 81.61 | 3.89
+listbuild_prealloc    | measured         | 20.62 | 72.85 | 3.53
+mapbuild              | measured         | 5.13  | 5.40 | 1.05
