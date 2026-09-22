@@ -470,6 +470,14 @@ impl Emitter<'_> {
             // lower_arm_body normalizes every value arm to one credit.
             return !arms.is_empty();
         }
+        // An extraction (`expr!`) is owned exactly when ITS lowering
+        // released the carrier it read the payload out of (#2509,
+        // `release_ok_carrier`): the carrier's one credit on the payload
+        // moved to the value. Every other extraction borrows the payload
+        // from a carrier some other route releases, and stays borrowed.
+        if matches!(&e.kind, almide_ir::IrExprKind::Try { .. } | almide_ir::IrExprKind::Unwrap { .. }) {
+            return self.owned_call_marks.contains(&(e as *const almide_ir::IrExpr as usize));
+        }
         let almide_ir::IrExprKind::Call { target, .. } = &e.kind else {
             return false;
         };
