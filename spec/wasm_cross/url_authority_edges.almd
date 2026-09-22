@@ -1,4 +1,4 @@
-// @contract: C-366
+// @contract: C-361
 // url.parse validates the HOST, not the authority (#2490). `http://:8` used
 // to parse with `host = ""` because the empty-host check ran on the
 // authority `:8`, which is non-empty; the check now runs on the host after

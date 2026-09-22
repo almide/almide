@@ -1,4 +1,4 @@
-// @contract: C-365
+// @contract: C-360
 // datetime.parse_iso reads `YYYY-MM-DDTHH:MM:SS` followed by `Z`, `+HH:MM`,
 // `-HH:MM` or nothing, APPLIES the offset (the answer is the UTC instant),
 // and refuses an out-of-range field by name (#2489). Before this the parser

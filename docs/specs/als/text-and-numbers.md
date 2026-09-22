@@ -243,7 +243,7 @@ v0-wasm / 自己ホストの 3 バックエンドが同一の逐次 `string.repl
 ケープは存在しない（認識されない `%X` はそのまま素通り）。`%Y` の欄幅は
 `to_iso` と同じ**可変幅**である — 最低 4 桁、ゼロ埋め、負の年は符号が 1 桁を
 占める（`-292277022657`、`0000`）。固定 4 桁欄は、桁あふれの年で下位 4 桁だけを、
-負の年で非 ASCII バイトを書いていた。Contracts: C-128、C-364。
+負の年で非 ASCII バイトを書いていた。Contracts: C-128、C-359。
 
 ## ALS-T18 assert の abort 形（非 test 位置）
 
@@ -513,7 +513,7 @@ err の文字列は次のとおり（先に違反した欄が勝つ）:
 
 テスト: `spec/wasm_cross/datetime_pre_epoch.almd`、
 `spec/wasm_cross/datetime_parse_iso_strict.almd`、
-`spec/stdlib/datetime_test.almd`。Contracts: C-364、C-365。
+`spec/stdlib/datetime_test.almd`。Contracts: C-359、C-360。
 
 ## ALS-T27 url.parse の authority 規範
 
@@ -530,4 +530,4 @@ host として読まずに名指しで拒否する: userinfo は
 `url.parse: invalid host: <host>`。受理された URL は `to_string` で往復する。
 
 テスト: `spec/wasm_cross/url_authority_edges.almd`、
-`spec/stdlib/url_test.almd`。Contracts: C-366。
+`spec/stdlib/url_test.almd`。Contracts: C-361。
