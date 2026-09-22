@@ -107,7 +107,7 @@ MSR ハーネスを名指しで移植済み: 付録 A-5）。
 
 | 指標 | 値 | 鮮度 | 問題 |
 |---|---|---|---|
-| Dojo MSR | 100%（30/30、Sonnet 4.6） | **2026-04-12** | #1963 P-critical: 5 ヶ月古く、しかも saturate |
+| Dojo MSR | 65%（25/38、Llama 3.3 70B）・44%（17/38、Llama 3.1 8B） | 2026-09-22 | 両走行とも harness が `comparable` と刻印（全 38 タスクがモデルに到達＝率は点であって区間ではない）、seed `20260922`・temperature 0 固定を manifest が実測値として記録（`almide-dojo@8af34bc`、CI・鍵不要）。Sonnet 行は「CI に Anthropic 鍵を置かない」裁定により手動計測で、今は無い |
 | MiniGit 同一モデル | 20/20、233 LOC（5 言語中最小）、**573 s / $3.19** | 2026-07-15 | Rust 297 s / $1.45、Ruby 73 s / $0.36 — **8.9× 高く 7.8× 遅い** |
 | 近隣の反応 | vibe が MSR ハーネスを名指しで移植 | 2026-09 | 指標を独占していない。土俵は今が作り時 |
 | 星 | almide 34 · vibe 35 · aver 60 · wado 116 · jacquard 119 · hexa 196 · vera 413 · moonbit/core 1,205 · gleam 21,907 | 2026-09-13 | カテゴリ最下位 |
