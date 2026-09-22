@@ -124,30 +124,39 @@ effect fn main() -> Unit = {
 
 ```
 // Wall-clock seconds since the Unix epoch.
+// @since 0.5.0 or earlier
 effect env.unix_timestamp() -> Int
 
 // Program arguments, argv[0] excluded.
+// @since 0.5.0 or earlier
 effect env.args() -> List[String]
 
 // Value of name, or none if unset.
+// @since 0.5.0 or earlier
 effect env.get(name: String) -> Option[String]
 
 // Sets name for this process and later spawns.
+// @since 0.5.0 or earlier
 effect env.set(name: String, value: String) -> Unit
 
 // Absolute current directory; err if unreadable.
+// @since 0.5.0 or earlier
 effect env.cwd() -> String
 
 // Wall-clock ms since the Unix epoch.
+// @since 0.5.0 or earlier
 effect env.millis() -> Int
 
 // Blocks ms milliseconds; a negative ms hangs.
+// @since 0.5.0 or earlier
 effect env.sleep_ms(ms: Int) -> Unit
 
 // Host temp dir; may end with /.
+// @since 0.5.0 or earlier
 effect env.temp_dir() -> String
 
 // Host OS: macos, linux, windows or unknown.
+// @since 0.5.0 or earlier
 env.os() -> String
 ```
 

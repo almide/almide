@@ -188,27 +188,35 @@ flags other than `(?m)`.
 
 ```
 // pat matches somewhere in s (unanchored).
+// @since 0.6.0 or earlier
 regex.is_match(pat: String, s: String) -> Bool
 
 // pat matches the whole of s.
+// @since 0.6.0 or earlier
 regex.full_match(pat: String, s: String) -> Bool
 
 // Leftmost match of pat in s, or none.
+// @since 0.5.0 or earlier
 regex.find(pat: String, s: String) -> Option[String]
 
 // All non-overlapping matches, in order.
+// @since 0.5.0 or earlier
 regex.find_all(pat: String, s: String) -> List[String]
 
 // All matches replaced by literal rep (no $1).
+// @since 0.5.0 or earlier
 regex.replace(pat: String, s: String, rep: String) -> String
 
 // First match replaced by literal rep.
+// @since 0.5.0 or earlier
 regex.replace_first(pat: String, s: String, rep: String) -> String
 
 // Text between matches; [s] if no match.
+// @since 0.5.0 or earlier
 regex.split(pat: String, s: String) -> List[String]
 
 // [whole, group1, ...] of first match, or none.
+// @since 0.5.0 or earlier
 regex.captures(pat: String, s: String) -> Option[List[String]]
 ```
 

@@ -127,33 +127,43 @@ every target (contract C-336).
 
 ```
 // Fails unless f panics, message containing expected.
+// @since 0.6.0 or earlier
 testing.assert_throws(f: () -> Unit, expected: String) -> Unit
 
 // Fails unless needle is in haystack; "" passes.
+// @since 0.6.0 or earlier
 testing.assert_contains(haystack: String, needle: String) -> Unit
 
 // Fails unless abs(a - b) < tolerance (strict).
+// @since 0.6.0 or earlier
 testing.assert_approx(a: Float, b: Float, tolerance: Float) -> Unit
 
 // Fails unless a > b; equal fails.
+// @since 0.6.0 or earlier
 testing.assert_gt(a: Int, b: Int) -> Unit
 
 // Fails unless a < b; equal fails.
+// @since 0.6.0 or earlier
 testing.assert_lt(a: Int, b: Int) -> Unit
 
 // Fails when opt is none.
+// @since 0.6.0 or earlier
 testing.assert_some(opt: Option[A]) -> Unit
 
 // Fails when result is an err.
+// @since 0.6.0 or earlier
 testing.assert_ok(result: Result[A, B]) -> Unit
 
 // Fails when opt is some.
+// @since 0.54.0
 testing.assert_none(opt: Option[A]) -> Unit
 
 // Fails when result is ok.
+// @since 0.54.0
 testing.assert_err(result: Result[A, B]) -> Unit
 
 // Fails unless actual == expected; --update-snapshots rewrites.
+// @since 0.62.0
 testing.assert_snapshot(actual: String, expected: String) -> Unit
 ```
 

@@ -84,15 +84,19 @@ needed.
 
 ```
 // 32-bit FNV-1a of s's UTF-8; non-negative Int.
+// @since 0.58.0 or earlier
 hash.fnv1a32(s: String) -> Int
 
 // 32-bit FNV-1a of b, in 0..4294967295.
+// @since 0.58.0 or earlier
 hash.fnv1a32_bytes(b: Bytes) -> Int
 
 // 32-byte SHA-256 digest of b.
+// @since 0.2.2 or earlier
 hash.sha256(b: Bytes) -> Bytes
 
 // SHA-256 of s's UTF-8, 64 lowercase hex chars.
+// @since 0.58.0 or earlier
 hash.sha256_hex(s: String) -> String
 ```
 
