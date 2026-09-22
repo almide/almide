@@ -2182,6 +2182,10 @@ jobs:
           cp .codopsyrc.json crates/almide-wasm/ 2>/dev/null || true
           /tmp/codopsy-bin/codopsy analyze crates/almide-wasm 2>&1 | tee /tmp/codopsy.out
           sed 's/\x1b\[[0-9;]*m//g' /tmp/codopsy.out | grep -E "Quality Score:" | grep -qE "\((9[0-9]|100)/100\)" || { echo "::error::codopsy below A"; exit 1; }
+          # #2152: the independent certificate verifier is held to A too.
+          cp .codopsyrc.json crates/almide-verify/ 2>/dev/null || true
+          /tmp/codopsy-bin/codopsy analyze crates/almide-verify 2>&1 | tee /tmp/codopsy-verify.out
+          sed 's/\x1b\[[0-9;]*m//g' /tmp/codopsy-verify.out | grep -E "Quality Score:" | grep -qE "\((9[0-9]|100)/100\)" || { echo "::error::codopsy below A (crates/almide-verify)"; exit 1; }
       - name: file discipline (800-line cap over the commissioned backend)
         run: bash scripts/check-file-discipline.sh
 
