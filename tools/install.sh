@@ -94,9 +94,22 @@ mkdir -p "$INSTALL_DIR"
 cp "almide-${os}-${arch}/almide" "${INSTALL_DIR}/almide"
 chmod +x "${INSTALL_DIR}/almide"
 
+# The independent certificate verifier (#2152) goes NEXT TO almide:
+# `almide verify` execs it from there and has no built-in fallback. Archives
+# older than the verifier do not carry it; say so instead of failing.
+if [ -f "almide-${os}-${arch}/almide-verify" ]; then
+  cp "almide-${os}-${arch}/almide-verify" "${INSTALL_DIR}/almide-verify"
+  chmod +x "${INSTALL_DIR}/almide-verify"
+else
+  echo "note: this release predates almide-verify; \`almide verify\` will report it missing" >&2
+fi
+
 echo ""
 echo "Installed almide to ${INSTALL_DIR}/almide"
 "${INSTALL_DIR}/almide" --version
+if [ -x "${INSTALL_DIR}/almide-verify" ]; then
+  "${INSTALL_DIR}/almide-verify" --version
+fi
 
 # --- PATH check ---
 
