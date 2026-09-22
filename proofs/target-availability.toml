@@ -117,6 +117,13 @@ schema = 3
 # makes both no-ops on every leg, exactly as native and bytes.heap_save
 # already are) and leave every leg. Parity evidence:
 # spec/wasm_cross/inplace_clear_family.almd, spec/wasm_cross/mem_checkpoint.almd.
+# Same day (#2465): the incumbent's twin follows — `rewrite_clear` (the
+# `list.clear` rebind) now covers string / bytes and a record-field
+# receiver for all four, so the forced incumbent and the shapes the router
+# still sends there agree with native; the shared-block `string_clear` /
+# `bytes_clear` bodies stay as rows but are not reached from a var or field
+# receiver. Evidence: spec/wasm_cross/inplace_clear_alias.almd +
+# tests/incumbent_clear_alias_test.rs (native == structural == incumbent).
 # Same day: 50 -> 48. fs.stat and fs.glob cross the embedded host on the
 # structural leg (ops 38 / 39 — the four FileStat fields as i64s, the
 # C-228 segment-wise glob transcribed into the host), the fs.walk shape.

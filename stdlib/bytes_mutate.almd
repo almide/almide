@@ -176,6 +176,11 @@ fn bytes_fill(b: Bytes, val: Int) -> Unit = {
 }
 
 // clear: truncate to length 0 (the cap/data are untouched, like Vec::clear).
+// NOT REACHED for a var or record-field receiver on either wasm leg (#2465): this stores into
+// the block the receiver SHARES with every alias bound before the clear (a `let bb = b` holder,
+// the caller behind a `mut` parameter), so the alias observed the clear. Both legs lower
+// `bytes.clear(b)` as a var write-back of a fresh empty block instead (the structural arm
+// `lower_bytes_clear`, the incumbent's `rewrite_clear` to `bytes.new(0)`), the C-033 discipline.
 fn bytes_clear(b: Bytes) -> Unit = prim.store32(prim.handle(b) + 4, 0)
 
 // ── f64 (store the 8 IEEE bits; prim.fbits gives the i64 bit pattern) ──
