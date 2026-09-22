@@ -259,6 +259,10 @@ The Perceus proof above proves one compiler pass, once. v1 generalizes that prin
 <!-- counts:generated:end -->
 <!-- stats:generated:end -->
 
+<!-- mutation-score:generated:start (as of 2026-09-22) — stamped from proofs/mutation-score.toml by scripts/gen-mutation-score.sh; re-measured by every mutation-sweep run, refreshed only by `--from-run`; DO NOT EDIT between the markers -->
+**Mutation score** — 41/41 mutants caught (100.0 %), 0 survived, 0 stale: the full release-shape net sweep of `ci/mutations/` ([`scripts/check-mutation-gate.sh`](./scripts/check-mutation-gate.sh)), stamped 2026-09-22 from mutation-sweep run [35650396971](https://github.com/almide/almide/actions/runs/35650396971) at `3b02f7dc4`.
+<!-- mutation-score:generated:end -->
+
 ## Ecosystem and documentation
 
 - [almide-grammar](https://github.com/almide/almide-grammar) — the single source of truth for syntax (keywords, operators, precedence, TextMate scopes), written in Almide; the compiler generates its lexer keyword table from it at build time, so compiler and tooling cannot drift

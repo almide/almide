@@ -49,6 +49,7 @@ Use `almide explain <code>` to read these from the CLI.
 | [E076](E076.md) | `@bounded`: effects bounded to standard output (ALS-B9) |
 | [E077](E077.md) | `@bounded`: no Float arithmetic, provisional (ALS-B10) |
 | [E078](E078.md) | `@bounded`: no early exit inside a counted loop (ALS-B11) |
+| [E085](E085.md) | `@intrinsic` / `@wasm_intrinsic` outside the stdlib — intrinsics live in the stdlib; wrap in an effect fn |
 | [E420](E420.md) | Function visibility violation (placeholder code, renumber candidate) |
 
 Retired codes: **E039** (the result.collect/collect_map deprecation window — the fns are removed, `result.partition` is the substance) and **E040** (the json.*/value.* alias deprecation window) each fired

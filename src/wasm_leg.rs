@@ -350,7 +350,13 @@ pub fn infer_module_capturing(
 ) {
     let Some((path, text)) = sources.get(name) else {
         // Bundled stdlib: compiled in and CI-gated, no user file to blame.
+        // The flag is the module's ORIGIN for E085 (its `@intrinsic`s are
+        // the runtime boundary, not a user declaration) — the entry file's
+        // path is still in `source_file` and must not be judged.
+        let saved_bundled = checker.in_bundled_module;
+        checker.in_bundled_module = true;
         checker.infer_module(mod_prog, name);
+        checker.in_bundled_module = saved_bundled;
         return;
     };
     let saved_file = checker.source_file.clone();

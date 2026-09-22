@@ -29,6 +29,7 @@ mod solving;
 mod diagnostics;
 mod deprecation_warn;
 mod exit_literal;
+mod intrinsic_authority;
 mod exhaustiveness;
 
 use almide_lang::ast;
@@ -82,6 +83,11 @@ pub struct Checker {
     pub diagnostics: Vec<Diagnostic>,
     pub source_file: Option<String>,
     pub source_text: Option<String>,
+    /// True while a BUNDLED stdlib module (compiled into the binary, no
+    /// source path) is under `infer_module`. The module driver sets it; E085
+    /// (`@intrinsic` outside the stdlib) reads it as the origin of a source
+    /// that has no path to judge by.
+    pub in_bundled_module: bool,
     /// #567 `--profile critical`: the bounded profile (ALS §B) applied to
     /// EVERY fn of the program under inference — no `@bounded` attribute
     /// needed — with capabilities starting deny-all. Set by the check CLI
@@ -521,6 +527,7 @@ impl Checker {
             env, type_map: crate::types::TypeMap::new(),
             diagnostics: Vec::new(),
             source_file: None, source_text: None,
+            in_bundled_module: false,
             profile_critical: false,
             critical_allow: Vec::new(),
             current_span: None,

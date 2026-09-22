@@ -303,9 +303,14 @@ Attribute names with semantic meaning today:
   `stdlib/<module>.almd` files during the Stdlib Declarative
   Unification arc. テスト: `spec/stdlib/int_bundled_inline_rust_test.almd`.
 
-Other attribute names (`@pure`, `@schedule`, `@rewrite`,
-`@wasm_intrinsic`) parse without error and are preserved in the AST,
-but carry no semantic behavior yet. They are reserved for later
+`@intrinsic("almide_rt_…")` and `@wasm_intrinsic` are **stdlib only** by
+authority, not just by convention (#2152): the checker accepts them in
+sources under `stdlib/` or `runtime/` and in the bundled stdlib copy, and
+rejects them anywhere else with E085 ("intrinsics live in the stdlib; wrap
+in an effect fn"). テスト: `tests/diagnostics/e085-intrinsic-outside-stdlib/`.
+
+Other attribute names (`@pure`, `@schedule`, `@rewrite`) parse without
+error and are preserved in the AST, but carry no semantic behavior yet. They are reserved for later
 sub-phases of the Stdlib Declarative Unification and MLIR Backend
 arcs (see `docs/roadmap/done/stdlib-declarative-unification.md` and
 `docs/roadmap/on-hold/mlir-backend-adoption.md`). Writing them in user
