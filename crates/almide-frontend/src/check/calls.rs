@@ -949,7 +949,7 @@ impl Checker {
                     if !self.env.mutable_vars.contains(&sym(name)) {
                         self.emit(super::err(
                             format!("cannot pass immutable binding '{}' to `mut` parameter of {}()", name, fn_name),
-                            format!("Declare '{}' with `var` instead of `let` to allow mutation", name),
+                            self.immutable_mut_arg_hint(name),
                             format!("call to {}()", fn_name),
                         ).with_code("E032"));
                     }
@@ -961,7 +961,7 @@ impl Checker {
                         Some(root) => {
                             self.emit(super::err(
                                 format!("cannot mutate a field of immutable binding '{}' via `mut` parameter of {}()", root, fn_name),
-                                format!("Declare '{}' with `var` instead of `let`", root),
+                                self.immutable_mut_arg_hint(root),
                                 format!("call to {}()", fn_name),
                             ).with_code("E032"));
                         }
@@ -982,6 +982,19 @@ impl Checker {
                     ).with_code("E032"));
                 }
             }
+        }
+    }
+    /// The E032 hint for an immutable binding passed (itself, or a field of it) to a `mut` parameter. There are two fixes and the hint names both, leading with the one that fits the binding: a LOCAL becomes `var`; a PARAMETER becomes `mut name: T`, so the write reaches the caller's value and the caller passes a `var`. The parameter case is the helper that fills its caller's buffer (#2466): a hint naming only `var` sent the writer to a local copy, whose write the caller never sees.
+    fn immutable_mut_arg_hint(&self, name: &str) -> String {
+        if self.env.param_vars.contains(&sym(name)) {
+            let ty = self.env.lookup_var(name).map(|t| t.display()).unwrap_or_else(|| "T".to_string());
+            format!(
+                "'{name}' is a parameter, and parameters are immutable: declare it `mut {name}: {ty}` so the write reaches the caller's value (the caller then passes a `var`), or copy it into a local `var` if the caller must not see the write"
+            )
+        } else {
+            format!(
+                "Declare '{name}' with `var` instead of `let` to allow mutation (a helper that writes its caller's value takes it as a `mut` parameter instead)"
+            )
         }
     }
     /// Root identifier of a place expression (member/tuple-index chain), or None if it doesn't bottom out at a plain identifier (i.e. a temporary).

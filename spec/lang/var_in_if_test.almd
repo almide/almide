@@ -3,12 +3,12 @@ import bytes
 fn mg(m: Bytes, off: Int) -> Float = bytes.read_f32_le(m, off)
 
 effect fn main() -> Unit = {
-  let jm = bytes.new(64)
+  var jm = bytes.new(64)
   bytes.set_f32_le(jm, 0, 1.0)
   bytes.set_f32_le(jm, 20, 1.0)
   bytes.set_f32_le(jm, 40, 1.0)
   bytes.set_f32_le(jm, 60, 1.0)
-  let verts = bytes.new(44)
+  var verts = bytes.new(44)
   bytes.set_f32_le(verts, 0, 3.0)
   // px
   bytes.set_f32_le(verts, 4, 4.0)

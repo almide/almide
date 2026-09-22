@@ -1,0 +1,12 @@
+// E032: a helper writes into a buffer it received as a plain parameter (#2466).
+// Parameters are immutable, so the write needs a `mut` parameter, which is what
+// carries it back to the caller. Before #2466 this compiled, and the targets
+// disagreed about whether the caller's buffer changed: native wrote through,
+// wasm did not.
+fn zero(b: Bytes) -> Unit = bytes.set_u8(b, 0, 0)
+
+fn main() -> Unit = {
+  var b = bytes.from_list([1, 2])
+  zero(b)
+  println(int.to_string(bytes.get_or(b, 0, 9)))
+}

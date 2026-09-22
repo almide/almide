@@ -1,0 +1,5 @@
+fn main() -> Unit = {
+  var b = bytes.new(4)
+  bytes.fill(b, 7)
+  println("${bytes.to_list(b)}")
+}

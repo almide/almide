@@ -1,28 +1,31 @@
 // @contract: C-132
-// A callee's byte writes through a PLAIN (non-`mut`) `Bytes` parameter are
-// visible to the caller — the `mut`-parameter promise reached by a different
-// route. The byte-writer family (`set_*` / `append_*` / `write_*`) is
-// `@intrinsic`s whose mutation lives in the native `&mut Vec<u8>` signature, so
-// the `.almd` declaration carries no `mut` marker even though the effect is the
-// same one C-132 pins for declared `mut` params.
+// A callee's byte writes through a `mut` `Bytes` parameter are visible to the
+// caller. The byte-writer family (`set_*` / `append_*` / `write_*`) is
+// `@intrinsic`s whose mutation lives in the native `&mut Vec<u8>` signature,
+// and since #2466 the `.almd` declaration says so (`fn set_u8(mut b: Bytes,
+// ...)`): a helper that writes a caller's buffer declares its parameter `mut`,
+// and the caller passes a `var`. Before #2466 the parameter could be plain, the
+// checker accepted it, and native wrote through while wasm dropped the write for
+// a `let` caller.
 //
-// Both backends always agreed here; the INTERPRETER did not (#1436). Its
-// copy-out fired only for `param.is_mut`, so a byte write inside a callee died
-// at the frame boundary and the third judge voted the UNMODIFIED buffer —
-// reported by the first scheduled both-arch fuzz night (run 31861833115, seed
-// 509789329843 index 150) as a false `both targets disagree with reference
-// interpreter`. This fixture is the pin that keeps all three legs together.
-fn fill_f32(b: Bytes) -> Unit = {
+// Both backends always agreed on the write-back; the INTERPRETER did not
+// (#1436). Its copy-out fired only for `param.is_mut`, so a byte write inside a
+// callee died at the frame boundary and the third judge voted the UNMODIFIED
+// buffer — reported by the first scheduled both-arch fuzz night (run
+// 31861833115, seed 509789329843 index 150) as a false `both targets disagree
+// with reference interpreter`. This fixture is the pin that keeps all three legs
+// together.
+fn fill_f32(mut b: Bytes) -> Unit = {
   bytes.set_f32_le(b, 4, 99.0)
 }
 
-fn fill_u8(b: Bytes) -> Unit = {
+fn fill_u8(mut b: Bytes) -> Unit = {
   bytes.set_u8(b, 0, 7)
 }
 
 // The callee observes its own write too — the effect is live inside the frame,
 // not only after the copy-out.
-fn fill_and_read(b: Bytes) -> Float = {
+fn fill_and_read(mut b: Bytes) -> Float = {
   bytes.set_f32_le(b, 8, 5.5)
   bytes.read_f32_le(b, 8)
 }
@@ -36,9 +39,9 @@ fn main() -> Unit = {
   println("u8=" + int.to_string(bytes.read_u8(b, 0)))
   let inside = fill_and_read(b)
   println("inside=" + float.to_string(inside) + " outside=" + float.to_string(bytes.read_f32_le(b, 8)))
-  // A TEMPORARY argument has no caller slot to write back into — legal for a
-  // plain param (E032 only forbids it for `mut`), and nothing downstream can
-  // observe the buffer, so the program is well defined and simply proceeds.
-  fill_f32(bytes.new(8))
+  // A buffer the caller does not need afterwards still goes through a `var`:
+  // a temporary argument to a `mut` parameter is E032.
+  var scratch = bytes.new(8)
+  fill_f32(scratch)
   println("temp_ok=yes")
 }

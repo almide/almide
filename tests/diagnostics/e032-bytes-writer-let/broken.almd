@@ -1,0 +1,9 @@
+// E032: a bytes writer on a `let` binding (#2466). The in-place writers
+// (`append_*`, `set_*`, `write_*`, `fill`, `clear`, `copy_from`) declare their
+// receiver `mut`, like `bytes.push` and `list.push`, so the buffer must be a
+// `var`. Before #2466 this compiled, and the write reached the `let` on native.
+fn main() -> Unit = {
+  let b = bytes.new(4)
+  bytes.fill(b, 7)
+  println("${bytes.to_list(b)}")
+}
