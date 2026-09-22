@@ -75,6 +75,7 @@ dependencies = [
 name = "almide-mir"
 version = "0.1.0"
 dependencies = [
+ "almide-base",
  "almide-driver",
  "almide-frontend",
  "almide-ir",
