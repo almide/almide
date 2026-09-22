@@ -92,17 +92,40 @@ effect fn serve() -> Unit = {
 ## Signature index (12 functions)
 
 ```
+// Connected stream handle; err if refused.
 effect net.tcp_connect(host: String, port: Int) -> Int
+
+// Up to len bytes; empty once the peer closed.
 effect net.tcp_read(stream: Int, len: Int) -> Bytes
+
+// Sends all of data, flushed; err if closed.
 effect net.tcp_write(stream: Int, data: Bytes) -> Unit
+
+// Exactly len bytes; err on early EOF.
 effect net.tcp_read_exact(stream: Int, len: Int) -> Bytes
+
+// Shuts down the stream; twice is ok.
 effect net.tcp_close(stream: Int) -> Unit
+
+// False after tcp_close; a peer close is not seen.
 net.tcp_is_open(stream: Int) -> Bool
+
+// Up to len bytes; err on timeout or 0 ms.
 effect net.tcp_read_timeout(stream: Int, len: Int, timeout_ms: Int) -> Bytes
+
+// Sets read/write timeout; <= 0 clears it.
 effect net.tcp_set_timeout(stream: Int, timeout_ms: Int) -> Unit
+
+// Bytes readable now, capped at 65536; 0 if none.
 effect net.tcp_available(stream: Int) -> Int
+
+// Listener bound to host:port; err if in use.
 effect net.tcp_listen(host: String, port: Int) -> Int
+
+// Blocks for the next client; its stream handle.
 effect net.tcp_accept(listener: Int) -> Int
+
+// Stops listening; closing twice is ok.
 effect net.tcp_close_listener(listener: Int) -> Unit
 ```
 

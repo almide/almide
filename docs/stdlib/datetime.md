@@ -322,27 +322,70 @@ true
 ## Signature index (22 functions)
 
 ```
+// ts + n * 86400; no DST or calendar logic.
 datetime.add_days(ts: Int, n: Int) -> Int
+
+// ts + n * 3600; n may be negative.
 datetime.add_hours(ts: Int, n: Int) -> Int
+
+// ts + n * 60; n may be negative.
 datetime.add_minutes(ts: Int, n: Int) -> Int
+
+// ts + n; n may be negative.
 datetime.add_seconds(ts: Int, n: Int) -> Int
+
+// Calendar day 1..31 (UTC).
 datetime.day(ts: Int) -> Int
+
+// a - b; positive when a is later.
 datetime.diff_seconds(a: Int, b: Int) -> Int
+
+// Replaces %Y %m %d %H %M %S (UTC); no %% escape.
 datetime.format(ts: Int, pattern: String) -> String
+
+// UTC epoch secs; out-of-range fields roll over.
 datetime.from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Int
+
+// Identity: seconds are already a timestamp.
 datetime.from_unix(seconds: Int) -> Int
+
+// UTC hour of day, 0..23.
 datetime.hour(ts: Int) -> Int
+
+// a > b; false when equal.
 datetime.is_after(a: Int, b: Int) -> Bool
+
+// a < b; false when equal.
 datetime.is_before(a: Int, b: Int) -> Bool
+
+// UTC minute, 0..59.
 datetime.minute(ts: Int) -> Int
+
+// UTC month, 1..12.
 datetime.month(ts: Int) -> Int
+
+// Wall-clock Unix seconds (not monotonic).
 effect datetime.now() -> Int
+
+// Monotonic ns since first call; compare differences.
 effect datetime.monotonic_ns() -> Int
+
+// Epoch secs of YYYY-MM-DDTHH:MM:SSZ; fractions err.
 datetime.parse_iso(s: String) -> Result[Int, String]
+
+// UTC second, 0..59.
 datetime.second(ts: Int) -> Int
+
+// YYYY-MM-DDTHH:MM:SSZ in UTC.
 datetime.to_iso(ts: Int) -> String
+
+// Identity: a timestamp is already Unix seconds.
 datetime.to_unix(ts: Int) -> Int
+
+// English day name in UTC; 0 is Thursday.
 datetime.weekday(ts: Int) -> String
+
+// Calendar year in UTC.
 datetime.year(ts: Int) -> Int
 ```
 
