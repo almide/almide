@@ -38,8 +38,14 @@ pub fn almide_rt_env_millis() -> i64 {
         .as_millis() as i64
 }
 
+// A negative duration sleeps 0 ms (#2486): `ms as u64` made -1 into u64::MAX
+// milliseconds, so the native leg never returned where every wasm host clamps
+// the count at 0 (crates/almide-wasm/src/host_env.rs, the embedded host's op 36,
+// the stock-p1 shim). `process.sleep` has always clamped the same way. A
+// deadline computed as `deadline - now` goes negative once it has passed, and
+// "already late" means "do not wait", not "wait forever" or abort.
 pub fn almide_rt_env_sleep_ms(ms: i64) {
-    std::thread::sleep(std::time::Duration::from_millis(ms as u64));
+    std::thread::sleep(std::time::Duration::from_millis(ms.max(0) as u64));
 }
 
 pub fn almide_rt_env_temp_dir() -> String {

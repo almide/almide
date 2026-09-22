@@ -131,7 +131,10 @@ pub fn almide_rt_net_tcp_is_open(handle: i64) -> bool {
 
 pub fn almide_rt_net_tcp_read_timeout(handle: i64, len: i64, timeout_ms: i64) -> Result<Vec<u8>, String> {
     with_stream(handle, |stream| {
-        stream.set_read_timeout(Some(Duration::from_millis(timeout_ms as u64)))
+        // A negative duration is an elapsed one (#2486, the env.sleep_ms rule):
+        // `timeout_ms as u64` made -1 into u64::MAX milliseconds, a read that
+        // never gave up. Clamped to 0 it takes the zero-duration refusal below.
+        stream.set_read_timeout(Some(Duration::from_millis(timeout_ms.max(0) as u64)))
             .map_err(|e| format!("tcp_read_timeout: {}", e))?;
         let mut buf = vec![0u8; len as usize];
         let result = stream.read(&mut buf);

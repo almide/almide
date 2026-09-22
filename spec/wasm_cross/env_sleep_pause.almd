@@ -5,10 +5,18 @@
 // thread (op 36); the stock-WASI p1 build spins on the monotonic clock it
 // already imports (the import-count identity keeps the funcref table
 // verbatim); native sleeps in the runtime.
+// A NEGATIVE duration is an elapsed one and returns at once (#2486): the
+// native runtime cast `ms as u64`, so -1 slept u64::MAX milliseconds where
+// every wasm host clamped the count at 0 — this line hung the native leg
+// until the harness's alarm. Zero is the boundary of the same rule.
 import env
 
 effect fn main() -> Unit = {
   println("before")
   env.sleep_ms(1)!
   println("after")
+  env.sleep_ms(-1)!
+  env.sleep_ms(0)!
+  env.sleep_ms(0 - 9223372036854775807 - 1)!
+  println("negative and zero durations return at once")
 }

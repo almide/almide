@@ -85,7 +85,10 @@ effect fn main() -> Unit = {
 
 ### `env.sleep_ms(ms: Int) -> Unit`
 
-Sleep for the given number of milliseconds.
+Sleep for the given number of milliseconds. A zero or negative duration is an
+elapsed one and returns at once, on every target (`process.sleep` and the
+`timeout_ms` parameters of `process.exec_status_timeout` / `net.tcp_read_timeout`
+follow the same rule).
 
 ```almd check
 import env
