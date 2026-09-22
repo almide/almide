@@ -757,6 +757,7 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_value_field_ref" => &[false, false],
         "almide_rt_value_field_ref_at" => &[false, false, false],
         "almide_rt_value_float" => &[false],
+        "almide_rt_value_float_json" => &[false],
         "almide_rt_value_int" => &[false],
         "almide_rt_value_keys" => &[false],
         "almide_rt_value_merge" => &[false, false],
