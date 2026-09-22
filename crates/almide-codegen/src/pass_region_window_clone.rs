@@ -75,7 +75,7 @@ fn collect_named(t: &Ty, out: &mut Vec<Sym>) {
 
 /// Every `Named` type name mentioned anywhere in a fn: signature, expression
 /// types, binding and pattern types.
-fn named_types_in(f: &IrFunction) -> HashSet<Sym> {
+pub(crate) fn named_types_in(f: &IrFunction) -> HashSet<Sym> {
     struct Names(HashSet<Sym>);
     impl Names {
         fn ty(&mut self, t: &Ty) {

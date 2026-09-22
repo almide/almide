@@ -173,8 +173,18 @@ impl Emitter<'_> {
                 // before the arguments (the producer call IS one), closed
                 // right after the call; a return_call site keeps its C-292
                 // constant stack instead.
-                let window = !(tail && ret.is_some() && ret == self.fn_ret)
-                    && self.region_window_opens(i, ret, args, &params);
+                // A `scoped { … }` entry (#1997) is the DECLARED form of the
+                // same window: the checker admitted the block, so the window
+                // is an obligation here — it wins over the tail transfer and
+                // over `ALMIDE_REGION_OFF`, and a recogniser that disagrees
+                // with the checker is a compiler defect, never a wall.
+                let window = if info.scoped_entry {
+                    self.scoped_entry_window(i, name, ret)?;
+                    true
+                } else {
+                    !(tail && ret.is_some() && ret == self.fn_ret)
+                        && self.region_window_opens(i, ret, args, &params)
+                };
                 let save = if window { Some(self.emit_region_save()?) } else { None };
                 // A self tail call in LOOP form under the raw-address rule:
                 // the loop-back rebinds the params and releases nothing
