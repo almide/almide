@@ -74,6 +74,7 @@ import json
 import math
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -98,6 +99,15 @@ ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 # the ladder was relying on the laxer half. Same corpus, one rule.
 SKIP = {"args.almd", "html.almd", "json.almd", "http.almd", "path.almd"}
 
+# A source that binds a runtime symbol (`@intrinsic` / `@wasm_intrinsic`) is not a
+# user module either: E085 (#2152) makes that attribute legal only when the
+# source's ORIGIN is the stdlib or runtime tree, and a copy placed in the scratch
+# project is, correctly, a user file. Excluded by RULE rather than by name, for the
+# same reason as SKIP — a new intrinsic-binding module leaves the corpus visibly,
+# and any other new failure is still a gate failure. Measured 2026-09-22: 28 of
+# 309 sources / 3,551 of 34,203 lines, leaving 30,652 — above the top rung.
+INTRINSIC_RE = re.compile(r"^\s*@(?:wasm_)?intrinsic\b", re.M)
+
 # Cumulative source-line targets for the rungs. 0 is the floor (entry only);
 # 10000 is the roadmap's headline size; the last rung is the whole corpus.
 DEFAULT_TARGETS = [0, 2000, 5000, 10000, 20000, 10 ** 9]
@@ -111,7 +121,10 @@ def corpus_files():
         if os.path.basename(p) in SKIP:
             continue
         with open(p, encoding="utf-8") as f:
-            out.append((os.path.relpath(p, ROOT), f.read().count("\n")))
+            text = f.read()
+        if INTRINSIC_RE.search(text):
+            continue
+        out.append((os.path.relpath(p, ROOT), text.count("\n")))
     return out
 
 
