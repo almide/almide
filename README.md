@@ -109,16 +109,16 @@ almide run hello.almd --target wasm   # same bytes, on wasmtime
 
 ## What is measured
 
-Every claim in this section is either derived by a script or carries the date it was measured; `scripts/check-readme-numbers.sh` refuses a bare number in CI.
+Every claim in this section is either derived by a script or carries the date it was measured; `scripts/check-readme-numbers.sh` refuses a bare number in CI, and refuses an LLM-writability scorecard that is older than 90 days or that does not name the almide-dojo run it came from.
 
 ### LLM writability
 
-Measured by [almide-dojo](https://github.com/almide/almide-dojo) across 30 tasks (basic / intermediate / advanced) on 2026-04-12; later runs are on the [live dashboard](https://almide.github.io/almide-dojo/):
+Measured by [almide-dojo](https://github.com/almide/almide-dojo) on 2026-09-22 across its bank of 38 tasks (basic / intermediate / advanced), with the pinned compiler `almide 0.62.0`, by that repo's CI lane. Both runs are stamped **`comparable`** by the harness — every planned task reached the model, so each rate is a point and not an interval — and both were sampled at a fixed seed (`20260922`) and temperature 0, recorded in the run's manifest as what the provider actually put on the wire. The runs are committed — [`almide-dojo@8af34bc`](https://github.com/almide/almide-dojo/commit/8af34bc3) — so the table below can be recomputed from their `summary.md` rather than believed; later runs are on the [live dashboard](https://almide.github.io/almide-dojo/). No Anthropic or OpenAI key is in CI by decision, so the models here are the ones the lane can reach without one:
 
 | Model | Pass Rate | 1-Shot Rate |
 |---|---|---|
-| Claude Sonnet 4.6 | **100%** (30/30) | 47% |
-| Llama 3.3 70B | 61% (17/28) | 33% |
+| Llama 3.3 70B (fp8-fast) | 65% (25/38) | 39% (15/38) |
+| Llama 3.1 8B | 44% (17/38) | 34% (13/38) |
 
 The most recent same-model comparison is the MiniGit bench: Sonnet 5 × 20 trials on 2026-07-15, 100% pass, the most concise of 5 languages (233 LOC), and the fastest agent wall-clock against Gleam and MoonBit — an LLM-writability number, measured under 6–9× self-parallelism, **not** generated-code speed ([chart](docs/figures/lang-bench-snapshot-2026-07.png) · [method](research/benchmark/lang-bench/README.md) · [upstream](https://github.com/mame/ai-coding-lang-bench)).
 
