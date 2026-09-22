@@ -1,4 +1,4 @@
 # The almide/als commit this tree's contract ledger is judged against
 # (scripts/check-als-pin.sh). Advance it AFTER the als PR that carries a
 # new contract id has merged — never in the same PR that mints the id.
-57a32e9cab4b164ca9b12ebeedc05fc72fa6b853
+84475c8c44d469624d22333df72a651ab2870fe0
