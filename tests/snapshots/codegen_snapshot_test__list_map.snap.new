@@ -1,5 +1,6 @@
 ---
 source: tests/codegen_snapshot_test.rs
+assertion_line: 132
 expression: code
 ---
 pub fn almide_rt_list_len<T>(xs: &[T]) -> i64 { xs.len() as i64 }
