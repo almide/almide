@@ -53,6 +53,29 @@ impl BuildDirLock {
             Ok(BuildDirLock {})
         }
     }
+
+    /// [`BuildDirLock::acquire`] that gives up instead of waiting: `None`
+    /// means another process is building in this dir right now (#2504's
+    /// sweep skips it) or the lockfile could not be opened at all.
+    pub(crate) fn try_acquire(project_dir: &std::path::Path) -> Option<Self> {
+        #[cfg(any(unix, windows))]
+        {
+            use fs2::FileExt;
+            let file = std::fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(false)
+                .open(project_dir.join(BUILD_LOCK_FILE))
+                .ok()?;
+            file.try_lock_exclusive().ok()?;
+            Some(BuildDirLock { _file: file })
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = project_dir;
+            Some(BuildDirLock {})
+        }
+    }
 }
 
 /// Compile an .almd file to a native binary, returning the path to the executable.
@@ -203,6 +226,29 @@ pub(crate) const BUILD_LOCK_FILE: &str = ".almide-build.lock";
 /// one run reports "Failed to execute" and the next rebuilds.
 pub(crate) fn clear_build_dir(dir: &std::path::Path) -> Result<bool, String> {
     let _lock = BuildDirLock::acquire(dir)?;
+    remove_build_dir_contents(dir)
+}
+
+/// [`clear_build_dir`] for a caller that must not WAIT: takes the dir's lock
+/// without blocking and does nothing if a build holds it (#2504's sweep runs
+/// over thousands of worker dirs at the start of `almide test`, and a dir
+/// another process is building in is by definition in use). `still_stale` is
+/// re-asked UNDER the lock, so a dir that was picked from a stale-looking
+/// scan but has since been rebuilt in is left alone.
+pub(crate) fn clear_build_dir_if_idle(
+    dir: &std::path::Path,
+    still_stale: impl FnOnce() -> bool,
+) -> bool {
+    let Some(_lock) = BuildDirLock::try_acquire(dir) else { return false };
+    if !still_stale() {
+        return false;
+    }
+    remove_build_dir_contents(dir).unwrap_or(false)
+}
+
+/// Every entry of a build scratch dir except its lockfile. The caller holds
+/// the lock.
+fn remove_build_dir_contents(dir: &std::path::Path) -> Result<bool, String> {
     let entries = std::fs::read_dir(dir).map_err(|e| format!("Failed to read {}: {}", dir.display(), e))?;
     let mut removed = false;
     for entry in entries {
@@ -219,23 +265,63 @@ pub(crate) fn clear_build_dir(dir: &std::path::Path) -> Result<bool, String> {
     Ok(removed)
 }
 
-/// How long a cached `almide-<hash>` binary may go unused before a later
-/// build in the same dir evicts it (#2500). Every cache hit refreshes the
-/// binary's mtime (`touch_used`), so "unused" is measured from the last
-/// RUN, not the build; the shared dir was 22 GB when nothing evicted at
-/// all. Seven days keeps a week's edit loop warm and bounds the dir to a
-/// week of distinct programs.
-const RUN_CACHE_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(7 * 24 * 60 * 60);
+/// How long a cached artifact may go unused before a sweep evicts it — the
+/// `almide-<hash>` binaries of a build dir (#2500) and the whole per-test-file
+/// worker dirs of `almide test` (#2504) read the same number. Every cache hit
+/// refreshes the binary's mtime (`touch_used`), so "unused" is measured from
+/// the last RUN, not the build; the shared dir was 22 GB and the worker tree
+/// 39 GB when nothing evicted at all. Seven days keeps a week's edit loop
+/// warm and bounds both to a week of distinct programs.
+pub(crate) const CACHE_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(7 * 24 * 60 * 60);
 
-/// How often the eviction sweep runs. A `readdir` + `stat` of the shared
-/// dir's 12,000 binaries and 47,000 kept object files measured 0.5 s warm
-/// and 3.5 s cold on the machine that filed #2500 — too much to pay on
-/// every build for a threshold measured in days. A stamp file in the dir
-/// records the last sweep; the next build a day later sweeps again.
-const EVICT_SWEEP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+/// How often an eviction sweep runs over one cache root. A `readdir` + `stat`
+/// of the shared dir's 12,000 binaries and 47,000 kept object files measured
+/// 0.5 s warm and 3.5 s cold on the machine that filed #2500, and the worker
+/// tree is 4,500 dirs — too much to pay on every build for a threshold
+/// measured in days. A stamp file in the root records the last sweep.
+const SWEEP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
 
 /// The stamp file the sweep's rate limit reads.
 const EVICT_STAMP_FILE: &str = ".almide-evict-stamp";
+
+/// Is `root`'s sweep due, i.e. has it not been swept within [`SWEEP_INTERVAL`]?
+pub(crate) fn sweep_due(root: &std::path::Path) -> bool {
+    let stamp = root.join(EVICT_STAMP_FILE);
+    match std::fs::metadata(&stamp).and_then(|m| m.modified()) {
+        Ok(t) => std::time::SystemTime::now().duration_since(t).map(|since| since >= SWEEP_INTERVAL).unwrap_or(true),
+        Err(_) => true,
+    }
+}
+
+/// Record that `root` was swept now, so the next sweep waits a day.
+pub(crate) fn stamp_sweep(root: &std::path::Path) {
+    let _ = std::fs::File::create(root.join(EVICT_STAMP_FILE));
+}
+
+/// Was any FILE in `dir` — its own, or a cached binary under
+/// `target/<profile>/` — modified since `cutoff`? A cache HIT touches the
+/// binary it execs, so this answers "did anyone use this dir", not "did
+/// anyone build in it". Stops at the first file newer than `cutoff`.
+///
+/// Files only: every build writes files (the harness `main.rs`, the rustc
+/// output, the content-keyed binary), so a directory's own mtime adds no
+/// signal — and whether it moves at all is filesystem-dependent, which is
+/// not something a cache-eviction rule should rest on.
+pub(crate) fn used_since(dir: &std::path::Path, cutoff: std::time::SystemTime) -> bool {
+    let any_newer = |d: std::path::PathBuf| {
+        std::fs::read_dir(d)
+            .map(|rd| {
+                rd.flatten().any(|e| {
+                    e.file_type().map(|t| t.is_file()).unwrap_or(false)
+                        && e.metadata().and_then(|m| m.modified()).map(|t| t > cutoff).unwrap_or(false)
+                })
+            })
+            .unwrap_or(false)
+    };
+    any_newer(dir.to_path_buf())
+        || any_newer(dir.join("target").join("debug"))
+        || any_newer(dir.join("target").join("release"))
+}
 
 /// Refresh a cached binary's mtime to "now" so the age-based eviction sees it
 /// as used. Best effort, lock-free, and through a READ handle: a write handle
@@ -280,15 +366,12 @@ fn touch_used(path: &std::path::Path) {
 /// (a hit's `exists()` check racing this sweep's `remove_file` on a binary
 /// unused for exactly a week) is one failed run that rebuilds on retry.
 fn evict_stale_artifacts(project_dir: &std::path::Path) {
-    let now = std::time::SystemTime::now();
-    let stamp = project_dir.join(EVICT_STAMP_FILE);
-    if let Ok(Ok(since)) = std::fs::metadata(&stamp).and_then(|m| m.modified()).map(|t| now.duration_since(t)) {
-        if since < EVICT_SWEEP_INTERVAL {
-            return;
-        }
+    if !sweep_due(project_dir) {
+        return;
     }
+    let now = std::time::SystemTime::now();
     let is_stale = |meta: &std::fs::Metadata| {
-        meta.modified().ok().and_then(|t| now.duration_since(t).ok()).is_some_and(|age| age > RUN_CACHE_MAX_AGE)
+        meta.modified().ok().and_then(|t| now.duration_since(t).ok()).is_some_and(|age| age > CACHE_MAX_AGE)
     };
     let sweep = |dir: &std::path::Path, prefix: &str| {
         let Ok(entries) = std::fs::read_dir(dir) else { return };
@@ -308,7 +391,7 @@ fn evict_stale_artifacts(project_dir: &std::path::Path) {
         sweep(&dir, "almide-");
         sweep(&dir.join("deps"), "almide_out-");
     }
-    let _ = std::fs::File::create(&stamp);
+    stamp_sweep(project_dir);
 }
 
 pub(crate) fn build_native_cached(
