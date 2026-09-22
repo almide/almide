@@ -4014,6 +4014,10 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/or_pattern.almd", class = "fixture" },
   { path = "spec/lang/or_pattern_test.almd", class = "fixture" },
+  { path = "spec/wasm_cross/ref_rust_or_pattern_guard_count.almd", class = "fixture" },
+  { path = "spec/wasm_cross/ref_grain_or_pattern_alias_match.almd", class = "fixture" },
+  { path = "spec/wasm_cross/ref_gleam_or_pattern_alternatives.almd", class = "fixture" },
+  { path = "spec/wasm_cross/ref_rust_or_pattern_heap_subject.almd", class = "fixture" },
   { path = "tests/diagnostics/e080-or-pattern-binder/broken.almd", class = "fixture" },
 ]
 [[contract]]
@@ -4340,4 +4344,16 @@ evidence  = [
   { path = "tests/diagnostics/e084-exit-code-pipe/broken.almd", class = "fixture" },
   { path = "tests/exit_literal_check_test.rs", name = "literal_exit_codes_follow_the_portable_domain", class = "fixture" },
   { path = "tests/exit_literal_check_test.rs", name = "computed_codes_and_local_functions_remain_checkable", class = "fixture" },
+]
+[[contract]]
+id        = "C-352"
+spec      = "ALS-E18"
+title     = "Or-pattern guards are evaluated once per matching alternative, in source order"
+statement = "The guard of an or-pattern arm `a | b | c if g => body` (#1461) is evaluated once for EACH alternative that matches the subject, in source order, until an evaluation holds — a false guard falls through to the next alternative before the next arm, so effects in the guard are observable exactly that many times (a wildcard-only `_ | _ | _` arm runs the guard three times; an arm whose first alternative does not match runs it once, for the alternative that does). This is the per-alternative desugar of C-323 made observable, and the reference languages specify the same count (rustc's or-patterns suite `search-via-bindings.rs`, gleam's `alternative_patterns_guard`). spec/wasm_cross/ref_rust_or_pattern_guard_count.almd pins it on scalar subjects and spec/wasm_cross/ref_gleam_or_pattern_alternatives.almd on list alternatives; spec/wasm_cross/ref_rust_or_pattern_guard_retry.almd (tuple / string / Option subjects) is the negative fixture of almide/almide#2464, where the wasm leg evaluates an effectful guard once per arm."
+since     = "0.63.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/ref_rust_or_pattern_guard_count.almd", class = "fixture" },
+  { path = "spec/wasm_cross/ref_gleam_or_pattern_alternatives.almd", class = "fixture" },
+  { path = "spec/wasm_cross/ref_rust_or_pattern_guard_retry.almd", class = "fixture" },
 ]

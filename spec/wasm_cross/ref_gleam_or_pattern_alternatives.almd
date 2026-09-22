@@ -1,0 +1,71 @@
+// @contract: C-323, C-352
+// gleam compiler-core/src/javascript/tests/ — case_clause_guards.rs
+// (`alternative_patterns`: `1 | 2 -> 0`; `alternative_patterns_list`:
+// `[1] | [1, 2] -> 0`; `alternative_patterns_guard`: `[x] | [_, x] if x == 1`),
+// compiler-core/src/erlang/tests/ — patterns.rs `alternative_patterns` (a `let`
+// inside a `1 | 2` arm shadowing an outer binding) and case.rs
+// `alternative_pattern_variable_rewriting` (`1 | _ -> Ok(1)`), ported
+// binder-free: gleam's `[x] | [_, x] if x == 1`
+// becomes `[1] | [_, 1]` with an effect counter in the guard, so the
+// guard-count observable (C-352) is pinned on LIST alternatives — exactly one
+// alternative matches each input, so the guard runs once for `[1]` and
+// `[2, 1]` and never for `[1, 2]` / `[]`.
+var hits = 0
+
+effect fn seen() -> Bool = {
+  hits = hits + 1
+  true
+}
+
+fn one_or_two(x: Int) -> Int = match x {
+  1 | 2 => 0,
+  _ => 1,
+}
+
+fn one_or_one_two(xs: List[Int]) -> Int = match xs {
+  [1] | [1, 2] => 0,
+  _ => 1,
+}
+
+effect fn guarded(xs: List[Int]) -> Int = {
+  hits = 0
+  let r = match xs {
+    [1] | [_, 1] if seen()! => 10,
+    _ => 0,
+  }
+  r + hits
+}
+
+fn shadow(x: Int) -> Int = {
+  let duplicate_name = 1
+  match x {
+    1 | 2 => {
+      let duplicate_name = duplicate_name + 1
+      duplicate_name
+    },
+    _ => 0,
+  }
+}
+
+fn wild_alt(mt: Int) -> Result[Int, String] = match mt {
+  1 | _ => ok(1)
+}
+
+effect fn main() -> Unit = {
+  println(int.to_string(one_or_two(1)))
+  println(int.to_string(one_or_two(2)))
+  println(int.to_string(one_or_two(3)))
+  println(int.to_string(one_or_one_two([1])))
+  println(int.to_string(one_or_one_two([1, 2])))
+  println(int.to_string(one_or_one_two([2, 1])))
+  println(int.to_string(guarded([1])!))
+  println(int.to_string(guarded([2, 1])!))
+  println(int.to_string(guarded([1, 2])!))
+  println(int.to_string(guarded([])!))
+  println(int.to_string(shadow(2)))
+  println(int.to_string(shadow(3)))
+  println(match wild_alt(9) {
+    ok(v) => int.to_string(v),
+    err(e) => e,
+  })
+}
