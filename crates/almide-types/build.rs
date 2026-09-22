@@ -8,7 +8,7 @@
 //! binary as it does in the file.
 //!
 //! So the EMBEDDED copy blanks them: a line whose first non-space character
-//! starts `//` becomes empty. Two properties make this safe rather than a
+//! starts `//` becomes empty. Three properties make this safe rather than a
 //! trade:
 //!
 //! * LINE COUNT is preserved exactly — a blanked line is still a line — so
@@ -17,6 +17,15 @@
 //! * Only WHOLE-LINE comments are blanked. A trailing `// …` after code stays,
 //!   because finding its start needs the lexer (a `//` inside a string literal
 //!   is not a comment), and that judgement does not belong in a build script.
+//! * A whole-line `///` DOC comment is KEPT (#2436). It is the one comment
+//!   with a consumer past the repo: `almide compile <module> --json` on the
+//!   by-name route serves this embedded copy, and the interface JSON's `doc`
+//!   field (crates/almide-tools/src/interface.rs) is the `///` run above the
+//!   declaration — which docs/stdlib/*.md render. A design-note `//` line
+//!   stays free; a `///` line is a byte the author chose to ship, and
+//!   `scripts/check-embedded-size.sh` (whose awk mirrors this rule) counts
+//!   it against the #878 ratchet. Measured at landing: the stdlib carried
+//!   0 `///` lines, so the delta of this rule was 0 bytes.
 //!
 //! Measured 374234 bytes saved of 1190489 — 31%.
 //!
@@ -53,7 +62,7 @@ fn main() {
     }
     writeln!(
         out,
-        "\n/// The embedded source of `stdlib/<stem>.almd`, comments blanked.\n\
+        "\n/// The embedded source of `stdlib/<stem>.almd`, `//` comments blanked, `///` kept.\n\
          pub fn source_of(stem: &str) -> Option<&'static str> {{\n\
          \x20   match stem {{\n{arms}        _ => None,\n    }}\n}}"
     )
@@ -64,10 +73,14 @@ fn main() {
 }
 
 /// Blank every WHOLE-LINE `//` comment, keeping the line itself so line
-/// numbers are unchanged. Trailing comments after code are left alone.
+/// numbers are unchanged. Trailing comments after code are left alone, and
+/// so is a whole-line `///` doc comment (#2436) — it is interface input.
 fn blank_comment_lines(src: &str) -> String {
     src.split('\n')
-        .map(|line| if line.trim_start().starts_with("//") { "" } else { line })
+        .map(|line| {
+            let t = line.trim_start();
+            if t.starts_with("//") && !t.starts_with("///") { "" } else { line }
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }
