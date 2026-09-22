@@ -40,8 +40,8 @@ impl IrVisitor for Scan {
                 let mutates = matches!(
                     (module.as_str(), func.as_str()),
                     ("list", "push" | "pop" | "clear")
-                        | ("map", "insert")
-                        | ("string", "push")
+                        | ("map", "insert" | "delete" | "clear")
+                        | ("string", "push" | "clear")
                         // bytes' in-place writers were MISSING here: a
                         // captured Bytes var mutated through them was never
                         // cell-classified, took the env value-copy path, and

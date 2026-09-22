@@ -1,0 +1,71 @@
+// @contract: C-033
+// The in-place clear/delete mutators on the structural wasm leg (#1423 stage
+// 4): `map.delete`, `map.clear`, `bytes.clear` and `string.clear` are var
+// write-backs of a fresh block — `map.delete` over the functional `remove`
+// exactly as `map.insert` rides `set`, the three clears the `list.clear`
+// rebind — so every alias or holder bound BEFORE the mutation keeps the
+// pre-mutation value (copy-on-write at the mutation site, the C-033
+// discipline), a delete keeps the remaining entries in insertion order, an
+// absent key is a no-op, and a cleared collection grows again from empty.
+// Through a `mut` parameter the mutation persists to the caller. Native, the
+// structural leg and the incumbent print the same bytes.
+fn render(m: Map[String, Int]) -> String = {
+  var out = ""
+  for (k, v) in m {
+    out = out + k + ":" + int.to_string(v) + ","
+  }
+  out
+}
+
+fn drop_key(mut m: Map[String, Int], k: String) -> Unit = map.delete(m, k)
+
+fn wipe_map(mut m: Map[String, Int]) -> Unit = map.clear(m)
+
+fn wipe_text(mut s: String) -> Unit = string.clear(s)
+
+fn main() -> Unit = {
+  // A. map.delete: a present key (order of the rest kept), an absent key
+  // (no-op), the alias bound before keeps every entry.
+  var m: Map[String, Int] = map.new()
+  map.insert(m, "a", 1)
+  map.insert(m, "b", 2)
+  map.insert(m, "c", 3)
+  map.insert(m, "d", 4)
+  let before = m
+  map.delete(m, "b")
+  map.delete(m, "zz")
+  println("A.m=" + render(m) + " len=" + int.to_string(map.len(m)) + " has_b=${map.contains(m, "b")}")
+  println("A.before=" + render(before))
+  // B. through a mut param, then re-insert the deleted key at the END.
+  drop_key(m, "a")
+  map.insert(m, "a", 10)
+  println("B.m=" + render(m))
+  // C. map.clear: empty, the alias intact, the map usable again.
+  let held = m
+  map.clear(m)
+  println("C.len=" + int.to_string(map.len(m)) + " held=" + render(held))
+  map.insert(m, "x", 7)
+  wipe_map(m)
+  map.insert(m, "y", 8)
+  println("C.m=" + render(m) + " held_len=" + int.to_string(map.len(held)))
+  // D. bytes.clear: length 0, the alias keeps its bytes, growth resumes.
+  var b = bytes.from_list([1, 2, 3, 4])
+  let bb = b
+  bytes.clear(b)
+  println("D.len=" + int.to_string(bytes.len(b)) + " alias=" + int.to_string(bytes.len(bb)) + " alias0=" + int.to_string(bytes.get_or(bb, 0, 0 - 1)))
+  bytes.push(b, 9)
+  bytes.push(b, 8)
+  bytes.clear(b)
+  bytes.push(b, 7)
+  println("D.b=" + int.to_string(bytes.len(b)) + ":" + int.to_string(bytes.get_or(b, 0, 0 - 1)))
+  // E. string.clear: empty, the alias keeps the text, push resumes, and
+  // the mut-param form persists to the caller.
+  var s = "hello"
+  let ss = s
+  string.clear(s)
+  println("E.s=[" + s + "] len=" + int.to_string(string.len(s)) + " alias=" + ss)
+  string.push(s, "ab")
+  wipe_text(s)
+  string.push(s, "c")
+  println("E.s=[" + s + "] empty=${string.is_empty(s)}")
+}

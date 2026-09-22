@@ -246,6 +246,39 @@ impl Emitter<'_> {
                 let _ = ret;
                 Ok(None)
             }
+            // mut delete (#1423 stage 4): the var write-back of the
+            // functional `remove` — the same shape `insert` takes over
+            // `set`. The fresh block is the var's alone, so an alias or
+            // holder bound before the delete keeps the pre-delete entries
+            // (C-033's value semantics), and insertion order is preserved.
+            ("delete", [m, _key]) => {
+                let IrExprKind::Var { id } = &m.kind else {
+                    return unsup("map-delete-nonvar");
+                };
+                let Some((var_idx, var_ty, vglob)) = self.mut_var(id) else {
+                    return unsup("var:unmapped");
+                };
+                let ret = self.lower_map_call("remove", args, ret_hint)?;
+                self.emit_store_mut_var(*id, var_idx, var_ty, vglob)?;
+                let _ = ret;
+                Ok(None)
+            }
+            // mut clear (native m.clear()): rebind the var to the empty
+            // map — the `list.clear` shape (list_mut.rs).
+            ("clear", [m]) => {
+                let IrExprKind::Var { id } = &m.kind else {
+                    return unsup("map-clear-nonvar");
+                };
+                let Some((var_idx, var_ty, vglob)) = self.mut_var(id) else {
+                    return unsup("var:unmapped");
+                };
+                let SliceTy::Map(..) = var_ty else {
+                    return unsup(&format!("map-clear-of:{var_ty:?}"));
+                };
+                self.f.instructions().i32_const(0).call(F_ALLOC);
+                self.emit_store_mut_var(*id, var_idx, var_ty, vglob)?;
+                Ok(None)
+            }
             // fold over entries in insertion order: (acc, k, v) => acc'.
             // Insertion-ordered (K, V) pairs — memory order IS the
             // map's insertion order, so a straight walk is exact.
