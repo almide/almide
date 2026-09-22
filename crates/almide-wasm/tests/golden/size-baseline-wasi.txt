@@ -449,6 +449,7 @@
 9247	spec/wasm_cross/mut_param_effect_can_err.almd
 3032	spec/wasm_cross/mut_param_effect_never_err.almd
 2619	spec/wasm_cross/mut_param_spread_reassign.almd
+5002	spec/wasm_cross/mut_param_tail_recursion.almd
 3313	spec/wasm_cross/mut_param_writeback_growth.almd
 6050	spec/wasm_cross/mut_scalar_param_reassign.almd
 6347	spec/wasm_cross/mutable_global_bytes_arena.almd
