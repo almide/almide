@@ -780,6 +780,7 @@ since     = "0.24.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/math_log_gamma.almd", class = "fixture" },
+  { path = "spec/wasm_cross/math_log_gamma_negative.almd", class = "fixture" },
 ]
 
 # ── EMPTY-COLLECTION FOLD: ANNOTATE THE COLLECTION (folds into C-058) ─
@@ -1944,6 +1945,7 @@ since     = "0.31.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/float_round_negzero.almd", class = "fixture" },
+  { path = "spec/wasm_cross/float_round_exact.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-141"
@@ -3876,6 +3878,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/float_to_int_edges.almd", class = "fixture" },
   { path = "spec/stdlib/float_determinism_test.almd", class = "fixture" },
+  { path = "spec/wasm_cross/checked_conversion_exact_bounds.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-308"
@@ -4206,6 +4209,7 @@ since     = "0.62.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/int_bit_family.almd", class = "fixture" },
+  { path = "spec/wasm_cross/checked_conversion_exact_bounds.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-339"
@@ -4372,6 +4376,45 @@ evidence  = [
   { path = "spec/wasm_cross/ref_gleam_or_pattern_alternatives.almd", class = "fixture" },
   { path = "spec/wasm_cross/ref_rust_or_pattern_guard_retry.almd", class = "fixture" },
 ]
+# ── A NON-FINITE FLOAT IN A VALUE IS THE JSON `null` ──
+[[contract]]
+id        = "C-361"
+spec      = "ALS-D2"
+title     = "A non-finite Float in a Value stringifies as the JSON null on every leg"
+statement = "`json.stringify`, `json.stringify_pretty`, `value.stringify` and the `${v}` display of a `Value` write a NaN, +inf or -inf Float leaf as `null`, at any depth (bare, inside arrays and objects, and in a Codec-encoded record), byte-identically on native and both wasm legs (#2499). JSON has no spelling for these values: the old output (`[NaN,inf,-inf]`) was refused by Almide's own `json.parse`, and of the two lineages other languages take — refuse (Go, Ruby, strict Python) or write `null` (JavaScript, serde_json) — only `null` keeps a `String`-returning stringify total, so `json.parse(json.stringify(v))` is `ok` for every `v`. Finite floats keep the Display form (`1.5`, `-0`, `3`); the constant-display rule for non-finite Floats OUTSIDE a Value (ALS-R4: `inf` / `-inf` / `NaN`) is untouched."
+since     = "0.63.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/json_stringify_nonfinite.almd", class = "fixture" },
+]
+
+# ── json.get_int IS INT-ONLY: A FLOAT FIELD IS none, NEVER TRUNCATED ──
+[[contract]]
+id        = "C-362"
+spec      = "ALS-D6"
+title     = "json.get_int is Int-only: a Float field is none, never truncated"
+statement = "`json.get_int(v, key)` is `some` only when the field holds a JSON integer; a Float field is `none` even when it is integral (`3.0`), and is never truncated — the same answer `value.as_int` (`expected Int, received Float`) and Codec `Int` decode give (#2476). The numeric widening is ONE-WAY: `json.get_float` / `value.as_float` accept an Int (C-085), the Int accessors do not accept a Float. Native's accessor carried an extra `Float(f) => Some(f as i64)` arm (so `get_int` of `2.7` was `some(2)` there and `none` on both wasm legs); the arm is gone and every leg agrees."
+since     = "0.63.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/json_get_int_float.almd", class = "fixture" },
+]
+
+# ── SCALAR MATH IS EXACT WHERE THE ANSWER IS REPRESENTABLE ──
+[[contract]]
+id        = "C-363"
+spec      = "ALS-T19"
+title     = "float.round, math.choose, int.rotate_* and math.log_gamma are exact over their whole domain on every leg"
+statement = "Four scalar cells that were only right on part of their domain are exact everywhere, byte-identically on native and both wasm legs. `float.round` is native `f64::round` — round half away from zero on the TRUE value — so `round(0.49999999999999994)` is `0.0`, `round(-0.49999999999999994)` is `-0.0` and an odd integer at or above 2^52 is unchanged (#2477; the self-hosted `floor(x + 0.5)` rounded the sum first). `math.choose(n, k)` is the exact binomial coefficient whenever it fits in an Int and its two's-complement wrap mod 2^64 (C-170) when it does not (`choose(62, 31)` = 465428353255261088, `choose(67, 33)` = C(67,33) - 2^64; #2491: the running product overflowed before it divided), computed on every leg by the same power-of-two count plus odd-part product with a Newton inverse mod 2^64. `int.rotate_left` / `rotate_right` reduce the count into `[0, bits)` Euclidean-ly, so a negative count rotates the other way (`rotate_left(1, -1, 8)` = 128; #2492: `(n % bits) as u32` made every negative count an over-wide shift that returned 0); the width rules C-047 / C-048 are unchanged. `math.log_gamma` is `ln|Γ(x)|` on the whole real line: below 0.5 the reflection formula `ln(π / |sin(πx)|) - ln Γ(1 - x)` (with `|sin(πx)|` on the reduced fraction) carries the work to the Lanczos series, the non-positive integers and ±inf give `+inf`, NaN stays NaN (#2493: the series alone gave NaN at -0.5 and +inf at -6.5); the `sin` and `log` are the vendored musl-libm on every leg, so C-051's bit-identity holds over the extended domain."
+since     = "0.63.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/float_round_exact.almd", class = "fixture" },
+  { path = "spec/wasm_cross/math_choose_exact.almd", class = "fixture" },
+  { path = "spec/wasm_cross/int_rotate_negative_count.almd", class = "fixture" },
+  { path = "spec/wasm_cross/math_log_gamma_negative.almd", class = "fixture" },
+]
+
 [[contract]]
 id        = "C-359"
 spec      = "ALS-T26"
