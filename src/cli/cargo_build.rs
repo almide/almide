@@ -829,17 +829,24 @@ pub(super) fn is_rustc_ice(stderr: &str) -> bool {
     stderr.contains("the compiler unexpectedly panicked") || stderr.contains("internal compiler error")
 }
 
-/// Remove every `<project_dir>/target/<profile>/incremental` session store.
-/// Returns the directories that existed and were removed. The CALLER holds
-/// the dir's `BuildDirLock`: a session store is rewritten by any build in
-/// the dir, so it is only ever touched under the same lock that serializes
-/// those builds.
+/// Remove every NON-EMPTY `<project_dir>/target/<profile>/incremental`
+/// session store. Returns the directories that held a session and were
+/// removed. The CALLER holds the dir's `BuildDirLock`: a session store is
+/// rewritten by any build in the dir, so it is only ever touched under the
+/// same lock that serializes those builds.
+///
+/// Empty is not "cleared": cargo creates `target/<profile>/incremental/`
+/// even when incremental compilation is OFF (`CARGO_INCREMENTAL=0`, which
+/// this repo's own CI sets for every job). Counting that empty directory as
+/// something recovered would make the caller retry a genuine ICE once for
+/// nothing, in exactly the environment where no session can have gone stale.
 pub(super) fn clear_incremental_sessions(project_dir: &std::path::Path) -> Vec<std::path::PathBuf> {
     let Ok(profiles) = std::fs::read_dir(project_dir.join("target")) else { return Vec::new() };
     let mut cleared = Vec::new();
     for entry in profiles.flatten() {
         let inc = entry.path().join("incremental");
-        if inc.is_dir() && std::fs::remove_dir_all(&inc).is_ok() {
+        let holds_a_session = std::fs::read_dir(&inc).map(|mut rd| rd.next().is_some()).unwrap_or(false);
+        if holds_a_session && std::fs::remove_dir_all(&inc).is_ok() {
             cleared.push(inc);
         }
     }
@@ -921,7 +928,7 @@ fn contains_rustc_error_code(text: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_recovering_from_ice, contains_rustc_error_code, defines_entry_point, is_rustc_ice};
+    use super::{build_recovering_from_ice, clear_incremental_sessions, contains_rustc_error_code, defines_entry_point, is_rustc_ice};
 
     #[test]
     fn detects_4_digit_rustc_code() {
@@ -1067,5 +1074,21 @@ mod tests {
         let out = build_recovering_from_ice(dir.path(), build);
         assert_eq!(out, Err(ICE.to_string()));
         assert_eq!(calls.get(), 1);
+    }
+
+    /// `CARGO_INCREMENTAL=0` (what this repo's CI sets for every job) still
+    /// leaves an EMPTY `target/<profile>/incremental/` behind. Nothing there
+    /// can have gone stale, so an ICE under it is genuine and must not cost
+    /// a retry.
+    #[test]
+    fn an_empty_session_dir_is_not_something_to_recover_from() {
+        let dir = tempfile::tempdir().unwrap();
+        let inc = dir.path().join("target/debug/incremental");
+        std::fs::create_dir_all(&inc).unwrap();
+        assert!(clear_incremental_sessions(dir.path()).is_empty(), "an empty session dir is not a session");
+        assert!(inc.is_dir(), "and it is not removed either");
+        let (build, calls) = scripted(vec![Err(ICE)]);
+        assert_eq!(build_recovering_from_ice(dir.path(), build), Err(ICE.to_string()));
+        assert_eq!(calls.get(), 1, "no retry when there was no session to clear");
     }
 }
