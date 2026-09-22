@@ -232,6 +232,7 @@
 66464	spec/wasm_cross/gleam_records_tuples.almd
 66368	spec/wasm_cross/gleam_toplet_consts.almd
 65888	spec/wasm_cross/global_in_both_arms.almd
+65824	spec/wasm_cross/global_in_shortcircuit_operand.almd
 65920	spec/wasm_cross/grain_functions.almd
 131360	spec/wasm_cross/grain_gc_shapes.almd
 66096	spec/wasm_cross/grain_pattern_destructure.almd

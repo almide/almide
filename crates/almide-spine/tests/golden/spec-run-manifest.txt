@@ -1,4 +1,4 @@
-# oracle: almide 0.63.0 (dev) at 3d136baba — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.63.0 (dev) at 1b981715b — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 f0709d9573472655341ac75bd847b3f30d2bddc3a201554bfd5cc22c21446902	0	spec/wasm_cross/adr0005_operator_equivalence.almd
 c0f26e63e32a038c59081b238912f0b3ecfd01d8d5ce45534b83fbbce13128a7	0	spec/wasm_cross/alias_combinator_rc.almd
 997e25dd01ce19a5253bd290b2f5f4b8eab74ea88f256b5fd9e09ca77d42af3b	0	spec/wasm_cross/alias_cow.almd
@@ -233,6 +233,7 @@ c5ea570ff0094151a4384b870f03216ac532c4959c82b33115e7953717364e8a	0	spec/wasm_cro
 1be4c1c4e0a5a87a8835313f327201461473c069c6785dabf532942c3b54f8c7	0	spec/wasm_cross/gleam_records_tuples.almd
 9ef63bd92f4471f56e7a9014dd56736fd451be57afa023d59b6561343c7640d9	0	spec/wasm_cross/gleam_toplet_consts.almd
 93f9ef3005a5b7bd9f0c748507d2c4dd216bf729ab450987d34501e6ff3124da	0	spec/wasm_cross/global_in_both_arms.almd
+ba2ad94fcc00a7f84e131d96dd18c9a70a47940d9afd5b355e0f07bb79380ad0	0	spec/wasm_cross/global_in_shortcircuit_operand.almd
 9000c487a3882f80c4f3d9935f4182a0adfe2d5e25ae9834723b36429fe1a5af	0	spec/wasm_cross/grain_functions.almd
 2554d04419fe7c28627172bcd2a309d499c97544aa3c73f140adf4db1eb119c3	0	spec/wasm_cross/grain_gc_shapes.almd
 45585adf4ab455c74349ffc561cf8c7389ea2d618f6bcbfef4f6ea96208ad529	0	spec/wasm_cross/grain_pattern_destructure.almd
