@@ -7,10 +7,20 @@
 //! at most 20 findings (`grep | head -60`, three lines each) without saying it
 //! was a cap: 23 in the headline, 20 in the list, nothing to explain the gap.
 //!
+//! #2513 is the third: "a reclaimed runner uploads nothing" was read as "its
+//! run was not recorded". The job LOG is not an upload — it outlives the kill
+//! and carries the campaign's last progress line — so four shards that fuzzed
+//! 100s/180s/275s/295s on 2026-09-22 were scored as zero minutes and the night
+//! read 50% instead of the 85% it delivered.
+//!
 //! The workflow cannot run here, so these forge what it would hand the scripts:
-//! a `download-artifact` shard layout with two shards absent, a findings dir
-//! with more entries than the cap, and `fuzz-night:` lines as the verdict job
-//! logs carry them (including the pre-#2390 shape, so history stays scoreable).
+//! a `download-artifact` shard layout with two shards absent, the job logs of
+//! the shards that uploaded nothing (`$FUZZ_SHARD_LOG_DIR`, the seam that
+//! stands in for `gh api .../jobs/<id>/logs`), a findings dir with more entries
+//! than the cap, and `fuzz-night:` lines as the verdict job logs carry them
+//! (including the pre-#2390 shape, so history stays scoreable). A gate that
+//! cannot be exercised off-network is the reason the forging is worth it: every
+//! test here runs with no `gh`, no token and no run.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -77,6 +87,42 @@ fn truncated_shard(root: &Path, shard: u32, generated: u32, elapsed_s: u32) {
     .unwrap();
 }
 
+/// A shard the runner reclaimed BEFORE its upload step ran: no artifact at all,
+/// and the only surviving record is its job log. Forged in the shape
+/// `gh api repos/<repo>/actions/jobs/<id>/logs` returns — an Actions timestamp
+/// in front of every line, the fuzzer's progress lines every few seconds, and
+/// the shutdown message the runner appends when it takes the job. Two progress
+/// lines, so "the LAST one" is a choice the reader has to make rather than the
+/// only line present.
+fn killed_shard_log(dir: &Path, shard: u32, secs: u32, generated: u32, findings: u32) {
+    fs::create_dir_all(dir).unwrap();
+    fs::write(
+        dir.join(format!("shard-{shard}.log")),
+        format!(
+            "2026-09-22T08:09:59.0000000Z   seed     = {seed}\n\
+             2026-09-22T08:12:00.0000000Z   [ {half:>4}s] generated={halfgen} clean={halfgen} rejects=2 findings=0 walls=0 skipped=0 | 210.0 prog/min\n\
+             2026-09-22T08:15:48.0222083Z   [ {secs:>4}s] generated={generated} clean={generated} rejects=20 findings={findings} walls=1 skipped=1 | 225.3 prog/min\n\
+             2026-09-22T08:15:49.0000000Z ##[error]The runner has received a shutdown signal\n",
+            seed = 6_787_872 + shard,
+            half = secs / 2,
+            halfgen = generated / 2,
+        ),
+    )
+    .unwrap();
+}
+
+/// A log the API returned but that holds no progress line at all — the shard
+/// was taken before the fuzzer printed one, or the fetch came back truncated.
+fn unreadable_shard_log(dir: &Path, shard: u32) {
+    fs::create_dir_all(dir).unwrap();
+    fs::write(
+        dir.join(format!("shard-{shard}.log")),
+        "2026-09-22T08:09:00.0000000Z Current runner version: '2.331.0'\n\
+         2026-09-22T08:09:01.0000000Z ##[error]The runner has received a shutdown signal\n",
+    )
+    .unwrap();
+}
+
 fn finding(root: &Path, name: &str, kind: &str, index: u32) {
     let d = root.join(name);
     fs::create_dir_all(&d).unwrap();
@@ -107,10 +153,17 @@ fn a_preempted_shard_is_named_and_the_count_is_conditional_in_the_heading() {
     truncated_shard(&shards, 7, 450, 130);
     let outputs = dir.join("outputs.txt");
     fs::write(&outputs, "").unwrap();
+    // An empty log directory: shards 3 and 8 yielded nothing either way, which
+    // is also what keeps this test off the network wherever it runs.
+    let logs = dir.join("logs");
+    fs::create_dir_all(&logs).unwrap();
 
     let r = bash(
         &["scripts/fuzz-night-verdict.sh", shards.to_str().unwrap(), "5", "8", "23", "0"],
-        &[("GITHUB_OUTPUT", outputs.to_str().unwrap())],
+        &[
+            ("GITHUB_OUTPUT", outputs.to_str().unwrap()),
+            ("FUZZ_SHARD_LOG_DIR", logs.to_str().unwrap()),
+        ],
     );
     assert_eq!(r.code, Some(0), "verdict must not fail on coverage loss\n{}{}", r.stdout, r.stderr);
 
@@ -120,13 +173,16 @@ fn a_preempted_shard_is_named_and_the_count_is_conditional_in_the_heading() {
         "heading:\n{}",
         r.stdout
     );
-    assert!(r.stdout.contains("(shards 3, 8) did not report"), "{}", r.stdout);
-    assert!(r.stdout.contains("NOT in this count"), "{}", r.stdout);
+    assert!(r.stdout.contains("(shards 3, 8) returned nothing AND"), "{}", r.stdout);
+    assert!(r.stdout.contains("NOT in\nthis count"), "{}", r.stdout);
+    assert!(r.stderr.contains("could not read shard 3's log"), "{}", r.stderr);
+    assert!(r.stderr.contains("could not read shard 8's log"), "{}", r.stderr);
 
     // The record line names the missing shards and states delivered vs planned.
     let line = r.stderr.lines().find(|l| l.starts_with("fuzz-night: ")).expect("record line");
     assert_eq!(field(line, "shards"), "4/8");
     assert_eq!(field(line, "reporting"), "6");
+    assert_eq!(field(line, "recovered"), "none");
     assert_eq!(field(line, "missing"), "3,8");
     assert_eq!(field(line, "minutes_planned"), "40");
     // 4 x 300s + 120s + 130s = 1450s = 24.2 min of 40 = 60%
@@ -134,7 +190,8 @@ fn a_preempted_shard_is_named_and_the_count_is_conditional_in_the_heading() {
     assert_eq!(field(line, "delivered_pct"), "60");
     assert_eq!(field(line, "budget"), "partial");
     assert_eq!(field(line, "findings"), "23");
-    assert!(r.stderr.contains("::warning::2 of 8 fuzz shard(s) did not report"), "{}", r.stderr);
+    assert_eq!(field(line, "findings_recovered"), "0");
+    assert!(r.stderr.contains("::warning::2 of 8 fuzz shard(s) yielded nothing at all"), "{}", r.stderr);
 
     // The workflow carries the qualification through $GITHUB_OUTPUT.
     let out = fs::read_to_string(&outputs).unwrap();
@@ -149,10 +206,13 @@ fn a_preempted_shard_is_named_and_the_count_is_conditional_in_the_heading() {
 fn a_full_night_says_so_and_a_shard_short_of_budget_still_counts_at_the_bar() {
     let dir = scratch("full");
     let shards = dir.join("shards");
+    let logs = dir.join("logs");
+    fs::create_dir_all(&logs).unwrap();
     for s in 1..=8 {
         complete_shard(&shards, s, 1000, 300);
     }
-    let r = bash(&["scripts/fuzz-night-verdict.sh", shards.to_str().unwrap(), "5", "8", "0"], &[]);
+    let env = [("FUZZ_SHARD_LOG_DIR", logs.to_str().unwrap())];
+    let r = bash(&["scripts/fuzz-night-verdict.sh", shards.to_str().unwrap(), "5", "8", "0"], &env);
     assert_eq!(r.code, Some(0), "{}{}", r.stdout, r.stderr);
     assert!(r.stdout.starts_with("## Nightly fuzz verdict — findings=0 of 8/8 shards"), "{}", r.stdout);
     let line = r.stderr.lines().find(|l| l.starts_with("fuzz-night: ")).unwrap();
@@ -160,14 +220,24 @@ fn a_full_night_says_so_and_a_shard_short_of_budget_still_counts_at_the_bar() {
     assert_eq!(field(line, "delivered_pct"), "100");
     assert_eq!(field(line, "budget"), "full");
     assert!(!r.stdout.contains("did not report"), "{}", r.stdout);
+    // A full night has nothing to recover, and says so rather than staying silent.
+    assert_eq!(field(line, "recovered"), "none");
+    assert_eq!(field(line, "findings_recovered"), "0");
+    assert!(!r.stdout.contains("recovered from job logs"), "{}", r.stdout);
+    assert!(!r.stderr.contains("could not read"), "{}", r.stderr);
 
     // One shard of eight reclaimed = 87.5% delivered: a streak night under the ruling.
     let dir = scratch("seven");
     let shards = dir.join("shards");
+    let logs = dir.join("logs");
+    fs::create_dir_all(&logs).unwrap();
     for s in 1..=7 {
         complete_shard(&shards, s, 1000, 300);
     }
-    let r = bash(&["scripts/fuzz-night-verdict.sh", shards.to_str().unwrap(), "5", "8", "0"], &[]);
+    let r = bash(
+        &["scripts/fuzz-night-verdict.sh", shards.to_str().unwrap(), "5", "8", "0"],
+        &[("FUZZ_SHARD_LOG_DIR", logs.to_str().unwrap())],
+    );
     let line = r.stderr.lines().find(|l| l.starts_with("fuzz-night: ")).unwrap();
     assert_eq!(field(line, "missing"), "8");
     assert_eq!(field(line, "delivered_pct"), "87");
@@ -179,13 +249,127 @@ fn a_full_night_says_so_and_a_shard_short_of_budget_still_counts_at_the_bar() {
 fn no_shard_at_all_is_an_infra_failure_that_names_every_shard() {
     let dir = scratch("none");
     let shards = dir.join("shards");
+    let logs = dir.join("logs");
     fs::create_dir_all(&shards).unwrap();
-    let r = bash(&["scripts/fuzz-night-verdict.sh", shards.to_str().unwrap(), "5", "8", "0"], &[]);
+    // Even with every shard's log on hand, a night where NOTHING uploaded stays
+    // an infra failure: the #976 vacuous-pass rule is a separate judgement the
+    // workflow has already made by then, and recovery does not overturn it.
+    for s in 1..=8 {
+        killed_shard_log(&logs, s, 290, 1000, 0);
+    }
+    let r = bash(
+        &["scripts/fuzz-night-verdict.sh", shards.to_str().unwrap(), "5", "8", "0"],
+        &[("FUZZ_SHARD_LOG_DIR", logs.to_str().unwrap())],
+    );
     assert_eq!(r.code, Some(1));
     let line = r.stderr.lines().find(|l| l.starts_with("fuzz-night: ")).unwrap();
     assert_eq!(field(line, "missing"), "1,2,3,4,5,6,7,8");
+    assert_eq!(field(line, "recovered"), "none");
     assert_eq!(field(line, "budget"), "partial");
     assert!(r.stdout.contains("findings=0 of 0/8 shards"), "{}", r.stdout);
+}
+
+/// #2513: the four shards run 35702279584 lost, read back out of their logs.
+#[test]
+fn a_reclaimed_shard_is_recovered_from_its_job_log_and_lifts_the_night_over_the_line() {
+    let dir = scratch("recovered");
+    let shards = dir.join("shards");
+    let logs = dir.join("logs");
+    // The night of 2026-09-22: 3, 5, 7 and 8 finished; 1, 2, 4 and 6 were
+    // reclaimed mid-budget and uploaded nothing. Their logs still hold
+    // 295s/180s/275s/100s, which is 85% of the plan, not the 50% it was scored.
+    for s in [3, 5, 7, 8] {
+        complete_shard(&shards, s, 1000, 300);
+    }
+    killed_shard_log(&logs, 1, 295, 1108, 0);
+    killed_shard_log(&logs, 2, 180, 565, 0);
+    killed_shard_log(&logs, 4, 275, 1045, 0);
+    killed_shard_log(&logs, 6, 100, 303, 0);
+    let outputs = dir.join("outputs.txt");
+    fs::write(&outputs, "").unwrap();
+
+    let r = bash(
+        &["scripts/fuzz-night-verdict.sh", shards.to_str().unwrap(), "5", "8", "0", "0"],
+        &[
+            ("GITHUB_OUTPUT", outputs.to_str().unwrap()),
+            ("FUZZ_SHARD_LOG_DIR", logs.to_str().unwrap()),
+        ],
+    );
+    assert_eq!(r.code, Some(0), "{}{}", r.stdout, r.stderr);
+
+    let line = r.stderr.lines().find(|l| l.starts_with("fuzz-night: ")).expect("record line");
+    assert_eq!(field(line, "shards"), "4/8", "the recovered shards did NOT finish their budget");
+    assert_eq!(field(line, "reporting"), "4", "`reporting` still means `uploaded`");
+    assert_eq!(field(line, "recovered"), "1@295s,2@180s,4@275s,6@100s");
+    assert_eq!(field(line, "missing"), "none", "nothing was unreadable");
+    // 4 x 300s + 295 + 180 + 275 + 100 = 2050s = 34.2 min of 40 = 85%.
+    assert_eq!(field(line, "minutes_delivered"), "34.2");
+    assert_eq!(field(line, "delivered_pct"), "85");
+    assert_eq!(field(line, "budget"), "full", "the night #924 was told it missed");
+    // 4 x 1000 uploaded + 1108 + 565 + 1045 + 303 recovered.
+    assert_eq!(field(line, "generated"), "7021");
+    assert_eq!(field(line, "findings"), "0");
+    assert_eq!(field(line, "findings_recovered"), "0");
+
+    assert!(r.stdout.contains("(+4 recovered from job logs)"), "heading:\n{}", r.stdout);
+    assert!(r.stdout.contains("only up to the second it is tagged with**"), "{}", r.stdout);
+    assert!(!r.stdout.contains("returned nothing AND"), "nothing is missing now:\n{}", r.stdout);
+    // The per-shard table distinguishes a recovered row from a complete one.
+    assert!(r.stdout.contains("| 1 | 6787873 | recovered | 1108 | 295s |"), "{}", r.stdout);
+    assert!(r.stdout.contains("| 3 | 6787875 | complete | 1000 | 300.0s |"), "{}", r.stdout);
+
+    let out = fs::read_to_string(&outputs).unwrap();
+    for want in ["recovered=1@295s,2@180s,4@275s,6@100s", "findings_recovered=0", "missing=none"] {
+        assert!(out.lines().any(|l| l == want), "missing `{want}` in GITHUB_OUTPUT:\n{out}");
+    }
+}
+
+/// A log that cannot be read is UNKNOWN. Not zero minutes, not a clean shard,
+/// and the reason is printed — an absent value read as a good value is the
+/// defect one level up, and it is the one this whole file exists about.
+#[test]
+fn an_unreadable_log_stays_missing_a_zero_second_kill_is_still_a_reading() {
+    let dir = scratch("unreadable");
+    let shards = dir.join("shards");
+    let logs = dir.join("logs");
+    for s in [3, 5, 7, 8] {
+        complete_shard(&shards, s, 1000, 300);
+    }
+    killed_shard_log(&logs, 1, 295, 1108, 2); // recovered, and it had found things
+    unreadable_shard_log(&logs, 2); // a log with no progress line in it
+    killed_shard_log(&logs, 4, 0, 0, 0); // taken before it fuzzed a second
+    // shard 6: no log file at all — the fetch itself failed.
+
+    let r = bash(
+        &["scripts/fuzz-night-verdict.sh", shards.to_str().unwrap(), "5", "8", "1", "0"],
+        &[("FUZZ_SHARD_LOG_DIR", logs.to_str().unwrap())],
+    );
+    assert_eq!(r.code, Some(0), "{}{}", r.stdout, r.stderr);
+    let line = r.stderr.lines().find(|l| l.starts_with("fuzz-night: ")).expect("record line");
+
+    // A 0s kill is a reading (that shard delivered nothing, and we know it);
+    // a log we could not read is not (that shard's minutes are unknown).
+    assert_eq!(field(line, "recovered"), "1@295s,4@0s");
+    assert_eq!(field(line, "missing"), "2,6");
+    assert!(r.stderr.contains("could not read shard 2's log"), "{}", r.stderr);
+    assert!(r.stderr.contains("could not read shard 6's log"), "{}", r.stderr);
+    assert!(!r.stderr.contains("could not read shard 1's log"), "{}", r.stderr);
+    assert!(r.stderr.contains("UNKNOWN, not zero"), "{}", r.stderr);
+
+    // 4 x 300 + 295 + 0 = 1495s = 24.9 min of 40 = 62%: the two unreadable
+    // shards contribute NOTHING, and the percentage says so rather than
+    // pretending they delivered.
+    assert_eq!(field(line, "minutes_delivered"), "24.9");
+    assert_eq!(field(line, "delivered_pct"), "62");
+    assert_eq!(field(line, "budget"), "partial");
+
+    // 1 uploaded finding + 2 read out of shard 1's log, and the recovered part
+    // is named separately because it is only "2 up to second 295".
+    assert_eq!(field(line, "findings"), "3");
+    assert_eq!(field(line, "findings_recovered"), "2");
+    assert_eq!(field(line, "correctness"), "1", "the class split covers the UPLOADED findings");
+    assert!(r.stdout.contains("this night is NOT green"), "{}", r.stdout);
+    assert!(r.stdout.contains("(shards 2, 6) returned nothing AND"), "{}", r.stdout);
 }
 
 #[test]
@@ -321,6 +505,51 @@ fn the_streak_readers_apply_the_75_percent_line_and_treat_no_record_as_unknown()
     let (full, green, _, text) = score("cancelled", "fuzz-night: shards=8/8 reporting=8 minutes_planned=40 minutes_delivered=40.0 findings=0\n");
     assert_eq!((full.as_str(), green.as_str()), ("0", "0"));
     assert!(text.starts_with("NO VERDICT"), "{text}");
+}
+
+/// #2513, on the reader side: a recovered night counts, and a count read off a
+/// truncated log can never be mistaken for a complete one.
+#[test]
+fn a_recovered_night_counts_and_a_recovered_finding_is_never_a_green_night() {
+    // 2026-09-22 (run 35702279584) as the recovery scores it: 4 uploaded, 4 read
+    // back out of their job logs, 34.2 of 40 minutes — a streak night.
+    let (full, green, cov, text) = score(
+        "success",
+        "fuzz-night: shards=4/8 reporting=4 recovered=1@295s,2@180s,4@275s,6@100s missing=none minutes_planned=40 minutes_delivered=34.2 delivered_pct=85 budget=full generated=7021 throughput=205.5prog/min findings=0 findings_recovered=0 correctness=0 slow=0\n",
+    );
+    assert_eq!((full.as_str(), green.as_str(), cov.as_str()), ("1", "1", "4/8 85%"));
+    assert!(text.starts_with("GREEN (shard(s) 1@295s, 2@180s, 4@275s, 6@100s recovered"), "{text}");
+    assert!(text.contains("counted only up to the second named"), "{text}");
+
+    // The verdict job sees only the shards that uploaded, so it can conclude
+    // success over a night whose reclaimed shard had already found something.
+    // The word GREEN does not survive that, and the streak does not take it.
+    let (full, green, _, text) = score(
+        "success",
+        "fuzz-night: shards=7/8 reporting=7 recovered=8@200s missing=none minutes_planned=40 minutes_delivered=38.3 delivered_pct=95 budget=full findings=2 findings_recovered=2\n",
+    );
+    assert_eq!((full.as_str(), green.as_str()), ("1", "0"), "a recovered finding is not clean");
+    assert!(text.starts_with("NOT GREEN"), "{text}");
+    assert!(text.contains("class unknown"), "{text}");
+
+    // Recovered AND still-missing shards: the two are said apart, because one
+    // set has numbers behind it and the other has none.
+    let (full, green, cov, text) = score(
+        "success",
+        "fuzz-night: shards=4/8 reporting=4 recovered=1@295s,4@0s missing=2,6 minutes_planned=40 minutes_delivered=24.9 delivered_pct=62 budget=partial findings=0 findings_recovered=0\n",
+    );
+    assert_eq!((full.as_str(), green.as_str(), cov.as_str()), ("0", "0", "4/8 62%"));
+    assert!(text.contains("shard(s) 2, 6 did not report: findings unknown, not zero"), "{text}");
+    assert!(text.contains("shard(s) 1@295s, 4@0s recovered from their job logs"), "{text}");
+
+    // A line from before the recovery existed scores exactly as it used to:
+    // absent means no recovery was attempted, not zero findings recovered.
+    let (full, green, _, text) = score(
+        "success",
+        "fuzz-night: shards=7/8 reporting=7 missing=8 minutes_planned=40 minutes_delivered=35.0 delivered_pct=87 budget=full findings=0 correctness=0 slow=0\n",
+    );
+    assert_eq!((full.as_str(), green.as_str()), ("1", "1"));
+    assert_eq!(text, "GREEN (shard(s) 8 did not report: findings unknown, not zero)");
 }
 
 /// The workflow calls the scripts by these paths; a rename would leave the
