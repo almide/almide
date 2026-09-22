@@ -1,14 +1,24 @@
 // @contract: C-226
-// The SELF-TAIL-RECURSIVE column of the mut-parameter promise, for a parameter
-// that is not `Bytes`. `mut_param_call_chain.almd` already threads a `mut Bytes`
-// buffer through a tail-recursive `if` — and `Bytes` was exactly the type the
-// native loop rewrite exempted from its reset-every-borrow-to-owned rule, so the
-// contract's tail-recursion clause was evidenced only on the one type that could
-// not fail (#2293). A `mut List` or `mut Map` threaded the same way was handed to
-// the loop BY VALUE on native: the caller kept its own copy and every push or
-// insert the loop made was lost, silently, while the wasm legs (which reach the
-// shape through the C-132 write-back rewrite, not a loop) answered correctly.
-// A scalar `mut` parameter reassigned inside the loop is the same cell.
+// The TAIL-RECURSIVE columns of the mut-parameter promise that were never
+// measured — the whole lesson of #2293 in one sentence: the contract's
+// tail-recursion evidence (`mut_param_call_chain.almd`) threads a `mut Bytes`
+// buffer, and `Bytes` was exactly the type the native loop rewrite EXEMPTED from
+// its reset-every-borrow-to-owned rule, so THE ONE COLUMN THAT COULD NOT FAIL WAS
+// THE ONLY ONE MEASURED. Read a family's evidence for which cells it can reach,
+// not for how many rows it has: a fixture that only exercises the exempt case
+// proves the exemption, not the rule.
+//
+// The cells this adds:
+//   - SELF tail recursion with a parameter that is not `Bytes` — `mut List`,
+//     `mut Map`, and a scalar reassigned in the loop body. Each was handed to
+//     the loop BY VALUE on native: the caller kept its own copy and every push,
+//     insert or increment was lost, silently, while both wasm legs (which reach
+//     the shape through the C-132 write-back rewrite, not a loop) were right.
+//   - MUTUAL tail recursion with a `mut` parameter, which failed the other way
+//     round: the merged tag-dispatch loop builds its frame slots owned and
+//     non-`mut`, so native emitted Rust that did not compile and BOTH wasm legs
+//     printed the entry value. That group is no longer merged.
+// `spec/lang/tco_test.almd` holds the per-leg twins of both.
 effect fn push_down(mut seen: List[Int], n: Int) -> Unit = if n == 0 then ()
 else {
   list.push(seen, n)
@@ -27,6 +37,21 @@ else {
   bump_down(d, n - 1)!
 }
 
+// A mutually tail-recursive scalar pair, the shape `mutual_tco` merges into one
+// tag-dispatched loop. Plain `fn`s: the merge only ever considered non-effect
+// all-scalar groups, which is exactly where a `mut` parameter went missing.
+fn even_step(mut d: Int, n: Int) -> Int = if n == 0 then d
+else {
+  d = d + 1
+  odd_step(d, n - 1)
+}
+
+fn odd_step(mut d: Int, n: Int) -> Int = if n == 0 then d
+else {
+  d = d + 10
+  even_step(d, n - 1)
+}
+
 effect fn main() -> Unit = {
   var seen: List[Int] = []
   push_down(seen, 4)!
@@ -42,4 +67,7 @@ effect fn main() -> Unit = {
   var big: List[Int] = []
   push_down(big, 500)!
   println("repeat len=${list.len(big)} last=${big[499]}")
+  var step = 0
+  let total = even_step(step, 4)
+  println("mutual total=${total} caller=${step}")
 }

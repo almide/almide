@@ -168,3 +168,50 @@ test "tco declines a mut param the self-call rebinds" {
   assert_eq(list.len(a), 1)
   assert_eq(a[0], 3)
 }
+
+// The MUTUAL cell of the same family, and the worse of the two. A group of
+// mutually tail-recursive scalar functions is merged into one tag-dispatched
+// loop, whose frame slots are built owned and non-`mut` by construction — so a
+// `mut` parameter lost its write-back there too: native emitted Rust that did
+// not compile (E0425, the parameter substituted away into a frame slot) and
+// BOTH wasm legs printed `0` where the answer is 22. The merge is now declined
+// for a group with a `mut` parameter, which costs it only its stack frames.
+// Removing that clause from `mutual_tco::candidate` must turn this test red.
+fn even_step(mut d: Int, n: Int) -> Int = if n == 0 then d
+else {
+  d = d + 1
+  odd_step(d, n - 1)
+}
+
+fn odd_step(mut d: Int, n: Int) -> Int = if n == 0 then d
+else {
+  d = d + 10
+  even_step(d, n - 1)
+}
+
+// The same pair with the recursion bound to a local, so neither call is a tail
+// call and the group is never a merge candidate — the control for the rows above.
+fn even_step_bound(mut d: Int, n: Int) -> Int = if n == 0 then d
+else {
+  d = d + 1
+  let r = odd_step_bound(d, n - 1)
+  r
+}
+
+fn odd_step_bound(mut d: Int, n: Int) -> Int = if n == 0 then d
+else {
+  d = d + 10
+  let r = even_step_bound(d, n - 1)
+  r
+}
+
+test "mutual tail recursion keeps the caller's mut variable" {
+  var a = 0
+  let inside_a = even_step(a, 4)
+  var b = 0
+  let inside_b = even_step_bound(b, 4)
+  assert_eq(inside_a, inside_b)
+  assert_eq(a, b)
+  assert_eq(inside_a, 22)
+  assert_eq(a, 22)
+}

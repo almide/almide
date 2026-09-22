@@ -74,7 +74,9 @@ fn candidate(f: &IrFunction) -> bool {
         // wasm leg printed the entry value instead of the mutated one. Leave
         // such a group in plain mutual recursion, which answers correctly on
         // both targets; the group merely keeps its stack frames (#2293's
-        // family, the mutual cell).
+        // family, the mutual cell). Removing this clause turns
+        // `spec/lang/tco_test.almd` and
+        // `spec/wasm_cross/mut_param_tail_recursion.almd` red on every leg.
         && f.params.iter().all(|p| !p.is_mut)
 }
 
