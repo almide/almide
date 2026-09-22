@@ -1,5 +1,6 @@
 ---
 source: tests/codegen_snapshot_test.rs
+assertion_line: 140
 expression: code
 ---
 pub fn almide_rt_list_len<T>(xs: &[T]) -> i64 { xs.len() as i64 }
@@ -375,6 +376,9 @@ pub fn almide_rt_list_binary_search(xs: &[i64], target: i64) -> Option<i64> {
 }
 
 //__ALMIDE_RT_BOUNDARY__
-pub fn doubles(xs: &[i64]) -> Vec<i64> {
-    (xs).iter().cloned().map(|x| (x).wrapping_mul(2i64)).collect::<Vec<_>>()
+pub fn positives(xs: Vec<i64>) -> Vec<i64> {
+    (xs).into_iter().filter(|x| {
+        let x: i64 = (*x);
+        (x > 0i64)
+    }).collect::<Vec<_>>()
 }
