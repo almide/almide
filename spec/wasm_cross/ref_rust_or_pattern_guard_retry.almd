@@ -1,0 +1,50 @@
+// @contract: C-352
+// rust tests/ui/or-patterns/ — search-via-bindings.rs `search`, ported with the
+// reference's TUPLE alternatives (`(a, _) | (_, a)` → `(1, _) | (_, 1)`, the
+// binder replaced by a literal per C-323 / E080) plus the same rule on a
+// string and an Option subject. The guard-count rule (C-352) says both
+// alternatives match `(1, 1)`, so the guard runs twice and every line prints 2.
+// The pointer-typed subjects are the point (#2464): the structural wasm leg
+// parked the subject in the scratch local the guard's `!` also tees, so a
+// false guard handed the next alternative a clobbered subject and it fell
+// through to `_` (1 per line). The scalar-subject spellings live in
+// ref_rust_or_pattern_guard_count.almd.
+var hits = 0
+
+effect fn hit_false() -> Bool = {
+  hits = hits + 1
+  false
+}
+
+effect fn tuple_alts(x: (Int, Int)) -> Int = {
+  hits = 0
+  let r = match x {
+    (1, _) | (_, 1) if hit_false()! => 100,
+    _ => 0,
+  }
+  r + hits
+}
+
+effect fn string_alts(x: String) -> Int = {
+  hits = 0
+  let r = match x {
+    "a" | "a" if hit_false()! => 100,
+    _ => 0,
+  }
+  r + hits
+}
+
+effect fn option_alts(x: Int?) -> Int = {
+  hits = 0
+  let r = match x {
+    some(_) | some(3) if hit_false()! => 100,
+    _ => 0,
+  }
+  r + hits
+}
+
+effect fn main() -> Unit = {
+  println(int.to_string(tuple_alts((1, 1))!))
+  println(int.to_string(string_alts("a")!))
+  println(int.to_string(option_alts(some(3))!))
+}
