@@ -19,6 +19,18 @@ test "int.rotate_left" {
   assert_eq(int.rotate_left(128, 1, 8), 1)
 }
 
+// #2492 — the count is reduced into [0, bits) Euclidean-ly: a negative count
+// rotates the other way (it used to become an over-wide shift and return 0).
+test "int.rotate_* with a negative count rotates the other way" {
+  assert_eq(int.rotate_left(1, -1, 8), 128)
+  assert_eq(int.rotate_right(1, -1, 8), 2)
+  assert_eq(int.rotate_left(1, -9, 8), 128)
+  assert_eq(int.rotate_right(128, -1, 8), 1)
+  assert_eq(int.rotate_left(1, -1, 64), -9223372036854775808)
+  assert_eq(int.rotate_right(1, -63, 64), -9223372036854775808)
+  assert_eq(int.rotate_left(1, -64, 64), 1)
+}
+
 test "int.to_u32" {
   assert_eq(int.to_u32(255), 255)
   assert_eq(int.to_u32(0), 0)
