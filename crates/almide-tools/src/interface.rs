@@ -683,22 +683,35 @@ fn detect_decl_name(trimmed: &str) -> Option<std::string::String> {
 }
 
 /// Walk backward from the declaration at `lines[i]` over the contiguous run
-/// of `//` comment lines directly above it, splitting them into doc text,
-/// `example:` entries, and a `deprecated[: reason]` marker.
+/// of `//` / `///` comment lines directly above it, splitting them into doc
+/// text, `example:` entries, and a `deprecated[: reason]` marker.
+///
+/// `///` is the DOC form (#2436): when the run holds any `///` line, only
+/// those lines are the doc and the plain `//` lines in the same run are
+/// design notes, dropped. A run of plain `//` lines only is still the doc
+/// (the pre-#2436 reading, which every user module on the file route relies
+/// on). This is what makes the two routes agree for a documented stdlib fn:
+/// the embedded source keeps `///` and blanks `//`, so the by-name route
+/// sees exactly the lines the file route selects.
 fn collect_preceding_doc(lines: &[&str], i: usize) -> DocInfo {
     let mut doc_lines = Vec::new();
+    let mut note_lines = Vec::new();
     let mut examples = Vec::new();
     let mut deprecated = None;
     let mut j = i;
     while j > 0 {
         j -= 1;
         let prev = lines[j].trim();
-        let comment = if let Some(c) = prev.strip_prefix("// ") {
-            Some(c)
+        let (comment, is_doc) = if let Some(c) = prev.strip_prefix("/// ") {
+            (Some(c), true)
+        } else if let Some(c) = prev.strip_prefix("///") {
+            (Some(c), true)
+        } else if let Some(c) = prev.strip_prefix("// ") {
+            (Some(c), false)
         } else if let Some(c) = prev.strip_prefix("//") {
-            Some(c)
+            (Some(c), false)
         } else {
-            None
+            (None, false)
         };
         match comment {
             Some(c) => {
@@ -708,8 +721,10 @@ fn collect_preceding_doc(lines: &[&str], i: usize) -> DocInfo {
                     deprecated = Some(dep.trim().to_string());
                 } else if c.starts_with("deprecated") {
                     deprecated = Some(String::new());
-                } else {
+                } else if is_doc {
                     doc_lines.push(c.to_string());
+                } else {
+                    note_lines.push(c.to_string());
                 }
             }
             None => {
@@ -743,6 +758,7 @@ fn collect_preceding_doc(lines: &[&str], i: usize) -> DocInfo {
             }
         }
     }
+    let mut doc_lines = if doc_lines.is_empty() { note_lines } else { doc_lines };
     doc_lines.reverse();
     examples.reverse();
     let doc = if doc_lines.is_empty() { None } else { Some(doc_lines.join("\n")) };
@@ -789,5 +805,32 @@ fn gone() -> Unit = ()
         assert_eq!(direct.deprecated, None);
         let gone = &docs["gone"];
         assert_eq!(gone.deprecated.as_deref(), Some("removed with the v2 surface"));
+    }
+
+    /// #2436: `///` is the doc form. In a mixed run the `///` lines are the
+    /// doc and the `//` lines are notes (dropped); the `///` prefix itself
+    /// never leaks into the text; a `//`-only run is still read as before.
+    #[test]
+    fn triple_slash_selects_the_doc_and_drops_notes_in_the_same_run() {
+        let src = "\
+// Design note: the split surface is exactly {split, split_once}.
+/// The split-at-first-separator pair of `split`.
+/// none ⇔ sep absent.
+@intrinsic(\"almide_rt_string_split_once\")
+fn split_once(s: String, sep: String) -> (String, String)? = _
+
+// Plain run still documents.
+fn plain() -> Unit = ()
+
+///
+fn empty_doc() -> Unit = ()
+";
+        let docs = extract_docs(src);
+        assert_eq!(
+            docs["split_once"].doc.as_deref(),
+            Some("The split-at-first-separator pair of `split`.\nnone ⇔ sep absent.")
+        );
+        assert_eq!(docs["plain"].doc.as_deref(), Some("Plain run still documents."));
+        assert_eq!(docs["empty_doc"].doc.as_deref(), Some(""));
     }
 }
