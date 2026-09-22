@@ -239,11 +239,15 @@ pub(crate) fn build_native_cached(
         return Ok(bin_path);
     }
 
-    let result = if use_test_harness {
-        cargo_build_test_with_native(&rs_code, &project_dir, native_deps, source_root)
-    } else {
-        cargo_build_generated_with_native(&rs_code, &project_dir, release, native_deps, source_root)
-    };
+    // One rustc ICE on a stale incremental session clears the session store
+    // (under this same lock) and rebuilds once; see `build_recovering_from_ice`.
+    let result = super::cargo_build::build_recovering_from_ice(&project_dir, || {
+        if use_test_harness {
+            cargo_build_test_with_native(rs_code, &project_dir, native_deps, source_root)
+        } else {
+            cargo_build_generated_with_native(rs_code, &project_dir, release, native_deps, source_root)
+        }
+    });
 
     match result {
         Ok(built_path) => {
