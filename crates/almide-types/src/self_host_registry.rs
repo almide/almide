@@ -250,7 +250,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         ),
         (
             crate::embedded::SRC_MATRIX_FUSED,
-            &[("matrix_mul_scaled", "matrix.mul_scaled"), ("matrix_mul_f32", "matrix.mul_f32"), ("matrix_mul_f32_scaled", "matrix.mul_f32_scaled"), ("matrix_mul_f32_t", "matrix.mul_f32_t"), ("matrix_mul_f32_t_scaled", "matrix.mul_f32_t_scaled"), ("matrix_zeros_f32", "matrix.zeros_f32"), ("matrix_ones_f32", "matrix.ones_f32"), ("matrix_attention_weights", "matrix.attention_weights"), ("matrix_scaled_dot_product_attention", "matrix.scaled_dot_product_attention")],
+            &[("matrix_mul_scaled", "matrix.mul_scaled"), ("matrix_mul_f32", "matrix.mul_f32"), ("matrix_mul_f32_scaled", "matrix.mul_f32_scaled"), ("matrix_mul_f32_t", "matrix.mul_f32_t"), ("matrix_mul_f32_t_scaled", "matrix.mul_f32_t_scaled"), ("matrix_zeros_f32", "matrix.zeros_f32"), ("matrix_ones_f32", "matrix.ones_f32"), ("matrix_attention_weights", "matrix.attention_weights"), ("matrix_scaled_dot_product_attention", "matrix.scaled_dot_product_attention"), ("matrix_fma", "matrix.fma"), ("matrix_fma3", "matrix.fma3"), ("matrix_fused_gemm_bias_scale_gelu", "matrix.fused_gemm_bias_scale_gelu"), ("matrix_linear_row_gelu", "matrix.linear_row_gelu"), ("matrix_pre_norm_linear", "matrix.pre_norm_linear"), ("matrix_append_rows", "matrix.append_rows"), ("matrix_linear_f32_row_no_bias", "matrix.linear_f32_row_no_bias")],
         ),
         (
             crate::embedded::SRC_MATRIX_EXT,

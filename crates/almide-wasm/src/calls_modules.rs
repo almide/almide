@@ -284,7 +284,11 @@ impl Emitter<'_> {
                 if let Some(out) = self.lower_matrix_call(func.as_str(), args)? {
                     return Ok(out);
                 }
-                unsup(&format!("call:matrix.{func}"))
+                // No arm: the prim-free compositions (stdlib/matrix_fused.almd,
+                // whitelist.rs MATRIX_COMPOSITIONS) link like any audited
+                // self-host body — their leaves are the arms above. Anything
+                // else stays the honest `call:matrix.<fn>` wall.
+                self.lower_linked_call("matrix", func.as_str(), args, tail)
             }
             CallTarget::Module { module, func, .. } if module.as_str() == "fan" => {
                 if let Some(out) = self.lower_fan_call(func.as_str(), args)? {
