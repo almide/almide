@@ -422,6 +422,7 @@ fn strip_borrows_at_tco_calls(
 /// - ALL self-recursive calls are in tail position
 /// - Not a test helper (name starts with `__test_`)
 /// - Return type can be default-initialized (primitives, tuples of primitives, etc.)
+/// - Every `mut` parameter is an identity carry in every self-call
 ///
 /// `pub` so borrow inference can pre-bake the owned-param signature these
 /// functions will get (their params become loop state → owned), keeping callers'
@@ -434,7 +435,21 @@ pub fn is_tco_candidate(func: &IrFunction) -> bool {
         return false;
     }
     let (has_any, all_in_tail) = all_self_calls_in_tail_pos(&func.body, &func.name, func.is_effect);
-    has_any && all_in_tail
+    if !(has_any && all_in_tail) {
+        return false;
+    }
+    // A `mut` parameter's borrow is not an optimisation: the language promises
+    // that the caller's `var` binding is what the callee writes into
+    // (`param_borrow` honours the keyword before any body policy). The loop
+    // form can keep that promise only for a slot it never rebinds
+    // ([`loop_keeps_borrow`]); a `mut` param REBOUND by a self-tail-call would
+    // have to store a reference to a loop-local. Refuse the rewrite for such a
+    // function rather than reset its borrow to `Own` — plain recursion is
+    // correct on every target, where the reset printed a silently wrong answer
+    // (#2293: `count_down(seen, 3)` said the caller saw 0 of 3 pushes).
+    let identity = tco_identity_carried(func);
+    !func.params.iter().enumerate()
+        .any(|(i, p)| p.is_mut && !loop_keeps_borrow(p, identity.get(i).copied().unwrap_or(false)))
 }
 
 /// Scan an expression tree, returning (has_any_self_call, all_self_calls_in_tail_position).
