@@ -545,7 +545,7 @@ pub(crate) fn emit_json_value_pretty_helper(
     i.local_get(cursor).local_get(v).i64_load(m_pay).call(F_APPEND_I64).local_set(cursor);
     i.else_();
     // 3 float — LINKED float.to_string, minus a trailing ".0"; a NON-FINITE
-    // float is the JSON `null` (#2499, C-361): `x != x` is NaN, `|x| == inf`
+    // float is the JSON `null` (#2499, C-356): `x != x` is NaN, `|x| == inf`
     // is either infinity, and JSON has no spelling for any of the three.
     i.local_get(t).i32_const(3).i32_eq().if_(BlockType::Empty);
     emit_nonfinite_test(&mut i, v, m_pay);
@@ -708,7 +708,7 @@ pub(crate) fn emit_json_value_helper(
     i.local_get(cursor).local_get(v).i64_load(m_pay).call(F_APPEND_I64).local_set(cursor);
     i.else_();
     // 3 float — LINKED float.to_string, minus a trailing ".0"; a NON-FINITE
-    // float is the JSON `null` (#2499, C-361): `x != x` is NaN, `|x| == inf`
+    // float is the JSON `null` (#2499, C-356): `x != x` is NaN, `|x| == inf`
     // is either infinity, and JSON has no spelling for any of the three.
     i.local_get(t).i32_const(3).i32_eq().if_(BlockType::Empty);
     emit_nonfinite_test(&mut i, v, m_pay);

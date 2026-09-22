@@ -1,4 +1,4 @@
-// @contract: C-361
+// @contract: C-356
 // A non-finite Float in a Value — NaN, +inf, -inf — is the JSON `null` in
 // `json.stringify`, `json.stringify_pretty`, `value.stringify`, the `${v}`
 // display of a Value and a Codec-encoded record, on every leg (#2499). JSON

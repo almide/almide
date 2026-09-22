@@ -1,4 +1,4 @@
-// @contract: C-363
+// @contract: C-358
 // `math.choose(n, k)` is the exact binomial coefficient whenever it fits in
 // an Int, and its two's-complement wrap (mod 2^64, like every Int product)
 // when it does not, on every leg (#2491). The old running product

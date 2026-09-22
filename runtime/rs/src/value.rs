@@ -386,7 +386,7 @@ pub fn almide_rt_value_tagged_variant(v: AlmideValue) -> Result<(String, AlmideV
 // ── Stringify ──
 
 /// A Float leaf of a Value in its JSON text: Rust's `{}` Display for a finite
-/// value (`3`, `-0`, `1e300`), and `null` for NaN and ±infinity (#2499, C-361):
+/// value (`3`, `-0`, `1e300`), and `null` for NaN and ±infinity (#2499, C-356):
 /// JSON has no spelling for them, `json.parse` refused the `NaN` / `inf` /
 /// `-inf` this used to write, and the two lineages (refuse: Go, Ruby; write
 /// `null`: JavaScript, serde_json) leave `null` as the only total answer for a

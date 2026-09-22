@@ -161,7 +161,7 @@ fn wrap_mul(a: Int, b: Int, bits: Int) -> Int = _
 
 /// Low bits of a rotated right by n mod bits; bits <= 0 aborts.
 // The count is reduced into [0, bits) Euclidean-ly: a negative count rotates
-// the other way (#2492, C-363). bits <= 0 aborts (C-047), bits >= 64
+// the other way (#2492, C-358). bits <= 0 aborts (C-047), bits >= 64
 // saturates the mask (C-048).
 @intrinsic("almide_rt_int_rotate_right")
 fn rotate_right(a: Int, n: Int, bits: Int) -> Int = _
