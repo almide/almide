@@ -9,7 +9,8 @@
 // the ctor NAMES were registered to builders of it — sound only while the decl never
 // reached the program; with `import bytes` the decl arrived, the call site passed
 // the variant, and the structural leg walled on the representation split.) Reads
-// and sets cross-call the PROVEN registered primitives (type-identical sigs). The
+// cross-call the PROVEN registered primitives (type-identical sigs); sets splice
+// locally (`__bt_set`, below — the registered setters take a `mut` receiver). The
 // functional append twins cannot be cross-called (the stdlib sig types them as v0's
 // in-place `-> Unit`), so the write path re-implements the grow-append locally (the
 // __bam shape). v0's write forms are IN-PLACE appends; v1 rewrites the statement
@@ -95,29 +96,53 @@ fn bytes_write_float32(b: Bytes, v: Float32, e: Endian) -> Bytes = {
   __bt_append(b, prim.f32bits(prim.f2f32(f)), 4, __endian_is_le(e))
 }
 
-fn bytes_set_uint16(b: Bytes, offset: Int, v: Int, e: Endian) -> Unit = if __endian_is_le(e) then bytes.set_u16_le(
-  b,
-  offset,
-  v,
-)
-else bytes.set_u16_be(b, offset, v)
+// In-place splice of k bytes of `bits` at `offset`, with bytes_mutate's window
+// rule (a negative offset, or a window past the end, is a silent no-op; the room
+// test subtracts, so a huge offset cannot overflow into the buffer). The sets do
+// NOT cross-call the registered `bytes.set_*` primitives: those declare their
+// receiver `mut` (#2466), and a registry body's `b` is a plain borrowed param —
+// the store lands in the caller's block through the shared handle, like every
+// bytes_mutate impl.
+fn __bt_put(p: Int, bits: Int, k: Int, le: Bool) -> Int = if le then __bt_le(p, bits, k, 0)
+else __bt_be(p, bits, k, 0)
 
-fn bytes_set_uint32(b: Bytes, offset: Int, v: Int, e: Endian) -> Unit = if __endian_is_le(e) then bytes.set_u32_le(
-  b,
-  offset,
-  v,
-)
-else bytes.set_u32_be(b, offset, v)
+fn __bt_set(b: Bytes, offset: Int, bits: Int, k: Int, le: Bool) -> Unit = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let _ = if offset >= 0 then (if offset <= n - k then __bt_put(
+    prim.handle(b) + 12 + offset,
+    bits,
+    k,
+    le,
+  )
+  else 0)
+  else 0
+}
 
-fn bytes_set_int32(b: Bytes, offset: Int, v: Int, e: Endian) -> Unit = if __endian_is_le(e) then bytes.set_i32_le(
+fn bytes_set_uint16(b: Bytes, offset: Int, v: Int, e: Endian) -> Unit = __bt_set(
   b,
   offset,
   v,
+  2,
+  __endian_is_le(e),
 )
-else bytes.set_i32_be(b, offset, v)
+
+fn bytes_set_uint32(b: Bytes, offset: Int, v: Int, e: Endian) -> Unit = __bt_set(
+  b,
+  offset,
+  v,
+  4,
+  __endian_is_le(e),
+)
+
+fn bytes_set_int32(b: Bytes, offset: Int, v: Int, e: Endian) -> Unit = __bt_set(
+  b,
+  offset,
+  v,
+  4,
+  __endian_is_le(e),
+)
 
 fn bytes_set_float32(b: Bytes, offset: Int, v: Float32, e: Endian) -> Unit = {
   let f = float.from_float32(v)
-  if __endian_is_le(e) then bytes.set_f32_le(b, offset, f)
-  else bytes.set_f32_be(b, offset, f)
+  __bt_set(b, offset, prim.f32bits(prim.f2f32(f)), 4, __endian_is_le(e))
 }
