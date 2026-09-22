@@ -23,7 +23,12 @@
 // Testing the file rather than a copy is the point: a copy would pass while the
 // shipped constant drifted.
 
-#[allow(dead_code)]
+// The shipped runtime source is linted nowhere else — it is embedded as TEXT,
+// never compiled as a crate. Including it here puts it in front of clippy for
+// the first time, and a lint fired on it would be pressure to change what ships
+// for a test's sake. Silence the lints on the included text; the test file's own
+// code below is not in this module and is linted normally.
+#[allow(dead_code, clippy::all, clippy::pedantic)]
 mod runtime_random {
     include!(concat!(
         env!("CARGO_MANIFEST_DIR"),

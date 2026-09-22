@@ -191,6 +191,7 @@ mod tco;
 mod types_table;
 mod value;
 mod utf8_helpers;
+mod json_helpers;
 mod value_helpers;
 mod whitelist;
 

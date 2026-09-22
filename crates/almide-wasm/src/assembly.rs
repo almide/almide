@@ -409,15 +409,15 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
 /// complexity budget).
 fn helper_body(h: &Helper, work: &FnWork, helper_snapshot: &[Helper], hpos: usize) -> Function {
     match h {
-    Helper::JsonValue { float_to_string, frags } => value_helpers::emit_json_value_helper(
+    Helper::JsonValue { float_to_string, frags } => json_helpers::emit_json_value_helper(
         work.helper_base.get(),
         helper_snapshot,
         *float_to_string,
         *frags,
     ),
-    Helper::JsonQuote { frags } => value_helpers::emit_json_quote_helper(*frags),
+    Helper::JsonQuote { frags } => json_helpers::emit_json_quote_helper(*frags),
     Helper::JsonValuePretty { float_to_string, frags, pfrags } => {
-        value_helpers::emit_json_value_pretty_helper(
+        json_helpers::emit_json_value_pretty_helper(
             work.helper_base.get(),
             helper_snapshot,
             *float_to_string,
