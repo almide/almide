@@ -1576,6 +1576,7 @@ since     = "0.27.8"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/env_args.almd", class = "fixture" },
+  { path = "tests/env_args_verbatim_test.rs", name = "a_program_argument_spelled_double_dash_reaches_env_args_on_every_leg", class = "fixture" },
 ]
 [[contract]]
 id        = "C-119"

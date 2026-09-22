@@ -17,7 +17,10 @@ effect fn main() -> Unit = {
 
 ### `env.args() -> List[String]`
 
-Get the command-line arguments as a list of strings.
+Get the command-line arguments as a list of strings: `argv[1..]`, verbatim, on
+every target. A `--` among the program's arguments is the program's (`./p a -- b`
+sees `["a", "--", "b"]`); `almide run app.almd -- a -- b` consumes its own
+separator and forwards the rest unchanged.
 
 ```almd check
 import env
