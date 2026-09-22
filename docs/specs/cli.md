@@ -1,6 +1,6 @@
 # CLI Specification
 
-> Last updated: 2026-09-10
+> Last updated: 2026-09-22
 
 ## Overview
 
@@ -566,6 +566,28 @@ almide clean
 
 ---
 
+### `almide verify`
+
+プログラムの flight-grade 証明書（ownership / names / caps / call-modes の witness）を、**独立版数の別バイナリ `almide-verify`** に再検査させる (#2152)。`almide verify` 自身は検査器を持たない subprocess shim で、`almide-verify` を **almide 実行ファイルの隣 → PATH** の順に探して起動し、標準入出力と終了コードをそのまま返す。見つからなければ **linked fallback は無く**、名前付きエラー `error[verifier-missing]` で終了コード 127。
+
+```bash
+almide verify app.almd                    # 証明書 bundle を生成し almide-verify bundle に渡す
+almide verify app.almd --emit app.bundle  # bundle をファイルに残す（almide-verify が無くても書く）
+almide verify ownership w.cert            # .almd 以外の引数は almide-verify にそのまま渡る
+almide-verify --version                   # 検査器自身の版数（コンパイラとは独立）
+```
+
+- `almide` 側で走るのは **untrusted な producer** だけ（`almide_mir::pipeline::program_witnesses` がプログラムを MIR に下ろし、`crate::certificate` の witness を bundle に書く）。判定は常に `almide-verify`。
+- `almide-verify` はコンパイラの crate を一切リンクしない（`crates/almide-verify`、依存ゼロ）。各性質の判定は `proofs/` の Coq 検査器（`check_xc` / `check_names_cert` / `check_caps_cert` / `check_prog_cert` / `check_modes_cert`）の転写で、定理は持たない。抽出版検査器との一致は `proofs/gate.sh`（全行 + seeded ランダム差分）と `proofs/corpus-wall.sh`（コーパス全 witness）がゲートする。
+- lowering subset の外の関数は bundle に `uncertified` として名前つきで載る（黙って飛ばさない）。
+- `./almide.toml` の `[permissions].allow` があれば effect fn の宣言 capability をそれに絞る（caps witness が reject できるようになる）。
+
+`almide-verify` の終了コード: 0 = 全 witness ACCEPT（CERTIFIED）、1 = REJECT あり、または witness が 0 件、3 = 全 ACCEPT だが uncertified な関数あり（INCOMPLETE）、2 = 使い方の誤り・読めない入力・不正な bundle。
+
+テスト: `tests/verify_shim_test.rs`（shim の委譲・不在時の名前付きエラー・終了コード転送）、`crates/almide-verify/tests/coq_examples.rs`（Coq の全 `Example` と `build-checker.sh` の固定行）、`crates/almide-verify/tests/cli.rs`
+
+---
+
 ## Legacy Mode
 
 ファイル名が `.almd` で終わる引数を最初に指定すると、`emit` コマンドとして扱われる:
@@ -585,6 +607,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 |---|---|
 | 0 | 成功 |
 | 1 | コンパイルエラー、テスト失敗、依存解決失敗 |
+| 127 | `almide verify`: 独立検査器 `almide-verify` が見つからない（`error[verifier-missing]`） |
 
 ---
 
