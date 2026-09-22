@@ -284,28 +284,73 @@ fn main() -> Unit = {
 ## Signature index (23 functions)
 
 ```
+// Magnitude of n; min_value wraps to itself.
 math.abs(n: Int) -> Int
+
+// Arctangent in radians, within -pi/2..pi/2.
 math.atan(x: Float) -> Float
+
+// Binomial n over k; 0 if k < 0 or k > n; overflow wraps.
 math.choose(n: Int, k: Int) -> Int
+
+// Cosine of x radians; NaN for infinite x.
 math.cos(x: Float) -> Float
+
+// Euler's number, 2.718281828459045.
 math.e() -> Float
+
+// e to the x; overflows to inf above ~709.78.
 math.exp(x: Float) -> Float
+
+// Product 1..n; 1 for n <= 0; wraps past 20.
 math.factorial(n: Int) -> Int
+
+// Greater; a NaN operand is ignored; 0.0 > -0.0.
 math.fmax(a: Float, b: Float) -> Float
+
+// Lesser; a NaN operand is ignored; -0.0 < 0.0.
 math.fmin(a: Float, b: Float) -> Float
+
+// base to the exp; NaN for negative base, fractional exp.
 math.fpow(base: Float, exp: Float) -> Float
+
+// Natural log; -inf at 0, NaN for negative x.
 math.log(x: Float) -> Float
+
+// Base-10 log; -inf at 0, NaN for negative x.
 math.log10(x: Float) -> Float
+
+// Base-2 log; -inf at 0, NaN for negative x.
 math.log2(x: Float) -> Float
+
+// ln Gamma(x), Lanczos; inf at 0, unreliable for x < 0.
 math.log_gamma(x: Float) -> Float
+
+// Greater of a and b.
 math.max(a: Int, b: Int) -> Int
+
+// Lesser of a and b.
 math.min(a: Int, b: Int) -> Int
+
+// The circle constant, 3.141592653589793.
 math.pi() -> Float
+
+// base to the exp, wrapping; negative exp aborts.
 math.pow(base: Int, exp: Int) -> Int
+
+// -1, 0 or 1 by the sign of n.
 math.sign(n: Int) -> Int
+
+// Sine of x radians; NaN for infinite x.
 math.sin(x: Float) -> Float
+
+// Square root; NaN below 0, -0.0 stays -0.0.
 math.sqrt(x: Float) -> Float
+
+// Tangent of x radians; NaN for infinite x.
 math.tan(x: Float) -> Float
+
+// Hyperbolic tangent in -1..1; inf gives 1.0.
 math.tanh(x: Float) -> Float
 ```
 
