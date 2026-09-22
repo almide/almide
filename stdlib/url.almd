@@ -15,6 +15,7 @@
 // A parsed URL. `port` is absent when the authority carries no `:port`;
 // `path` is "" when the authority is not followed by `/`; `query` and
 // `fragment` are "" when their separators are absent.
+/// Parsed URL; port none, other parts "" when absent.
 type Url = { scheme: String, host: String, port: Int?, path: String, query: String, fragment: String }
 
 // Split at the FIRST occurrence of `sep`: (before, after, found).
@@ -51,6 +52,7 @@ fn __url_enc_char(c: String) -> String = match string.codepoint(c) {
 // See also: url.decode_component (the inverse), url.build_query.
 // Example: url.encode_component("a b") == "a%20b"
 // Example: url.encode_component("A-z_.~09") == "A-z_.~09"
+/// All but A-Za-z0-9-._~ as UTF-8 %XX escapes.
 fn encode_component(s: String) -> String = s |> string.chars |> list.map((c) => __url_enc_char(c)) |> list.join("")
 
 fn __url_hex_val(c: String) -> Int? = match string.codepoint(c) {
@@ -155,6 +157,7 @@ else {
 // Example: match url.decode_component("a%20b") { ok(v) => v == "a b", err(_) => false }
 // Example: match url.decode_component("%zz") { ok(_) => false, err(_) => true }
 // Example: match url.decode_component(url.encode_component("日本語 ok~")) { ok(v) => v == "日本語 ok~", err(_) => false }
+/// Percent-decoded s; err on bad escape/UTF-8; + kept.
 fn decode_component(s: String) -> Result[String, String] = {
   let cs = string.chars(s)
   __url_dec_go(cs, 0, list.len(cs), "")
@@ -169,6 +172,7 @@ fn decode_component(s: String) -> Result[String, String] = {
 // Example: match url.parse("http://x") { ok(u) => u.host == "x" and u.path == "" and u.port == none, err(_) => false }
 // Example: match url.parse("not a url") { ok(_) => false, err(_) => true }
 // Example: match url.parse("http://h:99999") { ok(_) => false, err(_) => true }
+/// Url from s; err without :// or on bad port.
 fn parse(s: String) -> Result[Url, String] = match string.index_of(s, "://") {
   none => err("url.parse: missing '://' scheme separator"),
   some(i) => {
@@ -215,6 +219,7 @@ fn parse(s: String) -> Result[Url, String] = match string.index_of(s, "://") {
 // identity on every value `parse` produces.
 // See also: url.parse (the inverse).
 // Example: match url.parse("https://example.com:8080/a?x=1#t") { ok(u) => url.to_string(u) == "https://example.com:8080/a?x=1#t", err(_) => false }
+/// URL text of u; empty query/fragment omitted.
 fn to_string(u: Url) -> String = {
   let port_part = match u.port {
     some(p) => ":" + int.to_string(p),
@@ -235,6 +240,7 @@ fn to_string(u: Url) -> String = {
 // Example: url.query_pairs("a=1&b=two") == [("a", "1"), ("b", "two")]
 // Example: url.query_pairs("") == []
 // Example: url.query_pairs("flag&x=1") == [("flag", ""), ("x", "1")]
+/// Undecoded (k, v) pairs; bare key gets "".
 fn query_pairs(query: String) -> List[(String, String)] = if string.len(query) == 0 then []
 else query |> string.split("&") |> list.filter((part) => string.len(part) > 0) |> list.map((part) => {
   let kv = __url_split_once(part, "=")
@@ -246,6 +252,7 @@ else query |> string.split("&") |> list.filter((part) => string.len(part) > 0) |
 // See also: url.query_pairs, url.encode_component.
 // Example: url.build_query([("q", "a b"), ("lang", "ja")]) == "q=a%20b&lang=ja"
 // Example: url.build_query([]) == ""
+/// k=v joined by &, both sides percent-encoded.
 fn build_query(pairs: List[(String, String)]) -> String = pairs |> list.map(((k, v)) => encode_component(k) + "=" + encode_component(v)) |> list.join("&")
 
 // TEMP probes

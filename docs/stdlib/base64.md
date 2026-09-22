@@ -87,9 +87,16 @@ trips both `encode_url` and the unpadded JWT form.
 ## Signature index (4 functions)
 
 ```
+// Standard base64 with + / and = padding.
 base64.encode(b: Bytes) -> String
+
+// Bytes from base64; padding optional; err if bad.
 base64.decode(s: String) -> Result[Bytes, String]
+
+// URL-safe base64 (- _), still = padded.
 base64.encode_url(b: Bytes) -> String
+
+// Same as decode; accepts either alphabet.
 base64.decode_url(s: String) -> Result[Bytes, String]
 ```
 
