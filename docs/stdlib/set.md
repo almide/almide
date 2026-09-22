@@ -301,24 +301,61 @@ false
 ## Signature index (19 functions)
 
 ```
+// An empty Set[A].
 set.new() -> Set[A]
+
+// Distinct elements of xs in first-seen order.
 set.from_list(xs: List[A]) -> Set[A]
+
+// Copy with value appended; unchanged if present.
 set.insert(s: Set[A], value: A) -> Set[A]
+
+// Copy without value; unchanged if absent.
 set.remove(s: Set[A], value: A) -> Set[A]
+
+// true when value is a member.
 set.contains(s: Set[A], value: A) -> Bool
+
+// Member count; 0 for an empty set.
 set.len(s: Set[A]) -> Int
+
+// true iff s has no members.
 set.is_empty(s: Set[A]) -> Bool
+
+// Members in insertion order.
 set.to_list(s: Set[A]) -> List[A]
+
+// Members of a, then b's new ones.
 set.union(a: Set[A], b: Set[A]) -> Set[A]
+
+// Members of a also in b, in a's order.
 set.intersection(a: Set[A], b: Set[A]) -> Set[A]
+
+// Members of a not in b, in a's order.
 set.difference(a: Set[A], b: Set[A]) -> Set[A]
+
+// In exactly one set: a-only, then b-only.
 set.symmetric_difference(a: Set[A], b: Set[A]) -> Set[A]
+
+// true if all of a is in b; true for empty a.
 set.is_subset(a: Set[A], b: Set[A]) -> Bool
+
+// true if a and b share no member.
 set.is_disjoint(a: Set[A], b: Set[A]) -> Bool
+
+// Members where f holds, order kept.
 set.filter(s: Set[A], f: (A) -> Bool) -> Set[A]
+
+// Set of f(x); shrinks when f results collide.
 set.map(s: Set[A], f: (A) -> B) -> Set[B]
+
+// Folds f(acc, x) in insertion order.
 set.fold(s: Set[A], init: B, f: (B, A) -> B) -> B
+
+// true if f holds for some member; false if empty.
 set.any(s: Set[A], f: (A) -> Bool) -> Bool
+
+// true if f holds for every member; true if empty.
 set.all(s: Set[A], f: (A) -> Bool) -> Bool
 ```
 

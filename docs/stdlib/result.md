@@ -185,20 +185,49 @@ fn main() -> Unit = {
 ## Signature index (15 functions)
 
 ```
+// ok(f(v)) for ok(v); err passes through.
 result.map(r: Result[A, E], f: (A) -> B) -> Result[B, E]
+
+// err(f(e)) for err(e); ok passes through.
 result.map_err(r: Result[A, E], f: (E) -> F) -> Result[A, F]
+
+// f(v) for ok(v); err passes through.
 result.flat_map(r: Result[A, E], f: (A) -> Result[B, E]) -> Result[B, E]
+
+// v for ok(v), else default (always evaluated).
 result.unwrap_or(r: Result[A, E], default: A) -> A   (deprecated — use ??)
+
+// v for ok(v), else f(e); f runs only on err.
 result.unwrap_or_else(r: Result[A, E], f: (E) -> A) -> A
+
+// true for ok(_), false for err(_).
 result.is_ok(r: Result[A, E]) -> Bool
+
+// true for err(_), false for ok(_).
 result.is_err(r: Result[A, E]) -> Bool
+
+// some(v) for ok(v); none for err, e dropped.
 result.to_option(r: Result[A, E]) -> Option[A]
+
+// some(e) for err(e); none for ok.
 result.to_err_option(r: Result[A, E]) -> Option[E]
+
+// (ok values, err values), each in list order.
 result.partition(rs: List[Result[T, E]]) -> (List[T], List[E])
+
+// Inner result of ok(inner); outer err kept.
 result.flatten(r: Result[Result[A, E], E]) -> Result[A, E]
+
+// [v] for ok(v), [] for err.
 result.to_list(r: Result[A, E]) -> List[A]
+
+// ok((x, y)) if both ok, else the first err.
 result.zip(a: Result[A, E], b: Result[B, E]) -> Result[(A, B), E]
+
+// r when ok, else f(e); f runs only on err.
 result.or_else(r: Result[A, E], f: (E) -> Result[A, F]) -> Result[A, F]
+
+// err(err_val) if pred fails on ok; err kept.
 result.filter(r: Result[A, E], pred: (A) -> Bool, err_val: E) -> Result[A, E]
 ```
 

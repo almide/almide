@@ -218,19 +218,46 @@ fn main() -> Unit = {
 ## Signature index (14 functions)
 
 ```
+// some(f(v)) for some(v); none stays none.
 option.map(o: Option[A], f: (A) -> B) -> Option[B]
+
+// f(v) for some(v); none stays none.
 option.flat_map(o: Option[A], f: (A) -> Option[B]) -> Option[B]
+
+// Inner option of some(inner); none for none.
 option.flatten(o: Option[Option[A]]) -> Option[A]
+
+// v for some(v), else default (always evaluated).
 option.unwrap_or(o: Option[A], default: A) -> A   (deprecated — use ??)
+
+// v for some(v), else f(); f runs only for none.
 option.unwrap_or_else(o: Option[A], f: () -> A) -> A
+
+// true for some(_), false for none.
 option.is_some(o: Option[A]) -> Bool
+
+// true for none, false for some(_).
 option.is_none(o: Option[A]) -> Bool
+
+// ok(v) for some(v), err(e) for none.
 option.to_result(o: Option[A], e: E) -> Result[A, E]
+
+// o when some(v) and f(v) holds, else none.
 option.filter(o: Option[A], f: (A) -> Bool) -> Option[A]
+
+// some((x, y)) when both are some, else none.
 option.zip(a: Option[A], b: Option[B]) -> Option[(A, B)]
+
+// o when some, else f(); f runs only for none.
 option.or_else(o: Option[A], f: () -> Option[A]) -> Option[A]
+
+// [v] for some(v), [] for none.
 option.to_list(o: Option[A]) -> List[A]
+
+// some(values) if no element is none, else none.
 option.collect(xs: List[Option[T]]) -> Option[List[T]]
+
+// some of all f(x), or none; f runs on every x.
 option.collect_map(xs: List[T], f: (T) -> Option[U]) -> Option[List[U]]
 ```
 
