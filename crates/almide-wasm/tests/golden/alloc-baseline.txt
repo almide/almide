@@ -87,7 +87,7 @@
 71248	spec/wasm_cross/codec_variant_roundtrip.almd
 69008	spec/wasm_cross/codec_whitespace_tolerance.almd
 66720	spec/wasm_cross/collection_literals.almd
-66176	spec/wasm_cross/composition_fuzz_batch.almd
+66144	spec/wasm_cross/composition_fuzz_batch.almd
 67472	spec/wasm_cross/compound_eq.almd
 69056	spec/wasm_cross/compound_repr_interp.almd
 69952	spec/wasm_cross/compound_repr_records_interp.almd
@@ -117,12 +117,13 @@
 66224	spec/wasm_cross/edge_map_order.almd
 112944	spec/wasm_cross/edge_string_unicode.almd
 66336	spec/wasm_cross/effect_assign_unwrap.almd
+70160	spec/wasm_cross/effect_call_arg_credit.almd
 66592	spec/wasm_cross/effect_fn_value.almd
 65920	spec/wasm_cross/effect_main_guard_err.almd
 66192	spec/wasm_cross/effect_main_guard_ok.almd
-66320	spec/wasm_cross/effect_mut_generic_port.almd
+66256	spec/wasm_cross/effect_mut_generic_port.almd
 66688	spec/wasm_cross/effect_option_explicit_bang.almd
-66320	spec/wasm_cross/effect_slot_carrier.almd
+66288	spec/wasm_cross/effect_slot_carrier.almd
 66576	spec/wasm_cross/effect_tail_carrier_family.almd
 65904	spec/wasm_cross/effect_tco.almd
 ~	spec/wasm_cross/effect_tco_err_rewrap.almd
@@ -444,9 +445,9 @@
 66272	spec/wasm_cross/mut_map_param.almd
 209056	spec/wasm_cross/mut_param_alias_cow.almd
 65936	spec/wasm_cross/mut_param_branch_forward.almd
-391296	spec/wasm_cross/mut_param_call_chain.almd
-68224	spec/wasm_cross/mut_param_effect_can_err.almd
-66064	spec/wasm_cross/mut_param_effect_never_err.almd
+68032	spec/wasm_cross/mut_param_call_chain.almd
+67616	spec/wasm_cross/mut_param_effect_can_err.almd
+66032	spec/wasm_cross/mut_param_effect_never_err.almd
 65872	spec/wasm_cross/mut_param_spread_reassign.almd
 66384	spec/wasm_cross/mut_param_writeback_growth.almd
 66240	spec/wasm_cross/mut_scalar_param_reassign.almd
@@ -715,7 +716,7 @@
 66624	spec/wasm_cross/uint64_upper_half.almd
 65872	spec/wasm_cross/unannotated_toplet_generic_ctor.almd
 65904	spec/wasm_cross/unique_non_flat_element.almd
-66016	spec/wasm_cross/unit_effect_abi.almd
+65952	spec/wasm_cross/unit_effect_abi.almd
 66224	spec/wasm_cross/unsigned_literal_domain.almd
 66032	spec/wasm_cross/unwrap_in_callarg.almd
 65984	spec/wasm_cross/unwrap_in_if_arm.almd
@@ -728,7 +729,7 @@
 66016	spec/wasm_cross/unwrap_or_strict_default.almd
 66400	spec/wasm_cross/unwrap_or_tail_result.almd
 65968	spec/wasm_cross/unwrap_or_tuple_payload_extract.almd
-69392	spec/wasm_cross/unwrap_or_unwrap_fallback.almd
+69296	spec/wasm_cross/unwrap_or_unwrap_fallback.almd
 67200	spec/wasm_cross/unwrap_or_value_fn_named_parse.almd
 66720	spec/wasm_cross/uoe_heap_ok_share.almd
 68816	spec/wasm_cross/url_authority_edges.almd
