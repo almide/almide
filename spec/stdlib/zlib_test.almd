@@ -66,3 +66,13 @@ test "gunzip rejects non-gzip input" {
     err(e) => assert(string.len(e) > 0, "gunzip err carries a message"),
   }
 }
+
+// #2478 — a gzip file has at least one member: zero bytes is an error with
+// one text on every leg (the self-hosted member loop used to run zero times
+// and answer ok with 0 bytes).
+test "gunzip of empty input is an error" {
+  match zlib.gunzip(bytes.new(0)) {
+    ok(_) => assert(false, "gunzip accepted empty input"),
+    err(e) => assert_eq(e, "zlib.gunzip: unexpected end of file"),
+  }
+}
