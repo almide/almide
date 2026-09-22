@@ -832,71 +832,202 @@ When a callback that never errs leaves `E` unconstrained, annotate the result:
 ## Signature index (66 functions)
 
 ```
+// Element count; 0 for an empty list.
 list.len(xs: List[A]) -> Int
+
+// Element count; same as list.len.
 list.length(xs: List[A]) -> Int
+
+// Element at index i, or none when out of range.
 list.get(xs: List[A], i: Int) -> Option[A]
+
+// Element at i, or default when out of range.
 list.get_or(xs: List[A], i: Int, default: A) -> A
+
+// Copy with slot i = val; no-op if i out of range.
 list.set(xs: List[A], i: Int, val: A) -> List[A]
+
+// Copy with i and j swapped; no-op if either OOB.
 list.swap(xs: List[A], i: Int, j: Int) -> List[A]
+
+// Ascending copy; Floats in IEEE totalOrder.
 list.sort(xs: List[A]) -> List[A]
+
+// Elements in reverse order.
 list.reverse(xs: List[A]) -> List[A]
+
+// true if some element == x; NaN never matches.
 list.contains(xs: List[A], x: A) -> Bool
+
+// (index, element) pairs, index from 0.
 list.enumerate(xs: List[A]) -> List[(Int, A)]
+
+// Pairs by position; stops at the shorter list.
 list.zip(xs: List[A], ys: List[B]) -> List[(A, B)]
+
+// Inner lists concatenated in order.
 list.flatten(xss: List[List[T]]) -> List[T]
+
+// First n elements; all if n >= len or n < 0.
 list.take(xs: List[A], n: Int) -> List[A]
+
+// All but the first n; [] if n >= len or n < 0.
 list.drop(xs: List[A], n: Int) -> List[A]
+
+// All but the first element; [] when empty.
 list.tail(xs: List[A]) -> List[A]
+
+// Duplicates removed; first occurrences kept.
 list.unique(xs: List[A]) -> List[A]
+
+// Index of the first x, or none.
 list.index_of(xs: List[A], x: A) -> Option[Int]
+
+// Final element, or none when empty.
 list.last(xs: List[A]) -> Option[A]
+
+// Runs of n, last may be short; n = 0 aborts.
 list.chunk(xs: List[A], n: Int) -> List[List[A]]
+
+// Sum; 0 when empty; wraps on overflow.
 list.sum(xs: List[Int]) -> Int
+
+// Product; 1 when empty; wraps on overflow.
 list.product(xs: List[Int]) -> Int
+
+// Head element, or none when empty.
 list.first(xs: List[A]) -> Option[A]
+
+// true iff xs has no elements.
 list.is_empty(xs: List[A]) -> Bool
+
+// Least element, or none when empty.
 list.min(xs: List[A]) -> Option[A]
+
+// Greatest element, or none when empty.
 list.max(xs: List[A]) -> Option[A]
+
+// Strings joined by sep; empty string for [].
 list.join(xs: List[String], sep: String) -> String
+
+// f applied to each element, in order.
 list.map(xs: List[A], f: (A) -> B) -> List[B]
+
+// Elements where f is true, order kept.
 list.filter(xs: List[A], f: (A) -> Bool) -> List[A]
+
+// First element where f holds, or none.
 list.find(xs: List[A], f: (A) -> Bool) -> Option[A]
+
+// true if f holds for some x; false when empty.
 list.any(xs: List[A], f: (A) -> Bool) -> Bool
+
+// true if f holds for every x; true when empty.
 list.all(xs: List[A], f: (A) -> Bool) -> Bool
+
+// Number of elements where f holds.
 list.count(xs: List[A], f: (A) -> Bool) -> Int
+
+// f(x) lists concatenated in order.
 list.flat_map(xs: List[A], f: (A) -> List[B]) -> List[B]
+
+// The some values of f(x), in order.
 list.filter_map(xs: List[A], f: (A) -> Option[B]) -> List[B]
+
+// Left fold from init; init when empty.
 list.fold(xs: List[A], init: B, f: (B, A) -> B) -> B
+
+// Stable sort by key f(x); f runs once per x.
 list.sort_by(xs: List[A], f: (A) -> B) -> List[A]
+
+// Longest prefix where f holds.
 list.take_while(xs: List[A], f: (A) -> Bool) -> List[A]
+
+// Rest after the longest prefix where f holds.
 list.drop_while(xs: List[A], f: (A) -> Bool) -> List[A]
+
+// (where f holds, the rest), order kept.
 list.partition(xs: List[A], f: (A) -> Bool) -> (List[A], List[A])
+
+// Left fold seeded by xs[0]; none when empty.
 list.reduce(xs: List[A], f: (A, A) -> A) -> Option[A]
+
+// Key f(x) -> elements; keys in first-seen order.
 list.group_by(xs: List[A], f: (A) -> B) -> Map[B, List[A]]
+
+// Index of the first x where f holds, or none.
 list.find_index(xs: List[A], f: (A) -> Bool) -> Option[Int]
+
+// Copy with slot i = f(old); no-op if i out of range.
 list.update(xs: List[A], i: Int, f: (A) -> A) -> List[A]
+
+// Running fold values, init excluded.
 list.scan(xs: List[A], init: B, f: (B, A) -> B) -> List[B]
+
+// f over pairs; stops at the shorter list.
 list.zip_with(xs: List[A], ys: List[B], f: (A, B) -> C) -> List[C]
+
+// First element per distinct key f(x).
 list.unique_by(xs: List[A], f: (A) -> K) -> List[A]
+
+// start up to end, exclusive; [] if end <= start.
 list.range(start: Int, end: Int) -> List[Int]
+
+// Indices start..<end, clamped; [] if start >= end.
 list.slice(xs: List[A], start: Int, end: Int) -> List[A]
+
+// Copy with val at i; i >= len or i < 0 appends.
 list.insert(xs: List[A], i: Int, val: A) -> List[A]
+
+// Copy without slot i; no-op if i out of range.
 list.remove_at(xs: List[A], i: Int) -> List[A]
+
+// n copies of val; [] for n <= 0.
 list.repeat(val: A, n: Int) -> List[A]
+
+// sep between adjacent elements.
 list.intersperse(xs: List[A], sep: A) -> List[A]
+
+// All n-long runs; [] if n > len; n = 0 aborts.
 list.windows(xs: List[A], n: Int) -> List[List[A]]
+
+// Adjacent equal runs collapsed; not global.
 list.dedup(xs: List[A]) -> List[A]
+
+// Last n elements; all if n >= len or n < 0.
 list.take_end(xs: List[A], n: Int) -> List[A]
+
+// All but the last n; [] if n >= len or n < 0.
 list.drop_end(xs: List[A], n: Int) -> List[A]
+
+// Random permutation; unseeded, differs per run.
 list.shuffle(xs: List[A]) -> List[A]
+
+// All n-long runs; [] if n > len; n = 0 aborts.
 list.window(xs: List[A], n: Int) -> List[List[A]]
+
+// Index of target in ascending xs, or none.
 list.binary_search(xs: List[Int], target: Int) -> Option[Int]
+
+// Appends x to xs in place.
 list.push(xs: List[A], x: A) -> Unit
+
+// Empty list; cap is only a preallocation hint.
 list.with_capacity(cap: Int) -> List[A]
+
+// Removes and yields the last element; none if empty.
 list.pop(xs: List[A]) -> Option[A]
+
+// Removes every element of xs in place.
 list.clear(xs: List[A]) -> Unit
+
+// n + 1; bundled-dispatch smoke fn.
 list.bundled_probe(n: Int) -> Int
+
+// (take n, drop n); n past the end gives (xs, []).
 list.split_at(xs: List[T], n: Int) -> (List[T], List[T])
+
+// [seed, f(seed), ...] of length n; [] if n <= 0.
 list.iterate(seed: T, f: (T) -> T, n: Int) -> List[T]
 ```
 

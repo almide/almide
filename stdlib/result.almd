@@ -9,43 +9,53 @@
 // `collect_map` were REMOVED — ADR-0007: partition is the substance; the
 // old collect's name promised Rust's first-err short-circuit and did the
 // opposite.)
+/// ok(f(v)) for ok(v); err passes through.
 @intrinsic("almide_rt_result_map")
 @consume(r)
 fn map[A, B, E](r: Result[A, E], f: (A) -> B) -> Result[B, E] = _
 
+/// err(f(e)) for err(e); ok passes through.
 @intrinsic("almide_rt_result_map_err")
 @consume(r)
 fn map_err[A, E, F](r: Result[A, E], f: (E) -> F) -> Result[A, F] = _
 
+/// f(v) for ok(v); err passes through.
 @intrinsic("almide_rt_result_flat_map")
 @consume(r)
 fn flat_map[A, B, E](r: Result[A, E], f: (A) -> Result[B, E]) -> Result[B, E] = _
 
+/// v for ok(v), else default (always evaluated).
 @intrinsic("almide_rt_result_unwrap_or")
 @consume(r)
 @deprecated(since=3, use="??")
 fn unwrap_or[A, E](r: Result[A, E], default: A) -> A = _
 
+/// v for ok(v), else f(e); f runs only on err.
 @intrinsic("almide_rt_result_unwrap_or_else")
 @consume(r)
 fn unwrap_or_else[A, E](r: Result[A, E], f: (E) -> A) -> A = _
 
+/// true for ok(_), false for err(_).
 @intrinsic("almide_rt_result_is_ok")
 @borrow_ref(r)
 fn is_ok[A, E](r: Result[A, E]) -> Bool = _
 
+/// true for err(_), false for ok(_).
 @intrinsic("almide_rt_result_is_err")
 @borrow_ref(r)
 fn is_err[A, E](r: Result[A, E]) -> Bool = _
 
+/// some(v) for ok(v); none for err, e dropped.
 @intrinsic("almide_rt_result_to_option")
 @consume(r)
 fn to_option[A, E](r: Result[A, E]) -> A? = _
 
+/// some(e) for err(e); none for ok.
 @intrinsic("almide_rt_result_to_err_option")
 @consume(r)
 fn to_err_option[A, E](r: Result[A, E]) -> E? = _
 
+/// (ok values, err values), each in list order.
 @intrinsic("almide_rt_result_partition")
 @consume(rs)
 fn partition[T, E](rs: List[Result[T, E]]) -> (List[T], List[E]) = _
@@ -58,16 +68,19 @@ fn partition[T, E](rs: List[Result[T, E]]) -> (List[T], List[E]) = _
 // `runtime/rs/src/result.rs` are retained for the monomorphised
 // callers that the walker emits, but this layer is the source of
 // truth for behaviour.
+/// Inner result of ok(inner); outer err kept.
 fn flatten[A, E](r: Result[Result[A, E], E]) -> Result[A, E] = match r {
   ok(inner) => inner,
   err(e) => err(e),
 }
 
+/// [v] for ok(v), [] for err.
 fn to_list[A, E](r: Result[A, E]) -> List[A] = match r {
   ok(v) => [v],
   err(_) => [],
 }
 
+/// ok((x, y)) if both ok, else the first err.
 fn zip[A, B, E](a: Result[A, E], b: Result[B, E]) -> Result[(A, B), E] = match a {
   ok(va) => match b {
     ok(vb) => ok((va, vb)),
@@ -76,11 +89,13 @@ fn zip[A, B, E](a: Result[A, E], b: Result[B, E]) -> Result[(A, B), E] = match a
   err(e) => err(e),
 }
 
+/// r when ok, else f(e); f runs only on err.
 fn or_else[A, E, F](r: Result[A, E], f: (E) -> Result[A, F]) -> Result[A, F] = match r {
   ok(v) => ok(v),
   err(e) => f(e),
 }
 
+/// err(err_val) if pred fails on ok; err kept.
 fn filter[A, E](r: Result[A, E], pred: (A) -> Bool, err_val: E) -> Result[A, E] = match r {
   ok(v) => if pred(v) then ok(v) else err(err_val),
   err(e) => err(e),
