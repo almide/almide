@@ -105,7 +105,7 @@ url.encode_component(s: String) -> String
 // @since 0.60.0 or earlier
 url.decode_component(s: String) -> Result[String, String]
 
-// Url from s; err without :// or on bad port.
+// Url from s; err without ://, on an empty/invalid host, userinfo, an IPv6 literal, or a bad port.
 // @since 0.6.0 or earlier
 url.parse(s: String) -> Result[Url, String]
 
