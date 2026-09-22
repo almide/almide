@@ -22,6 +22,57 @@ pub fn fetch_dep(dep: &Dependency) -> Result<PathBuf, String> {
     fetch_dep_with_lock(dep, None)
 }
 
+/// The ref a manifest entry names: its tag, else its branch, else `main`.
+///
+/// One definition on purpose. The cache path, the lock LOOKUP and the lock
+/// WRITE must agree on which ref a dependency asked for; while this
+/// expression was spelled out in three places they could disagree, and a
+/// disagreement is not a slow build — it is a lock entry describing a fetch
+/// that did not happen (#2522).
+fn dep_ref_name(dep: &Dependency) -> &str {
+    dep.tag.as_deref().or(dep.branch.as_deref()).unwrap_or("main")
+}
+
+/// A stable 64-bit digest of a source URL, as 16 hex digits.
+///
+/// FNV-1a written out here rather than `DefaultHasher`: this value is a
+/// directory name that has to still be found after a toolchain upgrade, and
+/// `DefaultHasher`'s output is explicitly not guaranteed stable across Rust
+/// releases — an unstable key would silently orphan every cached checkout on
+/// a compiler bump.
+fn source_key(git: &str) -> String {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in git.as_bytes() {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("{:016x}", h)
+}
+
+/// Where one dependency's checkouts live: `~/.almide/cache/<name>/.src-<key>/`,
+/// with the per-ref and per-commit directories underneath.
+///
+/// The SOURCE is part of the key. Before #2523 the layout was
+/// `<name>/<ref>`, so two repositories that publish a package of the same
+/// name at the same tag aliased: the first one fetched answered for the
+/// second, and the lock then recorded the second URL beside a commit only the
+/// first repository has — a triple no machine but this one can resolve.
+///
+/// Two structural choices here, both about collisions:
+///
+/// * the URL is hashed VERBATIM, so `https://host/p` and `https://host/p.git`
+///   get separate directories. A redundant clone is all a spelling difference
+///   can cost; aliasing two sources costs a wrong build.
+/// * the component starts with a dot, which `git check-ref-format` forbids at
+///   the start of any ref component. So no legal tag or branch can ever be
+///   spelled like this level, and a pre-#2523 `<name>/<ref>` directory cannot
+///   be mistaken for a source key. Old entries MISS and are re-fetched under
+///   the new key; they are inert, not reused, because a stale hit here is the
+///   whole bug. They cost disk until `almide clean`.
+pub fn dep_cache_root(dep: &Dependency) -> PathBuf {
+    cache_dir().join(&dep.name).join(format!(".src-{}", source_key(&dep.git)))
+}
+
 /// Populate cache dir `dir` atomically: run `clone` against a fresh sibling
 /// temp dir, then rename it into place. Callers may race — `almide test`
 /// compiles test files on parallel threads and every thread resolves deps,
@@ -64,8 +115,7 @@ fn populate_cache_dir(dir: &Path, clone: impl FnOnce(&Path) -> Result<(), String
 /// `fetch_dep_with_lock`'s locked-commit path: clone into a commit-keyed
 /// cache dir and checkout the exact commit.
 fn fetch_dep_at_commit(dep: &Dependency, commit: &str) -> Result<PathBuf, String> {
-    let cache = cache_dir();
-    let dir = cache.join(&dep.name).join(&commit[..12.min(commit.len())]);
+    let dir = dep_cache_root(dep).join(&commit[..12.min(commit.len())]);
     if dir.exists() {
         return Ok(dir);
     }
@@ -94,8 +144,7 @@ fn fetch_dep_at_commit(dep: &Dependency, commit: &str) -> Result<PathBuf, String
 /// `fetch_dep_with_lock`'s ref-based path (tag/branch, no lock pin): clone
 /// into a ref-keyed cache dir.
 fn fetch_dep_at_ref(dep: &Dependency, ref_name: &str) -> Result<PathBuf, String> {
-    let cache = cache_dir();
-    let dep_dir = cache.join(&dep.name).join(ref_name);
+    let dep_dir = dep_cache_root(dep).join(ref_name);
 
     if dep_dir.exists() {
         return Ok(dep_dir);
@@ -143,10 +192,7 @@ pub fn fetch_dep_with_lock(dep: &Dependency, locked_commit: Option<&str>) -> Res
         return fetch_dep_at_commit(dep, commit);
     }
 
-    let ref_name = dep.tag.as_deref()
-        .or(dep.branch.as_deref())
-        .unwrap_or("main");
-    fetch_dep_at_ref(dep, ref_name)
+    fetch_dep_at_ref(dep, dep_ref_name(dep))
 }
 
 /// Update almide.lock after fetching all dependencies.
@@ -155,9 +201,7 @@ pub fn update_lock_file(project_root: &Path, deps: &[Dependency], fetched: &[Fet
     let lock_path = lock_path.as_path();
     let mut locked = Vec::new();
     for (dep, fd) in deps.iter().zip(fetched.iter()) {
-        let ref_name = dep.tag.as_deref()
-            .or(dep.branch.as_deref())
-            .unwrap_or("main");
+        let ref_name = dep_ref_name(dep);
         let commit = git_head_hash(&fd.source_dir)
             .or_else(|_| git_head_hash(fd.source_dir.parent().unwrap_or(&fd.source_dir)))
             .unwrap_or_default();
@@ -439,7 +483,7 @@ pub fn update_locked_deps(project: &Project, only: Option<&str>) -> Result<Vec<(
     };
     let mut changed = Vec::new();
     for dep in targets {
-        let ref_name = dep.tag.as_deref().or(dep.branch.as_deref()).unwrap_or("main");
+        let ref_name = dep_ref_name(dep);
         // A tag pins by definition — advancing it would silently change what
         // the manifest asked for. Only floating refs (branches, the default
         // `main`) move.
@@ -453,8 +497,10 @@ pub fn update_locked_deps(project: &Project, only: Option<&str>) -> Result<Vec<(
             err(&format!("{} already at {} ({})", dep.name, &head[..head.len().min(12)], ref_name));
             continue;
         }
-        // Drop the stale cache dir so the next fetch re-clones at the new head.
-        let cached = cache_dir().join(&dep.name).join(ref_name);
+        // Drop the stale cache dir so the next fetch re-clones at the new
+        // head — under THIS dependency's source key, so advancing one project's
+        // branch cannot evict a same-named package fetched from elsewhere.
+        let cached = dep_cache_root(dep).join(ref_name);
         let _ = std::fs::remove_dir_all(&cached);
         match locked.iter_mut().find(|l| l.name == dep.name) {
             Some(entry) => {
@@ -506,6 +552,56 @@ pub fn git_remote_head(git_url: &str, ref_name: &str) -> Result<String, String> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn dep(name: &str, git: &str, tag: Option<&str>) -> Dependency {
+        Dependency {
+            name: name.into(),
+            git: git.into(),
+            tag: tag.map(str::to_string),
+            branch: None,
+            version: None,
+            path: None,
+        }
+    }
+
+    /// The source key is a cache DIRECTORY name, so it is part of the on-disk
+    /// format: if it moves, every cached checkout on every machine is orphaned
+    /// silently. Pinned literally so that only a deliberate edit can move it.
+    #[test]
+    fn the_source_key_is_pinned_to_its_url() {
+        // Canonical FNV-1a-64 of the URL, and the bare offset basis for the
+        // empty string — both cross-checked against the reference algorithm,
+        // not merely against what this function happens to return.
+        assert_eq!(source_key("https://github.com/almide/almai"), "278da929d4245976");
+        assert_eq!(source_key(""), "cbf29ce484222325");
+    }
+
+    /// #2523: the source is part of the key, so a package NAME cannot put two
+    /// repositories in one directory.
+    #[test]
+    fn two_sources_sharing_a_name_get_separate_cache_roots() {
+        let a = dep_cache_root(&dep("fizz", "https://github.com/one/fizz", Some("v0.2.2")));
+        let b = dep_cache_root(&dep("fizz", "https://github.com/two/fizz", Some("v0.2.2")));
+        assert_ne!(a, b, "same name, different source: the checkouts must not share a root");
+        // Hashed verbatim: a `.git` suffix is a different spelling, and paying
+        // for a second clone is the safe direction to err in.
+        let bare = dep_cache_root(&dep("fizz", "https://github.com/one/fizz", None));
+        let dotgit = dep_cache_root(&dep("fizz", "https://github.com/one/fizz.git", None));
+        assert_ne!(bare, dotgit);
+    }
+
+    /// The pre-#2523 layout put the ref where the source key now sits. A git
+    /// ref component may not begin with `.` (`git check-ref-format`), so an
+    /// old `<name>/<ref>` directory can never be read as a source key: old
+    /// entries miss and are re-fetched rather than answering for a URL they
+    /// were not cloned from.
+    #[test]
+    fn the_source_component_cannot_be_spelled_by_any_git_ref() {
+        let root = dep_cache_root(&dep("fizz", "https://github.com/one/fizz", None));
+        let leaf = root.file_name().expect("source component").to_string_lossy().into_owned();
+        assert!(leaf.starts_with('.'), "source component `{leaf}` must be unspellable as a ref");
+        assert_eq!(root.parent().and_then(|p| p.file_name()).unwrap(), "fizz");
+    }
 
     #[test]
     fn add_tag_flag_is_kept_for_short_specs() {

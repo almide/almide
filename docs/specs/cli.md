@@ -586,7 +586,7 @@ almide deps
 
 ```bash
 almide dep-path bindgen
-# /Users/you/.almide/cache/bindgen/a629eded8d20/src
+# /Users/you/.almide/cache/bindgen/.src-2080cb5159116353/a629eded8d20/src
 ```
 
 用途: 依存パッケージの `.almd` ファイルを `process.exec("almide", ["run", path])` で実行する場合のパス取得。
