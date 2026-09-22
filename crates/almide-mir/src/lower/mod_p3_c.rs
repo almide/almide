@@ -142,10 +142,48 @@ impl LowerCtx {
     /// branching spread; nothing in the types said the cache was
     /// linearization-shaped, so nothing objected. One chokepoint, so the next
     /// materialization site cannot re-decide this per shape.
+    ///
+    /// The three flags are the three DISCIPLINES a region opts into by hand, and
+    /// twice now a lowering that opens a real region forgot to raise any of them:
+    /// `lower_heap_result_arm` (#945's heap twin) and the short-circuit `and`/`or`
+    /// RHS (#2521 — `n > 0 and n < CAP` put `CAP`'s `ConstInt` in the THEN block
+    /// and the later `else CAP` read it from a path where it never ran, so the
+    /// exported `f(0)` returned 0 where native returned 3000). A fourth flag would
+    /// be a fourth thing to remember. Instead ask the OP STREAM, which already
+    /// records the region structure the flags are trying to describe: a
+    /// definition emitted while an `IfThen` or a `LoopStart` is still open is not
+    /// dominated by the function entry, whatever the flags say, so it may not be
+    /// cached for a later reader. That predicate cannot be forgotten by a new
+    /// lowering, because a region it emits without the markers is not a region.
+    /// The flags stay as an AND: they also refuse in modeled/linearized frames,
+    /// which carry no markers, so dropping them would WIDEN what is memoized.
     fn memo_global(&mut self, var: VarId, dst: ValueId) {
-        if self.in_frame == 0 && self.unit_arm_depth == 0 && self.scalar_loop_depth == 0 {
+        if self.in_frame == 0
+            && self.unit_arm_depth == 0
+            && self.scalar_loop_depth == 0
+            && self.open_region_depth() == 0
+        {
             self.value_of.insert(var, dst);
         }
+    }
+
+    /// How many `IfThen` / `LoopStart` regions are still OPEN at the op stream's
+    /// tail — i.e. whether ops pushed now run on every path that reaches the ops
+    /// pushed later. `Else` is a separator inside one region, not a new one; the
+    /// stream is per-function (`LowerCtx::ops`), append-mostly, and the handful of
+    /// `ops.insert`/`ops.remove` sites move DROPS, never markers, so reading it
+    /// fresh is exact — no cached counter to desync. A full scan, deliberately:
+    /// this runs once per materialized global, not per op.
+    fn open_region_depth(&self) -> u32 {
+        let mut depth: u32 = 0;
+        for op in &self.ops {
+            match op {
+                Op::IfThen { .. } | Op::LoopStart => depth += 1,
+                Op::EndIf { .. } | Op::LoopEnd => depth = depth.saturating_sub(1),
+                _ => {}
+            }
+        }
+        depth
     }
 
     pub(crate) fn value_or_global(&mut self, var: VarId) -> Result<ValueId, LowerError> {
