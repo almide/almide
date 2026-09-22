@@ -203,6 +203,9 @@ effect fn main() -> Unit = {
     // source with no compiler, held as a shrink-only floor over the spec corpus.
     "fold-seed-source" => {
       let v = fold_seed_source.run(root)!
+      println(list.join(v.lines, "\n"))
+      if v.ok then process.exit(0) else process.exit(1)
+    },
     // #2397 / #2413: one stdlib operation, N implementations. The enumerator script counts;
     // this gate compares against proofs/impl-count-ledger.toml and is the ledger's only
     // writer (`--update`). Args: root, then optionally `--update`.
