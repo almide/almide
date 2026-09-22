@@ -44,8 +44,8 @@ impl NanoPass for TailCallOptPass {
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         // Collect: TCO'd function name → param positions whose borrow annotation
-        // was forced back to Own by the loop rewrite (i.e. NOT in the
-        // Bytes-borrow-preserved set). External call sites targeting these
+        // was forced back to Own by the loop rewrite (i.e. the slots
+        // [`loop_keeps_borrow`] refused). External call sites targeting these
         // functions need their Borrow wrappers stripped to match the new
         // signature — otherwise a &str arg is passed where String is expected.
         let mut reverted: HashMap<almide_base::intern::Sym, HashSet<usize>> = HashMap::new();
