@@ -13,7 +13,10 @@
 @intrinsic("almide_rt_json_parse")
 fn parse(text: String) -> Result[Value, String] = _
 
-/// Compact JSON; a Float 1.0 prints as 1.
+/// Compact JSON; a Float 1.0 prints as 1, NaN/inf as null.
+// A non-finite Float (NaN, ±inf) is written as `null` by stringify,
+// stringify_pretty and value.stringify alike (#2499, C-361): JSON has no
+// spelling for it, and the output always parses back.
 @intrinsic("almide_rt_json_stringify")
 fn stringify(v: Value) -> String = _
 

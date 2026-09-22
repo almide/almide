@@ -1,0 +1,46 @@
+// @contract: C-361
+// A non-finite Float in a Value — NaN, +inf, -inf — is the JSON `null` in
+// `json.stringify`, `json.stringify_pretty`, `value.stringify`, the `${v}`
+// display of a Value and a Codec-encoded record, on every leg (#2499). JSON
+// has no spelling for these values; the old output (`[NaN,inf,-inf]`) was
+// refused by Almide's own `json.parse`. Finite floats keep the Display form
+// (`1.5`, `-0`, `3`). The round trip `json.parse(json.stringify(v))` is `ok`.
+import json
+
+type P: Codec = { x: Float, y: Float, name: String }
+
+effect fn main() -> Unit = {
+  let nan = 0.0 / 0.0
+  let inf = 1.0 / 0.0
+  let arr = value.array([
+    value.float(nan),
+    value.float(inf),
+    value.float(0.0 - inf),
+    value.float(1.5),
+    value.float(-0.0),
+    value.float(3.0)
+  ])
+  let obj = value.object([
+    ("a", value.float(nan)),
+    ("b", value.array([value.float(inf)])),
+    ("c", value.object([("d", value.float(0.0 - inf))])),
+    ("e", value.int(7))
+  ])
+  println(json.stringify(arr))
+  println(json.stringify(obj))
+  println(value.stringify(obj))
+  println("${obj}")
+  println(json.stringify_pretty(obj))
+  println(json.stringify(value.float(nan)))
+  println(json.stringify_pretty(value.float(inf)))
+  let enc = json.stringify(P.encode(P { x: nan, y: inf, name: "n" }))
+  println(enc)
+  match json.parse(json.stringify(obj)) {
+    ok(v) => println("reparse ok: " + json.stringify(v)),
+    err(e) => println("reparse err: " + e),
+  }
+  match json.parse(enc) {
+    ok(v) => println("reparse ok: " + json.stringify(v)),
+    err(e) => println("reparse err: " + e),
+  }
+}

@@ -33,7 +33,9 @@ fn main() -> Unit = {
 
 ### `json.stringify(v: Value) -> String`
 
-Convert a Value to a JSON string.
+Convert a Value to a JSON string. A non-finite Float (NaN, +inf, -inf) has no
+JSON spelling and is written as `null`, so the output always parses back; the
+same rule holds for `json.stringify_pretty` and `value.stringify`.
 
 ```almd run
 import json
@@ -51,7 +53,8 @@ fn main() -> Unit = {
 
 ### `json.stringify_pretty(j: Value) -> String`
 
-Convert a Json value to a pretty-printed JSON string with indentation.
+Convert a Json value to a pretty-printed JSON string with indentation. A non-finite
+Float is written as `null`, as in `json.stringify`.
 
 ```almd run
 import json
@@ -98,11 +101,11 @@ none
 ### `json.get_int(j: Value, key: String) -> Option[Int]`
 
 Get an integer value by key. Returns none if key doesn't exist or value is not an integer.
+A Float value is `none` even when it is integral (`3.0`) — it is never truncated, the same
+rule as `value.as_int`. The widening runs one way only: `json.get_float` accepts an Int.
 
 ```almd run
 import json
-A Float value is `none` even when it is integral (`3.0`) — it is never truncated, the same
-rule as `value.as_int`. The widening runs one way only: `json.get_float` accepts an Int.
 
 fn main() -> Unit = {
   let j = json.parse("{\"name\": \"Alice\", \"age\": 30, \"price\": 9.5, \"active\": true, \"items\": [1, 2, 3]}") ?? value.null()
@@ -124,10 +127,10 @@ none
 ### `json.get_float(j: Value, key: String) -> Option[Float]`
 
 Get a float value by key. Returns none if key doesn't exist or value is not a number.
+An Int value is widened to Float (`30` reads as `30.0`).
 
 ```almd run
 import json
-An Int value is widened to Float (`30` reads as `30.0`).
 
 fn main() -> Unit = {
   let j = json.parse("{\"name\": \"Alice\", \"age\": 30, \"price\": 9.5, \"active\": true, \"items\": [1, 2, 3]}") ?? value.null()

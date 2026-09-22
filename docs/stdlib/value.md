@@ -88,7 +88,9 @@ Convert Object keys from camelCase to snake_case.
 
 ### `value.stringify(v: Value) -> String`
 
-Convert a Value to a JSON-like string representation.
+Convert a Value to a JSON-like string representation — the same text as `json.stringify`:
+a Float prints in its shortest form without a trailing `.0`, and a non-finite Float
+(NaN, +inf, -inf) is written as `null`.
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 

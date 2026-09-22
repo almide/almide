@@ -225,6 +225,14 @@ fn frag(i: &mut wasm_encoder::InstructionSink, cursor: u32, addr: u32, len: i32)
         .local_set(cursor);
 }
 
+/// Pushes an i32 that is nonzero iff the f64 at `v`'s payload slot is NaN or
+/// ±infinity — the values a JSON number cannot spell (#2499).
+fn emit_nonfinite_test(i: &mut wasm_encoder::InstructionSink, v: u32, m_pay: wasm_encoder::MemArg) {
+    i.local_get(v).f64_load(m_pay).local_get(v).f64_load(m_pay).f64_ne();
+    i.local_get(v).f64_load(m_pay).f64_abs().f64_const(f64::INFINITY.into()).f64_eq();
+    i.i32_or();
+}
+
 /// `$vjson_quote(cursor, str) -> cursor`: '"', the incumbent's exact
 /// 5-escape set (\\ \" \n \r \t — no control-char \u escapes), '"'.
 pub(crate) fn emit_json_quote_helper(frags: JsonFrags) -> Function {
@@ -536,8 +544,14 @@ pub(crate) fn emit_json_value_pretty_helper(
     i.local_get(t).i32_const(2).i32_eq().if_(BlockType::Empty);
     i.local_get(cursor).local_get(v).i64_load(m_pay).call(F_APPEND_I64).local_set(cursor);
     i.else_();
-    // 3 float — LINKED float.to_string, minus a trailing ".0"
+    // 3 float — LINKED float.to_string, minus a trailing ".0"; a NON-FINITE
+    // float is the JSON `null` (#2499, C-361): `x != x` is NaN, `|x| == inf`
+    // is either infinity, and JSON has no spelling for any of the three.
     i.local_get(t).i32_const(3).i32_eq().if_(BlockType::Empty);
+    emit_nonfinite_test(&mut i, v, m_pay);
+    i.if_(BlockType::Empty);
+    frag(&mut i, cursor, frags.null_, 4);
+    i.else_();
     i.local_get(cursor).global_set(G_LINE_CURSOR);
     i.local_get(v).f64_load(m_pay).call(float_to_string).local_set(s32);
     i.local_get(s32).i32_load(len_memarg()).local_set(l32);
@@ -562,6 +576,7 @@ pub(crate) fn emit_json_value_pretty_helper(
         .local_get(l32)
         .call(F_APPEND_COPY)
         .local_set(cursor);
+    i.end();
     i.else_();
     // 4 str
     i.local_get(t).i32_const(4).i32_eq().if_(BlockType::Empty);
@@ -692,8 +707,14 @@ pub(crate) fn emit_json_value_helper(
     i.local_get(t).i32_const(2).i32_eq().if_(BlockType::Empty);
     i.local_get(cursor).local_get(v).i64_load(m_pay).call(F_APPEND_I64).local_set(cursor);
     i.else_();
-    // 3 float — LINKED float.to_string, minus a trailing ".0"
+    // 3 float — LINKED float.to_string, minus a trailing ".0"; a NON-FINITE
+    // float is the JSON `null` (#2499, C-361): `x != x` is NaN, `|x| == inf`
+    // is either infinity, and JSON has no spelling for any of the three.
     i.local_get(t).i32_const(3).i32_eq().if_(BlockType::Empty);
+    emit_nonfinite_test(&mut i, v, m_pay);
+    i.if_(BlockType::Empty);
+    frag(&mut i, cursor, frags.null_, 4);
+    i.else_();
     i.local_get(cursor).global_set(G_LINE_CURSOR);
     i.local_get(v).f64_load(m_pay).call(float_to_string).local_set(s32);
     i.local_get(s32).i32_load(len_memarg()).local_set(l32);
@@ -718,6 +739,7 @@ pub(crate) fn emit_json_value_helper(
         .local_get(l32)
         .call(F_APPEND_COPY)
         .local_set(cursor);
+    i.end();
     i.else_();
     // 4 str
     i.local_get(t).i32_const(4).i32_eq().if_(BlockType::Empty);

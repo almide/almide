@@ -986,7 +986,9 @@ else {
 // oracle: `format!("{}", f)` — "15000000000", "-0"), NOT float.to_string's
 // ".0"-suffixed form. float.to_string IS `{}` plus a ".0" appended to
 // integral finite values, and `{}` itself never ends in ".0" (it prints the
-// shorter "X"), so stripping that suffix reproduces `{}` exactly.
+// shorter "X"), so stripping that suffix reproduces `{}` exactly. A
+// NON-FINITE float (NaN, ±inf) is the JSON `null` (#2499, C-361) — see the
+// native `almide_rt_value_float_json` for the ruling.
 fn value_stringify(v: Value) -> String = {
   let h = prim.handle(v)
   let tag = prim.load32(h + 4)
@@ -1001,9 +1003,16 @@ fn value_stringify(v: Value) -> String = {
 }
 
 // Recursively release each element Value of a tag-5 Array (called only at the Array's last ref).
-fn __vstr_float(f: Float) -> String = {
+fn __vstr_float_finite(f: Float) -> String = {
   let s = float.to_string(f)
   if string.ends_with(s, ".0") then string.drop_end(s, 2) else s
+}
+
+fn __vstr_float(f: Float) -> String = {
+  let nan = float.is_nan(f)
+  let inf = float.is_infinite(f)
+  if nan then "null"
+  else if inf then "null" else __vstr_float_finite(f)
 }
 
 // The runtime-tag-dispatched RECURSIVE Value free (the render of `Op::DropValue` calls this). At the
