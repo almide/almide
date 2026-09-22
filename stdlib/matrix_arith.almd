@@ -69,6 +69,11 @@ fn matrix_div(a: List[List[Float]], b: List[List[Float]]) -> List[List[Float]] =
   out
 }
 
+// #2484: negation is a SIGN FLIP (`f64.neg`, native's `-x`), not `0.0 - x` —
+// IEEE-754 `0.0 - 0.0` is +0.0, so the subtraction spelling mapped 0.0 to
+// +0.0 where native answered -0.0 (visible through `1.0 / z`: `inf` vs
+// `-inf`). Same class as the dequant-zero sign (#1358), opposite ruling:
+// here the sign IS the datum, exactly as C-270 keeps a decoded -0.0.
 fn __mxa_neg_row(dh: Int, sh: Int, n: Int, i: Int) -> Int = if i >= n then 0
 else {
   let x = prim.ffrombits(prim.load64(sh + 12 + i * 8))
