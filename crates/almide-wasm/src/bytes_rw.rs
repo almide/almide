@@ -308,14 +308,23 @@ impl Emitter<'_> {
         // RC-5: this family mutates IN PLACE through the receiver with
         // no write-back — under share-at-bind the receiver may be held
         // by a snapshot, so a Var receiver reads through the COW gate
-        // (which also repoints the var at the unique copy). Non-var
-        // receivers keep today's in-place semantics.
+        // (which also repoints the var at the unique copy), and a record
+        // var's field through the two-level record+field gate. A temporary
+        // (a call result, a fresh value) is mutated and dropped, as native
+        // does. Any other receiver — a nested path (`o.inner.buf`), an
+        // element — has an owner this leg does not model, and a store
+        // through a block that owner may share is exactly the aliasing
+        // miscompile the two gates exist for (the nested path printed the
+        // write through its alias); it keeps bytes_recv.rs's honest wall.
         if let almide_ir::IrExprKind::Var { id } = &b.kind
             && let Some((var_idx, var_ty, vglob)) = self.mut_var(id)
             && var_ty == BYTES
         {
             self.emit_read_mut_var_cow(id, var_idx, var_ty, vglob)?;
-        } else {
+        } else if !self.emit_read_field_bytes_cow(b)? {
+            if matches!(b.kind, almide_ir::IrExprKind::Member { .. } | almide_ir::IrExprKind::IndexAccess { .. } | almide_ir::IrExprKind::TupleIndex { .. }) {
+                return unsup("bytes-set-nonvar");
+            }
             self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
         }
         let bh = self.hold_i32()?;

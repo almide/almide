@@ -278,13 +278,21 @@ impl Emitter<'_> {
     }
 
     /// The copy-on-write judge for a value of type `t`: `$cow`, or for a
-    /// List of handles the variant whose copy takes its element credits.
+    /// List of handles — or a fixed-slot shape holding one (a record whose
+    /// field a set writes through, bytes_recv.rs) — the variant whose copy
+    /// takes its slot credits, as `copy_fn_of` picks for the plain copy.
     pub(crate) fn cow_fn_of(&self, t: SliceTy) -> u32 {
         match t {
             SliceTy::List(h) => match self.inc_elems_fn(self.types.el(h)) {
                 Some(inc_elems) => self.work.helper(crate::work::Helper::CowElems { inc_elems }),
                 None => F_COW,
             },
+            SliceTy::Option(_) | SliceTy::Result(..) | SliceTy::Tuple(_) | SliceTy::Named(_)
+                if self.shape_has_handles(t) =>
+            {
+                let inc_elems = self.shape_helper(crate::work::Helper::IncShape { ty: t }, t);
+                self.work.helper(crate::work::Helper::CowElems { inc_elems })
+            }
             _ => F_COW,
         }
     }

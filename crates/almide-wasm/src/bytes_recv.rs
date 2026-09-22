@@ -75,6 +75,61 @@ impl Emitter<'_> {
         }
     }
 
+    /// `bytes.set_*(h.f, ..)` on a record var's Bytes FIELD — the set
+    /// family writes IN PLACE with no write-back, so both levels are made
+    /// unique first (#794's two-level COW, on this leg): the record through
+    /// its COW judge (a shared record copies with its slot credits and the
+    /// var is repointed at the copy), then the field's block through `$cow`
+    /// (a shared block copies, the record's credit moves to the copy, and
+    /// the slot is repointed). Without it `var p2 = p1` shares one block
+    /// and the write shows through `p1.f` — native's RcCow never lets it.
+    /// Pushes the now-unique field block and answers `true`; `false` for
+    /// any other receiver, and for a PARAMETER's field, whose writes stay
+    /// caller-visible exactly as the var arm exempts a parameter. No block
+    /// reached here is pooled: the pool holds strings, nullary variant
+    /// cases and closure blocks, never a record with a field or a Bytes.
+    pub(crate) fn emit_read_field_bytes_cow(&mut self, b: &IrExpr) -> Result<bool, EmitError> {
+        let IrExprKind::Member { object, field } = &b.kind else {
+            return Ok(false);
+        };
+        let IrExprKind::Var { id } = &object.kind else {
+            return Ok(false);
+        };
+        let Some((idx, rty, global)) = self.mut_var(id) else {
+            return Ok(false);
+        };
+        let SliceTy::Named(ti) = rty else {
+            return Ok(false);
+        };
+        if !global && idx < self.rc_param_ceiling {
+            return Ok(false);
+        }
+        let off = {
+            let crate::types_table::NamedDef::Record(r) = self.types.def(ti) else {
+                return Ok(false);
+            };
+            match r.fields.iter().find(|f| f.name == field.as_str()) {
+                Some(fi) if fi.ty == BYTES => fi.offset,
+                _ => return Ok(false),
+            }
+        };
+        let (rcow, bcow) = (self.cow_fn_of(rty), self.cow_fn_of(BYTES));
+        let hr = self.hold_i32()?;
+        self.emit_read_mut_var(id, idx, rty, global);
+        self.f.instructions().call(rcow).local_tee(hr);
+        self.emit_store_mut_var(*id, idx, rty, global)?;
+        let scr = self.scr_i32_local;
+        {
+            let mut i = self.f.instructions();
+            i.local_get(hr).i32_load(slot_memarg(off)).call(bcow).local_set(scr);
+            i.local_get(hr).local_get(scr);
+        }
+        self.store_ty_slot(BYTES, off);
+        self.f.instructions().local_get(scr);
+        self.release_i32();
+        Ok(true)
+    }
+
     /// The mutated block is on the stack: a var takes it back through
     /// its slot; a temporary's is released. Every arm's block is uniquely
     /// held — the native arms allocate it, the push helper answers with
