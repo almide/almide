@@ -4349,11 +4349,10 @@ evidence  = [
 id        = "C-352"
 spec      = "ALS-E18"
 title     = "Or-pattern guards are evaluated once per matching alternative, in source order"
-statement = "The guard of an or-pattern arm `a | b | c if g => body` (#1461) is evaluated once for EACH alternative that matches the subject, in source order, until an evaluation holds — a false guard falls through to the next alternative before the next arm, so effects in the guard are observable exactly that many times (a wildcard-only `_ | _ | _` arm runs the guard three times; an arm whose first alternative does not match runs it once, for the alternative that does). This is the per-alternative desugar of C-323 made observable, and the reference languages specify the same count (rustc's or-patterns suite `search-via-bindings.rs`, gleam's `alternative_patterns_guard`). spec/wasm_cross/ref_rust_or_pattern_guard_count.almd pins it on scalar subjects and spec/wasm_cross/ref_gleam_or_pattern_alternatives.almd on list alternatives; spec/wasm_cross/ref_rust_or_pattern_guard_retry.almd (tuple / string / Option subjects) is the negative fixture of almide/almide#2464, where the wasm leg evaluates an effectful guard once per arm."
+statement = "The guard of an or-pattern arm `a | b | c if g => body` (#1461) is evaluated once for EACH alternative that matches the subject, in source order, until an evaluation holds — a false guard falls through to the next alternative before the next arm, so effects in the guard are observable exactly that many times (a wildcard-only `_ | _ | _` arm runs the guard three times; an arm whose first alternative does not match runs it once, for the alternative that does). This is the per-alternative desugar of C-323 made observable, and the reference languages specify the same count (rustc's or-patterns suite `search-via-bindings.rs`, gleam's `alternative_patterns_guard`). spec/wasm_cross/ref_rust_or_pattern_guard_count.almd pins it on scalar subjects and spec/wasm_cross/ref_gleam_or_pattern_alternatives.almd on list alternatives. The tuple / string / Option-subject spelling is the repro of almide/almide#2464, where the wasm leg evaluates an effectful guard once per arm; it re-enters the corpus with that fix."
 since     = "0.63.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/ref_rust_or_pattern_guard_count.almd", class = "fixture" },
   { path = "spec/wasm_cross/ref_gleam_or_pattern_alternatives.almd", class = "fixture" },
-  { path = "spec/wasm_cross/ref_rust_or_pattern_guard_retry.almd", class = "fixture" },
 ]
