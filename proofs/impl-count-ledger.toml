@@ -3,7 +3,7 @@
 # definitions in crates/almide-wasm/src, `<mod>.<fn>[_shape]` rows in
 # self_host_registry.rs), re-derived by scripts/lib/impl-count-enumerate.py.
 # Gated by tools/almide-gates impl-count: a total may not grow without its row.
-# holes = 702  implementations = 1698
+# holes = 702  implementations = 1715
 [[hole]]
 module   = "base64"
 name     = "encode"
@@ -162,9 +162,9 @@ total    = 3
 module   = "bytes"
 name     = "clear"
 native   = 1
-emitter  = 0
+emitter  = 1
 selfhost = 0
-total    = 1
+total    = 2
 [[hole]]
 module   = "bytes"
 name     = "cmp"
@@ -2956,8 +2956,8 @@ module   = "matrix"
 name     = "append_rows"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "matrix"
 name     = "qwen3_block_q1_0_kv"
@@ -2970,8 +2970,8 @@ module   = "matrix"
 name     = "linear_f32_row_no_bias"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "matrix"
 name     = "select_rows_f32"
@@ -3053,9 +3053,9 @@ total    = 2
 module   = "matrix"
 name     = "mul"
 native   = 1
-emitter  = 0
+emitter  = 1
 selfhost = 6
-total    = 7
+total    = 8
 [[hole]]
 module   = "matrix"
 name     = "scale"
@@ -3068,15 +3068,15 @@ module   = "matrix"
 name     = "fma"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "matrix"
 name     = "fma3"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "matrix"
 name     = "sub"
@@ -3194,8 +3194,8 @@ module   = "matrix"
 name     = "fused_gemm_bias_scale_gelu"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "matrix"
 name     = "attention_weights"
@@ -3215,15 +3215,15 @@ module   = "matrix"
 name     = "linear_row_gelu"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "matrix"
 name     = "pre_norm_linear"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "matrix"
 name     = "split_cols_even"
@@ -3235,9 +3235,9 @@ total    = 2
 module   = "matrix"
 name     = "concat_cols"
 native   = 1
-emitter  = 0
+emitter  = 1
 selfhost = 2
-total    = 3
+total    = 4
 [[hole]]
 module   = "matrix"
 name     = "concat_cols_many"
@@ -3271,8 +3271,8 @@ module   = "matrix"
 name     = "linear_row"
 native   = 1
 emitter  = 0
-selfhost = 2
-total    = 3
+selfhost = 3
+total    = 4
 [[hole]]
 module   = "matrix"
 name     = "linear_row_no_bias"
@@ -3284,23 +3284,23 @@ total    = 2
 module   = "matrix"
 name     = "slice_rows"
 native   = 1
-emitter  = 0
+emitter  = 1
 selfhost = 1
-total    = 2
+total    = 3
 [[hole]]
 module   = "matrix"
 name     = "conv1d"
 native   = 1
-emitter  = 0
+emitter  = 1
 selfhost = 1
-total    = 2
+total    = 3
 [[hole]]
 module   = "matrix"
 name     = "gather_rows"
 native   = 1
-emitter  = 0
+emitter  = 1
 selfhost = 1
-total    = 2
+total    = 3
 [[hole]]
 module   = "matrix"
 name     = "dot_row"
@@ -3369,15 +3369,15 @@ module   = "mem"
 name     = "save"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "mem"
 name     = "restore"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "tcp_is_open"
@@ -4712,9 +4712,9 @@ total    = 2
 module   = "string"
 name     = "clear"
 native   = 1
-emitter  = 0
+emitter  = 1
 selfhost = 1
-total    = 2
+total    = 3
 [[hole]]
 module   = "testing"
 name     = "assert_throws"
