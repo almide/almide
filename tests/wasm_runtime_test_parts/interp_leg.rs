@@ -203,7 +203,11 @@ type InterpSweepRow = (InterpLeg, Vec<(String, String)>);
 /// `ALMIDE_INTERP_SWEEP_THREADS=<n>` overrides the pool width (`1` reproduces
 /// the serial sweep exactly — the A/B lever); the default is
 /// `available_parallelism`, capped at the fixture count.
-fn interp_sweep_parallel(sources: &[String]) -> Vec<InterpSweepRow> {
+///
+/// `stems` names each source (same order); the wall of every evaluation is
+/// recorded under `ALMIDE_CORPUS_WEIGHTS_DIR` as the `interp` column of
+/// proofs/corpus-weights.txt (#2457), which the corpus slices balance on.
+fn interp_sweep_parallel(sources: &[String], stems: &[String]) -> Vec<InterpSweepRow> {
     use std::sync::atomic::{AtomicUsize, Ordering};
     let width = std::env::var("ALMIDE_INTERP_SWEEP_THREADS")
         .ok()
@@ -212,18 +216,21 @@ fn interp_sweep_parallel(sources: &[String]) -> Vec<InterpSweepRow> {
         .unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |n| n.get()))
         .min(sources.len().max(1));
     let next = AtomicUsize::new(0);
-    let mut rows: Vec<Option<InterpSweepRow>> = (0..sources.len()).map(|_| None).collect();
+    assert_eq!(sources.len(), stems.len(), "one stem per source");
+    let mut rows: Vec<Option<(InterpSweepRow, std::time::Duration)>> = (0..sources.len()).map(|_| None).collect();
     std::thread::scope(|scope| {
         let workers: Vec<_> = (0..width)
             .map(|_| {
                 scope.spawn(|| {
-                    let mut mine: Vec<(usize, InterpSweepRow)> = Vec::new();
+                    let mut mine: Vec<(usize, (InterpSweepRow, std::time::Duration))> = Vec::new();
                     loop {
                         let i = next.fetch_add(1, Ordering::Relaxed);
                         if i >= sources.len() {
                             break;
                         }
-                        mine.push((i, run_interp_capture_with_fallbacks(&sources[i])));
+                        let t0 = std::time::Instant::now();
+                        let row = run_interp_capture_with_fallbacks(&sources[i]);
+                        mine.push((i, (row, t0.elapsed())));
                     }
                     mine
                 })
@@ -235,7 +242,11 @@ fn interp_sweep_parallel(sources: &[String]) -> Vec<InterpSweepRow> {
             }
         }
     });
-    rows.into_iter()
+    let rows: Vec<(InterpSweepRow, std::time::Duration)> = rows
+        .into_iter()
         .map(|row| row.expect("every fixture is claimed exactly once by the counter"))
-        .collect()
+        .collect();
+    let walls: Vec<(String, std::time::Duration)> = stems.iter().cloned().zip(rows.iter().map(|(_, d)| *d)).collect();
+    almide_corpus::record_weights("interp", env!("CARGO_CRATE_NAME"), &walls);
+    rows.into_iter().map(|(row, _)| row).collect()
 }

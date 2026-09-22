@@ -157,7 +157,7 @@ fn sweep_corpus() -> Option<Sweep> {
     let all_stems: Vec<String> = entries.iter().map(stem_of).collect();
     let shard = almide_corpus::corpus_shard();
     if let Some(s) = shard {
-        entries = s.apply(entries);
+        entries = s.apply(entries, SHARD_GATE, stem_of);
         if let almide_corpus::CorpusShard::Slice { .. } = s {
             let walked: Vec<String> = entries.iter().map(stem_of).collect();
             almide_corpus::write_partial(s, SHARD_GATE, "fixtures", &walked);
@@ -168,7 +168,7 @@ fn sweep_corpus() -> Option<Sweep> {
         .iter()
         .map(|e| std::fs::read_to_string(e.path()).unwrap())
         .collect();
-    let rows = interp_sweep_parallel(&sources);
+    let rows = interp_sweep_parallel(&sources, &stems);
     Some(Sweep {
         rows: stems
             .into_iter()
