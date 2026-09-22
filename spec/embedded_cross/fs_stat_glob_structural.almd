@@ -15,7 +15,8 @@ import fs
 fn redact(s: String, dir: String) -> String = string.replace(s, dir, "<tmp>")
 
 fn show_stat(dir: String, r: Result[fs.FileStat, String]) -> String = match r {
-  ok(st) => "ok size=${if st.is_file then st.size else 0 - 1} dir=${st.is_dir} file=${st.is_file} recent=${st.modified > 1000000000}",
+  ok(st) => "ok size=${if st.is_file then st.size
+  else 0 - 1} dir=${st.is_dir} file=${st.is_file} recent=${st.modified > 1000000000}",
   err(e) => "err " + redact(e, dir),
 }
 
