@@ -55,10 +55,10 @@ fn floor(n: Float) -> Float = _
 @intrinsic("almide_rt_float_ceil")
 fn ceil(n: Float) -> Float = _
 
-/// Nearest whole value; halves round away from zero.
 // Round half AWAY from zero, exactly on the true value (`f64::round`; #2477,
 // C-358): round(0.49999999999999994) = 0.0, an odd integer above 2^52 is
 // unchanged. The self-hosted twin is stdlib/float_round.almd.
+/// Nearest whole value; halves round away from zero.
 @intrinsic("almide_rt_float_round")
 fn round(n: Float) -> Float = _
 

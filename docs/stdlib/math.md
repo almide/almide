@@ -339,7 +339,7 @@ math.log10(x: Float) -> Float
 // @since 0.5.13 or earlier
 math.log2(x: Float) -> Float
 
-// ln Gamma(x), Lanczos; inf at 0, unreliable for x < 0.
+// ln|Gamma(x)| on the whole line; inf at the poles.
 // @since 0.5.13 or earlier
 math.log_gamma(x: Float) -> Float
 

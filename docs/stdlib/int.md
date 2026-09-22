@@ -476,11 +476,11 @@ int.wrap_add(a: Int, b: Int, bits: Int) -> Int
 // @since 0.5.0 or earlier
 int.wrap_mul(a: Int, b: Int, bits: Int) -> Int
 
-// Low bits of a rotated right by n; bits <= 0 aborts.
+// Low bits of a rotated right by n mod bits; bits <= 0 aborts.
 // @since 0.5.0 or earlier
 int.rotate_right(a: Int, n: Int, bits: Int) -> Int
 
-// Low bits of a rotated left by n; bits <= 0 aborts.
+// Low bits of a rotated left by n mod bits; bits <= 0 aborts.
 // @since 0.5.0 or earlier
 int.rotate_left(a: Int, n: Int, bits: Int) -> Int
 
@@ -592,7 +592,7 @@ int.to_uint32_checked(n: Int) -> Option[UInt32]
 // @since 0.15.0 or earlier
 int.to_uint64_checked(n: Int) -> Option[UInt64]
 
-// some(f), or none if n fails the f32 round trip.
+// some(f), or none if the f32 does not hold n exactly.
 // @since 0.15.0 or earlier
 int.to_float32_checked(n: Int) -> Option[Float32]
 
