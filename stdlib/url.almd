@@ -190,7 +190,7 @@ fn __url_host_ok(host: String) -> Bool = host |> string.chars |> list.all((c) =>
 // Example: match url.parse("http://h:+80") { ok(_) => false, err(e) => e == "url.parse: invalid port: +80" }
 // Example: match url.parse("http://u@h") { ok(_) => false, err(e) => e == "url.parse: userinfo is not supported: u@h" }
 // Example: match url.parse("http://a b") { ok(_) => false, err(e) => e == "url.parse: invalid host: a b" }
-/// Url from s; err without :// or on bad port.
+/// Url from s; err without ://, on an empty/invalid host, userinfo, an IPv6 literal, or a bad port.
 fn parse(s: String) -> Result[Url, String] = match string.index_of(s, "://") {
   none => err("url.parse: missing '://' scheme separator"),
   some(i) => {
