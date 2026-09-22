@@ -1,0 +1,55 @@
+// @contract: C-033
+// `bytes.set_*(h.f, ..)` on a record var's Bytes FIELD keeps value semantics
+// on the wasm leg. The set family writes IN PLACE with no write-back, so the
+// structural leg makes both levels unique first: the record (a shared record
+// copies with its slot credits and the var is repointed at the copy), then
+// the field's block (a shared block copies, the record's credit moves to the
+// copy, and the slot is repointed). Before this, `var p2 = p1` shared one
+// record and one block, `bytes.set_at(p2.buf, 1, 42)` wrote through both, and
+// `p1.buf` read 42 where native's RcCow reads 8 — reproduced on the published
+// v0.62.0 asset.
+//
+// Rows, and what each is for:
+//   alias     the record is shared (`var p2 = p1`); the write lands on p2 only
+//   snapshot  a `let` snapshot taken before a run of writes keeps every byte
+//   widths    the u16 and f64 setters take the same gate as set_at
+//   shared    a unique record whose field block another binding also holds:
+//             only the field level copies
+//   unique    nothing shared: both writes land in place, no copy observable
+type Pack = { tag: String, buf: Bytes }
+
+type Only = { buf: Bytes }
+
+fn show(b: Bytes) -> String = bytes.to_list(b) |> list.map((x) => int.to_string(x)) |> list.join(",")
+
+fn main() -> Unit = {
+  let p1 = Pack { tag: "p1", buf: bytes.from_list([7, 8]) }
+  var p2 = p1
+  bytes.set_at(p2.buf, 1, 42)
+  println("alias.orig=" + show(p1.buf) + " " + p1.tag)
+  println("alias.mut=" + show(p2.buf) + " " + p2.tag)
+  var acc = Pack { tag: "acc", buf: bytes.from_list([0, 0, 0, 0]) }
+  let snap = acc
+  bytes.set_at(acc.buf, 0, 3)
+  bytes.set_at(acc.buf, 1, 6)
+  bytes.set_at(acc.buf, 2, 9)
+  bytes.set_at(acc.buf, 3, 12)
+  println("snapshot.mut=" + show(acc.buf))
+  println("snapshot.orig=" + show(snap.buf) + " " + snap.tag)
+  var o = Only { buf: bytes.new(11) }
+  let o0 = o
+  bytes.set_u16_le(o.buf, 0, 1027)
+  bytes.set_f64_le(o.buf, 3, 1.5)
+  println("widths.mut=" + show(o.buf))
+  println("widths.orig=" + show(o0.buf))
+  println("widths.f64=" + float.to_string(bytes.read_f64_le(o.buf, 3)))
+  let held = bytes.from_list([5, 6])
+  var s = Pack { tag: "s", buf: held }
+  bytes.set_at(s.buf, 0, 50)
+  println("shared.mut=" + show(s.buf))
+  println("shared.held=" + show(held))
+  var u = Only { buf: bytes.from_list([1, 1]) }
+  bytes.set_at(u.buf, 0, 2)
+  bytes.set_at(u.buf, 1, 3)
+  println("unique=" + show(u.buf))
+}

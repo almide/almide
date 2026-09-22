@@ -14,6 +14,9 @@
 // - matrix.zeros after a released matrix is still all zeros (C-161): the
 //   structural constructor assumed fresh pages were zero and handed back the
 //   dead block's cells once frees were real.
+// The div0 row divides by zero on both signs (inf, -inf) and deliberately
+// not 0/0: a NaN inside a container is the interp's declared abstain (#1403,
+// NaN bits are arch-conditional), and an abstaining row pins nothing.
 fn show(tag: String, m: Matrix) -> Unit = {
   let l = matrix.to_lists(m)
   let s = matrix.shape(m)
@@ -38,8 +41,8 @@ fn main() -> Unit = {
   ])))
   show("div", matrix.div(c, a))
   show("div0", matrix.div(matrix.from_lists([
-    [1.0, 0.0, -1.0]
-  ]), matrix.zeros(1, 3)))
+    [1.0, -1.0]
+  ]), matrix.zeros(1, 2)))
   show("add_empty", matrix.add(a, e))
   show("add_r0", matrix.add(matrix.zeros(3, 0), c))
   show("zeros_after_free", matrix.neg(matrix.zeros(1, 2)))
