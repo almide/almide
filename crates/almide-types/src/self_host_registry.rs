@@ -242,7 +242,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         (crate::embedded::SRC_BYTES_F16, &[("bytes_read_f16_le", "bytes.read_f16_le"), ("bytes_read_f16_le_array", "bytes.read_f16_le_array")]),
         (
             crate::embedded::SRC_MATRIX_ACTIVATIONS,
-            &[("matrix_softmax_rows", "matrix.softmax_rows"), ("matrix_gelu", "matrix.gelu"), ("matrix_swiglu_gate", "matrix.swiglu_gate"), ("matrix_rope_rotate", "matrix.rope_rotate"), ("matrix_rope_rotate_at", "matrix.rope_rotate_at"), ("matrix_rope_rotate_neox_at", "matrix.rope_rotate_neox_at"), ("matrix_multi_head_attention", "matrix.multi_head_attention"), ("matrix_masked_multi_head_attention", "matrix.masked_multi_head_attention"), ("matrix_from_q1_0_bytes", "matrix.from_q1_0_bytes"), ("matrix_select_rows_q1_0", "matrix.select_rows_q1_0"), ("matrix_select_rows_q8_0_dq", "matrix.select_rows_q8_0_dq")],
+            &[("matrix_softmax_rows", "matrix.softmax_rows"), ("matrix_gelu", "matrix.gelu"), ("matrix_swiglu_gate", "matrix.swiglu_gate"), ("matrix_silu_mul", "matrix.silu_mul"), ("matrix_rope_rotate", "matrix.rope_rotate"), ("matrix_rope_rotate_at", "matrix.rope_rotate_at"), ("matrix_rope_rotate_neox_at", "matrix.rope_rotate_neox_at"), ("matrix_multi_head_attention", "matrix.multi_head_attention"), ("matrix_masked_multi_head_attention", "matrix.masked_multi_head_attention"), ("matrix_from_q1_0_bytes", "matrix.from_q1_0_bytes"), ("matrix_select_rows_q1_0", "matrix.select_rows_q1_0"), ("matrix_select_rows_q8_0_dq", "matrix.select_rows_q8_0_dq")],
         ),
         (
             crate::embedded::SRC_MATRIX_SHAPE,
@@ -254,7 +254,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         ),
         (
             crate::embedded::SRC_MATRIX_EXT,
-            &[("matrix_silu_mul", "matrix.silu_mul"), ("matrix_broadcast_add_row", "matrix.broadcast_add_row"), ("matrix_row_dot", "matrix.row_dot"), ("matrix_conv1d", "matrix.conv1d"), ("matrix_to_bytes_f64_le", "matrix.to_bytes_f64_le"), ("matrix_to_bytes_f32_le", "matrix.to_bytes_f32_le"), ("matrix_from_bytes_f64_le", "matrix.from_bytes_f64_le")],
+            &[("matrix_broadcast_add_row", "matrix.broadcast_add_row"), ("matrix_row_dot", "matrix.row_dot"), ("matrix_conv1d", "matrix.conv1d"), ("matrix_to_bytes_f64_le", "matrix.to_bytes_f64_le"), ("matrix_to_bytes_f32_le", "matrix.to_bytes_f32_le"), ("matrix_from_bytes_f64_le", "matrix.from_bytes_f64_le")],
         ),
         (
             crate::embedded::SRC_MATRIX_ARITH,
