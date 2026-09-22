@@ -1,0 +1,49 @@
+// @contract: C-226
+// #2509, the repetition half of C-226's promise: an effect call's ABI carrier
+// is released on the OK path, so a heap argument's reference count does not
+// grow once per call. The err path always moved the carrier out; the ok path
+// read the payload out of it and released neither the block nor the credit it
+// held. Nothing observed the count, so nothing changed — until #2503's rc-gated
+// copy read it and a 64 KiB buffer through a 20,000-iteration effect loop went
+// out of memory on the structural leg while native and the incumbent printed
+// their answer. THE LEDGER ROW IS THE WATCH: this fixture's allocation total
+// must not scale with its loop counts, and the fresh-buffer loop below makes a
+// returning leak a megabyte-sized drift instead of an invisible one.
+import bytes
+
+effect fn poke(mut b: Bytes, v: Int) -> Unit = bytes.set_at(b, 0, v)
+
+effect fn width(b: Bytes) -> Int = ok(bytes.len(b))
+
+effect fn main() -> Unit = {
+  // A FRESH buffer per call: a leaked argument credit keeps every one of them
+  // alive, so the allocation total scales with the loop count.
+  var fresh = 0
+  var i = 0
+  while i < 2000 {
+    var b = bytes.new(1024)
+    poke(b, int.band(i, 255))!
+    fresh = fresh + bytes.get_or(b, 0, 0)
+    i = i + 1
+  }
+  println("fresh=${fresh}")
+  // ONE long-lived buffer: the count that used to grow by one per call, with
+  // nothing but the count to show for it.
+  var held = bytes.new(64)
+  var j = 0
+  while j < 2000 {
+    poke(held, int.band(j, 127))!
+    j = j + 1
+  }
+  println("held=${bytes.get_or(held, 0, 0)}")
+  // A plain (non-mut) heap argument through the same `!`, where the carrier is
+  // typed Result and parked in a temporary — the shape that always balanced.
+  var sum = 0
+  var k = 0
+  while k < 2000 {
+    let t = bytes.new(8)
+    sum = sum + width(t)!
+    k = k + 1
+  }
+  println("sum=${sum}")
+}
