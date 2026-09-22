@@ -1,0 +1,85 @@
+// @contract: C-033
+// The alias-observes-clear shape for every in-place clear (#2465): an alias or
+// holder bound BEFORE `list.clear` / `map.clear` / `bytes.clear` /
+// `string.clear` keeps the pre-clear value, whether the clear runs on the var
+// directly, through a `mut` parameter, or on a record field (directly and
+// through a `mut` record parameter). The released 0.62.0 default route printed
+// `[] []` for the string var shape: the incumbent's self-hosted `string_clear`
+// stored length 0 into the block the var and its alias SHARE. Both wasm legs
+// now lower every clear as a var / field write-back of a fresh empty block (the
+// `list.clear` rebind), so native, the structural leg, the forced incumbent
+// (tests/incumbent_clear_alias_test.rs) and the interpreter print the same
+// bytes. The sibling inplace_clear_family.almd pins the rest of the family's
+// behaviour (delete order, growth after clear).
+type R = { name: String, buf: Bytes, xs: List[Int], m: Map[String, Int] }
+
+fn wipe_list(mut xs: List[Int]) -> Unit = list.clear(xs)
+
+fn wipe_map(mut m: Map[String, Int]) -> Unit = map.clear(m)
+
+fn wipe_bytes(mut b: Bytes) -> Unit = bytes.clear(b)
+
+fn wipe_text(mut s: String) -> Unit = string.clear(s)
+
+fn wipe_record(mut r: R) -> Unit = {
+  string.clear(r.name)
+  bytes.clear(r.buf)
+  list.clear(r.xs)
+  map.clear(r.m)
+}
+
+fn show(r: R) -> String = "[" + r.name + "] " + int.to_string(bytes.len(r.buf)) + " " + int.to_string(list.len(r.xs)) + " " + int.to_string(map.len(r.m))
+
+fn main() -> Unit = {
+  // A. the var shape: the alias bound before keeps its value.
+  var s = "hello"
+  let ss = s
+  string.clear(s)
+  println("A.string=[" + s + "] [" + ss + "]")
+  var b = bytes.from_list([1, 2, 3])
+  let bb = b
+  bytes.clear(b)
+  println("A.bytes=" + int.to_string(bytes.len(b)) + " " + int.to_string(bytes.len(bb)) + " " + int.to_string(bytes.get_or(bb, 2, 0 - 1)))
+  var xs = [1, 2, 3]
+  let ys = xs
+  list.clear(xs)
+  println("A.list=" + int.to_string(list.len(xs)) + " " + int.to_string(list.len(ys)))
+  var m: Map[String, Int] = map.new()
+  map.insert(m, "a", 1)
+  let mm = m
+  map.clear(m)
+  println("A.map=" + int.to_string(map.len(m)) + " " + int.to_string(map.len(mm)))
+  // B. through a mut parameter: the caller's var is cleared, the alias the
+  // caller bound before the call is not.
+  s = "again"
+  let s2 = s
+  wipe_text(s)
+  b = bytes.from_list([4, 5])
+  let b2 = b
+  wipe_bytes(b)
+  xs = [4, 5]
+  let xs2 = xs
+  wipe_list(xs)
+  map.insert(m, "b", 2)
+  let m2 = m
+  wipe_map(m)
+  println("B=[" + s + "] [" + s2 + "] " + int.to_string(bytes.len(b)) + " " + int.to_string(bytes.len(b2)) + " " + int.to_string(list.len(xs)) + " " + int.to_string(list.len(xs2)) + " " + int.to_string(map.len(m)) + " " + int.to_string(map.len(m2)))
+  // C. a record field: the record alias keeps its field.
+  var m0: Map[String, Int] = map.new()
+  map.insert(m0, "k", 1)
+  var r = R { name: "hi", buf: bytes.from_list([1, 2]), xs: [7, 8, 9], m: m0 }
+  let r2 = r
+  string.clear(r.name)
+  bytes.clear(r.buf)
+  list.clear(r.xs)
+  map.clear(r.m)
+  println("C.r=" + show(r) + " r2=" + show(r2))
+  // D. a record field through a mut record parameter.
+  string.push(r.name, "x")
+  r.buf = bytes.from_list([5])
+  list.push(r.xs, 6)
+  r.m = m0
+  let r3 = r
+  wipe_record(r)
+  println("D.r=" + show(r) + " r3=" + show(r3))
+}
