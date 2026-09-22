@@ -137,6 +137,9 @@ pub(crate) fn parse_and_typecheck_for_compile(file: &str, bundled_module: Option
     );
     let mut checker = check::Checker::from_env(canon.env);
     checker.set_source(file, &source_text);
+    // The staged copy of a bundled module lives in the temp dir, so its
+    // path carries no `stdlib/` component: its origin is the flag (E085).
+    checker.in_bundled_module = bundled_module.is_some();
     checker.diagnostics = canon.diagnostics;
     let diagnostics = checker.infer_program(&mut program);
     let errors: Vec<_> = diagnostics.iter()
