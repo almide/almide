@@ -704,14 +704,35 @@ pub(super) fn rc_cow_raw_type(ty_str: &str) -> String {
 /// the mapped AlmideRcCow types — gluing it would double-wrap, the nn E0283).
 /// Decided against the runtime-module registry, the one source of truth for
 /// what ships raw native signatures.
+///
+/// Three runtime modules — `http`, `json`, `regex` — declare their intrinsics
+/// under the older `almide_<module>_…` spelling with no `rt_` segment
+/// (`almide_http_get_bytes`). That spelling is the runtime's own too, and a
+/// user-module fn never receives it (the normalizer only ever prefixes
+/// `almide_rt_`), so it is judged against the same registry (#2497: the
+/// `Result[Bytes, String]` of `http.get_bytes` reached a `let` binding raw —
+/// `let mut b: AlmideRcCow<Vec<u8>> = (almide_http_get_bytes(u))?;`, rustc
+/// E0308 after a green `check`, while every `almide_rt_` sibling glued).
 fn rc_cow_symbol_is_native_runtime(symbol: &str) -> bool {
-    let Some(rest) = symbol.strip_prefix("almide_rt_") else {
+    let Some(rest) = symbol.strip_prefix("almide_") else {
         return false;
+    };
+    let rest = match rest.strip_prefix("rt_") {
+        Some(r) => r,
+        None if LEGACY_RUNTIME_SYMBOL_MODULES.iter().any(|m| {
+            rest.strip_prefix(m).is_some_and(|r| r.starts_with('_'))
+        }) => rest,
+        None => return false,
     };
     crate::generated::rust_runtime::RUST_RUNTIME_MODULES
         .iter()
         .any(|(m, _)| rest.strip_prefix(m).is_some_and(|r| r.starts_with('_')))
 }
+
+/// The runtime modules whose intrinsic symbols are spelled `almide_<module>_…`
+/// rather than `almide_rt_<module>_…` (see `rc_cow_symbol_is_native_runtime`).
+/// Closed set: `grep -ho '@intrinsic("almide_[a-z]*_' stdlib/*.almd | grep -v rt_`.
+const LEGACY_RUNTIME_SYMBOL_MODULES: &[&str] = &["http", "json", "regex"];
 
 /// Inline numeric casts. Extracted from `render_runtime_call` (cog>30
 /// decomposition): `Some` mirrors the original's early `return`, `None`
