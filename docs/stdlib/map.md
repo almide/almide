@@ -369,30 +369,79 @@ fn main() -> Unit = {
 ## Signature index (25 functions)
 
 ```
+// An empty Map[K, V].
 map.new() -> Map[K, V]
+
+// Value for key, or none when absent.
 map.get(m: Map[K, V], key: K) -> Option[V]
+
+// Value for key, or default when absent.
 map.get_or(m: Map[K, V], key: K, default: V) -> V
+
+// Copy with key -> value; existing keys stay put.
 map.set(m: Map[K, V], key: K, value: V) -> Map[K, V]
+
+// true when key is present.
 map.contains(m: Map[K, V], key: K) -> Bool
+
+// Copy without key; unchanged if absent.
 map.remove(m: Map[K, V], key: K) -> Map[K, V]
+
+// Every key, in insertion order.
 map.keys(m: Map[K, V]) -> List[K]
+
+// Every value, in key insertion order.
 map.values(m: Map[K, V]) -> List[V]
+
+// Entry count; 0 for an empty map.
 map.len(m: Map[K, V]) -> Int
+
+// (key, value) pairs in insertion order.
 map.entries(m: Map[K, V]) -> List[(K, V)]
+
+// a plus b's entries; b wins on shared keys.
 map.merge(a: Map[K, V], b: Map[K, V]) -> Map[K, V]
+
+// true iff m has no entries.
 map.is_empty(m: Map[K, V]) -> Bool
+
+// Map of pairs; a repeated key takes the last value.
 map.from_list(pairs: List[(K, V)]) -> Map[K, V]
+
+// Same keys and order, values replaced by f(v).
 map.map(m: Map[K, V], f: (V) -> B) -> Map[K, B]
+
+// Entries where f(k, v) holds, order kept.
 map.filter(m: Map[K, V], f: (K, V) -> Bool) -> Map[K, V]
+
+// Folds f(acc, k, v) in insertion order.
 map.fold(m: Map[K, V], init: A, f: (A, K, V) -> A) -> A
+
+// true if some f(k, v) holds; false when empty.
 map.any(m: Map[K, V], f: (K, V) -> Bool) -> Bool
+
+// true if every f(k, v) holds; true when empty.
 map.all(m: Map[K, V], f: (K, V) -> Bool) -> Bool
+
+// Number of entries where f(k, v) holds.
 map.count(m: Map[K, V], f: (K, V) -> Bool) -> Int
+
+// First (k, v) where f holds, or none.
 map.find(m: Map[K, V], f: (K, V) -> Bool) -> Option[(K, V)]
+
+// Copy with key's value f(v); no-op if absent.
 map.update(m: Map[K, V], key: K, f: (V) -> V) -> Map[K, V]
+
+// key -> f(old) if present, else init appended.
 map.upsert(m: Map[K, V], key: K, init: V, f: (V) -> V) -> Map[K, V]
+
+// In-place key -> value; existing keys stay put.
 map.insert(m: Map[K, V], key: K, value: V) -> Unit
+
+// Removes key in place; no-op when absent.
 map.delete(m: Map[K, V], key: K) -> Unit
+
+// Removes every entry of m in place.
 map.clear(m: Map[K, V]) -> Unit
 ```
 
