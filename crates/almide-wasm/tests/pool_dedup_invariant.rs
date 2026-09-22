@@ -3,12 +3,14 @@
 //! `Pool::intern` deduplicates, so a string literal block is SHARED between
 //! every site that names it instead of being private to one. The audit that
 //! licensed that change enumerated why it is safe, and the load-bearing
-//! clause is a COUNT: `cow_fn_of` has exactly four call sites, three of them
-//! list paths that cannot see a pooled block and one that reads a `mut` var
-//! where only a Str is reachable.
+//! clause is a CLOSED SET: `cow_fn_of` was called from exactly four files,
+//! three of them list paths that cannot see a pooled block and one that reads
+//! a `mut` var where only a Str is reachable. The fifth (bytes_recv.rs, a
+//! record var's Bytes field under a set) was admitted on the same argument:
+//! neither a record with a field nor a Bytes block is ever pooled.
 //!
 //! A count is exactly the kind of premise that expires without anyone
-//! noticing. Add a fifth cow-then-write site, or pool a list, and the
+//! noticing. Add another cow-then-write site, or pool a list, and the
 //! argument is void while every test stays green — so the premise is checked
 //! here rather than trusted. This test does not prove the dedup is safe; it
 //! fails when the reasoning that did stops applying.
@@ -42,11 +44,16 @@ fn rust_sources() -> Vec<(String, String)> {
     out
 }
 
-/// The four sites, by file. `cow_fn_of`'s own definition and the helper body
-/// `emit_cow_elems` (which calls `F_COW` as the implementation of the variant
-/// `cow_fn_of` returns for a list of heap elements) are not call sites and
-/// are excluded by matching on the CALL spelling.
+/// The declared sites, by file. `cow_fn_of`'s own definition and the helper
+/// body `emit_cow_elems` (which calls `F_COW` as the implementation of the
+/// variant `cow_fn_of` returns for a list of heap elements) are not call sites
+/// and are excluded by matching on the CALL spelling.
 const DECLARED_COW_CALLERS: &[(&str, &str)] = &[
+    (
+        "bytes_recv.rs",
+        "a record var's Bytes field — the pool holds strings, nullary variant cases and \
+         closure blocks, never a record with a field or a Bytes",
+    ),
     ("emitter_vars.rs", "reads a `mut` var — only a Str is a reachable static"),
     ("stmts_append.rs", "$list_push — lists are never pooled"),
     ("stmts_index.rs", "element slot — lists are never pooled"),
@@ -54,7 +61,7 @@ const DECLARED_COW_CALLERS: &[(&str, &str)] = &[
 ];
 
 #[test]
-fn cow_then_write_is_still_the_declared_set_of_four() {
+fn cow_then_write_is_still_the_declared_set() {
     let mut found: BTreeMap<String, usize> = BTreeMap::new();
     for (name, text) in rust_sources() {
         // `self.cow_fn_of(` is the call; `fn cow_fn_of(` is the definition.
@@ -69,7 +76,7 @@ fn cow_then_write_is_still_the_declared_set_of_four() {
     assert!(
         unexpected.is_empty(),
         "a new cow-then-write site appeared in {unexpected:?}.\n\
-         The #2344 pool-dedup argument rests on the four declared sites being \
+         The #2344 pool-dedup argument rests on the declared sites being \
          the only ones, because a deduped literal block is shared between the \
          sites that name it. Before adding this file to DECLARED_COW_CALLERS, \
          establish that the new site cannot reach a POOLED block — either its \

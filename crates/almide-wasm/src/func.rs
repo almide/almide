@@ -58,11 +58,12 @@ impl Pool {
     ///    early-return below the line), so `$free` is unreachable for a pool
     ///    address through the dec path — which matters because `emit_free`
     ///    has no boundary test of its own.
-    /// 4. `cow_fn_of` has exactly four call sites; three of them are list
-    ///    paths that cannot see a pooled block, and the fourth reads a `mut`
-    ///    var, where only a Str is reachable.
+    /// 4. `cow_fn_of` is called from a declared set of five files; three are
+    ///    list paths that cannot see a pooled block, one reads a `mut` var,
+    ///    where only a Str is reachable, and one makes a record var and its
+    ///    Bytes field unique — neither of which is ever pooled.
     ///
-    /// Clause 4 is the one that expires silently if someone adds a fifth
+    /// Clause 4 is the one that expires silently if someone adds another
     /// cow-then-write site, so it is gated:
     /// `crates/almide-wasm/tests/pool_dedup_invariant.rs`.
     pub(crate) fn intern(&mut self, s: &str) -> u32 {
