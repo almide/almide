@@ -33,6 +33,10 @@ Develop run 35569545602 (last green develop run before tonight, 66 min end-to-en
 | Test shards cover every target | 2.4 min | |
 | Lean / Test WASM / Test ARM / ratchet-separation / coverage / changes | ≤ 0.7 min each | |
 
+The shard names in this table are the 0-based ones of that run. The jobs were
+renamed `Test Rust (shard 1/4)` … `(shard 4/4)` on 2026-09-22, so the row named
+`shard 0/4` here is today's `shard 1/4`.
+
 PR #2440 run 35581361256: the run was created 09:05:52 and `Change class` (the
 first job) started 09:34:44 — **29 min of runner-capacity wait** before any work;
 `build` finished 09:40:51 and the shards were picked up 09:42:38 (another ~2 min of
@@ -54,7 +58,7 @@ was measured on a contended shard; its true solo time is unknown until #2444 run
 so the ledger alone should be well under 1666 s in isolation).
 
 Required checks on develop today (API): Build (Linux), Test WASM, Test ARM,
-Emit & Format, WASM host-arch determinism, Lean Proofs, Test Rust (shard 0–3/4),
+Emit & Format, WASM host-arch determinism, Lean Proofs, Test Rust (shard 1–4/4),
 Test shards cover every target, Almide gates, WASM browser-ABI determinism, and the
 acceptance-ring names. **Not required: Commissioned wasm gates, Commissioned
 aviation quality, Perf ratchet, Test WASM (Windows host), Coverage ratchet,
