@@ -1,0 +1,2 @@
+expects_code = "E085"
+hint_substring = "intrinsics live in the stdlib"

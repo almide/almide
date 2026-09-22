@@ -1,0 +1,5 @@
+// E085: a pure fn bound to a runtime symbol is refused outside the stdlib too.
+@intrinsic("almide_rt_math_abs")
+fn magnitude(n: Int) -> Int = _
+
+fn main() -> Unit = println(int.to_string(magnitude(-3)))

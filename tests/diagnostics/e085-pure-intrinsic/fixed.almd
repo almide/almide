@@ -1,0 +1,4 @@
+// E085: call the stdlib function that owns the operation.
+fn magnitude(n: Int) -> Int = math.abs(n)
+
+fn main() -> Unit = println(int.to_string(magnitude(-3)))
