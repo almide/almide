@@ -88,19 +88,12 @@ json.to_map :: UNPROBEABLE :: no candidate shape builds natively
 list.group_by :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: list.group_by_x — rendering them would emit a dangling `(call $…)` (invalid wasm). Add the callee to th
 list.with_capacity :: UNPROBEABLE :: no candidate shape builds natively
 map.new :: UNPROBEABLE :: no candidate shape builds natively
-matrix.append_rows :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.append_rows — rendering them would emit a dangling `(call $…)` (invalid wasm). Add the callee to
-matrix.fma :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.fma — rendering them would emit a dangling `(call $…)` (invalid wasm). Add the callee to the sel
-matrix.fma3 :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.fma3 — rendering them would emit a dangling `(call $…)` (invalid wasm). Add the callee to the se
-matrix.fused_gemm_bias_scale_gelu :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.fused_gemm_bias_scale_gelu — rendering them would emit a dangling `(call $…)` (invalid wasm). Ad
-matrix.linear_f32_row_no_bias :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.linear_f32_row_no_bias — rendering them would emit a dangling `(call $…)` (invalid wasm). Add th
 matrix.linear_q1_0_row_no_bias :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.linear_q1_0_row_no_bias — rendering them would emit a dangling `(call $…)` (invalid wasm). Add t
 matrix.linear_q8_0_row_no_bias :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.linear_q8_0_row_no_bias — rendering them would emit a dangling `(call $…)` (invalid wasm). Add t
-matrix.linear_row_gelu :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.linear_row_gelu — rendering them would emit a dangling `(call $…)` (invalid wasm). Add the calle
 matrix.mul_f32 :: UNPROBEABLE :: parameter type outside the synthesizer
 matrix.mul_f32_scaled :: UNPROBEABLE :: parameter type outside the synthesizer
 matrix.mul_f32_t :: UNPROBEABLE :: parameter type outside the synthesizer
 matrix.mul_f32_t_scaled :: UNPROBEABLE :: parameter type outside the synthesizer
-matrix.pre_norm_linear :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.pre_norm_linear — rendering them would emit a dangling `(call $…)` (invalid wasm). Add the calle
 matrix.qwen3_block_f32_kv :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.qwen3_block_f32_kv — rendering them would emit a dangling `(call $…)` (invalid wasm). Add the ca
 matrix.qwen3_block_q1_0_kv :: COMPILER_FRONTIER :: wasm build failed
 matrix.qwen3_block_q8_0_kv :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.qwen3_block_q8_0_kv — rendering them would emit a dangling `(call $…)` (invalid wasm). Add the c
