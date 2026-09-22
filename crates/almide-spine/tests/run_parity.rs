@@ -20,6 +20,12 @@ use std::path::PathBuf;
 /// their use).
 const BASELINE: &str = "proofs/run-parity-unsupported-baseline.txt";
 
+/// The fixture stem of a manifest row's corpus-relative path — the key of
+/// `proofs/corpus-weights.txt`.
+fn stem_of(rel: &str) -> String {
+    std::path::Path::new(rel).file_stem().and_then(|s| s.to_str()).unwrap_or(rel).to_string()
+}
+
 fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().expect("test harness invariant")
 }
@@ -101,7 +107,7 @@ fn wasm_cross_fixtures_run_identically_on_the_interpreter() {
     }
     let mut rows: Vec<(&String, &(String, i32))> = manifest.iter().collect();
     if let Some(s) = shard {
-        rows = s.apply(rows);
+        rows = s.apply(rows, GATE, |(rel, _)| stem_of(rel));
         let walked: Vec<String> = rows.iter().map(|(rel, _)| (*rel).clone()).collect();
         almide_corpus::write_partial(s, GATE, "fixtures", &walked);
     }
@@ -112,9 +118,16 @@ fn wasm_cross_fixtures_run_identically_on_the_interpreter() {
     let mut n_unsupported = 0usize;
     let mut n_fuel = 0usize;
     let mut n_ok = 0usize;
+    // Per-fixture wall, recorded under ALMIDE_CORPUS_WEIGHTS_DIR (#2457) —
+    // the `run_parity` column of proofs/corpus-weights.txt the slices
+    // balance on.
+    let mut walls: Vec<(String, std::time::Duration)> = Vec::with_capacity(rows.len());
     for (rel, (want_hash, want_exit)) in rows {
         let text = std::fs::read_to_string(almide_corpus::resolve(&root, rel)).expect("test harness invariant");
-        match almide_spine::s5::run_file(rel, &text) {
+        let t0 = std::time::Instant::now();
+        let outcome = almide_spine::s5::run_file(rel, &text);
+        walls.push((stem_of(rel), t0.elapsed()));
+        match outcome {
             Ok(out) if out.exit == -2 => {
                 let reason = out.stderr.lines().next().unwrap_or("?").to_string();
                 *unsupported.entry(reason).or_default() += 1;
@@ -133,6 +146,7 @@ fn wasm_cross_fixtures_run_identically_on_the_interpreter() {
             Err(e) => front_end_failures.push(format!("{rel}: {e}")),
         }
     }
+    almide_corpus::record_weights("run_parity", GATE, &walls);
     println!("run parity: {n_ok} identical, {n_unsupported} unsupported-skipped, {n_fuel} fuel-exhausted, {} diverge", mismatches.len());
     for (reason, n) in unsupported.iter().take(10) {
         println!("  unsupported ×{n}: {reason}");

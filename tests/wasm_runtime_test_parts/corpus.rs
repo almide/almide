@@ -146,7 +146,7 @@ fn build_corpus() -> Option<Vec<FixtureLegs>> {
     if let Some(shard) = almide_corpus::corpus_shard() {
         let gate = env!("CARGO_CRATE_NAME");
         shard.require_slice(gate);
-        entries = shard.apply(entries);
+        entries = shard.apply(entries, gate, |e| e.path().file_stem().unwrap().to_str().unwrap().to_string());
         let walked: Vec<String> = entries
             .iter()
             .map(|e| e.path().file_stem().unwrap().to_str().unwrap().to_string())
@@ -181,10 +181,11 @@ fn build_corpus() -> Option<Vec<FixtureLegs>> {
     // in corpus order and are zipped onto the built legs below, so nothing
     // about the table depends on which finished first. An undeclared interp
     // leg spawns no sweep at all: every row gets `None`.
+    let stems: Vec<String> = entries.iter().map(|e| e.path().file_stem().unwrap().to_str().unwrap().to_string()).collect();
     let (built, interps) = std::thread::scope(|scope| {
         let sweep = NEEDED_LEGS
             .interp
-            .then(|| scope.spawn(|| interp_sweep_parallel(&sources)));
+            .then(|| scope.spawn(|| interp_sweep_parallel(&sources, &stems)));
         let built = build_backend_legs(&entries, &sources, have_wasm_opt);
         let interps: Vec<Option<InterpLeg>> = match sweep {
             Some(handle) => handle
@@ -258,9 +259,14 @@ type BackendLegs = (String, Option<String>, Option<(i32, String, String)>, (i32,
 
 fn build_backend_legs(entries: &[std::fs::DirEntry], sources: &[String], have_wasm_opt: bool) -> Vec<BackendLegs> {
     let mut legs = Vec::with_capacity(entries.len());
+    // Per-fixture build wall (native + wasm + wasm-opt subprocesses),
+    // recorded under ALMIDE_CORPUS_WEIGHTS_DIR (#2457) — the `build` column
+    // of proofs/corpus-weights.txt.
+    let mut walls: Vec<(String, std::time::Duration)> = Vec::with_capacity(entries.len());
     for (entry, source) in entries.iter().zip(sources) {
         let path = entry.path();
         let name = path.file_stem().unwrap().to_str().unwrap().to_string();
+        let t0 = std::time::Instant::now();
         let allow = source
             .lines()
             .find_map(|l| l.trim().strip_prefix("// @xt-allow:").map(|r| r.trim().to_string()));
@@ -286,8 +292,10 @@ fn build_backend_legs(entries: &[std::fs::DirEntry], sources: &[String], have_wa
         } else {
             None
         };
+        walls.push((name.clone(), t0.elapsed()));
         legs.push((name, allow, native, wasm, wasm_opt));
     }
+    almide_corpus::record_weights("build", env!("CARGO_CRATE_NAME"), &walls);
     legs
 }
 
