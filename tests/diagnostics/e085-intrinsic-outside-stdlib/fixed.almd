@@ -1,0 +1,6 @@
+// E085: the stdlib module owns the operation; wrap it in an effect fn.
+import fs
+
+effect fn write(path: String, text: String) -> Unit = fs.write(path, text)!
+
+effect fn main() -> Unit = write("out.txt", "hi")!

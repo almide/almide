@@ -440,6 +440,7 @@ impl Checker {
             // the native build (rustc: cannot find function; sweep finding
             // 2026-08-18, the acceptance-parity class).
             ast::Decl::Fn { name, body: None, extern_attrs, attrs, span, .. } => {
+                self.reject_user_intrinsic(name.as_str(), attrs, *span);
                 let declared_extern = !extern_attrs.is_empty()
                     || attrs.iter().any(|a| a.name.as_str() == "intrinsic");
                 if !declared_extern {
@@ -459,7 +460,8 @@ impl Checker {
                     self.emit(d);
                 }
             }
-            ast::Decl::Fn { name, params, return_type, body: Some(body), effect, generics, .. } => {
+            ast::Decl::Fn { name, params, return_type, body: Some(body), effect, generics, attrs, span, .. } => {
+                self.reject_user_intrinsic(name.as_str(), attrs, *span);
                 self.check_fn_decl(name, FnToCheck {
                     params, return_type, body, effect, generics,
                 });

@@ -1,0 +1,5 @@
+// E085: a user file binds a runtime symbol directly, bypassing the capability story.
+@intrinsic("almide_rt_fs_write")
+effect fn write(path: String, text: String) -> Result[Unit, String]
+
+effect fn main() -> Unit = write("out.txt", "hi")!
