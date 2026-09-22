@@ -31,3 +31,8 @@ crates/almide-mir/m.wasm
 # the fingerprint fast-path and force a full gate re-derivation
 almide-dossier-*.md
 *.regen
+
+# insta writes a .snap.new beside a snapshot it could not match; it is a
+# pending-review artifact, never a committed one (5 of them reached the tree
+# in the fifth A-ci batch through a directory-wide `git add`).
+*.snap.new
