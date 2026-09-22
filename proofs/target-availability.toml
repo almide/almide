@@ -139,7 +139,38 @@ schema = 3
 # leg would need per-element-type twins and the entropy floor; the
 # random.shuffle twins wall on the same leg), list.partition and every
 # matrix row (the 2026-09-08 layout finding above — one blocker, not 45).
-pending_self_host_ceiling = 48
+# 2026-09-22 (#1423 stage 4): 48 -> 9. The matrix blocker was one finding,
+# not 44 rows: the structural leg's Matrix is its OWN flat block
+# (`[rows][cols][f64 cells]`, matrix.rs), so no reading of
+# stdlib/matrix_core.almd's list-of-rows layout could ever serve it — the
+# leg needed the family's entry points on its layout. matrix_elem.rs (the
+# zip family add/sub/div/silu_mul, neg/scale/map, broadcast_add_row,
+# causal_mask_add, layer_norm_rows), matrix_prod.rs (mul, linear_row[_no_bias],
+# swiglu_gate, conv1d) and matrix_shape.rs (slice_rows, gather_rows,
+# concat_cols[_many], split_cols_even, to_bytes_f64/f32_le) are those arms,
+# from_bytes_f64_le joins the byte loader, and `Matrix[Float32]` is the same
+# flat f64 block (native stores every dtype as one AlmideMatrix). The rest are
+# native's own compositions, linked prim-free from stdlib/matrix_fused.almd on
+# EVERY leg (whitelist.rs MATRIX_COMPOSITIONS): mul_scaled, attention_weights,
+# scaled_dot_product_attention, the f32 family, and — closing all three legs —
+# fma / fma3 (native's `x*ka + y*kb [+ z*kc]` IS add∘scale, two rounded products
+# and one rounded sum), fused_gemm_bias_scale_gelu, linear_row_gelu,
+# pre_norm_linear, append_rows and linear_f32_row_no_bias (the sequential
+# widen-mul-add dot over from_bytes_f32_le's decode). En route, four incumbent
+# bodies moved to native's rule: neg's sign (`-x`, not `0.0 - x`),
+# slice_rows' `as usize` bounds, swiglu_gate's libm sigmoid and silu_mul's
+# fast-exp on equal shapes; and structural matrix.zeros now zero-fills (a freed
+# block came back with its dead cells). Parity evidence:
+# spec/wasm_cross/matrix_elementwise_family.almd, matrix_product_family.almd,
+# matrix_shape_family.almd, matrix_composition_family.almd.
+# Left, each for a stated reason: linear_q1_0_row_no_bias (almide-kernel's
+# packed dot scales each 128-weight block once and fuses its accumulators with
+# vfmaq on aarch64 — not the unfused composition's rounding, and not one
+# rounding across native arches), linear_q8_0_row_no_bias (native quantizes the
+# activation row to Q8 and runs an integer dot — a transcription, not a
+# composition), and the three qwen3_block_* layers (whole fused decoder layers
+# over those kernels plus repeat_kv / per-head norm — their own arc).
+pending_self_host_ceiling = 9
 pending_port_ceiling = 56
 
 # The unprobed class (#1827), per leg. Today: the five HttpRequest
@@ -412,121 +443,6 @@ reason = "pending-self-host"
 issue = "#1423"
 
 [[unavailable]]
-fn = "matrix.add"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.append_rows"
-legs = ["structural", "stock-p1", "embedded"]
-class = "pending-self-host"
-reason = "native intrinsic (almide_rt_matrix_append_rows) with no wasm definition on any leg — the incumbent refuses the unlinked call and the structural leg has no arm"
-alt = "matrix.from_lists(matrix.to_lists(base) + matrix.to_lists(extra))"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.attention_weights"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.broadcast_add_row"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.causal_mask_add"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.concat_cols"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.concat_cols_many"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.conv1d"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.div"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.fma"
-legs = ["structural", "stock-p1", "embedded"]
-class = "pending-self-host"
-reason = "fused-kernel-perf: a native intrinsic (almide_rt_matrix_fma) with no wasm definition on any leg — the incumbent refuses the unlinked call and the structural leg has no arm"
-alt = "matrix.add(matrix.scale(a, ka), matrix.scale(b, kb))"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.fma3"
-legs = ["structural", "stock-p1", "embedded"]
-class = "pending-self-host"
-reason = "fused-kernel-perf: a native intrinsic (almide_rt_matrix_fma3) with no wasm definition on any leg — the incumbent refuses the unlinked call and the structural leg has no arm"
-alt = "matrix.add(matrix.add(matrix.scale(a, ka), matrix.scale(b, kb)), matrix.scale(c, kc))"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.from_bytes_f64_le"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.fused_gemm_bias_scale_gelu"
-legs = ["structural", "stock-p1", "embedded"]
-class = "pending-self-host"
-reason = "fused-kernel-perf: a native intrinsic (almide_rt_matrix_fused_gemm_bias_scale_gelu) with no wasm definition on any leg — the incumbent refuses the unlinked call and the structural leg has no arm"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.gather_rows"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.layer_norm_rows"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.linear_f32_row_no_bias"
-legs = ["structural", "stock-p1", "embedded"]
-class = "pending-self-host"
-reason = "fused-kernel-perf: a native intrinsic (almide_rt_matrix_linear_f32_row_no_bias) with no wasm definition on any leg — the incumbent refuses the unlinked call and the structural leg has no arm; the weights are consumed packed from the source buffer, so the portable spelling is the primitive matrix ops over an unpacked Matrix"
-issue = "#1827"
-
-[[unavailable]]
 fn = "matrix.linear_q1_0_row_no_bias"
 legs = ["structural", "stock-p1", "embedded"]
 class = "pending-self-host"
@@ -538,99 +454,6 @@ fn = "matrix.linear_q8_0_row_no_bias"
 legs = ["structural", "stock-p1", "embedded"]
 class = "pending-self-host"
 reason = "fused-kernel-perf: a native intrinsic (almide_rt_matrix_linear_q8_0_row_no_bias) with no wasm definition on any leg — the incumbent refuses the unlinked call and the structural leg has no arm; the weights are consumed packed from the source buffer, so the portable spelling is the primitive matrix ops over an unpacked Matrix"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.linear_row"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.linear_row_gelu"
-legs = ["structural", "stock-p1", "embedded"]
-class = "pending-self-host"
-reason = "fused-kernel-perf: a native intrinsic (almide_rt_matrix_linear_row_gelu) with no wasm definition on any leg — the incumbent refuses the unlinked call and the structural leg has no arm"
-alt = "matrix.gelu(matrix.linear_row(x, weight, bias))"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.linear_row_no_bias"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.map"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.mul"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.mul_f32"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "structural-leg-gap: the structural leg has no representation for the Matrix[Float32] value (bind-ty:Applied); the incumbent serves it"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.mul_f32_scaled"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "structural-leg-gap: the structural leg has no representation for the Matrix[Float32] value (bind-ty:Applied); the incumbent serves it"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.mul_f32_t"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "structural-leg-gap: the structural leg has no representation for the Matrix[Float32] value (bind-ty:Applied); the incumbent serves it"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.mul_f32_t_scaled"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "structural-leg-gap: the structural leg has no representation for the Matrix[Float32] value (bind-ty:Applied); the incumbent serves it"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.mul_scaled"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.neg"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.ones_f32"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "structural-leg-gap: the structural leg has no representation for the Matrix[Float32] value (bind-ty:Applied); the incumbent serves it"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.pre_norm_linear"
-legs = ["structural", "stock-p1", "embedded"]
-class = "pending-self-host"
-reason = "fused-kernel-perf: a native intrinsic (almide_rt_matrix_pre_norm_linear) with no wasm definition on any leg — the incumbent refuses the unlinked call and the structural leg has no arm"
-alt = "matrix.linear_row(matrix.layer_norm_rows(x, gamma, beta, eps), weight, bias)"
 issue = "#1827"
 
 [[unavailable]]
@@ -652,76 +475,6 @@ fn = "matrix.qwen3_block_q8_0_kv"
 legs = ["structural", "stock-p1", "embedded"]
 class = "pending-self-host"
 reason = "fused-kernel-perf: a native intrinsic (almide_rt_matrix_qwen3_block_q8_0_kv) with no wasm definition on any leg — the incumbent refuses the unlinked call and the structural leg has no arm; the weights are consumed packed from the source buffer, so the portable spelling is the primitive matrix ops over an unpacked Matrix"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.scale"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.scaled_dot_product_attention"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.silu_mul"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.slice_rows"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.split_cols_even"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.sub"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.swiglu_gate"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.to_bytes_f32_le"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.to_bytes_f64_le"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.zeros_f32"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "structural-leg-gap: the structural leg has no representation for the Matrix[Float32] value (bind-ty:Applied); the incumbent serves it"
 issue = "#1827"
 
 [[unavailable]]
