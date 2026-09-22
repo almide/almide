@@ -549,6 +549,14 @@ struct FnInfo {
     /// releases) or only borrow it (neither) — param_borrow.rs (#2028).
     /// Both sides of every call edge read this one vector.
     param_owned: Vec<bool>,
+    /// Per param: was it declared `mut` (#2503)? The C-132 move-mode
+    /// rewrite clears `mutated_params` but keeps each parameter's marker,
+    /// so a CALL SITE can still tell which argument the callee writes into
+    /// and hands back. The site makes that argument's var unique first
+    /// (`emit_read_mut_var_cow`), exactly as a direct in-place write in
+    /// this frame would, so an alias bound before the call keeps its
+    /// pre-write value (C-033) and an unaliased buffer still costs nothing.
+    param_mut: Vec<bool>,
     /// `@extern(wasm, module, name)` (#2275): the slot is a declared import
     /// the host serves, not a body — its stub leaves the module in the
     /// `imports::declare` post-pass.

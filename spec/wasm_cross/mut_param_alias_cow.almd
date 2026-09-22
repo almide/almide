@@ -1,0 +1,130 @@
+// @contract: C-033, C-132
+// An alias bound BEFORE a `mut`-parameter call keeps its pre-write value
+// (#2503). C-033's copy-on-write is the caller's promise — `let held = b` is a
+// value copy — and it was lost across the `mut`-parameter hop: the callee's
+// in-place write went straight through the caller's block on the wasm legs,
+// while native (whose `&mut` sees an aliased bind as a clone-at-bind) always
+// answered the pre-write bytes. The same write made directly in the caller COWs
+// on every leg, so the divergence was the hop, not the writer.
+//
+// The CALL SITE is where the copy belongs: an argument in a `mut`-parameter
+// position is a mutation of this frame's var (the C-132 move-mode rewrite hands
+// the buffer back to be stored here), so the site reads it through the same
+// rc-gated `$cow` a direct `bytes.set_at(b, …)` here would — a shared block
+// copies and the var is repointed at the unique copy, an UNALIASED buffer costs
+// nothing. Judging it inside the CALLEE instead cannot work: the argument's own
+// credit makes rc >= 2 there on the effect-call convention, so every call would
+// copy (measured: a 64 KiB buffer in a 20k-call effect loop went out of memory,
+// and this corpus's mut_param_call_chain allocated 4.4x).
+//
+// Covered here: the alias bound BEFORE the call (A) and an alias bound AFTER it
+// (B), across bytes, List, String and Map. STILL OPEN on #2503, and deliberately
+// not asserted here: an alias of the parameter created INSIDE the callee, an
+// argument whose place is a record FIELD, and the incumbent leg's half of the
+// A-shape for the writers whose in-place arm it owns (`bytes.set_*`, `fill`,
+// `clear`, `copy_from`, `list.pop`; `string.clear` there is #2465).
+fn set_bytes(mut b: Bytes) -> Unit = bytes.set_at(b, 1, 9)
+
+fn grow_bytes(mut b: Bytes) -> Unit = bytes.push(b, 7)
+
+fn append_bytes(mut b: Bytes) -> Unit = bytes.append_u16_le(b, 258)
+
+fn count_after(mut b: Bytes) -> Int = {
+  bytes.push(b, 3)
+  bytes.len(b)
+}
+
+fn push_list(mut xs: List[Int]) -> Unit = list.push(xs, 9)
+
+fn clear_list(mut xs: List[Int]) -> Unit = list.clear(xs)
+
+fn push_text(mut s: String) -> Unit = string.push(s, "z")
+
+fn insert_key(mut m: Map[String, Int]) -> Unit = map.insert(m, "z", 9)
+
+fn drop_key(mut m: Map[String, Int]) -> Unit = map.delete(m, "a")
+
+fn wipe_map(mut m: Map[String, Int]) -> Unit = map.clear(m)
+
+fn render(m: Map[String, Int]) -> String = {
+  var out = ""
+  for (k, v) in m {
+    out = out + k + ":" + int.to_string(v) + ","
+  }
+  out
+}
+
+fn main() -> Unit = {
+  // ── A. bytes: the alias bound before the call keeps its bytes ──
+  var b = bytes.from_list([1, 2, 3])
+  let held = b
+  set_bytes(b)
+  println("A.b=" + "${bytes.to_list(b)}" + " held=" + "${bytes.to_list(held)}")
+  var g = bytes.from_list([1, 2])
+  let held_g = g
+  grow_bytes(g)
+  println("A.g=" + "${bytes.to_list(g)}" + " held_g=" + "${bytes.to_list(held_g)}")
+  var a = bytes.from_list([1, 2])
+  let held_a = a
+  append_bytes(a)
+  println("A.a=" + "${bytes.to_list(a)}" + " held_a=" + "${bytes.to_list(held_a)}")
+  // A value-returning callee takes the same copy through its tuple write-back.
+  var v = bytes.from_list([1, 2])
+  let held_v = v
+  let n = count_after(v)
+  println("A.n=" + int.to_string(n) + " v=" + "${bytes.to_list(v)}" + " held_v=" + "${bytes.to_list(held_v)}")
+  // ── B. an alias bound AFTER the call sees that write and no later one ──
+  var after_b = bytes.from_list([1, 2, 3])
+  set_bytes(after_b)
+  let after = after_b
+  bytes.set_at(after_b, 2, 6)
+  println("B.b=" + "${bytes.to_list(after_b)}" + " after=" + "${bytes.to_list(after)}")
+  // ── List ──
+  var xs = [1, 2, 3]
+  let held_xs = xs
+  push_list(xs)
+  println("A.xs=" + "${xs}" + " held_xs=" + "${held_xs}")
+  var ys = [1, 2, 3]
+  let held_ys = ys
+  clear_list(ys)
+  println("A.ys=" + "${ys}" + " held_ys=" + "${held_ys}")
+  var zs = [1, 2]
+  push_list(zs)
+  let after_zs = zs
+  push_list(zs)
+  println("B.zs=" + "${zs}" + " after_zs=" + "${after_zs}")
+  // ── String ──
+  var s = "ab"
+  let held_s = s
+  push_text(s)
+  println("A.s=[" + s + "] held_s=[" + held_s + "]")
+  // ── Map ──
+  var m: Map[String, Int] = map.new()
+  map.insert(m, "a", 1)
+  map.insert(m, "b", 2)
+  let held_m = m
+  insert_key(m)
+  println("A.m=" + render(m) + " held_m=" + render(held_m))
+  var m2: Map[String, Int] = map.new()
+  map.insert(m2, "a", 1)
+  map.insert(m2, "b", 2)
+  let held_m2 = m2
+  drop_key(m2)
+  println("A.m2=" + render(m2) + " held_m2=" + render(held_m2))
+  var m3: Map[String, Int] = map.new()
+  map.insert(m3, "a", 1)
+  let held_m3 = m3
+  wipe_map(m3)
+  println("A.m3=" + render(m3) + " held_m3=" + render(held_m3))
+  // ── the copy is rc-gated: an UNALIASED buffer is still written in place,
+  // so a build loop through a `mut` parameter stays linear ──
+  var acc: List[Int] = []
+  var buf = bytes.new(0)
+  for i in 0..<4000 {
+    push_list_at(acc, i)
+    grow_bytes(buf)
+  }
+  println("D.len=" + int.to_string(list.len(acc)) + " buf=" + int.to_string(bytes.len(buf)))
+}
+
+fn push_list_at(mut xs: List[Int], v: Int) -> Unit = list.push(xs, v)

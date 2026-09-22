@@ -109,7 +109,8 @@ fn emit_program_pass(
             table.impl_index.insert(f.name.as_str().to_string(), i);
         }
         table.by_name.insert(key, i);
-        table.infos.push(FnInfo { wasm_index: F_FN_BASE + i as u32, params, ret, refuse, param_owned: Vec::new(), import });
+        let param_mut: Vec<bool> = f.params.iter().map(|p| p.is_mut).collect();
+        table.infos.push(FnInfo { wasm_index: F_FN_BASE + i as u32, params, ret, refuse, param_owned: Vec::new(), param_mut, import });
     }
     // Which params each callee owns (#2028): computed once, over the whole
     // table, before any body lowers — the call sites and the exit plans
