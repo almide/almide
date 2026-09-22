@@ -62,3 +62,4 @@ ADR はその**決定に至る過程**（調査した証拠、比較した代替
 | [0015](./0015-reference-evaluator-is-fresh-source-level-python.md) | The reference evaluator is a fresh, source-level, judge-owned evaluator behind a black-box protocol — seeded by λ_almd, ratcheted by an abstain ledger (amended: Rust) | Accepted | 2026-08-21 |
 | [0016](./0016-numeric-determinism-is-normative.md) | Numeric determinism is one normative family, written once — not a property the targets happen to share | Accepted | 2026-08-21 |
 | [0017](./0017-flight-profile-is-a-normative-subset.md) | The bounded profile (née flight profile) is a normative subset of the language, specified here before any checker enforces it (amended at adjudication: `@bounded`, chapter `bounded.md`, prefix `B`) | Accepted | 2026-08-21 |
+| [0019](./0019-suppression-is-announced-dated-reasoned-acknowledged.md) | Suppression is announced, dated, reasoned and acknowledged — its shape is fixed before the construct exists | Accepted | 2026-09-22 |
