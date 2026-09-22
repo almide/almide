@@ -713,6 +713,12 @@ const BRANCH_PASSES: &[(RowTrigger, BranchPass)] = &[
     (RowTrigger::Always, |src, next_var, layouts| desugar_nested_branch_arms(src, next_var, layouts)),
 ];
 
+/// Upper bound on the rewrites ONE `desugar_heap_branches_inner` fixpoint may apply
+/// before it gives up (see the guard in the loop). A real body fires a few dozen
+/// times (one per lifted branch / regrouped match / hoisted `!`); the cap is far
+/// above that and only ever trips on a row that has stopped making progress.
+pub const MAX_FIXPOINT_FIRES: usize = 10_000;
+
 fn desugar_heap_branches_inner(
     body: &IrExpr,
     next_var: &mut u32,
@@ -731,7 +737,18 @@ fn desugar_heap_branches_inner(
     // fire again).
     let nested_arms_row = BRANCH_PASSES.len() - 1;
     let mut arms_normalized = false;
+    let mut fires = 0usize;
     'fixpoint: loop {
+        // TERMINATION guard: every row must shrink the work it can still do, so a
+        // body reaches its fixpoint in a bounded number of fires. A row that
+        // reports a rewrite it did not make (the #2463 identity regroup) would
+        // otherwise spin here forever, in the compiler process, with no output —
+        // the worst outcome. Past the cap the whole desugar is DISCARDED (the
+        // same refusal shape as the node-count cap in `desugar_heap_branches`):
+        // the un-desugared body then walls or falls back, never hangs.
+        if fires > MAX_FIXPOINT_FIRES {
+            return None;
+        }
         let src = cur.as_ref().unwrap_or(body);
         // One owned-region scan licenses (or skips) every gated row of this
         // iteration; the tree is fresh per iteration, so recompute.
@@ -742,6 +759,7 @@ fn desugar_heap_branches_inner(
                 continue;
             }
             if let Some(r) = pass(src, next_var, layouts) {
+                fires += 1;
                 cur = Some(r);
                 arms_normalized = i == nested_arms_row;
                 continue 'fixpoint;
