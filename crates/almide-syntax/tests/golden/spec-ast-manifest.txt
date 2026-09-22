@@ -1,4 +1,4 @@
-# oracle: almide 0.63.0 (dev) at 3b02f7dc4 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.63.0 (dev) at db9ad4e24 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -1138,7 +1138,6 @@ f823483b35f24b16f4635556a9476fa397ce225cbbcebc25dbddf3d4b2cd1878	spec/wasm_cross
 f0bcb50f69d8a6df028313103f78e70ca08c0735e5dbc11d41f498b173aaefa3	spec/wasm_cross/ref_roc_shared_cow.almd
 859fea5acb3bcbcb95af00845af2dec070a9e3b9e12828fa0dfc9423035e8889	spec/wasm_cross/ref_roc_trmc_control.almd
 bb95313b59eb71e32ffef8642dbe78848ce568e79d6eb044954ea7c91b2b8913	spec/wasm_cross/ref_rust_or_pattern_guard_count.almd
-6ef1dacaaf353a3ecfc38d37e4d464387440fcbbd56f72018fd82afcf70aff43	spec/wasm_cross/ref_rust_or_pattern_guard_retry.almd
 2afba457b3978420cc0db57a25746c82a40d312def4a107d6b2da02f4c2ba2dd	spec/wasm_cross/ref_rust_or_pattern_heap_subject.almd
 22c72172df1145fabf94808cab024a660e570109c9575afd329c2b6d9f9e24ad	spec/wasm_cross/regex_engine.almd
 e237e713b62ac45d98fc375c25982e53d06a410e53f3a03182254af5e91cebfb	spec/wasm_cross/regex_fuzz_batch.almd
