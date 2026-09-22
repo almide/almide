@@ -82,7 +82,12 @@ fn cmd_build_cdylib(rs_code: &str, output: &str, use_release: bool, native_deps:
     let _ = std::fs::create_dir_all(&project_dir);
     let _flock = super::run::BuildDirLock::acquire(&project_dir)
         .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
-    match super::cargo_build_cdylib(&lib_code, &project_dir, output, use_release, native_deps, source_root) {
+    // Same stale-incremental-session recovery as the bin path (#2500), under
+    // the lock just taken.
+    let built = super::cargo_build::build_recovering_from_ice(&project_dir, || {
+        super::cargo_build_cdylib(&lib_code, &project_dir, output, use_release, native_deps, source_root)
+    });
+    match built {
         Ok(lib_path) => {
             err(&format!("Built {}", lib_path.display()));
         }
