@@ -259,6 +259,8 @@
 66000	spec/wasm_cross/index_bounds_loop_invariant.almd
 65984	spec/wasm_cross/index_bounds_write_heap.almd
 66016	spec/wasm_cross/index_bounds_write_only_var.almd
+67568	spec/wasm_cross/inplace_clear_alias.almd
+!	spec/wasm_cross/inplace_clear_alias_field.almd
 68000	spec/wasm_cross/inplace_clear_family.almd
 66192	spec/wasm_cross/inplace_mutator_statement.almd
 65856	spec/wasm_cross/int8_div_overflow.almd
@@ -470,6 +472,7 @@
 66416	spec/wasm_cross/option_unwrap_or_else_heap.almd
 65856	spec/wasm_cross/optional_chain_scalar.almd
 66032	spec/wasm_cross/or_pattern.almd
+65904	spec/wasm_cross/or_pattern_guarded_nullary.almd
 68512	spec/wasm_cross/ord_record_variant.almd
 69440	spec/wasm_cross/ord_recursive.almd
 66480	spec/wasm_cross/path_extension_hidden.almd
@@ -524,6 +527,7 @@
 87648	spec/wasm_cross/ref_roc_shared_cow.almd
 82240	spec/wasm_cross/ref_roc_trmc_control.almd
 66112	spec/wasm_cross/ref_rust_or_pattern_guard_count.almd
+66000	spec/wasm_cross/ref_rust_or_pattern_guard_retry.almd
 66256	spec/wasm_cross/ref_rust_or_pattern_heap_subject.almd
 75136	spec/wasm_cross/regex_engine.almd
 94256	spec/wasm_cross/regex_fuzz_batch.almd
