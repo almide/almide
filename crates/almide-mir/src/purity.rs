@@ -365,6 +365,12 @@ fn is_pure_fn_in_impure_module(module: &str, func: &str) -> bool {
         // host's `$TMPDIR` claim (the Go/Python WASI convention) — an env
         // read is a capability, admitted the same way env.get is.
         "env" => matches!(func, "os"),
+        // The C-041 arena-checkpoint pair (#1423 stage 4): on v1 both are the
+        // trivial pair on every target (runtime/rs/src/mem.rs is `0` / no-op,
+        // stdlib/mem_checkpoint.almd the same) — no host capability, the
+        // bytes.heap_save/heap_restore admission. The module stays
+        // impure-plain: any future mem fn is walled until enumerated here.
+        "mem" => matches!(func, "save" | "restore"),
         // The whole zlib surface is a DETERMINISTIC data transform of its
         // input bytes (#1700): the self-host bodies (stdlib/zlib_inflate.almd
         // / zlib_deflate.almd) reach no host capability, and the `effect fn`

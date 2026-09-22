@@ -1,0 +1,57 @@
+// @contract: C-041
+// The `mem.save` / `mem.restore` arena-checkpoint pair (#1423 stage 4) — the
+// C-041 surface `bytes.heap_save` / `heap_restore` already pin
+// (spec/wasm_cross/heap_arena.almd), now reachable on every wasm leg through
+// stdlib/mem_checkpoint.almd: on native (runtime/rs/src/mem.rs) and on v1's
+// RC-disciplined wasm legs both are the trivial pair (0 / no-op), because
+// scope-end reclamation already frees exactly what a restore would. The
+// checkpoint is OPAQUE and never printed; only the post-restore observables
+// are — a checkpoint, scratch work, a restore, and later work must produce
+// identical bytes. Native oracle; the structural leg and the incumbent
+// agree.
+import mem
+
+fn arena_round(base: Int) -> Int = {
+  let cp = mem.save()
+  var scratch: List[Int] = []
+  for i in 0..<100 {
+    list.push(scratch, base + i)
+  }
+  var s = 0
+  for x in scratch {
+    s = s + x
+  }
+  mem.restore(cp)
+  s
+}
+
+fn main() -> Unit = {
+  var acc = 0
+  for r in 0..<40 {
+    acc = acc + arena_round(r * 10)
+  }
+  println(int.to_string(acc))
+  // A fresh persistent structure after the churn must be intact.
+  var persist: List[Int] = []
+  for i in 0..<50 {
+    list.push(persist, i * i)
+  }
+  var psum = 0
+  for x in persist {
+    psum = psum + x
+  }
+  println(int.to_string(psum) + " " + int.to_string(persist[7]) + " " + int.to_string(list.len(persist)))
+  // Nested: an inner save/restore must not disturb outer live data.
+  let cp_outer = mem.save()
+  var outer_live: List[Int] = []
+  for i in 0..<10 {
+    list.push(outer_live, i + 1)
+  }
+  let inner = arena_round(1000)
+  var ol_sum = 0
+  for x in outer_live {
+    ol_sum = ol_sum + x
+  }
+  mem.restore(cp_outer)
+  println(int.to_string(inner) + " " + int.to_string(ol_sum))
+}

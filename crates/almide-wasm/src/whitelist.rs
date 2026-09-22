@@ -94,6 +94,11 @@ pub(crate) const SCALAR_TEXT_VERIFIED: &[&str] = &[
     "base64_encode", "base64_encode_url", "hash_fnv1a32_bytes",
     "datetime_add_days", "datetime_add_hours", "datetime_add_minutes", "datetime_add_seconds", "datetime_day", "datetime_diff_seconds", "datetime_format", "datetime_from_parts", "datetime_from_unix", "datetime_hour", "datetime_is_after", "datetime_is_before", "datetime_minute", "datetime_month", "datetime_second", "datetime_to_iso", "datetime_to_unix", "datetime_weekday", "datetime_year",
     "string_is_whitespace", "string_to_bytes",
+    // mem_checkpoint.almd (#1423 stage 4): the C-041 arena-checkpoint
+    // pair — `0` / `()`, no prim access at all, the bytes_heap_save /
+    // bytes_heap_restore precedent. Parity evidence:
+    // spec/wasm_cross/mem_checkpoint.almd.
+    "mem_save", "mem_restore",
 ];
 
 /// Same audit, Option/Result-returning (constructor-built sums).

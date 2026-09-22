@@ -1,8 +1,12 @@
-// mem — heap scope management for bump allocator.
+// mem — arena checkpoint surface (the C-041 contract, bytes.heap_save's twin).
 //
-// save() snapshots the heap pointer. restore(mark) resets it,
-// freeing all allocations made after the snapshot. Use for
-// arena-style temporary allocation in tight loops.
+// save() takes an OPAQUE checkpoint; restore(mark) hands it back. The
+// promise is observational: take a checkpoint, allocate scratch, restore,
+// and subsequent work produces identical results on every target. v0's
+// wasm leg reset a bump pointer here; v1's RC discipline reclaims scratch
+// deterministically at scope end, so on every leg the pair is trivial —
+// native (runtime/rs/src/mem.rs) and wasm (stdlib/mem_checkpoint.almd) alike.
+// The checkpoint value is never meaningful to print.
 @intrinsic("almide_rt_mem_save")
 fn save() -> Int = _
 

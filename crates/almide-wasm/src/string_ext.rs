@@ -26,6 +26,9 @@ impl Emitter<'_> {
         match (func.as_str(), args) {
             // mut append (native s.push_str): var write-back of concat.
             ("push", [v, x]) => self.lower_string_push(v, x),
+            // mut clear (native s.clear()): var write-back of the empty
+            // string (#1423 stage 4).
+            ("clear", [v]) => self.lower_string_clear(v),
             ("from_bytes", [xs]) => self.lower_string_from_bytes(xs),
             ("is_empty", [s]) => {
                 self.lower_arg(s, Some(STR), ArgMode::Borrow)?;
@@ -189,6 +192,24 @@ impl Emitter<'_> {
         self.emit_read_mut_var(id, var_idx, var_ty, vglob);
         self.lower_arg(x, Some(STR), ArgMode::Borrow)?;
         self.f.instructions().call(F_CONCAT);
+        self.emit_store_mut_var(*id, var_idx, var_ty, vglob)?;
+        Ok(None)
+    }
+
+    /// mut clear (native `s.clear()`, length 0): the var is rebound to a
+    /// fresh empty block — `push`'s write-back with nothing appended. An
+    /// alias bound before the clear keeps the old text (value semantics).
+    fn lower_string_clear(&mut self, v: &IrExpr) -> ArmResult {
+        let IrExprKind::Var { id } = &v.kind else {
+            return unsup("string-clear-nonvar");
+        };
+        let Some((var_idx, var_ty, vglob)) = self.mut_var(id) else {
+            return unsup("var:unmapped");
+        };
+        if var_ty != STR {
+            return unsup(&format!("string-clear-of:{var_ty:?}"));
+        }
+        self.f.instructions().i32_const(0).call(F_ALLOC);
         self.emit_store_mut_var(*id, var_idx, var_ty, vglob)?;
         Ok(None)
     }
