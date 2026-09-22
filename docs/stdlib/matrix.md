@@ -46,7 +46,10 @@ treat the value as immutable; combinators return fresh matrices.
 
 ## Arithmetic
 
-All element-wise unless noted. Both operands of binary ops must have the same shape.
+All element-wise unless noted. `matrix.mul` is the matrix product and requires
+`cols(a) == rows(b)` (see **Shapes and domains** below); the element-wise pairs
+(`add` / `sub` / `div`, and `silu_mul` / `broadcast_add_row`) zip-truncate to
+the shorter operand instead, identically on both targets.
 
 | Signature | Purpose |
 |---|---|
@@ -83,6 +86,44 @@ All element-wise unless noted. Both operands of binary ops must have the same sh
 | `matrix.multi_head_attention(...) -> Matrix` | Standard MHA |
 | `matrix.masked_multi_head_attention(...) -> Matrix` | Causal MHA |
 | `matrix.conv1d(input, weight, bias, kernel, stride, padding) -> Matrix` | 1D convolution |
+
+## Shapes and domains
+
+**A shape precondition is a defined abort.** A kernel that indexes one
+operand's extent against another's requires them equal, and a violation stops
+the program with `Error: matrix shape mismatch` on stderr and exit code 1 —
+the same one-line abort the head count (`Error: head count must be positive`)
+and the element index (`Error: matrix index out of bounds`) already use, on
+native and on both wasm legs, never a panic and never a truncated answer
+(C-358):
+
+| Call | Requires |
+|---|---|
+| `mul(a, b)`, and the `mul_scaled` / `mul_f32*` / attention fusions over it | `cols(a) == rows(b)` |
+| `linear_row(x, w, bias)` | `cols(x) == cols(w)`, `len(bias) == rows(w)` |
+| `linear_row_no_bias(x, w)`, `linear_*_row_no_bias(x, …, w_cols)` | `cols(x) == cols(w)` |
+| `swiglu_gate(x, w_gate, w_up)` | `cols(w_gate) == cols(w_up) == cols(x)`, `rows(w_up) == rows(w_gate)` |
+| `multi_head_attention(q, k, v, n)` / the masked form | `cols(k) == cols(v) == cols(q)`, `rows(v) == rows(k)`; masked also `rows(q) <= rows(k)` |
+| `conv1d(input, weight, bias, kernel, …)` | `cols(weight) == cols(input) * kernel`, `len(bias) == rows(weight)` |
+| `concat_cols(ms)` | every non-empty member's `rows` equal the first member's |
+| `append_rows(base, extra)` | `cols(extra) == cols(base)` |
+| `from_lists(rows)` | every row as wide as the first — a ragged list aborts with `Error: matrix rows must have equal length` |
+
+An **empty** operand is exempt: each of these answers its degenerate shape
+rather than aborting (`mul(m, zeros(0, 0))` is the `rows(m)×0` matrix,
+`concat_cols([m, zeros(0, 0)])` is `m`).
+
+**Row ranges and counts clamp** (C-359), the way `list.slice` does:
+`slice_rows(m, start, end)` treats a negative `start` as the empty matrix and
+a negative or past-the-end `end` as `rows(m)`, so `start >= end` is empty;
+`split_cols_even(m, n)` answers the empty list for `n <= 0`; `conv1d`'s
+`kernel` and `padding` clamp at 0. Its `stride` is a step, not a width: a
+stride below 1 aborts with `Error: stride must be positive`.
+
+**`neg` is IEEE negation** (C-360): `matrix.neg` flips the sign bit, so
+`neg(0.0)` is `-0.0` and `1.0 / neg(0.0)` is `-inf` on both targets. The
+dequantization rule below is the deliberate exception, and only for a zero
+*magnitude*.
 
 ## Quantized loaders
 

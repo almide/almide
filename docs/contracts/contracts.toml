@@ -4378,6 +4378,48 @@ evidence  = [
   { path = "spec/wasm_cross/ref_gleam_or_pattern_alternatives.almd", class = "fixture" },
   { path = "spec/wasm_cross/ref_rust_or_pattern_guard_retry.almd", class = "fixture" },
 ]
+# ── A MATRIX KERNEL'S SHAPE PRECONDITION IS A DEFINED ABORT ──
+[[contract]]
+id        = "C-353"
+spec      = "ALS-T6"
+title     = "A matrix kernel's shape precondition is a defined abort on both targets"
+statement = "A `matrix` kernel that indexes one operand's extent against another's requires them EQUAL, and a violation ABORTS with `Error: matrix shape mismatch` on stderr and exit 1 on both targets — the same unified T6 abort the head count (C-198), the head geometry (C-278) and the index domain (C-282) already take, never a raw Rust panic (exit 101) and never a truncated or invented answer. The extents: `mul` needs cols(a) == rows(b); `linear_row` / `linear_row_no_bias` (and the fused `linear_row_gelu` / `pre_norm_linear`, which delegate) need cols(x) == cols(weight), and `linear_row` additionally len(bias) == rows(weight); `swiglu_gate` needs both weight widths == cols(x) and rows(w_up) == rows(w_gate); `multi_head_attention` / `masked_multi_head_attention` need cols(k) == cols(v) == cols(q) and rows(v) == rows(k), and the CAUSAL form additionally rows(q) <= rows(k) (the mask offset `rows(k) - rows(q)`); `conv1d` needs cols(weight) == in_ch * kernel and len(bias) == out_ch; `concat_cols` needs every NON-EMPTY member's row count to equal the first member's; `append_rows` needs cols(extra) == cols(base); and the bytes-resident linears (`linear_f32_row_no_bias`, `linear_q8_0_row_no_bias`, `linear_q1_0_row_no_bias`) need cols(x) == w_cols. `from_lists` is the constructor half: every row must have the FIRST row's width, and a ragged list aborts with `Error: matrix rows must have equal length` — which is what makes C-282's statement that no public constructor builds a ragged matrix true. An EMPTY operand is exempt on every entry (C-278's rule that the empty matrix has no row to violate): each kernel's existing empty short-circuit answers first, so `mul(2x3, 0x0)` is still the 2x0 matrix and `concat_cols([m, empty])` still concatenates. The ELEMENTWISE pair family is deliberately OUTSIDE this rule and keeps its zip truncation to the shorter operand on every leg (`add`, `sub`, `div`, `fma`, `silu_mul`, `broadcast_add_row`, and the row norms against a shorter gamma/beta). Before, one missing precondition produced BOTH failure classes at once: `mul(2x3, 2x2)` was a raw slice panic natively (`range end index 6 out of range for slice of length 4`) against a 2x2 product with the inner sum clamped to min(cols(a), rows(b)) on both wasm legs; `linear_row` with a short bias was a native index panic against a wasm answer that read the missing bias as 0.0; a ragged `from_lists` was a native `assertion left == right failed` against a structural leg that zero-filled the short row and an incumbent that kept it short — two wasm legs that did not agree with each other (almide/almide#2481, #2482, #2483). The guard is one shared helper per leg (`almide_rt_matrix_shape_eq` / `__mx_shape_eq` / `__mxa_shape_eq` / `__mxe_shape_eq`) and a matrix gate keeps every entry routed through it, the same structure that keeps the head-count rule total."
+since     = "0.63.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/matrix_shape_precondition_family.almd", class = "fixture" },
+  { path = "spec/wasm_cross/matrix_shape_precondition_activations.almd", class = "fixture" },
+  { path = "spec/wasm_fail/matrix_shape_mismatch_aborts.almd", class = "fixture" },
+  { path = "spec/wasm_fail/matrix_ragged_from_lists_aborts.almd", class = "fixture" },
+  { path = "spec/wasm_fail/matrix_linear_row_bias_aborts.almd", class = "fixture" },
+  { path = "spec/wasm_fail/matrix_concat_cols_rows_aborts.almd", class = "fixture" },
+]
+
+# ── MATRIX ROW RANGES AND PART COUNTS CLAMP; THE CONV STRIDE IS A POSITIVE STEP ──
+[[contract]]
+id        = "C-354"
+spec      = "ALS-C4"
+title     = "A matrix row range clamps like list.slice and a part count of 0 or less is the empty result"
+statement = "`matrix.slice_rows(m, start, end)` is `list.slice` over the rows and takes ALS-C4's index doctrine verbatim on both targets: a NEGATIVE start is the EMPTY (0-row) matrix, a negative or past-the-end end is `rows(m)`, and `start >= end` is empty — never an out-of-block read. `matrix.split_cols_even(m, n)` treats a part count of 0 or less as the EMPTY list (the answer `n == 0` always had), the C-034 signed-clamp reading of a count. `matrix.conv1d`'s kernel and padding are WIDTHS and clamp at 0 like every C-161 dimension (a kernel of 0 taps is the bias-only output), while its STRIDE is a STEP whose domain is `>= 1`: below it the call aborts with `Error: stride must be positive` + exit 1 on both targets, the ALS-T6 form the head count (C-198) takes, because a stride of 0 divides the output length by zero and a negative one walks backwards. Before, `slice_rows(m, -1, 1)` clamped only `end` on the self-hosted leg, so `start = -1` made the first row load `hm + 12 + (-1) * 8` — the outer block's own LENGTH word, dereferenced as a row pointer and then read for a length and that many elements: an out-of-bounds read whose address came from the header (almide/almide#2475, I-unsound), answering a 2-row matrix on both wasm legs where native answered 0 rows; a negative END was the mirror hole (0 rows on wasm, every row natively). `split_cols_even(m, -1)` cast the count through `as usize` natively and died in a raw `capacity overflow` panic (exit 101) where both wasm legs answered the empty list (#2480). conv1d's stride of 0 was a native divide-by-zero panic against the language's own `Error: division by zero` on wasm, and a negative stride answered one row natively and none on wasm."
+since     = "0.63.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/matrix_slice_rows_domain.almd", class = "fixture" },
+  { path = "spec/wasm_fail/matrix_conv1d_stride_aborts.almd", class = "fixture" },
+]
+
+# ── MATRIX NEGATION IS A SIGN FLIP, SO neg(0.0) IS -0.0 ──
+[[contract]]
+id        = "C-355"
+spec      = "ALS-T23"
+title     = "matrix.neg is IEEE negation, so the sign of a zero flips on both targets"
+statement = "`matrix.neg(m)` negates each element with an IEEE-754 SIGN FLIP (`f64.neg`), so `neg(+0.0)` is `-0.0` and `neg(-0.0)` is `+0.0` on both targets, and negating twice returns the original bits. The self-hosted body spelled the negation `0.0 - x`, and IEEE `0.0 - 0.0` is `+0.0` by the round-to-nearest-even rule of ALS-T23, so a zero element came back `+0.0` on both wasm legs where native's `-x` answered `-0.0` — invisible to `==` (ALS-C3) and visible through `1.0 / z` as `inf` against `-inf` (almide/almide#2484). This is the OPPOSITE ruling to the dequantization zero (C-229): a quantized element of zero magnitude encodes no direction, so its sign is an artifact of the spelling and is pinned to `+0.0`, while a negated datum's sign IS the datum — the same reason the float decoders keep a stored `-0.0` (C-270). The neighbouring elementwise spellings are pinned with it, because the question is per cell and not per function: `scale(m, -1.0)` and `map(m, (x) => -x)` sign by the product / negation rule, `sub(zeros, zeros)` is a SUBTRACTION and is `+0.0` on both legs by ALS-T23, and `transpose` / `from_lists` / `to_lists` carry a stored `-0.0` through unchanged."
+since     = "0.63.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/matrix_neg_signed_zero.almd", class = "fixture" },
+]
+
 # ── A NON-FINITE FLOAT IN A VALUE IS THE JSON `null` ──
 [[contract]]
 id        = "C-356"

@@ -388,6 +388,9 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-350 | process.exit accepts 0..=125 on every target, and any other code is a defined abort | 0.63.0 | active | fixture | 2 |
 | C-351 | literal process exit codes are checked against the portable domain | 0.63.0 | active | fixture | 0 |
 | C-352 | Or-pattern guards are evaluated once per matching alternative, in source order | 0.63.0 | active | fixture | 3 |
+| C-353 | A matrix kernel's shape precondition is a defined abort on both targets | 0.63.0 | active | fixture | 2 |
+| C-354 | A matrix row range clamps like list.slice and a part count of 0 or less is the empty result | 0.63.0 | active | fixture | 1 |
+| C-355 | matrix.neg is IEEE negation, so the sign of a zero flips on both targets | 0.63.0 | active | fixture | 1 |
 | C-356 | A non-finite Float in a Value stringifies as the JSON null on every leg | 0.63.0 | active | fixture | 1 |
 | C-357 | json.get_int is Int-only: a Float field is none, never truncated | 0.63.0 | active | fixture | 1 |
 | C-358 | float.round, math.choose, int.rotate_* and math.log_gamma are exact over their whole domain on every leg | 0.63.0 | active | fixture | 4 |
