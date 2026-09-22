@@ -1,22 +1,30 @@
 
 #[test]
-fn matrix_swiglu_gate_byte_matches_the_canonical_fast_exp() {
-    // ORACLE CHANGED (#1197): this pinned the retired promise "the wasm leg
-    // reproduces v0's scalar libm exp". The leg now runs the CANONICAL fast-exp
-    // — the same unfused algorithm, reduction order and scaling spelling the
-    // native SIMD kernel runs — so the pinned value is the one BOTH legs
-    // produce (verified by running this very program on native and wasm, and by
-    // spec/wasm_cross/matrix_softmax_fastexp.almd under C-223).
+fn matrix_swiglu_gate_byte_matches_natives_libm_sigmoid() {
+    // ORACLE CHANGED TWICE. #1197 retired "the wasm leg reproduces v0's scalar
+    // libm exp" and pinned the CANONICAL fast-exp instead. #1423 then measured
+    // the SIGMOID against native (matrix.rs `almide_rt_matrix_swiglu_gate`):
+    // native computes `1 / (1 + exp(-g))` through the vendored libm exp, with
+    // no ±40 clamp, so the clamped fast-exp the self-host used answered
+    // differently in the last bits — and past |g| = 40 by far more. The
+    // self-host now spells native's sigmoid, and the dots stay LEFT-TO-RIGHT,
+    // so the value below is the one all three legs produce: measured
+    // -0.1649501991937434 on native, on the structural leg and on this
+    // incumbent render of the very program above (it was -0.16495019896903929
+    // while the sigmoid took the fast-exp). softmax/gelu keep the canonical
+    // fast-exp — spec/wasm_cross/matrix_softmax_fastexp.almd under C-223 — and
+    // the whole family is pinned cross-target by
+    // spec/wasm_cross/matrix_product_family.almd (the `swiglu` row).
 
-    // Phase D1: swiglu_gate — g/u are LEFT-TO-RIGHT dot products, sig = 1/(1+exp(clamp(-g,
-    // ±40))) via scalar rt.math_exp (= math.exp), out = (g*sig)*u. The self-host transcribes
-    // the exact accumulation + op order, byte-exact vs v0 `--target wasm`.
+    // Phase D1: swiglu_gate — g/u are LEFT-TO-RIGHT dot products, sig = 1/(1+exp(-g))
+    // via scalar rt.math_exp (= math.exp), out = (g*sig)*u. The self-host transcribes
+    // the exact accumulation + op order.
     let src = "effect fn main() -> Unit = {\n        let x = matrix.from_lists([[1.0, 2.0, 0.0 - 1.0], [0.5, 0.0 - 3.0, 2.0]])\n        let wg = matrix.from_lists([[0.1, 0.2, 0.3], [0.0 - 0.4, 0.5, 0.0 - 0.6], [1.0, 0.0, 0.0 - 1.0], [0.2, 0.2, 0.2]])\n        let wu = matrix.from_lists([[0.5, 0.0 - 0.5, 1.0], [0.3, 0.3, 0.3], [0.0 - 1.0, 1.0, 0.0], [0.7, 0.0 - 0.2, 0.1]])\n        let ls = matrix.to_lists(matrix.swiglu_gate(x, wg, wu))\n        for row in ls { for v in row { println(float.to_string(v)) } } }\n";
     let prog = lower_source(src);
     assert!(prog.functions.iter().any(|f| f.name == "matrix.swiglu_gate"), "swiglu self-host must link");
     if let Some(out) = build_and_run("matrix_swiglu", &render_wasm_program(&prog)) {
         assert_eq!(out.lines().count(), 8, "2 rows × 4 out channels");
-        assert_eq!(out.lines().next().unwrap(), "-0.16495019896903929");
+        assert_eq!(out.lines().next().unwrap(), "-0.1649501991937434");
     }
 }
 
