@@ -218,7 +218,19 @@ fn recorded_gh_path() -> String {
 /// nothing would make both sides print an empty table and agree.
 #[test]
 fn the_fuzz_track_record_twin_answers_what_the_shell_gate_answers() {
-    let env = [("PATH", recorded_gh_path())];
+    // `FUZZ_NIGHT_RECOVER=0` scopes the comparison to SCORING. The bash also
+    // recovers a reclaimed shard's minutes from its job log before it scores
+    // the night (#2513), and the twin does not: the fold rounds the delivered
+    // minutes to one decimal after EVERY shard, so a faithful port turns on
+    // Almide's float formatting agreeing with printf's, which is a promise
+    // neither side makes yet. Declared here rather than left to the fixtures —
+    // all eight recorded nights happen to be pre-#2390 lines with no `missing=`
+    // list, so the recovery would no-op today and the drift would be invisible
+    // until the window was re-recorded.
+    let env = [
+        ("PATH", recorded_gh_path()),
+        ("FUZZ_NIGHT_RECOVER", "0".to_string()),
+    ];
     let original = run_env("bash", &["scripts/fuzz-track-record.sh", "8"], &env);
     for needle in [
         "IN PROGRESS (not scored)",
