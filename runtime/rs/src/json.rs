@@ -322,7 +322,7 @@ fn stringify_value(v: &AlmideValue, depth: usize) -> String {
         AlmideValue::Null => "null".into(),
         AlmideValue::Bool(b) => if *b { "true" } else { "false" }.into(),
         AlmideValue::Int(n) => n.to_string(),
-        AlmideValue::Float(f) => format!("{}", f),
+        AlmideValue::Float(f) => almide_rt_value_float_json(*f),
         AlmideValue::Str(s) => json_quote(s),
         AlmideValue::Array(items) => {
             if items.is_empty() { return "[]".into(); }
