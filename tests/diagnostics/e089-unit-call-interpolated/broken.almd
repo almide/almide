@@ -1,0 +1,5 @@
+fn noop() -> Unit = ()
+
+effect fn main() -> Unit = {
+  println("u=${noop()}")
+}

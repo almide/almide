@@ -1,0 +1,5 @@
+fn label() -> String = "ok"
+
+effect fn main() -> Unit = {
+  println("u=${label()}")
+}

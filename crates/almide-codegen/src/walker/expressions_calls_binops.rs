@@ -883,9 +883,20 @@ fn ty_needs_repr(ctx: &RenderContext, ty: &Ty) -> bool {
         // `FileStat`, `ProcessStatus`) the program references under the
         // reserved spelling: its impl lives in the runtime, so the route
         // holds with or without the bundled decl (#1829).
-        Ty::Named(name, _) => ctx.repr_named_types.contains(name)
-            || (ctx.ann.runtime_owned_types.contains_key(name.as_str())
-                && super::runtime_owned::has_runtime_repr(name.as_str())),
+        //
+        // Asked under the MODULE-QUALIFIED spelling too (#2496): a value
+        // built through `bytes.LittleEndian` types as `bytes.Endian`, and
+        // both these tables are keyed by the bare name `render_type` emits
+        // — so the qualified spelling fell to the `Display` path and rustc
+        // met `AlmideEndian` with no `Display` (E0277), while the bare
+        // `BigEndian` spelling of the same value printed fine.
+        Ty::Named(name, _) => {
+            let bare = name.as_str().rsplit('.').next().unwrap_or(name.as_str());
+            ctx.repr_named_types.contains(name)
+                || ctx.repr_named_types.contains(&almide_base::intern::sym(bare))
+                || (ctx.ann.runtime_owned_types.contains_key(bare)
+                    && super::runtime_owned::has_runtime_repr(bare))
+        }
         // Everything else (scalars, String, Bool, Unit, Fn, Unknown, …) stays on
         // the Display path.
         _ => false,

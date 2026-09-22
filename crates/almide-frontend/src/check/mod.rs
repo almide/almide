@@ -183,12 +183,37 @@ pub struct Checker {
     /// Map literal key types to validate after constraint solving.
     /// Each entry: (key_type, span) — checked via `is_hash()` once types are resolved.
     pub(crate) deferred_map_key_checks: Vec<(Ty, Option<crate::ast::Span>)>,
-    /// Interpolation segments whose value will NOT be auto-?'d, awaiting the
-    /// post-solve Result check (#1051): a `${resp}` holding a Result prints
-    /// its debug form (`ok(…)`/`err(…)`) — legal for debug output, but a
-    /// silent surprise when the writer meant the payload (the http.serve
-    /// handler trap). Each entry: (segment type, span).
-    pub(crate) deferred_result_interp_checks: Vec<(Ty, Option<crate::ast::Span>)>,
+    /// Every interpolation segment, awaiting the post-solve string-form
+    /// checks (`interp_string_form.rs`): the E089 "no defined string form"
+    /// rejection (Bytes, Unit, Matrix, a raw pointer, a function value or a
+    /// value holding one), the requirement a generic fn's segment places on
+    /// its callers (#2496), and the #1051 Result-debug-form warning for a
+    /// segment the lowering will NOT auto-`?` — `${resp}` holding a Result
+    /// prints `ok(…)`/`err(…)`, legal for debug output but a silent surprise
+    /// when the writer meant the payload (the http.serve handler trap).
+    pub(crate) deferred_result_interp_checks: Vec<InterpSite>,
+    /// Calls to a GENERIC user fn, with the generic bindings the call
+    /// pinned, awaiting the post-solve instantiation check (#2496): once the
+    /// bindings resolve they are moved to `generic_calls` and judged against
+    /// the callee's `interp_reqs`.
+    pub(crate) deferred_generic_calls: Vec<DeferredGenericCall>,
+    /// The fn whose body is being checked, as the key its callers resolve it
+    /// under (`{module}.{name}` inside a module, bare in the entry), and its
+    /// generic parameter names. `None` outside a fn body.
+    pub(crate) current_fn: Option<(Sym, Vec<Sym>)>,
+    /// #2496, checker-wide (survives the per-program union-find swap): for
+    /// each generic fn, the segment types (in its rigid generics) its body
+    /// interpolates — a requirement every instantiation must meet.
+    pub(crate) interp_reqs: std::collections::HashMap<Sym, Vec<InterpReq>>,
+    /// #2496, checker-wide: every call to a generic user fn with its
+    /// RESOLVED bindings. The entry program and the modules are inferred in
+    /// an order the source does not show, so a call and the requirement it
+    /// violates may live in files inferred either way round; both sides are
+    /// kept and the check re-runs at each program's post-solve.
+    pub(crate) generic_calls: Vec<GenericCall>,
+    /// #2496: (call site, requirement origin) pairs already reported, so the
+    /// per-program re-run never reports one twice.
+    pub(crate) interp_reported: std::collections::HashSet<(String, usize, usize, String, usize, usize)>,
     /// Order-sensitive combinator subjects/keys (list.sort/min/max, sort_by's
     /// key) awaiting the post-solve ORDERABLE-element check (E030).
     pub(crate) deferred_ord_elem_checks: Vec<(Ty, Option<crate::ast::Span>, String)>,
@@ -547,6 +572,11 @@ impl Checker {
             deferred_field_accesses: Vec::new(),
             deferred_map_key_checks: Vec::new(),
             deferred_result_interp_checks: Vec::new(),
+            deferred_generic_calls: Vec::new(),
+            current_fn: None,
+            interp_reqs: std::collections::HashMap::new(),
+            generic_calls: Vec::new(),
+            interp_reported: std::collections::HashSet::new(),
             deferred_ord_elem_checks: Vec::new(),
             deferred_empty_collection_checks: Vec::new(),
             deferred_int_overflow_checks: Vec::new(),
@@ -1269,6 +1299,7 @@ pub(crate) fn is_literal_numeric_ast(e: &ast::Expr) -> bool {
 }
 
 include!("post_solve_validation.rs");
+include!("interp_string_form.rs");
 include!("lint_error_surface.rs");
 include!("bounded.rs");
 include!("module_inference.rs");

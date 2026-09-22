@@ -90,9 +90,18 @@ impl Checker {
                         // `"${resp}"` never surprises silently.
                         let auto_unwraps =
                             self.env.auto_unwrap && matches!(expr.kind, ExprKind::Call { .. });
-                        if !auto_unwraps {
-                            self.deferred_result_interp_checks.push((t.clone(), expr.span));
-                        } else {
+                        // Every segment takes the string-form checks (#2496:
+                        // a CALL segment in an effect fn skipped them, so
+                        // `"${bytes.from_list(xs)}"` reached rustc); the
+                        // Result-debug-form warning is the one that yields
+                        // to the implicit-propagation check below.
+                        self.deferred_result_interp_checks.push(super::InterpSite {
+                            ty: t.clone(),
+                            span: expr.span,
+                            auto_unwrap_call: auto_unwraps,
+                            in_fn: self.current_fn.clone(),
+                        });
+                        if auto_unwraps {
                             // #1123: the segment's Result is stripped implicitly.
                             self.deferred_implicit_prop_checks.push((t.clone(), expr.span, "of this interpolated call", false, false));
                         }
