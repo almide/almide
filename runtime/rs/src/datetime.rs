@@ -42,15 +42,75 @@ pub fn almide_rt_datetime_to_iso(ts: i64) -> String {
     format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", y, m, d, h, mi, s)
 }
 
+/// `YYYY-MM-DDTHH:MM:SS` followed by `Z`, `+HH:MM`, `-HH:MM` or nothing (UTC).
+/// Every field is ASCII digits of any width (`2024-1-5T1:2:3` is accepted; a
+/// sign, a space or a letter is not), exactly three date and three time
+/// fields; month 1..=12, day 1..=days-in-month (proleptic Gregorian), hour
+/// 0..=23, minute and second 0..=59 (no leap second), offset hours 0..=23 and
+/// minutes 0..=59. The offset is APPLIED — the answer is the UTC instant, so
+/// `…T10:30:00+09:00` equals `…T01:30:00Z`.
+///
+/// Before #2489 this dropped every part `parse` refused (`filter_map`) and fed
+/// the rest to `from_parts`, which rolls over: `+09:00` was silently ignored
+/// (`00+09` failed to parse and vanished), and month 13 / day 45 / hour 99
+/// were "ok" — February of the next year. The self-host twin is
+/// stdlib/datetime_parse_iso.almd; the two must answer the same bytes.
 pub fn almide_rt_datetime_parse_iso(s: &str) -> Result<i64, String> {
-    // Minimal ISO 8601: "2024-01-15T10:30:00Z"
-    let s = s.trim().trim_end_matches('Z');
-    let parts: Vec<&str> = s.split('T').collect();
-    if parts.len() != 2 { return Err("expected YYYY-MM-DDTHH:MM:SSZ".into()); }
-    let date: Vec<i64> = parts[0].split('-').filter_map(|p| p.parse().ok()).collect();
-    let time: Vec<i64> = parts[1].split(':').filter_map(|p| p.parse().ok()).collect();
-    if date.len() != 3 || time.len() != 3 { return Err("invalid datetime format".into()); }
-    Ok(almide_rt_datetime_from_parts(date[0], date[1], date[2], time[0], time[1], time[2]))
+    let t = s.trim();
+    let mut halves = t.split('T');
+    let (Some(date), Some(time_raw), None) = (halves.next(), halves.next(), halves.next()) else {
+        return Err("expected YYYY-MM-DDTHH:MM:SSZ".into());
+    };
+    // Digits-only fields: one refused part refuses the whole string.
+    fn fields(half: &str, sep: char) -> Option<Vec<i64>> {
+        half.split(sep)
+            .map(|p| if almide_rt_iso_digits(p) { p.parse::<i64>().ok() } else { None })
+            .collect()
+    }
+    let (time_z, had_z) = match time_raw.strip_suffix('Z') {
+        Some(x) => (x, true),
+        None => (time_raw, false),
+    };
+    let sign_at = time_z.find(['+', '-']);
+    // `Z` and an offset are exclusive spellings of the same thing.
+    if had_z && sign_at.is_some() { return Err("invalid datetime format".into()); }
+    let hms = sign_at.map_or(time_z, |i| &time_z[..i]);
+    let (Some(d), Some(tm)) = (fields(date, '-'), fields(hms, ':')) else {
+        return Err("invalid datetime format".into());
+    };
+    if d.len() != 3 || tm.len() != 3 { return Err("invalid datetime format".into()); }
+    let offset = match sign_at {
+        None => 0,
+        Some(i) => {
+            let raw = &time_z[i..];
+            match fields(&time_z[i + 1..], ':').as_deref() {
+                Some([oh, om]) if (0..=23).contains(oh) && (0..=59).contains(om) => {
+                    let secs = oh * 3600 + om * 60;
+                    if raw.starts_with('-') { -secs } else { secs }
+                }
+                _ => return Err(format!("invalid offset: {raw}")),
+            }
+        }
+    };
+    let (y, mo, dd) = (d[0], d[1], d[2]);
+    let (h, mi, sec) = (tm[0], tm[1], tm[2]);
+    if !(1..=12).contains(&mo) { return Err(format!("month out of range: {mo}")); }
+    if dd < 1 || dd > almide_rt_days_in_month(y, mo) { return Err(format!("day out of range: {dd}")); }
+    if !(0..=23).contains(&h) { return Err(format!("hour out of range: {h}")); }
+    if !(0..=59).contains(&mi) { return Err(format!("minute out of range: {mi}")); }
+    if !(0..=59).contains(&sec) { return Err(format!("second out of range: {sec}")); }
+    Ok(almide_rt_datetime_from_parts(y, mo, dd, h, mi, sec) - offset)
+}
+
+// `string.is_digit`'s rule (runtime/rs/src/string.rs): non-empty, ASCII digits only.
+fn almide_rt_iso_digits(p: &str) -> bool { !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()) }
+
+fn almide_rt_days_in_month(y: i64, m: i64) -> i64 {
+    // Proleptic Gregorian; `%` on an exact multiple is 0 for either sign.
+    let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
+    if m == 2 { if leap { 29 } else { 28 } }
+    else if m == 4 || m == 6 || m == 9 || m == 11 { 30 }
+    else { 31 }
 }
 
 pub fn almide_rt_datetime_format(ts: i64, pattern: &str) -> String {

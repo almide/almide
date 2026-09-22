@@ -4383,3 +4383,14 @@ evidence  = [
   { path = "spec/wasm_cross/datetime_pre_epoch.almd", class = "fixture" },
   { path = "spec/stdlib/datetime_test.almd", class = "fixture" },
 ]
+[[contract]]
+id        = "C-365"
+spec      = "ALS-T17"
+title     = "datetime.parse_iso applies the UTC offset and refuses an out-of-range field by name"
+statement = "`datetime.parse_iso` reads `YYYY-MM-DDTHH:MM:SS` followed by `Z`, `+HH:MM`, `-HH:MM` or nothing (UTC), APPLIES the offset — the answer is the UTC instant, `2024-01-15T10:30:00+09:00` is 1705282200, `…-05:30` is 1705334400 — and refuses an out-of-range field by name, byte-identically on every leg (#2489). Every field is ASCII digits of any width (`string.is_digit`'s rule on both legs: `2024-1-5T1:2:3` is accepted, a sign, a space or a letter is not); exactly three date and three time fields; month 1..=12, day 1..=days-in-month under the proleptic Gregorian leap rule (2024-02-29 ok, 2023-02-29 and 2100-02-29 refused, 2000-02-29 ok), hour 0..=23, minute and second 0..=59 (no leap second), offset hours 0..=23 and minutes 0..=59; `Z` and an offset are exclusive spellings. The refusals: `<field> out of range: <value>` for month / day / hour / minute / second in that order (the first refused field wins: `2024-13-45T99:99:99Z` is `month out of range: 13`), `invalid offset: <text from the sign>` for a malformed or out-of-range offset, `invalid datetime format` for any other malformed string, and `expected YYYY-MM-DDTHH:MM:SSZ` when there is no `T`; surrounding whitespace is trimmed. Before this the parser dropped every part int.parse refused (`filter_map`) and fed the survivors to `from_parts`, which rolls over: `+09:00` was silently ignored because the `00+09` part vanished, `2024-13-45T99:99:99Z` was ok(1739853639) — February of the next year — and a junk date part, a fourth time part, a signed year and a doubled `Z` all parsed. spec/wasm_cross/datetime_parse_iso_strict.almd pins each suffix, each refusal, the leap-day rule, unpadded digits, whitespace and the formerly-accepted junk on every leg; spec/stdlib/datetime_test.almd carries the same matrix as assertions."
+since     = "0.63.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/datetime_parse_iso_strict.almd", class = "fixture" },
+  { path = "spec/stdlib/datetime_test.almd", class = "fixture" },
+]
