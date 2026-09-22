@@ -1,20 +1,22 @@
 // @contract: C-362
 // `json.get_int` is Int-only (#2476): a Float field is `none`, even an
 // integral one (`3.0`), never truncated — the same answer `value.as_int`
-// gives (`expected Int, received Float`) and Codec Int decode gives. The
+// gives (err) and Codec Int decode gives. The
 // widening runs ONE way: `json.get_float` / `value.as_float` accept an Int
 // (C-085). Native's accessor had an extra `Float(f) => Some(f as i64)` arm,
 // so `get_int` of `2.7` was `some(2)` there and `none` on both wasm legs.
 import json
 
+// The err SHAPE, not its text: the `expected Int, received Float` wording is
+// C-084's vocabulary and is pinned by the Codec fixtures.
 fn show(r: Result[Int, String]) -> String = match r {
   ok(n) => "ok(${n})",
-  err(e) => "err(${e})",
+  err(_) => "err",
 }
 
 fn showf(r: Result[Float, String]) -> String = match r {
   ok(f) => "ok(${float.to_string(f)})",
-  err(e) => "err(${e})",
+  err(_) => "err",
 }
 
 effect fn main() -> Unit = {
