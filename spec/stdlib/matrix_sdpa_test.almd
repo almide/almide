@@ -58,10 +58,14 @@ test "SDPA distinguishes V rows" {
     [10.0, 0.0, 0.0],
     [0.0, 10.0, 0.0]
   ])
+  // Kt is (d x seq_k) = 3x3: three keys, the third all-zero. It used to be
+  // written 3x2 — two keys against three V rows — and the product silently
+  // contracted over min(cols(aw), rows(v)) = 2, dropping V's third row
+  // (#2481). The shapes are now consistent: aw is 2x3 and V is 3x2.
   let kt = matrix.from_lists([
-    [1.0, 0.0],
-    [0.0, 1.0],
-    [0.0, 0.0]
+    [1.0, 0.0, 0.0],
+    [0.0, 1.0, 0.0],
+    [0.0, 0.0, 0.0]
   ])
   let v = matrix.from_lists([
     [1.0, 2.0],
