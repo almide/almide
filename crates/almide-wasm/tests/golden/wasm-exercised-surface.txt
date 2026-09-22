@@ -43,6 +43,7 @@ call:bytes.append_u8
 call:bytes.as_mut_ptr
 call:bytes.as_ptr
 call:bytes.chunks
+call:bytes.clear
 call:bytes.cmp
 call:bytes.concat
 call:bytes.contains
@@ -183,6 +184,7 @@ call:fs.create_temp_dir
 call:fs.create_temp_file
 call:fs.exists
 call:fs.file_size
+call:fs.glob
 call:fs.is_dir
 call:fs.is_file
 call:fs.is_symlink
@@ -376,7 +378,9 @@ call:list.windows
 call:list.with_capacity
 call:list.zip
 call:list.zip_with
+call:map.clear
 call:map.contains
+call:map.delete
 call:map.entries
 call:map.filter
 call:map.find
@@ -436,6 +440,8 @@ call:matrix.shape
 call:matrix.softmax_rows
 call:matrix.to_lists
 call:matrix.zeros
+call:mem.restore
+call:mem.save
 call:option.filter
 call:option.flat_map
 call:option.flatten
@@ -503,6 +509,7 @@ call:set.union
 call:string.byte_slice
 call:string.capitalize
 call:string.chars
+call:string.clear
 call:string.codepoint
 call:string.contains
 call:string.count
