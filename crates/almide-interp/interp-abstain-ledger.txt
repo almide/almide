@@ -37,8 +37,8 @@ io_write_ordering  out-of-interp-scope capability: prim.fd_write: no lowered bod
 list_repeat_size_ceiling  out-of-interp-scope capability: prim.alloc_list(268435456) beyond the interp arena ceiling
 loop_effect_match_stmt  out-of-interp-scope capability: prim.fd_write: no lowered body
 matrix_dims_guard  out-of-interp-scope capability: prim.store64 with a non-address
-matrix_from_bytes_offset_domain  out-of-interp-scope capability: prim.load8 with a non-address
 matrix_q_fp16_scale_domain  out-of-interp-scope capability: prim.handle of a container holding a NaN float (NaN bits are arch-conditional — #1403; a bit-compare vote would be a guess)
+matrix_shape_precondition_family  out-of-interp-scope capability: prim.load64 outside this heap's arena — the backends read real memory here, so a guessed value would be a wrong vote
 module_var_alias_cow  out-of-interp-scope capability: prim.store64 with a non-address
 mut_param_branch_forward  out-of-interp-scope capability: prim.fd_write: no lowered body
 negative_offset_and_width_totality  out-of-interp-scope capability: prim.int_to_ptr: no lowered body
