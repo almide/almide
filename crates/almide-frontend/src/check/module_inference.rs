@@ -20,6 +20,7 @@ impl Checker {
     fn validate_after_solve(&mut self, program: &ast::Program) {
         self.validate_map_key_types();
         self.validate_result_interpolations();
+        self.validate_interp_instantiations();
         self.validate_ord_elem_types();
         self.validate_unknown_named_types();
         self.validate_empty_collection_elements();
@@ -127,6 +128,8 @@ impl Checker {
             self.deferred_numeric_narrowing_checks.len(),
             self.deferred_float_overflow_checks.len(),
             self.deferred_implicit_prop_checks.len(),
+            self.deferred_result_interp_checks.len(),
+            self.deferred_generic_calls.len(),
         );
 
         let self_name = self.env.self_module_name.map(|s| s.to_string());
@@ -176,6 +179,8 @@ impl Checker {
         self.deferred_numeric_narrowing_checks.truncate(saved_deferred_lens.8);
         self.deferred_float_overflow_checks.truncate(saved_deferred_lens.9);
         self.deferred_implicit_prop_checks.truncate(saved_deferred_lens.10);
+        self.deferred_result_interp_checks.truncate(saved_deferred_lens.11);
+        self.deferred_generic_calls.truncate(saved_deferred_lens.12);
     }
 
     /// Upgrade `env.top_lets` entries from the POST-solve resolution of their
@@ -414,7 +419,14 @@ impl Checker {
         self.env.can_call_effect = is_effect;
         self.env.auto_unwrap = is_effect;
         self.env.lambda_depth = 0;
+        // #2496: the body's interpolation segments and generic calls are
+        // attributed to this fn under the key its callers resolve it by.
+        let prev_fn = self.current_fn.replace((
+            self.fn_decl_key(name),
+            generics.as_ref().map(|gs| gs.iter().map(|g| sym(&g.name)).collect()).unwrap_or_default(),
+        ));
         let body_ity = self.infer_expr(body);
+        self.current_fn = prev_fn;
         self.check_return_width(name, &ret_ty, &body_ity, body, is_effect);
         // ADR-0002 Phase 1b (#1103): a `-> T!` fn's body gets the SAME
         // value-tail acceptance an effect fn's lifted body has — the

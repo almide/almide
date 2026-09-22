@@ -1,0 +1,3 @@
+expects_code = "E089"
+expects_error = "a function value has no defined string form"
+hint_substring = "Call it and interpolate the result"

@@ -1,0 +1,3 @@
+expects_code = "E089"
+expects_error = "it holds a function value"
+hint_substring = "Interpolate the printable parts instead"

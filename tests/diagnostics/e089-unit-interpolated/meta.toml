@@ -1,0 +1,3 @@
+expects_code = "E089"
+expects_error = "a Unit value has no defined string form"
+hint_substring = "A Unit carries nothing to print"

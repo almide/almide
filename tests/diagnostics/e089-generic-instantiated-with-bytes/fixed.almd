@@ -1,0 +1,6 @@
+fn show[T](v: T) -> String = "v=${v}"
+
+effect fn main() -> Unit = {
+  println(show(1))
+  println(show(bytes.to_list(bytes.from_list([1, 2]))))
+}

@@ -1,0 +1,4 @@
+effect fn main() -> Unit = {
+  let m = matrix.zeros(1, 2)
+  println("m=${matrix.to_lists(m)}")
+}

@@ -140,6 +140,16 @@ fn endian_interpolation_under_the_auto_import_has_a_repr_route() {
         "effect fn main() -> Unit = {\n  let e: Endian = BigEndian\n  println(\"${e} ${bytes.len(bytes.new(0))}\")\n}\n",
         "BigEndian 0\n",
     );
+    // #2496: the MODULE-QUALIFIED ctor spelling types as `bytes.Endian`,
+    // and the repr router asked both its tables under that name while they
+    // are keyed by the bare one `render_type` emits — so the same value
+    // printed under `BigEndian` and was rustc E0277 under
+    // `bytes.LittleEndian`. One type, one route, either spelling.
+    assert_native_builds(
+        "endian_repr_module_qualified",
+        "effect fn main() -> Unit = {\n  let e = bytes.LittleEndian\n  println(\"${e}\")\n}\n",
+        "LittleEndian\n",
+    );
 }
 
 const INTERP_MOVE_SOURCE: &str = "type Meta = { size: Int, name: String, is_dir: Bool }\nfn kind(m: Meta) -> String = match m { Meta { is_dir, .. } => if is_dir then \"dir\" else \"file\" }\neffect fn main() -> Unit = {\n  let m = Meta { size: 3, name: \"a.txt\", is_dir: false }\n  println(\"${m.size} ${m.name} ${kind(m)}\")\n  let d = Meta { size: 0, name: \"d\", is_dir: true }\n  println(\"${d} ${kind(d)}\")\n}\n";

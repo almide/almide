@@ -413,6 +413,12 @@ m["key"] = value           // index write (var only)
 ```
 "hello ${name}, result=${1 + 1}"
 ```
+Numbers, `Bool` and `String` print their value; a `List`, `Map`, `Set`,
+`Option`, `Result`, tuple, record or variant prints its Almide-literal form
+(`[1, 2]`, `["a": 1]`, `some(3)`, `P { n: 1 }`). A value with no string form —
+`Bytes`, `Unit`, `Matrix`, a raw pointer, a function value, or a container
+holding one — is [E089](diagnostics/E089.md): interpolate what you mean
+(`${bytes.to_list(b)}`, `${matrix.to_lists(m)}`, `${f(x)}`).
 
 ### String escapes
 ```
