@@ -155,7 +155,15 @@ fi
 # standing refusal of every non-scalar element (C-147). Measured directly on
 # this tree: 676 emitted, 31 walled, 707 total — the emitted count is unchanged,
 # so this is one more input the incumbent never rendered, not coverage lost.
-MAX_WALLED=31
+# 33 as of 2026-09-22: ref_grain_or_pattern_alias_match.almd and
+# ref_rust_or_pattern_heap_subject.almd (C-323, #2435) — reference or-pattern
+# suites whose subjects are heap values (a String, a `some(String)`, a
+# `List[String]`) matched by literal and wildcard alternatives and reused after
+# the match. The structural leg emits both (native == wasm byte-identical, and
+# the judge agrees); the incumbent refuses the non-scalar subject the same way
+# it refuses every non-scalar element (C-147). Two new inputs the incumbent
+# never rendered, not coverage lost: every previously emitted fixture still is.
+MAX_WALLED=33
 corpus=$(ls "$FIXTURE_DIR"/*.almd 2>/dev/null | wc -l | tr -d ' ')
 if [ "$corpus" -eq 0 ] || [ $((n + walled)) -ne "$corpus" ]; then
   echo "::error::host-determinism: compared $n + walled $walled != corpus $corpus in $FIXTURE_DIR — the scan went blind (#985)"
