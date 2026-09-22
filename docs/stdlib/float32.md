@@ -48,15 +48,34 @@ value outside binary32's range becomes an infinity rather than an error.
 ## Signature index (10 functions)
 
 ```
+// Truncates toward 0, saturating; NaN gives 0.
 float32.to_int8(x: Float32) -> Int8
+
+// Truncates toward 0, saturating; NaN gives 0.
 float32.to_int16(x: Float32) -> Int16
+
+// Truncates toward 0, saturating; NaN gives 0.
 float32.to_int32(x: Float32) -> Int32
+
+// Truncates toward 0, saturating; NaN gives 0.
 float32.to_int64(x: Float32) -> Int64
+
+// Truncates toward 0, saturating; NaN gives 0.
 float32.to_uint8(x: Float32) -> UInt8
+
+// Truncates toward 0, saturating; NaN gives 0.
 float32.to_uint16(x: Float32) -> UInt16
+
+// Truncates toward 0, saturating; NaN gives 0.
 float32.to_uint32(x: Float32) -> UInt32
+
+// Truncates toward 0, saturating; NaN gives 0.
 float32.to_uint64(x: Float32) -> UInt64
+
+// Exact widening; never rounds.
 float32.to_float64(x: Float32) -> Float64
+
+// f64 digits of x; 0.1 prints 0.10000000149011612.
 float32.to_string(x: Float32) -> String
 ```
 

@@ -8,56 +8,82 @@
 // has used `int32.to_string` finds no `int64.to_string` and has to know the
 // `int.to_string(int.from_int64(x))` pivot (#894). There is no `to_int64` —
 // that is the identity on this type.
+/// Wraps to 8 bits; 128 becomes -128.
 fn to_int8(x: Int64) -> Int8 = int.to_int8(int.from_int64(x))
 
+/// Wraps to 16 bits; 32768 becomes -32768.
 fn to_int16(x: Int64) -> Int16 = int.to_int16(int.from_int64(x))
 
+/// Wraps to 32 bits; 2^31 becomes -2^31.
 fn to_int32(x: Int64) -> Int32 = int.to_int32(int.from_int64(x))
 
+/// Wraps to 8 bits; -1 becomes 255.
 fn to_uint8(x: Int64) -> UInt8 = int.to_uint8(int.from_int64(x))
 
+/// Wraps to 16 bits; -1 becomes 65535.
 fn to_uint16(x: Int64) -> UInt16 = int.to_uint16(int.from_int64(x))
 
+/// Wraps to 32 bits; -1 becomes 2^32-1.
 fn to_uint32(x: Int64) -> UInt32 = int.to_uint32(int.from_int64(x))
 
+/// Wraps to 64 bits; -1 becomes 2^64-1.
 fn to_uint64(x: Int64) -> UInt64 = int.to_uint64(int.from_int64(x))
 
+/// Float32 value; may round when abs(x) > 2^24.
 fn to_float32(x: Int64) -> Float32 = int.to_float32(int.from_int64(x))
 
+/// Float64 value; may round when abs(x) > 2^53.
 fn to_float64(x: Int64) -> Float64 = int.to_float64(int.from_int64(x))
 
+/// Decimal digits, with - when negative.
 fn to_string(x: Int64) -> String = int.to_string(int.from_int64(x))
 
 // ── Range-checked / saturating narrowings (matrix rule: lossy ⇒ trio) ──
+/// some(x), or none if outside -128..127.
 fn to_int8_checked(x: Int64) -> Int8? = int.to_int8_checked(int.from_int64(x))
 
+/// Clamps x to -128..127.
 fn to_int8_saturating(x: Int64) -> Int8 = int.to_int8_saturating(int.from_int64(x))
 
+/// some(x), or none if outside -32768..32767.
 fn to_int16_checked(x: Int64) -> Int16? = int.to_int16_checked(int.from_int64(x))
 
+/// Clamps x to -32768..32767.
 fn to_int16_saturating(x: Int64) -> Int16 = int.to_int16_saturating(int.from_int64(x))
 
+/// some(x), or none if outside -2^31..2^31-1.
 fn to_int32_checked(x: Int64) -> Int32? = int.to_int32_checked(int.from_int64(x))
 
+/// Clamps x to -2^31..2^31-1.
 fn to_int32_saturating(x: Int64) -> Int32 = int.to_int32_saturating(int.from_int64(x))
 
+/// some(x), or none if outside 0..255.
 fn to_uint8_checked(x: Int64) -> UInt8? = int.to_uint8_checked(int.from_int64(x))
 
+/// Clamps x to 0..255.
 fn to_uint8_saturating(x: Int64) -> UInt8 = int.to_uint8_saturating(int.from_int64(x))
 
+/// some(x), or none if outside 0..65535.
 fn to_uint16_checked(x: Int64) -> UInt16? = int.to_uint16_checked(int.from_int64(x))
 
+/// Clamps x to 0..65535.
 fn to_uint16_saturating(x: Int64) -> UInt16 = int.to_uint16_saturating(int.from_int64(x))
 
+/// some(x), or none if outside 0..2^32-1.
 fn to_uint32_checked(x: Int64) -> UInt32? = int.to_uint32_checked(int.from_int64(x))
 
+/// Clamps x to 0..2^32-1.
 fn to_uint32_saturating(x: Int64) -> UInt32 = int.to_uint32_saturating(int.from_int64(x))
 
+/// some(x), or none if x is negative.
 fn to_uint64_checked(x: Int64) -> UInt64? = int.to_uint64_checked(int.from_int64(x))
 
+/// Negative x clamps to 0.
 fn to_uint64_saturating(x: Int64) -> UInt64 = int.to_uint64_saturating(int.from_int64(x))
 
 // ── Bounds ──
+/// Smallest Int64: -2^63.
 fn min_value() -> Int64 = int.to_int64(-9223372036854775807 - 1)
 
+/// Largest Int64: 2^63-1.
 fn max_value() -> Int64 = int.to_int64(9223372036854775807)
