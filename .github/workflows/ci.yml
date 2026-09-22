@@ -1532,6 +1532,9 @@ jobs:
       - name: README counts derived, Hello, world bytes match the stamped baseline, no undated hand-written count
         run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/gen-readme-stats.sh --check && bash scripts/check-readme-numbers.sh
 
+      - name: Mutation score block is the stamped record rendered (#2152 — the sweep workflow re-measures it)
+        run: bash scripts/gen-mutation-score.sh --check
+
       # The two README-reading checks that otherwise live only in jobs a
       # docs-only change skips (tests/docs_gen_test.rs in Test Rust, the
       # build-speed render in Almide gates). This job always runs, so a README

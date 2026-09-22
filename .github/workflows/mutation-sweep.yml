@@ -48,6 +48,34 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: this shard's mutants must all be caught
         run: |
+          set -o pipefail
           ALMIDE_MUTATION_SHARDS=4 \
           ALMIDE_MUTATION_SHARD=${{ matrix.shard }} \
-            bash scripts/check-mutation-gate.sh
+            bash scripts/check-mutation-gate.sh | tee mutation-shard-${{ matrix.shard }}.log
+      # The per-mutant verdict lines are the measurement the score job reads.
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mutation-shard-${{ matrix.shard }}
+          path: mutation-shard-${{ matrix.shard }}.log
+          retention-days: 14
+
+  # #2152 item 5: the stamped score (proofs/mutation-score.toml, rendered into
+  # the README) is re-measured against what the net just did. Red means
+  # "refresh the stamp from this run" (bash scripts/gen-mutation-score.sh
+  # --from-run <run id>), the same ethos as the ledger-counts nightly — never a
+  # reason for an ordinary PR to touch the record.
+  score:
+    name: Mutation score matches the stamp
+    needs: sweep
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: mutation-shard-*
+          path: shards
+          merge-multiple: true
+      - name: stamped counts vs this sweep
+        run: bash scripts/gen-mutation-score.sh --drift shards/mutation-shard-*.log

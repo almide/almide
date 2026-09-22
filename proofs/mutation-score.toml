@@ -1,0 +1,24 @@
+# MUTATION SCORE — the verdict of the full net sweep, STAMPED (#2152 item 5).
+#
+# scripts/check-mutation-gate.sh applies each pre-authored mutant in
+# ci/mutations/ to the wasm backend and demands that the release-shape net
+# (crates/almide-wasm tests: --lib, backend_parity, fuzz_differential,
+# alias_semantics, tail_calls) goes RED. The full sweep is
+# .github/workflows/mutation-sweep.yml (every develop push, nightly); its
+# `score` job re-measures this record on every run and fails on drift.
+#
+# Refresh:  bash scripts/gen-mutation-score.sh --from-run <sweep run id>
+#           (stamps this file and re-renders the README block). An ordinary
+#           PR never refreshes it; a mutant PR (ci/mutations/) does not
+#           either — the next sweep judges the tree and names the drift.
+# Rendered into README.md by scripts/gen-mutation-score.sh --render.
+date            = "2026-09-22"
+source          = "https://github.com/almide/almide/actions/runs/35650396971"
+head_sha        = "3b02f7dc433e664c244b661973421071ecdbe0f1"
+mutants         = 41
+caught          = 41
+survived        = 0
+stale           = 0
+score_pct       = 100.0
+mutants_in_tree = 41
+killers         = "backend_parity 40, lib 1"
