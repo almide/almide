@@ -400,7 +400,7 @@
 9962	spec/wasm_cross/math_log_gamma.almd
 9503	spec/wasm_cross/math_pow.almd
 20692	spec/wasm_cross/math_transcendental_bits.almd
-20304	spec/wasm_cross/matrix_composition_family.almd
+20305	spec/wasm_cross/matrix_composition_family.almd
 3335	spec/wasm_cross/matrix_dims_guard.almd
 2307	spec/wasm_cross/matrix_dims_guard_overflow.almd
 2421	spec/wasm_cross/matrix_dims_guard_product.almd
@@ -419,7 +419,7 @@
 8525	spec/wasm_cross/matrix_select_rows.almd
 15131	spec/wasm_cross/matrix_select_rows_oob.almd
 9949	spec/wasm_cross/matrix_select_rows_q1_partial_block.almd
-14721	spec/wasm_cross/matrix_shape_family.almd
+14722	spec/wasm_cross/matrix_shape_family.almd
 7948	spec/wasm_cross/matrix_softmax_fastexp.almd
 10285	spec/wasm_cross/matrix_zero_cols_rows.almd
 2712	spec/wasm_cross/mem_checkpoint.almd
