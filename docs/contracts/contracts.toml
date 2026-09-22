@@ -512,6 +512,7 @@ evidence  = [
   { path = "spec/wasm_cross/list_push_on_record_field.almd", class = "fixture" },
   { path = "spec/wasm_cross/inplace_clear_family.almd", class = "fixture" },
   { path = "spec/wasm_cross/inplace_clear_alias.almd", class = "fixture" },
+  { path = "spec/wasm_cross/inplace_clear_alias_field.almd", class = "fixture" },
 ]
 
 # ── LIST BOUNDS GRACEFULNESS ─────────────────────────────────────────
