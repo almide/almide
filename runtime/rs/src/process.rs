@@ -260,15 +260,37 @@ pub fn almide_rt_process_env(key: &str) -> Option<String> {
     std::env::var(key).ok()
 }
 
+// The children this process spawned and has not yet reaped, by pid (#2494).
+// `spawn` used to drop the `Child` handle, so an exited child stayed a zombie
+// for the parent's whole life, and `is_alive` — a `kill -0`, which a zombie
+// answers — reported it alive forever, before and after `process.kill`. The
+// handle is kept here; `is_alive` polls it with `try_wait`, which reaps an
+// exited child and answers the truth. Process-wide (not thread-local): a fan
+// sibling may ask about a child the main thread spawned.
+fn almide_spawned_children() -> &'static std::sync::Mutex<std::collections::HashMap<u32, std::process::Child>> {
+    static CHILDREN: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<u32, std::process::Child>>> =
+        std::sync::OnceLock::new();
+    CHILDREN.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
 pub fn almide_rt_process_spawn(cmd: &str, args: &[String]) -> Result<i64, String> {
-    std::process::Command::new(cmd)
+    let child = std::process::Command::new(cmd)
         .args(args)
         .stdin(std::process::Stdio::null())
         .spawn()
-        .map(|child| child.id() as i64)
         // Was `spawn '{cmd}' failed: {e}` — it named the command, in a spelling
         // shared with nothing else (#2090). Nothing pinned it.
-        .map_err(|e| call_err("process.spawn", &proc_q(cmd), e))
+        .map_err(|e| call_err("process.spawn", &proc_q(cmd), e))?;
+    let pid = child.id();
+    let mut children = almide_spawned_children().lock().unwrap_or_else(|e| e.into_inner());
+    // Reap the children that have exited since the last look, so a program
+    // that spawns without ever asking is_alive does not accumulate zombies
+    // (each `try_wait` is one non-blocking waitpid). The kernel may then
+    // reuse a reaped pid; a later is_alive on that pid answers for whatever
+    // the OS runs under it, exactly as it would for a pid we never spawned.
+    children.retain(|_, c| matches!(c.try_wait(), Ok(None)));
+    children.insert(pid, child);
+    Ok(pid as i64)
 }
 
 pub fn almide_rt_process_kill(pid: i64, signal: i64) -> Result<(), String> {
@@ -297,6 +319,28 @@ pub fn almide_rt_process_sleep(ms: i64) {
 }
 
 pub fn almide_rt_process_is_alive(pid: i64) -> bool {
+    // A child of ours: the handle is the oracle. `try_wait` reaps an exited
+    // child (the zombie disappears with its handle) and answers false; a
+    // still-running child answers true. A pid we did not spawn falls through
+    // to the platform query below.
+    if let Ok(pid32) = u32::try_from(pid) {
+        let mut children = almide_spawned_children().lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(child) = children.get_mut(&pid32) {
+            return match child.try_wait() {
+                Ok(None) => true,
+                Ok(Some(_)) => {
+                    children.remove(&pid32);
+                    false
+                }
+                // waitpid itself failed (ECHILD: someone else reaped it, or
+                // it was never ours after all) — nothing left to hold.
+                Err(_) => {
+                    children.remove(&pid32);
+                    false
+                }
+            };
+        }
+    }
     #[cfg(unix)]
     {
         std::process::Command::new("kill")

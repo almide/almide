@@ -128,7 +128,10 @@ effect fn main() -> Unit = {
 
 ### `process.is_alive(pid: Int) -> Bool`
 
-Check if a process with the given PID is still running
+Check if a process with the given PID is still running. A child this process
+spawned is polled through its handle (and reaped once it has exited), so the
+answer turns `false` when the child exits or is killed — a zombie never
+answers `true`. Any other pid is asked of the OS.
 
 ```almd check
 import process
