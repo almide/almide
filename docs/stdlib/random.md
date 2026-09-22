@@ -16,7 +16,8 @@ effect fn main() -> Unit = {
 
 ### `random.float() -> Float`
 
-Generate a random float between 0.0 and 1.0.
+Generate a random float in `[0, 1)` — 53 random bits scaled by 2^-53, so
+`0.0` is possible and `1.0` is not, on every target.
 
 ```almd check
 import random
