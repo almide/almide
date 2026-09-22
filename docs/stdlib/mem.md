@@ -49,7 +49,10 @@ defined, so any program calling them emitted invalid Rust — both are pinned no
 ## Signature index (2 functions)
 
 ```
+// Opaque checkpoint for restore.
 mem.save() -> Int
+
+// Rewinds to mark; a no-op under RC today.
 mem.restore(mark: Int) -> Unit
 ```
 

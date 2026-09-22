@@ -7,8 +7,10 @@
 // deterministically at scope end, so on every leg the pair is trivial —
 // native (runtime/rs/src/mem.rs) and wasm (stdlib/mem_checkpoint.almd) alike.
 // The checkpoint value is never meaningful to print.
+/// Opaque checkpoint for restore.
 @intrinsic("almide_rt_mem_save")
 fn save() -> Int = _
 
+/// Rewinds to mark; a no-op under RC today.
 @intrinsic("almide_rt_mem_restore")
 fn restore(mark: Int) -> Unit = _
