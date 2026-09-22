@@ -88,8 +88,9 @@ fn main() -> Unit = {
 2024-01-15T12:00:00Z
 ```
 
-The output is byte-identical on the native and wasm targets (contract C-128), for
-years `0..9999`.
+The output is byte-identical on the native and wasm targets (contract C-128).
+`%Y` is at least four columns, zero-padded, the sign taking one of them — the
+same rule as `to_iso`, for any year.
 
 ### `datetime.to_iso(ts: Int) -> String`
 
@@ -205,6 +206,10 @@ fn main() -> Unit = {
 ### `datetime.weekday(ts: Int) -> String`
 
 Get the day of week as a string (Monday-Sunday).
+
+Every civil extractor (`year` / `month` / `day` / `weekday`, and `to_iso` /
+`format` over them) floors a negative timestamp to the day it belongs to:
+`-1` is `1969-12-31T23:59:59Z`, a Wednesday.
 
 ```almd run
 fn main() -> Unit = {

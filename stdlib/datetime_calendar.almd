@@ -5,7 +5,18 @@
 // like `datetime_month` is rewritten to `datetime.month` at link time, so calling it intra-file
 // would dangle — the helpers keep their names). Each public fn recomputes the shared chain (pure,
 // so redundant but correct).
-fn __c_z(ts: Int) -> Int = ts / 86400 + 719468
+// The day number, FLOORED (#2488): `ts / 86400` truncates toward zero, so every pre-epoch second
+// off a day boundary landed on the day AFTER its own — `to_iso(-1)` was 1970-01-01T23:59:59Z and
+// `weekday(-1)` Thursday. hour/minute/second always floor-modded (datetime_arith); the day number
+// must floor the same way or the two halves describe different days. Written as "truncate, then
+// step back when the remainder is negative" rather than `(ts - rem) / 86400`, which would wrap
+// near i64::MIN. The native twin is `almide_rt_days_from_epoch` (`div_euclid`).
+fn __c_days(ts: Int) -> Int = {
+  let q = ts / 86400
+  if ts % 86400 < 0 then q - 1 else q
+}
+
+fn __c_z(ts: Int) -> Int = __c_days(ts) + 719468
 
 fn __c_era(ts: Int) -> Int = {
   let z = __c_z(ts)
@@ -66,7 +77,7 @@ else if idx == 4 then "Monday"
 else if idx == 5 then "Tuesday" else "Wednesday"
 
 fn datetime_weekday(ts: Int) -> String = {
-  let idx = (((ts / 86400) % 7) + 7) % 7
+  let idx = ((__c_days(ts) % 7) + 7) % 7
   __wd_name(idx)
 }
 

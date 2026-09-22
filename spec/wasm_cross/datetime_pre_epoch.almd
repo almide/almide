@@ -1,0 +1,35 @@
+// @contract: C-364
+// Pre-epoch timestamps name the day they belong to (#2488). The day number
+// is FLOORED (native `div_euclid`, self-host `__c_days`), the same way the
+// time-of-day extractors always floor-modded, so `-1` is 1969-12-31T23:59:59Z
+// on a Wednesday — not 1970-01-01T23:59:59Z on a Thursday, which is what
+// `ts / 86400` (truncation toward zero) produced for every pre-epoch second
+// off a day boundary. Exact multiples of 86400 were always right, which is
+// why -86400 alone never caught it. The rows straddle the epoch, the day
+// boundary (-86399 / -86400 / -86401), year 1 / year 0 (-62135596800 and
+// one second before), a leap day, the 9999 ceiling and both i64 extremes;
+// `%Y` in datetime.format is the variable-width year to_iso already renders
+// (the fixed 4-wide pad wrote the low four digits of a wide year and
+// non-ASCII bytes for a negative one).
+fn main() -> Unit = {
+  for ts in [
+    0,
+    -1,
+    -86399,
+    -86400,
+    -86401,
+    -172800,
+    -2208988800,
+    -62135596800,
+    -62135596801,
+    951782400,
+    253402300799,
+    0 - 9223372036854775807 - 1,
+    9223372036854775807
+  ] {
+    println("${ts} ${datetime.to_iso(ts)} ${datetime.weekday(ts)} ${datetime.year(ts)}-${datetime.month(ts)}-${datetime.day(ts)} ${datetime.hour(ts)}:${datetime.minute(ts)}:${datetime.second(ts)} ${datetime.format(
+      ts,
+      "%Y/%m/%d %H.%M.%S",
+    )}")
+  }
+}

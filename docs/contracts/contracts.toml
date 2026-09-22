@@ -4372,3 +4372,14 @@ evidence  = [
   { path = "spec/wasm_cross/ref_gleam_or_pattern_alternatives.almd", class = "fixture" },
   { path = "spec/wasm_cross/ref_rust_or_pattern_guard_retry.almd", class = "fixture" },
 ]
+[[contract]]
+id        = "C-364"
+spec      = "ALS-T17"
+title     = "Pre-epoch timestamps floor to the day they belong to, and %Y renders any year"
+statement = "The civil extractors `datetime.year` / `month` / `day` / `weekday`, and `to_iso` / `format` over them, compute the day number of a timestamp by FLOOR division (native `i64::div_euclid(86400)`, self-host `__c_days` in stdlib/datetime_calendar.almd: truncate, then step back one day when the remainder is negative — the form that cannot wrap near i64::MIN), so a pre-epoch second names the day it belongs to: `to_iso(-1)` is `1969-12-31T23:59:59Z` and `weekday(-1)` is Wednesday, byte-identically on every leg (#2488). Before this the day number was `ts / 86400`, truncation toward zero, while hour/minute/second had always floor-modded (`(x % m + m) % m`), so the two halves described different days for every pre-epoch second off a day boundary — `to_iso(-1)` was `1970-01-01T23:59:59Z` on a Thursday, and only exact multiples of 86400 (which is what the fixtures exercised) were right. `from_parts` is the exact inverse across the epoch (`from_parts(1969, 12, 31, 23, 59, 59) == -1`). `datetime.format`'s `%Y` is the variable-width year `to_iso` renders under C-054 — at least four columns, zero-padded, the sign taking one — for ANY year: it had kept the fixed 4-wide pad that C-054 removed from `to_iso`, which wrote the low four digits of a wide year and non-ASCII bytes for a negative one (`48 + digit` with a negative digit), so `format(i64::MIN, \"%Y\")` answered `.*+)` on the wasm legs against native's `-292277022657`; the C-128 SCOPE note (year 0..9999) is closed the same way `to_iso`'s was. spec/wasm_cross/datetime_pre_epoch.almd pins the rows straddling the epoch, the day boundary, year 1 / year 0, a leap day, the 9999 ceiling and both i64 extremes, through every extractor and both renderers; spec/stdlib/datetime_test.almd carries the same rows as assertions on the three-way oracle."
+since     = "0.63.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/datetime_pre_epoch.almd", class = "fixture" },
+  { path = "spec/stdlib/datetime_test.almd", class = "fixture" },
+]
