@@ -193,19 +193,46 @@ effect fn main() -> Unit = {
 ## Signature index (14 functions)
 
 ```
+// Stdout on exit 0; else err with stderr text.
 effect process.exec(cmd: String, args: List[String]) -> String
+
+// Ends with code 0..=125; others abort, exit 1.
 effect process.exit(code: Int) -> Never
+
+// Full argv, program name at index 0.
 process.args() -> List[String]
+
+// All stdin lines; err on non-UTF-8 input.
 effect process.stdin_lines() -> List[String]
+
+// exec in dir; err is stderr, maybe empty.
 effect process.exec_in(dir: String, cmd: String, args: List[String]) -> String
+
+// exec with input piped in; err may be empty.
 effect process.exec_with_stdin(cmd: String, args: List[String], input: String) -> String
+
+// Code and output; code -1 if killed by signal.
 effect process.exec_status(cmd: String, args: List[String]) -> ProcessStatus
+
+// exec_status, but kills cmd and errs at timeout_ms.
 effect process.exec_status_timeout(cmd: String, args: List[String], timeout_ms: Int) -> ProcessStatus
+
+// OS process ID of this program.
 process.pid() -> Int
+
+// Variable value, or none if unset.
 process.env(key: String) -> Option[String]
+
+// Pid of cmd started in the background.
 effect process.spawn(cmd: String, args: List[String]) -> Int
+
+// Sends signal to pid; err is kill's stderr.
 effect process.kill(pid: Int, signal: Int) -> Unit
+
+// Blocks ms milliseconds; negative is 0.
 process.sleep(ms: Int) -> Unit
+
+// True while pid exists, zombies included.
 process.is_alive(pid: Int) -> Bool
 ```
 

@@ -7,23 +7,30 @@
 // `Result`. Almide has no surface-level `impure` keyword, so those
 // fns stay as plain `fn` (matching the existing TOML contract where
 // the sole difference was an omitted effect-context check).
+/// Next stdin line, newline cut; empty at EOF.
 @intrinsic("almide_rt_io_read_line")
 effect fn read_line() -> String = _
 
+/// Writes s, no newline, then flushes.
 @intrinsic("almide_rt_io_print")
 effect fn print(s: String) -> Unit = _
 
+/// Rest of stdin as text; empty at EOF.
 @intrinsic("almide_rt_io_read_all")
 effect fn read_all() -> String = _
 
+/// Next stdin byte 0..255, or -1 at EOF.
 @intrinsic("almide_rt_io_read_byte")
 fn read_byte() -> Int = _
 
+/// Up to n stdin bytes; [] if n <= 0.
 @intrinsic("almide_rt_io_read_n_bytes")
 fn read_n_bytes(n: Int) -> List[Int] = _
 
+/// Low byte of each Int to stdout; unflushed.
 @intrinsic("almide_rt_io_write_bytes")
 fn write_bytes(data: List[Int]) -> Unit = _
 
+/// Raw data to stdout; no newline.
 @intrinsic("almide_rt_io_write")
 fn write(data: Bytes) -> Unit = _
