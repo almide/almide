@@ -54,6 +54,22 @@ test "int.to_float32_checked detects precision loss" {
   assert_eq(int.to_float32_checked(16777217).is_none(), true)
 }
 
+// #2487 — the family rule: a `_checked` cell never trusts a round trip through
+// a conversion that wraps or saturates. `int.max_value()` rounds to 2^63 as an
+// f32; the saturating `float.to_int` read that back as `max_value` and the cell
+// said `some`. The bound is on the widened value now.
+test "int.to_float32_checked at the Int bounds" {
+  assert_eq(int.to_float32_checked(int.max_value()).is_none(), true)
+  // 2^63 - 512 also rounds to 2^63 as an f32.
+  assert_eq(int.to_float32_checked(9223372036854775296).is_none(), true)
+  // -2^63 IS an f32 (a power of two).
+  assert_eq(int.to_float32_checked(int.min_value()).is_some(), true)
+  // 2^63 - 2^39 = 2^39 * (2^24 - 1): the largest f32 below 2^63.
+  assert_eq(int.to_float32_checked(9223371487098961920).is_some(), true)
+  assert_eq(int.to_float32_checked(4611686018427387904).is_some(), true)
+  assert_eq(int.to_float32_checked(-9223372036854775807).is_none(), true)
+}
+
 // ── Int → sized int: _saturating ──
 test "int.to_int8_saturating clamps to range" {
   assert_eq(int.to_int8_saturating(200).to_int64(), 127)
@@ -113,6 +129,67 @@ test "float.to_uint8_checked rejects negatives and NaN" {
   assert_eq(float.to_uint8_checked(-1.0).is_none(), true)
   assert_eq(float.to_uint8_checked(256.0).is_none(), true)
   assert_eq(float.to_uint8_checked(255.0)!.to_int64(), 255)
+}
+
+// #2487 — every Float → T cell at its EXACT bounds (MIN, MIN - 1, MAX, the
+// first value outside, a half at the edge). `to_uint64_checked` compared its
+// round trip through `int.from_uint64`, which reinterprets [2^63, 2^64) as a
+// negative Int, and answered `none` for every value at or above 2^63.
+test "float.to_uint64_checked accepts the upper half of UInt64" {
+  assert_eq(
+    uint64.to_string(float.to_uint64_checked(9223372036854775808.0) ?? int.to_uint64(0)),
+    "9223372036854775808",
+  )
+  // The largest f64 below 2^64.
+  assert_eq(
+    uint64.to_string(float.to_uint64_checked(18446744073709549568.0) ?? int.to_uint64(0)),
+    "18446744073709549568",
+  )
+  assert_eq(float.to_uint64_checked(18446744073709551616.0).is_none(), true)
+  // 2^63 + 0.5 IS 2^63 in f64 (the ulp there is 2048): still some.
+  assert_eq(
+    uint64.to_string(float.to_uint64_checked(9223372036854775808.0 + 0.5) ?? int.to_uint64(0)),
+    "9223372036854775808",
+  )
+  assert_eq(float.to_uint64_checked(4503599627370495.5).is_none(), true)
+  assert_eq(
+    uint64.to_string(float.to_uint64_checked(4611686018427387904.0) ?? int.to_uint64(0)),
+    "4611686018427387904",
+  )
+  assert_eq(float.to_uint64_checked(-1.0).is_none(), true)
+  assert_eq(float.to_uint64_checked(-0.0)!.to_int64(), 0)
+}
+
+test "float.to_int64_checked at the Int64 bounds" {
+  assert_eq(int.from_int64(float.to_int64_checked(-9223372036854775808.0)!), -9223372036854775808)
+  // The next f64 below -2^63.
+  assert_eq(float.to_int64_checked(-9223372036854777856.0).is_none(), true)
+  // The largest f64 below 2^63.
+  assert_eq(int.from_int64(float.to_int64_checked(9223372036854774784.0)!), 9223372036854774784)
+  assert_eq(float.to_int64_checked(9223372036854775808.0).is_none(), true)
+  assert_eq(float.to_int64_checked(4503599627370495.5).is_none(), true)
+}
+
+test "float to narrow int _checked: MIN, MIN - 1, MAX, MAX + 1, a half" {
+  assert_eq(float.to_int8_checked(-128.0)!.to_int64(), -128)
+  assert_eq(float.to_int8_checked(-129.0).is_none(), true)
+  assert_eq(float.to_int8_checked(127.5).is_none(), true)
+  assert_eq(float.to_int8_checked(-128.5).is_none(), true)
+  assert_eq(float.to_int16_checked(-32768.0)!.to_int64(), -32768)
+  assert_eq(float.to_int16_checked(-32769.0).is_none(), true)
+  assert_eq(float.to_int16_checked(32767.0)!.to_int64(), 32767)
+  assert_eq(float.to_int16_checked(32768.0).is_none(), true)
+  assert_eq(float.to_int32_checked(-2147483648.0)!.to_int64(), -2147483648)
+  assert_eq(float.to_int32_checked(-2147483649.0).is_none(), true)
+  assert_eq(float.to_int32_checked(2147483647.0)!.to_int64(), 2147483647)
+  assert_eq(float.to_int32_checked(2147483648.0).is_none(), true)
+  assert_eq(float.to_int32_checked(2147483647.5).is_none(), true)
+  assert_eq(float.to_uint8_checked(-0.5).is_none(), true)
+  assert_eq(float.to_uint16_checked(65535.0)!.to_int64(), 65535)
+  assert_eq(float.to_uint16_checked(65536.0).is_none(), true)
+  assert_eq(float.to_uint32_checked(4294967295.0)!.to_int64(), 4294967295)
+  assert_eq(float.to_uint32_checked(4294967296.0).is_none(), true)
+  assert_eq(float.to_uint32_checked(4294967295.5).is_none(), true)
 }
 
 // ── Float → sized int: _saturating ──

@@ -1,24 +1,28 @@
-// float_checked — SELF-HOSTED float.to_{int,uint}{8,16,32}_checked for v1: Some(T) iff `n` is an
-// EXACT integer in T's range, else None (NaN / infinity / fractional / out-of-range → None),
-// byte-matching v0's round-trip-via-int.to_float check.
+// float_checked — SELF-HOSTED float.to_{int,uint}{8,16,32,64}_checked for v1: Some(T) iff `n` is
+// an EXACT integer in T's range, else None (NaN / infinity / fractional / out-of-range → None),
+// byte-matching v0 (stdlib/float.almd) cell for cell.
 //
-// SHAPE: all computation (guard bools, the truncation `i`, and the round-trip bool `rt`) is hoisted
-// into PRECEDING `let`s, leaving a FLAT if-chain whose every arm is directly `None` or `Some(i)` —
-// the proven materialized-Option shape (cf. int_checked.almd). A BLOCK arm (`else { … }`) is NOT in
-// that subset: a tail Option-`if` with a block arm falls back to an Opaque (len-0 = always-None)
-// result. v1 also does not lower `or` (so the chain is nested ifs), a scalar call as an `if` cond
-// (so each guard is bound first), or a nested call arg (so the round-trip is unrolled to one call
-// per `let`). Float compares go through the prim floor (flt/fgt/feq → f64.lt/gt/eq); the signed
-// lower bound is built with prim.fneg. `i`/`rt` are computed UNCONDITIONALLY — sound because every
-// op (float.to_T / int.from_T / int.to_float / prim.feq) is TOTAL (no trap, no effect, saturating),
-// so the discarded out-of-range values change nothing and the Some-path value is `to_T(n)` exactly.
+// THE FAMILY RULE (#2487): every cell is a RANGE test on the source value against the target's
+// exact bounds plus an INTEGRALITY test (`floor(n) == n`, via prim.ffloor / prim.feq), never a
+// round trip through a conversion that wraps or saturates. The old round trip through
+// int.from_T was exact up to 32 bits but `int.from_uint64` reinterprets [2^63, 2^64) as a
+// negative Int, so `to_uint64_checked(2^63)` was None although 2^63 is an exact UInt64.
+//
+// SHAPE: all computation (guard bools, the truncation `i`, and the integrality bool `rt`) is
+// hoisted into PRECEDING `let`s, leaving a FLAT if-chain whose every arm is directly `None` or
+// `Some(i)` — the proven materialized-Option shape (cf. int_checked.almd). A BLOCK arm
+// (`else { … }`) is NOT in that subset: a tail Option-`if` with a block arm falls back to an
+// Opaque (len-0 = always-None) result. v1 also does not lower `or` (so the chain is nested ifs),
+// a scalar call as an `if` cond (so each guard is bound first), or a nested call arg. Float
+// compares go through the prim floor (flt/fgt/feq → f64.lt/gt/eq); the signed lower bound is
+// built with prim.fneg. `i`/`rt` are computed UNCONDITIONALLY — sound because every op
+// (float.to_T / prim.ffloor / prim.feq) is TOTAL (no trap, no effect, saturating), so the
+// discarded out-of-range values change nothing and the Some-path value is `to_T(n)` exactly.
 // Scalar Option[Int8…] over the materialized-Option machinery — cert untouched.
 //
 // The 64-bit variants build their 2^63 / 2^64 bound at RUNTIME (the literal overflows the float
 // parser) via prim.i2f(prim.bshl(1, 62)) doubled — the pattern from float_convert.almd's
-// float_to_uint64; the round-trip through int.from_{int,uint}64 (an i64-repr identity) naturally
-// rejects the u64 high half (>= 2^63 wraps to a negative i64 repr → i2f gives a negative float ≠ n),
-// matching v0 exactly. Deferred: to_float32_checked (needs f32).
+// float_to_uint64. Deferred: to_float32_checked (needs f32).
 fn float_to_int8_checked(n: Float) -> Int8? = {
   let nan = float.is_nan(n)
   let inf = float.is_infinite(n)
@@ -26,9 +30,8 @@ fn float_to_int8_checked(n: Float) -> Int8? = {
   let lo = prim.flt(n, neg)
   let hi = prim.fgt(n, 127.0)
   let i = float.to_int8(n)
-  let f = int.from_int8(i)
-  let back = int.to_float(f)
-  let rt = prim.feq(back, n)
+  let fl = prim.ffloor(n)
+  let rt = prim.feq(fl, n)
   if nan then none
   else if inf then none
   else if lo then none
@@ -43,9 +46,8 @@ fn float_to_int16_checked(n: Float) -> Int16? = {
   let lo = prim.flt(n, neg)
   let hi = prim.fgt(n, 32767.0)
   let i = float.to_int16(n)
-  let f = int.from_int16(i)
-  let back = int.to_float(f)
-  let rt = prim.feq(back, n)
+  let fl = prim.ffloor(n)
+  let rt = prim.feq(fl, n)
   if nan then none
   else if inf then none
   else if lo then none
@@ -60,9 +62,8 @@ fn float_to_int32_checked(n: Float) -> Int32? = {
   let lo = prim.flt(n, neg)
   let hi = prim.fgt(n, 2147483647.0)
   let i = float.to_int32(n)
-  let f = int.from_int32(i)
-  let back = int.to_float(f)
-  let rt = prim.feq(back, n)
+  let fl = prim.ffloor(n)
+  let rt = prim.feq(fl, n)
   if nan then none
   else if inf then none
   else if lo then none
@@ -76,9 +77,8 @@ fn float_to_uint8_checked(n: Float) -> UInt8? = {
   let lo = prim.flt(n, 0.0)
   let hi = prim.fgt(n, 255.0)
   let i = float.to_uint8(n)
-  let f = int.from_uint8(i)
-  let back = int.to_float(f)
-  let rt = prim.feq(back, n)
+  let fl = prim.ffloor(n)
+  let rt = prim.feq(fl, n)
   if nan then none
   else if inf then none
   else if lo then none
@@ -92,9 +92,8 @@ fn float_to_uint16_checked(n: Float) -> UInt16? = {
   let lo = prim.flt(n, 0.0)
   let hi = prim.fgt(n, 65535.0)
   let i = float.to_uint16(n)
-  let f = int.from_uint16(i)
-  let back = int.to_float(f)
-  let rt = prim.feq(back, n)
+  let fl = prim.ffloor(n)
+  let rt = prim.feq(fl, n)
   if nan then none
   else if inf then none
   else if lo then none
@@ -108,9 +107,8 @@ fn float_to_uint32_checked(n: Float) -> UInt32? = {
   let lo = prim.flt(n, 0.0)
   let hi = prim.fgt(n, 4294967295.0)
   let i = float.to_uint32(n)
-  let f = int.from_uint32(i)
-  let back = int.to_float(f)
-  let rt = prim.feq(back, n)
+  let fl = prim.ffloor(n)
+  let rt = prim.feq(fl, n)
   if nan then none
   else if inf then none
   else if lo then none
@@ -130,9 +128,8 @@ fn float_to_int64_checked(n: Float) -> Int64? = {
   let lo = prim.flt(n, neg63)
   let hi = prim.fge(n, two63)
   let i = float.to_int64(n)
-  let f = int.from_int64(i)
-  let back = int.to_float(f)
-  let rt = prim.feq(back, n)
+  let fl = prim.ffloor(n)
+  let rt = prim.feq(fl, n)
   if nan then none
   else if inf then none
   else if lo then none
@@ -140,9 +137,9 @@ fn float_to_int64_checked(n: Float) -> Int64? = {
   else if rt then some(i) else none
 }
 
-// 64-bit unsigned: bound 2^64 built at runtime (2^63 + 2^63), guards `n < 0` / `n >= 2^64`. The
-// round-trip through int.from_uint64 (i64-repr identity) rejects [2^63, 2^64) — i2f of the wrapped
-// negative i64 ≠ n — so Some only for [0, 2^63) integers, exactly like v0.
+// 64-bit unsigned: bound 2^64 built at runtime (2^63 + 2^63), guards `n < 0` / `n >= 2^64`. Every
+// integral f64 in [0, 2^64) is an exact u64, the upper half included: float.to_uint64 returns it
+// as its i64 bit pattern (negative for >= 2^63), which IS the UInt64 (C-179).
 fn float_to_uint64_checked(n: Float) -> UInt64? = {
   let nan = float.is_nan(n)
   let inf = float.is_infinite(n)
@@ -153,9 +150,8 @@ fn float_to_uint64_checked(n: Float) -> UInt64? = {
   let lo = prim.flt(n, 0.0)
   let hi = prim.fge(n, two64)
   let i = float.to_uint64(n)
-  let f = int.from_uint64(i)
-  let back = int.to_float(f)
-  let rt = prim.feq(back, n)
+  let fl = prim.ffloor(n)
+  let rt = prim.feq(fl, n)
   if nan then none
   else if inf then none
   else if lo then none

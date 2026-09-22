@@ -1,0 +1,94 @@
+// @contract: C-307, C-338
+// The `_checked` conversion family at its exact bounds (#2487): a cell is a
+// RANGE test on the source value against the target's exact bounds plus an
+// integrality test, never a round trip through a conversion that wraps or
+// saturates. Two cells trusted such a pivot: `float.to_uint64_checked`
+// compared through `int.from_uint64` (which reinterprets `[2^63, 2^64)` as a
+// negative Int) and answered `none` for every value at or above 2^63;
+// `int.to_float32_checked` compared through the saturating `float.to_int`
+// and answered `some` for `int.max_value()` (2^63 - 1 rounds to 2^63 as an
+// f32, and the saturated read-back equalled `max_value`). Every leg agrees.
+fn s8(o: Int8?) -> String = match o {
+  some(v) => "some(${int.from_int8(v)})",
+  none => "none",
+}
+
+fn s16(o: Int16?) -> String = match o {
+  some(v) => "some(${int.from_int16(v)})",
+  none => "none",
+}
+
+fn s32(o: Int32?) -> String = match o {
+  some(v) => "some(${int.from_int32(v)})",
+  none => "none",
+}
+
+fn s64(o: Int64?) -> String = match o {
+  some(v) => "some(${int.from_int64(v)})",
+  none => "none",
+}
+
+fn u8(o: UInt8?) -> String = match o {
+  some(v) => "some(${int.from_uint8(v)})",
+  none => "none",
+}
+
+fn u16(o: UInt16?) -> String = match o {
+  some(v) => "some(${int.from_uint16(v)})",
+  none => "none",
+}
+
+fn u32(o: UInt32?) -> String = match o {
+  some(v) => "some(${int.from_uint32(v)})",
+  none => "none",
+}
+
+fn u64(o: UInt64?) -> String = match o {
+  some(v) => "some(${uint64.to_string(v)})",
+  none => "none",
+}
+
+fn f32(o: Float32?) -> String = match o {
+  some(v) => "some(${float32.to_string(v)})",
+  none => "none",
+}
+
+fn main() -> Unit = {
+  let nan = 0.0 / 0.0
+  let inf = 1.0 / 0.0
+  // Every cell over the same shared edge values: ±0, ±1, halves, tiny, NaN, ±inf, huge.
+  let common = [
+    0.0,
+    -0.0,
+    1.0,
+    -1.0,
+    0.5,
+    -0.5,
+    2.5,
+    1e-300,
+    -1e-300,
+    nan,
+    inf,
+    0.0 - inf,
+    1e300,
+    -1e300
+  ]
+  for x in common {
+    println("${x}: i8=${s8(float.to_int8_checked(x))} i16=${s16(float.to_int16_checked(x))} i32=${s32(float.to_int32_checked(x))} i64=${s64(float.to_int64_checked(x))} u8=${u8(float.to_uint8_checked(x))} u16=${u16(float.to_uint16_checked(x))} u32=${u32(float.to_uint32_checked(x))} u64=${u64(float.to_uint64_checked(x))}")
+  }
+  // Per cell: MIN, MIN - 1, MAX, MAX + 1 (or the first f64 outside), a half at the edge.
+  println("i8: ${s8(float.to_int8_checked(-128.0))} ${s8(float.to_int8_checked(-129.0))} ${s8(float.to_int8_checked(127.0))} ${s8(float.to_int8_checked(128.0))} ${s8(float.to_int8_checked(127.5))} ${s8(float.to_int8_checked(-128.5))}")
+  println("i16: ${s16(float.to_int16_checked(-32768.0))} ${s16(float.to_int16_checked(-32769.0))} ${s16(float.to_int16_checked(32767.0))} ${s16(float.to_int16_checked(32768.0))}")
+  println("i32: ${s32(float.to_int32_checked(-2147483648.0))} ${s32(float.to_int32_checked(-2147483649.0))} ${s32(float.to_int32_checked(2147483647.0))} ${s32(float.to_int32_checked(2147483648.0))} ${s32(float.to_int32_checked(2147483647.5))}")
+  println("i64: ${s64(float.to_int64_checked(-9223372036854775808.0))} ${s64(float.to_int64_checked(-9223372036854777856.0))} ${s64(float.to_int64_checked(9223372036854774784.0))} ${s64(float.to_int64_checked(9223372036854775808.0))} ${s64(float.to_int64_checked(4503599627370495.5))}")
+  println("u8: ${u8(float.to_uint8_checked(255.0))} ${u8(float.to_uint8_checked(256.0))} ${u8(float.to_uint8_checked(-1.0))} ${u8(float.to_uint8_checked(-0.5))}")
+  println("u16: ${u16(float.to_uint16_checked(65535.0))} ${u16(float.to_uint16_checked(65536.0))}")
+  println("u32: ${u32(float.to_uint32_checked(4294967295.0))} ${u32(float.to_uint32_checked(4294967296.0))} ${u32(float.to_uint32_checked(4294967295.5))}")
+  // u64: 2^63 (the corrected cell), the largest f64 below 2^64, 2^64, 2^63 + 2048, 2^62.
+  println("u64: ${u64(float.to_uint64_checked(9223372036854775808.0))} ${u64(float.to_uint64_checked(18446744073709549568.0))} ${u64(float.to_uint64_checked(18446744073709551616.0))} ${u64(float.to_uint64_checked(9223372036854775808.0 + 2048.0))} ${u64(float.to_uint64_checked(4611686018427387904.0))}")
+  // Int -> Float32: max_value (the corrected cell), min_value (= -2^63, exact), 2^24, 2^24 + 1,
+  // 2^62, 2^63 - 512 (rounds to 2^63), 2^63 - 2^39 (the largest f32 below 2^63), 0, -(2^63 - 1).
+  println("i->f32: ${f32(int.to_float32_checked(int.max_value()))} ${f32(int.to_float32_checked(int.min_value()))} ${f32(int.to_float32_checked(16777216))} ${f32(int.to_float32_checked(16777217))} ${f32(int.to_float32_checked(-16777217))} ${f32(int.to_float32_checked(4611686018427387904))} ${f32(int.to_float32_checked(9223372036854775296))} ${f32(int.to_float32_checked(9223371487098961920))} ${f32(int.to_float32_checked(0))} ${f32(int.to_float32_checked(-9223372036854775807))}")
+  // Float -> Float32: the widening pivot is exact, so the round trip stands.
+  println("f->f32: ${f32(float.to_float32_checked(0.1))} ${f32(float.to_float32_checked(0.5))} ${f32(float.to_float32_checked(nan))} ${f32(float.to_float32_checked(inf))} ${f32(float.to_float32_checked(1e300))} ${f32(float.to_float32_checked(16777217.0))}")
+}
