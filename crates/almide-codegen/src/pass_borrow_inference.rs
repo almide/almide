@@ -70,6 +70,12 @@ fn seed_pending_user_fns(program: &IrProgram) -> HashSet<String> {
 /// two copies of one `Bytes | Fn` type test, which is the second place a rule
 /// has to be remembered.
 fn tco_owned_params(func: &IrFunction, mut borrows: Vec<ParamBorrow>) -> Vec<ParamBorrow> {
+    // Nothing to bake when every slot is already owned — and this runs on every
+    // function in every fixed-point round, so the walk behind `is_tco_candidate`
+    // is worth skipping.
+    if borrows.iter().all(|b| matches!(b, ParamBorrow::Own)) {
+        return borrows;
+    }
     if crate::pass_tco::is_tco_candidate(func) {
         let identity = crate::pass_tco::tco_identity_carried(func);
         for (i, b) in borrows.iter_mut().enumerate() {
