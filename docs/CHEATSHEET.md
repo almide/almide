@@ -638,6 +638,42 @@ duration.ms(5000)   // Duration — wall-clock time (fan.timeout deadlines)
 - There is no literal suffix: `100ms` does not parse — write `compute.ms(100)`
 - A negative argument aborts at runtime (`Error: negative time: ...`); an overflowing construction saturates to the maximum
 - `fan.race` / `fan.bounded` results are deterministic: same program + same inputs = same winner/verdict on every target and every machine
+## scoped — a declared reclamation boundary
+
+`scoped { ... }` declares where the storage a block allocates ends; `scoped fn`
+makes "may run inside a region" part of a worker's signature. Both are checked
+obligations, not hints — the value of the block is the value of its body, and a
+shape outside the admitted fragment is refused at check time on both targets.
+
+```almide check
+type Chain = Nil | Cons(Int, Chain)
+
+scoped fn build(n: Int, acc: Chain) -> Chain =
+  if n == 0 then acc else build(n - 1, Cons(n, acc))
+
+scoped fn total(c: Chain, acc: Int) -> Int =
+  match c {
+    Nil => acc,
+    Cons(h, t) => total(t, acc + h),
+  }
+
+fn sum_to(n: Int) -> Int = scoped { total(build(n, Nil), 0) }
+
+effect fn main() -> Unit = println(int.to_string(sum_to(100)))
+```
+
+- Admitted inside: scalars (`Int`/`Float`/`Bool`/`Unit`), variant types over
+  scalars declared in the same file, records of scalars, tuples and `Option`
+  of those; calls to other `scoped fn`, constructors, and `int`/`float`/`math`/
+  `bool` members
+- Only a scalar crosses the boundary — a value built inside is **E086**
+- A callee that is not `scoped fn`, a global, `println`, a lambda, a captured
+  heap value, `!` / `?` / `guard` — **E087**
+- A single non-tail self-call or mutual recursion — **E088** (carry an
+  accumulator; a tree walk with two self-calls per arm is admitted)
+- `scoped` is contextual: a variable named `scoped` still works, and
+  `match scoped { ... }` still matches on it
+
 ## Test
 ```
 test "description" {

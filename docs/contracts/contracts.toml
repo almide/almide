@@ -4498,3 +4498,46 @@ evidence  = [
   { path = "spec/wasm_cross/url_authority_edges.almd", class = "fixture" },
   { path = "spec/stdlib/url_test.almd", class = "fixture" },
 ]
+
+# ── SCOPED REGIONS (#1997, the contract-relative survival arc's step 5) ──
+[[contract]]
+id        = "C-362"
+spec      = "ALS-E31"
+title     = "A `scoped` block's observables are its body's — the region is not observable"
+statement = "ALS-E31: `scoped { body }` evaluates to `body`'s value and produces byte-identical stdout, stderr and exit code to the same program with the qualifier removed, on BOTH targets. The qualifier declares a reclamation boundary, not a meaning: the structural wasm leg saves and rewinds its allocator around the block while the native leg runs the region clones in the prelude arena (or, where the closure cannot be twinned, releases by ownership at the same close point), and neither realization is observable. What is NOT promised, here or anywhere: a peak-memory bound inside the window, termination, or a bound on how much the block allocates before the boundary."
+since     = "0.64.0"
+status    = "active"
+declaration = "docs/specs/scoped.md#What a scoped block promises"
+refusal   = ["tests/diagnostics/e086-scope-escape-tail", "tests/diagnostics/e086-scope-escape-record", "tests/diagnostics/e086-scope-escape-outer-write"]
+challenge = ["dojo:scope-escape"]
+evidence  = [
+  { path = "spec/wasm_cross/scoped_region_value.almd", class = "fixture" },
+]
+[[contract]]
+id        = "C-363"
+spec      = "ALS-E31"
+title     = "A `scoped fn` computes the same answer inside and outside a region"
+statement = "ALS-E31: a `scoped fn` is an ordinary function wherever it is called — the qualifier is an eligibility obligation the checker enforces on its body, never a change of behaviour — so calling one directly and calling it from inside a `scoped { … }` block yield identical observables, and both are identical native == wasm. A direct tail-recursive worker and an ordinary (non-tail) worker agree across the two call positions alike, at depths that exercise the tail form's constant stack."
+since     = "0.64.0"
+status    = "active"
+declaration = "docs/specs/scoped.md#What a scoped fn promises"
+refusal   = ["tests/diagnostics/e088-scope-nontail-recursion", "tests/diagnostics/e088-scope-mutual-recursion", "tests/diagnostics/e088-scope-nontail-binding"]
+challenge = ["dojo:nested-scopes"]
+evidence  = [
+  { path = "spec/wasm_cross/scoped_worker_in_and_out.almd", class = "fixture" },
+]
+[[contract]]
+id        = "C-364"
+spec      = "ALS-E31"
+title     = "A shape outside the scoped fragment is refused at check time, identically on both targets"
+statement = "ALS-E31: the admitted `scoped` fragment is decided by the CHECKER, before the target split, so a shape outside it is rejected with the same code and the same wording under `almide check` and `almide check --target wasm`, and no backend accepts what the other refuses. The three codes are E086 (a value that would outlive the scoped allocation, carrying `allocated at` and `scope ends at` rows), E087 (an operation not permitted in a scoped function or block — a non-scoped callee, a global, a host resource, an unknown indirect call, an outer heap capture, a type outside the fragment), and E088 (a recursive call that retains the current scoped activation). A program the checker admits is never refused by a leg for its region: the structural wasm leg reports a disagreement as the E083 compiler-defect channel rather than a wall, and a `scoped` program routed away from that leg is refused loudly instead of built without the boundary."
+since     = "0.64.0"
+status    = "active"
+declaration = "docs/specs/scoped.md#What is refused, and why"
+refusal   = ["tests/diagnostics/e087-scope-unscoped-callee", "tests/diagnostics/e087-scope-global", "tests/diagnostics/e087-scope-host-output"]
+challenge = ["dojo:callback-retention"]
+evidence  = [
+  { path = "tests/diagnostics/e087-scope-unscoped-callee/broken.almd", class = "fixture" },
+  { path = "tests/diagnostic_harness_test.rs", name = "broken_files_produce_expected_diagnostics", class = "fixture" },
+  { path = "tests/scoped_region_test.rs", name = "the_same_refusal_on_both_check_targets", class = "fixture" },
+]
