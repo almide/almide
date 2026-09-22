@@ -483,6 +483,15 @@ measures = "the set of public stdlib fns transitively reaching the clock or entr
 varies = "#1515: `datetime.now` forged back to a plain fn read 1 (`+ datetime.now`); the tree reads 0 of 10 floor-reaching fns"
 
 [[gate]]
+path = "scripts/check-mut-receivers.sh"
+reads = "scalar"
+wired_by = ".github/workflows/ci.yml"
+class = "NEGATIVE_TESTED"
+evidence = "#2466 introduction (2026-09-22): fed forged trees through MUT_RECEIVERS_STDLIB / MUT_RECEIVERS_RUNTIME, each red naming exactly the forged row, with the real tree as the positive control (646 joined, 59 `&mut`-first, 58 `mut` + 1 allowlisted) — (1) `bytes.fill` forged back to a plain receiver: `+ bytes.fill -> almide_rt_bytes_fill`; (2) `bytes.copy_from` forged plain, whose runtime signature spans six lines: `+ bytes.copy_from`, so the multi-line join is live; (3) `bytes.len` forged `mut` over a `&Vec<u8>` runtime: the reverse direction, `+ bytes.len`; (4) `list.push`'s runtime forged to `&Vec<A>`: reverse direction on a non-bytes module; (5) `almide_rt_bytes_as_mut_ptr` forged to `&Vec<u8>`: the allowlist entry reported stale."
+measures = "the set of stdlib `@intrinsic` declarations whose first-parameter `mut` disagrees with the `&mut` of the first parameter of the joined `pub fn almide_rt_*` in runtime/rs/src, read from stdlib/*.almd and runtime/rs/src/*.rs"
+varies = "#2466: origin/develop 71cc55d47 read 47 disagreeing rows (every one a bytes writer); the #2466 tree reads 0"
+
+[[gate]]
 path = "scripts/check-pass-isolated.sh"
 reads = "UNCLASSIFIED"
 wired_by = ".github/workflows/ci.yml"
