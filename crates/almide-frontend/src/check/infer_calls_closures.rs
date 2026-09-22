@@ -22,6 +22,9 @@ impl Checker {
     pub(super) fn infer_expr_g3_scoped(&mut self, expr: &mut ast::Expr) -> Option<Ty> {
         Some(match &mut expr.kind {
             ExprKind::Block { .. } => self.infer_expr_g3_block(expr),
+            // `scoped { … }` has its body's type; what may cross the boundary
+            // is judged after solving (check/scoped.rs), on resolved types.
+            ExprKind::Scoped { body, .. } => self.infer_expr(body),
             ExprKind::Fan { .. } => self.infer_expr_g3_fan(expr),
             ExprKind::FanBounded { .. } => self.infer_expr_g3_fan_bounded(expr),
             ExprKind::FanRace { .. } => self.infer_expr_g3_fan_race(expr),

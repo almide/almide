@@ -88,7 +88,7 @@ impl Parser {
         let span = Some(self.current_span());
         self.expect(TokenType::Match)?;
         self.skip_newlines();
-        let subject = self.parse_or()?;
+        let subject = self.parse_block_head(|p| p.parse_or())?;
         self.skip_newlines();
         let open = self.current().clone();
         self.expect(TokenType::LBrace)?;

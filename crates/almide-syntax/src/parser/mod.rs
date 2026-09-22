@@ -63,6 +63,13 @@ pub struct Parser {
     /// speculative parse that backed out) never matches a later index and is
     /// simply overwritten.
     pub(crate) pending_gap: Option<(usize, Vec<GapComment>)>,
+    /// #1997: while the HEAD of `match` / `while` / `for … in` is parsed, the
+    /// `delim_depth` it started at. A `{` directly after the head opens the
+    /// construct's body, so at that depth `scoped {` is the identifier
+    /// `scoped` followed by the body — never a scoped block (`match scoped {`
+    /// keeps its pre-#1997 meaning). Inside a `(`/`[` the depth is deeper and
+    /// the scoped block is available again, as a struct literal is in Rust.
+    pub(crate) block_head_depth: Option<usize>,
 }
 
 /// A comment collected from a continuation gap (#1326): the Newline/Comment
@@ -90,7 +97,7 @@ pub(crate) enum CommentSide {
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
         let (tokens, inline_comments) = Self::drop_inline_comments(tokens);
-        Parser { tokens, pos: 0, inline_comments, expr_comments: std::collections::HashMap::new(), pending_gap: None, errors: Vec::new(), file: None, next_expr_id: 0, depth: 0, failed_fn_names: std::collections::HashSet::new(), delim_depth: 0 }
+        Parser { tokens, pos: 0, inline_comments, expr_comments: std::collections::HashMap::new(), pending_gap: None, errors: Vec::new(), file: None, next_expr_id: 0, depth: 0, failed_fn_names: std::collections::HashSet::new(), delim_depth: 0, block_head_depth: None }
     }
 
     /// Drop Comment tokens sitting INLINE mid-expression (`f(1 /* x */, 2)`) so the

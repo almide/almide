@@ -286,6 +286,8 @@ impl<'a> OccWalker<'a> {
                 for (_, a) in named_args { self.walk_expr(a); }
             }
             E::Member { object, .. } | E::OptionalChain { expr: object, .. } | E::TupleIndex { object, .. } => self.walk_expr(object),
+            // `scoped { … }`: the body is a Block, which opens its own scope.
+            E::Scoped { body, .. } => self.walk_expr(body),
             E::IndexAccess { object, index } => { self.walk_expr(object); self.walk_expr(index); }
             E::Pipe { left, right } | E::Compose { left, right } | E::Binary { left, right, .. } => {
                 self.walk_expr(left);

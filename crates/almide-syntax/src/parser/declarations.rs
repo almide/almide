@@ -159,6 +159,7 @@ impl Parser {
         if self.check(TokenType::Fn) || self.check(TokenType::Pub)
             || self.check(TokenType::Effect)
             || self.check(TokenType::Local) || self.check(TokenType::Mod)
+            || self.at_scoped_fn_head()
         {
             return self.parse_qualified_top_decl();
         }

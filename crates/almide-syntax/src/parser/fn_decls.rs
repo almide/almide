@@ -43,6 +43,11 @@ impl Parser {
         let span = self.current_span();
         if self.check(TokenType::Pub) { self.advance(); }
         let visibility = self.parse_visibility();
+        // `scoped` is a CONTEXTUAL keyword (#1997): it qualifies a declaration
+        // only when `fn` / `effect fn` follows it, so an identifier named
+        // `scoped` anywhere else keeps its meaning.
+        let scoped = self.at_scoped_fn_head();
+        if scoped { self.advance(); }
         let mut effect = false;
         if self.check(TokenType::Effect) { self.advance(); effect = true; }
         self.expect(TokenType::Fn)?;
@@ -55,7 +60,23 @@ impl Parser {
         if result.is_err() {
             self.failed_fn_names.insert(recorded_name.to_string());
         }
-        result
+        result.map(|mut d| {
+            if let Decl::Fn { scoped: ref mut s, .. } = d {
+                *s = scoped;
+            }
+            d
+        })
+    }
+
+    /// Is the current token the contextual `scoped` of a `scoped [effect] fn`
+    /// head? Only an identifier spelled `scoped` directly followed by `fn`
+    /// or `effect` qualifies.
+    pub(crate) fn at_scoped_fn_head(&self) -> bool {
+        self.check_ident("scoped")
+            && matches!(
+                self.peek_at(1).map(|t| t.token_type),
+                Some(TokenType::Fn) | Some(TokenType::Effect)
+            )
     }
 
     /// Everything after `[pub] [effect] fn <name>`: generics, parameter list,
@@ -80,6 +101,7 @@ impl Parser {
         Ok(Decl::Fn {
             name,
             effect: if effect { Some(true) } else { None },
+            scoped: false,
             visibility,
             extern_attrs: Vec::new(),
             export_attrs: Vec::new(),
