@@ -649,7 +649,10 @@ hel
 ```
 string.trim(s: String) -> String
 string.split(s: String, sep: String) -> List[String]
+
+// Split at the FIRST occurrence of `sep`: `(before, after)`, none ⇔ `sep` absent.
 string.split_once(s: String, sep: String) -> Option[(String, String)]
+
 string.join(list: List[String], sep: String) -> String
 string.len(s: String) -> Int
 string.length(s: String) -> Int   (deprecated — use string.len)
