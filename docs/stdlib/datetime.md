@@ -33,7 +33,16 @@ fn main() -> Unit = {
 
 ### `datetime.parse_iso(s: String) -> Result[Int, String]`
 
-Parse an ISO 8601 date string into a timestamp.
+Parse an ISO 8601 date-time into a timestamp: `YYYY-MM-DDTHH:MM:SS` followed
+by `Z`, `+HH:MM`, `-HH:MM` or nothing (UTC). The offset is applied — the
+result is the UTC instant, so `2024-01-15T10:30:00+09:00` is
+`2024-01-15T01:30:00Z`. Every field is ASCII digits of any width; exactly three
+date and three time fields; month `1..=12`, day `1..=` the month's length
+(proleptic Gregorian leap rule), hour `0..=23`, minute and second `0..=59`, and
+the offset within `23:59`. A refusal names the field and the value it saw
+(`"month out of range: 13"`, `"invalid offset: +24:00"`); a malformed string is
+`"invalid datetime format"`, and one without a `T` is
+`"expected YYYY-MM-DDTHH:MM:SSZ"`.
 
 ```almd check
 fn show(r: Result[Int, String]) -> String = match r {

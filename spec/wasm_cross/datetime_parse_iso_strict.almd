@@ -1,0 +1,57 @@
+// @contract: C-365
+// datetime.parse_iso reads `YYYY-MM-DDTHH:MM:SS` followed by `Z`, `+HH:MM`,
+// `-HH:MM` or nothing, APPLIES the offset (the answer is the UTC instant),
+// and refuses an out-of-range field by name (#2489). Before this the parser
+// dropped every part int.parse refused and fed the rest to from_parts, which
+// rolls over: `+09:00` was silently ignored (`00+09` vanished as an unparsable
+// part) and `2024-13-45T99:99:99Z` was ok — February of the next year. The
+// rows cover each suffix, each refusal (offset shape and range, every field's
+// range, the leap-day rule across 2024 / 2023 / 2100 / 2000, a leap second),
+// unpadded digits, surrounding whitespace, and the shapes the old drop-and-
+// count rule let through (a junk date part, a fourth time part, a signed
+// year, a doubled Z).
+fn show(r: Result[Int, String]) -> String = match r {
+  ok(n) => "ok(${n})",
+  err(e) => "err(${e})",
+}
+
+fn main() -> Unit = {
+  for s in [
+    "2024-01-15T10:30:00Z",
+    "2024-01-15T10:30:00",
+    "2024-01-15T10:30:00+09:00",
+    "2024-01-15T10:30:00-05:30",
+    "2024-01-15T10:30:00+00:00",
+    "2024-01-15T10:30:00Z+09:00",
+    "2024-01-15T10:30:00+9",
+    "2024-01-15T10:30:00+24:00",
+    "2024-01-15T10:30:00+09:60",
+    "2024-13-45T99:99:99Z",
+    "2024-00-15T10:30:00Z",
+    "2024-01-00T10:30:00Z",
+    "2024-02-29T00:00:00Z",
+    "2023-02-29T00:00:00Z",
+    "2100-02-29T00:00:00Z",
+    "2000-02-29T00:00:00Z",
+    "2024-04-31T00:00:00Z",
+    "2024-01-15T24:00:00Z",
+    "2024-01-15T10:60:00Z",
+    "2024-12-31T23:59:60Z",
+    "2024-1-5T1:2:3",
+    " 2024-01-15T10:30:00Z ",
+    "1969-12-31T23:59:59Z",
+    "0000-01-01T00:00:00Z",
+    "2024-01-15T10:30:00ZZ",
+    "2024-01-15-junkT10:30:00Z",
+    "2024-01-15T10:30:00:xx",
+    "-0001-01-01T00:00:00Z",
+    "+2024-01-15T10:30:00Z",
+    "2024-01-15T10:30",
+    "T10:30:00",
+    "not-a-date",
+    "2024-01-15",
+    "99999999999999999999-01-01T00:00:00Z"
+  ] {
+    println("${s} => ${show(datetime.parse_iso(s))}")
+  }
+}

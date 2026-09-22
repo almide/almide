@@ -1,43 +1,112 @@
 // datetime_parse_iso — SELF-HOSTED datetime.parse_iso (a PURE parser on the
-// impure-plain datetime module, whitelist-admitted like from_parts/to_iso).
-// v0 (runtime/rs datetime.rs): trim, strip EVERY trailing 'Z'
-// (trim_end_matches), split on 'T' (exactly 2 halves or
-// "expected YYYY-MM-DDTHH:MM:SSZ"), split the halves on '-' / ':' keeping
-// only the parts Rust's i64 parse accepts (filter_map — an invalid part is
-// DROPPED, and the count check catches it), require exactly 3 + 3 or
-// "invalid datetime format", then delegate to the self-hosted
-// datetime.from_parts. int.parse IS the exact-ParseIntError self-host, so
-// the accept/reject set matches v0's filter_map byte-for-byte.
-fn __dpi_strip_z(s: String) -> String = match string.strip_suffix(s, "Z") {
-  some(t) => __dpi_strip_z(t),
-  none => s,
+// impure-plain datetime module, whitelist-admitted like from_parts/to_iso),
+// byte-matching runtime/rs/src/datetime.rs. The grammar (#2489):
+//
+//   YYYY-MM-DDTHH:MM:SS  followed by  Z | +HH:MM | -HH:MM | nothing (UTC)
+//
+// Every field is ASCII digits of any width (`2024-1-5T1:2:3` is accepted; a
+// sign, a space or a letter is not — `string.is_digit`'s rule on both legs),
+// exactly three date and three time fields ("invalid datetime format"
+// otherwise); month 1..=12, day 1..=days-in-month (proleptic Gregorian), hour
+// 0..=23, minute and second 0..=59 (no leap second), offset hours 0..=23 and
+// minutes 0..=59 — each refusal names the field and the value it saw. The
+// offset is APPLIED: the answer is the UTC instant, so `…T10:30:00+09:00`
+// equals `…T01:30:00Z`. `Z` and an offset are exclusive spellings.
+//
+// Before this the parser DROPPED any part int.parse refused and fed the rest
+// to from_parts, which rolls over: `+09:00` was silently ignored (the `00+09`
+// part vanished) and month 13 / day 45 / hour 99 were ok — February of the
+// next year, off by the offset.
+// A digits-only field, or none.
+fn __dpi_field(s: String) -> Int? = if string.is_digit(s) then match int.parse(s) {
+  ok(v) => some(v),
+  err(_) => none,
+} else none
+
+// Every part as a number, or none at the first refused part.
+fn __dpi_nums(parts: List[String], i: Int, acc: List[Int]) -> List[Int]? = if i >= list.len(parts) then some(acc)
+else match __dpi_field(list.get(parts, i) ?? "") {
+  some(v) => __dpi_nums(parts, i + 1, acc + [v]),
+  none => none,
 }
 
-fn __dpi_nums(parts: List[String], i: Int, acc: List[Int]) -> List[Int] = if i >= list.len(parts) then acc
-else {
-  let p = list.get(parts, i) ?? ""
-  match int.parse(p) {
-    ok(v) => __dpi_nums(parts, i + 1, acc + [v]),
-    err(_) => __dpi_nums(parts, i + 1, acc),
+// Index of the first '+' or '-' — where an offset would start.
+fn __dpi_sign_at(t: String) -> Int? = match (string.index_of(t, "+"), string.index_of(t, "-")) {
+  (some(a), some(b)) => some(if a < b then a else b),
+  (some(a), none) => some(a),
+  (none, some(b)) => some(b),
+  (none, none) => none,
+}
+
+fn __dpi_leap(y: Int) -> Bool = y % 4 == 0 and (y % 100 != 0 or y % 400 == 0)
+
+fn __dpi_days_in_month(y: Int, m: Int) -> Int = if m == 2 then (if __dpi_leap(y) then 29 else 28)
+else if m == 4 or m == 6 or m == 9 or m == 11 then 30 else 31
+
+// The `±HH:MM` after the sign at `i`, in seconds (signed), or none.
+fn __dpi_offset(t: String, i: Int) -> Int? = {
+  let sign = string.slice(t, i, i + 1)
+  match __dpi_nums(string.split(string.slice(t, i + 1, string.len(t)), ":"), 0, []) {
+    some(parts) => if list.len(parts) != 2 then none
+    else {
+      let oh = list.get(parts, 0) ?? 0
+      let om = list.get(parts, 1) ?? 0
+      if oh < 0 or oh > 23 or om < 0 or om > 59 then none
+      else {
+        let secs = oh * 3600 + om * 60
+        some(if sign == "-" then 0 - secs else secs)
+      }
+    },
+    none => none,
   }
 }
 
+// Range-check the six fields in order, then build the UTC instant.
+fn __dpi_build(d: List[Int], tm: List[Int], off: Int) -> Result[Int, String] = {
+  let y = list.get(d, 0) ?? 0
+  let mo = list.get(d, 1) ?? 0
+  let dd = list.get(d, 2) ?? 0
+  let h = list.get(tm, 0) ?? 0
+  let mi = list.get(tm, 1) ?? 0
+  let s = list.get(tm, 2) ?? 0
+  if mo < 1 or mo > 12 then err("month out of range: " + int.to_string(mo))
+  else if dd < 1 or dd > __dpi_days_in_month(y, mo) then err("day out of range: " + int.to_string(dd))
+  else if h < 0 or h > 23 then err("hour out of range: " + int.to_string(h))
+  else if mi < 0 or mi > 59 then err("minute out of range: " + int.to_string(mi))
+  else if s < 0 or s > 59 then err("second out of range: " + int.to_string(s))
+  else ok(datetime.from_parts(y, mo, dd, h, mi, s) - off)
+}
+
 fn datetime_parse_iso(s: String) -> Result[Int, String] = {
-  let t = __dpi_strip_z(string.trim(s))
+  let t = string.trim(s)
   let tparts = string.split(t, "T")
   if list.len(tparts) != 2 then err("expected YYYY-MM-DDTHH:MM:SSZ")
   else {
     let date = __dpi_nums(string.split(list.get(tparts, 0) ?? "", "-"), 0, [])
-    let time = __dpi_nums(string.split(list.get(tparts, 1) ?? "", ":"), 0, [])
-    if list.len(date) != 3 then err("invalid datetime format")
-    else if list.len(time) != 3 then err("invalid datetime format")
-    else ok(datetime.from_parts(
-      list.get(date, 0) ?? 0,
-      list.get(date, 1) ?? 0,
-      list.get(date, 2) ?? 0,
-      list.get(time, 0) ?? 0,
-      list.get(time, 1) ?? 0,
-      list.get(time, 2) ?? 0,
-    ))
+    let time_raw = list.get(tparts, 1) ?? ""
+    let zs = string.strip_suffix(time_raw, "Z")
+    let time_z = zs ?? time_raw
+    let had_z = match zs {
+      some(_) => true,
+      none => false,
+    }
+    let sign_at = __dpi_sign_at(time_z)
+    let hms = match sign_at {
+      some(i) => string.slice(time_z, 0, i),
+      none => time_z,
+    }
+    let time = __dpi_nums(string.split(hms, ":"), 0, [])
+    if had_z and sign_at != none then err("invalid datetime format")
+    else match (date, time) {
+      (some(d), some(tm)) => if list.len(d) != 3 or list.len(tm) != 3 then err("invalid datetime format")
+      else match sign_at {
+        none => __dpi_build(d, tm, 0),
+        some(i) => match __dpi_offset(time_z, i) {
+          some(off) => __dpi_build(d, tm, off),
+          none => err("invalid offset: " + string.slice(time_z, i, string.len(time_z))),
+        },
+      },
+      _ => err("invalid datetime format"),
+    }
   }
 }
