@@ -1,0 +1,25 @@
+[package]
+name = "almide-verify"
+# Independently versioned (#2152): this number is the VERIFIER's, not the
+# compiler's. It moves when the checking semantics or the formats it reads
+# move, and never because the compiler shipped a release. `almide verify` is a
+# subprocess shim that execs this binary; it carries no linked copy.
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89"
+license = "MIT OR Apache-2.0"
+description = "Independent re-checker for Almide flight-grade certificates: ownership, name totality, capability bound, transitive capability reach and call modes"
+
+# NO dependencies, on purpose. The verifier reads witness bytes and nothing
+# else — it links none of the compiler (almide-mir's certificate emitter is the
+# untrusted PRODUCER of these bytes; sharing a format crate with it would let a
+# shared bug cancel out on both sides of the seam). Adding a dependency here is
+# a trust-boundary decision, not a convenience.
+[dependencies]
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "almide-verify"
+path = "src/main.rs"

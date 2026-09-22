@@ -1,5 +1,10 @@
 [workspace]
-members = [".", "crates/almide-base", "crates/almide-syntax", "crates/almide-types", "crates/almide-lang", "crates/almide-ir", "crates/almide-mir", "crates/almide-dialect", "crates/almide-codegen", "crates/almide-optimize", "crates/almide-frontend", "crates/almide-driver", "crates/almide-interp", "crates/almide-tools", "crates/almide-egg-lab", "crates/almide-layout", "crates/almide-corpus", "crates/almide-rt-core", "crates/almide-wasm", "crates/almide-wasm-run", "crates/almide-wasm-vm", "crates/almide-spine"]
+members = [".", "crates/almide-base", "crates/almide-syntax", "crates/almide-types", "crates/almide-lang", "crates/almide-ir", "crates/almide-mir", "crates/almide-dialect", "crates/almide-codegen", "crates/almide-optimize", "crates/almide-frontend", "crates/almide-driver", "crates/almide-interp", "crates/almide-tools", "crates/almide-egg-lab", "crates/almide-layout", "crates/almide-corpus", "crates/almide-rt-core", "crates/almide-wasm", "crates/almide-wasm-run", "crates/almide-wasm-vm", "crates/almide-spine", "crates/almide-verify"]
+# `cargo build` at the root builds the compiler AND the independent verifier
+# binary (#2152): `almide verify` execs `almide-verify` from next to itself and
+# has no linked fallback, so a build that produced one without the other would
+# ship a command that can only fail.
+default-members = [".", "crates/almide-verify"]
 resolver = "3"
 exclude = ["crates/almide-kernel", "research/benchmark/stdlib/rust_wasm_compare", "tools/wasmgen-harness", "tools/wasmgen-harness-uu", "tools/xtarget-fuzz"]
 
