@@ -1,0 +1,46 @@
+// @contract: C-323
+// ALS-E18 (docs/specs/als/expressions.md): an or-pattern arm whose
+// alternatives include a NULLARY constructor (`none`, a unit variant) may
+// carry a guard, and the guard is evaluated after the union match exactly as
+// on a single-pattern arm — a false guard falls through to the next arm, a
+// true guard takes the arm. Native lowering used to spin forever on this
+// shape (#2463: the grouped-variant regroup reported an identity rewrite on
+// every fixpoint pass); the two-arm spelling it desugars to is probed as
+// well, plus the true-guard side so the arm is observed taken, not only
+// fallen through.
+type Color = | Red | Green | Blue
+
+fn main() -> Unit = {
+  let a = match some(3) {
+    some(_) | none if false => "taken",
+    _ => "fell",
+  }
+  println(a)
+  let b = match some(3) {
+    some(_) if false => "taken",
+    none if false => "taken",
+    _ => "fell",
+  }
+  println(b)
+  let c = match Red {
+    Red | Green if false => "taken",
+    _ => "fell",
+  }
+  println(c)
+  let x: Int? = none
+  let d = match x {
+    some(_) | none if true => "taken",
+    _ => "fell",
+  }
+  println(d)
+  let e = match Green {
+    Red | Green if 1 + 1 == 2 => "taken",
+    _ => "fell",
+  }
+  println(e)
+  let f = match x {
+    none if false => "taken",
+    some(_) | none => "fell",
+  }
+  println(f)
+}
