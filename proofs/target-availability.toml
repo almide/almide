@@ -106,7 +106,30 @@ schema = 3
 # [Float32] representation, fold_lines_range arm, string.clear's Hole;
 # 8) and mem.save/restore (the allocator-mark scalar; 2) join. Burn-down
 # to 0 is still the stage-4 finish line; only the denominator is honest now.
-pending_self_host_ceiling = 56
+# 2026-09-22 (#1423 stage 4): 56 -> 50. The in-place clear/delete family
+# (map.delete, map.clear, bytes.clear, string.clear) gets structural-leg
+# arms — var write-backs of a fresh block, the map.insert / list.clear
+# shape, so an alias bound before the mutation keeps its value (C-033;
+# the incumbent's string_clear twin stores into the SHARED block and the
+# 0.62.0 default route printed the alias cleared — the new arm is the
+# fix on the default route); mem.save / mem.restore get the C-041
+# trivial-pair twins (stdlib/mem_checkpoint.almd — v1's RC discipline
+# makes both no-ops on every leg, exactly as native and bytes.heap_save
+# already are) and leave every leg. Parity evidence:
+# spec/wasm_cross/inplace_clear_family.almd, spec/wasm_cross/mem_checkpoint.almd.
+# Same day: 50 -> 48. fs.stat and fs.glob cross the embedded host on the
+# structural leg (ops 38 / 39 — the four FileStat fields as i64s, the
+# C-228 segment-wise glob transcribed into the host), the fs.walk shape.
+# An fs program routes to the incumbent on the BUILD path, so the parity
+# evidence is the embedded lane: spec/embedded_cross/fs_stat_glob_structural.almd.
+# Left this round, each for a stated reason: fs.fold_lines_range /
+# fold_lines_chunked (a byte-range walk and the chunk partition need a
+# host op pair plus C-220's ownership rule in the guest — more than one
+# sitting), list.shuffle (a generic `[A]` element move: the structural
+# leg would need per-element-type twins and the entropy floor; the
+# random.shuffle twins wall on the same leg), list.partition and every
+# matrix row (the 2026-09-08 layout finding above — one blocker, not 45).
+pending_self_host_ceiling = 48
 pending_port_ceiling = 56
 
 # The unprobed class (#1827), per leg. Today: the five HttpRequest
@@ -118,13 +141,6 @@ pending_port_ceiling = 56
 unprobed_ceiling_structural = 0
 unprobed_ceiling_stock_p1 = 5
 unprobed_ceiling_embedded = 5
-
-[[unavailable]]
-fn = "bytes.clear"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "pending-self-host"
-issue = "#1827"
 
 [[unavailable]]
 fn = "datetime.monotonic_ns"
@@ -167,20 +183,6 @@ fn = "fs.fold_lines_range"
 legs = ["structural"]
 class = "pending-self-host"
 reason = "structural-leg-gap: the incumbent links the four self-host twins (#1423 bucket A) and the default route BUILDS; the structural leg has no fold_lines_range arm yet and declines under ALMIDE_WASM_STRUCTURAL=1"
-issue = "#1423"
-
-[[unavailable]]
-fn = "fs.glob"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "pending-self-host"
-issue = "#1423"
-
-[[unavailable]]
-fn = "fs.stat"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "pending-self-host"
 issue = "#1423"
 
 [[unavailable]]
@@ -394,20 +396,6 @@ issue = "#1827"
 
 [[unavailable]]
 fn = "list.shuffle"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "pending-self-host"
-issue = "#1423"
-
-[[unavailable]]
-fn = "map.clear"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "pending-self-host"
-issue = "#1423"
-
-[[unavailable]]
-fn = "map.delete"
 legs = ["structural"]
 class = "pending-self-host"
 reason = "pending-self-host"
@@ -727,20 +715,6 @@ reason = "structural-leg-gap: the structural leg has no representation for the M
 issue = "#1827"
 
 [[unavailable]]
-fn = "mem.restore"
-legs = ["structural", "stock-p1", "embedded"]
-class = "pending-self-host"
-reason = "the wasm MIR lowering refuses the allocator-mark scalar (`scalar binding outside the value subset`) and mem.restore is not an admitted effectful call, so the module's stated wasm-leg purpose is unreachable from a wasm build today (the structural leg has no arm either); on the native leg both are no-ops"
-issue = "#1827"
-
-[[unavailable]]
-fn = "mem.save"
-legs = ["structural", "stock-p1", "embedded"]
-class = "pending-self-host"
-reason = "the wasm MIR lowering refuses the allocator-mark scalar (`scalar binding outside the value subset`) and mem.restore is not an admitted effectful call, so the module's stated wasm-leg purpose is unreachable from a wasm build today (the structural leg has no arm either); on the native leg both are no-ops"
-issue = "#1827"
-
-[[unavailable]]
 fn = "net.tcp_accept"
 legs = ["structural", "stock-p1", "embedded"]
 class = "pending-port"
@@ -986,13 +960,6 @@ legs = ["structural"]
 class = "pending-port"
 reason = "host-surface"
 issue = "#1423"
-
-[[unavailable]]
-fn = "string.clear"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "structural-leg-gap: the structural leg declines the self-host body's hole expression (expr:Hole); the incumbent serves it"
-issue = "#1827"
 
 
 [[unavailable]]
