@@ -7,12 +7,12 @@
 12121	T2 Float print	research/benchmark/perf/spectralnorm/spectralnorm.almd
 7401	T3 String	research/benchmark/perf/strchurn/strchurn.almd
 6734	T3 String	research/benchmark/perf/strbuild/strbuild_append.almd
-21496	T4 List	research/benchmark/perf/listbuild/listbuild_append.almd
-21896	T4 List	research/benchmark/perf/listbuild/listbuild_combinator.almd
+21501	T4 List	research/benchmark/perf/listbuild/listbuild_append.almd
+21901	T4 List	research/benchmark/perf/listbuild/listbuild_combinator.almd
 9522	T5 Map	research/benchmark/perf/mapbuild/mapbuild.almd
 11447	T5 Map	research/benchmark/perf/wordfreq/wordfreq.almd
 10587	T5 Map	research/benchmark/perf/wordfreq/wordfreq_group.almd
 31669	T6 JSON	research/benchmark/perf/decode/decode.almd
 26552	T6 JSON	spec/wasm_cross/json_gltf_walk.almd
 20120	T7 regex	spec/wasm_cross/regex_engine.almd
-191606	Σ	total
+191616	Σ	total
