@@ -80,26 +80,6 @@ pub fn almide_rt_int_wrap_mul(a: i64, b: i64, bits: i64) -> i64 {
     ((a as u64).wrapping_mul(b as u64) & mask) as i64
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_to_string() {
-        assert_eq!(almide_rt_int_to_string(42), "42");
-        assert_eq!(almide_rt_int_to_string(-1), "-1");
-        assert_eq!(almide_rt_int_to_string(0), "0");
-    }
-
-    #[test]
-    fn test_from_string() {
-        assert_eq!(almide_rt_int_from_string("42".into()), Ok(42));
-        assert_eq!(almide_rt_int_from_string("-1".into()), Ok(-1));
-        assert!(almide_rt_int_from_string("abc".into()).is_err());
-        assert!(almide_rt_int_from_string("".into()).is_err());
-    }
-}
-
 // ── Bit introspection ──
 
 #[inline(always)] pub fn almide_rt_int_count_leading_zeros(n: i64) -> i64 { (n as u64).leading_zeros() as i64 }

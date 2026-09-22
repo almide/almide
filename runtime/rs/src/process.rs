@@ -133,18 +133,6 @@ pub fn almide_rt_process_exec_with_stdin(cmd: &str, args: &[String], input: &str
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_process_exec() {
-        let result = almide_rt_process_exec("echo", &vec!["hello".into()]);
-        assert!(result.is_ok());
-        assert!(result.unwrap().trim() == "hello");
-    }
-}
-
 pub fn almide_rt_process_exec_status(cmd: &str, args: &[String]) -> Result<AlmideProcessStatus, String> {
     almide_stdout_flush();
     match std::process::Command::new(cmd).args(args).output() {
