@@ -185,6 +185,8 @@ impl Emitter<'_> {
                 let loop_form_raw = tail && Some(index) == self.self_index && !self.tail_release_allowed;
                 let mut moved: Vec<u32> = Vec::new();
                 let param_owned = self.table.infos[i].param_owned.clone();
+                // #2503: which arguments the callee writes back into.
+                let param_mut = self.table.infos[i].param_mut.clone();
                 // Owned temporaries handed to BORROWED params are parked
                 // here and released right after the call (the arm.rs
                 // borrow pool): the callee spends nothing on them. A TRUE
@@ -233,7 +235,9 @@ impl Emitter<'_> {
                     {
                         continue;
                     }
-                    self.lower(a, Some(want))?;
+                    if !self.lower_mut_param_arg(a, param_mut.get(k).copied().unwrap_or(false))? {
+                        self.lower(a, Some(want))?;
+                    }
                     if loop_form_raw && let Some(p) = self.frame_param_var(a) && !moved.contains(&p) {
                         moved.push(p);
                         self.witness_arg(a, want);
@@ -587,6 +591,37 @@ impl Emitter<'_> {
         Ok(start)
     }
 
+    /// #2503: the argument in a `mut`-PARAMETER position, read through the
+    /// caller's own copy-on-write. The callee writes this buffer in place
+    /// and the C-132 move-mode rewrite hands it back for the site to store,
+    /// so the site is a mutation of THIS frame's var — and takes the same
+    /// rc-gated `$cow` a direct `bytes.set_u8(b, …)` here would: a shared
+    /// block copies and the var is repointed at the unique copy, so an alias
+    /// bound BEFORE the call keeps its pre-write value (C-033), while an
+    /// unaliased buffer (rc == 1, the ordinary case) is not copied at all.
+    /// Judging it in the CALLEE instead cannot work: the argument's own
+    /// credit makes rc >= 2 there on the effect-call convention, so every
+    /// call would copy (measured: a 64 KiB buffer in a 20k-call loop went
+    /// out of memory).
+    ///
+    /// `false` = not this shape; the caller lowers the argument normally.
+    /// Strings and maps fall through to the plain read inside
+    /// `emit_read_mut_var_cow` (a string mutates functionally; a map has its
+    /// own judge in map_inplace.rs).
+    fn lower_mut_param_arg(&mut self, a: &IrExpr, is_mut_param: bool) -> Result<bool, EmitError> {
+        if !is_mut_param {
+            return Ok(false);
+        }
+        let IrExprKind::Var { id } = &a.kind else {
+            return Ok(false);
+        };
+        let Some((idx, ty, global)) = self.mut_var(id) else {
+            return Ok(false);
+        };
+        self.emit_read_mut_var_cow(id, idx, ty, global)?;
+        Ok(true)
+    }
+
     /// One already-lowered argument under the callee's declared convention
     /// (param_borrow.rs, #2028) — the Named and the registry route share
     /// it, so the two cannot disagree with the ONE `param_owned` table.
@@ -673,8 +708,11 @@ impl Emitter<'_> {
         let must_transfer = std::mem::take(&mut self.try_see_through) && true_tail;
         let depth = self.borrowed_temps.len();
         let mut no_transfer = false;
+        let param_mut = self.table.infos[i].param_mut.clone();
         for (k, (a, want)) in args.iter().zip(params).enumerate() {
-            self.lower(a, Some(want))?;
+            if !self.lower_mut_param_arg(a, param_mut.get(k).copied().unwrap_or(false))? {
+                self.lower(a, Some(want))?;
+            }
             let owned_pos = param_owned.get(k).copied().unwrap_or(true);
             if self.lower_conv_arg(a, want, owned_pos, true_tail, must_transfer)? {
                 no_transfer = true;
