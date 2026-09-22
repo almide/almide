@@ -405,3 +405,58 @@ reproduce the modulo slice exactly; an unrecorded stem takes the median so the
 table cannot exclude a fixture; the coverage step still proves the union).
 Predicted from the table: interp 230 / 230 s, run_parity 93 / 93 s per half.
 The develop run after this lands is recorded here.
+
+### 5.3 The prediction was a laptop's, and the runner did not honour it (#2502)
+
+The table above was the local measurement, and the develop runs after it landed
+kept the same shape they had before: `Test Rust (solo run_parity 1/2)` 479 s
+against `(2/2)` 1096 s on 35692820397, 841 / 1168 s on 35694867589 — a 1.4–2.3×
+skew against a predicted 1 : 1. The recorded ratios simply are not the same
+machine's. Per-fixture, on the runner vs the Mac:
+
+| fixture | Mac | ubuntu-latest | × |
+|---|---|---|---|
+| `string_position_large_offset` | 38.9 s | 520.5 s | 13.4 |
+| `regex_repetition_depth` | 56.9 s | 426.7 s | 7.5 |
+| `float_parse` | 6.0 s | 126.5 s | 21.1 |
+| `bytes_temp_receiver` | 2.4 s | 57.0 s | 24.1 |
+| the whole run_parity column | 186 s | 2008 s | 10.8 |
+
+Not a constant factor: the allocation-bound fixtures cost 13–24× more on the
+7 GB runner (#2387) and the CPU-bound ones 7×, which is precisely the ratio the
+LPT partition is made of. So the committed table is now rendered from a CI
+run's own recordings — every solo job already records under
+`ALMIDE_CORPUS_WEIGHTS_DIR` into its `corpus-shard-*` artifact (in a `weights/`
+subdirectory: flat, the run_parity gate's `run_parity` column collides by
+spelling with its own `fixtures` / `counts` partials, and a render over a CI
+download folded 743 junk rows into the table) —
+
+```
+bash scripts/gen-corpus-weights.sh --from-ci [run-id]   # default: latest green develop
+```
+
+and `# measured-on:` in the table says which run it came from. Rendered from
+run 35694867589, the same walls re-partition to **1004 / 1004 s** for
+run_parity, and replaying that table against the *other* run's measured walls
+gives 844 / 730 s (1.16×) — the ratios carry between runs of the same runner,
+which is the property the Mac table did not have.
+
+The weekly ratchet (`shard-balance.yml`, `gen-corpus-weights.sh --check`)
+measures the ten solo jobs from their own logs and fails on skew, exactly as
+the test-shard half does. It judges the legs by what their slice controls:
+
+- **serial legs** (`run_parity`, `cross_target`, `opt_parity`) — an even column
+  split is an even wall split, so max/min ≤ 1.4.
+- **thread-pool legs** (`interp_ledger`, `interp_oracle`) — the sweep runs on
+  `available_parallelism`, so the wall is the makespan, and one fixture
+  (`string_position_large_offset`, 492 s of the leg's 1657 s) is a floor no
+  partition can move: LPT already separates the two giants and the halves stay
+  ≈1.8× apart (492 / 272 s predicted, 593 / 286 s measured). A ratio target
+  there would be permanently red for a reason re-slicing cannot fix, so the
+  ratchet judges max wall ≤ 1.6 × that floor instead — it catches a slice that
+  stopped hiding the giant, and says the lever is making the fixture cheaper.
+
+And it refuses to judge at all while `# measured-on:` does not say `ci`: a red
+that only means "the table is a laptop's" is a red nobody can act on, so it
+prints the skew and the refresh command and stays green until a CI-measured
+table is committed.
