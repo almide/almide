@@ -64,31 +64,82 @@ machine-enforced by the numeric-matrix gate in `almide docs-gen --check` (#956).
 ## Signature index (26 functions)
 
 ```
+// Wraps to 8 bits; 255 becomes -1.
 uint64.to_int8(x: UInt64) -> Int8
+
+// Wraps to 16 bits; 65535 becomes -1.
 uint64.to_int16(x: UInt64) -> Int16
+
+// Wraps to 32 bits; 2^32-1 becomes -1.
 uint64.to_int32(x: UInt64) -> Int32
+
+// Wraps to 64 bits; 2^64-1 becomes -1.
 uint64.to_int64(x: UInt64) -> Int64
+
+// Wraps to 8 bits; 256 becomes 0.
 uint64.to_uint8(x: UInt64) -> UInt8
+
+// Wraps to 16 bits; 65536 becomes 0.
 uint64.to_uint16(x: UInt64) -> UInt16
+
+// Wraps to 32 bits; 2^32 becomes 0.
 uint64.to_uint32(x: UInt64) -> UInt32
+
+// Float32 value; may round when x > 2^24.
 uint64.to_float32(x: UInt64) -> Float32
+
+// Float64 value; may round when x > 2^53.
 uint64.to_float64(x: UInt64) -> Float64
+
+// Decimal digits, no sign; exact up to 2^64-1.
 uint64.to_string(x: UInt64) -> String
+
+// some(x), or none if x exceeds 127.
 uint64.to_int8_checked(x: UInt64) -> Option[Int8]
+
+// Clamps x to at most 127.
 uint64.to_int8_saturating(x: UInt64) -> Int8
+
+// some(x), or none if x exceeds 32767.
 uint64.to_int16_checked(x: UInt64) -> Option[Int16]
+
+// Clamps x to at most 32767.
 uint64.to_int16_saturating(x: UInt64) -> Int16
+
+// some(x), or none if x exceeds 2^31-1.
 uint64.to_int32_checked(x: UInt64) -> Option[Int32]
+
+// Clamps x to at most 2^31-1.
 uint64.to_int32_saturating(x: UInt64) -> Int32
+
+// some(x), or none if x exceeds 2^63-1.
 uint64.to_int64_checked(x: UInt64) -> Option[Int64]
+
+// Clamps x to at most 2^63-1.
 uint64.to_int64_saturating(x: UInt64) -> Int64
+
+// some(x), or none if x exceeds 255.
 uint64.to_uint8_checked(x: UInt64) -> Option[UInt8]
+
+// Clamps x to at most 255.
 uint64.to_uint8_saturating(x: UInt64) -> UInt8
+
+// some(x), or none if x exceeds 65535.
 uint64.to_uint16_checked(x: UInt64) -> Option[UInt16]
+
+// Clamps x to at most 65535.
 uint64.to_uint16_saturating(x: UInt64) -> UInt16
+
+// some(x), or none if x exceeds 2^32-1.
 uint64.to_uint32_checked(x: UInt64) -> Option[UInt32]
+
+// Clamps x to at most 2^32-1.
 uint64.to_uint32_saturating(x: UInt64) -> UInt32
+
+// Smallest UInt64: 0.
 uint64.min_value() -> UInt64
+
+// Largest UInt64: 2^64-1.
 uint64.max_value() -> UInt64
 ```
 

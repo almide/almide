@@ -45,15 +45,34 @@ index below.
 ## Signature index (10 functions)
 
 ```
+// Truncates toward 0, saturating; NaN gives 0.
 float64.to_int8(x: Float64) -> Int8
+
+// Truncates toward 0, saturating; NaN gives 0.
 float64.to_int16(x: Float64) -> Int16
+
+// Truncates toward 0, saturating; NaN gives 0.
 float64.to_int32(x: Float64) -> Int32
+
+// Truncates toward 0, saturating; NaN gives 0.
 float64.to_int64(x: Float64) -> Int64
+
+// Truncates toward 0, saturating; NaN gives 0.
 float64.to_uint8(x: Float64) -> UInt8
+
+// Truncates toward 0, saturating; NaN gives 0.
 float64.to_uint16(x: Float64) -> UInt16
+
+// Truncates toward 0, saturating; NaN gives 0.
 float64.to_uint32(x: Float64) -> UInt32
+
+// Truncates toward 0, saturating; NaN gives 0.
 float64.to_uint64(x: Float64) -> UInt64
+
+// Nearest Float32; overflow becomes infinity.
 float64.to_float32(x: Float64) -> Float32
+
+// Plain decimal, never an exponent; 2.0 keeps .0.
 float64.to_string(x: Float64) -> String
 ```
 

@@ -64,23 +64,58 @@ machine-enforced by the numeric-matrix gate in `almide docs-gen --check` (#956).
 ## Signature index (18 functions)
 
 ```
+// Wraps to 8 bits; 255 becomes -1.
 uint16.to_int8(x: UInt16) -> Int8
+
+// Wraps to 16 bits; 65535 becomes -1.
 uint16.to_int16(x: UInt16) -> Int16
+
+// Zero-extending widen; always exact.
 uint16.to_int32(x: UInt16) -> Int32
+
+// Zero-extending widen; always exact.
 uint16.to_int64(x: UInt16) -> Int64
+
+// Wraps to 8 bits; 256 becomes 0.
 uint16.to_uint8(x: UInt16) -> UInt8
+
+// Zero-extending widen; always exact.
 uint16.to_uint32(x: UInt16) -> UInt32
+
+// Zero-extending widen; always exact.
 uint16.to_uint64(x: UInt16) -> UInt64
+
+// Same value as Float32; always exact.
 uint16.to_float32(x: UInt16) -> Float32
+
+// Same value as Float64; always exact.
 uint16.to_float64(x: UInt16) -> Float64
+
+// Decimal digits; never a sign.
 uint16.to_string(x: UInt16) -> String
+
+// some(x), or none if x exceeds 127.
 uint16.to_int8_checked(x: UInt16) -> Option[Int8]
+
+// Clamps x to at most 127.
 uint16.to_int8_saturating(x: UInt16) -> Int8
+
+// some(x), or none if x exceeds 32767.
 uint16.to_int16_checked(x: UInt16) -> Option[Int16]
+
+// Clamps x to at most 32767.
 uint16.to_int16_saturating(x: UInt16) -> Int16
+
+// some(x), or none if x exceeds 255.
 uint16.to_uint8_checked(x: UInt16) -> Option[UInt8]
+
+// Clamps x to at most 255.
 uint16.to_uint8_saturating(x: UInt16) -> UInt8
+
+// Smallest UInt16: 0.
 uint16.min_value() -> UInt16
+
+// Largest UInt16: 65535.
 uint16.max_value() -> UInt16
 ```
 
