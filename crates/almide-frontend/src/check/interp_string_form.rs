@@ -186,10 +186,41 @@ impl Checker {
             Ty::Matrix | Ty::Applied(TC::Matrix, _) => gap("a Matrix value".into(), MATRIX_HINT),
             Ty::RawPtr => gap("a raw pointer".into(), RAWPTR_HINT),
             Ty::Fn { .. } => gap("a function value".into(), FN_HINT),
+            // An opaque newtype's string form is its TARGET's (#2496): the
+            // emitted struct renders the wrapped value. So a newtype over
+            // one of the gaps above is the same gap, named for the reader.
+            Ty::Named(name, _) => {
+                if let Some(target) = self.newtype_target(*name) {
+                    if let Some(g) = self.string_form_gap(&target) {
+                        return gap(
+                            format!("`{}` wraps {} — {}", name.as_str(), target.display(), g.what),
+                            g.hint,
+                        );
+                    }
+                }
+                let leaf = self.unprintable_leaf_in(ty, &mut Vec::new())?;
+                gap(format!("a `{}` value — it holds {leaf}", ty.display()), HOLDS_HINT)
+            }
             _ => {
                 let leaf = self.unprintable_leaf_in(ty, &mut Vec::new())?;
                 gap(format!("a `{}` value — it holds {leaf}", ty.display()), HOLDS_HINT)
             }
+        }
+    }
+
+    /// The type an opaque newtype wraps, when `name` is one — a `type` decl
+    /// whose registered form is neither a record nor a variant. `None` for a
+    /// record, a variant, an undeclared name, and for a newtype over itself.
+    fn newtype_target(&self, name: Sym) -> Option<Ty> {
+        // An OPAQUE alias keeps its target in its own registry (#1835); a
+        // transparent alias resolved away long before here.
+        if let Some(t) = self.env.opaque_alias_targets.get(&name) {
+            return Some(t.clone());
+        }
+        match self.env.types.get(&name)? {
+            Ty::Record { .. } | Ty::OpenRecord { .. } | Ty::Variant { .. } => None,
+            Ty::Named(inner, _) if *inner == name => None,
+            t => Some(t.clone()),
         }
     }
 

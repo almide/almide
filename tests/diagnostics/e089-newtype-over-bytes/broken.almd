@@ -1,0 +1,6 @@
+mod type Blob = Bytes
+
+effect fn main() -> Unit = {
+  let b = Blob(bytes.from_list([1, 2]))
+  println("b=${b}")
+}
