@@ -13,18 +13,16 @@ crates/almide-types/src/time_units.rs instead (see clock_table). Every
 docs/stdlib/*.md page is under the generator — a page without a block is
 stale, not exempt.
 
-What the block does NOT carry, because the input does not exist yet (#1469,
-measured 2026-09-21): a per-function doc comment and a `@since` epoch. The
-interface JSON has a `doc` slot (the `//` run above a declaration, see
-crates/almide-tools/src/interface.rs), but the stdlib sources carry no `///`
-line at all (0 of 986 public fns), and the by-name route this generator uses
-serves the EMBEDDED source, which crates/almide-types/build.rs blanks of
-every comment line — so `doc` is null for every stdlib fn whatever the
-source says. The file route (`compile stdlib/<m>.almd`) keeps comments but
-is not signature-equivalent (3 modules fail to compile standalone, 7 differ
-in JSON), so it is not a drop-in input. Per-function prose is the
-hand-written section above the block until a compiler change serves
-comments on the by-name route.
+What the block carries per function beyond the signature: its `///` doc
+comment, when the source has one. The interface JSON's `doc` slot is the
+`///` run directly above the declaration (crates/almide-tools/src/interface.rs);
+the by-name route serves the EMBEDDED source, which crates/almide-types/build.rs
+blanks of every whole-line `//` comment EXCEPT `///` lines (#2436, the
+compiler half of #1469), so a `///` line written in stdlib/<m>.almd reaches
+this block and a design-note `//` line does not. A fn without a `///` run
+renders as the bare signature, byte-identical to before — the remaining gap
+is the stdlib content work of writing the lines (#1469). What the block still
+does NOT carry: a `@since` epoch.
 
 Usage:
     python3 tools/gen-stdlib-doc-index.py            # rewrite blocks in place
@@ -98,6 +96,19 @@ def signature(module: str, f: dict) -> str:
     return f"{eff}{module}.{f['name']}({params}) -> {render_ty(f['return'])}{dep}"
 
 
+def entry(module: str, f: dict) -> list:
+    """The lines one function contributes to the index: its `///` doc comment
+    (#2436), rendered as `// ` lines directly above the signature so the fence
+    reads like the source it came from, then the signature. No doc → just the
+    signature, so an undocumented module's block is byte-identical to before."""
+    doc = f.get("doc")
+    lines = []
+    if doc:
+        lines += [f"// {line}".rstrip() for line in doc.split("\n")]
+    lines.append(signature(module, f))
+    return lines
+
+
 def module_block(module: str) -> str:
     out = subprocess.run(
         [almide_bin(), "compile", module, "--json"],
@@ -113,8 +124,15 @@ def module_block(module: str) -> str:
     # __fallible_* bodies, ADR-0006 D3) — never document them.
     fns = [f for f in fns if not f.get("name", "").startswith("__")]
     lines = [BEGIN, "", f"## Signature index ({len(fns)} functions)", "", "```"]
-    for f in fns:
-        lines.append(signature(module, f))
+    for i, f in enumerate(fns):
+        # A documented fn is set off by a blank line on each side so its
+        # comment is not read as belonging to the neighbour above.
+        e = entry(module, f)
+        if len(e) > 1 and i > 0 and lines[-1] != "":
+            lines.append("")
+        lines += e
+        if len(e) > 1 and i + 1 < len(fns):
+            lines.append("")
     lines += ["```"]
     # Exported types are public names too (#1469): a module's record /
     # variant / alias declarations are part of the surface a caller can
