@@ -49,7 +49,7 @@ fn main() {
             let before = checker.diagnostics.len();
             // A module with no source entry is the bundled stdlib: mark its origin
             // so E085 does not judge its `@intrinsic`s against the entry file's path.
-            checker.in_bundled_module = sources.get(name).is_none();
+            checker.in_bundled_module = !sources.contains_key(name);
             checker.infer_module(mod_prog, name);
             checker.in_bundled_module = false;
             let _ = checker.diagnostics.len() - before;
