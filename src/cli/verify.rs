@@ -75,7 +75,7 @@ fn one_line(s: &str) -> String {
 /// `uncertified` records.
 fn render_bundle(file: &str, w: &almide_mir::pipeline::ProgramWitnesses) -> Vec<u8> {
     let mut out = format!(
-        "almide-certificate-bundle 1\nproducer {}\nsource {}\n",
+        "almide-certificate-bundle 1\nproducer almide {}\nsource {}\n",
         one_line(env!("ALMIDE_VERSION_LINE")),
         one_line(file)
     )
