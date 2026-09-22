@@ -6,6 +6,7 @@
 mod type SafeHtml = String
 
 // Escape HTML special characters: & < > " '
+/// s with & < > " ' turned into HTML entities.
 fn escape(s: String) -> SafeHtml = {
   let escaped = s |> string.replace("&", "&amp;") |> string.replace("<", "&lt;") |> string.replace(
     ">",
@@ -16,14 +17,17 @@ fn escape(s: String) -> SafeHtml = {
 
 // Trust raw HTML — explicit opt-in for pre-sanitized content.
 // Use only for trusted sources (e.g., markdown renderer output).
+/// s as SafeHtml, unescaped; trusted input only.
 fn raw(s: String) -> SafeHtml = SafeHtml(s)
 
 // Unwrap SafeHtml to String (for rendering)
+/// HTML text inside h, as-is.
 fn to_string(h: SafeHtml) -> String = match h {
   SafeHtml(s) => s
 }
 
 // Concatenate two SafeHtml values
+/// a then b as one SafeHtml; nothing re-escaped.
 fn concat(a: SafeHtml, b: SafeHtml) -> SafeHtml = {
   let sa = to_string(a)
   let sb = to_string(b)
@@ -31,4 +35,5 @@ fn concat(a: SafeHtml, b: SafeHtml) -> SafeHtml = {
 }
 
 // Empty SafeHtml
+/// SafeHtml of the empty string.
 fn empty() -> SafeHtml = SafeHtml("")

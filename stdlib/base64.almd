@@ -10,14 +10,18 @@
 // encode and decode are SELF-HOSTED in `stdlib/base64_encode.almd`,
 // registered in `crates/almide-mir/src/render_wasm/registry.rs`. (v0
 // dispatched through `emit_wasm/calls_base64.rs`, retired in c71eff7b.)
+/// Standard base64 with + / and = padding.
 @intrinsic("almide_rt_base64_encode")
 fn encode(b: Bytes) -> String = _
 
+/// Bytes from base64; padding optional; err if bad.
 @intrinsic("almide_rt_base64_decode")
 fn decode(s: String) -> Result[Bytes, String] = _
 
+/// URL-safe base64 (- _), still = padded.
 @intrinsic("almide_rt_base64_encode_url")
 fn encode_url(b: Bytes) -> String = _
 
+/// Same as decode; accepts either alphabet.
 @intrinsic("almide_rt_base64_decode_url")
 fn decode_url(s: String) -> Result[Bytes, String] = _

@@ -8,11 +8,14 @@
 // encode and decode are SELF-HOSTED in `stdlib/hex_encode.almd`,
 // registered in `crates/almide-mir/src/render_wasm/registry.rs`. (v0
 // dispatched through `emit_wasm/calls_hex.rs`, retired in c71eff7b.)
+/// Lowercase hex, two chars per byte.
 @intrinsic("almide_rt_hex_encode")
 fn encode(b: Bytes) -> String = _
 
+/// Uppercase hex, two chars per byte.
 @intrinsic("almide_rt_hex_encode_upper")
 fn encode_upper(b: Bytes) -> String = _
 
+/// Bytes from hex (any case); err if odd or bad char.
 @intrinsic("almide_rt_hex_decode")
 fn decode(s: String) -> Result[Bytes, String] = _

@@ -361,20 +361,49 @@ Alice
 ## Signature index (15 functions)
 
 ```
+// Value or err; lenient, trailing text ignored.
 json.parse(text: String) -> Result[Value, String]
+
+// Compact JSON; a Float 1.0 prints as 1.
 json.stringify(v: Value) -> String
+
+// JSON with 2-space indent; [] and {} stay inline.
 json.stringify_pretty(j: Value) -> String
+
+// String at key; none if absent or non-string.
 json.get_string(j: Value, key: String) -> Option[String]
+
+// Int at key; none if absent or non-numeric.
 json.get_int(j: Value, key: String) -> Option[Int]
+
+// Float at key (Int widens); none if absent.
 json.get_float(j: Value, key: String) -> Option[Float]
+
+// Bool at key; none if absent or non-Bool.
 json.get_bool(j: Value, key: String) -> Option[Bool]
+
+// Array at key; none if absent or non-array.
 json.get_array(j: Value, key: String) -> Option[List[Value]]
+
+// Empty path: the whole value.
 json.root() -> JsonPath
+
+// path extended by object key name.
 json.field(path: JsonPath, name: String) -> JsonPath
+
+// path plus index i; negative i counts from end.
 json.index(path: JsonPath, i: Int) -> JsonPath
+
+// Value at path, or none if a step misses.
 json.get_path(j: Value, path: JsonPath) -> Option[Value]
+
+// j with value at path; missing keys created.
 json.set_path(j: Value, path: JsonPath, value: Value) -> Result[Value, String]
+
+// j minus the entry at path; unchanged if absent.
 json.remove_path(j: Value, path: JsonPath) -> Value
+
+// Object as key->string map (non-strings as JSON).
 json.to_map(j: Value) -> Option[Map[String, String]]
 ```
 
