@@ -273,7 +273,9 @@ fn matrix_from_bytes_f64_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> L
   // overflows for a huge count; keep in sync with `__mx_max_elems`.
   if r > 268435456 then prim.die(prim.handle("Error: matrix dimensions too large\n")) else ()
   if r > 0 and c > 268435456 / r then prim.die(prim.handle("Error: matrix dimensions too large\n")) else ()
-  if offset < 0 or offset + r * c * 8 > len then __mxe_zeros(r, c)
+  // C-341, SUBTRACTIVE (the f32/f16 twins in matrix_core carry the same
+  // rewrite): the additive test wrapped for an offset near i64::MAX.
+  if offset < 0 or offset > len or r * c * 8 > len - offset then __mxe_zeros(r, c)
   else {
     let out: List[List[Float]] = prim.alloc_list_str(r)
     let _x = __fb64_rows(prim.handle(out), bh + 12 + offset, r, c, 0)
