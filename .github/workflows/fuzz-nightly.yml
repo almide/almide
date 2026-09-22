@@ -304,6 +304,13 @@ jobs:
     permissions:
       contents: read
       issues: write
+      # `actions: read` is what lets the verdict read its SIBLING shard jobs'
+      # logs (#2513). A shard the runner reclaimed uploads nothing, but its log
+      # still carries the campaign's last progress line, and that is where the
+      # night's real delivered minutes and findings come from for those shards.
+      # Without this scope the log fetch 403s, every reclaimed shard scores as
+      # unknown, and the night reads lower than it ran.
+      actions: read
     steps:
       - uses: actions/checkout@v7
 
@@ -359,6 +366,11 @@ jobs:
       # the heading and not only in this step's log (#2390).
       - name: Campaign verdict
         id: verdict
+        env:
+          # The verdict reads the reclaimed shards' job logs through `gh api`
+          # (#2513); $GITHUB_REPOSITORY and $GITHUB_RUN_ID are already in the
+          # environment and tell it which run's shards to look for.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           bash scripts/fuzz-night-verdict.sh shards \
             "${{ github.event.inputs.minutes || env.FUZZ_MINUTES }}" \

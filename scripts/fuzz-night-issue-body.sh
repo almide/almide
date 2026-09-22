@@ -73,16 +73,26 @@ case "$CLASS" in
     ;;
 esac
 
+# `missing` is the shards that yielded NOTHING — no artifact and no readable
+# job log (#2513 narrowed it; before that it was every shard that did not
+# upload). Count it from the list itself so the number and the names cannot
+# disagree: `planned - reporting` also counts the shards the verdict recovered
+# from their logs, and those ARE in the count. Only an unnumbered layout, whose
+# missing list is `unknown`, falls back to the subtraction.
 if [ "$REPORTING" -ge 0 ] && [ "$REPORTING" -lt "$PLANNED" ]; then
-  UNRETURNED=$((PLANNED - REPORTING))
   case "$MISSING" in
-    unknown|none|"") WHICH="" ;;
-    *)               WHICH=" (shards ${MISSING//,/, })" ;;
+    unknown)  UNRETURNED=$((PLANNED - REPORTING)); WHICH="" ;;
+    none|"")  UNRETURNED=0; WHICH="" ;;
+    *)        UNRETURNED=$(printf '%s' "$MISSING" | tr ',' '\n' | grep -c .); WHICH=" (shards ${MISSING//,/, })" ;;
   esac
-  echo ""
-  echo "**$UNRETURNED shard(s)${WHICH} did not report** — their findings, if any, are not"
-  echo "in this count. A reclaimed runner uploads nothing; the shard's own job log"
-  echo "still lists every \`** FINDING\` line, and its seed is \`run_id * 16 + shard\`."
+  if [ "$UNRETURNED" -gt 0 ]; then
+    echo ""
+    echo "**$UNRETURNED shard(s)${WHICH} did not report** — their findings, if any, are not"
+    echo "in this count. A reclaimed runner uploads nothing, and for these the verdict"
+    echo "could not read the shard's job log either; when it can, that log's last"
+    echo "progress line is recovered into the count instead. The seed is derived"
+    echo "(\`run_id * 16 + shard\`), so the evidence is replayable from the run alone."
+  fi
 fi
 
 echo ""
