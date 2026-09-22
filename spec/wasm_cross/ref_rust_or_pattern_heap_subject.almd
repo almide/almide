@@ -1,0 +1,69 @@
+// @contract: C-323
+// rust tests/ui/or-patterns/ — basic-switch.rs (`Some(Test::Bar | Test::Qux)`)
+// and bindings-runpass-2.rs (`Ok(x @ 4) | Err(x @ (6 | 8))`, `Ok(x @ 1 | x @ 2)`,
+// the guarded `Err(x @ …) if x % 2 == 0`), and tests/ui/pattern/bindings-after-at/
+// — or-patterns.rs (`bar @ Some(Test::Foo | Test::Bar)`: the WHOLE value used
+// after the or-match), ported
+// binder-free: nested alternatives are flattened to top-level ones, and the
+// `x @` / `bar @` bindings become the scrutinee itself. The heap (RC) case: a
+// String-payload variant and a `some(String)` / `List[String]` subject are
+// matched through string-literal alternatives and REUSED after the match — the
+// desugared per-alternative arms must not consume or free the subject.
+type Test = | Foo | Bar | Baz | Qux
+
+type Tok = | Word(String) | Num(Int) | Eof
+
+fn switch(x: Test?) -> Bool = match x {
+  some(Bar) | some(Qux) => true,
+  some(_) => false,
+  none => false,
+}
+
+fn or_at(x: Result[Int, Int]) -> Int = match x {
+  ok(4) | err(6) | err(8) => x ?? 0,
+  ok(1) | ok(2) => x ?? 0,
+  err(_) if (x ?? 0) % 2 == 0 => 100,
+  err(_) => 200,
+  _ => 500,
+}
+
+fn kind(t: Tok) -> String = match t {
+  Word("let") | Word("fn") => "keyword",
+  Word(_) => "ident",
+  Num(0) | Num(1) => "bit",
+  Num(_) | Eof => "other",
+}
+
+fn main() -> Unit = {
+  println(if switch(some(Foo)) then "T" else "F")
+  println(if switch(some(Bar)) then "T" else "F")
+  println(if switch(some(Baz)) then "T" else "F")
+  println(if switch(some(Qux)) then "T" else "F")
+  println(if switch(none) then "T" else "F")
+  println(int.to_string(or_at(ok(1))))
+  println(int.to_string(or_at(ok(4))))
+  println(int.to_string(or_at(ok(5))))
+  println(int.to_string(or_at(err(6))))
+  println(int.to_string(or_at(err(7))))
+  println(int.to_string(or_at(err(20))))
+  let w = Word(string.repeat("let", 1))
+  println(kind(w))
+  println(kind(w))
+  println(kind(Word("x")))
+  println(kind(Num(1)))
+  println(kind(Eof))
+  let s = string.repeat("ab", 2)
+  let r = match some(s) {
+    some("abab") | some("zz") => "hit",
+    _ => "miss",
+  }
+  println(r)
+  println(s)
+  let xs = ["a", "b"]
+  let r2 = match xs {
+    ["a"] | ["a", _] => "a-led",
+    _ => "no",
+  }
+  println(r2)
+  println(list.join(xs, ","))
+}

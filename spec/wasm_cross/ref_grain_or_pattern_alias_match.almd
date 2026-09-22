@@ -1,0 +1,37 @@
+// @contract: C-323
+// grain compiler/test/suites/pattern_matching.re `alias_match_4`
+// (`match (Some(5)) { Some(3 | 4 as a) => a, Some(_) | None => 5, _ => 6 }`)
+// and `alias_match_5` (`{ Some(3 | 4) as a => a, Some(5) | None as a => a,
+// _ => None }`), ported binder-free: the nested `Some(3 | 4)` is flattened to
+// top-level `some(3) | some(4)` alternatives, the `as a` alias is the scrutinee
+// itself (the arm body cannot depend on which alternative matched), and grain's
+// trailing `_` after `Some(_) | None` is dropped — here that arm is E014
+// (unreachable), where grain only warns. Observable: which arm the union
+// selects for Some(5) / Some(3) / Some(4) / None / Some(9).
+fn alias4(x: Int?) -> Int = match x {
+  some(3) | some(4) => x ?? 0,
+  some(_) | none => 5,
+}
+
+fn alias5(x: Int?) -> Int? = match x {
+  some(3) | some(4) => x,
+  some(5) | none => x,
+  _ => none,
+}
+
+fn show(o: Int?) -> String = match o {
+  some(v) => "some(" + int.to_string(v) + ")",
+  none => "none",
+}
+
+fn main() -> Unit = {
+  println(int.to_string(alias4(some(5))))
+  println(int.to_string(alias4(some(3))))
+  println(int.to_string(alias4(some(4))))
+  println(int.to_string(alias4(none)))
+  println(show(alias5(some(5))))
+  println(show(alias5(some(3))))
+  println(show(alias5(some(4))))
+  println(show(alias5(none)))
+  println(show(alias5(some(9))))
+}
