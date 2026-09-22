@@ -5,6 +5,7 @@
 // f32 family aliases the f64 ops), so composition is the oracle. Each
 // intermediate binds owned and drops at scope end.
 import prim
+
 fn matrix_mul_scaled(a: Matrix, s: Float, b: Matrix) -> Matrix = {
   let p = matrix.mul(a, b)
   matrix.scale(p, s)
