@@ -369,3 +369,35 @@ Three layouts, three numbers, one day: 66 → 43.4 → 25.1. The split halved ea
 giant's cost but not its wall, because the residue-class slice is uneven
 (run_parity 6 vs 16) — #2457 carries that with the per-half table. #2381 is
 closed on this measurement.
+
+### 5.2 Why the halves were uneven, and the balanced slice (#2457)
+
+Per-fixture wall of every corpus fixture, measured once locally (Darwin/arm64,
+14 cpus, `ALMIDE_CORPUS_WEIGHTS_DIR`, unsharded; the walls each gate records
+under that switch are what `proofs/corpus-weights.txt` is rendered from):
+
+| leg | fixtures | total | median | max | top 20 share | modulo halves (1/2 · 2/2) | LPT halves |
+|---|---|---|---|---|---|---|---|
+| interp sweep (ledger, oracle) | 727 | 460 s | 2 ms | 65.6 s | **94.6 %** | 110 · **349 s** | 230 · 230 s |
+| run_parity (serial walk) | 729 | 186 s | 25 ms | 56.9 s | 85.0 % | 98 · 88 s | 93 · 93 s |
+| builds (cross_target, opt_parity) | 727 | 281 s | 375 ms | 1.4 s | 4.8 % | 142 · 139 s | 141 · 141 s |
+
+So it is a heavy tail, not a residue bias: the interp legs spend 95 % of their
+time in twenty fixtures (`string_position_large_offset`, `regex_repetition_depth`,
+`float_parse`, `matrix_q1_full_loader_cols_beyond_buffer`, `string_interp_large_hole`,
+`bytes_temp_receiver`, `float_subnormal_preserved` — the first seven, every one
+at an odd sorted index, i.e. all in 2/2: 3.2× between the halves, the 3 vs 11
+min CI measured), and the build-only legs are flat, which is why cross_target
+and opt_parity split evenly by count. run_parity's tail is the same fixtures
+but its halves are even LOCALLY (98 / 88 s) while CI measured 6 / 16 min: the
+ratio between the heavy fixtures and the rest is the runner's, not the
+program's (the 2/2 giants are allocation-bound, the 1/2 giant is CPU-bound),
+which is why the committed table is rendered from the CI runner's own
+measurement (every solo shard records its walls into its `corpus-shard-*`
+artifact; `scripts/gen-corpus-weights.sh --render` over the download).
+
+The slice is now the LPT partition over the recorded column (uniform weights
+reproduce the modulo slice exactly; an unrecorded stem takes the median so the
+table cannot exclude a fixture; the coverage step still proves the union).
+Predicted from the table: interp 230 / 230 s, run_parity 93 / 93 s per half.
+The develop run after this lands is recorded here.
