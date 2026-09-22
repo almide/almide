@@ -26,7 +26,7 @@ pub fn almide_rt_datetime_second(ts: i64) -> i64 { ((ts % 60) + 60) % 60 }
 
 pub fn almide_rt_datetime_weekday(ts: i64) -> String {
     let days = ["Thursday", "Friday", "Saturday", "Sunday", "Monday", "Tuesday", "Wednesday"];
-    let d = ((ts / 86400) % 7 + 7) % 7;
+    let d = almide_rt_days_from_epoch(ts).rem_euclid(7);
     days[d as usize].to_string()
 }
 
@@ -81,9 +81,19 @@ pub fn almide_rt_datetime_is_after(a: i64, b: i64) -> bool { a > b }
 pub fn almide_rt_datetime_from_unix(seconds: i64) -> i64 { seconds }
 pub fn almide_rt_datetime_to_unix(ts: i64) -> i64 { ts }
 
+// The day number of a timestamp, FLOORED (#2488): `ts / 86400` truncates toward
+// zero, so every pre-epoch second that is not on a day boundary landed on the
+// day AFTER its own — `to_iso(-1)` was `1970-01-01T23:59:59Z`, `weekday(-1)`
+// was Thursday. The time-of-day extractors always floor-modded (`(x % m + m)
+// % m` = rem_euclid); the day number must floor the same way or the two halves
+// describe different days. `div_euclid` floors for a positive divisor and
+// cannot overflow (only a divisor of -1 can). The self-host twin is
+// `__c_days` in stdlib/datetime_calendar.almd.
+fn almide_rt_days_from_epoch(ts: i64) -> i64 { ts.div_euclid(86400) }
+
 // Civil date ↔ epoch conversion (Howard Hinnant's algorithm)
 fn almide_rt_civil_from_epoch(ts: i64) -> (i64, i64, i64) {
-    let z = ts / 86400 + 719468;
+    let z = almide_rt_days_from_epoch(ts) + 719468;
     let era = if z >= 0 { z } else { z - 146096 } / 146097;
     let doe = (z - era * 146097) as u64;
     let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;

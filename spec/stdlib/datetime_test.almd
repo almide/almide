@@ -145,3 +145,25 @@ test "datetime.to_iso contains Z" {
   let iso = datetime.to_iso(ts)
   assert_eq(string.contains(iso, "Z"), true)
 }
+
+test "pre-epoch timestamps floor to their own day (#2488)" {
+  assert_eq(datetime.to_iso(-1), "1969-12-31T23:59:59Z")
+  assert_eq(datetime.weekday(-1), "Wednesday")
+  assert_eq(datetime.year(-1), 1969)
+  assert_eq(datetime.month(-1), 12)
+  assert_eq(datetime.day(-1), 31)
+  assert_eq(datetime.to_iso(-86399), "1969-12-31T00:00:01Z")
+  assert_eq(datetime.to_iso(-86400), "1969-12-31T00:00:00Z")
+  assert_eq(datetime.to_iso(-86401), "1969-12-30T23:59:59Z")
+  assert_eq(datetime.weekday(-86401), "Tuesday")
+  assert_eq(datetime.format(-1, "%Y-%m-%d %H:%M:%S"), "1969-12-31 23:59:59")
+  // the inverse still agrees with the forward direction across the epoch
+  assert_eq(datetime.from_parts(1969, 12, 31, 23, 59, 59), -1)
+  assert_eq(datetime.to_iso(-62135596801), "0000-12-31T23:59:59Z")
+}
+
+test "datetime.format %Y is the variable-width year to_iso renders" {
+  assert_eq(datetime.format(9223372036854775807, "%Y"), "292277026596")
+  assert_eq(datetime.format(0 - 9223372036854775807 - 1, "%Y"), "-292277022657")
+  assert_eq(datetime.format(-62135596801, "%Y"), "0000")
+}
