@@ -1302,6 +1302,9 @@ include!("post_solve_validation.rs");
 include!("interp_string_form.rs");
 include!("lint_error_surface.rs");
 include!("bounded.rs");
+include!("scoped.rs");
+include!("scoped_walk.rs");
+include!("scoped_shape.rs");
 include!("module_inference.rs");
 
 /// What the file SPELLS that can mark an import used (#1783, #1853).

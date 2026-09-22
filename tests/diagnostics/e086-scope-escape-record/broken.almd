@@ -1,0 +1,9 @@
+type Point = { x: Int, y: Int }
+
+scoped fn origin(dx: Int) -> Point = { x: dx, y: dx * 2 }
+
+fn build(dx: Int) -> Point = scoped {
+  origin(dx)
+}
+
+effect fn main() -> Unit = println(int.to_string(build(2).y))

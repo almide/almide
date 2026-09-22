@@ -174,6 +174,12 @@ pub struct Diagnostic {
     /// unattended (#1312). `Unspecified` whenever no span is attached — a
     /// display-only `try:` is never applied by anything.
     pub try_applicability: Applicability,
+    /// Free-form fact rows rendered as `  = <note>` between the location and
+    /// the `in` / `hint:` rows (#1997: `= allocated at f:12:16`, `= scope
+    /// ends at f:19:3`). A note states a FACT the reader needs to place the
+    /// error; the hint stays the one actionable line. Empty for every
+    /// diagnostic that predates the field, so their rendering is unchanged.
+    pub notes: Vec<String>,
 }
 
 impl Diagnostic {
@@ -184,6 +190,7 @@ impl Diagnostic {
             file: None, line: None, col: None, end_col: None, secondary: Vec::new(),
             try_snippet: None, here_snippet: None, try_replace_span: None,
             try_applicability: Applicability::Unspecified,
+            notes: Vec::new(),
         }
     }
 
@@ -194,11 +201,18 @@ impl Diagnostic {
             file: None, line: None, col: None, end_col: None, secondary: Vec::new(),
             try_snippet: None, here_snippet: None, try_replace_span: None,
             try_applicability: Applicability::Unspecified,
+            notes: Vec::new(),
         }
     }
 
     pub fn with_code(mut self, code: &'static str) -> Self {
         self.code = Some(code);
+        self
+    }
+
+    /// Append one `= <note>` fact row (see `notes`).
+    pub fn with_note(mut self, note: impl Into<String>) -> Self {
+        self.notes.push(note.into());
         self
     }
 
@@ -396,6 +410,9 @@ impl Diagnostic {
     /// The `in` / `here:` / `hint:` / `try:` rows, in render order.
     /// Each is omitted when its field is absent or empty.
     fn push_annotation_rows(&self, out: &mut String) {
+        for note in &self.notes {
+            out.push_str(&format!("\n  = {}", note));
+        }
         if !self.context.is_empty() {
             out.push_str(&format!("\n  in {}", self.context));
         }

@@ -1,0 +1,8 @@
+scoped fn countdown(n: Int, acc: Int) -> Int = {
+  let rest = if n == 0 then acc else countdown(n - 1, acc + n)
+  rest
+}
+
+effect fn main() -> Unit = println(int.to_string(scoped {
+  countdown(4, 0)
+}))

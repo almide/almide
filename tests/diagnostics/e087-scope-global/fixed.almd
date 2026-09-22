@@ -1,0 +1,8 @@
+let BIAS = 7
+
+scoped fn adjust(n: Int, bias: Int) -> Int = n + bias
+
+effect fn main() -> Unit = {
+  let bias = BIAS
+  println(int.to_string(scoped { adjust(3, bias) }))
+}

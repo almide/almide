@@ -1,0 +1,19 @@
+type Tree = | Leaf | Node(Tree, Tree)
+
+scoped fn make(depth: Int) -> Tree = if depth == 0 then Leaf else Node(
+  make(depth - 1),
+  make(depth - 1),
+)
+
+scoped fn count(t: Tree) -> Int = match t {
+  Leaf => 1,
+  Node(l, r) => 1 + count(l) + count(r),
+}
+
+effect fn main() -> Unit = {
+  var total = 0
+  scoped {
+    total = count(make(3))
+  }
+  println(int.to_string(total))
+}
