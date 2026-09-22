@@ -215,9 +215,14 @@ test "float.to_float32_checked round-trip exact" {
   assert_eq(float.to_float32_checked(-42.0).is_some(), true)
 }
 
-test "float.to_float32_checked rejects NaN" {
+test "float.to_float32_checked rejects NaN and the infinities" {
   let nan: Float = 0.0 / 0.0
+  let inf: Float = 1.0 / 0.0
   assert_eq(float.to_float32_checked(nan).is_none(), true)
+  // C-307 rules the whole checked family the same way: ±inf is none, although
+  // an f32 has both infinities and the round trip through them is exact.
+  assert_eq(float.to_float32_checked(inf).is_none(), true)
+  assert_eq(float.to_float32_checked(0.0 - inf).is_none(), true)
 }
 
 test "float.to_float32_checked rejects precision loss" {
