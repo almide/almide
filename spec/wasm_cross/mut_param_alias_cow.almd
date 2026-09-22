@@ -18,11 +18,19 @@
 // and this corpus's mut_param_call_chain allocated 4.4x).
 //
 // Covered here: the alias bound BEFORE the call (A) and an alias bound AFTER it
-// (B), across bytes, List, String and Map. STILL OPEN on #2503, and deliberately
-// not asserted here: an alias of the parameter created INSIDE the callee, an
-// argument whose place is a record FIELD, and the incumbent leg's half of the
-// A-shape for the writers whose in-place arm it owns (`bytes.set_*`, `fill`,
-// `clear`, `copy_from`, `list.pop`; `string.clear` there is #2465).
+// (B), across bytes, List, String and Map, with a PURE callee. STILL OPEN on
+// #2503, and deliberately not asserted here:
+//   - an EFFECT callee (`poke(b, i)!`). The argument's credit is not released
+//     on the ok path there, so the buffer's count grows by one per call and an
+//     rc-gated copy would fire on every iteration — measured, a 64 KiB buffer
+//     in a 20k-call loop went out of memory. That credit is where the other
+//     half of this fix starts.
+//   - an alias of the parameter created INSIDE the callee, and an argument
+//     whose place is a record FIELD.
+//   - the incumbent leg, which owns its own in-place arms (`bytes.set_*`,
+//     `fill`, `clear`, `copy_from`, `list.pop`; `string.clear` there is #2465).
+//     Its A.b row below still prints the post-write bytes under
+//     ALMIDE_WASM_INCUMBENT=1.
 fn set_bytes(mut b: Bytes) -> Unit = bytes.set_at(b, 1, 9)
 
 fn grow_bytes(mut b: Bytes) -> Unit = bytes.push(b, 7)

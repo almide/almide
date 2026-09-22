@@ -109,7 +109,16 @@ fn emit_program_pass(
             table.impl_index.insert(f.name.as_str().to_string(), i);
         }
         table.by_name.insert(key, i);
-        let param_mut: Vec<bool> = f.params.iter().map(|p| p.is_mut).collect();
+        // #2503: which arguments the call site must make unique first. An
+        // EFFECT callee is excluded, and the exclusion is measured, not
+        // cautious: an argument's credit at a `!` call site is not released
+        // on the ok path, so the buffer's count grows by one per call and
+        // the rc-gated copy would fire on EVERY iteration of a loop like
+        // `poke(b, i)!` — a 64 KiB buffer in a 20k-call loop ran out of
+        // memory, and this corpus's mut_param_call_chain allocated 4.4x.
+        // The alias rule therefore still diverges for an effect callee
+        // (#2503 keeps that half), and closing it starts with that credit.
+        let param_mut: Vec<bool> = f.params.iter().map(|p| p.is_mut && !f.is_effect).collect();
         table.infos.push(FnInfo { wasm_index: F_FN_BASE + i as u32, params, ret, refuse, param_owned: Vec::new(), param_mut, import });
     }
     // Which params each callee owns (#2028): computed once, over the whole
