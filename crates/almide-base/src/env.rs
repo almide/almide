@@ -176,7 +176,7 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_REGION_TRAP_STALE", Flag, Trap, "arm the native region prelude's stale-reference trap (#2200)"),
     sw("ALMIDE_RENDER", Value, Ci, "the render_program example binary the prelude audit re-renders fixtures with"),
     sw("ALMIDE_REPO", Value, Ci, "the repository slug a release script targets"),
-    sw("ALMIDE_RUN_PROJECT_DIR", Value, Tool, "the project root `almide run` resolves dependencies from, when the file is run from outside it"),
+    sw("ALMIDE_RUN_PROJECT_DIR", Value, Tool, "the scratch dir `almide run` / `almide build` compile native binaries in, instead of `<temp>/almide-run` (the content-keyed binary cache, its cargo target, its rustc incremental sessions); `almide clean` empties it"),
     sw("ALMIDE_SEMLAW_CASES", Value, Harness, "how many cases the semantic-laws property test draws"),
     sw("ALMIDE_SHUFFLE_PASSES", Value, Gate, "run the native passes in the seeded random order the declared dependency edges permit — a pass-dependency probe: the emitted Rust must not change (#2186)"),
     sw("ALMIDE_SIZE_ALONE", Value, Harness, "the one fixture a child process of the size ratchet measures alone, for its isolation check (#2309); the ratchet sets it on the processes it spawns"),

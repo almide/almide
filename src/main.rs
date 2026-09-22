@@ -310,7 +310,7 @@ enum Commands {
         /// Dependency name (default: every non-tag-pinned dependency)
         dep: Option<String>,
     },
-    /// Clear dependency cache
+    /// Clear the dependency cache and the native build scratch dirs
     Clean,
     /// Add a dependency
     Add {
