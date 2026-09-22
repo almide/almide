@@ -47,44 +47,70 @@ fn verifier() -> PathBuf {
     target.join("debug").join(exe("almide-verify"))
 }
 
-/// A scratch directory next to the almide under test (same filesystem, so
-/// the binary can be hard-linked rather than copied), holding `almide` and,
-/// when `with_verifier`, `almide-verify`.
+/// One stage at a time. macOS validates a freshly created executable on its
+/// first exec (AMFI + the syspolicy provenance scan), and concurrent first
+/// execs of new binary paths were observed to SIGKILL one of them ("no CMS
+/// blob … Unrecoverable CT signature issue" in the kernel log) — a host
+/// property, not the shim's. Staging serially avoids that race.
+static STAGING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// A scratch directory next to the almide under test holding a COPY of
+/// `almide` (a copy, not a hard link: a hard link shares the vnode whose
+/// signature the kernel validates) and, when `with_verifier`, of
+/// `almide-verify`.
 struct Stage {
     dir: PathBuf,
     empty_path: PathBuf,
+    _serial: std::sync::MutexGuard<'static, ()>,
 }
 
 impl Stage {
     fn new(tag: &str, with_verifier: bool) -> Stage {
+        let serial = STAGING.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let dir = almide().with_file_name(format!("verify-shim-{}-{tag}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let empty_path = dir.join("empty-path");
         std::fs::create_dir_all(&empty_path).expect("scratch dir");
         let place = |from: &Path, name: &str| {
-            let to = dir.join(exe(name));
-            if std::fs::hard_link(from, &to).is_err() {
-                std::fs::copy(from, &to).expect("copy binary");
-            }
+            std::fs::copy(from, dir.join(exe(name))).expect("copy binary");
         };
         place(&almide(), "almide");
         if with_verifier {
             place(&verifier(), "almide-verify");
         }
-        Stage { dir, empty_path }
+        Stage { dir, empty_path, _serial: serial }
     }
 
     /// Run the staged almide with PATH holding nothing, from the scratch dir
-    /// (no `almide.toml` in reach).
+    /// (no `almide.toml` in reach). A SIGKILL on a new binary's first exec on
+    /// macOS (see STAGING) is retried once; any other outcome is returned.
     fn verify(&self, args: &[&str]) -> Output {
-        Command::new(self.dir.join(exe("almide")))
-            .arg("verify")
-            .args(args)
-            .env("PATH", &self.empty_path)
-            .current_dir(&self.dir)
-            .output()
-            .expect("staged almide runs")
+        let run = || {
+            Command::new(self.dir.join(exe("almide")))
+                .arg("verify")
+                .args(args)
+                .env("PATH", &self.empty_path)
+                .current_dir(&self.dir)
+                .output()
+                .expect("staged almide runs")
+        };
+        let first = run();
+        if cfg!(target_os = "macos") && killed_by_sigkill(&first) {
+            return run();
+        }
+        first
     }
+}
+
+#[cfg(unix)]
+fn killed_by_sigkill(o: &Output) -> bool {
+    use std::os::unix::process::ExitStatusExt;
+    o.status.signal() == Some(9)
+}
+
+#[cfg(not(unix))]
+fn killed_by_sigkill(_: &Output) -> bool {
+    false
 }
 
 impl Drop for Stage {
@@ -115,7 +141,7 @@ fn emit_writes_the_bundle_even_without_the_verifier() {
     let stage = Stage::new("emit", false);
     let out = stage.dir.join("heap_arg_call.bundle");
     let o = stage.verify(&[&fixture("heap_arg_call.almd"), "--emit", &out.display().to_string()]);
-    assert_eq!(o.status.code(), Some(127), "{}", text(&o.stderr));
+    assert_eq!(o.status.code(), Some(127), "{:?}: {}", o.status, text(&o.stderr));
     let bundle = almide_verify::bundle::parse(&std::fs::read(&out).expect("bundle written"))
         .expect("the producer writes a bundle the verifier's parser reads");
     assert!(bundle.metadata.iter().any(|(k, v)| k == "producer" && v.starts_with("almide ")));
