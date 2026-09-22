@@ -129,7 +129,14 @@ fail=0; n=0
 # heap-result match outside its subset (proofs/walled-real-baseline.txt has the
 # five rows, owned by #2473); the structural leg lowers it byte-identical to
 # native. One more input the incumbent never rendered, not coverage lost.
-MAX_WALLED=34
+# 33 as of 2026-09-22 (fourth A-ci batch, measured on the assembled tree with
+# the native wasmgen harness: 712 emitted + 33 walled of 745): the ceiling goes
+# DOWN by one although the batch adds seven fixtures. #2466 made the bytes
+# writers take `mut` receivers, and bytes_temp_receiver.almd — walled since
+# 2026-09-03 as a temporary receiver outside the incumbent's value subset — now
+# drives its writers through a `var`, so the incumbent renders it. The matrix,
+# bytes-domain and record-field fixtures this batch adds all emit on both legs.
+MAX_WALLED=33
 walled=0
 for fix in "$FIXTURE_DIR"/*.almd; do
   [ -e "$fix" ] || continue
