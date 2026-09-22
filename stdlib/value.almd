@@ -1,61 +1,81 @@
+/// Wraps items as an Array Value.
 @intrinsic("almide_rt_value_array")
 fn array(items: List[Value]) -> Value = _
 
+/// Array items; err if v is another kind.
 @intrinsic("almide_rt_value_as_array")
 fn as_array(v: Value) -> Result[List[Value], String] = _
 
+/// Bool payload; err otherwise (no truthiness).
 @intrinsic("almide_rt_value_as_bool")
 fn as_bool(v: Value) -> Result[Bool, String] = _
 
+/// Float payload (Int widens); err otherwise.
 @intrinsic("almide_rt_value_as_float")
 fn as_float(v: Value) -> Result[Float, String] = _
 
+/// Int payload; err on Float, never truncated.
 @intrinsic("almide_rt_value_as_int")
 fn as_int(v: Value) -> Result[Int, String] = _
 
+/// Str payload; err otherwise (no coercion).
 @intrinsic("almide_rt_value_as_string")
 fn as_string(v: Value) -> Result[String, String] = _
 
+/// Value holding the Bool b.
 @intrinsic("almide_rt_value_bool")
 fn bool(b: Bool) -> Value = _
 
+/// Value holding the Float f.
 @intrinsic("almide_rt_value_float")
 fn float(f: Float) -> Value = _
 
+/// Value holding the Int n.
 @intrinsic("almide_rt_value_int")
 fn int(n: Int) -> Value = _
 
+/// Shallow merge, b's keys win; b if not both objects.
 @intrinsic("almide_rt_value_merge")
 fn merge(a: Value, b: Value) -> Value = _
 
+/// The JSON null Value.
 @intrinsic("almide_rt_value_null")
 fn null() -> Value = _
 
+/// Wraps pairs as an Object; duplicate keys kept.
 @intrinsic("almide_rt_value_object")
 fn object(pairs: List[(String, Value)]) -> Value = _
 
+/// v minus the listed keys; non-objects as-is.
 @intrinsic("almide_rt_value_omit")
 fn omit(v: Value, keys: List[String]) -> Value = _
 
+/// Only the listed keys of v; non-objects as-is.
 @intrinsic("almide_rt_value_pick")
 fn pick(v: Value, keys: List[String]) -> Value = _
 
+/// Value holding the String s.
 @intrinsic("almide_rt_value_str")
 fn str(s: String) -> Value = _
 
+/// Compact JSON; NaN/inf print bare (invalid JSON).
 @intrinsic("almide_rt_value_stringify")
 fn stringify(v: Value) -> String = _
 
+/// Top-level keys to camelCase; nested untouched.
 @intrinsic("almide_rt_value_to_camel_case")
 fn to_camel_case(v: Value) -> Value = _
 
+/// Top-level keys to snake_case; userID -> user_i_d.
 @intrinsic("almide_rt_value_to_snake_case")
 fn to_snake_case(v: Value) -> Value = _
 
+/// Value at key; err if missing or v not an Object.
 @intrinsic("almide_rt_value_field")
 fn field(v: Value, key: String) -> Result[Value, String] = _
 
 // Object keys, in insertion order. Backed by `almide_rt_value_keys` in the value
 // runtime so a value-only program links natively (#416).
+/// Object keys in order; [] for non-objects.
 @intrinsic("almide_rt_value_keys")
 fn keys(v: Value) -> List[String] = _

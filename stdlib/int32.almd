@@ -2,52 +2,76 @@
 //
 // See `int8.almd` for the routing rationale (dimensional pivot via
 // canonical `int`).
+/// Wraps to 8 bits; 128 becomes -128.
 fn to_int8(x: Int32) -> Int8 = int.to_int8(int.from_int32(x))
 
+/// Wraps to 16 bits; 32768 becomes -32768.
 fn to_int16(x: Int32) -> Int16 = int.to_int16(int.from_int32(x))
 
+/// Sign-extending widen; always exact.
 fn to_int64(x: Int32) -> Int64 = int.to_int64(int.from_int32(x))
 
+/// Wraps to 8 bits; -1 becomes 255.
 fn to_uint8(x: Int32) -> UInt8 = int.to_uint8(int.from_int32(x))
 
+/// Wraps to 16 bits; -1 becomes 65535.
 fn to_uint16(x: Int32) -> UInt16 = int.to_uint16(int.from_int32(x))
 
+/// Wraps to 32 bits; -1 becomes 2^32-1.
 fn to_uint32(x: Int32) -> UInt32 = int.to_uint32(int.from_int32(x))
 
+/// Wraps to 64 bits; -1 becomes 2^64-1.
 fn to_uint64(x: Int32) -> UInt64 = int.to_uint64(int.from_int32(x))
 
+/// Float32 value; may round when abs(x) > 2^24.
 fn to_float32(x: Int32) -> Float32 = int.to_float32(int.from_int32(x))
 
+/// Same value as Float64; always exact.
 fn to_float64(x: Int32) -> Float64 = int.to_float64(int.from_int32(x))
 
+/// Decimal digits, with - when negative.
 fn to_string(x: Int32) -> String = int.to_string(int.from_int32(x))
 
 // ── Range-checked / saturating narrowings (matrix rule: lossy ⇒ trio) ──
+/// some(x), or none if outside -128..127.
 fn to_int8_checked(x: Int32) -> Int8? = int.to_int8_checked(int.from_int32(x))
 
+/// Clamps x to -128..127.
 fn to_int8_saturating(x: Int32) -> Int8 = int.to_int8_saturating(int.from_int32(x))
 
+/// some(x), or none if outside -32768..32767.
 fn to_int16_checked(x: Int32) -> Int16? = int.to_int16_checked(int.from_int32(x))
 
+/// Clamps x to -32768..32767.
 fn to_int16_saturating(x: Int32) -> Int16 = int.to_int16_saturating(int.from_int32(x))
 
+/// some(x), or none if outside 0..255.
 fn to_uint8_checked(x: Int32) -> UInt8? = int.to_uint8_checked(int.from_int32(x))
 
+/// Clamps x to 0..255.
 fn to_uint8_saturating(x: Int32) -> UInt8 = int.to_uint8_saturating(int.from_int32(x))
 
+/// some(x), or none if outside 0..65535.
 fn to_uint16_checked(x: Int32) -> UInt16? = int.to_uint16_checked(int.from_int32(x))
 
+/// Clamps x to 0..65535.
 fn to_uint16_saturating(x: Int32) -> UInt16 = int.to_uint16_saturating(int.from_int32(x))
 
+/// some(x), or none if x is negative.
 fn to_uint32_checked(x: Int32) -> UInt32? = int.to_uint32_checked(int.from_int32(x))
 
+/// Negative x clamps to 0.
 fn to_uint32_saturating(x: Int32) -> UInt32 = int.to_uint32_saturating(int.from_int32(x))
 
+/// some(x), or none if x is negative.
 fn to_uint64_checked(x: Int32) -> UInt64? = int.to_uint64_checked(int.from_int32(x))
 
+/// Negative x clamps to 0.
 fn to_uint64_saturating(x: Int32) -> UInt64 = int.to_uint64_saturating(int.from_int32(x))
 
 // ── Bounds ──
+/// Smallest Int32: -2147483648.
 fn min_value() -> Int32 = int.to_int32(-2147483648)
 
+/// Largest Int32: 2147483647.
 fn max_value() -> Int32 = int.to_int32(2147483647)

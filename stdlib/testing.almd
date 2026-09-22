@@ -6,33 +6,42 @@
 // `testing.*` through `emit_wasm/calls.rs::dispatch_runtime_fallback` to a
 // Named dispatcher holding hardcoded assert_contains / assert_approx /
 // etc. implementations; that tree was retired in c71eff7b.)
+/// Fails unless f panics, message containing expected.
 @intrinsic("almide_rt_test_assert_throws")
 fn assert_throws(f: () -> Unit, expected: String) -> Unit = _
 
+/// Fails unless needle is in haystack; "" passes.
 @intrinsic("almide_rt_test_assert_contains")
 fn assert_contains(haystack: String, needle: String) -> Unit = _
 
+/// Fails unless abs(a - b) < tolerance (strict).
 @intrinsic("almide_rt_test_assert_approx")
 fn assert_approx(a: Float, b: Float, tolerance: Float) -> Unit = _
 
+/// Fails unless a > b; equal fails.
 @intrinsic("almide_rt_test_assert_gt")
 fn assert_gt(a: Int, b: Int) -> Unit = _
 
+/// Fails unless a < b; equal fails.
 @intrinsic("almide_rt_test_assert_lt")
 fn assert_lt(a: Int, b: Int) -> Unit = _
 
+/// Fails when opt is none.
 @intrinsic("almide_rt_test_assert_some")
 @borrow_ref(opt)
 fn assert_some[A](opt: A?) -> Unit = _
 
+/// Fails when result is an err.
 @intrinsic("almide_rt_test_assert_ok")
 @borrow_ref(result)
 fn assert_ok[A, B](result: Result[A, B]) -> Unit = _
 
+/// Fails when opt is some.
 @intrinsic("almide_rt_test_assert_none")
 @borrow_ref(opt)
 fn assert_none[A](opt: A?) -> Unit = _
 
+/// Fails when result is ok.
 @intrinsic("almide_rt_test_assert_err")
 @borrow_ref(result)
 fn assert_err[A, B](result: Result[A, B]) -> Unit = _
@@ -44,5 +53,6 @@ fn assert_err[A, B](result: Result[A, B]) -> Unit = _
 // `expected:` / `found:`, exit 1), the same shape on every lane, which is what
 // the accept step reads back. This body is reached only through a first-class
 // use of the fn value (never desugared) and keeps the verdict, minus the site.
+/// Fails unless actual == expected; --update-snapshots rewrites.
 fn assert_snapshot(actual: String, expected: String) -> Unit = if actual == expected then ()
 else panic("snapshot mismatch\n  expected: ${expected}\n  found: ${actual}")

@@ -163,7 +163,13 @@ fi
 # the judge agrees); the incumbent refuses the non-scalar subject the same way
 # it refuses every non-scalar element (C-147). Two new inputs the incumbent
 # never rendered, not coverage lost: every previously emitted fixture still is.
-MAX_WALLED=33
+# 34 as of 2026-09-22: or_pattern_guarded_nullary.almd (C-323, #2463) — the
+# fixture pinning the native fixpoint fix (a guarded or-pattern arm over a
+# nullary constructor). The incumbent refuses its lifted guard arms as a
+# heap-result match outside its subset (proofs/walled-real-baseline.txt has the
+# five rows, owned by #2473); the structural leg lowers it byte-identical to
+# native. One more input the incumbent never rendered, not coverage lost.
+MAX_WALLED=34
 corpus=$(ls "$FIXTURE_DIR"/*.almd 2>/dev/null | wc -l | tr -d ' ')
 if [ "$corpus" -eq 0 ] || [ $((n + walled)) -ne "$corpus" ]; then
   echo "::error::host-determinism: compared $n + walled $walled != corpus $corpus in $FIXTURE_DIR — the scan went blind (#985)"

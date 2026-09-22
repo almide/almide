@@ -123,7 +123,13 @@ fail=0; n=0
 # alternatives. The structural leg emits both; the incumbent refuses the
 # non-scalar subject (C-147). The same two, for the same reason, as the
 # host-arch twin of this gate (scripts/check-host-determinism.sh).
-MAX_WALLED=33
+# 34 as of 2026-09-22: or_pattern_guarded_nullary.almd (C-323, #2463) — the
+# fixture pinning the native fixpoint fix (a guarded or-pattern arm over a
+# nullary constructor). The incumbent refuses its lifted guard arms as a
+# heap-result match outside its subset (proofs/walled-real-baseline.txt has the
+# five rows, owned by #2473); the structural leg lowers it byte-identical to
+# native. One more input the incumbent never rendered, not coverage lost.
+MAX_WALLED=34
 walled=0
 for fix in "$FIXTURE_DIR"/*.almd; do
   [ -e "$fix" ] || continue

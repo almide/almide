@@ -8,71 +8,94 @@
 // `math_exp.almd`, `math_log.almd`, `math_atan.almd`, `math_tanh.almd`, …),
 // registered in `crates/almide-mir/src/render_wasm/registry.rs`. (v0
 // dispatched through `emit_wasm/calls_math.rs`, retired in c71eff7b.)
+/// Magnitude of n; min_value wraps to itself.
 @intrinsic("almide_rt_math_abs")
 fn abs(n: Int) -> Int = _
 
+/// Arctangent in radians, within -pi/2..pi/2.
 @intrinsic("almide_rt_math_atan")
 fn atan(x: Float) -> Float = _
 
+/// Binomial n over k; 0 if k < 0 or k > n; overflow wraps.
 @intrinsic("almide_rt_math_choose")
 fn choose(n: Int, k: Int) -> Int = _
 
+/// Cosine of x radians; NaN for infinite x.
 @intrinsic("almide_rt_math_cos")
 fn cos(x: Float) -> Float = _
 
+/// Euler's number, 2.718281828459045.
 @intrinsic("almide_rt_math_e")
 fn e() -> Float = _
 
+/// e to the x; overflows to inf above ~709.78.
 @intrinsic("almide_rt_math_exp")
 fn exp(x: Float) -> Float = _
 
+/// Product 1..n; 1 for n <= 0; wraps past 20.
 @intrinsic("almide_rt_math_factorial")
 fn factorial(n: Int) -> Int = _
 
+/// Greater; a NaN operand is ignored; 0.0 > -0.0.
 @intrinsic("almide_rt_math_fmax")
 fn fmax(a: Float, b: Float) -> Float = _
 
+/// Lesser; a NaN operand is ignored; -0.0 < 0.0.
 @intrinsic("almide_rt_math_fmin")
 fn fmin(a: Float, b: Float) -> Float = _
 
+/// base to the exp; NaN for negative base, fractional exp.
 @intrinsic("almide_rt_math_fpow")
 fn fpow(base: Float, exp: Float) -> Float = _
 
+/// Natural log; -inf at 0, NaN for negative x.
 @intrinsic("almide_rt_math_log")
 fn log(x: Float) -> Float = _
 
+/// Base-10 log; -inf at 0, NaN for negative x.
 @intrinsic("almide_rt_math_log10")
 fn log10(x: Float) -> Float = _
 
+/// Base-2 log; -inf at 0, NaN for negative x.
 @intrinsic("almide_rt_math_log2")
 fn log2(x: Float) -> Float = _
 
+/// ln Gamma(x), Lanczos; inf at 0, unreliable for x < 0.
 @intrinsic("almide_rt_math_log_gamma")
 fn log_gamma(x: Float) -> Float = _
 
+/// Greater of a and b.
 @intrinsic("almide_rt_math_max")
 fn max(a: Int, b: Int) -> Int = _
 
+/// Lesser of a and b.
 @intrinsic("almide_rt_math_min")
 fn min(a: Int, b: Int) -> Int = _
 
+/// The circle constant, 3.141592653589793.
 @intrinsic("almide_rt_math_pi")
 fn pi() -> Float = _
 
+/// base to the exp, wrapping; negative exp aborts.
 @intrinsic("almide_rt_math_pow")
 fn pow(base: Int, exp: Int) -> Int = _
 
+/// -1, 0 or 1 by the sign of n.
 @intrinsic("almide_rt_math_sign")
 fn sign(n: Int) -> Int = _
 
+/// Sine of x radians; NaN for infinite x.
 @intrinsic("almide_rt_math_sin")
 fn sin(x: Float) -> Float = _
 
+/// Square root; NaN below 0, -0.0 stays -0.0.
 @intrinsic("almide_rt_math_sqrt")
 fn sqrt(x: Float) -> Float = _
 
+/// Tangent of x radians; NaN for infinite x.
 @intrinsic("almide_rt_math_tan")
 fn tan(x: Float) -> Float = _
 
+/// Hyperbolic tangent in -1..1; inf gives 1.0.
 @intrinsic("almide_rt_math_tanh")
 fn tanh(x: Float) -> Float = _

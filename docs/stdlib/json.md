@@ -361,20 +361,64 @@ Alice
 ## Signature index (15 functions)
 
 ```
+// Value or err; lenient, trailing text ignored.
+// @since 0.5.0 or earlier
 json.parse(text: String) -> Result[Value, String]
+
+// Compact JSON; a Float 1.0 prints as 1.
+// @since 0.5.0 or earlier
 json.stringify(v: Value) -> String
+
+// JSON with 2-space indent; [] and {} stay inline.
+// @since 0.5.0 or earlier
 json.stringify_pretty(j: Value) -> String
+
+// String at key; none if absent or non-string.
+// @since 0.5.0 or earlier
 json.get_string(j: Value, key: String) -> Option[String]
+
+// Int at key; none if absent or non-numeric.
+// @since 0.5.0 or earlier
 json.get_int(j: Value, key: String) -> Option[Int]
+
+// Float at key (Int widens); none if absent.
+// @since 0.5.0 or earlier
 json.get_float(j: Value, key: String) -> Option[Float]
+
+// Bool at key; none if absent or non-Bool.
+// @since 0.5.0 or earlier
 json.get_bool(j: Value, key: String) -> Option[Bool]
+
+// Array at key; none if absent or non-array.
+// @since 0.5.0 or earlier
 json.get_array(j: Value, key: String) -> Option[List[Value]]
+
+// Empty path: the whole value.
+// @since 0.5.13 or earlier
 json.root() -> JsonPath
+
+// path extended by object key name.
+// @since 0.5.13 or earlier
 json.field(path: JsonPath, name: String) -> JsonPath
+
+// path plus index i; negative i counts from end.
+// @since 0.5.13 or earlier
 json.index(path: JsonPath, i: Int) -> JsonPath
+
+// Value at path, or none if a step misses.
+// @since 0.5.13 or earlier
 json.get_path(j: Value, path: JsonPath) -> Option[Value]
+
+// j with value at path; missing keys created.
+// @since 0.5.13 or earlier
 json.set_path(j: Value, path: JsonPath, value: Value) -> Result[Value, String]
+
+// j minus the entry at path; unchanged if absent.
+// @since 0.5.13 or earlier
 json.remove_path(j: Value, path: JsonPath) -> Value
+
+// Object as key->string map (non-strings as JSON).
+// @since 0.12.3 or earlier
 json.to_map(j: Value) -> Option[Map[String, String]]
 ```
 

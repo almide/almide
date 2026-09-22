@@ -68,7 +68,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-030 | hex.encode / hex.decode are byte-identical incl. positional error detail | 0.24.0 | active | fixture | 2 |
 | C-031 | json get/set/remove_path edge cases match the infallible native oracle | 0.24.0 | active | fixture | 3 |
 | C-032 | Regex engine is byte-identical to the native engine over a fuzzed grammar | 0.24.0 | active | fuzz(220) | 3 |
-| C-033 | [Value semantics for aliased mutables (copy-on-write)](C-033-cow-truth-table.md) | 0.24.0 | active | fixture | 6 |
+| C-033 | [Value semantics for aliased mutables (copy-on-write)](C-033-cow-truth-table.md) | 0.24.0 | active | fixture | 8 |
 | C-034 | Out-of-range list ops clamp / no-op gracefully (no OOB heap access) | 0.24.0 | active | fixture | 8 |
 | C-035 | Effect-main errors terminate uniformly: Error: <msg> + exit 1 | 0.24.0 | active | fixture | 6 |
 | C-036 | Records, variants, and pattern matching are byte-identical | 0.24.0 | active | fixture | 7 |
@@ -358,7 +358,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-320 | A budget cut performs exit bookkeeping: exhausted is always Err, regions are independent, cut placement is unobservable | 0.60.0 | active | fixture | 1 |
 | C-321 | The fan prefetch split (start-all, await-in-arm-order, abandon-losers) is unobservable | 0.60.0 | active | fixture | 1 |
 | C-322 | Constructors are function values, the builtin trio included | 0.60.0 | active | fixture | 1 |
-| C-323 | Or-patterns: an arm's alternatives match as a union, binder-free | 0.60.0 | active | fixture | 5 |
+| C-323 | Or-patterns: an arm's alternatives match as a union, binder-free | 0.60.0 | active | fixture | 6 |
 | C-324 | Mut-param forwarding from a branch arm: folded to value flow or refused, never silently wrong | 0.60.0 | active | fixture | 2 |
 | C-325 | bytes.push growth is amortized: linear retention, byte-identical at scale | 0.60.0 | active | fixture | 1 |
 | C-326 | Branch-selected mut-fn calls hoist their write-back out of the arm: the gzip-inflate shape lowers structurally | 0.60.0 | active | fixture | 1 |
@@ -387,5 +387,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-349 | A `??` inside a fan arm keeps its default on both targets | 0.63.0 | active | fixture | 1 |
 | C-350 | process.exit accepts 0..=125 on every target, and any other code is a defined abort | 0.63.0 | active | fixture | 2 |
 | C-351 | literal process exit codes are checked against the portable domain | 0.63.0 | active | fixture | 0 |
-| C-352 | Or-pattern guards are evaluated once per matching alternative, in source order | 0.63.0 | active | fixture | 2 |
+| C-352 | Or-pattern guards are evaluated once per matching alternative, in source order | 0.63.0 | active | fixture | 3 |
 

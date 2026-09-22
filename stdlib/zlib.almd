@@ -3,29 +3,37 @@
 // Supports zlib (with header), deflate (raw), and gzip formats.
 // Requires `import zlib`.
 // ── Zlib (with header) ──
+/// Zlib-framed DEFLATE of data; bytes vary by target.
 @intrinsic("almide_rt_zlib_compress")
 effect fn compress(data: Bytes) -> Result[Bytes, String] = _
 
+/// Like compress; level clamped to 0..9, unused on wasm.
 @intrinsic("almide_rt_zlib_compress_level")
 effect fn compress_level(data: Bytes, level: Int) -> Result[Bytes, String] = _
 
+/// Inflated zlib stream; err on corrupt input.
 @intrinsic("almide_rt_zlib_decompress")
 effect fn decompress(data: Bytes) -> Result[Bytes, String] = _
 
 // ── Deflate (raw, no header — used by Minecraft protocol) ──
+/// Raw DEFLATE, no header; bytes vary by target.
 @intrinsic("almide_rt_zlib_deflate")
 effect fn deflate(data: Bytes) -> Result[Bytes, String] = _
 
+/// Like deflate; level clamped to 0..9, unused on wasm.
 @intrinsic("almide_rt_zlib_deflate_level")
 effect fn deflate_level(data: Bytes, level: Int) -> Result[Bytes, String] = _
 
+/// Raw DEFLATE decoded; err on a corrupt stream.
 @intrinsic("almide_rt_zlib_inflate")
 effect fn inflate(data: Bytes) -> Result[Bytes, String] = _
 
 // ── Gzip ──
+/// RFC 1952 gzip of data; bytes vary by target.
 @intrinsic("almide_rt_zlib_gzip")
 effect fn gzip(data: Bytes) -> Result[Bytes, String] = _
 
+/// Gzip member decoded; err on bad header or CRC.
 @intrinsic("almide_rt_zlib_gunzip")
 effect fn gunzip(data: Bytes) -> Result[Bytes, String] = _
 
@@ -34,6 +42,7 @@ effect fn gunzip(data: Bytes) -> Result[Bytes, String] = _
 // Adler-32 — the checksums the gzip/zlib containers already carry, exposed so
 // programs stop shipping their own tables. Both return the unsigned 32-bit
 // value as an Int.
+/// CRC-32 (IEEE) as an unsigned Int; 0 for empty data.
 fn crc32(data: Bytes) -> Int = {
   var acc = 4294967295
   var i = 0
@@ -53,6 +62,7 @@ fn crc32(data: Bytes) -> Int = {
   int.bxor(acc, 4294967295)
 }
 
+/// Adler-32 as an unsigned Int; 1 for empty data.
 fn adler32(data: Bytes) -> Int = {
   var s1 = 1
   var s2 = 0

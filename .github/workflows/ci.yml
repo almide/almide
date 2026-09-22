@@ -106,8 +106,8 @@ jobs:
     #
     # MATRIX jobs are the exception: a job-level `if` skips the job BEFORE the
     # matrix expands, so the one skipped check-run is named with the literal
-    # `${{ matrix.shard }}` and the required contexts `Test Rust (shard 0/4)`…
-    # `(shard 3/4)` never receive a run — the first docs-only PR (#1609) sat
+    # `${{ matrix.shard }}` and the required contexts `Test Rust (shard 1/4)`…
+    # `(shard 4/4)` never receive a run — the first docs-only PR (#1609) sat
     # BLOCKED on exactly that. test-rust therefore keeps its job-level guard
     # OFF and guards every STEP instead (`if: env.DOCS_ONLY != 'true'`): the
     # four shards expand, each finishes in seconds, each reports success under
@@ -416,7 +416,7 @@ jobs:
       - name: Balance report (informational — imbalance costs time, not coverage)
         run: |
           for i in 0 1 2 3; do
-            printf '  shard %s: %s target(s)\n' "$i" "$(bash scripts/ci-test-shard.sh --list-archive "$i" 4 /tmp/almide-archive/almide-tests.tar.zst | wc -l | tr -d ' ')"
+            printf '  shard %s/4: %s target(s)\n' "$((i + 1))" "$(bash scripts/ci-test-shard.sh --list-archive "$i" 4 /tmp/almide-archive/almide-tests.tar.zst | wc -l | tr -d ' ')"
           done
 
   test-rust:
@@ -451,7 +451,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3]
+        # 1-based for the job NAME (`Test Rust (shard 1/4)` … `(shard 4/4)`,
+        # the required contexts); the packer in scripts/ci-test-shard.sh keeps
+        # its 0-based index, handed `shard - 1` below. Renaming these changes
+        # the branch-protection contexts — swap them in the same landing.
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v7
         if: env.DOCS_ONLY != 'true'
@@ -495,7 +499,7 @@ jobs:
         # and runs this shard's share. `shard-coverage` below proves the four
         # shards' union is the whole set, so a partition bug reads as a RED
         # build rather than a fast green one.
-        run: bash scripts/ci-test-shard.sh --run-archive ${{ matrix.shard }} 4 /tmp/almide-archive/almide-tests.tar.zst
+        run: bash scripts/ci-test-shard.sh --run-archive $(( ${{ matrix.shard }} - 1 )) 4 /tmp/almide-archive/almide-tests.tar.zst
 
   test-rust-solo:
     # The corpus giants, one runner each (#2381). Five test targets are each

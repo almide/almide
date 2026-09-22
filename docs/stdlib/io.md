@@ -119,12 +119,32 @@ effect fn main() -> Unit = {
 ## Signature index (7 functions)
 
 ```
+// Next stdin line, newline cut; empty at EOF.
+// @since 0.5.0 or earlier
 effect io.read_line() -> String
+
+// Writes s, no newline, then flushes.
+// @since 0.5.0 or earlier
 effect io.print(s: String) -> Unit
+
+// Rest of stdin as text; empty at EOF.
+// @since 0.5.0 or earlier
 effect io.read_all() -> String
+
+// Next stdin byte 0..255, or -1 at EOF.
+// @since 0.12.1 or earlier
 io.read_byte() -> Int
+
+// Up to n stdin bytes; [] if n <= 0.
+// @since 0.12.1 or earlier
 io.read_n_bytes(n: Int) -> List[Int]
+
+// Low byte of each Int to stdout; unflushed.
+// @since 0.9.8 or earlier
 io.write_bytes(data: List[Int]) -> Unit
+
+// Raw data to stdout; no newline.
+// @since 0.9.8 or earlier
 io.write(data: Bytes) -> Unit
 ```
 

@@ -1,5 +1,12 @@
 // string_mutate — SELF-HOSTED in-place fixed-size string mutation for v1. `string.clear` truncates
 // the String to length 0 (Vec::clear): a BORROW + a single store of the byte-length field to 0 (the
-// cap/data are untouched). No ownership change (no alloc/drop), no host capability — sound, and the
-// caller sees it (shared block). v0: `s.clear()`. (string.push GROWS the buffer → deferred.)
+// cap/data are untouched). No ownership change (no alloc/drop), no host capability. v0: `s.clear()`.
+// (string.push GROWS the buffer → deferred.)
+//
+// NOT REACHED for a var or record-field receiver on either wasm leg (#2465): this body stores into
+// the block the receiver SHARES with every alias bound before the clear, so the alias observed the
+// clear (`[] []` where native prints `[] [hello]` — the released 0.62.0 default route). Both legs
+// lower `string.clear(s)` as a var write-back of a fresh empty block instead (the structural arm
+// `lower_string_clear`, the incumbent's `rewrite_clear`), the C-033 discipline. The body stays as
+// the registry row for the receivers neither lowering admits (a nested place).
 fn string_clear(s: String) -> Unit = prim.store32(prim.handle(s) + 4, 0)

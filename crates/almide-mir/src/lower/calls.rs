@@ -646,9 +646,14 @@ impl LowerCtx {
 
 /// The IN-PLACE `&mut` mutator surface: the bytes writers (set_*/write_*/fill/clear/
 /// copy_within/copy_from — their self-host bodies store through args[0]'s block) and
-/// the in-place `list.pop` (the same &mut protocol over a list receiver). Shared with
-/// `inline_pure_call_globals`, which must not substitute a global's initializer into a
-/// RECEIVER position: the write would land in a fresh temporary (#906).
+/// the in-place `list.pop` (the same &mut protocol over a list receiver), and
+/// `string.clear` (its self-host body stores the length header through args[0]'s
+/// block — #2465: it was missing here, so the released 0.62.0 route cleared the block
+/// an alias shared; a var / field receiver is now rewritten to its rebind before this
+/// predicate is consulted, and any receiver that still reaches the body gets the same
+/// COW-or-wall discipline as `bytes.clear`). Shared with `inline_pure_call_globals`,
+/// which must not substitute a global's initializer into a RECEIVER position: the write
+/// would land in a fresh temporary (#906).
 pub(crate) fn is_inplace_mutator(module: &str, func: &str) -> bool {
     (module == "bytes"
         && (func.starts_with("set_")
@@ -661,6 +666,7 @@ pub(crate) fn is_inplace_mutator(module: &str, func: &str) -> bool {
             || func.starts_with("append_")
             || matches!(func, "fill" | "clear" | "copy_within" | "copy_from")))
         || (module == "list" && func == "pop")
+        || (module == "string" && func == "clear")
 }
 
 /// Extracted from `LowerCtx::lower_pure_module_call_args` (codopsy8 complexity sweep): the

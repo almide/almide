@@ -7,6 +7,7 @@
 mod type SafePath = String
 
 // Validate and construct a SafePath. Rejects paths containing ".." segments.
+/// SafePath of s; err if any segment is "..".
 fn from_string(s: String) -> Result[SafePath, String] = {
   let segments = string.split(s, "/")
   let has_traversal = list.any(segments, (seg) => seg == "..")
@@ -14,13 +15,16 @@ fn from_string(s: String) -> Result[SafePath, String] = {
 }
 
 // Trust a raw path — explicit opt-in for known-safe paths.
+/// SafePath of s with no traversal check.
 fn trusted(s: String) -> SafePath = SafePath(s)
 
 // Unwrap SafePath to String
+/// Path text inside p, unchanged.
 fn to_string(p: SafePath) -> String = match p {
   SafePath(s) => s
 }
 
+/// base/child; an absolute child replaces base.
 fn join(base: String, child: String) -> String = {
   // If child is absolute, it replaces base (matches Rust Path::join behavior)
   if string.starts_with(child, "/") then child
@@ -31,6 +35,7 @@ fn join(base: String, child: String) -> String = {
   }
 }
 
+/// p minus last segment; "" if no slash.
 fn dirname(p: String) -> String = {
   let parts = string.split(p, "/")
   let n = list.len(parts)
@@ -43,6 +48,7 @@ fn dirname(p: String) -> String = {
   }
 }
 
+/// Last non-empty segment; "" for / or empty p.
 fn basename(p: String) -> String = {
   let parts = string.split(p, "/")
   let filtered = list.filter(parts, (s) => string.len(s) > 0)
@@ -52,6 +58,7 @@ fn basename(p: String) -> String = {
   }
 }
 
+/// After basename's last dot; none if no dot or dotfile.
 fn extension(p: String) -> String? = {
   let name = basename(p)
   let parts = string.split(name, ".")
@@ -62,8 +69,10 @@ fn extension(p: String) -> String? = {
   else if string.starts_with(name, ".") and n == 2 then none else list.last(parts)
 }
 
+/// True when p starts with /.
 fn is_absolute(p: String) -> Bool = string.starts_with(p, "/")
 
+/// Basename minus last extension; dotfiles as-is.
 fn stem(p: String) -> String = {
   let name = basename(p)
   let parts = string.split(name, ".")
@@ -78,6 +87,7 @@ fn stem(p: String) -> String = {
   }
 }
 
+/// Resolves . and .. lexically; "" becomes ".".
 fn normalize(p: String) -> String = {
   let absolute = string.starts_with(p, "/")
   let segments = string.split(p, "/")

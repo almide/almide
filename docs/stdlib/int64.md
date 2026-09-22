@@ -57,31 +57,108 @@ machine-enforced by the numeric-matrix gate in `almide docs-gen --check` (#956).
 ## Signature index (26 functions)
 
 ```
+// Wraps to 8 bits; 128 becomes -128.
+// @since 0.37.0 or earlier
 int64.to_int8(x: Int64) -> Int8
+
+// Wraps to 16 bits; 32768 becomes -32768.
+// @since 0.37.0 or earlier
 int64.to_int16(x: Int64) -> Int16
+
+// Wraps to 32 bits; 2^31 becomes -2^31.
+// @since 0.37.0 or earlier
 int64.to_int32(x: Int64) -> Int32
+
+// Wraps to 8 bits; -1 becomes 255.
+// @since 0.37.0 or earlier
 int64.to_uint8(x: Int64) -> UInt8
+
+// Wraps to 16 bits; -1 becomes 65535.
+// @since 0.37.0 or earlier
 int64.to_uint16(x: Int64) -> UInt16
+
+// Wraps to 32 bits; -1 becomes 2^32-1.
+// @since 0.37.0 or earlier
 int64.to_uint32(x: Int64) -> UInt32
+
+// Wraps to 64 bits; -1 becomes 2^64-1.
+// @since 0.37.0 or earlier
 int64.to_uint64(x: Int64) -> UInt64
+
+// Float32 value; may round when abs(x) > 2^24.
+// @since 0.37.0 or earlier
 int64.to_float32(x: Int64) -> Float32
+
+// Float64 value; may round when abs(x) > 2^53.
+// @since 0.37.0 or earlier
 int64.to_float64(x: Int64) -> Float64
+
+// Decimal digits, with - when negative.
+// @since 0.37.0 or earlier
 int64.to_string(x: Int64) -> String
+
+// some(x), or none if outside -128..127.
+// @since 0.38.0
 int64.to_int8_checked(x: Int64) -> Option[Int8]
+
+// Clamps x to -128..127.
+// @since 0.38.0
 int64.to_int8_saturating(x: Int64) -> Int8
+
+// some(x), or none if outside -32768..32767.
+// @since 0.38.0
 int64.to_int16_checked(x: Int64) -> Option[Int16]
+
+// Clamps x to -32768..32767.
+// @since 0.38.0
 int64.to_int16_saturating(x: Int64) -> Int16
+
+// some(x), or none if outside -2^31..2^31-1.
+// @since 0.38.0
 int64.to_int32_checked(x: Int64) -> Option[Int32]
+
+// Clamps x to -2^31..2^31-1.
+// @since 0.38.0
 int64.to_int32_saturating(x: Int64) -> Int32
+
+// some(x), or none if outside 0..255.
+// @since 0.38.0
 int64.to_uint8_checked(x: Int64) -> Option[UInt8]
+
+// Clamps x to 0..255.
+// @since 0.38.0
 int64.to_uint8_saturating(x: Int64) -> UInt8
+
+// some(x), or none if outside 0..65535.
+// @since 0.38.0
 int64.to_uint16_checked(x: Int64) -> Option[UInt16]
+
+// Clamps x to 0..65535.
+// @since 0.38.0
 int64.to_uint16_saturating(x: Int64) -> UInt16
+
+// some(x), or none if outside 0..2^32-1.
+// @since 0.38.0
 int64.to_uint32_checked(x: Int64) -> Option[UInt32]
+
+// Clamps x to 0..2^32-1.
+// @since 0.38.0
 int64.to_uint32_saturating(x: Int64) -> UInt32
+
+// some(x), or none if x is negative.
+// @since 0.38.0
 int64.to_uint64_checked(x: Int64) -> Option[UInt64]
+
+// Negative x clamps to 0.
+// @since 0.38.0
 int64.to_uint64_saturating(x: Int64) -> UInt64
+
+// Smallest Int64: -2^63.
+// @since 0.38.0
 int64.min_value() -> Int64
+
+// Largest Int64: 2^63-1.
+// @since 0.38.0
 int64.max_value() -> Int64
 ```
 

@@ -10,89 +10,114 @@
 // `almide_rt_map_map_values` (not `_map`) because `map_values` is the
 // Rust runtime fn name — it transforms values while preserving keys.
 // ── basic accessors ──
+/// An empty Map[K, V].
 @intrinsic("almide_rt_map_new")
 fn new[K, V]() -> Map[K, V] = _
 
+/// Value for key, or none when absent.
 @intrinsic("almide_rt_map_get")
 @borrow_ref(key)
 fn get[K, V](m: Map[K, V], key: K) -> V? = _
 
+/// Value for key, or default when absent.
 @intrinsic("almide_rt_map_get_or")
 @borrow_ref(key)
 fn get_or[K, V](m: Map[K, V], key: K, default: V) -> V = _
 
+/// Copy with key -> value; existing keys stay put.
 @intrinsic("almide_rt_map_set")
 @consume(m)
 fn set[K, V](m: Map[K, V], key: K, value: V) -> Map[K, V] = _
 
+/// true when key is present.
 @intrinsic("almide_rt_map_contains")
 @borrow_ref(key)
 fn contains[K, V](m: Map[K, V], key: K) -> Bool = _
 
+/// Copy without key; unchanged if absent.
 @intrinsic("almide_rt_map_remove")
 fn remove[K, V](m: Map[K, V], key: K) -> Map[K, V] = _
 
+/// Every key, in insertion order.
 @intrinsic("almide_rt_map_keys")
 fn keys[K, V](m: Map[K, V]) -> List[K] = _
 
+/// Every value, in key insertion order.
 @intrinsic("almide_rt_map_values")
 fn values[K, V](m: Map[K, V]) -> List[V] = _
 
+/// Entry count; 0 for an empty map.
 @intrinsic("almide_rt_map_len")
 fn len[K, V](m: Map[K, V]) -> Int = _
 
+/// (key, value) pairs in insertion order.
 @intrinsic("almide_rt_map_entries")
 fn entries[K, V](m: Map[K, V]) -> List[(K, V)] = _
 
+/// a plus b's entries; b wins on shared keys.
 @intrinsic("almide_rt_map_merge")
 fn merge[K, V](a: Map[K, V], b: Map[K, V]) -> Map[K, V] = _
 
+/// true iff m has no entries.
 @intrinsic("almide_rt_map_is_empty")
 fn is_empty[K, V](m: Map[K, V]) -> Bool = _
 
 // ── construction ──
+/// Map of pairs; a repeated key takes the last value.
 @intrinsic("almide_rt_map_from_entries")
 @consume(pairs)
 fn from_list[K, V](pairs: List[(K, V)]) -> Map[K, V] = _
 
 // ── closure-bearing (direct runtime dispatch — map has no IterChain) ──
+/// Same keys and order, values replaced by f(v).
 @intrinsic("almide_rt_map_map_values")
 fn map[K, V, B](m: Map[K, V], f: (V) -> B) -> Map[K, B] = _
 
+/// Entries where f(k, v) holds, order kept.
 @intrinsic("almide_rt_map_filter")
 fn filter[K, V](m: Map[K, V], f: (K, V) -> Bool) -> Map[K, V] = _
 
+/// Folds f(acc, k, v) in insertion order.
 @intrinsic("almide_rt_map_fold")
 fn fold[K, V, A](m: Map[K, V], init: A, f: (A, K, V) -> A) -> A = _
 
+/// true if some f(k, v) holds; false when empty.
 @intrinsic("almide_rt_map_any")
 fn any[K, V](m: Map[K, V], f: (K, V) -> Bool) -> Bool = _
 
+/// true if every f(k, v) holds; true when empty.
 @intrinsic("almide_rt_map_all")
 fn all[K, V](m: Map[K, V], f: (K, V) -> Bool) -> Bool = _
 
+/// Number of entries where f(k, v) holds.
 @intrinsic("almide_rt_map_count")
 fn count[K, V](m: Map[K, V], f: (K, V) -> Bool) -> Int = _
 
+/// First (k, v) where f holds, or none.
 @intrinsic("almide_rt_map_find")
 fn find[K, V](m: Map[K, V], f: (K, V) -> Bool) -> (K, V)? = _
 
+/// Copy with key's value f(v); no-op if absent.
 @intrinsic("almide_rt_map_update")
 fn update[K, V](m: Map[K, V], key: K, f: (V) -> V) -> Map[K, V] = _
 
 // Single-lookup insert-or-update — the aggregation hot-loop form (present →
 // f(old), absent → init). `get` + `set` spells the same thing with two
 // lookups and a cloned-out V; upsert does one walk in place.
+/// key -> f(old) if present, else init appended.
 @intrinsic("almide_rt_map_upsert")
 @consume(m)
 fn upsert[K, V](m: Map[K, V], key: K, init: V, f: (V) -> V) -> Map[K, V] = _
 
 // ── mutable (in-place) ──
+/// In-place key -> value; existing keys stay put.
 @intrinsic("almide_rt_map_insert")
 fn insert[K, V](mut m: Map[K, V], key: K, value: V) -> Unit = _
 
+/// Removes key in place; no-op when absent.
 @intrinsic("almide_rt_map_delete")
 fn delete[K, V](mut m: Map[K, V], key: K) -> Unit = _
 
+/// Removes every entry of m in place.
 @intrinsic("almide_rt_map_clear")
 fn clear[K, V](mut m: Map[K, V]) -> Unit = _

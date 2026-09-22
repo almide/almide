@@ -216,9 +216,16 @@ fn group_option_result_arms(
     let mut any_guard_or_lit = false;
     for arm in ctor_arms {
         let (key, fields) = parse(&arm.pattern)?;
-        if arm.guard.is_some()
-            || fields.iter().any(|p| matches!(p, IrPattern::Literal { .. }))
-            || fields.iter().any(is_nested_ctor)
+        // Only a ctor WITH a payload can be regrouped into a payload sub-match — a NULLARY
+        // ctor (`none`, a unit variant) has nothing to sub-match on, so its guard is kept
+        // verbatim below and must NOT count as a reason to fire: counting it made the regroup
+        // report a rewrite whose output was identical to its input on every pass after the
+        // first (`some(_) if g / none if g` — #2463), and the `desugar_heap_branches` fixpoint
+        // spun forever on that identity.
+        if !fields.is_empty()
+            && (arm.guard.is_some()
+                || fields.iter().any(|p| matches!(p, IrPattern::Literal { .. }))
+                || fields.iter().any(is_nested_ctor))
         {
             any_guard_or_lit = true;
         }
