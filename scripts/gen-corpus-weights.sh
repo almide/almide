@@ -57,7 +57,7 @@ render() {
   # Every stem any column measured, plus the corpus and the manifest (a stem
   # nothing measured gets an empty row: the reader takes the median).
   stems="$(
-    { ls spec/wasm_cross/*.almd | xargs -n1 basename | sed 's/\.almd$//'
+    { for f in spec/wasm_cross/*.almd; do basename "$f" .almd; done
       grep -v '^[[:space:]]*#' "$MANIFEST" | grep -v '^[[:space:]]*$' | cut -f3 | xargs -n1 basename | sed 's/\.almd$//'
       for col in $COLUMNS; do cut -f1 "$dir/$col.txt"; done
     } | sort -u
