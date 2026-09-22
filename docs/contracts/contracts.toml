@@ -2668,6 +2668,7 @@ evidence  = [
   { path = "spec/wasm_cross/bytes_writer_family.almd", class = "fixture" },
   { path = "spec/wasm_cross/bytes_temp_receiver.almd", class = "fixture" },
   { path = "spec/wasm_cross/endian_auto_import.almd", class = "fixture" },
+  { path = "spec/wasm_cross/bytes_copy_within_offset_domain.almd", class = "fixture" },
   { path = "crates/almide-interp/src/inplace.rs", name = "bytes_write_op", class = "by-construction" },
 ]
 [[contract]]
@@ -2861,6 +2862,7 @@ evidence  = [
   { path = "spec/wasm_cross/matrix_q_dims_guard.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_select_rows_q1_partial_block.almd", class = "fixture" },
   { path = "spec/wasm_cross/bytes_negative_offset_family.almd", class = "fixture" },
+  { path = "spec/wasm_cross/bytes_cursor_read_domain.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_domain_edges.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_q1_full_loader_cols_beyond_buffer.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_shape_family.almd", class = "fixture" },
