@@ -586,10 +586,14 @@ jobs:
           ALMIDE_EXPECT_TOOLS: "1"
           ALMIDE_CORPUS_SHARD: ${{ matrix.shard }}/2
           ALMIDE_CORPUS_SHARD_DIR: /tmp/corpus-shard
-          # #2457: the per-fixture walls this shard measured ride in the same
-          # artifact, so proofs/corpus-weights.txt (the table the slices
-          # balance on) is rendered from THIS runner's ratios —
-          # scripts/gen-corpus-weights.sh --render over the downloaded set.
+          # #2457/#2502: the per-fixture walls this shard measured ride in the
+          # same artifact (under `weights/`, so they cannot be confused with
+          # the partials beside them), because proofs/corpus-weights.txt — the
+          # table the slices balance on — must be rendered from THIS runner's
+          # ratios, not a laptop's: the Mac-measured table predicted 93 / 93 s
+          # per run_parity half and split this runner 479 / 1096 s. The refresh
+          # is `scripts/gen-corpus-weights.sh --from-ci <run-id>` over these
+          # artifacts; the weekly ratchet in shard-balance.yml says when.
           ALMIDE_CORPUS_WEIGHTS_DIR: /tmp/corpus-shard
         run: bash scripts/ci-test-shard.sh --run-solo-archive ${{ matrix.leg }} /tmp/almide-archive/almide-tests.tar.zst
 
@@ -597,12 +601,17 @@ jobs:
       # coverage job. Uploaded on failure too, so a red shard's partial
       # says which half it walked; the coverage job refuses to certify
       # over a red leg regardless.
+      #
+      # Retention outlives the run because the weight refresh reads these
+      # (#2502): the weekly ratchet names a run whose skew went red and the
+      # fix is `gen-corpus-weights.sh --from-ci <that run>`, which downloads
+      # its `weights/` files. At one day the named run was already gone.
       - uses: actions/upload-artifact@v7
         if: env.DOCS_ONLY != 'true' && !cancelled()
         with:
           name: corpus-shard-${{ matrix.leg }}-${{ matrix.shard }}
           path: /tmp/corpus-shard
-          retention-days: 1
+          retention-days: 7
           if-no-files-found: error
 
   almide-gates:
