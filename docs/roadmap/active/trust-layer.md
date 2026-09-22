@@ -40,6 +40,11 @@ reference implementation がデフォルトになる。
 | **L3 Verified** | ツールチェーンの安全性パス自体が機械検証済み。stdlib は oracle-paired | [Perceus-belt](almide-perceus-belt.md) Phase A (Lean) + oracle registry + grandfathered count 0 | 🔄 Phase B 済 / Phase A 未 | なし (RustBelt は学術成果でツールチェーン gate ではない) |
 | **L4 Measured** | 生成プロセス (LLM が書く工程) の品質が継続測定・公開されている | dojo daily MSR、モデル横断、公開ダッシュボード | 🔄 測定は稼働 / 公開形式未 | なし |
 
+> **この L0-L4 は trust の梯子で、`docs/specs/edit-locality.md` の L1-L3
+> （編集フレーム / クロスターゲット一致 / 診断局所性）とは別物**。番号は共有して
+> いるが主張は無関係で、どちらかがどちらかの前提になってもいない。文脈で判らない
+> ところでは、どちらの梯子かを書くこと。
+
 設計上の要点: **L1 が trust の技術的心臓**。L0 は「壁の外に出られない」だが、
 L1 は「壁の中で何ができるかをバイナリ自体が証明する」。エージェント運用者が
 load 前に manifest を policy と突き合わせられる — これが「レビューなしの信頼」の

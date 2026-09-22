@@ -16,6 +16,23 @@ The observable set is fixed once, by the contract ledger
 (`docs/contracts/contracts.toml`): **stdout bytes, stderr bytes, exit
 code**. Nothing below ever means anything else by "observable".
 
+**`L<n>` here is the edit-locality ladder, and it is not the only one in this
+repository.** `docs/roadmap/active/trust-layer.md` runs its own L0-L4 — L1
+"the binary proves what it can do inside the wall", L2-L4 "rederivable without
+taking anyone's word" — and a reader who meets `L3` in a roadmap document is
+as likely to be holding that one as this one. The two ladders are unrelated:
+nothing here is a prerequisite for anything there. Say which ladder you mean
+when the surrounding text does not make it obvious.
+
+**L1, L2 and L3 below are taken.** A new proof obligation on this ladder takes
+**L4** and upward, never a free-looking small number. almide/almide#2009 and
+#1998 were written against an earlier revision of this file that named L1
+only, and both propose "L2" and "L3" for obligations that are not the two
+defined here (#2009's are declared-frame preservation, and checked lowering
+that composes); those adopt L4 and L5 when #1997 fixes the surface they
+quantify over. A number reused for a second meaning is the defect this
+document exists to rule out of programs — it should not be in the document.
+
 ## 1. The invariant
 
 **L1 — Edit Frame.** Let `P` be a well-typed program and `e` an edit to the
