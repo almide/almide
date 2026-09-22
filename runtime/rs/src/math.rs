@@ -160,7 +160,32 @@ const ALMIDE_LANCZOS_G_OFFSET: f64 = 7.5; // t = x + g + 0.5  with g = 7
 /// `0.5 · ln(2π)`, pinned to its exact f64 bit-pattern (= `(2π).ln() * 0.5`),
 /// shared verbatim with the wasm emit so the constant term cannot drift.
 const ALMIDE_HALF_LN_2PI: f64 = 0.9189385332046727;
+/// `ln|Γ(x)|` over the whole real line (#2493). The Lanczos series below is only
+/// valid for `x >= 0.5`: under it the log arguments reach zero or go negative, and
+/// `log_gamma(-0.5)` was NaN, `log_gamma(-6.5)` inf, `log_gamma(-1)` NaN. Below 0.5
+/// the REFLECTION formula `ln|Γ(x)| = ln(π / |sin(πx)|) - ln Γ(1 - x)` moves the
+/// work to `1 - x > 0.5`. `|sin(πx)|` is computed on the reduced fraction
+/// (`f = frac(|x|)`, folded to `min(f, 1 - f)`, both exact), so it keeps full
+/// relative accuracy next to the integers where `π·x` itself would round away the
+/// answer. The non-positive integers are poles: `f = 0` gives `+inf`, and so does
+/// `-inf` (its fraction is NaN) and `+inf` (the series would compute `inf - inf`),
+/// matching C `lgamma`. NaN stays NaN (it fails the `< 0.5` test and the series
+/// propagates it). Every op is shared with stdlib/math_lgamma.almd — the vendored
+/// musl `sin` and `log` on both sides — so the result stays bit-identical (C-051).
 pub fn almide_rt_math_log_gamma(x: f64) -> f64 {
+    if x < 0.5 {
+        let y = if x < 0.0 { -x } else { x };
+        let f = y - y.floor();
+        let f = if f > 0.5 { 1.0 - f } else { f };
+        let s = almide_rt_libm_sin(std::f64::consts::PI * f);
+        // `!(s > 0)`: a pole (s = 0) or -inf (s = NaN).
+        if !(s > 0.0) { return f64::INFINITY; }
+        return almide_rt_libm_log(std::f64::consts::PI / s) - almide_rt_math_log_gamma_lanczos(1.0 - x);
+    }
+    if x == f64::INFINITY { return f64::INFINITY; }
+    almide_rt_math_log_gamma_lanczos(x)
+}
+fn almide_rt_math_log_gamma_lanczos(x: f64) -> f64 {
     // Lanczos computes Γ(x+1), so shift input by -1 to get Γ(x)
     let x = x - 1.0;
     let coeffs = [

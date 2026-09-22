@@ -4,9 +4,17 @@
 // input shifted by -1. The two natural-log terms route through the self-hosted
 // math.log (same vendored libm log v0 uses), so the result byte-matches v0.
 //
+// Below x = 0.5 the series is not valid (#2493: log_gamma(-0.5) was NaN,
+// log_gamma(-6.5) inf), so the REFLECTION formula
+// `ln|Γ(x)| = ln(π / |sin(πx)|) - ln Γ(1 - x)` moves the work to 1 - x > 0.5, with
+// |sin(πx)| taken on the reduced fraction min(f, 1 - f), f = frac(|x|) (both exact),
+// through the self-hosted math.sin (the vendored libm sin v0 uses). The non-positive
+// integers are poles (+inf), as are -inf and +inf; NaN stays NaN. The op sequence is
+// v0's, op for op — see the native doc comment for the reasoning.
+//
 // Float constants are materialized via prim.ffrombits(<exact i64 bits>) — decimal
 // literals drift ~1 ULP. The accumulation order matches Rust left-assoc exactly.
-fn math_log_gamma(x0: Float) -> Float = {
+fn __lgamma_lanczos(x0: Float) -> Float = {
   let x = x0 - 1.0
   let c0 = prim.ffrombits(4607182418800015696)
   let c1 = prim.ffrombits(4649161951908399877)
@@ -24,4 +32,37 @@ fn math_log_gamma(x0: Float) -> Float = {
   let lt = math.log(t)
   let lag = math.log(ag)
   half_ln_2pi + (x + 0.5) * lt - t + lag
+}
+
+// ln(π / s) - ln Γ(1 - x), for s = |sin(πx)| > 0.
+fn __lgamma_reflect_finite(x: Float, s: Float, pi: Float) -> Float = {
+  let q = prim.fdiv(pi, s)
+  let l = math.log(q)
+  let w = prim.fsub(1.0, x)
+  let g = __lgamma_lanczos(w)
+  prim.fsub(l, g)
+}
+
+// x < 0.5 (or -inf): the reflection branch. `pos` false = a pole (s = 0) or -inf (s NaN).
+fn __lgamma_reflect(x: Float) -> Float = {
+  let neg = prim.flt(x, 0.0)
+  let y = if neg then prim.fneg(x) else x
+  let fl = prim.ffloor(y)
+  let f0 = prim.fsub(y, fl)
+  let hi = prim.fgt(f0, 0.5)
+  let f = if hi then prim.fsub(1.0, f0) else f0
+  let pi = prim.ffrombits(4614256656552045848)
+  let arg = prim.fmul(pi, f)
+  let s = math.sin(arg)
+  let pos = prim.fgt(s, 0.0)
+  if pos then __lgamma_reflect_finite(x, s, pi)
+  else prim.ffrombits(9218868437227405312)
+}
+
+fn math_log_gamma(x0: Float) -> Float = {
+  let small = prim.flt(x0, 0.5)
+  let pinf = prim.ffrombits(9218868437227405312)
+  let top = prim.feq(x0, pinf)
+  if small then __lgamma_reflect(x0)
+  else if top then pinf else __lgamma_lanczos(x0)
 }

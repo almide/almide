@@ -62,7 +62,9 @@ fn log10(x: Float) -> Float = _
 @intrinsic("almide_rt_math_log2")
 fn log2(x: Float) -> Float = _
 
-/// ln Gamma(x), Lanczos; inf at 0, unreliable for x < 0.
+/// ln|Gamma(x)| on the whole line; inf at the poles.
+// ln|Γ(x)| on the whole real line — reflection below 0.5 — bit-identical on
+// every leg (C-051, #2493); the non-positive integers are poles (+inf).
 @intrinsic("almide_rt_math_log_gamma")
 fn log_gamma(x: Float) -> Float = _
 
