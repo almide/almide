@@ -22,21 +22,29 @@ hands that to rustc:
 Both paths call `strip_test_blocks`, which deletes every `#[cfg(test)]` block
 before rustc sees it.
 
-`strip_test_blocks` counts braces per line, so a test body whose STRING
-literals hold unbalanced braces makes it over-run. `regex.rs` had two
-(`r"a\{x"`, `r"a{2"`, +4 depth), and the stripper consequently ran to
-end-of-file and also ate the trailing `// ---- End Regex Runtime ----`
-comment. That was harmless only because the test module was the last item in
-the file; real code after such a block would have been deleted from every
-emitted crate, silently. The kernel's copy of the stripper has the same shape;
-all ten `crates/almide-kernel/src/*.rs` test modules are last in their file
-today, so nothing is at risk there either — but neither fact is checked.
+`strip_test_blocks` used to count braces per line with no notion of a string
+literal, so a test body whose literals held unbalanced braces made it over-run
+and delete to end of file. `regex.rs` had two (`r"a\{x"`, `r"a{2"`, +4 depth),
+and the stripper ran from the test module to the file's last line, eating the
+trailing `// ---- End Regex Runtime ----` comment on the way. It was harmless
+only because that module was the last item in the file; real code after such a
+block would have been deleted from every emitted crate, silently. There were
+two copies of the stripper, byte-identical — this one and the build script's,
+over `crates/almide-kernel/src/*.rs` — and neither fact was checked.
 
-Deleting the seven test modules (#2507) therefore changed the EMITTED text by
-exactly eight lines, all blank or comment, verified by running
-`strip_test_blocks` over the before and after sources: six files lost one blank
-line, and `regex.rs` regained the comment the over-run had been eating. No code
-line moved.
+Both are fixed and both are checked (#2511). There is now ONE stripper,
+`crates/almide-codegen/src/strip_test_blocks.rs`, `#[path]`-shared with the
+build script. It tracks literal state instead of counting characters (normal
+and raw strings at any hash depth, char literals told apart from lifetimes,
+line and nested block comments, all carrying across lines), and losing a
+block's end is an ERROR naming the file and the opening line rather than a
+silent delete to EOF — "I could not strip it" is a safe failure, "I stripped
+everything after it" is not.
+
+Deleting the seven test modules (#2507) changed the EMITTED text by exactly
+eight lines, all blank or comment, verified by running `strip_test_blocks` over
+the before and after sources: six files lost one blank line, and `regex.rs`
+regained the comment the over-run had been eating. No code line moved.
 
 Because a `runtime/rs/src` edit changes the embedded text, CI regenerates
 `rust_runtime.rs` / `runtime_fn_modes.rs` and fails on any diff (ci.yml,
