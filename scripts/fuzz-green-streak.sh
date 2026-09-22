@@ -34,6 +34,11 @@
 # The rule is scripts/lib/fuzz-night-line.sh (`fuzz_night_score`), shared
 # with scripts/fuzz-track-record.sh.
 #
+# RECLAIMED IS NOT UNRECORDED (#2513): a shard the runner took uploaded
+# nothing, but its job log still carries the seconds it fuzzed and the findings
+# it had by then, so every `missing=` shard is read back out of its log before
+# the night is scored. `FUZZ_NIGHT_RECOVER=0` scores the lines as written.
+#
 # With --update, the dated ledger at
 # research/benchmark/fuzz-green/README.md is refreshed (BENCHMARKS.md
 # discipline: measurements are dated, never overwritten silently).
@@ -70,6 +75,10 @@ while IFS=$'\t' read -r id run_conc created; do
     IFS=$'\t' read -r vid vconc <<<"$vjob"
     log=$(gh api "repos/$REPO/actions/jobs/$vid/logs" 2>/dev/null || true)
     line=$(fuzz_night_line <(printf '%s\n' "$log"))
+    # Same recovery the track record applies (#2513), so the two meters cannot
+    # disagree about what a night delivered. Only nights with a `missing=` list
+    # cost anything: one API call per shard that was reclaimed.
+    [ "${FUZZ_NIGHT_RECOVER:-1}" = "0" ] || line=$(fuzz_night_recover "$REPO" "$jobs" "$line" "$day run $id")
     IFS=$'\t' read -r _full green _coverage _text <<<"$(fuzz_night_score "$vconc" "$line")"
     if [ "$green" -eq 1 ]; then v="success"
     elif [ "$vconc" != "success" ]; then v="$vconc"

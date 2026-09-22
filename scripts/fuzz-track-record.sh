@@ -35,6 +35,16 @@
 # scored as full — an absent value read as a full night would be the same
 # defect one level up.
 #
+# UNKNOWN IS NOT THE SAME AS LOST (#2513). A reclaimed runner uploads nothing,
+# but its job LOG survives the kill and its last progress line holds the seconds
+# it fuzzed, the programs it generated and its findings up to that second. Every
+# shard a night recorded as `missing=` is therefore looked up here before the
+# night is scored, so a night is measured on what it RAN. Run 35702279584 read
+# `4/8 50% PARTIAL` with four shards' 100s/180s/275s/295s sitting in their logs;
+# recovered, it is 85% — a streak night that had been scored as a broken one.
+# `FUZZ_NIGHT_RECOVER=0` turns the lookups off (one API call per reclaimed
+# shard) and scores the lines exactly as they were written.
+#
 # Closure conditions this makes checkable with one command:
 #   #924 — 14 consecutive nights with a verdict at >= 75% delivered
 #   #796 —  2 consecutive green nights (same coverage bar)
@@ -94,6 +104,12 @@ while IFS=$'\t' read -r id conclusion created; do
     vid=$(jq -r "[.jobs[] | select(.name == \"$VERDICT_JOB\") | .id][0]" <<<"$jobs")
     log=$(gh api "repos/$REPO/actions/jobs/$vid/logs" 2>/dev/null || true)
     line=$(fuzz_night_line <(printf '%s\n' "$log"))
+    # The shards the verdict recorded as missing, read back out of their own
+    # job logs (#2513). A night written before the recovery existed is scored
+    # on what it RAN, not on what it uploaded — the streak measures coverage,
+    # and the coverage was never lost, only unread. Costs one API call per
+    # reclaimed shard, and only for nights that had one.
+    [ "${FUZZ_NIGHT_RECOVER:-1}" = "0" ] || line=$(fuzz_night_recover "$REPO" "$jobs" "$line" "$date run $id")
     IFS=$'\t' read -r full green coverage verdict <<<"$(fuzz_night_score "$vjob" "$line")"
   fi
 
