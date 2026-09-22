@@ -190,13 +190,13 @@ impl Checker {
             // emitted struct renders the wrapped value. So a newtype over
             // one of the gaps above is the same gap, named for the reader.
             Ty::Named(name, _) => {
-                if let Some(target) = self.newtype_target(*name) {
-                    if let Some(g) = self.string_form_gap(&target) {
-                        return gap(
-                            format!("`{}` wraps {} — {}", name.as_str(), target.display(), g.what),
-                            g.hint,
-                        );
-                    }
+                if let Some(target) = self.newtype_target(*name)
+                    && let Some(g) = self.string_form_gap(&target)
+                {
+                    return gap(
+                        format!("`{}` wraps {} — {}", name.as_str(), target.display(), g.what),
+                        g.hint,
+                    );
                 }
                 let leaf = self.unprintable_leaf_in(ty, &mut Vec::new())?;
                 gap(format!("a `{}` value — it holds {leaf}", ty.display()), HOLDS_HINT)
@@ -453,10 +453,11 @@ impl Checker {
         }
         // The other end, when it is in this file too, underlined as well.
         for other in std::iter::once(&req.origin).chain(std::iter::once(&call.site)) {
-            if here(other) && other.span != anchor.span {
-                if let Some(s) = other.span {
-                    diag = diag.with_secondary(s.line, Some(s.col), if other.span == req.origin.span { "the segment" } else { "the call" });
-                }
+            if here(other)
+                && other.span != anchor.span
+                && let Some(s) = other.span
+            {
+                diag = diag.with_secondary(s.line, Some(s.col), if other.span == req.origin.span { "the segment" } else { "the call" });
             }
         }
         self.diagnostics.push(diag);
