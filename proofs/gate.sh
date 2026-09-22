@@ -358,7 +358,9 @@ echo "ok   structural-tamper(step4): an unreleased statement-call result is reje
 # ── #2152: almide-verify against the extracted checker on witnesses NO
 # producer wrote. The rows above only reach the shapes the emitters produce;
 # the transcription must agree on the whole input space, malformed bytes
-# included (a dangling `(`, a stray `x`, a huge id, an out-of-range callee).
+# included (a dangling `(`, a stray `x`, a zero-padded id, an out-of-range
+# callee). A crash of the reference (exit 2) is a harness failure, never a
+# verdict.
 # Seeded, so a disagreement reproduces; every witness goes through the
 # extracted checker one file at a time and through almide-verify as ONE
 # certificate bundle — which also exercises the bundle reader on every shape.
@@ -373,6 +375,11 @@ checker, verifier = sys.argv[1], sys.argv[2]
 rng = random.Random(2152)
 PER_MODE = 200
 
+# Ids stay below ~10^6: the extracted checker's `nat` is Peano (Extract.v maps
+# no ExtrOcamlNatInt), so an id is built as that many successor cells and a
+# 20-digit id never finishes parsing. almide-verify decides such ids exactly
+# (normalized digit strings; its own unit tests cover values beyond u64) —
+# only this comparison is bounded, by the reference's cost, not by semantics.
 def nums(k, hi):
     out = []
     for _ in range(k):
@@ -380,19 +387,41 @@ def nums(k, hi):
         if r < 0.05:
             out.append("0" * rng.randint(1, 3) + str(rng.randint(0, hi)))   # leading zeros
         elif r < 0.08:
-            out.append(str(rng.randint(10**19, 10**21)))                    # beyond u64
+            out.append(str(rng.randint(10**4, 10**6)))                      # multi-digit, out of range
         else:
             out.append(str(rng.randint(0, hi)))
     return rng.choice([" ", "  ", ","]).join(out)
 
+def ops(n):
+    # Mostly net-zero tokens, so bodies and arms balance often enough to
+    # exercise the accept side; the singles break the balance the rest of the time.
+    return "".join(rng.choice(["di", "di", "id", "ad", "b", "i", "d", "m"]) for _ in range(n))
+
 def ownership():
-    return "".join(rng.choice("iiiidddaambrIDxX(){}[]||\n ") for _ in range(rng.randint(0, 28)))
+    # Half byte soup (malformed nesting, stray markers), half the emitter's
+    # shapes with random contents — the soup alone almost never balances,
+    # and the accept side needs coverage too.
+    if rng.random() < 0.5:
+        return "".join(rng.choice("iiiidddaambrIDxX(){}[]||\n ") for _ in range(rng.randint(0, 28)))
+    def item():
+        r = rng.random()
+        if r < 0.5:
+            return ops(1)
+        if r < 0.65:
+            return "(" + ops(rng.randint(0, 3)) + ")"
+        if r < 0.8:
+            return "[" + ops(rng.randint(0, 3)) + "|" + ops(rng.randint(0, 2)) + "]"
+        return "{" + ops(rng.randint(0, 3)) + rng.choice(["", "x"]) + "|" + ops(rng.randint(0, 3)) + rng.choice(["", "", "x"]) + "}"
+    return "\n".join("i" + "".join(item() for _ in range(rng.randint(0, 4))) + rng.choice(["d", "m", "dd", ""])
+                     for _ in range(rng.randint(1, 3)))
 
 def subset():
     s = nums(rng.randint(0, 5), 6) + "|" + nums(rng.randint(0, 4), 6)
     if rng.random() < 0.1:
         s += rng.choice(["|3", ";1", "x", "\n2"])
-    return s.replace("|", "") if rng.random() < 0.05 else s
+    # No bar at all: a separator takes its place, so two ids never fuse into
+    # one the Peano reference cannot build.
+    return s.replace("|", " ") if rng.random() < 0.05 else s
 
 def graph():
     k = rng.randint(1, 5)
@@ -416,7 +445,13 @@ with tempfile.TemporaryDirectory() as d:
     for i, (mode, w) in enumerate(cases):
         with open(one, "w") as f:
             f.write(w)
-        want.append(subprocess.run([checker, mode, one], capture_output=True).returncode == 0)
+        rc = subprocess.run([checker, mode, one], capture_output=True).returncode
+        if rc not in (0, 1):
+            # A crash (the extracted checker exits 2 on Stack_overflow) is not
+            # a verdict; counting it as REJECT would manufacture a mismatch.
+            print(f"FAIL differential harness: the extracted checker gave no verdict (exit {rc}) on [{mode}] {w!r}")
+            sys.exit(1)
+        want.append(rc == 0)
         bundle += b"witness %s %d w%d\n" % (mode.encode(), len(w.encode()), i) + w.encode() + b"\n"
     path = os.path.join(d, "all.bundle")
     with open(path, "wb") as f:
