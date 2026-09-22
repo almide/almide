@@ -7,6 +7,13 @@ name: Shard balance ratchet
 # `Cargo tests` totals from its OWN logs and fails when max/min exceeds
 # the ratio — the fix it demands is `scripts/refresh-ci-test-weights.sh`
 # plus a commit of the refreshed file.
+#
+# #2502 adds the corpus legs, which have the same failure mode one layer
+# down: proofs/corpus-weights.txt slices the ten `Test Rust (solo <leg> k/2)`
+# jobs, its first version was measured on a Mac, and the runner's run_parity
+# halves stayed 479 / 1096 s while the table predicted 93 / 93 s. Same
+# instrument, same demand: measure the run's own job logs, fail on skew, name
+# the refresh (`gen-corpus-weights.sh --from-ci`).
 
 on:
   schedule:
@@ -30,3 +37,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash scripts/refresh-ci-test-weights.sh --check
+      # `always()`: a red test-shard skew must not hide the corpus verdict —
+      # they are separate weight files with separate refreshes, and reading
+      # only the first would leave the second stale for another week.
+      - name: measure the same run's corpus-leg skew (the k/2 fixture slices)
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/gen-corpus-weights.sh --check
