@@ -27,6 +27,28 @@ test "process.is_alive returns false for nonexistent PID" {
   assert_eq(process.is_alive(99999999), false)
 }
 
+test "process.is_alive is false once a spawned child has exited (#2494)" {
+  // The child is reaped by the poll, so a zombie no longer answers `kill -0`.
+  let is_win = (process.env("OS") ?? "") == "Windows_NT"
+  let pid = if is_win then process.spawn("cmd", ["/c", "exit"])!
+  else process.spawn("true", [])!
+  process.sleep(500)
+  assert_eq(process.is_alive(pid), false)
+  assert_eq(process.is_alive(pid), false)
+}
+
+test "process.is_alive is false after process.kill" {
+  let is_win = (process.env("OS") ?? "") == "Windows_NT"
+  let cmd = if is_win then "ping" else "sleep"
+  let args = if is_win then ["-n", "100", "127.0.0.1"]
+  else ["100"]
+  let pid = process.spawn(cmd, args)!
+  assert_eq(process.is_alive(pid), true)
+  process.kill(pid, 9)!
+  process.sleep(300)
+  assert_eq(process.is_alive(pid), false)
+}
+
 test "process.spawn failure for bad command" {
   let result = process.spawn("nonexistent_command_xyz", [])
   match result {
