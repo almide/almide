@@ -111,20 +111,42 @@ pub fn almide_rt_math_pow(base: i64, exp: i64) -> i64 {
 pub fn almide_rt_math_factorial(n: i64) -> i64 {
     (1..=n).product()
 }
-// The accumulation is i64 and WRAPPING, matching Almide's Int and matching the
-// self-host `__choose_loop` exactly. It used to run in u64: `choose(i64::MAX, 2)` came
-// out 4611686018427387905 here and -4611686018427387903 there, because an overflowing
-// product wraps differently in the two widths. Neither value is a binomial coefficient;
-// they simply have to be the same non-answer. `n >= k >= 0` holds past the guard, so
-// only the product can overflow.
+// C(n, k) EXACTLY, reduced mod 2^64 the way every Int product is (C-170, C-056): the
+// true binomial whenever it fits in an Int, and its two's-complement wrap when it does
+// not (`choose(67, 33)` = C(67,33) - 2^64). #2491: the old running product
+// `result * (n - i) / (i + 1)` multiplied before it divided, so the product left i64
+// several steps before the answer did, and `choose(62, 31)` came out negative although
+// C(62,31) < 2^63. A wrapped product cannot be divided exactly, so the product is kept
+// in a form where division is not needed: each factor's power of two is counted
+// (`twos`, which after step i is v2(C(n, i+1)) >= 0 because every partial product is a
+// binomial coefficient) and its odd part is multiplied in mod 2^64; odd numbers are
+// invertible mod 2^64, so the odd denominators are divided out once at the end by
+// their Newton inverse. Every step is wrapping u64 arithmetic, the same ops the
+// self-host `math_choose` (stdlib/math_int.almd) runs on the wasm legs. `n >= k >= 0`
+// holds past the guard, so `n - i >= 1` and `i + 1 >= 1`.
 pub fn almide_rt_math_choose(n: i64, k: i64) -> i64 {
     if k < 0 || k > n { return 0; }
     let k = k.min(n - k);
-    let mut result: i64 = 1;
+    let mut odd_num: u64 = 1;
+    let mut odd_den: u64 = 1;
+    let mut twos: u32 = 0;
     for i in 0..k {
-        result = result.wrapping_mul(n - i) / (i + 1);
+        let a = (n - i) as u64;
+        let b = (i + 1) as u64;
+        let (ta, tb) = (a.trailing_zeros(), b.trailing_zeros());
+        odd_num = odd_num.wrapping_mul(a >> ta);
+        odd_den = odd_den.wrapping_mul(b >> tb);
+        twos = twos + ta - tb;
     }
-    result
+    // x = odd_den is its own inverse mod 2^3; each Newton step doubles the correct
+    // low bits (3, 6, 12, 24, 48, 96), so five steps reach 64.
+    let mut inv = odd_den;
+    for _ in 0..5 {
+        inv = inv.wrapping_mul(2u64.wrapping_sub(odd_den.wrapping_mul(inv)));
+    }
+    let odd = odd_num.wrapping_mul(inv);
+    // v2(C(n, k)) <= log2(n) < 63, so the shift never reaches the width.
+    (if twos >= 64 { 0 } else { odd << twos }) as i64
 }
 // Lanczos approximation (g=7, n=9 coefficients). Both the native and the wasm
 // log_gamma compute this SAME polynomial; the only ULP-level divergence was the

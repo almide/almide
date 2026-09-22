@@ -17,6 +17,8 @@ fn abs(n: Int) -> Int = _
 fn atan(x: Float) -> Float = _
 
 /// Binomial n over k; 0 if k < 0 or k > n; overflow wraps.
+// C(n, k) exactly whenever it fits in an Int, its wrap mod 2^64 past that
+// (#2491, C-363); 0 for k < 0 or k > n.
 @intrinsic("almide_rt_math_choose")
 fn choose(n: Int, k: Int) -> Int = _
 
