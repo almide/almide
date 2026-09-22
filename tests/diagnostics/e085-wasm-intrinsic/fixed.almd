@@ -1,0 +1,4 @@
+// E085: the stdlib function is the one place the symbol is bound.
+fn magnitude(n: Int) -> Int = math.abs(n)
+
+fn main() -> Unit = println(int.to_string(magnitude(-3)))
