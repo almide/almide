@@ -48,6 +48,7 @@ structural leg.
 | AST → IR lowering | trusted | the checker's `TypeMap` is the source of truth; 974-file emit baselines |
 | IR → MIR lowering | **trusted** | ← *this is the gap F3 (#777) is about* |
 | MIR ownership witness | **proven to be re-checkable** | `proofs/gate.sh`: the untrusted producer emits a witness, the kernel-proven checker re-verifies it |
+| `almide-verify` (the checker a binary distribution runs, #2152) | trusted — agreement-gated, not proven | an independently versioned Rust transcription of the five Coq checkers, linking no compiler crate; `proofs/gate.sh` holds it to the extracted checker's verdict on every row plus a seeded random differential, `proofs/corpus-wall.sh` on the whole corpus witness set |
 | MIR → wasm bytes | trusted | `proofs/check-wasm-bytes.sh`, `WasmEncode.v` for the `rc_inc`/`rc_dec` byte trees |
 | wasmtime | unqualified tool | out of scope by construction |
 
@@ -164,7 +165,7 @@ from its body on a bare-parameter tail) — the gate bites.
 
 | Gate | Claim | NOT a claim |
 |---|---|---|
-| `proofs/gate.sh` | the witnessed MIR is RC-safe, name-total, capability-bounded | that the wasm bytes match the witness |
+| `proofs/gate.sh` | the witnessed MIR is RC-safe, name-total, capability-bounded; `almide-verify` gives the extracted checker's verdict on every row and on 1,000 seeded random witnesses | that the wasm bytes match the witness; that `almide-verify` agrees on inputs outside those rows (it carries no theorem) |
 | `proofs/corpus-wall.sh` | `lower_function` is total over the corpus: every function is `Ok` or an explicit `Unsupported` | that an `Ok` function has correct output |
 | `proofs/output-parity.sh` | native and wasm agree, for the baseline set | anything outside that set |
 | `scripts/check-contracts.sh` | every observable cross-target promise has executable evidence | that the promise is the right one |
