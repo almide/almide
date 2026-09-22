@@ -726,6 +726,15 @@ measures = "symmetric difference between `@intrinsic(\"almide_rt_*\")` declarati
 varies = "intrinsic-boundary landing (2026-08-17, #1468): a dangling `@intrinsic` name read 1 on the declaration side; the join reads 0 both ways on the tree"
 
 [[gate]]
+path = "scripts/check-runtime-test-placement.sh"
+reads = "scalar"
+wired_by = ".github/workflows/ci.yml"
+class = "NEGATIVE_TESTED"
+evidence = "landing (2026-09-22, #2507): a forged runtime/rs/burn/__forge_2507.rs carrying `#[cfg(test)] mod tests { #[test] fn forged() }` made the gate exit 1 listing all three marker lines; deleting it restored exit 0. The rule the gate encodes was measured first, not assumed: `runtime/rs` added to the root workspace `members` and `cargo check -p almide_rt` reports 220 errors (124 E0425, 83 E0433, 13 E0405) across 15 of the 25 modules lib.rs declares, in two classes — prelude items that exist only as string literals in crates/almide-codegen/src/lib.rs (almide_stdout_flush, AlmideRepr, AlmideMap, AlmideValue via the flat namespace) and cross-module calls with no path (json.rs -> almide_rt_value_stringify, math.rs -> almide_rt_libm_*, fan.rs -> almide_rt_list_par_*, sse.rs -> almide_rt_json_parse). Every emitted crate additionally runs strip_test_blocks, so the block is deleted before rustc sees it on the one path that DOES compile this source."
+measures = "count of Rust unit-test markers (`#[cfg(test)]`, `#[test]`, `mod tests {`) under runtime/rs"
+varies = "#2507 (2026-09-22): the marker count read 34 on origin/develop d377ed228 (seven dead test modules in env/int/string/list/base64/process/regex) and 0 after they were deleted; the forged control read 3"
+
+[[gate]]
 path = "scripts/check-wasm-runtime-ratio.sh"
 reads = "UNCLASSIFIED"
 wired_by = ".github/workflows/ci.yml"
