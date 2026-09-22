@@ -195,8 +195,16 @@ worker dir を空にする**(#2504)。判定は「その dir 直下と `target/<
 — キャッシュヒットが実行するバイナリの mtime を更新する(#2500)ので、ビルドしていなくても
 「使った」dir は残る。掃引は 1 日 1 回（`native/.almide-evict-stamp`）、各 dir の
 `.almide-build.lock` を**待たずに**取り、取れなければ（他プロセスがビルド中）その dir は飛ばす。
-lockfile は残すので、dir は空ディレクトリとして残る（消えるのは中身＝容量）。
-`ALMIDE_KEEP_SCRATCH=1` のときは掃引しない。`almide clean` は年齢に関係なく全 worker dir を空にする。
+lockfile は残すので、掃引後の dir は lockfile だけの空ディレクトリになる（理由は
+[`almide clean`](#almide-clean) の節）。`ALMIDE_KEEP_SCRATCH=1` のときは掃引しない。
+`almide clean` は年齢に関係なく全 worker dir を空にする。
+
+同じ規則が**ランタイム rlib キャッシュ** `<temp>/almide-rtlib-<key>/` にも効く(#2504)。
+この dir はランタイムソース × rustc バージョン × opt レベルごとに 1 つ作られ、コンパイラを
+ビルドし直すたび・ツールチェーンを上げるたびに新しい鍵になって古い方は二度とリンクされない
+（2026-09-22 に 31 dir / 102 MB を実測）。リンクのたびに rlib の mtime を更新し、7 日リンク
+されなかった dir を（自分が今使っている dir を除いて）空にする。掃引は 1 日 1 回、
+stamp は `<temp>/.almide-evict-stamp`。
 
 テスト: `tests/test_scratch_race_test.rs`, `tests/run_cache_recovery_test.rs`
 
@@ -587,7 +595,7 @@ almide dep-path bindgen
 
 ### `almide clean`
 
-キャッシュをクリアする。対象は 4 つ:
+キャッシュをクリアする。対象は 6 つ:
 
 | 対象 | 場所 |
 |---|---|
@@ -596,11 +604,19 @@ almide dep-path bindgen
 | コンパイルキャッシュ | `./target/compile/` |
 | native ビルドスクラッチ(#2500) | `ALMIDE_RUN_PROJECT_DIR`（既定 `<temp>/almide-run`）と `<temp>/almide-build-cdylib` |
 | `almide test` の worker dir(#2504) | `<temp>/almide-test/native/<key>/` を 1 つずつ |
+| ランタイム rlib(#2504) | `<temp>/almide-rtlib-<key>/` を 1 つずつ |
 
-ビルドスクラッチは各 dir の `.almide-build.lock` を取ってから空にする（進行中のビルドは
-完了してから消える）。lockfile 自体は残す — 消すと、待っている builder と次の builder が別 inode を
-ロックして排他が破れる。空にした dir ごとに `Cleaned <path>` を stderr に 1 行出し（worker dir は
-`Cleaned <native> (N test worker dir(s))` と 1 行にまとめる）、何も無ければ `No cache to clean`。
+**ビルドスクラッチの「空にする」は完了形の振る舞いであって、やり残しではない。** 各 dir の
+`.almide-build.lock` を取ってから中身を消す（進行中のビルドは完了してから消える）ので、
+dir は lockfile だけを持つ空ディレクトリとして残る。lockfile を消さないのは意図的で、消すと
+「その lockfile を開いて待っている builder」と「次に来て新しい lockfile を作る builder」が
+**別 inode をロックして排他が壊れる** — 同じ dir で 2 つのビルドが同時に走り、片方のバイナリが
+もう片方のものになる(#1877 と同じ壊れ方)。消えるのは容量（worker dir なら 1 本あたり数 MB）、
+残るのは 0 バイトのファイル 1 つ。
+
+空にした dir ごとに `Cleaned <path>` を stderr に 1 行出す（worker dir と rlib dir はそれぞれ
+`Cleaned <native> (N test worker dir(s))` / `Cleaned <temp>/almide-rtlib-* (N runtime rlib dir(s))`
+と 1 行にまとめる）。何も無ければ `No cache to clean`。
 
 ```bash
 almide clean
