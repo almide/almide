@@ -1,5 +1,5 @@
 // @expect-fail: Error: matrix shape mismatch
-// @contract: C-358
+// @contract: C-353
 // #2483: `matrix.linear_row(x, w, bias)` needs one bias entry per output —
 // `len(bias) == rows(weight)`. Native read `bias[j]` for every j < rows(w)
 // and died on a raw index panic (`index out of bounds: the len is 1 but the

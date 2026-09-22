@@ -1,4 +1,4 @@
-// @contract: C-359
+// @contract: C-354
 // The row-range and part-count domains of `matrix.slice_rows`,
 // `matrix.split_cols_even` and `matrix.conv1d` are DEFINED on both targets,
 // by the rule the neighbouring list functions already follow (C-034's
