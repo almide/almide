@@ -1,4 +1,4 @@
-# oracle: almide 0.63.0 (dev) at a19aa14a8 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.63.0 (dev) at 6f064cd9c — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -729,6 +729,7 @@ f7dcc6469e544dddeab580d9399f0902915fd6faae3861fdf75ef726be9ec64d	spec/wasm_cross
 ccca8ebf40993d68b311be6029e3eac6cb2d5c727efce9a003ea8853d413cdd1	spec/wasm_cross/edge_map_order.almd
 6f03802564e24c45853d8be12d49efba20bb780f0588c17e52af535650dbe3ad	spec/wasm_cross/edge_string_unicode.almd
 cfa6df6327e91712a02d814711b853968c5beea39595dd85701f3716acf249b5	spec/wasm_cross/effect_assign_unwrap.almd
+b3d714ebc7bbc933aa4e64ec62009aea9e3dba2a2c930eea6b46134e96cbc27e	spec/wasm_cross/effect_call_arg_credit.almd
 2169de24f5eed887f7e6b8fb93136840fd4659cbb502ba7401d983a21dab212e	spec/wasm_cross/effect_fn_value.almd
 85bdf8126bb1766a0c2bb74773ced029821a8d74f4b79ac362f44b55ee525425	spec/wasm_cross/effect_main_guard_err.almd
 946ec68b2ed2add5b3d487e2b69adf945907b6dc521daf69f201100c3eba521f	spec/wasm_cross/effect_main_guard_ok.almd
