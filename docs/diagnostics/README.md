@@ -50,6 +50,9 @@ Use `almide explain <code>` to read these from the CLI.
 | [E077](E077.md) | `@bounded`: no Float arithmetic, provisional (ALS-B10) |
 | [E078](E078.md) | `@bounded`: no early exit inside a counted loop (ALS-B11) |
 | [E085](E085.md) | `@intrinsic` / `@wasm_intrinsic` outside the stdlib — intrinsics live in the stdlib; wrap in an effect fn |
+| [E086](E086.md) | `scoped`: a value would outlive its scoped allocation (ALS-E31) |
+| [E087](E087.md) | `scoped`: an operation not permitted in a scoped region (ALS-E31) |
+| [E088](E088.md) | `scoped`: a recursive call retains the current scoped activation (ALS-E31) |
 | [E089](E089.md) | Interpolating a value with no defined string form (Bytes, Unit, Matrix, a raw pointer, a function value or a value holding one) — including through a generic instantiation |
 | [E420](E420.md) | Function visibility violation (placeholder code, renumber candidate) |
 

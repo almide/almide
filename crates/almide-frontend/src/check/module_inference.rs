@@ -31,6 +31,7 @@ impl Checker {
         self.validate_implicit_propagation();
         self.lint_error_surface(program);
         self.check_bounded_profile(program);
+        self.check_scoped(program);
     }
 
     /// Type-check a module's declarations. Populates type_map for all expressions.

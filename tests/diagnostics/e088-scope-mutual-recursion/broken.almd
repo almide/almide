@@ -1,0 +1,7 @@
+scoped fn even_steps(n: Int, acc: Int) -> Int = if n == 0 then acc else odd_steps(n - 1, acc + 1)
+
+scoped fn odd_steps(n: Int, acc: Int) -> Int = if n == 0 then acc else even_steps(n - 1, acc + 1)
+
+effect fn main() -> Unit = println(int.to_string(scoped {
+  even_steps(6, 0)
+}))
