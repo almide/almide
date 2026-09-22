@@ -72,7 +72,8 @@ fn matrix_div(a: List[List[Float]], b: List[List[Float]]) -> List[List[Float]] =
 fn __mxa_neg_row(dh: Int, sh: Int, n: Int, i: Int) -> Int = if i >= n then 0
 else {
   let x = prim.ffrombits(prim.load64(sh + 12 + i * 8))
-  prim.store64(dh + 12 + i * 8, prim.fbits(0.0 - x))
+  // native `-x` flips the sign: neg(0.0) is -0.0 (`0.0 - x` gave +0.0)
+  prim.store64(dh + 12 + i * 8, prim.fbits(-x))
   __mxa_neg_row(dh, sh, n, i + 1)
 }
 

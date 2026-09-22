@@ -250,11 +250,14 @@ fn matrix_transpose(m: List[List[Float]]) -> List[List[Float]] = {
 }
 
 // v0 slice_rows: rows start..min(end, len); start >= that end → the 0-row matrix.
+// Both bounds read as native's `as usize`: a negative end is past every row
+// (the slice runs to the last row), a negative start is past every row (the
+// empty slice) — the signed reading read rows at negative offsets (#1423).
 fn matrix_slice_rows(m: List[List[Float]], start: Int, end: Int) -> List[List[Float]] = {
   let hm = prim.handle(m)
   let len = prim.load32(hm + 4)
-  let e = if end < len then end else len
-  let n = if start < e then e - start else 0
+  let e = if end < 0 or end > len then len else end
+  let n = if start >= 0 and start < e then e - start else 0
   let out: List[List[Float]] = prim.alloc_list_str(n)
   let _x = __mx_slice_fill(prim.handle(out), hm, start, n, 0)
   out
