@@ -1,4 +1,4 @@
-# oracle: almide 0.63.0 (dev, a4e8137df) at a4e8137df — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.63.0 (dev, 0e9fd9aed) at 0e9fd9aed — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -873,7 +873,8 @@ fdfc4acae3dd8b5ad1b4eb04daf300333934301bca5513279987ad17026b1a76	spec/wasm_cross
 4bd6a3df39d7de26f8974df3f83105f03cd905d3bb6b7bc28ced5e8cc0ec00f9	spec/wasm_cross/index_bounds_loop_invariant.almd
 0fc55e57c4d60d4d6f505a111f4244f472a7a54bdfb99ea44c68e98f040cedf4	spec/wasm_cross/index_bounds_write_heap.almd
 8fa06b9feda01a54a361d77b150a104a4771b2b58934519f92e2217bca801aa0	spec/wasm_cross/index_bounds_write_only_var.almd
-c2f65d2de3af7cbe89b962e0ff8e5d52ca0d4f56e8ba844c3fb43cee6087802e	spec/wasm_cross/inplace_clear_alias.almd
+f6068d5d5c2647484ba52c508a99e17bb455d655e037faf68e2439c248863213	spec/wasm_cross/inplace_clear_alias.almd
+194f77500aed5a9bbf7db5fdc5e80268d4cb28db43e0260d09d63270c4fcb5b8	spec/wasm_cross/inplace_clear_alias_field.almd
 3bd935f3e6ba46d46d04442d6eb4417902f968444fcb51305146760ddcd0d0e1	spec/wasm_cross/inplace_clear_family.almd
 d691ec9739a1221b07fc56b03cfae365e99178c0bc11b31f7f2b3b6bdc16a638	spec/wasm_cross/inplace_mutator_statement.almd
 2b9a1c3e79cf30c9036b8a91c5de2d5461bca59b89de45d81bde53458a148bdd	spec/wasm_cross/int8_div_overflow.almd

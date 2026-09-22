@@ -259,7 +259,8 @@
 66000	spec/wasm_cross/index_bounds_loop_invariant.almd
 65984	spec/wasm_cross/index_bounds_write_heap.almd
 66016	spec/wasm_cross/index_bounds_write_only_var.almd
-!	spec/wasm_cross/inplace_clear_alias.almd
+67568	spec/wasm_cross/inplace_clear_alias.almd
+!	spec/wasm_cross/inplace_clear_alias_field.almd
 68000	spec/wasm_cross/inplace_clear_family.almd
 66192	spec/wasm_cross/inplace_mutator_statement.almd
 65856	spec/wasm_cross/int8_div_overflow.almd
