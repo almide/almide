@@ -34,3 +34,137 @@ test "tco fibonacci" {
   assert_eq(fib_tail(0, 0, 1), 0)
   assert_eq(fib_tail(1, 0, 1), 1)
 }
+
+// ── `mut` parameters through the loop rewrite (#2293) ────────────────────────
+// A `mut` parameter is the CALLER's variable, and turning the function into a
+// loop must not change that. Until 0.63.0 the rewrite reset every parameter's
+// borrow to owned except `Bytes` and `Fn`, so the caller was handed a copy and
+// every mutation the loop made was lost: `almide check` passed and the program
+// printed a wrong number (`count_down(seen, 3)` reported the caller seeing 0 of
+// 3 pushes). Each shape below is written twice — once self-tail-recursively, so
+// the loop rewrite fires, and once with the recursion bound to a local
+// (`let r = f(..); r`, which is not a tail call and so is never converted) —
+// and the two forms must agree with each other AND with what the caller sees.
+// The non-TCO twin of the `mut List` claim is spec/lang/mut_list_param_test.almd;
+// the cross-target twin is spec/wasm_cross/mut_param_tail_recursion.almd (C-226).
+// The emitted `&mut` is pinned by tests/tco_mut_param_borrow_test.rs.
+fn push_down(mut seen: List[Int], n: Int) -> Int = if n == 0 then list.len(seen)
+else {
+  list.push(seen, n)
+  push_down(seen, n - 1)
+}
+
+fn push_down_bound(mut seen: List[Int], n: Int) -> Int = if n == 0 then list.len(seen)
+else {
+  list.push(seen, n)
+  let r = push_down_bound(seen, n - 1)
+  r
+}
+
+test "tco mut List param stays the caller's list" {
+  var a: List[Int] = []
+  let inside_a = push_down(a, 3)
+  var b: List[Int] = []
+  let inside_b = push_down_bound(b, 3)
+  assert_eq(inside_a, inside_b)
+  assert_eq(list.len(a), list.len(b))
+  assert_eq(list.len(a), 3)
+  assert_eq(a[0], 3)
+  assert_eq(a[2], 1)
+}
+
+// Depth the recursive form would not survive on the native leg — the fix keeps
+// the loop rather than refusing to optimise `mut`-parameter functions. Held to
+// 2000 because the wasm leg reaches this shape through the C-132 write-back
+// rewrite and still spends a frame per step; the structural claim that the
+// NATIVE emit is still `while true { .. }` is pinned in
+// tests/tco_mut_param_borrow_test.rs, which reads the emitted Rust.
+test "tco mut List param still loops" {
+  var deep: List[Int] = []
+  assert_eq(push_down(deep, 2000), 2000)
+  assert_eq(list.len(deep), 2000)
+}
+
+fn fill_down(mut m: Map[Int, Int], n: Int) -> Int = if n == 0 then map.len(m)
+else {
+  map.insert(m, n, n * 10)
+  fill_down(m, n - 1)
+}
+
+fn fill_down_bound(mut m: Map[Int, Int], n: Int) -> Int = if n == 0 then map.len(m)
+else {
+  map.insert(m, n, n * 10)
+  let r = fill_down_bound(m, n - 1)
+  r
+}
+
+test "tco mut Map param stays the caller's map" {
+  var a: Map[Int, Int] = [:]
+  let inside_a = fill_down(a, 3)
+  var b: Map[Int, Int] = [:]
+  let inside_b = fill_down_bound(b, 3)
+  assert_eq(inside_a, inside_b)
+  assert_eq(map.len(a), map.len(b))
+  assert_eq(map.len(a), 3)
+  assert_eq(map.get(a, 2) ?? 0, 20)
+}
+
+fn bump_down(mut d: Int, n: Int) -> Int = if n == 0 then d
+else {
+  d = d + 1
+  bump_down(d, n - 1)
+}
+
+fn bump_down_bound(mut d: Int, n: Int) -> Int = if n == 0 then d
+else {
+  d = d + 1
+  let r = bump_down_bound(d, n - 1)
+  r
+}
+
+test "tco mut scalar param stays the caller's variable" {
+  var a = 0
+  let inside_a = bump_down(a, 3)
+  var b = 0
+  let inside_b = bump_down_bound(b, 3)
+  assert_eq(inside_a, inside_b)
+  assert_eq(a, b)
+  assert_eq(a, 3)
+}
+
+// The one shape the loop CANNOT carry: a `mut` parameter the self-call rebinds
+// to another variable. The loop would have to hold a reference to a binding it
+// re-creates every iteration, so the function keeps its recursive form — which
+// answers correctly, where resetting the borrow to owned did not. Each frame
+// pushes into its own caller's list, so the outermost caller sees exactly one
+// push and the innermost call counts the fresh list's single element.
+fn walk_other(mut a: List[Int], n: Int) -> Int = {
+  var fresh: List[Int] = [7]
+  if n == 0 then list.len(a)
+  else {
+    list.push(a, n)
+    walk_other(fresh, n - 1)
+  }
+}
+
+fn walk_other_bound(mut a: List[Int], n: Int) -> Int = {
+  var fresh: List[Int] = [7]
+  if n == 0 then list.len(a)
+  else {
+    list.push(a, n)
+    let r = walk_other_bound(fresh, n - 1)
+    r
+  }
+}
+
+test "tco declines a mut param the self-call rebinds" {
+  var a: List[Int] = []
+  let inside_a = walk_other(a, 3)
+  var b: List[Int] = []
+  let inside_b = walk_other_bound(b, 3)
+  assert_eq(inside_a, inside_b)
+  assert_eq(list.len(a), list.len(b))
+  assert_eq(inside_a, 1)
+  assert_eq(list.len(a), 1)
+  assert_eq(a[0], 3)
+}
