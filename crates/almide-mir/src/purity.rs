@@ -221,6 +221,7 @@ pub const PURE_MODULES: &[&str] = &[
     "matrix_ext",
     "matrix_fused",
     "matrix_shape",
+    "mem_checkpoint",
     "option",
     "option_collect",
     "option_collect_map",
