@@ -25,13 +25,28 @@ else if n > 4294967295 then none else some(n)
 // Only the sign bit can fail for Int → UInt64 (|Int64| ≤ UInt64::MAX), so just reject negatives.
 fn int_to_uint64_checked(n: Int) -> Int? = if n < 0 then none else some(n)
 
-// int.to_float32_checked(n) -> Some(n as f32) iff it round-trips exactly (|n| <= 2^24), else None.
-// The conversions are INLINED as the prim floor (i2f32 = `n as f32`, f32_2f = widen to f64, f2i =
-// `as i64`) — avoids any cross/intra-file link. Flat-arm materialized Option[Float32].
+// int.to_float32_checked(n) -> Some(n as f32) iff the value is exactly representable in f32 (the
+// widened f32 is n itself), else None. The conversions are INLINED as the prim floor (i2f32 =
+// `n as f32`, f32_2f = widen to f64, f2i = `as i64`) — avoids any cross/intra-file link.
+// Flat-arm materialized Option[Float32].
+//
+// THE FAMILY RULE (#2487): a `_checked` cell never trusts a round trip through a conversion
+// that saturates. `f2i` saturates at 2^63, so the read-back of `f = 2^63` (what every
+// n in (2^63 - 2^39, 2^63) rounds to as an f32, max_value included) compared EQUAL to
+// max_value and `to_float32_checked(max_value)` was Some. The widened value is therefore
+// bounded FIRST: `back >= 2^63` is outside Int, hence not n. Below that bound the widened f32
+// is an exact integer with |back| < 2^63, so f2i is exact and `f2i(back) == n` is the
+// representability test itself. The range bound 2^63 is built at runtime (2^62 + 2^62: the
+// literal overflows the float parser).
 fn int_to_float32_checked(n: Int) -> Float32? = {
   let f = prim.i2f32(n)
   let back = prim.f32_2f(f)
+  let p62 = prim.bshl(1, 62)
+  let f62 = prim.i2f(p62)
+  let two63 = prim.fadd(f62, f62)
+  let big = prim.fge(back, two63)
   let r = prim.f2i(back)
   let eq = r == n
-  if eq then some(f) else none
+  if big then none
+  else if eq then some(f) else none
 }

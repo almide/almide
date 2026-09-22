@@ -278,12 +278,19 @@ fn to_uint32_checked(n: Int) -> UInt32? = if n < 0 or n > 4294967295 then none e
 /// some(n), or none if n is negative.
 fn to_uint64_checked(n: Int) -> UInt64? = if n < 0 then none else some(int.to_uint64(n))
 
-// `Int → Float32` loses precision for `|n| > 2^24`. Round-trip through
-// `Float32 → Int` to detect the loss.
-/// some(f), or none if n fails the f32 round trip.
+// `Int → Float32` loses precision for `|n| > 2^24`. Widen the f32 back
+// and compare through `Float → Int`, which is exact below 2^63 — but
+// `float.to_int` SATURATES at 2^63, so a widened value there is bounded
+// out first (#2487: `max_value` rounds to 2^63 as an f32, the saturated
+// read-back equalled `max_value`, and the cell answered `some`). The
+// family rule: a `_checked` cell never trusts a round trip through a
+// conversion that wraps or saturates. Cell twin: stdlib/int_checked.almd.
+/// some(f), or none if the f32 does not hold n exactly.
 fn to_float32_checked(n: Int) -> Float32? = {
   let f: Float32 = int.to_float32(n)
-  if float.to_int(float.from_float32(f)) == n then some(f) else none
+  let back: Float = float.from_float32(f)
+  if back >= 9223372036854776000.0 then none
+  else if float.to_int(back) == n then some(f) else none
 }
 
 /// Clamps n to -128..127.
