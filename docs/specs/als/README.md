@@ -181,7 +181,7 @@
 | [ALS-T23](./text-and-numbers.md#als-t23-符号付きゼロ) | 符号付きゼロ | C-306 |
 | [ALS-T24](./text-and-numbers.md#als-t24-float-→-int-変換) | Float → Int 変換 | C-307, C-338, C-341 |
 | [ALS-T25](./text-and-numbers.md#als-t25-正準-fast-exp) | 正準 fast-exp | C-223 |
-| [ALS-T26](./text-and-numbers.md#als-t26-datetime-の暦フィールドと-parse_iso-の文法) | datetime の暦フィールドと parse_iso の文法 | C-364, C-365 |
-| [ALS-T27](./text-and-numbers.md#als-t27-urlparse-の-authority-規範) | url.parse の authority 規範 | C-366 |
+| [ALS-T26](./text-and-numbers.md#als-t26-datetime-の暦フィールドと-parse_iso-の文法) | datetime の暦フィールドと parse_iso の文法 | C-359, C-360 |
+| [ALS-T27](./text-and-numbers.md#als-t27-urlparse-の-authority-規範) | url.parse の authority 規範 | C-361 |
 
 131 sections across 11 chapters.
