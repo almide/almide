@@ -1,0 +1,92 @@
+// @contract: C-228, C-229
+// The matrix row/column movers and byte encoders run byte-identically on every
+// leg, the structural one included (#1423 stage 4):
+// - slice_rows / gather_rows read their bounds as native's `as usize`: a
+//   negative start is past every row (the empty slice — the incumbent read
+//   rows at negative offsets), a negative end runs to the last row, and a
+//   gathered index out of range — negative included — is the all-zero row
+//   (the C-229 OOB→zeros edge);
+// - concat_cols of the empty list is the 0-row matrix, and a first operand
+//   with no rows is ONE empty row (native's `vec![vec![]]`);
+// - split_cols_even gives n parts of width cols / n (the remainder columns
+//   drop), the empty list for n = 0 or a rowless matrix;
+// - to_bytes_f64_le / from_bytes_f64_le round-trip exactly, a window past the
+//   buffer or at a negative offset is the all-zero matrix (C-229), and
+//   to_bytes_f32_le rounds each cell to the nearest f32.
+fn show(tag: String, m: Matrix) -> Unit = {
+  let l = matrix.to_lists(m)
+  let s = matrix.shape(m)
+  println("${tag}: ${s} ${l}")
+}
+
+fn main() -> Unit = {
+  let a = matrix.from_lists([
+    [1.0, 2.0, 3.0],
+    [4.0, 5.0, 6.0]
+  ])
+  let c = matrix.from_lists([
+    [10.0, 20.0, 30.0],
+    [40.0, 50.0, 60.0],
+    [70.0, 80.0, 90.0]
+  ])
+  let e = matrix.zeros(0, 0)
+  show("slice", matrix.slice_rows(c, 1, 3))
+  show("slice_rev", matrix.slice_rows(c, 2, 1))
+  show("slice_long", matrix.slice_rows(c, 1, 99))
+  show("slice_negstart", matrix.slice_rows(c, -2, 2))
+  show("slice_negend", matrix.slice_rows(c, 1, -1))
+  show("gather", matrix.gather_rows(c, [2, -1, 0, 7]))
+  show("gather_empty", matrix.gather_rows(e, [0, 1]))
+  show("gather_none", matrix.gather_rows(c, []))
+  show("gather_r0", matrix.gather_rows(matrix.zeros(3, 0), [0, 5, -1]))
+  show(
+    "concat",
+    matrix.concat_cols([
+      a,
+      matrix.from_lists([
+        [7.0],
+        [8.0]
+      ])
+    ]),
+  )
+  show("concat_nil", matrix.concat_cols([]))
+  show("concat_first0", matrix.concat_cols([e, a]))
+  show(
+    "concat_many",
+    matrix.concat_cols_many([
+      a,
+      a,
+      matrix.from_lists([
+        [9.0],
+        [8.0]
+      ])
+    ]),
+  )
+  let p0 = matrix.split_cols_even(c, 0)
+  let pe = matrix.split_cols_even(e, 2)
+  let p2 = matrix.split_cols_even(c, 2)
+  let p5 = matrix.split_cols_even(a, 5)
+  let n0 = list.len(p0)
+  let ne = list.len(pe)
+  let n5 = list.len(p5)
+  println("split counts: ${n0} ${ne} ${n5}")
+  for p in p2 {
+    show("split2", p)
+  }
+  let b64 = matrix.to_bytes_f64_le(c)
+  let n64 = bytes.len(b64)
+  println("bytes64: ${n64}")
+  show("rt64", matrix.from_bytes_f64_le(b64, 0, 3, 3))
+  show("rt64_off", matrix.from_bytes_f64_le(b64, 8, 2, 2))
+  show("rt64_short", matrix.from_bytes_f64_le(b64, 64, 2, 2))
+  show("rt64_negoff", matrix.from_bytes_f64_le(b64, -8, 1, 1))
+  let b32 = matrix.to_bytes_f32_le(matrix.from_lists([
+    [0.1, 1.0e40, -2.5]
+  ]))
+  let n32 = bytes.len(b32)
+  println("bytes32: ${n32}")
+  show("rt32", matrix.from_bytes_f32_le(b32, 0, 1, 3))
+  let eb = matrix.to_bytes_f64_le(e)
+  let neb = bytes.len(eb)
+  println("bytes_empty: ${neb}")
+}
