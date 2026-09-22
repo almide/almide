@@ -1,6 +1,26 @@
 use std::{fs, io};
 use std::path::Path;
 
+// ONE stripper, shared verbatim with the compiler's emit path (#2511). The two copies
+// used to count braces per line with no notion of a string literal, so an unbalanced
+// brace inside one (`r"a\{x"`) lost the block's end and deleted to EOF. Shared the same
+// way `fusion_parse.rs` is shared with almide-egg-lab's build script: a `#[path]` module,
+// so the file is compiled into both the build script and the library and cannot drift.
+#[path = "../src/strip_test_blocks.rs"]
+mod strip_test_blocks;
+use self::strip_test_blocks::strip_test_blocks;
+
+/// Run the stripper for its verdict only, and turn a lost block end into a BUILD failure
+/// naming the file. The runtime modules are embedded unstripped and stripped at emit, so
+/// this is the earliest point the defect can be caught — and a build error is the loud
+/// version of what used to be a silent tail deletion. For a module assembled from
+/// `include!` parts the reported line is the line in the assembled text.
+fn reject_unterminated_test_block(path: &Path, content: &str) -> io::Result<()> {
+    strip_test_blocks(content, &path.display().to_string())
+        .map(|_| ())
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))
+}
+
 /// Read a runtime source file, INLINING any `include!("X.rs")` directive with the
 /// referenced file's content (resolved relative to this file's directory), recursively.
 /// The runtime is embedded as ONE source string per module and assembled by
@@ -71,6 +91,7 @@ pub fn generate(workspace_root: &Path, out_dir: &Path) -> io::Result<()> {
     for entry in &rust_entries {
         let stem = module_name(&entry.path())?;
         let content = read_with_includes(&entry.path())?;
+        reject_unterminated_test_block(&entry.path(), &content)?;
         rust_out.push_str(&format!("    (\"{stem}\", {content:?}),\n"));
     }
     rust_out.push_str("];\n\n");
@@ -164,8 +185,11 @@ fn build_kernel_inline(workspace_root: &Path) -> io::Result<String> {
             continue;
         }
         {
-            let src = read_source(&kernel_dir.join(format!("{m}.rs")))?;
-            let body = strip_test_blocks(&src).replace("crate::", "super::");
+            let path = kernel_dir.join(format!("{m}.rs"));
+            let src = read_source(&path)?;
+            let body = strip_test_blocks(&src, &path.display().to_string())
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?
+                .replace("crate::", "super::");
             inline.push_str(&format!("pub mod {m} {{\n{body}\n}}\n"));
         }
     }
@@ -407,36 +431,6 @@ fn split_top_level(s: &str) -> Vec<&str> {
         parts.push(&s[start..]);
     }
     parts
-}
-
-/// Strip `#[cfg(test)] mod tests { … }` blocks. Mirror of the codegen-side stripper:
-/// line-based brace counting (per-line string braces like `"i={i}"` net to zero, so
-/// they don't desync the depth). Keeps the embedded kernel free of test code, which
-/// would otherwise run under the runtime's `--test` build inside every spec.
-fn strip_test_blocks(src: &str) -> String {
-    let mut out = String::new();
-    let mut depth = 0i32;
-    let mut in_test_mod = false;
-    for line in src.lines() {
-        let trimmed = line.trim();
-        if !in_test_mod && (trimmed.starts_with("#[cfg(test)]") || trimmed.starts_with("mod tests")) {
-            in_test_mod = true;
-            depth = 0;
-        }
-        if in_test_mod {
-            for ch in line.chars() {
-                if ch == '{' { depth += 1; }
-                if ch == '}' { depth -= 1; }
-            }
-            if depth <= 0 && line.contains('}') {
-                in_test_mod = false;
-            }
-            continue;
-        }
-        out.push_str(line);
-        out.push('\n');
-    }
-    out
 }
 
 fn read_source(path: &Path) -> io::Result<String> {

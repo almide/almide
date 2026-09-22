@@ -24,6 +24,7 @@
 
 pub mod annotations;
 pub mod generated;
+pub mod strip_test_blocks;
 pub mod pass;
 pub mod verify_names;
 pub mod use_kind;
@@ -133,32 +134,11 @@ pub fn slim_main_with_external_runtime(full_rs: &str) -> Option<String> {
     Some(out)
 }
 
-/// Strip `mod tests { ... }` blocks from runtime source (avoid conflicts with user tests)
-fn strip_test_blocks(src: &str) -> String {
-    let mut out = String::new();
-    let mut depth = 0i32;
-    let mut in_test_mod = false;
-    for line in src.lines() {
-        let trimmed = line.trim();
-        if !in_test_mod && (trimmed.starts_with("#[cfg(test)]") || trimmed.starts_with("mod tests")) {
-            in_test_mod = true;
-            depth = 0;
-        }
-        if in_test_mod {
-            for ch in line.chars() {
-                if ch == '{' { depth += 1; }
-                if ch == '}' { depth -= 1; }
-            }
-            if depth <= 0 && line.contains('}') {
-                in_test_mod = false;
-            }
-            continue;
-        }
-        out.push_str(line);
-        out.push('\n');
-    }
-    out
-}
+// Strip `mod tests { ... }` blocks from runtime source (avoid conflicts with user tests).
+// The stripper is `strip_test_blocks::strip_test_blocks`, ONE copy shared verbatim with
+// `buildscript/runtime_registry.rs` (#2511): it counts braces in code only, and refuses
+// to delete to end of file when a block's end is lost.
+use crate::strip_test_blocks::strip_test_blocks;
 
 /// Unified codegen entry point: IR → Nanopass pipeline → target output.
 ///
@@ -559,12 +539,18 @@ fn resolve_runtime_deps(needed: &mut std::collections::HashSet<&str>) {
 /// `ProcessStatus` twins — silently substituted a USER struct of that name
 /// for the runtime's, breaking the runtime's own constructors (E0560).
 fn append_runtime_module_lines(
+    module: &str,
     source: &str,
     use_set: &mut std::collections::HashSet<String>,
     use_lines: &mut Vec<String>,
     body_lines: &mut Vec<String>,
 ) {
-    let stripped = strip_test_blocks(source);
+    // The embedded text is OUR source, checked module by module by the build script
+    // (buildscript/runtime_registry.rs), so an unterminated test block here is a compiler
+    // bug and not a user error. Stop loudly naming the file and the opening line: the one
+    // thing we must never do is silently emit a module with its tail deleted (#2511).
+    let stripped = strip_test_blocks(source, &format!("runtime/rs/src/{module}.rs"))
+        .unwrap_or_else(|e| panic!("almide-codegen: {e}"));
     let lines: Vec<&str> = stripped.lines().collect();
     let mut i = 0;
     while i < lines.len() {
@@ -639,7 +625,7 @@ fn rust_runtime_modules(needed: &std::collections::HashSet<&str>) -> String {
     let mut body_lines = Vec::new();
     for (name, source) in crate::generated::rust_runtime::RUST_RUNTIME_MODULES {
         if needed.contains(name) {
-            append_runtime_module_lines(source, &mut use_set, &mut use_lines, &mut body_lines);
+            append_runtime_module_lines(name, source, &mut use_set, &mut use_lines, &mut body_lines);
         }
     }
     let use_lines = dedup_use_lines(use_lines, &use_set);
