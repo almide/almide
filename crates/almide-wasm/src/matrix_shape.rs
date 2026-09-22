@@ -184,6 +184,31 @@ impl Emitter<'_> {
             i.end();
         }
         self.loop_end(hmi);
+        // C-353: every NON-EMPTY member carries the first member's row count
+        // (an empty member contributes no columns and no shape). A member
+        // with fewer rows left the output RAGGED — this leg zero-filled the
+        // missing cells, the incumbent kept the short row and native's flat
+        // store asserted (#2482).
+        let happ = self.hold_i32()?;
+        self.f.instructions().local_get(hrows0).i32_const(0).i32_ne().local_set(happ);
+        self.loop_begin(hmi, hk);
+        {
+            let mut i = self.f.instructions();
+            i.local_get(hl).local_get(hmi).i32_const(2).i32_shl().i32_add();
+            i.i32_load(slot_memarg(0)).local_tee(hsub).i32_load(slot_memarg(0));
+            i.if_(BlockType::Empty);
+        }
+        {
+            let mut i = self.f.instructions();
+            i.local_get(happ);
+            i.local_get(hsub).i32_load(slot_memarg(0)).local_get(hrows0).i32_ne();
+            i.i32_and().if_(BlockType::Empty);
+            let msg = self.pool.intern("matrix shape mismatch");
+            i.i32_const(msg as i32);
+        }
+        self.emit_error_frame_abort();
+        self.f.instructions().end().end();
+        self.loop_end(hmi);
         self.f.instructions().local_get(hrows0).i32_eqz().if_(BlockType::Empty).i32_const(0).local_set(hcols).end();
         let ho = self.mat_alloc_guarded(hrows, hcols)?;
         let hr = self.hold_i32()?;
@@ -211,8 +236,8 @@ impl Emitter<'_> {
         self.loop_end(hmi);
         self.loop_end(hr);
         self.f.instructions().local_get(ho);
-        // hl hk | hrows0 hrows hcols hmi hsub | ho | hr hpos
-        for _ in 0..10 {
+        // hl hk | hrows0 hrows hcols hmi hsub | happ | ho | hr hpos
+        for _ in 0..11 {
             self.release_i32();
         }
         Ok(Some(Lowered::owned(SliceTy::Matrix)))

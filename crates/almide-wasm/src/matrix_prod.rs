@@ -6,10 +6,13 @@
 //! output size is a PRODUCT of input extents, so every result goes through
 //! the C-197 structural bound (`mat_alloc_guarded`).
 //!
-//! Outside the sane domain (operands whose inner extents disagree) native
-//! indexes past a row and panics; these kernels read only inside their
-//! operands — the inner extent is the smaller of the two, a missing bias
-//! entry adds nothing — so a mismatch can never read another block.
+//! Outside the sane domain (operands whose inner extents disagree) these
+//! kernels read only inside their operands — the inner extent is the smaller
+//! of the two, a missing bias entry adds nothing — so a mismatch can never
+//! read another block. It is still OUT OF DOMAIN: C-353 makes a shape
+//! precondition a defined abort (`Error: matrix shape mismatch`, exit 1) on
+//! every leg, so the truncated product this would otherwise answer — where
+//! native panicked past its row — never reaches the program (#2481, #2483).
 
 use almide_ir::IrExpr;
 use wasm_encoder::{BlockType, ValType};
@@ -19,6 +22,25 @@ use crate::matrix_kernels::mat_elem;
 use crate::*;
 
 impl Emitter<'_> {
+    /// C-353: two extents a kernel indexes against each other must be EQUAL,
+    /// or the call aborts in the unified T6 form — the same abort the head
+    /// count (C-198), the head geometry (C-278) and the index domain (C-282)
+    /// take. `applies` is a 0/1 i32 local: the EMPTY-operand short-circuit
+    /// each kernel already has answers first (C-278's "the empty matrix has
+    /// no row to violate"), so the guard only judges a call that will read.
+    pub(crate) fn matrix_shape_eq(&mut self, applies: u32, a: u32, b: u32) {
+        let msg = self.pool.intern("matrix shape mismatch");
+        {
+            let mut i = self.f.instructions();
+            i.local_get(applies);
+            i.local_get(a).local_get(b).i32_ne();
+            i.i32_and().if_(BlockType::Empty);
+            i.i32_const(msg as i32);
+        }
+        self.emit_error_frame_abort();
+        self.f.instructions().end();
+    }
+
     /// A flat r×c block (i32 extents) through the C-197 bound, zero-filled
     /// (`mat_alloc_out64`).
     pub(crate) fn mat_alloc_guarded(&mut self, hr: u32, hc: u32) -> Result<u32, EmitError> {
@@ -59,6 +81,18 @@ impl Emitter<'_> {
         self.zero_cols_if_no_rows(rb, cb);
         self.f.instructions().local_get(cb).local_set(hn);
         self.zero_cols_if_no_rows(ra, hn);
+        // C-353: the inner dimension is a PRECONDITION — `cols(a) == rows(b)`
+        // — once the degenerate shapes are out (m, k or n zero answers the
+        // m×n zero matrix, native's early return). Without it this summed
+        // over min(cols(a), rows(b)) and printed a product of the overlap
+        // where native indexed past `b`'s data (#2481).
+        let happ = self.hold_i32()?;
+        {
+            let mut i = self.f.instructions();
+            i.local_get(ra).i32_eqz().local_get(ca).i32_eqz().i32_or();
+            i.local_get(hn).i32_eqz().i32_or().i32_eqz().local_set(happ);
+        }
+        self.matrix_shape_eq(happ, ca, rb);
         self.min_u32(hk, ca, rb);
         let ho = self.mat_alloc_guarded(ra, hn)?;
         let hi = self.hold_i32()?;
@@ -81,7 +115,7 @@ impl Emitter<'_> {
         self.loop_end(hi);
         self.f.instructions().local_get(ho);
         self.release_f64();
-        for _ in 0..12 {
+        for _ in 0..13 {
             self.release_i32();
         }
         Ok(Some(Lowered::owned(SliceTy::Matrix)))
@@ -106,6 +140,19 @@ impl Emitter<'_> {
             i.local_get(wr).local_set(hcols);
         }
         self.zero_cols_if_no_rows(hrows, hcols);
+        // C-353: the weight is (n_out, n_in) against x's width, and the bias
+        // has one entry per output — checked after the empty short-circuit
+        // native takes. The missing bias entries this skipped read as "no
+        // bias" where native panicked on the index (#2483).
+        let happ = self.hold_i32()?;
+        {
+            let mut i = self.f.instructions();
+            i.local_get(xr).i32_eqz().local_get(wr).i32_eqz().i32_or().i32_eqz().local_set(happ);
+        }
+        self.matrix_shape_eq(happ, wc, xc);
+        if bias.is_some() {
+            self.matrix_shape_eq(happ, hblen, wr);
+        }
         self.min_u32(hnin, xc, wc);
         let ho = self.mat_alloc_guarded(hrows, hcols)?;
         let hi = self.hold_i32()?;
@@ -132,7 +179,7 @@ impl Emitter<'_> {
         self.loop_end(hi);
         self.f.instructions().local_get(ho);
         self.release_f64();
-        for _ in 0..15 {
+        for _ in 0..16 {
             self.release_i32();
         }
         Ok(Some(Lowered::owned(SliceTy::Matrix)))
@@ -158,6 +205,17 @@ impl Emitter<'_> {
         }
         self.min_u32(hout, gr, ur);
         self.zero_cols_if_no_rows(hrows, hout);
+        // C-353: both weights are (d_out, d_in) against cols(x), and w_up
+        // carries w_gate's row count — checked after the empty short-circuit.
+        let happ = self.hold_i32()?;
+        {
+            let mut i = self.f.instructions();
+            i.local_get(xr).i32_eqz().local_get(gr).i32_eqz().i32_or();
+            i.local_get(ur).i32_eqz().i32_or().i32_eqz().local_set(happ);
+        }
+        self.matrix_shape_eq(happ, gc, xc);
+        self.matrix_shape_eq(happ, uc, xc);
+        self.matrix_shape_eq(happ, ur, gr);
         self.min_u32(hin, xc, gc);
         self.min_u32(hin, hin, uc);
         let ho = self.mat_alloc_guarded(hrows, hout)?;
@@ -185,7 +243,7 @@ impl Emitter<'_> {
         self.f.instructions().local_get(ho);
         self.release_f64();
         self.release_f64();
-        for _ in 0..16 {
+        for _ in 0..17 {
             self.release_i32();
         }
         Ok(Some(Lowered::owned(SliceTy::Matrix)))
@@ -209,6 +267,65 @@ impl Emitter<'_> {
             self.f.instructions().local_set(*slot);
         }
         let [hk, hs, hp] = sc;
+        // The count domain (C-354), in native's order: the STRIDE is a step
+        // and below 1 aborts (0 was a wasm `integer divide by zero` trap here
+        // against native's `Error: stride must be positive`), the kernel and
+        // padding are WIDTHS and clamp at 0 like every C-161 dimension, and a
+        // padding past the shared element ceiling aborts rather than wrapping
+        // `T + 2P` into "no rows" while native computed a length. All of it
+        // only when the call will read: an empty input or weight is the empty
+        // matrix on every leg.
+        let happ = self.hold_i32()?;
+        {
+            let mut i = self.f.instructions();
+            i.local_get(tin).i32_eqz().local_get(outch).i32_eqz().i32_or().i32_eqz().local_set(happ);
+        }
+        let stride_msg = self.pool.intern("stride must be positive");
+        let dims_msg = self.pool.intern("matrix dimensions too large");
+        {
+            let mut i = self.f.instructions();
+            i.local_get(happ);
+            i.local_get(hs).i64_const(1).i64_lt_s().i32_and().if_(BlockType::Empty);
+            i.i32_const(stride_msg as i32);
+        }
+        self.emit_error_frame_abort();
+        {
+            let mut i = self.f.instructions();
+            i.end();
+            // kernel / padding clamp at 0
+            for h in [hk, hp] {
+                i.i64_const(0).local_get(h).local_get(h).i64_const(0).i64_lt_s().select().local_set(h);
+            }
+            i.local_get(happ);
+            i.local_get(hp).i64_const(1 << 28).i64_gt_s().i32_and().if_(BlockType::Empty);
+            i.i32_const(dims_msg as i32);
+        }
+        self.emit_error_frame_abort();
+        self.f.instructions().end();
+        // C-353: the weight row is `in_ch * kernel` taps and the bias has one
+        // entry per output channel. The product is tested by DIVISION so a
+        // huge kernel cannot wrap it (native takes `checked_mul`): with
+        // in_ch > 0 the row fits iff `wc % in_ch == 0 && wc / in_ch == k`,
+        // and at in_ch == 0 the row must be empty.
+        let htaps = self.hold_i32()?;
+        {
+            let mut i = self.f.instructions();
+            i.local_get(inch).if_(BlockType::Result(ValType::I32));
+            i.local_get(wc).i64_extend_i32_u().local_get(inch).i64_extend_i32_u().i64_rem_u().i64_eqz();
+            i.local_get(wc).i64_extend_i32_u().local_get(inch).i64_extend_i32_u().i64_div_u();
+            i.local_get(hk).i64_eq().i32_and();
+            i.else_();
+            i.local_get(wc).i32_eqz();
+            i.end().local_set(htaps);
+            // reuse the shared abort: taps_ok == 1 is the "equal" side
+            i.local_get(happ);
+            i.local_get(htaps).i32_eqz().i32_and().if_(BlockType::Empty);
+            let msg = self.pool.intern("matrix shape mismatch");
+            i.i32_const(msg as i32);
+        }
+        self.emit_error_frame_abort();
+        self.f.instructions().end();
+        self.matrix_shape_eq(happ, hblen, outch);
         let htp = self.hold_i64()?;
         let htout = self.hold_i32()?;
         self.conv1d_out_rows(htout, (tin, outch), (hk, hs, hp), htp);
@@ -242,8 +359,9 @@ impl Emitter<'_> {
         for _ in 0..4 {
             self.release_i64();
         }
-        // hin tin inch | hw outch wc | hb hblen | htout hcols ho | ht hoo hc hki
-        for _ in 0..15 {
+        // hin tin inch | hw outch wc | hb hblen | happ htaps | htout hcols ho
+        // | ht hoo hc hki
+        for _ in 0..17 {
             self.release_i32();
         }
         Ok(Some(Lowered::owned(SliceTy::Matrix)))
