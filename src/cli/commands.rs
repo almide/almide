@@ -162,7 +162,8 @@ fn compile_test_files_parallel(test_files: &[String], no_check: bool, scratch: &
 }
 
 use super::test_report::{
-    libtest_counts, report_test_failure, test_harness_args, TestCounts, TestRun, NO_TESTS_EXIT,
+    libtest_counts, report_passing_output, report_test_failure, report_test_failure_io, test_harness_args, TestCounts,
+    TestRun, NO_TESTS_EXIT,
 };
 
 /// `cmd_test`'s Phase 2: execute every compiled test binary in parallel
@@ -184,12 +185,12 @@ fn run_test_binaries_parallel(compiled: Vec<(String, Result<std::path::PathBuf, 
         let sem_tx = sem_tx.clone();
         handles.push(std::thread::spawn(move || {
             let _ = sem_rx.lock().unwrap().recv();
-            let (code, out) = match compile_result {
-                Ok(bin) => super::run::run_binary_captured(&bin, &args),
-                Err(e) => (1, format!("Compile error for {}:\n{}", file, e)),
+            let (code, stdout, stderr) = match compile_result {
+                Ok(bin) => super::run::run_binary_captured_io(&bin, &args),
+                Err(e) => (1, format!("Compile error for {}:\n{}", file, e), String::new()),
             };
             let _ = sem_tx.send(());
-            let _ = tx.send((file, code, out));
+            let _ = tx.send((file, code, stdout, stderr));
         }));
     }
     drop(tx);
@@ -199,7 +200,7 @@ fn run_test_binaries_parallel(compiled: Vec<(String, Result<std::path::PathBuf, 
     results
 }
 
-pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>, allow_no_tests: bool) {
+pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>, allow_no_tests: bool, show_output: bool) {
     let test_files: Vec<String> = discover_test_files(file, &["spec", "exercises"]);
 
     let program_args = test_harness_args(run_filter);
@@ -213,11 +214,13 @@ pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>, allow_no_t
 
     let mut failed = 0;
     let mut counts = TestCounts::default();
-    for (file, code, output) in &results {
-        counts.add(libtest_counts(output).unwrap_or_default());
+    for (file, code, stdout, stderr) in &results {
+        counts.add(libtest_counts(&format!("{stdout}{stderr}")).unwrap_or_default());
         if *code != 0 {
-            report_test_failure(file, output);
+            report_test_failure_io(file, stdout, stderr, show_output);
             failed += 1;
+        } else if show_output {
+            report_passing_output(file, stdout, stderr);
         }
     }
     err("");
@@ -233,11 +236,14 @@ pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>, allow_no_t
 }
 
 enum WasmTestOutcome {
-    Pass { file: String, count: usize, filtered_out: usize, bytes: usize },
+    /// `stdout`/`stderr` are what the run printed — `--show-output` shows them.
+    Pass { file: String, count: usize, filtered_out: usize, bytes: usize, stdout: String, stderr: String },
     /// `raw` is the run's whole stdout+stderr (the same concatenation the
     /// native capture makes) — the accept step reads the snapshot block out
-    /// of it (#1314); `detail` is the two-line summary the harness prints.
-    Fail { file: String, detail: String, raw: String },
+    /// of it (#1314); `detail` is the two-line summary the harness prints;
+    /// `printed` is what the program printed, per test where the stream
+    /// allows (#2538 — `test_output`).
+    Fail { file: String, detail: String, raw: String, printed: super::test_output::TestOutput },
     /// The file does not compile on ANY target: resolve/type errors in the
     /// entry file or an imported module. Distinct from `Skip` — a SKIP means
     /// "correct program outside the verified renderer's subset", and the skip
@@ -304,7 +310,7 @@ fn wasm_test_preflight_outcome(
         for d in parse_errors.iter().filter(|d| d.level == crate::diagnostic::Level::Error).take(3) {
             detail.push_str(&format!("  parse error: {}\n", d.message));
         }
-        return Some(WasmTestOutcome::Fail { file: test_file.to_string(), raw: detail.clone(), detail });
+        return Some(WasmTestOutcome::Fail { file: test_file.to_string(), raw: detail.clone(), detail, printed: Default::default() });
     }
     None
 }
@@ -647,6 +653,8 @@ fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::PathBuf, run
                             // what `--run` excluded is only knowable from the source.
                             filtered_out: declared_tests.saturating_sub(ran),
                             bytes: bytes.len(),
+                            stdout: stdout.into_owned(),
+                            stderr: stderr.into_owned(),
                         }
                     }
                 } else {
@@ -656,8 +664,14 @@ fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::PathBuf, run
                     }
                     let mut detail = String::new();
                     if !last_test.is_empty() { detail.push_str(&format!("  trapped at: {}\n", last_test)); }
-                    for line in stderr.lines().take(2) { detail.push_str(&format!("  {}\n", line)); }
-                    WasmTestOutcome::Fail { file: test_file.to_string(), detail, raw: format!("{stdout}{stderr}") }
+                    // From the failure block when there is one: the first
+                    // stderr lines may be the program's own (#2538), which
+                    // `printed` carries under their own label.
+                    for line in super::test_output::wasm_failure_lines(&stderr) {
+                        detail.push_str(&format!("  {}\n", line));
+                    }
+                    let printed = super::test_output::TestOutput::wasm(&stdout, &stderr);
+                    WasmTestOutcome::Fail { file: test_file.to_string(), detail, raw: format!("{stdout}{stderr}"), printed }
                 }
             }
             Err(e) => skip_env(format!("wasmtime: {}", e)),
@@ -687,7 +701,7 @@ fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::PathBuf, run
     }
 }
 
-pub fn cmd_test_wasm(file: &str, run_filter: Option<&str>, allow_no_tests: bool) {
+pub fn cmd_test_wasm(file: &str, run_filter: Option<&str>, allow_no_tests: bool, show_output: bool) {
     let test_files: Vec<String> = discover_test_files(file, &[]);
     // Owned so each worker thread can carry it (#2085 — this leg used to drop it).
     let run_filter: Option<String> = run_filter.map(str::to_string);
@@ -735,14 +749,21 @@ pub fn cmd_test_wasm(file: &str, run_filter: Option<&str>, allow_no_tests: bool)
     let mut counts = TestCounts::default();
     for o in &outcomes {
         match o {
-            WasmTestOutcome::Pass { file, count, filtered_out, bytes } => {
+            WasmTestOutcome::Pass { file, count, filtered_out, bytes, stdout, stderr } => {
                 err(&format!("{}: {} tests passed ({} bytes)", file, count, bytes));
+                if show_output {
+                    err_no_nl(&super::test_output::TestOutput::wasm(stdout, stderr).render_passing(file));
+                }
                 counts.add(TestCounts { ran: *count, filtered_out: *filtered_out });
                 passed += 1;
             }
-            WasmTestOutcome::Fail { file, detail, .. } => {
+            WasmTestOutcome::Fail { file, detail, printed, .. } => {
                 err(&format!("FAIL {}", file));
                 err_no_nl(&format!("{}", detail));
+                // The wasm runner stops at the first failure, so the test that
+                // never printed its `ok` is the failing one.
+                err_no_nl(&printed.failure_stdout(None));
+                err_no_nl(&printed.render_rest(&[None], show_output));
                 failed += 1;
             }
             // Broken on every target — a FAIL verdict here, matching the
@@ -853,12 +874,12 @@ fn run_native_fallback_phase(fallback: &[String], program_args: &std::sync::Arc<
         handles.push(std::thread::spawn(move || {
             let _ = sr.lock().unwrap().recv();
             let worker_dir = scratch.native_worker_dir(&tf);
-            let (code, out) = match super::run::compile_to_binary(&tf, no_check, true, false, Some(&worker_dir)) {
-                Ok(bin) => super::run::run_binary_captured(&bin, &args),
-                Err(e) => (1, format!("Compile error for {}:\n{}", tf, e)),
+            let (code, stdout, stderr) = match super::run::compile_to_binary(&tf, no_check, true, false, Some(&worker_dir)) {
+                Ok(bin) => super::run::run_binary_captured_io(&bin, &args),
+                Err(e) => (1, format!("Compile error for {}:\n{}", tf, e), String::new()),
             };
             let _ = st.send(());
-            let _ = tx.send((tf, code, out));
+            let _ = tx.send((tf, code, stdout, stderr));
         }));
     }
     drop(tx);
@@ -872,7 +893,7 @@ fn run_native_fallback_phase(fallback: &[String], program_args: &std::sync::Arc<
 /// any file the WASM path can't pass (emitter gap, wasm:skip, or a trap), fall
 /// back to the native rustc path, which is authoritative. The common case (most
 /// tests pass on WASM) is ~9x faster; the native fallback preserves correctness.
-pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>, allow_no_tests: bool) {
+pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>, allow_no_tests: bool, show_output: bool) {
     let test_files: Vec<String> = discover_test_files(file, &["spec", "exercises"]);
 
     let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
@@ -889,7 +910,10 @@ pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>, allow
     let mut counts = TestCounts::default();
     for o in wasm_outcomes {
         match o {
-            WasmTestOutcome::Pass { count, filtered_out, .. } => {
+            WasmTestOutcome::Pass { file, count, filtered_out, stdout, stderr, .. } => {
+                if show_output {
+                    err_no_nl(&super::test_output::TestOutput::wasm(&stdout, &stderr).render_passing(&file));
+                }
                 counts.add(TestCounts { ran: count, filtered_out });
                 wasm_pass += 1
             }
@@ -926,9 +950,14 @@ pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>, allow
     let native_results = run_native_fallback_phase(&fallback, &program_args, no_check, cpus, &scratch);
 
     let mut failed = 0;
-    for (file, code, output) in &native_results {
-        counts.add(libtest_counts(output).unwrap_or_default());
-        if *code != 0 { report_test_failure(file, output); failed += 1; }
+    for (file, code, stdout, stderr) in &native_results {
+        counts.add(libtest_counts(&format!("{stdout}{stderr}")).unwrap_or_default());
+        if *code != 0 {
+            report_test_failure_io(file, stdout, stderr, show_output);
+            failed += 1;
+        } else if show_output {
+            report_passing_output(file, stdout, stderr);
+        }
     }
     // The #1166 divergence class: the wasm leg compiled the file and failed at
     // runtime, but the AUTHORITATIVE native re-run passed — a wasm-only
@@ -937,7 +966,7 @@ pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>, allow
     // is native's). A trap whose native re-run ALSO failed is a plain FAILED
     // test — no wasm-specific noise for those.
     let native_code: std::collections::HashMap<&String, i32> =
-        native_results.iter().map(|(f, c, _)| (f, *c)).collect();
+        native_results.iter().map(|(f, c, _, _)| (f, *c)).collect();
     let diverged: Vec<&(String, String)> = trapped
         .iter()
         .filter(|(f, _)| native_code.get(f).copied() == Some(0))

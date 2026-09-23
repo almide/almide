@@ -614,12 +614,22 @@ pub fn run_binary(bin: &std::path::Path, program_args: &[String]) -> i32 {
 /// output is printed whole, in sorted file order, instead of interleaving live
 /// with every other worker (agents diff one run against the next).
 pub fn run_binary_captured(bin: &std::path::Path, program_args: &[String]) -> (i32, String) {
+    let (code, stdout, stderr) = run_binary_captured_io(bin, program_args);
+    (code, stdout + &stderr)
+}
+
+/// [`run_binary_captured`] with the two streams kept apart: `almide test`
+/// attributes a test's stdout to the test from libtest's markers, which only
+/// the stdout stream carries (#2538).
+pub fn run_binary_captured_io(bin: &std::path::Path, program_args: &[String]) -> (i32, String, String) {
     let Some(out) = with_exec_retry(|| binary_command(bin, program_args).output()) else {
-        return (1, String::new());
+        return (1, String::new(), String::new());
     };
-    let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
-    text.push_str(&String::from_utf8_lossy(&out.stderr));
-    (out.status.code().unwrap_or(1), text)
+    (
+        out.status.code().unwrap_or(1),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
 }
 
 /// Compile + run one file, with the D5 dual-time report leg (`--time-report`).
