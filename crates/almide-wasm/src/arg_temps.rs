@@ -197,6 +197,25 @@ fn is_born_here(e: &IrExpr) -> bool {
     )
 }
 
+/// #2312: `"${int.to_string(x)}"` displays exactly as `"${x}"` (`x: Int`
+/// — the decimal digits either way), so the part becomes `x` BEFORE the
+/// operand scan: no String temporary is produced, bound or released, and
+/// the build appends the digits from the itoa scratch. Stdout is the same
+/// bytes; one allocation per such part is gone.
+fn fold_int_display_parts(parts: &mut [almide_ir::IrStringPart], changed: &mut bool) {
+    for p in parts.iter_mut() {
+        let almide_ir::IrStringPart::Expr { expr } = p else { continue };
+        let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &mut expr.kind else {
+            continue;
+        };
+        if module.as_str() == "int" && func.as_str() == "to_string" && args.len() == 1 && args[0].ty == Ty::Int {
+            let x = args.pop().expect("one arg");
+            *expr = x;
+            *changed = true;
+        }
+    }
+}
+
 impl IrMutVisitor for Binder<'_> {
     fn visit_expr_mut(&mut self, e: &mut IrExpr) {
         let tail = self.tail;
@@ -215,6 +234,9 @@ impl IrMutVisitor for Binder<'_> {
             }
             IrExprKind::ForIn { body, .. } => self.name_destructure_subjects(body),
             _ => {}
+        }
+        if let IrExprKind::StringInterp { parts } = &mut e.kind {
+            fold_int_display_parts(parts, self.changed);
         }
         let operands: Vec<&mut IrExpr> = match &mut e.kind {
             // A binary op over droppable operands — concatenation, or an
