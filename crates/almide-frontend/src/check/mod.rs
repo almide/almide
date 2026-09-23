@@ -1099,6 +1099,17 @@ impl Checker {
                 self.env.import_table.used.insert(*head);
             }
         }
+        // A QUALIFIED protocol reference (`[R: ports.Repository[K, V]]`,
+        // `type M: ports.Store`, #1589) spells its module's alias just as
+        // `ports.Row` does in a type position — judged syntactically, so the
+        // verdict does not depend on the protocol having resolved.
+        for w in written_protocol_refs(program) {
+            if let Some(m) = w.r.and_then(|r| r.module)
+                && self.env.import_table.aliases.contains_key(&m)
+            {
+                self.env.import_table.used.insert(m);
+            }
+        }
         // Third source: a spelling that resolves WITHOUT an alias, so it
         // names no import head — matched through the declaring module's
         // canonical name against each import's canonical instead:
