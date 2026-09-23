@@ -22,7 +22,10 @@ test "the declaring module's own construction still fills the default (#2518)" {
 }
 
 test "an explicit value still overrides the record-literal default (#2518)" {
-  let r = recdefault.Response { content: "o", sampling: recdefault.Sampling { temperature_sent: true } }
+  let r = recdefault.Response {
+    content: "o",
+    sampling: recdefault.Sampling { temperature_sent: true },
+  }
   assert_eq(r.sampling.temperature_sent, true)
   assert_eq(r.sampling.top_p, 1.0)
 }
