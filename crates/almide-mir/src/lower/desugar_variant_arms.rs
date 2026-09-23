@@ -118,7 +118,7 @@ pub fn desugar_variant_guard_match(body: &IrExpr) -> Option<IrExpr> {
         }
     }
     fn mk(kind: IrExprKind, ty: &Ty, span: &Option<almide_ir::Span>) -> IrExpr {
-        IrExpr { kind, ty: ty.clone(), span: span.clone(), def_id: None }
+        IrExpr { kind, ty: ty.clone(), span: *span, def_id: None }
     }
 
     struct Branch {
@@ -151,7 +151,7 @@ pub fn desugar_variant_guard_match(body: &IrExpr) -> Option<IrExpr> {
         }) {
             return None;
         }
-        let span = e.span.clone();
+        let span = e.span;
         // A catch-all BINDER names the whole subject: substitute a Var subject; hoist any
         // other subject once so the substitution reads a value, never a re-evaluation.
         let binds_subject = arms.iter().any(|a| matches!(a.pattern, IrPattern::Bind { .. }));
@@ -166,7 +166,7 @@ pub fn desugar_variant_guard_match(body: &IrExpr) -> Option<IrExpr> {
                     value: (**subject).clone(),
                     mutability: almide_ir::Mutability::Let,
                 },
-                span: span.clone(),
+                span,
             });
             mk(IrExprKind::Var { id: t }, &subject.ty, &span)
         } else {
@@ -264,7 +264,7 @@ pub fn desugar_variant_guard_match(body: &IrExpr) -> Option<IrExpr> {
         let m = IrExpr {
             kind: IrExprKind::Match { subject: Box::new(subj), arms: out_arms },
             ty: e.ty.clone(),
-            span: span.clone(),
+            span,
             def_id: e.def_id,
         };
         Some(if hoist.is_empty() {
@@ -289,6 +289,7 @@ pub fn desugar_variant_guard_match(body: &IrExpr) -> Option<IrExpr> {
     ///   literal-and-guard chain);
     /// - a multi-field or record-shaped head must be unguarded with plain field patterns,
     ///   and its first row closes its branch.
+    ///
     /// Everything else declines.
     fn specialize_user(e: &IrExpr, next: &mut u32) -> Option<IrExpr> {
         struct Row {
@@ -335,7 +336,7 @@ pub fn desugar_variant_guard_match(body: &IrExpr) -> Option<IrExpr> {
         if !ok {
             return None;
         }
-        let span = e.span.clone();
+        let span = e.span;
         let binds_subject = arms.iter().any(|a| matches!(a.pattern, IrPattern::Bind { .. }));
         let mut hoist: Vec<IrStmt> = Vec::new();
         let subj: IrExpr = if binds_subject && !matches!(subject.kind, IrExprKind::Var { .. }) {
@@ -348,7 +349,7 @@ pub fn desugar_variant_guard_match(body: &IrExpr) -> Option<IrExpr> {
                     value: (**subject).clone(),
                     mutability: almide_ir::Mutability::Let,
                 },
-                span: span.clone(),
+                span,
             });
             mk(IrExprKind::Var { id: t }, &subject.ty, &span)
         } else {
@@ -497,7 +498,7 @@ pub fn desugar_variant_guard_match(body: &IrExpr) -> Option<IrExpr> {
         let m = IrExpr {
             kind: IrExprKind::Match { subject: Box::new(subj), arms: out_arms },
             ty: e.ty.clone(),
-            span: span.clone(),
+            span,
             def_id: e.def_id,
         };
         Some(if hoist.is_empty() {
