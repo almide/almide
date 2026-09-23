@@ -69,7 +69,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         (crate::embedded::SRC_IO_READ_N_BYTES, &[("io_read_n_bytes", "io.read_n_bytes")]),
         (crate::embedded::SRC_IO_READ_ALL, &[("io_read_all", "io.read_all")]),
         (crate::embedded::SRC_JSON_GET_TYPED, &[("json_get_string", "json.get_string"), ("json_get_int", "json.get_int"), ("json_get_float", "json.get_float"), ("json_get_bool", "json.get_bool"), ("json_get_array", "json.get_array")]),
-        (crate::embedded::SRC_FLOAT_TO_STRING, &[("float_to_string", "float.to_string"), ("float_to_fixed", "float.to_fixed")]),
+        (crate::embedded::SRC_FLOAT_TO_STRING, &[("float_to_string", "float.to_string"), ("float_to_string_compound", "float.to_string_compound"), ("float_to_fixed", "float.to_fixed")]),
         (crate::embedded::SRC_BOOL, &[("bool_to_string", "bool.to_string")]),
         (crate::embedded::SRC_ERROR_CHAIN, &[("error_chain", "error.chain"), ("error_context", "error.context")]),
         (crate::embedded::SRC_ERROR_MESSAGE, &[("error_message", "error.message")]),
@@ -546,10 +546,9 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         (crate::embedded::SRC_LIST_TO_STRING_LOB, &[("list_to_string_lob", "list.to_string_lob")]),
         (crate::embedded::SRC_LIST_TO_STRING_LR, &[("list_to_string_lr", "list.to_string_lr")]),
         (crate::embedded::SRC_MAP_IF, &[("map_from_list_if", "map.from_list_if"), ("map_to_string_if", "map.to_string_if")]),
-        // Single-value compound formatters for record/tuple Display (the `${record}`/`${tuple}`
-        // form): a Float field drops the trailing ".0" like a List[Float] element, a String field
-        // is quoted+escaped like a List[String] element. Both reuse the proven list-element logic.
-        (crate::embedded::SRC_FLOAT_TO_STRING_COMPOUND, &[("float_to_string_compound", "float.to_string_compound")]),
+        // Single-value compound formatter for record/tuple Display (the `${record}`/`${tuple}`
+        // form): a String field is quoted+escaped like a List[String] element. (The Float form,
+        // `float.to_string_compound`, is the shared printer in SRC_FLOAT_TO_STRING above, #2099.)
         (crate::embedded::SRC_STRING_QUOTE, &[("string_quote", "string.quote")]),
         (crate::embedded::SRC_LIST_LEN, &[("list_len", "list.len"), ("list_length", "list.length")]),
         (crate::embedded::SRC_LIST_FLATTEN, &[("list_flatten", "list.flatten"), ("list_flatten_rc", "list.flatten_rc")]),
