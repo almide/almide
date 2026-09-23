@@ -1,0 +1,38 @@
+// @contract: C-066
+// #2516: `f(x)?` over an OWNED carrier releases the some-cell it builds. The
+// payload's one credit moves out of the carrier into the fresh cell (the
+// carrier's spine is released under it, #2509), so the cell is an owned value
+// and the bind takes no second credit on it. Before the fix the bind took the
+// borrowed-source `+1` and the cell stayed at rc 1 forever — the cell and the
+// 64-byte buffer it holds, every call that succeeded — so the allocation
+// ledger's watermark for this fixture is what a reintroduced leak moves. The
+// borrowed cell turns one var's Result into an Option twice and reads the
+// Result again afterwards: its cells hold VIEWS of the carrier's payload, so
+// they must not spend the carrier's credit.
+effect fn mko(v: Int) -> Bytes = if v % 3 == 2 then err("skip") else ok(bytes.new(64))
+
+fn mkr(v: Int) -> Result[Bytes, String] = if v % 3 == 2 then err("skip") else ok(bytes.new(64))
+
+fn width(o: Bytes?) -> Int = match o {
+  some(b) => bytes.len(b),
+  none => 1,
+}
+
+effect fn main() -> Unit = {
+  var owned = 0
+  var borrowed = 0
+  for i in 0..<2000 {
+    let o = mko(i)?
+    owned = owned + width(o)
+    let r: Result[Bytes, String] = mkr(i)
+    let p = r?
+    let q = r?
+    let again = match r {
+      ok(b) => bytes.len(b),
+      err(e) => string.len(e),
+    }
+    borrowed = borrowed + width(p) + width(q) + again
+  }
+  println("owned ${owned}")
+  println("borrowed ${borrowed}")
+}
