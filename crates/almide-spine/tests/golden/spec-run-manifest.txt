@@ -1,4 +1,6 @@
-# oracle: almide 0.63.0 (dev) at 3dedb3574 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.63.0 (dev) at 70ad67a31 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+fc1e509b32cc098b363a81b5a73b4a6df840014ff72f80578083a2a10e39ad8b	0	spec/wasm_cross/accum_recursion_declined.almd
+c04cb55e5ddf0c74b5410feb45743dba9a0405ee40b330b099a13389b94c12b9	0	spec/wasm_cross/accum_recursion_int.almd
 f0709d9573472655341ac75bd847b3f30d2bddc3a201554bfd5cc22c21446902	0	spec/wasm_cross/adr0005_operator_equivalence.almd
 c0f26e63e32a038c59081b238912f0b3ecfd01d8d5ce45534b83fbbce13128a7	0	spec/wasm_cross/alias_combinator_rc.almd
 997e25dd01ce19a5253bd290b2f5f4b8eab74ea88f256b5fd9e09ca77d42af3b	0	spec/wasm_cross/alias_cow.almd
