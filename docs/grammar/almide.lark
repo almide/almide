@@ -85,13 +85,13 @@ param_list: _nl _o_params _nl
 _o_params: _bare_receiver (COMMA _nl param)* _comma
          | param (COMMA _nl param)* _comma
          |
-_bare_receiver: _ident
+_bare_receiver: _o_mut _ident
 param: _o_attrs _o_mut _param_name COLON type_expr _o_default
 _param_name: _ident | VAR
 
 // ── type ─────────────────────────────────────────────────────────
 type_decl: _o_vis TYPE_KW TYPENAME _o_generics _o_deriving _nl EQ _nl type_expr
-_o_deriving: COLON TYPENAME (COMMA TYPENAME)*
+_o_deriving: COLON protocol_ref (COMMA protocol_ref)*
            |
 
 // ── protocol ─────────────────────────────────────────────────────
@@ -189,8 +189,11 @@ variant_case: TYPENAME "(" _o_type_list ")"
 generic_params: "[" generic_param (COMMA generic_param)* "]"
 generic_param: TYPENAME _o_generic_bound
 _o_generic_bound: COLON record_type
-                | COLON TYPENAME (PLUS TYPENAME)*
+                | COLON protocol_ref (PLUS protocol_ref)*
                 |
+// A protocol reference in a bound or a conformance list (#1589): qualified by
+// module like a type, with the protocol's type arguments when it is generic.
+protocol_ref: qualified_type_name ("[" type_args "]")?
 
 // ═══════════════════════════════════════════════════════════════════
 // Statements
