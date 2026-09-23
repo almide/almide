@@ -132,6 +132,10 @@ fn is_admitted_effectful_io(module: &str, func: &str) -> bool {
         // Self-hosted over the same prim.read_n_bytes floor (io_read_byte.almd),
         // returning the byte 0..255 or -1 on EOF (a SCALAR Int, no ownership).
         || (module == "io" && func == "read_byte")
+        // `io.read_line_opt` READS one line of standard input — REUSES Capability::Stdin.
+        // Self-hosted as a byte loop over the same prim.read_n_bytes floor
+        // (io_read_line_opt.almd, #2539), returning an owned `Option[String]`.
+        || (module == "io" && func == "read_line_opt")
 }
 
 include!("calls_b.rs");

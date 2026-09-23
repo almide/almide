@@ -7,9 +7,13 @@
 // `Result`. Almide has no surface-level `impure` keyword, so those
 // fns stay as plain `fn` (matching the existing TOML contract where
 // the sole difference was an omitted effect-context check).
-/// Next stdin line, newline cut; empty at EOF.
+/// Next stdin line, newline cut; "" at EOF too — read_line_opt tells them apart.
 @intrinsic("almide_rt_io_read_line")
 effect fn read_line() -> String = _
+
+/// Next stdin line, newline cut; none at EOF, some("") for an empty line.
+@intrinsic("almide_rt_io_read_line_opt")
+effect fn read_line_opt() -> String? = _
 
 /// Writes s, no newline, then flushes.
 @intrinsic("almide_rt_io_print")

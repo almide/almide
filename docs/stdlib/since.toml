@@ -537,6 +537,7 @@
 "io.read_all" = "<=0.5.0"
 "io.read_byte" = "<=0.12.1"
 "io.read_line" = "<=0.5.0"
+"io.read_line_opt" = "unreleased"
 "io.read_n_bytes" = "<=0.12.1"
 "io.write" = "<=0.9.8"
 "io.write_bytes" = "<=0.9.8"

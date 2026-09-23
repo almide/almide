@@ -23,6 +23,25 @@ pub fn almide_rt_io_read_line() -> String {
     buf.trim_end_matches('\n').trim_end_matches('\r').to_string()
 }
 
+// `read_line` answers "" both for an empty line and at end of input, so a loop
+// that skips empty lines never sees the end (#2539). This twin says which: `None`
+// when stdin had nothing left, `Some("")` for a line that was only a newline.
+// The line is decoded lossily (as io.read_all's twin does), so a stray invalid
+// byte costs one U+FFFD instead of the whole line — the wasm self-host
+// (stdlib/io_read_line_opt.almd) decodes the same way.
+pub fn almide_rt_io_read_line_opt() -> Option<String> {
+    use std::io::BufRead;
+    almide_stdout_flush();
+    let mut buf: Vec<u8> = Vec::new();
+    match std::io::stdin().lock().read_until(b'\n', &mut buf) {
+        Ok(0) | Err(_) => None,
+        Ok(_) => {
+            let line = String::from_utf8_lossy(&buf);
+            Some(line.trim_end_matches('\n').trim_end_matches('\r').to_string())
+        }
+    }
+}
+
 pub fn almide_rt_io_read_all() -> String {
     almide_stdout_flush();
     use std::io::Read;
