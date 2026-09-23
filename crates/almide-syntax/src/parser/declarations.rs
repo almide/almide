@@ -454,18 +454,26 @@ impl Parser {
         let name = self.expect_type_name()?;
         let generics = self.try_parse_generic_params()?;
         // Conventions: type Name: Eq, Show = ...
+        // Each entry is a protocol reference (#1589): `ports.Repository[K, V]`
+        // keeps its bare name in `deriving` and its qualifier / type
+        // arguments in `deriving_refs`.
+        let mut refs = Vec::new();
+        let mut deriving_spans = Vec::new();
         let deriving = if self.check(TokenType::Colon) {
             self.advance();
             let mut d = Vec::new();
-            d.push(self.expect_type_name()?);
+            let (n, r, sp) = self.parse_protocol_ref()?;
+            d.push(n); refs.push(r); deriving_spans.push(sp);
             while self.check(TokenType::Comma) {
                 self.advance();
-                d.push(self.expect_type_name()?);
+                let (n, r, sp) = self.parse_protocol_ref()?;
+                d.push(n); refs.push(r); deriving_spans.push(sp);
             }
             Some(d)
         } else {
             None
         };
+        let deriving_refs = crate::ast::protocol_refs_if_any(refs);
         self.skip_newlines();
         self.expect(TokenType::Eq)?;
         let type_start = self.pos;
@@ -488,7 +496,7 @@ impl Parser {
         if let TypeExpr::Variant { comments, .. } = &mut ty {
             *comments = super::variant_comments::collect(&self.tokens[type_start..self.pos]);
         }
-        Ok(Decl::Type { name, ty, deriving, visibility, generics, span: Some(span) })
+        Ok(Decl::Type { name, ty, deriving, deriving_refs, deriving_spans, visibility, generics, span: Some(span) })
     }
 
     fn parse_protocol_decl(&mut self) -> Result<Decl, String> {
@@ -685,16 +693,27 @@ impl Parser {
 
     /// The implicit `self` receiver, if the list opens with one. It carries the
     /// `Self` type and no attributes; a following comma is consumed too.
+    ///
+    /// `mut self` is the same receiver with the mutable-borrow mode (#1589):
+    /// exactly the param `mut self: Self` spells, so the shorthand parses
+    /// everywhere the typed form does. A `mut self:` with an explicit type is
+    /// left to the ordinary param parse.
     fn take_self_param(&mut self, params: &mut Vec<Param>) {
-        if !self.check_ident("self") {
+        let is_mut = self.check(TokenType::Mut)
+            && self.peek_at(1).is_some_and(|t| t.value == "self")
+            && !self.peek_at(2).is_some_and(|t| t.token_type == TokenType::Colon);
+        if !is_mut && !self.check_ident("self") {
             return;
+        }
+        if is_mut {
+            self.advance();
         }
         params.push(Param {
             name: sym("self"),
             ty: TypeExpr::Simple { name: sym("Self") },
             default: None,
             attrs: Vec::new(),
-            is_mut: false,
+            is_mut,
         });
         self.advance();
         if self.check(TokenType::Comma) {

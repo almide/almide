@@ -96,10 +96,50 @@ pub struct ProtocolMethod {
     pub effect: bool,
 }
 
+/// What a protocol reference says beyond its bare name (#1589): the module
+/// alias it was qualified with (`ports.Repository` → `ports`) and its type
+/// arguments (`Repository[UserId, User]`). A bare `Store` is
+/// `ProtocolRef::default()`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ProtocolRef {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module: Option<Sym>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<TypeExpr>,
+}
+
+impl ProtocolRef {
+    pub fn is_bare(&self) -> bool { self.module.is_none() && self.args.is_empty() }
+}
+
+/// `refs` collapsed to `None` when every entry is bare — the AST-stability
+/// rule for `bound_refs` / `deriving_refs`.
+pub fn protocol_refs_if_any(refs: Vec<ProtocolRef>) -> Option<Vec<ProtocolRef>> {
+    if refs.iter().all(ProtocolRef::is_bare) { None } else { Some(refs) }
+}
+
+/// The ref aligned with entry `i` of a name list whose refs may be `None`
+/// (all bare).
+pub fn protocol_ref_at(refs: &Option<Vec<ProtocolRef>>, i: usize) -> Option<&ProtocolRef> {
+    refs.as_ref().and_then(|rs| rs.get(i))
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenericParam {
     pub name: Sym,
+    /// Protocol (or const-param scalar) bound NAMES, always the bare
+    /// protocol name — the qualifier and type arguments live in
+    /// `bound_refs`, so every consumer that keys on the name is unchanged.
     pub bounds: Option<Vec<Sym>>,
+    /// Qualifier and type arguments of each bound, index-aligned with
+    /// `bounds` (#1589: `[R: ports.Repository[K, V]]`). `None` when every
+    /// bound is a bare, argument-free name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bound_refs: Option<Vec<ProtocolRef>>,
+    /// Where each bound was written (index-aligned with `bounds`), for the
+    /// qualification diagnostics and their fix-its.
+    #[serde(skip)]
+    pub bound_spans: Vec<Span>,
     /// Structural type constraint (e.g., `T: { name: String, .. }`)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub structural_bound: Option<TypeExpr>,
@@ -405,7 +445,17 @@ impl Default for Visibility {
 pub enum Decl {
     Module { path: Vec<Sym>, #[serde(skip)] span: Option<Span> },
     Import { path: Vec<Sym>, names: Option<Vec<Sym>>, alias: Option<Sym>, #[serde(skip)] span: Option<Span> },
-    Type { name: Sym, #[serde(rename = "type")] ty: TypeExpr, deriving: Option<Vec<Sym>>, #[serde(default)] visibility: Visibility, #[serde(default)] generics: Option<Vec<GenericParam>>, #[serde(skip)] span: Option<Span> },
+    Type {
+        name: Sym, #[serde(rename = "type")] ty: TypeExpr, deriving: Option<Vec<Sym>>,
+        /// Qualifier and type arguments of each `deriving` entry, index-aligned
+        /// with it (#1589: `type X: ports.Repository[UserId, User]`). `None`
+        /// when every entry is a bare, argument-free name, so every AST from
+        /// before generic conformance serializes unchanged.
+        #[serde(default, skip_serializing_if = "Option::is_none")] deriving_refs: Option<Vec<ProtocolRef>>,
+        /// Where each `deriving` entry was written (index-aligned).
+        #[serde(skip)] deriving_spans: Vec<Span>,
+        #[serde(default)] visibility: Visibility, #[serde(default)] generics: Option<Vec<GenericParam>>, #[serde(skip)] span: Option<Span>,
+    },
     Fn {
         name: Sym,
         #[serde(default)] effect: Option<bool>,

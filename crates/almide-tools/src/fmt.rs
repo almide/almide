@@ -834,10 +834,29 @@ fn fmt_generics(out: &mut String, params: &[GenericParam]) {
         if let Some(ref sb) = gp.structural_bound {
             out.push_str(": "); fmt_type(out, sb, 0);
         } else if let Some(ref bounds) = gp.bounds {
-            if !bounds.is_empty() { w!(out, ": {}", join_syms(bounds, " + ")); }
+            if !bounds.is_empty() {
+                out.push_str(": ");
+                fmt_protocol_refs(out, bounds, &gp.bound_refs, " + ");
+            }
         }
     });
     out.push(']');
+}
+
+/// A bound / conformance list, each entry with the qualifier and type
+/// arguments its `ProtocolRef` carries (#1589).
+fn fmt_protocol_refs(out: &mut String, names: &[Sym], refs: &Option<Vec<ProtocolRef>>, sep: &str) {
+    for (i, n) in names.iter().enumerate() {
+        if i > 0 { out.push_str(sep); }
+        let r = protocol_ref_at(refs, i);
+        if let Some(m) = r.and_then(|r| r.module) { w!(out, "{m}."); }
+        out.push_str(n);
+        if let Some(r) = r.filter(|r| !r.args.is_empty()) {
+            out.push('[');
+            comma_sep(out, &r.args, |out, a| fmt_type(out, a, 0));
+            out.push(']');
+        }
+    }
 }
 
 fn maybe_generics(out: &mut String, generics: &Option<Vec<GenericParam>>) {
@@ -855,14 +874,15 @@ fn is_bare_self_param(p: &Param) -> bool {
 
 /// `[vis] type Name[generics][: deriving] = Ty`.
 fn fmt_decl_type(out: &mut String, decl: &Decl, depth: usize) {
-    let Decl::Type { name, ty, deriving, visibility, generics, .. } = decl else { unreachable!() };
+    let Decl::Type { name, ty, deriving, deriving_refs, visibility, generics, .. } = decl else { unreachable!() };
     out.push_str(&ind(depth));
     fmt_vis(out, visibility);
     w!(out, "type {name}");
     maybe_generics(out, generics);
     if let Some(d) = deriving {
         if !d.is_empty() {
-            w!(out, ": {}", join_syms(d, ", "));
+            out.push_str(": ");
+            fmt_protocol_refs(out, d, deriving_refs, ", ");
         }
     }
     out.push_str(" = ");
@@ -958,9 +978,14 @@ fn fmt_decl_test(out: &mut String, decl: &Decl, depth: usize) {
 }
 
 fn fmt_decl_protocol(out: &mut String, decl: &Decl, depth: usize) {
-    let Decl::Protocol { name, methods, .. } = decl else { unreachable!() };
+    let Decl::Protocol { name, generics, methods, .. } = decl else { unreachable!() };
     let i = ind(depth);
-    wln!(out, "{i}protocol {name} {{");
+    // The protocol's own parameters (`protocol Repository[K, V]`) are part
+    // of its declaration; dropping them turned every `K` in a method into an
+    // unknown type on the next parse.
+    let mut head = String::new();
+    maybe_generics(&mut head, generics);
+    wln!(out, "{i}protocol {name}{head} {{");
     let inner = "  ".repeat(depth + 1);
     for m in methods {
         let effect = if m.effect { "effect " } else { "" };
@@ -970,10 +995,10 @@ fn fmt_decl_protocol(out: &mut String, decl: &Decl, depth: usize) {
             // `mut` is semantic here exactly as in fmt_decl_fn (a mutable-borrow
             // receiver/param — `fn bump(mut self: Self, by: Int)`); dropping it
             // failed the AST-conservation verifier on every protocol spelling a
-            // mut method (#1559). A MUT self keeps the TYPED spelling — the
-            // protocol grammar has no bare `mut self` (`mut self,` fails to
-            // re-parse: Expected Colon), so the shorthand is for the immutable
-            // receiver only.
+            // mut method (#1559). A MUT self keeps the TYPED spelling it has
+            // always printed as: `mut self` parses too since #1589, but
+            // switching the printed form would re-format every protocol that
+            // already declares a mut receiver.
             if p.is_mut { params_str.push_str("mut "); }
             if is_bare_self_param(p) && !p.is_mut {
                 params_str.push_str("self");

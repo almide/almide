@@ -445,23 +445,53 @@ impl Parser {
     fn parse_generic_param(&mut self) -> Result<GenericParam, String> {
         let name = self.expect_type_name()?;
         let mut bounds = Vec::new();
+        let mut refs = Vec::new();
+        let mut spans = Vec::new();
         let mut structural_bound = None;
         if self.check(TokenType::Colon) {
             self.advance();
             if self.check(TokenType::LBrace) {
                 structural_bound = Some(self.parse_record_type()?);
             } else {
-                bounds.push(self.expect_type_name()?);
+                let (b, r, sp) = self.parse_protocol_ref()?;
+                bounds.push(b); refs.push(r); spans.push(sp);
                 while self.check(TokenType::Plus) {
                     self.advance();
-                    bounds.push(self.expect_type_name()?);
+                    let (b, r, sp) = self.parse_protocol_ref()?;
+                    bounds.push(b); refs.push(r); spans.push(sp);
                 }
             }
         }
         Ok(GenericParam {
             name,
             bounds: if bounds.is_empty() { None } else { Some(bounds) },
+            bound_refs: protocol_refs_if_any(refs),
+            bound_spans: spans,
             structural_bound,
         })
+    }
+
+    /// A protocol reference in a bound or a conformance list (#1589):
+    /// `[module.]*Name[TypeArgs]?`. Returns the bare name (what every
+    /// name-keyed consumer reads) and the qualifier + arguments beside it.
+    /// The qualifier takes the same shape a module-qualified TYPE does —
+    /// lowercase segments, then the capitalized name.
+    pub(crate) fn parse_protocol_ref(&mut self) -> Result<(Sym, ProtocolRef, Span), String> {
+        let start = self.current_span();
+        let module = if self.check(TokenType::Ident) && self.peek_dot_type_name() {
+            let mut path = self.advance_and_get_sym().to_string();
+            self.advance(); // skip '.'
+            while self.check(TokenType::Ident) {
+                path.push('.');
+                path.push_str(&self.advance_and_get_sym());
+                self.advance(); // skip '.' (guaranteed by peek_dot_type_name)
+            }
+            Some(sym(&path))
+        } else {
+            None
+        };
+        let name = self.expect_type_name()?;
+        let args = if self.check(TokenType::LBracket) { self.parse_type_args()? } else { Vec::new() };
+        Ok((name, ProtocolRef { module, args }, self.span_to_prev_end(start)))
     }
 }
