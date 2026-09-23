@@ -23,6 +23,16 @@
 //!      free-list reuse per `Node`, allocated through the inlined bump.
 //!      It lives beside the window's other gates in region_window.rs
 //!      (`a_window_local_node_costs_one_inlined_allocation_and_no_free`).
+//!   R5 asymptotic class of an element store (#2150): t(4n, r/4) / t(n, r)
+//!      at a fixed number of stores. O(1) per store predicts ~1; the #1729
+//!      copy-per-write shape (fft's ~3,500x at 2^18) predicts ~4. Line 2.5.
+//!   R6 store/read parity (#2150): t(store loop) / t(read loop) at the same
+//!      n. An element-only loop judges copy-on-write once per loop entry
+//!      (cow_hoist.rs); judging per store read 2.92 against 1.13. Line 2.0.
+//!   R7 the timing runner's harness tax (#2150): t(run_wasm_unbounded) /
+//!      t(run_wasm) on mandelbrot's escape-time loop. The 30 s epoch
+//!      watchdog of the test runner checks at every loop header (1.9x on
+//!      mandelbrot); `almide bench --target wasm` must not pay it. Line 0.85.
 //!
 //! Anti-vacuous floor: the small-size measurement must be slow enough
 //! to mean something — if an optimizer ever elides the loop, the gate
@@ -110,6 +120,137 @@ fn sort_asymptotic_and_lockstep_relations() {
     assert!(
         overhead <= 4.0,
         "sort_by/sort = {overhead:.2} > 4 — the lockstep merge picked up more than a constant factor"
+    );
+}
+
+/// `rounds` passes over a preallocated `List[Float]` of `n` elements, each
+/// pass either storing into every element (`xs[i] = xs[i] + 1.0`) or only
+/// reading it (`acc = acc + xs[i]`) — the fft butterfly's access, isolated.
+fn index_kernel(n: usize, rounds: usize, store: bool) -> String {
+    let (decl, step, out) = if store {
+        ("", "xs[i] = xs[i] + 1.0", "xs[0]")
+    } else {
+        ("  var acc = 0.0\n", "acc = acc + xs[i]", "acc")
+    };
+    format!(
+        r#"fn main() -> Unit = {{
+  var xs: List[Float] = list.repeat(0.5, {n})
+{decl}  var r = 0
+  while r < {rounds} {{
+    for i in 0..<{n} {{
+      {step}
+    }}
+    r = r + 1
+  }}
+  println(float.to_string({out}))
+}}
+"#
+    )
+}
+
+/// R5 + R6 (#2150): the two ways an element store has gone wrong on this leg.
+#[cfg_attr(debug_assertions, ignore = "timing gate is release-only (CI: release-shape job)")]
+#[test]
+fn index_store_class_and_store_read_parity() {
+    const N: usize = 50_000;
+    const ROUNDS: usize = 600;
+    // R5 asymptotic class at a fixed total of stores: t(4n, r/4) / t(n, r).
+    // A store is O(1) and predicts ~1; the #1729 shape (a fresh block copy
+    // per store) is O(n) per store and predicts ~4 — the fft row's ~3,500x
+    // at 2^18. The gate line is 2.5.
+    let ts = measure(&index_kernel(N, ROUNDS, true));
+    let tb = measure(&index_kernel(4 * N, ROUNDS / 4, true));
+    assert!(ts >= 5.0, "index store: measured {ts:.1}ms — too fast to gate on, re-size the kernel");
+    let class = tb / ts;
+    println!("RATCHET index store t(n={N})={ts:.1}ms t(4n, r/4)={tb:.1}ms ratio={class:.2}");
+    assert!(
+        class <= 2.5,
+        "index store: t(4n, r/4)/t(n, r) = {class:.2} > 2.5 — a store costs O(len) again (the #1729 \
+         copy-per-write class, fft's ~3,500x cliff)"
+    );
+    // R6 store/read parity at the same n: a store in a loop that reaches the
+    // list only element-wise judges copy-on-write once per loop entry
+    // (cow_hoist.rs), so it costs a read plus a store. Judging per store (a
+    // call, a global compare and a reference-count load each) was the bulk of
+    // fft's remaining wasm/native gap.
+    let tr = measure(&index_kernel(N, ROUNDS, false));
+    let parity = ts / tr;
+    println!("RATCHET index store/read t(store)={ts:.1}ms t(read)={tr:.1}ms ratio={parity:.2}");
+    assert!(
+        parity <= STORE_READ_CEILING,
+        "index store/read = {parity:.2} > {STORE_READ_CEILING} — the element-only loop is judging \
+         copy-on-write per store again (cow_hoist.rs, #2150)"
+    );
+}
+
+/// A/B on an M4 Pro, 2026-09-24, same kernel: 1.13 with the judge hoisted
+/// per loop entry, 2.92 with it run per store. The line sits between.
+const STORE_READ_CEILING: f64 = 2.0;
+
+/// mandelbrot's escape-time inner loop over an `n`×`n` grid: a tight float
+/// loop with a tiny body, where a per-back-edge check is a large fraction.
+fn escape_time_kernel(n: usize) -> String {
+    format!(
+        r#"fn main() -> Unit = {{
+  var inside = 0
+  var y = 0
+  while y < {n} {{
+    let ci = 2.0 * float.from_int(y) / {n}.0 - 1.0
+    var x = 0
+    while x < {n} {{
+      let cr = 2.0 * float.from_int(x) / {n}.0 - 1.5
+      var zr = 0.0
+      var zi = 0.0
+      var it = 0
+      while it < 50 and zr * zr + zi * zi <= 4.0 {{
+        let t = zr * zr - zi * zi + cr
+        zi = 2.0 * zr * zi + ci
+        zr = t
+        it = it + 1
+      }}
+      if it == 50 then inside = inside + 1 else ()
+      x = x + 1
+    }}
+    y = y + 1
+  }}
+  println(int.to_string(inside))
+}}
+"#
+    )
+}
+
+/// R7 (#2150): `almide bench --target wasm` times the program, not the
+/// harness's watchdog. The in-process test runner (`run_wasm`) arms a 30 s
+/// epoch deadline, and epoch interruption makes wasmtime check the epoch at
+/// every loop header — 1.9x on mandelbrot at 4000, the whole of its embedded
+/// wasm/native gap. The timing runner (`run_wasm_unbounded`) must not carry
+/// it: t(unbounded) / t(watchdog) on the escape-time loop reads ~0.5 when it
+/// does not; the gate line is 0.85 (a re-armed watchdog reads ~1.0).
+#[cfg_attr(debug_assertions, ignore = "timing gate is release-only (CI: release-shape job)")]
+#[test]
+fn timing_runner_carries_no_watchdog_tax() {
+    let src = escape_time_kernel(1000);
+    let ir = almide_spine::s5::lower_to_ir("perf_ratchet.almd", &src).expect("front");
+    let bytes = almide_wasm::emit_program(&ir).expect("emit");
+    let best = |run: &dyn Fn(&[u8]) -> anyhow::Result<almide_wasm_run::RunResult>| {
+        (0..3)
+            .map(|_| {
+                let t = Instant::now();
+                let r = run(&bytes).expect("run");
+                assert_eq!(r.exit, 0, "kernel exited nonzero: {}", r.stderr);
+                t.elapsed().as_secs_f64() * 1000.0
+            })
+            .fold(f64::INFINITY, f64::min)
+    };
+    let watched = best(&almide_wasm_run::run_wasm);
+    let timed = best(&almide_wasm_run::run_wasm_unbounded);
+    assert!(watched >= 5.0, "escape-time: measured {watched:.1}ms — too fast to gate on, re-size the kernel");
+    let ratio = timed / watched;
+    println!("RATCHET timing runner/watchdog runner t={timed:.1}ms / {watched:.1}ms ratio={ratio:.2}");
+    assert!(
+        ratio <= 0.85,
+        "timing runner / watchdog runner = {ratio:.2} > 0.85 — `almide bench --target wasm` pays the \
+         epoch watchdog's per-loop-header check again (run_wasm_unbounded, #2150)"
     );
 }
 
