@@ -178,6 +178,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/top_let_div_eager.almd", class = "fixture" },
   { path = "spec/wasm_cross/top_let_div_used.almd", class = "fixture" },
+  { path = "spec/wasm_cross/top_let_closure_eager.almd", class = "fixture" },
 ]
 
 # ── COMPOUND / RECORD / RECURSIVE REPR INTERPOLATION (PR #379) ───────
@@ -3198,6 +3199,7 @@ since     = "0.57.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/declaration_forms.almd", class = "fixture" },
+  { path = "spec/wasm_cross/top_let_closure_record.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-261"
