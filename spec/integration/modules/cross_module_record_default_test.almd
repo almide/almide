@@ -18,7 +18,8 @@ test "a record-literal default with an explicit field fills from another module 
 }
 
 test "the declaring module's own construction still fills the default (#2518)" {
-  assert_eq(recdefault.make("m").sampling.temperature_sent, false)
+  let r = recdefault.make("m")
+  assert_eq(r.sampling.temperature_sent, false)
 }
 
 test "an explicit value still overrides the record-literal default (#2518)" {
