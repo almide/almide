@@ -18,6 +18,11 @@
 //!      scan #2156 shipped with predicts ~K2/K1 = 100 (every element
 //!      walked every group key — 11 µs per element over 5,000 keys). The
 //!      gate line is 8.
+//!   R4 per-node cost of a region window's producer (#2318), a COUNT
+//!      relation so it needs no clock: one allocation, no free and no
+//!      free-list reuse per `Node`, allocated through the inlined bump.
+//!      It lives beside the window's other gates in region_window.rs
+//!      (`a_window_local_node_costs_one_inlined_allocation_and_no_free`).
 //!
 //! Anti-vacuous floor: the small-size measurement must be slow enough
 //! to mean something — if an optimizer ever elides the loop, the gate
