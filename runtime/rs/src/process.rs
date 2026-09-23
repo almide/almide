@@ -156,6 +156,13 @@ pub fn almide_rt_process_exec_status(cmd: &str, args: &[String]) -> Result<Almid
 ///
 /// stdout/stderr are drained on READER THREADS so a chatty child can never
 /// deadlock against a full pipe while the parent polls `try_wait`.
+///
+/// The child runs in its OWN process group (so a timeout can stop its whole
+/// tree, #2065) — which makes it a BACKGROUND job for the controlling
+/// terminal. A child that changes terminal settings (`stty -echo`) or reads
+/// the terminal is stopped by the kernel with SIGTTOU / SIGTTIN; that stop
+/// is detected and answered at once with an error naming
+/// `process.exec_attached` (#2540), instead of waiting out the deadline.
 pub fn almide_rt_process_exec_status_timeout(
     cmd: &str,
     args: &[String],
@@ -191,8 +198,17 @@ pub fn almide_rt_process_exec_status_timeout(
     let mut exit_status = None;
     let status = loop {
         if exit_status.is_none() {
-            match child.try_wait() {
-                Ok(status) => exit_status = status,
+            match almide_process_poll_child(&mut child) {
+                Ok(AlmideChildPoll::Running) => {}
+                Ok(AlmideChildPoll::Exited(status)) => exit_status = Some(status),
+                Ok(AlmideChildPoll::TerminalStop(sig)) => {
+                    almide_process_stop_tree(&mut child);
+                    return Err(format!(
+                        "process.exec_status_timeout({cmd:?}, {timeout_ms}): the child was stopped by {sig}: \
+                         it tried to use the terminal from a background process group; \
+                         run terminal programs with process.exec_attached"
+                    ));
+                }
                 Err(e) => {
                     almide_process_stop_tree(&mut child);
                     return Err(call_err("process.exec_status_timeout", &format!("{cmd:?}, {timeout_ms}"), e));
@@ -215,6 +231,66 @@ pub fn almide_rt_process_exec_status_timeout(
     let stdout = String::from_utf8_lossy(&out_h.join().unwrap_or_default()).to_string();
     let stderr = String::from_utf8_lossy(&err_h.join().unwrap_or_default()).to_string();
     Ok(AlmideProcessStatus { code: status.code().unwrap_or(-1) as i64, stdout, stderr })
+}
+
+enum AlmideChildPoll {
+    Running,
+    Exited(std::process::ExitStatus),
+    /// Stopped by SIGTTOU / SIGTTIN (the signal's name): a background-group
+    /// child touched the controlling terminal and will never resume on its own.
+    TerminalStop(&'static str),
+}
+
+/// `try_wait` that ALSO reports a child stopped for touching the terminal
+/// (#2540). First the ordinary non-blocking reap; only if the child is still
+/// running, a `waitpid(pid, WNOHANG | WUNTRACED)` — which reports a stop
+/// without reaping. If the child exits between the two calls that waitpid
+/// reaps it, so its raw status is returned as the exit status (the Child
+/// handle is then never waited again: the caller breaks out on it).
+fn almide_process_poll_child(child: &mut std::process::Child) -> std::io::Result<AlmideChildPoll> {
+    if let Some(status) = child.try_wait()? {
+        return Ok(AlmideChildPoll::Exited(status));
+    }
+    #[cfg(unix)]
+    {
+        extern "C" {
+            fn waitpid(pid: i32, status: *mut i32, options: i32) -> i32;
+        }
+        // POSIX values, identical on Linux and macOS / BSD.
+        const WNOHANG: i32 = 1;
+        const WUNTRACED: i32 = 2;
+        const SIGTTIN: i32 = 21;
+        const SIGTTOU: i32 = 22;
+        let mut raw: i32 = 0;
+        let r = unsafe { waitpid(child.id() as i32, &mut raw, WNOHANG | WUNTRACED) };
+        if r == child.id() as i32 {
+            // WIFSTOPPED / WSTOPSIG (the same encoding on Linux and macOS).
+            if raw & 0xff == 0x7f {
+                return Ok(match (raw >> 8) & 0xff {
+                    SIGTTOU => AlmideChildPoll::TerminalStop("SIGTTOU"),
+                    SIGTTIN => AlmideChildPoll::TerminalStop("SIGTTIN"),
+                    _ => AlmideChildPoll::Running,
+                });
+            }
+            use std::os::unix::process::ExitStatusExt;
+            return Ok(AlmideChildPoll::Exited(std::process::ExitStatus::from_raw(raw)));
+        }
+    }
+    Ok(AlmideChildPoll::Running)
+}
+
+/// The TERMINAL-ATTACHED run (#2540): the child inherits this program's
+/// stdin, stdout and stderr and stays in its process group, so it is a
+/// foreground job whenever this program is — pagers, editors, `stty` and
+/// anything else that reads or reconfigures the terminal work. Nothing is
+/// captured; the answer is the exit code (-1 if killed by a signal).
+pub fn almide_rt_process_exec_attached(cmd: &str, args: &[String]) -> Result<i64, String> {
+    almide_stdout_flush();
+    match std::process::Command::new(cmd).args(args).status() {
+        Ok(status) => Ok(status.code().unwrap_or(-1) as i64),
+        // C-214's error family: quote the command, omit arguments, keep the host error.
+        Err(e) => Err(call_err("process.exec_attached", &format!("{cmd:?}"), e)),
+    }
 }
 
 fn almide_process_stop_tree(child: &mut std::process::Child) {

@@ -94,7 +94,8 @@ schema = 3
 # (the embedded overlay shim serves it, crates/almide-wasm/tests/
 # wasi_services.rs), testing.assert_throws is native-only-forever with
 # the subprocess family (process.exec/exec_in/exec_status/
-# exec_status_timeout/exec_with_stdin/spawn/is_alive/kill/pid);
+# exec_status_timeout/exec_with_stdin/spawn/is_alive/kill/pid; and
+# exec_attached, #2540);
 # process.env and process.stdin_lines stay pending-port (environ and
 # stdin exist in WASI; the split the ruling asked for).
 # 2026-09-21 (schema 3): 34 -> 56 is the CLASS basis, not a regression.
@@ -599,6 +600,16 @@ fn = "process.exec"
 legs = ["embedded", "stock-p1", "structural"]
 class = "native-only-forever"
 justification = "stock WASI (0.2 and 0.3) has no subprocess API, so a child process cannot be started on the wasm target as specified — ruled native-only-forever (#1423 bucket C, 2026-08-31)"
+reason-embedded = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
+reason-stock-p1 = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
+reason-structural = "host-surface (native-only-forever)"
+issue = "#1423"
+
+[[unavailable]]
+fn = "process.exec_attached"
+legs = ["embedded", "stock-p1", "structural"]
+class = "native-only-forever"
+justification = "stock WASI (0.2 and 0.3) has no subprocess API, so a child process cannot be started on the wasm target as specified — ruled native-only-forever (#1423 bucket C, 2026-08-31); the terminal-attached entry point (#2540) joins the subprocess family"
 reason-embedded = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
 reason-stock-p1 = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
 reason-structural = "host-surface (native-only-forever)"
