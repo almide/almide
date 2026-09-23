@@ -110,6 +110,7 @@
 2544	spec/wasm_cross/deep_eq_heap.almd
 2264	spec/wasm_cross/default_param_ref.almd
 2789	spec/wasm_cross/destructure_let_unwrap.almd
+3919	spec/wasm_cross/destructure_owned_tuple_release.almd
 5795	spec/wasm_cross/early_return_control_flow.almd
 3706	spec/wasm_cross/edge_closure_matrix.almd
 16712	spec/wasm_cross/edge_float_formatting.almd
@@ -708,6 +709,7 @@
 7041	spec/wasm_cross/to_fixed_domain_abort.almd
 7194	spec/wasm_cross/to_fixed_domain_abort_hi.almd
 8299	spec/wasm_cross/to_fixed_wide_precision.almd
+3023	spec/wasm_cross/to_option_owned_carrier_release.almd
 2728	spec/wasm_cross/to_result_custom_e.almd
 3311	spec/wasm_cross/to_result_nested_share.almd
 1476	spec/wasm_cross/top_let_div_eager.almd
