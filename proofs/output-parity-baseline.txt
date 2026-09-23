@@ -227,6 +227,7 @@ spec/wasm_cross/list_eq.almd
 spec/wasm_cross/list_eq_float_bool.almd
 spec/wasm_cross/list_flatten_borrow.almd
 spec/wasm_cross/list_float_total_order.almd
+spec/wasm_cross/list_heap_tuple_return.almd
 spec/wasm_cross/list_heapelem_rc.almd
 spec/wasm_cross/list_index_element_append.almd
 spec/wasm_cross/list_insert_clamp.almd
@@ -304,6 +305,9 @@ spec/wasm_cross/option_none_unwrap_term.almd
 spec/wasm_cross/option_result.almd
 spec/wasm_cross/option_tuple_payload_matrix.almd
 spec/wasm_cross/option_unwrap_or_else_heap.almd
+spec/wasm_cross/or_pattern.almd
+spec/wasm_cross/or_pattern_guarded_nullary.almd
+spec/wasm_cross/or_pattern_heap_subject_matrix.almd
 spec/wasm_cross/phantom_type_param.almd
 spec/wasm_cross/pipe_lambda_block_value.almd
 spec/wasm_cross/place_mutation.almd
@@ -325,6 +329,11 @@ spec/wasm_cross/records_variants.almd
 spec/wasm_cross/recursion_depth_within_limits.almd
 spec/wasm_cross/recursive_generic_repr_interp.almd
 spec/wasm_cross/reduce_str.almd
+spec/wasm_cross/ref_gleam_or_pattern_alternatives.almd
+spec/wasm_cross/ref_grain_or_pattern_alias_match.almd
+spec/wasm_cross/ref_rust_or_pattern_guard_count.almd
+spec/wasm_cross/ref_rust_or_pattern_guard_retry.almd
+spec/wasm_cross/ref_rust_or_pattern_heap_subject.almd
 spec/wasm_cross/regex_engine.almd
 spec/wasm_cross/regex_fuzz_batch.almd
 spec/wasm_cross/repeat_size_ceiling.almd
