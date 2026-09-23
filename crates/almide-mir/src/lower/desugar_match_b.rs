@@ -451,3 +451,4 @@ pub fn desugar_tuple_variant_match(body: &IrExpr) -> Option<IrExpr> {
 
 include!("desugar_match_deep.rs");
 include!("desugar_variant_arms.rs");
+include!("desugar_variant_arms_b.rs");
