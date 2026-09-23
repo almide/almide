@@ -773,8 +773,8 @@ impl Checker {
             ),
             format!(
                 "the value is already a plain {}. If it comes from an effect-fn call, \
-                 auto-`?` has unwrapped it — use the value directly, or `?? <default>` \
-                 on the producing call for a fallback",
+                 its `!` already unwrapped it — use the value directly, or replace the \
+                 `!` with `?? <default>` on that call for a fallback",
                 resolved.display()
             ),
             "match pattern".to_string(),
