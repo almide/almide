@@ -34,10 +34,11 @@ pub struct RunResult {
 }
 
 /// What the structural leg's allocator did during one run (#2407): the
-/// churn the `__heap` watermark cannot show. `allocs` is every `$alloc`
-/// call, `reused` the ones a size-class free-list pop served (the rest
-/// bumped the heap), `bytes` the payload bytes requested in total, and
-/// `frees` every `$free` call.
+/// churn the `__heap` watermark cannot show. `allocs` is every allocation
+/// (a `$alloc` call or a fixed-size constructor's inlined bump, #2318),
+/// `reused` the ones a size-class free-list pop served (the rest bumped
+/// the heap), `bytes` the payload bytes requested in total, and `frees`
+/// every `$free` call.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AllocCount {
     pub allocs: u64,

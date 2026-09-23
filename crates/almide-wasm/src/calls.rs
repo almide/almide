@@ -345,10 +345,12 @@ impl Emitter<'_> {
             return Ok(Some(SliceTy::Named(ti)));
         }
         let hold = self.hold_i32()?;
+        // A case with a payload is a fixed-size block: the size class folds
+        // at compile time and the bump is inlined, `$alloc` only for a
+        // reuse / grow (alloc_inline.rs, #2318).
+        self.emit_alloc_fixed(size, hold);
         self.f
             .instructions()
-            .i32_const(size as i32)
-            .call(F_ALLOC)
             .local_tee(hold)
             .i32_const(tag as i32)
             .i32_store(slot_memarg(almide_layout::SUM_TAG));

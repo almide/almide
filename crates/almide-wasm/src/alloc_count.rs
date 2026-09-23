@@ -9,7 +9,8 @@
 //!
 //! | export            | counts                                            |
 //! |-------------------|---------------------------------------------------|
-//! | `__alloc_count`   | every `$alloc` call (free-list hit or bump)       |
+//! | `__alloc_count`   | every allocation: a `$alloc` call (free-list hit  |
+//! |                   | or bump) or a constructor's inlined bump (#2318)  |
 //! | `__alloc_reused`  | the `$alloc` calls a free-list pop served         |
 //! | `__alloc_bytes`   | the sum of the payload lengths requested          |
 //! | `__free_count`    | every `$free` call (filed or abandoned)           |

@@ -106,6 +106,7 @@ mod bytes_rw;
 mod bytes_recv;
 mod bytes_split;
 pub mod alloc_count;
+mod alloc_inline;
 pub mod heap_cap;
 pub mod host_exports;
 pub mod witness;
