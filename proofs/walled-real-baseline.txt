@@ -222,25 +222,3 @@ spec/gauntlet/pkg/mut_port/src/main.almd :: main
 spec/wasm_cross/map_set_index_threshold.almd :: branch_lift_synth_3
 spec/wasm_cross/map_set_index_threshold.almd :: branch_lift_synth_4
 spec/wasm_cross/map_set_index_threshold.almd :: branch_lift_synth_7
-# 2026-09-22 (#2435 reference or-pattern suites, C-323): three fns that match a
-# HEAP-valued subject (String / some(String) / List[String]) against literal and
-# wildcard alternatives and reuse it afterwards wall on the incumbent MIR
-# lowering; the structural leg serves both fixtures byte-identically to native and
-# the judge agrees. Owned by #2473 (prune these and lower the two determinism
-# ceilings 33 -> 31 in the same change); the incumbent is retiring under #1696.
-spec/wasm_cross/ref_grain_or_pattern_alias_match.almd :: alias5
-spec/wasm_cross/ref_rust_or_pattern_heap_subject.almd :: main
-spec/wasm_cross/ref_rust_or_pattern_heap_subject.almd :: or_at
-# 2026-09-22 (#2463 guarded or-pattern over a nullary constructor, C-323): the
-# fixture that pins the native fixpoint fix. The incumbent MIR brick refuses the
-# four lifted guard arms as a heap-result `match` outside its executable subset
-# and refuses main's custom-variant statement match (`Red | Green if false`) as
-# an arm outside the scalar-field subset — the same honest refusal it makes for
-# the #2435 reference suites above. The structural leg, the default route, lowers
-# the fixture byte-identically to native. Owned by #2473 with the rows above; the
-# incumbent is retiring under #1696.
-spec/wasm_cross/or_pattern_guarded_nullary.almd :: branch_lift_synth_0
-spec/wasm_cross/or_pattern_guarded_nullary.almd :: branch_lift_synth_1
-spec/wasm_cross/or_pattern_guarded_nullary.almd :: branch_lift_synth_2
-spec/wasm_cross/or_pattern_guarded_nullary.almd :: branch_lift_synth_3
-spec/wasm_cross/or_pattern_guarded_nullary.almd :: main

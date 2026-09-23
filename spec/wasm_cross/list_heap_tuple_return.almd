@@ -1,0 +1,66 @@
+// @contract: C-102
+// #2520: a fn RETURNING a literal List of tuples whose elements own heap the
+// fixed two-slot pair drops cannot free — three- and four-field tuples with
+// String fields, a `(Int, List[String])` element, and a nested
+// `(String, List[(String, Float)])` element (a constant dispatch table is the
+// ordinary way to write a router or command table). Each list is returned,
+// destructured in a for-in, bound and re-read, and rebuilt with computed
+// fields inside a loop, so an element the caller's drop did not free (or freed
+// twice) shows up as a different line or a trap instead of the same output.
+fn routes() -> List[(String, String, Int)] = [("GET", "/users", 1), ("POST", "/users", 2)]
+
+fn quads() -> List[(Int, String, String, Bool)] = [(1, "x", "y", true), (2, "p", "q", false)]
+
+fn keyed() -> List[(String, Int, Int)] = [("k", 1, 2), ("m", 3, 4)]
+
+fn commands() -> List[(Int, List[String])] = [
+  (1, ["mv", "a", "b"]),
+  (2, [])
+]
+
+fn exprs() -> List[(String, List[(String, Float)])] = [
+  ("e", [("x", 1.5), ("y", 2.0)]),
+  ("f", [])
+]
+
+fn built(s: String) -> List[(String, String, Int)] = [(s + "!", "b" + s, string.len(s)), ("-", s, 0)]
+
+fn route(path: String) -> Int = routes() |> list.filter(((_, p, _)) => p == path) |> list.map(((_, _, n)) => n) |> list.fold(
+  0,
+  (acc, n) => acc + n,
+)
+
+effect fn main() -> Unit = {
+  for (m, p, n) in routes() {
+    println("${m} ${p} ${n}")
+  }
+  for (a, b, c, d) in quads() {
+    println("${a} ${b} ${c} ${d}")
+  }
+  for (k, a, b) in keyed() {
+    println("${k} ${a + b}")
+  }
+  for (n, args) in commands() {
+    println("${n}: ${list.join(args, " ")}")
+  }
+  for (name, ws) in exprs() {
+    println(name)
+    for (k, v) in ws {
+      println("  ${k}=${v}")
+    }
+  }
+  let rs = routes()
+  println("${list.len(rs)} routes, ${route("/users")} total")
+  for (m, _, _) in rs {
+    println(m)
+  }
+  var i = 0
+  var acc = 0
+  while i < 300 {
+    for (a, b, n) in built(int.to_string(i)) {
+      acc = acc + string.len(a) + string.len(b) + n
+    }
+    i = i + 1
+  }
+  println("${acc}")
+}
