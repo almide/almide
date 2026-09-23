@@ -40,6 +40,13 @@ fn dep_ref_name(dep: &Dependency) -> &str {
 /// `DefaultHasher`'s output is explicitly not guaranteed stable across Rust
 /// releases — an unstable key would silently orphan every cached checkout on
 /// a compiler bump.
+///
+/// THE RESIDUE: #2523's aliasing is closed structurally everywhere except
+/// here. Two URLs that collide in 64 bits share a cache directory and alias
+/// again, exactly as name-keyed paths did. That is a ~2⁻⁶⁴ accident rather
+/// than a spelling anyone can choose — which is why a hash is acceptable at
+/// all — but it is a probability, not an impossibility. Widen the digest
+/// before trusting this with anything that must not collide.
 fn source_key(git: &str) -> String {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for b in git.as_bytes() {
@@ -196,22 +203,32 @@ pub fn fetch_dep_with_lock(dep: &Dependency, locked_commit: Option<&str>) -> Res
 }
 
 /// Update almide.lock after fetching all dependencies.
-pub fn update_lock_file(project_root: &Path, deps: &[Dependency], fetched: &[FetchedDep]) -> Result<(), String> {
+/// `resolved` is what the walk actually fetched, one entry per dependency it
+/// visited; this picks out the DIRECT ones, which are what the lock carries.
+///
+/// The pairing is by the dependency's own identity — name, source and ref, the
+/// same triple the lock records and the lock lookup matches on (#2522). It used
+/// to be `deps.iter().zip(resolved.iter())`, but `deps` is the direct list while
+/// the walk is the flattened graph, so the indexes only coincided when nothing
+/// had transitive dependencies. Once one did, every later direct dependency was
+/// shifted and got another package's commit written under its own url — and the
+/// next build could not fetch it (#2529). A positional pairing that happens to
+/// be right is exactly what produced that, so there is no second index here to
+/// keep in step.
+pub fn update_lock_file(project_root: &Path, deps: &[Dependency], resolved: &[LockedDep]) -> Result<(), String> {
     let lock_path = project_root.join("almide.lock");
     let lock_path = lock_path.as_path();
     let mut locked = Vec::new();
-    for (dep, fd) in deps.iter().zip(fetched.iter()) {
+    for dep in deps {
         let ref_name = dep_ref_name(dep);
-        let commit = git_head_hash(&fd.source_dir)
-            .or_else(|_| git_head_hash(fd.source_dir.parent().unwrap_or(&fd.source_dir)))
-            .unwrap_or_default();
-        if !commit.is_empty() {
-            locked.push(LockedDep {
-                name: dep.name.clone(),
-                git: dep.git.clone(),
-                ref_name: ref_name.to_string(),
-                commit,
-            });
+        let entry = resolved
+            .iter()
+            .find(|r| r.name == dep.name && r.git == dep.git && r.ref_name == ref_name);
+        // No entry means nothing was resolved for it (a path dependency, or a
+        // checkout with no git metadata) — it was skipped before, and a lock
+        // entry invented for it here would be the same false record.
+        if let Some(entry) = entry {
+            locked.push(entry.clone());
         }
     }
     if !locked.is_empty() {
@@ -258,11 +275,16 @@ pub fn fetch_all_deps(project: &Project) -> Result<Vec<FetchedDep>, String> {
 
     let mut fetched: Vec<FetchedDep> = Vec::new();
     let mut visited = std::collections::HashSet::new();
-    fetch_deps_recursive(&project.dependencies, &locked, &mut fetched, &mut visited)?;
+    // What each dependency RESOLVED to, recorded as the walk fetches it.
+    // `fetched` cannot answer this: it is the flattened graph, its entries
+    // carry the package's own declared name rather than the manifest key,
+    // and nothing in them names a source or a ref (#2529).
+    let mut resolved: Vec<LockedDep> = Vec::new();
+    fetch_deps_recursive(&project.dependencies, &locked, &mut fetched, &mut visited, &mut resolved)?;
 
     // Update lock file if it doesn't exist or deps changed
     if !project.dependencies.is_empty() {
-        let _ = update_lock_file(&project.root, &project.dependencies, &fetched);
+        let _ = update_lock_file(&project.root, &project.dependencies, &resolved);
     }
 
     Ok(fetched)
@@ -309,6 +331,7 @@ fn fetch_one_dep_recursive(
     locked: &[LockedDep],
     fetched: &mut Vec<FetchedDep>,
     visited: &mut std::collections::HashSet<String>,
+    resolved: &mut Vec<LockedDep>,
 ) -> Result<(), String> {
     let version_str = resolve_dep_version(dep);
     let pkg_id = PkgId::from_version_str(&dep.name, &version_str);
@@ -350,6 +373,20 @@ fn fetch_one_dep_recursive(
         .map(|l| l.commit.as_str());
     let path = fetch_dep_with_lock(dep, locked_commit)?;
 
+    // Record what THIS dependency resolved to, here, where the manifest entry
+    // and the checkout it produced are both in hand. Pairing them later — from
+    // the flattened graph, by position or by a reconstructed key — is what
+    // #2529 was. A dependency with no git metadata (a path dependency) records
+    // nothing and is simply absent from the lock, as it was before.
+    if let Ok(commit) = git_head_hash(&path) {
+        resolved.push(LockedDep {
+            name: dep.name.clone(),
+            git: dep.git.clone(),
+            ref_name: want_ref.to_string(),
+            commit,
+        });
+    }
+
     let (module_name, source_dir, transitive_deps) = resolve_fetched_dep_manifest(&path, &dep.name);
 
     let actual_pkg_id = PkgId::from_version_str(&module_name, &version_str);
@@ -370,7 +407,7 @@ fn fetch_one_dep_recursive(
     }
 
     if !transitive_deps.is_empty() {
-        fetch_deps_recursive(&transitive_deps, locked, fetched, visited)?;
+        fetch_deps_recursive(&transitive_deps, locked, fetched, visited, resolved)?;
     }
     Ok(())
 }
@@ -380,9 +417,10 @@ fn fetch_deps_recursive(
     locked: &[LockedDep],
     fetched: &mut Vec<FetchedDep>,
     visited: &mut std::collections::HashSet<String>,
+    resolved: &mut Vec<LockedDep>,
 ) -> Result<(), String> {
     for dep in deps {
-        fetch_one_dep_recursive(dep, locked, fetched, visited)?;
+        fetch_one_dep_recursive(dep, locked, fetched, visited, resolved)?;
     }
     Ok(())
 }
