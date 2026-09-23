@@ -48,41 +48,41 @@ use wasmparser::{Parser, Payload};
 /// ran — the env.set lesson): extend the shim and this list TOGETHER.
 pub const P1_SERVED_OPS: &[i32] = &[26, 29, 30, 32, 34, 35, 36, 37];
 
-pub(crate) const UNSUPPORTED_MSG: &[u8] = b"Error: host op unsupported in the WASI build\n";
+pub const UNSUPPORTED_MSG: &[u8] = b"Error: host op unsupported in the WASI build\n";
 /// The env.set overlay log's own refusal. It used to borrow the line above,
 /// which names an operation the build supports and had just performed — the
 /// #2103 defect (an error that does not say what failed) in the shim.
-pub(crate) const ENV_FULL_MSG: &[u8] = b"Error: env.set log full (64 KiB of names and values)\n";
+pub const ENV_FULL_MSG: &[u8] = b"Error: env.set log full (64 KiB of names and values)\n";
 /// C-197's line, for the shim-side stagings that ask the machine for pages
 /// (#2120). The guest allocator prints the same words from its own path.
-pub(crate) const OOM_MSG: &[u8] = b"Error: out of memory\n";
+pub const OOM_MSG: &[u8] = b"Error: out of memory\n";
 // Park-page layout (offsets from park base).
-pub(crate) const IOV: u64 = 0; // two iovec entries (16 bytes)
-pub(crate) const NREAD: u64 = 16;
-pub(crate) const NL: u64 = 24;
-pub(crate) const MSG: u64 = 64;
+pub const IOV: u64 = 0; // two iovec entries (16 bytes)
+pub const NREAD: u64 = 16;
+pub const NL: u64 = 24;
+pub const MSG: u64 = 64;
 /// The second message slot, clear of MSG's text and below DATA.
-pub(crate) const MSG2: u64 = 256;
+pub const MSG2: u64 = 256;
 /// The third: the shim-side out-of-memory line.
-pub(crate) const MSG3: u64 = 384;
-pub(crate) const DATA: u64 = 1024; // stdin/entropy bytes + op result staging
+pub const MSG3: u64 = 384;
+pub const DATA: u64 = 1024; // stdin/entropy bytes + op result staging
 /// The env.set overlay log (#1716): [klen u32][vlen u32][key][val] entries,
 /// append-only, scanned last-write-wins by op 26. Its page sits above the
 /// staging span the other ops use.
-pub(crate) const OVL: u64 = 4 * 65536;
+pub const OVL: u64 = 4 * 65536;
 /// The staging room the emitter refuses to overrun (#2118) and this layout
 /// provides: one number, checked here rather than trusted.
 const _: () = assert!((OVL - DATA) as i64 == almide_wasm::WASI_STAGING_ROOM);
 /// The park span: five pages carved out at the original heap base — four
 /// for iovecs/messages/stdin, one for the env overlay log.
-pub(crate) const PARK_SPAN: u64 = 5 * 65536;
+pub const PARK_SPAN: u64 = 5 * 65536;
 
-pub(crate) struct Remap {
-    pub(crate) shim_base: u32,
+pub struct Remap {
+    pub shim_base: u32,
     /// How far NON-import function indices move (0 for the p1 build — it
     /// keeps the import count at five; the p2 build imports eight, so
     /// every original index >= 5 shifts by three).
-    pub(crate) shift: u32,
+    pub shift: u32,
 }
 
 impl Reencode for Remap {
@@ -92,16 +92,16 @@ impl Reencode for Remap {
     }
 }
 
-pub(crate) fn mem(offset: u64) -> MemArg {
+pub fn mem(offset: u64) -> MemArg {
     MemArg { offset, align: 2, memory_index: 0 }
 }
 
-pub(crate) fn mem8(offset: u64) -> MemArg {
+pub fn mem8(offset: u64) -> MemArg {
     MemArg { offset, align: 0, memory_index: 0 }
 }
 
 /// Find a function type's index, or append it.
-pub(crate) fn type_index(
+pub fn type_index(
     types: &mut Vec<(Vec<ValType>, Vec<ValType>)>,
     params: &[ValType],
     results: &[ValType],
@@ -114,33 +114,33 @@ pub(crate) fn type_index(
 }
 
 /// Everything `to_wasi` needs out of the source module, in one parse pass.
-pub(crate) struct Parsed<'a> {
-    pub(crate) types: Vec<(Vec<ValType>, Vec<ValType>)>,
-    pub(crate) func_types: Vec<u32>,
-    pub(crate) tables: TableSection,
-    pub(crate) old_mem_min: u64,
+pub struct Parsed<'a> {
+    pub types: Vec<(Vec<ValType>, Vec<ValType>)>,
+    pub func_types: Vec<u32>,
+    pub tables: TableSection,
+    pub old_mem_min: u64,
     /// The source module's declared memory MAXIMUM (the #1729 heap-cap,
     /// baked by the structural emitter) — carried through the transform,
     /// widened by the PARK_SPAN pages this shim appends.
-    pub(crate) old_mem_max: Option<u64>,
-    pub(crate) parsed_globals: Vec<(GlobalType, Option<i32>, Option<i64>, Option<u64>)>,
-    pub(crate) global_count: u32,
-    pub(crate) heap_global: Option<u32>,
+    pub old_mem_max: Option<u64>,
+    pub parsed_globals: Vec<(GlobalType, Option<i32>, Option<i64>, Option<u64>)>,
+    pub global_count: u32,
+    pub heap_global: Option<u32>,
     /// Raw export rows — Func indices are ORIGINAL and must be shifted by
     /// the transform's import delta when rebuilt (#1716).
-    pub(crate) exports: Vec<(String, ExportKind, u32)>,
-    pub(crate) main_index: Option<u32>,
+    pub exports: Vec<(String, ExportKind, u32)>,
+    pub main_index: Option<u32>,
     /// Raw element segments: each transform re-encodes them through its
     /// own `Remap`, so funcref table entries shift with the import count
     /// (the #1688 silent-corruption class — a verbatim roundtrip under a
     /// nonzero shift retargets every closure).
-    pub(crate) elements: Vec<wasmparser::Element<'a>>,
+    pub elements: Vec<wasmparser::Element<'a>>,
     /// Function imports past the five `almide.*` ones — the program's
     /// `@extern(wasm, module, name)` declarations (#2275), carried through
     /// verbatim behind the WASI imports: `(module, name, type index)`.
-    pub(crate) foreign_imports: Vec<(String, String, u32)>,
-    pub(crate) data: DataSection,
-    pub(crate) bodies: Vec<wasmparser::FunctionBody<'a>>,
+    pub foreign_imports: Vec<(String, String, u32)>,
+    pub data: DataSection,
+    pub bodies: Vec<wasmparser::FunctionBody<'a>>,
 }
 
 /// One global's type and const-init operands (i32/i64/f64 — the only forms
@@ -192,7 +192,7 @@ fn parse_export(e: wasmparser::Export<'_>, p: &mut Parsed<'_>) -> anyhow::Result
     Ok(())
 }
 
-pub(crate) fn parse_module(bytes: &[u8]) -> anyhow::Result<Parsed<'_>> {
+pub fn parse_module(bytes: &[u8]) -> anyhow::Result<Parsed<'_>> {
     let mut p = Parsed {
         types: Vec::new(),
         func_types: Vec::new(),
@@ -563,7 +563,7 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
 /// engine-fault split), and a stock WASI runtime would otherwise surface
 /// 128+SIGABRT. The trailing `unreachable` stays for stack-polymorphic
 /// validity.
-pub(crate) fn reencode_body(b: &wasmparser::FunctionBody<'_>, remap: &mut Remap, exit_fn: u32) -> anyhow::Result<Function> {
+pub fn reencode_body(b: &wasmparser::FunctionBody<'_>, remap: &mut Remap, exit_fn: u32) -> anyhow::Result<Function> {
     let locals: Vec<(u32, ValType)> = b
         .get_locals_reader()?
         .into_iter()

@@ -87,8 +87,9 @@ fn emitter_set() -> BTreeSet<String> {
     let mut files = Vec::new();
     rust_files(&crates.join("almide-wasm/src"), &mut files);
     // the to_wasi transform's shims: code appended to every shipped artifact
-    files.push(crates.join("almide-wasm-run/src/wasi.rs"));
-    files.push(crates.join("almide-wasm-run/src/wasi_shims.rs"));
+    // (its own crate since #2554, re-exported as `almide_wasm_run::wasi`)
+    files.push(crates.join("almide-wasi/src/lib.rs"));
+    files.push(crates.join("almide-wasi/src/wasi_shims.rs"));
     let mut set = BTreeSet::new();
     for f in &files {
         scan(&std::fs::read_to_string(f).expect("readable source"), &mut set);
