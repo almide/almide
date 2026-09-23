@@ -1,0 +1,63 @@
+// @contract: C-036, C-070
+// #2559: the POSITIONAL twin of record_variant_field_literal.almd. A literal, a
+// Bool, a nested constructor or a guard on a MULTI-field positional payload
+// (`Circle(0, _)`, `Toggle(true, n)`, `Tagged(Big(n), "x")`, `Circle(r, t) if
+// r > 2`) refines the arm on both legs. The incumbent's variant-arm specializer
+// used to admit a refutable payload only on a SINGLE-field constructor and
+// walled every function here; it now compiles the arms column by column into
+// the per-constructor-arm + inner-match shape it already lowered. Arm order and
+// fall-through are byte-identical native == wasm.
+type Shape = | Circle(Int, String) | Dot
+
+fn shape_name(s: Shape) -> String = match s {
+  Circle(0, _) => "zero",
+  Circle(_, "unit") => "unit",
+  Circle(_, _) => "circle",
+  Dot => "dot",
+}
+
+type Flag = | Toggle(Bool, Int) | Off
+
+fn flag_name(f: Flag) -> String = match f {
+  Toggle(true, 1) => "on-one",
+  Toggle(true, n) => "on-${n}",
+  Toggle(false, _) => "off-toggle",
+  Off => "off",
+}
+
+type Kind = | Small | Big(Int)
+
+type Item = | Tagged(Kind, String) | Plain
+
+fn item_name(i: Item) -> String = match i {
+  Tagged(Small, label) => "small:" + label,
+  Tagged(Big(0), _) => "big-zero",
+  Tagged(Big(n), "x") => "big-x:${n}",
+  Tagged(Big(n), label) => "big:${n}:" + label,
+  Plain => "plain",
+}
+
+fn guarded(s: Shape) -> String = match s {
+  Circle(r, t) if r > 2 => "big:" + t,
+  Circle(r, _) => "small:${r}",
+  Dot => "dot",
+}
+
+effect fn main() -> Unit = {
+  println(shape_name(Circle(0, "unit")))
+  println(shape_name(Circle(3, "unit")))
+  println(shape_name(Circle(5, "x")))
+  println(shape_name(Dot))
+  println(flag_name(Toggle(true, 1)))
+  println(flag_name(Toggle(true, 7)))
+  println(flag_name(Toggle(false, 1)))
+  println(flag_name(Off))
+  println(item_name(Tagged(Small, "a")))
+  println(item_name(Tagged(Big(0), "x")))
+  println(item_name(Tagged(Big(4), "x")))
+  println(item_name(Tagged(Big(4), "y")))
+  println(item_name(Plain))
+  println(guarded(Circle(3, "t")))
+  println(guarded(Circle(1, "t")))
+  println(guarded(Dot))
+}
