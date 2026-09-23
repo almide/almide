@@ -32,9 +32,13 @@
 
 use crate::{err, err_no_nl};
 
-/// A finished test file: its path, its exit code, and its captured
-/// stdout+stderr (empty when the file never got as far as running).
-pub type TestRun = (String, i32, String);
+/// A finished test file: its path, its exit code, and its captured stdout and
+/// stderr, kept apart (empty when the file never got as far as running).
+pub type TestRun = (String, i32, String, String);
+
+/// The flags `almide test` passes a native (libtest) test binary itself —
+/// everything else in its argv is the `--run` pattern.
+const HARNESS_FLAGS: [&str; 2] = ["--nocapture", "--test-threads=1"];
 
 /// The argv for a native (libtest) test binary.
 ///
@@ -44,8 +48,14 @@ pub type TestRun = (String, i32, String);
 /// the run reported a bare `FAILED` with no reason. `almide test` captures the
 /// whole binary's output itself and prints it only on failure, so nothing leaks
 /// into a passing run.
+///
+/// `--test-threads=1` is what makes that output ATTRIBUTABLE (#2538): run one
+/// at a time, libtest prints `test <name> ... ` before each test and its
+/// verdict after, so everything the test wrote to stdout sits between the two
+/// and a failing test's report can carry what it printed. Files still run in
+/// parallel with each other, which is where a suite's throughput comes from.
 pub fn test_harness_args(run_filter: Option<&str>) -> std::sync::Arc<Vec<String>> {
-    let mut args = vec!["--nocapture".to_string()];
+    let mut args: Vec<String> = HARNESS_FLAGS.iter().map(|f| f.to_string()).collect();
     args.extend(run_filter.map(|f| f.to_string()));
     std::sync::Arc::new(args)
 }
@@ -135,7 +145,7 @@ pub fn libtest_counts(output: &str) -> Option<TestCounts> {
 /// paths that carry only the built argv (the snapshot-accept loop) need the
 /// pattern back. Kept adjacent to its producer so the two cannot drift.
 pub fn harness_filter(program_args: &[String]) -> Option<&str> {
-    program_args.iter().find(|a| *a != "--nocapture").map(String::as_str)
+    program_args.iter().find(|a| !HARNESS_FLAGS.contains(&a.as_str())).map(String::as_str)
 }
 
 /// Report one failing test file as a STRUCTURED record: the assertion's `.almd`
@@ -157,6 +167,37 @@ pub fn report_test_failure(file: &str, output: &str) {
     for f in &failures {
         err_no_nl(&f.render());
     }
+}
+
+/// [`report_test_failure`] for a native run whose two streams were kept apart:
+/// each failure also carries what its test printed to stdout, and the file's
+/// program stderr follows the failures (#2538) — see `test_output` for why
+/// stdout is per test and stderr per file. `show_all` (`--show-output`) adds
+/// the passing tests' stdout.
+pub fn report_test_failure_io(file: &str, stdout: &str, stderr: &str, show_all: bool) {
+    let output = format!("{stdout}{stderr}");
+    let source = std::fs::read_to_string(file).unwrap_or_default();
+    let failures = parse(file, &source, &output);
+    if failures.is_empty() {
+        // The raw transcript already holds everything the program printed.
+        report_test_failure(file, &output);
+        return;
+    }
+    err(&format!("FAILED: {}", file));
+    let printed = super::test_output::TestOutput::native(&test_name_map(&source), stdout, stderr);
+    for f in &failures {
+        err_no_nl(&f.render());
+        err_no_nl(&printed.failure_stdout(f.name.as_deref()));
+    }
+    let reported: Vec<Option<String>> = failures.iter().map(|f| f.name.clone()).collect();
+    err_no_nl(&printed.render_rest(&reported, show_all));
+}
+
+/// `--show-output` for a native file that passed.
+pub fn report_passing_output(file: &str, stdout: &str, stderr: &str) {
+    let source = std::fs::read_to_string(file).unwrap_or_default();
+    let printed = super::test_output::TestOutput::native(&test_name_map(&source), stdout, stderr);
+    err_no_nl(&printed.render_passing(file));
 }
 
 /// One failing assertion, normalized away from whichever harness printed it.
@@ -329,14 +370,14 @@ fn block_header(line: &str) -> Option<&str> {
 /// `thread 'tests::__test_almd_x' panicked at <generated>.rs:L:C:` →
 /// `tests::__test_almd_x`. The location in that banner is the EMITTED Rust, not
 /// the `.almd` an agent can edit, so it is dropped with the banner.
-fn panic_header(line: &str) -> Option<&str> {
+pub(super) fn panic_header(line: &str) -> Option<&str> {
     let rest = line.strip_prefix("thread '")?;
     let end = rest.find('\'')?;
     line.contains(" panicked at ").then(|| &rest[..end])
 }
 
 /// Any line that can only belong to the harness, never to a payload.
-fn is_block_end(line: &str) -> bool {
+pub(super) fn is_block_end(line: &str) -> bool {
     line.starts_with("---- ")
         || line == "failures:"
         || line.starts_with("test result:")
@@ -509,7 +550,7 @@ fn join_field(lines: &[&str], key: &str) -> String {
 /// `(mangled, original)` for every `test "…"` in the source. Lowering prefixes
 /// test fns with `__test_almd_` and the Rust walker then sanitizes the name, so
 /// the mapping is only invertible by mangling FORWARD from the source.
-fn test_name_map(source: &str) -> Vec<(String, String)> {
+pub(super) fn test_name_map(source: &str) -> Vec<(String, String)> {
     let mut out = Vec::new();
     for line in source.lines() {
         let t = line.trim_start();
@@ -537,7 +578,7 @@ fn mangle(name: &str) -> String {
 
 /// `tests::__test_almd_string_mismatch` → `string mismatch` when the source
 /// offers a match, else the mangled tail (still better than the full path).
-fn display_name(names: &[(String, String)], raw: &str) -> String {
+pub(super) fn display_name(names: &[(String, String)], raw: &str) -> String {
     let tail = raw.rsplit("::").next().unwrap_or(raw);
     names
         .iter()
