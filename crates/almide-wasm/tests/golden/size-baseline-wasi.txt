@@ -710,8 +710,8 @@
 8299	spec/wasm_cross/to_fixed_wide_precision.almd
 2728	spec/wasm_cross/to_result_custom_e.almd
 3311	spec/wasm_cross/to_result_nested_share.almd
-2031	spec/wasm_cross/top_let_closure_eager.almd
-3631	spec/wasm_cross/top_let_closure_record.almd
+2352	spec/wasm_cross/top_let_closure_eager.almd
+3175	spec/wasm_cross/top_let_closure_record.almd
 1476	spec/wasm_cross/top_let_div_eager.almd
 2152	spec/wasm_cross/top_let_div_used.almd
 2089	spec/wasm_cross/toplevel_const_wrapping.almd
