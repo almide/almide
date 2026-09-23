@@ -150,6 +150,82 @@ every program that compiles for both targets produces **byte-identical
 stdout/stderr/exit code** native ⇄ wasm, tracked contract-by-contract in
 [docs/contracts/](../contracts).
 
+## Measuring allocation: the watermark and the counter (#2407)
+
+Every structural-leg module exports its bump-heap pointer as the `__heap`
+global (`__heap_high` too when a region window rewinds it). The embedded host
+reads it after the run and `crates/almide-wasm/tests/alloc_ledger.rs` pins it
+per corpus fixture in `crates/almide-wasm/tests/golden/alloc-baseline.txt` —
+the **watermark**. It costs nothing (a global the module maintains anyway) and
+it is a **peak**: the row is `pool size + the highest the heap ever reached`.
+A peak cannot show churn. The allocator keeps size-class free lists, so a
+loop that allocates and releases a fresh block per iteration reaches almost
+the same watermark as a single allocation.
+
+The **counter** is the instrument for that, the wasm twin of native's
+`ALMIDE_ALLOC_COUNT` (#2228). It is an *emit-time* switch:
+
+```bash
+ALMIDE_WASM_ALLOC_COUNT=1 almide run app.almd --target wasm
+# stderr, after the program's own output:
+# __ALMD_WASM_ALLOC allocs=2000 reused=1996 bytes=9780 frees=2000 heap_end=65872
+```
+
+| field | what it counts |
+|---|---|
+| `allocs` | every `$alloc` call (free-list hit or bump) |
+| `reused` | the `$alloc` calls a size-class free-list pop served (the rest advanced the bump head) |
+| `bytes` | the sum of the payload lengths requested |
+| `frees` | every `$free` call (filed into a free list, or abandoned as too small / too large) |
+| `heap_end` | the watermark, on the same line, so the pair can be read together |
+
+Under the switch the emitter appends four `i64` globals **after** the top-let
+globals (no existing index moves, no byte of the heap layout changes) and
+`$alloc` / `$free` bump them; the host reads them as `__alloc_count`,
+`__alloc_reused`, `__alloc_bytes`, `__free_count`. **Off — the default — none
+of it is emitted**: the module is byte-identical to a build that never heard
+of the switch, so neither the size ratchet nor the alloc ledger moves, and the
+proof-transcribed runtime trees (`proofs/StructuralRuntime.v`) stay the
+shipped ones. An unarmed module reports the counters as *absent*, never as
+zero (`RunResult::alloc_count` is `None`).
+
+The counter is ledgered beside the watermark: the same
+`ALMIDE_UPDATE_ALLOC=1` regeneration writes
+`crates/almide-wasm/tests/golden/alloc-count-baseline.txt` (`allocs reused
+bytes frees` per fixture, `~` calibrated out, `!` refused), and the check run
+also holds the armed module to the unarmed one — same stdout, same watermark
+— so the instrument is proven not to perturb what it measures.
+
+**Reading the pair.** When a watermark row moves, the count row says which
+half moved: more `allocs` / `bytes` is *allocation*, the same counts with a
+higher watermark is *liveness* (something held longer, so the free lists had
+nothing to hand back). When the watermark does not move at all, the count
+row still can — that is churn. Three programs where the two disagree:
+
+| program | `allocs` | `reused` | `bytes` | watermark delta |
+|---|---:|---:|---:|---:|
+| one list literal (`let xs = [1, 2, 3]`) | 1 | 0 | 24 | +0 (the base) |
+| the same plus a second literal | 2 | 0 | 48 | +64 |
+| 1000 × (`"row " + int.to_string(i)`, dropped each iteration) | 2000 | 1996 | 9780 | +48 |
+
+The third line is the point: 2000 allocations of 9,780 bytes in total moved
+the watermark by 48 bytes, because 1,996 of them were served from the free
+lists. On the watermark alone that loop is indistinguishable from two
+allocations. The corpus has the same shape at scale (rows of the two ledgers,
+2026-09-23):
+
+| fixture | `allocs` | `reused` | `bytes` requested | `__heap` row |
+|---|---:|---:|---:|---:|
+| `variant_result_one_credit_churn` | 1,638,000 | 1,629,810 | 104,832,000 | 1,114,096 |
+| `mut_param_alias_cow` | 8,170 | 8,049 | 72,057,178 | 209,056 |
+| `grain_gc_shapes` | 5,059 | 5,035 | 16,030,437 | 131,360 |
+
+Each requested a hundred to a thousand times more bytes than its watermark
+shows, and its watermark row would not move if the churn doubled. The
+instrument covers the structural leg only — a program the
+router hands to the incumbent leg runs on the `wasmtime` CLI, which reads no
+globals; `almide run` says so on stderr rather than print nothing.
+
 ## JS host (`--host js`, #2265)
 
 `almide build app.almd --target wasm --host js -o dist/app.wasm` writes
