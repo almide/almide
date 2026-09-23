@@ -214,6 +214,10 @@ enum Commands {
         /// Exit 0 instead of 5 when the run has no tests to execute
         #[arg(long)]
         allow_no_tests: bool,
+        /// Print what every test wrote to stdout/stderr, passing ones included
+        /// (a failing test's output is always shown under its failure)
+        #[arg(long)]
+        show_output: bool,
     },
     /// Type check only
     Check {
@@ -676,11 +680,12 @@ struct TestArgs {
     update_snapshots: bool,
     ci: bool,
     allow_no_tests: bool,
+    show_output: bool,
 }
 
 /// `dispatch`'s `Commands::Test` arm. Extracted verbatim.
 fn dispatch_test(args: TestArgs) {
-    let TestArgs { file, run, no_check, json, target, update_snapshots, ci, allow_no_tests } = args;
+    let TestArgs { file, run, no_check, json, target, update_snapshots, ci, allow_no_tests, show_output } = args;
     let file_str = file.as_deref().unwrap_or("");
     // The accept step (#1314). CI mode never writes: snapshots are committed
     // and reviewed like code, so a new or drifted snapshot fails the run
@@ -694,15 +699,15 @@ fn dispatch_test(args: TestArgs) {
         return;
     }
     if target.as_deref() == Some("wasm") {
-        cli::cmd_test_wasm(file_str, run.as_deref(), allow_no_tests);
+        cli::cmd_test_wasm(file_str, run.as_deref(), allow_no_tests, show_output);
     } else if json {
         cli::cmd_test_json(file_str, run.as_deref(), allow_no_tests);
     } else if matches!(target.as_deref(), Some("rust" | "native")) {
         // Explicit pure-native run (e.g. CI's "Test Rust" job).
-        cli::cmd_test(file_str, no_check, run.as_deref(), allow_no_tests);
+        cli::cmd_test(file_str, no_check, run.as_deref(), allow_no_tests, show_output);
     } else {
         // Default: fast rustc-free WASM path, native fallback for gaps.
-        cli::cmd_test_fast(file_str, no_check, run.as_deref(), allow_no_tests);
+        cli::cmd_test_fast(file_str, no_check, run.as_deref(), allow_no_tests, show_output);
     }
 }
 
@@ -1077,8 +1082,8 @@ fn dispatch(cli: Cli) {
                 host: host.as_deref(),
             });
         }
-        Commands::Test { file, run, no_check, json, target, update_snapshots, ci, allow_no_tests } => {
-            dispatch_test(TestArgs { file, run, no_check, json, target, update_snapshots, ci, allow_no_tests })
+        Commands::Test { file, run, no_check, json, target, update_snapshots, ci, allow_no_tests, show_output } => {
+            dispatch_test(TestArgs { file, run, no_check, json, target, update_snapshots, ci, allow_no_tests, show_output })
         }
         Commands::Check { file, deny_warnings, json, explain, effects, timings, stamp, profile, allow, target } => dispatch_check(file, deny_warnings, json, explain, effects, timings, stamp, profile, allow, target),
         Commands::Fix { file, dry_run, json } => {

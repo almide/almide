@@ -10,6 +10,7 @@ mod dialect_stamp;
 mod commands;
 mod test_scratch;
 pub mod test_report;
+mod test_output;
 pub mod snapshot;
 mod install;
 mod selfupdate;

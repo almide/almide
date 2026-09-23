@@ -1,6 +1,6 @@
 # CLI Specification
 
-> Last updated: 2026-09-22
+> Last updated: 2026-09-23
 
 ## Overview
 
@@ -147,6 +147,7 @@ almide test --update-snapshots x_test.almd  # スナップショットの受理(
 | `--update-snapshots` | `testing.assert_snapshot` の不一致を受理し、呼び出し側の期待値リテラルをソース内で書き換える(`ALMIDE_UPDATE_SNAPSHOTS=1` でも同じ) |
 | `--ci` | CI モード: スナップショットを一切書かない(`CI=true` でも同じ)。新規・乖離はどちらも失敗 |
 | `--allow-no-tests` | 実行すべきテストが 0 件でも 0 で終了する(既定は 5) |
+| `--show-output` | 通ったテストも含め、全テストが stdout / stderr に書いたものを表示する |
 
 実行のたびに **実行テスト数**を報告する: `2 tests in 1 file`。`--run` が何かを除外した
 ときは `0 tests in 1 file (2 filtered out)` のように除外数も付く。`--json` は各行に
@@ -169,6 +170,30 @@ almide test --update-snapshots x_test.almd  # スナップショットの受理(
 5 になる(#2204)。
 
 テスト: `tests/test_zero_outcomes_test.rs`、両ターゲット一致は `tests/test_zero_exit_parity_test.rs`
+
+**失敗したテストの出力は失敗報告の下に付く**(#2538)。`println` / `eprintln` で途中の値を
+出したテストが落ちたとき、その出力が捨てられないようにするため:
+
+```
+FAILED: e.almd
+  test: eprintln inside a failing test
+  at:   e.almd:4
+  expected: 2
+  found:    1
+  stdout:
+    STDOUT: value is 42
+  stderr (whole file — stderr carries no per-test boundary):
+    DEBUG: value is 42
+```
+
+- **stdout はテスト単位**。native(libtest を `--test-threads=1` で実行)も wasm のランナーも
+  テストの前後を stdout に印字するので、その間がそのテストの出力になる。
+- **stderr はファイル単位**。どちらのハーネスも stderr にはテストの境目を書かないため分割
+  できず、同じファイルの通ったテストの stderr も含む。ラベルがそう言う。
+- 通ったテストの出力は既定で黙る。`--show-output` で全テスト分を表示する。
+- native・wasm・既定レーン(wasm 先行、失敗は native で再実行)のどれでも同じ。
+
+テスト: `tests/test_failure_shows_output_test.rs`
 
 `--run <pattern>` は **生成された関数名に対する大文字小文字を区別する部分文字列一致**で、
 `test "…"` のラベルそのものではない。ラベルは `__test_almd_` を前置し、空白・記号を `_` に
