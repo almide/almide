@@ -195,6 +195,14 @@ FAILED: e.almd
 
 テスト: `tests/test_failure_shows_output_test.rs`
 
+**ファイルのテスト実行は、そのファイル自身の `test` だけを走らせる**(#2550)。import した
+モジュールの `test` は import 元のビルドには入らず、そのモジュールのファイル自身の実行で走る。
+したがってディレクトリを渡した `almide test` では、どのテストもちょうど 1 回走り、落ちた
+テストはそれを書いたファイルのパスとソース上の名前で報告される。native・wasm・既定レーンの
+どれでも同じ。
+
+テスト: `tests/imported_module_tests_not_rerun_test.rs`
+
 `--run <pattern>` は **生成された関数名に対する大文字小文字を区別する部分文字列一致**で、
 `test "…"` のラベルそのものではない。ラベルは `__test_almd_` を前置し、空白・記号を `_` に
 畳んだ綴りになる（`crates/almide-base/src/names.rs`）。したがって `test "beta fails"` は
