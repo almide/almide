@@ -101,10 +101,29 @@ nothing is published that `bench.py` did not produce.
   `SharedMut` cell — aggregation belongs on `fold_lines`, which is what the
   CHEATSHEET teaches. Wall-clock ratios here are reported, not gated, while
   the war continues.
-- The `fft-wasm` row exists because the wasm leg currently collapses on hot
-  `data[i] = x` list writes (~3 orders of magnitude at 2^18) — the canonical
-  2^22 workload would take hours on that leg. The cliff is the finding; it is
-  recorded at a workload that terminates.
+- The `fft-wasm` row exists because the wasm leg used to collapse on hot
+  `data[i] = x` list writes (~3 orders of magnitude at 2^18): every store
+  copied the whole block (`$block_copy` per write, O(n) per store). RC-5's
+  copy-on-write judge (#1729) made a store O(1) and the cliff was gone before
+  #2150 re-measured it — 4.1× at 2^18 / 4.7× at 2^22 in the embedded host on
+  develop (2026-09-24). What was left was the judge itself, run on EVERY
+  store: a call, a heap-bound compare and a reference-count load, four times
+  per butterfly. #2150 runs it once per loop entry for a list the loop only
+  reads and writes element-wise (`crates/almide-wasm/src/cow_hoist.rs`) and
+  the row reads 2.7× at 2^18 / 2.9× at 2^22. What remains is per-access:
+  an i64 bounds compare with its abort frame, and i64 index arithmetic wrapped
+  to i32 for every load and store. `perf_ratchet.rs` R5 (a store's asymptotic
+  class) and R6 (store/read parity) keep both shapes from coming back.
+- **mandelbrot's wasm "crater" (~130× at 4000) did not reproduce** when #2150
+  re-measured it on develop: under `wasmtime run` (this harness's wasm leg)
+  it read 1.13× native at 4000. `almide bench --target wasm` read 2.05×, and
+  the whole difference was the embedded host's 30 s epoch watchdog — epoch
+  interruption makes wasmtime check the epoch at every loop header, and the
+  escape-time loop is a few instructions per iteration (`wasmtime run -W
+  timeout=60s` on the same module: 636 → 1,199 ms). The watchdog is test
+  harness equipment, so the bench runner now runs without it
+  (`run_wasm_unbounded`) and reads 1.13×; `perf_ratchet.rs` R7 pins the
+  runner's missing tax.
 - **`fft` measures the transform, not its input** (#1338). The row used to
   build its 8.4M-element input with `data = data + [x]` in a loop, which put
   ~8% of the row's wall clock into list construction and published it as
@@ -186,9 +205,13 @@ nothing is published that `bench.py` did not produce.
   per element over the 5 000-word vocabulary, 110× the imperative spelling
   (2M draws: 22 s against 201 ms). It now grows in place through
   `$map_reserve` and takes the index lane like the `m[w] = …` window, and
-  the idiomatic row reads ~0.8× the imperative one on wasm. Reported, not
-  anchored, like strchurn — the row compares an allocator and a hasher
-  before it compares codegen. What the native `AlmideMap` is since #2150: a
+  the idiomatic row reads ~0.8× the imperative one on wasm. The native/Rust
+  ratio of `wordfreq` is ANCHORED in `check-perf-ratio.sh`'s PAIRS since
+  #2150 (baseline 1.90 at the 4M quick workload): it compares an allocator
+  and a hasher before it compares codegen, which kept it reported until it had
+  readings on two machine classes, and those agree — 1.66-1.75 on five green
+  runner runs at 2M, 1.77 on an M4 Pro at 2M and 1.97 at 4M. `wordfreq-group`
+  stays reported. What the native `AlmideMap` is since #2150: a
   compact-ordered-dict (insertion-ordered entry vector + an open-addressing
   slot table of positions with the full hash cached per entry, one
   multiply-fold hash per operation), with the read side (`map.get` /
@@ -235,9 +258,3 @@ ablation of the optimization the row is attributed to).
   `impl Iterator`. Measured 2026-08-13 in
   [string-gap-1004.md](./string-gap-1004.md) finding (a); no benchmark row
   covers it yet, and it is the largest un-taken win the suite has surfaced.
-- The wasm leg is measured but not ratcheted: the fft list-write cliff
-  (~3,500× at 2^18) and the mandelbrot crater (~130× at 4000) have to be fixed
-  first, otherwise the gate would just re-report two known craters. On the
-  other kernels the wasm leg already sits within 1.1–1.2× of native — and
-  binary-trees runs 3.5× *faster* than the native leg (thread fan-out plus
-  allocator churn vs the wasm bump path), which deserves its own look.
