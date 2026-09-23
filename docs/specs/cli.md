@@ -784,6 +784,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_EXPECT_TOOLS` | harness | make a harness test FAIL instead of skipping when an external tool (wasmtime, wasm-tools) is missing; CI sets it |
 | `ALMIDE_FALLBACK_NAMES` | tool | make `almide test` print one `FALLBACK <file>` line per file the wasm leg did not pass — the wasm coverage ratchet's data feed |
 | `ALMIDE_FAN_SEQUENTIAL` | runtime | run `fan.*` sequentially in the native runtime (a determinism lever for measurement; the observable result is the same by contract) |
+| `ALMIDE_FLOAT_SWEEP_N=value` | harness | how many xorshift64 bit patterns the float printer sweep prints and compares with Rust `format!` on each leg (default 100000; tests/float_to_string_cross_target_test.rs) |
 | `ALMIDE_FN_ESCAPE_OFF` | ablation | make BorrowInsertion borrow EVERY fn-typed param as `&dyn Fn`, escaping or not (#2288) — the ablation the ownership certifier's C5 sensitivity test drives |
 | `ALMIDE_FUEL_PROBE` | route | insert fuel charges and force the INCUMBENT wasm leg (the charge probe); `almide run --time-report` sets it internally |
 | `ALMIDE_FUZZ_BASE=value` | harness | the first seed of the differential fuzz's fixed seed range (default 0) |
