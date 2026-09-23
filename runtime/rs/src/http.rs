@@ -300,7 +300,10 @@ pub fn almide_http_request_bytes(method: &str, url: &str, body: &str, headers: &
 // (the common SSE shape) and plain bodies.
 //
 // The callback receives raw UTF-8 substrings of the body — it is the
-// caller's job to do SSE line splitting / parsing / event assembly.
+// caller's job to do SSE line splitting / parsing / event assembly. A
+// multibyte character split across two reads or two chunks is carried to
+// the next delivery whole (#2536), so the concatenation of every delivered
+// piece equals the lossy decoding of the whole body.
 
 pub fn almide_http_request_stream(
     method: &str,
@@ -374,6 +377,18 @@ fn http_exchange_stream<S: Read + Write, F: FnMut(&str)>(
     let mut chunk_remaining: usize = 0;
     let mut awaiting_size = true;
     let mut error_status: Option<String> = None;
+    // Body bytes not yet delivered because they end in an incomplete UTF-8
+    // sequence (at most 3 bytes).
+    let mut utf8_tail: Vec<u8> = Vec::new();
+    let mut deliver = |bytes: &[u8], at_end: bool, on_chunk: &mut F| {
+        utf8_tail.extend_from_slice(bytes);
+        let keep = if at_end { 0 } else { http_stream_incomplete_utf8_tail(&utf8_tail) };
+        let ready = utf8_tail.len() - keep;
+        if ready > 0 {
+            let drained: Vec<u8> = utf8_tail.drain(..ready).collect();
+            on_chunk(&String::from_utf8_lossy(&drained));
+        }
+    };
 
     loop {
         let n = match stream.read(&mut buf) {
@@ -442,6 +457,7 @@ fn http_exchange_stream<S: Read + Write, F: FnMut(&str)>(
                     let size = usize::from_str_radix(size_str, 16).unwrap_or(0);
                     acc.drain(..nl + 2);
                     if size == 0 {
+                        deliver(&[], true, on_chunk);
                         return Ok(());
                     }
                     chunk_remaining = size;
@@ -450,8 +466,7 @@ fn http_exchange_stream<S: Read + Write, F: FnMut(&str)>(
                 let take = chunk_remaining.min(acc.len());
                 if take > 0 {
                     let drained: Vec<u8> = acc.drain(..take).collect();
-                    let s = String::from_utf8_lossy(&drained);
-                    on_chunk(&s);
+                    deliver(&drained, false, on_chunk);
                     chunk_remaining -= take;
                 }
                 if chunk_remaining == 0 {
@@ -471,8 +486,7 @@ fn http_exchange_stream<S: Read + Write, F: FnMut(&str)>(
             // Plain body — surface as-is.
             if !acc.is_empty() {
                 let drained: Vec<u8> = acc.drain(..).collect();
-                let s = String::from_utf8_lossy(&drained);
-                on_chunk(&s);
+                deliver(&drained, false, on_chunk);
             }
         }
     }
@@ -480,7 +494,30 @@ fn http_exchange_stream<S: Read + Write, F: FnMut(&str)>(
     if !headers_done {
         return Err("connection closed before headers received".to_string());
     }
+    deliver(&[], true, on_chunk);
     Ok(())
+}
+
+/// The length of an incomplete UTF-8 sequence at the END of `b` (0..=3):
+/// the bytes from the last lead byte on, when that lead byte announces more
+/// bytes than follow it. Splitting just before a lead byte never changes
+/// what `from_utf8_lossy` produces, so holding these back and decoding them
+/// with the next read gives the same text as decoding the whole body.
+fn http_stream_incomplete_utf8_tail(b: &[u8]) -> usize {
+    for back in 1..=b.len().min(4) {
+        let byte = b[b.len() - back];
+        if byte & 0xC0 == 0x80 {
+            continue; // continuation byte — keep looking for its lead
+        }
+        let want = match byte {
+            0xC0..=0xDF => 2,
+            0xE0..=0xEF => 3,
+            0xF0..=0xF7 => 4,
+            _ => 1,
+        };
+        return if want > back { back } else { 0 };
+    }
+    0
 }
 
 

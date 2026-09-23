@@ -130,29 +130,10 @@ pub fn chunked_body_terminated(body: &[u8]) -> bool {
     }
 }
 
-pub fn decode_chunked(body: &str) -> String {
-    let mut result = String::new();
-    let mut remaining = body;
-    while let Some(line_end) = remaining.find("\r\n") {
-        let size = usize::from_str_radix(remaining[..line_end].trim(), 16).unwrap_or(0);
-        if size == 0 {
-            break;
-        }
-        let data_start = line_end + 2;
-        if data_start + size <= remaining.len() {
-            result.push_str(&remaining[data_start..data_start + size]);
-            remaining = &remaining[data_start + size..];
-            if remaining.starts_with("\r\n") {
-                remaining = &remaining[2..];
-            }
-        } else {
-            break;
-        }
-    }
-    result
-}
-
-/// Byte-level chunked transfer-decoding (mirrors `decode_chunked` for `Vec<u8>`).
+/// Chunked transfer-decoding. It runs on BYTES, before any text decoding:
+/// chunk sizes count bytes, and a multibyte character may straddle two
+/// chunks (#2536), so lossily decoding the framed body first would change
+/// its length under the size walk.
 pub fn decode_chunked_bytes(body: &[u8]) -> Vec<u8> {
     let mut result = Vec::new();
     let mut pos = 0usize;
@@ -247,33 +228,31 @@ pub fn http_exchange_response(
     http_write_request(stream, method, host, path, body, headers)?;
 
     let response = read_response_tolerant(stream)?;
-    let text = String::from_utf8_lossy(&response).to_string();
 
-    if let Some(idx) = text.find("\r\n\r\n") {
-        let header_section = &text[..idx];
-        let resp_body = &text[idx + 4..];
-        let mut lines = header_section.lines();
-        let status_line = lines.next().unwrap_or("");
-        let code: i64 = status_line
-            .split_whitespace()
-            .nth(1)
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(0);
-        let resp_headers: Vec<(String, String)> = lines
-            .filter_map(|line| {
-                let (k, v) = line.split_once(':')?;
-                Some((k.trim().to_string(), v.trim().to_string()))
-            })
-            .collect();
-        let body_out = if header_section.to_lowercase().contains("transfer-encoding: chunked") {
-            decode_chunked(resp_body)
-        } else {
-            resp_body.to_string()
-        };
-        Ok((code, resp_headers, body_out))
+    // The framing is removed on BYTES; only the decoded body is then turned
+    // into text (#2536). The header block is ASCII by protocol, so reading
+    // it lossily is harmless.
+    let Some(idx) = response.windows(4).position(|w| w == b"\r\n\r\n") else {
+        return Ok((0, Vec::new(), String::from_utf8_lossy(&response).into_owned()));
+    };
+    let header_section = String::from_utf8_lossy(&response[..idx]);
+    let resp_body = &response[idx + 4..];
+    let mut lines = header_section.lines();
+    let status_line = lines.next().unwrap_or("");
+    let code: i64 =
+        status_line.split_whitespace().nth(1).and_then(|s| s.parse().ok()).unwrap_or(0);
+    let resp_headers: Vec<(String, String)> = lines
+        .filter_map(|line| {
+            let (k, v) = line.split_once(':')?;
+            Some((k.trim().to_string(), v.trim().to_string()))
+        })
+        .collect();
+    let body_out = if header_section.to_lowercase().contains("transfer-encoding: chunked") {
+        String::from_utf8_lossy(&decode_chunked_bytes(resp_body)).into_owned()
     } else {
-        Ok((0, Vec::new(), text))
-    }
+        String::from_utf8_lossy(resp_body).into_owned()
+    };
+    Ok((code, resp_headers, body_out))
 }
 
 /// Perform an HTTP request/response exchange over any Read+Write stream and
