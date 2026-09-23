@@ -1,4 +1,4 @@
-# oracle: almide 0.63.0 (dev) at 3cc027144 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.63.0 (dev) at 3dedb3574 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 f0709d9573472655341ac75bd847b3f30d2bddc3a201554bfd5cc22c21446902	0	spec/wasm_cross/adr0005_operator_equivalence.almd
 c0f26e63e32a038c59081b238912f0b3ecfd01d8d5ce45534b83fbbce13128a7	0	spec/wasm_cross/alias_combinator_rc.almd
 997e25dd01ce19a5253bd290b2f5f4b8eab74ea88f256b5fd9e09ca77d42af3b	0	spec/wasm_cross/alias_cow.almd
@@ -515,6 +515,7 @@ b149bf43f2673c6c94f8f3badf4b76e84e447b0979bc7bde0fca26b3d67f98e7	0	spec/wasm_cro
 0c4a432e9637f73f7d3d8bc4c7cdd60f40e4878f4170f704c164f9222c9c0471	0	spec/wasm_cross/place_mutation.almd
 26ad9501a6de9cdf040ae680e10333e44378702ae176350e8631468c02bd6aea	0	spec/wasm_cross/playground_default.almd
 4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865	0	spec/wasm_cross/pop_heap_element.almd
+8419382b52e766c81871ddcae457568dd39c021fd4c075dafa73f4cb999588fd	0	spec/wasm_cross/positional_variant_field_literal.almd
 9160d4be34c8695bd172a76c7c7966587ea5a4d991ad22c87b2b91af54aa9ebb	1	spec/wasm_cross/prim_alloc_count_domain.almd
 a173880eed65a5a10b15536fa3ef0b21c99aede6b3d47c1946c1304d2e46f1a0	0	spec/wasm_cross/process_args.almd
 b39eabd1afedfb8b03f18c9efc61fd085ab1ded83a2e94c452896e3a8507a685	0	spec/wasm_cross/protocol_ufcs_inferred_lambda.almd
