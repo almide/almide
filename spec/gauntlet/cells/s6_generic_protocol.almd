@@ -9,5 +9,7 @@ type UserRepo: Repository[User] = { ids: List[String], vals: List[User] }
 
 fn UserRepo.get(self, id: String) -> User? = list.get(self.vals, 0)
 
-fn name_of[R: Repository[User]](r: R, id: String) -> String =
-  match r.get(id) { some(u) => u.name, none => "?" }
+fn name_of[R: Repository[User]](r: R, id: String) -> String = match r.get(id) {
+  some(u) => u.name,
+  none => "?",
+}

@@ -1,4 +1,6 @@
 // UNFILED: `mut self` needs the explicit `mut self: T` spelling
 type Box = { n: Int }
 
-fn Box.bump(mut self, by: Int) -> Unit = { self.n = self.n + by }
+fn Box.bump(mut self, by: Int) -> Unit = {
+  self.n = self.n + by
+}
