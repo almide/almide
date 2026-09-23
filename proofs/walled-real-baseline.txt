@@ -222,3 +222,13 @@ spec/gauntlet/pkg/mut_port/src/main.almd :: main
 spec/wasm_cross/map_set_index_threshold.almd :: branch_lift_synth_3
 spec/wasm_cross/map_set_index_threshold.almd :: branch_lift_synth_4
 spec/wasm_cross/map_set_index_threshold.almd :: branch_lift_synth_7
+# 2026-09-23 (#2553, the record-pattern field-literal fixture): a record pattern
+# with a refutable field (`Circle { r: 0, .. }`, `P { x: 0, y }`) is outside the
+# incumbent's variant-arm specializer, which admits a refutable payload only on a
+# SINGLE-field positional constructor (multi-field `Circle(0, _)` walls there too).
+# The incumbent refuses honestly; the structural leg (the default) lowers all four
+# byte-identical to native, and the incumbent is retiring under #1696.
+spec/wasm_cross/record_variant_field_literal.almd :: flag_name
+spec/wasm_cross/record_variant_field_literal.almd :: item_name
+spec/wasm_cross/record_variant_field_literal.almd :: point_name
+spec/wasm_cross/record_variant_field_literal.almd :: shape_name

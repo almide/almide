@@ -185,7 +185,14 @@ fi
 # ref_rust_or_pattern_heap_subject and or_pattern_guarded_nullary render and
 # byte-match native; the two fixtures the change adds
 # (or_pattern_heap_subject_matrix, list_heap_tuple_return) emit on both legs.
-MAX_WALLED=29
+# 30 as of 2026-09-23 (#2553): record_variant_field_literal.almd (C-036/C-070)
+# pins a record pattern with refutable fields (`Circle { r: 0, .. }`,
+# `P { x: 0, y }`), which only the structural leg lowers. The incumbent's
+# variant-arm specializer admits a refutable payload only on a single-field
+# positional constructor, so it walls these four functions
+# (proofs/walled-real-baseline.txt), identically on both hosts. One more input
+# the incumbent never rendered, not coverage lost.
+MAX_WALLED=30
 corpus=$(ls "$FIXTURE_DIR"/*.almd 2>/dev/null | wc -l | tr -d ' ')
 if [ "$corpus" -eq 0 ] || [ $((n + walled)) -ne "$corpus" ]; then
   echo "::error::host-determinism: compared $n + walled $walled != corpus $corpus in $FIXTURE_DIR — the scan went blind (#985)"

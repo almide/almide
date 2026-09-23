@@ -145,7 +145,12 @@ fail=0; n=0
 # ref_rust_or_pattern_heap_subject and or_pattern_guarded_nullary render and
 # byte-match native; the two fixtures the change adds
 # (or_pattern_heap_subject_matrix, list_heap_tuple_return) emit on both legs.
-MAX_WALLED=29
+# 30 as of 2026-09-23 (#2553): record_variant_field_literal.almd (C-036/C-070)
+# pins a record pattern with refutable fields, which only the structural leg
+# lowers; the incumbent's variant-arm specializer admits a refutable payload only
+# on a single-field positional constructor (proofs/walled-real-baseline.txt has
+# the four rows). One more input the incumbent never rendered, not coverage lost.
+MAX_WALLED=30
 walled=0
 for fix in "$FIXTURE_DIR"/*.almd; do
   [ -e "$fix" ] || continue
