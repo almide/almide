@@ -108,6 +108,7 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_DBG_DESUGAR_RAW", Flag, Dbg, "with `ALMIDE_DBG_DESUGAR_FN`, print the raw pre-desugar body too (was `DBG_DESUGAR_RAW`)"),
     sw("ALMIDE_DBG_ELEM", Flag, Dbg, "print why a list-literal Block element declined (v1 lowering)"),
     sw("ALMIDE_DBG_FAN", Flag, Dbg, "print the fan lowering's prefetch and pattern decisions (structural leg)"),
+    sw("ALMIDE_DBG_GINIT", Flag, Dbg, "print the eager top-let init runner's admission set and why an extended runner declined (v1 lowering, C-007)"),
     sw("ALMIDE_DBG_LINK", Flag, Dbg, "dump the wasm link demand set and what each key resolves to"),
     sw("ALMIDE_DBG_LOWER_FN", Value, Dbg, "print the fully desugared body the v1 lowering actually lowers, for the fn named by the value (was `DBG_LOWER_FN`)"),
     sw("ALMIDE_DBG_NEMATCH", Flag, Dbg, "print the never-err match analysis per function (v1 lowering)"),

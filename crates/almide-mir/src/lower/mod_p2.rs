@@ -22,6 +22,18 @@ thread_local! {
     pub(crate) static AUTO_WRAP_ABI_FNS: std::cell::RefCell<std::collections::HashSet<String>> =
         std::cell::RefCell::new(std::collections::HashSet::new());
 
+    /// MAIN-region top-lets whose PURE, call-bearing initializer CAN ABORT
+    /// (`init_can_abort`: an integer `/` or `%`) — C-007, #2571. Their VALUE is
+    /// inlined at each use site by `inline_pure_call_globals` (pure ⇒ the same
+    /// value each time), which alone would defer the abort to the first read:
+    /// `before use` printed where native and the structural leg abort at
+    /// startup. `synthesize_global_init` re-evaluates every member once in
+    /// `__global_init`, exactly as it already re-evaluates the call-free scalar
+    /// inits for their abort, so the abort fires before `main`. Populated by
+    /// `inline_pure_call_globals`, read by `synthesize_global_init`.
+    pub(crate) static EAGER_ABORT_GLOBALS: std::cell::RefCell<std::collections::HashSet<almide_ir::VarId>> =
+        std::cell::RefCell::new(std::collections::HashSet::new());
+
     /// Per user fn (by its lowered name), which parameter positions the callee
     /// WRITES BACK into (#2503 / C-033): `p.is_mut` on a PURE fn. The C-132
     /// move-mode rewrite keeps `is_mut` on the param and clears only
