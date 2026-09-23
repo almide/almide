@@ -49,7 +49,8 @@
 //!   terminates and `m - k` never wraps. The original's right spine had
 //!   the same length, so the only observable difference is recursion
 //!   DEPTH: the right spine no longer consumes stack. A stack overflow can
-//!   be removed, never added, and no value changes.
+//!   be removed, never added, and no value changes (call-stack exhaustion
+//!   is a resource limit outside the observable promise, contract C-196).
 //!
 //! Metering: the new loop adds a loop head, which the deterministic meter
 //! (ALS-DT2) would charge. The structural wasm leg therefore runs this only
