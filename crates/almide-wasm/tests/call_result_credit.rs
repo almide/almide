@@ -718,3 +718,57 @@ fn a_borrowed_tuple_destructure_keeps_its_subject() {
     );
     assert_eq!(g, 0, "borrowed destructure: {g} B per call");
 }
+
+/// #2516 — `f(x)?` over an OWNED carrier: the some-cell receives the
+/// payload's credit (the carrier's spine is released under it, #2509), so
+/// the node is owned and the bind must not add the conservative `+1` that
+/// left the cell at rc 1 forever (144 B per call).
+fn to_option_program(n: u32, body: &str) -> String {
+    format!(
+        r#"effect fn mko(v: Int) -> Bytes = if v % 3 == 2 then err("skip") else ok(bytes.new(64))
+
+fn mkr(v: Int) -> Result[Bytes, String] = if v % 3 == 2 then err("skip") else ok(bytes.new(64))
+
+fn width(o: Bytes?) -> Int = match o {{
+  some(b) => bytes.len(b),
+  none => 1,
+}}
+
+effect fn main() -> Unit = {{
+  var total = 0
+  for i in 0..<{n} {{
+{body}
+  }}
+  println("${{total}}")
+}}
+"#
+    )
+}
+
+#[test]
+fn an_owned_carrier_to_option_releases_the_some_cell() {
+    let g = growth_in(
+        to_option_program,
+        "let o = mko(i)?",
+        "    let o = mko(i)?\n    total = total + width(o)",
+        "43021",
+        "344042",
+    );
+    assert_eq!(g, 0, "owned `?`: {g} B per call leaked");
+}
+
+/// #2516, the BORROWED-carrier cell: the some-cell's payload slot is a view
+/// of a carrier some other holder releases, so the node stays borrowed and
+/// the bind keeps its `+1` — the cell is not released (the payload must not
+/// be spent twice). Pinned at today's count, which this change must not move.
+#[test]
+fn a_borrowed_carrier_to_option_keeps_todays_count() {
+    let g = growth_in(
+        to_option_program,
+        "let r: Result = mkr(i); let o = r?",
+        "    let r: Result[Bytes, String] = mkr(i)\n    let o = r?\n    let p = r?\n    total = total + width(o) + width(p)",
+        "86042",
+        "688084",
+    );
+    assert_eq!(g, 21, "borrowed `?`: {g} B per call (today: the two some-cells, 2 × 16 B on two calls in three)");
+}
