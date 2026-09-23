@@ -12,6 +12,12 @@
 //!   R2 lockstep overhead: t(sort_by) / t(sort) at the same n stays
 //!      bounded (the keys+values merge moves twice the bytes, not an
 //!      algorithm class more).
+//!   R3 key-count independence of `list.group_by`: t(K=4000) / t(K=40)
+//!      at the same n stays a small constant. An indexed lookup predicts
+//!      ~1-2 (more distinct keys = more entries, once each); the linear
+//!      scan #2156 shipped with predicts ~K2/K1 = 100 (every element
+//!      walked every group key — 11 µs per element over 5,000 keys). The
+//!      gate line is 8.
 //!
 //! Anti-vacuous floor: the small-size measurement must be slow enough
 //! to mean something — if an optimizer ever elides the loop, the gate
@@ -99,5 +105,39 @@ fn sort_asymptotic_and_lockstep_relations() {
     assert!(
         overhead <= 4.0,
         "sort_by/sort = {overhead:.2} > 4 — the lockstep merge picked up more than a constant factor"
+    );
+}
+
+/// One `list.group_by` over `n` String keys drawn from a `k`-word
+/// vocabulary — the wordfreq shape (#2156) with the vocabulary size as
+/// the free variable.
+fn group_by_kernel(n: usize, k: usize) -> String {
+    format!(
+        r#"fn main() -> Unit = {{
+  let xs = list.range(0, {n}) |> list.map((i) => int.to_string((i * 7919) % {k}))
+  let g = list.group_by(xs, (w) => w)
+  println(int.to_string(map.len(g)))
+}}
+"#
+    )
+}
+
+#[cfg_attr(debug_assertions, ignore = "timing gate is release-only (CI: release-shape job)")]
+#[test]
+fn group_by_key_count_relation() {
+    const N: usize = 200_000;
+    const K_SMALL: usize = 40;
+    const K_BIG: usize = 4_000;
+    let ts = measure(&group_by_kernel(N, K_SMALL));
+    let tb = measure(&group_by_kernel(N, K_BIG));
+    // Anti-vacuous: the small-vocabulary side must still be a measurement.
+    assert!(ts >= 2.0, "group_by: K={K_SMALL} measured {ts:.1}ms — too fast to gate on, re-size the kernel");
+    let ratio = tb / ts;
+    println!("RATCHET list.group_by t(K={K_SMALL})={ts:.1}ms t(K={K_BIG})={tb:.1}ms ratio={ratio:.2}");
+    assert!(
+        ratio <= 8.0,
+        "list.group_by: t(K={K_BIG})/t(K={K_SMALL}) = {ratio:.2} > 8 — the lookup left the index lane \
+         (the accumulator must grow in place so its address is stable; a per-key copy pins it to the \
+         linear scan, #2156's 110x)"
     );
 }
