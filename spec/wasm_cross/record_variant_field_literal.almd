@@ -1,0 +1,68 @@
+// @contract: C-036, C-070
+// #2553: a literal or nested constructor in a RECORD-variant field pattern
+// (`Circle { r: 0, .. }`) is a test on that field, exactly like a positional
+// constructor argument (`Square(0)`). Two independent defects hid this: the
+// exhaustiveness checker lowered a record pattern to its constructor alone, so
+// the later reachable arms were rejected as E014 and a non-exhaustive match
+// passed check; and the wasm emitter tested only the case tag of a record
+// pattern, so `Circle { r: 0, .. }` matched every Circle (prints `zero` for
+// r = 5). Each field type — Int, String, Bool, a nested variant — refines, and
+// arm order / fall-through is byte-identical native == wasm. A plain record
+// pattern (`P { x: 0, y }`) had the same wasm defect (every P took the first
+// arm) and is covered here too.
+type Shape = | Circle { r: Int, tag: String } | Dot
+
+fn shape_name(s: Shape) -> String = match s {
+  Circle { r: 0, tag: _ } => "zero",
+  Circle { r: _, tag: "unit" } => "unit",
+  Circle { r: _, tag: _ } => "circle",
+  Dot => "dot",
+}
+
+type Flag = | Toggle { on: Bool, n: Int } | Off
+
+fn flag_name(f: Flag) -> String = match f {
+  Toggle { on: true, n: 1 } => "on-one",
+  Toggle { on: true, n } => "on-${n}",
+  Toggle { on: false, .. } => "off-toggle",
+  Off => "off",
+}
+
+type Kind = | Small | Big(Int)
+
+type Item = | Tagged { kind: Kind, label: String } | Plain
+
+fn item_name(i: Item) -> String = match i {
+  Tagged { kind: Small, label } => "small:" + label,
+  Tagged { kind: Big(0), .. } => "big-zero",
+  Tagged { kind: Big(n), label: "x" } => "big-x:${n}",
+  Tagged { kind: Big(n), label } => "big:${n}:" + label,
+  Plain => "plain",
+}
+
+type P = { x: Int, y: Int }
+
+fn point_name(p: P) -> String = match p {
+  P { x: 0, y } => "x0:${y}",
+  P { x, y: 0 } => "y0:${x}",
+  P { .. } => "other",
+}
+
+effect fn main() -> Unit = {
+  println(shape_name(Circle { r: 0, tag: "unit" }))
+  println(shape_name(Circle { r: 3, tag: "unit" }))
+  println(shape_name(Circle { r: 5, tag: "x" }))
+  println(shape_name(Dot))
+  println(flag_name(Toggle { on: true, n: 1 }))
+  println(flag_name(Toggle { on: true, n: 7 }))
+  println(flag_name(Toggle { on: false, n: 1 }))
+  println(flag_name(Off))
+  println(item_name(Tagged { kind: Small, label: "a" }))
+  println(item_name(Tagged { kind: Big(0), label: "x" }))
+  println(item_name(Tagged { kind: Big(4), label: "x" }))
+  println(item_name(Tagged { kind: Big(4), label: "y" }))
+  println(item_name(Plain))
+  println(point_name({ x: 0, y: 3 }))
+  println(point_name({ x: 2, y: 0 }))
+  println(point_name({ x: 2, y: 2 }))
+}
