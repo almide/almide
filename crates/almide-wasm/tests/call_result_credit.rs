@@ -593,3 +593,36 @@ fn a_generic_constructor_hands_back_one_credit() {
         "26663",
     );
 }
+
+/// `value.keys(v)` copies the object's key HANDLES into a fresh list, and
+/// the list's typed drop releases every element — so the list has to take
+/// its own credit per key, as `map.keys` does (#2010 stage 2b). Without the
+/// inc, each dropped key list spent one of the Value's credits: two calls
+/// freed the keys under the object, and the next allocations overwrote them
+/// (`{"beta":20,…}` stringified as `{"�":20,"zzz…3":10,…}`). Found while
+/// closing #2515: the leaked destructure tuple of `json.parse`'s key loop
+/// had been holding one spare credit per key, which is what one extra
+/// release used to spend.
+#[test]
+fn a_value_keys_list_holds_its_own_key_credits() {
+    let src = r#"import json
+
+fn count(b: Value) -> Int = {
+  let ks = value.keys(b)
+  list.len(ks)
+}
+
+fn main() -> Unit = {
+  let b = json.parse("{\"beta\":20,\"alpha\":10,\"gamma\":30}") ?? value.null()
+  let n = count(b) + count(b) + count(b)
+  let junk = list.map([1, 2, 3, 4, 5, 6], (x) => "zzzzzzzzzzzzzzzzzzz" + int.to_string(x))
+  println("${n} ${json.stringify(b)} ${json.get_int(b, "alpha") ?? -1}")
+  println(list.join(junk, ","))
+}
+"#;
+    let (_, out) = heap_of(src);
+    assert_eq!(
+        out,
+        "9 {\"beta\":20,\"alpha\":10,\"gamma\":30} 10\nzzzzzzzzzzzzzzzzzzz1,zzzzzzzzzzzzzzzzzzz2,zzzzzzzzzzzzzzzzzzz3,zzzzzzzzzzzzzzzzzzz4,zzzzzzzzzzzzzzzzzzz5,zzzzzzzzzzzzzzzzzzz6"
+    );
+}
