@@ -665,6 +665,21 @@ pub(crate) fn insert_clones_live(mut expr: IrExpr, ctx: &mut CloneCtx) -> IrExpr
             if let IrExprKind::Clone { expr: unwrapped } = inner.kind {
                 inner = *unwrapped;
             }
+            // …and through a box deref: `&*(l.clone())` → `&*l` (#2582). A
+            // pattern binder off a `Box`'d field reaches here as
+            // `Borrow(Deref(Var))` (BoxDeref runs first), so the clone the
+            // liveness walk put on a non-last use sat UNDER the deref and the
+            // strip above never saw it — a deep copy of the whole subtree per
+            // borrowed call. `&*x` moves nothing; a sibling argument that
+            // moves `x` is covered by the E0505 guard, which sees this shape
+            // too (`call_borrowed_vars`).
+            if !mutable
+                && let IrExprKind::Deref { expr: d } = &mut inner.kind
+                && matches!(d.kind, IrExprKind::Clone { .. })
+            {
+                let IrExprKind::Clone { expr: unwrapped } = std::mem::replace(&mut d.kind, IrExprKind::Unit) else { unreachable!() };
+                **d = *unwrapped;
+            }
             IrExprKind::Borrow { expr: Box::new(inner), as_str, mutable }
         },
         // A closure body is a LOOP BODY to this pass: it may run any number
