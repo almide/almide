@@ -32,6 +32,11 @@
 //! and kin) are SELF-CALIBRATED out at generation time — the update run
 //! executes everything twice and pins `~` (excluded) where the two
 //! watermarks differ; excluded rows stay listed, never silently absent.
+//! A count row that varies across MACHINES (same watermark, same stdout,
+//! a different count on the ubuntu runner — map_insertion_order, #2407's
+//! follow-up issue) is beyond one machine's calibration, so a `~` in the
+//! count ledger is STICKY across regenerations; delete it by hand to
+//! re-pin the row.
 
 mod harness;
 use harness::run_wasm;
@@ -191,6 +196,16 @@ fn corpus_allocation_watermarks_hold() {
     let (bp, cp) = (baseline_path(), count_baseline_path());
     let ((mut baseline, mut refused), (mut counts, mut count_refused)) =
         if update { Default::default() } else { (read_ledger(&bp), read_ledger(&cp)) };
+    // A count row another MACHINE has shown to vary (the ubuntu runner read
+    // map_insertion_order one allocation below its macOS pin, at the same
+    // watermark and stdout) cannot be calibrated out by one machine's
+    // double run, so a `~` in the count ledger is STICKY: the update run
+    // keeps it. Removing the `~` by hand is how a row is re-pinned.
+    let sticky: std::collections::BTreeSet<String> = if update && cp.exists() {
+        read_ledger(&cp).0.into_iter().filter(|(_, v)| v.is_none()).map(|(rel, _)| rel).collect()
+    } else {
+        Default::default()
+    };
 
     let mut rows = String::new();
     let mut count_rows = String::new();
@@ -228,6 +243,7 @@ fn corpus_allocation_watermarks_hold() {
         if update {
             let (r, c) = generated_rows(rel, bytes, armed);
             rows.push_str(&r);
+            let c = if sticky.contains(rel) { format!("~\t{rel}\n") } else { c };
             count_rows.push_str(&c);
             continue;
         }
