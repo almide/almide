@@ -1,3 +1,4 @@
+// @contract: C-365
 // #1589 stage 1: the ports-and-adapters split the v0.59.0 DDD probe could not
 // express. `ports` declares `protocol Repository[K, V]`; `adapters` conforms
 // to `ports.Repository[domain.UserId, domain.User]`; `service` is generic over
