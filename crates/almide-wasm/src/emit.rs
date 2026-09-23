@@ -47,6 +47,10 @@ fn emit_with_ops(ir: &IrProgram, library: bool) -> Result<(Vec<u8>, std::collect
     // owner — bound first, released by the frame's exit plan.
     let bound = crate::arg_temps::bind_native_temporaries(ir);
     let ir = bound.as_ref().unwrap_or(ir);
+    // #2577: accumulator recursion elimination — the rewrite the native leg
+    // gets from TailCallOpt, from the same shared precondition check.
+    let accumulated = accumulate_binary_recursion(ir);
+    let ir = accumulated.as_ref().unwrap_or(ir);
     let first = emit_program_pass(ir, None, library, true)?;
     let keep = (first.visited.len() < first.total).then_some(&first.visited);
     let bounded = match keep {
@@ -64,6 +68,29 @@ fn emit_with_ops(ir: &IrProgram, library: bool) -> Result<(Vec<u8>, std::collect
     let checked = emit_program_pass(ir, keep, library, false)?;
     let best = if bounded.bytes.len() < checked.bytes.len() { bounded } else { checked };
     Ok((best.bytes, best.ops))
+}
+
+/// Rewrite every `almide_ir::accum_tre` candidate into its accumulator loop
+/// (`None` when nothing qualifies, so the common program is not cloned).
+/// Skipped whole when the program brackets a budget/timeout region: the
+/// new loop head would be a charge the deterministic meter (ALS-DT2) sees,
+/// and outside a region the meter is elided so no charge is observable.
+fn accumulate_binary_recursion(ir: &IrProgram) -> Option<IrProgram> {
+    use almide_ir::accum_tre;
+    let any = ir.functions.iter().chain(ir.modules.iter().flat_map(|m| m.functions.iter()));
+    if !any.clone().any(accum_tre::is_candidate) || fuel::program_has_regions(ir) {
+        return None;
+    }
+    let mut out = ir.clone();
+    for f in out.functions.iter_mut() {
+        accum_tre::rewrite(f, &mut out.var_table);
+    }
+    for m in out.modules.iter_mut() {
+        for f in m.functions.iter_mut() {
+            accum_tre::rewrite(f, &mut m.var_table);
+        }
+    }
+    Some(out)
 }
 
 /// One emission pass's output.
