@@ -281,6 +281,13 @@ impl Emitter<'_> {
             // local holds its ADDRESS from here on.
             let hv = self.hold_val(declared)?;
             self.f.instructions().local_set(hv);
+            // #2010: the cell is refcounted — the frame holds one credit
+            // (released at its exits, and here at a loop rebind: the
+            // previous pass's cell lives on only in the envs that captured
+            // it), each capturing env one more.
+            let dec_cell = self.dec_cell_fn(declared);
+            self.f.instructions().local_get(idx).call(dec_cell);
+            self.rc_own(idx, declared);
             self.f
                 .instructions()
                 .i32_const(declared.slot_size() as i32)
@@ -661,6 +668,19 @@ impl Emitter<'_> {
                     let dec = self.dec_fn_of(declared);
                     self.f.instructions().local_get(idx).call(dec);
                     self.rc_own(idx, declared);
+                }
+                // #2010: a C-319 cell's occupant is released as it is
+                // replaced (the cell holds exactly one credit on it) — the
+                // same settlement, one load deeper.
+                if let Some(idx) = local
+                    && self.cells.contains(var)
+                    && self.rc_droppable(declared)
+                    && !call_shaped_self
+                {
+                    let dec = self.dec_fn_of(declared);
+                    self.f.instructions().local_get(idx);
+                    self.load_ty_slot(declared, 0);
+                    self.f.instructions().call(dec);
                 }
                 match local {
                     Some(idx) => self.emit_store_var(*var, idx, declared)?,

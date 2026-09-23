@@ -91,17 +91,20 @@ impl Emitter<'_> {
                 } else {
                     None
                 };
-                // Closure block layout: [slot:i32][captures packed...].
-                // A C-319 cell travels as its 4-byte ADDRESS.
-                let widths: Vec<u32> = std::iter::once(4)
+                // Closure block layout: [slot:i32][drop:i32][captures
+                // packed...] (`ENV_DROP_OFF`, #2010 ruling B). A C-319 cell
+                // travels as its 4-byte ADDRESS.
+                let widths: Vec<u32> = [4, 4]
+                    .into_iter()
                     .chain(captured.iter().map(|(v, t)| {
                         if self.cells.contains(v) { 4 } else { t.slot_size() }
                     }))
                     .collect();
                 let (offsets, size) = almide_layout::pack_fields(&widths);
+                debug_assert_eq!(offsets[1], ENV_DROP_OFF);
                 let captures: Vec<(VarId, SliceTy, u32, bool)> = captured
                     .iter()
-                    .zip(offsets.iter().skip(1))
+                    .zip(offsets.iter().skip(2))
                     .map(|(&(v, t), &off)| (v, t, off, self.cells.contains(&v)))
                     .collect();
                 let j = self.work.register_closure_lambda(
@@ -120,11 +123,19 @@ impl Emitter<'_> {
                         .local_tee(hb)
                         .i32_const(slot as i32)
                         .i32_store(slot_memarg(0));
+                    let drop_slot = self.env_drop_slot(&captures);
+                    self.f
+                        .instructions()
+                        .local_get(hb)
+                        .i32_const(drop_slot as i32)
+                        .i32_store(slot_memarg(ENV_DROP_OFF));
                     for (v, t, off, is_cell) in &captures {
                         let (idx, _) = self.locals[v];
                         self.f.instructions().local_get(hb).local_get(idx);
                         if *is_cell {
-                            // the local already holds the cell address
+                            // the local already holds the cell address; the
+                            // env co-owns the cell (+1, released by its glue)
+                            self.f.instructions().call(F_INC).local_get(idx);
                             self.f.instructions().i32_store(slot_memarg(*off));
                         } else {
                             // The env is a holder: a captured handle takes +1
@@ -193,5 +204,25 @@ impl Emitter<'_> {
                     Some(t) => Ok(t.ty),
                     None => unsup("map-literal-unit"),
                 }
+    }
+}
+
+impl Emitter<'_> {
+    /// The funcref slot of the drop glue for one env layout (#2010 ruling
+    /// B): every handle capture released by its own typed drop. A C-319
+    /// cell capture is released by the cell's glue (`dec_cell_fn`).
+    pub(crate) fn env_drop_slot(&self, captures: &[(VarId, SliceTy, u32, bool)]) -> u32 {
+        let slots: Vec<(u32, u32)> = captures
+            .iter()
+            .filter_map(|&(_, t, off, is_cell)| {
+                if is_cell {
+                    Some((off, self.dec_cell_fn(t)))
+                } else {
+                    self.elem_is_handle(t).then(|| (off, self.dec_fn_of(t)))
+                }
+            })
+            .collect();
+        let glue = self.work.helper(crate::work::Helper::DropEnv { slots });
+        self.work.slot(TableEntry::Direct(glue))
     }
 }

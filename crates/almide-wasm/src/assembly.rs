@@ -543,6 +543,7 @@ pub(crate) fn resolve_extras(
                 extra_fns.push((ti, f.clone()));
                 entry_fn_indices.push(idx);
             }
+            TableEntry::Direct(idx) => entry_fn_indices.push(idx),
         }
     }
     (extra_fns, entry_fn_indices)

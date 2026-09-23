@@ -521,6 +521,26 @@ pub(crate) fn emit_cow_elems(inc_elems: u32) -> Function {
     f
 }
 
+/// `$drop_fn(block)` (#2010 closures, ruling B): a pool-static Fn block
+/// (a named fn's shim block, a capture-free lambda) is immortal; any other
+/// env names its own drop glue at `ENV_DROP_OFF` as a +1-biased funcref
+/// slot, called through the one fixed `(i32) -> ()` type `ti`. The glue
+/// does the credit arithmetic itself (`emit_drop_shape`), so this is the
+/// whole release of a closure value.
+pub(crate) fn emit_drop_fn(ti: u32) -> Function {
+    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
+    let mut f = Function::new([]);
+    let mut i = f.instructions();
+    i.local_get(0).global_get(G_LINE_END).i32_lt_u().if_(BlockType::Empty);
+    i.return_();
+    i.end();
+    i.local_get(0);
+    i.local_get(0).i32_load(word(almide_layout::PAYLOAD + crate::ENV_DROP_OFF));
+    i.call_indirect(0, ti);
+    i.end();
+    f
+}
+
 /// The signatures assembly promises for the rc-glue helpers (#2010).
 pub(crate) fn helper_params(h: &Helper) -> Option<Vec<ValType>> {
     if matches!(h, Helper::IncEntries { .. }) {
@@ -537,6 +557,9 @@ pub(crate) fn helper_params(h: &Helper) -> Option<Vec<ValType>> {
             | Helper::DropMapSpine { .. }
             | Helper::DropEntries { .. }
             | Helper::CopyEntries { .. }
+            | Helper::DropEnv { .. }
+            | Helper::DropFn { .. }
+            | Helper::DropCell { .. }
     )
     .then(|| vec![ValType::I32])
 }
@@ -552,7 +575,10 @@ pub(crate) fn helper_result(h: &Helper) -> Option<ValType> {
         | Helper::IncShape { .. }
         | Helper::DropMapSpine { .. }
         | Helper::DropEntries { .. }
-        | Helper::IncEntries { .. } => None,
+        | Helper::IncEntries { .. }
+        | Helper::DropEnv { .. }
+        | Helper::DropFn { .. }
+        | Helper::DropCell { .. } => None,
         _ => Some(ValType::I32),
     }
 }
@@ -569,6 +595,9 @@ pub(crate) fn helper_body(h: &Helper, work: &crate::work::FnWork) -> Option<Func
         Helper::DropEntries { stride, slots, side_clear } => emit_drop_entries(*stride, *slots, *side_clear),
         Helper::IncEntries { stride, slots } => emit_inc_entries(*stride, *slots),
         Helper::CopyEntries { inc_entries } => emit_copy_entries(*inc_entries),
+        Helper::DropEnv { slots } => emit_drop_shape(slots, None),
+        Helper::DropFn { ti } => emit_drop_fn(*ti),
+        Helper::DropCell { elem_dec } => emit_drop_shape(&elem_dec.map(|d| (0, d)).into_iter().collect::<Vec<_>>(), None),
         Helper::DropShape { .. } | Helper::IncShape { .. } => {
             let mut bodies = work.drop_bodies.borrow_mut();
             let built = bodies.iter_mut().find(|(k, _)| k == h).and_then(|(_, f)| f.take());
