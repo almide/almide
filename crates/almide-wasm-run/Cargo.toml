@@ -12,6 +12,9 @@ description = "The greenfield wasm HOST: the almide.* import surface (print/exit
 [dependencies]
 almide-base = { path = "../almide-base" }
 almide-wasm = { path = "../almide-wasm" }
+# The p1 transform moved out (#2554) so wasm32 consumers can carry it
+# without wasmtime; re-exported below as `wasi`, the path every caller uses.
+almide-wasi = { path = "../almide-wasi" }
 # The shared native-runtime client core (#1715): the http client the
 # embedded host serves through fs_call ops 43..=47 — the SAME source the
 # splice template inlines, so C-328 equality holds by construction.

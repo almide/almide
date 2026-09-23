@@ -73,7 +73,7 @@ done
 #
 #    KNOWN BASE (measured 2026-09-22 at the landing): the structural leg's
 #    WASI form imports fd_write / proc_exit / random_get / clock_time_get /
-#    fd_read UNCONDITIONALLY (crates/almide-wasm-run/src/wasi.rs, the "base
+#    fd_read UNCONDITIONALLY (crates/almide-wasi/src/lib.rs, the "base
 #    five"), so a program granted only IO still imports the Rand and Time
 #    entry points. That is a capability the profile denied and the artifact
 #    still asks for; it is recorded here as the base set the gate tolerates,

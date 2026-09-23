@@ -1,0 +1,21 @@
+[package]
+name = "almide-wasi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "The stock-WASI (preview-1) transform of a structural almide module, and the host-op set that transform serves — pure wasm-encoder/wasmparser, so a wasm32 consumer (the playground) can ship structural output without the wasmtime host"
+
+# Split out of almide-wasm-run (#2554): the transform never needed the
+# engine, but living next to it made every consumer that wanted to turn a
+# structural module into a runnable WASI command carry wasmtime — which
+# does not build for wasm32-unknown-unknown. almide-wasm-run re-exports
+# this crate as `almide_wasm_run::wasi`, so its callers are unchanged.
+[dependencies]
+almide-wasm = { path = "../almide-wasm" }
+wasm-encoder = { version = "0.259", features = ["wasmparser"] }
+wasmparser = "0.259"
+anyhow = "1"
+
+[lints]
+workspace = true

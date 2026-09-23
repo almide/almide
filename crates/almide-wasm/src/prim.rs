@@ -10,7 +10,7 @@ use wasm_encoder::{BlockType, MemArg, ValType};
 use crate::emitter::Emitter;
 
 /// The largest entropy request the emitter will lower (#2118): the staging
-/// room itself, which `crates/almide-wasm-run/src/wasi.rs` re-asserts against
+/// room itself, which `crates/almide-wasi/src/lib.rs` re-asserts against
 /// its own layout. Every stdlib caller asks for 8; a computed length is
 /// refused outright, because that is the shape that could reach past the span
 /// and the host checks nothing.
