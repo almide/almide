@@ -1,0 +1,2 @@
+expects_error = "pattern `ok(..)` cannot match Heard"
+hint_substring = "the value is already a plain Heard"

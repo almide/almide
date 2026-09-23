@@ -126,6 +126,22 @@ fn discover_test_files(file: &str, fallback_dirs: &[&str]) -> Vec<String> {
     }
 }
 
+/// Run one test-harness worker's job, turning a panic inside the compiler
+/// into `on_panic(message)` (#2533). A worker thread that panicked used to
+/// die without sending its result, so the file dropped out of the tally
+/// entirely — the harness then printed "All N test file(s) passed" over a
+/// file that never compiled — and the semaphore permit it held was lost.
+fn guard_worker_panic<T>(job: impl FnOnce() -> T, on_panic: impl FnOnce(String) -> T) -> T {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(job)).unwrap_or_else(|payload| {
+        let msg = payload
+            .downcast_ref::<&str>()
+            .map(|s| s.to_string())
+            .or_else(|| payload.downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "(non-string panic payload)".to_string());
+        on_panic(format!("the compiler panicked (this is an Almide bug): {msg}"))
+    })
+}
+
 /// `cmd_test`'s Phase 1: compile every test file in parallel (bounded by
 /// CPU count), each in its own scratch dir so cold rustc builds parallelize
 /// instead of serializing on the shared dir's BUILD_LOCK. Extracted
@@ -149,7 +165,10 @@ fn compile_test_files_parallel(test_files: &[String], no_check: bool, scratch: &
             // of serializing on the shared dir's BUILD_LOCK; keyed on the
             // absolute path (#1877).
             let worker_dir = scratch.native_worker_dir(&test_file);
-            let result = super::run::compile_to_binary(&test_file, no_check, true, false, Some(&worker_dir));
+            let result = guard_worker_panic(
+                || super::run::compile_to_binary(&test_file, no_check, true, false, Some(&worker_dir)),
+                Err,
+            );
             let _ = sem_tx.send(());
             let _ = tx.send((test_file, result));
         }));
@@ -185,7 +204,10 @@ fn run_test_binaries_parallel(compiled: Vec<(String, Result<std::path::PathBuf, 
         handles.push(std::thread::spawn(move || {
             let _ = sem_rx.lock().unwrap().recv();
             let (code, out) = match compile_result {
-                Ok(bin) => super::run::run_binary_captured(&bin, &args),
+                Ok(bin) => guard_worker_panic(
+                    || super::run::run_binary_captured(&bin, &args),
+                    |msg| (1, msg),
+                ),
                 Err(e) => (1, format!("Compile error for {}:\n{}", file, e)),
             };
             let _ = sem_tx.send(());
@@ -711,7 +733,10 @@ pub fn cmd_test_wasm(file: &str, run_filter: Option<&str>, allow_no_tests: bool)
         let run_filter = run_filter.clone();
         handles.push(std::thread::spawn(move || {
             let _ = sem_rx.lock().unwrap().recv();
-            let outcome = compile_and_run_wasm_test(&test_file, scratch.wasm_module_path(&test_file), run_filter.as_deref());
+            let outcome = guard_worker_panic(
+                || compile_and_run_wasm_test(&test_file, scratch.wasm_module_path(&test_file), run_filter.as_deref()),
+                |detail| WasmTestOutcome::CompileError { file: test_file.clone(), detail: format!("{detail}\n") },
+            );
             let _ = sem_tx.send(());
             let _ = tx.send(outcome);
         }));
@@ -823,7 +848,12 @@ fn run_wasm_test_phase(test_files: &[String], scratch: &std::sync::Arc<TestScrat
         let run_filter = run_filter.clone();
         handles.push(std::thread::spawn(move || {
             let _ = sr.lock().unwrap().recv();
-            let o = compile_and_run_wasm_test(&tf, scratch.wasm_module_path(&tf), run_filter.as_deref());
+            // A panic routes the file to the native fallback like any other
+            // compile error; that leg reports it authoritatively.
+            let o = guard_worker_panic(
+                || compile_and_run_wasm_test(&tf, scratch.wasm_module_path(&tf), run_filter.as_deref()),
+                |detail| WasmTestOutcome::CompileError { file: tf.clone(), detail: format!("{detail}\n") },
+            );
             let _ = st.send(());
             let _ = tx.send(o);
         }));
@@ -853,10 +883,13 @@ fn run_native_fallback_phase(fallback: &[String], program_args: &std::sync::Arc<
         handles.push(std::thread::spawn(move || {
             let _ = sr.lock().unwrap().recv();
             let worker_dir = scratch.native_worker_dir(&tf);
-            let (code, out) = match super::run::compile_to_binary(&tf, no_check, true, false, Some(&worker_dir)) {
-                Ok(bin) => super::run::run_binary_captured(&bin, &args),
-                Err(e) => (1, format!("Compile error for {}:\n{}", tf, e)),
-            };
+            let (code, out) = guard_worker_panic(
+                || match super::run::compile_to_binary(&tf, no_check, true, false, Some(&worker_dir)) {
+                    Ok(bin) => super::run::run_binary_captured(&bin, &args),
+                    Err(e) => (1, format!("Compile error for {}:\n{}", tf, e)),
+                },
+                |msg| (1, format!("Compile error for {}:\n{}", tf, msg)),
+            );
             let _ = st.send(());
             let _ = tx.send((tf, code, out));
         }));
@@ -1467,3 +1500,25 @@ pub fn cmd_clean() {
     }
 }
 
+
+#[cfg(test)]
+mod worker_panic_tests {
+    use super::guard_worker_panic;
+
+    /// #2533: a worker whose compile panicked must come back as a failure the
+    /// tally counts, not vanish (the harness printed "All N passed" over it).
+    #[test]
+    fn a_panicking_worker_becomes_a_counted_failure() {
+        let got: Result<u32, String> =
+            guard_worker_panic(|| panic!("Postcondition violation after pass 'X'"), Err);
+        let msg = got.expect_err("a panic must surface as the failure value");
+        assert!(msg.contains("the compiler panicked"), "{msg}");
+        assert!(msg.contains("Postcondition violation after pass 'X'"), "{msg}");
+    }
+
+    #[test]
+    fn a_normal_worker_passes_through() {
+        let got: Result<u32, String> = guard_worker_panic(|| Ok(7), Err);
+        assert_eq!(got, Ok(7));
+    }
+}

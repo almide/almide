@@ -1,0 +1,8 @@
+type Heard = { text: String }
+
+effect fn get() -> Result[Heard, String] = ok(Heard { text: "hi" })
+
+effect fn run() -> Result[String, String] = {
+  let h = get()!
+  ok(h.text)
+}

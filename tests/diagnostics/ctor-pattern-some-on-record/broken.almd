@@ -1,0 +1,8 @@
+// `some(..)`/`none` over a record subject (#2533): the record is not an
+// Option. This used to bind `x` as `Unknown` and panic in ConcretizeTypes.
+type Heard = { text: String }
+
+fn text_of(h: Heard) -> String = match h {
+  some(x) => x.text,
+  none => "",
+}

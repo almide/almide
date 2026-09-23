@@ -1,0 +1,4 @@
+fn first_or_zero(xs: List[Int]) -> Int = match list.first(xs) {
+  some(x) => x,
+  none => 0,
+}
