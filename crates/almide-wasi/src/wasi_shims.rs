@@ -45,7 +45,12 @@ fn stage_for(i: &mut wasm_encoder::InstructionSink<'_>, park: u64, need: u32, st
     i.end();
 }
 
-/// `(ptr, len) -> ()`: fd_write(fd, [(ptr,len),("\n",1)]).
+/// `(ptr, len) -> ()`: TWO `fd_write` calls, one iovec each — the payload,
+/// then `"\n"`. Not one call over both iovecs: wasmtime's preview-1
+/// `fd_write` writes only the FIRST non-empty iovec and returns its count
+/// (measured 2026-09-24, wasmtime 47: `fd_write(1, [("hello",5),("\n",1)])`
+/// printed `hello` with no newline), so a single call would drop every
+/// line's `\n` unless the shim looped on `nwritten` (#2312 shape 3).
 fn shim_print(fd: i32, park: u64) -> Function {
     let (ptr, len) = (0u32, 1u32);
     let mut f = Function::new([]);
