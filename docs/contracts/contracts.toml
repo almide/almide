@@ -236,6 +236,7 @@ evidence  = [
   { path = "spec/wasm_cross/num_edge_to_string.almd", class = "fixture" },
   { path = "spec/wasm_cross/int_float_ops.almd", class = "fixture" },
   { path = "spec/wasm_cross/float_interp_forms.almd", class = "fixture" },
+  { path = "tests/float_to_string_cross_target_test.rs", name = "to_string_wasm_matches_rust_display_over_the_sweep", class = "fuzz", n = 100000 },
 ]
 [[contract]]
 id        = "C-012"
@@ -383,6 +384,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/float_shortest_roundtrip.almd", class = "fixture" },
   { path = "spec/wasm_cross/num_edge_to_string.almd", class = "fixture" },
+  { path = "tests/float_to_string_cross_target_test.rs", name = "to_string_wasm_matches_rust_display_over_the_sweep", class = "fuzz", n = 100000 },
 ]
 [[contract]]
 id        = "C-024"
@@ -404,6 +406,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/float_to_fixed.almd", class = "fixture" },
   { path = "tests/float_to_fixed_cross_target_test.rs", name = "to_fixed_cross_target_random_fuzz", class = "fuzz", n = 1000 },
+  { path = "tests/float_to_string_cross_target_test.rs", name = "to_string_wasm_matches_rust_display_over_the_sweep", class = "fuzz", n = 100000 },
 ]
 
 # ── VENDORED-LIBM MATH ───────────────────────────────────────────────

@@ -146,3 +146,64 @@ is not the algorithm: it is reachability. `${x}` on a float pulls the whole shor
 round-trip path; a program that only prints integer-valued floats, or a fixed precision,
 could reach a far smaller formatter — the #1712/#1962 split-by-need discipline applied to
 a stdlib family, which is issue #1985's option 3 and is left open.
+
+## Addendum (#2099, 2026-09-23): both printers on one exact scaling
+
+Re-measured on develop at `c653598ee` (after #2368 removed the duplicate string
+constants): `println("${1.25}")` was 5,405 B against 1,970 B for the Int twin, so the
+shortest printer's share was 3,435 B — 26 functions, 3,076 B of function bodies, read
+off a per-function size dump of the emitted module. `println(float.to_fixed(1.25, 2))`
+was 6,650 B: the retained Dragon4 fixed path cost 4,680 B, more than the shortest
+printer, and it is the one `spectralnorm` (the size ladder's T2 rung) actually calls.
+Both were rewritten on one primitive, output unchanged:
+
+- `__sf_scale(x, q, k)` computes floor(x · 2^q · 10^-k) EXACTLY on the bignum — x
+  shifted or multiplied by 10^-k, then divided by 10^k in 10^9 chunks or shifted
+  down — and reads the sticky bit off the remainders. It is ~250 B.
+- `float.to_string` calls it three times (cb, its lower neighbour, cb + 2). Those are
+  the numbers Schubfach's g(k) approximates, so the candidate selection is Giulietti's
+  unchanged, and the g(k) derivation, the 126-bit extraction and the 64x64→128 product
+  (708 B) are gone.
+- `float.to_fixed(x, nd)` calls it once, for M = floor(2 · v · 10^nd): N = M >> 1, the
+  dropped bit is the half, round up when the sticky bit or N's last bit is set (half to
+  even), then N's digits by repeated division by 10^9. The Dragon4 fixed-mode digit
+  loop — one bignum compare-subtract per digit, five bignums, the `math.log10`
+  estimate and its fixups — is gone.
+- `float.to_string_compound` (the `${x}` form) is the same printer with a `dot0` flag,
+  not a separate module that re-rendered `to_string`'s result to drop the `.0`; a zero
+  renders through the same writer instead of four string literals, so the printer ships
+  no literal beyond `NaN` / `inf` / `-inf` (a literal shifts the static pool, and with it
+  every alloc-ledger row of every program that prints a float).
+- `__sf_wd` writes digits, zeros and the point straight into the result string in one
+  backwards pass — no digit buffer, no copy, no three-way renderer.
+
+Measured on the same probes (shipped form, `almide build --target wasm`):
+
+| program | before | after | Δ |
+|---|---:|---:|---:|
+| `println("${1.25}")` | 5,405 | 4,695 | −710 (−13.1 %) |
+| the same with `--wasm-opt` | 2,915 | 2,469 | −446 |
+| `println(float.to_string(1.25))` | 4,886 | 4,491 | −395 |
+| `println(float.to_fixed(1.25, 2))` | 6,650 | 4,515 | −2,135 (−32.1 %) |
+| `spectralnorm` (size ladder T2) | 12,121 | 9,986 | −2,135 |
+| `spec/wasm_cross/edge_float_formatting.almd` (both printers) | 16,203 | 12,773 | −3,430 |
+
+`size-baseline.txt`: 145 rows moved, all down, −85,007 B in total (the shipped-form
+ledger −85,261 B); the size ladder −10,812 B over its three float-printing rungs.
+
+Run time on the wasm leg, `almide bench --target wasm`, 200,000 conversions of the
+seeded xorshift64 stream (mostly huge and tiny magnitudes, the expensive end):
+`float.to_string` 189 ms → 575 ms (0.95 → 2.9 µs per value: three bignum pipelines
+instead of one plus three wide products); `float.to_fixed(x, 3)` 6,080 ms → 155 ms
+(30 → 0.8 µs: the per-digit bignum loop is gone). No perf row prints more than a
+handful of floats.
+
+Exactness evidence for the change: `tests/float_to_string_cross_target_test.rs` prints
+all three forms of every biased exponent × 7 significands × both signs (28,672 values),
+the history's decimal specials, `to_fixed` at 1074 / 1100 / 1200 / 4096 digits, and
+100,000 xorshift64 bit patterns (1,000,000 locally) on the wasm leg and compares
+byte-for-byte with Rust `format!`; it fails on a deliberately broken guard (`s >= 100`,
+the Java rule) and passes on both the old and the new printer. The exponent sweep is
+what found the two bugs the rewrite had (a whole value's trailing zeros landing on the
+left; the 9-digit chunks of a fixed value written in the wrong order), not the random
+stream.
