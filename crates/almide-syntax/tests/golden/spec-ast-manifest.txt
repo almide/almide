@@ -1,4 +1,4 @@
-# oracle: almide 0.63.0 (dev) at 9bb46bd6f — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.63.0 (dev) at 6591ab90a — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -570,7 +570,7 @@ ac657cd617c81cf2659c2ed6ae158e86ad9b2baec321e750813c413f38109b9f	spec/stdlib/opt
 558e6e2ea2bd49503e32dddf0df0b899f4646a046e0fbaa5f3bcd655c92f0b95	spec/stdlib/process_exec_status_test.almd
 79a122c67e837e1ef49a70997dd11ca798505e352b675eba4fa75944df83f8ed	spec/stdlib/process_ext_test.almd
 0cd5d750f4a44531e477d65ba353f6d3e242b9dc03bdcc71aa0ba4f88f9e6e54	spec/stdlib/process_named_type_test.almd
-ba6a40771f75471f0b17707a7702d6ce299f0713022ef21873c9e5984c56d0f7	spec/stdlib/process_semantics_manifest_test.almd
+1d6fedb003d7d45bd5437305f51740fb08c03408608b99f809bc93c7050fce9e	spec/stdlib/process_semantics_manifest_test.almd
 8897db6f43335d5e6323f7ae0f9456192a5de53ce8a48b1fdf9822a8847d906a	spec/stdlib/process_timeout_test.almd
 22a7c54982fe864cec1a682c56c9f4a2592f8953dc622d1d0fb57ed4869fe76b	spec/stdlib/random_choice_pair_test.almd
 ce8633340bbd14c7c19d151799179fd5d81657e9e8a9b2eb0ebc8b56725c080f	spec/stdlib/random_semantics_manifest_test.almd

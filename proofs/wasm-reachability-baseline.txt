@@ -111,6 +111,7 @@ net.tcp_set_timeout :: HOST_CAPABILITY :: main is outside the MIR-lowering subse
 net.tcp_write :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_write needs a declared capability not in this brick
 process.env :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.env needs a declared capability not in this brick
 process.exec :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.exec needs a declared capability not in this brick
+process.exec_attached :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.exec_attached needs a declared capability not in this brick
 process.exec_in :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.exec_in needs a declared capability not in this brick
 process.exec_status :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.exec_status needs a declared capability not in this brick
 process.exec_status_timeout :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.exec_status_timeout needs a declared capability not in this brick
