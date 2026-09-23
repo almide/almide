@@ -46,7 +46,7 @@ ADR はその**決定に至る過程**（調査した証拠、比較した代替
 | # | Title | Status | Date |
 |---|---|---|---|
 | [0001](./0001-deterministic-time-units.md) | Deterministic budgets are written in time units | Accepted | 2026-08-01 |
-| [0002](./0002-fallibility-effect-orthogonal.md) | Fallibility and effect are orthogonal axes; `-> T!` marks pure-fallible | Accepted | 2026-08-05 |
+| [0002](./0002-fallibility-effect-orthogonal.md) | Fallibility and effect are orthogonal axes; `-> T!` marks pure-fallible | Accepted (amended 2026-09-24: effect implies fallible, §D6) | 2026-08-05 |
 | [0003](./0003-error-type-conversion-at-propagation.md) | Error-type conversion at propagation points — lossy conversion must be spelled | Accepted | 2026-08-05 |
 | [0004](./0004-error-branchability-doctrine.md) | Error branchability — String stays terminal; doctrine, lint, and context instead of tags | Accepted | 2026-08-05 |
 | [0005](./0005-operators-desugar-to-stdlib.md) | Value-level operators are desugarings of named stdlib functions | Accepted | 2026-08-05 |
