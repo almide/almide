@@ -102,6 +102,10 @@ pub(crate) struct Emitter<'a> {
     /// Lowering `main`: a propagated `!` error ABORTS (the interp's
     /// main-level Flow::Return(Err) contract — "Error: {msg}" + exit 1).
     pub(crate) in_main: bool,
+    /// How many line-buffer builds this body is lexically inside while it
+    /// lowers (#2312): 0 = the next build opened here is OUTERMOST in its
+    /// function. `line_bounded.rs` reads it with `in_main`.
+    pub(crate) build_depth: u32,
     /// Function-value work: funcref-table entries, call_indirect types,
     /// lifted lambdas (W-1/W-2).
     pub(crate) work: &'a FnWork,

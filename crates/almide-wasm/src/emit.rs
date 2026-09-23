@@ -47,20 +47,43 @@ fn emit_with_ops(ir: &IrProgram, library: bool) -> Result<(Vec<u8>, std::collect
     // owner — bound first, released by the frame's exit plan.
     let bound = crate::arg_temps::bind_native_temporaries(ir);
     let ir = bound.as_ref().unwrap_or(ir);
-    let (bytes, visited, total, ops) = emit_program_pass(ir, None, library)?;
-    if visited.len() >= total {
-        return Ok((bytes, ops));
+    let first = emit_program_pass(ir, None, library, true)?;
+    let keep = (first.visited.len() < first.total).then_some(&first.visited);
+    let bounded = match keep {
+        Some(k) => emit_program_pass(ir, Some(k), library, true)?,
+        None => first.clone(),
+    };
+    if !bounded.bounded_fired {
+        return Ok((bounded.bytes, bounded.ops));
     }
-    let (bytes, _, _, ops) = emit_program_pass(ir, Some(&visited), library)?;
-    Ok((bytes, ops))
+    // #2312: the bounded-line rewrites (line_bounded.rs) usually shrink a
+    // module — they can keep the allocator and the line buffer's grow path
+    // out of it — but their helpers cost bytes when the checked machinery
+    // ships anyway. Emit both and ship the smaller: never larger than the
+    // checked emission, and the choice is deterministic.
+    let checked = emit_program_pass(ir, keep, library, false)?;
+    let best = if bounded.bytes.len() < checked.bytes.len() { bounded } else { checked };
+    Ok((best.bytes, best.ops))
 }
 
-#[allow(clippy::type_complexity)]
+/// One emission pass's output.
+#[derive(Clone)]
+struct Pass {
+    bytes: Vec<u8>,
+    /// The program fns main reaches (pass 2 keeps only these).
+    visited: HashSet<usize>,
+    total: usize,
+    ops: std::collections::BTreeSet<i32>,
+    /// A bounded-line rewrite was emitted (`FnWork::bounded_fired`).
+    bounded_fired: bool,
+}
+
 fn emit_program_pass(
     ir: &IrProgram,
     keep: Option<&HashSet<usize>>,
     library: bool,
-) -> Result<(Vec<u8>, HashSet<usize>, usize, std::collections::BTreeSet<i32>), EmitError> {
+    bounded_lines: bool,
+) -> Result<Pass, EmitError> {
     let main = ir.functions.iter().find(|f| f.name.as_str() == "main");
     if main.is_none() && !library {
         return unsup("no main function");
@@ -149,6 +172,7 @@ fn emit_program_pass(
     // Function-VALUE work shared by every lowering below (funcref table,
     // call_indirect types, lifted lambdas).
     let work = FnWork { region_pure: std::cell::RefCell::new(region_pure), ..FnWork::default() };
+    work.bounded_lines.set(bounded_lines);
     // Calls made from display-helper bodies (BFS roots).
     let mut display_helper_calls: std::collections::HashSet<usize> = HashSet::new();
     work.itype_base.set(T_FN_BASE + table.infos.len() as u32);
@@ -424,7 +448,7 @@ fn emit_program_pass(
         .collect();
     let bytes = imports::declare(&bytes, &declared).map_err(|e| EmitError::Unsupported(format!("extern-import:{e}")))?;
     let host_ops = work.host_ops.borrow().clone();
-    Ok((bytes, visited, total, host_ops))
+Ok(Pass { bytes, visited, total, ops: host_ops, bounded_fired: work.bounded_fired.get() })
 }
 
 /// The `@extern(wasm, module, name)` import a body-less fn declares (#2275):
