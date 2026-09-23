@@ -75,7 +75,9 @@ effect fn main() -> Unit = {
 
 ### `process.exec_status(cmd: String, args: List[String]) -> Result[{code: Int, stdout: String, stderr: String}, String]`
 
-Execute a command and return exit code, stdout, and stderr
+Execute a command and return exit code, stdout, and stderr. The child's stdin
+is null (not the terminal) and its output is captured, so a program that needs
+the terminal — a pager, an editor, `stty` — belongs in `process.exec_attached`.
 
 ```almd check
 import process
@@ -180,6 +182,14 @@ exactly `exec timed out after <ms>ms`; whether it fires is a function of the
 host. A fired deadline is commonly mapped to exit code 124 by callers that
 compare exit codes.
 
+The child runs in its own process group, so the timeout can kill its whole
+tree — which makes it a background job for the controlling terminal. A child
+that reads the terminal or changes its settings (`stty -echo`) is stopped by
+the kernel with SIGTTIN / SIGTTOU; that stop is answered at once with an err
+(`...: the child was stopped by SIGTTOU: it tried to use the terminal from a
+background process group; run terminal programs with process.exec_attached`)
+rather than by waiting out the deadline.
+
 ```almd check
 import process
 
@@ -191,9 +201,26 @@ effect fn main() -> Unit = {
 }
 ```
 
+### `process.exec_attached(cmd: String, args: List[String]) -> Result[Int, String]`
+
+Run a command ON this program's terminal: the child inherits stdin, stdout and
+stderr and stays in this program's process group, so pagers, editors, `stty`
+and anything else that reads or reconfigures the terminal work. Nothing is
+captured and there is no timeout; the answer is the exit code (-1 if the child
+was killed by a signal). Native only, like every process call.
+
+```almd check
+import process
+
+effect fn main() -> Unit = {
+  let code = process.exec_attached("stty", ["-echo"])!
+  println("stty exited ${code}")
+}
+```
+
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (14 functions)
+## Signature index (15 functions)
 
 ```
 // Stdout on exit 0; else err with stderr text.
@@ -220,13 +247,17 @@ effect process.exec_in(dir: String, cmd: String, args: List[String]) -> String
 // @since 0.5.0 or earlier
 effect process.exec_with_stdin(cmd: String, args: List[String], input: String) -> String
 
-// Code and output; code -1 if killed by signal.
+// Code and output; code -1 if killed by signal. Child stdin is null.
 // @since 0.5.0 or earlier
 effect process.exec_status(cmd: String, args: List[String]) -> ProcessStatus
 
 // exec_status, but kills cmd and errs at timeout_ms.
 // @since 0.53.6
 effect process.exec_status_timeout(cmd: String, args: List[String], timeout_ms: Int) -> ProcessStatus
+
+// Run cmd on this terminal; exit code, -1 if signalled.
+// @since unreleased
+effect process.exec_attached(cmd: String, args: List[String]) -> Int
 
 // OS process ID of this program.
 // @since 0.12.3 or earlier

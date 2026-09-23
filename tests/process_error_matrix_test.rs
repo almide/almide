@@ -66,6 +66,10 @@ fn rows() -> Vec<(&'static str, String)> {
             format!("process.exec_status_timeout({MISSING:?}, 1000):"),
         ),
         (
+            "let _ = process.exec_attached(\"almide-no-such-binary-2090\", [])!",
+            format!("process.exec_attached({MISSING:?}):"),
+        ),
+        (
             "let _ = process.exec(\"almide-no-such-binary-2090\", [])!",
             format!("process.exec({MISSING:?}):"),
         ),
