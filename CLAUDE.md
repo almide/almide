@@ -261,6 +261,7 @@ types |> list.find((t) => get_str(t, "name") == name) ?? json.null()
 ```
 
 ### Prefer recursion over var + while + flag
+When the iteration count is known up front, write a range `for` (`for _ in 0..<n`) and thread state with `var`. Recursion is for early exit (`break`/`continue` shapes) and for loops whose bound is not known in advance — not for counted `f(n - 1)` loops.
 ```almide
 // ✗ avoid
 var i = p
