@@ -144,6 +144,10 @@ pub(crate) struct Emitter<'a> {
     /// count is cached — the block ADDRESS is re-read every time, so a COW
     /// copy under an element store stays correct.
     pub(crate) hoisted_counts: HashMap<VarId, u32>,
+    /// #2150: VarId → the i32 flag a loop cleared before entry for a list
+    /// it reaches only through element reads and stores (cow_hoist.rs). A
+    /// store judges copy-on-write only while the flag is clear, then sets it.
+    pub(crate) cow_flags: HashMap<VarId, u32>,
     /// One-shot tail-position marker: set by `lower_tail`, TAKEN at
     /// `lower`'s entry so it never leaks into operand lowering. A direct
     /// call in tail position with a matching return type emits
