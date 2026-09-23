@@ -559,6 +559,7 @@ fn build_helper_body(
             region_repair: None,
             loop_ctl: None,
             hoisted_counts: HashMap::new(),
+            cow_flags: HashMap::new(),
             in_tail: false,
             try_see_through: false,
             branch_depth: 0,

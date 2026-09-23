@@ -108,6 +108,10 @@ impl Emitter<'_> {
     /// `continue` brs to the loop head (the next cond CHECK, which
     /// charges — the interp's per-check meter), `break` to the block.
     fn lower_while(&mut self, cond: &IrExpr, body: &[IrStmt]) -> Result<(), EmitError> {
+        // #2150: one copy-on-write judge per loop entry for a list the loop
+        // reaches only element-wise — cleared before the unrolled lane too,
+        // which runs copies of this same condition and body.
+        let flags = self.hoist_cow_flags(Some(cond), body)?;
         // Counted-shape fast lane (unroll.rs): on `true` the rolled loop
         // below drains the remainder iterations.
         let _ = self.try_unroll_while(cond, body)?;
@@ -123,6 +127,7 @@ impl Emitter<'_> {
         self.lower_loop_body(body, false)?;
         self.f.instructions().br(0).end().end();
         self.drop_hoisted_counts(hoisted);
+        self.drop_cow_flags(flags);
         Ok(())
     }
 
@@ -390,6 +395,7 @@ impl Emitter<'_> {
                     self.lower(end, Some(INT))?;
                     let stop = self.hold_i64()?;
                     self.f.instructions().local_set(stop);
+                    let flags = self.hoist_cow_flags(None, body)?;
                     self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
                     self.emit_det_charge_const(1);
                     self.f.instructions().local_get(var_idx).local_get(stop);
@@ -409,6 +415,7 @@ impl Emitter<'_> {
                         .br(0)
                         .end()
                         .end();
+                    self.drop_cow_flags(flags);
                     self.release_i64();
                     return Ok(());
                 }
@@ -422,6 +429,7 @@ impl Emitter<'_> {
                             return unsup("forin-range-nonint");
                         }
                         self.f.instructions().local_get(sl).local_set(var_idx);
+                        let flags = self.hoist_cow_flags(None, body)?;
                         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
                         self.emit_det_charge_const(1);
                         self.f.instructions().local_get(var_idx).local_get(el);
@@ -441,6 +449,7 @@ impl Emitter<'_> {
                             .br(0)
                             .end()
                             .end();
+                        self.drop_cow_flags(flags);
                         return Ok(());
                     }
                 }
