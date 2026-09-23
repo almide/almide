@@ -489,7 +489,7 @@ pub(crate) fn resolve_extras(
             Helper::JsonValuePretty { .. } | Helper::JsonPathRemove => {
                 vec![ValType::I32, ValType::I32, ValType::I32]
             }
-            Helper::JsonPathSet => {
+            Helper::JsonPathSet { .. } => {
                 vec![ValType::I32, ValType::I32, ValType::I32, ValType::I32]
             }
             Helper::FastExp | Helper::GeluScalar { .. } => vec![ValType::F64],
@@ -575,8 +575,8 @@ fn helper_body_b(h: &Helper, work: &FnWork, helper_snapshot: &[Helper]) -> Funct
             f
         }
     },
-    Helper::JsonPathSet => {
-        json_path_helpers::emit_json_path_set_helper(work.helper_base.get(), helper_snapshot)
+    Helper::JsonPathSet { vdec } => {
+        json_path_helpers::emit_json_path_set_helper(work.helper_base.get(), helper_snapshot, *vdec)
     }
     Helper::JsonPathRemove => {
         json_path_helpers::emit_json_path_remove_helper(work.helper_base.get(), helper_snapshot)

@@ -77,6 +77,9 @@ impl Emitter<'_> {
             // Closures (#2010 ruling B): the env block is released through
             // the drop glue its own payload names (`$drop_fn`).
             SliceTy::Fn(_) => true,
+            // #2010 item 5: a Value block releases its Str / Array / Object
+            // payload through its tagged glue.
+            SliceTy::Value => true,
             _ => false,
         }
     }
@@ -120,6 +123,19 @@ impl Emitter<'_> {
                 }
                 crate::types_table::NamedDef::Excluded => (Vec::new(), None),
             },
+            // #2010 item 5: a Value's payload by its tag — a Str block, an
+            // Array's `List[Value]`, an Object's `List[(String, Value)]`.
+            SliceTy::Value => {
+                let items = SliceTy::List(self.types.intern(SliceTy::Value));
+                let pair = self.types.tuple(vec![STR, SliceTy::Value]);
+                let pairs = SliceTy::List(self.types.intern(SliceTy::Tuple(pair)));
+                let cases = vec![
+                    (crate::value::VT_STR as u32, vec![(almide_layout::SUM_FIELD, F_DEC_FLAT)]),
+                    (crate::value::VT_ARRAY as u32, vec![(almide_layout::SUM_FIELD, self.dec_fn_of(items))]),
+                    (crate::value::VT_OBJECT as u32, vec![(almide_layout::SUM_FIELD, self.dec_fn_of(pairs))]),
+                ];
+                (Vec::new(), Some((almide_layout::SUM_TAG, cases)))
+            }
             _ => (Vec::new(), None),
         }
     }
@@ -138,6 +154,7 @@ impl Emitter<'_> {
                 }
                 crate::types_table::NamedDef::Excluded => false,
             },
+            SliceTy::Value => true,
             _ => false,
         }
     }
@@ -176,7 +193,7 @@ impl Emitter<'_> {
                     F_DEC_FLAT
                 }
             }
-            SliceTy::Option(_) | SliceTy::Result(..) | SliceTy::Tuple(_) | SliceTy::Named(_) => {
+            SliceTy::Option(_) | SliceTy::Result(..) | SliceTy::Tuple(_) | SliceTy::Named(_) | SliceTy::Value => {
                 if self.shape_has_handles(t) {
                     self.shape_helper(crate::work::Helper::DropShape { ty: t }, t)
                 } else {
@@ -287,7 +304,7 @@ impl Emitter<'_> {
                 Some(inc_elems) => self.work.helper(crate::work::Helper::CopyElems { inc_elems }),
                 None => F_BLOCK_COPY,
             },
-            SliceTy::Option(_) | SliceTy::Result(..) | SliceTy::Tuple(_) | SliceTy::Named(_)
+            SliceTy::Option(_) | SliceTy::Result(..) | SliceTy::Tuple(_) | SliceTy::Named(_) | SliceTy::Value
                 if self.shape_has_handles(t) =>
             {
                 let inc_elems = self.shape_helper(crate::work::Helper::IncShape { ty: t }, t);
@@ -312,7 +329,7 @@ impl Emitter<'_> {
                 Some(inc_elems) => self.work.helper(crate::work::Helper::CowElems { inc_elems }),
                 None => F_COW,
             },
-            SliceTy::Option(_) | SliceTy::Result(..) | SliceTy::Tuple(_) | SliceTy::Named(_)
+            SliceTy::Option(_) | SliceTy::Result(..) | SliceTy::Tuple(_) | SliceTy::Named(_) | SliceTy::Value
                 if self.shape_has_handles(t) =>
             {
                 let inc_elems = self.shape_helper(crate::work::Helper::IncShape { ty: t }, t);
@@ -363,6 +380,8 @@ pub(crate) fn rc_droppable_ty(types: &crate::types_table::TypeTable, t: SliceTy)
             // Closures (#2010 ruling B): a Fn value is an env block that
             // names its own drop glue; pool-static Fn blocks are immortal.
             SliceTy::Fn(_) => true,
+            // #2010 item 5: a Value through its tagged payload glue.
+            SliceTy::Value => true,
             _ => false,
         }
     }
