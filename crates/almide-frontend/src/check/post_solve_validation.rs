@@ -33,24 +33,34 @@ fn fill_example_ty(ty: &Ty) -> Ty {
 /// Infer types for default value expressions in type declarations.
 /// Prevents ICE "missing type for expr" during lowering.
 fn infer_default_exprs(checker: &mut Checker, ty: &mut ast::TypeExpr) {
-    if let ast::TypeExpr::Variant { cases, .. } = ty {
-        for case in cases {
-            if let ast::VariantCase::Record { fields, .. } = case {
-                for field in fields {
-                    let declared = checker.resolve_type_expr(&field.ty);
-                    if let Some(ref mut default_expr) = field.default {
-                        let val_ty = checker.infer_expr(default_expr);
-                        // The field's declared type is the source of truth for
-                        // its default value — flow it in so an empty default
-                        // (`items: List[Shape] = []`) pins its element to `Shape`
-                        // instead of staying undecidable (E018).
-                        checker.constrain(declared, val_ty, format!("default for field {}", field.name));
-                    }
+    match ty {
+        ast::TypeExpr::Variant { cases, .. } => {
+            for case in cases {
+                if let ast::VariantCase::Record { fields, .. } = case {
+                    infer_field_defaults(checker, fields);
                 }
             }
         }
+        // A plain record's defaults are checked too (#2518): a record-literal
+        // default (`s: Sampling = Sampling {}`) left unchecked reached the
+        // native build with a missing field (E0063) and no qualified type.
+        ast::TypeExpr::Record { fields } => infer_field_defaults(checker, fields),
+        _ => {}
     }
+}
 
+fn infer_field_defaults(checker: &mut Checker, fields: &mut [ast::FieldType]) {
+    for field in fields {
+        let declared = checker.resolve_type_expr(&field.ty);
+        if let Some(ref mut default_expr) = field.default {
+            let val_ty = checker.infer_expr(default_expr);
+            // The field's declared type is the source of truth for
+            // its default value — flow it in so an empty default
+            // (`items: List[Shape] = []`) pins its element to `Shape`
+            // instead of staying undecidable (E018).
+            checker.constrain(declared, val_ty, format!("default for field {}", field.name));
+        }
+    }
 }
 
 impl Checker {

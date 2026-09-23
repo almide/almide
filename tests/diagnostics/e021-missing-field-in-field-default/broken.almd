@@ -1,0 +1,10 @@
+// #2518: a field default is checked like any other construction. Before, a
+// record-literal default missing a required field passed `almide check` and
+// the native build failed with rustc E0063.
+type Sampling = { temperature_sent: Bool }
+type Response = { content: String, sampling: Sampling = Sampling {} }
+
+effect fn main() -> Unit = {
+  let r = Response { content: "hi" }
+  println("${r.content} ${r.sampling.temperature_sent}")
+}
