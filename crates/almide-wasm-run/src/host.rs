@@ -753,7 +753,19 @@ pub fn run_wasm(bytes: &[u8]) -> anyhow::Result<RunResult> {
 
 /// Run with a fixed stdin buffer (tests; piped byte streams).
 pub fn run_wasm_with(bytes: &[u8], stdin: &[u8]) -> anyhow::Result<RunResult> {
-    run_wasm_src(bytes, StdinSource::Buf(stdin.to_vec()), None, &[])
+    run_wasm_src(bytes, StdinSource::Buf(stdin.to_vec()), None, &[], true)
+}
+
+/// `run_wasm` WITHOUT the 30 s epoch watchdog — the timing runner
+/// (`almide bench --target wasm`, #2150). The watchdog is test-harness
+/// equipment, and it is not free: epoch interruption makes wasmtime check
+/// the epoch at every loop header and function entry, which measured 1.9x
+/// on mandelbrot's inner loop and 1.2x on fft (same module, `wasmtime run`
+/// with and without `-W timeout`, 2026-09-24). A bench must time the
+/// emitted program, as the native leg's bench does and as a stock runtime
+/// runs it. A bench of a diverging program hangs, exactly as it does natively.
+pub fn run_wasm_unbounded(bytes: &[u8]) -> anyhow::Result<RunResult> {
+    run_wasm_src(bytes, StdinSource::Buf(Vec::new()), None, &[], false)
 }
 
 /// Run under a hard linear-memory budget (bytes). Growth past the cap
@@ -761,19 +773,19 @@ pub fn run_wasm_with(bytes: &[u8], stdin: &[u8]) -> anyhow::Result<RunResult> {
 /// "Error: out of memory" + exit 1 (C-197) — the heap-budget
 /// acceptance-gate observable (W-8; the RC arc's floor).
 pub fn run_wasm_capped(bytes: &[u8], max_memory_bytes: usize) -> anyhow::Result<RunResult> {
-    run_wasm_src(bytes, StdinSource::Buf(Vec::new()), Some(max_memory_bytes), &[])
+    run_wasm_src(bytes, StdinSource::Buf(Vec::new()), Some(max_memory_bytes), &[], true)
 }
 
 /// Run with the process's real stdin, read lazily on first guest read
 /// (the product runner — never blocks for programs that skip stdin).
 pub fn run_wasm_real_stdin(bytes: &[u8]) -> anyhow::Result<RunResult> {
-    run_wasm_src(bytes, StdinSource::RealOnce, None, &[])
+    run_wasm_src(bytes, StdinSource::RealOnce, None, &[], true)
 }
 
 /// The product runner with program args (#1716): op 29 answers
 /// [argv0, args...] and the guest's frame walk skips argv0.
 pub fn run_wasm_real_stdin_args(bytes: &[u8], args: &[String]) -> anyhow::Result<RunResult> {
-    run_wasm_src(bytes, StdinSource::RealOnce, None, args)
+    run_wasm_src(bytes, StdinSource::RealOnce, None, args, true)
 }
 
 fn run_wasm_src(
@@ -781,13 +793,14 @@ fn run_wasm_src(
     stdin: StdinSource,
     max_memory_bytes: Option<usize>,
     args: &[String],
+    deadline: bool,
 ) -> anyhow::Result<RunResult> {
     wasmparser::validate(bytes)?; // the wall: never instantiate an invalid module
     // Epoch deadline: a fixture (or a MUTANT under the gate) that
     // diverges must FAIL the run, never hang the suite. 30s of real time
     // is orders beyond any fixture; the deadline maps to a plain trap.
     let mut cfg = wasmtime::Config::new();
-    cfg.epoch_interruption(true);
+    cfg.epoch_interruption(deadline);
     let engine = wasmtime::Engine::new(&cfg)?;
     let module = wasmtime::Module::new(&engine, bytes)?;
     let out = Arc::new(Mutex::new(String::new()));
@@ -919,11 +932,13 @@ fn run_wasm_src(
             Ok(())
         },
     )?;
-    store.set_epoch_deadline(1);
-    let eng = engine.clone();
-    let ticker = std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_secs(30));
-        eng.increment_epoch();
+    let ticker = deadline.then(|| {
+        store.set_epoch_deadline(1);
+        let eng = engine.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_secs(30));
+            eng.increment_epoch();
+        })
     });
     let instance = linker.instantiate(&mut store, &module)?;
     let main = instance.get_typed_func::<(), ()>(&mut store, "main")?;

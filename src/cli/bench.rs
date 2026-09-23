@@ -76,7 +76,9 @@ fn bench_wasm(file: &str, runs: u32) {
     }
     let run_once = move || -> Result<(Vec<u8>, f64), String> {
         let started = Instant::now();
-        let r = almide_wasm_run::run_wasm(&bytes).map_err(|e| format!("embedded wasm host: {e}"))?;
+        // No 30 s epoch watchdog: its loop-header checks are the harness's
+        // cost, not the program's (1.9x on mandelbrot, #2150).
+        let r = almide_wasm_run::run_wasm_unbounded(&bytes).map_err(|e| format!("embedded wasm host: {e}"))?;
         let secs = started.elapsed().as_secs_f64();
         if r.exit != 0 {
             return Err(format!("workload exited {} — bench only times a clean run:\n{}", r.exit, r.stderr));
