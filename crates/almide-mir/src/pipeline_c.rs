@@ -7,9 +7,13 @@
 /// value is inlined at every use, and this runner re-evaluates them once for
 /// the abort alone, so `let STEPS = [Step { name: int.to_string(7 / ZERO), … }]`
 /// traps before `main` prints anything, as native and the structural leg do.
-/// Should the extended body not lower, the runner keeps the call-free scalar
-/// form it always had (that init's abort then stays lazy — the pre-#2571
-/// behaviour for that one program, never a lost scalar abort).
+/// Three forms are tried in order: the WHOLE inits (their value dropped at the
+/// runner's scope end), then the PROBE form ([`abort_probes`]: only the `/` and
+/// `%` the init reaches unconditionally, bound as scalars — the whole value of
+/// a list of closure-holding records does not lower in bind position, its
+/// divisions do), then the call-free scalar form the runner always had (that
+/// init's abort then stays lazy — the pre-#2571 behaviour for that one
+/// program, never a lost scalar abort; `ALMIDE_DBG_GINIT` says which form ran).
 fn synthesize_global_init(
     ir: &almide_ir::IrProgram,
     layouts: &PipelineLayouts,
