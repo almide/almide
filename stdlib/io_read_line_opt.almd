@@ -1,0 +1,30 @@
+// io_read_line_opt — SELF-HOSTED `io.read_line_opt()` over the WASI fd-0 byte floor
+// (prim.read_n_bytes), the wasm twin of native `almide_rt_io_read_line_opt` (#2539).
+// Reads standard input one byte at a time up to a '\n' (excluded) or EOF. `none` only
+// when not a single byte was read — end of input — so an empty line is `some("")`,
+// which `io.read_line` cannot say (it answers "" for both). Trailing '\r's are cut and
+// the bytes decode lossily, exactly as the native line does. Reaching prim.read_n_bytes
+// carries Capability::Stdin (the SAME cap as io.read_line).
+effect fn io_read_line_opt() -> String? = {
+  var buf = bytes.new(0)
+  var got = 0
+  var open = true
+  while open {
+    let chunk = prim.read_n_bytes(1)
+    if list.len(chunk) == 0 then {
+      open = false
+    } else {
+      got = got + 1
+      let c = list.get(chunk, 0) ?? 10
+      if c == 10 then {
+        open = false
+      } else bytes.push(buf, c)
+    }
+  }
+  var end = bytes.len(buf)
+  while end > 0 and bytes.get_or(buf, end - 1, 0) == 13 {
+    end = end - 1
+  }
+  if got == 0 then none
+  else some(bytes.to_string_lossy(bytes.slice(buf, 0, end)))
+}

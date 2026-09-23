@@ -1,0 +1,14 @@
+// io.read_line_opt (#2539): `none` at the end of input, where io.read_line can
+// only answer "" — the same value it gives an empty line. `almide test` runs a
+// file with stdin closed on every leg, so the first read here is already at the
+// end. The empty-line half needs piped stdin and lives in
+// tests/io_read_line_opt_test.rs.
+import io
+
+test "read_line_opt is none at the end of input" {
+  assert_eq(io.read_line_opt(), none)
+}
+
+test "read_line answers an empty string at the end of input" {
+  assert_eq(io.read_line(), "")
+}
