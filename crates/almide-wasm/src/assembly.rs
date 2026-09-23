@@ -259,6 +259,19 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
         };
         globals.global(GlobalType { val_type: vt, mutable: true, shared: false }, &init);
     }
+    // #2407: the allocation counters, APPENDED after the top-let globals so
+    // no existing index moves — four i64 globals `$alloc` / `$free` bump,
+    // present only under the `alloc_count` switch (a shipped module has
+    // none: byte-identical to a build without the switch).
+    let counters = crate::alloc_count::armed().then(|| G_FIXED_COUNT + global_decls.len() as u32);
+    if counters.is_some() {
+        for _ in crate::alloc_count::EXPORTS {
+            globals.global(
+                GlobalType { val_type: ValType::I64, mutable: true, shared: false },
+                &ConstExpr::i64_const(0),
+            );
+        }
+    }
 
     let mut exports = ExportSection::new();
     exports.export("memory", ExportKind::Memory, 0);
@@ -273,6 +286,12 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     // so a window-free module's bytes do not move.
     if work.region_used.get() {
         exports.export("__heap_high", ExportKind::Global, G_HEAP_HIGH);
+    }
+    // #2407: the counters, read by the host beside `__heap` (armed only).
+    if let Some(base) = counters {
+        for (k, name) in crate::alloc_count::EXPORTS.iter().enumerate() {
+            exports.export(name, ExportKind::Global, base + k as u32);
+        }
     }
     // #457: every clean-closure entry pub fn is host-callable.
     for (name, idx) in export_fns {
@@ -307,7 +326,7 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
         (F_ITOA, emit_itoa()),
         (F_APPEND_I64, emit_append_i64()),
         (F_APPEND_BOOL, emit_append_bool(true_base, false_base)),
-        (F_ALLOC, emit_alloc(oom_msg)),
+        (F_ALLOC, emit_alloc(oom_msg, counters)),
         (F_INT_TO_STRING, emit_int_to_string()),
         (F_CONCAT, emit_concat()),
         (F_STR_EQ, emit_str_eq()),
@@ -329,7 +348,7 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
         (F_STR_CMP, emit_str_cmp()),
         (F_STR_REPLACE, emit_str_replace()),
         (F_COPY, emit_copy()),
-        (F_FREE, emit_free()),
+        (F_FREE, emit_free(counters)),
         (F_INC, emit_inc()),
         (F_DEC_FLAT, emit_dec_flat()),
         (F_COW, emit_cow()),

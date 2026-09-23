@@ -1197,6 +1197,11 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
 /// read from the IR before routing — what `--host js` marshals (#2265).
 pub(crate) fn compile_to_wasm_bytes_surfaced(file: &str, allow_unverified: bool, verified: bool, library_ok: bool, embedded_leg: bool) -> Result<(Vec<u8>, bool, Vec<i32>, crate::cli::js_host::HostSurface), ()> {
     let (mut program, source_text, mut resolved, dep_paths) = parse_and_resolve_wasm(file)?;
+    // ALMIDE_WASM_ALLOC_COUNT (#2407): arm the structural leg's allocation
+    // counters for this emission — the wasm twin of `arm_alloc_count`. The
+    // guard scopes the thread-local to this build; off, nothing is emitted.
+    let _alloc_count = almide_base::env::flag("ALMIDE_WASM_ALLOC_COUNT")
+        .then(almide_wasm::alloc_count::CountGuard::set);
 
     // The route resolves the module list itself (once, off disk, through the
     // same resolver) and hands the FRESH un-inferred programs to whichever
