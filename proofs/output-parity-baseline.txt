@@ -279,6 +279,7 @@ spec/wasm_cross/module_global_const.almd
 spec/wasm_cross/module_var_alias_cow.almd
 spec/wasm_cross/mut_heap_param.almd
 spec/wasm_cross/mut_map_param.almd
+spec/wasm_cross/mut_param_alias_cow.almd
 spec/wasm_cross/mutable_global_bytes_arena.almd
 spec/wasm_cross/mutable_global_bytes_copy_from.almd
 spec/wasm_cross/mutable_global_repeat_writes.almd
@@ -392,6 +393,7 @@ spec/wasm_cross/to_fixed_domain_abort.almd
 spec/wasm_cross/to_fixed_domain_abort_hi.almd
 spec/wasm_cross/to_fixed_wide_precision.almd
 spec/wasm_cross/to_result_nested_share.almd
+spec/wasm_cross/top_let_closure_eager.almd
 spec/wasm_cross/top_let_div_eager.almd
 spec/wasm_cross/top_let_div_used.almd
 spec/wasm_cross/toplevel_const_wrapping.almd
