@@ -1,4 +1,4 @@
-6475	spec/wasm_cross/accum_recursion_declined.almd
+6519	spec/wasm_cross/accum_recursion_declined.almd
 2095	spec/wasm_cross/accum_recursion_int.almd
 3769	spec/wasm_cross/adr0005_operator_equivalence.almd
 5501	spec/wasm_cross/alias_combinator_rc.almd
