@@ -92,7 +92,16 @@ pub fn desugar_prune_unreachable_arms(body: &IrExpr) -> Option<IrExpr> {
 /// catch, or a row cloned into both branches would duplicate a binder
 /// ([`introduces_binder`] — VarId uniqueness under duplication). Runs in both chains
 /// (desugar-before-both), so duplicated bodies count 1:1 in the caps `mir == ir` gate.
-pub fn desugar_variant_guard_match(body: &IrExpr) -> Option<IrExpr> {
+///
+/// A match over a CUSTOM variant or a plain record takes the column compiler in
+/// `desugar_variant_arms_b.rs` ([`specialize_user_variant_match`]): multi-field
+/// positional payloads (`Circle(0, _)`), record-form field patterns (`Circle { r: 0,
+/// tag: _ }`, `P { x: 0, y }`) and nested constructor patterns (`Tagged { kind: Big(n),
+/// .. }`) all reduce to the same per-constructor-arm + inner-match shape (#2559).
+pub fn desugar_variant_guard_match(
+    body: &IrExpr,
+    layouts: &crate::lower::VariantLayouts,
+) -> Option<IrExpr> {
     use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
     use almide_ir::{IrMatchArm, IrPattern};
     use almide_lang::types::constructor::TypeConstructorId as TC;
@@ -279,256 +288,25 @@ pub fn desugar_variant_guard_match(body: &IrExpr) -> Option<IrExpr> {
         })
     }
 
-    /// The user-variant twin: a match over a custom variant whose arms carry GUARDS or a
-    /// single-field constructor with a LITERAL field (`Square(0) | Square(1)`). One branch
-    /// per constructor head (first-appearance order) plus a `_` branch for the catch-all
-    /// rows, each branch holding the rows that can match it in source order:
-    /// - a NULLARY head's branch is the guard chain of its rows;
-    /// - a SINGLE-FIELD head binds its field to a fresh var and moves the rows' field
-    ///   patterns and guards into an inner match over it (a scalar / String
-    ///   literal-and-guard chain);
-    /// - a multi-field or record-shaped head must be unguarded with plain field patterns,
-    ///   and its first row closes its branch.
-    ///
-    /// Everything else declines.
-    fn specialize_user(e: &IrExpr, next: &mut u32) -> Option<IrExpr> {
-        struct Row {
-            arg: Option<IrPattern>,
-            guard: Option<IrExpr>,
-            body: IrExpr,
-        }
-        struct Head {
-            name: String,
-            pat: IrPattern,
-            arity: Option<usize>,
-            rows: Vec<Row>,
-            closed: bool,
-        }
-        fn head_name(p: &IrPattern) -> Option<&str> {
-            match p {
-                IrPattern::Constructor { name, .. } | IrPattern::RecordPattern { name, .. } => Some(name),
-                _ => None,
-            }
-        }
-        fn field_pat_ok(p: &IrPattern) -> bool {
-            simple(p) || matches!(p, IrPattern::Literal { .. })
-        }
-        let IrExprKind::Match { subject, arms } = &e.kind else { return None };
-        if !matches!(&subject.ty, Ty::Named(..) | Ty::Applied(TC::UserDefined(_), _)) {
-            return None;
-        }
-        let needed = arms.iter().any(|a| {
-            a.guard.is_some()
-                || matches!(&a.pattern, IrPattern::Constructor { args, .. }
-                    if args.len() == 1 && matches!(args[0], IrPattern::Literal { .. }))
-        });
-        if !needed {
-            return None;
-        }
-        let ok = arms.iter().all(|a| match &a.pattern {
-            IrPattern::Constructor { args, .. } if args.len() <= 1 => args.iter().all(field_pat_ok),
-            IrPattern::Constructor { args, .. } => args.iter().all(simple) && a.guard.is_none(),
-            IrPattern::RecordPattern { fields, .. } => {
-                a.guard.is_none() && fields.iter().all(|f| f.pattern.as_ref().is_none_or(simple))
-            }
-            p => simple(p),
-        });
-        if !ok {
-            return None;
-        }
-        let span = e.span;
-        let binds_subject = arms.iter().any(|a| matches!(a.pattern, IrPattern::Bind { .. }));
-        let mut hoist: Vec<IrStmt> = Vec::new();
-        let subj: IrExpr = if binds_subject && !matches!(subject.kind, IrExprKind::Var { .. }) {
-            let t = VarId(*next);
-            *next += 1;
-            hoist.push(IrStmt {
-                kind: IrStmtKind::Bind {
-                    var: t,
-                    ty: subject.ty.clone(),
-                    value: (**subject).clone(),
-                    mutability: almide_ir::Mutability::Let,
-                },
-                span,
-            });
-            mk(IrExprKind::Var { id: t }, &subject.ty, &span)
-        } else {
-            (**subject).clone()
-        };
-        let mut heads: Vec<Head> = Vec::new();
-        let mut default: (Vec<Row>, bool) = (Vec::new(), false);
-        let mut copies = vec![0usize; arms.len()];
-        let copy_row = |r: &Row| Row { arg: r.arg.clone(), guard: r.guard.clone(), body: r.body.clone() };
-        for (i, arm) in arms.iter().enumerate() {
-            let (guard, body) = match &arm.pattern {
-                IrPattern::Bind { var, .. } => (
-                    arm.guard.as_ref().map(|g| almide_ir::substitute_var_in_expr(g, *var, &subj)),
-                    almide_ir::substitute_var_in_expr(&arm.body, *var, &subj),
-                ),
-                _ => (arm.guard.clone(), arm.body.clone()),
-            };
-            match head_name(&arm.pattern) {
-                Some(name) => {
-                    let (arity, arg) = match &arm.pattern {
-                        IrPattern::Constructor { args, .. } if args.len() <= 1 => {
-                            (Some(args.len()), args.first().cloned())
-                        }
-                        _ => (None, None),
-                    };
-                    let closes = arm.guard.is_none() && arg.as_ref().is_none_or(simple);
-                    let pos = match heads.iter().position(|h| h.name == name) {
-                        Some(p) => p,
-                        None => {
-                            // The catch-all rows seen so far precede this head's own rows
-                            // in first-match order.
-                            let rows: Vec<Row> = default.0.iter().map(copy_row).collect();
-                            for (j, a) in arms.iter().enumerate().take(i) {
-                                if simple(&a.pattern) {
-                                    copies[j] += 1;
-                                }
-                            }
-                            heads.push(Head {
-                                name: name.to_string(),
-                                pat: arm.pattern.clone(),
-                                arity,
-                                rows,
-                                closed: default.1,
-                            });
-                            heads.len() - 1
-                        }
-                    };
-                    let h = &mut heads[pos];
-                    if !h.closed {
-                        h.rows.push(Row { arg, guard, body });
-                        h.closed = closes;
-                        copies[i] += 1;
-                    }
-                }
-                None => {
-                    let closes = arm.guard.is_none();
-                    for h in heads.iter_mut() {
-                        if !h.closed {
-                            h.rows.push(Row { arg: None, guard: guard.clone(), body: body.clone() });
-                            h.closed = closes;
-                            copies[i] += 1;
-                        }
-                    }
-                    if !default.1 {
-                        default.0.push(Row { arg: None, guard, body });
-                        default.1 = closes;
-                        copies[i] += 1;
-                    }
-                }
-            }
-        }
-        for (i, n) in copies.iter().enumerate() {
-            if *n > 1
-                && (introduces_binder(&arms[i].body)
-                    || arms[i].guard.as_ref().is_some_and(introduces_binder))
-            {
-                return None;
-            }
-        }
-        let chain = |mut rows: Vec<Row>| -> Option<IrExpr> {
-            let last = rows.pop()?;
-            let mut acc = last.body;
-            while let Some(r) = rows.pop() {
-                acc = match r.guard {
-                    Some(g) => mk(
-                        IrExprKind::If { cond: Box::new(g), then: Box::new(r.body), else_: Box::new(acc) },
-                        &e.ty,
-                        &span,
-                    ),
-                    None => r.body,
-                };
-            }
-            Some(acc)
-        };
-        let mut out_arms: Vec<IrMatchArm> = Vec::new();
-        for h in heads {
-            if !h.closed {
-                return None;
-            }
-            let needs_inner = h.arity == Some(1)
-                && h.rows.iter().any(|r| r.guard.is_some() || r.arg.as_ref().is_some_and(|a| !simple(a)));
-            if !needs_inner {
-                // Plain head: only its own (last) row may bind the fields.
-                if h.rows.iter().rev().skip(1).any(|r| r.arg.as_ref().is_some_and(|a| !matches!(a, IrPattern::Wildcard))) {
-                    return None;
-                }
-                out_arms.push(IrMatchArm { pattern: h.pat, guard: None, body: chain(h.rows)? });
-                continue;
-            }
-            let fty = h.rows.iter().find_map(|r| match &r.arg {
-                Some(IrPattern::Literal { expr }) => Some(expr.ty.clone()),
-                Some(IrPattern::Bind { ty, .. }) => Some(ty.clone()),
-                _ => None,
-            })?;
-            let pv = VarId(*next);
-            *next += 1;
-            let inner_arms: Vec<IrMatchArm> = h
-                .rows
-                .into_iter()
-                .map(|r| IrMatchArm {
-                    pattern: r.arg.unwrap_or(IrPattern::Wildcard),
-                    guard: r.guard,
-                    body: r.body,
-                })
-                .collect();
-            let inner = mk(
-                IrExprKind::Match {
-                    subject: Box::new(mk(IrExprKind::Var { id: pv }, &fty, &span)),
-                    arms: inner_arms,
-                },
-                &e.ty,
-                &span,
-            );
-            out_arms.push(IrMatchArm {
-                pattern: IrPattern::Constructor { name: h.name, args: vec![IrPattern::Bind { var: pv, ty: fty }] },
-                guard: None,
-                body: inner,
-            });
-        }
-        if !default.0.is_empty() {
-            if !default.1 {
-                return None;
-            }
-            out_arms.push(IrMatchArm { pattern: IrPattern::Wildcard, guard: None, body: chain(default.0)? });
-        }
-        let m = IrExpr {
-            kind: IrExprKind::Match { subject: Box::new(subj), arms: out_arms },
-            ty: e.ty.clone(),
-            span,
-            def_id: e.def_id,
-        };
-        Some(if hoist.is_empty() {
-            m
-        } else {
-            IrExpr {
-                kind: IrExprKind::Block { stmts: hoist, expr: Some(Box::new(m)) },
-                ty: e.ty.clone(),
-                span,
-                def_id: e.def_id,
-            }
-        })
-    }
-
-    struct V {
+    struct V<'a> {
         next: u32,
+        layouts: &'a crate::lower::VariantLayouts,
         changed: bool,
     }
-    impl IrMutVisitor for V {
+    impl IrMutVisitor for V<'_> {
         fn visit_expr_mut(&mut self, e: &mut IrExpr) {
             walk_expr_mut(self, e);
             let mut next = self.next;
-            if let Some(r) = specialize(e, &mut next).or_else(|| specialize_user(e, &mut next)) {
+            if let Some(r) = specialize(e, &mut next)
+                .or_else(|| specialize_user_variant_match(e, &mut next, self.layouts))
+            {
                 self.next = next;
                 *e = r;
                 self.changed = true;
             }
         }
     }
-    let mut v = V { next: crate::lower::desugar_var_seed(), changed: false };
+    let mut v = V { next: crate::lower::desugar_var_seed(), layouts, changed: false };
     let mut out = body.clone();
     v.visit_expr_mut(&mut out);
     v.changed.then_some(out)

@@ -679,7 +679,7 @@ const BRANCH_PASSES: &[(RowTrigger, BranchPass)] = &[
     (RowTrigger::AnyMatch, |src, _, _| crate::lower::desugar_str_list_literal_pattern_match(src)),
     // #2473: a guarded / nested-literal Option·Result·custom-variant match, specialized
     // into per-constructor branches while it is still a VALUE match (same reason).
-    (RowTrigger::AnyMatch, |src, _, _| crate::lower::desugar_variant_guard_match(src)),
+    (RowTrigger::AnyMatch, |src, _, layouts| crate::lower::desugar_variant_guard_match(src, layouts)),
     (RowTrigger::Always, |src, _, _| desugar_let_bound_heap_branch(src)),
     // `{ …; let r = e!; ok(r) }` ≡ `{ …; e }` (unwrap-rewrap identity) — collapse BEFORE the
     // let-unwrap continuation desugar, so read_message's `ok(parse_and_wrap(body)!)` arms become
