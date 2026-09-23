@@ -58,16 +58,31 @@ impl Emitter<'_> {
                 ps.extend(def.params.iter().map(|t| t.val_type()));
                 let ti = self.work.itype(ps, def.ret.map(SliceTy::val_type));
                 // Encoder argument order is (table, type).
+                // #2010: the callee VALUE is an env block the lifted body
+                // reads as a view. A fresh one (a call result, a lambda
+                // literal) is this site's to release after the call.
+                let callee_owned = self.rc_owned_result(callee);
                 if tail && def.ret.is_some() && def.ret == self.fn_ret && self.tail_transfer_ok(true) {
                     // A tail call REPLACES the frame — the epilogue's param
                     // release never runs, so it runs HERE (args are already
                     // +1'd by rc_arg_guard, so a pass-through param
-                    // survives its own dec).
+                    // survives its own dec). The env must outlive the jump:
+                    // a borrowed callee (an owned local, a param the exit
+                    // releases) takes +1 first and keeps it — a leak of one
+                    // credit on a live env, never a dangle; an owned callee
+                    // simply keeps its credit.
+                    if !callee_owned {
+                        self.f.instructions().local_get(h).call(F_INC);
+                    }
                     let plan = self.exit_plan(crate::exit_plan::Continuation::TailTransfer { replaces_frame: true });
                     self.emit_exit(&plan);
                     self.f.instructions().return_call_indirect(0, ti);
                 } else {
                     self.f.instructions().call_indirect(0, ti);
+                    if callee_owned {
+                        let dec = self.dec_fn_of(got);
+                        self.f.instructions().local_get(h).call(dec);
+                    }
                 }
                 self.release_i32();
                 let _ = ret_hint;

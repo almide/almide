@@ -371,7 +371,7 @@ fn emit_program_pass(
     for e in work.entries.borrow().iter() {
         match e {
             TableEntry::Fn(i) | TableEntry::Adapter { target: i, .. } => queue.push(*i),
-            TableEntry::Lambda(_) => {}
+            TableEntry::Lambda(_) | TableEntry::Direct(_) => {}
         }
     }
     let mut visited: HashSet<usize> = HashSet::new();

@@ -35,6 +35,11 @@ pub(crate) fn rc_certainly_fresh(k: &almide_ir::IrExprKind) -> bool {
             // `none` is NULL_ADDR — no block, so "owned" costs nothing and
             // lets an `if c then some(x) else none` tail count as owned.
             | K::OptionNone
+            // A Fn value (#2010 closures): a capturing lambda allocates its
+            // env at rc 1; a capture-free lambda and a named fn are pool
+            // statics the rc ops no-op on.
+            | K::Lambda { .. }
+            | K::FnRef { .. }
     )
 }
 
@@ -69,6 +74,9 @@ impl Emitter<'_> {
             SliceTy::Named(ti) => self.named_has_layout(ti),
             // Map stage b: the entries array and its entries are credits.
             SliceTy::Map(..) | SliceTy::Set(_) => true,
+            // Closures (#2010 ruling B): the env block is released through
+            // the drop glue its own payload names (`$drop_fn`).
+            SliceTy::Fn(_) => true,
             _ => false,
         }
     }
@@ -187,8 +195,22 @@ impl Emitter<'_> {
                     self.work.helper(crate::work::Helper::DropEntries { stride, slots, side_clear })
                 }
             }
+            SliceTy::Fn(_) => {
+                let ti = self.work.itype(vec![ValType::I32], None);
+                self.work.helper(crate::work::Helper::DropFn { ti })
+            }
             _ => F_DEC_FLAT,
         }
+    }
+
+    /// The release of a C-319 cell holding a `t` (#2010): the cell's
+    /// credit down; at zero its occupant released by `t`'s own drop (a
+    /// flat occupant needs none), then the cell freed. Credits: one for
+    /// the binding frame (released at its exits and at a loop rebind),
+    /// one per capturing env (released by the env's glue).
+    pub(crate) fn dec_cell_fn(&self, t: SliceTy) -> u32 {
+        let elem_dec = self.elem_is_handle(t).then(|| self.dec_fn_of(t));
+        self.work.helper(crate::work::Helper::DropCell { elem_dec })
     }
 
     /// The entry layout of a Map / Set: `(stride, [key slot, value slot])`
@@ -237,7 +259,10 @@ impl Emitter<'_> {
     /// The release fn of an owned LOCAL, by the type `rc_own` recorded
     /// for it (a param is recorded at frame entry).
     pub(crate) fn dec_fn_of_local(&self, idx: u32) -> u32 {
-        self.owned_ty.get(&idx).map_or(F_DEC_FLAT, |&t| self.dec_fn_of(t))
+        let Some(&t) = self.owned_ty.get(&idx) else { return F_DEC_FLAT };
+        // A C-319 cell local owns the CELL, not the occupant (#2010).
+        let is_cell = self.locals.iter().any(|(v, &(i, _))| i == idx && self.cells.contains(v));
+        if is_cell { self.dec_cell_fn(t) } else { self.dec_fn_of(t) }
     }
 
     /// `Some($inc_elems)` when a spine of `elem` slots copied from another
@@ -335,6 +360,9 @@ pub(crate) fn rc_droppable_ty(types: &crate::types_table::TypeTable, t: SliceTy)
             // index side-table entry, and every handle key / value / member
             // through the typed entry walk (`DropEntries`).
             SliceTy::Map(..) | SliceTy::Set(_) => true,
+            // Closures (#2010 ruling B): a Fn value is an env block that
+            // names its own drop glue; pool-static Fn blocks are immortal.
+            SliceTy::Fn(_) => true,
             _ => false,
         }
     }
