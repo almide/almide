@@ -626,3 +626,95 @@ fn main() -> Unit = {
         "9 {\"beta\":20,\"alpha\":10,\"gamma\":30} 10\nzzzzzzzzzzzzzzzzzzz1,zzzzzzzzzzzzzzzzzzz2,zzzzzzzzzzzzzzzzzzz3,zzzzzzzzzzzzzzzzzzz4,zzzzzzzzzzzzzzzzzzz5,zzzzzzzzzzzzzzzzzzz6"
     );
 }
+
+/// Per-call high-water growth of `body` in `program`, after checking both
+/// outputs — the measurement the two #2515/#2516 cell pairs share.
+fn growth_in(program: fn(u32, &str) -> String, name: &str, body: &str, expect_1000: &str, expect_8000: &str) -> u64 {
+    let (h1, o1) = heap_of(&program(1000, body));
+    let (h8, o8) = heap_of(&program(8000, body));
+    assert_eq!(o1, expect_1000, "{name}: output at N=1000");
+    assert_eq!(o8, expect_8000, "{name}: output at N=8000");
+    (h8 - h1) / 7000
+}
+
+/// #2515 — `let (a, b) = <owned tuple>`: the destructure read the fields out
+/// of a subject nobody owned, so the tuple and everything it held stayed at
+/// rc 1 forever (160 B per call with a fresh 64 B buffer inside). The owned
+/// subject is now named first (`let t = mk(i); let (a, b) = t`, arg_temps.rs),
+/// so the Bind route owns it and the frame exit releases it; the binds stay
+/// borrowed views of its fields, exactly as they are under a written-out name.
+fn destructure_program(n: u32, body: &str) -> String {
+    format!(
+        r#"fn mkt(v: Int) -> (Bytes, Int) = (bytes.new(64), v)
+
+fn mks(v: Int) -> (String, List[Int]) = (int.to_string(v % 10) + "s", [v, v])
+
+fn stamp(mut b: Bytes, v: Int) -> Int = {{
+  bytes.set_at(b, 0, v)
+  v
+}}
+
+effect fn estamp(mut b: Bytes, v: Int) -> Int = {{
+  bytes.set_at(b, 0, v)
+  ok(v)
+}}
+
+fn first(v: Int) -> Bytes = {{
+  let (b, k) = mkt(v)
+  b
+}}
+
+effect fn main() -> Unit = {{
+  var total = 0
+  for i in 0..<{n} {{
+{body}
+  }}
+  println("${{total}}")
+}}
+"#
+    )
+}
+
+#[test]
+fn an_owned_tuple_destructure_releases_the_tuple_and_its_contents() {
+    let rows = [
+        ("let (b, k) = mkt(i)", "    let (b, k) = mkt(i)\n    total = total + bytes.len(b) + k - i", "64000", "512000"),
+        (
+            "let (s, xs) = mks(i)",
+            "    let (s, xs) = mks(i)\n    total = total + string.len(s) + list.len(xs)",
+            "4000",
+            "32000",
+        ),
+        ("let (b, _) = mkt(i) in a tail", "    let b = first(i)\n    total = total + bytes.len(b)", "64000", "512000"),
+        (
+            "stamp(fresh buffer) — the mut-param value return",
+            "    var b = bytes.new(64)\n    let r = stamp(b, 7)\n    total = total + r + bytes.get_or(b, 0, 0)",
+            "14000",
+            "112000",
+        ),
+        (
+            "estamp(fresh buffer)! — the mut-param effect value return",
+            "    var b = bytes.new(64)\n    let r = estamp(b, 7)!\n    total = total + r + bytes.get_or(b, 0, 0)",
+            "14000",
+            "112000",
+        ),
+    ]
+    .map(|(name, body, e1, e8)| (name, growth_in(destructure_program, name, body, e1, e8)));
+    let leaked: Vec<_> = rows.iter().filter(|(_, g)| *g != 0).collect();
+    assert!(leaked.is_empty(), "B per call leaked: {leaked:?}");
+}
+
+/// #2515, the BORROWED-subject cell: a destructure of a var the frame
+/// already owns must neither take nor spend a credit on it — it stays at
+/// today's (flat) count; an over-release would read freed memory here.
+#[test]
+fn a_borrowed_tuple_destructure_keeps_its_subject() {
+    let g = growth_in(
+        destructure_program,
+        "let t = mkt(i); let (b, k) = t; read t again",
+        "    let t = mkt(i)\n    let (b, k) = t\n    let (c, _) = t\n    total = total + bytes.len(b) + bytes.len(c) + k - i",
+        "128000",
+        "1024000",
+    );
+    assert_eq!(g, 0, "borrowed destructure: {g} B per call");
+}
