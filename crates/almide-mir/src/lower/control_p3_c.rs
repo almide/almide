@@ -686,7 +686,10 @@ impl LowerCtx {
     /// Register the recursive drop set for a freshly materialized heap eq-operand block, mirroring
     /// the call-binding tracking in `lower_bind` so the cond-frame teardown frees nested ownership.
     pub(crate) fn register_owned_heap_eq_drop(&mut self, obj: ValueId, ty: &Ty) {
-        if crate::lower::is_list_list_str_ty(ty) {
+        if let Some(n) = crate::lower::anon_tuple_list_route(ty) {
+            // `List[<anon heap tuple>]` (#2520) — the synthesized per-slot sweep.
+            self.value_drops.entry(obj).or_default().named_route = Some(n);
+        } else if crate::lower::is_list_list_str_ty(ty) {
             self.value_drops.entry(obj).or_default().list_list_str = true;
         } else if crate::lower::is_list_str_str_ty(ty) {
             self.value_drops.entry(obj).or_default().str_str_elems = true;

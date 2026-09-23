@@ -56,6 +56,8 @@ pub(crate) struct DropShapes<'a> {
     pub flat_variant_names: &'a std::collections::HashSet<String>,
     pub rec_variant_names: &'a std::collections::HashSet<String>,
     pub generic_decls: &'a GenericRecordDecls,
+    /// The `anontup_<hash>` drops generated in this program (#2520).
+    pub anon_tuples: &'a std::collections::HashSet<String>,
 }
 
 /// Which shared drop helpers the emitted sources will need.
@@ -87,11 +89,11 @@ struct ListFreeOut<'a> {
 /// `continue` did; the tail is the flat free).
 fn emit_list_field_free(elem: &Ty, ty: &Ty, i: usize, shapes: DropShapes<'_>, out: ListFreeOut<'_>) {
     use almide_lang::types::constructor::TypeConstructorId;
-    let DropShapes { rec_names, flat_variant_names, rec_variant_names, generic_decls } = shapes;
+    let DropShapes { rec_names, flat_variant_names, rec_variant_names, generic_decls, anon_tuples } = shapes;
     let off = layout::slot_offset(i);
     let a = std::slice::from_ref(elem);
 
-                if let Some((rn, src)) = recursive_aggregate_route(&a[0], rec_names, generic_decls) {
+                if let Some((rn, src)) = recursive_aggregate_route(&a[0], rec_names, generic_decls, anon_tuples) {
                     out.list_drops.insert(rn.clone());
                     let rn_fn = drop_fn_ident(&rn);
                     // The BINDING type must be valid Almide source: a NAMED element renders
@@ -163,7 +165,7 @@ fn record_drop_field_frees(
     list_drops: &mut std::collections::BTreeSet<String>,
     needs: &mut DropNeeds,
 ) -> String {
-    let DropShapes { rec_names, flat_variant_names, rec_variant_names, generic_decls } = shapes;
+    let DropShapes { rec_names, flat_variant_names, rec_variant_names, generic_decls, anon_tuples } = shapes;
     let (need_map_ss, need_list_str, need_matrix, need_list_matrix) = (
         &mut needs.map_ss, &mut needs.list_str, &mut needs.matrix, &mut needs.list_matrix);
     use almide_lang::types::constructor::TypeConstructorId;
@@ -195,7 +197,7 @@ fn record_drop_field_frees(
                     &a[0],
                     ty,
                     i,
-                    DropShapes { rec_names, flat_variant_names, rec_variant_names, generic_decls },
+                    DropShapes { rec_names, flat_variant_names, rec_variant_names, generic_decls, anon_tuples },
                     ListFreeOut {
                         frees: &mut frees,
                         list_drops: &mut *list_drops,
@@ -239,7 +241,7 @@ fn record_drop_field_frees(
                 ));
             }
             t => {
-                if let Some((rn, src)) = recursive_aggregate_route(t, rec_names, generic_decls) {
+                if let Some((rn, src)) = recursive_aggregate_route(t, rec_names, generic_decls, anon_tuples) {
                     let rn_fn = drop_fn_ident(&rn);
                     frees.push_str(&format!(
                         "    let f{i}: {src} = prim.load_handle(h + {off})\n    __drop_{rn_fn}(f{i})\n"

@@ -27,6 +27,9 @@ enum ListElemDrop {
     OptRecord(String),
     Closure,
     StrClosure,
+    /// A heap tuple the fixed pair drops cannot free (3+ slots, or a slot owning
+    /// heap handles — #2520): the synthesized `$__drop_list_anontup_<hash>`.
+    AnonTuple(String),
 }
 
 // The interned field NAME type of a record literal / an aggregate's declared field list —

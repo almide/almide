@@ -513,6 +513,7 @@ include!("variant_drop_field_frees.rs");
 include!("drop_sources_b.rs");
 include!("drop_sources_c.rs");
 include!("drop_sources_d.rs");
+include!("drop_sources_anon_tuple.rs");
 include!("repr_sources.rs");
 include!("repr_sources_b.rs");
 include!("repr_sources_c.rs");

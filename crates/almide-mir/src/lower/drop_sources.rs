@@ -619,7 +619,16 @@ fn recursive_aggregate_route(
     ty: &Ty,
     rec_names: &std::collections::HashSet<String>,
     generic_decls: &GenericRecordDecls,
+    anon_tuples: &std::collections::HashSet<String>,
 ) -> Option<(String, String)> {
+    // A heap TUPLE whose synthesized `__drop_anontup_<hash>` is generated in this program
+    // (#2520) recurses through it; any other tuple keeps the flat free below.
+    if tuple_needs_recursive_drop(ty) {
+        let name = anon_tuple_drop_name(ty);
+        if anon_tuples.contains(&name) {
+            return Some((name, field_source_ty(ty)));
+        }
+    }
     if let Some(pairs) = instantiated_generic_record_fields(ty, generic_decls) {
         if anon_record_needs_recursive_drop(&pairs) {
             return Some((anon_record_drop_name(&pairs), anon_record_source_ty(&pairs)));

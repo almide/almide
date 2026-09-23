@@ -451,7 +451,7 @@
         let drops = format!(
             "{}{}{}{}{}{}{}{}{}{}{}",
             crate::lower::generate_variant_drop_sources(&ir.type_decls),
-            crate::lower::generate_record_drop_sources(&ir.type_decls, &anon_recs, uses_result_opt_str),
+            crate::lower::generate_record_drop_sources(&ir.type_decls, &anon_recs, &crate::lower::collect_anon_tuple_drops(ir), uses_result_opt_str),
             // `Result[(V1, V2), String]` wrapper drops (#1547 shape 1) —
             // pipeline_tail's mirror, usage-driven per pair.
             crate::lower::generate_variant_pair_result_sources(ir, &ir.type_decls),
