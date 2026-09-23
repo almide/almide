@@ -8,9 +8,11 @@ type Step = { name: String, run: (Int) -> Int }
 
 let ZERO = 0
 
-let S = Step { name: int.to_string(7 / ZERO), run: (x) => x + 1 }
+let STEPS = [
+  Step { name: int.to_string(7 / ZERO), run: (x) => x + 1 }
+]
 
 effect fn main() -> Unit = {
   println("before use")
-  println(S.name)
+  println(int.to_string(list.fold(STEPS, 1, (acc, s) => s.run(acc))))
 }
