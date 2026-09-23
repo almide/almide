@@ -66,8 +66,10 @@ impl Emitter<'_> {
                     key_off: def.fields[0].1,
                     val_off: def.fields[1].1,
                 });
-                self.lower_arg(va, Some(SliceTy::Value), ArgMode::Retain)?;
-                self.lower_arg(vb, Some(SliceTy::Value), ArgMode::Retain)?;
+                // Borrowed: `$value_merge` takes its own credit on every
+                // block of either operand its result shares (#2010 item 5).
+                self.lower_arg(va, Some(SliceTy::Value), ArgMode::Borrow)?;
+                self.lower_arg(vb, Some(SliceTy::Value), ArgMode::Borrow)?;
                 self.f.instructions().call(m);
                 Some(Lowered::owned(SliceTy::Value))
             }
@@ -130,7 +132,10 @@ impl Emitter<'_> {
     /// blocks themselves are never copied). Non-object passes through.
     fn lower_value_pick_omit(&mut self, func: &str, v: &IrExpr, keys: &IrExpr) -> Result<SliceTy, EmitError> {
         let keep_found = i32::from(func == "pick");
-        self.lower_arg(v, Some(SliceTy::Value), ArgMode::Retain)?;
+        // #2010 item 5: the source is only READ — every block the result
+        // shares with it (the kept pairs, a passed-through non-object)
+        // takes its own credit below.
+        self.lower_arg(v, Some(SliceTy::Value), ArgMode::Borrow)?;
         let hv = self.hold_i32()?;
         self.f.instructions().local_set(hv);
         match self.lower_arg(keys, None, ArgMode::Borrow)? {
@@ -151,6 +156,7 @@ impl Emitter<'_> {
             .i32_const(VT_OBJECT)
             .i32_ne()
             .if_(BlockType::Result(wasm_encoder::ValType::I32));
+        i.local_get(hv).call(F_INC);
         i.local_get(hv);
         i.else_();
         i.local_get(hv).i32_load(slot_memarg(almide_layout::SUM_FIELD)).local_set(hp);
@@ -165,6 +171,7 @@ impl Emitter<'_> {
         i.i32_load(slot_memarg(key_off));
         i.call(scan).i32_const(0).i32_ne();
         i.i32_const(keep_found).i32_eq().if_(BlockType::Empty);
+        i.local_get(hp).local_get(hv).i32_add().i32_load(slot_memarg(0)).call(F_INC);
         i.local_get(ho).local_get(hw).i32_add();
         i.local_get(hp).local_get(hv).i32_add().i32_load(slot_memarg(0));
         i.i32_store(slot_memarg(0));
@@ -214,7 +221,7 @@ impl Emitter<'_> {
         }
         let transform = self.table.infos[hi].wasm_index;
         self.calls.insert(hi);
-        self.lower_arg(v, Some(SliceTy::Value), ArgMode::Retain)?;
+        self.lower_arg(v, Some(SliceTy::Value), ArgMode::Borrow)?;
         let hv = self.hold_i32()?;
         self.f.instructions().local_set(hv);
         let ti = self.types.tuple(vec![STR, SliceTy::Value]);
@@ -230,6 +237,7 @@ impl Emitter<'_> {
             .i32_const(VT_OBJECT)
             .i32_ne()
             .if_(BlockType::Result(wasm_encoder::ValType::I32));
+        i.local_get(hv).call(F_INC);
         i.local_get(hv);
         i.else_();
         i.local_get(hv).i32_load(slot_memarg(almide_layout::SUM_FIELD)).local_set(hp);
@@ -245,6 +253,8 @@ impl Emitter<'_> {
         i.local_get(hq);
         i.local_get(hv).i32_load(slot_memarg(key_off)).call(transform);
         i.i32_store(slot_memarg(key_off));
+        // the value is SHARED with the source pair: the fresh pair's credit
+        i.local_get(hv).i32_load(slot_memarg(val_off)).call(F_INC);
         i.local_get(hq).local_get(hv).i32_load(slot_memarg(val_off)).i32_store(slot_memarg(val_off));
         i.local_get(ho).local_get(hw).i32_add().local_get(hq).i32_store(slot_memarg(0));
         i.local_get(hw).i32_const(4).i32_add().local_set(hw);
@@ -580,6 +590,10 @@ impl Emitter<'_> {
                 i.local_get(hk).call(F_DEC_FLAT);
                 i.else_();
                 i.local_get(hr).i32_const(0).i32_store(m_tag);
+                // The object keeps the field's Value: the ok payload is a
+                // share of it (#2010 item 5 — the Result's typed drop
+                // releases it).
+                i.local_get(hv).call(F_INC);
                 i.local_get(hr).local_get(hv).i32_store(m_pay);
                 i.end();
                 i.end();

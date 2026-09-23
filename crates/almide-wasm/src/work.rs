@@ -62,7 +62,7 @@ pub(crate) enum Helper {
     NamedOp { op: NamedOp, ti: u32 },
     /// `$jp_set(j, path, k, nv) -> Value` — json.set_path's recursive
     /// core over THIS backend's Value layout.
-    JsonPathSet,
+    JsonPathSet { vdec: u32 },
     /// `$jp_remove(j, path, k) -> Value` — json.remove_path's core.
     JsonPathRemove,
     /// `$scan_deep_<key>(block, stride, off, needle) -> i32` — the scan

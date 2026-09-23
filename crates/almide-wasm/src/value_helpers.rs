@@ -117,6 +117,9 @@ pub(crate) fn emit_value_merge_helper(key_off: u32, val_off: u32) -> Function {
     ins.local_get(a).i32_load(m_tag).i32_const(VT_OBJECT).i32_ne();
     ins.local_get(b).i32_load(m_tag).i32_const(VT_OBJECT).i32_ne();
     ins.i32_or().if_(BlockType::Empty);
+    // #2010 item 5: both operands are BORROWED — every block the result
+    // shares with them takes its own credit (here b itself).
+    ins.local_get(b).call(F_INC);
     ins.local_get(b).return_();
     ins.end();
     ins.local_get(a).i32_load(m_pay).local_set(pa);
@@ -172,11 +175,17 @@ pub(crate) fn emit_value_merge_helper(key_off: u32, val_off: u32) -> Function {
     ins.i32_const(8).call(F_ALLOC).local_tee(w);
     ins.local_get(ka).i32_store(slot_memarg(key_off));
     ins.local_get(w).local_get(fv).i32_store(slot_memarg(val_off));
+    ins.local_get(ka).call(F_INC);
+    ins.local_get(fv).call(F_INC);
     ins.local_get(w).local_set(fd);
     ins.br(2);
     ins.end();
     ins.local_get(j).i32_const(4).i32_add().local_set(j);
     ins.br(0).end().end();
+    // an A pair B did not override is shared: +1 (fv stays 0 on a miss)
+    ins.local_get(fv).i32_eqz().if_(BlockType::Empty);
+    ins.local_get(fd).call(F_INC);
+    ins.end();
     ins.local_get(out).local_get(i).i32_add().local_get(fd).i32_store(slot_memarg(0));
     ins.local_get(i).i32_const(4).i32_add().local_set(i);
     ins.br(0).end().end();
@@ -200,6 +209,7 @@ pub(crate) fn emit_value_merge_helper(key_off: u32, val_off: u32) -> Function {
     ins.local_get(i).i32_const(4).i32_add().local_set(i);
     ins.br(0).end().end();
     ins.local_get(fd).i32_eqz().if_(BlockType::Empty);
+    ins.local_get(pb).local_get(j).i32_add().i32_load(slot_memarg(0)).call(F_INC);
     ins.local_get(out).local_get(w).i32_add();
     ins.local_get(pb).local_get(j).i32_add().i32_load(slot_memarg(0));
     ins.i32_store(slot_memarg(0));

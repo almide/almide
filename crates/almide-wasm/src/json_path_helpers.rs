@@ -139,11 +139,17 @@ fn box_value(i: &mut wasm_encoder::InstructionSink, tag: i32, list_local: u32, t
 }
 
 /// `$jp_set(j, path, k, nv) -> Value` — see the module doc.
-pub(crate) fn emit_json_path_set_helper(helper_base: u32, helpers: &[Helper]) -> Function {
+///
+/// Credits (#2010 item 5): `j` and `nv` are BORROWED; the result owns one
+/// credit on everything it holds — a shared pair / item / passed-through
+/// node takes +1, a fresh pair's shared key takes +1, the scratch empty
+/// object a chain step starts from is released after the step, and the
+/// segment text `rest` is released unless it became a fresh pair's key.
+pub(crate) fn emit_json_path_set_helper(helper_base: u32, helpers: &[Helper], vdec: u32) -> Function {
     let self_idx = helper_base
         + helpers
             .iter()
-            .position(|h| matches!(h, Helper::JsonPathSet))
+            .position(|h| matches!(h, Helper::JsonPathSet { .. }))
             .expect("registered") as u32;
     let (j, path, k, nv) = (0u32, 1u32, 2u32, 3u32);
     let (seg, rest, idx, scr, scr2, pairs, n, cur, out, w, keyl, has, tmp) =
@@ -159,6 +165,7 @@ pub(crate) fn emit_json_path_set_helper(helper_base: u32, helpers: &[Helper]) ->
     i.local_get(k);
     i.local_get(path).i32_load(len_memarg()).i32_const(2).i32_shr_u();
     i.i32_ge_u().if_(BlockType::Empty);
+    i.local_get(nv).call(F_INC);
     i.local_get(nv).return_();
     i.end();
     seg_prologue(&mut i, path, k, seg, rest, idx, scr, scr2, acc);
@@ -210,11 +217,15 @@ pub(crate) fn emit_json_path_set_helper(helper_base: u32, helpers: &[Helper]) ->
     // fresh pair: (key, self(old_val, path, k+1, nv))
     i.local_get(tmp).i32_load(slot_memarg(4)).local_set(scr);
     i.i32_const(8).call(F_ALLOC).local_set(tmp);
+    i.local_get(keyl).call(F_INC);
     i.local_get(tmp).local_get(keyl).i32_store(slot_memarg(0));
     i.local_get(tmp);
     i.local_get(scr).local_get(path).local_get(k).i32_const(1).i32_add().local_get(nv);
     i.call(self_idx);
     i.i32_store(slot_memarg(4));
+    i.else_();
+    // an untouched pair is shared
+    i.local_get(tmp).call(F_INC);
     i.end();
     i.local_get(out).local_get(w).i32_add().local_get(tmp).i32_store(slot_memarg(0));
     i.local_get(w).i32_const(4).i32_add().local_set(w);
@@ -223,6 +234,7 @@ pub(crate) fn emit_json_path_set_helper(helper_base: u32, helpers: &[Helper]) ->
     i.local_get(has).i32_eqz().if_(BlockType::Empty);
     // append (rest, self(empty_obj, path, k+1, nv))
     i.i32_const(8).call(F_ALLOC).local_set(tmp);
+    i.local_get(rest).call(F_INC);
     i.local_get(tmp).local_get(rest).i32_store(slot_memarg(0));
     i.local_get(tmp);
     let _ = i;
@@ -232,13 +244,16 @@ pub(crate) fn emit_json_path_set_helper(helper_base: u32, helpers: &[Helper]) ->
     i.local_get(scr).local_get(path).local_get(k).i32_const(1).i32_add().local_get(nv);
     i.call(self_idx);
     i.i32_store(slot_memarg(4));
+    i.local_get(scr).call(vdec);
     i.local_get(out).local_get(w).i32_add().local_get(tmp).i32_store(slot_memarg(0));
     i.local_get(w).i32_const(4).i32_add().local_set(w);
     i.end();
+    i.local_get(rest).call(F_DEC_FLAT);
     box_value(&mut i, VT_OBJECT, out, tmp);
     i.return_();
     i.else_();
-    // non-object under a field step: object([(rest, chain)])
+    // non-object under a field step: object([(rest, chain)]) — `rest`'s
+    // one credit moves into the pair
     i.i32_const(8).call(F_ALLOC).local_set(tmp);
     i.local_get(tmp).local_get(rest).i32_store(slot_memarg(0));
     i.local_get(tmp);
@@ -249,6 +264,7 @@ pub(crate) fn emit_json_path_set_helper(helper_base: u32, helpers: &[Helper]) ->
     i.local_get(scr).local_get(path).local_get(k).i32_const(1).i32_add().local_get(nv);
     i.call(self_idx);
     i.i32_store(slot_memarg(4));
+    i.local_get(scr).call(vdec);
     i.i32_const(4).call(F_ALLOC).local_set(out);
     i.local_get(out).local_get(tmp).i32_store(slot_memarg(0));
     box_value(&mut i, VT_OBJECT, out, tmp);
@@ -272,22 +288,37 @@ pub(crate) fn emit_json_path_set_helper(helper_base: u32, helpers: &[Helper]) ->
     i.local_get(pairs).i32_const(almide_layout::PAYLOAD as i32).i32_add();
     i.local_get(pairs).i32_load(len_memarg());
     i.memory_copy(0, 0);
+    // every copied item but the replaced one is shared: +1
+    i.i32_const(0).local_set(cur);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(cur).local_get(n).i32_ge_u().br_if(1);
+    i.local_get(cur).local_get(idx).i32_ne().if_(BlockType::Empty);
+    i.local_get(pairs).local_get(cur).i32_const(4).i32_mul().i32_add().i32_load(slot_memarg(0)).call(F_INC);
+    i.end();
+    i.local_get(cur).i32_const(1).i32_add().local_set(cur);
+    i.br(0).end().end();
     i.local_get(out).local_get(idx).i32_const(4).i32_mul().i32_add();
     i.local_get(pairs).local_get(idx).i32_const(4).i32_mul().i32_add().i32_load(slot_memarg(0));
     i.local_get(path).local_get(k).i32_const(1).i32_add().local_get(nv);
     i.call(self_idx);
     i.i32_store(slot_memarg(0));
+    i.local_get(rest).call(F_DEC_FLAT);
     box_value(&mut i, VT_ARRAY, out, tmp);
     i.return_();
     i.end();
     i.end();
-    // miss / non-container: pass through
+    // miss / non-container: pass through (+1: the result's own credit)
+    i.local_get(rest).call(F_DEC_FLAT);
+    i.local_get(j).call(F_INC);
     i.local_get(j);
     i.end();
     f
 }
 
 /// `$jp_remove(j, path, k) -> Value` — see the module doc.
+///
+/// Credits (#2010 item 5): as `$jp_set` — `j` borrowed, every shared block
+/// of the result +1, `rest` released.
 pub(crate) fn emit_json_path_remove_helper(helper_base: u32, helpers: &[Helper]) -> Function {
     let self_idx = helper_base
         + helpers
@@ -343,23 +374,30 @@ pub(crate) fn emit_json_path_remove_helper(helper_base: u32, helpers: &[Helper])
     i.local_get(cur).i32_const(4).i32_add().local_set(cur);
     i.br(2);
     i.end();
-    // (key, self(val, path, k+1))
+    // (key, self(val, path, k+1)) — the key is shared: +1
     i.local_get(tmp).i32_load(slot_memarg(4)).local_set(scr);
     i.i32_const(8).call(F_ALLOC).local_set(tmp);
+    i.local_get(keyl).call(F_INC);
     i.local_get(tmp).local_get(keyl).i32_store(slot_memarg(0));
     i.local_get(tmp);
     i.local_get(scr).local_get(path).local_get(k).i32_const(1).i32_add();
     i.call(self_idx);
     i.i32_store(slot_memarg(4));
+    i.else_();
+    // an untouched pair is shared
+    i.local_get(tmp).call(F_INC);
     i.end();
     i.local_get(out).local_get(w).i32_add().local_get(tmp).i32_store(slot_memarg(0));
     i.local_get(w).i32_const(4).i32_add().local_set(w);
     i.local_get(cur).i32_const(4).i32_add().local_set(cur);
     i.br(0).end().end();
     i.local_get(out).local_get(w).i32_store(len_memarg());
+    i.local_get(rest).call(F_DEC_FLAT);
     box_value(&mut i, VT_OBJECT, out, tmp);
     i.return_();
     i.end();
+    i.local_get(rest).call(F_DEC_FLAT);
+    i.local_get(j).call(F_INC);
     i.local_get(j).return_();
     i.end();
     // index step
@@ -388,6 +426,7 @@ pub(crate) fn emit_json_path_remove_helper(helper_base: u32, helpers: &[Helper])
     i.call(self_idx);
     i.i32_store(slot_memarg(0));
     i.else_();
+    i.local_get(pairs).local_get(cur).i32_const(4).i32_mul().i32_add().i32_load(slot_memarg(0)).call(F_INC);
     i.local_get(out).local_get(w).i32_add();
     i.local_get(pairs).local_get(cur).i32_const(4).i32_mul().i32_add().i32_load(slot_memarg(0));
     i.i32_store(slot_memarg(0));
@@ -396,10 +435,13 @@ pub(crate) fn emit_json_path_remove_helper(helper_base: u32, helpers: &[Helper])
     i.local_get(cur).i32_const(1).i32_add().local_set(cur);
     i.br(0).end().end();
     i.local_get(out).local_get(w).i32_store(len_memarg());
+    i.local_get(rest).call(F_DEC_FLAT);
     box_value(&mut i, VT_ARRAY, out, tmp);
     i.return_();
     i.end();
     i.end();
+    i.local_get(rest).call(F_DEC_FLAT);
+    i.local_get(j).call(F_INC);
     i.local_get(j);
     i.end();
     f
