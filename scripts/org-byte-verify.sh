@@ -33,12 +33,12 @@ declare -a MISMATCHES=()
 declare -a PREEXISTING=()
 
 # Strip run-to-run noise before comparing: the temp module path embeds a fresh hash
-# every run (`.../almide-run-<hash>.wasm`), so an error message containing it would
+# every run (`.../almide-run-<hash>-<pid>.wasm`), so an error message containing it would
 # spuriously differ between two otherwise identical failures.
 # Also neutralize WALL-CLOCK tokens (Nms, N.Nµs/call, N.N GFLOPS): two runs of the SAME
 # binary differ there, so they carry zero cross-target signal. The deterministic remainder
 # (acc= sums, shapes, counts) is what must byte-match.
-norm() { sed -E -e 's#[^ `]*almide-run-[0-9a-f]+\.wasm#<tmp>.wasm#g' \
+norm() { sed -E -e 's#[^ `]*almide-run-[0-9a-f]+(-[0-9]+)?\.wasm#<tmp>.wasm#g' \
                 -e 's#[0-9]+ms#<ms>#g' \
                 -e 's#[0-9.]+(µs|us)/call#<us>/call#g' \
                 -e 's#[0-9.]+ GFLOPS#<gflops> GFLOPS#g'; }
