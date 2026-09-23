@@ -146,3 +146,66 @@ is not the algorithm: it is reachability. `${x}` on a float pulls the whole shor
 round-trip path; a program that only prints integer-valued floats, or a fixed precision,
 could reach a far smaller formatter — the #1712/#1962 split-by-need discipline applied to
 a stdlib family, which is issue #1985's option 3 and is left open.
+
+## Addendum (#2099, 2026-09-24): to_fixed on exact scaling, one printer for both forms
+
+Re-measured on develop at `c653598ee` (after #2368 removed the duplicate string
+constants): `println("${1.25}")` was 5,405 B against 1,970 B for the Int twin, so the
+shortest printer's share was 3,435 B. `println(float.to_fixed(1.25, 2))` was 6,650 B:
+the retained Dragon4 fixed path cost 4,680 B, more than the shortest printer, and it is
+the one `spectralnorm` (the size ladder's T2 rung) actually calls. Changed, output
+unchanged:
+
+- `__sf_scale(x, q, k)` computes floor(x · 2^q · 10^-k) EXACTLY on the bignum — x
+  shifted or multiplied by 10^-k, then divided by 10^k in 10^9 chunks or shifted
+  down — and reads the sticky bit off the remainders. It is ~250 B.
+- `float.to_fixed(x, nd)` calls it once, for M = floor(2 · v · 10^nd): N = M >> 1, the
+  dropped bit is the half, round up when the sticky bit or N's last bit is set (half to
+  even), then N's digits by repeated division by 10^9. The Dragon4 fixed-mode digit
+  loop — one bignum compare-subtract per digit, five bignums, the `math.log10`
+  estimate and its fixups — is gone.
+- `float.to_string_compound` (the `${x}` form) is the same printer with a `dot0` flag,
+  not a separate module that re-rendered `to_string`'s result to drop the `.0`; a zero
+  renders through the same writer instead of four string literals, so the printer ships
+  no literal beyond `NaN` / `inf` / `-inf` (a literal shifts the static pool, and with it
+  every alloc-ledger row of every program that prints a float).
+- `__sf_wd` writes digits, zeros and the point straight into the result string in one
+  backwards pass — no digit buffer, no copy, no three-way renderer. A spent digit
+  source writes its zeros without a divide (a huge or tiny value is mostly zeros).
+- `float.to_string` keeps the Schubfach core with the run-time g(k) above. Computing
+  its three numbers with `__sf_scale` too (one exact bignum pipeline each) was tried:
+  it saves ~400 B more but makes `float.to_string` 3× slower on wasm (0.95 → 2.9 µs
+  per value), and no mainstream printer trades a 3× shortest-print slowdown for that.
+  The shortest printer's size is the compact-table follow-up's job.
+
+Measured (`almide build --target wasm`, develop `547b0fdaf` → this change):
+
+| program | before | after | Δ |
+|---|---:|---:|---:|
+| `println(float.to_string(1.25))` | 4,886 | 4,864 | −22 |
+| `println("${1.25}")` | 5,405 | 5,068 | −337 (−6.2 %) |
+| `println(float.to_fixed(1.25, 2))` | 6,650 | 4,529 | −2,121 (−31.9 %) |
+| `spectralnorm` (size ladder T2) | 12,121 | 10,000 | −2,121 |
+| `spec/wasm_cross/edge_float_formatting.almd` (both printers) | 16,700 | 13,915 | −2,785 |
+| `spec/wasm_cross/float_to_fixed.almd` | 7,200 | 5,079 | −2,121 |
+| `spec/wasm_cross/float_shortest_roundtrip.almd` | 5,096 | 5,074 | −22 |
+
+`size-baseline.txt`: 146 rows moved, all down, −31,748 B in total (the shipped-form
+ledger −31,916 B); the size ladder −12,904 B over its float-printing rungs.
+
+Run time on the wasm leg, `almide bench --target wasm`, 200,000 conversions of the
+seeded xorshift64 stream (mostly huge and tiny magnitudes, the expensive end), medians
+of 9 runs interleaved with develop on a loaded machine: `float.to_string` 163–165 ms on
+develop against 159–162 ms here (unchanged within noise); `float.to_fixed(x, 3)`
+5,859 ms → 113 ms (29 → 0.56 µs: the per-digit bignum loop is gone). No perf row prints
+more than a handful of floats.
+
+Exactness evidence for the change: `tests/float_to_string_cross_target_test.rs` prints
+all three forms of every biased exponent × 7 significands × both signs (28,672 values),
+the history's decimal specials, `to_fixed` at 1074 / 1100 / 1200 / 4096 digits, and
+100,000 xorshift64 bit patterns (1,000,000 locally) on the wasm leg and compares
+byte-for-byte with Rust `format!`; it fails on a deliberately broken guard (`s >= 100`,
+the Java rule: first mismatch at line 100,521) and passes on this printer. The exponent
+sweep is what found the two bugs the exact-scaling rewrite had (a whole value's trailing
+zeros landing on the left; the 9-digit chunks of a fixed value written in the wrong
+order), not the random stream.
