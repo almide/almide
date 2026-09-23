@@ -1,6 +1,13 @@
 # ADR-0002: Fallibility and effect are orthogonal axes; `-> T!` marks pure-fallible
 
-- **Status**: Accepted(設計批准。実装は未着手 — Phase 計画は本文 §D5)
+- **Status**: Accepted(設計批准。Phase 1 出荷済 #1103 / #1108、Phase 2 未起票、Phase 3 未定 — Phase 計画は本文 §D5)。
+  **Falsifier 2 計測済 2026-09-23**(#2556、develop 8e0c2dcbb、playground 958ddea):
+  effect fn 987 本 = fallible 574 / total 307 / unclassifiable 106(stdlib 174 = 57/11/106、
+  spec 792 = 502/290/0、playground 21 = 15/6/0)。unclassifiable 106 のうち署名 `-> Result` で
+  可謬が宣言済 82、self-host 本体から総と分類可 20、**真に静的分類不能(`-> T` intrinsic で
+  Almide 本体なし)は 4**: `env.set` / `env.sleep_ms` / `http.serve` / `process.exit`。
+  再現: `ALMIDE_BIN=target/release/almide python3 tools/effect_fn_fallibility.py stdlib=stdlib spec=spec playground=<playground>/web/examples`
+  (§Falsifier 2 の追記を参照。Phase 2 起票か縮退かの ○× は未裁定)
 - **Date**: 2026-08-05
 - **決定範囲**: 関数宣言の失敗チャネル表記(`-> T!`)、`effect fn` の意味論の再分解、
   `!` 演算子の意味の固定、失敗を「値」で表すか「⊥(統制停止)」で表すかの規準
@@ -200,6 +207,24 @@ D4 の check 時エラー化はその是正。変換フック(From 相当)の導
    `!` 表記を捨てるか Result 表記を fn 宣言位置から退役させる ADR で supersede)。
 2. **Phase 2 の警告窓で、可謬/総を静的に分類できない effect fn が大量に見つかった場合**
    (Phase 3 の意味反転は成立しない — effect fn の lift 強制を維持する形へ縮退)。
+   **計測(2026-09-23、#2556、Phase 2 起票前に一度)** — `tools/effect_fn_fallibility.py`
+   (`almide --emit-ast` 駆動。分類規則は #2556 の表: `!` / `err(..)` / 明示 `-> T!`・`-> Result[..]`
+   = fallible、intrinsic 本体 = unclassifiable、残り = total。codegen の never-err 判定
+   `compute_can_err`(crates/almide-mir/src/lower/mod_p2.rs)の鏡像も並記):
+
+   | corpus | effect fn | fallible | total | unclassifiable |
+   |---|---|---|---|---|
+   | stdlib | 174 | 57 | 11 | 106 |
+   | spec | 792 | 502 | 290 | 0 |
+   | playground(web/examples、958ddea) | 21 | 15 | 6 | 0 |
+
+   unclassifiable 106 = intrinsic(`= _`)の内訳: 署名 `-> Result[..]` で可謬宣言済 82、
+   self-host 本体(self_host_registry.rs)から総と分類可 20、**runtime-opaque 4**
+   (`env.set`、`env.sleep_ms`、`http.serve`、`process.exit` — いずれも `-> Unit`/`-> Never`)。
+   `!` を綴ってはいるが呼び先が never-err で codegen 上は総(Phase 3 で `!` が消える形)は
+   spec 37 / playground 7(fern の `walk(..)!` を含む)/ stdlib 0。
+   spec の未計測 1 本(`spec/gauntlet/cells/s3_module_qualified_protocol`、parse 拒否 cell)。
+   **Phase 2 起票か縮退かの ○× は本計測時点で未裁定**(数値は上記、判断は #2556 の Exit 節)。
 3. **#1055 の設計が「fallibility は関数属性ではなく型構成子であるべき」という結論に
    達した場合**(D2 の属性モデルと矛盾するため、統合 ADR で supersede)。
 
