@@ -12,13 +12,26 @@ use crate::*;
 /// free lists (RC-2) are consulted first — a freed block whose class
 /// capacity covers the request is reused; otherwise bump, growing
 /// memory when needed.
-pub(crate) fn emit_alloc(oom_msg: u32) -> Function {
+///
+/// `counters` (#2407): the first of the four `alloc_count` globals when
+/// the counter switch is armed — every call bumps `__alloc_count` and adds
+/// `len` to `__alloc_bytes`, a free-list pop bumps `__alloc_reused`. `None`
+/// (the shipped module) emits none of it.
+pub(crate) fn emit_alloc(oom_msg: u32, counters: Option<u32>) -> Function {
     // params: 0=len i32; locals: 1=base i32, 2=next i32 (class scratch
     // before the bump path claims it), 3=want i32, 4=head i32
     let (len, base, next, want, head) = (0u32, 1u32, 2u32, 3u32, 4u32);
     let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
     let mut f = Function::new([(4, ValType::I32)]);
     let mut i = f.instructions();
+    if let Some(c) = counters {
+        bump_counter(&mut i, c + crate::alloc_count::COUNT);
+        i.global_get(c + crate::alloc_count::BYTES)
+            .local_get(len)
+            .i64_extend_i32_u()
+            .i64_add()
+            .global_set(c + crate::alloc_count::BYTES);
+    }
     // want = max(16, (PAYLOAD + len + 3) & !3); class = ceil_log2(want) - 4
     i.local_get(len)
         .i32_const(almide_layout::PAYLOAD as i32 + 3)
@@ -39,6 +52,9 @@ pub(crate) fn emit_alloc(oom_msg: u32) -> Function {
         .local_set(next); // next = the class slot ADDRESS now
     i.local_get(next).i32_load(word(0)).local_tee(head).if_(BlockType::Empty);
     // pop: slot = head.payload[0]; headers rc=1/len/cap=len; done.
+    if let Some(c) = counters {
+        bump_counter(&mut i, c + crate::alloc_count::REUSED);
+    }
     i.local_get(next);
     i.local_get(head).i32_load(word(almide_layout::PAYLOAD)).i32_store(word(0));
     i.local_get(head).i32_const(1).i32_store(word(almide_layout::RC.offset));
@@ -156,12 +172,18 @@ pub(crate) fn emit_alloc(oom_msg: u32) -> Function {
 /// 2^20) are abandoned to the bump graveyard, exactly as before RC-2.
 /// The caller must OWN the block outright — there is no rc check yet;
 /// the only callers are the sort machinery's private scratch buffers.
-pub(crate) fn emit_free() -> Function {
+///
+/// `counters` (#2407): when armed, every call bumps `__free_count` on
+/// entry — filed or abandoned alike, so the number is "blocks released".
+pub(crate) fn emit_free(counters: Option<u32>) -> Function {
     // params: 0=block i32; locals: 1=total i32, 2=class i32
     let (block, total, class) = (0u32, 1u32, 2u32);
     let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
     let mut f = Function::new([(2, ValType::I32)]);
     let mut i = f.instructions();
+    if let Some(c) = counters {
+        bump_counter(&mut i, c + crate::alloc_count::FREES);
+    }
     // total = (len + PAYLOAD + 3) & !3; too small to hold the next ptr → abandon
     i.local_get(block)
         .i32_load(word(almide_layout::CAP.offset))
@@ -192,6 +214,11 @@ pub(crate) fn emit_free() -> Function {
     i.local_get(class).local_get(block).i32_store(word(0));
     i.end();
     f
+}
+
+/// `global += 1` on an i64 counter global (#2407, armed builds only).
+fn bump_counter(i: &mut wasm_encoder::InstructionSink<'_>, global: u32) {
+    i.global_get(global).i64_const(1).i64_add().global_set(global);
 }
 
 /// `$inc(block)`: rc += 1 for a HEAP block; addresses below the heap
@@ -654,11 +681,11 @@ mod tests {
         let mut h = DefaultHasher::new();
         body_bytes(&super::emit_inc()).hash(&mut h);
         body_bytes(&super::emit_dec_flat()).hash(&mut h);
-        body_bytes(&super::emit_free()).hash(&mut h);
+        body_bytes(&super::emit_free(None)).hash(&mut h);
         // $alloc with a FIXED probe immediate for its one per-program
         // parameter (the OOM message address): the tree shape is pinned;
         // the immediate's value is not part of the transcription.
-        body_bytes(&super::emit_alloc(0)).hash(&mut h);
+        body_bytes(&super::emit_alloc(0, None)).hash(&mut h);
         let got = h.finish();
         // Recorded at the StructuralRuntime.v landing. A mismatch means
         // the emitted trees moved: update proofs/StructuralRuntime.v to
@@ -684,10 +711,10 @@ mod byte_dump {
         for (name, f) in [
             ("inc", super::emit_inc()),
             ("dec_flat", super::emit_dec_flat()),
-            ("free", super::emit_free()),
+            ("free", super::emit_free(None)),
             // 0 stands in for the per-program OOM message address; the
             // .v side carries that immediate as a parameter.
-            ("alloc", super::emit_alloc(0)),
+            ("alloc", super::emit_alloc(0, None)),
         ] {
             let mut cs = CodeSection::new();
             cs.function(&f);

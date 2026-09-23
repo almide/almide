@@ -823,6 +823,17 @@ fn cmd_run_wasm(file: &str, program_args: &[String], verified: bool, time_report
                 if time_report {
                     eprintln!("[almide] wall {} ms (embedded wasmtime)", started.elapsed().as_millis());
                 }
+                // ALMIDE_WASM_ALLOC_COUNT (#2407): the counters the armed
+                // module carried, in native's `__ALMD_ALLOC` line form.
+                if almide_base::env::flag("ALMIDE_WASM_ALLOC_COUNT") {
+                    match r.alloc_count {
+                        Some(c) => eprintln!(
+                            "__ALMD_WASM_ALLOC {c} heap_end={}",
+                            r.heap_end.map_or_else(|| "?".to_string(), |h| h.to_string())
+                        ),
+                        None => eprintln!("__ALMD_WASM_ALLOC absent (the module carries no counters)"),
+                    }
+                }
                 r.exit.clamp(0, 255)
             }
             Err(e) => {
@@ -832,6 +843,12 @@ fn cmd_run_wasm(file: &str, program_args: &[String], verified: bool, time_report
         };
     }
 
+    // ALMIDE_WASM_ALLOC_COUNT (#2407) is a structural-leg instrument: the
+    // incumbent module below carries no counters, and the wasmtime CLI
+    // reads no globals — say so rather than print nothing.
+    if almide_base::env::flag("ALMIDE_WASM_ALLOC_COUNT") {
+        eprintln!("__ALMD_WASM_ALLOC absent (this program took the incumbent wasm leg, which carries no counters)");
+    }
     // Stage the module under a per-content temp name so concurrent `almide run`
     // invocations never race on one path (the build scratch dir is shared).
     let wasm_name = format!("almide-run-{:016x}.wasm", hash64(&bytes));

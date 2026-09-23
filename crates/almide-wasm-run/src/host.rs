@@ -26,6 +26,30 @@ pub struct RunResult {
     /// allocation-ledger observable (#1586). None if the module predates
     /// the export.
     pub heap_end: Option<u64>,
+    /// The allocation counters (#2407), read from the `__alloc_count` /
+    /// `__alloc_reused` / `__alloc_bytes` / `__free_count` globals a module
+    /// emitted under the `ALMIDE_WASM_ALLOC_COUNT` switch carries. None for
+    /// a shipped (unarmed) module — the counters are absent, not zero.
+    pub alloc_count: Option<AllocCount>,
+}
+
+/// What the structural leg's allocator did during one run (#2407): the
+/// churn the `__heap` watermark cannot show. `allocs` is every `$alloc`
+/// call, `reused` the ones a size-class free-list pop served (the rest
+/// bumped the heap), `bytes` the payload bytes requested in total, and
+/// `frees` every `$free` call.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AllocCount {
+    pub allocs: u64,
+    pub reused: u64,
+    pub bytes: u64,
+    pub frees: u64,
+}
+
+impl std::fmt::Display for AllocCount {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "allocs={} reused={} bytes={} frees={}", self.allocs, self.reused, self.bytes, self.frees)
+    }
 }
 
 struct Host {
@@ -950,11 +974,25 @@ fn run_wasm_src(
         (Some(h), Some(hi)) => Some(h.max(hi)),
         (h, _) => h,
     };
+    // #2407: the counters ride four i64 globals an armed build exports;
+    // all four or none — a module missing any is a shipped one.
+    let alloc_count = match (
+        read_global(&mut store, "__alloc_count"),
+        read_global(&mut store, "__alloc_reused"),
+        read_global(&mut store, "__alloc_bytes"),
+        read_global(&mut store, "__free_count"),
+    ) {
+        (Some(allocs), Some(reused), Some(bytes), Some(frees)) => {
+            Some(AllocCount { allocs, reused, bytes, frees })
+        }
+        _ => None,
+    };
     Ok(RunResult {
         stdout: out.lock().expect("test harness invariant").clone(),
         stderr: err.lock().expect("test harness invariant").clone(),
         exit: exit_code,
         heap_end,
+        alloc_count,
     })
 }
 

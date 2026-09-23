@@ -105,6 +105,7 @@ mod param_borrow;
 mod bytes_rw;
 mod bytes_recv;
 mod bytes_split;
+pub mod alloc_count;
 pub mod heap_cap;
 pub mod host_exports;
 pub mod witness;
