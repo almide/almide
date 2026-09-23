@@ -228,3 +228,67 @@ fn extract_typevar_binding_fallback(param_ty: &Ty, arg_ty: &Ty, var_name: &str) 
     }
     Ty::Unknown
 }
+
+/// #1589: bind the letters an APPLIED protocol bound names but no parameter
+/// carries (`[V, R: Repository[Int, V]](r: R) -> V?`). `R`'s binding is a
+/// concrete type, and that type declares exactly one conformance to the
+/// protocol (`type UserRepo: Repository[Int, User]`), so `V` is a FUNCTION of
+/// `R` — read off the conformance positionally, never searched for. The
+/// instance's key (suffix) is unchanged: it is already determined by `R`.
+pub(super) fn bind_from_conformances(
+    func: &IrFunction,
+    bindings: &HashMap<String, Ty>,
+    conformances: &HashMap<(almide_base::intern::Sym, almide_base::intern::Sym), Vec<Ty>>,
+) -> HashMap<String, Ty> {
+    let mut out = bindings.clone();
+    let Some(generics) = func.generics.as_ref() else { return out };
+    let letters: std::collections::HashSet<&str> = generics.iter().map(|g| g.name.as_str()).collect();
+    // A letter can be pinned by a conformance that is itself reached through
+    // a letter the previous pass pinned; iterate to the fixed point.
+    loop {
+        let before = out.len();
+        for g in generics {
+            let Some(Ty::Named(type_name, _)) = out.get(g.name.as_str()).cloned() else { continue };
+            for (i, proto) in g.bounds.iter().flatten().enumerate() {
+                let Some(r) = almide_lang::ast::protocol_ref_at(&g.bound_refs, i) else { continue };
+                if r.args.is_empty() { continue; }
+                let bare = almide_base::intern::sym(type_name.as_str().rsplit('.').next().unwrap_or(type_name.as_str()));
+                let Some(have) = conformances.get(&(type_name, *proto)).or_else(|| conformances.get(&(bare, *proto))) else { continue };
+                for (te, ty) in r.args.iter().zip(have.iter()) {
+                    bind_letters_in_texpr(te, ty, &letters, &mut out);
+                }
+            }
+        }
+        if out.len() == before { return out; }
+    }
+}
+
+fn bind_letters_in_texpr(
+    te: &almide_lang::ast::TypeExpr,
+    ty: &Ty,
+    letters: &std::collections::HashSet<&str>,
+    out: &mut HashMap<String, Ty>,
+) {
+    use almide_lang::ast::TypeExpr;
+    match te {
+        TypeExpr::Simple { name } if letters.contains(name.as_str()) => {
+            out.entry(name.to_string()).or_insert_with(|| ty.clone());
+        }
+        TypeExpr::Generic { args, .. } => {
+            let targs = ty.type_args();
+            if targs.len() == args.len() {
+                for (a, t) in args.iter().zip(targs.iter()) {
+                    bind_letters_in_texpr(a, t, letters, out);
+                }
+            }
+        }
+        TypeExpr::Tuple { elements } => {
+            if let Ty::Tuple(ts) = ty && ts.len() == elements.len() {
+                for (a, t) in elements.iter().zip(ts.iter()) {
+                    bind_letters_in_texpr(a, t, letters, out);
+                }
+            }
+        }
+        _ => {}
+    }
+}

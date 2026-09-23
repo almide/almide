@@ -16,7 +16,7 @@ mod tests {
             effect_fn_names: Default::default(),
             effect_map: Default::default(),
             codegen_annotations: Default::default(),
-            used_stdlib_modules: Default::default(),
+            used_stdlib_modules: Default::default(), protocol_conformance_args: Default::default(),
         }
     }
 
@@ -236,7 +236,7 @@ mod tests {
             effect_fn_names: Default::default(),
             effect_map: Default::default(),
             codegen_annotations: Default::default(),
-            used_stdlib_modules: Default::default(),
+            used_stdlib_modules: Default::default(), protocol_conformance_args: Default::default(),
         };
         let errors = verify_program(&prog);
         assert_eq!(errors.len(), 1);
@@ -291,7 +291,7 @@ mod tests {
             effect_fn_names: Default::default(),
             effect_map: Default::default(),
             codegen_annotations: Default::default(),
-            used_stdlib_modules: Default::default(),
+            used_stdlib_modules: Default::default(), protocol_conformance_args: Default::default(),
         };
         let errors = verify_program(&prog);
         assert_eq!(errors.len(), 1);
@@ -328,7 +328,7 @@ mod tests {
             effect_fn_names: Default::default(),
             effect_map: Default::default(),
             codegen_annotations: Default::default(),
-            used_stdlib_modules: Default::default(),
+            used_stdlib_modules: Default::default(), protocol_conformance_args: Default::default(),
         };
         let errors = verify_program(&prog);
         assert_eq!(errors.len(), 1);
@@ -483,7 +483,7 @@ mod tests {
             effect_map: Default::default(),
             codegen_annotations: Default::default(),
             def_table: Default::default(),
-            used_stdlib_modules: Default::default(),
+            used_stdlib_modules: Default::default(), protocol_conformance_args: Default::default(),
         };
         let errors = verify_program(&prog);
         assert_eq!(errors.len(), 1);
@@ -522,7 +522,7 @@ mod tests {
             effect_map: Default::default(),
             codegen_annotations: Default::default(),
             def_table: Default::default(),
-            used_stdlib_modules: Default::default(),
+            used_stdlib_modules: Default::default(), protocol_conformance_args: Default::default(),
         };
         assert!(verify_program(&prog).is_empty());
     }

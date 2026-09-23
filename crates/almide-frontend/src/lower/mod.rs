@@ -559,12 +559,18 @@ fn build_ir_program(mut ctx: LowerCtx, functions: Vec<IrFunction>, top_lets: Vec
         }
     }
     functions.append(&mut ctx.synthesized_fns);
-    let mut program = IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table, def_table: ctx.def_table, modules: Vec::new(), type_registry: crate::types::TypeConstructorRegistry::new(), effect_fn_names, effect_map: Default::default(), codegen_annotations: Default::default(), used_stdlib_modules: Default::default() };
+    let mut program = IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table, def_table: ctx.def_table, modules: Vec::new(), type_registry: crate::types::TypeConstructorRegistry::new(), effect_fn_names, effect_map: Default::default(), codegen_annotations: Default::default(), used_stdlib_modules: Default::default(), protocol_conformance_args: Default::default() };
 
     // Register user-defined types in the type constructor registry (HKT foundation)
     for td in &program.type_decls {
         let arity = td.generics.as_ref().map_or(0, |g| g.len());
         program.type_registry.register_user_type(&*td.name, arity);
+    }
+    // Generic-protocol conformances (#1589), for monomorphization.
+    for (ty, protos) in &env.type_protocol_args {
+        for (proto, args) in protos {
+            program.protocol_conformance_args.insert((*ty, *proto), args.clone());
+        }
     }
 
     program

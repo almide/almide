@@ -433,4 +433,12 @@ pub struct IrProgram {
     /// Used by codegen to include only needed runtime modules.
     #[serde(skip)]
     pub used_stdlib_modules: std::collections::HashSet<String>,
+    /// Type arguments of every explicit conformance to a GENERIC protocol
+    /// (#1589): `(type name, protocol) → args`, under the bare and the
+    /// qualified type name alike. Monomorphization reads it to bind a letter
+    /// only an applied bound names (`[V, R: Repository[Int, V]]` with `R =
+    /// UserRepo` and `type UserRepo: Repository[Int, User]` gives `V =
+    /// User`) — the one conformance the type declares, never a search.
+    #[serde(skip)]
+    pub protocol_conformance_args: std::collections::HashMap<(Sym, Sym), Vec<Ty>>,
 }
