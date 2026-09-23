@@ -22,6 +22,17 @@ thread_local! {
     pub(crate) static AUTO_WRAP_ABI_FNS: std::cell::RefCell<std::collections::HashSet<String>> =
         std::cell::RefCell::new(std::collections::HashSet::new());
 
+    /// Per user fn (by its lowered name), which parameter positions the callee
+    /// WRITES BACK into (#2503 / C-033): `p.is_mut` on a PURE fn. The C-132
+    /// move-mode rewrite keeps `is_mut` on the param and clears only
+    /// `mutated_params`, so this is read after the rewrite. Effect callees are
+    /// excluded exactly as the structural leg excludes them (`param_mut` in
+    /// crates/almide-wasm/src/emit.rs): the argument's own credit makes
+    /// rc >= 2 there, so a call-site copy would fire on every call. Populated by
+    /// `populate_abi_registries`, read by `cow_mut_param_call_args`.
+    pub(crate) static MUT_PARAM_FNS: std::cell::RefCell<std::collections::HashMap<String, Vec<bool>>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+
     /// Effect fns whose DECLARED return is `Option[..]` — in the v1 model they are NOT
     /// lifted (the Option IS the real return; there is no err channel), so a caller's
     /// frontend auto-`?` (`Try`) over such a call is a NO-OP and must be STRIPPED: left
