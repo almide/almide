@@ -343,6 +343,7 @@
 66320	spec/wasm_cross/list_float_equality_family.almd
 67488	spec/wasm_cross/list_float_total_order.almd
 214176	spec/wasm_cross/list_fold_fused_callback_result_ownership.almd
+67616	spec/wasm_cross/list_heap_tuple_return.almd
 68192	spec/wasm_cross/list_heapelem_rc.almd
 67648	spec/wasm_cross/list_index_element_append.almd
 65904	spec/wasm_cross/list_index_element_append_oob.almd
@@ -499,6 +500,7 @@
 65856	spec/wasm_cross/optional_chain_scalar.almd
 66032	spec/wasm_cross/or_pattern.almd
 65904	spec/wasm_cross/or_pattern_guarded_nullary.almd
+66720	spec/wasm_cross/or_pattern_heap_subject_matrix.almd
 68512	spec/wasm_cross/ord_record_variant.almd
 69440	spec/wasm_cross/ord_recursive.almd
 66480	spec/wasm_cross/path_extension_hidden.almd

@@ -136,7 +136,14 @@ fail=0; n=0
 # 2026-09-03 as a temporary receiver outside the incumbent's value subset — now
 # drives its writers through a `var`, so the incumbent renders it. The matrix,
 # bytes-domain and record-field fixtures this batch adds all emit on both legs.
-MAX_WALLED=33
+# 30 as of 2026-09-23 (#2473/#2520, measured with the native wasmgen harness:
+# 739 emitted + 30 walled of 769): DOWN by three. The incumbent now specializes
+# guarded / literal-payload Option, Result and custom-variant matches and
+# String-literal list patterns per constructor, so ref_grain_or_pattern_alias_match,
+# ref_rust_or_pattern_heap_subject and or_pattern_guarded_nullary render and
+# byte-match native; the two fixtures the change adds
+# (or_pattern_heap_subject_matrix, list_heap_tuple_return) emit on both legs.
+MAX_WALLED=30
 walled=0
 for fix in "$FIXTURE_DIR"/*.almd; do
   [ -e "$fix" ] || continue
