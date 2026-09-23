@@ -125,7 +125,6 @@ spec/gauntlet/cells/x09_tuple_list_of_record.almd :: f
 spec/gauntlet/cells/x13_bang_nested_in_field.almd :: f
 spec/wasm_cross/bytes_equality_call_operands.almd :: main
 spec/wasm_cross/codec_triple_list.almd :: T.__dec_list_list_list_int_go
-spec/wasm_cross/nested_payload_guard.almd :: pick_opt
 spec/wasm_cross/nested_three_level_literal.almd :: main
 # (2026-08-30, C-326/#1696) The gzip inflate joined the corpus lowering on the
 # STRUCTURAL leg (the phase-4 hoist); the incumbent's brick walls its loop-level
@@ -222,13 +221,3 @@ spec/gauntlet/pkg/mut_port/src/main.almd :: main
 spec/wasm_cross/map_set_index_threshold.almd :: branch_lift_synth_3
 spec/wasm_cross/map_set_index_threshold.almd :: branch_lift_synth_4
 spec/wasm_cross/map_set_index_threshold.almd :: branch_lift_synth_7
-# 2026-09-23 (#2553, the record-pattern field-literal fixture): a record pattern
-# with a refutable field (`Circle { r: 0, .. }`, `P { x: 0, y }`) is outside the
-# incumbent's variant-arm specializer, which admits a refutable payload only on a
-# SINGLE-field positional constructor (multi-field `Circle(0, _)` walls there too).
-# The incumbent refuses honestly; the structural leg (the default) lowers all four
-# byte-identical to native, and the incumbent is retiring under #1696.
-spec/wasm_cross/record_variant_field_literal.almd :: flag_name
-spec/wasm_cross/record_variant_field_literal.almd :: item_name
-spec/wasm_cross/record_variant_field_literal.almd :: point_name
-spec/wasm_cross/record_variant_field_literal.almd :: shape_name
