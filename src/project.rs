@@ -192,9 +192,131 @@ fn project_root_from_toml_path(path: &Path) -> PathBuf {
     }
 }
 
+/// The bare or quoted key a `key = value` line assigns, or `None` for any
+/// other line (blank, comment, header, or the continuation of a multi-line
+/// value). Only keys spelled the way TOML spells a key are answered, so a
+/// continuation line like `"a=b",` inside a multi-line array is not mistaken
+/// for an assignment.
+fn assigned_key(line: &str) -> Option<&str> {
+    let line = line.trim();
+    if line.is_empty() || line.starts_with('#') || line.starts_with('[') {
+        return None;
+    }
+    let (key, _) = line.split_once('=')?;
+    let key = key.trim();
+    let bare = |k: &str| {
+        !k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    };
+    if bare(key) {
+        return Some(key);
+    }
+    let quoted = key
+        .strip_prefix('"')
+        .and_then(|k| k.strip_suffix('"'))
+        .or_else(|| key.strip_prefix('\'').and_then(|k| k.strip_suffix('\'')))?;
+    (!quoted.contains(['"', '\''])).then_some(quoted)
+}
+
+/// A key (or a table header) written twice where TOML allows it once.
+struct DuplicateKey {
+    /// The table the key is in: `dependencies`, `package`, … or `""` for the
+    /// top level (the lock file's shape). For a repeated header, the table
+    /// itself.
+    table: String,
+    /// The key, or `None` when the table header itself is repeated.
+    key: Option<String>,
+    first_line: usize,
+    second_line: usize,
+}
+
+/// The first key assigned twice in one table of `content`, or the first
+/// table header written twice (#2583). TOML forbids both; the manifest reader
+/// below is line-based rather than the `toml` crate, so it has to enforce it
+/// itself — without this it silently accepted the second line and kept BOTH
+/// dependencies, which the lock writer then recorded twice. `tables` limits
+/// the scan to the tables a reader actually reads (`None` = every table).
+fn find_duplicate_key(content: &str, tables: Option<&[&str]>) -> Option<DuplicateKey> {
+    use std::collections::HashMap;
+    let mut section = String::new();
+    let mut headers: HashMap<String, usize> = HashMap::new();
+    let mut seen: HashMap<(String, String), usize> = HashMap::new();
+    for (idx, raw) in content.lines().enumerate() {
+        let lineno = idx + 1;
+        let line = raw.trim();
+        if line.starts_with('[') && !line.starts_with("[[") && line.ends_with(']') {
+            section = line[1..line.len() - 1].trim().to_string();
+            let read = tables.is_none_or(|t| t.contains(&section.as_str()));
+            if read {
+                if let Some(&first_line) = headers.get(&section) {
+                    return Some(DuplicateKey {
+                        table: section,
+                        key: None,
+                        first_line,
+                        second_line: lineno,
+                    });
+                }
+                headers.insert(section.clone(), lineno);
+            }
+            continue;
+        }
+        if tables.is_some_and(|t| !t.contains(&section.as_str())) {
+            continue;
+        }
+        let Some(key) = assigned_key(line) else { continue };
+        let slot = (section.clone(), key.to_string());
+        if let Some(&first_line) = seen.get(&slot) {
+            return Some(DuplicateKey {
+                table: section,
+                key: Some(key.to_string()),
+                first_line,
+                second_line: lineno,
+            });
+        }
+        seen.insert(slot, lineno);
+    }
+    None
+}
+
+/// The tables `parse_toml` reads — a duplicate in any of them is refused.
+const MANIFEST_TABLES: &[&str] = &["package", "dependencies", "permissions", "native-deps"];
+
+/// Refuse an `almide.toml` that writes a key twice in a table the manifest
+/// reader reads, naming both lines and the fix (#2583).
+pub fn check_manifest_duplicates(path: &Path, content: &str) -> Result<(), String> {
+    let Some(dup) = find_duplicate_key(content, Some(MANIFEST_TABLES)) else {
+        return Ok(());
+    };
+    let at = format!("{}:{}", path.display(), dup.second_line);
+    Err(match dup.key {
+        Some(key) => {
+            let what = if dup.table == "dependencies" {
+                format!("dependency `{key}` is declared twice in [dependencies]")
+            } else {
+                format!("key `{key}` is declared twice in [{}]", dup.table)
+            };
+            format!(
+                "{at}: {what} (first at line {first})\n  \
+                 hint: keep one of lines {first} and {second} and delete the other — \
+                 TOML allows a key only once per table",
+                first = dup.first_line,
+                second = dup.second_line,
+            )
+        }
+        None => format!(
+            "{at}: table [{table}] is declared twice (first at line {first})\n  \
+             hint: move the entries under line {second} into the [{table}] table at line {first} \
+             and delete the second header — TOML allows a table only once",
+            table = dup.table,
+            first = dup.first_line,
+            second = dup.second_line,
+        ),
+    })
+}
+
 pub fn parse_toml(path: &Path) -> Result<Project, String> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+    check_manifest_duplicates(path, &content)?;
 
     let mut acc = TomlAccum { version: "0.1.0".to_string(), ..TomlAccum::default() };
     let mut section = "";

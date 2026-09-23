@@ -1037,6 +1037,36 @@ fn dispatch_rest(command: Commands) {
     }
 }
 
+/// Refuse a `./almide.toml` that declares a key twice (#2583) before any
+/// command runs. Most readers of the manifest treat a parse error as "no
+/// project" (`parse_toml(..).ok()`), which is right for a missing file but
+/// would turn this error into a silent run without dependencies; one gate
+/// here makes the refusal the same on every command. The commands that must
+/// keep working in a broken project are exempt: `init`, `clean`, the editor
+/// servers (an exit would kill the session; their manifest reads already
+/// fail closed), and the ones that never read the manifest.
+fn refuse_duplicate_manifest_keys(command: &Commands) {
+    if matches!(
+        command,
+        Commands::Init
+            | Commands::Clean
+            | Commands::Lsp
+            | Commands::Mcp
+            | Commands::SelfUpdate { .. }
+            | Commands::DocsGen { .. }
+            | Commands::Switches { .. }
+            | Commands::Explain { .. }
+    ) {
+        return;
+    }
+    let path = std::path::Path::new("almide.toml");
+    let Ok(content) = std::fs::read_to_string(path) else { return };
+    if let Err(e) = project::check_manifest_duplicates(path, &content) {
+        err(&format!("error: {}", e));
+        std::process::exit(1);
+    }
+}
+
 fn dispatch(cli: Cli) {
     if cli.verbose {
         // Deep pipeline code reads the env var so verbosity needs no
@@ -1052,6 +1082,7 @@ fn dispatch(cli: Cli) {
             return;
         }
     };
+    refuse_duplicate_manifest_keys(&command);
     match command {
         Commands::Init => cli::cmd_init(),
         Commands::Run { file, no_check, release, target, verified: _, no_verified, time_report, program_args } =>
