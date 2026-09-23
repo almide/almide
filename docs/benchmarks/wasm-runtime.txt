@@ -23,21 +23,21 @@
 # ab_band is the A/B tolerance in percent (a policy line, not a measurement);
 # a fan row overrides it with `ab_band=NN` at the end of its row.
 version = almide 0.63.0 (dev)
-date    = 2026-09-22
+date    = 2026-09-24
 machine = arm64 Darwin (local stamp; ratios are the gated quantity)
 ab_band = 30
 
-nbody                 | measured         | 1.23  | 2.79 | 2.27
-spectralnorm          | measured         | 1.53  | 2.75 | 1.80
-binarytrees           | measured         | 1.60  | 2.94 | 1.84 ab_band=100
-treealloc             | measured         | 40.30 | 59.64 | 1.48
-fasta                 | measured         | 1.39  | 2.42 | 1.74
-fannkuchredux         | routed-incumbent | 1.40  | -    | -
-mandelbrot            | measured         | 2.43  | 4.89 | 2.01 ab_band=100
-onebrc                | walled           | 1.84  | -    | -
-fft                   | measured         | 40.15 | 185.14 | 4.61
-strchurn              | measured         | 53.14 | 59.71 | 1.12
-listbuild_append      | measured         | 21.21 | 78.30 | 3.69
-listbuild_combinator  | measured         | 20.97 | 81.61 | 3.89
-listbuild_prealloc    | measured         | 20.62 | 72.85 | 3.53
-mapbuild              | measured         | 5.13  | 5.40 | 1.05
+nbody                 | measured         | 1.85  | 4.06 | 2.19
+spectralnorm          | measured         | 2.08  | 3.59 | 1.73
+binarytrees           | measured         | 2.31  | 3.15 | 1.36 ab_band=100
+treealloc             | measured         | 52.28 | 54.61 | 1.04
+fasta                 | measured         | 1.83  | 3.09 | 1.69
+fannkuchredux         | routed-incumbent | 1.94  | -    | -
+mandelbrot            | measured         | 3.40  | 4.40 | 1.29 ab_band=100
+onebrc                | walled           | 2.58  | -    | -
+fft                   | measured         | 53.50 | 152.37 | 2.85
+strchurn              | measured         | 70.98 | 61.69 | 0.87
+listbuild_append      | measured         | 28.43 | 86.37 | 3.04
+listbuild_combinator  | measured         | 28.50 | 89.21 | 3.13
+listbuild_prealloc    | measured         | 27.87 | 79.41 | 2.85
+mapbuild              | measured         | 6.93  | 5.98 | 0.86
