@@ -155,7 +155,8 @@ else if end - 1 == dot then {
 
 // The number of decimal digits of f (0 for 0), by comparison against rising powers of ten — a
 // multiply per digit, not a divide (f < 10^18, so p never overflows).
-fn __sf_ndig(f: Int, p: Int, acc: Int) -> Int = if f < p then acc else __sf_ndig(f, p * 10, acc + 1)
+fn __sf_ndig(f: Int, p: Int, acc: Int) -> Int = if f < p then acc
+else __sf_ndig(f, p * 10, acc + 1)
 
 fn __dg_special(bits0: Int, raw_mant0: Int) -> String = if raw_mant0 != 0 then "NaN"
 else if bits0 < 0 then "-inf" else "inf"
