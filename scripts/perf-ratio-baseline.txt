@@ -29,6 +29,11 @@ fft 1.176
 # repo has one architecture's reading. On an M4 Pro it reads 1.12x against the
 # same-shape reference and 1.94x against the idiomatic one.
 nbody 0.997
+# wordfreq anchored by #2150 at the 4M quick workload: 1.97 on an M4 Pro
+# (2026-09-24, median of 9); the runner read 1.66-1.75 at 2M. Anchored at 1.90
+# between the two so the +40% ceiling (2.66) and the 50% floor (0.95) hold on
+# both; re-anchor from the first runner reading at 4M if it sits far off.
+wordfreq 1.90
 spectralnorm 1.001
 # VICTORY rows (#1330): `binarytrees` (#1991) and `treealloc` (#2028) against
 # their same-shape `Box` references — the ordinary Rust for the program. The

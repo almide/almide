@@ -356,10 +356,14 @@ is #2157's open probe, not the Map. The recommended spelling
 cost is the per-element key clone `group_by`'s `Rc<dyn Fn(A) -> B>` callback
 forces plus the intermediate `List[String]`, not the lookups — the T5
 relation this row now watches. `mapbuild` (20k Int + 20k String keys, build
-then read back) reads 5.6 ms from 6.6. Both wordfreq rows join the ratchet's
+then read back) reads 5.6 ms from 6.6. Both wordfreq rows joined the ratchet's
 REPORTED rows (`wordfreq=rust:wordfreq wordfreq-group=rust:wordfreq`, quick
 arg 1M): a hash-map row compares an allocator and a hasher before it
-compares codegen, like strchurn.
+compares codegen, like strchurn. Since #2150 `wordfreq` is ANCHORED in the
+gated PAIRS (baseline 1.90 at a 4M quick arg): the runner read 1.66-1.75 on
+five green develop runs at 2M against 1.77 on an M4 Pro, so the ratio travels
+between the two machine classes where listbuild's does not. `wordfreq-group`
+stays reported; its relation to `wordfreq` is the gated wasm idiom row.
 
 ### Ablation: what the IR optimizer buys (2026-08-18)
 

@@ -167,8 +167,13 @@ QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
     # spawn-noise floor check-perf-ratio.sh's `wordfreq-wasm-idiom` relation
     # (#2156) refuses to judge on; a regressed idiomatic row (the linear scan)
     # takes ~12s at 2M, which is a red run and not a hang.
-    "wordfreq": "2000000",
-    "wordfreq-group": "2000000",
+    # 4M since #2150 anchored `wordfreq` native/rust in check-perf-ratio.sh's
+    # PAIRS: at 2M the reference read 0.0715s on one runner (develop run
+    # 35868760167), under the 0.08s floor PAIRS enforces as a hard error.
+    # Both spellings move together so the wasm idiom relation still compares
+    # one workload.
+    "wordfreq": "4000000",
+    "wordfreq-group": "4000000",
 }
 
 RUSTC_FLAGS = ["-C", "opt-level=3", "-C", "lto=yes", "-C", "codegen-units=1",

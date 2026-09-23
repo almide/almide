@@ -65,7 +65,7 @@ RUNS="${PERF_RATIO_RUNS:-9}"
 # README states for onebrc), and what is gated is the relation between them —
 # which is the property #1337 is about and which IS machine-stable: 1.018x on
 # the M4 Pro, 1.045x on the CI runner, from the same commit.
-PAIRS="nbody=rust:nbody_unrolled spectralnorm=rust:spectralnorm fasta=rust:fasta fft=rust:fft"
+PAIRS="nbody=rust:nbody_unrolled spectralnorm=rust:spectralnorm fasta=rust:fasta fft=rust:fft wordfreq=rust:wordfreq"
 # Rows measured for the record and printed, but not anchored (see above), as
 # `bench=rust-ref-variant`.
 #
@@ -99,11 +99,20 @@ PAIRS="nbody=rust:nbody_unrolled spectralnorm=rust:spectralnorm fasta=rust:fasta
 # `wordfreq` / `wordfreq-group` (#2150, #2157) are the keyed-aggregation row in
 # its imperative and its CHEATSHEET (`list.group_by`) spelling, both against
 # `rust:wordfreq` — a `HashMap<String, i64>` with an owned key per draw, the
-# ordinary Rust for the program. Reported like strchurn: the row compares the
-# native `AlmideMap` (compact-ordered-dict, insertion order kept) against
-# std's hashbrown + SipHash, an allocator-and-hasher reading first. The
-# relation between the two spellings is the T5 reading (recommended = fastest).
-REPORTED="listbuild=rust:listbuild listbuild-append=rust:listbuild listbuild-comb=rust:listbuild strchurn=rust:strchurn mandelbrot=rust:mandelbrot decode=rust:decode wordfreq=rust:wordfreq wordfreq-group=rust:wordfreq"
+# ordinary Rust for the program. `wordfreq` is ANCHORED in PAIRS since #2150:
+# the row compares the native `AlmideMap` (compact-ordered-dict, insertion
+# order kept) against std's hashbrown + SipHash, an allocator-and-hasher
+# reading first, and was reported for that reason until it had readings on two
+# machine classes — five green develop runs on the ubuntu runner read 1.661 /
+# 1.681 / 1.728 / 1.737 / 1.754 at 2M (2026-09-23, runs 35849745852,
+# 35857650106, 35864492749, 35868760167, 35872683812) against 1.77 on an M4
+# Pro, so unlike listbuild's 1.58/0.91 the ratio does travel. The workload moved
+# to 4M in the same change (bench.py QUICK_ARGS) because the reference read
+# 0.0715s once at 2M, under MIN_SECONDS. `wordfreq-group` stays reported: it
+# is the idiom spelling, and its relation to `wordfreq` is gated on the wasm
+# leg (below); natively it runs `list.group_by`'s grouping lists, a different
+# program from the reference's single `entry` per draw.
+REPORTED="listbuild=rust:listbuild listbuild-append=rust:listbuild listbuild-comb=rust:listbuild strchurn=rust:strchurn mandelbrot=rust:mandelbrot decode=rust:decode wordfreq-group=rust:wordfreq"
 # VICTORY rows (#1330): the workloads where Almide native is FASTER than the
 # ordinary Rust for the program, and the gate is the claim itself. Each entry
 # is `bench=rust-ref-variant:ABLATION_ENV` — the env knob that turns off the
@@ -176,7 +185,7 @@ trap 'rm -f "$out"' EXIT
 python3 research/benchmark/perf/bench.py \
   --quick --runs "$RUNS" --legs native,rust \
   --bench nbody,spectralnorm,fasta,fft,binarytrees,treealloc,listbuild,listbuild-append,listbuild-comb,strchurn,fannkuchredux,mandelbrot,decode,wordfreq,wordfreq-group \
-  --ablate ALMIDE_DISABLE_OPT --ablate-bench nbody,spectralnorm,fasta,fft \
+  --ablate ALMIDE_DISABLE_OPT --ablate-bench nbody,spectralnorm,fasta,fft,wordfreq \
   --label ratchet --out "$out"
 
 # VICTORY ABLATION LEG (#1330): each victory row rebuilt from the same source
