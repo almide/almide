@@ -1,0 +1,6 @@
+// `some(..)`/`none` over a Map subject (#2533): a map is not an Option.
+// This used to bind `v` as `Unknown` instead of a type error.
+fn lookup(m: Map[String, Int]) -> Int = match m {
+  some(v) => v,
+  none => 0,
+}

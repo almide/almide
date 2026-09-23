@@ -1,0 +1,3 @@
+fn left(p: (Int, String)) -> Int = match p {
+  (a, _) => a,
+}

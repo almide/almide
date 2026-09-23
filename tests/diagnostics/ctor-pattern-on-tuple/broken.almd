@@ -1,0 +1,6 @@
+// `ok(..)`/`err(..)` over a tuple subject (#2533): a tuple is not a Result.
+// This used to bind `a`/`e` as `Unknown` instead of a type error.
+fn left(p: (Int, String)) -> Int = match p {
+  ok(a) => a,
+  err(e) => 0,
+}

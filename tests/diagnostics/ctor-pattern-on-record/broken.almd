@@ -1,0 +1,14 @@
+// `ok(..)`/`err(..)` over a record subject (#2533): `get()!` has already
+// unwrapped the Result, so `h` is the record. This used to bind `x`/`e` as
+// `Unknown` and panic in ConcretizeTypes — now it is a checker error.
+type Heard = { text: String }
+
+effect fn get() -> Result[Heard, String] = ok(Heard { text: "hi" })
+
+effect fn run() -> Result[String, String] = {
+  let h = get()!
+  match h {
+    ok(x) => ok(x.text),
+    err(e) => err(e),
+  }
+}

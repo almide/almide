@@ -42,7 +42,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-004 | fan.any / fan.map / fan.settle are deterministic by list order | 0.24.0 | active | fixture | 8 |
 | C-005 | fan error propagation surfaces as the unified main-error abort | 0.24.0 | active | fixture | 4 |
 | C-006 | [fan.timeout does not exist — wall-clock deadlines live at the host boundary](C-006-fan-timeout-removed.md) | 0.29.0 | active | fixture | 0 |
-| C-007 | Abortable top-level lets evaluate eagerly at startup | 0.24.0 | active | fixture | 2 |
+| C-007 | Abortable top-level lets evaluate eagerly at startup | 0.24.0 | active | fixture | 3 |
 | C-008 | [Compound interpolation renders the Almide-literal repr (containers)](C-008-009-010-repr.md) | 0.24.0 | active | fixture | 3 |
 | C-009 | [Record / variant / anonymous-record interpolation repr (field sorting)](C-008-009-010-repr.md) | 0.24.0 | active | fixture | 2 |
 | C-010 | [Recursive / generic ADT interpolation repr keyed by instantiation](C-008-009-010-repr.md) | 0.24.0 | active | fixture | 2 |
@@ -295,7 +295,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-257 | The scalar error operators evaluate identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-258 | Named calls and lambdas evaluate identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-259 | Variant constructor references build values eliminated identically by match on both targets | 0.57.1 | active | fixture | 1 |
-| C-260 | The declaration family compiles and runs identically on both targets | 0.57.1 | active | fixture | 1 |
+| C-260 | The declaration family compiles and runs identically on both targets | 0.57.1 | active | fixture | 2 |
 | C-261 | Canonical float values including the negative-zero sign display identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-262 | The fmt-stable string escapes and the empty string evaluate identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-263 | Recovery nodes never appear in accepted programs; a broken file still reports past its first error | 0.57.1 | active | fixture | 1 |

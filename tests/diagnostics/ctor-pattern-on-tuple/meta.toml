@@ -1,0 +1,2 @@
+expects_error = "pattern `ok(..)` cannot match (Int, String)"
+hint_substring = "the subject is not a Result"
