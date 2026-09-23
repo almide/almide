@@ -445,6 +445,27 @@ pub struct LockedDep {
 pub fn parse_lock_file(path: &Path) -> Result<Vec<LockedDep>, String> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+    // A lock written by a compiler that accepted a duplicated dependency in
+    // almide.toml holds the same entry twice (#2583). The `toml` crate refuses
+    // that as a bare "duplicate key"; say which lines and what to do instead.
+    if let Some(dup) = find_duplicate_key(&content, None) {
+        let what = match &dup.key {
+            Some(key) => format!("lock entry `{key}` appears twice"),
+            None => format!("table [{}] appears twice", dup.table),
+        };
+        return Err(format!(
+            "{}:{}: {what} (first at line {first}) — almide.lock is generated, and an older \
+             compiler wrote this from a dependency declared twice in almide.toml\n  \
+             hint: make sure almide.toml declares the dependency once, then delete one of lines \
+             {first} and {second} of {lock} (keep the one whose `git` matches almide.toml), or delete \
+             {lock} and the next `almide check` / `almide run` rewrites it",
+            path.display(),
+            dup.second_line,
+            first = dup.first_line,
+            second = dup.second_line,
+            lock = path.display(),
+        ));
+    }
     let table: toml::Table = content
         .parse()
         .map_err(|e| format!("{} is not valid TOML: {}", path.display(), e))?;
@@ -481,7 +502,11 @@ fn toml_quoted(s: &str) -> String {
 /// Write almide.lock
 pub fn write_lock_file(path: &Path, locked: &[LockedDep]) -> Result<(), String> {
     let mut content = String::from("# almide.lock — auto-generated, do not edit\n\n");
-    for dep in locked {
+    // One entry per name, whatever the caller hands in: a name written twice
+    // makes the lock unreadable to every later run (#2583). The first entry
+    // wins — the manifest's own first declaration.
+    let mut written = std::collections::HashSet::new();
+    for dep in locked.iter().filter(|d| written.insert(d.name.as_str())) {
         content.push_str(&format!(
             "{} = {{ git = {}, ref = {}, commit = {} }}\n",
             dep.name,
