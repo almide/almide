@@ -150,7 +150,16 @@ fail=0; n=0
 # lowers; the incumbent's variant-arm specializer admits a refutable payload only
 # on a single-field positional constructor (proofs/walled-real-baseline.txt has
 # the four rows). One more input the incumbent never rendered, not coverage lost.
-MAX_WALLED=30
+# 28 as of 2026-09-23 (#2559, measured with the native wasmgen harness on the
+# tree rebased over develop: 745 emitted + 28 walled of 773): DOWN from 30. The
+# incumbent's variant-arm specializer now compiles refutable MULTI-field
+# positional payloads, record-form field patterns and nested constructor
+# patterns column by column, so record_variant_field_literal (the four rows
+# #2553 added to proofs/walled-real-baseline.txt, pruned) and
+# nested_payload_guard (`OCons(some(x), _) if x == y`) render and byte-match
+# native; the positional twin the change adds
+# (positional_variant_field_literal) emits on both legs.
+MAX_WALLED=28
 walled=0
 for fix in "$FIXTURE_DIR"/*.almd; do
   [ -e "$fix" ] || continue

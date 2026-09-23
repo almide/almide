@@ -192,7 +192,16 @@ fi
 # positional constructor, so it walls these four functions
 # (proofs/walled-real-baseline.txt), identically on both hosts. One more input
 # the incumbent never rendered, not coverage lost.
-MAX_WALLED=30
+# 28 as of 2026-09-23 (#2559, measured with the native wasmgen harness on the
+# tree rebased over develop: 745 emitted + 28 walled of 773): DOWN from 30. The
+# incumbent's variant-arm specializer now compiles refutable MULTI-field
+# positional payloads, record-form field patterns and nested constructor
+# patterns column by column, so record_variant_field_literal (the four rows
+# #2553 added to proofs/walled-real-baseline.txt, pruned) and
+# nested_payload_guard (`OCons(some(x), _) if x == y`) render and byte-match
+# native; the positional twin the change adds
+# (positional_variant_field_literal) emits on both legs.
+MAX_WALLED=28
 corpus=$(ls "$FIXTURE_DIR"/*.almd 2>/dev/null | wc -l | tr -d ' ')
 if [ "$corpus" -eq 0 ] || [ $((n + walled)) -ne "$corpus" ]; then
   echo "::error::host-determinism: compared $n + walled $walled != corpus $corpus in $FIXTURE_DIR — the scan went blind (#985)"
