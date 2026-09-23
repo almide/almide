@@ -29,15 +29,22 @@ read here is what the current compiler accepts.
   returning `Option[B]`, an optional fn value spells `((A) -> B)?`, nested
   Option spells `(T?)?`. Errors are spelled `Result[T, E]`, or `-> T!` for the
   pure-fallible `Result[T, String]` return (value tails lift into ok(...)).
-  A lambda whose body uses `!` is a fallible closure `(A) -> Result[T, String]`
+  A lambda whose body uses `!` is a fallible closure `(A) -> Result[T, E]`
   — first-class, and as a core list-HOF callback it takes the first-err form;
-  fn-type slots spell it `(A) -> B!`. In test blocks lambda-`!` stays unwrap. No `null`, no `throw`, no
+  fn-type slots spell it `(A) -> B!` / `(A) -> B!E`. Its E comes from the context
+  (a typed slot or `let`, the fn its result propagates into), else from the
+  join of its `!` operands: one shared E stays, a disagreement falls to String
+  (ADR-0021). In test blocks lambda-`!` stays unwrap. No `null`, no `throw`, no
   exceptions.
 - Effectful functions are written `effect fn f() -> T`. Pure functions
   cannot call effect functions (checked, emits E006). Exception: `println`,
   `eprintln`, `panic` and the `assert` family work in a pure fn (writes and
   aborts, never reads — ADR-0022), so a `main` that only prints is
   `fn main() -> Unit`; write `effect fn main()` when it reads or propagates.
+  A user-declared effect fn is always fallible, so write `f()!` on every
+  effect call — read the `!` like Swift `await` (it marks where the world is
+  touched); it is Swift `try`, never `try!`. On a stdlib effect fn that cannot
+  fail the `!` is a no-op.
 - Generics use `[T]` (not `<T>`). Variants use leading `|`.
 - `match` is exhaustive; missing arms emit a warning.
 - Multiple lets chain by newline (no `in`). No `let rec`, no `head :: tail`
