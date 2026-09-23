@@ -205,7 +205,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-167 | float.clamp returns its input unchanged when in range, sign bit included | 0.36.0 | active | fixture | 1 |
 | C-168 | list.flatten borrows its argument, so it composes with another borrow of the same binding | 0.36.0 | active | fixture | 2 |
 | C-169 | list.repeat over the size ceiling aborts in the T6 form on both targets | 0.36.0 | active | fixture | 1 |
-| C-170 | Integer arithmetic wraps in every position, including a module-level let | 0.36.0 | active | fixture | 1 |
+| C-170 | Integer arithmetic wraps in every position, including a module-level let | 0.36.0 | active | fixture | 3 |
 | C-171 | Byte-offset bound checks do not overflow at the i64 boundary | 0.36.0 | active | fixture | 1 |
 | C-172 | unwrap_or over any heap payload yields the same value on both targets | 0.36.0 | active | fixture | 2 |
 | C-173 | An integer literal outside what its context can represent is a checker error on both targets, never a silent value | 0.36.0 | active | fixture | 1 |
@@ -337,7 +337,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-299 | hash digests are byte-identical across targets | 0.58.0 | active | fixture | 1 |
 | C-300 | map literals with Option-scalar values cross targets, leak-free | 0.59.0 | active | fixture | 2 |
 | C-301 | map.upsert on the all-String map crosses targets | 0.59.0 | active | fixture | 1 |
-| C-302 | Numeric determinism family head: a Float result is a function of the program alone | 0.58.0 | active | fixture | 5 |
+| C-302 | Numeric determinism family head: a Float result is a function of the program alone | 0.58.0 | active | fixture | 6 |
 | C-303 | Float operations round to nearest-even once each — no contraction, no FMA | 0.58.0 | active | fixture | 1 |
 | C-304 | Subnormal floats are preserved — no flush-to-zero on any target | 0.58.0 | active | fixture | 1 |
 | C-305 | Transcendental accuracy bounds: sqrt correctly rounded, exp/log/log2/log10/sin/cos/tan/fpow within 1 ulp | 0.58.0 | active | fixture | 1 |

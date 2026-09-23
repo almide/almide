@@ -1,0 +1,50 @@
+// @contract: C-302, C-170
+// #2577: the NEGATIVE side of accumulator recursion elimination
+// (`almide_ir::accum_tre`). Each function below has the two-call recursion
+// shape but fails a precondition, so no leg may reassociate it; the output
+// must be the source shape's on every leg.
+//
+// Float `+` is not associative. Reassociated, `-0.0 + -0.0 + …` would start
+// from the identity 0.0 and print 0.0 instead of -0.0, and `rounded(5)` would
+// print 2.9 instead of 2.9000000000000004. Before #2577 the native leg DID
+// rewrite the Float shape (and failed IR verification doing it).
+fn neg_zero(n: Int) -> Float = if n < 2 then -0.0 else neg_zero(n - 1) + neg_zero(n - 2)
+
+fn rounded(n: Int) -> Float = if n < 2 then 0.1 * int.to_float(n) + 0.3 else rounded(n - 1) + rounded(n - 2)
+
+// String `+` is concatenation: associative but not commutative.
+fn word(n: Int) -> String = if n < 2 then "${n}" else word(n - 1) + word(n - 2)
+
+// An effect in the body: the order of the output lines is observable.
+effect fn noisy(n: Int) -> Int = {
+  println("visit ${n}")
+  if n < 2 then n
+  else noisy(n - 1)! + noisy(n - 2)!
+}
+
+// A call in the condition is not a scalar expression over `n`.
+fn small(n: Int) -> Bool = n < 2
+
+fn gated(n: Int) -> Int = if small(n) then n else gated(n - 1) + gated(n - 2)
+
+// Division in the base can trap; the body is not trap-free.
+fn divided(n: Int) -> Int = if n < 2 then 100 / (n + 3) else divided(n - 1) + divided(n - 2)
+
+// Int overflow edge on a DECLINED shape (subtraction is not commutative).
+fn diff(n: Int) -> Int = if n < 1 then -9223372036854775807 else diff(n - 1) - diff(n - 2)
+
+// An equality bound does not prove termination for every step, so it is
+// declined (for step 2 and an odd start the recursion never meets it).
+fn even_only(n: Int) -> Int = if n == 0 then 1 else even_only(n - 2) + even_only(n - 2)
+
+effect fn main() -> Unit = {
+  println(float.to_string(neg_zero(12)))
+  println(float.to_string(rounded(5)))
+  println(float.to_string(rounded(17)))
+  println(word(7))
+  println(int.to_string(noisy(4)!))
+  println(int.to_string(gated(20)))
+  println(int.to_string(divided(20)))
+  println(int.to_string(diff(30)))
+  println(int.to_string(even_only(12)))
+}

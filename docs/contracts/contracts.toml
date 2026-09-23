@@ -2152,6 +2152,8 @@ since     = "0.36.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/toplevel_const_wrapping.almd", class = "fixture" },
+  { path = "spec/wasm_cross/accum_recursion_int.almd", class = "fixture" },
+  { path = "spec/wasm_cross/accum_recursion_declined.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-171"
@@ -3837,6 +3839,7 @@ evidence  = [
   { path = "spec/wasm_cross/math_transcendental_bits.almd", class = "fixture" },
   { path = "spec/wasm_cross/float_signed_zero_minmax.almd", class = "fixture" },
   { path = "spec/wasm_cross/float_to_int_edges.almd", class = "fixture" },
+  { path = "spec/wasm_cross/accum_recursion_declined.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-303"
