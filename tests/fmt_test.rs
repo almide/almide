@@ -760,6 +760,19 @@ fn fmt_output_typechecks_multi_module_specs() {
         std::fs::create_dir_all(dst.parent().unwrap()).unwrap();
         std::fs::copy(path, &dst).unwrap();
     }
+    // A package fixture (`spec/integration/<pkg>/almide.toml` + `src/`,
+    // #1589) resolves `import self.x` through its manifest, so the copy
+    // needs the manifest beside its sources or every self-import fails to
+    // resolve and the gate reports fmt as having changed meaning.
+    for path in &files {
+        let Some(pkg) = path.ancestors().skip(1).find(|d| d.join("almide.toml").is_file()) else { continue };
+        let Ok(rel) = pkg.strip_prefix(&src_root) else { continue };
+        let dst = dst_root.join(rel).join("almide.toml");
+        if !dst.exists() {
+            std::fs::create_dir_all(dst.parent().unwrap()).unwrap();
+            std::fs::copy(pkg.join("almide.toml"), &dst).unwrap();
+        }
+    }
 
     let mut failures = Vec::new();
     let mut tested = 0u32;
