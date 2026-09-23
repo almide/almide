@@ -1,0 +1,2 @@
+expects_error = "does not implement protocol 'Repo[Int, User]'"
+hint_substring = "type Users: Repo[Int, User] = ..."

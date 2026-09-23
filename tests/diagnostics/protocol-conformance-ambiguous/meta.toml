@@ -1,0 +1,2 @@
+expects_error = "conforms to protocol 'Repo' twice"
+hint_substring = "A type implements a protocol at most once"

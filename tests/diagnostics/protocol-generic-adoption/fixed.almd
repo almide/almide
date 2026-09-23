@@ -1,6 +1,10 @@
-// The fix the hint teaches: plain convention fns, no protocol clause.
+// The fix the hint teaches: name the argument at the conformance.
+protocol Repository[T] {
+  fn find(self, id: Int) -> Option[T]
+}
+
 type User = { id: Int }
-type MemStore = { users: List[User] }
+type MemStore: Repository[User] = { users: List[User] }
 
 fn MemStore.find(self, id: Int) -> Option[User] =
   self.users |> list.find((u) => u.id == id)

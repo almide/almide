@@ -1,0 +1,2 @@
+expects_error = "method 'Cell.get' is an `effect fn`, but protocol 'Store' declares 'get' as a pure fn"
+hint_substring = "effect-ness is part of the method signature"

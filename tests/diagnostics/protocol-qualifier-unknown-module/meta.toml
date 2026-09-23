@@ -1,0 +1,2 @@
+expects_error = "'ports.Show': no module 'ports' is imported in this file"
+hint_substring = "Write the bare name `Show`"

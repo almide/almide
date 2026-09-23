@@ -1,0 +1,16 @@
+// The fix: one conformance per type; wrap the type for the other.
+protocol Repo[K, V] {
+  fn find(self, key: K) -> V?
+}
+
+type User = { id: Int, name: String }
+
+type Users: Repo[Int, User] = { rows: List[User] }
+
+fn Users.find(self, key: Int) -> User? = self.rows |> list.find((u) => u.id == key)
+
+type UsersByName: Repo[String, User] = { inner: Users }
+
+fn UsersByName.find(self, key: String) -> User? = self.inner.rows |> list.find((u) => u.name == key)
+
+fn main() -> Unit = println("x")

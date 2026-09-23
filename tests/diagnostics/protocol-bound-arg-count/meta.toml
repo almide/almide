@@ -1,0 +1,2 @@
+expects_error = "takes 2 type argument(s), but bound 'R' of 'name_of' gives it 1"
+hint_substring = "Write exactly one type per parameter"

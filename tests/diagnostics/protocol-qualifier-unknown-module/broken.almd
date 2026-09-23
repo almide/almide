@@ -1,0 +1,11 @@
+// #1589: a qualified protocol name names a module this file imports — the
+// same rule a qualified type follows.
+protocol Show {
+  fn show(self) -> String
+}
+
+type Tag: ports.Show = { s: String }
+
+fn Tag.show(self) -> String = self.s
+
+fn main() -> Unit = println(Tag { s: "x" }.show())

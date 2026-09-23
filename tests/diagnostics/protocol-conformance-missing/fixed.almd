@@ -1,0 +1,15 @@
+// The fix: declare the conformance with its arguments.
+protocol Repo[K, V] {
+  fn find(self, key: K) -> V?
+}
+
+type User = { id: Int, name: String }
+
+type Users: Repo[Int, User] = { rows: List[User] }
+
+fn Users.find(self, key: Int) -> User? = self.rows |> list.find((u) => u.id == key)
+
+fn name_of[R: Repo[Int, User]](r: R, id: Int) -> String =
+  match r.find(id) { some(u) => u.name, none => "?" }
+
+fn main() -> Unit = println(name_of(Users { rows: [] }, 1))

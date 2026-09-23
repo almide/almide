@@ -1,0 +1,10 @@
+// The fix: bound the parameter by the protocol once.
+protocol Repo[K, V] {
+  fn find(self, key: K) -> V?
+}
+
+type User = { id: Int, name: String }
+
+fn both[R: Repo[Int, User]](r: R) -> Int = 0
+
+fn main() -> Unit = println("x")

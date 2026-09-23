@@ -1,0 +1,2 @@
+expects_error = "method 'Cell.set' takes no `mut` parameter, but protocol 'Store' declares `mut self`"
+hint_substring = "Match the protocol's parameter modes"

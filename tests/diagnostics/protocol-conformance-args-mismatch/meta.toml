@@ -1,0 +1,2 @@
+expects_error = "implements 'Repo[Int, User]', but total_of() requires 'Repo[Int, Order]'"
+hint_substring = "conforms to 'Repo' exactly once"

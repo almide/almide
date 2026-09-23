@@ -1,0 +1,14 @@
+// #1589: `mut` (in-place mutation of the caller's value) is part of a
+// generic protocol method's signature.
+protocol Store[V] {
+  fn get(self) -> V
+  fn set(mut self, v: V) -> Unit
+}
+
+type Cell: Store[Int] = { v: Int }
+
+fn Cell.get(self) -> Int = self.v
+
+fn Cell.set(self, v: Int) -> Unit = ()
+
+fn main() -> Unit = println("x")
