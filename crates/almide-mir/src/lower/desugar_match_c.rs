@@ -297,6 +297,19 @@ pub fn desugar_record_destructure_match(body: &IrExpr) -> Option<IrExpr> {
 /// desugar-before-both (the one `list.len` call + any duplicated catch-all
 /// appear identically on both sides).
 pub fn desugar_list_pattern_match(body: &IrExpr) -> Option<IrExpr> {
+    list_pattern_match_impl(body, true)
+}
+
+/// The `List[String]` literal-element form of [`desugar_list_pattern_match`] ALONE —
+/// the heap-branches row that compiles it while it is still a VALUE match (`let r =
+/// match xs { ["a"] => …, _ => … }`), before the let-bound tail-duplication pushes a
+/// binder-carrying continuation into its arms that the catch-all duplication must
+/// decline (#2473). Scalar-element lists keep their existing position.
+pub fn desugar_str_list_literal_pattern_match(body: &IrExpr) -> Option<IrExpr> {
+    list_pattern_match_impl(body, false)
+}
+
+fn list_pattern_match_impl(body: &IrExpr, scalar_elems: bool) -> Option<IrExpr> {
     use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
     use almide_ir::{BinOp, IrPattern};
     use almide_lang::types::constructor::TypeConstructorId;
@@ -312,6 +325,20 @@ pub fn desugar_list_pattern_match(body: &IrExpr) -> Option<IrExpr> {
             }
             _ => None,
         }
+    }
+    /// A `List[String]` subject some arm of which tests an element against a string
+    /// LITERAL (`match xs { ["a"] | ["a", _] => …, _ => … }` — #2473): the same
+    /// length-grouped chain, the element temps being the list's String elements (an
+    /// owned `xs[i]` read under its length test) and each literal an `==` cond. Gated
+    /// to the literal-bearing form so a `List[String]` match that lowers through
+    /// another route keeps it.
+    fn str_list_with_literal_elem(subject_ty: &Ty, arms: &[almide_ir::IrMatchArm]) -> Option<Ty> {
+        let is_str_list = matches!(subject_ty,
+            Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(a[0], Ty::String));
+        let has_literal = arms.iter().any(|a| matches!(&a.pattern,
+            IrPattern::List { elements, .. }
+                if elements.iter().any(|p| matches!(p, IrPattern::Literal { .. }))));
+        (is_str_list && has_literal).then_some(Ty::String)
     }
     /// Extracted verbatim from `desugar_list_pattern_match`'s `visit_expr_mut`
     /// (codopsy r2, #852): decides ARM admission and groups the non-terminal arms
@@ -617,12 +644,18 @@ pub fn desugar_list_pattern_match(body: &IrExpr) -> Option<IrExpr> {
     struct V {
         next: u32,
         changed: bool,
+        scalar_elems: bool,
     }
     impl IrMutVisitor for V {
         fn visit_expr_mut(&mut self, e: &mut IrExpr) {
             walk_expr_mut(self, e);
             let IrExprKind::Match { subject, arms } = &e.kind else { return };
-            let Some(elem_ty) = scalar_list_elem_ty(&subject.ty) else { return };
+            let Some(elem_ty) = scalar_list_elem_ty(&subject.ty)
+                .filter(|_| self.scalar_elems)
+                .or_else(|| str_list_with_literal_elem(&subject.ty, arms))
+            else {
+                return;
+            };
             if arms.len() < 2 {
                 return;
             }
@@ -665,7 +698,7 @@ pub fn desugar_list_pattern_match(body: &IrExpr) -> Option<IrExpr> {
             self.changed = true;
         }
     }
-    let mut v = V { next: crate::lower::desugar_var_seed(), changed: false };
+    let mut v = V { next: crate::lower::desugar_var_seed(), changed: false, scalar_elems };
     let mut out = body.clone();
     v.visit_expr_mut(&mut out);
     // GROWTH CAP (arc v1-join-completeness, J0): this rewrite duplicates a

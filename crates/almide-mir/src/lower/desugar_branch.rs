@@ -674,6 +674,12 @@ const BRANCH_PASSES: &[(RowTrigger, BranchPass)] = &[
     // (idempotent there).
     (RowTrigger::TupleMatch, |src, _, _| desugar_tuple_variant_match(src)),
     (RowTrigger::TupleMatch, |src, _, layouts| desugar_tuple_variant_match_deep(src, layouts)),
+    // #2473: a `List[String]` literal-element list match, compiled while it is still a
+    // VALUE match — the same before-the-tail-duplication reason as the two rows above.
+    (RowTrigger::AnyMatch, |src, _, _| crate::lower::desugar_str_list_literal_pattern_match(src)),
+    // #2473: a guarded / nested-literal Option·Result·custom-variant match, specialized
+    // into per-constructor branches while it is still a VALUE match (same reason).
+    (RowTrigger::AnyMatch, |src, _, _| crate::lower::desugar_variant_guard_match(src)),
     (RowTrigger::Always, |src, _, _| desugar_let_bound_heap_branch(src)),
     // `{ …; let r = e!; ok(r) }` ≡ `{ …; e }` (unwrap-rewrap identity) — collapse BEFORE the
     // let-unwrap continuation desugar, so read_message's `ok(parse_and_wrap(body)!)` arms become
