@@ -256,7 +256,7 @@ The Rust template set (`codegen/templates/rust.toml`) defines constructs for:
 | Loops | `for_loop`, `while_loop`, `break_stmt`, `continue_stmt` |
 | Lambda | `lambda` (`move \|{params}\| {{ {body} }}`), `lambda_single` |
 | Match | `match_expr`, `match_arm`, `pattern_some`, `pattern_ok`, `pattern_variant`, etc. |
-| Top-level | `top_let_const`, `top_let_lazy` (`LazyLock`) |
+| Top-level | `top_let_const`, `top_let_lazy` (`LazyLock`), `top_let_thread_lazy` (per-thread slot for a closure-holding value) |
 | Module calls | `module_call` (`almide_rt_{module}_{func}({args})`) |
 
 ## 5. Walker

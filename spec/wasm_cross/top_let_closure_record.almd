@@ -1,0 +1,45 @@
+// @contract: C-260
+// #2537: a top-level `let` whose value HOLDS closures (a list of records with
+// a function field, a variant payload, a tuple cell, a record over a fn
+// alias) is a declaration form that must run identically on both targets.
+// Native used to put the value in a `static LazyLock`, and `Rc<dyn Fn>` is
+// not `Sync`, so rustc refused the generated Rust (E0277) while the wasm leg
+// printed the answer. The value now lives in a per-thread lazy slot, still
+// evaluated once, and every read site is unchanged.
+type Step = { name: String, run: (Int) -> Int }
+
+type Handler = (Int) -> Int
+
+type Boxed = { h: Handler }
+
+type Op = | Apply((Int) -> Int) | Skip
+
+let STEPS = [
+  Step { name: "inc", run: (x) => x + 1 },
+  Step { name: "dbl", run: (x) => x * 2 }
+]
+
+let OPS = [
+  Apply((x) => x + 100),
+  Skip
+]
+
+let PAIR = ("p", (x: Int) => x + 3)
+
+let BOXED = Boxed { h: (x) => x - 1 }
+
+fn apply_op(o: Op, x: Int) -> Int = match o {
+  Apply(f) => f(x),
+  Skip => x,
+}
+
+effect fn main() -> Unit = {
+  println(int.to_string(list.fold(STEPS, 1, (acc, s) => s.run(acc))))
+  println(int.to_string(list.fold(OPS, 0, (acc, o) => apply_op(o, acc))))
+  let (label, f) = PAIR
+  println("${label} ${int.to_string(f(4))}")
+  println(int.to_string(BOXED.h(1)))
+  println(STEPS |> list.map((s) => s.name) |> list.join(","))
+  let copy = STEPS
+  println(int.to_string(list.len(copy) + list.len(STEPS)))
+}
