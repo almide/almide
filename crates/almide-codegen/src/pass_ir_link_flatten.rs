@@ -189,8 +189,12 @@ fn build_type_rename_map(type_decls: &[IrTypeDecl]) -> HashMap<String, Sym> {
 /// defaulted `tool_calls` → generated-Rust E0063).
 fn remap_codegen_annotations(ann: &mut CodegenAnnotations, map: &HashMap<String, Sym>) {
     let remap = |n: &str| map.get(n).map(|s| s.as_str().to_string()).unwrap_or_else(|| n.to_string());
+    // The default EXPRESSION is spliced into every construction site, so the
+    // type names inside it need the same mangle as a fn body (#2518: a
+    // `Sampling {}` default from another module rendered as a bare
+    // `Sampling` against the flat `almide_rt_mod_Sampling` → E0422).
     ann.default_fields = std::mem::take(&mut ann.default_fields).into_iter()
-        .map(|((c, f), e)| ((remap(&c), f), e)).collect();
+        .map(|((c, f), e)| ((remap(&c), f), rename_expr(e, map))).collect();
     ann.boxed_fields = std::mem::take(&mut ann.boxed_fields).into_iter()
         .map(|(c, f)| (remap(&c), f)).collect();
     ann.ctor_to_enum = std::mem::take(&mut ann.ctor_to_enum).into_iter()
