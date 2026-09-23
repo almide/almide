@@ -562,6 +562,7 @@ since     = "0.24.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/records_variants.almd", class = "fixture" },
+  { path = "spec/wasm_cross/record_variant_field_literal.almd", class = "fixture" },
   { path = "spec/wasm_cross/match_result.almd", class = "fixture" },
   { path = "spec/wasm_cross/closures_and_variants.almd", class = "fixture" },
   { path = "spec/wasm_cross/playground_default.almd", class = "fixture" },
@@ -1015,6 +1016,7 @@ since     = "0.27.6"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/nested_ctor_pattern.almd", class = "fixture" },
+  { path = "spec/wasm_cross/record_variant_field_literal.almd", class = "fixture" },
   { path = "spec/wasm_cross/nested_variant_tag_box.almd", class = "fixture" },
   { path = "spec/wasm_cross/nested_payload_guard.almd", class = "fixture" },
   { path = "spec/wasm_cross/nested_tuple_pattern.almd", class = "fixture" },
