@@ -308,7 +308,7 @@ reads = "UNCLASSIFIED"
 wired_by = ".github/workflows/ci-cross-target.yml"
 class = "EXERCISED"
 evidence = "flight-evidence-gaps.md F4 close: 5 consecutive full-run greens after the LC_ALL root-cause; regression direction fired throughout the parity war"
-measures = "per-program byte diff of stdout between `almide run` (native) and the render_program -> wasmtime path over spec/*.almd with a main, against proofs/output-parity-baseline.txt"
+measures = "per-program byte diff of stdout between `almide run` (native) and the render_program -> wasmtime path over spec/*.almd with a main, against proofs/output-parity-baseline.txt; every wasmtime run is under a per-fixture alarm and a fired alarm is its own HANG class that fails the gate, never a RUNERR to ratchet (#2567)"
 varies = "flight-evidence-gaps.md F4: the LC_ALL collation difference read as diffs until pinned; 2026-08-13 4c6f40db6 and 2026-08-06 54c6f7035 each moved the baseline rows"
 
 [[gate]]
@@ -1025,7 +1025,7 @@ reads = "structured"
 wired_by = "tests/almide_gate_twin_parity_test.rs"
 class = "NEGATIVE_TESTED"
 evidence = "#2163 (2026-09-21): `the_output_parity_twin_answers_what_the_shell_gate_answers` in tests/almide_gate_twin_parity_test.rs runs proofs/output-parity.sh and the twin over tests/gate-twin-parity/output-parity/spec/ (nine fixtures, one per verdict row producible without a miscompile) and demands identical exit code and bytes. Negative input: a FORGED baseline naming a part-file that can never match and omitting two that do — the original reports the phantom as a REGRESSION, the pair as NEW matches, the unbracketed-warning fixture under XFAIL and exits 1, and the twin must say the same, offender for offender; then `--update` into a scratch baseline, compared as the bytes written. The first run found the twin lacked the --update ratchet, the no-baseline path, the tool checks and the #1123 warning-block stripping (a trap fixture printing an unused-import warning read XFAIL where the bash reads match), and that the stamp's coqc line printed empty where every pipefail caller prints n/a"
-measures = "per-program byte diff of stdout between the native run and the render_program -> wasmtime path over spec/, against proofs/output-parity-baseline.txt (the Almide twin of proofs/output-parity.sh)"
+measures = "per-program byte diff of stdout between the native run and the render_program -> wasmtime path over spec/, against proofs/output-parity-baseline.txt (the Almide twin of proofs/output-parity.sh); a fired per-fixture deadline on the wasm leg is the HANG class and fails the gate (#2567)"
 varies = "#2163 (2026-09-21): the twin parity test read this twin DIVERGED from proofs/output-parity.sh on its first run (trap_with_bracket_warning: bash match, twin xfail; no --update; no n/a in the stamp), then identical after the port was corrected; the forged baseline flips the verdict OK -> REGRESSION with the offender named"
 
 [[gate]]

@@ -6,6 +6,7 @@
 //
 //   render fails + oracle also failed  → v0fail   (the fixture itself is broken, not v1)
 //   render fails + oracle succeeded    → wall     (v1 declines a program v0 runs — honest)
+//   wasmtime hit the per-run deadline  → hang     (v1 renders something that never finishes; #2567)
 //   oracle ok + wasmtime failed        → runerr   (v1 renders something that traps)
 //   stdout differs                     → mismatch (the silent-miscompile class)
 //   oracle FAILED, stdout agrees       → the trap comparison: exit code + normalised stderr
@@ -30,6 +31,12 @@ fn verdict_of(oracle_ok: Bool, render_ok: Bool, wasm_ok: Bool, oracle_out: Strin
   if oracle_ok then "wall" else "v0fail"
 } else if oracle_ok and not wasm_ok then "runerr"
 else if oracle_out != wasm_out then "mismatch" else "match"
+
+// The deadline row (#2567). `run_capped` maps a fired deadline to exit code 124 — the code
+// a `timeout`-style wrapper reports — and a module that never finished is a HANG whatever
+// the oracle did: the byte compare cannot see a non-termination, and under the runerr row
+// it was one entry among the ratcheted while a sweep with no limit simply stopped on it.
+fn is_deadline(wasm_code: Int) -> Bool = wasm_code == 124
 
 // The full rule, trap row included. Reached only when `verdict_of` already said "match": a
 // SUCCEEDING oracle needs nothing more, but a FAILING one has two more observables to agree
@@ -142,6 +149,15 @@ test "render failure with a working oracle is a wall, not a v0 failure" {
 
 test "a rendered module that traps is a runerr" {
   assert_eq(verdict_of(true, true, false, "x", ""), "runerr")
+}
+
+test "a rendered module that hits the deadline is a hang, not a runerr" {
+  // The deadline is checked BEFORE the verdict rule: a killed wasmtime has a non-zero
+  // code and no stdout, exactly the runerr shape, so the order is what keeps a hang
+  // from filing itself where nothing fails (#2567).
+  assert_eq(is_deadline(124), true)
+  assert_eq(is_deadline(1), false)
+  assert_eq(is_deadline(0), false)
 }
 
 test "differing output is a mismatch, identical is a match" {
