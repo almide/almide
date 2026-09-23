@@ -602,6 +602,24 @@ fn fmt_ctor_arm_head(
     format!("{}({})", name, parts.join(", "))
 }
 
+/// Whether every row's head constructor belongs to the subject type's
+/// constructor space. A foreign head (`ok(x)` over a record, `some(x)` over a
+/// variant) is a pattern/type mismatch the checker has already reported;
+/// coverage over it is meaningless, and reporting a missing arm on top of the
+/// mismatch is a cascade that points at the wrong fix.
+fn heads_fit(matrix: &[Vec<Pat>], ty: &Ty, env: &TypeEnv) -> bool {
+    let set = ctor_set(ty, env);
+    matrix.iter().all(|row| match row.first() {
+        Some(Pat::Ctor(c, _)) => match &set {
+            CtorSet::Finite(all) => all.contains(c),
+            CtorSet::Single(one) => c == one,
+            CtorSet::Infinite => matches!(c, CtorId::Lit(_)),
+            CtorSet::Opaque => true,
+        },
+        _ => true,
+    })
+}
+
 // ────────────────────────────────────────────────
 //  Public API
 // ────────────────────────────────────────────────
@@ -645,6 +663,9 @@ pub fn check_exhaustiveness(
         })
         .collect();
 
+    if !heads_fit(&matrix, &resolved, env) {
+        return vec![];
+    }
     let types = vec![resolved.clone()];
 
     // Iteratively find up to 3 witnesses.
@@ -692,6 +713,16 @@ pub fn find_unreachable_arms(
 ) -> Vec<usize> {
     let resolved = env.resolve_named(subject_ty);
     if matches!(ctor_set(&resolved, env), CtorSet::Opaque) {
+        return vec![];
+    }
+    let all_rows: Vec<Vec<Pat>> = arms
+        .iter()
+        .flat_map(|a| match &a.pattern {
+            ast::Pattern::Or { alts } => alts.iter().map(|p| vec![lower(p, &resolved, env)]).collect::<Vec<_>>(),
+            p => vec![vec![lower(p, &resolved, env)]],
+        })
+        .collect();
+    if !heads_fit(&all_rows, &resolved, env) {
         return vec![];
     }
     let types = vec![resolved.clone()];
