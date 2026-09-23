@@ -80,6 +80,8 @@ impl Emitter<'_> {
             // #2010 item 5: a Value block releases its Str / Array / Object
             // payload through its tagged glue.
             SliceTy::Value => true,
+            // A flat matrix block: `$dec_flat` (dec_fn_of's default).
+            SliceTy::Matrix => true,
             _ => false,
         }
     }
@@ -382,6 +384,9 @@ pub(crate) fn rc_droppable_ty(types: &crate::types_table::TypeTable, t: SliceTy)
             SliceTy::Fn(_) => true,
             // #2010 item 5: a Value through its tagged payload glue.
             SliceTy::Value => true,
+            // A matrix is ONE flat block (`[rows][cols][f64…]`, no interior
+            // handles): `$dec_flat` releases it whole.
+            SliceTy::Matrix => true,
             _ => false,
         }
     }
