@@ -339,7 +339,7 @@ pub(crate) fn canonical_record_key<'a>(layouts: &'a RecordLayouts, name: &str) -
     let suffix = format!(".{name}");
     let mut found: Option<&'a str> = None;
     for k in layouts.keys() {
-        if k.ends_with(&suffix) {
+        if k.ends_with(&suffix) && !bare_is_stdlib_own_identity(name, k) {
             if found.is_some() {
                 return None; // ambiguous bare name — walled, never a guess
             }
@@ -347,6 +347,20 @@ pub(crate) fn canonical_record_key<'a>(layouts: &'a RecordLayouts, name: &str) -
         }
     }
     found
+}
+
+/// The bare spelling of a STDLIB-OWNED type name (`Value`, `Endian`, `Url`, …)
+/// is that stdlib type's own canonical identity — the `Ty::Named("Value")`
+/// every linked registry body carries — and a user scope's declaration of the
+/// same name (`self.Value`, `m.Value`; #1828) is a different type that merely
+/// spells alike. The unique-suffix fallback must not bridge the two (#2567):
+/// it did, and `json.parse`'s `List[Value]` accumulator lowered against the
+/// user's `{ n: Int }` layout — its drops walked an Int as a handle, and the
+/// incumbent leg of `stdlib_type_shadow.almd` never terminated. A BUNDLED
+/// module's own qualified key (`bytes.Endian`) is still reachable by its bare
+/// name, exactly as before.
+fn bare_is_stdlib_own_identity(bare: &str, qualified: &str) -> bool {
+    almide_lang::stdlib_info::stdlib_type_vs_user_shadow(bare, qualified)
 }
 
 /// The [`canonical_record_key`] resolution over a NAME SET (the drop generators'
@@ -361,7 +375,7 @@ pub(crate) fn canonical_name_in<'a>(
     let suffix = format!(".{name}");
     let mut found: Option<&'a str> = None;
     for k in names {
-        if k.ends_with(&suffix) {
+        if k.ends_with(&suffix) && !bare_is_stdlib_own_identity(name, k) {
             if found.is_some() {
                 return None;
             }
