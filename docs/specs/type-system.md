@@ -1,4 +1,4 @@
-> Last updated: 2026-03-28
+> Last updated: 2026-09-24
 
 # Type System Specification
 
@@ -559,6 +559,74 @@ test "multiple bounds" {
   assert_eq(show_named(Widget { id: 1, name: "knob" }), "knob: #1")
 }
 ```
+
+### Generic Protocols (Explicit Conformance)
+
+A protocol may declare type parameters. A type conforms to ONE instantiation
+of it, named at the declaration; a generic function is bounded by an APPLIED
+protocol:
+
+```almide
+protocol Repository[K, V] {
+  fn find(self, key: K) -> V?
+  fn put(mut self, key: K, value: V) -> Unit
+}
+
+type User = { id: Int, name: String }
+type Users: Repository[Int, User] = { rows: List[User] }
+
+fn Users.find(self, key: Int) -> User? = self.rows |> list.find((u) => u.id == key)
+
+fn Users.put(mut self, key: Int, value: User) -> Unit = {
+  self.rows = (self.rows |> list.filter((u) => u.id != key)) + [value]
+}
+
+fn rename[R: Repository[Int, User]](mut repo: R, id: Int, name: String) -> Unit =
+  repo.put(id, User { id: id, name: name })
+
+fn lookup[K, V, R: Repository[K, V]](repo: R, key: K) -> V? = repo.find(key)
+
+test "generic protocol through an applied bound" {
+  var users = Users { rows: [] }
+  rename(users, 1, "ada")
+  assert_eq(lookup(users, 1).map((u) => u.name) ?? "-", "ada")
+}
+```
+
+Rules the checker enforces:
+
+1. **Exact arguments.** A conformance and a bound give one type per protocol
+   parameter (`Repository[Int, User]`). A generic protocol named without its
+   arguments, or with the wrong number, is an error at the reference.
+2. **One conformance per protocol.** `type X: Repository[Int, User],
+   Repository[String, User]` is ambiguous (the `fn X.find` definitions are
+   the one implementation) and is rejected; so is a bound naming the same
+   protocol twice.
+3. **Deterministic implementation.** A call through `[R: Repository[Int,
+   User]]` runs the argument type's own `Type.method`. The type's declared
+   arguments must equal the bound's (nominally: two records with the same
+   fields are different arguments); no other implementation is searched for.
+   A letter only the bound names (`K`, `V` above) is pinned by the
+   conformance, at the call site and in monomorphization.
+4. **Effect and ownership are part of the method signature.** An
+   implementation of a generic protocol's method is `effect` exactly when the
+   protocol method is, and takes `mut` exactly the parameters it does
+   (`mut self` is the shorthand for `mut self: Self`).
+5. **Qualified names.** A protocol declared in another module is named with
+   that module, as a type is: `[R: ports.Repository[K, V]]`,
+   `type MemUsers: ports.Repository[domain.UserId, domain.User]`. The
+   qualifier must name the module that declares the protocol. The bare name
+   still resolves (protocol names were global before) and is a deprecation
+   warning whose machine-applicable fix is the qualified spelling.
+
+Calls through a bound are lowered by monomorphization, so an effect method
+reached through a bound propagates with `!` exactly as an ordinary effect call
+does. A protocol is not a type (`List[Repository[Int, User]]` is E029);
+protocol-as-type is a separate, later stage (#1589).
+
+Tests: `spec/wasm_cross/generic_protocol_conformance.almd` (C-365),
+`spec/integration/generic_protocol_ports/` (ports / adapters / service across
+modules), `tests/diagnostics/protocol-*`, `tests/protocol_qualification_test.rs`
 
 ### Marker Protocols
 

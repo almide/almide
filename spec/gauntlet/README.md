@@ -99,10 +99,10 @@ mode of a router should be a wall, never a misread.
 |---|---|
 | `s1_protocol_fallible_return` | fixed (`-> T!` / `-> T!E` were parse errors in a protocol method) |
 | `s2_multiline_tuple` | fixed (a tuple literal could not span lines; list/record/map could) |
-| `s3_module_qualified_protocol` | **open, unfiled** — `ports.Store` is a parse error in a bound and in a conformance list; the bare name resolves globally, while *types* must be qualified. The rule is exactly inverted between the two |
-| `s4_bare_mut_self` | **open, unfiled** — `mut self` is a parse error; `mut self: Self` is required |
+| `s3_module_qualified_protocol` | **closed (#1589 stage 1)** — `ports.Store` parses in a bound and in a conformance list, and the qualifier must name the declaring module, as for a type. The bare cross-module name still resolves but is a deprecation warning whose machine fix is the qualified spelling |
+| `s4_bare_mut_self` | **closed (#1589 stage 1)** — `mut self` is the shorthand for `mut self: Self` wherever a receiver is written |
 | `s5_match_self` | **closed (#1590)** — `self` was on the parser's rejected-ident table and the used-as-identifier lookahead had no `{` case; `self` now parses as the ordinary identifier it is, and the cell checks green |
-| `s6_generic_protocol` | **diagnosed honestly (#1590), expressiveness open (#1589)** — the adoption now refuses at the declaration with the root cause (generic-protocol adoption cannot bind `T`) instead of demanding an unimplementable `-> Option[T]`; the Repository abstraction itself still needs #1589 |
+| `s6_generic_protocol` | **closed (#1589 stage 1)** — `type UserRepo: Repository[User]` and `[R: Repository[User]]` are accepted with exact argument substitution; the call runs the one declared implementation (C-365, `spec/integration/generic_protocol_ports/`) |
 | `s7_protocol_as_type` | **diagnosed honestly (#1590), expressiveness open (#1589)** — E029 now says "'Policy' is a protocol, not a type" and the derived `E002`s are suppressed; the `List[Policy]` shape still emits one element-mismatch `E001` first (noted on #1590), and existential dispatch remains #1589 |
 
 **Invariant for greenfield**: these are design decisions, not bugs — decide them

@@ -236,7 +236,41 @@ fn run_action[T: Action](action: T, ctx: Context) -> Result[String, String] =
 ```
 Built-in conventions (Eq, Repr, Ord, Hash, Codec) are protocols too.
 
-The first parameter can be named/typed explicitly (`a: GreetAction`) or written as bare `self` (sugar for `self: Self`) — both resolve to the declaring type on a convention method, same as inside a `protocol { ... }` declaration.
+The first parameter can be named/typed explicitly (`a: GreetAction`) or written as bare `self` (sugar for `self: Self`) — both resolve to the declaring type on a convention method, same as inside a `protocol { ... }` declaration. A mutating receiver is `mut self` (sugar for `mut self: Self`).
+
+### Generic protocols (explicit conformance)
+A protocol may take type parameters. A type conforms to ONE instantiation, named at its declaration; a generic fn is bounded by the applied protocol. The call runs that type's own method — nothing else is searched for.
+```almide check
+protocol Repository[K, V] {
+  fn find(self, key: K) -> V?
+  fn put(mut self, key: K, value: V) -> Unit
+}
+
+type User = { id: Int, name: String }
+type Users: Repository[Int, User] = { rows: List[User] }
+
+fn Users.find(self, key: Int) -> User? = self.rows |> list.find((u) => u.id == key)
+
+fn Users.put(mut self, key: Int, value: User) -> Unit = {
+  self.rows = (self.rows |> list.filter((u) => u.id != key)) + [value]
+}
+
+fn rename[R: Repository[Int, User]](mut repo: R, id: Int, name: String) -> Unit =
+  repo.put(id, User { id: id, name: name })
+
+fn lookup[K, V, R: Repository[K, V]](repo: R, key: K) -> V? = repo.find(key)
+
+effect fn main() -> Unit = {
+  var users = Users { rows: [] }
+  rename(users, 1, "ada")
+  println(lookup(users, 1).map((u) => u.name) ?? "-")
+}
+```
+- Give exactly one type per parameter, at the conformance and in the bound: `Repository[Int, User]`, never bare `Repository`.
+- One conformance per protocol per type; wrap the type for a second instantiation.
+- An implementation matches the protocol method's `effect` and `mut` exactly.
+- A protocol from another module is named with the module, like a type: `[R: ports.Repository[K, V]]`, `type Mem: ports.Repository[Id, User]`.
+- A protocol is a bound, not a type: `List[Repository[Int, User]]` is an error.
 
 ## Expressions
 
