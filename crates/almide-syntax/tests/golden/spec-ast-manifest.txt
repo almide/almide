@@ -1,4 +1,4 @@
-# oracle: almide 0.63.0 (dev) at 70ad67a31 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.63.0 (dev) at f3665c838 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -614,7 +614,7 @@ a65e9a8553a9d82208949d7eeab250b8b6207e65be9a6ad4d2712ec2a3a8734d	spec/stdlib/tes
 3c88fd1a5d6776f1eefe36d40512ca9c10eee7ada9d80c7a4bb505f09649a863	spec/stdlib/value_test.almd
 ab7b5f1578bd71255b1a926c6b63c9a5ffe0f6317e9584d52ef1e166dbef63d5	spec/stdlib/zlib_semantics_manifest_test.almd
 7d6152f4b33dc83bf29fe5cbcb64ae0d8ddd1e098773b998b8e6ea6230ab90e2	spec/stdlib/zlib_test.almd
-5d1d65ba9d301914acbba0b50af0139317a2df7e06506ada21da753785ca1901	spec/wasm_cross/accum_recursion_declined.almd
+bfead41a59554f2da338b1d0afb28bc21d46557908fb2eb18bfabd927d811445	spec/wasm_cross/accum_recursion_declined.almd
 ee9e48c927353aee2f6ef6e2512e8bf52f9f5a00dc2b42dcea240d550a926713	spec/wasm_cross/accum_recursion_int.almd
 9497f0581c4db0fbc7f2e266753a06a3881952ac01667fb60f2c0706c9647468	spec/wasm_cross/adr0005_operator_equivalence.almd
 72850dabc34082686de0b875f4aaa9070924c50cfedba41dbb74fc5046fa223b	spec/wasm_cross/alias_combinator_rc.almd
