@@ -98,44 +98,7 @@ A bare prefix (`0x` with no digits) is a compile error, never a silent `0`.
 ```
 fn name(x: Type, y: Type) -> RetType = expr
 fn name(x: Type) -> Int!                             // pure-fallible: sugar for Result[Int, String]
-effect fn name(x: Type) -> Result[T, E] = expr       // has side effects
-```
-
-### Pure-fallible marker `-> T!` (ADR-0002 Phase 1)
-
-`-> T!` declares a pure fn that can fail: the return IS `Result[T, String]`.
-`!` propagates inside (no effect fn needed), and a VALUE tail lifts into
-`ok(...)` automatically — write the payload, or write the Result explicitly;
-both work:
-
-```almide check
-fn parse_port(s: String) -> Int! = int.parse(s)      // pass-through (already a Result)
-fn double_port(s: String) -> Int! = int.parse(s)! * 2  // value tail — lifts into ok(...)
-fn checked(s: String) -> Int! = {
-  let n = int.parse(s)!                              // ! propagates in a T! body
-  guard n > 0 else err("must be positive")
-  n                                                  // value tail lifts (ok(n) also fine)
-}
-```
-
-A LAMBDA whose body uses `!` becomes a fallible closure `(A) -> Result[T, String]`
-(first-class; a fallible callback to a core list HOF takes the first-err form;
-fn-type slots spell it `(A) -> B!`). In test blocks a lambda's `!` stays plain
-unwrap. `!` the RETURN MARKER is legal ONLY in return position of a fn
-declaration and in fn-type slots.
-
-The marker carries a TYPED error too (ADR-0012 D2): `-> T!E` ≡ `Result[T, E]`
-for a NAMED error type E, and `T!` stays the abbreviation of `T!String`. `?`
-binds first: `-> B?!E` is `Result[Option[B], E]`. Propagation is unchanged —
-`!` never converts E (ADR-0003/0004: branch on structure, not message text);
-an E mismatch stays a check error.
-
-```almide check
-type ConfigError = | Missing(String) | BadValue(String)
-fn load(path: String) -> String!ConfigError = {
-  guard path != "" else err(Missing(path))
-  "text"                          // value tail lifts into ok(...) with E=ConfigError
-}
+effect fn name(x: Type) -> T = expr                  // touches the world; a call is written name(x)! — see Effects
 ```
 
 ### Option shorthand `T?` (ADR-0010)
@@ -208,6 +171,147 @@ in-place stdlib op works (`list.push`, `list.pop`, `list.clear`, `map.insert`,
 parameter, so a local buffer is a `var` and a helper that writes its caller's
 buffer declares `mut b: Bytes`. Value semantics otherwise: `let c = a` copies,
 and a callee cannot reach its caller's binding through a plain parameter.
+
+## Effects, failure and `!`
+
+### `effect fn` and the `!` at its call sites (ADR-0002 §D6, ADR-0008)
+
+`effect fn f() -> T` touches the world (fs, http, process, random, io, …).
+A user-declared effect fn is **always fallible**: a call yields
+`Result[T, String]`, even when the body cannot fail. `-> T` is the canonical
+spelling — the `effect` already says it can fail.
+
+Read the `!` on an effect call like Swift's `await`: it marks the point where
+the world is touched, whether or not this particular call can fail (Almide has
+no `await`; this is only the reading). It is Swift's `try`, **not** `try!`:
+it propagates the error to the enclosing fn and never traps.
+
+| Call | What to write |
+|---|---|
+| a user-declared effect fn, or a stdlib one that can fail (`fs.read_text`, …) | `f()!` to propagate · `let _ = f()` to discard on purpose · or `match` on `ok`/`err`. A bare `let x = f()` is E041, a bare statement `f()` is E042 |
+| a stdlib effect fn that cannot fail (`random.int`, `io.read_line`, `fs.exists`, …) | the value is plain; a `!` on it is a harmless no-op |
+
+The one rule that is always right: **write `!` on every effect call.** You never
+need to know whether a stdlib effect fn can fail to append it.
+
+```almide check
+import fs
+import random
+
+effect fn roll() -> Int = random.int(1, 6)      // body cannot fail, but a call still yields a Result
+
+effect fn main() -> Unit = {
+  let a = roll()!                                // user-declared effect fn: `!` required
+  let b = random.int(1, 6)                       // stdlib effect fn that cannot fail: plain Int
+  let c = random.int(1, 6)!                      // ...and a `!` on it is a harmless no-op
+  let _ = fs.remove("scratch.txt")               // discard an error on purpose
+  println("${a} ${b} ${c}")
+}
+```
+
+### Pure-fallible marker `-> T!` (ADR-0002 Phase 1)
+
+`-> T!` declares a pure fn that can fail: the return IS `Result[T, String]`.
+`!` propagates inside (no effect fn needed), and a VALUE tail lifts into
+`ok(...)` automatically — write the payload, or write the Result explicitly;
+both work:
+
+```almide check
+fn parse_port(s: String) -> Int! = int.parse(s)      // pass-through (already a Result)
+fn double_port(s: String) -> Int! = int.parse(s)! * 2  // value tail — lifts into ok(...)
+fn checked(s: String) -> Int! = {
+  let n = int.parse(s)!                              // ! propagates in a T! body
+  guard n > 0 else err("must be positive")
+  n                                                  // value tail lifts (ok(n) also fine)
+}
+```
+
+A LAMBDA whose body uses `!` becomes a fallible closure `(A) -> Result[T, String]`
+(first-class; a fallible callback to a core list HOF takes the first-err form;
+fn-type slots spell it `(A) -> B!`). In test blocks a lambda's `!` stays plain
+unwrap. `!` the RETURN MARKER is legal ONLY in return position of a fn
+declaration and in fn-type slots.
+
+The marker carries a TYPED error too (ADR-0012 D2): `-> T!E` ≡ `Result[T, E]`
+for a NAMED error type E, and `T!` stays the abbreviation of `T!String`. `?`
+binds first: `-> B?!E` is `Result[Option[B], E]`. Propagation is unchanged —
+`!` never converts E (ADR-0003/0004: branch on structure, not message text);
+an E mismatch stays a check error.
+
+```almide check
+type ConfigError = | Missing(String) | BadValue(String)
+fn load(path: String) -> String!ConfigError = {
+  guard path != "" else err(Missing(path))
+  "text"                          // value tail lifts into ok(...) with E=ConfigError
+}
+```
+
+### Unwrap operators
+```
+expr!              // unwrap Result/Option, propagate the failure (effect fn, or a pure fn returning Result/Option)
+expr ?? fallback   // unwrap or use fallback value
+expr?              // Result → Option (err → none)
+expr?.field        // optional chaining (Option[Record] → Option[FieldType])
+o?.x ?? default    // the idiom: read a field if present, else default (ADR-0005; `?.` is Option-only — on a Result write `(r?)?.x`)
+```
+
+Each value-level operator is the desugaring of a named stdlib function (ADR-0005):
+`x ?? d` ≡ `option.unwrap_or_else(x, () => d)` / `result.unwrap_or_else(r, (_) => d)`
+(the fallback is lazy), `r?` ≡ `result.to_option(r)`, `o?.x` ≡ `option.map(o, (v) => v.x)`.
+`o?` on a value that is already an Option is a no-op and warns (E056).
+
+### Reading a file that may not exist (ADR-0004 D4)
+
+Absence is a value, not an error — never branch on the error text:
+
+```almide
+let cfg = fs.read_text_if_exists(path)! ?? "default"
+//  ok(none) = absent (missing parents too) / err = permission, IO — real failures
+// family: read_text / read_bytes / read_lines / read_bytes_raw + _if_exists
+```
+
+### Error-handling doctrine (ADR-0004)
+
+**Choosing `E` is a layer assignment, not a taste call.** `E = String` is the
+**erasure** layer — the *reporting* channel, read by humans and models; it is
+the default. A variant `E` is the **refinement** layer — the *branching*
+channel, where the program changes behaviour on the content — and it is worth
+its cost only inside a **closed domain**: a module or package that takes care
+of that error itself. Crossing out of that domain, the variant is **demoted**
+back to String, and the demotion is always visible as a `map_err` (there is no
+conversion hook, so it cannot happen silently). Full rule:
+[docs/specs/result-option-effect.md §8.0](./specs/result-option-effect.md).
+
+**Never branch on the text of an error message** (`string.contains(e, …)`,
+`e == "No such file"`) — the text is a report, not an API, and E035 warns.
+When a caller must branch on the failure *kind*, that is the signal to
+define a variant error type and match on its structure:
+
+```almide
+type LoadError = | NotFound(String) | BadValue(String)
+
+match load(p) {
+  ok(v)               => v,
+  err(NotFound(_))    => default_value,     // branch on structure
+  err(BadValue(msg))  => process.exit(1),
+}
+```
+
+For a kind-independent fallback, don't read the error at all: `load(p) ?? default`.
+
+**Adding context to an error** — the canonical spelling (do not invent
+variants; keep `": "` as the separator and `${e}` at the end):
+
+```almide
+let cfg = fs.read_text(path) |> result.map_err((e) => "loading config: ${e}")!
+// chained calls read as the failure's story:
+//   Error: starting server: loading config: No such file or directory
+
+// deliberate replacement is spelled with the discard parameter:
+fs.read_text(path) |> result.map_err((_) => "friendly message")
+// forgetting ${e} with a NAMED parameter warns (E036) — the original error
+// would be silently destroyed
+```
 
 ## Built-in Protocols
 Eq and Hash are automatic (compiler-derived from type structure). No annotation needed.
@@ -465,34 +569,6 @@ f([:]: Map[String, Int])    // typed empty map in call args
 let { name, age } = user    // record destructure (1 level only)
 ```
 
-### Unwrap operators
-```
-expr!              // unwrap Result/Option, propagate the failure (effect fn, or a pure fn returning Result/Option)
-expr ?? fallback   // unwrap or use fallback value
-expr?              // Result → Option (err → none)
-expr?.field        // optional chaining (Option[Record] → Option[FieldType])
-o?.x ?? default    // the idiom: read a field if present, else default (ADR-0005; `?.` is Option-only — on a Result write `(r?)?.x`)
-```
-
-Each value-level operator is the desugaring of a named stdlib function (ADR-0005):
-`x ?? d` ≡ `option.unwrap_or_else(x, () => d)` / `result.unwrap_or_else(r, (_) => d)`
-(the fallback is lazy), `r?` ≡ `result.to_option(r)`, `o?.x` ≡ `option.map(o, (v) => v.x)`.
-`o?` on a value that is already an Option is a no-op and warns (E056).
-
-`!` on an effect CALL always compiles: if the fn never fails (`random.int`,
-`fs.exists`, …) the `!` is a silent no-op. You never need to know whether a
-stdlib effect fn can fail to append it.
-
-### Reading a file that may not exist (ADR-0004 D4)
-
-Absence is a value, not an error — never branch on the error text:
-
-```almide
-let cfg = fs.read_text_if_exists(path)! ?? "default"
-//  ok(none) = absent (missing parents too) / err = permission, IO — real failures
-// family: read_text / read_bytes / read_lines / read_bytes_raw + _if_exists
-```
-
 ### Processing a file line-by-line (large files)
 
 `fs.read_lines` materializes the whole file — fine for small files, a memory
@@ -531,49 +607,6 @@ chunk body handles its own error.
 ```almide
 let (oks, errs) = result.partition(results)
 if list.is_empty(errs) then ok(oks) else err(errs)   // Result[List[T], List[E]]
-```
-
-### Error-handling doctrine (ADR-0004)
-
-**Choosing `E` is a layer assignment, not a taste call.** `E = String` is the
-**erasure** layer — the *reporting* channel, read by humans and models; it is
-the default. A variant `E` is the **refinement** layer — the *branching*
-channel, where the program changes behaviour on the content — and it is worth
-its cost only inside a **closed domain**: a module or package that takes care
-of that error itself. Crossing out of that domain, the variant is **demoted**
-back to String, and the demotion is always visible as a `map_err` (there is no
-conversion hook, so it cannot happen silently). Full rule:
-[docs/specs/result-option-effect.md §8.0](./specs/result-option-effect.md).
-
-**Never branch on the text of an error message** (`string.contains(e, …)`,
-`e == "No such file"`) — the text is a report, not an API, and E035 warns.
-When a caller must branch on the failure *kind*, that is the signal to
-define a variant error type and match on its structure:
-
-```almide
-type LoadError = | NotFound(String) | BadValue(String)
-
-match load(p) {
-  ok(v)               => v,
-  err(NotFound(_))    => default_value,     // branch on structure
-  err(BadValue(msg))  => process.exit(1),
-}
-```
-
-For a kind-independent fallback, don't read the error at all: `load(p) ?? default`.
-
-**Adding context to an error** — the canonical spelling (do not invent
-variants; keep `": "` as the separator and `${e}` at the end):
-
-```almide
-let cfg = fs.read_text(path) |> result.map_err((e) => "loading config: ${e}")!
-// chained calls read as the failure's story:
-//   Error: starting server: loading config: No such file or directory
-
-// deliberate replacement is spelled with the discard parameter:
-fs.read_text(path) |> result.map_err((_) => "friendly message")
-// forgetting ${e} with a NAMED parameter warns (E036) — the original error
-// would be silently destroyed
 ```
 
 ### Guard (early return / loop break)
@@ -714,7 +747,7 @@ assert(cond)               // assert true
 ```almide check
 import io                                     // io is NOT auto-imported
 effect fn main() -> Unit = {
-  let line = io.read_line()                   // plain String — NOT a Result. Do not add ! or ?
+  let line = io.read_line()                   // plain String — it cannot fail, so NOT a Result (`!` is a no-op, `?` is E034)
   let n = int.parse(string.trim(line)) ?? 0   // int.parse(s) -> Result[Int, String]
   println(int.to_string(n))
 }
@@ -876,6 +909,7 @@ fn types, Result) — wrap those in a named Codec type or convert at the boundar
 - `[]` for generics, NOT `<>`
 - `<` `>` are always comparison operators
 - `effect fn` for side effects, NOT `fn name!()`
+- Every effect call is written `f()!` — read it like Swift `await`; it is Swift `try`, never `try!`
 - Predicate functions return `Bool` (no special suffix)
 - No exceptions — use `Result[T, E]` everywhere
 - No null — use `Option[T]`
@@ -913,6 +947,7 @@ fn types, Result) — wrap those in a named Codec type or convert at the boundar
 - `let err = f()` → **WRONG**. `ok`/`err`/`some`/`none` (and capitalized forms) are the built-in Result/Option constructors — reserved words. Rename the binding (`let msg = f()`), or backtick-escape to keep the name (`let `err` = f()`)
 - Nested `fn` inside a function → **WRONG**. All `fn` must be top-level. Use `let helper = (x) => ...` for local functions
 - `match x { ... pattern => expr }` with `...` → **WRONG**. No spread in patterns
+- `try f()` / `try! f()` / `f()?` for an effect call → **WRONG**. Write `f()!`. Almide's `!` is Swift's `try` (propagate), never `try!` (trap); `?` converts Result → Option
 - `async fn` / `await` → **WRONG**. Almide has no async/await. Use `fan.any` / `fan.settle` / `fan.race` / `fan.bounded` block forms
 - `fan.any([a, b])` / `fan.settle([...])` → **WRONG**. The thunk-list form was removed. Write `fan.any { a(), b() }`
 - `fan.bounded(100) {...}` / `fan.race(5000) {...}` → **WRONG**. A bare Int is not a time. Write `compute.ms(100)`
