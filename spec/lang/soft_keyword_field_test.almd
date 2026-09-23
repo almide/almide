@@ -63,7 +63,7 @@ test "field assignment targets a soft-keyword field" {
 test "record pattern destructures a soft-keyword field" {
   let f = Flags { ok: true, err: "boom", some: 7, none: false, todo: "x" }
   let label = match f {
-    Flags { ok: o, err: e, .. } => if o then e else "no",
+    Flags { ok: o, err: e, .. } => if o then e else "no"
   }
   assert_eq(label, "boom")
 }
