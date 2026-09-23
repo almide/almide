@@ -236,6 +236,7 @@ mod tests {
             generics: vec![],
             structural_bounds: Default::default(),
             protocol_bounds: Default::default(),
+            protocol_bound_args: Default::default(),
             mut_params: vec![],
         }
     }

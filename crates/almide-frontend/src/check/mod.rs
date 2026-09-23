@@ -1080,6 +1080,7 @@ impl Checker {
         // top-lets in the same isolated bracket the module refresh uses; the
         // real pass right after re-checks them and owns all reporting.
         self.refresh_module_top_lets(program, "__entry");
+        self.validate_protocol_refs(program);
         for decl in program.decls.iter_mut() { self.check_decl(decl); }
         self.solve_constraints();
         self.resolve_deferred_tuple_indices();
@@ -1511,4 +1512,137 @@ fn bare_protocol_refs(program: &ast::Program) -> std::collections::HashSet<Sym> 
         }
     }
     refs
+}
+
+/// One protocol reference as written in a bound or a conformance list
+/// (#1589): the bare name, its qualifier / arguments, and where it was
+/// written. `is_bound` is false for a `type X: P` conformance, whose argument
+/// count `validate_protocol_impls` judges against the implementation.
+struct WrittenProtocolRef<'a> {
+    name: Sym,
+    r: Option<&'a ast::ProtocolRef>,
+    span: Option<ast::Span>,
+    is_bound: bool,
+    owner: String,
+}
+
+fn written_protocol_refs(program: &ast::Program) -> Vec<WrittenProtocolRef<'_>> {
+    use crate::canonicalize::registration::SCALAR_TYPE_NAMES;
+    fn take<'a>(gs: &'a Option<Vec<ast::GenericParam>>, owner: &str, out: &mut Vec<WrittenProtocolRef<'a>>) {
+        for g in gs.iter().flatten() {
+            let Some(bounds) = &g.bounds else { continue };
+            if let [only] = bounds.as_slice() && SCALAR_TYPE_NAMES.contains(&only.as_str()) { continue; }
+            for (i, b) in bounds.iter().enumerate() {
+                out.push(WrittenProtocolRef {
+                    name: *b, r: ast::protocol_ref_at(&g.bound_refs, i), span: g.bound_spans.get(i).copied(),
+                    is_bound: true, owner: format!("bound '{}' of {}", g.name, owner),
+                });
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for decl in &program.decls {
+        match decl {
+            ast::Decl::Fn { name, generics, .. } => take(generics, &format!("'{}'", name), &mut out),
+            ast::Decl::Protocol { name, generics, .. } => take(generics, &format!("protocol '{}'", name), &mut out),
+            ast::Decl::Type { name, generics, deriving, deriving_refs, deriving_spans, .. } => {
+                take(generics, &format!("type '{}'", name), &mut out);
+                for (i, d) in deriving.iter().flatten().enumerate() {
+                    out.push(WrittenProtocolRef {
+                        name: *d, r: ast::protocol_ref_at(deriving_refs, i), span: deriving_spans.get(i).copied(),
+                        is_bound: false, owner: format!("type '{}'", name),
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+impl Checker {
+    /// #1589: protocol references are qualified by module the way types are.
+    ///   - `ports.Store` must name a module this file imports, and that
+    ///     module must be the one declaring `Store`;
+    ///   - a BARE reference to another module's protocol still resolves (it
+    ///     always has — protocol names resolve globally) but is deprecated,
+    ///     with the qualified spelling as a machine fix;
+    ///   - a bound's type arguments match the protocol's parameter count;
+    ///   - one type parameter bound by the same protocol twice is ambiguous.
+    pub(crate) fn validate_protocol_refs(&mut self, program: &ast::Program) {
+        let saved = self.current_span;
+        let mut seen_per_owner: std::collections::HashMap<(String, Sym), usize> = std::collections::HashMap::new();
+        for w in written_protocol_refs(program) {
+            self.current_span = w.span;
+            let Some(proto) = self.env.protocols.get(&w.name).cloned() else { continue };
+            let here = self.current_module_prefix.as_deref().map(sym);
+            match w.r.and_then(|r| r.module) {
+                Some(m) => {
+                    let canon = self.env.import_table.aliases.get(&m).copied();
+                    if canon.is_some() { self.env.import_table.used.insert(m); }
+                    if canon.is_none() || proto.origin != canon {
+                        let declared_in = match proto.origin {
+                            Some(o) if Some(o) == here => "this module".to_string(),
+                            Some(o) => format!("module '{}'", o),
+                            None => "the entry file (or it is built in)".to_string(),
+                        };
+                        let fix = match proto.origin.and_then(|o| self.alias_for_module(o)) {
+                            Some(a) => format!("Write `{}.{}`", a, w.name),
+                            None => format!("Write the bare name `{}`", w.name),
+                        };
+                        let msg = if canon.is_none() {
+                            format!("'{}.{}': no module '{}' is imported in this file", m, w.name, m)
+                        } else {
+                            format!("protocol '{}' is not declared in module '{}' — it is declared in {}", w.name, m, declared_in)
+                        };
+                        self.emit(err(msg, format!("{} — a qualified protocol name names the module that declares it, as a qualified type does", fix), w.owner.clone()));
+                    }
+                }
+                None => {
+                    if let Some(o) = proto.origin.filter(|o| Some(*o) != here) {
+                        let alias = self.alias_for_module(o);
+                        let hint = match &alias {
+                            Some(a) => format!("Write `{}.{}`: a protocol from another module is named with its module, the same way a type is (`{}.SomeType`). The bare name still resolves for now", a, w.name, a),
+                            None => format!("Import the declaring module and qualify the name (`import self.<module>` then `<module>.{}`): a protocol from another module is named with its module, the same way a type is", w.name),
+                        };
+                        let mut diag = almide_base::diagnostic::Diagnostic::warning(
+                            format!("protocol '{}' from module '{}' is referenced by its bare name", w.name, o),
+                            hint,
+                            w.owner.clone(),
+                        );
+                        if let (Some(a), Some(sp)) = (alias, w.span) {
+                            let end = sp.col + w.name.as_str().chars().count();
+                            diag = diag.with_machine_fix(sp.line, sp.col, end, format!("{}.{}", a, w.name));
+                        }
+                        self.emit(diag);
+                    }
+                }
+            }
+            let given = w.r.map_or(0, |r| r.args.len());
+            if w.is_bound && given != proto.generics.len() {
+                let ctx = format!("{} : {}", w.owner, w.name);
+                self.emit(crate::canonicalize::registration::protocol_arg_count_err(&proto, given, &w.owner, &ctx));
+            }
+            if w.is_bound {
+                let n = seen_per_owner.entry((w.owner.clone(), w.name)).or_insert(0);
+                *n += 1;
+                if *n == 2 {
+                    self.emit(err(
+                        format!("{} names protocol '{}' twice — which conformance a call uses would be ambiguous", w.owner, w.name),
+                        format!("Bound the parameter by '{}' once. A type conforms to a protocol exactly once, so two different argument lists can never both hold", w.name),
+                        w.owner.clone(),
+                    ));
+                }
+            }
+        }
+        self.current_span = saved;
+    }
+
+    /// The alias this file imports canonical module `m` under, if any.
+    fn alias_for_module(&self, m: Sym) -> Option<Sym> {
+        let mut hits: Vec<Sym> = self.env.import_table.aliases.iter()
+            .filter(|(_, c)| **c == m).map(|(a, _)| *a).collect();
+        hits.sort_by_key(|a| a.as_str().to_string());
+        hits.into_iter().next()
+    }
 }

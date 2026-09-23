@@ -75,6 +75,7 @@ impl Checker {
             &mut self.current_module_prefix,
             Some(module_name.to_string()),
         );
+        self.validate_protocol_refs(prog);
         for decl in prog.decls.iter_mut() { self.check_decl(decl); }
         self.solve_constraints();
         self.resolve_deferred_tuple_indices();
@@ -246,6 +247,17 @@ impl Checker {
                 }
             }
         }
+        // Applied bounds' type arguments (#1589), resolved once every letter
+        // of this declaration is in scope — `[R: Repository[K, V], K, V]`
+        // names letters declared after the bound.
+        for g in gs.iter() {
+            for (i, b) in g.bounds.iter().flatten().enumerate() {
+                let Some(r) = ast::protocol_ref_at(&g.bound_refs, i) else { continue };
+                if r.args.is_empty() { continue; }
+                let args: Vec<Ty> = r.args.iter().map(|a| self.resolve_type_expr(a)).collect();
+                self.env.generic_protocol_bound_args.insert((g.name, *b), args);
+            }
+        }
         shadowed
     }
 
@@ -257,6 +269,9 @@ impl Checker {
                 self.env.types.remove(&sym(&g.name));
                 self.env.structural_bounds.remove(&sym(&g.name));
                 self.env.generic_protocol_bounds.remove(&sym(&g.name));
+                for b in g.bounds.iter().flatten() {
+                    self.env.generic_protocol_bound_args.remove(&(g.name, *b));
+                }
             }
         }
         for (gn, prev) in shadowed.into_iter().rev() {
