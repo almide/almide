@@ -1,13 +1,16 @@
 # ADR-0002: Fallibility and effect are orthogonal axes; `-> T!` marks pure-fallible
 
-- **Status**: Accepted(設計批准。Phase 1 出荷済 #1103 / #1108、Phase 2 起票済 #2563、Phase 3 未定 — Phase 計画は本文 §D5)。
+- **Status**: Accepted、**2026-09-24 に一部撤回**(§D6)。Phase 1 出荷済 #1103 / #1108。
+  「effect・総」象限と、それを作るための Phase 2 / Phase 3 は撤回 — `effect fn f() -> T` は
+  常に `T!` の意味(#2563 は not planned)。pure 側の `-> T!` はそのまま。
   **Falsifier 2 計測済 2026-09-23**(#2556、develop 8e0c2dcbb、playground 958ddea):
   effect fn 987 本のうち **静的に分類できないのは 4 本**(`-> T` intrinsic で Almide 本体なし:
   `env.set` / `env.sleep_ms` / `http.serve` / `process.exit`)。残りは fallible 574 / total 307 /
   intrinsic だが署名 `-> Result` で可謬 82 / intrinsic だが self-host 本体で総 20
   (列ごとの内訳は §Falsifier 2 の表)。
   再現: `ALMIDE_BIN=target/release/almide python3 tools/effect_fn_fallibility.py stdlib=stdlib spec=spec playground=<playground>/web/examples`
-  (§Falsifier 2 の追記を参照。○ 2026-09-23 — Falsifier 2 は発火せず(残り 4/987)、Phase 2 起票 #2563)
+  (§Falsifier 2 の追記を参照。○ 2026-09-23 — Falsifier 2 は発火せず(残り 4/987)、Phase 2 起票 #2563。
+  その後 2026-09-24 に §D6 で象限ごと撤回したため、この計測は Phase 2 の根拠としては使われない)
 - **Date**: 2026-08-05
 - **決定範囲**: 関数宣言の失敗チャネル表記(`-> T!`)、`effect fn` の意味論の再分解、
   `!` 演算子の意味の固定、失敗を「値」で表すか「⊥(統制停止)」で表すかの規準
@@ -58,10 +61,13 @@ spec に purity / fallibility / totality の区別が書かれておらず、
 `effect` キーワードは capability のみを、戻り型位置の後置 `!`(`-> T!`)は
 fallibility のみを意味する。** 最終文法は 4 象限:
 
+> **2026-09-24 改訂(§D6)**: 3 行目「effect・総」は撤回。effect は可謬を含意し、
+> `effect fn f() -> Int` は 4 行目と同じ意味(lift あり)で確定。直交するのは pure 側だけ。
+
 ```almide
 fn        f() -> Int      // pure  ・総(失敗しない)
 fn        f() -> Int!     // pure  ・可謬     ← 新設(Phase 1)
-effect fn f() -> Int      // effect・総       ← Phase 3 で表現可能になる
+effect fn f() -> Int      // effect・総       ← 撤回(2026-09-24、§D6)— 4 行目と同義
 effect fn f() -> Int!     // effect・可謬     ← 今の effect fn
 ```
 
@@ -108,11 +114,45 @@ operand 型を見て hint を分岐、末尾形には machine-applicable な
 
 - **Phase 1(追加のみ・非破壊)**: pure に `-> T!` 導入。E022 hint 更新。
   `try_*` family 等の callback slot を `(A) -> B!` 表記に更新(意味不変)。
-- **Phase 2(警告窓)**: `effect fn f() -> T!` を現行 effect fn の同義として許可。
+- ~~**Phase 2(警告窓)**~~ **撤回(§D6)**: `effect fn f() -> T!` を現行 effect fn の同義として許可。
   本体が可謬なのに `-> T` な effect fn へ deprecation 警告 + `almide fix` が `!` を機械挿入。
-- **Phase 3(意味反転)**: `effect fn f() -> T` を**総**(lift なし)と再定義。
+- ~~**Phase 3(意味反転)**~~ **撤回(§D6)**: `effect fn f() -> T` を**総**(lift なし)と再定義。
   `env.args` / `random.int` らの署名が正直になり、never-err elision が型に裏打ちされる。
   stdlib 宣言を一括更新。**Phase 3 の実施時期は未定**(Falsifier 条件を先に監視)。
+
+### D6. 改訂(2026-09-24): effect は可謬を含意する — 「effect・総」象限の撤回
+
+**`effect fn f() -> T` は常に `T!` の意味(`Result[T, String]` への lift)とし、これを最終形とする。**
+Phase 2(`-> T!` 綴りの受理と警告窓、#2563)と Phase 3(`effect fn -> T` を総に意味反転)は
+実施しない。pure 側の 2 象限(`-> T` / `-> T!`、Phase 1)は変更なし。
+
+理由:
+
+1. **本 ADR 自身の規準(D1)と矛盾していた。** D1 は「世界の状態に依存する失敗は effect 圏で表す」
+   と定める。effect fn は定義上世界に触る関数なので、この規準では可謬になる。「effect・総」は
+   規準の外にある升だった。
+2. **「総」に見える effect fn も実行時には失敗しうる。** #2556 の計測で total に分類された
+   effect fn(`io.print`、`random.float`、`env.sleep_ms` …)は、Almide の字面に `!` / `err` が無い
+   というだけで、SIGPIPE・OS の乱数源・シグナルによる中断で失敗しうる。分類器は世界を見ていない。
+3. **MSR の観点で損が大きい。**
+   - 修正の局所性: 総の effect fn に可謬な呼び出しを 1 つ足すと署名が `-> T!` に変わり、
+     全呼び出し元に `!` が要る(上へ連鎖)。今は全 effect fn が lift 済みなので、その修正は関数内で閉じる。
+   - 既存コーパスは effect 呼び出しに一律 `!` を付けており、Phase 3 後は `random.float()!` の
+     ような付けすぎが新しいエラー群になる。
+   - Phase 2 の窓は `-> T` / `-> T!` の同義併存を作り、Falsifier 1 の懸念そのものになる。
+   - 得るものは小さい: 意味のない `!` が消えるのは spec 37 / playground 7 箇所。実行時性能は
+     never-err elision(#840/#841)が既に取っている。
+   - 現状のコストは小さい: Dojo 2026-09-22〜23 の走行で `!` の書き忘れ(E041/E042)は
+     約 1,000 件の check エラー中 1 件(ただし effect fn を含むタスクは 234 記録中 48 件で、証拠は弱い)。
+
+帰結:
+
+- `!` が失敗しない呼び先(`random.float()` など)にも要る現状は**仕様**として残す。Swift / Rust
+  出身の読み手には儀式に見えるが、書き手(LLM)の失点源ではない。
+- 綴りは `effect fn f() -> T` のまま。`-> T!` を必須にする案は、`effect` と同じ情報の
+  二重記載・約 880 署名の移行・「`!` の書き忘れ」という新エラーを生むため採らない。
+- never-err elision は型ではなく codegen の最適化として存続する。
+- fn 型側の鏡映(ADR-0009 D1 の `effect (A) -> B`)も同じ扱い — effect ビットが立てば可謬。
 
 ## Rationale — なぜそれか
 
@@ -186,7 +226,8 @@ D4 の check 時エラー化はその是正。変換フック(From 相当)の導
 ## Consequences — 何が良くなり、何を払うか
 
 **得るもの**: 上記 Rationale の波及 4 点。加えて `effect` / `!` が 1 キーワード 1 意味に
-戻り、stdlib の署名が正直になる(Phase 3)。
+戻り、stdlib の署名が正直になる(Phase 3)。**2026-09-24 改訂: Phase 3 は撤回(§D6)。
+`effect` は capability に加えて可謬を含意する — 「1 キーワード 1 意味」は pure 側でのみ成立。**
 
 **払うもの**:
 - 文法表面の追加(戻り位置の `!`、fn 型 slot の `!`)とその教育コスト。
@@ -194,7 +235,7 @@ D4 の check 時エラー化はその是正。変換フック(From 相当)の導
   0.53.5 の one-name-one-meaning 運動(#1078)と緊張するが、あれは「1 関数に 2 名前」、
   これは「1 型に 2 記法」(`16` と `0x10` の関係)であり、デノテーション規則 1 行で固定する。
   **fmt がどちらへ正規化するかは未決**(open question)。
-- Phase 3 は全 effect fn の署名に触れる移行(機械書き換え可能だが、外部パッケージへの
+- ~~Phase 3 は全 effect fn の署名に触れる移行~~(撤回、§D6)(機械書き換え可能だが、外部パッケージへの
   波及は E040 のときと同様の下流走査が要る)。
 - pure-fallible に auto-`?` を入れることで、auto-`?` の位置非対称
   (matrix B 論点: 位置・注釈・パターン形で挙動が変わる)を pure 圏にも輸入する。
@@ -232,6 +273,8 @@ D4 の check 時エラー化はその是正。変換フック(From 相当)の導
    spec 37 / playground 7(fern の `walk(..)!` を含む)/ stdlib 0。
    spec の未計測 1 本(`spec/gauntlet/cells/s3_module_qualified_protocol`、parse 拒否 cell)。
    **○ 2026-09-23 — Falsifier 2 は発火せず(残り 4/987)、Phase 2 起票 #2563**(数値は上記、判断は #2556 の Exit 節)。
+   **2026-09-24 — 本 Falsifier は論点ごと消滅**: §D6 で「effect・総」象限を撤回し、Phase 2 / 3 を
+   実施しないため、effect fn を可謬/総に分類する必要がなくなった(#2563 は not planned)。
 3. **#1055 の設計が「fallibility は関数属性ではなく型構成子であるべき」という結論に
    達した場合**(D2 の属性モデルと矛盾するため、統合 ADR で supersede)。
 
