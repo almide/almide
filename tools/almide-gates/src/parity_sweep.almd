@@ -256,16 +256,17 @@ effect fn sweep(root: String, alm: String, rp: String, baseline_path: String, up
   )
   // A hang fails LOUDLY and before any ratchet (#2567): the sweep that found it had no
   // per-run limit and simply stopped, and the one that had a limit filed the fixture under
-  // RUNERR, where nothing fails. Neither is a verdict.
+  // RUNERR, where nothing fails. Neither is a verdict. After it, `--update` is the ratchet:
+  // the match list, sorted, one path per line — and an EMPTY list writes an empty file, as
+  // `cp` of an empty matches.txt does, not a lone newline.
   let hung = count_of(cells, "hang")
   if hung > 0 then Sweep {
-    lines: [summary] + classes + ["::error::output-parity: " + int.to_string(hung) + " fixture(s) HUNG on the v1 leg — a hang is never a baseline verdict; fix the renderer or wall the shape (#2567)"],
+    lines: [summary] + classes + [
+      "::error::output-parity: " + int.to_string(hung) + " fixture(s) HUNG on the v1 leg — a hang is never a baseline verdict; fix the renderer or wall the shape (#2567)"
+    ],
     matches: matches,
     ok: false,
-  }
-  // `--update`: the ratchet. The match list, sorted, one path per line — and an EMPTY list
-  // writes an empty file, as `cp` of an empty matches.txt does, not a lone newline.
-  else if update then {
+  } else if update then {
     let text = if list.len(matches) == 0 then "" else list.join(matches, "\n") + "\n"
     fs.write(baseline_path, text)!
     Sweep {
@@ -322,7 +323,14 @@ test "an empty class prints nothing at all, not an empty heading" {
 }
 
 test "counting is per class, and the classes do not overlap" {
-  let cells: List[(String, String)] = [("a", "match"), ("b", "match"), ("c", "wall"), ("d", "mismatch"), ("e", "v0fail"), ("f", "hang")]
+  let cells: List[(String, String)] = [
+    ("a", "match"),
+    ("b", "match"),
+    ("c", "wall"),
+    ("d", "mismatch"),
+    ("e", "v0fail"),
+    ("f", "hang")
+  ]
   assert_eq(count_of(cells, "match"), 2)
   assert_eq(count_of(cells, "wall"), 1)
   assert_eq(count_of(cells, "runerr"), 0)
