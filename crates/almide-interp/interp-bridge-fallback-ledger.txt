@@ -43,7 +43,6 @@ int.to_string  availability_pure_batch  floor: consumed inside a self-hosted bod
 math.cos  matrix_head_count_domain  floor: consumed inside a self-hosted body
 math.fpow  matrix_head_count_domain  floor: consumed inside a self-hosted body
 math.log  math_log_gamma  floor: consumed inside a self-hosted body
-math.log10  edge_float_formatting  floor: consumed inside a self-hosted body
 math.sin  math_log_gamma_negative  floor: consumed inside a self-hosted body
 string.chars  http_response_headers  floor: consumed inside a self-hosted body
 string.contains  fs_glob_segments  floor: consumed inside a self-hosted body
