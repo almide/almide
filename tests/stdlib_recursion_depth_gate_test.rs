@@ -59,8 +59,6 @@ const BOUNDED: &[(&str, &str, &str, &str)] = &[
     ("datetime_format.almd", "__iso_digits", "__iso_digits", DIGITS),
     ("float_to_string.almd", "__sf_pow10_small", "__sf_pow10_small",
         "called only with j < 9 (`__sf_pow10_loop` takes 10^9 steps above that): at most 8 frames"),
-    ("float_to_string.almd", "__sf_getbits", "__sf_getbits",
-        "re-enters at most once: a negative `pos` recurses with `pos` = 0"),
     ("fs_walk.almd", "__walk_entries", "__walk_into", DIR_DEPTH),
     ("fs_walk.almd", "__glob_dstar_match", "__glob_segs_match", DIR_DEPTH),
     ("int_to_string.almd", "__itos_fill", "__itos_fill", DIGITS),
