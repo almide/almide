@@ -849,9 +849,11 @@ fn cmd_run_wasm(file: &str, program_args: &[String], verified: bool, time_report
     if almide_base::env::flag("ALMIDE_WASM_ALLOC_COUNT") {
         eprintln!("__ALMD_WASM_ALLOC absent (this program took the incumbent wasm leg, which carries no counters)");
     }
-    // Stage the module under a per-content temp name so concurrent `almide run`
-    // invocations never race on one path (the build scratch dir is shared).
-    let wasm_name = format!("almide-run-{:016x}.wasm", hash64(&bytes));
+    // Stage the module under a per-INVOCATION temp name. A content hash alone
+    // is not enough: two concurrent `almide run`s of the same program stage
+    // the same bytes, and the first to finish removes the file the second is
+    // about to open ("failed to open wasm module"). The pid separates them.
+    let wasm_name = format!("almide-run-{:016x}-{}.wasm", hash64(&bytes), std::process::id());
     let wasm_path = std::env::temp_dir().join(wasm_name);
     if let Err(e) = std::fs::write(&wasm_path, &bytes) {
         err(&format!("error: failed to stage wasm module {}: {}", wasm_path.display(), e));
