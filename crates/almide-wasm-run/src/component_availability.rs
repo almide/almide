@@ -30,7 +30,7 @@ fn operation_name(op: i32) -> &'static str {
         "fs.read_bytes_if_exists", "env.get", "env.os", "env.temp_dir",
         "env.args / process.args (also used by args.option and other args helpers)",
         "io.write", "io.read_all", "random", "env.cwd", "time.now",
-        "io.read_byte / io.read_line", "env.sleep_ms", "env.set",
+        "io.read_byte / io.read_line / io.read_line_opt", "env.sleep_ms", "env.set",
     ];
     usize::try_from(op).ok().and_then(|index| NAMES.get(index)).copied()
         .unwrap_or(match op {

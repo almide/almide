@@ -17,7 +17,10 @@ host and produces the same bytes in the same order (C-162).
 
 ### `io.read_line() -> String`
 
-Read a single line from standard input
+Read a single line from standard input. The newline (and a trailing `\r`) is
+cut. At end of input it returns `""` — the same value it returns for an empty
+line, so it cannot tell the two apart; use `io.read_line_opt` when the loop
+has to stop at the end of input.
 
 ```almd check
 import io
@@ -25,6 +28,30 @@ import io
 effect fn main() -> Unit = {
   let name = io.read_line()
   println("Hello, ${name}!")
+}
+```
+
+### `io.read_line_opt() -> String?`
+
+Read a single line from standard input, or `none` at end of input (#2539).
+An empty line is `some("")`, so a loop can skip empty lines and still stop
+when the input ends (Ctrl+D, or the end of a pipe). Same line cutting as
+`io.read_line`, and both read from the same stdin, so they can be mixed.
+
+```almd check
+import io
+
+effect fn main() -> Unit = {
+  var open = true
+  while open {
+    match io.read_line_opt() {
+      none => {
+        open = false
+      },
+      some("") => (),
+      some(line) => println("> ${line}"),
+    }
+  }
 }
 ```
 
@@ -116,12 +143,16 @@ effect fn main() -> Unit = {
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (7 functions)
+## Signature index (8 functions)
 
 ```
-// Next stdin line, newline cut; empty at EOF.
+// Next stdin line, newline cut; "" at EOF too — read_line_opt tells them apart.
 // @since 0.5.0 or earlier
 effect io.read_line() -> String
+
+// Next stdin line, newline cut; none at EOF, some("") for an empty line.
+// @since unreleased
+effect io.read_line_opt() -> Option[String]
 
 // Writes s, no newline, then flushes.
 // @since 0.5.0 or earlier

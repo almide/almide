@@ -363,6 +363,7 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_io_read_all" => &[],
         "almide_rt_io_read_byte" => &[],
         "almide_rt_io_read_line" => &[],
+        "almide_rt_io_read_line_opt" => &[],
         "almide_rt_io_read_n_bytes" => &[false],
         "almide_rt_io_write" => &[false],
         "almide_rt_io_write_bytes" => &[false],
