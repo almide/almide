@@ -89,7 +89,7 @@ fn churn_the_watermark_hides_is_what_the_counter_shows() {
     let one = run_wasm(&emit(ONE, true)).expect("run");
     let churn = run_wasm(&emit(CHURN, true)).expect("run");
     assert_eq!(churn.stdout, "6890\n");
-    let (w1, wc) = (one.heap_end.unwrap(), churn.heap_end.unwrap());
+    let (w1, wc) = (one.heap_end.expect("__heap export"), churn.heap_end.expect("__heap export"));
     let c = churn.alloc_count.expect("counters");
     // 1000 iterations, two blocks each (the int's text and the concat):
     // the watermark moved by well under one iteration's worth of bytes
