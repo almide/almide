@@ -27,10 +27,11 @@
 //     half of this fix starts.
 //   - an alias of the parameter created INSIDE the callee, and an argument
 //     whose place is a record FIELD.
-//   - the incumbent leg, which owns its own in-place arms (`bytes.set_*`,
-//     `fill`, `clear`, `copy_from`, `list.pop`; `string.clear` there is #2465).
-//     Its A.b row below still prints the post-write bytes under
-//     ALMIDE_WASM_INCUMBENT=1.
+// The incumbent leg (ALMIDE_WASM_INCUMBENT=1) takes the same call-site copy
+// since #2571: its C-132 write-back bind emits the rc-gated `MakeUnique` on a
+// Bytes / scalar-List argument var before the call (`cow_mut_param_call_args`),
+// so its A.b row prints the pre-write bytes too. `proofs/output-parity.sh`
+// and tests/incumbent_top_let_eager_and_cow_test.rs hold that leg to this file.
 fn set_bytes(mut b: Bytes) -> Unit = bytes.set_at(b, 1, 9)
 
 fn grow_bytes(mut b: Bytes) -> Unit = bytes.push(b, 7)

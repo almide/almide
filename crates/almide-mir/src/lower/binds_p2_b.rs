@@ -561,6 +561,9 @@ impl LowerCtx {
                 name.as_str()
             )));
         }
+        // #2503 / C-033: the C-132 write-back bind (`let __mp = f(b); b = __mp`)
+        // is where the caller's `mut`-position var is mutated — COW it here.
+        self.cow_mut_param_call_args(name.as_str(), args);
         let lowered = self.lower_call_args(args)?;
         let dst = self.fresh_value();
         // A function-VALUED result (`let f = mk()`) is a CLOSURE BLOCK — the uniform
