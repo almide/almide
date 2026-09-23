@@ -178,8 +178,15 @@ nothing is published that `bench.py` did not produce.
   recommended idiom costs. The reference (`rust-ref/wordfreq.rs`) is
   same-shape and same-semantics: a `HashMap<String, i64>` (hashbrown +
   SipHash), an OWNED key cloned out of the vocabulary per draw (Almide's
-  `let w = vocab[i]` owns), one `entry` per draw. Native/rust only: the wasm
-  leg's `group_by` is #2156's 110× and would measure that. Reported, not
+  `let w = vocab[i]` owns), one `entry` per draw. Both rows also run the
+  wasm leg, and `check-perf-ratio.sh` gates the wasm relation between them
+  (`wordfreq-wasm-idiom`, ceiling 1.15×): before #2156 the structural leg's
+  `group_by` copy-grew its accumulator per new key, which pinned the lookup
+  to the linear `$scan_str` — every element walked every group key, ~11 µs
+  per element over the 5 000-word vocabulary, 110× the imperative spelling
+  (2M draws: 22 s against 201 ms). It now grows in place through
+  `$map_reserve` and takes the index lane like the `m[w] = …` window, and
+  the idiomatic row reads ~0.8× the imperative one on wasm. Reported, not
   anchored, like strchurn — the row compares an allocator and a hasher
   before it compares codegen. What the native `AlmideMap` is since #2150: a
   compact-ordered-dict (insertion-ordered entry vector + an open-addressing
