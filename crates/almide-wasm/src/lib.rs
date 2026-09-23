@@ -131,6 +131,7 @@ mod prim;
 mod runtime;
 mod runtime_alloc;
 mod runtime_line;
+mod line_bounded;
 mod runtime_str;
 mod scalar_ext;
 mod data;

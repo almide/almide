@@ -550,6 +550,7 @@ fn build_helper_body(
             scr_i32_local: shell.scr_i32,
             scr_i64_local: scr_i64,
             in_main: false,
+            build_depth: 0,
             work,
             globals: &empty_globals,
             deferred_ranges: &empty_ranges,

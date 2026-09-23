@@ -360,6 +360,7 @@ pub(crate) fn lower_fn(
             cur_module,
             var_space,
             in_main,
+            build_depth: 0,
             work: ctx.work,
             globals: ctx.globals,
             deferred_ranges: &deferred_ranges,

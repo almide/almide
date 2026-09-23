@@ -450,7 +450,10 @@ fn helper_body(h: &Helper, work: &FnWork, helper_snapshot: &[Helper], hpos: usiz
     Helper::BytesToString { inv_pre, inv_mid, inc_pre } => {
         utf8_helpers::emit_bytes_to_string_helper(*inv_pre, *inv_mid, *inc_pre)
     }
-    _ => match map_index::helper_body(h).or_else(|| runtime_alloc::helper_body(h, work)) {
+    _ => match map_index::helper_body(h)
+        .or_else(|| runtime_alloc::helper_body(h, work))
+        .or_else(|| runtime_line::helper_body(h, work))
+    {
         Some(f) => f,
         None => helper_body_b(h, work, helper_snapshot),
     },
@@ -470,7 +473,10 @@ pub(crate) fn resolve_extras(
     // lowering; the table-entry extras follow.
     let helper_snapshot: Vec<Helper> = work.helpers.borrow().clone();
     for (hpos, h) in helper_snapshot.iter().enumerate() {
-        let params = match map_index::helper_params(h).or_else(|| runtime_alloc::helper_params(h)) {
+        let params = match map_index::helper_params(h)
+            .or_else(|| runtime_alloc::helper_params(h))
+            .or_else(|| runtime_line::helper_params(h))
+        {
             Some(p) => p,
             None => match h {
             Helper::ValueKeys
@@ -493,6 +499,7 @@ pub(crate) fn resolve_extras(
         };
         let ret = match h {
             Helper::FastExp | Helper::GeluScalar { .. } | Helper::Q10Val => Some(ValType::F64),
+            _ if runtime_line::helper_is_void(h) => None,
             _ => runtime_alloc::helper_result(h),
         };
         let ti = work.itype(params, ret);

@@ -1,7 +1,7 @@
 //! Call lowering: user functions, variant constructors, the
 //! println/eprintln special forms, and the `list.*` runtime forms.
 
-use almide_ir::{CallTarget, IrExpr, IrExprKind, IrStringPart};
+use almide_ir::{CallTarget, IrExpr, IrExprKind};
 
 use crate::emitter::Emitter;
 use crate::types_table::NamedDef;
@@ -529,6 +529,11 @@ impl Emitter<'_> {
     /// everything else must lower to a String block and goes through the
     /// stream's block-print helper.
     pub(crate) fn lower_print(&mut self, arg: &IrExpr, import: u32, block_print: u32) -> Result<(), EmitError> {
+        // #2312: a line that is one Int prints from the itoa scratch — no
+        // block, no build (line_bounded.rs).
+        if self.lower_int_line(arg, import)? {
+            return Ok(());
+        }
         if let IrExprKind::StringInterp { parts } = &arg.kind {
             let start = self.lower_interp_build(parts)?;
             // Flush [start, cursor) from its PHYSICAL home (the region may
@@ -555,52 +560,6 @@ impl Emitter<'_> {
             em.f.instructions().call(block_print);
             Ok(())
         })
-    }
-
-    /// Build interpolation parts into the line buffer from the CURRENT
-    /// global cursor (stack-disciplined: nested value-position builds
-    /// start after our partial content and restore on their exit).
-    /// Returns the hold local carrying the build's start; the caller
-    /// consumes the region [start, cursor_local), then must restore
-    /// `G_LINE_CURSOR = start` and `release_i32()`.
-    pub(crate) fn lower_interp_build(
-        &mut self,
-        parts: &[IrStringPart],
-    ) -> Result<u32, EmitError> {
-        let start = self.hold_i32()?;
-        self.f
-            .instructions()
-            .global_get(G_LINE_CURSOR)
-            .local_tee(start)
-            .local_set(self.cursor_local);
-        for part in parts {
-            match part {
-                IrStringPart::Lit { value } => {
-                    if value.is_empty() {
-                        continue;
-                    }
-                    let base = self.pool.intern(value);
-                    let len = value.len() as i32;
-                    self.f
-                        .instructions()
-                        .local_get(self.cursor_local)
-                        .i32_const((base + almide_layout::PAYLOAD) as i32)
-                        .i32_const(len)
-                        .call(F_APPEND_COPY)
-                        .local_set(self.cursor_local);
-                }
-                IrStringPart::Expr { expr } => {
-                    // Publish our cursor so a nested build starts past it.
-                    self.f
-                        .instructions()
-                        .local_get(self.cursor_local)
-                        .global_set(G_LINE_CURSOR);
-                    let got = self.lower(expr, None)?;
-                    self.emit_display_value(got, false)?;
-                }
-            }
-        }
-        Ok(start)
     }
 
     /// #2503: the argument in a `mut`-PARAMETER position, read through the
