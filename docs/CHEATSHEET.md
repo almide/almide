@@ -372,6 +372,7 @@ while i < 10 {
 for i in 0..<n { ... }   // optimized: no list allocation
 let xs = list.map(0..<10, (i) => i * i)  // range as List[Int]
 ```
+Prefer `for i in 0..<n` whenever the iteration count is known up front (thread state with `var`); use recursion only for early exit or an unknown bound — see "✗ counted recursion".
 
 ### Pipe
 ```
@@ -1012,6 +1013,30 @@ Use a recursive helper function instead of loop control keywords.
 ```
 ✗ while cond { if done then break }
 ✓ fn loop(state) = if done then state else loop(next_state)
+```
+
+### ✗ counted recursion `f(n - 1)` → ✓ `for _ in 0..<n`
+When the iteration count is known up front, write a range `for` and thread state with `var`. Recursion is for early exit (`break`/`continue` shapes) and for loops whose bound is not known in advance.
+```almide
+// ✗ correct (tail calls are optimized), but the shape says nothing a `for` would not,
+//   reads as a stack risk, and drags `!` onto every iteration in an effect fn
+fn fib(a: Int, b: Int, n: Int) -> Int =
+  if n == 0 then a else fib(b, a + b, n - 1)
+```
+```almide check
+// ✓ known bound: range for, state in var
+fn fib(n: Int) -> Int = {
+  var a = 0
+  var b = 1
+  for _ in 0..<n {
+    let next = a + b
+    a = b
+    b = next
+  }
+  a
+}
+
+fn main() -> Unit = println(int.to_string(fib(10)))
 ```
 
 ### ✗ `return expr` → ✓ just `expr`

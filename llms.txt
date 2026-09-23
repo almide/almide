@@ -120,6 +120,8 @@ fn shout(items: List[String]) -> List[String] = items |> list.map(transform)
 
 ### Recursion for stateful loops (no head :: tail)
 
+When the iteration count is known up front, write a range `for` (`for _ in 0..<n`) and thread state with `var`. Recursion is for early exit (`break`/`continue` shapes) and for loops whose bound is not known in advance — not for counted `f(n - 1)` loops.
+
 ```almide check
 fn peek(s: String, p: Int) -> String = string.slice(s, p, p + 1)
 fn is_ws(c: String) -> Bool = c == " " or c == "\t"
