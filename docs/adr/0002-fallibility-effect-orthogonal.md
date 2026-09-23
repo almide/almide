@@ -2,10 +2,10 @@
 
 - **Status**: Accepted(設計批准。Phase 1 出荷済 #1103 / #1108、Phase 2 起票済 #2563、Phase 3 未定 — Phase 計画は本文 §D5)。
   **Falsifier 2 計測済 2026-09-23**(#2556、develop 8e0c2dcbb、playground 958ddea):
-  effect fn 987 本 = fallible 574 / total 307 / unclassifiable 106(stdlib 174 = 57/11/106、
-  spec 792 = 502/290/0、playground 21 = 15/6/0)。unclassifiable 106 のうち署名 `-> Result` で
-  可謬が宣言済 82、self-host 本体から総と分類可 20、**真に静的分類不能(`-> T` intrinsic で
-  Almide 本体なし)は 4**: `env.set` / `env.sleep_ms` / `http.serve` / `process.exit`。
+  effect fn 987 本のうち **静的に分類できないのは 4 本**(`-> T` intrinsic で Almide 本体なし:
+  `env.set` / `env.sleep_ms` / `http.serve` / `process.exit`)。残りは fallible 574 / total 307 /
+  intrinsic だが署名 `-> Result` で可謬 82 / intrinsic だが self-host 本体で総 20
+  (列ごとの内訳は §Falsifier 2 の表)。
   再現: `ALMIDE_BIN=target/release/almide python3 tools/effect_fn_fallibility.py stdlib=stdlib spec=spec playground=<playground>/web/examples`
   (§Falsifier 2 の追記を参照。○ 2026-09-23 — Falsifier 2 は発火せず(残り 4/987)、Phase 2 起票 #2563)
 - **Date**: 2026-08-05
@@ -212,15 +212,22 @@ D4 の check 時エラー化はその是正。変換フック(From 相当)の導
    = fallible、intrinsic 本体 = unclassifiable、残り = total。codegen の never-err 判定
    `compute_can_err`(crates/almide-mir/src/lower/mod_p2.rs)の鏡像も並記):
 
-   | corpus | effect fn | fallible | total | unclassifiable |
-   |---|---|---|---|---|
-   | stdlib | 174 | 57 | 11 | 106 |
-   | spec | 792 | 502 | 290 | 0 |
-   | playground(web/examples、958ddea) | 21 | 15 | 6 | 0 |
+   intrinsic(`= _`)は「unclassifiable」一列にまとめず、何で決着するかで 3 列に割る。
+   Falsifier の対象は **opaque 列だけ**で、残り 2 列は静的に決着している:
 
-   unclassifiable 106 = intrinsic(`= _`)の内訳: 署名 `-> Result[..]` で可謬宣言済 82、
-   self-host 本体(self_host_registry.rs)から総と分類可 20、**runtime-opaque 4**
-   (`env.set`、`env.sleep_ms`、`http.serve`、`process.exit` — いずれも `-> Unit`/`-> Never`)。
+   | corpus | effect fn | fallible | total | intrinsic: 署名で可謬 | intrinsic: 本体で総 | **intrinsic: opaque** |
+   |---|---|---|---|---|---|---|
+   | stdlib | 174 | 57 | 11 | 82 | 20 | **4** |
+   | spec | 792 | 502 | 290 | 0 | 0 | **0** |
+   | playground(web/examples、958ddea) | 21 | 15 | 6 | 0 | 0 | **0** |
+
+   - 署名で可謬 = 本体 `= _` だが署名が `-> Result[..]`(fs / http / net / process / zlib …)。
+   - 本体で総 = self-host 本体(self_host_registry.rs)があり、その本体が total に分類される
+     (`random.*`、`env.args` ほか — fern の `!` の出所)。
+   - **opaque** = `-> T` で Almide 本体を持たない 4 本(`env.set`、`env.sleep_ms`、`http.serve`、
+     `process.exit` — いずれも `-> Unit`/`-> Never`)。1 本ずつ `-> T` / `-> T!` を宣言で決める。
+   - ツールの素の出力は 3 分類(unclassifiable = 106 = 82 + 20 + 4)。内訳は
+     `unclassifiable refined:` 行と `--list unclassifiable` で出る。
    `!` を綴ってはいるが呼び先が never-err で codegen 上は総(Phase 3 で `!` が消える形)は
    spec 37 / playground 7(fern の `walk(..)!` を含む)/ stdlib 0。
    spec の未計測 1 本(`spec/gauntlet/cells/s3_module_qualified_protocol`、parse 拒否 cell)。
