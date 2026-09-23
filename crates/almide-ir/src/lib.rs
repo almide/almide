@@ -31,6 +31,7 @@ pub mod annotations;
 pub mod mut_param;
 pub mod exit_code;
 pub mod top_let_storage;
+pub mod accum_tre;
 
 mod wasm_repr;
 
