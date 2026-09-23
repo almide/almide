@@ -62,7 +62,11 @@ effect fn run_one(root: String, alm: String, rp: String, file: String, secs: Int
   } else {
     fs.write(wat, render.stdout)!
     let v1 = run_capped(secs, "wasmtime", [wat])!
-    parity.verdict_full(
+    // The deadline fired on the wasm leg: the module never finished. HANG, never
+    // runerr — the byte compare cannot see a non-termination, and a sweep with no
+    // per-run limit simply stopped on it (#2567).
+    if parity.is_deadline(v1.code) then "hang"
+    else parity.verdict_full(
       v0.code == 0,
       true,
       v1.code == 0,
@@ -225,7 +229,7 @@ effect fn sweep(root: String, alm: String, rp: String, baseline_path: String, up
   let cand = candidates(root)!
   let cells = retry_suspects(root, alm, rp, classify_all(root, alm, rp, cand.files)!)!
   let matches = files_of(cells, "match") |> list.sort
-  let summary = "output-parity: match=" + int.to_string(count_of(cells, "match")) + " wall=" + int.to_string(count_of(cells, "wall")) + " MISMATCH=" + int.to_string(count_of(cells, "mismatch")) + " RUNERR=" + int.to_string(count_of(cells, "runerr")) + " XFAIL=" + int.to_string(count_of(cells, "xfail")) + " v0fail=" + int.to_string(count_of(cells, "v0fail")) + " skip=" + int.to_string(cand.skipped)
+  let summary = "output-parity: match=" + int.to_string(count_of(cells, "match")) + " wall=" + int.to_string(count_of(cells, "wall")) + " MISMATCH=" + int.to_string(count_of(cells, "mismatch")) + " RUNERR=" + int.to_string(count_of(cells, "runerr")) + " HANG=" + int.to_string(count_of(cells, "hang")) + " XFAIL=" + int.to_string(count_of(cells, "xfail")) + " v0fail=" + int.to_string(count_of(cells, "v0fail")) + " skip=" + int.to_string(cand.skipped)
   let classes = class_report(
     cells,
     "mismatch",
@@ -236,6 +240,11 @@ effect fn sweep(root: String, alm: String, rp: String, baseline_path: String, up
     "runerr",
     "r",
     "  (RUNERR = renders but wasmtime rejects or traps where v0 succeeds):",
+  ) + class_report(
+    cells,
+    "hang",
+    "h",
+    "  (HANG = renders but wasmtime did not finish within the per-run limit — a non-termination the byte compare never sees):",
   ) + class_report_wrapped(
     cells,
     "xfail",
@@ -245,9 +254,18 @@ effect fn sweep(root: String, alm: String, rp: String, baseline_path: String, up
       "   the trap-semantics contract surface not yet implemented on the MIR render path):"
     ],
   )
+  // A hang fails LOUDLY and before any ratchet (#2567): the sweep that found it had no
+  // per-run limit and simply stopped, and the one that had a limit filed the fixture under
+  // RUNERR, where nothing fails. Neither is a verdict.
+  let hung = count_of(cells, "hang")
+  if hung > 0 then Sweep {
+    lines: [summary] + classes + ["::error::output-parity: " + int.to_string(hung) + " fixture(s) HUNG on the v1 leg — a hang is never a baseline verdict; fix the renderer or wall the shape (#2567)"],
+    matches: matches,
+    ok: false,
+  }
   // `--update`: the ratchet. The match list, sorted, one path per line — and an EMPTY list
   // writes an empty file, as `cp` of an empty matches.txt does, not a lone newline.
-  if update then {
+  else if update then {
     let text = if list.len(matches) == 0 then "" else list.join(matches, "\n") + "\n"
     fs.write(baseline_path, text)!
     Sweep {
@@ -304,9 +322,19 @@ test "an empty class prints nothing at all, not an empty heading" {
 }
 
 test "counting is per class, and the classes do not overlap" {
-  let cells: List[(String, String)] = [("a", "match"), ("b", "match"), ("c", "wall"), ("d", "mismatch"), ("e", "v0fail")]
+  let cells: List[(String, String)] = [("a", "match"), ("b", "match"), ("c", "wall"), ("d", "mismatch"), ("e", "v0fail"), ("f", "hang")]
   assert_eq(count_of(cells, "match"), 2)
   assert_eq(count_of(cells, "wall"), 1)
   assert_eq(count_of(cells, "runerr"), 0)
+  assert_eq(count_of(cells, "hang"), 1)
   assert_eq(files_of(cells, "mismatch"), ["d"])
+  assert_eq(files_of(cells, "hang"), ["f"])
+}
+
+test "a hang names its file under its own heading, apart from the runerr row" {
+  // #2567: the incumbent leg of one fixture never terminated. Under the runerr row it was
+  // one entry among the ratcheted; as its own class it is the line the gate fails on.
+  let cells: List[(String, String)] = [("x.almd", "hang"), ("y.almd", "runerr")]
+  assert_eq(class_report(cells, "hang", "h", "H"), ["H", "    h x.almd"])
+  assert_eq(class_report(cells, "runerr", "r", "R"), ["R", "    r y.almd"])
 }

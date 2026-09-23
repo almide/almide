@@ -12,7 +12,10 @@
 #
 # Categories: MATCH / WALL (clean Unsupported — expected for unlinked stdlib) /
 # MISMATCH (renders but wrong bytes = silent miscompile) / RUNERR (renders but
-# wasmtime rejects the wasm = invalid wasm) / v0fail (v0 can't run = effect/input).
+# wasmtime rejects the wasm = invalid wasm) / HANG (renders but wasmtime never
+# finishes within the per-run limit — a non-termination the byte compare cannot
+# see; #2567) / v0fail (v0 can't run = effect/input). A HANG FAILS the gate
+# outright: it is never a baseline verdict and never a RUNERR to be ratcheted.
 #
 # RATCHET: proofs/output-parity-baseline.txt lists the files that MUST byte-match.
 # The gate FAILS if any baseline file stops matching (a regression). As fixes land,
@@ -71,7 +74,7 @@ cargo build -q -p almide-mir --example render_program 2>/dev/null || { echo "out
 RP="$ROOT/target/debug/examples/render_program"
 
 : > "$TMP/matches.txt"
-match=0; wall=0; mismatch=0; runerr=0; v0fail=0; skip=0; xfail=0
+match=0; wall=0; mismatch=0; runerr=0; hang=0; v0fail=0; skip=0; xfail=0
 # F4 (flight-evidence-gaps): a NON-DETERMINISTIC verification result is not a
 # result. Under full-gate machine load the 20s alarm occasionally fires on files
 # that byte-match solo (append_accumulator/list_eq/string_codepoint — recorded
@@ -101,7 +104,7 @@ match=0; wall=0; mismatch=0; runerr=0; v0fail=0; skip=0; xfail=0
 # The fixture was not even the first to read stdin — it was the first to SUCCEED
 # at it. `read_n_bytes(i64::MAX)` used to truncate to i32 and read nothing, so
 # the hazard sat here harmless until that truncation was fixed.
-run_one() { # $1=file -> sets VERDICT to match|mismatch|wall|runerr|v0fail
+run_one() { # $1=file -> sets VERDICT to match|mismatch|wall|runerr|hang|v0fail
   local f="$1" t="$2"
   to "$t" "$ALM" run "$f" > "$TMP/v0" 2>"$TMP/v0e" < /dev/null
   local v0rc=$?
@@ -111,6 +114,12 @@ run_one() { # $1=file -> sets VERDICT to match|mismatch|wall|runerr|v0fail
   }
   to "$t" wasmtime "$TMP/wat" > "$TMP/v1" 2>"$TMP/v1e" < /dev/null
   local v1rc=$?
+  # The alarm fired on the wasm leg (142 = 128 + SIGALRM from the perl wrapper;
+  # 124 is what a `timeout`-style wrapper reports): the module never finished.
+  # Counted as HANG, never RUNERR — the incumbent leg of stdlib_type_shadow
+  # sat at 99% CPU for hours inside sweeps that had no per-run limit, and here
+  # it was one RUNERR among the ratcheted (#2567).
+  if [ "$v1rc" -eq 142 ] || [ "$v1rc" -eq 124 ]; then VERDICT=hang; return; fi
   if [ "$v0rc" -eq 0 ] && [ "$v1rc" -ne 0 ]; then VERDICT=runerr; return; fi
   diff -q "$TMP/v0" "$TMP/v1" >/dev/null 2>&1 || { VERDICT=mismatch; return; }
   if [ "$v0rc" -eq 0 ]; then VERDICT=match; return; fi
@@ -190,12 +199,13 @@ for sv in "${suspects[@]:-}"; do
     v0fail)   v0fail=$((v0fail+1)) ;;
     wall)     wall=$((wall+1)) ;;
     runerr)   runerr=$((runerr+1)); echo "$f" >> "$TMP/runerr.txt" ;;
+    hang)     hang=$((hang+1)); echo "$f" >> "$TMP/hang.txt" ;;
     xfail)    xfail=$((xfail+1)); echo "$f" >> "$TMP/xfail.txt" ;;
     mismatch) mismatch=$((mismatch+1)); echo "$f" >> "$TMP/mismatch.txt" ;;
   esac
 done
 sort -o "$TMP/matches.txt" "$TMP/matches.txt"  # (re-sorted below after the retry appends)
-echo "output-parity: match=$match wall=$wall MISMATCH=$mismatch RUNERR=$runerr XFAIL=$xfail v0fail=$v0fail skip=$skip"
+echo "output-parity: match=$match wall=$wall MISMATCH=$mismatch RUNERR=$runerr HANG=$hang XFAIL=$xfail v0fail=$v0fail skip=$skip"
 
 # THE COUNTERS MUST ACCOUNT FOR THE WHOLE CORPUS. Every file lands in exactly one
 # bucket, so the buckets sum to the corpus size — and if they do not, the sweep
@@ -205,7 +215,7 @@ echo "output-parity: match=$match wall=$wall MISMATCH=$mismatch RUNERR=$runerr X
 # files that were simply never run (547 of 932, ~300 phantom regressions,
 # MISMATCH=0 — 2026-08-16). The stdin isolation in run_one fixes THAT cause; this
 # catches the next one, whatever it is.
-seen=$((match + wall + mismatch + runerr + xfail + v0fail + skip))
+seen=$((match + wall + mismatch + runerr + hang + xfail + v0fail + skip))
 corpus=$(find "$SPEC" -name '*.almd' | wc -l | tr -d ' ')
 if [ "$seen" -ne "$corpus" ]; then
   echo "::error::output-parity: classified $seen of $corpus files — the sweep did not finish."
@@ -225,10 +235,21 @@ if [ "$runerr" -gt 0 ]; then
   echo "  (RUNERR = renders but wasmtime rejects or traps where v0 succeeds):"
   sed 's/^/    r /' "$TMP/runerr.txt"
 fi
+if [ "$hang" -gt 0 ]; then
+  echo "  (HANG = renders but wasmtime did not finish within the per-run limit — a non-termination the byte compare never sees):"
+  sed 's/^/    h /' "$TMP/hang.txt"
+fi
 if [ "$xfail" -gt 0 ]; then
   echo "  (XFAIL = a trap/abort fixture whose v1 observable [stderr+exit] diverges from v0 —"
   echo "   the trap-semantics contract surface not yet implemented on the MIR render path):"
   sed 's/^/    x /' "$TMP/xfail.txt"
+fi
+# A hang fails LOUDLY and before any ratchet: the sweep that found #2567 had
+# no per-run limit and simply stopped, and the one that had a limit filed the
+# fixture under RUNERR, where nothing fails. Neither is a verdict.
+if [ "$hang" -gt 0 ]; then
+  echo "::error::output-parity: $hang fixture(s) HUNG on the v1 leg — a hang is never a baseline verdict; fix the renderer or wall the shape (#2567)"
+  rm -rf "$TMP"; exit 1
 fi
 
 # The retry loop appends AFTER the first sort — comm(1) requires sorted input,
