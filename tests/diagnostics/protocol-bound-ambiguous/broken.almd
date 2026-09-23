@@ -1,0 +1,11 @@
+// #1589: a parameter bound by one protocol twice could never be satisfied —
+// a type conforms to a protocol exactly once.
+protocol Repo[K, V] {
+  fn find(self, key: K) -> V?
+}
+
+type User = { id: Int, name: String }
+
+fn both[R: Repo[Int, User] + Repo[String, User]](r: R) -> Int = 0
+
+fn main() -> Unit = println("x")

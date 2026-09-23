@@ -1,0 +1,13 @@
+// #1589: two conformances to one protocol would need two implementations of
+// each method under one name — which one a call runs would be ambiguous.
+protocol Repo[K, V] {
+  fn find(self, key: K) -> V?
+}
+
+type User = { id: Int, name: String }
+
+type Users: Repo[Int, User], Repo[String, User] = { rows: List[User] }
+
+fn Users.find(self, key: Int) -> User? = self.rows |> list.find((u) => u.id == key)
+
+fn main() -> Unit = println("x")

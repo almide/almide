@@ -1,0 +1,2 @@
+expects_error = "names protocol 'Repo' twice"
+hint_substring = "Bound the parameter by 'Repo' once"

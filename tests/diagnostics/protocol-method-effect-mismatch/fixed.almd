@@ -1,0 +1,13 @@
+// The fix: implement each method exactly as the protocol declares it.
+protocol Store[V] {
+  fn get(self) -> V
+  fn set(mut self, v: V) -> Unit
+}
+
+type Cell: Store[Int] = { v: Int }
+
+fn Cell.get(self) -> Int = self.v
+
+fn Cell.set(mut self, v: Int) -> Unit = { self.v = v }
+
+fn main() -> Unit = println("x")
