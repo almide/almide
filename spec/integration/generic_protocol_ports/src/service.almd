@@ -1,0 +1,19 @@
+import self.domain
+import self.ports
+
+fn register[R: ports.Repository[domain.UserId, domain.User]](mut repo: R, id: Int, name: String) -> Unit = {
+  let uid = domain.UserId { value: id }
+  repo.put(uid, domain.User { id: uid, name: name, credit: 0 })
+}
+
+fn describe[R: ports.Repository[domain.UserId, domain.User]](repo: R, id: Int) -> String = match repo.find(domain.UserId { value: id }) {
+  some(u) => "${u.name} (#${int.to_string(u.id.value)})",
+  none => "no user ${int.to_string(id)}",
+}
+
+fn lookup[K, V, R: ports.Repository[K, V]](repo: R, key: K) -> V? = repo.find(key)
+
+effect fn require[R: ports.Repository[domain.UserId, domain.User]](repo: R, id: Int) -> String = {
+  let u = repo.load(domain.UserId { value: id })!
+  u.name
+}
