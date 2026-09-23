@@ -1,0 +1,10 @@
+// #2518: a field whose default is a RECORD LITERAL of another type declared
+// in this module. The default expression is spliced into the caller's
+// construction site, so its type name must survive the module flatten.
+type Sampling = { temperature_sent: Bool = false, top_p: Float = 1.0 }
+
+type Response = { content: String, sampling: Sampling = Sampling {} }
+
+type Pinned = { label: String, sampling: Sampling = Sampling { temperature_sent: true } }
+
+fn make(content: String) -> Response = Response { content: content }

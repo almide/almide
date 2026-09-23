@@ -1,0 +1,7 @@
+type Sampling = { temperature_sent: Bool }
+type Response = { content: String, sampling: Sampling = Sampling { temperature_sent: false } }
+
+effect fn main() -> Unit = {
+  let r = Response { content: "hi" }
+  println("${r.content} ${r.sampling.temperature_sent}")
+}
