@@ -1,0 +1,11 @@
+// #2553: a literal in a record-variant field pattern refines the arm — it does
+// not cover every `Circle`. `Circle { r: 0, .. }` leaves `Circle` with any
+// other `r` unmatched, so this match is non-exhaustive.
+type Shape = | Circle { r: Int, tag: String } | Dot
+
+fn name(s: Shape) -> String = match s {
+  Circle { r: 0, tag: _ } => "zero",
+  Dot => "dot",
+}
+
+effect fn main() -> Unit = println(name(Circle { r: 5, tag: "x" }))
