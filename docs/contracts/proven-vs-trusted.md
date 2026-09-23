@@ -161,6 +161,22 @@ caught two real compiler bugs (almide#1428: checker-accepted program dies
 in codegen; almide#1429: the v1 renderer splits an effect fn's signature
 from its body on a bare-parameter tail) — the gate bites.
 
+### Above L1: L4 and L5 (`edit-locality.md` §1a)
+
+Each obligation is split by what can be said about it, because the halves
+have different standings and a single "L4 holds" would hide which one was
+checked. All theorems below are in
+`crates/almide-edit-belt/AlmideEditBelt/Contract.lean`, 0 `sorry`, no new
+axiom.
+
+| Obligation | Standing | Claims | Does NOT claim |
+|---|---|---|---|
+| L4, effect frame | **proven** (`l4_pure_replacement_silent`) | a replacement of a pure-declared definition that checks against the unchanged signature produces an empty trace, in any environment, in the edited λ_almd program | anything about the replacement's return value, or about what a caller does with it — the caller may print something different next |
+| L4, non-vacuity | **proven** (`l4_witness`, `l4_loud_replacement_prints`) | the four hypotheses hold together, and without the purity hypothesis the conclusion is false (an effectful replacement prints `"hi"`) | that the hypotheses are the weakest possible |
+| L4, resource frame (`scoped`, #1997) | **gated**, not proven — C-362 / C-363 / C-364 fixtures | a `scoped` block's observables are its body's; a `scoped fn` answers the same inside and outside a region; an out-of-fragment shape is refused at check time on both targets | any property of λ_almd: the kernel has no heap and no regions, so there is no statement to make there until a region component is added |
+| L5, composition | **proven** (`l5_edits_compose`, `l5_pure_silent_after_edits`) | any sequence of signature-preserving replacements keeps the program well-typed, and every pure-declared definition in the result is silent | that the sequence preserves any observable other than the empty trace of pure code |
+| L5, realization on both targets | **trusted** — backend refinement | — | that the checked lowering (#1995's ExitPlan, #1996's E-OWN-LOWERING) preserves the above on native and wasm. That is the same kernel-to-backend seam as every other row in this section, gated by `spec/wasm_cross` and the contract ledger, not proven |
+
 ## What each gate actually claims
 
 | Gate | Claim | NOT a claim |
