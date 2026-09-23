@@ -219,6 +219,7 @@
 2637	spec/wasm_cross/generic_chain_unwrap_or.almd
 2652	spec/wasm_cross/generic_concat.almd
 3098	spec/wasm_cross/generic_fn_in_inferred_lambda.almd
+5417	spec/wasm_cross/generic_protocol_conformance.almd
 3586	spec/wasm_cross/generic_record_anon_field.almd
 2984	spec/wasm_cross/generic_record_field_size.almd
 4011	spec/wasm_cross/generic_record_fn_field.almd
