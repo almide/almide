@@ -1,0 +1,40 @@
+// @contract: C-170
+// #2577: `f(n) = if C then B else f(A) + f(n - k)` is rewritten on the native
+// and structural wasm legs into ONE recursive call plus an accumulator loop
+// (`almide_ir::accum_tre`). The rewrite reassociates the sum (or product), so
+// it is legal only because Int `+` / `*` wrap on two's complement in every
+// position: every value below must match the interpreter, which runs the
+// source shape, and the overflow rows wrap many times over.
+fn fib(n: Int) -> Int = if n < 2 then n else fib(n - 1) + fib(n - 2)
+
+// The recursive branch in `then`, the literal first.
+fn fib_flipped(n: Int) -> Int = if 2 <= n then fib_flipped(n - 1) + fib_flipped(n - 2) else n
+
+// `<=` bound, a non-trivial base, a wider step.
+fn tri(n: Int) -> Int = if n <= 1 then n * n - 3 else tri(n - 1) + tri(n - 3)
+
+// The loop spine is the LEFT operand here (the right argument is not `n - k`).
+fn count(n: Int) -> Int = if n < 2 then n else count(n - 1) + count(n - n + 1)
+
+// Overflow edge, `+`: every leaf is Int max, so the sum wraps thousands of times.
+fn wrap_sum(n: Int) -> Int = if n < 1 then 9223372036854775807 else wrap_sum(n - 5) + wrap_sum(n - 1)
+
+// Overflow edge, `*`: a product of thousands of 3s, identity 1.
+fn wrap_prod(n: Int) -> Int = if n < 1 then 3 else wrap_prod(n - 7) * wrap_prod(n - 1)
+
+// Negative leaves: the sum crosses zero and Int min.
+fn neg_sum(n: Int) -> Int = if n < 1 then -9223372036854775807 - n else neg_sum(n - 1) + neg_sum(n - 2)
+
+fn main() -> Unit = {
+  println(int.to_string(fib(25)))
+  println(int.to_string(fib_flipped(20)))
+  println(int.to_string(tri(30)))
+  println(int.to_string(count(30)))
+  println(int.to_string(wrap_sum(40)))
+  println(int.to_string(wrap_prod(50)))
+  println(int.to_string(neg_sum(20)))
+  // Below the bound: the loop never runs, the base answers directly.
+  println(int.to_string(fib(1)))
+  println(int.to_string(fib(-5)))
+  println(int.to_string(tri(-2)))
+}
