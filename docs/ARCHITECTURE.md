@@ -192,6 +192,12 @@ walker sees only typed IR nodes — it never checks what target it renders for.
    allocates exactly the (allocs, deallocs) pair pinned per program in
    `tests/golden/native-borrow-oracle-alloc.txt`: a clone where a borrow
    would do changes neither stdout nor the build, only that count (#2228).
+   The wasm leg has the twin: `ALMIDE_WASM_ALLOC_COUNT=1` makes the
+   structural emitter count `$alloc` / `$free` in four exported globals
+   (absent, not zero, when off) and `crates/almide-wasm/tests/alloc_ledger.rs`
+   pins `allocs reused bytes frees` per corpus fixture beside the `__heap`
+   watermark, so churn the watermark cannot see is ratcheted too (#2407;
+   [docs/wasm/WASM-OUTPUT.md](./wasm/WASM-OUTPUT.md)).
    The verdicts themselves are certified on every DEBUG native build, and on
    a release build that asks (`ALMIDE_CERTIFY_OWNERSHIP=report|fail|off`,
    `crates/almide-codegen/src/certify_ownership.rs`, #2231): the final IR is
