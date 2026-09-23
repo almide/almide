@@ -1,0 +1,8 @@
+// The port: a GENERIC protocol (#1589). Adapters conform to one
+// instantiation of it; services are generic over an applied bound.
+protocol Repository[K, V] {
+  fn find(self, key: K) -> V?
+  fn put(mut self: Self, key: K, value: V) -> Unit
+  fn count(self) -> Int
+  effect fn load(self, key: K) -> V!
+}

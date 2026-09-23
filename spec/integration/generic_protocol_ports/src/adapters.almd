@@ -1,0 +1,19 @@
+import self.domain
+import self.ports
+
+type MemUsers: ports.Repository[domain.UserId, domain.User] = { rows: List[domain.User] }
+
+fn empty() -> MemUsers = MemUsers { rows: [] }
+
+fn MemUsers.find(self, key: domain.UserId) -> domain.User? = self.rows |> list.find((u) => u.id.value == key.value)
+
+fn MemUsers.put(mut self, key: domain.UserId, value: domain.User) -> Unit = {
+  self.rows = (self.rows |> list.filter((u) => u.id.value != key.value)) + [value]
+}
+
+fn MemUsers.count(self) -> Int = list.len(self.rows)
+
+effect fn MemUsers.load(self, key: domain.UserId) -> domain.User! = match self.find(key) {
+  some(u) => ok(u),
+  none => err("user ${int.to_string(key.value)} not found"),
+}
