@@ -5,6 +5,28 @@
 // and then clamped it to the available run, so `-128` copied the byte the
 // wasm leg refused (fuzz seed 541740772279:6731, a mutation of the C-194
 // fixture; #1910).
+//
+// #2439: the incumbent wasm leg (the self-hosted `bytes_copy_from` in
+// stdlib/bytes_mutate.almd, which `render_program` and the incumbent route of
+// `almide run --target wasm` link) kept the v0 transcription's clamp and
+// printed `negative len: 42`. That leg is measured by proofs/output-parity.sh,
+// so this file is in its baseline. The second half runs the ALIASED path
+// (dst and src the same block — the self-host body's `__cw_move` branch,
+// native's aliasing hoist) and the length extremes, because a guard that sat
+// on only one of the two branches would pass the first half.
+fn self_copy(doff: Int, soff: Int, n: Int) -> String = {
+  var b = bytes.from_list([
+    10,
+    20,
+    30,
+    40,
+    50,
+    60
+  ])
+  bytes.copy_from(b, b, doff, soff, n)
+  "self(${doff}, ${soff}, ${n}) len=${bytes.len(b)} ${bytes.to_list(b)}"
+}
+
 fn main() -> Unit = {
   var a = bytes.new(8)
   var o = bytes.new(8)
@@ -19,4 +41,22 @@ fn main() -> Unit = {
   println("positive: ${bytes.get_or(a, 0, -1)}")
   bytes.copy_from(a, o, 6, 3, 100)
   println("clamped run: ${bytes.get_or(a, 6, -1)} ${bytes.get_or(a, 7, -1)}")
+  let lo = -9223372036854775807 - 1
+  var z = bytes.new(8)
+  bytes.copy_from(z, o, 0, 3, 0)
+  bytes.copy_from(z, o, 0, 3, -1)
+  bytes.copy_from(z, o, 0, 3, lo)
+  println("zero / -1 / i64::MIN len: ${bytes.to_list(z)}")
+  // ── the aliased path: forward and backward overlap, each length sign ──
+  for n in [
+    -1,
+    -6,
+    lo,
+    0,
+    3,
+    100
+  ] {
+    println(self_copy(0, 2, n))
+    println(self_copy(2, 0, n))
+  }
 }

@@ -31,7 +31,7 @@
 3297	spec/wasm_cross/bytes_alloc_ceiling_domain.almd
 2278	spec/wasm_cross/bytes_array_count_domain.almd
 4048	spec/wasm_cross/bytes_clear_mut_param.almd
-3210	spec/wasm_cross/bytes_copy_from_negative_len.almd
+4941	spec/wasm_cross/bytes_copy_from_negative_len.almd
 4207	spec/wasm_cross/bytes_copy_within_offset_domain.almd
 10286	spec/wasm_cross/bytes_cursor_read_domain.almd
 1494	spec/wasm_cross/bytes_equality_call_operands.almd
